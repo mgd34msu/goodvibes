@@ -2,6 +2,8 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
 import { existsSync, readFileSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
+import { withSyncFileLock } from './sync-file-lock.js';
+import { summarizeError } from '../utils/error-display.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
@@ -130,6 +132,21 @@ interface SubscriptionImportRecord {
   transition?: PreparedSubscriptionImportTransition;
 }
 
+/**
+ * How long a started re-login waits for its browser round trip. A re-login
+ * abandoned past this, for a provider that still has a working subscription,
+ * is no longer reported as pending, so it stops masking that subscription;
+ * completing it means starting the login again.
+ */
+const PENDING_LOGIN_TTL_MS = 30 * 60_000;
+
+function livePending(store: SubscriptionStore, provider: string, now = Date.now()): PendingSubscriptionLogin | null {
+  const pending = store.pending[provider];
+  if (!pending) return null;
+  const abandoned = Number.isFinite(pending.createdAt) && now - pending.createdAt >= PENDING_LOGIN_TTL_MS;
+  return abandoned && store.subscriptions[provider] ? null : pending;
+}
+
 function isSubscriptionExpired(expiresAt?: number, bufferMs = 60_000): boolean {
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return false;
   return Date.now() + bufferMs >= expiresAt;
@@ -176,6 +193,8 @@ export class SubscriptionManager {
   }
   private readonly path: string;
   private importGeneration = 0;
+  /** One token refresh per provider at a time: a rotating refresh token is spent by the first use. */
+  private readonly refreshes = new Map<string, Promise<ProviderSubscription>>();
   private readonly preparedImports = new WeakMap<PreparedSubscriptionImport, SubscriptionImportRecord>();
 
   /** Capture privately without invoking legacy recovery or publishing any token. */
@@ -323,18 +342,29 @@ export class SubscriptionManager {
     const legacyEntries = Object.entries(legacy.subscriptions);
     if (legacyEntries.length === 0) return;
 
-    const shared = this.read();
-    const adopted: string[] = [];
-    for (const [provider, legacyRecord] of legacyEntries) {
-      const sharedRecord = shared.subscriptions[provider];
-      if (!sharedRecord || legacyRecord.updatedAt > sharedRecord.updatedAt) {
-        shared.subscriptions[provider] = legacyRecord;
-        adopted.push(provider);
-      }
+    let adopted: string[];
+    try {
+      adopted = this.mutate((shared) => {
+        const taken: string[] = [];
+        for (const [provider, legacyRecord] of legacyEntries) {
+          const sharedRecord = shared.subscriptions[provider];
+          if (!sharedRecord || legacyRecord.updatedAt > sharedRecord.updatedAt) {
+            shared.subscriptions[provider] = legacyRecord;
+            taken.push(provider);
+          }
+        }
+        return taken;
+      }, (taken) => taken.length > 0);
+    } catch (error) {
+      // An unreadable shared store is not an empty one: folding into it would erase it.
+      logger.warn('SubscriptionManager: legacy subscriptions were not folded because the shared store could not be read', {
+        sharedPath: this.path,
+        error: summarizeError(error),
+      });
+      return;
     }
     if (adopted.length === 0) return;
 
-    this.write(shared);
     logger.info('SubscriptionManager: folded legacy provider subscriptions into the shared store', {
       sharedPath: this.path,
       legacyPath,
@@ -353,24 +383,34 @@ export class SubscriptionManager {
    * the empty store, preserving this method's never-throws contract.
    */
   private read(): SubscriptionStore {
-    const empty: SubscriptionStore = { version: 1, subscriptions: {}, pending: {} };
     try {
-      return (
-        readJsonFileOrQuarantine<SubscriptionStore>(this.path, {
-          label: 'config/subscriptions',
-          recovery:
-            'Provider subscriptions are re-recorded the next time a provider subscription login completes; no stored credential is lost, because subscription secrets live in the secrets store, not here.',
-          validate: (parsed) => {
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-              throw new Error('subscription store is not a JSON object');
-            }
-            return parsed as SubscriptionStore;
-          },
-        }) ?? empty
-      );
+      return this.readStrict();
     } catch {
-      return empty;
+      return { version: 1, subscriptions: {}, pending: {} };
     }
+  }
+
+  /**
+   * The store as a writer must see it: absent or quarantined-corrupt reads as
+   * empty, but a failure to read an existing file (permissions, I/O) throws.
+   * A writer that treated that as empty would rewrite the file holding only its
+   * own change and erase every other provider's saved session.
+   */
+  private readStrict(): SubscriptionStore {
+    const empty: SubscriptionStore = { version: 1, subscriptions: {}, pending: {} };
+    return (
+      readJsonFileOrQuarantine<SubscriptionStore>(this.path, {
+        label: 'config/subscriptions',
+        recovery:
+          'Provider subscriptions are re-recorded the next time a provider subscription login completes; no stored credential is lost, because subscription secrets live in the secrets store, not here.',
+        validate: (parsed) => {
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('subscription store is not a JSON object');
+          }
+          return parsed as SubscriptionStore;
+        },
+      }) ?? empty
+    );
   }
 
   private write(store: SubscriptionStore): void {
@@ -378,12 +418,29 @@ export class SubscriptionManager {
     try { writeJsonFileAtomic(this.path, store); } finally { this.importGeneration++; }
   }
 
+  /**
+   * One read-modify-write of the store, under a cross-process lock: the daemon,
+   * the TUI and the agent share this file, and without the lock the later
+   * rename drops whatever another process saved in between. `change` sees the
+   * store as it is on disk now; return false from `wrote` to skip the write.
+   */
+  private mutate<T>(change: (store: SubscriptionStore) => T, wrote: (result: T) => boolean = () => true): T {
+    return withSyncFileLock(this.path, () => {
+      const store = this.readStrict();
+      const result = change(store);
+      if (wrote(result)) this.write(store);
+      return result;
+    });
+  }
+
   public list(): ProviderSubscription[] {
     return Object.values(this.read().subscriptions).sort((a, b) => a.provider.localeCompare(b.provider));
   }
 
   public listPending(): PendingSubscriptionLogin[] {
-    return Object.values(this.read().pending).sort((a, b) => a.provider.localeCompare(b.provider));
+    const store = this.read(), now = Date.now();
+    return Object.keys(store.pending).map(provider => livePending(store, provider, now))
+      .filter((pending): pending is PendingSubscriptionLogin => pending !== null).sort((a, b) => a.provider.localeCompare(b.provider));
   }
 
   public get(provider: string): ProviderSubscription | null {
@@ -402,14 +459,17 @@ export class SubscriptionManager {
   ): Promise<string | null> {
     const subscription = this.get(provider);
     if (!subscription) return null;
-    const active = isSubscriptionExpired(subscription.expiresAt)
-      ? await this.refreshOAuthToken(provider, config)
-      : subscription;
-    return active.accessToken;
+    if (!isSubscriptionExpired(subscription.expiresAt)) return subscription.accessToken;
+    try {
+      return (await this.refreshOAuthToken(provider, config)).accessToken;
+    } catch (error) {
+      // Signed out while the refresh was in flight: there is no token to use.
+      if (this.get(provider) === null) return null;
+      throw error;
+    }
   }
 
   public async beginOAuthLogin(provider: string, config: OAuthProviderConfig): Promise<{ authorizationUrl: string; pending: PendingSubscriptionLogin }> {
-    const store = this.read();
     const state = createOAuthState();
     const verifier = createPkceVerifier();
     const redirectUri = config.redirectUri;
@@ -421,8 +481,8 @@ export class SubscriptionManager {
       createdAt: Date.now(),
     };
     const started = await buildOAuthAuthorizationStart(config, { state, verifier, redirectUri });
-    store.pending[provider] = pending;
-    this.write(store);
+    // Read after the await, so a change made meanwhile (another provider's login) is kept.
+    this.mutate((store) => { store.pending[provider] = pending; });
     return {
       authorizationUrl: started.authorizationUrl,
       pending,
@@ -434,10 +494,10 @@ export class SubscriptionManager {
     config: OAuthProviderConfig,
     code: string,
   ): Promise<ProviderSubscription> {
-    const store = this.read();
-    const pending = store.pending[provider]!;
+    const started = this.read();
+    const pending = livePending(started, provider);
     if (!pending) {
-      throw new Error(`No pending OAuth login for ${provider}. Start with /subscription login ${provider} start.`);
+      throw new Error(`No pending OAuth login for ${provider}${started.pending[provider] ? ' (the started login expired)' : ''}. Start with /subscription login ${provider} start.`);
     }
 
     const tokenResponse = await exchangeOAuthAuthorizationCode(config, {
@@ -460,21 +520,40 @@ export class SubscriptionManager {
       ...(tokenResponse.scopes ? { scopes: tokenResponse.scopes } : {}),
       authMode: 'oauth',
       overrideAmbientApiKeys: config.overrideAmbientApiKeys ?? true,
-      createdAt: store.subscriptions[provider]?.createdAt ?? now,
+      createdAt: this.read().subscriptions[provider]?.createdAt ?? now,
       updatedAt: now,
     };
-    store.subscriptions[provider] = subscription;
-    delete store.pending[provider];
-    this.write(store);
+    // Merge only this provider into the store as it is now, after the await.
+    this.mutate((store) => {
+      store.subscriptions[provider] = subscription;
+      if (store.pending[provider]?.state === pending.state) delete store.pending[provider];
+    });
     return subscription;
   }
 
-  public async refreshOAuthToken(
+  /**
+   * Refresh a provider's access token. Concurrent callers share one request,
+   * so a rotating refresh token is used once; the result is merged into the
+   * store as it is after the request, never over a logout or a newer login.
+   */
+  public refreshOAuthToken(
     provider: string,
     config: OAuthProviderConfig,
   ): Promise<ProviderSubscription> {
-    const store = this.read();
-    const existing = store.subscriptions[provider]!;
+    const inFlight = this.refreshes.get(provider);
+    if (inFlight) return inFlight;
+    const refresh = this.refreshOAuthTokenOnce(provider, config).finally(() => {
+      if (this.refreshes.get(provider) === refresh) this.refreshes.delete(provider);
+    });
+    this.refreshes.set(provider, refresh);
+    return refresh;
+  }
+
+  private async refreshOAuthTokenOnce(
+    provider: string,
+    config: OAuthProviderConfig,
+  ): Promise<ProviderSubscription> {
+    const existing = this.read().subscriptions[provider];
     if (!existing) {
       throw new Error(`No stored OAuth subscription for ${provider}.`);
     }
@@ -483,10 +562,32 @@ export class SubscriptionManager {
     }
 
     const tokenResponse = await refreshOAuthAccessToken(config, existing.refreshToken);
+    // The comparison and the write are one locked step, so a login another
+    // process completes after this read cannot land between them.
+    const outcome = this.mutate((store): { readonly saved: boolean; readonly record: ProviderSubscription } => {
+      const current = store.subscriptions[provider];
+      if (!current) {
+        throw new Error(`No stored OAuth subscription for ${provider}: it was signed out while its token was being refreshed.`);
+      }
+      if (current.accessToken !== existing.accessToken || current.refreshToken !== existing.refreshToken) {
+        // A login or another refresh replaced the record meanwhile; it is newer than this answer.
+        return { saved: false, record: current };
+      }
+      const refreshed = this.refreshedRecord(current, existing, tokenResponse);
+      store.subscriptions[provider] = refreshed;
+      return { saved: true, record: refreshed };
+    }, (result) => result.saved);
+    return outcome.record;
+  }
 
+  private refreshedRecord(
+    current: ProviderSubscription,
+    existing: ProviderSubscription,
+    tokenResponse: Awaited<ReturnType<typeof refreshOAuthAccessToken>>,
+  ): ProviderSubscription {
     const now = Date.now();
     const refreshed: ProviderSubscription = {
-      ...existing,
+      ...current,
       accessToken: tokenResponse.accessToken,
       refreshToken: typeof tokenResponse.refreshToken === 'string' && tokenResponse.refreshToken.length > 0
         ? tokenResponse.refreshToken
@@ -500,42 +601,35 @@ export class SubscriptionManager {
       ...(tokenResponse.scopes ? { scopes: tokenResponse.scopes } : existing.scopes ? { scopes: existing.scopes } : {}),
       updatedAt: now,
     };
-
-    store.subscriptions[provider] = refreshed;
-    this.write(store);
     return refreshed;
   }
 
   public logout(provider: string): boolean {
-    const store = this.read();
-    const existed = provider in store.subscriptions || provider in store.pending;
-    delete store.subscriptions[provider];
-    delete store.pending[provider];
-    this.write(store);
-    return existed;
+    return this.mutate((store) => {
+      const existed = provider in store.subscriptions || provider in store.pending;
+      delete store.subscriptions[provider];
+      delete store.pending[provider];
+      return existed;
+    });
   }
 
   public getPending(provider: string): PendingSubscriptionLogin | null {
-    return this.read().pending[provider] ?? null;
+    return livePending(this.read(), provider);
   }
 
   public savePending(pending: PendingSubscriptionLogin): void {
-    const store = this.read();
-    store.pending[pending.provider] = pending;
-    this.write(store);
+    this.mutate((store) => { store.pending[pending.provider] = pending; });
   }
 
   public clearPending(provider: string): void {
-    const store = this.read();
-    delete store.pending[provider];
-    this.write(store);
+    this.mutate((store) => { delete store.pending[provider]; });
   }
 
   public saveSubscription(subscription: ProviderSubscription): ProviderSubscription {
-    const store = this.read();
-    store.subscriptions[subscription.provider] = subscription;
-    delete store.pending[subscription.provider];
-    this.write(store);
+    this.mutate((store) => {
+      store.subscriptions[subscription.provider] = subscription;
+      delete store.pending[subscription.provider];
+    });
     return subscription;
   }
 }

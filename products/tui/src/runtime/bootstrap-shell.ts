@@ -3,7 +3,6 @@ import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/termi
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import 'node:path';
-import { readBudgetAlertUsd, BUDGET_ALERT_USD_DEFAULT } from '@goodvibes-jev/engine/platform/platform/providers';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import type { ConversationManager } from '../core/conversation';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
@@ -40,6 +39,7 @@ import type { TaskManager } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { seedCostBudgetFromEnv } from './cost-budget-seed.ts';
 
 export interface BootstrapShellState {
   readonly commandRegistry: CommandRegistry;
@@ -162,18 +162,11 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   // initial cost-budget alert threshold (USD; 0/unset = disabled).
   // Once the session starts, the Usage modal's 'b' key and /cost budget <usd>
   // both write the behavior.budgetAlertUsd config key (runtime/usage-tracker.ts),
-  // the same key the background budget-breach notifier reads. The env
-  // var remains a first-run convenience only: it seeds the config key when
-  // that key has never been set, so it doesn't silently override a value the
-  // user has already configured in a prior session.
-  const parsedBudgetThreshold = Number(process.env.GOODVIBES_COST_BUDGET_USD);
-  const initialCostBudgetThreshold = Number.isFinite(parsedBudgetThreshold) && parsedBudgetThreshold > 0 ? parsedBudgetThreshold : 0;
-  if (
-    initialCostBudgetThreshold > 0 &&
-    readBudgetAlertUsd((k) => configManager.get(k as Parameters<typeof configManager.get>[0])) === BUDGET_ALERT_USD_DEFAULT
-  ) {
-    configManager.set('behavior.budgetAlertUsd' as Parameters<typeof configManager.set>[0], initialCostBudgetThreshold as never);
-  }
+  // the same key the background budget-breach notifier reads. The env var
+  // remains a first-run convenience only: it seeds the key when nothing was ever
+  // stored for it, so it never overrides a value (including a deliberate 0) the
+  // user set in a prior session.
+  seedCostBudgetFromEnv(configManager, process.env.GOODVIBES_COST_BUDGET_USD);
 
   let commandContextRef: CommandContext | null = null;
   const nativeWorkLedgerHost = createNativeWorkLedgerHost({

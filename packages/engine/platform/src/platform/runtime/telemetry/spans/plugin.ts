@@ -91,9 +91,10 @@ export function endPluginSpan(span: Span, ctx: PluginSpanEndContext): void {
 
   span.addEvent(`plugin.${ctx.outcome}`);
 
-  if (ctx.outcome === 'error' && ctx.error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error });
-    span.setAttribute('plugin.error', ctx.error);
+  if (ctx.outcome === 'error') {
+    // A failure without a message is still a failure: it must not export as OK.
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error || 'error' });
+    if (ctx.error) span.setAttribute('plugin.error', ctx.error);
   } else if (ctx.outcome === 'disabled') {
     span.setStatus({ code: SpanStatusCode.OK });
     if (ctx.reason) {

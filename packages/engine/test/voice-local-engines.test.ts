@@ -4,18 +4,17 @@
  *
  * - A machine without engines shows honest not-configured, never an error;
  *   nothing auto-downloads.
- * - With engines configured (scripted fixture binaries here; the live host
- *   engines when installed), a spoken conversation completes with NO cloud
+ * - With engines configured (scripted fixture binaries here), a spoken conversation completes with NO cloud
  *   voice dependency, through the real VoiceService + SpokenTurnController +
  *   AudioSink seams the voice-* families mark.
  * - Metered (ElevenLabs-class) voice spend flows through cost attribution
  *   with real dollars + provenance once the one-key manual price is set;
  *   local emits NOTHING (honest no-billing-dimension, never a fake $0.00).
  */
-import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
 import { VoiceProviderRegistry } from '../platform/src/platform/voice/provider-registry.ts';
 import { VoiceService } from '../platform/src/platform/voice/service.ts';
@@ -29,8 +28,14 @@ function configReader(values: Record<string, string>) {
 }
 
 /** Real scripted engine binaries (shell scripts) honoring the documented CLI contracts. */
+const fixtureDirs: string[] = [];
+afterAll(() => {
+  for (const dir of fixtureDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function makeFixtureEngines() {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-voice-fixture-'));
+  const dir = makeProjectTempDir('gv-voice-fixture');
+  fixtureDirs.push(dir);
   const tts = join(dir, 'fake-piper');
   // piper contract: --model <m> --output_file <wav>, text on stdin.
   writeFileSync(tts, '#!/bin/bash\nOUT=""\nwhile [ $# -gt 0 ]; do if [ "$1" = "--output_file" ]; then OUT="$2"; shift; fi; shift; done\nTEXT=$(cat)\nprintf "RIFF-FIXTURE-WAV:%s" "$TEXT" > "$OUT"\n', { mode: 0o755 });
@@ -81,7 +86,7 @@ describe('honest not-configured, and the managed runtime is what fills it in', (
 });
 
 describe('a spoken conversation with no cloud voice dependency (scripted engines)', () => {
-  test('STT -> (turn) -> TTS -> audio sink, all through the real seams', async () => {
+  test.skipIf(process.platform === 'win32')('STT -> (turn) -> TTS -> audio sink, all through the real seams', async () => {
     const { tts, stt, model } = makeFixtureEngines();
     const readConfig = configReader({
       'voice.local.sttEngine': 'whisper-cpp',
@@ -141,40 +146,6 @@ describe('a spoken conversation with no cloud voice dependency (scripted engines
   }, 15_000);
 });
 
-describe('live host engines (when installed)', () => {
-  test('real whisper.cpp + piper round-trip through the provider', async () => {
-    const home = homedir();
-    const piperBin = join(home, '.local/opt/piper/piper');
-    const piperModel = join(home, '.local/opt/piper-voices/en_US-lessac-low.onnx');
-    const whisperBin = join(home, '.local/opt/whisper.cpp/build/bin/whisper-cli');
-    const whisperModel = join(home, '.local/opt/whisper.cpp/ggml-tiny.en.bin');
-    if (![piperBin, piperModel, whisperBin, whisperModel].every((path) => existsSync(path))) {
-      // Honest skip: the blessed engines are not installed on this machine.
-      console.warn('[voice test] live engines not installed at ~/.local/opt, live round-trip skipped honestly');
-      return;
-    }
-    const provider = createLocalVoiceProvider({
-      readConfig: configReader({
-        'voice.local.sttEngine': 'whisper-cpp',
-        'voice.local.sttBinary': whisperBin,
-        'voice.local.sttModelPath': whisperModel,
-        'voice.local.ttsEngine': 'piper',
-        'voice.local.ttsBinary': piperBin,
-        'voice.local.ttsModelPath': piperModel,
-      }),
-    });
-    const started = Date.now();
-    const synthesis = await provider.synthesize!({ text: 'The quick brown fox jumps over the lazy dog.', metadata: {} });
-    const ttsMs = Date.now() - started;
-    expect(synthesis.audio.dataBase64).toBeDefined();
-    const sttStarted = Date.now();
-    const transcript = await provider.transcribe!({ audio: synthesis.audio, metadata: {} });
-    const sttMs = Date.now() - sttStarted;
-    expect(transcript.text.toLowerCase()).toContain('quick brown fox');
-    console.warn(`[voice test] LIVE local round-trip on this host: TTS ${ttsMs}ms, STT ${sttMs}ms`);
-  }, 60_000);
-});
-
 describe('voice cost honesty: metered vs local', () => {
   function meteredProvider(id: string): VoiceProvider {
     return {
@@ -224,7 +195,7 @@ describe('voice cost honesty: metered vs local', () => {
     expect(JSON.stringify(byProvider.costSource)).toContain('user');
   });
 
-  test('local records nothing at all: no billing dimension, never $0.00', async () => {
+  test.skipIf(process.platform === 'win32')('local records nothing at all: no billing dimension, never $0.00', async () => {
     const { tts, model } = makeFixtureEngines();
     const registry = new VoiceProviderRegistry();
     registry.register(createLocalVoiceProvider({
@@ -236,7 +207,20 @@ describe('voice cost honesty: metered vs local', () => {
     }), { replace: true });
     const attribution = new CostAttributionService({ resolvePricing: () => null });
     let sinkCalls = 0;
-    const service = new VoiceService(registry, () => { sinkCalls += 1; });
+    // Wired exactly as the metered case is: anything the local provider reported would land in attribution.
+    const service = new VoiceService(registry, (usage) => {
+      sinkCalls += 1;
+      attribution.record({
+        at: Date.now(),
+        provider: usage.providerId,
+        model: `${usage.providerId}:voice-${usage.kind}:${usage.unit}`,
+        sessionId: 'sess-voice',
+        inputTokens: usage.billableUnits,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+    });
     await service.synthesize('local', { text: 'free and offline', metadata: {} });
     expect(sinkCalls).toBe(0);
     const result = attribution.attribution('24h', 'provider');

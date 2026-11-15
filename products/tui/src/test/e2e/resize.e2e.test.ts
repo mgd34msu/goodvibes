@@ -5,7 +5,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { startE2ENativeHost } from './native-host-fixture.ts';
-import { closeE2EFixture, inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, lastUserText, launchTui, makeHome, screenText, startStubModel, type E2EHome, type TuiSession } from './harness.ts';
 
 const PROMPT = 'describe the lighthouse keeper routine';
 const REPLY = 'The keeper trims the wick at dusk.';
@@ -15,7 +15,8 @@ const model = startStubModel((request) => (
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => host?.stop(), () => model.stop()));
+let ownedHome: E2EHome | null = null;
+afterAll(() => closeE2EFixture(ownedHome, () => tui?.stop(), () => host?.stop(), () => model.stop()));
 
 /** Width of the composer's top bar (the ▄ run), which spans the screen minus its gutters. */
 function composerBarWidth(screen: string): number {
@@ -26,7 +27,9 @@ function composerBarWidth(screen: string): number {
 describe('resize', () => {
   test('80 -> 120 -> 200 columns redraws at each width without losing the transcript', async () => {
     const home = await makeHome(model);
+    ownedHome = home;
     host = await startE2ENativeHost(home);
+    host.judgments.expectTextOnlyCompletion(PROMPT, REPLY);
     tui = launchTui(home, { cols: 80, rows: 30, env: host.env });
     await tui.waitForScreen('the input area', inputAreaVisible, 45_000);
     tui.type(PROMPT);
@@ -50,10 +53,6 @@ describe('resize', () => {
       expect(screen.split('\n').every((line) => [...line].length <= cols)).toBe(true);
     }
     expect(tui.alive()).toBe(true);
-    expect(host.judgments.accepted).not.toContain('native-route');
-    expect(host.judgments.accepted).not.toContain('native-turn');
-    expect(host.judgments.accepted).not.toContain('route');
-    expect(host.judgments.accepted).not.toContain('turn');
     expect(host.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
     expect(host.daemon.services.agentManager.list()).toHaveLength(0);
   }, 120_000);

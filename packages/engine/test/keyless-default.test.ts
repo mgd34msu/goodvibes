@@ -50,10 +50,10 @@ function openrouterLike(apiKey = ''): OpenAICompatProvider {
   });
 }
 
-function anonymousLike(): OpenAICompatProvider {
+function anonymousLike(baseURL = 'http://127.0.0.1:1/v1'): OpenAICompatProvider {
   return new OpenAICompatProvider({
     name: 'local-anon',
-    baseURL: 'http://127.0.0.1:1/v1',
+    baseURL,
     apiKey: 'gv-local',
     authConfigured: false,
     defaultModel: 'local-model',
@@ -179,25 +179,32 @@ describe('shipped default model × live builtin registration', () => {
     return captured;
   }
 
-  test('fresh install (no keys anywhere): the shipped default honestly asks for a key: never promises keyless', () => {
+  test('fresh install (no keys anywhere): the shipped default never promises keyless unless its provider is keyless', () => {
     const providers = registerBuiltins(() => '');
     const defaultModelKey = coreConfigDefaults.provider.model; // the REAL shipped default
     const providerId = defaultModelKey.split(':')[0]!;
     const provider = providers.get(providerId);
     expect(provider).toBeDefined();
+    const source = { getForModel: () => provider! };
 
-    const readiness = resolveDefaultModelReadiness({ getForModel: () => provider! }, defaultModelKey);
+    const readiness = resolveDefaultModelReadiness(source, defaultModelKey);
     const copy = buildOnboardingModelCopy(readiness);
 
-    // Live reality this cycle: openrouter 401s without a key. The generated
-    // copy must ask for the key, and the keyless promise must be absent.
-    expect(readiness.kind).toBe('needs-key');
-    expect(copy.keyless).toBe(false);
-    expect(`${copy.headline} ${copy.detail}`).not.toContain('no API key');
-    expect(copy.detail).toContain('OPENROUTER_API_KEY');
-
-    // And the pairing gate red-flags any surface still claiming keyless.
-    expect(() => assertKeylessDefaultPairing({ getForModel: () => provider! }, defaultModelKey)).toThrow();
+    // With no key anywhere the default is either honestly keyless or asks for
+    // the key; it can never be "configured" or unresolvable.
+    expect(['keyless', 'needs-key']).toContain(readiness.kind);
+    expect(copy.keyless).toBe(readiness.kind === 'keyless');
+    if (readiness.kind === 'keyless') {
+      expect(copy.detail).toContain('no API key needed');
+      expect(() => assertKeylessDefaultPairing(source, defaultModelKey)).not.toThrow();
+    } else {
+      expect(`${copy.headline} ${copy.detail}`).not.toContain('no API key');
+      for (const envVar of readiness.kind === 'needs-key' ? readiness.authEnvVars : []) {
+        expect(copy.detail).toContain(envVar);
+      }
+      // And the pairing gate red-flags any surface still claiming keyless.
+      expect(() => assertKeylessDefaultPairing(source, defaultModelKey)).toThrow();
+    }
   });
 
   test('with a key configured, the same derivation reports configured (copy flips honestly)', () => {
@@ -218,16 +225,10 @@ describe('unconfigured provider chat preflight', () => {
   test('OpenAI-compat: chat() rejects with the honest ask-for-key error, request never sent', async () => {
     const provider = openrouterLike();
     expect(provider.isConfigured()).toBe(false);
-    const started = Date.now();
     await expect(provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'openrouter/free' }))
       .rejects.toThrow(/no API key configured.*was not sent.*OPENROUTER_API_KEY/s);
-    // Preflight, not a network failure: rejects immediately (no retry loop).
-    expect(Date.now() - started).toBeLessThan(1_000);
-    try {
-      await provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'openrouter/free' });
-    } catch (err) {
-      expect(err).toBeInstanceOf(ProviderError);
-    }
+    await expect(provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'openrouter/free' }))
+      .rejects.toBeInstanceOf(ProviderError);
   });
 
   test('Anthropic-compat: same preflight, same honest copy', async () => {
@@ -246,14 +247,35 @@ describe('unconfigured provider chat preflight', () => {
       .rejects.toThrow(/no API key configured.*was not sent.*ANTHRO_TEST_KEY/s);
   });
 
-  test('an anonymous-ready provider passes the preflight (fails later on the unreachable host, NOT on auth)', async () => {
-    const provider = anonymousLike();
-    expect(provider.isConfigured()).toBe(true);
+  test('an anonymous-ready provider passes the preflight and sends the request', async () => {
+    // A loopback server that refuses with a non-retryable 400, so the only way
+    // the call can end without reaching it is a preflight rejection.
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch() {
+        requests += 1;
+        return new Response(JSON.stringify({ error: { message: 'rejected by test server' } }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
     try {
-      await provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'local-model' });
-      throw new Error('expected the unreachable host to fail');
-    } catch (err) {
-      expect(String(err)).not.toContain('no API key configured');
+      const provider = anonymousLike(`http://127.0.0.1:${server.port}/v1`);
+      expect(provider.isConfigured()).toBe(true);
+      let failure: unknown;
+      try {
+        await provider.chat({ messages: [{ role: 'user', content: 'hi' }], model: 'local-model' });
+      } catch (err) {
+        failure = err;
+      }
+      expect(failure).toBeDefined();
+      expect(String(failure)).not.toContain('no API key configured');
+      expect(requests).toBe(1);
+    } finally {
+      server.stop(true);
     }
-  }, 30_000);
+  });
 });

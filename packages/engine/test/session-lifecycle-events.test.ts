@@ -14,7 +14,7 @@
  *   - the intent→event mapping is contract-aligned so a broker rename fails loudly
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
@@ -195,15 +195,20 @@ describe('session mutators advertise control.session_update', () => {
     // event name, expand the dynamic `session-input-${state}` site over the
     // finalizeable input states, and assert each is declared in the enum. A future
     // emit of an undeclared name (e.g. a new session-input-<state>) fails here.
-    const brokerSrc = readFileSync(
-      new URL('../platform/src/platform/control-plane/session-broker.ts', import.meta.url),
-      'utf-8',
-    );
+    // The broker is split across session-broker*.ts modules and each one publishes.
+    const controlPlaneDir = new URL('../platform/src/platform/control-plane/', import.meta.url);
+    const brokerSrc = readdirSync(controlPlaneDir)
+      .filter((name) => /^session-broker.*\.ts$/.test(name))
+      .map((name) => readFileSync(new URL(name, controlPlaneDir), 'utf-8'))
+      .join('\n');
     const declared = new Set<string>(SESSION_UPDATE_WIRE_EVENTS);
     // finalizeAgentInputs can only transition to these states (see its signature).
     const finalizeStates = ['completed', 'failed', 'cancelled'];
     const emitted = new Set<string>();
-    const literalRe = /publish(?:Update|InputLifecycleEvent)\(\s*[`'"]([^`'"]+)[`'"]/g;
+    // The inputs module reaches the broker through `hooks.publish(` / `hooks.publishInput(`,
+    // and one site picks between two names with a ternary.
+    const literalRe = /publish(?:Update|InputLifecycleEvent|Input)?\(\s*[`'"]([^`'"]+)[`'"]/g;
+    const ternaryRe = /publish(?:Update|InputLifecycleEvent|Input)?\(\s*[^,'"`()]+\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g;
     for (const match of brokerSrc.matchAll(literalRe)) {
       const raw = match[1]!;
       if (raw.includes('${')) {
@@ -214,10 +219,18 @@ describe('session mutators advertise control.session_update', () => {
         emitted.add(raw);
       }
     }
+    for (const match of brokerSrc.matchAll(ternaryRe)) {
+      emitted.add(match[1]!);
+      emitted.add(match[2]!);
+    }
     // Sanity: we actually found the discriminated emit names.
+    expect(emitted.has('session-agent-bound')).toBe(true);
     expect(emitted.has('session-created')).toBe(true);
     expect(emitted.has('session-input-completed')).toBe(true);
     expect(emitted.has('session-input-failed')).toBe(true);
+    // Emits made from the sibling modules are scanned too.
+    expect(emitted.has('session-input-queued')).toBe(true);
+    expect(emitted.has('session-input-delivered')).toBe(true);
 
     const undeclared = [...emitted].filter((event) => !declared.has(event));
     expect(undeclared).toEqual([]);
@@ -350,24 +363,33 @@ describe('SSE client sees each lifecycle event end-to-end', () => {
     expect((deleted!.data as { payload: { sessionId: string } }).payload.sessionId).toBe('lifecycle-delete-session');
   });
 
-  test('a steer-class frame (session-input-delivered) carries on the same channel', async () => {
-    // Driving the full steer state machine needs an active agent; here we assert the wire
-    // channel carries the steered discriminant that SESSION_UPDATE_INTENT_MAP.steered names,
-    // proving a subscriber can switch on payload.event for steer invalidation.
+  test('a steer-class frame (session-input-delivered) is emitted by the broker onto the same channel', async () => {
     const gateway = makeGateway(true);
+    const broker = makeBroker();
+    broker.setEventPublisher((event, payload) => gateway.publishEvent(event, payload));
+    await broker.register({
+      sessionId: 'lifecycle-steer-session',
+      kind: 'tui',
+      participant: { surfaceKind: 'tui', surfaceId: 'surface:tui', lastSeenAt: Date.now() },
+    });
+    const submission = await broker.steerMessage({
+      sessionId: 'lifecycle-steer-session',
+      surfaceKind: 'web',
+      surfaceId: 'surface:web',
+      body: 'steer body',
+      allowSpawnFallback: true,
+    });
+
     const stream = gateway.createEventStream(new Request('http://localhost/stream'), {
       clientKind: 'web',
       principalId: 'shared-token',
       scopes: ['read:sessions'],
     });
     const framePromise = readUntil(stream, isSessionUpdate('session-input-delivered'));
-    gateway.publishEvent('session-update', {
-      event: 'session-input-delivered',
-      payload: { sessionId: 'lifecycle-session', inputId: 'in-1' },
-      createdAt: Date.now(),
-    });
+    await broker.markInputDelivered('lifecycle-steer-session', submission.input.id, { consumed: false });
     const frame = await framePromise;
     expect(frame).not.toBeNull();
+    expect((frame!.data as { payload: { sessionId: string } }).payload.sessionId).toBe('lifecycle-steer-session');
     expect(SESSION_UPDATE_INTENT_MAP.steered).toContain('session-input-delivered');
   });
 });

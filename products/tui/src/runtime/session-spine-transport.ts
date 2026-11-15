@@ -46,7 +46,12 @@ export function createTuiSpineTransport(sessionsClient: SpineSessionsClient): Sp
   return {
     register: async (input: RegisterSharedSessionInput): Promise<SpineResult> => {
       try {
-        await sessionsClient.register(input);
+        const result = await sessionsClient.register(input);
+        // The daemon answers a register against a closed session with a 200 and a
+        // conflict, not an error: it is a refusal, not an applied register.
+        if (result?.conflict?.status === 'closed') {
+          return { outcome: 'rejected', conflict: 'closed', error: 'session is closed on the daemon' };
+        }
         return { outcome: 'ok' };
       } catch (error) {
         return { outcome: 'offline', error: error instanceof Error ? error.message : String(error) };

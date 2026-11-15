@@ -46,6 +46,8 @@ export type AgentEvent =
       contractId?: string | undefined;
       contractRole?: 'owner' | 'unit' | 'planner' | undefined;
       contractUnitId?: string | undefined;
+      /** Set only on the AGENT_RUNNING the agent manager publishes when it wakes a failed or completed run. */
+      wake?: true | undefined;
     }
   /** Agent emitted a textual progress update. */
   | {

@@ -23,8 +23,6 @@ export type CiWatchCompositionDeps = Pick<
   | 'surfaceRoot'
   | 'channelDeliveryRouter'
   | 'automationManager'
-  | 'stampFixSessionOnApproval'
-  | 'requestApproval'
   | 'ciAutonomousHost'
   | 'ciNativeContinuationOwner'
   | 'ciNativeContinuationRevocation'

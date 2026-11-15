@@ -53,6 +53,8 @@ export interface ActivityNow {
   }>;
   /** Count of running background processes. */
   readonly processes: number;
+  /** Set when the daemon capped its fleet answer, so the agents above are only part of what runs there. */
+  readonly daemonPartial?: { readonly shown: number; readonly total: number } | undefined;
 }
 
 export interface ActivityView {
@@ -183,6 +185,10 @@ export function activityItems(view: ActivityView, query: string): ActivityItem[]
       agentId: agent.id,
     });
   }
+  if (view.now.daemonPartial) {
+    const { shown, total } = view.now.daemonPartial;
+    items.push({ section: 'Now', row: { label: `daemon fleet is partial: ${shown} of ${total}`, mark: '!', markFg: t.warning } });
+  }
   if (view.now.processes > 0) {
     items.push({
       section: 'Now',
@@ -232,6 +238,7 @@ export function renderActivityModalPackageText(): string {
     'recent',
     'Working…',
     '<n> background processes',
+    'daemon fleet is partial: <n> of <total>',
     '<n> agents running',
     'quiet <n>m',
     'Nothing yet, activity will show up here.',

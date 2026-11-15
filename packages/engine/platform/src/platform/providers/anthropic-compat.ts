@@ -30,6 +30,7 @@ import { toProviderError } from '../utils/error-display.js';
 import { createAnthropicSSEState, readAnthropicSSEStream, assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 
 const ANTHROPIC_API_VERSION = '2023-06-01';
@@ -84,12 +85,28 @@ export interface AnthropicCompatOptions {
    *    `models` is the complete dated-static list and no live fetch is made.
    */
   modelListing?: 'anthropic-endpoint' | 'none' | undefined;
-  /** Override the model-listing URL (defaults to `${baseURL}/models`). */
+  /**
+   * Override the model-listing URL (defaults to `${baseURL}/models`). The listing
+   * request carries the API key, so it must be an origin the operator trusts with
+   * it: it may differ from `baseURL` (a backend whose listing lives on another
+   * host), and nothing here checks that.
+   */
   modelListingUrl?: string | undefined;
   /** The date the static `models` list was last verified, e.g. '2026-07-12'. */
   modelsAsOf?: string | undefined;
   /** On-disk cache path for live-discovered model lists (TTL cached). */
   modelsCachePath?: string | undefined;
+}
+
+/**
+ * Add one `anthropic-beta` feature to the request headers without dropping the
+ * operator's own (`defaultHeaders` may already name betas, under any casing).
+ */
+function mergeBetaHeader(headers: Record<string, string>, beta: string): void {
+  const key = Object.keys(headers).find((name) => name.toLowerCase() === 'anthropic-beta');
+  const existing = key ? headers[key]!.split(',').map((part) => part.trim()).filter(Boolean) : [];
+  if (key) delete headers[key];
+  headers['anthropic-beta'] = [...new Set([...existing, beta])].join(',');
 }
 
 /**
@@ -237,7 +254,8 @@ export class AnthropicCompatProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    const { messages, tools, model, maxTokens, signal, systemPrompt, onDelta, onRetry, reasoningEffort } = params;
+    const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry, reasoningEffort } = params;
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     this.assertConfiguredForChat(model);
 
     return (await instrumentedLlmCall(
@@ -280,7 +298,7 @@ export class AnthropicCompatProvider implements LLMProvider {
       }
 
       if (isAnthropicThinkingEnabled(body['thinking'])) {
-        headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
+        mergeBetaHeader(headers, 'interleaved-thinking-2025-05-14');
       }
 
       if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
@@ -302,11 +320,13 @@ export class AnthropicCompatProvider implements LLMProvider {
 
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
+        const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(
           `AnthropicCompat(${this.name}) API error ${res.status}: ${text}`
             + ((await describeReasoningRejection(res.status, text, resolvedEffort.value, 'providers.anthropic-compat.reasoning-rejection')) ?? ''),
           {
             statusCode: res.status,
+            ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             provider: this.name,
             operation: 'chat',
             phase: 'request',
@@ -341,7 +361,7 @@ export class AnthropicCompatProvider implements LLMProvider {
         ...withProviderStopReason(state.rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
@@ -385,8 +405,9 @@ export class AnthropicCompatProvider implements LLMProvider {
         streaming: true,
         toolCalling: true,
         parallelTools: true,
-        promptCaching: true,
-        notes: ['Anthropic prompt caching and thinking controls are surfaced through the compat wrapper.'],
+        // This wrapper sends no cache_control blocks, so it does not claim caching.
+        promptCaching: false,
+        notes: ['Thinking controls are surfaced through the compat wrapper; prompt-cache breakpoints are not sent.'],
       },
       policy: {
         local: false,
@@ -395,7 +416,6 @@ export class AnthropicCompatProvider implements LLMProvider {
         // output_config.effort, Claude 4.5 and earlier take a thinking budget,
         // and the levels each accepts come from the resolved spec.
         reasoningMode: 'per-model-effort-or-thinking-budget',
-        cacheStrategy: 'anthropic-prompt-cache',
       },
     };
   }

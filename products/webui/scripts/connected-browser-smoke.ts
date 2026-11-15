@@ -179,8 +179,15 @@ try {
       throw error;
     } finally {
       if (createdId) {
-        await invoke(page, 'sessions.close', { sessionId: createdId });
-        await invoke(page, 'sessions.delete', { sessionId: createdId });
+        // Cleanup runs while the stage's own failure may be in flight (a dead daemon fails
+        // these too); a throw here must not replace that failure in the report.
+        try {
+          await invoke(page, 'sessions.close', { sessionId: createdId });
+          await invoke(page, 'sessions.delete', { sessionId: createdId });
+        } catch (cleanupError: unknown) {
+          const detail = cleanupError instanceof Error ? cleanupError.message : 'unknown error';
+          process.stderr.write(`Connected browser smoke cleanup of session ${createdId} failed: ${detail.replaceAll(token, '[redacted]')}\n`);
+        }
       }
       await context.close();
     }

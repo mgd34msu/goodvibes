@@ -7,6 +7,33 @@ import { Select } from "../ui/Select";
 import { Input } from "../ui/Field";
 import { Button } from "../ui/Button";
 
+/** Raised when the credential source was already reset but the destination write that follows was refused. */
+export class JudgmentDestinationChangeError extends Error {}
+
+/**
+ * Changing where decision calls go resets the credential source first, so a
+ * credential never reaches a destination the owner has not re-approved. The
+ * two writes are separate, so a refused second write leaves the source reset
+ * while the old destination stays; the error says so. The source is not
+ * restored: a lost response may mean the new destination was stored.
+ */
+export async function commitJudgmentDestination(
+  onCommit: (key: string, value: unknown) => Promise<void>,
+  key: string,
+  value: unknown,
+  noun: string,
+): Promise<void> {
+  await onCommit("judgment.keySource", "none");
+  try {
+    await onCommit(key, value);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new JudgmentDestinationChangeError(
+      `The decision credential source was reset to none, but the ${noun} was not saved (${reason}). Decision calls will not authenticate until you choose the credential source again.`,
+    );
+  }
+}
+
 export function JudgmentModelField({
   value,
   onCommit,
@@ -92,17 +119,22 @@ export function JudgmentProviderField({
     setError("");
     try {
       // Protocol changes never carry a credential into an unconfigured destination.
-      await onCommit("judgment.keySource", "none");
-      await onCommit(
+      await commitJudgmentDestination(
+        onCommit,
         "judgment.backend",
         captureJudgmentBackendSettings({
           ...backend,
           adapter,
           responseModels: adapter === "laya" ? ["laya-rl-agent"] : [],
-        })
+        }),
+        "provider",
       );
-    } catch {
-      setError("Unable to save the decision provider. Check the settings connection.");
+    } catch (err) {
+      setError(
+        err instanceof JudgmentDestinationChangeError
+          ? err.message
+          : "Unable to save the decision provider. Check the settings connection.",
+      );
     } finally {
       setSaving(false);
     }

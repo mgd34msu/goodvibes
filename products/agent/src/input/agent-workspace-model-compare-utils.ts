@@ -11,10 +11,7 @@ export function readPositiveInteger(value: string): number | null {
   return Math.max(1, Math.trunc(parsed));
 }
 
-export function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
-}
+export { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 export function compareExportMode(value: string): AgentModelCompareExportWorkspaceToolArgs['mode'] {
   const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, '');

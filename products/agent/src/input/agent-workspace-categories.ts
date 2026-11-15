@@ -4,7 +4,7 @@ import { AGENT_WORKSPACE_HOST_CATEGORY } from './agent-workspace-host-category.t
 import { AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES } from './agent-workspace-onboarding-categories.ts';
 import { THEME_MODE_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 
-export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = [
+export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = freezeDeclaration([
   {
     id: 'home',
     group: 'START',
@@ -142,7 +142,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = [
       settingAction({ id: 'display-tool-preview', label: 'Tool call preview', detail: 'Toggle partial tool-call preview while streaming.', key: 'display.showToolPreview' }),
       settingAction({ id: 'display-operational-messages', label: 'Operational messages', detail: 'Cycle panel (activity feed only), conversation, or both for tool and runtime messages.', key: 'ui.operationalMessages' }),
       settingAction({ id: 'display-system-messages', label: 'System messages', detail: 'Cycle panel (activity feed only), conversation, or both for system messages.', key: 'ui.systemMessages' }),
-      settingAction({ id: 'display-release-channel', label: 'Release channel', detail: 'Cycle stable or preview for update flows.', key: 'release.channel' }),
     ],
   },
   ...AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES,
@@ -576,7 +575,17 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = [
     detail: 'Use this final step after reviewing setup. Apply & close writes the user onboarding completion marker so normal future launches start in the main conversation.',
     actions: [{ id: 'onboarding-apply-close', label: 'Apply & close', detail: 'Acknowledge onboarding as finished, persist the user completion marker, and close the fullscreen Agent workspace.', kind: 'onboarding-complete', safety: 'safe' }],
   },
-];
+]);
+
+/** The declarations are static data. Freezing them here, once, lets every
+ * protected reader prove them unchanged by identity instead of re-reading each
+ * slot at every publication boundary. */
+function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
+  if (value === null || typeof value !== 'object' || visited.has(value)) return value;
+  visited.add(value);
+  for (const child of Object.values(value)) freezeDeclaration(child, visited);
+  return Object.freeze(value);
+}
 
 export function renderAgentWorkspacePackageText(): string {
   const lines: string[] = [];

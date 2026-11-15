@@ -110,7 +110,8 @@ describe('a conversation always gets a response', () => {
     expect(completeOrRegenerate(agent, chat, { content: 'The build is green.' })).toBe(false);
     recoverEmptyConversationalReply(agent);
     expect(agent.fullOutput).toBe('The build is green.');
-    expect(chat.messages.some((m) => m.content === CONVERSATIONAL_REGENERATION_REQUEST)).toBe(false);
+    // No regeneration request: nothing was added as a user turn.
+    expect(chat.messages.filter((m) => m.role === 'user')).toEqual([]);
   });
 });
 
@@ -121,7 +122,8 @@ describe('background work with nothing to report stays silent', () => {
     expect(completeOrRegenerate(agent, chat, { content: '' })).toBe(false);
     recoverEmptyConversationalReply(agent);
     expect(agent.fullOutput).toBe('');
-    expect(chat.messages.some((m) => m.content === CONVERSATIONAL_REGENERATION_REQUEST)).toBe(false);
+    // No regeneration request: nothing was added as a user turn.
+    expect(chat.messages.filter((m) => m.role === 'user')).toEqual([]);
   });
 
   test('a completion with no output notifies nobody, and still closes the run out', async () => {
@@ -154,7 +156,8 @@ describe('background work with nothing to report stays silent', () => {
       agentId: 'agent-quiet',
     }, { agentId: 'agent-quiet', durationMs: 5, output: '' });
 
-    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    // The mocked channel settles on microtasks, so the run closing out is the drain signal.
+    for (let turn = 0; turn < 100 && pipeline.has('agent-quiet'); turn += 1) await Promise.resolve();
     // No "Done.", no "Completed", nothing at all.
     expect(published).toEqual([]);
     // The pipeline invariant: silence still closes the run out, so the poller

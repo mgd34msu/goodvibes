@@ -223,11 +223,11 @@ describe('the other API', () => {
     const second = readsAsAlternateApi(evidence, 'test', { signal: controller.signal });
     controller.abort();
     try {
-      const stopped = await Promise.race([second.then(() => false, () => true), Bun.sleep(100).then(() => false)]);
-      expect(stopped).toBe(true);
+      // The producer is still held here: the aborted waiter must settle on its own,
+      // so a waiter that only settled after the release would hang this await.
+      await expect(second).rejects.toThrow();
     } finally { release.resolve(); }
     expect(await first).toBe(true);
-    await expect(second).rejects.toThrow();
     expect(fixture.alternateRequests).toHaveLength(1);
   });
 

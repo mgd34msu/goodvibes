@@ -1,37 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 import { parseIcs, renderIcs, foldLine, expandRecurringEvent } from '../../agent/ics-calendar.ts';
+import { wallClockToUtcMs } from '../../agent/ics-timezone.ts';
 
 // ---------------------------------------------------------------------------
 // MIN-4: RRULE total-iteration backstop test
 // ---------------------------------------------------------------------------
 
-describe('expandRecurringEvent MIN-4: total-iteration backstop', () => {
-  test('terminates when COUNT is enormous and horizon would not naturally stop the loop', () => {
-    // A daily event starting 10 years in the future from the reference date
-    // with COUNT=99999999 would only be bounded by the 90-day horizon normally.
-    // But we also test that when the cursor does not advance (degenerate edge)
-    // the totalIterations cap kicks in at 100_000.
-    // In practice, the horizon check terminates this in ~90 iterations.
-    // We test that the function returns a finite result in reasonable time.
-    const start = new Date();
-    const ref = new Date(start.getTime());
+describe('expandRecurringEvent: total-iteration backstop', () => {
+  test('a series starting so far back that the reference date is out of reach returns nothing instead of looping on', () => {
+    // 100_000 daily steps from year 1000 end near year 1274, long before the
+    // reference date. Without the backstop the loop would run ~370k steps and
+    // return the 90 in-range occurrences; with it the walk stops empty-handed.
     const event = {
       uid: 'backstop-test',
       summary: 'Daily Backstop',
-      dtstart: start.toISOString(),
+      dtstart: '1000-01-01T09:00:00Z',
       allDay: false,
       rrule: 'FREQ=DAILY;COUNT=99999999',
     };
-    const before = Date.now();
-    const occ = expandRecurringEvent(event, ref, 90);
-    const elapsed = Date.now() - before;
-    // Must return in under 2 seconds (backstop prevents runaway)
-    expect(elapsed).toBeLessThan(2000);
-    // Should have approximately 90 occurrences (horizon-bounded to ~90 days);
-    // the exact count depends on timing but must be well below the backstop (100_000)
-    // and well above zero.
-    expect(occ.length).toBeGreaterThan(0);
-    expect(occ.length).toBeLessThan(200); // far less than the 100_000 backstop
+    expect(expandRecurringEvent(event, new Date('2026-01-01T00:00:00Z'), 90)).toEqual([]);
+  });
+
+  test('the same series starting within reach of the reference date still expands', () => {
+    const event = { uid: 'near', summary: 'Daily', dtstart: '2020-01-01T09:00:00Z', allDay: false, rrule: 'FREQ=DAILY;COUNT=99999999' };
+    const occ = expandRecurringEvent(event, new Date('2026-01-01T00:00:00Z'), 90);
+    expect(occ).toHaveLength(90);
+    expect(occ[0]!.dtstart).toBe('2026-01-01T09:00:00Z');
   });
 });
 
@@ -391,7 +385,9 @@ describe('expandRecurringEvent', () => {
     // No COUNT or UNTIL, should be capped by horizon
     const event = { uid: 'horizon', summary: 'Daily', dtstart: '2024-01-01T09:00:00Z', allDay: false, rrule: 'FREQ=DAILY' };
     const occ = expandRecurringEvent(event, ref, 90);
-    expect(occ.length).toBeLessThanOrEqual(90);
+    // 2024-01-01 through 2024-03-30 at 09:00Z; 03-31 09:00Z is past the horizon end (03-31 00:00Z).
+    expect(occ).toHaveLength(90);
+    expect(occ[89]!.dtstart).toBe('2024-03-30T09:00:00Z');
   });
 
   test('preserves duration across occurrences', () => {
@@ -609,11 +605,11 @@ describe('timezone handling (TZID)', () => {
     expect(occ[1]!.dtend).toBe('2026-01-16T10:00:00');   // advanced, NOT '2026-01-15T10:00:00'
     expect(new Date(occ[1]!.dtstartUtcMs!).toISOString()).toBe('2026-01-16T14:00:00.000Z');
 
-    // Duration stays exactly 1 hour on both occurrences
-    const dur0 = new Date(occ[0]!.dtend!).getTime() - new Date(occ[0]!.dtstartUtcMs!).getTime();
-    // dtend wall-clock must be converted to UTC for duration check
-    const dtend1UtcMs = occ[1]!.dtstartUtcMs! + 3_600_000; // start + 1h
-    expect(new Date(dtend1UtcMs).toISOString()).toBe('2026-01-16T15:00:00.000Z');
+    // Duration stays exactly 1 hour on both occurrences, measured from the emitted dtend.
+    for (const o of occ) {
+      expect(wallClockToUtcMs(o.dtend!, 'America/New_York') - o.dtstartUtcMs!).toBe(3_600_000);
+    }
+    expect(new Date(wallClockToUtcMs(occ[1]!.dtend!, 'America/New_York')).toISOString()).toBe('2026-01-16T15:00:00.000Z');
   });
 
   test('TZID DAILY recurrence on Mar 8 with occurrence in 03:00-08:59 band converts via EDT (UTC-4)', () => {
@@ -678,9 +674,8 @@ describe('timezone handling (TZID)', () => {
 
     // dtend on Mar 8 must be 10:00 NY (wall-clock), i.e. 14:00Z (EDT), 1h after start
     expect(occ[1]!.dtend).toMatch(/T10:00:00$/);
-    // The UTC instant of the end should be 14:00Z = 13:00Z + 1h
-    // (dtend is stored as wall-clock; reconstruct UTC via dtstartUtcMs + durationMs)
-    const durMs = occ[1]!.dtstartUtcMs! + 3_600_000; // 14:00Z
-    expect(new Date(durMs).toISOString()).toBe('2026-03-08T14:00:00.000Z');
+    const end1UtcMs = wallClockToUtcMs(occ[1]!.dtend!, 'America/New_York');
+    expect(new Date(end1UtcMs).toISOString()).toBe('2026-03-08T14:00:00.000Z');
+    expect(end1UtcMs - occ[1]!.dtstartUtcMs!).toBe(3_600_000);
   });
 });

@@ -122,6 +122,61 @@ describe('runtime store lifecycle seams', () => {
     expect(store.getState().agents.agents.get('owner-2')?.status).toBe('completed');
   });
 
+  test('a woken run comes back to running only through its marked AGENT_RUNNING; a cancelled run never does', () => {
+    const store = createRuntimeStore();
+    const dispatch = createDomainDispatch(store);
+    const wake = { wake: true } as const;
+
+    dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: 'worker-1', task: 'Fix the parser' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_FAILED', agentId: 'worker-1', error: 'turn budget', durationMs: 5 });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: 'worker-1' });
+    expect(store.getState().agents.agents.get('worker-1')?.status).toBe('failed');
+
+    dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: 'worker-1', ...wake });
+    const woken = store.getState().agents.agents.get('worker-1');
+    expect(woken?.status).toBe('running');
+    expect(woken?.endedAt).toBeUndefined();
+    expect(woken?.error).toBeUndefined();
+    expect(store.getState().agents.totalFailed).toBe(0);
+    expect(store.getState().agents.activeAgentIds).toContain('worker-1');
+
+    dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: 'worker-2', task: 'Stopped work' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_CANCELLED', agentId: 'worker-2' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: 'worker-2', ...wake });
+    expect(store.getState().agents.agents.get('worker-2')?.status).toBe('cancelled');
+  });
+
+  test('progress and output do not clear a wait; a repeated terminal event keeps the first outcome', () => {
+    const store = createRuntimeStore();
+    const dispatch = createDomainDispatch(store);
+    const agent = () => store.getState().agents.agents.get('w1');
+
+    dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: 'w1', task: 'Wait on a tool' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_PROGRESS', agentId: 'w1', progress: 'starting' } as never);
+    expect(agent()?.status).toBe('running');
+    dispatch.dispatchAgentEvent({ type: 'AGENT_AWAITING_TOOL', agentId: 'w1', callId: 'c1', tool: 'exec' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_PROGRESS', agentId: 'w1', progress: 'still waiting' } as never);
+    dispatch.dispatchAgentEvent({ type: 'AGENT_STREAM_DELTA', agentId: 'w1', accumulated: 'partial', delta: 'partial' } as never);
+    expect(agent()?.status).toBe('awaiting_tool');
+    expect(agent()?.latestOutput).toBe('partial');
+
+    dispatch.dispatchAgentEvent({ type: 'AGENT_COMPLETED', agentId: 'w1', durationMs: 5, output: 'first' });
+    const firstEnd = agent()?.endedAt;
+    dispatch.dispatchAgentEvent({ type: 'AGENT_COMPLETED', agentId: 'w1', durationMs: 99, output: 'second' });
+    expect(agent()?.endedAt).toBe(firstEnd);
+    expect(agent()?.result).toMatchObject({ durationMs: 5, output: 'first' });
+    expect(store.getState().agents.totalCompleted).toBe(1);
+  });
+
+  test('a direct transition cannot move a finished agent back to a live state', () => {
+    const store = createRuntimeStore();
+    const dispatch = createDomainDispatch(store);
+    dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: 'w2', task: 'Done already' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_FAILED', agentId: 'w2', error: 'x', durationMs: 1 });
+    dispatch.transitionRuntimeAgent('w2', 'running', undefined, 'test');
+    expect(store.getState().agents.agents.get('w2')?.status).toBe('failed');
+  });
+
   test('scheduler adapter preserves failed run status when wrapping history', () => {
     const store = createRuntimeStore();
     const adapter = new SchedulerTaskAdapter(store);

@@ -98,6 +98,9 @@ export interface LedgerEntry {
 
 const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+/** Ledger entries between retention passes, so a run that exports no spans still stays within the caps. */
+const RETENTION_EVERY_ENTRIES = 200;
+
 /**
  * LocalLedgerExporter, writes spans as JSON lines to a rotating file.
  *
@@ -119,6 +122,7 @@ export class LocalLedgerExporter implements SpanExporter {
   private readonly captureRunSnapshot: (() => RuntimeStateSnapshot) | undefined;
   /** Run ids whose start has been handled; loaded from the snapshot file on first use. */
   private snapshottedRunIds: Set<string> | null = null;
+  private entriesSinceRetention = 0;
   /** Keep each file's lines in order while their credential spans are read. */
   private readonly spanWriter = new AtRestLineWriter(SPAN_FILE_CREDENTIAL_SITE);
   private readonly ledgerWriter = new AtRestLineWriter(LEDGER_FILE_CREDENTIAL_SITE);
@@ -238,6 +242,13 @@ export class LocalLedgerExporter implements SpanExporter {
     // span is read, after every line ahead of it; flush() waits for those.
     if (this.atRestPolicy.redact) this.ledgerWriter.write(serialized, append);
     else append(serialized);
+    // Retention otherwise runs only when spans are exported, which a session
+    // with span export off never does; the ledger and snapshot files would grow unchecked.
+    this.entriesSinceRetention += 1;
+    if (this.entriesSinceRetention >= RETENTION_EVERY_ENTRIES) {
+      this.entriesSinceRetention = 0;
+      this._enforceRetention();
+    }
   }
 
   /**

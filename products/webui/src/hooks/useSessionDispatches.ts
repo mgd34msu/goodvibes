@@ -31,8 +31,8 @@ function validReceipt(value: unknown, sessionId: string): value is InputReceipt 
 function adopt(dispatch: LocalDispatch, input: InputReceipt): LocalDispatch {
   // An older in-flight list must not undo a newer POST receipt, or regress a
   // delivered/terminal input to queued when updates share a millisecond.
-  // Spawn POSTs manufacture a snapshot before the broker's oldest-input claim;
-  // a list may correctly show that this particular input is still queued.
+  // A spawn POST's receipt can be ahead of a list read taken before the
+  // broker's claim of that exact input; that stale list still shows it queued.
   if ((dispatch.updatedAt ?? -Infinity) > input.updatedAt || terminal.has(dispatch.state)
     || (input.state === 'queued' && dispatch.state === 'delivered')) return dispatch;
   if (dispatch.inputId === input.id && dispatch.state === input.state
@@ -56,11 +56,17 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
     const aborts = flights.current;
     const release = () => {
       owner.current = false;
-      for (const abort of aborts) abort.abort();
-      aborts.clear();
       client.removeQueries({ queryKey: queryKeys.sessionInputs(lifetime.revision, sessionId), exact: true });
     };
-    const unsubscribe = subscribeClientLifetime(release);
+    // A new identity must not keep a request in flight. Leaving this composer is
+    // different: a POST already sent may have reached the daemon, so it is left to
+    // finish (bounded by its own deadline) and only refreshes the session lists.
+    const retire = () => {
+      for (const abort of aborts) abort.abort();
+      aborts.clear();
+      release();
+    };
+    const unsubscribe = subscribeClientLifetime(retire);
     return () => { unsubscribe(); release(); };
   }, [client, lifetime, sessionId]);
 
@@ -108,9 +114,11 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
   // retaining them in QueryClient's cross-account mutation cache after navigation.
   async function dispatch(id: number, body: string, mode: DispatchMode, abort: AbortController) {
     const timer = setTimeout(() => {
-      if (!owned() || abort.signal.aborted) return;
-      setDispatches((previous) => previous.map((entry) => entry.id !== id ? entry : { ...entry, state: 'unknown',
-        error: 'Delivery confirmation timed out. Check the transcript before sending again. The request will not be retried automatically.' }));
+      if (abort.signal.aborted) return;
+      if (owned()) {
+        setDispatches((previous) => previous.map((entry) => entry.id !== id ? entry : { ...entry, state: 'unknown',
+          error: 'Delivery confirmation timed out. Check the transcript before sending again. The request will not be retried automatically.' }));
+      }
       abort.abort();
     }, 30_000);
     const clearDeadline = () => clearTimeout(timer);
@@ -121,13 +129,21 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
       const data = await (mode === 'steer'
         ? platformClient.operator.sessions.steer(sessionId, { body }, abort.signal)
         : platformClient.operator.sessions.followUp(sessionId, { body }, abort.signal));
-      if (!owned() || abort.signal.aborted) return;
+      if (abort.signal.aborted) return;
+      if (!owned()) {
+        if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
+        return;
+      }
       setDispatches((previous) => previous.map((entry) => entry.id !== id ? entry
         : validReceipt(data?.input, sessionId) ? adopt(entry, data.input)
           : { ...entry, state: 'unknown', error: 'The request returned no readable input receipt. Check the transcript before sending again.' }));
       void client.invalidateQueries({ queryKey: queryKeys.sessions });
     } catch (error) {
-      if (!owned() || abort.signal.aborted) return;
+      if (abort.signal.aborted) return;
+      if (!owned()) {
+        if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
+        return;
+      }
       const closed = isSessionClosedError(error);
       const serialized = serializeError(error);
       const transport = asRecord(serialized.transport);

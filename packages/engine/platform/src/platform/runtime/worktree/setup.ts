@@ -25,7 +25,7 @@ import { summarizeError } from '../../utils/error-display.js';
 export interface WorktreeSetupConfig {
   /** Shell command lines to run, in order, in the new worktree (e.g. `bun install`, `bun run codegen`). */
   readonly commands: readonly string[];
-  /** Globs (relative to the source working tree) of UNTRACKED files to copy into the new worktree (e.g. `.env`, `.env.*`, `config/local.json`). */
+  /** Globs (relative to the source working tree) of UNTRACKED or git-ignored files to copy into the new worktree (e.g. `.env`, `.env.*`, `config/local.json`). */
   readonly carryOverGlobs: readonly string[];
 }
 
@@ -58,19 +58,32 @@ export interface WorktreeSetupResult {
 export interface WorktreeCommandOutcome {
   readonly exitCode: number;
   readonly output: string;
+  /** True when the command was stopped because it ran past its time limit. */
+  readonly timedOut?: boolean | undefined;
 }
 
 /** Runs a single shell command line in `cwd`, returning its exit code and captured combined output. */
 export type WorktreeCommandRunner = (commandLine: string, cwd: string) => Promise<WorktreeCommandOutcome>;
 
-/** Lists UNTRACKED files (relative paths) in the source working tree, the carry-over candidate set. Injectable for tests. */
-export type UntrackedFileLister = (sourceRoot: string) => Promise<readonly string[]>;
+/**
+ * Lists the files (relative paths) in the source working tree that are not
+ * committed, the carry-over candidate set. That includes files git ignores,
+ * since local config such as `.env` is almost always ignored; `globs` lets the
+ * lister look only for what will be copied instead of walking every ignored
+ * dependency folder. Injectable for tests.
+ */
+export type UntrackedFileLister = (sourceRoot: string, globs?: readonly string[]) => Promise<readonly string[]>;
 
 export interface RunWorktreeSetupOptions {
   readonly runCommand?: WorktreeCommandRunner | undefined;
   readonly listUntracked?: UntrackedFileLister | undefined;
   readonly now?: (() => number) | undefined;
+  /** Time limit for each setup command when the default runner is used. Defaults to {@link DEFAULT_SETUP_COMMAND_TIMEOUT_MS}. */
+  readonly commandTimeoutMs?: number | undefined;
 }
+
+/** Ten minutes: long enough for a cold install on a slow link, short enough that a stalled one is reported rather than waited on forever. */
+export const DEFAULT_SETUP_COMMAND_TIMEOUT_MS = 10 * 60_000;
 
 /** Cap captured command output so a chatty install never bloats the persisted record. */
 const MAX_STEP_OUTPUT_BYTES = 16_384;
@@ -80,32 +93,60 @@ function clampOutput(text: string): string {
   return `${text.slice(0, MAX_STEP_OUTPUT_BYTES)}\n…[truncated ${text.length - MAX_STEP_OUTPUT_BYTES} bytes]`;
 }
 
-/** Default command runner: Bun.spawn through `sh -c`, capturing combined stdout+stderr. */
-const defaultRunCommand: WorktreeCommandRunner = async (commandLine, cwd) => {
-  const proc = Bun.spawn(['sh', '-c', commandLine], {
-    cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: process.env,
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, output: clampOutput([stdout, stderr].filter((s) => s.length > 0).join('\n')) };
-};
+/**
+ * A command runner that stops a command still running after `timeoutMs`. The
+ * command gets its own process group so the stop reaches what it started
+ * (`bun install` spawns children), and no stdin, so a prompt cannot wait for a
+ * keypress nobody will make.
+ */
+export function createWorktreeCommandRunner(timeoutMs: number = DEFAULT_SETUP_COMMAND_TIMEOUT_MS): WorktreeCommandRunner {
+  return async (commandLine, cwd) => {
+    const proc = Bun.spawn(['sh', '-c', commandLine], {
+      cwd,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: process.env,
+      detached: true,
+    });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { process.kill(-proc.pid, 'SIGKILL'); } catch { proc.kill('SIGKILL'); }
+    }, timeoutMs);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      return { exitCode, output: clampOutput([stdout, stderr].filter((s) => s.length > 0).join('\n')), ...(timedOut ? { timedOut } : {}) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
 
-/** Default untracked lister: `git ls-files --others --exclude-standard` in the source root. */
-const defaultListUntracked: UntrackedFileLister = async (sourceRoot) => {
-  const proc = Bun.spawn(['git', 'ls-files', '--others', '--exclude-standard'], {
-    cwd: sourceRoot,
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
-  const [out, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-  if (exitCode !== 0) return [];
+async function gitLines(sourceRoot: string, args: readonly string[]): Promise<string[]> {
+  const proc = Bun.spawn(['git', ...args], { cwd: sourceRoot, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const [out, err, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  // An empty list from a failed git would read as "nothing to carry over" and report success without the env files.
+  if (exitCode !== 0) throw new Error(`git ${args[0]} exited ${exitCode} in ${sourceRoot}${err.trim() ? `: ${err.trim()}` : ''}`);
   return out.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+}
+
+/**
+ * Default lister: files git does not track, plus the git-IGNORED files that
+ * match the globs (a repo's `.env` is nearly always ignored). Ignored files
+ * are only listed through the globs as pathspecs, so a large ignored folder
+ * such as `node_modules` is never walked unless a glob names it.
+ */
+const defaultListUntracked: UntrackedFileLister = async (sourceRoot, globs = []) => {
+  const untracked = await gitLines(sourceRoot, ['ls-files', '--others', '--exclude-standard']);
+  const pathspecs = globs.filter((glob) => glob.length > 0 && !glob.startsWith(':')).map((glob) => `:(glob)${glob}`);
+  if (pathspecs.length === 0) return untracked;
+  const ignored = await gitLines(sourceRoot, ['ls-files', '--others', '--ignored', '--exclude-standard', '--', ...pathspecs]);
+  return [...new Set([...untracked, ...ignored])];
 };
 
 function matchesAnyGlob(path: string, globs: readonly string[]): boolean {
@@ -131,7 +172,8 @@ export async function runWorktreeSetup(
   options: RunWorktreeSetupOptions = {},
 ): Promise<WorktreeSetupResult> {
   const now = options.now ?? Date.now;
-  const runCommand = options.runCommand ?? defaultRunCommand;
+  const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_SETUP_COMMAND_TIMEOUT_MS;
+  const runCommand = options.runCommand ?? createWorktreeCommandRunner(commandTimeoutMs);
   const listUntracked = options.listUntracked ?? defaultListUntracked;
   const startedAt = now();
   const steps: WorktreeSetupStep[] = [];
@@ -155,7 +197,10 @@ export async function runWorktreeSetup(
     const ok = outcome.exitCode === 0;
     steps.push({ kind: 'command', label: commandLine, ok, exitCode: outcome.exitCode, output: outcome.output });
     if (!ok) {
-      logger.warn('runWorktreeSetup: command exited non-zero', { commandLine, worktreePath, exitCode: outcome.exitCode });
+      logger.warn('runWorktreeSetup: command exited non-zero', { commandLine, worktreePath, exitCode: outcome.exitCode, timedOut: outcome.timedOut === true });
+      if (outcome.timedOut) {
+        return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command was stopped after running longer than ${commandTimeoutMs >= 1000 ? `${Math.round(commandTimeoutMs / 1000)}s` : `${commandTimeoutMs}ms`}: ${commandLine}` };
+      }
       return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command exited ${outcome.exitCode}: ${commandLine}` };
     }
   }
@@ -164,7 +209,7 @@ export async function runWorktreeSetup(
     const carriedOver: string[] = [];
     let carryError: string | undefined;
     try {
-      const untracked = await listUntracked(sourceRoot);
+      const untracked = await listUntracked(sourceRoot, config.carryOverGlobs);
       for (const relative of untracked) {
         if (!matchesAnyGlob(relative, config.carryOverGlobs)) continue;
         const from = join(sourceRoot, relative);
@@ -181,7 +226,14 @@ export async function runWorktreeSetup(
       steps.push({ kind: 'carry-over', label: 'carry over untracked files', ok: false, output: clampOutput(carryError) });
       return { state: 'failed', startedAt, completedAt: now(), steps, error: `carry-over of untracked files failed: ${carryError}` };
     }
-    steps.push({ kind: 'carry-over', label: 'carry over untracked files', ok: true, output: carriedOver.join('\n') });
+    steps.push({
+      kind: 'carry-over',
+      label: 'carry over untracked files',
+      ok: true,
+      output: carriedOver.length > 0
+        ? carriedOver.join('\n')
+        : `no file in ${sourceRoot} matched the carry-over globs (${config.carryOverGlobs.join(', ')}); nothing was copied`,
+    });
   }
 
   return { state: 'succeeded', startedAt, completedAt: now(), steps };

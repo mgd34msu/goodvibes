@@ -19,15 +19,28 @@ const TERMINAL_STATUSES: ReadonlySet<ContractStatus> = new Set(['passed', 'faile
 /** Ended contracts kept for surfaces; the oldest ended ones go first past this. Live contracts are never dropped. */
 export const MAX_RETAINED_CONTRACTS = 200;
 
-function evictEnded(contracts: Map<string, ContractRecord>): void {
-  if (contracts.size <= MAX_RETAINED_CONTRACTS) return;
+/** Evicted ids remembered so late events for them are dropped. */
+const MAX_REMEMBERED_EVICTIONS = 1000;
+
+/** Drops the oldest ended contracts past the cap and returns their ids. */
+function evictEnded(contracts: Map<string, ContractRecord>): string[] {
+  const evicted: string[] = [];
+  if (contracts.size <= MAX_RETAINED_CONTRACTS) return evicted;
   const ended = [...contracts.values()]
     .filter((contract) => TERMINAL_STATUSES.has(contract.status))
     .sort((a, b) => (a.endedAt ?? a.createdAt) - (b.endedAt ?? b.createdAt));
   for (const contract of ended) {
-    if (contracts.size <= MAX_RETAINED_CONTRACTS) return;
+    if (contracts.size <= MAX_RETAINED_CONTRACTS) break;
     contracts.delete(contract.id);
+    evicted.push(contract.id);
   }
+  return evicted;
+}
+
+/** Events that move a contract's status; none of them may move an ended contract. */
+function movesStatus(event: ContractEvent): boolean {
+  return event.type === 'CONTRACT_STATUS_CHANGED' || event.type === 'CONTRACT_PASSED'
+    || event.type === 'CONTRACT_FAILED' || event.type === 'CONTRACT_CANCELLED';
 }
 
 function emptyContract(contractId: string, timestamp: number): ContractRecord {
@@ -229,13 +242,18 @@ export function updateContractsState(domain: ContractDomainState, event: Contrac
     return { ...updateDomainMetadata(domain, event.type), spawnGuardTrips: domain.spawnGuardTrips + 1 };
   }
   const timestamp = now();
-  const existing = domain.contracts.get(event.contractId) ?? emptyContract(event.contractId, timestamp);
+  const known = domain.contracts.get(event.contractId);
+  // An ended contract keeps its first outcome (a cancel racing a pass must not count both), and a
+  // late event for one that was evicted must not bring it back as a contract that never ends.
+  if (known && TERMINAL_STATUSES.has(known.status) && movesStatus(event)) return domain;
+  if (!known && domain.evictedContractIds?.includes(event.contractId)) return domain;
+  const existing = known ?? emptyContract(event.contractId, timestamp);
   const next = applyToContract(existing, event, timestamp);
   if (next === null) return domain;
 
   const contracts = new Map(domain.contracts);
   contracts.set(next.id, next);
-  evictEnded(contracts);
+  const evicted = evictEnded(contracts);
   const records = [...contracts.values()];
   return {
     ...updateDomainMetadata(domain, event.type),
@@ -244,6 +262,7 @@ export function updateContractsState(domain: ContractDomainState, event: Contrac
       .filter((contract) => !TERMINAL_STATUSES.has(contract.status))
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((contract) => contract.id),
+    ...(evicted.length > 0 ? { evictedContractIds: [...(domain.evictedContractIds ?? []), ...evicted].slice(-MAX_REMEMBERED_EVICTIONS) } : {}),
     totalContracts: domain.totalContracts + (domain.contracts.has(next.id) ? 0 : 1),
     totalPassed: domain.totalPassed + (endedAs(existing, next, 'passed') ? 1 : 0),
     totalFailed: domain.totalFailed + (endedAs(existing, next, 'failed') ? 1 : 0),

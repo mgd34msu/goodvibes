@@ -1,5 +1,6 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -44,10 +45,6 @@ export function isAgentWorkspaceWorkPlanEditorKind(kind: string): kind is AgentW
     || kind === 'workplan-status'
     || kind === 'workplan-delete'
     || kind === 'workplan-clear-completed';
-}
-
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
 }
 
 function unconfirmed(editor: AgentWorkspaceLocalEditor, message: string, status: string): AgentWorkspaceWorkPlanEditorSubmission {

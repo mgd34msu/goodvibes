@@ -97,8 +97,12 @@ export interface WorkstreamDraftStore {
    * fatal, and are only deleted once older than the TTL.
    */
   loadAll(): WorkstreamDraft[];
-  /** Write (or overwrite) one draft's snapshot atomically. Silently no-ops on any I/O failure, a lost journal write must never break the in-memory flow. */
-  save(draft: WorkstreamDraft): void;
+  /**
+   * Write (or overwrite) one draft's snapshot atomically. Never throws, a lost journal write must never
+   * break the in-memory flow; it returns false instead, so the caller can say the draft is not journaled
+   * (and, after an edit, retire the older file that is still on disk).
+   */
+  save(draft: WorkstreamDraft): boolean;
   /** Delete one draft's snapshot (on launch or cancel). Missing file ⇒ no-op. */
   remove(id: string): void;
   /** Summary of the most recent `loadAll()` that reclaimed something; null otherwise. */
@@ -169,13 +173,15 @@ export function createWorkstreamDraftStore(
   /**
    * Read every snapshot, reject the ones whose CONTENT is not a draft, apply
    * both bounds, and record/announce what was reclaimed. Returns the surviving
-   * drafts, oldest first. Never throws.
+   * drafts, oldest first. Never throws. `keepId` names a draft that was just
+   * written: its file is exempt from both bounds, so saving a draft (whose age
+   * is measured from `createdAt`) can never delete the file it just journaled.
    *
    * Idempotent: a second run over the same directory finds nothing left to
    * remove, which is also what makes two processes running it at once safe,
    * they converge on the same surviving set and unlink races count as done.
    */
-  const reap = (): WorkstreamDraft[] => {
+  const reap = (keepId?: string): WorkstreamDraft[] => {
     let entries: string[];
     try {
       entries = readdirSync(dir);
@@ -215,7 +221,7 @@ export function createWorkstreamDraftStore(
     const live: WorkstreamDraft[] = [];
     let expired = 0;
     for (const draft of drafts) {
-      if (now - draft.createdAt > ttlMs) {
+      if (draft.id !== keepId && now - draft.createdAt > ttlMs) {
         discard(fileFor(draft.id));
         expired += 1;
         continue;
@@ -223,9 +229,16 @@ export function createWorkstreamDraftStore(
       live.push(draft);
     }
     // Bound 2, count cap: keep the newest `cap`, reclaim the oldest overflow.
-    const overCapCount = Math.max(0, live.length - cap);
-    for (const draft of live.slice(0, overCapCount)) discard(fileFor(draft.id));
-    const kept = live.slice(overCapCount);
+    let overCapCount = 0;
+    const kept: WorkstreamDraft[] = [];
+    for (const draft of live) {
+      if (live.length - overCapCount > cap && draft.id !== keepId) {
+        discard(fileFor(draft.id));
+        overCapCount += 1;
+      } else {
+        kept.push(draft);
+      }
+    }
 
     if (expired + overCapCount + unreadable > 0) {
       lastReclaim = { at: now, expired, overCap: overCapCount, unreadable };
@@ -247,23 +260,29 @@ export function createWorkstreamDraftStore(
     loadAll(): WorkstreamDraft[] {
       return reap();
     },
-    save(draft: WorkstreamDraft): void {
-      if (!isSafeId(draft.id)) return;
+    save(draft: WorkstreamDraft): boolean {
+      if (!isSafeId(draft.id)) return false;
+      let written = true;
       try {
         mkdirSync(dir, { recursive: true });
         // Atomic (temp + fsync + rename): a crash mid-save can no longer leave a
         // truncated snapshot behind for loadAll() to reject.
-        atomicWriteFileSync(fileFor(draft.id), JSON.stringify(draft));
+        // The in-memory "not journaled" flag describes this very write; it is not part of the draft.
+        const { journaled: _inMemoryFlag, ...persisted } = draft;
+        atomicWriteFileSync(fileFor(draft.id), JSON.stringify(persisted));
       } catch {
         // A failed journal write leaves the in-memory draft intact and usable;
         // only its restart-durability is lost, which is strictly better than
-        // failing the edit the user just made.
+        // failing the edit the user just made. The caller is told (false).
+        written = false;
       }
       // Keep reaping DURING the session, not only at the loadAll() recovery
       // point: loadAll runs once at construction, so a long-lived session would
-      // otherwise never bound the directory again. Throttled, and always after
-      // this draft is on disk so the newest file is never the one reclaimed.
-      if (clock() - lastSweepAt >= sweepIntervalMs) reap();
+      // otherwise never bound the directory again. Throttled, and the draft just
+      // saved is exempt: its age is its createdAt, which can be old for a draft
+      // that is being edited right now.
+      if (clock() - lastSweepAt >= sweepIntervalMs) reap(draft.id);
+      return written;
     },
     remove(id: string): void {
       if (!isSafeId(id)) return;

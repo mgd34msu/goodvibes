@@ -36,6 +36,15 @@ function collection(owner: object): Archives {
   if (!found) { found = { active: 'main', branches: new Map([['main', empty()]]) }; archives.set(owner, found); }
   return found;
 }
+/**
+ * Journal first, then memory: when the journal write throws, the in-memory
+ * branch is still the one the conversation edit started from, so the caller's
+ * failure leaves memory and journal agreeing.
+ */
+function commit(entries: Archives, next: Archive): void {
+  entries.save?.(snapshot(entries.active, next));
+  entries.branches.set(entries.active, next);
+}
 function archive(owner: object): Archive { const entries = collection(owner); return entries.branches.get(entries.active)!; }
 function ownedMessage(entry: Archive, id: string): OwnedMessage {
   let record = entry.messageRecords.get(id);
@@ -92,7 +101,7 @@ export function retainVerificationMessagePositions(owner: object, position: (ori
   const records = recordsFor(current, derived, runtimeMessages);
   if (same(current.derived, derived) && same(current.runtimeMessages, runtimeMessages) && current.messageRecords.size === records.size) return;
   const next = { ...current, derived, runtimeMessages, messageRecords: records, changed: true };
-  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next));
+  commit(entries, next);
 }
 /** The native undo array owns its removed records. A discarded undo stack
  * releases these values through the weak key, including private originals. */
@@ -114,7 +123,7 @@ export function restoreVerificationMessages(owner: object, start: number, turn: 
   for (const [position, id] of held.derived) derived.set(start + position, id);
   for (const [position, id] of held.runtimeMessages) runtimeMessages.set(start + position, id);
   const next = { ...current, derived, runtimeMessages, messageRecords: new Map([...current.messageRecords, ...held.records]), changed: true };
-  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next)); detachedMessages.delete(turn);
+  commit(entries, next); detachedMessages.delete(turn);
 }
 /** A native metadata edit preserves provenance while issuing a new immutable
  * record. Borrowed changed bytes cannot silently update the original record. */
@@ -130,7 +139,7 @@ export function updateVerificationMessage(owner: object, position: number, befor
   derived.delete(position); runtimeMessages.delete(position);
   const next = { ...current, derived, runtimeMessages, messageRecords: recordsFor(current, derived, runtimeMessages), changed: true };
   (origin === 'derived' ? derived : runtimeMessages).set(position, retainMessage(next, value));
-  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next));
+  commit(entries, next);
 }
 export function verificationHistory(owner: object) { return archive(owner).histories; }
 /** A newly constructed conversation retains archived evidence, never another run's message slots. */
@@ -138,7 +147,7 @@ export function beginVerificationConversation(owner: object): void {
   const entries = collection(owner), current = archive(owner);
   if (!current.derived.size && !current.runtimeMessages.size) return;
   const next = { ...current, derived: new Map<number, string>(), runtimeMessages: new Map<number, string>(), messageRecords: new Map<string, OwnedMessage>(), changed: true };
-  entries.branches.set(entries.active, next); entries.save?.(snapshot(entries.active, next));
+  commit(entries, next);
 }
 export function registerVerificationArchive(owner: object, save: Archives['save'], restored: readonly VerificationArchive[] = []): void {
   const entries = collection(owner);
@@ -289,12 +298,34 @@ export function appendVerificationObservation(owner: {
   getMessageSnapshot(): readonly { readonly role: string; readonly content: unknown }[];
 }, content: string): void {
   owner.addUserMessage(verificationObservationText(content));
+  markLastMessageRuntime(owner);
+}
+
+/**
+ * Appends a host-made message that sits in a user-role slot (for example the
+ * images a read tool returned) and marks it as runtime feedback, so the
+ * verifier never reads it as the person's own words.
+ */
+export function appendVerificationRuntimeMessage<Content>(owner: {
+  addUserMessage(content: Content): void;
+  getMessageSnapshot(): readonly { readonly role: string; readonly content: unknown }[];
+}, content: Content): void {
+  owner.addUserMessage(content);
+  markLastMessageRuntime(owner);
+}
+
+/** True when the message at `position` was appended by the host as runtime feedback rather than typed by the person. */
+export function isVerificationRuntimeMessage(owner: object, position: number): boolean {
+  const entries = archives.get(owner), current = entries?.branches.get(entries.active);
+  return current?.runtimeMessages.has(position) === true;
+}
+
+function markLastMessageRuntime(owner: { getMessageSnapshot(): readonly { readonly role: string; readonly content: unknown }[] }): void {
   const messages = owner.getMessageSnapshot(), position = messages.length - 1;
   const entries = collection(owner), current = archive(owner), runtimeMessages = new Map(current.runtimeMessages);
   const message = messages[position];
   if (!message) throw new VerificationHeldError('missing appended runtime observation');
   const next = { ...current, runtimeMessages, messageRecords: recordsFor(current, current.derived, runtimeMessages), changed: true };
   runtimeMessages.set(position, retainMessage(next, message));
-  entries.branches.set(entries.active, next);
-  entries.save?.(snapshot(entries.active, next));
+  commit(entries, next);
 }

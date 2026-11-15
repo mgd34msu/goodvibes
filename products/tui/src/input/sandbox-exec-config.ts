@@ -66,7 +66,7 @@ export const SANDBOX_WORKSPACE_WRITABLE_SYNTHETIC_SETTING: ConfigSetting = {
   key: SANDBOX_WORKSPACE_WRITABLE_CONFIG_KEY,
   type: 'string',
   default: [],
-  description: 'Comma-separated absolute paths outside the workspace bound writable into the per-command exec sandbox boundary, as a named escalation the approval flow surfaces ("wants path outside workspace"). Empty = only the workspace (and an isolated /tmp) is writable. Only takes effect when sandbox.enabled is on, the exec-sandbox setting is on, and bubblewrap is available (Linux only; reports unavailable elsewhere).',
+  description: 'Comma-separated absolute paths outside the workspace bound writable into the exec sandbox boundary of EVERY sandboxed command. There is no per-command approval for these paths: any command the sandbox auto-allows can write there, so list only paths you are content to open to all of them. Empty = only the workspace (and an isolated /tmp) is writable. Only takes effect when sandbox.enabled is on, the exec-sandbox setting is on, and bubblewrap is available (Linux only; reports unavailable elsewhere).',
 };
 
 function buildSandboxExecListEntry(configManager: Pick<ConfigManager, 'get'>, setting: ConfigSetting): SettingEntry {

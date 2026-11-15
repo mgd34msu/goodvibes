@@ -116,6 +116,8 @@ const INSTALL_RESULT_SCHEMA = objectSchema({
   configured: objectSchema({
     set: { type: 'array', items: objectSchema({ key: STRING_SCHEMA, value: STRING_SCHEMA }, ['key', 'value']) },
     skipped: { type: 'array', items: objectSchema({ key: STRING_SCHEMA, reason: STRING_SCHEMA }, ['key', 'reason']) },
+    // Keys whose earlier value the install replaced, with what it held before.
+    superseded: { type: 'array', items: objectSchema({ key: STRING_SCHEMA, previousValue: STRING_SCHEMA, value: STRING_SCHEMA }, ['key', 'previousValue', 'value']) },
   }, ['set', 'skipped']),
 }, ['provisioned', 'platform', 'tts', 'stt', 'components', 'configured']);
 
@@ -204,6 +206,8 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       'One-act setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
     category: 'health',
     scopes: ['write:config'],
+    // Downloads and installs executables and rewrites voice.* config: admin, like config.set.
+    access: 'admin',
     http: { method: 'POST', path: '/api/voice/local/install' },
     inputSchema: objectSchema({}, []),
     outputSchema: INSTALL_RESULT_SCHEMA,
@@ -246,6 +250,8 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
       + 'boot attempt and a user asking, join one download instead of racing for the same files.',
     category: 'health',
     scopes: ['write:config'],
+    // Downloads and installs executables and rewrites voice.* config: admin, like config.set.
+    access: 'admin',
     http: { method: 'POST', path: '/api/voice/wake/provision' },
     inputSchema: objectSchema({}, []),
     outputSchema: WAKE_PROVISION_RESULT_SCHEMA,

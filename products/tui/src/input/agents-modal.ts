@@ -22,6 +22,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
@@ -76,8 +77,12 @@ export interface AgentsModalDeps {
   readonly spawn?: FleetSpawn | null;
   readonly configManager?: ConfigManager | null;
   readonly hosted?: HostedSessionFeed;
-  /** Send a line to the hosted session (/hosted say). */
-  readonly steerHosted?: (text: string) => void;
+  /**
+   * Send a line to the hosted session (/hosted say). A returned promise is
+   * awaited: `{ ok: false }` or a rejection keeps the draft and shows the
+   * error; a plain return (nothing to await) counts as sent.
+   */
+  readonly steerHosted?: (text: string) => void | Promise<void | { readonly ok: boolean; readonly error?: string }>;
   /** This session's own cost (the "you" half of the header), or null when unpriced. */
   readonly sessionCost?: () => number | null;
   readonly confirm?: (options: ConfirmOptions) => Promise<boolean>;
@@ -110,6 +115,7 @@ export class AgentsModal implements SurfaceModal {
   /** The full-height view of the hosted session is open. */
   hostedFull = false;
   steer: { readonly id: string; draft: string } | null = null;
+  private hostedSending = false;
   status: AgentsText | null = null;
   private receiptStatus: { nodeId: string; messageId: string; label: string; status: AgentsText } | null = null;
   readonly stopTracker = new FleetStopTracker();
@@ -343,9 +349,35 @@ export class AgentsModal implements SurfaceModal {
     const text = steer.draft.trim();
     if (!text) { this.steer = null; return; }
     if (steer.id === HOSTED_ID) {
-      this.steer = null;
-      this.deps.steerHosted?.(text);
-      this.say('Sent to the hosted session.');
+      if (this.hostedSending) return;
+      let pending: ReturnType<NonNullable<AgentsModalDeps['steerHosted']>>;
+      try {
+        pending = this.deps.steerHosted?.(text);
+      } catch (error) {
+        this.say(`Not sent to the hosted session: ${summarizeError(error)}`, 'error');
+        return;
+      }
+      if (pending === undefined || typeof (pending as PromiseLike<unknown>).then !== 'function') {
+        this.steer = null;
+        this.say('Sent to the hosted session.');
+        return;
+      }
+      this.hostedSending = true;
+      void (pending as Promise<void | { readonly ok: boolean; readonly error?: string }>).then(
+        (outcome) => outcome && outcome.ok === false ? (outcome.error ?? 'the daemon did not accept it') : null,
+        (error: unknown) => summarizeError(error),
+      ).then((failure) => {
+        this.hostedSending = false;
+        if (this.closed || this.steer !== steer) return;
+        if (failure === null) {
+          this.steer = null;
+          this.say('Sent to the hosted session.');
+        } else {
+          // The draft stays so nothing typed is lost.
+          this.say(`Not sent to the hosted session: ${failure}`, 'error');
+        }
+        this.deps.requestRender();
+      });
       return;
     }
     const submittedKind = this.findNode(steer.id)?.kind;
@@ -692,6 +724,7 @@ export class AgentsModal implements SurfaceModal {
     const parts = [`${snapshot.runningCount} running`];
     if (failed > 0) parts.push(`${failed} failed`);
     if (blocked > 0) parts.push(`${blocked} waiting on you`);
+    if (snapshot.daemonPartial) parts.push(`daemon fleet is partial: ${snapshot.daemonPartial.shown} of ${snapshot.daemonPartial.total}`);
     // The read model sums known leaf readings, not a completeness guarantee:
     // absent/unpriced costs are omitted, while a recorded zero stays real.
     // Keep that qualified amount before the secondary session cost so it

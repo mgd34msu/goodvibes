@@ -18,10 +18,7 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.j
 import { createEventEnvelope } from '../platform/src/platform/runtime/event-envelope.js';
 import type { AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 import { AgentCapacityError } from '../platform/src/platform/tools/agent/capacity-error.js';
-
-async function flushMicrotasks(rounds = 12): Promise<void> {
-  for (let i = 0; i < rounds; i++) await Promise.resolve();
-}
+import { waitFor } from './_helpers/test-timeout.js';
 
 function makeRecord(overrides: Partial<AgentRecord> & { id: string; task: string }): AgentRecord {
   return {
@@ -163,7 +160,7 @@ function makeHarness(projectRoot: string): Harness {
   });
 
   function makeEngine(depsOverrides: Partial<OrchestrationEngineDeps> = {}): ReturnType<typeof createOrchestrationEngine> {
-    return createOrchestrationEngine({
+    const engine = createOrchestrationEngine({
       agentManager,
       configManager,
       runtimeBus: bus,
@@ -178,6 +175,8 @@ function makeHarness(projectRoot: string): Harness {
       skipClaimVerification: true,
       ...depsOverrides,
     });
+    engines.push(engine);
+    return engine;
   }
 
   function completeAgent(agentId: string, output: string): void {
@@ -230,6 +229,8 @@ function gatePhase(capacity = 1, gates: readonly string[] = []): PhaseSpec {
 
 let projectRoot: string;
 let h: Harness;
+// Every engine a test starts is disposed after it, so a failed assertion leaves no timers or bus listeners behind.
+const engines: Array<ReturnType<typeof createOrchestrationEngine>> = [];
 
 beforeEach(() => {
   projectRoot = mkdtempSync(join(tmpdir(), 'orch-engine-'));
@@ -242,6 +243,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const engine of engines.splice(0)) engine.dispose();
   rmSync(projectRoot, { recursive: true, force: true });
 });
 
@@ -261,17 +263,16 @@ describe('scheduler: pipeline flow, no pairwise binding', () => {
     const ws = engine.createWorkstream({ title: 'ordinary contract work', phases: [enginePhase()], items: [{ id: 'queued', title: 'queued', task: 'preserve and finish' }] });
     try {
       engine.start(ws.id);
-      await flushMicrotasks(30);
+      await waitFor(() => ws.items[0]!.state === 'awaiting-capacity');
       expect(ws.items[0]!.state).toBe('awaiting-capacity');
       expect(h.spawnedTasks).toEqual([]);
       expect(failures).toEqual([]);
       expect(ws.items[0]!.visits.size).toBe(0);
       full = false;
-      const until = Date.now() + 2000;
-      while (h.spawnedTasks.length === 0 && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 10));
+      await waitFor(() => h.spawnedTasks.length === 1);
       expect(h.spawnedTasks).toHaveLength(1);
       h.completeAgent(ws.items[0]!.agentId!, engineerReportOutput('Finished the queued work'));
-      await flushMicrotasks(40);
+      await waitFor(() => ws.items[0]!.state === 'passed');
       expect(ws.items[0]!.state).toBe('passed');
       expect(failures).toEqual([]);
     } finally { engine.dispose(); }
@@ -282,7 +283,7 @@ describe('scheduler: pipeline flow, no pairwise binding', () => {
     const items: WorkItemSpec[] = [{ id: 'item-a', title: 'A', task: 'do A' }, { id: 'item-b', title: 'B', task: 'do B' }];
     const ws = engine.createWorkstream({ title: 'ws', phases: [enginePhase(), gatePhase(1)], items });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
 
     // Both engineer slots (capacity 2 would be needed for true concurrency,
     // but capacity 1 here proves sequencing instead), bump capacity to 2
@@ -295,7 +296,7 @@ describe('scheduler: pipeline flow, no pairwise binding', () => {
       items,
     });
     engine2.start(ws2.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 3);
 
     const itemA = ws2.items.find((i) => i.id === 'item-a')!;
     const itemB = ws2.items.find((i) => i.id === 'item-b')!;
@@ -308,7 +309,7 @@ describe('scheduler: pipeline flow, no pairwise binding', () => {
     // single second-phase slot without waiting on A (no pairwise binding of
     // one phase's agent to another's).
     h.completeAgent(itemB.agentId!, engineerReportOutput('did B'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'in-phase' && itemB.currentPhaseId === ws2.phases[1]!.id && h.spawnedTasks.length === 4);
 
     expect(itemB.state).toBe('in-phase');
     expect(itemB.currentPhaseId).toBe(ws2.phases[1]!.id);
@@ -319,13 +320,13 @@ describe('scheduler: pipeline flow, no pairwise binding', () => {
     // A finishes next, the second-phase slot is occupied by B, so A must wait
     // (proves capacity is enforced, not bypassed).
     h.completeAgent(itemA.agentId!, engineerReportOutput('did A'));
-    await flushMicrotasks();
+    await waitFor(() => itemA.state === 'awaiting-capacity');
     expect(itemA.state).toBe('awaiting-capacity');
     expect(itemA.currentPhaseId).toBe(ws2.phases[1]!.id);
 
     // B's gate phase passes, freeing the slot for A.
     h.completeAgent(itemB.agentId!, engineerReportOutput('checked B'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'passed' && itemA.state === 'in-phase');
     expect(itemB.state).toBe('passed');
     expect(itemA.state).toBe('in-phase');
   });
@@ -341,7 +342,7 @@ describe('budget refusal', () => {
       budget: { maxTokens: 15 },
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
 
     const itemA = ws.items.find((i) => i.id === 'item-a')!;
     const itemB = ws.items.find((i) => i.id === 'item-b')!;
@@ -355,7 +356,7 @@ describe('budget refusal', () => {
     // ceiling (10 in + 10 out = 20 >= 15), in-flight, so it finishes
     // normally; no mid-item cancel call for A.
     h.completeAgent(itemA.agentId!, engineerReportOutput('did A'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'blocked-budget');
 
     expect(itemA.state).toBe('passed');
     expect(h.cancelCalls.find((c) => c.id === itemA.agentId)).toBeUndefined();
@@ -374,12 +375,12 @@ describe('budget refusal', () => {
       budget: { maxTokens: 15 },
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
     const itemA = ws.items.find((i) => i.id === 'item-a')!;
     const itemB = ws.items.find((i) => i.id === 'item-b')!;
 
     h.completeAgent(itemA.agentId!, engineerReportOutput('did A'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'blocked-budget');
     expect(itemA.state).toBe('passed');
     expect(itemB.state).toBe('blocked-budget');
     expect(itemB.blockedReason).toBeDefined();
@@ -397,7 +398,7 @@ describe('budget refusal', () => {
     expect(h.spawnedTasks.length).toBe(2);
 
     h.completeAgent(itemB.agentId!, engineerReportOutput('did B'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'passed');
     expect(itemB.state).toBe('passed');
   });
 
@@ -410,11 +411,11 @@ describe('budget refusal', () => {
       budget: { maxTokens: 15 },
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
     const itemA = ws.items.find((i) => i.id === 'item-a')!;
     const itemB = ws.items.find((i) => i.id === 'item-b')!;
     h.completeAgent(itemA.agentId!, engineerReportOutput('did A'));
-    await flushMicrotasks();
+    await waitFor(() => itemB.state === 'blocked-budget');
     expect(itemB.state).toBe('blocked-budget');
 
     engine.updateBudget(ws.id, undefined);
@@ -437,7 +438,7 @@ describe('cancellation', () => {
       items: [{ id: 'item-a', title: 'A', task: 'do A' }, { id: 'item-b', title: 'B', task: 'do B' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 2);
 
     const itemA = ws.items.find((i) => i.id === 'item-a')!;
     const itemB = ws.items.find((i) => i.id === 'item-b')!;
@@ -455,7 +456,7 @@ describe('cancellation', () => {
     // The turn-boundary poll eventually fires AGENT_CANCELLED for A, the
     // engine must not clobber the already-terminal state.
     h.cancelAgentEvent(agentAId);
-    await flushMicrotasks();
+    await waitFor(() => !h.registeredSignals.has(agentAId));
     expect(itemA.state).toBe('failed');
 
     // B was never touched.
@@ -480,10 +481,10 @@ describe('primitive reuse', () => {
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('claims work', { filesCreated: ['does-not-exist.ts'] }));
-    await flushMicrotasks();
+    await engine.join();
 
     expect(item.state).toBe('failed');
     const results = engine.getPhaseResults(ws.id);
@@ -501,13 +502,13 @@ describe('primitive reuse', () => {
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     // This is the phase's output, not an untouched owner edit already present
     // in the actual launch-dirty snapshot.
     writeFileSync(join(projectRoot, 'real-file.ts'), 'export const x = 1;\n');
     h.completeAgent(item.agentId!, engineerReportOutput('did real work', { filesCreated: ['real-file.ts'] }));
-    await flushMicrotasks();
+    await engine.join();
 
     expect(item.state).toBe('passed');
     expect(h.commitCalls.length).toBe(1);
@@ -525,10 +526,10 @@ describe('primitive reuse', () => {
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('did real work', { filesCreated: ['real-file.ts'] }));
-    await flushMicrotasks();
+    await engine.join();
 
     expect(item.state).toBe('passed');
     expect(h.commitCalls.length).toBe(0);
@@ -559,10 +560,10 @@ describe('dual-outcome: post-gate bookkeeping never contradicts a passed phase',
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks(100);
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('did work', { filesCreated: ['f.ts'] }));
-    await flushMicrotasks(100);
+    await engine.join();
 
     // The phase passed; the item is passed, NOT failed, with the commit miss surfaced as a warning.
     expect(item.state).toBe('passed');
@@ -591,10 +592,10 @@ describe('dual-outcome: post-gate bookkeeping never contradicts a passed phase',
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks(100);
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('did work', { filesCreated: ['f.ts'] }));
-    await flushMicrotasks(100);
+    await engine.join();
 
     expect(item.state).toBe('failed');
     expect(item.failureReason).toMatch(/workspace was left unrecorded\/corrupted/i);
@@ -612,10 +613,10 @@ describe('dual-outcome: post-gate bookkeeping never contradicts a passed phase',
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks(100);
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('did work', { filesCreated: ['f.ts'] }));
-    await flushMicrotasks(100);
+    await engine.join();
 
     expect(item.state).toBe('passed');
     expect(item.warnings ?? []).toEqual([]);
@@ -632,13 +633,13 @@ describe('dual-outcome: post-gate bookkeeping never contradicts a passed phase',
       items: [{ id: 'item-a', title: 'A', task: 'do A' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks(100);
+    await waitFor(() => h.spawnedTasks.length === 1);
     const item = ws.items[0]!;
     h.completeAgent(item.agentId!, engineerReportOutput('did work', { filesCreated: ['f.ts'] }));
-    await flushMicrotasks(100);
+    await waitFor(() => item.currentPhaseId === ws.phases[1]!.id && h.spawnedTasks.length === 2);
     // The second phase requires a gate that is not configured -> terminal gate failure.
     h.completeAgent(item.agentId!, engineerReportOutput('checked'));
-    await flushMicrotasks(100);
+    await engine.join();
 
     expect(item.state).toBe('failed');
     const results = engine.getPhaseResults(ws.id);
@@ -696,7 +697,7 @@ describe('resume prefix replay', () => {
     const imported = freshEngine.importWorkstream(snapshotJson!);
     expect(imported).toBe(true);
     freshEngine.start(seed.id);
-    await flushMicrotasks();
+    await waitFor(() => freshHarness.spawnedTasks.length === 1);
 
     // Only ONE spawn, for phase 2. Phase 1 is never re-spawned.
     expect(freshHarness.spawnedTasks.length).toBe(1);
@@ -741,7 +742,7 @@ describe('resume reconciliation: the exact restart-mid-phase blocker', () => {
       items: [{ id: 'item-a', title: 'A', task: 'do A' }, { id: 'item-b', title: 'B', task: 'do B' }],
     });
     engine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => h.spawnedTasks.length === 1);
 
     const itemA = ws.items.find((i) => i.id === 'item-a')!;
     const itemB = ws.items.find((i) => i.id === 'item-b')!;
@@ -777,7 +778,7 @@ describe('resume reconciliation: the exact restart-mid-phase blocker', () => {
     expect(requeuedEvents[0]!.reason).toContain('re-queued');
 
     freshEngine.start(ws.id);
-    await flushMicrotasks();
+    await waitFor(() => freshHarness.spawnedTasks.length === 1);
 
     const resumed = freshEngine.getWorkstream(ws.id)!;
     const resumedA = resumed.items.find((i) => i.id === 'item-a')!;
@@ -803,13 +804,13 @@ describe('resume reconciliation: the exact restart-mid-phase blocker', () => {
     // the slot for B, which claims it immediately (same reactive scheduler
     // as every other test in this file).
     freshHarness.completeAgent(resumedA.agentId!, engineerReportOutput('did A (resumed)'));
-    await flushMicrotasks();
+    await waitFor(() => resumedA.state === 'passed' && resumedB.state === 'in-phase' && resumedB.agentId !== undefined);
     expect(resumedA.state).toBe('passed');
     expect(resumedB.state).toBe('in-phase');
     expect(resumedB.agentId).toBeDefined();
 
     freshHarness.completeAgent(resumedB.agentId!, engineerReportOutput('did B'));
-    await flushMicrotasks();
+    await waitFor(() => resumedB.state === 'passed');
     expect(resumedB.state).toBe('passed');
 
     // The workstream reaches terminal, the entire point of the fix.
@@ -836,5 +837,29 @@ describe('resume reconciliation: the exact restart-mid-phase blocker', () => {
     expect(freshEngine.importWorkstream(snapshotJson!)).toBe(true);
     expect(events).not.toContain('item-requeued');
     expect(freshEngine.getWorkstream(ws.id)!.items[0]!.state).toBe('awaiting-capacity');
+  });
+});
+
+describe('item lifecycle guards', () => {
+  test('a run that throws after kill() cannot auto-retry the killed item back to pending', async () => {
+    const engine = h.makeEngine({
+      maxItemRetries: 2,
+      agentManager: { ...h.agentManager, releaseCancellationSignal: () => { throw new Error('release blew up after kill'); } },
+    });
+    const events: OrchestrationEvent[] = [];
+    engine.on(event => events.push(event));
+    const ws = engine.createWorkstream({ title: 'ws', phases: [enginePhase()], items: [{ id: 'a', title: 'A', task: 'do A' }] });
+    engine.start(ws.id);
+    await waitFor(() => h.spawnedTasks.length === 1);
+    const item = ws.items[0]!;
+    expect(item.state).toBe('in-phase');
+    expect(engine.kill(item.id)).toBe(true);
+    expect(item.state).toBe('failed');
+    h.cancelAgentEvent(item.agentId!);
+    // The throwing release is the run's last step: once the engine has settled, no retry can still arrive.
+    await engine.join();
+    expect(item.state).toBe('failed');
+    expect(events.filter(event => event.type === 'item-retried')).toHaveLength(0);
+    expect(item.retryCount ?? 0).toBe(0);
   });
 });

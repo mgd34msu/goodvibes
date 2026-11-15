@@ -3,7 +3,7 @@ import { type Line, type Cell, createStyledCell } from '@goodvibes-jev/engine/pl
 import { safeTerminalLink } from '../ansi-sanitize.js';
 import { stringToLine } from './string-to-line.js';
 import { renderCodeBlock } from './code-block.js';
-import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
+import { expandTabs, getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTheme, activeTokens } from './theme.js';
 import { renderInlineMarkdown, type InlineToken } from './markdown-inline.js';
 import { isLikelyTableHeaderRow, isLikelyTableSeparatorRow, renderTable } from './markdown-table.js';
@@ -64,6 +64,7 @@ export function renderMarkdownTracked(
   let codeBlockLines: string[] = [];
   let fenceChar = '`';
   let fenceIndent = 0;
+  let fenceLength = 3;
   // Prose starts at column 5 (the Measurements table's text column, the
   // same column user-message and composer text use) and wraps before
   // width-5, so the right edge never reaches a fill's padding band.
@@ -92,21 +93,28 @@ export function renderMarkdownTracked(
   };
 
   for (let i = 0; i < rawLines.length; i++) {
-    const raw = requireDefined(rawLines[i]);
+    const original = requireDefined(rawLines[i]);
+    // Prose is laid out cell by cell, where a tab has no width; code keeps
+    // its tabs (a copied block must paste back unchanged).
+    const raw = expandTabs(original);
 
-    const fenceMatch = raw.match(/^(\s*)(```|~~~)\s*([\w-]*)/);
+    const fenceMatch = raw.match(/^(\s*)(`{3,}|~{3,})\s*([\w-]*)/);
     if (fenceMatch && !inCodeBlock) {
       if (inQuote) { inQuote = false; closeBlock(); }
       inCodeBlock = true;
       fenceIndent = requireDefined(fenceMatch[1]).length;
       fenceChar = requireDefined(requireDefined(fenceMatch[2])[0]); // '`' or '~'
+      fenceLength = requireDefined(fenceMatch[2]).length;
       codeBlockLang = fenceMatch[3] || '';
       codeBlockLines = [];
       continue;
     }
     if (inCodeBlock) {
-      // Close fence: same char, same or less indentation, at least 3 of that char
-      const closeFenceRe = new RegExp(`^\\s{0,${fenceIndent}}${fenceChar === '`' ? '```' : '~~~'}`);
+      // Close fence: same char, same or less indentation, at least as many
+      // chars as the opener, nothing after them. A shorter run or one with an
+      // info string ("```js") is content, so a fenced example nested in a
+      // longer fence stays inside it.
+      const closeFenceRe = new RegExp(`^\\s{0,${fenceIndent}}${fenceChar === '`' ? '`' : '~'}{${fenceLength},}\\s*$`);
       if (closeFenceRe.test(raw)) {
         openBlock();
         const blockStart = lines.length;
@@ -126,8 +134,9 @@ export function renderMarkdownTracked(
         codeBlockLines = [];
         fenceChar = '`';
         fenceIndent = 0;
+        fenceLength = 3;
       } else {
-        codeBlockLines.push(raw);
+        codeBlockLines.push(original);
       }
       continue;
     }
@@ -224,7 +233,7 @@ export function renderMarkdownTracked(
       const tableRows: string[] = [];
       let j = i;
       while (j < rawLines.length && requireDefined(rawLines[j]).includes('|')) {
-        tableRows.push(requireDefined(rawLines[j]));
+        tableRows.push(expandTabs(requireDefined(rawLines[j])));
         j++;
       }
       i = j - 1;

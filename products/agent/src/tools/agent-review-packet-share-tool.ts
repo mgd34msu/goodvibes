@@ -194,19 +194,19 @@ export function createAgentReviewPacketShareTool(
           },
           channel: {
             type: 'string',
-            description: 'Optional channel target. Use exactly one target field.',
+            description: 'Delivery target. Exactly one of channel, route, webhook or link is required.',
           },
           route: {
             type: 'string',
-            description: 'Optional route id or route:label. Use one target.',
+            description: 'Delivery target: route id or route:label. Exactly one of channel, route, webhook or link is required.',
           },
           webhook: {
             type: 'string',
-            description: 'Optional http(s) webhook URL. Use one target.',
+            description: 'Delivery target: http(s) webhook URL. Exactly one of channel, route, webhook or link is required.',
           },
           link: {
             type: 'string',
-            description: 'Optional link delivery target. Use one target.',
+            description: 'Delivery target: link. Exactly one of channel, route, webhook or link is required.',
           },
           confirm: {
             type: 'boolean',
@@ -228,6 +228,10 @@ export function createAgentReviewPacketShareTool(
       try { effect(); } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
       const artifactId = readString(args.archiveArtifactId);
       if (!artifactId) return failure('archiveArtifactId is required.');
+      // Checked before the outward-effect decision, which would otherwise rule on an empty target and mask this cause.
+      const targetCount = ['channel', 'route', 'webhook', 'link'].filter(name => readString(args[name])).length;
+      if (targetCount === 0) return failure('Choose one delivery target: exactly one of channel, route, webhook or link is required. Nothing was sent.');
+      if (targetCount > 1) return failure('Choose exactly one delivery target: channel, route, webhook and link are mutually exclusive. Nothing was sent.');
       let summary: ReviewPacketArchiveSummary;
       let assertSource: () => void;
       try {
@@ -241,6 +245,8 @@ export function createAgentReviewPacketShareTool(
       }
       const title = readString(args.title) ?? 'GoodVibes Agent review packet';
       const message = buildShareMessage(summary, readString(args.message));
+      // Set just before the delivery call: a throw after that point cannot say the message was not sent.
+      let deliveryStarted = false;
       try {
         const ledger = getSessionUntrustedContentLedger();
         const ledgerSnapshot = () => JSON.stringify([ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
@@ -263,7 +269,8 @@ export function createAgentReviewPacketShareTool(
           taintOptions: { signal: executionOptions?.signal, exactMatchFields: ['channel', 'route', 'webhook', 'link'] },
         });
         assertCurrent();
-        if (!decision.allowed) return failure(decision.reason ?? 'Outward effect held.');
+        if (!decision.allowed) return failure([decision.reason ?? 'Outward effect held.', decision.fix].filter(Boolean).join(' '));
+        deliveryStarted = true;
         const delivery = await deliverAgentChannelMessage(channelDeliveryRouter, {
           message,
           title,
@@ -275,7 +282,11 @@ export function createAgentReviewPacketShareTool(
         assertCurrent();
         return output(formatShareResult({ summary, delivery }));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        if (deliveryStarted) {
+          return failure(`Review packet share outcome unknown: the delivery was started and then failed (${message}). The message may have been delivered; check the destination before sharing again.`);
+        }
+        return failure(message);
       }
     },
   };

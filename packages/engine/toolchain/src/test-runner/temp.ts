@@ -9,7 +9,7 @@
  * os.tmpdir(); `bun test` never runs exit hooks, so that one is reclaimed by
  * the same sweep on a later run.
  */
-import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -43,6 +43,22 @@ export function sweepStaleTmpDirs(root: string, prefix: string, maxAgeMs: number
   }
 }
 
+/** Names the process that owns a plain-`bun test` root, so another run's sweep keeps it while that process lives. */
+export const PLAIN_ROOT_OWNER_FILE = '.owner-pid';
+
+/** True when the directory's recorded owner process is still running. A missing or unreadable record is not an owner. */
+export function plainRootOwnerAlive(directory: string): boolean {
+  try {
+    const pid = Number(readFileSync(join(directory, PLAIN_ROOT_OWNER_FILE), 'utf8').trim());
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 let fallbackRoot: string | undefined;
 
 /** The directory this process's temp dirs go under: the runner's, else its own. */
@@ -50,8 +66,9 @@ export function testTempRoot(): string {
   const supplied = process.env[TEST_TMP_ROOT_ENV];
   if (supplied) return supplied;
   if (!fallbackRoot) {
-    sweepStaleTmpDirs(tmpdir(), PLAIN_TMP_PREFIX);
+    sweepStaleTmpDirs(tmpdir(), PLAIN_TMP_PREFIX, STALE_RUN_MS, { preserve: plainRootOwnerAlive });
     fallbackRoot = realpathSync(mkdtempSync(join(tmpdir(), PLAIN_TMP_PREFIX)));
+    writeFileSync(join(fallbackRoot, PLAIN_ROOT_OWNER_FILE), String(process.pid));
   }
   return fallbackRoot;
 }

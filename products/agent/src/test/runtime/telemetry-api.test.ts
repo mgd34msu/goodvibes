@@ -152,9 +152,10 @@ describe('TelemetryApiService', () => {
 
     const firstPage = telemetry.listEventPage({ limit: 1 });
     expect(firstPage.pageInfo.hasMore).toBe(true);
-    expect(firstPage.pageInfo.nextCursor).toBe(telemetry.listEventPage({ limit: 2 }).items[1]?.id);
+    expect(firstPage.pageInfo.nextCursor).toBe(firstPage.items[0]?.id);
     const secondPage = telemetry.listEventPage({ limit: 1, cursor: firstPage.pageInfo.nextCursor });
     expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.items[0]?.id).toBe(telemetry.listEventPage({ limit: 2 }).items[1]?.id);
 
     includeRawPrompts = false;
     expect(() => telemetry.listEvents({ view: 'raw' })).toThrow('Raw telemetry is disabled');

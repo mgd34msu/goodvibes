@@ -1,5 +1,6 @@
 import type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt } from '@goodvibes-jev/engine/daemon-api';
 import { types as nodeTypes } from 'node:util';
+import { SettingsRefusalError, refusalReasonOf, refusalText } from './settings-refusal.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
@@ -30,6 +31,18 @@ interface Entry {
 }
 const entries = new WeakMap<RemoteSettingsImportPrecondition, Entry>();
 function unavailable(): Error { return new Error('Settings import owner unavailable; fresh capture and admission required.'); }
+const PAIRING_STORE_FAULTED_TEXT = 'Settings import refused: the daemon\'s pairing token store is faulted, so paired and shared-token settings authority is held. Nothing was applied. Retrying will not help until the store is readable again; a failed revoke, rename or grant write holds until the daemon restarts.';
+/** A capture refusal that names a cause the caller can act on; anything else stays the generic refusal. */
+async function captureRefusal(response: Response): Promise<Error> {
+  if (response.redirected || response.status !== 409) return unavailable();
+  try {
+    const body: unknown = await response.json();
+    if (!record(body)) return unavailable();
+    if (body.code === 'PAIRING_STORE_FAULTED') return new SettingsRefusalError('pairing-store-faulted', PAIRING_STORE_FAULTED_TEXT);
+    const reason = refusalReasonOf(body);
+    return reason ? new SettingsRefusalError(reason, refusalText('Settings import', reason)) : unavailable();
+  } catch { return unavailable(); }
+}
 function assertSynchronous(check: (() => void) | undefined): void {
   if (!check) return;
   const result: unknown = Reflect.apply(check, undefined, []);
@@ -113,7 +126,7 @@ export async function captureRemoteSettingsImportPrecondition(endpoint: DaemonCo
     deps.signal?.throwIfAborted(); assertSynchronous(deps.assertCurrent);
     const response = await fetchImpl(`${base}/config`, { method: 'POST', headers, redirect: 'error',
       body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'capture', settings: input.settings } }), signal: wireSignal(timeoutMs, deps.signal) });
-    if (!response.ok || response.redirected) throw unavailable();
+    if (!response.ok || response.redirected) throw await captureRefusal(response);
     const payload: unknown = await response.json();
     if (!record(payload) || !exact(payload, ['settingsImportPrecondition']) || !record(payload.settingsImportPrecondition)) throw unavailable();
     const arm = payload.settingsImportPrecondition;
@@ -126,7 +139,7 @@ export async function captureRemoteSettingsImportPrecondition(endpoint: DaemonCo
         ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}) }), phase: 'ready' };
     assertSource(entry);
     const handle = Object.freeze({}) as RemoteSettingsImportPrecondition; entries.set(handle, entry); return handle;
-  } catch { throw unavailable(); }
+  } catch (error) { throw error instanceof SettingsRefusalError ? error : unavailable(); }
 }
 export function inspectRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition): RemoteSettingsImportPreconditionFacts {
   const entry = entries.get(handle); if (!entry) throw unavailable(); return entry.facts;
@@ -149,6 +162,18 @@ function validateReceipt(value: unknown, facts: RemoteSettingsImportPrecondition
   }
   return captureStrictJudgmentJson(value, unavailable) as unknown as SettingsImportPreconditionReceipt;
 }
+/** The daemon's import precondition refusals all precede any effect; only they mean "nothing was applied". */
+const REFUSAL_CODES: readonly string[] = ['SETTINGS_IMPORT_PRECONDITION_STALE', 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE', 'SETTINGS_IMPORT_PRECONDITION_INVALID', 'PAIRING_STORE_FAULTED'];
+/** Not null when the daemon refused before any effect; `reason` is set when it said why. */
+async function refusedBeforeEffect(response: Response): Promise<{ readonly reason?: ReturnType<typeof refusalReasonOf> } | null> {
+  if (response.redirected || (response.status !== 409 && response.status !== 400)) return null;
+  try {
+    const body: unknown = await response.json();
+    if (!record(body) || !exact(body, Object.hasOwn(body, 'reason') ? ['error', 'code', 'reason'] : ['error', 'code']) || !REFUSAL_CODES.includes(String(body.code))) return null;
+    const reason = refusalReasonOf(body);
+    return reason ? { reason } : {};
+  } catch { return null; }
+}
 export async function applyRemoteSettingsImportPrecondition(handle: RemoteSettingsImportPrecondition,
   restriction: RemoteSettingsImportRestriction = {}): Promise<SettingsImportPreconditionReceipt> {
   assertRemoteSettingsImportPrecondition(handle); restriction.signal?.throwIfAborted(); assertSynchronous(restriction.assertCurrent);
@@ -160,7 +185,10 @@ export async function applyRemoteSettingsImportPrecondition(handle: RemoteSettin
     const response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
       body: JSON.stringify({ settingsImportPrecondition: { version: 1, action: 'apply', reference: entry.reference } }),
       signal: wireSignal(entry.timeoutMs, restriction.signal ? (entry.restriction.signal ? AbortSignal.any([restriction.signal, entry.restriction.signal]) : restriction.signal) : entry.restriction.signal) });
-    if (!response.ok || response.redirected) return unknown;
+    if (!response.ok || response.redirected) {
+      const refused = await refusedBeforeEffect(response);
+      return refused ? Object.freeze({ ...unknown, refused: true as const, ...(refused.reason ? { refusalReason: refused.reason } : {}) }) : unknown;
+    }
     const payload: unknown = await response.json();
     if (!record(payload) || !exact(payload, ['settingsImportPrecondition']) || !record(payload.settingsImportPrecondition)) return unknown;
     const arm = payload.settingsImportPrecondition;

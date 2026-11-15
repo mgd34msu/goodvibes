@@ -2,7 +2,7 @@
  * Model picker UI data types.
  *
  * Purely data-oriented, no rendering logic. These types are produced by
- * ModelPickerDataProvider and consumed by renderers/components.
+ * enrichModelEntries and consumed by renderers/components.
  */
 import type { ContextWindowOrigin } from '../../../providers/registry-types.js';
 import type { ProviderStatus } from '../../store/domains/provider-health.js';
@@ -147,22 +147,4 @@ export interface ModelPickerGroup {
   readonly label: string;
   /** Entries belonging to this group, sorted by health then favorites. */
   readonly entries: readonly ModelPickerEntry[];
-}
-
-/**
- * Complete data snapshot produced by ModelPickerDataProvider.
- */
-export interface ModelPickerData {
-  /** All enriched model entries (flat, pre-sorted). */
-  readonly entries: readonly ModelPickerEntry[];
-  /** Grouped view for rendering with section headers. */
-  readonly groups: readonly ModelPickerGroup[];
-  /** IDs of providers that are currently degraded. */
-  readonly degradedProviderIds: readonly string[];
-  /** IDs of providers that are currently unavailable. */
-  readonly unavailableProviderIds: readonly string[];
-  /** Registry key currently at the head of the fallback chain (active model). */
-  readonly activeModelId: string;
-  /** Epoch ms when this snapshot was produced. */
-  readonly snapshotAt: number;
 }

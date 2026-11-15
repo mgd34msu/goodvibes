@@ -124,6 +124,12 @@ export class NativeWorkExecutionControls {
       if (!current()) return;
       const result = await binding.client[action](identity, { signal: controller.signal });
       if (!current()) return;
+      // The retained identity pins the attempt, not its revisions. A status read of that same, still-current
+      // attempt carries the host's current revisions, so a later cancel is not refused as stale by revisions
+      // that advanced while it ran. A different attempt id is never adopted here.
+      if (action === 'status' && result.currentAttempt && result.attemptId === identity.attemptId && result.currentRevision) {
+        this.observed.set(workId, { ...identity, expectedRevision: result.currentRevision });
+      }
       this.state = { workId, action, busy: false, snapshot: result, message: resultMessage(result) };
       this.changed();
       return current() ? this.state : undefined;
@@ -152,7 +158,7 @@ export function nativeWorkExecutionLines(state: NativeWorkExecutionState | undef
     `Current attempt: ${snapshot.currentAttempt} · stale: ${snapshot.stale}`);
   if (snapshot.kind !== 'execution') return lines;
   if (snapshot.receipt) lines.push(`Receipt: contract ${snapshot.receipt.contractId} · owner ${snapshot.receipt.ownerAgentId}`);
-  if (snapshot.settlement) lines.push(`Verification publication: ${snapshot.settlement.state}${snapshot.settlement.evidenceId ? ` · evidence ${snapshot.settlement.evidenceId}` : ''}`);
+  if (snapshot.settlement) lines.push(`Verification publication: ${snapshot.settlement.state}${snapshot.settlement.evidenceId ? ` · evidence ${snapshot.settlement.evidenceId}` : ''}${snapshot.settlement.reason ? ` · reason ${snapshot.settlement.reason}` : ''}`);
   const progress = snapshot.progress;
   if (progress) lines.push(`Progress: ${progress.status} · semantic ${progress.semanticState ?? 'none'} · stage ${progress.stage ?? 'none'} · retrying ${progress.retrying}`,
     `Units: ${progress.units.passed}/${progress.units.total} passed · ${progress.units.failed} failed`,

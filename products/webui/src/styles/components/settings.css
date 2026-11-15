@@ -250,10 +250,6 @@
   font-size: var(--text-sm);
 }
 
-.settings-advanced {
-  margin-top: var(--space-4);
-}
-
 /* Phone: a row's control moves under its text. */
 @media (max-width: 899px) {
   .settings-field {

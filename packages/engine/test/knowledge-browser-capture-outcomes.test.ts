@@ -103,6 +103,37 @@ describe('browser capture and compilation outcomes', () => {
     expect(f.store.listSources()).toHaveLength(1);
   });
 
+  test('request metadata is recorded on the browser sources it imports, beside what the run observed', async () => {
+    const f = await fixture();
+    const result = await ingestBrowserKnowledge(f.context, { ...f.options, metadata: { originSurface: 'synthetic-agent', browserObservationCount: 99 } });
+    const source = result.capturedSources[0]!;
+    expect(source.metadata.originSurface).toBe('synthetic-agent');
+    // What the run observed itself is not something a caller can overwrite.
+    expect(source.metadata.browserObservationCount).toBe(1);
+  });
+
+  test('the batch ingest routes hand the caller\'s metadata object to the service, and drop one that is not an object', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const record = (input: Record<string, unknown>) => { seen.push(input); return Promise.resolve({}); };
+    const handlers = createDaemonKnowledgeRouteHandlers({
+      requireAdmin: () => null,
+      configManager: { get: () => false },
+      parseJsonBody: async (request: Request) => request.json(),
+      parseOptionalJsonBody: async (request: Request) => request.json(),
+      knowledgeService: { importBookmarksFromFile: record, importUrlsFromFile: record, ingestConnectorInput: record, syncBrowserHistory: record },
+    } as unknown as DaemonKnowledgeRouteContext);
+    const post = (body: Record<string, unknown>) => new Request('https://daemon.invalid/x', { method: 'POST', body: JSON.stringify(body) });
+    const origin = { originSurface: 'synthetic-agent' };
+    await handlers.postKnowledgeImportBookmarks(post({ path: '/b.html', metadata: origin }));
+    await handlers.postKnowledgeImportUrls(post({ path: '/u.txt', metadata: origin }));
+    await handlers.postKnowledgeIngestConnector(post({ connectorId: 'url-list', content: 'x', metadata: origin }));
+    await handlers.postKnowledgeSyncBrowserHistory(post({ metadata: origin }));
+    expect(seen.map((input) => input.metadata)).toEqual([origin, origin, origin, origin]);
+    seen.length = 0;
+    await handlers.postKnowledgeImportUrls(post({ path: '/u.txt', metadata: 'not an object' }));
+    expect('metadata' in seen[0]!).toBe(false);
+  });
+
   test('alias hold reports retained capture, preserves rich evidence and retries the same source', async () => {
     const f = await fixture();
     const retained = await retainRichSource(f);

@@ -1,4 +1,3 @@
-/** Source regressions authored during coding; execution remains deferred. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -7,6 +6,9 @@ import { nativeReaderCapabilities } from '../../platform/src/platform/runtime/se
 import { inspectTerminalReaderArtifact, recordTerminalReaderArtifact, retainTerminalReaderCohort, verifyTerminalReaderArtifact } from '../../toolchain/src/lib/client-reader-artifact.js';
 import { retainNativeArtifactFiles, nativeArtifactPins } from '../../toolchain/src/lib/retained-native-artifact-files.js';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
+
+// The fixture is a shell script that prints the linux-x64 reader profile.
+const linuxX64 = process.platform === 'linux' && process.arch === 'x64';
 
 function fixture(pinPayloads = true) {
   const directory = makeProjectTempDir('terminal-reader-producer'); mkdirSync(directory, { recursive: true });
@@ -28,8 +30,7 @@ function fixture(pinPayloads = true) {
     version: '3.1.2', target: 'linux-x64' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40) } };
 }
 
-test('native producer binds its compiled profile to the exact source and already pinned cohort', () => {
-  if (process.platform !== 'linux' || process.arch !== 'x64') return;
+test.skipIf(!linuxX64)('native producer binds its compiled profile to the exact source and already pinned cohort', () => {
   const f = fixture(); recordTerminalReaderArtifact(f.input);
   const stored = JSON.parse(readFileSync(join(f.directory, 'reader-ci-artifact.json'), 'utf8'));
   expect(stored).toMatchObject({ schema: 1, packageName: '@goodvibes-jev/tui', version: '3.1.2', readers: f.readers, files: f.input.files });
@@ -39,8 +40,7 @@ test('native producer binds its compiled profile to the exact source and already
   expect(() => verifyTerminalReaderArtifact(f.input)).toThrow('differs');
 });
 
-test('a physical replacement after producer pinning cannot run or receive new reader evidence', () => {
-  if (process.platform !== 'linux' || process.arch !== 'x64') return;
+test.skipIf(!linuxX64)('a physical replacement after producer pinning cannot run or receive new reader evidence', () => {
   // The original cohort guard rejects before reading any supplied pin.
   const f = fixture(false); writeFileSync(join(f.directory, f.asset), 'Different program');
   expect(() => inspectTerminalReaderArtifact(f.input)).toThrow('changed'); expect(existsSync(f.marker)).toBe(false);
@@ -48,8 +48,7 @@ test('a physical replacement after producer pinning cannot run or receive new re
 });
 
 
-test('a public pin DTO with a no-op callback cannot decorate an actual compiled reader with forged bytes', () => {
-  if (process.platform !== 'linux' || process.arch !== 'x64') return;
+test.skipIf(!linuxX64)('a public pin DTO with a no-op callback cannot decorate an actual compiled reader with forged bytes', () => {
   const f = fixture();
   const files = f.input.files.map((file, index) => index === 0 ? { ...file, sha256: '0'.repeat(64) } : file);
   expect(() => inspectTerminalReaderArtifact({ ...f.input, files, assertCurrent() {} })).toThrow('actual original payloads');
@@ -57,8 +56,7 @@ test('a public pin DTO with a no-op callback cannot decorate an actual compiled 
   expect(existsSync(join(f.directory, 'reader-ci-artifact.json'))).toBe(false);
 });
 
-test('only genuine original pins skip repeated local hashing; a foreign or copied owner never does', () => {
-  if (process.platform !== 'linux' || process.arch !== 'x64') return;
+test.skipIf(!linuxX64)('only genuine original pins skip repeated local hashing; a foreign or copied owner never does', () => {
   const f = fixture();
   const original = f.retained;
   if (!original) throw new Error('Expected original fixture pins');

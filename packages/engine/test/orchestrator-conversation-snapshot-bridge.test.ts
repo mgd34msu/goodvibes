@@ -364,8 +364,7 @@ test('native context owner failure prevents the first provider transmission', as
     const provider: LLMProvider = { name: 'test-provider', models: ['test-model'], async chat() { calls++; return { content: 'Unexpected', toolCalls: [], usage: { inputTokens: 0, outputTokens: 0 }, stopReason: 'completed' }; } };
     const record = makeAgentRecord({ id: 'ag-context-denied', task: 'Do that.' });
     await runAgentTask({ ...makeMinimalRunContext({ workingDirectory: dir, provider }), autonomousSource() { throw new Error('Native context owner revoked password=SYNTHETIC_PRIVATE_CONTEXT'); } }, record);
-    expect(calls).toBe(0); expect(record.status).toBe('failed'); expect(record.error).toBe('Native context owner revoked password=SYNTHETIC_PRIVATE_CONTEXT');
-
+    expect(calls).toBe(0); expect(record.status).toBe('failed'); expect(record.error).toBe('[REDACTED]');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

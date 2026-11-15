@@ -142,9 +142,6 @@ export interface GoodVibesConfig {
     contractMessages: 'panel' | 'conversation' | 'both';
   };
   tts: TtsConfig;
-  release: {
-    channel: 'stable' | 'preview';
-  };
   automation: AutomationConfig;
   controlPlane: ControlPlaneConfig;
   httpListener: HttpListenerRuntimeConfig;
@@ -311,7 +308,6 @@ export type ConfigKey =
   | 'tts.llmProvider'
   | 'tts.llmModel'
   | 'tts.speed'
-  | 'release.channel'
   | PaymentsConfigKey
   | DaemonProcessConfigKey
   | 'danger.httpListener'
@@ -457,6 +453,7 @@ export type ConfigKey =
   | 'surfaces.msteams.enabled'
   | 'surfaces.msteams.appId'
   | 'surfaces.msteams.appPassword'
+  | 'surfaces.msteams.webhookSecret'
   | 'surfaces.msteams.tenantId'
   | 'surfaces.msteams.serviceUrl'
   | 'surfaces.msteams.botId'
@@ -470,11 +467,13 @@ export type ConfigKey =
   | 'surfaces.mattermost.enabled'
   | 'surfaces.mattermost.baseUrl'
   | 'surfaces.mattermost.botToken'
+  | 'surfaces.mattermost.webhookSecret'
   | 'surfaces.mattermost.teamId'
   | 'surfaces.mattermost.defaultChannelId'
   | 'surfaces.matrix.enabled'
   | 'surfaces.matrix.homeserverUrl'
   | 'surfaces.matrix.accessToken'
+  | 'surfaces.matrix.webhookSecret'
   | 'surfaces.matrix.userId'
   | 'surfaces.matrix.defaultRoomId'
   // The daemon's own mailbox and calendar (schema-domain-daemon-mailbox.ts).

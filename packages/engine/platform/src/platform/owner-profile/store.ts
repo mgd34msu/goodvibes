@@ -21,6 +21,7 @@ import {
   appendProse,
   forget as forgetLines,
   forgetProseByText,
+  ProfileChangedDuringWriteError,
   persistProfileText,
   profileTextFromLines,
   setField,
@@ -83,6 +84,12 @@ export class OwnerProfileStore {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private reloading = false;
+  /** A change event arrived while a reload was already reading; one more reload follows it. */
+  private reloadAgain = false;
+  /** Bumped each time a commit installs its own text, so a slower read that began earlier cannot replace it. */
+  private commitGeneration = 0;
+  /** The last queued commit, so in-process mutations run one at a time; null when none is running. */
+  private commitTail: Promise<void> | null = null;
   /** The stat of the file this store itself last wrote, so its own write is not a change. */
   private ownWrite: { mtimeMs: number; size: number } | null = null;
   /**
@@ -122,7 +129,14 @@ export class OwnerProfileStore {
   async load(): Promise<ProfileLoadState> {
     this.readEpoch += 1;
     this.pendingSourceChanges += 1;
-    try { return this.adoptRead(await readProfile(this.filePath), this.enabled); }
+    const generation = this.commitGeneration;
+    try {
+      const read = await readProfile(this.filePath);
+      // A write of ours that landed while this read was in flight is newer than what was read; adopting
+      // the read would put the pre-write text back. The next change event reloads whatever is on disk.
+      if (generation !== this.commitGeneration) return this.state;
+      return this.adoptRead(read, this.enabled);
+    }
     finally { this.pendingSourceChanges -= 1; }
   }
 
@@ -299,16 +313,24 @@ export class OwnerProfileStore {
   }
 
   private async reloadIfChanged(): Promise<void> {
-    if (this.reloading) return;
-    const observed = statOf(this.filePath);
-    const own = this.ownWrite;
-    if (own !== null && own.mtimeMs === observed.mtimeMs && own.size === observed.size) return;
+    if (this.reloading) {
+      // The file changed again while the reload in flight was reading it; that read may predate the change.
+      this.reloadAgain = true;
+      return;
+    }
     this.reloading = true;
     try {
-      const state = await this.load();
-      this.options.onReload?.(state);
+      do {
+        this.reloadAgain = false;
+        const observed = statOf(this.filePath);
+        const own = this.ownWrite;
+        if (own !== null && own.mtimeMs === observed.mtimeMs && own.size === observed.size) continue;
+        const state = await this.load();
+        this.options.onReload?.(state);
+      } while (this.reloadAgain);
     } finally {
       this.reloading = false;
+      this.reloadAgain = false;
     }
   }
 
@@ -589,7 +611,7 @@ export class OwnerProfileStore {
     const options = Object.freeze({ ...input });
     if (!options.assertCurrent && !options.signal && !options.delegation && !options.withPublication) return undefined;
     const delegation = readProfileDelegation(options.delegation);
-    const ownerCurrent = captureMutationDescriptors(this, ['filePath', 'options', 'commit', 'commitWhilePending', 'provenanceFor']);
+    const ownerCurrent = captureMutationDescriptors(this, ['filePath', 'options', 'commit', 'commitNow', 'commitWhilePending', 'provenanceFor']);
     const filePath = this.filePath, storeOptions = this.options;
     const optionsCurrent = captureMutationDescriptors(storeOptions, ['persistIo', 'now', 'ledger']);
     const persistIo = storeOptions.persistIo;
@@ -643,8 +665,8 @@ export class OwnerProfileStore {
    *
    * ## Why this takes an operation rather than a finished edit
    *
-   * §3 says the daemon is the single writer, and that is what makes a
-   * rename-based atomic write sufficient with no lock. It is not true. The
+   * A rename-based atomic write is only sufficient with no lock if the daemon is the sole
+   * writer. It is not. The
    * OWNER is a second writer by design, §4.5 exists precisely so they can open
    * the file and change it, and a write computed from a projection loaded
    * minutes ago joins the whole document, so every line they changed in between
@@ -658,8 +680,8 @@ export class OwnerProfileStore {
    * file's stat is compared against what this store last saw; if it moved, the
    * document is re-read, re-projected, and the operation is re-run against the
    * fresh projection so the owner's edit and this write both survive. The stat is
-   * re-checked immediately before the rename, and a write that keeps losing the
-   * race is refused rather than forced.
+   * re-checked after the temp file is written and immediately before the rename, and a write that
+   * keeps losing the race is refused rather than forced.
    *
    * This is not a lock and does not claim to be. It closes the minutes-wide
    * window (a stale projection) and narrows the remaining one to the few
@@ -668,9 +690,33 @@ export class OwnerProfileStore {
    * while the daemon runs is the case this design actually has, and it is now
    * handled rather than assumed away.
    */
-  private async commit(
+  private commit(
     operate: (projection: ProfileProjection) => ProfileEditResult,
     options: { readonly replayable?: boolean; readonly lifetime?: ReturnType<OwnerProfileStore['mutationLifetime']> } = {},
+  ): Promise<ProfileWriteResult> {
+    // Two mutations in this process must not both start from the same projection: the second would
+    // rename a full text that lacks the first one's edit. Each runs only after the previous one has
+    // adopted its result, and its lifetime checks run when it really starts, not when it was queued.
+    // A write waiting its turn already counts as a pending source change, so a read taken in the gap
+    // between the write ahead of it finishing and this one starting is not current. Its own claim
+    // (taken in commitNow's first, synchronous steps) replaces this one.
+    const queued = this.commitTail !== null;
+    if (queued) this.pendingSourceChanges += 1;
+    const run = (): Promise<ProfileWriteResult> => {
+      const started = this.commitNow(operate, options);
+      if (queued) this.pendingSourceChanges -= 1;
+      return started;
+    };
+    const result = this.commitTail === null ? run() : this.commitTail.then(run);
+    const tail: Promise<void> = result.then(() => undefined, () => undefined);
+    this.commitTail = tail;
+    void tail.then(() => { if (this.commitTail === tail) this.commitTail = null; });
+    return result;
+  }
+
+  private async commitNow(
+    operate: (projection: ProfileProjection) => ProfileEditResult,
+    options: { readonly replayable?: boolean; readonly lifetime?: ReturnType<OwnerProfileStore['mutationLifetime']> },
   ): Promise<ProfileWriteResult> {
     options.lifetime?.assertCurrent();
     options.lifetime?.onWriteIntent();
@@ -690,6 +736,21 @@ export class OwnerProfileStore {
     const start = this.projection;
     if (start === null) return refusal('Your profile has not been loaded, so nothing was recorded.');
     let edit = operate(start);
+    if (!edit.ok && replayable && !this.matchesLastSeen(statOf(this.filePath))) {
+      // The refusal may rest on a projection that predates a hand edit not yet picked up by the
+      // watcher (a line he just added reads as missing); judge it against the file as it is now.
+      options.lifetime?.assertCurrent();
+      const reloaded = await this.load();
+      options.lifetime?.assertCurrent();
+      if (reloaded.kind !== 'loaded' || this.projection === null) {
+        return refusal(
+          reloaded.kind === 'unavailable'
+            ? reloaded.reason
+            : 'Your profile changed while this was being written and could not be re-read, so nothing was recorded.',
+        );
+      }
+      edit = operate(this.projection);
+    }
     if (!edit.ok) {
       return { ok: false, reason: edit.reason, changes: [], disclosure: '' };
     }
@@ -736,8 +797,12 @@ export class OwnerProfileStore {
 
     const text = profileTextFromLines(edit.lines);
     try {
-      await persistProfileText(this.filePath, text, this.options.persistIo, options.lifetime);
+      await persistProfileText(
+        this.filePath, text, this.options.persistIo, options.lifetime,
+        () => this.matchesLastSeen(statOf(this.filePath)),
+      );
     } catch (error) {
+      if (error instanceof ProfileChangedDuringWriteError) return refusal(error.message);
       logger.warn('owner-profile: write failed', {
         path: this.filePath,
         fields: edit.changes.map((change) => change.fieldId ?? change.section),
@@ -753,6 +818,7 @@ export class OwnerProfileStore {
 
     this.ownWrite = statOf(this.filePath);
     this.lastSeen = this.ownWrite;
+    this.commitGeneration += 1;
     this.adopt(parseProfileDocument({ path: this.filePath, text, exists: true }));
     logger.info('owner-profile: wrote', {
       path: this.filePath,

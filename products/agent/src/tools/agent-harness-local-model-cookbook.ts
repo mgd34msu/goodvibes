@@ -46,25 +46,25 @@ export function localModelDownloadGuidance(recipe: LocalModelRecipe, hardware: L
 export function localModelProviderRoutes(recipe: LocalModelRecipe): readonly string[] {
   if (recipe.id === 'ollama') {
     return [
-      'agent_harness mode:"open_ui_surface" surfaceId:"provider-picker" confirm:true explicitUserRequest:"Select the discovered Ollama route."',
-      'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after starting Ollama."',
+      'agent_harness mode:"open_ui_surface" surfaceId:"provider-picker" explicitUserRequest:"<the user request, in their own words>"',
+      'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     ];
   }
   if (recipe.id === 'llama-cpp') {
     return [
-      'agent_harness mode:"run_command" command:"/provider add llama-cpp-local http://127.0.0.1:8080/v1 local --yes" confirm:true explicitUserRequest:"Add a local llama.cpp OpenAI-compatible provider."',
-      'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after starting llama.cpp."',
+      'agent_harness mode:"run_command" command:"/provider add llama-cpp-local http://127.0.0.1:8080/v1 local --yes" explicitUserRequest:"<the user request, in their own words>"',
+      'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     ];
   }
   if (recipe.id === 'vllm') {
     return [
-      'agent_harness mode:"run_command" command:"/provider add vllm-local http://127.0.0.1:8000/v1 local --yes" confirm:true explicitUserRequest:"Add a local vLLM OpenAI-compatible provider."',
-      'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after starting vLLM."',
+      'agent_harness mode:"run_command" command:"/provider add vllm-local http://127.0.0.1:8000/v1 local --yes" explicitUserRequest:"<the user request, in their own words>"',
+      'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     ];
   }
   return [
-    'agent_harness mode:"run_command" command:"/provider add local-openai http://127.0.0.1:1234/v1 local --yes" confirm:true explicitUserRequest:"Add a local OpenAI-compatible provider."',
-    'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after starting the local server."',
+    'agent_harness mode:"run_command" command:"/provider add local-openai http://127.0.0.1:1234/v1 local --yes" explicitUserRequest:"<the user request, in their own words>"',
+    'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
   ];
 }
 
@@ -83,7 +83,7 @@ export function localModelSetupPlan(
     downloadGuidance: localModelDownloadGuidance(recipe, hardware),
     providerRoutes: localModelProviderRoutes(recipe),
     benchmarkPlan: localModelBenchmarkPlan(recipe),
-    confirmationBoundary: 'The plan is read-only guidance. Installs, downloads, server starts, provider edits, refreshes, comparisons, and route changes require explicit user action or confirmation.',
+    confirmationBoundary: 'The plan is read-only guidance. Installs, downloads, server starts, provider edits, refreshes, comparisons, and route changes require explicit user action and recorded effect admission.',
   };
 }
 

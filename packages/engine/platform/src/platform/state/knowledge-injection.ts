@@ -64,10 +64,14 @@ const RELEVANCE_CONCURRENCY = 8;
 
 function isInjectable(record: MemoryRecord, now: number): boolean {
   // A record OUTSIDE its temporal validity window (pending or expired) is never
-  // injected, mirrors the recall contract so both injection paths agree.
+  // injected, and neither is a flagged one (stale: merged away or superseded;
+  // contradicted), whatever its confidence, mirrors the recall contract so both
+  // injection paths agree on what is flagged. The confidence floor is this
+  // path's own.
   return isMemoryTemporallyActive(record, now)
     && record.confidence >= MIN_INJECTION_CONFIDENCE
-    && record.reviewState !== 'contradicted';
+    && record.reviewState !== 'contradicted'
+    && record.reviewState !== 'stale';
 }
 
 interface ShortlistEntry {

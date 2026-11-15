@@ -10,13 +10,6 @@ const candidate = { anyOf: [
 const inputs = [
   ['webui.voice.speech-seams', objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentRevision: ref, cursor: { type: 'integer', minimum: 0, maximum: 4095, multipleOf: 64 } }, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', 'cursor'])],
   ['webui.errors.daemon-refusal', objectSchema({ errorRef: ref }, ['errorRef'])],
-  ['webui.status.badge-tone', objectSchema({
-    vocabulary: { type: 'string', enum: ['badge', 'library-dot'] },
-    source: { anyOf: [
-      objectSchema({ kind: literal('catalog'), labelId: ref }, ['kind', 'labelId']),
-      objectSchema({ kind: literal('daemon'), statusRef: ref }, ['kind', 'statusRef']),
-    ] },
-  }, ['vocabulary', 'source'])],
   ['webui.palette.command-rank', objectSchema({
     query: { anyOf: [
       objectSchema({ kind: literal('inline'), text: ref }, ['kind', 'text']),
@@ -25,7 +18,6 @@ const inputs = [
     registryVersion: ref, candidates: { ...arraySchema(candidate), minItems: 1, maxItems: 64 },
   }, ['query', 'registryVersion', 'candidates'])],
   ['webui.mail.reply-subject', objectSchema({ subjectRef: ref }, ['subjectRef'])],
-  ['webui.pwa.install-platform', objectSchema({ userAgent: { type: 'string', minLength: 1, maxLength: 2048 }, platform: { type: 'string', maxLength: 128 }, maxTouchPoints: { type: 'integer', minimum: 0, maximum: 256 } }, ['userAgent', 'platform', 'maxTouchPoints'])],
   ['webui.models.catalog-provider-match', objectSchema({ providerId: { type: 'string', minLength: 1, maxLength: 128 }, keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['providerId', 'keys'])],
   ['webui.credentials.provider-key', objectSchema({ providerId: { type: 'string', minLength: 1, maxLength: 128 }, keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['providerId', 'keys'])],
   ['webui.settings.card-material-key', objectSchema({ keys: { ...arraySchema(ref), minItems: 1, maxItems: 64 } }, ['keys'])],
@@ -48,13 +40,8 @@ const evidence = arraySchema(objectSchema({
 const values = [
   objectSchema({ endOffsets: { ...arraySchema({ type: 'integer', minimum: 1, maximum: 32768 }), maxItems: 64 }, nextCursor: { anyOf: [{ type: 'integer', minimum: 64, maximum: 4095 }, { type: 'null' }] } }, ['endOffsets', 'nextCursor']),
   objectSchema({ session_not_found: BOOLEAN_SCHEMA, session_closed: BOOLEAN_SCHEMA, session_active: BOOLEAN_SCHEMA, session_not_local: BOOLEAN_SCHEMA, method_unknown: BOOLEAN_SCHEMA }, ['session_not_found', 'session_closed', 'session_active', 'session_not_local', 'method_unknown']),
-  { anyOf: [
-    objectSchema({ vocabulary: literal('badge'), tone: { type: 'string', enum: ['ok', 'warning', 'bad', 'neutral'] } }, ['vocabulary', 'tone']),
-    objectSchema({ vocabulary: literal('library-dot'), tone: { type: 'string', enum: ['ok', 'warn', 'bad', 'info', 'idle'] } }, ['vocabulary', 'tone']),
-  ] },
   objectSchema({ registryVersion: ref, accepted: arraySchema(objectSchema({ candidateIndex: { type: 'number', minimum: 0, maximum: 63 }, probability: p }, ['candidateIndex', 'probability'])), rejected: arraySchema({ type: 'number', minimum: 0, maximum: 63 }) }, ['registryVersion', 'accepted', 'rejected']),
   objectSchema({ alreadyReply: BOOLEAN_SCHEMA }, ['alreadyReply']),
-  objectSchema({ platform: { type: 'string', enum: ['ios-share-menu', 'other'] } }, ['platform']),
   objectSchema({ matches: arraySchema(BOOLEAN_SCHEMA) }, ['matches']),
   objectSchema({ matches: arraySchema(BOOLEAN_SCHEMA) }, ['matches']),
   objectSchema({ matches: arraySchema(BOOLEAN_SCHEMA) }, ['matches']),

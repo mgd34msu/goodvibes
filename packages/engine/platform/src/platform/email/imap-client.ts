@@ -200,6 +200,9 @@ function buildXOAuth2Token(username: string, bearerToken: string): string {
 
 
 
+/** About 700,000 UIDs; a mailbox past that is refused rather than read in part. */
+const COMPLETE_SEARCH_RESPONSE_BYTES = 8 * 1_048_576;
+
 export class ImapClient {
   private readonly options: ImapClientOptions;
   /** The one session this connection uses, from `open()` until `logout()`. */
@@ -573,7 +576,7 @@ export class ImapClient {
   /** Exact bounded UID SEARCH snapshot for protected whole-source batches. */
   async searchCompleteUids(unreadOnly: boolean): Promise<readonly number[]> {
     const frames = await this.requireReadableMailbox().commandFrames(
-      `UID SEARCH ${unreadOnly ? 'UNSEEN' : 'ALL'}`, { maxResponseBytes: 1_048_576 });
+      `UID SEARCH ${unreadOnly ? 'UNSEEN' : 'ALL'}`, { maxResponseBytes: COMPLETE_SEARCH_RESPONSE_BYTES });
     return completeSearchUids(frames);
   }
 

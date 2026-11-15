@@ -38,7 +38,7 @@ interface SignalSpec {
   readonly defaultOn: boolean;
 }
 
-/** Per-signal config keys + defaults. Kept in sync with settings-modal-data.ts. */
+/** Per-signal config keys + defaults. The settings modal repeats them; a test holds the two tables equal. */
 export const TERMINAL_NOTIFY_SIGNALS: Record<TerminalNotifySignal, SignalSpec> = {
   'approval-wait': { configKey: 'behavior.terminalNotifyApprovalWait', defaultOn: true },
   'turn-end': { configKey: 'behavior.terminalNotifyTurnEnd', defaultOn: false },

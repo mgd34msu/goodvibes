@@ -55,10 +55,14 @@ export interface VibeProjectionOptions {
   readonly scopes?: readonly MemoryScope[];
 }
 
+/** Projection order of the scopes: a narrower scope reads first. */
+const SCOPE_RANK: Readonly<Record<MemoryScope, number>> = { session: 0, project: 1, team: 2 };
+
 /**
  * Select the constraint records that make up the VIBE persona: cls 'constraint',
- * tagged VIBE_PERSONA_TAG, in an eligible scope. Ordered stably by scope (team
- * after project) then creation time so the projected block is deterministic.
+ * tagged VIBE_PERSONA_TAG, in an eligible scope, and not marked stale or contradicted
+ * (those are no longer what the user stands behind). Ordered by scope rank, then
+ * creation time, so the projected block is deterministic.
  */
 export function selectVibeRecords(
   records: readonly MemoryRecord[],
@@ -69,10 +73,8 @@ export function selectVibeRecords(
     .filter((record) => record.cls === 'constraint')
     .filter((record) => record.tags.includes(VIBE_PERSONA_TAG))
     .filter((record) => scopes.has(record.scope))
-    .sort((left, right) => {
-      if (left.scope !== right.scope) return left.scope === 'project' ? -1 : 1;
-      return left.createdAt - right.createdAt;
-    });
+    .filter((record) => record.reviewState !== 'stale' && record.reviewState !== 'contradicted')
+    .sort((left, right) => SCOPE_RANK[left.scope] - SCOPE_RANK[right.scope] || left.createdAt - right.createdAt);
 }
 
 function vibeLine(record: MemoryRecord): string {

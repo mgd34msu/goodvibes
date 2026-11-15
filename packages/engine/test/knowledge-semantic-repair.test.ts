@@ -25,7 +25,10 @@ import {
   WeakFeatureAnswerLlm,
   createStores,
   waitFor,
+  useStoreCleanup,
 } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 const answerReadings = useKnowledgeAnswerReadings({ repairProfile: semanticRepairProfileValues, repairUseful: semanticRepairUsefulValues, objectAlignment: [
   { query: 'what features does the LG 86NANO90UNA have?', objects: [
@@ -139,7 +142,6 @@ describe('semantic knowledge/wiki enrichment: web repair and subject links', () 
     expect(result?.sourceAssessments?.[0]?.confidence).toBeGreaterThanOrEqual(70);
     expect(ingested).toHaveLength(2);
     expect(ingested[0]?.knowledgeSpaceId).toBe('homeassistant:house');
-    expect(ingested[0]?.metadata?.sourceDiscovery).not.toBeUndefined(); // presence-only: sourceDiscovery field
     expect((ingested[0]?.metadata?.sourceDiscovery as Record<string, unknown>).confidence).toBeGreaterThanOrEqual(70);
     expect((ingested[0]?.metadata?.sourceDiscovery as Record<string, unknown>).confidenceReasons).toContain('semantic-relevance');
     expect(ingested[0]?.tags).toContain('semantic-gap-repair');
@@ -433,10 +435,12 @@ describe('semantic knowledge/wiki enrichment: web repair and subject links', () 
     expect(answer.answer.facts.some((fact) => fact.title === 'Display and picture specifications')).toBe(true);
     expect(answer.answer.facts.some((fact) => fact.title === 'Smart TV platform and integrations')).toBe(true);
     const reopened = new KnowledgeStore({ dbPath: store.storagePath });
-    await reopened.init();
-    for (const fact of facts) expect(reopened.getNode(fact.id)).toEqual(store.getNode(fact.id));
-    expect(reopened.getRefinementTask(result.taskIds[0]!)?.state).toBe('closed');
-    expect(reopened.listEdges().filter((edge) => edge.relation === 'describes' && edge.toId === device.id)).toHaveLength(4);
+    try {
+      await reopened.init();
+      for (const fact of facts) expect(reopened.getNode(fact.id)).toEqual(store.getNode(fact.id));
+      expect(reopened.getRefinementTask(result.taskIds[0]!)?.state).toBe('closed');
+      expect(reopened.listEdges().filter((edge) => edge.relation === 'describes' && edge.toId === device.id)).toHaveLength(4);
+    } finally { await reopened.close(); }
   });
 
   test('strict Home Graph answers admit repaired sources linked to the subject', async () => {

@@ -181,9 +181,8 @@ describe('capability-advertisement honesty (agent side)', () => {
   /**
    * channels.drafts.save (and the rest of the channels.drafts.* family) was
    * this test's other unavailable example until the daemon attached a real
-   * route behind it. channels.inbox.list is the one channels.* method still
-   * without a served route (see the file header), so it carries that role now.
-   * Asserting the drafts family here catches the same staleness if it recurs.
+   * route behind it. Asserting the drafts family here catches the same
+   * staleness if it recurs.
    */
   test('discovery: the channels drafts methods the daemon now serves render as live, not degraded', async () => {
     for (const methodId of ['channels.drafts.save', 'channels.drafts.get', 'channels.drafts.list', 'channels.drafts.delete']) {

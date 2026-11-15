@@ -1,12 +1,16 @@
-/** Native host regressions, authored and UNRUN during coding first. */
 import { expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { boundedLatestRelease, probeVersionLine, resolveSelfDirectory } from '../platform/src/platform/runtime/reachability-check.ts';
 test('a failed version process printing our banner remains unidentified', () => {
-  const root = mkdtempSync(join(tmpdir(), 'reachability-failed-version-'));
+  const root = makeProjectTempDir('reachability-failed-version');
   try {
+    // Control: the same script exiting cleanly reports its banner, so an
+    // unrunnable temp directory fails here instead of passing the next check.
+    const working = join(root, 'goodvibes-ok');
+    writeFileSync(working, '#!/bin/sh\nprintf "goodvibes 2.0.25\\n"; exit 0\n', { mode: 0o755 });
+    expect(probeVersionLine(working)).toBe('goodvibes 2.0.25');
     const path = join(root, 'goodvibes');
     writeFileSync(path, '#!/bin/sh\nprintf "goodvibes 2.0.25\\n"; exit 7\n', { mode: 0o755 });
     expect(probeVersionLine(path)).toBeUndefined();

@@ -64,6 +64,9 @@ import type {
   HostedSessionExecPosture,
   HostedWorkspaceFloor,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import {
+  containmentFor,
+} from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -155,9 +158,14 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         homeDirectory: services.homeDirectory,
         requestApproval: gateFor(workspaceRoot),
         workspaceTrust: trustFor(workspaceRoot),
+        // One store owns the rule file: a remembered approval in a hosted session
+        // is the one the gateway lists and deletes.
+        userPermissionRuleStore: services.userPermissionRuleStore,
         // A workspace with broken or absent provider credentials must degrade,
         // not take the daemon down on a create call.
         providerRegistryFactory: createLaunchTolerantProviderRegistry,
+        // Workers a hosted turn delegates to run under the turn's own posture.
+        execContainment: containmentFor(hostedExecPosture()),
       });
       try {
         // The floor's own tolerant custom load must settle before cached names

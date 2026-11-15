@@ -367,6 +367,10 @@ function createClientOptions<T extends OperatorApiClientOptions | PeerApiClientO
     ...(options.getHeaders ? { getHeaders: options.getHeaders } : {}),
     ...(options.retry ? { retry: options.retry } : {}),
     ...(options.middleware ? { middleware: options.middleware } : {}),
+    // PlatformObserver extends TransportObserver; the cast below hides that
+    // from the compiler, so the field is listed here to keep HTTP send/recv
+    // and error reports reaching the observer.
+    ...(options.observer ? { observer: options.observer } : {}),
   // The `as T` cast is necessary because the return type is generic (T extends
   // a union of ClientOptions subtypes). The object literal satisfies all members
   // of GoodVibesPlatformOptions; T is always a structural subset of that shape.
@@ -391,8 +395,8 @@ function createClientOptions<T extends OperatorApiClientOptions | PeerApiClientO
  *   authToken: process.env.GV_TOKEN,
  * });
  *
- * const agents = await platform.operator.agents.list();
- * console.log(agents);
+ * const sessions = await platform.operator.sessions.list();
+ * console.log(sessions);
  */
 export function createGoodVibesPlatform(
   options: GoodVibesPlatformOptions,
@@ -402,9 +406,7 @@ export function createGoodVibesPlatform(
   const getAuthToken = tokenStore
     ? () => tokenStore.getToken()
     : options.getAuthToken;
-  // Single normalized resolver used by realtime connectors. Invoked per-connect
-  // (not once at construction) so the latest token is always used.
-  const tokenResolver = normalizeAuthToken(getAuthToken ?? options.authToken ?? undefined);
+  const baseTokenResolver = normalizeAuthToken(getAuthToken ?? options.authToken ?? undefined);
   const fetchImpl = () => requireFetchImplementation(options.fetch);
 
   const { observer } = options;
@@ -422,6 +424,22 @@ export function createGoodVibesPlatform(
         observer,
       })
     : null;
+
+  // Single normalized resolver used by realtime connectors. Invoked per-connect
+  // (not once at construction) so the latest token is always used. With
+  // auto-refresh on, a token inside the leeway window is refreshed first, as
+  // the HTTP transport does, so a (re)connect does not present a stale bearer.
+  const tokenResolver: typeof baseTokenResolver = coordinator
+    ? async () => {
+        try {
+          await coordinator.ensureFreshToken();
+        } catch {
+          // A refresh that cannot be read leaves the token as it was; connect with it
+          // and let the daemon's answer decide, as a request would.
+        }
+        return baseTokenResolver();
+      }
+    : baseTokenResolver;
 
   // Build the merged middleware list: auto-refresh first (if enabled), then
   // consumer-provided middleware. This ensures the auto-refresh pre-flight runs

@@ -22,6 +22,7 @@ import type { BudgetCeiling, PhaseSpec, WorkItemSpec, WorkItemUsage } from '../o
 import { briefWithPreviousChecks, buildUnitBrief } from './brief.js';
 import type { ContractConfig } from './config.js';
 import { unitToolContract } from './plan-schema.js';
+import { UNIT_SELF_CHECK_TOOL } from './self-check.js';
 import type { Contract, ContractGroup, ContractUnit, UnitRole } from './types.js';
 
 /** The agent archetype for a unit's role. A design unit runs as a general agent held read-only by its tool contract. */
@@ -76,7 +77,8 @@ export function unitWorkItem(contract: Contract, group: ContractGroup, unit: Con
     contractId: contract.id,
     contractUnitId: unit.id,
     ...(unit.route === undefined ? {} : { route: unit.route }),
-    ...(tools.tools === undefined ? {} : { tools: [...tools.tools] }),
+    // A unit's agent can always read how its own criteria read; the name only takes effect where the tool is registered.
+    tools: [...(tools.tools ?? []), UNIT_SELF_CHECK_TOOL],
     restrictTools: tools.restrictTools,
     template: unitTemplate(unit.role),
     files: [...unit.files],

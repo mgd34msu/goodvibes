@@ -62,7 +62,7 @@ export function createNativeInboundSourceOwner(deps: {
   const entries = new Set<Entry>();
   const usedInputs = new Set<string>();
   let closed = false;
-  const clear = () => { closed = true; for (const entry of entries) { entry.original = undefined; delete entry.broker; entry.retired.abort(); entry.cleanup?.(); } entries.clear(); bound.clear(); };
+  const clear = () => { closed = true; for (const entry of entries) { entry.original = undefined; delete entry.broker; entry.retired.abort(); entry.cleanup?.(); } entries.clear(); bound.clear(); usedInputs.clear(); };
   deps.lifetime.addEventListener('abort', clear, { once: true });
   const assertLifetime = () => {
     if (closed || deps.lifetime.aborted) throw new NativeInboundSourceError();

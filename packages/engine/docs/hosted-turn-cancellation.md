@@ -102,7 +102,16 @@ failure where applicable). Cancellation is cooperative: a provider or tool
 that ignores its signal may remain in flight until it settles. HTTP acceptance
 must never be rendered as proof that external side effects have stopped.
 
+A cancellation that arrives after the turn's final answer is already in the
+transcript, while post-turn context maintenance (auto-compaction) or owned hooks
+are still running, stops that maintenance and those hooks. The answer stays,
+and the turn still ends with `TURN_COMPLETED`, not `TURN_CANCEL`.
+
 The session, its attachments, and future queued messages are preserved. A
+`sessions.steer` / `sessions.followUp` input delivered while the hosted session
+is busy is recorded consumed only when its own queued turn ends. If the session
+is killed before that turn runs, the input is marked failed with that reason
+instead. A
 new execution receives a fresh identity even when its prompt and transcript
 position match a cancelled pre-admission attempt, so replaying an old cancel
 cannot hit the new execution. Cancelling a queued input, cancelling one tool,

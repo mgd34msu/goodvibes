@@ -7,7 +7,7 @@ import type {
   KnowledgeSourceRecord,
   KnowledgeSourceType,
 } from '../types.js';
-import { belongsToSpace, edgeIsActive, readRecord, readStringArray } from './helpers.js';
+import { belongsToSpace, edgeIsActive, factSourceIds, readRecord, readStringArray } from './helpers.js';
 import type { HomeGraphRenderState } from './rendering.js';
 import { readHomeGraphQuality, HomeGraphQualityHeldError, type HomeGraphQualityQuestion } from './quality/reader.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
@@ -61,7 +61,18 @@ export function renderHomeGraphState(store: KnowledgeStore, spaceId: string, tit
 
 export function sourcesLinkedToNode(nodeId: string, state: HomeGraphState): KnowledgeSourceRecord[] {
   const sourceIds = sourceIdsLinkedToNodeThroughFacts(nodeId, state.edges);
-  return state.sources.filter((source) => sourceIds.has(source.id));
+  // A fact that describes the node and names its sources in its own metadata
+  // links those sources too, the same as on the device passport.
+  const factsById = new Map(state.nodes.map((node) => [node.id, node]));
+  for (const edge of state.edges) {
+    if (!edgeIsActive(edge) || edge.fromKind !== 'node' || edge.toKind !== 'node' || edge.toId !== nodeId || edge.relation !== 'describes') continue;
+    const fact = factsById.get(edge.fromId);
+    if (fact) for (const sourceId of factSourceIds(fact)) sourceIds.add(sourceId);
+  }
+  // A source that names the node through its discovery hints counts as linked,
+  // the same as on the device passport; otherwise quality raises a missing
+  // manual that the passport page says does not exist.
+  return state.sources.filter((source) => sourceIds.has(source.id) || sourceLinkedObjectIds(source).includes(nodeId));
 }
 
 export function collectLinkedObjects(

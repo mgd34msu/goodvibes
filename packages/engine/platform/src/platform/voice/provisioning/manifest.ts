@@ -22,6 +22,7 @@
  * default model is ggml-base.en, pinned to an immutable Hugging Face revision.
  */
 import type { VerifiedDownloadSpec } from './download-verified.js';
+import { voiceRuntimesAsset } from './runtime-origins.js';
 
 export type VoicePlatform = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64';
 
@@ -104,7 +105,7 @@ export const WHISPER_UNSUPPORTED_REASON =
  */
 export interface WhisperEngineManifest {
   readonly version: string;
-  readonly bundle: { readonly url: string | null; readonly bytes: number; readonly sha256: string };
+  readonly bundle: { readonly url: string | null; readonly fallbackUrls?: readonly string[] | undefined; readonly bytes: number; readonly sha256: string };
   /** Path of the whisper-cli binary inside the extracted archive. */
   readonly binaryRelPath: string;
 }
@@ -125,13 +126,13 @@ export const WHISPER_ENGINES: Partial<Record<VoicePlatform, WhisperEngineManifes
   'linux-x64': {
     version: '1.8.2',
     bundle: {
-      // Retained artifact-storage origin: these exact pinned bytes are still hosted
-      // in the former repository, not a dependency on its source or packages.
+      // The canonical release is tried first and the former repository's release,
+      // which holds the same pinned bytes, is the fallback (see runtime-origins.ts).
       // Hosted at the append-only voice-runtimes-v1 release tag (a .sha256
       // sidecar sits next to the asset). Assets there are never re-uploaded in
       // place or renamed, so this URL + pin is stable; a sideloaded copy of the
       // same bytes still verifies and installs identically (see provisioner.ts).
-      url: 'https://github.com/mgd34msu/goodvibes-sdk/releases/download/voice-runtimes-v1/goodvibes-whisper-cpp-1.8.2-linux-x64.tar.gz',
+      ...voiceRuntimesAsset('goodvibes-whisper-cpp-1.8.2-linux-x64.tar.gz'),
       bytes: 1121557,
       sha256: '80948cd00eed6b43fc7bc307424713a4b4890bc1aec11bdc560aba9357834ac5',
     },

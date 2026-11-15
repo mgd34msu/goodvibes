@@ -8,19 +8,12 @@ const recovery = new Map<string, NativeHeadlessMode>([
   ['--intake-cancel', 'cancel'],
 ]);
 
-// Mirror this product's required-value CLI flags, including their aliases.
-const requiredValueOptions = new Set([
-  '--provider', '--model', '-m',
-  '--working-dir', '--cd', '-C', '--prompt', '-p',
-  '--output-format', '--output', '-o', '--config', '-c',
-  '--enable', '--disable', '--port', '--hostname', '--host', '--session', '-s',
-]);
-
 // These flags consume only following tokens that do not start with a dash.
 const optionalValueOptions = new Set(['--resume', '-r']);
 
 export function extractNativeHeadlessOptions(argv: readonly string[], grammar: { readonly required?: readonly string[]; readonly optional?: readonly string[] } = {}): { argv: string[]; mode: NativeHeadlessMode; errors: string[] } {
-  const required = new Set([...requiredValueOptions, ...(grammar.required ?? [])]);
+  // The caller passes every value-taking flag of its own catalog, aliases included.
+  const required = new Set(grammar.required ?? []);
   const optional = new Set([...optionalValueOptions, ...(grammar.optional ?? [])]);
   const result: string[] = [];
   const errors: string[] = [];

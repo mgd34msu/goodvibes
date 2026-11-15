@@ -15,6 +15,11 @@ import { registerTuiLegacyImportCommands } from '../../input/commands/legacy-wor
 import { createShellPathService } from '../../runtime/index.ts';
 import { pairNativeTestHost, replaceNativeTestCredential } from '../helpers/native-host-pairing.ts';
 
+/** What the native fetch guard says when the paired host or credential is no longer the selected one. */
+const SELECTION_CHANGED = 'Native host selection changed.';
+/** What the request policy says when a native host answers with a redirect. */
+const REDIRECT_REFUSED = 'Fetch redirect refused by request policy';
+
 const auth = { authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false,
   principalId: 'redirected-principal', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger', 'read:knowledge'], roles: [] };
 const target = { workId: 'work', attemptId: 'attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 } };
@@ -45,7 +50,7 @@ test('native fetch cannot be instructed to follow redirects and checks before ev
   let current = true; const redirects: (RequestRedirect | undefined)[] = [];
   const guarded = createNativeHostFetch({ current: () => current, fetchImpl: async (_url, init) => { redirects.push(init?.redirect); return new Response('{}'); } });
   await guarded('http://host.invalid', { redirect: 'follow' }); current = false;
-  await expect(guarded('http://host.invalid', { method: 'POST', body: 'source' })).rejects.toThrow();
+  await expect(guarded('http://host.invalid', { method: 'POST', body: 'source' })).rejects.toThrow(SELECTION_CHANGED);
   expect(redirects).toEqual(['error']);
 });
 
@@ -53,8 +58,8 @@ for (const sameOrigin of [false, true]) test(`native auth refuses ${sameOrigin ?
   const f = await redirectFixture(302, sameOrigin);
   const submission = createNativeWorkSubmissionBinding(f.host, 'project'); const intake = createNativeConversationIntakeBinding(f.host, 'project');
   try {
-    await expect(submission.readPrincipal(new AbortController().signal)).rejects.toThrow();
-    await expect(intake.readPrincipal(new AbortController().signal)).rejects.toThrow();
+    await expect(submission.readPrincipal(new AbortController().signal)).rejects.toThrow(REDIRECT_REFUSED);
+    await expect(intake.readPrincipal(new AbortController().signal)).rejects.toThrow(REDIRECT_REFUSED);
     expect(f.requested.map(request => request.path)).toEqual(['/api/control-plane/auth', '/api/control-plane/auth']); expect(f.delivered).toEqual([]);
   } finally { submission.dispose(); intake.dispose(); f.close(); }
 });
@@ -63,9 +68,9 @@ for (const status of [307, 308]) test(`native POST bodies never cross a ${status
   const f = await redirectFixture(status);
   const submission = createNativeWorkSubmissionBinding(f.host, 'project'); const intake = createNativeConversationIntakeBinding(f.host, 'project');
   try {
-    await expect(submission.client.submit({ requestId: 'request', inputId: 'input', expectedRevision: 0, goal: source.text, criteria: ['Exact criterion'] })).rejects.toThrow();
-    await expect(intake.client.capture(source)).rejects.toThrow();
-    await expect(intake.execution.start(target)).rejects.toThrow();
+    await expect(submission.client.submit({ requestId: 'request', inputId: 'input', expectedRevision: 0, goal: source.text, criteria: ['Exact criterion'] })).rejects.toThrow(REDIRECT_REFUSED);
+    await expect(intake.client.capture(source)).rejects.toThrow(REDIRECT_REFUSED);
+    await expect(intake.execution.start(target)).rejects.toThrow(REDIRECT_REFUSED);
     expect(f.requested).toHaveLength(3); expect(f.requested.every(request => request.method === 'POST')).toBe(true);
     expect(f.requested[0]!.body).toContain(source.text); expect(f.requested[1]!.body).toContain(source.text);
     expect(f.delivered).toEqual([]);
@@ -80,9 +85,9 @@ test('native ledger discovery, readers and execution refuse redirected authority
     await host.discoverProject(); expect(host.readSelection().available).toBe(false);
     host.selectProject('project'); const selected = host.readSelection(); if (!selected.available) throw new Error('Missing fixture selection');
     binding = selected.bind(() => {}); if (!binding.available) throw new Error('Missing fixture binding');
-    await expect(binding.client.readSnapshot()).rejects.toThrow();
-    await expect(binding.client.history(0)).rejects.toThrow();
-    await expect(binding.execution!.start(target)).rejects.toThrow();
+    await expect(binding.client.readSnapshot()).rejects.toThrow(REDIRECT_REFUSED);
+    await expect(binding.client.history(0)).rejects.toThrow(REDIRECT_REFUSED);
+    await expect(binding.execution!.start(target)).rejects.toThrow(REDIRECT_REFUSED);
     expect(f.requested).toHaveLength(4); expect(f.delivered).toEqual([]);
   } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } f.close(); }
 });
@@ -119,11 +124,19 @@ for (const action of ['submission-principal', 'intake-principal', 'submission-po
       : action === 'submission-post' ? submission.client.submit({ requestId: 'request', inputId: 'input', expectedRevision: 0, goal: source.text, criteria: ['Exact'] })
       : action === 'intake-post' ? intake.client.capture(source) : intake.execution.start(target);
     await Promise.resolve(); expect(checks).toBeGreaterThan(0); current = false;
-    await expect(pending).rejects.toThrow(); expect(requests).toBe(0);
+    await expect(pending).rejects.toThrow(SELECTION_CHANGED); expect(requests).toBe(0);
   } finally { submission.dispose(); intake.dispose(); server.stop(true); }
 });
 
-for (const action of ['reader', 'execution', 'discovery', 'headless', 'legacy'] as const) test(`final fetch boundary fences ${action} after private credential replacement`, async () => {
+const credentialActions = ['reader', 'execution', 'discovery', 'headless', 'legacy'] as const;
+
+/**
+ * Start one native-host action against the redirect fixture, optionally
+ * replacing the private credential after the call started and before it can
+ * reach the network. The fixture answers every request with a redirect, so a
+ * request that got through shows up in `f.requested`.
+ */
+async function runCredentialAction(action: typeof credentialActions[number], replaceCredential: boolean): Promise<Awaited<ReturnType<typeof redirectFixture>>> {
   const f = await redirectFixture(); const host = createNativeWorkLedgerHost({ configManager: f.configManager, homeDirectory: f.home, workspace: () => f.home });
   let binding: ReturnType<Extract<ReturnType<typeof host.readSelection>, { available: true }>['bind']> | undefined;
   try {
@@ -140,9 +153,22 @@ for (const action of ['reader', 'execution', 'discovery', 'headless', 'legacy'] 
       const context = { platform: { configManager: f.configManager }, workspace: { shellPaths: createShellPathService({ workingDirectory: f.home, homeDirectory: f.home }) }, print() {} } as unknown as CommandContext;
       pending = registry.execute('work-import', ['status', 'project'], context);
     }
-    await Promise.resolve(); replaceNativeTestCredential(f.home);
-    await pending.catch(() => undefined); expect(f.requested).toEqual([]); expect(f.delivered).toEqual([]);
-  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } f.close(); }
+    await Promise.resolve(); if (replaceCredential) replaceNativeTestCredential(f.home);
+    // Each action reports its refusal its own way (a rejection, an exit code, a
+    // printed line); what they share is what reached the network.
+    await pending.then(() => undefined, () => undefined);
+    return f;
+  } finally { if (binding?.available) { binding.execution?.dispose(); binding.client.dispose(); } }
+}
+
+for (const action of credentialActions) test(`${action} reaches the native host when its credential is unchanged`, async () => {
+  const f = await runCredentialAction(action, false);
+  try { expect(f.requested.length).toBeGreaterThan(0); expect(f.delivered).toEqual([]); } finally { f.close(); }
+});
+
+for (const action of credentialActions) test(`final fetch boundary fences ${action} after private credential replacement`, async () => {
+  const f = await runCredentialAction(action, true);
+  try { expect(f.requested).toEqual([]); expect(f.delivered).toEqual([]); } finally { f.close(); }
 });
 
 test('queued turn revalidation fences platform gaps and refuses redirects even after intake disposal', async () => {
@@ -153,9 +179,9 @@ test('queued turn revalidation fences platform gaps and refuses redirects even a
   try {
     const result = await intake.client.capture(source); const permit = intake.client.bindTurn(result); intake.dispose();
     const pending = revalidateNativeConversationTurnPermit(permit); current = false;
-    await expect(pending).rejects.toThrow(); expect(requests).toBe(1);
+    await expect(pending).rejects.toThrow(SELECTION_CHANGED); expect(requests).toBe(1);
     current = true; redirect = true;
-    await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow(); expect(requests).toBe(2); expect(delivered).toBe(0);
+    await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow(REDIRECT_REFUSED); expect(requests).toBe(2); expect(delivered).toBe(0);
   } finally { intake.dispose(); server.stop(true); other.stop(true); }
 });
 
@@ -166,7 +192,7 @@ for (const kind of ['submission', 'intake'] as const) test(`disposing ${kind} du
   const binding = kind === 'submission' ? createNativeWorkSubmissionBinding(host, 'project') : createNativeConversationIntakeBinding(host, 'project');
   try {
     const pending = binding.readPrincipal(new AbortController().signal); binding.dispose();
-    await expect(pending).rejects.toThrow(); expect(requests).toBe(0);
+    await expect(pending).rejects.toThrow(SELECTION_CHANGED); expect(requests).toBe(0);
   } finally { binding.dispose(); server.stop(true); }
 });
 
@@ -177,6 +203,6 @@ test('platform retry rechecks the selection at fetch rather than resending the c
   const operator = createOperatorApiClient({ baseUrl: `http://127.0.0.1:${server.port}`, authToken: 'private-token', fetchImpl: createNativeHostFetch({ current: () => current }),
     retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 }, onRetryScheduled() { retries++; current = false; } });
   try {
-    await expect(operator.control.auth.current({})).rejects.toThrow(); expect(retries).toBe(1); expect(requests).toBe(1);
+    await expect(operator.control.auth.current({})).rejects.toThrow(SELECTION_CHANGED); expect(retries).toBe(1); expect(requests).toBe(1);
   } finally { operator.dispose(); server.stop(true); }
 });

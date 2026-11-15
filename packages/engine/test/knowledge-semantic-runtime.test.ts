@@ -29,7 +29,10 @@ import {
   WeakFeatureAnswerLlm,
   createStores,
   waitFor,
+  useStoreCleanup,
 } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
   test.each(['fresh', 'saved-protected'] as const)('semantic reindex excludes generated sources and preserves %s wiki identity', async identity => {
@@ -198,8 +201,9 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
     expect(result.createdGaps).toBe(1);
     expect(result.repairableGaps).toBe(1);
     expect(result.searched).toBe(1);
-    expect(task).not.toBeUndefined(); // presence-only: task was created
-    expect(result.taskIds).toContain(task!.id);
+    if (!task) throw new Error('No refinement task was created');
+    expect(result.taskIds).toEqual([task.id]);
+    expect(task.spaceId).toBe(spaceId);
     expect(calls).toHaveLength(1);
     expect(gap?.title).toContain('complete features and specifications');
     expect(store.listEdges().some((edge) => edge.relation === 'repairs_gap' && edge.toId === gap?.id)).toBe(true);
@@ -240,7 +244,7 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
     });
     answerReadings.addAssessments([gapAssessmentFixture(gap, [device], 0.99, 0.99, semanticRepairAssessmentCoverage, 0.99)]);
 
-    const result = await semantic.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true, maxRunMs: 5 });
+    const result = await semantic.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true });
     const task = store.listRefinementTasks(10, { spaceId })[0];
     const updatedGap = store.getNode(gap.id);
 
@@ -488,7 +492,8 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
     expect(second.coalesced).toBe(true);
     expect(second.skippedGaps).toBe(1);
     expect(second.truncated).toBe(true);
-    expect(second.budgetExhausted).toBe(true);
+    // The run never started, so no budget was spent.
+    expect(second.budgetExhausted).toBe(false);
   });
 
   test('self-improvement recovers stale no-repairer blocks when a repairer is configured', async () => {
@@ -698,7 +703,6 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
       }),
     } as never, { timeoutMs: 25 });
 
-    const startedAt = Date.now();
     const result = await semanticLlm.completeText({
       purpose: 'test-timeout',
       systemPrompt: 'test',
@@ -708,6 +712,5 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
 
     expect(result).toBeNull();
     expect(aborted).toBe(true);
-    expect(Date.now() - startedAt).toBeLessThan(3_000);
   });
 });

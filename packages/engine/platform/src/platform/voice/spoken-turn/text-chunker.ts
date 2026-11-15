@@ -17,9 +17,12 @@ export interface TtsTextChunkerOptions {
   readonly assertCurrent?: (() => void) | undefined;
 }
 
+/** How much already-admitted reply text is screened again together with each new delta. */
+const RAW_SCREEN_WINDOW_CHARS = 4096;
+
 export class TtsTextChunker {
   private buffer = '';
-  // Complete received source, before markdown filtering or candidate selection.
+  // Tail of the received source (see RAW_SCREEN_WINDOW_CHARS), before markdown filtering or candidate selection.
   private raw = '';
   private firstBufferedAt: number | null = null;
   private readonly fenceFilter = new StreamingCodeFenceFilter();
@@ -59,7 +62,11 @@ export class TtsTextChunker {
     // readings before they can publish. Never screen only filtered speech.
     try {
       this.assertCurrent();
-      this.raw += delta;
+      // Only a bounded tail is re-screened: the declarations the screen reads
+      // (KEY=value, URL userinfo, card digits, key headers) show their sensitive
+      // part within a short span, and rescanning the whole reply per delta made
+      // a long reply quadratic.
+      this.raw = this.raw.slice(-RAW_SCREEN_WINDOW_CHARS) + delta;
       snapshotJudgmentInput({ text: this.raw });
       this.queuedInputChars += delta.length;
       if (this.buffer.length + this.queuedInputChars >= this.maxChunkChars) this.requestMechanicalProgress();

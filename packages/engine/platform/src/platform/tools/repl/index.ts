@@ -1,6 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { isCapturedInputPath } from '../../contract/input-authority.js';
 import { type ConfigManagerLike } from '../../runtime/sandbox/manager.js';
 import { SandboxSessionRegistry } from '../../runtime/sandbox/session-registry.js';
 import { requireSurfaceRoot } from '../../runtime/surface-root.js';
@@ -27,29 +26,35 @@ interface ReplHistoryEntry {
   readonly error?: string | undefined;
 }
 
-type ReplExecutionInput = ReplToolInput & {
-  readonly workspaceRoot?: string | undefined;
-};
-
 export interface ReplToolOptions {
   readonly surfaceRoot: string;
+  /** The host's project directory, where the attempt history is kept. The model never supplies it. */
+  readonly workingDirectory?: string | undefined;
 }
 
 function resolveHistoryPath(workspaceRoot: string, surfaceRoot: string): string {
   return join(workspaceRoot, '.goodvibes', surfaceRoot, 'repl-history.json');
 }
 
+/** A missing file is an empty history; a file that cannot be parsed is reported, never overwritten. */
 async function loadHistory(historyPath: string): Promise<ReplHistoryEntry[]> {
+  let raw: string;
   try {
-    return JSON.parse(await readFile(historyPath, 'utf-8')) as ReplHistoryEntry[];
-  } catch {
-    return [];
+    raw = await readFile(historyPath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw new Error('history file is not a list');
+  return parsed as ReplHistoryEntry[];
 }
 
 async function saveHistory(historyPath: string, entries: readonly ReplHistoryEntry[]): Promise<void> {
   await mkdir(dirname(historyPath), { recursive: true });
-  await writeFile(historyPath, `${JSON.stringify(entries, null, 2)}\n`, 'utf-8');
+  const temporary = `${historyPath}.${process.pid}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(entries, null, 2)}\n`, 'utf-8');
+  await rename(temporary, historyPath);
 }
 
 function mapRuntimeToSandboxProfile(runtime: NonNullable<ReplToolInput['runtime']>) {
@@ -73,7 +78,7 @@ export function createReplTool(
       name: 'repl',
       description: REPL_TOOL_SCHEMA.description,
       parameters: REPL_TOOL_SCHEMA.parameters,
-      sideEffects: ['exec', 'state'],
+      sideEffects: ['exec', 'state', 'write_fs'],
       concurrency: 'serial',
     },
 
@@ -81,26 +86,45 @@ export function createReplTool(
       if (!args || typeof args !== 'object' || typeof args.mode !== 'string') {
         return { success: false, error: 'Invalid args: mode is required.' };
       }
-      const input = args as unknown as ReplExecutionInput;
-      if (!input.workspaceRoot || input.workspaceRoot.trim().length === 0) {
-        return { success: false, error: 'repl requires workspaceRoot.' };
+      const input = args as unknown as ReplToolInput;
+      const workingDirectory = options.workingDirectory;
+      if (input.mode === 'eval' && input.expression && !workingDirectory) {
+        // Without a project directory nothing can be recorded, and the real reason is the missing backend.
+        return { success: false, error: REPL_NO_ISOLATING_BACKEND_ERROR };
       }
-      if (isCapturedInputPath(input.workspaceRoot))
-        return { success: false, error: 'Captured REPL requires its construction-owned execution backend.' };
-      const historyPath = resolveHistoryPath(input.workspaceRoot, surfaceRoot);
-      const history = await loadHistory(historyPath);
+      if (!workingDirectory) {
+        return { success: false, error: 'repl history is unavailable: this host did not give the tool a project directory to keep it in.' };
+      }
+      const historyPath = resolveHistoryPath(workingDirectory, surfaceRoot);
+      let history: ReplHistoryEntry[];
+      try {
+        history = await loadHistory(historyPath);
+      } catch (error) {
+        return { success: false, error: `repl history file ${historyPath} cannot be read (${error instanceof Error ? error.message : String(error)}). Move or delete it to start a new history.` };
+      }
 
       if (input.mode === 'history') {
-        return { success: true, output: JSON.stringify({ count: history.length, history }) };
+        const offset = input.offset ?? 0;
+        const limit = input.limit ?? history.length;
+        const page = history.slice(offset, offset + limit);
+        return { success: true, output: JSON.stringify({
+          count: history.length,
+          history: page,
+          ...(offset > 0 || page.length < history.length ? { offset, returned: page.length, has_more: offset + page.length < history.length } : {}),
+        }) };
       }
 
       if (!input.expression) return { success: false, error: 'eval requires expression.' };
       const runtime = input.runtime ?? 'javascript';
+      const existingSessions = new Set(sandboxSessionRegistry.list().map((session) => session.id));
       const sandboxSession = await sandboxSessionRegistry.start(
         mapRuntimeToSandboxProfile(runtime),
         `repl:${runtime}`,
         configManager,
       );
+      // Nothing runs in the session, so one this eval started is stopped again;
+      // a shared session that was already running belongs to someone else.
+      if (!existingSessions.has(sandboxSession.id)) sandboxSessionRegistry.stop(sandboxSession.id);
       await saveHistory(historyPath, [...history, {
         ts: Date.now(),
         runtime,

@@ -71,13 +71,14 @@ describe('loadPolicyBundle (non-managed mode)', () => {
     expect(result.provenance.signatureStatus).toBe('unsigned');
   });
 
-  it('accepts a bundle with invalid signature in non-managed mode', () => {
+  it('rejects a bundle with an invalid signature even in non-managed mode', () => {
     const bundle = makeSignedBundle('nm-4', WRONG_KEY);
     const result = loadPolicyBundle(bundle, {
       signingKey: TEST_KEY,  // Different key
       managed: false,
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('signature does not verify');
     expect(result.provenance.signatureStatus).toBe('invalid');
   });
 
@@ -254,7 +255,7 @@ describe('provenance in PermissionDecision (integration)', () => {
       signingKey: TEST_KEY,
       managed: false,
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
     expect(result.provenance.signatureStatus).toBe('invalid');
 
     const evaluator = createPermissionEvaluator(

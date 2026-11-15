@@ -8,6 +8,12 @@ import type { UiReadModel } from './ui-read-models-base.js';
 import { deriveContextUsage } from './context-usage.js';
 import { readCurrentContextWindow } from '../providers/context-window-reading.js';
 
+/** How many approvals the broker holds that are pending or claimed: raised, and not yet decided, cancelled or expired. */
+export function countUndecidedApprovals(broker: Pick<RuntimeServices['approvalBroker'], 'listApprovals'>): number {
+  return broker.listApprovals(Number.MAX_SAFE_INTEGER)
+    .filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
+}
+
 /** Fraction of the model context window at which the context-warning flag activates. */
 const CONTEXT_WARNING_THRESHOLD = 0.85;
 
@@ -28,6 +34,7 @@ export interface UiSessionSnapshot {
   readonly turnState: TurnState;
   readonly streamToolPreview?: string | undefined;
   readonly contextWarningActive: boolean;
+  /** True while the approval broker holds an approval that is pending or claimed. */
   readonly pendingApproval: boolean;
   readonly denialCount: number;
 }
@@ -51,9 +58,11 @@ export interface UiCoreReadModels {
 }
 
 export function createCoreReadModels(
-  runtimeServices: Pick<RuntimeServices, 'runtimeStore' | 'runtimeBus' | 'providerRegistry'>,
+  runtimeServices: Pick<RuntimeServices, 'runtimeStore' | 'runtimeBus' | 'providerRegistry'>
+    & Partial<Pick<RuntimeServices, 'approvalBroker'>>,
 ): UiCoreReadModels {
   const { runtimeStore } = runtimeServices;
+  const approvalBroker = runtimeServices.approvalBroker;
 
   return {
     providers: {
@@ -84,7 +93,12 @@ export function createCoreReadModels(
           streamToolPreview: state.conversation.stream.partialToolPreview,
           contextWarningActive:
             window !== null && usedTokens >= window * CONTEXT_WARNING_THRESHOLD,
-          pendingApproval: state.permissions.awaitingDecision,
+          // The gate reports its request only after the decision, so the
+          // store flag never reads true while a prompt is open; the broker
+          // holds the request for as long as it is undecided.
+          pendingApproval: approvalBroker
+            ? countUndecidedApprovals(approvalBroker) > 0
+            : state.permissions.awaitingDecision,
           denialCount: state.permissions.denialCount,
         };
       },
@@ -92,6 +106,7 @@ export function createCoreReadModels(
         return combineSubscriptions(
           runtimeStore.subscribe(listener),
           runtimeServices.runtimeBus.onDomain('providers', listener),
+          ...(approvalBroker ? [approvalBroker.subscribe(() => listener())] : []),
         );
       },
     },

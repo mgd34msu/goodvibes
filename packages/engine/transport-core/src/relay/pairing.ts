@@ -98,6 +98,14 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     throw new GoodVibesError('Relay pairing string is missing required fields.', { category: 'bad_request', source: 'transport', recoverable: false });
   }
   const w = wire as WirePairing;
+  if (w.p !== RELAY_PROTOCOL_VERSION) {
+    throw new GoodVibesError(`This pairing code is for relay protocol ${w.p}; this build speaks protocol ${RELAY_PROTOCOL_VERSION}.`, {
+      category: 'bad_request',
+      source: 'transport',
+      recoverable: false,
+      hint: 'Generate a new pairing code from a daemon of the same release line, or update this client.',
+    });
+  }
   return {
     protocol: w.p,
     relayUrl: w.u,

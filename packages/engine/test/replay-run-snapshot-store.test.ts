@@ -5,11 +5,12 @@
  * replay baseline, and falls back to an empty baseline (and says so) only for
  * a run with no stored snapshot.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
 import { DeterministicReplayEngine } from '../platform/src/platform/core/deterministic-replay.ts';
 import { handleReplayCommand } from '../platform/src/platform/core/replay-command-handler.ts';
@@ -73,7 +74,7 @@ describe('run-start snapshot store', () => {
     expect(captures).toBe(2);
 
     const engine = new DeterministicReplayEngine(dir);
-    const result = handleReplayCommand({ replayEngine: engine }, 'load', ['run-a'], reopened);
+    const result = await handleReplayCommand({ replayEngine: engine }, 'load', ['run-a'], reopened);
     expect(result.ok).toBe(true);
     expect(engine.getInitialSnapshot()).toEqual(snapshotAt(1_700_000_000_000, 1));
     expect(result.output).toContain('Baseline: state snapshot from run start (1 domain,');
@@ -87,7 +88,7 @@ describe('run-start snapshot store', () => {
     expect(exporter.readRunSnapshot('old-run')).toBeNull();
 
     const engine = new DeterministicReplayEngine(dir);
-    const result = handleReplayCommand({ replayEngine: engine }, 'load', ['old-run'], exporter);
+    const result = await handleReplayCommand({ replayEngine: engine }, 'load', ['old-run'], exporter);
     expect(result.ok).toBe(true);
     expect(engine.getInitialSnapshot()).toEqual({ capturedAt: 1_700_000_000_001, domains: [] });
     expect(result.output).toContain('Baseline: empty (this run was recorded before run-start state snapshots were stored)');
@@ -107,13 +108,19 @@ describe('run-start snapshot store', () => {
 
   test('a failed capture is logged, not retried on the run\'s later events, and the entries are still recorded', async () => {
     let calls = 0;
+    const warn = spyOn(logger, 'warn').mockImplementation(() => {});
     const exporter = makeExporter(() => {
       calls += 1;
       throw new Error('provider not ready');
     });
-    record(exporter, 'run-d', 1);
-    record(exporter, 'run-d', 2);
-    await exporter.flush();
+    try {
+      record(exporter, 'run-d', 1);
+      record(exporter, 'run-d', 2);
+      await exporter.flush();
+      const logged = warn.mock.calls.filter((call) => call[0] === '[local-ledger] run snapshot capture failed');
+      expect(logged).toHaveLength(1);
+      expect(JSON.stringify(logged[0]![1])).toContain('provider not ready');
+    } finally { warn.mockRestore(); }
     expect(calls).toBe(1);
     expect(exporter.readRunSnapshot('run-d')).toBeNull();
     expect(exporter.readRunEntries('run-d')).toHaveLength(2);

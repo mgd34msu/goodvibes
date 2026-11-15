@@ -1,11 +1,12 @@
 import { useMemoryReadings } from '../helpers/memory-readings.ts';
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { buildRecallSnapshot, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../../agent/prompt-context-receipts.ts';
+import { skillStorePath } from '../../agent/skill-registry.ts';
 import { importVibeFilesIntoMemoryOnce } from '../../agent/vibe-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -323,6 +324,35 @@ describe('prompt context receipts', () => {
         expect(snapshot.note).toContain('recall-eligible');
         expect(snapshot.note).not.toContain('browse set');
       });
+    });
+  });
+
+  test('a corrupt skill store still composes: the prompt and the receipt both name the file to repair', async () => {
+    await withReceiptFixture(async ({ shellPaths, memoryRegistry }) => {
+      const storePath = skillStorePath(shellPaths);
+      mkdirSync(dirname(storePath), { recursive: true });
+      writeFileSync(storePath, '{ not json');
+
+      const composed = await composeRuntimePromptWithReceipt({
+        sessionId: 'session-skills-corrupt',
+        turnId: 'turn-skills-corrupt',
+        source: 'turn',
+        provider: 'openai',
+        model: { registryKey: 'openai:gpt-4.1', id: 'gpt-4.1' },
+        contextWindow: 128_000,
+        tierPrompt: '',
+        runtimePrompt: 'Base runtime prompt.',
+        operatorPolicy: 'Operator policy prompt.',
+        shellPaths,
+        memoryRegistry,
+      });
+
+      expect(composed.prompt).toContain('Base runtime prompt.');
+      expect(composed.prompt).toContain(storePath);
+      const skills = composed.receipt.segments.find((segment) => segment.id === 'skills');
+      expect(skills?.status).toBe('attention');
+      expect(skills?.activeCount).toBe(0);
+      expect(skills?.note).toContain(storePath);
     });
   });
 });

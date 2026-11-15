@@ -2,16 +2,15 @@
  * Tests for renderProfilePickerModal renderer.
  */
 import { describe, test, expect } from 'bun:test';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { ProfilePickerModal } from '../../input/profile-picker-modal.ts';
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { renderProfilePickerModal } from '../../renderer/profile-picker-modal.ts';
 import { layerText, layerTextBlock } from '../helpers/surface-frame.ts';
 import { activeTokens } from '../../renderer/theme.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const W = 120;
-const profileManager = new ProfileManager(join(tmpdir(), 'gv-renderer-profile-picker'));
+const profileManager = new ProfileManager(makeProjectTempDir('gv-renderer-profile-picker'));
 
 function makeModal(overrides: Partial<ProfilePickerModal> = {}): ProfilePickerModal {
   const modal = new ProfilePickerModal(profileManager);

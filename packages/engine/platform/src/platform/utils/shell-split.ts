@@ -11,6 +11,16 @@
 // Intended for splitting trigger action strings into argv arrays for Bun.spawn.
 // ---------------------------------------------------------------------------
 
+export interface ShellSplitOptions {
+  /**
+   * Split for execution: an empty quoted word (`""`, `''`) is kept as an empty
+   * argument and an unterminated quote throws. Without it, empty words are
+   * dropped and an unterminated quote runs to the end of the input, which is
+   * what callers that only inspect words (and check quoting themselves) rely on.
+   */
+  readonly strict?: boolean | undefined;
+}
+
 /**
  * Split a shell command string into an argument array.
  * Handles double-quoted strings, single-quoted strings, and backslash escapes.
@@ -20,7 +30,8 @@
  * shellSplit('echo "hello world"')    // ['echo', 'hello world']
  * shellSplit('path/with\\ space')     // ['path/with space']
  */
-export function shellSplit(input: string): string[] {
+export function shellSplit(input: string, options: ShellSplitOptions = {}): string[] {
+  const strict = options.strict === true;
   const tokens: string[] = [];
   let i = 0;
   const len = input.length;
@@ -34,12 +45,15 @@ export function shellSplit(input: string): string[] {
 
     // Accumulate one token
     let token = '';
+    // A quoted region makes a word even when it holds nothing.
+    let quoted = false;
 
     while (i < len && !/\s/.test(input[i]!)) {
       const ch = input[i]!;
 
       if (ch === '"') {
         // Double-quoted region: process \\ and \" escapes
+        quoted = true;
         i++;
         while (i < len && input[i] !== '"') {
           if (input[i] === '\\' && i + 1 < len) {
@@ -57,14 +71,17 @@ export function shellSplit(input: string): string[] {
             i++;
           }
         }
+        if (strict && i >= len) throw new Error('Unterminated double quote in command');
         i++; // consume closing "
       } else if (ch === "'") {
         // Single-quoted region: no escape processing
+        quoted = true;
         i++;
         while (i < len && input[i] !== "'") {
           token += input[i];
           i++;
         }
+        if (strict && i >= len) throw new Error('Unterminated single quote in command');
         i++; // consume closing '
       } else if (ch === '\\' && i + 1 < len) {
         // Backslash escape outside quotes
@@ -76,7 +93,7 @@ export function shellSplit(input: string): string[] {
       }
     }
 
-    if (token.length > 0) {
+    if (token.length > 0 || (strict && quoted)) {
       tokens.push(token);
     }
   }

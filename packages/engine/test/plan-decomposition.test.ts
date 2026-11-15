@@ -3,9 +3,10 @@
  *
  * Exercises the whole honesty contract: a contract-valid agent output becomes
  * an 'agent'-provenance proposal with usage/cost/elapsed; malformed output
- * gets exactly ONE repair attempt and then falls back to the heuristic path
- * with a reason + honest event; timeout/kill fall back with reason 'cancelled';
- * a dependency cycle is rejected; config can force the heuristic path. The LLM
+ * gets exactly ONE repair attempt and then the run is held (JudgmentHeldError)
+ * with a reason carried on the 'fallback' outcome; timeout/kill report reason
+ * 'cancelled'; a dependency cycle is rejected; config can force the heuristic
+ * path. The LLM
  * transport is not touched, a stubbed DecompositionRunner supplies canned
  * agent output, mirroring how the platform's orchestrator-turn-loop tests script a
  * fake provider.
@@ -179,38 +180,49 @@ describe('decomposeGoal: repair then accept', () => {
   });
 });
 
-describe('decomposeGoal: fallback honesty', () => {
-  test('malformed after one repair → heuristic fallback with reason + event', async () => {
-    const { runner, calls } = scriptedRunner([completed('garbage'), completed('still garbage')]);
+describe('decomposeGoal: a failed planning run is held, with the reason reported', () => {
+  const HELD = 'operation remains unexecuted';
+
+  async function held(runner: DecompositionRunner | null): Promise<DecompositionOutcome[]> {
     const outcomes: DecompositionOutcome[] = [];
     await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner, {
       onOutcome: (o) => outcomes.push(o),
-    })).rejects.toThrow('operation remains unexecuted');
+    })).rejects.toThrow(HELD);
+    expect(outcomes).toHaveLength(1);
+    return outcomes;
+  }
+
+  test('malformed after one repair → held with a malformed-output reason after exactly one repair', async () => {
+    const { runner, calls } = scriptedRunner([completed('garbage'), completed('still garbage')]);
+    const outcomes = await held(runner);
     expect(calls).toHaveLength(2); // exactly one repair attempt
-    expect(outcomes[0]).toMatchObject({ kind: 'fallback' });
+    expect(outcomes[0]).toMatchObject({ kind: 'fallback', reason: expect.stringContaining('malformed agent output after repair'), elapsedMs: 2468 });
   });
 
-  test('cancelled run (timeout/kill) → fallback reason "cancelled"', async () => {
+  test('cancelled run (timeout/kill) → held with reason "cancelled (detail)", no repair', async () => {
     const { runner, calls } = scriptedRunner([
-      { status: 'cancelled', output: '', elapsedMs: 60_000, detail: 'wall-timeout 60000ms' },
+      { status: 'cancelled', output: '', elapsedMs: 60_000, detail: 'wall-timeout 60000ms', usage: USAGE },
     ]);
-    await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner)).rejects.toThrow('operation remains unexecuted');
+    const outcomes = await held(runner);
     expect(calls).toHaveLength(1); // no repair on cancellation
+    expect(outcomes[0]).toMatchObject({ kind: 'fallback', reason: 'cancelled (wall-timeout 60000ms)', usage: USAGE, elapsedMs: 60_000 });
   });
 
-  test('failed run (spawn/agent error) → fallback reason "agent error"', async () => {
+  test('failed run (agent error) → held with reason "agent error: detail"', async () => {
     const { runner } = scriptedRunner([{ status: 'failed', output: '', elapsedMs: 5, detail: 'boom' }]);
-    await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner)).rejects.toThrow('operation remains unexecuted');
+    const outcomes = await held(runner);
+    expect(outcomes[0]).toMatchObject({ kind: 'fallback', reason: 'agent error: boom', elapsedMs: 5 });
   });
 
-  test('a runner that throws → fallback reason "spawn error"', async () => {
+  test('a runner that throws → held with reason "spawn error: message"', async () => {
     const runner: DecompositionRunner = {
       async run() { throw new Error('kaboom'); },
     };
-    await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner)).rejects.toThrow('operation remains unexecuted');
+    const outcomes = await held(runner);
+    expect(outcomes[0]).toMatchObject({ kind: 'fallback', reason: 'spawn error: kaboom' });
   });
 
-  test('dependency cycle is rejected → repair still cyclic → fallback', async () => {
+  test('dependency cycle is rejected → repair still cyclic → held with the issue kinds', async () => {
     const cyclic = JSON.stringify({
       items: [
         { title: 'A', brief: 'a', ordinal: 1, dependsOn: ['B'] },
@@ -218,12 +230,14 @@ describe('decomposeGoal: fallback honesty', () => {
       ],
     });
     const { runner, calls } = scriptedRunner([completed(cyclic), completed(cyclic)]);
-    await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner)).rejects.toThrow('operation remains unexecuted');
+    const outcomes = await held(runner);
     expect(calls).toHaveLength(2);
+    expect(outcomes[0]).toMatchObject({ kind: 'fallback', reason: expect.stringContaining('invalid agent decomposition after repair') });
   });
 
-  test('no runner available → heuristic fallback with runtime reason', async () => {
-    await expect(decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, null)).rejects.toThrow('operation remains unexecuted');
+  test('no runner available → held with the no-runtime reason', async () => {
+    const outcomes = await held(null);
+    expect(outcomes[0]).toEqual({ kind: 'fallback', reason: 'no planning agent runtime available' });
   });
 });
 
@@ -252,5 +266,58 @@ describe('decomposeGoal: configured / gated heuristic (not a fallback)', () => {
     expect(result.proposal.decomposedBy).toBe('heuristic');
     expect(result.proposal.fallbackReason).toBeUndefined();
     expect(outcomes[0]!.kind).toBe('gate-declined');
+  });
+});
+
+describe('parseDecomposition: malformed dependency edges', () => {
+  const withDependencies = (dependencies: unknown) => JSON.stringify({
+    items: [{ title: 'A', brief: 'a', ordinal: 1 }, { title: 'B', brief: 'b', ordinal: 2 }],
+    dependencies,
+  });
+
+  test('a null edge and an edge without "from" come back as errors naming the edge, never as a throw', () => {
+    for (const bad of [[null], [{ to: 'a' }], [{ from: 'a', to: '' }], [{ from: {}, to: 'a' }]]) {
+      const parsed = parseDecomposition(withDependencies(bad));
+      expect(parsed.ok).toBe(false);
+      expect(parsed.errors.join(' ')).toContain('dependencies[0]');
+    }
+  });
+
+  test('a non-array "dependencies" value is rejected', () => {
+    const parsed = parseDecomposition(withDependencies({ from: 'A', to: 'B' }));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors.join(' ')).toContain('"dependencies" must be an array');
+  });
+
+  test('well-formed edges with titles or ordinals still parse', () => {
+    const parsed = parseDecomposition(withDependencies([{ from: 'B', to: 'A' }, { from: 2, to: 1 }]));
+    expect(parsed.ok).toBe(true);
+  });
+
+  test('decomposeGoal runs one repair for a malformed edge and accepts the repaired output', async () => {
+    const { runner, calls } = scriptedRunner([completed(withDependencies([null])), completed(VALID_JSON, USAGE)]);
+    const outcomes: DecompositionOutcome[] = [];
+    const result = await decomposeGoal(REQUEST, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner, {
+      onOutcome: (o) => outcomes.push(o),
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.attempt).toBe('repair');
+    expect(calls[1]!.userPrompt).toContain('dependencies[0]');
+    expect(result.proposal.decomposedBy).toBe('agent');
+    expect(outcomes).toHaveLength(1);
+  });
+});
+
+describe('decomposeGoal: caller seams reach the runner', () => {
+  test('signal, route and onStarted are forwarded to the planning agent', async () => {
+    const { runner, calls } = scriptedRunner([completed(VALID_JSON, USAGE)]);
+    const controller = new AbortController();
+    const route = { model: 'm', provider: 'p' };
+    const onStarted = () => {};
+    controller.abort();
+    await decomposeGoal({ ...REQUEST, signal: controller.signal, route, onStarted }, new AdaptivePlanner(), DECOMPOSE_INPUTS, AGENT_CONFIG, runner);
+    expect(calls[0]!.signal?.aborted).toBe(true);
+    expect(calls[0]!.route).toBe(route);
+    expect(calls[0]!.onStarted).toBe(onStarted);
   });
 });

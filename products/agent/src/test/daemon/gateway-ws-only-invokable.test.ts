@@ -28,7 +28,7 @@
  * `pluginManager.init({ gatewayMethods })`, so a loaded plugin can register
  * verbs into it, and those same two probes are what pick them up.
  */
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 /**
@@ -65,7 +65,8 @@ const DAEMON_SERVED_METHOD_IDS = [
 
 describe('this process serves no gateway verb', () => {
   let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
-  beforeAll(async () => { services = await getTestRuntimeServices(); });
+  // The helper closes every owned graph before each test; acquire per test.
+  beforeEach(async () => { services = await getTestRuntimeServices(); });
 
   for (const methodId of DAEMON_SERVED_METHOD_IDS) {
     test(`${methodId} has no handler here, the daemon serves it`, () => {
@@ -81,9 +82,10 @@ describe('this process serves no gateway verb', () => {
   test('invoking one refuses rather than answering from this process\'s partial state', async () => {
     // The refusal is the honest outcome. A fleet snapshot built here would list
     // this agent's own sub-agents and no other surface's, and look complete.
+    // The message is pinned so a disposed or broken catalog cannot pass for the refusal.
     await expect(
       services.gatewayMethods.invoke('fleet.snapshot', { methodId: 'fleet.snapshot', body: {} } as never),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/fleet\.snapshot/);
   });
 
   test('the descriptors remain: they are the shared contract, not a claim to serve them', () => {
@@ -98,7 +100,8 @@ describe('this process serves no gateway verb', () => {
 
 describe('the catalog is kept for the consumers that are actually live', () => {
   let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
-  beforeAll(async () => { services = await getTestRuntimeServices(); });
+  // The helper closes every owned graph before each test; acquire per test.
+  beforeEach(async () => { services = await getTestRuntimeServices(); });
 
   test('occasions and profile verbs are unhandled here, so those tools use the connected host', () => {
     // The daemon owns the owner-profile Markdown file. One file, one writer:

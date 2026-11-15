@@ -16,8 +16,7 @@ import type {
   HomeGraphReviewInput,
   HomeGraphSnapshotInput,
 } from '../../knowledge/index.js';
-import { readJsonErrorResponse } from './error-response.js';
-import { readBoundedPositiveInteger, readOptionalBoundedInteger } from './route-helpers.js';
+import { readBoundedPositiveInteger, readOptionalBoundedInteger, requireParsedBody, routeFailureResponse } from './route-helpers.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -27,7 +26,43 @@ interface HomeGraphRouteContext {
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
+  /** The authenticated caller's principal id, when the request carries a recognised token. */
+  readonly callerId?: ((req: Request) => string | undefined) | undefined;
 }
+
+/**
+ * The paths the home graph routes serve.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const HOME_GRAPH_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/homeassistant/home-graph/status' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/issues' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/sources' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/pages' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/refinement/tasks' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/refinement/tasks/{taskId}/cancel' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/refinement/tasks/{taskId}' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/refinement/run' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/browse' },
+  { method: 'GET', path: '/api/homeassistant/home-graph/map' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/map' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/export' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/reset' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/ask' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/reindex' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/sync' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/ingest/url' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/ingest/note' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/ingest/artifact' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/link' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/unlink' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/device-passport' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/room-page' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/packet' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/facts/review' },
+  { method: 'POST', path: '/api/homeassistant/home-graph/import' },
+];
 
 export class HomeGraphRoutes {
   constructor(private readonly context: HomeGraphRouteContext) {}
@@ -121,13 +156,19 @@ export class HomeGraphRoutes {
         return Response.json(result);
       }
       if (pathname === '/api/homeassistant/home-graph/export' && req.method === 'POST') {
-        return Response.json(await this.context.homeGraphService.exportSpace(await this.readOptionalBody(req)));
+        return await this.admin(req, async () => Response.json(await this.context.homeGraphService.exportSpace(await this.readOptionalBody(req))));
       }
       if (pathname === '/api/homeassistant/home-graph/reset' && req.method === 'POST') {
         return await this.admin(req, async () => Response.json(await this.context.homeGraphService.resetSpace(await this.readOptionalBody(req))));
       }
       if (pathname === '/api/homeassistant/home-graph/ask' && req.method === 'POST') {
-        return Response.json(await this.context.homeGraphService.ask(await this.readBody<HomeGraphAskInput>(req)));
+        // Answering also repairs stale extractions, regenerates device pages and queues
+        // enrichment. Those writes are admin-only when called directly, so a caller
+        // without the admin role gets the answer with the service told not to write.
+        const body = await this.readBody<HomeGraphAskInput>(req);
+        const readOnly = this.context.requireAdmin(req) !== null;
+        const input: HomeGraphAskInput = readOnly ? { ...body, readOnly: true } : body;
+        return Response.json(await this.context.homeGraphService.ask(input));
       }
       if (pathname === '/api/homeassistant/home-graph/reindex' && req.method === 'POST') {
         return await this.admin(req, async () => Response.json(await this.context.homeGraphService.reindex(await this.readOptionalBody(req))));
@@ -170,14 +211,25 @@ export class HomeGraphRoutes {
         return await this.admin(req, async () => Response.json(await this.context.homeGraphService.generatePacket(await this.readBody<HomeGraphProjectionInput>(req))));
       }
       if (pathname === '/api/homeassistant/home-graph/facts/review' && req.method === 'POST') {
-        return await this.admin(req, async () => Response.json(await this.context.homeGraphService.reviewFact(await this.readBody<HomeGraphReviewInput>(req))));
+        return await this.admin(req, async () => {
+          const body = await this.readBody<HomeGraphReviewInput>(req);
+          // The recorded reviewer is the authenticated caller; a name in the body is kept only as what the caller claimed.
+          const { reviewer: claimed, ...rest } = body;
+          const callerId = this.context.callerId?.(req);
+          const input: HomeGraphReviewInput = {
+            ...rest,
+            ...(callerId ? { reviewer: callerId } : {}),
+            ...(typeof claimed === 'string' && claimed.trim() ? { claimedReviewer: claimed.trim() } : {}),
+          };
+          return Response.json(await this.context.homeGraphService.reviewFact(input));
+        });
       }
       if (pathname === '/api/homeassistant/home-graph/import' && req.method === 'POST') {
         return await this.admin(req, async () => Response.json(await this.context.homeGraphService.importSpace(await this.readBody<HomeGraphSpaceImportInput>(req))));
       }
       return Response.json({ error: 'Unknown Home Graph route' }, { status: 404 });
     } catch (error) {
-      return readJsonErrorResponse(error, { status: 400 });
+      return routeFailureResponse(error);
     }
   }
 
@@ -189,14 +241,12 @@ export class HomeGraphRoutes {
 
   private async readBody<T>(req: Request): Promise<T> {
     const body = await this.context.parseJsonBody(req);
-    if (body instanceof Response) throw new Error(await body.text());
-    return body as T;
+    return requireParsedBody(body) as T;
   }
 
   private async readOptionalBody(req: Request): Promise<JsonRecord> {
     const body = await this.context.parseOptionalJsonBody(req);
-    if (body instanceof Response) throw new Error(await body.text());
-    return body ?? {};
+    return requireParsedBody(body) ?? {};
   }
 }
 

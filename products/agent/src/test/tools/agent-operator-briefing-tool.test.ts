@@ -314,32 +314,44 @@ describe('native work operator briefing', () => {
     let release!: (response: Response) => void; let entered!: () => void;
     const pending = new Promise<Response>(resolve => { release = resolve; });
     const started = new Promise<void>(resolve => { entered = resolve; });
+    let calls = 0;
     await withFetch((url, init) => {
+      calls++;
       if (new URL(url).pathname === '/api/work-ledger/snapshot') { signal = init?.signal; entered(); return pending; }
       return routeResponse(url);
     }, async () => {
       const running = createAgentOperatorBriefingTool(paths, configManager(paths)).execute({}, { signal: controller.signal });
       await started; controller.abort();
       const result = await running; expectNoNativeClaims(result); expect(signal?.aborted).toBe(true);
+      const callsBeforeRelease = calls;
       release(Response.json(nativeSnapshot([nativeWork(0, 'complete', 'verified')], 1)));
-      await Bun.sleep(10); expectNoNativeClaims(result);
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+      // The late snapshot is dropped: it triggers no further request and the answer stays free of native claims.
+      expect(calls).toBe(callsBeforeRelease); expectNoNativeClaims(result);
     });
   });
 
-  test('bounds stalled native reads at five seconds and ignores their late response', async () => {
+  test('bounds stalled native reads and ignores their late response', async () => {
     const paths = shellPaths(); let release!: (response: Response) => void; let signal: AbortSignal | null | undefined;
     const pending = new Promise<Response>(resolve => { release = resolve; });
+    let calls = 0;
     await withFetch((url, init) => {
+      calls++;
       if (new URL(url).pathname === '/api/work-ledger/snapshot') { signal = init?.signal; return pending; }
       return routeResponse(url);
     }, async () => {
-      const start = Date.now(); const result = await createAgentOperatorBriefingTool(paths, configManager(paths)).execute({});
-      expect(Date.now() - start).toBeLessThan(6500); expect(signal?.aborted).toBe(true);
-      expect(result.success).toBe(false); expect(result.error).toContain('briefing_unavailable'); expectNoNativeClaims(result);
+      const result = await createAgentOperatorBriefingTool(paths, configManager(paths), 250).execute({});
+      expect(signal?.aborted).toBe(true);
+      // The stalled native read is reported as unavailable; the other routes already read are kept.
+      expect(result.success).toBe(true); expectNoNativeClaims(result);
+      expect(result.output).toContain('native work: unavailable'); expect(result.output).toContain('approvals: pending 1');
+      expect(result.output).not.toContain('warnings: none');
+      const callsBeforeRelease = calls;
       release(Response.json(nativeSnapshot([nativeWork(0, 'complete', 'verified')], 1)));
-      await Bun.sleep(10); expectNoNativeClaims(result);
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+      expect(calls).toBe(callsBeforeRelease); expectNoNativeClaims(result);
     });
-  }, 8000);
+  });
 });
 
 

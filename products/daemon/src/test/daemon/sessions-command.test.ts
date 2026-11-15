@@ -185,7 +185,7 @@ describe('sessions list', () => {
   });
 
   test('a daemon that does not know the verb says exactly that', async () => {
-    const { factory } = fakeSocketFactory({ ok: false, status: 404 });
+    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
     const result = await runSessionsCommand({ ...baseInput(), socketFactory: factory });
     expect(result.exitCode).toBe(1);
     expect(result.lines.join('\n')).toContain('does not know the verb sessions.hosted.list');
@@ -214,7 +214,7 @@ describe('sessions kill', () => {
   test('calls the ws-only kill verb with the named id', async () => {
     const { factory, methodIds, bodies } = fakeSocketFactory({
       ok: true,
-      body: { session: { id: 'hs-1', status: 'terminated', endedReason: 'killed' } },
+      body: { session: { id: 'hs-1', status: 'terminated', terminatedReason: 'killed' } },
     });
     const result = await runSessionsCommand({ ...baseInput({ args: ['kill', 'hs-1'] }), socketFactory: factory });
 
@@ -222,6 +222,7 @@ describe('sessions kill', () => {
     expect(methodIds).toEqual(['sessions.hosted.kill']);
     expect(bodies).toEqual([{ sessionId: 'hs-1' }]);
     expect(result.lines.join('\n')).toContain('ended hs-1');
+    expect(result.lines.join('\n')).toContain('ended: killed');
     expect(result.lines.join('\n')).toContain('retention window');
   });
 
@@ -242,7 +243,7 @@ describe('sessions against another machine', () => {
   test('--host/--port build the ws URL for that machine', async () => {
     const { factory, urls, headers } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
     await runSessionsCommand({
-      ...baseInput({ flags: { host: '10.0.0.7', port: 4321, token: 'other-token', json: false, all: false } }),
+      ...baseInput({ flags: { host: 'http://10.0.0.7', port: 4321, token: 'other-token', json: false, all: false } }),
       socketFactory: factory,
     });
     expect(urls[0]).toBe('ws://10.0.0.7:4321/api/control-plane/ws');

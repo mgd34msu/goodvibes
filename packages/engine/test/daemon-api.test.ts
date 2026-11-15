@@ -7,8 +7,8 @@ import {
   createDaemonSystemRouteHandlers,
   dispatchDaemonApiRoutes,
   jsonErrorResponse,
-} from '../daemon-api/dist/index.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+} from '../daemon-api/src/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import enginePackage from '../package.json' with { type: 'json' };
 
 describe('daemon API', () => {
@@ -236,7 +236,9 @@ describe('daemon API', () => {
         runWatcherNow: async () => null,
       },
     });
-    expect(typeof systemHandlers.getServiceStatus).toBe('function'); // getServiceStatus is a function
+    const status = await systemHandlers.getServiceStatus(new Request('http://localhost/api/service/status'));
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ running: true });
 
     const knowledgeHandlers = createDaemonKnowledgeRouteHandlers({
       artifactStore: { create: async () => ({}) },
@@ -348,7 +350,7 @@ describe('daemon API', () => {
         search: async () => ({}),
       },
     });
-    expect(await (await mediaHandlers.getArtifacts()).json()).toEqual({
+    expect(await (await mediaHandlers.getArtifacts(new Request('http://daemon.test/api/artifacts'))).json()).toEqual({
       artifacts: [{ id: 'artifact-1' }],
     });
   });

@@ -16,7 +16,8 @@ import { splitModelRegistryKey } from '../platform/src/platform/providers/regist
 import { getConfiguredProviderId } from '../platform/src/platform/config/index.ts';
 
 const defaultProvider = getProviderIdFromModel(DEFAULT_CONFIG.provider.model);
-const defaultModel = String(DEFAULT_CONFIG.provider.model);
+// The model half of the default value, after its provider and separator.
+const defaultModel = String(DEFAULT_CONFIG.provider.model).slice(defaultProvider.length + 1);
 
 describe('getProviderIdFromModel', () => {
   test('splits a qualified value at the first colon', () => {
@@ -68,9 +69,8 @@ describe('formatProviderModel', () => {
     expect(formatProviderModel('anthropic', 'claude-fable-5')).toBe('anthropic:claude-fable-5');
   });
 
-  test('leaves an already-qualified model alone rather than double-qualifying it', () => {
-    expect(formatProviderModel('anthropic', 'openrouter:anthropic/claude-fable-5'))
-      .toBe('openrouter:anthropic/claude-fable-5');
+  test('leaves a model already qualified by this provider alone rather than double-qualifying it', () => {
+    expect(formatProviderModel('anthropic', 'anthropic:claude-fable-5')).toBe('anthropic:claude-fable-5');
   });
 
   test('a blank provider yields the bare model', () => {

@@ -1,4 +1,5 @@
 import { ConfigManager } from '../config/manager.js';
+import { DEFAULT_CONFIG } from '../config/schema.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { ExecutionIntent } from '../runtime/execution-intents.js';
 import type { AutomationDeliveryPolicy } from './delivery.js';
@@ -325,7 +326,7 @@ export function buildDefaultFailurePolicy(configManager: ConfigManager, override
   const base: AutomationFailurePolicy = {
     action: 'retry',
     maxConsecutiveFailures: 3,
-    cooldownMs: Number(configManager.get('automation.failureCooldownMs') ?? 30_000),
+    cooldownMs: Number(configManager.get('automation.failureCooldownMs') ?? DEFAULT_CONFIG.automation.failureCooldownMs),
     retryPolicy: baseRetryPolicy,
     disableAfterFailures: false,
   };

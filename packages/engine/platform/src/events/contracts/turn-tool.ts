@@ -27,11 +27,14 @@ export function validateTurnCompleted(v: unknown): ContractResult {
   ]);
 }
 
-// TURN_ERROR: { type: 'TURN_ERROR'; turnId: string; error: string; stopReason: ... }
+// TURN_ERROR: { type: 'TURN_ERROR'; turnId: string; error: string; status?: number; code?: string; stopReason: ... }
 export function validateTurnFailed(v: unknown): ContractResult {
   return validateEventFields('TURN_ERROR', v, [
     { key: 'turnId', kind: 'string' },
     { key: 'error', kind: 'string' },
+    { key: 'status', kind: 'number', optional: true },
+    { key: 'code', kind: 'string', optional: true },
+    { key: 'stopReason', kind: 'string' },
   ]);
 }
 
@@ -39,6 +42,7 @@ export function validateTurnFailed(v: unknown): ContractResult {
 export function validateTurnCancelled(v: unknown): ContractResult {
   return validateEventFields('TURN_CANCEL', v, [
     { key: 'turnId', kind: 'string' },
+    { key: 'stopReason', kind: 'string' },
   ]);
 }
 
@@ -56,6 +60,7 @@ export function validateToolSucceeded(v: unknown): ContractResult {
   return validateEventFields('TOOL_SUCCEEDED', v, [
     { key: 'callId', kind: 'string' },
     { key: 'turnId', kind: 'string' },
+    { key: 'tool', kind: 'string' },
     { key: 'durationMs', kind: 'number' },
   ]);
 }
@@ -64,6 +69,8 @@ export function validateToolFailed(v: unknown): ContractResult {
   return validateEventFields('TOOL_FAILED', v, [
     { key: 'callId', kind: 'string' },
     { key: 'turnId', kind: 'string' },
+    { key: 'tool', kind: 'string' },
     { key: 'error', kind: 'string' },
+    { key: 'durationMs', kind: 'number' },
   ]);
 }

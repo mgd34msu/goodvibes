@@ -108,6 +108,31 @@ function requirePositiveInt(value: unknown, field: string, max = Number.MAX_SAFE
   return value;
 }
 
+/** A zero-or-more whole count (a TTL or interval that may be 0), the form the persisted snapshot demands. */
+function requireCount(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new TriggerDefinitionError(field, 'must be a non-negative whole number');
+  }
+  return value;
+}
+
+function requireStringMap(value: unknown, field: string): void {
+  const entries = requireObject(value, field);
+  for (const [key, entry] of Object.entries(entries)) {
+    if (typeof entry !== 'string') throw new TriggerDefinitionError(`${field}.${key}`, 'must be a string');
+  }
+}
+
+function optionalString(value: unknown, field: string): void {
+  if (value !== undefined && typeof value !== 'string') throw new TriggerDefinitionError(field, 'must be a string when present');
+}
+
+function optionalChoice(value: unknown, choices: readonly string[], field: string): void {
+  if (value !== undefined && !(typeof value === 'string' && choices.includes(value))) {
+    throw new TriggerDefinitionError(field, `must be one of ${choices.join(', ')}`);
+  }
+}
+
 function requireFiniteNumber(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new TriggerDefinitionError(field, 'must be a finite number');
@@ -125,7 +150,12 @@ export function assertPlainData(value: unknown, field: string, depth = 0): void 
   }
   if (value === null || value === undefined) return;
   const type = typeof value;
-  if (type === 'string' || type === 'number' || type === 'boolean') return;
+  if (type === 'string' || type === 'boolean') return;
+  if (type === 'number') {
+    // JSON has no Infinity or NaN: the snapshot store refuses them at save and would take the whole trigger family down.
+    if (!Number.isFinite(value)) throw new TriggerDefinitionError(field, 'must be a finite number');
+    return;
+  }
   if (type === 'function') {
     throw new TriggerDefinitionError(field, 'must not be a function, the trigger DSL is declarative data, not code');
   }
@@ -144,6 +174,48 @@ export function assertPlainData(value: unknown, field: string, depth = 0): void 
   }
 }
 
+/** Set only while a stored definition is re-read, so a pattern saved before this rule existed does not make its whole store unreadable. It is still refused when it runs. */
+let readingPersistedDefinition = false;
+
+/**
+ * True when a group that contains an unbounded repeat (`*`, `+`, `{n,}`) is
+ * itself repeated without a bound. That shape backtracks exponentially, and
+ * these patterns run synchronously on the daemon's event loop against
+ * untrusted lines, so it is refused at the door rather than defended later.
+ */
+function hasNestedUnboundedQuantifier(pattern: string): boolean {
+  const unbounded = (at: number): number => {
+    const char = pattern[at];
+    if (char === '*' || char === '+') return 1;
+    if (char === '{') {
+      const close = pattern.indexOf('}', at);
+      if (close !== -1 && /^\{\d+,\}$/.test(pattern.slice(at, close + 1))) return close - at + 1;
+    }
+    return 0;
+  };
+  const groups: boolean[] = [];
+  let inClass = false;
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === '\\') { index += 1; continue; }
+    if (inClass) { if (char === ']') inClass = false; continue; }
+    if (char === '[') { inClass = true; continue; }
+    if (char === '(') { groups.push(false); continue; }
+    if (char === ')') {
+      const inner = groups.pop() ?? false;
+      const width = unbounded(index + 1);
+      if (width > 0 && inner) return true;
+      if (groups.length > 0 && (inner || width > 0)) groups[groups.length - 1] = true;
+      index += width;
+      continue;
+    }
+    const width = unbounded(index);
+    if (width > 0 && groups.length > 0) groups[groups.length - 1] = true;
+    index += Math.max(0, width - 1);
+  }
+  return false;
+}
+
 export function validateRegexSource(pattern: string, field: string, flags?: string | undefined): RegExp {
   if (pattern.length > MAX_REGEX_LENGTH) {
     throw new TriggerDefinitionError(field, `pattern must be at most ${MAX_REGEX_LENGTH} characters`);
@@ -151,8 +223,11 @@ export function validateRegexSource(pattern: string, field: string, flags?: stri
   const resolvedFlags = flags ?? '';
   for (const flag of resolvedFlags) {
     if (!ALLOWED_REGEX_FLAGS.has(flag)) {
-      throw new TriggerDefinitionError(field, `flag "${flag}" is not allowed (only i, m, s, u, g and y carry lastIndex state across checks)`);
+      throw new TriggerDefinitionError(field, `flag "${flag}" is not allowed (only i, m, s and u are accepted; g and y keep lastIndex state between checks)`);
     }
+  }
+  if (!readingPersistedDefinition && hasNestedUnboundedQuantifier(pattern)) {
+    throw new TriggerDefinitionError(field, 'repeats a group that itself repeats without a bound (for example (a+)+), which can stall the daemon on a crafted line; use a bounded or non-nested repeat');
   }
   try {
     return new RegExp(pattern, resolvedFlags);
@@ -171,6 +246,7 @@ export function validateProbe(input: unknown, field = 'probe'): TriggerProbe {
     throw new TriggerDefinitionError(`${field}.kind`, `must be one of ${[...PROBE_KINDS].join(', ')}`);
   }
   assertPlainData(probe, field);
+  if (probe.timeoutMs !== undefined) requireCount(probe.timeoutMs, `${field}.timeoutMs`);
 
   if (kind === 'http') {
     const url = requireString(probe.url, `${field}.url`);
@@ -186,17 +262,23 @@ export function validateProbe(input: unknown, field = 'probe'): TriggerProbe {
     if (probe.method !== undefined && !['GET', 'HEAD', 'POST'].includes(String(probe.method))) {
       throw new TriggerDefinitionError(`${field}.method`, 'must be GET, HEAD or POST');
     }
+    if (probe.headers !== undefined) requireStringMap(probe.headers, `${field}.headers`);
+    optionalString(probe.body, `${field}.body`);
+    optionalChoice(probe.capture, ['body', 'status', 'envelope'], `${field}.capture`);
     return probe as unknown as TriggerProbe;
   }
 
   if (kind === 'file') {
     requireString(probe.path, `${field}.path`);
     if (probe.maxBytes !== undefined) requirePositiveInt(probe.maxBytes, `${field}.maxBytes`, 16 * 1024 * 1024);
+    optionalChoice(probe.capture, ['content', 'stat'], `${field}.capture`);
     return probe as unknown as TriggerProbe;
   }
 
   if (kind === 'command') {
     validateArgv(probe.command, probe.args, field);
+    optionalString(probe.cwd, `${field}.cwd`);
+    optionalChoice(probe.capture, ['stdout', 'stderr', 'exit-code', 'envelope'], `${field}.capture`);
     return probe as unknown as TriggerProbe;
   }
 
@@ -380,6 +462,11 @@ export function validateAction(input: unknown, field = 'action'): TriggerFireAct
     if (typeof action.prompt === 'string' && action.prompt.length > MAX_STRING_LENGTH) {
       throw new TriggerDefinitionError(`${field}.prompt`, `must be at most ${MAX_STRING_LENGTH} characters`);
     }
+    // A fired trigger starts its own agent; nothing attaches it to an existing session.
+    // Refusing the field beats accepting it and running the turn somewhere else.
+    if (action.sessionId !== undefined && !readingPersistedDefinition) {
+      throw new TriggerDefinitionError(`${field}.sessionId`, 'is not supported: a fired trigger starts its own agent turn and cannot be attached to a session');
+    }
   } else {
     requireString(action.grantId, `${field}.grantId`);
     requireString(action.digest, `${field}.digest`);
@@ -397,6 +484,10 @@ export function validateSpec(input: unknown, field = 'spec'): TriggerSpec {
       if (spec.exclude !== undefined) {
         validateExtract({ ...requireObject(spec.exclude, `${field}.exclude`), kind: 'regex' }, `${field}.exclude`);
       }
+      optionalString(spec.cwd, `${field}.cwd`);
+      if (spec.restart !== undefined && typeof spec.restart !== 'boolean') throw new TriggerDefinitionError(`${field}.restart`, 'must be true or false');
+      if (spec.dedupTtlMs !== undefined) requireCount(spec.dedupTtlMs, `${field}.dedupTtlMs`);
+      if (spec.batchIntervalMs !== undefined) requireCount(spec.batchIntervalMs, `${field}.batchIntervalMs`);
       if (spec.batchLines !== undefined) requirePositiveInt(spec.batchLines, `${field}.batchLines`, 10_000);
       if (spec.queueLimit !== undefined) requirePositiveInt(spec.queueLimit, `${field}.queueLimit`, 1_000_000);
       return spec as unknown as TriggerSpec;
@@ -408,6 +499,9 @@ export function validateSpec(input: unknown, field = 'spec'): TriggerSpec {
       return spec as unknown as TriggerSpec;
     case 'on-exit':
       validateArgv(spec.command, spec.args, field);
+      optionalString(spec.cwd, `${field}.cwd`);
+      if (spec.env !== undefined) requireStringMap(spec.env, `${field}.env`);
+      if (spec.outputTailBytes !== undefined) requireCount(spec.outputTailBytes, `${field}.outputTailBytes`);
       if (spec.maxDurationMs !== undefined) {
         requirePositiveInt(spec.maxDurationMs, `${field}.maxDurationMs`, 7 * 24 * 60 * 60 * 1000);
       }
@@ -423,15 +517,25 @@ export function validateSpec(input: unknown, field = 'spec'): TriggerSpec {
   }
 }
 
-export function validateDefinition(input: unknown): TriggerDefinition {
+export function validateDefinition(input: unknown, options: { readonly persisted?: boolean } = {}): TriggerDefinition {
+  if (options.persisted !== true) return validateDefinitionFields(input);
+  readingPersistedDefinition = true;
+  try { return validateDefinitionFields(input); } finally { readingPersistedDefinition = false; }
+}
+
+function validateDefinitionFields(input: unknown): TriggerDefinition {
   const definition = requireObject(input, 'definition');
   const id = requireString(definition.id, 'definition.id');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) {
     throw new TriggerDefinitionError('definition.id', 'must be 1-128 characters of letters, digits, dot, underscore or hyphen');
   }
   requireString(definition.label, 'definition.label');
+  optionalString(definition.description, 'definition.description');
+  optionalString(definition.ownerSessionId, 'definition.ownerSessionId');
   validateSpec(definition.spec);
   validateAction(definition.action);
+  // The whole definition is saved as JSON, so a non-finite number in createdAt or any extra top-level field must be refused here, not at save.
+  assertPlainData(definition, 'definition');
   return {
     ...(definition as unknown as TriggerDefinition),
     createdAt: typeof definition.createdAt === 'number' ? definition.createdAt : Date.now(),

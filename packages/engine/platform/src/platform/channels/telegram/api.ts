@@ -131,7 +131,20 @@ export class TelegramBotApi {
     }
 
     const text = await response.text();
-    const payload = readRecord(text ? JSON.parse(text) as unknown : null);
+    let parsed: unknown = null;
+    if (text) {
+      try { parsed = JSON.parse(text) as unknown; }
+      catch {
+        // A proxy or gateway answered with a page instead of Telegram's JSON. The
+        // status is still the signal the retry logic reads (429, 5xx).
+        throw new TelegramApiError(`Telegram ${method} failed: HTTP ${response.status} with a non-JSON body`, {
+          errorCode: response.status, httpStatus: response.status, description: `HTTP ${response.status}`,
+          ...(response.headers.get('retry-after') && Number.isFinite(Number(response.headers.get('retry-after')))
+            ? { retryAfterSeconds: Number(response.headers.get('retry-after')) } : {}),
+        });
+      }
+    }
+    const payload = readRecord(parsed);
     if (payload?.ok === true) return payload.result;
 
     const description = typeof payload?.description === 'string'

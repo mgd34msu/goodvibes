@@ -5,6 +5,7 @@
  * composed in code. No message text is pattern-matched.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.ts';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
@@ -376,7 +377,7 @@ describe('AutomationManager reconcile', () => {
     });
     try {
       await manager.start();
-      for (let i = 0; i < 20 && retryable.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      await waitFor(() => retryable.length > 0);
       expect(manager.getRun('run-1')?.status).toBe('failed');
       return retryable;
     } finally {

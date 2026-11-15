@@ -191,30 +191,45 @@ describe('discovery decides before anything runs', () => {
     expect(plan.setupPath).toBe('oauth');
   });
 
-  test('the default succession never scans the filesystem for credential files', async () => {
+  test('the default succession touches only gcloud and the stored keys, never a credential path', async () => {
     // Ordinary people have no ~/.gmail-mcp, and a connector that goes looking
     // through home directories for credentials is doing something nobody
-    // asked for. Disk credentials are user-directed only.
-    let filesTouched = 0;
-    const watchfulHome = new Proxy(
-      {},
-      {
-        get: () => { filesTouched += 1; return undefined; },
+    // asked for. Disk credentials are user-directed only. Discovery has three
+    // ways to reach anything: the command port, the config port and the secret
+    // port. Recording all three means a disk scan, through a shell command or a
+    // new key, shows up here whatever it is named.
+    const knownKeys = new Set<string>([
+      ...Object.values(GOOGLE_CONFIG_KEYS),
+      ...Object.values(GOOGLE_SECRET_KEYS),
+    ]);
+    const readKeys: string[] = [];
+    const commandLines: string[] = [];
+    const recordingCommands = (inner: GoogleCommandPort): GoogleCommandPort => ({
+      run: async (command, args, options) => {
+        commandLines.push([command, ...args].join(' '));
+        return inner.run(command, args, options);
       },
-    );
-
-    const plan = await planGoogleConnection({
-      config: configPort(),
-      secrets: secretPort(),
-      commands: noGcloud,
-      // Any real file access would have to come through a port, and discovery
-      // is not given one at all, its dependencies do not include a file port.
+    });
+    const config = configPort();
+    const secrets = secretPort();
+    const sources = (commands: GoogleCommandPort) => ({
+      config: { ...config, get: (key: string) => { readKeys.push(key); return config.get(key); } },
+      secrets: { ...secrets, get: async (key: string) => { readKeys.push(key); return secrets.get(key); } },
+      commands: recordingCommands(commands),
       homeDirectory: HOME,
     });
 
-    expect(plan.route).toBe('guided-new-client');
-    expect(filesTouched).toBe(0);
-    void watchfulHome;
+    const absent = await planGoogleConnection(sources(noGcloud));
+    const present = await planGoogleConnection(sources(liveGcloud('agent@example.com')));
+
+    expect(absent.route).toBe('guided-new-client');
+    expect(present.route).toBe('gcloud-assisted');
+    expect(commandLines.length).toBeGreaterThan(0);
+    for (const line of commandLines) {
+      expect(line, `unexpected command: ${line}`).toMatch(/^(gcloud|\/home\/tester\/google-cloud-sdk\/bin\/gcloud) /);
+      expect(line).not.toMatch(/gmail-mcp|credentials|\.json|\bcat\b|\bfind\b|\bls\b/);
+    }
+    for (const key of readKeys) expect(knownKeys.has(key), `unknown key read: ${key}`).toBe(true);
   });
 
   test('the discovery contract exposes no file port at all, so a scan is impossible', () => {
@@ -539,6 +554,37 @@ describe('the token manager never repeats a refusal', () => {
     await manager.forceRefresh();
 
     expect(attempts).toBe(1);
+    expect(manager.grantIsDead()).toBe(true);
+  });
+
+  test('six callers arriving while a doomed refresh is in flight share that one refresh', async () => {
+    // The sequential case above only proves the latch after the first answer.
+    // The incident was concurrent: every caller arrived before any answer did.
+    let attempts = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const manager = new GoogleTokenManager(credentials(), {
+      refresh: async () => {
+        attempts += 1;
+        await gate;
+        return { ok: false, failure: 'grant-invalid', problem: 'Token has been expired or revoked.', fix: '/google reauthorize' };
+      },
+    });
+
+    const callers = [
+      ...Array.from({ length: 5 }, () => manager.accessToken()),
+      // forceRefresh racing the same in-flight refresh must join it, not start another.
+      manager.forceRefresh(),
+    ];
+    expect(attempts).toBe(1);
+    release();
+    const outcomes = await Promise.all(callers);
+
+    expect(attempts).toBe(1);
+    for (const outcome of outcomes) {
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.failure).toBe('grant-invalid');
+    }
     expect(manager.grantIsDead()).toBe(true);
   });
 

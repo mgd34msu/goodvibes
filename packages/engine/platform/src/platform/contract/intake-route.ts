@@ -28,7 +28,7 @@ import type { ToolResult } from '../types/tools.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { ESCALATION_TURN_SITE, escalationTurn, turnIsUnrelated } from './batteries/escalation-turn.js';
 import { REQUEST_ROUTE_SITE, requestRoute } from './batteries/request-route.js';
-import type { OwnerReplyOutcome } from './escalation.js';
+import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractRunner } from './runner.js';
 import type { ContractView, Escalation } from './types.js';
 
@@ -38,7 +38,7 @@ export type TurnIntakeOutcome =
   /** A contract started for the turn's text; the turn ends. */
   | { readonly kind: 'started'; readonly contractId: string; readonly ownerAgentId: string }
   /** The turn's text answered an open escalation; the turn ends. */
-  | { readonly kind: 'replied'; readonly contractId: string; readonly outcome: OwnerReplyOutcome };
+  | { readonly kind: 'replied'; readonly contractId: string; readonly outcome: OwnerReplyOutcome; readonly failurePause?: true };
 
 export interface ContractIntake {
   /** Reads one user turn; see the module comment. */
@@ -100,8 +100,16 @@ export function createContractIntake(deps: ContractIntakeDeps): ContractIntake {
         turn.signal?.throwIfAborted();
         if (route.kind === 'turn') return route;
         if (route.kind === 'reply') {
-          const outcome = await deps.runner.reply(route.waiting.contract.id, route.waiting.escalation.id, turn.text);
-          return { kind: 'replied', contractId: route.waiting.contract.id, outcome };
+          let outcome: OwnerReplyOutcome;
+          try {
+            outcome = await deps.runner.reply(route.waiting.contract.id, route.waiting.escalation.id, turn.text);
+          } catch (error) {
+            // The question was read as the turn's answer while it was being read elsewhere: the contract ended, or another
+            // surface answered first. Each refusal says nothing was applied, so the turn goes on as a normal message.
+            if (error instanceof OwnerReplyRefusedError && (error.refusal === 'ended' || error.refusal === 'not-open' || error.refusal === 'already-reading')) return { kind: 'turn' as const };
+            throw error;
+          }
+          return { kind: 'replied', contractId: route.waiting.contract.id, outcome, ...(route.waiting.escalation.failurePause === true ? { failurePause: true as const } : {}) };
         }
         const started = await deps.runner.start({ ask: turn.text, sessionId: turn.sessionId, origin: 'turn', projectRoot: deps.projectRoot,
           ...(deps.getSelectedModel === undefined ? {} : { selectedModel: deps.getSelectedModel() }),
@@ -128,6 +136,10 @@ export function toolResultStartedContract(result: ToolResult): boolean {
 export function describeIntake(outcome: Exclude<TurnIntakeOutcome, { kind: 'turn' }>): string {
   if (outcome.kind === 'started') {
     return `[Contract] Contract ${outcome.contractId} took this request; its answer arrives when every acceptance criterion is checked and met.`;
+  }
+  // A failed-turn question is answered "retry" or "cancel", not read as approval, so it says what was done.
+  if (outcome.failurePause === true) {
+    return `[Contract] Your answer to contract ${outcome.contractId} (${outcome.outcome.escalationId}) was taken as ${outcome.outcome.action === 'stopped' ? 'cancel: the contract is cancelled' : 'retry: the turn is retrying'}.`;
   }
   const next = outcome.outcome.nextEscalationId === undefined ? '' : ` It asks again (${outcome.outcome.nextEscalationId}).`;
   return `[Contract] Your reply to contract ${outcome.contractId} (${outcome.outcome.escalationId}) was read as ${outcome.outcome.reading}: ${outcome.outcome.action}.${next}`;

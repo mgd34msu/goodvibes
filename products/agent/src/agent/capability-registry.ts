@@ -236,7 +236,7 @@ export const CAPABILITY_REGISTRY: readonly AdvertisedCapability[] = [
     surfaces: ['calendar', 'personal-ops'],
     advertisedNames: ['calendar'],
     readinessNote:
-      'Calendar import and export through .ics files is implemented. Direct CalDAV server sync is not shipped.',
+      'Calendar import and export through .ics files, read-only feed subscriptions (any .ics address, including Google and Outlook published calendars), and Google and Microsoft account connect are implemented. Direct CalDAV server sync is not shipped.',
   },
   {
     id: 'browser-control',

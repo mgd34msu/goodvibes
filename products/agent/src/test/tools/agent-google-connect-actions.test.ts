@@ -103,18 +103,26 @@ describe('Google model credential setup uses native opaque plans', () => {
   });
   test('inline secret material is refused at the canonical model boundary', async () => {
     const rig = await toolRig();
-    expect((await rig.run({ action: 'connect.client', clientId: CLIENT_ID, clientSecret: CLIENT_SECRET })).success).toBe(false);
+    const refused = await rig.run({ action: 'connect.client', clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain('projection invalid');
     expect(rig.config.get(GOOGLE_CONFIG_KEYS.oauthClientId)).toBe('');
   });
   test('plan mode cannot bypass the concrete write floor even when readings say read', async () => {
     const rig = await toolRig();
-    expect((await rig.run({ action: 'connect.client', clientId: CLIENT_ID }, { mode: 'plan' })).success).toBe(false);
+    const refused = await rig.run({ action: 'connect.client', clientId: CLIENT_ID }, { mode: 'plan' });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toBe('plan_mode');
     expect(rig.config.get(GOOGLE_CONFIG_KEYS.oauthClientId)).toBe('');
   });
   test('missing or malformed client files are refused without a partial client config', async () => {
     const rig = await toolRig(); const malformed = join(rig.root, 'wrong.json'); writeFileSync(malformed, '{"refresh_token":"synthetic"}');
-    expect((await rig.run({ action: 'connect.clientFile', path: join(rig.root, 'missing.json') })).success).toBe(false);
-    expect((await rig.run({ action: 'connect.clientFile', path: malformed })).success).toBe(false);
+    const missing = await rig.run({ action: 'connect.clientFile', path: join(rig.root, 'missing.json') });
+    expect(missing.success).toBe(false);
+    expect(missing.error).toContain('projection unavailable');
+    const wrong = await rig.run({ action: 'connect.clientFile', path: malformed });
+    expect(wrong.success).toBe(false);
+    expect(wrong.error).toContain('projection invalid');
     expect(rig.config.get(GOOGLE_CONFIG_KEYS.oauthClientId)).toBe('');
   });
   test('account replacement before completion cannot adopt the pending token', async () => {

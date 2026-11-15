@@ -1,5 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -32,10 +32,18 @@ export interface KnowledgeModalDeps {
   readonly knowledgeApi: {
     readonly graph: {
       readonly nodes: { list(limit?: number, options?: KnowledgeReadOptions): Promise<readonly KnowledgeNodeLike[]> };
-      readonly issues: { list(limit?: number, options?: KnowledgeReadOptions): Promise<readonly KnowledgeIssueLike[]> };
+      readonly issues: {
+        list(limit?: number, options?: KnowledgeReadOptions): Promise<readonly KnowledgeIssueLike[]>;
+        /** Filtered read: the Review tab asks for open issues directly so a long store cannot push them out of the window. */
+        query?(input: { readonly status?: string; readonly limit?: number }, options?: KnowledgeReadOptions): Promise<{ readonly total: number; readonly items: readonly KnowledgeIssueLike[] }>;
+      };
+    };
+    /** Store-wide counts; without it the header falls back to the loaded window sizes. */
+    readonly status?: {
+      get(scope?: Record<string, never>, options?: KnowledgeReadOptions): Promise<{ readonly sourceCount: number; readonly nodeCount: number; readonly issueCount: number }>;
     };
     readonly sources: { list(limit?: number, options?: KnowledgeReadOptions): Promise<readonly KnowledgeSourceLike[]> };
-    readonly jobs: { schedules: { list(limit?: number): readonly KnowledgeScheduleLike[] } };
+    readonly jobs: { schedules: { list(limit?: number): Promise<readonly KnowledgeScheduleLike[]> | readonly KnowledgeScheduleLike[] } };
   };
 }
 
@@ -69,6 +77,10 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
   private sourceCount = 0;
   private nodeCount = 0;
   private issueCount = 0;
+  /** How many open issues the store holds, which can exceed the Review rows loaded. */
+  private openIssueCount = 0;
+  /** Rows actually loaded per kind (each read is capped at LIST_LIMIT), so the header can say when it shows only part. */
+  private shownCounts = { sources: 0, nodes: 0, issues: 0 };
   private schedules: readonly KnowledgeScheduleLike[] = [];
   private loadError: string | null = null;
 
@@ -121,26 +133,33 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
   private async load(controller: AbortController, assertCurrent: () => void): Promise<void> {
     const options = { signal: controller.signal, assertCurrent };
     try {
-      const [nodes, sources, issues] = await Promise.all([
-        this.deps.knowledgeApi.graph.nodes.list(LIST_LIMIT, options),
-        this.deps.knowledgeApi.sources.list(LIST_LIMIT, options),
-        this.deps.knowledgeApi.graph.issues.list(LIST_LIMIT, options),
+      const api = this.deps.knowledgeApi;
+      const [nodes, sources, issues, status, openIssues] = await Promise.all([
+        api.graph.nodes.list(LIST_LIMIT, options),
+        api.sources.list(LIST_LIMIT, options),
+        api.graph.issues.list(LIST_LIMIT, options),
+        api.status?.get({}, options),
+        api.graph.issues.query?.({ status: 'open', limit: LIST_LIMIT }, options),
       ]);
       assertCurrent();
-      const schedules = this.deps.knowledgeApi.jobs.schedules.list(20);
+      const schedules = await this.deps.knowledgeApi.jobs.schedules.list(20);
       assertCurrent();
-      this.sourceCount = sources.length;
-      this.nodeCount = nodes.length;
-      this.issueCount = issues.length;
+      this.sourceCount = status?.sourceCount ?? sources.length;
+      this.nodeCount = status?.nodeCount ?? nodes.length;
+      this.issueCount = status?.issueCount ?? issues.length;
+      this.shownCounts = { sources: sources.length, nodes: nodes.length, issues: issues.length };
       this.browseRows = [...sources.map(sourceRow), ...nodes.map(nodeRow), ...issues.map(issueRow)];
-      this.reviewRows = issues.filter((issue) => issue.status === 'open').map(issueRow);
+      const reviewIssues = openIssues ? openIssues.items : issues.filter((issue) => issue.status === 'open');
+      this.openIssueCount = openIssues ? openIssues.total : reviewIssues.length;
+      this.reviewRows = reviewIssues.map(issueRow);
       this.schedules = schedules;
       this.loading = false;
       this.requestRender();
     } catch (e) {
       if (controller.signal.aborted || this.controller !== controller) return;
       this.browseRows = []; this.reviewRows = []; this.schedules = [];
-      this.sourceCount = 0; this.nodeCount = 0; this.issueCount = 0;
+      this.sourceCount = 0; this.nodeCount = 0; this.issueCount = 0; this.openIssueCount = 0;
+      this.shownCounts = { sources: 0, nodes: 0, issues: 0 };
       this.loading = false;
       this.loadError = `Knowledge graph load failed: ${summarizeError(e)}`;
       this.requestRender();
@@ -153,8 +172,9 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
 
   private browseTab(): ConfigModalTab {
     const readySources = this.sourceCount > 0 && this.nodeCount > 0;
+    const count = (total: number, shown: number): string => (total > shown ? `${total} (listing ${shown})` : String(total));
     const header = [
-      `sources ${this.sourceCount}  nodes ${this.nodeCount}  issues ${this.issueCount}  schedules ${this.schedules.length}`,
+      `sources ${count(this.sourceCount, this.shownCounts.sources)}  nodes ${count(this.nodeCount, this.shownCounts.nodes)}  issues ${count(this.issueCount, this.shownCounts.issues)}  schedules ${this.schedules.length}`,
       readySources ? 'retrieval ready (sources + nodes indexed)' : 'retrieval not ready (needs sources and nodes)',
     ];
     const rows: ConfigModalRow[] = this.browseRows.map((row) => this.rowFor(row));
@@ -166,7 +186,8 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
   }
 
   private reviewTab(): ConfigModalTab {
-    return { id: 'review', label: 'Review', rows: this.reviewRows.map((row) => this.rowFor(row)), emptyText: 'No issues waiting for review.', hints: ['a accept', 'x reject', 's resolve', 'o reopen'] };
+    const header = this.openIssueCount > this.reviewRows.length ? [`open issues ${this.openIssueCount} (listing ${this.reviewRows.length})`] : undefined;
+    return { id: 'review', label: 'Review', ...(header ? { header } : {}), rows: this.reviewRows.map((row) => this.rowFor(row)), emptyText: 'No issues waiting for review.', hints: ['a accept', 'x reject', 's resolve', 'o reopen'] };
   }
 
   buildView(): ConfigModalView {
@@ -182,8 +203,7 @@ class KnowledgeModalSurface implements KnowledgeModalReadSurface {
     if (!action) return;
     const issueId = ctx.row?.id.startsWith('issue:') ? ctx.row.id.slice('issue:'.length) : null;
     if (!issueId) return;
-    void ctx.executeCommand?.('knowledge', ['review-issue', issueId, action, '--reviewer', 'tui']);
-    ctx.setStatus(`Dispatched /knowledge review-issue ${issueId} ${action}.`);
+    runModalCommand(ctx, 'knowledge', ['review-issue', issueId, action, '--reviewer', 'tui'], `/knowledge review-issue ${issueId} ${action}`, { afterSettle: () => this.refresh() });
   }
 }
 

@@ -1,5 +1,7 @@
 import type { SpawnOptionsWithoutStdio } from 'node:child_process';
 export type AcceptanceFetch = (url: string, options: RequestInit) => Promise<Response>;
+/** The release repository named by scripts/install.sh. */
+export const repository: string;
 export function consumeAcceptanceMetadataFetch(env?: NodeJS.ProcessEnv, fetchImpl?: AcceptanceFetch): {
   authentication: 'read-only-ci-token' | 'anonymous'; fetch: AcceptanceFetch;
 };
@@ -11,16 +13,7 @@ export interface AcceptanceSteps {
   admit(): Promise<void>; install(): Promise<void>; verifyInstalled(): Promise<void>; verifyDefaults(): Promise<void>;
   disableUpdates(): Promise<void>; restartAndVerifyOptOut(): Promise<void>; verifyOptOut(): Promise<void>;
   uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
-  diagnoseFailure?(): Promise<void>;
-  verifyNativeLifecycle?(): Promise<void>;
 }
-export interface HistoricalUpgradeSteps {
-  admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>;
-  seedPreviousData(): Promise<void>; startPreviousService(): Promise<void>; awaitAutomaticUpgrade(): Promise<void>;
-  verifyUpgradedData(): Promise<void>; verifyRollbackRefusal(): Promise<void>;
-  uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
-}
-export function runHistoricalUpgradeSteps(host: HistoricalUpgradeSteps): Promise<void>;
 export interface PreviousReleaseUpgradeSteps {
   admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>;
   seedPreviousData(): Promise<void>; startPreviousService(): Promise<void>; verifyPreviousService(): Promise<void>;
@@ -43,22 +36,6 @@ export function verifyCompiledSuiteRollback(input: {
   host: NativeLifecycleHost; target: string; source: string; sourceRoot: string; previousVersion: string; currentVersion: string;
   previousReaders: Map<string, unknown>; webuiDirectory: string; verifyPreserved(): Promise<void>;
 }): Promise<{ updatedPid: number; rolledBackPid: number }>;
-export interface InstallerMigrationSteps {
-  admit(): Promise<void>; installPrevious(): Promise<void>; verifyPrevious(): Promise<void>; seedPreviousData(): Promise<void>;
-  disablePreviousUpdates(): Promise<void>; startPreviousService(): Promise<void>; verifyPreviousService(): Promise<void>;
-  installCurrent(): Promise<void>; verifyCurrent(): Promise<void>; verifyMigratedData(): Promise<void>; restartAndVerifyMigrated(): Promise<void>;
-  uninstall(): Promise<void>; verifyPreserved(): Promise<void>;
-}
-export function runInstallerMigrationSteps(host: InstallerMigrationSteps): Promise<void>;
-export function assertHistoricalRollbackRefusal(input: { bin: string; version: string; webuiDirectory: string; signal?: AbortSignal; sourceRoot?: string },
-  verifier?: {
-    resolveSuiteUpdatePlan(input: object): { files: readonly { path: string }[]; directories: readonly { path: string }[]; assertCurrent(): void };
-    rollbackSuiteUpdate(input: { beforeCommit(): void; assertCurrent(): void }): unknown;
-    captureUpdateFileIo(input: object): object; realUpdateFileIo: object;
-    retainNativeUpdateSources(paths: readonly string[], io: object): () => void;
-    retainNativeUpdateTree(path: string): { assertCurrent(): void };
-    UpdateTransactionError: new(...args: never[]) => Error;
-  }): Promise<void>;
 export function assertHostedContext(input: HostedContext): void;
 export function runAcceptanceSteps(host: AcceptanceSteps): Promise<void>;
 export type NativeDaemonFailure = 'token-missing' | 'invalid-port' | 'unreachable' | 'auth-refused' | 'route-missing'
@@ -101,7 +78,7 @@ export function runOwnedCommand(command: string, args: readonly string[], option
   signal?: AbortSignal; timeoutMs?: number; installerSource?: string; installerSourcePath?: string; nativeDaemonDiagnostics?: boolean;
 }): Promise<{ code: number; stdout: string; exitSignal?: NodeJS.Signals; diagnostics?: string[]; nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure }>;
 export interface AcceptanceDelivery {
-  installerSource?: string; installerSourcePath?: string; rollbackSourceRoot?: string;
+  installerSource?: string; installerSourcePath?: string;
   admit(input: { tag: string; source: string; target: string; root: string; signal?: AbortSignal }): Promise<{
     readers: Map<string, unknown>; installer: string; published: { url: string; bytes: Uint8Array };
   }>;
@@ -111,19 +88,19 @@ export interface AcceptanceDelivery {
   }): Promise<void>;
   assertCurrent(): void;
   finish?(): Promise<void>;
-  /** Explicit unpublished Mac fixtures only; ordinary admission is unchanged. */
-  verifyNativeLifecycle?(input: NativeLifecycleHost): Promise<void>;
 }
 export function acceptPublishedSuite(input: { tag: string; source: string; target: string;
-  scenario?: 'fresh' | 'upgrade-v3.1.1' | 'installer-migrate-v3.1.1' | 'upgrade-previous';
-  previousTag?: string; previousSource?: string; signal?: AbortSignal; delivery?: AcceptanceDelivery }): Promise<void>;
+  scenario?: 'fresh' | 'upgrade-previous';
+  previousTag?: string; previousSource?: string; signal?: AbortSignal; delivery?: AcceptanceDelivery;
+  /** `recheck` re-verifies an already published release; see readPublicAcceptanceDelivery. */
+  mode?: 'release' | 'recheck' }): Promise<void>;
 export function readPublishedReaders(input: { tag: string; source: string; target: string; assets: ReadonlySet<string>; onCheck?(check: string): void },
   load: (name: string) => Promise<PublishedReader>): Promise<Map<string, unknown>>;
 export function readPublicAcceptanceDelivery(input: {
   tag: string; source: string; target: string; signal?: AbortSignal;
-  checkpoint(check: string): void; onHttpStatus(status: number): void;
+  checkpoint(check: string): void; onHttpStatus(status: number): void; mode?: 'release' | 'recheck';
 }, fetchImpl?: (url: string, options: RequestInit) => Promise<Response>): Promise<{ readers: Map<string, unknown>;
-  published: { bytes: Buffer; url: string }; immutable: { bytes: Buffer; url: string } }>;
+  published: { bytes: Buffer; url: string }; immutable: { bytes: Buffer; url: string }; mode: 'release' | 'recheck' }>;
 export function readPreviousReleaseCohort(input: {
   tag: string; source: string; target: string; signal?: AbortSignal;
   checkpoint(check: string): void; onHttpStatus(status: number): void;

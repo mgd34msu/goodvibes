@@ -6,8 +6,12 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { openTtsProviderPicker, openTtsVoicePicker } from '../input/tts-settings-actions.ts';
 import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/platform/platform/voice';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-route.ts';
+import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
+import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string { return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`; }
@@ -19,9 +23,7 @@ function hostActions(...actions: readonly string[]): string { return `host ${act
 function readString(value: unknown): string { return typeof value === 'string' ? value.trim() : ''; }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function routeUnavailable(surface: UiSurfaceDefinition): Record<string, unknown> {
@@ -40,6 +42,18 @@ function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {
     ...extra,
     note: 'UI routing was handed to the current Agent operator surface.',
   };
+}
+
+function notOpened(surface: UiSurfaceDefinition, reason: string): Record<string, unknown> {
+  return { status: 'not_opened', surface: surface.id, kind: surface.kind, note: reason };
+}
+
+const MODEL_PICKER_TARGETS = 'main, helper, tool or tts';
+
+/** A target the picker cannot route is refused, not silently replaced by `main`. */
+function unrecognisedModelTarget(args: AgentHarnessUiSurfaceArgs): string | null {
+  const target = readString(args.target);
+  return target && !optionalModelTarget(args) ? target : null;
 }
 
 function optionalModelTarget(args: AgentHarnessUiSurfaceArgs): 'main' | 'helper' | 'tool' | 'tts' | undefined {
@@ -127,6 +141,9 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       const surface = findSurfaceById('agent-workspace')!;
       if (!context.openAgentWorkspace) return routeUnavailable(surface);
       const categoryId = workspaceCategory(args);
+      if (categoryId && !isKnownAgentWorkspaceCategory(AGENT_WORKSPACE_CATEGORIES, categoryId)) {
+        return notOpened(surface, `Unknown Agent workspace area "${categoryId}". Nothing was opened. Valid ids: ${AGENT_WORKSPACE_CATEGORIES.map((category) => category.id).join(', ')}.`);
+      }
       context.openAgentWorkspace(categoryId);
       return opened(surface, { categoryId: categoryId ?? 'default' });
     },
@@ -150,6 +167,15 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       const surface = findSurfaceById('connected-browser-cockpit')!;
       const route = await connectedBrowserCockpitRoute(context, {}, readingOptions);
       assertCurrent?.();
+      if (route.status === 'unavailable') {
+        return {
+          status: 'unavailable',
+          surface: surface.id,
+          kind: surface.kind,
+          route,
+          note: typeof route.reason === 'string' && route.reason ? route.reason : 'The connected-host web endpoint settings could not be read.',
+        };
+      }
       if (route.enabled !== true) {
         return {
           status: 'setup_needed',
@@ -288,9 +314,12 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
       const surface = findSurfaceById('model-picker')!;
+      const unrecognised = unrecognisedModelTarget(args);
+      if (unrecognised) return notOpened(surface, `Unknown model target "${unrecognised}". Nothing was opened. Use one of ${MODEL_PICKER_TARGETS}, or omit target for the main model.`);
       const target = optionalModelTarget(args);
       if (target && context.openModelPickerWithTarget) {
         const openedForTarget = context.openModelPickerWithTarget(target);
+        if (!openedForTarget) return notOpened(surface, `The ${target} model picker did not open (the runtime declined it). Nothing was changed.`);
         return opened(surface, { target, openedForTarget });
       }
       if (!context.openModelPicker) return routeUnavailable(surface);
@@ -310,9 +339,11 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
       const surface = findSurfaceById('provider-picker')!;
+      const unrecognised = unrecognisedModelTarget(args);
+      if (unrecognised) return notOpened(surface, `Unknown provider target "${unrecognised}". Nothing was opened. Use one of ${MODEL_PICKER_TARGETS}, or omit target for the main route.`);
       const target = optionalModelTarget(args);
       if (target && context.openProviderModelPickerWithTarget) {
-        context.openProviderModelPickerWithTarget(target);
+        if (!context.openProviderModelPickerWithTarget(target)) return notOpened(surface, `The ${target} provider picker did not open (the runtime declined it). Nothing was changed.`);
         return opened(surface, { target });
       }
       if (!context.openProviderPicker) return routeUnavailable(surface);
@@ -618,7 +649,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
   },
   {
     id: 'onboarding',
-    label: 'Agent Workspace',
+    label: 'Agent Workspace Onboarding',
     kind: 'workspace',
     summary: 'Agent workspace entry for first-run and setup review.',
     command: '/agent',
@@ -810,7 +841,7 @@ async function describeSurface(
       parameters: surface.parameters ?? [],
       policy: {
         effect: 'visible-ui-navigation',
-        confirmation: 'agent_harness mode:"open_ui_surface" requires confirm:true and explicitUserRequest.',
+        confirmation: 'agent_harness mode:"open_ui_surface" opens a visible surface; confirm:true and explicitUserRequest are context only and grant nothing.',
         boundary: 'UI surface routing opens the same visible Agent shell surface the user can open. Use first-class model tools, settings modes, workspace actions, or confirmed slash-command mirrors for actual operations.',
       },
     } : {}),
@@ -854,25 +885,34 @@ export async function describeHarnessUiSurface(context: CommandContext, args: Ag
 }
 
 export async function openHarnessUiSurface(context: CommandContext, args: AgentHarnessUiSurfaceArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return withUiReadingRequest(context, args, options, async (request, readingOptions) => {
-    args = request.input;
-    const resolved = await resolveHarnessUiSurface(context, args, readingOptions);
-    readingOptions.assertCurrent?.();
-    if (resolved?.status === 'ambiguous') {
-      return { status: 'ambiguous_ui_surface', input: resolved.input, candidates: resolved.candidates };
-    }
-    if (!resolved) {
-      return {
-        status: 'unknown_ui_surface',
-        surfaceId: readString(args.surfaceId || args.query || args.target) || '<missing>',
-        availableSurfaces: UI_SURFACES.map((entry) => entry.id),
-      };
-    }
-    readingOptions.assertCurrent?.();
-    const routed = await resolved.surface.open(context, args, () => { readingOptions.assertCurrent?.(); }, readingOptions);
-    readingOptions.assertCurrent?.();
-    const descriptor = await describeSurface(context, resolved.surface, { includeParameters: true, lookup: resolved.lookup }, readingOptions);
-    readingOptions.assertCurrent?.();
-    return { ...routed, descriptor };
-  });
+  let routed: Record<string, unknown> | undefined;
+  try {
+    return await withUiReadingRequest(context, args, options, async (request, readingOptions) => {
+      args = request.input;
+      const resolved = await resolveHarnessUiSurface(context, args, readingOptions);
+      readingOptions.assertCurrent?.();
+      if (resolved?.status === 'ambiguous') {
+        return { status: 'ambiguous_ui_surface', input: resolved.input, candidates: resolved.candidates };
+      }
+      if (!resolved) {
+        return {
+          status: 'unknown_ui_surface',
+          surfaceId: readString(args.surfaceId || args.query || args.target) || '<missing>',
+          availableSurfaces: UI_SURFACES.map((entry) => entry.id),
+        };
+      }
+      readingOptions.assertCurrent?.();
+      routed = await resolved.surface.open(context, args, () => { readingOptions.assertCurrent?.(); }, readingOptions);
+      readingOptions.assertCurrent?.();
+      const descriptor = await describeSurface(context, resolved.surface, { includeParameters: true, lookup: resolved.lookup }, readingOptions);
+      readingOptions.assertCurrent?.();
+      return { ...routed, descriptor };
+    });
+  } catch (err) {
+    // The surface is already open (a browser may be launched) and the reading source's own
+    // checks run after the callback returns, so the guard is here: reporting a failure would
+    // make the caller open it a second time.
+    if (routed?.status !== 'opened' || !(err instanceof ToolInputProjectionError)) throw err;
+    return { ...routed, descriptorUnavailable: 'The surface opened, but its descriptor could not be read because the source changed afterwards. Do not call open_ui_surface again; inspect it with mode:"ui_surface".' };
+  }
 }

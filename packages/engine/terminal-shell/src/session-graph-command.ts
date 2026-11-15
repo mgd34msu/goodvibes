@@ -4,7 +4,9 @@ import { statusBadge } from './task-presentation.js';
 export function flagValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx === -1 || idx + 1 >= args.length) return undefined;
-  return args[idx + 1];
+  const value = args[idx + 1]!;
+  // The next token is another flag, so this one has no value.
+  return value.startsWith('--') ? undefined : value;
 }
 export function fmtRef(ref: CrossSessionTaskRef): string {
   const key = `${ref.sessionId.slice(0, 8)}...:${ref.taskId.slice(0, 8)}...`;
@@ -18,17 +20,39 @@ export function createSessionGraphHandler<Context extends { readonly print: (mes
   emptyGraph: string,
 ) {
   function handleGraph(args: string[], context: Context): void {
-    const filterSession = flagValue(args, '--session');
+    const requestedSession = flagValue(args, '--session');
     const format = flagValue(args, '--format') ?? 'text';
 
     const orchestration = requireSessionOrchestration(context);
     const snap = orchestration.snapshot();
 
     const refs = Object.values(snap.refs);
+    // The text view shows shortened ids, so a prefix of a registered session id
+    // selects it; an exact id always wins.
+    let filterSession = requestedSession;
+    if (requestedSession) {
+      const ids = [...new Set(refs.map((r) => r.sessionId))];
+      const matches = ids.includes(requestedSession) ? [requestedSession] : ids.filter((id) => id.startsWith(requestedSession));
+      if (matches.length > 1) {
+        context.print(`[session] Ambiguous session: ${requestedSession}. Use more of the id: ${matches.join(', ')}`);
+        return;
+      }
+      filterSession = matches[0] ?? requestedSession;
+    }
     const filteredRefs = filterSession ? refs.filter((r) => r.sessionId === filterSession) : refs;
 
     if (format === 'json') {
-      context.print(JSON.stringify(snap, null, 2));
+      if (!filterSession) {
+        context.print(JSON.stringify(snap, null, 2));
+        return;
+      }
+      const scoped = {
+        ...snap,
+        refs: Object.fromEntries(Object.entries(snap.refs).filter(([, ref]) => ref.sessionId === filterSession)),
+        edges: snap.edges.filter((e) => e.fromRef.sessionId === filterSession || e.toRef.sessionId === filterSession),
+        handoffs: snap.handoffs.filter((h) => h.fromSessionId === filterSession || h.toSessionId === filterSession),
+      };
+      context.print(JSON.stringify(scoped, null, 2));
       return;
     }
 
@@ -36,7 +60,7 @@ export function createSessionGraphHandler<Context extends { readonly print: (mes
 
     if (filteredRefs.length === 0) {
       if (filterSession) {
-        context.print(`[session] No tasks registered for session ${filterSession.slice(0, 8)}...`);
+        context.print(`[session] No tasks registered for session ${filterSession}`);
       } else {
         context.print(emptyGraph);
       }
@@ -54,7 +78,7 @@ export function createSessionGraphHandler<Context extends { readonly print: (mes
     }
 
     for (const [sid, sessionRefs] of bySession) {
-      lines.push(`  Session ${sid.slice(0, 16)}...`);
+      lines.push(`  Session ${sid}`);
       for (const ref of sessionRefs) {
         lines.push(`    ${fmtRef(ref)}`);
 

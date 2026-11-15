@@ -276,10 +276,20 @@ describe('DNS and pinned webhook transport lifetime', () => {
 
   test('existing address fallback rechecks authority before another outbound attempt', async () => {
     const owner = lifetime();
-    transport = async () => { owner.revoke(); throw new Error('Owned connection failure'); };
+    // Only a refused connection proves the first attempt never reached the server, so only it is retried.
+    transport = async () => { owner.revoke(); throw Object.assign(new Error('Owned connection refused'), { code: 'ECONNREFUSED' }); };
     await expect(pinnedFetch('https://owned.example.invalid/hook', { method: 'POST' }, [
       { address: '203.0.113.31', family: 4 }, { address: '203.0.113.32', family: 4 },
     ], 'opaque-url', owner.assertCurrent)).rejects.toBe(revoked);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('a POST that failed after reaching the server is not repeated against another address', async () => {
+    const failure = new Error('Owned connection reset');
+    transport = async () => { throw failure; };
+    await expect(pinnedFetch('https://owned.example.invalid/hook', { method: 'POST' }, [
+      { address: '203.0.113.31', family: 4 }, { address: '203.0.113.32', family: 4 },
+    ], 'opaque-url')).rejects.toBe(failure);
     expect(calls).toHaveLength(1);
   });
 });

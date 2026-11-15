@@ -28,6 +28,7 @@ export interface SurfaceDomainState {
   readonly surfaceIds: string[];
   readonly enabledSurfaceIds: string[];
   readonly problemSurfaceIds: string[];
+  /** Enabled surfaces in the `healthy` state; a disabled surface counts only in `totalDisabled`. */
   readonly totalHealthy: number;
   readonly totalDegraded: number;
   readonly totalDisabled: number;

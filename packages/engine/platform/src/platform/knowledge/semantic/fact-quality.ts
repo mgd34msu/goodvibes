@@ -77,6 +77,8 @@ export interface KnowledgeFactQualityOptions extends KnowledgePageFactQualityOpt
   readonly query: string;
   readonly subjects: readonly KnowledgeNodeRecord[];
   readonly signal?: AbortSignal | undefined;
+  /** Bounds one repair-usefulness reading batch; omitted, the reader's own default applies. */
+  readonly timeoutMs?: number | undefined;
   readonly guard?: SemanticWriteGuard | undefined;
   /** Exact prepared proposals. Their current target rows, including absence, remain guarded. */
   readonly proposedFacts?: ReadonlySet<KnowledgeNodeRecord> | undefined;
@@ -103,7 +105,7 @@ export function createKnowledgeFactQualityReader(store: KnowledgeStore, options:
   requireSemanticKnowledge();
   const signal = options.signal;
   const guard = options.guard ?? createSemanticWriteGuard(store, options.signal);
-  const repair = createRepairFactUsefulnessReader({ signal: options.signal });
+  const repair = createRepairFactUsefulnessReader({ signal: options.signal, timeoutMs: options.timeoutMs });
   const page = createKnowledgePageFactUsefulnessReader({ signal: options.signal });
   const ownership: (() => void)[] = [];
   const policy = () => JSON.stringify({ spaceId: options.spaceId, query: options.query,

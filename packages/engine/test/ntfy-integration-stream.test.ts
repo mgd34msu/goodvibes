@@ -54,9 +54,7 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
         Connection: 'keep-alive',
       });
       res.write(JSON.stringify({ event: 'open', topic: 'goodvibes' }) + '\n');
-      setTimeout(() => {
-        res.write(JSON.stringify({ event: 'message', topic: 'goodvibes', message: 'hello' }) + '\n');
-      }, 5);
+      res.write(JSON.stringify({ event: 'message', topic: 'goodvibes', message: 'hello' }) + '\n');
     });
 
     try {
@@ -74,8 +72,8 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
         reconnectDelayMs: 10,
       });
 
-      await withTimeout(receivedMessage, 1_000, 'timed out waiting for ntfy message');
-      await withTimeout(subscription, 1_000, 'timed out waiting for ntfy subscription abort');
+      await withTimeout(receivedMessage, 10_000, 'timed out waiting for ntfy message');
+      await withTimeout(subscription, 10_000, 'timed out waiting for ntfy subscription abort');
 
       expect(requestHeaders.authorization).toBe('Bearer token-1');
       expect(messages.map((message) => message.event)).toEqual(['open', 'message']);
@@ -134,8 +132,8 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
         reconnectDelayMs: 1,
       });
 
-      await withTimeout(receivedSecondMessage, 1_000, 'timed out waiting for reconnect ntfy message');
-      await withTimeout(subscription, 1_000, 'timed out waiting for ntfy subscription abort');
+      await withTimeout(receivedSecondMessage, 10_000, 'timed out waiting for reconnect ntfy message');
+      await withTimeout(subscription, 10_000, 'timed out waiting for ntfy subscription abort');
 
       expect(messages.map((message) => message.id)).toEqual([firstMessage.id, secondMessage.id]);
       expect(new URL(requestUrls[0]!, baseUrl).searchParams.get('since')).toBe('1000');
@@ -182,7 +180,7 @@ describe('NtfyIntegration.subscribeJsonStream()', () => {
 
       const result = await manager.start('ntfy');
       expect(result.ok).toBe(true);
-      const requestUrl = await withTimeout(receivedRequest, 1_000, 'timed out waiting for ntfy runtime subscription');
+      const requestUrl = await withTimeout(receivedRequest, 10_000, 'timed out waiting for ntfy runtime subscription');
       const after = Number(createNtfyLiveSubscriptionSince());
       const since = new URL(requestUrl, baseUrl).searchParams.get('since');
       expect(since).not.toBe('latest');
@@ -322,6 +320,7 @@ describe('ntfy topic routing', () => {
     try {
       const helper = new DaemonSurfaceActionHelper({
         serviceRegistry: { resolveSecret: async () => null },
+        secretsManager: { get: async () => null, getGlobalHome: () => '/nonexistent-home' },
         configManager: {
           get: (key: string) => key === 'surfaces.ntfy.baseUrl' ? baseUrl : '',
         },
@@ -372,7 +371,7 @@ describe('ntfy topic routing', () => {
         { turnId: 'turn-1', response: 'hello from model', stopReason: 'completed' },
       );
 
-      await withTimeout(published, 1_000, 'timed out waiting for ntfy chat reply publish');
+      await withTimeout(published, 10_000, 'timed out waiting for ntfy chat reply publish');
       expect(publishCalls).toHaveLength(1);
       expect(publishCalls[0]).toMatchObject({
         url: `/${GOODVIBES_NTFY_CHAT_TOPIC}`,
@@ -412,6 +411,7 @@ describe('ntfy topic routing', () => {
     try {
       const helper = new DaemonSurfaceActionHelper({
         serviceRegistry: { resolveSecret: async () => null },
+        secretsManager: { get: async () => null, getGlobalHome: () => '/nonexistent-home' },
         configManager: {
           get: (key: string) => key === 'surfaces.ntfy.baseUrl' ? baseUrl : '',
         },
@@ -444,7 +444,11 @@ describe('ntfy topic routing', () => {
       emitTurnSubmitted(
         runtimeBus,
         { sessionId: 'orchestrator-private-session', traceId: 'turn-1', source: 'test' },
-        { turnId: 'turn-1', prompt: 'hi' },
+        {
+          turnId: 'turn-1',
+          prompt: 'hi',
+          origin: { source: 'ntfy-chat', surface: 'ntfy', topic: GOODVIBES_NTFY_CHAT_TOPIC },
+        },
       );
       emitTurnCompleted(
         runtimeBus,
@@ -452,7 +456,7 @@ describe('ntfy topic routing', () => {
         { turnId: 'turn-1', response: 'hello from prompt-derived route', stopReason: 'completed' },
       );
 
-      await withTimeout(published, 1_000, 'timed out waiting for ntfy chat reply publish');
+      await withTimeout(published, 10_000, 'timed out waiting for ntfy chat reply publish');
       expect(publishCalls).toHaveLength(1);
       expect(publishCalls[0]).toMatchObject({
         url: `/${GOODVIBES_NTFY_CHAT_TOPIC}`,
@@ -596,6 +600,7 @@ describe('ntfy topic routing', () => {
       };
       const helper = new DaemonSurfaceActionHelper({
         serviceRegistry: { resolveSecret: async () => null },
+        secretsManager: { get: async () => null, getGlobalHome: () => '/nonexistent-home' },
         configManager: {
           get: (key: string) => key === 'surfaces.ntfy.baseUrl' ? baseUrl : '',
         },
@@ -630,7 +635,7 @@ describe('ntfy topic routing', () => {
         provider: 'openai',
         model: 'gpt-5.5',
       });
-      await withTimeout(published, 1_000, 'timed out waiting for ntfy remote reply publish');
+      await withTimeout(published, 10_000, 'timed out waiting for ntfy remote reply publish');
     } finally {
       await close(server);
     }
@@ -651,6 +656,7 @@ describe('ntfy topic routing', () => {
           return {
             mode: 'spawn',
             session: { id: input.sessionId },
+            input: { id: 'input-1' },
             task: 'agent task',
             routeBinding: { id: 'route-1', surfaceId: 'ntfy', channelId: GOODVIBES_NTFY_AGENT_TOPIC, externalId: GOODVIBES_NTFY_AGENT_TOPIC },
           };

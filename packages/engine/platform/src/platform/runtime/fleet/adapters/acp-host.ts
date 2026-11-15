@@ -3,13 +3,11 @@
 /**
  * Hosted third-party ACP agent -> ProcessNode. A hosted Claude Code / Codex /
  * opencode session appears as a first-class fleet row: steerable (a steer is
- * the next ACP prompt), stoppable (ACP cancel + kill), and its
- * waiting-on-human permission ask classifies as 'awaiting-approval' so the
- * attention machinery (glyph/count/jump/push) is inherited unchanged.
+ * the next ACP prompt) and stoppable (ACP cancel + kill). Its permission asks
+ * are decided autonomously, so a hosted row never waits on a human.
  */
 import type { AcpHostService, HostedAcpAgent } from '../../../acp/host.js';
 import type { ProcessNode, ProcessState } from '../types.js';
-import { deriveNeedsAttention } from './agent.js';
 
 export function acpHostNodeId(hostedId: string): string {
   return `acp:${hostedId}`;
@@ -23,8 +21,6 @@ function hostedState(hosted: HostedAcpAgent): ProcessState {
       return 'idle';
     case 'prompting':
       return 'executing-tool';
-    case 'awaiting-approval':
-      return 'awaiting-approval';
     case 'failed':
       return 'failed';
     case 'stopped':
@@ -36,7 +32,6 @@ function hostedState(hosted: HostedAcpAgent): ProcessState {
 export function adaptHostedAcpAgent(hosted: HostedAcpAgent, now: number): ProcessNode {
   const state = hostedState(hosted);
   const live = hosted.state !== 'failed' && hosted.state !== 'stopped';
-  const attention = deriveNeedsAttention(state, hosted.pendingPermission);
   return {
     id: acpHostNodeId(hosted.id),
     kind: 'acp-agent',
@@ -65,7 +60,6 @@ export function adaptHostedAcpAgent(hosted: HostedAcpAgent, now: number): Proces
       // bus involved; the host service delivers it over the ACP connection.
       steerable: live,
     },
-    ...(attention ? { needsAttention: attention } : {}),
     ...(hosted.sessionId ? { sessionRef: { sessionId: hosted.sessionId } } : {}),
     raw: hosted,
   };

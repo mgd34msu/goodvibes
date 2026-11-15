@@ -20,6 +20,7 @@
  *     revocation at all.
  */
 import { isOutOfBandMessageType } from './group-membership.js';
+import { MAX_DATAGRAM_SKEW_MS } from './protocol.js';
 import { ClusterOwnedLifecycle } from './owned-lifecycle.js';
 import {
   decodeEnvelope,
@@ -77,6 +78,13 @@ export interface GroupWireRouterOptions {
   readonly onOutOfBandMessage: (raw: string, type: string) => void;
   /** A beacon from a DIFFERENT group. Advertisement only; never acted on. */
   readonly onForeignBeacon: (groupId: string, body: Record<string, unknown>, version: string) => void;
+  /**
+   * A datagram claimed a key generation this machine does not hold: the group
+   * has probably rotated while this machine was not listening. Unauthenticated
+   * (the signature could not be checked), so it may only prompt a verified
+   * catch-up, never act on the datagram.
+   */
+  readonly onGenerationNotHeld?: (() => void) | undefined;
 }
 
 /**
@@ -293,6 +301,7 @@ export class GroupWireRouter {
     const decoded = decodeEnvelope(raw, this.options.keyring);
     if (!decoded.envelope) {
       this.countRejection(decoded.rejected);
+      if (this.claimsNewerGeneration(raw, decoded.rejected)) this.options.onGenerationNotHeld?.();
       if (
         decoded.rejected === 'other-group'
         && peeked?.type === 'BEACON'
@@ -303,11 +312,38 @@ export class GroupWireRouter {
       return;
     }
 
+    // A signature proves who sent a datagram, not when: a captured one replayed
+    // into a node that just restarted would otherwise be taken as live.
+    const skew = Math.abs(this.options.now() - decoded.envelope.ts);
+    if (skew > MAX_DATAGRAM_SKEW_MS) {
+      this.counters.droppedMalformed += 1;
+      this.options.logger.debug('cluster: dropped a datagram whose timestamp is too far from this machine\'s clock', {
+        type: decoded.envelope.type,
+        skewSeconds: Math.round(skew / 1_000),
+      });
+      return;
+    }
+
     if (GROUP_OWNED_TYPES.has(decoded.envelope.type)) {
       this.options.onGroupMessage(decoded.envelope);
       return;
     }
     this.electionListener?.(this.unwrapElectionMessage(decoded.envelope));
+  }
+
+  /**
+   * A generation we do not hold, or one ahead of ours (a rotation we missed).
+   * A generation BEHIND ours is the sender being stale, which is not our gap.
+   */
+  private claimsNewerGeneration(raw: string, rejection: EnvelopeRejection | null): boolean {
+    if (rejection === 'generation-not-held') return true;
+    if (rejection !== 'generation-not-accepted') return false;
+    try {
+      const claimed = (JSON.parse(raw) as Record<string, unknown>)['keyGen'];
+      return typeof claimed === 'number' && claimed > this.options.keyring.currentGeneration;
+    } catch {
+      return false;
+    }
   }
 
   private countRejection(rejection: EnvelopeRejection | null): void {

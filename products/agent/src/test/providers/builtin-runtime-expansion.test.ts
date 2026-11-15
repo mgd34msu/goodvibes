@@ -48,15 +48,15 @@ describe('provider runtime expansion', () => {
       originalEnv.set(key, process.env[key]);
       delete process.env[key];
     }
-    const configManager = new ConfigManager({ surfaceRoot: 'tui',  configDir: join(tempHome, '.goodvibes', 'tui') });
-    const subscriptionManager = new SubscriptionManager(join(tempHome, '.goodvibes', 'tui', 'subscriptions.json'));
+    const configManager = new ConfigManager({ surfaceRoot: 'agent',  configDir: join(tempHome, '.goodvibes', 'agent') });
+    const subscriptionManager = new SubscriptionManager(join(tempHome, '.goodvibes', 'agent', 'subscriptions.json'));
     const secretsManager = new SecretsManager({ projectRoot: tempHome, globalHome: tempHome });
-    const serviceRegistry = new ServiceRegistry(join(tempHome, '.goodvibes', 'tui', 'services.json'), {
+    const serviceRegistry = new ServiceRegistry(join(tempHome, '.goodvibes', 'agent', 'services.json'), {
       secretsManager,
       subscriptionManager,
     });
-    const favoritesStore = new FavoritesStore({ dir: join(tempHome, '.goodvibes', 'tui') });
-    const benchmarkStore = new BenchmarkStore({ dir: join(tempHome, '.goodvibes', 'tui') });
+    const favoritesStore = new FavoritesStore({ dir: join(tempHome, '.goodvibes', 'agent') });
+    const benchmarkStore = new BenchmarkStore({ dir: join(tempHome, '.goodvibes', 'agent') });
     providerRegistry = createLaunchTolerantProviderRegistry({
       configManager,
       subscriptionManager,

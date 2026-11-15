@@ -159,6 +159,27 @@ describe('AgentOrchestrator: getFullRegistry(cwd) against REAL tool deps', () =>
     }
   });
 
+  test('a registry built without control surfaces tells the model about no commands or panels', async () => {
+    const defaultDir = mkdtempSync(join(tmpdir(), 'agent-cwd-control-'));
+    const scratchRoot = mkdtempSync(join(tmpdir(), 'agent-cwd-control-scratch-'));
+    try {
+      const orchestrator = disposables.add(new AgentOrchestrator({ messageBus: new AgentMessageBus() })) as unknown as PrivateOrchestrator;
+      orchestrator.toolDeps = makeRealToolDeps(defaultDir, scratchRoot);
+      const registry = orchestrator.getFullRegistry();
+      const commands = await registry.execute('call-commands', 'control', { mode: 'commands' });
+      expect(JSON.parse(commands.output!)).toEqual({ count: 0, commands: [] });
+      const panels = await registry.execute('call-panels', 'control', { mode: 'panels' });
+      expect(JSON.parse(panels.output!)).toEqual({ count: 0, panels: [] });
+    } finally {
+      try {
+        await disposables.flush();
+      } finally {
+        rmSync(defaultDir, { recursive: true, force: true });
+        rmSync(scratchRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('the concrete claim: a real "write" tool call through the OVERRIDE registry lands inside the override directory, never the default one', async () => {
     const defaultDir = mkdtempSync(join(tmpdir(), 'agent-cwd-write-default-'));
     const worktreeDir = mkdtempSync(join(tmpdir(), 'agent-cwd-write-worktree-'));

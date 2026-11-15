@@ -15,7 +15,8 @@
  *   3. On failure, call `markFailed(key)` to allow a retry on the next attempt.
  *
  * TTL-based eviction runs automatically whenever the store exceeds `maxRecords`.
- * In-flight records are never evicted.
+ * An in-flight record is evicted only once it is older than `inFlightTimeoutMs`,
+ * which marks its caller as gone.
  */
 
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
@@ -44,6 +45,9 @@ export const idempotencyLifecycle = defineLifecycle<IdempotencyStatus>('idempote
 
 /** Default TTL: 5 minutes. */
 const DEFAULT_TTL_MS = 5 * 60 * 1_000;
+
+/** Default age after which an unfinalized in-flight record counts as abandoned: 2 hours. */
+const DEFAULT_IN_FLIGHT_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 
 /** Default maximum stored records before eviction sweep. */
 const DEFAULT_MAX_RECORDS = 5_000;
@@ -87,10 +91,14 @@ export class IdempotencyStore {
   private readonly store = new Map<string, IdempotencyRecord>();
   private readonly ttlMs: number;
   private readonly maxRecords: number;
+  private readonly inFlightTimeoutMs: number;
+  private readonly now: () => number;
 
   constructor(config: IdempotencyStoreConfig = {}) {
     this.ttlMs = config.ttlMs ?? DEFAULT_TTL_MS;
     this.maxRecords = config.maxRecords ?? DEFAULT_MAX_RECORDS;
+    this.inFlightTimeoutMs = config.inFlightTimeoutMs ?? DEFAULT_IN_FLIGHT_TIMEOUT_MS;
+    this.now = config.now ?? Date.now;
   }
 
   // ---------------------------------------------------------------------------
@@ -133,11 +141,11 @@ export class IdempotencyStore {
     const existing = this.store.get(key);
 
     if (existing) {
-      if (existing.status === 'in-flight') {
+      if (existing.status === 'in-flight' && !this._abandoned(existing, this.now())) {
         return { status: 'in-flight', record: existing };
       }
-      if (existing.status === 'failed') {
-        // Failed records allow retry, delete and fall through to register as new.
+      if (existing.status === 'in-flight' || existing.status === 'failed') {
+        // Failed (or abandoned in-flight) records allow retry, delete and fall through to register as new.
         this.store.delete(key);
       } else {
         // completed, return cached result to duplicate callers
@@ -149,7 +157,7 @@ export class IdempotencyStore {
     const record: IdempotencyRecord = {
       key,
       status: 'in-flight',
-      createdAt: Date.now(),
+      createdAt: this.now(),
     };
     this.store.set(key, record);
     this._maybeSweep();
@@ -172,7 +180,7 @@ export class IdempotencyStore {
     // Finalized once: a no-op unless in-flight, so a late call cannot rewrite the outcome.
     if (!idempotencyLifecycle.can(record.status, 'completed')) return;
     record.status = 'completed';
-    record.completedAt = Date.now();
+    record.completedAt = this.now();
     if (result !== undefined) {
       record.result = result;
     }
@@ -196,7 +204,7 @@ export class IdempotencyStore {
     // A completed record keeps its cached result; only an in-flight record can fail.
     if (!idempotencyLifecycle.can(record.status, 'failed')) return;
     record.status = 'failed';
-    record.completedAt = Date.now();
+    record.completedAt = this.now();
   }
 
   // ---------------------------------------------------------------------------
@@ -225,26 +233,35 @@ export class IdempotencyStore {
   // ---------------------------------------------------------------------------
 
   /**
-   * Evict completed and failed records whose age exceeds the configured TTL.
+   * Evict completed and failed records whose age exceeds the configured TTL,
+   * in-flight records abandoned past `inFlightTimeoutMs`, and, when the store
+   * still holds more than `maxRecords`, the oldest finalized records beyond it.
    *
    * Called automatically by `checkAndRecord` when the store is near capacity.
    * May also be called explicitly (e.g. on a periodic timer).
-   *
-   * In-flight records are never evicted.
    */
   sweep(): void {
-    const now = Date.now();
+    const now = this.now();
     const cutoff = now - this.ttlMs;
     for (const [key, record] of this.store) {
-      if (record.status !== 'in-flight' && record.createdAt < cutoff) {
+      if (record.status === 'in-flight' ? this._abandoned(record, now) : record.createdAt < cutoff) {
         this.store.delete(key);
       }
+    }
+    // Map iteration is insertion order, oldest first. A live in-flight record is never dropped for capacity.
+    for (const [key, record] of this.store) {
+      if (this.store.size <= this.maxRecords) break;
+      if (record.status !== 'in-flight') this.store.delete(key);
     }
   }
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  private _abandoned(record: IdempotencyRecord, now: number): boolean {
+    return now - record.createdAt > this.inFlightTimeoutMs;
+  }
 
   /** Trigger a sweep when the store reaches 80% of the configured maximum. */
   private _maybeSweep(): void {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createPeerApiClient } from '../peer-client/dist/index.js';
+import { createPeerApiClient } from '../peer-client/src/index.js';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

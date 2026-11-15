@@ -139,6 +139,7 @@ export function CheckpointsPanel() {
         });
         return;
       }
+      description = `The preview of the files this restore changes could not be loaded (${formatError(error)}). ${description}`;
     }
     const ok = await confirm.ask({
       title: restoreConfirmTitle(checkpoint),

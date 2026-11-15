@@ -293,7 +293,13 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
     const fileIndex = files.indexOf(actionTarget.file);
     const hunkIndex = actionTarget.file.hunks.indexOf(actionTarget.hunk);
     const unifiedDiff = mode === 'session' ? sessionChanges.data?.unifiedDiff : diff.data?.diff.unifiedDiff;
-    if (fileIndex < 0 || hunkIndex < 0 || unifiedDiff === undefined) return;
+    if (fileIndex < 0 || hunkIndex < 0 || unifiedDiff === undefined) {
+      // The diff was refreshed while the sheet was open, so the tapped hunk is no longer in it.
+      setSendError('The diff changed while the menu was open. Tap the hunk again to comment on it.');
+      setSendState('failed');
+      setActionTarget(null);
+      return;
+    }
     setCommentTarget({ ...actionTarget, capturedLabel, selection: {
       kind: mode, ...(mode === 'workspace' ? { baselineId: effectiveBaselineId } : {}),
       unifiedDiff, fileIndex, hunkIndex,

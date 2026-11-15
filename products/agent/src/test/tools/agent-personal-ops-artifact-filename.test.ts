@@ -140,7 +140,7 @@ describe('Personal Ops generated review artifact filenames', () => {
         expect(JSON.stringify(artifactRecords)).not.toContain(artifact.filename!);
       } else expect(label).toContain(artifact.filename!);
       expect(queueRecords.find((record) => record.artifactId === artifact.id)?.modelRoute)
-        .toBe(`agent_artifacts show artifactId:"${artifact.id}" includeContent:true`);
+        .toBe(`agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:true`);
       const result = await browser.execute({ mode: 'show', artifactId: artifact.id, includeContent: true });
       expect(result.success).toBe(true);
       expect(String(result.output)).toContain(artifact.filename!);

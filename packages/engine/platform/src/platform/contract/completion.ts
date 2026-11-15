@@ -1,4 +1,5 @@
 import { currentFileObservationsAsync } from './current-file-observations.js';
+import { setAgentProgress } from '../agents/progress-audience.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { nativeContractSourceData } from './native-source.js';
 import { reviewInventoryObservationAsync, compactReviewInventory } from './review-inventory.js';
@@ -39,6 +40,8 @@ import { admitPublicationInput, type PublicationInputAdmission } from './publica
 import { contractSourceScope } from './work-receipts.js';
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { judgmentPort, captureJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -91,7 +94,10 @@ export interface Completion {
   judgeGroup(run: ContractRun, groupId: string, trigger: CheckTrigger): Promise<void>;
   /** Judges the deliverable now. */
   judgeDeliverable(run: ContractRun, trigger: CheckTrigger): Promise<void>;
-  /** Commits the passed deliverable and passes the contract: the step a contract was on when a restart stopped it in `committing` (design 7.2). */
+  /**
+   * The step a contract was on when a restart stopped it in `committing` (design 7.2). The accepted result's
+   * identity is held in memory only, so the deliverable is judged again first; a pass then publishes it and passes the contract.
+   */
   commitDeliverable(run: ContractRun): Promise<void>;
 }
 
@@ -144,6 +150,39 @@ function git(cwd: string, args: readonly string[]): { readonly ok: boolean; read
   return { ok: result.status === 0, out: (result.stdout ?? '').trim(), err: (result.stderr ?? '').trim() || (result.error?.message ?? '') };
 }
 
+/** Whether the owner's tree is in the middle of a merge: MERGE_HEAD, or an index with unmerged paths. */
+function mergeInProgress(root: string): { readonly merging: boolean; readonly unmerged: boolean } {
+  const gitDir = git(root, ['rev-parse', '--absolute-git-dir']);
+  const unmerged = git(root, ['diff', '--name-only', '--diff-filter=U']);
+  return { merging: gitDir.ok && existsSync(join(gitDir.out, 'MERGE_HEAD')), unmerged: unmerged.ok && unmerged.out !== '' };
+}
+
+/**
+ * A merge that stopped on a conflict leaves conflict markers, an unmerged index and possibly MERGE_HEAD in the
+ * owner's tree. Puts the tree back and says what was done, or why nothing was. A merge the owner had already
+ * started (`ownerHadMerge`, read before this one) is theirs and is never undone here.
+ */
+export function abortFailedMerge(root: string, ownerHadMerge: boolean): string {
+  if (ownerHadMerge) return 'the owner has an unfinished merge of their own, which was left untouched; finish or abort it before retrying';
+  const state = mergeInProgress(root);
+  if (!state.merging && !state.unmerged) return 'the merge changed nothing in the owner tree, so there was nothing to undo';
+  const undone = state.merging ? git(root, ['merge', '--abort']) : git(root, ['reset', '--merge']);
+  return undone.ok ? 'the unfinished merge was undone and the owner tree is as it was' : `the unfinished merge could not be undone (${undone.err}); inspect owner Git state before retrying`;
+}
+
+/** Whether the owner is mid-merge before the contract's own merge starts. */
+export function ownerMergeInProgress(root: string): boolean {
+  const state = mergeInProgress(root);
+  return state.merging || state.unmerged;
+}
+
+/** True when the contract branch holds work of its own that the project's HEAD already contains (an earlier publication merged it). */
+export function branchAlreadyPublished(root: string, branch: string, inputCommit: string): boolean {
+  const tip = git(root, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
+  if (!tip.ok || tip.out === inputCommit) return false;
+  return git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok;
+}
+
 /** The commit message: the goal, the criteria met, gates passed, the units, and what was excluded. */
 export function buildContractCommitMessage(contract: Contract): string {
   const firstLine = contract.goal.replace(/\s+/g, ' ').trim();
@@ -168,6 +207,51 @@ class PublicationPending extends Error {
   constructor(reason = 'The checked result has not reached the owner workspace.') { super(reason); }
 }
 
+/** Publication attempts with backoff before the runner waits for the project tree to change instead. */
+const PUBLICATION_RETRIES = 6;
+/** How often a parked publication looks at the project tree. */
+const PARKED_PUBLICATION_POLL_MS = 30_000;
+
+function abortableDelay(run: ContractRun, ms: number): Promise<void> {
+  if (run.env.wait !== undefined) return run.env.wait(ms, run.abort.signal);
+  return new Promise<void>(resolve => {
+    const done = (): void => { clearTimeout(timer); run.abort.signal.removeEventListener('abort', done); resolve(); };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    run.abort.signal.addEventListener('abort', done, { once: true });
+    if (run.abort.signal.aborted) done();
+  });
+}
+
+/** The owner Git operations that hold a publication back; clearing one is a change the retry must notice. */
+const OWNER_GIT_MARKERS = ['index.lock', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer'];
+
+/**
+ * HEAD, the working tree's status lines and which owner Git operations are in progress: what the owner changes to clear a publication obstacle.
+ * With `relevantPaths`, only the status lines of those paths count: an unrelated edit does not wake a parked publication.
+ */
+export function projectTreeState(root: string, relevantPaths?: ReadonlySet<string>): string {
+  const head = spawnSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD'], { encoding: 'utf-8' });
+  const status = spawnSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], { encoding: 'utf-8' });
+  const gitDir = spawnSync('git', ['-C', root, 'rev-parse', '--absolute-git-dir'], { encoding: 'utf-8' }).stdout?.trim() ?? '';
+  const operations = gitDir === '' ? '' : OWNER_GIT_MARKERS.filter(name => existsSync(join(gitDir, name))).join(',');
+  const lines = (status.stdout ?? '').split('\n');
+  // A quoted path (special characters) cannot be matched here, so it always counts: waiting on a change that was missed would never end.
+  const statusLines = relevantPaths === undefined || relevantPaths.size === 0 ? lines
+    : lines.filter(line => line.length > 3 && (line.slice(3).startsWith('"') || line.slice(3).split(' -> ').some(path => relevantPaths.has(path))));
+  return `${head.stdout ?? ''}\n${operations}\n${statusLines.join('\n')}`;
+}
+
+async function untilTreeChanges(run: ContractRun): Promise<void> {
+  // The files the contract's result touches: an owner edit there can be what blocks publication.
+  const relevant = new Set(run.contract.units.flatMap(unit => unit.touchedPaths));
+  const before = projectTreeState(run.contract.projectRoot, relevant);
+  while (!run.terminal) {
+    await abortableDelay(run, PARKED_PUBLICATION_POLL_MS);
+    if (run.terminal || projectTreeState(run.contract.projectRoot, relevant) !== before) return;
+  }
+}
+
 export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed'>): Completion {
   const config = () => readContractConfig(context.configManager);
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
@@ -184,6 +268,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     if (existing !== undefined) return existing;
     const operation = run.work.run(async () => {
       let failures = 0;
+      let reported: string | undefined;
       while (!run.terminal) {
         try { await step(); return; }
         catch (error) {
@@ -194,18 +279,25 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             run.control.fail(failure.kind, `${what}: ${failure.reason}`);
             return;
           }
-          const delay = Math.min(30_000, 1_000 * 2 ** Math.min(failures++, 5));
-          run.decide('resumed', targetId,
-            `publication pending: ${run.contract.commit?.note ?? failure.reason}; checked work retained, revalidate before retry in ${delay / 1_000} seconds; no answer delivered`);
-          logger.warn('contract publication pending; work retained',
-            { contractId: run.id, targetId, reason: run.contract.commit?.note });
-          await new Promise<void>(resolve => {
-            const done = (): void => { clearTimeout(timer); run.abort.signal.removeEventListener('abort', done); resolve(); };
-            const timer = setTimeout(done, delay);
-            timer.unref?.();
-            run.abort.signal.addEventListener('abort', done, { once: true });
-            if (run.abort.signal.aborted) done();
-          });
+          const note = run.contract.commit?.note ?? failure.reason;
+          failures += 1;
+          // One decision per distinct obstacle, not one per attempt.
+          if (note !== reported) {
+            reported = note;
+            run.decide('resumed', targetId, `publication pending: ${note}; checked work retained and revalidated before each retry; no answer delivered`);
+          }
+          logger.warn('contract publication pending; work retained', { contractId: run.id, targetId, attempt: failures, reason: note });
+          if (failures < PUBLICATION_RETRIES) {
+            await abortableDelay(run, Math.min(30_000, 1_000 * 2 ** (failures - 1)));
+            continue;
+          }
+          // Retrying an unchanged tree cannot succeed: wait for the owner's tree to change (or a cancel).
+          const owner = context.getStatus(run.contract.ownerAgentId);
+          if (owner !== null && owner.status === 'running') {
+            setAgentProgress(owner, `Contract ${run.id}: publication pending (${note}); change the project tree to let it retry, or cancel the contract`, 'operator');
+          }
+          await untilTreeChanges(run);
+          if (!run.terminal) context.ownerProgress(run);
         }
       }
     });
@@ -954,7 +1046,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     run.moveContract('committing');
     context.ownerProgress(run);
     const commit = await commitContract(run);
-    if (run.terminal) return;
+    if (run.terminal) {
+      recordLatePublication(run, commit);
+      return;
+    }
     assertOwnedContractSource(contract);
     if (contract.isolation !== 'worktree') assertAcceptedResultCurrent(run);
     contract.commit = commit;
@@ -976,6 +1071,22 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     publicationAssessments.delete(run);
     publicationRepairs.delete(run);
     run.control.finishPassed({ answer: answer.length > 0 ? answer : CONTRACT_PASSED_WITHOUT_OUTPUT, statusLine: describeContractOutcome(contract) });
+  }
+
+  /**
+   * The contract ended (cancelled, or failed by a late reading) while its
+   * result was being published. Ending cannot undo what reached the owner's
+   * tree, so the record says it happened instead of reading as if nothing did.
+   */
+  function recordLatePublication(run: ContractRun, commit: NonNullable<Contract['commit']>): void {
+    if (commit.status !== 'committed' && commit.status !== 'applied') return;
+    const { contract } = run;
+    contract.commit = commit;
+    run.decide('committed', contract.id, `${commit.note}; published before the contract ended ${contract.status}`);
+    run.emit({ type: 'CONTRACT_COMMITTED', contractId: contract.id, status: commit.status, ...(commit.hash === undefined ? {} : { hash: commit.hash }), note: commit.note });
+    contract.statusLine = `Contract ${contract.id} ${contract.status}${contract.error ? ` (${contract.error})` : ''} after its result was already published: ${commit.note}`;
+    const owner = context.getStatus(contract.ownerAgentId);
+    if (owner !== null) setAgentProgress(owner, contract.statusLine, 'operator');
   }
 
   async function groupsPassed(run: ContractRun): Promise<void> {
@@ -1060,18 +1171,24 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const changed = git(root, ['diff', '--name-only', `HEAD...${branch}`]);
     const files = changed.ok ? changed.out.split('\n').filter(Boolean) : [];
     assertAcceptedResultCurrent(run);
-    if (changed.ok && files.length === 0) return { status: 'skipped', note: describeCommitOutcome(null, [], true) };
+    if (changed.ok && files.length === 0) {
+      return { status: 'skipped', note: branchAlreadyPublished(root, branch, contract.inputSnapshot.inputCommit)
+        ? `commit skipped: branch ${branch} is already part of the project history; nothing is left to publish`
+        : describeCommitOutcome(null, [], true) };
+    }
     if (commitOn) {
+      const ownerHadMerge = ownerMergeInProgress(root);
       const merged = git(root, ['merge', '--no-ff', '-m', buildContractCommitMessage(contract), branch]);
       if (!merged.ok) {
-        return { status: 'failed', note: `commit failed: ${merged.err || 'git merge did not complete'}; inspect owner Git state before retrying; the work stays on branch ${branch}` };
+        return { status: 'failed', note: `commit failed: ${merged.err || 'git merge did not complete'}; ${abortFailedMerge(root, ownerHadMerge)}; the work stays on branch ${branch}` };
       }
       const head = git(root, ['rev-parse', 'HEAD']).out;
       return { status: 'committed', hash: head, note: describeCommitOutcome(head, [], false) };
     }
+    const ownerHadMerge = ownerMergeInProgress(root);
     const squashed = git(root, ['merge', '--squash', branch]);
     if (!squashed.ok) {
-      return { status: 'failed', note: `apply failed: ${squashed.err || 'git merge --squash did not complete'}; inspect owner Git state before retrying; the work stays on branch ${branch}` };
+      return { status: 'failed', note: `apply failed: ${squashed.err || 'git merge --squash did not complete'}; ${abortFailedMerge(root, ownerHadMerge)}; the work stays on branch ${branch}` };
     }
     // Unstage exactly what the squash staged: the work is left as uncommitted changes.
     git(root, ['reset', '-q', '--', ...files]);

@@ -10,7 +10,6 @@ import {
   parseProcMeminfo,
   parseNvidiaSmiOutput,
   readHardwareProfileSync,
-  startHardwareProbe,
   BYTES_PER_WEIGHT,
   DEFAULT_BYTES_PER_WEIGHT,
   REPRESENTATIVE_7B_PARAMS,
@@ -365,122 +364,56 @@ describe('estimateModelBytes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readHardwareProfile, cache reset safety
+// readHardwareProfile / readHardwareProfileSync: cache behaviour, RAM injected
 // ---------------------------------------------------------------------------
 
-describe('readHardwareProfile', () => {
-  afterEach(() => {
-    _resetHardwareProfileCache();
-  });
-
-  test('returns a profile that never throws', async () => {
-    const { readHardwareProfile } = await import('../../core/hardware-profile.ts');
-    expect(() => readHardwareProfile()).not.toThrow();
-  });
-
-  test('profile has expected shape', async () => {
-    const { readHardwareProfile } = await import('../../core/hardware-profile.ts');
-    const profile = readHardwareProfile();
-    // totalRamBytes is either a positive number or null
-    if (profile.totalRamBytes !== null) {
-      expect(profile.totalRamBytes).toBeGreaterThan(0);
-    }
-    // gpus is always an array
-    expect(Array.isArray(profile.gpus)).toBe(true);
-    // cpuCores is either a positive integer or null
-    if (profile.cpuCores !== null) {
-      expect(profile.cpuCores).toBeGreaterThan(0);
-    }
-  });
-
-  test('returns the same object on repeated calls (cache hit)', async () => {
-    const { readHardwareProfile } = await import('../../core/hardware-profile.ts');
-    const first = readHardwareProfile();
-    const second = readHardwareProfile();
-    expect(first).toBe(second);
-  });
-
-  test('cache is reset by _resetHardwareProfileCache', async () => {
-    const { readHardwareProfile, _resetHardwareProfileCache: reset } = await import('../../core/hardware-profile.ts');
-    const first = readHardwareProfile();
-    reset();
-    const second = readHardwareProfile();
-    // After reset a new probe runs, yielding a new object reference
-    expect(first).not.toBe(second);
-    // But the shape is the same (same machine)
-    expect(second.cpuCores).toBe(first.cpuCores);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// readHardwareProfileSync, never spawns, returns immediate RAM+CPU profile
-// ---------------------------------------------------------------------------
+const GB_BYTES = 1024 ** 3;
+const injectedRam = (total: number, available: number) => () => ({ totalRamBytes: total, availableRamBytes: available });
 
 describe('readHardwareProfileSync', () => {
   afterEach(() => {
     _resetHardwareProfileCache();
   });
 
-  test('never throws', () => {
-    expect(() => readHardwareProfileSync()).not.toThrow();
-  });
-
-  test('returns a valid HardwareProfile shape', () => {
-    const profile = readHardwareProfileSync();
-    expect(Array.isArray(profile.gpus)).toBe(true);
-    if (profile.totalRamBytes !== null) {
-      expect(profile.totalRamBytes).toBeGreaterThan(0);
-    }
-    if (profile.cpuCores !== null) {
-      expect(profile.cpuCores).toBeGreaterThan(0);
-    }
-  });
-
-  test('returns gpus:[] when cache is cold (no async probe has run)', () => {
-    // Cold cache: sync path never spawns nvidia-smi, so gpus must be empty.
+  test('a cold cache yields the injected RAM and no GPUs: the sync path never learns GPU data', () => {
     _resetHardwareProfileCache();
-    const profile = readHardwareProfileSync();
-    // Either the cache was empty (gpus=[]) OR a prior test populated it.
-    // What we assert is that the function did not block, no spawn is fired here.
-    expect(Array.isArray(profile.gpus)).toBe(true);
+    const profile = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
+    expect(profile.gpus).toEqual([]);
+    expect(profile.totalRamBytes).toBe(8 * GB_BYTES);
+    expect(profile.availableRamBytes).toBe(4 * GB_BYTES);
+    if (profile.cpuCores !== null) expect(profile.cpuCores).toBeGreaterThan(0);
   });
 
-  test('returns the same object on repeated calls (cache hit)', () => {
-    const first = readHardwareProfileSync();
-    const second = readHardwareProfileSync();
-    expect(first).toBe(second);
+  test('repeated calls keep the cached GPU list and CPU cores while free RAM is refreshed', () => {
+    const first = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
+    const second = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 2 * GB_BYTES));
+    expect(second.gpus).toBe(first.gpus);
+    expect(second.cpuCores).toBe(first.cpuCores);
+    expect(second.totalRamBytes).toBe(8 * GB_BYTES);
+    expect(second.availableRamBytes).toBe(2 * GB_BYTES);
   });
 
-  test('async GPU result from startHardwareProbe upgrades cached profile after close', async () => {
-    // Reset so startHardwareProbe sees a cold cache.
-    _resetHardwareProfileCache();
-    // Kick off the async probe. On this machine nvidia-smi is either absent
-    // (exits non-0) or present. Either way the probe must complete without error.
-    startHardwareProbe();
-    // Wait long enough for the spawn to close (2s covers the 1.5s timeout + startup).
-    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    // After the probe resolves, readHardwareProfileSync() should have a non-null
-    // RAM snapshot (the probe writes RAM+CPU regardless of GPU presence).
-    const profile = readHardwareProfileSync();
-    // The module cache is now populated, RAM should be readable on this machine.
-    if (profile.totalRamBytes !== null) {
-      expect(profile.totalRamBytes).toBeGreaterThan(0);
-    }
-    // gpus is always an array (empty when nvidia-smi not found)
-    expect(Array.isArray(profile.gpus)).toBe(true);
-  }, 5000);
+  test('an unchanged free-RAM reading returns the same object', () => {
+    const first = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
+    const second = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
+    expect(second).toBe(first);
+  });
 
-  test('probe upgrades a sync-populated cache (gpus:[]) with GPU data on close', async () => {
-    // Smoke test: real probe runs and cache is populated.
+  test('an injected profile is returned as-is, with its GPUs, until the cache is reset', () => {
+    const injected = makeProfile({ gpus: [{ name: 'Test GPU', vramBytes: 8 * GB_BYTES }] });
+    _setHardwareProfileForTest(injected);
+    expect(readHardwareProfileSync(injectedRam(1, 1))).toBe(injected);
     _resetHardwareProfileCache();
-    startHardwareProbe();
-    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    const profile = readHardwareProfileSync();
-    if (profile.totalRamBytes !== null) {
-      expect(profile.totalRamBytes).toBeGreaterThan(0);
-    }
-    expect(Array.isArray(profile.gpus)).toBe(true);
-  }, 5000);
+    const cold = readHardwareProfileSync(injectedRam(8 * GB_BYTES, 4 * GB_BYTES));
+    expect(cold).not.toBe(injected);
+    expect(cold.gpus).toEqual([]);
+  });
+
+  test('readHardwareProfile is the same reading as the sync reader', async () => {
+    const { readHardwareProfile } = await import('../../core/hardware-profile.ts');
+    _setHardwareProfileForTest(makeProfile());
+    expect(readHardwareProfile()).toBe(readHardwareProfileSync());
+  });
 });
 
 // ---------------------------------------------------------------------------

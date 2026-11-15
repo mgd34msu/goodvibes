@@ -47,6 +47,8 @@ export function createAsyncDisposalScope(scopeName: string): AsyncDisposalScope 
   const entries: Entry[] = [];
   const pendingLate = new Set<Promise<void>>();
   const failures: Failure[] = [];
+  // Failures a settled close already reported; a later close reports only newer ones.
+  let reported = 0;
   let started = false;
   let active = false;
   let revision = 0;
@@ -90,7 +92,9 @@ export function createAsyncDisposalScope(scopeName: string): AsyncDisposalScope 
       const late = waitLate();
       if (late) { void late.then(finish); return; }
       active = false; closedRevision = revision;
-      if (failures.length > 0) reject(new AsyncDisposalError(scopeName, failures));
+      const fresh = failures.slice(reported);
+      reported = failures.length;
+      if (fresh.length > 0) reject(new AsyncDisposalError(scopeName, fresh));
       else resolve();
     };
     // run() handles each callback's failure, keeping drain itself non-rejecting.

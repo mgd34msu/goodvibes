@@ -83,13 +83,33 @@ function routeString(value: string): string {
   return JSON.stringify(value);
 }
 
+/** Every check a save makes before it writes, so a clean preview predicts a save that is not refused for content. */
+function validateResearchReport(args: AgentResearchReportToolArgs, sources: readonly ResearchSource[]): CitationCoverage {
+  if (!readString(args.title)) throw new Error('title is required.');
+  if (!readString(args.question)) throw new Error('question is required.');
+  if (sources.length === 0) throw new Error('At least one reviewed source is required for a research report artifact.');
+  if (!readString(args.summary) && !readString(args.reportMarkdown) && readList(args.findings).length === 0) {
+    throw new Error('summary, reportMarkdown, or findings are required.');
+  }
+  const coverage = citationCoverage(args, sources);
+  if (readBoolean(args.requireCitationCoverage) && !coverage.pass) {
+    throw new Error([
+      `Citation coverage check failed. Missing body citations: ${coverage.missingSourceIds.join(', ') || '(none)'}. Unknown citations: ${coverage.unknownCitationIds.join(', ') || '(none)'}.`,
+      `Repair suggestions: ${coverage.repairSuggestions.join(' ') || '(none)'}`,
+    ].join('\n'));
+  }
+  return coverage;
+}
+
 function preview(args: AgentResearchReportToolArgs, sources: readonly ResearchSource[]): string {
+  const coverage = validateResearchReport(args, sources);
   return [
-    'Agent research report preview',
-    `  title ${readString(args.title) || '(missing)'}`,
-    `  question ${readString(args.question) || '(missing)'}`,
+    'Agent research report preview (nothing saved; the save would pass these content checks)',
+    `  title ${readString(args.title)}`,
+    `  question ${readString(args.question)}`,
     `  sources ${sources.length}`,
     `  confidence ${readString(args.confidence) || '(unspecified)'}`,
+    `  citationCoverage ${coverage.citedSourceIds.length}/${coverage.sourceCount} cited; uncited ${coverage.missingSourceIds.length}; unknown ${coverage.unknownCitationIds.length}`,
     '  policy saving a sourced report artifact requires current recorded effect admission',
   ].join('\n');
 }
@@ -377,6 +397,7 @@ function reportNextRouteLines(descriptor: ArtifactDescriptor, args: AgentResearc
     `  promoteKnowledge agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(descriptor.id)}`,
     ...(runId ? [
       `  completeRun research action:"complete" id:${routeString(runId)} reportArtifactId:${routeString(descriptor.id)}`,
+      `  note run ${runId} is still open: saving the report does not complete it`,
     ] : []),
     `  reports research action:"reports"${title ? ` query:${routeString(title)}` : ''}`,
   ];
@@ -387,23 +408,11 @@ async function saveResearchReport(
   args: AgentResearchReportToolArgs & { readonly sources: readonly ResearchSource[] },
   assertWrite: () => void,
 ): Promise<ArtifactDescriptor> {
+  const sources = args.sources;
+  const coverage = validateResearchReport(args, sources);
   const title = readString(args.title);
   const question = readString(args.question);
-  if (!title) throw new Error('title is required.');
-  if (!question) throw new Error('question is required.');
-  const sources = args.sources;
-  if (sources.length === 0) throw new Error('At least one reviewed source is required for a research report artifact.');
-  if (!readString(args.summary) && !readString(args.reportMarkdown) && readList(args.findings).length === 0) {
-    throw new Error('summary, reportMarkdown, or findings are required.');
-  }
   const explicitUserRequest = readString(args.explicitUserRequest);
-  const coverage = citationCoverage(args, sources);
-  if (readBoolean(args.requireCitationCoverage) && !coverage.pass) {
-    throw new Error([
-      `Citation coverage check failed. Missing body citations: ${coverage.missingSourceIds.join(', ') || '(none)'}. Unknown citations: ${coverage.unknownCitationIds.join(', ') || '(none)'}.`,
-      `Repair suggestions: ${coverage.repairSuggestions.join(' ') || '(none)'}`,
-    ].join('\n'));
-  }
   const includeVisualReport = readBoolean(args.visualReport);
   const markdown = buildMarkdown(args, sources, includeVisualReport);
   assertWrite();
@@ -456,16 +465,16 @@ export function createAgentResearchReportTool(
       parameters: {
         type: 'object',
         properties: {
-          runId: { type: 'string', description: 'Optional visible research run id to complete after saving the artifact.' },
+          runId: { type: 'string', description: 'Optional visible research run id. Only used to print the complete route; saving the report does not complete the run.' },
           id: { type: 'string', description: 'Alias for runId when saving through the high-level research adapter.' },
           title: { type: 'string', description: 'Report title.' },
           question: { type: 'string', description: 'Research question answered by the report.' },
-          summary: { type: 'string', description: 'Short executive summary.' },
-          reportMarkdown: { type: 'string', description: 'Full report markdown.' },
+          summary: { type: 'string', description: 'Short executive summary. At least one of summary, reportMarkdown or findings is required.' },
+          reportMarkdown: { type: 'string', description: 'Full report markdown. At least one of summary, reportMarkdown or findings is required.' },
           sources: {
             type: 'array',
             items: { type: 'object' },
-            description: 'Reviewed sources with title, url, and credibility. Credential-redacted, userinfo-bearing or malformed URLs are withheld in full with urlOmitted:true; ordinary query and section references are preserved.',
+            description: 'At least one reviewed source with title, url, and credibility. Credential-redacted, userinfo-bearing or malformed URLs are withheld in full with urlOmitted:true; ordinary query and section references are preserved.',
           },
           findings: {
             type: 'array',
@@ -504,6 +513,7 @@ export function createAgentResearchReportTool(
     execute: async (rawArgs: Record<string, unknown>, options) => {
       if (!artifactStore?.create) return failure('Research report export is unavailable because this runtime did not provide an artifact store.');
       let prepared: PreparedResearchReport | undefined;
+      let saved: ArtifactDescriptor | undefined;
       try {
         const assertWrite = () => {
           options?.signal?.throwIfAborted();
@@ -517,6 +527,7 @@ export function createAgentResearchReportTool(
         if (args.preview === true) return output(preview(args, args.sources));
         const assertCommit = () => { assertWrite(); prepared?.assertCurrent(); };
         const descriptor = await saveResearchReport(artifactStore, args, assertCommit);
+        saved = descriptor;
         assertCommit();
         const coverage = coverageFromMetadata(descriptor.metadata);
         const lines = [
@@ -537,7 +548,10 @@ export function createAgentResearchReportTool(
         ].filter(Boolean);
         return output(lines.join('\n'));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        // The artifact exists; the failure came from a check after it was written.
+        if (saved) return failure(`Agent research report artifact ${saved.id} was saved, but a check after the save failed (${message}). Do not save the report again; inspect it with agent_artifacts mode:"show" artifactId:${routeString(saved.id)}.`);
+        return failure(message);
       } finally { await prepared?.release(); }
     },
   };

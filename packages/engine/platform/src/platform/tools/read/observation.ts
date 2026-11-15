@@ -1,3 +1,5 @@
+import type { ToolResult } from '../../types/tools.js';
+
 interface ReadLineObservation {
   startLine: number;
   completeLines: number;
@@ -67,4 +69,28 @@ export function validatedReadContent(file: { content: string; readObservation?: 
 export function returnedReadRows(file: { content: string; readObservation?: unknown }): string[] {
   if (file.readObservation === undefined) return file.content.split('\n').filter(row => /^[ \t]*\d+ \|/.test(row));
   return validatedReadContent(file)?.rows ?? [];
+}
+
+/**
+ * The parsed body of a `read` result with each file's `readObservation` and `resolvedPath` restored.
+ * They travel on the result's host-only channel; a body that still carries them in its text (results
+ * stored before that channel existed) is returned unchanged. Undefined when the output is not a read body.
+ */
+export function readBodyWithHostEvidence(result: Pick<ToolResult, 'output' | 'hostEvidence'>): { files?: unknown[]; [key: string]: unknown } | undefined {
+  if (typeof result.output !== 'string') return undefined;
+  let body: unknown;
+  try { body = JSON.parse(result.output); } catch { return undefined; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const parsed = body as { files?: unknown[]; [key: string]: unknown };
+  const reads = result.hostEvidence?.reads;
+  if (!reads?.length || !Array.isArray(parsed.files)) return parsed;
+  const files = parsed.files.map((file, index) => {
+    const read = reads.find(entry => entry.index === index);
+    if (!read || !file || typeof file !== 'object' || Array.isArray(file) || (file as { path?: unknown }).path !== read.path) return file;
+    const record = file as Record<string, unknown>;
+    return { ...record,
+      ...(record['readObservation'] === undefined && read.readObservation !== undefined ? { readObservation: read.readObservation } : {}),
+      ...(record['resolvedPath'] === undefined && read.resolvedPath !== undefined ? { resolvedPath: read.resolvedPath } : {}) };
+  });
+  return { ...parsed, files };
 }

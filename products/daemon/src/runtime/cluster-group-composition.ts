@@ -35,7 +35,7 @@ import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ClusterTransport } from '@goodvibes-jev/engine/platform/platform/cluster';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from './index.js';
 import { createClusterComposition } from './cluster-composition.js';
 import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
@@ -47,6 +47,8 @@ export interface ClusterGroupComposition {
   readonly verbs: ClusterGroupVerbSurface;
   /** The transport the leader election must use, so its traffic is group-signed. */
   readonly electionTransport: ClusterTransport;
+  /** Ask the group to hand this machine its current key again, rate-limited. */
+  rejoin(): void;
   /** Start the group layer. Safe to call more than once. */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -65,6 +67,12 @@ function defaultNodeDisplayName(nodeId: string): string {
   return `machine ${nodeId.slice(0, 8)}`;
 }
 
+/** Gaps between further return announcements when nobody answered; then it waits for a restart. */
+const REJOIN_RETRY_DELAYS_MS: readonly number[] = Object.freeze([30_000, 120_000, 600_000]);
+
+/** Least gap between catch-ups prompted by a datagram showing the group's key moved on. */
+const KEY_LOST_REJOIN_MIN_GAP_MS = 60_000;
+
 /**
  * Build the group layer.
  *
@@ -79,6 +87,12 @@ export function createClusterGroupComposition(options: {
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
+  /**
+   * Waits between further return announcements when nobody answered the first.
+   * A machine that starts before the rest of its group would otherwise never
+   * ask again and stay on stale keys until the daemon is restarted.
+   */
+  readonly rejoinRetryDelaysMs?: readonly number[] | undefined;
   /**
    * The leader election's own answer to "am I the master".
    *
@@ -109,8 +123,11 @@ export function createClusterGroupComposition(options: {
   // other durable state.
   const stateDirectory = options.shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'cluster');
   const nodeId = resolveNodeIdentity({ stateDirectory, logger }).nodeId;
+  const clock = options.clock ?? createSystemClusterClock();
 
+  let requestRejoin: () => void = () => {};
   const runtime = new ClusterGroupRuntime({
+    onKeyGenerationLost: () => requestRejoin(),
     settings: groupSettings,
     transport: options.transport ?? new UdpClusterTransport({
       port: settings.port,
@@ -130,7 +147,7 @@ export function createClusterGroupComposition(options: {
     nodeId,
     nodeDisplayName: defaultNodeDisplayName(nodeId),
     version: VERSION,
-    clock: options.clock ?? createSystemClusterClock(),
+    clock,
     logger,
     ...(options.isMaster ? { isMaster: options.isMaster } : {}),
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
@@ -159,16 +176,52 @@ export function createClusterGroupComposition(options: {
     nodeId,
     nodeDisplayName: defaultNodeDisplayName(nodeId),
     version: VERSION,
-    now: () => options.clock?.now() ?? Date.now(),
+    now: () => clock.now(),
   };
 
   let started = false;
   let starting: Promise<void> | null = null;
   let stopping: Promise<void> | null = null;
+  const retryDelays = options.rejoinRetryDelaysMs ?? REJOIN_RETRY_DELAYS_MS;
+  let cancelRejoin: (() => void) | undefined;
+  const clearRejoin = (): void => {
+    const cancel = cancelRejoin;
+    cancelRejoin = undefined;
+    cancel?.();
+  };
+  // Bounded: each unanswered announcement schedules the next on the group
+  // layer's own clock, and stopping cancels the one pending.
+  const scheduleRejoin = (attempt: number, delayMs?: number): void => {
+    if (stopping || (delayMs === undefined && attempt >= retryDelays.length)) return;
+    cancelRejoin = clock.setTimer(() => {
+      cancelRejoin = undefined;
+      if (stopping || !started) return;
+      void announceReturn(runtime, context, nodeId).then(
+        (outcome) => { if (outcome === 'retry') scheduleRejoin(attempt + 1); },
+        (error: unknown) => {
+          if (stopping) return;
+          logger.warn('cluster: a repeated return announcement failed', { error: summarizeError(error) });
+          scheduleRejoin(attempt + 1);
+        },
+      );
+    }, delayMs ?? retryDelays[attempt]!);
+  };
+  // The group's key moved on while this machine was running. The datagram that
+  // showed it is unauthenticated, so this only asks the group again (a member
+  // verifies the answer), at most once a minute and never alongside a pending one.
+  let lastKeyLostRejoinAt = Number.NEGATIVE_INFINITY;
+  requestRejoin = () => {
+    if (stopping || !started || cancelRejoin) return;
+    const now = clock.now();
+    if (now - lastKeyLostRejoinAt < KEY_LOST_REJOIN_MIN_GAP_MS) return;
+    lastKeyLostRejoinAt = now;
+    scheduleRejoin(0, 0);
+  };
   return {
     runtime,
     verbs: createClusterGroupVerbs(context),
     electionTransport: runtime.electionTransport(),
+    rejoin: () => requestRejoin(),
     start: () => {
       if (stopping) return Promise.reject(new Error('Cluster composition is stopping'));
       if (starting) return starting;
@@ -177,9 +230,10 @@ export function createClusterGroupComposition(options: {
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         await runtime.start();
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
-        await announceReturn(runtime, context, nodeId);
+        const outcome = await announceReturn(runtime, context, nodeId);
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         started = true;
+        if (outcome === 'retry') scheduleRejoin(0);
       }).catch(async (error: unknown) => {
         try { await runtime.stop(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Cluster composition startup and cleanup failed'); }
@@ -190,6 +244,7 @@ export function createClusterGroupComposition(options: {
     stop: () => {
       if (stopping) return stopping;
       started = false;
+      clearRejoin();
       const pending = starting;
       stopping = Promise.resolve().then(async () => {
         // Cancel the runtime FIRST: a pending return announcement needs its
@@ -277,16 +332,16 @@ async function announceReturn(
   runtime: ClusterGroupRuntime,
   context: GroupOperationsContext,
   nodeId: string,
-): Promise<void> {
-  if (runtime.membership !== 'member') return;
-  if (!stillOnRoster(runtime.groupState, nodeId)) return;
+): Promise<'settled' | 'retry'> {
+  if (runtime.membership !== 'member') return 'settled';
+  if (!stillOnRoster(runtime.groupState, nodeId)) return 'settled';
   const result = await rejoinGroup(context);
   if (result.ok) {
     logger.info('cluster: rejoined the group and took the current group key', {
       group: result.data.groupName,
       members: result.data.memberCount,
     });
-    return;
+    return 'settled';
   }
   if (result.terminal) {
     // A member refused this machine and proved it was a member when it did.
@@ -299,7 +354,7 @@ async function announceReturn(
       reason: result.error,
       action: result.fix,
     });
-    return;
+    return 'settled';
   }
   if (result.failure === 'unverifiable-replies') {
     // Something answered and none of it could be authenticated. This machine
@@ -312,9 +367,11 @@ async function announceReturn(
       reason: result.error,
       action: result.fix,
     });
-    return;
+    return 'retry';
   }
   // Not an error. A machine that starts first, or is alone on the network, has
-  // nobody to answer it and carries on with the keys it already holds.
+  // nobody to answer it and carries on with the keys it already holds, but a
+  // member that comes up before the others would otherwise never ask again.
   logger.debug('cluster: no other machine answered the return announcement', { reason: result.error });
+  return 'retry';
 }

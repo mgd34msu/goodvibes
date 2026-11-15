@@ -27,8 +27,15 @@ Enable the web-UI-serving capability on the daemon (it is off by default; the
 daemon stays loopback-only until you turn it on):
 
 ```
-controlPlane.webui.serve = true   # daemon config, opt-in, never automatic
+goodvibes-daemon webui enable [--bundle-dir <dir>] [--lan]
 ```
+
+The command sets `controlPlane.webui.serve`, the bundle directory and the
+public base URL together, so pairing links carry the address the bundle is
+actually served at. Setting only `controlPlane.webui.serve = true` by hand
+leaves the bundle directory and the public URL as they were, and links can
+point at a loopback placeholder. `goodvibes-daemon webui disable` turns it
+off again.
 
 With this on, the browser loads the app and calls the API from the same
 address, so the browser's same-origin rules are a non-issue. Nothing about
@@ -48,6 +55,14 @@ Vite dev server on `127.0.0.1:3423` talking to a daemon on another port, or a
 reverse proxy in front of a separately-hosted bundle, the daemon must be told
 which origins may call it (an explicit allowlist; it is empty by default). This
 is the secondary path; prefer same-origin serving for anything but development.
+
+The dev server reads these environment variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `GOODVIBES_WEB_HOST`, `GOODVIBES_WEB_PORT` | Interface and port the dev server binds. |
+| `GOODVIBES_WEB_ALLOWED_HOSTS` | Comma-separated host names the dev server accepts besides this machine's own names. Set it when you open the app by a name the dev server does not already know. |
+| `GOODVIBES_WEB_PUBLIC_BASE_URL` | The public address the app is reached at; its host name is added to the accepted hosts. |
 
 ## Moving the host: reaching the daemon over Tailscale
 
@@ -85,7 +100,9 @@ in, and the ordinary token pairing still handles authentication on top.
 
 Get the pairing onto the device by scanning it from the pairing QR, opening a
 `#relay=` hand-off link, or pasting the `gvrelay1.` code on the sign-in
-screen. Relay use is opt-in and probe-driven, so while the daemon is reachable
+screen. The page shows the relay host and a short fingerprint of the
+daemon's key and stores the pairing only after you confirm it (it says when it
+would replace an existing one). Relay use is opt-in and probe-driven, so while the daemon is reachable
 directly, requests stay direct. State-changing calls over the relay require a
 passkey step-up (a WebAuthn assertion) before the daemon accepts them, so
 register a passkey from Settings, Account before relying on the relay away from home.
@@ -119,7 +136,10 @@ instantly, because its shell is cached.
 ## Honest offline
 
 The installed app opens instantly even with no network, because the app shell
-(the page and its code) is cached. But the daemon is the single source of truth
+(the page and its code) is cached. When the daemon is reachable, opening the app
+loads the daemon's current shell (waiting at most about a second and a half
+before using the cached copy), so the first launch after an upgrade already runs
+the new version. But the daemon is the single source of truth
 for every piece of live data, and no API response is ever cached. So when you
 open the app offline, or while the daemon is unreachable, the shell loads and
 then shows the ordinary "Can't reach the daemon" state, the same honest,
@@ -141,7 +161,8 @@ even when it isn't open.
   browser's own push service, and your device's push address is never handed back
   out over the wire.
 - Tapping an approval notification deep-links straight to that approval in
-  Work, and its Allow/Deny buttons hand the decision to the signed-in app (see
+  Work, and its Allow button opens the approval for you to review in the signed-in
+  app while Deny denies it there (see
   [push-approval-actions.md](push-approval-actions.md)). A needs-input
   notification, a fleet node blocked on you, deep-links to Work focused on
   that node. Notification links from earlier versions (`?view=approvals-tasks`,

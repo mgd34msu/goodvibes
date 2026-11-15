@@ -1,4 +1,4 @@
-import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
+import { useTestWebhookNotifications, makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
 /**
  * Tests for src/core/turn-event-wiring.ts
  *
@@ -22,6 +22,8 @@ import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/op
 import { journalPathFor } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
+
+useTestWebhookNotifications();
 
 // ---------------------------------------------------------------------------
 // Minimal fake event bus
@@ -49,7 +51,7 @@ function makeFakeTurnEventBus() {
     for (const handler of listeners.get(type) ?? []) handler(event);
   }
 
-  return { on, emit };
+  return { on, emit, count: (type: string): number => listeners.get(type)?.length ?? 0 };
 }
 
 function makeFakeEvents() {
@@ -67,6 +69,8 @@ function makeFakeEvents() {
     emitTool: (type: string, payload: unknown) => tools.emit(type, payload),
     emitAgent: (type: string, payload: unknown) => agents.emit(type, payload),
     emitContract: (type: string, payload: unknown) => contracts.emit(type, payload),
+    agentListeners: (type: string) => agents.count(type),
+    contractListeners: (type: string) => contracts.count(type),
   };
 }
 
@@ -89,8 +93,10 @@ function makeMinimalOptions(
   emitTurn: (type: string, payload: unknown) => void;
   emitAgent: (type: string, payload: unknown) => void;
   emitContract: (type: string, payload: unknown) => void;
+  agentListeners: (type: string) => number;
+  contractListeners: (type: string) => number;
 } {
-  const { events, emitTurn, emitAgent, emitContract } = makeFakeEvents();
+  const { events, emitTurn, emitAgent, emitContract, agentListeners, contractListeners } = makeFakeEvents();
 
   const defaults: WireTurnEventHandlersOptions = {
     events,
@@ -130,7 +136,7 @@ function makeMinimalOptions(
     _clock: () => 0,
   };
 
-  return { ...defaults, ...overrides, emitTurn, emitAgent, emitContract };
+  return { ...defaults, ...overrides, emitTurn, emitAgent, emitContract, agentListeners, contractListeners };
 }
 
 // ---------------------------------------------------------------------------
@@ -400,12 +406,15 @@ describe('wireTurnEventHandlers: agent/chain-failure alerts', () => {
   });
 
   test('no agent/chain-failure listeners are registered when focusTracker is absent', async () => {
-    const spy = spyOnStdoutWrite();
-    const opts = makeMinimalOptions({ focusTracker: undefined });
-    wireTurnEventHandlers(opts);
-    expect(() => opts.emitAgent('AGENT_FAILED', { type: 'AGENT_FAILED', agentId: 'a', error: 'e', durationMs: 1 })).not.toThrow();
-    expect(spy).not.toHaveBeenCalledWith('\x07');
-    spy.mockRestore();
+    const watched = [['AGENT_FAILED', 'agent'], ['CONTRACT_FAILED', 'contract'], ['CONTRACT_CANCELLED', 'contract']] as const;
+    const counts = (o: ReturnType<typeof makeMinimalOptions>) => watched.map(([type, bus]) => (bus === 'agent' ? o.agentListeners(type) : o.contractListeners(type)));
+    const tracker = new FocusTracker();
+    const withTracker = makeMinimalOptions({ focusTracker: tracker });
+    wireTurnEventHandlers(withTracker);
+    expect(counts(withTracker)).toEqual([1, 1, 1]);
+    const without = makeMinimalOptions({ focusTracker: undefined });
+    wireTurnEventHandlers(without);
+    expect(counts(without)).toEqual([0, 0, 0]);
   });
 
   test('CONTRACT_FAILED (failure state) rings the bell when unfocused', async () => {

@@ -30,13 +30,14 @@ import { logger } from '../utils/logger.js';
 import {
   estimateTokens,
   estimateConversationTokens,
-  compactSmallWindow,
+  SMALL_WINDOW_KEEP_RECENT,
 } from '../core/context-compaction.js';
 import { ConversationManager } from '../core/conversation.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { LLMProvider } from '../providers/interface.js';
 import type { AgentOrchestratorRunContext } from './orchestrator-runner.js';
 import { setAgentProgress } from './progress-audience.js';
+import { compactAgentConversation } from './orchestrator-utils.js';
 
 /** Fraction of the context window at which compaction is triggered (default fallback). */
 const CONTEXT_COMPACT_THRESHOLD = 0.85;
@@ -143,9 +144,9 @@ export async function applyContextWindowAwareness(
   setAgentProgress(record, `Turn ${turn} · Compacting context…`, 'operator');
 
   if (modelWindow <= MIN_WINDOW_FOR_LLM_COMPACT) {
-    conversation.replaceMessagesForLLM(compactSmallWindow(messages));
+    conversation.replaceMessagesForLLM(compactAgentConversation(messages, SMALL_WINDOW_KEEP_RECENT, record.task));
   } else {
-    conversation.replaceMessagesForLLM(compactSmallWindow(messages, Math.max(10, Math.floor(messages.length / 2))));
+    conversation.replaceMessagesForLLM(compactAgentConversation(messages, Math.max(10, Math.floor(messages.length / 2)), record.task));
   }
 
   const remainingAfterMsgs = modelWindow - estimateConversationTokens(conversation.getMessagesForLLM()) - toolTokens;

@@ -10,7 +10,6 @@ const text = (value: unknown): value is string => typeof value === 'string';
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(text);
 const optional = (entry: Record<string, unknown>, key: string, check: (value: unknown) => boolean) => entry[key] === undefined || check(entry[key]);
 const oneOf = (value: unknown, choices: readonly string[]) => typeof value === 'string' && choices.includes(value);
-function stringMap(value: unknown): boolean { return object(value) && Object.values(value).every(text); }
 function approval(value: unknown): boolean {
   if (!object(value) || Object.keys(value).length !== 4 || value['version'] !== 1 || !strings(value['args']) || !(value['cwd'] === null || text(value['cwd']))) return false;
   try { validateArgv(value['command'], value['args'], 'approval'); return true; } catch { return false; }
@@ -32,23 +31,11 @@ function run(value: unknown): boolean {
     && optional(value, 'observation', observation) && optional(value, 'termination', termination);
 }
 function definition(value: unknown): boolean {
-  if (!object(value) || !finite(value['createdAt']) || !optional(value, 'description', text) || !optional(value, 'ownerSessionId', text)) return false;
-  try { validateDefinition(value); } catch { return false; }
-  const spec = value['spec'], action = value['action'];
-  if (!object(spec) || !object(action) || !optional(action, 'approvedAction', approval)) return false;
-  if (spec['kind'] === 'condition') {
-    const probe = spec['probe'];
-    if (!object(probe) || !optional(probe, 'timeoutMs', count)) return false;
-    if (probe['kind'] === 'http' && (!optional(probe, 'headers', stringMap) || !optional(probe, 'body', text)
-      || !optional(probe, 'capture', entry => oneOf(entry, ['body', 'status', 'envelope'])))) return false;
-    if (probe['kind'] === 'file' && !optional(probe, 'capture', entry => oneOf(entry, ['content', 'stat']))) return false;
-    if (probe['kind'] === 'command' && (!optional(probe, 'cwd', text) || !optional(probe, 'capture', entry => oneOf(entry, ['stdout', 'stderr', 'exit-code', 'envelope'])))) return false;
-  }
-  if ((spec['kind'] === 'stream' || spec['kind'] === 'on-exit') && !optional(spec, 'cwd', text)) return false;
-  if (spec['kind'] === 'stream' && (!optional(spec, 'restart', entry => typeof entry === 'boolean') || !optional(spec, 'dedupTtlMs', count)
-    || !optional(spec, 'batchIntervalMs', count))) return false;
-  if (spec['kind'] === 'on-exit' && (!optional(spec, 'env', stringMap) || !optional(spec, 'outputTailBytes', count))) return false;
-  return true;
+  // Field-level shape is owned by validateDefinition, so a definition accepted at create is never refused at save.
+  if (!object(value) || !finite(value['createdAt'])) return false;
+  try { validateDefinition(value, { persisted: true }); } catch { return false; }
+  const action = value['action'];
+  return object(action) && optional(action, 'approvedAction', approval);
 }
 export function isTriggerRecord(value: unknown): value is TriggerRecord {
   if (!object(value) || !definition(value['definition']) || !oneOf(value['state'], ['idle', 'running', 'backoff', 'circuit-open', 'fired', 'cancelled', 'failed'])

@@ -32,6 +32,20 @@ export async function handleSharedSessionLifecycle(
   action: 'close' | 'reopen',
 ): Promise<Response> {
   await context.sessionBroker.start();
+  if (action === 'close') {
+    const live = context.sessionBroker.getSession(sessionId);
+    // Closing only the shared record of a live hosted session would leave its
+    // loop running, spending tokens and holding its workspace, while every list
+    // shows it closed. Ending it takes the hosted session's own verb, which also
+    // closes the shared record.
+    if (live && (live as { kind?: unknown }).kind === 'hosted' && live.status === 'active') {
+      return jsonErrorResponse({
+        error: `Session ${sessionId} is a daemon-hosted session that is still running; closing only its shared record would leave it running. `
+          + 'End it with sessions.hosted.kill, which also closes this record. Nothing was changed.',
+        code: 'HOSTED_SESSION_STILL_RUNNING',
+      }, { status: 409 });
+    }
+  }
   const session = action === 'close'
     ? await context.sessionBroker.closeSession(sessionId)
     : await context.sessionBroker.reopenSession(sessionId);

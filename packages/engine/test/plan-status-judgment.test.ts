@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installJudgmentPort, bindJudgmentPortAuthority } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
-import { ExecutionPlanManager, PlanStatusUnavailableError, type PlanItemStatus } from '../platform/src/platform/core/execution-plan.js';
+import { ExecutionPlanManager, type PlanItemStatus } from '../platform/src/platform/core/execution-plan.js';
 import { handleFinalResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { registry } from '../platform/src/platform/core/judgment-registry.js';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -19,22 +20,22 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 function caller(content = '# Plan\n## Phase 1\n- [ ] Build -- All done') {
   const planManager = manager();
   const plan = planManager.create('Plan', [], 'session'); plan.awaitingPlan = true; planManager.save(plan);
-  const spawned: string[] = [], messages: string[] = [];
-  let enabled = true, terminal = false, timers = 0;
+  const messages: string[] = [];
+  let enabled = true, terminal = false;
   const controller = new AbortController();
   const args: Parameters<typeof handleFinalResponseOutcome>[0] = {
     signal: controller.signal,
     conversation: { addAssistantMessage() {}, addSystemMessage: (text: string) => { messages.push(text); } } as never,
-    agentManager: { list: () => [], spawn: (input: { task: string }) => { spawned.push(input.task); return { id: 'agent' }; } } as never,
+    agentManager: { list: () => [], spawn: () => { throw new Error('final-response handling must not spawn agents'); } } as never,
     planManager, preTurnPlan: plan,
     configManager: { get: (key: string) => key === 'orchestration.recursionEnabled' ? enabled : 10 } as never,
     providerRegistry: { getCurrentModel: () => ({ displayName: 'test', registryKey: 'test', provider: 'test' }) } as never,
     runtimeBus: null, emitterContext: () => ({ sessionId: 'session', source: 'test', traceId: 'test' }), turnId: 'turn',
     response: { content, toolCalls: [], stopReason: 'completed' } as never,
-    requestRender() {}, setAutoSpawnTimeout: () => { timers++; }, autoSpawnTimeoutMs: 10, sessionId: 'session',
+    requestRender() {}, sessionId: 'session',
     onTurnTerminal: publish => { terminal = true; publish(); },
   };
-  return { args, planManager, plan, controller, spawned, messages, disable: () => { enabled = false; }, get timers() { return timers; }, get terminal() { return terminal; } };
+  return { args, planManager, plan, controller, messages, disable: () => { enabled = false; }, get terminal() { return terminal; } };
 }
 function delayed(status: PlanItemStatus = 'complete') {
   const start = deferred(), release = deferred(), fake = reading(status);
@@ -59,20 +60,20 @@ describe('canonical plan status boundary', () => {
   });
   test('complete source is screened before any request, including late ignored lines', async () => {
     const fake = reading(); installJudgmentPort(fake.port);
-    await expect(manager().parseFromMarkdown('# Plan\n## Phase 1\n- [ ] A -- DONE\npassword=private-value')).rejects.toBeInstanceOf(PlanStatusUnavailableError);
+    await expect(manager().parseFromMarkdown('# Plan\n## Phase 1\n- [ ] A -- DONE\npassword=private-value')).rejects.toBeInstanceOf(JudgmentInputError);
     expect(fake.requests).toHaveLength(0);
   });
-  test('unavailable and unsettled readings preserve the shell without fallback spawning', async () => {
+  test('unavailable and unsettled readings preserve the shell', async () => {
     for (const port of [undefined, reading('complete', .21).port]) {
       installJudgmentPort(port); const f = caller(); await handleFinalResponseOutcome(f.args);
-      expect(f.planManager.getActive('session')).toEqual(f.plan); expect(f.spawned).toEqual([]); expect(f.timers).toBe(0);
+      expect(f.planManager.getActive('session')).toEqual(f.plan);
       expect(f.messages.join(' ')).toContain('unavailable');
     }
   });
   test('real caller preserves complete, failed, skipped and dependency gates; proposals remain pending', async () => {
     const f = caller('# Plan\n## Phase 1\n- [ ] A -- COMPLETE\n- [ ] B -- FAILED\n- [ ] C -- SKIPPED\n- [ ] D -- PENDING (depends: B)\n- [ ] E -- PENDING (depends: A)');
     await handleFinalResponseOutcome(f.args);
-    expect(f.spawned).toEqual([]); expect(f.timers).toBe(0);
+   
     expect(f.planManager.getActive('session')?.items.map(item => item.status)).toEqual(['complete', 'failed', 'skipped', 'pending', 'pending']);
     f.planManager.replaceItems(f.plan.id, [{ description: 'Proposal', phase: 'Phase 1', status: 'complete' }]);
     expect(f.planManager.load(f.plan.id)?.items[0]?.status).toBe('pending');
@@ -86,7 +87,7 @@ describe('canonical plan status boundary', () => {
     expect(saved?.items.map(item => ({ phase: item.phase, description: item.description, status: item.status })))
       .toEqual([{ phase: 'Build', description: 'Compile', status: 'failed' }]);
     expect(fake.requests).toHaveLength(1);
-    expect(f.spawned).toEqual([]); expect(f.timers).toBe(0);
+   
   });
   test('plan save ABA and replacement cannot be overwritten by a late reading', async () => {
     for (const mutation of ['aba', 'replace', 'dismiss'] as const) {
@@ -95,18 +96,18 @@ describe('canonical plan status boundary', () => {
       else if (mutation === 'dismiss') f.planManager.dismiss('session');
       else { f.planManager.save({ ...f.plan, title: 'Changed' }); f.planManager.save(f.plan); }
       const expected = f.planManager.getActive('session'); read.release.resolve(); await pending;
-      expect(f.planManager.getActive('session')).toEqual(expected); expect(f.spawned).toEqual([]); expect(f.timers).toBe(0);
+      expect(f.planManager.getActive('session')).toEqual(expected);
     }
   });
   test('cancellation interrupts a noncooperating reader; late completion cannot write or spawn', async () => {
     const read = delayed(), f = caller(), pending = handleFinalResponseOutcome(f.args); await read.start.promise;
     f.controller.abort(); await expect(pending).rejects.toBeDefined(); read.release.resolve(); await Promise.resolve();
-    expect(f.planManager.getActive('session')).toEqual(f.plan); expect(f.spawned).toEqual([]);
+    expect(f.planManager.getActive('session')).toEqual(f.plan);
   });
   test('reader installation ABA invalidates an in-flight answer', async () => {
     const read = delayed(), f = caller(), pending = handleFinalResponseOutcome(f.args); await read.start.promise;
     const old = installJudgmentPort(reading('pending').port); installJudgmentPort(old); read.release.resolve(); await pending;
-    expect(f.planManager.getActive('session')).toEqual(f.plan); expect(f.spawned).toEqual([]);
+    expect(f.planManager.getActive('session')).toEqual(f.plan);
   });
   test('source owner mutation invalidates an in-flight answer', async () => {
     let current = true; const read = delayed();
@@ -119,13 +120,13 @@ describe('canonical plan status boundary', () => {
     for (const mutation of ['session', 'content'] as const) {
       const read = delayed(), f = caller(), pending = handleFinalResponseOutcome(f.args); await read.start.promise;
       if (mutation === 'session') f.args.sessionId = 'other'; else f.args.response.content = '# Different plan';
-      read.release.resolve(); await pending; expect(f.planManager.getActive('session')).toEqual(f.plan); expect(f.spawned).toEqual([]);
+      read.release.resolve(); await pending; expect(f.planManager.getActive('session')).toEqual(f.plan);
     }
   });
   test('live policy disabling spawn while awaiting a reading is respected', async () => {
     const read = delayed('pending'), f = caller(), pending = handleFinalResponseOutcome(f.args); await read.start.promise;
     f.disable(); read.release.resolve(); await pending;
-    expect(f.planManager.getActive('session')?.awaitingPlan).toBe(false); expect(f.spawned).toEqual([]);
+    expect(f.planManager.getActive('session')?.awaitingPlan).toBe(false);
   });
   test('terminal publication waits for plan settlement and happens once on recoverable failure', async () => {
     const read = delayed(), f = caller();
@@ -138,17 +139,6 @@ describe('canonical plan status boundary', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(f.terminal).toBe(true); expect(completions).toBe(1);
     expect(f.planManager.getActive('session')).toEqual(f.plan);
-  });
-  test('timer fallback cannot spawn a replacement plan or survive turn cancellation', async () => {
-    for (const mutation of ['replacement', 'cancel'] as const) {
-      const f = caller('Plain final answer');
-      f.planManager.replaceItems(f.plan.id, [{ description: 'Old task', phase: 'Phase 1' }]);
-      await handleFinalResponseOutcome(f.args);
-      if (mutation === 'cancel') f.controller.abort();
-      else f.planManager.create('Replacement', [{ description: 'New task', phase: 'Phase 1' }], 'session');
-      await new Promise(resolve => setTimeout(resolve, 25));
-      expect(f.spawned).toEqual([]);
-    }
   });
 
 });

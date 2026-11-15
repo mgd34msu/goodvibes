@@ -17,6 +17,7 @@ import type { OrchestrationEngine } from '../orchestration/engine.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractPreSpawn, ContractUnitOutcome } from '../orchestration/phase-runner.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import type { ContractHoldOutcome } from './agent-hooks.js';
 import type { ContractConfig } from './config.js';
@@ -27,6 +28,7 @@ import {
   transitionContract,
   transitionGroup,
   transitionUnit,
+  UNIT_TRANSITIONS,
   type Contract,
   type ContractDecisionAction,
   type ContractFailureKind,
@@ -113,19 +115,29 @@ export function failureFromError(error: unknown): { readonly kind: ContractFailu
   return { kind: 'other', reason: summarizeError(error) };
 }
 
-/** An error thrown because a check or read was stopped on purpose. */
+/**
+ * An error thrown because a check or read was stopped on purpose. With the
+ * owning signal given, only that signal's abort counts: an abort-shaped error
+ * nobody asked for is a failure, and treating it as a stop would leave the work
+ * waiting with no outcome.
+ */
 export function isAbortError(error: unknown, signal?: AbortSignal): boolean {
-  return signal?.aborted === true || (error instanceof JudgmentError && error.kind === 'aborted') || (error instanceof Error && error.name === 'AbortError');
+  if (signal !== undefined) return signal.aborted;
+  return (error instanceof JudgmentError && error.kind === 'aborted') || (error instanceof Error && error.name === 'AbortError');
 }
 
 export interface RunEnv {
   readonly native?: NativeContractServices | undefined;
   readonly now: () => number;
+  /** Waits `ms` or until the signal aborts (absent: a real timer). */
+  readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
   readonly config: () => ContractConfig;
   /** Emits on the runtime bus with the contract's context, and to the runner's listeners. */
   readonly emit: (contract: Contract, event: ContractEvent) => void;
   /** An agent's silence clock restarts (a hold released: held time is not silence). */
   readonly touchAgent: (agentId: string) => void;
+  /** The contract's status changed: the owner record's progress line follows it. */
+  readonly contractMoved?: ((contract: Contract) => void) | undefined;
 }
 
 /**
@@ -159,6 +171,8 @@ export class ContractRun {
   readonly startingGroups = new Set<string>();
   /** Groups whose units all passed and were handed to the group step. */
   readonly settledGroups = new Set<string>();
+  /** Escalations whose owner reply is being read or acted on now. */
+  readonly replying = new Set<string>();
 
   constructor(
     readonly contract: Contract,
@@ -206,12 +220,28 @@ export class ContractRun {
     if (this.contract.status === to) return;
     const change = transitionContract(this.contract, to);
     this.emit({ type: 'CONTRACT_STATUS_CHANGED', contractId: this.id, from: change.from, to: change.to });
+    this.env.contractMoved?.(this.contract);
   }
 
   moveGroup(group: ContractGroup, to: GroupStatus): void {
     if (group.status === to) return;
     const change = transitionGroup(group, to);
     this.emit({ type: 'CONTRACT_GROUP_STATUS_CHANGED', contractId: this.id, groupId: group.id, from: change.from, to: change.to });
+  }
+
+  /**
+   * A unit move for a callback that can arrive after something else already
+   * moved the unit (a late check, a settled agent): a refused move is logged
+   * and leaves the unit as it is, instead of throwing where nobody handles it.
+   */
+  tryMoveUnit(unit: ContractUnit, to: UnitStatus): boolean {
+    if (unit.status === to) return true;
+    if (!UNIT_TRANSITIONS[unit.status].includes(to)) {
+      logger.warn('contract runner: a late unit move was refused', { contractId: this.id, unitId: unit.id, from: unit.status, to, allowed: UNIT_TRANSITIONS[unit.status] });
+      return false;
+    }
+    this.moveUnit(unit, to);
+    return true;
   }
 
   moveUnit(unit: ContractUnit, to: UnitStatus): void {

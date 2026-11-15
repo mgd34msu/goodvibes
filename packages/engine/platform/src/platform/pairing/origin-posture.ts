@@ -14,6 +14,7 @@
  *    the daemon NEVER provisions a CA or mints certificates).
  */
 import { isPrivateNetworkHost } from '@goodvibes-jev/engine/transport-http';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 
 /** The browser-gated capabilities a surface renders availability for. */
 export type BrowserGatedCapability = 'service-worker' | 'push' | 'microphone';
@@ -54,11 +55,7 @@ export const LAN_PLAIN_HTTP_NOTICE =
 
 const NEEDS_HTTPS_REASON = 'needs https, available via tailscale';
 
-/** A loopback host (the W3C Secure Contexts list); a URL's bracketed IPv6 `[::1]` counts. */
-export function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.startsWith('127.') || host.endsWith('.localhost');
-}
+export { isLoopbackHost };
 
 /**
  * Describe the TLS/capability posture of a web origin. Invalid origins are

@@ -1,4 +1,3 @@
-/** UNRUN: inspect actual persisted project selectors before any store constructor. */
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

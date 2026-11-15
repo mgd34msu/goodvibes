@@ -10,7 +10,7 @@ import type { KnowledgeSemanticService } from './semantic/index.js';
 
 export interface KnowledgeServiceJobRunnerContext {
   readonly lint: () => Promise<readonly KnowledgeIssueRecord[]>;
-  readonly reindex: () => Promise<{ readonly status: KnowledgeStatus; readonly issues: readonly KnowledgeIssueRecord[]; readonly provenance?: 'classic'; readonly semanticEnrichment?: 'attempted' | 'not-evaluated' }>;
+  readonly reindex: () => Promise<{ readonly status: KnowledgeStatus; readonly issues: readonly KnowledgeIssueRecord[]; readonly provenance?: 'classic'; readonly recompileFailures?: readonly { readonly sourceId: string; readonly error: string }[]; readonly semanticEnrichment?: 'attempted' | 'not-evaluated' }>;
   readonly refreshSources: (
     kind: 'stale' | 'bookmark',
     sourceIds?: readonly string[],
@@ -28,6 +28,17 @@ export interface KnowledgeServiceJobRunnerContext {
   ) => Promise<{ readonly id: string; readonly metrics: Record<string, number> }>;
 }
 
+/** A job that ran but achieved nothing; the run is recorded `failed` with this message. */
+export class KnowledgeJobFailedError extends Error {
+  override readonly name = 'KnowledgeJobFailedError';
+}
+
+function firstError(errors: readonly (string | { readonly error?: unknown })[]): string {
+  const first = errors[0];
+  const text = typeof first === 'string' ? first : typeof first?.error === 'string' ? first.error : undefined;
+  return text ? ` (first: ${text})` : '';
+}
+
 export async function runKnowledgeServiceJobByKind(
   kind: KnowledgeJobRecord['kind'],
   input: { readonly mode?: KnowledgeJobMode | undefined; readonly sourceIds?: readonly string[] | undefined; readonly limit?: number | undefined },
@@ -42,6 +53,7 @@ export async function runKnowledgeServiceJobByKind(
       const result = await context.reindex();
       return { sourceCount: result.status.sourceCount, issueCount: result.issues.length,
         ...(result.provenance ? { provenance: result.provenance } : {}),
+        ...(result.recompileFailures?.length ? { recompileFailed: result.recompileFailures.length, recompileFailures: result.recompileFailures } : {}),
         ...(result.semanticEnrichment ? { semanticEnrichment: result.semanticEnrichment } : {}) };
     }
     case 'refresh-stale':
@@ -50,6 +62,12 @@ export async function runKnowledgeServiceJobByKind(
       return { refreshed: await context.refreshSources('bookmark', input.sourceIds, input.limit) };
     case 'sync-browser-history': {
       const result = await context.syncBrowserHistory({ limit: input.limit });
+      // Partial failures stay `completed` with counts in the result; a run in
+      // which nothing was imported or captured and something failed did not do
+      // its work (a retained capture with compilation held is reported in outcomes).
+      if (result.imported === 0 && result.captured === 0 && (result.failed > 0 || result.errors.length > 0)) {
+        throw new KnowledgeJobFailedError(`Browser history sync imported nothing: ${result.failed} failed, ${result.errors.length} error(s)${firstError(result.errors)}.`);
+      }
       return {
         imported: result.imported,
         failed: result.failed,
@@ -75,17 +93,31 @@ export async function runKnowledgeServiceJobByKind(
         ...(preserved.length ? { preservedUnscopedSourceIds: preserved, note: overview.note ?? bundle.note } : {}),
       };
     }
-    case 'semantic-enrichment':
-      return context.semanticService.reindex({
+    case 'semantic-enrichment': {
+      const result = await context.semanticService.reindex({
         sourceIds: input.sourceIds,
         limit: input.limit,
       });
+      // Some sources failing is a labelled partial result (`failed`, `errors`);
+      // every attempted source failing is a failed run, not a green one.
+      if (result.failed > 0 && result.enriched === 0 && result.skipped === 0) {
+        throw new KnowledgeJobFailedError(`Semantic enrichment failed for all ${result.failed} source(s)${firstError(result.errors.map((entry) => entry.error))}.`);
+      }
+      return result;
+    }
     case 'semantic-self-improvement': {
       const result = await context.semanticService.selfImprove({
         sourceIds: input.sourceIds,
         limit: input.limit,
         reason: 'scheduled',
       });
+      // A refused run (nothing processed, a reason given) or one in which every
+      // processed gap errored did nothing; a coalesced or truncated run is expected.
+      const processed = result.processedGaps ?? 0;
+      if (result.errors.length > 0 && !result.coalesced && result.queuedTasks === 0 && result.closedGaps === 0 && result.linkedRepairs === 0
+        && (processed === 0 || result.errors.length >= processed)) {
+        throw new KnowledgeJobFailedError(`Semantic self-improvement did not complete: ${result.errors.length} error(s)${firstError(result.errors.map((entry) => entry.error))}.`);
+      }
       return { ...result };
     }
     case 'light-consolidation': {

@@ -550,13 +550,13 @@ describe('the four flat card keys the entry surfaces write never reach the model
     const groups = buildSettingsModel({
       payments: {
         cardNumber: '4000056655665556',
-        cardCvv: '731',
+        cardCvv: 'cvv-sentinel-9c41',
         cardholderName: 'Jane Q. Fakename',
       },
     });
     const serialized = JSON.stringify(groups);
     expect(serialized).not.toContain('4000056655665556');
-    expect(serialized).not.toContain('731');
+    expect(serialized).not.toContain('cvv-sentinel-9c41');
     expect(serialized).not.toContain('Jane Q. Fakename');
   });
 

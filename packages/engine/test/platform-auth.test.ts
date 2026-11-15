@@ -3,7 +3,7 @@ import {
   createBrowserTokenStore,
   createGoodVibesPlatform,
   createMemoryTokenStore,
-} from '../platform/dist/index.js';
+} from '../platform/src/index.js';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

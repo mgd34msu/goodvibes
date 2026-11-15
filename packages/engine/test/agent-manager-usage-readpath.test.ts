@@ -58,9 +58,7 @@ describe('AgentManager: usage read path after direct-executed completion', () =>
       outsideContract: true,
     });
 
-    // Let the (synchronous-bodied) async executor settle.
-    await Promise.resolve();
-    await Promise.resolve();
+    await manager.join(spawned.id);
 
     const status = manager.getStatus(spawned.id);
     expect(status?.status).toBe('completed');

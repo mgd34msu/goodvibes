@@ -6,7 +6,8 @@
  * `detectSandboxAvailability`, and `probeSandboxHost` existed but no public
  * subpath exported them, so a consumer could not wire an approval flow to the
  * sandbox policy. These imports resolve through the package `exports` map
- * against the built dist, so a broken/absent subpath fails the import.
+ * (Bun's `bun` condition, which points at the sources), so a broken or absent
+ * subpath fails the import without a prior build.
  */
 import { describe, expect, test } from 'bun:test';
 import {

@@ -10,6 +10,11 @@ import type { CapturedExecAuthority } from './captured-exec.js';
 export interface CapturedFileBytes { readonly bytes: RetainedFileSlice; readonly mode: number }
 interface CapturedFileChange extends CapturedFileBytes { readonly path: string }
 
+/** Publication failed part-way and the rollback could not restore everything. */
+export class PartialCapturedPublication extends Error {
+  constructor(message: string) { super(`captured publication is partial: ${message}`); this.name = 'PartialCapturedPublication'; }
+}
+
 export async function publishCapturedProjection(
   binding: CapturedExecAuthority,
   bytes: { readonly originals: RetainedFileBytes; readonly changes: RetainedFileBytes },
@@ -85,17 +90,50 @@ export async function publishCapturedProjection(
     for (const change of changes.values()) {
       if (!bytes.changes.matchesFileSync(change.bytes, change.path)) throw new Error('captured output changed before publication');
     }
-    for (const [path, mode] of changedDirectories) {
-      if (!originalDirectories.has(path)) mkdirSync(join(binding.root, path));
-      chmodSync(join(binding.root, path), mode);
+    // Each applied step registers its inverse, so an I/O failure part-way
+    // restores the previous state instead of leaving half a publication.
+    const undo: Array<() => void> = [];
+    const at = (path: string): string => join(binding.root, path);
+    try {
+      for (const [path, mode] of changedDirectories) {
+        const previous = originalDirectories.get(path);
+        if (previous === undefined) { mkdirSync(at(path)); undo.push(() => rmdirSync(at(path))); }
+        else undo.push(() => chmodSync(at(path), previous));
+        chmodSync(at(path), mode);
+      }
+      for (const [path, change] of changes) {
+        const original = originals.get(path);
+        let created = true;
+        undo.push(() => {
+          if (original) bytes.originals.copyToSync(original.bytes, at(path), original.mode, true);
+          else if (created) unlinkSync(at(path));
+        });
+        try { bytes.changes.copyToSync(change.bytes, at(path), change.mode, original !== undefined); }
+        catch (error) {
+          // O_EXCL refused because something else owns the path; it is not ours to remove.
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') created = false;
+          throw error;
+        }
+      }
+      for (const path of removedFiles) {
+        unlinkSync(at(path));
+        const original = originals.get(path)!;
+        undo.push(() => bytes.originals.copyToSync(original.bytes, at(path), original.mode));
+      }
+      // Never recursively remove a host tree: only now-empty admitted directories.
+      for (const path of removedDirectories) {
+        rmdirSync(at(path));
+        const mode = originalDirectories.get(path)!;
+        undo.push(() => { mkdirSync(at(path)); chmodSync(at(path), mode); });
+      }
+    } catch (error) {
+      let failed = 0;
+      for (const step of undo.reverse()) {
+        try { step(); } catch { failed += 1; }
+      }
+      if (failed > 0) throw new PartialCapturedPublication(`${failed} step(s) could not be restored after: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
-    for (const [path, change] of changes) {
-      const { mode } = change;
-      bytes.changes.copyToSync(change.bytes, join(binding.root, path), mode, originals.has(path));
-    }
-    for (const path of removedFiles) unlinkSync(join(binding.root, path));
-    // Never recursively remove a host tree: only now-empty admitted directories.
-    for (const path of removedDirectories) rmdirSync(join(binding.root, path));
   };
   if (lease) await publishWithinCapturedLease(lease, binding.authority, publish, signal);
   else await withCapturedPublication(binding.authority, () => publish(), signal);

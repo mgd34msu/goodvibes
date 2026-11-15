@@ -1,12 +1,13 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { mkdtemp, open, type FileHandle } from 'node:fs/promises';
+import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
+import { callingAgentId } from '../../agents/calling-agent.js';
 import { resolveCredentialEnvScrub, scrubCredentialEnv, type ResolvedCredentialEnvScrub } from '../exec/credential-env.js';
 
 /**
@@ -41,11 +42,17 @@ export interface BackgroundProcess {
   completedAt?: number | undefined;
   /** POSIX signal name that terminated the process, or null if it exited. */
   signal?: string | null | undefined;
-  /** True when the watchdog terminated the process at its timeout. */
+  /** True once the process passed its timeout, whether or not it was terminated for it. */
   timedOut?: boolean | undefined;
+  /** True when the timeout passed and the process was deliberately left running (kill_on_timeout: false). */
+  leftRunningAtTimeout?: boolean | undefined;
+  /** The sub-agent whose tool call started this process; absent when the operator or the host started it. */
+  startedBy?: string | undefined;
 }
 
 const MAX_PROCESS_OUTPUT_BYTES = 256 * 1024;
+/** A spill file stops growing here; the process keeps running and its output is still drained, but no more is kept. */
+const MAX_PROCESS_SPILL_BYTES = 64 * 1024 * 1024;
 /**
  * How long to keep draining stdout/stderr AFTER the spawned process has exited.
  *
@@ -194,6 +201,8 @@ export class ProcessManager {
   private _processes = new Map<string, BackgroundProcess>();
   private readonly _shutdowns = new Map<string, ManagedProcessShutdown>();
   private readonly _inputs = new Map<string, ManagedProcessInput>();
+  /** Private spill directories a large output was written to, removed with the record. */
+  private readonly _spills = new Map<string, string[]>();
   private readonly _launches = new Set<Promise<BgCommandResult>>();
   private _closed = false;
   private _closing: Promise<void> | undefined;
@@ -302,6 +311,8 @@ export class ProcessManager {
         return Promise.resolve();
       }));
       await launches;
+      // The records go with the runtime, so no one can name a spill file again.
+      await Promise.all([...this._spills.keys()].map((id) => this.releaseSpills(id)));
       const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (errors.length) throw new AggregateError(errors.map((result) => result.reason), 'Background process shutdown failed');
     });
@@ -362,6 +373,7 @@ export class ProcessManager {
       exitCode: null,
       done: false,
       killDeadline: null,
+      startedBy: callingAgentId(),
     };
     this.pruneCompletedProcesses();
     this._processes.set(id, entry);
@@ -422,9 +434,11 @@ export class ProcessManager {
         throw new Error('Managed output observer failed');
       }
     };
+    const spills: string[] = [];
+    this._spills.set(id, spills);
     const streams = Promise.allSettled([
-      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout')),
-      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr')),
+      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout'), spills),
+      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr'), spills),
     ]).then((results) => {
       for (const result of results) if (result.status === 'rejected') {
         logger.debug('Background process output collection ended early', {
@@ -504,6 +518,7 @@ export class ProcessManager {
       if (entry.done) return;
       entry.timedOut = true; timedOut = true;
       if (!killOnTimeout) {
+        entry.leftRunningAtTimeout = true;
         logger.info('Background process passed its timeout and was left running', { processId: id, pid: entry.pid, cmd, timeoutMs });
         return;
       }
@@ -575,7 +590,7 @@ export class ProcessManager {
     const id = `bg_owned_${this.newId().slice(3)}`;
     const entry: BackgroundProcess = {
       id, pid: 0, cmd: execution.cmd, startTime: Date.now(), stdout: [], stderr: [],
-      exitCode: null, done: false, killDeadline: null,
+      exitCode: null, done: false, killDeadline: null, startedBy: callingAgentId(),
     };
     this._processes.set(id, entry);
     this._boundaryExecutions.set(id, execution);
@@ -751,7 +766,8 @@ export class ProcessManager {
     const owner = this._shutdowns.get(id);
     if (owner) void owner.stop().catch((error: unknown) => {
       logger.warn('Background process stop failed', { processId: id, error: summarizeError(error) });
-    });
+    }).then(() => this.releaseSpills(id));
+    else void this.releaseSpills(id);
     // Preserve bg_stop's immediate record removal, but retain the owned handle
     // until exit/output collection completes so close() can still drain it.
     this._processes.delete(id);
@@ -761,11 +777,51 @@ export class ProcessManager {
     return true;
   }
 
+  /**
+   * Stop a background process and wait for its termination to be confirmed. `stop` only requests it and
+   * drops the record at once; this says whether the process actually ended, so a caller can report
+   * "stopped" truthfully.
+   */
+  async stopConfirmed(id: string): Promise<'stopped' | 'unconfirmed' | 'unknown'> {
+    const entry = this._processes.get(id);
+    if (!entry) return 'unknown';
+    const owner = this._shutdowns.get(id);
+    let confirmed = true;
+    if (owner) {
+      try { await owner.stop(); await this.releaseSpills(id); }
+      catch (error: unknown) {
+        confirmed = false;
+        logger.warn('Background process stop failed', { processId: id, error: summarizeError(error) });
+      }
+    } else await this.releaseSpills(id);
+    this._processes.delete(id);
+    this._inputs.delete(id);
+    if (!this._shutdowns.has(id)) this._boundaryExecutions.delete(id);
+    return confirmed ? 'stopped' : 'unconfirmed';
+  }
+
+  /**
+   * `handleCommand` for callers that can wait: `bg_stop` answers only after the process is confirmed ended,
+   * or says plainly that the stop was requested but not confirmed. Every other command is unchanged.
+   */
+  async handleCommandAsync(cmd: string): Promise<BgCommandResult | null> {
+    const stopMatch = cmd.match(/^bg_stop\s+(\S+)$/);
+    if (!stopMatch || this._boundaryExecutions.has(stopMatch[1]!)) return this.handleCommand(cmd);
+    this.pruneCompletedProcesses();
+    const id = stopMatch[1]!;
+    const outcome = await this.stopConfirmed(id);
+    if (outcome === 'unknown') return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${id}`, success: false };
+    if (outcome === 'unconfirmed') {
+      return { cmd, exit_code: 1, stdout: '', stderr: `A stop was requested for ${id} but the process did not confirm it ended; it may still be running. Check the host's process list before starting another.`, success: false };
+    }
+    return { cmd, exit_code: 0, stdout: `Stopped ${id}`, stderr: '', success: true };
+  }
+
   /** Runtime cleanup can distinguish retained boundaries without exposing their owner token. */
   hasBoundaryOwner(id: string): boolean { return this._boundaryExecutions.has(id); }
 
   /** List tracked processes with authoritative completion and display status. */
-  list(): Array<{ id: string; pid: number; cmd: string; status: string; done: boolean }> {
+  list(): Array<{ id: string; pid: number; cmd: string; status: string; done: boolean; startedBy?: string | undefined }> {
     this.pruneCompletedProcesses();
     return Array.from(this._processes.values()).map((e) => ({
       id: e.id,
@@ -773,6 +829,7 @@ export class ProcessManager {
       cmd: e.cmd,
       status: describeProcessStatus(e),
       done: e.done,
+      startedBy: e.startedBy,
     }));
   }
 
@@ -834,7 +891,7 @@ export class ProcessManager {
       if (!found) {
         return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${stopMatch[1]!}`, success: false };
       }
-      return { cmd, exit_code: 0, stdout: `Stopped ${stopMatch[1]!}`, stderr: '', success: true };
+      return { cmd, exit_code: 0, stdout: `Stop requested for ${stopMatch[1]!}; its termination was signalled and has not been confirmed.`, stderr: '', success: true };
     }
 
     // bg_list
@@ -856,7 +913,17 @@ export class ProcessManager {
       this._processes.delete(entry.id);
       this._inputs.delete(entry.id);
       this._boundaryExecutions.delete(entry.id);
+      void this.releaseSpills(entry.id);
     }
+  }
+
+  /** Once its record is gone nothing can name the spill file again, so it is removed. */
+  private async releaseSpills(id: string): Promise<void> {
+    const directories = this._spills.get(id);
+    this._spills.delete(id);
+    await Promise.all((directories ?? []).map((directory) => rm(directory, { recursive: true, force: true }).catch((error: unknown) => {
+      logger.debug('Background output spill directory could not be removed', { processId: id, error: summarizeError(error) });
+    })));
   }
 }
 
@@ -866,9 +933,11 @@ export class ProcessManager {
  */
 export function describeProcessStatus(entry: BackgroundProcess): string {
   if (!entry.done) return 'running';
-  if (entry.timedOut === true) return `timed out (signal ${entry.signal ?? 'SIGKILL'})`;
+  if (entry.timedOut === true && entry.leftRunningAtTimeout !== true) {
+    return entry.signal ? `timed out (signal ${entry.signal})` : `timed out (exit ${entry.exitCode})`;
+  }
   if (entry.signal) return `killed by ${entry.signal}`;
-  return `done (exit ${entry.exitCode})`;
+  return entry.timedOut === true ? `done (exit ${entry.exitCode}; ran past its timeout)` : `done (exit ${entry.exitCode})`;
 }
 
 /**
@@ -907,16 +976,34 @@ function killTrackedProcess(proc: ReturnType<typeof Bun.spawn>, signal: Paramete
  * Large streams spill to a private local file. The bounded in-memory preview
  * names that file; subsequent output is retained there with backpressure.
  */
-async function readProcessStream(
+export async function readProcessStream(
   stream: ReadableStream<Uint8Array>,
   sink: string[],
   cancelSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,
+  spillDirectories?: string[],
+  limits: { readonly previewBytes: number; readonly spillBytes: number } = { previewBytes: MAX_PROCESS_OUTPUT_BYTES, spillBytes: MAX_PROCESS_SPILL_BYTES },
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let total = 0;
   let spill: FileHandle | undefined;
+  let spilled = 0;
+  let spillFull = false;
+  // Writes up to the spill cap, then records once that the rest is discarded.
+  const writeSpill = async (text: string): Promise<void> => {
+    if (!spill || spillFull || text.length === 0) return;
+    const bytes = Buffer.byteLength(text);
+    if (spilled + bytes > limits.spillBytes) {
+      spillFull = true;
+      const note = `\n[goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was discarded]\n`;
+      await spill.writeFile(note);
+      sink.push(note);
+      return;
+    }
+    spilled += bytes;
+    await spill.writeFile(text);
+  };
   let cancellation: Promise<void> | undefined;
 
   // Abort releases the read loop for a pipe whose write end a surviving
@@ -934,20 +1021,21 @@ async function readProcessStream(
       const { done, value } = await reader.read();
       if (done) break;
       const decoded = decoder.decode(value, { stream: true });
-      if (!spill && total + value.byteLength > MAX_PROCESS_OUTPUT_BYTES) {
+      if (!spill && total + value.byteLength > limits.previewBytes) {
         const directory = await mkdtemp(join(tmpdir(), 'goodvibes-process-output-'));
+        spillDirectories?.push(directory);
         const path = join(directory, 'output.log');
         spill = await open(path, 'wx', 0o600);
-        await spill.writeFile(sink.join(''));
+        await writeSpill(sink.join(''));
         sink.push(`\n[goodvibes: complete output continues in ${path}]\n`);
       }
-      if (spill) await spill.writeFile(decoded);
+      if (spill) await writeSpill(decoded);
       else if (decoded.length > 0) sink.push(decoded);
       total += value.byteLength;
       if (decoded.length > 0) onChunk?.(decoded);
     }
     const tail = decoder.decode();
-    if (spill) await spill.writeFile(tail);
+    if (spill) await writeSpill(tail);
     else if (tail.length > 0) sink.push(tail);
     if (tail.length > 0) onChunk?.(tail);
   } finally {

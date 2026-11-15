@@ -10,13 +10,13 @@
  * circuit breaker, one honest engine-unavailable state, no per-chunk crash
  * storm, and a transient timeout does NOT trip it.
  */
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { downloadVoiceModel } from '../platform/src/platform/voice/model-download.ts';
 import { createLocalVoiceProvider } from '../platform/src/platform/voice/providers/local.ts';
 import type { VoiceSynthesisRequest } from '../platform/src/platform/voice/types.ts';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function onnxBytes(n = 8192): Uint8Array {
   const b = new Uint8Array(n);
@@ -37,10 +37,15 @@ function mockFetch(resp: Response): typeof fetch {
   return (async () => resp) as unknown as typeof fetch;
 }
 
+const dirs: string[] = [];
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-voice-dl-'));
+  const dir = makeProjectTempDir('gv-voice-dl');
+  dirs.push(dir);
   return dir;
 }
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('atomic voice model download', () => {
   test('a complete, verified model lands atomically at the final path', async () => {
@@ -50,9 +55,8 @@ describe('atomic voice model download', () => {
     const result = await downloadVoiceModel({ url: 'https://models.test/x.onnx', destPath: dest, fetchImpl: mockFetch(mockResponse(bytes)) });
     expect(result.ok).toBe(true);
     expect(existsSync(dest)).toBe(true);
-    // No leftover temp/partial files.
-    expect(readdirSync(dir).filter((f) => f.endsWith('.part'))).toEqual([]);
-    rmSync(dir, { recursive: true, force: true });
+    // Only the final file remains: no temp or partial file beside it.
+    expect(readdirSync(dir)).toEqual([basename(dest)]);
   });
 
   test('a Content-Length-short (truncated) download is rejected; no partial at the final path', async () => {
@@ -64,7 +68,6 @@ describe('atomic voice model download', () => {
     if (!result.ok) expect(result.error).toMatch(/truncated/i);
     expect(existsSync(dest)).toBe(false);
     expect(readdirSync(dir)).toEqual([]);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test('a too-small download (no Content-Length) is rejected', async () => {
@@ -74,7 +77,6 @@ describe('atomic voice model download', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/too small/i);
     expect(existsSync(dest)).toBe(false);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test('an HTML error page served with 200 is rejected', async () => {
@@ -85,7 +87,6 @@ describe('atomic voice model download', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/HTML/i);
     expect(existsSync(dest)).toBe(false);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test('bad ONNX magic is rejected', async () => {
@@ -95,7 +96,8 @@ describe('atomic voice model download', () => {
     const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(bytes)) });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/not a valid ONNX/i);
-    rmSync(dir, { recursive: true, force: true });
+    expect(existsSync(dest)).toBe(false);
+    expect(readdirSync(dir)).toEqual([]);
   });
 
   test('a .json config (magic check off) downloads when non-trivial', async () => {
@@ -105,7 +107,6 @@ describe('atomic voice model download', () => {
     const result = await downloadVoiceModel({ url: 'u', destPath: dest, fetchImpl: mockFetch(mockResponse(json)) });
     expect(result.ok).toBe(true);
     expect(existsSync(dest)).toBe(true);
-    rmSync(dir, { recursive: true, force: true });
   });
 });
 

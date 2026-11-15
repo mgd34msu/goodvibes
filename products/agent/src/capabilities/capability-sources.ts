@@ -39,6 +39,27 @@ export function configValueIsPresent(configManager: unknown, key: string): boole
   }
 }
 
+interface SecretsManagerLike {
+  readonly resolveLocalCredentialSnapshot: (key: string) => { readonly state: string; readonly value?: string };
+}
+
+/**
+ * Whether a secret-store entry holds a value. Returns a boolean and never the
+ * value. An entry that cannot be observed (store unreadable, overridden from the
+ * environment) counts as not present: a capability must not be reported ready on
+ * a credential nobody could confirm.
+ */
+export function secretValueIsPresent(secretsManager: unknown, key: string): boolean {
+  const manager = secretsManager as SecretsManagerLike | null;
+  if (!manager || typeof manager.resolveLocalCredentialSnapshot !== 'function') return false;
+  try {
+    const snapshot = manager.resolveLocalCredentialSnapshot(key);
+    return snapshot.state === 'resolved' && typeof snapshot.value === 'string' && snapshot.value.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** Live MCP server posture, or nothing when this session has no MCP client. */
 export function safeMcpServerPosture(context: CommandContext): ProbeContext['mcpServers'] {
   try {

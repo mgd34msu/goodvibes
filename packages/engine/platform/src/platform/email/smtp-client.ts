@@ -49,6 +49,29 @@ export interface SmtpSendOptions extends DeliveryLifetime {
   readonly to: string;
   readonly subject: string;
   readonly body: string;
+  /** Message-ID of the message this one answers; written as `In-Reply-To`. */
+  readonly inReplyTo?: string | undefined;
+  /** The thread's Message-ID chain; written as `References`. */
+  readonly references?: string | undefined;
+}
+
+/**
+ * The message bytes were written and the server's final reply never arrived
+ * (timeout, abort, dropped connection). The server may have accepted and queued
+ * the mail, so the outcome is unknown: the caller must not resend it
+ * automatically, and should check the Sent folder or ask the owner first.
+ */
+export class SmtpDeliveryUnconfirmedError extends Error {
+  readonly retryable = false;
+  override readonly cause: unknown;
+  constructor(cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `The mail server did not confirm the message (${reason}). It may already have been delivered, so it was not sent again; check the Sent folder before resending.`,
+    );
+    this.name = 'SmtpDeliveryUnconfirmedError';
+    this.cause = cause;
+  }
 }
 
 /** What a completed send is afterwards identifiable by. */
@@ -129,6 +152,18 @@ export function validateSmtpSubject(subject: string): void {
   if (CONTROL_CHAR_RE.test(subject)) {
     throw new Error(
       'Invalid subject: subject must not contain control characters (CR, LF, etc.).',
+    );
+  }
+}
+
+/**
+ * Validate a threading header value (`In-Reply-To`, `References`). Same rule as
+ * the subject: a control character would end the header and start another.
+ */
+export function validateSmtpThreadHeader(value: string, field: 'inReplyTo' | 'references'): void {
+  if (CONTROL_CHAR_RE.test(value)) {
+    throw new Error(
+      `Invalid ${field}: ${field} must not contain control characters (CR, LF, etc.).`,
     );
   }
 }
@@ -298,10 +333,13 @@ export class SmtpClient {
     const { hostname, username, password } = this.options;
     const timeoutMs = this.options.timeoutMs ?? SMTP_DEFAULT_TIMEOUT_MS;
     const session = new SmtpSession(this.options.socket, timeoutMs);
-    const { capabilities } = await this.greetAndEhlo(session, hostname);
-    await this.authenticate(session, capabilities, username, password);
-    await session.send('QUIT');
-    session.destroy();
+    try {
+      const { capabilities } = await this.greetAndEhlo(session, hostname);
+      await this.authenticate(session, capabilities, username, password);
+      await session.send('QUIT');
+    } finally {
+      session.destroy();
+    }
   }
 
   /**
@@ -330,6 +368,8 @@ export class SmtpClient {
       validateSmtpAddress(opts.from, 'from');
       validateSmtpAddress(opts.to, 'to');
       validateSmtpSubject(opts.subject);
+      if (opts.inReplyTo !== undefined) validateSmtpThreadHeader(opts.inReplyTo, 'inReplyTo');
+      if (opts.references !== undefined) validateSmtpThreadHeader(opts.references, 'references');
 
       const date = new Date().toUTCString();
       const headers = [
@@ -339,6 +379,8 @@ export class SmtpClient {
         `Date: ${date}`,
         `MIME-Version: 1.0`,
         `Content-Type: text/plain; charset=utf-8`,
+        ...(opts.inReplyTo === undefined || opts.inReplyTo.trim() === '' ? [] : [`In-Reply-To: ${opts.inReplyTo.trim()}`]),
+        ...(opts.references === undefined || opts.references.trim() === '' ? [] : [`References: ${opts.references.trim()}`]),
       ];
 
       // Two Message-ID headers is a protocol error, so an id already present in
@@ -357,7 +399,14 @@ export class SmtpClient {
         current(); await session.cmd(`RCPT TO:<${opts.to}>`, 250);
         current(); await session.cmd('DATA', 354);
         current(); await session.sendRaw(message);
-        const dataResp = await session.readResponse();
+        // From here the server may have accepted the message, so a failed wait
+        // is an unknown outcome rather than a failed send.
+        let dataResp: { code: number; lines: string[] };
+        try {
+          dataResp = await session.readResponse();
+        } catch (error) {
+          throw new SmtpDeliveryUnconfirmedError(error);
+        }
         if (dataResp.code !== 250) throw new Error(`SMTP DATA rejected: ${dataResp.lines.join(' | ')}`);
         // The final response proves the server accepted this message.
         return { messageId, sentAt: new Date().toISOString() };

@@ -179,6 +179,8 @@ export interface AddNodeOptions {
    * storage behaviour under test is the shipping one rather than a model of it.
    */
   readonly secrets?: ClusterSecretStore | undefined;
+  /** Called when the group's key is seen to have moved past this node's. */
+  readonly onKeyGenerationLost?: (() => void) | undefined;
 }
 
 /** Build a node and start its runtime. */
@@ -210,6 +212,7 @@ export async function addGroupNode(
     isMaster: () => options.isMaster === true,
     config,
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
+    ...(options.onKeyGenerationLost ? { onKeyGenerationLost: options.onKeyGenerationLost } : {}),
   });
   await runtime.start();
 
@@ -285,7 +288,6 @@ export async function resolveWithClock<T>(
   world: GroupTestWorld,
   work: Promise<T>,
   stepMs = 1_000,
-  realBudgetMs = 4_000,
 ): Promise<T> {
   let done = false;
   const tracked = work.then((value) => { done = true; return value; });
@@ -294,8 +296,9 @@ export async function resolveWithClock<T>(
   // verifier is scrypt on the thread pool, so the deadline timer this is
   // waiting on does not even exist until that has finished. Winding the fake
   // clock without ever yielding real time would race past the whole exchange.
-  const deadline = Date.now() + realBudgetMs;
-  while (!done && Date.now() < deadline) {
+  // There is no real-time budget: a slow machine takes longer rather than
+  // failing, and a join that never settles ends at the test's own timeout.
+  while (!done) {
     world.clock.advance(stepMs);
     await new Promise<void>((resolve) => { setTimeout(resolve, 2); });
   }

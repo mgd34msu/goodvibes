@@ -13,7 +13,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { forwardHarnessCatalogCall, harnessCatalogInvocationAuthority } from '../../tools/agent-harness-catalog-ingress.ts';
 import { requireConfirmedAction } from '../../tools/agent-harness-tool-utils.ts';
-import { runFileRecovery } from '../../tools/agent-harness-file-recovery.ts';
+import { fileRecoverySummary, runFileRecovery } from '../../tools/agent-harness-file-recovery.ts';
 
 type ExecuteOptions = Parameters<Tool['execute']>[1];
 let prior: ReturnType<typeof installJudgmentPort>;
@@ -113,12 +113,16 @@ test('trusted facade translation and nested same-object forwarding retain the or
 });
 
 test('raw facade forwarding cannot mint proof from confirmation fields', async () => {
+  let ran = false;
   const inner: Tool = { definition: { name: 'translated_harness', description: 'Synthetic unadmitted facade.', parameters: {} },
     async execute(args, options) {
+      ran = true;
       expect(requireConfirmedAction(args, options, 'Unadmitted action')).toContain('recorded effect admission');
       return { success: true };
     } };
-  await forwardHarnessCatalogCall(inner, { action: 'set_keybinding' }, { mode: 'set_keybinding', confirm: true, explicitUserRequest: 'Caller assertion' });
+  const forwarded = await forwardHarnessCatalogCall(inner, { action: 'set_keybinding' }, { mode: 'set_keybinding', confirm: true, explicitUserRequest: 'Caller assertion' });
+  expect(ran).toBe(true);
+  expect(forwarded).toMatchObject({ success: true });
 });
 
 test.each(['plan', 'custom'] as const)('a synthetic read classification cannot authorize a %s mode effect', async mode => {
@@ -174,6 +178,38 @@ test('file recovery applies admitted undo/redo only within the physical workspac
   await scene.tools.run({ mode: 'run_file_recovery', recoveryAction: 'redo' });
   expect(scene.result()).toMatchObject({ status: 'applied', path: 'owned.txt' });
   expect(readFileSync(path, 'utf8')).toBe('after'); expect(scene.manager.peekRedo()).toBeUndefined();
+});
+
+test('without a workspace root no absolute path is shown, and a path outside the workspace is not named', () => {
+  const scene = recoveryFixture(); const path = join(scene.workspace, 'owned.txt'); const outside = join(scene.root, 'outside.txt');
+  writeFileSync(path, 'after'); scene.manager.snapshot({ path, beforeContent: 'before', afterContent: 'after', tool: 'edit' });
+  const inside = JSON.stringify(fileRecoverySummary(scene.context, {}));
+  expect(inside).toContain('owned.txt'); expect(inside).not.toContain(scene.root);
+  const noRoot = JSON.stringify(fileRecoverySummary({ workspace: { fileUndoManager: scene.manager } }, {}));
+  expect(noRoot).toContain('<unknown-workspace>'); expect(noRoot).not.toContain(scene.root);
+  scene.manager.snapshot({ path: outside, beforeContent: 'before', afterContent: 'after', tool: 'edit' });
+  const escaped = JSON.stringify(fileRecoverySummary(scene.context, {}));
+  expect(escaped).toContain('<outside-workspace>'); expect(escaped).not.toContain(scene.root);
+});
+
+test('a refusal names the state and the step that re-inspects', async () => {
+  const scene = recoveryFixture(); const path = join(scene.workspace, 'owned.txt');
+  writeFileSync(path, 'after'); scene.manager.snapshot({ path, beforeContent: 'before', afterContent: 'after', tool: 'edit' });
+  // No recorded admission at all.
+  const raw = runFileRecovery(scene.context, { mode: 'run_file_recovery', recoveryAction: 'undo' });
+  expect(raw).toMatchObject({ status: 'held' });
+  expect(String(raw.error)).toContain('recorded effect admission');
+  expect(String(raw.error)).toContain('Nothing was changed');
+  expect(String(raw.error)).toContain('execution action:"recovery"');
+  // Admitted, but this session has no workspace to restore into.
+  let result: Record<string, unknown> | undefined;
+  const bare = { workspace: { fileUndoManager: scene.manager } };
+  const tools = fixture(async (args, options) => { result = runFileRecovery(bare, args, options); return { success: true }; }, 'prompt', {}, scene.workspace);
+  await tools.run({ mode: 'run_file_recovery', recoveryAction: 'undo' });
+  expect(result).toMatchObject({ status: 'held' });
+  expect(String(result?.error)).toContain('requires an active workspace');
+  expect(String(result?.error)).toContain('execution action:"recovery"');
+  expect(readFileSync(path, 'utf8')).toBe('after'); expect(scene.manager.undoDepth()).toBe(1);
 });
 
 test('raw file recovery cannot use caller confirmation to restore bytes', () => {

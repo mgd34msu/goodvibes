@@ -84,7 +84,8 @@ export function emitTransportRetryScheduled(
   ctx: EmitterContext,
   data: { transportId: string; attempt: number; maxAttempts: number; backoffMs: number; reason: string }
 ): void {
-  transportRetriesTotal.add(1, { transport_type: data.transportId, reason: data.reason });
+  // Unlabelled: the status surface reads the plain total, and the transport and reason are on the event.
+  transportRetriesTotal.add(1);
   bus.emit('transport', createEventEnvelope('TRANSPORT_RETRY_SCHEDULED', { type: 'TRANSPORT_RETRY_SCHEDULED', ...data }, ctx));
 }
 
@@ -94,8 +95,27 @@ export function emitTransportRetryExecuted(
   ctx: EmitterContext,
   data: { transportId: string; attempt: number; maxAttempts: number }
 ): void {
-  transportRetriesTotal.add(1, { transport_type: data.transportId });
+  // Not counted: the Scheduled emitter already counted this retry, and one retry is one count.
   bus.emit('transport', createEventEnvelope('TRANSPORT_RETRY_EXECUTED', { type: 'TRANSPORT_RETRY_EXECUTED', ...data }, ctx));
+}
+
+/**
+ * The `onRetryScheduled` / `onRetryExecuted` options of an HTTP JSON transport,
+ * bound to the bus: pass the result into the transport's options so each retry
+ * reaches TRANSPORT_RETRY_* and the retry counter.
+ */
+export function transportRetryHooks(
+  bus: RuntimeEventBus,
+  ctx: EmitterContext,
+  transportId: string,
+): {
+  readonly onRetryScheduled: (info: { attempt: number; maxAttempts: number; backoffMs: number; reason: string }) => void;
+  readonly onRetryExecuted: (info: { attempt: number; maxAttempts: number }) => void;
+} {
+  return {
+    onRetryScheduled: (info) => emitTransportRetryScheduled(bus, ctx, { transportId, ...info }),
+    onRetryExecuted: (info) => emitTransportRetryExecuted(bus, ctx, { transportId, ...info }),
+  };
 }
 
 /** Emit STREAM_SUBSCRIBER_CONNECTED when an SSE subscriber connects. */

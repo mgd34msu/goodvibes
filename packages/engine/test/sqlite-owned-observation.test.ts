@@ -218,7 +218,6 @@ test('clean-content mode excludes only irreversible operation count while defaul
 });
 
 
-// Regression source intentionally UNRUN during the coding-first pass.
 test('full local equality frames remain private during ordinary store serialization', async () => {
   const { sqlite, handle } = await fixture();
   const privateValue = 'Do not serialize this private SQLite source';

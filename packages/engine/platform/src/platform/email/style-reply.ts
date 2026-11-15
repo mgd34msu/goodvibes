@@ -3,7 +3,7 @@ import type { SecretLikeTextPredicate } from '../google/account-registry.js';
 import type { EmailSummary } from './email-service.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
-import { readStyleFrequency, readStyleSenderName, readStyleSentenceCount, readStyleTone, StyleReplyReadingError, withEmailStyleSource, type StyleReplyReadingOptions } from './style-reply-readings.js';
+import { readStyleFrequency, readStyleFrequencyOrNone, readStyleSenderName, readStyleSentenceCount, readStyleTone, StyleReplyReadingError, withEmailStyleSource, type StyleReplyReadingOptions } from './style-reply-readings.js';
 export { StyleReplyReadingError } from './style-reply-readings.js';
 export type { StyleReplyReadingOptions } from './style-reply-readings.js';
 
@@ -28,6 +28,11 @@ export interface StyleProfile {
   readonly tone: 'formal' | 'casual' | 'neutral';
   /** True when values are explicit defaults, including an unassessed Classic template. */
   readonly isDefault: boolean;
+  /**
+   * Fields of a corpus-derived profile that the sent messages gave no evidence for,
+   * so they hold the template value rather than a learned one. Absent when none did.
+   */
+  readonly templateFields?: readonly ('greeting' | 'signOff' | 'medianSentenceCount')[];
 }
 
 export const DEFAULT_STYLE_PROFILE: StyleProfile = Object.freeze({ greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: true });
@@ -117,19 +122,24 @@ export async function extractStyleProfile(sentMessages: readonly StyleSentMessag
   return withEmailStyleSource({ sentMessages }, options, source => { requireSentMessages(source.sentMessages); return source.sentMessages.length > 0; }, async (source, readings) => {
     if (isClassicOperation()) return { ...DEFAULT_STYLE_PROFILE, provenance: 'classic' as const, assessment: 'not-evaluated' as const };
     const bodies = source.sentMessages.map(message => message.bodyPreview).filter(body => body.length > 0);
-    if (!bodies.length) return { greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: source.sentMessages.length === 0 };
+    if (!bodies.length) return { greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: true };
     if (!readings) throw new StyleReplyReadingError();
-    const greeting = await readStyleFrequency(bodies, GREETING_TOKENS, 'Hi', 'greeting', readings);
-    const signOff = await readStyleFrequency(bodies, SIGN_OFF_TOKENS, 'Thanks', 'signOff', readings);
+    const templateFields: Array<'greeting' | 'signOff' | 'medianSentenceCount'> = [];
+    const greetingRead = await readStyleFrequencyOrNone(bodies, GREETING_TOKENS, 'greeting', readings);
+    if (greetingRead === null) templateFields.push('greeting');
+    const signOffRead = await readStyleFrequencyOrNone(bodies, SIGN_OFF_TOKENS, 'signOff', readings);
+    if (signOffRead === null) templateFields.push('signOff');
+    const greeting = greetingRead ?? 'Hi', signOff = signOffRead ?? 'Thanks';
     const sentenceCounts: number[] = [];
     for (const body of bodies) {
       const count = await readStyleSentenceCount(body, readings);
       if (count > 0) sentenceCounts.push(count);
     }
     sentenceCounts.sort((a, b) => a - b);
+    if (!sentenceCounts.length) templateFields.push('medianSentenceCount');
     const tone = await readStyleTone(bodies, readings);
     readings.assertCurrent();
-    return { greeting, signOff, medianSentenceCount: Math.max(1, median(sentenceCounts, 3)), tone, isDefault: false };
+    return { greeting, signOff, medianSentenceCount: Math.max(1, median(sentenceCounts, 3)), tone, isDefault: false, ...(templateFields.length > 0 ? { templateFields } : {}) };
   }, undefined, true);
 }
 
@@ -203,6 +213,9 @@ export async function composeDraftReply(
     }
 
     readings?.assertCurrent();
+    // Profiles can arrive from a caller, so only the known field names are echoed.
+    const templateFields = (Array.isArray(usedProfile.templateFields) ? usedProfile.templateFields : [])
+      .filter(field => field === 'greeting' || field === 'signOff' || field === 'medianSentenceCount');
     return {
       ...(classic ? { provenance: 'classic' as const, styleAssessment: 'not-evaluated' as const } : {}),
       body,
@@ -211,6 +224,9 @@ export async function composeDraftReply(
       requiresBeforeSendReview: true,
       reviewBoundary:
         (classic ? 'Classic uses the supplied/default template; writing style and personal salutation were not inferred. ' : '') +
+        (templateFields.length
+          ? `The ${templateFields.join(', ')} in this draft are template defaults: the sent messages showed none, so they are not the author's own style. `
+          : '') +
         'This is a DRAFT only. Review the content before sending. ' +
         'Sending requires confirm:true on the email send path (SMTP or connector) ' +
         'with explicit user confirmation of recipients and body.',

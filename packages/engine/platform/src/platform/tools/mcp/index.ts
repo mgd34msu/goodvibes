@@ -45,7 +45,7 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
   return {
     definition: {
       name: 'mcp',
-      description: 'Inspect MCP servers, tools, schemas, and trust state.',
+      description: 'Inspect MCP servers, tools, schemas, and trust state. set-trust, set-role and approve-quarantine change what a server is allowed to do.',
       parameters: MCP_TOOL_SCHEMA.parameters,
       sideEffects: ['state'],
       concurrency: 'serial',
@@ -88,29 +88,24 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
     if (input.mode === 'schema') {
       if (!input.qualifiedName) return { success: false, error: 'schema requires qualifiedName.' };
       const schema = await mcpRegistry.getToolSchema(input.qualifiedName);
-      if (!schema) return { success: false, error: `Unknown MCP tool: ${input.qualifiedName}` };
+      if (!schema) {
+        const parsed = /^mcp:([^:]+):(.+)$/.exec(input.qualifiedName);
+        const server = parsed ? mcpRegistry.listServerSecurity().find((entry) => entry.name === parsed[1]) : undefined;
+        const cause = !parsed
+          ? 'it is not a qualified name of the form mcp:<server>:<tool>'
+          : !server
+            ? `no MCP server named '${parsed[1]}' is configured`
+            : 'that server does not list this tool now (it may be disconnected, or the tool was removed)';
+        return { success: false, error: `Unknown MCP tool: ${input.qualifiedName}: ${cause}. List current names with mode=tools.` };
+      }
       return { success: true, output: JSON.stringify(schema) };
     }
 
     if (input.mode === 'resources') {
-      const security = mcpRegistry.listServerSecurity();
-      const filtered = input.serverName
-        ? security.filter((server) => server.name === input.serverName)
-        : security;
+      // The registry does not expose resource inventories here; reporting zero would read as "none".
       return {
-        success: true,
-        output: JSON.stringify({
-          view,
-          count: filtered.length,
-          servers: filtered.map((server) => ({
-            name: server.name,
-            resourceCount: 0,
-            availableResources: [],
-            note: 'resource inventory is not surfaced by the lightweight MCP registry path yet',
-            trustMode: server.trustMode,
-            schemaFreshness: server.schemaFreshness,
-          })),
-        }),
+        success: false,
+        error: 'resources mode is not available: this tool cannot list MCP resources, so it cannot say whether a server has any. Use mode=tools for tools and mode=servers for server state.',
       };
     }
 
@@ -171,25 +166,39 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
       // The approver is who is acting in this turn (the owner, or the surface
       // the turn arrived on), taken from the turn boundary, never from the
       // model's arguments. The call itself went through the gate first.
+      const servers = mcpRegistry.listServerSecurity();
+      const server = servers.find((entry) => entry.name === input.serverName);
+      if (!server) {
+        return { success: false, error: `Unknown MCP server: ${input.serverName}. Known servers: ${servers.map((entry) => entry.name).join(', ') || '(none)'}.` };
+      }
+      // Approving re-arms the server's policy lifetime, which cancels its
+      // in-flight calls; a server that is not quarantined gains nothing from it.
+      if (server.schemaFreshness !== 'quarantined') {
+        return { success: false, error: `MCP server ${input.serverName} is not quarantined (schema ${server.schemaFreshness}); there is nothing to approve. Nothing was changed.` };
+      }
       const approvedBy = currentTurnActor();
       mcpRegistry.approveSchemaQuarantine(input.serverName, approvedBy);
       return { success: true, output: JSON.stringify({ serverName: input.serverName, approvedBy }) };
     }
 
-    if (input.mode === 'set-trust') {
-      if (!input.serverName || !input.trustMode) {
-        return { success: false, error: 'set-trust requires serverName and trustMode.' };
+    if (input.mode === 'set-trust' || input.mode === 'set-role') {
+      if (!input.serverName || (input.mode === 'set-trust' ? !input.trustMode : !input.role)) {
+        return { success: false, error: input.mode === 'set-trust' ? 'set-trust requires serverName and trustMode.' : 'set-role requires serverName and role.' };
       }
-      mcpRegistry.setServerTrustMode(input.serverName, input.trustMode);
-      return { success: true, output: JSON.stringify({ serverName: input.serverName, trustMode: input.trustMode }) };
-    }
-
-    if (input.mode === 'set-role') {
-      if (!input.serverName || !input.role) {
-        return { success: false, error: 'set-role requires serverName and role.' };
+      // Changing a server's trust or role re-arms its policy lifetime and cancels in-flight calls, so the
+      // name is checked first: a typo must not touch anything.
+      const servers = mcpRegistry.listServerSecurity();
+      if (!servers.some((entry) => entry.name === input.serverName)) {
+        return { success: false, error: `Unknown MCP server: ${input.serverName}. Known servers: ${servers.map((entry) => entry.name).join(', ') || '(none)'}. Nothing was changed.` };
       }
-      mcpRegistry.setServerRole(input.serverName, input.role === 'deploy' ? 'ops' : input.role);
-      return { success: true, output: JSON.stringify({ serverName: input.serverName, role: input.role }) };
+      if (input.mode === 'set-trust') {
+        mcpRegistry.setServerTrustMode(input.serverName, input.trustMode!);
+        return { success: true, output: JSON.stringify({ serverName: input.serverName, trustMode: input.trustMode }) };
+      }
+      // 'deploy' is the name this tool offers for the registry's 'ops' role; report what was stored.
+      const stored = input.role === 'deploy' ? 'ops' : input.role!;
+      mcpRegistry.setServerRole(input.serverName, stored);
+      return { success: true, output: JSON.stringify({ serverName: input.serverName, role: stored, ...(stored !== input.role ? { requested: input.role } : {}) }) };
     }
 
       return { success: false, error: `Unknown mode: ${input.mode}` };

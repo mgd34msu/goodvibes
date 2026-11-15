@@ -136,6 +136,10 @@ describe('composition parity: append-only sweep + live config watch', () => {
     try {
       expect(configManager.get('power.keepAwake')).toBe(false);
 
+      // The watcher polls on its own interval; wait for the change notification it
+      // fires rather than for a fixed span.
+      const applied = Promise.withResolvers<void>();
+      const unsubscribe = configManager.subscribe('power.keepAwake', (next) => { if (next === true) applied.resolve(); });
       const settingsPath = configManager.getConfigPath();
       const onDisk: Record<string, unknown> = existsSync(settingsPath)
         ? (JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>)
@@ -143,14 +147,9 @@ describe('composition parity: append-only sweep + live config watch', () => {
       onDisk.power = { ...(onDisk.power as Record<string, unknown> | undefined), keepAwake: true };
       writeFileSync(settingsPath, JSON.stringify(onDisk, null, 2), 'utf-8');
 
-      // watchConfigFiles polls (default 250ms); give it margin to fire.
-      const deadline = Date.now() + 2000;
-      let observed = configManager.get('power.keepAwake');
-      while (observed !== true && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        observed = configManager.get('power.keepAwake');
-      }
-      expect(observed).toBe(true);
+      await applied.promise;
+      unsubscribe();
+      expect(configManager.get('power.keepAwake')).toBe(true);
     } finally {
       services.providerRegistry.stopWatching();
       configManager.stopWatchingConfigFiles();
@@ -178,7 +177,7 @@ describe('composition parity: live model discovery refreshes by default, and cal
     return existsSync(join(configDir, 'provider-models'));
   }
 
-  test('createRuntimeServices without the opt-in starts no discovery sweep', async () => {
+  test('an explicit modelDiscovery skip leaves no discovery cache behind', async () => {
     root = makeProjectTempDir('goodvibes-agent-model-discovery');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');

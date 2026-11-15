@@ -136,7 +136,11 @@ function observe(): DecisionModelPolicyState {
   const reason = scope?.state.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
   return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0 });
 }
-installDecisionModelPolicyObserver(observe, activateClassicFallback, withConfiguredDecisionModelPolicy);
+/** Make the platform's observer the process one again after something else replaced it. */
+export function installPlatformDecisionPolicyObserver(): void {
+  installDecisionModelPolicyObserver(observe, activateClassicFallback, withConfiguredDecisionModelPolicy);
+}
+installPlatformDecisionPolicyObserver();
 
 export function isClassicOperation(): boolean { return decisionModelPolicyState().operation === 'classic'; }
 

@@ -5,10 +5,13 @@
  * platform peer contract, serves `device.capability` work, and discards a token the
  * daemon rejects instead of retrying against a dead credential.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { announcedCapabilities, type BrowserBindings } from './capability-bindings';
 import {
+  PHONE_NODE_EXECUTED_KEY,
+  PHONE_NODE_TOKEN_KEY,
   PhoneNodeClient,
+  browserPhoneNodeStorage,
   type ExecutedWorkRecord,
   type PhoneNodeIdentity,
   type PhoneNodeStorage,
@@ -159,15 +162,84 @@ describe('pairing', () => {
   });
 
   test('a stored identity with a missing token is discarded rather than used', () => {
-    const broken: PhoneNodeStorage = {
-      read: () => null,
-      write: () => undefined,
-      clear: () => undefined,
-    };
+    window.localStorage.setItem(PHONE_NODE_TOKEN_KEY, JSON.stringify({ nodeId: 'n', label: 'Pixel' }));
+    const storage = browserPhoneNodeStorage();
+    expect(storage.read()).toBeNull();
     const client = new PhoneNodeClient({
-      baseUrl: 'http://daemon.test', label: 'Pixel', storage: broken, fetchImpl: stubFetch([]).impl, bindings: bindings(),
+      baseUrl: 'http://daemon.test', label: 'Pixel', storage, fetchImpl: stubFetch([]).impl, bindings: bindings(),
     });
     expect(client.getState().status).toBe('unpaired');
+  });
+});
+
+describe('browserPhoneNodeStorage', () => {
+  beforeEach(() => { window.localStorage.clear(); });
+  afterEach(() => { window.localStorage.clear(); });
+
+  test('a well-formed stored identity round-trips', () => {
+    const storage = browserPhoneNodeStorage();
+    storage.write({ nodeId: 'n', token: 't', label: 'Pixel' });
+    expect(storage.read()).toEqual({ nodeId: 'n', token: 't', label: 'Pixel' });
+  });
+
+  test('an identity with an empty or non-string nodeId or token is discarded', () => {
+    const storage = browserPhoneNodeStorage();
+    for (const bad of [{ nodeId: 5, token: 't' }, { nodeId: '', token: 't' }, { nodeId: 'n', token: 7 }, { nodeId: 'n', token: '' }]) {
+      window.localStorage.setItem(PHONE_NODE_TOKEN_KEY, JSON.stringify(bad));
+      expect(storage.read()).toBeNull();
+    }
+  });
+
+  test('unparseable stored identity is discarded', () => {
+    window.localStorage.setItem(PHONE_NODE_TOKEN_KEY, '{not json');
+    expect(browserPhoneNodeStorage().read()).toBeNull();
+  });
+
+  test('a non-array executed marker reads as empty and a client built on it still constructs', () => {
+    window.localStorage.setItem(PHONE_NODE_EXECUTED_KEY, JSON.stringify({ w1: { status: 'completed' } }));
+    const storage = browserPhoneNodeStorage();
+    expect(storage.readExecuted?.()).toEqual([]);
+    const client = new PhoneNodeClient({
+      baseUrl: 'http://daemon.test', label: 'Pixel', storage, fetchImpl: stubFetch([]).impl, bindings: bindings(),
+    });
+    expect(client.getState().status).toBe('unpaired');
+  });
+
+  test('executed entries of the wrong shape are dropped and well-formed ones kept', () => {
+    const good: [string, ExecutedWorkRecord] = ['w1', { status: 'completed', result: { ok: true }, error: undefined }];
+    window.localStorage.setItem(PHONE_NODE_EXECUTED_KEY, JSON.stringify([
+      good, ['w2'], [3, { status: 'completed' }], ['w3', null], ['w4', { status: 'weird' }], 'junk',
+    ]));
+    const read = browserPhoneNodeStorage().readExecuted?.() ?? [];
+    expect(read.map(([id]) => id)).toEqual(['w1']);
+  });
+
+  test('executed markers survive a storage round-trip', () => {
+    const storage = browserPhoneNodeStorage();
+    const record: ExecutedWorkRecord = { status: 'failed', result: undefined, error: 'denied' };
+    storage.writeExecuted?.([['w1', record]]);
+    expect(browserPhoneNodeStorage().readExecuted?.().map(([id, r]) => [id, r.status, r.error])).toEqual([['w1', 'failed', 'denied']]);
+  });
+
+  test('clear drops the identity and the executed markers', () => {
+    const storage = browserPhoneNodeStorage();
+    storage.write({ nodeId: 'n', token: 't', label: 'Pixel' });
+    storage.writeExecuted?.([['w1', { status: 'completed', result: 1, error: undefined }]]);
+    storage.clear();
+    expect(storage.read()).toBeNull();
+    expect(storage.readExecuted?.()).toEqual([]);
+  });
+
+  test('a storage that refuses writes does not throw', () => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new Error('QuotaExceededError'); };
+    try {
+      const storage = browserPhoneNodeStorage();
+      expect(() => storage.write({ nodeId: 'n', token: 't', label: 'Pixel' })).not.toThrow();
+      expect(() => storage.writeExecuted?.([['w1', { status: 'completed', result: 1, error: undefined }]])).not.toThrow();
+    } finally {
+      Storage.prototype.setItem = original;
+    }
   });
 });
 

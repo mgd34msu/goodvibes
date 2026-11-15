@@ -1,10 +1,13 @@
 /**
- * Integration tests covering UAT findings F1, F2, F4, F14.
+ * Integration tests for routes served by a standalone daemon.
  *
  * F1 , companion-chat, provider-current, session-SSE routes on standalone daemon
- * F2 , provider discovery: loadPersistedProviders + background scan registration
- * F4 , panel registry: TUI panels absent on standalone, daemon panels present
- * F14, control-plane SSE DEFAULT_DOMAINS includes 'providers' and 'turn'
+ * F2 , the provider list route reflects providers registered in the registry
+ * F4 , panel routes: the daemon has no screen, so it has no panels
+ * F14, the control-plane snapshot route answers
+ *
+ * Daemon start-up wiring for provider loading and the control-plane default
+ * domains is covered by daemon-host.test.ts and the engine gateway tests.
  *
  * These tests start a real DaemonServer bound to a random high port and issue
  * real HTTP requests. No mocks of HTTP or platform internals.
@@ -24,6 +27,7 @@ import type { DaemonFixture } from '../../testing/daemon-fixture.js';
 
 
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
+import { until } from '../helpers/wait.js';
 
 // Stop the shared test runtime graph when this file ends. Called here, not
 // registered inside the helper, for the reason its doc comment gives.
@@ -53,15 +57,6 @@ async function startDaemon(env: ReturnType<typeof makeEnv>) {
 
 function bearerHeaders(): HeadersInit {
   return { Authorization: `Bearer ${TEST_TOKEN}`, 'Content-Type': 'application/json' };
-}
-
-async function waitForCondition(description: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for ${description}`);
 }
 
 async function readSseUntil(
@@ -278,7 +273,7 @@ describe('F1: companion-chat routes on standalone DaemonServer', () => {
     );
     expect(sseRaw).toContain(artifactBody.artifact.id);
 
-    await waitForCondition('provider to receive attachment prompt', () => observedRequests.length > 0);
+    await until(() => observedRequests.length > 0, 'provider to receive attachment prompt');
     const lastMessage = observedRequests[0]?.messages.at(-1);
     expect(lastMessage?.role).toBe('user');
     expect(String(lastMessage?.content)).toContain('ATTACHMENT_MARKER_TEXT reaches the provider prompt.');
@@ -334,10 +329,10 @@ describe('F1: companion-chat routes on standalone DaemonServer', () => {
 });
 
 // ---------------------------------------------------------------------------
-// F2, Provider discovery on standalone daemon
+// F2, Provider list route on standalone daemon
 // ---------------------------------------------------------------------------
 
-describe('F2: provider state on standalone daemon', () => {
+describe('F2: provider list route on standalone daemon', () => {
   let tempRoot: string;
   let daemon: DaemonServer;
   let runtimeServices: Awaited<ReturnType<typeof createRuntimeServices>>;
@@ -372,7 +367,6 @@ describe('F2: provider state on standalone daemon', () => {
     const beforeBody = await before.json() as { providers: unknown[] };
     const beforeCount = beforeBody.providers.length;
 
-    // Simulate what loadPersistedProviders + registerDiscoveredProviders does
     runtimeServices.providerRegistry.registerDiscoveredProviders([
       {
         name: 'LM Studio (test)',
@@ -443,10 +437,10 @@ describe('F4: panel registry on standalone daemon', () => {
 });
 
 // ---------------------------------------------------------------------------
-// F14, Control-plane SSE DEFAULT_DOMAINS
+// F14, Control-plane snapshot
 // ---------------------------------------------------------------------------
 
-describe('F14: control-plane SSE default domains', () => {
+describe('F14: control-plane snapshot route', () => {
   let tempRoot: string;
   let daemon: DaemonServer;
   let port: number;

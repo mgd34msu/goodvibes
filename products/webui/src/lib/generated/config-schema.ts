@@ -350,7 +350,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.read",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for file read operations (read, find, analyze). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for the read tool only; find and analyze have their own settings below. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -361,7 +361,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.tools.write",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file write operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
+    "description": "Permission for file write operations, and for changing settings through the goodvibes_settings tool. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.",
     "enumValues": [
       "allow",
       "prompt",
@@ -548,7 +548,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "sandbox.enabled",
     "type": "boolean",
     "default": true,
-    "description": "Master switch for the per-command exec sandbox (bubblewrap on Linux): the workspace is writable, the rest of the filesystem is read-only, /tmp is isolated, and network is disabled unless a command is on sandbox.egressAllowlist. Default ON where the host probe passes; honestly reported unavailable when bubblewrap is not present, leaving the exec path unchanged."
+    "description": "Master switch for the per-command exec sandbox (bubblewrap on Linux): the workspace is writable, the rest of the filesystem is read-only, /tmp is isolated, and network is disabled unless a command is on sandbox.egressAllowlist. Default ON where the host probe passes; honestly reported unavailable when bubblewrap is not present, leaving the exec path unchanged. Turning it on takes effect at the next start (the host is probed then); sandbox.egressAllowlist and sandbox.workspaceWritable apply from the next command."
   },
   {
     "key": "sandbox.judgment",
@@ -673,16 +673,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     ]
   },
   {
-    "key": "release.channel",
-    "type": "enum",
-    "default": "stable",
-    "description": "Preferred release channel for install/update flows",
-    "enumValues": [
-      "stable",
-      "preview"
-    ]
-  },
-  {
     "key": "automation.enabled",
     "type": "boolean",
     "default": true,
@@ -713,7 +703,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "automation.catchUpWindowMinutes",
     "type": "number",
     "default": 30,
-    "description": "How long after startup the engine should catch up missed runs",
+    "description": "How long after startup the engine should catch up missed runs. The same window (at least 5 minutes) is also how long a running run whose agent has vanished is left before it is failed as \"Agent state lost\", so a large value keeps such a run holding a concurrency slot for as long.",
     "validationHint": "integer in [0, 1440]"
   },
   {
@@ -727,7 +717,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "automation.deleteAfterRun",
     "type": "boolean",
     "default": false,
-    "description": "Delete one-shot automation jobs after their first successful run"
+    "description": "Default for the deleteAfterRun flag of newly created one-shot (at) automation jobs: a job with the flag is deleted after its first successful run. Recurring jobs are never deleted by this default. Existing jobs keep the value they were created with."
   },
   {
     "key": "checkin.enabled",
@@ -745,19 +735,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "checkin.deliveryChannel",
     "type": "string",
     "default": "",
-    "description": "Where a proactive check-in message is delivered: \"surfaceKind\" or \"surfaceKind:address\" (e.g. \"slack:C123\")"
+    "description": "Where a proactive check-in message is delivered: \"surfaceKind\" or \"surfaceKind:address\" (e.g. \"slack:C123\"). Empty falls back to the owner profile field contactMe.channel."
   },
   {
     "key": "checkin.quietHours",
     "type": "string",
     "default": "",
-    "description": "Proactive check-in quiet hours as \"HH:MM-HH:MM\" local time (empty disables); no message is sent during this window"
+    "description": "Proactive check-in quiet hours as \"HH:MM-HH:MM\" local time; no message is sent during this window. Empty falls back to the owner profile field contactMe.quietHours, and disables quiet hours only when the profile has none."
   },
   {
     "key": "controlPlane.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Enable the standalone control-plane HTTP server"
+    "description": "Informational: whether the standalone control-plane HTTP server is meant to run. Status and readiness checks report it; changing it does not start or stop a running listener."
   },
   {
     "key": "controlPlane.gateway",
@@ -769,7 +759,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.hostMode",
     "type": "enum",
     "default": "local",
-    "description": "Network binding mode: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (editable host and port)",
+    "description": "Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds; controlPlane.allowRemote does not change it.",
     "enumValues": [
       "local",
       "network",
@@ -780,7 +770,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.host",
     "type": "string",
     "default": "127.0.0.1",
-    "description": "Bind host for the control-plane HTTP server"
+    "description": "Bind host for the control-plane HTTP server, used when controlPlane.hostMode is custom"
   },
   {
     "key": "controlPlane.port",
@@ -799,7 +789,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.streamMode",
     "type": "enum",
     "default": "sse",
-    "description": "Live update stream mode for control-plane clients",
+    "description": "Informational: the live update stream mode reported to control-plane clients. It is echoed in status; the SSE and WebSocket endpoints are both served whatever it says.",
     "enumValues": [
       "sse",
       "websocket",
@@ -810,7 +800,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.allowRemote",
     "type": "boolean",
     "default": false,
-    "description": "Allow remote clients to connect to the control plane"
+    "description": "Deprecated: nothing reads this, and the terminal setup no longer writes it. It does not open or close the listener: the bind comes only from controlPlane.hostMode and controlPlane.host, so set those to widen or narrow exposure (authentication still applies either way)."
   },
   {
     "key": "controlPlane.trustProxy",
@@ -828,7 +818,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.openaiCompatible.pathPrefix",
     "type": "string",
     "default": "/v1",
-    "description": "Path prefix for the daemon OpenAI-compatible routes"
+    "description": "Path prefix for the daemon OpenAI-compatible routes",
+    "validationHint": "a path such as /v1: segments of letters, digits, . _ ~ -, with no trailing slash and not just /"
   },
   {
     "key": "controlPlane.webui.serve",
@@ -852,7 +843,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.cors.allowedOrigins",
     "type": "string",
     "default": "",
-    "description": "Comma-separated explicit allowlist of browser origins permitted to make cross-origin requests when controlPlane.cors.enabled is true (e.g. http://localhost:5173). Empty refuses every cross-origin request."
+    "description": "Comma-separated explicit allowlist of browser origins permitted to make cross-origin requests when controlPlane.cors.enabled is true (e.g. http://localhost:5173). Empty refuses every cross-origin request. The WebSocket upgrade origin check reads this list on its own, whether or not controlPlane.cors.enabled is true."
   },
   {
     "key": "controlPlane.tls.mode",
@@ -869,13 +860,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "controlPlane.tls.certFile",
     "type": "string",
     "default": "",
-    "description": "Certificate chain PEM path for direct control-plane TLS (empty = ~/.goodvibes/certs/fullchain.pem)"
+    "description": "Certificate chain PEM path for direct control-plane TLS (empty = certs/fullchain.pem under this surface's settings directory, e.g. ~/.goodvibes/tui/certs/fullchain.pem for the terminal app and the daemon)"
   },
   {
     "key": "controlPlane.tls.keyFile",
     "type": "string",
     "default": "",
-    "description": "Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses ~/.goodvibes/certs/privkey.pem."
+    "description": "Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses certs/privkey.pem under this surface's settings directory (e.g. ~/.goodvibes/tui/certs/privkey.pem for the terminal app and the daemon)."
   },
   {
     "key": "httpListener.hostMode",
@@ -928,25 +919,25 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "httpListener.tls.certFile",
     "type": "string",
     "default": "",
-    "description": "Certificate chain PEM path for direct webhook-listener TLS (empty = ~/.goodvibes/certs/fullchain.pem)"
+    "description": "Certificate chain PEM path for direct webhook-listener TLS (empty = certs/fullchain.pem under this surface's settings directory)"
   },
   {
     "key": "httpListener.tls.keyFile",
     "type": "string",
     "default": "",
-    "description": "Private key PEM path for direct webhook-listener TLS (empty = ~/.goodvibes/certs/privkey.pem)"
+    "description": "Private key PEM path for direct webhook-listener TLS (empty = certs/privkey.pem under this surface's settings directory)"
   },
   {
     "key": "web.enabled",
     "type": "boolean",
     "default": true,
-    "description": "Enable the browser-based operator surface. Default on, bound to loopback (web.hostMode local): served on this machine only until deliberately widened via web.hostMode. The URL is announced once at daemon start."
+    "description": "Declare the browser-based operator surface as available (status and links). This does not bind a listener: the bundle is served by the control-plane listener when controlPlane.webui.serve is true, so who can reach it follows controlPlane.hostMode and controlPlane.host."
   },
   {
     "key": "web.hostMode",
     "type": "enum",
     "default": "local",
-    "description": "Network binding mode: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (editable host and port)",
+    "description": "Declared endpoint mode for the web surface links (local, network or custom). Nothing binds it; exposure of the served bundle follows controlPlane.hostMode.",
     "enumValues": [
       "local",
       "network",
@@ -957,20 +948,20 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "web.host",
     "type": "string",
     "default": "127.0.0.1",
-    "description": "Bind host for the web surface"
+    "description": "Declared host of the web surface endpoint, used for links. Nothing listens on web.host:web.port; the served bundle follows controlPlane.host and controlPlane.port."
   },
   {
     "key": "web.port",
     "type": "number",
     "default": 3423,
-    "description": "Bind port for the web surface",
+    "description": "Declared port of the web surface endpoint, used for links and development servers. The daemon does not bind it; the served bundle uses controlPlane.port.",
     "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "web.publicBaseUrl",
     "type": "string",
     "default": "http://127.0.0.1:3423",
-    "description": "Public base URL for web links and ntfy/notification deep links"
+    "description": "Public base URL for web links and ntfy/notification deep links. The default is a placeholder: nothing listens on its port, so set it to the address people actually reach (usually the control-plane address)."
   },
   {
     "key": "web.staticAssetsDir",
@@ -993,13 +984,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "conversationGate.proposalTtlMs",
     "type": "number",
     "default": 1800000,
-    "description": "How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Clamped to 1 minute - 24 hours."
+    "description": "How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Between 1 minute and 24 hours.",
+    "validationHint": "integer in [60000, 86400000]"
   },
   {
     "key": "conversationGate.maxPendingProposals",
     "type": "number",
     "default": 20,
-    "description": "Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Clamped to 1 - 200."
+    "description": "Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Between 1 and 200.",
+    "validationHint": "integer in [1, 200]"
   },
   {
     "key": "hostedSessions.detachPolicy",
@@ -1015,25 +1008,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "hostedSessions.maxSessions",
     "type": "number",
     "default": 8,
-    "description": "How many daemon-hosted sessions may be live at once. Creating one past this is refused with the count and this setting named, rather than accepted and starved. Terminated sessions do not count."
+    "description": "How many daemon-hosted sessions may be live at once. Creating one past this is refused with the count and this setting named, rather than accepted and starved. Terminated sessions do not count.",
+    "validationHint": "integer in [1, 1000]"
   },
   {
     "key": "hostedSessions.maxMessagesPerSession",
     "type": "number",
     "default": 500,
-    "description": "How many of a hosted session's most recent messages are written to disk. The transcript in memory is unaffected; this bounds what a restart can restore, so one long conversation cannot grow its file without limit."
+    "description": "How many of a hosted session's most recent messages are written to disk. The transcript in memory is unaffected; this bounds what a restart can restore, so one long conversation cannot grow its file without limit.",
+    "validationHint": "integer in [1, 100000]"
   },
   {
     "key": "hostedSessions.terminatedRetentionMs",
     "type": "number",
     "default": 86400000,
-    "description": "How long a terminated hosted session's record is kept before it is retired, in milliseconds. Until then it is still listable with its termination reason, so a session that ended can be asked about rather than having simply vanished."
+    "description": "How long a terminated hosted session's record is kept before it is retired, in milliseconds. Until then it is still listable with its termination reason, so a session that ended can be asked about rather than having simply vanished.",
+    "validationHint": "integer in [0, 31536000000]"
   },
   {
     "key": "hostedSessions.attachmentTtlMs",
     "type": "number",
     "default": 600000,
-    "description": "How long a client stays attached to a daemon-hosted session without renewing, in milliseconds. Attaching again renews it, and a client whose control-plane connection is still open renews automatically. A client that crashed or closed its tab never detaches, so without this its attachment stands forever and a kill-policy session waits for a departure that never comes. When the last attachment lapses the session is treated as detached, and hostedSessions.detachPolicy decides what happens next. Clamped to at least 30 seconds and at most a day."
+    "description": "How long a client stays attached to a daemon-hosted session without renewing, in milliseconds. Attaching again renews it, and a client whose control-plane connection is still open renews automatically. A client that crashed or closed its tab never detaches, so without this its attachment stands forever and a kill-policy session waits for a departure that never comes. When the last attachment lapses the session is treated as detached, and hostedSessions.detachPolicy decides what happens next. Between 30 seconds and a day.",
+    "validationHint": "integer in [30000, 86400000]"
   },
   {
     "key": "hostedSessions.promoteInboundConversations",
@@ -1045,13 +1042,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "hostedSessions.routeConversationTurns",
     "type": "boolean",
     "default": true,
-    "description": "Run this surface's own conversation turns inside the connected daemon rather than in this process. On (the default) and with a connected daemon reachable: the first message of a conversation creates a daemon-hosted session rooted at this surface's working directory, every later message is steered into it, and this surface renders the turn from the daemon's event stream, so the turn survives this process closing and every surface sees one conversation. The daemon holds the authoritative transcript; this surface still keeps its own local record of what the stream delivered. Off: every turn runs in this process, as it always did. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason, it is never silent about where a turn ran. This is about what happens when you press enter; hostedSessions.promoteInboundConversations is the same question for messages arriving from a channel."
+    "description": "Only goodvibes-agent routes its conversation turns this way; the terminal product (goodvibes) always runs turns in its own process and ignores this setting. Run the agent's own conversation turns inside the connected daemon rather than in this process. On (the default) and with a connected daemon reachable: the first message of a conversation creates a daemon-hosted session rooted at this surface's working directory, every later message is steered into it, and this surface renders the turn from the daemon's event stream, so the turn survives this process closing and every surface sees one conversation. The daemon holds the authoritative transcript; this surface still keeps its own local record of what the stream delivered. Off: every turn runs in this process, as it always did. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason, it is never silent about where a turn ran. This is about what happens when you press enter; hostedSessions.promoteInboundConversations is the same question for messages arriving from a channel."
   },
   {
     "key": "atRest.redactionEnabled",
     "type": "boolean",
     "default": true,
-    "description": "When true (default), secret/credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials, home paths) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl) and the local execution ledger (spans + ledger jsonl), reusing the same pattern set as the telemetry egress. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets on disk are acceptable."
+    "description": "When true (default), credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl), reusing the same pattern set as the telemetry egress. Home paths are NOT redacted. The local execution ledger gets the same treatment only when the application embedding the platform wires the policy in. Crash reports are always redacted, whatever this setting says. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets in the transcript journal are acceptable."
   },
   {
     "key": "atRest.retentionMaxAgeDays",
@@ -1077,7 +1074,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.defaultCardId",
     "type": "string",
     "default": "",
-    "description": "Which configured card to use when a purchase does not name one. Refers to a card id from payments.cards.list; the card NUMBER, expiry and CVV live in the daemon secret store and never in config."
+    "description": "A card id from payments.cards.list, shown as your preferred card. For now every purchase must still name its card: nothing falls back to this setting, and deleting that card does not clear it. The card NUMBER, expiry and CVV live in the daemon secret store and never in config."
   },
   {
     "key": "payments.currency",
@@ -1090,7 +1087,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.cvvHandling",
     "type": "enum",
     "default": "stored",
-    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing and stops every purchase to ask you for the code, which DISABLES UNATTENDED PURCHASING; surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
+    "description": "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing, and there is not yet a place to type the code at purchase time, so while it is selected every purchase is refused as having no usable card; it is for owners who want purchasing off for the card, not a working stop-and-ask mode. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
     "enumValues": [
       "stored",
       "prompt"
@@ -1155,85 +1152,85 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.billingAddress.name",
     "type": "string",
     "default": "",
-    "description": "Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.line1",
     "type": "string",
     "default": "",
-    "description": "Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.line2",
     "type": "string",
     "default": "",
-    "description": "Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.city",
     "type": "string",
     "default": "",
-    "description": "City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.region",
     "type": "string",
     "default": "",
-    "description": "State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.postalCode",
     "type": "string",
     "default": "",
-    "description": "Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.billingAddress.country",
     "type": "string",
     "default": "",
-    "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that."
+    "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.name",
     "type": "string",
     "default": "",
-    "description": "Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.line1",
     "type": "string",
     "default": "",
-    "description": "Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.line2",
     "type": "string",
     "default": "",
-    "description": "Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.city",
     "type": "string",
     "default": "",
-    "description": "City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.region",
     "type": "string",
     "default": "",
-    "description": "State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.postalCode",
     "type": "string",
     "default": "",
-    "description": "Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.shippingAddress.country",
     "type": "string",
     "default": "",
-    "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do."
+    "description": "Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified."
   },
   {
     "key": "payments.windows.vetoMinutes",
@@ -1260,29 +1257,29 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.majorRetailersExcluded",
     "type": "string",
     "default": "",
-    "description": "Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is kept, since the addition is the more specific instruction.",
+    "description": "Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.",
     "validationHint": "a comma-separated list of registrable domains"
   },
   {
     "key": "payments.ebayMinSellerFeedbackCount",
     "type": "number",
     "default": 100,
-    "description": "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, the purchase asks for your yes. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
+    "description": "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, the purchase asks for your yes. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
     "validationHint": "integer in [0, 1000000]"
   },
   {
     "key": "payments.ebayMinSellerPositivePercent",
     "type": "number",
     "default": 98,
-    "description": "Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay's own feedback widget, never from the seller's listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming.",
+    "description": "Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay's own feedback widget, never from the seller's listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes.",
     "validationHint": "integer in [0, 100]"
   },
   {
     "key": "payments.notifyChannels",
     "type": "string",
     "default": "",
-    "description": "Comma-separated, ordered list of surfaces that receive approval and veto prompts and may answer them: 'tui', 'agent-terminal', 'telegram'. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means an above-budget purchase has nowhere to ask and is refused, while an in-budget one proceeds unannounced.",
-    "validationHint": "a comma-separated list drawn from 'tui', 'agent-terminal', 'telegram'"
+    "description": "Comma-separated, ordered list of surfaces that receive approval and veto prompts and may answer them. Today only 'telegram' has a delivery path; 'tui' and 'agent-terminal' are rejected until the daemon can deliver a notice to a terminal window, because a channel you believe will reach you and does not is worse than none. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means an above-budget purchase has nowhere to ask and is refused, while an in-budget one proceeds unannounced.",
+    "validationHint": "a comma-separated list; only 'telegram' can deliver a notice today"
   },
   {
     "key": "daemon.timezone",
@@ -1376,56 +1373,56 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "memory.budgetMb",
     "type": "number",
     "default": 0,
-    "description": "MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start.",
+    "description": "MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.",
     "validationHint": "integer in [0, 1048576]"
   },
   {
     "key": "memory.tier.elevatedPct",
     "type": "number",
     "default": 60,
-    "description": "Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc.",
+    "description": "Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
     "key": "memory.tier.highPct",
     "type": "number",
     "default": 80,
-    "description": "High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs.",
+    "description": "High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
     "key": "memory.tier.criticalPct",
     "type": "number",
     "default": 95,
-    "description": "Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event.",
+    "description": "Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
     "key": "memory.tripwire.rateMbPerSec",
     "type": "number",
     "default": 25,
-    "description": "Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected.",
+    "description": "Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts.",
     "validationHint": "number in [1, 100000]"
   },
   {
     "key": "memory.tripwire.sustainSec",
     "type": "number",
     "default": 60,
-    "description": "Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart.",
+    "description": "Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 86400]"
   },
   {
     "key": "memory.hardLimitPct",
     "type": "number",
     "default": 90,
-    "description": "Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop.",
+    "description": "Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
     "key": "profile.enabled",
     "type": "boolean",
     "default": true,
-    "description": "Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers \"your profile is turned off\", a stated state, not an empty profile that would read as \"I know nothing about you\"."
+    "description": "Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers \"your profile is turned off\", a stated state, not an empty profile that would read as \"I know nothing about you\". Applies when the daemon starts."
   },
   {
     "key": "profile.autonomousWrites",
@@ -1461,14 +1458,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "profile.reloadThrottleMs",
     "type": "number",
     "default": 2000,
-    "description": "How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows.",
+    "description": "How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.",
     "validationHint": "integer in [50, 3600000]"
   },
   {
     "key": "profile.path",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely."
+    "description": "Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts."
   },
   {
     "key": "profile.conversationalCapture",
@@ -1480,7 +1477,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "profile.ownerChannels",
     "type": "string",
     "default": "",
-    "description": "The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else's words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means the channels already set to reach you privately in occasions.nudgeChannel, so the channel that sends you a birthday reminder can also hear you say when your flight leaves."
+    "description": "The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else's words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means no channel counts as you on a conversational turn: only a surface you are sitting at (the terminal, the web UI) can record to your profile, and the refusal names this setting. occasions.nudgeChannel is where reminders are sent and is not an owner grant, so the channel that sends you a birthday reminder cannot also record that your flight leaves at nine until you list it here."
   },
   {
     "key": "occasions.enabled",
@@ -1609,7 +1606,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "voice.wake.models",
     "type": "string",
     "default": "hey_goodvibes",
-    "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service."
+    "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.",
+    "validationHint": "comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators)"
   },
   {
     "key": "voice.wake.threshold",
@@ -1871,7 +1869,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "device.capture.maxArtifacts",
     "type": "number",
     "default": 200,
-    "description": "How many captures are kept at once across all paired phones. Past this count the oldest are deleted even while inside the retention window, so a burst of captures cannot fill the disk between sweeps.",
+    "description": "How many captures are kept at once across all paired phones. The count is enforced when housekeeping runs (see device.capture.sweepIntervalMinutes): then the oldest past it are deleted even while inside the retention window. A burst of captures can exceed it until the next sweep.",
     "validationHint": "integer in [1, 5000]"
   },
   {
@@ -1913,7 +1911,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "push.vapidSubject",
     "type": "string",
     "default": "",
-    "description": "Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID \"sub\" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem.",
+    "description": "Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID \"sub\" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem. A change takes effect after the daemon restarts.",
     "validationHint": "empty, or a mailto: address or an https: URL a push service can use to reach you"
   },
   {
@@ -1934,7 +1932,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "push.subscriptions.sweepIntervalMinutes",
     "type": "number",
     "default": 60,
-    "description": "How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss.",
+    "description": "How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss. A change to the interval takes effect after the daemon restarts.",
     "validationHint": "integer in [1, 1440]"
   },
   {
@@ -1954,35 +1952,35 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.heartbeatSeconds",
     "type": "number",
     "default": 30,
-    "description": "How often the responsible node tells the others it is still alive, in seconds. Lower means a faster crash takeover and slightly more network chatter.",
+    "description": "How often the responsible node tells the others it is still alive, in seconds. Lower means slightly faster notice that a node is alive and more network chatter; it does not by itself shorten a crash takeover, which waits for cluster.masterTimeoutSeconds. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 3600]"
   },
   {
     "key": "cluster.masterTimeoutSeconds",
     "type": "number",
     "default": 90,
-    "description": "How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Must be at least two heartbeats.",
+    "description": "How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Used as at least two heartbeats: a value below that is raised to two heartbeats at runtime. Applies after the daemon restarts.",
     "validationHint": "integer in [2, 86400]"
   },
   {
     "key": "cluster.bootProbeSeconds",
     "type": "number",
     "default": 3,
-    "description": "How long a starting node listens for an existing responsible node before claiming the role itself, in seconds.",
+    "description": "How long a starting node listens for an existing responsible node before claiming the role itself, in seconds. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 300]"
   },
   {
     "key": "cluster.port",
     "type": "number",
     "default": 61860,
-    "description": "UDP port used for node-to-node coordination on the local network. Every node that should coordinate must share this port. Change it only to avoid a collision with something else on your network.",
+    "description": "UDP port used for node-to-node coordination on the local network. Every node that should coordinate must share this port. Change it only to avoid a collision with something else on your network. Applies after the daemon restarts.",
     "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "cluster.multicastGroup",
     "type": "string",
     "default": "239.255.71.86",
-    "description": "IPv4 multicast group the nodes coordinate over. The default sits in the administratively-scoped range (239.0.0.0/8), which routers do not forward off the local network. Every node that should coordinate must share this value."
+    "description": "IPv4 multicast group the nodes coordinate over. The default sits in the administratively-scoped range (239.0.0.0/8), which routers do not forward off the local network. Every node that should coordinate must share this value. Applies after the daemon restarts."
   },
   {
     "key": "cluster.secret",
@@ -1994,28 +1992,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cluster.keyRotationHours",
     "type": "number",
     "default": 24,
-    "description": "How often the group replaces the internal key it signs coordination messages with, in hours. This is NOT the join key you type when adding a machine, that one is stable and changes only when you change it. This key rotates by itself, is never shown to you, and rotating it limits how long a copy taken off an old disk or a backup would be accepted. Lower means a shorter window and a little more network traffic once per rotation; the changeover never interrupts anything, because both the new key and the previous one are accepted for a few minutes either side of it.",
+    "description": "How often the group replaces the internal key it signs coordination messages with, in hours. This is NOT the join key you type when adding a machine, that one is stable and changes only when you change it. This key rotates by itself, is never shown to you, and rotating it limits how long a copy taken off an old disk or a backup would be accepted. Lower means a shorter window and a little more network traffic once per rotation; the changeover never interrupts anything, because both the new key and the previous one are accepted for a few minutes either side of it. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 8760]"
   },
   {
     "key": "cluster.keyRotationGraceMinutes",
     "type": "number",
     "default": 5,
-    "description": "How long both the new and the previous internal group key are accepted around a rotation, in minutes. This exists so that machines which have not yet picked up the new key are still heard while they catch up, without it, a rotation would look like every other machine going silent at once, and the group would needlessly hand work around. Raise it if your machines are often asleep or on a flaky link. It does NOT apply when you remove a machine: that rotation takes effect at once, which is the point of it.",
+    "description": "How long both the new and the previous internal group key are accepted around a rotation, in minutes. This exists so that machines which have not yet picked up the new key are still heard while they catch up, without it, a rotation would look like every other machine going silent at once, and the group would needlessly hand work around. Raise it if your machines are often asleep or on a flaky link. It does NOT apply when you remove a machine: that rotation takes effect at once, which is the point of it. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 120]"
   },
   {
     "key": "cluster.beaconSeconds",
     "type": "number",
     "default": 15,
-    "description": "How often this machine advertises its group on the local network, in seconds. The advertisement carries the group's id, its name, how many machines are in it and this build's version, and nothing else. It is what lets a new machine running `cluster join` see the group and pick it from a list. Lower means a new machine finds the group faster; higher means slightly less traffic.",
+    "description": "How often this machine advertises its group on the local network, in seconds. The advertisement carries the group's id, its name, how many machines are in it and this build's version, and nothing else. It is what lets a new machine running `cluster join` see the group and pick it from a list. Lower means a new machine finds the group faster; higher means slightly less traffic. Applies after the daemon restarts.",
     "validationHint": "integer in [5, 3600]"
   },
   {
     "key": "cluster.rosterGossipSeconds",
     "type": "number",
     "default": 60,
-    "description": "How often this machine shares the group's member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. Lower means changes settle everywhere faster.",
+    "description": "How often this machine shares the group's member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. The member list is checked on a 30 second timer, so any value below 30 behaves as 30. Higher means changes settle more slowly. Applies after the daemon restarts.",
     "validationHint": "integer in [10, 3600]"
   },
   {
@@ -2069,7 +2067,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "",
     "description": "Expected Slack user ID for protected inbox reads; configure it explicitly. The token must prove this identity before reading messages. Empty keeps the inbox unconfigured.",
-    "validationHint": "an explicitly configured Slack user ID, or empty to keep the inbox unconfigured"
+    "validationHint": "a Slack user ID such as U012ABCDEF, or empty to keep the inbox unconfigured"
   },
   {
     "key": "surfaces.discord.enabled",
@@ -2099,13 +2097,15 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.discord.inboxBotUserId",
     "type": "string",
     "default": "",
-    "description": "Expected Discord bot user ID for protected inbox reads; the token must prove this identity before any message history is requested"
+    "description": "Expected Discord bot user ID for protected inbox reads; the token must prove this identity before any message history is requested",
+    "validationHint": "a Discord snowflake ID (digits), or empty"
   },
   {
     "key": "surfaces.discord.inboxChannelIds",
     "type": "string",
     "default": "",
-    "description": "Comma-separated explicit bot-readable one-to-one DM channel IDs for protected inbox reads (1–200 unique IDs); group DMs and inferred historical discovery are unsupported"
+    "description": "Comma-separated explicit bot-readable one-to-one DM channel IDs for protected inbox reads (1–200 unique IDs); group DMs and inferred historical discovery are unsupported",
+    "validationHint": "1-200 unique Discord snowflake IDs separated by commas (at most 4300 characters), or empty"
   },
   {
     "key": "surfaces.discord.defaultChannelId",
@@ -2191,7 +2191,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.webhook.secret",
     "type": "string",
     "default": "",
-    "description": "Shared secret used to sign or verify webhook payloads"
+    "description": "Shared secret that verifies inbound webhook payloads. Outbound webhook deliveries are not signed with it."
   },
   {
     "key": "surfaces.homeassistant.enabled",
@@ -2416,7 +2416,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.telephony.provider",
     "type": "enum",
     "default": "twilio",
-    "description": "Telephony provider mode: direct Twilio API or bridge",
+    "description": "Telephony provider mode: direct Twilio API or bridge. Delivery goes through the bridge when either this or the delivery mode below is bridge.",
     "enumValues": [
       "twilio",
       "bridge"
@@ -2426,7 +2426,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.telephony.mode",
     "type": "enum",
     "default": "sms",
-    "description": "Telephony delivery mode: SMS, voice call, or bridge",
+    "description": "Telephony delivery mode: SMS, voice call, or bridge. Choosing bridge here also sends through the bridge, so set the bridge URL.",
     "enumValues": [
       "sms",
       "voice",
@@ -2530,6 +2530,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Microsoft Teams bot application password (client secret)"
   },
   {
+    "key": "surfaces.msteams.webhookSecret",
+    "type": "string",
+    "default": "",
+    "description": "Microsoft Teams inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
+  },
+  {
     "key": "surfaces.msteams.tenantId",
     "type": "string",
     "default": "",
@@ -2608,6 +2614,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Mattermost bot access token"
   },
   {
+    "key": "surfaces.mattermost.webhookSecret",
+    "type": "string",
+    "default": "",
+    "description": "Mattermost inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
+  },
+  {
     "key": "surfaces.mattermost.teamId",
     "type": "string",
     "default": "",
@@ -2636,6 +2648,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "",
     "description": "Matrix account access token"
+  },
+  {
+    "key": "surfaces.matrix.webhookSecret",
+    "type": "string",
+    "default": "",
+    "description": "Matrix inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret."
   },
   {
     "key": "surfaces.matrix.userId",
@@ -2689,7 +2707,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.imapPort",
     "type": "number",
     "default": 993,
-    "description": "IMAP port read by the inbox provider"
+    "description": "IMAP port read by the inbox provider",
+    "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "surfaces.email.imapUser",
@@ -2713,7 +2732,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.imap.port",
     "type": "number",
     "default": 993,
-    "description": "IMAP port"
+    "description": "IMAP port",
+    "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "surfaces.email.imap.user",
@@ -2742,8 +2762,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "surfaces.email.imap.draftsMailbox",
     "type": "string",
-    "default": "Drafts",
-    "description": "Mailbox drafts are appended to"
+    "default": "",
+    "description": "Mailbox drafts are appended to. Empty (the default) means ask the server which folder carries the \\Drafts flag, which is right for providers such as Gmail whose Drafts folder is not literally named \"Drafts\""
   },
   {
     "key": "surfaces.email.smtp.host",
@@ -2755,7 +2775,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.smtp.port",
     "type": "number",
     "default": 465,
-    "description": "SMTP port"
+    "description": "SMTP port",
+    "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "surfaces.email.smtp.password",
@@ -2779,7 +2800,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.inbound.accounts",
     "type": "string",
     "default": "[]",
-    "description": "JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. [\"primary\"]. Empty means no mailbox is watched even when enabled is true. A list rather than a single switch because one address for signups and another for the owner's real mail is the expected shape."
+    "description": "JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. [\"primary\"]. Empty means no mailbox is watched even when enabled is true. A list rather than a single switch because one address for signups and another for the owner's real mail is the expected shape. Only the first entry is watched today; any further entries are accepted but not watched.",
+    "validationHint": "a JSON array of account names, e.g. [\"primary\"]"
   },
   {
     "key": "surfaces.email.inbound.source",
@@ -2859,7 +2881,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.inbound.expectationWindowMinutes",
     "type": "number",
     "default": 15,
-    "description": "Default lifetime, in minutes, of a verification expectation opened for inbound-mail matching (for example an account signup awaiting its confirmation email). Raising it gives a slower-to-arrive confirmation more time to match; lowering it shrinks how long a stale expectation can be satisfied by a late message. Hard-capped at 60 to match MAX_VERIFICATION_WINDOW_MS.",
+    "description": "Default lifetime, in minutes, of a verification expectation opened for inbound-mail matching (for example an account signup awaiting its confirmation email). Raising it gives a slower-to-arrive confirmation more time to match; lowering it shrinks how long a stale expectation can be satisfied by a late message. Hard-capped at 60 to match MAX_VERIFICATION_WINDOW_MS. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 60]"
   },
   {
@@ -2873,14 +2895,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.email.inbound.retentionDays",
     "type": "number",
     "default": 30,
-    "description": "How many days an inbound mail record (sender, subject, delivery evidence, link verdicts, never the full body) is kept before it is reaped. Longer keeps a longer history to explain \"why did I get that message\"; shorter bounds how much of the owner's mail metadata the daemon retains.",
+    "description": "How many days an inbound mail record (sender, subject, delivery evidence, link verdicts, never the full body) is kept before it is reaped. Longer keeps a longer history to explain \"why did I get that message\"; shorter bounds how much of the owner's mail metadata the daemon retains. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 365]"
   },
   {
     "key": "surfaces.email.inbound.maxRecords",
     "type": "number",
     "default": 5000,
-    "description": "Hard cap on the number of inbound mail records kept regardless of age. Whichever of this and retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail.",
+    "description": "Hard cap on the number of inbound mail records kept regardless of age. Whichever of this and retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail. Applies after the daemon restarts.",
     "validationHint": "integer in [100, 100000]"
   },
   {
@@ -2928,7 +2950,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "surfaces.calendar.calendars",
     "type": "string",
     "default": "",
-    "description": "JSON object mapping a calendar id to its collection path, e.g. {\"work\":\"/dav/calendars/work/\"}. Empty means the CalDAV URL is the one calendar"
+    "description": "JSON object mapping a calendar id to its collection path, e.g. {\"work\":\"/dav/calendars/work/\"}. Empty means the CalDAV URL is the one calendar",
+    "validationHint": "a JSON object mapping calendar ids to collection paths"
   },
   {
     "key": "watchers.enabled",
@@ -2940,7 +2963,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "watchers.pollIntervalMs",
     "type": "number",
     "default": 60000,
-    "description": "Polling interval for watcher sources in milliseconds",
+    "description": "Default polling interval in milliseconds for new watchers registered through the API; existing watchers and other registration paths keep their own interval",
     "validationHint": "integer in [1000, 86400000]"
   },
   {
@@ -2954,7 +2977,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "watchers.ciPollIntervalMs",
     "type": "number",
     "default": 60000,
-    "description": "Cadence (ms) for the daemon's recurring CI-watch poll; the poller enforces a 15s floor to respect the status source's rate limits",
+    "description": "Cadence (ms) for the daemon's recurring CI-watch poll; the poller enforces a 15s floor to respect the status source's rate limits. Read once when the daemon starts: a new value applies after the next restart.",
     "validationHint": "integer in [1000, 86400000]"
   },
   {
@@ -2999,7 +3022,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "service.serviceName",
     "type": "string",
     "default": "goodvibes",
-    "description": "Service name used for host integration and install scripts"
+    "description": "Service name used for host integration and install scripts. An unset value resolves per platform: goodvibes on Linux and Windows, sh.goodvibes.daemon on macOS (the launchd label)."
   },
   {
     "key": "service.logPath",
@@ -3075,8 +3098,9 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "runtime.companionChatLimiter.perSessionLimit",
     "type": "number",
-    "default": 10,
-    "description": "Max companion chat messages per 60-second window per session. Overrides the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (env is read once at daemon startup; this config key is read on each check() call and takes precedence when set to a positive integer)."
+    "default": 0,
+    "description": "Max companion chat messages per 60-second window per session. 0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. A positive integer overrides the env var and is read on each check() call.",
+    "validationHint": "integer in [0, 100000]"
   },
   {
     "key": "runtime.eventBus.maxListeners",
@@ -3118,7 +3142,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.mode",
     "type": "enum",
     "default": "off",
-    "description": "Daemon provider Batch API mode: off, explicit per request, or eligible-by-default for batch-capable daemon requests",
+    "description": "Daemon provider Batch API mode: off, explicit per request, or eligible-by-default (accepted and reported to clients, not yet enforced by the daemon; behaves like explicit)",
     "enumValues": [
       "off",
       "explicit",
@@ -3129,7 +3153,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.fallback",
     "type": "enum",
     "default": "live",
-    "description": "Fallback behavior when a batch-requested job is not eligible: live allows callers to choose live execution, fail rejects the batch job",
+    "description": "Reported in the batch runtime description only. Job creation always rejects a live execution mode for a batch job whatever this says.",
     "enumValues": [
       "live",
       "fail"
@@ -3139,7 +3163,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.queueBackend",
     "type": "enum",
     "default": "local",
-    "description": "Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare requires cloudflare.enabled.",
+    "description": "Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare is meant to be used with cloudflare.enabled; the pairing is reported, not enforced.",
     "enumValues": [
       "local",
       "cloudflare"
@@ -3149,7 +3173,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.tickIntervalMs",
     "type": "number",
     "default": 60000,
-    "description": "Daemon-local batch scheduler tick interval in milliseconds",
+    "description": "Daemon-local batch scheduler tick interval in milliseconds. Read once when the scheduler starts: a new value applies after the next restart.",
     "validationHint": "integer in [5000, 3600000]"
   },
   {
@@ -3170,14 +3194,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.maxQueuePayloadBytes",
     "type": "number",
     "default": 16384,
-    "description": "Recommended maximum Cloudflare queue message payload size; queue messages should be signals, not full prompt archives",
+    "description": "Maximum Cloudflare queue message payload size in bytes; a larger cloudflare-queue job is refused (HTTP 413). Queue messages should be signals, not full prompt archives",
     "validationHint": "integer in [1024, 131072]"
   },
   {
     "key": "batch.maxQueueMessagesPerDay",
     "type": "number",
     "default": 1000,
-    "description": "platform-side free-tier guardrail for Cloudflare queue message volume",
+    "description": "Reported only: the intended daily Cloudflare queue message budget. Nothing counts queue messages or refuses past it yet.",
     "validationHint": "integer in [0, 10000000]"
   },
   {
@@ -3190,7 +3214,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cloudflare.freeTierMode",
     "type": "boolean",
     "default": true,
-    "description": "Prefer Cloudflare usage patterns that fit the free tier: small queue signals, local daemon storage, and bounded daily queue volume"
+    "description": "Reported only: marks the intent to use Cloudflare within the free tier (small queue signals, local daemon storage). It does not change daemon behavior."
   },
   {
     "key": "cloudflare.accountId",
@@ -3364,7 +3388,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cloudflare.maxQueueOpsPerDay",
     "type": "number",
     "default": 10000,
-    "description": "Free-tier queue operation budget used by clients to warn before Cloudflare queue usage exceeds the intended budget",
+    "description": "Reported only: the intended daily Cloudflare queue operation budget. Nothing counts operations or warns against it yet.",
     "validationHint": "integer in [0, 10000000]"
   },
   {
@@ -3377,14 +3401,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "watchers.triggers.backoffLadderMs",
     "type": "string",
     "default": "30000,60000,300000,900000,3600000",
-    "description": "Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens.",
+    "description": "Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "comma-separated integers, each 1000..86400000 ms"
   },
   {
     "key": "watchers.triggers.breakerStrikes",
     "type": "number",
     "default": 5,
-    "description": "Consecutive check failures that open the trigger's breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast.",
+    "description": "Consecutive check failures that open the trigger's breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [1, 50]"
   },
   {
@@ -3412,49 +3436,49 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "watchers.triggers.observationRingSize",
     "type": "number",
     "default": 200,
-    "description": "Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring.",
+    "description": "Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [2, 10000]"
   },
   {
     "key": "watchers.triggers.runHistoryLimit",
     "type": "number",
     "default": 50,
-    "description": "Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name.",
+    "description": "Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [1, 5000]"
   },
   {
     "key": "watchers.triggers.runHistoryTtlHours",
     "type": "number",
     "default": 168,
-    "description": "Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed.",
+    "description": "Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [1, 8760]"
   },
   {
     "key": "watchers.triggers.eventLogLimit",
     "type": "number",
     "default": 500,
-    "description": "Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit.",
+    "description": "Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [10, 50000]"
   },
   {
     "key": "watchers.triggers.eventLogTtlHours",
     "type": "number",
     "default": 24,
-    "description": "Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window.",
+    "description": "Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [1, 2160]"
   },
   {
     "key": "watchers.triggers.sweepIntervalMs",
     "type": "number",
     "default": 300000,
-    "description": "Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps.",
+    "description": "Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [10000, 86400000]"
   },
   {
     "key": "watchers.triggers.supervisionTickMs",
     "type": "number",
     "default": 1000,
-    "description": "How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds.",
+    "description": "How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds. Read once when the daemon starts; restart to apply a change.",
     "validationHint": "integer in [250, 300000]"
   },
   {
@@ -3539,7 +3563,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "update.releasesUrl",
     "type": "string",
     "default": "https://github.com/mgd34msu/goodvibes/releases/latest",
-    "description": "GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes; explicit custom feeds remain unchanged. Native suite updates replace installed sibling programs and configured release WebUI/browser support together"
+    "description": "GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be an https://github.com URL, or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other remote host would let a config write replace the installed programs",
+    "validationHint": "an https://github.com releases URL (or http on 127.0.0.1, localhost or [::1]) without credentials, or empty to turn the update loop off"
   },
   {
     "key": "update.rollbackAfterFailedStarts",
@@ -3608,7 +3633,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "tools.hooksFile",
     "type": "string",
     "default": "hooks.json",
-    "description": "Hook configuration file name (relative to the host .goodvibes data directory)"
+    "description": "Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)"
   },
   {
     "key": "tools.overflowSpillBackend",
@@ -3803,8 +3828,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "contract.heartbeatTimeoutMs",
     "type": "number",
-    "default": 0,
-    "description": "Silence in ms after which a running unit agent is restarted once, then failed. 0 = off.",
+    "default": 600000,
+    "description": "Silence in ms after which a running unit agent is restarted once, then failed. An exec command within its own timeout_ms, or without one, is not silence. 0 = off.",
     "validationHint": "finite number >= 0"
   },
   {
@@ -4015,7 +4040,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "policy.requireSignedBundles",
     "type": "boolean",
     "default": false,
-    "description": "Validate HMAC-SHA256 signatures when policy bundles load: managed mode rejects bundles with invalid or missing signatures; non-managed mode permits unsigned bundles with a warning. Restart to apply. Default off until divergence evidence clears the governance gate."
+    "description": "Require a valid HMAC-SHA256 signature on every policy bundle: a bundle that is unsigned, altered or signed with another key is refused, and so is every bundle when no signing key is set. The key is read from the GOODVIBES_POLICY_SIGNING_KEY environment variable (hex, at least 16 bytes). Restart to apply. Default off until divergence evidence clears the governance gate."
   },
   {
     "key": "policy.bundleSource",
@@ -4192,27 +4217,27 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "runtime.toolBudget.enforced",
     "type": "boolean",
     "default": false,
-    "description": "Enforce per-phase runtime budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd) checked at phase entry and exit, terminating the pipeline on a hard breach with a typed diagnostic event. Default off until budget attribution wiring lands."
+    "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The check runs after the tool returns, so a call over its limit is reported to the model as failed with its output kept and a note that its action may have taken effect. Token and cost limits apply only to tools that report tokenCount or costUsd."
   },
   {
     "key": "runtime.toolBudget.maxMs",
     "type": "number",
     "default": 0,
-    "description": "Default per-phase wall-clock budget (ms) for tool execution when runtime.toolBudget.enforced is true. 0 = unlimited. A per-call ToolRuntimeContext.budget.maxMs overrides this default.",
+    "description": "Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns. 0 = unlimited.",
     "validationHint": "integer in [0, 86400000]"
   },
   {
     "key": "runtime.toolBudget.maxTokens",
     "type": "number",
     "default": 0,
-    "description": "Default token budget for a single tool execution when runtime.toolBudget.enforced is true (checked against a tool result tokenCount annotation at phase exit). 0 = unlimited. A per-call ToolRuntimeContext.budget.maxTokens overrides.",
+    "description": "Token budget for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the tokenCount the result reports. 0 = unlimited.",
     "validationHint": "integer in [0, 100000000]"
   },
   {
     "key": "runtime.toolBudget.maxCostUsd",
     "type": "number",
     "default": 0,
-    "description": "Default cost budget (USD) for a single tool execution when runtime.toolBudget.enforced is true (checked against a tool result costUsd annotation at phase exit). 0 = unlimited. A per-call ToolRuntimeContext.budget.maxCostUsd overrides.",
+    "description": "Cost budget (USD) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the costUsd the result reports. 0 = unlimited.",
     "validationHint": "number in [0, 1000000]"
   },
   {
@@ -4292,25 +4317,26 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "email.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Turns on the mail connector: the account the daemon composes, sends and lists mail through. Off by default, a mailbox is only usable once host, username and a stored password reference are set below."
+    "description": "Turns on the mail connector: the account the daemon composes, sends and lists mail through. Off by default, a mailbox is only usable once host, username and a stored password reference are set below. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.imapHost",
     "type": "string",
     "default": "",
-    "description": "IMAP hostname the connector reads from, e.g. imap.gmail.com"
+    "description": "IMAP hostname the connector reads from, e.g. imap.gmail.com Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.imapPort",
     "type": "number",
     "default": 993,
-    "description": "IMAP port the connector reads from"
+    "description": "IMAP port the connector reads from Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail.",
+    "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "email.imapSecurity",
     "type": "enum",
     "default": "tls",
-    "description": "IMAP connection security. \"tls\" is implicit TLS on the IMAP port and is the safe default; \"plaintext\" is an unencrypted connection, legitimate only for a localhost or test server. There is no \"auto\" here, the operator either asks for TLS or asks not to have it.",
+    "description": "IMAP connection security. \"tls\" is implicit TLS on the IMAP port and is the safe default; \"plaintext\" is an unencrypted connection, legitimate only for a localhost or test server. There is no \"auto\" here, the operator either asks for TLS or asks not to have it. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail.",
     "enumValues": [
       "tls",
       "plaintext"
@@ -4320,19 +4346,20 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "email.smtpHost",
     "type": "string",
     "default": "",
-    "description": "SMTP submission hostname the connector sends through, e.g. smtp.gmail.com"
+    "description": "SMTP submission hostname the connector sends through, e.g. smtp.gmail.com Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.smtpPort",
     "type": "number",
     "default": 587,
-    "description": "SMTP port the connector sends through: 465 for implicit TLS, or 587 (the default) for STARTTLS"
+    "description": "SMTP port the connector sends through: 465 for implicit TLS, or 587 (the default) for STARTTLS Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail.",
+    "validationHint": "integer port in [1, 65535]"
   },
   {
     "key": "email.smtpSecurity",
     "type": "enum",
     "default": "auto",
-    "description": "\"auto\" (the default) picks implicit TLS on port 465 and STARTTLS everywhere else. \"tls\" and \"starttls\" force one of the two regardless of port, for a provider whose port does not match the usual convention.",
+    "description": "\"auto\" (the default) picks implicit TLS on port 465 and STARTTLS everywhere else. \"tls\" and \"starttls\" force one of the two regardless of port, for a provider whose port does not match the usual convention. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail.",
     "enumValues": [
       "auto",
       "tls",
@@ -4343,37 +4370,37 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "email.username",
     "type": "string",
     "default": "",
-    "description": "Login username the connector authenticates as, on both IMAP and SMTP"
+    "description": "Login username the connector authenticates as, on both IMAP and SMTP Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.passwordRef",
     "type": "string",
     "default": "",
-    "description": "A reference into the secret store (goodvibes://secrets/...) naming the mailbox password or app password, never a raw password. The secret itself is stored in the daemon secret tier, never in config."
+    "description": "A reference into the secret store (goodvibes://secrets/...) naming the mailbox password or app password, never a raw password. The secret itself is stored in the daemon secret tier, never in config. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.smtpPasswordRef",
     "type": "string",
     "default": "",
-    "description": "A reference into the secret store for the SMTP password, only when the provider issues one that differs from the IMAP password. Empty, the common case, means submission authenticates with email.passwordRef like everything else. The secret itself is stored in the daemon secret tier, never in config."
+    "description": "A reference into the secret store for the SMTP password, only when the provider issues one that differs from the IMAP password. Empty, the common case, means submission authenticates with email.passwordRef like everything else. The secret itself is stored in the daemon secret tier, never in config. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.fromAddress",
     "type": "string",
     "default": "",
-    "description": "From: address on mail the connector sends; usually the same address as email.username"
+    "description": "From: address on mail the connector sends; usually the same address as email.username Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.mailbox",
     "type": "string",
     "default": "",
-    "description": "Mailbox to read. Empty, the common case, means INBOX. Set when the account delivers to a folder, such as a per-signup alias mailbox."
+    "description": "Mailbox to read. Empty, the common case, means INBOX. Set when the account delivers to a folder, such as a per-signup alias mailbox. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "email.draftsMailbox",
     "type": "string",
     "default": "",
-    "description": "Drafts folder. Empty means ask the server, which is the better answer for a provider like Gmail whose Drafts folder is not literally named \"Drafts\". Set only when the server does not advertise one."
+    "description": "Drafts folder. Empty means ask the server, which is the better answer for a provider like Gmail whose Drafts folder is not literally named \"Drafts\". Set only when the server does not advertise one. Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail."
   },
   {
     "key": "calendar.google.clientId",
@@ -4385,7 +4412,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "calendar.google.clientSecretRef",
     "type": "string",
     "default": "",
-    "description": "A reference into the secret store naming the Google OAuth client secret, needed only for a confidential (Web-app) client registration, a Desktop-app client using PKCE needs none. The secret itself is stored in the daemon secret tier, never in config."
+    "description": "A reference into the secret store naming the Google OAuth client secret, needed only for a confidential (Web-app) client registration, a Desktop-app client using PKCE needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting's key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config."
   },
   {
     "key": "calendar.google.icsUrl",
@@ -4403,7 +4430,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "calendar.microsoft.clientSecretRef",
     "type": "string",
     "default": "",
-    "description": "A reference into the secret store naming the Microsoft OAuth client secret, needed only for a confidential registration, a public client with \"Allow public client flows\" enabled needs none. The secret itself is stored in the daemon secret tier, never in config."
+    "description": "A reference into the secret store naming the Microsoft OAuth client secret, needed only for a confidential registration, a public client with \"Allow public client flows\" enabled needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting's key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config."
   },
   {
     "key": "google.oauth.projectId",
@@ -4421,7 +4448,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "google.oauth.refreshToken",
     "type": "string",
     "default": "",
-    "description": "A reference into the secret store naming the long-lived OAuth refresh token the calendar connector authenticates with after the one-time authorization. The token itself is stored in the daemon secret tier, never in config."
+    "description": "Not read by the calendar connector. The long-lived OAuth refresh token it authenticates with after the one-time authorization lives only in the daemon secret store, under its own secret key; the connector never looks at this setting, so leave it empty."
   },
   {
     "key": "google.credentials.migratedFrom",
@@ -4640,7 +4667,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "policy-signing",
     "name": "Policy Signing",
-    "description": "Enables HMAC-SHA256 signature validation on policy bundle load. When enabled, managed mode rejects bundles with invalid or missing signatures. In non-managed mode, unsigned bundles are permitted with a warning status.",
+    "description": "Enables HMAC-SHA256 signature validation on policy bundle load. When enabled, a bundle that is unsigned, altered or signed with another key is refused, and so is every bundle when no signing key is set (GOODVIBES_POLICY_SIGNING_KEY, hex, at least 16 bytes).",
     "domain": "policy",
     "enablement": {
       "key": "policy.requireSignedBundles",
@@ -4712,7 +4739,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "runtime-tools-budget-enforcement",
     "name": "Runtime Budget Enforcement",
-    "description": "Enables per-phase runtime budget enforcement for tool execution pipelines. Checks wall-clock time (BUDGET_EXCEEDED_MS), token consumption (BUDGET_EXCEEDED_TOKENS), and cost (BUDGET_EXCEEDED_COST) limits at phase entry and exit. Terminates the pipeline immediately on hard budget breach and emits a typed diagnostic event. Disable to revert to unlimited execution.",
+    "description": "Fails a tool call that finishes over its wall-clock (BUDGET_EXCEEDED_MS), token (BUDGET_EXCEEDED_TOKENS) or cost (BUDGET_EXCEEDED_COST) limit (runtime.toolBudget.*). The check runs when the tool returns, so its action may have taken effect. Disable to report over-limit calls as successful.",
     "domain": "runtime",
     "enablement": {
       "key": "runtime.toolBudget.enforced",
@@ -4730,7 +4757,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "overflow-spill-backends",
     "name": "Overflow Spill Backends",
-    "description": "Enables the pluggable spill backend system for overflow content. When enabled, spillBackend can be set to file|ledger|diagnostics via config. When disabled, overflow content uses the file spill backend.",
+    "description": "Enables the pluggable spill backend system for overflow content. When enabled, spillBackend can be set to file|ledger|diagnostics via config. When disabled, overflow content uses the file spill backend. The spill handler reads the gate and the backend once when the runtime starts, so a change takes effect after a restart.",
     "domain": "tools",
     "enablement": {
       "key": "tools.overflowSpillBackend",
@@ -4743,7 +4770,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
     "settings": [
       "tools.overflowSpillBackend"
     ],
-    "restartRequired": false,
+    "restartRequired": true,
     "defaultEnabled": false
   },
   {
@@ -4766,7 +4793,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "shell-ast-normalization",
     "name": "Shell AST Normalization",
-    "description": "Enables the Shell AST parser for compound command verdict evaluation. Produces per-segment verdicts (safe/unsafe) with user-facing denial explanations that are strictly more specific than the baseline. Default-on: the AST path is safe to default because a parser failure falls back automatically to the baseline flat segmentation matcher (never a hard error, never a blanket allow), and the frozen catastrophic block is enforced identically in both modes. Disable at runtime to force the baseline flat segmentation mode for every command.",
+    "description": "Enables the Shell AST parser for compound command verdict evaluation. Produces per-segment verdicts (safe/unsafe) with user-facing denial explanations that are strictly more specific than the baseline. Default-on: the AST path is safe to default because a parser failure falls back automatically to the baseline flat segmentation matcher (never a hard error, never a blanket allow), and the permission gate reads the catastrophic case before the call in both modes. Disable at runtime to force the baseline flat segmentation mode for every command.",
     "domain": "permissions",
     "enablement": {
       "key": "permissions.commandParser",
@@ -5246,6 +5273,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.msteams.enabled",
       "surfaces.msteams.appId",
       "surfaces.msteams.appPassword",
+      "surfaces.msteams.webhookSecret",
       "surfaces.msteams.botId",
       "surfaces.msteams.tenantId",
       "surfaces.msteams.serviceUrl",
@@ -5269,6 +5297,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.matrix.homeserverUrl",
       "surfaces.matrix.userId",
       "surfaces.matrix.accessToken",
+      "surfaces.matrix.webhookSecret",
       "surfaces.matrix.defaultRoomId"
     ],
     "restartRequired": false,
@@ -5287,6 +5316,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.mattermost.enabled",
       "surfaces.mattermost.baseUrl",
       "surfaces.mattermost.botToken",
+      "surfaces.mattermost.webhookSecret",
       "surfaces.mattermost.teamId",
       "surfaces.mattermost.defaultChannelId"
     ],
@@ -5453,7 +5483,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "exec-sandbox",
     "name": "Per-Command Exec Sandbox",
-    "description": "Enables the per-command OS-level exec boundary (bubblewrap on Linux): the workspace is writable, the rest of the filesystem read-only, /tmp isolated, and network disabled unless a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would otherwise prompt can auto-allow, and commands needing host access (network, host-privilege escalation, package installs) surface as named escalation asks. The frozen catastrophic command block stays in force identically inside the boundary. On by default where the host probe passes (Linux with bubblewrap available); the first auto-allow announces once that commands now run contained and escalations will ask. When bubblewrap is absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec path is byte-for-byte unchanged. Set sandbox.enabled false to revert to unsandboxed exec.",
+    "description": "Enables the per-command OS-level exec boundary (bubblewrap on Linux): the workspace is writable, the rest of the filesystem read-only, /tmp isolated, and network disabled unless a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would otherwise prompt can auto-allow, and commands needing host access (network, host-privilege escalation, package installs) surface as named escalation asks. The permission gate reads the catastrophic case before the call, inside the boundary as outside it. On by default where the host probe passes (Linux with bubblewrap available); the first auto-allow announces once that commands now run contained and escalations will ask. When bubblewrap is absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec path is byte-for-byte unchanged. Set sandbox.enabled false to revert to unsandboxed exec.",
     "domain": "sandbox",
     "enablement": {
       "key": "sandbox.enabled",

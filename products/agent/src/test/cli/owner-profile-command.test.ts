@@ -370,7 +370,7 @@ describe('owner-profile CLI command', () => {
   test('person prints one person by name, with the disclosure the daemon supplied', async () => {
     const calls: Call[] = [];
     const result = await handleOwnerProfileCommand(
-      runtime(['person', 'Sarah', '--named-by', 'email my sister the tickets']),
+      runtime(['person', 'Sarah']),
       { invoke: stubInvoke(() => ({
         name: 'Sarah',
         lines: [{ lineIndex: 8, section: 'People', text: 'Sarah, sister, sarah@example.com' }],
@@ -381,14 +381,13 @@ describe('owner-profile CLI command', () => {
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain('sarah@example.com');
     expect(result.output).toContain("Used Sarah's details from your profile.");
-    // The verb takes a name and nothing else, --named-by is a gate at this
-    // surface, not a parameter invented for the daemon.
+    // The verb takes a name and nothing else; the owner at the terminal is the one naming the person.
     expect(calls[0]?.body).toEqual({ name: 'Sarah' });
   });
 
   test('a person who is not recorded exits non-zero and claims no receipt', async () => {
     const result = await handleOwnerProfileCommand(
-      runtime(['person', 'Nobody', '--named-by', 'send it to Nobody']),
+      runtime(['person', 'Nobody']),
       { invoke: stubInvoke(() => ({ name: 'Nobody', lines: [], disclosure: '' })) },
     );
 
@@ -496,5 +495,37 @@ describe('owner-profile CLI command', () => {
     const result = await handleOwnerProfileCommand(runtime(['status', '--json'], false));
     expect(result.exitCode).toBe(1);
     expect(result.output).toContain('auth_required');
+  });
+});
+
+describe('owner-profile note and undo', () => {
+  test('note appends a prose line with owner-direct authority and refuses without --yes', async () => {
+    const calls: Call[] = [];
+    const invoke = stubInvoke(() => wrote('Added.'), calls);
+    const refused = await handleOwnerProfileCommand(runtime(['note', '--section', 'Notes', '--text', 'Prefers aisle seats']), { invoke });
+    expect(refused.exitCode).toBe(2);
+    expect(calls).toHaveLength(0);
+
+    const done = await handleOwnerProfileCommand(runtime(['note', '--section', 'Notes', '--text', 'Prefers aisle seats', '--yes']), { invoke });
+    expect(done.exitCode).toBe(0);
+    expect(calls[0]?.methodId).toBe('profile.append');
+    expect(calls[0]?.body).toMatchObject({ section: 'Notes', text: 'Prefers aisle seats', authority: 'owner-direct', surface: 'agent' });
+  });
+
+  test('undo restores a field and reports the daemon reason when it could not', async () => {
+    const calls: Call[] = [];
+    const restored = await handleOwnerProfileCommand(
+      runtime(['undo', 'contact.phone', '--yes']),
+      { invoke: stubInvoke(() => wrote('Put back the previous phone.'), calls) },
+    );
+    expect(restored.exitCode).toBe(0);
+    expect(calls[0]).toMatchObject({ methodId: 'profile.undo', body: { fieldId: 'contact.phone', authority: 'owner-direct' } });
+
+    const failed = await handleOwnerProfileCommand(
+      runtime(['undo', 'contact.phone', '--yes']),
+      { invoke: stubInvoke(() => refused('nothing to undo')) },
+    );
+    expect(failed.exitCode).toBe(1);
+    expect(failed.output).toContain('nothing to undo');
   });
 });

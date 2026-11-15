@@ -116,6 +116,14 @@ export interface CompactionRunResult {
   readonly qualityScore: CompactionQualityScore | null;
 }
 
+/** Manual /compact refused because it would rewrite the transcript under a running turn. */
+export class CompactBusyError extends Error {
+  constructor() {
+    super('A turn is still running. Stop it with Esc or let it finish, then /compact.');
+    this.name = 'CompactBusyError';
+  }
+}
+
 /**
  * Compact the conversation and return the CompactionEvent recorded by the platform
  * (plus an out-of-band quality score), or null if no event was recorded (e.g.
@@ -135,12 +143,16 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   // pipeline, so mirror the platform auto-compaction path and degrade to the
   // simplified "keep the most recent messages" compaction.
   if (contextWindow > 0 && contextWindow < SMALL_WINDOW_THRESHOLD) {
+    // This branch replaces the transcript in place, so a running turn would lose what it appends.
+    if (context.isGenerating?.()) throw new CompactBusyError();
     const compacted = compactSmallWindow(conversationManager.getMessagesForLLM(), 10);
     conversationManager.replaceMessagesForLLM(compacted);
     return null;
   }
 
-  const eventBefore = getLastCompactionEvent();
+  // The event log is shared by every session in the process: read this session's own events.
+  const sessionId = context.session.runtime.sessionId;
+  const eventBefore = getLastCompactionEvent(sessionId);
   const messagesBefore = conversationManager.getMessagesForLLM();
   const sessionMemories = context.session.sessionMemoryStore?.list() ?? [];
   const lineageTracker = context.session.sessionLineageTracker;
@@ -148,6 +160,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
   const planManager = context.ops.planManager;
   const compactionCtx: CompactionContext = {
     messages: messagesBefore,
+    sessionId,
     sessionMemories,
     // Mirror buildAutoCompactionContext: pass ALL agent records (not just
     // running/pending) so completed/failed subagent work reaches the
@@ -178,7 +191,7 @@ export async function compactConversation(context: CommandContext): Promise<Comp
     context.session.runtime.provider,
     compactionCtx,
   );
-  const eventAfter = getLastCompactionEvent();
+  const eventAfter = getLastCompactionEvent(sessionId);
   if (eventAfter !== null && eventAfter !== eventBefore) {
     //: score this run out-of-band (see compaction-quality.ts for why
     // this can't just subscribe to the platform's own CompactionManager pipeline)

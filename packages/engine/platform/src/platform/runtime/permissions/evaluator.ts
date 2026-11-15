@@ -376,10 +376,12 @@ export class LayeredPolicyEvaluator {
       detail: `no session cache entry for key "${sessionKey}"`,
     });
 
-    // ── Layer 4: Policy rules (user before managed, first match wins) ─────
+    // ── Layer 4: Policy rules (managed denies, then user before managed, first match wins) ─────
+    // An administrator's deny is a ceiling: no user or remembered allow may sit ahead of it.
+    const managedDenies = this.rules.filter((r) => r.origin === 'managed' && r.effect === 'deny');
     const userRules = this.rules.filter((r) => r.origin === 'user');
-    const managedRules = this.rules.filter((r) => r.origin === 'managed');
-    const orderedRules = [...userRules, ...managedRules];
+    const managedRules = this.rules.filter((r) => r.origin === 'managed' && r.effect !== 'deny');
+    const orderedRules = [...managedDenies, ...userRules, ...managedRules];
 
     for (const rule of orderedRules) {
       const argShape = rule.type === 'arg-shape' ? yield rule : undefined;
@@ -496,7 +498,17 @@ export class LayeredPolicyEvaluator {
     if (typeof args['path'] === 'string') return `${toolName}:path:${args['path']}`;
     if (typeof args['command'] === 'string') return `${toolName}:cmd:${args['command']}`;
     if (typeof args['url'] === 'string') return `${toolName}:url:${args['url']}`;
-    const argKeysHash = JSON.stringify(Object.keys(args).sort());
-    return `${toolName}:${argKeysHash}`;
+    // Other shapes (exec `commands`, fetch `urls`, ...) are keyed on their full
+    // values: names alone would let one remembered call approve every other
+    // call that merely has the same argument names.
+    return `${toolName}:args:${stableStringify(args)}`;
   }
+}
+
+/** JSON with object keys sorted at every depth, so equal arguments give an equal string. */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+    return Object.fromEntries(Object.entries(item).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
+  }) ?? 'undefined';
 }

@@ -49,14 +49,15 @@ export async function setSecretBackedSettingValue(args: {
     assertPolicyAvailable();
     const update = buildSecretBackedConfigUpdate(key, value);
     if ((update.secretKey || update.clearSecretKey) && args.route?.applies(key)) {
-      await args.route.write(key, value);
+      // The trimmed text, as the local path stores: a token pasted with a trailing newline must not reach the daemon with it.
+      await args.route.write(key, value.trim());
       args.onDaemonWrite?.();
       return true;
     }
     if ((update.secretKey || update.clearSecretKey) && defaultSecretBackedScope(key) === 'daemon' && args.daemonCredentials) {
       const writer = args.daemonCredentials;
       if (value.trim().length === 0) await writer.clear(key);
-      else await writer.set(key, value);
+      else await writer.set(key, value.trim());
       return true;
     }
     if ((update.secretKey || update.clearSecretKey) && !secretsManager) {
@@ -66,16 +67,26 @@ export async function setSecretBackedSettingValue(args: {
     const scope = defaultSecretBackedScope(key);
     const medium = getSecretWriteMedium(configManager.get('storage.secretPolicy'));
     // Publishing a reference is the commit: readers must never see it before
-    // the cross-process secret write (or clear) has actually completed.
+    // the cross-process secret write has actually completed.
     if (update.secretKey && update.secretValue !== undefined) {
       await secretsManager!.set(update.secretKey, update.secretValue, { scope, medium });
-    }
-    if (update.clearSecretKey) {
-      await secretsManager!.delete(update.clearSecretKey, { scope });
     }
     assertPolicyAvailable();
     configManager.validateDynamic?.(key, update.configValue);
     await setConfigValue(key, update.configValue);
+    // A clear unpublishes the reference first and only then deletes the value:
+    // the other order, failing at the config write, would leave a reference
+    // that resolves to nothing, a broken credential.
+    if (update.clearSecretKey) {
+      try {
+        await secretsManager!.delete(update.clearSecretKey, { scope });
+      } catch {
+        logger.error('SettingsModal: cleared secret reference but could not delete its stored value', { key });
+        const message = 'The credential was cleared, but its stored value could not be removed. Remove it with /secrets delete.';
+        args.onFailure?.(message);
+        args.onError?.(message);
+      }
+    }
     return true;
   } catch {
     // Store/transport errors may echo credential material. Never display or log them.

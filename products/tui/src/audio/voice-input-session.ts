@@ -112,7 +112,12 @@ export function wireVoiceInputRuntime(deps: VoiceInputRuntimeDeps): VoiceInputRu
     deps.render();
     try {
       const text = (await resolution.gateway.transcribe(utteranceToAudioArtifact(utterance), { signal: controller.signal })).trim();
-      if (!current(owner) || deps.readDraftRevision?.() !== draftRevision) return;
+      if (!current(owner)) return;
+      if (deps.readDraftRevision?.() !== draftRevision) {
+        // Writing the transcript over text typed while it was being recognised would destroy that text.
+        deps.notify('[Voice] The draft changed while the recording was being transcribed, so the transcript was discarded rather than written over it.');
+        return;
+      }
       if (text.length === 0) {
         deps.notify('[Voice] Speech-to-text returned no words for that recording.');
       } else {
@@ -130,7 +135,6 @@ export function wireVoiceInputRuntime(deps: VoiceInputRuntimeDeps): VoiceInputRu
 
   const start = (): void => {
     const owner = ++generation;
-    const draftRevision = deps.readDraftRevision?.();
     const settings = deps.readSettings();
     const active = new PushToTalkSession({
       openCapture: deps.openCapture,
@@ -145,6 +149,8 @@ export function wireVoiceInputRuntime(deps: VoiceInputRuntimeDeps): VoiceInputRu
         // The ceiling fired instead of a second keypress. The audio is still what
         // the user said, so it is transcribed rather than discarded.
         session = null;
+        // Same capture point as a manual stop: the draft as it is when recording ends.
+        const draftRevision = deps.readDraftRevision?.();
         deps.notify(`[Voice] Recording reached the ${settings.captureMaxSeconds}s ceiling (voice.wake.captureMaxSeconds) and stopped on its own.`);
         void transcribe(utterance, owner, draftRevision);
       },

@@ -63,7 +63,7 @@ export function mailFixture(options: {
     'email.smtpHost': 'smtp.example.invalid',
     'email.smtpPort': 587,
     'email.username': 'owner@example.invalid',
-    'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_PASSWORD',
+    'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_MAIL_PASSWORD',
     'email.fromAddress': 'owner@example.invalid',
     'email.mailbox': 'INBOX',
   };

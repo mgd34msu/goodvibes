@@ -14,8 +14,8 @@
  * lockstep with the platform feature-flag set.
  */
 
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { getFeatureSetting, isFeatureDefaultEnabled } from '@goodvibes-jev/engine/terminal-shell';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { getFeatureSetting, isFeatureConfigEnabled, isFeatureDefaultEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import type {
   OnboardingWizardControllerLike,
   OnboardingWizardFieldDefinition,
@@ -378,7 +378,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'runtime-tools-budget-enforcement',
         label: 'Runtime budget enforcement',
-        hint: 'Enforce per-phase wall-clock, token, and cost budgets on tool pipelines, terminating on hard breach. Limits are tuned in /settings.',
+        hint: 'Fail a tool call that finishes over its wall-clock, token, or cost limit; limits are tuned in /settings.',
       },
       {
         flagId: 'overflow-spill-backends',
@@ -437,6 +437,24 @@ export function isFeatureDefaultOn(flagId: string): boolean {
   return isFeatureDefaultEnabled(flagId);
 }
 
+// What each feature is set to right now, per wizard. The runtime snapshot does not carry
+// feature enablement, and the wizard must start from (and compare against) the live
+// setting: starting from the platform default hides a feature the user enabled in
+// /settings, and an unchecked box would then write nothing and leave it on.
+const currentEnablement = new WeakMap<object, ReadonlyMap<string, boolean>>();
+
+/** Record the live enablement of every guided feature for this wizard; call before its values are (re)built. */
+export function recordFeatureEnablement(controller: object, config: Pick<ConfigManager, 'get'>): void {
+  const current = new Map<string, boolean>();
+  for (const flagId of getFeatureOnboardingFlagIds()) current.set(flagId, isFeatureConfigEnabled(config, flagId));
+  currentEnablement.set(controller, current);
+}
+
+/** The feature's live setting when known, otherwise the platform default. */
+function currentFeatureEnablement(controller: object, flagId: string): boolean {
+  return currentEnablement.get(controller)?.get(flagId) ?? isFeatureDefaultOn(flagId);
+}
+
 /** Every flag id reachable through the guided feature steps. */
 export function getFeatureOnboardingFlagIds(): readonly string[] {
   return FEATURE_ONBOARDING_SECTIONS.flatMap((section) => section.units.map((unit) => unit.flagId));
@@ -456,7 +474,8 @@ export function buildFeatureUnitStep(
 
   for (const unit of section.units) {
     const defaultOn = isFeatureDefaultOn(unit.flagId);
-    const enabled = controller.getBooleanFieldValue(featureEnableFieldId(unit.flagId), defaultOn);
+    const current = currentFeatureEnablement(controller, unit.flagId);
+    const enabled = controller.getBooleanFieldValue(featureEnableFieldId(unit.flagId), current);
     if (enabled) enabledCount += 1;
 
     fields.push({
@@ -464,7 +483,7 @@ export function buildFeatureUnitStep(
       id: featureEnableFieldId(unit.flagId),
       label: unit.label,
       hint: `${unit.hint}${defaultOn ? ' (on by default)' : ''} Full options: /settings.`,
-      defaultValue: defaultOn,
+      defaultValue: current,
     });
 
     if (unit.note) {
@@ -528,7 +547,8 @@ export function buildFeatureUnitSteps(
 
 /**
  * Fold the guided feature selections into apply operations: for each unit, when
- * the user's choice differs from the feature's default, record the desired
+ * the user's choice differs from the feature's current setting (the platform
+ * default when it has not been read), record the desired
  * state; when the feature is enabled, write its implied config, prerequisite
  * features, and chosen sub-options. Desired states are collected into
  * `overrides` (flushed by the caller as plain domain-settings writes on each
@@ -542,12 +562,12 @@ export function applyFeatureUnitOperations(
 ): void {
   for (const section of FEATURE_ONBOARDING_SECTIONS) {
     for (const unit of section.units) {
-      const defaultOn = isFeatureDefaultOn(unit.flagId);
-      const enabled = controller.getBooleanFieldValue(featureEnableFieldId(unit.flagId), defaultOn);
+      const current = currentFeatureEnablement(controller, unit.flagId);
+      const enabled = controller.getBooleanFieldValue(featureEnableFieldId(unit.flagId), current);
 
-      // Persist the flag only when the user's choice diverges from the default,
-      // so a first run that accepts the defaults writes no flag override.
-      if (enabled !== defaultOn) overrides.set(unit.flagId, enabled ? 'enabled' : 'disabled');
+      // Persist the flag only when the user's choice diverges from what it is now,
+      // so accepting the shown state writes no flag override.
+      if (enabled !== current) overrides.set(unit.flagId, enabled ? 'enabled' : 'disabled');
       if (!enabled) continue;
 
       for (const prerequisite of unit.requiresFlags ?? []) overrides.set(prerequisite, 'enabled');

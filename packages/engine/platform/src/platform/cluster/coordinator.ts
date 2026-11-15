@@ -20,7 +20,7 @@
  * behavior that existed before it: every gate starts on start() and stops on
  * stop(), no sockets are opened, and nothing is broadcast anywhere.
  */
-import { OwnedClusterDrainError } from './owned-drain-error.js';
+import { ClusterConsumerStopError, OwnedClusterDrainError } from './owned-drain-error.js';
 import { ClusterElection } from './election-node.js';
 import { ClusterSurfaceRegistry } from './surface-registry.js';
 import { createSystemClusterClock } from './clock.js';
@@ -67,8 +67,16 @@ export class ClusterCoordinator {
   private election: ClusterElection | null = null;
   private transport: ClusterTransport | null = null;
   private started = false;
+  /** The start in flight, which a second start() joins and stop() waits out. */
+  private starting: Promise<void> | null = null;
+  /** The stop in flight, which a second stop() joins. */
+  private stopping: Promise<void> | null = null;
+  /** The last of start() and stop() to be called; a start queued behind a stop honours it. */
+  private wanted = false;
   /** Only meaningful with the election off: every gate runs unconditionally. */
   private ungatedRunning = false;
+  /** Elections were on but the group could not be joined, so every gate runs. */
+  private ungatedFallback = false;
   /** Run once at start(), before anything is contested. See `onPrepare`. */
   private readonly prepares: (() => Promise<void>)[] = [];
 
@@ -107,7 +115,7 @@ export class ClusterCoordinator {
 
   /** True when this node currently holds the given surface. */
   holdsSurface(surface: ClusterSurfaceKey): boolean {
-    if (!this.options.settings.enabled) return this.ungatedRunning;
+    if (!this.options.settings.enabled || this.ungatedFallback) return this.ungatedRunning;
     return this.election?.surfaceRole(surfaceIdFor(surface)) === 'master';
   }
 
@@ -171,7 +179,11 @@ export class ClusterCoordinator {
 
   private registerConsumer(gate: ClusterConsumerGate, strictDrain: boolean): () => Promise<void> {
     const surfaceId = surfaceIdFor(gate.surface);
-    if (strictDrain && this.ownedWithdrawals.has(surfaceId)) throw new Error('Owned cluster surface is still retiring');
+    if (strictDrain && this.ownedWithdrawals.has(surfaceId)) {
+      throw new Error('Owned cluster surface is still retiring: the consumer registered for it before has not '
+        + 'finished stopping. Await that withdrawal before registering a replacement; if the withdrawal '
+        + 'rejected, that consumer did not stop and only a daemon restart can serve this surface again');
+    }
     let retired = false;
     let running = false;
     let stopping: Promise<void> | undefined;
@@ -277,10 +289,33 @@ export class ClusterCoordinator {
     this.prepares.push(prepare);
   }
 
-  async start(): Promise<void> {
-    if (this.started) return;
+  /**
+   * Join the group and start contesting. A second call joins the start in
+   * flight. A stop() that arrives meanwhile wins: each await below is followed
+   * by a check, so nothing is started after the stop, and the stop waits for
+   * this to reach one of those checks before tearing down what was built.
+   */
+  start(): Promise<void> {
+    this.wanted = true;
+    if (this.starting) return this.starting;
+    if (this.started) return Promise.resolve();
+    const work = this.runStart().finally(() => {
+      if (this.starting === work) this.starting = null;
+    });
+    this.starting = work;
+    return work;
+  }
+
+  private async runStart(): Promise<void> {
+    if (this.stopping) {
+      await this.stopping;
+      // Another stop() joined that one after this start was asked for.
+      if (!this.wanted) return;
+    }
     this.started = true;
+    this.ungatedFallback = false;
     for (const prepare of [...this.prepares]) {
+      if (!this.started) return;
       try {
         await prepare();
       } catch (error) {
@@ -292,6 +327,7 @@ export class ClusterCoordinator {
         });
       }
     }
+    if (!this.started) return;
 
     if (!this.options.settings.enabled) {
       this.options.logger.debug('cluster: leader election is disabled; consuming on this node unconditionally');
@@ -319,6 +355,12 @@ export class ClusterCoordinator {
     try {
       await this.election.start();
     } catch (error) {
+      // The failed election already undid itself (ClusterElection.start).
+      this.election = null;
+      this.transport = null;
+      // A stop during the failed join owns the teardown; consuming now would
+      // start gates after it, with nothing left to stop them.
+      if (!this.started) return;
       // Coordination could not be established at all, the socket would not
       // bind, or the transport threw. Consume anyway. A node that answers a
       // message twice is a nuisance; a network where NOBODY reads the inbox
@@ -329,15 +371,28 @@ export class ClusterCoordinator {
         impact: 'if another goodvibes node is running on this network, an inbound message may be answered twice',
         action: `check that UDP port ${this.options.settings.port} is free, or set cluster.enabled false to silence this`,
       });
-      this.election = null;
-      this.transport = null;
+      this.ungatedFallback = true;
       await this.startAllUngated('coordination unavailable');
     }
   }
 
-  async stop(reason = 'shutdown'): Promise<void> {
-    if (!this.started) return;
+  stop(reason = 'shutdown'): Promise<void> {
+    this.wanted = false;
+    if (this.stopping) return this.stopping;
+    if (!this.started) return Promise.resolve();
     this.started = false;
+    // Captured now: a start() issued after this stop must not be waited on
+    // here, because that start waits on this stop.
+    const inFlightStart = this.starting;
+    const work = this.runStop(reason, inFlightStart).finally(() => {
+      if (this.stopping === work) this.stopping = null;
+    });
+    this.stopping = work;
+    return work;
+  }
+
+  private async runStop(reason: string, inFlightStart: Promise<void> | null): Promise<void> {
+    if (inFlightStart) await inFlightStart.catch(() => {});
     if (this.election) {
       // The election's own stop performs the ordered stop-then-RESIGN, per
       // surface.
@@ -346,7 +401,7 @@ export class ClusterCoordinator {
       this.transport = null;
       return;
     }
-    await this.stopAllUngated(reason);
+    if (this.ungatedRunning) await this.stopAllUngated(reason);
   }
 
   /** Wait for any in-flight transition, tests and orderly shutdown use it. */
@@ -381,6 +436,11 @@ export class ClusterCoordinator {
     }));
     return {
       enabled: this.options.settings.enabled,
+      // `master` below is not an election result in either ungated case; this
+      // is what lets a reader tell "won" from "reads everything regardless".
+      coordination: !this.options.settings.enabled
+        ? 'ungated-disabled'
+        : this.ungatedFallback ? 'ungated-fallback' : 'elected',
       role: this.started ? 'master' : 'stopped',
       nodeId: this.nodeId,
       version: this.options.version,
@@ -399,15 +459,35 @@ export class ClusterCoordinator {
   private async startAllUngated(reason: string): Promise<void> {
     this.ungatedRunning = true;
     for (const surface of this.registry.list()) {
+      if (!this.started) return;
       await this.registry.startSurface(surface.surfaceId, { replayFromMs: null, reason });
     }
   }
 
   private async stopAllUngated(reason: string): Promise<void> {
+    // Every surface gets its stop even when an earlier one fails: leaving the
+    // rest running after a shutdown would keep reading inboxes that no node
+    // claims, and the first failure is still reported to the caller.
+    let failure: { readonly error: unknown } | null = null;
     for (const surface of [...this.registry.list()].reverse()) {
-      await this.registry.stopSurface(surface.surfaceId, reason);
+      try {
+        await this.registry.stopSurface(surface.surfaceId, reason);
+      } catch (error) {
+        // Already logged by the registry; without an election there is no
+        // RESIGN to withhold, and a legacy consumer's failed stop never failed
+        // the shutdown.
+        if (error instanceof ClusterConsumerStopError) continue;
+        if (failure === null) failure = { error };
+        else {
+          this.options.logger.error('cluster: another surface also failed to stop', {
+            surface: surface.label,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
     this.ungatedRunning = false;
+    if (failure !== null) throw failure.error;
   }
 
   private async startGateUngated(

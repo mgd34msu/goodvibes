@@ -182,6 +182,9 @@ export interface OrchestrationEngine {
   join(): Promise<void>;
 }
 
+const CAPACITY_RETRY_BASE_MS = 500;
+const CAPACITY_RETRY_MAX_MS = 5_000;
+
 function generateId(prefix: string): string {
   return `${prefix}-${opaqueUuid()}`;
 }
@@ -204,6 +207,13 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   const stallAfterMs = deps.stallAfterMs ?? 10 * 60 * 1000;
   /** Workstreams currently in the announced at-cap state (event fires once per transition). */
   const atCapNoted = new Set<string>();
+  /** Items whose current spawn refusal was already announced, with its reason: an unchanged refusal is not re-announced. */
+  const refusalNoted = new Map<string, string>();
+  function announceRefusal(workstreamId: string, itemId: string, reason: string): void {
+    if (refusalNoted.get(itemId) === reason) return;
+    refusalNoted.set(itemId, reason);
+    emit({ type: 'pool-spawn-refused', workstreamId, itemId, reason });
+  }
   const requeuedInFlight = new Set<WorkItem>(); // requeued mid-flight: the settling run must not clobber the reset
   const workstreams = new Map<string, Workstream>();
   const completedResults = new Map<string, PhaseResult[]>();
@@ -233,9 +243,11 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   function emit(event: OrchestrationEvent): void {
     dispatch(event);
     // Integration can finish after the phase's final scheduling tick. Empty
-    // branches emit removal without a merge commit; both outcomes can release dependencies.
-    if (event.type === 'item-merged' || event.type === 'item-worktree-removed') {
-      queueMicrotask(() => { if (!disposed) tick(event.workstreamId); });
+    // branches emit removal without a merge commit (or keep the tree when its
+    // removal fails); each of these outcomes can release dependencies.
+    if (event.type === 'item-merged' || event.type === 'item-worktree-removed' || mergedButKept(event)) {
+      const { workstreamId } = event;
+      queueMicrotask(() => { if (!disposed) tick(workstreamId); });
     }
     // An integration conflict adds serialization edges (dynamic graph).
     if (event.type === 'item-merge-conflict') {
@@ -247,8 +259,20 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     }
   }
 
+  function mergedButKept(event: OrchestrationEvent): event is Extract<OrchestrationEvent, { type: 'item-worktree-kept' }> {
+    if (event.type !== 'item-worktree-kept') return false;
+    return workstreams.get(event.workstreamId)?.items.find((item) => item.id === event.itemId)?.mergeState === 'merged';
+  }
+
   function on(listener: OrchestrationEventListener): () => void {
     listeners.add(listener);
+    if (launchDirtyPaths !== undefined) {
+      try {
+        listener({ type: 'dirty-tree-at-launch', paths: [...launchDirtyPaths] });
+      } catch (error) {
+        logger.warn('orchestration engine: listener threw', { error: summarizeError(error) });
+      }
+    }
     return () => listeners.delete(listener);
   }
 
@@ -256,8 +280,11 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   // see dirty-guard.ts) so a later scoped commit can tell prior-run residue
   // from this run's own changes.
   const launchDirtySnapshot: DirtyLaunchSnapshot = snapshotDirtyTree(deps.projectRoot);
-  if (launchDirtySnapshot.size > 0) {
-    emit({ type: 'dirty-tree-at-launch', paths: [...launchDirtySnapshot.keys()] });
+  // Nobody can be subscribed while the engine is still being built, so the
+  // notice is held and handed to each listener as it subscribes.
+  const launchDirtyPaths: readonly string[] | undefined = launchDirtySnapshot.size > 0 ? [...launchDirtySnapshot.keys()] : undefined;
+  if (launchDirtyPaths !== undefined) {
+    logger.info('orchestration engine: the working tree had uncommitted changes at launch; they are left out of scoped commits unless a phase edits them', { paths: launchDirtyPaths.slice(0, 20), count: launchDirtyPaths.length });
   }
 
   // Worktree-isolation lane (worktree-mode workstreams only; no I/O until
@@ -316,7 +343,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
 
   const unsubscribeWriter = deps.persist === false
     ? (): void => undefined
-    : attachDebouncedWriter(snapshotRoot, getWorkstream, getPhaseResults, on);
+    : attachDebouncedWriter(snapshotRoot, getWorkstream, getPhaseResults, on, undefined, (workstreamId) => emit({ type: 'workstream-persistence-failed', workstreamId }));
 
   function buildPhase(spec: PhaseSpec, ordinal: number, insertedAt?: number): Phase {
     return {
@@ -435,6 +462,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
         item.failureReason = undefined;
         item.blockedReason = undefined;
         item.visits.clear();
+        attempts.onItemReopened(item);
         emit({ type: 'item-retried', workstreamId: workstream.id, itemId: item.id, reason: `auto-retry ${item.retryCount}/${maxItemRetries}: ${reason}` });
         queueMicrotask(() => { if (!disposed) tick(workstream.id); });
         return;
@@ -518,14 +546,12 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       priceProvenance: deps.priceProvenance,
       skipClaimVerification: deps.skipClaimVerification,
       contractUnitSettlement: deps.contractUnitSettlement,
-      onAgentSpawned: (agentId) => emit({ type: 'item-agent-spawned', workstreamId: workstream.id, itemId: item.id, agentId }),
+      onAgentSpawned: (agentId) => { capacityRetries = 0; emit({ type: 'item-agent-spawned', workstreamId: workstream.id, itemId: item.id, agentId }); },
       launchDirtySnapshot,
       itemWorktree,
     });
 
     let phaseResult = outcome.result;
-    // A killed/requeued phase cannot publish an old commit observation or result.
-    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item); return; }
     let bookkeepingHeld = outcome.result.commit?.classification === 'held';
     const fenceBookkeeping = () => {
       try { outcome.bookkeeping?.assertCurrent(); } catch { bookkeepingHeld = true; }
@@ -547,7 +573,14 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     } catch (error) {
       warnItem(item, `usage rollup skipped: ${summarizeError(error)}`);
     }
-    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item); return; }
+    // A requeued run is superseded and a replaced or removed workstream is gone:
+    // neither may publish its result, whether or not it carried commit
+    // bookkeeping, or a retried item would read the superseded run's report and
+    // a removed workstream would regain a result list. Its usage above still
+    // counts: the work was paid for. A killed run's own report is real history
+    // and is kept; only commit bookkeeping is withheld from it.
+    if (requeuedInFlight.has(item) || workstreams.get(workstream.id) !== workstream
+      || ((disposed || signal.aborted) && outcome.bookkeeping)) { requeuedInFlight.delete(item); return; }
     fenceBookkeeping();
     const results = completedResults.get(workstream.id) ?? [];
     results.push(phaseResult);
@@ -621,14 +654,20 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   }
 
   let capacityRetry: ReturnType<typeof setTimeout> | undefined;
+  /** Consecutive rechecks that found capacity still refused; reset when a claim is admitted. */
+  let capacityRetries = 0;
   function retryWhenCapacityChanges(): void {
     if (disposed || capacityRetry !== undefined) return;
     // A terminal event can precede release of the executor's reservation.
     // Recheck locally without another model call, visit, or failure attempt.
+    // A refusal that persists is rechecked less and less often, up to a cap, so a
+    // long-lived refusal does not become a steady poll.
+    const delay = Math.min(CAPACITY_RETRY_MAX_MS, CAPACITY_RETRY_BASE_MS * 2 ** Math.min(capacityRetries, 10));
+    capacityRetries += 1;
     capacityRetry = setTimeout(() => {
       capacityRetry = undefined;
       for (const id of workstreams.keys()) tick(id);
-    }, 500);
+    }, delay);
     capacityRetry.unref?.();
   }
 
@@ -657,7 +696,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
         if (!decision.allow) {
           if (decision.event) {
             if (decision.event.type === 'pool-at-cap') atCapNoted.add(workstreamId);
-            emit(decision.event);
+            if (decision.event.type === 'pool-spawn-refused') announceRefusal(workstreamId, item.id, decision.event.reason);
+            else emit(decision.event);
           }
           // The task stays VISIBLY ready with its reason, never a silent stall.
           item.state = 'awaiting-capacity';
@@ -699,7 +739,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
             const visits = (item.visits.get(phase.id) ?? 1) - 1;
             if (visits > 0) item.visits.set(phase.id, visits);
             else item.visits.delete(phase.id);
-            emit({ type: 'pool-spawn-refused', workstreamId, itemId: item.id, reason: error.message });
+            announceRefusal(workstreamId, item.id, error.message);
             retryWhenCapacityChanges();
           } else {
             logger.error('orchestration engine: phase run threw before producing an outcome', {
@@ -716,6 +756,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
             }
           } finally {
             cancellation.release(item.id, signal);
+            if (!capacityRefused) refusalNoted.delete(item.id);
             requeuedInFlight.delete(item);
             terminatedWorktreeCleanup.delete(item);
             activeItems.delete(item);
@@ -789,6 +830,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     item.completedAt = undefined;
     item.blockedReason = undefined;
     item.visits.clear();
+    attempts.onItemReopened(item);
     emit({ type: 'item-retried', workstreamId: workstream.id, itemId, reason: 'reset to re-run after failure' });
     tick(workstream.id);
     return true;
@@ -819,6 +861,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     item.currentPhaseId = first.id;
     item.agentId = undefined;
     item.blockedReason = undefined;
+    attempts.onItemReopened(item);
     emit({ type: 'item-requeued', workstreamId: workstream.id, itemId, reason });
     tick(workstream.id);
     return true;

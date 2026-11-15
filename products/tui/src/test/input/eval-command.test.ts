@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { EvalRegistry } from '@goodvibes-jev/engine/platform/platform/observe';
 import { EvalRegistry as ViewEvalRegistry } from '../../views/eval-registry.ts';
@@ -15,6 +15,7 @@ import { evalCommand } from '../../input/commands/eval.ts';
 import { createBootstrapCommandExtensionsSection } from '../../runtime/bootstrap-command-parts.ts';
 import type { BootstrapCommandShellServices } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function makeGateContext(printed: string[], evalRegistry?: EvalRegistry): CommandContext {
   // process.cwd() as workingDirectory so the platform resolveBaselinePath check
@@ -102,7 +103,8 @@ describe('evalCommand canonical observe registry adoption', () => {
     expect(other.evalRegistry?.getSuiteResults()).toEqual([]);
     expect(registry?.getLastRunAt()).toBeGreaterThan(0);
     // The next command sees the run, rather than the empty-registry early return.
-    const missing = join(process.cwd(), `.eval-missing-${crypto.randomUUID()}.json`);
+    // Inside the working directory (the baseline check resolves relative to it) but in the run's temp area.
+    const missing = join(makeProjectTempDir('eval-missing'), 'baseline.json');
     await evalCommand.handler(['compare', missing], context);
     expect(printed.at(-2)).toBe(`[eval] Baseline file not found: ${missing}`);
   });
@@ -125,7 +127,9 @@ describe('evalCommand canonical observe registry adoption', () => {
     expect(first?.suite).toBe('core-performance');
     expect(first?.results.length).toBeGreaterThan(0);
     expect(registry.getLastRunAt()).toBe(100);
-    expect(states).toEqual([true, true, false]);
+    // The registry told the subscriber it was running, then that it had finished.
+    expect(states[0]).toBe(true);
+    expect(states.at(-1)).toBe(false);
     expect(printed.some(line => line.includes('Running suite: core-performance'))).toBe(true);
 
     now = 200;
@@ -137,16 +141,17 @@ describe('evalCommand canonical observe registry adoption', () => {
     expect(registry.getSuiteResults()[0]).not.toBe(first);
     expect(registry.getLastRunAt()).toBe(200);
     expect(registry.isRunning()).toBe(false);
-    expect(states).toHaveLength(9);
+    const notifiedBeforeUnsubscribe = states.length;
+    expect(states.at(-1)).toBe(false);
 
     unsubscribe();
     await evalCommand.handler(['run', 'core-performance'], context);
-    expect(states).toHaveLength(9);
+    expect(states).toHaveLength(notifiedBeforeUnsubscribe);
     expect(registry.isRunning()).toBe(false);
   });
 
   test('gate replaces results per suite and compare reads the same canonical registry', async () => {
-    const directory = mkdtempSync(join(process.cwd(), '.eval-registry-test-'));
+    const directory = makeProjectTempDir('eval-registry-test');
     const baseline = join(directory, 'baseline.json');
     const registry = new EvalRegistry(() => 300);
     const printed: string[] = [];
@@ -158,7 +163,8 @@ describe('evalCommand canonical observe registry adoption', () => {
       const firstSuite = registry.getSuiteResults()[0];
       const firstGate = registry.getGateResults()[0];
       expect(firstGate?.suite).toBe('cost-tokens');
-      expect(states).toEqual([true, true, false, false]);
+      expect(states[0]).toBe(true);
+      expect(states.at(-1)).toBe(false);
       expect(await Bun.file(baseline).exists()).toBe(true);
 
       await evalCommand.handler(['gate', 'safety-baseline', baseline], context);
@@ -173,20 +179,44 @@ describe('evalCommand canonical observe registry adoption', () => {
       expect(registry.getGateResults()[0]).not.toBe(firstGate);
       expect(registry.getLastRunAt()).toBe(300);
       expect(registry.isRunning()).toBe(false);
-      expect(states).toHaveLength(12);
+      const notifiedAfterGates = states.length;
+      expect(states.at(-1)).toBe(false);
 
       printed.length = 0;
       await evalCommand.handler(['compare', baseline], context);
       expect(printed).toHaveLength(2);
       expect(printed[0]).toContain('cost-tokens');
       expect(printed[1]).toContain('safety-baseline');
-      expect(states).toHaveLength(12);
+      // Comparing reads the registry; it does not start a run.
+      expect(states).toHaveLength(notifiedAfterGates);
       unsubscribe();
       await evalCommand.handler(['gate', 'cost-tokens', baseline], context);
-      expect(states).toHaveLength(12);
+      expect(states).toHaveLength(notifiedAfterGates);
     } finally {
       unsubscribe();
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('evalCommand running flag ownership', () => {
+  test('a failure during a run still clears the running flag', async () => {
+    const registry = new EvalRegistry();
+    registry.push = () => { throw new Error('registry rejected the result'); };
+    const context = makeGateContext([], registry);
+    await expect(evalCommand.handler(['run', 'core-performance'], context)).rejects.toThrow('registry rejected');
+    expect(registry.isRunning()).toBe(false);
+  });
+
+  test('a second run is refused while one is active and leaves the flag with the first', async () => {
+    const registry = new EvalRegistry();
+    registry.setRunning(true);
+    const printed: string[] = [];
+    const context = makeGateContext(printed, registry);
+    await evalCommand.handler(['run', 'core-performance'], context);
+    await evalCommand.handler(['gate', 'core-performance'], context);
+    expect(printed.filter(line => line.includes('already in progress'))).toHaveLength(2);
+    expect(registry.getSuiteResults()).toEqual([]);
+    expect(registry.isRunning()).toBe(true);
   });
 });

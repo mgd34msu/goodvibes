@@ -77,37 +77,61 @@ function normalizeIdentities(identities: readonly PrincipalIdentity[] | undefine
 
 export class PrincipalRegistry {
   private records: PrincipalRecord[] | null = null;
+  private loading: Promise<PrincipalRecord[]> | null = null;
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
   constructor(private readonly store: PrincipalStore) {}
 
   /**
-   * Write the principals as they stand at THIS call, after every write already
-   * queued has finished.
+   * Apply one change to the principals and make it durable, one change at a time.
    *
-   * `PrincipalStore.save` replaces the file atomically but says nothing about
-   * ORDER, and `records` is one live array every method mutates in place, so two
-   * gateway calls in flight at once finished in whatever order their renames
-   * landed. Unordered, a `create` could land after the `delete` that followed
-   * it, and a principal is the thing channel intake resolves a sender identity
-   * against, so a deleted principal back on disk is a person whose messages are
-   * still attributed to a named identity after they were unmapped.
+   * `change` builds the NEXT array from the current one and never edits the
+   * current one. The next array is saved first and becomes live only after the
+   * save succeeded, so a failed write leaves memory and disk agreeing on the old
+   * state (a retry of a failed `create` must not meet a CONFLICT with a
+   * principal the caller was told was not created, and a failed `delete` must
+   * not leave a person unmapped until the next restart).
    *
-   * The snapshot is taken here rather than at write time: every caller mutates
-   * `records` and then saves, so each snapshot is at least as new as the one
-   * queued before it.
+   * Changes run through the write queue as a whole, load included. `PrincipalStore.save`
+   * replaces the file atomically but says nothing about ORDER, and two changes
+   * that both started from the same array would each save a list missing the
+   * other's principal. A principal is what channel intake resolves a sender
+   * identity against, so a lost or resurrected one is a person attributed to the
+   * wrong identity.
    */
-  private async persist(records: readonly PrincipalRecord[]): Promise<void> {
-    const snapshot = [...records];
-    await this.writes.run(() => this.store.save(snapshot));
+  private mutate<T>(
+    change: (records: readonly PrincipalRecord[]) => { readonly next: PrincipalRecord[] | null; readonly result: T },
+  ): Promise<T> {
+    return (async () => {
+      let outcome: T | undefined;
+      await this.writes.run(async () => {
+        const { next, result } = change(await this.all());
+        outcome = result;
+        if (next === null) return;
+        await this.store.save(next);
+        this.records = next;
+      });
+      return outcome as T;
+    })();
   }
 
-  private async all(): Promise<PrincipalRecord[]> {
+  private async all(): Promise<readonly PrincipalRecord[]> {
     if (this.records === null) {
-      this.records = await this.store.load();
+      // One shared load: two first callers must end up holding the same array.
+      this.loading ??= this.store.load().then(
+        (loaded) => {
+          this.records ??= loaded;
+          return loaded;
+        },
+        (error: unknown) => {
+          this.loading = null;
+          throw error;
+        },
+      );
+      await this.loading;
     }
-    return this.records;
+    return this.records!;
   }
 
   /** Throw CONFLICT if any of `identities` already belongs to a principal other than `exceptId`. */
@@ -147,54 +171,52 @@ export class PrincipalRegistry {
     if (!name) throw new PrincipalRegistryError('name is required', 'INVALID_ARGUMENT');
     const kind = requireKind(input.kind);
     const identities = normalizeIdentities(input.identities);
-    const records = await this.all();
-    this.assertIdentitiesFree(records, identities, null);
-    const now = Date.now();
-    const record: PrincipalRecord = {
-      id: `principal:${randomUUID().slice(0, 12)}`,
-      name,
-      kind,
-      identities,
-      createdAt: now,
-      updatedAt: now,
-      ...(input.metadata ? { metadata: input.metadata } : {}),
-    };
-    records.push(record);
-    await this.persist(records);
-    return record;
+    return this.mutate((records) => {
+      this.assertIdentitiesFree(records, identities, null);
+      const now = Date.now();
+      const record: PrincipalRecord = {
+        id: `principal:${randomUUID().slice(0, 12)}`,
+        name,
+        kind,
+        identities,
+        createdAt: now,
+        updatedAt: now,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      };
+      return { next: [...records, record], result: record };
+    });
   }
 
   async update(id: string, input: UpdatePrincipalInput): Promise<PrincipalRecord> {
-    const records = await this.all();
-    const index = records.findIndex((r) => r.id === id);
-    if (index === -1) throw new PrincipalRegistryError(`No principal with id ${id}`, 'NOT_FOUND');
-    const current = records[index]!;
-    const identities = input.identities !== undefined
-      ? normalizeIdentities(input.identities)
-      : current.identities;
-    if (input.identities !== undefined) this.assertIdentitiesFree(records, identities, id);
-    const name = input.name !== undefined ? input.name.trim() : current.name;
-    if (!name) throw new PrincipalRegistryError('name cannot be empty', 'INVALID_ARGUMENT');
-    const next: PrincipalRecord = {
-      ...current,
-      name,
-      kind: input.kind !== undefined ? requireKind(input.kind) : current.kind,
-      identities,
-      updatedAt: Date.now(),
-      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-    };
-    records[index] = next;
-    await this.persist(records);
-    return next;
+    return this.mutate((records) => {
+      const index = records.findIndex((r) => r.id === id);
+      if (index === -1) throw new PrincipalRegistryError(`No principal with id ${id}`, 'NOT_FOUND');
+      const current = records[index]!;
+      const identities = input.identities !== undefined
+        ? normalizeIdentities(input.identities)
+        : current.identities;
+      if (input.identities !== undefined) this.assertIdentitiesFree(records, identities, id);
+      const name = input.name !== undefined ? input.name.trim() : current.name;
+      if (!name) throw new PrincipalRegistryError('name cannot be empty', 'INVALID_ARGUMENT');
+      const next: PrincipalRecord = {
+        ...current,
+        name,
+        kind: input.kind !== undefined ? requireKind(input.kind) : current.kind,
+        identities,
+        updatedAt: Date.now(),
+        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      };
+      const nextRecords = [...records];
+      nextRecords[index] = next;
+      return { next: nextRecords, result: next };
+    });
   }
 
   async delete(id: string): Promise<boolean> {
-    const records = await this.all();
-    const index = records.findIndex((r) => r.id === id);
-    if (index === -1) return false;
-    records.splice(index, 1);
-    await this.persist(records);
-    return true;
+    return this.mutate((records) => {
+      if (!records.some((r) => r.id === id)) return { next: null, result: false };
+      return { next: records.filter((r) => r.id !== id), result: true };
+    });
   }
 
   /**

@@ -1,7 +1,7 @@
+import { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+
 /** Exact material fields declared by the card-entry contract. Unknown names require a canonical reading. */
-const DECLARED_CARD_MATERIAL_KEYS: ReadonlySet<string> = new Set([
-  'payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName',
-]);
+const DECLARED_CARD_MATERIAL_KEYS: ReadonlySet<string> = new Set<string>(PAYMENTS_SYNTHETIC_CONFIG_KEYS);
 
 /** Structural exclusions cannot be cleared by a semantic answer. No value is inspected here. */
 export function isDeclaredCardMaterialKey(key: string): boolean {

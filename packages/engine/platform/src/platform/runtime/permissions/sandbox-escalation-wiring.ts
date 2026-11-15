@@ -29,7 +29,8 @@ export interface EscalationWiringDeps {
 
 /** Build the canonical exact-plan handler, preserving standalone advisory compatibility. */
 export function buildSandboxEscalationHandler(deps: EscalationWiringDeps): ExecSandboxEscalationHandler {
-  const judgment: SandboxEscalationJudgment | undefined = deps.featureFlags.isEnabled('sandbox-model-judgment')
+  // Read per escalation, not once at build: turning auto-approve off (or the advisory off) must hold for the next ask.
+  const judgmentNow = (): SandboxEscalationJudgment | undefined => deps.featureFlags.isEnabled('sandbox-model-judgment')
     ? {
         config: { enabled: true, autoApprove: deps.configManager.get('sandbox.judgment') === 'auto-approve' },
         onReceipt: (r) => logger.info('[sandbox-judgment] receipt', {
@@ -38,10 +39,10 @@ export function buildSandboxEscalationHandler(deps: EscalationWiringDeps): ExecS
       }
     : undefined;
 
-  const seam = createSandboxEscalationApprovalHandler(deps.requestApproval, judgment);
   return async (input, execution) => {
     if (deps.autonomousHost) return admitSandboxEscalation(deps.autonomousHost, input, execution);
     if (currentExternalOperationSource()) return false;
+    const seam = createSandboxEscalationApprovalHandler(deps.requestApproval, judgmentNow());
     return (await seam({ sandbox: 'exec-sandbox', ...input })).approved;
   };
 }

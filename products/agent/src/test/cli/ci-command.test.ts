@@ -110,11 +110,11 @@ describe('ci CLI command', () => {
 
   test('creates, lists, runs, and deletes a CI watch with confirmation', async () => {
     const originalFetch = globalThis.fetch;
-    const requests: Array<{ readonly url: string; readonly method: string; readonly body: string }> = [];
+    const requests: Array<{ readonly url: string; readonly method: string; readonly body: string; readonly authorization: string | null }> = [];
     globalThis.fetch = mockFetch(async (input, init) => {
       const url = inputUrl(input);
       const method = init?.method ?? 'GET';
-      requests.push({ url, method, body: typeof init?.body === 'string' ? init.body : '' });
+      requests.push({ url, method, body: typeof init?.body === 'string' ? init.body : '', authorization: new Headers(init?.headers).get('authorization') });
       if (method === 'POST' && url.endsWith('/api/ci/watches')) {
         return jsonResponse({
           watch: {
@@ -177,7 +177,12 @@ describe('ci CLI command', () => {
       expect(listed.output).toContain('CI watches (1)');
       expect(listed.output).toContain('watch-1');
 
-      const ran = await handleCiCommand(runtime(['watches', 'run', 'watch-1']));
+      const unconfirmed = await handleCiCommand(runtime(['watches', 'run', 'watch-1']));
+      expect(unconfirmed.exitCode).toBe(2);
+      expect(unconfirmed.output).toContain('without --yes');
+      expect(requests.filter((request) => request.url.includes('ci.watches.run') || request.url.endsWith('/run'))).toHaveLength(0);
+
+      const ran = await handleCiCommand(runtime(['watches', 'run', 'watch-1', '--yes']));
       expect(ran.exitCode).toBe(0);
       expect(ran.output).toContain('overall passed');
       expect(ran.output).toContain('notified yes (notif-1)');
@@ -190,6 +195,10 @@ describe('ci CLI command', () => {
       const deleted = await handleCiCommand(runtime(['watches', 'delete', 'watch-1', '--yes']));
       expect(deleted.exitCode).toBe(0);
       expect(deleted.output).toContain('Deleted CI watch watch-1');
+
+      // Every call to the connected host carried the operator token.
+      expect(requests.length).toBeGreaterThanOrEqual(4);
+      expect(requests.map((request) => request.authorization)).toEqual(requests.map(() => 'Bearer ci-cli-token'));
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -16,9 +16,12 @@ import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox
  *
  * The daemon suite drove a listening fixture over `fetch`. The engine has no
  * fixture that composes payments and listens, so `routeFetch` below resolves a
- * method and path against the catalog's own `http` bindings (path templates,
- * query strings, JSON bodies, the explicit-user-request header) and hands the
- * call to the dispatcher, returning a real `Response`. Every assertion of the
+ * method and path against the catalog's own `http` bindings and hands the
+ * request to the daemon's real REST-verb handler (`createDaemonControlRouteHandlers`:
+ * bearer extraction, the admin gate, path-parameter folding and the
+ * explicit-user-request header) in front of the dispatcher, returning a real
+ * `Response`. Uncovered here: the listener and the daemon router's own route
+ * table, whose matching `routeFetch` stands in for. Every assertion of the
  * daemon file is kept. Two things the listening fixture supplied are supplied
  * here by the test instead: the settings the read verbs report (a plain map
  * behind `PaymentsConfigReader`) and the secret tier (a map shared across
@@ -44,6 +47,7 @@ import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import type { BrowserCheckoutSeam } from '../platform/src/platform/control-plane/routes/browser-composition.js';
 import {
@@ -72,6 +76,7 @@ import {
   registerPaymentsMethods,
 } from '../platform/src/platform/payments/host/register.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { turnsUntil } from './_helpers/turns-until.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 // The begin flow's link validation asks the judgment port about the checkout url's host; a fake port answers the plain cases these tests use.
@@ -175,6 +180,36 @@ async function composePayments(input: {
   const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, authToken: () => 'test-operator-token',
     userAuth: { validateSession: () => null } } as unknown as DaemonControlPlaneContext);
 
+  // The daemon's own REST-verb handler: it reads the explicit-user-request
+  // header, extracts the bearer token and folds path parameters, so none of
+  // that is reimplemented here.
+  const handlers = createDaemonControlRouteHandlers({
+    authToken: 'test-operator-token',
+    version: '0.0.0-test',
+    sessionCookieName: 'goodvibes_session',
+    controlPlaneGateway: {
+      getSnapshot: () => ({}), renderWebUi: () => new Response('', { status: 200 }), listRecentEvents: () => [],
+      listSurfaceMessages: () => [], listClients: () => [], createEventStream: () => new Response('', { status: 200 }),
+    },
+    extractAuthToken: request => helper.extractAuthToken(request),
+    resolveAuthenticatedPrincipal: request => {
+      const token = helper.extractAuthToken(request);
+      return token ? helper.describeAuthenticatedPrincipal(token) : null;
+    },
+    gatewayMethods: catalog,
+    getOperatorContract: () => ({}),
+    invokeGatewayMethodCall: input => helper.invokeGatewayMethodCall(input),
+    parseOptionalJsonBody: async request => {
+      const text = await request.text();
+      return text === '' ? null : JSON.parse(text) as Record<string, unknown>;
+    },
+    requireAdmin: request => helper.requireAdmin(request),
+    requireAuthenticatedSession: () => null,
+  });
+
+  // Only the path-template match is test-side: the daemon's router is not
+  // composed here. Header mapping, bearer extraction, the admin gate and
+  // path-parameter folding run through the real handler above.
   const routeFetch: ComposedPayments['fetch'] = async (path, init = {}) => {
     const url = new URL(path, 'http://daemon.local');
     const method = (init.method ?? 'GET').toUpperCase();
@@ -187,21 +222,12 @@ async function composePayments(input: {
       })}$`);
       const matched = pattern.exec(url.pathname);
       if (matched === null) continue;
-      const query: Record<string, unknown> = Object.fromEntries(url.searchParams.entries());
-      names.forEach((name, index) => { query[name] = decodeURIComponent(matched[index + 1]!); });
-      const headers = init.headers ?? {};
-      const token = headers['authorization'] === 'Bearer test-operator-token' ? 'test-operator-token' : paired.token;
-      const result = await helper.invokeGatewayMethodCall({
-        authToken: token,
-        methodId: descriptor.id,
-        query,
-        body: init.body === undefined ? undefined : JSON.parse(init.body) as unknown,
-        context: {
-          ...helper.describeAuthenticatedPrincipal(token),
-          explicitUserRequest: headers['x-goodvibes-explicit-user-request'] === 'true' ? true : undefined,
-        },
-      });
-      return new Response(JSON.stringify(result.body), { status: result.status });
+      const params: Record<string, string> = {};
+      names.forEach((name, index) => { params[name] = decodeURIComponent(matched[index + 1]!); });
+      const headers = new Headers(init.headers ?? {});
+      if (!headers.has('authorization')) headers.set('authorization', `Bearer ${paired.token}`);
+      const request = new Request(url, { method, headers, ...(init.body === undefined ? {} : { body: init.body }) });
+      return handlers.invokeGatewayRestVerb({ methodId: descriptor.id, req: request, params });
     }
     return new Response(JSON.stringify({ error: `No route for ${method} ${url.pathname}` }), { status: 404 });
   };
@@ -336,8 +362,8 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
   });
 
   test('checkout.approve then begin: admission acknowledges and durable status records the later gate refusal', async () => {
-    // The approve verb is ws-only (no REST binding, see register.ts's
-    // CHECKOUT_APPROVE_DESCRIPTOR), so it is minted through the same catalog
+    // The approve verb is ws-only (no REST binding, see its descriptor in
+    // method-catalog-payments.ts), so it is minted through the same catalog
     // dispatch the ws methodId arm uses (control-plane.ts invokes
     // gatewayMethods.invoke for handler-backed verbs), against the LIVE
     // composition's persisted store under this fixture's root.
@@ -369,15 +395,13 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(200);
     expect(response.body['outcome']).toBe('accepted');
     expect(response.body['purchaseId']).toBe('wire-approved-missing-card');
-    const deadline = Date.now() + 2000;
-    for (;;) {
+    await turnsUntil(async () => {
       const status = await readJson(await fixture.fetch('/api/payments/purchase/status?purchaseId=wire-approved-missing-card'));
       expect(status.status, JSON.stringify(status.body)).toBe(200);
-      const operation = readPaymentWindowStatus(status.body).operations[0];
-      if (operation?.state === 'refused') { expect(operation.outcome).toBe('refused:no-card'); break; }
-      if (Date.now() >= deadline) throw new Error('The detached wire fixture did not record its later refusal');
-      await new Promise(resolve => setTimeout(resolve, 1));
-    }
+      return readPaymentWindowStatus(status.body).operations[0]?.state === 'refused';
+    }, 'the detached wire fixture recording its later refusal');
+    const status = await readJson(await fixture.fetch('/api/payments/purchase/status?purchaseId=wire-approved-missing-card'));
+    expect(readPaymentWindowStatus(status.body).operations[0]?.outcome).toBe('refused:no-card');
   });
 
   test('checkout.fillCard refuses honestly for a session and page that do not exist', async () => {

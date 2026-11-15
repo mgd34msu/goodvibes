@@ -4,8 +4,8 @@ import {
   renderLiveVerificationReportMarkdown,
   writeLiveVerificationReportFiles,
 } from '../src/verification/live-verifier.ts';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { liveVerificationPasses, resolveVerifyLiveHome } from './verify-live-options.ts';
 
 function readArgValue(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
@@ -23,12 +23,13 @@ if (args.includes('--help') || args.includes('-h')) {
     'Usage: bun run scripts/verify-live.ts [options]',
     '',
     'Options:',
-    '  --home <path>        GoodVibes home directory. Defaults to ~/.goodvibes.',
+    '  --home <path>        The .goodvibes directory. Defaults to the tree under',
+    '                       GOODVIBES_HOME, or ~/.goodvibes when that is unset.',
     '  --binary <path>      Compiled goodvibes-agent binary. Defaults to dist/goodvibes-agent.',
     '  --connected-host-url <url>',
     '                      Connected host base URL. Defaults to configured control-plane port on 127.0.0.1.',
     '  --runtime-url <url> Alias for --connected-host-url.',
-    '  --strict            Treat warnings as failures.',
+    '  --strict            Treat warnings and skipped checks as failures.',
     '  --json              Print JSON instead of Markdown.',
     '  --out <dir>         Write live-verification.{json,md} to a directory.',
     '  --help              Show this help.',
@@ -37,7 +38,7 @@ if (args.includes('--help') || args.includes('-h')) {
 }
 
 const report = await buildLiveVerificationReport({
-  homeDir: readArgValue(args, '--home') ?? process.env.GOODVIBES_HOME ?? join(homedir(), '.goodvibes'),
+  homeDir: resolveVerifyLiveHome(readArgValue(args, '--home')),
   binaryPath: readArgValue(args, '--binary') ?? join(resolve(join(import.meta.dir, '..')), 'dist', 'goodvibes-agent'),
   projectRoot: resolve(join(import.meta.dir, '..')),
   connectedHostBaseUrl,
@@ -53,4 +54,8 @@ console.log(args.includes('--json')
   ? JSON.stringify(report, null, 2)
   : renderLiveVerificationReportMarkdown(report));
 
-process.exit(report.ok ? 0 : 1);
+if (!liveVerificationPasses(report)) {
+  if (report.strict && report.counts.fail === 0 && report.counts.skip > 0) console.error(`verify-live: ${report.counts.skip} check(s) were skipped, which --strict does not accept.`);
+  process.exit(1);
+}
+process.exit(0);

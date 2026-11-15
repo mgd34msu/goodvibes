@@ -26,6 +26,15 @@ export interface UseThemeResult {
 const ThemeContext = createContext<UseThemeResult | null>(null);
 
 // ─────────────────────────────────────────
+/** The choice already applies in memory; a blocked or full store only loses persistence. */
+function persistPreferences(next: ThemePreferences): void {
+  try {
+    writeThemePreferences(next);
+  } catch {
+    // Private mode or disabled site data: keep the choice for this tab.
+  }
+}
+
 export function useTheme(): UseThemeResult {
   const ctx = useContext(ThemeContext);
   if (ctx === null) {
@@ -70,13 +79,13 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const setTheme = useCallback((theme: Theme) => {
     const next: ThemePreferences = { ...prefs, theme };
     setPrefs(next);
-    writeThemePreferences(next);
+    persistPreferences(next);
   }, [prefs]);
 
   const setDensity = useCallback((density: Density) => {
     const next: ThemePreferences = { ...prefs, density };
     setPrefs(next);
-    writeThemePreferences(next);
+    persistPreferences(next);
   }, [prefs]);
 
   // Toggle flips the scheme on screen: Auto resolves against the OS first, and

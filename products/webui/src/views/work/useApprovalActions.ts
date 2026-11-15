@@ -1,6 +1,7 @@
 /**
  * Approve, deny, claim and cancel for the Work view's approval detail, and the
- * push-notification hand-off (#approval-action=…&approval-id=…).
+ * push-notification hand-off (#approval-action=…&approval-id=…): Allow opens the
+ * approval for review, Deny denies it.
  *
  * Moved from the old Approvals view unchanged in behavior: a partial hunk
  * approval sends an index array only (the daemon computes the edit), and every
@@ -10,7 +11,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
-import type { ApprovalApproveInput } from '../../lib/goodvibes';
+import type { ApprovalActionResult, ApprovalApproveInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { refetchAfterDecision } from '../../lib/approval-refresh';
 import { isDurableRememberTier, recordedAnswerDelivered, recordedReasonStored, recordedRememberTier } from '../../lib/approvals';
@@ -30,12 +31,46 @@ export interface ApprovalApproveRequest {
   readonly totalHunks?: number;
 }
 
+const ACTION_TARGET = { approve: 'approved', deny: 'denied', claim: 'claimed', cancel: 'cancelled' } as const;
+type ApprovalAction = keyof typeof ACTION_TARGET;
+
+/**
+ * The toast for a decision the daemon did not apply, or null when it did.
+ *
+ * Acting on an approval that already ended (an expired ask opened from a push
+ * notification, one another surface answered first) returns 200 with the
+ * record unchanged. The daemon reports that as `applied: false` with its own
+ * refusal; a daemon predating that field is read from the returned status.
+ */
+export function describeUnappliedDecision(
+  result: ApprovalActionResult | undefined,
+  action: ApprovalAction,
+): { title: string; description: string; tone: 'info' } | null {
+  if (!result) return null;
+  const applied = 'applied' in result && typeof result.applied === 'boolean'
+    ? result.applied
+    : result.approval?.status === ACTION_TARGET[action];
+  if (applied) return null;
+  const status = result.approval?.status ?? 'unknown';
+  const refusal = 'refusal' in result && typeof result.refusal === 'string' ? result.refusal : null;
+  return {
+    title: `Already ${status}, nothing changed`,
+    description: refusal ?? `This approval is ${status}, so it could not be ${ACTION_TARGET[action]}.`,
+    tone: 'info',
+  };
+}
+
 function friendlyError(error: unknown): string {
   if (isSessionClosedError(error)) return 'That session is closed. The approval can no longer be actioned.';
   return formatError(error);
 }
 
-export function useApprovalActions() {
+export interface ApprovalActionsOptions {
+  /** Open an approval's detail so the person reviews it (a push "Allow" lands here). */
+  readonly onOpenApproval?: (id: string) => void;
+}
+
+export function useApprovalActions({ onOpenApproval }: ApprovalActionsOptions = {}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -50,6 +85,8 @@ export function useApprovalActions() {
     },
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
+      const unapplied = describeUnappliedDecision(result, 'approve');
+      if (unapplied) { toast(unapplied); return; }
       const selectedCount = variables.selectedHunks?.length ?? 0;
       const isPartial = selectedCount > 0
         && variables.totalHunks !== undefined
@@ -86,6 +123,8 @@ export function useApprovalActions() {
       platformClient.operator.approvals.deny(id, reason ? { note: reason, reason } : undefined),
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
+      const unapplied = describeUnappliedDecision(result, 'deny');
+      if (unapplied) { toast(unapplied); return; }
       toast(variables.reason && recordedReasonStored(result)
         ? { title: 'Denied', description: 'Reason fed back with the denial.', tone: 'info' }
         : { title: 'Denied', tone: 'info' });
@@ -97,9 +136,9 @@ export function useApprovalActions() {
 
   const claim = useMutation({
     mutationFn: (id: string) => platformClient.operator.approvals.claim(id),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
-      toast({ title: 'Claimed', tone: 'info' });
+      toast(describeUnappliedDecision(result, 'claim') ?? { title: 'Claimed', tone: 'info' });
     },
     onError: (error: unknown) => {
       toast({ title: 'Claim failed', description: friendlyError(error), tone: 'danger' });
@@ -108,9 +147,9 @@ export function useApprovalActions() {
 
   const cancel = useMutation({
     mutationFn: (id: string) => platformClient.operator.approvals.cancel(id),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
-      toast({ title: 'Cancelled', tone: 'info' });
+      toast(describeUnappliedDecision(result, 'cancel') ?? { title: 'Cancelled', tone: 'info' });
     },
     onError: (error: unknown) => {
       toast({ title: 'Cancel failed', description: friendlyError(error), tone: 'danger' });
@@ -118,15 +157,18 @@ export function useApprovalActions() {
   });
 
   // Push-notification action hand-off: an "Allow"/"Deny" tap opens the app at
-  // #approval-action=…&approval-id=… (the service worker cannot approve itself).
-  // This authenticated surface completes the real call on mount, once; the
-  // fragment is scrubbed so a reload does not re-fire it.
+  // #approval-action=…&approval-id=… (the service worker cannot act itself).
+  // The fragment is plain URL text anyone can put in front of a signed-in
+  // person, so "Allow" only opens the approval for review: the person sees what
+  // is being asked and presses Approve. "Deny" is applied once on mount, since
+  // refusing is always safe. The fragment is scrubbed so a reload does not
+  // re-fire it.
   const handoffDoneRef = useRef(false);
-  const approveRef = useRef(approve.mutate);
   const denyRef = useRef(deny.mutate);
+  const openRef = useRef(onOpenApproval);
   useLayoutEffect(() => {
-    approveRef.current = approve.mutate;
     denyRef.current = deny.mutate;
+    openRef.current = onOpenApproval;
   });
   useEffect(() => {
     if (handoffDoneRef.current) return;
@@ -134,7 +176,7 @@ export function useApprovalActions() {
     if (!intent) return;
     handoffDoneRef.current = true;
     stripApprovalActionFragment();
-    if (intent.action === 'approve') approveRef.current({ id: intent.approvalId });
+    if (intent.action === 'approve') openRef.current?.(intent.approvalId);
     else denyRef.current({ id: intent.approvalId });
   }, []);
 

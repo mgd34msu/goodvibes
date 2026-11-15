@@ -70,19 +70,49 @@ function spawnLauncher(command: string, args: string[]): Promise<boolean> {
   });
 }
 
+/** One program and its arguments, tried in order until one reports success. */
+export interface ExternalUrlLauncher {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * The launchers for `url` on a platform, in the order they are tried.
+ *
+ * Windows opens the URL through `rundll32 url.dll,FileProtocolHandler`, which
+ * receives it as one argument. `cmd.exe /c start` would hand it to the command
+ * interpreter, where `&`, `|` and `^` in an authorize URL split the command and
+ * can run whatever follows.
+ */
+export function externalUrlLaunchers(
+  url: string,
+  platform: NodeJS.Platform,
+  underWsl: boolean,
+): readonly ExternalUrlLauncher[] {
+  const windows: ExternalUrlLauncher = { command: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', url] };
+  if (platform === 'darwin') return [{ command: 'open', args: [url] }];
+  if (platform === 'win32') return [windows];
+  if (underWsl) return [{ command: 'wslview', args: [url] }, windows, { command: 'xdg-open', args: [url] }];
+  return [{ command: 'xdg-open', args: [url] }];
+}
+
+function isWebUrl(url: string): boolean {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+/** Opens an http(s) URL in the default browser. Any other scheme, or a URL that does not parse, is refused (false) without launching anything. */
 export async function openExternalUrl(url: string): Promise<boolean> {
-  if (process.platform === 'darwin') {
-    return spawnLauncher('open', [url]);
+  if (!isWebUrl(url)) {
+    logger.warn('External URL not opened because it is not an http(s) URL', { argCount: 1 });
+    return false;
   }
-
-  if (process.platform === 'win32') {
-    return spawnLauncher('cmd.exe', ['/c', 'start', '', url]);
+  for (const launcher of externalUrlLaunchers(url, process.platform, Boolean(process.env['WSL_DISTRO_NAME']))) {
+    if (await spawnLauncher(launcher.command, [...launcher.args])) return true;
   }
-
-  if (process.env['WSL_DISTRO_NAME']) {
-    if (await spawnLauncher('wslview', [url])) return true;
-    if (await spawnLauncher('cmd.exe', ['/c', 'start', '', url])) return true;
-  }
-
-  return spawnLauncher('xdg-open', [url]);
+  return false;
 }

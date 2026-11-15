@@ -145,7 +145,11 @@ export async function mirrorHostedSessionToStore(
 
 /** `sessions.hosted.list` reply. */
 export interface HostedListReply {
-  readonly sessions: readonly (HostedAttachedSession & { readonly workspaceRoot?: string | undefined })[];
+  readonly sessions: readonly (HostedAttachedSession & {
+    readonly workspaceRoot?: string | undefined;
+    readonly updatedAt?: number | undefined;
+    readonly status?: string | undefined;
+  })[];
 }
 
 export interface HostedRecoveryDeps extends HostedSessionMirrorDeps {
@@ -171,6 +175,11 @@ export const DEFAULT_MAX_RECOVERED_HOSTED_SESSIONS = 5;
  * becomes resumable, newest last so the last-session pointer ends up on the
  * most recent conversation.
  *
+ * A session the daemon has already ended (a daemon restart or a lapsed
+ * attachment lease under the `kill` detach policy) cannot be attached again, so
+ * it is not recovered; the pass says how many it skipped so the loss is not
+ * silent.
+ *
  * Bounded and quiet: at most `maxRecovered` sessions per boot, sessions with no
  * transcript skipped, and every failure logged rather than thrown, a daemon
  * that is not reachable at boot must not stop the agent from starting.
@@ -180,22 +189,33 @@ export async function recoverUnmirroredHostedSessions(
 ): Promise<readonly HostedMirrorOutcome[]> {
   let reply: HostedListReply;
   try {
-    reply = await deps.verbs.invoke<HostedListReply>('sessions.hosted.list', {});
+    reply = await deps.verbs.invoke<HostedListReply>('sessions.hosted.list', { includeTerminated: true });
   } catch (error) {
     logger.debug('[hosted-mirror] could not list hosted sessions at boot', { error: summarizeError(error) });
     return [];
   }
 
   const known = new Set(deps.knownSessionIds());
-  const candidates = (reply?.sessions ?? []).filter((session) =>
+  const unknown = (reply?.sessions ?? []).filter((session) =>
     session.workspaceRoot === deps.workspaceRoot
     && !known.has(session.id)
     && (session.messageCount ?? 0) > 0);
+  const ended = unknown.filter((session) => session.status === 'terminated');
+  if (ended.length > 0) {
+    logger.info('[hosted-mirror] hosted conversations the daemon already ended cannot be recovered', {
+      skipped: ended.length,
+    });
+  }
+  // Sorted here rather than trusting the wire order: the daemon lists newest
+  // first, and the oldest-to-newest order below is what puts the last-session
+  // pointer on the most recent conversation. The sort is stable, so sessions
+  // without a timestamp keep the order they arrived in.
+  const candidates = unknown
+    .filter((session) => session.status !== 'terminated')
+    .sort((a, b) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0));
   if (candidates.length === 0) return [];
 
   const limit = deps.maxRecovered ?? DEFAULT_MAX_RECOVERED_HOSTED_SESSIONS;
-  // Oldest first, so the newest mirrored session is the one the last-session
-  // pointer is left on.
   const selected = candidates.slice(-limit);
   const outcomes: HostedMirrorOutcome[] = [];
   for (const session of selected) {

@@ -76,8 +76,8 @@ afterEach(() => {
 
 test('an empty candidate list renders no rows', async () => {
   const { el, unmount } = render();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  flushSync(() => {});
+  // The list has loaded once the loading skeleton is gone.
+  await waitFor(() => el.querySelector('.dv-skeleton') === null);
   expect(el.querySelector('.knowledge-candidate-row')).toBeNull();
   unmount();
 });
@@ -86,6 +86,23 @@ test('a query failure offers a retry', async () => {
   listImpl = () => Promise.reject(new Error('boom'));
   const { el, unmount } = render();
   await waitFor(() => Boolean(el.querySelector('button[aria-label="Retry"]')));
+  unmount();
+});
+
+test('a failed decision says so and leaves the candidate decidable', async () => {
+  listImpl = () => Promise.resolve({
+    candidates: [{ id: 'cand-1', status: 'pending', title: 'Candidate one', score: 0.5 }],
+  });
+  decideImpl = () => Promise.reject(new Error('daemon refused'));
+  const { el, unmount } = render();
+  await waitFor(() => (el.textContent ?? '').includes('Candidate one'));
+  clickRow(el, 'Candidate one');
+  flushSync(() => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Reject')?.click());
+
+  await waitFor(() => Boolean(el.querySelector('[role="alert"]')));
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain('Decision failed');
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain('daemon refused');
+  expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toContain('Reject');
   unmount();
 });
 
@@ -136,6 +153,23 @@ test('accepting a candidate sends {id, decision: "accept"}', async () => {
   unmount();
 });
 
+for (const [label, decision] of [['Reject', 'reject'], ['Supersede', 'supersede']] as const) {
+  test(`${label} sends {id, decision: "${decision}"}`, async () => {
+    listImpl = () => Promise.resolve({
+      candidates: [{ id: 'cand-1', status: 'pending', title: 'Candidate one', score: 0.5 }],
+    });
+    decideImpl = () => Promise.resolve({ candidate: { id: 'cand-1' } });
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('Candidate one'));
+    clickRow(el, 'Candidate one');
+    flushSync(() => [...el.querySelectorAll('button')].find((b) => b.textContent === label)?.click());
+
+    await waitFor(() => decideCalls.length > 0);
+    expect(decideCalls).toEqual([{ id: 'cand-1', decision }]);
+    unmount();
+  });
+}
+
 test('an already-decided candidate (status !== pending) offers no decision buttons', async () => {
   listImpl = () => Promise.resolve({
     candidates: [{ id: 'cand-2', status: 'accepted', title: 'Already decided', score: 0.9 }],
@@ -148,4 +182,16 @@ test('an already-decided candidate (status !== pending) offers no decision butto
   expect(labels).not.toContain('Accept');
   expect(labels).not.toContain('Reject');
   unmount();
+});
+
+test('a candidate with no id is not listed and never yields a decidable id', async () => {
+  expect(parseCandidate({ title: 'No id' }).id).toBe('');
+  listImpl = () => Promise.resolve({ candidates: [{ title: 'Ghost', status: 'proposed' }, { id: 'c-real', title: 'Real one', status: 'proposed' }] });
+  const { el, unmount } = render();
+  try {
+    await waitFor(() => el.textContent?.includes('Real one') === true);
+    expect(el.textContent).not.toContain('Ghost');
+  } finally {
+    unmount();
+  }
 });

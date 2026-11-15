@@ -7,7 +7,6 @@ import type { BenchmarkEntry } from '../../platform/src/platform/providers/model
 export interface ProviderCacheFixture {
   readonly cacheDir: string;
   readonly cleanup: () => void;
-  readonly restoreEnv: () => void;
 }
 
 export interface ProviderCachePaths {
@@ -23,7 +22,6 @@ export function createProviderCacheFixture(prefix = 'provider-cache'): ProviderC
   return {
     cacheDir,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
-    restoreEnv: () => {},
   };
 }
 

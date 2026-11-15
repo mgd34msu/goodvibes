@@ -16,7 +16,15 @@ const child = Bun.spawn([process.execPath, join(project, 'scripts/connected-rout
   cwd: project, env, stdin: 'ignore', stdout: 'inherit', stderr: 'inherit',
 });
 let interrupted = false;
-const stop = () => { interrupted = true; child.kill('SIGTERM'); };
+// A child stuck in a state that defers SIGTERM would hold the lane until the CI job limit
+// and leave its run root and browser behind, so a grace period later it is killed outright.
+const KILL_GRACE_MS = 10_000;
+let killTimer: ReturnType<typeof setTimeout> | undefined;
+const stop = () => {
+  interrupted = true;
+  child.kill('SIGTERM');
+  killTimer ??= setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
+};
 process.once('SIGINT', stop); process.once('SIGTERM', stop);
 const ceiling = setTimeout(stop, 300_000);
 try {
@@ -27,5 +35,5 @@ try {
   if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   process.exitCode = interrupted ? 1 : code;
 } finally {
-  clearTimeout(ceiling); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);
+  clearTimeout(ceiling); clearTimeout(killTimer); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop);
 }

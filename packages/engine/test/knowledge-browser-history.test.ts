@@ -15,6 +15,7 @@ import type { KnowledgeIngestContext } from '../platform/src/platform/knowledge/
 
 const CHROMIUM_EPOCH_OFFSET_MS = 11_644_473_600_000;
 const tempDirs: string[] = [];
+const openStores: KnowledgeStore[] = [];
 
 function chromiumMicros(ms: number): number {
   return Math.floor((ms + CHROMIUM_EPOCH_OFFSET_MS) * 1000);
@@ -78,6 +79,7 @@ function makeIngestContext(store: KnowledgeStore, artifactStore: ArtifactStore):
 }
 
 afterEach(async () => {
+  for (const store of openStores.splice(0)) await store.close();
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -99,7 +101,7 @@ describe('browser history knowledge ingest', () => {
   test('ingests browser-local knowledge once per canonical URL with provenance', async () => {
     const home = await makeTempDir();
     await createChromiumProfile(home);
-    const store = new KnowledgeStore({ dbPath: join(home, 'knowledge.sqlite') });
+    const store = new KnowledgeStore({ dbPath: join(home, 'knowledge.sqlite') }); openStores.push(store);
     const artifactStore = new ArtifactStore({ rootDir: join(home, 'artifacts') });
 
     const result = await ingestBrowserKnowledge(makeIngestContext(store, artifactStore), {

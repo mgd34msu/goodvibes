@@ -6,7 +6,7 @@ import { memoryRecordTemporalStatus } from '@goodvibes-jev/engine/platform/platf
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, setupWizardLiveDurableReceipts } from './setup-wizard-live-receipts.ts';
+import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from './setup-wizard-live-receipts.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
@@ -34,6 +34,8 @@ import {
   buildAgentWorkspaceSkillSnapshot,
   buildAgentWorkspaceSubscriptionSnapshot,
   buildAgentWorkspaceVoiceMediaProvidersSnapshot,
+  buildAgentWorkspaceArtifactResolver,
+  type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
@@ -41,6 +43,46 @@ import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
 // Re-exported so this module's public surface still carries this builder,
 // whose body now lives in agent-workspace-snapshot-builders.ts.
 export { buildAgentWorkspaceEmailConnectStatus } from './agent-workspace-snapshot-builders.ts';
+
+const READ_FAILURE_LABELS: Readonly<Record<string, string>> = {
+  personas: 'personas',
+  notes: 'notes',
+  skills: 'skills',
+  routines: 'routines',
+  memory: 'memory',
+  documents: 'document drafts',
+  artifacts: 'artifacts',
+  'routine-receipts': 'routine schedule receipts',
+  'research-sources': 'research sources',
+  'research-runs': 'research runs',
+  'setup-receipts': 'host setup receipts',
+};
+
+/** Store ids that map onto a setup checklist item, with that item's id. */
+const UNREADABLE_CHECKLIST_ITEMS: readonly (readonly [string, string])[] = [
+  ['personas', 'persona'],
+  ['skills', 'skills'],
+  ['routines', 'routines'],
+  ['memory', 'memory'],
+  ['notes', 'notes'],
+];
+
+/** Turns failed reads into warnings, so an unreadable store is never shown as an empty one. */
+function describeReadFailures(failures: AgentWorkspaceReadFailures): string[] {
+  const warnings: string[] = [];
+  const settingKeys: string[] = [];
+  for (const [id, reason] of failures) {
+    if (id.startsWith('config:')) {
+      settingKeys.push(id.slice('config:'.length));
+      continue;
+    }
+    warnings.push(`Could not read ${READ_FAILURE_LABELS[id] ?? id}: ${reason}. It is shown as empty, which may not be what is stored.`);
+  }
+  if (settingKeys.length > 0) {
+    warnings.push(`Could not read ${settingKeys.length} setting(s) (${settingKeys.join(', ')}); the values shown for them are defaults, not what is stored.`);
+  }
+  return warnings;
+}
 
 function inferActiveRuntimeProfile(homeDirectory: string): string {
   const marker = `${sep}.goodvibes${sep}agent${sep}profile-homes${sep}`;
@@ -122,10 +164,11 @@ export function readLiveAgentMemoryCounters(context: CommandContext): AgentWorks
  * Best-effort variant of readLiveAgentMemoryCounters for the full runtime
  * snapshot builder: never throws, defaults to empty on any read failure.
  */
-export function buildAgentWorkspaceMemorySnapshot(context: CommandContext): AgentWorkspaceLiveMemoryCounters {
+export function buildAgentWorkspaceMemorySnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures): AgentWorkspaceLiveMemoryCounters {
   try {
     return readLiveAgentMemoryCounters(context);
-  } catch {
+  } catch (error) {
+    failures?.set('memory', error instanceof Error ? error.message : String(error));
     return { count: 0, reviewQueueCount: 0, promptActiveCount: 0, temporallyPendingCount: 0, temporallyExpiredCount: 0, items: [] };
   }
 }
@@ -162,10 +205,11 @@ export function readLiveAgentRoutineCounters(context: CommandContext): AgentWork
  * Best-effort variant of readLiveAgentRoutineCounters for the full runtime
  * snapshot builder: never throws, defaults to empty on any read failure.
  */
-export function buildAgentWorkspaceRoutineCounters(context: CommandContext): AgentWorkspaceLiveRoutineCounters {
+export function buildAgentWorkspaceRoutineCounters(context: CommandContext, failures?: AgentWorkspaceReadFailures): AgentWorkspaceLiveRoutineCounters {
   try {
     return readLiveAgentRoutineCounters(context);
-  } catch {
+  } catch (error) {
+    failures?.set('routines', error instanceof Error ? error.message : String(error));
     return { count: 0, enabled: 0, items: [] };
   }
 }
@@ -177,37 +221,46 @@ export function buildAgentWorkspaceRoutineCounters(context: CommandContext): Age
  * above, then maps everything onto the AgentWorkspaceRuntimeSnapshot shape.
  */
 export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): AgentWorkspaceRuntimeSnapshot {
-  const host = readConfigString(context, 'controlPlane.host', '127.0.0.1');
-  const port = readConfigNumber(context, 'controlPlane.port', 3421);
+  const readFailures: AgentWorkspaceReadFailures = new Map();
+  const host = readConfigString(context, 'controlPlane.host', '127.0.0.1', readFailures);
+  const port = readConfigNumber(context, 'controlPlane.port', 3421, readFailures);
   const model = context.session?.runtime?.model ?? 'unknown';
   const provider = context.session?.runtime?.provider ?? 'unknown';
   const currentModel = buildAgentWorkspaceCurrentModelSnapshot(context);
   const sessionMemoryCount = buildAgentWorkspaceSessionMemoryCount(context);
-  const memorySnapshot = buildAgentWorkspaceMemorySnapshot(context);
-  const personaSnapshot = buildAgentWorkspacePersonaSnapshot(context);
-  const noteSnapshot = buildAgentWorkspaceNoteSnapshot(context);
-  const skillSnapshot = buildAgentWorkspaceSkillSnapshot(context);
-  const routineSnapshot = buildAgentWorkspaceRoutineCounters(context);
-  const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context);
-  const researchSourceSnapshot = buildAgentWorkspaceResearchSourceSnapshot(context);
-  const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context);
-  const artifactListSnapshot = buildAgentWorkspaceArtifactListSnapshot(context);
+  const memorySnapshot = buildAgentWorkspaceMemorySnapshot(context, readFailures);
+  const personaSnapshot = buildAgentWorkspacePersonaSnapshot(context, readFailures);
+  const noteSnapshot = buildAgentWorkspaceNoteSnapshot(context, readFailures);
+  const skillSnapshot = buildAgentWorkspaceSkillSnapshot(context, readFailures);
+  const routineSnapshot = buildAgentWorkspaceRoutineCounters(context, readFailures);
+  const routineScheduleReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context, readFailures);
+  const researchSourceSnapshot = buildAgentWorkspaceResearchSourceSnapshot(context, readFailures);
+  const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
+  const artifactListSnapshot = buildAgentWorkspaceArtifactListSnapshot(context, readFailures);
   const setupSmokeHistory = buildSetupSmokeHistory(artifactListSnapshot.items, artifactListSnapshot.available);
+  const liveSetupReceipts = readSetupWizardLiveDurableReceipts(context);
+  if (liveSetupReceipts.unavailable.length > 0) readFailures.set('setup-receipts', `receipts unavailable: ${liveSetupReceipts.unavailable.join(', ')}`);
   const durableSetupReceipts = mergeSetupWizardDurableReceipts(
     buildSetupWizardDurableReceipts(artifactListSnapshot.items),
-    setupWizardLiveDurableReceipts(context),
+    liveSetupReceipts.receipts,
   );
   const recentReviewerHandoffs = buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactListSnapshot.items);
-  const documentDrafts = readDocumentDrafts(context);
+  const documentDrafts = readDocumentDrafts(context, readFailures);
+  const artifactListInfo = {
+    truncated: artifactListSnapshot.truncated,
+    resolveArtifact: buildAgentWorkspaceArtifactResolver(context),
+  };
   const reviewerBadge = reviewerReadinessBadge(
     documentDrafts,
     artifactListSnapshot.items,
     artifactListSnapshot.available,
+    artifactListInfo,
   );
   const reviewPacketTimeline = buildReviewPacketTimeline(
     documentDrafts,
     artifactListSnapshot.items,
     artifactListSnapshot.available,
+    artifactListInfo,
   );
   const reviewPacketDefaults = buildReviewPacketDefaults(
     documentDrafts,
@@ -217,6 +270,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     documentDrafts,
     artifactListSnapshot.available,
     reviewPacketDefaults,
+    artifactListInfo,
   );
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   const profileBaseHome = inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? '');
@@ -236,7 +290,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const warnings: string[] = [];
   if (provider === 'unknown' || model === 'unknown') warnings.push('Provider/model unavailable in this runtime context.');
   if (!context.executeCommand) warnings.push('Command dispatch is unavailable; workspace actions will show guidance only.');
-  const config = buildAgentWorkspaceConfigSettingsSnapshot(context);
+  const config = buildAgentWorkspaceConfigSettingsSnapshot(context, readFailures);
   const runtimeBaseUrl = connectedHostBaseUrl(host, port);
   const companionAccess = buildAgentWorkspaceCompanionAccessSnapshot(context, runtimeBaseUrl);
   const subscriptionSnapshot = buildAgentWorkspaceSubscriptionSnapshot(context);
@@ -259,6 +313,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     connectedHostTokenReadable: Boolean(nativeCredential.token),
     connectedHostTokenPath: nativeCredential.path,
     connectedHostTokenError: nativeCredential.error,
+    agentHomeUnavailable: !homeDirectory,
+    unreadableItemIds: UNREADABLE_CHECKLIST_ITEMS.filter(([storeId]) => readFailures.has(storeId)).map(([, itemId]) => itemId),
     activeSubscriptionCount: subscriptionSnapshot.active,
     pendingSubscriptionCount: subscriptionSnapshot.pending,
     availableSubscriptionProviderCount: subscriptionSnapshot.available,
@@ -292,6 +348,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     setupCompletionMarkerExists(context),
     durableSetupReceipts,
   );
+  warnings.push(...describeReadFailures(readFailures));
   const researchBrowserRunnerContract = buildResearchBrowserRunnerContract(context);
   const researchVisualReportContract = buildResearchVisualReportContract(researchSourceSnapshot);
   const vibe = buildVibeSummary(context);
@@ -325,7 +382,6 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     lineNumbers: config.lineNumbers,
     operationalMessages: config.operationalMessages,
     systemMessages: config.systemMessages,
-    releaseChannel: config.releaseChannel,
     permissionMode: config.permissionMode,
     toolAutoHeal: config.toolAutoHeal,
     toolsDefaultTokenBudget: config.toolsDefaultTokenBudget,

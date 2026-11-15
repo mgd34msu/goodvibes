@@ -12,14 +12,7 @@ The source-level adapter API also exports `WebuiDaemonRefusalRun`, `WebuiStatusT
 
 `webui-specs.ts` exports `daemonRefusalBattery`, `statusToneBattery`, `commandRankBattery`, `mailReplySubjectBattery` and `WEBUI_BATTERY_QUESTIONS`. All are version 1. Questions, item names, criteria and decision sites are fixed. Fixtures are synthetic calibration inputs; offline replay verifies the harness, not real-model calibration or accuracy.
 
-`webui-readers.ts` exports:
-
-- `readStructuredDaemonRefusal(input)` is the caller-side path before the interpretation endpoint; it returns a structural result without probabilities/decision IDs, or `undefined` when semantic reading remains necessary
-- `readDaemonRefusal(port, input, { signal? })` interprets unresolved refusals only; known structural cases return `held(unsupported-input)` without a value, model call or decision-log entry
-- `readStatusTone(port, input, { signal? })`
-- `readCommandRank(port, input, { signal? })`
-
-The asynchronous readers return `Promise<WebuiReadResult<Value>>`; the optional injected `JudgmentPort` supports an honest `unconfigured` result. Only `ready` contains a business value. An unsettled result preserves `confirm` versus `escalate`, including in a compound ranking. Typed per-item evidence is attached by the foundation to the admitted decision log and is not emitted as an executable choice in a non-ready browser result.
+`webui-readers.ts` exports `readStructuredDaemonRefusal(input)`, the caller-side path before the interpretation endpoint: it returns a structural result without probabilities or decision IDs, or `undefined` when semantic reading remains necessary. It also exports the `snapshotWebui*` functions that screen and capture each complete source before any port or log use. The reading itself runs through the adapters in `webui-adapters.ts`, which the service drives; an unsettled result preserves `confirm` versus `escalate`, including in a compound ranking, and typed per-item evidence is attached by the foundation to the admitted decision log.
 
 ## Resolved server projections
 
@@ -35,17 +28,9 @@ The browser-facing resolver must reject unregistered, duplicate, stale, cross-pr
 
 The service must establish source access, source/purpose permission, route clearance **and retention policy before any call, state hash or log**. Private text remains private even if the reader's shape scanner finds no credential/card syntax. There is no `public`, `safe`, consent or route flag here. The reader's complete-input snapshot is an additional guard, not admission authority. The service must also preflight the complete source before its own resolver narrows it.
 
-`webui-answers.ts` exports `validateWebuiAnswers(questions, raw)` for the service's pre-log validation seam, plus `withWebuiAnswerBoundary(nonRecordingPort, options?)`. Correct composition is:
+`webui-answers.ts` exports `validateWebuiAnswers(questions, raw)` and `withWebuiAnswerBoundary(nonRecordingPort, options?)`. The daemon's `composeJudgment` places the boundary per call around its non-recording transport and inside the decision log, and hands the result to the browser route as `JudgmentServices.browserPort` (sharing the transport, lifetime and log of the ordinary port). Its `returnedModels` and `fallbackModels` come from the live `judgment.model`, `judgment.backend` and `judgment.fallbacks` settings, never from browser input. The helper rejects a port with a recorder because an outer wrapper would be too late to stop raw answer/failure retention. Strict outputs reject unknown fields/options/items, nonfinite or out-of-range probabilities, and non-maximal choices. Choice distributions use the foundation's shared approximate-unit admission policy: their total may differ from one by at most 0.01 plus floating-point roundoff. Admitted values are preserved without renormalization. The provider's confidence is preserved separately from the selected option's probability, as the [TypeSafe confidence contract](https://docs.typesafe.ai/confidence) requires. Failure messages, causes and provider request IDs are removed before logging. Valid numeric lineage and its local logical request UUID are retained. Requested and actual model provenance remain distinct: an endpoint's declared response-model aliases map to the model that was requested; absent a declaration only exact identity is accepted.
 
-1. Non-recording, server-configured port with a source-bound route and current-authority checks at every shared retry/fallback dispatch
-2. `withWebuiAnswerBoundary(port, { returnedModels?, fallbackModels? })`
-3. `withDecisionLog(validatedPort, admittedLog)`
-4. Service scoped port enforcing registration/question identity and the aggregate budget
-5. Reader
-
-If the service owns equivalent validation and metadata scrubbing, it may use the exported validator there rather than wrapping a recording port. The helper rejects a port with a recorder because an outer wrapper would be too late to stop raw answer/failure retention. Strict outputs reject unknown fields/options/items, nonfinite or out-of-range probabilities, and non-maximal choices. Choice distributions use the foundation's shared approximate-unit admission policy: their total may differ from one by at most 0.01 plus floating-point roundoff. Admitted values are preserved without renormalization. The provider's confidence is preserved separately from the selected option's probability, as the [TypeSafe confidence contract](https://docs.typesafe.ai/confidence) requires. Failure messages, causes and provider request IDs are removed before logging. Valid numeric lineage and its local logical request UUID are retained. Requested and actual model provenance remain distinct: the server may declare a calibrated alias-to-version mapping in `returnedModels`; absent a declaration only exact identity is accepted. Never populate that mapping from browser/provider input.
-
-The foundation recording wrapper stores an unsalted state hash. This helper does not make a private, low-entropy query hash anonymous and does not replace a retention policy. Hold private input when the configured log cannot meet its policy. Neither this reader nor the answer boundary can undo an already-retained hash or response.
+The foundation recording wrapper stores an unsalted state hash. This helper does not make a private, low-entropy query hash anonymous and does not replace a retention policy. Hold private input when the configured log cannot meet its policy. Neither the readers nor the answer boundary can undo an already-retained hash or response.
 
 ## Budgets and cancellation
 

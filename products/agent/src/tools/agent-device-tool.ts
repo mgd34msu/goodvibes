@@ -62,9 +62,11 @@ function normalizeDeviceAction(value: unknown): AgentDeviceAction | null {
   return null;
 }
 
-function readAction(args: AgentDeviceToolArgs): AgentDeviceAction {
+function readAction(args: AgentDeviceToolArgs): AgentDeviceAction | null {
   const explicit = normalizeDeviceAction(args.action) ?? normalizeDeviceAction(args.mode);
   if (explicit) return explicit;
+  // An action or mode that was given but is not one of ours is not a request to guess: answering with another view would read as the requested one.
+  if (readString(args.action) || readString(args.mode)) return null;
   if (readString(args.mediaProviderId) || readString(args.providerId)) return 'provider';
   if (readString(args.capabilityId) || readString(args.routeId) || readString(args.pairingRouteId)) return 'capability';
   return 'status';
@@ -192,7 +194,7 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
           action: {
             type: 'string',
             enum: ['status', 'capability', 'browser', 'open_browser', 'control', 'voice', 'provider', 'open_tts_provider', 'open_tts_voice'],
-            description: 'Read device/browser/voice posture; confirm visible open actions.',
+            description: 'Read device/browser/voice posture, or open a visible route (needs the owner\'s current recorded effect admission).',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Capability, route, or provider id alias.' },
@@ -202,11 +204,11 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
           mediaProviderId: { type: 'string', description: 'Voice/media provider id.' },
           providerId: { type: 'string', description: 'Voice/media provider id alias.' },
           target: { type: 'string', description: 'Lookup or provider target.' },
-          query: { type: 'string', description: 'Search text.' },
+          query: { type: 'string', description: 'Search text. When omitted, action:"status" searches for "device" and action:"voice" for "voice", so the result is filtered, not complete.' },
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
           limit: { type: 'number', description: 'Maximum rows.' },
-          confirm: { type: 'boolean', description: 'Required true for visible open actions.' },
-          explicitUserRequest: { type: 'string', description: 'User request authorizing visible open actions.' },
+          confirm: { type: 'boolean', description: 'Optional provenance; does not grant authority. Opening is allowed only under the owner\'s recorded effect admission.' },
+          explicitUserRequest: { type: 'string', description: 'Optional request provenance; does not grant authority.' },
         },
         additionalProperties: false,
       },
@@ -217,6 +219,7 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentDeviceToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
+      if (action === null) return error('Unknown device action. Use action (or mode) as one of: status, capability, browser, open_browser, control, voice, provider, open_tts_provider, open_tts_voice.');
 
       if (action === 'status') return forward(statusArgs(args));
       if (action === 'capability') return forward(capabilityArgs(args));

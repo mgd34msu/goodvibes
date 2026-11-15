@@ -9,20 +9,38 @@ import { logger } from '../utils/logger.js';
 import type { AgentOrchestratorRunContext } from './orchestrator-run-context.js';
 import type { AgentSession } from './session.js';
 
+/**
+ * Attribute to the run every process its own tool calls started. The manager
+ * records which sub-agent's call started each process, so another agent's or
+ * the operator's process that appears during the same call is never claimed.
+ */
+export function claimStartedProcesses(
+  processManager: ProcessManager | undefined,
+  agentId: string,
+  runProcessIds: Set<string>,
+): void {
+  for (const p of processManager?.list() ?? []) if (p.startedBy === agentId) runProcessIds.add(p.id);
+}
+
 export interface AgentRunTerminal {
   readonly assertCurrent: () => void;
   readonly settle: () => Promise<void>;
 }
 
-/** Stops every process the run started (anything not running before it began). */
+/**
+ * Stops the background processes this run's own tool calls started. The process
+ * manager is shared with other agents and the operator's session, so a process
+ * is the run's only if one of the run's calls started it
+ * (see `claimStartedProcesses`); anything else is left running.
+ */
 export function cleanupLeakedProcesses(
   processManager: ProcessManager | undefined,
-  preAgentProcessIds: Set<string>,
+  runProcessIds: ReadonlySet<string>,
 ): void {
   const pm = processManager;
   if (!pm) return;
   for (const p of pm.list()) {
-    if (!preAgentProcessIds.has(p.id) && !pm.hasBoundaryOwner(p.id)) {
+    if (runProcessIds.has(p.id) && !pm.hasBoundaryOwner(p.id)) {
       pm.stop(p.id);
     }
   }
@@ -58,7 +76,7 @@ export async function finishCancelledRun(
   context: AgentOrchestratorRunContext,
   record: AgentRecord,
   session: AgentSession | null,
-  preAgentProcessIds: Set<string>,
+  runProcessIds: ReadonlySet<string>,
   turn?: number,
   terminal?: AgentRunTerminal,
 ): Promise<void> {
@@ -70,7 +88,7 @@ export async function finishCancelledRun(
   terminal?.assertCurrent();
   context.emitAgentCancelledEvent(record.id, 'Agent cancelled');
   terminal?.assertCurrent();
-  if (!context.beforeRunSettlement) cleanupLeakedProcesses(context.processManager, preAgentProcessIds);
+  if (!context.beforeRunSettlement) cleanupLeakedProcesses(context.processManager, runProcessIds);
   terminal?.assertCurrent();
   if (!session) return;
   session.appendMessage({

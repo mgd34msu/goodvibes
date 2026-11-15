@@ -1,8 +1,9 @@
-import type { WebSearchProvider, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
+import type { WebSearchProvider, WebSearchProviderCall, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
 import {
   buildDescriptor,
   executeJsonRequest,
   resolveDomain,
+  resolveBaseUrl,
   resultFromRecord,
   withInlineApiKey,
   type SearchProviderContext,
@@ -42,9 +43,9 @@ export function createBraveSearchProvider(context: SearchProviderContext): WebSe
         defaultBaseUrl: BRAVE_DEFAULT_BASE_URL,
       }, { env, serviceRegistry });
     },
-    async search(request: WebSearchRequest): Promise<WebSearchProviderResponse> {
+    async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
-      const baseUrl = (serviceRegistry.get(BRAVE_SERVICE_NAME)?.baseUrl ?? BRAVE_DEFAULT_BASE_URL).replace(/\/+$/, '');
+      const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, BRAVE_SERVICE_NAME, BRAVE_DEFAULT_BASE_URL)!;
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/res/v1/web/search`,
         params: {
@@ -55,7 +56,7 @@ export function createBraveSearchProvider(context: SearchProviderContext): WebSe
         headers: { Accept: 'application/json' },
         service: serviceRegistry.get(BRAVE_SERVICE_NAME) ? BRAVE_SERVICE_NAME : undefined,
         auth: serviceRegistry.get(BRAVE_SERVICE_NAME) ? undefined : withInlineApiKey(env, BRAVE_ENV_KEYS, 'X-Subscription-Token'),
-        fetcher: context.fetcher,
+        fetcher: context.fetcher ?? call?.fetcher,
       });
       const web = payload.web;
       const results = Array.isArray((web as Record<string, unknown> | undefined)?.results)

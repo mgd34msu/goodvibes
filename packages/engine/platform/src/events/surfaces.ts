@@ -55,6 +55,11 @@ export function isChannelSurfaceKind(kind: string | undefined): kind is ChannelS
   return kind !== undefined && (CHANNEL_SURFACE_KINDS as readonly string[]).includes(kind);
 }
 
+/**
+ * Declared, not yet emitted: nothing publishes SURFACE_ENABLED, SURFACE_DISABLED,
+ * SURFACE_ACCOUNT_CONNECTED, SURFACE_ACCOUNT_DEGRADED or SURFACE_CAPABILITY_CHANGED
+ * today, so a subscriber to the `surfaces` domain receives none of them.
+ */
 export type SurfaceEvent =
   | {
       type: 'SURFACE_ENABLED';

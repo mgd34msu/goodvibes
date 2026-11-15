@@ -72,6 +72,12 @@ export interface FleetNotice {
 /** The slice of a fleet event stream the needs-input push source subscribes to. */
 export interface FleetNoticeSource {
   subscribe(listener: (notice: FleetNotice) => void): () => void;
+  /**
+   * The asks still waiting on a human right now. Read once when the needs-input
+   * source is attached, so a block that was already waiting when the daemon
+   * started keeps its escalation instead of going quiet until someone answers.
+   */
+  currentlyBlocked?(): readonly FleetNotice[];
 }
 
 /** Presence check: is an operator surface currently attached to this session? */
@@ -121,6 +127,24 @@ function defaultEscalationScheduler(): EscalationScheduler {
       return () => clearTimeout(handle);
     },
   };
+}
+
+/**
+ * How many already-pushed ids each de-dup set remembers. The oldest is
+ * forgotten first, so a daemon that runs for months holds a bounded set; the
+ * cost is that an ask re-published after this many newer ones may push again.
+ */
+export const MAX_REMEMBERED_PUSH_IDS = 4096;
+
+function remember(seen: Set<string>, id: string): void {
+  // Re-adding moves an id to the newest position.
+  seen.delete(id);
+  seen.add(id);
+  while (seen.size > MAX_REMEMBERED_PUSH_IDS) {
+    const oldest = seen.values().next().value;
+    if (oldest === undefined) break;
+    seen.delete(oldest);
+  }
 }
 
 /** Internal record of a block that is being tracked for escalation. */
@@ -308,7 +332,7 @@ export class PushService {
       if (approval.status !== 'pending') return;
       if (!this.isCategoryEnabled('approval')) return;
       if (this.notifiedApprovals.has(approval.id)) return;
-      this.notifiedApprovals.add(approval.id);
+      remember(this.notifiedApprovals, approval.id);
       const tool = approval.request?.tool ?? 'a tool';
       const summary = approval.request?.analysis?.summary ?? 'A pending action needs your decision.';
       // Fire-and-forget: an approval must never block on a push, and a delivery
@@ -347,7 +371,7 @@ export class PushService {
    * later re-block re-notifies. Returns an unsubscribe handle.
    */
   attachFleetNeedsInputSource(source: FleetNoticeSource, presence?: NeedsInputPresence): () => void {
-    return source.subscribe((notice) => {
+    const unsubscribe = source.subscribe((notice) => {
       if (notice.type === 'FLEET_NODE_UNBLOCKED' || notice.type === 'FLEET_NODE_FINISHED') {
         // A cleared block is the human-response (or terminal) signal: stop any
         // armed escalation and forget the ask so a genuine re-block re-notifies.
@@ -364,26 +388,39 @@ export class PushService {
       // Presence suppression applies only to the IMMEDIATE push. Not marked
       // notified when suppressed, so a detach-then-re-block still notifies.
       if (!attached) {
-        this.notifiedNeedsInput.add(notice.nodeId);
+        remember(this.notifiedNeedsInput, notice.nodeId);
         this.sendNeedsInput(notice, false);
       }
 
       // Track the block for escalation whether or not the immediate push fired:
       // an unattended block that goes unseen still earns its bounded reminders,
       // and an attended one escalates past presence once the grace elapses.
-      const block: TrackedBlock = {
-        nodeId: notice.nodeId,
-        sessionId: notice.sessionId,
-        label: notice.label,
-        reason: notice.reason,
-        blockedAt: this.now(),
-        escalated: false,
-        followUpsSent: 0,
-        cancel: () => {},
-      };
-      this.trackedBlocks.set(notice.nodeId, block);
-      this.armEscalation(block, presence);
+      this.trackBlock(notice, presence);
     });
+    // Escalation timers live in memory only: asks already waiting when this
+    // source is attached (a daemon restart) are tracked again, without a fresh
+    // immediate push, so an unanswered ask keeps earning its reminders.
+    for (const notice of source.currentlyBlocked?.() ?? []) {
+      if (notice.type !== 'FLEET_NODE_BLOCKED_ON_USER') continue;
+      if (this.trackedBlocks.has(notice.nodeId)) continue;
+      this.trackBlock(notice, presence);
+    }
+    return unsubscribe;
+  }
+
+  private trackBlock(notice: FleetNotice, presence?: NeedsInputPresence): void {
+    const block: TrackedBlock = {
+      nodeId: notice.nodeId,
+      sessionId: notice.sessionId,
+      label: notice.label,
+      reason: notice.reason,
+      blockedAt: this.now(),
+      escalated: false,
+      followUpsSent: 0,
+      cancel: () => {},
+    };
+    this.trackedBlocks.set(notice.nodeId, block);
+    this.armEscalation(block, presence);
   }
 
   /** Arm the next escalation/reminder timer for a tracked block. */
@@ -404,7 +441,7 @@ export class PushService {
         true,
         waitedMs,
       );
-      this.notifiedNeedsInput.add(block.nodeId);
+      remember(this.notifiedNeedsInput, block.nodeId);
       if (!block.escalated) {
         block.escalated = true;
       } else {
@@ -470,7 +507,7 @@ export class PushService {
       if (notice.kind !== undefined && !RUN_KINDS.has(notice.kind)) return;
       if (!this.isCategoryEnabled('completion')) return;
       if (this.notifiedCompletions.has(notice.nodeId)) return;
-      this.notifiedCompletions.add(notice.nodeId);
+      remember(this.notifiedCompletions, notice.nodeId);
       const label = notice.label ?? 'A tracked run';
       const outcome = notice.state === 'done'
         ? 'completed'

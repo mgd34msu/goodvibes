@@ -1,6 +1,6 @@
 import { checkEachFixture, decisionHeader, fixtureCheck, type NamedDecision } from '../batteries/decision.ts';
 import { choice, type JudgmentPort, type JudgmentResult, type Questions } from '../port/types.ts';
-import { assertBand, type ChoiceBand, type Outcome } from '../readings/bands.ts';
+import { assertChoiceBand, type ChoiceBand, type Outcome } from '../readings/bands.ts';
 import { readChoice, type ChoiceReading } from '../readings/readings.ts';
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader } from '../batteries/asking.ts';
 
@@ -62,13 +62,15 @@ export function normalizeForMatch(text: string): string {
 
 export function defineFidelityChecker(spec: FidelitySpec): FidelityChecker {
   const header = decisionHeader(spec);
-  assertBand(spec.band);
+  assertChoiceBand(`fidelity ${spec.name}`, spec.band as ChoiceBand, Object.keys(RELATIONS));
   const question = choice('How does `source` relate to `claim`?', RELATIONS);
 
   const checker: FidelityChecker = {
     ...header,
     async check(port, claim, source, quote, options = {}) {
-      if (quote !== undefined && !normalizeForMatch(source).includes(normalizeForMatch(quote))) {
+      // A quote with no text (empty or only whitespace) is contained in every source; it is not evidence.
+      const needle = quote === undefined ? undefined : normalizeForMatch(quote);
+      if (needle !== undefined && (needle === '' || !normalizeForMatch(source).includes(needle))) {
         return { fidelity: 'fabricated', reading: undefined, outcome: 'act', decisionId: undefined, usage: undefined, recordAction: () => {} };
       }
       const result = await askAs(port, spec, 'fidelity', { claim, source }, { relation: question }, options);

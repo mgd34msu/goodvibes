@@ -14,7 +14,8 @@
  *   DECSET/private mode, and any other CSI/ESC sequences).
  * - PRESERVE SGR color/style codes (\x1b[<params>m), colorized output is a
  *   legitimate, non-navigating use of the escape channel.
- * - STRIP bare BEL (\x07) characters.
+ * - STRIP bare BEL (\x07) characters and the 8-bit C1 controls (U+0080-U+009F).
+ * - DROP SGR conceal (parameter 8), which hides text from the reader.
  *
  * Safe SGR pattern: \x1b[ followed by digits/semicolons, ending in 'm'.
  * Everything else that starts with \x1b is dangerous and stripped.
@@ -31,6 +32,28 @@ const OSC_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // Matches other ESC sequences (ESC + single character that is not '[' or ']')
 const ESC_OTHER = /\x1b[^\[\]]/g;
+
+// 8-bit C1 forms of CSI and OSC. Terminals that honour C1 controls treat these as the escape sequences above.
+const C1_CSI_SEQUENCE = /\x9b[\x20-\x3f]*[\x40-\x7e]/g;
+const C1_OSC_SEQUENCE = /\x9d[^\x07\x9c\x1b]*(?:\x07|\x9c|\x1b\\)/g;
+const C1_CONTROL = /[\x80-\x9f]/g;
+
+/** SGR parameter 8 hides text from the reader; colour arguments (38/48/58 ; 5 ; n or ; 2 ; r ; g ; b) may legitimately contain an 8. */
+function sgrConceals(params: string): boolean {
+  const parts = params.split(';');
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const code = part === undefined || part === '' ? 0 : Number(part);
+    if (code === 38 || code === 48 || code === 58) {
+      const mode = parts[i + 1] === undefined || parts[i + 1] === '' ? 0 : Number(parts[i + 1]);
+      i += mode === 5 ? 2 : mode === 2 ? 4 : 0;
+      continue;
+    }
+    // Leading zeros are the same parameter: ESC[08m conceals just like ESC[8m.
+    if (code === 8) return true;
+  }
+  return false;
+}
 
 // Matches standalone BEL
 const BEL = /\x07/g;
@@ -66,7 +89,8 @@ export function stripDangerousAnsi(input: string): string {
 
   // Collect SGR sequences and replace with unique markers
   const sgrTokens: string[] = [];
-  const withPlaceholders = input.replace(SGR_PATTERN, (match) => {
+  const withPlaceholders = input.replace(C1_CSI_SEQUENCE, '').replace(C1_OSC_SEQUENCE, '').replace(C1_CONTROL, '').replace(SGR_PATTERN, (match, params: string) => {
+    if (sgrConceals(params)) return '';
     const idx = sgrTokens.length;
     sgrTokens.push(match);
     return `\x00SGR${idx}\x00`;

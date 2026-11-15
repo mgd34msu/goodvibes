@@ -90,17 +90,7 @@ provenance message instead of source contents. Full history authorization failur
 purges cached rows and reports unavailable. Terminal control characters
 are neutralized, and long source records remain scrollable.
 
-## Validation boundaries
-
-- Synthetic replay fixtures cover duplicate/conflicting IDs, stale source and
-  host bindings, source deletion, cancellation, dirty-source rejection, malformed
-  and oversized records, approval/evidence non-authority, and deep detachment.
-- A real temporary `ProjectPlanningService` + `KnowledgeStore` fixture creates
-  all four artifact kinds, both representations of one work ID, and an automatic
-  planning projection. It compares SQLite bytes before/after preparation/replay,
-  then rewrites a real source and verifies the old review is rejected.
-- Product history tests use actual Agent and TUI models/renderers, including TUI
-  keyboard navigation, narrow-width scrolling, close, and subscription cleanup.
+## Jev import
 
 For Jev input only, host-generated digest metadata and store-envelope epoch
 timestamps use lossless grouped representations so protocol metadata cannot be
@@ -112,15 +102,6 @@ request, paired authority generation and workspace registration generation. A
 fresh recorded `act` is checked again inside the native ledger transaction.
 Non-act decisions do not import anything. A stored or parsed decision never
 authorizes a later action; reconsideration makes a fresh recorded reading.
-
-Focused tests exercise actual Agent harness and TUI keyboard/registry routes,
-synthetic owned HTTP hosts, SQLite journal reopen, lost acknowledgement and exact
-replay, repeated submit, stale request selection, source/revision conflicts,
-revocation during shared retry, closed service, and interrupted transports.
-Compiled command fixtures exercise the real command/platform/journal composition in
-new processes. Independent review, exact-head CI, product tests and compiled
-startup qualification remain required validation boundaries. Synthetic fixture
-evidence does not establish whole-product parity.
 
 ## Journal and protected-read integrity
 
@@ -150,17 +131,9 @@ before displaying protected data. Preserve both legacy `{ sources }` and cursor
 `{ items, hasMore, nextCursor? }` source-list results with validation enabled;
 TypeScript callers narrow the output union even when omitting pagination input.
 
-Compiled protected-read validation uses real command/platform/journal composition and
-readable status/binding/preview lines. Cover empty status, complete paginated
-preview with one preparation, and knowledge-read revocation during the first
-page stopping before preparation. Preserve the fixed synthetic read-fixture
-assertions: two authentication reads for empty status; eight reads for a two-page
-preview with one preparation; four reads and one page before revocation stops
-preparation. These are fixture call boundaries, not a production polling cadence.
-Read-only scenarios must make no import
-mutation, preserve the paired credential bytes, leave a private 0600 journal
-with zero saved commands, exit naturally and record no external-network use.
-Do not infer mutation/runner/live-provider acceptance from those read probes.
+Read-only status and preview make no import mutation, preserve the paired
+credential bytes and leave a private 0600 journal with zero saved commands.
+They do not imply mutation, runner or live-provider acceptance.
 
 The native persistence and legacy guard contract
 retains generic source-write compatibility and durable publication requirements.

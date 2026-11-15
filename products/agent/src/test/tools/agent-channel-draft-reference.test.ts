@@ -153,11 +153,15 @@ test.each(['complete', 'private-field'] as const)('connected send preserves the 
     const result = await f.run();
     expect(result.success).toBe(true);
     const receipt = JSON.parse(result.output!);
-    expect(receipt.status).toBe('sent'); expect(requests).toHaveLength(1); expect(f.delivery).toHaveLength(1);
-    expect(requests[0]?.input).toMatchObject({ id: receipt.draftId, admission: 'autonomous',
+    expect(receipt.status).toBe('sent'); expect(requests).toHaveLength(2); expect(f.delivery).toHaveLength(1);
+    expect(requests[0]?.input).toMatchObject({ id: receipt.draftId, admission: 'autonomous', status: 'queued',
       message: 'Send the completed review to the owned fixture channel.', channel: 'slack:fixture' });
+    // The delivery outcome is offered to the daemon too, so another surface does not see the draft queued for ever.
+    expect(requests[1]?.input).toMatchObject({ id: receipt.draftId, admission: 'autonomous', status: 'sent', channel: 'slack:fixture' });
+    expect(requests[1]?.input.sentResponseId ?? null).toBe(receipt.responseId);
+    expect(getDraft(f.paths, legacyId)?.daemonSyncState).toBe('synced');
     expect(requests[0]?.headers.get(EXPLICIT_USER_REQUEST_HEADER)).toBeNull();
-    expect(requests[0]?.headers.get('authorization')).toBe('Bearer fixture-native-reference-private-token');
+    for (const request of requests) expect(request.headers.get('authorization')).toBe('Bearer fixture-native-reference-private-token');
     expect(JSON.stringify(requests)).not.toContain(legacyId);
     expect(JSON.stringify(readings.requests)).not.toContain(legacyId);
     expect(result.output).not.toContain('fixture-native-reference-private-token');

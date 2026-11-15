@@ -34,4 +34,11 @@ describe('tool result summary', () => {
     expect(summary.kind).toBe('text');
     expect(summary.byteSize).toBe(0);
   });
+
+  test('byteSize counts bytes, not UTF-16 code units, for multi-byte output and errors', async () => {
+    const { toToolResultSummary } = await import('../platform/src/platform/runtime/emitters/index.js');
+    expect(toToolResultSummary({ success: true, output: 'é' }).byteSize).toBe(2);
+    expect(toToolResultSummary({ success: true, output: '日本' }).byteSize).toBe(6);
+    expect(toToolResultSummary({ success: false, error: 'é' }).byteSize).toBe(2);
+  });
 });

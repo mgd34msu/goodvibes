@@ -82,7 +82,8 @@ export function getActiveReasoningEffortOptions(sessionId?: string): readonly st
  * Validate a persisted preference without tying it to a temporary serving model.
  * Known levels remain valid across model switches; request construction resolves
  * the effective value for each model. Explicit session validation still checks
- * that session's actual choices. Published custom levels are also accepted.
+ * that session's actual choices. Without a session the result never depends on
+ * live process state.
  */
 export function isAcceptableReasoningEffortSetting(value: unknown, sessionId?: string): boolean {
   if (typeof value !== 'string' || value === '') return false;
@@ -90,12 +91,8 @@ export function isAcceptableReasoningEffortSetting(value: unknown, sessionId?: s
     const scoped = getActiveReasoningEffortOptions(sessionId);
     return scoped === null ? reasoningEffortRank(value) !== -1 : scoped.includes(value);
   }
-  if (reasoningEffortRank(value) !== -1) return true;
-  if (activeReasoningEffortOptions !== null) {
-    if (activeReasoningEffortOptions.includes(value)) return true;
-  }
-  for (const levels of activeReasoningEffortOptionsBySession.values()) {
-    if (levels.includes(value)) return true;
-  }
-  return false;
+  // Sessionless: the answer must not depend on which sessions happen to be live,
+  // so only the severity ladder is accepted. A model's own extra levels are
+  // validated per session and resolved per request.
+  return reasoningEffortRank(value) !== -1;
 }

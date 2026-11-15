@@ -14,6 +14,7 @@ import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } fr
 import { remoteReadModelSnapshot, captureNativeRemoteReadModelSnapshot, settleNativeRemotePublisherSemantics, currentNativeRemoteReadModelSnapshot, bindNativeRemoteWorkspaceDisplays, projectNativeRemoteWorkspaceDisplayReferences, captureNativeRemoteWorkspacePathSource, projectNativeRemoteWorkspacePathSource, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { projectSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 interface AgentHarnessAgentOrchestrationArgs {
   readonly agentId?: unknown;
@@ -34,6 +35,10 @@ interface RemoteRuntimeSnapshot {
   readonly outcomes: readonly RemoteCaptureOutcomeRecord[];
   readonly workspaces: readonly RemoteWorkspaceEvidenceRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
+  /** Published records left out of outcomes/workspaces; sourceCounts still counts them. */
+  readonly dropped?: { readonly withoutRunner: number; readonly duplicates: number };
+  /** Read-model methods that threw; their records are missing from outcomes and workspaces. */
+  readonly sourceErrors?: readonly string[];
 }
 
 export type AgentOrchestrationResolution =
@@ -85,9 +90,7 @@ function isRemoteArtifactReceipt(record: Record<string, unknown>): boolean {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function lookupFromArgs(args: AgentHarnessAgentOrchestrationArgs): { readonly source: AgentLookupSource; readonly input: string } | null {
@@ -137,11 +140,11 @@ function artifactCreatedAt(artifact: ArtifactDescriptor): number {
   return typeof artifact.createdAt === 'number' && Number.isFinite(artifact.createdAt) ? artifact.createdAt : 0;
 }
 
-function remoteReceiptArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
+export function remoteReceiptArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
   const store = context.platform.artifactStore;
   if (!store?.list) return [];
   try {
-    return store.list(100)
+    return store.list(Number.MAX_SAFE_INTEGER)
       .filter((artifact) => isRemoteArtifactReceipt(artifact as unknown as Record<string, unknown>))
       .filter((artifact) => remoteRunnerId(artifact as unknown as Record<string, unknown>))
       .sort((left, right) => artifactCreatedAt(right) - artifactCreatedAt(left))
@@ -185,9 +188,23 @@ function remoteRuntimeSnapshot(context: CommandContext, source?: OrchestrationRe
     outcomes: readModels.outcomes,
     workspaces: readModels.workspaces,
     sourceCounts: readModels.sourceCounts,
+    ...(readModels.dropped ? { dropped: readModels.dropped } : {}),
+    ...(readModels.sourceErrors ? { sourceErrors: readModels.sourceErrors } : {}),
   };
   if (source?.kind === 'native') orchestrationWorkspaceDisplays.set(result, source.token);
   return result;
+}
+
+/**
+ * sourceCounts counts every published record, but outcomes and workspaces list only the ones that could be attached to a
+ * runner; this says what is missing so the counts are not read as the listed total.
+ */
+export function remoteEvidenceCaveats(snapshot: Pick<RemoteRuntimeSnapshot, 'dropped' | 'sourceErrors'>): Record<string, unknown> {
+  const { dropped, sourceErrors } = snapshot;
+  return {
+    ...(dropped && (dropped.withoutRunner > 0 || dropped.duplicates > 0) ? { dropped, droppedNote: 'sourceCounts counts every published record; the dropped ones are not in liveOutcomes or workspaceEvidence.' } : {}),
+    ...(sourceErrors?.length ? { sourceErrors, sourceErrorNote: 'These remote read-model methods failed; their records are missing from liveOutcomes and workspaceEvidence.' } : {}),
+  };
 }
 
 function agentToolRegistered(toolRegistry: ToolRegistry): boolean {
@@ -326,7 +343,7 @@ function artifactSummary(artifact: Record<string, unknown>, includeParameters: b
 function artifactReviewRoute(artifact: Record<string, unknown>): string {
   const id = readString(artifact.id);
   return isRemoteArtifactReceipt(artifact)
-    ? `agent_artifacts show artifactId:"${id}" includeContent:false`
+    ? `agent_artifacts mode:"show" artifactId:"${id}" includeContent:false`
     : `remote { mode: "review", artifactId: "${id}" }`;
 }
 
@@ -405,6 +422,9 @@ function workPlanItemsByAgentId(items: readonly WorkPlanItem[]): Map<string, rea
   return grouped;
 }
 
+const DISPATCH_RECEIPT_BASIS = 'Counted from free text in work-plan notes; not owner-verified.';
+
+/** Work-plan notes are writable by the model, so a matching line is a claim, never proof that a dispatch happened. */
 function dispatchReceiptLines(item: WorkPlanItem): readonly string[] {
   return readString(item.notes)
     .split('\n')
@@ -421,6 +441,7 @@ function workPlanCloseoutItem(item: WorkPlanItem, includeParameters: boolean): R
     owner: item.owner ?? null,
     source: item.source ?? null,
     dispatchReceiptCount: receipts.length,
+    dispatchReceiptBasis: DISPATCH_RECEIPT_BASIS,
     latestDispatchReceipt: receipts.at(-1) ? previewHarnessText(receipts.at(-1)!, includeParameters ? 260 : 120) : null,
     routes: {
       inspect: `agent_work_plan action:"get" id:"${item.id}"`,
@@ -455,6 +476,7 @@ function closeoutCard(id: string, status: string, items: readonly WorkPlanItem[]
     status: closeoutStatus(status, items, artifacts, outcomes),
     workPlanItemCount: items.length,
     dispatchReceiptCount: items.reduce((count, item) => count + dispatchReceiptLines(item).length, 0),
+    dispatchReceiptBasis: DISPATCH_RECEIPT_BASIS,
     remoteArtifactCount: artifacts.length,
     remoteReceiptCount: artifacts.filter((artifact) => isRemoteArtifactReceipt(artifact)).length,
     remoteOutcomeCount: outcomes.length,
@@ -581,7 +603,7 @@ function managedExecutionPlan(
   return {
     planId: 'visible-managed-execution',
     status,
-    summary: `${records.length} visible agent${records.length === 1 ? '' : 's'}, ${running} active, ${failed} attention, ${artifacts.length} remote artifact${artifacts.length === 1 ? '' : 's'}, ${outcomes.length} live remote outcome${outcomes.length === 1 ? '' : 's'}, ${workspaces.length} workspace evidence record${workspaces.length === 1 ? '' : 's'}, ${dispatchReceiptCount} dispatch receipt${dispatchReceiptCount === 1 ? '' : 's'}.`,
+    summary: `${records.length} visible agent${records.length === 1 ? '' : 's'}, ${running} active, ${failed} attention, ${artifacts.length} remote artifact${artifacts.length === 1 ? '' : 's'}, ${outcomes.length} live remote outcome${outcomes.length === 1 ? '' : 's'}, ${workspaces.length} workspace evidence record${workspaces.length === 1 ? '' : 's'}, ${dispatchReceiptCount} dispatch receipt note${dispatchReceiptCount === 1 ? '' : 's'} (free text in work-plan notes, not owner-verified).`,
     milestones: [
       {
         id: 'intake-and-lane-selection',
@@ -621,7 +643,8 @@ function managedExecutionPlan(
         status: failed > 0 ? 'attention' : running > 0 ? 'active' : records.length > 0 ? 'ready' : 'needs-setup',
         linkedWorkPlanItems: linkedWorkPlanItemCount,
         dispatchReceipts: dispatchReceiptCount,
-        autoAttachedRemoteArtifacts: artifacts.length,
+        dispatchReceiptBasis: DISPATCH_RECEIPT_BASIS,
+            autoAttachedRemoteArtifacts: artifacts.length,
         liveRemoteOutcomes: outcomes.length,
         workspaceEvidence: workspaces.length,
         requiredEvidence: ['changed files or artifact', 'test or verification output', 'agent status', 'workspace isolation evidence when remote runners are used', 'recovery route when writes happened'],
@@ -641,6 +664,7 @@ function managedExecutionPlan(
       liveOutcomes: outcomes.slice(0, includeParameters ? 8 : 3),
       workspaceEvidence: workspaces.slice(0, includeParameters ? 8 : 3),
       sourceCounts,
+      ...remoteEvidenceCaveats(remoteSnapshot),
       policy: 'Remote runner evidence is read-only here; creating pools, assigning runners, importing artifacts, accepting workspace isolation, or spawning agents stays on confirmed first-class routes.',
     },
     modelAccess: {
@@ -1466,7 +1490,7 @@ export async function agentOrchestrationSummary(context: CommandContext, toolReg
       cancel: 'agent { mode: "cancel" }',
       harness: 'agent_harness mode:"agent_orchestration"',
     },
-    policy: 'Read-only orchestration posture. Agent work must be visible, statused, cancellable, and tied to the user request; hidden fanout is blocked.',
+    policy: 'Read-only orchestration posture. Agent work must be visible, statused, cancellable, and tied to the user request; hidden fanout is blocked. includeParameters defaults to false for this list (summaries) and to true for a single agent_orchestration_agent view. total counts every visible agent; returned counts the matching agents shown, so returned below total is not by itself a truncation.' + (selected.matches.length > filtered.length ? ` Showing the first ${filtered.length} of ${selected.matches.length} matching agents (limit).` : ''),
   };
   const protectedResult = await protectOrchestrationOutput(result, { ...options, assertCurrent: assertQueryCurrent }, orchestrationWorkspaceDisplays.get(sources));
   assertQueryCurrent(); return publish(protectedResult);

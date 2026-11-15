@@ -1,7 +1,7 @@
 /**
  * A fake judgment port for contract check tests: answers the unit judge
- * (`goal`, `criterion_<i>`), the quality battery (its six items) and the
- * severity battery from plain probabilities, and records every request.
+ * (`goal`, `criterion_<i>`), the quality battery (its six items), the
+ * severity battery and the gap battery from plain probabilities, and records every request.
  */
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -13,6 +13,8 @@ export interface CheckAnswers {
   readonly goal?: number;
   readonly quality?: Partial<Record<QualityItem, number>>;
   readonly severity?: { readonly choice: 'critical' | 'major' | 'minor'; readonly confidence: number };
+  /** What is missing for a criterion the nudge lists; unset reads as not demonstrated. */
+  readonly gap?: { readonly choice: 'not_attempted' | 'not_demonstrated' | 'partial' | 'contradicted'; readonly confidence: number };
 }
 
 /** Clearly met, clean and settled: past the act threshold on the pass side of every band. */
@@ -26,6 +28,10 @@ export function checkPort(answers: CheckAnswers, onAsk?: (name: string) => void)
     if (name === 'severity') {
       const severity = answers.severity ?? { choice: 'major', confidence: 0.9 };
       return choiceAnswer(question, severity.choice, severity.confidence);
+    }
+    if (name === 'gap') {
+      const gap = answers.gap ?? { choice: 'not_demonstrated', confidence: 0.9 };
+      return choiceAnswer(question, gap.choice, gap.confidence);
     }
     if (name === 'goal') return noulAnswer(answers.goal ?? MET);
     const criterion = /^criterion_(\d+)$/.exec(name);

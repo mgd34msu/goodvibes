@@ -95,10 +95,21 @@ export class ConversationRewindHostError extends Error {
   }
 }
 
+/** How many replaced hosts the broker remembers the reason for. */
+const MAX_REMEMBERED_TAKEOVERS = 64;
+
 /** Lease bounds. A lease is a promise to keep polling, not a reservation. */
 export const CONVERSATION_HOST_MIN_LEASE_MS = 5_000;
 export const CONVERSATION_HOST_MAX_LEASE_MS = 10 * 60_000;
 export const CONVERSATION_HOST_DEFAULT_LEASE_MS = 2 * 60_000;
+
+/**
+ * How long a read-only question handed to a host may go unanswered before the
+ * next poll is given it again, in case the response carrying it was lost. A
+ * `rewind` question is never handed out twice: truncating a conversation is
+ * not something to repeat on a guess.
+ */
+export const CONVERSATION_PREVIEW_REDELIVER_MS = 3_000;
 
 /** How long a host may hold a `take` call open waiting for work. */
 export const CONVERSATION_HOST_MAX_WAIT_MS = 25_000;
@@ -132,6 +143,8 @@ interface PendingRequest {
   readonly settle: (answer: ConversationRewindAnswer) => void;
   timer: ReturnType<typeof setTimeout> | undefined;
   taken: boolean;
+  /** When a host last took this request, for redelivering a lost preview. */
+  takenAt: number;
 }
 
 function clampLease(requestedMs: number | undefined, fallbackMs: number): number {
@@ -150,8 +163,14 @@ function unavailable(reason: string): { available: false; unavailableReason: str
 export class ConversationRewindHostBroker implements RewindConversationPort {
   private readonly hosts = new Map<string, ConversationRewindHost>();
   private readonly pending = new Map<string, PendingRequest>();
+  /** The lease length each host asked for, so polling renews it rather than shortening it. */
+  private readonly hostLeaseMs = new Map<string, number>();
+  /** The principal that registered each host, when the route supplied one. */
+  private readonly hostPrincipals = new Map<string, string>();
   /** Resolvers for `take` calls waiting on work, keyed by host id. */
   private readonly waiters = new Map<string, Array<() => void>>();
+  /** Hosts replaced by another surface, so the replaced one can be told why instead of "unknown". Bounded. */
+  private readonly takenOverHosts = new Map<string, string>();
   private readonly fallback: RewindConversationPort | null;
   private readonly answerTimeoutMs: number;
   private readonly defaultLeaseMs: number;
@@ -184,6 +203,12 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     readonly hostId?: string | undefined;
     readonly label?: string | undefined;
     readonly leaseMs?: number | undefined;
+    /**
+     * Who is registering, as the route authenticated them. A claim on a
+     * session another principal already hosts is refused; a registration that
+     * names no principal is accepted as before.
+     */
+    readonly principalId?: string | undefined;
   }): ConversationRewindHost {
     this.dropExpiredHosts();
     const now = this.now();
@@ -201,10 +226,23 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       }
       const renewed: ConversationRewindHost = { ...existing, leaseExpiresAt: now + leaseMs };
       this.hosts.set(renewed.hostId, renewed);
+      this.hostLeaseMs.set(renewed.hostId, leaseMs);
       return renewed;
     }
 
-    if (existing) this.evictHost(existing.hostId, 'another surface took over hosting this session\'s conversation');
+    const owner = existing ? this.hostPrincipals.get(existing.hostId) : undefined;
+    if (existing && owner !== undefined && owner !== input.principalId) {
+      throw new ConversationRewindHostError(
+        `Session ${JSON.stringify(input.sessionId)} is already hosted by a surface registered by another principal. `
+        + 'Only that principal can replace it; until its lease lapses or it releases the session, rewind is served by that surface.',
+        'not-the-host',
+        'sessionId',
+      );
+    }
+    if (existing) {
+      this.evictHost(existing.hostId, 'another surface took over hosting this session\'s conversation');
+      this.rememberTakeover(existing.hostId, existing.sessionId);
+    }
     if (this.hosts.size >= CONVERSATION_HOST_MAX_HOSTS) {
       throw new ConversationRewindHostError(
         `This daemon is already tracking ${CONVERSATION_HOST_MAX_HOSTS} conversation hosts, the ceiling. `
@@ -222,6 +260,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       leaseExpiresAt: now + leaseMs,
     };
     this.hosts.set(host.hostId, host);
+    this.hostLeaseMs.set(host.hostId, leaseMs);
+    if (input.principalId !== undefined) this.hostPrincipals.set(host.hostId, input.principalId);
     return host;
   }
 
@@ -268,12 +308,21 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       CONVERSATION_HOST_MAX_WAIT_MS,
     );
     if (ready.length === 0 && waitMs > 0) {
-      await this.waitForWork(host.hostId, waitMs);
-      // The lease is renewed again on the way out: the host was here for the
-      // whole wait, and charging it for the time it spent waiting for us would
-      // expire a surface that did exactly what it was asked to do.
-      host = this.renewByPolling(input.hostId);
-      ready = this.collect(host.hostId, limit);
+      const deadline = this.now() + waitMs;
+      for (;;) {
+        const remaining = deadline - this.now();
+        if (remaining <= 0) break;
+        // A preview already taken becomes collectable again with no new event
+        // to wake this call, so the wait ends when it does rather than at waitMs.
+        const redeliverIn = this.untilRedelivery(host.hostId);
+        await this.waitForWork(host.hostId, redeliverIn === undefined ? remaining : Math.min(remaining, redeliverIn));
+        // The lease is renewed again on the way out: the host was here for the
+        // whole wait, and charging it for the time it spent waiting for us would
+        // expire a surface that did exactly what it was asked to do.
+        host = this.renewByPolling(input.hostId);
+        ready = this.collect(host.hostId, limit);
+        if (ready.length > 0) break;
+      }
     }
     return { host, requests: ready };
   }
@@ -290,6 +339,13 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
         `No conversation rewind request with id ${JSON.stringify(input.requestId)} is waiting. `
         + 'It may already have been answered, or it timed out and was reported unavailable.',
         'request-unknown',
+        'requestId',
+      );
+    }
+    if (entry.request.expiresAt <= this.now()) {
+      throw new ConversationRewindHostError(
+        `Request ${JSON.stringify(input.requestId)} stopped waiting for an answer, so the daemon has already reported it unavailable.`,
+        'request-expired',
         'requestId',
       );
     }
@@ -321,6 +377,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       this.settle(requestId, { kind: 'unavailable', reason: 'the daemon stopped serving conversation rewind' });
     }
     this.hosts.clear();
+    this.hostLeaseMs.clear();
+    this.hostPrincipals.clear();
     for (const [hostId, resolvers] of this.waiters) {
       for (const resolve of resolvers) resolve();
       this.waiters.delete(hostId);
@@ -412,7 +470,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
         });
       }, this.answerTimeoutMs);
       timer.unref?.();
-      this.pending.set(requestId, { request, hostId: host.hostId, settle: resolve, timer, taken: false });
+      this.pending.set(requestId, { request, hostId: host.hostId, settle: resolve, timer, taken: false, takenAt: 0 });
       this.wakeWaiters(host.hostId);
     });
   }
@@ -438,13 +496,23 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     this.dropExpiredHosts();
     const host = this.hosts.get(hostId);
     if (!host) {
+      const takenOverSession = this.takenOverHosts.get(hostId);
+      if (takenOverSession !== undefined) {
+        throw new ConversationRewindHostError(
+          `Another surface took over hosting session ${JSON.stringify(takenOverSession)}'s conversation, so hostId ${JSON.stringify(hostId)} no longer serves it. `
+          + 'Stop offering this session; register it again only if this surface should take it back.',
+          'not-the-host',
+          'hostId',
+        );
+      }
       throw new ConversationRewindHostError(
         `hostId ${JSON.stringify(hostId)} is not registered. Its lease may have lapsed; register the session again.`,
         'host-unknown',
         'hostId',
       );
     }
-    const renewed: ConversationRewindHost = { ...host, leaseExpiresAt: this.now() + this.defaultLeaseMs };
+    // The lease the host asked for, not the default: polling must not shorten it.
+    const renewed: ConversationRewindHost = { ...host, leaseExpiresAt: this.now() + (this.hostLeaseMs.get(hostId) ?? this.defaultLeaseMs) };
     this.hosts.set(hostId, renewed);
     return renewed;
   }
@@ -453,13 +521,28 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     const now = this.now();
     const ready: ConversationRewindRequest[] = [];
     for (const entry of this.pending.values()) {
-      if (entry.hostId !== hostId || entry.taken) continue;
+      if (entry.hostId !== hostId) continue;
       if (entry.request.expiresAt <= now) continue;
+      const lost = entry.taken && entry.request.kind === 'preview' && now - entry.takenAt >= CONVERSATION_PREVIEW_REDELIVER_MS;
+      if (entry.taken && !lost) continue;
       entry.taken = true;
+      entry.takenAt = now;
       ready.push(entry.request);
       if (ready.length >= limit) break;
     }
     return ready;
+  }
+
+  /** Milliseconds until the soonest taken, unexpired preview of this host is handed out again; undefined when none is. */
+  private untilRedelivery(hostId: string): number | undefined {
+    const now = this.now();
+    let soonest: number | undefined;
+    for (const entry of this.pending.values()) {
+      if (entry.hostId !== hostId || !entry.taken || entry.request.kind !== 'preview' || entry.request.expiresAt <= now) continue;
+      const due = Math.max(entry.takenAt + CONVERSATION_PREVIEW_REDELIVER_MS - now, 1);
+      if (soonest === undefined || due < soonest) soonest = due;
+    }
+    return soonest;
   }
 
   private waitForWork(hostId: string, waitMs: number): Promise<void> {
@@ -491,9 +574,19 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     for (const resolve of [...resolvers]) resolve();
   }
 
+  private rememberTakeover(hostId: string, sessionId: string): void {
+    this.takenOverHosts.set(hostId, sessionId);
+    if (this.takenOverHosts.size > MAX_REMEMBERED_TAKEOVERS) {
+      const oldest = this.takenOverHosts.keys().next().value;
+      if (oldest !== undefined) this.takenOverHosts.delete(oldest);
+    }
+  }
+
   /** Answer this host's outstanding questions and forget it. */
   private evictHost(hostId: string, reason: string): void {
     this.hosts.delete(hostId);
+    this.hostLeaseMs.delete(hostId);
+    this.hostPrincipals.delete(hostId);
     for (const [requestId, entry] of [...this.pending]) {
       if (entry.hostId !== hostId) continue;
       this.settle(requestId, { kind: 'unavailable', reason });

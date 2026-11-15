@@ -19,6 +19,7 @@ import type { CliCommandRuntime } from './management.ts';
 import {
   VALID_REVIEW_STATES,
   csvOption,
+  exportFilterFromOptions,
   failure,
   filterFromOptions,
   hasFlag,
@@ -227,7 +228,7 @@ async function handleExportWire(runtime: CliCommandRuntime, memorySpine: MemoryA
   const pathArg = options.positionals[0];
   if (!pathArg) return failure(runtime, 'invalid_memory_command', 'Usage: goodvibes-agent memory export <path> [--scope <scope>] [--cls <class>] --yes', 2);
   if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to export Agent memory bundle to ${pathArg} without --yes.`, 2);
-  const filter = filterFromOptions(options, 200);
+  const filter = exportFilterFromOptions(options);
   const path = resolvePath(runtime, pathArg);
   const bundle = await memorySpine.exportBundle(filter);
   writeBundle(path, bundle);

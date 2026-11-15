@@ -44,9 +44,9 @@ import {
   connectSocket,
   makeFakeImapServer,
   serverWrite,
-  serverWriteRaw,
   type FakeServer,
 } from './fake-imap-server.ts';
+import { writeFetchSectionResponse, type FakeSectionEncoding, type FakeUidPosition } from './imap-fetch-framing.ts';
 
 export interface FakeMessage {
   readonly uid: number;
@@ -79,26 +79,6 @@ export type FakeIdleAdvertisement =
   | 'silent-then-none'
   /** Greeting says nothing and CAPABILITY is never answered. */
   | 'silent-unanswered';
-
-/**
- * Where the automatic `UID` data item goes in a FETCH response.
- *
- * `leading` writes `* 3 FETCH (UID 307 BODY[…] {n}`; `trailing` writes
- * `* 3 FETCH (BODY[…] {n}` and closes with ` UID 307)`. RFC 3501 §6.4.8 says
- * the server includes the item, not where, so a client has to read both.
- */
-export type FakeUidPosition = 'leading' | 'trailing';
-
-/**
- * How the header block comes back.
- *
- * `literal` is what servers do and the default. `bare-lines` is the shape this
- * harness used to hard-code, the header block written as ordinary response
- * lines with no `{n}` count, kept only so a test can assert that the client
- * still reads a scripted response of that shape. Nothing on a real socket
- * produces it.
- */
-export type FakeSectionEncoding = 'literal' | 'bare-lines';
 
 export interface FakeMailboxOptions {
   readonly uidValidity?: number;
@@ -422,35 +402,22 @@ export async function makeFakeMailbox(
   /**
    * One `* n FETCH (...)` response, framed the way the options ask for.
    *
-   * The literal count is `Buffer.byteLength`, not `payload.length`: `{n}` is a
-   * byte count, and a fake that counted characters would read correctly only
-   * for pure-ASCII mail and desynchronize the client's reader on anything else
-   *, which is the same arithmetic the client itself has to get right, so
-   * getting it wrong here would hide getting it wrong there.
+   * The framing arithmetic lives in `imap-fetch-framing.ts`.
    */
   const writeFetchResponse = (
     socket: Socket,
     seq: number,
     message: FakeMessage,
   ): void => {
-    const omitUid = (options.unreadableUids ?? []).includes(message.uid);
-    const position: FakeUidPosition = options.uidPosition ?? 'leading';
-    const leading = !omitUid && position === 'leading' ? `UID ${message.uid} ` : '';
-    const trailing = !omitUid && position === 'trailing' ? ` UID ${message.uid}` : '';
-    const block = headerBlock(message);
-
-    if ((options.sectionEncoding ?? 'literal') === 'bare-lines') {
-      serverWrite(socket, `* ${seq} FETCH (${leading}${HEADER_SECTION} `);
-      for (const line of block.split('\r\n')) serverWrite(socket, line);
-      serverWrite(socket, `${trailing})`);
-      return;
-    }
-
-    serverWriteRaw(socket,
-      `* ${seq} FETCH (${leading}${HEADER_SECTION} `
-      + `{${Buffer.byteLength(block, 'utf8')}}\r\n`);
-    serverWriteRaw(socket, block);
-    serverWriteRaw(socket, `${trailing})\r\n`);
+    writeFetchSectionResponse(socket, {
+      seq,
+      uid: message.uid,
+      section: HEADER_SECTION,
+      payload: headerBlock(message),
+      uidPosition: options.uidPosition ?? 'leading',
+      sectionEncoding: options.sectionEncoding ?? 'literal',
+      omitUid: (options.unreadableUids ?? []).includes(message.uid),
+    });
   };
 
   /**

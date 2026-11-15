@@ -4,6 +4,7 @@ import { expect, spyOn, test } from 'bun:test';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import * as ledger from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { expectMatchesCommittedFixture } from '../helpers/webui-fixture-parity.ts';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,10 +39,14 @@ function execution(wire: NativeIntakeExecutionHttpWire) {
   return nativeWorkExecutionSnapshotSchema.parse(parse(wire));
 }
 function exportCapture(name: string, capture: Record<string, unknown>) {
+  const recorded = { source: 'owned-synthetic-provider; real paired DaemonServer intake and native execution graph HTTP', name, ...capture };
   const directory = process.env.GOODVIBES_TEST_NATIVE_EXECUTION_FIXTURE_DIR;
-  if (!directory) return;
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, `${name}.json`), `${JSON.stringify({ source: 'owned-synthetic-provider; real paired DaemonServer intake and native execution graph HTTP', name, ...capture }, null, 2)}\n`);
+  if (directory) {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, `${name}.json`), `${JSON.stringify(recorded, null, 2)}\n`);
+  }
+  // The browser replays the committed files, so a stale one must fail here.
+  expectMatchesCommittedFixture(recorded, new URL(`../../../../webui/e2e/support/fixtures/native-execution/${name}.json`, import.meta.url));
 }
 async function admitted(f: Fixture, name: string) {
   const input = source(name);

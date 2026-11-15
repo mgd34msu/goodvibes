@@ -10,14 +10,18 @@ import { SettingsBlock } from './dialog/parts';
  * cursor, and a lost write response is never automatically retried. */
 export function TelegramCursorRecovery() {
   const active = useRef<AbortController | null>(null);
+  const writing = useRef(false);
   const [preview, setPreview] = useState<TelegramCursorPreview | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => () => active.current?.abort(), []);
   useEffect(() => subscribeClientLifetime(() => {
-    active.current?.abort(); active.current = null;
-    setPreview(null); setConfirmed(false); setPending(false); setMessage('');
+    // An aborted write may already have been applied; say so rather than going silent.
+    const interrupted = writing.current;
+    active.current?.abort(); active.current = null; writing.current = false;
+    setPreview(null); setConfirmed(false); setPending(false);
+    setMessage(interrupted ? 'The connection changed while the cursor was being saved, so whether it was saved is unknown. Review the saved Telegram cursor again before trying again.' : '');
   }), []);
   const inspect = async () => {
     if (active.current) return;
@@ -31,14 +35,14 @@ export function TelegramCursorRecovery() {
   };
   const migrate = async () => {
     if (active.current || !confirmed || preview?.state !== 'unbound') return;
-    const selected = preview, controller = new AbortController(); active.current = controller;
+    const selected = preview, controller = new AbortController(); active.current = controller; writing.current = true;
     setPending(true); setPreview(null); setConfirmed(false); setMessage('');
     try {
       const result = await platformClient.operator.channels.telegramCursor.commit(selected, controller.signal);
       if (!controller.signal.aborted) setMessage(result.message);
     } catch (error) {
       if (!controller.signal.aborted) setMessage(`${formatError(error)} Review the cursor and channel status before trying again.`);
-    } finally { if (active.current === controller) active.current = null; if (!controller.signal.aborted) setPending(false); }
+    } finally { if (active.current === controller) { active.current = null; writing.current = false; } if (!controller.signal.aborted) setPending(false); }
   };
   return <SettingsBlock title="Telegram cursor recovery" description="When polling stops because a previous cursor has no bot identity, verify which bot owns that saved position. Selecting the wrong bot can skip its waiting messages.">
     <Button size="sm" disabled={pending} onClick={() => { void inspect(); }}>{pending ? 'Working…' : 'Review saved Telegram cursor'}</Button>

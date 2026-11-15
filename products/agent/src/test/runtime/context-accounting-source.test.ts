@@ -37,10 +37,10 @@ describe('bindOrchestratorContextAccounting (platform 1.6.1 context_accounting t
     expect(result.success).toBe(true);
     const parsed = JSON.parse((result as { output: string }).output) as ParsedOutput;
     expect(parsed.available).toBe(false);
-    expect(parsed.reason).toBe('No live session context is bound to this tool instance. Context accounting is populated on the interactive session.');
+    expect(parsed.reason).toBe('No live session context is bound to this tool instance (background runs without a session have none). Nothing is wrong with your call; do not retry it. Continue the task.');
   });
 
-  test('bound to a real Orchestrator-backed source: the tool returns real token/injection/compaction data, not the unbound message', async () => {
+  test('bound to an orchestrator-shaped source: the tool returns its token, injection and compaction data, not the unbound message', async () => {
     const holder = new ContextAccountingHolder();
     const runtimeBus = new RuntimeEventBus();
     const runtimeStore = createRuntimeStore();

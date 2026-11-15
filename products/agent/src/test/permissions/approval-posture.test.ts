@@ -30,7 +30,7 @@ test('legacy auto-approve reports the effective YOLO mode instead of the underly
 });
 
 test('config-backed posture reflects live mode changes', () => {
-  const manager = new ConfigManager({ surfaceRoot: 'tui', configDir: makeProjectTempDir('execution-posture') });
+  const manager = new ConfigManager({ surfaceRoot: 'agent', configDir: makeProjectTempDir('execution-posture') });
   manager.set('permissions.mode', 'safe-jev');
   expect(readApprovalPostureFromConfig(manager)).toMatchObject({ mode: 'safe-jev', bypassesPrompts: true, automaticApprovals: false });
   manager.set('permissions.mode', 'yolo');
@@ -40,7 +40,7 @@ test('config-backed posture reflects live mode changes', () => {
 });
 
 test('choosing a safe mode replaces the legacy automatic-approval override', () => {
-  const manager = new ConfigManager({ surfaceRoot: 'tui', configDir: makeProjectTempDir('execution-posture-choice') });
+  const manager = new ConfigManager({ surfaceRoot: 'agent', configDir: makeProjectTempDir('execution-posture-choice') });
   manager.set('behavior.autoApprove', true);
   expect(readApprovalPostureFromConfig(manager).mode).toBe('yolo');
   manager.set('permissions.mode', 'safe-owner');

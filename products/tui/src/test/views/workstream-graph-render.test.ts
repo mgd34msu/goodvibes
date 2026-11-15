@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderWorkstreamGraphLines, renderPoolSummary, type WorkstreamGraphSnapshot } from '../../views/workstream-graph-render.ts';
 
 // ---------------------------------------------------------------------------
-// STEP 6, the task graph renders (fleet.graph.get): nodes/edges/states,
+// The task graph renders (fleet.graph.get): nodes/edges/states,
 // ready / running / blocked-with-"waiting on: X" / at-cap / stalled, legible
 // without opening transcripts. Full-string render at 80x24 and 60 columns, no
 // clipping (every line fits the width).
@@ -30,7 +30,7 @@ function snapshot(nodes: Node[], edges: { from: string; to: string }[], pool: Wo
 
 const noOverflow = (lines: string[], width: number) => lines.every((l) => [...l].length <= width);
 
-describe('renderPoolSummary (STEP 6)', () => {
+describe('renderPoolSummary', () => {
   test('names the at-cap posture with fleet.maxSize', () => {
     expect(renderPoolSummary({ ready: 2, running: 3, atCap: true, capKey: 'fleet.maxSize', maxSize: 3, refusal: undefined } as WorkstreamGraphSnapshot['pool']))
       .toBe('2 ready, 3 running, at cap (fleet.maxSize=3)');
@@ -44,7 +44,7 @@ describe('renderPoolSummary (STEP 6)', () => {
   });
 });
 
-describe('renderWorkstreamGraphLines states (STEP 6)', () => {
+describe('renderWorkstreamGraphLines states', () => {
   for (const width of [80, 60]) {
     test(`ready / running / blocked-waiting-on / stalled all render at ${width} columns without clipping`, () => {
       const nodes = [

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import { saveWizardProgressForHandler } from '../../../input/handler-onboarding.ts';
 import type { InputHandler } from '../../../input/handler.ts';
@@ -38,6 +38,17 @@ describe('wizard progress persistence', () => {
     expect(state.exists).toBe(false);
     expect(state.payload).toBeNull();
     expect(state.parseError).toBeUndefined();
+  });
+
+  test('a progress file from a newer release is kept aside, not overwritten, by a write', () => {
+    const path = getWizardProgressPath(shellPaths);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ version: 2, stepIndex: 7 }));
+
+    writeWizardProgress(shellPaths, { mode: 'new', stepIndex: 1, toggleState: [], radioState: [], textState: [] });
+
+    expect(JSON.parse(readFileSync(`${path}.unrecognized`, 'utf-8'))).toEqual({ version: 2, stepIndex: 7 });
+    expect(readWizardProgress(shellPaths).payload?.stepIndex).toBe(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -302,26 +313,40 @@ describe('wizard progress persistence', () => {
   // Masked field exclusion (contract between caller and writeWizardProgress)
   // ---------------------------------------------------------------------------
 
-  test('writes only non-masked textState entries passed by the caller', () => {
-    // Simulates what saveWizardProgressForHandler does: it strips masked
-    // fields before calling writeWizardProgress. The function itself does
-    // not filter, the contract is at the call site. This test documents
-    // that whatever is passed in is faithfully persisted (no surprise stripping).
+  test('writes the non-secret textState entries the caller passes, faithfully', () => {
     writeWizardProgress(shellPaths, {
       mode: 'new',
       stepIndex: 0,
       toggleState: [],
       radioState: [],
-      textState: [['apiHost', 'localhost']], // masked fields were stripped by caller
+      textState: [['apiHost', 'localhost'], ['cloudflare.tunnel-token-ref', 'goodvibes://secrets/goodvibes/TUNNEL']],
       clock: () => 1,
     });
 
     const { payload } = readWizardProgress(shellPaths);
-    const text = new Map(payload?.textState ?? []);
-    expect(text.has('apiHost')).toBe(true);
-    // No masked key was passed in, so none should appear.
-    expect(text.has('password')).toBe(false);
-    expect(text.has('apiKey')).toBe(false);
+    expect(payload?.textState).toEqual([['apiHost', 'localhost'], ['cloudflare.tunnel-token-ref', 'goodvibes://secrets/goodvibes/TUNNEL']]);
+  });
+
+  test('a secret-named field is never persisted even when the caller did not declare it masked', () => {
+    writeWizardProgress(shellPaths, {
+      mode: 'new',
+      stepIndex: 0,
+      toggleState: [],
+      radioState: [],
+      textState: [
+        ['apiHost', 'localhost'],
+        ['cloudflare.operational-token', 'cf-secret-value'],
+        ['accounts.admin-password', 'hunter2hunter2'],
+        ['external-services.webhook.secret', 'whsec_value'],
+      ],
+      clock: () => 1,
+    });
+
+    const raw = readFileSync(getWizardProgressPath(shellPaths), 'utf-8');
+    expect(raw).not.toContain('cf-secret-value');
+    expect(raw).not.toContain('hunter2hunter2');
+    expect(raw).not.toContain('whsec_value');
+    expect(readWizardProgress(shellPaths).payload?.textState).toEqual([['apiHost', 'localhost']]);
   });
 
   // ---------------------------------------------------------------------------

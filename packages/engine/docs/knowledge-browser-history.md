@@ -95,6 +95,10 @@ To target an entire family, list its kinds explicitly, for example the whole
 Chromium family as
 `['chrome', 'chromium', 'brave', 'edge', 'vivaldi', 'arc', 'opera']`.
 
+The `limit` applies to each source kind separately, so a profile with more
+visits than the limit still imports its bookmarks; a call that asks for both
+kinds can therefore read up to twice the limit.
+
 Equivalent service API:
 
 ```ts

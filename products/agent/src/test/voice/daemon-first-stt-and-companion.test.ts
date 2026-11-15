@@ -11,7 +11,11 @@
  *    success, and opens no microphone at all.
  */
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
+import { connectedHostOperatorTokenPath } from '../../runtime/connected-host-auth.ts';
 
 import { createVoiceSttGateway, describeTranscriptionFailure } from '../../core/voice-stt-gateway.ts';
 import { readVoiceDiagnostics } from '@goodvibes-jev/engine/platform/platform/voice';
@@ -162,5 +166,40 @@ describe('captured audio goes to the connected host first', () => {
     }
     expect(described).toContain('the host refused');
     expect(described).toContain('local STT is not configured');
+  });
+});
+
+describe('a connected host that times out is not asked again in process', () => {
+  test('the real verb caller abandons the call and the audio is not transcribed a second time', async () => {
+    const home = makeProjectTempDir('gv-stt-host-timeout');
+    try {
+      const tokenPath = connectedHostOperatorTokenPath(home);
+      mkdirSync(dirname(tokenPath), { recursive: true });
+      writeFileSync(tokenPath, JSON.stringify({ token: 'operator-token-value' }));
+      const controller = new AbortController();
+      const fetchImpl = ((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        controller.abort();
+      })) as unknown as typeof fetch;
+      const verbs = createAgentDaemonVerbCaller({
+        configManager: { get: (key: string) => ({ 'controlPlane.host': '127.0.0.1', 'controlPlane.port': 3421 } as Record<string, unknown>)[key] } as never,
+        homeDirectory: home,
+        fetchImpl,
+        invokeSignal: () => controller.signal,
+      });
+      let inProcessCalls = 0;
+      const resolution = createVoiceSttGateway({
+        voiceService: { transcribe: async () => { inProcessCalls += 1; return { text: 'again' }; } } as never,
+        voiceProviders: registryWithStt() as never,
+        daemonVerbs: verbs,
+      });
+      expect(resolution.available).toBe(true);
+      if (!resolution.available) return;
+      const error = await resolution.gateway.transcribe(audio).catch((caught: unknown) => caught);
+      expect(inProcessCalls).toBe(0);
+      expect(describeTranscriptionFailure(error)).toContain('may already have transcribed');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

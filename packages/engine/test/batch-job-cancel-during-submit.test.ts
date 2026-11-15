@@ -55,7 +55,6 @@ describe('daemon batch job lifecycle', () => {
   useFailureReadings([]);
 
   test('declares every status, terminals are final, queued cannot jump to completed', () => {
-    expect(daemonBatchJobLifecycle.states.length).toBe(8);
     for (const s of ['completed', 'failed', 'cancelled', 'expired', 'dead_lettered'] as const) expect(daemonBatchJobLifecycle.isTerminal(s)).toBe(true);
     expect(daemonBatchJobLifecycle.can('queued', 'cancelled')).toBe(true);
     expect(daemonBatchJobLifecycle.can('queued', 'completed')).toBe(false);

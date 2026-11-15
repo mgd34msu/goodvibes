@@ -106,6 +106,21 @@ describe('AnthropicProvider.refreshModels', () => {
       },
     );
   });
+
+  test('an empty live list keeps the dated-static list and reports the reason', async () => {
+    await withTempDir(async (dir) => {
+      await withMockedFetch(
+        () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+        async () => {
+          const provider = new AnthropicProvider('sk-test-key', undefined, join(dir, 'anthropic.json'));
+          const result = await provider.refreshModels();
+          expect(result.source).toBe('dated-static');
+          expect(result.error).toContain('empty');
+          expect(provider.models).toEqual([...ANTHROPIC_DATED_STATIC_MODELS]);
+        },
+      );
+    });
+  });
 });
 
 describe('OpenAIProvider.refreshModels', () => {
@@ -145,6 +160,21 @@ describe('OpenAIProvider.refreshModels', () => {
       );
     });
   });
+
+  test('an empty live list keeps the dated-static list and reports the reason', async () => {
+    await withTempDir(async (dir) => {
+      await withMockedFetch(
+        () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+        async () => {
+          const provider = new OpenAIProvider('sk-test-key', undefined, join(dir, 'openai.json'));
+          const result = await provider.refreshModels();
+          expect(result.source).toBe('dated-static');
+          expect(result.error).toContain('empty');
+          expect(provider.models).toEqual([...OPENAI_DATED_STATIC_MODELS]);
+        },
+      );
+    });
+  });
 });
 
 describe('GeminiProvider.refreshModels', () => {
@@ -173,6 +203,21 @@ describe('GeminiProvider.refreshModels', () => {
           const result = await provider.refreshModels();
           expect(result.source).toBe('live');
           expect(provider.models).toEqual(['gemini-3-pro']);
+        },
+      );
+    });
+  });
+
+  test('an empty live list keeps the dated-static list and reports the reason', async () => {
+    await withTempDir(async (dir) => {
+      await withMockedFetch(
+        () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+        async () => {
+          const provider = new GeminiProvider('test-key', undefined, join(dir, 'gemini.json'));
+          const result = await provider.refreshModels();
+          expect(result.source).toBe('dated-static');
+          expect(result.error).toContain('empty');
+          expect(provider.models).toEqual([...GEMINI_DATED_STATIC_MODELS]);
         },
       );
     });

@@ -1,5 +1,6 @@
 /** Reconstructed from the previously qualified 23-case suite; actual manager, synthetic peers. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.ts';
 import * as crypto from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -115,7 +116,7 @@ describe('host-owned distributed work admission', () => {
   test('cancellation while the peer is pending wakes invoke and refuses a late completion', async () => {
     const f = await fixture(); const owner = authority();
     const request = f.manager.invokePeer({ peerId: f.peerId, command: 'device.screen.capture', admission: owner.admission, waitMs: 5_000 }).catch(() => null);
-    while (f.manager.listWork().length === 0) await Bun.sleep(5);
+    await waitFor(() => f.manager.listWork().length > 0);
     const [work] = await f.manager.claimWork(f.auth); expect(work).toBeDefined(); owner.lifetime.abort();
     const result = await request; if (result) expect(result.work.status).toBe('cancelled');
     const late = await f.manager.completeWork(f.auth, work!.id, { result: { secretCapture: 'late' } });

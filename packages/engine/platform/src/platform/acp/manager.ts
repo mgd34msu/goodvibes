@@ -37,7 +37,7 @@ export function getDefaultAcpAgentCommand(): string[] {
  *
  * @example
  * ```ts
- * const mgr = new AcpManager({ requestPermission });
+ * const mgr = new AcpManager({ permissionHost });
  * const id = await mgr.spawn({ description: 'Fix the bug', context: '...', tools: ['read'] });
  * const results = await mgr.waitAll();
  * ```
@@ -53,6 +53,10 @@ export class AcpManager {
 
   constructor(options: {
     readonly permissionHost?: ExternalPermissionHost;
+    /**
+     * @deprecated Ignored. A subagent's permission asks are decided only through
+     * `permissionHost`; with none, every ask is cancelled.
+     */
     readonly requestPermission?: PermissionRequestHandler | undefined;
     readonly runtimeBus?: RuntimeEventBus | null | undefined;
     readonly hookDispatcher?: Pick<HookDispatcher, 'fire'> | null | undefined;

@@ -315,7 +315,10 @@ export function buildApprovalNotification(facts: ApprovalNotificationFacts, opti
     const name = trimAtWordBoundary(notificationOptionalText(facts.turnName), NOTIFICATION_TEXT_LIMITS.desktopTitle - 'Approval needed: '.length);
     const title = name ? `Approval needed: ${name}` : 'GoodVibes: approval needed';
     const target = trimAtWordBoundary(notificationOptionalText(facts.target), 160);
-    const body = target ? `${rawTool} is waiting for approval: ${target}` : metadataBody;
+    // A plugin or MCP tool name is content a server chose and may carry escape or newline characters;
+    // none of them may reach a desktop popup, and the whole body is bounded like every other one.
+    const named = target ? `${rawTool.replace(/\p{Cc}+/gu, ' ')} is waiting for approval: ${target.replace(/\p{Cc}+/gu, ' ')}` : metadataBody;
+    const body = trimAtWordBoundary(named, NOTIFICATION_TEXT_LIMITS.desktopBody);
     return { title, body };
   } catch {
     throw new TypeError('Invalid notification facts');

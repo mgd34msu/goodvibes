@@ -12,6 +12,7 @@ import { KillRing } from '../../input/kill-ring.ts';
 import { handlePromptTextToken, type TextRouteState } from '../../input/handler-feed-routes.ts';
 import { handlePromptKeyToken, type KeyRouteState } from '../../input/handler-feed-routes.ts';
 import { handleGlobalShortcutToken, type GlobalShortcutRouteState } from '../../input/handler-shortcuts.ts';
+import { saveUndoState, undoPromptState, type UndoState } from '../../input/handler-prompt-buffer.ts';
 
 function makeKillRing(): KillRing {
   return new KillRing();
@@ -239,6 +240,68 @@ describe('yank-pop state isolation', () => {
     expect(ring.lastActionWasYank).toBe(true);
     const rotated = ring.yankPop();
     expect(rotated).toBe('old');
+    expect(ring.lastActionWasYank).toBe(true);
+  });
+});
+
+/** A shortcut state wired to a real undo stack, with keys mapped straight to actions. */
+function undoableShortcutState(ring: KillRing, actions: Record<string, string>, prompt: string, cursorPos: number): GlobalShortcutRouteState {
+  const undoStack: UndoState[] = [];
+  const redoStack: UndoState[] = [];
+  const state = makeShortcutState(ring, {
+    prompt,
+    cursorPos,
+    keybindingsManager: {
+      matches: () => false,
+      lookup: (token: { logicalName?: string; alt?: boolean }) => actions[`${token.alt ? 'alt+' : ''}${token.logicalName}`] ?? null,
+    } as unknown as GlobalShortcutRouteState['keybindingsManager'],
+  });
+  state.saveUndoState = () => saveUndoState(undoStack, redoStack, state.prompt, state.cursorPos, 100);
+  state.handleUndo = () => undoPromptState(undoStack, redoStack, state.prompt, state.cursorPos) ?? undefined;
+  return state;
+}
+
+const CTRL_U = { type: 'key' as const, name: '\x15', logicalName: 'u', ctrl: true, shift: false, meta: false };
+const CTRL_Y = { type: 'key' as const, name: '\x19', logicalName: 'y', ctrl: true, shift: false, meta: false };
+
+describe('kill and yank through the shortcut handler', () => {
+  const actions = { u: 'kill-to-start', y: 'yank', 'alt+y': 'yank-pop' };
+
+  test('a kill saves an undo snapshot first, so undo restores the killed text', () => {
+    const ring = makeKillRing();
+    const state = undoableShortcutState(ring, actions, 'hello world', 5);
+
+    expect(handleGlobalShortcutToken(state, CTRL_U, 24)).toBe(true);
+    expect(state.prompt).toBe(' world');
+    expect(ring.yank()).toBe('hello');
+
+    const edit = state.handleUndo();
+    expect(edit).toEqual({ prompt: 'hello world', cursorPos: 5 });
+  });
+
+  test('a yank saves an undo snapshot first, so undo removes the yanked text', () => {
+    const ring = makeKillRing();
+    ring.push('XY');
+    const state = undoableShortcutState(ring, actions, 'abc', 3);
+
+    expect(handleGlobalShortcutToken(state, CTRL_Y, 24)).toBe(true);
+    expect(state.prompt).toBe('abcXY');
+    expect(state.cursorPos).toBe(5);
+
+    expect(state.handleUndo()).toEqual({ prompt: 'abc', cursorPos: 3 });
+  });
+
+  test('Alt+Y right after a yank swaps the yanked text for the next ring entry', () => {
+    const ring = makeKillRing();
+    ring.push('old');
+    ring.push('new');
+    const state = undoableShortcutState(ring, actions, 'abc', 3);
+
+    expect(handleGlobalShortcutToken(state, CTRL_Y, 24)).toBe(true);
+    expect(state.prompt).toBe('abcnew');
+    expect(handleGlobalShortcutToken(state, ALT_Y, 24)).toBe(true);
+    expect(state.prompt).toBe('abcold');
+    expect(state.cursorPos).toBe(6);
     expect(ring.lastActionWasYank).toBe(true);
   });
 });

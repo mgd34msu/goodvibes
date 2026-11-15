@@ -7,10 +7,12 @@ confirmation or release behavior.
 
 ## Requirements and installation
 
-Use the [suite installer](../../../docs/installation.md) from `goodvibes-jev`.
-It builds the private Agent workspace with the daemon, TUI and WebUI on supported
-Linux hosts. Source development requires Bun **1.3.14** and Node **22 or later**.
-Upstream npm installation commands do not install this workspace.
+Install with the [release installer](../../../docs/installation.md)
+(`curl -fsSL https://goodvibes.sh/install.sh | sh`, Linux or macOS), or build from
+a `goodvibes-jev` checkout with `scripts/install-from-checkout.sh` (Linux x64/arm64
+with glibc). Either installs Agent with the daemon, TUI and WebUI. Source
+development requires Bun **1.3.14** and Node **22 or later**. Upstream npm
+installation commands do not install this workspace.
 
 ```sh
 goodvibes-agent --help
@@ -20,11 +22,11 @@ goodvibes-agent
 ```
 
 Commands are installed in `~/.local/bin`; add that directory to `PATH` if
-needed. A fresh Agent home opens setup. After setup is applied, the TUI opens
-directly into the Agent workspace.
+needed. A fresh Agent home opens setup. After setup is applied, a relaunch opens
+a fresh conversation, with a notice about your last session when one exists so you can choose to resume it.
 
 Agent needs a connected daemon, accepted credentials and the scopes required
-by each route. The suite installer pairs the TUI, while Agent's native
+by each route. The checkout installer pairs the TUI (the release installer does not), while Agent's native
 conversation and work routes require their own [native readiness](setup-explicit-pairing.md#native-intake-setup-readiness)
 and [explicit pairing](setup-explicit-pairing.md). An onboarding marker does not
 grant authority. Configure the conversation provider separately from Jev.
@@ -173,7 +175,7 @@ Common model routes:
 | Workspace actions | `workspace action:"status\|actions\|action\|run"`; lower-level workspace harness modes remain available for compatibility/detail |
 | Slash commands | `workspace action:"commands\|command\|run_command"`; lower-level command harness modes remain available for compatibility/detail |
 | Settings | `settings action:"list\|get\|set\|reset\|import"`; lower-level `agent_harness mode:"settings"`, `mode:"get_setting"`, `mode:"set_setting"`, `mode:"reset_setting"` remain available for compatibility/detail |
-| GoodVibes settings import | `settings action:"import"` previews by default; apply with `confirm:true explicitUserRequest:"..."`; `import_goodvibes_settings action:"preview\|apply"` remains available |
+| GoodVibes settings import | `settings action:"preview_import"` previews; `settings action:"import"` applies under a current recorded admission; `import_goodvibes_settings action:"preview\|apply"` remains available |
 | Visible UI and devices | `workspace action:"surfaces\|surface\|open"` for visible navigation; `computer action:"status\|plan\|control\|browser\|setup\|mcp\|open_browser"` for browser/PWA readiness, certified browser-native category routes and first-run receipts, browser/screenshot/desktop-control planning, and computer-use UX; `device action:"status\|capability\|voice\|provider\|open_tts_provider\|open_tts_voice"` for device/voice UX |
 | Keybindings | `workspace action:"shortcuts\|keybindings\|keybinding\|run_keybinding\|set_keybinding\|reset_keybinding"` |
 | Tool contracts | `agent_harness mode:"tools"`, `mode:"tool"` |
@@ -196,7 +198,7 @@ Common model routes:
 
 All effects require explicit user request and confirmation. Ambiguous lookup is refused with candidates.
 
-Registered tool definitions are intentionally terse. The default model catalog keeps top-level descriptions short, removes nested parameter descriptions, and includes direct harness inspection routes; use `agent_harness mode:"tools"` with `includeParameters:true`, `mode:"tool"`, or the owning harness mode when detailed contracts are needed.
+Registered tool definitions are tiered: the most-used tools (read, find, edit, write, exec, fetch, agent, task, state) keep their parameter descriptions, and the rest are terse, with their full contracts one lookup away. Use `agent_harness mode:"tools"` with `includeParameters:true`, `mode:"tool"`, or the owning harness mode when detailed contracts are needed.
 
 ## Isolated Agent profiles
 
@@ -217,7 +219,7 @@ goodvibes-agent profiles templates export research ./research-starter.json --inc
 goodvibes-agent profiles templates import ./research-starter.json --yes
 ```
 
-Named profiles isolate Agent-local config, sessions, VIBE.md, memory, notes, personas, skills, routines, and setup state. Starter export/from-discovered flows can include the current safe VIBE.md with `--include-vibe`; blocked VIBE.md files must be repaired first. Shared GoodVibes settings import can reuse existing provider, UI, permission, subscription, surface, tool, and daemon endpoint settings from goodvibes-tui and other published GoodVibes platform stores. The direct `settings action:"import"` route, `import_goodvibes_settings` compatibility route, and workspace action all preview changed counts first, show source-package ownership metadata, redact secret values, and require confirmation before applying Agent-owned settings or provider subscriptions without mutating the source package stores.
+Named profiles isolate Agent-local config, sessions, VIBE.md, memory, notes, personas, skills, routines, and setup state. Starter export/from-discovered flows can include the current safe VIBE.md with `--include-vibe`; blocked VIBE.md files must be repaired first. Shared GoodVibes settings import can reuse existing provider, UI, permission, subscription, surface, tool, and daemon endpoint settings from goodvibes-tui and other published GoodVibes platform stores. `settings action:"preview_import"` shows what would change without applying it, and `settings action:"import"` applies it. The `import_goodvibes_settings` compatibility route and workspace action also preview changed counts first, show source-package ownership metadata, redact secret values, and require confirmation before applying Agent-owned settings or provider subscriptions without mutating the source package stores.
 
 ## Local behavior
 
@@ -246,7 +248,7 @@ Use the workspace first:
 
 - Memory & Skills -> Create memory, Create note, or Capture learned behavior.
 - Memory & Skills -> Prompt plan to see which reviewed memories and setup-ready behaviors can guide the assistant now, what is suppressed, and which scored review/proposal/consolidation routes should run before context expands.
-- Memory & Skills -> Learning curator to rank stale, low-confidence, missing-setup, VIBE.md personality health, duplicate-consolidation candidates with visible diffs and rollback/recreate routes, expose an ordered duplicate-consolidation batch review plan, apply confirmed merge/stale/delete/rollback/recreate phases through `agent_learning_consolidation`, surface reviewed-note memory/behavior proposals, completed-work memory/behavior proposals, completed-research memory/behavior proposals, saved-session memory/behavior proposals, and review-needed local behavior records before they silently guide the assistant.
+- Memory & Skills -> Learning curator to rank stale, low-confidence, missing-setup, VIBE.md personality health, duplicate-consolidation candidates with visible diffs and rollback/recreate routes, expose an ordered duplicate-consolidation batch review plan, apply confirmed stale/delete/rollback/recreate phases through `agent_learning_consolidation`, surface reviewed-note memory/behavior proposals, completed-work memory/behavior proposals, completed-research memory/behavior proposals, saved-session memory/behavior proposals, and review-needed local behavior records before they silently guide the assistant.
 - Local Context -> Prompt context, Inspect VIBE.md, Inspect project context, or Inspect one context file before relying on persistent personality or project instructions.
 - Notes -> Create notes for source triage, temporary decisions, and operator handoff.
 - Personas -> Inspect, create, show, or import VIBE.md; create, inspect, activate, review, stale, or delete personas.

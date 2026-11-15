@@ -12,7 +12,7 @@
  * intentional sanitization as the authoritative defence.
  */
 import { describe, expect, test } from 'bun:test';
-import { stripDangerousAnsi } from '../../renderer/ansi-sanitize.ts';
+import { stripDangerousAnsi } from '@goodvibes-jev/engine/terminal-shell/ansi-sanitize';
 import { logConversationToolResult } from '../../core/conversation-rendering.ts';
 
 /** One bead row for a finished call, drawn the way the work tree draws it. */

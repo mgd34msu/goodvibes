@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { chmodSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { LiveVerificationReport } from '../../verification/live-verifier.ts';
 import {
@@ -297,6 +297,34 @@ describe('live verification report', () => {
       expect(knowledgeCheck?.status).toBe('warn');
       expect(report.ok).toBe(true);
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the connected-host port from the Agent settings file', async () => {
+    const root = makeProjectTempDir('goodvibes-live-verifier');
+    const envKeys = ['GOODVIBES_CONNECTED_HOST_URL', 'GOODVIBES_AGENT_RUNTIME_URL', 'GOODVIBES_DAEMON_URL'];
+    const saved = envKeys.map((key) => [key, process.env[key]] as const);
+    for (const key of envKeys) delete process.env[key];
+    try {
+      const homeDir = join(root, 'home');
+      mkdirSync(join(homeDir, 'agent'), { recursive: true });
+      writeFileSync(join(homeDir, 'agent', 'settings.json'), JSON.stringify({ controlPlane: { port: 4555 } }));
+      const binaryPath = writeFakeAgentBinary(root, {
+        compatOutput: '{"compatible":true}',
+        compatExitCode: 0,
+        knowledgeOutput: '{"status":"unavailable"}',
+        knowledgeExitCode: 1,
+      });
+
+      const report = await buildLiveVerificationReport({ homeDir, binaryPath, projectRoot });
+
+      expect(report.connectedHostBaseUrl).toBe('http://127.0.0.1:4555');
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       rmSync(root, { recursive: true, force: true });
     }
   });

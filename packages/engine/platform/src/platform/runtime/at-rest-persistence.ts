@@ -88,9 +88,12 @@ export const AT_REST_CONFIG_KEYS = {
  */
 export function resolveAtRestPolicy(get?: (key: string) => unknown): AtRestPolicy {
   if (!get) return DEFAULT_AT_REST_POLICY;
-  const redactRaw = get(AT_REST_CONFIG_KEYS.redactEnabled);
-  const ageDaysRaw = get(AT_REST_CONFIG_KEYS.maxAgeDays);
-  const totalMbRaw = get(AT_REST_CONFIG_KEYS.maxTotalMb);
+  const read = (key: string): unknown => {
+    try { return get(key); } catch { return undefined; }
+  };
+  const redactRaw = read(AT_REST_CONFIG_KEYS.redactEnabled);
+  const ageDaysRaw = read(AT_REST_CONFIG_KEYS.maxAgeDays);
+  const totalMbRaw = read(AT_REST_CONFIG_KEYS.maxTotalMb);
   const redact = typeof redactRaw === 'boolean' ? redactRaw : DEFAULT_AT_REST_POLICY.redact;
   const maxAgeMs = typeof ageDaysRaw === 'number' && ageDaysRaw > 0
     ? ageDaysRaw * DAY_MS
@@ -350,6 +353,8 @@ export function clearAtRestCredentialReadings(): void {
 export class AtRestLineWriter {
   readonly #site: string;
   #tail: Promise<void> | null = null;
+  /** Queued lines whose append threw since the last flush; flush() reports them. */
+  #failedAppends = 0;
 
   constructor(site: string) { this.#site = site; }
 
@@ -375,14 +380,19 @@ export class AtRestLineWriter {
       })
       .then(() => append(projectAtRestLine(line, authority, admitted)))
       .catch(() => {
+        this.#failedAppends += 1;
         try { logger.warn('[at-rest] writing a queued line failed'); } catch { /* Diagnostics are best effort. */ }
       });
     this.#tail = next;
     void next.then(() => { if (this.#tail === next) this.#tail = null; });
   }
 
+  /** Resolves once every queued line is written; rejects when a queued append failed, as an immediate append would have. */
   async flush(): Promise<void> {
     while (this.#tail !== null) await this.#tail;
+    const failed = this.#failedAppends;
+    this.#failedAppends = 0;
+    if (failed > 0) throw new Error(`${failed} queued line(s) could not be written; they are not on disk.`);
   }
 }
 

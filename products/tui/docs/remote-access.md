@@ -53,7 +53,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
 The installer downloads checksum-verified binaries, registers the daemon as a
-systemd user service (`goodvibes.service`), and enables user lingering
+systemd user service (`goodvibes-jev.service`), and enables user lingering
 so the service starts at boot, with no login required, which is the point of
 an always-on box. If lingering cannot be enabled non-interactively, the installer
 prints the one command to run once (`loginctl enable-linger <user>`).
@@ -68,7 +68,7 @@ that one manual command, an explicit note saying so).
 goodvibes service status
 ```
 
-(or, equivalently, `systemctl --user status goodvibes.service`)
+(or, equivalently, `systemctl --user status goodvibes-jev.service`)
 
 **You should now see** the service reported as installed and running. If it
 is not, `goodvibes service check` prints what is wrong and exits non-zero.
@@ -91,26 +91,29 @@ surface without local users as a must-fix finding and exits non-zero in step 7.
 
 ## Step 4: enable the browser surface and bind beyond loopback
 
-By default every surface binds loopback only. Enable the webui and set the
-host mode to `network` in the server's settings file
-(`~/.goodvibes/tui/settings.json`):
+A fresh install binds every surface to loopback only. `goodvibes surfaces enable web`
+turns the browser surface on and, unless you pass `--hostname`, also binds both
+the web surface and the control plane to every interface (`hostMode: "network"`,
+`0.0.0.0`) and allows remote control-plane clients. The command prints the
+resulting binding of each endpoint and says when one is reachable from other
+machines.
 
 ```sh
 goodvibes surfaces enable web
 ```
 
-Then add the bind modes (hand-edit; these keys have no dedicated CLI):
+For a Tailscale-only setup (step 6), keep both on loopback instead:
 
-```json
-{
-  "controlPlane": { "hostMode": "network" },
-  "web": { "hostMode": "network" }
-}
+```sh
+goodvibes surfaces enable web --hostname 127.0.0.1
 ```
 
-`hostMode: "network"` binds `0.0.0.0`. `"custom"` plus `web.host` or
-`controlPlane.host` binds one specific address. The defaults are port `3421`
-for the control plane and `3423` for the webui. Restart to apply:
+These bind keys are owned by the daemon and stored in the daemon's settings
+file (`~/.goodvibes/daemon/settings.json`), which overrides anything written
+for them in `~/.goodvibes/tui/settings.json`. To bind one specific
+address, set `goodvibes-daemon config set controlPlane.hostMode custom` plus
+`controlPlane.host` (and the same for `web`). The defaults are port `3421` for the control plane and `3423`
+for the webui. Restart to apply:
 
 ```sh
 goodvibes service restart
@@ -122,9 +125,10 @@ and `goodvibes control-plane status` shows the control-plane bind, local
 admin, and token posture.
 
 Note (LAN-only alternative): if you will reach the box exclusively through
-`tailscale serve` (step 6), you can leave both host modes `local`. Tailscale
-proxies to loopback, and nothing else on the network can reach the surfaces
-at all.
+`tailscale serve` (step 6), use the `--hostname 127.0.0.1` form above. Tailscale
+proxies to loopback, and nothing else on the network can reach the surfaces at
+all. Running plain `goodvibes surfaces enable web` and stopping there leaves the
+control plane (port 3421, bearer token over plain `http`) open on the LAN.
 
 ## Step 5: open the webui from another machine on the LAN
 

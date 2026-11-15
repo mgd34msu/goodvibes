@@ -24,7 +24,11 @@ test('the old Workstream link lands on Work, and opening the workstream fetches 
   // The graph read names this exact contract group. Its colon is encoded as a
   // path segment by the real HTTP facade; the mock decodes it for the keyed lookup.
   await expect.poll(() => daemon.requests.some((r) => r.method === 'GET' && r.path === `/api/fleet/workstreams/${encodeURIComponent(FLEET_GRAPH_WORKSTREAM_ID)}/graph`)).toBe(true);
-  await expect(panel.locator('[data-testid="task-graph-node"]')).toHaveCount(5);
+  const nodes = panel.locator('[data-testid="task-graph-node"]');
+  await expect(nodes).toHaveCount(5);
+  await expect(nodes.filter({ hasText: 'Refactor the retry loop' })).toContainText('Stalled');
+  await expect(nodes.filter({ hasText: 'Stalled' })).toHaveCount(1);
+  await expect(nodes.filter({ hasText: 'Update the changelog entry' })).toContainText('Blocked');
 
   await expectNoHorizontalScroll(page);
 });

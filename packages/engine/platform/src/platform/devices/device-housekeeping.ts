@@ -14,6 +14,7 @@
  * why, so a deletion is never indistinguishable from data loss.
  */
 import { PersistentStore } from '../state/persistent-store.js';
+import { logger } from '../utils/logger.js';
 import type { DeviceGrantStore, DeviceGrantSweepReport } from './device-grants.js';
 import type { DeviceArtifactSweepReport, DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
 
@@ -34,6 +35,13 @@ interface HousekeepingLog extends Record<string, unknown> {
 
 /** Keep the disclosure log itself bounded, it is persisted state too. */
 const MAX_DISCLOSURE_REPORTS = 20;
+
+/** The most recent sweep that threw, kept so a status surface can say so. */
+export interface DeviceHousekeepingFailure {
+  readonly at: number;
+  readonly trigger: DeviceHousekeepingReport['trigger'];
+  readonly error: string;
+}
 
 export type DeviceRecoveryStage = 'grant-sweep' | 'capture-sweep' | 'disclosure-read' | 'disclosure-persist';
 
@@ -80,6 +88,9 @@ export class DeviceHousekeeper {
   private readonly observeRecovery: DeviceHousekeepingOptions['observeRecovery'];
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastReport: DeviceHousekeepingReport | null = null;
+  private lastFailure: DeviceHousekeepingFailure | null = null;
+  /** The sweep in progress, joined by a caller that arrives while it runs. */
+  private inFlight: Promise<DeviceHousekeepingReport> | null = null;
   /** Set while a timer runs; re-read after each sweep to follow a live setting. */
   private resolveInterval: (() => number) | null = null;
   private armedIntervalMs = 0;
@@ -97,6 +108,14 @@ export class DeviceHousekeeper {
     return this.lastReport;
   }
 
+  /**
+   * The most recent sweep that failed and has not been followed by a good one,
+   * or null. A stale `getLastReport()` alone would read as healthy.
+   */
+  getLastFailure(): DeviceHousekeepingFailure | null {
+    return this.lastFailure;
+  }
+
   /** Disclosure history from disk, newest last. */
   async listDisclosures(): Promise<readonly DeviceHousekeepingReport[]> {
     const log = await this.disclosure.load();
@@ -108,18 +127,48 @@ export class DeviceHousekeeper {
     try { this.observeRecovery(stage); } catch { /* Observation never blocks recovery. */ }
   }
 
-  /** One full pass over both stores, with the result disclosed to disk. */
-  async sweep(trigger: DeviceHousekeepingReport['trigger']): Promise<DeviceHousekeepingReport> {
+  /**
+   * One full pass over both stores, with the result disclosed to disk. A call
+   * made while a pass is running joins it: two overlapping passes would race on
+   * the disclosure log and lose one report.
+   */
+  sweep(trigger: DeviceHousekeepingReport['trigger']): Promise<DeviceHousekeepingReport> {
+    if (this.inFlight) return this.inFlight;
+    const run = this.runSweep(trigger).then(
+      (report) => { this.lastFailure = null; return report; },
+      (error: unknown) => {
+        this.lastFailure = { at: this.now(), trigger, error: error instanceof Error ? error.message : String(error) };
+        throw error;
+      },
+    );
+    const settled = run.finally(() => { if (this.inFlight === settled) this.inFlight = null; });
+    this.inFlight = settled;
+    return settled;
+  }
+
+  private async runSweep(trigger: DeviceHousekeepingReport['trigger']): Promise<DeviceHousekeepingReport> {
     this.observeRecoveryStage(trigger, 'grant-sweep');
     const grants = await this.grants.sweep();
     this.observeRecoveryStage(trigger, 'capture-sweep');
-    const artifacts = await this.artifacts.sweep();
+    let artifacts: DeviceArtifactSweepReport;
+    let captureFailure: unknown;
+    try {
+      artifacts = await this.artifacts.sweep();
+    } catch (error) {
+      // The grant removals already happened and are disclosed even though the
+      // capture half could not run.
+      captureFailure = error;
+      artifacts = { sweptAt: this.now(), removed: [], retained: 0, bytesReclaimed: 0 };
+    }
+    const failureText = captureFailure === undefined ? '' : captureFailure instanceof Error ? captureFailure.message : String(captureFailure);
     const report: DeviceHousekeepingReport = {
       sweptAt: this.now(),
       trigger,
       grants,
       artifacts,
-      summary: summarize(grants, artifacts),
+      summary: captureFailure === undefined
+        ? summarize(grants, artifacts)
+        : `${summarize(grants, artifacts)} The capture sweep did not run (${failureText}); captures were not checked.`,
     };
     this.lastReport = report;
     this.observeRecoveryStage(trigger, 'disclosure-read');
@@ -129,6 +178,7 @@ export class DeviceHousekeeper {
       version: 1,
       reports: [...existing, report].slice(-MAX_DISCLOSURE_REPORTS),
     });
+    if (captureFailure !== undefined) throw captureFailure;
     return report;
   }
 
@@ -164,11 +214,20 @@ export class DeviceHousekeeper {
   }
 
   private arm(intervalMs: number): void {
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      logger.warn('Device housekeeping was not scheduled: the sweep interval is not a positive number', { intervalMs });
+      return;
+    }
     this.armedIntervalMs = intervalMs;
     this.timer = setInterval(() => {
       void this.sweep('periodic')
-        .catch(() => undefined)
+        .catch((error: unknown) => {
+          // The timer callback has no caller to throw to; the failure is logged
+          // and kept for getLastFailure().
+          logger.warn('Periodic device housekeeping failed; expired captures and grants may not have been removed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
         .finally(() => { this.rearmIfCadenceChanged(); });
     }, intervalMs);
     this.timer.unref?.();

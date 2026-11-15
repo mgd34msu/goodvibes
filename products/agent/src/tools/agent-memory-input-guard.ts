@@ -9,7 +9,7 @@ export function assertAgentMemoryInput(args: unknown): void {
   function inspect(value: unknown, depth: number): void {
     if (++nodes > 20_000 || depth > 64) throw new ToolInputProjectionError('invalid');
     if (typeof value === 'string') {
-      if (containsSecretLikeText(value)) throw new ToolInputProjectionError('held');
+      if (containsSecretLikeText(value)) throw new ToolInputProjectionError('invalid'); // the arguments hold secret-like text
       return;
     }
     if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return;
@@ -26,7 +26,7 @@ export function assertAgentMemoryInput(args: unknown): void {
       if (!descriptor || !('value' in descriptor)) throw new ToolInputProjectionError('invalid');
       if (array && key === 'length') continue;
       if (!descriptor.enumerable || (array && (typeof length !== 'number' || !Number.isSafeInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= length))) throw new ToolInputProjectionError('invalid');
-      if (containsSecretLikeText(key)) throw new ToolInputProjectionError('held');
+      if (containsSecretLikeText(key)) throw new ToolInputProjectionError('invalid');
       inspect(descriptor.value, depth + 1);
     }
     ancestors.delete(value);

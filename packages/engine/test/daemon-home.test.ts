@@ -282,12 +282,12 @@ describe('WorkspaceSwapManager', () => {
     }
   });
 
-  test('swap returns INVALID_PATH when rerootStores throws', async () => {
+  test('swap returns REROOT_FAILED when rerootStores throws', async () => {
     const mgr = makeManager({ rerootFails: true });
     const result = await mgr.requestSwap(join(baseDir, 'new-workspace'));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.code).toBe('INVALID_PATH');
+      expect(result.code).toBe('REROOT_FAILED');
     }
   });
 
@@ -324,34 +324,30 @@ describe('WorkspaceSwapManager: path traversal', () => {
     });
   }
 
-  test('requestSwap with ".." relative path resolves cleanly and succeeds', async () => {
+  test('requestSwap with a ".." relative path resolves against the current dir and is accepted', async () => {
     const mgr = makeManager();
-    const traversalPath = join(baseDir, '..', 'traversal-target-' + Date.now());
-    const result = await mgr.requestSwap(traversalPath);
-    if (result.ok) {
-      expect(mgr.getCurrentWorkingDir()).toBe(traversalPath);
-    } else {
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.code).toBe('INVALID_PATH');
-      }
-    }
-    try { rmSync(traversalPath, { recursive: true, force: true }); } catch { /* ignore */ }
+    const result = await mgr.requestSwap('sub/../resolved-relative');
+    const expected = join(baseDir, 'resolved-relative');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.current).toBe(expected);
+    expect(mgr.getCurrentWorkingDir()).toBe(expected);
+    expect(existsSync(join(expected, '.goodvibes', 'sessions'))).toBe(true);
+    // The unresolved segment is never created.
+    expect(existsSync(join(baseDir, 'sub'))).toBe(false);
   });
 
-  test('requestSwap with absolute path containing ".." segments resolves correctly', async () => {
+  test('requestSwap with an absolute path containing ".." segments is normalised and accepted', async () => {
     const mgr = makeManager();
-    const subDir = join(baseDir, 'sub');
-    mkdirSync(subDir, { recursive: true });
-    const traversalPath = join(subDir, '..', 'resolved-target');
-    const result = await mgr.requestSwap(traversalPath);
-    if (result.ok) {
-      expect(mgr.getCurrentWorkingDir()).toBe(traversalPath);
-    } else {
-      if (!result.ok) {
-        expect(result.code).toBe('INVALID_PATH');
-      }
-    }
+    // String concatenation: join() would normalise the segments away before the manager sees them.
+    const rawPath = `${baseDir}/sub/../resolved-target`;
+    const result = await mgr.requestSwap(rawPath);
+    const expected = join(baseDir, 'resolved-target');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.current).toBe(expected);
+    expect(mgr.getCurrentWorkingDir()).toBe(expected);
+    expect(existsSync(join(baseDir, 'sub'))).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { classifyHostTrustTier, extractHostname } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 interface NotifyContext {
@@ -68,10 +69,22 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             requireYesFlag(ctx, `add webhook notification URL ${url}`, `/notify add <url>${suffix}`);
             return;
           }
+          let target: URL;
           try {
-            new URL(url);
+            target = new URL(url);
           } catch {
             ctx.print(policy.message('Invalid URL', url));
+            return;
+          }
+          if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+            ctx.print(policy.message('Invalid URL (only http and https webhooks can be delivered)', url));
+            return;
+          }
+          // Delivery refuses these hosts, so a stored URL for one would only ever fail silently.
+          const hostname = extractHostname(url);
+          const trust = hostname === null ? null : classifyHostTrustTier(hostname);
+          if (trust !== null && (trust.tier === 'blocked' || trust.tier === 'localhost')) {
+            ctx.print(policy.message(`Refusing to add a webhook that delivery would block (${trust.reason})`, url));
             return;
           }
           if (urls.includes(url)) {
@@ -131,7 +144,14 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           const results = await notifier.test();
           ctx.print(
             results
-              .map((r) => (r.ok ? `  [ok] ${r.url}` : `  [fail] ${r.url}${policy.failureSeparator}${r.error ?? 'unknown error'}`))
+              .map((r) => {
+                // The stored URL carries the secret topic or token, so a masked policy names only the host here.
+                let shown = r.url;
+                if (policy.maskUrls) {
+                  try { shown = `${new URL(r.url).origin}/…`; } catch { shown = '(invalid URL)'; }
+                }
+                return r.ok ? `  [ok] ${shown}` : `  [fail] ${shown}${policy.failureSeparator}${r.error ?? 'unknown error'}`;
+              })
               .join('\n'),
           );
           return;

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PairingTokenManager, PairingTokenStoreBusyError } from '../platform/src/platform/pairing/pairing-token-store.js';
+import { PairingStoreFaultedError } from '../platform/src/platform/security/settings-authority.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
@@ -196,7 +197,8 @@ describe('strict SETTINGS serving-owner auth', () => {
     try { expect(() => f.pairing.revoke(f.paired!.id)).toThrow('synthetic persistence failure'); } finally { write.mockRestore(); }
     expect(f.pairing.authenticate(f.token)).not.toBeNull();
     const action = commit(f, authority); expect(() => action.run()).toThrow(); expect(action.effects()).toBe(0);
-    expect(f.helper.captureSettingsAdminAuthority(f.request)).toBeNull();
+    // A held store is reported as a fault, distinct from a stale capture.
+    expect(() => f.helper.captureSettingsAdminAuthority(f.request)).toThrow(PairingStoreFaultedError);
   });
 
   test('facade lifetime replacement, stop and token ABA retire captured authority', () => {
@@ -294,7 +296,7 @@ describe('strict SETTINGS serving-owner auth', () => {
     ] }));
     const users = new UserAuthManager({ bootstrapFilePath: file, bootstrapCredentialPath: join(dir, 'bootstrap.txt') });
     const session = users.createSession('operator'); const authority = users.captureSettingsAuthority(session.token)!;
-    expect(authority).not.toBeNull(); mkdirSync(`${file}.tmp`);
+    expect(authority).not.toBeNull(); rmSync(file); mkdirSync(file);
     expect(() => users.deleteUser('spare')).toThrow();
     expect(users.validateSession(session.token)).not.toBeNull();
     expect(() => users.assertSettingsAuthorityCurrent(authority)).toThrow();
@@ -352,7 +354,7 @@ describe('strict SETTINGS serving-owner auth', () => {
     expect(f.helper.withSettingsAdminAuthority(f.request, capture(f), assertCurrent => {
       assertCurrent(); const receipt = { committed: true }; rmSync(ownerLockPath(f.file), { recursive: true }); return receipt;
     })).toEqual({ committed: true });
-    expect(f.helper.captureSettingsAdminAuthority(f.request)).toBeNull();
+    expect(() => f.helper.captureSettingsAdminAuthority(f.request)).toThrow(PairingStoreFaultedError);
   });
 
   test('no-op ordinary mutations on a genuinely fresh absent store do not invent persisted history', () => {

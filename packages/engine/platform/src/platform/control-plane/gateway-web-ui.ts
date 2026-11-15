@@ -374,23 +374,42 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       els.events.prepend(div);
     }
 
+    // One refresh at a time: a burst of events asks for one more refresh after
+    // the running one, not one request storm per event with renders landing out of order.
+    let snapshotRunning = false;
+    let snapshotQueued = false;
     async function loadSnapshot() {
+      if (snapshotRunning) {
+        snapshotQueued = true;
+        return;
+      }
+      snapshotRunning = true;
+      try {
+        do {
+          snapshotQueued = false;
+          try {
+            await loadSnapshotOnce();
+          } catch (error) {
+            els.authStatus.textContent = 'Could not refresh: ' + (error && error.message ? error.message : 'network error');
+            els.authStatus.className = 'warn';
+          }
+        } while (snapshotQueued);
+      } finally {
+        snapshotRunning = false;
+      }
+    }
+
+    async function loadSnapshotOnce() {
       if (!state.token) return;
-      const [tasksRes, automationRes, sessionsRes, approvalsRes, deliveriesRes, controlPlaneRes, routesRes, surfacesRes, watchersRes, serviceRes, messagesRes] = await Promise.all([
-        fetch('/api/tasks', { headers: authHeaders() }),
-        fetch('/api/automation', { headers: authHeaders() }),
-        fetch('/api/sessions', { headers: authHeaders() }),
-        fetch('/api/approvals', { headers: authHeaders() }),
-        fetch('/api/deliveries', { headers: authHeaders() }),
-        fetch('/api/control-plane', { headers: authHeaders() }),
-        fetch('/api/routes/bindings', { headers: authHeaders() }),
-        fetch('/api/surfaces', { headers: authHeaders() }),
-        fetch('/api/watchers', { headers: authHeaders() }),
-        fetch('/api/service/status', { headers: authHeaders() }),
-        fetch('/api/control-plane/messages', { headers: authHeaders() }),
-      ]);
-      if (!tasksRes.ok || !automationRes.ok || !sessionsRes.ok || !approvalsRes.ok || !deliveriesRes.ok || !controlPlaneRes.ok || !routesRes.ok || !surfacesRes.ok || !watchersRes.ok || !serviceRes.ok || !messagesRes.ok) {
-        els.authStatus.textContent = 'Authentication failed or control plane unavailable.';
+      const paths = ['/api/tasks', '/api/automation', '/api/sessions', '/api/approvals', '/api/deliveries', '/api/control-plane', '/api/routes/bindings', '/api/surfaces', '/api/watchers', '/api/service/status', '/api/control-plane/messages'];
+      const responses = await Promise.all(paths.map((path) => fetch(path, { headers: authHeaders() })));
+      const [tasksRes, automationRes, sessionsRes, approvalsRes, deliveriesRes, controlPlaneRes, routesRes, surfacesRes, watchersRes, serviceRes, messagesRes] = responses;
+      const failed = responses.map((res, index) => ({ path: paths[index], status: res.status, ok: res.ok })).filter((entry) => !entry.ok);
+      if (failed.length > 0) {
+        // Name what failed: a token without one scope must not read as a bad token.
+        els.authStatus.textContent = failed.some((entry) => entry.status === 401)
+          ? 'Authentication failed: the token was not accepted.'
+          : 'Could not load: ' + failed.map((entry) => entry.path + ' (HTTP ' + entry.status + ')').join(', ') + '.';
         els.authStatus.className = 'warn';
         return;
       }
@@ -526,6 +545,11 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
           return;
         }
         if (eventName === 'heartbeat' || eventName === 'pong') return;
+        if (eventName === 'gap') {
+          appendEvent('events were missed while this page was behind; refreshing', 'warn');
+          loadSnapshot();
+          return;
+        }
         if (eventName === 'surface-message' || eventName === 'session-update' || eventName === 'approval-update') {
           appendEvent(eventName + ' ' + rendered, 'ok');
           loadSnapshot();
@@ -538,27 +562,46 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
         appendEvent(eventName + ' ' + rendered);
       };
       const controller = new AbortController();
-      state.stream = { close: () => controller.abort() };
+      let reconnectTimer = null;
+      let delayMs = 1000;
+      let lastEventId = '';
+      state.stream = { close: () => { controller.abort(); if (reconnectTimer !== null) clearTimeout(reconnectTimer); } };
       const parseEventBlock = (block) => {
         let eventName = 'message';
         const data = [];
         for (const line of block.split(/\\r?\\n/)) {
           if (line.startsWith('event:')) eventName = line.slice(6).trim();
           if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+          if (line.startsWith('id:')) lastEventId = line.slice(3).trim();
         }
         if (data.length > 0) handleLiveEvent(eventName, data.join('\\n'));
       };
-      void (async () => {
+      // A dropped stream is reopened from the last event seen, with a growing wait.
+      const scheduleReconnect = () => {
+        if (controller.signal.aborted) return;
+        appendEvent('event stream disconnected; reconnecting in ' + Math.round(delayMs / 1000) + 's', 'warn');
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; void run(); }, delayMs);
+        delayMs = Math.min(delayMs * 2, 30000);
+      };
+      const run = async () => {
         try {
+          const headers = authHeaders();
+          if (lastEventId) headers['Last-Event-ID'] = lastEventId;
           const res = await fetch('/api/control-plane/events?domains=' + encodeURIComponent(domains.join(',')), {
-            headers: authHeaders(),
+            headers,
             signal: controller.signal,
           });
+          if (res.status === 401 || res.status === 403) {
+            appendEvent('event stream refused: HTTP ' + res.status + ' (not retrying)', 'warn');
+            return;
+          }
           if (!res.ok || !res.body) {
             appendEvent('event stream unavailable: HTTP ' + res.status, 'warn');
+            scheduleReconnect();
             return;
           }
           appendEvent('event stream connected', 'ok');
+          delayMs = 1000;
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let buffer = '';
@@ -574,10 +617,12 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
               boundary = buffer.indexOf('\\n\\n');
             }
           }
+          scheduleReconnect();
         } catch (error) {
-          if (!controller.signal.aborted) appendEvent('event stream disconnected', 'warn');
+          scheduleReconnect();
         }
-      })();
+      };
+      void run();
     }
 
     async function postJson(url, body) {
@@ -670,6 +715,7 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       const jobId = target.getAttribute('data-job-id');
       if (!action || !jobId) return;
       if (action === 'delete') {
+        if (!window.confirm('Remove this job? Its schedule will be deleted.')) return;
         const res = await fetch('/api/automation/jobs/' + encodeURIComponent(jobId), {
           method: 'DELETE',
           headers: authHeaders(),
@@ -725,9 +771,13 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
 
     els.serviceInstall.addEventListener('click', async () => postJson('/api/service/install', {}));
     els.serviceStart.addEventListener('click', async () => postJson('/api/service/start', {}));
-    els.serviceStop.addEventListener('click', async () => postJson('/api/service/stop', {}));
+    els.serviceStop.addEventListener('click', async () => {
+      if (window.confirm('Stop the background service? Anything it is running will end.')) await postJson('/api/service/stop', {});
+    });
     els.serviceRestart.addEventListener('click', async () => postJson('/api/service/restart', {}));
-    els.serviceUninstall.addEventListener('click', async () => postJson('/api/service/uninstall', {}));
+    els.serviceUninstall.addEventListener('click', async () => {
+      if (window.confirm('Uninstall the background service?')) await postJson('/api/service/uninstall', {});
+    });
 
     if (state.token) {
       loadSnapshot();

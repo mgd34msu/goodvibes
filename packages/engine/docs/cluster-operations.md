@@ -14,6 +14,23 @@ Configuration transfers remain bound to the original live group and member gener
 
 Group envelopes use a shared group key. These checks restrict the claimed sender against the current roster; they do not turn that shared key into an independent signature for each machine.
 
+## Networks without multicast
+
+Machines find each other over multicast by default. On a network that drops multicast, list the other machines by hand under `cluster.peers` in the settings file (a JSON array; it has no settings-screen row, so edit the file):
+
+```json
+{
+  "cluster": {
+    "enabled": true,
+    "peers": ["10.0.0.2", "10.0.0.3:61860"]
+  }
+}
+```
+
+Each entry is a host or `host:port`; a host with no port uses `cluster.port`. List every other machine on every machine. The coordination log line "set cluster.peers" refers to this key.
+
+The same applies to `conversationGate.gatedSurfaces`: an array of surface names (for example `["telegram", "slack"]`) whose inbound messages go through the conversation gate. It has no settings-screen row either, and an empty or missing list uses the shipped list of channel surfaces.
+
 ## Local configuration and credentials
 
 The daemon subscribes to successful configuration and credential-store changes.

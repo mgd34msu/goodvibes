@@ -31,6 +31,7 @@ import {
   isBillingOrCreditError,
   isRateLimitOrQuotaError,
 } from '../platform/src/platform/types/errors.ts';
+import { shouldWaitOutRateLimit } from '../platform/src/platform/agents/orchestrator-runner.ts';
 import { readNormalizedError } from '../platform/src/platform/utils/error-display.ts';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { authoredErrorReadingsPort, errorSpan, errorText, type AuthoredFailure } from './_helpers/authored-error-readings.ts';
@@ -167,28 +168,16 @@ describe('isBillingOrCreditError separates a spent account from a rate limit', (
 });
 
 describe('the orchestrator retry ladder does not wait out a spent account', () => {
-  /**
-   * Mirrors the branch order in agents/orchestrator-runner.ts. The point under
-   * test is the ORDER: billing is decided before the rate-limit branch, so a
-   * credit failure can never take the 60s backoff even though it matches the
-   * quota wording that branch keys off.
-   */
-  async function retryDecision(err: unknown): Promise<'rate-limit-backoff' | 'fail-now'> {
-    if (await isBillingOrCreditError(err)) return 'fail-now';
-    if (await isRateLimitOrQuotaError(err)) return 'rate-limit-backoff';
-    return 'fail-now';
-  }
-
   test('the Anthropic 400 credit failure fails immediately instead of retrying', async () => {
-    expect(await retryDecision(new ProviderError(ANTHROPIC_CREDIT_400, { statusCode: 400 }))).toBe('fail-now');
+    expect(await shouldWaitOutRateLimit(new ProviderError(ANTHROPIC_CREDIT_400, { statusCode: 400 }))).toBe(false);
   });
 
   test('the OpenAI 429 insufficient_quota also fails immediately', async () => {
-    expect(await retryDecision(new ProviderError(OPENAI_QUOTA_429, { statusCode: 429 }))).toBe('fail-now');
+    expect(await shouldWaitOutRateLimit(new ProviderError(OPENAI_QUOTA_429, { statusCode: 429 }))).toBe(false);
   });
 
   test('a genuine rate limit still takes the backoff', async () => {
-    expect(await retryDecision(new ProviderError('Rate limit reached, too many requests', { statusCode: 429 })))
-      .toBe('rate-limit-backoff');
+    expect(await shouldWaitOutRateLimit(new ProviderError('Rate limit reached, too many requests', { statusCode: 429 })))
+      .toBe(true);
   });
 });

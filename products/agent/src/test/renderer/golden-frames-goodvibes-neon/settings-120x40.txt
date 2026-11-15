@@ -32,7 +32,7 @@
 |            Local Voice        34                                                                                       |
 |            Model Pricing       1                                                                                       |
 |                                                                                                                        |
-|                        39 more ↓                                                                                       |
+|                        38 more ↓                                                                                       |
 |                                                                                                                        |
 |             ↑↓  move    ⏎  change    ←→  category    pgup pgdn  docs    ctrl+r  reset                                  |
 |                                                                                                                        |

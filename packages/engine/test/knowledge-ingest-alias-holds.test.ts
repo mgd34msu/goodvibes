@@ -15,12 +15,14 @@ import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } f
 import { getKnowledgeNodeObservation, prepareStagedObservedKnowledgeNodeInput } from '../platform/src/platform/knowledge/store-node-observation.js';
 import { KnowledgeExtractionJudgmentHoldError } from '../platform/src/platform/knowledge/extraction-policy.js';
 import { createCompressedPdfBuffer } from './_helpers/homegraph-service-fixtures.js';
+import { settleEvents } from './_helpers/test-timeout.js';
 import { knowledgeIngestErrorReadings } from './_helpers/knowledge-ingest-error-readings.js';
 
 let root: string;
+const stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'knowledge-ingest-alias-')); previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); rmSync(root, { recursive: true, force: true }); });
 const uri = 'https://example.invalid/aurora-manual.txt';
 const tags = ['project:Aurora Runtime'];
 const routes = ['artifact', 'url'] as const;
@@ -31,7 +33,7 @@ function snapshot(store: KnowledgeStore) {
 }
 async function fixture(route: typeof routes[number]) {
   const dbPath = join(root, 'knowledge.sqlite');
-  const store = new KnowledgeStore({ dbPath });
+  const store = new KnowledgeStore({ dbPath }); stores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   await store.init();
   const first = await artifactStore.createFromStream({ kind: 'document', filename: 'original.txt', mimeType: 'text/plain', sourceUri: uri, stream: ['Aurora Runtime (AR) retains original usable knowledge.'] });
@@ -45,7 +47,7 @@ async function fixture(route: typeof routes[number]) {
     const input = { title: replace ? 'Replacement title' : 'Original title', tags, metadata: { knowledgeSpaceId: 'alias-lab' }, signal };
     return route === 'artifact' ? ingestKnowledgeArtifact(ctx, { ...input, artifactId: selected.id, uri }) : ingestKnowledgeUrl(ctx, { ...input, url: uri });
   };
-  const reopen = async () => { const opened = new KnowledgeStore({ dbPath }); await opened.init(); return snapshot(opened); };
+  const reopen = async () => { const opened = new KnowledgeStore({ dbPath }); stores.push(opened); await opened.init(); return snapshot(opened); };
   return { ctx, ingest, reopen, first, replacement, fetch };
 }
 function settled() { const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port); return fake; }
@@ -203,13 +205,15 @@ for (const route of routes) describe(`${route} aliases before source publication
       let started = () => {};
       const pending = new Promise<void>((resolve) => { release = resolve; });
       const reading = new Promise<void>((resolve) => { started = resolve; });
-      installJudgmentPort({ model: responder.model, async ask(request) { started(); await pending; return responder.ask(request); } });
+      const drained = Promise.withResolvers<void>();
+      installJudgmentPort({ model: responder.model, async ask(request) { started(); try { await pending; return await responder.ask(request); } finally { drained.resolve(); } } });
       const attempt = ingest(true, controller.signal);
       await reading;
       controller.abort();
       await expect(attempt).rejects.toBeInstanceOf(KnowledgeEntityAliasHoldError);
       release();
-      await Promise.resolve();
+      await drained.promise;
+      await settleEvents();
       expect(snapshot(ctx.store)).toEqual(before);
       expect(await reopen()).toEqual(before);
     } finally { fetch.mockRestore(); }
@@ -252,14 +256,14 @@ for (const route of routes) describe(`${route} aliases before source publication
   }
 });
 
-test('ordinary URL fetch and artifact parse failures still produce failed source records', async () => {
+test('a failed re-fetch keeps the indexed source with its crawl error; a parse failure records a failed source', async () => {
   const { ctx, ingest, reopen, fetch } = await fixture('url');
   try {
     settled(); await ingest();
     fetch.mockRejectedValue(new Error('Synthetic fetch failed'));
     installJudgmentPort(knowledgeIngestErrorReadings().port);
     const failed = await ingest(true);
-    expect(failed.source.status).toBe('failed');
+    expect(failed.source.status).toBe('indexed');
     expect(failed.source.crawlError).toContain('Synthetic fetch failed');
     const empty = await ctx.artifactStore.createFromStream({ kind: 'document', filename: 'empty.pdf', mimeType: 'application/pdf', stream: [createCompressedPdfBuffer('')] });
     const parsed = await ingestKnowledgeArtifact(ctx, { artifactId: empty.id, title: 'Empty PDF' });

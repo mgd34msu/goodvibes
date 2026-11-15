@@ -5,10 +5,18 @@ import { isNotebookFile } from '../../utils/notebook.js';
 import { unifiedDiff, FileStateCache } from '../../state/file-cache.js';
 import { FileUndoManager } from '../../state/file-undo.js';
 import { logger } from '../../utils/logger.js';
-import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { resolveWritablePath } from '../../utils/path-safety.js';
 import type { EditInput, JupyterNotebook, NotebookCell, NotebookOperation, NotebookOperationsInput, EditResult } from './types.js';
 import { assertCapturedToolMutationCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import { summarizeError } from '../../utils/error-display.js';
+
+/**
+ * A refused edit stays refused until the file is read again (the edit tool
+ * never records the newer content itself), so the text names that next step.
+ */
+export function occConflictMessage(resolvedPath: string): string {
+  return `OCC conflict: '${resolvedPath}' was modified externally since last read. Nothing was changed; read it again before editing, then retry against its current content.`;
+}
 
 export function normalizeSource(source: string | string[]): string[] {
   if (Array.isArray(source)) return source;
@@ -52,9 +60,9 @@ export function readNotebookFile(
   resolvedPath: string,
   fileCache: FileStateCache,
 ): { notebook: JupyterNotebook; rawContent: string } | { error: string } {
-  const cacheResult = fileCache.lookup(resolvedPath);
+  const cacheResult = fileCache.peek(resolvedPath);
   if (cacheResult.status === 'modified') {
-    return { error: `OCC conflict: '${resolvedPath}' was modified externally since last read` };
+    return { error: occConflictMessage(resolvedPath) };
   }
 
   let rawContent: string;
@@ -82,7 +90,14 @@ export function applyNotebookOperations(
   const needsCellIds = notebook.nbformat > 4 ||
     (notebook.nbformat === 4 && (notebook.nbformat_minor ?? 0) >= 5);
 
-  let indexOffset = 0;
+  // Numeric `cell` and `after` indices always name the notebook as it was before
+  // this call. Resolving them against the live array would shift them by every
+  // earlier insert or delete, wherever it happened, and hit the wrong cell.
+  const original = [...notebook.cells];
+  const liveIndex = (originalIndex: number): number => {
+    const target = original[originalIndex];
+    return target === undefined ? -1 : notebook.cells.indexOf(target);
+  };
   let applied = 0;
   const summaryLines: string[] = [];
 
@@ -95,9 +110,12 @@ export function applyNotebookOperations(
           return { success: false, applied, summary: summaryLines.join('\n'), error: `replace: cell_id '${op.cell_id}' not found` };
         }
       } else if (op.cell !== undefined) {
-        idx = op.cell + indexOffset;
-        if (idx < 0 || idx >= notebook.cells.length) {
-          return { success: false, applied, summary: summaryLines.join('\n'), error: `replace: cell index ${op.cell} out of range (notebook has ${notebook.cells.length} cells)` };
+        if (op.cell < 0 || op.cell >= original.length) {
+          return { success: false, applied, summary: summaryLines.join('\n'), error: `replace: cell index ${op.cell} out of range (notebook has ${original.length} cells)` };
+        }
+        idx = liveIndex(op.cell);
+        if (idx === -1) {
+          return { success: false, applied, summary: summaryLines.join('\n'), error: `replace: cell index ${op.cell} was deleted by an earlier operation in this call` };
         }
       } else {
         return { success: false, applied, summary: summaryLines.join('\n'), error: 'replace: requires cell or cell_id' };
@@ -159,18 +177,20 @@ export function applyNotebookOperations(
         if (op.after === -1) {
           insertAt = 0;
         } else {
-          const adjustedAfter = op.after + indexOffset;
-          if (adjustedAfter < -1 || adjustedAfter >= notebook.cells.length) {
-            return { success: false, applied, summary: summaryLines.join('\n'), error: `insert: after index ${op.after} out of bounds (-1 to ${notebook.cells.length - 1})` };
+          if (op.after < -1 || op.after >= original.length) {
+            return { success: false, applied, summary: summaryLines.join('\n'), error: `insert: after index ${op.after} out of bounds (-1 to ${original.length - 1})` };
           }
-          insertAt = adjustedAfter + 1;
+          const afterIdx = liveIndex(op.after);
+          if (afterIdx === -1) {
+            return { success: false, applied, summary: summaryLines.join('\n'), error: `insert: after index ${op.after} was deleted by an earlier operation in this call` };
+          }
+          insertAt = afterIdx + 1;
         }
       } else {
         insertAt = notebook.cells.length;
       }
 
       notebook.cells.splice(insertAt, 0, newCell);
-      indexOffset++;
       summaryLines.push(`  OK: insert cell at[${insertAt}]`);
       applied++;
     } else if (op.op === 'delete') {
@@ -181,16 +201,18 @@ export function applyNotebookOperations(
           return { success: false, applied, summary: summaryLines.join('\n'), error: `delete: cell_id '${op.cell_id}' not found` };
         }
       } else if (op.cell !== undefined) {
-        idx = op.cell + indexOffset;
-        if (idx < 0 || idx >= notebook.cells.length) {
-          return { success: false, applied, summary: summaryLines.join('\n'), error: `delete: cell index ${op.cell} out of range (notebook has ${notebook.cells.length} cells)` };
+        if (op.cell < 0 || op.cell >= original.length) {
+          return { success: false, applied, summary: summaryLines.join('\n'), error: `delete: cell index ${op.cell} out of range (notebook has ${original.length} cells)` };
+        }
+        idx = liveIndex(op.cell);
+        if (idx === -1) {
+          return { success: false, applied, summary: summaryLines.join('\n'), error: `delete: cell index ${op.cell} was already deleted by an earlier operation in this call` };
         }
       } else {
         return { success: false, applied, summary: summaryLines.join('\n'), error: 'delete: requires cell or cell_id' };
       }
 
       notebook.cells.splice(idx, 1);
-      indexOffset--;
       summaryLines.push(`  OK: delete cell[${idx}]`);
       applied++;
     }
@@ -236,7 +258,7 @@ export async function executeNotebookEdit(
 
   let resolvedPath: string;
   try {
-    resolvedPath = resolveAndValidatePath(nbOps.path, env.cwd);
+    resolvedPath = resolveWritablePath(nbOps.path, env.cwd);
   } catch (err) {
     return Promise.resolve({ success: false, error: `Path error: ${summarizeError(err)}` });
   }

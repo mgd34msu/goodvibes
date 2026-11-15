@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { profileDataToConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -35,11 +35,46 @@ function buildConfigSnapshot(
   return snapshot;
 }
 
+/** The session's model fields mirror three config keys; refresh them after any change to the config. */
+function syncRuntimeMirror(ctx: CommandContext): void {
+  const config = ctx.platform.configManager;
+  ctx.session.runtime.model = String(config.get('provider.model'));
+  ctx.session.runtime.provider = getProviderIdFromModel(config.get('provider.model'));
+  ctx.session.runtime.reasoningEffort = config.get('provider.reasoningEffort') as string;
+}
+
+function splitKeyArguments(values: readonly string[]): { requestedKeys: ConfigKey[]; invalidKeys: string[]; yes: boolean } {
+  const yes = values.includes('--yes');
+  const keys = values.filter((value) => value !== '--yes');
+  return {
+    requestedKeys: keys.filter((value): value is ConfigKey => CONFIG_KEYS.has(value as ConfigKey)),
+    invalidKeys: keys.filter((value) => !CONFIG_KEYS.has(value as ConfigKey)),
+    yes,
+  };
+}
+
+function readBundleFile(sourcePath: string): unknown {
+  let text: string;
+  try {
+    text = readFileSync(sourcePath, 'utf-8');
+  } catch (error) {
+    throw new Error(`Cannot read ${sourcePath}: ${summarizeError(error)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${sourcePath} is not valid JSON, so it is not a managed settings bundle.`);
+  }
+}
+
+const MANAGED_USAGE_ARGS = '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...] [--yes]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]';
+const MANAGED_USAGE = `Usage: /managed ${MANAGED_USAGE_ARGS}`;
+
 export function registerManagedRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'managed',
     description: 'Export, inspect, and apply managed settings bundles',
-    usage: '[review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]',
+    usage: MANAGED_USAGE_ARGS,
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const controlPlaneConfigDir = ctx.platform.configManager.getControlPlaneConfigDir();
@@ -85,6 +120,10 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
           ctx.print('Usage: /managed lock <key> <source> <reason...>');
           return;
         }
+        if (!CONFIG_KEYS.has(key)) {
+          ctx.print(`Unknown config key: ${key}. No lock was recorded.`);
+          return;
+        }
         setManagedSettingLock(key, source, reason, controlPlaneConfigDir);
         ctx.print(`Managed lock recorded for ${key}.`);
         return;
@@ -94,6 +133,10 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         const key = args[1] as ConfigKey | undefined;
         if (!key) {
           ctx.print('Usage: /managed unlock <key>');
+          return;
+        }
+        if (!CONFIG_KEYS.has(key)) {
+          ctx.print(`Unknown config key: ${key}.`);
           return;
         }
         ctx.print(clearManagedSettingLock(key, controlPlaneConfigDir) ? `Managed lock cleared for ${key}.` : `No managed lock found for ${key}.`);
@@ -129,17 +172,14 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       }
 
       if (sub === 'apply-staged') {
-        const requestedKeys = args.slice(1).filter((value): value is ConfigKey => CONFIG_KEYS.has(value as ConfigKey));
-        const invalidKeys = args.slice(1).filter((value) => !CONFIG_KEYS.has(value as ConfigKey));
+        const { requestedKeys, invalidKeys } = splitKeyArguments(args.slice(1));
         if (invalidKeys.length > 0) {
           ctx.print(`Unknown config key(s): ${invalidKeys.join(', ')}`);
           return;
         }
         try {
           const result = await applyStagedManagedBundle(ctx.platform.configManager, requestedKeys);
-          ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
-          ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
-          ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
+          syncRuntimeMirror(ctx);
           ctx.print(`Staged managed settings applied (${result.appliedCount} changes, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).`);
         } catch (error) {
           recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
@@ -156,9 +196,7 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         }
         try {
           const restored = rollbackManagedApply(ctx.platform.configManager, token);
-          ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
-          ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
-          ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
+          syncRuntimeMirror(ctx);
           ctx.print(`Managed rollback ${token} restored ${restored} setting(s).`);
         } catch (error) {
           recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
@@ -167,43 +205,56 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         return;
       }
 
+      if (sub !== 'inspect' && sub !== 'stage' && sub !== 'apply') {
+        recordSettingsSyncFailure('managed', `unsupported subcommand: ${sub}`, controlPlaneConfigDir);
+        ctx.print(MANAGED_USAGE);
+        return;
+      }
       const pathArg = args[1];
       if (!pathArg) {
         ctx.print(`Usage: /managed ${sub} <path>`);
         return;
       }
       const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
-      const bundle = JSON.parse(readFileSync(sourcePath, 'utf-8')) as ManagedSettingsBundle;
-
-      if (sub === 'inspect') {
-        ctx.print(await inspectManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath));
+      const keyArguments = splitKeyArguments(args.slice(2));
+      if (sub === 'apply' && keyArguments.invalidKeys.length > 0) {
+        ctx.print(`Unknown config key(s): ${keyArguments.invalidKeys.join(', ')}`);
         return;
       }
 
-      if (sub === 'stage') {
-        const stage = await stageManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath);
-        ctx.print(`Managed settings bundle staged from ${sourcePath} (${stage.changeCount} changes, risk=${stage.risk}).`);
-        return;
-      }
+      try {
+        const bundle = readBundleFile(sourcePath) as ManagedSettingsBundle;
 
-      if (sub === 'apply') {
-        const requestedKeys = args.slice(2).filter((value): value is ConfigKey => CONFIG_KEYS.has(value as ConfigKey));
-        const invalidKeys = args.slice(2).filter((value) => !CONFIG_KEYS.has(value as ConfigKey));
-        if (invalidKeys.length > 0) {
-          ctx.print(`Unknown config key(s): ${invalidKeys.join(', ')}`);
+        if (sub === 'inspect') {
+          ctx.print(await inspectManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath));
           return;
         }
-        await stageManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath);
-        const result = await applyStagedManagedBundle(ctx.platform.configManager, requestedKeys);
-        ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
-        ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
-        ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
-        ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).`);
-        return;
-      }
 
-      recordSettingsSyncFailure('managed', `unsupported subcommand: ${sub}`, controlPlaneConfigDir);
-      ctx.print('Usage: /managed [review|staged|rollback-history|export <profile> <path>|inspect <path>|stage <path>|apply <path> [key ...]|apply-staged [key ...]|rollback <token>|lock <key> <source> <reason...>|unlock <key>]');
+        const stage = await stageManagedSettingsBundle(ctx.platform.configManager, bundle, sourcePath);
+        const ignoredNote = stage.ignoredKeys && stage.ignoredKeys.length > 0
+          ? `\nIgnored unknown keys (not staged): ${stage.ignoredKeys.join(', ')}`
+          : '';
+        if (sub === 'stage') {
+          ctx.print(`Managed settings bundle staged from ${sourcePath} (${stage.changeCount} changes, risk=${stage.risk}).${ignoredNote}`);
+          return;
+        }
+
+        // apply: a bundle that is not known to be low risk is staged for review instead of applied in one step.
+        if (stage.risk !== 'low' && !keyArguments.yes) {
+          ctx.print([
+            `Managed settings bundle staged from ${sourcePath} (${stage.changeCount} changes, risk=${stage.risk}); nothing was applied.`,
+            'Review it with /managed staged, then run /managed apply-staged, or re-run /managed apply <path> --yes.',
+            ...(ignoredNote ? [ignoredNote.trimStart()] : []),
+          ].join('\n'));
+          return;
+        }
+        const result = await applyStagedManagedBundle(ctx.platform.configManager, keyArguments.requestedKeys);
+        syncRuntimeMirror(ctx);
+        ctx.print(`Managed settings bundle applied from ${sourcePath} (${result.appliedCount} changes, risk=${stage.risk}, rollback ${result.rollbackToken}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}).${ignoredNote}`);
+      } catch (error) {
+        recordSettingsSyncFailure('managed', summarizeError(error), controlPlaneConfigDir);
+        ctx.print(`/managed ${sub} failed: ${summarizeError(error)}`);
+      }
     },
   });
 }

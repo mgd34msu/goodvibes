@@ -7,12 +7,14 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { OwnedWork } from '../utils/owned-work.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { findOriginalBrowserPage, observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
 import { captureBrowserPageConnection, BrowserPageConnectionError } from './browser-page-connection-data.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
-import { BrowserHostClient, remoteContext, type BrowserHostOptions } from './browser-host-client.js';
+import { BrowserHostClient, refreshRemotePages, remoteContext, type BrowserHostOptions } from './browser-host-client.js';
 import { createBrowserProvisionIo, DRIVER_VERSION, loadDriverModule } from './browser-provision-io.js';
 import { ensureBrowserBinary } from './browser-provisioning.js';
 import type {
@@ -73,7 +75,7 @@ interface TrackedPage {
 
 interface TrackedSession {
   readonly sessionId: string;
-  readonly lifetime: AbortController;
+  lifetime: AbortController;
   readonly origin: BrowserSessionOrigin;
   readonly context: BrowserContext;
   readonly browser: Browser | null;
@@ -227,9 +229,12 @@ export class BrowserSessionManager {
   /**
    * Consecutive launch failures, reset to 0 on any success. Capped at
    * `MAX_CONSECUTIVE_LAUNCH_FAILURES`, after that many failures in a row,
-   * `launch()` refuses to try again on its own rather than opening another
-   * window that will fail the same way. One value 2 means one real retry
-   * after the first failure, not open-ended retrying.
+   * `launch()` refuses one call rather than opening another window that will
+   * fail the same way. The refusal re-arms exactly one attempt, so the next
+   * launch (after the cause is fixed) really tries, and a failure there is
+   * refused again: retries alternate with refusals instead of looping, and
+   * the cap is never a lockout that only a restart clears. Cancelled
+   * launches are not failures and are not counted.
    */
   private consecutiveLaunchFailures = 0;
   private static readonly MAX_CONSECUTIVE_LAUNCH_FAILURES = 2;
@@ -355,8 +360,9 @@ export class BrowserSessionManager {
    *   2. A launch already in flight is awaited rather than duplicated, so
    *      concurrent calls cannot start two browser processes at once.
    *   3. Failures are counted; after MAX_CONSECUTIVE_LAUNCH_FAILURES in a row
-   *      launch refuses to try again on its own, and says so in plain words,
-   *      instead of opening one more window that will fail the same way.
+   *      launch refuses one call, and says so in plain words, instead of
+   *      opening one more window that will fail the same way. The call after
+   *      a refusal tries once more.
    */
   async launch(options: BrowserLaunchOptions = {}): Promise<BrowserLaunchResult> {
     this.#assertOpen();
@@ -378,9 +384,11 @@ export class BrowserSessionManager {
     }
 
     if (this.consecutiveLaunchFailures >= BrowserSessionManager.MAX_CONSECUTIVE_LAUNCH_FAILURES) {
+      const failures = this.consecutiveLaunchFailures;
+      this.consecutiveLaunchFailures = BrowserSessionManager.MAX_CONSECUTIVE_LAUNCH_FAILURES - 1;
       throw new BrowserSessionError(
-        `The browser failed to launch ${String(this.consecutiveLaunchFailures)} times in a row, so this agent stopped retrying automatically.`,
-        'Call action:"status" to see what went wrong, fix it, then call action:"launch" once more, automatic retries are capped at one.',
+        `The browser failed to launch ${String(failures)} times in a row, so this agent stopped retrying automatically and did not try this time.`,
+        'Call action:"status" to see what went wrong and fix it; the next action:"launch" will try exactly once more.',
       );
     }
 
@@ -392,7 +400,8 @@ export class BrowserSessionManager {
         return { ...info, reused: false };
       })
       .catch((error: unknown) => {
-        this.consecutiveLaunchFailures += 1;
+        // A cancelled turn or a shutdown says nothing about whether the browser can start.
+        if (!options.signal?.aborted) this.consecutiveLaunchFailures += 1;
         throw error;
       })
       .finally(() => {
@@ -585,7 +594,12 @@ export class BrowserSessionManager {
       current();
       await client.start();
       current();
+      // The host may sit nowhere near the driver this process resolved, so it
+      // is told where the driver is and which version this build requires.
+      const driverDirectory = this.io.resolveDriver().packageDirectory;
       const attached = await client.call<{ pages: { pages: { pageId: string; url: string }[] } }>('attach', { endpoint,
+        driverVersion: DRIVER_VERSION,
+        ...(driverDirectory ? { driverDirectory } : {}),
         ...(original ? { original: { targetId: original.targetId, browserContextId: original.browserContextId } } : {}),
       }, { signal });
       current();
@@ -679,6 +693,8 @@ export class BrowserSessionManager {
         session.activePageId = selected.pageId;
       }
       input.context.on('page', (page: Page) => { this.trackPage(session, page); });
+      // A browser the person closes must stop being the session calls default to.
+      input.context.on('close', () => { this.retireClosedSession(session); });
       this.#assertOpen();
       return this.describe(session);
     } catch (error) {
@@ -707,6 +723,22 @@ export class BrowserSessionManager {
     tracked.lifetime.abort(new BrowserSessionError('The original browser page was closed.'));
   }
 
+  /** Drop a session whose browser went away underneath it, releasing an attached transport too. */
+  private retireClosedSession(session: TrackedSession): void {
+    if (this.#closing || this.sessions.get(session.sessionId) !== session) return;
+    try {
+      if (session.origin === 'attached') this.releaseTrackedSession(session);
+      else this.forgetSession(session);
+    } catch (error) {
+      logger.warn('Browser session closed underneath the agent could not be released cleanly', { sessionId: session.sessionId, error: summarizeError(error) });
+    }
+  }
+
+  /** Sessions whose browser is known to be closed are dropped before anything is listed or chosen. */
+  private pruneClosedSessions(): void {
+    for (const session of [...this.sessions.values()]) if (!this.isSessionAlive(session)) this.retireClosedSession(session);
+  }
+
   private forgetSession(session: TrackedSession): void {
     if (this.sessions.get(session.sessionId) === session) this.sessions.delete(session.sessionId);
     session.lifetime.abort(new BrowserSessionError('The original browser session was closed or released.'));
@@ -729,6 +761,7 @@ export class BrowserSessionManager {
   }
 
   list(): readonly BrowserSessionInfo[] {
+    this.pruneClosedSessions();
     return [...this.sessions.values()].map((session) => this.describe(session));
   }
 
@@ -742,6 +775,7 @@ export class BrowserSessionManager {
 
   /** The session a call should act on when none is named. */
   defaultSessionId(): string | null {
+    this.pruneClosedSessions();
     const first = this.sessions.keys().next();
     return first.done === true ? null : first.value;
   }
@@ -949,6 +983,11 @@ export class BrowserSessionManager {
 
   private async pageListOwned(session: TrackedSession): Promise<readonly BrowserPageInfo[]> {
     const infos: BrowserPageInfo[] = [];
+    // A host-backed browser cannot push tab events; ask it which tabs exist.
+    try { await refreshRemotePages(session.context); } catch (error) {
+      logger.warn('Browser tabs could not be refreshed from the browser host', { sessionId: session.sessionId, error: summarizeError(error) });
+    }
+    this.assertSessionCurrent(session);
     for (const tracked of [...session.pages.values()]) {
       this.assertSessionCurrent(session);
       if (tracked.lifetime.signal.aborted) continue;
@@ -988,7 +1027,18 @@ export class BrowserSessionManager {
     }
     const info = this.describe(session);
     this.forgetSession(session);
-    return this.#operations.run(async () => { await this.closeContext(session.context); return info; });
+    return this.#operations.run(async () => {
+      try { await this.closeContext(session.context); } catch (error) {
+        // The browser is still there: list it again, with a fresh lifetime, so
+        // the close can be retried instead of the session vanishing.
+        if (!this.#closing && !this.sessions.has(session.sessionId)) {
+          session.lifetime = new AbortController();
+          this.sessions.set(session.sessionId, session);
+        }
+        throw error;
+      }
+      return info;
+    });
   }
 
   /** Retain failures and coalesce actual native context closure across callers. */

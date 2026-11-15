@@ -87,7 +87,7 @@ export interface ContractSessionHooks extends ContractAgentHooks {
    * work in that session, and returns the turn's stand-in record (its id is the
    * turn id). Null when no session-mode unit waits in the session.
    */
-  sessionTurn(sessionId: string, turnId: string): AgentRecord | null;
+  sessionTurn(sessionId: string, turnId: string, except?: ReadonlySet<string>): AgentRecord | null;
   /** Session mode: the oldest mid-run nudge waiting for the turn, taken once. */
   takeSessionNudge(record: AgentRecord): { readonly message: string; readonly nudgeId: string } | null;
 }
@@ -127,7 +127,7 @@ export interface UnitCheckLoopDeps {
   /** Gives the unit a fresh agent with its brief, "Previous checks" and `firstTurn` after them. */
   readonly respawnUnit: (run: ContractRun, unit: ContractUnit, reason: string, firstTurn: string) => void;
   /** Session mode: the session-mode contract and its unit waiting for work in `sessionId`. */
-  readonly sessionUnit: (sessionId: string) => { readonly run: ContractRun; readonly unit: ContractUnit } | null;
+  readonly sessionUnit: (sessionId: string, except?: ReadonlySet<string>) => { readonly run: ContractRun; readonly unit: ContractUnit } | null;
 }
 
 export interface UnitCheckLoop {
@@ -227,18 +227,45 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     return 'stopped';
   }
 
+  /**
+   * Runs a check and never rejects: callers start it detached (`void`), so a
+   * throw after the judgment (a refused move, an event listener, a missing
+   * nudge text) would otherwise be an unhandled rejection, with the unit held
+   * and its agent waiting on a hold nobody resolves.
+   */
   function runCheck(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
     if (run.terminal) return Promise.resolve();
-    return run.work.run(() => checkUnit(run, unit, trigger, given));
+    return run.work.run(() => checkUnit(run, unit, trigger, given)).catch((error: unknown) => { abandonCheck(run, unit, trigger, error); });
+  }
+
+  /** A check threw outside its guarded block: say so, fail the contract with the reason, and never leave the agent on its hold. */
+  function abandonCheck(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, error: unknown): void {
+    if (run.terminal) return;
+    logger.error('contract runner: a unit check stopped unexpectedly', { contractId: run.id, unitId: unit.id, trigger, error: summarizeError(error) });
+    try {
+      const failure = failureFromError(error);
+      deps.failContract(run, failure.kind, `the check of unit ${unit.id} stopped unexpectedly: ${failure.reason}`);
+    } catch (failError) {
+      logger.error('contract runner: the contract could not be failed after a unit check stopped', { contractId: run.id, unitId: unit.id, error: summarizeError(failError) });
+    } finally {
+      // Failing the contract releases every hold; this covers the contract already being past that.
+      run.releaseHold(unit);
+    }
+  }
+
+  /** A check that ended without a result frees the unit's check slot, or later mid-run checks only queue behind it. */
+  function retire(runtime: UnitRuntime, check: InFlightCheck): void {
+    if (runtime.check === check) runtime.check = null;
   }
 
   async function checkUnit(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
     requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     const runtime = run.runtime(unit);
     const config = run.env.config();
+    // A check asked for after the unit moved on (passed, ended, or taken by correction) has nothing to check.
+    if (unit.status !== 'held' && !run.tryMoveUnit(unit, 'checking')) return;
     const check: InFlightCheck = { trigger, abort: new AbortController(), superseded: false };
     runtime.check = check;
-    if (unit.status !== 'held') run.moveUnit(unit, 'checking');
     const signal = AbortSignal.any([runtime.abort.signal, check.abort.signal, run.abort.signal]);
     const evidenceOwner = { run, unit, runtime, runSignal: run.abort.signal, unitSignal: runtime.abort.signal,
       active: () => !run.terminal && !isTerminalUnitStatus(unit.status) && run.runtime(unit) === runtime };
@@ -271,10 +298,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
         paths: runtime.evidencePaths,
         signal,
       });
-      if (check.superseded || signal.aborted) return;
+      if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       if (!unitMustWrite(run.contract, unit)) unit.readEvidence = structuredClone(evidence.sourceReads ?? []);
       const selection = await selectSourceCitationEvidence(unit, evidence, nativeContractPort(run.contract, run.env.native, judgmentPort('contract.check.source-citation-purpose'), signal), signal);
-      if (check.superseded || signal.aborted) return;
+      if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       addJudgmentUsage(run.contract.judgmentUsage, selection.usage);
       evidence = selection.evidence;
       const settings = checkSettings(config);
@@ -388,6 +415,14 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       passUnit(run, unit, output);
       return;
     }
+    if (check.result === 'stall' && check.trigger === 'turn-end') {
+      // The agent is still working and this check no longer holds the unit's
+      // check slot, so routing it to correction now would race the agent's own
+      // completion check. That check reads the same history and routes the stall.
+      if (unit.status === 'checking') run.moveUnit(unit, 'running');
+      outcome.recordAction('recorded: a stall seen mid-run is routed at the completion check');
+      return;
+    }
     if (check.result === 'stall') {
       run.decide('stalled', unit.id, describeStall(outcome.stall!), check.decisionIds);
       await routeToCorrection(run, unit, outcome);
@@ -432,9 +467,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
 
   function passUnit(run: ContractRun, unit: ContractUnit, output: string, action?: string): void {
     const runtime = run.runtime(unit);
+    // A pass read after correction or the owner took the unit is not applied: they decide it now.
+    if (!run.tryMoveUnit(unit, awaitsMerge(run, unit) ? 'held-merge' : 'passed')) return;
     unit.answer = output;
     if (action !== undefined) run.decide('checked', unit.id, action);
-    run.moveUnit(unit, awaitsMerge(run, unit) ? 'held-merge' : 'passed');
     if (runtime.hold !== null) {
       run.releaseHold(unit);
     } else {
@@ -463,6 +499,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       return;
     }
     const agentId = unit.activeAgentId!;
+    if (!run.tryMoveUnit(unit, 'nudged')) {
+      outcome.recordAction(`discarded: the unit is ${unit.status} and no longer takes a nudge from this check`);
+      return;
+    }
     const nudge = createNudge({
       unit,
       checkId: check.id,
@@ -476,7 +516,6 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       at: run.env.now(),
     });
     unit.nudges.push(nudge);
-    run.moveUnit(unit, 'nudged');
     run.decide('nudged', unit.id, `check ${check.id}: ${found.kinds.join(', ')} (${nudge.delivery})`, check.decisionIds);
     run.emit({ type: 'CONTRACT_NUDGED', contractId: run.id, unitId: unit.id, nudgeId: nudge.id, checkId: check.id, kinds: nudge.kinds, criterionIds: nudge.criterionIds, delivery: nudge.delivery, agentId });
     outcome.recordAction(`nudged (${nudge.delivery})`);
@@ -525,8 +564,8 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     }
   }
 
-  function sessionTurn(sessionId: string, turnId: string): AgentRecord | null {
-    const found = deps.sessionUnit(sessionId);
+  function sessionTurn(sessionId: string, turnId: string, except?: ReadonlySet<string>): AgentRecord | null {
+    const found = deps.sessionUnit(sessionId, except);
     if (found === null) return null;
     const { run, unit } = found;
     const runtime = run.runtime(unit);

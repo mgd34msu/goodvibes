@@ -78,12 +78,14 @@ import {
   updatePluginState,
   updateRouteFailureState,
   updateRoutesDomainFromBinding,
+  removeRoutesDomainBinding,
   updateSessionState,
   updateSurfaceDomainFromRecord,
   updateTaskDomainFromRecord,
   updateTaskState,
   updateTransportState,
   updateWatcherDomainFromRecord,
+  removeWatcherDomainRecord,
 } from './helpers/reducers.js';
 
 export type RuntimeStore = StoreApi<RuntimeState>;
@@ -119,13 +121,17 @@ function mutateRuntimeStore(store: RuntimeStore, updater: (state: RuntimeState) 
 
 export interface DomainDispatch {
   dispatchTurnEvent(event: TurnEvent): void;
+  /** Forwarded from the `tools` bus domain by the host event bridge; it feeds `conversation.activeToolCalls`. */
   dispatchToolEvent(event: ToolEvent): void;
   dispatchGateEvent(event: GateEvent): void;
+  /** @deprecated No production host calls this; the task domain is driven by `syncRuntimeTask`/`transitionRuntimeTask`. */
   dispatchTaskEvent(event: TaskEvent): void;
   dispatchAgentEvent(event: AgentEvent): void;
   dispatchContractEvent(event: ContractEvent): void;
   dispatchCommunicationEvent(event: CommunicationEvent): void;
+  /** Forwarded from the `plugins` bus domain by the host event bridge. */
   dispatchPluginEvent(event: PluginEvent): void;
+  /** Forwarded from the `mcp` bus domain by the host event bridge; the MCP domain, and MCP health, are driven from it. */
   dispatchMcpEvent(event: McpEvent): void;
   dispatchTransportEvent(event: TransportEvent): void;
   dispatchCompactionEvent(event: CompactionEvent): void;
@@ -150,6 +156,7 @@ export interface DomainDispatch {
   syncAutomationJob(record: AutomationJob, source?: string): void;
   syncAutomationRun(record: AutomationRun, source?: string): void;
   syncRouteBinding(record: AutomationRouteBinding, source?: string): void;
+  removeRouteBinding(bindingId: string, source?: string): void;
   recordRouteBindingFailure(
     surfaceKind: AutomationSurfaceKind,
     externalId: string,
@@ -160,6 +167,7 @@ export interface DomainDispatch {
   syncDeliveryAttempt(record: AutomationDeliveryAttempt, source?: string): void;
   syncSurface(record: SurfaceRecord, source?: string): void;
   syncWatcher(record: WatcherRecord, source?: string): void;
+  removeWatcher(watcherId: string, source?: string): void;
 }
 
 export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
@@ -288,6 +296,12 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
         routes: updateRoutesDomainFromBinding(state.routes, record, source),
       }));
     },
+    removeRouteBinding(bindingId, source = 'domain-dispatch') {
+      mutateRuntimeStore(store, (state) => ({
+        ...state,
+        routes: removeRoutesDomainBinding(state.routes, bindingId, source),
+      }));
+    },
     recordRouteBindingFailure(surfaceKind, externalId, source = 'domain-dispatch') {
       mutateRuntimeStore(store, (state) => ({
         ...state,
@@ -316,6 +330,12 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
       mutateRuntimeStore(store, (state) => ({
         ...state,
         surfaces: updateSurfaceDomainFromRecord(state.surfaces, record, source),
+      }));
+    },
+    removeWatcher(watcherId, source = 'domain-dispatch') {
+      mutateRuntimeStore(store, (state) => ({
+        ...state,
+        watchers: removeWatcherDomainRecord(state.watchers, watcherId, source),
       }));
     },
     syncWatcher(record, source = 'domain-dispatch') {

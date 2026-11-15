@@ -37,6 +37,9 @@ export function findModelDefinitionForProvider(
   const providerCandidates = new Set(getProviderLookupCandidates(providerName, aliases));
   const resolvedModelId = modelId.includes(':') ? splitModelRegistryKey(modelId).resolvedModelId : modelId;
   if (modelId.includes(':')) {
+    // A colon may belong to the id itself (Ollama `llama3:8b`), so this provider's own exact id wins before the colon is read as a qualifier.
+    const own = registry.find((model) => model.id === modelId && providerCandidates.has(model.provider));
+    if (own) return own;
     const registryMatch = findModelDefinition(modelId, registry);
     return registryMatch && providerCandidates.has(registryMatch.provider)
       ? registryMatch

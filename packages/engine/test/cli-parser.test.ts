@@ -455,6 +455,22 @@ describe('a bare `-`', () => {
 });
 
 
+describe('session flags that would be ignored are refused', () => {
+  test('--session is accepted by run only', () => {
+    expect(parse(['run', '--session', 'sess-1', 'hello']).errors).toEqual([]);
+    expect(parse(['--session', 'sess-1']).errors).toEqual([
+      '--session is only supported with run; use --resume to reopen a session in the interactive shell.',
+    ]);
+  });
+
+  test('--fork is refused with run and still accepted for the interactive shell', () => {
+    expect(parse(['run', '--fork', 'sess-1', 'hello']).errors).toEqual([
+      '--fork is not supported with run; use --resume <id> or --session <id> to continue a session headlessly.',
+    ]);
+    expect(parse(['--fork', 'sess-1']).errors).toEqual([]);
+  });
+});
+
 describe('headless literal argument boundary', () => {
   for (const command of ['run', 'exec', 'e']) {
     test(`${command} includes literal -- arguments in the original prompt`, () => {

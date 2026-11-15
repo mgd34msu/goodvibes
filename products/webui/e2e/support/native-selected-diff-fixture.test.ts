@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { nativeConversationIntakeLookupResultSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
 import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import {
   loadSelectedDiffCapture,
-  recordedUnifiedDiff,
   selectedDiffPreview,
   selectedDiffDeliveryPhaseAfterMutation,
   validateSelectedDiffCapture,
@@ -45,9 +43,14 @@ describe("genuine native selected-hunk HTTP recordings", () => {
       );
       expect(source.kind).toBe(name === "session" ? "turn" : "work");
       expect(selector.kind).toBe(name);
-      expect(selector.revision).toBe(
-        createHash("sha256").update(recordedUnifiedDiff(scenario.diff!)).digest("hex")
-      );
+      // The revision is the opaque label the host wrote beside the diff it served, not a digest.
+      const servedDiff = JSON.parse(scenario.diff!.body) as {
+        nativeRevision?: string;
+        diff?: { nativeRevision?: string };
+      };
+      const servedRevision = servedDiff.diff?.nativeRevision ?? servedDiff.nativeRevision;
+      if (servedRevision === undefined) throw new Error("The served diff carries no native revision");
+      expect(selector.revision).toBe(servedRevision);
       expect(original.text).toStartWith("  ");
       expect(original.text).toEndWith("  ");
       expect(original.text).toContain("🌻");
@@ -141,7 +144,7 @@ describe("genuine native selected-hunk HTTP recordings", () => {
     diff.unifiedDiff += "\n";
     wrongDiff.session.diff!.body = JSON.stringify(diff);
     expect(() => validateSelectedDiffCapture(wrongDiff)).toThrow(
-      "Invalid host-written native diff revision"
+      "Changed recorded native diff view"
     );
     const wrongRevision = structuredClone(capture);
     const response = JSON.parse(wrongRevision.session.diff!.body) as { nativeRevision: string };
@@ -153,7 +156,7 @@ describe("genuine native selected-hunk HTTP recordings", () => {
     // compatibility verifier rather than fail the outer shape check.
     const wrongCommitment = structuredClone(capture);
     const oldDiff = JSON.parse(wrongCommitment.session.diff!.body) as { nativeRevision: string };
-    oldDiff.nativeRevision = (oldDiff.nativeRevision.startsWith("0") ? "1" : "0") + oldDiff.nativeRevision.slice(1);
+    oldDiff.nativeRevision = "0".repeat(64);
     wrongCommitment.session.diff!.body = JSON.stringify(oldDiff);
     expect(() => validateSelectedDiffCapture(wrongCommitment)).toThrow("Invalid host-written native diff revision");
     const wrongRoute = structuredClone(capture);

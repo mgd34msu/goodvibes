@@ -58,6 +58,7 @@ function controlPlaneStubs(): HandlerStubs {
     getEvents: jsonStub({ events: [] }),
     getConfig: jsonStub({ config: {} }),
     postConfig: jsonStub({ ok: true }),
+    postConfigReset: jsonStub({ ok: true }),
     getReview: jsonStub({ review: {} }),
   };
 }

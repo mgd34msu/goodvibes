@@ -94,7 +94,8 @@ describe('shell surface: the composer', () => {
       expect(lineToString(result.lines[2]!)).toContain('Ask anything');
       expect(status).toContain('esc  back to typing');
       // Esc leads; the other keys give way first.
-      expect(status.indexOf('esc  back to typing')).toBeLessThan(Math.max(status.indexOf('move between beads'), status.length));
+      const moveKeys = status.indexOf('move between beads');
+      if (moveKeys >= 0) expect(status.indexOf('esc  back to typing')).toBeLessThan(moveKeys);
       if (status.includes('↑↓')) expect(status.indexOf('esc')).toBeLessThan(status.indexOf('↑↓'));
     }
   });

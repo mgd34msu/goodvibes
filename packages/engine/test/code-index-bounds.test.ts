@@ -21,7 +21,16 @@ function makeRoot(): string {
   return root;
 }
 
+const stores: CodeIndexStore[] = [];
+/** Every store a test opens is closed in afterEach, so a failed assertion cannot leak a handle. */
+function openStore(...args: ConstructorParameters<typeof CodeIndexStore>): CodeIndexStore {
+  const store = new CodeIndexStore(...args);
+  stores.push(store);
+  return store;
+}
+
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   while (roots.length > 0) {
     const root = roots.pop()!;
     rmSync(root, { recursive: true, force: true });
@@ -40,7 +49,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'ignored.ts'), 'export const secret = 1;\n');
     writeFileSync(join(root, 'kept.ts'), 'export const kept = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const stats = await store.buildFull();
@@ -61,7 +70,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'hidden', 'nested', 'secret.ts'), 'export const secret = 1;\n');
     writeFileSync(join(root, 'root-only', 'excluded.ts'), 'export const excluded = 1;\n');
     writeFileSync(join(root, 'sub', 'root-only', 'kept.ts'), 'export const kept = 1;\n');
-    const store = new CodeIndexStore(root, ':memory:', makeRegistry(root));
+    const store = openStore(root, ':memory:', makeRegistry(root));
     await store.init();
     try {
       const stats = await store.buildFull();
@@ -77,7 +86,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'big.ts'), `export const big = '${'x'.repeat(2000)}';\n`);
     writeFileSync(join(root, 'small.ts'), 'export const small = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry, { maxFileBytes: 200 });
+    const store = openStore(root, ':memory:', registry, { maxFileBytes: 200 });
     await store.init();
 
     const stats = await store.buildFull();
@@ -93,7 +102,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'b.ts'), 'export const b = 1;\n');
     writeFileSync(join(root, 'c.ts'), 'export const c = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry, { maxFiles: 1 });
+    const store = openStore(root, ':memory:', registry, { maxFiles: 1 });
     await store.init();
 
     const stats = await store.buildFull();
@@ -111,7 +120,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'b.ts'), 'export const bbbbbbbbbb = 1;\n');
     writeFileSync(join(root, 'c.ts'), 'export const cccccccccc = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry, { maxTotalBytes: 50 });
+    const store = openStore(root, ':memory:', registry, { maxTotalBytes: 50 });
     await store.init();
 
     const stats = await store.buildFull();
@@ -130,7 +139,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'sub', 'kept.ts'), 'export const nestedKept = 1;\n');
     writeFileSync(join(root, 'top.ts'), 'export const top = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const stats = await store.buildFull();
@@ -147,7 +156,7 @@ describe('CodeIndexStore: bounds honesty', () => {
     writeFileSync(join(root, 'a.bin'), Buffer.from([0, 1, 2, 0, 3, 4]));
     writeFileSync(join(root, 'kept.ts'), 'export const kept = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const stats = await store.buildFull();
@@ -155,12 +164,12 @@ describe('CodeIndexStore: bounds honesty', () => {
     expect(stats.filesIndexed).toBe(1);
   });
 
-  test('skip counts never silently disappear across an empty build', async () => {
+  test('every skip counter a build reports is a finite, non-negative number', async () => {
     const root = makeRoot();
     writeFileSync(join(root, '.gitignore'), 'ignored/**\n');
     writeFileSync(join(root, 'kept.ts'), 'export const kept = 1;\n');
     const registry = makeRegistry(root);
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const stats = await store.buildFull();

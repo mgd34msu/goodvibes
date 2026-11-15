@@ -159,6 +159,19 @@ function readRecords(db: SqlDatabase): Map<string, TriageStoredRecord> {
   return new Map((db.exec('SELECT id, latest, settled FROM triage_receipts')[0]?.values ?? []).map(decodeRecord));
 }
 
+/**
+ * Name the file and the way out when an existing image is refused. The image is
+ * never repaired or replaced here, and labels are recomputed by the next triage
+ * run, so moving the file aside loses nothing that cannot be rebuilt.
+ */
+function refusedImage<T>(path: string, read: () => T): T {
+  try { return read(); }
+  catch (error) {
+    if (!(error instanceof Error)) throw error;
+    throw new Error(`${error.message} The triage receipt file is ${path}; it was left untouched. Move it aside and the next triage run starts a new one.`, { cause: error });
+  }
+}
+
 function publishImage(path: string, image: Uint8Array, signal?: AbortSignal, assertPublicationCurrent?: () => void): void {
   abortIfRequested(signal);
   checkPath(path);
@@ -228,11 +241,11 @@ export class SqliteTriageStore implements TriageStore {
     }
     return this.enqueue(async () => {
       const SQL = await loadSqlJsEngine();
-      const image = readImage(this.path);
+      const image = refusedImage(this.path, () => readImage(this.path));
       if (!image) return new Map<string, TriageStoredRecord>();
       const db = createSqlJsDatabase(SQL.Database, image);
       try {
-        const records = readRecords(db);
+        const records = refusedImage(this.path, () => readRecords(db));
         return new Map([...records].filter(([id]) => requested.has(id)));
       } finally {
         db.close();
@@ -259,11 +272,11 @@ export class SqliteTriageStore implements TriageStore {
       if (checked.length === 0) return;
       const SQL = await loadSqlJsEngine();
       abortIfRequested(signal);
-      const image = readImage(this.path);
+      const image = refusedImage(this.path, () => readImage(this.path));
       const db = createSqlJsDatabase(SQL.Database, image);
       try {
         if (!image) initializeSchema(db);
-        const records = readRecords(db);
+        const records = refusedImage(this.path, () => readRecords(db));
         abortIfRequested(signal);
         db.run('BEGIN TRANSACTION');
         for (const receipt of checked) {

@@ -21,6 +21,15 @@ export interface InboxIdentityRegistryOwner {
   readonly beforeWrite?: (() => void) | undefined;
 }
 const unavailable = () => new Error('Inbox native identity registry is unavailable');
+/** Fixed causes only: the registry's contents and paths are never echoed. */
+const REGISTRY_UNAVAILABLE_CAUSES = {
+  file: 'its file must be a regular file with a single link, owned by this user, mode 0600 and under 16 MiB; correct the file and retry.',
+  content: 'its content is not a valid registry for this version; restore it from a backup rather than deleting it, because the mirrors it names would be orphaned.',
+  locked: 'another process holds its lock; retry once that process has finished.',
+} as const;
+class RegistryUnavailable extends Error {
+  constructor(cause: keyof typeof REGISTRY_UNAVAILABLE_CAUSES) { super(`Inbox native identity registry is unavailable: ${REGISTRY_UNAVAILABLE_CAUSES[cause]}`); this.name = 'Error'; }
+}
 export function captureRegistryOwner(owner: InboxIdentityRegistryOwner): InboxIdentityRegistryOwner {
   return Object.freeze({ workingDirectory: owner.workingDirectory, assertCurrent: owner.assertCurrent.bind(owner), beforeWrite: owner.beforeWrite?.bind(owner) });
 }
@@ -71,7 +80,7 @@ export async function updateInboxIdentityRegistry<R, T>(owner: InboxIdentityRegi
   }
   const path = join(directory, format.fileName), lock = `${path}.owner.lock`;
   const release = tryAcquireCrossProcessLock(lock);
-  if (!release) throw unavailable();
+  if (!release) throw new RegistryUnavailable('locked');
   try {
     const held = lockStamp(lock), payload = readFileSync(lock);
     const current = () => {
@@ -85,10 +94,12 @@ export async function updateInboxIdentityRegistry<R, T>(owner: InboxIdentityRegi
     try {
       const stat = lstatSync(path);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
-        || (stat.mode & 0o777) !== 0o600 || (process.geteuid && stat.uid !== process.geteuid()) || stat.size > 16 * 1024 * 1024) throw unavailable();
+        || (stat.mode & 0o777) !== 0o600 || (process.geteuid && stat.uid !== process.geteuid()) || stat.size > 16 * 1024 * 1024) throw new RegistryUnavailable('file');
       const source = readFileObservation(path); observed = source.physical;
-      registry = format.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)));
+      try { registry = format.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes))); }
+      catch { throw new RegistryUnavailable('content'); }
     } catch (error) {
+      if (error instanceof RegistryUnavailable) throw error;
       if (!missing(error)) throw unavailable();
       registry = format.empty();
     }
@@ -113,6 +124,6 @@ export async function updateInboxIdentityRegistry<R, T>(owner: InboxIdentityRegi
     return { value: result.value, assertDirectoryCurrent: () => {
       if (realpathSync(owner.workingDirectory) !== root || parents.some(parent => directoryStamp(parent.path) !== parent.stamp)) throw unavailable();
     } };
-  } catch { throw unavailable(); }
+  } catch (error) { throw error instanceof RegistryUnavailable ? error : unavailable(); }
   finally { try { release(); } catch { throw unavailable(); } }
 }

@@ -56,7 +56,7 @@ export function createAgentLocalStateInputProjector(capture: (args: Record<strin
   isRead: (args: Record<string, unknown>) => boolean): ToolInputProjector {
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
-    if (protectedText(request.args)) throw new ToolInputProjectionError('held');
+    if (protectedText(request.args)) throw new ToolInputProjectionError('invalid'); // secret-like text in the arguments
     const captured = capture(request.args);
     const targets = captured.targets.map(target => ({ ...target, root: resolve(target.root), path: resolve(target.path) }));
     const roots = targets.map(target => realpathSync(target.root));

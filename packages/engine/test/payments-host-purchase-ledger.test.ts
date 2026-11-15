@@ -107,10 +107,14 @@ describe('DaemonPurchaseLedger', () => {
 
   test('the limit is clamped rather than trusted', async () => {
     const ledger = new DaemonPurchaseLedger({ filePath });
-    await ledger.record(purchase());
-    expect(ledger.list({ limit: 0, dayKey: undefined }).purchases).toHaveLength(1);
+    for (let index = 0; index <= MAX_PURCHASE_LIST_LIMIT; index++) await ledger.record(purchase({ purchaseId: `pur-${String(index)}` }));
+    // A zero or negative limit still returns the newest row; an absurd or non-finite one stops at the ceiling.
+    expect(ledger.list({ limit: 0, dayKey: undefined }).purchases.map(row => row.purchaseId)).toEqual([`pur-${String(MAX_PURCHASE_LIST_LIMIT)}`]);
     expect(ledger.list({ limit: -5, dayKey: undefined }).purchases).toHaveLength(1);
-    expect(ledger.list({ limit: MAX_PURCHASE_LIST_LIMIT * 10, dayKey: undefined }).purchases).toHaveLength(1);
+    expect(ledger.list({ limit: MAX_PURCHASE_LIST_LIMIT * 10, dayKey: undefined }).purchases).toHaveLength(MAX_PURCHASE_LIST_LIMIT);
+    expect(ledger.list({ limit: Number.NaN, dayKey: undefined }).purchases).toHaveLength(MAX_PURCHASE_LIST_LIMIT);
+    // The count still reports every matching row, so a caller can see the page was cut.
+    expect(ledger.list({ limit: MAX_PURCHASE_LIST_LIMIT * 10, dayKey: undefined }).total).toBe(MAX_PURCHASE_LIST_LIMIT + 1);
   });
 
   test('a record with no merchantDiscovered reads as false, never as a claim', async () => {

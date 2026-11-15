@@ -99,6 +99,17 @@ function render(
   return lines;
 }
 
+const SINGLE_LANE_GLYPHS = ["square", "ascii"] as const;
+
+/** Every golden name defineWorkTreeGoldens writes. */
+export function workTreeGoldenNames(): string[] {
+  return [
+    ...WORK_TREE_SCENES.map((make) => `work-tree-${make().name}`),
+    ...SINGLE_LANE_GLYPHS.map((glyphs) => `work-tree-single-lane-${glyphs}`),
+    "work-tree-lanes-80",
+  ];
+}
+
 export function defineWorkTreeGoldens(
   THEME: "goodvibes" | "goodvibes-neon",
 ): void {
@@ -139,7 +150,7 @@ export function defineWorkTreeGoldens(
       });
     }
 
-    for (const glyphs of ["square", "ascii"] as const) {
+    for (const glyphs of SINGLE_LANE_GLYPHS) {
       test(`work-tree-single-lane-${glyphs}`, () => {
         const lines = render(singleLaneScene(), glyphs);
         assertGoldenIn(DIR, `work-tree-single-lane-${glyphs}`, lines);

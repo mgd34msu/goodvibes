@@ -35,6 +35,10 @@ function fakeServiceRegistry(secrets: Record<string, string | undefined> = {}): 
   } as unknown as ServiceRegistry;
 }
 
+/** An explicit webhook is resolved and pinned to a checked address; the test resolves every name to a documentation address. */
+const resolveHost = async () => [{ address: '203.0.113.10', family: 4 as const }];
+const PINNED = 'https://203.0.113.10';
+
 const fakeArtifactStore = {} as unknown as ArtifactStore;
 
 /**
@@ -96,13 +100,14 @@ describe('google chat delivery resolves the webhook from the route binding', () 
       fakeServiceRegistry(),
       fakeArtifactStore,
       noSecrets,
+      { resolveHost },
     );
 
     const result = await strategy.deliver(requestWithBindingMetadata({ webhookUrl: BINDING_WEBHOOK }));
 
     expect(result.responseId).toBe('spaces/AAAA/messages/msg-1');
     const [target] = spy.mock.calls[0]!;
-    expect(String(target)).toBe(BINDING_WEBHOOK);
+    expect(String(target)).toBe(`${PINNED}${new URL(BINDING_WEBHOOK).pathname}${new URL(BINDING_WEBHOOK).search}`);
   });
 
   test('the thread key from the binding still rides along with it', async () => {
@@ -112,6 +117,7 @@ describe('google chat delivery resolves the webhook from the route binding', () 
       fakeServiceRegistry(),
       fakeArtifactStore,
       noSecrets,
+      { resolveHost },
     );
 
     await strategy.deliver(requestWithBindingMetadata({ webhookUrl: BINDING_WEBHOOK }));
@@ -128,6 +134,7 @@ describe('google chat delivery resolves the webhook from the route binding', () 
       fakeServiceRegistry(),
       fakeArtifactStore,
       noSecrets,
+      { resolveHost },
     );
     const request = {
       ...requestWithBindingMetadata({ webhookUrl: BINDING_WEBHOOK }),
@@ -136,7 +143,7 @@ describe('google chat delivery resolves the webhook from the route binding', () 
 
     await strategy.deliver(request);
 
-    expect(String(spy.mock.calls[0]![0])).toBe(ADDRESS_WEBHOOK);
+    expect(String(spy.mock.calls[0]![0])).toBe(`${PINNED}${new URL(ADDRESS_WEBHOOK).pathname}${new URL(ADDRESS_WEBHOOK).search}`);
   });
 
   test('binding metadata outranks the configured default, matching the webhook strategy', async () => {
@@ -146,11 +153,12 @@ describe('google chat delivery resolves the webhook from the route binding', () 
       fakeServiceRegistry(),
       fakeArtifactStore,
       noSecrets,
+      { resolveHost },
     );
 
     await strategy.deliver(requestWithBindingMetadata({ webhookUrl: BINDING_WEBHOOK }));
 
-    expect(String(spy.mock.calls[0]![0])).toBe(BINDING_WEBHOOK);
+    expect(String(spy.mock.calls[0]![0])).toBe(`${PINNED}${new URL(BINDING_WEBHOOK).pathname}${new URL(BINDING_WEBHOOK).search}`);
   });
 
   test('a binding with no webhook metadata still falls through to config', async () => {

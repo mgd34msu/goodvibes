@@ -87,3 +87,72 @@ test('beforeAttempt rejection prevents the initial transport entirely', async ()
   await expect(withRetry(async () => { sent++; return 'unexpected'; }, { beforeAttempt() { throw new Error('stale source'); } })).rejects.toThrow('stale source');
   expect(sent).toBe(0);
 });
+
+describe('withRetry provider-stated waits', () => {
+  test('waits at least the error retryAfterMs and reports it to onRetry', async () => {
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { ProviderError } = await import('../platform/src/platform/types/errors.js');
+    const controller = new AbortController();
+    const delays: number[] = [];
+    let attempts = 0;
+    // Aborting from onRetry ends the backoff at once, so the test never sleeps.
+    await expect(withRetry(
+      async () => { attempts++; throw new ProviderError('rate limited', { statusCode: 429, retryAfterMs: 5000 }); },
+      { maxRetries: 3, initialDelayMs: 1, maxDelayMs: 10, signal: controller.signal },
+      (_a, _m, delayMs) => { delays.push(delayMs); controller.abort(); },
+    )).rejects.toThrow('rate limited');
+    expect(delays).toHaveLength(1);
+    expect(delays[0]!).toBeGreaterThanOrEqual(5000);
+    expect(attempts).toBe(1);
+  });
+
+  test('surfaces a wait longer than the honoured ceiling instead of retrying early', async () => {
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { ProviderError } = await import('../platform/src/platform/types/errors.js');
+    let attempts = 0;
+    let retries = 0;
+    await expect(withRetry(
+      async () => { attempts++; throw new ProviderError('slow down', { statusCode: 429, retryAfterMs: 600_000 }); },
+      { maxRetries: 3, initialDelayMs: 0, maxDelayMs: 0 },
+      () => { retries++; },
+    )).rejects.toThrow('slow down');
+    expect(attempts).toBe(1);
+    expect(retries).toBe(0);
+  });
+
+  test('does not retry a billing failure even though its status is retryable', async () => {
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { ProviderError } = await import('../platform/src/platform/types/errors.js');
+    let attempts = 0;
+    await expect(withRetry(
+      async () => { attempts++; throw new ProviderError('quota spent', { statusCode: 429, category: 'billing' }); },
+      { maxRetries: 3, initialDelayMs: 0, maxDelayMs: 0 },
+    )).rejects.toThrow('quota spent');
+    expect(attempts).toBe(1);
+  });
+});
+
+describe('withRetry canRetry', () => {
+  test('a retryable failure after delivered output is final when the host says so', async () => {
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { AppError } = await import('../platform/src/platform/types/errors.js');
+    let delivered = false;
+    let attempts = 0;
+    await expect(withRetry(
+      async () => { attempts++; delivered = true; throw new AppError('stream dropped', 'TEST_TRANSIENT', true); },
+      { maxRetries: 3, initialDelayMs: 0, maxDelayMs: 0, canRetry: () => !delivered },
+    )).rejects.toThrow('stream dropped');
+    expect(attempts).toBe(1);
+  });
+
+  test('still retries when nothing was delivered', async () => {
+    const { withRetry } = await import('../platform/src/platform/utils/retry.js');
+    const { AppError } = await import('../platform/src/platform/types/errors.js');
+    let attempts = 0;
+    const result = await withRetry(
+      async () => { attempts++; if (attempts < 2) throw new AppError('early failure', 'TEST_TRANSIENT', true); return 'ok'; },
+      { maxRetries: 3, initialDelayMs: 0, maxDelayMs: 0, canRetry: () => true },
+    );
+    expect(result).toBe('ok');
+  });
+});

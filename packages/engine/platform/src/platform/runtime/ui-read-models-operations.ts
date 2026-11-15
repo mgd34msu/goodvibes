@@ -180,6 +180,7 @@ export function createOperationsReadModels(
         const unsubs = [
           runtimeStore.subscribe(listener),
           runtimeServices.approvalBroker.subscribe(listener),
+          runtimeServices.sessionBroker.subscribe(() => listener()),
         ];
         return combineSubscriptions(...unsubs);
       },

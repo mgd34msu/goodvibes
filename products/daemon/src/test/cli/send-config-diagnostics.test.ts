@@ -171,13 +171,16 @@ describe('standalone send config-load diagnostics', () => {
     expect(fx.result.logs.find((entry) => entry[0] === 'warn')?.[2].error).toContain('JSON Parse error');
   });
 
-  test('the config CLI reports readable malformed settings diagnostics and exits unsuccessfully', () => {
+  test('the config CLI names the malformed settings file and withholds its content, exiting unsuccessfully', () => {
     const fx = probe('config');
     expect(fx.result.code).toBe(1);
     expect(fx.result.stdout).toEqual([]);
     expect(fx.result.stderr).toEqual(['Daemon command failed']);
-    expect(fx.rawStdout).toContain(SENTINEL);
-    expect(fx.rawStderr).toContain(SENTINEL);
+    expect(fx.rawStdout).not.toContain(SENTINEL);
+    expect(fx.rawStderr).not.toContain(SENTINEL);
+    expect(fx.rawStderr).toContain('REFUSED (whole file)');
+    expect(fx.rawStderr).toContain(fx.path);
+    expect(fx.rawStderr).toContain('could not be read as JSON');
   });
 
   test('structural mode retains canonical daemon migration and settings precedence', () => {

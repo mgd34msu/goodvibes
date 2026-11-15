@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import * as nodeCrypto from 'node:crypto';
 import { generatedFactSupportMetadata } from '../platform/src/platform/knowledge/semantic/fact-support-write-plan.js';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -246,9 +246,9 @@ describe('generated fact field support and subject attachment', () => {
 
 });
 
-// UNRUN: no decorative per-field/source/checksum work in this real whole-pass reader.
+// No decorative per-field/source/checksum work in this real whole-pass reader.
 test('fresh exact duplicate pass has no SHA computations, while private source distinctions still hold', async () => {
-  const fake = readings(), hashing = spyOn(crypto, 'createHash');
+  const fake = readings(), hashing = spyOn(nodeCrypto, 'createHash');
   try {
     const [first, duplicate] = await prepareGeneratedFactSupport([input(), input()]);
     expect(first).toEqual(duplicate); expect(fake.requests).toHaveLength(10);
@@ -288,7 +288,7 @@ test('proxy outer request collection is refused before length/prototype/descript
   await held(prepareGeneratedFactSupport(inputs), 'malformed'); expect(traps).toBe(0); expect(fake.requests).toHaveLength(0);
 });
 
-// UNRUN original snapshot reuse is pass-local and value-checked, not raw-ref trust.
+// Original snapshot reuse is pass-local and value-checked, not raw-ref trust.
 test('many claims share one original source version only after exact current comparison', () => {
   const originals = createSupportOriginalValues(), item = input(), first = projectSupportInput(item, undefined, originals);
   const duplicate = projectSupportInput({ ...item, claim: { ...item.claim, title: 'Another claim over the same evidence' } }, undefined, originals);

@@ -313,16 +313,23 @@ describe('the cursor advances only after processing completes', () => {
     await expect(store.advance({ account: 'acct-1', mailbox: 'INBOX', uidValidity: 2, lastSeenUid: 20 })).rejects.toThrow('UIDVALIDITY mismatch');
   });
 
-  test('a crash between fetch and advance() leaves the cursor where it was, so recovery re-fetches rather than skips', async () => {
+  test('an advance() whose write fails leaves the persisted cursor where it was, so recovery re-fetches rather than skips', async () => {
     const store = new MailboxCursorStore(storePath);
     await store.resolve({ account: 'acct-1', mailbox: 'INBOX', serverUidValidity: 1, currentHighestUid: 10, currentMessageCount: 10 });
-    // Simulate: new mail (UID 11) was fetched but processing crashed before advance() ran.
-    const beforeCrash = await store.get('acct-1', 'INBOX');
-    // No advance() call here, this is the crash.
+
+    // The write is what fails; the reply must not claim the move happened.
+    const inner = (store as unknown as { store: { persist: (snapshot: unknown) => Promise<void> } }).store;
+    const realPersist = inner.persist.bind(inner);
+    inner.persist = async () => { throw new Error('disk full'); };
+    await expect(store.advance({ account: 'acct-1', mailbox: 'INBOX', uidValidity: 1, lastSeenUid: 11 })).rejects.toThrow('disk full');
+
     const afterRestart = new MailboxCursorStore(storePath);
-    const cursor = await afterRestart.get('acct-1', 'INBOX');
-    expect(cursor?.lastSeenUid).toBe(beforeCrash?.lastSeenUid);
-    expect(cursor?.lastSeenUid).toBe(10); // UID 11 was never marked processed, a UID SEARCH UID 11:* refetches it.
+    expect((await afterRestart.get('acct-1', 'INBOX'))?.lastSeenUid).toBe(10); // UID 11 was never marked processed, a UID SEARCH UID 11:* refetches it.
+
+    // Same call with a working write does move it, so the assertion above is about the failure.
+    inner.persist = realPersist;
+    await store.advance({ account: 'acct-1', mailbox: 'INBOX', uidValidity: 1, lastSeenUid: 11 });
+    expect((await new MailboxCursorStore(storePath).get('acct-1', 'INBOX'))?.lastSeenUid).toBe(11);
   });
 
   test('advance() never moves the cursor backwards, so a late write cannot resurrect handled mail', async () => {

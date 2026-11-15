@@ -18,6 +18,7 @@ import {
   statSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -66,12 +67,11 @@ describe('atomicWriteSecretFile: durability', () => {
   beforeEach(() => { dir = tempDir('fsync'); });
   afterEach(() => cleanup(dir));
 
-  test('auth-users.json is written atomically (no .tmp file left on success)', () => {
+  test('auth-users.json is written atomically (no staging file left on success)', () => {
     const bootstrapFilePath = join(dir, 'auth-users.json');
-    const tmpPath = bootstrapFilePath + '.tmp';
     makeManager(dir);
     expect(existsSync(bootstrapFilePath)).toBe(true);
-    expect(existsSync(tmpPath)).toBe(false);
+    expect(readdirSync(dir).filter((name) => name.includes('.tmp'))).toEqual([]);
   });
 
   test('auth-users.json contains valid JSON after write', () => {
@@ -493,16 +493,25 @@ describe('scrypt cost parameterization', () => {
     expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash.split(':').slice(1, 4)).toEqual(['4096', '8', '2']);
   });
 
-  test('a failed upgrade write keeps the original credential usable', () => {
+  test('a failed upgrade write keeps the original credential and the login usable', () => {
     const path = join(dir, 'auth-users.json');
     const old = UserAuthManager.hashPassword('old-password', { N: 1024, r: 8, p: 1 });
-    writeFileSync(path, JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old }] }));
+    const stored = JSON.stringify({ version: 1, users: [{ username: 'owner', passwordHash: old }] });
+    writeFileSync(path, stored);
     const mgr = makeManager(dir, { scryptParams: { N: 2048, r: 8, p: 1 } });
-    mkdirSync(path + '.tmp');
-    expect(() => mgr.authenticate('owner', 'old-password')).toThrow();
-    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash).toBe(old);
-    rmSync(path + '.tmp', { recursive: true });
+    // A directory where the store file belongs makes the publication fail for every uid.
+    rmSync(path);
+    mkdirSync(path);
+    const failed = mgr.authenticate('owner', 'old-password');
+    expect(failed.ok).toBe(true);
+    if (failed.ok) expect(failed.user.passwordHash).toBe(old);
+    expect(statSync(path).isDirectory()).toBe(true);
+    expect(readdirSync(dir).filter((name) => name.includes('.tmp'))).toEqual([]);
+    // The upgrade is retried on the next login once the store is writable again.
+    rmSync(path, { recursive: true });
+    writeFileSync(path, stored);
     expect(mgr.authenticate('owner', 'old-password').ok).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8')).users[0].passwordHash.split(':').slice(1, 4)).toEqual(['2048', '8', '1']);
   });
 
   test('rotatePassword uses configured scrypt params', () => {
@@ -611,51 +620,52 @@ describe('accountLocks cap and eviction', () => {
   beforeEach(() => { dir = tempDir('acct-locks-cap'); });
   afterEach(() => cleanup(dir));
 
-  test('cap is enforced: inserting beyond maxAccountLocks evicts an entry', () => {
-    // Use a tiny cap to make the test feasible
-    const cap = 5;
-    const mgr = new UserAuthManager({
+  function capped(cap: number, nowFn: () => number): UserAuthManager {
+    return new UserAuthManager({
       bootstrapFilePath: join(dir, 'auth-users.json'),
       bootstrapCredentialPath: join(dir, 'auth-bootstrap.txt'),
+      scryptParams: { N: 1024, r: 8, p: 1 },
       maxAccountLocks: cap,
+      nowFn,
     });
-    // Fail with `cap` different unknown usernames to fill the map
-    for (let i = 0; i < cap; i++) {
-      mgr.authenticate(`spray-user-${i}`, 'wrong');
-    }
-    // Insert one more, must trigger eviction so size stays <= cap
-    mgr.authenticate('spray-user-overflow', 'wrong');
-    // Total entries in the map must not exceed cap + 1 (the overflow user
-    // is added, then eviction removes one, net = cap).
-    // We verify indirectly: another failure for a known user still works,
-    // proving the map hasn't grown without bound (no OOM).
-    // Direct count is not exposed, so verify the result shape instead.
-    const r = mgr.authenticate('spray-user-overflow', 'wrong');
-    expect(r.ok).toBe(false);
+  }
+  const tracked = (mgr: UserAuthManager, names: readonly string[]): string[] =>
+    names.filter((name) => mgr.getAccountLockState(name) !== undefined);
+
+  test('the number of tracked usernames never exceeds maxAccountLocks', () => {
+    const cap = 3;
+    const mgr = capped(cap, () => 1_000_000);
+    const names = Array.from({ length: cap + 4 }, (_, i) => `spray-user-${i}`);
+    for (const name of names) mgr.authenticate(name, 'wrong');
+    expect(tracked(mgr, names)).toHaveLength(cap);
+    // The newest name is always tracked: the cap evicts old entries, not new attempts.
+    expect(tracked(mgr, names)).toContain(names[names.length - 1]!);
   });
 
-  test('stale entries (expired lock, low failure count) are evicted before live entries', () => {
+  test('a stale entry (no active lock, under 6 failures) is evicted before locked entries', () => {
+    const mgr = capped(3, () => 1_000_000);
+    mgr.authenticate('stale', 'wrong');
+    for (const name of ['locked-1', 'locked-2']) for (let i = 0; i < 6; i++) mgr.authenticate(name, 'wrong');
+    mgr.authenticate('newcomer', 'wrong');
+    expect(mgr.getAccountLockState('stale')).toBeUndefined();
+    expect(mgr.getAccountLockState('locked-1')?.failures).toBe(6);
+    expect(mgr.getAccountLockState('locked-2')?.failures).toBe(6);
+    expect(mgr.getAccountLockState('newcomer')?.failures).toBe(1);
+  });
+
+  test('when every entry has a lock history the one whose lock ended first is evicted, never an active lock', () => {
     let fakeNow = 1_000_000;
-    const cap = 3;
-    const mgr = new UserAuthManager({
-      bootstrapFilePath: join(dir, 'auth-users.json'),
-      bootstrapCredentialPath: join(dir, 'auth-bootstrap.txt'),
-      maxAccountLocks: cap,
-      nowFn: () => fakeNow,
-    });
-    // Fill with 3 entries that each get a 30s lock (6 failures each)
-    for (const u of ['a', 'b', 'c']) {
-      for (let i = 0; i < 6; i++) mgr.authenticate(u, 'wrong');
-    }
-    // Fast-forward past the 30s lock for all three
-    fakeNow += 31_000;
-    // Now all three have stale (expired) locks with failure count = 6
-    // Adding a 4th entry should evict a stale one, not a live one
-    mgr.authenticate('d', 'wrong'); // 1 failure, no lock yet
-    // 'd' should have a lock state entry
-    const dState = mgr.getAccountLockState('d');
-    expect(dState).toBeDefined();
-    expect(dState!.failures).toBe(1);
+    const mgr = capped(3, () => fakeNow);
+    for (const name of ['a', 'b']) for (let i = 0; i < 6; i++) mgr.authenticate(name, 'wrong'); // locked until t0 + 30s
+    fakeNow += 20_000;
+    for (let i = 0; i < 6; i++) mgr.authenticate('c', 'wrong'); // locked until t0 + 50s
+    fakeNow += 15_000; // a and b locks ended, c is still locked
+    mgr.authenticate('d', 'wrong');
+    expect(mgr.getAccountLockState('a')).toBeUndefined();
+    const c = mgr.getAccountLockState('c');
+    expect(c?.failures).toBe(6);
+    expect(c!.lockedUntil).toBeGreaterThan(fakeNow);
+    expect(tracked(mgr, ['a', 'b', 'c', 'd'])).toEqual(['b', 'c', 'd']);
   });
 
   test('enumeration parity: unknown usernames are tracked the same as known ones', () => {

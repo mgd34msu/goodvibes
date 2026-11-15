@@ -43,14 +43,14 @@ function titleCaseWords(value: string): string {
 export function formatAgentRecordSource(source: string | undefined): string {
   const normalized = (source ?? '').trim().toLowerCase();
   if (!normalized) return 'Unknown';
-  if (normalized in SOURCE_LABELS) return SOURCE_LABELS[normalized as SourceLabelKey];
+  if (Object.hasOwn(SOURCE_LABELS, normalized)) return SOURCE_LABELS[normalized as SourceLabelKey];
   return titleCaseWords(source ?? '');
 }
 
 export function formatAgentRecordReviewState(reviewState: string | undefined): string {
   const normalized = (reviewState ?? '').trim().toLowerCase();
   if (!normalized) return REVIEW_STATE_LABELS.fresh;
-  if (normalized in REVIEW_STATE_LABELS) return REVIEW_STATE_LABELS[normalized as ReviewStateLabelKey];
+  if (Object.hasOwn(REVIEW_STATE_LABELS, normalized)) return REVIEW_STATE_LABELS[normalized as ReviewStateLabelKey];
   return titleCaseWords(reviewState ?? '');
 }
 

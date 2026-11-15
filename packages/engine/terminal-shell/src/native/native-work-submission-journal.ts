@@ -136,7 +136,8 @@ function readFile(path: string): JournalFile {
  * and durable publication. An AtomicWriteDurabilityError is deliberately allowed
  * to escape unchanged: published-indeterminate bytes must never be rolled back,
  * deleted, treated as absent or used for a POST without explicit confirmation.
- * There is no expiry or eviction of unresolved identities.
+ * There is no expiry or eviction of unresolved identities; a record leaves only
+ * through `remove`, once its submission has a validated receipt.
  */
 export class NativeWorkSubmissionJournal {
   readonly path: string;
@@ -181,6 +182,20 @@ export class NativeWorkSubmissionJournal {
         || Buffer.byteLength(JSON.stringify(file), 'utf8') > NATIVE_SUBMISSION_JOURNAL_MAX_BYTES) {
         throw new NativeSubmissionJournalError('journal_limit');
       }
+      this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+    });
+  }
+
+  /** Release a settled record so its slot can serve another binding. Only the exact requestId is removed. */
+  async remove(binding: NativeSubmissionJournalBinding, requestId: string): Promise<void> {
+    const selected = copyBinding(binding);
+    if (typeof requestId !== 'string' || !requestId.length) throw new NativeSubmissionJournalError('conflict');
+    await this.locked(() => {
+      const file = readFile(this.path);
+      const index = file.records.findIndex(existing => sameBinding(existing.binding, selected));
+      if (index < 0) return;
+      if (file.records[index]!.command.requestId !== requestId) throw new NativeSubmissionJournalError('conflict');
+      file.records.splice(index, 1);
       this.io.writeJsonFileAtomic(this.path, file, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
     });
   }

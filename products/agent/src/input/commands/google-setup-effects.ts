@@ -72,7 +72,9 @@ export function googleSetupWritePorts(config: ConfigManager, secrets: SecretsMan
               committed: () => {
                 const receipt = secrets.inspectWriteTransition(token);
                 if (receipt.phase !== 'committed') throw new Error('The setup credential write has no committed receipt.');
-                committed = true; secretTransition = undefined; expectedSecret = receipt.beforeGeneration + 2;
+                committed = true; secretTransition = undefined;
+                // The store's own settled generation, not a count of how far one write advances it.
+                expectedSecret = secretRevision?.().generation;
                 current(); ownership.committed();
               },
             };

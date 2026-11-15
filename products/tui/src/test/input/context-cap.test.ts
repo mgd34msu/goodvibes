@@ -247,10 +247,6 @@ describe('ModelPickerModal: deleteContextCapChar', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ProviderRegistry, setModelContextCap
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Handler, Space key (local vs cloud)
 // ---------------------------------------------------------------------------
 
@@ -281,23 +277,30 @@ describe('ModelPickerModal: isLocalModel', () => {
     expect(picker.isLocalModel(cloud)).toBe(false);
   });
 
-  test('cloud model does NOT trigger enterContextCapMode when space is pressed (guard check)', () => {
+  function pressSpace(model: ModelDefinition): void {
+    picker.openAllModels([model], model.id);
+    handleModelPickerToken({
+      modelPicker: picker,
+      modalStack: ['modelPicker'],
+      commandContext: {} as never,
+      getViewportHeight: () => 30,
+      requestRender: () => {},
+      handleEscape: () => {},
+    }, { type: 'text', value: ' ' } as never);
+  }
+
+  test('Space on a cloud model leaves the picker on its model list', () => {
     const cloud = makeCloudModel();
-    // If isLocalModel returns false, enterContextCapMode should not be called.
-    // Verify the guard: mode stays 'model' if we respect isLocalModel result.
-    expect(picker.isLocalModel(cloud)).toBe(false);
-    // Caller (handler) should NOT call enterContextCapMode for cloud models
-    //, this test confirms the discriminator works correctly
-    picker.models = [cloud];
-    picker.openAllModels([cloud], cloud.registryKey!);
+    pressSpace(cloud);
     expect(picker.mode).toBe('model');
+    expect(picker.contextCapPendingModel).toBeNull();
   });
 
-  test('local model enables entering contextCap mode when space is pressed', () => {
+  test('Space on a local model opens the context cap entry for that model', () => {
     const local = makeLocalModel();
-    expect(picker.isLocalModel(local)).toBe(true);
-    picker.enterContextCapMode(local);
+    pressSpace(local);
     expect(picker.mode).toBe('contextCap');
+    expect(picker.contextCapPendingModel).toBe(local);
   });
 });
 

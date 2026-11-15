@@ -3,19 +3,20 @@ import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { createEditTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const PROJECT_ROOT = process.cwd();
-
-let tmpCounter = 0;
+// The tool resolves paths against its `cwd` option, so every test points it at a
+// per-run temp directory instead of the checkout.
+let projectRoot = '';
 
 function makeTmpDir(): string {
-  const dir = join(PROJECT_ROOT, `.test-edit-nb-tmp-${process.pid}-${++tmpCounter}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  projectRoot = makeProjectTempDir('test-edit-nb');
+  mkdirSync(projectRoot, { recursive: true });
+  return projectRoot;
 }
 
 function writeFile(dir: string, name: string, content: string): string {
@@ -26,7 +27,7 @@ function writeFile(dir: string, name: string, content: string): string {
 
 /** Return a relative path from project root (for use as tool input path). */
 function relPath(absPath: string): string {
-  return absPath.slice(PROJECT_ROOT.length + 1);
+  return absPath.slice(projectRoot.length + 1);
 }
 
 /** Build a minimal valid Jupyter notebook JSON string. */
@@ -87,7 +88,7 @@ describe('edit tool: notebook operations', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     fileCache = new FileStateCache();
-    tool = createEditTool(fileCache, { cwd: PROJECT_ROOT });
+    tool = createEditTool(fileCache, { cwd: tmpDir });
   });
 
   afterEach(() => {
@@ -633,16 +634,10 @@ describe('edit tool: notebook operations', () => {
     test('rejects operation when file was externally modified', async () => {
       const nb = makeNotebook([{ cell_type: 'code', source: 'x' }]);
       const file = writeFile(tmpDir, 'nb.ipynb', nb);
-      // Update cache with old content
-      fileCache.update(join(tmpDir, 'nb.ipynb'), 'old content hash marker');
-      // Write different content to disk (simulating external modification)
-      writeFileSync(file, nb, 'utf-8');
-      // The cache now shows the file as potentially modified since content changed
-      // We need to mark as modified by having cache see different content
-      // Actually the cache uses content hash - let's just prime with different content
+      // The cache holds different content than the disk, so the file reads as modified since it was last seen.
       const freshCache = new FileStateCache();
       freshCache.update(join(tmpDir, 'nb.ipynb'), 'different content than on disk');
-      const toolWithFreshCache = createEditTool(freshCache, { cwd: PROJECT_ROOT });
+      const toolWithFreshCache = createEditTool(freshCache, { cwd: tmpDir });
 
       const result = await toolWithFreshCache.execute({
         notebook_operations: {

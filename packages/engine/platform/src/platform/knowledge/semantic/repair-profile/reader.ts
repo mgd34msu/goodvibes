@@ -8,8 +8,8 @@ import { freezeSupport } from '../verification/projection.js';
 import { repairProfileCategory, repairProfileValue, repairProfileSupport } from './battery.js';
 import { REPAIR_PROFILE_CATEGORIES as CATEGORIES, REPAIR_PROFILE_LIMITS as LIMITS, KnowledgeRepairProfileHeldError as Held,
   type RepairProfileReadingInput, type RepairProfileValueCandidate, type RepairProfileSelection } from './types.js';
+import { isRecord as record } from '../reader-validation.js';
 export * from './types.js';
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 /** Mechanical paragraph/sentence spans only. Single newlines keep table labels with their values. */
 export function repairProfileValueCandidates(text: string): readonly RepairProfileValueCandidate[] {
   const candidates: RepairProfileValueCandidate[] = [];

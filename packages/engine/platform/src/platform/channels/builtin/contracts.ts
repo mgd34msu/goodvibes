@@ -104,12 +104,23 @@ export async function getBuiltinDoctorReport(
 ): Promise<ChannelDoctorReport> {
   const account = accountId ? await context.resolveAccount(surface, accountId) : await context.buildAccount(surface);
   const effectiveAccount = account ?? await context.buildAccount(surface);
+  const requestedAccountMissing = accountId !== undefined && account === null;
   const lifecycle = await getBuiltinLifecycleState(context, surface, accountId);
   const checks: ChannelDoctorCheck[] = [];
   const pushCheck = (id: string, label: string, status: ChannelDoctorStatus, detail: string, repairActionId?: string) => {
     checks.push({ id, label, status, detail, ...(repairActionId ? { repairActionId } : {}), metadata: {} });
   };
 
+  if (requestedAccountMissing) {
+    // The checks below describe the surface's default account, not the one asked
+    // for; say so instead of echoing the requested id over another account's state.
+    pushCheck(
+      'account-found',
+      'Requested account exists',
+      'fail',
+      `No account '${accountId}' exists on this surface; the checks below describe the surface's default account.`,
+    );
+  }
   pushCheck(
     'configured',
     'Configuration present',
@@ -176,10 +187,12 @@ export async function getBuiltinDoctorReport(
   if (surface === 'whatsapp' && !surfaces.whatsapp.phoneNumberId && surfaces.whatsapp.provider === 'meta-cloud') {
     pushCheck('provider-shape', 'Provider metadata', 'warn', 'Meta Cloud mode works best with a phone number id configured.', 'setup');
   }
-  if (surface === 'telephony' && surfaces.telephony.provider === 'bridge' && !surfaces.telephony.bridgeUrl) {
+  // Delivery goes through the bridge when either the provider or the delivery mode says so (strategies-bridge.ts).
+  const telephonyUsesBridge = surfaces.telephony.provider === 'bridge' || surfaces.telephony.mode === 'bridge';
+  if (surface === 'telephony' && telephonyUsesBridge && !surfaces.telephony.bridgeUrl) {
     pushCheck('bridge-url', 'Bridge URL', 'fail', 'Bridge mode requires a telephony bridge URL.', 'setup');
   }
-  if (surface === 'telephony' && surfaces.telephony.provider === 'twilio' && (!surfaces.telephony.accountSid || !surfaces.telephony.authToken || !surfaces.telephony.fromNumber)) {
+  if (surface === 'telephony' && !telephonyUsesBridge && surfaces.telephony.provider === 'twilio' && (!surfaces.telephony.accountSid || !surfaces.telephony.authToken || !surfaces.telephony.fromNumber)) {
     pushCheck('twilio-credentials', 'Twilio credentials', 'fail', 'Direct provider mode requires account SID, auth token, and a sender/caller number.', 'setup');
   }
   if (surface === 'telephony' && !surfaces.telephony.defaultRecipient) {
@@ -243,9 +256,9 @@ export async function getBuiltinDoctorReport(
     ...(accountId ? { accountId } : {}),
     state: resolveChannelHealthState({
       enabled: effectiveAccount.enabled,
-      // `linked` rather than `configured`: the account's `configured` flag is
-      // true for every surface, because the account id falls back to the
-      // literal `surface:<name>` and so can never be absent.
+      // `linked` rather than `configured`: a surface can hold an account
+      // identity (a workspace or topic id) and still have no credential that
+      // resolves, and that surface cannot send.
       configured: effectiveAccount.linked || surface === 'tui' || surface === 'web',
       credentialResolves: surface === 'tui' || surface === 'web'
         || effectiveAccount.secrets.some((secret) => secret.resolved ?? secret.configured),
@@ -258,6 +271,7 @@ export async function getBuiltinDoctorReport(
     repairActions: await listBuiltinRepairActions(context, surface, accountId),
     metadata: {
       accountId: effectiveAccount.accountId ?? effectiveAccount.id,
+      ...(requestedAccountMissing ? { requestedAccountFound: false } : {}),
     },
   };
 }
@@ -281,6 +295,7 @@ export async function resolveBuiltinAllowlist(
   context: BuiltinContractContext,
   surface: ChannelSurface,
   input: ChannelAllowlistEditInput,
+  options: { readonly createIfMissing?: boolean } = {},
 ): Promise<ChannelAllowlistResolution> {
   const requested = [...(input.add ?? []), ...(input.remove ?? [])];
   const resolved: ChannelAllowlistTarget[] = [];
@@ -292,7 +307,8 @@ export async function resolveBuiltinAllowlist(
     seen.add(candidate);
     const target = await context.resolveTarget(surface, {
       input: candidate,
-      createIfMissing: true,
+      // A lookup answers from what exists; only an edit may mint a target.
+      createIfMissing: options.createIfMissing === true,
       ...(input.kind ? { preferredKind: preferredConversationKindForAllowlist(input.kind) } : {}),
     });
     if (!target) {
@@ -327,7 +343,7 @@ export async function editBuiltinAllowlist(
   input: ChannelAllowlistEditInput,
 ): Promise<ChannelAllowlistEditResult> {
   await context.channelPolicy.start();
-  const resolution = await resolveBuiltinAllowlist(context, surface, input);
+  const resolution = await resolveBuiltinAllowlist(context, surface, input, { createIfMissing: true });
   const addInputs = new Set((input.add ?? []).map((value) => value.trim()).filter(Boolean));
   const removeInputs = new Set((input.remove ?? []).map((value) => value.trim()).filter(Boolean));
   const added = resolution.resolved.filter((entry) => addInputs.has(entry.input));
@@ -336,13 +352,17 @@ export async function editBuiltinAllowlist(
   const scoped = Boolean(input.groupId || input.channelId || input.workspaceId);
 
   if (scoped) {
+    // The group is the one matching EVERY scope field given: matching on any
+    // one of them would let an edit scoped to (group A, workspace W) rewrite
+    // another group's policy that merely shares W.
     const match = existing.groupPolicies.find((entry) => (
-      (input.groupId && entry.groupId === input.groupId)
-      || (input.channelId && entry.channelId === input.channelId)
-      || (input.workspaceId && entry.workspaceId === input.workspaceId)
+      (!input.groupId || entry.groupId === input.groupId)
+      && (!input.channelId || entry.channelId === input.channelId)
+      && (!input.workspaceId || entry.workspaceId === input.workspaceId)
     ));
+    const scopeKey = [input.groupId, input.channelId, input.workspaceId].filter(Boolean).join(':') || 'scope';
     const nextGroup = {
-      id: match?.id ?? `allowlist:${surface}:${input.groupId ?? input.channelId ?? input.workspaceId ?? 'scope'}`,
+      id: match?.id ?? `allowlist:${surface}:${scopeKey}`,
       ...(match?.label ? { label: match.label } : {}),
       ...(input.groupId ? { groupId: input.groupId } : match?.groupId ? { groupId: match.groupId } : {}),
       ...(input.channelId ? { channelId: input.channelId } : match?.channelId ? { channelId: match.channelId } : {}),

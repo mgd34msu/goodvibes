@@ -20,7 +20,6 @@ test('fixture allocates fresh owned paths and cleanup is idempotent', () => {
   const first = fixture(); const second = fixture();
   expect(first.cacheDir).not.toBe(second.cacheDir);
   expect(existsSync(first.cacheDir)).toBe(true);
-  first.restoreEnv();
   first.cleanup(); first.cleanup();
   expect(existsSync(first.cacheDir)).toBe(false);
   expect(existsSync(second.cacheDir)).toBe(true);

@@ -70,7 +70,7 @@ export const clusterConfigDefaults: { cluster: ClusterConfig } = {
   },
 };
 
-export const clusterConfigSettings: ConfigSettingDefinition[] = [
+const clusterSettingRows: ConfigSettingDefinition[] = [
   {
     key: 'cluster.enabled',
     type: 'boolean',
@@ -83,7 +83,7 @@ export const clusterConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 30,
     description:
-      'How often the responsible node tells the others it is still alive, in seconds. Lower means a faster crash takeover and slightly more network chatter.',
+      'How often the responsible node tells the others it is still alive, in seconds. Lower means slightly faster notice that a node is alive and more network chatter; it does not by itself shorten a crash takeover, which waits for cluster.masterTimeoutSeconds.',
     ...intRange(1, 3_600),
   },
   {
@@ -91,7 +91,7 @@ export const clusterConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 90,
     description:
-      'How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Must be at least two heartbeats.',
+      'How long a standby node waits without a heartbeat before it decides the responsible node has crashed and holds an election, in seconds. This is the CRASH path only: a node shut down normally hands over immediately, so ordinary restarts never wait this out. Used as at least two heartbeats: a value below that is raised to two heartbeats at runtime.',
     ...intRange(2, 86_400),
   },
   {
@@ -153,7 +153,30 @@ export const clusterConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 60,
     description:
-      'How often this machine shares the group\'s member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. Lower means changes settle everywhere faster.',
+      'How often this machine shares the group\'s member list with the others, in seconds. This is how a rename, a newly added machine or a removal reaches every machine in the group, including ones that were switched off when it happened. The member list is checked on a 30 second timer, so any value below 30 behaves as 30. Higher means changes settle more slowly.',
     ...intRange(10, 3_600),
   },
 ];
+
+/**
+ * Settings the group runtime resolves once when the daemon starts. A change is
+ * saved at once but only takes effect after a restart; the description says so
+ * on every surface that shows it.
+ */
+export const CLUSTER_STARTUP_ONLY_KEYS: ReadonlySet<string> = new Set([
+  'cluster.heartbeatSeconds',
+  'cluster.masterTimeoutSeconds',
+  'cluster.bootProbeSeconds',
+  'cluster.port',
+  'cluster.multicastGroup',
+  'cluster.beaconSeconds',
+  'cluster.rosterGossipSeconds',
+  'cluster.keyRotationHours',
+  'cluster.keyRotationGraceMinutes',
+]);
+
+export const CLUSTER_RESTART_NOTE = 'Applies after the daemon restarts.';
+
+export const clusterConfigSettings: ConfigSettingDefinition[] = clusterSettingRows.map(row => (
+  CLUSTER_STARTUP_ONLY_KEYS.has(row.key) ? { ...row, description: `${row.description} ${CLUSTER_RESTART_NOTE}` } : row
+));

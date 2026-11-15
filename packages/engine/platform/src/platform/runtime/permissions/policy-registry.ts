@@ -5,8 +5,12 @@
  * Enforces the rule that no bundle may move to enforcement without
  * prior simulation evidence and a passing divergence gate.
  *
- * Bundle lifecycle:
+ * Bundle lifecycle (declared once in `policyBundleLifecycle` below):
  *   loaded → simulating → promoting (gate check) → active (enforced)
+ *   A failed simulation returns the candidate to `loaded`; a candidate with
+ *   evidence can be simulated again. An active bundle becomes `superseded`
+ *   when another is promoted (and can be restored by rollback) or
+ *   `rolled-back` when rollback replaces it.
  *
  * At any time:
  *   - `current`  , the bundle whose rules are actively enforced
@@ -20,6 +24,7 @@ import type { PolicyBundlePayload, BundleProvenance, PolicyLoadResult, PolicyLoa
 import { loadPolicyBundle } from './policy-loader.js';
 import type { DivergenceReport, SimulationMode } from './types.js';
 import type { EnforceGateResult } from './divergence-dashboard.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 // ── Registry types ─────────────────────────────────────────────────────────────
 
@@ -30,14 +35,25 @@ import type { EnforceGateResult } from './divergence-dashboard.js';
  * - `simulating`, Simulation pipeline is active; divergence being collected.
  * - `promoting` , Gate check in progress; simulation evidence collected.
  * - `active`    , Bundle is the enforced policy.
- * - `rolled-back`: Bundle was superseded by a rollback operation.
+ * - `superseded`, Bundle was enforced until another was promoted; rollback can restore it.
+ * - `rolled-back`: Bundle was replaced by a rollback operation.
  */
 export type BundleLifecycleState =
   | 'loaded'
   | 'simulating'
   | 'promoting'
   | 'active'
+  | 'superseded'
   | 'rolled-back';
+
+const policyBundleLifecycle = defineLifecycle<BundleLifecycleState>('Policy bundle', {
+  loaded: ['simulating'],
+  simulating: ['promoting', 'loaded'],
+  promoting: ['simulating', 'active'],
+  active: ['superseded', 'rolled-back'],
+  superseded: ['active'],
+  'rolled-back': [],
+});
 
 /**
  * A versioned policy bundle entry in the registry.
@@ -207,17 +223,46 @@ export class PolicyRegistry {
    * markSimulating, Transition candidate to `simulating` state.
    *
    * Called by the `/policy simulate` command when a simulation pipeline
-   * is started. Validates that a candidate is loaded and in `loaded` state.
+   * is started. A `loaded` candidate starts its first simulation; a
+   * `promoting` candidate is simulated again and its earlier evidence is
+   * dropped, so promotion always reads the newest run.
    *
    * @returns true if the state was successfully advanced.
    */
   public markSimulating(): boolean {
-    if (!this._candidate || this._candidate.state !== 'loaded') {
+    if (!this._candidate || !policyBundleLifecycle.can(this._candidate.state, 'simulating')) {
       return false;
     }
     this._publicationRevision++;
-    this._candidate = { ...this._candidate, state: 'simulating' };
+    this._candidate = { ...this._candidate, state: 'simulating', simulationReport: undefined, gateResult: undefined };
     return true;
+  }
+
+  /**
+   * abandonSimulation, Return a `simulating` candidate to `loaded` when its
+   * simulation failed or its results were discarded, so it can be simulated
+   * again instead of staying stuck.
+   *
+   * @returns true if the candidate was returned to `loaded`.
+   */
+  public abandonSimulation(): boolean {
+    if (!this._candidate || this._candidate.state !== 'simulating') {
+      return false;
+    }
+    this._publicationRevision++;
+    this._candidate = { ...this._candidate, state: 'loaded' };
+    return true;
+  }
+
+  /**
+   * Why the candidate cannot move to `to` right now, in the lifecycle's own
+   * words ("Policy bundle is X and cannot become Y; from X it can become …"),
+   * or null when the move is legal.
+   */
+  public describeCandidateRefusal(to: BundleLifecycleState): string | null {
+    if (!this._candidate) return null;
+    const check = policyBundleLifecycle.check(this._candidate.state, to);
+    return check.ok ? null : check.reason;
   }
 
   /**
@@ -277,15 +322,13 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Simulation is in progress. Attach a divergence report before promoting.',
+          'Simulation is in progress. Wait for `/policy simulate` to finish, then promote.',
       };
     }
 
-    if (this._candidate.state !== 'promoting') {
-      return {
-        ok: false,
-        error: `Candidate is in unexpected state: "${this._candidate.state}".`,
-      };
+    const check = policyBundleLifecycle.check(this._candidate.state, 'active');
+    if (!check.ok) {
+      return { ok: false, error: `${check.reason}.` };
     }
 
     const gateResult = this._candidate.gateResult;
@@ -307,15 +350,16 @@ export class PolicyRegistry {
           `Promotion blocked: divergence gate is "${gateResult.status}" ` +
           `(rate ${rateStr} exceeds threshold ` +
           `${(gateResult.threshold * 100).toFixed(1)}%). ` +
-          `Reduce divergence or run more evaluations before promoting.`,
+          `Change the candidate's rules and load it again, run \`/policy simulate\` again, ` +
+          `or promote with --force to override the gate.`,
       };
     }
 
     const now = new Date().toISOString();
 
-    // Archive the current active bundle
+    // Archive the current active bundle; rollback can restore it.
     if (this._current) {
-      this._archiveVersion({ ...this._current });
+      this._archiveVersion({ ...this._current, state: 'superseded' });
     }
 
     // Promote candidate to active
@@ -346,7 +390,7 @@ export class PolicyRegistry {
    * @returns `RollbackResult` indicating success or failure.
    */
   public rollback(): RollbackResult {
-    const previous = this._history.findLast((v) => v.state === 'active');
+    const previous = this._history.findLast((v) => v.state === 'superseded');
 
     if (!previous) {
       return {

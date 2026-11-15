@@ -73,16 +73,19 @@ afterEach(() => {
 
 describe('PriceSourceNote', () => {
   test('each known source renders a label and an edit action, distinct per source', async () => {
-    const labels: string[] = [];
+    const expected = {
+      user: ['your price', 'Edit price'],
+      catalog: ['catalog price', 'Set price'],
+      provider: ['provider-served price', 'Set price'],
+      mixed: ['mixed pricing sources', 'Set price'],
+    } as const;
     for (const costSource of ['user', 'catalog', 'provider', 'mixed'] as const) {
       const { el, unmount } = render({ costSource, provider: 'openrouter', model: 'deepseek/deepseek-chat' });
       await settle();
-      labels.push(el.querySelector('.price-source-note__label')?.textContent ?? '');
-      expect(el.querySelector('.price-source-note__edit')).not.toBeNull();
+      expect(el.querySelector('.price-source-note__label')?.textContent).toBe(expected[costSource][0]);
+      expect(el.querySelector('.price-source-note__edit')?.textContent).toBe(expected[costSource][1]);
       unmount();
     }
-    expect(labels.every((label) => label.length > 0)).toBe(true);
-    expect(new Set(labels).size).toBe(labels.length);
   });
 
   test('a served as-of date is carried in the label', async () => {
@@ -93,7 +96,7 @@ describe('PriceSourceNote', () => {
       model: 'deepseek/deepseek-chat',
     });
     await settle();
-    expect(el.querySelector('.price-source-note__label')?.textContent).toContain('2026');
+    expect(el.querySelector('.price-source-note__label')?.textContent).toMatch(/^catalog price, as of .*2026/);
     unmount();
   });
 

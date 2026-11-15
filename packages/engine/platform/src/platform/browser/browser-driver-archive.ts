@@ -183,7 +183,9 @@ export function extractTarGzTree(
   let directories = 0;
   let bytes = 0;
   mkdirSync(destination, { recursive: true });
-  for (const entry of readTarGzEntries(archive)) {
+  // Strict: a truncated member or bad size must fail the extraction, not
+  // leave a partial tree that reads as a finished one.
+  for (const entry of readTarGzEntries(archive, { strict: true })) {
     if (entry.kind === 'other') continue;
     const relative = strip(entry.path, stripComponents);
     if (relative === null || relative.length === 0) continue;

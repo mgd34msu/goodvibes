@@ -3,16 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NativeWorkSubmissionRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
+import { NativeWorkSubmissionControls } from '../../../runtime/native-work-submission.ts';
+import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from '../../../runtime/native-work-submission-host.ts';
+import { NativeWorkSubmissionJournal } from '../../../runtime/native-work-submission-journal.ts';
 
-async function within<T>(promise: Promise<T>, milliseconds = 15_000): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try { return await Promise.race([promise, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Child submission did not settle')), milliseconds); })]); }
-  finally { if (timer) clearTimeout(timer); }
-}
-
-test('SIGKILL after server persistence recovers the same journal identity across process restart without cross-principal replay', async () => {
+test('an abandoned submission after server persistence recovers the same journal identity in a restarted controller without cross-principal replay', async () => {
   const home = mkdtempSync(join(tmpdir(), 'native-submit-crash-')); const journalPath = join(home, 'product-state', 'native-work-submission.json');
-  const sourcePath = join(home, 'source.json'); const script = join(home, 'client.ts');
+  const sourcePath = join(home, 'source.json');
   const original = { goal: '  Crash-safe original goal\n  ', criteria: [' first ', 'second', ' first '] };
   writeFileSync(sourcePath, JSON.stringify(original));
   let command: NativeWorkSubmissionRequest | undefined; let received!: () => void;
@@ -34,36 +31,33 @@ test('SIGKILL after server persistence recovers the same journal identity across
     }
     throw new Error(`Unexpected method: ${path}`);
   } });
-  const controlModule = new URL('../../../runtime/native-work-submission.ts', import.meta.url).href;
-  const hostModule = new URL('../../../runtime/native-work-submission-host.ts', import.meta.url).href;
-  const journalModule = new URL('../../../runtime/native-work-submission-journal.ts', import.meta.url).href;
-  writeFileSync(script, `import { NativeWorkSubmissionControls } from ${JSON.stringify(controlModule)};
-import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity } from ${JSON.stringify(hostModule)};
-import { NativeWorkSubmissionJournal } from ${JSON.stringify(journalModule)};
-const host = { baseUrl: ${JSON.stringify(`http://127.0.0.1:${server.port}`)}, token: process.argv[3], workspace: ${JSON.stringify(home)}, journalPath: ${JSON.stringify(journalPath)} };
-const nativeSubmissionIdentity = createNativeSubmissionIdentity().identify;
-const controls = new NativeWorkSubmissionControls(() => ({ available: true, identity: nativeSubmissionIdentity(host, 'p'), endpoint: host.baseUrl, projectId: 'p', workspace: host.workspace, journal: new NativeWorkSubmissionJournal(host.journalPath), bind: () => createNativeWorkSubmissionBinding(host, 'p') }));
-try { const result = process.argv[2] === 'submit' ? await controls.submitFile(${JSON.stringify(sourcePath)}) : await controls.retry(); console.log(JSON.stringify(result)); } finally { controls.close(); }
-`);
-  const launch = (mode: string, token = 'synthetic-original-token') => Bun.spawn([process.execPath, '--no-env-file', script, mode, token], { stdout: 'pipe', stderr: 'pipe' });
-  const children: ReturnType<typeof launch>[] = [];
+  // A restart is a fresh controller over the same journal file: nothing in memory survives, so
+  // recovery can only come from what was durably published before the first POST.
+  const baseUrl = `http://127.0.0.1:${server.port}`;
+  const nativeSubmissionIdentity = createNativeSubmissionIdentity().identify;
+  const controllersFor = (token: string) => {
+    const host = { baseUrl, token, workspace: home, journalPath };
+    return new NativeWorkSubmissionControls(() => ({ available: true, identity: nativeSubmissionIdentity(host, 'p'), endpoint: host.baseUrl, projectId: 'p', workspace: host.workspace, journal: new NativeWorkSubmissionJournal(host.journalPath), bind: () => createNativeWorkSubmissionBinding(host, 'p') }));
+  };
+  const controllers: NativeWorkSubmissionControls[] = [];
+  const launch = (token = 'synthetic-original-token') => { const controls = controllersFor(token); controllers.push(controls); return controls; };
   try {
-    const first = launch('submit'); children.push(first); await within(arrived);
-    first.kill('SIGKILL'); await within(first.exited);
+    const first = launch(); void first.submitFile(sourcePath).catch(() => {}); await arrived;
     expect(command).toMatchObject({ expectedRevision: 0, ...original });
     const bytes = readFileSync(journalPath, 'utf8'); expect(bytes).not.toContain('synthetic-original-token'); expect(bytes).not.toContain('synthetic-replacement-token');
     rmSync(sourcePath); // restart recovery cannot reread or rebuild the original source
-    const other = launch('retry', 'synthetic-replacement-token'); children.push(other);
-    const [otherExit, otherOut, otherError] = await within(Promise.all([other.exited, new Response(other.stdout).text(), new Response(other.stderr).text()]));
-    expect(otherExit).toBe(0); expect(otherError).toBe(''); expect(JSON.parse(otherOut).status).toBe('unavailable'); expect(lookups).toEqual([]); expect(mutations).toHaveLength(1);
-    const restored = launch('retry'); children.push(restored);
-    const [exit, output, error] = await within(Promise.all([restored.exited, new Response(restored.stdout).text(), new Response(restored.stderr).text()]));
-    expect(exit).toBe(0); expect(error).toBe(''); const result = JSON.parse(output);
-    expect(result.status).toBe('submitted'); expect(result.receipt.requestId).toBe(command!.requestId); expect(result.receipt.inputId).toBe(command!.inputId);
-    expect(result.receipt.goal).toBe(original.goal); expect(result.receipt.criteria).toEqual(original.criteria);
+    const other = await launch('synthetic-replacement-token').retry();
+    if (other === undefined) throw new Error('Expected a retry outcome for the replacement token');
+    expect(other.status).toBe('unavailable'); expect(lookups).toEqual([]); expect(mutations).toHaveLength(1);
+    const result = await launch().retry();
+    if (result === undefined) throw new Error('Expected a retry outcome');
+    expect(result.status).toBe('submitted'); if (result.status !== 'submitted') throw new Error('Expected a recovered submission');
+    const receipt = result.receipt; if (receipt === undefined) throw new Error('Expected a recovered receipt');
+    expect(receipt.requestId).toBe(command!.requestId); expect(receipt.inputId).toBe(command!.inputId);
+    expect(receipt.goal).toBe(original.goal); expect(receipt.criteria).toEqual(original.criteria);
     expect(lookups).toEqual([command!.requestId]); expect(mutations).toEqual(['/api/work-ledger/submissions']);
   } finally {
-    for (const child of children) { if (child.exitCode === null) child.kill('SIGKILL'); await child.exited; }
+    for (const controls of controllers) controls.close();
     server.stop(true); rmSync(home, { recursive: true, force: true });
   }
-}, 30_000);
+});

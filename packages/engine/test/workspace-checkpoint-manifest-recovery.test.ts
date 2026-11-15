@@ -57,7 +57,8 @@ describe('checkpoint manifest recovery', () => {
     try {
       const first = new WorkspaceCheckpointManager({ workspaceRoot: root });
       writeFileSync(join(root, 'a.txt'), 'a'.repeat(200));
-      expect(await first.create({ kind: 'manual', label: 'cp1' })).not.toBeNull();
+      const cp1 = await first.create({ kind: 'manual', label: 'cp1' });
+      expect(cp1).not.toBeNull();
 
       // What an unclean shutdown can leave behind: the renamed file is there,
       // but its contents were never flushed, so it does not parse.
@@ -69,7 +70,8 @@ describe('checkpoint manifest recovery', () => {
       // Before the fix this threw `JsonFileStore failed to load ...` and kept
       // throwing for every later call on this manager.
       await second.init();
-      expect(await second.list()).toEqual([]);
+      // The index is rebuilt from the snapshot refs still in the side repo.
+      expect((await second.list()).map((c) => c.id)).toEqual([cp1!.id]);
 
       const quarantined = readdirSync(checkpointsDir(root)).filter((name) => name.startsWith('index.json.corrupt-'));
       expect(quarantined.filter((name) => !name.endsWith('.why'))).toHaveLength(1);
@@ -78,7 +80,7 @@ describe('checkpoint manifest recovery', () => {
       const rebuilt = await second.create({ kind: 'manual', label: 'cp2' });
       expect(rebuilt).not.toBeNull();
       const reloaded = JSON.parse(readFileSync(manifestPath, 'utf8')) as { checkpoints: unknown[] };
-      expect(reloaded.checkpoints).toHaveLength(1);
+      expect(reloaded.checkpoints).toHaveLength(2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

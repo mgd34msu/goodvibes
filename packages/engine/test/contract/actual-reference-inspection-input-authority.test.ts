@@ -71,7 +71,8 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
         expect(result.status, result.stderr.toString()).toBe(0);
       };
       git('add', '.'); git('commit', '-qm', 'read workflow fixture sources');
-      const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(root, '.goodvibes', 'cfg'), workingDir: root, homeDir: root });
+      // No home directory, so find attaches no language server and references takes the in-process text scan this test observes.
+      const config = new ConfigManager({ surfaceRoot: 'agent', configDir: join(root, '.goodvibes', 'cfg'), workingDir: root });
       config.set('permissions.engine', 'policy-engine'); config.set('permissions.mode', 'prompt');
       config.set('behavior.autoApprove', false); config.set('contract.isolation', 'worktree'); config.set('tools.autoHeal', false);
       const bus = new RuntimeEventBus();
@@ -110,7 +111,7 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
       let settledTargetBytes: Buffer | undefined;
       let subjectSettlementObserved = false;
       const steps: ToolCall[] = workflow === 'references' ? [{ id: 'subject', name: 'find', arguments: {
-        queries: [{ id: 'refs', mode: 'references', file: target, symbol: 'referenceTarget', line: 0, column: 16 }],
+        queries: [{ id: 'refs', mode: 'references', file: target, symbol: 'referenceTarget', line: 1, column: 16 }],
         output: { format: 'locations', max_results: 20 },
       } }] : workflow === 'inspection' ? [{ id: 'subject', name: 'inspect', arguments: { mode: 'components', projectRoot: '.', file: target } }]
         : workflow === 'analysis' ? [{ id: 'subject', name: 'analyze', arguments: { mode: 'preview', projectRoot: '.', files: [target], find: 'referenceTarget', replace: 'reviewedTarget' } }]
@@ -271,25 +272,21 @@ for (const workflow of ['references', 'inspection', 'analysis', 'edit', 'write-r
       } else {
         expect(outcome.status, JSON.stringify({ error: outcome.error, results: [...results] })).toBe('passed');
         expect(memberCalls).toBe(steps.length + 1);
-        if (!(workflow === 'analysis' && scenario === 'denied'))
-          expect(subject?.success, JSON.stringify(subject)).toBe(scenario === 'allowed');
+        expect(subject?.success, JSON.stringify(subject)).toBe(scenario === 'allowed');
         if (scenario === 'denied') {
           expect(subjectSettlementObserved).toBe(true);
           expect(settledTargetBytes).toEqual(subjectTargetBytes);
           expect(fixtureBytes(join(root, target))).toEqual(originalTargetBytes);
-          if (workflow === 'analysis') {
-            // The existing preview envelope carries a structured read refusal.
-            // Its transport success flag is not successful analysis evidence.
-            const refusal = JSON.parse(subject!.output!);
-            expect(refusal.error).toBe(`Cannot read file: ${target}`);
-            expect(refusal.diff).toBeUndefined();
-          } else {
-            expect(subject?.output).toBeUndefined();
-            if (workflow === 'references') expect(subject?.error).toBe('captured input path is access-restricted');
-            else if (workflow === 'inspection') expect(subject?.error).toBe('inspect (components): captured input path is access-restricted');
-            else if (workflow === 'edit') expect(subject?.error).toBe('Unexpected error: captured input path is access-restricted');
-            else expect(subject?.error).toMatch(/captured input (?:path is access-restricted|tool held:)/i);
-          }
+          if (workflow === 'references') {
+            // find reports a refused query inside its per-query results.
+            expect(subject?.output).toContain('captured input path is access-restricted');
+            expect(subject?.output).not.toContain(PRIVATE);
+          } else expect(subject?.output).toBeUndefined();
+          if (workflow === 'analysis') expect(subject?.error).toBe('captured input path is access-restricted');
+          else if (workflow === 'references') { /* refusal asserted on the output above */ }
+          else if (workflow === 'inspection') expect(subject?.error).toBe('inspect (components): captured input path is access-restricted');
+          else if (workflow === 'edit') expect(subject?.error).toBe('Unexpected error: captured input path is access-restricted');
+          else expect(subject?.error).toMatch(/captured input (?:path is access-restricted|tool held)/i);
           expect(opened).not.toContain(join(memberRoot, target));
         } else {
           expect(opened).toContain(join(memberRoot, target));

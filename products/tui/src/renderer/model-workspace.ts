@@ -48,6 +48,12 @@ import {
 import { drawList, type KitListResult, type KitRow } from './surface-kit-list.ts';
 import { meter, inset, insetPut, insetWrap, tabs, type KitInset } from './surface-kit-parts.ts';
 
+/**
+ * Rows the picker's chrome takes (title, tabs, search, padding, hints); the
+ * key route subtracts it from the viewport height for page-sized moves.
+ */
+export const MODEL_PICKER_CHROME_LINES = 7;
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------

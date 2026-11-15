@@ -82,7 +82,7 @@ describe('opaque session-bound source accounts', () => {
     if (!owner.reader.acquireWhenAvailable) throw new Error('Missing native startup acquisition');
     let reads = 0, settled = false;
     const pending = owner.reader.acquireWhenAvailable(abort.signal).then(handle => { settled = true; return handle; });
-    await Promise.resolve(); expect(settled).toBe(false); expect(reads).toBe(0);
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(settled).toBe(false); expect(reads).toBe(0);
     owner.attach({ lifetime: abort.signal, isCurrent: async () => true, isCurrentSync: () => true,
       readIdentity: async () => { reads++; return { id: '123', username: 'verified_bot' }; } });
     const handle = await pending; if (!handle) throw new Error('Missing original handle');
@@ -107,7 +107,7 @@ describe('opaque session-bound source accounts', () => {
     await expect(pending).rejects.toThrow(); let reads = 0;
     owner.attach({ lifetime: new AbortController().signal, isCurrent: async () => true, isCurrentSync: () => true,
       readIdentity: async () => { reads++; return { id: '123', username: 'verified_bot' }; } });
-    await Promise.resolve(); expect(reads).toBe(0); owner.invalidate();
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(reads).toBe(0); owner.invalidate();
   });
 
   test('installation is lazy, success is cached only inside the current session, and handles do not serialize', async () => {
@@ -162,6 +162,25 @@ describe('opaque session-bound source accounts', () => {
       readIdentity: async () => { current = false; return { id: '123', username: 'verified_bot' }; } });
     expect(await lease.acquire()).toBeNull(); expect(owner.reader.current()).toBeNull();
     current = true; expect(await lease.acquire()).toBeNull();
+  });
+
+  test('a session that stops being current while coverage is retained returns nothing and leaves the retained span settled', async () => {
+    const owner = createTelegramSourceAccountOwner(); let checks = 0;
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', record);
+    cleanups.push(() => { process.off('unhandledRejection', record); });
+    let retained = 0;
+    // A span that is a rejecting promise: nothing may leave it unhandled when the reservation is refused.
+    const span = Object.assign(Promise.reject(new Error('span refused')), { waitFor: async () => () => {} });
+    owner.attach({ lifetime: new AbortController().signal, isCurrent: async () => true,
+      // Current at attach and when coverage is requested, not current right after the span was retained.
+      isCurrentSync: () => ++checks <= 2, readIdentity: async () => ({ id: '123', username: 'verified_bot' }),
+      receiveProgress: { retain: () => { retained++; return span as never; } } });
+    expect(owner.reader.retainReceiveCoverage?.()).toBeNull();
+    expect(retained).toBe(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(unhandled).toEqual([]);
   });
 
   test('read fences in-flight currentness checks against replacement and revoked lifetime', async () => {
@@ -385,7 +404,7 @@ describe('acknowledged webhook source ownership', () => {
     const registration = f.registrations[0]; if (!registration) throw new Error('Missing attempted registration');
     expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
     let drained = false; const stopping = f.supervisor.stop().then(() => { drained = true; });
-    await Promise.resolve(); expect(drained).toBe(false); expect(registration.signal?.aborted).toBe(true);
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(drained).toBe(false); expect(registration.signal?.aborted).toBe(true);
     gate.resolve(true); await starting; await stopping;
     expect(drained).toBe(true); expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
     expect(await f.owner.reader.acquire()).toBeNull(); expect(f.supervisor.status.mode).not.toBe('webhook');
@@ -539,7 +558,9 @@ describe('real polling supervisor provenance wiring', () => {
     expect(await f.owner.reader.acquire()).toBeNull();
     await f.supervisor.start(); const b = await snapshot(f.owner);
     expect(b).toMatchObject({ id: '456', username: 'new_bot' }); expect(b.revision).not.toBe(a.revision);
-    expect(f.config['surfaces.telegram.botUsername']).toBe('configured_stale_bot');
+    // The handle on file named the previous bot. Keeping it would make the next
+    // start, now recorded against bot 456, adopt the old bot's handle.
+    expect(f.config['surfaces.telegram.botUsername']).toBe('new_bot');
   });
 
   test('same-bot token rotation reacquires proof with the original account revision', async () => {

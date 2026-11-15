@@ -7,7 +7,7 @@ import type { NativeContractSource } from '../../platform/src/platform/contract/
 const source: NativeContractSource = { sourceId: 'review-work', sourceRevision: '1', inputRevision: 'input-1', criteriaId: 'review-criteria', criteriaRevision: '1', goal: 'Deliver the original parser', criteria: ['Preserve all parser behavior'] };
 function plan() { return { ...oneUnitPlan(1), goal: source.goal, criteria: [{ id: 'c1', text: source.criteria[0]!, quote: source.criteria[0]! }] }; }
 
-test('review: authority change during semantic defer cancels pending operation rather than recapturing new authority', async () => {
+test('authority change during semantic defer cancels pending operation rather than recapturing new authority', async () => {
   let authorityRevision = '1'; let evidenceRevision = '1'; let wake: (() => void) | undefined; let planDecisions = 0;
   const h = makeHarness({ recordNative: true, plan: plan(), scripts: { u1: finishes('complete parser') },
     nativeDecisions: {
@@ -23,7 +23,6 @@ test('review: authority change during semantic defer cancels pending operation r
     await waitFor(() => wake !== undefined, 'registered semantic condition wait');
     authorityRevision = 'revoked'; evidenceRevision = '2'; wake!();
     await waitFor(() => terminal(h, id), 'terminal native contract', 15000); await h.runner.join(id);
-    console.log('REVIEW_RESULT', JSON.stringify({ status: h.store.get(id)?.status, agents: h.agentsOf('u1').length, receipts: h.store.get(id)?.nativeDecisions?.history.map(r => ({ stage: r.stage, outcome: r.decision.outcome, authorityRevision: r.decision.binding.authorityRevision })) }));
     expect(h.store.get(id)?.status).toBe('cancelled');
     expect(h.agentsOf('u1')).toHaveLength(0);
   } finally { h.dispose(); }

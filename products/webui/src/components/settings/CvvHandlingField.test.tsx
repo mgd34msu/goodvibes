@@ -6,9 +6,10 @@ import { CvvHandlingField } from './CvvHandlingField';
 
 const ENUM_VALUES = ['stored', 'prompt'] as const;
 
-function render(props: { value: string; onCommit: (value: string) => void }): {
+function render(props: { value: string; disabled?: boolean; onCommit: (value: string) => void }): {
   container: HTMLElement;
   select: HTMLButtonElement;
+  rerender: (next: { value: string; disabled?: boolean }) => void;
   unmount: () => void;
 } {
   const container = document.createElement('div');
@@ -21,6 +22,9 @@ function render(props: { value: string; onCommit: (value: string) => void }): {
   return {
     container,
     select,
+    rerender: (next) => flushSync(() => {
+      root.render(React.createElement(CvvHandlingField, { ...props, ...next, enumValues: ENUM_VALUES }));
+    }),
     unmount: () => {
       flushSync(() => root.unmount());
       container.remove();
@@ -66,28 +70,47 @@ describe('CvvHandlingField', () => {
     unmount();
   });
 
-  test('selecting "prompt" surfaces the trade-off warning at the moment of selection', () => {
+  test('selecting "prompt" surfaces the trade-off warning while the write is in flight', () => {
     const commits: string[] = [];
-    const { container, select, unmount } = render({ value: 'stored', onCommit: (v) => commits.push(v) });
+    const { container, select, rerender, unmount } = render({ value: 'stored', onCommit: (v) => commits.push(v) });
     selectLabel(select, 'prompt');
+    rerender({ value: 'stored', disabled: true });
     expect(commits).toEqual(['prompt']);
+    expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).not.toBeNull();
+    unmount();
+  });
+
+  test('a write that settles without storing "prompt" leaves no warning about a mode that is not active', () => {
+    const { container, select, rerender, unmount } = render({ value: 'stored', onCommit: () => {} });
+    selectLabel(select, 'prompt');
+    rerender({ value: 'stored', disabled: true });
+    rerender({ value: 'stored', disabled: false });
+    expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).toBeNull();
+    unmount();
+  });
+
+  test('the warning follows the stored value when it changes elsewhere', () => {
+    const { container, rerender, unmount } = render({ value: 'stored', onCommit: () => {} });
+    rerender({ value: 'prompt' });
     expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).not.toBeNull();
     unmount();
   });
 
   test('selecting "stored" does not surface a warning, and commits', () => {
     const commits: string[] = [];
-    const { container, select, unmount } = render({ value: 'prompt', onCommit: (v) => commits.push(v) });
+    const { container, select, rerender, unmount } = render({ value: 'prompt', onCommit: (v) => commits.push(v) });
     selectLabel(select, 'stored');
+    rerender({ value: 'stored' });
     expect(commits).toEqual(['stored']);
     expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).toBeNull();
     unmount();
   });
 
   test('switching from prompt back to stored removes the warning', () => {
-    const { container, select, unmount } = render({ value: 'prompt', onCommit: () => {} });
+    const { container, select, rerender, unmount } = render({ value: 'prompt', onCommit: () => {} });
     expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).not.toBeNull();
     selectLabel(select, 'stored');
+    rerender({ value: 'stored' });
     expect(container.querySelector('[data-testid="cvv-prompt-warning"]')).toBeNull();
     unmount();
   });

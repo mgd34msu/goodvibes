@@ -1,4 +1,3 @@
-/** Regression source; intentionally UNRUN during the coding-first pass. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

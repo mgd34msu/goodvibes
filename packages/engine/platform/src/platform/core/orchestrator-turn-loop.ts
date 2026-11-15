@@ -60,6 +60,7 @@ import {
   handleToolResponseOutcome,
   bindContractSession,
   holdSessionFinalResponse,
+  takeSessionNudges,
   type ChatResponseWithReasoning,
   type ContractSessionHooks,
 } from './orchestrator-turn-helpers.js';
@@ -70,6 +71,7 @@ import { withOpenTierProfileBlock } from '../agents/orchestrator-prompts.js';
 import {
   buildPerTurnKnowledgeInjection,
   defaultTurnKnowledgeBudgetTokens,
+  memoryRecordIdsOf,
   DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
   type TurnInjectionRecord,
   type TurnKnowledgeRegistrySource,
@@ -113,7 +115,11 @@ function resolveTurnReasoning(
   };
 }
 
-const AUTO_SPAWN_FALLBACK_DELAY_MS = 5_000;
+/**
+ * Breaker trips (each after 10 consecutive all-failed tool rounds) one turn
+ * may take before it ends with an error instead of paying for more rounds.
+ */
+const MAX_CIRCUIT_BREAKER_TRIPS = 3;
 /**
  * Per-turn passive-injection headroom clamp for the MAIN interactive session.
  * Sourced from config `agents.contextCompactThreshold` (default 0.85), the same
@@ -143,6 +149,8 @@ export interface OrchestratorTurnLoopContext {
   readonly assertPostTurnCurrent?: (() => void) | undefined;
   /** Close the cancellation boundary before publishing a terminal outcome. */
   readonly onTurnTerminal?: ((publish: () => void) => void) | undefined;
+  /** The final answer is appended and its completion registered. */
+  readonly onAnswerCommitted?: (() => void) | undefined;
   readonly conversation: ConversationManager;
   readonly toolRegistry: ToolRegistry;
   readonly getSystemPrompt: (signal?: AbortSignal) => string | Promise<string>;
@@ -178,7 +186,6 @@ export interface OrchestratorTurnLoopContext {
   readonly getMessageQueueLength: () => number;
   readonly isReconciliationEnabled: () => boolean;
   readonly setPendingToolCalls: (calls: ToolCall[]) => void;
-  readonly setAutoSpawnTimeout: (timeout: ReturnType<typeof setTimeout> | null) => void;
   readonly setStreamingActive: (value: boolean) => void;
   readonly setStreamingInputTokens: (value: number) => void;
   readonly addStreamingOutputTokens: (value: number) => void;
@@ -253,6 +260,25 @@ export interface OrchestratorTurnLoopContext {
   readonly getCompletedWork?: (() => readonly Record<string, unknown>[]) | undefined;
 }
 
+/**
+ * Opens this session's verification journal. A journal that cannot be read
+ * (unreadable or non-ordinary path, corrupt or held records) may hold evidence
+ * that blocks completion, so the turn stops with a message that names the
+ * cause and the way out, rather than a bare filesystem error and rather than
+ * continuing on a store that has lost that evidence.
+ */
+function openVerificationStore(workingDirectory: string | undefined, sessionId: string, onSetAside?: (notice: string) => void): VerificationStore {
+  try {
+    const store = new VerificationStore(workingDirectory, sessionId);
+    if (store.setAsideNotice) { logger.warn(store.setAsideNotice); onSetAside?.(store.setAsideNotice); }
+    return store;
+  }
+  catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    throw new Error(`The verification journal for this workspace could not be opened, so this turn did not run and the conversation is unchanged. ${cause} Check that .goodvibes/verification in the working directory is an ordinary directory this user can read and write, and that its journal file is not damaged, then send the message again.`, { cause: error });
+  }
+}
+
 export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopContext): Promise<void> {
   const signal = context.getAbortSignal();
   const assertActiveTurn = (): void => {
@@ -296,10 +322,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // as exceeding the context window; a second rejection surfaces as an error.
   let contextOverflowRetried = false;
   const circuitBreaker = new ConsecutiveErrorBreaker();
+  let circuitBreakerTrips = 0;
   let assertVerificationProvider: () => void | Promise<void> = assertActiveTurn;
   const completionGuard = new ResponseCompletionGuard({ request: context.text, conversation: context.conversation,
     onCompletionRequired: () => { context.setCompletionActivity?.('checking'); context.requestRender(); },
-    verificationStore: new VerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId),
+    verificationStore: openVerificationStore(context.configManager.getWorkingDirectory?.() ?? undefined, context.sessionId, notice => context.conversation.addSystemMessage(notice)),
     verificationWriter: createVerificationWriter({
       route: () => ({ provider, model: model.id, reasoning: turnReasoning() }),
       beforeAttempt: () => assertVerificationProvider(),
@@ -318,6 +345,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     }),
   });
   let completionCorrection = completionGuard.resumedRepair();
+  // Instructions that apply to the next provider call only (a held progress text, a breaker notice, a contract nudge); the revision context above stays until the draft is accepted.
+  let transientCorrection = '';
   let continuationEvidence = context.continuationEvidence ?? '';
   const intakeAgentIds: string[] = [];
   // True only for the FIRST LLM call this executeOrchestratorTurnLoop()
@@ -389,6 +418,13 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       context.requestRender();
     };
 
+    // A queued session-mode nudge reaches the model on the very next call, in
+    // the same private channel as a held draft's revision instructions.
+    if (contractSession) {
+      const nudges = takeSessionNudges({ runtimeBus: context.runtimeBus, emitterContext: (id) => context.emitterContext(id), turnId: context.turnId }, contractSession);
+      if (nudges.length > 0) transientCorrection = [transientCorrection, ...nudges.map(message => '[Contract check] ' + message)].filter(Boolean).join('\n\n');
+    }
+
     const preflightResult = await context.checkContextWindowPreflight(context.turnId, model);
     assertActiveTurn();
     if (preflightResult !== 'ok') markNativeConversationTurnEffectsPossible();
@@ -444,8 +480,15 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       const preResult = await context.hookDispatcher.fire(preEvent);
       assertActiveTurn();
       if (preResult.decision === 'deny') {
+        // The stream opened above never reached the provider; close it so the
+        // turn does not end with STREAM_START unmatched.
+        if (streamEnabled) {
+          context.setStreamingActive(false);
+          context.conversation.finalizeStreamingBlock();
+        }
         context.conversation.addSystemMessage(preResult.reason ?? 'LLM call blocked by hook');
         if (context.runtimeBus) {
+          emitStreamEnd(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId });
           publishTurnTerminal(() => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
             turnId: context.turnId,
             error: preResult.reason ?? 'LLM call blocked by hook',
@@ -481,7 +524,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     const baseSystemPromptForCall = appendGoodVibesRuntimeAwarenessPrompt(resolvedSystemPrompt);
     const composedBaseSystemPrompt = baseSystemPromptForCall
       + `\n\n${FINAL_RESPONSE_REVIEW_INSTRUCTIONS}`
-      + (completionCorrection ? `\n\n${completionCorrection}` : '');
+      + (completionCorrection ? `\n\n${completionCorrection}` : '')
+      + (transientCorrection ? `\n\n${transientCorrection}` : '');
     const contextCompactThreshold = context.configManager.get('agents.contextCompactThreshold')
       ?? DEFAULT_PASSIVE_KNOWLEDGE_INJECTION_CONTEXT_THRESHOLD;
     if (passiveKnowledgeInjectionEnabled && newUserInputThisTurn && context.memoryRegistry) {
@@ -545,9 +589,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           if (turnInjectionRecord.injectedIds.length > 0) {
             context.addInjectedKnowledgeIds(turnInjectionRecord.injectedIds);
             // Memory provenance: only 'memory'-sourced ids reach the wire chip.
-            turnInjectionRecord.injectedIds.forEach((id, index) => {
-              if (turnInjectionRecord.injectedSources[index] === 'memory') turnMemoryRecordIds.add(id);
-            });
+            for (const id of memoryRecordIdsOf(turnInjectionRecord)) turnMemoryRecordIds.add(id);
           }
           context.recordTurnKnowledgeInjection(turnInjectionRecord);
         }
@@ -657,6 +699,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         },
       });
       assertActiveTurn();
+      transientCorrection = '';
     } catch (chatErr) {
       assertActiveTurn();
       if (streamEnabled) {
@@ -869,7 +912,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
             if (enrichedResponse.content !== checkedText) throw new Error('Checked progress text changed before publication');
           };
           else {
-            completionCorrection = publication.correction + '\nUnpublished progress text (quoted data):\n' + JSON.stringify(enrichedResponse.content);
+            transientCorrection = publication.correction + '\nUnpublished progress text (quoted data):\n' + JSON.stringify(enrichedResponse.content);
             enrichedResponse.content = '';
           }
         } finally { context.setCompletionActivity?.(null); }
@@ -915,9 +958,24 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         logger.warn(`Orchestrator: consecutive all-error turn ${circuitBreaker.consecutiveErrors}`);
         if (breakerResult === 'break') {
           logger.warn(`Orchestrator: circuit breaker tripped at ${circuitBreaker.consecutiveErrors} consecutive all-error turns`);
-          completionCorrection = `[Tool recovery] ${circuitBreaker.consecutiveErrors} consecutive tool rounds failed. `
+          circuitBreakerTrips++;
+          if (circuitBreakerTrips >= MAX_CIRCUIT_BREAKER_TRIPS) {
+            const reason = `Stopped after ${circuitBreakerTrips * circuitBreaker.consecutiveErrors} consecutive tool rounds in which every call failed. The request is not complete. Check the tool failures above, fix the cause (permissions, an unavailable service, the inputs), then send the request again.`;
+            context.conversation.addSystemMessage(`[Tool recovery] ${reason}`);
+            if (context.runtimeBus) {
+              publishTurnTerminal(() => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
+                turnId: context.turnId,
+                error: reason,
+                stopReason: 'tool_loop_circuit_breaker',
+              }), context.onTurnTerminal);
+            }
+            context.markTurnFailed();
+            context.requestRender();
+            break;
+          }
+          transientCorrection = `[Tool recovery] ${circuitBreaker.consecutiveErrors} consecutive tool rounds failed. `
             + 'Inspect the failures and revise the failing inputs or plan before retrying. Internal tool failures do not complete the original request.';
-          context.conversation.addSystemMessage(completionCorrection);
+          context.conversation.addSystemMessage(transientCorrection);
           await waitForTaskRecovery(1_000, signal);
           assertActiveTurn();
           circuitBreaker.recordSuccess();
@@ -984,13 +1042,12 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       providerRegistry: context.providerRegistry,
       runtimeBus: context.runtimeBus,
       onTurnTerminal: context.onTurnTerminal,
+      onAnswerCommitted: context.onAnswerCommitted,
       emitterContext: (id) => context.emitterContext(id),
       turnId: context.turnId,
       response: enrichedResponse,
       preTurnPlan: context.preTurnPlan,
       requestRender: context.requestRender,
-      setAutoSpawnTimeout: (timeout) => { context.setAutoSpawnTimeout(timeout); },
-      autoSpawnTimeoutMs: AUTO_SPAWN_FALLBACK_DELAY_MS,
       sessionId: context.sessionId,
       memoryRecordIds: [...turnMemoryRecordIds],
     });

@@ -430,12 +430,25 @@ describe('owned canonical route and record selectors', () => {
     const f = fixture();
     f.records[0] = { ...record('name-only', ''), tool: 'delete_inbox_preview', routeKind: 'read' };
     f.records[1] = { ...record('opaque-write', ''), tool: 'opaque_operation', routeKind: 'write' };
-    Object.assign(f.context.workspace, { fileUndoManager: { undoDepth: () => 1, redoDepth: () => 0, peekUndo: () => null } });
+    Object.assign(f.context.workspace, { fileUndoManager: { undoDepth: () => 1, redoDepth: () => 0, peekUndo: () => ({ path: '/synthetic/file.txt', tool: 'edit', timestamp: new Date(1500).toISOString() }) } });
     const read = await describeExecutionHistoryItem(f.context, { executionRecordId: 'name-only' });
     const write = await describeExecutionHistoryItem(f.context, { executionRecordId: 'opaque-write' });
     expect(read).toMatchObject({ status: 'found', record: { tool: 'delete_inbox_preview' } });
     if (read.status === 'found') expect(read.record.recoveryRoute).toBeUndefined();
     expect(write).toMatchObject({ status: 'found', record: { recoveryRoute: 'execution action:"recovery"' } });
+  });
+
+  test('only the record whose edit is on top of the undo stack is offered for rollback', async () => {
+    const f = fixture();
+    f.records[0] = { ...record('older-edit', ''), tool: 'edit', routeKind: 'write', receivedAt: 1000, updatedAt: 2000 };
+    f.records[1] = { ...record('newer-edit', ''), tool: 'edit', routeKind: 'write', receivedAt: 3000, updatedAt: 4000 };
+    // The stack top was stamped while the older record's call ran: undo would revert that edit, not the newer one.
+    Object.assign(f.context.workspace, { fileUndoManager: { undoDepth: () => 1, redoDepth: () => 0, peekUndo: () => ({ path: '/synthetic/file.txt', tool: 'edit', timestamp: new Date(1500).toISOString() }) } });
+    const older = await describeExecutionHistoryItem(f.context, { executionRecordId: 'older-edit' });
+    const newer = await describeExecutionHistoryItem(f.context, { executionRecordId: 'newer-edit' });
+    expect(older).toMatchObject({ status: 'found', record: { recoveryRoute: 'execution action:"recovery"' } });
+    if (newer.status === 'found') expect(newer.record.recoveryRoute).toBeUndefined();
+    else throw new Error('expected newer-edit to be found');
   });
 
   test('a cancelled verification cannot retain a late reading or a success card', async () => {

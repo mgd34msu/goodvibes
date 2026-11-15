@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 export const PACKET_TOOL_SCHEMA: ToolDefinition = {
   name: 'packet',
-  description: 'Manage durable implementation packets and published execution packets.',
+  description: 'Keep your own notes as implementation packets (draft, revise, publish). Packets are stored in a file for later reference; nothing consumes them or sends them to anyone.',
   parameters: {
     type: 'object',
     properties: {

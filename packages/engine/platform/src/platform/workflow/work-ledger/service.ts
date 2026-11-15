@@ -391,6 +391,17 @@ export function createWorkLedger(options: {
 }): { readonly service: WorkLedgerService; readonly authority: WorkLedgerAuthority } {
   const { projectId, storage, clock } = options;
   createEmptyWorkLedgerState(projectId);
+  // The last persisted image that passed full validation. Replaying every
+  // command costs O(events) per call and clients poll, so an image identical
+  // to it skips the replay. Identity is by deep equality, never by revision
+  // alone, so a restored or edited ledger is always validated afresh.
+  let validated: { readonly image: unknown; readonly state: WorkLedgerState } | undefined;
+  function readValidatedState(raw: unknown): WorkLedgerState {
+    if (validated !== undefined && isDeepStrictEqual(validated.image, raw)) return structuredClone(validated.state);
+    const state = readWorkLedgerState(raw, projectId);
+    validated = { image: structuredClone(raw), state: structuredClone(state) };
+    return state;
+  }
   const identities = new WeakMap<WorkLedgerActor, WorkLedgerHostIdentity>();
   const pending = new Set<Promise<unknown>>();
   // Reserve ownership BEFORE invoking any adapter, parser getter or host hook.
@@ -441,7 +452,7 @@ export function createWorkLedger(options: {
   async function readAuthoritativeState(): Promise<WorkLedgerState> {
     let raw: unknown;
     try { raw = await storage.read(); } catch { throw new WorkLedgerAccessError('storage_error', 'Cannot read authoritative ledger storage.'); }
-    try { return readWorkLedgerState(raw, projectId); } catch { throw new WorkLedgerAccessError('invalid_state', 'Authoritative ledger state is invalid; it was not reset.'); }
+    try { return readValidatedState(raw); } catch { throw new WorkLedgerAccessError('invalid_state', 'Authoritative ledger state is invalid; it was not reset.'); }
   }
 
   const service: WorkLedgerService = {
@@ -494,7 +505,7 @@ export function createWorkLedger(options: {
           : rejected('request_conflict', 'requestId was already used for a different command or role.', state.revision);
       });
     },
-    subscribe(actor, listener) {
+    subscribe(actor, listener, onUnavailable) {
       if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
       requireIdentity(actor);
       const admission = reserve<void>();
@@ -534,7 +545,12 @@ export function createWorkLedger(options: {
               void Promise.resolve(returned).catch(() => {});
             } catch { /* Bad observers cannot fail writes or the service lifecycle. */ }
           });
-        });
+        }, onUnavailable ? reason => {
+          queueMicrotask(() => {
+            if (!active || closed || !identity(actor)) return;
+            try { onUnavailable(reason); } catch { /* Bad observers cannot fail writes or the service lifecycle. */ }
+          });
+        } : undefined);
         if (!active || closed || !identity(actor)) {
           try { unsubscribe(); } catch { /* Preserve the admission error. */ }
           if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
@@ -558,12 +574,17 @@ export function createWorkLedger(options: {
       if (command.type === 'import_legacy') command.manifest = validateLegacyWorkLedgerManifest(command.manifest);
       const signal = executeOptions?.signal;
       const actorId = requireIdentity(actor).actorId;
+      // A host check that throws (an owner changed) means nothing was committed:
+      // that is a refusal, not an unknown storage outcome.
+      const authorizedNow = (): boolean => {
+        try { return !executeOptions?.isAuthorized || executeOptions.isAuthorized() === true; } catch { return false; }
+      };
       const operation = Promise.resolve().then(() => storage.transaction((current, context) => {
         let state: WorkLedgerState;
-        try { state = readWorkLedgerState(current, projectId); } catch {
+        try { state = readValidatedState(current); } catch {
           return { next: null, value: rejected('invalid_state', 'Authoritative ledger state is invalid; it was not reset.', null) };
         }
-        if ((executeOptions?.isAuthorized && executeOptions.isAuthorized() !== true) || !identity(actor)) return { next: null, value: rejected('forbidden', 'Host actor was revoked before commit.', state.revision) };
+        if (!authorizedNow() || !identity(actor)) return { next: null, value: rejected('forbidden', 'Host actor was revoked before commit.', state.revision) };
         // A known durable receipt wins over a later abort: never describe an
         // already committed command as cancelled when reconciling its outcome.
         if (state.receipts.some(receipt => receipt.actorId === requireIdentity(actor).actorId && receipt.requestId === command.requestId)) {
@@ -589,7 +610,7 @@ export function createWorkLedger(options: {
         // Read the extensible signal accessor before the final identity check:
         // a host-provided getter can itself synchronously revoke the actor.
         const aborted = signal?.aborted;
-        const authorized = !executeOptions?.isAuthorized || executeOptions.isAuthorized() === true;
+        const authorized = authorizedNow();
         // Authorization itself may synchronously cancel a genuine host signal.
         // Do not call its extensible getter again after sampling authorization:
         // that would reopen the inverse getter-to-revocation race above.

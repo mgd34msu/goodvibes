@@ -18,7 +18,7 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
       read: observation => policy.read(context, observation), files: policy.files,
       environment: policy.environment, fetchImpl: policy.fetchImpl, signal: abort.signal }); }
     catch { context.print('[telegram] Check the selected host and paired administrative credential, then reopen cursor recovery.'); return; }
-    let closed = false, replacing = false, picker: AbortController | undefined, principal: string | undefined;
+    let closed = false, replacing = false, committing = false, picker: AbortController | undefined, principal: string | undefined;
     const finish = () => { if (closed) return; closed = true; abort.abort(); picker?.abort(); void connection.close(); };
     const report = (message: string) => { if (!closed) { context.print(message); context.renderRequest(); } };
     const show = (title: string, items: SelectionItem[], choose: (result: SelectionResult) => void) => {
@@ -29,6 +29,8 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
       picker = new AbortController();
       open.call(context, title, items, { allowSearch: false, primaryVerbLabel: 'Choose', signal: AbortSignal.any([connection.signal, picker.signal]) }, result => {
         if (closed || replacing) return;
+        // Once the commit is sent the host may apply it, so the view must stay open to report the outcome.
+        if (committing) return;
         if (!result || result.action !== 'select') { finish(); return; }
         try { connection.assertCurrent(); choose(result); }
         catch { report('[telegram] The selected host changed. Reopen cursor recovery.'); finish(); }
@@ -47,8 +49,8 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
     const commit = async (preview: Extract<TelegramCursorPreview, { readonly state: 'unbound' }>) => {
       let dispatched = false;
       try {
-        show('Saving Telegram cursor — Escape closes this view', [], () => {});
-        await authenticate(); dispatched = true;
+        show('Saving Telegram cursor — please wait', [], () => {});
+        await authenticate(); dispatched = true; committing = true;
         const response = await action('cursor-migration-commit', { previewId: preview.previewId, confirm: true });
         const result = readTelegramCursorMigrationResult(response.result);
         if (result.accountId !== preview.accountId || result.offset !== preview.offset) throw new Error('Different cursor acknowledgement');

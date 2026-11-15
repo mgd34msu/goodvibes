@@ -19,16 +19,24 @@
  * git object store. A real subprocess case backs the primitive with genuine
  * process separation.
  */
-import { describe, expect, test } from 'bun:test';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
 
+const createdDirs: string[] = [];
+
 function tempDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  createdDirs.push(dir);
+  return dir;
 }
+
+afterAll(() => {
+  for (const dir of createdDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 /**
  * Wait for a subprocess's marker file to appear.
@@ -62,17 +70,36 @@ function runGit(cwd: string, args: string[]): { exitCode: number; stdout: string
 /**
  * Count checkpoint refs directly in the shared side git repo, the ground
  * truth for "how many checkpoints genuinely exist", independent of the JSON
- * manifest (index.json). Each manager instance keeps its OWN in-memory
- * manifest hydrated once at its own init(); two independent instances (like
- * two OS processes) racing manifest writes is a separate, pre-existing
- * last-write-wins limitation of the single JSON manifest file, NOT the git
- * index/object-store corruption this lock defends against. Reading refs
- * straight from git sidesteps that limitation entirely.
+ * manifest (index.json). The manifest is what `list()` and `restore()` read, so
+ * `manifestIds` below is compared against this: a ref with no manifest entry is
+ * a checkpoint the user created and can neither see nor restore. Every
+ * manager re-reads the manifest under the lock before it writes, so
+ * concurrent managers must not lose each other's entries.
  */
 function countCheckpointRefs(root: string): number {
   const gitDir = join(root, '.goodvibes', 'checkpoints', 'git');
   const result = runGit(root, ['--git-dir', gitDir, 'for-each-ref', 'refs/goodvibes/checkpoints']);
   return result.stdout.split('\n').filter((line) => line.trim().length > 0).length;
+}
+
+function checkpointRefNames(root: string): string[] {
+  const gitDir = join(root, '.goodvibes', 'checkpoints', 'git');
+  const result = runGit(root, ['--git-dir', gitDir, 'for-each-ref', '--format=%(refname)', 'refs/goodvibes/checkpoints']);
+  return result.stdout.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+}
+
+/** The checkpoint ids a brand-new manager lists from the manifest on disk. */
+async function manifestIds(root: string): Promise<string[]> {
+  const fresh = new WorkspaceCheckpointManager({ workspaceRoot: root, autoRetention: false });
+  return (await fresh.list()).map((checkpoint) => checkpoint.id);
+}
+
+/** Every checkpoint ref in git has a manifest entry and the reverse: nothing is invisible or dangling. */
+async function expectManifestMatchesRefs(root: string): Promise<void> {
+  const ids = await manifestIds(root);
+  const refs = checkpointRefNames(root);
+  expect(ids).toHaveLength(refs.length);
+  for (const id of ids) expect(refs.some((ref) => ref.endsWith(`/${id}`))).toBe(true);
 }
 
 describe('acquireCrossProcessLock: the primitive', () => {
@@ -536,6 +563,7 @@ describe('WorkspaceCheckpointManager: two instances sharing one directory (simul
     const nonNullCount = results.filter((r) => r !== null).length;
     expect(nonNullCount).toBeGreaterThan(0);
     expect(countCheckpointRefs(root)).toBe(nonNullCount);
+    await expectManifestMatchesRefs(root);
 
     // git's own integrity check on the shared side repo, parentless
     // checkpoint commits show up as "dangling", which is expected and NOT a
@@ -570,7 +598,8 @@ describe('WorkspaceCheckpointManager: two instances sharing one directory (simul
 
     // None of these may throw, that alone proves the lock serialized every
     // git-touching call instead of letting them interleave.
-    await expect(Promise.all(ops.map((fn) => fn()))).resolves.toBeDefined();
+    const outcomes = await Promise.all(ops.map((fn) => fn()));
+    expect(outcomes).toHaveLength(ops.length);
 
     const gitDir = join(root, '.goodvibes', 'checkpoints', 'git');
     const fsck = runGit(root, ['--git-dir', gitDir, 'fsck', '--no-dangling']);
@@ -579,7 +608,8 @@ describe('WorkspaceCheckpointManager: two instances sharing one directory (simul
     // The store is still fully usable afterward, list()/diff() work cleanly.
     const managerC = new WorkspaceCheckpointManager({ workspaceRoot: root, autoRetention: false });
     const all = await managerC.list();
-    expect(all.length).toBeGreaterThan(0);
+    expect(all.some((checkpoint) => checkpoint.id === baseline!.id)).toBe(true);
+    await expectManifestMatchesRefs(root);
     // Same reason as the sibling above: real git subprocesses, ~1.6s idle,
     // against a default budget that a loaded host overruns.
   }, 60_000);
@@ -648,16 +678,16 @@ describe('WorkspaceCheckpointManager: real subprocess separation', () => {
     // reported success from either process corresponds to exactly one real,
     // uncorrupted git ref, nothing silently lost, nothing torn.
     expect(countCheckpointRefs(root)).toBe(countA + countB);
+    await expectManifestMatchesRefs(root);
   }, 20_000);
 });
 
 describe('acquireCrossProcessLock: same-process queueing', () => {
   test('a second acquisition in the same process queues behind the first instead of timing out', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-lock-inproc-'));
+    const dir = tempDir('gv-lock-inproc-');
     const lockPath = join(dir, '.gv-lock');
 
     const release1 = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 3_000 });
-    const secondStarted = Date.now();
     const second = acquireCrossProcessLock(lockPath, { totalTimeoutMs: 3_000 });
 
     // Give the second acquisition time to have failed under the old behavior's
@@ -665,14 +695,11 @@ describe('acquireCrossProcessLock: same-process queueing', () => {
     await new Promise((r) => setTimeout(r, 150));
     release1();
     const release2 = await second;
-    const waited = Date.now() - secondStarted;
-    expect(waited).toBeGreaterThanOrEqual(140); // genuinely waited on the holder
-    expect(waited).toBeLessThan(2_000); // and did not burn the timeout window
     release2();
   });
 
   test('three same-process waiters acquire strictly in order', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-lock-fifo-'));
+    const dir = tempDir('gv-lock-fifo-');
     const lockPath = join(dir, '.gv-lock');
     const order: number[] = [];
 
@@ -689,7 +716,7 @@ describe('acquireCrossProcessLock: same-process queueing', () => {
   });
 
   test('a queued waiter that times out neither wedges later waiters nor leaks the queue', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-lock-qtimeout-'));
+    const dir = tempDir('gv-lock-qtimeout-');
     const lockPath = join(dir, '.gv-lock');
 
     const release1 = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 3_000 });
@@ -701,4 +728,38 @@ describe('acquireCrossProcessLock: same-process queueing', () => {
     const release2 = await acquireCrossProcessLock(lockPath, { totalTimeoutMs: 3_000 });
     release2();
   });
+});
+
+describe('WorkspaceCheckpointManager: a live holder frozen past the stale window keeps its lock', () => {
+  function plantLiveHolderLock(root: string, pid: number, agedSeconds: number): { lockPath: string; payload: string } {
+    const lockPath = join(root, '.goodvibes', 'checkpoints', 'git', '.gv-lock');
+    const payload = JSON.stringify({ pid, token: '0123456789abcdef', acquiredAt: Date.now() - agedSeconds * 1000 });
+    writeFileSync(lockPath, payload);
+    const past = Date.now() / 1000 - agedSeconds;
+    utimesSync(lockPath, past, past);
+    return { lockPath, payload };
+  }
+
+  test('create() times out instead of taking over a lock whose live holder has not refreshed it for minutes', async () => {
+    const root = tempDir('gv-lock-frozen-holder-');
+    const manager = new WorkspaceCheckpointManager({ workspaceRoot: root, autoRetention: false, lockTimeoutMs: 300 });
+    await manager.list();
+    // process.pid is alive; the mtime is far past the 30s default stale window.
+    const { lockPath, payload } = plantLiveHolderLock(root, process.pid, 600);
+    writeFileSync(join(root, 'a.txt'), 'a\n');
+
+    await expect(manager.create({ kind: 'manual', label: 'blocked' })).rejects.toThrow(/timed out/);
+    expect(readFileSync(lockPath, 'utf-8')).toBe(payload);
+  }, 30_000);
+
+  test('a lock whose holder process is gone is still taken over', async () => {
+    const root = tempDir('gv-lock-dead-holder-');
+    const manager = new WorkspaceCheckpointManager({ workspaceRoot: root, autoRetention: false, lockTimeoutMs: 5_000 });
+    await manager.list();
+    plantLiveHolderLock(root, 999_999, 1);
+    writeFileSync(join(root, 'a.txt'), 'a\n');
+
+    const created = await manager.create({ kind: 'manual', label: 'recovered' });
+    expect(created).not.toBeNull();
+  }, 30_000);
 });

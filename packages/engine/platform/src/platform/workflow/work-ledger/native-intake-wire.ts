@@ -46,7 +46,9 @@ export const nativeConversationIntakeResultSchema = union([
   strictObject({ kind: literal('captured'), ...common }),
   strictObject({ kind: literal('processing'), ...common, stage: enumSchema(['routing', 'extracting', 'checking', 'deciding', 'waiting']), recovery: enumSchema(['pending', 'required']) }),
   strictObject({ kind: literal('turn'), ...common, route: enumSchema(['converse', 'answer']), text, continuation: nativeConversationContinuationSchema.optional() }),
-  strictObject({ kind: literal('blocked'), ...common, reason: enumSchema(['unsupported-source', 'missing-context']), recovery: literal('required') }),
+  strictObject({ kind: literal('blocked'), ...common, reason: enumSchema(['unsupported-source', 'missing-context']), recovery: literal('required'),
+    /** Resuming a blocked input changes nothing; the only way forward is to cancel it and capture a new input. */
+    next: literal('cancel-and-resubmit').optional() }),
   strictObject({ kind: literal('refused'), ...common, reason: enumSchema(['semantic', 'exhausted']) }),
   strictObject({ kind: literal('cancelled'), ...common }),
   strictObject({ kind: literal('work'), ...common, receipt: nativeConversationIntakeWorkReceiptSchema }),

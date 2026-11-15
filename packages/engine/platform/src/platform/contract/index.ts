@@ -159,11 +159,14 @@ export {
   REASON_SENTENCES,
   buildAttemptsQuestion,
   buildEscalationQuestion,
+  buildFailurePauseQuestion,
+  FAILURE_PAUSE_ANSWERS,
+  readFailurePauseAnswer,
   createEscalations,
   standingCriteria,
   targetCriteria,
 } from './escalation.js';
-export type { EscalationInput, Escalations, OwnerReplyAction, OwnerReplyOutcome, Rejudge } from './escalation.js';
+export type { EscalationInput, Escalations, FailurePauseAnswer, FailurePauseInput, OwnerReplyAction, OwnerReplyOutcome, Rejudge } from './escalation.js';
 export { amendTarget, buildAmendmentPrompt, buildAmendmentRequest, parseAmendment } from './amendment.js';
 export type { AmendmentOutcome } from './amendment.js';
 export { CONTRACT_PASSED_WITHOUT_OUTPUT, answerUnit, deliverableOutput, describeCommitOutcome, describeContractOutcome, renderContractAnswer } from './answer.js';
@@ -266,6 +269,8 @@ export type { NudgeDispatch, NudgeFindings, NudgeTargetState, NudgeTransport } f
 export { UNIT_JUDGES, UNIT_JUDGE_BANDS, unitJudgeDecision } from './batteries/unit-judge.js';
 export { MID_RUN_QUALITY_ITEMS, UNIT_QUALITY_BAND, midRunNudgeItems, unitQuality } from './batteries/unit-quality.js';
 export { unmetSeverity } from './batteries/unmet-severity.js';
+export { unmetGap, UNMET_GAP_SENTENCES, type UnmetGap } from './batteries/unmet-gap.js';
+export { describeUnitSelfCheck, UNIT_SELF_CHECK_TOOL, type UnitSelfCheck, type UnitSelfCheckCriterion, type UnitSelfCheckResult } from './self-check.js';
 export { STALL_ROUTE_OPTIONS, stallRoute } from './batteries/stall-route.js';
 export { GROUP_JUDGES, groupJudgeDecision, groupVerdict } from './batteries/group-judge.js';
 export { DELIVERABLE_JUDGES, deliverableJudgeDecision, deliverableVerdict } from './batteries/deliverable-judge.js';

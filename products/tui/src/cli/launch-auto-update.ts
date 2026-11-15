@@ -26,10 +26,10 @@ import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime
  *     what actually happened rather than assumed. The budget cancels the work
  *     through a real AbortSignal, so a download that is still in flight is
  *     genuinely stopped and "deferred, will retry next launch" is true. Once
- *     the swap has begun it is never interrupted, so that outcome says the
- *     binary WAS replaced and asks for a restart instead. The two are told
- *     apart by the swap state the install reports back (UpdateSwapProgress),
- *     never by guessing.
+ *     the swap has begun it is never interrupted: that outcome says it is
+ *     still finishing, and its eventual success or failure is printed when it
+ *     settles. The two are told apart by the swap state the install reports
+ *     back (UpdateSwapProgress), never by guessing.
  *   - every swap keeps the outgoing file at `<path>.previous`; rollback is
  *     one command (`/update rollback`).
  *
@@ -79,7 +79,7 @@ export type LaunchAutoUpdateOutcome =
         | 'update-failed'
         /** The budget ran out before anything was written, and the work was cancelled. */
         | 'update-deferred'
-        /** The budget ran out after the swap had begun; the swap finished, so a restart picks up the new version. */
+        /** The budget ran out after the swap had begun; it is left to finish and report its own outcome. */
         | 'update-in-background';
     }
   | { readonly action: 'restart'; readonly latestTag: string }
@@ -140,11 +140,26 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
       signal: controller.signal,
       progress,
     });
-    // Losing the race abandons this promise, and a cancelled download rejects
-    // shortly after: that rejection is the expected end of the work, not an
-    // unhandled failure, so it is absorbed here. The race below still sees
-    // every rejection that arrives before the budget runs out.
-    applyPromise.catch(() => {});
+    // Losing the race abandons this promise. A cancelled download rejects
+    // shortly after and that is the expected end of the work, so it stays
+    // quiet. A swap that was already running is different: its late outcome is
+    // reported below, because the launch has already told the user to expect it.
+    // The race still sees every rejection that arrives before the budget runs out.
+    let reportLateOutcome = false;
+    applyPromise.then(
+      (late) => {
+        if (reportLateOutcome && late) options.print(`background update finished: v${late.version} is installed; restart to use it`);
+      },
+      (error) => {
+        if (!reportLateOutcome) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        options.print(
+          suiteUpdateRequiresRecovery(error)
+            ? `background update requires recovery: ${detail}; restart ${'`'}goodvibes${'`'} to run the recovery before using this install`
+            : `background update failed: ${detail}; the installed version may be unchanged, check with ${'`'}goodvibes status${'`'}`,
+        );
+      },
+    );
     const applyResult = await withTimeout(applyPromise, applyTimeoutMs);
     if (applyResult === 'timeout') {
       if (!progress.begun) {
@@ -155,10 +170,11 @@ export async function runLaunchAutoUpdate(options: RunLaunchAutoUpdateOptions): 
         return { action: 'continue', reason: 'update-deferred' };
       }
       // The swap had already started when the budget ran out. A swap is never
-      // interrupted, so the binary on disk is the new one, cancelling here
-      // would be a lie in the other direction. Report the replacement and the
-      // restart it needs instead of claiming a deferral that did not happen.
-      options.print(`updated in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)}`);
+      // interrupted, so cancelling here would be a lie in the other direction.
+      // It has not necessarily finished, so say it is still running and let its
+      // own outcome be reported when it settles.
+      reportLateOutcome = true;
+      options.print(`update still finishing in background; restart to use v${normalizeVersion(progress.targetTag ?? check.latestTag)} once it completes`);
       return { action: 'continue', reason: 'update-in-background' };
     }
     // The release may move between preflight and apply. Production reports

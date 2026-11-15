@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as childProcess from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import { closeSync, openSync, ftruncateSync, chmodSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,24 @@ afterEach(() => {
   }
   finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
 });
+/** Records the contained processes whose command line mentions `marker`, so a test waits for one to end instead of sleeping. */
+function watchContained(marker: string): { children: childProcess.ChildProcess[]; restore: () => void } {
+  const originalSpawn = childProcess.spawn;
+  const children: childProcess.ChildProcess[] = [];
+  const tap = spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
+    const child = originalSpawn(...args);
+    if (String(args[0]) === '/usr/bin/bwrap' && JSON.stringify(args[1]).includes(marker)) children.push(child);
+    return child;
+  }) as typeof childProcess.spawn);
+  return { children, restore: () => tap.mockRestore() };
+}
+/** The snippets here finish cleanly on their own with exit 0, so any other ending means the process was stopped before it could write. */
+async function expectStopped(watch: { children: childProcess.ChildProcess[] }): Promise<void> {
+  const child = watch.children[0];
+  if (!child) throw new Error('contained process was never started');
+  if (child.exitCode === null && child.signalCode === null) await new Promise<void>((resolve) => child.once('close', () => resolve()));
+  expect(child.exitCode).not.toBe(0);
+}
 const availability = await probeCapturedExecAvailability();
 const supported = availability.available;
 
@@ -129,6 +148,30 @@ test('a late projection mutation cannot substitute different bytes after final p
   expect(readFileSync(f.added)).toEqual(Buffer.alloc(0));
 });
 
+test('a copy failing after the first publication step restores every earlier step', async () => {
+  const f = await publicationFixture(), copy = RetainedFileBytes.prototype.copyToSync;
+  const tap = spyOn(RetainedFileBytes.prototype, 'copyToSync').mockImplementation(function(this: RetainedFileBytes, ...args) {
+    if (String(args[1]).endsWith('added.bin')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    return Reflect.apply(copy, this, args);
+  });
+  try { await expect(f.publish()).rejects.toThrow('disk full'); } finally { tap.mockRestore(); }
+  expect(readFileSync(f.host)).toEqual(f.original);
+  expect(existsSync(f.added)).toBe(false);
+});
+
+test('a publication that cannot be fully rolled back says so instead of reading as held', async () => {
+  const f = await publicationFixture(), copy = RetainedFileBytes.prototype.copyToSync;
+  let first = true;
+  const tap = spyOn(RetainedFileBytes.prototype, 'copyToSync').mockImplementation(function(this: RetainedFileBytes, ...args) {
+    if (String(args[1]).endsWith('added.bin')) throw new Error('disk full');
+    // The restore of the first file fails too.
+    if (!first) throw new Error('restore failed');
+    first = false;
+    return Reflect.apply(copy, this, args);
+  });
+  try { await expect(f.publish()).rejects.toThrow('captured publication is partial'); } finally { tap.mockRestore(); }
+});
+
 test.skipIf(!supported)('reserved output gives a specific correction, publishes nothing, and permits a corrected retry', async () => {
   const binding = await fixture();
   const rejected = await run(binding, "printf changed > input.txt; mkdir -p .goodvibes/reviews; printf private > .goodvibes/reviews/receipt.json; printf artifact > artifact.txt; printf SYNTHETIC_OUTPUT");
@@ -188,16 +231,19 @@ for (const interruption of ['abort', 'revoke', 'permission'] as const)
     let allowed = true;
     const binding = await fixture(() => allowed);
     const controller = new AbortController();
-    const pending = run(binding, 'echo BEFORE; sleep 1; echo LATE > late.txt; echo AFTER', controller.signal);
-    setTimeout(() => {
-      if (interruption === 'abort') controller.abort();
-      else if (interruption === 'revoke') revokeContractInputAuthority(binding.authority);
-      else allowed = false;
-    }, 200);
-    const result = await pending;
-    expect(result.success).toBe(false); expect(result.stdout).toBe('');
-    expect(JSON.stringify(result)).not.toContain('BEFORE\\n');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const watch = watchContained('LATE > late.txt');
+    try {
+      const pending = run(binding, 'echo BEFORE; sleep 1; echo LATE > late.txt; echo AFTER', controller.signal);
+      setTimeout(() => {
+        if (interruption === 'abort') controller.abort();
+        else if (interruption === 'revoke') revokeContractInputAuthority(binding.authority);
+        else allowed = false;
+      }, 200);
+      const result = await pending;
+      expect(result.success).toBe(false); expect(result.stdout).toBe('');
+      expect(JSON.stringify(result)).not.toContain('BEFORE\\n');
+      await expectStopped(watch);
+    } finally { watch.restore(); }
     expect(existsSync(join(binding.root, 'late.txt'))).toBe(false);
   });
 test.skipIf(!supported)('forged authority and detached commands cannot select a host fallback', async () => {
@@ -339,10 +385,14 @@ test.skipIf(!supported)('dependency permission revocation stops output and futur
   mkdirSync(dependencies);
   writeFileSync(join(dependencies, 'public.js'), 'export const value=42;');
   const token = await admitCapturedExecDependency(binding, { sourceRoot: dependencies, targetRelativePath: 'node_modules' });
-  const pending = run({ ...binding, dependencyInputs: [token!] }, 'cat node_modules/public.js; sleep 1; echo late > late.txt');
-  setTimeout(() => { allowed = false; }, 200);
-  const result = await pending;
-  expect(result.success).toBe(false); expect(result.stdout).toBe('');
+  const watch = watchContained('echo late > late.txt');
+  try {
+    const pending = run({ ...binding, dependencyInputs: [token!] }, 'cat node_modules/public.js; sleep 1; echo late > late.txt');
+    setTimeout(() => { allowed = false; }, 200);
+    const result = await pending;
+    expect(result.success).toBe(false); expect(result.stdout).toBe('');
+    await expectStopped(watch);
+  } finally { watch.restore(); }
   expect(existsSync(join(binding.root, 'late.txt'))).toBe(false);
   await expect(assertContractInputReadAccess(binding.authority, binding.readAccessFilter)).rejects.toThrow('restricted');
 });

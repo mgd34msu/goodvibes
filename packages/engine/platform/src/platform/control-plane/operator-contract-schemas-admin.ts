@@ -13,6 +13,7 @@ import {
   enumSchema,
 } from './operator-contract-schemas-shared.js';
 import { REASONING_EFFORT_SEVERITY } from '../providers/reasoning-effort.js';
+import { ROUTE_SURFACE_KINDS } from '../../events/routes.js';
 
 export const LOCAL_AUTH_USER_SCHEMA = objectSchema({
   username: STRING_SCHEMA,
@@ -185,26 +186,8 @@ const AUTOMATION_RUN_TRIGGER_SCHEMA = enumSchema([
   'surface',
   'watcher',
 ]);
-const AUTOMATION_SURFACE_KIND_SCHEMA = enumSchema([
-  'tui',
-  'web',
-  'slack',
-  'discord',
-  'ntfy',
-  'webhook',
-  'homeassistant',
-  'telegram',
-  'google-chat',
-  'signal',
-  'whatsapp',
-  'telephony',
-  'imessage',
-  'msteams',
-  'bluebubbles',
-  'mattermost',
-  'matrix',
-  'service',
-]);
+// Derived from the tuple that binds routes so a new surface kind reaches the published schema.
+const AUTOMATION_SURFACE_KIND_SCHEMA = enumSchema(ROUTE_SURFACE_KINDS);
 const AUTOMATION_ROUTE_KIND_SCHEMA = enumSchema(['session', 'thread', 'channel', 'message']);
 const AUTOMATION_SOURCE_KIND_SCHEMA = enumSchema([
   'schedule',
@@ -557,20 +540,40 @@ export const AUTOMATION_INTEGRATION_SNAPSHOT_SCHEMA = objectSchema({
   }, ['id', 'jobId', 'status', 'trigger', 'queuedAt'], { additionalProperties: true })),
 }, ['totals', 'jobs', 'recentRuns']);
 
-export const AUTOMATION_JOBS_OUTPUT_SCHEMA = objectSchema({
-  jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
-  // Present only while automation is enabled with zero routines: the
-  // how-to-create-your-first-routine copy a surface renders instead of a
-  // bare empty list. Disappears by itself once the first routine exists.
-  emptyState: objectSchema({
-    title: STRING_SCHEMA,
-    body: STRING_SCHEMA,
-  }, ['title', 'body']),
-}, ['jobs']);
+// With ?limit or ?cursor the routes answer the bounded cursor envelope
+// instead of the legacy `{ jobs }` / `{ runs }` body; both shapes are published.
+export const AUTOMATION_JOBS_OUTPUT_SCHEMA = {
+  anyOf: [
+    objectSchema({
+      jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
+      // Present only while automation is enabled with zero routines: the
+      // how-to-create-your-first-routine copy a surface renders instead of a
+      // bare empty list. Disappears by itself once the first routine exists.
+      emptyState: objectSchema({
+        title: STRING_SCHEMA,
+        body: STRING_SCHEMA,
+      }, ['title', 'body']),
+    }, ['jobs']),
+    objectSchema({
+      items: arraySchema(AUTOMATION_JOB_SCHEMA),
+      hasMore: BOOLEAN_SCHEMA,
+      nextCursor: STRING_SCHEMA,
+    }, ['items', 'hasMore']),
+  ],
+};
 
-export const AUTOMATION_RUNS_OUTPUT_SCHEMA = objectSchema({
-  runs: arraySchema(AUTOMATION_RUN_SCHEMA),
-}, ['runs']);
+export const AUTOMATION_RUNS_OUTPUT_SCHEMA = {
+  anyOf: [
+    objectSchema({
+      runs: arraySchema(AUTOMATION_RUN_SCHEMA),
+    }, ['runs']),
+    objectSchema({
+      items: arraySchema(AUTOMATION_RUN_SCHEMA),
+      hasMore: BOOLEAN_SCHEMA,
+      nextCursor: STRING_SCHEMA,
+    }, ['items', 'hasMore']),
+  ],
+};
 
 export const AUTOMATION_RUN_DETAIL_OUTPUT_SCHEMA = objectSchema({
   run: AUTOMATION_RUN_SCHEMA,

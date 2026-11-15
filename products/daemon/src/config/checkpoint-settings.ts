@@ -1,4 +1,5 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Checkpoint guard settings (`checkpoints.*` namespace).
@@ -49,6 +50,27 @@ export interface CheckpointGuardSettings {
   readonly autoRetention?: boolean;
 }
 
+const KNOWN_CHECKPOINT_KEYS: Readonly<Record<string, (value: unknown) => boolean>> = {
+  preferGitRoot: (value) => typeof value === 'boolean',
+  allowBroadRoot: (value) => typeof value === 'boolean',
+  allowLargeFirstSnapshot: (value) => typeof value === 'boolean',
+  maxFirstSnapshotFiles: (value) => typeof value === 'number' && Number.isFinite(value) && value > 0,
+  autoRetention: (value) => typeof value === 'boolean',
+  unregisteredWorkspaces: (value) => value === 'off' || value === 'guarded',
+};
+
+/**
+ * Names (never values) of `checkpoints` entries that are ignored: a misspelt key,
+ * or a value of the wrong type. These settings are not schema keys, so nothing
+ * else would tell the owner that a hand-edited entry took no effect.
+ */
+export function ignoredCheckpointSettingKeys(block: Readonly<Record<string, unknown>>): readonly string[] {
+  return Object.keys(block).filter((key) => {
+    const valid = Object.hasOwn(KNOWN_CHECKPOINT_KEYS, key) ? KNOWN_CHECKPOINT_KEYS[key] : undefined;
+    return valid === undefined || !valid(block[key]);
+  });
+}
+
 /**
  * Read the `checkpoints.*` guard passthrough keys from the loaded config. Only
  * keys present with the right primitive type are returned; everything else is
@@ -62,6 +84,10 @@ export function readCheckpointGuardSettings(
   const block = raw.checkpoints;
   if (block === null || typeof block !== 'object' || Array.isArray(block)) return {};
   const cp = block as Record<string, unknown>;
+  const ignored = ignoredCheckpointSettingKeys(cp);
+  if (ignored.length > 0) {
+    logger.warn('checkpoints settings ignored: the key is unknown or its value has the wrong type; the default applies', { keys: ignored });
+  }
 
   const out: {
     preferGitRoot?: boolean;

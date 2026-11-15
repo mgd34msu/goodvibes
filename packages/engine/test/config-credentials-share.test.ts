@@ -5,7 +5,8 @@
  * (never 3421/4444). Proves the new admin-scoped `credentials.get` wire method:
  *
  *   1. cross-surface provider visibility, config.get carries provider.* config.
- *   2. admin scoping, no token → 401; a valid admin token → 200.
+ *   2. admin scoping, no token → 401; a signed-in non-admin user → 403;
+ *      a valid admin token → 200.
  *   3. secret-free by construction, NO raw key bytes in any response path, and
  *      CONFIG_SNAPSHOT_SCHEMA still carries no secrets/apiKeys field.
  *   4. external refs, an env:// ref resolves through the read method (usable),
@@ -14,18 +15,20 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
 import { CONFIG_SNAPSHOT_SCHEMA } from '../platform/src/platform/control-plane/operator-contract-schemas-admin.ts';
 
 const TOKEN = 'w6c1-credentials-token';
 const STORED_PLAINTEXT = 'super-secret-plaintext-value-do-not-leak';
 const ENV_REF_PLAINTEXT = 'resolved-through-env-ref-do-not-leak';
 const ENV_REF_VAR = 'W6C1_TEST_ENV_SECRET';
+const VIEWER = { username: 'viewer', password: 'viewer-password-1' };
 
 let home: string;
 let work: string;
@@ -50,6 +53,14 @@ beforeAll(async () => {
   await seed.set('SHARED_CHANNEL_TOKEN', STORED_PLAINTEXT, { scope: 'user', medium: 'secure' });
   await seed.set('REF_BACKED_TOKEN', `goodvibes://secrets/env/${ENV_REF_VAR}`, { scope: 'user', medium: 'secure' });
   process.env[ENV_REF_VAR] = ENV_REF_PLAINTEXT;
+
+  // A signed-in user without the admin role, seeded into the store the daemon loads at boot.
+  const authDir = join(home, '.goodvibes', 'goodvibes');
+  mkdirSync(authDir, { recursive: true });
+  new UserAuthManager({
+    bootstrapFilePath: join(authDir, 'auth-users.json'),
+    bootstrapCredentialPath: join(authDir, 'auth-bootstrap.txt'),
+  }).addUser(VIEWER.username, VIEWER.password, ['viewer']);
 
   seedBenchmarkCache(home, 'goodvibes');
   daemon = await bootDaemon({
@@ -91,6 +102,22 @@ describe('credentials.get admin-scoped secret-free read', () => {
   test('admin scoping: no token → 401', async () => {
     const res = await fetch(`${daemon.url}/config/credentials`);
     expect(res.status).toBe(401);
+  });
+
+  test('admin scoping: a signed-in non-admin user → 403, not the credential status', async () => {
+    const login = await fetch(`${daemon.url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(VIEWER),
+    });
+    expect(login.status).toBe(200);
+    const { token } = await login.json() as { token: string };
+    expect(typeof token).toBe('string');
+
+    const res = await fetch(`${daemon.url}/config/credentials`, { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(403);
+    const text = await res.text();
+    expect(text.includes('SHARED_CHANNEL_TOKEN')).toBe(false);
   });
 
   test('admin token → 200 with secret-free credential status', async () => {

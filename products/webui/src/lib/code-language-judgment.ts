@@ -7,7 +7,9 @@ import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } f
 import { randomUuid } from './uuid';
 
 type Request = BrowserJudgmentRequest<'webui.code.language'>;
-export type CodeSource = { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string; readonly content: string; readonly start: number; readonly end: number };
+export type CodeSource = { readonly sessionId: string; readonly messageId: string; readonly contentRevision: string; readonly content: string; readonly start: number; readonly end: number;
+  /** Live check that the message still carries this revision; the result's `isCurrent` reports false once it returns false. */
+  readonly isSourceCurrent?: () => boolean };
 export type CodeLanguageResult = { readonly status: 'ready'; readonly language: WebuiCodeLanguage; readonly provenance?: 'classic'; readonly isCurrent: () => boolean } | { readonly status: 'held' | 'unavailable' };
 const object = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const keys = (value: Record<string, unknown>, names: readonly string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
@@ -55,8 +57,7 @@ export async function readCodeLanguage(source: CodeSource, signal: AbortSignal):
   const cancel = () => abort.abort(); const unsubscribe = subscribeClientLifetime(cancel);
   signal.addEventListener('abort', cancel, { once: true });
   const isCurrent = () => !signal.aborted && !abort.signal.aborted && isClientLifetimeCurrent(lifetime)
-    && source.sessionId === sessionId && source.messageId === messageId && source.contentRevision === contentRevision
-    && source.content === content && source.start === start && source.end === end;
+    && (source.isSourceCurrent?.() ?? true);
   try {
     if (!isCurrent()) return { status: 'unavailable' };
     const request: Request = { protocolVersion: 1, requestId: randomUuid(), battery: 'webui.code.language', batteryVersion: 2,

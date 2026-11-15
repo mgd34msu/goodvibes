@@ -219,11 +219,16 @@ describe('native execution operator client', () => {
         const error = Object.assign(new Error('synthetic operator failure'), { code, status: 503 });
         const f = fixture(() => { throw error; });
         await expect(f.client[operation](identity())).rejects.toBe(error);
-        await Promise.resolve(); expect(f.calls).toHaveLength(1); f.client.dispose();
+        await settle(); expect(f.calls).toHaveLength(1); f.client.dispose();
       }
     }
   });
 });
+
+/** Let queued promise work finish: setImmediate runs after every pending microtask, so no test depends on await depth. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 3; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+};
 
 describe('native work host project discovery', () => {
   test('requires fresh read-scoped admin authority and exposes only strict selected project identity', () => {
@@ -255,9 +260,9 @@ describe('native work host project discovery', () => {
     };
     const controller = new AbortController(); const remove = spyOn(controller.signal, 'removeEventListener');
     const pending = getOperatorWorkLedgerProject({ invoke }, { signal: controller.signal });
-    await Promise.resolve(); controller.abort();
+    await settle(); controller.abort();
     await expect(pending).rejects.toMatchObject({ code: 'aborted' }); expect(signal?.aborted).toBe(true);
-    gate.resolve({ projectId }); await Promise.resolve(); expect(calls).toBe(1); expect(remove).toHaveBeenCalledTimes(1);
+    gate.resolve({ projectId }); await settle(); expect(calls).toBe(1); expect(remove).toHaveBeenCalledTimes(1);
     await expect(getOperatorWorkLedgerProject({ invoke }, { signal: controller.signal })).rejects.toMatchObject({ code: 'aborted' }); expect(calls).toBe(1);
     remove.mockRestore();
     const reentrant = new AbortController();
@@ -280,11 +285,11 @@ describe('native execution client local lifecycle', () => {
     const gate = deferred<unknown>(); const f = fixture(() => gate.promise);
     const controller = new AbortController(); const remove = spyOn(controller.signal, 'removeEventListener');
     const pending = f.client.start(identity(), { signal: controller.signal });
-    await Promise.resolve(); expect(f.calls).toHaveLength(1);
+    await settle(); expect(f.calls).toHaveLength(1);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: 'aborted' });
     expect(f.calls[0]?.signal?.aborted).toBe(true); expect(remove).toHaveBeenCalledTimes(1);
-    gate.resolve(snapshot()); await Promise.resolve();
+    gate.resolve(snapshot()); await settle();
     expect(f.calls).toHaveLength(1); f.client.dispose(); remove.mockRestore();
   });
 
@@ -292,13 +297,13 @@ describe('native execution client local lifecycle', () => {
     const gates = operations.map(() => deferred<unknown>()); let calls = 0;
     const f = fixture(() => gates[calls++]!.promise);
     const pending = operations.map(operation => f.client[operation](identity()).catch(error => error));
-    await Promise.resolve(); expect(f.calls).toHaveLength(4);
+    await settle(); expect(f.calls).toHaveLength(4);
     f.client.dispose();
     for (const result of pending) expect(await result).toMatchObject({ code: 'disposed' });
     expect(f.calls.every(call => call.signal?.aborted)).toBe(true);
     gates[0]!.resolve(snapshot()); gates[1]!.reject(new Error('late connection loss'));
     gates[2]!.resolve(snapshot()); gates[3]!.reject(new Error('late connection loss'));
-    await Promise.resolve(); expect(f.calls).toHaveLength(4);
+    await settle(); expect(f.calls).toHaveLength(4);
   });
 
   test('a completed operation detaches external abort and leaves subsequent requests usable', async () => {

@@ -17,7 +17,7 @@
  *     data, unbound holder returns the honest "not available" message.
  */
 import { describe, expect, test } from 'bun:test';
-import { createContextAccountingSource } from '../../runtime/context-accounting-source.ts';
+import { createContextAccountingSource, type CompactionActivityBus, type CompactionActivityEnvelope } from '../../runtime/context-accounting-source.ts';
 import { ContextAccountingHolder, createContextAccountingTool } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
@@ -71,9 +71,9 @@ function makeFakeLineageTracker(compactionCount: number) {
 
 /** A minimal fake runtime bus: records subscribers by event type, lets tests fire them. */
 function makeFakeRuntimeBus() {
-  const handlers = new Map<string, Array<() => void>>();
-  const bus = {
-    on: (type: string, cb: () => void) => {
+  const handlers = new Map<string, Array<(envelope: CompactionActivityEnvelope) => void>>();
+  const bus: CompactionActivityBus & { fire(type: string): void } = {
+    on: (type, cb) => {
       const list = handlers.get(type) ?? [];
       list.push(cb);
       handlers.set(type, list);
@@ -83,7 +83,7 @@ function makeFakeRuntimeBus() {
       };
     },
     fire: (type: string) => {
-      for (const cb of handlers.get(type) ?? []) cb();
+      for (const cb of handlers.get(type) ?? []) cb({});
     },
   };
   return bus;

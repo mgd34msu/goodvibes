@@ -203,7 +203,6 @@ describe('research adapter', () => {
         readonly title: string;
         readonly url: string;
         readonly captureArgs: { readonly action: string; readonly confirm?: boolean; readonly explicitUserRequest?: string };
-        readonly captureRoute: string;
       }[];
     };
 
@@ -217,7 +216,8 @@ describe('research adapter', () => {
     expect(packet.sourceCandidates[0]?.captureArgs.action).toBe('add_source');
     expect(packet.sourceCandidates[0]?.captureArgs.confirm).toBeUndefined();
     expect(packet.sourceCandidates[0]?.captureArgs.explicitUserRequest).toBeUndefined();
-    expect(packet.sourceCandidates[0]?.captureRoute).toContain('research action:"add_source"');
+    // Page-authored text is not echoed into a ready-to-run route; the structured captureArgs carry it.
+    expect(packet.sourceCandidates[0]).not.toHaveProperty('captureRoute');
   });
 
   test('public search refuses literal credentials before returning source capture routes', async () => {
@@ -365,7 +365,7 @@ describe('research adapter', () => {
       expect(packet.sources[0]?.reviewRoute).toContain('action:"review_source"');
       expect(packet.sources[0]?.reportLine).toContain('https://example.test/report?topic=agents');
       expect(packet.nextRoutes.run).toContain(`runId:"${packet.run.id}"`);
-      expect(packet.nextRoutes.sources).toContain('includeReportLines:true');
+      expect(packet.nextRoutes.sources).not.toContain('includeReportLines');
       expect(packet.nextRoutes.bundle).toContain('includeReportLines:true');
       expect(packet.nextRoutes.saveReport).toContain('requireCitationCoverage:true');
       expect(packet.policy).toContain('does not save a report');
@@ -387,7 +387,7 @@ describe('research adapter', () => {
     }
   });
 
-  test('routes source bundle and confirmed writes to existing research tools', async () => {
+  test('routes source bundle and writes to existing research tools without forwarding the legacy confirm flag', async () => {
     const calls: Record<string, unknown>[] = [];
     const tool = makeTool(calls);
 
@@ -437,7 +437,6 @@ describe('research adapter', () => {
         title: 'Browser agent comparison',
         question: 'Which local browser agents are strongest?',
         plan: ['Search', 'Review', 'Report'],
-        confirm: true,
         explicitUserRequest: 'Start a visible research run.',
       },
       {
@@ -447,7 +446,6 @@ describe('research adapter', () => {
         title: 'Odysseus README',
         url: 'https://example.test/odysseus',
         summary: 'Local-first browser agent notes.',
-        confirm: true,
         explicitUserRequest: 'Capture this source.',
       },
       {
@@ -457,7 +455,6 @@ describe('research adapter', () => {
         credibility: 'high',
         score: 90,
         note: 'Primary project source.',
-        confirm: true,
         explicitUserRequest: 'Review this source.',
       },
       {
@@ -467,13 +464,12 @@ describe('research adapter', () => {
         question: 'Which local browser agents are strongest?',
         sources: [{ title: 'Odysseus README', credibility: 'high' }],
         visualReport: true,
-        confirm: true,
         explicitUserRequest: 'Save this sourced report.',
       },
     ]);
   });
 
-  test('routes confirmed run lifecycle and source status changes', async () => {
+  test('routes run lifecycle and source status changes without forwarding the legacy confirm flag', async () => {
     const calls: Record<string, unknown>[] = [];
     const tool = makeTool(calls);
 
@@ -523,7 +519,6 @@ describe('research adapter', () => {
         phase: 'reading',
         progress: 45,
         sourceIds: ['src_123'],
-        confirm: true,
         explicitUserRequest: 'Checkpoint this research run.',
       },
       {
@@ -531,7 +526,6 @@ describe('research adapter', () => {
         mode: 'pause',
         id: 'run_123',
         note: 'Waiting for user review.',
-        confirm: true,
         explicitUserRequest: 'Pause the research run.',
       },
       {
@@ -539,7 +533,6 @@ describe('research adapter', () => {
         mode: 'complete',
         id: 'run_123',
         reportArtifactId: 'artifact_123',
-        confirm: true,
         explicitUserRequest: 'Complete the research run.',
       },
       {
@@ -547,7 +540,6 @@ describe('research adapter', () => {
         mode: 'reject',
         id: 'src_123',
         note: 'Outdated secondary source.',
-        confirm: true,
         explicitUserRequest: 'Reject this source.',
       },
       {
@@ -555,7 +547,6 @@ describe('research adapter', () => {
         mode: 'use',
         id: 'src_456',
         reportArtifactId: 'artifact_123',
-        confirm: true,
         explicitUserRequest: 'Mark this source used.',
       },
     ]);

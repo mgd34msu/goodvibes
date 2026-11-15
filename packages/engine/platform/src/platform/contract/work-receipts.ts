@@ -49,16 +49,27 @@ export function contractSourceScope(contract: Pick<ContractView, 'units'> & Part
  * or change its action arguments; retain the exact execution record locally. */
 function commandReceipt(command: NonNullable<ContractView['units'][number]['commandEvidence']>[number]) {
   const observed = commandObservation(command);
-  const spans = findCardNumberShapes(observed.head);
-  const stderr = 'stderr' in observed && typeof observed.stderr === 'string' ? observed.stderr : undefined;
-  const errorSpans = stderr === undefined ? [] : findCardNumberShapes(stderr);
-  if (spans.length + errorSpans.length === 0) return observed;
-  const redact = (value: string, found: ReturnType<typeof findCardNumberShapes>) => {
+  let withheld = 0;
+  const redact = (value: string): string => {
+    const found = findCardNumberShapes(value);
+    withheld += found.length;
     for (const span of found.toReversed()) value = value.slice(0, span.startIndex)
       + '[WITHHELD:card-shaped-number]' + value.slice(span.startIndex + span.length);
     return value;
   };
-  return { ...observed, head: redact(observed.head, spans), ...(stderr === undefined ? {} : { stderr: redact(stderr, errorSpans) }), headProjection: { withheldSpans: spans.length + errorSpans.length,
+  const redactDeep = (value: unknown): unknown => typeof value === 'string' ? redact(value)
+    : Array.isArray(value) ? value.map(redactDeep)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactDeep(entry)]))
+        : value;
+  // The command line and the other fields of the exec envelope can carry the
+  // same digit runs as its output (an argument, an echoed environment value).
+  const head = redact(observed.head);
+  const commandText = redact(observed.command);
+  const stderr = 'stderr' in observed && typeof observed.stderr === 'string' ? redact(observed.stderr) : undefined;
+  const captureContext = 'captureContext' in observed ? redactDeep(observed.captureContext) : undefined;
+  if (withheld === 0) return observed;
+  return { ...observed, head, command: commandText, ...(stderr === undefined ? {} : { stderr }),
+    ...(captureContext === undefined ? {} : { captureContext }), headProjection: { withheldSpans: withheld,
     meaning: 'Card-shaped number spans in this observational output are unavailable here. Markers do not establish their contents or equality. The complete execution receipt remains retained locally; this projection does not approve the command or any claim.' } };
 }
 

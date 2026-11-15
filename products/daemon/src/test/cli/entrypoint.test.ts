@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { availableLoopbackPorts } from '../helpers/companion-cli-fixture.js';
+import { assertEmittedBuildCurrent } from '../helpers/emitted-build.js';
 import { runDaemonCli } from '../../cli/run.js';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { parseDaemonCli } from '../../cli/parser.js';
@@ -19,6 +21,7 @@ const packageVersion = (JSON.parse(readFileSync(new URL('../../../package.json',
 function launch(args: string[], composed = false, root = makeOwnedTempDir('daemon-built-cli'), source = false) {
   const home = join(root, 'home'); const cwd = join(root, 'work');
   mkdirSync(home, { recursive: true }); mkdirSync(cwd, { recursive: true });
+  if (!source) assertEmittedBuildCurrent();
   const child = spawn(process.execPath, [composed
     ? fileURLToPath(new URL('../helpers/daemon-cli-child.ts', import.meta.url)) : source ? fileURLToPath(new URL('../../cli/entrypoint.ts', import.meta.url)) : entrypoint, ...args], {
     cwd, stdio: ['pipe', 'pipe', 'pipe'],
@@ -187,8 +190,7 @@ test('CLI errors from caller-owned output/config ports never render exception va
 });
 
 test('shipped emitted entrypoint serves complete fresh-install inbox membership without injected adapters', async () => {
-  const lease = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('lease') });
-  const port = lease.port!; await lease.stop(true);
+  const [port] = await availableLoopbackPorts(1);
   const root = makeOwnedTempDir('daemon-production-serving');
   mkdirSync(join(root, 'daemon'), { recursive: true });
   writeFileSync(join(root, 'daemon', 'settings.json'), JSON.stringify({ cluster: { enabled: false }, relay: { enabled: false } }));
@@ -207,20 +209,32 @@ test('shipped emitted entrypoint serves complete fresh-install inbox membership 
   } finally { await fx.close(); }
 }, 30_000);
 
-for (const mode of ['shipped', 'source'] as const) test(`${mode} entrypoint refuses configured provider intake without trusted account admission`, async () => {
+// An enabled provider whose account is not admitted must not stop the daemon or serve provider data:
+// it stays up and the inbox says that provider is unavailable and why.
+for (const mode of ['shipped', 'source'] as const) test(`${mode} entrypoint reports a configured provider without trusted account admission as unavailable`, async () => {
+  const [port] = await availableLoopbackPorts(1);
   const root = makeOwnedTempDir('daemon-production-refusal');
   mkdirSync(join(root, 'daemon'), { recursive: true });
   writeFileSync(join(root, 'daemon', 'settings.json'), JSON.stringify({ cluster: { enabled: false }, relay: { enabled: false },
     surfaces: { slack: { enabled: true } } }));
-  const fixture = launch(['serve', '--hostname', '127.0.0.1', '--port', '41379'], false, root, mode === 'source');
-  const code = await fixture.waitForExit();
-  expect(code).toBe(1); expect(fixture.output().stdout).not.toContain('host started');
+  const fx = launch(['serve', '--hostname', '127.0.0.1', '--port', String(port)], false, root, mode === 'source');
+  try {
+    await fx.waitFor('host started');
+    const response = await fetch(`http://127.0.0.1:${port}/api/channels/inbox`, { headers: { Authorization: 'Bearer synthetic-cli-token' } });
+    expect(response.status).toBe(200);
+    const receipt = await response.json() as { items?: unknown; partial?: unknown; providers?: unknown };
+    expect(receipt.items).toEqual([]); expect(receipt.partial).toBe(true);
+    expect(receipt.providers).toEqual(['slack', 'discord', 'email'].map(provider => provider === 'slack'
+      ? { provider, state: 'error', configured: true, syncing: false, itemCount: 0, storedCount: 0, error: 'account-incomplete' }
+      : { provider, state: 'unconfigured', configured: false, syncing: false, itemCount: 0, storedCount: 0 }));
+    expect(fx.child.kill('SIGTERM')).toBe(true);
+    expect(await fx.waitForExit()).toBe(0);
+  } finally { await fx.close(); }
 }, 30_000);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   test(`emitted explicit launcher serves real loopback contracts and awaits inbox drainage on ${signal}`, async () => {
-    const lease = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('lease') });
-    const port = lease.port!; await lease.stop(true);
+    const [port] = await availableLoopbackPorts(1);
     const root = makeOwnedTempDir('daemon-cli-serving');
     mkdirSync(join(root, 'daemon'), { recursive: true });
     writeFileSync(join(root, 'daemon', 'settings.json'), JSON.stringify({ cluster: { enabled: false }, relay: { enabled: false } }));
@@ -245,8 +259,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 test('CLI test deadline kills and reaps an interrupted child held in shutdown', async () => {
-  const lease = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('lease') });
-  const port = lease.port!; await lease.stop(true);
+  const [port] = await availableLoopbackPorts(1);
   const root = makeOwnedTempDir('daemon-cli-deadline');
   mkdirSync(join(root, 'daemon'), { recursive: true });
   writeFileSync(join(root, 'daemon', 'settings.json'), JSON.stringify({ cluster: { enabled: false }, relay: { enabled: false } }));
@@ -314,8 +327,8 @@ test('custom daemon identity receives the legacy migration and does not seed the
 for (const [flags, expected] of [
   [['--provider', 'openai', '--model', 'anthropic:fixture-model'], 'openai:fixture-model'],
   [['--model', 'anthropic:fixture-model', '--provider', 'openai'], 'openai:fixture-model'],
-  [['--model', 'openai/fixture-model'], 'openai:fixture-model'],
-  [['--provider', 'openai', '--model', 'anthropic/fixture-model'], 'openai:fixture-model'],
+  [['--model', 'openai/fixture-model'], 'openrouter:openai/fixture-model'],
+  [['--provider', 'openai', '--model', 'anthropic/fixture-model'], 'openai:anthropic/fixture-model'],
   [['--model', 'openrouter:namespace/model:revision'], 'openrouter:namespace/model:revision'],
 ] as const) {
   test(`model identity reaches runtime config for ${flags.join(' ')}`, () => {

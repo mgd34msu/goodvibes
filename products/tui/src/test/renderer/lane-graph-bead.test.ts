@@ -199,6 +199,14 @@ describe('edit diffs', () => {
     expect(diff?.numbered).toBe(false);
     expect(diff?.text).toContain(' keep\n-old\n+new');
   });
+
+  test('a base64 field wins over a plain empty twin, so the hunk shows the bytes the edit writes', () => {
+    const z = Buffer.from('z').toString('base64');
+    const diff = editDiff(call('edit', { edits: [{ path: 'a.ts', find: 'x', replace: '', replace_base64: z }] }), '{"applied":1,"failed":0}');
+    expect(diff?.text).toContain('-x\n+z');
+    const encodedFind = editDiff(call('edit', { edits: [{ path: 'a.ts', find: '', find_base64: Buffer.from('old').toString('base64'), replace: 'new' }] }), '{"applied":1,"failed":0}');
+    expect(encodedFind?.text).toContain('-old\n+new');
+  });
 });
 
 describe('terminal control sequences never reach the row', () => {

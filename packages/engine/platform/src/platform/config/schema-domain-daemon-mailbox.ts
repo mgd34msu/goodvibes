@@ -44,7 +44,19 @@
  * rather than on the non-scalar list in `config-ownership.ts`.
  */
 
-import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
+import { type ConfigSettingDefinition, intRange, port } from './schema-shared.js';
+
+/** Validator for a setting that holds JSON text: empty is allowed, anything else must parse and pass `shape`. */
+function jsonText(shape: (parsed: unknown) => boolean, hint: string): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
+  return {
+    validate: (value) => {
+      if (typeof value !== 'string') return false;
+      if (value.trim() === '') return true;
+      try { return shape(JSON.parse(value)); } catch { return false; }
+    },
+    validationHint: hint,
+  };
+}
 
 /** Defaults for the daemon's own mail account and calendar. */
 export const daemonMailboxConfigDefaults = {
@@ -65,7 +77,7 @@ export const daemonMailboxConfigDefaults = {
       password: '',
       secure: true,
       mailbox: 'INBOX',
-      draftsMailbox: 'Drafts',
+      draftsMailbox: '',
     },
     smtp: {
       host: '',
@@ -152,6 +164,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 993,
     description: 'IMAP port read by the inbox provider',
+    ...port(),
   },
   {
     key: 'surfaces.email.imapUser',
@@ -176,6 +189,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 993,
     description: 'IMAP port',
+    ...port(),
   },
   {
     key: 'surfaces.email.imap.user',
@@ -204,8 +218,8 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'surfaces.email.imap.draftsMailbox',
     type: 'string',
-    default: 'Drafts',
-    description: 'Mailbox drafts are appended to',
+    default: '',
+    description: 'Mailbox drafts are appended to. Empty (the default) means ask the server which folder carries the \\Drafts flag, which is right for providers such as Gmail whose Drafts folder is not literally named "Drafts"',
   },
   {
     key: 'surfaces.email.smtp.host',
@@ -218,6 +232,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 465,
     description: 'SMTP port',
+    ...port(),
   },
   {
     key: 'surfaces.email.smtp.password',
@@ -249,7 +264,9 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     default: '[]',
     description: 'JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. '
       + '["primary"]. Empty means no mailbox is watched even when enabled is true. A list rather than a single '
-      + 'switch because one address for signups and another for the owner\'s real mail is the expected shape.',
+      + 'switch because one address for signups and another for the owner\'s real mail is the expected shape. '
+      + 'Only the first entry is watched today; any further entries are accepted but not watched.',
+    ...jsonText((parsed) => Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string'), 'a JSON array of account names, e.g. ["primary"]'),
   },
   {
     key: 'surfaces.email.inbound.source',
@@ -351,7 +368,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     description: 'Default lifetime, in minutes, of a verification expectation opened for inbound-mail matching '
       + '(for example an account signup awaiting its confirmation email). Raising it gives a slower-to-arrive '
       + 'confirmation more time to match; lowering it shrinks how long a stale expectation can be satisfied by a '
-      + 'late message. Hard-capped at 60 to match MAX_VERIFICATION_WINDOW_MS.',
+      + 'late message. Hard-capped at 60 to match MAX_VERIFICATION_WINDOW_MS. Applies after the daemon restarts.',
     ...intRange(1, 60),
   },
   {
@@ -371,7 +388,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     default: 30,
     description: 'How many days an inbound mail record (sender, subject, delivery evidence, link verdicts, '
       + 'never the full body) is kept before it is reaped. Longer keeps a longer history to explain "why did I '
-      + 'get that message"; shorter bounds how much of the owner\'s mail metadata the daemon retains.',
+      + 'get that message"; shorter bounds how much of the owner\'s mail metadata the daemon retains. Applies after the daemon restarts.',
     ...intRange(1, 365),
   },
   {
@@ -379,7 +396,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 5000,
     description: 'Hard cap on the number of inbound mail records kept regardless of age. Whichever of this and '
-      + 'retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail.',
+      + 'retentionDays is reached first wins, so this bounds worst-case storage even under a burst of mail. Applies after the daemon restarts.',
     ...intRange(100, 100_000),
   },
   {
@@ -439,5 +456,10 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description: 'JSON object mapping a calendar id to its collection path, e.g. {"work":"/dav/calendars/work/"}. Empty means the CalDAV URL is the one calendar',
+    ...jsonText(
+      (parsed) => parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        && Object.values(parsed as Record<string, unknown>).every((path) => typeof path === 'string'),
+      'a JSON object mapping calendar ids to collection paths',
+    ),
   },
 ];

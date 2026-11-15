@@ -30,8 +30,9 @@
  * another. Each record still carries the workspace it was made in, so the file
  * says plainly where the decision came from.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { withSyncFileLock } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SessionSurface } from '@/runtime/index.ts';
 
@@ -187,12 +188,17 @@ export interface RecoveryDecisionsPruneOutcome {
  * anything logs the counts and the ledger path.
  *
  * Idempotent and safe to run from two processes at once: it is a pure function
- * of the file's content plus `nowMs`, the rewrite is a temp-file-plus-rename,
+ * of the file's content plus `nowMs`, the rewrite is a temp-file-plus-rename
+ * under the same cross-process lock {@link recordRecoveryRemoval} takes,
  * and a second run over an already-pruned ledger drops nothing and writes
  * nothing. Best-effort, a ledger that cannot be pruned is left exactly as it
  * was and never breaks a boot.
  */
 export function pruneRecoveryDecisions(surface: SessionSurface, nowMs: number = Date.now()): RecoveryDecisionsPruneOutcome {
+  return withSyncFileLock(recoveryDecisionsPathFor(surface), () => pruneLedgerLocked(surface, nowMs));
+}
+
+function pruneLedgerLocked(surface: SessionSurface, nowMs: number): RecoveryDecisionsPruneOutcome {
   const path = recoveryDecisionsPathFor(surface);
   const load = loadLedger(surface, nowMs);
   const overCap = Math.max(0, load.kept.length - MAX_RECORDS);
@@ -258,15 +264,34 @@ export function isRecoveryRemovalRecorded(surface: SessionSurface, sessionId: st
  */
 export function recordRecoveryRemoval(surface: SessionSurface, sessionId: string, nowMs: number = Date.now()): void {
   if (!sessionId.trim()) return;
+  // Two terminals answering Remove for different snapshots would each read the
+  // old ledger and rename their own copy over the other's, so the load and the
+  // write happen under one cross-process lock.
+  withSyncFileLock(recoveryDecisionsPathFor(surface), () => recordRemovalLocked(surface, sessionId, nowMs));
+}
+
+function recordRemovalLocked(surface: SessionSurface, sessionId: string, nowMs: number): void {
   const path = recoveryDecisionsPathFor(surface);
   try {
     const load = loadLedger(surface, nowMs);
     if (load.unreadable) {
-      // Appending onto an unreadable ledger would rewrite it as a one-record
-      // array, silently discarding whatever the user decided before. Say so
-      // rather than quietly resetting their history.
-      logger.warn('recovery decisions: ledger unreadable; recording this removal replaces it', {
+      // Writing a one-record array over an unreadable ledger would turn "could
+      // not read" into "forgot every earlier decision". Keep the old bytes
+      // beside it first; when they cannot even be copied (a transient permission
+      // or I/O failure, a directory in the way) the file is left exactly as it is
+      // and this removal is not recorded, which costs one more question later.
+      try {
+        copyFileSync(path, `${path}.unreadable`);
+      } catch {
+        logger.warn('recovery decisions: ledger unreadable and could not be set aside; left untouched, this removal is not recorded', {
+          ledger: path,
+          sessionId,
+        });
+        return;
+      }
+      logger.warn('recovery decisions: ledger unreadable; its contents were kept beside it and a new ledger is started', {
         ledger: path,
+        kept: `${path}.unreadable`,
         sessionId,
       });
     }

@@ -13,9 +13,35 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { Lang, parse } from '@ast-grep/napi';
+import { Lang, parse, type SgNode } from '@ast-grep/napi';
+
+/** `.unref()`, `.unref?.()` or `.unref?()`-style calls. */
+const UNREF_CALL = /\.unref\s*(?:\?\.)?\s*\(\)/;
+
+/** Callee text of an interval-starting call: `setInterval`, `x.setInterval`, `this.setIntervalImpl`. */
+const INTERVAL_CALLEE = /(?:^|\.)setInterval(?:Impl)?$/;
 
 const ENGINE_SRC = resolve(import.meta.dir, '../platform/src/platform');
+
+/** True when the interval call is directly `.unref`-ed or passed to `unrefHandle(...)`. */
+function isUnrefedInline(call: SgNode): boolean {
+  let node: SgNode = call;
+  let parent = node.parent();
+  // Look through `(call)` and `call as T` wrappers.
+  while (parent && (parent.kind() === 'parenthesized_expression' || parent.kind() === 'as_expression')) {
+    node = parent;
+    parent = node.parent();
+  }
+  if (!parent) return false;
+  if (parent.kind() === 'member_expression') {
+    return parent.field('object')?.id() === node.id() && parent.field('property')?.text() === 'unref';
+  }
+  if (parent.kind() === 'arguments') {
+    const outer = parent.parent();
+    return outer?.kind() === 'call_expression' && outer.field('function')?.text() === 'unrefHandle';
+  }
+  return false;
+}
 
 /**
  * For a given source file, find all `setInterval(...)` call expressions using
@@ -41,7 +67,10 @@ function findUnrefViolations(
 
   // Find all setInterval call expressions
   // findAll() returns SgNode[] directly, each element IS the node
-  const matches = root.findAll({ rule: { pattern: 'setInterval($$$ARGS)' } });
+  // Direct, member-style and injected (`this.setIntervalImpl`) interval sites.
+  const matches = root
+    .findAll({ rule: { kind: 'call_expression' } })
+    .filter((call) => INTERVAL_CALLEE.test(call.field('function')?.text() ?? ''));
 
   for (const match of matches) {
     const range = match.range();
@@ -50,10 +79,10 @@ function findUnrefViolations(
     // Get the text of the matched setInterval call
     const callText = match.text();
 
-    // Case 1: Inline chain, setInterval(...).unref?.() or .unref()
-    const parentText = match.parent()?.text() ?? '';
-    if (/\.unref\??\(\)/.test(parentText)) {
-      continue; // unref is chained on same expression
+    // Case 1: the call itself is the receiver of .unref, or the argument of unrefHandle(...).
+    // Only the immediate parents count; an unref elsewhere in the statement is a different timer.
+    if (isUnrefedInline(match)) {
+      continue;
     }
 
     // Case 2: Assignment, find the variable name being assigned
@@ -94,46 +123,71 @@ function findUnrefViolations(
       // Build a pattern matching the assigned variable followed by .unref
       // Escape dots in member expressions (e.g., this.interval)
       const escapedTarget = assignTarget.replace(/\./g, '\\.');
-      const unrefPattern = new RegExp(`${escapedTarget}\\s*\\.\\s*unref\\??\\(\\)`);
-      if (unrefPattern.test(windowText)) {
+      const unrefPattern = new RegExp(`(?<![\\w$.])${escapedTarget}\\s*(?:as\\s[^;]*?\\)\\s*)?(?:\\?\\s*)?\\.\\s*unref\\s*(?:\\?\\.)?\\s*\\(\\)`);
+      const unrefHelper = new RegExp(`unrefHandle\\(\\s*(?<![\\w$.])${escapedTarget}\\s*\\)`);
+      if (unrefPattern.test(windowText) || unrefHelper.test(windowText)) {
         continue; // found .unref call on the assigned variable
       }
     }
 
-    // Case 3: Class field or complex pattern, scan enclosing block for any .unref
-    let blockCursor = match.parent();
-    while (blockCursor) {
-      const kind = blockCursor.kind();
-      if (kind === 'statement_block' || kind === 'class_body' || kind === 'program') {
-        const blockText = blockCursor.text();
-        // Only scan lines at/after the setInterval call
-        const afterCall = blockText.slice(blockText.indexOf(callText));
-        if (/\.unref\??\(\)/.test(afterCall)) {
-          break; // found .unref in the enclosing block
-        }
-        break;
-      }
-      if (kind === 'method_definition' || kind === 'function_declaration' || kind === 'arrow_function') {
-        const bodyText = blockCursor.text();
-        const afterCall = bodyText.slice(bodyText.indexOf(callText));
-        if (/\.unref\??\(\)/.test(afterCall)) {
-          break; // found .unref in the enclosing function
-        }
-        // No .unref found in enclosing function scope, this is a violation
-        violations.push({
-          line: startLine + 1, // convert to 1-indexed
-          snippet: callText.slice(0, 120),
-        });
-        break;
-      }
-      blockCursor = blockCursor.parent();
-    }
+    // Case 3: not chained and no matching unref on the assigned handle. An unref on
+    // some other timer in the scope does not count.
+    violations.push({
+      line: startLine + 1, // convert to 1-indexed
+      snippet: callText.slice(0, 120),
+    });
   }
 
   return violations;
 }
 
 describe('setInterval .unref() coverage (AST walk)', () => {
+  test('reports an interval that is stored but never unref-ed', () => {
+    const source = 'class A { start() { this.t = setInterval(() => {}, 1); } }';
+    expect(findUnrefViolations('a.ts', source)).toHaveLength(1);
+  });
+
+  test('reports an injected interval that is never unref-ed', () => {
+    const source = 'class A { start() { this.t = this.setIntervalImpl(() => {}, 1); } }';
+    expect(findUnrefViolations('a.ts', source)).toHaveLength(1);
+  });
+
+  test('does not accept an unref on a different timer', () => {
+    const source = 'class A { start() { this.a = setInterval(() => {}, 1); this.b.unref?.(); } }';
+    expect(findUnrefViolations('a.ts', source)).toHaveLength(1);
+  });
+
+  test('does not accept an unrelated unref earlier in the same block', () => {
+    const source = 'function f() { other.unref(); setInterval(() => {}, 1); }';
+    expect(findUnrefViolations('a.ts', source)).toHaveLength(1);
+  });
+
+  test('does not accept an unref of a suffix-named handle', () => {
+    expect(findUnrefViolations('a.ts', 'function f() { const t = setInterval(() => {}, 1); next.unref(); }')).toHaveLength(1);
+    expect(findUnrefViolations('a.ts', 'function f() { const timer = setInterval(() => {}, 1); flushTimer.unref(); }')).toHaveLength(1);
+    expect(findUnrefViolations('a.ts', 'function f() { const timer = setInterval(() => {}, 1); timer.unref(); }')).toHaveLength(0);
+  });
+
+  test('does not accept an unref of another handle inside the callback', () => {
+    const source = 'class A { start() { this.t = setInterval(() => { x.unref(); }, 1); } }';
+    expect(findUnrefViolations('a.ts', source)).toHaveLength(1);
+  });
+
+  test('accepts an immediate .unref and an unrefHandle wrapper', () => {
+    expect(findUnrefViolations('a.ts', 'setInterval(() => {}, 1).unref();')).toHaveLength(0);
+    expect(findUnrefViolations('a.ts', 'unrefHandle(setInterval(() => {}, 1));')).toHaveLength(0);
+  });
+
+  test('accepts chained and later-unref-ed intervals', () => {
+    expect(findUnrefViolations('a.ts', 'setInterval(() => {}, 1).unref?.();')).toHaveLength(0);
+    expect(
+      findUnrefViolations('a.ts', 'class A { start() { this.t = this.setIntervalImpl(() => {}, 1); this.t?.unref?.(); } }'),
+    ).toHaveLength(0);
+    expect(
+      findUnrefViolations('a.ts', 'class A { start() { this.t = setInterval(() => {}, 1); this.t.unref?.(); } }'),
+    ).toHaveLength(0);
+  });
+
   test('all setInterval sites in platform/ have .unref?.() (real AST walk)', async () => {
     const files: string[] = [];
     for await (const entry of glob('**/*.ts', { cwd: ENGINE_SRC })) {

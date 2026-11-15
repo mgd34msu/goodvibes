@@ -217,6 +217,10 @@ function parseSaveInput(body: unknown): DraftSaveInput {
   if (tags !== undefined) input.tags = tags;
   const status = parseSaveStatus(record.status);
   if (status !== undefined) input.status = status;
+  const sentResponseId = optionalString(record.sentResponseId, 'sentResponseId');
+  if (sentResponseId !== undefined) input.sentResponseId = sentResponseId;
+  const sendError = optionalString(record.sendError, 'sendError');
+  if (sendError !== undefined) input.sendError = sendError;
   const createdAt = optionalIso8601(record.createdAt, 'createdAt');
   if (createdAt !== undefined) input.createdAt = createdAt;
   const updatedAt = optionalIso8601(record.updatedAt, 'updatedAt');
@@ -369,8 +373,9 @@ export function registerDraftMethods(
           target?.assertCurrent();
         },
         async mutate(assertCurrent, _admission, withPublication) {
-          const result = await store.upsert(input, autonomous ? assertCurrent : undefined, withPublication);
-          if (!autonomous) await store.save();
+          // A manual save is staged and published as one write: one that cannot
+          // be saved leaves the mirror as it was instead of active in memory.
+          const result = await store.upsert(input, autonomous ? assertCurrent : undefined, withPublication, !autonomous);
           if (!reference) return { ...result, draft: { ...result.draft, id: result.draft.wireReference } };
           if (result.draft.id !== reference.id) throw new HandlerError('Native draft publication changed', 'NATIVE_DRAFT_REFERENCE_STALE', 409);
           return { ...result, draft: { ...result.draft, id: reference.reference } };
@@ -409,8 +414,7 @@ export function registerDraftMethods(
           target?.assertCurrent();
         },
         async mutate(assertCurrent, _admission, withPublication) {
-          const deleted = autonomous ? await store.deleteAdmitted(draftId, assertCurrent, withPublication) : store.delete(draftId);
-          if (!autonomous && deleted) await store.save();
+          const deleted = await store.deleteAdmitted(draftId, assertCurrent, withPublication);
           return { deleted, draftId: publicId };
         } });
     } finally {

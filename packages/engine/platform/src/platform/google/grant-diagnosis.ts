@@ -63,7 +63,17 @@ async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise
   const intended = normalize(input.intendedAccount);
   const signedIn = normalize(input.signedInAccount);
 
-  if (intended !== null && signedIn !== null && intended !== signedIn) {
+  let cause: 'revoked' | 'client-mismatch' | 'testing-expiry' | 'unknown' = 'unknown';
+  const explanation = input.googleError.trim();
+  if (explanation && explanation !== 'invalid_grant' && explanation !== 'Google rejected the token request (invalid_grant).') {
+    try { cause = await readGrantFailure(input, { assertCurrent: source.assertCurrent }); }
+    catch { /* An unavailable reading does not establish a cause. */ }
+  }
+  source.assertCurrent();
+
+  // The signed-in gcloud account says nothing about which account approved
+  // consent, so it only explains a failure Google itself did not explain.
+  if (cause === 'unknown' && intended !== null && signedIn !== null && intended !== signedIn) {
     return {
       cause: 'account-mismatch',
       problem:
@@ -76,13 +86,6 @@ async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise
     };
   }
 
-  let cause: 'revoked' | 'client-mismatch' | 'testing-expiry' | 'unknown' = 'unknown';
-  const explanation = input.googleError.trim();
-  if (explanation && explanation !== 'invalid_grant' && explanation !== 'Google rejected the token request (invalid_grant).') {
-    try { cause = await readGrantFailure(input, { assertCurrent: source.assertCurrent }); }
-    catch { /* An unavailable reading does not establish a cause. */ }
-  }
-  source.assertCurrent();
   if (cause === 'revoked') {
     return {
       cause: 'revoked',

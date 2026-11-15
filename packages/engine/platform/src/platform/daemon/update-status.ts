@@ -13,6 +13,19 @@
 
 import type { UpdateTransactionReceipt } from '../runtime/self-update.js';
 
+/** What an on-demand update check did, so "nothing found" is not confused with "nothing ran". */
+export type DaemonUpdateCheckOutcome = 'ran' | 'already-in-flight' | 'loop-off';
+
+/** The status after an on-demand check, with what the check itself did. */
+export interface DaemonUpdateCheckStatus extends DaemonUpdateStatus {
+  /**
+   * `ran`: a check ran now (its result is in the fields below). `already-in-flight`: another
+   * check is still running, none was started, and the fields are as of now. `loop-off`: the
+   * self-update loop is off (see `offReason`), so nothing ran.
+   */
+  readonly check: DaemonUpdateCheckOutcome;
+}
+
 /** What a daemon can say about updating itself. See DaemonLifecycleRuntime.updateStatus. */
 export interface DaemonUpdateStatus {
   /** Whether the self-update loop is running. */

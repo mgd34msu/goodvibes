@@ -19,7 +19,9 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'nod
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { MAX_TURN_OUTCOMES, type TurnOutcomeRecord } from './work-tree-focus.js';
+import { MAX_TURN_OUTCOMES, isWorkTreeFoldKey, type TurnOutcomeRecord } from './work-tree-focus.js';
+
+export { isWorkTreeFoldKey };
 
 const SUFFIX = '.work-tree.json';
 const VERSION = 1;
@@ -27,13 +29,6 @@ const VERSION = 1;
 export const MAX_FOLD_KEYS = 2000;
 /** A staging file older than this is crash residue. */
 const TMP_MAX_AGE_MS = 60 * 60 * 1000;
-
-/** Collapse keys the work tree owns (work-tree-model.ts). */
-const KEY_SHAPE = /^(turn_\d+|bead_[\w:./-]+|beadmore_[\w:./-]+|lane_[\w:./-]+)$/;
-
-export function isWorkTreeFoldKey(key: string): boolean {
-  return KEY_SHAPE.test(key);
-}
 
 function sidecarPath(sessionsDir: string, sessionId: string): string | null {
   if (!sessionsDir || !sessionId) return null;

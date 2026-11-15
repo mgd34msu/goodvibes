@@ -5,7 +5,7 @@ import { channelBackedPaymentNotifier } from '../platform/src/platform/payments/
 import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
 import { PaymentReplySourceOwner } from '../platform/src/platform/payments/reply-source-owner.js';
 import { TelegramPollingReceiveProgress } from '../platform/src/platform/channels/telegram/receive-progress.js';
-import { withPaymentsReadings } from './helpers/payments-readings.js';
+import { paymentsPort, withPaymentsReadings } from './helpers/payments-readings.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
@@ -117,7 +117,7 @@ test('deadline refuses an unresolved original verification and close drains its 
   f.expire(); await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
   let drained = false;
   const closing = f.inbox.close().then(() => { drained = true; });
-  await Promise.resolve(); expect(drained).toBe(false);
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(drained).toBe(false);
   gate.resolve(); await closing; expect(drained).toBe(true); expect(f.inbox.pending).toBe(0);
   expect(account.handleReads()).toBe(0);
 });
@@ -225,11 +225,54 @@ test('completed original receive coverage cannot turn an in-flight owner reply i
     await expect(f.waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
     let drained = false;
     const closing = f.inbox.close().then(() => { drained = true; });
-    await Promise.resolve(); expect(drained).toBe(false);
+    await new Promise<void>(resolve => setImmediate(resolve)); expect(drained).toBe(false);
     resume.resolve(); await observed; await closing;
     expect(drained).toBe(true); expect(f.inbox.pending).toBe(0);
     expect(requests).toHaveLength(0);
   });
+});
+
+/** An owner reply whose model reading is still running when the window's receive coverage completes. */
+async function replyBeingRead(sentAtMs: number | undefined) {
+  const account = source(), f = await window(account, '123', 5000); await account.ready();
+  const fake = paymentsPort(), entered = deferred(), release = deferred();
+  const previous = installJudgmentPort({ model: fake.port.model, async ask(request) { entered.resolve(); await release.promise; return fake.port.ask(request); } });
+  cleanup.push(release.resolve, () => { installJudgmentPort(previous); });
+  const offering = f.inbox.offer('telegram', 'stop', reply(account, sentAtMs));
+  await entered.promise;
+  // The deadline passes and coverage of the original window completes while the reading runs.
+  f.expire(); f.at(6000); account.cover(5000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  return { f, offering, finish: release.resolve };
+}
+
+test('a reply the provider dated before the deadline is honoured although its reading ends after coverage completes', async () => {
+  const { f, offering, finish } = await replyBeingRead(3000);
+  expect(f.inbox.pending).toBe(1);
+  finish();
+  expect(await offering).toEqual({ consumed: true, answer: 'object' });
+  expect(await f.waiting).toEqual({ answer: 'object', channel: 'telegram' });
+  expect(f.inbox.pending).toBe(0);
+});
+
+test.each([undefined, 4500] as const)('a reply with missing or deadline-overlapping provider time (%s) still ends unsettled when its reading outlives the window', async sentAtMs => {
+  const { f, offering, finish } = await replyBeingRead(sentAtMs);
+  await expect(f.waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
+  finish(); expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
+  expect(f.inbox.pending).toBe(0);
+});
+
+test('a provably on-time reply that turns out not to be an answer leaves the window unsettled, never silent', async () => {
+  const account = source(), f = await window(account, '123', 5000); await account.ready();
+  const fake = paymentsPort({ vetoReply: () => 'unclear' }), entered = deferred(), release = deferred();
+  const previous = installJudgmentPort({ model: fake.port.model, async ask(request) { entered.resolve(); await release.promise; return fake.port.ask(request); } });
+  cleanup.push(release.resolve, () => { installJudgmentPort(previous); });
+  const offering = f.inbox.offer('telegram', 'hmm', reply(account, 3000)), observed = f.waiting.catch(error => error as unknown);
+  await entered.promise; f.expire(); f.at(6000); account.cover(5000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(f.inbox.pending).toBe(1);
+  release.resolve(); await offering;
+  expect(await observed).toMatchObject({ kind: 'unsettled-reply' });
 });
 
 test('decision-model exhaustion survives a queued reply and cannot be converted to quiet expiry', async () => {

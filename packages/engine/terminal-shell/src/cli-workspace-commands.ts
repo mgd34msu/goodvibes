@@ -1,8 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { findSessionCandidates, type SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatJsonOrText } from './cli-output.js';
 interface WorkspaceCommandRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
@@ -24,7 +25,7 @@ export function createCliWorkspaceCommands<Runtime extends WorkspaceCommandRunti
   },
 ) {
   async function handleSessions(runtime: Runtime): Promise<string | null> {
-    return await withRuntimeServices(runtime, (services) => {
+    return await withRuntimeServices(runtime, async (services) => {
       const [sub = 'list', ...rest] = runtime.cli.commandArgs;
       const sessions = services.sessionManager.list();
       if (sub === 'list') {
@@ -72,11 +73,14 @@ export function createCliWorkspaceCommands<Runtime extends WorkspaceCommandRunti
         const found = candidates[0];
         if (!found) return `Session not found${policy.inline ? ': ' : ' '}${target}`;
         const data = services.sessionManager.load(found.name);
-        const text = JSON.stringify({ name: found.name, ...data }, null, 2) + '\n';
+        // The same redaction the in-session export applies: the file is the durable transcript copy and tends to be shared.
+        const text = (await redactSensitiveDataAsync(JSON.stringify({ name: found.name, ...data }, null, 2))) + '\n';
         if (outputPath) {
           const targetPath = services.shellPaths.resolveWorkspacePath(outputPath);
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, text, 'utf-8');
+          mkdirSync(dirname(targetPath), { recursive: true, mode: 0o700 });
+          writeFileSync(targetPath, text, { encoding: 'utf-8', mode: 0o600 });
+          // The mode above applies only when the file is created; an export over an older, wider file must still end owner-only.
+          chmodSync(targetPath, 0o600);
           return policy.inline ? `Session exported: ${targetPath}` : 'Session exported\n  path ' + targetPath;
         }
         return text.trimEnd();

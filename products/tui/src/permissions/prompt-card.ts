@@ -29,7 +29,7 @@
  */
 
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { buildPermissionApprovalBrief, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, buildRememberOptions, getDisplayArg } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { activeTokens } from '../renderer/theme.ts';
 import {
   beginModal,
@@ -46,7 +46,7 @@ import {
 } from '../renderer/surface-kit.ts';
 import { chip, button, buttonWidth } from '../renderer/surface-kit-parts.ts';
 import { drawRow, measureRow, type KitRow, type KitSpan } from '../renderer/surface-kit-list.ts';
-import type { HunkSelectionState } from './hunk-selection.ts';
+import { editItemText, type HunkSelectionState } from './hunk-selection.ts';
 import { readSandboxAskAnnotation } from './sandbox-exec-gate.ts';
 
 /** Hunks listed before a "+N more hunks" trailer. */
@@ -83,10 +83,17 @@ export interface PermissionButton {
   readonly label: string;
 }
 
+/** True when a remembered allow would not stop the next matching call from asking the owner again. */
+export function asksAgainEvenIfRemembered(request: Pick<PermissionPromptRequest, 'rememberEffect'>): boolean {
+  return request.rememberEffect === 'owner-asked-again';
+}
+
 /** The card's buttons, in order (the safe answers are Allow once / Apply first, Deny last). */
 export function permissionButtons(request: PermissionPromptRequest, state: Pick<PermissionCardState, 'hunkState' | 'replyMode'>): PermissionButton[] {
   if (state.replyMode === 'exec-answer') return [];
   if (state.hunkState) return [{ id: 'apply', label: 'Apply selected' }, { id: 'deny', label: 'Deny' }];
+  // An ask the mode always puts to the owner again is not skipped by a remembered allow, so the card does not offer one.
+  if (asksAgainEvenIfRemembered(request)) return [{ id: 'allow', label: 'Allow once' }, { id: 'deny', label: 'Deny' }];
   const tiers = request.rememberOptions?.length ?? 0;
   return [
     { id: 'allow', label: 'Allow once' },
@@ -136,6 +143,40 @@ function collectField(arr: unknown, field: string): string[] {
   return out;
 }
 
+const BASE64_TEXT = /^[A-Za-z0-9+/\s]*={0,2}$/;
+
+/**
+ * The command text of each `commands` entry as the exec tool will run it:
+ * `cmd_base64` decoded when present, else `cmd`. Display only; the tool does its
+ * own strict reading and refuses an entry it cannot decode.
+ */
+function commandTexts(commands: unknown): string[] {
+  if (!Array.isArray(commands)) return [];
+  const out: string[] = [];
+  for (const el of commands) {
+    if (typeof el === 'string') { out.push(el); continue; }
+    if (!el || typeof el !== 'object') continue;
+    const entry = el as Record<string, unknown>;
+    if (typeof entry.cmd_base64 === 'string' && entry.cmd_base64.length > 0) {
+      out.push(BASE64_TEXT.test(entry.cmd_base64) ? Buffer.from(entry.cmd_base64, 'base64').toString('utf-8') : '(cmd_base64 is not valid base64)');
+    } else if (typeof entry.cmd === 'string') out.push(entry.cmd);
+  }
+  return out;
+}
+
+/** One line per host-side file operation of an exec call (`file_ops`), so the owner can read what will be copied, moved or deleted. */
+function fileOpLines(args: Record<string, unknown>): string[] {
+  if (!Array.isArray(args.file_ops)) return [];
+  return args.file_ops.flatMap((el) => {
+    if (!el || typeof el !== 'object') return [];
+    const op = el as Record<string, unknown>;
+    const source = typeof op.source === 'string' ? op.source : '?';
+    const destination = typeof op.destination === 'string' ? ` -> ${op.destination}` : '';
+    const flags = [op.recursive === true ? 'recursive' : '', op.overwrite === true ? 'overwrite' : ''].filter(Boolean).join(', ');
+    return [`${typeof op.op === 'string' ? op.op : 'file operation'} ${source}${destination}${flags ? ` (${flags})` : ''}`];
+  });
+}
+
 /** The real display target(s) of a tool call (paths, commands, urls), relativised; a fallback when none is recognisable. */
 export function cardTargets(request: PermissionPromptRequest): string[] {
   const args = request.args ?? {};
@@ -144,7 +185,7 @@ export function cardTargets(request: PermissionPromptRequest): string[] {
     if (files.length) return files;
     if (typeof args.path === 'string') return [args.path];
     if (typeof args.file === 'string') return [args.file];
-    const commands = collectField(args.commands, 'cmd');
+    const commands = commandTexts(args.commands);
     if (commands.length) return commands;
     if (typeof args.command === 'string') return [args.command];
     if (typeof args.cmd === 'string') return [args.cmd];
@@ -166,12 +207,14 @@ function commandOf(request: PermissionPromptRequest): string {
   return typeof args.command === 'string' ? args.command : typeof args.cmd === 'string' ? args.cmd : '';
 }
 
-/** The exact session rule "Allow for session" remembers (mirrors the platform's approval key). */
-export function rememberScopeKey(request: PermissionPromptRequest): string {
-  const args = request.args ?? {};
-  if (typeof args.path === 'string' && args.path.length > 0) return `${request.tool}:${args.path}`;
-  if (typeof args.command === 'string' && args.command.length > 0) return `${request.tool}:${args.command}`;
-  return request.tool;
+/**
+ * What "Allow for session" remembers, in the platform's own words (the session
+ * option of the remember tiers), so the card cannot drift from the key the
+ * permission manager stores.
+ */
+export function rememberScope(request: PermissionPromptRequest): string {
+  const session = buildRememberOptions(request.tool, request.args ?? {}).find((option) => option.tier === 'session');
+  return session?.label.replace(/ this session$/, '') ?? `every ${request.tool} call`;
 }
 
 function riskColor(level: PermissionRequestAnalysis['riskLevel']): string {
@@ -278,10 +321,19 @@ export function writeDiffLines(request: PermissionPromptRequest, hunkState: Hunk
     let hidden = 0;
     for (const edit of args.edits) {
       if (!edit || typeof edit !== 'object') continue;
-      const e = edit as { path?: unknown; find?: unknown; replace?: unknown };
-      if (typeof e.find !== 'string' || typeof e.replace !== 'string') continue;
-      const findLines = e.find.split('\n');
-      const replaceLines = e.replace.split('\n');
+      const e = edit as { path?: unknown; find?: unknown; replace?: unknown; find_base64?: unknown; replace_base64?: unknown };
+      const hasFind = typeof e.find === 'string' || typeof e.find_base64 === 'string';
+      const hasReplace = typeof e.replace === 'string' || typeof e.replace_base64 === 'string';
+      if (!hasFind || !hasReplace) continue;
+      const text = editItemText({
+        path: '',
+        ...(typeof e.find === 'string' ? { find: e.find } : {}),
+        ...(typeof e.replace === 'string' ? { replace: e.replace } : {}),
+        ...(typeof e.find_base64 === 'string' ? { find_base64: e.find_base64 } : {}),
+        ...(typeof e.replace_base64 === 'string' ? { replace_base64: e.replace_base64 } : {}),
+      });
+      const findLines = text.find.split('\n');
+      const replaceLines = text.replace.split('\n');
       const need = 1 + findLines.length + replaceLines.length;
       if (budget < need) {
         hidden += 1;
@@ -308,12 +360,14 @@ function subjectRows(request: PermissionPromptRequest, width: number): CardRow[]
     if (typeof attribution.prompt === 'string' && attribution.prompt.length > 0) rows.push(...labelled('Asks', attribution.prompt, width, t.warning));
     return rows;
   }
+  const fileOps = request.category === 'execute' ? fileOpLines(request.args ?? {}) : [];
+  const fileOpRows = fileOps.flatMap((line, i) => labelled(i === 0 ? 'File ops' : '', line, width, t.warning));
   const command = request.category === 'execute' ? commandOf(request) : '';
   if (command) {
     // The FULL command, wrapped, never truncated.
-    return command.split('\n').flatMap((para, p) => wrapCode(para, Math.max(4, width - 2)).map((line, i) => ({
+    return [...command.split('\n').flatMap((para, p) => wrapCode(para, Math.max(4, width - 2)).map((line, i) => ({
       spans: [{ text: p === 0 && i === 0 ? '$ ' : '  ', fg: t.textFaint }, { text: line, fg: t.text }],
-    })));
+    }))), ...fileOpRows];
   }
   const brief = buildPermissionApprovalBrief(request);
   const targets = cardTargets(request);
@@ -321,9 +375,9 @@ function subjectRows(request: PermissionPromptRequest, width: number): CardRow[]
   // complete list stays in the details' Args row).
   if (targets.length > MAX_TARGET_ROWS) {
     const base = (p: string): string => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p;
-    return labelled(brief.subjectLabel, `${targets.length} files: ${targets.slice(0, 2).map(base).join(', ')}, +${targets.length - 2} more`, width, t.text);
+    return [...labelled(brief.subjectLabel, `${targets.length} files: ${targets.slice(0, 2).map(base).join(', ')}, +${targets.length - 2} more`, width, t.text), ...fileOpRows];
   }
-  return targets.flatMap((target, i) => labelled(i === 0 ? brief.subjectLabel : '', target, width, t.text));
+  return [...targets.flatMap((target, i) => labelled(i === 0 ? brief.subjectLabel : '', target, width, t.text)), ...fileOpRows];
 }
 
 function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {
@@ -337,7 +391,8 @@ function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {
       spans: [{ text: k === 0 ? (on ? '[x] ' : '[ ] ') : '    ', fg: on ? t.success : t.textFaint, bold: true }, { text: part, fg: on ? t.text : t.textMuted }],
       cursor: i === cursor,
     }));
-    const lines = [...hunk.find.split('\n').map((l) => `-${l}`), ...hunk.replace.split('\n').map((l) => `+${l}`)];
+    const text = editItemText(hunk);
+    const lines = [...text.find.split('\n').map((l) => `-${l}`), ...text.replace.split('\n').map((l) => `+${l}`)];
     const shown = diffRows(lines.slice(0, MAX_HUNK_LINES), width);
     rows.push(...insetRows(lines.length > MAX_HUNK_LINES
       ? [...shown, { spans: [{ text: `+${lines.length - MAX_HUNK_LINES} more lines`, fg: t.textFaint }] }]
@@ -364,7 +419,7 @@ function detailRows(request: PermissionPromptRequest, state: PermissionCardState
   if (analysis.sideEffects && analysis.sideEffects.length > 0) rows.push(...labelled('Effects', analysis.sideEffects.join(', '), width, t.textMuted));
   reasons.forEach((reason, i) => rows.push(...labelled(i === 0 ? 'Review' : '', reason, width, t.textMuted)));
   rows.push(...labelled('Checklist', brief.checklist, width, t.textMuted));
-  if (!state.hunkState) rows.push(...labelled('Remembers', `"Allow for session" remembers ${rememberScopeKey(request)}`, width, t.textMuted));
+  if (!state.hunkState) rows.push(...labelled('Remembers', `"Allow for session" remembers ${rememberScope(request)}`, width, t.textMuted));
   rows.push(...labelled('Args', JSON.stringify(request.args ?? {}), width, t.textFaint));
   return rows;
 }
@@ -400,7 +455,9 @@ function bodyRows(request: PermissionPromptRequest, state: PermissionCardState, 
   if (state.replyMode) {
     const label = state.replyMode === 'exec-answer' ? 'Answer' : 'Reason';
     rows.push({ spans: [] });
-    rows.push(...insetRows(labelled(label, `${state.replyBuffer ?? ''}▏`, width - 4, t.text)));
+    // A terminal prompt is often a password, so the answer is drawn as one dot per character, never in clear.
+    const shown = state.replyMode === 'exec-answer' ? '•'.repeat([...(state.replyBuffer ?? '')].length) : (state.replyBuffer ?? '');
+    rows.push(...insetRows(labelled(label, `${shown}▏`, width - 4, t.text)));
   }
   return rows;
 }
@@ -410,6 +467,7 @@ function cardHints(request: PermissionPromptRequest, state: PermissionCardState)
   if (state.replyMode === 'deny-reason') return [['⏎', 'deny with this reason'], ['esc', 'back'], ['ctrl+c', 'abort turn']];
   if (state.submenuOpen) return [['↑↓', 'tier'], ['⏎', 'allow and remember'], ['esc', 'back']];
   if (state.hunkState) return [['↑↓', 'hunk'], ['space', 'toggle'], ['a', 'all'], ['←→', 'choose'], ['⏎', 'confirm'], ['n', 'deny']];
+  if (asksAgainEvenIfRemembered(request)) return [['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'], ['n', 'deny'], ['type', 'a reason to deny']];
   const tiers = request.rememberOptions?.length ?? 0;
   return [
     ['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'],

@@ -1,8 +1,8 @@
 import { buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
 import { randomUUID } from 'node:crypto';
 import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
+import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
-import { installAgentPlatformBoundaryGuard } from '../tools/agent-platform-boundary-policy.ts';
 import { registerAgentChannelSendTool } from '../tools/agent-channel-send-tool.ts';
 import { registerAgentAutonomyScheduleTool } from '../tools/agent-autonomy-schedule-tool.ts';
 import { registerAgentArtifactsTool } from '../tools/agent-artifacts-tool.ts';
@@ -36,18 +36,16 @@ import { registerAgentWorkPlanTool } from '../tools/agent-work-plan-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { installToolExecutionSafetyGuard } from '../tools/tool-execution-safety.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { AGENT_OWNER_TERMINAL_GUARD } from './agent-exec-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeServices } from './services.ts';
+import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
  * The main conversation's tool registry, composed exactly once, in one place:
- * the platform tools (with the Agent's owner-terminal posture and daemon config
+ * the platform tools (with the daemon config
  * routing), the Agent's own tools, then the Agent's wrappers in order: the tool
- * policy guard, the platform-boundary guard (installed after the policy guard
- * so it wraps the policy-wrapped execute), the execution-safety wrapper, and
- * definition compaction. bootstrap-core.ts calls it for the live shell; the
+ * policy guard, the execution-safety wrapper, and definition compaction. bootstrap-core.ts calls it for the live shell; the
  * exec refusal-and-kill test calls it too, so a reorder here is what that test
  * runs.
  */
@@ -61,7 +59,7 @@ export interface AgentToolRegistryDeps {
   readonly homeDirectory: string;
   /** The runtime session id, read fresh on every call. */
   readonly resolveSessionId: () => string;
-  /** What the owner said this turn; the policy and boundary guards read it. */
+  /** What the owner said this turn; the policy guard reads it. */
   readonly getLastUserMessage: () => string | null;
 }
 
@@ -69,12 +67,35 @@ export interface AgentToolRegistry {
   readonly toolRegistry: ToolRegistry;
   readonly fileCache: ReturnType<typeof registerAllTools>['fileCache'];
   readonly projectIndex: ReturnType<typeof registerAllTools>['projectIndex'];
+  /** Flushes and stops the session key-value store; the host calls it at shutdown. */
+  readonly dispose: ReturnType<typeof registerAllTools>['dispose'];
+}
+
+/**
+ * The wrappers a spawned or background worker's registry gets, so delegating
+ * does not step around the restrictions the main conversation has. The main
+ * registry's extra layer is left out on purpose: definition compaction only
+ * shapes what the main model sees.
+ * Nothing here reads the owner's last message, which a worker does not have.
+ */
+export function decorateAgentWorkerRegistry(registry: ToolRegistry): void {
+  installAgentToolPolicyGuard(registry);
+  installToolExecutionSafetyGuard(registry);
 }
 
 export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentToolRegistry {
   const { services, configManager, homeDirectory, resolveSessionId, getLastUserMessage } = deps;
   const toolRegistry = new ToolRegistry(services.permissionManager);
-  const { fileCache, projectIndex } = registerAllTools(toolRegistry, {
+  const { fileCache, projectIndex, dispose } = registerAllTools(toolRegistry, {
+    hookDispatcher: services.hookDispatcher,
+    // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
+    hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
+    // find, repo_map and the agent tool apply the same per-file read decision the read tool gets.
+    readAccessFilter: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
+    // goodvibes_context reads Cloudflare tokens held in the secret store.
+    secretsManager: services.secretsManager,
+    // and counts the daemon's own token as the Worker operator token, as the daemon's status route does.
+    cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
     execPromptAnswerHandler: services.execPromptAnswerHandler,
     localhostFetchApproval: services.localhostFetchApproval,
     sandboxEscalationHandler: services.sandboxEscalationHandler,
@@ -87,6 +108,9 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // namespace and nothing is keyed to a session that can be reaped.
     resolveSessionId,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+    // A keyed state file is reclaimed only once no saved conversation carries its session id.
+    isSessionResumable: (sessionToken) => services.sessionManager.has(sessionToken),
+    controlSurfaces: controlSurfacesFor(services),
     readAdmissionPolicy: 'agent-main-conversation',
     settingsAdmissionPolicy: 'agent-main-conversation',
     // ONE file cache and ONE project index for the process. registerAllTools
@@ -134,15 +158,14 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // would read an unbound holder of its own while the real source sits on a
     // different instance nothing reads.
     contextAccountingHolder: services.contextAccountingHolder,
-    // A local turn reaches the owner's tmux through the same exec tool a hosted
-    // turn does, so the rule is stated here too, see agent-exec-posture.ts.
-    ownerTerminalGuard: AGENT_OWNER_TERMINAL_GUARD,
   });
   registerAgentArtifactsTool(toolRegistry, services.artifactStore, { projectRoot: services.shellPaths.workingDirectory });
   registerAgentBrowserTool(toolRegistry, {
     screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
     profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
     homeDirectory: services.shellPaths.homeDirectory,
+    // A file: page is a local read, held to the same decision the read tool gets.
+    readAccess: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
   });
   // google.* and calendar.* are app-layer sections absent from the platform schema;
   // resolvePath throws on a section that is not there.
@@ -180,7 +203,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentKnowledgeIngestTool(toolRegistry, services.shellPaths, configManager);
   registerAgentChannelSendTool(toolRegistry, services.channelDeliveryRouter, { shellPaths: services.shellPaths });
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry);
+  registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentLocalRegistryTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentMediaGenerateTool(toolRegistry, services.mediaProviders, services.artifactStore);
   registerAgentResearchRunsTool(toolRegistry, services.shellPaths);
@@ -218,16 +241,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   installAgentToolPolicyGuard(toolRegistry, {
     getLastUserMessage: getLastUserMessage,
   });
-  // The conversational-session boundary: platform source is not touched as a
-  // means of self-repair in a turn that asked for something else. Installed
-  // AFTER the policy guard so it wraps the policy-wrapped execute rather than
-  // the other way round, the boundary question ("did he ask for this at all")
-  // is answered before the read policy is asked what shape the read may take.
-  // Reads his own words this turn through the same conversation accessor, which
-  // is the only thing that distinguishes self-directed repair from a read he
-  // requested.
-  installAgentPlatformBoundaryGuard(toolRegistry, getLastUserMessage);
   installToolExecutionSafetyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
-  return { toolRegistry, fileCache, projectIndex };
+  return { toolRegistry, fileCache, projectIndex, dispose };
 }

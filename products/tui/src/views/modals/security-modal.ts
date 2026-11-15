@@ -1,5 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import type { TokenAuditResult } from '@goodvibes-jev/engine/platform/platform/security';
 import { registerThemeRefresh } from '../../renderer/theme.ts';
 import type { ModalSectionStyle } from '../../input/config-modal-types.ts';
@@ -173,10 +173,9 @@ class SecurityModalSurface implements ConfigModalSurface {
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { ctx.setStatus('Security posture is read live.'); ctx.requestRender(); return; }
-    if (id === 'preflight') { void ctx.executeCommand?.('policy', ['preflight']); ctx.setStatus('Dispatched /policy preflight.'); return; }
+    if (id === 'preflight') { runModalCommand(ctx, 'policy', ['preflight'], '/policy preflight'); return; }
     if (id === 'jumpToIncident' && this.deps.readModel.getSnapshot().latestIncident) {
-      void ctx.executeCommand?.('agents', []);
-      ctx.setStatus('Opened Agents on the running processes.');
+      runModalCommand(ctx, 'agents', [], '/agents', { pending: 'Opening Agents on the running processes.', done: 'Opened Agents on the running processes.' });
       return;
     }
     if (id === 'manageDevices') {

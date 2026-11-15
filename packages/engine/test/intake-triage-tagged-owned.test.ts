@@ -45,6 +45,18 @@ test('owned exact mirrored mutation gets authentic fresh recorded admission, wit
  const f = fixture(); await f.owner.applyTags('slack:C123:123.456', ['GoodVibes/Priority'], f.operation);
  expect(f.counts()).toEqual({ writes: 1, released: 1, humans: 0, listeners: 0 }); await f.owner.close(); await f.tagger.close();
 });
+test('a settled tag mutation retires the source id it was admitted under', async () => {
+ const admittedIds: string[] = [], retired: string[] = [];
+ // Patched before fixture() so the fixture's bound admit wrapper reaches the observer.
+ const proto = PermissionManager.prototype, admit = proto.admitAutonomous, retire = proto.retireAutonomousSource;
+ proto.admitAutonomous = function (this: PermissionManager, ...args: Parameters<typeof admit>) { admittedIds.push(args[0]); return admit.apply(this, args); } as typeof admit;
+ proto.retireAutonomousSource = function (this: PermissionManager, id: string) { retired.push(id); return retire.call(this, id); };
+ const f = fixture();
+ try { await f.owner.applyTags('slack:C123:123.456', ['GoodVibes/Priority'], f.operation); }
+ finally { proto.admitAutonomous = admit; proto.retireAutonomousSource = retire; await f.owner.close(); await f.tagger.close(); }
+ expect(admittedIds.length).toBe(1);
+ expect(retired).toEqual(admittedIds);
+});
 test('configured plan mode has zero provider calls and no human fallback', async () => {
  const f = fixture({ deny: true }); await expect(f.owner.applyTags('slack:C123:123.456', ['GoodVibes/Priority'], f.operation)).rejects.toThrow(); expect(f.counts().writes).toBe(0); expect(f.counts().humans).toBe(0);
 });

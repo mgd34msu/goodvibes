@@ -188,6 +188,7 @@ test('owned AgentManager startup keeps the preparing child owned until cancellat
     await metadata.ready;
     expect(execution.record.contractId).toBeUndefined(); expect(h.runner.list()).toHaveLength(0);
     let settled = false; const done = execution.settled.then(record => { settled = true; return record; });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     expect(settled).toBe(false); execution.cancel();
     expect((await done).status).toBe('cancelled');
     await h.manager.join(execution.record.id);

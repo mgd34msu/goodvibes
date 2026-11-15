@@ -60,7 +60,9 @@ function audioFormatFromMimeType(mimeType: string): VoiceAudioArtifact['format']
   if (lower.includes('ogg')) return 'ogg';
   if (lower.includes('webm')) return 'webm';
   if (lower.includes('flac')) return 'flac';
-  return 'wav';
+  // Name the real container (m4a, aac, opus, ...) rather than mislabel it as wav.
+  const subtype = lower.split('/')[1]?.split(';')[0]?.trim().replace(/^x-/, '');
+  return subtype || 'wav';
 }
 
 function detailLimit(detail: MultimodalDetail, compact: number, standard: number, detailed: number): number {
@@ -86,6 +88,15 @@ function mergeUnique(...groups: Array<readonly string[] | undefined>): string[] 
     }
   }
   return result;
+}
+
+/** What a stored analysis must say about entities that were not semantically assessed. */
+function evaluationMarkers(result: MultimodalAnalysisResult): Record<string, unknown> {
+  return {
+    ...(result.metadata.provenance === 'classic' ? { provenance: 'classic' } : {}),
+    ...(result.metadata.entityAssessment === 'not-evaluated' ? { entityAssessment: 'not-evaluated' } : {}),
+    ...(result.metadata.entityAssessmentSkipped === 'budget' ? { entityAssessmentSkipped: 'budget' } : {}),
+  };
 }
 
 export class MultimodalService {
@@ -178,39 +189,46 @@ export class MultimodalService {
           // An absent Default port cannot be replaced by a later installation.
         }
       }
-      const { descriptor, record, buffer, assertCurrent: contentCurrent } = await this.resolveArtifactInput(owned);
-      if (!classic && !isClassicOperation()) authority?.assertCurrent();
-      const initial = captureOwnedJson(descriptor) as ArtifactDescriptor;
-      const assertArtifact = (artifact: ArtifactDescriptor) => {
-        active();
-        if (JSON.stringify(this.artifactStore.get(artifact.id)) !== JSON.stringify(artifact)) throw new MultimodalEntityHeldError('stale');
-      };
-      assertArtifact(initial);
-      assertJudgmentInput({ filename: initial.filename, metadata: initial.metadata, prompt: owned.prompt, metadataInput: owned.metadata, artifactMetadata: owned.artifact?.metadata });
-      const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); if (!classic && !isClassicOperation()) authority?.assertCurrent(); };
-      let result: MultimodalAnalysisResult;
-      switch (this.resolveKind(initial)) {
-        case 'image': result = await this.analyzeImage(initial, owned); break;
-        case 'audio': result = await this.analyzeAudio(initial, buffer, owned); break;
-        case 'video': result = await this.analyzeVideo(initial, owned, assertEntryCurrent); break;
-        default: result = await this.analyzeDocument(record, buffer, owned, assertEntryCurrent); break;
+      const { descriptor, record, buffer, assertCurrent: contentCurrent, createdHere } = await this.resolveArtifactInput(owned);
+      try {
+        if (!classic && !isClassicOperation()) authority?.assertCurrent();
+        const initial = captureOwnedJson(descriptor) as ArtifactDescriptor;
+        const assertArtifact = (artifact: ArtifactDescriptor) => {
+          active();
+          if (JSON.stringify(this.artifactStore.get(artifact.id)) !== JSON.stringify(artifact)) throw new MultimodalEntityHeldError('stale');
+        };
+        assertArtifact(initial);
+        assertJudgmentInput({ filename: initial.filename, metadata: initial.metadata, prompt: owned.prompt, metadataInput: owned.metadata, artifactMetadata: owned.artifact?.metadata });
+        const assertEntryCurrent = () => { try { contentCurrent?.(); } catch { throw new MultimodalEntityHeldError('stale'); } assertArtifact(initial); if (!classic && !isClassicOperation()) authority?.assertCurrent(); };
+        let result: MultimodalAnalysisResult;
+        switch (this.resolveKind(initial)) {
+          case 'image': result = await this.analyzeImage(initial, owned); break;
+          case 'audio': result = await this.analyzeAudio(initial, buffer, owned); break;
+          case 'video': result = await this.analyzeVideo(initial, owned, assertEntryCurrent); break;
+          default: result = await this.analyzeDocument(record, buffer, owned, assertEntryCurrent); break;
+        }
+        const source = this.sources.get(result)!;
+        const artifacts = captureOwnedJson(source.artifacts) as readonly ArtifactDescriptor[];
+        const assertCurrent = () => { assertEntryCurrent(); for (const artifact of artifacts) assertArtifact(artifact); };
+        assertCurrent();
+        const ranked = await rankMultimodalEntities(source.text, result.kind === 'image' ? 8 : 10, { signal: options.signal, assertCurrent, authority });
+        classic = ranked.provenance === 'classic';
+        ranked.assertCurrent();
+        const retained = captureOwnedJson({ ...result, entities: ranked.entities, metadata: {
+          ...result.metadata,
+          // Provider metadata cannot mint the host's assessment/provenance fields.
+          provenance: classic ? 'classic' : 'decision', entityAssessment: ranked.assessment,
+          ...(ranked.skipped ? { entityAssessmentSkipped: ranked.skipped } : {}),
+        } }) as MultimodalAnalysisResult;
+        // Bounded retention supports explicit HTTP packet/write-back round trips. Eviction is a hold, never re-admission.
+        if (this.analyses.size >= 128) this.analyses.delete(this.analyses.keys().next().value!);
+        this.analyses.set(retained.id, { result: retained, assertCurrent: ranked.assertCurrent });
+        return retained;
+      } catch (error) {
+        // An artifact made only to hold this call's inline input has no analysis to belong to.
+        if (createdHere) { try { this.artifactStore.delete(descriptor.id); } catch { logger.warn('Multimodal inline artifact cleanup was not confirmed.'); } }
+        throw error;
       }
-      const source = this.sources.get(result)!;
-      const artifacts = captureOwnedJson(source.artifacts) as readonly ArtifactDescriptor[];
-      const assertCurrent = () => { assertEntryCurrent(); for (const artifact of artifacts) assertArtifact(artifact); };
-      assertCurrent();
-      const ranked = await rankMultimodalEntities(source.text, result.kind === 'image' ? 8 : 10, { signal: options.signal, assertCurrent, authority });
-      classic = ranked.provenance === 'classic';
-      ranked.assertCurrent();
-      const retained = captureOwnedJson({ ...result, entities: ranked.entities, metadata: {
-        ...result.metadata,
-        // Provider metadata cannot mint the host's assessment/provenance fields.
-        provenance: classic ? 'classic' : 'decision', entityAssessment: ranked.assessment,
-      } }) as MultimodalAnalysisResult;
-      // Bounded retention supports explicit HTTP packet/write-back round trips. Eviction is a hold, never re-admission.
-      if (this.analyses.size >= 128) this.analyses.delete(this.analyses.keys().next().value!);
-      this.analyses.set(retained.id, { result: retained, assertCurrent: ranked.assertCurrent });
-      return retained;
     });
   }
 
@@ -228,12 +246,15 @@ export class MultimodalService {
     if (result.summary) lines.push(`Summary: ${result.summary}`);
     if (result.labels.length > 0) lines.push(`Labels: ${result.labels.join(', ')}`);
     if (result.entities.length > 0) lines.push(`Entities: ${result.entities.join(', ')}`);
-    if (result.metadata.entityAssessment === 'not-evaluated') lines.push('Classic: semantic entity assessment was not performed.');
+    if (result.metadata.entityAssessmentSkipped === 'budget') lines.push('Entities were not assessed: the source is too large for one assessment.');
+    else if (result.metadata.entityAssessment === 'not-evaluated') lines.push('Classic: semantic entity assessment was not performed.');
     if (result.text) lines.push(`Text: ${compactText(result.text, detailLimit(detail, 180, 320, 520))}`);
     for (const segment of result.segments.slice(0, detailLimit(detail, 2, 4, 8))) {
       const segmentLabel = segment.title ? `${segment.kind}:${segment.title}` : segment.kind;
       if (segment.text) lines.push(`- ${segmentLabel}: ${compactText(segment.text, detailLimit(detail, 120, 220, 360))}`);
     }
+    // The budget is a limit callers rely on, so an overrun is stated, never silently clipped or ignored.
+    if (estimateTokens(lines.join('\n')) > budgetLimit) lines.push(`Over budget: this packet is about ${estimateTokens(lines.join('\n'))} tokens, above the ${budgetLimit} requested.`);
     const rendered = lines.join('\n');
     return {
       detail,
@@ -275,7 +296,7 @@ export class MultimodalService {
         sourceArtifactId: result.artifact.id,
         multimodalKind: result.kind,
         providerIds: [...result.providerIds],
-        ...(result.metadata.provenance === 'classic' ? { provenance: 'classic', entityAssessment: 'not-evaluated' } : {}),
+        ...evaluationMarkers(result),
       },
     }, { signal, assertCurrent: owned.assertCurrent });
     const analysisArtifact = created.artifact;
@@ -304,7 +325,7 @@ export class MultimodalService {
           sourceArtifactId: result.artifact.id,
           multimodalKind: result.kind,
           providerIds: [...result.providerIds],
-          ...(result.metadata.provenance === 'classic' ? { provenance: 'classic', entityAssessment: 'not-evaluated' } : {}),
+          ...evaluationMarkers(result),
         },
       }, { signal, assertCurrent: assertAnalysisCurrent, onCommitted: (id) => { committedSourceId = id; } });
       committedSourceId ??= ingest.source.id;
@@ -344,14 +365,14 @@ export class MultimodalService {
         ...(completionWarning ? { completionWarning } : {}),
         sourceArtifactId: result.artifact.id,
         multimodalKind: result.kind,
-        ...(result.metadata.provenance === 'classic' ? { provenance: 'classic', entityAssessment: 'not-evaluated' } : {}),
+        ...evaluationMarkers(result),
       },
     };
   }
 
   private async resolveArtifactInput(
     request: MultimodalAnalysisRequest,
-  ): Promise<{ descriptor: ArtifactDescriptor; record: ArtifactRecord; buffer: Buffer; assertCurrent?: (() => void) | undefined }> {
+  ): Promise<{ descriptor: ArtifactDescriptor; record: ArtifactRecord; buffer: Buffer; assertCurrent?: (() => void) | undefined; createdHere?: true }> {
     const artifactId = request.artifactId ?? request.artifact?.artifactId;
     if (artifactId) {
       const descriptor = captureOwnedJson(this.artifactStore.get(artifactId)) as ArtifactDescriptor | null;
@@ -377,7 +398,7 @@ export class MultimodalService {
       metadata: artifact.metadata ?? {},
     });
     const acquired = await this.artifactStore.readContent(created.id);
-    return { descriptor: created, record: acquired.record, buffer: acquired.buffer, assertCurrent: acquired.assertCurrent?.bind(acquired) };
+    return { descriptor: created, record: acquired.record, buffer: acquired.buffer, assertCurrent: acquired.assertCurrent?.bind(acquired), createdHere: true };
   }
 
   private resolveKind(descriptor: ArtifactDescriptor): MultimodalKind {

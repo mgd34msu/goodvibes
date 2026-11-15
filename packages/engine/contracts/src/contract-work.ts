@@ -148,7 +148,14 @@ export function contractWorkProgress(contract: ContractWorkFields): string {
 }
 
 export function contractWorkSnapshot(contract: ContractWorkFields): ContractExternalWorkSnapshot {
-  const last = Math.max(contract.createdAt, contract.completedAt ?? 0, ...contract.decisions.map((decision) => decision.at));
+  // A raised or answered escalation changes what the contract is waiting on, so a poller comparing
+  // updatedAt must see it move even when no decision was recorded with it.
+  const last = Math.max(
+    contract.createdAt,
+    contract.completedAt ?? 0,
+    ...contract.decisions.map((decision) => decision.at),
+    ...contract.escalations.flatMap((escalation) => [escalation.at, escalation.resolvedAt ?? 0]),
+  );
   return { ...contractWorkHandle(contract), progress: contractWorkProgress(contract), updatedAt: new Date(last).toISOString() };
 }
 

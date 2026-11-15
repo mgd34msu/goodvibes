@@ -1,7 +1,7 @@
 /**
  * Consolidation proposals and runs, memory.consolidation.receipts (platform 1.8.0). Covers
- * every honest state (pending, unavailable via 404 and 501, genuinely empty, pending
- * proposals present, resolved runs with no pending proposals) in isolation. The jump to
+ * the honest states in isolation: a retryable failure, unavailable via 404 and 501,
+ * genuinely empty, pending proposals present, and resolved runs with no pending proposals. The jump to
  * the review queue rows is covered in src/views/library/ReviewTab.test.tsx (the proposals
  * component only calls the onSelect callback it is handed).
  */
@@ -85,6 +85,35 @@ describe('ConsolidationReceipts: failure', () => {
     receiptsImpl = () => Promise.reject(Object.assign(new Error('boom'), { status: 500 }));
     const { el, unmount } = render();
     await waitFor(() => Boolean(el.querySelector('button[aria-label="Retry"]')));
+    expect(el.textContent).toContain('Consolidation receipts unavailable');
+    expect(el.textContent).not.toContain('does not run consolidation');
+    unmount();
+  });
+
+  test('a 501 says the daemon does not run consolidation and offers no retry', async () => {
+    receiptsImpl = () => Promise.reject(Object.assign(new Error('not implemented'), { status: 501 }));
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('This daemon does not run consolidation'));
+    expect(el.querySelector('button[aria-label="Retry"]')).toBeNull();
+    unmount();
+  });
+
+  test('a 404 METHOD_NOT_FOUND says the daemon does not run consolidation and offers no retry', async () => {
+    receiptsImpl = () => Promise.reject(Object.assign(new Error('unknown method'), { status: 404, code: 'METHOD_NOT_FOUND' }));
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('This daemon does not run consolidation'));
+    expect(el.querySelector('button[aria-label="Retry"]')).toBeNull();
+    unmount();
+  });
+});
+
+describe('ConsolidationReceipts: genuinely empty', () => {
+  test('no proposals and no runs shows the no-runs-yet line', async () => {
+    receiptsImpl = () => Promise.resolve({ receipts: [], pendingProposals: [] });
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('No consolidation runs yet'));
+    expect(el.querySelector('.consolidation-proposal-row')).toBeNull();
+    expect(el.querySelector('.consolidation-receipts-runs')).toBeNull();
     unmount();
   });
 });

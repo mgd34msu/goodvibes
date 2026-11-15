@@ -7,7 +7,7 @@ import {
 import { installUserErrorReading } from '../helpers/user-error-reading.ts';
 let restore: (() => void) | undefined;
 afterEach(() => { restore?.(); restore = undefined; });
-const reading = (kind: ErrorClass, sessionEnded = false) => { restore?.(); restore = installUserErrorReading(kind, sessionEnded); };
+const reading = (kind: ErrorClass, sessionEnded = false, states?: string[]) => { restore?.(); restore = installUserErrorReading(kind, sessionEnded, states); };
 
 import { SystemMessageRouter, createSystemMessageRouter } from '../../core/system-message-router.ts';
 import type { ConversationManager } from '../../core/conversation';
@@ -55,13 +55,52 @@ const classifyCases: ClassifyCase[] = [
   { label: 'undefined', err: undefined, expected: 'generic' },
 ];
 
-describe('public owner class readings', () => {
+// The fake reader answers with the class it is given, whatever the error is, so this
+// table pins only how a reading maps to a kind. What the reader is shown is pinned below.
+describe('reading to kind mapping', () => {
   for (const { label, err, expected } of classifyCases) {
-    test(`classifies as ${expected}: ${label}`, async () => {
+    test(`a reading of ${expected} yields ${expected}: ${label}`, async () => {
       reading(expected);
       expect((await readUserFacingError(err)).kind).toBe(expected);
     });
   }
+});
+
+describe('evidence shown to the reader', () => {
+  const shown = async (err: unknown): Promise<string[]> => {
+    const states: string[] = [];
+    reading('generic', false, states);
+    await readUserFacingError(err);
+    return states;
+  };
+
+  test('the HTTP status and message of a 401 reach the reader', async () => {
+    const states = await shown({ status: 401, message: 'Unauthorized' });
+    expect(states).toHaveLength(1);
+    expect(states[0]).toContain('HTTP status: 401');
+    expect(states[0]).toContain('Message: Unauthorized');
+  });
+
+  test('an errno code settles the class from structure alone, without asking the reader', async () => {
+    const states: string[] = [];
+    reading('generic', false, states);
+    const err = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:11434'), { code: 'ECONNREFUSED' });
+    expect((await readUserFacingError(err)).kind).toBe('network');
+    expect(states).toEqual([]);
+  });
+
+  test('a 429 status settles the class from structure alone, without asking the reader', async () => {
+    const states: string[] = [];
+    reading('generic', false, states);
+    expect((await readUserFacingError({ status: 429, message: 'Too Many Requests' })).kind).toBe('rate-limit');
+    expect(states).toEqual([]);
+  });
+
+  test('a plain-string error reaches the reader as its message', async () => {
+    const states = await shown('too many tokens in conversation');
+    expect(states).toHaveLength(1);
+    expect(states[0]).toContain('Message: too many tokens in conversation');
+  });
 });
 
 // ---------------------------------------------------------------------------

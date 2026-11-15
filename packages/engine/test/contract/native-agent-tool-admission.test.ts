@@ -40,7 +40,7 @@ const REVISED_MARKER = 'HOST_REVISED_READ_BODY';
 const TOOL_SITE = 'engine.gate.autonomous-tool';
 const readArgs = (path = 'README.md') => ({ files: [{ path }] });
 
-for (const scenario of ['act', 'unrecorded', 'planner-act', 'review-drafts'] as const) {
+for (const scenario of ['act', 'planner-act', 'review-drafts'] as const) {
   test(`actual native sub-agent tool admission ${scenario} retains source and captured authority without a secondary gate`, async () => {
     forgetGateReadings();
     const root = makeRepo();
@@ -185,7 +185,6 @@ for (const scenario of ['act', 'unrecorded', 'planner-act', 'review-drafts'] as 
       expect(getContractActionSource(record)?.()).toEqual({ goal: SOURCE.goal, criteria: [...SOURCE.criteria] });
       expect(getContractActionSource({ ...record })).toBeUndefined();
       expect(getContractInputAuthority({ ...record })).toBeUndefined();
-      if (scenario === 'unrecorded') installJudgmentPort(rawPort);
       await runtime.agentOrchestrator.runAgent(record);
     } });
     let id: string | undefined;

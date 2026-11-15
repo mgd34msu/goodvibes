@@ -48,8 +48,16 @@ export function livenessMarkerDirFor(surface: SessionSurface): string {
   return join(surface.homeDirectory, '.goodvibes', surface.surfaceRoot, 'liveness');
 }
 
-/** Absolute path to a session's liveness marker file. */
+/**
+ * Absolute path to a session's liveness marker file. The id becomes a file name
+ * under the liveness directory, so one that could name a different place (a path
+ * separator, a dot segment, a NUL) is refused rather than joined: the marker
+ * writer, remover and reader all treat that as "no marker".
+ */
 export function livenessMarkerPathFor(surface: SessionSurface, sessionId: string): string {
+  if (sessionId.length === 0 || sessionId === '.' || sessionId === '..' || /[/\\\0]/.test(sessionId)) {
+    throw new Error(`Session id ${JSON.stringify(sessionId)} cannot be used as a liveness marker file name.`);
+  }
   return join(livenessMarkerDirFor(surface), `${sessionId}.json`);
 }
 
@@ -95,7 +103,11 @@ function parseMarkerFile(path: string): LivenessMarker | null {
 }
 
 function readLivenessMarker(surface: SessionSurface, sessionId: string): LivenessMarker | null {
-  return parseMarkerFile(livenessMarkerPathFor(surface, sessionId));
+  try {
+    return parseMarkerFile(livenessMarkerPathFor(surface, sessionId));
+  } catch {
+    return null;
+  }
 }
 
 /** Best-effort check that a pid still refers to a running process. Injectable for tests. */

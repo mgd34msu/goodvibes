@@ -1,29 +1,16 @@
 /**
- * Build with the production compatibility driver, then execute the actual Agent
- * model harness registry in fresh compiled processes. The loopback
+ * Execute the actual Agent model harness registry from source in fresh
+ * processes, so saved state has to survive between them. The loopback
  * response fixture is intentionally synthetic; host-side Jev admission has
  * its own integration coverage. This is command-graph proof, not a renderer test.
  */
-import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { createLegacyImportHostFixture, IMPORT_FIXTURE_TOKEN, IMPORT_ROUTES, type LegacyImportHostFixture } from '../helpers/legacy-import-host-fixture.ts';
 import { pairImportProofHost } from '../helpers/legacy-import-product-proof.ts';
-const productRoot = resolve(import.meta.dir, '../../..');
-let buildRoot = ''; let binary = '';
-beforeAll(async () => {
-  buildRoot = mkdtempSync(join(tmpdir(), 'compiled-import-command-')); binary = join(buildRoot, 'import-command-proof');
-  const child = Bun.spawn([process.execPath, 'scripts/compile.ts', 'src/test/e2e/legacy-import-command-proof-entry.ts', '--compile', `--target=bun-${process.platform}-${process.arch}`, '--outfile', binary], { cwd: productRoot, stdout: 'pipe', stderr: 'pipe' });
-  const timer = setTimeout(() => child.kill('SIGKILL'), 180_000);
-  try {
-    const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-    if (code !== 0) throw new Error(`Compiled import command proof failed (${code}): ${out}\n${error}`);
-  } finally { clearTimeout(timer); if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await child.exited; } }
-}, 190_000);
-afterAll(() => { if (buildRoot) rmSync(buildRoot, { recursive: true, force: true }); });
+const entry = join(import.meta.dir, 'legacy-import-command-proof-entry.ts');
 async function run(product: 'agent', fixture: LegacyImportHostFixture, args: string[]) {
-  const child = Bun.spawn([binary, product, fixture.home, fixture.workspace, fixture.baseUrl, ...args], {
+  const child = Bun.spawn([process.execPath, entry, product, fixture.home, fixture.workspace, fixture.baseUrl, ...args], {
     cwd: fixture.workspace, env: { HOME: fixture.home, GOODVIBES_HOME: fixture.home, PATH: '/usr/bin:/bin', TMPDIR: fixture.root, TERM: 'dumb', LANG: 'C.UTF-8' }, stdout: 'pipe', stderr: 'pipe', stdin: 'ignore',
   });
   const timer = setTimeout(() => child.kill('SIGKILL'), 20_000);
@@ -34,7 +21,7 @@ async function run(product: 'agent', fixture: LegacyImportHostFixture, args: str
   } finally { clearTimeout(timer); if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await child.exited; } }
 }
 const product = 'agent';
-test(`compiled ${product} command survives lost acknowledgement and exact recovery across processes`, async () => {
+test(`${product} command survives lost acknowledgement and exact recovery across processes`, async () => {
   const fixture = createLegacyImportHostFixture();
   try {
     await pairImportProofHost(fixture);

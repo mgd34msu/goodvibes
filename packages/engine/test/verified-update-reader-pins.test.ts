@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -28,15 +27,17 @@ function fixture() {
 }
 
 test('forward reader admission reuses the platform verified pins instead of hashing payloads a second time', async () => {
-  const f = fixture(), hash = spyOn(crypto, 'createHash'); let retained: VerifiedUpdateStage | undefined;
+  const f = fixture(), hash = spyOn(crypto, 'createHash'); let retained: VerifiedUpdateStage | undefined, memberCount = 0;
   try {
     await applyVerifiedUpdate({ fetchImpl: f.fetchImpl, downloadBaseUrl: 'https://fixture.invalid/release', targets: f.targets, io: realUpdateFileIo, platform: 'darwin', native: true,
       beforeCommit(stage) {
         retained = stage;
-        expect(verifiedUpdateStageMembers(stage)?.length).toBe(2);
+        memberCount = verifiedUpdateStageMembers(stage)?.length ?? 0;
+        expect(memberCount).toBe(f.targets.length);
         assertStagedClientReaderCompatible(f.execPath, f.execPath + '.update-download', realUpdateFileIo, '3.1.2', f.asset, stage);
       } });
-    expect(hash).toHaveBeenCalledTimes(2); expect(readFileSync(f.execPath)).toEqual(f.binary);
+    // One hash per downloaded member (the platform verification); reader admission adds none.
+    expect(hash).toHaveBeenCalledTimes(memberCount); expect(readFileSync(f.execPath)).toEqual(f.binary);
     expect(retained).toBeDefined(); expect(() => verifiedUpdateStageMembers(retained!)).toThrow('unavailable');
   } finally { hash.mockRestore(); }
 });

@@ -20,7 +20,7 @@
  * mode is gone in both directions.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,6 +35,16 @@ import {
 } from '../platform/src/platform/config/settings-ingestion.ts';
 import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { useConfigReadings } from './_helpers/config-readings.js';
+
+const tempRoots: string[] = [];
+const makeTempRoot = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(dir);
+  return dir;
+};
+afterEach(() => {
+  for (const dir of tempRoots.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('resolveOrCreateDaemonPath', () => {
   test('creates a missing app-layer section instead of throwing', () => {
@@ -77,7 +87,7 @@ describe('resolveOrCreateDaemonPath', () => {
 
 describe('a ConfigManager constructed over a daemon tier holding app-layer keys', () => {
   test('constructs, and the stored value is readable back', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-daemon-tier-'));
+    const root = makeTempRoot('gv-daemon-tier-');
     const daemonDir = join(root, 'daemon');
     mkdirSync(daemonDir, { recursive: true });
     // Exactly what a surface writes once the mail connection is daemon-owned.
@@ -126,7 +136,7 @@ describe('a ConfigManager constructed over a daemon tier holding app-layer keys'
 
 /** A ConfigManager over a temp home whose daemon tier holds exactly `settings`. */
 function managerOverDaemonTier(settings: unknown): { manager: ConfigManager; path: string } {
-  const root = mkdtempSync(join(tmpdir(), 'gv-ingest-'));
+  const root = makeTempRoot('gv-ingest-');
   const daemonDir = join(root, 'daemon');
   mkdirSync(daemonDir, { recursive: true });
   const path = join(daemonDir, 'settings.json');
@@ -203,7 +213,7 @@ describe('settings ingestion: a key form from a newer component', () => {
   const readings = useConfigReadings({ forms: { 'clientSecretRef@v2': 'clientSecretRef' } });
 
   test('terminal launch update settings load without unknown-setting judgments', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-launch-update-settings-'));
+    const root = makeTempRoot('gv-launch-update-settings-');
     try {
       const configDir = join(root, 'config');
       mkdirSync(configDir);
@@ -271,7 +281,7 @@ describe('settings ingestion: a secret reference that cannot be resolved', () =>
 
 describe('settings ingestion: the keys that refuse instead of skipping', () => {
   test('a rejected value on a tool approval gate refuses, naming file, key and reason', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-gate-'));
+    const root = makeTempRoot('gv-gate-');
     const daemonDir = join(root, 'daemon');
     mkdirSync(daemonDir, { recursive: true });
     const path = join(daemonDir, 'settings.json');
@@ -355,7 +365,7 @@ describe('settings ingestion runs after the load-time migrations, not before', (
     // the bytes on disk and false of the config the reader actually builds.
     // A key the platform is about to rewrite itself is not one it fails to
     // understand, so the migrations run first and the screen sees the result.
-    const configDir = mkdtempSync(join(tmpdir(), 'gv-ingest-order-'));
+    const configDir = makeTempRoot('gv-ingest-order-');
     writeFileSync(
       join(configDir, 'settings.json'),
       JSON.stringify({ sandbox: { judgmentAutoApprove: true } }),

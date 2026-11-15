@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { contractPath } from '../platform/src/platform/contract/store.js';
@@ -6,7 +6,7 @@ import { makeContract, makeUnit } from './contract/fixtures.js';
 import type { UnitCheck } from '../platform/src/platform/contract/types.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, type NativeDataFormat } from '../platform/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../platform/src/platform/runtime/self-update.js';
-import { createAgentExecutionGraph, createAgentGraph } from '../platform/src/platform/runtime/agent-graph-composition.ts';
+import { createAgentExecutionGraph, createContractedAgentGraph } from '../platform/src/platform/runtime/agent-graph-composition.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
 import { createLaunchTolerantProviderRegistry } from '../platform/src/platform/providers/launch-tolerant-registry.ts';
@@ -19,8 +19,12 @@ import { AgentManager } from '../platform/src/platform/tools/agent/index.ts';
 import * as composition from '../platform/src/platform/runtime/contract-composition.ts';
 import { makeProjectTempDir } from '../test/_helpers/project-temp.ts';
 
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
 function fixture() {
   const root = makeProjectTempDir('agent-graph-base');
+  roots.push(root);
   const configManager = new ConfigManager({ configDir: join(root, 'config') });
   const providerRegistry = createLaunchTolerantProviderRegistry({
     configManager,
@@ -55,9 +59,9 @@ test('default graph retains exactly one canonical runner and one startup resume'
     return composed;
   });
   const install = spyOn(AgentManager.prototype, 'setContractRunner');
-  let graph: ReturnType<typeof createAgentGraph> | undefined;
+  let graph: ReturnType<typeof createContractedAgentGraph> | undefined;
   try {
-    graph = createAgentGraph(f);
+    graph = createContractedAgentGraph(f);
     expect(compose).toHaveBeenCalledTimes(1);
     expect(install).toHaveBeenCalledTimes(1);
     expect(install.mock.calls[0]?.[0]).toBe(graph.contractRunner);
@@ -142,7 +146,7 @@ test('ordinary review receipts declare optional state bindings before publicatio
   } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
 });
 
-// Source-first regressions: authored without running during the audit pass.
+// A borrowed thenable or promise must never have its `then` read or run by the publication boundary.
 for (const boundary of ['identity', 'checkpoint'] as const) for (const mode of ['throw-promise', 'return-promise', 'throw-error', 'return-thenable'] as const) {
   test(`contract ${boundary} publication ${mode} preserves refusal and observes owned rejected work`, async () => {
     const f = fixture(), graph = createAgentExecutionGraph(f), contract = makeContract({ projectRoot: f.workingDirectory });

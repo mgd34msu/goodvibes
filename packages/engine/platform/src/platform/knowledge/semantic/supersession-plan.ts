@@ -62,9 +62,12 @@ export function prepareSemanticSupersession(
     return async () => {
       store.assertPreparedNodeWrites(activation);
       for (const [index, { node, primarySourceId }] of writes.entries()) {
-        // Recheck authority before removing a retained fact's previous support.
-        await store.upsertPreparedNode(activation, index);
+        // Support goes first: the fact still references this source until its
+        // node is rewritten, so a run stopped between the two writes is found
+        // and finished by the next one. The reverse order strands an active edge
+        // that no retry selects.
         if (primarySourceId) await deactivateSemanticFactSupport(store, sourceId, node.id, spaceId, supersededAt, assertCurrent);
+        await store.upsertPreparedNode(activation, index);
       }
     };
   };

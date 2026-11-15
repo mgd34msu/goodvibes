@@ -10,8 +10,7 @@ describe('correlation ids', () => {
   test('getCorrelationContext returns empty object when no context is active', async () => {
     const { getCorrelationContext } = await import('../platform/src/platform/runtime/correlation.js');
     const ctx = getCorrelationContext();
-    // toBeTypeOf('object') already proves ctx is defined; check the empty-ctx contract directly.
-    expect(ctx).toBeTypeOf('object');
+    expect(ctx).toEqual({});
   });
 
   test('correlationCtx.run provides requestId within the callback', async () => {

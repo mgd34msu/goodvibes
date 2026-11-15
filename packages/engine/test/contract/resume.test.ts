@@ -1,4 +1,4 @@
-import { withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.ts';
+import { configureDecisionModelPolicy, withDecisionModelPolicy } from '../../platform/src/platform/runtime/decision-policy.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 /**
  * Resume and zombie reaping (docs/design/contract-runner.md section 7.2), with
@@ -26,9 +26,9 @@ import { answers, fixPlan, git, judgeOf, replyAnswers, terminal } from './steps-
 
 const roots: string[] = [];
 const harnesses: Harness[] = [];
-afterEach(() => {
-  for (const h of harnesses.splice(0)) h.dispose();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  try { await Promise.all(harnesses.splice(0).map(h => h.dispose())); }
+  finally { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
 });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -63,14 +63,14 @@ async function interrupt(options: Options, until: (contract: ContractView) => bo
       return contract !== null && until(contract);
     }), what, 10_000,
     );
-    // Checks in flight settle and the debounced writes land; stopping the runner writes anything still pending.
-    await sleep(300);
   } finally {
     first.dispose();
     // A restarted process has no surviving local cleanup. Model that barrier
     // before reusing its tree. The deliberately never-answering planner has
     // no engine/tree work and intentionally cannot provide a cleanup receipt.
     if (options.planner !== stuckPlanner) await Promise.all(ids.map((id) => first.runner.join(id)));
+    // Nothing may checkpoint after the caller edits the file.
+    first.store.flush();
   }
   return { root, ids };
 }
@@ -421,7 +421,7 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
       plannerRuns++;
       prompt = request.userPrompt;
       if (condition === 'privacy-refused') {
-        await sleep(20);
+        second.store.flush();
         const saved = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
         expect(saved.contract.status).toBe('fixing');
         expect(saved.contract.error).toBeUndefined();
@@ -633,6 +633,7 @@ test.each([400, 429, 503])(
     expect(contractIn(h, contract.id).decisions.some(decision => decision.reason.includes('verification pending:'))).toBe(false);
     expect(eventsOf(h, 'CONTRACT_FAILED')).toHaveLength(1);
     h.dispose();
+    await h.runner.join(contract.id);
     let restartedRequests = 0;
     const resumed = restart(h.root, {
       plan, contract: { isolation: 'worktree', maxParallelUnits: 2 },
@@ -1079,7 +1080,6 @@ describe('units resume at their step', () => {
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun }, port: replyAnswers([{ reading: 'approve' }]) });
     const report = await h.runner.resumeAll();
     expect(report.resumed).toEqual([{ contractId: id!, step: 'await-owner' }]);
-    await sleep(300);
     expect(contractIn(h, id!).status).toBe('awaiting-owner');
     expect(contractIn(h, id!).escalations[0]!.resolvedAt).toBeUndefined();
     expect(h.agentsOf('u1')).toEqual([]);
@@ -1138,6 +1138,91 @@ describe('units resume at their step', () => {
     expect(h.agentsOf('u1')).toEqual([]);
     expect(done.commit?.status).toBe('committed');
     expect(git(root, 'show', 'HEAD:src/csv.ts')).toContain('text.split');
+  }, 30_000);
+});
+
+describe('a unit whose check passed before the restart', () => {
+  test.each([
+    ['passed', { isolation: 'shared' }],
+    ['held-merge', { isolation: 'auto' }],
+  ] as const)('a %s unit whose item was still in its phase settles it without a fresh agent', async (status, contractConfig) => {
+    const options: Options = { plan: oneUnitPlan(1), contract: contractConfig, scripts: { u1: writesThenHangs } };
+    const {
+      root,
+      ids: [id],
+    } = await interrupt(options, running, 'u1 running after a check');
+    editContract(root, id!, (contract) => {
+      contract.units[0]!.status = status;
+      contract.units[0]!.answer = 'Wrote the parser in src/csv.ts.';
+      contract.units[0]!.lastOutput = 'Wrote the parser in src/csv.ts.';
+    });
+    const h = restart(root, { ...options, scripts: { u1: mustNotRun } });
+    await h.runner.resumeAll();
+    const done = await ended(h, id!);
+    expect(h.agentsOf('u1')).toEqual([]);
+    expect(eventsOf(h, 'CONTRACT_UNIT_SPAWNED')).toEqual([]);
+    expect(done.units[0]!.status).toBe('passed');
+    expect(done.status).toBe('passed');
+  }, 30_000);
+});
+
+describe('an interrupted repair round while the owner is asked about another unit', () => {
+  test('the unit left fixing is planned again after the restart; the asked unit keeps waiting', async () => {
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: twoUnitPlan(), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    editContract(root, id!, (contract) => {
+      contract.statusBeforeOwner = 'running';
+      contract.status = 'awaiting-owner';
+      contract.units[0]!.status = 'fixing';
+      contract.units[0]!.fixRounds = 1;
+      contract.units[1]!.status = 'awaiting-owner';
+      contract.escalations.push({
+        id: `${id}.e1`, at: Date.now(), scope: 'unit', targetId: 'u2', reason: 'stalled',
+        question: 'Unit u2 needs your decision.', unmetCriterionIds: [],
+      });
+    });
+    const plannerRequests: string[] = [];
+    const h = restart(root, {
+      plan: twoUnitPlan(),
+      scripts: { u1: mustNotRun, u2: mustNotRun },
+      planner: { run: (request) => {
+        plannerRequests.push(request.userPrompt);
+        // Never answers, but gives way when the runner is disposed so teardown can drain.
+        return new Promise((_resolve, reject) => request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true }));
+      } },
+    });
+    // The fix planner never answers, so resuming never finishes; the request is what this checks.
+    void h.runner.resumeAll();
+    await waitFor(() => plannerRequests.length > 0, 'the interrupted fix of u1 to be planned again', 10_000);
+    expect(plannerRequests).toHaveLength(1);
+    expect(plannerRequests[0]).toContain('u1');
+    const contract = contractIn(h, id!);
+    expect(contract.units[1]!.status).toBe('awaiting-owner');
+    expect(contract.escalations.find((item) => item.id === `${id}.e1`)?.resolvedAt).toBeUndefined();
+  }, 30_000);
+});
+
+describe('a working unit whose work item ended without it', () => {
+  test('a running unit whose item failed in the snapshot fails with the item, not waits forever', async () => {
+    const {
+      root,
+      ids: [id],
+    } = await interrupt({ plan: oneUnitPlan(1), scripts: { u1: writesThenHangs } }, running, 'u1 running after a check');
+    const snapshot = join(root, '.goodvibes', 'orchestration', id!, 'g1.json');
+    const saved = JSON.parse(readFileSync(snapshot, 'utf-8')) as { workstream: { items: { id: string; state: string; failureReason?: string }[] } };
+    const item = saved.workstream.items.find((candidate) => candidate.id === 'u1')!;
+    item.state = 'failed';
+    item.failureReason = 'its worktree could not be set up';
+    writeFileSync(snapshot, JSON.stringify(saved));
+    const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
+    await h.runner.resumeAll();
+    const done = await ended(h, id!);
+    expect(done.status).toBe('failed');
+    expect(done.units[0]!.status).toBe('failed');
+    expect(done.error).toContain('its worktree could not be set up');
+    expect(h.agentsOf('u1')).toEqual([]);
   }, 30_000);
 });
 
@@ -1235,6 +1320,31 @@ describe('the deliverable steps run again', () => {
   }, 30_000);
 });
 
+describe('a contract another live process runs', () => {
+  test('a second runner over the same project leaves it to the first, and takes it up once the first has stopped', async () => {
+    const root = makeRepo();
+    roots.push(root);
+    const first = makeHarness({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {}, root });
+    const id = (await startContract(first)).contract.id;
+    await waitFor(() => first.store.get(id)?.status === 'planning', 'planning', 10_000);
+
+    const second = restart(root, { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} });
+    const report = await second.runner.resumeAll();
+    expect(report.skipped).toEqual([id]);
+    expect(report.resumed).toEqual([]);
+
+    first.dispose();
+    const third = restart(root, {
+      plan: oneUnitPlan(1),
+      planner: { run: async () => ({ status: 'completed', output: plannerOutput(oneUnitPlan(1)), elapsedMs: 1, agentId: 'planner-again' }) },
+      scripts: { u1: () => [{ files: { 'src/csv.ts': 'parse\n' }, text: 'Wrote the parser.' }] },
+    });
+    const later = await third.runner.resumeAll();
+    expect(later.resumed).toEqual([{ contractId: id, step: 'plan' }]);
+    expect((await ended(third, id)).status).toBe('passed');
+  });
+});
+
 describe('the active-contract cap', () => {
   test('contracts beyond the cap wait in the queue and resume from their step when a slot opens', async () => {
     const { root, ids } = await interrupt(
@@ -1265,6 +1375,40 @@ describe('the active-contract cap', () => {
   }, 40_000);
 });
 
+describe('a queued contract whose turn comes after the decision-model policy changed', () => {
+  test('ends failed with the reason and frees its slot instead of staying queued behind an unseen rejection', async () => {
+    const { root, ids } = await interrupt(
+      { plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} },
+      (contract) => contract.status === 'planning',
+      'both planning',
+      2,
+    );
+    let policy = 'Preferred';
+    const stopPolicy = configureDecisionModelPolicy(() => policy);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const h = restart(root, {
+        plan: oneUnitPlan(1),
+        contract: { maxActiveContracts: 1 },
+        scripts: { u1: (record) => [{ before: () => gate, files: { 'src/csv.ts': `parse ${record.id}\n` }, text: 'Wrote the parser.' }] },
+      });
+      const report = await h.runner.resumeAll();
+      const queued = report.queued[0]!;
+      expect(contractIn(h, queued).status).toBe('queued');
+      // The running contract ends under the new policy, which hands its slot to the queued one.
+      policy = 'Classic - Off';
+      h.runner.cancel(report.resumed[0]!.contractId, 'stopped for the test');
+      const later = await ended(h, queued);
+      expect(later.status).toBe('failed');
+      expect(later.error).toContain('could not resume');
+    } finally {
+      release();
+      stopPolicy();
+    }
+  }, 40_000);
+});
+
 describe('zombies', () => {
   function expectReaped(h: Harness, id: string, reasonPart: string): void {
     const contract = contractIn(h, id);
@@ -1292,7 +1436,7 @@ describe('zombies', () => {
     ]);
     expectReaped(h, id!, 'group g1 is running but has no loadable workstream snapshot');
     // The failed tree is written, so the next start does not reap it again.
-    await sleep(100);
+    h.store.flush();
     expect((JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.status).toBe('failed');
   }, 30_000);
 

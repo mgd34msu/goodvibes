@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync } from 'node:fs';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { readVersioned } from '@goodvibes-jev/engine/platform/platform/config';
+import { readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
 
 import type {
   OnboardingMode,
@@ -89,10 +89,20 @@ export interface WriteWizardProgressOptions {
  * never leaves a torn file. The file is user-scoped so it survives across
  * project switches and is shared with the resume-prompt check at startup.
  *
- * Masked (password) fields are deliberately excluded from the serialised
- * textState by the caller, this function accepts whatever is passed in and
- * does NOT filter. Callers must strip sensitive fields before calling.
+ * Masked (password) fields are excluded from the serialised textState by the
+ * caller. As a second line of defence this function also drops any entry whose
+ * field id names a secret (see {@link isSecretFieldId}), so a secret in a field
+ * that was never declared masked still never reaches the user-scope file.
  */
+/**
+ * Whether a wizard field id names a secret by its last segment (`...-token`,
+ * `...-password`). A reference to a secret (`...-token-ref`) or an id of one
+ * (`...-token-id`) is not the secret and stays resumable.
+ */
+export function isSecretFieldId(fieldId: string): boolean {
+  return /(?:^|[.-])(?:token|password|passphrase|secret|api-?key|credential)$/i.test(fieldId);
+}
+
 export function writeWizardProgress(
   shellPaths: OnboardingShellPaths,
   options: WriteWizardProgressOptions,
@@ -105,8 +115,10 @@ export function writeWizardProgress(
     stepIndex: options.stepIndex,
     toggleState: options.toggleState,
     radioState: options.radioState,
-    textState: options.textState,
+    textState: options.textState.filter(([fieldId]) => !isSecretFieldId(fieldId)),
   };
+  // A file from a newer release is moved aside, not overwritten, so downgrading never destroys its state.
+  setAsideNewerVersionFile(path, 1);
   atomicWriteFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mkdirp: true });
 }
 

@@ -109,8 +109,8 @@ export class SloCollector {
 
   /** Pending turn start timestamps keyed by turnId. */
   private readonly _pendingTurnStart = new Map<string, number>();
-  /** Tracks which turnIds have received their first STREAM_DELTA. */
-  private readonly _seenFirstDelta = new Set<string>();
+  /** Turns that have received their first STREAM_DELTA, with that delta's time so the sweep can age them out. */
+  private readonly _seenFirstDelta = new Map<string, number>();
   /** Pending cancel timestamps keyed by turnId (set on TURN_CANCEL). */
   private readonly _pendingCancel = new Map<string, number>();
   /** Pending reconnect start timestamp. Only the most recent reconnect attempt is tracked. */
@@ -153,7 +153,7 @@ export class SloCollector {
         const turnId = getField<string>(e, 'turnId');
         if (turnId === undefined) return;
         if (this._seenFirstDelta.has(turnId)) return;
-        this._seenFirstDelta.add(turnId);
+        this._seenFirstDelta.set(turnId, e.ts);
         const startAt = this._pendingTurnStart.get(turnId);
         if (startAt !== undefined) {
           appendSample(this._turnStartSamples, e.ts - startAt);
@@ -290,6 +290,11 @@ export class SloCollector {
         this._seenFirstDelta.delete(key);
       }
     }
+    // A turn that streamed leaves _pendingTurnStart at its first delta, so only
+    // this pass reaps it when no terminal event ever arrives.
+    for (const [key, ts] of this._seenFirstDelta) {
+      if (ts < cutoff) this._seenFirstDelta.delete(key);
+    }
     for (const [key, ts] of this._pendingCancel) {
       if (ts < cutoff) this._pendingCancel.delete(key);
     }
@@ -303,8 +308,9 @@ export class SloCollector {
   }
 
   /**
-   * Returns current p95 values for all four SLO metrics as PerfMetric entries.
-   * Metrics with no samples return a value of 0.
+   * Returns current p95 values as PerfMetric entries for the SLO metrics that have samples.
+   * A metric with no samples is left out, so a budget check reads "no data" rather than a
+   * 0 ms p95 that would pass any threshold; `getSampleCounts()` reports the empty ones.
    *
    * Intended for use with `PerfMonitor.evaluate()` via the `extraMetrics` field:
    * ```ts
@@ -314,32 +320,15 @@ export class SloCollector {
    */
   public getMetrics(): PerfMetric[] {
     const now = Date.now();
-    return [
-      {
-        name: SLO_METRICS.TURN_START,
-        value: p95(this._turnStartSamples),
-        unit: 'ms',
-        timestamp: now,
-      },
-      {
-        name: SLO_METRICS.CANCEL,
-        value: p95(this._cancelSamples),
-        unit: 'ms',
-        timestamp: now,
-      },
-      {
-        name: SLO_METRICS.RECONNECT_RECOVERY,
-        value: p95(this._reconnectSamples),
-        unit: 'ms',
-        timestamp: now,
-      },
-      {
-        name: SLO_METRICS.PERMISSION_DECISION,
-        value: p95(this._permissionSamples),
-        unit: 'ms',
-        timestamp: now,
-      },
+    const all: Array<{ name: string; samples: readonly number[] }> = [
+      { name: SLO_METRICS.TURN_START, samples: this._turnStartSamples },
+      { name: SLO_METRICS.CANCEL, samples: this._cancelSamples },
+      { name: SLO_METRICS.RECONNECT_RECOVERY, samples: this._reconnectSamples },
+      { name: SLO_METRICS.PERMISSION_DECISION, samples: this._permissionSamples },
     ];
+    return all
+      .filter((m) => m.samples.length > 0)
+      .map((m): PerfMetric => ({ name: m.name, value: p95(m.samples), unit: 'ms', timestamp: now }));
   }
 
   /**

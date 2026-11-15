@@ -188,6 +188,32 @@ describe('the settings the port is built from', () => {
     }
   });
 
+  test('the browser port refuses an answer the web boundary rejects, while the native port accepts it', async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), 'judgment-browser-'));
+    const scope = createDisposalScope('test');
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch() {
+        return Response.json({ model: 'jev-pinned-here', answers: { check: { type: 'noul', noul: 0.9 } }, usage: { input_tokens: 1.5, output_tokens: 1 } });
+      },
+    });
+    try {
+      const { port, browserPort, decisionLog } = composeJudgment({
+        ...source({ 'judgment.endpoint': `http://127.0.0.1:${server.port}`, 'judgment.model': 'jev-pinned-here' }, { TYPESAFE_API_KEY: KEY }),
+        stateRoot, disposal: scope.registry,
+      });
+      const request = { state: { sample: true }, questions: { check: { type: 'noul' as const, instructions: 'Is the sample present?' } } };
+      await expect(browserPort!.ask(request)).rejects.toMatchObject({ kind: 'invalid-response' });
+      expect(decisionLog.query({ status: 'answered' })).toEqual([]);
+      expect((await port.ask(request)).model).toBe('jev-pinned-here');
+    } finally {
+      server.stop(true);
+      scope.dispose();
+      rmSync(stateRoot, { recursive: true, force: true });
+    }
+  });
+
   test('a burst of completed judgments gives input a turn between durable records', async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), 'judgment-input-'));
     const scope = createDisposalScope('test');

@@ -58,7 +58,9 @@ interface Captured {
   readonly credentials: Array<{ credentialId: string }>;
 }
 
-function makeCatalog(relayAvailable = true, withStepUp = true): { catalog: GatewayMethodCatalog; captured: Captured } {
+interface Failures { readonly subscribe?: Error; readonly registerCredential?: Error }
+
+function makeCatalog(relayAvailable = true, withStepUp = true, failures: Failures = {}): { catalog: GatewayMethodCatalog; captured: Captured } {
   const captured: Captured = { subscribed: [], credentials: [] };
   const catalog = new GatewayMethodCatalog();
   registerPairingHandoffGatewayMethods(catalog, {
@@ -66,6 +68,7 @@ function makeCatalog(relayAvailable = true, withStepUp = true): { catalog: Gatew
     push: {
       getPublicKey: async () => 'VAPID_PUBLIC',
       subscribe: async (input) => {
+        if (failures.subscribe) throw failures.subscribe;
         captured.subscribed.push({ endpoint: input.endpoint, ...(input.deviceId ? { deviceId: input.deviceId } : {}) });
         return {
           id: 'push-1', principalId: input.principalId, endpointOrigin: 'https://push', createdAt: 1,
@@ -76,10 +79,10 @@ function makeCatalog(relayAvailable = true, withStepUp = true): { catalog: Gatew
       ? {
           stepUp: {
             registerCredential: async (input) => {
+              if (failures.registerCredential) throw failures.registerCredential;
               captured.credentials.push({ credentialId: input.credentialId });
               return { credential: { credentialId: input.credentialId } } as never;
             },
-            mintChallenge: (() => ({})) as never,
           },
         }
       : {}),
@@ -126,6 +129,30 @@ describe('pairing.handoff.* over the catalog', () => {
     // The notifications offer really registered the subscription (device-scoped).
     expect(captured.subscribed).toEqual([{ endpoint: 'https://push/device', deviceId: 'dev-1' }]);
     expect(captured.credentials).toHaveLength(0);
+    // Relay needs no daemon-side action; the result must say it was acknowledged, not armed.
+    const relay = done.results.find((r) => r.kind === 'relay') as { detail?: string } | undefined;
+    expect(relay?.detail).toContain('nothing was set up on the daemon');
+  });
+
+  test('a push service or credential store that throws fails only its own offer and leaks no offer material', async () => {
+    const { catalog } = makeCatalog(true, true, { subscribe: new Error('push service unreachable'), registerCredential: new Error('credential store locked') });
+    const done = await catalog.invoke('pairing.handoff.complete', {
+      ...ctx,
+      body: {
+        accept: {
+          notifications: { endpoint: 'https://push/device', keys: pushKeys },
+          relay: true,
+          passkey: { rpId: 'app.example', origin: 'https://app.example', credentialId: 'cred-secret-1', publicKeyCose: 'cose-secret' },
+        },
+      },
+    }) as { results: Array<{ kind: string; status: string; detail?: string }> };
+    const byKind = Object.fromEntries(done.results.map((r) => [r.kind, r]));
+    expect(byKind.notifications).toMatchObject({ status: 'failed', detail: 'push service unreachable' });
+    expect(byKind.passkey).toMatchObject({ status: 'failed', detail: 'credential store locked' });
+    // The offer after the failed one is still reported, not discarded.
+    expect(byKind.relay?.status).toBe('completed');
+    const text = JSON.stringify(done);
+    for (const secret of [pushKeys.auth, pushKeys.p256dh, 'cose-secret']) expect(text).not.toContain(secret);
   });
 
   test('an accepted passkey offer registers the credential in the same pass', async () => {
@@ -146,33 +173,67 @@ describe('pairing.handoff.* over the catalog', () => {
     expect(captured.credentials).toEqual([{ credentialId: 'cred-1' }]);
   });
 
-  test('a notifications offer with unusable key material is refused, not stored', async () => {
+  test('a notifications offer with unusable key material fails that offer, not stored', async () => {
     const { catalog, captured } = makeCatalog();
-    // A malformed request is a 400 here, the same as every other bad argument
-    // in this verb, and nothing reaches the push service, so a record that
-    // could never receive a push is never registered.
-    await expect(catalog.invoke('pairing.handoff.complete', {
+    // A refused offer is that offer's own failed result (the response still
+    // reports every other offer), and nothing reaches the push service, so a
+    // record that could never receive a push is never registered.
+    const done = await catalog.invoke('pairing.handoff.complete', {
       ...ctx,
       body: {
         accept: {
           notifications: { endpoint: 'https://push/device', keys: { p256dh: 'not-base64!!!!', auth: 'x' } },
         },
       },
-    })).rejects.toThrow('Push subscription p256dh key is not a 65-byte uncompressed P-256 point');
+    }) as { results: Array<{ kind: string; status: string; detail?: string }> };
+    const notifications = done.results.find((r) => r.kind === 'notifications');
+    expect(notifications?.status).toBe('failed');
+    expect(notifications?.detail).toContain('Push subscription p256dh key is not a 65-byte uncompressed P-256 point');
     expect(captured.subscribed).toHaveLength(0);
   });
 
-  test('a notifications offer with an oversized endpoint is refused', async () => {
+  test('a notifications offer with an oversized endpoint fails that offer', async () => {
     const { catalog, captured } = makeCatalog();
-    await expect(catalog.invoke('pairing.handoff.complete', {
+    const done = await catalog.invoke('pairing.handoff.complete', {
       ...ctx,
       body: {
         accept: {
           notifications: { endpoint: `https://push/${'d'.repeat(50_000)}`, keys: pushKeys },
         },
       },
-    })).rejects.toThrow('longer than 2048 characters');
+    }) as { results: Array<{ kind: string; status: string; detail?: string }> };
+    const notifications = done.results.find((r) => r.kind === 'notifications');
+    expect(notifications?.status).toBe('failed');
+    expect(notifications?.detail).toContain('longer than 2048 characters');
     expect(captured.subscribed).toHaveLength(0);
+  });
+
+  test('a refused later offer does not discard the report of an earlier one that took effect', async () => {
+    const { catalog, captured } = makeCatalog();
+    const done = await catalog.invoke('pairing.handoff.complete', {
+      ...ctx,
+      body: {
+        accept: {
+          notifications: { endpoint: 'https://push/device', keys: pushKeys },
+          passkey: true,
+        },
+      },
+    }) as { results: Array<{ kind: string; status: string }> };
+    const byKind = Object.fromEntries(done.results.map((r) => [r.kind, r.status]));
+    expect(byKind).toEqual({ notifications: 'completed', relay: 'declined', passkey: 'failed' });
+    expect(captured.subscribed).toHaveLength(1);
+  });
+
+  test('create mints no token when the offer details cannot be resolved', async () => {
+    const minted: string[] = [];
+    const catalog = new GatewayMethodCatalog();
+    registerPairingHandoffGatewayMethods(catalog, {
+      tokens: { mint: ({ name }) => { minted.push(name); return { id: 'p', name, token: 'gvp_x', createdAt: 1 }; } },
+      push: { getPublicKey: async () => { throw new Error('vapid store unavailable'); }, subscribe: async () => { throw new Error('unused'); } },
+      relayAvailable: () => false,
+    });
+    await expect(catalog.invoke('pairing.handoff.create', { ...ctx, body: { name: 'Phone' } })).rejects.toThrow('vapid store unavailable');
+    expect(minted).toEqual([]);
   });
 
   test('an offer the daemon does not support is reported unavailable, not faked', async () => {

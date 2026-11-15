@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildCliDoctorFindings, buildCliExposureReport, renderCliStatus, resolveDoctorExitCode } from '../../cli/status.ts';
+import { buildCliDoctorFindings, buildCliStatusSnapshot, buildCliExposureReport, renderCliStatus, resolveDoctorExitCode } from '../../cli/status.ts';
 import type { CliStatusOptions } from '../../cli/status.ts';
 
 type ConfigValues = Record<string, unknown>;
@@ -53,6 +53,19 @@ function makeOptions(overrides: ConfigValues = {}): CliStatusOptions {
 }
 
 describe('CLI status and doctor output', () => {
+  test('doctor flags auto-approve as a distinct risk finding, independent of permissions.mode', () => {
+    const options = { ...makeOptions({ 'permissions.mode': 'prompt', 'behavior.autoApprove': true }), doctor: true };
+    const finding = buildCliDoctorFindings(options).find((f) => f.id === 'auto-approve-enabled');
+    expect(finding?.severity).toBe('risk');
+    const snapshot = buildCliStatusSnapshot(options);
+    expect(snapshot.auth.automaticApprovals).toBe(true);
+    expect(snapshot.auth.autoApprove).toBe(true);
+    expect(renderCliStatus(options)).toContain('autoApprove: yes (behavior.autoApprove)');
+    const plain = buildCliStatusSnapshot(makeOptions());
+    expect(plain.auth.autoApprove).toBe(false);
+    expect(plain.auth.automaticApprovals).toBe(false);
+  });
+
   test('renders operator-friendly labels for permission and secret policies', () => {
     const text = renderCliStatus(makeOptions({
       'permissions.mode': 'allow-all',
@@ -110,6 +123,7 @@ describe('CLI status and doctor output', () => {
     // so a service-mode-off warning still fires for the daemon-backed surface.
     const findings = buildCliDoctorFindings(makeOptions({
       'danger.daemon': undefined,
+      'daemon.enabled': undefined,
       'controlPlane.enabled': false,
       'service.enabled': false,
     }));
@@ -178,6 +192,26 @@ describe('CLI status and doctor output', () => {
     expect(parsed.service.lifecycle.managed.pid).toBe(123);
     expect(parsed.surfaces.controlPlane.port).toBe(3421);
     expect(parsed.findings).toBeArray();
+  });
+});
+
+describe('CLI status workspace trust record', () => {
+  const workspace = {
+    trustLevel: 'undecided' as const,
+    trustGrandfathered: false,
+    registrationStatus: 'unknown' as const,
+    registrationRoot: '/project',
+    registeredBy: null,
+    viaWorktreeLink: false,
+    registrationBroad: false,
+  };
+
+  test('a damaged trust record is reported instead of reading as a plain undecided workspace', () => {
+    const damaged = renderCliStatus({ ...makeOptions(), workspace: { ...workspace, trustFault: '/project/.goodvibes/tui/trust.json could not be read (bad JSON)' } });
+    expect(damaged).toContain('trust: undecided');
+    expect(damaged).toContain('trust record: damaged');
+    expect(damaged).toContain('could not be read (bad JSON)');
+    expect(renderCliStatus({ ...makeOptions(), workspace })).not.toContain('trust record: damaged');
   });
 });
 

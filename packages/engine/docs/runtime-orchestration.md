@@ -44,6 +44,34 @@ Important pieces:
 - `ConversationManager` stores the conversation messages for a session.
 - `executeOrchestratorTurnLoop()` drives provider streaming and tool execution.
 - `executeToolCalls()` routes tool calls through the registered tool runtime.
+- A worker agent runs the consecutive tool calls of one assistant turn whose
+  definitions declare `concurrency: 'parallel'` together, at most four at a
+  time. Any other call is a barrier: everything before it finishes, it runs
+  alone, then the rest continue. Results reach the model in the order the calls
+  were made, whichever finished first. Permission asks for the calls of a turn
+  are made one at a time. On cancellation every in-flight call is aborted and
+  every unfinished call gets one "Tool invocation cancelled" result.
+  A tool that reports progress while it works (`exec` as output arrives) counts
+  as alive to the contract silence watchdog, so a long printing command is not
+  taken for a hang; reports are published at most every five seconds. Each
+  turn's `llm_response` record in the agent session log carries the turn's
+  cache-read and cache-write tokens (`null` when the provider reported none), and
+  what stays the same from turn to turn (the system prompt, the owner block, the
+  permission-mode line, the runtime-awareness instruction) comes before what
+  changes per turn, so a caching provider keeps reusing the start of the prompt.
+- Every turn path names the permission mode in one line of the system prompt
+  (what it lets through, what asks, what is refused), for every mode, so the
+  model knows before it calls a tool.
+- The compactions that only drop messages (the small-window and micro
+  compactions) say so: "N earlier messages were dropped, not summarised", and
+  that tool results are gone and files must be re-read.
+- The orchestrator keeps one turn phase (`idle`, `indicating`, `admitting`,
+  `thinking`, `streaming`, `compacting`, `settling`, and the two cancelled
+  states that still hold an open stream or compaction). `isThinking`,
+  `isTurnInFlight`, `isTurnActive` and the stream and compaction questions are all
+  derived from it, and a turn's end resets it in one assignment, so no flag can be
+  left set after a turn. A throw while a turn starts releases the turn's
+  reservation instead of leaving the orchestrator occupied.
 - `checkContextWindowPreflight()` protects turns that exceed model limits.
 - `OrchestratorFollowUpRuntime` routes follow-up messages back into active
   sessions. A follow-up that cannot be delivered is retried up to five times in
@@ -184,6 +212,17 @@ question. The external work seam (`ContractExternalWorkAdapter`: `dispatch`,
 `status`, `cancel`, `result`) maps a contract to a snapshot and a result the
 same way in both adapters (`contract-work.ts` in the contracts package).
 
+`contracts.start` without a hosted session works in the daemon's working
+directory, or in a folder inside it when `workspaceRoot` names one; a
+`workspaceRoot` outside it is refused with `INVALID_ARGUMENT`. A `sessionId`
+that names a hosted session that has ended is refused with `SESSION_NOT_LIVE`
+(409), not run in the daemon's directory. `contracts.list` leaves out each
+contract's captured file manifest (`inputSnapshot`), which `contracts.get`
+returns, and neither returns the earlier conversation or selected diff of the
+session that started the contract. `contracts.cancel` and `contracts.reply`
+answer a stored contract this runner is not running with `CONTRACT_NOT_RUNNING`
+(409), and a native work contract's cancel with `CONTRACT_NATIVE` (409).
+
 A spawn by an `AgentManager` caller that does not set `outsideContract` goes
 through `runner.startForOwner`, which makes the spawned record the contract's
 owner. Conversation-level helpers (the planner, conversation continuations,
@@ -242,6 +281,28 @@ unit, readings that stay unsettled, an undecided best-of-N pick), it moves to
 `awaiting-owner` with a question built in code. The owner's reply, from the
 conversation (the turn intake) or a host calling `runner.reply`, is read with `contract.owner-reply`
 as approve, amend or reject. No reply can pass a criterion that reads unmet.
+A second reply to a question whose first reply is still being read is refused
+("a reply to <id> is already being read; wait for its result"), and a reply that
+cannot be read leaves the question open so the owner can reply again.
+
+Native work has no owner approval of its work, and this is not one. When a
+native work session's turn keeps failing (a provider error that outlasts three
+retries with backoff, a failure that a retry cannot clear, or a second turn
+that ends without its completion check), the contract is not cancelled. It
+moves to `awaiting-owner` with its unit and the work done so far kept, and asks
+one question with exactly two answers: `retry` runs the turn again with a fresh
+set of retries, and `cancel` stops the contract. Any other answer is refused
+with those two named and leaves the question open; nothing the owner says passes
+a criterion or changes what is required. The question survives a daemon restart.
+Answer it through `contracts.reply` (the native work execution's contracts are
+listed by `contracts.list` and read by `contracts.get`; stopping native work
+itself stays with the native work execution's cancel). `retry` is reported as
+`amend`/`amended` and `cancel` as `reject`/`stopped`, the existing reply values;
+the TUI and the contract CLI say "retrying" and "cancelled" for them. A unit whose
+nudge was still waiting for its next turn goes back to `nudged` after a retry, so
+the nudge is still delivered.
+Native work execution status reports the contract as `awaiting-owner` while it
+waits.
 
 ### Isolation, commit and persistence
 
@@ -250,17 +311,60 @@ as approve, amend or reject. No reply can pass a criterion that reads unmet.
   `.goodvibes/.worktrees/contract/<short>`; each unit works in its own item
   worktree and merges into the contract branch. Shared mode runs one unit at a
   time per working tree.
+- **Worktree retention.** A worktree the product created under
+  `.goodvibes/.worktrees` is judged when its contract or agent ends (passed,
+  failed, cancelled) and again when the daemon starts. One that is clean and
+  whose commits are all in its base branch is removed at once, with its
+  branch. One that is clean but holds commits its base lacks stays for 14 days
+  after the owner ended; then its directory is removed and its branch is kept,
+  so the commits stay reachable. One with uncommitted changes (tracked or
+  untracked) or with files git ignores (`.env`, local databases, build output,
+  which removal would delete and no commit holds) is never removed
+  automatically, at any age, and neither is one whose git state cannot be read,
+  one whose owner is still running, one marked kept or paused, one attached to
+  a session or task, or any worktree that does not carry the record the product
+  writes when it creates one (worktrees made by hand or by an earlier version
+  are left alone). `/worktree
+  review` and `/worktree inspect` show each worktree's age, size on disk and
+  why it is kept, with the days left before pruning. When kept worktrees total
+  more than 1 GB the daemon prints one line at startup naming the count and
+  size. `/worktree discard <path>` removes one on request: it commits any
+  uncommitted state onto the branch first, keeps the branch (a detached HEAD
+  that no branch holds gets a `goodvibes/discarded-<commit>` branch so its
+  commits stay reachable), says how many ignored files it deleted because they
+  cannot be preserved, and refuses (naming what is at stake) while the owner is
+  running or when removal cannot finish.
+  When a worktree-mode contract ends, once its work has drained, its tree is
+  handed to these rules at once. An agent's worktree that is cancelled or fails
+  is released the same way: it is removed (never forced, and its branch never
+  deleted with `-D`) only when it holds nothing the base branch lacks;
+  uncommitted changes, ignored files or commits the base does not have keep
+  both the directory and the branch. When an agent's branch is merged, a
+  conflict keeps its worktree and branch, restores the base branch and reports
+  the conflicting files; a successful merge removes the worktree without force
+  and deletes the branch with `-d`.
 - **Commit.** When the deliverable passes, `contract.autoCommit` and
   `contract.commitScope` decide whether the contract's changes are committed,
   applied as uncommitted changes, or left in place. A commit failure is a
-  warning on a passed contract, never a failure.
+  warning on a passed contract, never a failure. A publication the project
+  tree refuses (a merge in progress, a lock) is retried a few times with
+  backoff; after that the contract waits for the project tree to change (a
+  changed file or HEAD, or an owner Git operation or lock appearing or going
+  away), or for a cancel, and the owner's progress line says so. A contract cancelled
+  while its result was being published still records that publication, and
+  its status line says the result already reached the project.
 - **Persistence.** Each contract is written to
   `.goodvibes/contracts/checkpoints-v6/<contractId>.json` (`ContractStore`,
   `contract/store.ts`). At startup `resumeAll()` imports every unfinished
   contract; one whose workstream snapshot or worktree is gone is failed as a
-  zombie, and the rest resume at the step they left.
+  zombie, and the rest resume at the step they left. A unit whose check had
+  already passed settles its work without a fresh agent, and a working unit
+  whose work item ended without it fails with that item's reason.
 - **Concurrency.** `contract.maxActiveContracts` (default 6) contracts run at
-  once; the rest wait as `queued`.
+  once; the rest wait as `queued`. A native session contract paused on its
+  owner after a failed turn (retry or cancel) is not running, so it does not
+  count against the limit; a queued contract takes its place. Answering retry
+  resumes it at once, even if that briefly puts more than the limit in flight.
 
 ### Settings
 
@@ -271,21 +375,21 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | --- | --- | --- |
 | `contract.autoCommit` | `true` | Commit the deliverable when it passes |
 | `contract.commitScope` | `scoped` | `off`, `scoped` (the contract's changes only) or `all` |
-| `contract.gates` | typecheck and lint on, build off | Quality gate commands run at each completion check |
-| `contract.gateTimeoutMs` | `120000` | Timeout per gate |
+| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`) |
+| `contract.gateTimeoutMs` | `0` (no limit) | Timeout per gate; `0` lets a gate run until it finishes or is cancelled |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
 | `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands |
-| `contract.evidenceNudgeLimit` | `2` | Unsettled checks before the owner is asked |
+| `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |
 | `contract.stallLimit` | `3` | Consecutive checks without progress that make a stall |
-| `contract.maxNudgesPerUnit` | `12` | Nudge ceiling per unit |
-| `contract.maxFixRounds` | `5` | Fix groups plus fresh agents before the owner decides |
-| `contract.planRepairLimit` | `2` | Planner repairs before the owner decides |
-| `contract.maxUnits` | `64` | Units per plan |
+| `contract.maxNudgesPerUnit` | `0` (no limit) | Nudge ceiling per unit; with `0` a unit is not stopped on this count |
+| `contract.maxFixRounds` | `0` (no limit) | Fix groups plus fresh agents before the owner decides; with `0` the owner is not asked on this count |
+| `contract.planRepairLimit` | `0` (no limit) | Planner repairs before the owner decides; with `0` repairs continue until the plan passes or a repair repeats the same unresolved problems |
+| `contract.maxUnits` | `0` (no limit) | Units per plan; with `0` a plan may hold any number of units |
 | `contract.defaultAttempts` | `1` | Attempts per unit without an explicit ask |
 | `contract.maxActiveContracts` | `6` | Contracts running at once |
 | `contract.maxParallelUnits` | `64` | Units running at once in one group (worktree mode) |
 | `contract.isolation` | `auto` | `auto`, `worktree` or `shared` |
-| `contract.heartbeatTimeoutMs` | `0` (off) | Silence before a running unit agent is restarted once; a second silence fails the unit |
+| `contract.heartbeatTimeoutMs` | `600000` (10 minutes) | Silence before a running unit agent is restarted once; a second silence fails the unit. A model reply that is streaming is not silence, and neither is an `exec` command that is within its own `timeout_ms` or has none; a read, search or other tool call that runs past this is. `0` turns the watchdog off |
 | `contract.transportRetryLimit` | `1` | Fresh agents after a network failure |
 | `contract.transportRetryDelayMs` | `5000` | Wait before that retry |
 | `contract.nudgeTtlMs` | `300000` | Lifetime of a mid-run nudge on the message bus |
@@ -345,16 +449,25 @@ Beyond the phase pipeline itself, the engine provides:
   with nothing left to claim retires instead of idling.
 - **Budget ceilings.** Spend is checked before a work item is claimed into a
   new phase, never mid-phase, so an in-flight phase always finishes even if
-  a later item would be refused for budget reasons.
+  a later item would be refused for budget reasons. A contract whose budget
+  runs out fails with failure kind `budget` rather than waiting.
 - **Dynamic dependency graphs.** Dependency and conflict-serialization edges
   can be added while a workstream is running, with orphan detection and
-  cycle prevention.
+  cycle prevention. A dependency on a best-of-N group is cycle-checked like any
+  other. A conflict-serialization edge goes only to an item still waiting at the
+  first phase, the one place a dependency gate holds an item.
 
 Workstream state is snapshotted for resume across restarts, under
 `.goodvibes/orchestration/<contractId>/` for a contract's engine. Drafts (a
 workstream not yet launched) are held in a capped, swept store so a proposed
 plan can be edited before it runs; launching a draft starts a contract with
-`runner.startFromPlan`.
+`runner.startFromPlan`. A launch is refused, with the reason, when an item asks
+for best-of-N attempts and the draft is not worktree-isolated. While a launch is
+in progress the saved copy of the draft reads as not approved, so a restart in
+that window asks for a fresh approval instead of launching it again. A draft
+whose latest change could not be written to disk is marked as held in memory
+only, and an earlier approved copy on disk is removed so it cannot launch with
+the old plan after a restart.
 
 ## Runtime events
 

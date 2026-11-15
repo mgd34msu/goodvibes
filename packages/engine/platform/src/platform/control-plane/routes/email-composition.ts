@@ -206,12 +206,17 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
       });
     },
 
+    replyEnvelopeSenders(inReplyTo: string): readonly string[] {
+      return service.getReplyEnvelopeSenders(inReplyTo);
+    },
+
     async send(input: EmailGatewaySendInput): Promise<EmailGatewaySendResult> {
       return guard(async () => {
         const result = await service.sendMail({
           to: input.to,
           subject: input.subject,
           body: input.body,
+          ...(input.inReplyTo === undefined ? {} : { inReplyTo: input.inReplyTo }),
           // The handler already refused anything without an explicit
           // confirm: true from the caller; this is the service's own
           // belt-and-braces precondition, not a second decision.
@@ -249,6 +254,9 @@ export function instrumentEmailGateway(
   return {
     ...(backend.getReplySubjectSource === undefined ? {} : {
       getReplySubjectSource: (message: EmailGatewayMessageDetail) => backend.getReplySubjectSource?.(message),
+    }),
+    ...(backend.replyEnvelopeSenders === undefined ? {} : {
+      replyEnvelopeSenders: (inReplyTo: string) => backend.replyEnvelopeSenders?.(inReplyTo) ?? [],
     }),
     async listInbox(input: EmailGatewayListInput): Promise<EmailGatewayListResult> {
       await ready();
@@ -326,7 +334,7 @@ export function createDaemonEmailGatewayService(
  *
  * Lives here rather than at the verb-group root so the whole mail composition
  *, service, instrumentation, and now the owner's own addresses, is decided
- * in one file. The addresses are read from the daemon's configuration and from
+ * in one file. The addresses are read from the daemon's configuration at each send and from
  * nowhere a message can reach; empty leaves the taint refusal in force rather
  * than guessing at an identity. See security/owner-identity.ts.
  */
@@ -340,10 +348,14 @@ export function registerDaemonEmailVerbs(
   registerEmailGatewayMethods(
     catalog,
     gateway,
-    undefined,
+    // The same ledger the mailbox reads were recorded into: with a different
+    // one, the taint check at send time would never see what was read.
+    deps.untrustedContentLedger,
+    // Read at each send, so an address changed in settings takes effect
+    // without a restart and a retired one stops being exempt.
     getConfig === undefined
       ? new Set<string>()
-      : resolveOwnerAddresses((key) => getConfig.get(key as never)),
+      : () => resolveOwnerAddresses((key) => getConfig.get(key as never)),
     deps.browserJudgment,
   );
 }

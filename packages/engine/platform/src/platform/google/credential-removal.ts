@@ -76,7 +76,16 @@ export interface GoogleRemovalRefused {
   readonly refused: true;
 }
 
-export type GoogleRemovalResult = GoogleRemovalPlan | GoogleRemovalDone | GoogleRemovalRefused;
+/** The store failed part way: `removed` is what is already gone, `wouldRemove` what is still there. */
+export interface GoogleRemovalPartial {
+  readonly confirmed: true;
+  readonly removed: readonly string[];
+  readonly wouldRemove: readonly string[];
+  readonly detail: string;
+  readonly partial: true;
+}
+
+export type GoogleRemovalResult = GoogleRemovalPlan | GoogleRemovalDone | GoogleRemovalRefused | GoogleRemovalPartial;
 
 export interface GoogleRemovalRequest {
   readonly items: readonly GoogleCredentialItem[];
@@ -101,14 +110,10 @@ function isRemovable(secrets: GoogleSecretPort): secrets is GoogleRemovableSecre
   return typeof (secrets as Partial<GoogleRemovableSecretPort>).delete === 'function';
 }
 
-/** True when a secret exists and is non-empty. Never returns the value. */
+/** True when a secret exists and is non-empty; throws when the store cannot be read. Never returns the value. */
 async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
-  try {
-    const value = await secrets.get(key);
-    return typeof value === 'string' && value.trim().length > 0;
-  } catch {
-    return false;
-  }
+  const value = await secrets.get(key);
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function buildPrompt(labels: readonly string[], reason: string | undefined): string {
@@ -136,7 +141,19 @@ export async function removeGoogleCredentials(
 ): Promise<GoogleRemovalResult> {
   const present: GoogleCredentialItem[] = [];
   for (const item of request.items) {
-    if (await secretPresent(deps.secrets, ITEM_SECRET_KEYS[item])) present.push(item);
+    try {
+      if (await secretPresent(deps.secrets, ITEM_SECRET_KEYS[item])) present.push(item);
+    } catch {
+      // An unreadable store is not an empty one: saying "nothing is stored"
+      // would send the owner to set up again over credentials that are there.
+      return {
+        confirmed: false,
+        removed: [],
+        wouldRemove: [],
+        refused: true,
+        prompt: 'The encrypted store could not be read, so nothing was removed and it is not known what is stored. Unlock or repair the store, then ask again.',
+      };
+    }
   }
 
   if (present.length === 0) {
@@ -172,7 +189,19 @@ export async function removeGoogleCredentials(
   const secrets = deps.secrets;
   const removed: string[] = [];
   for (const item of present) {
-    await secrets.delete(ITEM_SECRET_KEYS[item]);
+    try {
+      await secrets.delete(ITEM_SECRET_KEYS[item]);
+    } catch {
+      return {
+        confirmed: true,
+        removed,
+        wouldRemove: present.filter((rest) => !removed.includes(ITEM_LABELS[rest])).map((rest) => ITEM_LABELS[rest]),
+        partial: true,
+        detail:
+          `Removal stopped at ${ITEM_LABELS[item]}, which the store would not delete. `
+          + `${removed.length === 0 ? 'Nothing was removed.' : `Already removed: ${removed.join(', ')}.`} Ask again to remove the rest.`,
+      };
+    }
     removed.push(ITEM_LABELS[item]);
     // The config reference is cleared alongside the value it points at, or the
     // machine is left claiming a credential that is no longer there, which is

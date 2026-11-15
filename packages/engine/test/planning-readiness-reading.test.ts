@@ -28,6 +28,7 @@ function contentRequests(fake: Pick<ReturnType<typeof fakePort>, 'requests'>) {
 }
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
+function owned(store: KnowledgeStore): KnowledgeStore { stores.push(store); return store; }
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fileSnapshot(path: string): Buffer | null {
@@ -311,7 +312,7 @@ test('generated Luhn-collision clocks survive the actual planning publication li
     expect(approved.applied).toBe(true);
     const task = (await f.service.getWorkPlanSnapshot(request)).tasks[0]!;
     await f.service.setWorkPlanTaskStatus({ projectId: request.projectId, taskId: task.taskId, status: 'done' });
-    const reopened = new ProjectPlanningService(new KnowledgeStore({ dbPath: f.path }));
+    const reopened = new ProjectPlanningService(owned(new KnowledgeStore({ dbPath: f.path })));
     expect((await reopened.evaluate({ projectId: request.projectId })).readiness).toBe('executable');
     // Re-publication must also admit the stored terminal work-plan clock.
     const result = await reopened.applyStateAction({ projectId: request.projectId,
@@ -365,7 +366,7 @@ for (const target of ['createdAt', 'updatedAt', 'answeredAt', 'approvedAt', 'com
       f.bus.on('WORK_PLAN_TASK_CREATED', event => { events.push(event); });
       f.bus.on('WORK_PLAN_TASK_UPDATED', event => { events.push(event); });
       f.bus.on('WORK_PLAN_TASK_STATUS_CHANGED', event => { events.push(event); });
-      const reopened = new ProjectPlanningService(new KnowledgeStore({ dbPath: f.path }), { runtimeBus: f.bus });
+      const reopened = new ProjectPlanningService(owned(new KnowledgeStore({ dbPath: f.path })), { runtimeBus: f.bus });
       await expect(reopened.upsertState(input())).rejects.toMatchObject({ problem: 'card-material' });
       expect(events).toEqual([]); // No full task/previousTask reaches event/telemetry subscribers.
       if (kind === 'state') {
@@ -390,7 +391,7 @@ for (const target of ['createdAt', 'lastCrawledAt'] as const) {
       f.bus.on('WORK_PLAN_TASK_CREATED', event => { events.push(event); });
       f.bus.on('WORK_PLAN_TASK_UPDATED', event => { events.push(event); });
       f.bus.on('WORK_PLAN_TASK_STATUS_CHANGED', event => { events.push(event); });
-      const reopened = new ProjectPlanningService(new KnowledgeStore({ dbPath: f.path }), { runtimeBus: f.bus });
+      const reopened = new ProjectPlanningService(owned(new KnowledgeStore({ dbPath: f.path })), { runtimeBus: f.bus });
       await expect(reopened.upsertState(input())).rejects.toMatchObject({ problem: 'card-material' });
       expect(events).toEqual([]); // No full task/previousTask reaches event/telemetry subscribers.
       expect(contentRequests(fake)).toHaveLength(requests);
@@ -406,7 +407,7 @@ test('numeric compatibility source rewrite changes raw generation and retires an
   try {
     const f = await fixture(); install();
     const seeded = await f.service.upsertState(input());
-    const other = new KnowledgeStore({ dbPath: f.path }); await other.init();
+    const other = owned(new KnowledgeStore({ dbPath: f.path })); await other.init();
     const source = other.getSource(seeded.source!.id)!;
     const generation = other.getSourceGeneration(source.id);
     held = delayed(); pending = f.service.upsertState(input({ goal: 'Add bounded jitter.' }));
@@ -433,7 +434,7 @@ test('legacy numeric collision source remains refused without migration on reope
     const seeded = await f.service.upsertState(input());
     await f.store.replaceSourceRecord({ ...seeded.source!, createdAt: 1700000000004 });
     const bytes = fileSnapshot(f.path), requests = contentRequests(fake).length;
-    const reopenedStore = new KnowledgeStore({ dbPath: f.path });
+    const reopenedStore = owned(new KnowledgeStore({ dbPath: f.path }));
     const reopened = new ProjectPlanningService(reopenedStore);
     await expect(reopened.upsertState(input())).rejects.toMatchObject({ problem: 'card-material' });
     expect(contentRequests(fake)).toHaveLength(requests);
@@ -452,7 +453,7 @@ test('admitted legacy numeric clocks migrate without changing numeric public rea
       ...seeded.source!.metadata, value: seeded.state!,
     } });
     expect(f.store.getSourceSnapshot({ id: seeded.source!.id }).raw?.created_at).toBe(1000);
-    const reopenedStore = new KnowledgeStore({ dbPath: f.path });
+    const reopenedStore = owned(new KnowledgeStore({ dbPath: f.path }));
     const reopened = new ProjectPlanningService(reopenedStore);
     const migrated = await reopened.upsertState(input());
     expect(migrated.state?.createdAt).toBe(1000);
@@ -484,7 +485,7 @@ for (const target of ['createdAt', 'updatedAt'] as const) for (const malformed o
       const seeded = await f.service.upsertState(input());
       await f.store.replaceSourceRecord({ ...seeded.source!, [target]: malformed } as unknown as NonNullable<typeof seeded.source>);
       const bytes = fileSnapshot(f.path), requests = contentRequests(fake).length;
-      const reopenedStore = new KnowledgeStore({ dbPath: f.path });
+      const reopenedStore = owned(new KnowledgeStore({ dbPath: f.path }));
       const reopened = new ProjectPlanningService(reopenedStore);
       await expect(reopened.evaluate({ projectId: input().projectId })).rejects.toMatchObject({ problem: 'unsupported-input' });
       await expect(reopened.upsertState(input())).rejects.toMatchObject({ problem: 'unsupported-input' });
@@ -516,7 +517,7 @@ test('knowledge v8 upgrade snapshots original bytes and stamps v9 without rewrit
   legacy.close();
   const before = readFileSync(path);
   expect(listStoreSnapshots(path)).toEqual([]);
-  const upgraded = new KnowledgeStore({ dbPath: path });
+  const upgraded = owned(new KnowledgeStore({ dbPath: path }));
   try {
     await upgraded.init();
     const sqlite = (upgraded as unknown as { sqlite: SQLiteStore }).sqlite;
@@ -562,7 +563,7 @@ test('historical v8 missing a durable table refuses v9 upgrade without silent re
   legacy.run('DROP TABLE work_ledgers');
   await legacy.save(); legacy.close();
   const before = readFileSync(path);
-  const upgraded = new KnowledgeStore({ dbPath: path });
+  const upgraded = owned(new KnowledgeStore({ dbPath: path }));
   await expect(upgraded.init()).rejects.toBeInstanceOf(StoreMigrationError);
   expect(upgraded.isReady).toBe(false);
   expect(readFileSync(path)).toEqual(before);
@@ -595,7 +596,7 @@ test('Classic plan editing, questions, owner approval and restart use native rea
     expect(approved).toMatchObject({ applied: true, state: { readiness: 'executable', executionApproved: true }, evaluation: { semanticAssessment: 'not-evaluated' } });
     expect((await f.service.getWorkPlanSnapshot(input())).tasks[0]?.taskId).toBe(originalTask?.taskId);
     expect((await f.service.getWorkPlanSnapshot(input())).tasks[0]?.createdAt).toBe(originalTask?.createdAt);
-    const nextStore = new KnowledgeStore({ dbPath: f.path }), nextService = new ProjectPlanningService(nextStore);
+    const nextStore = owned(new KnowledgeStore({ dbPath: f.path })), nextService = new ProjectPlanningService(nextStore);
     const reloaded = await nextService.getState({ projectId: input().projectId });
     expect(reloaded.state).toMatchObject({ readiness: 'executable', executionApproved: true, readinessAssessment: { semanticAssessment: 'not-evaluated' } });
     await nextStore.close(); expect(asks).toBe(0); expect(metadata).toBe(0);

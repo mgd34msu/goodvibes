@@ -201,3 +201,24 @@ test('terminal events without a public duration or an observed start do not inve
     expect(sent).toEqual([]);
   } finally { unsubscribe(); await notifier.close(); }
 });
+
+describe('the TUI Slack/Discord notifier', () => {
+  test('the configured Slack bot token reaches the notifier', async () => {
+    const saved = { slack: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
+    delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.SLACK_WEBHOOK_URL;
+    try {
+      const registry = { resolveSecret: async () => null };
+      const config = { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : undefined) } as never;
+      const without = await createRuntimeNotifier(registry as never, () => false);
+      expect(without.getQueueStatus()).toHaveLength(0);
+      const notifier = await createRuntimeNotifier(registry as never, () => false, config);
+      expect(notifier.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
+      await without.close();
+      await notifier.close();
+    } finally {
+      if (saved.slack !== undefined) process.env.SLACK_BOT_TOKEN = saved.slack;
+      if (saved.hook !== undefined) process.env.SLACK_WEBHOOK_URL = saved.hook;
+    }
+  });
+});

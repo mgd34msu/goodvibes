@@ -1,7 +1,6 @@
 import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { Database } from 'bun:sqlite';
-/** Authored source regressions; runtime qualification is deferred. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -26,7 +26,8 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) awai
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(accept => { resolve = accept; }); return { promise, resolve }; }
 async function fixture(options: { route?: 'contract' | 'converse' | 'answer'; final?: string; proposer?: NativeRequirementProposer; decorate?: (port: JudgmentPort) => JudgmentPort;
   continuation?: NativeConversationContinuationOwner;
-  decorateStorage?: (storage: NativeConversationStorage) => NativeConversationStorage } = {}) {
+  decorateStorage?: (storage: NativeConversationStorage) => NativeConversationStorage;
+  declare?: (format: string) => void } = {}) {
   const root = makeRepo(); mkdirSync(join(root, '.goodvibes'), { recursive: true });
   const tokens = new PairingTokenManager(join(root, '.goodvibes', 'pairing.json')); const token = tokens.mint({ name: 'Synthetic owned intake device' });
   const catalog = new GatewayMethodCatalog();
@@ -35,7 +36,7 @@ async function fixture(options: { route?: 'contract' | 'converse' | 'answer'; fi
   const authority = helper.createNativeExecutionAuthority(token.token)!;
   const scopes = new WorkspaceRegistrationStore({ path: join(root, '.goodvibes', 'workspaces.json'), homeDir: join(root, 'home'), daemonStateDir: join(root, '.goodvibes', 'daemon') });
   await scopes.add(root);
-  const store = new KnowledgeStore({ dbPath: join(root, '.goodvibes', 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, '.goodvibes', 'knowledge.sqlite'), ...(options.declare ? { nativeDataWriter: { declare: options.declare } } : {}) });
   const storage = await store.openNativeConversationStorage('project');
   const log = new SqliteDecisionLog(join(root, '.goodvibes', 'decisions.sqlite'));
   const fake = fakePort((name, question) => {
@@ -540,4 +541,52 @@ test.each(['session', 'workspace'] as const)('selected %s diff cannot bypass its
   const selectedDiff = kind === 'session' ? { kind, revision: 'd'.repeat(64), fileIndex: 0, hunkIndex: 0 } : { kind, baselineId: 'baseline', revision: 'd'.repeat(64), fileIndex: 0, hunkIndex: 0 };
   await expect(f.host.capture({ ...f.original, continuation: { sessionId: 'hosted-owned', selectedDiff } }, authority)).rejects.toMatchObject({ code: 'forbidden' });
   expect(captures).toBe(0);
+});
+
+test('a settled turn is refused by intake itself, after restart too, and settling is final and idempotent', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const f = await fixture();
+    const captured = await f.capture(); const target = f.target(captured);
+    await expect(f.host.settle(target, f.authority)).rejects.toMatchObject({ code: 'conflict' });
+    const turn = await f.host.admit(target, f.authority);
+    expect(turn.kind).toBe('turn');
+    await f.host.settle(target, f.authority); await f.host.settle(target, f.authority);
+    const key = { principalId: f.principalId, inputId: f.original.inputId };
+    expect(f.storage.current(key)?.settled).toBe(true);
+    await expect(f.host.admit(target, f.authority)).rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('can never run again') });
+    await expect(f.host.resume(target, f.authority)).rejects.toMatchObject({ code: 'conflict' });
+    expect(await f.host.get({ inputId: target.inputId }, f.authority)).toEqual(turn);
+    const unsettle = f.storage.transaction(key, current => ({ next: { ...current!, settled: undefined } as never, value: undefined }));
+    await expect(unsettle).rejects.toBeDefined();
+    expect(await f.host.cancel(target, f.authority)).toEqual(turn);
+    await f.host.close();
+    const restarted = createNativeConversationIntakeHost(f.deps);
+    cleanups.push(() => restarted.close());
+    await expect(restarted.admit(target, f.authority)).rejects.toMatchObject({ code: 'conflict' });
+    expect(f.fake.requests).toEqual([]);
+  });
+});
+
+test('settling a turn first declares the reader requirement an older build needs, and a refused declaration leaves the turn unsettled', async () => {
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    const declared: string[] = []; let denied = false;
+    const f = await fixture({ declare: format => { declared.push(format); if (format === 'native-conversation-settled-v1' && denied) throw new Error('Synthetic old reader'); } });
+    const captured = await f.capture(); const target = f.target(captured);
+    await f.host.admit(target, f.authority);
+    expect(declared).not.toContain('native-conversation-settled-v1');
+    const key = { principalId: f.principalId, inputId: f.original.inputId };
+    denied = true;
+    await expect(f.host.settle(target, f.authority)).rejects.toBeDefined();
+    expect(f.storage.current(key)?.settled).toBeUndefined();
+    denied = false;
+    await f.host.settle(target, f.authority);
+    expect(declared).toContain('native-conversation-settled-v1');
+    expect(f.storage.current(key)?.settled).toBe(true);
+  });
+});
+
+test('a blocked input says that only cancelling and resubmitting works', async () => {
+  const f = await fixture({ route: 'converse', final: 'revise_0' });
+  const captured = await f.host.capture({ ...f.original, unsupportedSources: [{ kind: 'image', label: 'Original referenced screenshot' }] }, f.authority);
+  expect(await f.host.admit(f.target(captured), f.authority)).toMatchObject({ kind: 'blocked', next: 'cancel-and-resubmit' });
 });

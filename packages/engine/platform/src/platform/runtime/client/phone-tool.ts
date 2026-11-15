@@ -59,6 +59,18 @@ import {
 import type { Tool } from '../../types/index.js';
 import type { DeviceCapabilityOutcomeWire, DeviceNodeSummary, DevicesClient } from './devices-client.js';
 
+/**
+ * The longest base64 payload `action:"read"` puts into the tool output. A
+ * capture is returned whole or not at all (half an image is not an image), so a
+ * larger one is refused with the way to get a smaller one.
+ */
+const MAX_READ_BASE64_CHARS = 262_144;
+
+export interface ClientPhoneToolOptions {
+  /** The conversation the phone tool is serving, so a confirmation prompt and a session-scoped grant bind to it. */
+  readonly sessionId?: (() => string | null | undefined) | undefined;
+}
+
 /** The registry members this registration needs; a real ToolRegistry satisfies it. */
 export interface PhoneToolRegistry {
   has(name: string): boolean;
@@ -188,6 +200,7 @@ function resolveNodeId(
 
 async function runCapability(
   devices: DevicesClient,
+  sessionId: string | undefined,
   args: Record<string, unknown>,
   capabilityId: DeviceCapabilityId,
   capabilityInput: Record<string, unknown>,
@@ -213,6 +226,7 @@ async function runCapability(
   try {
     return renderOutcome(await devices.requestCapability({
       nodeId, capabilityId, input: capabilityInput, reason,
+      ...(sessionId === undefined ? {} : { sessionId }),
     }));
   } catch (error) {
     // Only a transport or argument failure reaches here, a refusal by the
@@ -221,7 +235,7 @@ async function runCapability(
   }
 }
 
-export function createClientPhoneTool(devices: DevicesClient): Tool {
+export function createClientPhoneTool(devices: DevicesClient, toolOptions: ClientPhoneToolOptions = {}): Tool {
   return {
     definition: {
       name: 'phone',
@@ -263,7 +277,13 @@ export function createClientPhoneTool(devices: DevicesClient): Tool {
       concurrency: 'serial',
     },
     execute: async (rawArgs: Record<string, unknown>) => {
-      const payload = await handleAction(devices, readRecord(rawArgs));
+      let payload: PhonePayload;
+      try {
+        payload = await handleAction(devices, toolOptions.sessionId?.() || undefined, readRecord(rawArgs));
+      } catch (error) {
+        // A reachable daemon that failed a read: say so, never report it as "no phone" or "no grants".
+        payload = fail(error instanceof Error ? error.message : String(error), 'The daemon answered the connection but not this request; retry, or check the daemon from the web app.');
+      }
       const output = JSON.stringify(payload, null, 2);
       return payload.success
         ? { success: true, output }
@@ -273,7 +293,7 @@ export function createClientPhoneTool(devices: DevicesClient): Tool {
 }
 
 /** Every action, returning the tool's own payload before it is serialised. */
-async function handleAction(devices: DevicesClient, args: Record<string, unknown>): Promise<PhonePayload> {
+async function handleAction(devices: DevicesClient, sessionId: string | undefined, args: Record<string, unknown>): Promise<PhonePayload> {
   const action = normalizeAction(args['action']) ?? 'nodes';
   const limit = typeof args['limit'] === 'number' && args['limit'] > 0 ? Math.floor(args['limit']) : 50;
   const unreachable = devices.describeAvailability();
@@ -367,6 +387,15 @@ async function handleAction(devices: DevicesClient, args: Record<string, unknown
     if (!artifactId) return fail('Pass artifactId:"…", use action:"artifacts" to list them.');
     try {
       const read = await devices.readArtifact(artifactId);
+      if (read.dataBase64.length > MAX_READ_BASE64_CHARS) {
+        const daemonPath = typeof read.artifact['daemonPath'] === 'string' ? read.artifact['daemonPath'] : undefined;
+        return {
+          success: false,
+          error: `The capture is too large to return here (${read.dataBase64.length} base64 characters, the limit is ${MAX_READ_BASE64_CHARS}).`,
+          hint: `Capture it again with a smaller maxWidth${daemonPath ? `, or read it on the daemon machine at ${daemonPath}` : ''}.`,
+          artifact: read.artifact,
+        };
+      }
       return {
         success: true,
         artifact: read.artifact,
@@ -396,48 +425,48 @@ async function handleAction(devices: DevicesClient, args: Record<string, unknown
         `Known capabilities: ${DEVICE_CAPABILITY_CATALOG.map((entry) => entry.id).join(', ')}`,
       );
     }
-    return runCapability(devices, args, capabilityId, readRecord(args['input']));
+    return runCapability(devices, sessionId, args, capabilityId, readRecord(args['input']));
   }
 
   if (action === 'photo') {
     const front = readString(args['camera']).toLowerCase() === 'front';
-    return runCapability(devices, args, front ? 'device.camera.front.capture' : 'device.camera.rear.capture', {
+    return runCapability(devices, sessionId, args, front ? 'device.camera.front.capture' : 'device.camera.rear.capture', {
       ...(typeof args['maxWidth'] === 'number' ? { maxWidth: args['maxWidth'] } : {}),
     });
   }
 
-  if (action === 'screenshot') return runCapability(devices, args, 'device.screen.capture', {});
+  if (action === 'screenshot') return runCapability(devices, sessionId, args, 'device.screen.capture', {});
 
   if (action === 'location') {
     const precise = readString(args['precision']).toLowerCase() === 'precise';
-    return runCapability(devices, args, precise ? 'device.location.precise' : 'device.location.coarse', {
+    return runCapability(devices, sessionId, args, precise ? 'device.location.precise' : 'device.location.coarse', {
       ...(typeof args['maxAgeSeconds'] === 'number' ? { maxAgeSeconds: args['maxAgeSeconds'] } : {}),
     });
   }
 
-  if (action === 'clipboard_read') return runCapability(devices, args, 'device.clipboard.read', {});
+  if (action === 'clipboard_read') return runCapability(devices, sessionId, args, 'device.clipboard.read', {});
 
   if (action === 'clipboard_write') {
     const text = readString(args['text']);
     if (!text) return fail('Pass text:"…", the text to place on the phone\'s clipboard.');
-    return runCapability(devices, args, 'device.clipboard.write', { text });
+    return runCapability(devices, sessionId, args, 'device.clipboard.write', { text });
   }
 
   if (action === 'notify') {
     const title = readString(args['title']);
     if (!title) return fail('Pass title:"…", the notification title.');
     const body = readString(args['body']);
-    return runCapability(devices, args, 'device.command.notify', { title, ...(body ? { body } : {}) });
+    return runCapability(devices, sessionId, args, 'device.command.notify', { title, ...(body ? { body } : {}) });
   }
 
   if (action === 'open_url') {
     const url = readString(args['url']);
     if (!/^https?:\/\//i.test(url)) return fail('Pass url:"https://…", only http and https links are opened on the phone.');
-    return runCapability(devices, args, 'device.command.open_url', { url });
+    return runCapability(devices, sessionId, args, 'device.command.open_url', { url });
   }
 
   if (action === 'vibrate') {
-    return runCapability(devices, args, 'device.command.vibrate', {
+    return runCapability(devices, sessionId, args, 'device.command.vibrate', {
       ...(typeof args['durationMs'] === 'number' ? { durationMs: args['durationMs'] } : {}),
     });
   }
@@ -446,6 +475,6 @@ async function handleAction(devices: DevicesClient, args: Record<string, unknown
 }
 
 /** Register the client-mode `phone` tool, leaving an existing registration alone. */
-export function registerClientPhoneTool(registry: PhoneToolRegistry, devices: DevicesClient): void {
-  if (!registry.has('phone')) registry.register(createClientPhoneTool(devices));
+export function registerClientPhoneTool(registry: PhoneToolRegistry, devices: DevicesClient, toolOptions: ClientPhoneToolOptions = {}): void {
+  if (!registry.has('phone')) registry.register(createClientPhoneTool(devices, toolOptions));
 }

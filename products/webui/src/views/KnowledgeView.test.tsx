@@ -34,7 +34,7 @@ mock.module('../lib/goodvibes', () => ({
     knowledge: {
       status: () => Promise.resolve(statusData),
       map: () => Promise.resolve(mapData),
-      ask: () => Promise.resolve({}),
+      ask: (input: { query: string }) => Promise.resolve({ answer: `Answer for ${input.query}` }),
       search: () => Promise.resolve({}),
     },
   },
@@ -42,22 +42,24 @@ mock.module('../lib/goodvibes', () => ({
 
 const { KnowledgeView } = await import('./KnowledgeView');
 
-function render() {
+function render(initialQuery = '') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  flushSync(() => {
+  const show = (query: string) => flushSync(() => {
     root.render(
       React.createElement(
         QueryClientProvider,
         { client },
-        React.createElement(KnowledgeView, { query: '' }),
+        React.createElement(KnowledgeView, { query }),
       ),
     );
   });
+  show(initialQuery);
   return {
     el: container,
+    setQuery: show,
     unmount: () => {
       flushSync(() => root.unmount());
       container.remove();
@@ -214,5 +216,42 @@ describe('KnowledgeView projection target dispatch and preserved-page inspection
       await waitFor(() => calls.some(call => call.method === 'knowledge.item.get'));
       expect(calls.find(call => call.method === 'knowledge.item.get')?.input).toEqual({ id: 'kg-gen-historical', includeAllSpaces: true });
     } finally { view.unmount(); }
+  });
+});
+
+describe('KnowledgeView: Ask and projections', () => {
+  test('the answer pane names the query it answered after the search box is edited', async () => {
+    const { el, setQuery, unmount } = render('release plan');
+    try {
+      await waitFor(() => [...el.querySelectorAll('button')].some((b) => b.textContent === 'Ask'));
+      flushSync(() => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Ask')?.click());
+      const paneMeta = () => document.body.querySelector('.dv-pane__meta')?.textContent ?? '';
+      await waitFor(() => paneMeta().includes('release plan'));
+      setQuery('something else');
+      flushSync(() => {});
+      expect(paneMeta()).toContain('“release plan”');
+      expect(paneMeta()).not.toContain('something else');
+    } finally {
+      unmount();
+    }
+  });
+
+  test('more than one page of wiki projections can be paged through', async () => {
+    const targets = Array.from({ length: 30 }, (_, index) => ({ kind: 'node', id: `n${String(index)}`, title: `Projection ${String(index)}` }));
+    invokeImpl = (method) => {
+      if (method === 'knowledge.projections.list') return Promise.resolve({ targets });
+      return Promise.resolve({ sources: [], nodes: [], issues: [], tasks: [], jobs: [], runs: [] });
+    };
+    const { el, unmount } = render();
+    try {
+      await waitFor(() => (el.textContent ?? '').includes('Projection 0'));
+      expect(el.textContent).not.toContain('Projection 29');
+      const more = el.querySelector<HTMLButtonElement>('button[aria-label="Show more wiki projections"]');
+      if (!more) throw new Error('Show more button is missing');
+      flushSync(() => more.click());
+      expect(el.textContent).toContain('Projection 29');
+    } finally {
+      unmount();
+    }
   });
 });

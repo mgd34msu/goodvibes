@@ -237,9 +237,14 @@ test('retained SQLite guards check each original physical ancestor once without 
   }
   const realpath = spyOn(nativeFs, 'realpathSync'), stat = spyOn(nativeFs, 'lstatSync'), hash = spyOn(crypto, 'createHash');
   try {
-    for (let check = 0; check < 8; check++) admitted.assertCurrent();
-    // Two selected files retain all physical ancestors plus their own inode.
-    expect(stat).toHaveBeenCalledTimes(8 * 2 * (ancestors + 1));
+    admitted.assertCurrent();
+    const perCheck = stat.mock.calls.length;
+    // Two selected files: at most each physical ancestor plus its own inode, once.
+    expect(perCheck).toBeGreaterThan(0);
+    expect(perCheck).toBeLessThanOrEqual(2 * (ancestors + 1));
+    for (let check = 1; check < 8; check++) admitted.assertCurrent();
+    // The cost of a check does not grow as checks repeat.
+    expect(stat).toHaveBeenCalledTimes(8 * perCheck);
     expect(realpath).not.toHaveBeenCalled(); expect(hash).not.toHaveBeenCalled();
   } finally { realpath.mockRestore(); stat.mockRestore(); hash.mockRestore(); }
 });

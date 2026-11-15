@@ -1,5 +1,6 @@
 /** Data-only substrate for ConfigManager's same-owner settings mutation. No grants. */
 import { ConfigError } from '../types/errors.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { ConfigKey, ConfigSetting } from './schema.js';
 import { coerceSchemaValue } from './manager-bootstrap.js';
 import type { PreparedSettingsTarget } from './prepared-target.js';
@@ -39,6 +40,33 @@ export interface PreparedConfigMutationReceipt {
   readonly uncertainPath?: string;
 }
 
+/** Why an owner refused before any effect; the wire vocabulary of the settings precondition refusals. */
+export type PreparedMutationRefusalReason = 'stale' | 'spent' | 'managed' | 'read-only' | 'owner-fault';
+/** A refusal that changed nothing, tagged with a value-free reason a caller can act on. */
+export class PreparedMutationRefusal extends ConfigError {
+  constructor(readonly refusalReason: PreparedMutationRefusalReason, message: string) {
+    super(message);
+    this.name = 'PreparedMutationRefusal';
+  }
+}
+
+export type PreparedMutationPhase = 'prepared' | 'beginning' | 'begun' | 'committing' | 'spent';
+/**
+ * One prepared settings change, from capture to its single use.
+ * - `prepared -> beginning -> begun` is the owner's begin, which runs every re-entrant callback first.
+ * - `begun -> committing -> spent` is the one finish. A re-entered finish finds `committing` and is refused.
+ * - A step of a compound plan has no begin of its own: the plan's finish moves each step `prepared -> begun`
+ *   directly, because the plan already ran its begin and no callback may run between steps.
+ * - Any failure, and any refused re-entry, ends in `spent`; `spent` is final and is never reused.
+ */
+export const preparedMutationLifecycle = defineLifecycle<PreparedMutationPhase>('Prepared settings change', {
+  prepared: ['beginning', 'begun', 'spent'],
+  beginning: ['begun', 'spent'],
+  begun: ['committing', 'spent'],
+  committing: ['spent'],
+  spent: [],
+});
+
 export interface PreparedMutationRecord {
   readonly facts: PreparedConfigMutationFacts;
   readonly schemaIdentity: object;
@@ -46,7 +74,7 @@ export interface PreparedMutationRecord {
   readonly validator: ConfigSetting['validate'];
   readonly normalizedJson: string;
   readonly steps?: readonly PreparedConfigMutation[];
-  phase: 'prepared' | 'beginning' | 'begun' | 'committing' | 'spent';
+  phase: PreparedMutationPhase;
   transition?: PreparedConfigMutationTransition;
   targets?: readonly PreparedSettingsTarget[];
   completion?: {

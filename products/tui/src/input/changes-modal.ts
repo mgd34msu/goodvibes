@@ -15,6 +15,8 @@
  * Esc on a preview question answers "no".
  */
 
+import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from './surface-modal-host.ts';
 import type { SurfaceLayer, KitHint } from '../renderer/surface-kit.ts';
@@ -24,7 +26,7 @@ import { renderChangesModal, type ChangesFootLine, type ChangesModalView, type C
 import { activeTokens } from '../renderer/theme.ts';
 import { changeTotals, hunkPatch, parseChanges, type ChangeFile, type ChangeHunk } from './changes-model.ts';
 import {
-  applyHunkToIndex, commitStaged, initRepo, isGitRepo, loadCommitDiff, loadDiff, loadRecentCommits, loadRepoSummary,
+  applyHunkToIndex, commitStaged, resolveRepoPath, initRepo, isGitRepo, loadCommitDiff, loadDiff, loadRecentCommits, loadRepoSummary,
   loadSemanticDiff, setFileStaged, CHANGES_SOURCES, CHANGES_SOURCE_LABELS, type ChangesSource, type CommitEntry, type RepoSummary,
 } from './changes-git.ts';
 import { buildSteerMessage, type HunkComment, type ReviewHunk } from '../views/diff-review-model.ts';
@@ -88,6 +90,10 @@ export class ChangesModal implements SurfaceModal {
   private question: PendingQuestion | null = null;
   get waitingForOwner(): boolean { return this.question !== null; }
   private loadSeq = 0;
+  /** Hashes whose patch is still being read: an empty patch is a real answer, not "still loading". */
+  private readonly commitPending = new Set<string>();
+  /** A stage, unstage or revert is running; a second press would act on the same hunk before the reload. */
+  private actionBusy = false;
 
   constructor(private readonly deps: ChangesDeps, mode: 'workspace' | 'preview' = 'workspace') {
     this.mode = mode;
@@ -163,9 +169,10 @@ export class ChangesModal implements SurfaceModal {
   }
 
   private ensureCommit(commit: CommitEntry): void {
-    if (this.commitFiles.has(commit.hash)) return;
-    this.commitFiles.set(commit.hash, []);
+    if (this.commitFiles.has(commit.hash) || this.commitPending.has(commit.hash)) return;
+    this.commitPending.add(commit.hash);
     void loadCommitDiff(this.deps.workingDirectory, commit.hash).then((result) => {
+      this.commitPending.delete(commit.hash);
       this.commitFiles.set(commit.hash, result.error ?? parseChanges(result.raw));
       this.deps.requestRender();
     });
@@ -254,29 +261,41 @@ export class ChangesModal implements SurfaceModal {
   async stageHunk(): Promise<void> {
     const current = this.currentHunk();
     if (!current || this.mode !== 'workspace' || this.currentCommit()) return;
-    const reverse = this.source === 'staged';
-    const error = await applyHunkToIndex(this.deps.workingDirectory, hunkPatch(current.file, current.hunk), reverse);
-    if (error) {
-      this.note(`${reverse ? 'Unstage' : 'Stage'} failed: ${error}`, 'error');
-      return;
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      const reverse = this.source === 'staged';
+      const error = await applyHunkToIndex(this.deps.workingDirectory, hunkPatch(current.file, current.hunk), reverse);
+      if (error) {
+        this.note(`${reverse ? 'Unstage' : 'Stage'} failed: ${error}`, 'error');
+        return;
+      }
+      const range = `${current.file.path}:${current.hunk.review.newStart}`;
+      await this.reload();
+      this.note(reverse ? `Unstaged the hunk at ${range}.` : `Staged the hunk at ${range}.`, 'success');
+    } finally {
+      this.actionBusy = false;
     }
-    const range = `${current.file.path}:${current.hunk.review.newStart}`;
-    await this.reload();
-    this.note(reverse ? `Unstaged the hunk at ${range}.` : `Staged the hunk at ${range}.`, 'success');
   }
 
   /** S: stage the selected file (unstage it in the staged view). */
   async stageFile(): Promise<void> {
     const file = this.currentFile();
     if (!file || this.mode !== 'workspace') return;
-    const stage = this.source !== 'staged';
-    const error = await setFileStaged(this.deps.workingDirectory, file.path, stage);
-    if (error) {
-      this.note(`${stage ? 'Stage' : 'Unstage'} failed: ${error}`, 'error');
-      return;
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      const stage = this.source !== 'staged';
+      const error = await setFileStaged(this.deps.workingDirectory, file.path, stage);
+      if (error) {
+        this.note(`${stage ? 'Stage' : 'Unstage'} failed: ${error}`, 'error');
+        return;
+      }
+      await this.reload();
+      this.note(stage ? `Staged ${file.path}.` : `Unstaged ${file.path}.`, 'success');
+    } finally {
+      this.actionBusy = false;
     }
-    await this.reload();
-    this.note(stage ? `Staged ${file.path}.` : `Unstaged ${file.path}.`, 'success');
   }
 
   toggleReviewed(): void {
@@ -287,15 +306,18 @@ export class ChangesModal implements SurfaceModal {
     this.status = { text: this.reviewed.has(file.path) ? `Marked ${file.path} reviewed.` : `${file.path} is no longer marked reviewed.`, tone: 'muted' };
   }
 
-  private openEditor(): void {
+  private async openEditor(): Promise<void> {
     const current = this.currentHunk();
     const file = current?.file ?? this.currentFile();
     if (!file) return;
-    if (!this.deps.openInEditor) {
+    const open = this.deps.openInEditor;
+    if (!open) {
       this.status = { text: 'Opening an editor is not available here.', tone: 'error' };
       return;
     }
-    this.deps.openInEditor(file.path, current?.hunk.review.newStart);
+    // Diff paths are relative to the repository root, which can sit above the directory the TUI started in.
+    const path = this.mode === 'workspace' ? await resolveRepoPath(this.deps.workingDirectory, file.path) : file.path;
+    open(path, current?.hunk.review.newStart);
   }
 
   private async revert(): Promise<void> {
@@ -309,9 +331,23 @@ export class ChangesModal implements SurfaceModal {
       this.note('Hunk revert is not available in this session.', 'error');
       return;
     }
-    const message = await this.deps.revertHunk(current.hunk.review);
-    await this.reload();
-    this.note(message);
+    if (this.actionBusy) return;
+    this.actionBusy = true;
+    try {
+      // The checkpoint service resolves paths against the launch directory, while diff paths are repo-root relative.
+      // git reports the real repository root, so the launch directory is compared by its real path too (it may be a symlink).
+      const launchDir = realpathSync(this.deps.workingDirectory);
+      const rel = relative(launchDir, await resolveRepoPath(this.deps.workingDirectory, current.hunk.review.filePath));
+      if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        this.note(`Cannot revert ${current.hunk.review.filePath}: it is outside ${this.deps.workingDirectory}, where this session was started. Revert it with git from the repository root.`, 'error');
+        return;
+      }
+      const message = await this.deps.revertHunk({ ...current.hunk.review, filePath: rel });
+      await this.reload();
+      this.note(message);
+    } finally {
+      this.actionBusy = false;
+    }
   }
 
   /** Send every attached comment that has not been sent (closes the modal first). */
@@ -489,7 +525,7 @@ export class ChangesModal implements SurfaceModal {
         if (this.currentHunk() && !this.currentCommit()) this.composing = this.comments.get(commentKey(this.currentHunk()!.hunk.review))?.text ?? '';
         break;
       case 'm': this.toggleReviewed(); break;
-      case 'o': this.openEditor(); break;
+      case 'o': void this.openEditor(); break;
       case 'x': void this.revert(); break;
       case 'v': {
         const next = CHANGES_SOURCES[(CHANGES_SOURCES.indexOf(this.source) + 1) % CHANGES_SOURCES.length]!;
@@ -557,7 +593,8 @@ export class ChangesModal implements SurfaceModal {
     if (commit) {
       const loaded = this.commitFiles.get(commit.hash);
       if (typeof loaded === 'string') return `git could not show ${commit.hash.slice(0, 7)}: ${loaded}`;
-      if (!loaded || loaded.length === 0) return `Loading ${commit.hash.slice(0, 7)} ${commit.message}…`;
+      if (!loaded) return `Loading ${commit.hash.slice(0, 7)} ${commit.message}…`;
+      if (loaded.length === 0) return `${commit.hash.slice(0, 7)} ${commit.message}\nThis commit has no file changes.`;
       return null;
     }
     if (this.files.length === 0) return `No changes (${this.label || CHANGES_SOURCE_LABELS[this.source]}). Press v to switch between this session, not staged, staged and everything vs HEAD.`;

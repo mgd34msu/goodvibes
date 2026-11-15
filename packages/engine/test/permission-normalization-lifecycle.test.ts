@@ -202,10 +202,10 @@ describe('sandbox command reading lifetime', () => {
     expect(fake.requests).toHaveLength(2);
   });
 
-  test('runtime planning uses explicit egress policy without a command reading', async () => {
+  test('runtime planning reads the command needs once and honors cancellation', async () => {
     const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
     const plan = await resolveRuntimeSandboxPlan(sandbox, 'fixture-command', '/fixture', '/fixture');
-    expect(plan?.network).toBe('disabled'); expect(fake.requests).toHaveLength(0);
+    expect(plan?.network).toBe('disabled'); expect(fake.requests).toHaveLength(1);
     const canceled = new AbortController(); canceled.abort(new Error('owner cancelled'));
     await expect(resolveRuntimeSandboxPlan(sandbox, 'fixture-command', '/fixture', '/fixture', { signal: canceled.signal })).rejects.toThrow('owner cancelled');
   });
@@ -216,6 +216,7 @@ describe('sandbox command reading lifetime', () => {
     let received: AbortSignal | undefined;
     const configured: ExecSandboxRuntime = { ...sandbox, config: { ...sandbox.config, egressAllowlist: ['fixture-command'] },
       requestEscalation: async (_input, execution) => { received = execution?.signal; entered.resolve(); await release.promise; return true; } };
+    installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     const plan = await resolveRuntimeSandboxPlan(configured, 'fixture-command', '/fixture', '/fixture');
     const pending = brokerSandboxEscalation(configured, plan, 'fixture-command', '/fixture', { signal: canceled.signal, assertCurrent() {} });
     const observed = pending.catch(error => error);

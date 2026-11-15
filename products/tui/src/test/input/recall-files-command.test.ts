@@ -184,6 +184,19 @@ describe('/recall files (memory file projection surface)', () => {
     expect(printed.some((l) => l.includes('No changes'))).toBe(true);
   });
 
+  test('a second sync names the edited file it kept', async () => {
+    await recallCommand.handler(['files', 'sync', '--dir', dir], makeContext(printed, registry, root));
+    const file = join(dir, readdirSync(dir).filter((name) => name.endsWith('.md'))[0]!);
+    writeFileSync(file, readFileSync(file, 'utf-8').replace('Ship dark flags', 'Ship the dark flags'), 'utf-8');
+
+    printed.length = 0;
+    await recallCommand.handler(['files', 'sync', '--dir', dir], makeContext(printed, registry, root));
+    const text = printed.join('\n');
+    expect(text).toContain('Projected 0 record(s)');
+    expect(text).toContain('Kept 1 edited or deleted file(s) as they are: mem-1');
+    expect(readFileSync(file, 'utf-8')).toContain('Ship the dark flags');
+  });
+
   test('review is read-only: an edited file produces an update proposal without mutating the store', async () => {
     await recallCommand.handler(['files', 'sync', '--dir', dir], makeContext(printed, registry, root));
     const file = join(dir, readdirSync(dir).filter((name) => name.endsWith('.md'))[0]!);

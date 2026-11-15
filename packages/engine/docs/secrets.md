@@ -96,7 +96,7 @@ the same process (`SecretsManager.onDidChange` →
 `ProviderRegistry.refreshProviderCredentials()`), so a provider becomes
 usable the moment its key is stored. No restart anywhere. Status badges,
 the model picker, and chat all read the same refreshed provider instances,
-so status can never be green while chat fails auth. Every registered
+so status can never be green while chat fails auth. The one exception is the providers registered from the environment alone at startup (`cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux`, `zenmux-anthropic`): they read only their environment variable, so a key stored in the secrets store does not activate them. Every registered
 provider must declare how its credentials are obtained
 (`credentialAuthority: 'resolver' | 'anonymous' | 'subscription' | 'oauth'`);
 registration is refused otherwise.

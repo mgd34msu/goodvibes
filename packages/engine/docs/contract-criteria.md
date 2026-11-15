@@ -22,9 +22,18 @@ excluded. Enumeration errors remain visible. Large inventories are grouped for
 the planner, while host coverage checks retain the exact paths.
 
 Review units assign file or directory scopes, and `reviewExclusions` records
-explicit paths/patterns and reasons. An inventory does not expand the user's
-request to unrelated files. Unit briefs and evidence carry the assigned scope
-and its contribution to the requested outcome.
+explicit paths/patterns and reasons. A scope of `.` names the project root's
+direct files only; `**` names the whole project. An inventory does not expand
+the user's request to unrelated files. Unit briefs and evidence carry the
+assigned scope and its contribution to the requested outcome.
+
+A unit brief carries the unit's own scope patterns, the exclusions, and the
+assigned files themselves only when there are at most 50 of them; a larger
+assignment is sent as a count with file counts per directory, and the worker
+lists the exact files with `find` over its scope patterns. Contract-wide
+remaining, pending and excluded file lists in a brief's host records are
+summarised the same way. The exact lists stay with the host, which checks
+coverage and accepts assessments against them.
 
 The observation distinguishes these facts:
 
@@ -156,7 +165,7 @@ The final status line counts excluded criteria, for example "1 excluded".
 
 ### Repair and the owner
 
-Every problem goes back to the planner in one repair request, up to `contract.planRepairLimit` repairs (default 2). When problems remain, the contract waits on the owner with a `plan-unresolved` escalation that lists them. The owner can approve the plan as it stands, amend it (the reply goes to the planner as an instruction), or stop the contract.
+Every problem goes back to the planner in one repair request, up to `contract.planRepairLimit` repairs (default 0, no limit: repairs continue until the plan passes or a repair repeats the same unresolved problems; set a positive number to hand it to the owner sooner). When problems remain, the contract waits on the owner with a `plan-unresolved` escalation that lists them. The owner can approve the plan as it stands, amend it (the reply goes to the planner as an instruction), or stop the contract.
 
 ---
 
@@ -168,9 +177,10 @@ Every problem goes back to the planner in one repair request, up to `contract.pl
 2. The unit's id, title, goal and the planner's brief.
 3. `Acceptance criteria for this unit:` every judged unit criterion by id and text, each followed by the contract criteria it serves.
 4. The group's goal, the sibling units and the units this one builds on, so the parts stay compatible with the whole.
-5. For an integration unit, what every other unit delivered.
-6. The tool line: read-only, or read, write, edit and run commands.
-7. One fixed paragraph: "Your work is checked against these criteria while you work and when you finish. If a check finds a problem you will receive a correction; fix it and finish again."
+5. For a project review, the unit's review scope (see Project review inventory).
+6. For an integration unit, what every other unit delivered.
+7. The tool line: read-only, or read, write, edit and run commands.
+8. One fixed paragraph: "Your work is checked against these criteria while you work and when you finish. If a check finds a problem you will receive a correction; fix it and finish again."
 
 A criterion line looks like this:
 
@@ -201,7 +211,9 @@ The brief never asks the agent to list constraints or review itself. The criteri
 
 - **Criteria and goal: `contract.unit-judge`** (judge pattern). One request per check asks, for each judged criterion, "does the output fail it, or does the evidence fail to show it is met", and once whether the output fails the unit's goal. The pass side carries the higher stakes: `contract.acceptanceStakes` chooses between the two bands declared in `batteries/unit-judge.ts` (`high` by default, or `critical`).
 - **Quality: `contract.unit-quality`**, asked in parallel: placeholder code, weakened tests, broken existing behaviour, out-of-scope changes, hidden failures, and claims the evidence does not show.
+- **Reason: `contract.unmet-gap`**, one per criterion a nudge lists as unmet or not shown (at most six per nudge, four at a time), read while the nudge is built. It says what kind of evidence is missing (nothing attempted, nothing that shows it holds, only part of it, something that conflicts with it) and the nudge prints that as a `Why:` line under the criterion. The reading is kept on the criterion's reading as `rationale`. A reading that cannot be made leaves the criterion without a reason; the nudge still goes out, and the reason never decides whether work passes.
 - **Severity: `contract.unmet-severity`**, one per unmet criterion (critical, major, minor), read after the nudge is sent so it never delays one. It orders and labels; it never decides whether work passes.
+- **Self-check.** A unit's agent can read how its criteria read now without ending its turn: the latest verdict of each judged criterion, the reason the last check gave, the problems it found, and which check that was. This is the host's recorded state, not a new reading, and it passes nothing (`describeUnitSelfCheck`, served by the `contract_self_check` tool where the host registers it).
 
 ### Readings to verdicts
 

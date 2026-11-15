@@ -196,7 +196,9 @@ export interface KnowledgeSemanticSelfImproveInput {
   readonly knowledgeSpaceId?: string | undefined;
   readonly sourceIds?: readonly string[] | undefined;
   readonly gapIds?: readonly string[] | undefined;
+  /** Gaps to process. Omitted, zero or negative means every candidate; there is no platform cap. */
   readonly limit?: number | undefined;
+  /** Run window in ms. Omitted means unbounded; a value beyond what a timer can hold (about 24.8 days) is unbounded too. */
   readonly maxRunMs?: number | undefined;
   readonly deferRepair?: boolean | undefined;
   readonly force?: boolean | undefined;

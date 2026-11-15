@@ -10,11 +10,17 @@ import { FindRuntimeService, type ImportGraphLike } from '../platform/src/platfo
 import { ImportGraph } from '../platform/src/platform/intelligence/import-graph.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
+const roots: string[] = [];
 beforeEach(() => { previous = installJudgmentPort(fakePort(() => noulAnswer(0.001)).port); });
-afterEach(() => { installJudgmentPort(previous); });
+afterEach(() => {
+  installJudgmentPort(previous);
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function tempRoot(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(root);
+  return root;
 }
 
 class DegradedImportGraphRuntime extends FindRuntimeService {
@@ -40,7 +46,8 @@ describe('find/search degradation observability', () => {
     try {
       for (const include_hidden of [false, true]) {
         const result = await executeFilesQuery({ id: 'files', mode: 'files', patterns: ['**/*.ts'], include_hidden }, { format: 'files_only' }, root);
-        expect(result.files).toEqual([live]);
+        expect(result.files).toEqual(['src/live.ts']);
+        expect(result.root).toBe(root);
         expect(result.error).toBeUndefined();
       }
       const content = await executeContentQuery({ id: 'content', mode: 'content', pattern: 'REVIEW_SOURCE' }, { format: 'matches' }, new FindRuntimeService(), root);
@@ -86,7 +93,7 @@ describe('find/search degradation observability', () => {
 
     const files = result.files as string[];
     const warnings = result.warnings as string[];
-    expect(files).toContain(join(root, 'src', 'ignored.ts'));
+    expect(files).toContain(join('src', 'ignored.ts'));
     expect(warnings.some((warning) => warning.includes('Nested .gitignore files are not applied'))).toBe(true);
   });
 
@@ -105,5 +112,21 @@ describe('find/search degradation observability', () => {
     expect(result.relationships).toBeDefined();
     const warnings = result.warnings as string[];
     expect(warnings.some((warning) => warning.includes('Import graph build failed'))).toBe(true);
+  });
+});
+
+describe('find stops at its time budget with a partial result', () => {
+  test('a content search whose budget is already spent says so, and the partial answer is not cached as the complete one', async () => {
+    const root = tempRoot('gv-find-budget-');
+    for (const name of ['a.ts', 'b.ts', 'c.ts']) writeFileSync(join(root, name), 'const NEEDLE = 1;\n');
+    try {
+      const runtime = new FindRuntimeService();
+      const query = { id: 'q', mode: 'content' as const, pattern: 'NEEDLE' };
+      const partial = await executeContentQuery(query, { format: 'matches' }, runtime, root, undefined, { shouldContinue: () => false });
+      expect(partial.warnings).toEqual([expect.stringMatching(/^Stopped at the time budget: searched 0 of \d+ files \(finding the files was itself cut short, so more exist\) and found 0 match\(es\) so far\. Narrow 'path' or 'glob'/)]);
+      const full = await executeContentQuery(query, { format: 'matches' }, runtime, root);
+      expect(full.count).toBe(3);
+      expect(full.warnings).toBeUndefined();
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

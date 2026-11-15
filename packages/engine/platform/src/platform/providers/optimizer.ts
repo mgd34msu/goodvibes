@@ -131,9 +131,14 @@ export class ProviderOptimizer {
    * Set the routing mode.
    * - `auto`  , optimizer selects the best capable provider for each request profile.
    * - `manual`, optimizer is advisory only; caller drives provider selection.
-   * - `pinned`, optimizer always returns the pinned provider/model (if capable).
+   * - `pinned`, optimizer always returns the pinned provider/model, even when
+   *   its explanation says the target is not capable: callers check
+   *   `explanation.accepted`. Needs a target, so use {@link pin} to enter it.
    */
   setMode(mode: OptimizerMode): void {
+    if (mode === 'pinned' && this.pinnedTarget === null) {
+      throw new Error(`Cannot switch the provider optimizer to pinned mode (currently ${this._mode}): no provider and model are pinned. Call pin(providerId, modelId) instead.`);
+    }
     this._mode = mode;
     if (mode !== 'pinned') {
       this._pinnedProvider = null;

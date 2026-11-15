@@ -15,6 +15,20 @@ export interface LedgerArea {
   readonly externalRequired: number;
 }
 
+/** Check a parsed areas file before it is rendered; throws naming the first bad entry. */
+export function parseLedgerAreas(value: unknown): LedgerArea[] {
+  if (!Array.isArray(value)) throw new Error('the areas file must contain a JSON array');
+  const counts = ['total', 'localSignal', 'localBehavior', 'externalRequired'] as const;
+  value.forEach((entry: unknown, index) => {
+    const record = typeof entry === 'object' && entry !== null ? entry as Record<string, unknown> : undefined;
+    if (!record || typeof record.area !== 'string') throw new Error(`areas[${index}] needs a string "area"`);
+    for (const key of counts) {
+      if (typeof record[key] !== 'number' || !Number.isFinite(record[key])) throw new Error(`areas[${index}] needs a numeric "${key}"`);
+    }
+  });
+  return value as LedgerArea[];
+}
+
 export interface LedgerTotals {
   readonly total: number;
   readonly localSignal: number;

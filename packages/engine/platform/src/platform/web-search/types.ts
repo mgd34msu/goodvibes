@@ -1,4 +1,5 @@
-import type { FetchExtractMode } from '../tools/fetch/schema.js';
+import type { FetchExtractMode, FetchInput } from '../tools/fetch/schema.js';
+import type { FetchOutput } from '../tools/fetch/index.js';
 
 export type WebSearchVerbosity = 'urls_only' | 'titles' | 'snippets' | 'evidence' | 'full';
 export type WebSearchSafeSearch = 'strict' | 'moderate' | 'off';
@@ -28,6 +29,8 @@ export interface WebSearchResult {
   readonly providerId: string;
   readonly metadata: Record<string, unknown>;
   readonly evidence?: readonly WebSearchEvidence[] | undefined;
+  /** Why evidence was asked for but not attached to this result (fetch refused, failed or empty). */
+  readonly evidenceError?: string | undefined;
 }
 
 export interface WebSearchRelatedTopic {
@@ -94,5 +97,10 @@ export interface WebSearchProvider {
   readonly label: string;
   readonly capabilities: readonly WebSearchProviderCapability[];
   descriptor?(): WebSearchProviderDescriptor;
-  search(request: WebSearchRequest): Promise<WebSearchProviderResponse>;
+  search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse>;
+}
+
+/** What the caller lends one search: the request path that carries the owner's fetch policy and credentials. */
+export interface WebSearchProviderCall {
+  readonly fetcher?: ((input: FetchInput) => Promise<FetchOutput>) | undefined;
 }

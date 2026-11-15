@@ -63,6 +63,18 @@ test('real recorded admission performs alias, record, forget and sweep without c
   expect(await current.fixture.run({ action: 'sweep' })).toMatchObject({ success: true }); expect(readings).toBe(0);
 });
 
+test('a sweep with no secret store says credential presence was not checked, and one with it does not', async () => {
+  const without = scene();
+  const unchecked = await without.fixture.run({ action: 'sweep' });
+  expect(unchecked).toMatchObject({ success: true });
+  expect(unchecked.output).toContain('Credential presence could not be checked');
+
+  const withStore = scene(async () => []);
+  const checked = await withStore.fixture.run({ action: 'sweep' });
+  expect(checked).toMatchObject({ success: true });
+  expect(checked.output).not.toContain('Credential presence could not be checked');
+});
+
 test('owned writes create missing parents without invalidating their own source fence', async () => {
   const current = scene(undefined, true);
   expect(await current.fixture.run(VALID)).toMatchObject({ success: true });

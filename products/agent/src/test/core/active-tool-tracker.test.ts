@@ -57,4 +57,26 @@ describe('active tool tracker', () => {
     tracker.clear();
     expect(tracker.current()).toBeNull();
   });
+
+  test('calls that never report back are bounded: the oldest beyond 64 are forgotten', () => {
+    const tools = fakeTools();
+    const tracker = trackActiveTool(tools as never);
+    for (let i = 0; i <= 64; i++) tools.emit('TOOL_EXECUTING', { callId: `c${i}`, tool: 'read', startedAt: i });
+    // 65 started, 64 kept: settling the newest names the next newest.
+    tools.emit('TOOL_SUCCEEDED', { callId: 'c64' });
+    expect(tracker.current()?.startedAtMs).toBe(63);
+    // Settling every retained call leaves nothing; c0 would still be named if it had been kept.
+    for (let i = 63; i >= 1; i--) tools.emit('TOOL_SUCCEEDED', { callId: `c${i}` });
+    expect(tracker.current()).toBeNull();
+  });
+
+  test('arguments of calls that never started are bounded the same way', () => {
+    const tools = fakeTools();
+    const tracker = trackActiveTool(tools as never);
+    for (let i = 0; i <= 64; i++) tools.emit('TOOL_RECEIVED', { callId: `c${i}`, tool: 'read', args: { path: `f${i}` } });
+    tools.emit('TOOL_EXECUTING', { callId: 'c0', tool: 'read', startedAt: 0 });
+    expect(tracker.current()?.args).toBeUndefined();
+    tools.emit('TOOL_EXECUTING', { callId: 'c1', tool: 'read', startedAt: 1 });
+    expect(tracker.current()?.args).toEqual({ path: 'f1' });
+  });
 });

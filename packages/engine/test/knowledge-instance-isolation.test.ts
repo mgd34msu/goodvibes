@@ -26,8 +26,10 @@ const readings = useKnowledgeAnswerReadings();
 const disposables = trackDisposables();
 
 const tmpRoots: string[] = [];
+const stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -46,6 +48,7 @@ describe('knowledge instance isolation', () => {
     const regularStore = new KnowledgeStore({ configManager, dbFileName: REGULAR_KNOWLEDGE_DB_FILE });
     const agentStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE });
     const homeGraphStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
+    stores.push(regularStore, agentStore, homeGraphStore);
     const regularService = disposables.add(new KnowledgeService(regularStore, artifactStore, undefined, {
       memoryRegistry: {
         add: async (_opts: MemoryAddOptions): Promise<MemoryRecord> => { throw new Error('not exercised in this isolation test'); },

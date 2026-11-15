@@ -13,7 +13,6 @@ export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload}
  * unaffected.
  */
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
@@ -25,8 +24,10 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
  *
  * Configures the provided WebhookNotifier with the given URL list, attaches it
  * to the runtime bus so it receives SESSION_NOTIFICATION events, and pushes a
- * detach() cleanup into runtimeUnsubs for shutdown. When webhookUrls is empty
- * this function is a complete no-op.
+ * detach() cleanup into runtimeUnsubs for shutdown. The attach happens even
+ * with no URL configured: a URL added mid-session is read by the same shared
+ * instance, and a notifier with no URLs sends nothing, so skipping the attach
+ * would leave failure notifications dead until restart.
  */
 export function registerWebhookNotifier(
   webhookNotifier: WebhookNotifier,
@@ -34,42 +35,7 @@ export function registerWebhookNotifier(
   runtimeBus: RuntimeEventBus,
   runtimeUnsubs: Array<() => void>,
 ): void {
-  if (webhookUrls.length === 0) return;
-  webhookNotifier.setUrls(webhookUrls);
+  if (webhookUrls.length > 0) webhookNotifier.setUrls(webhookUrls);
   webhookNotifier.attachToRuntimeBus(runtimeBus);
   runtimeUnsubs.push(() => webhookNotifier.detach());
-}
-
-
-
-/**
- * Fleet-attention wiring: derive the shared-approval metadata for a
- * permission ask. Background/subagent asks carry
- * `request.attribution` (kind: 'background-agent', agentId, template, set by
- * AgentOrchestrator's gateBackgroundToolCall once permissionManager is wired
- * into it, see the `services.agentOrchestrator.setDependencies(...)` call
- * below and orchestrator.test.ts's "background agent permission gating"
- * suite). Forwarding `attribution.agentId` into the shared approval's
- * `metadata.agentId` is what lets the platform's fleet ProcessRegistry
- * (runtime/fleet/registry.js, collectPendingApprovals) attribute the pending
- * ask to that agent's ProcessNode, deriving
- * `state: 'awaiting-approval'` / `needsAttention: { reason: 'approval' }` on
- * the spawned agent itself, rather than leaving the ask an anonymous approval
- * entry the fleet plane cannot attach to anything. Foreground asks (no
- * attribution) return undefined, preserving today's un-attributed shape.
- *
- * PermissionAttribution is a discriminated union (platform 1.6.1 added
- * `mcp-server` and `sandbox-escalation` alongside the original
- * `background-agent`); only `background-agent` carries an `agentId` the
- * fleet ProcessRegistry can attach a pending approval to, so only that kind
- * populates `metadata.agentId` here. The other two kinds are surfaced in the
- * permission-prompt UI itself (see src/permissions/prompt.ts), not through
- * fleet attribution metadata, an MCP server or a sandbox escalation is not
- * a spawned agent's ProcessNode.
- */
-export function approvalMetadataForRequest(
-  request: Pick<PermissionPromptRequest, 'attribution'>,
-): Record<string, unknown> | undefined {
-  const attribution = request.attribution;
-  return attribution?.kind === 'background-agent' ? { agentId: attribution.agentId } : undefined;
 }

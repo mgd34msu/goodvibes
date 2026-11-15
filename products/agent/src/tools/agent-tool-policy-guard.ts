@@ -13,11 +13,17 @@ import { wrapFindToolForAgentPolicy } from './agent-find-policy.ts';
 import { AGENT_MCP_CALL_MODE, isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import { wrapReadToolForAgentPolicy, validateAgentReadMechanics } from './agent-read-policy.ts';
 import {
-  AGENT_SETTINGS_TOOL_DESCRIPTION,
+  AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
+  validateAnalyzeToolInvocationForAgentPolicy,
+  validateRegistryToolInvocationForAgentPolicy,
+} from './agent-analysis-registry-policy.ts';
+import { validateFindToolInvocationForAgentPolicy } from './agent-find-policy.ts';
+import { validateWebSearchToolInvocationForAgentPolicy } from './agent-web-search-policy.ts';
+import {
+  wrapSettingsToolForAdmittedAgentPolicy,
+  validateAgentSettingsMechanics,
   type SettingsToolArgs,
-} from './agent-settings-write-policy.ts';
-import { wrapSettingsToolForAdmittedAgentPolicy as wrapSettingsToolForAgentPolicy,
-  validateAgentSettingsMechanics } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+} from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { wrapWebSearchToolForAgentPolicy } from './agent-web-search-policy.ts';
 import type {
   AgentToolArgs,
@@ -109,7 +115,7 @@ const REMOTE_MUTATION_DENIAL = [
 const CHANNEL_ACTION_DENIAL = [
   'GoodVibes Agent only inspects channel accounts, directories, capabilities, tools, and actions from the main conversation.',
   'Channel account actions, tool runs, operator action runs, authorization, and target auto-creation are disabled here.',
-  'External channel side effects require an explicit Agent approval flow before they can run.',
+  'External channel side effects run only after the owner approves that exact call through the Agent approval flow; ask the owner when one is needed.',
 ].join(' ');
 
 const MCP_SECURITY_MUTATION_DENIAL = [
@@ -130,9 +136,9 @@ const STATE_MUTATION_DENIAL = [
   'Use Agent-owned memory, skills, personas, routines, and explicit CLI/slash commands for intentional local state changes.',
 ].join(' ');
 
-// The blanket settings denial that used to live here is gone. Its history, what
-// it was protecting, and the short confirmation-gated list that replaced it are
-// documented in agent-settings-write-policy.ts.
+// `goodvibes_settings` has no key list here: the engine's admitted settings
+// wrapper checks the call's mechanics, and whether a write goes ahead is decided
+// by the recorded admission for the exact effect.
 
 const INSPECT_WRITE_DENIAL = [
   'GoodVibes Agent only uses inspect scaffold mode for dry-run planning from the main conversation.',
@@ -152,6 +158,12 @@ const CONTROL_MUTATION_DENIAL = [
   'Use explicit Agent CLI/slash commands for Agent-owned changes, and keep connected-host lifecycle external.',
 ].join(' ');
 
+/**
+ * The only Agent tool guard installer; the engine no longer carries a second copy.
+ * The shared read, find, web search, analysis and settings wrappers come from the
+ * engine gate. Under yolo execution every wrapper here passes the call through, by
+ * design: yolo is the owner's explicit decision to run without these narrowings.
+ */
 export function installAgentToolPolicyGuard(registry: ToolRegistry, options: AgentToolPolicyGuardOptions = {}): void {
   const agentTool = registry.list().find((tool) => tool.definition.name === 'agent');
   if (!agentTool) throw new Error('Agent tool policy guard could not find the agent tool.');
@@ -165,7 +177,6 @@ export function installAgentToolPolicyGuard(registry: ToolRegistry, options: Age
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_REMOTE_TOOL_MODES,
         modeSet: READ_ONLY_REMOTE_TOOL_MODE_SET,
-        description: 'Read-only remote build-host inspection. Mutations are disabled in Agent.',
         denial: REMOTE_MUTATION_DENIAL,
       });
     } else if (tool.definition.name === 'channel') {
@@ -174,7 +185,6 @@ export function installAgentToolPolicyGuard(registry: ToolRegistry, options: Age
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_MCP_TOOL_MODES,
         modeSet: READ_ONLY_MCP_TOOL_MODE_SET,
-        description: 'Read-only MCP inspection. Mutations are disabled in Agent.',
         denial: MCP_SECURITY_MUTATION_DENIAL,
       });
     } else if (tool.definition.name === 'fetch') {
@@ -184,7 +194,7 @@ export function installAgentToolPolicyGuard(registry: ToolRegistry, options: Age
     } else if (tool.definition.name === 'goodvibes_context') {
       wrapAgentContextToolForAgentPolicy(tool, registry);
     } else if (tool.definition.name === 'goodvibes_settings') {
-      wrapSettingsToolForAgentPolicy(tool);
+      wrapSettingsToolForAdmittedAgentPolicy(tool);
     } else if (tool.definition.name === 'inspect') {
       wrapInspectToolForAgentPolicy(tool);
     } else if (tool.definition.name === 'analyze') {
@@ -199,54 +209,58 @@ export function installAgentToolPolicyGuard(registry: ToolRegistry, options: Age
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_CONTROL_TOOL_MODES,
         modeSet: READ_ONLY_CONTROL_TOOL_MODE_SET,
-        description: 'Read-only product-control inspection. Mutations are external.',
         denial: CONTROL_MUTATION_DENIAL,
       });
     } else if (tool.definition.name === 'task') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_TASK_TOOL_MODES,
         modeSet: READ_ONLY_TASK_TOOL_MODE_SET,
-        description: 'Read-only task/workflow inspection. Mutations are disabled in Agent.',
         denial: DURABLE_WORKFLOW_MUTATION_DENIAL,
-        removedProperties: ['title', 'label', 'status', 'dependsOnSessionId', 'dependsOnTaskId', 'reason', 'toSessionId'],
       });
     } else if (tool.definition.name === 'team') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_TEAM_TOOL_MODES,
         modeSet: READ_ONLY_TEAM_TOOL_MODE_SET,
-        description: 'Read-only team inspection. Mutations are disabled in Agent.',
         denial: DURABLE_WORKFLOW_MUTATION_DENIAL,
-        removedProperties: ['name', 'summary', 'memberId', 'role', 'lanes'],
       });
     } else if (tool.definition.name === 'worklist') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_WORKLIST_TOOL_MODES,
         modeSet: READ_ONLY_WORKLIST_TOOL_MODE_SET,
-        description: 'Read-only worklist inspection. Mutations are disabled in Agent.',
         denial: DURABLE_WORKFLOW_MUTATION_DENIAL,
-        removedProperties: ['title', 'itemId', 'text', 'owner', 'priority'],
       });
     } else if (tool.definition.name === 'packet') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_PACKET_TOOL_MODES,
         modeSet: READ_ONLY_PACKET_TOOL_MODE_SET,
-        description: 'Read-only operator packet inspection. Mutations are disabled in Agent.',
         denial: DURABLE_WORKFLOW_MUTATION_DENIAL,
-        removedProperties: ['title', 'summary', 'goals', 'constraints', 'risks', 'audience'],
       });
     } else if (tool.definition.name === 'query') {
       wrapModeRestrictedToolForAgentPolicy(tool, {
         allowedModes: READ_ONLY_QUERY_TOOL_MODES,
         modeSet: READ_ONLY_QUERY_TOOL_MODE_SET,
-        description: 'Read-only operator query inspection. Mutations are disabled in Agent.',
         denial: DURABLE_WORKFLOW_MUTATION_DENIAL,
-        removedProperties: ['prompt', 'askedBy', 'target', 'answer', 'resolution'],
       });
     } else if (BLOCKED_MAIN_CONVERSATION_TOOL_NAME_SET.has(tool.definition.name)) {
       wrapBlockedMainConversationToolForAgentPolicy(tool);
     }
+    const advertised = ADVERTISED_MODES[tool.definition.name];
+    if (advertised) describeAvailableModes(tool, advertised);
   }
 }
+
+const ADVERTISED_MODES: Readonly<Record<string, readonly string[]>> = {
+  remote: READ_ONLY_REMOTE_TOOL_MODES,
+  channel: READ_ONLY_CHANNEL_TOOL_MODES,
+  mcp: READ_ONLY_MCP_TOOL_MODES,
+  state: READ_ONLY_STATE_TOOL_MODES,
+  control: READ_ONLY_CONTROL_TOOL_MODES,
+  task: READ_ONLY_TASK_TOOL_MODES,
+  team: READ_ONLY_TEAM_TOOL_MODES,
+  worklist: READ_ONLY_WORKLIST_TOOL_MODES,
+  packet: READ_ONLY_PACKET_TOOL_MODES,
+  query: READ_ONLY_QUERY_TOOL_MODES,
+};
 
 export function wrapAgentToolForAgentPolicy(tool: Tool, _options: AgentToolPolicyGuardOptions = {}): void {
   const originalExecute = tool.execute.bind(tool);
@@ -260,7 +274,7 @@ export function wrapAgentToolForAgentPolicy(tool: Tool, _options: AgentToolPolic
 
 export function validateAgentToolInvocationForAgentPolicy(args: AgentToolArgs): string | null {
   if (isYoloExecution()) return null;
-  if (typeof args.mode === 'string' && !READ_ONLY_AGENT_TOOL_MODE_SET.has(args.mode)) return LOCAL_AGENT_DENIAL;
+  if (typeof args.mode === 'string' && !READ_ONLY_AGENT_TOOL_MODE_SET.has(args.mode)) return modeDenial(LOCAL_AGENT_DENIAL, args.mode, READ_ONLY_AGENT_TOOL_MODES);
   return null;
 }
 
@@ -352,7 +366,7 @@ export function normalizeFetchToolInvocationForAgentPolicy(args: FetchToolArgs):
 export function validateStateToolInvocationForAgentPolicy(args: StateToolArgs): string | null {
   if (isYoloExecution()) return null;
   if (isPresent(args.values) || isPresent(args.clearKeys)) return STATE_MUTATION_DENIAL;
-  if (typeof args.mode === 'string' && !READ_ONLY_STATE_TOOL_MODE_SET.has(args.mode)) return STATE_MUTATION_DENIAL;
+  if (typeof args.mode === 'string' && !READ_ONLY_STATE_TOOL_MODE_SET.has(args.mode)) return modeDenial(STATE_MUTATION_DENIAL, args.mode, READ_ONLY_STATE_TOOL_MODES);
 
   if (args.mode === 'memory') {
     const action = typeof args.memoryAction === 'string' ? args.memoryAction : 'list';
@@ -398,21 +412,50 @@ export function normalizeInspectToolInvocationForAgentPolicy(args: InspectToolAr
   return { ...args, dryRun: true };
 }
 
+/**
+ * Tell the model which modes this surface allows, in the `mode` description.
+ * The enum itself is NOT narrowed: the registry checks a call against the
+ * advertised schema before any guard runs, and YOLO (decided per call) skips
+ * this guard, so a narrowed enum would refuse in YOLO what the guard allows.
+ * A refused mode still gets the guard's own message naming the allowed modes.
+ */
+export function describeAvailableModes(tool: Tool, modes: readonly string[]): void {
+  const parameters = structuredClone(tool.definition.parameters) as Record<string, unknown>;
+  const properties = parameters.properties;
+  const mode = isRecord(properties) ? properties['mode'] : undefined;
+  if (!isRecord(mode)) return;
+  mode['description'] = `Operation. Available here: ${modes.join(', ')}.`;
+  tool.definition = { ...tool.definition, parameters: parameters as Tool['definition']['parameters'] };
+}
+
 export function wrapModeRestrictedToolForAgentPolicy(tool: Tool, policy: ModeRestrictedToolPolicy): void {
   const originalExecute = tool.execute.bind(tool);
   tool.execute = async (args, options) => {
     if (assertCurrentToolExecution(args, options) || isYoloExecution()) return originalExecute(args, options);
-    const denial = validateModeRestrictedToolInvocationForAgentPolicy(args as ModeToolArgs, policy.modeSet, policy.denial);
+    const denial = validateModeRestrictedToolInvocationForAgentPolicy(args as ModeToolArgs, policy.modeSet, policy.denial,
+      availableModesFor(tool.definition.name, policy.allowedModes));
     if (denial) return { success: false, error: denial };
     return originalExecute(args, options);
   };
+}
+
+/** The modes a call can really use here; the MCP call route is layered on after this guard. */
+function availableModesFor(toolName: string, allowedModes: readonly string[]): readonly string[] {
+  return toolName === 'mcp' && isAgentMcpCallRouteInstalled() ? [...allowedModes, AGENT_MCP_CALL_MODE] : allowedModes;
+}
+
+/** A mode refusal names the refused mode and the ones this surface does allow. */
+function modeDenial(denial: string, mode: string, available: Iterable<string>): string {
+  // A call the owner has approved carries its own recorded admission and is not
+  // held to this list, so the refusal is "not without approval", not "never".
+  return `${denial} mode "${mode}" is not available here; available: ${[...available].join(', ')}. A call the owner has approved through the Agent approval flow is not limited to this list.`;
 }
 
 export function wrapChannelToolForAgentPolicy(tool: Tool): void {
   const originalExecute = tool.execute.bind(tool);
   tool.execute = async (args, options) => {
     if (assertCurrentToolExecution(args, options) || isYoloExecution()) return originalExecute(args, options);
-    const denial = validateModeRestrictedToolInvocationForAgentPolicy(args as ModeToolArgs, READ_ONLY_CHANNEL_TOOL_MODE_SET, CHANNEL_ACTION_DENIAL)
+    const denial = validateModeRestrictedToolInvocationForAgentPolicy(args as ModeToolArgs, READ_ONLY_CHANNEL_TOOL_MODE_SET, CHANNEL_ACTION_DENIAL, READ_ONLY_CHANNEL_TOOL_MODES)
       ?? validateChannelToolInvocationForAgentPolicy(args as ModeToolArgs);
     if (denial) return { success: false, error: denial };
     return originalExecute(args, options);
@@ -423,9 +466,10 @@ export function validateModeRestrictedToolInvocationForAgentPolicy(
   args: ModeToolArgs,
   modeSet: ReadonlySet<string>,
   denial: string,
+  available: Iterable<string> = modeSet,
 ): string | null {
   if (isYoloExecution()) return null;
-  if (typeof args.mode === 'string' && !modeSet.has(args.mode)) return denial;
+  if (typeof args.mode === 'string' && !modeSet.has(args.mode)) return modeDenial(denial, args.mode, available);
   return null;
 }
 
@@ -459,7 +503,7 @@ function explainModeRestrictedAgentPolicy(
   modeSet: ReadonlySet<string>,
   denial: string,
 ): AgentToolPolicyInvocationExplanation {
-  const denied = validateModeRestrictedToolInvocationForAgentPolicy(args, modeSet, denial);
+  const denied = validateModeRestrictedToolInvocationForAgentPolicy(args, modeSet, denial, allowedModes);
   if (denied) return deniedByAgentPolicy(denied, allowedModes);
   const mode = typeof args.mode === 'string' && args.mode.trim() ? args.mode.trim() : '(default)';
   return allowedByAgentPolicy(`Agent policy allows ${mode} for read-only inspection on this tool.`, allowedModes);
@@ -515,6 +559,22 @@ export function explainAgentToolPolicyInvocation(
       ? deniedByAgentPolicy(denied)
       : allowedByAgentPolicy('Mechanical settings checks pass; the original host source and resolved effect still require current recorded admission. This explanation grants no authority.');
   }
+  if (toolName === 'analyze') {
+    const denied = validateAnalyzeToolInvocationForAgentPolicy(args);
+    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy adds no restriction here; the shared analysis schema decides which modes and providers apply.');
+  }
+  if (toolName === 'registry') {
+    const denied = validateRegistryToolInvocationForAgentPolicy(args);
+    return denied ? deniedByAgentPolicy(denied, AGENT_READ_ONLY_REGISTRY_TOOL_MODES) : allowedByAgentPolicy('Agent policy allows registry discovery without content modes.', AGENT_READ_ONLY_REGISTRY_TOOL_MODES);
+  }
+  if (toolName === 'find') {
+    const denied = validateFindToolInvocationForAgentPolicy(args);
+    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy allows find.');
+  }
+  if (toolName === 'web_search') {
+    const denied = validateWebSearchToolInvocationForAgentPolicy(args);
+    return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy allows web search.');
+  }
   if (toolName === 'inspect') {
     const denied = validateInspectToolInvocationForAgentPolicy(args as InspectToolArgs);
     return denied ? deniedByAgentPolicy(denied) : allowedByAgentPolicy('Agent policy allows inspection and dry-run scaffolding only.');
@@ -553,15 +613,7 @@ export const AGENT_CHANNEL_ACTION_DENIAL_MESSAGE = CHANNEL_ACTION_DENIAL;
 export const AGENT_MCP_SECURITY_MUTATION_DENIAL_MESSAGE = MCP_SECURITY_MUTATION_DENIAL;
 export const AGENT_FETCH_NETWORK_MUTATION_DENIAL_MESSAGE = FETCH_NETWORK_MUTATION_DENIAL;
 export const AGENT_STATE_MUTATION_DENIAL_MESSAGE = STATE_MUTATION_DENIAL;
-export const AGENT_SETTINGS_TOOL_DESCRIPTION_TEXT = AGENT_SETTINGS_TOOL_DESCRIPTION;
-export {
-  AGENT_CONFIRMATION_REQUIRED_CONFIG_KEYS,
-  AGENT_SETTINGS_CONFIRMATION_PROPERTY,
-  describeConfirmationRequiredDenial,
-  findConfirmationRequiredConfigKey,
-  validateSettingsToolInvocationForAgentPolicy,
-  wrapSettingsToolForAgentPolicy,
-} from './agent-settings-write-policy.ts';
+export { wrapSettingsToolForAdmittedAgentPolicy };
 export const AGENT_INSPECT_WRITE_DENIAL_MESSAGE = INSPECT_WRITE_DENIAL;
 export const AGENT_DURABLE_WORKFLOW_MUTATION_DENIAL_MESSAGE = DURABLE_WORKFLOW_MUTATION_DENIAL;
 export const AGENT_CONTROL_MUTATION_DENIAL_MESSAGE = CONTROL_MUTATION_DENIAL;
@@ -572,7 +624,6 @@ export {
 } from './agent-context-policy.ts';
 
 export {
-  AGENT_ANALYZE_NETWORK_DENIAL_MESSAGE,
   AGENT_READ_ONLY_ANALYZE_TOOL_MODES,
   AGENT_READ_ONLY_REGISTRY_TOOL_MODES,
   AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE,
@@ -587,7 +638,6 @@ export {
   AGENT_MAX_READ_IMAGE_SIZE_BYTES,
   AGENT_READ_IMAGE_MODES,
   AGENT_READ_POLICY_DENIAL_MESSAGE,
-  isBlockedReadPath,
   validateReadToolInvocationForAgentPolicy,
   wrapReadToolForAgentPolicy,
 } from './agent-read-policy.ts';

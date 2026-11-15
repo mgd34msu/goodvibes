@@ -9,7 +9,7 @@ import {
 } from '@goodvibes-jev/judgment/decisions';
 import type { DaemonErrorCategory } from './daemon-error-contract.js';
 import type { CallOptions, JudgmentPort } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort } from './judgment-authority.js';
+import { captureJudgmentPort, JudgmentAuthorityRetiredError } from './judgment-authority.js';
 import { decisionModelPolicyState, tryClassicDecisionFallback } from './decision-policy.js';
 
 /**
@@ -318,7 +318,17 @@ async function readDecisionFailure(evidence: FailureEvidence, site: string, opti
   let memo = source && memos.get(source.identity);
   if (source && !memo) { memo = new Map(); memos.set(source.identity, memo); }
   const known = memo?.get(state);
-  if (known !== undefined) { const result = await known; source?.assertCurrent(); return result; }
+  if (known !== undefined) {
+    try { const result = await known; source?.assertCurrent(); return result; }
+    catch (error) {
+      // The shared reading belongs to the caller that started it. If that caller
+      // was retired or cancelled, this one is not: a failed reading is dropped
+      // from the memo, so this caller reads for itself. Any other failure, and
+      // this caller's own retirement, still surface.
+      current();
+      if (!(error instanceof JudgmentAuthorityRetiredError)) throw error;
+    }
+  }
   const reading = (async () => {
     const run = await failureReading.run(port, state, { site,
       ...((options?.signal ?? source?.signal) ? { signal: (options?.signal ?? source?.signal)! } : {}),

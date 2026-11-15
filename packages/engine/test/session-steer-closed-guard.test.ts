@@ -17,6 +17,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
+import { makeSessionRouteContext } from './_helpers/session-route-context.ts';
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/sessions/s-1/steer', {
@@ -27,55 +28,7 @@ function makeRequest(body: unknown): Request {
 }
 
 function makeContext(steerMessage: (input: unknown) => Promise<unknown>): DaemonRuntimeRouteContext {
-  return {
-    parseJsonBody: async (req: Request) => {
-      try {
-        return await req.json();
-      } catch {
-        return new Response('Bad JSON', { status: 400 });
-      }
-    },
-    parseOptionalJsonBody: async () => null,
-    recordApiResponse: (_req: unknown, _path: unknown, response: Response) => response,
-    requireAdmin: () => null,
-    sessionBroker: {
-      start: async () => {},
-      steerMessage,
-      submitMessage: async () => { throw new Error('not expected'); },
-      followUpMessage: async () => { throw new Error('not expected'); },
-      bindAgent: async () => {},
-      createSession: async (input: { id?: string }) => ({ id: input.id ?? randomUUID() }),
-      getSession: () => null,
-      getMessages: () => [],
-      getInputs: () => [],
-      closeSession: async () => null,
-      reopenSession: async () => null,
-      cancelInput: async () => null,
-      completeAgent: async () => {},
-      appendCompanionMessage: async () => null,
-    },
-    agentManager: { getStatus: () => null, cancel: () => {} },
-    automationManager: {
-      listJobs: () => [], listRuns: () => [], getRun: () => null,
-      triggerHeartbeat: async () => null, cancelRun: async () => null, retryRun: async () => ({}),
-      createJob: async () => ({ id: randomUUID() }), updateJob: async () => null, removeJob: async () => {},
-      setEnabled: async () => null, runNow: async () => ({ id: randomUUID(), status: 'running' }),
-    },
-    normalizeAtSchedule: (at: unknown) => at,
-    normalizeEverySchedule: (interval: unknown) => interval,
-    normalizeCronSchedule: (expr: unknown) => expr,
-    routeBindings: { start: async () => {}, getBinding: () => undefined },
-    trySpawnAgent: () => ({ id: randomUUID(), status: 'running', task: 'test-task', tools: [], startedAt: Date.now() }),
-    queueSurfaceReplyFromBinding: () => {},
-    surfaceDeliveryEnabled: () => false,
-    syncSpawnedAgentTask: () => {},
-    syncFinishedAgentTask: () => {},
-    configManager: { get: () => undefined },
-    runtimeStore: null,
-    runtimeDispatch: null,
-    publishConversationFollowup: () => {},
-    openSessionEventStream: () => new Response('stream', { status: 200 }),
-  } as unknown as DaemonRuntimeRouteContext;
+  return makeSessionRouteContext({ steerMessage });
 }
 
 describe('POST /api/sessions/:id/steer: closed-session guard', () => {
@@ -91,6 +44,21 @@ describe('POST /api/sessions/:id/steer: closed-session guard', () => {
     const payload = await res.json() as { code?: string; error?: string };
     expect(payload.code).toBe('SESSION_CLOSED');
     expect(typeof payload.error).toBe('string');
+  });
+
+  test('returns 404 { code: SESSION_NOT_FOUND } and starts no agent when the broker has no such session', async () => {
+    const ctx = makeContext(async () => {
+      throw Object.assign(new Error('Unknown shared session "s-1"'), { code: 'SESSION_NOT_FOUND', status: 404 });
+    });
+    let spawned = 0;
+    (ctx as unknown as { trySpawnAgent: () => unknown }).trySpawnAgent = () => { spawned += 1; return null; };
+    const handlers = createDaemonRuntimeSessionRouteHandlers(ctx);
+
+    const res = await handlers.postSharedSessionSteer('s-1', makeRequest({ body: 'steer a session nobody holds', allowSpawnFallback: true }));
+
+    expect(res.status).toBe(404);
+    expect((await res.json() as { code?: string }).code).toBe('SESSION_NOT_FOUND');
+    expect(spawned).toBe(0);
   });
 
   test('an unrelated thrown error from the broker is not swallowed as SESSION_CLOSED', async () => {

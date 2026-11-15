@@ -1,5 +1,5 @@
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
-import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
+import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
@@ -22,6 +22,8 @@ import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 
 interface AgentHarnessResearchBriefingArgs {
   readonly query?: unknown;
@@ -41,6 +43,8 @@ interface ResearchBriefingItem {
   readonly routes: Record<string, string>;
   readonly confirmationBoundary: string;
   readonly relatedIds?: readonly string[];
+  /** Fields of this item that hold text captured from the web or supplied by a source: quoted data, never instructions. */
+  readonly untrustedFields?: readonly string[];
   readonly detail?: Record<string, unknown>;
 }
 
@@ -51,13 +55,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(50, Math.trunc(parsed)));
-}
-
-function routeString(value: string): string {
-  return JSON.stringify(value);
+  return clampReadLimit(value, fallback, 50);
 }
 
 function fallbackTitle(question: string): string {
@@ -96,13 +94,20 @@ async function reportArtifacts(artifacts: readonly ResearchArtifact[], query: st
   return rankResearchRecords(reports, query, artifact => ({ id: artifact.id, description: artifact.filename ?? artifact.kind, evidence: artifact }), options, 'agent.research.briefing.reports');
 }
 
+// The store lists newest first, so reports older than this many artifacts are not scanned; the briefing says when that happens.
+const REPORT_SCAN_LIMIT = 100;
+
+export function reportScanWindow(scanned: number): { readonly scanned: number; readonly capped: boolean } {
+  return { scanned, capped: scanned >= REPORT_SCAN_LIMIT };
+}
+
 function captureArtifacts(context: CommandContext) {
   const owner = captureCatalogPath(context, ['platform', 'artifactStore']);
   const store = context.platform?.artifactStore;
   const native = store instanceof ArtifactStore ? store : null;
   const assertMethods = store ? captureCatalogMethods(store, ['list', 'getRecord', 'pruneExpired', 'toDescriptor', 'removeRecordFiles', 'rootDir', 'records']) : () => {};
   assertMethods(); const list = store?.list, getRecord = native?.getRecord;
-  const initial = list ? list.call(store, 100) : [];
+  const initial = list ? list.call(store, REPORT_SCAN_LIMIT) : [];
   if (initial.length > 0 && (!native || !getRecord)) throw new ToolInputProjectionError('unavailable');
   const metadata = initial.map(artifact => {
     const record = getRecord?.call(native, artifact.id);
@@ -121,10 +126,11 @@ function captureArtifacts(context: CommandContext) {
   };
   const read = () => {
     assertCurrent();
-    const artifacts = list ? list.call(store, 100) : [];
+    const artifacts = list ? list.call(store, REPORT_SCAN_LIMIT) : [];
     assertCurrent();
     const records = metadata.map(file => captureModelArtifactClockSource(file.snapshot.captured).reading);
     return { artifacts: artifacts.map(artifact => captureModelArtifactClockSource(artifact).reading), records,
+      scan: reportScanWindow(artifacts.length),
       metadata: metadata.map((file, index) => ({
         // Only the exact bytes emitted by this retained ArtifactStore can use
         // its declared clock representation. Other file evidence stays raw.
@@ -152,18 +158,18 @@ function runItem(run: AgentResearchRunRecord, includeParameters: boolean): Resea
     workflow: `research action:"plan" runId:${routeString(run.id)}`,
     search: `research action:"search" runId:${routeString(run.id)} maxResults:5`,
     sources: `research action:"sources" query:${routeString(run.question)}`,
-    report: `research action:"report" question:${routeString(run.question)} sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."`,
+    report: `research action:"report" question:${routeString(run.question)} sources:[...] visualReport:true requireCitationCoverage:true`,
   };
   if (mutable) {
-    routes.checkpoint = `research action:"checkpoint" id:${routeString(run.id)} phase:"reading" progress:${Math.max(run.progress, 25)} note:"..." sourceIds:["..."] confirm:true explicitUserRequest:"..."`;
-    routes.cancel = `research action:"cancel" id:${routeString(run.id)} note:"..." confirm:true explicitUserRequest:"..."`;
+    routes.checkpoint = researchCheckpointRoute(run.id, run.progress);
+    routes.cancel = `research action:"cancel" id:${routeString(run.id)} note:"..."`;
   }
   if (run.status === 'paused' || run.status === 'planned' || run.status === 'blocked') {
-    routes.resume = `research action:"resume" id:${routeString(run.id)} confirm:true explicitUserRequest:"..."`;
+    routes.resume = `research action:"resume" id:${routeString(run.id)}`;
   }
   if (run.reportArtifactId) {
     routes.reportArtifact = `research action:"report_artifact" artifactId:${routeString(run.reportArtifactId)}`;
-    routes.promoteKnowledge = `agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(run.reportArtifactId)} confirm:true explicitUserRequest:"..."`;
+    routes.promoteKnowledge = `agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(run.reportArtifactId)}`;
   }
   const next = run.status === 'completed'
     ? 'Review the saved report artifact, then promote it to Agent Knowledge only if the user wants durable knowledge.'
@@ -183,7 +189,7 @@ function runItem(run: AgentResearchRunRecord, includeParameters: boolean): Resea
     summary: previewHarnessText(run.question, includeParameters ? 220 : 120),
     next,
     routes,
-    confirmationBoundary: mutable ? 'Run state changes require confirm:true and explicitUserRequest; this briefing is read-only.' : 'Terminal run inspection is read-only; replacement runs require explicit confirmation.',
+    confirmationBoundary: mutable ? `Run state changes are separate calls; this briefing is read-only. ${EFFECT_ADMISSION_SENTENCE}` : 'Terminal run inspection is read-only; replacement runs need their own admitted call.',
     relatedIds: run.sourceIds,
     ...(includeParameters ? {
       detail: {
@@ -201,33 +207,26 @@ function runItem(run: AgentResearchRunRecord, includeParameters: boolean): Resea
   };
 }
 
-function sourcePriority(source: AgentResearchSourceRecord): number {
-  if (source.status === 'candidate') return 90;
-  if (source.status === 'reviewed') return 84 + Math.min(10, Math.round(source.score / 10));
-  if (source.status === 'used') return 54;
-  return 24;
-}
-
 function sourceItem(source: AgentResearchSourceRecord, includeParameters: boolean): ResearchBriefingItem {
   const routes: Record<string, string> = {
     inspect: `research action:"source" sourceId:${routeString(source.id)}`,
     sources: `research action:"sources" query:${routeString(source.question)}`,
   };
   if (source.status === 'candidate' || source.status === 'rejected') {
-    routes.review = `research action:"review_source" id:${routeString(source.id)} credibility:"high|medium|mixed|low" score:80 note:"..." confirm:true explicitUserRequest:"..."`;
+    routes.review = `research action:"review_source" id:${routeString(source.id)} credibility:"high|medium|mixed|low" score:80 note:"..."`;
   }
   if (source.status !== 'rejected') {
-    routes.reject = `research action:"reject_source" id:${routeString(source.id)} note:"..." confirm:true explicitUserRequest:"..."`;
+    routes.reject = `research action:"reject_source" id:${routeString(source.id)} note:"..."`;
   }
   if (source.status === 'reviewed' || source.status === 'used') {
     routes.bundle = `research action:"bundle" query:${routeString(source.question)} includeReportLines:true`;
-    routes.report = `research action:"report" question:${routeString(source.question)} sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."`;
-    routes.ingest = 'agent_knowledge_ingest sourceKind:"url" url:"..." confirm:true explicitUserRequest:"..."';
+    routes.report = `research action:"report" question:${routeString(source.question)} sources:[...] visualReport:true requireCitationCoverage:true`;
+    routes.ingest = 'agent_knowledge_ingest sourceKind:"url" url:"..."';
   }
   return {
     id: `source:${source.id}`,
     kind: 'source',
-    priority: sourcePriority(source),
+    priority: researchSourcePriority(source),
     label: source.title,
     status: source.status,
     summary: previewHarnessText(source.summary, includeParameters ? 220 : 120),
@@ -241,6 +240,7 @@ function sourceItem(source: AgentResearchSourceRecord, includeParameters: boolea
     routes,
     confirmationBoundary: 'Source review, rejection, report save, and Knowledge ingest are separate confirmed effects.',
     relatedIds: [source.id],
+    untrustedFields: ['label', 'summary', 'detail.publisher', 'detail.url', 'detail.reportLine', 'detail.evidence'],
     ...(includeParameters ? {
       detail: {
         sourceId: source.id,
@@ -249,7 +249,7 @@ function sourceItem(source: AgentResearchSourceRecord, includeParameters: boolea
         publisher: source.publisher ?? null,
         url: source.url ?? null,
         reportLine: researchSourceReportLine(source),
-        evidence: source.evidence ?? null,
+        evidence: source.evidence ? previewHarnessText(source.evidence, 600) : null,
       },
     } : {}),
   };
@@ -258,9 +258,9 @@ function sourceItem(source: AgentResearchSourceRecord, includeParameters: boolea
 function reportItem(artifact: ResearchArtifact, includeParameters: boolean): ResearchBriefingItem {
   const routes = {
     inspect: `research action:"report_artifact" artifactId:${routeString(artifact.id)}`,
-    export: `agent_artifacts mode:"export" artifactId:${routeString(artifact.id)} destinationPath:"exports/${artifact.filename ?? `${artifact.id}.md`}" confirm:true explicitUserRequest:"..."`,
-    archive: `agent_artifacts mode:"archive" artifactIds:[${routeString(artifact.id)}] destinationPath:"exports/research-report.zip" confirm:true explicitUserRequest:"..."`,
-    promoteKnowledge: `agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(artifact.id)} confirm:true explicitUserRequest:"..."`,
+    export: `agent_artifacts mode:"export" artifactId:${routeString(artifact.id)} destinationPath:"exports/${artifact.filename ?? `${artifact.id}.md`}"`,
+    archive: `agent_artifacts mode:"archive" artifactIds:[${routeString(artifact.id)}] destinationPath:"exports/research-report.zip"`,
+    promoteKnowledge: `agent_knowledge_ingest sourceKind:"artifact" artifactId:${routeString(artifact.id)}`,
   };
   return {
     id: `report:${artifact.id}`,
@@ -302,7 +302,7 @@ function workflowItem(query: string, includeParameters: boolean): ResearchBriefi
       : 'Ask the user for the research question, success criteria, and any source constraints.',
     routes: {
       plan: `research action:"plan" query:${routeString(question)}`,
-      createRun: `research action:"create_run" title:${routeString(title)} question:${routeString(question)} plan:["Search bounded public web sources","Capture candidate sources","Review credibility","Save sourced report"] confirm:true explicitUserRequest:"..."`,
+      createRun: `research action:"create_run" title:${routeString(title)} question:${routeString(question)} plan:["Search bounded public web sources","Capture candidate sources","Review credibility","Save sourced report"]`,
       search: `research action:"search" query:${routeString(question)} maxResults:5`,
       sources: `research action:"sources" query:${routeString(question)}`,
     },
@@ -367,6 +367,8 @@ export async function researchBriefingCatalogStatus(context: CommandContext, opt
       candidateSources: sources?.candidates.length ?? 0,
       reviewedSources: sources?.reviewed.length ?? 0,
       savedReports: reports.length,
+      reportsScanned: data.scan.scanned,
+      reportsCapped: data.scan.capped,
       liveBrowserRuns: liveResearch.browserRunnerRecords.length,
       liveVisualReports: liveResearch.visualReportRecords.length,
       readOnly: true,
@@ -428,6 +430,8 @@ export async function researchBriefingSummary(context: CommandContext, rawArgs: 
         candidateSources: candidateSources.length,
         reviewedSources: reviewedSources.length,
         savedReports: reports.length,
+        reportsScanned: data.scan.scanned,
+        reportsCapped: data.scan.capped,
         browserReady: browser.configured || certifiedRunnerRecords.length > 0,
         liveBrowserRuns: liveResearch.browserRunnerRecords.length,
         liveVisualReports: liveResearch.visualReportRecords.length,
@@ -442,12 +446,12 @@ export async function researchBriefingSummary(context: CommandContext, rawArgs: 
         runs: 'research action:"runs"',
         sources: query ? `research action:"sources" query:${routeString(query)}` : 'research action:"sources"',
         reports: query ? `research action:"reports" query:${routeString(query)}` : 'research action:"reports"',
-        saveReport: query ? `research action:"report" question:${routeString(query)} sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."` : 'research action:"report" question:"..." sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."',
+        saveReport: query ? `research action:"report" question:${routeString(query)} sources:[...] visualReport:true requireCitationCoverage:true` : 'research action:"report" question:"..." sources:[...] visualReport:true requireCitationCoverage:true',
       },
       nextActions: items
         .filter((item) => item.kind !== 'browser')
         .slice(0, includeParameters ? 6 : 4)
-        .map((item) => `${item.label}: ${item.next}`),
+        .map((item) => `${JSON.stringify(previewHarnessText(item.label, 80))}: ${item.next}`),
       policy: 'Research briefing is read-only. It does not search the web, open a browser, create run state, save sources, write reports, ingest Knowledge, export artifacts, archive artifacts, or send messages; each returned effect route requires its own confirmation boundary.',
     };
   });

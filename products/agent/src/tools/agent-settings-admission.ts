@@ -2,7 +2,10 @@ import { agentResearchSourceOwner } from '../agent/protected-research-report.ts'
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
 import { readFileSync } from 'node:fs';
+import { settingsOutcomeError } from './agent-settings-outcome.ts';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
+import { agentSettingsWriteRefusal } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToolSettingsDispatch,
   commitCurrentToolSettingsPlan, currentToolSettingsPresentation, ToolInputProjectionError,
   type ToolInputProjector, type ToolRegistry, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -129,6 +132,7 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     if (operation === 'set' && original.value === undefined) throw new ToolInputProjectionError('invalid');
     // An alias must not hide declared credential material from the privacy floor.
     snapshotJudgmentInput({ key, value }, 'goodvibes_settings');
+    assertSettingsWriteAllowed(operation, key, value);
     const credentialClear = secretKey && (operation === 'reset' || (typeof value === 'string' && value.trim() === ''));
     if (secretKey && operation === 'set' && typeof value === 'string' && value.trim() && !isSecretReferenceValue(value)) throw new ToolInputProjectionError('held');
     const capability = client?.preparedSettings;
@@ -229,14 +233,55 @@ export async function executeAdmittedPreferredSettings(args: Record<string, unkn
         try { deletion.owner.assertCompletedScopedDeletion(deletion.mutation); }
         catch { verified = false; }
       }
-    } catch { /* Reporting cannot undo an already committed effect. */ }
+    } catch (readBackError) {
+      // Reporting cannot undo an already committed effect; verified stays false and says so.
+      logger.warn('A committed setting could not be read back from its destination', { key: capture.key, error: summarizeError(readBackError) });
+    }
   }
+  const refused = 'refused' in receipt && receipt.refused === true;
+  const reportedReason = refused && 'refusalReason' in receipt ? receipt.refusalReason : undefined;
+  const refusalReason = (['stale', 'spent', 'managed', 'read-only', 'owner-fault'] as const).find(known => known === reportedReason);
+  const unverified = settingsCommitWarning(receipt.status, verified);
   return { success: receipt.status === 'committed', output: JSON.stringify({ key: capture.key, action: capture.operation,
-    status: receipt.status, previous: presentation.previous,
+    status: refused ? 'refused' : receipt.status, ...(refusalReason ? { refusalReason } : {}), previous: presentation.previous,
     ...(verified && (capture.operation === 'set' || capture.remote) ? { current: presentation.current } : {}),
     lookup: capture.lookup, scope: configKeyScope(capture.key), appliedBy: capture.local ? 'local' : 'daemon',
     persistedTo: capture.persistedTo, verifiedInOwningStore: verified, completedPaths: receipt.completedPaths,
     ...(capture.companion && receipt.status === 'committed' ? { alsoSet: capture.companion } : {}),
-    ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
-    ...(receipt.status !== 'committed' ? { error: 'Settings outcome is partial or unknown; no mutation was retried.' } : {}) };
+    ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}),
+    ...(unverified ? { warning: unverified } : {}) }),
+    ...(unverified ? { warnings: [unverified] } : {}),
+    ...(receipt.status !== 'committed' ? { error: settingsOutcomeError(receipt.status, refused, refusalReason) } : {}) };
+}
+
+const SETTINGS_COMMITTED_UNVERIFIED = 'The owner reports the change as committed, but it could not be read back from the owning store, so it is not confirmed. Read the setting before telling the user it is set.';
+
+/** A committed write that could not be read back is reported with a next step, not as plain success. */
+export function settingsCommitWarning(status: string, verified: boolean): string | undefined {
+  return status === 'committed' && !verified ? SETTINGS_COMMITTED_UNVERIFIED : undefined;
+}
+
+/**
+ * A call that threw. A held or stale admission is the only thing that means
+ * "nothing was tried"; anything else may have happened after the capture was
+ * spent, so it is reported with its cause and the instruction to read the
+ * setting back instead of as an authorization hold.
+ */
+/** Owner-only settings (payments, credential destinations, foreign secret references) are refused before any admission or effect. */
+export class SettingsWriteRefusedError extends ToolInputProjectionError {
+  // The refusal rides as the error's detail: a projector throw never reaches execute, so the host's describers are the only path to the agent.
+  constructor(readonly refusal: string) { super('held', refusal); }
+}
+
+export function assertSettingsWriteAllowed(operation: 'set' | 'reset', key: string, value: unknown): void {
+  const refusal = agentSettingsWriteRefusal({ mode: operation, key, value });
+  if (refusal) throw new SettingsWriteRefusedError(refusal);
+}
+
+export function settingsThrownFailure(subject: 'mutation' | 'import', thrown: unknown): { readonly success: false; readonly error: string } {
+  if (thrown instanceof SettingsWriteRefusedError) return { success: false, error: thrown.refusal };
+  if (thrown instanceof ToolInputProjectionError) {
+    return { success: false, error: `Settings ${subject} requires a current recorded effect-owner admission. Nothing was applied. Settings change only for what the owner asked in this turn; confirm and explicitUserRequest are not authority. Ask the owner to make the request, and do not retry the same call.` };
+  }
+  return { success: false, error: `Settings ${subject} did not finish: ${summarizeError(thrown)}. It may or may not have been applied and was not retried; read the setting before requesting it again.` };
 }

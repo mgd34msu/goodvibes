@@ -16,8 +16,13 @@ export async function discoverZones(
       ...(input.accountId ? { account: { id: input.accountId } } : {}),
       ...(clean(input.zoneName) ? { name: clean(input.zoneName) } : {}),
     };
-    return await collectAsync(client.zones!.list(query));
+    return await collectAsync(client.zones!.list(query), undefined, () => truncationWarning('zones', input.warnings));
   }) ?? [];
+}
+
+/** Discovery lists are capped; say so, or a partial account reads as the whole account. */
+export function truncationWarning(label: string, warnings: string[]): void {
+  warnings.push(`The Cloudflare ${label} list was cut off at 250 items, so this result is partial.`);
 }
 
 export async function selectDiscoveredZone(

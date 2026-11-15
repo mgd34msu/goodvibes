@@ -2,7 +2,7 @@
  * WorkView against a mocked platform: Needs you comes first and the first item
  * opens by itself; the approval detail approves (with a Remember tier, an
  * exec-prompt answer, a hunk subset) and denies (with a reason); the push
- * hand-off fragments complete; the kind filter, the old Checkpoints link, the
+ * hand-off fragments open the approval (Allow) or deny it (Deny); the kind filter, the old Checkpoints link, the
  * hosted attach and detach, process actions behind the confirm sheet, and the
  * honesty rules (no "price unknown", no polling text).
  */
@@ -52,6 +52,7 @@ const EDIT = {
 };
 
 let approvals: unknown[] = [PENDING];
+let approveResult: unknown = null;
 let contextWindow: number | null | undefined = 10000;
 let contextUsagePct: number | null = 10;
 let contextError: Error | null = null;
@@ -122,6 +123,7 @@ mock.module('../../lib/goodvibes', () => ({
         list: () => Promise.resolve({ approvals }),
         approve: (id: string, input?: unknown) => {
           calls.approve.push({ id, input });
+          if (approveResult) return Promise.resolve(approveResult);
           return Promise.resolve({ approval: { ...PENDING, id, status: 'approved' }, recorded: { approved: true, rememberTier: 'exact', reasonStored: false, modifiedArgsDelivered: true } });
         },
         deny: (id: string, input?: unknown) => {
@@ -242,6 +244,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void
 afterEach(() => {
   for (const list of Object.values(calls)) list.length = 0;
   approvals = [PENDING];
+  approveResult = null;
   contextWindow = 10000;
   contextUsagePct = 10;
   contextError = null;
@@ -291,6 +294,20 @@ describe('the approval detail', () => {
     unmount();
   });
 
+  test('approving an ask that already expired says nothing changed, never "Approved"', async () => {
+    const refusal = 'Approval is expired by approval-broker, which is final; it cannot become approved. Nothing changed.';
+    approveResult = { approval: { ...PENDING, status: 'expired' }, applied: false, refusal };
+    const { el, unmount } = render();
+    await waitFor(() => Boolean(el.querySelector('.dv-detail')));
+    click(button(el.querySelector('.dv-detail')!, 'Approve'));
+    await waitFor(() => calls.approve.length === 1);
+    await waitFor(() => (el.querySelector('.toast-viewport')?.textContent ?? '').includes('Already expired, nothing changed'));
+    const toasts = el.querySelector('.toast-viewport')?.textContent ?? '';
+    expect(toasts).toContain(refusal);
+    expect(toasts).not.toContain('Approved');
+    unmount();
+  });
+
   test('Deny sends the optional reason on both wire fields', async () => {
     const { el, unmount } = render();
     await waitFor(() => Boolean(el.querySelector('input[aria-label="Deny reason for bash"]')));
@@ -324,11 +341,22 @@ describe('the approval detail', () => {
     unmount();
   });
 
-  test('a push notification hand-off completes the approval on mount and scrubs the fragment', async () => {
-    window.history.replaceState(null, '', '/?view=work#approval-action=approve&approval-id=ap-1');
+  test('a push "Allow" hand-off opens the approval for review and does not approve it', async () => {
+    approvals = [PENDING, EXEC_PROMPT];
+    window.history.replaceState(null, '', '/?view=work#approval-action=approve&approval-id=ap-2');
+    const { el, unmount } = render();
+    await waitFor(() => (el.querySelector('.dv-detail')?.textContent ?? '').includes('npm init'));
+    expect(calls.approve).toEqual([]);
+    expect(window.location.hash).toBe('');
+    unmount();
+  });
+
+  test('a push "Deny" hand-off denies on mount and scrubs the fragment', async () => {
+    window.history.replaceState(null, '', '/?view=work#approval-action=deny&approval-id=ap-1');
     const { unmount } = render();
-    await waitFor(() => calls.approve.length === 1);
-    expect(calls.approve[0].id).toBe('ap-1');
+    await waitFor(() => calls.deny.length === 1);
+    expect(calls.deny[0].id).toBe('ap-1');
+    expect(calls.approve).toEqual([]);
     expect(window.location.hash).toBe('');
     unmount();
   });

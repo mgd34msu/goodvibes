@@ -7,7 +7,7 @@ import {
   OPERATOR_METHOD_IDS,
   PEER_ENDPOINT_IDS,
   RUNTIME_EVENT_DOMAINS,
-} from '../contracts/dist/index.js';
+} from '../contracts/src/index.js';
 
 describe('contracts package', () => {
   test('foundation metadata matches synced artifacts', () => {

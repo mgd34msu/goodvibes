@@ -40,6 +40,7 @@ const DEBOUNCE_MS = 250;
 export const MAX_TERMINAL_CONTRACT_FILES = Infinity;
 /** Age past which a terminal contract file is reaped, from its completion (or last write). */
 export const TERMINAL_CONTRACT_MAX_AGE_MS = Infinity;
+const REAPS_TERMINAL_CONTRACTS = Number.isFinite(TERMINAL_CONTRACT_MAX_AGE_MS) || Number.isFinite(MAX_TERMINAL_CONTRACT_FILES);
 /** Quarantine files are forensic, so they outlive terminal contracts: a month. */
 export const CONTRACT_QUARANTINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** A crash loop can mint one quarantine file per start, so the age bound alone is not a bound. Newest are kept. */
@@ -217,6 +218,20 @@ export interface ContractStoreOptions {
   readonly debounceMs?: number | undefined;
   /** Housekeeping interval while attached; 0 turns the timer off. Defaults to an hour. */
   readonly sweepIntervalMs?: number | undefined;
+  /**
+   * Called when a checkpoint write fails, with the contract and a plain
+   * statement of why. The write has no caller to throw to when it runs from the
+   * debounce timer or a flush, so this is where a failure becomes visible.
+   */
+  readonly onWriteFailure?: ((contractId: string, failure: ContractWriteFailure) => void) | undefined;
+}
+
+/** The last checkpoint write that failed for a contract, until a write succeeds. */
+export interface ContractWriteFailure {
+  readonly at: number;
+  readonly message: string;
+  /** The file was written by a newer build; writes stop until that file changes. */
+  readonly newerFormat: boolean;
 }
 
 export interface ContractCreationReservation {
@@ -280,8 +295,11 @@ export class ContractStore {
   private readonly beforeCreate: ((contractId: string) => void) | undefined;
   private readonly creations = new Map<string, CreationState>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly writeFailures = new Map<string, ContractWriteFailure>();
+  private readonly onWriteFailure: ContractStoreOptions['onWriteFailure'];
 
   constructor(options: ContractStoreOptions) {
+    this.onWriteFailure = options.onWriteFailure;
     this.projectRoot = options.projectRoot;
     this.now = options.now ?? Date.now;
     this.debounceMs = options.debounceMs ?? DEBOUNCE_MS;
@@ -293,6 +311,11 @@ export class ContractStore {
   /** The live contract, which the runner mutates in place. */
   get(contractId: string): Contract | null {
     return this.contracts.get(contractId) ?? null;
+  }
+
+  /** The failure of this contract's most recent checkpoint write, or null when it last succeeded (or never failed). */
+  writeFailure(contractId: string): ContractWriteFailure | null {
+    return this.writeFailures.get(contractId) ?? null;
   }
 
   list(): Contract[] {
@@ -373,6 +396,8 @@ export class ContractStore {
   /** Holds a contract in memory and schedules its write. */
   put(contract: Contract): void {
     this.assertStoredVersion(contract.id);
+    // The newer-format file is gone or replaced: writing may resume.
+    if (this.writeFailures.get(contract.id)?.newerFormat) this.writeFailures.delete(contract.id);
     this.contracts.set(contract.id, contract);
     this.scheduleWrite(contract.id);
   }
@@ -414,9 +439,18 @@ export class ContractStore {
         syncContractDirectory(contractCheckpointsDir(this.projectRoot));
         syncContractDirectory(contractsDir(this.projectRoot));
       }
+      this.writeFailures.delete(contract.id);
       return true;
     } catch (error) {
       logger.error('contract store: write failed', { path, error: summarizeError(error) });
+      const failure: ContractWriteFailure = {
+        at: this.now(),
+        message: error instanceof ContractStoreVersionError ? error.message : `The checkpoint could not be written: ${summarizeError(error)}`,
+        newerFormat: error instanceof ContractStoreVersionError,
+      };
+      this.writeFailures.set(contract.id, failure);
+      try { this.onWriteFailure?.(contract.id, failure); }
+      catch (callbackError) { logger.warn('contract store: write-failure listener threw', { error: summarizeError(callbackError) }); }
       return false;
     }
   }
@@ -424,6 +458,8 @@ export class ContractStore {
   /** Writes the contract after the debounce; a later call for the same contract restarts the wait. */
   scheduleWrite(contractId: string): void {
     this.cancelPendingWrite(contractId);
+    // A newer build's file is never overwritten; retrying on every event only repeats the refusal.
+    if (this.writeFailures.get(contractId)?.newerFormat) return;
     const timer = setTimeout(() => {
       this.timers.delete(contractId);
       this.write(contractId);
@@ -617,6 +653,9 @@ export class ContractStore {
       if (!isContractId(id)) continue;
       const held = this.contracts.get(id);
       if (held && !isTerminalContractStatus(held.status)) continue;
+      // Completed contracts are kept without bound, so there is nothing to reap
+      // and no reason to read and parse every checkpoint to find out.
+      if (!REAPS_TERMINAL_CONTRACTS) continue;
       // Terminal-ness is decided by content. A file that is refused is left
       // for load() to quarantine with its disclosure, not deleted here.
       let text: string;

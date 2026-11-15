@@ -85,23 +85,47 @@ function errorFrame(code: RelayErrorCode, message: string, pipe?: PipeId): strin
   return encodeControlFrame(pipe !== undefined ? { t: 'error', code, message, pipe } : { t: 'error', code, message });
 }
 
-/** A simple per-address rolling-minute counter for handshake attempts. */
-class HandshakeRateLimiter {
+/** Most addresses the limiter remembers at once; past it the least recently added are forgotten. */
+const MAX_TRACKED_ADDRESSES = 10_000;
+
+/**
+ * A per-address rolling-minute counter for handshake attempts, bounded in the
+ * number of addresses it remembers so a public relay probed from many sources
+ * cannot grow it without limit. Behind a proxy every client shares the proxy's
+ * address, so they also share one allowance.
+ */
+export class HandshakeRateLimiter {
   private readonly hits = new Map<string, number[]>();
-  constructor(private readonly perMinute: number) {}
+  constructor(private readonly perMinute: number, private readonly maxAddresses = MAX_TRACKED_ADDRESSES) {}
+  /** Addresses currently remembered. */
+  get trackedAddresses(): number {
+    return this.hits.size;
+  }
   allow(addr: string, now: number): boolean {
     const cutoff = now - 60_000;
     const list = (this.hits.get(addr) ?? []).filter((t) => t > cutoff);
+    // Re-insert so the map stays ordered by most recent activity.
+    this.hits.delete(addr);
     if (list.length >= this.perMinute) {
       this.hits.set(addr, list);
+      this.trim(cutoff);
       return false;
     }
     list.push(now);
     this.hits.set(addr, list);
+    this.trim(cutoff);
     return true;
   }
   forget(addr: string): void {
     this.hits.delete(addr);
+  }
+  private trim(cutoff: number): void {
+    if (this.hits.size <= this.maxAddresses) return;
+    // Addresses whose attempts all fell out of the window carry no information.
+    for (const [addr, list] of this.hits) {
+      if (list[list.length - 1]! <= cutoff) this.hits.delete(addr);
+    }
+    while (this.hits.size > this.maxAddresses) this.hits.delete(this.hits.keys().next().value!);
   }
 }
 

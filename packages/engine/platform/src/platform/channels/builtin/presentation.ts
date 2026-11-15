@@ -1,43 +1,9 @@
 import type { ChannelRenderPolicy, ChannelSurface } from '../types.js';
+import { DEFAULT_POLICY } from '../reply-policy.js';
 
+/** The built-in surface's render policy: the one default table, marked as built in. */
 export function renderBuiltinPolicy(surface: ChannelSurface): ChannelRenderPolicy {
-  const base = {
-    surface,
-    maxEventsPerUpdate: 16,
-    metadata: { builtIn: true },
-  };
-  switch (surface) {
-    case 'tui':
-      return { ...base, reasoningVisibility: 'public', format: 'markdown', supportsThreads: true, maxChunkChars: 8_000 };
-    case 'web':
-      return { ...base, reasoningVisibility: 'summary', format: 'markdown', supportsThreads: true, maxChunkChars: 8_000 };
-    case 'slack':
-    case 'discord':
-    case 'telegram':
-    case 'google-chat':
-    case 'msteams':
-    case 'mattermost':
-    case 'matrix':
-      return {
-        ...base,
-        reasoningVisibility: 'summary',
-        format: 'markdown',
-        supportsThreads: surface !== 'telegram',
-        maxChunkChars: surface === 'slack' || surface === 'discord' ? 2_500 : 3_500,
-      };
-    case 'ntfy':
-      return { ...base, reasoningVisibility: 'suppress', format: 'plain', supportsThreads: false, maxChunkChars: 1_600 };
-    case 'webhook':
-      return { ...base, reasoningVisibility: 'private', format: 'json', supportsThreads: false, maxChunkChars: 12_000 };
-    case 'homeassistant':
-      return { ...base, reasoningVisibility: 'summary', format: 'json', supportsThreads: true, maxChunkChars: 8_000 };
-    case 'signal':
-    case 'whatsapp':
-    case 'telephony':
-    case 'imessage':
-    case 'bluebubbles':
-      return { ...base, reasoningVisibility: 'summary', format: 'plain', supportsThreads: false, maxChunkChars: 3_500 };
-  }
+  return { ...DEFAULT_POLICY[surface], metadata: { ...DEFAULT_POLICY[surface].metadata, builtIn: true } };
 }
 
 export function surfaceLabelForBuiltin(surface: ChannelSurface): string {

@@ -34,8 +34,14 @@ import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } fr
 import { NativeContinuationOwner, nativeContinuationParents, type NativeContinuationParents } from './native-continuation-owner.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
+import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 
 const TOKEN_PREFIX = 'gvp_';
+
+/** Whether a presented credential has the pairing-token shape (not whether it is valid). */
+export function isPairingTokenShape(token: string): boolean {
+  return token.trim().startsWith(TOKEN_PREFIX);
+}
 /** Do not thrash the disk stamping last-seen on every request. */
 const LAST_SEEN_FLUSH_INTERVAL_MS = 10_000;
 const OWNER_LOCK_NAMESPACE_VERSION = 'goodvibes-pairing-owner-lock-v2\n';
@@ -89,6 +95,30 @@ interface PairingTokenSnapshot {
 }
 class UnsupportedNativeSourceBindingError extends Error {}
 
+/**
+ * Continuation grants are tombstones: a consumed or revoked grant must stay so
+ * its source cannot be issued again. They stop mattering only when the pairing
+ * they were issued under no longer exists, because every use of such a grant
+ * (read, consume, issue a child) first needs that pairing's record, and a new
+ * pairing gets a new random id. So exactly the grants whose pairing is gone are
+ * dropped, together with the cancelled-source tombstones that only those grants
+ * referenced. Grants of a live pairing, and cancelled sources no grant ever
+ * referenced, are never dropped: nothing proves they cannot be presented again.
+ */
+function pruneUnpresentableContinuations(snapshot: PairingTokenSnapshot): void {
+  const grants = snapshot.continuations;
+  if (!grants?.length) return;
+  const live = new Set(snapshot.tokens.map(token => token.id));
+  const kept = grants.filter(grant => live.has(grant.tokenId));
+  if (kept.length === grants.length) return;
+  const sourcesOf = (list: readonly StoredNativeContinuationGrant[]) =>
+    new Set(list.flatMap(grant => [grant.sourceBinding, grant.successorSourceBinding]).filter((value): value is string => value !== null));
+  const stillReferenced = sourcesOf(kept);
+  const dropped = new Set([...sourcesOf(grants.filter(grant => !live.has(grant.tokenId)))].filter(source => !stillReferenced.has(source)));
+  snapshot.continuations = kept;
+  if (snapshot.revokedNativeSources) snapshot.revokedNativeSources = snapshot.revokedNativeSources.filter(source => !dropped.has(source));
+}
+
 /** The redacted, wire-safe view of a pairing token, no hash, no secret. */
 export interface PublicPairingToken {
   readonly id: string;
@@ -131,8 +161,9 @@ interface SettingsPairingAuthorityRecord {
 
 export class PairingTokenStoreBusyError extends Error {
   readonly code = 'PAIRING_TOKEN_STORE_BUSY';
-  constructor() {
-    super('Pairing token authority is busy or its ownership lock needs recovery');
+  /** @param detail Which lock, and who holds it, when that is known. */
+  constructor(detail?: string) {
+    super(`Pairing token authority is busy or its ownership lock needs recovery${detail ? `: ${detail}` : ''}`);
     this.name = 'PairingTokenStoreBusyError';
   }
 }
@@ -254,15 +285,29 @@ export class PairingTokenManager {
   /** Live hash -> identity index, paired with fresh disk proof for native auth. */
   private index = new Map<string, StoredPairingToken>();
   private lastSeenFlushAt = 0;
-  /** Any failed write blocks native admission until a successful owner mutation. */
-  private nativePersistenceFailed = false;
+  private lastSeenFailureLogged = false;
+  /**
+   * Any failed write blocks native admission. A failed owner write (revoke,
+   * mint, rename, native grants) or an unconfirmed native read clears only on
+   * a later successful owner mutation; a failed last-seen stamp, which changes
+   * no authority, also clears on the next stamp that writes durably.
+   */
+  private nativePersistenceFailed: false | 'owner' | 'last-seen' = false;
   // Same-serving-owner evidence only; no reconstruction of prior process history.
   // These flags never weaken ordinary/manual authentication or native behavior.
+  // A read fault, or a start that could not take the lock, is re-checked under
+  // the owner lock at the next settings capture, so a transient cause recovers
+  // without a restart. A failed owner write (a revoke that may not have landed)
+  // or a lost owner lock stays a hold for this serving owner. An observed store
+  // or legacy revocation never un-happens, and an unverified start never
+  // certifies an absent store as fresh.
   private settingsInitializationVerified = false;
   private settingsCleanInitialAbsence = false;
   private settingsObservedStore = false;
   private settingsObservedLegacyRevocation = false;
-  private settingsFaulted = false;
+  private settingsFaulted: false | 'read' | 'owner' = false;
+  /** True while settings authority is held by a read or owner-write fault. */
+  get settingsAuthorityFaulted(): boolean { return this.settingsFaulted !== false; }
   private readonly settingsAuthorities = new WeakMap<SettingsPairingAuthority, SettingsPairingAuthorityRecord>();
   private readonly readMaxPaired: (() => number | undefined) | null;
   private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
@@ -289,15 +334,15 @@ export class PairingTokenManager {
         this.settingsInitializationVerified = true;
         this.snapshot = observed ?? { tokens: [] };
       } catch (error) {
-        this.settingsFaulted = true;
-        // Retain ordinary recovery, with the observed strict failure latched.
+        this.faultSettings('read');
+        // Retain ordinary recovery, with the observed strict failure recorded.
         if (!(error instanceof UnsupportedNativeSourceBindingError)) this.snapshot = this.load();
       }
     } catch {
-      this.settingsFaulted = true;
       // A live owner may be launching, or this process may lack write access.
       // Reading a complete file is safe; quarantining/repairing it without
       // ownership is not. Ordinary auth retains its read-only startup behavior.
+      // Settings authority stays unverified until a capture verifies it under the lock.
       try { this.snapshot = this.readPersisted() ?? { tokens: [] }; } catch { /* fail closed */ }
     } finally { lock?.release(); }
     this.reindex();
@@ -341,9 +386,14 @@ export class PairingTokenManager {
         }) ?? { tokens: [] }
       );
     } catch {
-      this.settingsFaulted = true;
+      this.faultSettings('read');
       return { tokens: [] };
     }
+  }
+
+  /** A failed owner write or a lost lock outranks a read fault; nothing downgrades it. */
+  private faultSettings(kind: 'read' | 'owner'): void {
+    if (this.settingsFaulted !== 'owner') this.settingsFaulted = kind;
   }
 
   private reindex(): void {
@@ -360,7 +410,9 @@ export class PairingTokenManager {
       return snapshot;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      this.settingsFaulted = true;
+      // Something is there, even if unreadable: a later absence is not a clean one.
+      this.settingsObservedStore = true;
+      this.faultSettings('read');
       throw error;
     }
   }
@@ -388,12 +440,20 @@ export class PairingTokenManager {
     const namespace = lstatSync(namespacePath);
     if (!namespace.isDirectory() || namespace.isSymbolicLink() || (namespace.mode & 0o077) !== 0) throw new PairingTokenStoreBusyError();
     const lockPath = join(namespacePath, `${basename(this.filePath)}.lock`);
-    try { mkdirSync(lockPath); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PairingTokenStoreBusyError();
-      throw error;
+    for (let attempt = 0;; attempt++) {
+      try { mkdirSync(lockPath); break; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        // A lock left by a crash is reclaimed only when its recorded holder is proven dead.
+        if (reclaimDeadOwnerLock(lockPath)) continue;
+        // A holder still writing its record is taking the lock right now, not a crash leftover: wait for it.
+        if (waitWhileLockIsBeingTaken(lockPath, attempt)) continue;
+        throw new PairingTokenStoreBusyError(describeOwnerLock(lockPath));
+      }
     }
     const owned = lstatSync(lockPath);
+    try { recordOwnerLockHolder(lockPath); }
+    catch (error) { rmdirSync(lockPath); throw error; }
     const assertOwned = () => {
       let current;
       try { current = lstatSync(lockPath); } catch { throw new PairingTokenStoreBusyError(); }
@@ -407,7 +467,7 @@ export class PairingTokenManager {
         || (currentNamespace.mode & 0o077) !== 0
         || currentNamespace.dev !== namespace.dev || currentNamespace.ino !== namespace.ino) throw new PairingTokenStoreBusyError();
     };
-    return { assertOwned, release: () => { assertOwned(); rmdirSync(lockPath); } };
+    return { assertOwned, release: () => { assertOwned(); removeOwnerLockDirectory(lockPath); } };
   }
 
   private publish(snapshot: PairingTokenSnapshot): void {
@@ -419,12 +479,21 @@ export class PairingTokenManager {
   }
 
   /** Reload under ownership, persist, THEN expose a successful mutation. */
-  private mutate<T>(operation: (snapshot: PairingTokenSnapshot) => { readonly value: T; readonly changed: boolean }, nativeRecovery = true): T {
+  private mutate<T>(operation: (snapshot: PairingTokenSnapshot) => { readonly value: T; readonly changed: boolean }, nativeRecovery = true,
+    /**
+     * True when the operation only ADDED authority (a new pairing replacing nothing). A write that
+     * fails then cannot have left a revocation unrecorded, so the settings fault is the re-verifiable
+     * kind: the next capture re-reads the disk under the lock. A revoke, rename or grant that fails
+     * to persist keeps the strict hold until restart.
+     */
+    additiveOnly: () => boolean = () => false): T {
     const lock = this.acquireOwnerLock();
     try {
       const persisted = this.readPersisted();
       const snapshot = persisted ?? { tokens: [] };
       const result = operation(snapshot);
+      // Rides on a write that is happening anyway; a read never rewrites the file.
+      if (result.changed) pruneUnpresentableContinuations(snapshot);
       try {
         lock.assertOwned();
         if (result.changed) {
@@ -444,24 +513,40 @@ export class PairingTokenManager {
           confirmFileDurable(this.filePath);
         }
       } catch (error) {
-        this.nativePersistenceFailed = true;
-        this.settingsFaulted = true;
+        this.nativePersistenceFailed = nativeRecovery || this.nativePersistenceFailed === 'owner' ? 'owner' : 'last-seen';
+        // A last-seen stamp changes no authority, so its failure is re-verifiable like an additive write.
+        this.faultSettings(additiveOnly() || !nativeRecovery ? 'read' : 'owner');
         throw error;
       }
-      if (nativeRecovery && (result.changed || persisted !== null)) this.nativePersistenceFailed = false;
+      if (nativeRecovery ? result.changed || persisted !== null : result.changed && this.nativePersistenceFailed === 'last-seen') {
+        this.nativePersistenceFailed = false;
+      }
       lock.assertOwned();
       this.publish(snapshot);
       return result.value;
     } finally { lock.release(); }
   }
 
-  /** Read without fallback, repair, telemetry, or native-only substitution. */
+  /**
+   * Read without fallback, repair, telemetry, or native-only substitution.
+   * Called only under the owner lock. A read fault, or a start that could not
+   * take the lock, is re-verified here: a valid, durably confirmed snapshot
+   * clears it. An owner-write fault is never cleared here.
+   */
   private readSettingsSnapshot(): PairingTokenSnapshot | null {
-    if (!this.settingsInitializationVerified || this.settingsFaulted) throw new SettingsAuthorityUnavailableError();
+    if (this.settingsFaulted === 'owner') throw new SettingsAuthorityUnavailableError();
+    const recovering = this.settingsFaulted !== false || !this.settingsInitializationVerified;
+    const recovered = () => {
+      if (recovering) logger.info('Pairing settings authority verified under the owner lock', { path: this.filePath });
+      this.settingsInitializationVerified = true;
+      this.settingsFaulted = false;
+    };
     try {
       const snapshot = this.readPersisted();
       if (snapshot === null) {
-        if (!this.settingsCleanInitialAbsence || this.settingsObservedStore) throw new SettingsAuthorityUnavailableError();
+        // Only a start verified under the lock can certify a fresh absence.
+        if (!this.settingsInitializationVerified || !this.settingsCleanInitialAbsence || this.settingsObservedStore) throw new SettingsAuthorityUnavailableError();
+        recovered();
         return null;
       }
       confirmFileDurable(this.filePath);
@@ -469,16 +554,17 @@ export class PairingTokenManager {
       // rejects a publication changed during durability confirmation.
       const confirmed = this.readPersisted();
       if (!confirmed || JSON.stringify(confirmed) !== JSON.stringify(snapshot)) throw new SettingsAuthorityUnavailableError();
+      recovered();
       return confirmed;
     } catch {
-      this.settingsFaulted = true;
+      this.faultSettings('read');
       throw new SettingsAuthorityUnavailableError();
     }
   }
 
   captureSettingsAuthority(input: { readonly kind: 'shared-token' }
     | { readonly kind: 'pairing-token'; readonly token: string }): SettingsPairingAuthority | null {
-    if (input.kind === 'pairing-token' && !input.token.trim().startsWith(TOKEN_PREFIX)) return null;
+    if (input.kind === 'pairing-token' && !isPairingTokenShape(input.token)) return null;
     let lock: PairingOwnerLock | undefined;
     try {
       lock = this.acquireOwnerLock();
@@ -535,7 +621,7 @@ export class PairingTokenManager {
       active = false;
       try { lock.release(); }
       catch (error) {
-        this.settingsFaulted = true;
+        this.faultSettings('owner');
         // Cleanup cannot undo an effect or replace its truthful receipt with a
         // refusal. A leftover/lost lock and this owner fault block later work.
         if (!completed) throw error;
@@ -565,8 +651,8 @@ export class PairingTokenManager {
       if (readFileSync(this.filePath, 'utf8') !== before) return null;
       persisted = snapshot.tokens.find(record => record.tokenHash === hash);
     } catch (error) {
-      if (error instanceof AtomicWriteDurabilityError) this.nativePersistenceFailed = true;
-      this.settingsFaulted = true;
+      if (error instanceof AtomicWriteDurabilityError) this.nativePersistenceFailed = 'owner';
+      this.faultSettings('read');
       return null;
     }
     if (!persisted || persisted.id !== live.id || persisted.createdAt !== live.createdAt) return null;
@@ -675,7 +761,7 @@ export class PairingTokenManager {
       }
       tokenRevision = tokenRecord.nativeContinuationRevision.id;
       try { ownerRoot = this.continuationOwner.ensure(); }
-      catch (error) { this.nativePersistenceFailed = true; this.settingsFaulted = true; throw error; }
+      catch (error) { this.nativePersistenceFailed = 'owner'; this.faultSettings('owner'); throw error; }
     }
     const grant: StoredNativeContinuationGrant = { id: `continuation-${randomUUID()}`, binding, sourceBindingVersion: 2, sourceBinding, successorSourceBinding: null, parent, tokenId: expected.tokenId,
       tokenRevision, ownerRoot, watchBinding: null, scopes: [...expected.scopes].sort(), createdAt: Date.now(), consumption: null, revoked: false };
@@ -827,6 +913,7 @@ export class PairingTokenManager {
     input: { readonly name: string },
     options: { readonly enforceCap: boolean },
   ): MintedPairingToken {
+    let replaced = false;
     return this.mutate((snapshot) => {
       const cap = options.enforceCap ? this.currentCap() : null;
       if (cap !== null && snapshot.tokens.length >= cap) {
@@ -837,6 +924,7 @@ export class PairingTokenManager {
           name: existing.name, maxPaired: cap, pairedCount: snapshot.tokens.length,
         });
         snapshot.tokens = snapshot.tokens.filter(record => record.id !== existing.id);
+        replaced = true;
       }
       const token = generateTokenValue();
       const record: StoredPairingToken = {
@@ -845,7 +933,7 @@ export class PairingTokenManager {
       };
       snapshot.tokens.push(record);
       return { value: { id: record.id, name: record.name, token, createdAt: record.createdAt }, changed: true };
-    });
+    }, true, () => !replaced);
   }
 
   /**
@@ -888,9 +976,15 @@ export class PairingTokenManager {
           return { value: found, changed: found !== undefined };
         }, false);
         this.lastSeenFlushAt = now;
+        this.lastSeenFailureLogged = false;
       } catch (error) {
-        // Telemetry persistence never grants access or resurrects cached records.
-        logger.warn('Pairing token last-seen update failed', { path: this.filePath, error: String(error) });
+        // Telemetry persistence never grants access or resurrects cached records. The stamp is
+        // retried on the next request (a clean stamp is what re-admits native auth), so the
+        // warning is logged once per run of failures rather than on every request.
+        if (!this.lastSeenFailureLogged) {
+          logger.warn('Pairing token last-seen update failed', { path: this.filePath, error: String(error) });
+          this.lastSeenFailureLogged = true;
+        }
         try { record = this.readPersisted()?.tokens.find(item => item.tokenHash === hash); }
         catch { return null; }
       }
@@ -901,6 +995,8 @@ export class PairingTokenManager {
 
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
   list(): PublicPairingToken[] {
+    // Pick up a mint or revoke made by another process; an unreadable file keeps the last good view.
+    try { const snapshot = this.readPersisted(); if (snapshot) this.publish(snapshot); } catch { /* cached view */ }
     return this.snapshot.tokens.map((t) => ({
       id: t.id,
       name: t.name,

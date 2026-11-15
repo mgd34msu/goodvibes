@@ -94,6 +94,48 @@ describe('marketplace modal surface', () => {
     } finally { cleanup(); }
   });
 
+  test('install: the row reads INSTALLED and install is disabled only after the command settles', async () => {
+    const { paths, cleanup } = seedCatalog({ plugin: [makeEntry('plugin', 'formatter', 'Formatter', '/tmp/x')] });
+    try {
+      const surface = createMarketplaceModalSurface({ ecosystemPaths: paths });
+      // The hook registered at open stays the surface's render hook, so renders after the command settles are observable.
+      let renders = 0;
+      await new Promise<void>((resolve) => { surface.onOpen?.(() => { renders++; resolve(); }); });
+      const row = { id: 'plugin:formatter', label: '' };
+      expect(tabText(surface.buildView(), 'catalog')).not.toContain('INSTALLED');
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => { finish = resolve; });
+      const statuses: string[] = [];
+      surface.onAction?.('install', actionCtx(row, {
+        setStatus: (m: string) => statuses.push(m),
+        executeCommand: async () => {
+          await gate;
+          const dir = join(paths.projectCatalogRoot!, 'installed');
+          mkdirSync(dir, { recursive: true });
+          const entry = makeEntry('plugin', 'formatter', 'Formatter', '/tmp/x');
+          writeFileSync(join(dir, 'plugin-formatter.json'), JSON.stringify({
+            version: 1, id: 'plugin-formatter', kind: 'plugin', installedAt: 1, scope: 'project', entry,
+            sourcePath: '/tmp/x', targetPath: '/tmp/y', provenanceSummary: 'local',
+            runtimeFit: { appVersion: '1', status: 'supported', reasons: [] },
+            compatibility: { appVersion: '1', status: 'supported', reasons: [] },
+          }));
+          return true;
+        },
+      }));
+      // Command still running: nothing changed yet.
+      expect(tabText(surface.buildView(), 'catalog')).not.toContain('INSTALLED');
+      const rendersBeforeFinish = renders;
+      finish();
+      for (let i = 0; i < 200 && !statuses.some((m) => m.startsWith('Done')); i++) await nextEventLoop();
+      // Only the refresh run after Done may re-read the receipt; the test never re-opens the surface.
+      for (let i = 0; i < 200 && renders === rendersBeforeFinish; i++) await nextEventLoop();
+      expect(renders).toBeGreaterThan(rendersBeforeFinish);
+      expect(tabText(surface.buildView(), 'catalog')).toContain('INSTALLED');
+      expect(findAction(surface, 'install')?.enabledFor?.(row, 'catalog')).toBe(false);
+      expect(findAction(surface, 'uninstall')?.enabledFor?.(row, 'catalog')).toBe(true);
+    } finally { cleanup(); }
+  });
+
   test('read-model recommendations and startup issues surface in the view', async () => {
     const { paths, cleanup } = seedCatalog({ plugin: [makeEntry('plugin', 'formatter', 'Formatter', '/tmp/x')] });
     try {

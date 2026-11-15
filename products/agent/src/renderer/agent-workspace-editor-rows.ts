@@ -10,6 +10,8 @@ import { wrapText } from '../utils/terminal-width.ts';
 import { GLYPHS } from './ui-primitives.ts';
 import { WORKSPACE_PALETTE as PALETTE, type WorkspaceRow } from './fullscreen-workspace.ts';
 
+const MAX_VALUE_LINES = 4;
+
 export function buildEditorRows(editor: AgentWorkspaceLocalEditor, width: number, height: number): WorkspaceRow[] {
   const rows: WorkspaceRow[] = [
     { text: editor.title, fg: PALETTE.title, bold: true },
@@ -53,12 +55,17 @@ function buildEditorFieldRows(editor: AgentWorkspaceLocalEditor, index: number, 
     bold: selected,
   }];
   const valueLines = value.split('\n');
-  for (const valueLine of valueLines.slice(0, 4)) {
+  const hidden = Math.max(0, valueLines.length - MAX_VALUE_LINES);
+  // Input is append-only, so the lines being typed are the last ones: the field
+  // being edited shows its tail, every other field shows its head.
+  if (selected && hidden > 0) rows.push({ text: `  ${hidden} earlier line(s)`, fg: PALETTE.dim, dim: true });
+  const shown = selected ? valueLines.slice(hidden) : valueLines.slice(0, MAX_VALUE_LINES);
+  for (const valueLine of shown) {
     for (const wrapped of wrapText(`  ${valueLine}`, Math.max(1, width - 2))) {
       rows.push({ text: wrapped, fg: field.value.length > 0 ? PALETTE.text : PALETTE.dim, dim: field.value.length === 0 });
     }
   }
-  if (valueLines.length > 4) rows.push({ text: `  ${valueLines.length - 4} more line(s)`, fg: PALETTE.dim, dim: true });
+  if (!selected && hidden > 0) rows.push({ text: `  ${hidden} more line(s)`, fg: PALETTE.dim, dim: true });
   for (const hint of wrapText(field.hint, Math.max(1, width - 2))) rows.push({ text: `  ${hint}`, fg: PALETTE.dim, dim: true });
   return rows;
 }

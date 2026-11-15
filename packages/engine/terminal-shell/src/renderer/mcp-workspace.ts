@@ -1,4 +1,4 @@
-import { formRows } from './mcp-form-rows.js';
+import { formRows, maskLaunchArgs } from './mcp-form-rows.js';
 import { peekSystemMessagePresentation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { RegisteredTool } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { McpWorkspaceRow, McpWorkspaceServerRow, McpWorkspaceFormField } from '../mcp-workspace-model.js';
@@ -181,7 +181,7 @@ export function createMcpWorkspaceRenderer(policy: {
         { text: '' },
         body(`Role ${server.role} · trust ${server.trustMode}`),
         body(
-          `Command ${server.command ? `${server.command}${server.args?.length ? ` ${server.args.join(' ')}` : ''}` : '(runtime only; no launch config found)'}`,
+          `Command ${server.command ? `${server.command}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}` : '(runtime only; no launch config found)'}`,
         ),
         body(`Allowed paths ${server.allowedPaths.length > 0 ? server.allowedPaths.join(', ') : '(none)'}`),
         body(`Allowed hosts ${server.allowedHosts.length > 0 ? server.allowedHosts.join(', ') : '(none)'}`),

@@ -2,6 +2,7 @@ import { prepareProtectedResearchReport, type ResearchReportOperation } from '..
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { prepareAgentResearchReportInput } from '../agent/research-report-input.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -38,11 +39,6 @@ function splitList(value: string): readonly string[] {
 
 function splitTags(value: string): readonly string[] {
   return value.split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean);
-}
-
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
 }
 
 export function createAgentResearchReportEditor(): AgentWorkspaceLocalEditor {
@@ -193,7 +189,7 @@ export function buildAgentResearchReportPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Research report artifact',
-      detail: 'Submitted a confirmed request to save a reviewed source-grounded report artifact with visual packet.',
+      detail: 'Asked the model to save a reviewed source-grounded report artifact with visual packet. Nothing is saved until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

@@ -46,7 +46,7 @@ export interface EnsureBrowserOptions extends BrowserProvisionLifetime {
   readonly forceReinstall?: boolean;
 }
 
-type VerificationFailure = 'missing' | 'not-executable' | 'missing-system-libraries' | 'corrupt';
+type VerificationFailure = 'missing' | 'not-executable' | 'missing-system-libraries' | 'corrupt' | 'probe-timed-out';
 
 interface VerificationResult {
   readonly ok: boolean;
@@ -82,7 +82,10 @@ async function verifyExecutable(io: BrowserProvisionIo, executablePath: string, 
   if (!io.isExecutableFile(executablePath)) {
     return { ok: false, failure: 'not-executable', detail: `${executablePath} is not an executable file` };
   }
-  const probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
+  let probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
+  // A cold start on a slow disk is not a broken build: ask once more, and if it
+  // still does not answer, say so without treating the browser as corrupt.
+  if (probe.timedOut) probe = await io.runCommand(executablePath, ['--version'], { timeoutMs: VERSION_PROBE_TIMEOUT_MS });
   if (probe.code === 0) {
     return { ok: true, failure: null, detail: probe.stdout.trim() || 'reported a version' };
   }
@@ -91,7 +94,10 @@ async function verifyExecutable(io: BrowserProvisionIo, executablePath: string, 
   if (library) {
     return { ok: false, failure: 'missing-system-libraries', detail: library };
   }
-  const reason = probe.spawnError ?? (probe.timedOut ? 'version probe timed out' : combined.trim().split('\n')[0] ?? 'unknown error');
+  if (probe.timedOut) {
+    return { ok: false, failure: 'probe-timed-out', detail: 'the version probe timed out twice; the browser was left in place' };
+  }
+  const reason = probe.spawnError ?? (combined.trim().split('\n')[0] ?? 'unknown error');
   return { ok: false, failure: 'corrupt', detail: reason };
 }
 
@@ -234,7 +240,9 @@ function failureGuidance(failure: BrowserProvisionFailure, detail: string, drive
     case 'binary-not-executable':
       return {
         problem: `The cached browser exists but cannot be executed (${detail}).`,
-        fix: 'Check that the browser cache directory is not mounted noexec, then run the browser tool with action:"provision" and repair:true.',
+        fix: detail.includes('timed out')
+          ? 'The browser may only be slow to start on a busy machine: retry the call, or run the browser tool with action:"provision" and repair:true to reinstall it.'
+          : 'Check that the browser cache directory is not mounted noexec, then run the browser tool with action:"provision" and repair:true.',
       };
     case 'missing-system-libraries':
       return {
@@ -458,6 +466,25 @@ async function provision(io: BrowserProvisionIo, options: EnsureBrowserOptions):
       return report(recorder, browsersPath, resolvedDriver.version, driverFix, {
         ok: false,
         failure: 'missing-system-libraries',
+        detail: verification.detail,
+      });
+    }
+    if (verification.failure === 'probe-timed-out') {
+      // Removing a hundreds-of-megabytes build because it was slow to answer
+      // would turn a busy machine into a reinstall; repair:true still does it.
+      assertProvisionCurrent(options);
+      const systemBrowser = await trySystemBrowser(io, recorder, options);
+      assertProvisionCurrent(options);
+      if (systemBrowser) {
+        return report(recorder, browsersPath, resolvedDriver.version, driverFix, {
+          ok: true,
+          source: 'system-browser',
+          executablePath: systemBrowser,
+        });
+      }
+      return report(recorder, browsersPath, resolvedDriver.version, driverFix, {
+        ok: false,
+        failure: 'binary-not-executable',
         detail: verification.detail,
       });
     }

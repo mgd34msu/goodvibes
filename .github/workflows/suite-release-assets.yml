@@ -131,8 +131,8 @@ jobs:
         run: python3 .github/scripts/publish-missing-suite-assets.py "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"
 
   previous-release:
-    # The release being upgraded from is the nearest earlier version tag in this
-    # release's history; empty for the first release.
+    # The release being upgraded from is the nearest earlier stable version tag in this
+    # release's history; none for the first release, which is warned about.
     needs: collect
     if: inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'
     runs-on: ubuntu-24.04
@@ -141,21 +141,24 @@ jobs:
       tag: ${{ steps.previous.outputs.tag }}
       source: ${{ steps.previous.outputs.source }}
     steps:
+      # The resolver comes from the dispatch ref: a tag cut before it existed has no copy of it.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: tooling
+          sparse-checkout: .github/scripts
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: refs/tags/${{ inputs.tag }}
+          path: release
           fetch-depth: 0
       - name: Resolve the previous published release
         id: previous
+        working-directory: release
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "refs/tags/$RELEASE_TAG^" 2>/dev/null || true)
-          if [ -n "$previous" ] && [ "$previous" != "$RELEASE_TAG" ]; then
-            echo "tag=$previous" >> "$GITHUB_OUTPUT"
-            echo "source=$(git rev-parse "$previous^{commit}")" >> "$GITHUB_OUTPUT"
-          fi
+          python3 "$GITHUB_WORKSPACE/tooling/.github/scripts/resolve_previous_release.py" "$RELEASE_TAG" "refs/tags/$RELEASE_TAG^"
 
   published-install-acceptance:
     # Packaging-only callers have not published anything and must not run this.
@@ -170,3 +173,4 @@ jobs:
       tooling-sha: ${{ github.sha }}
       previous-tag: ${{ needs.previous-release.outputs.tag }}
       previous-source: ${{ needs.previous-release.outputs.source }}
+      recheck: true

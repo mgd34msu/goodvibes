@@ -100,8 +100,9 @@ const isEmpty = (value: JsonValue | undefined): boolean => isBlank(value) || has
 const SEPARATOR = '::';
 const checkKey = (field: string, metric: Metric): string => `${field}${SEPARATOR}${metric}`;
 const toFieldCheck = ([key, p]: [string, number]): FieldCheck => {
-  const [field, metric] = key.split(SEPARATOR) as [string, Metric];
-  return { field, metric, p };
+  // Metric names never contain the separator, so the last one splits a field name that does.
+  const at = key.lastIndexOf(SEPARATOR);
+  return { field: key.slice(0, at), metric: key.slice(at + SEPARATOR.length) as Metric, p };
 };
 
 function fieldQuestions(name: string, spec: FieldSpec, value: JsonValue | undefined): [string, NoulQuestion][] {
@@ -122,6 +123,10 @@ export function defineExtractionVerifier(spec: ExtractionVerifierSpec): Extracti
   const verifier: ExtractionVerifier = {
     ...header,
     async verify(port, input, options = {}) {
+      // A key the record carries but the fields do not list would go unchecked
+      // while the result still reads as a complete verification.
+      const unlisted = Object.keys(input.record).filter((key) => !Object.hasOwn(input.fields, key));
+      if (unlisted.length > 0) throw new RangeError(`extraction verifier ${spec.name}: record has keys with no field spec: ${unlisted.join(', ')}`);
       const questions = Object.fromEntries(
         Object.entries(input.fields).flatMap(([name, field]) => fieldQuestions(name, field, input.record[name])),
       );

@@ -32,6 +32,9 @@ import {
   type FleetWorktreeDiscardReceipt,
 } from '../../views/fleet-gateway.ts';
 
+/** Lets every already-queued promise continuation run, however many awaits the code under test makes. */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 
 function candidate(overrides: Partial<FleetAttemptCandidate> & { itemId: string; attemptIndex: number }): FleetAttemptCandidate {
@@ -193,7 +196,7 @@ describe('pick act: preview -> confirm through fleet.attempts.pick, no id typed'
     const { surface, log: diff } = makeDiffSurface();
     const { acts } = makeActs(gateway, surface);
     expect(acts.handleTreeKey('enter', pickUnitNode('ws-1'))).toBe(true);
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     expect(log.listAttempts).toEqual(['ctr:ws-1']);
     expect(acts.pickModeActive()).toBe(true);
     const view = acts.pickView()!;
@@ -212,7 +215,7 @@ describe('pick act: preview -> confirm through fleet.attempts.pick, no id typed'
     expect(acts.handlePickInput('down')).toBe(true);
     expect(acts.pickView()!.diff).toContain('new it-b');
     expect(acts.handlePickInput('enter')).toBe(true);
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     // The PREVIEW call fired (confirm:false) for the chosen winner, no confirm yet.
     expect(log.pick).toEqual([{ groupId: 'ctr:g-1', winnerItemId: 'ctr:it-b', confirm: false }]);
     // The chosen candidate's diff opens in the Changes preview with the question over it.
@@ -235,7 +238,7 @@ describe('pick act: preview -> confirm through fleet.attempts.pick, no id typed'
     const { acts, notes } = makeActs(gateway, surface);
     await acts.beginPick(pickUnitNode('ws-1'));
     acts.handlePickInput('enter');
-    await Promise.resolve();
+    await flush();
     diff.confirms[0]!.onCancel?.();
     expect(log.pick.filter((p) => p.confirm)).toHaveLength(0);
     expect(acts.pickModeActive()).toBe(false);
@@ -260,7 +263,7 @@ describe('conflict act: resolve -> stamped session -> jump', () => {
     const { surface } = makeDiffSurface();
     const { acts, notes } = makeActs(gateway, surface);
     expect(acts.handleTreeKey('enter', conflictNode('it-a', ['a.ts', 'b.ts']))).toBe(true);
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     expect(log.resolveConflict).toEqual(['ctr:it-a']);
     expect(log.armed).toEqual(['sess-ctr:it-a']); // the STAMPED id, routed to the shared jump affordance
     expect(notes.some((n) => n.includes('press j to jump'))).toBe(true);

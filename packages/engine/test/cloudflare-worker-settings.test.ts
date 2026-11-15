@@ -126,9 +126,7 @@ describe('Cloudflare Worker settings provisioning', () => {
     expect(updatedBody).toEqual([]);
     expect(steps).toHaveLength(1);
     expect(steps[0]?.status).toBe('warning');
-    expect(steps[0]?.message).toContain('existing schedule state could not be read first');
     expect(steps[0]?.message).toContain('existing schedule state could not be read first: schedule get denied');
-
   });
 
   test('surfaces workers.dev state read failures while still deleting on disable', async () => {
@@ -149,9 +147,7 @@ describe('Cloudflare Worker settings provisioning', () => {
     expect(scriptSubdomainDeletes).toBe(1);
     expect(steps).toHaveLength(1);
     expect(steps[0]?.status).toBe('warning');
-    expect(steps[0]?.message).toContain('existing workers.dev route state could not be read first');
     expect(steps[0]?.message).toContain('existing workers.dev route state could not be read first: subdomain get denied');
-
   });
 
   test('creates a Durable Object SQLite class migration only on first Worker upload', async () => {
@@ -265,7 +261,10 @@ describe('Cloudflare Worker settings provisioning', () => {
 
     expect(result.durableObjectMigration).toBe('recovered-existing-class');
     expect(metadata).toHaveLength(2);
-    expect(metadata[0]?.['migrations']).not.toBeUndefined(); // presence-only: migrations field
+    expect(metadata[0]?.['migrations']).toEqual({
+      new_tag: 'goodvibes-coordinator-v1',
+      steps: [{ new_sqlite_classes: ['GoodVibesCoordinator'] }],
+    });
     expect(metadata[1]?.['migrations']).toBeUndefined();
   });
   test('migration-related prose and an incidental 10074 cannot authorize a retry', async () => {

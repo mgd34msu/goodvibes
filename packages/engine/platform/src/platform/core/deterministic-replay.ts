@@ -133,6 +133,12 @@ export interface ReplayEngineSnapshot {
   readonly currentFrame: ReplayFrame | null;
   readonly mismatches: readonly ReplayMismatch[];
   readonly turnSummaries: readonly ReplayTurnSummary[];
+  /**
+   * What the last `diff()` compared the recording against. `none` means no
+   * replayed events were supplied, so nothing was compared and an empty
+   * mismatch list does not mean the run is deterministic.
+   */
+  readonly diffSource?: 'none' | 'replayed-events' | undefined;
 }
 
 // ── DeterministicReplayEngine ──────────────────────────────────────────────
@@ -147,7 +153,7 @@ export interface ReplayEngineSnapshot {
  * engine.step();          // advance one event
  * engine.step(5);         // advance five events
  * engine.seek(10);        // jump to rev 10
- * const report = engine.diff();  // compare current to recorded
+ * const report = engine.diff(replayedEntries);  // compare the recording to a re-execution's events
  * engine.export('replay.json');  // write report inside the project root
  * ```
  */
@@ -167,6 +173,7 @@ export class DeterministicReplayEngine {
   private _frames: ReplayFrame[] = [];
   private _currentFrameIndex = 0;
   private _mismatches: ReplayMismatch[] = [];
+  private _diffSource: 'none' | 'replayed-events' = 'none';
   private _turnSummaries: ReplayTurnSummary[] = [];
   private readonly _subscribers = new Set<() => void>();
 
@@ -195,6 +202,7 @@ export class DeterministicReplayEngine {
     this._runId = runId;
     this._snapshot = snapshot;
     this._mismatches = [];
+    this._diffSource = 'none';
 
     // Sort by revision ascending; validate rev sequence.
     const sorted = [...entries].sort((a, b) => a.rev - b.rev);
@@ -296,47 +304,61 @@ export class DeterministicReplayEngine {
   }
 
   /**
-   * Run diff mode: compare each replayed frame against the recorded sequence.
+   * Run diff mode: compare the recording against the events a re-execution
+   * produced.
    *
-   * Produces a list of `ReplayMismatch` entries that identify divergences
-   * with actionable classifiers and descriptions, not raw payload dumps.
+   * The loaded frames are folded from the recording itself, so they can never
+   * disagree with it; a comparison needs an independent stream, passed as
+   * `replayed`. Without one nothing is compared: the result is empty, the
+   * snapshot's `diffSource` is `none`, and the caller must not present that as
+   * "no divergence".
    *
    * Diff analysis covers:
-   * - Missing events (recorded entry has no corresponding replayed frame)
-   * - Extra events (frame exists past the recorded sequence)
+   * - Missing events (recorded entry has no corresponding replayed entry)
+   * - Extra events (replayed entries past the recorded sequence)
    * - Payload mismatches (event name matches, but key payload fields differ)
-   * - Ordering violations (same events, different rev sequence)
+   * - Ordering violations (different event at the same position)
+   * - Per-turn terminal outcome and stop-reason divergence
    *
+   * @param replayed - Ledger entries produced by re-executing the run, in any order.
    * @returns Ordered list of mismatches (by rev).
    */
-  diff(): ReplayMismatch[] {
+  diff(replayed?: readonly LedgerEntry[]): ReplayMismatch[] {
     if (this._status === 'idle' || this._frames.length === 0) {
       return [];
     }
+    if (replayed === undefined) {
+      logger.warn('[DeterministicReplayEngine] diff called without replayed events; nothing was compared', { runId: this._runId });
+      this._mismatches = [];
+      this._diffSource = 'none';
+      this._notify();
+      return [];
+    }
 
+    const replayedEntries = [...replayed].sort((a, b) => a.rev - b.rev);
     const mismatches: ReplayMismatch[] = [];
-    const maxRev = Math.max(this._entries.length, this._frames.length - 1);
+    const maxRev = Math.max(this._entries.length, replayedEntries.length);
 
     for (let i = 0; i < maxRev; i++) {
-      const recorded = this._entries[i]!;
-      const frame = this._frames[i + 1]; // frame[0] is snapshot (rev 0)
+      const recorded = this._entries[i];
+      const replayedEntry = replayedEntries[i];
 
-      if (!recorded && frame) {
-        // Extra frame: replayed more events than recorded.
+      if (!recorded && replayedEntry) {
+        // Extra entry: replayed more events than recorded.
         mismatches.push({
-          rev: frame.rev,
+          rev: replayedEntry.rev,
           kind: 'extra_event',
-          ownerDomain: this._inferOwnerDomain(frame.entry?.eventName),
+          ownerDomain: this._inferOwnerDomain(replayedEntry.eventName),
           failureMode: 'extra_event',
-          relatedTurnId: this._extractTurnId(frame.entry?.payload),
-          description: `Rev ${frame.rev}: event "${frame.entry?.eventName ?? 'unknown'}" was replayed but does not exist in the recording.`,
-          eventName: frame.entry?.eventName,
+          relatedTurnId: this._extractTurnId(replayedEntry.payload),
+          description: `Rev ${replayedEntry.rev}: event "${replayedEntry.eventName}" was replayed but does not exist in the recording.`,
+          eventName: replayedEntry.eventName,
         });
         continue;
       }
 
-      if (recorded && !frame) {
-        // Missing frame: recording has an event that replay did not produce.
+      if (recorded && !replayedEntry) {
+        // Missing entry: recording has an event that replay did not produce.
         mismatches.push({
           rev: recorded.rev,
           kind: 'missing_event',
@@ -349,22 +371,19 @@ export class DeterministicReplayEngine {
         continue;
       }
 
-      if (!recorded || !frame) continue;
+      if (!recorded || !replayedEntry) continue;
 
-      const frameEntry = frame.entry;
-      if (!frameEntry) continue;
-
-      if (recorded.eventName !== frameEntry.eventName) {
+      if (recorded.eventName !== replayedEntry.eventName) {
         mismatches.push({
           rev: recorded.rev,
           kind: 'ordering',
           ownerDomain: this._inferOwnerDomain(recorded.eventName),
           failureMode: 'ordering_violation',
-          relatedTurnId: this._extractTurnId(recorded.payload, frameEntry.payload),
-          description: `Rev ${recorded.rev}: expected event "${recorded.eventName}" but replayed "${frameEntry.eventName}". Possible ordering violation.`,
+          relatedTurnId: this._extractTurnId(recorded.payload, replayedEntry.payload),
+          description: `Rev ${recorded.rev}: expected event "${recorded.eventName}" but replayed "${replayedEntry.eventName}". Possible ordering violation.`,
           eventName: recorded.eventName,
           recordedSummary: recorded.eventName,
-          replayedSummary: frameEntry.eventName,
+          replayedSummary: replayedEntry.eventName,
         });
         continue;
       }
@@ -373,16 +392,17 @@ export class DeterministicReplayEngine {
         recorded.rev,
         recorded.eventName,
         recorded.payload,
-        frameEntry.payload,
+        replayedEntry.payload,
       );
       if (payloadMismatch) {
         mismatches.push(payloadMismatch);
       }
     }
 
-    mismatches.push(...this._diffTurnSummaries());
+    mismatches.push(...this._diffTurnSummaries(replayedEntries));
 
     this._mismatches = mismatches;
+    this._diffSource = 'replayed-events';
     this._notify();
 
     logger.debug('[DeterministicReplayEngine] diff complete', {
@@ -455,6 +475,7 @@ export class DeterministicReplayEngine {
       currentFrame: this._frames[this._currentFrameIndex] ?? null,
       mismatches: this._mismatches,
       turnSummaries: this._turnSummaries,
+      diffSource: this._diffSource,
     };
   }
 
@@ -476,6 +497,7 @@ export class DeterministicReplayEngine {
     this._frames = [];
     this._currentFrameIndex = 0;
     this._mismatches = [];
+    this._diffSource = 'none';
     this._turnSummaries = [];
     this._notify();
   }
@@ -612,7 +634,7 @@ export class DeterministicReplayEngine {
   }
 
   private _deriveTurnSummaries(
-    entries: Array<Pick<LedgerEntry, 'rev' | 'eventName' | 'payload'>>
+    entries: ReadonlyArray<Pick<LedgerEntry, 'rev' | 'eventName' | 'payload'>>
   ): ReplayTurnSummary[] {
     const starts = new Map<string, number>();
     const summaries: ReplayTurnSummary[] = [];
@@ -669,13 +691,9 @@ export class DeterministicReplayEngine {
     return summaries;
   }
 
-  private _diffTurnSummaries(): ReplayMismatch[] {
+  private _diffTurnSummaries(replayedEntries: readonly LedgerEntry[]): ReplayMismatch[] {
     const recorded = this._deriveTurnSummaries(this._entries);
-    const replayed = this._deriveTurnSummaries(
-      this._frames
-        .map((frame) => frame.entry)
-        .filter((entry): entry is LedgerEntry => entry !== undefined),
-    );
+    const replayed = this._deriveTurnSummaries(replayedEntries);
 
     const mismatches: ReplayMismatch[] = [];
     const replayedByTurnId = new Map(replayed.map((summary) => [summary.turnId, summary] as const));

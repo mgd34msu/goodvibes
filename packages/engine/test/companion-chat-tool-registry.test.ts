@@ -14,7 +14,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { settleEvents } from './_helpers/test-timeout.js';
+import { waitFor } from './_helpers/test-timeout.js';
+import { trackDisposables } from './_helpers/disposables.ts';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
   CompanionLLMProvider,
@@ -24,6 +25,8 @@ import type {
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import type { ToolResult } from '../platform/src/platform/types/tools.js';
 import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
+
+const disposables = trackDisposables();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,6 +105,11 @@ function makeRecordingPublisher(): { publisher: CompanionChatEventPublisher; eve
   return { publisher, events };
 }
 
+/** Resolves once the turn has ended, however it ended. */
+function turnEnded(events: readonly PublishedEvent[]): Promise<void> {
+  return waitFor(() => events.some((e) => /^companion-chat\.turn\.(completed|error|cancelled)$/.test(e.event)));
+}
+
 function allowToolPermission() {
   return {
     check: async () => true,
@@ -115,9 +123,9 @@ function allowToolPermission() {
 describe('ToolRegistry.execute() called when LLM emits tool_call', () => {
   test('registry receives the correct toolName and toolInput', async () => {
     const { registry, calls } = makeMockRegistry('result-output');
-    const { publisher } = makeRecordingPublisher();
+    const { publisher, events } = makeRecordingPublisher();
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider: makeToolCallProvider('mock_tool', 'call-xyz', { query: 'hello' }),
       eventPublisher: publisher,
       toolRegistry: registry,
@@ -125,18 +133,15 @@ describe('ToolRegistry.execute() called when LLM emits tool_call', () => {
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     await manager.postMessage(session.id, 'use a tool please');
 
-    // Give async turn time to complete
-    await settleEvents(100);
+    await turnEnded(events);
 
     expect(calls.length).toBe(1);
     expect(calls[0]!.args).toEqual({ query: 'hello' });
-
-    manager.dispose();
   });
 });
 
@@ -149,7 +154,7 @@ describe('turn.tool_result event published after tool executes', () => {
     const { registry } = makeMockRegistry('my-tool-output');
     const { publisher, events } = makeRecordingPublisher();
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider: makeToolCallProvider('mock_tool', 'call-abc', { n: 42 }),
       eventPublisher: publisher,
       toolRegistry: registry,
@@ -157,12 +162,12 @@ describe('turn.tool_result event published after tool executes', () => {
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     await manager.postMessage(session.id, 'run tool');
 
-    await settleEvents(100);
+    await turnEnded(events);
 
     const toolResultEvents = events.filter((e) => e.event === 'companion-chat.turn.tool_result');
     expect(toolResultEvents.length).toBeGreaterThanOrEqual(1);
@@ -180,8 +185,6 @@ describe('turn.tool_result event published after tool executes', () => {
     expect(resultPayload.toolCallId).toBe('call-abc');
     expect(resultPayload.result).toBe('my-tool-output');
     expect(resultPayload.isError).toBe(false);
-
-    manager.dispose();
   });
 });
 
@@ -194,7 +197,7 @@ describe('tool execution error published as isError=true', () => {
     const { registry } = makeMockRegistry('unused', /* shouldThrow */ true);
     const { publisher, events } = makeRecordingPublisher();
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider: makeToolCallProvider('mock_tool', 'call-err', {}),
       eventPublisher: publisher,
       toolRegistry: registry,
@@ -202,12 +205,12 @@ describe('tool execution error published as isError=true', () => {
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     await manager.postMessage(session.id, 'run failing tool');
 
-    await settleEvents(100);
+    await turnEnded(events);
 
     const toolResultEvents = events.filter((e) => e.event === 'companion-chat.turn.tool_result');
     expect(toolResultEvents.length).toBeGreaterThanOrEqual(1);
@@ -215,8 +218,6 @@ describe('tool execution error published as isError=true', () => {
     const resultPayload = toolResultEvents[0]!.payload as { isError: boolean; result: unknown };
     expect(resultPayload.isError).toBe(true);
     expect(typeof resultPayload.result).toBe('string'); // error message
-
-    manager.dispose();
   });
 });
 
@@ -228,19 +229,19 @@ describe('no toolRegistry: tool_call event published, graceful degradation', () 
   test('turn.tool_call event emitted even without toolRegistry', async () => {
     const { publisher, events } = makeRecordingPublisher();
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider: makeToolCallProvider('mock_tool', 'call-noop', { a: 'b' }),
       eventPublisher: publisher,
       // No toolRegistry
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     await manager.postMessage(session.id, 'run tool with no registry');
 
-    await settleEvents(100);
+    await turnEnded(events);
 
     const toolCallEvents = events.filter((e) => e.event === 'companion-chat.turn.tool_call');
     expect(toolCallEvents.length).toBeGreaterThanOrEqual(1);
@@ -252,8 +253,6 @@ describe('no toolRegistry: tool_call event published, graceful degradation', () 
     // No tool_result event should have been emitted (no registry to call)
     const toolResultEvents = events.filter((e) => e.event === 'companion-chat.turn.tool_result');
     expect(toolResultEvents.length).toBe(0);
-
-    manager.dispose();
   });
 });
 
@@ -289,7 +288,7 @@ describe('companion remote chat advertises tools and loops over tool results', (
       },
     };
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider,
       eventPublisher: publisher,
       toolRegistry: registry,
@@ -297,7 +296,7 @@ describe('companion remote chat advertises tools and loops over tool results', (
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     const reply = await manager.postMessageAndWaitForReply(
@@ -355,7 +354,7 @@ describe('companion remote chat advertises tools and loops over tool results', (
       },
     };
 
-    const manager = new CompanionChatManager({
+    const manager = disposables.add(new CompanionChatManager({
       provider,
       eventPublisher: publisher,
       toolRegistry: registry,
@@ -363,7 +362,7 @@ describe('companion remote chat advertises tools and loops over tool results', (
       gcIntervalMs: 999_999,
       persist: false,
       rateLimiter: false,
-    });
+    }));
 
     const session = manager.createSession();
     const reply = await manager.postMessageAndWaitForReply(

@@ -40,12 +40,11 @@ export function createPluginCommandAdapter<Context>(registry: Pick<TerminalComma
 export function wireTerminalMcpReload(
   roots: McpRuntimeReloadOptions['roots'],
   registry: McpRuntimeReloadOptions['registry'],
-  discovery: { stop(): void },
+  discovery: { stop(): void | Promise<void> },
   unsubs: Array<() => void | Promise<void>>,
   router: { low(text: string): void; high(text: string): void },
   render: () => void,
 ): void {
-  unsubs.push(() => discovery.stop());
   const reload = startMcpConfigAutoReload({
     roots,
     registry,
@@ -60,7 +59,9 @@ export function wireTerminalMcpReload(
       render();
     },
   });
+  // The watcher stops before the servers are released, so a config edit during the disconnect cannot reconnect them.
   unsubs.push(() => reload.stop());
+  unsubs.push(() => discovery.stop());
 }
 export function announceTerminalSessionStarted(
   sessionId: string,

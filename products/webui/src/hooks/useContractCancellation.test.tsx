@@ -143,6 +143,13 @@ describe('explicit lifetime-bound contract cancellation', () => {
     cancel = () => Promise.reject(new Error('timeout')); const h = render(); await settle(() => h.reads.detail > 0); h.ask(); await h.confirm(); h.failReads();
     await h.action().refresh(); await settle(() => !h.action().refreshing); expect(h.action().needsRefresh).toBe(true); h.ask(); expect(h.action().phase).toBe('unknown');
   });
+  test('a 409 CONTRACT_NOT_RUNNING refusal is "not cancelled", never an unknown outcome', async () => {
+    cancel = () => Promise.reject(Object.assign(new Error('not running'), { status: 409, body: { code: 'CONTRACT_NOT_RUNNING', status: 409 } }));
+    const h = render(); await settle(() => h.reads.detail > 0); const before = { ...h.reads };
+    h.ask(); await h.confirm(); await settle(() => h.action().phase === 'not-cancelled');
+    expect(h.action().notice).toBe(CONTRACT_CANCEL_NOTICE['not-cancelled']);
+    for (const key of ['list', 'detail', 'fleet'] as const) expect(h.reads[key]).toBeGreaterThan(before[key]);
+  });
   for (const cancelled of [false, true]) {
     test(`${cancelled}: authoritative list/detail/fleet refetch, no optimistic terminal state`, async () => {
       cancel = () => Promise.resolve({ cancelled }); const h = render(); await settle(() => h.reads.detail > 0); const before = { ...h.reads };

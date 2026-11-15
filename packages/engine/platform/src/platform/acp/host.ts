@@ -9,9 +9,9 @@ import { AcpPermissionWire } from './permission-wire.js';
  * short-lived ACP *subagents* (connection.ts/manager.ts). This module is the
  * daemon-side HOST: it discovers installed third-party coding agents (Claude
  * Code, Codex CLI, opencode), spawns one over stdio as a LONG-LIVED session,
- * and exposes the lifecycle a fleet row needs, prompt (steer), stop, and the
- * waiting-on-human attention states, so a hosted agent is visible, steerable,
- * and stoppable exactly like a native row.
+ * and exposes the lifecycle a fleet row needs, prompt (steer) and stop, so a
+ * hosted agent is visible, steerable, and stoppable exactly like a native row.
+ * Permission asks are decided autonomously, so no row ever waits on a human.
  *
  * Honesty contract:
  *  - Discovery is READ-ONLY (PATH + known install directories; no execution).
@@ -35,7 +35,7 @@ import { homedir } from 'node:os';
 import { loadAcpLibrary } from './optional-acp-library.js';
 import type { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Agent, Client, NewSessionResponse, PromptResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from './protocol.js';
-import { permissionOutcomeFor, type AcpPermissionOptionLike } from './protocol.js';
+import { ACP_HANDSHAKE_TIMEOUT_MS, drainStderrTail, messageChunkText, permissionOutcomeFor, withTimeout, type AcpPermissionOptionLike } from './protocol.js';
 import type { PermissionRequestHandler } from '../permissions/prompt.js';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
@@ -128,8 +128,12 @@ export function discoverAcpAgents(io: DiscoveryIo = defaultDiscoveryIo): Discove
 
 // ── Hosted sessions ──────────────────────────────────────────────────────────
 
-/** Lifecycle state of a hosted third-party agent session. */
-export type HostedAcpState = 'starting' | 'idle' | 'prompting' | 'awaiting-approval' | 'failed' | 'stopped';
+/**
+ * Lifecycle state of a hosted third-party agent session. There is no waiting
+ * state: permission asks are decided by the autonomous admission, not by a
+ * person, so no hosted row waits on a human.
+ */
+export type HostedAcpState = 'starting' | 'idle' | 'prompting' | 'failed' | 'stopped';
 
 /** The structured, user-renderable handshake/spawn failure, never a bare string. */
 export interface AcpHostError {
@@ -154,8 +158,6 @@ export interface HostedAcpAgent {
   readonly sessionId?: string | undefined;
   /** Latest streamed output tail (bounded), for the row's activity line. */
   readonly progress?: string | undefined;
-  /** Present while a permission ask is pending, the attention detail. */
-  readonly pendingPermission?: string | undefined;
   /** Present when state === 'failed'. */
   readonly error?: AcpHostError | undefined;
   readonly promptCount: number;
@@ -166,7 +168,7 @@ interface HostedRecord {
     id: string; agentId: string; title: string; binaryPath: string; cwd: string;
     state: HostedAcpState; startedAt: number; completedAt?: number | undefined;
     sessionId?: string | undefined; progress?: string | undefined;
-    pendingPermission?: string | undefined; error?: AcpHostError | undefined; promptCount: number;
+    error?: AcpHostError | undefined; promptCount: number;
   };
   child: ReturnType<typeof Bun.spawn> | null;
   conn: ClientSideConnection | null;
@@ -203,21 +205,9 @@ export interface AcpHostServiceDeps {
   readonly now?: (() => number) | undefined;
 }
 
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 15_000;
 const PROGRESS_TAIL_CHARS = 400;
 const SHUTDOWN_GRACE_MS = 250;
 const FORCED_EXIT_TIMEOUT_MS = 5000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => rejectPromise(new Error(`${label} timed out after ${ms}ms`)), ms);
-    (timer as unknown as { unref?: () => void }).unref?.();
-    promise.then(
-      (value) => { clearTimeout(timer); resolvePromise(value); },
-      (error) => { clearTimeout(timer); rejectPromise(error); },
-    );
-  });
-}
 
 export class AcpHostService {
   private readonly records = new Map<string, HostedRecord>();
@@ -285,7 +275,7 @@ export class AcpHostService {
       assertWorkspaceCurrent,
     };
     this.records.set(id, record);
-    const timeoutMs = this.deps.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+    const timeoutMs = this.deps.handshakeTimeoutMs ?? ACP_HANDSHAKE_TIMEOUT_MS;
     const spawn = this.deps.spawn ?? ((cmd: string[], opts: { cwd: string }) => Bun.spawn(cmd, { ...opts, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
 
     let stage: AcpHostError['stage'] = 'spawn';
@@ -299,10 +289,12 @@ export class AcpHostService {
       assertSpawnCurrent();
       record.child = spawn([input.agent.binaryPath, ...input.agent.args], { cwd: input.cwd });
       const ownedChild = record.child;
+      // An unread stderr pipe fills and blocks a chatty child; keep its tail for the exit message.
+      const stderr = drainStderrTail(ownedChild.stderr);
       void ownedChild.exited.then(() => {
         if (record.child !== ownedChild || record.lifetime.signal.aborted) return;
         record.info.state = 'failed'; record.info.completedAt = this.now();
-        record.info.error = { binary: record.info.binaryPath, stage: 'prompt', message: 'Hosted ACP process exited' };
+        record.info.error = { binary: record.info.binaryPath, stage: 'prompt', message: stderr.tail() ? `Hosted ACP process exited (stderr: ${stderr.tail()})` : 'Hosted ACP process exited' };
         this.teardown(record);
       }, () => { if (record.child === ownedChild) this.teardown(record); });
       if (!record.child.stdin || !record.child.stdout) {
@@ -407,7 +399,7 @@ export class AcpHostService {
       .then((response: PromptResponse) => {
         if (record.operation !== operation) return;
         operation.lifetime.abort();
-        if (record.info.state === 'prompting' || record.info.state === 'awaiting-approval') {
+        if (record.info.state === 'prompting') {
           // A cancelled turn ends the turn, not the session: the child and the
           // connection are still alive, so the row goes back to idle (promptable,
           // not dismissable) rather than 'stopped', which would refuse prompts
@@ -437,7 +429,6 @@ export class AcpHostService {
     if (wasRunning) {
       record.info.state = 'stopped';
       record.info.completedAt = this.now();
-      record.info.pendingPermission = undefined;
     }
     await this.teardown(record, wasRunning && connection && sessionId
       ? () => connection.cancel({ sessionId }) : undefined);
@@ -573,14 +564,7 @@ export class AcpHostService {
         }
       },
       sessionUpdate: async (params: SessionNotification): Promise<void> => {
-        const update = params.update as { sessionUpdate?: unknown; content?: unknown };
-        if (update.sessionUpdate !== 'agent_message_chunk') return;
-        // ACP sends `content` as ONE ContentBlock; tolerate the array shape too.
-        const blocks = Array.isArray(update.content) ? update.content : [update.content];
-        const text = blocks
-          .filter((c): c is { type: string; text?: string } => !!c && typeof c === 'object' && (c as { type?: unknown }).type === 'text')
-          .map((c) => c.text ?? '')
-          .join('');
+        const text = messageChunkText(params.update as { sessionUpdate?: unknown; content?: unknown });
         if (text) {
           record.info.progress = ((record.info.progress ?? '') + text).slice(-PROGRESS_TAIL_CHARS);
         }

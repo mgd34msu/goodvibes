@@ -260,22 +260,23 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       if (scenario === 'cancel-embedding' || scenario === 'revoke-embedding' || scenario === 'retry-revoked' || scenario === 'embedding-retry-revoked') {
         // Drain the late provider result before asserting it never reached chat.
         await runner.join(id);
+        const settled = runner.get(id)!;
         expect(unexpectedCodeReadings).toEqual([]);
-        expect(result.status).not.toBe('passed');
+        expect(settled.status).not.toBe('passed');
         expect([ownerStats, ownerSearch, ownerReindex]).toEqual([0, 0, 0]);
         expect(passiveOpens().filter(([path]) => String(path).endsWith('/private.ts'))).toHaveLength(0);
         for (const observed of [...embeddings, ...judgments, ...requests.map((r) => r.text)]) expect(observed).not.toContain(PRIVATE);
         if (scenario === 'retry-revoked') {
-          expect(retryRejected, `${result.error}; requests=${requests.length}`).toBe(1);
+          expect(retryRejected, `${settled.error}; requests=${requests.length}`).toBe(1);
           expect(requests).toHaveLength(1);
           expect(relevance.requests.length).toBeGreaterThan(0);
           expect(requests[0]!.prompt).toContain('## Injected Code Context');
         } else {
           expect(requests).toHaveLength(0);
           expect(embeddings.some((text) => text.includes(ORIGINAL))).toBe(true);
-          if (scenario === 'cancel-embedding') expect(result.status).toBe('cancelled');
+          if (scenario === 'cancel-embedding') expect(settled.status).toBe('cancelled');
           if (scenario === 'embedding-retry-revoked') {
-            expect(embeddingRetryRejected, result.error).toBe(1);
+            expect(embeddingRetryRejected, settled.error).toBe(1);
             expect(embeddingDispatches).toBe(1);
             expect(embeddingRetryDispatches).toBe(0);
             expect(embeddings).toHaveLength(1);
@@ -295,10 +296,13 @@ for (const scenario of ['allowed', 'feature-off', 'storage-off', 'zero-budget', 
       for (const request of members) expect(request.text).not.toContain('Output withheld');
       expect(toolResults.length).toBeGreaterThanOrEqual(steps.length);
       for (const text of toolResults) {
-        let result: { success?: boolean; error?: string };
-        try { result = JSON.parse(text); } catch { continue; }
-        expect(result.success, text).not.toBe(false);
-        expect(result.error, text).toBeUndefined();
+        // A failed tool reaches the model as plain text, not JSON, so a parse
+        // failure must not be skipped.
+        expect(text.startsWith('Error:'), text).toBe(false);
+        let parsed: { success?: boolean; error?: string } | undefined;
+        try { parsed = JSON.parse(text); } catch { /* a non-JSON success, such as file text, has no fields to check */ }
+        expect(parsed?.success, text).not.toBe(false);
+        expect(parsed?.error, text).toBeUndefined();
       }
       const enabled = scenario === 'allowed' || scenario === 'mutable' || scenario === 'restore-embedding';
       if (scenario === 'restore-embedding') {

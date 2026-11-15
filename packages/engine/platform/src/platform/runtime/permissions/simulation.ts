@@ -31,6 +31,7 @@ import type {
   PermissionDecision,
   PermissionSimulatorConfig,
   PermissionsConfig,
+  PolicyRule,
   SimulationMode,
   SimulationResult,
 } from './types.js';
@@ -62,35 +63,25 @@ function classifyDivergence(
   return 'reason-mismatch';
 }
 
-/** Returns an empty DivergenceStats object. */
-function emptyStats(totalEvaluations = 0): DivergenceStats {
-  return {
-    total: 0,
-    byType: {
-      'allow-vs-deny': 0,
-      'deny-vs-allow': 0,
-      'reason-mismatch': 0,
-    },
-    divergenceRate: 0,
-    totalEvaluations,
-  };
+type DivergenceCounts = Record<DivergenceType, number>;
+
+const emptyCounts = (): DivergenceCounts => ({ 'allow-vs-deny': 0, 'deny-vs-allow': 0, 'reason-mismatch': 0 });
+
+function countDivergence(bucket: Record<string, DivergenceCounts>, key: string, type: DivergenceType): void {
+  const counts = bucket[key] ?? (bucket[key] = emptyCounts());
+  counts[type] += 1;
 }
 
-/** Increments a DivergenceStats object with a new divergence. */
-function accumulateStats(
-  stats: DivergenceStats,
-  type: DivergenceType,
-): DivergenceStats {
-  const updated: DivergenceStats = {
-    ...stats,
-    total: stats.total + 1,
-    byType: { ...stats.byType, [type]: stats.byType[type] + 1 },
+/** Builds a bucket's stats from its divergence counts and evaluation total. */
+function statsFromCounts(counts: DivergenceCounts | undefined, totalEvaluations: number): DivergenceStats {
+  const byType = counts ?? emptyCounts();
+  const total = byType['allow-vs-deny'] + byType['deny-vs-allow'] + byType['reason-mismatch'];
+  return {
+    total,
+    byType: { ...byType },
+    divergenceRate: totalEvaluations > 0 ? total / totalEvaluations : 0,
+    totalEvaluations,
   };
-  updated.divergenceRate =
-    updated.totalEvaluations > 0
-      ? updated.total / updated.totalEvaluations
-      : 0;
-  return updated;
 }
 
 // ── PermissionSimulator ────────────────────────────────────────────────────────
@@ -127,6 +118,7 @@ export class PermissionSimulator {
   private readonly maxDivergenceRecords: number;
   private readonly divergenceThreshold: number;
   private readonly onWarning: ((record: DivergenceRecord) => void) | undefined;
+  private readonly policySources: { readonly projectRoot: string | undefined; readonly rules: readonly PolicyRule[] };
 
   /** All recorded divergences, capped at `maxDivergenceRecords`. */
   private records: DivergenceRecord[] = [];
@@ -143,6 +135,18 @@ export class PermissionSimulator {
   /** Total evaluations across all calls. */
   private totalEvals = 0;
 
+  /**
+   * Divergence counts per bucket. Counted as each divergence happens, never recomputed from `records`,
+   * which drops its oldest entries at the cap: the rate the enforcement gate and the promotion gate
+   * read must not shrink because older divergences aged out of the list.
+   */
+  private divergenceTally = {
+    overall: emptyCounts(),
+    byClass: {} as Record<string, DivergenceCounts>,
+    byPrefix: {} as Record<string, DivergenceCounts>,
+    byMode: {} as Record<string, DivergenceCounts>,
+  };
+
   private static readonly DEFAULT_MAX_RECORDS = 500;
   private static readonly DEFAULT_THRESHOLD = 0.05;
 
@@ -153,11 +157,15 @@ export class PermissionSimulator {
     config: PermissionSimulatorConfig = {},
   ) {
     setSimulationReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['totalEvals', 'records', 'evalsByClass', 'evalsByPrefix', 'evalsByMode', 'getDivergenceReport']);
+      const binding = captureSecurityReadBindings(this, ['totalEvals', 'records', 'divergenceTally', 'evalsByClass', 'evalsByPrefix', 'evalsByMode', 'getDivergenceReport']);
       const evaluations = this.totalEvals;
-      const rawCurrent = retainSecurityReadData([this.records, this.evalsByClass, this.evalsByPrefix, this.evalsByMode]);
+      const rawCurrent = retainSecurityReadData([this.records, this.divergenceTally, this.evalsByClass, this.evalsByPrefix, this.evalsByMode]);
       return () => { binding(); rawCurrent(); assertSecurityReadSource(this.totalEvals === evaluations); };
     });
+    this.policySources = {
+      projectRoot: simulatedConfig.projectRoot ?? actualConfig.projectRoot,
+      rules: [...(actualConfig.rules ?? []), ...(simulatedConfig.rules ?? [])],
+    };
     this.actual = new LayeredPolicyEvaluator(actualConfig);
     this.simulated = new LayeredPolicyEvaluator(simulatedConfig);
     this.simulationMode = simulationMode;
@@ -247,6 +255,11 @@ export class PermissionSimulator {
       simulatedReason: simulatedDecision.reason,
     };
 
+    this.divergenceTally.overall[divergenceType] += 1;
+    countDivergence(this.divergenceTally.byClass, toolClass, divergenceType);
+    if (commandPrefix !== undefined) countDivergence(this.divergenceTally.byPrefix, commandPrefix, divergenceType);
+    countDivergence(this.divergenceTally.byMode, this.simulationMode, divergenceType);
+
     if (this.records.length >= this.maxDivergenceRecords) {
       this.records.shift();
     }
@@ -273,55 +286,21 @@ export class PermissionSimulator {
    * per-class, per-prefix, and per-mode breakdowns.
    */
   getDivergenceReport(): DivergenceReport {
-    const overall = emptyStats(this.totalEvals);
-
-    const byToolClass: Partial<Record<CommandClassification, DivergenceStats>> =
-      {};
+    const tally = this.divergenceTally;
+    const byToolClass: Partial<Record<CommandClassification, DivergenceStats>> = {};
     const byCommandPrefix: Record<string, DivergenceStats> = {};
     const byMode: Partial<Record<SimulationMode, DivergenceStats>> = {};
 
-    // Prime per-class and per-prefix stats with evaluation counts
     for (const [cls, count] of Object.entries(this.evalsByClass)) {
-      byToolClass[cls as CommandClassification] = emptyStats(count as number);
+      byToolClass[cls as CommandClassification] = statsFromCounts(tally.byClass[cls], count as number);
     }
     for (const [prefix, count] of Object.entries(this.evalsByPrefix)) {
-      byCommandPrefix[prefix] = emptyStats(count as number);
+      byCommandPrefix[prefix] = statsFromCounts(tally.byPrefix[prefix], count as number);
     }
     for (const [mode, count] of Object.entries(this.evalsByMode)) {
-      byMode[mode as SimulationMode] = emptyStats(count as number);
+      byMode[mode as SimulationMode] = statsFromCounts(tally.byMode[mode], count as number);
     }
-
-    // Accumulate divergence records into all buckets
-    let accumulatedOverall = overall;
-    for (const rec of this.records) {
-      const cls = rec.toolClass;
-      const prefix = rec.commandPrefix;
-      const mode = rec.mode;
-      const type = rec.divergenceType;
-
-      // Overall, use accumulateStats for consistency with other buckets
-      accumulatedOverall = accumulateStats(accumulatedOverall, type);
-
-      // By class
-      const existingClass = byToolClass[cls]!;
-      if (existingClass !== undefined) {
-        byToolClass[cls] = accumulateStats(existingClass, type);
-      }
-
-      // By prefix
-      if (prefix !== undefined) {
-        const existingPrefix = byCommandPrefix[prefix]!;
-        if (existingPrefix !== undefined) {
-          byCommandPrefix[prefix] = accumulateStats(existingPrefix, type);
-        }
-      }
-
-      // By mode
-      const existingMode = byMode[mode]!;
-      if (existingMode !== undefined) {
-        byMode[mode] = accumulateStats(existingMode, type);
-      }
-    }
+    const accumulatedOverall = statsFromCounts(tally.overall, this.totalEvals);
 
     return {
       overall: accumulatedOverall,
@@ -330,6 +309,14 @@ export class PermissionSimulator {
       byMode,
       records: [...this.records],
     };
+  }
+
+  /**
+   * getPolicySources, The project root and the rules of both policy sets, so a caller can build
+   * evidence that exercises what the rules are about.
+   */
+  getPolicySources(): { readonly projectRoot: string | undefined; readonly rules: readonly PolicyRule[] } {
+    return this.policySources;
   }
 
   /**

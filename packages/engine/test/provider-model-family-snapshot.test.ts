@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { ModelPickerDataProvider } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { enrichModelEntries } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { createInitialModelState } from '../platform/src/platform/runtime/store/domains/model.ts';
 import { createInitialProviderHealthState } from '../platform/src/platform/runtime/store/domains/provider-health.ts';
 import { getProviderRuntimeSnapshot, listProviderRuntimeSnapshots, type ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -47,18 +47,24 @@ test('repository refresh replaces family metadata while earlier snapshots remain
   expect(missing?.models[0]).not.toHaveProperty('family');
 });
 
-test('the picker uses local metadata in its initial snapshot and updates with the registry', () => {
-  publish('gpt');
-  const provider = new ModelPickerDataProvider([model()], createInitialProviderHealthState(), createInitialModelState(), {
-    benchmarkStore: { getBenchmarks: () => undefined }, providerRegistry: {
-      getSyntheticModelInfoFromCatalog: () => null,
-      getContextWindowForModel: candidate => candidate.contextWindow,
-      getKnownContextWindowForModel: candidate => candidate.contextWindow,
-    },
+test('picker entries report prompt caching for providers whose adapter sends cache hints, and not for others', () => {
+  const entryFor = (provider: string) => enrichModelEntries([{ ...model(), provider }], createInitialProviderHealthState(), createInitialModelState(), new Set(), { getBenchmarks: () => undefined }, {
+    getSyntheticModelInfoFromCatalog: () => null,
+    getContextWindowForModel: candidate => candidate.contextWindow,
+    getKnownContextWindowForModel: candidate => candidate.contextWindow,
+  })[0];
+  expect(entryFor('anthropic')?.capabilities.caching).toBe(true);
+  expect(entryFor('local')?.capabilities.caching).toBe(false);
+});
+
+test('picker entries take their family from the local metadata and follow a registry refresh', () => {
+  const enrich = () => enrichModelEntries([model()], createInitialProviderHealthState(), createInitialModelState(), new Set(), { getBenchmarks: () => undefined }, {
+    getSyntheticModelInfoFromCatalog: () => null,
+    getContextWindowForModel: candidate => candidate.contextWindow,
+    getKnownContextWindowForModel: candidate => candidate.contextWindow,
   });
-  try {
-    expect(provider.getSnapshot().entries[0]?.family).toBe('GPT');
-    publish('claude-haiku'); provider.updateModels([model()]);
-    expect(provider.getSnapshot().entries[0]?.family).toBe('Claude');
-  } finally { provider.dispose(); }
+  publish('gpt');
+  expect(enrich()[0]?.family).toBe('GPT');
+  publish('claude-haiku');
+  expect(enrich()[0]?.family).toBe('Claude');
 });

@@ -103,6 +103,8 @@ export interface CheckoutBudgetSettlementOwner {
   settled(reservation: BudgetReservation | null, spend: SpendRecord | null, receipt: CheckoutBudgetSettlement): void;
 }
 
+const RECONCILIATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
 /**
  * The pools, over a set of spend records and live reservations.
  *
@@ -265,6 +267,8 @@ export class BudgetLedger {
     const held = this.reservations.find(row => row.id === receipt.purchaseId) ?? null;
     const spent = this.spend.find(row => row.purchaseId === receipt.purchaseId) ?? null;
     if (!samePaymentEvidence(held, receipt.reservation) || !samePaymentEvidence(spent, receipt.spend)) throw new Error('The original payment accounting changed.');
+    // A purchase recorded as bought with no hold and no spend would leave the budget uncharged.
+    if (receipt.outcome === 'purchased' && !held && !spent) throw new Error('The original payment hold and spend are both missing, so this purchase cannot be settled as bought without charging the budget.');
     let finalSpend = spent;
     if (held) {
       if (spent || held.retainUntilSettled !== true || held.id !== receipt.purchaseId) throw new Error('The original payment hold is unavailable.');
@@ -296,6 +300,9 @@ export class BudgetLedger {
    */
   prune(nowMs: number, retainPendingSpend?: (purchaseId: string) => boolean): void {
     const cutoff = nowMs - 2 * 24 * 60 * 60 * 1000;
+    // Receipts only guard a replayed reconciliation, which finds nothing left to settle once its
+    // hold is gone; keeping them past this window grows the persisted snapshot without bound.
+    this.reconciliations = this.reconciliations.filter(record => record.atMs >= nowMs - RECONCILIATION_RETENTION_MS);
     const settled = new Set(this.reconciliations.map(record => record.purchaseId));
     this.spend = this.spend.filter(record => record.atMs >= cutoff
       || (!settled.has(record.purchaseId) && retainPendingSpend?.(record.purchaseId) === true));

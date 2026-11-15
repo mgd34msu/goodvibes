@@ -63,6 +63,25 @@ const NORMAL_SNAPSHOT = {
 
 describe('MemoryDiagnostics', () => {
 
+  test('loading renders the busy skeleton and none of the snapshot', () => {
+    mockDiagnostics = { isPending: true, isError: false, isSuccess: false, data: undefined, refetch: () => {} };
+    const { el, unmount } = render();
+    cleanup = unmount;
+    expect(el.querySelector('[aria-label="Loading memory diagnostics"][aria-busy="true"]')).not.toBeNull();
+    expect(el.querySelector('[role="progressbar"]')).toBeNull();
+    expect(el.querySelector('.memory-diagnostics__tier')).toBeNull();
+  });
+
+  test.each([
+    ['normal', 'Normal'],
+    ['high', 'High'],
+  ])('the %s tier is stated in the tier chip', (tier, label) => {
+    mockDiagnostics = { isPending: false, isError: false, isSuccess: true, data: { ...NORMAL_SNAPSHOT, tier }, refetch: () => {} };
+    const { el, unmount } = render();
+    cleanup = unmount;
+    expect(el.querySelector('.memory-diagnostics__tier')?.textContent).toContain(label);
+  });
+
   test('unavailable (404 METHOD_NOT_FOUND) offers no retry', () => {
     mockDiagnostics = {
       isPending: false,
@@ -74,6 +93,8 @@ describe('MemoryDiagnostics', () => {
     const { el, unmount } = render();
     cleanup = unmount;
     expect(el.querySelector('button[aria-label="Retry"]')).toBeNull();
+    expect(el.textContent).toContain('This daemon does not serve memory diagnostics');
+    expect(el.querySelector('[role="progressbar"]')).toBeNull();
   });
 
   test('unavailable (501) offers no retry either', () => {
@@ -87,6 +108,8 @@ describe('MemoryDiagnostics', () => {
     const { el, unmount } = render();
     cleanup = unmount;
     expect(el.querySelector('button[aria-label="Retry"]')).toBeNull();
+    expect(el.textContent).toContain('This daemon does not serve memory diagnostics');
+    expect(el.querySelector('[role="progressbar"]')).toBeNull();
   });
 
   test('a genuine fetch error offers a retry that refetches', () => {

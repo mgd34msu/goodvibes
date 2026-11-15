@@ -27,7 +27,8 @@ export function nativeExecutionPayloadMembers(product, target) {
   assert.equal(row.nativeAddonFile, platform === 'darwin' ? 'vec0.dylib' : 'vec0.so');
   const members = [{ path: artifact, mode: 0o755 }];
   if (platform === 'linux') {
-    assert.equal(row.capturedBunRuntime, '1.3.14');
+    // The pinned Bun is declared once, in the engine's toolchain schema; the config row only has to carry it.
+    assert(typeof row.capturedBunRuntime === 'string' && row.capturedBunRuntime.length > 0, 'Linux native artifacts declare their captured Bun runtime');
     members.push({ path: artifact + '.bun', mode: 0o755 }, { path: artifact + '.bun.LICENSE.md', mode: 0o644 }, { path: artifact + '.bun.json', mode: 0o644 });
   } else {
     assert.equal(row.capturedBunRuntime, undefined, 'Darwin compiled artifacts do not declare Linux runtime sidecars');
@@ -38,9 +39,8 @@ export function nativeExecutionPayloadMembers(product, target) {
     const library = `lib/sqlite-${target}/libsqlite3.dylib`;
     assert(runtime, 'Darwin native vector execution requires declared extension-enabled SQLite');
     assert.equal(runtime.libraryPath, library); assert.equal(runtime.provenancePath, library + '.json');
-    assert.equal(runtime.sqliteVersion, '3.54.0');
-    assert.equal(runtime.sourceUrl, 'https://www.sqlite.org/2026/sqlite-autoconf-3540000.tar.gz');
-    assert.equal(runtime.sourceSha3, 'f5e3e724e9c9b3b5d512c76b02082091a59eeea9becd169a9fbf4d376403acce');
+    // The pin itself lives in src/cli/native-sqlite-runtime.ts, which the producer and the
+    // configuration-agreement test compare with this declaration; it is not copied here.
     members.push({ path: library, mode: 0o644 }, { path: library + '.json', mode: 0o644 });
   }
   return Object.freeze(members.map(member => Object.freeze(member)));

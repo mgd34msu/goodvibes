@@ -11,8 +11,13 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { createNativeWorkLedgerView } from '../../runtime/native-work-ledger-host.ts';
 import { registerAgentWorkspaceRuntimeCommands } from '../../input/commands/agent-workspace-runtime.ts';
 
+const guarded = (violations: string[], handle: (request: Request) => Promise<Response>) => async (request: Request): Promise<Response> => {
+  // A failed assertion in a handler becomes an HTTP 500 the client may treat as an expected failure; keep it for the test body.
+  try { return await handle(request); } catch (error) { violations.push(error instanceof Error ? error.message : String(error)); throw error; }
+};
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'native-intake-product-')); const journalPath = join(home, 'native-submissions.json');
+  const violations: string[] = [];
   const requests: string[] = []; const captures: NativeConversationIntakeCaptureRequest[] = []; const states = new Map<string, NativeConversationIntakeResult>();
   const executionStarts: NativeWorkExecutionIdentity[] = []; const executions = new Map<string, NativeWorkExecutionSnapshot>(); let loseStart = false; let invalidStartRevision = false;
   const hostedTurns = new Map<string, NativeHostedTurnSnapshot>(); const hostedBodies: NativeHostedTurnRequest[] = [];
@@ -30,7 +35,7 @@ function fixture() {
     if (command.unsupportedSources.length) return { ...c, kind: 'blocked', reason: 'unsupported-source', recovery: 'required' };
     return { ...c, kind: 'work', receipt: { projectId: 'p', requestId: command.requestId, inputId: command.inputId, ledgerRevision: 1, workId: 'native-recorded-work', attemptId: 'native-recorded-attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 }, source: { version: 2, sourceId: c.sourceRef.sourceId, sourceRevision: c.sourceRef.sourceRevision, sessionId: c.sourceRef.sessionId, offsetEncoding: 'utf16', proposalRevision: 'proposal-r1', spans: [{ partId: 'input', start: 0, end: command.text.length }], admissionDecisionId: 'admission', judgmentDecisionIds: ['judge'] }, goal: command.text, criteria: [command.text] } };
   };
-  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-intake-token');
     const path = new URL(request.url).pathname; requests.push(path);
     if (revoked) return Response.json({ error: 'Revoked authority' }, { status: 403 });
@@ -92,7 +97,7 @@ function fixture() {
       return Response.json(snapshot);
     }
     return Response.json({ error: `Unexpected route ${path}` }, { status: 500 });
-  } });
+  }) });
   const baseUrl = `http://127.0.0.1:${server.port}`;
   let selectionIdentity = 'original-selection';
   const view = createNativeWorkLedgerView(() => ({ baseUrl, token: 'synthetic-intake-token', workspace: home, journalPath, selectionIdentity }), () => {});
@@ -120,7 +125,7 @@ function fixture() {
     settle() { processing = false; }, loseAdmit() { loseAdmit = true; },
     turn() { processing = false; turnMode = true; }, revoke() { revoked = true; },
     holdAdmit() { heldAdmit = new Promise(resolve => { releaseAdmit = resolve; }); return { arrived: new Promise<void>(resolve => { admitArrived = resolve; }), release: () => releaseAdmit() }; },
-    close() { releaseSnapshot(); releaseAdmit(); releaseHostedStart(); close(); server.stop(true); rmSync(home, { recursive: true, force: true }); } };
+    close() { releaseSnapshot(); releaseAdmit(); releaseHostedStart(); close(); server.stop(true); rmSync(home, { recursive: true, force: true }); expect(violations).toEqual([]); } };
 }
 test('ordinary product transport persists exact source and explicitly recovered admission starts its native target', async () => {
   const f = fixture(); const text = '  Deliver the exact change\r\nkeep 😀 and spaces  ';

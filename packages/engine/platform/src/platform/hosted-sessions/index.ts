@@ -19,6 +19,7 @@
 export {
   HostedSessionManager,
   HostedSessionArgumentError,
+  HostedSessionClientOwnerError,
   HostedSessionLimitError,
   HostedSessionNotFoundError,
   HostedSessionUnavailableError,
@@ -50,7 +51,6 @@ export {
   resolveHostedExecPosture,
   CONVERSATIONAL_CONTAINMENT,
   WORKSTREAM_CONTAINMENT,
-  HOSTED_OWNER_TERMINAL_GUARD,
 } from './exec-posture.js';
 export type { HostedExecPostureDecider, HostedSessionExecPosture } from './exec-posture.js';
 

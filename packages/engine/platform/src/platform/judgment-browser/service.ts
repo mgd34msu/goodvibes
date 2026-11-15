@@ -11,7 +11,7 @@ import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { BrowserJudgmentReferences } from './references.js';
 import { BrowserJudgmentRegistry, type RegisteredBrowserJudgmentBattery } from './registry.js';
 import { validateBrowserJudgmentProjection } from './projection.js';
-import type { BrowserJudgmentAuthorization, BrowserJudgmentRoute, BrowserJudgmentProjection } from './types.js';
+import type { BrowserJudgmentAuthorization, BrowserJudgmentRoute } from './types.js';
 import { BrowserJudgmentCallLimit } from './call-limit.js';
 import { consumeRejectedHook, granted, requireSynchronousAssertion } from './guards.js';
 
@@ -73,7 +73,7 @@ export class BrowserJudgmentService {
     const identity = { principalId: principal.principalId, principalKind: principal.principalKind };
     const request = parseBrowserJudgmentRequest(raw);
     const battery = this.options.registry.get(request.battery);
-    if (!battery) throw new BrowserJudgmentError('JUDGMENT_UNAVAILABLE');
+    if (!battery) throw new BrowserJudgmentError('JUDGMENT_BATTERY_UNKNOWN');
     if (battery.version !== request.batteryVersion) throw new BrowserJudgmentError('JUDGMENT_BATTERY_VERSION_UNSUPPORTED');
     if (this.#active.size >= LIMIT.totalRuns || [...this.#active.values()].filter((run) => run.principal === identity.principalId).length >= LIMIT.principalRuns) {
       throw new BrowserJudgmentError('JUDGMENT_BUSY');
@@ -216,24 +216,29 @@ export class BrowserJudgmentService {
       } finally { accepting = false; await Promise.allSettled([...ownedCalls]); } // Drain siblings before closing the log.
       authorized();
       if (!evidence.length) throw new BrowserJudgmentError('JUDGMENT_UNRECORDED');
-      let projected: BrowserJudgmentProjection<unknown>;
-      const projection = battery.project(result);
-      try { projected = captureBrowserJudgmentJson(projection) as BrowserJudgmentProjection<unknown>; }
-      catch { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); }
-      finally { open = false; }
-      authorized();
-      validateBrowserJudgmentProjection(request, projected, state);
-      const outcomes = Object.values(projected.readings).map((reading) => reading.outcome);
-      if (projected.status === 'held' && projected.compoundOutcome !== undefined) outcomes.push(projected.compoundOutcome);
-      const outcome = outcomes.includes('escalate') ? 'escalate' : outcomes.includes('confirm') ? 'confirm' : 'act';
-      // The minimum compound outcome is an adapter instruction, not a second wire
-      // outcome. Structural facts stay visible and never masquerade as readings.
-      const wireProjection = projected.status === 'held'
-        ? { status: projected.status, reason: projected.reason, readings: projected.readings,
-            ...(projected.structuralBasis === undefined ? {} : { structuralBasis: projected.structuralBasis }) }
-        : projected;
-      const response = { protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: request.batteryVersion, ...wireProjection, outcome, evidence };
-      if (new TextEncoder().encode(JSON.stringify(response)).byteLength > LIMIT.bodyBytes) throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
+      let projected: Parameters<RegisteredBrowserJudgmentBattery['record']>[1];
+      let response: object;
+      // The decision log stays open for `battery.record` only, which runs last.
+      try {
+        const projection = battery.project(result);
+        try { projected = captureBrowserJudgmentJson(projection) as typeof projected; }
+        catch { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); }
+        authorized();
+        validateBrowserJudgmentProjection(request, projected, state);
+        const outcomes = Object.values(projected.readings).map((reading) => reading.outcome);
+        if (projected.status === 'held' && projected.compoundOutcome !== undefined) outcomes.push(projected.compoundOutcome);
+        const outcome = outcomes.includes('escalate') ? 'escalate' : outcomes.includes('confirm') ? 'confirm' : 'act';
+        // The minimum compound outcome is an adapter instruction, not a second wire
+        // outcome. Structural facts stay visible and never masquerade as readings.
+        const wireProjection = projected.status === 'held'
+          ? { status: projected.status, reason: projected.reason, readings: projected.readings,
+              ...(projected.structuralBasis === undefined ? {} : { structuralBasis: projected.structuralBasis }) }
+          : projected;
+        response = { protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: request.batteryVersion, ...wireProjection, outcome, evidence };
+        if (new TextEncoder().encode(JSON.stringify(response)).byteLength > LIMIT.bodyBytes) throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
+        // Nothing awaits between the last authorization and here, so recording cannot outlive it.
+        battery.record(result, projected);
+      } finally { open = false; }
       return response;
     } finally {
       referenceSignal?.removeEventListener('abort', revoked);

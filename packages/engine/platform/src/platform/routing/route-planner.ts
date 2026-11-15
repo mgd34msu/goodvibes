@@ -25,7 +25,7 @@ import type { ResolvedModelPricing } from '../providers/model-pricing.js';
 import type { ProviderStatus } from '../runtime/store/domains/provider-health.js';
 import { modelChoice } from './batteries/model.js';
 import { modelFactsState, type ModelFacts, type ModelTierStore } from './model-tiers.js';
-import { FALLBACK_ROUTES } from './policy.js';
+import { CHOICE_SHORTLIST, FALLBACK_ROUTES, TIER_READ_ROUNDS, TIER_READ_SHORTLIST } from './policy.js';
 import { readRequest, type RequestReading, type RoutingRequest } from './request-reading.js';
 import { tierSearchOrder, type RouteTier } from './tiers.js';
 import { withinSelectedFamily } from './route-scope.js';
@@ -175,7 +175,7 @@ function choiceContext(request: RoutePlanRequest, reading: RequestReading): { [k
   };
 }
 
-interface TierPool {
+export interface TierPool {
   readonly tier: RouteTier;
   readonly members: readonly ModelFacts[];
 }
@@ -185,12 +185,16 @@ interface TierPool {
  * read a shortlist at a time (remembered per model) until the tier holds
  * enough candidates to choose among or the read rounds run out.
  */
-async function poolFor(deps: RoutePlannerDeps, candidates: readonly ModelFacts[], tier: RouteTier, request: RoutePlanRequest): Promise<TierPool> {
+export async function poolFor(deps: { readonly tiers: Pick<ModelTierStore, 'known' | 'readMany'> }, candidates: readonly ModelFacts[], tier: RouteTier, request: RoutePlanRequest): Promise<TierPool> {
   const sorted = [...candidates].sort(shortlistOrder(tier));
   const inTier = (facts: ModelFacts): boolean => deps.tiers.known(facts)?.tier === tier;
-  const unread = sorted.filter((facts) => deps.tiers.known(facts) === undefined);
-  if (unread.length) await deps.tiers.readMany(unread, { site: 'routing.route-planner.model-tier', ...(request.signal ? { signal: request.signal } : {}), ...(request.beforeAttempt ? { beforeAttempt: request.beforeAttempt } : {}), ...(request.onRetry ? { onRetry: request.onRetry } : {}) });
-  if (sorted.some((facts) => deps.tiers.known(facts)?.tier === undefined)) throw new JudgmentHeldError();
+  const readOptions = { site: 'routing.route-planner.model-tier', ...(request.signal ? { signal: request.signal } : {}), ...(request.beforeAttempt ? { beforeAttempt: request.beforeAttempt } : {}), ...(request.onRetry ? { onRetry: request.onRetry } : {}) };
+  for (let round = 0; round < TIER_READ_ROUNDS && sorted.filter(inTier).length < CHOICE_SHORTLIST; round++) {
+    const shortlist = sorted.filter((facts) => deps.tiers.known(facts) === undefined).slice(0, TIER_READ_SHORTLIST);
+    if (shortlist.length === 0) break;
+    await deps.tiers.readMany(shortlist, readOptions);
+    if (shortlist.some((facts) => deps.tiers.known(facts)?.tier === undefined)) throw new JudgmentHeldError();
+  }
   return { tier, members: sorted.filter(inTier) };
 }
 

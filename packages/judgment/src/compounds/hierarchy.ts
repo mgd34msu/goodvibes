@@ -1,3 +1,4 @@
+import { mapLimit } from '../patterns/common.ts';
 import { checkEachFixture, decisionHeader, fixtureCheck, type DecisionIdentity, type FixtureCheck, type NamedDecision } from '../batteries/decision.ts';
 import { choice, type EntryType, type JudgmentPort } from '../port/types.ts';
 import { LIMITS } from '../port/limits.ts';
@@ -132,7 +133,7 @@ async function beamSearch(port: JudgmentPort, spec: HierarchySpec, state: EntryT
   let beam: Candidate[] = [{ path: [], logSum: 0, decisions: 0 }];
   for (let open = beam; open.length > 0; open = beam.filter((c) => !isLeaf(spec.tree, c.path))) {
     const done = beam.filter((c) => isLeaf(spec.tree, c.path));
-    const expanded = await Promise.all(open.map((candidate) => expand(port, spec, state, candidate, options)));
+    const expanded = await mapLimit(open, open.length, (candidate) => expand(port, spec, state, candidate, options));
     beam = [...done, ...expanded.flat()].sort((a, b) => scoreOf(b) - scoreOf(a)).slice(0, spec.beamWidth);
   }
   return beam.map((candidate) => ({ path: candidate.path, score: scoreOf(candidate) }));

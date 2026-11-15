@@ -37,7 +37,8 @@ const VALID_MEMORY_SCOPES = new Set(['session', 'project', 'team']);
 
 const INSTRUCTION_FILENAMES = new Set(['claude.md', 'agents.md', 'openclaw.md']);
 const INSTRUCTION_DIRS = ['instructions', 'personas'];
-const ALLOWLIST_FILENAMES = ['allowed-tools.json', 'allowlist.json', 'tools.json', 'permissions.json'];
+// `tools.json` is deliberately absent: it is usually a list of the tools a workspace defines, not the ones it allows.
+const ALLOWLIST_FILENAMES = ['allowed-tools.json', 'allowlist.json', 'permissions.json'];
 
 /**
  * OpenClaw allowlist tool identifier -> Agent permission tool category. The
@@ -307,7 +308,7 @@ function collectSkills(root: string, skipped: SkippedEntry[]): PlannedSkill[] {
   return skills;
 }
 
-/** Normalize one allowlist entry to a bare tool name (strips `Bash(git*)` args and casing). */
+/** Normalize one allowlist entry to a bare tool name (casing and separators folded). Callers check for arguments first. */
 function normalizeAllowlistEntry(entry: string): string {
   const beforeParen = entry.split('(')[0] ?? entry;
   return beforeParen.trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -317,7 +318,7 @@ function collectAllowlistEntries(value: unknown): readonly string[] {
   if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string');
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
-    for (const key of ['allow', 'allowed', 'allowedTools', 'allowed_tools', 'tools']) {
+    for (const key of ['allow', 'allowed', 'allowedTools', 'allowed_tools']) {
       const nested = record[key];
       if (Array.isArray(nested)) return nested.filter((entry): entry is string => typeof entry === 'string');
     }
@@ -343,12 +344,18 @@ function collectPermissions(root: string, skipped: SkippedEntry[]): PlannedPermi
     }
     const entries = collectAllowlistEntries(parsed);
     if (entries.length === 0) {
-      skipped.push({ path: full, reason: 'allowlist file has no recognizable tool entries (expected an array, or an "allow"/"tools" array)' });
+      skipped.push({ path: full, reason: 'allowlist file has no recognizable tool entries (expected an array, or an "allow" array)' });
       continue;
     }
     const matched: { entry: string; category: string }[] = [];
     const categories = new Set<string>();
     for (const entry of entries) {
+      // `Bash(git status)` allows one command; the Agent's categories allow every
+      // tool in the group, so mapping it would widen the grant. Leave it out.
+      if (entry.includes('(')) {
+        skipped.push({ path: full, reason: `allowlist entry "${entry}" is scoped to arguments; scoped allow not representable` });
+        continue;
+      }
       const category = TOOL_CATEGORY_MAP[normalizeAllowlistEntry(entry)];
       if (category) {
         matched.push({ entry, category });

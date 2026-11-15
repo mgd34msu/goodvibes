@@ -60,6 +60,7 @@
  * report as a design-doc correction, not silently reinterpreted.
  */
 import { PersistentStore, type PersistentStoreCorruption } from '../../state/persistent-store.js';
+import { loadStoreForWrite } from './store-read.js';
 import { withInboundStoreWriteLock } from './store-write-lock.js';
 import {
   type HousekeepingTrigger,
@@ -369,12 +370,14 @@ export class MailboxCursorStore {
     return this.corruption;
   }
 
-  private async readWithDrops(): Promise<{
+  private async readWithDrops(forWrite = false): Promise<{
     cursors: InboundSourceCursor[];
     malformed: number;
     corrupt: PersistentStoreCorruption | null;
   }> {
-    const { data: raw, corruption } = await this.store.loadOrDiscard();
+    const { data: raw, corruption } = forWrite
+      ? await loadStoreForWrite(this.store)
+      : await this.store.loadOrDiscard();
     if (corruption !== null) this.corruption = corruption;
     if (!raw || typeof raw !== 'object') return { cursors: [], malformed: 0, corrupt: corruption };
     const rawCursors = Array.isArray(raw.cursors) ? raw.cursors : [];
@@ -395,7 +398,7 @@ export class MailboxCursorStore {
     // across processes. Both, because neither alone is "one writer at a time"
     //, see store-write-lock.ts for why a second daemon is reachable here.
     const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
-      const { cursors, malformed, corrupt } = await this.readWithDrops();
+      const { cursors, malformed, corrupt } = await this.readWithDrops(true);
       const { next, result } = await fn(cursors, malformed, corrupt);
       await this.store.persist({ version: 1, cursors: next });
       return result;
@@ -413,6 +416,12 @@ export class MailboxCursorStore {
    * hiding a live position because nobody could say yet whether its account is
    * configured would make the position look absent to the very caller about to
    * resume from it.
+   *
+   * Only readers filter. `resolve`, `resolveGmail` and `advance` work on the raw
+   * file on purpose: a source still running for an account that was just
+   * removed from config (or is mid-reload) must resume from its real position,
+   * and treating that position as absent would re-establish it at the
+   * high-water mark and skip mail. `sweep()` is the only thing that reaps.
    */
   async list(): Promise<readonly InboundSourceCursor[]> {
     const { cursors } = await this.readWithDrops();

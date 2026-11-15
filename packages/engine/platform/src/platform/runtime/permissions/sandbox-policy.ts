@@ -47,7 +47,7 @@ export interface SandboxPolicyInput {
    * When false, the base policy applies unchanged.
    */
   readonly sandboxActive: boolean;
-  /** Command base names (or `*`) whose network access is re-enabled in the boundary. */
+  /** Command base names (or `*`) whose network access is re-enabled in the boundary; a command is covered only when every command in it is listed. */
   readonly egressAllowlist: readonly string[];
   /**
    * What the existing permission layer would decide for this exec absent the
@@ -59,24 +59,139 @@ export interface SandboxPolicyInput {
   readonly needs: CommandNeeds;
 }
 
-/** The base command names of a shell command, for matching the owner's egress allowlist. */
-function baseNames(command: string): Set<string> {
-  try {
-    return new Set(normalizeCommand(command).segments.map((seg) => seg.command).filter((name) => name.length > 0));
-  } catch {
-    return new Set();
+/**
+ * The text inside every `$(...)` and backtick substitution in one word, wherever it sits: the whole
+ * word, in the middle of a word, or inside double quotes. Single quotes keep the text literal. An
+ * unclosed substitution reads to the end of the word.
+ */
+function embeddedSubstitutions(word: string): string[] {
+  if (word.startsWith("'")) return [];
+  const found: string[] = [];
+  for (let i = 0; i < word.length; i++) {
+    const c = word[i]!;
+    if (c === '\\') { i++; continue; }
+    if (c === '`') {
+      const close = word.indexOf('`', i + 1);
+      found.push(word.slice(i + 1, close < 0 ? word.length : close));
+      if (close < 0) break;
+      i = close;
+    } else if (c === '$' && word[i + 1] === '(') {
+      let depth = 0;
+      let j = i + 1;
+      for (; j < word.length; j++) {
+        if (word[j] === '(') depth++;
+        else if (word[j] === ')' && --depth === 0) break;
+      }
+      found.push(word.slice(i + 2, j));
+      i = j;
+    }
   }
+  return found;
 }
 
 /**
- * Whether the owner's egress allowlist names one of the command's base
- * commands. The list is the owner's setting; matching its names against the
- * parsed command names carries out that setting and interprets nothing.
+ * The substitutions inside the bodies of heredocs whose delimiter word is unquoted: the shell
+ * expands `$(...)` and backticks there, while the tokenizer skips the body. A quoted or
+ * backslashed delimiter keeps the body literal. A `<<` that is not a heredoc only adds names, which
+ * errs toward asking.
  */
-function isOnEgressAllowlist(command: string, egressAllowlist: readonly string[]): boolean {
-  if (egressAllowlist.includes('*')) return true;
-  const bases = baseNames(command);
-  return egressAllowlist.some((name) => bases.has(name));
+function heredocBodySubstitutions(text: string): string[] {
+  const found: string[] = [];
+  const opener = /<<(?!<)-?[ \t]*([^\s;&|<>()]+)/g;
+  for (let m = opener.exec(text); m !== null; m = opener.exec(text)) {
+    const delimiter = m[1]!;
+    if (/['"\\]/.test(delimiter)) continue;
+    const bodyStart = text.indexOf('\n', opener.lastIndex);
+    if (bodyStart < 0) continue;
+    const lines = text.slice(bodyStart + 1).split('\n');
+    const body: string[] = [];
+    for (const line of lines) {
+      if (line.trim() === delimiter) break;
+      body.push(line);
+    }
+    found.push(...embeddedSubstitutions(body.join('\n')));
+  }
+  return found;
+}
+
+/**
+ * The base command names of a shell command, for matching the owner's egress allowlist: every
+ * segment (a newline separates commands like `;`) and the commands inside `$(...)` / backtick
+ * substitutions. Empty when the command could not be read.
+ */
+export function commandBaseNames(command: string): string[] {
+  const names = new Set<string>();
+  const collect = (text: string, depth: number): void => {
+    const normalized = normalizeCommand(text);
+    for (const seg of normalized.segments) {
+      if (seg.command.length > 0) names.add(seg.command);
+      if (depth >= 4) continue;
+      for (const token of seg.tokens) {
+        for (const inner of embeddedSubstitutions(token.value)) collect(inner, depth + 1);
+      }
+    }
+    if (depth < 4) {
+      for (const inner of heredocBodySubstitutions(text)) collect(inner, depth + 1);
+    }
+  };
+  try {
+    collect(command, 0);
+  } catch {
+    return [];
+  }
+  return [...names];
+}
+
+/**
+ * The command's base names that the owner's egress allowlist does not name. Empty when the list
+ * is `*` or names every command. A command too long to read in full is never fully listed.
+ */
+export function unlistedBaseNames(command: string, egressAllowlist: readonly string[]): string[] {
+  if (egressAllowlist.includes('*')) return [];
+  const names = commandBaseNames(command);
+  if (names.length === 0) return ['(unreadable command)'];
+  const unlisted = names.filter((name) => !egressAllowlist.includes(name));
+  // `<(cmd)` and `>(cmd)` run cmd too, and the tokenizer does not read inside them.
+  if (/[<>]\(/.test(command)) unlisted.push('(process substitution)');
+  try {
+    if (normalizeCommand(command).truncated === true) unlisted.push('(rest of a command too long to read)');
+  } catch { /* unreadable: already named above */ }
+  return unlisted;
+}
+
+/**
+ * Whether the owner's egress allowlist covers the WHOLE command: every command in it is named (or
+ * the list is `*`). The network is opened for the entire shell command, so one listed command must
+ * not carry an unlisted one with it. The list is the owner's setting; matching its names against
+ * the parsed command names carries out that setting and interprets nothing.
+ */
+export function egressAllowed(command: string, egressAllowlist: readonly string[]): boolean {
+  return unlistedBaseNames(command, egressAllowlist).length === 0;
+}
+
+/** How long the owner's answer at the approval gate stays usable by the exec that follows it. */
+const GATE_APPROVAL_TTL_MS = 60_000;
+const gateApprovals = new Map<string, number[]>();
+
+/**
+ * Remember that the owner approved `command` at the approval gate with its host-access escalations
+ * named on the card, so the exec that runs it next does not ask the same question again.
+ */
+export function recordGateEscalationApproval(command: string, now: number = Date.now()): void {
+  const live = (gateApprovals.get(command) ?? []).filter((at) => now - at < GATE_APPROVAL_TTL_MS);
+  live.push(now);
+  gateApprovals.set(command, live);
+  for (const [key, times] of gateApprovals) {
+    if (times.every((at) => now - at >= GATE_APPROVAL_TTL_MS)) gateApprovals.delete(key);
+  }
+}
+
+/** Use up one recorded gate approval for `command`. False when the owner was not asked at the gate, or the answer is too old. */
+export function consumeGateEscalationApproval(command: string, now: number = Date.now()): boolean {
+  const live = (gateApprovals.get(command) ?? []).filter((at) => now - at < GATE_APPROVAL_TTL_MS);
+  const used = live.shift() !== undefined;
+  if (live.length > 0) gateApprovals.set(command, live); else gateApprovals.delete(command);
+  return used;
 }
 
 /**
@@ -100,14 +215,15 @@ export function decideSandboxedExec(input: SandboxPolicyInput): SandboxPolicyDec
 
   const escalations: string[] = [];
   if (input.needs.needsNetwork) {
+    const unlisted = unlistedBaseNames(input.command, input.egressAllowlist);
     escalations.push(
-      isOnEgressAllowlist(input.command, input.egressAllowlist)
+      unlisted.length === 0
         ? 'wants network (on egress allowlist, granted inside the boundary once approved)'
-        : 'wants network (not on egress allowlist, denied inside the boundary unless approved)',
+        : `wants network (not on egress allowlist: ${unlisted.join(', ')}; denied inside the boundary and approval does not change that; add it to sandbox.egressAllowlist)`,
     );
   }
   if (input.needs.needsPrivilege) {
-    escalations.push('wants host privilege escalation');
+    escalations.push('wants host privilege escalation (the boundary never grants it: approving lets the command run inside the boundary without root, so it fails where it needs root)');
   }
 
   if (escalations.length > 0) {

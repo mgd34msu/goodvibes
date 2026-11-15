@@ -29,7 +29,10 @@ export interface QualityGate {
   enabled: boolean;
   /** Required unavailable checks leave their acceptance obligation unverified. Tests are required by default. */
   required?: boolean;
-  /** Assertion checks require a supported machine reporter or the registered completion protocol. */
+  /**
+   * Assertion checks require a supported machine reporter (`bun test`) or the registered completion protocol
+   * (see `unverifiedGateAdvice`). A gate named `test` is always an assertion check, whatever this says.
+   */
   verification?: 'command' | 'assertions';
 }
 
@@ -132,6 +135,15 @@ export function refreshGateResults(results: readonly QualityGateResult[] | undef
 /** Required unknown checks cannot be promoted by a semantic reading. */
 export function unverifiedGates(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
   return (results ?? []).filter(result => result.required === true && gateOutcome(result) === 'unverified');
+}
+
+/** What the nudge tells a worker about a required gate that has no current evidence, including how to supply it when that is possible. */
+export function unverifiedGateAdvice(result: QualityGateResult): string {
+  if (result.reason !== 'check-completion-unverified') return result.reason ?? 'unverified check completion';
+  return 'check-completion-unverified: the command finished, but its output is not a test result the contract can read. '
+    + 'Run the tests with `bun test`, or make the last line the command prints to stdout one JSON object: '
+    + `{"kind":"goodvibes-gate-result","schemaVersion":1,"gate":"${result.gate}","runId":"<the value of $GOODVIBES_GATE_RUN_ID>","outcome":"passed" or "failed",`
+    + '"checks":{"passed":N,"failed":N,"skipped":N},"observation":{}} with at least one passed or failed check counted.';
 }
 
 /** The `scripts` of `cwd`'s package.json; empty when there is none or it cannot be read. */

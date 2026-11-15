@@ -17,7 +17,10 @@ let previous: ReturnType<typeof installJudgmentPort>;
 let installed = false;
 function reading(probability: number) {
   const fixture = fakePort(() => noulAnswer(probability));
-  previous = installJudgmentPort(fixture.port); installed = true;
+  // Keep the port that was there before the first call, so a second call in one test restores the original, not the first fake.
+  const replaced = installJudgmentPort(fixture.port);
+  if (!installed) previous = replaced;
+  installed = true;
   return fixture;
 }
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });

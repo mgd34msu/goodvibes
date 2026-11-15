@@ -17,6 +17,11 @@ import { createWriteTool } from '../platform/src/platform/tools/write/index.js';
 import { FileStateCache } from '../platform/src/platform/state/file-cache.js';
 import type { ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.js';
 const roots: string[] = [];
+/** Polls a condition another party makes true; the attempt cap only turns a hang into a named failure. */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 4_000 && !condition(); attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  if (!condition()) throw new Error(`timed out waiting for ${what}`);
+}
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function git(root: string, ...args: string[]) {
   const result = spawnSync('git', ['-C', root, ...args]);
@@ -198,7 +203,7 @@ test.skipIf(!supported)('contained validator and competing write remain serializ
   writeFileSync(join(f.root, 'package.json'), JSON.stringify({ scripts: { build: 'sleep 0.3; cp source.txt validated.txt' } }));
   const { write } = f.tools();
   const first = write.execute({ files: [{ path: 'source.txt', content: 'first', mode: 'overwrite' }], validate: { after: ['build'] } });
-  while (readFileSync(join(f.root, 'source.txt'), 'utf8') !== 'first') await new Promise((resolve) => setTimeout(resolve, 1));
+  await until(() => readFileSync(join(f.root, 'source.txt'), 'utf8') === 'first', 'the first write to publish its source');
   const second = write.execute({ files: [{ path: 'source.txt', content: 'second', mode: 'overwrite' }] });
   const results = await Promise.all([first, second]);
   expect(results.every((result) => result.success)).toBe(true);
@@ -210,16 +215,25 @@ for (const interruption of ['abort', 'revoke', 'permission'] as const)
   test.skipIf(!supported)(`captured embedded validator ${interruption} withholds late diagnostics and publication`, async () => {
     const f = await fixture(); let allowed = true;
     writeFileSync(join(f.root, 'package.json'), JSON.stringify({ scripts: { build: 'echo HIDDEN_DELAYED_DIAGNOSTIC; sleep 1; echo late > late.txt' } }));
-    const call = new AbortController();
-    const pending = f.tools(async () => allowed).write.execute({ files: [{ path: 'source.txt', content: 'first', mode: 'overwrite' }], validate: { after: ['build'] } }, { signal: call.signal });
-    setTimeout(() => {
+    // Watch the real contained spawn so the interruption provably lands while the validator runs, and so the
+    // absence check can wait for the validator process itself instead of a guessed delay.
+    const nativeSpawn = childProcess.spawn; const spawned = Promise.withResolvers<childProcess.ChildProcess>();
+    const tap = spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
+      const child = nativeSpawn(...args);
+      if (Array.isArray(args[1]) && args[1].some((part) => typeof part === 'string' && part.includes("'run' 'build'"))) spawned.resolve(child);
+      return child;
+    }) as typeof childProcess.spawn);
+    try {
+      const call = new AbortController();
+      const pending = f.tools(async () => allowed).write.execute({ files: [{ path: 'source.txt', content: 'first', mode: 'overwrite' }], validate: { after: ['build'] } }, { signal: call.signal });
+      const validator = await spawned.promise;
       if (interruption === 'abort') call.abort();
       else if (interruption === 'revoke') revokeContractInputAuthority(f.authority);
       else allowed = false;
-    }, 400);
-    const result = await pending;
-    expect(result.success).toBe(false); expect(JSON.stringify(result)).not.toContain('HIDDEN_DELAYED_DIAGNOSTIC');
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+      const result = await pending;
+      expect(result.success).toBe(false); expect(JSON.stringify(result)).not.toContain('HIDDEN_DELAYED_DIAGNOSTIC');
+      if (validator.exitCode === null && validator.signalCode === null) await new Promise((resolve) => validator.once('exit', resolve));
+    } finally { tap.mockRestore(); }
     expect(existsSync(join(f.root, 'late.txt'))).toBe(false); expect(existsSync(join(f.owner, 'late.txt'))).toBe(false);
   });
 
@@ -243,7 +257,7 @@ test('validator publication lease rejects copied, wrong-owner, concurrent and ex
     let finish!: () => void;
     const first = publishWithinCapturedLease(lease, f.authority, async () => { await new Promise<void>((resolve) => { finish = resolve; }); });
     await expect(publishWithinCapturedLease(lease, f.authority, async () => {})).rejects.toThrow();
-    while (!finish) await new Promise((resolve) => setTimeout(resolve, 1));
+    await until(() => Boolean(finish), 'the first publication callback to start');
     finish(); await first;
   });
   await expect(publishWithinCapturedLease(retained, f.authority, async () => {})).rejects.toThrow();
@@ -262,7 +276,8 @@ test('a settled publication owner drains and invalidates an in-flight borrowed c
   });
   await ready;
   const subsequent = withCapturedPublication(f.authority, async () => { next = true; });
-  await new Promise((resolve) => setTimeout(resolve, 10)); expect(next).toBe(false);
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+  expect(next).toBe(false);
   finish(); await expect(borrowed).rejects.toThrow('settled'); await owner; await subsequent;
   expect(published).toBe(false); expect(next).toBe(true);
 });
@@ -280,6 +295,17 @@ test.skipIf(!supported)('captured validators retain configured network denial in
   const tool = capturedInputTool(createWriteTool({ projectRoot: f.root, validatorRunner }), f.authority, f.root, filter, undefined);
   const result = await tool.execute({ files: [{ path: 'source.txt', content: 'network checked', mode: 'overwrite' }], validate: { after: ['build'] } });
   expect(result.success).toBe(true); expect(JSON.parse(result.output!).validation_passed).toBe(true);
+});
+
+test.skipIf(!supported)('the native spawn spy used by the host-fallback check observes a real contained validator launch', async () => {
+  const f = await fixture();
+  writeFileSync(join(f.root, 'package.json'), JSON.stringify({ scripts: { build: 'true' } }));
+  const nativeSpawn = spyOn(childProcess, 'spawn');
+  try {
+    const result = await f.tools().write.execute({ files: [{ path: 'source.txt', content: 'observed', mode: 'overwrite' }], validate: { after: ['build'] } });
+    expect(JSON.parse(result.output!).validation_passed).toBe(true);
+    expect(nativeSpawn).toHaveBeenCalled();
+  } finally { nativeSpawn.mockRestore(); }
 });
 
 test('captured validator command names cannot select arbitrary commands or fall back to host spawn', async () => {

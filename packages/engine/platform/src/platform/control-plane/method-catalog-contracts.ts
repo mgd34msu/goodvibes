@@ -48,7 +48,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.start',
     title: 'Start a Contract',
-    description: 'Start a contract for `ask`, the person\'s words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract\'s questions and a following turn answers them. Otherwise it starts on the daemon\'s own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon\'s working directory. `isolation` overrides `contract.isolation` for this contract.',
+    description: 'Start a contract for `ask`, the person\'s words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract\'s questions and a following turn answers them. Otherwise it starts on the daemon\'s own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon\'s working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon\'s workspace, or differs from the hosted session\'s; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.',
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts' },
@@ -58,7 +58,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.cancel',
     title: 'Cancel a Contract',
-    description: 'Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id.',
+    description: 'Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NATIVE for native work (stop it through its own execution, or answer its open question with `cancel`); 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection.',
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts/{contractId}/cancel' },
@@ -68,7 +68,7 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'contracts.reply',
     title: 'Reply to a Contract Escalation',
-    description: 'The owner\'s free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED when the contract has ended.',
+    description: 'The owner\'s free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A native work contract\'s failed-turn question is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.',
     category: 'contracts',
     scopes: ['write:fleet'],
     http: { method: 'POST', path: '/api/contracts/{contractId}/reply' },

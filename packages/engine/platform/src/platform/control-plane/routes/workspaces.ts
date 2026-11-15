@@ -77,7 +77,11 @@ function createRemoveHandler(service: WorkspacesGatewayService): GatewayMethodHa
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const root = requireString(params.root, 'root');
-    return service.remove(root);
+    try {
+      return await service.remove(root);
+    } catch (error) {
+      rethrowAsVerbError(error);
+    }
   };
 }
 
@@ -88,7 +92,11 @@ function createResolveHandler(service: WorkspacesGatewayService): GatewayMethodH
     const mainWorktreeRoot = optionalString(params.mainWorktreeRoot);
     const git: WorkspaceGitMetadata | undefined =
       mainWorktreeRoot !== undefined ? { mainWorktreeRoot } : undefined;
-    return service.resolve(path, git);
+    try {
+      return await service.resolve(path, git);
+    } catch (error) {
+      rethrowAsVerbError(error);
+    }
   };
 }
 

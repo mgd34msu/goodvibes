@@ -6,10 +6,12 @@ import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { createOperatorNativeConversationIntakeClient, readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationIntakeResult, type NativeConversationTurnPermit } from '../platform/src/platform/workflow/work-ledger/native-intake-client.js';
 import type { OperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { admitNativeConversationTurn, failNativeConversationTurn, readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn } from '../platform/src/platform/core/native-turn-admission.js';
-import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, withNativeConversationTurn } from '../platform/src/platform/core/native-turn-scope.js';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
+import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL, markNativeConversationTurnEffectsPossible, withNativeConversationTurn } from '../platform/src/platform/core/native-turn-scope.js';
 import { ProviderError } from '../platform/src/platform/types/errors.js';
 import { Orchestrator, type OrchestratorOptions } from '../platform/src/platform/core/orchestrator.js';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import type { TurnPhase } from '../platform/src/platform/core/turn-phase.js';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import type { OrchestratorCoreServices } from '../platform/src/platform/core/orchestrator-runtime.js';
 import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
@@ -162,14 +164,14 @@ describe('native ordinary turn through the real orchestrator', () => {
   test('queues authentic exact text once, suppresses all legacy intake/plan paths, and dedups settled delivery', async () => {
     const f = fixture(); const permit = await f.permit(); const gate = deferred<void>(); let calls = 0;
     const h = orchestrator(async () => { calls++; await gate.promise; return finalResponse(); });
-    (h.instance as unknown as { isCompacting: boolean }).isCompacting = true;
+    (h.instance as unknown as { phase: TurnPhase }).phase = 'compacting';
     await h.instance.handleUserInput(text, undefined, { nativeConversationTurnPermit: permit });
     await h.instance.handleUserInput(text, undefined, { nativeConversationTurnPermit: permit });
     expect(h.instance.messageQueue).toHaveLength(1);
     expect(h.instance.editQueuedMessage(h.instance.messageQueue[0]!.id, 'changed')).toBe(false);
     expect(() => h.instance.bindNativeConversationProject('different')).toThrow('identity_mismatch');
     expect(calls).toBe(0);
-    (h.instance as unknown as { isCompacting: boolean }).isCompacting = false;
+    (h.instance as unknown as { phase: TurnPhase }).phase = 'idle';
     const drain = (h.instance as unknown as { drainMessageQueue: () => Promise<void> }).drainMessageQueue();
     for (let i = 0; i < 50 && calls === 0; i++) await Promise.resolve();
     expect(calls).toBe(1); expect(isNativeConversationTurn()).toBe(false);
@@ -185,44 +187,61 @@ describe('native ordinary turn through the real orchestrator', () => {
   });
   test('fake permit is rejected before queue mutation and stale queued authority fails before model/transcript', async () => {
     const f = fixture(); const permit = await f.permit(); let calls = 0; const h = orchestrator(async () => { calls++; return finalResponse(); });
-    (h.instance as unknown as { isCompacting: boolean }).isCompacting = true;
+    (h.instance as unknown as { phase: TurnPhase }).phase = 'compacting';
     await expect(h.instance.handleUserInput(text, undefined, { nativeConversationTurnPermit: {} as NativeConversationTurnPermit })).rejects.toThrow('invalid_turn_permit');
     expect(h.instance.messageQueue).toHaveLength(0);
     await h.instance.handleUserInput(text, undefined, { nativeConversationTurnPermit: permit });
     const source = readNativeConversationTurnPermit(permit);
     f.set({ kind: 'cancelled', projectId: source.projectId, requestId: source.requestId, sourceRef: { ...source.sourceRef } });
-    (h.instance as unknown as { isCompacting: boolean }).isCompacting = false;
+    (h.instance as unknown as { phase: TurnPhase }).phase = 'idle';
     await expect((h.instance as unknown as { drainMessageQueue: () => Promise<void> }).drainMessageQueue()).rejects.toThrow('invalid_turn_permit');
     expect(calls).toBe(0); expect(h.conversation.getMessagesForLLM()).toHaveLength(0);
     expect(readNativeConversationTurnStatus(permit)).toBe('recovery_required');
     h.instance.dispose(); f.client.dispose();
   });
   test('scope blocks spawn/batch including outsideContract and workflow contract, but leaves unrelated calls alone', async () => {
-    const f = fixture(); const permit = await f.permit(); let starts = 0;
-    const agent = createAgentTool({ manager: { guardContractLeafSpawn: () => {}, list: () => [] }, messageBus: {}, configManager: {}, archetypeLoader: {},
+    const f = fixture(); const permit = await f.permit(); let starts = 0; let spawns = 0;
+    const agent = createAgentTool({ manager: { guardContractLeafSpawn: () => {}, list: () => [], spawn: () => { spawns++; throw new Error('spawn reached'); }, spawnOwned: () => { spawns++; throw new Error('spawn reached'); } }, messageBus: {}, configManager: {}, archetypeLoader: {},
       contractRunner: { start: () => { starts++; throw new Error('ordinary start reached'); } }, projectRoot: '/fixture', resolveSessionId: () => 'session' } as unknown as Parameters<typeof createAgentTool>[0]);
     const workflow = createWorkflowTool({} as Parameters<typeof createWorkflowTool>[0], { contractRunner: { start: () => { starts++; throw new Error('ordinary start reached'); } }, projectRoot: '/fixture', resolveSessionId: () => 'session' });
     await withNativeConversationTurn(permit, async () => {
       for (const args of [{ mode: 'spawn', task: 'work' }, { mode: 'spawn', task: 'work', outsideContract: true },
-        { mode: 'batch-spawn', tasks: [{ task: 'work', outsideContract: true }] }]) expect((await agent.execute(args)).success).toBe(false);
+        { mode: 'batch-spawn', tasks: [{ task: 'work', outsideContract: true }] }]) {
+        // The refusal text, not just a failure: any other error means the guard was bypassed.
+        expect(await agent.execute(args)).toEqual({ success: false, error: NATIVE_TURN_EXECUTION_REFUSAL });
+      }
       expect((await workflow.execute({ mode: 'start', definition: 'contract', task: 'work' })).success).toBe(false);
       await new Promise<void>(resolve => setTimeout(resolve, 0));
       expect(isNativeConversationTurn()).toBe(true);
     });
-    expect(starts).toBe(0); expect(isNativeConversationTurn()).toBe(false);
+    expect(starts).toBe(0); expect(spawns).toBe(0); expect(isNativeConversationTurn()).toBe(false);
     await workflow.execute({ mode: 'start', definition: 'contract', task: 'work' }); expect(starts).toBe(1);
     f.client.dispose();
   });
+  test('a classic-policy native turn is exempt from the spawn refusal', async () => {
+    const f = fixture(); const permit = await f.permit(); let starts = 0; let spawns = 0;
+    const agent = createAgentTool({ manager: { guardContractLeafSpawn: () => {}, list: () => [], spawn: () => { spawns++; throw new Error('spawn reached'); }, spawnOwned: () => { spawns++; throw new Error('spawn reached'); } }, messageBus: {}, configManager: {}, archetypeLoader: {},
+      contractRunner: { start: () => { starts++; throw new Error('ordinary start reached'); } }, projectRoot: '/fixture', resolveSessionId: () => 'session' } as unknown as Parameters<typeof createAgentTool>[0]);
+    const retire = configureDecisionModelPolicy(() => 'Classic - Off');
+    try {
+      await withNativeConversationTurn(permit, async () => {
+        const result = await agent.execute({ mode: 'spawn', task: 'work', outsideContract: true });
+        expect(result.error).not.toBe(NATIVE_TURN_EXECUTION_REFUSAL);
+      });
+    } finally { retire(); }
+    expect(starts + spawns).toBeGreaterThan(0);
+    f.client.dispose();
+  });
   test('native helpers neither prime/classify nor read plans or schedule fallback spawning', async () => {
-    const f = fixture(); const permit = await f.permit(); const conversation = new ConversationManager(); let timers = 0;
+    const f = fixture(); const permit = await f.permit(); const conversation = new ConversationManager(); 
     const forbiddenPlan = new Proxy({}, { get() { throw new Error('legacy plan path'); } });
     await withNativeConversationTurn(permit, async () => {
       const prepared = await prepareConversationForTurn(conversation, { getCurrentModel: () => model }, text, undefined, 'session', forbiddenPlan as Parameters<typeof prepareConversationForTurn>[5]);
       expect(prepared).toBeNull();
       await handleFinalResponseOutcome({ conversation, response: finalResponse(), runtimeBus: null, providerRegistry: { getCurrentModel: () => model },
-        planManager: forbiddenPlan, preTurnPlan: { awaitingPlan: true }, setAutoSpawnTimeout: () => { timers++; } } as unknown as Parameters<typeof handleFinalResponseOutcome>[0]);
+        planManager: forbiddenPlan, preTurnPlan: { awaitingPlan: true } } as unknown as Parameters<typeof handleFinalResponseOutcome>[0]);
     });
-    expect(timers).toBe(0); f.client.dispose();
+    f.client.dispose();
   });
   test('provider failover retains the same permit only with no possible effects; ambiguous failures stay closed', async () => {
     for (const effects of [false, true]) {

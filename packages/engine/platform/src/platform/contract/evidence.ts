@@ -32,7 +32,7 @@ import { reviewProjectPath, reviewInventoryObservationAsync } from './review-inv
 import { projectCheckEvidence } from './check-evidence-projection.js';
 export { currentFileObservations } from './current-file-observations.js';
 import { parseCompletionReport } from '../agents/completion-report.js';
-import { returnedReadRows } from '../tools/read/observation.js';
+import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
 import { compactJsonReference } from './json-reference.js';
 import type { ToolResult } from '../types/tools.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -142,8 +142,8 @@ export function sourceReadsFromTurns(turns: readonly ContractTurnRecord[], refer
     if (turn.toolCalls[index]!.name !== 'read') continue;
     const result = turn.results[index];
     if (!result?.success || !result.output) continue;
-    let body: { success?: boolean; files?: unknown[] };
-    try { body = JSON.parse(result.output); } catch { continue; }
+    // The observation of each file travels on the result's host channel; results stored before it carried it in their text.
+    const body = readBodyWithHostEvidence(result) as { success?: boolean; files?: unknown[] } | undefined;
     if (body?.success !== true || !Array.isArray(body.files)) continue;
     for (const value of body.files) {
       if (!value || typeof value !== 'object') continue;

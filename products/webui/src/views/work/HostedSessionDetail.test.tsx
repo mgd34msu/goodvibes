@@ -25,14 +25,14 @@ mock.module('../../hooks/useHostedSessionRealtime', () => ({
 }));
 mock.module('../../lib/toast', () => ({ useToast: () => ({ toast: notify }) }));
 mock.module('../../components/ui/ConfirmDialog', () => ({ useConfirm: () => ({ ask: async () => true, element: null }) }));
-const { useHostedAttachment } = await import('./HostedSessionDetail');
+const { useHostedAttachment, HostedSessionDetail } = await import('./HostedSessionDetail');
 const cleanups: (() => void)[] = [];
-function mount(id: string) {
+function mount(id: string, onLeft: () => void = notify) {
   let result!: HostedAttachment;
   const client = new QueryClient();
   const el = document.createElement('div'); document.body.append(el);
   const root = createRoot(el);
-  function Harness({ selected }: { selected: string }) { result = useHostedAttachment(selected, [], notify); return null; }
+  function Harness({ selected }: { selected: string }) { result = useHostedAttachment(selected, [], onLeft); return null; }
   const render = (selected: string) => flushSync(() => root.render(<QueryClientProvider client={client}><Harness selected={selected}/></QueryClientProvider>));
   render(id);
   cleanups.push(() => { flushSync(() => root.unmount()); client.clear(); el.remove(); });
@@ -82,4 +82,29 @@ test('a kill that settles after the selection moved on does not show the killed 
 
   finishKill(); await settle();
   expect(h.result.session?.id).toBe('b');
+});
+
+test('a failed Leave keeps the pane and the owner so the detach is retried on unmount', async () => {
+  const onLeft = mock(() => {});
+  detach.mockImplementationOnce(async () => { throw new Error('offline'); });
+  const h = mount('a', onLeft); pending[0]!.resolve(reply('a')); await settle();
+  h.result.leave(); await settle();
+  expect(detach).toHaveBeenCalledTimes(1);
+  expect(onLeft).not.toHaveBeenCalled();
+  expect(h.result.session?.id).toBe('a');
+  for (const clean of cleanups.splice(0)) clean();
+  expect(detach).toHaveBeenCalledTimes(2);
+  expect(detach).toHaveBeenLastCalledWith('a', pending[0]!.client);
+});
+
+test('a lost live stream is shown above the transcript', () => {
+  const el = document.createElement('div'); document.body.append(el);
+  const root = createRoot(el);
+  const attachment = {
+    streamError: 'Live session output paused: the event stream reported an error', session: null, history: [], liveMessages: [], liveText: '',
+    activeToolCalls: [], attaching: false, attachError: null, killPending: false, leave: () => {}, kill: () => {}, confirmElement: null,
+  } satisfies HostedAttachment;
+  flushSync(() => root.render(<HostedSessionDetail attachment={attachment} fallbackTitle="x" onClose={() => {}} />));
+  expect(el.textContent).toContain('Live session output paused');
+  flushSync(() => root.unmount()); el.remove();
 });

@@ -64,7 +64,7 @@
  * recorded in the report, left alone, and the daemon boots.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -107,8 +107,11 @@ export interface PreSplitControlPlaneSweepReport {
    * `swept`     , state was adopted, folded and/or retired this pass.
    * `conflicted`, nothing moved, and at least one file disagrees with its
    *                scoped counterpart; the sweep refused rather than guess.
+   * `incomplete`, something could not be done (`failures`) or was left where it
+   *                is because it could not be placed (`skippedFiles`); the
+   *                next boot tries again. Read those lists, not just this.
    */
-  readonly status: 'absent' | 'clean' | 'swept' | 'conflicted';
+  readonly status: 'absent' | 'clean' | 'swept' | 'conflicted' | 'incomplete';
   readonly legacyDirectory: string;
   readonly scopedDirectory: string;
   /** Sessions the fold added to the broker's store that were not already in it. */
@@ -334,13 +337,40 @@ export async function sweepPreSplitControlPlaneStore(input: {
     if (!existsSync(scopedPath)) {
       try {
         mkdirSync(scopedDirectory, { recursive: true });
-        renameSync(legacyPath, scopedPath);
+        // A hard link, then the legacy name removed, rather than a rename: a
+        // rename silently replaces a scoped file that another process (or a
+        // lazily loading store) created since the check above, and the newer
+        // state would be lost. A link fails with EEXIST instead.
+        try {
+          linkSync(legacyPath, scopedPath);
+        } catch (error) {
+          // A filesystem without hard links: the rename is all there is, and
+          // the existence check just above is the best guard it can have.
+          const linkCode = (error as { code?: string }).code;
+          if (linkCode !== 'EPERM' && linkCode !== 'ENOTSUP' && linkCode !== 'ENOSYS') throw error;
+          renameSync(legacyPath, scopedPath);
+          adoptedFiles.push(name);
+          continue;
+        }
+        try {
+          unlinkSync(legacyPath);
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ENOENT') {
+            failures.push(`${name} was copied to ${scopedDirectory} but the old copy could not be removed (${summarizeError(error)})`);
+          }
+        }
         adoptedFiles.push(name);
+        continue;
       } catch (error) {
-        if ((error as { code?: string }).code === 'ENOENT') continue;
-        failures.push(`${name} could not be moved to ${scopedDirectory} (${summarizeError(error)})`);
+        const code = (error as { code?: string }).code;
+        if (code === 'ENOENT') continue;
+        // The scoped file appeared in the meantime: it is now a file in both
+        // places, so it is compared like any other pair below.
+        if (code !== 'EEXIST') {
+          failures.push(`${name} could not be moved to ${scopedDirectory} (${summarizeError(error)})`);
+          continue;
+        }
       }
-      continue;
     }
 
     // ── A counterpart exists ─────────────────────────────────────────────
@@ -368,7 +398,9 @@ export async function sweepPreSplitControlPlaneStore(input: {
 
   const changed = movedFiles.length > 0 || adoptedFiles.length > 0 || foldedSessions > 0 || foldedWorkspaceRows > 0;
   const report: PreSplitControlPlaneSweepReport = {
-    status: changed ? 'swept' : (conflictedFiles.length > 0 ? 'conflicted' : 'clean'),
+    status: failures.length > 0 || skippedFiles.length > 0
+      ? 'incomplete'
+      : changed ? 'swept' : (conflictedFiles.length > 0 ? 'conflicted' : 'clean'),
     legacyDirectory,
     scopedDirectory,
     foldedSessions,

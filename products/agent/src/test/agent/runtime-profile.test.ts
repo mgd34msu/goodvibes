@@ -9,6 +9,7 @@ import {
   deleteAgentRuntimeProfile,
   exportAgentRuntimeProfileTemplate,
   getAgentRuntimeProfilesRoot,
+  getAgentRuntimeProfileTemplatesRoot,
   importAgentRuntimeProfileTemplate,
   createAgentRuntimeProfileTemplateFromDiscovered,
   listAgentRuntimeProfileTemplates,
@@ -320,5 +321,68 @@ describe('Agent profiles', () => {
       { homeDirectory: home, workingDirectory: workspace },
       { id: 'leaked-template' },
     )).rejects.toThrow("secret-looking");
+  });
+});
+
+describe('Agent profile creation failures leave nothing behind', () => {
+  test('an unknown starter template is refused before the profile directory exists, and a retry succeeds', () => {
+    const home = makeHome();
+    expect(() => createAgentRuntimeProfile(home, 'foo', { templateId: 'nonexistent' })).toThrow('Unknown Agent starter profile template');
+    expect(existsSync(join(getAgentRuntimeProfilesRoot(home), 'foo'))).toBe(false);
+    expect(listAgentRuntimeProfiles(home)).toEqual([]);
+
+    const created = createAgentRuntimeProfile(home, 'foo', { templateId: 'research' });
+    expect(created.starterTemplateId).toBe('research');
+  });
+
+  test('a template that fails while being applied removes the half-built profile', () => {
+    const home = makeHome();
+    const templatesRoot = getAgentRuntimeProfileTemplatesRoot(home);
+    const exportedPath = join(home, 'leaky.json');
+    exportAgentRuntimeProfileTemplate(home, 'research', exportedPath);
+    const raw = JSON.parse(readFileSync(exportedPath, 'utf-8')) as {
+      template: { id: string; persona: { body: string } };
+    };
+    raw.template.id = 'leaky';
+    raw.template.persona.body = 'Use api_key=sk-live-0123456789abcdef0123456789abcdef when calling out.';
+    writeFileSync(exportedPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');
+    mkdirSync(templatesRoot, { recursive: true });
+    writeFileSync(join(templatesRoot, 'leaky.json'), readFileSync(exportedPath, 'utf-8'), 'utf-8');
+
+    expect(() => createAgentRuntimeProfile(home, 'secretive', { templateId: 'leaky' })).toThrow(/secret/i);
+    expect(existsSync(join(getAgentRuntimeProfilesRoot(home), 'secretive'))).toBe(false);
+    expect(listAgentRuntimeProfiles(home)).toEqual([]);
+  });
+});
+
+describe('Agent starter template import', () => {
+  function exportedResearch(home: string, id: string): string {
+    const path = join(home, `${id}.json`);
+    exportAgentRuntimeProfileTemplate(home, 'research', path);
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { template: { id: string } };
+    raw.template.id = id;
+    writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');
+    return path;
+  }
+
+  test('refuses an id that a built-in template already owns', () => {
+    const home = makeHome();
+    expect(() => importAgentRuntimeProfileTemplate(home, exportedResearch(home, 'research'))).toThrow('built-in');
+  });
+
+  test('refuses to overwrite an existing local template unless asked', () => {
+    const home = makeHome();
+    const path = exportedResearch(home, 'lab-ops');
+    importAgentRuntimeProfileTemplate(home, path);
+    expect(() => importAgentRuntimeProfileTemplate(home, path)).toThrow('already exists');
+    expect(importAgentRuntimeProfileTemplate(home, path, { replace: true }).id).toBe('lab-ops');
+  });
+
+  test('naming a template whose file is unreadable says why instead of "unknown"', () => {
+    const home = makeHome();
+    const root = getAgentRuntimeProfileTemplatesRoot(home);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'broken.json'), '{ not json', 'utf-8');
+    expect(() => createAgentRuntimeProfile(home, 'p', { templateId: 'broken' })).toThrow('could not be read as a starter template');
   });
 });

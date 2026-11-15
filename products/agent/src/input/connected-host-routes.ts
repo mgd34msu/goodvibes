@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import type { CommandContext } from './command-registry.ts';
@@ -40,15 +41,20 @@ export function resolveConnectedHostConnection(context: CommandContext): Connect
     context.platform?.configManager?.get('controlPlane.host'),
     context.platform?.configManager?.get('controlPlane.port'),
   );
-  const homeDirectory = context.workspace?.shellPaths?.homeDirectory ?? process.env.HOME ?? '';
+  const homeDirectory = context.workspace?.shellPaths?.homeDirectory ?? process.env['GOODVIBES_AGENT_HOME'] ?? homedir();
   const credential = readConnectedHostOperatorToken(homeDirectory, baseUrl);
   return { baseUrl, token: credential.token, tokenPath: credential.path };
 }
 
+/** A host that accepts the connection but never answers must not hold a command forever. */
+export const CONNECTED_HOST_READ_TIMEOUT_MS = 15_000;
+
 export async function fetchConnectedHostReadOnlyRoute(
   context: CommandContext,
   route: string,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<ConnectedHostRouteResult> {
+  const timeoutMs = options.timeoutMs ?? CONNECTED_HOST_READ_TIMEOUT_MS;
   const connection = resolveConnectedHostConnection(context);
   if (!connection.token) {
     return {
@@ -63,6 +69,7 @@ export async function fetchConnectedHostReadOnlyRoute(
   try {
     const response = await fetch(`${connection.baseUrl}${route}`, {
       headers: { authorization: `Bearer ${connection.token}` },
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const text = await response.text();
     let body: unknown = text;
@@ -94,7 +101,9 @@ export async function fetchConnectedHostReadOnlyRoute(
       route,
       kind: 'connected_host_unavailable',
       baseUrl: connection.baseUrl,
-      message: error instanceof Error ? error.message : String(error),
+      message: error instanceof Error && error.name === 'TimeoutError'
+        ? `no answer within ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)}s` : `${timeoutMs} ms`}`
+        : error instanceof Error ? error.message : String(error),
     };
   }
 }

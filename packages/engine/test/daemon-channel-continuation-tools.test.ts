@@ -269,7 +269,7 @@ describe('a served daemon offers a channel conversation the conversational tools
         }
         await startTelegramConversation(harness, identity);
         const first = await waitFor('the unlisted chat to reach the provider', () => harness.requests[0]);
-        expect(toolNames(first).sort()).toEqual(['fetch', 'find', 'read']);
+        expect(toolNames(first).sort()).toEqual(['find', 'read']);
         harness.releaseFirst();
         const resultRequest = await waitFor('denied profile tool results to return to the provider', () =>
           harness.requests.find((request) => request.messages.some((message) => message.role === 'tool')));

@@ -66,6 +66,13 @@ export {
 } from './terminal-lifecycle.js';
 
 export {
+  installTerminalExitGuards,
+  type TerminalExitGuardOptions,
+  type TerminalStartupSteps,
+  type TerminalExitGuards,
+} from './terminal-exit-guards.js';
+
+export {
   createRenderScheduler,
   type RenderScheduler,
 } from './render-scheduler.js';
@@ -153,6 +160,7 @@ export { parseWithCatalog } from './cli-parser-engine.js';
 
 export {
   GOODVIBES_CLI_CATALOG,
+  inferProviderFromModel,
   type GoodVibesCliFlagField,
 } from './cli-command-catalog.js';
 

@@ -76,7 +76,7 @@ export interface RuntimeConfig {
   eventBus: {
     maxListeners: number;
   };
-  /** Unified RuntimeTask tracking across subsystems (restart to apply). Default false. */
+  /** Unified RuntimeTask tracking across subsystems (restart to apply). Default true. */
   unifiedTasks: boolean;
   /** Structured plugin init/teardown lifecycle with health integration (restart to apply). Default false. */
   pluginLifecycle: boolean;

@@ -62,7 +62,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.list',
     title: 'List Calendar Events',
-    description: 'Return calendar event summaries from the configured CalDAV calendar within an optional time window.',
+    description: 'Return calendar event summaries from the configured CalDAV calendar within an optional time window. With no from or to, lists events starting from 24 hours ago onward.',
     category: 'calendar',
     scopes: ['read:calendar'],
     http: { method: 'GET', path: '/api/calendar/events' },

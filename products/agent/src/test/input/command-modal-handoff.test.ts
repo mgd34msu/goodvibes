@@ -10,6 +10,7 @@ import { InputHandler } from '../../input/handler.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
+import { waitUntil } from '../helpers/wait-until.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { registerConfigCommand } from '../../input/commands/config.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
@@ -210,7 +211,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => modalStack.includes('modelPicker') && state.commandMode === false, 'the nested modal to open');
 
     expect(handled).toBe(true);
     expect(state.commandMode).toBe(false);
@@ -245,7 +246,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => modalStack.length === 0, 'the command entry to leave the stack');
 
     expect(handled).toBe(true);
     expect(state.commandMode).toBe(false);
@@ -366,7 +367,7 @@ describe('command modal handoff', () => {
       input.setCommandRegistry(registry, context);
 
       input.feed('/config display.stream\r');
-      await Promise.resolve();
+      await waitUntil(() => input.settingsModal.active, 'the settings modal to open');
 
       expect(input.settingsModal.active).toBe(true);
       expect(input.commandMode).toBe(false);

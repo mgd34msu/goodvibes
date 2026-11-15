@@ -297,6 +297,10 @@ export class RuntimeEventBus {
       const ev = envelope as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>;
       const evType = envelope.type;
       queueMicrotask(() => {
+        // Unsubscribing means no further calls, including for events already
+        // emitted: a component that unsubscribes and tears down must not be called
+        // back on its disposed state.
+        if (!this._listeners.get(evType)?.has(h)) return;
         try {
           h(ev);
         } catch (err) {
@@ -311,6 +315,7 @@ export class RuntimeEventBus {
       const evType = envelope.type;
       const d = domain;
       queueMicrotask(() => {
+        if (!this._domainListeners.get(d)?.has(h)) return;
         try {
           h(ev);
         } catch (err) {

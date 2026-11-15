@@ -14,9 +14,11 @@
  * The counters feed the idle consolidation decay ordering (never-referenced
  * memories decay first) via `lookup`.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import type { MemoryConsolidationUsageSignal } from './memory-consolidation.js';
+import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { summarizeError } from '../utils/error-display.js';
 
 export interface MemoryUsageEntry {
   readonly injectedCount: number;
@@ -66,8 +68,23 @@ export class MemoryUsageStatsStore {
   private ensureLoaded(): void {
     if (this.loaded) return;
     this.loaded = true;
+    this.readFromDisk();
+  }
+
+  /**
+   * Counters are read again before each write so another process's counts
+   * (the daemon and a terminal share this file) are not overwritten by this
+   * process's older copy.
+   */
+  private reloadForWrite(): void {
+    this.loaded = true;
+    this.readFromDisk();
+  }
+
+  private readFromDisk(): void {
     if (!existsSync(this.filePath)) return;
     try {
+      this.entries.clear();
       const parsed: unknown = JSON.parse(readFileSync(this.filePath, 'utf-8'));
       const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>).entries
@@ -90,10 +107,17 @@ export class MemoryUsageStatsStore {
   private persist(): void {
     const record: Record<string, MemoryUsageEntry> = {};
     for (const [id, entry] of this.entries.entries()) record[id] = { ...entry };
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    const tmpPath = `${this.filePath}.tmp`;
-    writeFileSync(tmpPath, `${JSON.stringify({ version: USAGE_FILE_VERSION, entries: record }, null, 2)}\n`, 'utf-8');
-    renameSync(tmpPath, this.filePath);
+    // Counters are rewritten on every injection; skip the fsync, a lost write only loses a count.
+    writeJsonFileAtomic(this.filePath, { version: USAGE_FILE_VERSION, entries: record }, { durable: false });
+  }
+
+  /** Usage counters are instrumentation: a failed write is logged, never thrown into the prompt or consolidation path that recorded it. */
+  private persistBestEffort(): void {
+    try {
+      this.persist();
+    } catch (error) {
+      logger.warn('[memory] usage counters were not saved', { error: summarizeError(error) });
+    }
   }
 
   private mutable(id: string): MutableEntry {
@@ -106,27 +130,27 @@ export class MemoryUsageStatsStore {
   }
 
   public recordInjected(ids: readonly string[], at: number = Date.now()): void {
-    this.ensureLoaded();
     const unique = [...new Set(ids.filter((id) => id.trim()))];
     if (unique.length === 0) return;
+    this.reloadForWrite();
     for (const id of unique) {
       const entry = this.mutable(id);
       entry.injectedCount += 1;
       entry.lastInjectedAt = at;
     }
-    this.persist();
+    this.persistBestEffort();
   }
 
   public recordReferenced(ids: readonly string[], at: number = Date.now()): void {
-    this.ensureLoaded();
     const unique = [...new Set(ids.filter((id) => id.trim()))];
     if (unique.length === 0) return;
+    this.reloadForWrite();
     for (const id of unique) {
       const entry = this.mutable(id);
       entry.referencedCount += 1;
       entry.lastReferencedAt = at;
     }
-    this.persist();
+    this.persistBestEffort();
   }
 
   public get(id: string): MemoryUsageEntry | null {

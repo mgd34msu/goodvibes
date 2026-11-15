@@ -21,12 +21,6 @@ import { VERSION } from '../version.js';
 import { OPERATOR_SESSION_COOKIE_NAME } from '../security/http-auth.js';
 
 const OPERATOR_CONTRACT_VERSION = 1;
-const OPERATOR_WS_PATH = '/api/control-plane/ws';
-const OPERATOR_EVENTS_PATH = '/api/control-plane/events';
-const OPERATOR_METHODS_PATH = '/api/control-plane/methods';
-const OPERATOR_EVENTS_CATALOG_PATH = '/api/control-plane/events/catalog';
-const OPERATOR_AUTH_CURRENT_PATH = '/api/control-plane/auth';
-const PEER_CONTRACT_PATH = '/api/remote/node-host/contract';
 
 export type { OperatorContractManifest } from '../types/foundation-contract.js';
 
@@ -127,8 +121,10 @@ export const OPERATOR_CONTRACT_SCHEMA = objectSchema({
   }, ['contractPath', 'relationship']),
 }, ['version', 'product', 'auth', 'transports', 'operator', 'peer']);
 
+/** A method with no schema at all is as untyped as one with an open object. */
 function isGenericObjectSchema(schema: Record<string, unknown> | undefined): boolean {
-  return Boolean(schema && schema.type === 'object' && !Object.hasOwn(schema, 'properties'));
+  if (schema === undefined) return true;
+  return schema.type === 'object' && !Object.hasOwn(schema, 'properties');
 }
 
 function summarizeSchemaCoverage(methods: readonly GatewayMethodDescriptor[]): OperatorSchemaCoverage {

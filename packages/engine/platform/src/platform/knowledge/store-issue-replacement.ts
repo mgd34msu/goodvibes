@@ -14,7 +14,8 @@ interface IssueReplacementView {
   readonly nodes: ReadonlyMap<string, KnowledgeNodeRecord>;
   readonly beforeIssueWrite?: ((record: KnowledgeIssueRecord) => void) | undefined;
 }
-function operatorReviewed(issue: KnowledgeIssueRecord): boolean {
+/** An issue an operator has acted on; automated passes must not delete it just because their finding went away. */
+export function operatorReviewed(issue: KnowledgeIssueRecord): boolean {
   const review = issue.metadata.review;
   return Boolean(review && typeof review === 'object' && !Array.isArray(review)
     && typeof (review as Record<string, unknown>).action === 'string');

@@ -56,7 +56,7 @@ describe('writes are owned by the real session, never by the tool input', () => 
       expect(created.success).toBe(true);
 
       // The ref landed under the REAL identity...
-      expect(registry.getRef('real-session-1', 't1')).not.toBeNull();
+      expect(registry.getRef('real-session-1', 't1')?.title).toBe('Ship it');
       // ...and nothing at all was written under the name the model supplied.
       expect(registry.getRef('someone-elses-session', 't1')).toBeUndefined();
       expect(registry.getRefsBySession('someone-elses-session')).toEqual([]);
@@ -72,9 +72,9 @@ describe('writes are owned by the real session, never by the tool input', () => 
       await call(tool, { mode: 'create', taskId: 't1', title: 'Task' });
 
       // status: a spoofed sessionId must not be able to reach another session's ref.
-      const status = await call(tool, { mode: 'status', taskId: 't1', status: 'completed', sessionId: 'spoof' });
+      const status = await call(tool, { mode: 'status', taskId: 't1', status: 'running', sessionId: 'spoof' });
       expect(status.success).toBe(true);
-      expect(registry.getRef('real-session-2', 't1')?.status).toBe('completed');
+      expect(registry.getRef('real-session-2', 't1')?.status).toBe('running');
 
       // handoff: the FROM side is always us; the TO side is a legitimate counterparty.
       const handoff = await call(tool, {
@@ -88,9 +88,21 @@ describe('writes are owned by the real session, never by the tool input', () => 
       expect(records).toHaveLength(1);
       expect(records[0]?.fromSessionId).toBe('real-session-2');
       expect(records[0]?.toSessionId).toBe('peer-session');
+      // The handoff holds the task until the destination accepts it.
+      expect(registry.getRef('real-session-2', 't1')?.status).toBe('blocked');
 
+      // Accepting it returns the task to the status it had before.
+      const handoffId = (handoff.output as { handoffId: string }).handoffId;
+      const peer = createTaskTool(registry, { resolveSessionId: () => 'peer-session' });
+      expect((await call(peer, { mode: 'acknowledge', handoffId })).success).toBe(true);
+      expect(registry.getRef('real-session-2', 't1')?.status).toBe('running');
+
+      // cancel targets our own ref, not the spoofed session.
       const cancelled = await call(tool, { mode: 'cancel', taskId: 't1', sessionId: 'spoof' });
       expect(cancelled.success).toBe(true);
+      expect((cancelled.output as { cancelled: Array<{ sessionId: string; taskId: string }> }).cancelled)
+        .toEqual([expect.objectContaining({ sessionId: 'real-session-2', taskId: 't1' })]);
+      expect(registry.getRef('real-session-2', 't1')?.status).toBe('cancelled');
     } finally {
       registry.dispose();
     }
@@ -111,6 +123,24 @@ describe('writes are owned by the real session, never by the tool input', () => 
 
       expect(registry.getRefsBySession('boot-session').map((r) => r.taskId)).toEqual(['before']);
       expect(registry.getRefsBySession('recovered-session').map((r) => r.taskId)).toEqual(['after']);
+    } finally {
+      registry.dispose();
+    }
+  });
+});
+
+describe('a handoff of a settled task is refused', () => {
+  test('a completed task cannot be handed off and no handoff is recorded', async () => {
+    const registry = makeRegistry();
+    try {
+      const tool = createTaskTool(registry, { resolveSessionId: () => 'owner' });
+      await call(tool, { mode: 'create', taskId: 't1', title: 'Done' });
+      await call(tool, { mode: 'status', taskId: 't1', status: 'completed' });
+      const handoff = await call(tool, { mode: 'handoff', taskId: 't1', toSessionId: 'peer-session' });
+      expect(handoff.success).toBe(false);
+      expect(handoff.error).toContain('completed');
+      expect(registry.getHandoffs()).toEqual([]);
+      expect(registry.getRef('owner', 't1')?.status).toBe('completed');
     } finally {
       registry.dispose();
     }
@@ -158,7 +188,7 @@ describe('an unbound host falls back to the legacy namespace, visibly', () => {
     try {
       const tool = createTaskTool(registry);
       await call(tool, { mode: 'create', taskId: 't1', title: 'Unbound' });
-      expect(registry.getRef(LEGACY_TASK_NAMESPACE, 't1')).not.toBeNull();
+      expect(registry.getRef(LEGACY_TASK_NAMESPACE, 't1')?.taskId).toBe('t1');
     } finally {
       registry.dispose();
     }
@@ -172,7 +202,7 @@ describe('an unbound host falls back to the legacy namespace, visibly', () => {
       const tool = createTaskTool(registry);
       await call(tool, { mode: 'create', taskId: 't1', title: 'Unbound', sessionId: 'spoof' });
       expect(registry.getRef('spoof', 't1')).toBeUndefined();
-      expect(registry.getRef(LEGACY_TASK_NAMESPACE, 't1')).not.toBeNull();
+      expect(registry.getRef(LEGACY_TASK_NAMESPACE, 't1')?.taskId).toBe('t1');
     } finally {
       registry.dispose();
     }
@@ -188,8 +218,9 @@ describe('the wired predicate reaches the registry', () => {
     try {
       const tool = createTaskTool(registry, { resolveSessionId: () => 'live-unsaved' });
       await call(tool, { mode: 'create', taskId: 't1', title: 'In flight' });
+      expect(registry.getRef('live-unsaved', 't1')?.taskId).toBe('t1');
       expect(registry.reap().refsMissingSession).toBe(0);
-      expect(registry.getRef('live-unsaved', 't1')).not.toBeNull();
+      expect(registry.getRef('live-unsaved', 't1')?.taskId).toBe('t1');
     } finally {
       registry.dispose();
     }
@@ -213,7 +244,7 @@ describe('the wired predicate reaches the registry', () => {
       // It was consulted for both sessions...
       expect(new Set(asked)).toEqual(new Set(['alive', 'dead']));
       // ...and neither ref is gone yet, because both are inside the grace floor.
-      expect(registry.getRef('dead', 'b')).not.toBeNull();
+      expect(registry.getRef('dead', 'b')?.taskId).toBe('b');
     } finally {
       registry.dispose();
     }

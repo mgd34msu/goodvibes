@@ -43,6 +43,13 @@ import { createSyncGitSeam } from './recall-files-git.ts';
 
 const PROJECTION_LIST_LIMIT = 5000;
 
+/** The list is capped, so at the cap some records are not in the projection or the diff; say so instead of looking complete. */
+function warnIfTruncated(context: CommandContext, count: number): void {
+  if (count >= PROJECTION_LIST_LIMIT) {
+    context.print(`[recall] Warning: the store returned ${count} records, the most this command reads; any further records are not projected or compared.`);
+  }
+}
+
 /** Resolve the projection directory: an explicit --dir argument wins, else the configured setting. */
 function resolveProjectionDir(args: string[], context: CommandContext): string {
   const shellPaths = requireShellPaths(context);
@@ -58,6 +65,7 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
 
   const dir = resolveProjectionDir(args, context);
   const records = await memory.list({ limit: PROJECTION_LIST_LIMIT });
+  warnIfTruncated(context, records.length);
 
   try {
     // The platform's ownership gate commits only to a repository whose toplevel IS
@@ -65,9 +73,14 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
     // to a checkout the directory merely sits inside.
     const report = projectMemoryToFiles(records, dir, { git: createSyncGitSeam() });
     context.print(`[recall] Projected ${report.written.length} record(s) to ${report.dir}`);
+    if (report.kept && report.kept.length > 0) {
+      context.print(`[recall] Kept ${report.kept.length} edited or deleted file(s) as they are: ${report.kept.join(', ')}. Run /recall files review to see them, then apply to take them into the store. A changed cls, confidence or reviewState line is read-only and has no proposal: change it back by hand so sync can refresh the file.`);
+    }
     context.print(report.committed
       ? `  committed in ${report.dir} (the projection's own repository)`
-      : '  not committed (git seam did not run)');
+      : report.kept && report.kept.length > 0 && report.written.length === 0
+        ? '  nothing to commit (no file was written)'
+        : '  not committed (the directory is unchanged or git did not run)');
   } catch (error) {
     context.print(`[recall] Projection sync failed: ${summarizeError(error)}`);
   }
@@ -85,6 +98,7 @@ async function computeProposals(
     return null;
   }
   const records = await memory.list({ limit: PROJECTION_LIST_LIMIT });
+  warnIfTruncated(context, records.length);
   const files = readProjectedMemoryFiles(dir);
   return diffProjectionToProposals(records, files);
 }

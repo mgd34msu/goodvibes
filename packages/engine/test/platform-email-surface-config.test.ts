@@ -17,10 +17,12 @@ import {
   SURFACE_EMAIL_PASSWORD_REF,
   SURFACE_EMAIL_SMTP_PASSWORD_REF,
   createSurfaceEmailConfigReader,
+  configReaderWithOrigins,
   createSurfaceEmailSecretReader,
   describeSurfaceEmailConfigProblem,
   readSurfaceEmailSettings,
 } from '../platform/src/platform/email/surface-config.ts';
+import { CONFIG_SCHEMA } from '../platform/src/platform/config/schema.ts';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
 import { readEmailConfig, smtpPasswordRefFor } from '../platform/src/platform/email/email-service.ts';
 import { createDaemonEmailGatewayService } from '../platform/src/platform/control-plane/routes/email-composition.ts';
@@ -69,6 +71,55 @@ const FLAT: Record<string, unknown> = {
 // ---------------------------------------------------------------------------
 // Config precedence
 // ---------------------------------------------------------------------------
+
+/** Answers an unset key with its schema default, exactly as the config manager does. */
+function readerWithSchemaDefaults(values: Record<string, unknown>): (key: string) => unknown {
+  return (key: string): unknown => {
+    if (key in values) return values[key];
+    const setting = CONFIG_SCHEMA.find((entry) => entry.key === key);
+    if (!setting) throw new Error(`Invalid config path: ${key}`);
+    return setting.default;
+  };
+}
+
+describe('surfaces.email against the real schema defaults', () => {
+  test('only the flat imapPort set: the inbox connects to that port, not the nested default', () => {
+    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imapPort': 1993 })).imapPort).toBe(1993);
+  });
+
+  test('an explicit nested port wins over the flat one', () => {
+    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.port': 1143, 'surfaces.email.imapPort': 1993 })).imapPort).toBe(1143);
+  });
+
+  test('an explicit port equal to the schema default is kept, and still wins over a later spelling', () => {
+    // The manager answers 465 and 993 for unset keys, so only its origin tells the operator's value apart.
+    const withOrigins = (values: Record<string, unknown>) => configReaderWithOrigins({
+      get: readerWithSchemaDefaults(values),
+      describeConfigKeySource: (key) => ({ tier: key in values ? 'daemon' : 'default', effectiveOrigin: key in values ? 'daemon' : 'default' }),
+    });
+    const plain = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.smtp.port': 465, 'surfaces.email.smtp.secure': false, 'surfaces.email.imap.port': 993, 'surfaces.email.imap.secure': false }));
+    expect([plain.imapPort, plain.smtpPort]).toEqual([993, 465]);
+    const shadowed = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.imap.port': 993, 'surfaces.email.imapPort': 1993 }));
+    expect(shadowed.imapPort).toBe(993);
+    const unset = readSurfaceEmailSettings(withOrigins({ 'surfaces.email.imap.secure': false, 'surfaces.email.smtp.secure': false }));
+    expect([unset.imapPort, unset.smtpPort]).toEqual([143, 587]);
+  });
+
+  test('a plain connection with no port set gets the plain ports even though the schema defaults are the TLS ones', () => {
+    const settings = readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.secure': false, 'surfaces.email.smtp.secure': false }));
+    expect([settings.imapPort, settings.smtpPort]).toEqual([143, 587]);
+    const tls = readSurfaceEmailSettings(readerWithSchemaDefaults({}));
+    expect([tls.imapPort, tls.smtpPort]).toEqual([993, 465]);
+  });
+
+  test('imap.user names the mailbox login first, while from keeps following the plain account', () => {
+    const settings = readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.user': 'imap-login', 'surfaces.email.user': 'avery@example.com' }));
+    expect(settings.username).toBe('imap-login');
+    expect(settings.fromAddress).toBe('avery@example.com');
+    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.imap.user': 'only-imap' })).username).toBe('only-imap');
+    expect(readSurfaceEmailSettings(readerWithSchemaDefaults({ 'surfaces.email.user': 'u' })).username).toBe('u');
+  });
+});
 
 describe('surfaces.email config precedence', () => {
   test('the nested spelling wins, and the shared host backs the rest', () => {
@@ -261,6 +312,26 @@ describe('unfinished mailbox setup', () => {
       'Email is not configured. Set surfaces.email.host, surfaces.email.user, and the email password secret.',
     );
     expect(problem?.code).toBe('EMAIL_NOT_CONFIGURED');
+  });
+
+  test('an inbox-only mailbox is complete for the inbox flow and incomplete for the full one', async () => {
+    const inboxOnly = reader({
+      'surfaces.email.imap.host': 'imap.example.com',
+      'surfaces.email.user': 'avery@example.com',
+    });
+    const withPassword = secrets({ GOODVIBES_SURFACES_EMAIL_PASSWORD: 'shared-pw' });
+    expect(await describeSurfaceEmailConfigProblem(inboxOnly, withPassword, 'inbox')).toBeNull();
+    expect((await describeSurfaceEmailConfigProblem(inboxOnly, withPassword))?.code).toBe('EMAIL_NOT_CONFIGURED');
+    expect((await describeSurfaceEmailConfigProblem(reader({}), withPassword, 'inbox'))?.message).toContain('surfaces.email.imap.host');
+  });
+
+  test('an unset port follows the security answer, and an explicit port always wins', () => {
+    const plain = readSurfaceEmailSettings(reader({ 'surfaces.email.host': 'h', 'surfaces.email.imap.secure': false, 'surfaces.email.smtp.secure': false }));
+    expect([plain.imapPort, plain.smtpPort]).toEqual([143, 587]);
+    const explicit = readSurfaceEmailSettings(reader({
+      'surfaces.email.host': 'h', 'surfaces.email.imap.secure': false, 'surfaces.email.imap.port': 1143, 'surfaces.email.smtp.secure': false, 'surfaces.email.smtp.port': 2525,
+    }));
+    expect([explicit.imapPort, explicit.smtpPort]).toEqual([1143, 2525]);
   });
 
   test('a complete config with no stored password is a credential-store problem', async () => {

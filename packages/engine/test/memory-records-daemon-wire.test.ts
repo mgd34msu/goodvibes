@@ -99,17 +99,17 @@ describe('add over the wire is visible via wire search AND a direct canonical-st
   });
 });
 
-describe('semantic search degrades honestly to a literal fallback with a stated reason', () => {
-  test('semantic requested with no consultable index → literal fallback, reason stated, record still found', async () => {
+describe('semantic search over the wire never reports a mode its index cannot back', () => {
+  test('semantic requested → mode and stated reason agree (literal fallback names why; semantic mode has no reason), record still found', async () => {
     const record = await addRecord({ cls: 'fact', summary: 'semantic honesty probe fact', review: { confidence: 75 } });
 
     const result = await search({ query: 'semantic honesty probe', semantic: true });
     expect(result.requestedSemantic).toBe(true);
-    // In the isolated test daemon the semantic index has no modeled provider / no
-    // indexed rows, so the honest path is a stated fallback, never a silent empty.
-    if (result.indexUnavailableReason !== null) {
-      expect(result.mode).toBe('literal');
-    }
+    // Whether the daemon's index is consultable depends on the platform's sqlite-vec,
+    // so assert the contract either way: a literal fallback always says why, and a
+    // semantic answer never carries an unavailability reason.
+    if (result.mode === 'literal') expect(result.indexUnavailableReason).toEqual(expect.any(String));
+    else expect(result.indexUnavailableReason).toBeNull();
     expect(result.records.some((r) => r.id === record.id)).toBe(true);
   });
 });

@@ -57,6 +57,8 @@ function hostedAdapter(h: Harness, workspaceRoot?: string): ContractExternalWork
         return { id, workspaceRoot: input.workspaceRoot } as HostedSessionRecord;
       },
     },
+    allowedWorkspaceRoots: ['/work'],
+    ownsSession: () => true,
     ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
   });
 }
@@ -146,8 +148,8 @@ describe('the operator adapter', () => {
   test('dispatches through contracts.start, polls and fetches through contracts.get, cancels through contracts.cancel', async () => {
     const h = harness();
     const { adapter, calls } = operatorAdapter(h.service);
-    const id = await exerciseLifecycle(adapter, h.daemon, { workspaceRoot: '/work/partner', isolation: 'shared' });
-    expect(h.daemon.started[0]).toMatchObject({ ask: 'Add a --json flag to export.', origin: 'external', projectRoot: '/work/partner', isolation: 'shared' });
+    const id = await exerciseLifecycle(adapter, h.daemon, { workspaceRoot: `${WORKDIR}/partner`, isolation: 'shared' });
+    expect(h.daemon.started[0]).toMatchObject({ ask: 'Add a --json flag to export.', origin: 'external', projectRoot: `${WORKDIR}/partner`, isolation: 'shared' });
     expect(calls[0]).toBe('contracts.start');
     expect(calls.slice(1).every((methodId) => methodId === 'contracts.get')).toBe(true);
 

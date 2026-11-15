@@ -64,9 +64,19 @@ export class KeybindingsManager<Action extends string> {
     for (const action of this.actions()) result[action] = this.catalog.defaults[action].map(combo => ({ ...combo }));
     return result;
   }
-  /** Reload from defaults; malformed overrides never become executable bindings. */
-  loadFromDisk(): void {
-    if (!existsSync(this.configPath)) return;
+  /**
+   * Reload from defaults; malformed overrides never become executable bindings.
+   * Returns one line per override that was skipped (and one when the whole file
+   * was unreadable) so the host can tell the user why a shortcut does nothing.
+   */
+  loadFromDisk(): readonly string[] {
+    const notices: string[] = [];
+    if (!existsSync(this.configPath)) {
+      // A deleted file means no overrides, not the previous file's overrides.
+      this.bindings = this.cloneDefaults();
+      this.buildLookupMap();
+      return notices;
+    }
     try {
       const parsed: unknown = JSON.parse(readFileSync(this.configPath, 'utf-8'));
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Keybindings must be an object.');
@@ -75,37 +85,52 @@ export class KeybindingsManager<Action extends string> {
         const aliases = this.catalog.aliases;
         const action = aliases && Object.hasOwn(aliases, rawAction) ? aliases[rawAction] : rawAction;
         if (action === undefined || !this.isAction(action)) {
-          logger.debug('keybindings: unknown action, skipping', { action });
+          notices.push(`keybindings: unknown action "${rawAction}" ignored`);
           continue;
         }
         const normalized: unknown[] = Array.isArray(combo) ? combo : [combo];
         if (!normalized.every(isKeyCombo)) {
-          logger.debug('keybindings: invalid combo for action, skipping', { action });
+          notices.push(`keybindings: invalid key combination for "${rawAction}" ignored; the default stays`);
           continue;
         }
         this.bindings[action] = normalized;
       }
       logger.debug('keybindings: loaded overrides from disk', { path: this.configPath });
     } catch (error) {
-      logger.debug('keybindings: failed to load config file', { path: this.configPath, err: summarizeError(error) });
+      this.bindings = this.cloneDefaults();
+      notices.push(`keybindings: ${this.configPath} could not be read (${summarizeError(error)}); defaults are in use`);
     }
-    this.buildLookupMap();
+    notices.push(...this.buildLookupMap());
+    if (notices.length > 0) logger.warn('keybindings: some overrides were not applied', { path: this.configPath, notices });
+    return notices;
   }
-  private buildLookupMap(): void {
+  /** Rebuild the single chord table that both lookup() and matches() read, and describe every chord two actions share. */
+  private buildLookupMap(): string[] {
     this.lookupMap.clear();
-    // Preserve catalog order and the existing last-writer rule for collisions.
+    const owners = new Map<string, { combo: KeyCombo; actions: Action[] }>();
+    // Preserve catalog order and the last-writer rule for collisions.
     for (const action of this.actions()) {
-      for (const combo of this.bindings[action]) this.lookupMap.set(tokenKey({ ...combo, logicalName: combo.key }), action);
+      for (const combo of this.bindings[action]) {
+        const key = tokenKey({ ...combo, logicalName: combo.key });
+        this.lookupMap.set(key, action);
+        const entry = owners.get(key) ?? { combo, actions: [] };
+        if (!entry.actions.includes(action)) entry.actions.push(action);
+        owners.set(key, entry);
+      }
     }
+    const conflicts: string[] = [];
+    for (const [key, { combo, actions }] of owners) {
+      if (actions.length < 2) continue;
+      conflicts.push(`keybindings: ${this.formatCombo(combo)} is bound to ${actions.join(' and ')}; only ${this.lookupMap.get(key)} responds to it`);
+    }
+    return conflicts;
   }
   lookup(token: KeyToken): Action | null {
     return token.logicalName ? this.lookupMap.get(tokenKey(token)) ?? null : null;
   }
+  /** Reads the same table as lookup(), so a chord shared by two actions reaches only the one lookup() names. */
   matches(action: string, token: KeyToken): boolean {
-    if (!this.isAction(action)) return false;
-    return this.bindings[action].some(combo => combo.key === token.logicalName
-      && !!combo.ctrl === !!token.ctrl && !!combo.shift === !!token.shift
-      && !!combo.alt === !!(token.alt ?? token.meta));
+    return this.isAction(action) && this.lookup(token) === action;
   }
   getAll(): Array<{ action: Action; combos: KeyCombo[]; description: string }> {
     return this.actions().map(action => ({ action, combos: this.bindings[action], description: this.catalog.descriptions[action] }));

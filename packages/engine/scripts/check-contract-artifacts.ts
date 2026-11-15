@@ -10,11 +10,10 @@ await import('./refresh-contract-artifacts.ts');
 // refresh-contract-artifacts.ts never touches
 // contracts/src/generated/foundation-client-types.ts (it only
 // regenerates operator-contract/operator-method-ids/peer-contract/
-// peer-endpoint-ids/foundation-metadata), that file is emitted by
-// scripts/export-foundation-artifacts.ts, which is absent from this repo
-// (an unrecoverable-source decision: hand-authored fallback with a
-// mandatory consistency check). Run that check here so `contracts:check`
-// stays the one gate that catches drift in either generated surface.
+// peer-endpoint-ids/foundation-metadata). That file's input/output maps are
+// written by scripts/generate-foundation-io-entries.ts from the method catalog;
+// run the consistency check here so `contracts:check` stays the one gate that
+// catches drift in either generated surface.
 await import('./check-foundation-io-types.ts');
 
 // The typed-IO coverage ratchet: check-foundation-io-types.ts above proves the
@@ -25,9 +24,14 @@ await import('./check-foundation-io-coverage.ts');
 // The published OpenAPI 3.1 operator contract is generated from the committed
 // operator-contract.json (plus the typed-client-IO ratchet inputs, so the
 // untyped methods stay honestly marked). Same gate, same idiom: drift in
-// contracts/artifacts/operator-openapi.json or
-// docs/operator-openapi.json reddens `contracts:check`.
+// contracts/artifacts/operator-openapi.json reddens `contracts:check`.
 await import('./generate-openapi-contract.ts');
+
+// The small agent-facing spec is derived from the same contract. This only
+// reads: the module runs in check mode here (--check is on argv above), so a
+// stale docs/agent-api.openapi.json reddens `contracts:check` and nothing is
+// written by any gate.
+await import('./generate-agent-spec.ts');
 
 // The generated consumer transport layers (Stage C): the webui mechanical
 // facade (contracts/src/generated/webui-facade.ts) and the Home

@@ -84,7 +84,10 @@ interface ControlStatusPayload {
   readonly version?: string;
   readonly cluster?: {
     readonly enabled?: boolean;
+    /** `elected`, or one of the two ways a node reads everything itself. */
+    readonly coordination?: string;
     readonly role?: string;
+    readonly surfaces?: readonly { readonly role?: string }[];
     readonly nodeId?: string;
     readonly heldSurfaceCount?: number;
     readonly consumersRunning?: boolean;
@@ -286,20 +289,42 @@ function clusterLines(
   if (identity.cluster?.enabled === false) {
     return ['  cluster:  off, this machine handles its own inbound work'];
   }
+  const notes = clusterNotes(identity);
+  // A node that fell back to reading everything reports `master`, but no
+  // election gave it that; saying "master in <group>" would claim one did.
+  const standing = identity.cluster?.coordination === 'ungated-fallback'
+    ? 'reading every inbound surface itself (it could not join the coordination group)'
+    : role;
   if (!outcome.ok) {
     return [
-      role === undefined
+      standing === undefined
         ? `  cluster:  could not read: ${outcome.error}`
-        : `  cluster:  ${role} (the group view could not be read: ${outcome.error})`,
+        : `  cluster:  ${standing} (the group view could not be read: ${outcome.error})`,
+      ...notes,
     ];
   }
   const cluster = outcome.data;
   if (cluster.membership === 'no-group') {
-    return ['  cluster:  in no group yet, `goodvibes-daemon cluster create` starts one'];
+    return ['  cluster:  in no group yet, `goodvibes-daemon cluster create` starts one', ...notes];
   }
   const group = cluster.groupName ?? cluster.groupId ?? 'its group';
   const members = cluster.memberCount === undefined ? '' : ` of ${cluster.memberCount}`;
-  return [`  cluster:  ${role ?? cluster.membership ?? 'a member'} in "${group}"${members}`];
+  return [`  cluster:  ${standing ?? cluster.membership ?? 'a member'} in "${group}"${members}`, ...notes];
+}
+
+/** What the one-word role cannot say: duplicate reads, and surfaces only a restart recovers. */
+function clusterNotes(identity: ControlStatusPayload): string[] {
+  const notes: string[] = [];
+  if (identity.cluster?.coordination === 'ungated-fallback') {
+    notes.push('            another node on this network may be reading the same surfaces, so a message '
+      + 'may be answered twice; check that the cluster UDP port is free, then restart the daemon');
+  }
+  const fenced = (identity.cluster?.surfaces ?? []).filter((surface) => surface.role === 'fenced').length;
+  if (fenced > 0) {
+    notes.push(`            ${fenced} inbound surface${fenced === 1 ? '' : 's'} fenced: a consumer did not stop `
+      + 'when told to, so this machine will not read it again until the daemon restarts');
+  }
+  return notes;
 }
 
 function hostedSessionLines(outcome: DaemonVerbOutcome<HostedSessionsPayload>): string[] {

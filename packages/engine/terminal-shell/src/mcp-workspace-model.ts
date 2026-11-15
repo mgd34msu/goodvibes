@@ -44,6 +44,14 @@ export interface McpWorkspaceFormBase {
   env: string;
   allowedPaths: string;
   allowedHosts: string;
+  /**
+   * The saved config this form was opened from. The text fields cannot encode every
+   * saved value (a comma inside an env value or path, allow-all trust), so a field
+   * the user has not changed keeps the saved value instead of its re-parsed text.
+   */
+  origin?: McpServerConfig | undefined;
+  /** Set once the user moves the trust mode, so a deliberate choice replaces a saved allow-all. */
+  trustTouched?: boolean | undefined;
 }
 export interface McpWorkspaceSnapshot {
   readonly projectPath: string;
@@ -62,6 +70,8 @@ export function parseArgs(value: string): string[] {
   let current = '';
   let quote: '"' | "'" | null = null;
   let escaping = false;
+  // A quoted empty string ("") is an argument even though it adds no characters.
+  let started = false;
   for (const ch of value) {
     if (escaping) {
       current += ch;
@@ -79,43 +89,54 @@ export function parseArgs(value: string): string[] {
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
+      started = true;
       continue;
     }
     if (/\s/.test(ch)) {
-      if (current.length > 0) {
+      if (started || current.length > 0) {
         args.push(current);
         current = '';
+        started = false;
       }
       continue;
     }
     current += ch;
   }
   if (escaping) current += '\\';
-  if (current.length > 0) args.push(current);
+  if (started || current.length > 0) args.push(current);
   return args;
+}
+/** The inverse of parseArgs: a token that parseArgs would split or unquote is written quoted. */
+export function formatArgs(args: readonly string[]): string {
+  return args.map((arg) => (arg.length > 0 && !/[\s"'\\]/.test(arg) ? arg : `"${arg.replace(/[\\"]/g, '\\$&')}"`)).join(' ');
 }
 export function parseEnv(value: string): Record<string, string> | undefined {
   const entries: Array<[string, string]> = [];
-  for (const raw of splitList(value)) {
+  // A comma only separates entries when another KEY= follows, so a value may contain commas.
+  for (const raw of value.split(/,(?=\s*[A-Za-z_][A-Za-z0-9_.-]*=)/).map((entry) => entry.trim()).filter(Boolean)) {
     const eq = raw.indexOf('=');
     if (eq <= 0) throw new Error(`Invalid env entry "${raw}". Use KEY=VALUE.`);
     entries.push([raw.slice(0, eq).trim(), raw.slice(eq + 1)]);
   }
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
+function envText(env: McpServerConfig['env']): string {
+  return env
+    ? Object.entries(env)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(', ')
+    : '';
+}
 export function serverConfigToForm(server?: McpServerConfig | undefined): McpWorkspaceFormBase {
   return {
+    ...(server ? { origin: server } : {}),
     scope: 'project',
     name: server?.name ?? '',
     command: server?.command ?? '',
-    args: server?.args?.join(' ') ?? '',
+    args: server?.args ? formatArgs(server.args) : '',
     role: server?.role ?? 'general',
     trustMode: server?.trustMode === 'blocked' || server?.trustMode === 'ask-on-risk' ? server.trustMode : 'constrained',
-    env: server?.env
-      ? Object.entries(server.env)
-          .map(([key, value]) => `${key}=${value}`)
-          .join(', ')
-      : '',
+    env: envText(server?.env),
     allowedPaths: server?.allowedPaths?.join(', ') ?? '',
     allowedHosts: server?.allowedHosts?.join(', ') ?? '',
   };
@@ -130,16 +151,20 @@ export function formToServerConfig(form: McpWorkspaceFormBase): McpServerConfig 
     throw new Error('Server names may contain letters, numbers, dot, underscore, and dash only.');
   }
   if (!command) throw new Error('Command is required.');
-  const args = parseArgs(form.args.trim());
-  const env = parseEnv(form.env);
-  const allowedPaths = splitList(form.allowedPaths);
-  const allowedHosts = splitList(form.allowedHosts);
+  const origin = form.origin;
+  const unedited = (text: string, saved: string): boolean => origin !== undefined && text === saved;
+  const args = origin?.args && unedited(form.args, formatArgs(origin.args)) ? [...origin.args] : parseArgs(form.args.trim());
+  const env = origin?.env && unedited(form.env, envText(origin.env)) ? { ...origin.env } : parseEnv(form.env);
+  const allowedPaths = origin?.allowedPaths && unedited(form.allowedPaths, origin.allowedPaths.join(', ')) ? [...origin.allowedPaths] : splitList(form.allowedPaths);
+  const allowedHosts = origin?.allowedHosts && unedited(form.allowedHosts, origin.allowedHosts.join(', ')) ? [...origin.allowedHosts] : splitList(form.allowedHosts);
+  // The form cannot show allow-all, so an untouched trust field must not downgrade it.
+  const trustMode = origin?.trustMode === 'allow-all' && !form.trustTouched ? 'allow-all' : form.trustMode;
   return {
     name,
     command,
     ...(args.length > 0 ? { args } : {}),
     role: form.role,
-    trustMode: form.trustMode,
+    trustMode,
     ...(env ? { env } : {}),
     ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
     ...(allowedHosts.length > 0 ? { allowedHosts } : {}),

@@ -52,9 +52,14 @@ afterEach(async () => {
  * An explicit value set by the caller still wins, so a harness that has already
  * arranged its own isolation is not overridden.
  */
-if (!process.env['GOODVIBES_DAEMON_HOME']?.trim()) {
+if (!process.env['GOODVIBES_DAEMON_HOME']?.trim() && !process.env['GOODVIBES_HOME']?.trim()) {
+  // The tree root is pinned, not the daemon home itself: a test that roots a
+  // fixture home somewhere seeds `<home>/.goodvibes/daemon`, and code that
+  // honours GOODVIBES_DAEMON_HOME would look in the pinned directory instead.
+  // Pinning the root leaves the daemon home following the caller's home and
+  // sends only a caller with no home of its own to this empty tree.
   // Lands under the run's temp root and goes away with it. Deliberately NOT one of the
   // per-test directories: it must survive every test in every file for the
   // whole run, not just the first test to touch it.
-  process.env['GOODVIBES_DAEMON_HOME'] = makeLongLivedProjectTempDir('goodvibes-agent-test-daemon-home');
+  process.env['GOODVIBES_HOME'] = makeLongLivedProjectTempDir('goodvibes-agent-test-home');
 }

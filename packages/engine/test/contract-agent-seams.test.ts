@@ -489,7 +489,8 @@ describe('waking a stopped unit agent', () => {
           expect(tracker.agentsCost()).toBe(40);
           expect(liveStates).toEqual(['running', 'running']);
           expect(lifecycle.filter((type) => type === 'AGENT_SPAWNING')).toHaveLength(2);
-          expect(lifecycle.filter((type) => type === 'AGENT_RUNNING')).toHaveLength(4);
+          // Two spawned runs, and for each wake the manager's marked running event before the run's own.
+          expect(lifecycle.filter((type) => type === 'AGENT_RUNNING')).toHaveLength(6);
         } finally { detach(); }
       });
     }
@@ -650,7 +651,7 @@ describe('phase runner contract binding', () => {
     expect(item.route).not.toBe(route);
 
     engine.start(ws.id);
-    for (let i = 0; i < 20 && spawns.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let i = 0; i < 2000 && spawns.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(spawns).toHaveLength(2);
 
     const unit = spawns.find((spawn) => spawn.binding !== undefined)!;
@@ -677,7 +678,7 @@ describe('phase runner contract binding', () => {
     // The plain item settles on its agent's completion; the unit only once the runner settles it.
     expect(settlements.has(unit.record.id)).toBe(true);
     settlements.get(unit.record.id)!('completed');
-    for (let i = 0; i < 20 && engine.getWorkstream(ws.id)!.items.some((candidate) => candidate.state !== 'passed'); i++) {
+    for (let i = 0; i < 2000 && engine.getWorkstream(ws.id)!.items.some((candidate) => candidate.state !== 'passed'); i++) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(engine.getWorkstream(ws.id)!.items.map((candidate) => candidate.state)).toEqual(['passed', 'passed']);

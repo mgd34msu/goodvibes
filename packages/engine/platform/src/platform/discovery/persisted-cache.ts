@@ -26,7 +26,8 @@ function captureNumericMap(value: unknown): Record<string, number> | undefined |
   return captured;
 }
 
-function captureServer(value: unknown): DiscoveredServer | null {
+/** One cache entry, validated with the same rules the loader applies. */
+export function capturePersistedServer(value: unknown): DiscoveredServer | null {
   if (!isRecord(value)
     || typeof value.name !== 'string'
     || typeof value.host !== 'string'
@@ -58,7 +59,7 @@ export function capturePersistedProviders(value: unknown): { servers: Discovered
   const servers: DiscoveredServer[] = [];
   let invalid = false;
   for (const item of value) {
-    const server = captureServer(item);
+    const server = capturePersistedServer(item);
     if (server === null) invalid = true;
     else servers.push(server);
   }

@@ -76,7 +76,7 @@ export async function ensureKvNamespace(
   if (configuredNamespaceId) {
     const configured = { id: configuredNamespaceId, title: namespaceName };
     persistKvNamespace(context, configured, namespaceName, persist);
-    steps.push({ name: 'kv-namespace', status: 'ok', message: `Using configured KV namespace ${namespaceName}.`, resourceId: configuredNamespaceId });
+    steps.push({ name: 'kv-namespace', status: 'warning', message: `Using configured KV namespace id ${configuredNamespaceId}; it was not visible in this account, so the Worker binding may point at nothing. Clear cloudflare.kvNamespaceId to create a namespace instead.`, resourceId: configuredNamespaceId });
     return configured;
   }
   try {
@@ -170,6 +170,20 @@ export async function ensureSecretsStore(
   throw new CloudflareControlPlaneError(`Cloudflare Secrets Store '${storeName}' did not return a created store.`, 'CLOUDFLARE_SECRETS_STORE_CREATE_FAILED', 502);
 }
 
+async function readTunnelIngress(
+  api: NonNullable<NonNullable<CloudflareApiClient['zeroTrust']>['tunnels']>['cloudflared'],
+  tunnelId: string,
+  accountId: string,
+): Promise<Record<string, unknown>[] | undefined> {
+  if (!api.configurations.get) return undefined;
+  try {
+    const current = await api.configurations.get(tunnelId, { account_id: accountId });
+    return [...(current.config?.ingress ?? [])];
+  } catch {
+    return undefined;
+  }
+}
+
 export async function ensureTunnel(
   context: CloudflareProvisioningContext,
   client: CloudflareApiClient,
@@ -189,6 +203,7 @@ export async function ensureTunnel(
     throw new CloudflareControlPlaneError('The Cloudflare client does not expose Zero Trust Tunnel APIs.', 'CLOUDFLARE_TUNNEL_API_UNAVAILABLE', 500);
   }
   let tunnel: CloudflareTunnelLike | undefined;
+  let createdTunnel = false;
   if (input.tunnelId) {
     tunnel = { id: input.tunnelId, name: input.tunnelName };
   } else {
@@ -201,6 +216,7 @@ export async function ensureTunnel(
     if (!tunnel) {
       try {
         tunnel = await api.create({ account_id: input.accountId, name: input.tunnelName, config_src: 'cloudflare' });
+        createdTunnel = true;
         input.steps.push({ name: 'zero-trust-tunnel', status: 'ok', message: `Created Zero Trust Tunnel ${input.tunnelName}.`, resourceId: tunnel.id });
       } catch (error: unknown) {
         tunnel = await findTunnelByName(client, input.accountId, input.tunnelName);
@@ -215,27 +231,80 @@ export async function ensureTunnel(
     throw new CloudflareControlPlaneError(`Zero Trust Tunnel '${input.tunnelName}' did not include an id.`, 'CLOUDFLARE_TUNNEL_ID_MISSING', 502);
   }
   if (input.daemonHostname && input.tunnelServiceUrl) {
-    await api.configurations.update(tunnel.id, {
-      account_id: input.accountId,
-      config: {
-        ingress: [
-          { hostname: input.daemonHostname, service: input.tunnelServiceUrl },
-          { service: 'http_status:404' },
-        ],
-      },
-    });
-    input.steps.push({ name: 'zero-trust-tunnel-config', status: 'ok', message: `Configured Tunnel ingress for ${input.daemonHostname}.` });
+    const rule = { hostname: input.daemonHostname, service: input.tunnelServiceUrl };
+    const catchAll = { service: 'http_status:404' };
+    let ingress: Record<string, unknown>[] | undefined = [rule, catchAll];
+    if (!createdTunnel) {
+      // An existing tunnel may serve other hostnames: keep their rules, replace
+      // only the one for this daemon, and leave the tunnel alone when its
+      // current rules cannot be read rather than overwrite them blind.
+      const current = await readTunnelIngress(api, tunnel.id, input.accountId);
+      if (current === undefined) {
+        ingress = undefined;
+      } else {
+        // Cloudflare requires exactly one catch-all (no hostname, no path), last.
+        const isCatchAll = (entry: Record<string, unknown>): boolean => entry.hostname === undefined && entry.path === undefined;
+        const others = current.filter((entry) => !isCatchAll(entry) && entry.hostname !== input.daemonHostname);
+        const fallback = current.find(isCatchAll) ?? catchAll;
+        ingress = [...others, rule, fallback];
+      }
+    }
+    if (ingress) {
+      await api.configurations.update(tunnel.id, { account_id: input.accountId, config: { ingress } });
+      input.steps.push({ name: 'zero-trust-tunnel-config', status: 'ok', message: `Configured Tunnel ingress for ${input.daemonHostname}.` });
+    } else {
+      input.steps.push({
+        name: 'zero-trust-tunnel-config',
+        status: 'warning',
+        message: `The existing Tunnel's ingress rules could not be read, so they were left unchanged. Add a rule for ${input.daemonHostname} pointing at ${input.tunnelServiceUrl} in Cloudflare.`,
+      });
+    }
   } else {
     input.steps.push({ name: 'zero-trust-tunnel-config', status: 'warning', message: 'Tunnel was created but no daemonHostname/tunnelServiceUrl was available for ingress configuration.' });
   }
   const token = await api.token.get(tunnel.id, { account_id: input.accountId });
-  await context.storeSecret(CLOUDFLARE_TUNNEL_TOKEN_KEY, token);
-  const tokenRef = `goodvibes://secrets/goodvibes/${CLOUDFLARE_TUNNEL_TOKEN_KEY}`;
   context.setConfig('cloudflare.tunnelName', input.tunnelName, input.persist);
   context.setConfig('cloudflare.tunnelId', tunnel.id, input.persist);
-  context.setConfig('cloudflare.tunnelTokenRef', tokenRef, input.persist);
-  input.steps.push({ name: 'zero-trust-tunnel-token', status: 'ok', message: 'Stored Tunnel token in the GoodVibes secret store.' });
-  return { id: tunnel.id, name: tunnel.name ?? input.tunnelName, ...(input.returnGeneratedSecrets ? { token } : {}), tokenRef };
+  // The token can be read from Cloudflare again at any time, so a run that
+  // keeps nothing locally has nothing to lose by not storing it.
+  let tokenRef: string | undefined;
+  if (input.persist) {
+    await context.storeSecret(CLOUDFLARE_TUNNEL_TOKEN_KEY, token);
+    tokenRef = `goodvibes://secrets/goodvibes/${CLOUDFLARE_TUNNEL_TOKEN_KEY}`;
+    context.setConfig('cloudflare.tunnelTokenRef', tokenRef, input.persist);
+    input.steps.push({ name: 'zero-trust-tunnel-token', status: 'ok', message: 'Stored Tunnel token in the GoodVibes secret store.' });
+  } else {
+    input.steps.push({ name: 'zero-trust-tunnel-token', status: 'skipped', message: 'persistConfig is false, so the Tunnel token was not stored.' });
+  }
+  return { id: tunnel.id, name: tunnel.name ?? input.tunnelName, ...(input.returnGeneratedSecrets ? { token } : {}), ...(tokenRef ? { tokenRef } : {}) };
+}
+
+const ACCESS_APP_NAME = 'GoodVibes Daemon';
+const DNS_RECORD_COMMENT = 'Managed by GoodVibes platform Cloudflare provisioning';
+
+/**
+ * An Access application on the daemon's hostname that GoodVibes did not create
+ * carries someone else's login policy. Replacing it would lock out the people
+ * it was written for, so it is left alone and the operator is told.
+ */
+function skipForeignAccessApp(
+  input: { readonly daemonHostname: string; readonly returnGeneratedSecrets: boolean; readonly steps: CloudflareProvisionStep[] },
+  app: CloudflareAccessApplicationLike,
+  serviceToken: CloudflareAccessServiceTokenLike,
+  serviceTokenRef: string | undefined,
+): { readonly serviceTokenId?: string; readonly serviceTokenRef?: string; readonly clientId?: string; readonly clientSecret?: string } {
+  input.steps.push({
+    name: 'zero-trust-access-app',
+    status: 'warning',
+    message: `An Access application named "${app.name ?? 'unnamed'}" already protects ${input.daemonHostname} and was not created by GoodVibes, so it was left unchanged. Rename or delete it in Cloudflare, or set cloudflare.accessAppId to let GoodVibes manage it.`,
+    ...(app.id ? { resourceId: app.id } : {}),
+  });
+  return {
+    ...(serviceToken.id ? { serviceTokenId: serviceToken.id } : {}),
+    ...(serviceTokenRef ? { serviceTokenRef } : {}),
+    ...(serviceToken.client_id && input.returnGeneratedSecrets ? { clientId: serviceToken.client_id } : {}),
+    ...(serviceToken.client_secret && input.returnGeneratedSecrets ? { clientSecret: serviceToken.client_secret } : {}),
+  };
 }
 
 export async function ensureAccess(
@@ -279,7 +348,11 @@ export async function ensureAccess(
     input.steps.push({ name: 'zero-trust-access-service-token', status: 'ok', message: 'Using existing Zero Trust Access service token.', resourceId: serviceToken.id });
   }
   let serviceTokenRef: string | undefined = input.accessServiceTokenRef || undefined;
-  if (serviceToken.client_id && serviceToken.client_secret) {
+  if (serviceToken.client_id && serviceToken.client_secret && !input.persist) {
+    // Cloudflare shows this secret once, so a run that stores nothing must hand
+    // it back (the caller passes returnGeneratedSecrets for that case).
+    input.steps.push({ name: 'zero-trust-access-service-token-secret', status: 'skipped', message: 'persistConfig is false, so the Access service token credentials were not stored; they are returned in the result and Cloudflare will not show them again.' });
+  } else if (serviceToken.client_id && serviceToken.client_secret) {
     await context.storeSecret(CLOUDFLARE_ACCESS_SERVICE_TOKEN_KEY, JSON.stringify({
       clientId: serviceToken.client_id,
       clientSecret: serviceToken.client_secret,
@@ -290,6 +363,9 @@ export async function ensureAccess(
   } else if (serviceTokenRef) {
     context.setConfig('cloudflare.accessServiceTokenRef', serviceTokenRef, input.persist);
     input.steps.push({ name: 'zero-trust-access-service-token-secret', status: 'ok', message: 'Using configured Access service token secret reference.' });
+  } else {
+    // Cloudflare returns a service token's secret only when it is created.
+    input.steps.push({ name: 'zero-trust-access-service-token-secret', status: 'warning', message: 'The existing Access service token has no secret on record, so the daemon has no credential for it. Set cloudflare.accessServiceTokenRef, or delete the token in Cloudflare and provision again to mint a new one.' });
   }
   if (serviceToken.id) context.setConfig('cloudflare.accessServiceTokenId', serviceToken.id, input.persist);
 
@@ -329,12 +405,13 @@ export async function ensureAccess(
         break;
       }
     }
+    if (app && app.name !== ACCESS_APP_NAME) return skipForeignAccessApp(input, app, serviceToken, serviceTokenRef);
   }
   const accessAppParams = {
     account_id: input.accountId,
     domain: input.daemonHostname,
     type: 'self_hosted',
-    name: 'GoodVibes Daemon',
+    name: ACCESS_APP_NAME,
     session_duration: '24h',
     service_auth_401_redirect: true,
     policies: [
@@ -353,6 +430,7 @@ export async function ensureAccess(
     } catch (error: unknown) {
       const recovered = await findAccessApplicationByDomain(api, input.accountId, input.daemonHostname);
       if (!recovered?.id) throw error;
+      if (recovered.name !== ACCESS_APP_NAME) return skipForeignAccessApp(input, recovered, serviceToken, serviceTokenRef);
       app = await api.applications.update(recovered.id, accessAppParams);
     }
   }
@@ -502,9 +580,18 @@ async function ensureCnameRecord(
     content: target,
     proxied: true,
     ttl: 1,
-    comment: 'Managed by GoodVibes platform Cloudflare provisioning',
+    comment: DNS_RECORD_COMMENT,
   };
   if (match?.id) {
+    if (match.content === target && match.proxied !== false) {
+      steps.push({ name: stepName, status: 'ok', message: `Using existing CNAME ${hostname} -> ${target}.`, resourceId: match.id });
+      return match;
+    }
+    if (match.comment !== DNS_RECORD_COMMENT) {
+      // Pointing someone else's record at the daemon would take their site down.
+      steps.push({ name: stepName, status: 'warning', message: `A CNAME for ${hostname} already exists pointing at ${match.content} and was not created by GoodVibes, so it was left unchanged. Delete it in Cloudflare or choose another hostname.`, resourceId: match.id });
+      return match;
+    }
     const updated = await client.dns!.records.update(match.id, params);
     steps.push({ name: stepName, status: 'ok', message: `Updated CNAME ${hostname} -> ${target}.`, resourceId: updated.id });
     return updated;
@@ -516,6 +603,10 @@ async function ensureCnameRecord(
   } catch (error: unknown) {
     const recovered = await findCnameRecord(client, zoneId, hostname);
     if (!recovered?.id) throw error;
+    if (recovered.content !== target && recovered.comment !== DNS_RECORD_COMMENT) {
+      steps.push({ name: stepName, status: 'warning', message: `A CNAME for ${hostname} already exists pointing at ${recovered.content} and was not created by GoodVibes, so it was left unchanged.`, resourceId: recovered.id });
+      return recovered;
+    }
     const updated = await client.dns!.records.update(recovered.id, params);
     steps.push({ name: stepName, status: 'ok', message: `Updated existing CNAME ${hostname} -> ${target} after create retry: ${summarizeError(error)}`, resourceId: updated.id });
     return updated;

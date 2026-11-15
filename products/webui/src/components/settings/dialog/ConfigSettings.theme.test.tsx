@@ -29,11 +29,11 @@ mock.module('../../../lib/goodvibes', () => ({
     set: (key: string, value: unknown) => config('POST', { key, value }),
   } } },
 }));
-const { ConfigSettingsProvider, ConfigGroupList, RawConfigEditor, useConfigSettings } = await import('./ConfigSettings');
+const { ConfigSettingsProvider, ConfigGroupList, useConfigSettings } = await import('./ConfigSettings');
 
 function ThemeRows() {
   const { groups } = useConfigSettings();
-  return <><ConfigGroupList groups={groups.filter(group => group.id === 'display')} /><RawConfigEditor /></>;
+  return <><ConfigGroupList groups={groups.filter(group => group.id === 'display')} /></>;
 }
 const cleanups: (() => void)[] = [];
 function render(content: React.ReactNode = <ConfigSettingsProvider><ThemeRows /></ConfigSettingsProvider>) {
@@ -139,25 +139,4 @@ test('a real handler refusal keeps the old enum value and shows an inline error,
   expect(el.querySelector('[data-config-key="display.theme"] .settings-field-persisted')).toBeNull();
   expect(host.manager.get('display.theme')).toBe('vaporwave');
   expect(host.requests.filter(request => request.method === 'POST').map(request => request.status)).toEqual([403]);
-});
-
-test('an unsupported Advanced theme write shows genuine validation feedback without changing the enum', async () => {
-  host = createTerminalThemeHost('nord');
-  const { el } = render();
-  await waitFor(() => Boolean(trigger(el)));
-  const key = el.querySelector<HTMLInputElement>('.settings-advanced input')!;
-  const value = el.querySelector<HTMLTextAreaElement>('.settings-advanced textarea')!;
-  flushSync(() => {
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(key, 'display.theme');
-    key.dispatchEvent(new Event('input', { bubbles: true }));
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(value, '"not-a-theme"');
-    value.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  flushSync(() => el.querySelector('.settings-advanced form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  await waitFor(() => Boolean(el.querySelector('.settings-advanced [role="alert"]')));
-  expect(el.querySelector('.settings-advanced [role="alert"]')?.textContent).toContain('display.theme');
-  expect(host.requests.filter(request => request.method === 'POST').map(request => request.status)).toEqual([400]);
-  expect(trigger(el).textContent).toBe('nord');
-  expect(host.manager.get('display.theme')).toBe('nord');
-  expect(el.querySelector('[data-config-key="display.theme"] .settings-field-persisted')).toBeNull();
 });

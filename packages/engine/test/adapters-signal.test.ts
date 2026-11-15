@@ -41,6 +41,7 @@ function makeSignalContext(overrides: Partial<Record<string, unknown>> = {}) {
             mode: 'spawn',
             task: { prompt: 'hello signal' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },

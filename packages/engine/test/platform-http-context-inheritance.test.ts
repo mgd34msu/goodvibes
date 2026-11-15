@@ -11,8 +11,9 @@
  *   automatically requires it, because the platform-HTTP interface extends the
  *   canonical via Omit<CanonicalDaemonRuntimeRouteContext, 'trySpawnAgent'>.
  *
- * These are compile-time structural tests. At runtime they just confirm the
- * shape assignments are accepted by the TypeScript compiler.
+ * These are compile-time structural tests: the assertions are the helper
+ * functions' return types, so the file only means something while the
+ * engine-tests typecheck project compiles it.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -96,70 +97,18 @@ function assertPlatformInheritsAgentManager(
 }
 
 // ---------------------------------------------------------------------------
-// Runtime smoke test, validates the structural assertions compile
+// The assertions above are checked by the compiler; this test only keeps the
+// helpers referenced and runs them over a context built from the same types.
 // ---------------------------------------------------------------------------
 
 describe('platform-HTTP DaemonRuntimeRouteContext inherits canonical shapes', () => {
-  test('automationManager shape is inherited from canonical, not inlined', () => {
-    // Construct a minimal stub that satisfies PlatformHttpContext
-    const automationManager: PlatformHttpContext['automationManager'] = {
-      listJobs: () => [],
-      listRuns: () => [],
-      getRun: () => null,
-      triggerHeartbeat: async () => ({}),
-      cancelRun: async () => null,
-      retryRun: async () => ({}),
-      createJob: async () => ({ id: 'stub' }),
-      updateJob: async () => null,
-      removeJob: async () => {},
-      setEnabled: async () => null,
-      runNow: async () => ({ id: 'stub', status: 'running' }),
-      getSchedulerCapacity: () => ({
-        slotsTotal: 4,
-        slotsInUse: 0,
-        queueDepth: 0,
-        oldestQueuedAgeMs: null,
-      }),
-    };
-
-    const ctx = buildMinimalContext(automationManager);
-
-    // assertPlatformInheritsAutomationManager would not compile if
-    // PlatformHttpContext.automationManager diverged from CanonicalContext.automationManager
-    const inherited = assertPlatformInheritsAutomationManager(ctx);
-    expect(inherited.listJobs()).toEqual([]);
-    expect(inherited.getSchedulerCapacity()).toMatchObject({ slotsTotal: 4, slotsInUse: 0 });
-    // runNow and triggerHeartbeat are async stubs, verify they return thenables
-  });
-
-  test('sessionBroker shape is inherited from canonical, not inlined', async () => {
+  test('a context built from the platform type satisfies every canonical shape', () => {
     const ctx = buildMinimalContext();
-    const inherited = assertPlatformInheritsSessionBroker(ctx);
-    // Stubs throw, verify they are callable methods (not undefined)
-    expect(typeof inherited.submitMessage).toBe('function');
-    expect(typeof inherited.steerMessage).toBe('function');
-    expect(typeof inherited.followUpMessage).toBe('function');
-    // createSession returns a stub session
-    const session = await inherited.createSession({} as never);
-    expect(session).toMatchObject({ id: 'stub' });
-  });
-
-  test('agentManager shape is inherited from canonical, not inlined', () => {
-    const ctx = buildMinimalContext();
-    const inherited = assertPlatformInheritsAgentManager(ctx);
-    expect(inherited.getStatus('stub-session')).toBeNull();
-    inherited.cancel('stub-session'); // stub is a no-op, just verify it does not throw
-  });
-
-  test('DaemonRuntimeRouteHandlerMap is imported from canonical, not Pick<>-duplicated', async () => {
-    // This test verifies the module shape at import time.
-    // If DaemonRuntimeRouteHandlerMap were re-declared as a local Pick<>,
-    // a new handler added to the canonical would not be required here.
-    // By importing from the canonical file, this is enforced automatically.
-    const mod = await import('../platform/src/platform/daemon/http/runtime-route-types.js');
-    // The module should export JsonBody and DaemonRuntimeRouteHandlerMap (type-only)
-    // At runtime we can only verify the module loaded without error.
-    expect(mod).not.toBeNull(); // presence-only: module loaded check
+    assertPlatformInheritsAutomationManager(ctx);
+    assertRefinedAutomationInputs(ctx);
+    assertPlatformInheritsSessionBroker(ctx);
+    assertPlatformInheritsAgentManager(ctx);
+    expect(ctx.automationManager).toBeDefined();
   });
 });
 

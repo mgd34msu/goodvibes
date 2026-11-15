@@ -1,4 +1,4 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately per-repo test, kept per repo and not expected to match the sibling product's copy: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import { selectStreamToolPreview } from '../../runtime/store/selectors/index.ts';
@@ -269,7 +269,8 @@ describe('createDomainDispatch', () => {
     expect(state.mcp.servers.get('mcp-1')?.role).toBe('ops');
     expect(state.mcp.servers.get('mcp-1')?.allowedPaths).toEqual(['/srv/app']);
     expect(state.mcp.servers.get('mcp-1')?.schemaFreshness).toBe('stale');
-    expect(state.mcp.servers.get('mcp-1')?.quarantineReason).toBe('operator_flagged');
+    // Approval ends the quarantine, so its reason is cleared with it.
+    expect(state.mcp.servers.get('mcp-1')?.quarantineReason).toBeUndefined();
     expect(state.mcp.servers.get('mcp-1')?.quarantineApprovedBy).toBe('alice');
     expect(state.daemon.transportState).toBe('connected');
   });

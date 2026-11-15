@@ -147,11 +147,13 @@ function openOrRefuse(
 
 describe('anything the live verb mints, the load path accepts', () => {
   test('open -> validate round-trips for every accepted input', () => {
+    let accepted = 0;
     fc.assert(
       fc.property(openInput, (input) => {
         const book = new VerificationExpectationBook();
         const opened = openOrRefuse(book, { ...input, now: T0 });
         if (opened === null) return;
+        accepted += 1;
 
         // The same instant the record was minted at. A record cannot be
         // "already stale" the moment it is written.
@@ -163,44 +165,58 @@ describe('anything the live verb mints, the load path accepts', () => {
       }),
       { numRuns: 400 },
     );
+    // A refuse-everything regression would otherwise pass every run vacuously.
+    expect(accepted).toBeGreaterThan(0);
   });
 
   test('the minted window always lands inside the range the load path enforces', () => {
+    let accepted = 0;
     fc.assert(
       fc.property(openInput, (input) => {
         const opened = openOrRefuse(new VerificationExpectationBook(), { ...input, now: T0 });
         if (opened === null) return;
+        accepted += 1;
         const span = Date.parse(opened.expiresAt) - Date.parse(opened.openedAt);
         expect(span).toBeGreaterThanOrEqual(MIN_VERIFICATION_WINDOW_MS);
         expect(span).toBeLessThanOrEqual(MAX_VERIFICATION_WINDOW_MS);
       }),
       { numRuns: 400 },
     );
+    // A refuse-everything regression would otherwise pass every run vacuously.
+    expect(accepted).toBeGreaterThan(0);
   });
 
   test('a minted id always satisfies the bound the load path applies', () => {
+    let accepted = 0;
     fc.assert(
       fc.property(openInput, (input) => {
         const opened = openOrRefuse(new VerificationExpectationBook(), { ...input, now: T0 });
         if (opened === null) return;
+        accepted += 1;
         expect(opened.id.length).toBeGreaterThan(0);
         expect(opened.id.length).toBeLessThanOrEqual(MAX_EXPECTATION_ID_CHARS);
         expect(opened.id).toMatch(/^[A-Za-z0-9._:-]+$/);
       }),
       { numRuns: 400 },
     );
+    // A refuse-everything regression would otherwise pass every run vacuously.
+    expect(accepted).toBeGreaterThan(0);
   });
 
   test('a minted recipient always satisfies the ceiling the load path applies', () => {
+    let accepted = 0;
     fc.assert(
       fc.property(openInput, (input) => {
         const opened = openOrRefuse(new VerificationExpectationBook(), { ...input, now: T0 });
         if (opened === null) return;
+        accepted += 1;
         expect(opened.recipientAddress.length).toBeLessThanOrEqual(MAX_RECIPIENT_ADDRESS_CHARS);
         expect(opened.recipientAddress).toContain('@');
       }),
       { numRuns: 200 },
     );
+    // A refuse-everything regression would otherwise pass every run vacuously.
+    expect(accepted).toBeGreaterThan(0);
   });
 });
 
@@ -210,12 +226,14 @@ describe('anything the live verb mints, the load path accepts', () => {
 
 describe('an expectation survives the restart it was persisted for', () => {
   test('open -> mirror -> sweep -> hydrate keeps the grant intact', async () => {
+    let accepted = 0;
     await fc.assert(
       fc.asyncProperty(openInput, async (input) => {
         rmSync(storePath, { force: true });
         const book = new VerificationExpectationBook();
         const opened = openOrRefuse(book, { ...input, now: T0 });
         if (opened === null) return;
+        accepted += 1;
 
         // The mirror write. `replaceAll` returns void and silently drops
         // anything it re-validates as invalid, so a disagreement here is
@@ -231,8 +249,14 @@ describe('an expectation survives the restart it was persisted for', () => {
         expect(report.retained).toBe(1);
         expect(report.removed).toHaveLength(0);
 
+        // Hydrate from what the store wrote, not from the in-memory record,
+        // so a store that persists a lossy or rewritten record is caught.
+        const persisted = await reopened.list();
+        expect(persisted).toHaveLength(1);
+        expect(persisted[0]).toEqual(opened);
+
         const restored = new VerificationExpectationBook();
-        const hydrated = restored.hydrateExpectation(opened, T0);
+        const hydrated = restored.hydrateExpectation(persisted[0]!, T0);
         expect(hydrated).not.toBeNull();
         // The window is the ORIGINAL one. A restart must not extend a grant.
         expect(hydrated?.expiresAt).toBe(opened.expiresAt);
@@ -241,6 +265,7 @@ describe('an expectation survives the restart it was persisted for', () => {
       }),
       { numRuns: 60 },
     );
+    expect(accepted).toBeGreaterThan(0);
   });
 
   test('a full book at the open ceiling mirrors without losing any of it', async () => {

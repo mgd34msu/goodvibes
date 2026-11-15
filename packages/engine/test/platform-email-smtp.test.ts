@@ -152,7 +152,7 @@ describe('validateSmtpAddress / validateSmtpSubject: injection prevention', () =
   });
 });
 
-describe('SmtpClient sendMail: hostile from/to/subject blocked before envelope write', () => {
+describe('SmtpClient sendMail: hostile from/to/subject blocked before the envelope is written', () => {
   let fakeServer: FakeServer | null = null;
 
   afterEach(() => {
@@ -160,10 +160,14 @@ describe('SmtpClient sendMail: hostile from/to/subject blocked before envelope w
     fakeServer = null;
   });
 
+  /** Every line the fake server received, so a test can say what never reached it. */
+  let received: string[] = [];
+
   async function makeSendAttempt(
     opts: { from?: string; to?: string; subject?: string },
   ): Promise<void> {
     const commands: string[] = [];
+    received = commands;
     fakeServer = await makeFakeSmtpServer((sock) => happyPathScript(sock, commands));
 
     const socket = await connectSocket(fakeServer.address.port);
@@ -182,29 +186,40 @@ describe('SmtpClient sendMail: hostile from/to/subject blocked before envelope w
     });
   }
 
-  test('\\r\\n in subject throws and does not write to socket', async () => {
+  /** Nothing of the message transaction may have reached the server. */
+  function expectNoEnvelopeWritten(): void {
+    expect(received.filter((line) => /^(MAIL FROM|RCPT TO|DATA)\b/i.test(line.trim()))).toEqual([]);
+  }
+
+  test('\\r\\n in subject throws before MAIL FROM, RCPT TO or DATA', async () => {
     await expect(makeSendAttempt({ subject: 'Hello\r\nBCC: evil@example.test' }))
       .rejects.toThrow(/must not contain control characters/);
+    expectNoEnvelopeWritten();
+    expect(received.some((line) => /^BCC:/i.test(line))).toBe(false);
   });
 
-  test('\\n in from address throws and does not write to socket', async () => {
+  test('\\n in from address throws before MAIL FROM, RCPT TO or DATA', async () => {
     await expect(makeSendAttempt({ from: 'good@example.test\nX-Evil: yes' }))
       .rejects.toThrow(/must not contain control characters/);
+    expectNoEnvelopeWritten();
   });
 
-  test('\\r\\n in to address throws and does not write to socket', async () => {
+  test('\\r\\n in to address throws before MAIL FROM, RCPT TO or DATA', async () => {
     await expect(makeSendAttempt({ to: 'r@example.test\r\nDATA' }))
       .rejects.toThrow(/must not contain control characters/);
+    expectNoEnvelopeWritten();
   });
 
-  test('angle-bracket smuggling in from throws', async () => {
+  test('angle-bracket smuggling in from throws before the envelope', async () => {
     await expect(makeSendAttempt({ from: '<attacker@example.test>' }))
       .rejects.toThrow(/angle brackets/);
+    expectNoEnvelopeWritten();
   });
 
-  test('comma list in to throws', async () => {
+  test('comma list in to throws before the envelope', async () => {
     await expect(makeSendAttempt({ to: 'a@b.test,c@d.test' }))
       .rejects.toThrow(/one address is allowed/);
+    expectNoEnvelopeWritten();
   });
 });
 
@@ -327,6 +342,39 @@ describe('SmtpClient protocol', () => {
     expect(commands.some((c) => c.trim() === '.')).toBe(true);
   });
 
+  test('a reply carries In-Reply-To and References in the message headers', async () => {
+    const commands: string[] = [];
+    fakeServer = await makeFakeSmtpServer((sock) => happyPathScript(sock, commands));
+    const socket = await connectSocket(fakeServer.address.port);
+    const client = new SmtpClient({ socket, hostname: 'client.test', username: 'user@example.test', password: 'mypassword', timeoutMs: 5000 });
+    await client.sendMail({
+      from: 'user@example.test',
+      to: 'recipient@example.test',
+      subject: 'Re: Test subject',
+      body: 'Hello',
+      inReplyTo: '<parent@example.test>',
+      references: '<root@example.test> <parent@example.test>',
+    });
+    const data = commands.slice(commands.findIndex((c) => c.trim() === 'DATA'));
+    expect(data).toContain('In-Reply-To: <parent@example.test>');
+    expect(data).toContain('References: <root@example.test> <parent@example.test>');
+  });
+
+  test('a line break in inReplyTo is refused before anything is written', async () => {
+    const commands: string[] = [];
+    fakeServer = await makeFakeSmtpServer((sock) => happyPathScript(sock, commands));
+    const socket = await connectSocket(fakeServer.address.port);
+    const client = new SmtpClient({ socket, hostname: 'client.test', username: 'user@example.test', password: 'mypassword', timeoutMs: 5000 });
+    await expect(client.sendMail({
+      from: 'user@example.test',
+      to: 'recipient@example.test',
+      subject: 'Re: x',
+      body: 'Hello',
+      inReplyTo: '<a@example.test>\r\nBcc: evil@example.test',
+    })).rejects.toThrow(/inReplyTo must not contain control characters/);
+    expect(commands.some((c) => c.trim() === 'DATA')).toBe(false);
+  });
+
   test('dot-stuffing: lines beginning with "." get an extra "."', async () => {
     const commands: string[] = [];
     fakeServer = await makeFakeSmtpServer((sock) => happyPathScript(sock, commands));
@@ -344,15 +392,23 @@ describe('SmtpClient protocol', () => {
       from: 'user@example.test',
       to: 'recipient@example.test',
       subject: 'Dot stuffing test',
-      body: '.line starting with dot\nnormal line\n..double dot line',
+      body: '.line starting with dot\nnormal line\n..double dot line\n.',
     });
 
-    // After DATA, body is sent; look for double-dotted lines
-    const dataIdx = commands.findIndex((c) => c.trim() === 'DATA');
-    const bodyLines = commands.slice(dataIdx + 1);
-    expect(bodyLines.some((l) => l.startsWith('..'))).toBe(true);
-    // The terminator '.' itself should appear (it's not doubled)
-    expect(bodyLines.some((l) => l === '.')).toBe(true);
+    // The body starts after the blank line that ends the headers. Everything up to
+    // the first lone "." is message content; that "." is the terminator.
+    const headerEnd = commands.indexOf('', commands.findIndex((c) => c.trim() === 'DATA'));
+    const afterHeaders = commands.slice(headerEnd + 1);
+    const terminator = afterHeaders.indexOf('.');
+    expect(afterHeaders.slice(0, terminator)).toEqual([
+      '..line starting with dot',
+      'normal line',
+      '...double dot line',
+      // A body line that is a single "." would otherwise end DATA early.
+      '..',
+    ]);
+    // The terminator is the last line of the message, so the stuffed "." above did not end it.
+    expect(terminator).toBe(4);
   });
 
   test('AUTH LOGIN fallback: uses two-step base64 when PLAIN not advertised', async () => {

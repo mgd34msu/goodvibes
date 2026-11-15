@@ -55,11 +55,12 @@ export function buildAgentModelComparePromptSubmission(
 
   const modelRefs = readList(readField('modelRefs'));
   const artifactId = readField('artifactId').trim();
-  const candidateCount = readPositiveInteger(readField('candidateCount')) ?? 2;
+  const candidateCount = readPositiveInteger(readField('candidateCount'));
   const reveal = isAffirmative(readField('reveal'));
   const rubric = readField('rubric').trim();
   const systemPrompt = readField('systemPrompt').trim();
-  const maxTokens = readPositiveInteger(readField('maxTokens')) ?? 0;
+  // Blank means "use the model default", the same as the tool arguments built from this form.
+  const maxTokens = readPositiveInteger(readField('maxTokens'));
   const benchmarkKind = readField('benchmarkKind').trim();
   const taskType = readField('taskType').trim();
   const documentId = readField('documentId').trim();
@@ -76,10 +77,12 @@ export function buildAgentModelComparePromptSubmission(
     '',
     modelRefs.length > 0
       ? `Candidate models: ${modelRefs.join(', ')}.`
-      : `Candidate models: auto-select ${candidateCount} selectable models.`,
+      : candidateCount !== null
+        ? `Candidate models: auto-select ${candidateCount} selectable models.`
+        : 'Candidate models: auto-select the default number of selectable models.',
     rubric ? `Rubric: ${rubric}` : 'Rubric: none.',
     systemPrompt ? `System prompt: ${systemPrompt}` : 'System prompt: none.',
-    `Max tokens per candidate: ${maxTokens}.`,
+    maxTokens !== null ? `Max tokens per candidate: ${maxTokens}.` : 'Max tokens per candidate: model default.',
     benchmarkKind ? `Benchmark kind: ${benchmarkKind}.` : 'Benchmark kind: none.',
     taskType ? `Task type: ${taskType}.` : 'Task type: none.',
     documentId ? `Document id: ${documentId}.` : 'Document id: none.',
@@ -94,7 +97,7 @@ export function buildAgentModelComparePromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Blind model comparison',
-      detail: 'Submitted a confirmed request to run the first-class model comparison tool.',
+      detail: 'Asked the model to run the model comparison tool. Nothing has run yet: the comparison starts when the model calls the tool, and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -284,7 +287,7 @@ export function buildAgentModelCompareJudgmentPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Saved comparison judgment',
-      detail: 'Submitted a confirmed request to save a local comparison judgment artifact.',
+      detail: 'Asked the model to save a local comparison judgment artifact. Nothing is saved until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -346,7 +349,7 @@ export function buildAgentModelCompareApplyPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Apply compare winner',
-      detail: 'Submitted a confirmed request to apply a revealed comparison judgment to the selected model route.',
+      detail: 'Asked the model to apply a revealed comparison judgment to the selected model route. The route is unchanged until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -408,7 +411,7 @@ export function buildAgentModelCompareRouteDecisionPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Record route decision',
-      detail: 'Submitted a confirmed request to save a leave-unchanged comparison route-decision receipt.',
+      detail: 'Asked the model to save a leave-unchanged route-decision receipt. Nothing is saved until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -490,10 +493,10 @@ export function buildAgentModelCompareExportPromptSubmission(
           ? 'Archive reviewer handoff'
           : 'Export compare report',
       detail: mode === 'handoff'
-        ? 'Submitted a confirmed request to create a reviewer handoff from saved comparison evidence.'
+        ? 'Asked the model to create a reviewer handoff from saved comparison evidence. Nothing is created until the model calls the tool and its result appears in the conversation.'
         : mode === 'handoffArchive'
-          ? 'Submitted a confirmed request to create a ZIP archive artifact from a saved reviewer handoff.'
-          : 'Submitted a confirmed request to export a saved comparison or judgment as markdown.',
+          ? 'Asked the model to create a ZIP archive artifact from a saved reviewer handoff. Nothing is created until the model calls the tool and its result appears in the conversation.'
+          : 'Asked the model to export a saved comparison or judgment as markdown. Nothing is created until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

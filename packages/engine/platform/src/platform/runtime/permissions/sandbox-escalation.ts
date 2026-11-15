@@ -16,10 +16,12 @@
  * annotates the ask with the reading, or, only in opt-in auto-approve mode and
  * only for a confident `looks-safe` reading, auto-approves it. It
  * NEVER converts the standing ask into a deny and NEVER touches the frozen
- * catastrophic block.
+ * catastrophic block. When the reading cannot be taken (an outage), the owner
+ * is still asked, with the reason noted on the ask.
  */
 import { randomUUID } from 'node:crypto';
-import { decisionOrClassic } from '../decision-policy.js';
+import { DecisionModelPolicyChangedError, decisionOrClassic } from '../decision-policy.js';
+import { summarizeError } from '../../utils/error-display.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
 import {
   runSandboxJudgment,
@@ -94,16 +96,28 @@ export function createSandboxEscalationApprovalHandler(
 
     let judgmentReceipt: SandboxJudgmentReceipt | undefined;
     if (judgment?.config.enabled) {
-      const resolved = await decisionOrClassic(() => runSandboxJudgment(
-        {
-          command: request.command,
-          sandboxPlan: request.boundary,
-          escalations: request.escalations,
-          policyReasons: request.policyReasons,
-          ...(request.workspaceContext ? { workspaceContext: request.workspaceContext } : {}),
-        },
-      ), () => undefined);
-      if (resolved) {
+      let resolved: Awaited<ReturnType<typeof runSandboxJudgment>> | undefined;
+      let advisoryFailure: string | undefined;
+      try {
+        resolved = await decisionOrClassic(() => runSandboxJudgment(
+          {
+            command: request.command,
+            sandboxPlan: request.boundary,
+            escalations: request.escalations,
+            policyReasons: request.policyReasons,
+            ...(request.workspaceContext ? { workspaceContext: request.workspaceContext } : {}),
+          },
+        ), () => undefined);
+      } catch (error) {
+        // The advisory only ever annotates or relaxes an ask, so an outage must leave the plain ask in
+        // place for the owner rather than block the prompt. A cancelled or superseded operation stays
+        // cancelled.
+        if (error instanceof DecisionModelPolicyChangedError || (error instanceof Error && error.name === 'AbortError')) throw error;
+        advisoryFailure = summarizeError(error);
+      }
+      if (advisoryFailure !== undefined) {
+        reasons.push(`The advisory reading was unavailable (${advisoryFailure}); owner approval is required.`);
+      } else if (resolved) {
         const applied = applySandboxJudgment(resolved, judgment.config, request.command);
         judgmentReceipt = applied.receipt;
         judgment.onReceipt?.(applied.receipt);

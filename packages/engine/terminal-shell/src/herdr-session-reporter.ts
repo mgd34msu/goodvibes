@@ -123,6 +123,7 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
   const flush = (): Promise<void> => {
     if (draining) return draining;
     const controller = new AbortController(); active = controller;
+    const startedWith = desired;
     const operation = Promise.resolve().then(async () => {
       if (!detected && !closed) {
         try {
@@ -145,7 +146,13 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
           ...(resumeArgv === undefined ? [] : ['--', ...resumeArgv])], 3_000, controller.signal);
         lastReported = signature;
       }
-    }).catch(() => { desired = undefined; if (!closed) notifyFailure(); });
+    }).catch(() => {
+      // A state that arrived while the failed command ran is newer than the
+      // failure and is sent next; only an unchanged one is dropped, so a command
+      // that fails before taking it cannot retry forever.
+      if (desired === startedWith) desired = undefined;
+      if (!closed) notifyFailure();
+    });
     draining = operation.finally(() => {
       draining = undefined;
       if (active === controller) active = undefined;

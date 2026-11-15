@@ -134,6 +134,8 @@ test('integration status preserves pre/post-acquisition pairing scopes, project 
   expect(f.acquisitions).toBe(1); expect(f.reads).toBe(0); expect(f.effects).toBe(0);
 });
 
+// The record carries the frozen historical binding recipe (a persisted v1 format), so a saved row
+// from before the current recipe is what these denials are judged against.
 function hostFixture() {
   const root = realpathSync(process.cwd()); const auth = authorityFixture(); const contract = makeContract({ id: 'ctr-11111111', isolation: 'worktree' });
   const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -167,16 +169,19 @@ test('native host status after restart is unavailable without implicit recovery,
   expect(() => f.host.status(key, f.auth.authority)).toThrow('closed');
 });
 
-test('native host denies revoked pairing, changed incarnation/scope/project and post-read revocation before disclosure', async () => {
-  for (const change of [
-    (f: ReturnType<typeof hostFixture>) => { f.auth.current = null; },
-    (f: ReturnType<typeof hostFixture>) => { f.auth.current = { ...f.auth.current!, tokenId: 'new', authorityRevision: 'new' }; },
-    (f: ReturnType<typeof hostFixture>) => { f.auth.current = { ...f.auth.current!, scopes: ['read:work-ledger'] }; },
-    (f: ReturnType<typeof hostFixture>) => { f.generation = 'replacement'; },
-    (f: ReturnType<typeof hostFixture>) => { f.current = { ...f.current, record: { ...f.current.record!, projectId: 'other' } }; },
-    (f: ReturnType<typeof hostFixture>) => { f.runner.get = () => { f.auth.current = null; return f.contract; }; },
-  ]) {
-    const f = hostFixture(); change(f); expect(() => f.host.status(key, f.auth.authority)).toThrow();
+test('native host denies revoked pairing, changed incarnation/scope/project and post-read revocation before disclosure, each for its own reason', async () => {
+  type Fixture = ReturnType<typeof hostFixture>;
+  const cases: ReadonlyArray<readonly [string, (f: Fixture) => void, 'unsupported-authority' | 'stale']> = [
+    ['revoked pairing', f => { f.auth.current = null; }, 'unsupported-authority'],
+    ['changed incarnation', f => { f.auth.current = { ...f.auth.current!, tokenId: 'new', authorityRevision: 'new' }; }, 'stale'],
+    ['narrowed scopes', f => { f.auth.current = { ...f.auth.current!, scopes: ['read:work-ledger'] }; }, 'unsupported-authority'],
+    ['replaced workspace scope', f => { f.generation = 'replacement'; }, 'stale'],
+    ['changed project', f => { f.current = { ...f.current, record: { ...f.current.record!, projectId: 'other' } }; }, 'stale'],
+    ['revocation after the read', f => { f.runner.get = () => { f.auth.current = null; return f.contract; }; }, 'unsupported-authority'],
+  ];
+  for (const [name, change, reason] of cases) {
+    const f = hostFixture(); change(f);
+    expect(() => f.host.status(key, f.auth.authority), name).toThrow(`Native work execution: ${reason}.`);
     expect(f.reads).toBe(0); expect(f.effects).toBe(0); await f.host.close();
   }
 });

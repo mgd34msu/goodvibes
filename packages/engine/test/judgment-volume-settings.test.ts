@@ -1,4 +1,4 @@
-/** Product settings/runtime lifecycle regressions; execution deferred. */
+/** Product settings/runtime lifecycle regressions. */
 import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -104,4 +104,23 @@ test('disabled budgets stay bounded and only complete enabled controls can start
     { enabled: false, intervalMs: 0 }, { enabled: false, windowMs: Infinity }, { enabled: false, limit: 100_001 }]) {
     expect(() => captureJudgmentVolumeMonitorControl(value)).toThrow();
   }
+});
+
+test('the composed monitor handle reports an unreadable log with its failure class', () => {
+  const scope = createDisposalScope('volume status fixture'), warn = spyOn(logger, 'warn').mockImplementation(() => {}), info = spyOn(logger, 'info').mockImplementation(() => {});
+  try {
+    const handle = composeJudgmentVolumeMonitor({ query: () => { throw new TypeError('database is locked'); } }, {}, scope.registry,
+      { get: () => ({ enabled: true, budgets: [budget] }) });
+    const alert = handle.lastAlert();
+    expect(alert).toEqual({ kind: 'unavailable', reason: 'TypeError' });
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally { scope.dispose(); warn.mockRestore(); info.mockRestore(); }
+});
+
+test('the composed monitor handle has no alert while monitoring is disabled', () => {
+  const scope = createDisposalScope('volume status disabled');
+  try {
+    const handle = composeJudgmentVolumeMonitor({ query: () => [] }, {}, scope.registry, { get: () => ({ enabled: false }) });
+    expect(handle.lastAlert()).toBeUndefined();
+  } finally { scope.dispose(); }
 });

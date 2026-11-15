@@ -1,4 +1,5 @@
 /** Actual contract -> AgentManager -> default orchestrator -> captured repair -> ToolLLM. */
+import { readBodyWithHostEvidence } from '../../platform/src/platform/tools/read/observation.js';
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -130,7 +131,7 @@ async function fixture(mode: Mode, outcome: Outcome) {
   let backups: string[] = [];
   let checkedBeforeDelivery = false;
   // Bounded, value-free observations of the actual original-owner read filter.
-  // Preserve the real permission answer; never log paths, source bytes or tokens.
+  // Preserve the real permission answer; never log paths, source bytes or tokens. Only surfaced in failure messages through state().
   const readChecks: { candidate: 'owner-source' | 'member-source' | 'other'; decision: 'allow' | 'restricted'; boundary: string; memberCalls: number }[] = [];
   const originalReadAccess = runtime.permissionManager.readAccess;
   runtime.permissionManager.readAccess = async (path) => {
@@ -231,6 +232,8 @@ async function fixture(mode: Mode, outcome: Outcome) {
     decompositionRunner: createAgentManagerDecompositionRunner({ agentManager: runtime.agentManager }),
     createEngine: (input) => createOrchestrationEngine({
       agentManager: runtime.agentManager, configManager: config, runtimeBus: bus,
+      // 'ctr-797d133b' is the namespace whose digest once produced a worktree path component that read as card-shaped material and was
+      // refused by the privacy floor (see orchestration-worktree-namespace.test.ts); the revoke scenario keeps that exact namespace.
       projectRoot: input.projectRoot, stateRoot: input.stateRoot, stateNamespace: outcome === 'revoke-pending' ? 'ctr-797d133b' : input.stateNamespace,
       initializeWorktree: input.initializeWorktree, prepareInputAuthority: input.prepareInputAuthority,
       contractUnitSettlement: input.contractUnitSettlement, fleetCapacity: input.fleetCapacity, judgeAttempts: input.judgeAttempts,
@@ -332,7 +335,7 @@ for (const mode of ['write', 'edit'] as const) {
       const expected = mode === 'write' ? repaired : editRepaired;
       const readResult = f.results.get('read-repaired-file');
       expect(readResult?.success, JSON.stringify(readResult)).toBe(true);
-      const readOutput = JSON.parse(readResult!.output!) as ReadOutput;
+      const readOutput = readBodyWithHostEvidence(readResult!) as unknown as ReadOutput;
       expect(readOutput.success).toBe(true);
       expect(readOutput.summary).toMatchObject({ files_read: 1, files_binary: 0, files_errored: 0 });
       expect(readOutput.files).toHaveLength(1);
@@ -420,11 +423,11 @@ for (const outcome of ['deny-pending', 'revoke-pending', 'cancel-pending'] as co
         expect(authority).toBeDefined(); revokeContractInputAuthority(authority!);
       } else {
         f.runner.cancel(id, 'cancel pending captured auto-heal');
-        expect((await observed(execution, 2_000)).state).toBe('settled');
+        expect((await observed(execution, 30_000)).state).toBe('settled');
         expect(f.repairRequests[0]?.signal?.aborted).toBe(true);
       }
       f.releaseRepair.resolve();
-      expect((await observed(f.repairReturned.promise, 2_000)).state).toBe('settled');
+      expect((await observed(f.repairReturned.promise, 30_000)).state).toBe('settled');
       const contract = await f.settle();
       expect(contract.status).not.toBe('passed'); expect(f.acceptance).toHaveLength(0);
       expect(f.state().memberCalls).toBe(1); expect(f.repairRequests).toHaveLength(1);

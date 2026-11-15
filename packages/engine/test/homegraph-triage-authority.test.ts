@@ -46,23 +46,40 @@ describe('automatic triage respects operator authority and frozen state', () => 
     const transmitted = JSON.stringify(fake.requests);
     for (const privateValue of ['device-local', 'issue-local-', 'DO_NOT_TRANSMIT', 'createdAt', 'updatedAt']) expect(transmitted).not.toContain(privateValue);
   });
-  test('no writes for uncertainty, backend failure, unsupported fact, protected input or cancellation', async () => {
-    for (const mode of ['uncertain', 'failure', 'unsupported', 'protected', 'cancelled'] as const) {
+  test('no writes for backend failure, protected input or cancellation', async () => {
+    for (const mode of ['failure', 'protected', 'cancelled'] as const) {
       const { store, node, run, snapshot } = await fixture(); const fake = readings(); const controller = new AbortController();
-      if (mode === 'uncertain') readings('reject', 0.8);
       if (mode === 'failure') installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
-      if (mode === 'unsupported') installJudgmentPort(fakePort((name, q) => name === 'action' ? choiceAnswer(q, 'reject', 0.99) : noulAnswer(0.01)).port);
       if (mode === 'protected') await store.upsertNode({ ...node, summary: 'Authorization: Bearer synthetic' });
       if (mode === 'cancelled') installJudgmentPort({ ...fake.port, async ask(request) { const answer = await fake.port.ask(request); controller.abort(); return answer; } });
       const before = snapshot(); const result = await run({}, controller.signal);
       expect(result.applied).toBe(0); expect(result.reason).toStartWith('triage-held-'); expect(snapshot()).toBe(before);
     }
   });
-  test('one later unsupported issue prevents every earlier fact, resolution and cache write', async () => {
-    const { run, snapshot } = await fixture(['homegraph.device.unknown_battery', 'homegraph.device.missing_manual']);
-    installJudgmentPort(fakePort((name, q) => name === 'action' ? choiceAnswer(q, 'reject', 0.99) : noulAnswer(name === 'manualNotRequired' ? 0.01 : 0.99)).port);
-    const before = snapshot(); expect((await run()).reason).toBe('triage-held-unsupported-fact'); expect(snapshot()).toBe(before);
+  test('an uncertain or unsupported reading holds that issue for review and writes no fact', async () => {
+    for (const mode of ['uncertain', 'unsupported'] as const) {
+      const { store, node, issues, run } = await fixture();
+      if (mode === 'uncertain') readings('reject', 0.8);
+      else installJudgmentPort(fakePort((name, q) => name === 'action' ? choiceAnswer(q, 'reject', 0.99) : noulAnswer(0.01)).port);
+      const nodeBefore = JSON.stringify(store.getNode(node.id));
+      const result = await run();
+      expect(result.applied).toBe(0);
+      expect(result.decisions[0]!.reason).toBe(mode === 'uncertain' ? 'held-unsettled' : 'held-unsupported-fact');
+      expect(JSON.stringify(store.getNode(node.id))).toBe(nodeBefore);
+      expect(store.getIssue(issues[0]!.id)!.status).toBe('open');
+    }
   });
+  test('one unsupported issue does not stop an earlier supported one from settling', async () => {
+    const { store, node, issues, run } = await fixture(['homegraph.device.unknown_battery', 'homegraph.device.missing_manual']);
+    installJudgmentPort(fakePort((name, q) => name === 'action' ? choiceAnswer(q, 'reject', 0.99) : noulAnswer(name === 'manualNotRequired' ? 0.01 : 0.99)).port);
+    const result = await run();
+    expect(result.applied).toBe(1); expect(result.reviewed).toBe(1);
+    expect(store.getIssue(issues[0]!.id)!.status).toBe('resolved');
+    expect(store.getIssue(issues[1]!.id)!.status).toBe('open');
+    expect(result.decisions.find(decision => decision.issueId === issues[1]!.id)!.reason).toBe('held-unsupported-fact');
+    expect(store.getNode(node.id)!.metadata.manualRequired).toBeUndefined();
+  });
+
   test('force cannot override operator-reviewed node or explicitly reopened issue', async () => {
     for (const target of ['node', 'issue'] as const) {
       const { store, node, issues, run, snapshot } = await fixture();
@@ -211,7 +228,7 @@ test('answered reuse, forced reads and held attempts perform no triage hashing',
     expect((await f.run({ force: true })).reviewed).toBe(1);
     expect(fake.requests).toHaveLength(2);
     readings('reject', 0.8);
-    expect((await f.run({ force: true })).processed).toBe(0);
+    expect((await f.run({ force: true })).processed).toBe(1);
     expect(hashing.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(0);
   } finally { hashing.mockRestore(); await f.store.close(); }
 });

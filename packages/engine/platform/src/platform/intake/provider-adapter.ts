@@ -104,6 +104,8 @@ export interface ProviderPollResult {
   configured?: boolean;
   /** Durable UID progress, atomically committed with only the redacted items. */
   checkpointAdvance?: ImapUidCheckpointAdvance;
+  /** UIDs this poll passed without publishing because their content cannot be proven complete. */
+  skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
 }
 
 export interface ProviderPollOptions {

@@ -13,6 +13,7 @@ import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/plat
 import { SecretsManager } from '../../config/secrets.ts';
 import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { installAgentDaemonConfigClient } from '../../config/daemon-config-routing.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
@@ -32,7 +33,7 @@ function createConfigManager(root: string): ConfigManager {
   });
 }
 
-describe('SettingsModal payments category', () => {
+describe('SettingsModal payments category (no connected host: local fallback)', () => {
   const originalCwd = process.cwd();
   const originalHome = process.env.HOME;
   let tmpDir: string;
@@ -296,4 +297,139 @@ describe('SettingsModal payments category', () => {
     });
   });
 
+});
+
+describe('SettingsModal payments category (connected host owns payments.*)', () => {
+  const originalCwd = process.cwd();
+  const originalHome = process.env.HOME;
+  let tmpDir: string;
+  let cm: ConfigManager;
+  let modal: SettingsModal;
+  let stored: Map<string, unknown>;
+  let sets: Array<{ key: string; value: unknown }>;
+  let failWith: Error | null;
+  let rendered: () => void;
+
+  /** Resolves when the host's answer (not the in-flight notice) has been shown. */
+  const hostAnswered = (): Promise<void> => new Promise((resolve) => { rendered = resolve; });
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    process.env.HOME = tmpDir;
+    process.chdir(tmpDir);
+    cm = createConfigManager(tmpDir);
+    stored = new Map();
+    sets = [];
+    failWith = null;
+    rendered = () => {};
+    installAgentDaemonConfigClient({
+      ownsKey: (key: string) => key.startsWith('payments.'),
+      set: async (key: string, value: unknown) => {
+        sets.push({ key, value });
+        if (failWith) throw failWith;
+        stored.set(key, value);
+      },
+      get: async (key: string) => stored.get(key),
+      snapshot: async () => null,
+    });
+    const subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'agent', 'subscriptions.json'));
+    const serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'agent', 'services.json'), {
+      secretsManager: new SecretsManager({ projectRoot: tmpDir, globalHome: tmpDir, configManager: cm }),
+      subscriptionManager,
+    });
+    mkdirSync(join(tmpDir, '.goodvibes', 'agent'), { recursive: true });
+    modal = new SettingsModal();
+    modal.open(cm, createFeatureFlagManager(), subscriptionManager, serviceRegistry,
+      { listServerSecurity: () => [], setServerTrustMode: () => {} } as unknown as McpRegistry,
+      undefined, { requestRender: () => {
+        if (modal.lastSettingEffectMessage?.startsWith('Saving on the connected host')) return;
+        rendered();
+      } });
+    while (modal.currentCategory !== 'payments') modal.nextCategory();
+  });
+
+  afterEach(() => {
+    installAgentDaemonConfigClient(null);
+    process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function select(key: string): void {
+    modal.selectedIndex = modal.currentItems.findIndex((entry) => entry.setting.key === key);
+  }
+
+  test('a toggle is written to the host, not the local file, and the row shows what the host holds', async () => {
+    select('payments.enabled');
+    const answered = hostAnswered();
+    modal.activateSelected();
+    expect(modal.lastSettingEffectMessage).toContain('Saving on the connected host');
+    await answered;
+    expect(sets).toEqual([{ key: 'payments.enabled', value: true }]);
+    expect(cm.get('payments.enabled')).toBe(false);
+    expect(modal.getSelected()?.currentValue).toBe(true);
+    expect(modal.lastSettingEffectMessage).toContain('Applied by the connected host');
+  });
+
+  test('a money amount is sent to the host as the number typed and shown back as the host stores it', async () => {
+    select('payments.budget.dailyItem');
+    modal.activateSelected();
+    modal.editBuffer = '19.99';
+    const answered = hostAnswered();
+    expect(modal.commitEdit()).toBe(true);
+    await answered;
+    expect(sets).toEqual([{ key: 'payments.budget.dailyItem', value: 19.99 }]);
+    expect(cm.get('payments.budget.dailyItem')).toBe(0);
+    expect(modal.getSelected()?.currentValue).toBe(19.99);
+  });
+
+  test('what the host holds wins over what was sent when it clamps the value', async () => {
+    stored.set('payments.windows.approvalMinutes', 15);
+    const original = (key: string, value: unknown) => { sets.push({ key, value }); };
+    installAgentDaemonConfigClient({
+      ownsKey: (key: string) => key.startsWith('payments.'),
+      set: async (key: string, value: unknown) => { original(key, value); },
+      get: async () => 15,
+      snapshot: async () => null,
+    });
+    select('payments.windows.approvalMinutes');
+    modal.activateSelected();
+    modal.editBuffer = '600';
+    const answered = hostAnswered();
+    expect(modal.commitEdit()).toBe(true);
+    await answered;
+    expect(sets).toEqual([{ key: 'payments.windows.approvalMinutes', value: 600 }]);
+    expect(modal.getSelected()?.currentValue).toBe(15);
+  });
+
+  test('a refusal from the host is reported, nothing is written locally and the row keeps its value', async () => {
+    failWith = new Error('host unreachable');
+    select('payments.enabled');
+    const answered = hostAnswered();
+    modal.activateSelected();
+    await answered;
+    expect(modal.lastSettingEffectMessage).toBe('Save failed: host unreachable');
+    expect(cm.get('payments.enabled')).toBe(false);
+    expect(modal.getSelected()?.currentValue).toBe(false);
+  });
+
+  test('a second change to a key still being saved is refused until the host answers', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    installAgentDaemonConfigClient({
+      ownsKey: (key: string) => key.startsWith('payments.'),
+      set: async (key: string, value: unknown) => { sets.push({ key, value }); await gate; },
+      get: async () => true,
+      snapshot: async () => null,
+    });
+    select('payments.enabled');
+    modal.activateSelected();
+    modal.activateSelected();
+    expect(modal.lastSettingEffectMessage).toContain('still being saved on the connected host');
+    expect(sets).toHaveLength(1);
+    const answered = hostAnswered();
+    release();
+    await answered;
+  });
 });

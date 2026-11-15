@@ -77,6 +77,17 @@ function readMode(value: unknown): AgentKnowledgeAskMode {
   return value === 'concise' || value === 'standard' || value === 'detailed' ? value : 'standard';
 }
 
+/** The search formatter prints at most this many rows; the model must be told when more came back. */
+const SEARCH_ROWS_PRINTED = 10;
+
+function labelSearchCut(text: string, data: unknown): string {
+  const record = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+  const rows = Array.isArray(record.items) && record.items.length > 0 ? record.items : Array.isArray(record.results) ? record.results : [];
+  return rows.length > SEARCH_ROWS_PRINTED
+    ? `${text}\nShowing the first ${SEARCH_ROWS_PRINTED} of ${rows.length} results returned; narrow the query to see others.`
+    : text;
+}
+
 function toolFailure(error: string): { readonly success: false; readonly error: string } {
   return { success: false, error };
 }
@@ -151,7 +162,7 @@ export function createAgentKnowledgeTool(
   return {
     definition: {
       name: 'agent_knowledge',
-      description: 'Read isolated Agent Knowledge.',
+      description: 'Read isolated Agent Knowledge: status, ask, search, sources, nodes, issues, item, map, connectors, connector, connector_doctor.',
       parameters: {
         type: 'object',
         properties: {
@@ -174,7 +185,7 @@ export function createAgentKnowledgeTool(
           },
           limit: {
             type: 'number',
-            description: 'Maximum result count.',
+            description: 'Maximum result count. ask: default 8, at most 25. search: default 10, at most 25. sources, nodes, issues: default 25, at most 500. map: default 50, at most 500.',
           },
           mode: {
             type: 'string',
@@ -212,7 +223,7 @@ export function createAgentKnowledgeTool(
           if (!isAction(args.action)) return toolFailure(`Unknown Agent Knowledge action. Valid values ${ACTIONS.join(', ')}.`);
           if (!connection.token) {
             return toolFailure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
-              error: `No connected-host operator token found at ${connection.tokenPath}`,
+              error: 'No connected-host operator token found.',
               baseUrl: connection.baseUrl, route: '/api/goodvibes-agent/knowledge/*' }));
           }
           let method: ConnectedHostCallMethod = AGENT_KNOWLEDGE_METHODS.status;
@@ -242,7 +253,7 @@ export function createAgentKnowledgeTool(
               const query = readString(args.query);
               if (!query) return toolFailure('query is required for Agent Knowledge search.');
               const data = await platformClient.knowledge.search({ query, limit: readLimit(args.limit, 10) });
-              return validatedToolOutput(data, connection, method, (validatedData) => formatSearch(validatedData, query));
+              return validatedToolOutput(data, connection, method, (validatedData) => labelSearchCut(formatSearch(validatedData, query), validatedData));
             }
             if (args.action === 'sources' || args.action === 'nodes' || args.action === 'issues') {
               const kind = args.action;
@@ -253,7 +264,7 @@ export function createAgentKnowledgeTool(
                   ? AGENT_KNOWLEDGE_METHODS.nodesList
                   : AGENT_KNOWLEDGE_METHODS.issuesList;
               const data = await getAgentKnowledgeJson(connection, method.route, { limit }, restrictions);
-              return validatedToolOutput(data, connection, method, (validatedData) => formatEntityList(validatedData, kind, limit));
+              return validatedToolOutput(data, connection, method, (validatedData) => formatEntityList(validatedData, kind, limit).replaceAll('--limit', 'limit'));
             }
             if (args.action === 'item') {
               method = AGENT_KNOWLEDGE_METHODS.itemGet;

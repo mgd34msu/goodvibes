@@ -1,5 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessNotificationArgs {
   readonly notificationTargetId?: unknown;
@@ -31,9 +32,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readConfiguredWebhookUrls(context: CommandContext): readonly string[] {
@@ -88,15 +87,13 @@ function lookupFromArgs(args: AgentHarnessNotificationArgs): { readonly source: 
   return query ? { source: 'query', input: query } : null;
 }
 
-function targetSearchText(target: NotificationTargetDescriptor): string {
-  return [
-    target.id,
-    String(target.index),
-    target.protocol ?? '',
-    target.host ?? '',
-    target.validUrl ? 'valid' : 'invalid',
-    target.hasQuery ? 'query' : 'no-query',
-  ].join('\n').toLowerCase();
+// These words describe a target and are matched whole: "valid" must not select an
+// "invalid" target, nor "query" a "no-query" one.
+const TARGET_STATE_WORDS = new Set(['valid', 'invalid', 'query', 'no-query']);
+
+function targetMatchesQuery(target: NotificationTargetDescriptor, query: string): boolean {
+  if (TARGET_STATE_WORDS.has(query)) return query === (target.validUrl ? 'valid' : 'invalid') || query === (target.hasQuery ? 'query' : 'no-query');
+  return [target.id, String(target.index), target.protocol ?? '', target.host ?? ''].join('\n').toLowerCase().includes(query);
 }
 
 function describeTargetCandidate(target: NotificationTargetDescriptor): Record<string, unknown> {
@@ -172,7 +169,7 @@ export function listHarnessNotificationTargets(context: CommandContext, args: Ag
   const includeParameters = args.includeParameters === true;
   const targets = notificationTargets(context);
   const filtered = targets
-    .filter((target) => !query || targetSearchText(target).includes(query))
+    .filter((target) => !query || targetMatchesQuery(target, query))
     .slice(0, readLimit(args.limit, 100));
   return {
     targets: filtered.map((target) => describeTarget(target, { includeParameters })),
@@ -199,7 +196,7 @@ export function describeHarnessNotificationTarget(
   const normalized = lookup.input.toLowerCase();
   const exact = targets.find((target) => target.id === lookup.input || String(target.index) === lookup.input);
   if (exact) return { status: 'found', target: describeTarget(exact, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'id-or-index' } }) };
-  const searched = targets.filter((target) => targetSearchText(target).includes(normalized));
+  const searched = targets.filter((target) => targetMatchesQuery(target, normalized));
   if (searched.length === 1) {
     return { status: 'found', target: describeTarget(searched[0]!, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }) };
   }

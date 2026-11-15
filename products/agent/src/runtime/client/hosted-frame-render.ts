@@ -271,7 +271,7 @@ export function createHostedFrameRenderer(
         conversation.addToolResults([{
           callId,
           success: succeeded,
-          ...(succeeded ? { output: described } : { error: error ?? described ?? 'the tool failed' }),
+          ...(succeeded ? { output: described } : { error: error ?? (described || 'the tool failed') }),
         } as ToolResult]);
         requestRender();
         return;
@@ -281,15 +281,17 @@ export function createHostedFrameRenderer(
         const inputTokens = readNumber(payload, 'inputTokens');
         const outputTokens = readNumber(payload, 'outputTokens');
         if (inputTokens !== undefined || outputTokens !== undefined) {
+          // A tool loop makes several model calls in one turn; the closing
+          // message reports what the whole turn used, so each call adds to it.
+          const cacheRead = readNumber(payload, 'cacheReadTokens');
+          const cacheWrite = readNumber(payload, 'cacheWriteTokens');
+          const cacheReadTotal = cacheRead === undefined ? usage?.cacheReadTokens : (usage?.cacheReadTokens ?? 0) + cacheRead;
+          const cacheWriteTotal = cacheWrite === undefined ? usage?.cacheWriteTokens : (usage?.cacheWriteTokens ?? 0) + cacheWrite;
           usage = {
-            inputTokens: inputTokens ?? 0,
-            outputTokens: outputTokens ?? 0,
-            ...(readNumber(payload, 'cacheReadTokens') !== undefined
-              ? { cacheReadTokens: readNumber(payload, 'cacheReadTokens') }
-              : {}),
-            ...(readNumber(payload, 'cacheWriteTokens') !== undefined
-              ? { cacheWriteTokens: readNumber(payload, 'cacheWriteTokens') }
-              : {}),
+            inputTokens: (usage?.inputTokens ?? 0) + (inputTokens ?? 0),
+            outputTokens: (usage?.outputTokens ?? 0) + (outputTokens ?? 0),
+            ...(cacheReadTotal !== undefined ? { cacheReadTokens: cacheReadTotal } : {}),
+            ...(cacheWriteTotal !== undefined ? { cacheWriteTokens: cacheWriteTotal } : {}),
           } as TokenUsage;
         }
         model = readString(payload, 'model') ?? model;

@@ -18,7 +18,7 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
         hidden: true,
         separator: ' ',
         tokenTitle: 'Token Review',
-        emptyTokens: 'No registered API tokens are currently available for security review.',
+        emptyTokens: 'Nothing registers tokens with the auditor in this build, so no credential is being audited.',
         policyUnavailable: 'Policy state is not available in this Agent session.',
         beforeRead(args, ctx) {
           const subcommand = args[0]?.toLowerCase() ?? 'review';

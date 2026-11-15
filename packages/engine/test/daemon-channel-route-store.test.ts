@@ -5,7 +5,7 @@ import {
   RouteStore,
 } from '../platform/src/platform/channels/host-routing/route-store.ts';
 import { GatewayVerbError as HandlerError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
-import { makeTmpWorkingDir } from './_helpers/daemon-routing-temp.ts';
+import { makeTmpWorkingDir } from './_helpers/routing-registration.js';
 
 describe('parseChannelId', () => {
   test('surface-only id has no routeId', () => {
@@ -145,6 +145,11 @@ describe('RouteStore', () => {
     } finally {
       await reopened.close();
     }
+  });
+
+  test('operations after close say the store is closed, not uninitialized', async () => {
+    await store.close();
+    expect(() => store.listAll()).toThrow('RouteStore has been closed');
   });
 
   test('operations before init throw an uninitialized error', () => {

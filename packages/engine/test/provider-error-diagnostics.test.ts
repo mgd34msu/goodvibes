@@ -97,7 +97,6 @@ describe('error normalization and display', () => {
   it('preserves structured local diagnostic text', () => {
     const raw = '{"error":{"message":"model not found","code":"model_not_found"}}';
     expect(summarizeError(raw)).toBe('model not found, model_not_found');
-    expect(raw).toContain('model_not_found');
   });
 
   it('normalizes network errors into a descriptive summary and category where the wording is read', async () => {
@@ -155,6 +154,15 @@ describe('error normalization and display', () => {
     expect(err.provider).toBe('ollama');
     expect(err.operation).toBe('chat');
     expect(err.phase).toBe('request');
+  });
+
+  it('keeps a transport errno on the rewrapped error so it stays recoverable', () => {
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+    const err = toProviderError(reset, { provider: 'openai' });
+    expect(err.cause).toBe(reset);
+    expect(err.recoverable).toBe(true);
+    expect(err.statusCode).toBeUndefined();
+    expect(toProviderError(err, { provider: 'openai' }).recoverable).toBe(true);
   });
 
   it('preserves upstream provider metadata when rewrapping provider errors', () => {

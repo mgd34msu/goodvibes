@@ -7,6 +7,7 @@ import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 const nativeApply = Reflect.apply, nativeIsPromise = nodeTypes.isPromise;
 
 import { previewHarnessText } from './agent-harness-text.ts';
+import { certificationRecords, firstAcross, publishedModelRoute, safeNullablePreview, safePreview, stringList } from './agent-harness-read-helpers.ts';
 
 export interface ResearchLiveRecordCertification {
   readonly schemaStatus: 'certified' | 'legacy';
@@ -128,50 +129,8 @@ function nestedString(record: Record<string, unknown>, key: string): string {
     || readString(readObject(record.evidence)[key]);
 }
 
-function certificationRecords(record: Record<string, unknown>): readonly Record<string, unknown>[] {
-  return [
-    record,
-    readMetadata(record),
-    readObject(record.schema),
-    readObject(record.contract),
-    readObject(record.publication),
-    readObject(record.receipt),
-    readObject(record.certification),
-  ];
-}
-
-function firstAcross(records: readonly Record<string, unknown>[], keys: readonly string[]): string {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = readString(record[key]);
-      if (value) return value;
-    }
-  }
-  return '';
-}
-
-function stringArray(value: unknown): readonly string[] {
-  if (Array.isArray(value)) return [...new Set(value.map((entry) => readString(entry)).filter(Boolean))].slice(0, 12);
-  const text = readString(value);
-  return text ? text.split(',').map((entry) => entry.trim()).filter(Boolean).slice(0, 12) : [];
-}
-
 function objectArray(value: unknown): readonly Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(readObject).filter((entry) => Object.keys(entry).length > 0) : [];
-}
-
-function redactText(value: string): string {
-  return value
-    .replace(/\b(bearer)\s+[a-z0-9._~+/=-]+/gi, '$1 <redacted>')
-    .replace(/\b(token|secret|password|api[_-]?key|authorization)\s*[:=]\s*[^,\s;/]+/gi, '$1=<redacted>');
-}
-
-function safePreview(value: string, limit: number): string {
-  return previewHarnessText(redactText(value), limit);
-}
-
-function safeNullablePreview(value: string, limit: number): string | null {
-  return value ? safePreview(value, limit) : null;
 }
 
 function safeUrl(value: string): string | null {
@@ -196,9 +155,9 @@ async function schemaStatus(records: readonly Record<string, unknown>[], options
   const matches = await rankResearchRecords([{ records, explicit }], 'Explicit schema certification',
     entry => ({ id: 'schema', description: 'Explicit schema certification claim', evidence: entry }), options,
     'agent.research.schema-status', 'engine.tools.research-schema-status');
-  // Preserve the original native metadata alternative; the prose reading
-  // neither authenticates these fields nor grants any effect authority.
-  return matches.length > 0 || presence ? 'certified' : 'legacy';
+  // An explicit claim decides: a record that states it is not certified stays legacy however many publication fields it carries.
+  // The reading neither authenticates these fields nor grants any effect authority.
+  return matches.length > 0 ? 'certified' : 'legacy';
 }
 
 function certification(input: {
@@ -223,7 +182,7 @@ function certification(input: {
   const receiptId = firstAcross(records, ['receiptId', 'runReceiptId', 'sourceReceiptId', 'renderReceiptId', 'reportRenderReceiptId']);
   const cursor = firstAcross(records, ['cursor', 'freshnessCursor', 'sequence', 'checkpoint']);
   const provenance = [...new Set([
-    ...stringArray(input.record.provenance),
+    ...stringList(input.record.provenance, 12),
     input.sourcePath ? `source ${input.sourcePath}` : '',
     firstAcross(records, ['methodId']) ? `method ${firstAcross(records, ['methodId'])}` : '',
     firstAcross(records, ['sourceTool']) ? `sourceTool ${firstAcross(records, ['sourceTool'])}` : '',
@@ -334,9 +293,9 @@ function sourceReceiptIds(record: Record<string, unknown>): readonly string[] {
     ...objectArray(readObject(record.evidence).sourceReceipts),
   ];
   return [...new Set([
-    ...stringArray(record.sourceReceiptIds),
-    ...stringArray(record.pageReceiptIds),
-    ...stringArray(readObject(record.evidence).sourceReceiptIds),
+    ...stringList(record.sourceReceiptIds, 12),
+    ...stringList(record.pageReceiptIds, 12),
+    ...stringList(readObject(record.evidence).sourceReceiptIds, 12),
     ...receiptObjects.map((entry) => readString(entry.receiptId) || readString(entry.id) || readString(entry.sourceReceiptId)),
   ].map((entry) => safePreview(entry, 96)).filter(Boolean))].slice(0, 12);
 }
@@ -346,35 +305,42 @@ function routeMap(record: Record<string, unknown>): Readonly<Record<string, stri
   const output: Record<string, string> = {};
   for (const key of ['inspect', 'checkpoint', 'pause', 'resume', 'cancel', 'report', 'saveReport', 'open', 'view']) {
     const value = readString(routes[key]) || nestedString(record, `${key}Route`);
-    if (value) output[key] = safePreview(value, 180);
+    const route = publishedModelRoute(value);
+    if (route) output[key] = route;
   }
   return output;
 }
 
-function modelRoute(record: Record<string, unknown>, fallback: string): string {
-  return nestedString(record, 'modelRoute')
-    || nestedString(record, 'inspectRoute')
-    || nestedString(record, 'reviewRoute')
-    || nestedString(record, 'openRoute')
-    || fallback;
+/** The first route the record published that is a well-formed call to an Agent tool; '' when it published none. */
+function publishedRoute(record: Record<string, unknown>): string {
+  for (const key of ['modelRoute', 'inspectRoute', 'reviewRoute', 'openRoute']) {
+    const route = publishedModelRoute(nestedString(record, key));
+    if (route) return route;
+  }
+  return '';
 }
 
 function normalizeRunner(entry: CollectedRecord, index: number, currentSchemaStatus: ResearchLiveRecordCertification['schemaStatus']): ResearchBrowserRunnerRecord | null {
   const runId = nestedString(entry.record, 'runId') || nestedString(entry.record, 'researchRunId');
   const question = nestedString(entry.record, 'question') || nestedString(entry.record, 'task') || nestedString(entry.record, 'title');
-  const status = nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown';
-  const id = nestedString(entry.record, 'id') || nestedString(entry.record, 'receiptId') || (runId ? `research-runner:${runId}` : `research-runner:${index}`);
+  // Whether the record itself published an id, status and route is read before any fallback is filled in.
+  const publishedStatus = nestedString(entry.record, 'status') || nestedString(entry.record, 'state');
+  const publishedId = nestedString(entry.record, 'id') || nestedString(entry.record, 'receiptId');
+  const status = safePreview(publishedStatus || 'unknown', 80);
+  const id = safePreview(publishedId || (runId ? `research-runner:${runId}` : `research-runner:${index}`), 160);
   const routes = routeMap(entry.record);
   const receipts = sourceReceiptIds(entry.record);
   const logs = [
-    ...stringArray(entry.record.logTail),
-    ...stringArray(entry.record.boundedLogs),
-    ...stringArray(entry.record.outputChunks),
+    ...stringList(entry.record.logTail, 12),
+    ...stringList(entry.record.boundedLogs, 12),
+    ...stringList(entry.record.outputChunks, 12),
   ].map((line) => safePreview(line, 180)).slice(0, 5);
-  const route = modelRoute(entry.record, runId ? `research action:"runner" runId:"${runId}" includeParameters:true` : 'research action:"runner" includeParameters:true');
+  // A runner publishes its inspect route either as a model route or inside its control routes.
+  const published = publishedRoute(entry.record) || routes.inspect || '';
+  const route = published || (runId ? `research action:"runner" runId:${JSON.stringify(runId)} includeParameters:true` : 'research action:"runner" includeParameters:true');
   return {
     id,
-    runId: runId || null,
+    runId: safeNullablePreview(runId, 96),
     status,
     phase: safeNullablePreview(nestedString(entry.record, 'phase'), 80),
     progress: readNumber(entry.record.progress ?? readObject(entry.record.run).progress),
@@ -392,9 +358,9 @@ function normalizeRunner(entry: CollectedRecord, index: number, currentSchemaSta
       record: entry.record,
       sourcePath: entry.path,
       kind: 'browser-backed research run',
-      durableId: id,
-      status,
-      modelRoute: route,
+      durableId: publishedId,
+      status: publishedStatus,
+      modelRoute: published,
       hasVisibleControls: ['checkpoint', 'pause', 'resume', 'cancel'].some((key) => Boolean(routes[key])),
       hasSourceReceipts: receipts.length > 0,
       hasBoundedLogs: logs.length > 0 || Boolean(nestedString(entry.record, 'boundedLogDescriptor') || nestedString(entry.record, 'redaction')),
@@ -404,8 +370,8 @@ function normalizeRunner(entry: CollectedRecord, index: number, currentSchemaSta
 
 function visualSections(record: Record<string, unknown>): readonly string[] {
   return [...new Set([
-    ...stringArray(record.sections),
-    ...stringArray(readObject(record.visualReport).sections),
+    ...stringList(record.sections, 12),
+    ...stringList(readObject(record.visualReport).sections, 12),
     ...objectArray(record.packetSections).map((entry) => readString(entry.id) || readString(entry.title)),
   ].map((entry) => safePreview(entry, 80)).filter(Boolean))].slice(0, 16);
 }
@@ -419,10 +385,14 @@ function sourceMapCount(record: Record<string, unknown>): number {
 
 function normalizeVisualReport(entry: CollectedRecord, index: number, currentSchemaStatus: ResearchLiveRecordCertification['schemaStatus']): ResearchVisualReportRecord | null {
   const reportArtifactId = nestedString(entry.record, 'reportArtifactId') || nestedString(entry.record, 'artifactId');
-  const status = nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown';
-  const id = nestedString(entry.record, 'id') || nestedString(entry.record, 'renderReceiptId') || (reportArtifactId ? `visual-report:${reportArtifactId}` : `visual-report:${index}`);
-  const route = modelRoute(entry.record, reportArtifactId ? `research action:"report_artifact" artifactId:"${reportArtifactId}"` : 'research action:"reports" includeParameters:true');
-  const renderRoute = nestedString(entry.record, 'renderRoute') || nestedString(entry.record, 'openRoute') || route;
+  const publishedStatus = nestedString(entry.record, 'status') || nestedString(entry.record, 'state');
+  const publishedId = nestedString(entry.record, 'id') || nestedString(entry.record, 'renderReceiptId');
+  const status = safePreview(publishedStatus || 'unknown', 80);
+  const id = safePreview(publishedId || (reportArtifactId ? `visual-report:${reportArtifactId}` : `visual-report:${index}`), 160);
+  const published = publishedRoute(entry.record);
+  const route = published || (reportArtifactId ? `research action:"report_artifact" artifactId:${JSON.stringify(reportArtifactId)}` : 'research action:"reports" includeParameters:true');
+  const publishedRender = publishedModelRoute(nestedString(entry.record, 'renderRoute') || nestedString(entry.record, 'openRoute'));
+  const renderRoute = publishedRender || route;
   const sections = visualSections(entry.record);
   const mapCount = sourceMapCount(entry.record);
   return {
@@ -441,10 +411,10 @@ function normalizeVisualReport(entry: CollectedRecord, index: number, currentSch
       record: entry.record,
       sourcePath: entry.path,
       kind: 'visual report render',
-      durableId: id,
-      status,
-      modelRoute: route,
-      hasRenderRoute: Boolean(renderRoute),
+      durableId: publishedId,
+      status: publishedStatus,
+      modelRoute: published,
+      hasRenderRoute: Boolean(publishedRender || published),
       hasSourceMap: mapCount > 0 || Boolean(nestedString(entry.record, 'citationCoverage') || nestedString(entry.record, 'coverage')),
       hasReportEvidence: Boolean(reportArtifactId || nestedString(entry.record, 'renderArtifactId')),
       hasVisualSections: sections.length > 0,

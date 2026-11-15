@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeRefinementTaskState } from './types.js';
+import { knowledgeRefinementTaskLifecycle, type KnowledgeIssueRecord, type KnowledgeIssueUpsertInput, type KnowledgeRefinementTaskState } from './types.js';
 
 export function isTerminalRefinementState(state: KnowledgeRefinementTaskState): boolean {
-  return state === 'cancelled' || state === 'closed' || state === 'suppressed';
+  return knowledgeRefinementTaskLifecycle.isTerminal(state);
 }
 
 /** Only an explicit review caller may reopen the same issue lifecycle. */

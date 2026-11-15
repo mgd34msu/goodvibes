@@ -258,8 +258,44 @@ export function parseInterval(interval: string): number | null {
   }
 }
 
+/** The longest delay a timer honours; a larger one is clamped to 1ms by the runtime, which would make the slowest schedule the fastest. */
+const MAX_SCHEDULE_INTERVAL_MS = 2 ** 31 - 1;
+
+/** The shortest interval the tool accepts; a scheduled command is a background job, not a loop. */
+export const MIN_SCHEDULE_INTERVAL_MS = 1_000;
+
+/**
+ * Splits a command line into argv. There is no shell: single and double quotes
+ * group words, nothing else (no expansion, no escapes). An unclosed quote throws
+ * so a mis-quoted command is refused instead of running with the wrong arguments.
+ */
+export function splitCommand(command: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let started = false;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null; else current += char;
+    } else if (char === '"' || char === "'") {
+      quote = char; started = true;
+    } else if (/\s/.test(char)) {
+      if (started || current.length > 0) { parts.push(current); current = ''; started = false; }
+    } else {
+      current += char; started = true;
+    }
+  }
+  if (quote) throw new Error(`Command has an unclosed ${quote} quote: ${command}`);
+  if (started || current.length > 0) parts.push(current);
+  return parts;
+}
+
 export class ScheduleManager {
   private schedules = new Map<string, ScheduleEntry>();
+  /** Names whose previous run has not exited; a tick during one is skipped so runs never pile up. */
+  private running = new Set<string>();
+  /** Bumped by destroy() so a start that was awaiting its credential scrub does not spawn afterwards. */
+  private epoch = 0;
   /** Timer IDs keyed by schedule name */
   private timers = new Map<string, ReturnType<typeof setInterval>>();
   /** Spawned process handles tracked for cleanup in destroy() */
@@ -277,25 +313,34 @@ export class ScheduleManager {
   }
 
   add(name: string, interval: string, command: string): ScheduleEntry {
+    // Refuse what could never run, before anything is stored: an entry with no timer
+    // would be reported as scheduled while nothing ever executes.
+    const intervalMs = parseInterval(interval);
+    if (intervalMs === null) {
+      throw new Error(`Unrecognised interval "${interval}": use a number followed by s, m, h or d, for example 30s, 5m or 1h.`);
+    }
+    if (!(intervalMs > 0)) throw new Error(`Interval "${interval}" must be greater than zero.`);
+    if (intervalMs > MAX_SCHEDULE_INTERVAL_MS) {
+      throw new Error(`Interval "${interval}" is longer than the 24 day maximum a timer can hold; use a shorter one.`);
+    }
+    if (splitCommand(command).length === 0) throw new Error('Schedule command is empty.');
+
     // Clear existing timer if re-adding
     this._clearTimer(name);
 
     const now = Date.now();
-    const intervalMs = parseInterval(interval);
     const entry: ScheduleEntry = {
       name,
       interval,
       command,
       enabled: true,
-      nextRun: intervalMs !== null ? now + intervalMs : undefined,
+      nextRun: now + intervalMs,
     };
     this.schedules.set(name, entry);
 
-    if (intervalMs !== null) {
-      const timer = setInterval(() => this._tick(name), intervalMs);
-      timer.unref?.();
-      this.timers.set(name, timer);
-    }
+    const timer = setInterval(() => this._tick(name), intervalMs);
+    timer.unref?.();
+    this.timers.set(name, timer);
 
     return entry;
   }
@@ -340,6 +385,8 @@ export class ScheduleManager {
       this._clearTimer(name);
     }
     this.schedules.clear();
+    this.running.clear();
+    this.epoch += 1;
     // Kill any still-running spawned processes
     for (const { proc } of this.spawnedProcs) {
       try {
@@ -356,15 +403,23 @@ export class ScheduleManager {
     const entry = this.schedules.get(name);
     if (!entry || !entry.enabled) return;
 
-    const now = Date.now();
-    entry.lastRun = now;
-    const intervalMs = parseInterval(entry.interval);
-    entry.nextRun = intervalMs !== null ? now + intervalMs : undefined;
+    // The previous run is still going: starting another would pile processes up.
+    if (this.running.has(name)) {
+      logger.debug('[workflow] scheduled command still running; tick skipped', { workflow: name });
+      return;
+    }
 
-    // Parse command string
-    const parts = entry.command.split(/\s+/).filter(Boolean);
+    const intervalMs = parseInterval(entry.interval);
+    entry.nextRun = intervalMs !== null ? Date.now() + intervalMs : undefined;
+
+    let parts: string[];
+    try { parts = splitCommand(entry.command); } catch (error) {
+      logger.warn('[workflow] scheduled command could not be parsed', { workflow: name, error: summarizeError(error) });
+      return;
+    }
     if (parts.length === 0) return;
 
+    this.running.add(name);
     void this._spawnScheduled(name, entry.command, parts);
   }
 
@@ -376,27 +431,36 @@ export class ScheduleManager {
    * command does not run.
    */
   private async _spawnScheduled(name: string, command: string, parts: string[]): Promise<void> {
+    const epoch = this.epoch;
     try {
       const base = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
       const { env } = await scrubCredentialEnv(base, this.credentialEnvScrub);
+      // destroy() ran while the scrub was being read: nothing may start that destroy cannot stop.
+      if (epoch !== this.epoch) return;
       const proc = Bun.spawn(parts, {
         env: { ...env, GV_SCHEDULE_NAME: name },
         stdout: 'ignore',
         stderr: 'ignore',
       });
       const pid = proc.pid;
+      // Recorded only once the command actually started, so `list` never shows a run that did not happen.
+      const entry = this.schedules.get(name);
+      if (entry) entry.lastRun = Date.now();
       this.spawnedProcs.push({ pid, proc });
       proc.exited.then(() => {
         // Remove from tracking once the process has exited
         const idx = this.spawnedProcs.findIndex(p => p.pid === pid);
         if (idx !== -1) this.spawnedProcs.splice(idx, 1);
+        if (epoch === this.epoch) this.running.delete(name);
       }).catch((error: unknown) => {
+        if (epoch === this.epoch) this.running.delete(name);
         logger.warn('[workflow] scheduled command exit tracking failed', {
           workflow: name,
           error: summarizeError(error),
         });
       });
     } catch (error) {
+      if (epoch === this.epoch) this.running.delete(name);
       logger.warn('[workflow] scheduled command failed to start', {
         workflow: name,
         command,
@@ -657,6 +721,10 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               }
               if (!input.scheduleCommand) {
                 return { success: false, error: 'schedule/add requires "scheduleCommand"' };
+              }
+              const intervalMs = parseInterval(input.scheduleInterval);
+              if (intervalMs !== null && intervalMs < MIN_SCHEDULE_INTERVAL_MS) {
+                return { success: false, error: `schedule/add interval "${input.scheduleInterval}" is shorter than the ${MIN_SCHEDULE_INTERVAL_MS / 1000}s minimum; use 1s or longer.` };
               }
               const entry = sm.add(input.scheduleName, input.scheduleInterval, input.scheduleCommand);
               return { success: true, output: JSON.stringify(entry) };

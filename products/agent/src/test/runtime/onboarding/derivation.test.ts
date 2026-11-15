@@ -184,48 +184,35 @@ describe('onboarding derivation helpers', () => {
       },
     };
 
-    expect(deriveStep1Capabilities(snapshot)).toEqual([
+    // Wording is copy; which capabilities are offered, and which are pre-selected, is the behaviour.
+    expect(deriveStep1Capabilities(snapshot).map(({ id, selected }) => ({ id, selected }))).toEqual([
       {
         id: 'operator-terminal',
-        label: 'Agent Operator TUI',
         selected: true,
-        detail: 'Use GoodVibes Agent as the terminal operator while connecting to an existing GoodVibes host. Agent setup does not create new entrypoints.',
       },
       {
         id: 'provider-access',
-        label: 'Provider and Model Access',
         selected: true,
-        detail: 'Review 1 provider auth or routing signal(s) already available to Agent.',
       },
       {
         id: 'agent-knowledge',
-        label: 'Isolated Agent Knowledge',
         selected: true,
-        detail: 'Agent Knowledge uses the isolated /api/goodvibes-agent/knowledge segment only; it never falls back to another knowledge segment.',
       },
       {
         id: 'local-behavior',
-        label: 'Local Memory and Skills',
         selected: false,
-        detail: 'Configure local memory, routines, skills, personas, permissions, and secret handling before the Agent starts doing useful work.',
       },
       {
         id: 'communication-channels',
-        label: 'Channels and Notifications',
         selected: true,
-        detail: 'Review 1 configured channel or integration signal(s) before the Agent uses them for delivery.',
       },
       {
         id: 'automation-review',
-        label: 'Routines and Automation Review',
         selected: true,
-        detail: 'Review existing event, schedule, or automation signals and keep all side effects behind explicit commands or confirmations.',
       },
       {
         id: 'tui-delegation',
-        label: 'Explicit Build Delegation',
         selected: true,
-        detail: 'Delegate explicit build, fix, implementation, and review work to GoodVibes TUI; delegated review is requested only when the user explicitly asks for it.',
       },
     ]);
 
@@ -398,48 +385,35 @@ describe('onboarding derivation helpers', () => {
       },
     };
 
-    expect(deriveStep1Capabilities(snapshot)).toEqual([
+    // Wording is copy; which capabilities are offered, and which are pre-selected, is the behaviour.
+    expect(deriveStep1Capabilities(snapshot).map(({ id, selected }) => ({ id, selected }))).toEqual([
       {
         id: 'operator-terminal',
-        label: 'Agent Operator TUI',
         selected: true,
-        detail: 'Use GoodVibes Agent as the terminal operator while connecting to an existing GoodVibes host. Agent setup does not create new entrypoints.',
       },
       {
         id: 'provider-access',
-        label: 'Provider and Model Access',
         selected: true,
-        detail: 'Review 1 provider auth or routing signal(s) already available to Agent.',
       },
       {
         id: 'agent-knowledge',
-        label: 'Isolated Agent Knowledge',
         selected: true,
-        detail: 'Agent Knowledge uses the isolated /api/goodvibes-agent/knowledge segment only; it never falls back to another knowledge segment.',
       },
       {
         id: 'local-behavior',
-        label: 'Local Memory and Skills',
         selected: false,
-        detail: 'Configure local memory, routines, skills, personas, permissions, and secret handling before the Agent starts doing useful work.',
       },
       {
         id: 'communication-channels',
-        label: 'Channels and Notifications',
         selected: false,
-        detail: 'Connect only the channels the Agent should use, and keep outbound delivery explicit until a user action allows it.',
       },
       {
         id: 'automation-review',
-        label: 'Routines and Automation Review',
         selected: false,
-        detail: 'Review schedules, routine promotion, approvals, and automation visibility without starting hidden background work.',
       },
       {
         id: 'tui-delegation',
-        label: 'Explicit Build Delegation',
         selected: true,
-        detail: 'Delegate explicit build, fix, implementation, and review work to GoodVibes TUI; delegated review is requested only when the user explicitly asks for it.',
       },
     ]);
   });

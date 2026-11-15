@@ -33,10 +33,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { classifyInputSchema } from '../platform/src/platform/control-plane/invoke-input-validation.js';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import {
   EXPECTED_ROUTE_REGISTRARS,
   buildProbeCatalog,
   probeAllHandlerVerbs,
+  probeVerb,
   type VerbConformance,
 } from './_helpers/gateway-verb-required-probe.js';
 
@@ -95,6 +98,19 @@ const ALLOWED_UNATTRIBUTED_REFUSALS: Readonly<Record<string, string>> = {
     + 'which is the one that removes a prose line.',
 };
 
+/**
+ * Verbs whose handler lets a plain `Error` escape under the probe. A plain
+ * `Error` is how a handler words a refusal, and the probe cannot tell whether
+ * it is about the caller's input or about the state of the world, so the set
+ * is closed: each entry says why the throw is not an input refusal.
+ */
+const ALLOWED_PLAIN_THROWS: Readonly<Record<string, string>> = {
+  'occasions.plans.list':
+    'Refuses because the probe invocation carries no authority check for the profile read (native-profile-mutation.ts), not because of the input.',
+  'profile.person':
+    'Refuses because the stub profile service is not the person source the handler was bound to (owner-profile-policy.ts), not because of the input.',
+};
+
 let cachedResults: readonly VerbConformance[] | null = null;
 async function results(): Promise<readonly VerbConformance[]> {
   cachedResults ??= await probeAllHandlerVerbs(await buildProbeCatalog());
@@ -130,6 +146,41 @@ describe('gateway verb required-field conformance', () => {
       .map((entry) => entry.id));
     const stale = Object.keys(ALLOWED_UNATTRIBUTED_REFUSALS).filter((id) => !unattributed.has(id));
     expect(stale).toEqual([]);
+  });
+
+  test('a plain Error escaping a handler is its own verdict and the set is closed', async () => {
+    const catalog = new GatewayMethodCatalog();
+    const descriptor = {
+      id: 'probe.plain.refusal', title: 'plain refusal', description: 'throws a plain Error for a missing field',
+      category: 'probe', source: 'builtin', access: 'authenticated', transport: ['http'], scopes: [],
+      inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
+    } as const;
+    catalog.register(descriptor, async () => { throw new Error('other is required'); });
+    const verdict = await probeVerb(catalog, descriptor);
+    expect(verdict.verdict).toBe('unclassified-throw');
+    expect(verdict.message).toBe('other is required');
+
+    const thrown = (await results()).filter((entry) => entry.verdict === 'unclassified-throw');
+    const undocumented = thrown
+      .filter((entry) => !Object.hasOwn(ALLOWED_PLAIN_THROWS, entry.id))
+      .map((entry) => `${entry.id}: a plain Error ("${String(entry.message)}") escaped the handler. Throw GatewayVerbError with the field for a refused input, or add an entry to ALLOWED_PLAIN_THROWS saying why it is not one.`);
+    expect(undocumented).toEqual([]);
+    const stale = Object.keys(ALLOWED_PLAIN_THROWS).filter((id) => !thrown.some((entry) => entry.id === id));
+    expect(stale).toEqual([]);
+  });
+
+  test('a field-naming refusal is attributed whatever its code, and a field-less state refusal is not', async () => {
+    const descriptor = (id: string) => ({
+      id, title: id, description: id, category: 'probe', source: 'builtin', access: 'authenticated', transport: ['http'], scopes: [],
+      inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
+    }) as const;
+    const catalog = new GatewayMethodCatalog();
+    const named = descriptor('probe.coded.field');
+    const stateOnly = descriptor('probe.coded.state');
+    catalog.register(named, async () => { throw new GatewayVerbError('bad range', 'CALENDAR_BAD_RANGE', 400, 'range'); });
+    catalog.register(stateOnly, async () => { throw new GatewayVerbError('gone', 'NOT_FOUND', 404); });
+    expect((await probeVerb(catalog, named)).verdict).toBe('undeclared-requirement');
+    expect((await probeVerb(catalog, stateOnly)).verdict).toBe('declared-satisfied');
   });
 
   test('every probed verb lands in exactly one verdict, and the surface is accounted for', async () => {
@@ -170,8 +221,6 @@ describe('gateway verb required-field conformance', () => {
       'pairing.tokens.revokeShared',
       'push.subscriptions.list',
       'push.vapid.get',
-      'tailscale.get',
-      'tailscale.serve.run',
     ]);
     // Every one of them takes no input today; the probe is what proves it.
     const byId = new Map((await results()).map((entry) => [entry.id, entry]));

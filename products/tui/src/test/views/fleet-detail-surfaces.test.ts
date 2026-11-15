@@ -12,6 +12,9 @@ import type { FleetGateway, FleetGraphSnapshot } from '../../views/fleet-gateway
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 import { lineToString } from '../setup.ts';
 
+/** Lets every already-queued promise continuation run, however many awaits the code under test makes. */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 const text = (lines: ReturnType<typeof renderGraphPostureLines>): string => lines.map(lineToString).join('\n');
 
 const graph: WorkstreamGraphSnapshot = {
@@ -60,7 +63,7 @@ describe('fleet-acts graph fetch/cache (7c wiring)', () => {
     const acts = makeActs(async () => { calls += 1; return graph as unknown as FleetGraphSnapshot; });
     acts.ensureGraphFor(wsNode);
     acts.ensureGraphFor(wsNode); // second call must not refetch (in-flight/cache guard)
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     expect(calls).toBe(1);
     expect(acts.graphFor(wsNode.id)).toBeTruthy();
   });

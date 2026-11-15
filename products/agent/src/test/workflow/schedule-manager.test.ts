@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, jest } from 'bun:test';
 import { ScheduleManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getTestScheduleManager, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
@@ -37,10 +37,10 @@ describe('ScheduleManager', () => {
     expect(entry.nextRun!).toBeLessThanOrEqual(after + 60_000);
   });
 
-  test('add with unparseable interval sets nextRun undefined', async () => {
+  test('add with an unparseable interval is refused and stores nothing', async () => {
     const sm = (await getTestScheduleManager());
-    const entry = sm.add('task2', 'badinterval', 'echo x');
-    expect(entry.nextRun).toBeUndefined();
+    expect(() => sm.add('task2', 'badinterval', 'echo x')).toThrow('Unrecognised interval');
+    expect(sm.list()).toEqual([]);
   });
 
   test('list returns added entries', async () => {
@@ -59,6 +59,23 @@ describe('ScheduleManager', () => {
     const removed = sm.remove('temp');
     expect(removed).toBe(true);
     expect(sm.list()).toHaveLength(0);
+  });
+
+  test('remove stops the entry\'s timer and leaves the others running', async () => {
+    jest.useFakeTimers();
+    const sm = (await getTestScheduleManager());
+    try {
+      sm.add('temp', '30s', 'echo temp');
+      sm.add('keep', '30s', 'echo keep');
+      expect(jest.getTimerCount()).toBe(2);
+      expect(sm.remove('temp')).toBe(true);
+      expect(jest.getTimerCount()).toBe(1);
+      expect(sm.remove('keep')).toBe(true);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      sm.destroy();
+      jest.useRealTimers();
+    }
   });
 
   test('remove returns false for unknown name', async () => {

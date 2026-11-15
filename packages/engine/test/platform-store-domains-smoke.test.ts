@@ -1,8 +1,7 @@
 /**
- * Coverage-gap smoke test, platform/runtime/store/domains
- * Verifies that each store domain's createInitial*State() factory function
- * returns an object with the expected base shape and key-field values.
- * Closes coverage gap: platform/runtime/store/domains per-domain
+ * Store domain factories: every initial state starts at revision 0 from the
+ * 'init' source, and no two calls share a mutable collection (a shared Map or
+ * array would leak one store's data into the next).
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -21,91 +20,52 @@ import { createInitialPermissionsState } from '../platform/src/platform/runtime/
 import { createInitialSessionState } from '../platform/src/platform/runtime/store/domains/session.js';
 import { createInitialTasksState } from '../platform/src/platform/runtime/store/domains/tasks.js';
 
-/** All domain states must have a numeric revision field. */
-function assertBaseShape(state: unknown, domainName: string) {
-  const s = state as Record<string, unknown>;
-  expect(typeof s.revision, `${domainName}: revision should be a number`).toBe('number');
+const factories: ReadonlyArray<readonly [string, () => object]> = [
+  ['acp', createInitialAcpState],
+  ['agents', createInitialAgentsState],
+  ['automation', createInitialAutomationState],
+  ['contracts', createInitialContractsState],
+  ['conversation', createInitialConversationState],
+  ['daemon', createInitialDaemonState],
+  ['discovery', createInitialDiscoveryState],
+  ['git', createInitialGitState],
+  ['intelligence', createInitialIntelligenceState],
+  ['mcp', createInitialMcpState],
+  ['model', createInitialModelState],
+  ['permissions', createInitialPermissionsState],
+  ['session', createInitialSessionState],
+  ['tasks', createInitialTasksState],
+];
+
+/** Every Map, Set and array reachable from the state, one level of plain objects deep. */
+function collections(value: object): object[] {
+  const found: object[] = [];
+  for (const entry of Object.values(value)) {
+    if (entry instanceof Map || entry instanceof Set || Array.isArray(entry)) found.push(entry);
+    else if (entry !== null && typeof entry === 'object') found.push(...collections(entry));
+  }
+  return found;
 }
 
-describe('platform/runtime/store/domains: behavior smoke', () => {
-  test('createInitialAcpState returns correct shape', () => {
-    const state = createInitialAcpState();
-    assertBaseShape(state, 'acp');
-    expect(state.initialized).toBe(false);
-    expect(state.connections).toBeInstanceOf(Map);
-  });
+describe('platform/runtime/store/domains: initial state', () => {
+  for (const [name, create] of factories) {
+    test(`${name} starts at revision 0 from the init source and shares no collection between calls`, () => {
+      const first = create() as Record<string, unknown>;
+      expect(first['revision']).toBe(0);
+      expect(first['lastUpdatedAt']).toBe(0);
+      expect(first['source']).toBe('init');
 
-  test('createInitialAgentsState returns correct shape', () => {
-    const state = createInitialAgentsState();
-    assertBaseShape(state, 'agents');
-    expect(state.agents).toBeInstanceOf(Map);
-    expect(state.activeAgentIds).toBeInstanceOf(Array);
-    expect(state.activeAgentIds.length).toBe(0);
-    expect(state.peakConcurrency).toBe(0);
-  });
+      const firstCollections = collections(first);
+      const secondCollections = new Set(collections(create()));
+      for (const collection of firstCollections) expect(secondCollections.has(collection)).toBe(false);
+    });
+  }
 
-  test('createInitialAutomationState returns correct shape', () => {
-    const state = createInitialAutomationState();
-    assertBaseShape(state, 'automation');
-  });
-
-  test('createInitialConversationState returns correct shape', () => {
-    const state = createInitialConversationState();
-    assertBaseShape(state, 'conversation');
-    expect(state.turnState).toBe('idle');
-  });
-
-  test('createInitialDaemonState returns correct shape', () => {
-    const state = createInitialDaemonState();
-    assertBaseShape(state, 'daemon');
-  });
-
-  test('createInitialDiscoveryState returns correct shape', () => {
-    const state = createInitialDiscoveryState();
-    assertBaseShape(state, 'discovery');
-  });
-
-  test('createInitialGitState returns correct shape', () => {
-    const state = createInitialGitState();
-    assertBaseShape(state, 'git');
-  });
-
-  test('createInitialIntelligenceState returns correct shape', () => {
-    const state = createInitialIntelligenceState();
-    assertBaseShape(state, 'intelligence');
-  });
-
-  test('createInitialMcpState returns correct shape', () => {
-    const state = createInitialMcpState();
-    assertBaseShape(state, 'mcp');
-  });
-
-  test('createInitialModelState returns correct shape', () => {
-    const state = createInitialModelState();
-    assertBaseShape(state, 'model');
-  });
-
-  test('createInitialContractsState returns correct shape', () => {
-    const state = createInitialContractsState();
-    assertBaseShape(state, 'contracts');
-    expect(state.contracts).toBeInstanceOf(Map);
-    expect(state.activeContractIds).toEqual([]);
-    expect(state.totalContracts).toBe(0);
-    expect(state.spawnGuardTrips).toBe(0);
-  });
-
-  test('createInitialPermissionsState returns correct shape', () => {
-    const state = createInitialPermissionsState();
-    assertBaseShape(state, 'permissions');
-  });
-
-  test('createInitialSessionState returns correct shape', () => {
-    const state = createInitialSessionState();
-    assertBaseShape(state, 'session');
-  });
-
-  test('createInitialTasksState returns correct shape', () => {
-    const state = createInitialTasksState();
-    assertBaseShape(state, 'tasks');
+  test('conversation begins idle with no turn, and tasks and agents begin empty', () => {
+    expect(createInitialConversationState()).toMatchObject({ turnState: 'idle', totalTurns: 0, currentTurnId: undefined });
+    expect(createInitialAgentsState()).toMatchObject({ activeAgentIds: [], totalSpawned: 0, peakConcurrency: 0 });
+    expect(createInitialAgentsState().agents.size).toBe(0);
+    expect(createInitialTasksState()).toMatchObject({ queuedIds: [], runningIds: [], blockedIds: [], totalCreated: 0 });
+    expect(createInitialContractsState()).toMatchObject({ activeContractIds: [], totalContracts: 0, spawnGuardTrips: 0 });
   });
 });

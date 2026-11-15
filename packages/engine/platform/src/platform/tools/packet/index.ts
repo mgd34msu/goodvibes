@@ -1,8 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Tool } from '../../types/tools.js';
 import { resolveScopedDirectory } from '../../runtime/surface-root.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
+import { writeFileAtomic } from '../../utils/atomic-json-store.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { PACKET_TOOL_SCHEMA, type PacketToolInput } from './schema.js';
 
 interface PacketRecord {
@@ -50,23 +52,35 @@ export function createPacketTool(
   const packetsDir = resolveScopedDirectory(workspaceRoot, surfaceRoot);
   const packetsPath = join(packetsDir, 'packets.json');
 
+  // Only a missing file is an empty store. An unreadable or malformed file must
+  // fail the call: treating it as empty would let the next write replace every record.
   function loadPackets(): PacketRecord[] {
+    let raw: string;
     try {
-      return JSON.parse(readFileSync(packetsPath, 'utf-8')) as PacketRecord[];
-    } catch {
-      return [];
+      raw = readFileSync(packetsPath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Cannot read ${packetsPath}: ${summarizeError(err)}. Nothing was changed.`);
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`${packetsPath} is not valid JSON (${summarizeError(err)}). Nothing was changed; repair or move the file aside.`);
+    }
+    if (!Array.isArray(parsed)) throw new Error(`${packetsPath} does not hold a list of packets. Nothing was changed; repair or move the file aside.`);
+    return parsed as PacketRecord[];
   }
 
   function savePackets(records: readonly PacketRecord[]): void {
     mkdirSync(packetsDir, { recursive: true });
-    writeFileSync(packetsPath, `${JSON.stringify(records, null, 2)}\n`, 'utf-8');
+    writeFileAtomic(packetsPath, `${JSON.stringify(records, null, 2)}\n`);
   }
 
   return {
     definition: {
       name: 'packet',
-      description: 'Manage durable implementation packets and published execution packets.',
+      description: 'Keep your own notes as implementation packets (draft, revise, publish). Packets are stored in a file for later reference; nothing consumes them or sends them to anyone.',
       parameters: PACKET_TOOL_SCHEMA.parameters,
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',
@@ -77,12 +91,24 @@ export function createPacketTool(
         return { success: false, error: 'Invalid args: mode is required.' };
       }
       const input = args as unknown as PacketToolInput;
-      const records = loadPackets();
+      let records: PacketRecord[];
+      try {
+        records = loadPackets();
+      } catch (err) {
+        return { success: false, error: summarizeError(err) };
+      }
       const view = input.view ?? 'summary';
 
       if (input.mode === 'create') {
         if (!input.packetId || !input.title || !input.summary) {
           return { success: false, error: 'create requires packetId, title, and summary.' };
+        }
+        const existing = records.find((entry) => entry.id === input.packetId);
+        if (existing) {
+          return {
+            success: false,
+            error: `Packet ${existing.id} already exists (status ${existing.status}); create would replace it. Use revise to change its content, show to read it, or choose a new packetId.`,
+          };
         }
         const now = Date.now();
         const record: PacketRecord = {
@@ -97,7 +123,7 @@ export function createPacketTool(
           createdAt: now,
           updatedAt: now,
         };
-        savePackets([...records.filter((entry) => entry.id !== record.id), record]);
+        savePackets([...records, record]);
         return { success: true, output: JSON.stringify(record) };
       }
 

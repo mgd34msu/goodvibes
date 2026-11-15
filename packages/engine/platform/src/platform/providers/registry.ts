@@ -69,6 +69,13 @@ export class ProviderRegistry {
   /** The servers the last registerDiscoveredProviders call was given, verbatim. */
   private discoveredServers: readonly DiscoveredServer[] = [];
   private runtimeProviderNames: Set<string> = new Set();
+  private liveModelDiscoveryTail: Promise<void> = Promise.resolve();
+  /**
+   * Providers the custom-provider loader put in `providers`, by name, with the
+   * provider each one replaced (a built-in of the same name), if any. A reload
+   * that no longer lists a name removes it and puts the replaced one back.
+   */
+  private customProviderNames: Map<string, LLMProvider | undefined> = new Map();
   private customModels: ModelDefinition[] = [];
   private runtimeModels: ModelDefinition[] = [];
   private discoveredModels: ModelDefinition[] = [];
@@ -273,20 +280,28 @@ export class ProviderRegistry {
     providerId?: string,
     options: { force?: boolean } = {},
   ): Promise<Array<{ providerId: string } & LiveModelDiscoveryResult>> {
-    const { providerNativeModels, reports } = await sweepLiveModelDiscovery(
-      this.providers.values(),
-      this.providerNativeModels,
-      providerId,
-      options,
-    );
-    this.providerNativeModels = providerNativeModels;
-    if (reports.length > 0) { this._invalidateModelRegistry(); }
+    // Sweeps run one after another so two overlapping calls cannot finish out of
+    // order and leave the older answer in place.
+    const run = async () => {
+      const { providerNativeModels, reports } = await sweepLiveModelDiscovery(
+        this.providers.values(),
+        () => this.providerNativeModels,
+        providerId,
+        { ...options, isRegistered: (name) => this.providers.has(name) },
+      );
+      this.providerNativeModels = providerNativeModels;
+      if (reports.length > 0) { this._invalidateModelRegistry(); }
+      return reports;
+    };
+    const result = this.liveModelDiscoveryTail.then(run, run);
+    this.liveModelDiscoveryTail = result.then(() => undefined, () => undefined);
+    const reports = await result;
     return reports;
   }
 
   /** Register a runtime/plugin-owned provider + optional models; returns an unregister callback. */
   registerRuntimeProvider(registration: RuntimeProviderRegistration): () => void {
-    const { provider, models = [], suppressCatalogModelRegistryKeys = [], replace = false } = registration;
+    const { provider, models = [], suppressCatalogModelRegistryKeys = [], replace = false, appendModels = false } = registration;
     if (this.providers.has(provider.name) && !this.runtimeProviderNames.has(provider.name) && !replace) {
       throw new Error(`Provider '${provider.name}' is already registered.`);
     }
@@ -297,23 +312,31 @@ export class ProviderRegistry {
     recordProviderAdapterKind(provider);
     this.providerNativeModels = applyProviderNativeModelBaseline(this.providerNativeModels, provider);
     this.runtimeProviderNames.add(provider.name);
+    const incoming = models.map((model) => withRegistryKey({
+      ...model,
+      provider: provider.name,
+      registryKey: model.registryKey || `${provider.name}:${model.id}`,
+    }));
+    const incomingKeys = new Set(incoming.map((model) => model.registryKey));
     this.runtimeModels = [
-      ...this.runtimeModels.filter((model) => model.provider !== provider.name),
-      ...models.map((model) => withRegistryKey({
-        ...model,
-        provider: provider.name,
-        registryKey: model.registryKey || `${provider.name}:${model.id}`,
-      })),
+      ...this.runtimeModels.filter((model) => appendModels
+        ? !incomingKeys.has(model.registryKey)
+        : model.provider !== provider.name),
+      ...incoming,
     ];
-    this.runtimeCatalogSuppressedRegistryKeys.set(provider.name, [...new Set(suppressCatalogModelRegistryKeys)]);
+    const keptSuppressions = appendModels ? this.runtimeCatalogSuppressedRegistryKeys.get(provider.name) ?? [] : [];
+    this.runtimeCatalogSuppressedRegistryKeys.set(provider.name, [...new Set([...keptSuppressions, ...suppressCatalogModelRegistryKeys])]);
     this.capabilityRegistry.invalidate();
     this._invalidateModelRegistry();
     return () => {
-      if (!this.runtimeProviderNames.has(provider.name)) return;
+      // Only the registration that is still live may remove it: a later
+      // registration under the same name (a replace) belongs to its own owner.
+      if (this.providers.get(provider.name) !== provider || !this.runtimeProviderNames.has(provider.name)) return;
       this.providers.delete(provider.name);
       this.runtimeProviderNames.delete(provider.name);
       this.runtimeModels = this.runtimeModels.filter((model) => model.provider !== provider.name);
       this.providerNativeModels = removeProviderNativeModels(this.providerNativeModels, provider.name);
+      recordProviderAdapterKind({ name: provider.name });
       this.runtimeCatalogSuppressedRegistryKeys.delete(provider.name);
       this.capabilityRegistry.invalidate();
       this._invalidateModelRegistry();
@@ -679,11 +702,13 @@ export class ProviderRegistry {
    * persisted to the control-plane config dir, so it survives restarts and
    * reaches every consumer of the same home. Keys for models not yet
    * registered are allowed, discovered models pick the override up when
-   * they materialize.
+   * they materialize. A valid cap applies to this session even when it cannot be
+   * written; `onNotSaved` is told why in that case, or why an invalid cap was rejected.
    */
-  setModelContextCap(registryKey: string, cap: number): void {
-    if (!this.contextWindowOverrideStore().set(registryKey, cap)) {
+  setModelContextCap(registryKey: string, cap: number, onNotSaved?: (reason: string) => void): void {
+    if (!this.contextWindowOverrideStore().set(registryKey, cap, onNotSaved)) {
       logger.warn('[registry] setModelContextCap: rejecting invalid cap', { registryKey, cap });
+      onNotSaved?.('not a whole number of tokens within the supported range');
       return;
     }
     this._invalidateModelRegistry();
@@ -762,8 +787,12 @@ export class ProviderRegistry {
    * Call this after construction to populate custom providers.
    */
   async loadCustomProviders(): Promise<{ warnings: string[]; added: string[]; removed: string[]; updated: string[] }> {
+    // A file may not replace a built-in or runtime provider; names a previous
+    // custom load registered stay reloadable.
+    const reservedNames = new Set([...this.providers.keys()].filter((name) => !this.customProviderNames.has(name)));
     const result = await loadCustomProviders({
       providersDir: this.getCustomProvidersDir(),
+      reservedNames,
       ingestContextWindows: this.featureFlags?.isEnabled('local-provider-context-ingestion') ?? false,
       contextIngestion: this.localContextIngestionService,
     });
@@ -771,11 +800,39 @@ export class ProviderRegistry {
     const warnings = [...result.warnings, ...diff.collisionWarnings];
 
     // A single misconfigured provider is skipped with a warning, not an abort of the rest.
+    const loadedNames = new Set<string>();
     for (const { provider } of result.providers) {
       try {
+        const shadowed = this.customProviderNames.has(provider.name)
+          ? this.customProviderNames.get(provider.name)
+          : this.providers.get(provider.name);
         this.register(provider);
+        this.customProviderNames.set(provider.name, shadowed);
+        loadedNames.add(provider.name);
       } catch (err) {
         warnings.push(`[registry] Custom provider '${provider.name}' rejected at registration: ${summarizeError(err)}`);
+      }
+    }
+    // A provider whose file was deleted or renamed is no longer offered; a
+    // built-in it had replaced comes back.
+    for (const [name, shadowed] of [...this.customProviderNames]) {
+      if (loadedNames.has(name)) continue;
+      this.customProviderNames.delete(name);
+      if (this.runtimeProviderNames.has(name)) continue;
+      // Drop what the custom provider left behind (its native models and recorded adapter kind) so the
+      // restored built-in, or the absence of one, is not described by the removed provider.
+      this.providerNativeModels = removeProviderNativeModels(this.providerNativeModels, name);
+      recordProviderAdapterKind({ name });
+      if (shadowed) {
+        try {
+          this.register(shadowed);
+        } catch (err) {
+          warnings.push(`[registry] Built-in provider '${name}' was restored without re-checking it: ${summarizeError(err)}`);
+          this.providers.set(name, shadowed);
+          recordProviderAdapterKind(shadowed);
+        }
+      } else {
+        this.providers.delete(name);
       }
     }
 
@@ -940,8 +997,14 @@ export class ProviderRegistry {
         this._readyPromise = null;
       })
       .catch((err) => {
-        // Do not console.warn here; it corrupts TUI display.
+        // Not console.warn: it corrupts the TUI. The logger and the provider
+        // warning event reach the operator without it.
         this._readyPromise = null;
+        const message = `[registry] Custom providers could not be loaded: ${summarizeError(err)}. Their keys will report as not in the registry until a reload succeeds.`;
+        logger.warn(message);
+        if (this.runtimeBus) {
+          emitProviderWarning(this.runtimeBus, { sessionId: 'system', traceId: `providers:warning:${Date.now()}`, source: 'provider-registry' }, { message });
+        }
       });
   }
 

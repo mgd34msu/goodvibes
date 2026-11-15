@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { consumeGateEscalationApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 import type { SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
 import type { PermissionExecutionOptions, PermissionPromptRequest, PermissionPromptDecision } from '@goodvibes-jev/engine/platform/platform/permissions';
 import {
   createSandboxExecAsk,
+  sandboxAwareApprovalRaiser,
   extractExecCommands,
   readSandboxAskAnnotation,
   type SandboxExecAskDeps,
@@ -252,6 +254,48 @@ describe('createSandboxExecAsk', () => {
     const gate = createSandboxExecAsk(deps({ detectAvailability: () => { probes++; return AVAILABLE; } }), ask);
     await gate(execRequest('echo a'));
     await gate(execRequest('echo b'));
+    expect(probes).toBe(1);
+  });
+});
+
+describe('the owner\'s answer on the card reaches the exec', () => {
+  it('an approved card is remembered for its command, so the exec does not ask again; a refused card is not', async () => {
+    const approvedCommand = 'curl https://example.com';
+    const refusedCommand = 'curl https://x.test';
+    await createSandboxExecAsk(deps({ readEgressAllowlist: () => ['curl'] }), async () => ({ approved: true }))(execRequest(approvedCommand));
+    await createSandboxExecAsk(deps({ readEgressAllowlist: () => ['curl'] }), async () => ({ approved: false }))(execRequest(refusedCommand));
+    expect(consumeGateEscalationApproval(refusedCommand)).toBe(false);
+    expect(consumeGateEscalationApproval(approvedCommand)).toBe(true);
+    expect(consumeGateEscalationApproval(approvedCommand)).toBe(false);
+  });
+});
+
+describe('sandboxAwareApprovalRaiser', () => {
+  it('approves a contained command a worker asks about without raising it', async () => {
+    const raised: unknown[] = [];
+    const raise = sandboxAwareApprovalRaiser(deps(), async (input) => { raised.push(input); return { approved: false }; });
+    const decision = await raise({ request: execRequest('ls -la') });
+    expect(decision.approved).toBe(true);
+    expect(raised).toHaveLength(0);
+  });
+
+  it('raises a command that needs the network with its routing and signal intact', async () => {
+    const raised: Array<{ routeId?: string; signal?: AbortSignal; request: PermissionPromptRequest }> = [];
+    const raise = sandboxAwareApprovalRaiser(deps(), async (input) => { raised.push(input); return { approved: true }; });
+    const signal = new AbortController().signal;
+    const decision = await raise({ request: execRequest('curl https://example.com'), routeId: 'route-1', signal });
+    expect(decision.approved).toBe(true);
+    expect(raised).toHaveLength(1);
+    expect(raised[0]?.routeId).toBe('route-1');
+    expect(raised[0]?.signal).toBe(signal);
+    expect(readSandboxAskAnnotation(raised[0]?.request)?.sandboxed).toBe(true);
+  });
+
+  it('probes the host once across asks', async () => {
+    let probes = 0;
+    const raise = sandboxAwareApprovalRaiser(deps({ detectAvailability: () => { probes += 1; return AVAILABLE; } }), async () => ({ approved: false }));
+    await raise({ request: execRequest('ls') });
+    await raise({ request: execRequest('pwd') });
     expect(probes).toBe(1);
   });
 });

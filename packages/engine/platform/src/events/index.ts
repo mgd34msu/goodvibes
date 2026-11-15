@@ -3,9 +3,9 @@
  *
  * Validation helpers:
  * - `isRuntimeEventDomain(value)`, typeguard for the 28 domain names.
- * - `isKnownEventType(value)`, typeguard for the full discriminant union of event types.
- * - `registeredEventTypes()`, enumerates all known event-type strings.
- * - `validateKnownEvent(envelope)`, runtime-validates an envelope's payload against the contract registry.
+ * - `isKnownEventType(value)`, typeguard for the event types that have a registered validator (a subset of the full event union).
+ * - `registeredEventTypes()`, enumerates the event-type strings that have a registered validator.
+ * - `validateKnownEvent(event)`, validates an event payload (the object with its `type`, not the envelope around it) against its registered contract.
  */
 export type { SessionEvent, SessionEventType } from './session.js';
 export type { TurnEvent, TurnEventType, TurnInputOrigin, TurnStopReason, PartialToolCall } from './turn.js';
@@ -46,6 +46,7 @@ export type {
   GroupKind,
   NudgeDelivery,
   NudgeKind,
+  OwnerReplyAction,
   OwnerReplyReading,
   PlanCheck,
   QualityItem,
@@ -79,6 +80,7 @@ export {
   GROUP_KINDS,
   NUDGE_DELIVERIES,
   NUDGE_KINDS,
+  OWNER_REPLY_ACTIONS,
   OWNER_REPLY_READINGS,
   PLAN_CHECKS,
   QUALITY_ITEMS,

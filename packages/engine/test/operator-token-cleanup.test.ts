@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '../platform/src/platform/runtime/operator-token-cleanup.ts';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 describe('workspaceOperatorTokenCandidates', () => {
@@ -92,5 +93,28 @@ describe('resolveDaemonCompanionToken', () => {
     expect(record.token).toBe('gv_pasted_in_wizard');
     const onDisk = JSON.parse(readFileSync(join(daemonHomeDir, 'operator-tokens.json'), 'utf-8')) as { token: string };
     expect(onDisk.token).toBe('gv_pasted_in_wizard');
+  });
+
+  test('the override rewrite keeps mode 0600 and leaves no staging file behind', () => {
+    mkdirSync(daemonHomeDir, { recursive: true });
+    writeFileSync(join(daemonHomeDir, 'operator-tokens.json'), JSON.stringify({ token: 'gv_stale', peerId: 'p', createdAt: 1 }));
+    process.env.GOODVIBES_DAEMON_TOKEN = 'gv_from_env';
+    resolveDaemonCompanionToken(daemonHomeDir, 'test-surface');
+    expect(statSync(join(daemonHomeDir, 'operator-tokens.json')).mode & 0o777).toBe(0o600);
+    expect(readdirSync(daemonHomeDir)).toEqual(['operator-tokens.json']);
+  });
+
+  test('a failed override write is logged, and the override still applies to this process', () => {
+    // A directory at the token path cannot be replaced by a file.
+    mkdirSync(join(daemonHomeDir, 'operator-tokens.json'), { recursive: true });
+    process.env.GOODVIBES_DAEMON_TOKEN = 'gv_from_env';
+    const warn = spyOn(logger, 'warn').mockImplementation(() => {});
+    try {
+      const record = resolveDaemonCompanionToken(daemonHomeDir, 'test-surface');
+      expect(record.token).toBe('gv_from_env');
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

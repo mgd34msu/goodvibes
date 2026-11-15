@@ -11,14 +11,14 @@ import { formatDeviceLine, resolveTokenByIdPrefix } from '@goodvibes-jev/engine/
  *   /devices rename <id> <name>   rename a device token (id or unambiguous prefix)
  *   /devices revoke <id>          revoke a device token immediately
  *   /devices migrate-shared [name] mint a per-device token off the legacy shared token
- *   /devices revoke-shared        revoke the legacy shared token (it stops authenticating)
+ *   /devices revoke-shared --yes  revoke the legacy shared token (it stops authenticating)
  */
 export function registerDevicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'devices',
     aliases: ['device'],
     description: 'Manage paired-device tokens (list, rename, revoke, migrate-shared)',
-    usage: '[list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared]',
+    usage: '[list|rename <id> <name>|revoke <id>|migrate-shared [name]|revoke-shared --yes]',
     argsHint: '[list|rename|revoke|migrate-shared|revoke-shared]',
     handler(args, ctx) {
       const pairingTokens = ctx.platform.pairingTokens;
@@ -45,7 +45,10 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
           ctx.print(resolved.reason === 'ambiguous' ? `Ambiguous device id "${idOrPrefix}": use more characters.` : `No device matches "${idOrPrefix}".`);
           return;
         }
-        pairingTokens.rename(resolved.token.id, name);
+        if (!pairingTokens.rename(resolved.token.id, name)) {
+          ctx.print(`No device matches "${idOrPrefix}" any more (it was revoked elsewhere); nothing was renamed.`);
+          return;
+        }
         ctx.print(`Renamed device to "${name}".`);
         return;
       }
@@ -79,6 +82,13 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       if (sub === 'revoke-shared') {
         if (pairingTokens.isLegacyRevoked()) {
           ctx.print('The legacy shared token is already revoked.');
+          return;
+        }
+        if (!args.slice(1).includes('--yes')) {
+          const stillShared = pairingTokens.list().length === 0
+            ? 'No per-device token exists yet, so every device still using the shared token would be locked out.'
+            : 'Devices still on the shared token will be locked out until they re-pair.';
+          ctx.print(`This revokes the legacy shared token and cannot be undone. ${stillShared}\nRun /devices revoke-shared --yes to confirm.`);
           return;
         }
         pairingTokens.revokeLegacyShared();

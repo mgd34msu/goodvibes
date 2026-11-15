@@ -181,12 +181,20 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
     }
     // Boost recent (non-pinned) models to the front
     if (recentIds.length > 0) {
-        const recentSet = new Set(recentIds);
-        const recent = recentIds
-            .filter(id => result.some(m => m.id === id && !pinnedIds.has(id)))
-            .map(id => result.find(m => m.id === id)!)
-            .filter(Boolean);
-        const rest = result.filter(m => !recentSet.has(m.id) || pinnedIds.has(m.id));
+        // Models can share an id across providers, so the ones moved to the
+        // front are tracked by identity and the others keep their place.
+        const recent: ModelDefinition[] = [];
+        const moved = new Set<ModelDefinition>();
+        for (const id of recentIds) {
+            if (pinnedIds.has(id))
+                continue;
+            const model = result.find(m => m.id === id);
+            if (model && !moved.has(model)) {
+                recent.push(model);
+                moved.add(model);
+            }
+        }
+        const rest = result.filter(m => !moved.has(m));
         result = [...recent, ...rest];
     }
     // Pinned models lead (before recent), so the picker's Pinned group sits at

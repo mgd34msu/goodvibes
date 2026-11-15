@@ -17,11 +17,11 @@ import type { LLMProvider } from '../platform/src/platform/providers/interface.j
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
-import { AGENT_OWNER_TERMINAL_GUARD } from '../platform/src/platform/gate/policy/index.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { emitAgentCompleted } from '../platform/src/platform/runtime/emitters/agents.js';
 import { registry } from '../platform/src/platform/core/judgment-registry.js';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -42,6 +42,12 @@ function semanticPort(answer: Parameters<typeof fakePort>[0], completion?: (name
     return answer(name, question, state);
   });
 }function deferred() { let resolve!: () => void; const promise = new Promise<void>((r) => { resolve = r; }); return { promise, resolve }; }
+/** Lets queued work run, one event-loop turn at a time, until the condition holds; the bound counts turns, not time. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 2_000 && !condition(); turn++) await eventLoopTurns(1);
+  expect(condition()).toBe(true);
+}
+
 function setup(rounds = 0, output: (n: number) => string = () => 'same result') {
   const root = mkdtempSync(join(tmpdir(), 'orchestrator-observation-')); roots.push(root);
   const controller = new AbortController(), requests: unknown[] = [], events: string[] = [];
@@ -207,7 +213,7 @@ describe('canonical spawn framework', () => {
     await entered.promise;
     installJudgmentPort(undefined);
     release.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await until(() => fixtures.every((f) => f.record.status === 'failed'));
     for (const f of fixtures) {
       expect(f.executions).toBe(1);
       expect(f.record.status).toBe('failed');
@@ -281,15 +287,19 @@ describe('canonical repeated-call observation and actual runner', () => {
       expect(JSON.stringify(f.requests)).not.toContain('You are repeating');
     }
   });
-  test('private result tails are withheld and completion stays held until cancelled', async () => {
-    const f = setup(5, () => 'x'.repeat(200_000) + ' password=private-value');
+  test('a private value inside the retained part of a result is withheld and completion stays held until cancelled', async () => {
+    const f = setup(5, () => 'x'.repeat(2_000) + ' password=private-value ' + 'x'.repeat(200_000));
     const fake = semanticPort(
       () => noulAnswer(0.01),
       (name, state) => (name === 'unsupported' && JSON.stringify(state).includes('unavailableObservation') ? 0.99 : 0.01),
     );
     installJudgmentPort(fake.port);
-    const pending = runAgentTask(f.context, f.record);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    let settled = false;
+    const pending = runAgentTask(f.context, f.record).finally(() => { settled = true; });
+    // Every tool ran, so the run is at the point where completion would be decided.
+    await until(() => f.executions === 5);
+    await eventLoopTurns();
+    expect(settled).toBe(false);
     expect(f.completed).toHaveLength(0);
     f.record.status = 'cancelled';
     f.controller.abort();
@@ -300,6 +310,16 @@ describe('canonical repeated-call observation and actual runner', () => {
     expect(f.executions).toBe(5);
     expect(f.record.status).toBe('cancelled');
     expect(f.completed).toHaveLength(0);
+  });
+  test('a private value beyond the output cut never reaches a judge and does not hold completion', async () => {
+    const f = setup(5, () => 'x'.repeat(200_000) + ' password=private-value');
+    const fake = semanticPort(() => noulAnswer(0.01));
+    installJudgmentPort(fake.port);
+    await runAgentTask(f.context, f.record);
+    expect(JSON.stringify(fake.requests)).not.toContain('private-value');
+    expect(JSON.stringify(fake.requests)).toContain('Output cut: kept the first');
+    expect(f.record.status).toBe('completed');
+    expect(f.completed).toHaveLength(1);
   });
   test('run cancellation interrupts a non-cooperating judgment without stale messages', async () => {
     const f = setup(5),
@@ -668,7 +688,8 @@ describe('review regressions: complete observation through tool effects', () => 
       },
     };
     const pending = runAgentTask(f.context, f.record);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await until(() => f.executions === 4);
+    await eventLoopTurns();
     expect(f.executions).toBe(4);
     expect(f.completed).toHaveLength(0);
     f.record.status = 'cancelled';
@@ -827,7 +848,8 @@ describe('cancelled batch mechanical transcript closure', () => {
       };
       const pending = runAgentTask(f.context, f.record);
       if (kind === 'port') {
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await until(() => f.executions === 1);
+        await eventLoopTurns();
         expect(f.completed).toHaveLength(0);
         installJudgmentPort(semanticPort(() => noulAnswer(0.01)).port);
       }
@@ -1112,7 +1134,6 @@ describe('real invocation guard retains restriction without minting admission', 
         defaultWorkingDirectory: f.root,
         overflowHandler: new OverflowHandler({ baseDir: f.root }),
         credentialEnvScrub: { enabled: false },
-        ownerTerminal: AGENT_OWNER_TERMINAL_GUARD,
       }),
     );
     try {

@@ -21,10 +21,10 @@ const resolveHost: HostResolver = async (host) => {
 
 const sent: Array<{ url: string; host: string | null }> = [];
 const originalFetch = globalThis.fetch;
-function stubNetwork(): void {
+function stubNetwork(body = 'ok'): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     sent.push({ url: String(input), host: new Headers(init?.headers).get('host') });
-    return new Response('ok');
+    return new Response(body);
   }) as typeof fetch;
 }
 afterEach(() => {
@@ -43,7 +43,7 @@ const directDeps = {
   resolveHost,
 } as never;
 
-const approvalDeps = {
+const approvalDepsParts = {
   serviceRegistry: { resolveSecret: async () => null },
   configManager: { get: () => undefined },
   controlPlaneWebUrl: () => undefined,
@@ -51,7 +51,8 @@ const approvalDeps = {
   resolveSlackBotToken: async () => null,
   signWebhookPayload: () => 'sig',
   resolveHost,
-} as never;
+};
+const approvalDeps = approvalDepsParts as never;
 
 const pending = (responseUrl: string) => ({ agentId: 'a1', surfaceKind: 'slack', task: 't', createdAt: 0, responseUrl }) as never;
 const approval = { id: 'ap1', status: 'pending', sessionId: 's1', request: { tool: 'exec', analysis: { summary: 'run it' } } } as never;
@@ -76,10 +77,17 @@ describe('daemon response_url posts', () => {
       expect(sent).toEqual([]);
     });
 
-    test(`approval update to ${label} is not sent`, async () => {
+    test(`approval update to ${label} is refused before sending and the refusal is surfaced`, async () => {
       stubNetwork();
-      await deliverSlackApprovalUpdate(approvalDeps, approval, binding(url));
+      await expect(deliverSlackApprovalUpdate(approvalDeps, approval, binding(url))).rejects.toThrow(reason);
       expect(sent).toEqual([]);
+    });
+
+    test(`approval update to ${label} falls back to the bound channel instead of being dropped`, async () => {
+      stubNetwork('{"ok":true}');
+      const withChannel = { id: 'b1', channelId: 'C123', metadata: { responseUrl: url } } as never;
+      await deliverSlackApprovalUpdate({ ...approvalDepsParts, resolveSlackBotToken: async () => 'xoxb-test' } as never, approval, withChannel);
+      expect(sent.map((request) => new URL(request.url).host)).toEqual(['slack.com']);
     });
   }
 

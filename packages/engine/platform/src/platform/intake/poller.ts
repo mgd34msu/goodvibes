@@ -19,6 +19,8 @@ import type { InboxCursorStore } from './cursor-store.js';
 import type { IntakeLogger as HandlerLogger } from './context.js';
 import { summarizeError } from '../utils/error-display.js';
 
+const PAUSED_TEXT = 'Email inbox polling is paused; pending message count is unknown';
+
 export interface ProviderStatus {
   id: string;
   state: ProviderState;
@@ -27,6 +29,8 @@ export interface ProviderStatus {
   error?: string;
   lastPolledAt?: number;
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
+  /** Messages the last poll passed because their content cannot be proven complete. */
+  skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
   /**
    * Whether the provider's credentials resolved on the last poll, as the
    * adapter reported it. Absent until a poll has happened (or when the
@@ -116,6 +120,15 @@ export class InboundPoller {
     const adapter = this.adapters.get(id);
     if (!adapter) return;
     this.paused.delete(id);
+    if (adapter.checkpointKind === 'imap-uid') {
+      const previous = this.statuses.get(id);
+      if (previous?.error === PAUSED_TEXT) {
+        // Resumed: the count is still unknown until the next poll, but the
+        // mailbox is no longer paused, and `skipInitialPoll` can leave this
+        // showing for a whole interval.
+        this.statuses.set(id, { ...previous, error: 'Email inbox polling resumed; pending message count is unknown until the next poll' });
+      }
+    }
     const generation = this.generations.get(id) ?? 0;
     const handle = this.setIntervalImpl(() => {
       // A queued callback belongs to the interval that created it, even when
@@ -142,7 +155,7 @@ export class InboundPoller {
       const previous = this.statuses.get(id);
       if (previous) {
         const { mailboxProgress: _progress, ...status } = previous;
-        this.statuses.set(id, { ...status, state: 'unavailable', error: 'Email inbox polling is paused; pending message count is unknown' });
+        this.statuses.set(id, { ...status, state: 'unavailable', error: PAUSED_TEXT });
       }
     }
     const handle = this.timers.get(id);
@@ -262,6 +275,7 @@ export class InboundPoller {
         id,
         state: result.items.length > 0 ? 'ready' : 'empty',
         ...progress,
+        ...(result.skippedMessages && result.skippedMessages.length > 0 ? { skippedMessages: result.skippedMessages } : {}),
         itemCount: newCount,
         lastPolledAt: Date.now(),
         ...(result.configured === undefined ? {} : { configured: result.configured }),

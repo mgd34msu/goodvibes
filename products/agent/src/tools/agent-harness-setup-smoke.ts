@@ -7,14 +7,16 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, setupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
+import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
+import { listEveryArtifact, readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import type { SetupConnectedHostAuthPosture, SetupInstallSmokeCheck, SetupInstallSmokePlan, SetupInstallSmokeRunSummary, SetupPlanItem, SetupServiceProbe, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
+import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
 
 export function installSmokeCheckStatus(ready: boolean): 'ready' | 'blocked' {
   return ready ? 'ready' : 'blocked';
@@ -83,7 +85,7 @@ export function installSmokePlan(
       'A provider/model route is selected for normal assistant turns.',
       'The first assistant turn responds in the main conversation.',
     ],
-    policy: 'Install smoke is read-only, token-safe guidance. Agent does not run package, host, or shell smoke commands implicitly; use explicit user-run commands or confirmed routes only.',
+    policy: 'Install smoke only reads posture and, once confirmed, saves a redacted evidence artifact; it is token-safe guidance. Agent does not run package, host, or shell smoke commands implicitly; use explicit user-run commands or confirmed routes only.',
   };
 }
 
@@ -247,7 +249,20 @@ export function projectSetupSmokeEvidenceFull(input: string): { readonly display
 }
 
 export function redactSetupSmokeEvidence(input: string): string {
-  return redactSetupSmokeEvidenceFull(input).slice(0, MAX_SETUP_SMOKE_FIELD_CHARS);
+  const full = redactSetupSmokeEvidenceFull(input);
+  if (full.length <= MAX_SETUP_SMOKE_FIELD_CHARS) return full;
+  // The saved text says it is cut, so a partial field is not read as the whole output.
+  // The count must include the characters the marker itself displaces, and its width depends on the count.
+  const markerFor = (kept: number) => `\n[truncated: ${full.length - kept} more characters were not saved]`;
+  let marker = markerFor(MAX_SETUP_SMOKE_FIELD_CHARS);
+  for (let pass = 0; pass < 3; pass++) marker = markerFor(MAX_SETUP_SMOKE_FIELD_CHARS - marker.length);
+  return full.slice(0, MAX_SETUP_SMOKE_FIELD_CHARS - marker.length) + marker;
+}
+
+/** Keys of a `fields` map that the smoke evidence does not keep. */
+export function ignoredSetupSmokeEvidenceFields(fields: unknown): readonly string[] {
+  const known = new Set<string>(SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS.map((definition) => definition.id));
+  return Object.keys(readFieldMap(fields)).filter((key) => !known.has(key));
 }
 
 export function setupSmokeEvidenceFields(fields: unknown): readonly SetupSmokeEvidenceField[] {
@@ -274,13 +289,12 @@ export function setupSmokeEvidenceMarkdown(input: {
   readonly evidenceFields: readonly SetupSmokeEvidenceField[];
 }): string {
   const checkLines = input.smokePlan.checks.map((check) => `- ${check.id}: ${check.status} - ${redactSetupSmokeEvidence(check.evidence)}`);
-  const evidenceSections = input.evidenceFields.map((field) => [
-    `## ${field.label}`,
-    '',
-    '```text',
-    field.value,
-    '```',
-  ].join('\n'));
+  const evidenceSections = input.evidenceFields.map((field) => {
+    // A fence longer than any backtick run inside the value, so the value cannot end it early.
+    const longestRun = Math.max(0, ...(field.value.match(/`+/g) ?? []).map((run) => run.length));
+    const fence = '`'.repeat(Math.max(3, longestRun + 1));
+    return [`## ${field.label}`, '', `${fence}text`, field.value, fence].join('\n');
+  });
   return [
     '# GoodVibes Agent Setup Smoke Evidence',
     '',
@@ -365,7 +379,7 @@ export async function saveSetupSmokeArtifact(input: {
       id: field.id,
       preview: previewHarnessText(field.value, 120),
     })),
-    inspectRoute: `agent_artifacts show artifactId:"${descriptor.id}" includeContent:false`,
+    inspectRoute: artifactShowRoute(descriptor.id, false),
   };
 }
 
@@ -387,7 +401,8 @@ export function setupSmokeEvidenceArtifacts(context: CommandContext): { readonly
       reason: 'Artifact list support is unavailable in this runtime.',
     };
   }
-  const artifacts = artifactStore.list(100)
+  const list = artifactStore.list;
+  const artifacts = listEveryArtifact((limit) => list.call(artifactStore, limit))
     .filter((artifact) => readArtifactMetadataString(artifact, 'purpose') === 'agent-setup-smoke-evidence')
     .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0));
   return { status: 'available', artifacts };
@@ -442,7 +457,7 @@ export function describeSetupSmokeEvidenceArtifact(artifact: ArtifactDescriptor)
     blockedChecks: readArtifactMetadataStringArray(artifact, 'blockedChecks'),
     userRunChecks: readArtifactMetadataStringArray(artifact, 'userRunChecks'),
     evidenceFields: readArtifactMetadataStringArray(artifact, 'evidenceFields'),
-    inspectRoute: `agent_artifacts show artifactId:"${artifact.id}" includeContent:false`,
+    inspectRoute: artifactShowRoute(artifact.id, false),
   };
 }
 
@@ -494,7 +509,7 @@ export function setupSmokeEvidenceHistory(context: CommandContext): Record<strin
     resultCounts,
     blockedCheckFrequency: setupSmokeBlockedCheckFrequency(artifacts),
     recent: artifacts.slice(0, 5).map(describeSetupSmokeEvidenceArtifact),
-    inspectLatestRoute: `agent_artifacts show artifactId:"${artifacts[0]!.id}" includeContent:false`,
+    inspectLatestRoute: artifactShowRoute(artifacts[0]!.id, false),
     rerunRoute: DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE,
     saveRoute: DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE,
   };
@@ -528,7 +543,7 @@ export function setupWizardSmokeHistory(context: CommandContext): AgentSetupWiza
       checkId: readString(entry.checkId),
       count: typeof entry.count === 'number' ? entry.count : 0,
     })).filter((entry) => entry.checkId && entry.count > 0),
-    inspectLatestRoute: `agent_artifacts show artifactId:"${artifacts[0]!.id}" includeContent:false`,
+    inspectLatestRoute: artifactShowRoute(artifacts[0]!.id, false),
     rerunRoute: DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE,
     saveRoute: DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE,
   };
@@ -547,7 +562,7 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
       return {
         ...emptyAgentSetupWizardCheckpoint(),
         ...routes,
-        path: snapshot.path,
+        path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
       };
     }
     if (!snapshot.checkpoint) {
@@ -555,7 +570,7 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
         ...emptyAgentSetupWizardCheckpoint(snapshot.parseError ?? 'Saved setup wizard checkpoint could not be read.'),
         ...routes,
         status: 'unavailable',
-        path: snapshot.path,
+        path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
         ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
       };
     }
@@ -567,7 +582,7 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
       source: snapshot.checkpoint.source,
       resumed: false,
       summary: `Saved setup checkpoint for ${snapshot.checkpoint.currentStepLabel}.`,
-      path: snapshot.path,
+      path: homeRelativePath(snapshot.path, shellPaths.homeDirectory),
       ...(snapshot.checkpoint.note ? { note: snapshot.checkpoint.note } : {}),
       ...routes,
     };
@@ -580,15 +595,20 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
   }
 }
 
-export function setupWizardDurableReceipts(context: CommandContext): readonly AgentSetupWizardDurableReceipt[] {
+export function setupWizardDurableReceiptRead(context: CommandContext): { readonly receipts: readonly AgentSetupWizardDurableReceipt[]; readonly unavailable: readonly string[] } {
   const artifactStore = setupSmokeArtifactStore(context);
-  const liveReceipts = setupWizardLiveDurableReceipts(context);
-  if (!artifactStore?.list) return liveReceipts;
+  const live = readSetupWizardLiveDurableReceipts(context);
+  const liveReceipts = live.receipts;
+  if (!artifactStore?.list) return { receipts: liveReceipts, unavailable: live.unavailable };
   try {
-    return mergeSetupWizardDurableReceipts(buildSetupWizardDurableReceipts(artifactStore.list(100)), liveReceipts);
+    return { receipts: mergeSetupWizardDurableReceipts(buildSetupWizardDurableReceipts(listEveryArtifact((limit) => artifactStore.list!(limit))), liveReceipts), unavailable: live.unavailable };
   } catch {
-    return liveReceipts;
+    return { receipts: liveReceipts, unavailable: live.unavailable };
   }
+}
+
+export function setupWizardDurableReceipts(context: CommandContext): readonly AgentSetupWizardDurableReceipt[] {
+  return setupWizardDurableReceiptRead(context).receipts;
 }
 
 export function setupCompletionMarkerExists(context: CommandContext): boolean {
@@ -623,16 +643,20 @@ export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWiza
 
 export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
-  return buildAgentSetupWizard({
+  const durable = setupWizardDurableReceiptRead(context);
+  const wizard = buildAgentSetupWizard({
     items: plan.map(setupPlanItemToWizardSource),
     smokeHistory: setupWizardSmokeHistory(context),
     checkpoint: setupWizardCheckpoint(context),
     closeoutCriticalStepIds: plan.filter((item) => item.blocksAutonomy).map((item) => item.id),
     receiptRequiredStepIds: ['connected-host-readiness', 'connected-host-auth', 'install-smoke'],
-    durableReceipts: setupWizardDurableReceipts(context),
+    durableReceipts: durable.receipts,
     setupMarkerExists: markerItem?.status === 'ready' || setupCompletionMarkerExists(context),
     repeatedBlockerAliases: SETUP_WIZARD_PLAN_BLOCKER_ALIASES,
   });
+  if (durable.unavailable.length === 0) return wizard;
+  // An unreadable host read model is not the same as a host with no receipts.
+  return { ...wizard, next: `${wizard.next} (receipts unavailable: ${durable.unavailable.join(', ')})` };
 }
 
 export function installSmokeRunSummary(plan: SetupInstallSmokePlan): SetupInstallSmokeRunSummary {

@@ -9,8 +9,11 @@
  *     self-hosted deployment registers the credential directly ('none'
  *     attestation), so there is no attestation chain to verify here (documented
  *     in docs/relay-zero-knowledge.md).
- *   - stepup.challenge.mint, issue a short-lived, single-use challenge bound to
- *     the calling session/rendezvous, which a surface feeds to
+ *   - stepup.credentials.list / stepup.credentials.remove, show the registered
+ *     passkeys (no key material) and remove one, for a lost device. Admin-gated;
+ *     remove is a mutating call, so a relay call needs a step-up assertion.
+ *   - stepup.challenge.mint, issue a short-lived, single-use challenge (carrying the
+ *     caller-supplied session/rendezvous ids), which a surface feeds to
  *     `navigator.credentials.get` before making a mutating relay call.
  *
  * The assertion produced by the passkey is carried on the mutating call in the
@@ -20,8 +23,11 @@
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import {
+  BOOLEAN_SCHEMA,
+  EMPTY_OBJECT_SCHEMA,
   NUMBER_SCHEMA,
   STRING_SCHEMA,
+  arraySchema,
   entityOutputSchema,
   methodDescriptor,
   objectSchema,
@@ -38,7 +44,8 @@ export const STEP_UP_CREDENTIAL_SUMMARY_SCHEMA = objectSchema({
 
 export const STEP_UP_CREDENTIALS_REGISTER_INPUT_SCHEMA = objectSchema({
   rpId: STRING_SCHEMA,
-  origin: STRING_SCHEMA,
+  // One origin, or several: the handler and the service accept both.
+  origin: { anyOf: [STRING_SCHEMA, arraySchema(STRING_SCHEMA)] },
   credentialId: STRING_SCHEMA,
   publicKeyCose: STRING_SCHEMA,
   signCount: NUMBER_SCHEMA,
@@ -47,9 +54,21 @@ export const STEP_UP_CREDENTIALS_REGISTER_INPUT_SCHEMA = objectSchema({
 }, ['rpId', 'origin', 'credentialId', 'publicKeyCose']);
 export const STEP_UP_CREDENTIALS_REGISTER_OUTPUT_SCHEMA = entityOutputSchema('credential', STEP_UP_CREDENTIAL_SUMMARY_SCHEMA);
 
+export const STEP_UP_CREDENTIALS_LIST_OUTPUT_SCHEMA = objectSchema({
+  credentials: arraySchema(STEP_UP_CREDENTIAL_SUMMARY_SCHEMA),
+}, ['credentials']);
+
+export const STEP_UP_CREDENTIALS_REMOVE_INPUT_SCHEMA = objectSchema({ credentialId: STRING_SCHEMA }, ['credentialId']);
+export const STEP_UP_CREDENTIALS_REMOVE_OUTPUT_SCHEMA = objectSchema({
+  credentialId: STRING_SCHEMA,
+  removed: BOOLEAN_SCHEMA,
+}, ['credentialId', 'removed']);
+
 export const STEP_UP_CHALLENGE_MINT_INPUT_SCHEMA = objectSchema({
   rendezvousId: STRING_SCHEMA,
   sessionId: STRING_SCHEMA,
+  method: STRING_SCHEMA,
+  path: STRING_SCHEMA,
   ttlMs: NUMBER_SCHEMA,
 }, []);
 export const STEP_UP_CHALLENGE_MINT_OUTPUT_SCHEMA = objectSchema({
@@ -71,9 +90,32 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
     outputSchema: STEP_UP_CREDENTIALS_REGISTER_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
+    id: 'stepup.credentials.list',
+    title: 'List Step-up Credentials',
+    description: 'List the registered step-up passkeys: credentialId, label, creation time and signature counter. Never returns key material. Admin/local-only.',
+    category: 'relay',
+    scopes: ['read:relay'],
+    access: 'admin',
+    http: { method: 'GET', path: '/api/stepup/credentials' },
+    inputSchema: EMPTY_OBJECT_SCHEMA,
+    outputSchema: STEP_UP_CREDENTIALS_LIST_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'stepup.credentials.remove',
+    title: 'Remove Step-up Credential',
+    description: 'Remove a registered step-up passkey so it can no longer confirm anything (a lost device). Answers 404 when no credential has that id. Admin/local-only. Mutating, so a relay call needs a step-up assertion. Removing the last passkey leaves no credential to confirm relay actions until a new one is registered.',
+    category: 'relay',
+    scopes: ['write:relay'],
+    access: 'admin',
+    http: { method: 'DELETE', path: '/api/stepup/credentials/{credentialId}' },
+    inputSchema: STEP_UP_CREDENTIALS_REMOVE_INPUT_SCHEMA,
+    outputSchema: STEP_UP_CREDENTIALS_REMOVE_OUTPUT_SCHEMA,
+    dangerous: true,
+  }),
+  methodDescriptor({
     id: 'stepup.challenge.mint',
     title: 'Mint Step-up Challenge',
-    description: 'Issue a short-lived, single-use WebAuthn challenge bound to the calling session/rendezvous. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).',
+    description: 'Issue a short-lived, single-use WebAuthn challenge. The optional sessionId, rendezvousId, method and path bind it: a challenge minted with any of them is accepted only for a relay request that matches every one given (a different session, rendezvous, HTTP method or path is refused as challenge-unbound), while a challenge minted with none is accepted for any request. The values are recorded as the caller supplied them; they are not checked against the authenticated session. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).',
     category: 'relay',
     scopes: ['read:relay'],
     access: 'authenticated',

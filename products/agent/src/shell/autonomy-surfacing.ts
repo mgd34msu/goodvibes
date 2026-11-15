@@ -17,7 +17,7 @@ import { LastSeenStore } from '../core/last-seen-store.ts';
 import type { AutomationRunsSinceResult } from '../agent/automation-runs-source.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentCalendarRegistry } from '../agent/calendar-registry.ts';
-import { executeToolCalls } from '@goodvibes-jev/engine/platform/platform/core';
+import { executeToolCalls, toolBudgetFromConfig } from '@goodvibes-jev/engine/platform/platform/core';
 import type { RuntimeServices } from '../runtime/services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -200,7 +200,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
         lifetime.signal.throwIfAborted();
         const runsSince: AutomationRunsSinceResult = runsResult.status === 'fulfilled'
           ? runsResult.value
-          : { runs: [], deliveries: [] };
+          : { runs: [], deliveries: [], unavailable: 'the connected host did not answer in time', unavailableKind: 'no_answer' };
         const allTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : [];
 
         const firedSchedules = aggregateFiredSchedules(
@@ -243,6 +243,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
           deliveries: runsSince.deliveries,
           failedRuns,
           missedRuns,
+          runsUnavailableReason: runsSince.unavailableKind === 'no_answer' ? runsSince.unavailable : null,
         });
 
         if (digest !== null) {
@@ -267,8 +268,9 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
                 'schedule',
               );
             }
-          } catch {
-            // Skill draft hook failed, skip silently.
+          } catch (err) {
+            // A failed draft pass adds no digest line, but the cause stays in the log.
+            logger.debug('away-digest skill-draft hook failed (non-fatal)', { error: err instanceof Error ? err.message : String(err) });
           }
         }
       } catch (err) {
@@ -279,16 +281,22 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
     void work.then(() => pendingDigests.delete(work), () => pendingDigests.delete(work));
   }
 
+  /** Resolves once every digest pass started so far has finished, without cancelling any. */
+  function whenIdle(): Promise<void> {
+    return Promise.allSettled([...pendingDigests]).then(() => undefined);
+  }
+
   function stop(): Promise<void> {
     lifetime.abort();
     clearInterval(lastSeenRefreshInterval);
     lastSeenStore.save();
-    return Promise.allSettled([...pendingDigests]).then(() => undefined);
+    return whenIdle();
   }
 
   return {
     refreshComingUp,
     announceAwayDigest,
+    whenIdle,
     stop,
     // Return a defensive copy so callers cannot mutate internal cache state.
     comingUpItems: (): readonly string[] => [...comingUpCache.items],
@@ -313,7 +321,8 @@ export function buildSkillDraftProposer(
     captureCatalogMethods(services, ['permissionManager', 'configManager']),
     captureCatalogMethods(config, ['getConfigurationIncarnation']),
     captureCatalogMethods(context, ['session', 'workspace', 'clients']),
-    captureCatalogMethods(session, ['runtime']), captureCatalogMethods(runtime, ['sessionId']),
+    // The runtime's session id is an accessor on the native runtime, so it is compared by value in assertCurrent, not guarded by descriptor.
+    captureCatalogMethods(session, ['runtime']),
     captureCatalogMethods(registry, ['list', 'prepareCall', 'projectCall', 'executePrepared', 'assertPrepared', 'releaseProjected']),
     captureCatalogMethods(manager, ['prepareAutonomousOwner', 'autonomousPreparation', 'projectAutonomousChoices', 'releaseAutonomousChoices', 'admitAutonomous']),
   ];
@@ -346,6 +355,7 @@ export function buildSkillDraftProposer(
     const results = await executeToolCalls({
       toolRegistry: registry, permissionManager: manager, autonomousSource: () => { assertCurrent(); return source; },
       turnSignal: signal, assertCurrent, sessionId, hookDispatcher: null, runtimeBus: null,
+      toolBudget: () => toolBudgetFromConfig(config),
       emitterContext: () => ({ sessionId, traceId: callId, source: 'agent-away-digest' }),
     }, callId, [{ id: callId, name: 'agent_harness', arguments: { mode: 'propose_skill_drafts' } }]);
     assertCurrent();

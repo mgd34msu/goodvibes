@@ -66,6 +66,13 @@ export class TokenRefreshError extends Error {
   }
 }
 
+/** The provider answered the refresh and refused the grant (invalid_grant, 401), as opposed to being unreachable or failing. */
+function isGrantRejection(error: OAuthFlowError): boolean {
+  if (error.reason !== 'token-request-rejected') return false;
+  const status = error.status;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 export class CalendarTokenStore {
   private readonly secrets: SecretStoreSlice;
   private readonly clock: Clock;
@@ -79,6 +86,12 @@ export class CalendarTokenStore {
    * caller for a given provider instead awaits the SAME in-flight refresh.
    */
   private readonly inflightRefresh = new Map<CalendarProviderId, Promise<string>>();
+  /**
+   * Bumped by `disconnect`. A refresh that was already on the wire when the
+   * owner disconnected must not write its result back and so reconnect an
+   * account the owner just removed.
+   */
+  private readonly generations = new Map<CalendarProviderId, number>();
 
   constructor(options: CalendarTokenStoreOptions) {
     this.secrets = options.secrets;
@@ -88,8 +101,9 @@ export class CalendarTokenStore {
 
   /** Persist a fresh token set + account metadata; clears any reconnect marker. */
   async save(provider: CalendarProviderId, tokens: StoredTokenSet, account: ConnectedAccount): Promise<void> {
-    await this.secrets.set(tokenKey(provider), JSON.stringify(tokens));
+    // Account first: tokens with no account would be an account nobody lists.
     await this.secrets.set(accountKey(provider), JSON.stringify(account));
+    await this.secrets.set(tokenKey(provider), JSON.stringify(tokens));
     await this.secrets.delete(statusKey(provider));
   }
 
@@ -159,7 +173,8 @@ export class CalendarTokenStore {
     const existing = this.inflightRefresh.get(provider);
     if (existing) return existing;
     const refreshToken = tokens.refreshToken;
-    const inFlight = this.performRefresh(provider, config, fetchImpl, refreshToken)
+    const generation = this.generations.get(provider) ?? 0;
+    const inFlight = this.performRefresh(provider, config, fetchImpl, refreshToken, generation)
       .finally(() => {
         if (this.inflightRefresh.get(provider) === inFlight) this.inflightRefresh.delete(provider);
       });
@@ -172,17 +187,31 @@ export class CalendarTokenStore {
     config: ResolvedClientConfig,
     fetchImpl: HttpFetch,
     refreshToken: string,
+    generation: number,
   ): Promise<string> {
     let refreshed: StoredTokenSet;
     try {
       refreshed = await refreshAccessToken(config, fetchImpl, refreshToken, this.clock());
     } catch (error) {
-      await this.markReconnectNeeded(provider);
+      // Only an answer from the provider that refuses the grant means the owner
+      // has to reconnect. A dropped connection or a 5xx says nothing about the
+      // grant, and the next call retries on its own.
+      if (error instanceof OAuthFlowError && isGrantRejection(error)) {
+        await this.markReconnectNeeded(provider);
+      }
       const detail = error instanceof OAuthFlowError ? error.message : String(error);
       throw new TokenRefreshError(provider, `Refreshing the ${provider} token failed: ${detail}`);
     }
-    const account = (await this.loadAccount(provider)) ?? this.syntheticAccount(provider, refreshed);
-    await this.save(provider, refreshed, account);
+    if ((this.generations.get(provider) ?? 0) !== generation) {
+      throw new TokenRefreshError(provider, `The ${provider} account was disconnected while its token was refreshing.`);
+    }
+    // The rotated token set goes first: it is the only copy of a refresh token
+    // the provider has already invalidated the old one for.
+    await this.secrets.set(tokenKey(provider), JSON.stringify(refreshed));
+    if (!(await this.loadAccount(provider))) {
+      await this.secrets.set(accountKey(provider), JSON.stringify(this.syntheticAccount(provider, refreshed)));
+    }
+    await this.secrets.delete(statusKey(provider));
     return refreshed.accessToken;
   }
 
@@ -196,6 +225,8 @@ export class CalendarTokenStore {
     config: ResolvedClientConfig,
     fetchImpl: HttpFetch,
   ): Promise<{ readonly revokedRemotely: boolean }> {
+    this.generations.set(provider, (this.generations.get(provider) ?? 0) + 1);
+    this.inflightRefresh.delete(provider);
     const tokens = await this.load(provider);
     let revokedRemotely = false;
     if (tokens) {

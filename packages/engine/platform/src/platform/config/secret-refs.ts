@@ -683,7 +683,13 @@ function selectPath(value: unknown, selector: string): unknown {
 function resolveFileRef(ref: FileSecretRef, options: SecretRefResolutionOptions): string | null {
   const raw = readFileSync(expandUserPath(ref.path, options.homeDirectory), 'utf-8');
   if (!ref.selector) return stripFinalNewline(raw);
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // The parser's message quotes the text it stopped at, which here is a secret file.
+    throw new Error('The secret file is not valid JSON.');
+  }
   const selected = selectPath(parsed, ref.selector);
   return selected === undefined || selected === null ? null : String(selected);
 }

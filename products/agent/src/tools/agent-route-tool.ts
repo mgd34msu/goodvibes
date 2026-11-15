@@ -96,6 +96,12 @@ export function createAgentRouteTool(commandContext: CommandContext, sources: Ag
     },
     execute: async (rawArgs, options) => {
       const args = captureModelReadingInput(rawArgs);
+      for (const value of [args.action, args.mode]) {
+        // An unrecognised action must not fall through to planning a route for whatever query came along.
+        if (readString(value) && normalizeRouteAction(value) === null) {
+          return { success: false, error: `Unknown route action "${readString(value)}". Valid actions: plan, status.` };
+        }
+      }
       const action = readAction(args);
       if (action === 'status') return output(status());
       return output(await planAgentTaskRoute(commandContext, args, sources, {

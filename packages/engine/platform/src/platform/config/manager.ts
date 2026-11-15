@@ -1,6 +1,6 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { postalConfigKey, POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
-import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
+import { DurablePolicyEpochOwner, OwnerLockBusyError } from './durable-policy-epoch.js';
 import { observeImportFile } from './prepared-import.js';
 import { PreparedSettingsTarget } from './prepared-target.js';
 import { readFileSync, existsSync } from 'fs';
@@ -9,7 +9,8 @@ import { isDeepStrictEqual, types as nativeTypes } from 'node:util';
 import { VERSION } from '../version.js';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { writeJsonFileAtomic as writeJsonFileAtomicUnacknowledged, type AtomicJsonWriteOptions } from '../utils/atomic-json-store.js';
+import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
 import type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting } from './schema.js';
 import { CONFIG_SCHEMA } from './schema.js';
 import { ConfigError } from '../types/errors.js';
@@ -50,7 +51,10 @@ import { HostSettings, type HostBooleanSetting, type HostBooleanSettingHandle, t
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
 import { announceIngestionNotice } from './settings-ingestion.js';
-import { freezePreparedData, normalizePreparedValue, preparedSchemaSignature, type PreparedMutationRecord,
+import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
+import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
+import { memoryBudgetRefusal, memoryTierOrderRefusal, nonSchemaKeyRefusal, schemaTypeRefusal } from './write-admission.js';
+import { freezePreparedData, normalizePreparedValue, preparedMutationLifecycle, preparedSchemaSignature, PreparedMutationRefusal, type PreparedMutationRecord,
   type PreparedConfigMutation, type PreparedConfigMutationTransition, type PreparedConfigMutationRequest,
   type PreparedConfigMutationFacts, type PreparedConfigMutationDestination,
   type PreparedConfigMutationTransitionFacts, type PreparedConfigMutationReceipt } from './prepared-mutation.js';
@@ -199,6 +203,15 @@ export type { ConfigKeyTier, ConfigKeySource } from './manager-key-source.js';
 
 export interface ConfigSetOptions {
   bypassManagedLock?: boolean | undefined;
+}
+
+/**
+ * Every settings write this manager makes goes through here, so the file watcher
+ * does not report the process's own write back as an outside edit.
+ */
+function writeJsonFileAtomic(path: string, value: unknown, options?: AtomicJsonWriteOptions): void {
+  writeJsonFileAtomicUnacknowledged(path, value, options);
+  acknowledgeConfigFileWrite(path);
 }
 
 /** Callback invoked when a watched config key changes. */
@@ -721,7 +734,12 @@ export class ConfigManager {
     let durableFailure: unknown;
     let durableFailed = false;
     try { if (!this.hydrating) this.durablePolicy?.advance(); }
-    catch (error) { durableFailed = true; durableFailure = error; }
+    catch (error) {
+      // Another live process briefly holding the epoch lock refused this change
+      // before anything moved: no permission source or host setting is touched.
+      if (error instanceof OwnerLockBusyError) throw error;
+      durableFailed = true; durableFailure = error;
+    }
     this.#permissionIncarnation++;
     for (const listener of [...this.incarnationListeners]) {
       try { listener(); } catch { /* A lifetime observer cannot defeat revocation. */ }
@@ -739,9 +757,15 @@ export class ConfigManager {
   private invalidateLifetimes(): void {
     // Publish before observers run, even if a mutation subsequently restores
     // the same value. Outstanding admission cannot survive an A -> B -> A turn.
+    let refused = false;
     try { this.advanceConfigurationIncarnation(); }
+    catch (error) {
+      // Refused by a briefly busy epoch lock before anything changed: nothing to revoke.
+      refused = error instanceof OwnerLockBusyError;
+      throw error;
+    }
     finally {
-      for (const listener of [...this.invalidationListeners]) {
+      if (!refused) for (const listener of [...this.invalidationListeners]) {
         try { listener(); } catch { /* One subscriber must not defeat revocation. */ }
       }
     }
@@ -776,7 +800,7 @@ export class ConfigManager {
     };
     this.#preparedMutations.set(handle, record);
     try { this.assertPreparedCurrent(record, incarnation); }
-    catch (error) { record.phase = 'spent'; throw error; }
+    catch (error) { this.spendPrepared(record); throw error; }
     return handle;
   }
 
@@ -788,7 +812,9 @@ export class ConfigManager {
       if (override && (override.operation !== 'set' || override.value !== false)) {
         throw new ConfigError('Selecting an execution mode must clear the legacy auto-approve override.');
       }
-      if (!override) requests = [...requests, { operation: 'set', key: 'behavior.autoApprove', value: false }];
+      // Clear the override first: if a later step fails, the partial result is
+      // the previous mode without auto-approve, never the new mode still in yolo.
+      requests = [{ operation: 'set', key: 'behavior.autoApprove', value: false }, ...requests.filter(request => request !== override)];
     }
     const knownKeys = new Set([...CONFIG_SCHEMA, ...this.getHostSettingsSchema()].map(setting => setting.key));
     if (requests.length < 1 || requests.length > knownKeys.size || new Set(requests.map(request => request.key)).size !== requests.length
@@ -813,15 +839,28 @@ export class ConfigManager {
 
   assertPreparedMutation(handle: PreparedConfigMutation): void {
     const record = this.preparedRecord(handle);
-    if (record.phase !== 'prepared') throw new ConfigError('Prepared mutation is not available.');
+    this.requirePreparedMove(record, 'beginning');
     this.assertPreparedCurrent(record, record.facts.incarnation);
+  }
+
+  /** The refusal for a move the lifecycle does not allow; names the phase and what would be allowed. */
+  private requirePreparedMove(record: PreparedMutationRecord, to: PreparedMutationRecord['phase']): void {
+    const check = preparedMutationLifecycle.check(record.phase, to);
+    if (!check.ok) throw new PreparedMutationRefusal('spent', check.reason);
+  }
+  private movePrepared(record: PreparedMutationRecord, to: PreparedMutationRecord['phase']): void {
+    this.requirePreparedMove(record, to);
+    record.phase = to;
+  }
+  /** Failure paths settle whatever phase they interrupted; a record that is already spent stays so. */
+  private spendPrepared(record: PreparedMutationRecord): void {
+    if (record.phase !== 'spent') record.phase = 'spent';
   }
 
   /** Run all reentrant work before exposing the one exact owner transition. */
   beginPreparedMutation(handle: PreparedConfigMutation): PreparedConfigMutationTransition {
     const record = this.preparedRecord(handle);
-    if (record.phase !== 'prepared') throw new ConfigError('Prepared mutation is not available.');
-    record.phase = 'beginning';
+    this.movePrepared(record, 'beginning');
     try {
       this.assertPreparedCurrent(record, record.facts.incarnation);
       this.invalidateLifetimes();
@@ -835,10 +874,10 @@ export class ConfigManager {
       for (const destination of record.facts.destinations) readHostSettingsFile(destination.path);
       this.assertPreparedCurrent(record, record.facts.incarnation + 1);
       const transition = Object.freeze({}) as PreparedConfigMutationTransition;
-      record.phase = 'begun'; record.transition = transition;
+      this.movePrepared(record, 'begun'); record.transition = transition;
       this.#preparedTransitions.set(transition, handle);
       return transition;
-    } catch (error) { record.phase = 'spent'; throw error; }
+    } catch (error) { this.spendPrepared(record); throw error; }
   }
 
   inspectPreparedMutationTransition(handle: PreparedConfigMutation, transition: PreparedConfigMutationTransition): PreparedConfigMutationTransitionFacts {
@@ -850,7 +889,7 @@ export class ConfigManager {
   assertPreparedMutationTransition(handle: PreparedConfigMutation, transition: PreparedConfigMutationTransition): void {
     const record = this.preparedRecord(handle);
     if ((record.phase !== 'begun' && record.phase !== 'committing') || record.transition !== transition || this.#preparedTransitions.get(transition) !== handle) {
-      throw new ConfigError('Prepared mutation transition is not authentic or has been spent.');
+      throw new PreparedMutationRefusal('spent', 'Prepared mutation transition is not authentic or has been spent.');
     }
     this.assertPreparedCurrent(record, record.facts.incarnation + 1);
   }
@@ -916,14 +955,14 @@ export class ConfigManager {
     const record = this.preparedRecord(handle);
     // A forged transition cannot consume a different authentic operation.
     if (record.transition !== transition || this.#preparedTransitions.get(transition) !== handle) {
-      throw new ConfigError('Prepared mutation transition is not authentic.');
+      throw new PreparedMutationRefusal('spent', 'Prepared mutation transition is not authentic.');
     }
     if (record.steps) {
-      if (record.phase !== 'begun') throw new ConfigError('Prepared settings plan is already committing.');
+      this.requirePreparedMove(record, 'committing');
       this.assertPreparedMutationTransition(handle, transition);
       // Only the transition guard remains usable while committing. Reentrant
       // finish calls cannot repeat a step; unrelated mutation stops the tail.
-      record.phase = 'committing';
+      this.movePrepared(record, 'committing');
       const completedPaths: string[] = [];
       for (const step of record.steps) {
         const child = this.preparedRecord(step);
@@ -932,23 +971,25 @@ export class ConfigManager {
           beforeEffect?.();
           this.assertPreparedCurrent(child, record.facts.incarnation + 1);
           const childTransition = Object.freeze({}) as PreparedConfigMutationTransition;
-          child.phase = 'begun'; child.transition = childTransition;
+          this.movePrepared(child, 'begun'); child.transition = childTransition;
           this.#preparedTransitions.set(childTransition, step);
           receipt = this.finishPreparedMutation(step, childTransition, beforeEffect);
         } catch {
-          record.phase = 'spent';
+          this.spendPrepared(record);
           return freezePreparedData({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths,
             ...(child.facts.destinations[0] ? { uncertainPath: child.facts.destinations[0].path } : {}) });
         }
         completedPaths.push(...receipt.completedPaths);
-        if (receipt.status !== 'committed') { record.phase = 'spent'; return freezePreparedData({ ...receipt,
+        if (receipt.status !== 'committed') { this.spendPrepared(record); return freezePreparedData({ ...receipt,
           status: completedPaths.length ? 'partial' : 'unknown', completedPaths }); }
       }
-      record.phase = 'spent';
+      this.spendPrepared(record);
       const receipt: PreparedConfigMutationReceipt = freezePreparedData({ status: 'committed', completedPaths });
       this.capturePreparedCompletion(record, receipt);
       return receipt;
     }
+    // A finish re-entered from its own beforeEffect callback must not publish twice.
+    this.requirePreparedMove(record, 'committing');
     let stores: Map<string, Record<string, unknown>>;
     try {
       this.assertPreparedMutationTransition(handle, transition);
@@ -961,8 +1002,8 @@ export class ConfigManager {
         }
       }
       this.assertPreparedMutationTransition(handle, transition);
-    } catch (error) { record.phase = 'spent'; throw error; }
-    record.phase = 'committing';
+    } catch (error) { this.spendPrepared(record); throw error; }
+    this.movePrepared(record, 'committing');
     const { key, value, destinations } = record.facts;
     const previousValue = this.#resolvePath(key).parent[this.#resolvePath(key).field];
     const previousHost = this.hostSettings.has(key) ? this.hostSettings.snapshot(this.#config) : null;
@@ -1010,7 +1051,7 @@ export class ConfigManager {
       status: uncertainPath === undefined ? 'committed' : completedPaths.length > 0 ? 'partial' : 'unknown',
       completedPaths, ...(uncertainPath === undefined ? {} : { uncertainPath }),
     });
-    record.phase = 'spent';
+    this.spendPrepared(record);
     if (receipt.status === 'committed' || completedPaths.length > 0) {
       if (previousHost) {
         const values = this.hostSettings.defaults();
@@ -1035,7 +1076,7 @@ export class ConfigManager {
 
   private preparedRecord(handle: PreparedConfigMutation): PreparedMutationRecord {
     const record = this.#preparedMutations.get(handle);
-    if (!record || record.phase === 'spent') throw new ConfigError('Prepared mutation is not authentic or has been spent.');
+    if (!record || record.phase === 'spent') throw new PreparedMutationRefusal('spent', 'Prepared mutation is not authentic or has been spent.');
     return record;
   }
 
@@ -1055,12 +1096,15 @@ export class ConfigManager {
       if (operation === 'set') return [destination(project ? this.projectConfigPath! : this.configPath, project ? 'project' : 'global', 'set')];
       return [...(project ? [destination(this.projectConfigPath!, 'project', 'set')] : []), destination(this.configPath, 'global', 'set')];
     }
+    const project = this.projectOverridesKey(key);
     if (operation === 'set') {
       if (this.daemonTierPath && isDaemonOwnedConfigKey(key)) return [destination(this.daemonTierPath, 'daemon', 'set')];
       if (this.sharedTierPath && isSharedConfigKey(key)) return [destination(this.sharedTierPath, 'shared', 'set')];
+      if (project) return [destination(this.projectConfigPath!, 'project', 'set')];
       return [destination(this.configPath, 'global', 'set')];
     }
     return [destination(this.configPath, 'global', 'remove'),
+      ...(project ? [destination(this.projectConfigPath!, 'project', 'remove')] : []),
       ...(this.daemonTierPath && isDaemonOwnedConfigKey(key) ? [destination(this.daemonTierPath, 'daemon', 'remove')] : []),
       ...(this.sharedTierPath && isSharedConfigKey(key) ? [destination(this.sharedTierPath, 'shared', 'remove')] : [])];
   }
@@ -1077,12 +1121,12 @@ export class ConfigManager {
     // Host validators are freshly allocated by the legacy accessor; the frozen
     // per-instance host descriptor is their stable identity.
     if (identity !== record.schemaIdentity || preparedSchemaSignature(schema) !== record.schemaSignature
-      || (!this.hostSettings.has(key) && schema.validate !== record.validator)) throw new ConfigError('Prepared setting schema changed.');
+      || (!this.hostSettings.has(key) && schema.validate !== record.validator)) throw new PreparedMutationRefusal('stale', 'Prepared setting schema changed.');
     if (JSON.stringify(this.preparedDestinations(operation, key)) !== JSON.stringify(record.facts.destinations)) {
-      throw new ConfigError('Prepared setting destination changed.');
+      throw new PreparedMutationRefusal('stale', 'Prepared setting destination changed.');
     }
-    if (readHostManagedSettingLock(key, this.configDir)) throw new ConfigError('Prepared setting is managed and cannot be changed.');
-    if (this.#permissionIncarnation !== incarnation) throw new ConfigError('Prepared setting owner changed.');
+    if (readHostManagedSettingLock(key, this.configDir)) throw new PreparedMutationRefusal('managed', 'Prepared setting is managed and cannot be changed.');
+    if (this.#permissionIncarnation !== incarnation) throw new PreparedMutationRefusal('stale', 'Prepared setting owner changed.');
   }
 
   /**
@@ -1174,7 +1218,36 @@ export class ConfigManager {
     }
 
     this.#resolvePath(key);
+    // A value is checked against the same type the loader will insist on, so a
+    // write cannot be reported as saved and then skipped at the next start.
+    const refusal = schema
+      ? (schema.type === 'enum' ? null : schemaTypeRefusal(schema, value)) ?? memoryTierOrderRefusal(key, value, this.#config) ?? memoryBudgetRefusal(key, value, this.#config)
+      : nonSchemaKeyRefusal(key, value, this.#config);
+    if (refusal) throw new ConfigError(`Invalid value for ${key}: ${String(value)} (${refusal})`);
     return value;
+  }
+
+  /**
+   * A project file may only tighten a restricted key, and its stricter value
+   * outranks the global file at every load. Writing a different global value
+   * would show as live now and be undone at the next start, so it is refused.
+   */
+  private refuseBehindStricterProjectValue(key: string, value: unknown): void {
+    if (!isProjectRestrictedKey(key) || !this.projectConfigPath || this.projectConfigPath === this.configPath) return;
+    if (!existsSync(this.projectConfigPath)) return;
+    let projectValue: { present: boolean; value: unknown };
+    try { projectValue = readDotPath(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')), key); }
+    catch { return; }
+    if (!projectValue.present || JSON.stringify(projectValue.value) === JSON.stringify(value)) return;
+    const baseline = structuredClone(this.#config) as unknown as Record<string, unknown>;
+    writeRawDotPath(baseline, key, structuredClone(value));
+    const layer: Record<string, unknown> = {};
+    writeRawDotPath(layer, key, structuredClone(projectValue.value));
+    if (restrictProjectLayer(layer, baseline, this.projectConfigPath).notices.length > 0) return;
+    throw new ConfigError(
+      `Setting ${key} is held at ${JSON.stringify(projectValue.value)} by the project settings file ${this.projectConfigPath}, `
+      + 'which may only make it stricter and would override the new value at the next start. '
+      + 'Remove the key from that file (or reset it) first, then set it again.');
   }
 
   /** Set a config value by dot-path key and auto-save to disk. */
@@ -1185,7 +1258,14 @@ export class ConfigManager {
       (this.setProjectValue as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
       return;
     }
+    // A project file that holds the key outranks the global file at every load,
+    // so the value is written where it will actually win.
+    if (this.projectOverridesKey(key)) {
+      (this.setProjectValue as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
+      return;
+    }
     value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    this.refuseBehindStricterProjectValue(key, value);
 
     if (key === 'permissions.mode' && this.get('behavior.autoApprove')) {
       this.set('behavior.autoApprove', false, options);
@@ -1433,6 +1513,27 @@ export class ConfigManager {
   getHostSettingsSchema(): readonly HostBooleanSetting[] { return this.hostSettings.definitions; }
 
   /**
+   * True when the project settings file explicitly holds a key whose ordinary
+   * write goes to the global file. The project tier outranks global at load, so
+   * a global-only write would report success and then flip back. Daemon and
+   * shared keys sit above the project tier, and the keys a project file may only
+   * tighten (see project-layer-restrictions.ts) keep their stricter project value
+   * by design. Read without side effects: a corrupt project file is not this
+   * method's to quarantine.
+   */
+  private projectOverridesKey(key: string, includeRestricted = false): boolean {
+    if (!this.projectConfigPath || !existsSync(this.projectConfigPath)) return false;
+    // One file serving as both layers (a product whose project settings are its own settings file) is the global
+    // file: a write to it must not turn the same key into a project-layer value between prepare and commit.
+    if (this.projectConfigPath === this.configPath) return false;
+    if (this.daemonTierPath && isDaemonOwnedConfigKey(key)) return false;
+    if (this.sharedTierPath && isSharedConfigKey(key)) return false;
+    if (!includeRestricted && isProjectRestrictedKey(key)) return false;
+    try { return readDotPath(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')), key).present; }
+    catch { return false; }
+  }
+
+  /**
    * Persist a single key to the global settings file by read-merge-write, so
    * hand edits and other keys survive and no default reaches disk unless set.
    */
@@ -1454,13 +1555,58 @@ export class ConfigManager {
   save(): void {
     this.requireWritable();
     this.advanceConfigurationIncarnation();
-    const minimal = this.runtimeState.bulkSnapshot();
+    const minimal = this.destinationSnapshot('global', this.configPath);
     this.preserveHostSettingsForBulkSave(minimal, this.configPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'global', this.hostSettings.keys());
     const effective = staged.compose();
     this.writeRawGlobal(minimal);
     this.publishState(staged, effective);
+  }
+
+  /**
+   * The working view as one destination file should hold it. The view merges
+   * every tier, so a value another tier owns is replaced here by what the
+   * destination file already holds (or dropped), never copied across: a project
+   * approval must not become a global setting, and shared or daemon values keep
+   * their one file.
+   * The reader-floor marker and values the loader could not read are kept as
+   * they are on disk, so a bulk save never erases what it did not understand.
+   */
+  private destinationSnapshot(tier: 'global' | 'project', path: string): Record<string, unknown> {
+    // Read without quarantining: an unreadable file contributes nothing here, and
+    // the write below replaces it exactly as a bulk save always has.
+    let disk: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : {};
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) disk = parsed as Record<string, unknown>;
+    } catch { /* unreadable: nothing to preserve */ }
+    const snapshot = this.runtimeState.bulkSnapshot();
+    // A project save is the explicit "write the effective config here" snapshot,
+    // so global values may come along; values owned by the shared and daemon
+    // tiers never do, and a global save never takes a project value.
+    const foreign = (source: string | undefined): boolean => source === 'shared' || source === 'daemon'
+      || (tier === 'global' && source === 'project');
+    const leaves: string[] = [];
+    const walk = (value: unknown, prefix: string): void => {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0) {
+        for (const [field, child] of Object.entries(value)) walk(child, prefix ? `${prefix}.${field}` : field);
+      } else if (prefix) leaves.push(prefix);
+    };
+    walk(snapshot, '');
+    for (const leaf of leaves) {
+      if (!foreign(this.runtimeState.sources.get(leaf))) continue;
+      const held = readDotPath(disk, leaf);
+      if (held.present) writeRawDotPath(snapshot, leaf, structuredClone(held.value));
+      else deleteRawDotPath(snapshot, leaf);
+    }
+    for (const notice of this.ingestionNotices) {
+      if (notice.file !== path || notice.key === path) continue;
+      const held = readDotPath(disk, notice.key);
+      if (held.present && !readDotPath(snapshot, notice.key).present) writeRawDotPath(snapshot, notice.key, structuredClone(held.value));
+    }
+    if (SETTINGS_FLOOR_MARKER_KEY in disk) snapshot[SETTINGS_FLOOR_MARKER_KEY] = structuredClone(disk[SETTINGS_FLOOR_MARKER_KEY]);
+    return snapshot;
   }
 
   /**
@@ -1482,7 +1628,7 @@ export class ConfigManager {
     if (!this.projectConfigPath) {
       throw new Error('ConfigManager.saveProject requires an explicit workingDir.');
     }
-    const minimal = this.runtimeState.bulkSnapshot();
+    const minimal = this.destinationSnapshot('project', this.projectConfigPath);
     this.preserveHostSettingsForBulkSave(minimal, this.projectConfigPath);
     const staged = this.runtimeState.fork();
     staged.acceptBulkSnapshot(this.withoutDaemonOwned(minimal), 'project', this.hostSettings.keys());
@@ -1519,6 +1665,7 @@ export class ConfigManager {
       diagnosticMode: this.diagnosticMode,
       record: (entry) => { this.recordIngestionNotice(entry); },
       receipt: (id, text) => { this.migrationReceipt(id, text); },
+      forgetReceipts: (selects) => { if (!this.readOnly) new FeatureAnnouncementStore(featureAnnouncementsPath(this)).forgetMatching(selects); },
       unknown: (file, keys) => { this.unknownSettingForms.keep(file, keys, this.ingestionSink()); },
     };
   }
@@ -1571,8 +1718,11 @@ export class ConfigManager {
       }
       if (this.projectConfigPath && (this.hostSettings.active ? hostSettingsFileExists(this.projectConfigPath) : existsSync(this.projectConfigPath))) {
         try {
-          const migrated = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>,
+          const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>,
             this.projectConfigPath, parsed => this.applyLoadMigrations(parsed, this.projectConfigPath!));
+          const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath);
+          for (const notice of restricted.notices) { announceIngestionNotice(notice); this.recordIngestionNotice(notice); }
+          const migrated = restricted.layer;
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
           staged.recordLayer(migrated, 'project');
         } catch (error) { throw this.loadFailure('Project', this.projectConfigPath, error); }
@@ -1673,7 +1823,7 @@ export class ConfigManager {
     catch { return false; } // Preserve ordinary in-memory recovery without persistence or a write receipt.
   }
   private requireWritable(): void {
-    if (this.readOnly) throw new ConfigError('ConfigManager is read-only.');
+    if (this.readOnly) throw new PreparedMutationRefusal('read-only', 'ConfigManager is read-only.');
   }
   /** File a receipt against this config's own announce-once store. */
   private migrationReceipt(id: string, text: string): void {
@@ -1770,6 +1920,22 @@ export class ConfigManager {
       throw new ConfigError('Registered host settings require the guarded scalar set API.');
     }
     const ownedPatch = structuredClone(patch) as Record<string, unknown>;
+    // Every field is admitted before any is written: the same lock and schema
+    // checks as set(), so this path cannot change what set() would refuse.
+    const previous = new Map<string, unknown>();
+    for (const [field, value] of Object.entries(ownedPatch)) {
+      if (value === undefined) continue;
+      const path = `${String(category)}.${field}`;
+      const schema = CONFIG_SCHEMA.find(setting => setting.key === path);
+      if (schema) {
+        const refusal = (schema.validate && !schema.validate(value) ? 'does not satisfy this setting\'s rules' : null)
+          ?? (schema.type === 'enum' ? (schema.enumValues?.includes(value as string) ? null : `allowed: ${schema.enumValues?.join(', ')}`) : schemaTypeRefusal(schema, value));
+        if (refusal) throw new ConfigError(`Invalid value for ${path} (${refusal})`);
+      }
+      const lock = getManagedSettingLock(path as ConfigKey, this.configDir);
+      if (lock) throw new ConfigError(`Setting ${path} is locked by ${lock.source}: ${lock.reason}`);
+      previous.set(path, readDotPath(this.#config, path).value);
+    }
     const staged = this.runtimeState.fork();
     const current = staged.nonRuntime[category] as Record<string, unknown>;
     for (const [field, value] of Object.entries(ownedPatch)) {
@@ -1782,6 +1948,7 @@ export class ConfigManager {
     const effective = staged.compose();
     persistCategoryPatch(String(category), ownedPatch, current, this.categoryIoDeps(staged));
     this.publishState(staged, effective);
+    for (const [path, before] of previous) this.notifyPersistedChange(path as ConfigKey, before);
   }
 
   /**
@@ -1797,12 +1964,16 @@ export class ConfigManager {
     const staged = this.runtimeState.fork();
     const current = staged.nonRuntime[category] as Record<string, unknown>;
     if (!(key in current) && ![...staged.overrides.keys()].some(entry => entry === hostKey || entry.startsWith(`${hostKey}.`))) return;
+    const lock = getManagedSettingLock(hostKey as ConfigKey, this.configDir);
+    if (lock) throw new ConfigError(`Setting ${hostKey} is locked by ${lock.source}: ${lock.reason}`);
+    const previousValue = readDotPath(this.#config, hostKey).value;
     delete current[key];
     staged.retire(hostKey);
     staged.mark(hostKey);
     const effective = staged.compose();
     persistCategoryKeyRemoval(String(category), key, this.categoryIoDeps(staged));
     this.publishState(staged, effective);
+    this.notifyPersistedChange(hostKey as ConfigKey, previousValue);
   }
 
   private categoryIoDeps(staged: ConfigRuntimeState): CategoryIoDeps {
@@ -1814,9 +1985,33 @@ export class ConfigManager {
     };
   }
 
+  private resetDynamicToolPermission(key: ConfigKey): void {
+    this.invalidateLifetimes();
+    const raw = readRawSettingsFile(this.configPath);
+    deleteRawDotPath(raw, key);
+    this.writeRawGlobal(raw);
+    if (this.projectOverridesKey(key, true)) {
+      const project = readRawSettingsFile(this.projectConfigPath!);
+      deleteRawDotPath(project, key);
+      writeJsonFileAtomic(this.projectConfigPath!, project);
+    }
+    this.load();
+  }
+
   /** Remove explicit preferences; full reset retains this frontend's defaults. Cross-tier disk writes are not transactional. */
   reset(key?: ConfigKey): void {
     this.requireWritable();
+    // A managed-policy lock refuses a reset the same way it refuses a write.
+    if (key !== undefined) {
+      const lock = getManagedSettingLock(key, this.configDir);
+      if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+    }
+    // A per-tool permission has no schema row (tools register at runtime) but is still written by set() and can be
+    // held by the project file, whose refusal tells the user to reset it.
+    if (key !== undefined && key.startsWith('permissions.tools.') && !CONFIG_SCHEMA.some(setting => setting.key === key)) {
+      this.resetDynamicToolPermission(key);
+      return;
+    }
     this.invalidateLifetimes();
     for (const definition of this.hostSettings.definitions) {
       if (key !== undefined && key !== definition.key) continue;
@@ -1848,6 +2043,12 @@ export class ConfigManager {
       const raw = readRawSettingsFile(this.configPath);
       deleteRawDotPath(raw, key);
       this.writeRawGlobal(raw);
+      // A project value would put the key straight back at the next load.
+      if (this.projectOverridesKey(key, true)) {
+        const project = readRawSettingsFile(this.projectConfigPath!);
+        deleteRawDotPath(project, key);
+        writeJsonFileAtomic(this.projectConfigPath!, project);
+      }
     }
     if (this.daemonTierPath) clearDaemonTierForReset(this.daemonTierPath, key);
     if (this.sharedTierPath) {
@@ -1858,6 +2059,10 @@ export class ConfigManager {
     // the complete live state; the next accepted load reconciles those bytes.
     this.publishState(staged, effective);
     for (const previous of previousValues) this.notifyPersistedChange(previous.key, previous.value);
+    // A full reset leaves the project file alone, and its values win at every load: show them now, not at the next start.
+    if (key === undefined && this.projectConfigPath && this.projectConfigPath !== this.configPath && existsSync(this.projectConfigPath)) {
+      try { this.load(); } catch { /* the reset is written; an unreadable project file is reported by the next load */ }
+    }
   }
 }
 

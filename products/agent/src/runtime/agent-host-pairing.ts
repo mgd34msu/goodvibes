@@ -5,15 +5,17 @@ import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { resolveConnectedHostConnection, type AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
-import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, readHostPairingResponse } from './native-paired-principal.ts';
-import { beginAgentHostPairing, canonicalizePairingHost, completeAgentHostPairing, readAgentHostPairing } from './connected-host-pairing-store.ts';
+import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from './native-paired-principal.ts';
+import { beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing } from './connected-host-pairing-store.ts';
 
 export interface AgentHostPairingResult {
-  readonly status: 'preview' | 'blocked' | 'already-paired' | 'cancelled' | 'changed' | 'unknown' | 'paired' | 'paired-unverified' | 'paired-shadowed';
+  readonly status: 'preview' | 'blocked' | 'already-paired' | 'cancelled' | 'changed' | 'unknown' | 'rejected' | 'cleared' | 'paired' | 'paired-unverified' | 'paired-shadowed';
   readonly message: string;
   readonly host?: string;
   readonly name?: string;
   readonly confirmation?: string;
+  /** What typing the confirmation does, when it is not creating the credential. */
+  readonly confirmationPrompt?: string;
   readonly scopeDisclosure?: string;
   readonly environmentOverride?: boolean;
 }
@@ -26,6 +28,10 @@ export interface AgentHostPairingPreview {
 
 const unavailable = (): AgentHostPairingResult => ({ status: 'blocked', message: 'Pairing could not be verified. Check the selected host and local credential store, then preview again.' });
 const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: 'A pairing attempt may already have created a credential. Its outcome must be reviewed on this host; no automatic remint or revoke is allowed.' });
+const rejected = (host: string): AgentHostPairingResult => ({ status: 'rejected', host, message: 'The host refused the request; nothing was created. Preview again.' });
+// A refusal before any minting (a 4xx other than a timeout or a conflict, or a host that was not listening) proves no credential exists.
+const refusedWithoutMinting = (status: number): boolean => status >= 400 && status < 500 && status !== 408 && status !== 409;
+const connectionRefused = (error: unknown): boolean => (error as { cause?: { code?: unknown } } | null)?.cause?.code === 'ECONNREFUSED';
 const changed = (): AgentHostPairingResult => ({ status: 'changed', message: 'The selected host, effective credential or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): AgentHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
 const envOverride = (): boolean => Boolean(process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim());
@@ -35,6 +41,31 @@ const envOverride = (): boolean => Boolean(process.env.GOODVIBES_CONNECTED_HOST_
  * source credential, name and store state to a fresh terminal confirmation.
  * No raw token, credential digest or remote error leaves this module.
  */
+/**
+ * An unresolved attempt blocks pairing until the owner has checked the host.
+ * Clearing it is an owner-terminal action: it only deletes the local marker, so
+ * it is offered with the warning that a credential the host did mint stays there.
+ */
+function clearPreview(home: string, host: string, attemptId: string): AgentHostPairingPreview {
+  const confirmation = `CLEAR ${randomBytes(6).toString('hex')}`;
+  let consumed = false;
+  return {
+    result: {
+      ...unknown(host),
+      confirmation,
+      confirmationPrompt: 'forget this unresolved attempt',
+      message: `${unknown(host).message} If the host shows no pairing token for this attempt, confirm below to forget it and pair again; a token that does exist stays valid until you revoke it on the host.`,
+    },
+    async confirm(answer) {
+      if (consumed || answer !== confirmation) return cancelled();
+      consumed = true;
+      const cleared = await clearAgentHostPairingAttempt(home, host, attemptId);
+      if (cleared.status === 'cleared') return { status: 'cleared', host, message: 'The unresolved attempt was forgotten. Preview again to pair.' };
+      return cleared.status === 'conflict' ? changed() : unavailable();
+    },
+  };
+}
+
 export async function previewAgentHostPairing(
   options: AgentDaemonVerbCallerOptions,
   name = 'GoodVibes Agent',
@@ -49,7 +80,7 @@ export async function previewAgentHostPairing(
     const host = canonicalizePairingHost(resolveConnectedHostBaseUrl(options.configManager));
     if (!host) return { result: unavailable() };
     const state = readAgentHostPairing(home, host);
-    if (state.status === 'unknown') return { result: unknown(host) };
+    if (state.status === 'unknown') return clearPreview(home, host, state.attemptId);
     if (state.status === 'unavailable') return { result: unavailable() };
     const selected = resolveConnectedHostConnection(options);
     if ('reason' in selected) return { result: unavailable() };
@@ -79,6 +110,7 @@ export async function previewAgentHostPairing(
       if (consumed || answer !== confirmation || actionSignal?.aborted) return cancelled();
       consumed = true;
       let attempted = false;
+      let attemptId: string | undefined;
       try {
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
         // Authority can be revoked after preview without replacing the local token.
@@ -89,7 +121,7 @@ export async function previewAgentHostPairing(
         if (actionSignal?.aborted) return cancelled();
         if (!current() || !isDeepStrictEqual(readAgentHostPairing(home, host), state)) return changed();
         if (!isHostPairingBootstrapPrincipal(live)) return changed();
-        const attemptId = randomUUID();
+        attemptId = randomUUID();
         const begin = await beginAgentHostPairing(home, host, { attemptId, name, startedAt: Date.now() });
         if (begin.status !== 'begun') return begin.status === 'conflict' ? changed() : unavailable();
         // Once the durable marker exists, every interruption is conservatively
@@ -106,12 +138,13 @@ export async function previewAgentHostPairing(
           body: JSON.stringify({ body: { name } }),
           signal: AbortSignal.any([AbortSignal.timeout(5000), ...(actionSignal ? [actionSignal] : [])]),
         });
-        if (!response.ok) return unknown(host);
+        if (!response.ok) {
+          if (!refusedWithoutMinting(response.status)) return unknown(host);
+          return (await clearAgentHostPairingAttempt(home, host, attemptId)).status === 'cleared' ? rejected(host) : unknown(host);
+        }
         const payload = await readHostPairingResponse(response);
-        const minted = payload && typeof payload === 'object' && 'token' in payload ? payload.token : null;
-        if (!minted || typeof minted !== 'object' || !('id' in minted) || typeof minted.id !== 'string' || !/^pair-[0-9a-f-]{36}$/i.test(minted.id)
-          || !('token' in minted) || typeof minted.token !== 'string' || !/^gvp_[A-Za-z0-9_-]{32}$/.test(minted.token)
-          || !('name' in minted) || minted.name !== name || !('createdAt' in minted) || typeof minted.createdAt !== 'number' || !Number.isFinite(minted.createdAt)) return unknown(host);
+        const minted = parseMintedPairingToken(payload, name);
+        if (!minted) return unknown(host);
         const complete = await completeAgentHostPairing(home, host, attemptId, { token: minted.token, tokenId: minted.id, name, createdAt: minted.createdAt });
         if (complete.status !== 'paired') return unknown(host);
         // Persist before verifying: a lost verification reply must never lose
@@ -131,7 +164,10 @@ export async function previewAgentHostPairing(
         const effective = resolveConnectedHostConnection(options);
         if ('reason' in effective || canonicalizePairingHost(effective.baseUrl) !== host || effective.token !== minted.token) return { status: 'paired-unverified', host, message: 'Pairing credential stored for the original host. Current configuration or authority is unverified; rerun setup status before native work.' };
         return { status: 'paired', host, message: 'Agent pairing is stored and the selected host verified native intake authority. Provider, workspace, Jev and execution readiness remain separate checks.' };
-      } catch { return attempted ? unknown(host) : actionSignal?.aborted ? cancelled() : unavailable(); }
+      } catch (error) {
+        if (attempted && attemptId && connectionRefused(error) && (await clearAgentHostPairingAttempt(home, host, attemptId)).status === 'cleared') return rejected(host);
+        return attempted ? unknown(host) : actionSignal?.aborted ? cancelled() : unavailable();
+      }
     } };
   } catch { return { result: signal?.aborted ? cancelled() : unavailable() }; }
 }

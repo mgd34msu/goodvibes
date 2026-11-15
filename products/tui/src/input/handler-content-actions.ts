@@ -46,6 +46,11 @@ export function handleDiffApply(
   const lineIndex = getAnchorLine();
   const diff = conversationManager.getDiffAtLine(lineIndex);
   if (!diff || !diff.filePath) return false;
+  if (diff.unsupported) {
+    conversationManager.log(`[Diff apply refused: ${diff.unsupported}]`, { fg: activeTokens().error });
+    requestRender();
+    return true;
+  }
   const projectRoot =
     commandContext?.workspace.shellPaths?.workingDirectory ?? commandContext?.platform.configManager.getWorkingDirectory();
 
@@ -79,7 +84,7 @@ export function handleDiffApply(
               fg: activeTokens().error,
             });
           } else {
-            const newContent = content.replace(diff.original, diff.updated);
+            const newContent = content.replace(diff.original, () => diff.updated);
             writeFileSync(resolvedPath, newContent, 'utf-8');
             conversationManager.log(`[Applied diff to ${diff.filePath}]`, { fg: activeTokens().success });
           }

@@ -267,7 +267,10 @@ function compileCatalogSnapshotGuard(captured: unknown): (current: unknown) => v
 }
 
 /** Compare descriptors before touching a previously acquired backend again.
- * The installed recording port's stable model getter is the sole accessor. */
+ * The installed recording port's stable model getter is the sole accessor.
+ * A frozen object can never change its own slots or prototype, so a slot (and
+ * each prototype link) whose whole lookup path was frozen at capture is proven
+ * once, here, and is not compared again. Only mutable paths stay live. */
 function catalogBackendSlots(subject: object, keys: readonly string[], modelGetter = false) {
   const chain: object[] = [];
   let owner: object | null = subject;
@@ -275,23 +278,29 @@ function catalogBackendSlots(subject: object, keys: readonly string[], modelGett
     if (isProxy(owner) || chain.length >= 64) throw new ToolInputProjectionError('held');
     chain.push(owner); owner = prototypeOf(owner);
   }
-  return { chain, fields: keys.map(key => {
-    for (const owner of chain) {
-      const descriptor = ownDescriptor(owner, key);
+  const frozen = chain.map(link => nativeIsFrozen(link));
+  const fields = keys.map(key => {
+    let depth = 0;
+    for (; depth < chain.length; depth++) {
+      const descriptor = ownDescriptor(chain[depth]!, key);
       if (descriptor) {
         if (!('value' in descriptor) && (!modelGetter || key !== 'model' || typeof descriptor.get !== 'function' || descriptor.set)) throw new ToolInputProjectionError('held');
-        return { key, owner, descriptor };
+        return { key, owner: chain[depth], descriptor, depth, immutable: frozen.slice(0, depth + 1).every(Boolean) };
       }
     }
-    return { key, owner: undefined, descriptor: undefined };
-  }) };
+    return { key, owner: undefined, descriptor: undefined, depth, immutable: frozen.every(Boolean) };
+  });
+  const live = fields.filter(field => !field.immutable);
+  // A prototype link matters only on the path a live slot is resolved through.
+  const links = [...new Set(live.flatMap(field => chain.map((_link, index) => index).filter(index => index < field.depth && !frozen[index])))];
+  return { chain, links, fields, live };
 }
 function assertCatalogBackendSlots(before: ReturnType<typeof catalogBackendSlots>): void {
-  for (let index = 0; index < before.chain.length; index++) {
+  for (const index of before.links) {
     const owner = before.chain[index];
     if (!owner || prototypeOf(owner) !== (before.chain[index + 1] ?? null)) throw new ToolInputProjectionError('held');
   }
-  for (const field of before.fields) {
+  for (const field of before.live) {
     let owner: object | undefined, descriptor: PropertyDescriptor | undefined;
     for (const candidate of before.chain) {
       descriptor = ownDescriptor(candidate, field.key);
@@ -303,11 +312,19 @@ function assertCatalogBackendSlots(before: ReturnType<typeof catalogBackendSlots
       || field.descriptor?.writable !== descriptor?.writable) throw new ToolInputProjectionError('held');
   }
 }
+/** Returned for slots proven unchangeable at capture; there is nothing left to compare. */
+const immutableCatalogSlots = (): void => {};
 /** Retain descriptor and prototype identity without invoking replacement accessors. */
 export function captureCatalogMethods(subject: object, keys: readonly string[]): () => void {
   const names = [...keys];
   const captured = catalogBackendSlots(subject, names);
-  return () => assertCatalogBackendSlots(captured);
+  return captured.links.length === 0 && captured.live.length === 0 ? immutableCatalogSlots : () => assertCatalogBackendSlots(captured);
+}
+/** One guard for many retained slots; slots proven unchangeable cost nothing per boundary. */
+export function combineCatalogGuards(guards: readonly (() => void)[]): () => void {
+  const live = guards.filter(guard => guard !== immutableCatalogSlots);
+  if (live.length === 0) return immutableCatalogSlots;
+  return live.length === 1 ? live[0]! : () => { for (const guard of live) guard(); };
 }
 function captureCatalogBackend(port: ReturnType<typeof judgmentPort>, decision: Rerank) {
   const decisionKeys = ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'rerank'];

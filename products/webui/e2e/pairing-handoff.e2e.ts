@@ -5,8 +5,9 @@
  * (PairingHandoffOffers → pairing.handoff.complete). Both paths, at phone width:
  *   - accept: notifications + relay are gathered/acknowledged and complete
  *     honestly as Completed.
- *   - decline: every offer is unchecked before continuing, nothing is sent to
- *     the daemon, and each renders as Declined, never silently half-applied.
+ *   - decline: every offer is unchecked before continuing, the daemon is told
+ *     the accept set is empty (and no push subscription is created), and each
+ *     renders as Declined, never silently half-applied.
  *
  * Passkey is left out of both e2e paths (its ceremony needs a real WebAuthn
  * authenticator, not a Playwright-mockable browser API the way Push is); the
@@ -48,8 +49,8 @@ test('accepting notifications + relay completes both honestly', async ({ page })
   await expect(page.locator('.app-shell')).toBeVisible();
 });
 
-test('declining every offer never contacts the ceremony or sends anything to the daemon', async ({ page }) => {
-  await installMockDaemon(page, { signedIn: false });
+test('declining every offer completes with an empty accept set and runs no ceremony', async ({ page }) => {
+  const daemon = await installMockDaemon(page, { signedIn: false });
 
   const completeCalls: unknown[] = [];
   page.on('request', (req) => {
@@ -73,6 +74,7 @@ test('declining every offer never contacts the ceremony or sends anything to the
 
   expect(completeCalls).toHaveLength(1);
   expect((completeCalls[0] as { body?: { accept?: unknown } }).body?.accept).toEqual({});
+  expect(daemon.invocations('push.subscriptions.create')).toEqual([]);
 
   await page.getByRole('button', { name: 'Continue to the app' }).click();
   await expect(page.locator('.app-shell')).toBeVisible();

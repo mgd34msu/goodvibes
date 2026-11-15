@@ -1,5 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { describeProjectionFailure } from './agent-projection-failure.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const TOOL_SAFETY_MARKER = Symbol.for('goodvibes-agent.tool-execution-safety-wrapped');
@@ -32,6 +34,12 @@ export function wrapToolExecutionSafety(tool: Tool): void {
     try {
       return await originalExecute(args, options);
     } catch (error) {
+      // A cancelled call is signalled by a throw and must stay one: the host
+      // reports it as cancelled, where an ordinary failed result would invite a
+      // retry of a call the owner stopped. A held or stale call becomes a failed
+      // result that says it is not the arguments' fault and not to retry.
+      if (options?.signal?.aborted || (error instanceof ToolInputProjectionError && error.problem === 'cancelled')) throw error;
+      if (error instanceof ToolInputProjectionError) return { success: false, error: describeProjectionFailure(error) };
       return {
         success: false,
         error: summarizeError(error),

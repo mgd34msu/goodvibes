@@ -30,6 +30,8 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { JsonFileStore } from '../state/index.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { PermissionCategory } from '../permissions/index.js';
 import type { PermissionRequestHandler } from '../permissions/index.js';
 
@@ -55,22 +57,28 @@ export function trustGatedAsk(
   ask: PermissionRequestHandler,
   requestTrustDecision: () => Promise<WorkspaceTrustLevel>,
 ): PermissionRequestHandler {
+  // The prompt and the save are one shared step, so N concurrent requests
+  // cause one persisted write, and none of them is let through on trust that
+  // is still being saved.
   let pendingDecision: Promise<WorkspaceTrustLevel> | null = null;
   return async (request, options) => {
     assertPermissionActive(options?.signal);
-    if (manager.isCategoryAllowed(request.category)) return ask(request, options);
-    if (!manager.isDecided()) {
-      if (!pendingDecision) {
-        pendingDecision = requestTrustDecision().finally(() => {
+    if (pendingDecision === null) {
+      if (manager.isCategoryAllowed(request.category)) return ask(request, options);
+      if (manager.isDecided()) return { approved: false };
+      pendingDecision = requestTrustDecision()
+        .then(async (level) => {
+          await manager.setLevel(level);
+          return level;
+        })
+        .finally(() => {
           pendingDecision = null;
         });
-      }
-      const decision = pendingDecision;
-      const level = await awaitPermission(() => decision, options?.signal);
-      await manager.setLevel(level);
-      assertPermissionActive(options?.signal);
-      if (manager.isCategoryAllowed(request.category)) return ask(request, options);
     }
+    const decision = pendingDecision;
+    await awaitPermission(() => decision, options?.signal);
+    assertPermissionActive(options?.signal);
+    if (manager.isCategoryAllowed(request.category)) return ask(request, options);
     return { approved: false };
   };
 }
@@ -132,6 +140,12 @@ export interface PersistedWorkspaceTrustView {
   /** 'trusted' | 'restricted' when a decision exists; 'undecided' when none is persisted yet. */
   readonly level: WorkspaceTrustLevel | 'undecided';
   readonly grandfathered: boolean;
+  /**
+   * Present when trust.json exists but could not be read. The level then reads
+   * 'undecided' because nothing readable is recorded, which is not the same as
+   * nobody ever deciding: a report should say the record is damaged.
+   */
+  readonly fault?: string | undefined;
 }
 
 /**
@@ -151,8 +165,9 @@ export function readPersistedWorkspaceTrust(
     if (parsed.level === 'trusted' || parsed.level === 'restricted') {
       return { level: parsed.level, grandfathered: parsed.grandfathered ?? false };
     }
-  } catch {
-    // Unreadable/corrupt, report undecided rather than crash the report.
+  } catch (error) {
+    // Unreadable/corrupt: report undecided rather than crash the report, and say why.
+    return { level: 'undecided', grandfathered: false, fault: `${file} could not be read (${summarizeError(error)})` };
   }
   return { level: 'undecided', grandfathered: false };
 }
@@ -170,12 +185,16 @@ export class WorkspaceTrustManager {
   private revision = 0;
   private decisionRevision = 0;
   private pendingDecisions = 0;
+  /** Saves of a not-yet-trusted workspace becoming trusted that have not finished. */
+  private unsavedTrust = 0;
+  /** Why trust.json could not be read, or null. A damaged record is not a missing one. */
+  private loadFault: string | null = null;
+  private readonly file: string;
   private readonly store: JsonFileStore<PersistedWorkspaceTrust>;
 
   constructor(options: WorkspaceTrustManagerOptions) {
-    this.store = new JsonFileStore<PersistedWorkspaceTrust>(
-      options.shellPaths.resolveProjectPath(options.surfaceRoot, TRUST_FILE),
-    );
+    this.file = options.shellPaths.resolveProjectPath(options.surfaceRoot, TRUST_FILE);
+    this.store = new JsonFileStore<PersistedWorkspaceTrust>(this.file);
   }
 
   /**
@@ -191,8 +210,19 @@ export class WorkspaceTrustManager {
   async load(): Promise<void> {
     if (this.loaded) return;
     const revision = this.revision;
-    const persisted = await this.store.load().catch(() => null);
+    let fault: string | null = null;
+    const persisted = await this.store.load().catch((error: unknown) => {
+      fault = `${this.file} could not be read (${summarizeError(error)})`;
+      return null;
+    });
     if (this.loaded || this.revision !== revision) return;
+    if (fault !== null) {
+      // The file exists but is unusable, so a decision may have been recorded
+      // (possibly a restriction). Autonomous callers stay restricted until the
+      // owner decides again; a person at the keyboard is simply asked.
+      this.loadFault = fault;
+      logger.warn('workspace trust: the saved trust decision could not be read; autonomous actions stay restricted until it is replaced', { file: this.file, fault });
+    }
     if (persisted && (persisted.level === 'trusted' || persisted.level === 'restricted')) {
       this.level = persisted.level;
       this.grandfathered = persisted.grandfathered ?? false;
@@ -212,6 +242,9 @@ export class WorkspaceTrustManager {
       assertPermissionActive(signal);
       if (this.pendingDecisions > 0) throw new Error('Workspace trust decision is pending');
       if (this.revision !== revision) throw new Error('Workspace trust changed before autonomous dispatch');
+      if (this.loadFault !== null && !this.isDecided() && !this.isCategoryAllowed(category)) {
+        throw new Error(`Workspace trust record is unreadable (${this.loadFault}), so this workspace is treated as restricted for autonomous work. Choose a trust level to replace it.`);
+      }
       if (this.isDecided() && !this.isCategoryAllowed(category)) throw new Error('Explicit restricted workspace forbids this operation');
     };
     assertCurrent();
@@ -222,13 +255,19 @@ export class WorkspaceTrustManager {
     return this.level !== null;
   }
 
+  /** Why the saved decision could not be read, or null when it was read or never existed. */
+  getLoadFault(): string | null {
+    return this.loadFault;
+  }
+
   /** Undecided workspaces read as 'restricted', the safe default before a choice. */
   getLevel(): WorkspaceTrustLevel {
     return this.level ?? 'restricted';
   }
 
+  /** Trust still being saved does not count: it is withdrawn if the save fails. */
   isTrusted(): boolean {
-    return this.level === 'trusted';
+    return this.level === 'trusted' && this.unsavedTrust === 0;
   }
 
   wasGrandfathered(): boolean {
@@ -236,14 +275,31 @@ export class WorkspaceTrustManager {
   }
 
   async setLevel(level: WorkspaceTrustLevel): Promise<void> {
-    this.decisionRevision++;
+    const previous = { level: this.level, grandfathered: this.grandfathered, loaded: this.loaded };
+    const decision = ++this.decisionRevision;
     this.revision++;
     this.level = level;
     this.grandfathered = false;
     this.loaded = true;
     this.pendingDecisions++;
-    try { await this.persist(); }
-    finally { this.pendingDecisions--; }
+    const grantsTrust = level === 'trusted' && previous.level !== 'trusted';
+    if (grantsTrust) this.unsavedTrust++;
+    try { await this.persist(); this.loadFault = null; }
+    catch (error) {
+      // Trust that was not saved is withdrawn rather than kept for the session
+      // behind an error; a restriction that was not saved stays in effect.
+      if (level === 'trusted' && this.decisionRevision === decision) {
+        this.revision++;
+        this.level = previous.level;
+        this.grandfathered = previous.grandfathered;
+        this.loaded = previous.loaded;
+      }
+      throw error;
+    }
+    finally {
+      this.pendingDecisions--;
+      if (grantsTrust) this.unsavedTrust--;
+    }
   }
 
   /**

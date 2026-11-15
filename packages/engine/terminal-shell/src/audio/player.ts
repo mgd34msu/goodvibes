@@ -84,6 +84,10 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
       try { proc.kill('SIGTERM'); } catch { /* ignore */ }
     };
     options.signal?.addEventListener('abort', abort, { once: true });
+    // Recorded from spawn so a sink that died between chunks is not waited on for a 'close' that already fired.
+    let closed = false;
+    proc.once('close', () => { closed = true; });
+    let playedOut = false;
 
     try {
       // Head survival: hold the first audio byte until the sink has actually
@@ -97,7 +101,13 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
       for await (const chunk of chunks) {
         if (options.signal?.aborted) break;
         if (chunk.data.byteLength === 0) continue;
-        await writeStdin(proc, chunk.data);
+        try {
+          await writeStdin(proc, chunk.data);
+        } catch (error) {
+          // An intentional interrupt destroys stdin under a pending write; that is not a playback failure.
+          if (options.signal?.aborted) return;
+          throw error;
+        }
       }
 
       // An intentional interrupt (turn cancel / quit chord / /tts stop) has
@@ -107,9 +117,12 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
       // so the tail of the response is never truncated.
       if (options.signal?.aborted) return;
       try { proc.stdin.end(); } catch { /* ignore */ }
-      await waitForExit(proc);
+      if (!closed) await waitForExit(proc);
+      playedOut = true;
     } finally {
       options.signal?.removeEventListener('abort', abort);
+      // A failed stream (the chunk iterator threw) must not leave the sink reading stdin forever. A natural drain is left alone so the tail is not cut.
+      if (!playedOut && !closed) abort();
       if (this.activeProcess === proc) this.activeProcess = null;
     }
   }

@@ -13,6 +13,7 @@ import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 import { disposeTestRuntimeServicesAfterAll } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { waitUntil } from '../helpers/wait-until.ts';
 import { createShellPathService } from '@/runtime/index.ts';
 import { registerConfigCommand } from '../../input/commands/config.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
@@ -248,7 +249,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => modalStack.length === 1 && modalStack[0] === 'modelPicker', 'the nested modal to open');
 
     expect(handled).toBe(true);
     expect(state.commandMode).toBe(false);
@@ -284,7 +285,7 @@ describe('command modal handoff', () => {
     };
 
     handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => dismissals.length === 1, 'the splash to be dismissed');
 
     expect(dismissals).toHaveLength(1);
   });
@@ -315,7 +316,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => modalStack.length === 0, 'the command entry to leave the stack');
 
     expect(handled).toBe(true);
     expect(state.commandMode).toBe(false);
@@ -366,7 +367,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => state.prompt !== '', 'the clipboard image to be inserted');
 
     expect(handled).toBe(true);
     expect(state.commandMode).toBe(false);
@@ -410,7 +411,7 @@ describe('command modal handoff', () => {
     };
 
     const handled = handleCommandModeToken(state, key('enter'));
-    await Promise.resolve();
+    await waitUntil(() => opened.length > 0, 'the command to open its modal');
 
     expect(handled).toBe(true);
     expect(opened).toEqual(['git']);
@@ -530,7 +531,7 @@ describe('command modal handoff', () => {
       input.setCommandRegistry(registry, context);
 
       input.feed('/config daemon.enabled\r');
-      await Promise.resolve();
+      await waitUntil(() => input.settingsModal.active, 'the settings modal to open');
 
       expect(input.settingsModal.active).toBe(true);
       expect(input.commandMode).toBe(false);
@@ -653,7 +654,7 @@ describe('command modal handoff', () => {
     };
 
     handlePromptKeyToken(keyState, { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false });
-    await Promise.resolve();
+    await waitUntil(() => executeCalls.length > 0, 'the command to execute');
 
     expect(submitCalls).toEqual([]);
     expect(executeCalls).toEqual([{ name: 'shortcuts', args: [] }]);
@@ -705,7 +706,7 @@ describe('command modal handoff', () => {
       handled = await withPublicErrorText(['kaboom'], async () => {
         const result = handleCommandModeToken(state, key('enter'));
         // Let the rejected commandPromise's .then/.catch chain settle.
-        await new Promise((r) => setTimeout(r, 10));
+        await new Promise((r) => setImmediate(r));
         return result;
       });
     } finally {
@@ -757,7 +758,7 @@ describe('command modal handoff', () => {
     input.setCommandRegistry(registry, context);
 
     input.feed('/shortcuts\r');
-    await Promise.resolve();
+    await waitUntil(() => input.shortcutsOverlayActive, 'the shortcuts overlay to open');
     expect(input.shortcutsOverlayActive).toBe(true);
     expect(input.modalStack).toEqual(['shortcuts']);
 
@@ -767,7 +768,7 @@ describe('command modal handoff', () => {
     expect(input.modalStack).toEqual([]);
 
     input.feed('/commands\r');
-    await Promise.resolve();
+    await waitUntil(() => input.helpOverlayActive, 'the help overlay to open');
     expect(input.helpOverlayActive).toBe(true);
     expect(input.modalStack).toEqual(['help']);
 

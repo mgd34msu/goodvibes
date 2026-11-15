@@ -54,17 +54,20 @@ const BROWSER_TARGET_PROPERTIES = {
   pageId: STRING_SCHEMA,
 } as const;
 
+/** The engine reports a fact that does not apply (no profile on an attached browser, no driver on a bare machine) as null. */
+const NULLABLE_STRING_SCHEMA = { anyOf: [STRING_SCHEMA, { type: 'null' }] } as const;
+
 const BROWSER_SESSION_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
   origin: STRING_SCHEMA,
-  profileDirectory: STRING_SCHEMA,
-  cdpEndpoint: STRING_SCHEMA,
-  executablePath: STRING_SCHEMA,
-  source: STRING_SCHEMA,
+  profileDirectory: NULLABLE_STRING_SCHEMA,
+  cdpEndpoint: NULLABLE_STRING_SCHEMA,
+  executablePath: NULLABLE_STRING_SCHEMA,
+  source: NULLABLE_STRING_SCHEMA,
   headless: BOOLEAN_SCHEMA,
   startedAt: STRING_SCHEMA,
   pageCount: NUMBER_SCHEMA,
-  activePageId: STRING_SCHEMA,
+  activePageId: NULLABLE_STRING_SCHEMA,
   closableByAgent: BOOLEAN_SCHEMA,
 }, ['sessionId', 'origin', 'headless', 'startedAt', 'pageCount', 'closableByAgent']);
 
@@ -128,16 +131,16 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     inputSchema: objectSchema({}),
     outputSchema: objectSchema({
       browserAvailable: BOOLEAN_SCHEMA,
-      binarySource: STRING_SCHEMA,
-      executablePath: STRING_SCHEMA,
-      driverVersion: STRING_SCHEMA,
+      binarySource: NULLABLE_STRING_SCHEMA,
+      executablePath: NULLABLE_STRING_SCHEMA,
+      driverVersion: NULLABLE_STRING_SCHEMA,
       browsersPath: STRING_SCHEMA,
       displayAvailable: BOOLEAN_SCHEMA,
       defaultMode: STRING_SCHEMA,
       sessions: arraySchema(BROWSER_SESSION_SCHEMA),
       provisionSteps: arraySchema(JSON_OBJECT_SCHEMA),
-      problem: STRING_SCHEMA,
-      fix: STRING_SCHEMA,
+      problem: NULLABLE_STRING_SCHEMA,
+      fix: NULLABLE_STRING_SCHEMA,
     }, ['browserAvailable'], { additionalProperties: true }),
   }),
   methodDescriptor({
@@ -187,9 +190,10 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'browser.sessions.attach',
     title: 'Attach To Running Browser',
-    description: 'Connect to a browser already running at a remote debugging endpoint. The daemon can drive it but can never close it.',
+    description: 'Connect to a browser already running at a remote debugging endpoint on this machine (a bare port, localhost or a loopback address; a browser elsewhere is reached through a local port forward). The daemon can drive it but can never close it.',
     category: 'browser',
     scopes: ['write:browser'],
+    dangerous: true,
     http: { method: 'POST', path: '/api/browser/sessions/attach' },
     inputSchema: bodyEnvelopeSchema({
       cdpEndpoint: STRING_SCHEMA,

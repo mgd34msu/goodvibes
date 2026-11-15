@@ -1,5 +1,5 @@
 import type { DaemonTriagePermissionHost, DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
-import type { OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { OwnedInboxTagging, OwnerMailObservation } from '@goodvibes-jev/engine/platform/platform/intake';
 /** Product host surfaces over canonical engine implementations. */
 import type { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { registerOwnedMailInbox } from './owned-inbox-mail.js';
@@ -8,11 +8,13 @@ import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/plat
 import type { ClusterCoordinator } from '@goodvibes-jev/engine/platform/platform/cluster';
 import type { GatewayMethodCatalog, NativeMutationHost } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerRoutingMethods, registerDraftMethods, type ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
-import { registerRemoteSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { DistributedRuntimeManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { InboxPollingControl, RegisterInboxSurfaceOptions } from '@goodvibes-jev/engine/platform/platform/intake';
 import { registerDaemonHandlers, type DaemonHandlerSurfaces, type RoutingRegistration } from '../daemon/handlers/index.js';
 import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daemon/handlers/context.js';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createPaymentsServices } from './payments-composition.js';
+import { createOwnerMailRelay } from './owner-mail-relay.js';
 import { inboxPollerGate } from './cluster-composition.js';
 import type { ShellPathService } from './index.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -41,6 +43,8 @@ export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceO
   readonly onConfigurationChange?: (key: ConfigKey, listener: () => void) => () => void;
   /** Trusted root-owned constructor; no credentials or generic secret access escape. */
   readonly createEmailService?: () => { readonly service: EmailService; close(): void };
+  /** Receives each screened message on the owner's mailbox (see owner-mail-relay.ts). */
+  readonly onOwnerMail?: ((mail: OwnerMailObservation) => void) | undefined;
   /** Native exact-pair consent, privately resolved credentials and revocable source lifetime. */
   readonly acquireHostedScreening?: (source: HostedInboxScreeningSource, operation: HostedInboxScreeningOperation) => Promise<HostedInboxScreeningAcquisition>;
 }
@@ -56,13 +60,14 @@ export interface DaemonHandlerCompositionOptions {
   readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly triagePermissionHost?: DaemonTriagePermissionHost;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
+  readonly hasProfile?: ((profileId: string) => boolean) | undefined;
   readonly gatewayMethods: GatewayMethodCatalog;
   readonly secretsManager: SecretsManager;
   readonly configManager: ConfigManager;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   readonly shellPaths: ShellPathService;
-  readonly distributedRuntime: NonNullable<Parameters<typeof registerRemoteSurface>[1]>['manager'];
+  readonly distributedRuntime: DistributedRuntimeManager;
   /** Startup is owned by the root, not by the borrowed remote surface. */
   readonly distributedRuntimeReady: Promise<void>;
   readonly clusterCoordinator: ClusterCoordinator;
@@ -78,10 +83,14 @@ export async function createDaemonHandlerComposition(
   if (typeof options.inboxFactory !== 'function') {
     throw new Error('An explicit daemon inbox factory is required until built-in provider composition is restored.');
   }
+  // The platform logger reaches the daemon log and activity trail; a raw
+  // console write would leave a refused inbox or payments source invisible there.
+  const asData = (meta: unknown): Record<string, unknown> | undefined =>
+    meta === undefined ? undefined : typeof meta === 'object' && meta !== null && !Array.isArray(meta) ? meta as Record<string, unknown> : { detail: meta };
   const handlerLogger: HandlerLogger = {
-    info: (message, meta) => console.info(message, meta ?? ''),
-    warn: (message, meta) => console.warn(message, meta ?? ''),
-    error: (message, meta) => console.error(message, meta ?? ''),
+    info: (message, meta) => logger.info(message, asData(meta)),
+    warn: (message, meta) => logger.warn(message, asData(meta)),
+    error: (message, meta) => logger.error(message, asData(meta)),
   };
   const handlerContext: HandlerContext = {
     catalog: options.gatewayMethods,
@@ -91,7 +100,9 @@ export async function createDaemonHandlerComposition(
     homeDirectory: options.homeDirectory,
     logger: handlerLogger,
     ...(options.nativeMutationHost ? { nativeMutationHost: options.nativeMutationHost } : {}),
+    ...(options.hasProfile ? { hasProfile: options.hasProfile } : {}),
   };
+  const ownerMail = createOwnerMailRelay();
   return registerDaemonHandlers(handlerContext, {
     registerRouting: registerRoutingMethods,
     registerInbox: (ctx, routing) => registerOwnedMailInbox(options.inboxFactory, ctx, routing, {
@@ -108,6 +119,7 @@ export async function createDaemonHandlerComposition(
         if (receiptVersion === 4) options.nativeDataWriter?.declare('inbox-triage-source-revisions-v1');
       },
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
+      onOwnerMail: ownerMail.observe,
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,
     registerPayments: () => createPaymentsServices({
@@ -122,10 +134,7 @@ export async function createDaemonHandlerComposition(
       isPaymentsLeader: () => !options.clusterCoordinator.enabled,
       checkoutSeam: options.checkoutSeam,
       channelDeliveryRouter: options.channelDeliveryRouter,
-    }),
-    registerRemote: (ctx) => registerRemoteSurface(ctx, {
-      manager: options.distributedRuntime,
-      managerReady: options.distributedRuntimeReady,
+      ownerMail,
     }),
   });
 }

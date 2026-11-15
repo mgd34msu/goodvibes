@@ -8,8 +8,10 @@ import type { AgentWorkspaceVoiceMediaProviderStatus } from '../input/agent-work
 import type { CommandContext } from '../input/command-registry.ts';
 import { certifiedDeviceLiveRecords, deviceLiveReadModelSnapshot } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { agentWakeCapabilities } from '../core/wake-provision-status.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessMediaArgs {
   readonly mediaProviderId?: unknown;
@@ -53,9 +55,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readConfigBoolean(context: CommandContext, key: string, fallback: boolean): boolean {
@@ -68,7 +68,8 @@ function readConfigBoolean(context: CommandContext, key: string, fallback: boole
       if (normalized === 'false') return false;
     }
     return fallback;
-  } catch {
+  } catch (error) {
+    logger.warn('Media posture setting could not be read; using its default', { key, error: summarizeError(error) });
     return fallback;
   }
 }
@@ -77,7 +78,8 @@ function readConfigString(context: CommandContext, key: string): string {
   try {
     const value = (context.platform.configManager as { get(settingKey: string): unknown }).get(key);
     return typeof value === 'string' ? value.trim() : '';
-  } catch {
+  } catch (error) {
+    logger.warn('Media posture setting could not be read', { key, error: summarizeError(error) });
     return '';
   }
 }
@@ -154,7 +156,7 @@ async function buildVoiceInteractionWorkflows(
   const speechInputRegistered = hasRegisteredVoiceFeature(readiness, ['stt', 'realtime']);
   const selectedTtsReady = readiness.selectedTtsProviderStatus === 'ready';
   const spokenReady = spokenResponseRecords.length > 0 || (spokenTurnRuntime && selectedTtsReady && readiness.ttsVoiceConfigured);
-  const spokenAttention = spokenTurnRuntime && selectedTtsReady && !readiness.ttsVoiceConfigured;
+  const spokenAttention = spokenTurnRuntime && (readiness.selectedTtsProviderStatus === 'ready-agent-env' || (selectedTtsReady && !readiness.ttsVoiceConfigured));
   const pushToTalkReady = pushToTalkRecords.length > 0 || (voiceEnabled && spokenTurnRuntime && speechInputReady);
   const pushToTalkAttention = voiceEnabled && (spokenTurnRuntime || speechInputRegistered);
   const transcriptionReady = transcriptionRecords.length > 0 || (transcribeRuntime && speechInputReady);
@@ -234,8 +236,8 @@ async function buildVoiceInteractionWorkflows(
       modelRoute: 'agent_harness mode:"media_posture" query:"spoken responses" includeParameters:true',
       userRoute: '/tts <prompt>',
       setupRoutes: [
-        'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" confirm:true explicitUserRequest:"..."',
-        'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" confirm:true explicitUserRequest:"..."',
+        'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
+        'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
       ],
       evidence: {
         spokenTurnRuntime,
@@ -269,15 +271,15 @@ async function buildVoiceInteractionWorkflows(
       // next step phrased as a command for the user to type is the defect: the
       // platform does the thing and reports what it did.
       nextStep: wake.blockers.length > 0
-        ? `Clear the refusing row yourself: ${wake.blockers[0]?.key ?? 'the blocking row'}, its written reason is in this posture record.`
+        ? `Tell the user which row refuses to start wake capture: ${wake.blockers[0]?.key ?? 'the blocking row'}. Its written reason is in blockedRowDetails; changing that setting is their decision.`
         : wake.active
           ? 'Wake capture is live; confirm the pinned models verify on disk and report the result rather than asking anyone to check.'
-          : 'Set voice.wake.enabled for the user, the surface row moves with it, and missing models are fetched and verified as part of turning it on.',
+          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the surface row moves with it). Turning it on does not fetch models: a host missing them reports not-provisioned and names the command that fetches them.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
       modelRoute: wakeRecords[0]?.modelRoute ?? 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [
         ...wakeRecords.slice(0, 3).map((record) => record.modelRoute),
-        'settings action:"set" key:"voice.wake.surfaces.agent" value:"true"',
+        'settings action:"set" key:"voice.wake.surfaces.agent" value:"true" explicitUserRequest:"<the user request, in their own words>"',
         'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
         'agent_harness mode:"pairing_posture" query:"device" includeParameters:true',
       ],
@@ -290,7 +292,9 @@ async function buildVoiceInteractionWorkflows(
         autoSubmit: wake.autoSubmit,
         recorder: wake.capture.backend,
         blockedRows: wake.blockers.map((blocker) => blocker.key),
+        blockedRowDetails: wake.blockers.map((blocker) => ({ key: blocker.key, detail: previewHarnessText(blocker.detail, 200) })),
         rowsNotInForce: wake.limitations.map((limitation) => limitation.key),
+        rowsNotInForceDetails: wake.limitations.map((limitation) => ({ key: limitation.key, detail: previewHarnessText(limitation.detail, 200) })),
         // Both filtering rows, reported as what they are rather than as refusals.
         noiseSuppression: wake.capture.noiseSuppression,
         speechGateThreshold: wake.vadThreshold,
@@ -357,7 +361,7 @@ function describeProvider(
         modelRoutes: {
           inspectPosture: 'agent_harness mode:"media_posture"',
           inspectProvider: 'agent_harness mode:"media_provider"',
-          generateMedia: 'agent_media_generate with confirm:true and explicitUserRequest',
+          generateMedia: 'agent_media_generate with the user request in explicitUserRequest',
           ttsSettings: 'settings action:"list|get|set" for tts.provider, tts.voice, tts.llmProvider, and tts.llmModel',
         },
         policy: {
@@ -374,20 +378,21 @@ function describeProvider(
 
 async function readRuntimeStatuses(context: CommandContext, options: CatalogRankingOptions) {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const readErrors: string[] = [];
   const voice = await (async () => {
     try { return await context.platform.voiceProviderRegistry?.status() ?? []; }
-    catch { return []; }
+    catch (error) { logger.warn('Voice provider status could not be read', { error: summarizeError(error) }); readErrors.push('voice provider status could not be read'); return []; }
   })();
   const voiceSource = captureAsyncHarnessInput(voice, options);
   voiceSource.retainSourceCurrent();
   voiceSource.assertCurrent();
   const media = await (async () => {
     try { return await context.platform.mediaProviderRegistry?.status() ?? []; }
-    catch { return []; }
+    catch (error) { logger.warn('Media provider status could not be read', { error: summarizeError(error) }); readErrors.push('media provider status could not be read'); return []; }
   })();
   voiceSource.assertCurrent();
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  return { voice: voiceSource.args, media };
+  return { voice: voiceSource.args, media, readErrors };
 }
 
 function buildReadiness(context: CommandContext) {
@@ -481,13 +486,14 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
         voiceWorkflows: filteredVoiceWorkflows.map((workflow) => describeVoiceWorkflow(workflow, args.includeParameters === true)),
         returned: filtered.length,
         total: providers.length,
+        ...(runtimeStatuses.readErrors.length > 0 ? { readErrors: runtimeStatuses.readErrors, readErrorNote: 'Runtime status was not available for some providers; absent status here is not evidence they are unconfigured.' } : {}),
         policy: 'Read-only voice/media posture. Media generation, voice enable/disable, TTS setting changes, and bundle export stay confirmation-gated through first-class tools, settings modes, workspace actions, or slash-command mirrors.',
         ...(args.includeParameters === true ? { modelAccess: {
           mediaGenerateTool: 'agent_media_generate',
           providerCatalogMode: 'media_posture',
           singleProviderMode: 'media_provider',
-          ttsProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" confirm:true explicitUserRequest:"..."',
-          ttsVoicePicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" confirm:true explicitUserRequest:"..."',
+          ttsProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
+          ttsVoicePicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
           voiceWorkflowPosture: 'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
           commands: ['/media providers', '/voice review', '/tts <prompt>', '/image <path>'],
         } } : {}),

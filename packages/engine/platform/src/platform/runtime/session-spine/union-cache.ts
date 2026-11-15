@@ -40,6 +40,7 @@
 
 import { logger } from '../../utils/logger.js';
 import type { SharedSessionBroker, SharedSessionRecord } from '../../control-plane/index.js';
+import { sortSessions } from '../../control-plane/session-broker-state.js';
 
 /** The synchronous local read source, the in-process SharedSessionBroker. */
 export type LocalSessionReader = Pick<SharedSessionBroker, 'listSessions' | 'getSession'>;
@@ -253,6 +254,8 @@ export class SessionUnionCache implements SessionReadFacade {
     this.wireCache = [];
     this.refreshInFlight = null; // a new adoption starts a fresh probe, not a stale prior reader's
     this.timer = this.scheduler.setInterval(() => void this.refresh(), this.refreshIntervalMs);
+    // An injected scheduler may hand back a ref-ed handle; the probe must never pin the process.
+    this.timer?.unref?.();
     void this.refresh();
   }
 
@@ -387,7 +390,9 @@ export class SessionUnionCache implements SessionReadFacade {
       merged.set(record.id, record);
     }
     for (const record of this.local.listSessions()) merged.set(record.id, record);
-    const union = Array.from(merged.values());
+    // Newest first, as the broker orders its own list: wire rows come first in the map,
+    // so slicing it unsorted would drop this surface's own newer sessions beyond `limit`.
+    const union = sortSessions(merged.values());
     return typeof limit === 'number' && limit >= 0 ? union.slice(0, limit) : union;
   }
 

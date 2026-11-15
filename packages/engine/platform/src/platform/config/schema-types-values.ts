@@ -123,7 +123,6 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'tts.llmProvider' ? string :
   K extends 'tts.llmModel' ? string :
   K extends 'tts.speed' ? number :
-  K extends 'release.channel' ? 'stable' | 'preview' :
   K extends keyof PaymentsConfigValueMap ? PaymentsConfigValueMap[K] :
   K extends keyof DaemonProcessConfigValueMap ? DaemonProcessConfigValueMap[K] :
   K extends 'daemon.enabled' ? boolean :
@@ -266,6 +265,7 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'surfaces.msteams.enabled' ? boolean :
   K extends 'surfaces.msteams.appId' ? string :
   K extends 'surfaces.msteams.appPassword' ? string :
+  K extends 'surfaces.msteams.webhookSecret' ? string :
   K extends 'surfaces.msteams.tenantId' ? string :
   K extends 'surfaces.msteams.serviceUrl' ? string :
   K extends 'surfaces.msteams.botId' ? string :
@@ -279,11 +279,13 @@ export type ConfigValue<K extends ConfigKey> =
   K extends 'surfaces.mattermost.enabled' ? boolean :
   K extends 'surfaces.mattermost.baseUrl' ? string :
   K extends 'surfaces.mattermost.botToken' ? string :
+  K extends 'surfaces.mattermost.webhookSecret' ? string :
   K extends 'surfaces.mattermost.teamId' ? string :
   K extends 'surfaces.mattermost.defaultChannelId' ? string :
   K extends 'surfaces.matrix.enabled' ? boolean :
   K extends 'surfaces.matrix.homeserverUrl' ? string :
   K extends 'surfaces.matrix.accessToken' ? string :
+  K extends 'surfaces.matrix.webhookSecret' ? string :
   K extends 'surfaces.matrix.userId' ? string :
   K extends 'surfaces.matrix.defaultRoomId' ? string :
   K extends 'surfaces.email.host' ? string :

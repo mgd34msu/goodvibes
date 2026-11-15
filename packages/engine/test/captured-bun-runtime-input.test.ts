@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { noteSkippedContainment } from './_helpers/exec-containment-proof.ts';
 import * as fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ afterEach(() => {
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
   throw new Error('required Bun runtime admission containment backend is unavailable');
+noteSkippedContainment('captured-bun-runtime-input.test.ts', availability.available);
 function git(root: string, ...args: string[]): void {
   const result = spawnSync('git', ['-C', root, ...args]);
   if (result.status !== 0) throw new Error(result.stderr.toString());
@@ -107,10 +109,15 @@ test('revocation inside a runtime permission await prevents opening executable b
   const f = await fixture(path => { if (path === process.execPath && authority) revokeContractInputAuthority(authority); return true; });
   authority = f.binding.authority;
   const admission = createCapturedExecBunRuntimeAdmission(f.binding);
-  const opened: string[] = []; const read = fs.readFile;
-  const tap = spyOn(fs, 'readFile').mockImplementation(((path, ...args) => { opened.push(String(path)); return read(path, ...args); }) as typeof fs.readFile);
+  // Executable bytes are retained through open(), not readFile(), so that is the call watched.
+  const opened: string[] = []; const open = fs.open;
+  const tap = spyOn(fs, 'open').mockImplementation(((path, ...args) => { opened.push(String(path)); return open(path, ...args); }) as typeof fs.open);
   try {
     await expect(admission()).rejects.toThrow();
     expect(opened).not.toContain(process.execPath);
+    // Positive control: an unrevoked admission does open the executable through the same spy.
+    const control = await fixture();
+    await createCapturedExecBunRuntimeAdmission(control.binding)();
+    expect(opened).toContain(process.execPath);
   } finally { tap.mockRestore(); }
 });

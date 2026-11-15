@@ -510,16 +510,22 @@ describe('compiled interactive TUI owner pairing', () => {
       await session.find('confirmation visible at 80 columns', text => text.includes(phrase), since);
       const normalize = (text: string) => text.replace(/[┃│]/g, '').replace(/\s+/g, ' ');
       const disclosures = [f.host, 'persistent administrative', 'fleet execution', 'existing daemon-global operator token', 'only in this TUI home', 'shared token remains active', 'nothing is revoked'];
+      // Paging waits for the redraw instead of a fixed delay. Paging past either end
+      // draws nothing, so an unchanged screen after the bounded wait is also a result.
+      const pageTo = async (key: string) => {
+        const before = session.screen();
+        session.write(key);
+        await waitFor('the paged redraw', () => session.screen() !== before, 1_500, 15).catch(() => undefined);
+      };
       let reviewed = session.screen();
       for (let page = 0; page < 8 && !disclosures.every(part => normalize(reviewed).includes(part)); page++) {
-        session.write('\x1b[5~');
-        await Bun.sleep(60);
+        await pageTo('\x1b[5~');
         reviewed += `\n${session.screen()}`;
       }
       for (const disclosure of disclosures) expect(normalize(reviewed)).toContain(disclosure);
       expect(f.migrations()).toBe(0);
       for (let page = 0; page < 8 && !session.screen().includes(phrase); page++) {
-        session.write('\x1b[6~'); await Bun.sleep(60);
+        await pageTo('\x1b[6~');
       }
       expect(session.screen()).toContain(phrase);
       since = session.mark(); session.write(`${phrase}\r`);

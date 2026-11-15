@@ -87,6 +87,10 @@ export async function reconcileMemorySpineAdoption(options: MemorySpineAdoptionO
     // things: local store, no wire, no dispatch binding. Asked before activate()
     // so nothing routes over the wire first and gets pulled back.
     if (options.mayAdopt && !(await options.mayAdopt())) return;
+    // The check above awaited: a second reconcile (boot task and interval tick)
+    // may have adopted in the meantime, and activating twice would run onAttach
+    // twice. Re-read the state it decided on.
+    if (options.memorySpineClient.active) return;
     options.memorySpineClient.activate(options.transport);
     if (options.onAttach) {
       // Adoption already happened synchronously above; a receipt-read failure

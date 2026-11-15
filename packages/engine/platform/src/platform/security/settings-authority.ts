@@ -7,6 +7,19 @@ export class SettingsAuthorityUnavailableError extends Error {
   }
 }
 
+/**
+ * The pairing store could not be read or written safely, so no paired or
+ * shared-token settings authority can be captured until it recovers. Distinct
+ * from a stale capture: retrying the same request will not help.
+ */
+export class PairingStoreFaultedError extends Error {
+  readonly code = 'PAIRING_STORE_FAULTED';
+  constructor() {
+    super('The pairing token store is faulted; settings changes through paired or shared-token authority are held until it is readable again (a failed owner write holds until the daemon restarts)');
+    this.name = 'PairingStoreFaultedError';
+  }
+}
+
 const ASYNC_FUNCTION_PROTOTYPE = Object.getPrototypeOf(async () => undefined);
 
 /**

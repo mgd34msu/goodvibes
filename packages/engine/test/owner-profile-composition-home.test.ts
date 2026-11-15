@@ -15,12 +15,11 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { redactSensitiveData } from '../platform/src/platform/utils/redaction.ts';
+import { redactDiagnosticText } from '../platform/src/platform/utils/redaction.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { composeOwnerProfile } from '../platform/src/platform/control-plane/routes/owner-profile-composition.ts';
-import { resolveOwnerProfilePath } from '../platform/src/platform/owner-profile/paths.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
@@ -89,14 +88,23 @@ describe('owner-profile composition honours an injected home', () => {
     }
   });
 
-  test('without an injected home, the redirected tree wins over the login home fallback', () => {
-    const loginHome = makeProjectTempDir('gv-profile-login-home');
+  test('without an injected home, the tree GOODVIBES_HOME names wins over the login home', () => {
     const treeHome = makeProjectTempDir('gv-profile-tree-home');
-    // Pure resolution with an isolated environment never opens a real profile.
-    expect(resolveOwnerProfilePath({ env: { HOME: loginHome } }))
-      .toBe(join(loginHome, '.goodvibes', 'daemon', 'owner-profile.md'));
-    expect(resolveOwnerProfilePath({ env: { HOME: loginHome, GOODVIBES_HOME: treeHome } }))
-      .toBe(join(treeHome, '.goodvibes', 'daemon', 'owner-profile.md'));
+    const expected = seedProfile(treeHome, 'tree-owner');
+    const savedTree = process.env['GOODVIBES_HOME'];
+    process.env['GOODVIBES_HOME'] = treeHome;
+    try {
+      const composed = composeOwnerProfile(new GatewayMethodCatalog(), { configManager: configFor() });
+      try {
+        expect(composed.store.path).toBe(expected);
+        expect(composed.store.get('identity.name')?.value).toBe('tree-owner');
+      } finally {
+        composed.dispose();
+      }
+    } finally {
+      if (savedTree === undefined) delete process.env['GOODVIBES_HOME'];
+      else process.env['GOODVIBES_HOME'] = savedTree;
+    }
   });
 
   test('an explicit profile.path still wins over the injected home', () => {
@@ -138,16 +146,26 @@ describe('owner-profile composition honours an injected home', () => {
 });
 
 describe('owner-profile composition registers the account identity for egress redaction', () => {
-  test('the running account\'s home is redacted while composed, and kept after dispose', () => {
-    const inHome = join(homedir(), 'work', 'notes.txt');
+  // `redactSensitiveData` masks all text it cannot prove safe, registered or not, so
+  // it cannot show the registration. The diagnostic path masks only what is known.
+  const account = userInfo().username;
+  const inHome = join(homedir(), 'work', 'notes.txt');
+  const named = `signed in as ${account} today`;
+
+  test('the running account\'s home and login name are masked while composed, and visible again after dispose', () => {
+    expect(redactDiagnosticText(inHome)).toBe(inHome);
+    expect(redactDiagnosticText(named)).toBe(named);
+
     const composed = composeOwnerProfile(new GatewayMethodCatalog(), { configManager: configFor(), homeDir: makeProjectTempDir('gv-profile-identity') });
     try {
-      expect(redactSensitiveData(inHome)).not.toContain(homedir());
-      expect(redactSensitiveData(inHome)).toContain('[REDACTED]');
+      expect(redactDiagnosticText(inHome)).not.toContain(homedir());
+      expect(redactDiagnosticText(inHome)).toContain('[REDACTED]');
+      expect(redactDiagnosticText(named)).toBe('signed in as [REDACTED] today');
     } finally {
       composed.dispose();
     }
-    expect(redactSensitiveData(inHome)).not.toContain(homedir());
-    expect(redactSensitiveData(inHome)).toContain('[REDACTED]');
+
+    expect(redactDiagnosticText(inHome)).toBe(inHome);
+    expect(redactDiagnosticText(named)).toBe(named);
   });
 });

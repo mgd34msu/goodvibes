@@ -1,4 +1,4 @@
-/** Native persisted v2 capture regressions. Source only; execution deferred. */
+/** Native persisted v2 capture regressions. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,10 +64,10 @@ test('a real native writer floor precedes fresh capture bytes and blocks an olde
   const captured = await store.retain(originalInput); expect(existsSync(store.pathFor(captured))).toBe(true); expect(declared).toBe(3);
 });
 
-test('a live capture holds the real index lease so another sweeper cannot delete its unindexed bytes', async () => {
+test('a live capture holds the real index lease so another sweeper waits instead of deleting its unindexed bytes', async () => {
   const f = fixture(), competing = new DeviceCaptureArtifactStore(f.directory); let sweep: Promise<unknown> | undefined;
   const store = new DeviceCaptureArtifactStore(f.directory, { beforeObservationWrite() { sweep ??= competing.sweep(); void sweep.catch(() => {}); } });
-  const capture = await store.retain(originalInput); await expect(sweep).rejects.toThrow('writer'); expect((await store.read(capture.id)).ok).toBe(true);
+  const capture = await store.retain(originalInput); await sweep; expect((await store.read(capture.id)).ok).toBe(true);
 });
 
 test('sweep preserves unproven UUID names and unrelated/index temporary files', async () => {

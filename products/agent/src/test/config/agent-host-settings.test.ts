@@ -27,12 +27,6 @@ function privacy(config: ConfigManager): boolean {
   return readNotificationsMetadataOnly((key) => readAgentHostSetting(config, key));
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-  expect(predicate()).toBe(true);
-}
-
 describe('Agent host-owned notification privacy settings', () => {
   test('one local descriptor, restrictive absent read, no startup write or platform mutation', () => {
     const { configDir, path } = fixture();
@@ -132,7 +126,7 @@ describe('Agent host-owned notification privacy settings', () => {
     expect(new AgentConfigManager(options).getHostBooleanSetting(KEY).get()).toBe(true);
   });
 
-  test('a reset that revokes the project tier then fails globally reports failure and remains restrictive on reload', () => {
+  test('a reset refused because the lock store is unreadable reports failure and changes nothing', () => {
     const { root, configDir } = fixture();
     const workingDir = join(root, 'project');
     mkdirSync(workingDir);
@@ -142,12 +136,13 @@ describe('Agent host-owned notification privacy settings', () => {
     config.getHostBooleanSetting(KEY).setProjectValue(false);
     renameSync(configDir, join(root, 'saved-config'));
     writeFileSync(configDir, 'blocked global path');
-    expect(() => config.getHostBooleanSetting(KEY).reset()).toThrow();
-    expect(config.getHostBooleanSetting(KEY).get()).toBe(true);
-    // Restore the original global false value; the successfully revoked
-    // higher-priority project tier must keep reload restrictive.
+    expect(() => config.getHostBooleanSetting(KEY).reset()).toThrow('Managed locks are not changed');
+    expect(config.getHostBooleanSetting(KEY).get()).toBe(false);
+    // The refusal comes before any file is written: the project choice was not revoked, so once the
+    // original config is readable again the stored false choices are exactly what they were.
     const restored = join(root, 'saved-config');
-    expect(new AgentConfigManager({ ...options, configDir: restored }).getHostBooleanSetting(KEY).get()).toBe(true);
+    expect(new AgentConfigManager({ ...options, configDir: restored }).getHostBooleanSetting(KEY).get()).toBe(false);
+    expect(JSON.parse(readFileSync(join(workingDir, '.goodvibes', 'agent', 'settings.json'), 'utf8')).behavior.notificationsMetadataOnly).toBe(false);
   });
 
   test('read-only and managed locks block setting and both reset paths', () => {
@@ -171,7 +166,7 @@ describe('Agent host-owned notification privacy settings', () => {
     expect(config.getHostBooleanSetting(KEY).get()).toBe(true);
   });
 
-  test('failed persistence revokes unreadable privacy once and never reports success', () => {
+  test('a write or reset refused for an unreadable lock store reports failure and changes nothing', () => {
     const { root, configDir } = fixture();
     const config = new AgentConfigManager({ configDir });
     config.getHostBooleanSetting(KEY).set(false);
@@ -179,27 +174,31 @@ describe('Agent host-owned notification privacy settings', () => {
     config.getHostBooleanSetting(KEY).subscribe((next) => changes.push(next));
     renameSync(configDir, join(root, 'saved-config'));
     writeFileSync(configDir, 'blocked parent path');
-    for (const action of [() => config.getHostBooleanSetting(KEY).set(true), () => config.getHostBooleanSetting(KEY).reset(), () => config.reset()]) {
-      expect(action).toThrow();
-      expect(config.getHostBooleanSetting(KEY).get()).toBe(true);
-      expect(changes).toEqual([true]);
+    for (const action of [() => config.getHostBooleanSetting(KEY).set(true), () => config.getHostBooleanSetting(KEY).reset()]) {
+      expect(action).toThrow('Managed locks are not changed');
+      expect(config.getHostBooleanSetting(KEY).get()).toBe(false);
     }
+    expect(changes).toEqual([]);
+    expect(readFileSync(join(root, 'saved-config', 'settings.json'), 'utf8')).toContain('false');
   });
 
-  test('external reload revokes details for true, malformed, and removed values', async () => {
+  test('external reload revokes details for true, malformed, and removed values', () => {
     const { configDir, path } = fixture();
     const config = new AgentConfigManager({ configDir });
     config.getHostBooleanSetting(KEY).set(false);
     const changes: unknown[] = [];
     config.getHostBooleanSetting(KEY).subscribe((next, previous) => changes.push([next, previous]));
-    const stop = config.watchConfigFiles({ intervalMs: 5 });
+    // The interval never fires inside the test; each external edit is applied by an explicit poll of the same watcher.
+    const stop = config.watchConfigFiles({ intervalMs: 3_600_000 });
     try {
       for (const value of [true, 'false', undefined]) {
         seed(configDir, value);
-        await waitFor(() => config.getHostBooleanSetting(KEY).get() === true);
+        config.flushConfigFileChanges();
+        expect(config.getHostBooleanSetting(KEY).get()).toBe(true);
         expect(privacy(config)).toBe(true);
         writeFileSync(path, JSON.stringify({ behavior: { notificationsMetadataOnly: false } }));
-        await waitFor(() => config.getHostBooleanSetting(KEY).get() === false);
+        config.flushConfigFileChanges();
+        expect(config.getHostBooleanSetting(KEY).get()).toBe(false);
       }
       expect(changes).toEqual(Array.from({ length: 3 }, () => [[true, false], [false, true]]).flat());
     } finally { stop(); }

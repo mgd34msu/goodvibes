@@ -28,12 +28,11 @@ import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_pro
 import { existsSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { watchSleepEdge } from './sleep-edge-watch.js';
 import type { PowerInhibitClass, PowerInhibitHandle, PowerPlatformSeam } from './types.js';
 import {
   defaultSleepWatchSpawner,
-  onStdoutLines,
   pidIsAlive,
-  trackSleepWatcher,
   type OrphanReaperDeps,
   type SleepWatchSpawner,
 } from './child-hygiene.js';
@@ -243,6 +242,15 @@ export function createDarwinCaffeinateSeam(options: DarwinCaffeinateSeamOptions 
       const child = await startInhibitor(spawnInhibitor, caffeinateArgs(held, process.pid), probeMs);
       if (!child) return null;
       let released = false;
+      let lost = false;
+      const lostCallbacks: Array<() => void> = [];
+      // caffeinate ending on its own (killed, or its `-w` check failed) drops every assertion it held.
+      child.once('exit', () => {
+        if (released || lost) return;
+        lost = true;
+        logger.warn('[power] caffeinate exited on its own; the hold is lost');
+        for (const callback of lostCallbacks.splice(0)) callback();
+      });
       return {
         grantedClasses: granted,
         deniedClasses: denied,
@@ -255,23 +263,26 @@ export function createDarwinCaffeinateSeam(options: DarwinCaffeinateSeamOptions 
             logger.warn('[power] caffeinate release failed', { error: summarizeError(error) });
           }
         },
+        onLost: (callback) => {
+          if (lost) callback();
+          else lostCallbacks.push(callback);
+        },
       };
     },
     onPrepareForSleep(callback): () => void {
-      const monitor = spawnMonitor(LOG_PATH, sleepWatchArgs(process.pid));
-      const stop = trackSleepWatcher(monitor, (error) => {
-        logger.warn('[power] log stream unavailable; sleep-edge signal disabled', { error: summarizeError(error) });
+      return watchSleepEdge({
+        label: 'log stream',
+        spawnWatcher: () => spawnMonitor(LOG_PATH, sleepWatchArgs(process.pid)),
+        createLineHandler: () => (line) => {
+          const sleeping = darwinSleepEdgeFromLogLine(line);
+          if (sleeping === null) return;
+          try {
+            callback(sleeping);
+          } catch (error) {
+            logger.warn('[power] sleep-edge callback failed', { error: summarizeError(error) });
+          }
+        },
       });
-      onStdoutLines(monitor, (line) => {
-        const sleeping = darwinSleepEdgeFromLogLine(line);
-        if (sleeping === null) return;
-        try {
-          callback(sleeping);
-        } catch (error) {
-          logger.warn('[power] sleep-edge callback failed', { error: summarizeError(error) });
-        }
-      });
-      return stop;
     },
   };
 }

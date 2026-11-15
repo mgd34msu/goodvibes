@@ -107,6 +107,20 @@ describe('a Google question with nothing connected answers from runtime state', 
   });
 });
 
+describe('the broad question carries the Google route text too', () => {
+  test('subject all names the built-in google tool, and says when its live status could not be read', () => {
+    const answer = renderCapabilityStatus('all', { ...GOOGLE_UNCONFIGURED, googleStatus: undefined, googleStatusUnreadable: true });
+    expect(answer).toContain('built-in google tool');
+    expect(answer).toContain('/google connect');
+    expect(answer).toContain('could not be read just now');
+  });
+
+  test('subject all in a build without the route says it is absent', () => {
+    const answer = renderCapabilityStatus('all', { ...GOOGLE_UNCONFIGURED, googleToolRegistered: false });
+    expect(answer).toContain('Gmail and Google Calendar are absent from this build');
+  });
+});
+
 describe('a build that genuinely lacks the route says so', () => {
   const answer = renderCapabilityStatus('google', {
     googleToolRegistered: false,

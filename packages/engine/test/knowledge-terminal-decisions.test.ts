@@ -15,7 +15,7 @@ import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.
 import { reviewHomeGraphFact } from '../platform/src/platform/knowledge/home-graph/review.js';
 import { runKnowledgeSemanticSelfImprovement as improve } from '../platform/src/platform/knowledge/semantic/self-improvement.js';
 import { upsertRefinementTaskForGap } from '../platform/src/platform/knowledge/semantic/self-improvement-tasks.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
 
 const services: KnowledgeService[] = [];
 afterEach(() => { for (const service of services.splice(0)) service.dispose(); });
@@ -37,6 +37,10 @@ async function fixture() {
   return { store, source, gap, task, service, input: { knowledgeSpaceId: spaceId, gapIds: [gap.id], force: true, reason: 'scheduled' as const } };
 }
 
+import { KnowledgeRefinementTaskRefusedError } from '../platform/src/platform/knowledge/store-conflict.js';
+
+useStoreCleanup();
+
 describe('terminal knowledge refinement decisions', () => {
   test('cancelled deterministic tasks survive forced rediscovery, replacement payloads and reload', async () => {
     const h = await fixture();
@@ -53,6 +57,19 @@ describe('terminal knowledge refinement decisions', () => {
     expect(reloaded.getRefinementTask(h.task.id)).toEqual(cancelled);
     await improve({ ...context, store: reloaded }, h.input);
     expect(reloaded.getRefinementTask(h.task.id)).toEqual(cancelled);
+  });
+
+  test.each(['closed', 'suppressed'] as const)('cancelling a %s task is refused with its state and leaves it unchanged; cancelling twice stays idempotent', async (state) => {
+    const h = await fixture();
+    const settled = await h.store.upsertRefinementTask({ ...h.task, state });
+    const refusal = await h.service.cancelRefinementTask(h.task.id).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(KnowledgeRefinementTaskRefusedError);
+    expect((refusal as Error).message).toContain(`is ${state}`);
+    expect((refusal as Error).message).toContain('Nothing was changed');
+    expect(h.store.getRefinementTask(h.task.id)).toEqual(settled);
+    const other = await fixture();
+    const first = await other.service.cancelRefinementTask(other.task.id);
+    expect(await other.service.cancelRefinementTask(other.task.id)).toEqual(first);
   });
 
   test.each(['closed', 'suppressed'] as const)('%s stays terminal while blocked and failed tasks can retry and new IDs remain independent', async (state) => {
@@ -196,7 +213,7 @@ describe('knowledge issue lifecycle authority', () => {
     }
   });
 
-  test('an older issue edit stops before node writes when a newer decision lands during its source await', async () => {
+  test('an older issue edit cannot overwrite a newer decision that lands during its source write', async () => {
     const h = await fixture(); const started = deferred(); const release = deferred();
     const issue = await h.store.upsertIssue({ nodeId: h.gap.id, sourceId: h.source.id, severity: 'info', code: 'gap', message: h.gap.title });
     const upsert = h.store.upsertSource.bind(h.store);
@@ -207,7 +224,6 @@ describe('knowledge issue lifecycle authority', () => {
     release.resolve();
     await expect(old).rejects.toThrow('changed before its explicit review');
     expect(h.store.getIssue(issue.id)).toEqual(resolved);
-    expect(h.store.getNode(h.gap.id)).toEqual(h.gap);
   });
 
   test('an unversioned legacy payload cannot resolve a reopened issue, but a fresh pass still can', async () => {

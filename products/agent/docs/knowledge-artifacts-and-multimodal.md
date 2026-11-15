@@ -164,4 +164,3 @@ Multimodal outputs should stay in the conversation, artifacts, local notes or me
 
 - [Tools and commands](tools-and-commands.md)
 - [Getting started](getting-started.md)
-- Release and publishing

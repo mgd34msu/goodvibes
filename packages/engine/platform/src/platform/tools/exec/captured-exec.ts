@@ -1,4 +1,5 @@
 import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
+import { logger } from '../../utils/logger.js';
 import { RetainedFileBytes, type RetainedFileCapture, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { projectCapturedExecBunRuntime, type CapturedExecBunRuntimeInput } from './captured-bun-runtime-input.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../runtime/captured-bun-runtime.js';
@@ -8,7 +9,8 @@ import { MAX_INPUT_LENGTH, MAX_TOKEN_COUNT, tokenize } from '../../runtime/permi
 import { projectCapturedExecNodeRuntime, type CapturedExecNodeRuntimeInput } from './captured-exec-runtime-input.js';
 import { assertCapturedPublicationOwner, type CapturedPublicationLease } from '../shared/captured-publication.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { publishCapturedProjection } from './captured-exec-publication.js';
+import { discardCapturedProjection } from './captured-exec-cleanup.js';
+import { PartialCapturedPublication, publishCapturedProjection } from './captured-exec-publication.js';
 import { executeCapturedFileOperations } from './captured-exec-file-ops.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
 import { runInteractiveCommand, type ExecInteractionRuntime } from './interactive.js';
@@ -32,6 +34,11 @@ import { CONTRACT_INPUT_EXCLUSIONS } from '../../contract/input-snapshot.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
 import type { ExecCommandInput, ExecCommandResult, ExecFileOp } from './schema.js';
 
+/** Characters of one stream held in memory; the rest is dropped and the result says so. */
+export const MAX_CAPTURE_CHARS = 4_000_000;
+/** The tail of the output an until pattern is tested against, so each chunk costs a bounded amount. */
+export const UNTIL_PATTERN_WINDOW_CHARS = 65_536;
+
 export interface CapturedExecAuthority {
   /** Actual host run owns staged input resources; never read from tool JSON. */
   readonly retainInputResource?: ((dispose: () => void) => void) | undefined;
@@ -49,7 +56,10 @@ export interface CapturedExecAuthority {
 export type CapturedExecAvailability =
   | { readonly available: true; readonly backend: 'linux-bwrap-projection' }
   | { readonly available: false; readonly reason: 'unsupported-platform' | 'unsupported-architecture' | 'missing-bwrap' | 'unusable-boundary'; readonly message: string };
-const HELD = 'Captured exec held: original-owner/view authority is unavailable, changed, cancelled or restricted. Output withheld.';
+const HELD = 'Captured exec held: original-owner/view authority is unavailable, changed or restricted. Output withheld; no file changes were applied. Re-read the files you rely on, then rerun if still needed.';
+const CANCELLED = 'Captured exec cancelled. Output withheld; no file changes were applied.';
+const HELD_AFTER_PUBLISH = 'Captured exec held after its file changes were applied: the changes are in the project; only output is withheld. Do not rerun to repeat them; read the changed files instead.';
+const timedOutNote = (timeoutMs: number): string => `Captured exec timed out after ${timeoutMs}ms. Output withheld; no file changes were applied.`;
 
 class ReservedCapturedOutput extends Error {
   constructor(directory: (typeof CONTRACT_INPUT_EXCLUSIONS)[number]) {
@@ -95,11 +105,32 @@ function runtimeArgv(nodeRuntime = false, bunRuntime = false): string[] {
   return argv;
 }
 
-/** Actual supported-host proof, not a PATH/existence claim. No host fallback. */
-export async function probeCapturedExecAvailability(): Promise<CapturedExecAvailability> {
+let provenBoundary = false;
+
+function capturedHostRefusal(): CapturedExecAvailability | null {
   if (process.platform !== 'linux') return { available: false, reason: 'unsupported-platform', message: 'Captured exec currently requires Linux with bubblewrap; this host platform has no supported captured boundary.' };
   if (process.arch !== 'x64' && process.arch !== 'arm64') return { available: false, reason: 'unsupported-architecture', message: 'Captured exec currently supports Linux x64 and arm64 only.' };
   if (!existsSync('/usr/bin/bwrap')) return { available: false, reason: 'missing-bwrap', message: 'Captured exec requires bubblewrap at /usr/bin/bwrap.' };
+  return null;
+}
+
+/**
+ * Actual supported-host proof, not a PATH/existence claim. No host fallback.
+ * The platform and bubblewrap checks run every time; the boundary run, which
+ * spawns bubblewrap and writes a temporary file synchronously, is kept after it
+ * succeeds once, since the host does not lose it between commands. A failed
+ * proof is repeated, so a fixed host is noticed.
+ */
+export async function probeCapturedExecAvailability(): Promise<CapturedExecAvailability> {
+  const refusal = capturedHostRefusal();
+  if (refusal) return refusal;
+  if (provenBoundary) return { available: true, backend: 'linux-bwrap-projection' };
+  const probed = await probeCapturedExecBoundary();
+  if (probed.available) provenBoundary = true;
+  return probed;
+}
+
+async function probeCapturedExecBoundary(): Promise<CapturedExecAvailability> {
   let dir: string | undefined;
   try {
     dir = await mkdtemp(join(tmpdir(), 'captured-exec-probe-'));
@@ -258,6 +289,10 @@ export async function runCapturedCommand(
     await checkDependencies();
     if (observer.repairCandidate) assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
   }, operationSignal);
+  let published = false;
+  // A timed-out PTY run reports the prompt it was waiting on, but only after
+  // authority is proven again before the stopped run's operations are released.
+  let promptDiagnostics: Pick<ExecCommandResult, 'pending_prompt' | 'prompt_declined'> = {};
   try {
     if (!within(root, resolve(workingDirectory)) || !within(root, cwd)) throw new Error('outside captured working directory');
     if (['/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'].some((path) => within(path, root) || within(root, path)))
@@ -282,18 +317,22 @@ export async function runCapturedCommand(
       try {
         const nodeRuntimeInput = await executePolicyCheck(() => binding.nodeRuntimeAdmission!(operationSignal), operationSignal);
         binding = Object.freeze({ ...binding, nodeRuntimeInput });
-      } catch {
+      } catch (error) {
         operationSignal.throwIfAborted();
         await check();
+        // The command still runs, with a stub that says the runtime is
+        // unavailable; the cause is logged so it is not lost behind that stub.
+        logger.warn('captured exec: Node runtime admission failed', { error: error instanceof Error ? error.message : String(error) });
       }
     }
     if (!binding.bunRuntimeInput && binding.bunRuntimeAdmission && needsRuntime(command, input, 'bun')) {
       try {
         const bunRuntimeInput = await executePolicyCheck(() => binding.bunRuntimeAdmission!(operationSignal), operationSignal);
         binding = Object.freeze({ ...binding, bunRuntimeInput });
-      } catch {
+      } catch (error) {
         operationSignal.throwIfAborted();
         await check();
+        logger.warn('captured exec: Bun runtime admission failed', { error: error instanceof Error ? error.message : String(error) });
       }
     }
     temporary = await mkdtemp(join(tmpdir(), 'goodvibes-captured-exec-'));
@@ -380,7 +419,9 @@ export async function runCapturedCommand(
       validating = true;
       validation = check().catch(() => { invalid = true; stop(); }).finally(() => { validating = false; });
     }, 50);
+    monitor.unref?.();
     let stdout = ''; let stderr = '';
+    let stdoutDropped = false; let stderrDropped = false;
     let exitCode: number | null;
     let modeResult: ExecCommandResult | undefined;
     if (observer.interaction) {
@@ -393,6 +434,17 @@ export async function runCapturedCommand(
         stdout = modeResult.stdout; stderr = modeResult.stderr; exitCode = modeResult.exit_code;
         timedOut = modeResult.timed_out === true;
         killed = killed || timedOut || modeResult.cancelled === true;
+        if (timedOut && (modeResult.pending_prompt !== undefined || modeResult.prompt_declined)) {
+          clearInterval(monitor);
+          await validation;
+          try {
+            await check();
+            if (!invalid) promptDiagnostics = {
+              ...(modeResult.pending_prompt !== undefined ? { pending_prompt: modeResult.pending_prompt } : {}),
+              ...(modeResult.prompt_declined ? { prompt_declined: true } : {}),
+            };
+          } catch { /* Authority did not hold; the prompt stays withheld with the output. */ }
+        }
         if (killed) operations.abort();
       } finally { closeSync(fd); clearInterval(monitor); }
     } else {
@@ -421,7 +473,16 @@ export async function runCapturedCommand(
       let checkingUntil = false;
       let untilCompletion: Promise<void> = Promise.resolve();
       const capture = (data: Buffer, output: 'stdout' | 'stderr'): void => {
-        if (output === 'stdout') stdout += data.toString(); else stderr += data.toString();
+        // A command that prints without end must not grow the host process: keep a bounded prefix and say the rest was dropped.
+        if (output === 'stdout') {
+          const room = MAX_CAPTURE_CHARS - stdout.length; const text = data.toString();
+          if (text.length > room) stdoutDropped = true;
+          if (room > 0) stdout += text.length > room ? text.slice(0, room) : text;
+        } else {
+          const room = MAX_CAPTURE_CHARS - stderr.length; const text = data.toString();
+          if (text.length > room) stderrDropped = true;
+          if (room > 0) stderr += text.length > room ? text.slice(0, room) : text;
+        }
         untilDirty = true;
         if (checkingUntil || !untilPattern || untilMatched) return;
         checkingUntil = true;
@@ -429,7 +490,7 @@ export async function runCapturedCommand(
           try {
             while (untilDirty && !untilMatched) {
               untilDirty = false;
-              if (await untilPattern.test(stdout + stderr)) {
+              if (await untilPattern.test((stdout.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderr.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))) {
                 await check();
                 untilMatched = true;
                 clearTimeout(timer);
@@ -457,7 +518,8 @@ export async function runCapturedCommand(
     await validation;
     await check();
     if (invalid) throw new Error('authority changed');
-    if (killed) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: '', success: false, timed_out: timedOut, duration_ms: Date.now() - start };
+    if (killed) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOut ? timedOutNote(timeoutMs) : CANCELLED, success: false, timed_out: timedOut,
+      ...(timedOut ? promptDiagnostics : { cancelled: true }), duration_ms: Date.now() - start };
     if (script) await rm(join(projection, script.name), { force: true });
     const changes = new Map<string, { path: string; bytes: RetainedFileSlice; mode: number }>();
     const present = new Set<string>();
@@ -512,6 +574,10 @@ export async function runCapturedCommand(
     untilPattern?.assertCurrent();
     if (outputBytes)
       await publishCapturedProjection(binding, { originals: originalByteOwner, changes: outputBytes }, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
+    published = outputBytes !== undefined && (changes.size > 0
+      || [...originals.keys()].some((rel) => !present.has(rel))
+      || [...directories.keys()].some((rel) => !originalDirectories.has(rel))
+      || [...originalDirectories.keys()].some((rel) => !directories.has(rel)));
     await check();
     if (candidate && candidateRelative) {
       assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
@@ -527,29 +593,27 @@ export async function runCapturedCommand(
     if (input.expect?.exit_code !== undefined && exitCode !== input.expect.exit_code) failures.push('exit_code expectation failed');
     if (input.expect?.stdout_contains !== undefined && !stdout.includes(input.expect.stdout_contains)) failures.push('stdout expectation failed');
     if (input.expect?.stderr_contains !== undefined && !stderr.includes(input.expect.stderr_contains)) failures.push('stderr expectation failed');
-    return { ...modeResult, cmd: command, cwd, exit_code: exitCode, stdout, stderr, success: (input.until ? untilMatched : (modeResult?.success ?? exitCode === 0)) && failures.length === 0,
+    return { ...modeResult, cmd: command, cwd, exit_code: exitCode, stdout, stderr, ...(stdoutDropped ? { stdout_truncated: true } : {}), ...(stderrDropped ? { stderr_truncated: true } : {}), success: (input.until ? untilMatched : (modeResult?.success ?? exitCode === 0)) && failures.length === 0,
       duration_ms: Date.now() - start, sandboxed: true, sandbox_boundary: `captured authorized projection; isolated PID/mounts; network ${network}`, sandbox_network: network,
       captured_exec_availability: availability, ...(failures.length ? { expectation_error: failures.join('; ') } : {}) };
   } catch (error) {
     stop();
     await childCompletion?.catch(() => {});
-    if (timedOut) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: '', success: false, timed_out: true, duration_ms: Date.now() - start };
-    const diagnosis = error instanceof ReservedCapturedOutput && !combined?.aborted ? error.message : HELD;
+    // A rollback that could not finish leaves some of the command's changes on disk.
+    if (error instanceof PartialCapturedPublication) published = true;
+    if (timedOut && !published) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOutNote(timeoutMs), success: false, timed_out: true,
+      ...promptDiagnostics, duration_ms: Date.now() - start };
+    // Output stays withheld on every path here; what differs is whether the
+    // command's file changes already landed, which decides if a rerun is safe.
+    const diagnosis = published ? HELD_AFTER_PUBLISH
+      : error instanceof ReservedCapturedOutput && !combined?.aborted ? error.message
+        : combined?.aborted ? CANCELLED : HELD;
     return { cmd: command, cwd, exit_code: null, stdout: '', stderr: diagnosis, success: false, denied: true,
-      ...(combined?.aborted ? { cancelled: true } : {}), duration_ms: Date.now() - start };
+      ...(combined?.aborted ? { cancelled: true } : {}), ...(published ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
   } finally {
     clearTimeout(timer); clearInterval(monitor);
     try {
-      if (temporary) {
-        const restoreDirectoryAccess = async (path: string): Promise<void> => {
-          const stat = await lstat(path);
-          if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-          await chmod(path, (stat.mode & 0o777) | 0o700);
-          for (const name of await readdir(path)) await restoreDirectoryAccess(join(path, name));
-        };
-        await restoreDirectoryAccess(temporary);
-        await rm(temporary, { recursive: true, force: true });
-      }
+      if (temporary) await discardCapturedProjection(temporary);
     } finally {
       try { originalBytes?.close(); } finally { outputBytes?.close(); }
     }

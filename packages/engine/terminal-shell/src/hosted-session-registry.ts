@@ -21,12 +21,16 @@
  * ── Busy is turn-scoped, deliberately ─────────────────────────────────────
  *
  * `TURN_SUBMITTED` marks a session busy; `TURN_COMPLETED` / `TURN_ERROR` /
- * `TURN_CANCEL` mark it idle again. Those three terminal events are the same
- * set the platform's own power work-signals use, so a cancelled or failed turn
- * releases the busy flag rather than pinning it until the next successful one.
- * A turn that never reports a terminal event would leave a session busy
- * forever, which errs toward "do not consolidate memory / do not restart the
- * binary", the safe direction for both consumers.
+ * `TURN_CANCEL` mark it idle again, and so does `PREFLIGHT_FAIL` for a turn
+ * this registry saw submitted (a context-window failure ends a turn with no
+ * other event). Those are the same terminal events the platform's own power
+ * work-signals use, so a cancelled or failed turn releases the busy flag rather
+ * than pinning it until the next successful one. A `PREFLIGHT_FAIL` for a turn
+ * id never seen submitted is ignored: a rejected duplicate submission reports a
+ * fresh id while the real turn is still running. A turn that never reports a
+ * terminal event would leave a session busy forever, which errs toward "do not
+ * consolidate memory / do not restart the binary", the safe direction for both
+ * consumers.
  */
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
@@ -59,6 +63,12 @@ type TurnEnd = Extract<
     type: 'TURN_COMPLETED' | 'TURN_ERROR' | 'TURN_CANCEL';
   }
 >;
+type TurnPreflightFail = Extract<
+  TurnEvent,
+  {
+    type: 'PREFLIGHT_FAIL';
+  }
+>;
 /**
  * Build the registry.
  *
@@ -70,7 +80,19 @@ type TurnEnd = Extract<
 export function createHostedSessionRegistry(bus?: TurnBus | undefined): HostedSessionRegistry {
   const hosted = new Set<string>();
   const busy = new Set<string>();
+  /** Turn ids submitted and not yet ended, per session, and the session each belongs to. */
+  const openTurns = new Map<string, Set<string>>();
+  const turnOwner = new Map<string, string>();
+  const closeTurns = (sessionId: string): void => {
+    for (const turnId of openTurns.get(sessionId) ?? []) turnOwner.delete(turnId);
+    openTurns.delete(sessionId);
+  };
   const unsubscribes: Array<() => void> = [];
+  /** The turn an event is about; a bare envelope without a payload names none. */
+  const turnIdOf = (envelope: { readonly payload?: { readonly turnId?: unknown } | undefined }): string | undefined => {
+    const turnId = envelope.payload?.turnId;
+    return typeof turnId === 'string' ? turnId : undefined;
+  };
   /**
    * The session a turn belongs to.
    *
@@ -89,21 +111,43 @@ export function createHostedSessionRegistry(bus?: TurnBus | undefined): HostedSe
     unsubscribes.push(
       bus.on<TurnStart>('TURN_SUBMITTED', (envelope) => {
         const sessionId = sessionForTurn(envelope.sessionId);
-        if (sessionId) busy.add(sessionId);
+        if (!sessionId) return;
+        busy.add(sessionId);
+        const turnId = turnIdOf(envelope);
+        if (turnId === undefined) return;
+        let turns = openTurns.get(sessionId);
+        if (!turns) { turns = new Set(); openTurns.set(sessionId, turns); }
+        turns.add(turnId);
+        turnOwner.set(turnId, sessionId);
       }),
     );
     for (const terminal of ['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL'] as const) {
       unsubscribes.push(
         bus.on<TurnEnd>(terminal, (envelope) => {
-          const sessionId = sessionForTurn(envelope.sessionId);
-          if (sessionId) busy.delete(sessionId);
-          // A terminal event this process could not attribute still ends A turn.
-          // With nothing attributable left to end, clear the whole busy set
-          // rather than leaving a stale id pinned busy for the process lifetime.
-          else busy.clear();
+          const turnId = turnIdOf(envelope);
+          const sessionId = sessionForTurn(envelope.sessionId) ?? (turnId === undefined ? undefined : turnOwner.get(turnId));
+          // With several sessions hosted, an event that names neither session
+          // nor a turn seen here cannot say whose turn ended; leaving every
+          // session busy is the safe answer, clearing them all would not be.
+          if (!sessionId) return;
+          busy.delete(sessionId);
+          closeTurns(sessionId);
         }),
       );
     }
+    unsubscribes.push(
+      bus.on<TurnPreflightFail>('PREFLIGHT_FAIL', (envelope) => {
+        const turnId = turnIdOf(envelope);
+        const sessionId = envelope.sessionId || (turnId === undefined ? undefined : turnOwner.get(turnId));
+        const turns = sessionId ? openTurns.get(sessionId) : undefined;
+        if (!sessionId || turnId === undefined || !turns?.has(turnId)) return;
+        turns.delete(turnId);
+        turnOwner.delete(turnId);
+        if (turns.size > 0) return;
+        openTurns.delete(sessionId);
+        busy.delete(sessionId);
+      }),
+    );
   }
   return {
     adopt(sessionId: string): void {
@@ -112,6 +156,7 @@ export function createHostedSessionRegistry(bus?: TurnBus | undefined): HostedSe
     release(sessionId: string): void {
       hosted.delete(sessionId);
       busy.delete(sessionId);
+      closeTurns(sessionId);
     },
     ids(): readonly string[] {
       return [...hosted];

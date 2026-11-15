@@ -1,6 +1,7 @@
 import type { ConversationMessageSnapshot, TokenUsage } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+type ToolHostEvidence = NonNullable<Extract<ConversationMessageSnapshot, { role: 'tool' }>['hostEvidence']>;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -88,16 +89,31 @@ function readConversationMessageSnapshot(value: unknown): ConversationMessageSna
     };
   }
   if (value.role === 'system' && typeof value.content === 'string') {
-    return { role: 'system', content: value.content };
+    if (!hasOwn(value, 'runtimeEvent')) return { role: 'system', content: value.content };
+    const event = value.runtimeEvent;
+    if (!isRecord(event) || typeof event.type !== 'string') return null;
+    if (hasOwn(event, 'occurrenceId') && event.occurrenceId !== undefined && typeof event.occurrenceId !== 'string') return null;
+    return {
+      role: 'system',
+      content: value.content,
+      runtimeEvent: { type: event.type, ...(typeof event.occurrenceId === 'string' ? { occurrenceId: event.occurrenceId } : {}) },
+    };
   }
   if (value.role === 'tool' && typeof value.callId === 'string' && typeof value.content === 'string') {
     const toolName = hasOwn(value, 'toolName') ? readString(value.toolName) : undefined;
     if (hasOwn(value, 'toolName') && toolName === undefined) return null;
+    // An absent outcome means "unknown" (legacy results); a present one must be a known state.
+    const rawOutcome = hasOwn(value, 'outcome') ? value.outcome : undefined;
+    const outcome = rawOutcome === 'ok' || rawOutcome === 'error' || rawOutcome === 'cancelled' ? rawOutcome : undefined;
+    if (hasOwn(value, 'outcome') && outcome === undefined) return null;
     return {
       role: 'tool',
       callId: value.callId,
       content: value.content,
       ...(toolName !== undefined ? { toolName } : {}),
+      ...(outcome !== undefined ? { outcome } : {}),
+      // Passed through for the platform fold to validate, like usage.
+      ...(hasOwn(value, 'hostEvidence') && value.hostEvidence !== undefined ? { hostEvidence: value.hostEvidence as ToolHostEvidence } : {}),
     };
   }
   return null;

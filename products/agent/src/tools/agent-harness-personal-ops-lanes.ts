@@ -6,11 +6,16 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { calendarWorkflows, connectorSignalsMatching, inboxWorkflows, contractMethodsForLane, contractMethodsForLanes, retainPersonalOpsContractSource, reminderWorkflows, taskWorkflows } from './agent-harness-personal-ops-discovery.ts';
-import { providerBackedQueueRecords } from './agent-harness-personal-ops-provider-records.ts';
-import { providerBackedReminderRecords, providerBackedTaskRecords } from './agent-harness-personal-ops-provider-task-records.ts';
-import { channelRecords, connectorRecords, localRecord, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords } from './agent-harness-personal-ops-records.ts';
+import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
+import { cappedCount, channelRecords, connectorRecords, localRecord, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords } from './agent-harness-personal-ops-records.ts';
 import type { McpToolRecord, McpToolSchema, PersonalOpsLane, PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
 import { personalOpsStyleDraftRecord, personalOpsStyleDraftWorkflow } from './agent-harness-personal-ops-style-draft.ts';
+
+/** Methods a lane reading could not settle are left out of the lane; say so instead of dropping them silently. */
+export function withUnassessed(lane: PersonalOpsLane, unassessed: readonly string[] | undefined): PersonalOpsLane {
+  if (!unassessed?.length) return lane;
+  return { ...lane, signals: [...lane.signals, `${unassessed.length} method(s) not assessed for this lane (reading could not settle them): ${unassessed.join(', ')}`] };
+}
 
 function notesLane(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>): PersonalOpsLane {
   return {
@@ -23,7 +28,7 @@ function notesLane(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapsho
       ? 'Review or promote selected notes into memory, skills, routines, or Agent Knowledge when useful.'
       : 'Create a note from the Personal Ops or Notes workspace when the next decision or source needs tracking.',
     userRoute: 'Agent Workspace -> Personal Ops -> Create note',
-    modelRoute: 'agent_local_registry domain:"notes" action:"create"',
+    modelRoute: NOTE_CAPTURE_ROUTE,
     signals: [
       `${snapshot.localNoteCount} local note(s)`,
       `${snapshot.localNoteReviewQueueCount} note(s) in review queue`,
@@ -32,47 +37,40 @@ function notesLane(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapsho
   };
 }
 
-function remindersLane(scheduleMethods: readonly string[], reminderProviderRecords: readonly PersonalOpsLiveRecord[],
+function remindersLane(scheduleMethods: readonly string[],
   reminderEffectReceiptRecords: readonly PersonalOpsLiveRecord[], configuredTargets: number, readyChannels: number): PersonalOpsLane {
   return {
     id: 'reminders',
     label: 'Reminders',
-    status: reminderProviderRecords.length > 0 || scheduleMethods.length > 0 || reminderEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
+    status: scheduleMethods.length > 0 || reminderEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
     outcome: 'Turn a user request into a visible reminder or autonomous schedule with delivery target and cancellation path.',
-    current: reminderProviderRecords.length > 0
-      ? `Fresh provider-backed reminder records are published by the connected daemon or platform read model; Agent can review ${reminderProviderRecords.length} current reminder record(s) before any edit, snooze, complete, or delete route.`
-      : reminderEffectReceiptRecords.length > 0
-        ? 'Saved reminder provider-effect receipts are available for audit and follow-up; no fresh reminder provider record is currently ready.'
+    current: reminderEffectReceiptRecords.length > 0
+      ? 'Saved reminder provider-effect receipts are available for audit and follow-up; no fresh reminder provider record is currently ready.'
       : `Reminder and autonomous schedule creation are available through Agent tools; ${scheduleMethods.length} schedule/reminder daemon method(s) are discoverable.`,
-    next: reminderProviderRecords.length > 0
-      ? 'Inspect one provider reminder record, then use only a published confirmed follow-up route for edits, snooze, completion, cancellation, or delete.'
-      : reminderEffectReceiptRecords.length > 0
-        ? 'Review saved reminder provider-effect receipts, then repair or refresh the reminder provider before another provider update.'
+    next: reminderEffectReceiptRecords.length > 0
+      ? 'Review saved reminder provider-effect receipts, then repair or refresh the reminder provider before another provider update.'
       : 'Create one confirmed reminder or autonomous schedule with title, time, scope, delivery target, success criteria, and explicit user request.',
     userRoute: 'Agent Workspace -> Personal Ops -> Create reminder',
-    modelRoute: 'schedule action:"remind|create"',
+    modelRoute: 'schedule action:"remind"',
     signals: [
-      `${reminderProviderRecords.length} fresh provider-backed reminder record(s)`,
-      `${reminderEffectReceiptRecords.length} saved reminder provider-effect receipt(s)`,
+      `${cappedCount(reminderEffectReceiptRecords.length, 'record')} saved reminder provider-effect receipt(s)`,
       `${scheduleMethods.length} schedule/reminder daemon method(s)`,
       `${configuredTargets} configured delivery target(s)`,
     ],
     methodIds: scheduleMethods,
     workflows: reminderWorkflows(scheduleMethods, configuredTargets > 0 || readyChannels > 0),
     liveRecords: [
-      ...reminderProviderRecords,
       ...reminderEffectReceiptRecords,
       ...reminderOperationRecords(scheduleMethods, configuredTargets > 0 || readyChannels > 0),
     ],
   };
 }
 
-function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxProviderRecords, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
+function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
   readonly snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>;
   readonly emailMethods: readonly string[];
   readonly unavailableEmailMethods: readonly string[];
   readonly emailConnectors: Awaited<ReturnType<typeof connectorSignalsMatching>>;
-  readonly inboxProviderRecords: readonly PersonalOpsLiveRecord[];
   readonly inboxArtifactRecords: readonly PersonalOpsLiveRecord[];
   readonly inboxReviewQueueRecords: readonly PersonalOpsLiveRecord[];
   readonly inboxEffectReceiptRecords: readonly PersonalOpsLiveRecord[];
@@ -82,13 +80,9 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
   return {
     id: 'inbox',
     label: 'Inbox',
-    status: inboxProviderRecords.length > 0
-      ? 'ready'
-      : emailMethods.length > 0 || emailConnectors.length > 0 || inboxArtifactRecords.length > 0 || inboxEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
+    status: emailMethods.length > 0 || emailConnectors.length > 0 || inboxArtifactRecords.length > 0 || inboxEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
     outcome: 'Triage inbound email or message inboxes, summarize threads, draft replies, and send only after confirmation.',
-    current: inboxProviderRecords.length > 0
-      ? 'Fresh provider-backed inbox thread records are published by the connected daemon or platform read model; Personal Ops can triage current queue state without inventing sends, labels, or archive effects.'
-      : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
+    current: emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
       ? 'The daemon contract exposes email-like methods; Personal Ops workflow cards now guide inbox triage and draft boundaries around exact methods.'
       : emailConnectors.length > 0
         ? 'A configured MCP connector looks email-capable; Personal Ops workflow cards now guide inbox triage, schema-derived operation records, and draft boundaries around its exact tools.'
@@ -99,9 +93,7 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
       : unavailableEmailMethods.length > 0
         ? `The operator contract advertises ${unavailableEmailMethods.length} email method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched.`
       : 'No email/IMAP/SMTP methods are present in the current GoodVibes platform operator contract.',
-    next: inboxProviderRecords.length > 0
-      ? 'Inspect one fresh thread record, summarize or draft locally, and use only the published confirmed follow-up routes for replies, sends, labels, or archive.'
-      : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
+    next: emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
       ? 'Use the inbox workflow cards to inspect exact methods, read selected threads, summarize priorities, and keep send as a separate confirmation.'
       : emailConnectors.length > 0
         ? 'Use the inbox workflow cards and operation records to inspect matching MCP connector schemas, then route triage only through reviewed connector actions.'
@@ -113,13 +105,12 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
     userRoute: 'Agent Workspace -> Personal Ops -> Delivery channels',
     modelRoute: emailConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"email"' : 'host action:"methods" query:"email"',
     signals: [
-      `${inboxProviderRecords.length} fresh provider-backed inbox thread record(s)`,
       `${emailMethods.length} dispatchable email-like daemon method(s)`,
       ...(unavailableEmailMethods.length > 0 ? [`${unavailableEmailMethods.length} advertised-but-unavailable email method(s) (route not served by this daemon)`] : []),
       `${emailConnectors.length} email-like MCP connector(s)`,
-      `${inboxArtifactRecords.length} saved inbox review artifact(s)`,
-      `${inboxReviewQueueRecords.length} saved inbox thread queue item(s)`,
-      `${inboxEffectReceiptRecords.length} saved inbox provider-effect receipt(s)`,
+      `${cappedCount(inboxArtifactRecords.length, 'review')} saved inbox review artifact(s)`,
+      `${cappedCount(inboxReviewQueueRecords.length, 'record')} saved inbox thread queue item(s)`,
+      `${cappedCount(inboxEffectReceiptRecords.length, 'record')} saved inbox provider-effect receipt(s)`,
       `${refreshableInboxQueueRecords} refreshable saved inbox queue item(s)`,
       `${readyChannels}/${snapshot.channels.length} channel(s) ready for delivery`,
     ],
@@ -128,7 +119,6 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
     workflows: [...inboxWorkflows(emailMethods, emailConnectors, unavailableEmailMethods), personalOpsStyleDraftWorkflow()],
     liveRecords: [
       personalOpsStyleDraftRecord(),
-      ...inboxProviderRecords,
       ...inboxReviewQueueRecords,
       ...inboxArtifactRecords,
       ...inboxEffectReceiptRecords,
@@ -210,22 +200,21 @@ async function ownedBuildLanes(
   }
   const toolsByName = options.toolsByServer ?? new Map<string, readonly McpToolRecord[]>();
   const schemasByQualifiedName = options.schemasByQualifiedName ?? new Map<string, McpToolSchema>();
-  const emailConnectors = await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'inbox', toolsByServer: toolsByName, schemasByQualifiedName }));
-  const calendarConnectors = await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'calendar', toolsByServer: toolsByName, schemasByQualifiedName }));
-  const inboxProviderRecords = await readChild(() => providerBackedQueueRecords(context, 'inbox', childOptions));
-  const calendarProviderRecords = await readChild(() => providerBackedQueueRecords(context, 'calendar', childOptions));
-  const inboxArtifactRecords = await readChild(() => savedReviewArtifactRecords(context, 'inbox', emailConnectors, childOptions));
-  const calendarArtifactRecords = await readChild(() => savedReviewArtifactRecords(context, 'calendar', calendarConnectors, childOptions));
-  const inboxReviewQueueRecords = await readChild(() => savedReviewQueueRecords(context, 'inbox', emailConnectors, childOptions));
-  const calendarReviewQueueRecords = await readChild(() => savedReviewQueueRecords(context, 'calendar', calendarConnectors, childOptions));
-  const inboxEffectReceiptRecords = await readChild(() => savedProviderEffectReceiptRecords(context, 'inbox', childOptions));
-  const calendarEffectReceiptRecords = await readChild(() => savedProviderEffectReceiptRecords(context, 'calendar', childOptions));
+  // A lane's reads are skipped when the caller asked for another lane alone.
+  const wants = (lane: 'inbox' | 'calendar' | 'tasks' | 'reminders') => exactLane === undefined || exactLane === lane;
+  const none: readonly PersonalOpsLiveRecord[] = [];
+  const emailConnectors = wants('inbox') ? await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'inbox', toolsByServer: toolsByName, schemasByQualifiedName })) : [];
+  const calendarConnectors = wants('calendar') ? await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'calendar', toolsByServer: toolsByName, schemasByQualifiedName })) : [];
+  const inboxArtifactRecords = wants('inbox') ? await readChild(() => savedReviewArtifactRecords(context, 'inbox', emailConnectors, childOptions)) : none;
+  const calendarArtifactRecords = wants('calendar') ? await readChild(() => savedReviewArtifactRecords(context, 'calendar', calendarConnectors, childOptions)) : none;
+  const inboxReviewQueueRecords = wants('inbox') ? await readChild(() => savedReviewQueueRecords(context, 'inbox', emailConnectors, childOptions)) : none;
+  const calendarReviewQueueRecords = wants('calendar') ? await readChild(() => savedReviewQueueRecords(context, 'calendar', calendarConnectors, childOptions)) : none;
+  const inboxEffectReceiptRecords = wants('inbox') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'inbox', childOptions)) : none;
+  const calendarEffectReceiptRecords = wants('calendar') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'calendar', childOptions)) : none;
   const refreshableInboxQueueRecords = refreshableSavedRecordCount(inboxReviewQueueRecords);
   const refreshableCalendarQueueRecords = refreshableSavedRecordCount(calendarReviewQueueRecords);
-  const taskProviderRecords = await readChild(() => providerBackedTaskRecords(context, childOptions));
-  const reminderProviderRecords = await readChild(() => providerBackedReminderRecords(context, childOptions));
-  const taskEffectReceiptRecords = await readChild(() => savedProviderEffectReceiptRecords(context, 'tasks', childOptions));
-  const reminderEffectReceiptRecords = await readChild(() => savedProviderEffectReceiptRecords(context, 'reminders', childOptions));
+  const taskEffectReceiptRecords = wants('tasks') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'tasks', childOptions)) : none;
+  const reminderEffectReceiptRecords = wants('reminders') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'reminders', childOptions)) : none;
   const readyChannels = snapshot.channels.filter((channel) => channel.ready).length;
   const enabledChannels = snapshot.channels.filter((channel) => channel.enabled).length;
   const configuredTargets = snapshot.channels.filter((channel) => channel.defaultTarget === 'configured').length;
@@ -235,27 +224,26 @@ async function ownedBuildLanes(
     && (routine.missingRequirementCount ?? 0) === 0
   )).length;
   if (contract.scope === 'notes') return [notesLane(snapshot)];
-  if (contract.scope === 'reminders') return [remindersLane(contract.values.available, reminderProviderRecords,
-    reminderEffectReceiptRecords, configuredTargets, readyChannels)];
-  if (contract.scope === 'inbox') return [inboxLane({ snapshot, emailMethods: contract.values.available,
-    unavailableEmailMethods: contract.values.unavailable, emailConnectors, inboxProviderRecords, inboxArtifactRecords,
-    inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels })];
+  if (contract.scope === 'reminders') return [withUnassessed(remindersLane(contract.values.available,
+    reminderEffectReceiptRecords, configuredTargets, readyChannels), contract.values.unassessed)];
+  if (contract.scope === 'inbox') return [withUnassessed(inboxLane({ snapshot, emailMethods: contract.values.available,
+    unavailableEmailMethods: contract.values.unavailable, emailConnectors, inboxArtifactRecords,
+    inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }), contract.values.unassessed)];
   const { inbox: email, calendar, tasks, reminders } = contract.values;
   const emailMethods = email.available, unavailableEmailMethods = email.unavailable;
   const calendarMethods = calendar.available, unavailableCalendarMethods = calendar.unavailable;
   const taskMethods = tasks.available, scheduleMethods = reminders.available;
-  return [
-    inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxProviderRecords, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }),
+  const unassessedByLane: Readonly<Record<string, readonly string[] | undefined>> = {
+    inbox: email.unassessed, calendar: calendar.unassessed, tasks: tasks.unassessed, reminders: reminders.unassessed,
+  };
+  const allLanes: readonly PersonalOpsLane[] = [
+    inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }),
     {
       id: 'calendar',
       label: 'Calendar',
-      status: calendarProviderRecords.length > 0
-        ? 'ready'
-        : calendarMethods.length > 0 || calendarConnectors.length > 0 || calendarArtifactRecords.length > 0 || calendarEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
+      status: calendarMethods.length > 0 || calendarConnectors.length > 0 || calendarArtifactRecords.length > 0 || calendarEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
       outcome: 'Read agenda context, identify conflicts, prepare briefings, and create reminders for calendar-driven work.',
-      current: calendarProviderRecords.length > 0
-        ? 'Fresh provider-backed calendar event records are published by the connected daemon or platform read model; Personal Ops can brief current agenda and conflict state without inventing event edits or RSVP effects.'
-        : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
+      current: calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
         ? 'The daemon contract exposes calendar-like methods; Personal Ops workflow cards now guide agenda briefing and conflict-scan boundaries.'
         : calendarConnectors.length > 0
           ? 'A configured MCP connector looks calendar-capable; Personal Ops workflow cards now guide agenda briefing, schema-derived operation records, and conflict-scan boundaries around its exact tools.'
@@ -266,9 +254,7 @@ async function ownedBuildLanes(
         : unavailableCalendarMethods.length > 0
           ? `The operator contract advertises ${unavailableCalendarMethods.length} calendar method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched. The local Agent calendar (/calendar) remains available.`
         : 'No calendar/CalDAV/agenda methods are present in the current GoodVibes platform operator contract.',
-      next: calendarProviderRecords.length > 0
-        ? 'Inspect one fresh event record, brief the agenda or conflicts locally, and use only the published confirmed follow-up routes for edits, RSVP, reschedule, or delete.'
-        : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
+      next: calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
         ? 'Use the calendar workflow cards to inspect exact methods, fetch a bounded agenda window, and propose reminders or follow-ups.'
         : calendarConnectors.length > 0
           ? 'Use the calendar workflow cards and operation records to inspect matching MCP connector schemas, then route agenda work only through reviewed connector actions.'
@@ -280,13 +266,12 @@ async function ownedBuildLanes(
       userRoute: 'Agent Workspace -> Personal Ops -> Create reminder',
       modelRoute: calendarConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"calendar"' : 'host action:"methods" query:"calendar"',
       signals: [
-        `${calendarProviderRecords.length} fresh provider-backed calendar event record(s)`,
         `${calendarMethods.length} dispatchable calendar-like daemon method(s)`,
         ...(unavailableCalendarMethods.length > 0 ? [`${unavailableCalendarMethods.length} advertised-but-unavailable calendar method(s) (route not served by this daemon)`] : []),
         `${calendarConnectors.length} calendar-like MCP connector(s)`,
-        `${calendarArtifactRecords.length} saved calendar review artifact(s)`,
-        `${calendarReviewQueueRecords.length} saved calendar event queue item(s)`,
-        `${calendarEffectReceiptRecords.length} saved calendar provider-effect receipt(s)`,
+        `${cappedCount(calendarArtifactRecords.length, 'review')} saved calendar review artifact(s)`,
+        `${cappedCount(calendarReviewQueueRecords.length, 'record')} saved calendar event queue item(s)`,
+        `${cappedCount(calendarEffectReceiptRecords.length, 'record')} saved calendar provider-effect receipt(s)`,
         `${refreshableCalendarQueueRecords} refreshable saved calendar queue item(s)`,
         `${scheduleMethods.length} schedule/reminder method(s) available for follow-up`,
       ],
@@ -294,7 +279,6 @@ async function ownedBuildLanes(
       connectorSignals: calendarConnectors,
       workflows: calendarWorkflows(calendarMethods, calendarConnectors, unavailableCalendarMethods),
       liveRecords: [
-        ...calendarProviderRecords,
         ...calendarReviewQueueRecords,
         ...calendarArtifactRecords,
         ...calendarEffectReceiptRecords,
@@ -305,35 +289,29 @@ async function ownedBuildLanes(
     {
       id: 'tasks',
       label: 'Tasks',
-      status: taskProviderRecords.length > 0 || taskMethods.length > 0 || taskEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
+      status: taskMethods.length > 0 || taskEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
       outcome: 'Track user-visible work items, inspect host task state, and update work plan status without hidden jobs.',
-      current: taskProviderRecords.length > 0
-        ? `Fresh provider-backed task records are published by the connected daemon or platform read model; Agent can review ${taskProviderRecords.length} current external task record(s) before any provider update, completion, defer, or delete route.`
-        : taskEffectReceiptRecords.length > 0
-          ? 'Saved task provider-effect receipts are available for audit and follow-up; no fresh task provider record is currently ready.'
+      current: taskEffectReceiptRecords.length > 0
+        ? 'Saved task provider-effect receipts are available for audit and follow-up; no fresh task provider record is currently ready.'
         : `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the platform contract.`,
-      next: taskProviderRecords.length > 0
-        ? 'Inspect one provider task record, then use only a published confirmed follow-up route for updates, completion, defer, archive, or delete.'
-        : taskEffectReceiptRecords.length > 0
-          ? 'Review saved task provider-effect receipts, then repair or refresh the task provider before another provider update.'
+      next: taskEffectReceiptRecords.length > 0
+        ? 'Review saved task provider-effect receipts, then repair or refresh the task provider before another provider update.'
         : 'Use work plans for user-visible task tracking; inspect runtime host tasks separately before mutating anything.',
       userRoute: 'Agent Workspace -> Work & Approvals -> Autonomy queue',
-      modelRoute: 'agent_work_plan action:"create"',
+      modelRoute: 'agent_work_plan action:"list"',
       signals: [
-        `${taskProviderRecords.length} fresh provider-backed task record(s)`,
-        `${taskEffectReceiptRecords.length} saved task provider-effect receipt(s)`,
+        `${cappedCount(taskEffectReceiptRecords.length, 'record')} saved task provider-effect receipt(s)`,
         `${taskMethods.length} task/work-plan daemon method(s)`,
-        'Work plan add/show/status/delete actions are available',
+        'Work plan list/get/create/update/set_status/remove/clear_completed actions are available',
       ],
       methodIds: taskMethods,
       workflows: taskWorkflows(taskMethods),
       liveRecords: [
-        ...taskProviderRecords,
         ...taskEffectReceiptRecords,
         ...taskOperationRecords(taskMethods),
       ],
     },
-    remindersLane(scheduleMethods, reminderProviderRecords, reminderEffectReceiptRecords, configuredTargets, readyChannels),
+    remindersLane(scheduleMethods, reminderEffectReceiptRecords, configuredTargets, readyChannels),
     {
       id: 'routines',
       label: 'Routines',
@@ -372,6 +350,7 @@ async function ownedBuildLanes(
       liveRecords: channelRecords(snapshot),
     },
   ];
+  return allLanes.map(lane => withUnassessed(lane, unassessedByLane[lane.id]));
   });
   assertCurrent(); publicationCurrent();
   for (const [key, guards] of staged) {
@@ -380,5 +359,7 @@ async function ownedBuildLanes(
   }
   retainCurrent?.(publicationCurrent, 'personal-ops-lanes');
   assertCurrent(); publicationCurrent();
-  return lanes;
+  if (!savedArtifactScanWindowFull(context)) return lanes;
+  const readsSavedArtifacts = new Set(['inbox', 'calendar', 'tasks', 'reminders']);
+  return lanes.map(lane => readsSavedArtifacts.has(lane.id) ? { ...lane, signals: [...lane.signals, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL] } : lane);
 }

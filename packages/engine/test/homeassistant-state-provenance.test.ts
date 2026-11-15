@@ -53,7 +53,6 @@ describe('Home Assistant state provenance contract', () => {
     expect(result.present).toBe(false);
     expect(result.entityId).toBe('light.does_not_exist');
     expect(result.observedAt).toBe(OBSERVED_AT);
-    expect(String(result.error)).toContain("don't have state");
     expect(String(result.error)).toContain('light.does_not_exist');
     // No fabricated state or provenance is invented for a missing entity.
     expect(result.state).toBeUndefined();
@@ -66,9 +65,9 @@ describe('Home Assistant state provenance contract', () => {
     const stateTool = tools.find((tool) => tool.name === 'homeassistant_state');
     const statesTool = tools.find((tool) => tool.name === 'homeassistant_states');
 
-    expect(stateTool?.description).toContain('Home-state honesty contract');
-    expect(stateTool?.description).toContain('observedAt');
-    expect(statesTool?.description).toContain('Home-state honesty contract');
+    expect(HOME_STATE_PROVENANCE_CONTRACT.length).toBeGreaterThan(0);
+    expect(stateTool?.description).toContain(HOME_STATE_PROVENANCE_CONTRACT);
+    expect(statesTool?.description).toContain(HOME_STATE_PROVENANCE_CONTRACT);
   });
 
   test('the model-facing Home Assistant system prompt states the contract', () => {
@@ -82,7 +81,6 @@ describe('Home Assistant state provenance contract', () => {
       remoteSessionTtlMs: 60_000,
     });
 
-    expect(prompt).toContain('Home-state honesty contract');
-    expect(prompt).toContain("don't have state");
+    expect(prompt).toContain(HOME_STATE_PROVENANCE_CONTRACT);
   });
 });

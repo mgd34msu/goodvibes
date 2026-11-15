@@ -1,4 +1,4 @@
-import { withResearchCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
+import { withResearchCatalog, rankResearchRecords, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
@@ -7,9 +7,9 @@ import {
   AgentResearchSourceRegistry,
   researchSourceReportLine,
   type AgentResearchSourceRecord,
-  type AgentResearchSourceStatus,
 } from '../agent/research-source-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 interface AgentHarnessResearchQueueArgs {
   readonly sourceId?: unknown;
@@ -42,21 +42,11 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(200, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 200);
 }
 
-function routeString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function statusPriority(status: AgentResearchSourceStatus): number {
-  if (status === 'candidate') return 86;
-  if (status === 'reviewed') return 72;
-  if (status === 'used') return 42;
-  return 20;
-}
+// Captured from web pages or written by whoever supplied the source: quoted data, never instructions.
+const UNTRUSTED_SOURCE_FIELDS = ['title', 'question', 'summary', 'publisher', 'url', 'evidence', 'note', 'reportSourceLine'] as const;
 
 function nextForSource(source: AgentResearchSourceRecord): string {
   if (source.status === 'candidate') return 'Review credibility, score, and notes before citing or ingesting this source.';
@@ -67,26 +57,26 @@ function nextForSource(source: AgentResearchSourceRecord): string {
 
 function buildQueueItem(source: AgentResearchSourceRecord): ResearchQueueItem {
   const reviewRoute = source.status === 'candidate' || source.status === 'rejected'
-    ? `research action:"review_source" id="${source.id}" confirm:true explicitUserRequest="..."`
+    ? `research action:"review_source" id:${routeString(source.id)}`
     : '';
   const rejectRoute = source.status !== 'rejected'
-    ? `research action:"reject_source" id="${source.id}" confirm:true explicitUserRequest="..."`
+    ? `research action:"reject_source" id:${routeString(source.id)}`
     : '';
   const reportRoute = source.status === 'reviewed' || source.status === 'used'
-    ? 'research action:"report" confirm:true explicitUserRequest:"..."'
+    ? 'research action:"report"'
     : '';
   const bundleRoute = source.status === 'reviewed' || source.status === 'used'
     ? `research action:"bundle" query:${routeString(source.id)} limit:10`
     : '';
   const ingestRoute = source.status === 'reviewed' || source.status === 'used'
-    ? 'agent_knowledge_ingest sourceKind="url" confirm=true explicitUserRequest="..."'
+    ? 'agent_knowledge_ingest sourceKind:"url"'
     : '';
   return {
     source,
-    priority: Math.max(statusPriority(source.status), source.score),
+    priority: researchSourcePriority(source),
     next: nextForSource(source),
     modelRoute: 'research action:"source"',
-    inspectRoute: `research action:"source" sourceId="${source.id}"`,
+    inspectRoute: `research action:"source" sourceId:${routeString(source.id)}`,
     ...(bundleRoute ? { bundleRoute } : {}),
     ...(reviewRoute ? { reviewRoute } : {}),
     ...(rejectRoute ? { rejectRoute } : {}),
@@ -129,10 +119,11 @@ function describeSourceItem(item: ResearchQueueItem, includeParameters: boolean,
     ...(item.reportRoute ? { reportRoute: item.reportRoute } : {}),
     ...(item.ingestRoute ? { ingestRoute: item.ingestRoute } : {}),
     reportSourceLine: researchSourceReportLine(source),
+    untrustedFields: UNTRUSTED_SOURCE_FIELDS,
     ...(lookup ? { lookup } : {}),
     ...(includeParameters ? {
-      evidence: source.evidence ?? null,
-      note: source.note ?? null,
+      evidence: source.evidence ? previewHarnessText(source.evidence, 600) : null,
+      note: source.note ? previewHarnessText(source.note, 600) : null,
       createdAt: source.createdAt,
       updatedAt: source.updatedAt,
       reviewedAt: source.reviewedAt ?? null,
@@ -147,7 +138,7 @@ function nextActions(items: readonly ResearchQueueItem[]): readonly string[] {
   return items
     .filter((item) => item.source.status === 'candidate' || item.source.status === 'reviewed')
     .slice(0, 5)
-    .map((item) => `${item.source.title}: ${item.next}`);
+    .map((item) => `${routeString(previewHarnessText(item.source.title, 80))}: ${item.next}`);
 }
 
 export async function researchQueueCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
@@ -188,12 +179,12 @@ export async function researchQueueSummary(context: CommandContext, rawArgs: Age
         route: query
           ? `research action:"bundle" query:${routeString(query)} limit:${Math.min(limit, 20)}`
           : `research action:"bundle" limit:${Math.min(limit, 20)}`,
-        reportRoute: 'research action:"report" requireCitationCoverage:true confirm:true explicitUserRequest:"..."',
+        reportRoute: 'research action:"report" requireCitationCoverage:true',
         next: 'Use bundle route to assemble reviewed/used sources into citation-ready report input before saving a report artifact.',
       },
       returned: Math.min(filtered.length, limit),
       total: items.length,
-      nextActions: nextActions(items),
+      nextActions: nextActions(filtered),
       policy: 'Research queue is read-only in the harness. Source capture/review writes use confirmed research source actions; report artifacts and Knowledge ingest remain explicit separate steps.',
     };
 

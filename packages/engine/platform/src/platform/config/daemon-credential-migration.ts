@@ -65,6 +65,8 @@ export type CredentialMigrationOutcome =
   | 'already-migrated'
   /** The daemon tier held a DIFFERENT value. Its copy wins; nothing was changed. */
   | 'daemon-copy-kept'
+  /** The surface copy could not be read (gone, or empty); nothing was verified or changed. */
+  | 'source-unreadable'
   /** The daemon copy did not read back. The source was left in place, untouched. */
   | 'verification-failed'
   /** The daemon write itself threw. The source was left in place, untouched. */
@@ -83,6 +85,11 @@ export interface CredentialMigrationReport {
   readonly entries: readonly CredentialMigrationEntry[];
   readonly migrated: number;
   readonly failed: number;
+  /**
+   * Credentials left in a surface store because the daemon holds a different
+   * value for the same key. Neither side was changed; someone has to choose.
+   */
+  readonly conflicts?: number | undefined;
   /** True when nothing needed doing, the common case after the first run. */
   readonly noop: boolean;
 }
@@ -172,8 +179,8 @@ async function migrateOne(
   const surfaceValue = await store.getFromScope(record.key, fromScope, sourcePath);
   if (surfaceValue === null || surfaceValue.length === 0) {
     // Nothing readable there after all, another process may have moved it
-    // between the listing and now. Leave it alone.
-    return { ...base, outcome: 'already-migrated' };
+    // between the listing and now. Leave it alone, and do not claim a move.
+    return { ...base, outcome: 'source-unreadable' };
   }
 
   const daemonValue = await store.getFromScope(record.key, 'daemon');
@@ -252,6 +259,15 @@ export async function migrateDaemonNeededCredentials(
     (entry) => entry.outcome === 'verification-failed' || entry.outcome === 'write-failed',
   ).length;
 
+  const conflicts = entries.filter((entry) => entry.outcome === 'daemon-copy-kept').length;
+  if (conflicts > 0) {
+    // The surface copy stays and is found again on every start; say so, with
+    // key names only, so the operator knows a credential is parked in a silo.
+    logger.warn('Credential migration: a surface store holds a different value than the daemon store for these credentials; neither was changed', {
+      keys: entries.filter((entry) => entry.outcome === 'daemon-copy-kept').map((entry) => `${entry.key}@${entry.fromScope}`),
+    });
+  }
+
   if (migrated > 0 || failed > 0) {
     // Disclosed, per the rule that a relocation is never silent. Key names and
     // outcomes only.
@@ -262,7 +278,7 @@ export async function migrateDaemonNeededCredentials(
     });
   }
 
-  return { entries, migrated, failed, noop: migrated === 0 && failed === 0 };
+  return { entries, migrated, failed, conflicts, noop: migrated === 0 && failed === 0 && conflicts === 0 };
 }
 
 /**
@@ -312,6 +328,8 @@ export function describeCredentialMigration(report: CredentialMigrationReport): 
   if (report.migrated > 0) parts.push(`${report.migrated} moved to the daemon's own store`);
   const kept = report.entries.filter((entry) => entry.outcome === 'daemon-copy-kept').length;
   if (kept > 0) parts.push(`${kept} left alone because the daemon already has a different value`);
+  const unreadable = report.entries.filter((entry) => entry.outcome === 'source-unreadable').length;
+  if (unreadable > 0) parts.push(`${unreadable} could not be read at the source and were left where they are`);
   const already = report.entries.filter((entry) => entry.outcome === 'already-migrated').length;
   if (already > 0) parts.push(`${already} duplicate copies removed`);
   if (report.failed > 0) {

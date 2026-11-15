@@ -52,7 +52,7 @@ export async function requestWithoutDeadline(
   const url = `${config.endpoint.baseURL.replace(/\/$/, '')}${path}`;
   const init = {
     method, redirect: 'error' as const, signal,
-    headers: { ...extraHeaders, ...(config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: { ...extraHeaders, ...(config.endpoint.authentication !== 'none' && config.endpoint.apiKey ? { Authorization: `Bearer ${config.endpoint.apiKey}` } : {}), Accept: 'application/json', 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   };
   let response: Response;

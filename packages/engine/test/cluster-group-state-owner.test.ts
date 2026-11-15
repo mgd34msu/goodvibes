@@ -1,4 +1,4 @@
-/** Original physical group-state ownership, authored and UNRUN. */
+/** Original physical group-state ownership. */
 import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';

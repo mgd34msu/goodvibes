@@ -61,11 +61,13 @@ export interface ProviderAccountSnapshot {
   readonly providers: readonly ProviderAccountRecord[];
   readonly configuredCount: number;
   readonly issueCount: number;
+  /** Set when the services file is unusable, so a missing service-backed account is not read as "none configured". */
+  readonly servicesUnreadable?: string;
 }
 
 export interface ProviderAccountSnapshotDeps {
   readonly providerRegistry: Pick<ProviderRegistry, 'listModels' | 'getCurrentModel' | 'getRegistered' | 'describeRuntime'>;
-  readonly serviceRegistry: Pick<ServiceRegistry, 'getAll' | 'inspect'>;
+  readonly serviceRegistry: Pick<ServiceRegistry, 'getAll' | 'inspect'> & Partial<Pick<ServiceRegistry, 'unreadableReason'>>;
   readonly subscriptionManager: Pick<SubscriptionManager, 'list' | 'listPending' | 'get' | 'getPending'>;
   readonly secretsManager: Pick<SecretsManager, 'get'>;
 }
@@ -94,8 +96,13 @@ function classifyRoutes(input: {
   return routes;
 }
 
-function determineActiveRoute(routes: readonly ProviderAuthRoute[]): ProviderAuthRoute {
-  if (routes.includes('subscription')) return 'subscription';
+/**
+ * A stored subscription is used ahead of an ambient API key only when it was set to override ambient
+ * keys (`overrideAmbientApiKeys`, the rule `SubscriptionManager.getAccessToken` applies); otherwise the
+ * ambient key stays the active route and the subscription is the route used when no key exists.
+ */
+function determineActiveRoute(routes: readonly ProviderAuthRoute[], subscriptionOverridesApiKey: boolean): ProviderAuthRoute {
+  if (routes.includes('subscription') && (subscriptionOverridesApiKey || !routes.includes('api-key'))) return 'subscription';
   if (routes.includes('service-oauth')) return 'service-oauth';
   if (routes.includes('api-key')) return 'api-key';
   return 'unconfigured';
@@ -128,6 +135,7 @@ export async function buildProviderAccountSnapshot(
   const builtinSubscriptionProviders = new Set(listBuiltinSubscriptionProviders().map((entry) => entry.provider));
   const serviceRegistry = deps.serviceRegistry;
   const serviceConfigs = serviceRegistry.getAll();
+  const servicesUnreadable = serviceRegistry.unreadableReason?.() ?? null;
   const services = Object.values(serviceConfigs);
   const serviceInspections = await Promise.all(Object.keys(serviceConfigs).map(async (name) => ({
     name,
@@ -181,8 +189,9 @@ export async function buildProviderAccountSnapshot(
       const notes: string[] = [];
       const recommendedActions: ProviderRecommendedAction[] = [];
       const routeRecords: ProviderRouteRecord[] = [];
-      const preferredRoute = determineActiveRoute(routes);
-      const activeRoute = determineActiveRoute(usableRoutes);
+      const subscriptionOverridesApiKey = subscription?.overrideAmbientApiKeys === true;
+      const preferredRoute = determineActiveRoute(routes, subscriptionOverridesApiKey);
+      const activeRoute = determineActiveRoute(usableRoutes, subscriptionOverridesApiKey);
       let activeRouteReason = 'No usable auth route is configured for this provider.';
       let authFreshness: ProviderAuthFreshness = 'unconfigured';
 
@@ -301,7 +310,9 @@ export async function buildProviderAccountSnapshot(
           ? 'Subscription route is unavailable, so ambient API-key access is the current usable path.'
           : preferredRoute === 'service-oauth'
             ? 'Service OAuth is unavailable, so ambient API-key access is the current usable path.'
-            : 'Ambient API-key access is the current usable route.';
+            : routes.includes('subscription')
+              ? 'Ambient API-key access is the active route; the stored subscription does not override ambient API keys.'
+              : 'Ambient API-key access is the current usable route.';
       }
       const fallbackRoute = preferredRoute !== activeRoute && activeRoute !== 'unconfigured'
         ? activeRoute
@@ -340,6 +351,7 @@ export async function buildProviderAccountSnapshot(
     capturedAt: Date.now(),
     providers,
     configuredCount: providers.filter((provider) => provider.configured).length,
-    issueCount: providers.reduce((sum, provider) => sum + provider.issues.length, 0),
+    issueCount: providers.reduce((sum, provider) => sum + provider.issues.length, 0) + (servicesUnreadable ? 1 : 0),
+    ...(servicesUnreadable ? { servicesUnreadable } : {}),
   });
 }

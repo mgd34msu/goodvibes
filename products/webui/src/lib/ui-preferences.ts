@@ -25,7 +25,11 @@ function storageAvailable(): boolean {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
+/** The last value storage refused to keep; readers prefer it so the change event does not revert it. */
+let unpersisted: WebUiPreferences | null = null;
+
 export function readWebUiPreferences(): WebUiPreferences {
+  if (unpersisted !== null) return unpersisted;
   if (!storageAvailable()) return DEFAULT_WEBUI_PREFERENCES;
   try {
     const stored = window.localStorage.getItem(WEBUI_PREFERENCES_KEY);
@@ -45,7 +49,13 @@ export function readWebUiPreferences(): WebUiPreferences {
 export function writeWebUiPreference<Key extends PreferenceKey>(key: Key, value: WebUiPreferences[Key]): WebUiPreferences {
   const next = { ...readWebUiPreferences(), [key]: value };
   if (storageAvailable()) {
-    window.localStorage.setItem(WEBUI_PREFERENCES_KEY, JSON.stringify(next));
+    try {
+      window.localStorage.setItem(WEBUI_PREFERENCES_KEY, JSON.stringify(next));
+      unpersisted = null;
+    } catch {
+      // The preference still applies for this session, it just is not remembered.
+      unpersisted = next;
+    }
     window.dispatchEvent(new CustomEvent(WEBUI_PREFERENCES_EVENT, { detail: next }));
   }
   return next;

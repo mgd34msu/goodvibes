@@ -356,6 +356,12 @@ export interface PrefixRule extends BaseRule {
    * Unknown values must never widen an exact match.
    */
   exactCommandMatch?: 'literal' | 'command-class' | undefined;
+  /**
+   * For an exact allow: what the approved call also fixed (working directory, environment,
+   * detachment, file operations), as canonical text. The rule matches only a call with the same.
+   * Absent means the call fixed none of these.
+   */
+  exactContext?: string | undefined;
 }
 
 /**
@@ -385,8 +391,10 @@ export interface PathScopeRule extends BaseRule {
   /** Tool name(s) this rule applies to. Use `'*'` for any tool. */
   toolPattern: string | string[];
   /**
-   * Allowed or denied path prefixes. Relative paths are resolved against cwd.
-   * Supports glob-style `**` wildcards via micromatch semantics.
+   * Allowed or denied paths. Relative paths are resolved against the project root.
+   * A pattern with no wildcard covers that path and everything beneath it; otherwise
+   * `*` (within one segment), `**` (across segments) and `?` match, and `dir/**`
+   * covers `dir` itself too. Braces and negation are not supported.
    */
   pathPatterns: string[];
 }

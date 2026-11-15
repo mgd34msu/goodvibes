@@ -14,10 +14,11 @@
  *    disabled. Without the warning, low estimated usage compacts nothing.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
+import { handleContextWindowSubcommand } from '../terminal-shell/src/context-window-command.js';
 import { getContextWindowOverridesPath } from '../platform/src/platform/providers/context-window-overrides.js';
 import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
 import {
@@ -129,6 +130,43 @@ describe('ProviderRegistry context-window overrides', () => {
     });
   });
 
+  test('a cap that cannot be written still applies this session and /context window says it was not saved', () => {
+    withTempRoot((root) => {
+      const registry = makeRegistry(root);
+      registry.registerDiscoveredProviders([DISCOVERED_SERVER]);
+      // A directory where the file belongs fails the atomic write for every user, root included.
+      mkdirSync(getContextWindowOverridesPath(root), { recursive: true });
+      const model = registry.listModels().find((m) => m.registryKey === 'ollama:qwen3-local')!;
+      const printed: string[] = [];
+      const output = handleContextWindowSubcommand(['32k'], {
+        provider: { providerRegistry: {
+          getCurrentModel: () => model,
+          getKnownContextWindowForModel: registry.getKnownContextWindowForModel.bind(registry),
+          getModelContextCap: registry.getModelContextCap.bind(registry),
+          getObservedContextWindow: registry.getObservedContextWindow.bind(registry),
+          clearModelContextCap: registry.clearModelContextCap.bind(registry),
+          setModelContextCap: registry.setModelContextCap.bind(registry),
+        } },
+        print: (text) => { printed.push(text); },
+        renderRequest: () => {},
+      });
+      expect(registry.getModelContextCap('ollama:qwen3-local')).toBe(32_000);
+      expect(output).toContain('Not saved:');
+      expect(output).toContain('this session only');
+      expect(printed).toEqual([output]);
+    });
+  });
+
+  test('a cap that is written is reported without a not-saved note', () => {
+    withTempRoot((root) => {
+      const registry = makeRegistry(root);
+      registry.registerDiscoveredProviders([DISCOVERED_SERVER]);
+      const reasons: string[] = [];
+      registry.setModelContextCap('ollama:qwen3-local', 32_768, (reason) => reasons.push(reason));
+      expect(reasons).toEqual([]);
+    });
+  });
+
   test('clearModelContextCap returns the model to its automatic window', () => {
     withTempRoot((root) => {
       const registry = makeRegistry(root);
@@ -164,9 +202,11 @@ describe('ProviderRegistry context-window overrides', () => {
     withTempRoot((root) => {
       const registry = makeRegistry(root);
       registry.registerDiscoveredProviders([DISCOVERED_SERVER]);
+      const reasons: string[] = [];
       for (const bad of [0, -5, 1.5, 10_000_001]) {
-        registry.setModelContextCap('ollama:qwen3-local', bad);
+        registry.setModelContextCap('ollama:qwen3-local', bad, (reason) => reasons.push(reason));
       }
+      expect(reasons).toHaveLength(4);
       const model = registry.listModels().find((m) => m.registryKey === 'ollama:qwen3-local');
       expect(model?.contextWindow).toBe(8192);
       expect(registry.getModelContextCap('ollama:qwen3-local')).toBeNull();

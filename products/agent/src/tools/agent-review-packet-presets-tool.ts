@@ -19,13 +19,15 @@ function formatPacketLines(packet: ReviewPacketPresetPacket): readonly string[] 
   ].filter(Boolean);
 }
 
-function formatSaveResult(descriptor: ArtifactDescriptor, record: ReviewPacketPresetRecord): string {
+function formatSaveResult(descriptor: ArtifactDescriptor, record: ReviewPacketPresetRecord, audit: ReviewPacketFreshnessAudit): string {
   return [
     'Review packet preset saved',
     `  artifact ${descriptor.id}`,
     `  preset ${record.presetId}`,
     `  name ${record.name}`,
     ...formatPacketLines(record.packet),
+    // A typo'd id is saved as given; this is where it shows up, not on a later read.
+    ...formatFreshnessLines(audit),
     `  inspect agent_review_packet_presets mode:"show" artifactId:"${descriptor.id}"`,
     '  list agent_review_packet_presets mode:"list"',
     '  policy local preset artifact only; documents, model routing, handoffs, and archives unchanged',
@@ -53,7 +55,7 @@ function hasRefreshableReplacements(audit: ReviewPacketFreshnessAudit): boolean 
 }
 
 function unresolvedFreshnessCount(audit: ReviewPacketFreshnessAudit): number {
-  return audit.missing.filter((missing) => !missing.replacementId).length;
+  return audit.missing.filter((missing) => !missing.replacementId).length + audit.dependentOnReplaced.length;
 }
 
 function updateSummaryReferences(summary: string, audit: ReviewPacketFreshnessAudit): string {
@@ -148,7 +150,7 @@ function formatAlreadyCurrent(source: LoadedReviewPacketPreset, audit: ReviewPac
 function formatFreshnessSummary(audit: ReviewPacketFreshnessAudit): string {
   if (!audit.available) return 'freshness unchecked; artifact list unavailable';
   if (audit.status === 'current') return `freshness current; checked ${audit.scannedArtifacts} artifact(s)`;
-  return `freshness needs-review; missing ${audit.missing.length}; newer ${audit.superseded.length}; checked ${audit.scannedArtifacts} artifact(s)`;
+  return `freshness needs-review; missing ${audit.missing.length}; newer ${audit.superseded.length}${audit.dependentOnReplaced.length > 0 ? `; unresolved ${audit.dependentOnReplaced.length}` : ''}; checked ${audit.scannedArtifacts} artifact(s)`;
 }
 
 function formatFreshnessLines(audit: ReviewPacketFreshnessAudit): readonly string[] {
@@ -162,9 +164,13 @@ function formatFreshnessLines(audit: ReviewPacketFreshnessAudit): readonly strin
   for (const superseded of audit.superseded.slice(0, 8)) {
     lines.push(`  newer ${superseded.label} ${superseded.id} -> ${superseded.replacementId} (${superseded.reason})`);
   }
+  for (const dependent of audit.dependentOnReplaced.slice(0, 8)) {
+    lines.push(`  unresolved ${dependent.label} ${dependent.id} ${dependent.reason}; it was not replaced and may not match the newer evidence`);
+  }
   const shownMissing = Math.min(audit.missing.length, 8);
   const shownSuperseded = Math.min(audit.superseded.length, 8);
-  const hidden = Math.max(0, audit.missing.length + audit.superseded.length - shownMissing - shownSuperseded);
+  const shownDependent = Math.min(audit.dependentOnReplaced.length, 8);
+  const hidden = Math.max(0, audit.missing.length + audit.superseded.length + audit.dependentOnReplaced.length - shownMissing - shownSuperseded - shownDependent);
   if (hidden > 0) lines.push(`  freshness omitted ${hidden} additional issue(s)`);
   if (audit.status === 'needs-review') {
     lines.push('  policy inspect freshness before reuse; recommended routes below use newer ids when a safe replacement was found');
@@ -177,17 +183,20 @@ function formatList(
   total: number,
   allArtifacts: readonly ArtifactDescriptor[] | null,
   store?: AgentReviewPacketPresetArtifactStore,
+  cappedAt: number | null = null,
 ): string {
+  // The store is asked for its newest N artifacts; when it filled that window, older presets may exist unseen.
+  const windowNote = cappedAt === null ? '' : ` (searched the newest ${cappedAt} artifacts only; older presets were not searched)`;
   if (artifacts.length === 0) {
     return [
       'Saved review packet presets',
-      '  none found',
+      `  none found${windowNote}`,
       '  save agent_review_packet_presets mode:"save" name:"..."',
     ].join('\n');
   }
   return [
     'Saved review packet presets',
-    `  shown ${artifacts.length}/${total}`,
+    `  shown ${artifacts.length}/${total}${windowNote}`,
     ...artifacts.flatMap((artifact) => {
       const packet = packetFromMetadata(artifact);
       const audit = auditPresetFreshness({ packet, descriptor: artifact, artifacts: allArtifacts, store });
@@ -342,15 +351,17 @@ export function createAgentReviewPacketPresetsTool(
     execute: async (rawArgs: Record<string, unknown>, executionOptions) => {
       const args = rawArgs;
       const assertCurrent = agentArtifactEffectGuard(rawArgs, executionOptions);
+      let created: ArtifactDescriptor | undefined;
       try {
         const mode = parseMode(args.mode);
         if (mode === 'list') {
           if (!artifactStore?.list) return failure('Review packet preset list is unavailable because this runtime cannot list artifacts.');
           const limit = clamp(readNumber(args.limit, DEFAULT_LIST_LIMIT), 1, MAX_LIST_LIMIT);
-          const allArtifacts = artifactStore.list(Math.max(MAX_FRESHNESS_ARTIFACT_SCAN, limit * 4));
+          const window = Math.max(MAX_FRESHNESS_ARTIFACT_SCAN, limit * 4);
+          const allArtifacts = artifactStore.list(window);
           const source = allArtifacts.filter(isPresetArtifact);
           const ordered = source.sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id));
-          return output(formatList(ordered.slice(0, limit), source.length, allArtifacts, artifactStore));
+          return output(formatList(ordered.slice(0, limit), source.length, allArtifacts, artifactStore, allArtifacts.length >= window ? window : null));
         }
         if (mode === 'show') {
           const artifactId = readString(args.artifactId);
@@ -403,6 +414,7 @@ export function createAgentReviewPacketPresetsTool(
           }
           check();
           const descriptor = await artifactStore.create(presetCreateInput(record), { signal: executionOptions?.signal, assertCurrent: check });
+          created = descriptor;
           assertCurrent();
           return output(formatRefreshResult(descriptor, loaded, audit, record));
         }
@@ -410,10 +422,20 @@ export function createAgentReviewPacketPresetsTool(
         if (!artifactStore?.create) return failure('Review packet preset save is unavailable because this runtime did not provide an artifact store.');
         const record = buildPresetRecord(args);
         const descriptor = await artifactStore.create(presetCreateInput(record), { signal: executionOptions?.signal, assertCurrent });
+        created = descriptor;
         assertCurrent();
-        return output(formatSaveResult(descriptor, record));
+        const audit = auditPresetFreshness({
+          packet: record.packet,
+          descriptor,
+          artifacts: artifactStore.list?.(MAX_FRESHNESS_ARTIFACT_SCAN) ?? null,
+          store: artifactStore,
+        });
+        return output(formatSaveResult(descriptor, record, audit));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        // The preset artifact exists; the failure came from a check after it was written.
+        if (created) return failure(`Review packet preset artifact ${created.id} was saved, but a check after the save failed (${message}). Do not save it again; inspect it with agent_review_packet_presets mode:"show" artifactId:"${created.id}".`);
+        return failure(message);
       }
     },
   };

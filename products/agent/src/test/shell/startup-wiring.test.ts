@@ -89,7 +89,7 @@ describe('wireSetupIncompleteHint: in-progress message content', () => {
     const { router, captured } = makeRouter();
     wireSetupIncompleteHint({ shellPaths, providerReady: false, systemMessageRouter: router });
     const allText = captured.low.join(' ').toLowerCase();
-    expect(allText).toMatch(/model|pick/);
+    expect(allText).toContain('pick a model to start, run /agent to continue setup.');
   });
 
   test('providerReady true: message says chat still works', () => {
@@ -99,7 +99,7 @@ describe('wireSetupIncompleteHint: in-progress message content', () => {
     wireSetupIncompleteHint({ shellPaths, providerReady: true, systemMessageRouter: router });
     const allText = captured.low.join(' ').toLowerCase();
     // Should indicate chat is possible
-    expect(allText).toMatch(/chat|now/);
+    expect(allText).toContain('you can chat now.');
   });
 
   test('hostReady omitted: only one low message (no host line)', () => {
@@ -146,7 +146,7 @@ describe('wireSetupIncompleteHint: localReady signal', () => {
     wireSetupIncompleteHint({ shellPaths, providerReady: false, localReady: true, systemMessageRouter: router });
     const allText = captured.low.join(' ').toLowerCase();
     // Local model is ready so chat is possible, hint must convey this
-    expect(allText).toMatch(/chat|now/);
+    expect(allText).toContain('you can chat now.');
   });
 
   test('providerReady:false + localReady:false: still leads with pick-a-model', () => {
@@ -156,7 +156,7 @@ describe('wireSetupIncompleteHint: localReady signal', () => {
     wireSetupIncompleteHint({ shellPaths, providerReady: false, localReady: false, systemMessageRouter: router });
     const allText = captured.low.join(' ').toLowerCase();
     // Neither provider nor local is ready, must still prompt to pick a model
-    expect(allText).toMatch(/model|pick/);
+    expect(allText).toContain('pick a model to start, run /agent to continue setup.');
   });
 
   test('providerReady:false + localReady omitted: leads with pick-a-model (backward compat)', () => {
@@ -165,7 +165,7 @@ describe('wireSetupIncompleteHint: localReady signal', () => {
     const { router, captured } = makeRouter();
     wireSetupIncompleteHint({ shellPaths, providerReady: false, systemMessageRouter: router });
     const allText = captured.low.join(' ').toLowerCase();
-    expect(allText).toMatch(/model|pick/);
+    expect(allText).toContain('pick a model to start, run /agent to continue setup.');
   });
 });
 

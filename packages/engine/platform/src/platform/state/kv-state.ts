@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { JsonFileStore } from './json-file-store.js';
 import { StoreWriteQueue } from './store-write-queue.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -19,7 +19,27 @@ const RESERVED_KEYS = new Set(['id', 'started_at', '__proto__', 'constructor', '
  * retention registry deliberately excludes the whole directory. Nothing outside
  * this one shape is listed, stat-ed, or removed.
  */
-const SESSION_FILE_PATTERN = /^session_[0-9a-f]{8}\.json$/;
+const SESSION_FILE_PATTERN = /^(?:session_[0-9a-f]{8}|session-[A-Za-z0-9_-]{1,64})\.json$/;
+
+/** An id that is already the 8-hex shape keeps its original `session_<id>.json` name. */
+const GENERATED_ID_PATTERN = /^[0-9a-f]{8}$/;
+
+/**
+ * The file name for a session id. A caller-supplied id (a real conversation
+ * session id) is not filename-safe by construction. An id made only of
+ * `[A-Za-z0-9_-]` and at most 64 long is used as it is; any other id has its
+ * unsafe characters replaced and is cut short, and a hash of the whole id is
+ * appended so two ids that sanitize alike (`a/b`, `a_b`) or share a long prefix
+ * keep separate files. The `session-` prefix keeps these files apart from the
+ * generated `session_<8 hex>` ones.
+ */
+function sessionFileName(sessionId: string): string {
+  if (GENERATED_ID_PATTERN.test(sessionId)) return `session_${sessionId}.json`;
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(sessionId)) return `session-${sessionId}.json`;
+  const readable = sessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
+  const digest = createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
+  return `session-${readable}-${digest}.json`;
+}
 
 /**
  * Count bound: at most this many session files survive a pass, newest-written
@@ -103,6 +123,7 @@ function reapSessionFiles(
   protectedFileName: string,
   bounds: ReapBounds,
   now: number,
+  canReclaimKeyedState?: (sessionToken: string) => boolean,
 ): ReapOutcome {
   let names: string[];
   try {
@@ -113,15 +134,22 @@ function reapSessionFiles(
     return NOTHING_REAPED;
   }
 
-  const candidates: { readonly path: string; readonly name: string; readonly mtimeMs: number; readonly size: number }[] = [];
+  const candidates: { readonly path: string; readonly name: string; readonly mtimeMs: number; readonly size: number; readonly keyed: boolean }[] = [];
   for (const name of names) {
     if (!SESSION_FILE_PATTERN.test(name)) continue;
     if (name === protectedFileName) continue;
+    // A `session-<id>` file is a real conversation's state, which comes back
+    // when that conversation resumes, however long a saved conversation
+    // lasts. Only the owner of the conversations can say one is gone, so
+    // without that answer these files are never reclaimed; they are also
+    // outside the count bound, which is for per-process `session_<hex>` litter.
+    const keyed = name.startsWith('session-');
+    if (keyed && !canReclaimKeyedState?.(name.slice('session-'.length, -'.json'.length))) continue;
     const path = join(stateDir, name);
     try {
       const stats = statSync(path);
       if (!stats.isFile()) continue;
-      candidates.push({ path, name, mtimeMs: stats.mtimeMs, size: stats.size });
+      candidates.push({ path, name, mtimeMs: stats.mtimeMs, size: stats.size, keyed });
     } catch {
       // Vanished between readdir and stat, a concurrent pass won the race.
     }
@@ -134,10 +162,11 @@ function reapSessionFiles(
   let bytesReclaimed = 0;
   let agedOut = 0;
   let overCap = 0;
-  for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index]!;
+  let generatedSeen = 0;
+  for (const candidate of candidates) {
     const tooOld = now - candidate.mtimeMs > bounds.maxAgeMs;
-    const beyondCap = bounds.keepCount !== null && index >= bounds.keepCount;
+    if (!candidate.keyed) generatedSeen += 1;
+    const beyondCap = !candidate.keyed && bounds.keepCount !== null && generatedSeen > bounds.keepCount;
     if (!tooOld && !beyondCap) continue;
     if (!removeSessionFile(candidate.path, candidate.name)) continue;
     filesRemoved += 1;
@@ -190,13 +219,23 @@ export interface KVStateOptions {
    * clean.
    */
   readonly legacyStateDir?: string | undefined;
+  /**
+   * Whether the state file of a caller-supplied (`session-<id>`) session may be
+   * reclaimed once it is past the age bound. Receives the file's id part.
+   * Omitted, those files are never reclaimed: a resumed conversation must find
+   * its state, and only the owner of the conversations knows which are gone.
+   */
+  readonly canReclaimKeyedState?: ((sessionToken: string) => boolean) | undefined;
 }
 
 /**
  * KVState, Session-scoped persistent key-value store.
  *
- * Storage: <stateDir>/session_{id}.json
- * Session ID: 8-char hex string, auto-generated if not provided.
+ * Storage: <stateDir>/session_{id}.json (session-{id}.json for a caller-supplied id)
+ * Session ID: 8-char hex string, auto-generated if not provided. Pass the
+ * conversation's own session id so state set before a restart is read back when
+ * that session resumes, and dispose() the instance at shutdown so a write still
+ * waiting on the debounce timer is flushed.
  *
  * Features:
  * - Lazy load: defers disk read until first operation.
@@ -220,6 +259,7 @@ export class KVState {
   private readonly legacyStore: JsonFileStore<Record<string, unknown>> | undefined;
   /** The legacy unscoped state DIRECTORY, kept for the age-bounded sweep; undefined whenever legacyStore is. */
   private readonly legacyStateDir: string | undefined;
+  private readonly canReclaimKeyedState: ((sessionToken: string) => boolean) | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private housekeepingStarted = false;
   /** Whole-file writes run one at a time, in call order. See StoreWriteQueue. */
@@ -231,7 +271,7 @@ export class KVState {
     }
     this.sessionId = options.sessionId ?? KVState.generateId();
     this.stateDir = options.stateDir;
-    this.fileName = `session_${this.sessionId}.json`;
+    this.fileName = sessionFileName(this.sessionId);
     this.filePath = join(this.stateDir, this.fileName);
     this.store = new JsonFileStore(this.filePath);
     const legacyDir = options.legacyStateDir && options.legacyStateDir !== this.stateDir
@@ -239,6 +279,7 @@ export class KVState {
       : undefined;
     this.legacyStore = legacyDir === undefined ? undefined : new JsonFileStore(join(legacyDir, this.fileName));
     this.legacyStateDir = legacyDir;
+    this.canReclaimKeyedState = options.canReclaimKeyedState;
   }
 
   async get(keys: string[]): Promise<Record<string, unknown>> {
@@ -254,11 +295,12 @@ export class KVState {
 
   async set(values: Record<string, unknown>): Promise<void> {
     await this.ensureLoaded();
+    // Checked before anything is written, so a refused call changes nothing.
+    const reserved = Object.keys(values).filter((key) => RESERVED_KEYS.has(key));
+    if (reserved.length > 0) {
+      throw new Error(`KVState cannot set reserved key(s): ${reserved.join(', ')}. Nothing was stored; use a different key name.`);
+    }
     for (const [key, value] of Object.entries(values)) {
-      if (RESERVED_KEYS.has(key)) {
-        logger.debug('KVState: ignoring reserved key', { key });
-        continue;
-      }
       this.data![key] = value;
     }
     this.schedulePersist();
@@ -374,8 +416,8 @@ export class KVState {
     const stateDir = readKVStateDir(options);
     if (!existsSync(stateDir)) return [];
     return readdirSync(stateDir)
-      .filter(f => /^session_[0-9a-f]{8}\.json$/.test(f))
-      .map(f => f.replace(/^session_/, '').replace(/\.json$/, ''))
+      .filter(f => SESSION_FILE_PATTERN.test(f))
+      .map(f => f.replace(/^session[_-]/, '').replace(/\.json$/, ''))
       .sort();
   }
 
@@ -441,7 +483,7 @@ export class KVState {
     if (loaded === null || loaded === undefined) return null;
     if (typeof loaded === 'object' && !Array.isArray(loaded)) return loaded;
     if (onInvalid === 'throw') {
-      throw new Error(`KVState failed to load ${label}: parsed content is not a session state object`);
+      throw new Error(`KVState failed to load ${label}: parsed content is not a session state object. Move or delete that file to start this session's state clean.`);
     }
     logger.warn('KVState: legacy state file is not a session state object, ignoring it and starting clean', {
       sessionId: this.sessionId,
@@ -497,12 +539,12 @@ export class KVState {
       const now = Date.now();
       discloseReap(
         this.stateDir,
-        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT, maxAgeMs: SESSION_MAX_AGE_MS }, now),
+        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT, maxAgeMs: SESSION_MAX_AGE_MS }, now, this.canReclaimKeyedState),
       );
       if (this.legacyStateDir !== undefined) {
         discloseReap(
           this.legacyStateDir,
-          reapSessionFiles(this.legacyStateDir, this.fileName, { keepCount: null, maxAgeMs: SESSION_MAX_AGE_MS }, now),
+          reapSessionFiles(this.legacyStateDir, this.fileName, { keepCount: null, maxAgeMs: SESSION_MAX_AGE_MS }, now, this.canReclaimKeyedState),
         );
       }
     } catch (err) {
@@ -513,7 +555,9 @@ export class KVState {
   private async ensureLoaded(): Promise<void> {
     if (this.data !== null) return;
     if (!this.loadPromise) {
-      this.loadPromise = this.load().then(() => {
+      // Cleared on failure too: a transient read error must not answer every
+      // later call for the life of the process.
+      this.loadPromise = this.load().finally(() => {
         this.loadPromise = null;
       });
     }

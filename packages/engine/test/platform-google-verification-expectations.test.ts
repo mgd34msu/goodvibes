@@ -58,6 +58,20 @@ function openedBook(overrides: Partial<CandidateEmail> = {}): {
   return { book, expectation };
 }
 
+describe('expectation ids', () => {
+  test('an id already used for another address is refused rather than replacing that expectation', () => {
+    const { book } = openedBook();
+    expect(() => book.openExpectation({
+      id: 'exp-1',
+      serviceDomain: 'example.com',
+      recipientAddress: 'someone-else@alias.test',
+      purpose: 'Create an account elsewhere',
+      now: T0,
+    })).toThrow('already in use');
+    expect(book.list(T0)).toHaveLength(1);
+  });
+});
+
 describe('hostMatchesServiceDomain', () => {
   test('accepts the registered domain itself and any real subdomain of it', () => {
     expect(hostMatchesServiceDomain('github.com', 'github.com')).toBe(true);
@@ -122,13 +136,19 @@ describe('VerificationExpectationBook correlation', () => {
     expect(result.kind).toBe('matched');
   });
 
-  test('reports an unrelated sender as weak corroboration without refusing the match', () => {
+  test('mail from an unrelated sender to the alias is not the awaited mail and leaves the expectation open', () => {
     const { book } = openedBook();
     const result = book.matchCandidate(email({ from: 'bounce@sendgrid.net' }), at(60_000));
 
-    expect(result.kind).toBe('matched');
-    if (result.kind !== 'matched') throw new Error('expected matched');
-    expect(result.senderCorroboration).toBe('sender-domain-unrelated');
+    expect(result.kind).toBe('sender-unrelated');
+    expect(book.list(at(60_000))).toHaveLength(1);
+    expect(book.matchCandidate(email(), at(61_000)).kind).toBe('matched');
+  });
+
+  test('an expired match does not reap the row, so the sweep still reports it', () => {
+    const { book } = openedBook();
+    expect(book.matchCandidate(email(), at(16 * 60_000)).kind).toBe('expired');
+    expect(book.sweepExpired(at(16 * 60_000))).toHaveLength(1);
   });
 
   test('refuses a verification email that arrives after the expectation window closed', () => {

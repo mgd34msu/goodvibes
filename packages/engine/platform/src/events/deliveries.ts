@@ -36,7 +36,8 @@ export type DeliveryEvent =
       targetId: string;
       completedAt: number;
       durationMs: number;
-      statusCode: number;
+      /** Present only when the delivery target reported a real status. */
+      statusCode?: number;
     }
   | {
       type: 'DELIVERY_FAILED';

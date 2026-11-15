@@ -20,11 +20,13 @@ export {
   updateAutomationDomainFromJob,
   updateAutomationDomainFromRun,
   updateRoutesDomainFromBinding,
+  removeRoutesDomainBinding,
   updateRouteFailureState,
   updateControlPlaneDomainFromClient,
   patchControlPlaneDomain,
   updateDeliveryDomainFromAttempt,
   updateSurfaceDomainFromRecord,
   updateWatcherDomainFromRecord,
+  removeWatcherDomainRecord,
   syncSessionStatePatch,
 } from './reducers/sync.js';

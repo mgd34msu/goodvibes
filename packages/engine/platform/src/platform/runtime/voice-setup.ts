@@ -23,12 +23,14 @@ import {
   readVoiceInstallStamp,
   writeVoiceInstallStamp,
   type VoiceComponentOutcome,
+  type VoiceInstallStamp,
   type VoiceKeySupersede,
   type VoiceProvisionOptions,
   type VoiceProvisionResult,
   type VoiceRoundTripProof,
   type VoiceRuntimeStatus,
 } from '../voice/provisioning/index.js';
+import { DEFAULT_PIPER_VOICE, PIPER_ENGINES } from '../voice/provisioning/manifest.js';
 import { recordVoiceDiagnostic } from '../voice/diagnostics.js';
 import { assertVoiceProofCurrent, beginVoiceProofReading, ownVoiceProofLifetime, type VoiceProofLifetime } from '../voice/provisioning/round-trip-reading.js';
 import { VOICE_PROOF_PHRASE, type VoiceRoundTripProofOptions } from '../voice/provisioning/round-trip-proof.js';
@@ -42,6 +44,7 @@ import {
   type WakeSetupService,
 } from './wake-setup.js';
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type { WakeInstallProvisionOutcome } from '../voice/wake/install-provision.js';
 
 /** What voice.local.install resolves with (the wire receipt). */
@@ -122,6 +125,11 @@ export function captureVoiceWakeReadSource(service: unknown): () => void {
   return capture();
 }
 
+function currentVoiceInstallStamp(platform: VoiceProvisionResult['platform']): VoiceInstallStamp | null {
+  const engine = platform ? PIPER_ENGINES[platform] : undefined;
+  return engine ? { engineVersion: engine.version, voiceId: DEFAULT_PIPER_VOICE.id, configWrites: {} } : null;
+}
+
 export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetupService {
   const provision = deps.provision ?? provisionLocalVoiceRuntime;
   const readStatus = deps.readStatus ?? localVoiceRuntimeStatus;
@@ -167,8 +175,25 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         });
         configured = { set: [...receipt.set], skipped: [...receipt.skipped], superseded: [...receipt.superseded] };
         notes.push(...describeSupersededVoiceKeys(receipt));
-        if (stamp) {
-          writeVoiceInstallStamp(deps.managedVoiceRoot, { ...stamp, configWrites: { ...stamp.configWrites, ...receipt.installWrites } });
+        // The stamp is what lets a later install update these keys; without it
+        // they read as user-set and keep pointing at today's paths. Its writer
+        // only logs a failure, so read it back to know it landed.
+        const written = Object.entries(receipt.installWrites);
+        if (written.length > 0) {
+          // No stamp on disk (the provisioner's own write failed, or it was never
+          // written): start one from the pinned versions so the keys just set stay owned.
+          const base = stamp ?? currentVoiceInstallStamp(result.platform);
+          if (base) {
+            writeVoiceInstallStamp(deps.managedVoiceRoot, { ...base, configWrites: { ...base.configWrites, ...receipt.installWrites } });
+          }
+          const recorded = readVoiceInstallStamp(deps.managedVoiceRoot)?.configWrites;
+          if (!recorded || written.some(([key, value]) => recorded[key] !== value)) {
+            notes.push(
+              'The installer could not record which voice settings it set, so a later reinstall will treat '
+              + `${written.map(([key]) => key).join(', ')} as your own choices and will not move them to new managed paths. `
+              + 'Check that the managed voice folder is writable, then reinstall.',
+            );
+          }
         }
         // A successful (re-)install is the recovery act: clear any tripped
         // local-engine circuit breaker so the next call retries the fresh engine.
@@ -257,7 +282,7 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         // buffers, refuse honestly instead of piling onto memory pressure.
         const admission = deps.admitExpensiveWork('voice runtime install');
         if (!admission.allowed) {
-          throw new Error(admission.reason ?? 'voice runtime install refused: daemon is under critical memory pressure.');
+          throw new GatewayVerbError(admission.reason ?? 'voice runtime install refused: daemon is under critical memory pressure. Retry when memory pressure eases.', 'SERVICE_UNAVAILABLE', 503);
         }
         // The first request owns the shared work. Joining callers may cancel their
         // wait, but cannot lend new authority to the original installation.
@@ -275,7 +300,7 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       // refusing honestly under memory pressure beats adding to it.
       const admission = deps.admitExpensiveWork('wake-word model provision');
       if (!admission.allowed) {
-        throw new Error(admission.reason ?? 'wake-word provision refused: daemon is under critical memory pressure.');
+        throw new GatewayVerbError(admission.reason ?? 'wake-word provision refused: daemon is under critical memory pressure. Retry when memory pressure eases.', 'SERVICE_UNAVAILABLE', 503);
       }
       return wake.provision();
     },

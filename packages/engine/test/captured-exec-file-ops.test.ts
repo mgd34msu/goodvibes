@@ -72,9 +72,8 @@ test('recursive copies authorize generated descendants and delete previews retai
 
 test('overwrite rules, missing-file warnings and operation errors preserve existing semantics', async () => {
   const f = fixture({ 'input.txt': 'SYNTHETIC_INPUT', 'copy.txt': 'SYNTHETIC_OLD' });
-  let privacySource: ReturnType<typeof captureRedactionSource> | undefined;
-  try { privacySource = captureRedactionSource(); }
-  catch { /* An unavailable native profile source closes the entire diagnostic. */ }
+  // Every currency check below is meaningless without a captured source, so an unavailable one fails the test.
+  const privacySource = captureRedactionSource();
   const fields: ('copy' | 'exists' | 'overwrite')[] = [];
   let unexpectedFieldReading = false, capturedOverwriteResidual = false;
   const withheldPrivacy: JudgmentPort = {
@@ -106,8 +105,8 @@ test('overwrite rules, missing-file warnings and operation errors preserve exist
       { op: 'copy', source: 'input.txt', destination: 'copy.txt' },
     ], f.authorize);
     // Drain the original diagnostic's finite, rejected background readings.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    privacySource?.assertCurrent();
+    for (let turn = 0; turn < 5; turn++) await new Promise<void>((resolve) => setImmediate(resolve));
+    privacySource.assertCurrent();
     expect(fields).toEqual([]);
     expect(capturedOverwriteResidual).toBe(false);
     expect(blocked.fileOpError).toContain('overwrite');
@@ -135,7 +134,7 @@ test('overwrite rules, missing-file warnings and operation errors preserve exist
     expect(existsSync(join(f.root, 'missing.txt'))).toBe(false);
     expect(JSON.stringify(result)).not.toContain(f.projection);
     expect(readFileSync(join(f.root, 'copy.txt'), 'utf8')).toBe('SYNTHETIC_OLD');
-    privacySource?.assertCurrent();
+    privacySource.assertCurrent();
   } finally { restoreJudgmentPort(withheldPrivacy, previousPort); }
 });
 
@@ -163,10 +162,15 @@ test('move import rewrites run after all operations and return captured paths', 
 for (const side of ['source', 'destination'] as const) {
   for (const path of ['../outside.txt', '.aws/credentials', '.git/config', '.goodvibes/runtime']) {
     test(`rejects ${side} outside/excluded path ${path}`, async () => {
-      const f = fixture();
+      // The refused path exists, so only the exclusion check can be what stops the copy.
+      const f = fixture({ 'input.txt': 'SYNTHETIC_INPUT', '.aws/credentials': 'SYNTHETIC_SECRET', '.git/config': 'SYNTHETIC_GIT', '.goodvibes/runtime': 'SYNTHETIC_RUNTIME' });
+      writeFileSync(join(f.temporary, 'outside.txt'), 'SYNTHETIC_OUTSIDE');
       const op: ExecFileOp = { op: 'copy', source: 'input.txt', destination: 'copy.txt', [side]: path };
-      await expect(executeCapturedFileOperations(f.root, f.projection, [op], f.authorize)).rejects.toThrow();
+      await expect(executeCapturedFileOperations(f.root, f.projection, [op], f.authorize)).rejects.toThrow('outside authorized captured input');
       expect(existsSync(join(f.projection, 'copy.txt'))).toBe(false);
+      expect(readFileSync(join(f.temporary, 'outside.txt'), 'utf8')).toBe('SYNTHETIC_OUTSIDE');
+      expect(readFileSync(join(f.root, '.aws/credentials'), 'utf8')).toBe('SYNTHETIC_SECRET');
+      expect(f.authorized).toEqual([]);
     });
   }
 }
@@ -188,7 +192,7 @@ for (const location of ['source', 'destination', 'nested', 'imports', 'hardlink'
       op = { op: 'move', source: 'src/input.ts', destination: 'src/moved.ts', update_imports: true };
     }
     if (location === 'destination') op.destination = 'alias/outside.ts';
-    await expect(executeCapturedFileOperations(f.root, f.projection, [op], f.authorize)).rejects.toThrow();
+    await expect(executeCapturedFileOperations(f.root, f.projection, [op], f.authorize)).rejects.toThrow('alias or special file');
     expect(readFileSync(outside, 'utf8')).toBe('SYNTHETIC_OUTSIDE');
     expect(readFileSync(join(f.root, 'src/input.ts'), 'utf8')).toBe('SYNTHETIC_INPUT');
   });
@@ -250,11 +254,11 @@ test('import-scan authority failures propagate instead of becoming warnings', as
 test('rejects direct original execution, redirected projection and redirected authorization', async () => {
   const f = fixture();
   const ops: ExecFileOp[] = [{ op: 'delete', source: 'input.txt' }];
-  await expect(executeCapturedFileOperations(f.root, f.root, ops, f.authorize)).rejects.toThrow();
+  await expect(executeCapturedFileOperations(f.root, f.root, ops, f.authorize)).rejects.toThrow('separate disposable projection');
   const alias = join(f.temporary, 'projection-alias');
   symlinkSync(f.projection, alias);
-  await expect(executeCapturedFileOperations(f.root, alias, ops, f.authorize)).rejects.toThrow();
-  await expect(executeCapturedFileOperations(f.root, f.projection, ops, async () => join(f.temporary, 'outside'))).rejects.toThrow();
+  await expect(executeCapturedFileOperations(f.root, alias, ops, f.authorize)).rejects.toThrow('projection is redirected');
+  await expect(executeCapturedFileOperations(f.root, f.projection, ops, async () => join(f.temporary, 'outside'))).rejects.toThrow('authorization redirected a path');
   expect(readFileSync(join(f.root, 'input.txt'), 'utf8')).toBe('SYNTHETIC_INPUT');
 });
 
@@ -277,7 +281,7 @@ for (const deniedSide of ['original', 'captured', 'revoked'] as const) {
     const denied = join(deniedSide === 'original' ? f.root : captured, 'src/nested/file.txt');
     await expect(executeCapturedFileOperations(captured, f.projection, [
       { op: 'copy', source: 'src', destination: 'copy', recursive: true },
-    ], (path) => authorizeContractInputPath(authority, path, async (candidate) => candidate !== denied))).rejects.toThrow();
+    ], (path) => authorizeContractInputPath(authority, path, async (candidate) => candidate !== denied))).rejects.toThrow(deniedSide === 'revoked' ? 'missing or revoked' : 'access-restricted');
     expect(existsSync(join(f.projection, 'copy'))).toBe(false);
     expect(relative(f.root, captured)).toContain('.goodvibes');
   });

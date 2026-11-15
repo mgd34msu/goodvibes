@@ -173,7 +173,7 @@ describe('launchd handover (real local IPC; synthetic manager observations)', ()
     retired.resolve(); await commandEntered.promise;
     expect(commands).toEqual([['kickstart', target]]);
     let finished = false; void fixture.task.then(() => { finished = true; });
-    await Promise.resolve(); expect(finished).toBe(false);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0)); expect(finished).toBe(false);
     commandDrained.resolve(); expect(await fixture.task).toBe(0);
   });
 

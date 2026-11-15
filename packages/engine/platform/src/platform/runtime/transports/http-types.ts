@@ -32,11 +32,17 @@ import type {
 import type { UiControlPlaneSnapshot, UiLocalAuthSnapshot, UiSessionSnapshot, UiTasksSnapshot } from '../ui-read-models.js';
 import type { UiRuntimeEvents } from '../ui-events.js';
 import type { TransportPaths } from './shared.js';
+import type { HttpRetryPolicy } from './http-json-transport.js';
 
 export interface HttpTransportOptions {
   readonly baseUrl: string;
   readonly authToken?: string | null | undefined;
   readonly fetchImpl?: FetchLike | undefined;
+  /** Retry policy of the JSON transport. Absent means one attempt per request. */
+  readonly retry?: HttpRetryPolicy | undefined;
+  /** Retry observers of the JSON transport; see `transportRetryHooks` to bind them to the runtime bus. */
+  readonly onRetryScheduled?: ((info: { attempt: number; maxAttempts: number; backoffMs: number; reason: string }) => void) | undefined;
+  readonly onRetryExecuted?: ((info: { attempt: number; maxAttempts: number }) => void) | undefined;
 }
 
 export interface HttpProvidersSnapshot {
@@ -90,6 +96,8 @@ export interface HttpTransportSessionsClient {
     inputId: string,
     options?: {
       readonly consumed?: boolean | undefined;
+      /** Take the input before working on it; refused (409) when another surface already holds it. */
+      readonly claim?: boolean | undefined;
       /** The agent this surface is running for the input, binds the channel reply. */
       readonly agentId?: string | undefined;
       /** That agent's finished output, reported with `consumed:true`. */
@@ -187,7 +195,8 @@ export interface HttpTransportOperatorClient {
 export interface HttpTransportPeerPairingClient {
   listRequests(limit?: number): Promise<readonly DistributedRuntimePairRequest[]>;
   request(input: HttpRemotePairRequestInput): Promise<HttpRemotePairResponse>;
-  approve(requestId: string, actor: string, note?: string): Promise<HttpRemotePairApprovalResponse | null>;
+  /** `confirmReplace` is required when the request names an existing peer; without it the daemon refuses with REMOTE_PAIR_REPLACES_PEER. */
+  approve(requestId: string, actor: string, note?: string, confirmReplace?: boolean): Promise<HttpRemotePairApprovalResponse | null>;
   reject(requestId: string, actor: string, note?: string): Promise<DistributedRuntimePairRequest | null>;
   verify(requestId: string, challenge: string, remoteAddress?: string): Promise<HttpRemotePairVerificationResponse | null>;
 }

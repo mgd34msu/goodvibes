@@ -15,8 +15,11 @@ export interface ParsedOperatorCommandArgs {
 export function parseOperatorCommandArgs(
   args: readonly string[],
   valueFlags: readonly string[] = [],
+  // Flags that never take a value, so `--trigger-fix-session extra` keeps `extra` positional.
+  booleanFlagNames: readonly string[] = [],
 ): ParsedOperatorCommandArgs {
   const valued = new Set(valueFlags);
+  const neverValued = new Set(booleanFlagNames);
   const flags = new Map<string, string>();
   const booleanFlags = new Set<string>();
   const positionals: string[] = [];
@@ -40,7 +43,7 @@ export function parseOperatorCommandArgs(
       }
       const key = raw;
       const next = args[index + 1];
-      if (next !== undefined && (valued.has(key) || !next.startsWith('--'))) {
+      if (next !== undefined && !neverValued.has(key) && (valued.has(key) || !next.startsWith('--'))) {
         flags.set(key, next);
         index += 1;
       } else {

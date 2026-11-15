@@ -22,7 +22,12 @@ function selectEvidenceExtract(request: WebSearchRequest, verbosity: WebSearchVe
   return verbosity === 'full' ? 'readable' : 'summary';
 }
 
-function shapeResultForVerbosity(result: WebSearchResult, verbosity: WebSearchVerbosity): WebSearchResult {
+/**
+ * Trims a result to the asked-for verbosity. Evidence the caller asked for
+ * (`includeEvidence`) is kept at every verbosity, with the reason it is missing
+ * when it could not be fetched, so a requested fetch is never discarded silently.
+ */
+function shapeResultForVerbosity(result: WebSearchResult, verbosity: WebSearchVerbosity, keepEvidence: boolean): WebSearchResult {
   switch (verbosity) {
     case 'urls_only':
       return {
@@ -32,16 +37,18 @@ function shapeResultForVerbosity(result: WebSearchResult, verbosity: WebSearchVe
         type: result.type,
         providerId: result.providerId,
         metadata: result.metadata,
+        ...(keepEvidence && result.evidence ? { evidence: result.evidence } : {}),
+        ...(keepEvidence && result.evidenceError ? { evidenceError: result.evidenceError } : {}),
       };
     case 'titles':
       return {
-        ...shapeResultForVerbosity(result, 'urls_only'),
+        ...shapeResultForVerbosity(result, 'urls_only', keepEvidence),
         ...(result.title ? { title: result.title } : {}),
         ...(result.displayUrl ? { displayUrl: result.displayUrl } : {}),
       };
     case 'snippets':
       return {
-        ...shapeResultForVerbosity(result, 'titles'),
+        ...shapeResultForVerbosity(result, 'titles', keepEvidence),
         ...(result.snippet ? { snippet: result.snippet } : {}),
       };
     default:
@@ -70,16 +77,32 @@ export class WebSearchService {
   async search(request: WebSearchRequest): Promise<WebSearchResponse> {
     const provider = this.registry.find(request.providerId);
     if (!provider) {
-      throw new Error(request.providerId ? `Web search provider unavailable: ${request.providerId}` : 'No web search provider is registered');
+      const ids = this.registry.list().map((entry) => entry.id).join(', ');
+      throw Object.assign(new Error(request.providerId
+        ? `Web search provider unavailable: ${request.providerId}. Registered providers: ${ids || 'none'}.`
+        : 'No web search provider is registered'), { status: 400 });
+    }
+    const descriptor = provider.descriptor?.();
+    if (descriptor && !descriptor.configured) {
+      const configured = this.registry.list().filter((entry) => entry.configured).map((entry) => entry.id).join(', ');
+      throw Object.assign(
+        new Error(`Web search provider "${provider.id}" is not configured. ${descriptor.note ?? ''} Configured providers: ${configured || 'none'}.`.replace(/\s+/g, ' ')),
+        { status: 400 },
+      );
     }
 
     const verbosity = request.verbosity ?? 'snippets';
-    const baseResponse = await provider.search(request);
+    // The provider's own requests go through the same fetch policy (service
+    // credentials, host lists, localhost approval) as the evidence fetch.
+    const baseResponse = await provider.search(request, {
+      fetcher: (input) => this.fetchRuntime.execute(input, this.fetchDeps),
+    });
     const evidenceEnabled = request.includeEvidence || verbosity === 'evidence' || verbosity === 'full';
-    const resultsWithEvidence = evidenceEnabled
+    const evidenceRun = evidenceEnabled
       ? await this.attachEvidence(baseResponse.results, request)
-      : baseResponse.results;
-    const shapedResults = resultsWithEvidence.map((result) => shapeResultForVerbosity(result, verbosity));
+      : undefined;
+    const resultsWithEvidence = evidenceRun?.results ?? baseResponse.results;
+    const shapedResults = resultsWithEvidence.map((result) => shapeResultForVerbosity(result, verbosity, request.includeEvidence === true));
 
     return {
       providerId: provider.id,
@@ -88,17 +111,22 @@ export class WebSearchService {
       verbosity,
       results: shapedResults,
       ...(baseResponse.instantAnswer ? { instantAnswer: baseResponse.instantAnswer } : {}),
-      metadata: baseResponse.metadata,
+      metadata: evidenceRun
+        ? { ...baseResponse.metadata, evidence: evidenceRun.summary }
+        : baseResponse.metadata,
     };
   }
 
-  private async attachEvidence(results: readonly WebSearchResult[], request: WebSearchRequest): Promise<readonly WebSearchResult[]> {
+  private async attachEvidence(
+    results: readonly WebSearchResult[],
+    request: WebSearchRequest,
+  ): Promise<{ readonly results: readonly WebSearchResult[]; readonly summary: { readonly requested: number; readonly attached: number; readonly failed: number } }> {
     const evidenceTopN = Math.max(1, Math.min(10, request.evidenceTopN ?? 3));
     const extract = selectEvidenceExtract(request, request.verbosity ?? 'snippets');
     const selectedIndexes = results
       .map((result, index) => ({ result, index }))
       .filter(({ result, index }) => index < evidenceTopN && (!result.evidence || result.evidence.length === 0));
-    if (selectedIndexes.length === 0) return results;
+    if (selectedIndexes.length === 0) return { results, summary: { requested: 0, attached: 0, failed: 0 } };
 
     const fetched = await this.fetchRuntime.execute({
       urls: selectedIndexes.map(({ result }) => ({
@@ -108,14 +136,18 @@ export class WebSearchService {
       })),
       parallel: true,
       verbosity: 'standard',
-      sanitize_mode: 'safe-text',
+      // No sanitize_mode: the owner's configured fetch.sanitizeMode (default safe-text) applies, as it does to the fetch tool.
       ...(request.trustedHosts ? { trusted_hosts: [...request.trustedHosts] } : {}),
       ...(request.blockedHosts ? { blocked_hosts: [...request.blockedHosts] } : {}),
     }, this.fetchDeps);
 
     const evidenceByUrl = new Map<string, WebSearchEvidence>();
+    const failureByUrl = new Map<string, string>();
     for (const result of fetched.results ?? []) {
-      if (!result.content || result.error) continue;
+      if (!result.content || result.error) {
+        failureByUrl.set(result.url, result.error ?? 'The page had no extractable content.');
+        continue;
+      }
       evidenceByUrl.set(result.url, {
         url: result.final_url ?? result.url,
         extract,
@@ -130,13 +162,21 @@ export class WebSearchService {
       });
     }
 
-    return results.map((result) => {
+    const attachedResults = results.map((result, index) => {
+      if (!selectedIndexes.some((selected) => selected.index === index)) return result;
       const evidence = evidenceByUrl.get(result.url);
-      if (!evidence) return result;
+      if (!evidence) {
+        return { ...result, evidenceError: failureByUrl.get(result.url) ?? 'The page was not fetched.' };
+      }
       return {
         ...result,
         evidence: [...(result.evidence ?? []), evidence],
       };
     });
+    const attached = selectedIndexes.filter(({ result }) => evidenceByUrl.has(result.url)).length;
+    return {
+      results: attachedResults,
+      summary: { requested: selectedIndexes.length, attached, failed: selectedIndexes.length - attached },
+    };
   }
 }

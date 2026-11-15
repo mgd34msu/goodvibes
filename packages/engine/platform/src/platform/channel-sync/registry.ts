@@ -76,6 +76,8 @@ function applyLimit<T>(rows: readonly T[], limit: number | undefined): T[] {
 
 export class ChannelSyncRegistry {
   private tables: ChannelSyncTables | null = null;
+  /** The first load, shared: two first calls must read the file once and see one table. */
+  private loading: Promise<ChannelSyncTables> | null = null;
   private readonly writes = new StoreWriteQueue();
   private readonly now: () => number;
 
@@ -83,14 +85,45 @@ export class ChannelSyncRegistry {
     this.now = options.now ?? ((): number => Date.now());
   }
 
-  private async load(): Promise<ChannelSyncTables> {
-    this.tables ??= await this.store.load();
-    return this.tables;
+  private load(): Promise<ChannelSyncTables> {
+    if (this.tables !== null) return Promise.resolve(this.tables);
+    this.loading ??= this.store.load().then(
+      (loaded) => {
+        this.tables ??= loaded;
+        return this.tables;
+      },
+      (error: unknown) => {
+        // A failed load is retried by the next call, not cached.
+        this.loading = null;
+        throw error;
+      },
+    );
+    return this.loading;
   }
 
-  private async persist(tables: ChannelSyncTables): Promise<void> {
-    const snapshot: ChannelSyncTables = { routes: [...tables.routes], drafts: [...tables.drafts] };
-    await this.writes.run(() => this.store.save(snapshot));
+  /**
+   * Change the tables: compute the new ones from the current ones, write them,
+   * and only then make them the live ones. Mutations run one at a time in call
+   * order, so each sees the previous one's result and the file is written in the
+   * same order. Memory changes only after the write succeeds, so a change the
+   * caller was told failed is not served by later reads or written by a later
+   * unrelated save.
+   */
+  private async mutate<T>(
+    change: (current: ChannelSyncTables) => { next: ChannelSyncTables | null; result: T },
+  ): Promise<T> {
+    let outcome: T | undefined;
+    await this.writes.run(async () => {
+      const current = await this.load();
+      const { next, result } = change(current);
+      if (next !== null) {
+        const snapshot: ChannelSyncTables = { routes: [...next.routes], drafts: [...next.drafts] };
+        await this.store.save(snapshot);
+        this.tables = snapshot;
+      }
+      outcome = result;
+    });
+    return outcome as T;
   }
 
   private stamp(): string {
@@ -113,37 +146,37 @@ export class ChannelSyncRegistry {
   }
 
   async assignRoute(input: AssignChannelRoutingInput): Promise<ChannelRoutingRule> {
-    const tables = await this.load();
     const surfaceKind = requireString(input.surfaceKind, 'surfaceKind').toLowerCase();
     const profileId = requireString(input.profileId, 'profileId');
     const channelId = optionalString(input.channelId, 'channelId');
     const id = channelRoutingRuleId(surfaceKind, channelId);
     const at = this.stamp();
-    const existing = tables.routes.find((rule) => rule.id === id);
-    const rule: ChannelRoutingRule = {
-      id,
-      createdAt: existing?.createdAt ?? at,
-      updatedAt: at,
-      surfaceKind,
-      profileId,
-      ...(channelId ? { channelId } : {}),
-      ...(optionalString(input.routeId, 'routeId') ? { routeId: optionalString(input.routeId, 'routeId') } : {}),
-      ...(optionalString(input.label, 'label') ? { label: optionalString(input.label, 'label') } : {}),
-    };
-    const routes = [...tables.routes.filter((entry) => entry.id !== id), rule];
-    this.tables = { routes, drafts: tables.drafts };
-    await this.persist(this.tables);
-    return rule;
+    const routeId = optionalString(input.routeId, 'routeId');
+    const label = optionalString(input.label, 'label');
+    return this.mutate((tables) => {
+      const existing = tables.routes.find((rule) => rule.id === id);
+      const rule: ChannelRoutingRule = {
+        id,
+        createdAt: existing?.createdAt ?? at,
+        updatedAt: at,
+        surfaceKind,
+        profileId,
+        ...(channelId ? { channelId } : {}),
+        ...(routeId ? { routeId } : {}),
+        ...(label ? { label } : {}),
+      };
+      const routes = [...tables.routes.filter((entry) => entry.id !== id), rule];
+      return { next: { routes, drafts: tables.drafts }, result: rule };
+    });
   }
 
   async deleteRoute(assignmentId: string): Promise<boolean> {
-    const tables = await this.load();
     const id = requireString(assignmentId, 'assignmentId');
-    const routes = tables.routes.filter((rule) => rule.id !== id);
-    if (routes.length === tables.routes.length) return false;
-    this.tables = { routes, drafts: tables.drafts };
-    await this.persist(this.tables);
-    return true;
+    return this.mutate((tables) => {
+        const routes = tables.routes.filter((rule) => rule.id !== id);
+        if (routes.length === tables.routes.length) return { next: null, result: false };
+        return { next: { routes, drafts: tables.drafts }, result: true };
+    });
   }
 
   // ── Drafts ───────────────────────────────────────────────────────────────
@@ -162,7 +195,6 @@ export class ChannelSyncRegistry {
   }
 
   async saveDraft(input: Record<string, unknown>): Promise<{ draft: ChannelDraft; created: boolean }> {
-    const tables = await this.load();
     const id = requireString(input.id, 'id');
     const webhook = optionalString(input.webhook, 'webhook');
     if (webhook && looksLikeLiveWebhook(webhook)) {
@@ -177,41 +209,40 @@ export class ChannelSyncRegistry {
     }
     const version = typeof input.version === 'number' && Number.isFinite(input.version) ? input.version : 1;
     const at = this.stamp();
-    const existing = tables.drafts.find((draft) => draft.id === id);
-    const tags = Array.isArray(input.tags)
-      ? input.tags.filter((tag): tag is string => typeof tag === 'string')
-      : undefined;
-    const draft: ChannelDraft = {
-      version,
-      id,
-      createdAt: optionalString(input.createdAt, 'createdAt') ?? existing?.createdAt ?? at,
-      updatedAt: at,
-      status: requireStatus(input.status),
-      message: requireString(input.message, 'message'),
-      ...(optionalString(input.title, 'title') ? { title: optionalString(input.title, 'title') } : {}),
-      ...(optionalString(input.channel, 'channel') ? { channel: optionalString(input.channel, 'channel') } : {}),
-      ...(optionalString(input.route, 'route') ? { route: optionalString(input.route, 'route') } : {}),
-      ...(webhook ? { webhook } : {}),
-      ...(optionalString(input.link, 'link') ? { link: optionalString(input.link, 'link') } : {}),
-      ...(tags ? { tags } : {}),
-      ...(optionalString(input.sentResponseId, 'sentResponseId')
-        ? { sentResponseId: optionalString(input.sentResponseId, 'sentResponseId') }
-        : {}),
-      ...(optionalString(input.sendError, 'sendError') ? { sendError: optionalString(input.sendError, 'sendError') } : {}),
-    };
-    const drafts = [...tables.drafts.filter((entry) => entry.id !== id), draft];
-    this.tables = { routes: tables.routes, drafts };
-    await this.persist(this.tables);
-    return { draft, created: existing === undefined };
+    return this.mutate((tables) => {
+      const existing = tables.drafts.find((draft) => draft.id === id);
+      const tags = Array.isArray(input.tags)
+        ? input.tags.filter((tag): tag is string => typeof tag === 'string')
+        : undefined;
+      const draft: ChannelDraft = {
+        version,
+        id,
+        createdAt: optionalString(input.createdAt, 'createdAt') ?? existing?.createdAt ?? at,
+        updatedAt: at,
+        status: requireStatus(input.status),
+        message: requireString(input.message, 'message'),
+        ...(optionalString(input.title, 'title') ? { title: optionalString(input.title, 'title') } : {}),
+        ...(optionalString(input.channel, 'channel') ? { channel: optionalString(input.channel, 'channel') } : {}),
+        ...(optionalString(input.route, 'route') ? { route: optionalString(input.route, 'route') } : {}),
+        ...(webhook ? { webhook } : {}),
+        ...(optionalString(input.link, 'link') ? { link: optionalString(input.link, 'link') } : {}),
+        ...(tags ? { tags } : {}),
+        ...(optionalString(input.sentResponseId, 'sentResponseId')
+          ? { sentResponseId: optionalString(input.sentResponseId, 'sentResponseId') }
+          : {}),
+        ...(optionalString(input.sendError, 'sendError') ? { sendError: optionalString(input.sendError, 'sendError') } : {}),
+      };
+      const drafts = [...tables.drafts.filter((entry) => entry.id !== id), draft];
+      return { next: { routes: tables.routes, drafts }, result: { draft, created: existing === undefined } };
+    });
   }
 
   async deleteDraft(draftId: string): Promise<boolean> {
-    const tables = await this.load();
     const id = requireString(draftId, 'draftId');
-    const drafts = tables.drafts.filter((draft) => draft.id !== id);
-    if (drafts.length === tables.drafts.length) return false;
-    this.tables = { routes: tables.routes, drafts };
-    await this.persist(this.tables);
-    return true;
+    return this.mutate((tables) => {
+        const drafts = tables.drafts.filter((draft) => draft.id !== id);
+        if (drafts.length === tables.drafts.length) return { next: null, result: false };
+        return { next: { routes: tables.routes, drafts }, result: true };
+    });
   }
 }

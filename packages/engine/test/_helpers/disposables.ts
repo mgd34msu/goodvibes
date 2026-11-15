@@ -1,7 +1,8 @@
 /**
  * Automatic teardown for anything a test starts.
  *
- * The whole suite runs in ONE `bun test` process. A test that constructs a
+ * The runner gives every test file its own process, but a file run by plain
+ * `bun test` shares one process with the rest. A test that constructs a
  * scheduler, manager, listener or watcher and never disposes it leaves that
  * object's `setInterval` / `setTimeout` chain running for the remainder of the
  * run, inside every later test file. That is how `provider-stream-retry.test.ts`

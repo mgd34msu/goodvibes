@@ -32,6 +32,7 @@ function readPlist(): Record<string, unknown> {
   const result = spawnSync('python3', ['-c',
     'import json, plistlib, sys\nwith open(sys.argv[1], "rb") as f: print(json.dumps(plistlib.load(f)))', plist],
   { encoding: 'utf8', timeout: 10_000 });
+  expect(result.error, 'python3 is required on PATH to decode the plist independently of the shell writer').toBeUndefined();
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout);
 }

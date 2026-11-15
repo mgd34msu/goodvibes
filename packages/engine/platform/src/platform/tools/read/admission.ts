@@ -32,7 +32,12 @@ function paths(args: Record<string, unknown>): readonly string[] {
   });
 }
 
-/** Resource identity only; no contents or credential data enter semantic evidence. */
+/**
+ * Resource identity only; no contents or credential data enter semantic evidence. Size and times are
+ * deliberately not part of it: they change whenever a file grows (a log being written), and the approval
+ * is for which file is read, which a replaced, relinked or moved file still changes through its inode,
+ * link target and parents.
+ */
 function revision(path: string, root: string): string {
   const parents: string[] = [];
   for (let parent = dirname(path); ; parent = dirname(parent)) {
@@ -49,7 +54,7 @@ function revision(path: string, root: string): string {
     const link = lstatSync(path);
     const stat = statSync(path, { bigint: true });
     return JSON.stringify([parents, realpathSync(path), link.dev, link.ino, link.mode,
-      String(stat.dev), String(stat.ino), String(stat.mode), String(stat.nlink), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]);
+      String(stat.dev), String(stat.ino), String(stat.mode), String(stat.nlink)]);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return JSON.stringify([parents, 'absent']);

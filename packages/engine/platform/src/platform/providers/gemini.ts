@@ -22,7 +22,8 @@ import { createGeminiResponseIdentityAccumulator } from './gemini-response-ident
 import { mapGeminiStopReason } from './stop-reason-maps.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
 import { ProviderError } from '../types/errors.js';
-import { withRetry } from '../utils/retry.js';
+import { withRetry, type RetryConfig } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { logger } from '../utils/logger.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
@@ -36,6 +37,7 @@ import type { CacheHitTracker } from './cache-strategy.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
 import { readsAsBelowCacheMinimum } from '../routing/provider-cache-readings.js';
+import { JudgmentHeldError } from '../types/judgment-held.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_CACHE_TTL_SECONDS = 3600;
@@ -158,11 +160,13 @@ export class GeminiProvider implements LLMProvider {
   private cachedContentExpiry: number = 0;
   /** One bounded rejection hint, rather than retaining a history of large prompts. */
   private uncacheableInput: GeminiProvider['cachedContentInput'] = null;
+  private cacheCreation: { input: NonNullable<GeminiProvider['cachedContentInput']>; promise: Promise<string | null> } | null = null;
 
   constructor(
     apiKey: string,
     cacheHitTracker: Pick<CacheHitTracker, 'recordTurn'> = NOOP_CACHE_HIT_TRACKER,
     modelsCachePath?: string,
+    private readonly retryConfig?: Partial<RetryConfig>,
   ) {
     this.apiKey = apiKey;
     this.cacheHitTracker = cacheHitTracker;
@@ -224,6 +228,29 @@ export class GeminiProvider implements LLMProvider {
       this.cachedContentInput = null;
     }
 
+    // Parallel requests with the same input share one creation; a second POST
+    // would create another billed cache resource. A follower whose leader failed
+    // sends its request uncached.
+    const inFlight = this.cacheCreation;
+    if (inFlight && matches(inFlight.input)) return inFlight.promise.catch(() => null);
+    const creation = this.createCachedContent(input, estimatedChars, systemPrompt, tools, model, beforeAttempt);
+    const entry = { input, promise: creation };
+    this.cacheCreation = entry;
+    void creation.then(
+      () => { if (this.cacheCreation === entry) this.cacheCreation = null; },
+      () => { if (this.cacheCreation === entry) this.cacheCreation = null; },
+    );
+    return creation;
+  }
+
+  private async createCachedContent(
+    input: NonNullable<GeminiProvider['cachedContentInput']>,
+    estimatedChars: number,
+    systemPrompt: string | undefined,
+    tools: import('./interface.js').ChatRequest['tools'],
+    model: string,
+    beforeAttempt?: ChatRequest['beforeAttempt'],
+  ): Promise<string | null> {
     // Other requests can still be using the previous resource. Its server TTL
     // owns retirement; replacing this reuse hint must not delete their cache.
 
@@ -271,9 +298,21 @@ export class GeminiProvider implements LLMProvider {
     // Only a 400 (INVALID_ARGUMENT) rejects the content itself; its wording is
     // read by routing.cache-minimum, outside the try so a judgment port error
     // propagates. Any other status, or a reading too weak to act on, leaves the
-    // prompt cacheable so a later request tries again.
+    // prompt cacheable so a later request tries again. The cache is only an
+    // optimisation, so an unsettled reading sends this request uncached
+    // instead of holding the whole turn.
     const { status, text } = rejection;
-    if (status === 400 && await readsAsBelowCacheMinimum(text, 'providers.gemini.cache-minimum')) {
+    let belowMinimum = false;
+    if (status === 400) {
+      try {
+        belowMinimum = await readsAsBelowCacheMinimum(text, 'providers.gemini.cache-minimum');
+      } catch (err) {
+        if (!(err instanceof JudgmentHeldError)) throw err;
+        logger.debug('[Gemini] Cache rejection reading unsettled; sending uncached');
+        return null;
+      }
+    }
+    if (belowMinimum) {
       // Oversized rejected inputs do not become another long-lived prompt copy.
       this.uncacheableInput = estimatedChars <= 1024 * 1024 ? input : null;
       logger.debug('[Gemini] Content below cache minimum', { status, error: text.slice(0, 200) });
@@ -284,7 +323,8 @@ export class GeminiProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    const { messages, tools, model, maxTokens, signal, systemPrompt, onDelta, onRetry } = params;
+    const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry } = params;
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
       // Gemini thinking models require each call's signature on both sides of the round-trip.
@@ -352,8 +392,10 @@ export class GeminiProvider implements LLMProvider {
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
         const effortHint = (await describeReasoningRejection(res.status, text, thinking.level, 'providers.gemini.reasoning-rejection')) ?? '';
+        const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(`Gemini API error ${res.status}: ${text}${effortHint}`, {
           statusCode: res.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
           provider: this.name,
           operation: 'chat',
           phase: 'request',
@@ -482,7 +524,7 @@ export class GeminiProvider implements LLMProvider {
         ...(lastFinishReason ? { providerStopReason: lastFinishReason } : {}),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, onRetry), { provider: 'gemini', model: model })).result;
+    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: 'gemini', model: model })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -558,7 +600,6 @@ export class GeminiProvider implements LLMProvider {
       models: {
         models: this.models,
         embeddingModel: this.embeddingModel,
-        embeddingDimensions: 384,
       },
       usage: {
         streaming: true,

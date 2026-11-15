@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -11,6 +12,9 @@ interface PackageManifest {
   readonly dependencies?: Readonly<Record<string, unknown>>;
   readonly optionalDependencies?: Readonly<Record<string, unknown>>;
 }
+
+/** The package that declares exact per-platform native packages and so owns their pinned versions. */
+const NATIVE_ADDON_OWNER = 'sqlite-vec';
 
 function isWithin(root: string, path: string): boolean {
   const rel = relative(root, path);
@@ -84,8 +88,8 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
   if (!packageName || !file) return true;
   const productManifest = join(root, 'package.json');
   const product = JSON.parse(readFileSync(productManifest, 'utf8')) as PackageManifest;
-  const declaredByProduct = Object.hasOwn(product.dependencies ?? {}, 'sqlite-vec') || Object.hasOwn(product.optionalDependencies ?? {}, 'sqlite-vec');
-  let ownerPath = declaredByProduct ? resolveOwnedPackageManifest(productManifest, 'sqlite-vec') : null;
+  const declaredByProduct = Object.hasOwn(product.dependencies ?? {}, NATIVE_ADDON_OWNER) || Object.hasOwn(product.optionalDependencies ?? {}, NATIVE_ADDON_OWNER);
+  let ownerPath = declaredByProduct ? resolveOwnedPackageManifest(productManifest, NATIVE_ADDON_OWNER) : null;
   // Private clients depend on the engine; sqlite-vec belongs to that declared
   // dependency, not to a fictitious product-level or hoisted installation.
   if (!declaredByProduct && options.enginePackage) {
@@ -94,8 +98,8 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
       const enginePath = resolveOwnedPackageManifest(productManifest, options.enginePackage);
       if (enginePath !== null) {
         const engine = JSON.parse(readFileSync(enginePath, 'utf8')) as PackageManifest;
-        if (Object.hasOwn(engine.dependencies ?? {}, 'sqlite-vec') || Object.hasOwn(engine.optionalDependencies ?? {}, 'sqlite-vec')) {
-          ownerPath = resolveOwnedPackageManifest(enginePath, 'sqlite-vec');
+        if (Object.hasOwn(engine.dependencies ?? {}, NATIVE_ADDON_OWNER) || Object.hasOwn(engine.optionalDependencies ?? {}, NATIVE_ADDON_OWNER)) {
+          ownerPath = resolveOwnedPackageManifest(enginePath, NATIVE_ADDON_OWNER);
         }
       }
     }
@@ -106,7 +110,7 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
   // sqlite-vec declares exact per-platform versions. Do not silently replace a
   // missing/malformed target declaration with the current host or another range.
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`sqlite-vec does not pin a version for requested native package ${packageName}`);
+    throw new Error(`${NATIVE_ADDON_OWNER} does not pin a version for requested native package ${packageName}`);
   }
   const stage = (source: string): void => {
     const destDirectory = resolve(root, options.addonOutDir, packageName);
@@ -126,19 +130,42 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
     (options.logger ?? consoleLogger).error(`[build-binaries] native addon missing for host target ${target.key}; run install`);
     return false;
   }
+  // A package fetched for another target is trusted only against the integrity
+  // the owner's lockfile records for this exact name and version.
+  const pinned = lockfileIntegrity(root, `${packageName}@${version}`);
+  if (pinned === null) {
+    (options.logger ?? consoleLogger).error(`[build-binaries] no pinned integrity for ${packageName}@${version} in a bun.lock at or above ${root}; run install so the lockfile records it, or build this target on its own platform`);
+    return false;
+  }
   const exec = options.exec ?? realExec;
   const scratch = mkdtempSync(join(tmpdir(), 'gv-addon-'));
   try {
-    const packed = exec('npm', ['pack', `${packageName}@${version}`, '--pack-destination', scratch]);
+    const packed = exec('npm', ['pack', `${packageName}@${version}`, '--pack-destination', scratch], { timeoutMs: 120_000 });
     if (packed.status !== 0) return false;
     const tarball = packed.stdout.trim().split('\n').pop();
     if (!tarball || basename(tarball) !== tarball) return false;
-    const unpacked = exec('tar', ['-xzf', join(scratch, tarball), '-C', scratch]);
+    const archive = join(scratch, tarball);
+    const integrity = `sha512-${createHash('sha512').update(readFileSync(archive)).digest('base64')}`;
+    if (integrity !== pinned) throw new Error(`Native package archive ${packageName}@${version} does not match the lockfile integrity`);
+    const unpacked = exec('tar', ['-xzf', archive, '-C', scratch], { timeoutMs: 60_000 });
     if (unpacked.status !== 0) return false;
     const payload = resolveNativeAddonPayload(join(scratch, 'package'), packageName, version, file, scratch);
     stage(payload);
     return true;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** The sha512 a bun.lock (nearest one at or above `from`) records for `name@version`, or null. */
+function lockfileIntegrity(from: string, spec: string): string | null {
+  for (let directory = resolve(from); ; directory = dirname(directory)) {
+    const lockfile = join(directory, 'bun.lock');
+    if (existsSync(lockfile)) {
+      const escaped = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = new RegExp(`\\["${escaped}"[^\\n]*?"(sha512-[A-Za-z0-9+/=]+)"\\]`).exec(readFileSync(lockfile, 'utf8'));
+      return match?.[1] ?? null;
+    }
+    if (dirname(directory) === directory) return null;
   }
 }

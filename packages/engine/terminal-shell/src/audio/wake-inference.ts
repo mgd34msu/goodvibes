@@ -163,30 +163,42 @@ export function createWakeEngineFactory(options: WakeEngineFactoryOptions): () =
     return async () => {
         if (options.loadSession === undefined)
             configureOnnxRuntime(options.assetDirectory);
-        const embedding = await load(options.embeddingPath);
-        const models: WakeModelHandle[] = [];
-        for (const model of options.models) {
-            models.push({ id: model.id, session: await load(model.path) });
+        // A later load that throws would otherwise strand the sessions already created, once per failed start attempt.
+        const created: WakeInferenceSession[] = [];
+        const loadTracked = async (path: string): Promise<WakeInferenceSession> => {
+            const session = await load(path);
+            created.push(session);
+            return session;
+        };
+        try {
+            const embedding = await loadTracked(options.embeddingPath);
+            const models: WakeModelHandle[] = [];
+            for (const model of options.models) {
+                models.push({ id: model.id, session: await loadTracked(model.path) });
+            }
+            // Loaded per start, like every other session here: a restart exists to
+            // recover from a runtime that died, and a gate session carried over from the
+            // dead run would be the one piece that did not recover.
+            const gate = options.vad ?? (options.vadPath === undefined ? undefined : { path: options.vadPath, ready: true });
+            let vad: WakeVadGate | undefined;
+            if (options.settings.vadThreshold > 0) {
+                if (!gate || !gate.ready)
+                    throw new Error('Wake speech screening is configured, but its verified model is unavailable. Provision the speech gate before starting.');
+                if (options.vadPath !== undefined && options.vad && options.vadPath !== options.vad.path)
+                    throw new Error('Wake speech gate paths disagree.');
+                vad = { session: await loadTracked(gate.path), threshold: options.settings.vadThreshold };
+            }
+            return new WakeWordEngine({
+                embedding,
+                models,
+                tuning: options.settings.tuning,
+                preRollMs: options.settings.preRollMs,
+                ...(vad !== undefined ? { vad } : {}),
+                warn: options.warn,
+            });
+        } catch (error) {
+            await Promise.all(created.map((session) => session.release?.().catch(() => undefined)));
+            throw error;
         }
-        // Loaded per start, like every other session here: a restart exists to
-        // recover from a runtime that died, and a gate session carried over from the
-        // dead run would be the one piece that did not recover.
-        const gate = options.vad ?? (options.vadPath === undefined ? undefined : { path: options.vadPath, ready: true });
-        let vad: WakeVadGate | undefined;
-        if (options.settings.vadThreshold > 0) {
-            if (!gate || !gate.ready)
-                throw new Error('Wake speech screening is configured, but its verified model is unavailable. Provision the speech gate before starting.');
-            if (options.vadPath !== undefined && options.vad && options.vadPath !== options.vad.path)
-                throw new Error('Wake speech gate paths disagree.');
-            vad = { session: await load(gate.path), threshold: options.settings.vadThreshold };
-        }
-        return new WakeWordEngine({
-            embedding,
-            models,
-            tuning: options.settings.tuning,
-            preRollMs: options.settings.preRollMs,
-            ...(vad !== undefined ? { vad } : {}),
-            warn: options.warn,
-        });
     };
 }

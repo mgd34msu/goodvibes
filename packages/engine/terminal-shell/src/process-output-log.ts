@@ -152,11 +152,13 @@ export class ProcessOutputLog {
           assertCurrent(); reading.assertCurrent(); reading.recordPublication(); assertCurrent();
           const retained = new Set(entry.lines);
           for (const line of lines) if (retained.has(line) && reading.errors.has(line.id)) { line.error = reading.errors.get(line.id); entry.observed.add(line.id); }
-          if (reading.errors.size > 0) entry.authorities.add(() => {
+          // Every reading of an entry shares its lifetime and a source that only ever extends the previous one,
+          // so the newest check covers the older ones; keeping them all would grow with every quiet window.
+          if (reading.errors.size > 0) { entry.authorities.clear(); entry.authorities.add(() => {
             reading.assertAuthorityCurrent();
             if (records.get(id) !== source.record || !appended(source, source.record)) throw new JudgmentAuthorityRetiredError();
             assertSource?.(id, source.record, 'retained');
-          });
+          }); }
           entry.port = reading.port; entry.portReading = reading; entry.revision++;
           this.onChange();
         } catch { /* Missing, private, uncertain or retired observations stay neutral. */ }

@@ -74,6 +74,51 @@ describe('agent_channel_send tool', () => {
     expect(requests).toEqual([]);
   });
 
+  test('a link target is refused up front, with the targets that do work', async () => {
+    const requests: ChannelDeliveryRequest[] = [];
+    const tool = createAgentChannelSendTool(fakeRouter(requests));
+
+    const result = await tool.execute({ message: 'hi', link: 'https://example.com/x', preview: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('channel, route or webhook');
+    expect(requests).toEqual([]);
+  });
+
+  test('a missing home directory is a failure result, not a thrown error', async () => {
+    const requests: ChannelDeliveryRequest[] = [];
+    const home = makeProjectTempDir('agent-channel-send-gone-home');
+    const shellPaths = createShellPathService({ workingDirectory: home, homeDirectory: `${home}/removed` });
+    const tool = createAgentChannelSendTool(fakeRouter(requests), { shellPaths });
+
+    const result = await tool.execute({ message: 'hi', channel: 'slack:ops:Ops' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not available');
+    expect(requests).toEqual([]);
+  });
+
+  test('an unreadable strategy list after the provider accepted the message still reports the send', async () => {
+    const requests: ChannelDeliveryRequest[] = [];
+    const base = fakeRouter(requests);
+    // The strategy list is read again after delivery to report the count; a read that fails there must not hide the send.
+    const router = {
+      deliver: base.deliver,
+      listStrategies: () => {
+        if (requests.length > 0) throw new Error('strategy registry went away');
+        return base.listStrategies();
+      },
+    };
+    const tool = createAgentChannelSendTool(router);
+
+    const result = await recordedEffectFixture(tool).run({ message: 'Review the approvals', channel: 'slack:ops:Ops' });
+
+    expect(requests).toHaveLength(1);
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Agent channel delivery sent');
+    expect(result.output).not.toContain('held');
+  });
+
   test('sends one message under recorded synthetic admission without caller flags', async () => {
     const requests: ChannelDeliveryRequest[] = [];
     const tool = createAgentChannelSendTool(fakeRouter(requests));

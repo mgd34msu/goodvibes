@@ -40,7 +40,8 @@ const ProviderSnapshotSchema = z.object({
     command: z.object({ name: z.string(), args: z.array(z.string()) }).optional(),
   })),
   routeRecords: z.array(ProviderRouteRecordSchema),
-}).strict();
+// Provider records are open: the catalog declares additionalProperties true, and a daemon may add fields.
+});
 
 /**
  * Schema for `accounts.snapshot` response.

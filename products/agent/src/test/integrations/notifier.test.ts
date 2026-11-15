@@ -1,4 +1,4 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately a per-repo test: the module it exercises is this repo's own, so the sibling product's tests do not stand in for it.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,8 +15,8 @@ describe('Notifier.fromConfig', () => {
   beforeEach(() => {
     previousCwd = process.cwd();
     root = makeProjectTempDir('gv-notifier');
-    mkdirSync(join(root, '.goodvibes', 'tui'), { recursive: true });
-    writeFileSync(join(root, '.goodvibes', 'tui', 'services.json'), JSON.stringify({
+    mkdirSync(join(root, '.goodvibes', 'agent'), { recursive: true });
+    writeFileSync(join(root, '.goodvibes', 'agent', 'services.json'), JSON.stringify({
       slack: {
         name: 'Slack',
         baseUrl: 'https://slack.com/api',
@@ -48,9 +48,9 @@ describe('Notifier.fromConfig', () => {
   });
 
   test('builds active channels from service registry and env-backed secrets', async () => {
-    const notifier = await Notifier.fromConfig(new ServiceRegistry(join(root, '.goodvibes', 'tui', 'services.json'), {
+    const notifier = await Notifier.fromConfig(new ServiceRegistry(join(root, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: new SecretsManager({ projectRoot: root, globalHome: root }),
-      subscriptionManager: new SubscriptionManager(join(root, '.goodvibes', 'tui', 'subscriptions.json')),
+      subscriptionManager: new SubscriptionManager(join(root, '.goodvibes', 'agent', 'subscriptions.json')),
     }));
     const channels = notifier.getQueueStatus().map((entry) => entry.channel).sort();
     expect(channels).toEqual(['discord', 'slack']);

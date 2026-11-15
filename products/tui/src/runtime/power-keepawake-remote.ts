@@ -20,6 +20,7 @@
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveOperatorRpc } from '../input/commands/operator-rpc.ts';
 
 export interface KeepAwakeRemoteDeps {
@@ -29,23 +30,59 @@ export interface KeepAwakeRemoteDeps {
   readonly isExternalDaemon: () => boolean;
   /** Injectable rpc resolution (tests); defaults to the shared resolveOperatorRpc. */
   readonly resolveRpc?: typeof resolveOperatorRpc;
+  /** One line shown to the owner when the daemon did not take the toggle. */
+  readonly notify?: ((text: string) => void) | undefined;
 }
 
 /**
  * Best-effort forward of the keep-awake toggle to the adopted external daemon so
  * the DAEMON holds the inhibitor (surviving the TUI closing). A no-op in the
- * embedded topology and quiet when the daemon is unreachable, a transient
- * daemon hiccup never breaks the local toggle.
+ * embedded topology. A daemon that cannot be reached never breaks the local
+ * toggle, but the owner is told the daemon did not take it, because only the
+ * daemon's hold outlives this terminal.
  */
 export async function forwardKeepAwakeToDaemon(enabled: boolean, deps: KeepAwakeRemoteDeps): Promise<void> {
   if (!deps.isExternalDaemon()) return;
   const rpc = (deps.resolveRpc ?? resolveOperatorRpc)({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
-  if (!rpc.available) return;
-  try {
-    await rpc.platformClient.operator.invoke('power.keepAwake.set', { enabled });
-  } catch {
-    // Best-effort by design; the local toggle already applied.
+  const tell = (reason: string): void => {
+    const line = `Keep-awake is ${enabled ? 'on' : 'off'} in this terminal only; the daemon did not take it (${reason}), so it will not outlive this terminal.`;
+    logger.warn('keep-awake forward failed', { enabled, reason });
+    deps.notify?.(line);
+  };
+  if (!rpc.available) {
+    tell(rpc.reason);
+    return;
   }
+  try {
+    const served = await rpc.platformClient.operator.invoke('power.keepAwake.set', { enabled });
+    // The request being accepted does not mean the host is held: the OS can
+    // still refuse the inhibitor, and the daemon says so in the state it serves.
+    if (enabled && servedKeepAwakeState(served) === 'refused') {
+      const line = 'The daemon accepted keep-awake but the system refused to hold the host awake, so the machine can still sleep.';
+      logger.warn('keep-awake refused by the daemon host', { enabled });
+      deps.notify?.(line);
+    }
+  } catch (error) {
+    // The local toggle already applied; the daemon's did not.
+    tell(summarizeError(error));
+  }
+}
+
+function servedKeepAwakeState(served: unknown): string | undefined {
+  if (typeof served !== 'object' || served === null) return undefined;
+  const keepAwake = (served as { keepAwake?: unknown }).keepAwake;
+  if (typeof keepAwake !== 'object' || keepAwake === null) return undefined;
+  const state = (keepAwake as { state?: unknown }).state;
+  return typeof state === 'string' ? state : undefined;
+}
+
+// One queue per config manager, so a re-send after a reconnect and a toggle
+// reach the daemon in the order they happened.
+const forwardChains = new WeakMap<object, Promise<void>>();
+
+function enqueueForward(deps: KeepAwakeRemoteDeps, enabled: boolean): void {
+  const previous = forwardChains.get(deps.configManager) ?? Promise.resolve();
+  forwardChains.set(deps.configManager, previous.then(() => forwardKeepAwakeToDaemon(enabled, deps)).catch(() => {}));
 }
 
 /**
@@ -54,9 +91,34 @@ export async function forwardKeepAwakeToDaemon(enabled: boolean, deps: KeepAwake
  * toggle origins land on the same config key, this one seam carries them all.
  */
 export function installKeepAwakeRemoteForward(deps: KeepAwakeRemoteDeps): () => void {
+  // Forwards run one after another in toggle order: two quick toggles are two
+  // unordered requests otherwise, and the daemon could settle on the older one.
   return deps.configManager.subscribe('power.keepAwake', (newValue) => {
-    void forwardKeepAwakeToDaemon(newValue === true, deps);
+    enqueueForward(deps, newValue === true);
   });
+}
+
+/**
+ * Wrap the daemon-state poll so that keep-awake that is on here is re-sent each
+ * time the daemon turns reachable (including the first poll at startup). A
+ * daemon that started or restarted after the toggle holds nothing until told,
+ * and only its hold outlives this terminal. Only "on" is re-sent: the daemon
+ * defaults to off, and another surface may have turned it off on purpose.
+ */
+export function resendKeepAwakeOnReconnect(
+  deps: KeepAwakeRemoteDeps,
+  fetchState: () => Promise<PowerState | null>,
+): () => Promise<PowerState | null> {
+  let wasReachable = false;
+  return async () => {
+    const state = await fetchState();
+    const reachable = state !== null;
+    if (reachable && !wasReachable && deps.configManager.get('power.keepAwake') === true) {
+      enqueueForward(deps, true);
+    }
+    wasReachable = reachable;
+    return state;
+  };
 }
 
 /**

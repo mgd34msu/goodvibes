@@ -10,11 +10,10 @@
  * for the optional GoodVibes Worker bridge around daemon batch queue/tick
  * integration.
  *
- * Module resolution: Miniflare resolves static imports relative to the
- * worker script location. We copy worker.ts into a tmp directory outside
- * dist/ to avoid racing with concurrent builds, and point modulesRoot at
- * packages/platform/dist/ so that `import './web.js'` resolves correctly.
- * The tmp directory is cleaned up in afterAll().
+ * Bundling: esbuild inlines the built platform (packages/engine/platform/dist,
+ * imported by relative path from worker.ts) into one module written to a
+ * per-run temp directory. Nothing is written into dist, so concurrent runs
+ * and builds cannot clobber each other. esbuild is the copy wrangler ships.
  *
  * Run:
  *   bun run build && bun test test/workers/workers.test.ts
@@ -23,8 +22,10 @@
  *   bun run test:workers
  */
 
-import { resolve, dirname } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { Miniflare } from 'miniflare';
@@ -32,67 +33,53 @@ import { Miniflare } from 'miniflare';
 // fileURLToPath alias: __dirname here is a local const, not the Node.js global
 // __dirname, which is unavailable in ESM.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLATFORM_DIST = resolve(__dirname, '../../platform/dist');
 const WORKER_SOURCE = resolve(__dirname, 'worker.ts');
 
-// Write to a tmp dir outside dist so concurrent builds that clean/rewrite dist
-// cannot clobber the staged file.
-const TMP_DIR = resolve(__dirname, '../../.test-tmp/workers-harness');
-const WORKER_IN_TMP = resolve(TMP_DIR, '_workers-test-entry.mjs');
-const WORKER_BUNDLED = resolve(TMP_DIR, '_workers-test-bundled.mjs');
-
 let mf: Miniflare;
+let tmpDir = '';
+
+// esbuild is a dependency of wrangler, not of the engine: resolve the copy that
+// wrangler uses instead of fetching one with bunx.
+// The engine does not depend on esbuild, so its types are not resolvable here:
+// this is the slice of the build options the bundle step uses.
+interface EsbuildBundleOptions {
+  readonly entryPoints: readonly string[];
+  readonly bundle: boolean;
+  readonly platform: 'browser';
+  readonly format: 'esm';
+  readonly target: string;
+  readonly external: readonly string[];
+  readonly outfile: string;
+  readonly logLevel: 'silent';
+}
+function loadEsbuild(): { build: (options: EsbuildBundleOptions) => Promise<unknown> } {
+  const fromHere = createRequire(import.meta.url);
+  return createRequire(fromHere.resolve('wrangler'))('esbuild');
+}
 
 beforeAll(async () => {
-  // Stage a full snapshot of PLATFORM_DIST in a tmp dir outside dist. modulesRoot
-  // points to TMP_DIR so static imports resolve from a stable location that
-  // concurrent builds cannot race against.
-  if (existsSync(TMP_DIR)) {
-    rmSync(TMP_DIR, { recursive: true, force: true });
-  }
-  // (esbuild handles module resolution; no copyDir needed)
-  mkdirSync(TMP_DIR, { recursive: true });
-  // Stage the worker source INSIDE PLATFORM_DIST so its ./web.js / ./errors.js
-  // relative imports resolve against the built dist during bundling.
-  const WORKER_IN_DIST = resolve(PLATFORM_DIST, '_workers-test-entry.ts');
-  writeFileSync(WORKER_IN_DIST, readFileSync(WORKER_SOURCE, 'utf8'), 'utf8');
+  tmpDir = mkdtempSync(join(tmpdir(), 'goodvibes-workers-'));
+  const bundled = join(tmpDir, 'worker.mjs');
 
-  // Pre-bundle the worker entry via esbuild so bare-module specifiers
-  // (e.g. 'zod/v4') that Miniflare cannot resolve locally are inlined
-  // into a single self-contained module. Output lands in TMP_DIR.
-  const { execFileSync: execBundle } = await import('node:child_process');
-  try {
-    execBundle(
-      'bunx',
-      [
-        'esbuild',
-        '--bundle',
-        '--platform=browser',
-        '--format=esm',
-        '--target=es2022',
-        // Keep node built-ins external so esbuild does not try to bundle them.
-        // Miniflare resolves them via the nodejs_compat compatibility flag
-        // added to the Miniflare config below.
-        '--external:fs',
-        '--external:path',
-        '--external:node:fs',
-        '--external:node:path',
-        `--outfile=${WORKER_BUNDLED}`,
-        WORKER_IN_DIST,
-      ],
-      { stdio: 'inherit' },
-    );
-  } finally {
-    // Clean up the staged worker file from dist so concurrent builds don't trip over it.
-    if (existsSync(WORKER_IN_DIST)) {
-      rmSync(WORKER_IN_DIST, { force: true });
-    }
-  }
+  // Pre-bundle the worker entry so bare-module specifiers (e.g. 'zod/v4') that
+  // Miniflare cannot resolve locally are inlined into one self-contained module.
+  await loadEsbuild().build({
+    entryPoints: [WORKER_SOURCE],
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    target: 'es2022',
+    // Node built-ins stay external; Miniflare resolves them through the
+    // nodejs_compat flag below.
+    external: ['fs', 'path', 'node:fs', 'node:path'],
+    outfile: bundled,
+    logLevel: 'silent',
+  });
 
   mf = new Miniflare({
     modules: true,
-    scriptPath: WORKER_BUNDLED,
-    modulesRoot: TMP_DIR,
+    scriptPath: bundled,
+    modulesRoot: tmpDir,
     modulesRules: [
       { type: 'ESModule', include: ['**/*.js', '**/*.mjs'] },
     ],
@@ -105,16 +92,12 @@ beforeAll(async () => {
     // ERR_MODULE_RULE for any bare 'fs' import encountered at load time.
     compatibilityFlags: ['nodejs_compat'],
   });
-  // Wait for Miniflare to be ready
   await mf.ready;
 }, 30_000);
 
 afterAll(async () => {
   await mf?.dispose();
-  // Clean up staged worker file and tmp dir
-  if (existsSync(TMP_DIR)) {
-    rmSync(TMP_DIR, { recursive: true, force: true });
-  }
+  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
 // ─── Smoke ───────────────────────────────────────────────────────────────────
@@ -261,19 +244,17 @@ describe('Workers harness: globals audit', () => {
     expect(globals.setTimeout).toBe(true);
   }, 10_000);
 
-  // Assert the actual observed value, not just typeof.
-  // Miniflare simulates EventSource; production workerd does NOT.
-  // Local verification is impossible, both Miniflare and wrangler dev --local share the Miniflare 4
-  // runtime and inject EventSource. See test/workers/NOTES.md for the runtime boundary.
-  test('EventSource availability (Miniflare injects it, real Workers does not)', async () => {
-    const res = await mf.dispatchFetch('http://workers.test/globals');
-    const body = await res.json() as Record<string, unknown>;
-    const globals = body.globals as Record<string, boolean>;
+  // Miniflare injects EventSource and production Workers do not, so the global's
+  // presence proves nothing. What matters is that SSE realtime works without it.
+  test('SSE realtime delivers an event when EventSource is absent from the isolate', async () => {
+    const res = await mf.dispatchFetch('http://workers.test/realtime-without-eventsource');
+    expect(res.status).toBe(200);
 
-    // Miniflare simulates EventSource; production workerd does NOT.
-    // Both Miniflare and wrangler dev --local share the Miniflare 4 runtime, EventSource is
-    // injected in both local harnesses. Production absence is unverifiable without a real CF deploy.
-    expect(globals.EventSource).toBe(true);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.eventSourceAbsent).toBe(true);
+    expect(body.constructionError).toBeNull();
+    expect(body.errors).toEqual([]);
+    expect(body.delivered).toEqual({ type: 'TURN_SUBMITTED', sessionId: 'workers-sse-session' });
   }, 10_000);
 
   test('location is NOT available (must pass explicit baseUrl)', async () => {

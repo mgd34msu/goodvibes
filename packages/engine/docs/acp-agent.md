@@ -8,7 +8,15 @@ itself spawns ACP subagents.)
 
 ## Running it
 
-Point the editor's agent-server command at:
+From an installed GoodVibes, point the editor's agent-server command at:
+
+```
+goodvibes acp
+```
+
+(for Zed: `{ "agent_servers": { "GoodVibes": { "command": "goodvibes", "args": ["acp"] } } }`).
+Stdout carries only protocol frames, messages go to stderr, and the process ends
+when the editor closes stdin. From a repository checkout the same agent starts with:
 
 ```
 bun packages/engine/scripts/acp-agent.ts
@@ -21,7 +29,9 @@ Programmatic use (exported from `@goodvibes-jev/engine/platform/platform/acp`):
 
 ```ts
 import { serveAcpAgent, GoodVibesAcpAgent } from '@goodvibes-jev/engine/platform/platform/acp';
-const { connection, dispose } = serveAcpAgent({ homeDirectory: process.env.HOME! });
+const { connection, dispose } = await serveAcpAgent({ homeDirectory: process.env.HOME! });
+// Optional second argument: { input: ReadableStream<Uint8Array>, output: WritableStream<Uint8Array> }
+// replaces process stdin/stdout.
 ```
 
 ## What it maps

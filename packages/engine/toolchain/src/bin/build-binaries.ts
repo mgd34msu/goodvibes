@@ -33,6 +33,8 @@ function dependencyManifests(): DependencyManifest[] {
   const enginePackage = config.enginePin?.enginePackage ?? DEFAULT_ENGINE_PACKAGE;
   const enginePath = resolveOwnedPackageManifest(join(root, 'package.json'), enginePackage);
   const engine = enginePath === null ? null : readDependencyManifest(fs, enginePath, enginePackage);
+  // A configured engine that cannot be found would leave its required packages unscreened.
+  if (config.enginePin && !engine) throw new Error(`the engine package ${enginePackage} named by enginePin is not installed or has no readable package.json; run the install and rebuild`);
   if (engine) found.push(engine);
   return found;
 }
@@ -43,7 +45,13 @@ function dependencyManifests(): DependencyManifest[] {
  * no importable entry too, so a half-installed package is treated as present
  * exactly as bun would treat it.
  */
-const manifests = dependencyManifests();
+let manifests: DependencyManifest[];
+try {
+  manifests = dependencyManifests();
+} catch (error) {
+  consoleLogger.error(`build-binaries: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 function isPackageInstalled(packageName: string): boolean {
   const owners = manifests.filter(manifest => manifest.required.includes(packageName) || manifest.optional.includes(packageName));
   return owners.every(owner => {

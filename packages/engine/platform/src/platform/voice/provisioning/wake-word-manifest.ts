@@ -32,16 +32,7 @@
  * provenance traces to that Apache-2.0 grant directly.
  */
 import type { VerifiedDownloadSpec } from './download-verified.js';
-
-/**
- * Actual verified artifact-storage origin. The former repository stores these
- * pinned bytes; renaming local code does not relocate its published assets.
- * The canonical project has no corresponding release yet. No source/package
- * dependency is loaded from this origin.
- * Declared before the manifests below because they are evaluated at module load.
- */
-const VOICE_RUNTIMES_BASE =
-  'https://github.com/mgd34msu/goodvibes-sdk/releases/download/voice-runtimes-v1';
+import { voiceRuntimesAsset } from './runtime-origins.js';
 
 /**
  * How a runtime should obtain the two front-end models this classifier sits
@@ -134,12 +125,12 @@ export const WAKE_WORD_FRONT_END: WakeWordFrontEndManifest = {
     sourceUrl:
       'https://www.kaggle.com/api/v1/models/google/speech-embedding/tensorFlow1/speech-embedding/1/download',
     notice: {
-      url: `${VOICE_RUNTIMES_BASE}/goodvibes-speech-embedding-1.0.0.NOTICE.txt`,
+      ...voiceRuntimesAsset('goodvibes-speech-embedding-1.0.0.NOTICE.txt'),
       bytes: 3434,
       sha256: '2e9426d943fdd65fbf881c7ecc3bd1c68fda30a1334cce4de2787e607c48d6f3',
     },
     download: {
-      url: `${VOICE_RUNTIMES_BASE}/goodvibes-speech-embedding-1.0.0.onnx`,
+      ...voiceRuntimesAsset('goodvibes-speech-embedding-1.0.0.onnx'),
       bytes: 1319365,
       sha256: '463e5c778f7f623bb1ee52e82daad200f36a947738fe191c247ba1fbc5eed28a',
     },
@@ -227,17 +218,17 @@ export const WAKE_WORD_MODELS: Readonly<Record<string, WakeWordModelManifest>> =
     version: '1.0.0',
     license: 'Apache-2.0',
     notice: {
-      url: `${VOICE_RUNTIMES_BASE}/goodvibes-wakeword-hey-goodvibes-1.0.0.NOTICE.txt`,
+      ...voiceRuntimesAsset('goodvibes-wakeword-hey-goodvibes-1.0.0.NOTICE.txt'),
       bytes: 5574,
       sha256: '7d85d7b37ac37dbe3753cabaae3ace8d8d35052ea6902cc9b27ec0051e594ab0',
     },
     onnx: {
-      url: `${VOICE_RUNTIMES_BASE}/goodvibes-wakeword-hey-goodvibes-1.0.0.onnx`,
+      ...voiceRuntimesAsset('goodvibes-wakeword-hey-goodvibes-1.0.0.onnx'),
       bytes: 2367644,
       sha256: '89a0b7b565d433cb73e3dd24476274fdbec2c71925a63185973303861c0467d9',
     },
     tflite: {
-      url: `${VOICE_RUNTIMES_BASE}/goodvibes-wakeword-hey-goodvibes-1.0.0.tflite`,
+      ...voiceRuntimesAsset('goodvibes-wakeword-hey-goodvibes-1.0.0.tflite'),
       bytes: 2369264,
       sha256: '05da156c040e497d7e71f1892e4f773e46d8f9a3ef24ba1c2572d30241647c8a',
     },
@@ -337,17 +328,17 @@ export const WAKE_VAD_MODEL: WakeVadModelManifest = {
   version: '1.0.0',
   license: 'Apache-2.0',
   notice: {
-    url: `${VOICE_RUNTIMES_BASE}/goodvibes-vad-1.0.0.NOTICE.txt`,
+    ...voiceRuntimesAsset('goodvibes-vad-1.0.0.NOTICE.txt'),
     bytes: 6786,
     sha256: '3d8d27800798397e4b1974712e28753f0c149018be733421d84bfe6cc16546d0',
   },
   onnx: {
-    url: `${VOICE_RUNTIMES_BASE}/goodvibes-vad-1.0.0.onnx`,
+    ...voiceRuntimesAsset('goodvibes-vad-1.0.0.onnx'),
     bytes: 15885,
     sha256: '0ee90b4849f667211fc8fdd27f3c459560108db64b8978f17ae2b27c65596aab',
   },
   tflite: {
-    url: `${VOICE_RUNTIMES_BASE}/goodvibes-vad-1.0.0.tflite`,
+    ...voiceRuntimesAsset('goodvibes-vad-1.0.0.tflite'),
     bytes: 18136,
     sha256: 'f8f1903c075b3d8cb0c7998ae613bbbf31ad5c2bd4c090fde3f83cfed588fdcd',
   },

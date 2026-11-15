@@ -107,9 +107,8 @@ export function wireAgentExternalServices(options: {
 
   // Connected-host honesty receipts ("updated from X to Y", "restarted after
   // a crash at HH:MM", settings migrations) captured off the once-per-attach
-  // ?receipts=consume /status read (bootstrap.ts's memory-spine onAttach):
-  // delivery at the daemon is destructive (served once, to the consuming
-  // reader), so every captured receipt renders here, buffered ones from before
+  // receipt-reading /status read (bootstrap.ts's memory-spine onAttach, peek
+  // then acknowledge): delivery at the daemon is once-only, so every captured receipt renders here, buffered ones from before
   // this sink attaches flush immediately.
   services.daemonReceiptFeed.attach((receipt) => {
     systemMessageRouter.high(`[Connected host] ${receipt.text}`);
@@ -155,6 +154,33 @@ export function wireAgentExternalServices(options: {
     // substitutes and why neither is dereferenced here.
     startServices(configManager, runtimeBus, hookDispatcher, services.asDaemonGradeView(), { adoptOnly: true });
 
+  // The boot discovery, the boot-time autostart and `restart()` each replace the
+  // adopted handle. Every replacement goes through here: the latest START wins (a
+  // slower earlier completion is stopped and discarded, never allowed to overwrite
+  // the newer status), and the handle it replaces is stopped, not dropped.
+  let startGeneration = 0;
+  const stopQuietly = async (handle: ExternalServicesHandle): Promise<void> => {
+    try {
+      await handle.stop();
+    } catch (error) {
+      logger.debug('Stopping a replaced connected-host handle failed', { error: summarizeError(error) });
+    }
+  };
+  const replaceExternalServices = async (replaceOptions: { readonly previousAlreadyStopped?: boolean } = {}): Promise<ExternalServicesHandle> => {
+    const mine = ++startGeneration;
+    const pending = startAgentExternalServices();
+    externalServicesPromise = pending;
+    const handle = await pending;
+    if (mine !== startGeneration) {
+      await stopQuietly(handle);
+      return (await externalServicesPromise) ?? handle;
+    }
+    const previous = externalServices;
+    externalServices = handle;
+    if (previous !== handle && !replaceOptions.previousAlreadyStopped) await stopQuietly(previous);
+    return handle;
+  };
+
   // Boot-time start of an installed-but-stopped host: when discovery found
   // nothing on the configured port, check the platform service manager for an
   // installed host entry, start it once, wait a bounded time, and re-probe.
@@ -180,12 +206,11 @@ export function wireAgentExternalServices(options: {
       switch (outcome.action) {
         case 'started':
         case 'came-online': {
-          externalServicesPromise = startAgentExternalServices();
-          externalServices = await externalServicesPromise;
-          const adopted = externalServices.daemonStatus.mode === 'external';
+          const settled = await replaceExternalServices();
+          const adopted = settled.daemonStatus.mode === 'external';
           const suffix = adopted
             ? ''
-            : `, but adopting it still failed: ${externalServices.daemonStatus.reason ?? externalServices.daemonStatus.mode}`;
+            : `, but adopting it still failed: ${settled.daemonStatus.reason ?? settled.daemonStatus.mode}`;
           systemMessageRouter.low(
             outcome.action === 'started'
               ? `[Startup] Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}.`
@@ -222,8 +247,7 @@ export function wireAgentExternalServices(options: {
         }
       }
       await externalServices.stop();
-      externalServicesPromise = startAgentExternalServices();
-      externalServices = await externalServicesPromise;
+      await replaceExternalServices({ previousAlreadyStopped: true });
       systemMessageRouter.high(
         '[Startup] GoodVibes Agent re-probed the connected GoodVibes host and adopted its current status; this route never starts or restarts the host itself.',
       );
@@ -240,8 +264,7 @@ export function wireAgentExternalServices(options: {
   const discoveryComplete = deferredStartup.schedule({
     label: 'external-services',
     run: async () => {
-      externalServicesPromise = startAgentExternalServices();
-      externalServices = await externalServicesPromise;
+      await replaceExternalServices();
       await maybeStartInstalledConnectedHost();
       requestRender();
     },

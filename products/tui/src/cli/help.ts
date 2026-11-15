@@ -12,28 +12,6 @@ export function renderGoodVibesVersion(binary = 'goodvibes'): string {
   return `${binary} ${getPackageVersion()}`;
 }
 
-/**
- * Honest one-line startup identity for the daemon binary, emitted right as it
- * begins serving, including on a bare (no-arg) systemd launch. It states the
- * RESOLVED version (never a placeholder), the home/host/port it actually bound,
- * and points at the real service-setup command. This replaces the field
- * behavior where a bare launch showed a wrong "v0.0.0" banner and gave an
- * operator nothing to act on. `version` is passed in (never read from the live
- * build here) so callers/tests can pin a sentinel and never compare the live
- * VERSION.
- */
-export function renderDaemonStartupBanner(
-  version: string,
-  binding: { readonly homeDir: string; readonly host: string; readonly port: number },
-  binary = 'goodvibes-daemon',
-): string {
-  return (
-    `${binary} ${version} starting: ` +
-    `home=${binding.homeDir} host=${binding.host} port=${binding.port} ` +
-    `(manage as a service: ${binary} install-service)`
-  );
-}
-
 export function renderGoodVibesHelp(binary = 'goodvibes'): string {
   return [
     `Usage: ${binary} [OPTIONS] [PROMPT]`,
@@ -57,6 +35,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '  secrets                    List, set, link, delete, and test GoodVibes secret refs',
     '  sessions                   List, show, export, or resume saved sessions',
     '  tasks                      List/show in-process tasks or submit a non-interactive task',
+    '  acp                        Run as an Agent Client Protocol agent over stdio (for editors)',
     '  host pair                 Review explicit TUI host pairing (--bootstrap-shared; --apply)',
     '  pair|qrcode                Print companion pairing payload and QR code',
     '  surfaces                   Inspect/check/enable/disable browser/listener/external surfaces',
@@ -92,9 +71,13 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '      --hostname <host>          Hostname for server/web commands (--host is an alias)',
     '      --open                     Open browser when supported',
     '  -r, --resume [id|latest]       Resume saved session when supported',
-    '  -s, --session <id>             Use a specific session when supported',
+    '  -s, --session <id>             run: attach to a specific session',
     '      --continue                 Continue the latest session when supported',
     '      --fork [id]                Fork session (current or specific id) when supported',
+    '      --timeout <duration>       run: stop after this long (90, 90s, 5m, 1h); exits 124',
+    '      --max-turns <n>            run: stop after n model answers that still ask for tools; exits 1',
+    '      --omit-accumulated         run: with stream-json, leave `accumulated` out of STREAM_DELTA',
+    '      --answer-permissions       run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts',
     '  -y, --yes                      Auto-confirm prompts (non-interactive)',
     '      --non-interactive          Disable all interactive prompts (implies --yes)',
     '      --strict                   doctor: also fail on advisory findings, for CI',
@@ -136,9 +119,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'run [prompt] [--output text|json|stream-json]',
       'exec [prompt]',
       'run --intake-status|--intake-retry|--intake-resume|--intake-cancel',
+      'run [prompt] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]',
     ],
     summary:
-      'Capture the exact original prompt through native daemon admission. Status is read-only; recovery reuses the saved input. Use -- before literal prompt tokens.',
+      'Run one prompt non-interactively and print the result; the prompt goes straight to the local model. The --intake-* modes work on a prompt captured through native daemon admission: status is read-only and recovery reuses the saved input. Use -- before literal prompt tokens.',
     examples: ['run "summarize the current project"', 'run --output json "list risks"', 'exec --output stream-json "fix lint"'],
   },
   onboarding: {
@@ -167,9 +151,24 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   providers: COMMON_COMMAND_HELP['providers'],
   models: COMMON_COMMAND_HELP['models'],
   auth: {
-    usage: ['auth status', 'auth users', 'auth sessions', 'auth add-user <username>', 'auth clear-bootstrap'],
-    summary: 'Inspect and manage local admin users, bootstrap auth, and local sessions.',
-    examples: ['auth', 'auth add-user admin --password-stdin', 'auth clear-bootstrap'],
+    usage: [
+      'auth status',
+      'auth users',
+      'auth sessions',
+      'auth add-user <username> [--password <value>|--password-stdin] [--role <role>]',
+      'auth delete-user <username>',
+      'auth rotate-password <username> [--password <value>|--password-stdin]',
+      'auth revoke-session <session-id-or-token>',
+      'auth revoke-sessions <username>',
+      'auth clear-bootstrap',
+    ],
+    summary: 'Inspect and manage local admin users, bootstrap auth, and local sessions. Changes are written to the user store; a running host picks them up when it restarts, and its in-memory sessions are not reachable from this command.',
+    examples: ['auth', 'auth add-user admin --password-stdin', 'auth rotate-password admin --password-stdin', 'auth clear-bootstrap'],
+  },
+  host: {
+    usage: ['host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]'],
+    summary: 'Review pairing of this TUI with its host. --apply creates the credential and needs fresh confirmation in an owner terminal; scripted approval (--yes) is not supported.',
+    examples: ['host pair', 'host pair --bootstrap-shared', 'host pair --apply'],
   },
   subscription: {
     usage: [
@@ -215,10 +214,16 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['control-plane status', 'control-plane status --json'],
   },
   'support-bundle': {
-    usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path>'],
+    usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--yes]'],
     summary:
-      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values, validated first and only with --yes. Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
+  },
+  acp: {
+    usage: ['acp'],
+    summary:
+      'Run GoodVibes as an Agent Client Protocol agent on stdin/stdout so an ACP editor (Zed and others) can drive it. Stdout carries only protocol frames; messages go to stderr. Ends when the editor closes stdin. Prompt input is text only and session restore (loadSession) is not supported. For an MCP client use `goodvibes-daemon mcp serve`.',
+    examples: ['acp'],
   },
   pair: COMMON_COMMAND_HELP['pair'],
   web: {
@@ -300,45 +305,4 @@ export function renderGoodVibesCommandHelp(topic: string, binary = 'goodvibes'):
   const normalized = normalizeHelpTopic(topic);
   const help = Object.hasOwn(COMMAND_HELP, normalized) ? COMMAND_HELP[normalized] : undefined;
   return renderDetailedCommandHelp(topic, normalized, help, binary, 'GoodVibes', renderGoodVibesHelp);
-}
-
-export function renderGoodVibesDaemonHelp(binary = 'goodvibes-daemon'): string {
-  return [
-    `Usage: ${binary} [COMMAND] [OPTIONS]`,
-    '',
-    'Starts the headless GoodVibes daemon/API host.',
-    '',
-    'Commands:',
-    '  install-service                Install + enable the daemon as a systemd user service (survives reboots)',
-    '  uninstall-service              Disable + remove the daemon systemd user service',
-    '  service-status                 Show whether the daemon service is installed / enabled / active',
-    '  migrate-service                Guided migration from an install-script goodvibes-daemon.service unit; prints a plan',
-    '                                 unless run with -y/--yes (never auto-migrates)',
-    '  send [message]                 Send a message to one of your configured channels: Telegram, ntfy,',
-    '                                 Discord, Slack, Google Chat, Signal, WhatsApp, iMessage, Teams,',
-    '                                 BlueBubbles, Mattermost, Matrix or a webhook. Takes the message as',
-    '                                 an argument or on stdin, so it composes with other tooling.',
-    '                                 --channel <id> picks the channel; with none named it uses your one',
-    '                                 configured channel and says which. --to <address> targets a specific',
-    '                                 topic / chat / room within it, --title <text> sets a title, and',
-    '                                 --list shows every channel with where it would send. A channel that',
-    '                                 is off is refused rather than redirected to the default, and a',
-    "                                 failed send exits non-zero with the provider's own error.",
-    '  cluster <command>              Share inbound channel work with your other machines on this network.',
-    '                                 status | create | join | key | nodes | forget <machine> | rotate [--now]',
-    '                                 | leave | rename | groups',
-    '                                 Talks to a running daemon: add --host/--port/--token for one on another',
-    '                                 machine, or --json for a scriptable answer.',
-    '',
-    'Options:',
-    '      --daemon-home <dir>        Override daemon home',
-    '      --working-dir <dir>        Override working directory',
-    '  -C, --cd <dir>                 Alias for --working-dir',
-    '      --provider <id>            Override provider',
-    '  -m, --model <registryKey>      Override model. provider:model infers --provider',
-    '      --hostname <host>          Hostname hint for printed connection info',
-    '      --port <port>              Control-plane port override when supported',
-    '  -h, --help                     Print help',
-    '  -v, --version                  Print version',
-  ].join('\n');
 }

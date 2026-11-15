@@ -13,7 +13,7 @@ import type { KnowledgeExtractionRecord } from './types.js';
  * retained lake into a compounding asset. Extractions written before versioning
  * carry no stamp and resolve to version 0, so they re-extract once.
  */
-export const KNOWLEDGE_EXTRACTOR_VERSION = 3;
+export const KNOWLEDGE_EXTRACTOR_VERSION = 4;
 
 export function readKnowledgeExtractorVersion(metadata: Record<string, unknown>): number {
   const value = readDocumentFields(metadata, ['extractorVersion']).extractorVersion;

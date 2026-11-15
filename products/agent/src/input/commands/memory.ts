@@ -31,6 +31,7 @@ import {
   handleRecallSearch,
   handleRecallVector,
 } from './recall-query.ts';
+import { handleRecallFilesApply, handleRecallFilesReview, handleRecallFilesSync } from './recall-files.ts';
 import { handleRecallExplain, handleRecallPromote, handleRecallQueue, handleRecallReview } from './recall-review.ts';
 import { VALID_CLASSES } from './recall-shared.ts';
 
@@ -61,7 +62,7 @@ export const recallCommand: SlashCommand = {
   aliases: ['rc'],
   description: 'Project memory: add decisions, constraints, incidents, and patterns with provenance.',
   usage: '<subcommand> [args]',
-  argsHint: 'add|search|link|get|list|remove',
+  argsHint: 'add|search|link|get|list|remove|files',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 
@@ -69,6 +70,15 @@ export const recallCommand: SlashCommand = {
     if (dispatched instanceof Promise ? await dispatched : dispatched) return;
 
     switch (sub) {
+      case 'files': {
+        const [filesSub, ...filesRest] = rest;
+        if (filesSub === 'sync') await handleRecallFilesSync(filesRest, context);
+        else if (filesSub === 'review') await handleRecallFilesReview(filesRest, context);
+        else if (filesSub === 'apply') await handleRecallFilesApply(filesRest, context);
+        else context.print('[memory] Usage: /memory files <sync|review|apply> [--dir <path>]');
+        break;
+      }
+
       default: {
         const usage = [
           'Usage: /memory <subcommand>',
@@ -93,6 +103,9 @@ export const recallCommand: SlashCommand = {
           '  handoff-export <path> [--scope <scope>] --yes  , Export a reviewable handoff bundle for team/shared use',
           '  handoff-inspect <path>                        , Inspect a handoff bundle before import',
           '  handoff-import <path> --yes                    , Import a handoff bundle into durable memory',
+          '  files sync [--dir <path>]                      , Write standing memory records as markdown files and commit them in their own repository',
+          '  files review [--dir <path>]                    , Show what editing or deleting those files would change; changes nothing',
+          '  files apply <id>... | --all [--dir <path>]     , Apply the named proposals to memory',
           '  list [class] [--scope <scope>]                , List all records grouped by class',
           '  remove <id> --yes                             , Delete a record',
         ].join('\n');

@@ -130,7 +130,7 @@ describe('workstream draft planner inputs', () => {
     orchestrationEngine.dispose();
   });
 
-  test('remoteAvailable follows the remote supervisor: a connected runner with a fresh heartbeat', async () => {
+  test('remoteAvailable follows the remote supervisor: a connected runner, however long ago it connected', async () => {
     installJudgmentPort(riskPort(0).port);
     const store = createRuntimeStore();
     const { workstreamCommands, orchestrationEngine, planner } = makeServices({ decomposition: 'heuristic', store });
@@ -144,7 +144,8 @@ describe('workstream draft planner inputs', () => {
 
     withConnection(store, { agentId: 'runner-1', label: 'runner', transportState: 'connected', connectedAt: Date.now() - 10 * 60_000, completing: false, messageCount: 0, errorCount: 0 });
     await workstreamCommands.proposeDraft('Add a status endpoint.');
-    expect(planner.getLatest()!.inputs.remoteAvailable).toBe(false);
+    // How long ago it connected says nothing about whether it still answers.
+    expect(planner.getLatest()!.inputs.remoteAvailable).toBe(true);
 
     withConnection(store, { agentId: 'runner-1', label: 'runner', transportState: 'reconnecting', connectedAt: Date.now(), completing: false, messageCount: 0, errorCount: 0 });
     await workstreamCommands.proposeDraft('Add a status endpoint.');

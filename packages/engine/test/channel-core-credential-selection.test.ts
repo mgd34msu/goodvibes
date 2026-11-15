@@ -4,10 +4,14 @@ import type { ChannelDeliveryRequest } from '../platform/src/platform/channels/d
 import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 import type { ServiceRegistry } from '../platform/src/platform/config/service-registry.js';
 import type { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import {
+  createDiscordDeliveryStrategy, createGoogleChatDeliveryStrategy, createSlackDeliveryStrategy,
+} from '../platform/src/platform/channels/delivery/strategies-core.js';
 import { logger } from '../platform/src/platform/utils/logger.js';
 const restores: Array<() => void> = [];
 afterEach(() => { for (const restore of restores.splice(0).reverse()) restore(); });
-function fixture(surface: 'telegram' | 'slack' | 'discord' | 'google-chat', values: Record<string, unknown> = {}) {
+const PUBLIC_ADDRESS = '203.0.113.7';
+function fixture(surface: 'telegram' | 'slack' | 'discord' | 'google-chat', values: Record<string, unknown> = {}, webhookStrategies = false) {
   let lookups = 0;
   const calls: string[] = [];
   const fetched = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (url: string | URL | Request) => {
@@ -17,12 +21,19 @@ function fixture(surface: 'telegram' | 'slack' | 'discord' | 'google-chat', valu
   for (const level of ['info', 'warn', 'error'] as const) {
     const log = spyOn(logger, level).mockImplementation(() => {}); restores.push(() => log.mockRestore());
   }
-  const router = new ChannelDeliveryRouter({
-    configManager: { get: (key: string) => values[key] } as unknown as ConfigManager,
-    serviceRegistry: { get: () => undefined, resolveSecret: async () => null } as unknown as ServiceRegistry,
-    artifactStore: {} as ArtifactStore,
-    secretsManager: { get: async () => { lookups += 1; return null; }, getGlobalHome: () => '/owned-synthetic-home' },
-  });
+  const configManager = { get: (key: string) => values[key] } as unknown as ConfigManager;
+  const serviceRegistry = { get: () => undefined, resolveSecret: async () => null } as unknown as ServiceRegistry;
+  const artifactStore = {} as ArtifactStore;
+  const secretsManager = { get: async () => { lookups += 1; return null; }, getGlobalHome: () => '/owned-synthetic-home' };
+  // An explicit webhook host is resolved and pinned before sending; a fixed public answer keeps the test off the network.
+  const resolveHost = async () => [{ address: PUBLIC_ADDRESS, family: 4 as const }];
+  const router = webhookStrategies && (surface === 'slack' || surface === 'discord' || surface === 'google-chat')
+    ? new ChannelDeliveryRouter({ strategies: [
+      surface === 'slack' ? createSlackDeliveryStrategy(serviceRegistry, configManager, artifactStore, secretsManager, { resolveHost })
+        : surface === 'discord' ? createDiscordDeliveryStrategy(serviceRegistry, configManager, artifactStore, secretsManager, { resolveHost })
+        : createGoogleChatDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager, { resolveHost }),
+    ] })
+    : new ChannelDeliveryRouter({ configManager, serviceRegistry, artifactStore, secretsManager });
   const request: ChannelDeliveryRequest = {
     target: { kind: 'surface', surfaceKind: surface, ...(surface === 'google-chat' ? {} : { address: '123456789012345678' }) },
     body: 'owned body', title: 'owned', jobId: 'owned-job', runId: 'owned-run', includeLinks: false,
@@ -54,11 +65,12 @@ test('an invalid explicit Google Chat target cannot fall back to its configured 
 for (const surface of ['slack', 'discord', 'google-chat'] as const) {
   test(`${surface} explicit webhook does not require an unrelated broken fallback`, async () => {
     const key = surface === 'google-chat' ? 'surfaces.googleChat.webhookUrl' : `surfaces.${surface}.botToken`;
-    const owned = fixture(surface, { [key]: 'goodvibes://secrets/goodvibes/OWNED_MISSING_SECRET' });
+    const owned = fixture(surface, { [key]: 'goodvibes://secrets/goodvibes/OWNED_MISSING_SECRET' }, true);
     const target = surface === 'slack' ? 'https://hooks.slack.com/services/owned-synthetic-token'
       : surface === 'discord' ? 'https://discord.com/api/webhooks/123456789012345678/owned-synthetic-token'
       : 'https://owned-requested.example.invalid/hook';
     await owned.router.deliver({ ...owned.request, target: { kind: 'surface', surfaceKind: surface, address: target } });
-    expect(owned.calls).toEqual([target]); expect(owned.lookups()).toBe(0);
+    const pinned = new URL(target); pinned.hostname = PUBLIC_ADDRESS;
+    expect(owned.calls).toEqual([pinned.toString()]); expect(owned.lookups()).toBe(0);
   });
 }

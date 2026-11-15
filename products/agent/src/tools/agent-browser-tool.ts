@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
 import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
@@ -109,6 +110,32 @@ function failure(message: string, fix: string | null = null): { success: false; 
   return { success: false, error: fix ? `${message} ${fix}` : message };
 }
 
+/**
+ * A `file:` address is a local read, so it is held to the read policy before the
+ * browser opens it. Other schemes pass through to the engine's own checks.
+ */
+async function assertLocalAddressReadable(url: string, readAccess: AgentBrowserToolOptions['readAccess'], signal: AbortSignal | undefined): Promise<void> {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return; }
+  if (parsed.protocol !== 'file:') return;
+  if (!readAccess) {
+    throw new BrowserSessionError(
+      'The browser tool does not open file: addresses here because no read policy is wired to check them.',
+      'Use the read tool for a local file, or open an http or https address.',
+    );
+  }
+  let path: string;
+  try { path = fileURLToPath(parsed); } catch {
+    throw new BrowserSessionError(`${url} is not a local file address this tool can check.`, 'Use a file:///absolute/path address, or the read tool.');
+  }
+  if (!(await readAccess(path, signal))) {
+    throw new BrowserSessionError(
+      `The agent's read policy does not allow opening ${path}.`,
+      'Choose a file the read tool is allowed to open, or ask the owner to share its contents.',
+    );
+  }
+}
+
 function requireString(value: unknown, field: string, action: string): string {
   const text = readString(value);
   if (!text) {
@@ -135,6 +162,13 @@ export interface AgentBrowserToolOptions {
    * page read cannot make the next test's outward action refuse.
    */
   readonly untrusted?: UntrustedContentPort;
+  /**
+   * Whether the agent's own read policy lets it open this absolute local path.
+   * A `file:` page is read back into the conversation like the read tool's
+   * output, so it must pass the same filter. Left absent, `file:` addresses are
+   * refused rather than opened unchecked.
+   */
+  readonly readAccess?: (absolutePath: string, signal?: AbortSignal) => Promise<boolean>;
 }
 
 /**
@@ -170,9 +204,8 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
         );
       }
       // Built through the agent's one browser composition point, so the
-      // storage root, the untrusted-content port, the host-script advice and
-      // the session-write ledger are bound in exactly one place rather than
-      // once per construction site.
+      // storage root, the untrusted-content port and the host-script advice
+      // are bound in exactly one place rather than once per construction site.
       engine = createAgentBrowserEngine({
         screenshotDirectory,
         profileRoot,
@@ -196,19 +229,19 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             enum: [...BROWSER_ACTIONS],
             description: 'What to do. status reports availability and open sessions.',
           },
-          url: { type: 'string', description: 'URL for navigate or new_tab. http, https, file, or about only.' },
+          url: { type: 'string', description: 'URL for navigate or new_tab (http, https, file, or about only; file: must be a path the read tool may open), or the address action:"wait_for" waits to reach.' },
           ref: { type: 'string', description: 'Element ref from the latest snapshot of this page.' },
           selector: { type: 'string', description: 'CSS selector for extract. Reaches into open shadow DOM.' },
-          text: { type: 'string', description: 'Text to type, or the text wait_for should wait for.' },
+          text: { type: 'string', description: 'Required for action:"type": the text to enter (an explicit empty string clears the field). For action:"wait_for": the text to wait for; with neither text nor url, wait_for waits for the network to go idle.' },
           key: { type: 'string', description: 'Key name for action:"press", such as Enter or Escape.' },
-          values: { type: 'array', items: { type: 'string' }, description: 'Option values for action:"select".' },
+          values: { type: 'array', items: { type: 'string' }, description: 'Required for action:"select": the option values to choose.' },
           fields: {
             type: 'array',
             items: { type: 'string', enum: ['text', 'html', 'value', 'attributes'] },
-            description: 'What to read for action:"extract". Defaults to text.',
+            description: 'What to read for action:"extract": any of text, html, value, attributes. Defaults to text; an unknown name is refused.',
           },
           all: { type: 'boolean', description: 'For action:"extract": read every match rather than the first.' },
-          sessionId: { type: 'string', description: 'Browser session to act on. Defaults to the open session.' },
+          sessionId: { type: 'string', description: 'Browser session to act on. Defaults to the open session, except action:"release" and action:"close", which require it.' },
           pageId: { type: 'string', description: 'Page/tab to act on. Defaults to the active tab.' },
           cdpEndpoint: { type: 'string', description: 'Remote debugging endpoint of a running browser, for attach.' },
           profileName: { type: 'string', description: 'Saved profile to launch with. Keeps logins across runs.' },
@@ -216,7 +249,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
           submit: { type: 'boolean', description: 'Press Enter after typing.' },
           replace: { type: 'boolean', description: 'Replace the field contents rather than appending. Default true.' },
           fullPage: { type: 'boolean', description: 'Capture the whole scrollable page instead of the visible area.' },
-          path: { type: 'string', description: 'Where to write the screenshot. Defaults to a readable folder.' },
+          path: { type: 'string', description: 'File name or path inside the screenshot folder to write to. Defaults to a generated name there. An existing file is never overwritten.' },
           direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction when no ref is given.' },
           amount: { type: 'number', description: 'Scroll distance in pixels.' },
           limit: { type: 'number', description: 'Maximum elements to include in a snapshot.' },
@@ -303,12 +336,15 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             return output(browser.release(requireString(args.sessionId, 'sessionId', 'release')));
           case 'close':
             return output(await browser.close(requireString(args.sessionId, 'sessionId', 'close')));
-          case 'navigate':
+          case 'navigate': {
+            const url = requireString(args.url, 'url', 'navigate');
+            await assertLocalAddressReadable(url, options.readAccess, signal);
             return output(await browser.navigate(target, {
-              url: requireString(args.url, 'url', 'navigate'),
+              url,
               launch,
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }));
+          }
           case 'snapshot':
             return output(await browser.snapshot(target, { ...(readNumber(args.limit) === undefined ? {} : { limit: readNumber(args.limit) }) }));
           case 'click':
@@ -317,20 +353,33 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
               ...(args.button === 'right' || args.button === 'middle' || args.button === 'left' ? { button: args.button } : {}),
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }, ownership));
-          case 'type':
+          case 'type': {
+            // An omitted or misnamed text would otherwise fill the field with
+            // nothing, wiping it and reporting success. Clearing is allowed, but
+            // only when asked for with an explicit empty string.
+            const ref = requireString(args.ref, 'ref', 'type');
+            if (typeof args.text !== 'string') {
+              throw new BrowserSessionError('browser action:"type" needs text.', 'Pass text:"…" (text:"" clears the field).');
+            }
+            const text = args.text;
             return await interactive(() => browser.type(target, {
-              ref: requireString(args.ref, 'ref', 'type'),
-              text: typeof args.text === 'string' ? args.text : '',
+              ref,
+              text,
               ...(args.submit === true ? { submit: true } : {}),
               ...(args.replace === false ? { replace: false } : {}),
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }, ownership));
-          case 'select':
+          }
+          case 'select': {
+            const ref = requireString(args.ref, 'ref', 'select');
+            const values = readStringArray(args.values);
+            if (values.length === 0) throw new BrowserSessionError('browser action:"select" needs values.', 'Pass values:["…"] naming the options to choose.');
             return await interactive(() => browser.select(target, {
-              ref: requireString(args.ref, 'ref', 'select'),
-              values: readStringArray(args.values),
+              ref,
+              values,
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }, ownership));
+          }
           case 'press':
             return await interactive(() => browser.press(target, {
               ref: requireString(args.ref, 'ref', 'press'),
@@ -358,8 +407,11 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             }));
           case 'tabs':
             return output(await browser.tabs(target));
-          case 'new_tab':
-            return output(await browser.newTab(target, { launch, ...(readString(args.url) ? { url: readString(args.url) } : {}) }));
+          case 'new_tab': {
+            const url = readString(args.url);
+            if (url) await assertLocalAddressReadable(url, options.readAccess, signal);
+            return output(await browser.newTab(target, { launch, ...(url ? { url } : {}) }));
+          }
           case 'switch_tab':
             return output(browser.switchTab(target, { pageId: requireString(args.pageId, 'pageId', 'switch_tab') }));
           case 'close_tab':
@@ -368,7 +420,10 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             return output(await browser.goBack(target));
           case 'forward':
             return output(await browser.goForward(target));
-          case 'extract':
+          case 'extract': {
+            if (readStringArray(args.fields).length > 0 && readExtractFields(args.fields).length === 0) {
+              throw new BrowserSessionError('browser action:"extract" got no field it knows.', 'Use fields from: text, html, value, attributes.');
+            }
             return output(await browser.extract(target, {
               ...(readString(args.ref) ? { ref: readString(args.ref) } : {}),
               ...(readString(args.selector) ? { selector: readString(args.selector) } : {}),
@@ -376,6 +431,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
               ...(args.all === true ? { all: true } : {}),
               ...(readNumber(args.limit) === undefined ? {} : { limit: readNumber(args.limit) }),
             }));
+          }
           default:
             return failure(`Unknown browser action: ${action}. Use one of: ${BROWSER_ACTIONS.join(', ')}.`);
         }

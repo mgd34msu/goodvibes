@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../src/runtime/services.ts';
 import { createRuntimeStore } from '../../src/runtime/store/index.ts';
@@ -25,7 +25,7 @@ export async function runReferenceOperatorClientExample(): Promise<void> {
       workingDir,
       homeDir,
     });
-    await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
+    await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
     const runtimeServices = createRuntimeServices({
       runtimeStore: createRuntimeStore(),
       runtimeBus: new RuntimeEventBus(),

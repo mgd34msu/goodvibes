@@ -1,4 +1,4 @@
-/** Actual native retention fixtures; authored UNRUN during the coding pass. */
+/** Actual native retention fixtures. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -100,10 +100,13 @@ describe.skipIf(process.geteuid === undefined)('retention owns exact original na
 
   test('retention examines metadata without reading large journal bodies', () => {
     const root = fixture(), path = file(root, 'journal.jsonl', 0, 100_000);
-    const reads = spyOn(fs, 'readFileSync');
+    const bodyReads = (['readFileSync', 'openSync', 'readSync'] as const).map(name => spyOn(fs, name));
+    const examined = spyOn(fs, 'lstatSync');
     try {
       expect(enforceFileRetention([path], policy(0)).reclaimedBytes).toBe(100_000);
-      expect(reads).not.toHaveBeenCalled();
-    } finally { reads.mockRestore(); }
+      // Control: the metadata check is observed through the same export, so the silence on reads is meaningful.
+      expect(examined).toHaveBeenCalled();
+      for (const read of bodyReads) expect(read).not.toHaveBeenCalled();
+    } finally { for (const spy of [...bodyReads, examined]) spy.mockRestore(); }
   });
 });

@@ -18,7 +18,7 @@ import { scoreCompactionRun } from '../../renderer/compaction-quality.ts';
 import { useCompactionQualityPort } from '../helpers/compaction-quality-port.ts';
 
 useCompactionQualityPort();
-import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import { DEFAULT_COMPACTION_CONFIG, type CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 
 function makeMsg(role: 'user' | 'assistant', content: string): ProviderMessage {
@@ -47,6 +47,11 @@ describe('buildCompactionPreview', () => {
     const msgs: ProviderMessage[] = [makeMsg('user', 'hello world')];
     const result = buildCompactionPreview({ messages: msgs, contextWindow: 0, pinnedMemoryCount: 0, trigger: 'manual' });
     expect(result).toContain('estimate');
+  });
+
+  test('estimates the size after compaction from the engine ceiling', () => {
+    const result = buildCompactionPreview({ messages: [makeMsg('user', 'hello world')], contextWindow: 0, pinnedMemoryCount: 0, trigger: 'manual' });
+    expect(result).toContain(DEFAULT_COMPACTION_CONFIG.totalCeiling.toLocaleString());
   });
 
   test('includes message count from input messages', () => {

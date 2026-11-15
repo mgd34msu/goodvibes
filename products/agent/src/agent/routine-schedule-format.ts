@@ -8,6 +8,7 @@ import {
   type RoutineScheduleReceipt,
   type RoutineScheduleReceiptSnapshot,
 } from './routine-schedule-promotion.ts';
+import { deliveryTargetFlag } from './schedule-delivery-targets.ts';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from './schedule-next-routes.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -54,16 +55,31 @@ function routineScheduleSelector(preview: RoutineSchedulePromotionPreview): { re
   return { flag: '--at', value: String(preview.payload.at ?? '') };
 }
 
-function routineScheduleConfirmCommand(preview: RoutineSchedulePromotionPreview): string {
+// Every option the preview shows is repeated here: a command that dropped one
+// would create a different schedule (live instead of paused, no delivery target)
+// than the one the operator confirmed.
+export function routineScheduleConfirmCommand(preview: RoutineSchedulePromotionPreview, options: { readonly redactWebhook?: boolean } = {}): string {
   const selector = routineScheduleSelector(preview);
+  const { payload } = preview;
   const args = [
     '/schedule promote-routine',
     scheduleRouteArg(preview.routineId),
     selector.flag,
     scheduleRouteArg(selector.value),
   ];
-  if (typeof preview.payload.timezone === 'string' && preview.payload.timezone) {
-    args.push('--timezone', scheduleRouteArg(preview.payload.timezone));
+  if (typeof payload.timezone === 'string' && payload.timezone) {
+    args.push('--timezone', scheduleRouteArg(payload.timezone));
+  }
+  if (typeof payload.name === 'string' && payload.name) args.push('--name', scheduleRouteArg(payload.name));
+  if (typeof payload.provider === 'string' && payload.provider) args.push('--provider', scheduleRouteArg(payload.provider));
+  if (typeof payload.model === 'string' && payload.model) args.push('--model', scheduleRouteArg(payload.model));
+  if (payload.enabled === false) args.push('--disabled');
+  for (const target of payload.delivery?.targets ?? []) {
+    const flag = deliveryTargetFlag(target);
+    // A webhook address usually carries its secret in the path, so a command that is
+    // printed shows a placeholder; the operator pastes the address they supplied.
+    const hidden = options.redactWebhook === true && flag?.flag === '--delivery-webhook';
+    if (flag) args.push(flag.flag, scheduleRouteArg(hidden ? '<webhook-url>' : flag.value));
   }
   args.push('--yes');
   return args.join(' ');
@@ -89,7 +105,7 @@ export function formatRoutineSchedulePreview(preview: RoutineSchedulePromotionPr
     '  policy isolated Agent Knowledge only; no default knowledge/non-Agent fallback; no delegated review unless explicitly requested',
     ...scheduleConfirmationRouteLines({
       workspace: 'workspace action:"run" actionId:"schedule-promote-routine"',
-      cli: routineScheduleConfirmCommand(preview),
+      cli: routineScheduleConfirmCommand(preview, { redactWebhook: true }),
     }),
   ].join('\n');
 }
@@ -202,6 +218,9 @@ export function formatRoutineScheduleCorrelation(result: RoutineScheduleCorrelat
       return `  ${receipt.id}  ${entry.liveStatus}  reason ${entry.matchReason}  routine ${receipt.routineId}  receipt schedule ${receipt.scheduleId ?? '(none)'}${live}${runs}${next}`;
     }),
     result.correlations.length > correlations.length ? `  ...${result.correlations.length - correlations.length} more` : '',
+    result.reaping && result.reaping.reaped > 0
+      ? `  retired ${result.reaping.reaped} local receipt${result.reaping.reaped === 1 ? '' : 's'} whose schedule the host no longer lists (removed from /schedule receipts): ${result.reaping.reapedIds.join(', ')}`
+      : '',
   ].filter((line): line is string => Boolean(line)).join('\n');
 }
 

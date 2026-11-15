@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from 'bun:test';
+import { describe, test, expect, afterEach, beforeEach, jest } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -117,41 +117,30 @@ describe('GitStatusProvider', () => {
   });
 
   describe('error handling: never throws', () => {
-    test('getStatus returns fallback when GitService.getInstance throws', async () => {
-      // Create a provider and corrupt its internal state by patching _fetch indirectly
-      const provider = new GitStatusProvider(process.cwd());
-
-      // Override _fetch using casting to private
-      (provider as unknown as { _fetch: () => Promise<void> })._fetch = async () => {
-        throw new Error('git not found');
-      };
-
-      // lastFetch is 0, so it will call _fetch, should not throw
+    test('getStatus returns the fallback when the git state cannot be read', async () => {
+      // The directory does not exist, so the real fetch fails inside GitService.
+      const missing = join(makeProjectTempDir('gv-git-missing-parent'), 'absent');
+      const provider = new GitStatusProvider(missing);
       const info = await provider.getStatus();
-      expect(info.branch).toBe('?');
-      expect(info.dirty).toBe(false);
-      expect(info.ahead).toBe(0);
-      expect(info.behind).toBe(0);
+      expect(info).toEqual({ branch: '?', dirty: false, ahead: 0, behind: 0 });
     });
 
-    test('refresh returns fallback (does not throw) when git fails', async () => {
-      const provider = new GitStatusProvider(process.cwd());
-
-      (provider as unknown as { _fetch: () => Promise<void> })._fetch = async () => {
-        throw new Error('git not found');
-      };
-
-      // refresh calls _fetch directly, wraps error
-      const info = await provider.refresh().catch(() => null);
-      // refresh propagates errors from _fetch via the outer try/catch in the private method
-      // but our overridden _fetch throws before the finally, info may be null here
-      // The important contract: the PROVIDER METHOD (getStatus) never throws
-      // refresh() itself is allowed to propagate, but in practice the private _fetch
-      // catches the error. Let's verify the cache still has the fallback.
-      // The important contract: getStatus never throws and cache holds fallback values
-      const cached = await provider.getStatus();
-      expect(cached.branch).toBe('?');
-      expect(cached.dirty).toBe(false);
+    test('refresh replaces a good reading with the fallback once git fails', async () => {
+      const dir = makeProjectTempDir('gv-git-refresh-fails');
+      try {
+        Bun.spawnSync(['git', 'init'], { cwd: dir });
+        await Bun.write(join(dir, 'untracked.txt'), 'x');
+        const provider = new GitStatusProvider(dir);
+        const good = await provider.refresh();
+        expect(good.branch).not.toBe('?');
+        expect(good.dirty).toBe(true);
+        // The repository disappears; the old branch and dirty marker must not stand as current.
+        rmSync(dir, { recursive: true, force: true });
+        const after = await provider.refresh();
+        expect(after).toEqual({ branch: '?', dirty: false, ahead: 0, behind: 0 });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -190,93 +179,103 @@ describe('GitStatusProvider', () => {
     const originalIsGitRepo = GitService.isGitRepo;
     const providers: GitStatusProvider[] = [];
 
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
     afterEach(() => {
       // Always restore the real static method and stop any timers we started,
       // even if an assertion above threw mid-test.
       GitService.isGitRepo = originalIsGitRepo;
       for (const p of providers.splice(0)) p.stopPolling();
+      jest.useRealTimers();
       if (tmpDir) {
         rmSync(tmpDir, { recursive: true, force: true });
         tmpDir = null;
       }
     });
 
-    function wait(ms: number): Promise<void> {
-      return new Promise((resolve) => setTimeout(resolve, ms));
+    /** Replace the repo probe with a controllable one that counts its calls. */
+    function fakeRepoProbe(initial: boolean): { calls: () => number; setIsRepo: (v: boolean) => void } {
+      let isRepo = initial;
+      let calls = 0;
+      GitService.isGitRepo = () => { calls++; return isRepo; };
+      return { calls: () => calls, setIsRepo: (v) => { isRepo = v; } };
     }
 
     test('a live not-a-repo -> is-a-repo flip (external `git init`) triggers exactly one refresh-driven onChange call', async () => {
-      // A system temp dir: the project temp root can sit inside a git checkout,
-      // which would make the directory a repo before the test flips it.
       tmpDir = mkdtempSync(join(tmpdir(), 'gv-git-status-poll-'));
+      Bun.spawnSync(['git', 'init', '-q', tmpDir]);
+      const probe = fakeRepoProbe(false);
       const provider = new GitStatusProvider(tmpDir);
       providers.push(provider);
 
       const seen: Array<{ branch: string }> = [];
-      provider.startPolling(POLL_MS, (info) => { seen.push(info); });
+      let changed!: () => void;
+      const firstChange = new Promise<void>((resolve) => { changed = resolve; });
+      provider.startPolling(POLL_MS, (info) => { seen.push(info); changed(); });
 
-      // Confirm we start in the not-a-repo state before mutating anything.
-      expect(GitService.isGitRepo(tmpDir)).toBe(false);
+      jest.advanceTimersByTime(POLL_MS * 2);
+      // The poll ran (initial probe plus two ticks) and saw no flip, so no refresh.
+      expect(probe.calls()).toBe(3);
+      expect(seen).toEqual([]);
 
-      await wait(POLL_MS * 2);
-      expect(seen).toEqual([]); // no flip yet -> no refresh
-
-      await Bun.$`git init -q ${tmpDir}`.quiet();
-      await Bun.$`git -C ${tmpDir} config user.email test@example.com`.quiet();
-      await Bun.$`git -C ${tmpDir} config user.name test`.quiet();
-
-      // Give the poll several ticks to observe the flip and fire onChange.
-      await wait(POLL_MS * 10);
-
+      probe.setIsRepo(true);
+      // The first tick sees the flip; the later ticks see a stable answer and must not refresh again.
+      jest.advanceTimersByTime(POLL_MS * 4);
+      expect(probe.calls()).toBe(7);
+      // The refresh spawns git for real; its completion is awaited on real timers.
+      jest.useRealTimers();
+      await firstChange;
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
       expect(seen.length).toBe(1);
       expect(typeof seen[0]?.branch).toBe('string');
     });
 
-    test('no-op if the repo state does not change between ticks', async () => {
-      tmpDir = makeProjectTempDir('gv-git-status-poll-nochange');
-      const provider = new GitStatusProvider(tmpDir);
+    test('no-op if the repo state does not change between ticks', () => {
+      const probe = fakeRepoProbe(false);
+      const provider = new GitStatusProvider(process.cwd());
       providers.push(provider);
 
       const seen: Array<{ branch: string }> = [];
       provider.startPolling(POLL_MS, (info) => { seen.push(info); });
 
-      await wait(POLL_MS * 8);
-      // tmpDir was never turned into a repo, so isGitRepo() stays false the
-      // whole time, the call count must not increment every tick.
+      jest.advanceTimersByTime(POLL_MS * 8);
+      // The probe ran on every tick, yet an unchanged answer never refreshes.
+      expect(probe.calls()).toBe(9);
       expect(seen).toEqual([]);
     });
 
-    test('stopPolling() clears the interval: no further onChange after it is called', async () => {
-      tmpDir = makeProjectTempDir('gv-git-status-poll-stop');
-      const provider = new GitStatusProvider(tmpDir);
+    test('stopPolling() clears the interval: the repo is not probed again after it is called', () => {
+      const probe = fakeRepoProbe(false);
+      const provider = new GitStatusProvider(process.cwd());
       providers.push(provider);
 
       const seen: Array<{ branch: string }> = [];
       provider.startPolling(POLL_MS, (info) => { seen.push(info); });
+      jest.advanceTimersByTime(POLL_MS);
+      expect(probe.calls()).toBe(2); // the poll was running
       provider.stopPolling();
 
-      await Bun.$`git init -q ${tmpDir}`.quiet();
-      await wait(POLL_MS * 10);
-
-      // Even though the directory became a repo, polling was stopped before
-      // that happened, so no onChange should ever fire.
+      probe.setIsRepo(true);
+      jest.advanceTimersByTime(POLL_MS * 10);
+      expect(probe.calls()).toBe(2);
       expect(seen).toEqual([]);
     });
 
-    test('never throws even if GitService.isGitRepo itself throws', async () => {
-      tmpDir = makeProjectTempDir('gv-git-status-poll-throws');
-      const provider = new GitStatusProvider(tmpDir);
+    test('never throws even if GitService.isGitRepo itself throws, and keeps polling', () => {
+      const provider = new GitStatusProvider(process.cwd());
       providers.push(provider);
 
-      GitService.isGitRepo = () => { throw new Error('boom'); };
+      let calls = 0;
+      GitService.isGitRepo = () => { calls++; throw new Error('boom'); };
 
       expect(() => {
         provider.startPolling(POLL_MS, () => {});
       }).not.toThrow();
 
-      // Let a few ticks elapse with the throwing isGitRepo, must not crash
-      // the process or reject unhandled.
-      await wait(POLL_MS * 5);
+      expect(() => jest.advanceTimersByTime(POLL_MS * 5)).not.toThrow();
+      expect(calls).toBe(6);
     });
   });
 });

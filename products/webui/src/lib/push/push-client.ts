@@ -15,7 +15,7 @@
 
 import { client as platformClient } from '../goodvibes';
 import type { PublicPushSubscription, PushReconcileDrift } from '../goodvibes';
-import { formatError } from '../errors';
+import { errorCode, formatError } from '../errors';
 import { randomUuid } from '../uuid';
 import { detectPushSupport, urlBase64ToUint8Array } from './push-support';
 
@@ -212,7 +212,9 @@ export async function subscribeToPush(): Promise<PublicPushSubscription> {
 /**
  * Unsubscribe this device: drop the browser PushManager subscription and remove
  * exactly this device's daemon-side record (by the id remembered at subscribe
- * time). Idempotent, safe to call when already unsubscribed.
+ * time). Idempotent, safe to call when already unsubscribed. If the daemon call
+ * fails the id is kept and the error propagates, so calling again retries the
+ * daemon-side removal.
  */
 export async function unsubscribeFromPush(): Promise<void> {
   const storedId = recallSubscriptionId();
@@ -226,9 +228,12 @@ export async function unsubscribeFromPush(): Promise<void> {
   if (storedId) {
     try {
       await platformClient.operator.push.unsubscribe(storedId);
-    } finally {
-      forgetSubscriptionId();
+    } catch (error) {
+      // The daemon already dropped this record: the goal state is reached. Any
+      // other failure keeps the remembered id so a retry can still remove it.
+      if (errorCode(error) !== 'SUBSCRIPTION_NOT_FOUND') throw error;
     }
+    forgetSubscriptionId();
   }
 }
 

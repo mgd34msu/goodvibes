@@ -139,12 +139,16 @@ export function appPasswordPathComplete(state: GoogleSetupState): boolean {
   return state.hasAppPassword && state.hasGmailConfig && state.gmailEnabled && state.hasCalendarAddress;
 }
 
-/** Whether the OAuth path is complete *and* not on a seven-day fuse. */
+/**
+ * Whether the OAuth path is complete *and* not known to be on a seven-day fuse.
+ * An unread publishing status counts as complete: no step reads it, so holding
+ * the path open for it could never end.
+ */
 export function oauthPathComplete(state: GoogleSetupState): boolean {
   return (
     state.oauthClientId !== null &&
     state.hasOAuthClientSecret &&
     state.hasRefreshToken &&
-    state.publishingStatus === 'in-production'
+    state.publishingStatus !== 'testing'
   );
 }

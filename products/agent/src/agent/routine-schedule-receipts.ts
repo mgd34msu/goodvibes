@@ -1,6 +1,6 @@
 import { readErrorFailure } from '@goodvibes-jev/engine/platform/platform/types';
 import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
@@ -34,7 +34,19 @@ type ScheduleListOutput = OperatorMethodOutput<'automation.schedules.list'>;
 interface RoutineScheduleReceiptStoreFile {
   readonly version: 1;
   readonly receipts: readonly RoutineScheduleReceipt[];
+  /** Entries this build could not validate, written back untouched so a rewrite never drops them. */
+  readonly foreign: readonly unknown[];
 }
+
+/** A store read plus whether it is safe to write the result back. */
+interface RoutineScheduleReceiptStoreRead {
+  readonly file: RoutineScheduleReceiptStoreFile;
+  /** Why a write must be refused, or null. A refused write leaves the file exactly as it is. */
+  readonly writeBlock: string | null;
+}
+
+/** Bound on how long `/status` may take; a host that accepts the connection and never answers must not hang the command. */
+const CONNECTED_HOST_STATUS_TIMEOUT_MS = 10_000;
 
 const RECEIPT_STORE_VERSION = 1;
 
@@ -78,6 +90,8 @@ export interface RoutineScheduleReceiptReaping {
   /** False when the connected host was not authoritative (unreachable/auth/route failure): nothing is ever reaped then. */
   readonly authoritative: boolean;
   readonly reaped: number;
+  /** Ids of the receipts removed, so the surface can name what it retired. */
+  readonly reapedIds: readonly string[];
   /** Receipts the host did not list but that are too young to reap yet. */
   readonly withinGrace: number;
 }
@@ -222,19 +236,30 @@ function readReceipt(value: unknown): RoutineScheduleReceipt | null {
   };
 }
 
-function parseReceiptStore(raw: string): RoutineScheduleReceiptStoreFile {
+function parseReceiptStore(raw: string): RoutineScheduleReceiptStoreRead {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: RECEIPT_STORE_VERSION, receipts: [] };
+  const empty: RoutineScheduleReceiptStoreFile = { version: RECEIPT_STORE_VERSION, receipts: [], foreign: [] };
+  if (!isRecord(parsed)) return { file: empty, writeBlock: null };
+  const entries: readonly unknown[] = Array.isArray(parsed.receipts) ? parsed.receipts : [];
+  const receipts: RoutineScheduleReceipt[] = [];
+  const foreign: unknown[] = [];
+  for (const entry of entries) {
+    const receipt = readReceipt(entry);
+    if (receipt) receipts.push(receipt);
+    else foreign.push(entry);
+  }
+  // A newer build may have added fields this reader would drop on rewrite.
+  const newer = typeof parsed.version === 'number' && parsed.version > RECEIPT_STORE_VERSION;
   return {
-    version: RECEIPT_STORE_VERSION,
-    receipts: Array.isArray(parsed.receipts)
-      ? parsed.receipts.map(readReceipt).filter((receipt): receipt is RoutineScheduleReceipt => receipt !== null)
-      : [],
+    file: { version: RECEIPT_STORE_VERSION, receipts, foreign },
+    writeBlock: newer
+      ? `it was written by a newer GoodVibes Agent (store version ${String(parsed.version)}, this build understands ${RECEIPT_STORE_VERSION}); update Agent before recording new receipts`
+      : null,
   };
 }
 
 function formatReceiptStore(store: RoutineScheduleReceiptStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
+  return `${JSON.stringify({ version: store.version, receipts: [...store.receipts, ...store.foreign] }, null, 2)}\n`;
 }
 
 function receiptId(createdAt: string, routineId: string, existing: readonly RoutineScheduleReceipt[]): string {
@@ -346,17 +371,28 @@ export class RoutineScheduleReceiptStore {
     // Reading is the recovery point for this store: apply both bounds here and
     // persist the result when anything was actually dropped, so housekeeping is
     // not limited to the write path. A second call drops nothing and writes
-    // nothing, which keeps the sweep idempotent.
-    const store = this.readStore();
-    const prune = pruneReceipts(store.receipts, Date.now(), this.limit, this.maxAgeMs);
-    if (prune.expired > 0 || prune.overflow > 0) {
-      this.writeStore({ version: RECEIPT_STORE_VERSION, receipts: prune.kept });
-      logger.info('Agent routine schedule receipts pruned', {
-        path: this.storePath,
-        expired: prune.expired,
-        overflow: prune.overflow,
-        kept: prune.kept.length,
+    // nothing, which keeps the sweep idempotent. The lock is taken only when a
+    // prune must be written, and the store is re-read under it so a receipt
+    // another process appended in between is not lost.
+    const read = this.readStore();
+    let prune = pruneReceipts(read.file.receipts, Date.now(), this.limit, this.maxAgeMs);
+    if ((prune.expired > 0 || prune.overflow > 0) && read.writeBlock === null) {
+      prune = runStoreFileUpdateSync(this.storePath, () => {
+        const current = this.readStore();
+        const pruned = pruneReceipts(current.file.receipts, Date.now(), this.limit, this.maxAgeMs);
+        if (current.writeBlock === null && (pruned.expired > 0 || pruned.overflow > 0)) {
+          this.writeStore(current, pruned.kept);
+        }
+        return pruned;
       });
+      if (prune.expired > 0 || prune.overflow > 0) {
+        logger.info('Agent routine schedule receipts pruned', {
+          path: this.storePath,
+          expired: prune.expired,
+          overflow: prune.overflow,
+          kept: prune.kept.length,
+        });
+      }
     }
     this.lastMaintenanceSummary = {
       path: this.storePath,
@@ -378,19 +414,21 @@ export class RoutineScheduleReceiptStore {
   }
 
   public append(connection: AgentConnectedHostConnection, preview: RoutineSchedulePromotionPreview, result: RoutineSchedulePromotionResult): RoutineScheduleReceipt {
-    const store = this.readStore();
-    const receipt = buildReceipt(store.receipts, connection, preview, result);
-    const prune = pruneReceipts([...store.receipts, receipt], Date.now(), this.limit, this.maxAgeMs);
-    this.writeStore({ version: RECEIPT_STORE_VERSION, receipts: prune.kept });
-    if (prune.expired > 0 || prune.overflow > 0) {
-      logger.info('Agent routine schedule receipts pruned on append', {
-        path: this.storePath,
-        expired: prune.expired,
-        overflow: prune.overflow,
-        kept: prune.kept.length,
-      });
-    }
-    return receipt;
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const read = this.readStore();
+      const receipt = buildReceipt(read.file.receipts, connection, preview, result);
+      const prune = pruneReceipts([...read.file.receipts, receipt], Date.now(), this.limit, this.maxAgeMs);
+      this.writeStore(read, prune.kept);
+      if (prune.expired > 0 || prune.overflow > 0) {
+        logger.info('Agent routine schedule receipts pruned on append', {
+          path: this.storePath,
+          expired: prune.expired,
+          overflow: prune.overflow,
+          kept: prune.kept.length,
+        });
+      }
+      return receipt;
+    });
   }
 
   /**
@@ -400,34 +438,46 @@ export class RoutineScheduleReceiptStore {
   public remove(receiptIds: readonly string[]): number {
     const ids = new Set(receiptIds.map((id) => id.trim().toLowerCase()).filter(Boolean));
     if (ids.size === 0) return 0;
-    const store = this.readStore();
-    const kept = store.receipts.filter((receipt) => !ids.has(receipt.id.toLowerCase()));
-    const removed = store.receipts.length - kept.length;
-    if (removed === 0) return 0;
-    this.writeStore({ version: RECEIPT_STORE_VERSION, receipts: kept });
-    return removed;
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const read = this.readStore();
+      const kept = read.file.receipts.filter((receipt) => !ids.has(receipt.id.toLowerCase()));
+      const removed = read.file.receipts.length - kept.length;
+      if (removed === 0) return 0;
+      this.writeStore(read, kept);
+      return removed;
+    });
   }
 
   /**
    * Read the store, degrading to "no receipts" for anything a crash can leave
-   * behind, an unreadable file, a zero-byte file, a truncated JSON body. A
-   * corrupt (non-empty, unparseable) body is preserved by renaming it aside
-   * rather than being silently discarded; the quarantine slot is a single fixed
-   * name that is overwritten, so it cannot itself accumulate.
+   * behind: a zero-byte file, a truncated JSON body, a file that cannot be read.
+   * A corrupt body is preserved by renaming it aside rather than being silently
+   * discarded; the quarantine slot is a single fixed name that is overwritten,
+   * so it cannot itself accumulate. When the body is unreadable, could not be set
+   * aside, or was written by a newer build, the read carries a `writeBlock` so
+   * the next write refuses instead of replacing receipts this build cannot see.
    */
-  private readStore(): RoutineScheduleReceiptStoreFile {
-    const empty: RoutineScheduleReceiptStoreFile = { version: RECEIPT_STORE_VERSION, receipts: [] };
+  private readStore(): RoutineScheduleReceiptStoreRead {
+    const empty: RoutineScheduleReceiptStoreRead = {
+      file: { version: RECEIPT_STORE_VERSION, receipts: [], foreign: [] },
+      writeBlock: null,
+    };
     if (!existsSync(this.storePath)) return empty;
     let raw = '';
     try {
       raw = readFileSync(this.storePath, 'utf-8');
     } catch (error) {
+      // Left in place: a read that fails now may succeed later, and writing
+      // over it would replace receipts that are still there.
       this.noteRecovery('unreadable');
-      logger.warn('Agent routine schedule receipt store could not be read; continuing with no receipts', {
+      logger.warn('Agent routine schedule receipt store could not be read; showing no receipts and refusing to overwrite it', {
         path: this.storePath,
         error: summarizeError(error),
       });
-      return empty;
+      return {
+        file: empty.file,
+        writeBlock: 'it could not be read, and writing would replace its contents; fix the file permissions, then retry',
+      };
     }
     if (!raw.trim()) {
       this.noteRecovery('empty-file');
@@ -440,9 +490,25 @@ export class RoutineScheduleReceiptStore {
     try {
       return parseReceiptStore(raw);
     } catch (error) {
-      this.quarantine(Buffer.byteLength(raw, 'utf-8'), error);
-      return empty;
+      return this.quarantinedEmpty(empty, Buffer.byteLength(raw, 'utf-8'), error);
     }
+  }
+
+  private quarantinedEmpty(empty: RoutineScheduleReceiptStoreRead, bytes: number, error: unknown): RoutineScheduleReceiptStoreRead {
+    const preserved = this.quarantine(bytes, error);
+    return preserved
+      ? empty
+      : {
+        file: empty.file,
+        writeBlock: 'it is corrupt and could not be set aside, so writing would replace its contents; fix the file permissions, then retry',
+      };
+  }
+
+  private writeStore(read: RoutineScheduleReceiptStoreRead, receipts: readonly RoutineScheduleReceipt[]): void {
+    if (read.writeBlock !== null) {
+      throw new Error(`Agent routine schedule receipt store ${this.storePath} was left unchanged: ${read.writeBlock}.`);
+    }
+    writeStoreFile(this.storePath, formatReceiptStore({ ...read.file, receipts }));
   }
 
   private noteRecovery(recovered: RoutineScheduleReceiptMaintenance['recovered']): void {
@@ -455,7 +521,7 @@ export class RoutineScheduleReceiptStore {
     };
   }
 
-  private quarantine(bytes: number, error: unknown): void {
+  private quarantine(bytes: number, error: unknown): boolean {
     const quarantinePath = `${this.storePath}.corrupt`;
     let preserved = false;
     try {
@@ -472,10 +538,7 @@ export class RoutineScheduleReceiptStore {
       ...(preserved ? { quarantinePath } : {}),
       error: summarizeError(error),
     });
-  }
-
-  private writeStore(store: RoutineScheduleReceiptStoreFile): void {
-    writeStoreFile(this.storePath, formatReceiptStore(store));
+    return preserved;
   }
 }
 
@@ -494,7 +557,7 @@ export function reapMissingRoutineScheduleReceipts(
   result: RoutineScheduleCorrelationResult,
   now: number = Date.now(),
 ): RoutineScheduleReceiptReaping {
-  if (!result.ok) return { authoritative: false, reaped: 0, withinGrace: 0 };
+  if (!result.ok) return { authoritative: false, reaped: 0, reapedIds: [], withinGrace: 0 };
   const reapable: string[] = [];
   let withinGrace = 0;
   for (const correlation of result.correlations) {
@@ -515,7 +578,7 @@ export function reapMissingRoutineScheduleReceipts(
       scheduleCount: result.scheduleCount,
     });
   }
-  return { authoritative: true, reaped, withinGrace };
+  return { authoritative: true, reaped, reapedIds: reaped > 0 ? reapable : [], withinGrace };
 }
 
 function normalizeForMatch(value: string | undefined): string {
@@ -648,6 +711,7 @@ async function fetchConnectedHostStatus(connection: AgentConnectedHostConnection
   try {
     const response = await fetch(`${connection.baseUrl}/status`, {
       headers: connection.token ? { authorization: `Bearer ${connection.token}` } : undefined,
+      signal: AbortSignal.timeout(CONNECTED_HOST_STATUS_TIMEOUT_MS),
     });
     const text = await response.text();
     let body: unknown = text;
@@ -703,8 +767,10 @@ async function classifyScheduleListError(
  * drives reapMissingRoutineScheduleReceipts. A failed response reaps nothing. The
  * store defaults to the one the snapshot came from (snapshot.path), so every
  * existing caller gets the housekeeping without passing anything; pass `store`
- * explicitly to point the reap somewhere else. The returned correlations still
- * describe what was found missing, so the surface can show it before it is gone.
+ * explicitly to point the reap somewhere else. The result carries the reaping
+ * record and the correlations still describe what was found missing, so the
+ * surface can name what was retired. Never rejects: a failure to classify the
+ * list error is itself reported as `connected_host_error`.
  */
 export async function reconcileRoutineScheduleReceipts(
   connection: AgentConnectedHostConnection,
@@ -720,11 +786,12 @@ export async function reconcileRoutineScheduleReceipts(
       baseUrl: connection.baseUrl,
     };
   }
+  let result: RoutineScheduleCorrelationSuccess;
   try {
     const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
     const output = await platformClient.operator.invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});
     const schedules = readLiveSchedules(output);
-    const result: RoutineScheduleCorrelationSuccess = {
+    result = {
       ok: true,
       kind: ROUTINE_SCHEDULE_LIST_METHOD,
       route: ROUTINE_SCHEDULE_ROUTE,
@@ -733,11 +800,31 @@ export async function reconcileRoutineScheduleReceipts(
       receiptCount: snapshot.receipts.length,
       correlations: correlateReceipts(snapshot.receipts, schedules),
     };
-    const reapTarget = store ?? (snapshot.path ? new RoutineScheduleReceiptStore(snapshot.path) : null);
-    if (reapTarget) reapMissingRoutineScheduleReceipts(reapTarget, result);
-    return result;
   } catch (error) {
-    return classifyScheduleListError(error, connection);
+    try {
+      return await classifyScheduleListError(error, connection);
+    } catch {
+      return {
+        ok: false,
+        kind: 'connected_host_error',
+        error: summarizeError(error),
+        route: ROUTINE_SCHEDULE_ROUTE,
+        baseUrl: connection.baseUrl,
+      };
+    }
+  }
+  const reapTarget = store ?? (snapshot.path ? new RoutineScheduleReceiptStore(snapshot.path) : null);
+  if (!reapTarget) return result;
+  try {
+    const reaping = reapMissingRoutineScheduleReceipts(reapTarget, result);
+    return { ...result, reaping: { reaped: reaping.reaped, withinGrace: reaping.withinGrace, reapedIds: reaping.reapedIds } };
+  } catch (error) {
+    // The host answered, so the listing is still true; only the housekeeping failed.
+    logger.warn('Agent routine schedule receipt reap failed; the reconciliation result is unaffected', {
+      path: reapTarget.path,
+      error: summarizeError(error),
+    });
+    return result;
   }
 }
 

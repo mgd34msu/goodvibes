@@ -20,7 +20,9 @@
  * the same announcement and answers the same work type is served by this code
  * path with no branch of its own.
  */
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { logger } from '../utils/logger.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import type { DeviceAutonomousOwner, DeviceAdmission } from './device-autonomous.js';
 import {
@@ -97,6 +99,12 @@ export interface DevicePeerTransport {
     readonly waitMs?: number | undefined;
     readonly timeoutMs?: number | undefined;
   }): Promise<{ work: DeviceWorkView; completed: boolean }>;
+  /**
+   * Withdraw a work item that is still queued or claimed. The dispatcher calls
+   * it when it stops waiting, so a request it reported as failed cannot be
+   * picked up later by a phone that comes back online.
+   */
+  cancelWork?(workId: string, input?: { readonly actor?: string | undefined; readonly reason?: string | undefined }): Promise<unknown>;
 }
 
 /** The slice of the shared approval path the confirmation prompt rides. */
@@ -204,6 +212,13 @@ function createDispatcher(transport: DevicePeerTransport, actor: string): Device
         ...(input.admission ? { admission: input.admission } : {}),
       });
       if (!completed || work.status !== 'completed') {
+        if (work.status === 'queued' || work.status === 'claimed') {
+          // The caller is told this request failed, so it must not stay claimable.
+          try { await transport.cancelWork?.(work.id, { actor, reason: 'device request stopped waiting' }); }
+          catch (error) {
+            logger.warn('Device work could not be withdrawn after the request timed out', { workId: work.id, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
         return {
           ok: false,
           error: work.error?.trim()
@@ -215,6 +230,9 @@ function createDispatcher(transport: DevicePeerTransport, actor: string): Device
       const result = parseDeviceCapabilityWorkResult(work.result);
       if (!result) {
         return { ok: false, error: 'The device returned a result this contract does not recognise.', workId: work.id };
+      }
+      if (result.capabilityId !== input.capabilityId) {
+        return { ok: false, error: `The device answered for ${result.capabilityId}, not the ${input.capabilityId} that was requested.`, workId: work.id };
       }
       if (!result.ok) {
         return { ok: false, error: result.error ?? 'The device declined or failed the request.', workId: work.id };
@@ -242,14 +260,16 @@ function createDispatcher(transport: DevicePeerTransport, actor: string): Device
 function createConfirmationHandler(options: DevicePostureRuntimeOptions): DeviceConfirmationHandler {
   return async (request) => {
     const promptRequest: PermissionPromptRequest = {
-      callId: `phone-${request.capabilityId}-${Date.now()}`,
+      callId: `phone-${request.capabilityId}-${randomUUID()}`,
       tool: 'phone',
+      // The caller's input goes first: the fields that identify the request
+      // are authoritative and an input key of the same name must not replace them.
       args: {
+        ...request.input,
         node: request.nodeLabel,
         nodeId: request.nodeId,
         capability: request.capabilityId,
         reason: request.reason,
-        ...request.input,
       },
       category: request.descriptor.effect === 'actuate' ? 'write' : 'read',
       analysis: {

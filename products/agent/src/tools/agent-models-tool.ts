@@ -165,7 +165,7 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
           action: {
             type: 'string',
             enum: ['status', 'route', 'local', 'providers', 'provider', 'smoke'],
-            description: 'Read model/provider posture; confirm local server smoke checks.',
+            description: 'Read model/provider posture, or run a local server smoke check (smoke needs current recorded admission).',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Model route or provider id alias.' },
@@ -177,8 +177,8 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
           limit: { type: 'number', description: 'Maximum rows.' },
           timeoutMs: { type: 'number', description: 'Optional timeout for local model smoke checks.' },
-          confirm: { type: 'boolean', description: 'Required true for local server smoke checks.' },
-          explicitUserRequest: { type: 'string', description: 'User request authorizing confirmed local server checks.' },
+          confirm: { type: 'boolean', description: 'Optional audit annotation; does not grant authority. Local server smoke checks need current recorded effect admission.' },
+          explicitUserRequest: { type: 'string', description: 'Optional request text recorded with the check; does not grant authority.' },
         },
         additionalProperties: false,
       },
@@ -188,6 +188,11 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
     execute: async (rawArgs, options) => {
       const args = captureModelReadingInput(rawArgs) as AgentModelsToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+      for (const value of [args.action, args.mode]) {
+        if (readString(value) && normalizeModelsAction(value) === null) {
+          return error(`Unknown models action "${readString(value)}". Valid actions: status, route, local, providers, provider, smoke.`);
+        }
+      }
       const action = readAction(args);
 
       if (action === 'status') return forward(statusArgs(args));

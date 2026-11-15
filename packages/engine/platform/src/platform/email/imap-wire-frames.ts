@@ -1,5 +1,13 @@
 import type { ImapFetchFrame } from './imap-fetch-response.js';
 
+/**
+ * Status lines (`A1 NO ...`, `* BYE ...`) and continuations carry free text, and
+ * only data responses (FETCH, LIST, ...) can announce a literal. Text that
+ * happens to end in `{12}` would otherwise swallow the next 12 bytes of the
+ * stream, and with them the completion the caller is waiting for.
+ */
+const TEXT_ONLY_LINE = /^(?:\+|(?:\*|[^\s*+]+) (?:OK|NO|BAD|BYE|PREAUTH)\b)/;
+
 interface WireLine extends ImapFetchFrame { readonly end: number }
 
 /** Frame original octets before decoding: IMAP literal lengths are byte counts. */
@@ -14,7 +22,7 @@ export function* wireLines(raw: string | Uint8Array, complete: boolean, literalC
     }
     const syntax = bytes.subarray(offset, newline).toString('utf8').replace(/\r$/, '');
     offset = newline + 1;
-    const literal = /\{(\d+)\}$/.exec(syntax);
+    const literal = TEXT_ONLY_LINE.test(syntax) ? null : /\{(\d+)\}$/.exec(syntax);
     if (!literal) { yield { syntax, end: offset }; continue; }
     const length = Number(literal[1]);
     if (!Number.isSafeInteger(length)) throw new Error('Invalid IMAP literal length');

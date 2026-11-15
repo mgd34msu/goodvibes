@@ -47,6 +47,9 @@ export const LOCAL_LIBRARY_VALUE_OPTIONS = [
   'provenance',
 ] as const;
 
+/** Flags that never take a value, so `--yes <id>` keeps `<id>` as a positional. */
+export const LOCAL_LIBRARY_BOOLEAN_OPTIONS = ['yes', 'use', 'enabled'] as const;
+
 export function success<TData>(runtime: CliCommandRuntime, kind: string, data: TData, text: string): CliCommandOutput {
   const value: CommandSuccess<TData> = { ok: true, kind, data };
   return { output: jsonOrText(runtime, value, text), exitCode: 0 };
@@ -60,8 +63,13 @@ export function failure(runtime: CliCommandRuntime, kind: string, error: string,
   };
 }
 
-export function parseOptions(args: readonly string[], valueOptions: readonly string[] = LOCAL_LIBRARY_VALUE_OPTIONS): ParsedOptions {
+export function parseOptions(
+  args: readonly string[],
+  valueOptions: readonly string[] = LOCAL_LIBRARY_VALUE_OPTIONS,
+  booleanOptions: readonly string[] = LOCAL_LIBRARY_BOOLEAN_OPTIONS,
+): ParsedOptions {
   const valued = new Set(valueOptions);
+  const boolean = new Set(booleanOptions);
   const values = new Map<string, string>();
   const flags = new Set<string>();
   const positionals: string[] = [];
@@ -83,7 +91,7 @@ export function parseOptions(args: readonly string[], valueOptions: readonly str
     }
     const name = raw;
     const next = args[index + 1];
-    if (next !== undefined && (valued.has(name) || !next.startsWith('--'))) {
+    if (next !== undefined && !boolean.has(name) && (valued.has(name) || !next.startsWith('--'))) {
       values.set(name, next);
       index += 1;
       continue;

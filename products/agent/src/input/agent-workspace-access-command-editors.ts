@@ -136,9 +136,9 @@ function voiceEnableDisableSpec(kind: AgentWorkspaceAccessCommandEditorKind): Ag
   const enabling = kind === 'voice-enable';
   return {
     mode: 'update',
-    title: enabling ? 'Enable Voice Interaction' : 'Disable Voice Interaction',
+    title: enabling ? 'Enable Always-Speak' : 'Disable Always-Speak',
     selectedFieldIndex: 0,
-    message: `${enabling ? 'Enable' : 'Disable'} local voice interaction for this Agent runtime. Type yes to confirm.`,
+    message: `${enabling ? 'Speak every assistant reply aloud' : 'Stop speaking every assistant reply'}. Wake-word listening is configured separately. Type yes to confirm.`,
     fields: [
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: `Type yes to run /voice ${enabling ? 'enable' : 'disable'} with --yes.` },
     ],

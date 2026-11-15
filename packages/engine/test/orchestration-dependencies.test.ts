@@ -20,10 +20,11 @@ import type { OrchestrationEvent, WorkItemSpec } from '../platform/src/platform/
 import {
   createOrchestrationHarness,
   engineerReportOutput,
-  flushMicrotasks,
   makeFakeConfigManager,
   type OrchestrationTestHarness,
 } from './_helpers/orchestration-harness.js';
+import { waitFor } from './_helpers/test-timeout.js';
+import type { Workstream } from '../platform/src/platform/orchestration/types.js';
 
 const cfg = makeFakeConfigManager();
 
@@ -38,10 +39,16 @@ function workstreamOf(items: readonly WorkItemSpec[]): CreateWorkstreamInput {
 
 let projectRoot: string;
 beforeEach(() => { projectRoot = mkdtempSync(join(tmpdir(), 'orch-deps-')); });
-afterEach(() => { rmSync(projectRoot, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const engine of engines.splice(0)) engine.dispose();
+  rmSync(projectRoot, { recursive: true, force: true });
+});
+
+// Engines are disposed after each test so a failed assertion leaves no listeners on the bus.
+const engines: Array<ReturnType<typeof createOrchestrationEngine>> = [];
 
 function makeEngine(h: OrchestrationTestHarness) {
-  return createOrchestrationEngine({
+  const engine = createOrchestrationEngine({
     agentManager: h.agentManager,
     configManager: cfg,
     runtimeBus: h.bus,
@@ -50,6 +57,8 @@ function makeEngine(h: OrchestrationTestHarness) {
     persist: false,
     skipClaimVerification: true,
   });
+  engines.push(engine);
+  return engine;
 }
 
 /** The single running agent driving the given item's live phase. */
@@ -60,10 +69,12 @@ function runningAgentFor(h: OrchestrationTestHarness, itemId: string): string {
   throw new Error(`no running agent for item ${itemId}`);
 }
 
+const stateOf = (ws: Workstream, itemId: string) => ws.items.find((i) => i.id === itemId)?.state;
+
 /** Drive an item through its engineer phase to 'passed'. */
-async function passItem(h: OrchestrationTestHarness, itemId: string): Promise<void> {
+async function passItem(h: OrchestrationTestHarness, ws: Workstream, itemId: string): Promise<void> {
   h.completeAgent(runningAgentFor(h, itemId), engineerReportOutput({ summary: `did ${itemId}` }));
-  await flushMicrotasks(20);
+  await waitFor(() => stateOf(ws, itemId) === 'passed');
 }
 
 describe('dependency gating: concurrency, waiting, release', () => {
@@ -80,7 +91,7 @@ describe('dependency gating: concurrency, waiting, release', () => {
     ]);
     const ws = engine.createWorkstream(spec);
     engine.start(ws.id);
-    await flushMicrotasks(20);
+    await waitFor(() => h.spawnedRecords.length === 2 && stateOf(ws, 'b') === 'blocked-dependency');
 
     const item = (id: string) => ws.items.find((i) => i.id === id)!;
 
@@ -96,15 +107,15 @@ describe('dependency gating: concurrency, waiting, release', () => {
     expect(blockEvents[0]).toMatchObject({ itemId: 'b', reason: 'waiting on: A', deps: ['a'] });
 
     // Pass A fully. Its termination should release B.
-    await passItem(h, 'a');
+    await passItem(h, ws, 'a');
+    await waitFor(() => item('b').state === 'in-phase');
     expect(item('a').state).toBe('passed');
-    expect(item('b').state).toBe('in-phase');
     expect(item('b').blockedReason).toBeUndefined();
     expect(events.some((e) => e.type === 'item-dependency-cleared' && e.itemId === 'b')).toBe(true);
 
     // Finish B and C, all three pass.
-    await passItem(h, 'c');
-    await passItem(h, 'b');
+    await passItem(h, ws, 'c');
+    await passItem(h, ws, 'b');
     expect(ws.items.map((i) => i.state).sort()).toEqual(['passed', 'passed', 'passed']);
   });
 });
@@ -122,12 +133,12 @@ describe('dependency gating: failed dependency + retry recovery', () => {
     ]);
     const ws = engine.createWorkstream(spec);
     engine.start(ws.id);
-    await flushMicrotasks(20);
+    await waitFor(() => stateOf(ws, 'a') === 'in-phase' && stateOf(ws, 'b') === 'blocked-dependency');
     const item = (id: string) => ws.items.find((i) => i.id === id)!;
 
     // Fail A's engineer phase.
     h.failAgent(runningAgentFor(h, 'a'), 'boom');
-    await flushMicrotasks(20);
+    await waitFor(() => item('a').state === 'failed' && item('b').blockedReason === 'dependency failed: A');
     expect(item('a').state).toBe('failed');
 
     // B is REFUSED, not killed: still recoverable, with a failed-dependency reason.
@@ -140,14 +151,13 @@ describe('dependency gating: failed dependency + retry recovery', () => {
     const retried = engine.retryItem('a');
     expect(retried).toBe(true);
     expect(events.some((e) => e.type === 'item-retried' && e.itemId === 'a')).toBe(true);
-    await flushMicrotasks(20);
-    expect(item('a').state).toBe('in-phase'); // re-running from the first phase
+    await waitFor(() => item('a').state === 'in-phase'); // re-running from the first phase
 
     // A passes on retry ⇒ B unblocks and both pass.
-    await passItem(h, 'a');
+    await passItem(h, ws, 'a');
+    await waitFor(() => item('b').state === 'in-phase');
     expect(item('a').state).toBe('passed');
-    expect(item('b').state).toBe('in-phase');
-    await passItem(h, 'b');
+    await passItem(h, ws, 'b');
     expect(item('b').state).toBe('passed');
 
     // retryItem refuses a non-failed item.
@@ -166,8 +176,7 @@ describe('dependency gating: resume preserves the wait', () => {
     ]);
     const ws = engine.createWorkstream(spec);
     engine.start(ws.id);
-    await flushMicrotasks(20);
-    expect(ws.items.find((i) => i.id === 'b')!.state).toBe('blocked-dependency');
+    await waitFor(() => stateOf(ws, 'b') === 'blocked-dependency');
 
     const json = engine.serializeWorkstream(ws.id)!;
     expect(json).toBeTruthy();
@@ -177,9 +186,9 @@ describe('dependency gating: resume preserves the wait', () => {
     const engine2 = makeEngine(h2);
     expect(engine2.importWorkstream(json)).toBe(true);
     engine2.start(ws.id);
-    await flushMicrotasks(20);
-
     const ws2 = engine2.getWorkstream(ws.id)!;
+    await waitFor(() => stateOf(ws2, 'a') === 'in-phase' && stateOf(ws2, 'b') === 'blocked-dependency');
+
     const b2 = ws2.items.find((i) => i.id === 'b')!;
     // The dependency wait survived the resume, B is still gated on A, which was
     // re-queued (its in-phase snapshot reconciled) and is running again.
@@ -188,7 +197,7 @@ describe('dependency gating: resume preserves the wait', () => {
     expect(ws2.items.find((i) => i.id === 'a')!.state).toBe('in-phase');
 
     // And it still recovers: passing A releases B.
-    await passItem(h2, 'a');
-    expect(b2.state).toBe('in-phase');
+    await passItem(h2, ws2, 'a');
+    await waitFor(() => b2.state === 'in-phase');
   });
 });

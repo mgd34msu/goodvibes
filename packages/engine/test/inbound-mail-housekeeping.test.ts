@@ -8,7 +8,7 @@
  *  - the disclosure log is bounded and persisted beside the stores;
  *  - the periodic sweep runs on an unref'd timer without a restart.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -173,34 +173,86 @@ describe('disclosure is written to disk and stays bounded', () => {
   });
 });
 
+/**
+ * Arm `start(intervalMs)` against a captured `setInterval`: nothing is armed
+ * natively, so the tick is fired by hand and no test waits on real time.
+ */
+function armCaptured(housekeeper: InboundMailHousekeeper, intervalMs: number): {
+  readonly armed: Array<{ readonly callback: () => void; readonly ms: number | undefined }>;
+  readonly cleared: unknown[];
+  readonly sweeps: Array<Promise<unknown>>;
+  restore(): void;
+} {
+  const armed: Array<{ callback: () => void; ms: number | undefined }> = [];
+  const cleared: unknown[] = [];
+  const sweeps: Array<Promise<unknown>> = [];
+  const handle = { unref: () => handle };
+  const setIntervalSpy = spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, ms?: number) => {
+    armed.push({ callback, ms });
+    return handle;
+  }) as unknown as typeof setInterval);
+  const nativeClearInterval = globalThis.clearInterval;
+  const clearIntervalSpy = spyOn(globalThis, 'clearInterval').mockImplementation(((timer: unknown) => {
+    // Only this housekeeper's handle is recorded; other code in the process clears its own timers.
+    if (timer === handle) cleared.push(timer);
+    else nativeClearInterval(timer as Parameters<typeof clearInterval>[0]);
+  }) as unknown as typeof clearInterval);
+  const realSweep = housekeeper.sweep.bind(housekeeper);
+  const sweepSpy = spyOn(housekeeper, 'sweep').mockImplementation(((trigger: Parameters<typeof realSweep>[0]) => {
+    const pending = realSweep(trigger);
+    sweeps.push(pending);
+    return pending;
+  }) as typeof housekeeper.sweep);
+  try {
+    housekeeper.start(intervalMs);
+  } finally {
+    // Only the arming is captured: the stores' own lock heartbeats run later and stay native.
+    setIntervalSpy.mockRestore();
+  }
+  return {
+    armed,
+    cleared,
+    sweeps,
+    restore: () => {
+      sweepSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    },
+  };
+}
+
 describe('the periodic sweep runs on a timer without a restart', () => {
-  test('start() sweeps again after the interval elapses, and stop() halts it', async () => {
+  test('start() arms one timer at the interval, each tick sweeps, and stop() clears it', async () => {
     const housekeeper = buildHousekeeper();
     await housekeeper.runRecoverySweep();
-    housekeeper.start(15);
+    const rig = armCaptured(housekeeper, 15);
     try {
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline) {
-        const disclosures = readDisclosures();
-        if (disclosures.some((r) => r.trigger === 'periodic')) break;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      expect(rig.armed).toHaveLength(1);
+      expect(rig.armed[0]?.ms).toBe(15);
+      expect(readDisclosures().some((r) => r.trigger === 'periodic')).toBe(false);
+
+      rig.armed[0]!.callback();
+      await Promise.all(rig.sweeps);
+      expect(readDisclosures().some((r) => r.trigger === 'periodic')).toBe(true);
+
+      housekeeper.stop();
+      expect(rig.cleared).toHaveLength(1);
+      // Stopped twice is still one clear: there is no timer left to clear.
+      housekeeper.stop();
+      expect(rig.cleared).toHaveLength(1);
     } finally {
       housekeeper.stop();
+      rig.restore();
     }
-    const disclosures = readDisclosures();
-    expect(disclosures.some((r) => r.trigger === 'periodic')).toBe(true);
-  }, 30_000);
+  });
 
   /**
    * `start(0)` used to be asserted with `expect(() => start(0)).not.toThrow()`,
    * which passes WITH the busy loop installed: delete the `intervalMs <= 0`
    * guard and `setInterval(fn, 0)` still does not throw, while running a sweep
-   * roughly every millisecond. Not throwing was never the claim, not sweeping
-   * was.
+   * roughly every millisecond. Not throwing was never the claim, not arming a
+   * timer was.
    *
-   * So the assertion is on the sweeps themselves, over a window long enough
-   * that an ungated `setInterval(fn, 0)` would have run dozens of them.
+   * So the assertion is that `setInterval` is never reached.
    */
   const NON_INTERVALS: ReadonlyArray<{ label: string; value: number }> = [
     { label: 'zero', value: 0 },
@@ -210,36 +262,19 @@ describe('the periodic sweep runs on a timer without a restart', () => {
   ];
 
   for (const { label, value } of NON_INTERVALS) {
-    test(`start(${label}) installs no timer and sweeps nothing`, async () => {
+    test(`start(${label}) installs no timer and sweeps nothing`, () => {
       const housekeeper = buildHousekeeper();
-      housekeeper.start(value);
+      const rig = armCaptured(housekeeper, value);
       try {
-        // No timer object at all, which is the mechanism; the sweep count
-        // below is the consequence, and both are asserted because a timer
-        // installed with a different handler would satisfy only one.
+        expect(rig.armed).toHaveLength(0);
         expect((housekeeper as unknown as { timer: unknown }).timer).toBeNull();
-        await new Promise((resolve) => { setTimeout(resolve, 120); });
+        expect(rig.sweeps).toHaveLength(0);
         expect(housekeeper.getLastReport()).toBeNull();
         expect(readDisclosures()).toHaveLength(0);
       } finally {
         housekeeper.stop();
+        rig.restore();
       }
     });
   }
-
-  test('a real interval DOES sweep in the same window, so the check above is not vacuous', async () => {
-    // The control. Without it, "no sweeps in 120 ms" could be true because
-    // nothing in this harness ever sweeps.
-    const housekeeper = buildHousekeeper();
-    housekeeper.start(10);
-    try {
-      const deadline = Date.now() + 10_000;
-      while (Date.now() < deadline && housekeeper.getLastReport() === null) {
-        await new Promise((resolve) => { setTimeout(resolve, 5); });
-      }
-    } finally {
-      housekeeper.stop();
-    }
-    expect(housekeeper.getLastReport()?.trigger).toBe('periodic');
-  }, 15_000);
 });

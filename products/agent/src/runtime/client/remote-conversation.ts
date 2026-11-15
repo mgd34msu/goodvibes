@@ -74,15 +74,16 @@ import { effectivePermissionMode, isGatePresetName, type GatePresetName } from '
  */
 
 import { randomUUID } from 'node:crypto';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
 import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { transport } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
+import { TERMINAL_TURN_EVENT_TYPES, createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes-jev/engine/platform/transport-realtime';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { ConnectedHostVerbError, describeConnectedHostVerbError } from './daemon-verbs.ts';
+import { ConnectedHostVerbError, describeConnectedHostVerbError, isDefiniteHostRefusal } from './daemon-verbs.ts';
 import {
   createHostedFrameRenderer,
   type HostedFrameConversation,
@@ -175,6 +176,15 @@ export interface RemoteConversationRouterOptions {
    * become a termination immediately instead of waiting out ten attempts.
    */
   readonly reconnect?: { readonly enabled: boolean } | undefined;
+  /**
+   * How often the router renews this surface's attachment to its hosted
+   * session while the session is in use. The daemon ends a session whose lease
+   * lapses, and a long turn or a long pause between turns would otherwise
+   * outlast the default 10 minutes. 0 disables it. Default 2 minutes.
+   */
+  readonly leaseRenewIntervalMs?: number | undefined;
+  /** Test seam for the renewal timer: schedule `run` every `ms`, return a stopper. */
+  readonly scheduleRenewal?: ((run: () => void, ms: number) => () => void) | undefined;
 }
 
 /** What else the caller knows about this submission. */
@@ -209,6 +219,18 @@ export interface RemoteConversationRouter {
   setExecutionMode(mode: GatePresetName): Promise<void>;
   /** Request Stop for this submission only; true means the hosted path owns it. */
   cancelTurn(): boolean;
+  /**
+   * Leave the hosted session: tell the daemon this surface is gone, bounded so a
+   * hung host cannot hold an exit open. What happens to the session then is the
+   * daemon's detach policy. Resolves 'none' when there is nothing to leave.
+   */
+  detach(timeoutMs?: number): Promise<'none' | 'detached' | 'failed'>;
+  /**
+   * Let go of the hosted session after the local conversation was cleared or
+   * replaced, so the next message opens a new one instead of continuing the
+   * conversation the person just left. The old session is detached, not killed.
+   */
+  reset(): void;
   /** Stop watching. Leaves the hosted session alone, detaching is separate. */
   dispose(): void;
 }
@@ -229,9 +251,26 @@ function isStaleHostedSession(error: unknown): boolean {
   return error instanceof ConnectedHostVerbError && (error.status === 404 || error.status === 409);
 }
 
+/** The part of a `sessions.steer` reply the router checks. */
+interface HostedSteerReply {
+  readonly session?: { readonly id?: unknown } | undefined;
+  readonly mode?: unknown;
+}
+
+/**
+ * The daemon accepted the message but not into the hosted session: it minted a
+ * different session, or spawned a daemon agent for it. Such an agent does not
+ * run under the hosted session's execution mode, so the turn is not treated as
+ * routed.
+ */
+class HostedSteerMisroutedError extends Error {}
+
+const DEFAULT_LEASE_RENEW_INTERVAL_MS = 120_000;
+const DEFAULT_DETACH_TIMEOUT_MS = 2_000;
+
 /** Build the hosted session's event-stream URL. */
 export function hostedSessionEventStreamUrl(baseUrl: string, hostedSessionId: string): string {
-  return new URL(`/api/sessions/${encodeURIComponent(hostedSessionId)}/events`, baseUrl).toString();
+  return buildUrl(baseUrl, `/api/sessions/${encodeURIComponent(hostedSessionId)}/events`);
 }
 
 export function createRemoteConversationRouter(
@@ -267,6 +306,34 @@ export function createRemoteConversationRouter(
   let hostedMode: GatePresetName | undefined;
   let modeObservation = 0;
   let modeRequest = 0;
+  let stopRenewal: (() => void) | null = null;
+  const renewLease = (): void => {
+    const id = hostedId;
+    if (!id || disposed) return;
+    // Attaching again with the same client id is the daemon's documented renewal.
+    options.verbs.invoke<unknown>('sessions.hosted.attach', { sessionId: id, clientId: options.clientId }).catch((error: unknown) => {
+      logger.debug('[remote-conversation] renewing the hosted session lease failed', { error: String(error) });
+    });
+  };
+  const startRenewal = (): void => {
+    const ms = options.leaseRenewIntervalMs ?? DEFAULT_LEASE_RENEW_INTERVAL_MS;
+    if (stopRenewal || ms <= 0) return;
+    if (options.scheduleRenewal) {
+      stopRenewal = options.scheduleRenewal(renewLease, ms);
+      return;
+    }
+    const timer = setInterval(renewLease, ms);
+    timer.unref?.();
+    stopRenewal = () => clearInterval(timer);
+  };
+  const endRenewal = (): void => { stopRenewal?.(); stopRenewal = null; };
+  // A session this surface will not use: leave it so it does not hold a slot
+  // until its lease lapses. Best effort; the outcome of the message is already decided.
+  const detachQuietly = (sessionId: string): void => {
+    options.verbs.invoke<unknown>('sessions.hosted.detach', { sessionId, clientId: options.clientId }).catch((error: unknown) => {
+      logger.debug('[remote-conversation] detaching an unused hosted session failed', { sessionId, error: String(error) });
+    });
+  };
   const currentModeOwner = () => {
     const connection = options.resolveConnection();
     if (disposed || !hostedId || !hostedConnection || !sameNativeRemoteConnection(hostedConnection, connection)) throw new HostedExecutionModeError('The active hosted execution owner is unavailable or changed.');
@@ -428,7 +495,7 @@ export function createRemoteConversationRouter(
     const gate = createTurnLifecycleGate(turn.turnId ? { turnId: turn.turnId } : undefined);
     const streamUrl = hostedSessionEventStreamUrl(baseUrl, sessionId);
     const positionKey = turn.nativeKey ?? streamUrl;
-    const terminalTypes = new Set(['TURN_CANCEL', 'TURN_COMPLETED', 'TURN_ERROR', 'PREFLIGHT_FAIL']);
+    const terminalTypes = new Set(TERMINAL_TURN_EVENT_TYPES);
     const close = await transport.openServerSentEventStream(options.fetchImpl ?? globalThis.fetch, streamUrl, {
       // The platform parses id: before dispatching its event. After terminal release
       // or replacement, buffered frames no longer advance this watch's cursor.
@@ -548,21 +615,48 @@ export function createRemoteConversationRouter(
       });
       const id = reply.session?.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error('the connected host returned no session id this build could read');
-      if (isCurrent(turn)) {
-        modeObservation++; modeRequest++;
-        hostedId = id;
-        hostedConnection = connection;
-        const createdMode = reply.session?.permissionMode;
-        hostedMode = typeof createdMode === 'string' && isGatePresetName(createdMode) ? createdMode : undefined;
-        const configuredMode = options.configManager.get('permissions.mode');
-        const autoApprove = options.configManager.get('behavior.autoApprove') === true;
-        if (typeof configuredMode === 'string' || autoApprove) {
-          // A new legacy-hosted session has not received input yet. Apply the
-          // surface's explicit choice before its first steer can run tools.
-          await setRemoteExecutionMode(effectivePermissionMode(configuredMode, autoApprove));
-        } else if (hostedMode === undefined) void refreshExecutionMode().catch(() => undefined);
+      if (!isCurrent(turn)) {
+        // Stop, dispose or a newer submission won while the daemon was creating
+        // this session. The router cannot adopt it, so leave it rather than
+        // let it hold a slot (and, under a surviving policy, hold it for good).
+        detachQuietly(id);
+        return id;
       }
+      modeObservation++; modeRequest++;
+      hostedId = id;
+      hostedConnection = connection;
+      const createdMode = reply.session?.permissionMode;
+      hostedMode = typeof createdMode === 'string' && isGatePresetName(createdMode) ? createdMode : undefined;
+      const configuredMode = options.configManager.get('permissions.mode');
+      const autoApprove = options.configManager.get('behavior.autoApprove') === true;
+      if (typeof configuredMode === 'string' || autoApprove) {
+        // A new legacy-hosted session has not received input yet. Apply the
+        // surface's explicit choice before its first steer can run tools.
+        try {
+          await setRemoteExecutionMode(effectivePermissionMode(configuredMode, autoApprove));
+        } catch (error) {
+          // The session exists but is not under the mode this surface chose.
+          // Forget it, so the next message creates a session and applies the
+          // mode again instead of steering into one that runs under the
+          // daemon's own default.
+          if (hostedId === id) { hostedId = null; hostedConnection = undefined; hostedMode = undefined; }
+          modeObservation++; modeRequest++;
+          detachQuietly(id);
+          throw error;
+        }
+      } else if (hostedMode === undefined) void refreshExecutionMode().catch(() => undefined);
+      startRenewal();
       return id;
+    };
+    const steer = async (sessionId: string): Promise<void> => {
+      turn.steerAttempted = true;
+      const reply = await options.verbs.invoke<HostedSteerReply | undefined>(
+        'sessions.steer', { sessionId, body: text, metadata: { correlationId: turn.correlationId } },
+      );
+      const replySessionId = reply?.session?.id;
+      if ((typeof replySessionId === 'string' && replySessionId !== sessionId) || reply?.mode === 'spawn') {
+        throw new HostedSteerMisroutedError('the host took the message into a different session than the hosted conversation');
+      }
     };
     const stopBeforeSteer = (): RemoteTurnOutcome | null => {
       // A synchronous catch-up may have rendered its terminal frame while the
@@ -580,8 +674,7 @@ export function createRemoteConversationRouter(
       cancelled = stopBeforeSteer();
       if (cancelled) return cancelled;
       try {
-        turn.steerAttempted = true;
-        await options.verbs.invoke<unknown>('sessions.steer', { sessionId: id, body: text, metadata: { correlationId: turn.correlationId } });
+        await steer(id);
       } catch (error) {
         if (turn.cancelRequested) {
           turn.submissionPending = false;
@@ -604,11 +697,15 @@ export function createRemoteConversationRouter(
         action = 'recreated';
         cancelled = stopBeforeSteer();
         if (cancelled) return cancelled;
+        // Never silent: the screen still shows the whole conversation, but the
+        // model answering from here has none of it.
+        options.conversation.addSystemMessage('The hosted conversation this session was using is no longer on the daemon. '
+          + 'This message started a new one, and the model has no memory of what came before.');
+        options.requestRender();
         renderer = await watch(turn, connection.baseUrl, connection.token, id);
         cancelled = stopBeforeSteer();
         if (cancelled) return cancelled;
-        turn.steerAttempted = true;
-        await options.verbs.invoke<unknown>('sessions.steer', { sessionId: id, body: text, metadata: { correlationId: turn.correlationId } });
+        await steer(id);
       }
       turn.submissionPending = false;
       if (renderer.isTurnFinished()) release(turn);
@@ -629,6 +726,23 @@ export function createRemoteConversationRouter(
       if (turn.cancelRequested || !isCurrent(turn)) {
         release(turn);
         return stopped();
+      }
+      if (error instanceof HostedSteerMisroutedError) {
+        // The session this surface remembers is not one the daemon serves.
+        if (hostedId === turn.sessionId) { hostedId = null; hostedConnection = undefined; hostedMode = undefined; modeObservation++; modeRequest++; }
+        release(turn);
+        return { routed: false, chosen: true, cancelled: true,
+          reason: 'The host accepted this message but not into the hosted conversation, so it may be running elsewhere on the daemon outside this conversation. '
+            + 'It was not run locally. The next message opens a new hosted conversation.' };
+      }
+      if (turn.steerAttempted && !isDefiniteHostRefusal(error)) {
+        // The request left this process and no definite answer came back, so the
+        // daemon may already have queued the turn. Running it here too would run
+        // it twice, with tool side effects both places.
+        release(turn);
+        return { routed: false, chosen: true, cancelled: true,
+          reason: `This message was sent to the daemon but its reply was lost (${describeConnectedHostVerbError(error)}), so it may be running there. `
+            + 'It was not run locally, to avoid running it twice. Check the hosted conversation before sending it again.' };
       }
       release(turn);
       return refuse(`the connected host would not take this message into the hosted conversation, so it ran here, ${describeConnectedHostVerbError(error)}`);
@@ -675,6 +789,7 @@ export function createRemoteConversationRouter(
     }
     hostedId = snapshot.sessionId;
     hostedConnection = connection;
+    startRenewal();
     void refreshExecutionMode().catch(() => undefined);
     turn.selectionTimer = setInterval(() => {
       if (!isCurrent(turn) && !turn.finished) abandon(turn, 'Selected host or credentials changed. Detached from this native turn; its remote outcome is unconfirmed.');
@@ -707,16 +822,51 @@ export function createRemoteConversationRouter(
     cancelTurn: () => {
       const turn = active;
       if (!turn || !isCurrent(turn) || (!turn.submissionPending && turn.renderer?.isTurnFinished())) return false;
+      // A host that never echoes this submission's correlation never lets the
+      // queued cancellation fire. A second Stop is the way out: stop waiting.
+      if (turn.cancelRequested && !turn.turnId && !turn.nativeCancel && !turn.submissionPending) {
+        abandon(turn, 'Stopped waiting for the host to identify this submission. Its remote outcome and cancellation are unconfirmed; '
+          + 'it was not run locally. Reopen this conversation to see how it ended.');
+        return true;
+      }
       if (!turn.cancelRequested) {
         turn.cancelRequested = true;
-        if (!turn.turnId && !turn.nativeCancel) notice(turn, '[Stop] Waiting for hosted submission identity; cancellation is pending.');
+        if (!turn.turnId && !turn.nativeCancel) notice(turn, '[Stop] Waiting for hosted submission identity; cancellation is pending and is sent when the host starts this turn. Press Stop again to stop waiting without cancelling it.');
       }
       if (!turn.cancelRequest && !turn.cancellationAcknowledged) turn.cancelQueued = true;
       sendCancellation(turn);
       return true;
     },
+    detach: async (timeoutMs = DEFAULT_DETACH_TIMEOUT_MS) => {
+      const id = hostedId;
+      endRenewal();
+      if (!id) return 'none';
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          options.verbs.invoke<unknown>('sessions.hosted.detach', { sessionId: id, clientId: options.clientId })
+            .then(() => 'detached' as const),
+          new Promise<'failed'>((resolve) => { timer = setTimeout(() => resolve('failed'), timeoutMs); timer.unref?.(); }),
+        ]);
+      } catch (error) {
+        logger.debug('[remote-conversation] leaving the hosted session was refused', { sessionId: id, error: String(error) });
+        return 'failed';
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    },
+    reset: () => {
+      const id = hostedId;
+      endRenewal();
+      hostedId = null; hostedConnection = undefined; hostedMode = undefined;
+      modeObservation++; modeRequest++;
+      // A create still in flight finds its turn no longer current and leaves its session.
+      if (active) { active.submissionPending = false; abandon(active, 'The conversation was cleared before the hosted turn settled. Clearing did not cancel the remote turn.'); }
+      if (id) detachQuietly(id);
+    },
     dispose: () => {
       disposed = true;
+      endRenewal();
       if (active) { active.submissionPending = false; abandon(active, 'This surface detached before the hosted turn settled. Detaching does not cancel the remote turn.'); }
     },
   };

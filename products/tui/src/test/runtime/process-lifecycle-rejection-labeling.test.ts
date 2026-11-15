@@ -59,12 +59,12 @@ async function installRejectionReading(reasons: readonly unknown[], options: {
  * classifiable (auth, network...) keeps its specific line.
  */
 
-function makeHandler(timeoutMs?: number) {
+function makeHandler(timeoutMs?: number, onMessage?: () => void) {
   const messages: string[] = [];
   const runtime = { sessionId: 'session-a' };
   const ctx = {
     runtime,
-    systemMessageRouter: { high: (m: string) => { messages.push(m); }, low: () => {} },
+    systemMessageRouter: { high: (m: string) => { messages.push(m); onMessage?.(); }, low: () => {} },
   } as unknown as BootstrapContext;
   const deps = {
     stdin: { setRawMode: () => {}, removeAllListeners: () => {} },
@@ -159,8 +159,11 @@ test('a rejecting rejection reader has one neutral delivery and no unhandled rec
 test('an indefinitely pending rejection reader has a bounded neutral delivery', async () => {
   const reason = new Error('pending failure');
   const reading = await installRejectionReading([reason], { pending: new Promise<never>(() => {}) });
-  const f = makeHandler(5); f.handle(reason);
-  await new Promise(resolve => setTimeout(resolve, 20));
+  // The notice arrives when the narration deadline gives up on the reader; the
+  // test waits for that delivery itself, not for a guessed interval.
+  const delivered = Promise.withResolvers<void>();
+  const f = makeHandler(5, () => delivered.resolve()); f.handle(reason);
+  await delivered.promise;
   expect(reading.requests).toHaveLength(1);
   expect(f.messages).toEqual(['[Error] Error details unavailable. Original error: pending failure']); f.restoreTerminal();
 });

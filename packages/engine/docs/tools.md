@@ -13,33 +13,34 @@ For how tool-call arguments are parsed, validated, and dropped when malformed, s
 
 | Tool | Purpose | Main modes or operations |
 |---|---|---|
-| `read` | Read text, structured files, and media-aware inputs | per-file extraction, image handling, global extraction defaults |
+| `read` | Read text, structured files, and media-aware inputs | per-file extraction, image handling, global extraction defaults; one response is capped at `output.max_tokens` (25,000 by default) and clipped files are listed in `summary.truncated` with the line to continue from; standard output leaves out each file's `resolvedPath` and `readObservation` (which lines were actually returned), which travel on the result's host-only `hostEvidence.reads` for evidence collection and are never shown to the model; `verbose` keeps them in the text |
 | `write` | Write files with project/cache/undo integration | create, overwrite, append, transaction modes |
-| `edit` | Apply targeted edits | exact, fuzzy, regex, notebook operations, validation, rollback |
-| `find` | Search the workspace | files, content, symbols, references, structural AST search |
+| `edit` | Apply targeted edits | exact, fuzzy, regex, notebook operations, validation, rollback; an edit to a file that changed since it was last read is refused until the file is read again |
+| `find` | Search the workspace | files, content, symbols, references, structural AST search; files mode lists paths relative to the reported `root`; each query's page fits `output.max_tokens` (about 10,000 tokens by default) and continues with `next_offset`; a query still running at `timeout_ms` (60 s by default) reports `timed_out`; the product's worktree directory `.goodvibes/.worktrees` is skipped by default (by path, not by name) unless the task runs inside it, and the result's `warnings` say what was skipped and that `path: '.goodvibes/.worktrees'` includes it |
 | `exec` | Run shell commands through the process manager | retries, timeouts, expectations, pre-command file ops, AST guard |
-| `fetch` | Fetch HTTP resources | raw/text/markdown/structured extraction, rate limits, sanitization, trusted hosts |
-| `analyze` | Analyze code and changes | impact, dependencies, dead code, security, diff, preview, upgrade, surface |
-| `inspect` | Inspect project shape | project, API, database, components, layout, accessibility, scaffold |
+| `fetch` | Fetch HTTP resources | raw/text/markdown/structured extraction, rate limits, sanitization, trusted hosts; a call where every URL failed or every response was an HTTP error (`summary.http_errors`) is an unsuccessful call, and the per-URL results are still returned |
+| `analyze` | Analyze code and changes | impact, dependencies, dead code, security, diff, preview, upgrade, surface; output over `output.max_tokens` (25,000 tokens by default) is cut with a note saying how much was kept |
+| `inspect` | Inspect project shape | project, API, database, components, layout, accessibility, scaffold (creates new files only; refuses when a target exists); `output.max_tokens` caps the response (25,000 tokens by default) |
 | `agent` | Spawn and manage agents | spawn, batch-spawn for independent roots, status, cancel, list, templates, get, budget, plan, wait, message, contracts, contract-history, cohorts |
 | `goodvibes_context` | Inspect the current GoodVibes harness safely | runtime summary, redacted config reads/schema, integrations, tool catalog, Cloudflare status/token requirements |
 | `goodvibes_settings` | Change GoodVibes settings through the config manager | set, reset with explicit confirmation; rejects raw credential persistence |
 | `profile` | Record what the owner says about themselves into the owner profile | registered only when profile collaborators are provided; write authority is bound per turn by the composition root, never supplied by the model |
-| `repo_map` | Model-invoked, token-budgeted repository outline | directory summary plus highest-centrality source files and their exports, ranked by import-graph centrality; no LLM and no process spawn |
-| `context_accounting` | Let the model read its own context composition | recall-contract floors and exclusions, per-turn injection records; measured token counts reported as fact, estimates flagged as estimates |
-| `state` | Store and inspect runtime state | get, set, list, clear, budget, context, memory, telemetry, hooks, mode, analytics |
+| `repo_map` | Model-invoked repository outline | directory summary plus source files and their exports, ranked by import-graph centrality, unbounded unless a token budget is passed; no LLM and no process spawn |
+| `context_accounting` | Let the model read its own context composition | recall-contract floors and exclusions, per-turn injection records; measured token counts reported as fact, estimates flagged as estimates; for a worker agent it reports that worker's turns used and left (warning at 80% of the limit) once the host binds the worker as its source |
+| `state` | Store and inspect runtime state | get, set, list, clear, budget, context, memory (get, set, list, delete: delete removes the file and its retrieval record), telemetry, mode; `list` returns the key inventory unless `view=full`; `set` of `runtime.workingDir` must be sent alone; `hooks` and `analytics` only when the host provides them; `analytics` reads recorded calls (the model cannot record rows) and its export is size-capped; an added hook needs a unique name and lasts for the session only; `hooks` lists registered hooks, and adding, enabling, disabling or removing one is always put to the owner (never settled by a mode, a category or a remembered answer, and never remembered), refused in plan mode, and refused when the session cannot ask |
 | `workflow` | Start and control workflows | start, status, transition, cancel, triggers, schedule |
-| `registry` | Discover skills/agents/tools | search, recommend, dependencies, preview, content |
-| `task` | Manage cross-session tasks | create, list, show, status, depend, cancel, handoff |
-| `team` | Manage team/work lanes | create, list, show, add/remove member, set lanes, delete |
+| `registry` | Discover skills/agents/tools | search, recommend, dependencies, preview, content; files are read only from `.goodvibes/skills` and `.goodvibes/agents` of the project and the home directory, after `..` and symlinks are resolved, and an `@include` that leaves those directories is refused |
+| `task` | Manage cross-session tasks | create, list, show, status, depend, cancel, handoff, handoffs, acknowledge |
+| `team` | Keep durable team notes | create, list, show, add/remove member, set lanes, delete; a record for the model and the user to read back, it does not change how agents are spawned or communicate |
 | `worklist` | Manage worklists | create, list, show, add, complete, reopen, remove |
-| `mcp` | Inspect and operate MCP servers | servers, tools, schema, resources, security, auth, quarantine/trust |
+| `mcp` | Inspect and operate MCP servers | servers, tools, schema, security, auth, quarantine/trust |
 | `packet` | Manage context packets | create, list, show, revise, publish |
 | `query` | Ask and answer structured questions | ask, list, show, answer, close |
 | `remote` | Manage distributed runners | create-pool, pools, assign, unassign, contracts, artifacts, review, import-artifact |
 | `repl` | Evaluate bounded code when an isolating backend is available | eval, history |
 | `control` | Inspect host control data | commands, panels, subscriptions, sandbox presets |
 | `channel` | Use channel-owned runtime tools | surface-specific tool bridge |
+| `contract_self_check` | Read how a contract unit's acceptance criteria read now | read-only, no parameters; answers for the calling worker's own unit from the last check without ending its turn; it passes nothing and describes the last check, not work done since |
 | `web_search` | Run provider-backed web search | query, safe-search, evidence fetching |
 
 ## Record status rules
@@ -55,6 +56,7 @@ current status and the moves that remain, for example
 | `query` | A query is `open`, then `answered`, then `closed`. An answer can be revised with another `answer` until the query is closed. A closed query cannot be answered or closed again. |
 | `packet` | A packet is published once. A second `publish` is refused and reports the original publish time. `revise` still works on a published packet and does not change its status. |
 | `workflow` | `cancel` applies to a workflow that is still in progress. Cancelling a workflow that already finished or was already cancelled is refused with the reason, and its completion time is unchanged. |
+| `task` | `create` never replaces an existing task ref; use `status` to move it. A handoff to a session this host does not know, or of a finished task, is refused. A handoff marks the task `blocked` until the destination session runs `acknowledge` with the handoff id, which returns the task to the status it had. |
 
 ## Captured Bun commands
 
@@ -84,8 +86,11 @@ printed completion value and console output are returned in `result`. Variables
 do not survive the call. Authorized file changes persist only in mutable member
 views; immutable views remain unchanged. Results report `stateless`, `isolated`
 and `workspace_changes_persist`. Network access and the ambient host environment
-are unavailable. Evaluation has a 10-second execution limit and a 64 KiB command
-limit, in addition to the captured executor's output and workspace limits.
+are unavailable. Evaluation stops after `timeout_ms` (120 seconds when omitted;
+`0` waits for completion or cancellation) and has a 64 KiB command limit, in
+addition to the captured executor's output and workspace limits. A snippet that
+exits non-zero without error output is reported with its exit code; a cancelled
+eval says it was cancelled.
 
 Captured `history` returns `{ count, history }` for the exact construction-owned
 run and authority in the current process. Entries retain the runtime, expression,
@@ -175,18 +180,18 @@ warning-level violations are handled.
 ## Permissions
 
 Tool permissions are configured under `permissions.tools.*` and enforced by the
-runtime permission layer. `permissions.mode` selects the approval mode
-(`prompt` default, `allow-all`, or `custom`), and each tool category has its own
+runtime permission layer. `permissions.mode` selects the execution mode
+(`safe-owner` default, `safe-jev`, `yolo`, or `plan`), and each tool category has its own
 key with a built-in default:
 
 | Config key | Default | Covers |
 |---|---|---|
-| `permissions.tools.read` | `allow` | file read (read/find/analyze paths) |
+| `permissions.tools.read` | `allow` | the read tool (find and analyze have their own keys) |
 | `permissions.tools.write` | `prompt` | file write |
 | `permissions.tools.edit` | `prompt` | file edit/patch |
 | `permissions.tools.exec` | `prompt` | shell command execution |
 | `permissions.tools.find` | `allow` | file/directory search |
-| `permissions.tools.fetch` | `prompt` | outbound network fetch (custom mode) |
+| `permissions.tools.fetch` | `prompt` | outbound network fetch |
 | `permissions.tools.analyze` | `allow` | code/project analysis |
 | `permissions.tools.inspect` | `allow` | runtime/object inspection |
 | `permissions.tools.agent` | `prompt` | spawning subagents / delegating tasks |
@@ -196,10 +201,10 @@ key with a built-in default:
 | `permissions.tools.mcp` | `prompt` | MCP (external server) tool calls |
 | `permissions.tools.delegate` | `prompt` | unknown or unregistered tools (see below) |
 
-The default posture therefore allows read/find/fetch/analyze/inspect/state/registry
-and prompts for write/edit/exec/agent/workflow/delegate/MCP. The
-`permissions.tools.fetch` default of `prompt` applies only in `custom` mode; in the
-default `prompt` mode `fetch` is treated as a read-category tool and auto-approved.
+In Classic operation the default posture therefore allows read/find/analyze/inspect/state/registry
+and prompts for write/edit/exec/fetch/agent/workflow/delegate/MCP. These per-tool defaults are
+read only in Classic operation; in the other operations the stakes reading decides whether a
+call asks, and `fetch` is treated as a read-category tool.
 For the broader security posture and how these keys interact with secrets, see
 [Security](./security.md) and [Secrets](./secrets.md).
 
@@ -227,11 +232,13 @@ Related tool settings:
 - `permissions.divergenceDashboard` (default on): aggregates
   permission-simulation divergence by tool/prefix/mode and gates enforce-mode
   transitions on the divergence rate.
-- `runtime.toolBudget.enforced` (default off): enforces per-phase wall-clock,
-  token, and cost budgets across tool execution pipelines, terminating on a
-  hard breach.
+- `runtime.toolBudget.enforced` (default off): checks each tool call against the
+  wall-clock, token, and cost limits (`runtime.toolBudget.maxMs`, `maxTokens`,
+  `maxCostUsd`) once it returns. A call over a limit is reported as failed with
+  its output kept and a note that its action may already have happened.
 - `tools.overflowSpillBackend`: selects the overflow spill backend
-  (`file`, `ledger`, or `diagnostics`); `file` is the stock behavior.
+  (`file`, `ledger`, or `diagnostics`); `file` is the stock behavior. The
+  choice is read when the runtime starts, so a change applies after a restart.
 
 See [Feature settings](./feature-settings.md) for the full capability catalog.
 
@@ -240,7 +247,7 @@ See [Feature settings](./feature-settings.md) for the full capability catalog.
 The fetch tool sanitizes by default (`fetch.sanitizeMode`, default
 `safe-text`). It classifies initial and redirected hosts, blocks
 private/link-local/metadata targets absolutely, gates localhost dev servers
-behind a one-tap per-project approval (`fetch.allowLocalhost`), applies
+behind a one-tap approval saved in your own settings (`fetch.allowLocalhost`; a project file cannot turn it on), applies
 safe-text handling for unknown hosts, and enforces streaming response-size
 caps. `fetch.sanitizeMode: none` skips content sanitization only. Host
 blocking is unaffected.
@@ -251,6 +258,14 @@ The exec tool runs through `ProcessManager` and uses shell AST normalization
 by default (`permissions.commandParser`, default `ast`). AST normalization
 evaluates compound commands segment-by-segment and gives structured denial
 reasons for unsafe command forms.
+
+A foreground command runs with piped output and no controlling terminal. When
+it fails because it needed one (`sudo` without `-S` or `-n`, an `ssh` password
+ask), the result carries `tty_note` saying to rerun with `interactive: true` or
+a non-interactive form. Interactive runs put prompts to the user; an answer the
+user typed that was overtaken by more program output is counted in
+`prompts_dropped`, the prompt is asked again, and a timeout, cancel or decline
+stops the command's whole process tree, including `nohup`ed children.
 
 ## File safety
 
@@ -273,8 +288,21 @@ inspect budgets and plans, and inspect contracts.
   otherwise the parent turn's text; the spawned tasks become the contract's
   proposed units, which the planner weighs when it writes the plan. The result
   JSON carries `contractStarted: true`, the contract id and the owner agent id.
+  A contract's planner chooses each unit's tools and write scope, so a call
+  that sets `tools`, `restrictTools`, `writeScope` or `executionIntent`
+  without `outsideContract` is refused with the parameters named. Other
+  per-agent settings (`model`, `successCriteria`, `cohort` and the like) are
+  not carried into the contract; the result lists them under `notApplied`.
 - **`outsideContract: true`** runs an ordinary agent with no contract and no
-  checks.
+  checks, and keeps every per-agent setting. In a batch, tasks that find no
+  free agent slot are not started and are not queued: the result lists them
+  under `notStarted`, and a spawn that fails partway lists the agents already
+  running and the tasks not started.
+- **`cancel`** stops a running agent; an agent that already finished is
+  refused with its state, and a cascade lists only the agents it stopped.
+- **`message`** is read by the agent at the start of its next turn and stays
+  queued until the agent reads it or is removed. The message is reported as
+  delivered when that turn runs, not when it is queued.
 - **`contracts`** lists the session's contracts with their status and units.
 - **`contract-history`** shows one contract's events: plan, checks, nudges,
   escalations and outcome.

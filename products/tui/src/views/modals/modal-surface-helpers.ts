@@ -1,6 +1,7 @@
 import { DEFAULT_VIEW_PALETTE } from '../polish.ts';
 import type { ModalSectionStyle } from '../../input/config-modal-types.ts';
-import type { ConfigModalRow } from '../../input/config-modal-types.ts';
+import type { ConfigModalActionContext, ConfigModalRow } from '../../input/config-modal-types.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Shared formatting helpers for config-modal surfaces. Row styling reuses
@@ -61,4 +62,40 @@ export function infoRow(id: string, label: string, style?: ModalSectionStyle): C
  */
 export function headerRow(id: string, label: string): ConfigModalRow {
   return { id, label, selectable: false, header: true };
+}
+
+/**
+ * Run a slash command from a modal action and report what actually happened.
+ * The status line reads "Dispatched ..." while the command runs, then "Done" or
+ * "Failed: <reason>" once it settles, so a refused or throwing command is never
+ * left looking like it worked and never escapes as an unhandled rejection.
+ * `afterSettle` runs on success and on failure (the screen may have changed
+ * either way) and is where a surface re-reads the data the command changed:
+ * refreshing before the command settles would read the old value back.
+ */
+export function runModalCommand(
+  ctx: ConfigModalActionContext,
+  name: string,
+  args: string[],
+  label: string,
+  options: { readonly pending?: string; readonly done?: string; readonly afterSettle?: () => void } = {},
+): void {
+  const run = ctx.executeCommand;
+  if (!run) {
+    ctx.setStatus(`Not run: ${label} (this session has no command runner).`);
+    return;
+  }
+  ctx.setStatus(options.pending ?? `Dispatched ${label}.`);
+  // The command starts now, in the key handler's own tick; a synchronous throw from the runner is turned into a rejection.
+  let started: Promise<unknown>;
+  try { started = Promise.resolve(run(name, args)); } catch (error) { started = Promise.reject(error); }
+  void started
+    .then(
+      () => ctx.setStatus(options.done ?? `Done: ${label}.`),
+      (error: unknown) => ctx.setStatus(`Failed: ${label}: ${summarizeError(error)}`),
+    )
+    .then(() => {
+      try { options.afterSettle?.(); } catch (error) { ctx.setStatus(`Failed to refresh after ${label}: ${summarizeError(error)}`); }
+      ctx.requestRender();
+    });
 }

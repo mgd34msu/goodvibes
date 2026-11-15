@@ -32,7 +32,8 @@ export interface ModelCandidate {
   readonly benchmarkCompositeScore?: number | null;
   readonly benchmarkQualityTier?: string;
   readonly localBenchmarkLatency?: LocalModelBenchmarkRouteLatency | null;
-  readonly pinned: boolean;
+  /** null when the favorites could not be read: unknown, not "not pinned". */
+  readonly pinned: boolean | null;
   readonly available?: boolean | null;
   readonly configured?: boolean | null;
 }

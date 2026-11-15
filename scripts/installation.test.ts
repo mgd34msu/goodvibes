@@ -399,7 +399,13 @@ describe('A44 installer lock ownership', () => {
   });
   test('a lock whose pid was reused by another process is reclaimed', async () => {
     const start = processStartTime(process.pid);
-    if (start === undefined) return;
+    if (start === undefined) {
+      // Without a readable start time reuse cannot be proven, so a live pid keeps its lock.
+      plant({ pid: process.pid, startTime: '1' });
+      await expect(install(options, hooks)).rejects.toThrow('Another install/uninstall');
+      expect(existsSync(join(lockOf(), 'owner.json'))).toBe(true);
+      return;
+    }
     plant({ pid: process.pid, startTime: `${start}0` });
     await install(options, hooks);
     expect(existsSync(lockOf())).toBe(false);

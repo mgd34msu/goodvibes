@@ -127,7 +127,8 @@ function requireFieldId(value: unknown): string {
  * deleted the owner's shipping address.
  *
  * An unrecognised string is refused rather than defaulted, so a typo or a probe
- * can never resolve to the one tier that carries write authority.
+ * can never resolve to the one tier that carries write authority. `owner-direct`
+ * is further refused for a bot or remote-peer principal.
  */
 function readAuthority(value: unknown, invocation: GatewayMethodInvocation): AuthoritySurface | 'autonomous' {
   if (value === 'autonomous' && profileDelegationForInvocation(invocation)) return 'autonomous';
@@ -136,6 +137,19 @@ function readAuthority(value: unknown, invocation: GatewayMethodInvocation): Aut
       `authority is required and must be one of ${AUTHORITY_SURFACES.join(', ')}`,
       'INVALID_ARGUMENT',
       400,
+      'authority',
+    );
+  }
+  // The body states the tier, but the principal behind the call decides whether
+  // it may state this one: a channel bot or a remote peer relays other people's
+  // words, so it can never be the owner speaking directly. A service principal
+  // is automation that acts for no one in particular, so it cannot either.
+  const kind = invocation.context.principalKind;
+  if (value === 'owner-direct' && (kind === 'bot' || kind === 'remote-peer' || kind === 'service')) {
+    throw new GatewayVerbError(
+      `A ${kind} principal cannot claim owner-direct authority, because it does not speak as the owner. Name where the words came from instead: channel-message, email, web-page or document.`,
+      'FORBIDDEN',
+      403,
       'authority',
     );
   }

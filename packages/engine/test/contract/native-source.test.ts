@@ -48,11 +48,12 @@ function planner(outputs: string[]) {
 const harnesses: Harness[] = [];
 const roots: string[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
-afterEach(() => {
-  for (const h of harnesses.splice(0).reverse()) h.dispose();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  installJudgmentPort(previous);
-  for (const log of logs.splice(0)) log[Symbol.dispose]();
+afterEach(async () => {
+  try { await Promise.all(harnesses.splice(0).reverse().map(h => h.dispose())); } finally {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+    installJudgmentPort(previous);
+    for (const log of logs.splice(0)) log[Symbol.dispose]();
+  }
 });
 const logs: SqliteDecisionLog[] = [];
 function install(): void { const log = new SqliteDecisionLog(':memory:'); logs.push(log); previous = installJudgmentPort(withDecisionLog(planningPort().port, log)); }

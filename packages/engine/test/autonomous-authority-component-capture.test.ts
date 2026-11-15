@@ -121,6 +121,12 @@ test('complete source validation refuses hidden accessors and nested proxies wit
   expect(captureAutonomousSourceFrame(oversized).source.conversationContext).toHaveLength(300);
 });
 
+test('a malformed conversation message is refused with a reason that does not claim a size bound', () => {
+  const bad = source();
+  bad.conversationContext = [{ role: 'user' as const, content: 42 }] as unknown as typeof bad.conversationContext;
+  expect(() => captureAutonomousSourceFrame(bad)).toThrow('autonomous conversation evidence must be complete host data');
+});
+
 test('catalog factory preserves the original canonical context and fresh detached references', () => {
   const continuations = [{ id: 'registered-alternative', revision: protocolIdentity, kind: 'revise-action' as const }];
   const conditions = [{ id: 'registered-condition', revision: 'condition-current' }];

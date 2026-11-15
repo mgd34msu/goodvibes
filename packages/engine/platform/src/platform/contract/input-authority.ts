@@ -56,7 +56,29 @@ const authorities = new WeakMap<ContractInputAuthority, Authority>();
 const bindings = new WeakMap<object, ContractInputAuthority>();
 const activeInputAuthority = new AsyncLocalStorage<ContractInputAuthority>();
 // Revocation never makes a previously captured root an ordinary live workspace.
+// Only roots outside the product-owned layout are kept: that layout is denied by pattern alone, so
+// remembering every view and worktree of every contract would only grow the set and slow each lookup.
 const capturedRoots = new Set<string>();
+const RESERVED_VIEW_LAYOUT = /[/\\]\.goodvibes[/\\]\.worktrees[/\\](?:contract-input|contract-planner|contract)(?:[/\\]|$)/;
+
+function resolvedPath(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    /* A missing reserved view still fails closed below. */
+    return absolute;
+  }
+}
+
+function rememberCapturedRoot(path: string): void {
+  if (!RESERVED_VIEW_LAYOUT.test(resolvedPath(path))) capturedRoots.add(resolve(path));
+}
+
+/** How many roots are remembered individually; the product-owned layout is not one of them. */
+export function capturedInputRootCount(): number {
+  return capturedRoots.size;
+}
 const identity = (stat: { dev: bigint; ino: bigint }): string => `${stat.dev}:${stat.ino}`;
 
 function assertAdmission(admission: Admission, compareContents = true): void {
@@ -154,7 +176,7 @@ export async function createContractInputAuthority(
     revokeContractInputAuthority(token);
     for (const signal of signals) signal.throwIfAborted();
   }
-  capturedRoots.add(view);
+  rememberCapturedRoot(view);
   return token;
 }
 
@@ -201,20 +223,15 @@ export function registerContractInputCleanup(token: ContractInputAuthority, clea
 }
 
 export function markCapturedInputPath(path: string): void {
-  capturedRoots.add(resolve(path));
+  rememberCapturedRoot(path);
 }
 
 export function isCapturedInputPath(path: string): boolean {
-  let absolute = resolve(path);
-  try {
-    absolute = realpathSync(absolute);
-  } catch {
-    /* A missing reserved view still fails closed below. */
-  }
+  const absolute = resolvedPath(path);
   for (const root of capturedRoots) if (absolute === root || absolute.startsWith(`${root}${sep}`)) return true;
   // Reserved runtime views also fail closed before a restored lease is rebound.
   // This is only a denial check; prefixes never confer original-owner authority.
-  return /[/\\]\.goodvibes[/\\]\.worktrees[/\\](?:contract-input|contract-planner|contract)(?:[/\\]|$)/.test(absolute);
+  return RESERVED_VIEW_LAYOUT.test(absolute);
 }
 
 function stateOf(token: ContractInputAuthority): Authority {

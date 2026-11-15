@@ -77,7 +77,11 @@ function logPath(): string {
 const UNIT_MS: Readonly<Record<string, number>> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 function driftOptions(): DriftOptions {
-  if (values.windows !== undefined) return { windows: Number(values.windows) };
+  if (values.windows !== undefined) {
+    const windows = Number(values.windows);
+    if (!(Number.isInteger(windows) && windows > 0)) fail(`--windows takes a positive integer, not "${values.windows}"`);
+    return { windows };
+  }
   if (values.window === undefined) return {};
   const match = /^(\d+)([mhd])$/.exec(values.window);
   if (match === null) fail(`--window takes a length such as 30m, 6h or 1d, not "${values.window}"`);
@@ -91,9 +95,17 @@ function thresholds(): number[] | undefined {
   return parsed;
 }
 
+for (const flag of ['since', 'until'] as const) {
+  const value = values[flag];
+  if (value !== undefined && Number.isNaN(Date.parse(value))) fail(`--${flag} takes an ISO timestamp such as 2026-01-31T00:00:00Z, not "${value}"`);
+}
+if (values.windows !== undefined) driftOptions();
+
 const path = logPath();
 if (!existsSync(path)) fail(`no decision log at ${path}`);
-const { decisions, files } = await loadEngineRegistries();
+const { decisions, files, conflicts } = await loadEngineRegistries();
+// The first-loaded decision of a name would silently set every floor and the registered names.
+if (conflicts.length > 0) fail(`two registries register different decisions under the same name (${conflicts.join(', ')}); run judgment:lint`);
 const limit = values.limit === undefined ? undefined : Number(values.limit);
 if (limit !== undefined && !(Number.isInteger(limit) && limit > 0)) fail('--limit takes a positive integer');
 const sweepAt = thresholds();
@@ -122,21 +134,22 @@ if (values.json === true) {
   console.log(suite.results.length === 0 ? '    no registered decision has ground truth in this window' : formatSuiteResult(suite));
 }
 
+let exitCode = 0;
 if (values.check === true) {
   const below = report.accuracy.filter((row) => row.belowFloor === true).map((row) => row.battery);
   const outside = report.unregistered ?? [];
   if (below.length > 0 || outside.length > 0) {
     console.error(`[observe-report] CHECK FAILED: ${below.length} decision(s) below floor${below.length > 0 ? ` (${below.join(', ')})` : ''}, ${outside.length} site group(s) calling Jev outside a registered battery`);
-    process.exit(1);
-  }
-  console.log('[observe-report] CHECK PASSED: every decision with ground truth is at or above its floor, and every call names a registered decision');
+    exitCode = 1;
+  } else console.log('[observe-report] CHECK PASSED: every decision with ground truth is at or above its floor, and every call names a registered decision');
 }
 
 if (values['check-volume'] === true) {
   if (report.truncated) fail('The volume window is truncated; narrow the window or raise --limit before checking budgets');
   if (report.volumeBreaches.length) {
     console.error(`[observe-report] VOLUME CHECK FAILED: ${report.volumeBreaches.length} budget violation(s)`);
-    process.exit(1);
-  }
-  console.error('[observe-report] VOLUME CHECK PASSED');
+    exitCode = 1;
+  } else console.error('[observe-report] VOLUME CHECK PASSED');
 }
+// Both checks ran before the exit, so a failing accuracy floor does not hide the volume result.
+process.exitCode = exitCode;

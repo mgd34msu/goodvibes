@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { OPERATOR_METHOD_IDS } from '../contracts/dist/index.js';
-import * as ContractZodSchemas from '../contracts/dist/index.js';
+import { OPERATOR_METHOD_IDS } from '../contracts/src/index.js';
+import * as ContractZodSchemas from '../contracts/src/index.js';
 import { buildSchemaRegistry, methodIdToSchemaName } from '../operator-client/src/schema-registry.js';
 
 describe('operator-client schema registry', () => {

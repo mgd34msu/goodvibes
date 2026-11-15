@@ -115,7 +115,7 @@ describe('the remote-target convention', () => {
 
   test('--host and --port retarget it, and --token overrides the file', () => {
     const resolved = resolveRemoteDaemonTarget({
-      flags: { host: '10.0.0.7', port: 5000, token: 'supplied' },
+      flags: { host: 'http://10.0.0.7', port: 5000, token: 'supplied' },
       configManager: CONFIG,
       daemonHomeDir: '/nowhere',
       readToken: () => TOKEN_FILE,
@@ -127,9 +127,33 @@ describe('the remote-target convention', () => {
     expect(resolved.target.isLocal).toBe(false);
   });
 
+  test('another machine named without a scheme is refused instead of inferring one from local settings', () => {
+    const resolved = resolveRemoteDaemonTarget({
+      flags: { host: '10.0.0.7', token: 'supplied' },
+      configManager: CONFIG,
+      daemonHomeDir: '/nowhere',
+      readToken: () => TOKEN_FILE,
+    });
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.fix).toContain('--host https://10.0.0.7');
+    expect(resolved.fix).toContain('--host http://10.0.0.7');
+  });
+
+  test('a stated https scheme is used for another machine whatever this machine\'s own tls setting is', () => {
+    const resolved = resolveRemoteDaemonTarget({
+      flags: { host: 'https://10.0.0.7', port: 5000, token: 'supplied' },
+      configManager: CONFIG,
+      daemonHomeDir: '/nowhere',
+      readToken: () => TOKEN_FILE,
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.target.baseUrl).toBe('https://10.0.0.7:5000');
+  });
+
   test('an IPv6 host is bracketed so the port is not read as part of the address', () => {
     const resolved = resolveRemoteDaemonTarget({
-      flags: { host: 'fd00::5', port: 4319 },
+      flags: { host: 'http://fd00::5', port: 4319 },
       configManager: CONFIG,
       daemonHomeDir: '/nowhere',
       readToken: () => TOKEN_FILE,
@@ -146,7 +170,7 @@ describe('the remote-target convention', () => {
     if (!local.ok) expect(local.fix).toContain('start the daemon once');
 
     const remote = resolveRemoteDaemonTarget({
-      flags: { host: '10.0.0.7' }, configManager: CONFIG, daemonHomeDir: '/nowhere', readToken: () => undefined,
+      flags: { host: 'https://10.0.0.7' }, configManager: CONFIG, daemonHomeDir: '/nowhere', readToken: () => undefined,
     });
     expect(remote.ok).toBe(false);
     if (!remote.ok) expect(remote.fix).toContain('the machine you are trying to reach');
@@ -254,7 +278,7 @@ describe('running a subcommand', () => {
         nodeId: 'x', displayName: 'x', memberCount: 1, keyGeneration: 1 } });
     };
     await runClusterCommand({ ...base, argv: ['create', '--name', 'the workshop'], fetchImpl: capture });
-    await runClusterCommand({ ...base, argv: ['forget', 'node-b'], fetchImpl: capture });
+    await runClusterCommand({ ...base, argv: ['forget', 'node-b', '--yes'], fetchImpl: capture });
     expect(seen[0]).toEqual({ path: '/api/cluster/create', body: { name: 'the workshop' } });
     expect(seen[1]).toEqual({ path: '/api/cluster/forget', body: { nodeId: 'node-b' } });
   });
@@ -432,7 +456,7 @@ describe('rotate', () => {
     let sent: unknown;
     const result = await runClusterCommand({
       ...base,
-      argv: ['rotate', '--now'],
+      argv: ['rotate', '--now', '--yes'],
       fetchImpl: async (_url, init) => {
         sent = JSON.parse(String(init?.body ?? '{}'));
         return jsonResponse({

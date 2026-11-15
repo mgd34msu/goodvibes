@@ -89,6 +89,9 @@ export type WakeModelDigest = (bytes: Uint8Array) => Promise<string>;
 export interface WakeModelCache {
   match(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | undefined>;
   put(key: string, bytes: Uint8Array): Promise<void>;
+  /** Optional: with both, a verified new write prunes older entries of the same component. */
+  keys?(): Promise<readonly string[]>;
+  delete?(key: string): Promise<void>;
 }
 
 export interface WakeModelLoaderDeps {
@@ -156,6 +159,10 @@ export async function openWakeModelCache(): Promise<WakeModelCache | undefined> 
         // A copy, because `put` may hold the buffer past this call.
         await cache.put(key, new Response(bytes.slice(), { headers: { 'content-type': 'application/octet-stream' } }));
       },
+      keys: async () => (await cache.keys()).map((request) => new URL(request.url).pathname),
+      delete: async (key) => {
+        await cache.delete(key);
+      },
     };
   } catch {
     return undefined;
@@ -165,6 +172,8 @@ export async function openWakeModelCache(): Promise<WakeModelCache | undefined> 
 interface CacheLike {
   match(key: string): Promise<Response | undefined>;
   put(key: string, response: Response): Promise<void>;
+  keys(): Promise<readonly Request[]>;
+  delete(key: string): Promise<boolean>;
 }
 
 /**
@@ -282,9 +291,34 @@ export async function loadWakeModel(
     } catch (error) {
       deps.warn?.('wake model cache write failed', { component, error: String(error) });
     }
+    await pruneStaleEntries(deps.cache, component, cacheKey, deps.warn);
   }
 
   return { component, bytes: assembled, sha256: chunk.sha256, fromCache: false };
+}
+
+/**
+ * Drop entries of the same component whose version or digest no longer matches the
+ * one just written, so each model update does not leave a multi-megabyte entry
+ * behind. Best effort: a failure only costs disk, never a model load.
+ */
+async function pruneStaleEntries(
+  cache: WakeModelCache,
+  component: WakeModelComponent,
+  currentKey: string,
+  warn: WakeModelLoaderDeps['warn'],
+): Promise<void> {
+  if (!cache.keys || !cache.delete) return;
+  try {
+    for (const key of await cache.keys()) {
+      const parts = key.split('/');
+      if (key !== currentKey && key.startsWith('/__goodvibes-wake-model/') && parts[parts.length - 2] === component) {
+        await cache.delete(key);
+      }
+    }
+  } catch (error) {
+    warn?.('wake model cache cleanup failed', { component, error: String(error) });
+  }
 }
 
 function concatBytes(parts: readonly Uint8Array[], total: number): Uint8Array {

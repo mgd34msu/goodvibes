@@ -17,6 +17,7 @@ import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
+import { isDeepStrictEqual } from 'node:util';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from './settings-modal-behavior.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
@@ -110,6 +111,10 @@ export class SettingsModal extends TerminalSettingsModalState<
   /** Accepted secret edits finish here; commitEdit remains a synchronous keystroke API. */
 
   private secretWriteSession = 0;
+  /** Daemon-owned keys with a write still in flight; a second change to one waits for the first. */
+  private readonly routedWriteKeys = new Set<string>();
+  /** Values the connected host confirmed this session; the local store never holds them, so every rebuild of the rows re-applies them. */
+  private readonly hostHeldValues = new Map<string, unknown>();
   /** The always-live search row: a non-empty query lists ranked matches from every category. */
 
   get searchFocused(): boolean {
@@ -147,6 +152,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     options?: SettingsModalOpenOptions,
   ): void {
     this.secretWriteSession++;
+    this.routedWriteKeys.clear();
+    this.hostHeldValues.clear();
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = options?.requestRender ?? null;
@@ -224,6 +231,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   close(): void {
     this.active = false;
     this.secretWriteSession++;
+    this.routedWriteKeys.clear();
+    this.hostHeldValues.clear();
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = null;
@@ -507,9 +516,15 @@ export class SettingsModal extends TerminalSettingsModalState<
 
     try {
       const write = resolveFeatureEnablementWrite(feature.id, newState === 'enabled' ? 'enabled' : 'disabled');
-      this.configManager.setDynamic(write.key, write.value);
+      // The same write path as every other setting: a key the connected host owns goes to the
+      // host, and the apply hooks run (so a refused key such as service.enabled is refused here too).
+      this.lastSettingEffectMessage = null;
+      const accepted = this._setValue(write.key as AgentSettingKey, write.value);
       this._loadFlagEntries();
-      this.lastSettingEffectMessage = feature.restartRequired
+      if (!accepted) return;
+      // A routed write reports and updates the row when the host answers.
+      if (this.routedWriteKeys.has(write.key)) return;
+      this.lastSettingEffectMessage ??= feature.restartRequired
         ? `${write.key} = ${String(write.value)} saved; takes effect on the next launch.`
         : `${write.key} = ${String(write.value)}`;
     } catch (e) {
@@ -532,7 +547,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       if (this.mcpAllowAllConfirmationTarget) {
         const expected = `ALLOW ALL ${this.mcpAllowAllConfirmationTarget}`;
         if (this.editBuffer.trim() !== expected) {
-          return false;
+          return this._rejectEdit(`Not changed: type ${expected} exactly to allow all, or press Esc to cancel.`);
         }
         this.mcpRegistry.setServerTrustMode(entry.name, 'allow-all');
         this._loadMcpEntries();
@@ -545,10 +560,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       const nextMode = this.editBuffer.trim() as McpEntry['trustMode'];
       const validModes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
       if (!validModes.includes(nextMode)) {
-        this.editingMode = false;
-        this.editBuffer = '';
-        this.mcpAllowAllConfirmationTarget = null;
-        return false;
+        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode. Use ${validModes.join(', ')}.`);
       }
       if (nextMode === 'allow-all' && entry.trustMode !== 'allow-all') {
         this.mcpAllowAllConfirmationTarget = entry.name;
@@ -573,21 +585,17 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (setting.type === 'number') {
       parsed = parseNumberEditBuffer(this.editBuffer);
       if (parsed === null) {
-        this.editingMode = false;
-        this.editBuffer = '';
-        return false;
+        return this._rejectEdit(`Not saved: "${this.editBuffer}" is not a number for ${setting.key}. The value is unchanged.`);
       }
     }
 
     if (setting.type === 'object') {
       try { parsed = JSON.parse(this.editBuffer); }
-      catch { return false; }
+      catch { return this._rejectEdit(`Not saved: the text is not valid JSON for ${setting.key}. The value is unchanged.`); }
     }
 
     if (setting.validate && !setting.validate(parsed)) {
-      this.editingMode = false;
-      this.editBuffer = '';
-      return false;
+      return this._rejectEdit(`Not saved: "${this.editBuffer}" is outside what ${setting.key} accepts. The value is unchanged.`);
     }
 
     if (setting.type === 'string' && isSecretConfigKey(setting.key)) {
@@ -600,6 +608,12 @@ export class SettingsModal extends TerminalSettingsModalState<
     return true;
   }
 
+  /** An edit the setting refused: say why and keep the editor open on what was typed, so it can be corrected. */
+  private _rejectEdit(message: string): false {
+    this.lastSettingEffectMessage = message;
+    return false;
+  }
+
   /** Capture the owner once for edits and resets; publication follows storage completion. */
   private _writeSecretSetting(key: ConfigKey, value: string): void {
     const configManager = this.configManager;
@@ -607,6 +621,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     const onApplied = this.onSettingApplied;
     const configClient = agentDaemonConfigClient();
     let effectMessage: string | null = null;
+    let warning: string | null = null;
+    let routedValue: { readonly value: unknown } | null = null;
     const session = this.secretWriteSession;
     this.lastSettingEffectMessage = 'Saving credential…';
     this.pendingSecretWrite = setSecretBackedSettingValue({
@@ -617,6 +633,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       setConfigValue: async (key, value) => {
         if (configClient?.ownsKey(key)) {
           await configClient.set(key, value);
+          routedValue = { value };
           effectMessage = 'Applied by the connected host; it takes effect for every client.';
           return;
         }
@@ -626,14 +643,18 @@ export class SettingsModal extends TerminalSettingsModalState<
       },
       onWriteReported: (report) => {
         if (report.ok) effectMessage = report.message;
+        // A cleared credential whose stored value could not be removed still completes; keep that warning.
+        else warning = report.message;
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = report.message;
       },
     })
       .then((ok) => {
         if (session === this.secretWriteSession) {
           if (ok) {
-            this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.';
+            this.lastSettingEffectMessage = warning ?? effectMessage ?? 'Credential saved.';
             this._refreshAllEntries();
+            // The local store does not hold a value the host owns; show what was written there.
+            if (routedValue) this._applyRoutedValue(key, routedValue.value);
           }
           this.requestHostSettingRender?.();
         }
@@ -661,9 +682,9 @@ export class SettingsModal extends TerminalSettingsModalState<
       this._writeSecretSetting(key, String(entry.setting.default ?? ''));
       return null; // Accepted asynchronously, not yet a completed reset.
     }
+    // A refused write must not be copied into the live session (provider.model, reasoningEffort).
     const applied = this._setValue(key, entry.setting.default);
-    if (isAgentHostSettingKey(key)) return applied ? { key, value: entry.setting.default } : null;
-    return { key, value: entry.setting.default };
+    return applied ? { key, value: entry.setting.default } : null;
   }
 
   /** Handle a keystroke in edit mode: regular chars appended, Backspace removes last char. */
@@ -771,6 +792,7 @@ export class SettingsModal extends TerminalSettingsModalState<
    */
   private _loadFlagEntries(): void {
     this.flagEntries = buildFlagEntries(this.configManager, this.featureFlagManager);
+    for (const [key, value] of this.hostHeldValues) this._showRoutedValue(key, value);
   }
 
   private _loadMcpEntries(): void {
@@ -806,6 +828,38 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (entry.setting.key === 'permissions.mode')
           entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
         this._refreshHostEntry(entry);
+      }
+    }
+    for (const [key, value] of this.hostHeldValues) this._showRoutedValue(key, value);
+  }
+
+  /**
+   * Show a value the connected host now holds. The Agent's own config store does not hold a
+   * host-owned value (a host on another machine never writes this process's file, and a local
+   * host is only noticed on the next file poll), so rows are set from the host's reply rather
+   * than re-read locally.
+   */
+  private _applyRoutedValue(key: string, value: unknown): void {
+    this.hostHeldValues.set(key, value);
+    this._showRoutedValue(key, value);
+  }
+
+  private _showRoutedValue(key: string, value: unknown): void {
+    for (const entries of this.groups.values()) {
+      for (const entry of entries) {
+        if (entry.setting.key !== key) continue;
+        entry.currentValue = value;
+        entry.isDefault = isDeepStrictEqual(value, entry.setting.default);
+        delete entry.metadataUnavailable;
+      }
+    }
+    for (const flag of this.flagEntries) {
+      if (flag.feature.enablement.key !== key) continue;
+      flag.enablementValue = String(value);
+      try {
+        flag.state = isDeepStrictEqual(value, resolveFeatureEnablementWrite(flag.feature.id, 'enabled').value) ? 'enabled' : 'disabled';
+      } catch {
+        // A feature with no writable enablement keeps the state it had.
       }
     }
   }
@@ -885,11 +939,27 @@ export class SettingsModal extends TerminalSettingsModalState<
     // daemon-owned key never has two writers. The modal cannot await from a
     // keystroke handler, so the outcome lands on `lastSettingEffectMessage` a
     // moment later, including the refusal, which is the message that matters.
+    if (this.routedWriteKeys.has(key)) {
+      this.lastSettingEffectMessage = `A change to ${key} is still being saved on the connected host. Try again when it finishes.`;
+      return false;
+    }
+    const opened = this.secretWriteSession;
     const routed = routeSettingWriteToConnectedHost(key, value, (update) => {
+      // The modal may have been closed or reopened while the host answered.
+      if (!this.active || opened !== this.secretWriteSession) return;
+      if (update.settled) this.routedWriteKeys.delete(key);
       this.lastSettingEffectMessage = update.message;
-      if (update.ok) this._refreshAllEntries();
+      if (update.applied) {
+        this._applyRoutedValue(key, update.applied.value);
+        // Same warning as a local write, set after the host's report so the report does not replace it.
+        if (key === 'payments.cvvHandling' && update.applied.value === 'prompt') this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
+      }
+      this.requestHostSettingRender?.();
     });
-    if (routed) return true;
+    if (routed) {
+      this.routedWriteKeys.add(key);
+      return true;
+    }
     try {
       this.configManager.setDynamic(key, value);
       for (const entries of this.groups.values()) {

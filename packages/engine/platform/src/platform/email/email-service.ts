@@ -52,7 +52,7 @@ import { readEmailMessage } from './email-message-reader.js';
 import type { EmailMailboxObservation, EmailReplySubjectSource, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 import { ensureMailboxConfigDefaults } from '../config/connector-config-sections.js';
 import { ImapClient } from './imap-client.js';
-import { SmtpClient, validateSmtpAddress, validateSmtpSubject } from './smtp-client.js';
+import { SmtpClient, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
 import {
   imapSocketFactoryFor,
   readEmailConfig,
@@ -77,6 +77,7 @@ import type {
 import type { EmailInboxUnreadableResponse, EmailMessageRead } from './email-read-results.js';
 import type { SmtpSendResult } from './smtp-client.js';
 import type { EmailSenderClaim, EmailSenderClaimDescriber } from './sender-claim.js';
+import { readSenderAuthentication } from '../google/sender-authentication.js';
 import type { Socket } from 'node:net';
 
 // Re-exported so this module stays the one entry point callers already import.
@@ -225,6 +226,10 @@ export interface SendMailOptions extends DeliveryLifetime {
   readonly to: string;
   readonly subject: string;
   readonly body: string;
+  /** Message-ID of the message this answers; sent as `In-Reply-To`. No CR/LF. */
+  readonly inReplyTo?: string | undefined;
+  /** The thread's Message-ID chain; sent as `References`. No CR/LF. */
+  readonly references?: string | undefined;
   /** Must be true at the call site; the service rejects sends without it. */
   readonly confirm: boolean;
 }
@@ -401,6 +406,52 @@ export class EmailService {
 
   readonly #replySubjectSources = new WeakMap<ImapMessageDetail, EmailReplySubjectSource>();
 
+  /**
+   * Message-ID -> the sender address of a message this process read whose
+   * receiving server vouched for the sender (DKIM, SPF and DMARC all passed in
+   * the top-most `Authentication-Results`). `null` marks an ID two different
+   * senders have claimed, which proves nothing. A `Message-ID` is written by
+   * the sender, so it only ever SELECTS a stored entry; the address returned
+   * comes from the verified read, never from what a later message says.
+   */
+  readonly #replyEvidence = new Map<string, string | null>();
+
+  #noteReplyEvidence(messageId: string, claim: EmailSenderClaim): void {
+    const id = messageId.trim();
+    if (id === '' || claim.displayedConfidence !== 'protocol-verified') return;
+    const address = claim.claimedAddress.trim().toLowerCase();
+    if (!address.includes('@')) return;
+    const known = this.#replyEvidence.get(id);
+    if (known !== undefined && known !== address) {
+      this.#replyEvidence.set(id, null);
+      return;
+    }
+    // Insertion order is age; bounded so a large mailbox cannot grow it forever.
+    this.#replyEvidence.delete(id);
+    this.#replyEvidence.set(id, known === null ? null : address);
+    if (this.#replyEvidence.size > 2000) {
+      const oldest = this.#replyEvidence.keys().next();
+      if (!oldest.done) this.#replyEvidence.delete(oldest.value);
+    }
+  }
+
+  /**
+   * The verified sender of the message with this Message-ID, when this process
+   * read it and its sender was authenticated by the receiving server; empty
+   * otherwise. This is the only evidence a reply to that address may rely on.
+   */
+  getReplyEnvelopeSenders(inReplyTo: string): readonly string[] {
+    const address = this.#replyEvidence.get(inReplyTo.trim());
+    return address === undefined || address === null ? [] : [address];
+  }
+
+  #noteDetail(detail: { readonly messageId: string; readonly from: string; readonly authenticationResults: readonly string[] }): void {
+    this.#noteReplyEvidence(
+      detail.messageId,
+      this.deps.describeSenderClaim(detail.from, readSenderAuthentication(detail.authenticationResults)),
+    );
+  }
+
   /** Only the exact canonical result can retrieve its immutable subject snapshot. */
   getReplySubjectSource(message: ImapMessageDetail): EmailReplySubjectSource | undefined {
     const source = this.#replySubjectSources.get(message);
@@ -473,6 +524,7 @@ export class EmailService {
     current();
     const result = buildResult();
     current();
+    for (const message of result.messages) this.#noteReplyEvidence(message.messageId, message.senderClaim);
     const observation = sourceRead?.completeMailboxObservation();
     current();
     if (observation) this.#inboxObservations.set(result, this.bindObservation(observation, input.signal));
@@ -502,7 +554,7 @@ export class EmailService {
     for (const message of result.messages) {
       current();
       this.recordIngest([{ from: message.source.detail.from,
-        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);
+        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);      this.#noteDetail(message.source.detail);
     }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, input.signal));
@@ -534,7 +586,7 @@ export class EmailService {
     if (result.outcome === 'complete') for (const message of result.messages) {
       current();
       this.recordIngest([{ from: message.source.detail.from,
-        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);
+        text: [message.source.rawHeaders, message.source.rawBodyStructure, ...message.source.textSections.map(section => section.text)].join('\n') }], current);      this.#noteDetail(message.source.detail);
     }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, signal));
@@ -577,10 +629,12 @@ export class EmailService {
    * separate outcomes instead of one thrown error and one null.
    */
   async readMessageResult(uid: number): Promise<EmailMessageRead> {
-    return readEmailMessage(
+    const read = await readEmailMessage(
       this.deps, this.getValidatedConfig(), uid, this.#replySubjectSources,
       (messages, current) => this.recordIngest(messages, current),
     );
+    if (read.outcome === 'read') this.#noteDetail(read.detail);
+    return read;
   }
 
   /**
@@ -601,6 +655,8 @@ export class EmailService {
 
     const socketFactory = this.deps.imapSocketFactory ?? imapSocketFactoryFor(this.deps.transport, config.imapSecurity);
     const socket = await socketFactory(config.imapHost, config.imapPort);
+    // A socket error after the answer is read must not become an uncaught event.
+    socket.on('error', () => {});
     const client = new ImapClient({ socket, username: config.username, password,
       signal: sourceRead?.signal, assertCurrent: () => {
         sourceRead?.assertCurrent();
@@ -626,6 +682,9 @@ export class EmailService {
     } catch (err) {
       try { await client.logout(); } catch { /* best-effort */ }
       throw err;
+    } finally {
+      // Whatever happened, the connection does not outlive the draft.
+      client.close();
     }
   }
 
@@ -687,9 +746,12 @@ export class EmailService {
       return { ok: false, stage: 'config', error: err instanceof Error ? err.message : String(err) };
     }
 
+    let imapSocket: { destroy(): unknown } | undefined;
     try {
       const socketFactory = this.deps.imapSocketFactory ?? imapSocketFactoryFor(this.deps.transport, config.imapSecurity);
       const socket = await socketFactory(config.imapHost, config.imapPort);
+      imapSocket = socket;
+      socket.on('error', () => {});
       const client = new ImapClient({
         socket,
         username: config.username,
@@ -706,16 +768,24 @@ export class EmailService {
       await client.logout();
     } catch (err) {
       return { ok: false, stage: 'imap', error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      // A failed OPEN or LOGIN leaves the socket up until the server's idle timeout.
+      imapSocket?.destroy();
     }
 
+    let smtpSocket: { destroy(): unknown } | undefined;
     try {
       const smtpPassword = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager);
       const socketFactory = this.deps.smtpSocketFactory ?? this.defaultSmtpSocketFactory(config.smtpPort, config.smtpSecurity);
       const socket = await socketFactory(config.smtpHost, config.smtpPort);
+      smtpSocket = socket;
+      socket.on('error', () => {});
       const client = new SmtpClient({ socket, hostname: config.smtpHost, username: config.username, password: smtpPassword });
       await client.verifyAuth();
     } catch (err) {
       return { ok: false, stage: 'smtp', error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      smtpSocket?.destroy();
     }
 
     return { ok: true };
@@ -742,6 +812,8 @@ export class EmailService {
     validateSmtpAddress(config.fromAddress, 'from');
     validateSmtpAddress(opts.to, 'to');
     validateSmtpSubject(opts.subject);
+    if (opts.inReplyTo !== undefined) validateSmtpThreadHeader(opts.inReplyTo, 'inReplyTo');
+    if (opts.references !== undefined) validateSmtpThreadHeader(opts.references, 'references');
 
     const socketFactory = this.deps.smtpSocketFactory ?? this.defaultSmtpSocketFactory(config.smtpPort, config.smtpSecurity);
     const socket = await socketFactory(config.smtpHost, config.smtpPort);
@@ -759,6 +831,8 @@ export class EmailService {
       to: opts.to,
       subject: opts.subject,
       body: opts.body,
+      inReplyTo: opts.inReplyTo,
+      references: opts.references,
       signal: opts.signal,
       assertCurrent: opts.assertCurrent,
       withPublication: opts.withPublication,

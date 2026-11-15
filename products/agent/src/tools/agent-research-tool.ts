@@ -148,6 +148,19 @@ function normalizeResearchAction(value: unknown): AgentResearchAction | null {
   return null;
 }
 
+const RESEARCH_ACTIONS: readonly AgentResearchAction[] = [
+  'briefing', 'plan', 'runner', 'runs', 'run', 'sources', 'source', 'bundle', 'search', 'reports', 'report_artifact',
+  'create_run', 'start_run', 'checkpoint', 'pause', 'resume', 'cancel', 'complete', 'fail', 'delete_run',
+  'add_source', 'review_source', 'reject_source', 'use_source', 'delete_source', 'report',
+];
+const RUN_STATUS_WORDS = ['planned', 'running', 'paused', 'blocked'] as const;
+const RUN_PHASE_WORDS = ['planning', 'searching', 'reading', 'synthesizing', 'reviewing', 'reporting'] as const;
+
+/** An unrecognised action word is a typo to correct, not a protected-input refusal. */
+class UnknownResearchActionError extends Error {
+  constructor(readonly word: string) { super('Unknown research action.'); }
+}
+
 function readAction(args: AgentResearchToolArgs): AgentResearchAction {
   // Inspect dispatch fields without invoking caller accessors. The complete
   // report snapshot below must precede every report argument projection.
@@ -160,7 +173,8 @@ function readAction(args: AgentResearchToolArgs): AgentResearchAction {
   const captured = snapshotJudgmentInput(routing, 'research') as AgentResearchToolArgs;
   const explicit = normalizeResearchAction(captured.action) ?? normalizeResearchAction(captured.mode);
   if (explicit) return explicit;
-  if (readString(captured.action) || readString(captured.mode)) throw new Error('Unknown research action.');
+  const unknownWord = readString(captured.action) || readString(captured.mode);
+  if (unknownWord) throw new UnknownResearchActionError(unknownWord);
   if (readString(args.sourceId)) return 'source';
   if (readString(args.runId)) return 'run';
   if (readString(args.query) || readString(args.target)) return 'plan';
@@ -243,8 +257,8 @@ function sourceArgs(args: AgentResearchToolArgs): Record<string, unknown> {
 }
 
 function auditArgs(args: AgentResearchToolArgs): Record<string, unknown> {
+  // Only the provenance text travels; the legacy confirm flag carries no authority.
   return compactArgs({
-    confirm: args.confirm,
     explicitUserRequest: args.explicitUserRequest,
   });
 }
@@ -404,8 +418,8 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-
-            description: 'Read plans/queues; writes require current recorded effect admission.',
+            // Not an enum: the registry enforces enums strictly and several aliases are accepted.
+            description: `Read plans/queues; writes require current recorded effect admission. Actions: ${RESEARCH_ACTIONS.join(', ')}.`,
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Run or source id alias.' },
@@ -427,8 +441,8 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
           plan: { type: 'array', items: { type: 'string' }, description: 'Run plan steps.' },
           nextSteps: { type: 'array', items: { type: 'string' }, description: 'Next visible run steps.' },
           sourceIds: { type: 'array', items: { type: 'string' }, description: 'Run source ids.' },
-          status: { type: 'string', description: 'Mutable run status.' },
-          phase: { type: 'string', description: 'Research run phase.' },
+          status: { type: 'string', enum: [...RUN_STATUS_WORDS], description: 'Run status for action:"checkpoint"; finish a run with complete, fail or cancel instead.' },
+          phase: { type: 'string', enum: [...RUN_PHASE_WORDS], description: 'Research run phase.' },
           progress: { type: 'number', description: '0-100 run progress.' },
           url: { type: 'string', description: 'Source URL.' },
           publisher: { type: 'string', description: 'Source publisher.' },
@@ -483,8 +497,11 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
           // A caller Proxy cannot switch its declared route during capture.
           if (readAction(args) !== 'report') throw new Error('Unsupported research input.');
         }
-      } catch {
+      } catch (cause) {
         await prepared?.release();
+        if (cause instanceof UnknownResearchActionError) {
+          return error(`Unknown research action '${cause.word}'. Valid actions: ${RESEARCH_ACTIONS.join(', ')}. Nothing was dispatched.`);
+        }
         return error('Research input was refused by the protected-input boundary before dispatch.');
       }
 
@@ -523,9 +540,17 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
         finally { await prepared!.release(); }
       }
 
-      return error('Unknown research action. Use action:"plan" for research routing.');
+      return error(`Unknown research action. Valid actions: ${RESEARCH_ACTIONS.join(', ')}.`);
     },
   };
+}
+
+/** The projector runs before execute, so an unknown action must fall through to execute's own message rather than throw here. */
+function isReportAction(args: AgentResearchToolArgs): boolean {
+  try { return readAction(args) === 'report'; } catch (cause) {
+    if (cause instanceof UnknownResearchActionError) return false;
+    throw cause;
+  }
 }
 
 export function registerAgentResearchTool(
@@ -534,7 +559,7 @@ export function registerAgentResearchTool(
   commandContext: CommandContext,
 ): void {
   if (!registry.has('research')) registry.register(createAgentResearchTool({ commandRegistry, commandContext, toolRegistry: registry }), {
-    inputProjection: createAgentResearchReportProjector(agentResearchReportSourceOwner(registry), args => readAction(args) === 'report'
+    inputProjection: createAgentResearchReportProjector(agentResearchReportSourceOwner(registry), args => isReportAction(args)
       || ['sources', 'reportMarkdown', 'findings', 'gaps', 'recommendations', 'methodology', 'requireCitationCoverage', 'visualReport'].some(key => Object.hasOwn(args, key))),
   });
 }

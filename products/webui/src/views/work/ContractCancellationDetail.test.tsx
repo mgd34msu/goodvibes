@@ -23,7 +23,7 @@ function render(capture = RETAINED_CANCELLATION) {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)); const method = init?.method ?? 'GET';
     requests.push({ path: url.pathname, method, auth: new Headers(init?.headers).get('authorization') });
-    if (method === 'POST') { phase = 'after'; if (ambiguous) throw new TypeError('Disconnected after send'); return new Response(capture.resultBody); }
+    if (method === 'POST') { phase = 'after'; if (ambiguous) throw new TypeError('Disconnected after send'); return new Response(capture.resultBody, { status: capture.resultStatus, headers: { 'content-type': 'application/json' } }); }
     return new Response(url.pathname === '/api/contracts' ? capture[phase].listBody : capture[phase].getBody);
   }) as typeof fetch;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

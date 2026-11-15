@@ -4,10 +4,10 @@ import { realpathSync, statSync } from 'node:fs';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { createHookExecution, type HookExecutionOptions } from '../execution.js';
+import { createHookExecution, hookTimeoutSeconds, type HookExecutionOptions } from '../execution.js';
 
 /** Expected shape of a TypeScript hook module's default export */
-type TsHookHandler = (event: HookEvent, execution?: HookExecutionOptions) => Promise<HookResult> | HookResult;
+type TsHookHandler = (event: HookEvent, execution?: HookExecutionOptions) => Promise<HookResult | void | undefined> | HookResult | void | undefined;
 
 /**
  * TypeScript hook runner.
@@ -34,9 +34,10 @@ export async function run(hook: HookDefinition, event: HookEvent, projectRoot: s
     return { ok: false, error: `ts hook path '${path}' is outside the project directory` };
   }
 
-  const execution = options === undefined ? undefined : createHookExecution(options, hook.timeout ?? 0, 'ts');
+  // The deadline applies to an unowned run too; the handler is asked to stop through its signal.
+  const execution = createHookExecution(options ?? {}, hookTimeoutSeconds(hook, 'ts'), 'ts');
   try {
-    execution?.signal.throwIfAborted();
+    execution.signal.throwIfAborted();
     let moduleUrl = pathToFileURL(resolvedPath).href;
     try {
       const { mtimeMs } = statSync(resolvedPath);
@@ -46,7 +47,7 @@ export async function run(hook: HookDefinition, event: HookEvent, projectRoot: s
     }
 
     const mod = await import(moduleUrl);
-    execution?.signal.throwIfAborted();
+    execution.signal.throwIfAborted();
     const handler = mod.default as TsHookHandler | undefined;
 
     if (typeof handler !== 'function') {
@@ -55,14 +56,18 @@ export async function run(hook: HookDefinition, event: HookEvent, projectRoot: s
 
     // In-process handlers cannot be forcibly stopped. Keep the invocation
     // owned until its actual settlement, even if it ignores the signal.
-    const result = await (execution ? handler(event, { signal: execution.signal }) : handler(event));
-    execution?.signal.throwIfAborted();
-    return result;
+    const result: unknown = await handler(event, { signal: execution.signal });
+    execution.signal.throwIfAborted();
+    // A handler with no return value, or a bare decision, is a normal outcome:
+    // read it the way the other runners read their output.
+    if (typeof result !== 'object' || result === null || Array.isArray(result)) return { ok: true };
+    const handled = result as HookResult;
+    return { ...handled, ok: handled.ok ?? true };
   } catch (err) {
     const message = summarizeError(err);
     logger.error('ts hook error', { path, error: message });
     return { ok: false, error: message };
   } finally {
-    execution?.dispose();
+    execution.dispose();
   }
 }

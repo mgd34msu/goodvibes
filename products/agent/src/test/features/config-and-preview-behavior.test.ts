@@ -16,15 +16,14 @@ describe('tool preview truncation', () => {
     expect(text).toContain('read_file');
   });
 
-  it('tool preview display width does not exceed terminal width', () => {
+  it('a preview of double-width glyphs is cut to the terminal width, not to the cell count', () => {
     const width = 40;
-    const longPreview = 'some_tool(' + 'a'.repeat(100) + ')';
-    const previewLine = UIFactory.createToolPreviewRow(width, longPreview);
-    // The preview line should not exceed width cells
+    const wideTool = 'ツール(' + '漢'.repeat(100) + ')';
+    const previewLine = UIFactory.createToolPreviewRow(width, wideTool);
     expect(previewLine).toHaveLength(width);
-    // Compute display width of non-space content
     const text = previewLine.map((c) => c.char).join('');
-    const displayW = getDisplayWidth(text.trimEnd());
-    expect(displayW).toBeLessThanOrEqual(width);
+    // Two columns per glyph: counting cells instead of columns would overflow.
+    expect(getDisplayWidth(text.trimEnd())).toBeLessThanOrEqual(width);
+    expect(text).toContain('ツール');
   });
 });

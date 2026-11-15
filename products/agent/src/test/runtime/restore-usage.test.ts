@@ -37,7 +37,7 @@ async function fixture() {
     forensicsRegistry: new ForensicsRegistry(), policyRuntimeState: services.policyRuntimeState,
     uiServices: createUiRuntimeServices(services),
     taskManager: createTaskManager(runtimeStore, runtimeBus, runtime.sessionId, services.featureFlags),
-    restoreTurnAnchors: () => 0,
+    restoreTurnAnchors: () => 0, announceSessionResumed: () => {},
   });
   const holder = new ContextAccountingHolder();
   cleanups.push(bindOrchestratorContextAccounting({ orchestrator, holder, runtimeBus, runtimeStore, sessionId: runtime.sessionId, getContextWindow: () => 100_000 }));

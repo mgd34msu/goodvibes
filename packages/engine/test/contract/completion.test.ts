@@ -22,10 +22,20 @@ import { answerClaimScopes, completeAnswerClaimCoverage } from '../../platform/s
 import { judgmentExecutionEvidence } from '../../platform/src/platform/contract/judgment-execution-evidence.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
+
+/** The statuses a contract rests in until its owner acts: nothing publishes from them on its own. */
+const HELD_STATUSES: readonly string[] = ['failed', 'awaiting-owner', 'held-merge', 'cancelled'];
+
+/** Waits for the first check, then for the contract to come to rest without having published. */
+async function waitForHeld(h: Harness, contractId: string, what: string): Promise<void> {
+  await waitFor(() => (h.runner.get(contractId)?.checks.length ?? 0) > 0, what);
+  await waitFor(() => HELD_STATUSES.includes(h.store.get(contractId)?.status ?? ''), `${what} to come to rest`);
+}
 
 function use(h: Harness): Harness {
   harness = h;
@@ -43,8 +53,8 @@ test.each(['covered', 'omitted', 'failed-criterion', 'confident-goal'])('an unce
       return undefined;
     } }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the original goal decision');
   if (scenario === 'covered') await waitFor(() => terminal(h, contract.id), 'qualified goal publication');
+  else await waitForHeld(h, contract.id, 'the original goal decision');
   const current = contractOf(h, contract.id), check = current.checks.at(-1)!;
   expect(workers).toBe(1);
   expect(proofs).toBe(scenario === 'covered' || scenario === 'omitted' ? 1 : 0);
@@ -115,7 +125,7 @@ test.each([0.61, 0.98])('a held exact factual claim stays private and carries it
     return undefined;
   } }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'exact claim rejection');
+  await waitForHeld(h, contract.id, 'exact claim rejection');
   const current = contractOf(h, contract.id);
   expect(current.status).not.toBe('passed'); expect(current.commit).toBeUndefined(); expect(workers).toBe(1);
   const receipt = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
@@ -143,8 +153,8 @@ test.each(['none', 'goal', 'content'])('an excluded-only root still needs origin
     return undefined;
   } }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'root goal and content checks');
   if (failure === 'none') await waitFor(() => terminal(h, contract.id), 'checked completion');
+  else await waitForHeld(h, contract.id, 'root goal and content checks');
   const current = contractOf(h, contract.id);
   expect(current.criteria[0]!.disposition).toBe('excluded');
   expect(originalRequests.every(request => request === contract.ask)).toBe(true);
@@ -452,7 +462,7 @@ test('a rejected native answer review holds publication even when fulfillment re
     },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the answer review to reach fulfillment');
+  await waitForHeld(h, contract.id, 'the answer review to reach fulfillment');
   const current = contractOf(h, contract.id);
   expect(current.status).not.toBe('passed');
   expect(current.checks[0]!.goal.verdict).toBe('met');
@@ -582,7 +592,7 @@ test('current primary evidence never bypasses an unmet original root after answe
     },
   }));
   const { contract } = (await startContract(h));
-  await waitFor(() => (h.runner.get(contract.id)?.checks.length ?? 0) > 0, 'the original fulfillment check');
+  await waitForHeld(h, contract.id, 'the original fulfillment check');
   const current = contractOf(h, contract.id);
   expect(composed).toBe(true);
   expect(assessments).toBe(2);

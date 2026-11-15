@@ -136,7 +136,7 @@ describe('repair operation generated-reference scope', () => {
     expect(atHold).not.toBe(''); expect(graph()).toBe(atHold);
     expect(item.store.listNodes().filter((node) => node.kind === 'fact' && node.status === 'active')).toHaveLength(1);
     expect(item.store.getRefinementTask(result.taskIds[0]!)?.state).toBe('failed');
-    const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); await reopened.init();
+    const reopened = new KnowledgeStore({ dbPath: item.store.storagePath }); stores.push(reopened); await reopened.init();
     expect(reopened.listNodes().filter((node) => node.kind === 'fact')).toEqual(item.store.listNodes().filter((node) => node.kind === 'fact'));
     expect(reopened.listEdges()).toEqual(item.store.listEdges());
     expect(reopened.getRefinementTask(result.taskIds[0]!)?.state).toBe('failed');

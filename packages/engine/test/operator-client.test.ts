@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { createOperatorApiClient } from '../operator-client/dist/index.js';
-import { HttpStatusError } from '../errors/dist/index.js';
+import { createOperatorApiClient } from '../operator-client/src/index.js';
+import { HttpStatusError } from '../errors/src/index.js';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

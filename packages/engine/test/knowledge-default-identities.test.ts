@@ -1,4 +1,4 @@
-/** UNRUN: distinct native UUIDs sharing the old32bit prefix must never
+/** Distinct native UUIDs sharing the old32bit prefix must never
  * overwrite one another in the real persisted knowledge tables. */
 import { expect, spyOn, test } from 'bun:test';
 import * as nodeCrypto from 'node:crypto';

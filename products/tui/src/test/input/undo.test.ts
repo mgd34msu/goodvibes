@@ -1,6 +1,7 @@
 /**
- * undo.test.ts, undo/redo coalescing, cursor restoration, kill/yank undoability,
- * bounded history eviction, and redo invalidation.
+ * undo.test.ts, the undo/redo stack helpers: coalescing, cursor restoration,
+ * bounded history eviction, and redo invalidation. Kill and yank undoability
+ * through the shortcut handler is covered in yank-pop-state-isolation.test.ts.
  */
 import { describe, test, expect, beforeEach } from 'bun:test';
 import {
@@ -153,13 +154,13 @@ describe('bounded undo history', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Kill-then-undo (kill is undoable)
+// Undo of a snapshot taken before an edit
 // ---------------------------------------------------------------------------
 
-describe('kill-then-undo', () => {
+describe('undo of a snapshot taken before an edit', () => {
   const MAX = 100;
 
-  test('kill pushes undo snapshot; undo restores pre-kill state', () => {
+  test('undo restores the state that was saved before a text-removing edit', () => {
     const undoStack: UndoState[] = [];
     const redoStack: UndoState[] = [];
 
@@ -170,7 +171,7 @@ describe('kill-then-undo', () => {
     expect(result).toEqual({ prompt: 'hello world', cursorPos: 5 });
   });
 
-  test('yank is undoable (saveUndoState before yank)', () => {
+  test('undo restores the state that was saved before a text-inserting edit', () => {
     const undoStack: UndoState[] = [];
     const redoStack: UndoState[] = [];
 

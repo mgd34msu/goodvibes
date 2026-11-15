@@ -17,7 +17,7 @@
 import { promptCardLines } from '../helpers/permission-card.ts';
 import { describe, expect, test } from 'bun:test';
 import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { PermissionPromptUI, type PromptViewState } from '../../permissions/prompt.ts';
+import { PermissionPromptUI, permissionButtons, type PromptViewState } from '../../permissions/prompt.ts';
 import { buildPendingPermissionExtras } from '../../permissions/hunk-selection.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from '../../shell/blocking-input.ts';
 
@@ -291,7 +291,9 @@ describe('exec-prompt asks: an answerable card', () => {
     const joined = lines.map((t) => t.trim()).join(' ');
     expect(joined).toContain("can't be established");
     expect(joined).toContain('continue connecting (yes/no)?');
-    expect(lines.some((t) => /Answer +yes▏/.test(t))).toBe(true);
+    // The typed answer may be a password, so the card shows one dot per character.
+    expect(lines.some((t) => /Answer +•••▏/.test(t))).toBe(true);
+    expect(lines.some((t) => /Answer +yes/.test(t))).toBe(false);
     const all = lines.join('\n');
     for (const hint of [' ⏎  send answer', ' esc  clear', ' ctrl+c  abort turn']) expect(all).toContain(hint);
   });
@@ -368,4 +370,25 @@ describe('every card shape fits the screen, with its buttons in view', () => {
       });
     }
   }
+});
+
+describe('remembered allows on an ask the mode puts to the owner again', () => {
+  const labels = (request: PermissionPromptRequest) => permissionButtons(request, {}).map((button) => button.label);
+
+  test('the card offers a session allow when a remembered allow skips the next ask', () => {
+    expect(labels(makeExecRequest({ rememberOptions: [...REMEMBER_OPTIONS] }))).toContain('Allow for session ▸');
+  });
+
+  test('the card offers only Allow once and Deny when the owner is asked again anyway', () => {
+    expect(labels(makeExecRequest({ rememberOptions: [...REMEMBER_OPTIONS], rememberEffect: 'owner-asked-again' }))).toEqual(['Allow once', 'Deny']);
+  });
+
+  test('the session key allows once instead of remembering', () => {
+    const decisions: Record<string, unknown>[] = [];
+    const pending = makePending(makeExecRequest({ rememberEffect: 'owner-asked-again' }), (decision) => decisions.push(decision));
+    press(pending, 'a');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ approved: true });
+    expect(decisions[0]!['remember']).not.toBe(true);
+  });
 });

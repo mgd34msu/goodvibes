@@ -16,14 +16,13 @@ const flushMicrotasks = async (rounds = 6) => {
  * The typed turn-budget-exhaustion outcome (platform 1.8.0, agents/turn-budget.ts):
  * the real orchestrator stamps AgentRecord.failureReason === 'max_turns' plus
  * turnBudget { limit, source } on the record when a run spends its whole
- * budget. Exercising the REAL orchestrator to genuinely exhaust a budget here
- * would be slow and indirect; instead this stamps those two fields onto the
- * live record the same way the orchestrator does (AgentRecord is a mutable,
- * shared instance, see src/test/agents/orchestrator.test.ts directly
- * mutating `record.status` for the same reason) and verifies
- * registerAgentRuntimeEvents renders the honest budget line from those typed
- * fields alone, never touching the (irrelevant, generic) child-failure
- * envelope path.
+ * budget. That the real orchestrator stamps those fields on exhaustion is
+ * proved where the orchestrator is built, packages/engine/test/
+ * orchestrator-runner-agent-experience.test.ts; this file stamps the same two
+ * fields onto the live record (AgentRecord is a mutable, shared instance) and
+ * verifies registerAgentRuntimeEvents renders the honest budget line from
+ * those typed fields alone, never touching the (irrelevant, generic)
+ * child-failure envelope path.
  */
 describe('registerAgentRuntimeEvents: AGENT_FAILED typed turn-budget outcome (platform 1.8.0)', () => {
   function makeHarness() {

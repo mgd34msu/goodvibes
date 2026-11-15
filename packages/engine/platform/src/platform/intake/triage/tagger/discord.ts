@@ -40,8 +40,38 @@ export async function applyDiscordTagEffects(target: { channel: string; message:
   }
   if (requireForum) throw new Error('Discord prepared forum target changed');
   if (effects.some(effect => effect.reaction === undefined)) throw new Error('Discord reaction meaning unavailable');
+  let applied = 0;
   for (const effect of effects) {
-    const response = await request(http, `${base}/messages/${target.message}/reactions/${encodeURIComponent(effect.reaction!)}/@me`, { method: 'PUT', headers }, guard);
-    if (response.status !== 200 && response.status !== 204) throw new Error('Discord triage reaction rejected');
+    const put = () => request(http, `${base}/messages/${target.message}/reactions/${encodeURIComponent(effect.reaction!)}/@me`, { method: 'PUT', headers }, guard);
+    let response = await put();
+    // Discord rate-limits reaction adds per message. Wait the asked time once.
+    if (response.status === 429) {
+      const waitMs = retryAfterMs(response);
+      if (waitMs !== null) { await pause(waitMs, guard.signal); current(guard); response = await put(); }
+    }
+    if (response.status !== 200 && response.status !== 204) {
+      throw new Error(response.status === 429
+        ? `Discord triage reaction rate-limited after ${applied} of ${effects.length} applied; try again later`
+        : `Discord triage reaction rejected after ${applied} of ${effects.length} applied`);
+    }
+    applied += 1;
   }
+}
+
+const MAX_RETRY_AFTER_MS = 5_000;
+
+/** The wait Discord asked for, or null when it is missing or longer than a tagging pass should hold. */
+function retryAfterMs(response: Response): number | null {
+  const seconds = Number(response.headers.get('retry-after'));
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const ms = Math.ceil(seconds * 1000);
+  return ms <= MAX_RETRY_AFTER_MS ? ms : null;
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(done, ms);
+    function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }
+    signal.addEventListener('abort', done, { once: true });
+  });
 }

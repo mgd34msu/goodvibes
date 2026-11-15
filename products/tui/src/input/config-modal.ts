@@ -132,11 +132,15 @@ export class ConfigModal {
    */
   private interactedSinceOpen = false;
 
+  /** Whether the current surface has been given `onOpen` without a matching `onClose` yet. */
+  private surfaceOpened = false;
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   open(surface: ConfigModalSurface, requestRender: () => void = () => {}): void {
-    // Re-opening a different surface closes the previous one cleanly.
-    if (this.surface && this.surface !== surface) this.surface.onClose?.();
+    // Opening over a surface that is still open (another surface, or the same one again)
+    // closes it first, so every onOpen is matched by exactly one onClose.
+    this.releaseSurface();
     this.surface = surface;
     this.requestRender = requestRender;
     this.active = true;
@@ -149,12 +153,20 @@ export class ConfigModal {
     this.frozenView = view;
     this.activeTabId = view.tabs[0]?.id ?? '';
     this.selectedRowId = this._firstSelectableId(this._frozenTab());
+    this.surfaceOpened = true;
     surface.onOpen?.(requestRender);
+  }
+
+  /** Run `onClose` for a surface that was opened and not yet closed. */
+  private releaseSurface(): void {
+    if (!this.surfaceOpened) return;
+    this.surfaceOpened = false;
+    this.surface?.onClose?.();
   }
 
   close(): void {
     if (!this.active) return;
-    this.surface?.onClose?.();
+    this.releaseSurface();
     this.active = false;
     this.surface = null;
     this.frozenView = null;
@@ -166,8 +178,12 @@ export class ConfigModal {
   /** Re-activate the current surface after a nested modal closes (Esc stack). */
   reopen(): void {
     if (!this.surface) return;
+    // The surface may still hold what its last onOpen set up (the host never closed it
+    // while a nested modal was on top); release it so the new onOpen does not double up.
+    this.releaseSurface();
     this.active = true;
     this.syncStructure();
+    this.surfaceOpened = true;
     this.surface.onOpen?.(this.requestRender);
   }
 

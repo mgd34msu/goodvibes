@@ -152,6 +152,12 @@ export interface EmailGatewayService {
   readMessage(uid: number): Promise<EmailGatewayMessageDetail | null>;
   createDraft(input: EmailGatewayDraftInput): Promise<EmailGatewayDraftResult>;
   send(input: EmailGatewaySendInput): Promise<EmailGatewaySendResult>;
+  /**
+   * Senders of messages this process read whose receiving server authenticated
+   * the sender, for the message with this Message-ID. Delivery evidence, never
+   * a header the correspondent wrote. Absent or empty: no reply exemption.
+   */
+  replyEnvelopeSenders?(inReplyTo: string): readonly string[];
   /** Exact result-object lookup owned by the canonical read implementation. */
   getReplySubjectSource?(message: EmailGatewayMessageDetail): BrowserJudgmentMailSubjectSnapshot | undefined;
 }
@@ -350,6 +356,9 @@ async function refuseTaintedSend(
   );
 }
 
+/** The owner's addresses, or a function that reads them fresh at each send. */
+export type OwnerAddressSource = ReadonlySet<string> | (() => ReadonlySet<string>);
+
 export function createEmailSendHandler(
   service: EmailGatewayService,
   /**
@@ -363,7 +372,7 @@ export function createEmailSendHandler(
    * owner-destination exemption rather than widening it, see
    * security/owner-identity.ts.
    */
-  ownerAddresses: ReadonlySet<string> = new Set(),
+  ownerAddresses: OwnerAddressSource = new Set(),
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -382,12 +391,19 @@ export function createEmailSendHandler(
     // Before anything leaves the machine: does what is about to leave derive
     // from what was read? Recipient included, a redirected reply is as much
     // an injection outcome as a rewritten body.
-    await refuseTaintedSend(ledger, { to, subject, body }, `sending mail to ${to}`, [], ownerAddresses);
+    const inReplyTo = readOptionalString(params.inReplyTo);
+    await refuseTaintedSend(
+      ledger,
+      { to, subject, body },
+      `sending mail to ${to}`,
+      inReplyTo === undefined ? [] : [...(service.replyEnvelopeSenders?.(inReplyTo) ?? [])],
+      typeof ownerAddresses === 'function' ? ownerAddresses() : ownerAddresses,
+    );
     const sent = await service.send({
       to,
       subject,
       body,
-      inReplyTo: readOptionalString(params.inReplyTo),
+      ...(inReplyTo === undefined ? {} : { inReplyTo }),
     });
     return { ...sent, ...untrustedExposureDisclosure(ledger) };
   };
@@ -399,7 +415,7 @@ export function registerEmailGatewayMethods(
   service: EmailGatewayService,
   ledger: UntrustedContentLedger = getProcessUntrustedContentLedger(),
   /** See createEmailSendHandler. Empty means the exemption cannot fire. */
-  ownerAddresses: ReadonlySet<string> = new Set(),
+  ownerAddresses: OwnerAddressSource = new Set(),
   judgment?: BrowserJudgmentCapability,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => {

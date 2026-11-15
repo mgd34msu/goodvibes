@@ -18,6 +18,29 @@
  * the same message.
  */
 
+import { isIP } from 'node:net';
+import { classifyResolvedAddress } from '../tools/fetch/trust-tiers.js';
+
+/**
+ * Set to `1` to let a push endpoint be a plain-http or loopback/private address,
+ * for a development push relay or a local test sink. Off by default: a
+ * registered endpoint is a URL the daemon POSTs to, so an unrestricted one
+ * would let any device that can register reach the daemon's internal network.
+ */
+export const PUSH_ALLOW_LOCAL_ENDPOINTS_ENV = 'GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS';
+
+/** Whether this process was told to accept non-public push endpoints. */
+export function localPushEndpointsAllowed(): boolean {
+  return process.env[PUSH_ALLOW_LOCAL_ENDPOINTS_ENV] === '1';
+}
+
+/** A loopback name, or an address literal in a loopback, private, link-local or metadata range. */
+function isNonPublicHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  return isIP(host) !== 0 && classifyResolvedAddress(host) !== null;
+}
+
 /** RFC 8291: the receiver's public key is an uncompressed P-256 point. */
 export const P256DH_POINT_BYTES = 65;
 /** RFC 8291: the receiver's authentication secret is 16 bytes. */
@@ -88,7 +111,7 @@ export function describeAuthSecretProblem(value: unknown): string | null {
   return decodedByteLength(value) === AUTH_SECRET_BYTES ? null : AUTH_SECRET_INVALID_MESSAGE;
 }
 
-/** Why this endpoint cannot be used, or null when it is a bounded http(s) URL. */
+/** Why this endpoint cannot be used, or null when it is a bounded public https URL. */
 export function describeEndpointProblem(value: unknown): string | null {
   if (typeof value !== 'string' || value.trim().length === 0) return 'Push endpoint is missing';
   if (value.length > MAX_PUSH_ENDPOINT_LENGTH) {
@@ -105,6 +128,12 @@ export function describeEndpointProblem(value: unknown): string | null {
     return 'Push endpoint must be an http(s) URL';
   }
   if (parsed.hostname.length === 0) return 'Push endpoint has no host';
+  if (localPushEndpointsAllowed()) return null;
+  if (parsed.protocol !== 'https:') return 'Push endpoint must use https';
+  // A name is judged again, after resolution, when the push is sent.
+  if (isNonPublicHost(parsed.hostname)) {
+    return 'Push endpoint must be a public host, not a loopback, private or link-local address';
+  }
   return null;
 }
 

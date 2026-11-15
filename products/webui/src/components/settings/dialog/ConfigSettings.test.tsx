@@ -9,6 +9,8 @@ import { CONFIG_SCHEMA_ENTRIES } from "../../../lib/generated/config-schema";
 type ConfigOutcome = "ok" | "admin-required" | "network-error";
 let outcome: ConfigOutcome = "ok";
 const configSetCalls: [string, unknown][] = [];
+const credentialSetCalls: { key: string; value: string }[] = [];
+let credentialSetMode: "ok" | "unavailable" = "ok";
 // Controls what platform.operator.config.set does, independent of `outcome` above (which only
 // governs config.get). 'reject' simulates the real requestJson behavior on a non-2xx or
 // network failure, a rejected promise, never a resolved { success: false }.
@@ -32,7 +34,7 @@ const CONFIG_FIXTURE = {
     // secret-store-only-config-keys.ts: the daemon's mail connector never reads
     // this value from config (surface-config.ts resolves the password only
     // from the secret store), used below to prove the field refuses to write
-    // it rather than offering a Replace flow that cannot work.
+    // it through config.set.
     email: { password: "nine-nine-nine-plaintext" },
   },
   behavior: { hitlMode: "balanced" },
@@ -59,6 +61,23 @@ mock.module("../../../lib/goodvibes", () => ({
           },
           create: () => Promise.resolve({ card: null }),
           delete: () => Promise.resolve({ id: "", deleted: true, secretsCleared: 0 }),
+        },
+      },
+      credentials: {
+        set: (input: { key: string; value: string }) => {
+          credentialSetCalls.push(input);
+          if (credentialSetMode === "unavailable") {
+            return Promise.reject(
+              Object.assign(new Error("Unknown method"), { status: 404, code: "METHOD_NOT_FOUND" })
+            );
+          }
+          return Promise.resolve({
+            success: true,
+            key: input.key,
+            secretKey: "GOODVIBES_SURFACES_EMAIL_PASSWORD",
+            scope: "daemon",
+            reference: "goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD",
+          });
         },
       },
       config: {
@@ -103,7 +122,7 @@ mock.module("../../../lib/goodvibes", () => ({
   },
 }));
 
-const { ConfigSettingsProvider, ConfigGroupList, RawConfigEditor, useConfigSettings } =
+const { ConfigSettingsProvider, ConfigGroupList, useConfigSettings } =
   await import("./ConfigSettings");
 const { groupsForSection, sectionForNamespace } = await import("./sections");
 
@@ -138,8 +157,7 @@ function Harness() {
         )
       )
     ),
-    React.createElement(ConfigGroupList, { groups: shown }),
-    React.createElement(RawConfigEditor)
+    React.createElement(ConfigGroupList, { groups: shown })
   );
 }
 
@@ -232,6 +250,7 @@ function commitByBlur(input: HTMLInputElement): void {
 }
 
 afterEach(() => {
+  credentialSetMode = "ok";
   outcome = "ok";
   setOutcome = "ok";
   configSetCalls.length = 0;
@@ -399,84 +418,63 @@ describe("settings config groups: feature units", () => {
     openSelect(trigger);
     pickOption("operator");
     await waitFor(() => configSetCalls.length > 0);
+    // config.set is entered before the success path commits. Wait for the write to
+    // be reported persisted and for the control to be released (the same tick that
+    // would mark a restart-gated feature pending) before asserting the marker is absent.
+    const unit = el.querySelector('[data-feature-id="hitl-ux-modes"]') as HTMLElement;
+    await waitFor(() => Boolean(unit.querySelector(".feature-unit-persisted")));
+    await waitFor(() => {
+      const select = unit.querySelector(".gv-select__trigger") as HTMLButtonElement | null;
+      return select !== null && !select.disabled;
+    });
     expect(el.querySelector("[data-pending-restart]")).toBeNull();
     unmount();
   });
 });
 
-describe("settings config groups: secret-store-only credentials refuse a config.set write", () => {
-  test("surfaces.email.password is masked and offers no password input", async () => {
-    const { el, unmount } = render();
+describe("settings config groups: secret-store-only credentials go through credentials.set", () => {
+  async function openEmailPassword(el: HTMLElement): Promise<HTMLElement> {
     await waitFor(() =>
-      Boolean(
-        [...el.querySelectorAll(".settings-category")].some((b) => b.textContent === "Surfaces")
-      )
+      Boolean([...el.querySelectorAll(".settings-category")].some((b) => b.textContent === "Surfaces"))
     );
     clickCategory(el, "Surfaces");
     await waitFor(() => Boolean(el.querySelector('[data-config-key="surfaces.email.password"]')));
-    const field = el.querySelector('[data-config-key="surfaces.email.password"]') as HTMLElement;
-    // Never the raw value.
+    return el.querySelector('[data-config-key="surfaces.email.password"]') as HTMLElement;
+  }
+
+  function enterAndSave(field: HTMLElement, value: string): void {
+    const replace = field.querySelector(".settings-field-replace") as HTMLButtonElement;
+    flushSync(() => replace.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+    setInputValue(field.querySelector('input[type="password"]') as HTMLInputElement, value);
+    const save = field.querySelector(".settings-field-save") as HTMLButtonElement;
+    flushSync(() => save.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  }
+
+  test("a saved password is sent to credentials.set, never config.set, and the row says where it landed", async () => {
+    credentialSetCalls.length = 0;
+    const { el, unmount } = render();
+    const field = await openEmailPassword(el);
     expect(field.textContent).not.toContain("nine-nine-nine-plaintext");
-    // No write path at all for this key, no Replace button, no password input.
-    expect(field.querySelector('input[type="password"]')).toBeNull();
+    enterAndSave(field, "new-mail-password");
+    await waitFor(() => credentialSetCalls.length > 0);
+    expect(credentialSetCalls).toEqual([{ key: "surfaces.email.password", value: "new-mail-password" }]);
+    expect(configSetCalls.filter(([key]) => key === "surfaces.email.password")).toEqual([]);
+    await waitFor(() => (field.textContent ?? "").includes("secret store"));
+    expect(field.textContent).not.toContain("new-mail-password");
     unmount();
   });
 
-  test("the Advanced escape hatch refuses a secret-store-only key too, and never calls config.set", async () => {
+  test("a daemon without credentials.set saves nothing and names the terminal command", async () => {
+    credentialSetCalls.length = 0;
+    credentialSetMode = "unavailable";
     const { el, unmount } = render();
-    await waitFor(() => Boolean(el.querySelector(".settings-advanced input")));
-    const keyInput = el.querySelector(".settings-advanced input") as HTMLInputElement;
-    const valueTextarea = el.querySelector(".settings-advanced textarea") as HTMLTextAreaElement;
-    flushSync(() => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value"
-      )?.set;
-      setter?.call(keyInput, "surfaces.calendar.caldavPassword");
-      keyInput.dispatchEvent(new window.Event("input", { bubbles: true }));
-      const taSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value"
-      )?.set;
-      taSetter?.call(valueTextarea, '"a-plaintext-caldav-password"');
-      valueTextarea.dispatchEvent(new window.Event("input", { bubbles: true }));
-    });
-    const form = el.querySelector(".settings-advanced form") as HTMLFormElement;
-    flushSync(() => {
-      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    });
-    await waitFor(() => Boolean(el.querySelector(".settings-advanced .banner.warning")));
-    expect(configSetCalls).toEqual([]);
-    unmount();
-  });
-});
-
-describe("settings config groups: Advanced unschema'd escape hatch", () => {
-  test("saving a key/value calls config.set with the parsed value", async () => {
-    const { el, unmount } = render();
-    await waitFor(() => Boolean(el.querySelector(".settings-advanced input")));
-    const keyInput = el.querySelector(".settings-advanced input") as HTMLInputElement;
-    const valueTextarea = el.querySelector(".settings-advanced textarea") as HTMLTextAreaElement;
-    flushSync(() => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value"
-      )?.set;
-      setter?.call(keyInput, "display.theme");
-      keyInput.dispatchEvent(new window.Event("input", { bubbles: true }));
-      const taSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value"
-      )?.set;
-      taSetter?.call(valueTextarea, '"dracula"');
-      valueTextarea.dispatchEvent(new window.Event("input", { bubbles: true }));
-    });
-    const form = el.querySelector(".settings-advanced form") as HTMLFormElement;
-    flushSync(() => {
-      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    });
-    await waitFor(() => configSetCalls.length > 0);
-    expect(configSetCalls).toEqual([["display.theme", "dracula"]]);
+    const field = await openEmailPassword(el);
+    enterAndSave(field, "new-mail-password");
+    await waitFor(() => Boolean(field.querySelector(".settings-field-error")));
+    expect(field.querySelector(".settings-field-error")?.textContent).toContain(
+      "/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD"
+    );
+    expect(configSetCalls.filter(([key]) => key === "surfaces.email.password")).toEqual([]);
     unmount();
   });
 });
@@ -575,7 +573,7 @@ describe("settings config groups: declared fallback-reference arrays", () => {
         expect(field.querySelector(".settings-value--secret")?.textContent).toBe("••••");
         expect(ui.el.innerHTML).not.toContain("synthetic-private-value");
         save(field);
-        expect(field.querySelector('[role="alert"]')?.textContent).toBe("Not valid JSON.");
+        expect(field.querySelector('[role="alert"]')?.textContent).toBe("The stored fallback settings are invalid or concealed. Add a fallback or enter valid JSON, then save.");
         expect(configSetCalls).toEqual([]);
         replaceDraft(field, []);
         save(field);

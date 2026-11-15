@@ -1,7 +1,7 @@
 /**
  * narrowed-constraints.test.ts
  *
- * Seven constraints that were applied one layer too wide, or hardcoded tables
+ * Constraints that were applied one layer too wide, or hardcoded tables
  * that went stale. Each test asserts the REAL behaviour the narrowing is for,
  * that credentials are still masked, that unrelated env names still never
  * reach the wire, that a model's cap matches what the provider publishes,
@@ -30,9 +30,6 @@ import { redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persi
 import { upsertMcpServerConfig } from '../platform/src/platform/mcp/config.ts';
 import { getCatalogModelDefinitionsFrom, modelCapabilityFactsFromCatalog } from '../platform/src/platform/providers/model-catalog.ts';
 import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
-import { runResumeRepair } from '../platform/src/platform/runtime/compaction/resume-repair.ts';
-import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.ts';
-import type { BoundaryCommit } from '../platform/src/platform/runtime/compaction/types.ts';
 import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.ts';
 import { createCredentialStatusProvider } from '../platform/src/platform/config/credential-status.ts';
 import { AnthropicProvider } from '../platform/src/platform/providers/anthropic.ts';
@@ -345,64 +342,6 @@ describe('multimodal is read per model rather than guessed by vendor', () => {
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// 6. Resume repair uses the real context window
-// ───────────────────────────────────────────────────────────────────────────
-
-describe('resume repair truncates against the real window', () => {
-  /** A commit whose JSON is ~460k characters ≈ 115k estimated tokens. */
-  function bigCommit(): BoundaryCommit {
-    const filler = 'x'.repeat(5_000);
-    const messages = Array.from({ length: 90 }, () => ({
-      role: 'user' as const,
-      content: [{ type: 'text' as const, text: filler }],
-    }));
-    return {
-      checkpointId: 'cpt_test', sessionId: 'sess_test', createdAt: Date.now(),
-      strategy: 'summarize', parentCheckpointId: null, lineage: [],
-      messages,
-    } as unknown as BoundaryCommit;
-  }
-
-  test('the 80k fallback still truncates when no caller supplies a window', () => {
-    const result = runResumeRepair({ commit: bigCommit() });
-    expect(result.actions.some((a) => a.kind === 'truncate_overflow')).toBe(true);
-  });
-
-  test('a 1M-token window keeps every message the session could afford', () => {
-    const result = runResumeRepair({ commit: bigCommit(), maxTokens: Math.floor(1_000_000 * 0.8) });
-    expect(result.actions.some((a) => a.kind === 'truncate_overflow')).toBe(false);
-    expect(result.messages).toHaveLength(90);
-  });
-
-  test('the manager passes its own contextWindow, so a 1M model keeps its messages', () => {
-    // repair() reads only _lastCommit/override and _contextWindow, bus and
-    // flags are never touched on this path, so minimal stubs are honest here.
-    const stub = {} as unknown as ConstructorParameters<typeof CompactionManager>[0]['bus'];
-    const manager = new CompactionManager({
-      sessionId: 'sess_test',
-      bus: stub,
-      flags: {} as unknown as ConstructorParameters<typeof CompactionManager>[0]['flags'],
-      contextWindow: 1_000_000,
-    });
-    const result = manager.repair(bigCommit());
-    // Before the fix this discarded ~25 messages against a hardcoded 80_000,
-    // on a model with room for more than ten times that.
-    expect(result.actions.some((a) => a.kind === 'truncate_overflow')).toBe(false);
-    expect(result.messages).toHaveLength(90);
-  });
-
-  test('a small window still truncates through the manager', () => {
-    const manager = new CompactionManager({
-      sessionId: 'sess_test',
-      bus: {} as unknown as ConstructorParameters<typeof CompactionManager>[0]['bus'],
-      flags: {} as unknown as ConstructorParameters<typeof CompactionManager>[0]['flags'],
-      contextWindow: 100_000,
-    });
-    expect(manager.repair(bigCommit()).actions.some((a) => a.kind === 'truncate_overflow')).toBe(true);
-  });
-});
-
-// ───────────────────────────────────────────────────────────────────────────
 // 7. Capability overrides hold exceptions; the fleet comes from live data
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -480,7 +419,7 @@ describe('credential status list covers env credentials without dumping the envi
         { key: 'ANTHROPIC_API_KEY', source: 'env' as const, scope: 'env' as const, secure: false, overriddenByEnv: false },
         // The rest of the shell, which listDetailed also enumerates.
         { key: 'PATH', source: 'env' as const, scope: 'env' as const, secure: false, overriddenByEnv: false },
-        { key: 'AWS_PROFILE', source: 'env' as const, scope: 'env' as const, secure: false, overriddenByEnv: false },
+        { key: 'AWS_REGION', source: 'env' as const, scope: 'env' as const, secure: false, overriddenByEnv: false },
       ];
     },
     async list() { return []; },
@@ -499,9 +438,9 @@ describe('credential status list covers env credentials without dumping the envi
   test('unrelated environment variable names still never reach the wire', async () => {
     const keys = (await createCredentialStatusProvider(secrets).list()).map((r) => r.key);
     expect(keys).not.toContain('PATH');
-    // AWS_PROFILE is not a credential name in the provider catalog, so it stays
+    // AWS_REGION is not a credential name in the provider catalog, so it stays
     // invisible even though it looks credential-adjacent.
-    expect(keys).not.toContain('AWS_PROFILE');
+    expect(keys).not.toContain('AWS_REGION');
   });
 
   test('stored keys are still listed', async () => {

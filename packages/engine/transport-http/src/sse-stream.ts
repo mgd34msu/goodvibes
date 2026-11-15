@@ -5,7 +5,7 @@ import {
   normalizeStreamReconnectPolicy,
   type StreamReconnectPolicy,
 } from './reconnect.js';
-import { createHttpStatusError, HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { createHttpStatusError, HttpStatusError, RETRYABLE_STATUS_CODES } from '@goodvibes-jev/engine/errors';
 import { isAbortError, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import type { TransportJsonError } from './http-core.js';
 
@@ -64,21 +64,42 @@ function readEventPayload(data: string): unknown {
 
 export { isAbortError };
 
+function parseRetryAfterMs(headers: Headers | undefined): number | undefined {
+  const value = headers?.get('retry-after');
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.ceil(seconds * 1000), MAX_RETRY_AFTER_MS);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.min(Math.max(date - Date.now(), 0), MAX_RETRY_AFTER_MS);
+}
+
+const MAX_RETRY_AFTER_MS = 10 * 60 * 1000;
+
+/**
+ * A connection that stayed up this long was healthy even if it only carried the
+ * `ready` greeting and heartbeat comments, so its drop starts a fresh retry budget.
+ */
+const CONNECTION_STABILITY_MS = 30_000;
+
 function createStreamError(
   status: number,
   url: string,
   body: string,
+  headers?: Headers,
 ): HttpStatusError & { readonly transport: TransportJsonError } {
   const message = body.trim()
     ? `Unable to open SSE stream: ${status} ${body}`.trim()
     : `Unable to open SSE stream: ${status}`;
+  const retryAfterMs = status > 0 ? parseRetryAfterMs(headers) : undefined;
   const error = status > 0
     ? status >= 500
+      // A server error on opening the stream is an unreachable stream endpoint, so it is
+      // reported as a network failure; only statuses a retry can clear are recoverable.
       ? new HttpStatusError(message, {
           status,
           category: 'network',
           source: 'transport',
-          recoverable: true,
+          recoverable: RETRYABLE_STATUS_CODES.includes(status),
           url,
           method: 'GET',
           body,
@@ -98,8 +119,12 @@ function createStreamError(
     body,
     url,
     method: 'GET',
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
   };
-  return Object.assign(error, { transport: transportPayload });
+  return Object.assign(error, {
+    transport: transportPayload,
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+  });
 }
 
 export { openRawServerSentEventStream as openServerSentEventStream };
@@ -138,7 +163,9 @@ export async function openRawServerSentEventStream(
     };
     outerController.signal.addEventListener('abort', () => settleReady(outerController.signal.reason), { once: true });
 
-    const runConnection = async (): Promise<void> => {
+    // Resolves true once the stream opened (a 2xx with a body), false when the
+    // first attempt failed to open and rejected the caller's open() instead.
+    const runConnection = async (): Promise<boolean> => {
       const controller = new AbortController();
       activeController = controller;
       const signal = AbortSignal.any([outerController.signal, controller.signal]);
@@ -165,22 +192,23 @@ export async function openRawServerSentEventStream(
         const wrapped = createStreamError(0, url, error instanceof Error ? error.message : String(error));
         if (!readySettled) {
           settleReady(wrapped);
-          return;
+          return false;
         }
         throw wrapped;
       }
 
       if (!response.ok || !response.body) {
         const body = await response.text().catch(() => '');
-        const wrapped = createStreamError(response.status, url, body);
+        const wrapped = createStreamError(response.status, url, body, response.headers);
         if (!readySettled) {
           settleReady(wrapped);
-          return;
+          return false;
         }
         throw wrapped;
       }
 
       settleReady();
+      const connectedAt = Date.now();
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -200,6 +228,11 @@ export async function openRawServerSentEventStream(
           data = '';
           return;
         }
+        // A connection that delivered a frame was healthy, so its drop starts a
+        // fresh retry budget. Merely answering 200 does not count, and neither does
+        // the `ready` greeting the daemon sends on every connect: a stream the
+        // server accepts, greets and closes at once must still run out of attempts.
+        if (eventName !== 'ready') reconnectAttempts = 0;
         const payload = readEventPayload(data);
         if (eventName === 'ready') {
           handlers.onReady?.(payload);
@@ -250,8 +283,18 @@ export async function openRawServerSentEventStream(
         // treats the close as unexpected.
         await Promise.resolve();
         if (reconnectPolicy.enabled && !controller.signal.aborted && !outerController.signal.aborted && !stopped) {
+          // An idle stream delivers no frame past `ready`, so lifetime is the only sign of health.
+          if (Date.now() - connectedAt >= CONNECTION_STABILITY_MS) reconnectAttempts = 0;
           throw createStreamError(response.status, url, 'Stream closed unexpectedly');
         }
+        return true;
+      } catch (error) {
+        // A read error (reset, idle timeout, sleep/wake) after a long-lived connection is a drop, not a failed connect.
+        if (!controller.signal.aborted && !outerController.signal.aborted && !stopped
+          && Date.now() - connectedAt >= CONNECTION_STABILITY_MS) {
+          reconnectAttempts = 0;
+        }
+        throw error;
       } finally {
         controller.abort();
         if (activeController === controller) {
@@ -263,8 +306,7 @@ export async function openRawServerSentEventStream(
     const loop = async (): Promise<void> => {
       while (!outerController.signal.aborted && !stopped) {
         try {
-          await runConnection();
-          reconnectAttempts = 0;
+          if (!(await runConnection())) return;
           handlers.onClose?.();
           return;
         } catch (error) {
@@ -282,7 +324,12 @@ export async function openRawServerSentEventStream(
           }
           reconnectAttempts = nextAttempt;
           // Use the same 1-based attempt counter as the WS connector for a symmetric schedule.
-          const delayMs = getStreamReconnectDelay(nextAttempt, reconnectPolicy);
+          // A server-named wait (429/503 Retry-After) is a floor under the client's own schedule.
+          const serverWaitMs = (error as { retryAfterMs?: unknown }).retryAfterMs;
+          const delayMs = Math.max(
+            getStreamReconnectDelay(nextAttempt, reconnectPolicy),
+            typeof serverWaitMs === 'number' && Number.isFinite(serverWaitMs) ? Math.min(serverWaitMs, MAX_RETRY_AFTER_MS) : 0,
+          );
           handlers.onReconnect?.({ attempt: nextAttempt, delayMs });
           handlers.onError?.(error);
           try {

@@ -56,6 +56,7 @@ export {
   createNtfyLiveSubscriptionSince,
   isGoodVibesNtfyDeliveryEcho,
   resolveGoodVibesNtfyTopics,
+  resolveNtfyDefaultPriority,
 } from './ntfy.js';
 export type {
   DeliveryOutcome,

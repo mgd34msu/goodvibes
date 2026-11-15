@@ -8,6 +8,9 @@ import {
   buildRoutineSchedulePreview,
   promoteRoutineToConnectedSchedule,
   resolveAgentConnectedHostConnection,
+  routinePromotionBlockers,
+  routineScheduleName,
+  type RoutineSchedulePromotionPreview,
 } from '../agent/routine-schedule-promotion.ts';
 import { parseRoutineSchedulePromotionArgs } from '../agent/routine-schedule-args.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
@@ -19,7 +22,8 @@ import {
   formatRoutineScheduleReceipts,
   formatRoutineScheduleSuccess,
 } from '../agent/routine-schedule-format.ts';
-import { reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
+import { fetchLiveSchedules, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -300,6 +304,17 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
     };
   }
   const preview = buildRoutineSchedulePreview(routine, parsed);
+  // An imported routine starts disabled and unreviewed, and a schedule turns its steps into a
+  // standing prompt, so the same gate the terminal command applies holds here.
+  const blockers = routinePromotionBlockers(routine);
+  if (parsed.yes && blockers.length > 0) {
+    return commandFailure(
+      runtime,
+      'routine_not_ready',
+      [`Refusing to promote ${routine.id}: no schedule was created.`, ...blockers.map((blocker) => `  ${blocker}`)].join('\n'),
+      1,
+    );
+  }
   if (!parsed.yes) {
     const value: RoutinesCommandSuccess<typeof preview> = {
       ok: true,
@@ -307,24 +322,70 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
       data: preview,
     };
     return {
-      output: jsonOrText(runtime, value, formatRoutineSchedulePreview(preview)),
+      output: jsonOrText(runtime, value, [
+        formatRoutineSchedulePreview(preview),
+        ...(blockers.length === 0 ? [] : ['', `Not ready to promote ${routine.id}:`, ...blockers.map((blocker) => `  ${blocker}`)]),
+      ].join('\n')),
       exitCode: 0,
     };
   }
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);
+  const receipts = routineReceiptStore(runtime);
+
+  // A repeat of an earlier promotion would create a second schedule with the same name: when
+  // that attempt created one, or failed without saying whether the host acted (dropped
+  // connection, timeout, host error), the host is asked first and what it holds decides.
+  const scheduleName = routineScheduleName(preview);
+  const earlier = latestAttemptFor(receipts, connection.baseUrl, preview);
+  const earlierAmbiguous = earlier?.status === 'failed' && (earlier.failureKind === 'connected_host_unavailable' || earlier.failureKind === 'connected_host_error');
+  if (earlier && (earlier.status === 'created' || earlierAmbiguous)) {
+    const live = await fetchLiveSchedules(connection);
+    const existing = live.ok ? live.schedules.find((schedule) => schedule.name === scheduleName) : undefined;
+    if (!live.ok || existing) {
+      const origin = earlier.status === 'created' ? 'from the earlier promotion' : 'most likely from the earlier attempt';
+      const error = existing
+        ? `A schedule named "${scheduleName}" (id ${existing.id}) already exists on the connected host, ${origin} (receipt ${earlier.id}). Nothing was created. Use routines reconcile to review it, or promote with a different --name to create another.`
+        : `An earlier promotion of this routine (receipt ${earlier.id}) ${earlier.status === 'created' ? 'created a schedule' : 'failed without a known outcome'}, and the connected host's schedules could not be read to check (${live.error ?? 'no detail'}). Nothing was created. Retry once the host is reachable.`;
+      return commandFailure(runtime, existing ? 'schedule_already_exists' : 'earlier_attempt_unverified', error, 1);
+    }
+  }
+
   const result = await promoteRoutineToConnectedSchedule(connection, preview);
-  const receipt = routineReceiptStore(runtime).append(connection, preview, result);
+  let receipt: ReturnType<RoutineScheduleReceiptStore['append']> | null = null;
+  let receiptError: string | null = null;
+  try {
+    receipt = receipts.append(connection, preview, result);
+  } catch (error) {
+    // The host's answer stands whether or not the local record could be written.
+    receiptError = summarizeError(error);
+    logger.warn('Agent routine promotion receipt could not be written', { error: receiptError });
+  }
+  const receiptLine = receipt ? `receipt: ${receipt.id}` : `receipt not recorded: ${receiptError}`;
   if (!result.ok) {
     return {
-      output: json ? JSON.stringify({ ...result, receipt }, null, 2) : `${formatRoutineScheduleFailure(result)}\n  receipt: ${receipt.id}`,
+      output: json ? JSON.stringify({ ...result, receipt, ...(receiptError ? { receiptError } : {}) }, null, 2) : `${formatRoutineScheduleFailure(result)}\n  ${receiptLine}`,
       exitCode: 1,
     };
   }
-  const value = { ...result, receipt };
+  const value = { ...result, receipt, ...(receiptError ? { receiptError } : {}) };
   return {
-    output: jsonOrText(runtime, value, `${formatRoutineScheduleSuccess(result)}\n  receipt: ${receipt.id}`),
+    output: jsonOrText(runtime, value, `${formatRoutineScheduleSuccess(result)}\n  ${receiptLine}`),
     exitCode: 0,
   };
+}
+
+function latestAttemptFor(
+  receipts: RoutineScheduleReceiptStore,
+  baseUrl: string,
+  preview: RoutineSchedulePromotionPreview,
+) {
+  const scheduleName = routineScheduleName(preview);
+  let latest: ReturnType<RoutineScheduleReceiptStore['get']> = null;
+  for (const receipt of receipts.snapshot().receipts) {
+    if (receipt.routineId !== preview.routineId || receipt.scheduleName !== scheduleName || receipt.connectedHostBaseUrl !== baseUrl) continue;
+    if (!latest || receipt.createdAt > latest.createdAt) latest = receipt;
+  }
+  return latest;
 }
 
 export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {

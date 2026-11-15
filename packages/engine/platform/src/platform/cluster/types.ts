@@ -41,7 +41,23 @@ export type ClusterRole =
   /** We are the single node responsible for this surface. Consumer running. */
   | 'master'
   /** Stopping the consumer so a RESIGN can be broadcast after it has closed. */
-  | 'resigning';
+  | 'resigning'
+  /**
+   * The consumer did not stop when told to, so this node neither said it had
+   * (no RESIGN) nor may contest the surface again: a second consumer could run
+   * beside the one that would not stop. Only a daemon restart clears it.
+   */
+  | 'fenced';
+
+/**
+ * How this node decides which inbound surfaces it reads.
+ *
+ * `elected`: per-surface elections with the rest of the network.
+ * `ungated-disabled`: `cluster.enabled` is false, so it reads everything it can.
+ * `ungated-fallback`: elections are on but the coordination group could not be
+ * joined, so it reads everything it can and a peer may read the same surfaces.
+ */
+export type ClusterCoordination = 'elected' | 'ungated-disabled' | 'ungated-fallback';
 
 /** The four datagrams the protocol uses. Nothing else is ever sent. */
 export type ClusterMessageType = 'PROBE' | 'CLAIM' | 'HEARTBEAT' | 'RESIGN';
@@ -209,10 +225,13 @@ export interface ClusterSurfaceHolding {
 /** The `cluster` section of /status. Inspection only; never user-facing. */
 export interface ClusterStatus {
   readonly enabled: boolean;
+  /** Whether `role` is an election result or this node reading everything itself. */
+  readonly coordination: ClusterCoordination;
   /**
    * The node's aggregate standing: `master` when it holds at least one
-   * surface, `standby` when it participates but holds none, `stopped` when it
-   * is not participating at all.
+   * surface, `fenced` when it holds none and a surface's consumer failed to
+   * stop, `electing` while any surface is between roles, `standby` when it
+   * participates but holds none, `stopped` when it is not participating at all.
    */
   readonly role: ClusterRole;
   readonly nodeId: string;

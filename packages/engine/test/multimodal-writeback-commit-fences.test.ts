@@ -67,7 +67,9 @@ for (const phase of ['artifact', 'knowledge'] as const) for (const change of ['c
     if (change === 'permission') allowed = false;
     release.resolve();
     try {
-      expect((await pending).status).toBe(400);
+      // Access withdrawn mid-request is an authorization failure, not a malformed request. The
+      // knowledge phase re-wraps the refusal in a statusless error, so only the artifact phase carries it.
+      expect((await pending).status).toBe(change === 'permission' && phase === 'artifact' ? 401 : 400);
       expect(store.listSources()).toHaveLength(0); expect(store.listExtractions()).toHaveLength(0); expect(store.listNodes()).toHaveLength(0);
       // A genuinely clean, never-persisted native family can prove that its
       // rejected candidate is unreferenced without a fabricated source write.
@@ -80,7 +82,7 @@ for (const phase of ['artifact', 'knowledge'] as const) for (const change of ['c
   });
 }
 
-test('guarded ingestion reports the true commit before a later generic completion failure', async () => {
+test('guarded ingestion returns the committed source when a later completion step fails', async () => {
   const { ingestKnowledgeArtifact } = await import('../platform/src/platform/knowledge/ingest-inputs.js');
   const root = mkdtempSync(join(tmpdir(), 'multimodal-commit-receipt-')); roots.push(root);
   previous = installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installed = true;
@@ -92,8 +94,10 @@ test('guarded ingestion reports the true commit before a later generic completio
     emitIfReady(fn, sessionId) { fn(bus, { traceId: 'ingest-commit', sessionId: sessionId ?? 'ingest-session', source: 'test' }); },
     syncReviewedMemory: async () => { throw new Error('Synthetic post-commit completion failure'); }, lint: async () => [], listConnectors: () => [] };
   let committed: string | undefined;
-  await expect(ingestKnowledgeArtifact(context, { artifactId: artifact.id }, { assertCurrent() {}, onCommitted: id => { committed = id; throw new Error('Synthetic observer failure after actual commit'); } })).rejects.toThrow('Synthetic post-commit completion failure');
-  expect(committed).toBeDefined(); expect(store.getSource(committed!)?.status).toBe('indexed');
+  // The memory mirror fails after the source is durably published: the caller still gets the committed source, not a failed ingest.
+  const result = await ingestKnowledgeArtifact(context, { artifactId: artifact.id }, { assertCurrent() {}, onCommitted: id => { committed = id; throw new Error('Synthetic observer failure after actual commit'); } });
+  expect(committed).toBeDefined(); expect(result.source.id).toBe(committed!); expect(result.source.status).toBe('indexed');
+  expect(store.getSource(committed!)?.status).toBe('indexed');
   expect(artifacts.get(artifact.id)).not.toBeNull();
   const events = emitted.mock.calls.map(([, envelope]) => envelope.type);
   expect(events).toContain('KNOWLEDGE_EXTRACTION_COMPLETED');

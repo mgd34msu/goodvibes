@@ -1,5 +1,9 @@
 import type { Tool, ToolCall, ToolResult } from '../../types/tools.js';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { attachVisibleToolWarning } from './phases/warnings.js';
 import type { ToolRuntimeContext } from './context.js';
 import type { ExecutorConfig, PhaseResult, ToolExecutionPhase, ToolExecutionRecord } from './types.js';
 import {
@@ -37,6 +41,8 @@ import {
  *
  * Cancellation is cooperative: the executor checks `context.cancellation.signal`
  * at each phase boundary and immediately transitions to `cancelled` when aborted.
+ * Once the execute phase has produced a result the side effect has happened, so a
+ * later cancel no longer discards it: the call completes with its real result.
  *
  * @example
  * ```ts
@@ -61,6 +67,10 @@ export class PhasedToolExecutor {
   /**
    * Execute a tool call through all pipeline phases.
    * Returns a ToolResult regardless of outcome, callers never need to catch.
+   * The one exception is a Jev reading that could not be made (a JudgmentError or
+   * JudgmentPortMissingError from auto-repair or overflow ranking): it is rethrown
+   * so the host sees it, but only after the record, the abort listener and the
+   * idempotency key are settled as failed.
    */
   async execute(
     call: ToolCall,
@@ -151,13 +161,16 @@ export class PhasedToolExecutor {
     ];
 
     const budgetEnabled = this.config.enableBudgetEnforcement === true;
+    // The time budget is also the tool's deadline, so the configured default
+    // interrupts a hung tool; with enforcement off no budget applies at all.
+    const budgetMaxMs = budgetEnabled ? (context.budget ?? this.config.defaultBudget)?.maxMs : undefined;
 
     const pipeline: PipelineEntry[] = [
       ['validated',     validatePhase,                                              true],
       ['prehooked',     prehookPhase,                                               this.config.enableHooks],
       ['permissioned',  permissionPhase,                                            this.config.enablePermissions],
       ['budget-entry',  (c, t, ctx, r) => budgetPhase(c, t, ctx, r, 'entry', this.config.defaultBudget), budgetEnabled],
-      ['executing',     (c, t, ctx, r) => executePhase(c, t, ctx, r, this.config), true],
+      ['executing',     (c, t, ctx, r) => executePhase(c, t, ctx, r, this.config, budgetMaxMs), true],
       ['mapped',        mapOutputPhase,                                             true],
       ['budget-exit',   (c, t, ctx, r) => budgetPhase(c, t, ctx, r, 'exit', this.config.defaultBudget),  budgetEnabled],
       ['posthooked',    posthookPhase,                                              this.config.enableHooks],
@@ -169,88 +182,121 @@ export class PhasedToolExecutor {
       source:    'phased-executor' as const,
     };
 
-    for (const [phaseName, phaseFn, enabled] of pipeline) {
-      // --- Cancellation check at every boundary ---
-      if (cancelSignal.aborted) {
-        context.cancellation.signal.removeEventListener('abort', forwardAbort);
-        this.controllers.delete(call.id);
+    try {
+      for (const [phaseName, phaseFn, enabled] of pipeline) {
+        // --- Cancellation check at every boundary ---
+        // A result means the tool already ran; discarding it as cancelled would
+        // report no effect for a write that happened and let a retry repeat it.
+        if (cancelSignal.aborted && !record.result) {
+          return this._cancel(record, call, context, emitterCtx, cancelSignal.reason as string | undefined);
+        }
+
+        if (!enabled) {
+          continue;
+        }
+
+        record.currentPhase = phaseName;
+        const phaseResult = await phaseFn(call, tool, context, record);
+        record.phases.push(phaseResult);
+
+        // --- Emit per-phase event ---
+        if (this.config.enableEvents && context.runtimeBus) {
+          this._emitPhaseEvent(phaseName, phaseResult, call, context, emitterCtx);
+        }
+
+        // --- Capture execute result ---
+        if (phaseName === 'executing' && phaseResult.toolResult) {
+          record.result = phaseResult.toolResult;
+        }
+
+        // --- Handle phase failure/abort ---
+        if (!phaseResult.success || phaseResult.abort) {
+          // Emit typed budget breach event before failing
+          if (phaseResult.budgetExceedReason && this.config.enableEvents && context.runtimeBus) {
+            this._emitBudgetEvent(
+              phaseResult.budgetExceedReason,
+              phaseResult.budgetMeta ?? {},
+              phaseName,
+              call,
+              context,
+              emitterCtx,
+            );
+          }
+
+          return this._fail(record, call, context, emitterCtx, phaseResult.error ?? 'Phase failed', phaseResult.denial);
+        }
+      }
+
+      // --- Final cancellation check before transitioning to succeeded ---
+      if (cancelSignal.aborted && !record.result) {
         return this._cancel(record, call, context, emitterCtx, cancelSignal.reason as string | undefined);
       }
 
-      if (!enabled) {
-        continue;
+      // --- A tool that resolved with success:false did not succeed ---
+      if (record.result && record.result.success === false) {
+        return this._fail(
+          record, call, context, emitterCtx,
+          record.result.error ?? 'Tool reported failure without an error message',
+          undefined,
+          record.result,
+        );
       }
 
-      record.currentPhase = phaseName;
-      const phaseResult = await phaseFn(call, tool, context, record);
-      record.phases.push(phaseResult);
+      if (cancelSignal.aborted) {
+        attachVisibleToolWarning(
+          record.result,
+          'A cancel arrived after the tool had finished; its result is reported as completed.',
+        );
+      }
 
-      // --- Emit per-phase event ---
+      // --- Succeeded ---
+      record.currentPhase = 'succeeded';
+      const durationMs = performance.now() - record.startedAt;
+      record.completedAt = Date.now();
       if (this.config.enableEvents && context.runtimeBus) {
-        this._emitPhaseEvent(phaseName, phaseResult, call, context, emitterCtx);
+        emitToolSucceeded(context.runtimeBus, emitterCtx, {
+          callId: call.id,
+          turnId: context.ids.turnId,
+          tool: call.name,
+          durationMs,
+        });
       }
 
-      // --- Capture execute result ---
-      if (phaseName === 'executing' && phaseResult.toolResult) {
-        record.result = phaseResult.toolResult;
-      }
+      context.tasks.onComplete?.(call.id, durationMs);
 
-      // --- Handle phase failure/abort ---
-      if (!phaseResult.success || phaseResult.abort) {
-        context.cancellation.signal.removeEventListener('abort', forwardAbort);
-        this.controllers.delete(call.id);
-
-        // Emit typed budget breach event before failing
-        if (phaseResult.budgetExceedReason && this.config.enableEvents && context.runtimeBus) {
-          this._emitBudgetEvent(
-            phaseResult.budgetExceedReason,
-            phaseResult.budgetMeta ?? {},
-            phaseName,
-            call,
-            context,
-            emitterCtx,
-          );
-        }
-
-        return this._fail(record, call, context, emitterCtx, phaseResult.error ?? 'Phase failed', phaseResult.denial);
-      }
-    }
-
-    // --- Final cancellation check before transitioning to succeeded ---
-    context.cancellation.signal.removeEventListener('abort', forwardAbort);
-    if (cancelSignal.aborted) {
-      this.controllers.delete(call.id);
-      return this._cancel(record, call, context, emitterCtx, cancelSignal.reason as string | undefined);
-    }
-
-    // --- Succeeded ---
-    this.controllers.delete(call.id);
-    record.currentPhase = 'succeeded';
-    const durationMs = performance.now() - record.startedAt;
-    record.completedAt = Date.now();
-    if (this.config.enableEvents && context.runtimeBus) {
-      emitToolSucceeded(context.runtimeBus, emitterCtx, {
+      const finalResult: ToolResult = record.result ?? {
         callId: call.id,
-        turnId: context.ids.turnId,
-        tool: call.name,
-        durationMs,
-      });
+        success: true,
+      };
+
+      // --- Idempotency: cache the successful result ---
+      const idKey = this._getIdKey(call);
+      if (idKey && this.config.idempotencyStore) {
+        this.config.idempotencyStore.markComplete(idKey, finalResult);
+      }
+
+      return finalResult;
+    } catch (err) {
+      // A phase threw instead of returning a failed PhaseResult. Settle the record
+      // and the idempotency key first, so the call is not left in flight forever.
+      if (record.completedAt) throw err;
+      let failed: ToolResult | undefined;
+      try {
+        failed = this._fail(record, call, context, emitterCtx, summarizeError(err));
+      } catch (settleErr) {
+        logger.warn('PhasedToolExecutor: could not settle a call after a phase threw', {
+          callId: call.id,
+          tool: call.name,
+          error: summarizeError(settleErr),
+        });
+      }
+      // A missing Jev reading is deliberate: it reaches the host rather than becoming a tool failure.
+      if (err instanceof JudgmentError || err instanceof JudgmentPortMissingError || !failed) throw err;
+      return failed;
+    } finally {
+      context.cancellation.signal.removeEventListener('abort', forwardAbort);
+      this.controllers.delete(call.id);
     }
-
-    context.tasks.onComplete?.(call.id, durationMs);
-
-    const finalResult: ToolResult = record.result ?? {
-      callId: call.id,
-      success: true,
-    };
-
-    // --- Idempotency: cache the successful result ---
-    const idKey = this._getIdKey(call);
-    if (idKey && this.config.idempotencyStore) {
-      this.config.idempotencyStore.markComplete(idKey, finalResult);
-    }
-
-    return finalResult;
   }
 
   /**
@@ -295,10 +341,12 @@ export class PhasedToolExecutor {
     emitterCtx: { sessionId: string; traceId: string; source: string },
     error: string,
     denial?: import('../../types/tools.js').ToolDenial | undefined,
+    toolResult?: ToolResult | undefined,
   ): ToolResult {
     // First terminal outcome wins: cancel() ran before this failure surfaced, so
     // the record ends cancelled rather than as cancelled === true with phase failed.
-    if (record.cancelled) return this._cancel(record, call, context, emitterCtx, record.cancelledReason);
+    // A call whose tool already ran keeps its real outcome instead.
+    if (record.cancelled && !record.result) return this._cancel(record, call, context, emitterCtx, record.cancelledReason);
     record.currentPhase = 'failed';
     const durationMs = performance.now() - record.startedAt;
     record.completedAt = Date.now();
@@ -320,6 +368,9 @@ export class PhasedToolExecutor {
     if (idKey && this.config.idempotencyStore) {
       this.config.idempotencyStore.markFailed(idKey);
     }
+
+    // The tool's own failed result (its output and detail) is what the model should see.
+    if (toolResult) return toolResult;
 
     return {
       callId: call.id,

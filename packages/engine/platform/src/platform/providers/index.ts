@@ -43,6 +43,7 @@ export {
 } from './live-model-discovery.js';
 export type { LiveModelDiscoveryResult, LiveModelDiscoverySource, LiveModelRefreshOptions } from './live-model-discovery.js';
 export { REASONING_BUDGET_MAP } from './interface.js';
+export { BUILTIN_PROVIDER_ENV_KEYS } from './credential-catalog.js';
 export { createProviderApi } from './provider-api.js';
 export type {
   ProviderApi,

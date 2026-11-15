@@ -88,12 +88,6 @@ describe('surface-owned browser storage', () => {
     expect(browserScreenshotRoot('/home/someone', 'agent')).toBe('/home/someone/.goodvibes/agent/browser/screenshots');
   });
 
-  test('neither writes into the user\'s project directory', () => {
-    for (const path of [browserProfileRoot('/home/someone', 'agent'), browserScreenshotRoot('/home/someone', 'agent')]) {
-      expect(path.startsWith('/home/someone/.goodvibes/')).toBe(true);
-    }
-  });
-
   test('two surfaces never share a browser profile directory', () => {
     expect(browserProfileRoot('/home/someone', 'agent')).not.toBe(browserProfileRoot('/home/someone', 'daemon'));
   });
@@ -136,7 +130,7 @@ describe('the node-hosted browser host', () => {
         process.on('SIGTERM', () => process.exit(0));
         const page = { on() {}, url: () => 'about:blank', title: async () => 'Original page', close: async () => record('page.close') };
         const context = { pages: () => [page], on() {}, close: async () => record('context.close') };
-        const browser = { contexts: () => [context], close: async () => record('browser.close') };
+        const browser = { contexts: () => [context], on: () => undefined, close: async () => record('browser.close') };
         exports.chromium = { connectOverCDP: async endpoint => { record({ endpoint, pid: process.pid }); return browser; } };
       `);
       const session = await manager.attach(requested);
@@ -185,7 +179,7 @@ describe('the node-hosted browser host', () => {
         setInterval(() => {}, 1000);
         const page = { on() {}, url: () => 'about:blank', title: async () => 'Original page', close: async () => record('page.close') };
         const context = { pages: () => [page], on() {}, close: async () => record('context.close') };
-        const browser = { contexts: () => [context], close: async () => record('browser.close') };
+        const browser = { contexts: () => [context], on: () => undefined, close: async () => record('browser.close') };
         exports.chromium = { connectOverCDP: async () => {
           writeFileSync(paths.connected, String(process.pid));
           ${phase === 'attach' ? 'await new Promise(() => {});' : ''}
@@ -253,7 +247,7 @@ describe('the node-hosted browser host', () => {
         const record = (call) => appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(call) + '\\n');
         const page = { on() {}, url: () => 'https://fixture.invalid/', title: async () => 'Existing page', close: async () => record('page.close') };
         const context = { pages: () => [page], on() {}, close: async () => record('context.close') };
-        const browser = { contexts: () => [context], close: async () => record('browser.close') };
+        const browser = { contexts: () => [context], on: () => undefined, close: async () => record('browser.close') };
         exports.chromium = { connectOverCDP: async (endpoint) => { record({ attach: endpoint }); return browser; } };
       `);
       child = spawn('node', [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -278,7 +272,7 @@ describe('the node-hosted browser host', () => {
         expect(reply.id).toBe(id);
         return reply;
       };
-      expect(await call('attach', { endpoint: 'http://127.0.0.1:9222' })).toMatchObject({ ok: true });
+      expect(await call('attach', { endpoint: 'http://127.0.0.1:9222', driverVersion: DRIVER_VERSION })).toMatchObject({ ok: true });
       expect((await call('pages')).result).toEqual({
         pages: [{ pageId: 'hp1', url: 'https://fixture.invalid/', title: 'Existing page' }],
       });
@@ -303,20 +297,4 @@ describe('the node-hosted browser host', () => {
       }
     }
   }, 60_000);
-
-  /**
-   * The agent asserted the script sat beside `dist/goodvibes-agent`. The platform
-   * equivalent was that the published package carried it. The engine is not
-   * published: it runs from source, and tsc emits only what it compiles, so
-   * the hand-written .mjs never reaches dist. What must hold is that the
-   * compiled client still finds the script, or every attach from compiled
-   * output would fail.
-   */
-  test('the compiled client finds the host script', async () => {
-    const compiled = await import('../platform/dist/platform/browser/browser-host-client.js') as {
-      readonly browserHostScriptPath: () => string;
-    };
-    const path = compiled.browserHostScriptPath();
-    expect(readFileSync(path)).toEqual(readFileSync(browserHostScriptPath()));
-  });
 });

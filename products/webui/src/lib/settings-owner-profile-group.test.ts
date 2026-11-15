@@ -19,6 +19,7 @@ const PROFILE_KEYS = CONFIG_SCHEMA_ENTRIES.map((entry) => entry.key).filter((key
 describe('the owner-profile settings group', () => {
   test('every profile key lands in the profile namespace group', () => {
     const label = groupLabelForNamespace('profile');
+    expect(label).toBe('Owner Profile');
     expect(categoryLabelForKey('profile.enabled')).toBe(label);
     expect(categoryLabelForKey('profile.path')).toBe(label);
   });
@@ -27,7 +28,7 @@ describe('the owner-profile settings group', () => {
     const groups = buildSettingsModel({});
     const group = groups.find((entry) => entry.id === 'profile');
     expect(group, 'no profile group was built').toBeDefined();
-    expect(group?.label).toBe(groupLabelForNamespace('profile'));
+    expect(group?.label).toBe('Owner Profile');
     const rendered = new Set([
       ...(group?.plainRows ?? []).map((row) => row.key),
       ...(group?.featureUnits ?? []).flatMap((unit) => [

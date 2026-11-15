@@ -21,7 +21,12 @@ export function makeFakeImapServer(
   script: (socket: Socket) => void,
 ): Promise<FakeServer> {
   return new Promise<FakeServer>((resolve) => {
+    // `server.close()` only stops the listener; open connections keep the
+    // process and the port busy, so they are ended with the server.
+    const sockets = new Set<Socket>();
     const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
       script(socket);
     });
     server.listen(0, '127.0.0.1', () => {
@@ -29,7 +34,10 @@ export function makeFakeImapServer(
       resolve({
         address: { port: (addr as { port: number }).port },
         server,
-        close: () => server.close(),
+        close: () => {
+          server.close();
+          for (const socket of sockets) socket.destroy();
+        },
       });
     });
   });

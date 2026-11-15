@@ -1,7 +1,7 @@
 /**
  * Platform adapter behavioral contract tests.
  *
- * Covers the shared utility layer in packages/platform/src/platform/adapters/helpers.ts
+ * Covers the shared utility layer in packages/engine/platform/src/platform/adapters/helpers.ts
  * and the cross-cutting behavioral invariants every surface adapter must satisfy:
  *
  *   - Token extraction (bearer + custom header)
@@ -10,8 +10,8 @@
  *   - Timing-safe constant comparison
  *   - Delivery-echo short-circuit (ntfy)
  *   - Missing-topic guard (ntfy)
- *   - Authorization-denied guard returns 4xx
- *   - Body-size limit guard returns 413
+ *   - Authorization-denied guard returns 403, and an allowed message is routed (ntfy)
+ *   - Body-size limit guard returns 413 (ntfy webhook)
  *
  * These tests run against src/ (not dist/) so they execute under bun:test with
  * TypeScript transpilation, no build step required.
@@ -25,7 +25,7 @@ import {
   verifySha256HmacSignature,
 } from '../platform/src/platform/adapters/helpers.js';
 import { parseJsonRecord } from '../platform/src/platform/adapters/helpers.js';
-import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.js';
+import { handleNtfySurfacePayload, handleNtfySurfaceWebhook } from '../platform/src/platform/adapters/ntfy/index.js';
 import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/types.js';
 import type { ChannelPolicyDecision } from '../platform/src/platform/channels/types.js';
 
@@ -190,12 +190,8 @@ describe('parseJsonRecord', () => {
     expect(result).toEqual({});
   });
 
-  test('returns array as-is for JSON array (object truthy check passes)', () => {
-    const result = parseJsonRecord('[1,2,3]');
-    expect(result).not.toBeInstanceOf(Response);
-    // Arrays satisfy `typeof x === 'object' && x !== null`, the implementation
-    // returns them as-is without coercion to {}. This documents that behaviour.
-    expect(result).toBeInstanceOf(Array);
+  test('returns an empty object for a JSON array, which is not a record', () => {
+    expect(parseJsonRecord('[1,2,3]')).toEqual({});
   });
 
   test('returns empty object for JSON string (non-object)', () => {
@@ -333,5 +329,43 @@ describe('handleNtfySurfacePayload: authorization', () => {
     expect(res.status).toBe(403);
     const json = await res.json() as { error: string };
     expect(json.error).toContain('Blocked by channel policy');
+  });
+});
+
+describe('handleNtfySurfacePayload: allowed message', () => {
+  test('routes an authorized remote-chat message to the remote chat service', async () => {
+    const posted: Array<{ topic: string; body: string }> = [];
+    const ctx: SurfaceAdapterContext = {
+      ...makePassingContext(),
+      postNtfyRemoteChatMessage: async (input) => {
+        posted.push({ topic: input.topic, body: input.body });
+        return { sessionId: 'session-1', messageId: 'message-1', delivered: true };
+      },
+    };
+    const { GOODVIBES_NTFY_REMOTE_TOPIC } = await import('../platform/src/platform/integrations/ntfy.js');
+    const res = await handleNtfySurfacePayload({ topic: GOODVIBES_NTFY_REMOTE_TOPIC, message: 'hello there' }, ctx);
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ routedTo: 'ntfy-remote-chat', sessionId: 'session-1', delivered: true });
+    expect(posted).toEqual([{ topic: GOODVIBES_NTFY_REMOTE_TOPIC, body: 'hello there' }]);
+  });
+});
+
+describe('handleNtfySurfaceWebhook: body-size limit', () => {
+  const webhook = (body: string) => handleNtfySurfaceWebhook(
+    new Request('http://localhost/webhook/ntfy', { method: 'POST', headers: { 'x-ntfy-token': 'test-token' }, body }),
+    makePassingContext(),
+  );
+
+  test('returns 413 naming the limit when the body is over it', async () => {
+    const res = await webhook('x'.repeat(1_000_001));
+    expect(res.status).toBe(413);
+    expect((await res.json() as { error: string }).error).toContain('1000000');
+  });
+
+  test('a body at the limit is read and reaches the payload handler', async () => {
+    // Plain text becomes the message, with no topic: the missing-topic refusal proves the body got past the size guard.
+    const res = await webhook('x'.repeat(1_000_000));
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toContain('topic');
   });
 });

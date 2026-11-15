@@ -126,6 +126,7 @@ describe('executeToolCalls uses modifiedArgs for execution but not for emitted e
 
     const toolRegistry = {
       execute: overrides.executeSpy,
+      isDangerous: () => false,
     } as unknown as ToolRegistry;
 
     const permissionManager = {

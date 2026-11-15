@@ -39,7 +39,19 @@ const TRANSIENT_CODES: ReadonlySet<string> = new Set([
   'ECONNREFUSED',
   'EPIPE',
   'ESOCKETTIMEDOUT',
+  'ECONNABORTED',
+  'ERR_SOCKET_TIMEOUT',
+  // npm prints a registry's HTTP failure as `npm error code E429` or `E503`.
+  'E429',
 ]);
+
+/** A registry 5xx printed by npm as `E500`..`E599`. */
+const REGISTRY_SERVER_ERROR = /^E5\d\d$/;
+
+function isTransientCode(code: string): boolean {
+  const upper = code.toUpperCase();
+  return TRANSIENT_CODES.has(upper) || REGISTRY_SERVER_ERROR.test(upper);
+}
 
 /** The longest output tail handed to a reading; install output says what failed at its end. */
 const MAX_EVIDENCE_CHARS = 2_000;
@@ -84,15 +96,18 @@ function ensureJudgmentPort(site: string): void {
   }
 }
 
+/** A codeless install failure that no reading could classify, because no judgment port could be built. */
+export class InstallReadingUnavailableError extends AggregateError {}
+
 /** Whether a failed install is a transient network fault worth another attempt. */
 export async function isTransientInstallFailure(error: unknown, site: string): Promise<boolean> {
   const code = installErrorCode(error);
-  if (code !== null) return TRANSIENT_CODES.has(code.toUpperCase());
+  if (code !== null) return isTransientCode(code);
   try {
     ensureJudgmentPort(site);
   } catch (portError) {
     const reason = portError instanceof Error ? portError.message : String(portError);
-    throw new AggregateError(
+    throw new InstallReadingUnavailableError(
       [error, portError],
       `${site}: the install failed without an error code, and its output could not be read (${reason})`,
     );
@@ -109,6 +124,8 @@ export interface InstallRetryOptions {
   readonly label: string;
   /** The decision site for the decision log. */
   readonly site: string;
+  /** Waits between attempts; defaults to a timer. Tests inject one that returns at once. */
+  readonly sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 
 const BACKOFF_MS = [0, 2000, 5000];
@@ -127,7 +144,7 @@ export async function retryTransientInstall(op: () => string | void, options: In
       if (attempt > 1) {
         const delay = BACKOFF_MS[attempt - 1] ?? 5000;
         console.log(`[${options.prefix}] ${options.label}: attempt ${attempt}/${MAX_ATTEMPTS} after ${delay}ms backoff`);
-        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        await (options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))))(delay);
       }
       const output = op();
       if (typeof output === 'string' && output.trim()) console.log(output.trimEnd());
@@ -140,7 +157,19 @@ export async function retryTransientInstall(op: () => string | void, options: In
         if (stdout) console.log(stdout);
         if (stderr) console.error(stderr);
       }
-      if (attempt === MAX_ATTEMPTS || !(await isTransientInstallFailure(err, options.site))) throw err;
+      if (attempt === MAX_ATTEMPTS) throw err;
+      let transient: boolean;
+      try {
+        transient = await isTransientInstallFailure(err, options.site);
+      } catch (reading) {
+        if (!(reading instanceof InstallReadingUnavailableError)) throw reading;
+        // No reading is possible (no judgment key). A fresh install attempt is idempotent, so give a codeless
+        // failure one more try rather than failing a release on a blip; a second failure is reported as it is.
+        if (attempt > 1) throw err;
+        console.log(`[${options.prefix}] ${options.label}: failed with no error code and no way to read its output; retrying once`);
+        continue;
+      }
+      if (!transient) throw err;
       const message = err instanceof Error ? err.message : String(err);
       console.log(`[${options.prefix}] ${options.label}: transient network error, retrying (${message.slice(0, 200)})`);
     }

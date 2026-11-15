@@ -1,7 +1,7 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import { containsSecretLikeText } from './memory-safety.ts';
@@ -105,6 +105,39 @@ export function assertNoSecretLikeText(fields: readonly string[], ownerLabel = '
   }
 }
 
+/**
+ * Run one read-modify-write of a store file under the cross-process lock.
+ * Taking the lock can create the store's directory and a lock file. A write that
+ * runs under an admission watching those directories is told so through
+ * `onEffect(false)`, the way it is for its own created parents; otherwise it
+ * would read the lock as foreign interference and refuse its own write.
+ */
+export function runLockedStoreUpdate<T>(path: string, effects: { readonly onEffect?: ((published?: boolean) => void) | undefined } | undefined, update: () => T): T {
+  return runStoreFileUpdateSync(path, () => {
+    effects?.onEffect?.(false);
+    return update();
+  });
+}
+
+/**
+ * A store file is rewritten whole by every save, so a save must not follow a
+ * read that silently left something out. Call this on the parsed file before a
+ * mutator builds on it: it throws when entries failed their parser (hand edit,
+ * newer version) or the file was written by a newer store version, because the
+ * save would erase them. Reads stay tolerant; only the write path refuses.
+ */
+export function assertStoreRewritable(parsed: unknown, key: string, kept: number, supportedVersion: number): void {
+  if (!isRecord(parsed)) throw new Error('the store file is not a JSON object; repair or remove it before saving, or a save would replace it.');
+  if (typeof parsed.version === 'number' && parsed.version > supportedVersion) {
+    throw new Error(`the store file is version ${parsed.version} but this release writes version ${supportedVersion}; upgrade before saving, or a save would drop newer data.`);
+  }
+  const entries = parsed[key];
+  const total = Array.isArray(entries) ? entries.length : 0;
+  if (total > kept) {
+    throw new Error(`${total - kept} of ${total} stored entries cannot be read by this release; repair or remove them in the store file before saving, or a save would erase them.`);
+  }
+}
+
 function parsePersona(value: unknown): AgentPersonaRecord | null {
   if (!isRecord(value)) return null;
   const id = readString(value.id).trim();
@@ -133,12 +166,16 @@ function parsePersona(value: unknown): AgentPersonaRecord | null {
   };
 }
 
-function parseStore(raw: string): PersonaStoreFile {
+function parseStore(raw: string, forWrite = false): PersonaStoreFile {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, activePersonaId: null, personas: [] };
+  if (!isRecord(parsed)) {
+    if (forWrite) assertStoreRewritable(parsed, 'personas', 0, STORE_VERSION);
+    return { version: STORE_VERSION, activePersonaId: null, personas: [] };
+  }
   const personas = Array.isArray(parsed.personas)
     ? parsed.personas.map(parsePersona).filter((entry): entry is AgentPersonaRecord => entry !== null)
     : [];
+  if (forWrite) assertStoreRewritable(parsed, 'personas', personas.length, STORE_VERSION);
   const activePersonaId = readString(parsed.activePersonaId).trim() || null;
   return {
     version: STORE_VERSION,
@@ -201,116 +238,130 @@ export class AgentPersonaRegistry {
   }
 
   public create(input: AgentPersonaCreateInput): AgentPersonaRecord {
-    const store = this.readStore();
-    const name = normalizeName(input.name);
-    const description = input.description.trim();
-    const body = input.body.trim();
-    this.validateRequired(name, description, body);
-    assertNoSecretLikeText([name, description, body, ...(input.tags ?? []), ...(input.triggers ?? [])], 'Personas');
-    const duplicate = store.personas.find((persona) => persona.name.toLowerCase() === name.toLowerCase());
-    if (duplicate) throw new Error(`Persona already exists ${duplicate.id}`);
-    const timestamp = nowIso();
-    const persona: AgentPersonaRecord = {
-      id: this.nextId(name, store.personas),
-      name,
-      description,
-      body,
-      tags: normalizeList(input.tags),
-      triggers: normalizeList(input.triggers),
-      source: input.source ?? 'user',
-      provenance: input.provenance?.trim() || input.source || 'user',
-      reviewState: 'fresh',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({ ...store, personas: [...store.personas, persona] });
-    return persona;
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const name = normalizeName(input.name);
+      const description = input.description.trim();
+      const body = input.body.trim();
+      this.validateRequired(name, description, body);
+      assertNoSecretLikeText([name, description, body, ...(input.tags ?? []), ...(input.triggers ?? [])], 'Personas');
+      const duplicate = store.personas.find((persona) => persona.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) throw new Error(`Persona already exists ${duplicate.id}`);
+      const timestamp = nowIso();
+      const persona: AgentPersonaRecord = {
+        id: this.nextId(name, store.personas),
+        name,
+        description,
+        body,
+        tags: normalizeList(input.tags),
+        triggers: normalizeList(input.triggers),
+        source: input.source ?? 'user',
+        provenance: input.provenance?.trim() || input.source || 'user',
+        reviewState: 'fresh',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({ ...store, personas: [...store.personas, persona] });
+      return persona;
+    });
   }
 
   public update(idOrName: string, input: AgentPersonaUpdateInput): AgentPersonaRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown persona ${idOrName}`);
-    const name = input.name === undefined ? existing.name : normalizeName(input.name);
-    const description = input.description === undefined ? existing.description : input.description.trim();
-    const body = input.body === undefined ? existing.body : input.body.trim();
-    this.validateRequired(name, description, body);
-    assertNoSecretLikeText([name, description, body, ...(input.tags ?? []), ...(input.triggers ?? [])], 'Personas');
-    const duplicate = store.personas.find((persona) => persona.id !== existing.id && persona.name.toLowerCase() === name.toLowerCase());
-    if (duplicate) throw new Error(`Persona already exists ${duplicate.id}`);
-    const updated: AgentPersonaRecord = {
-      ...existing,
-      name,
-      description,
-      body,
-      tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
-      triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
-      provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-      ...freshReviewPatch(),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown persona ${idOrName}`);
+      const name = input.name === undefined ? existing.name : normalizeName(input.name);
+      const description = input.description === undefined ? existing.description : input.description.trim();
+      const body = input.body === undefined ? existing.body : input.body.trim();
+      this.validateRequired(name, description, body);
+      assertNoSecretLikeText([name, description, body, ...(input.tags ?? []), ...(input.triggers ?? [])], 'Personas');
+      const duplicate = store.personas.find((persona) => persona.id !== existing.id && persona.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) throw new Error(`Persona already exists ${duplicate.id}`);
+      const updated: AgentPersonaRecord = {
+        ...existing,
+        name,
+        description,
+        body,
+        tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
+        triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
+        provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
+        ...freshReviewPatch(),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public setActive(idOrName: string): AgentPersonaRecord {
-    const store = this.readStore();
-    const persona = this.findInStore(store, idOrName);
-    if (!persona) throw new Error(`Unknown persona ${idOrName}`);
-    this.writeStore({ ...store, activePersonaId: persona.id });
-    return persona;
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const persona = this.findInStore(store, idOrName);
+      if (!persona) throw new Error(`Unknown persona ${idOrName}`);
+      this.writeStore({ ...store, activePersonaId: persona.id });
+      return persona;
+    });
   }
 
   public clearActive(): void {
-    const store = this.readStore();
-    this.writeStore({ ...store, activePersonaId: null });
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      this.writeStore({ ...store, activePersonaId: null });
+    });
   }
 
   public markReviewed(idOrName: string): AgentPersonaRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown persona ${idOrName}`);
-    const updated: AgentPersonaRecord = {
-      ...existing,
-      ...reviewedReviewPatch(),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown persona ${idOrName}`);
+      const updated: AgentPersonaRecord = {
+        ...existing,
+        ...reviewedReviewPatch(),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public markStale(idOrName: string, reason: string): AgentPersonaRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown persona ${idOrName}`);
-    const updated: AgentPersonaRecord = {
-      ...existing,
-      ...staleReviewPatch(reason),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown persona ${idOrName}`);
+      const updated: AgentPersonaRecord = {
+        ...existing,
+        ...staleReviewPatch(reason),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        personas: store.personas.map((persona) => persona.id === existing.id ? updated : persona),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public deletePersona(idOrName: string): AgentPersonaRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown persona ${idOrName}`);
-    this.writeStore({
-      ...store,
-      activePersonaId: store.activePersonaId === existing.id ? null : store.activePersonaId,
-      personas: store.personas.filter((persona) => persona.id !== existing.id),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown persona ${idOrName}`);
+      this.writeStore({
+        ...store,
+        activePersonaId: store.activePersonaId === existing.id ? null : store.activePersonaId,
+        personas: store.personas.filter((persona) => persona.id !== existing.id),
+      });
+      return existing;
     });
-    return existing;
   }
 
   private validateRequired(name: string, description: string, body: string): void {
@@ -336,10 +387,10 @@ export class AgentPersonaRegistry {
     return store.personas.find((persona) => persona.id.toLowerCase() === lookup || persona.name.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(): PersonaStoreFile {
+  private readStore(forWrite = false): PersonaStoreFile {
     if (!existsSync(this.storePath)) return { version: STORE_VERSION, activePersonaId: null, personas: [] };
     try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'));
+      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
     } catch (error) {
       throw new Error(`Could not read Agent persona store ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -350,8 +401,8 @@ export class AgentPersonaRegistry {
   }
 }
 
-export function buildActivePersonaPrompt(shellPaths: ShellPathService): string | null {
-  const active = AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().activePersona;
+export function buildActivePersonaPrompt(shellPaths: ShellPathService, snapshot?: AgentPersonaSnapshot): string | null {
+  const active = (snapshot ?? AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot()).activePersona;
   if (!active) return null;
   if (active.reviewState !== 'reviewed') {
     return [

@@ -184,14 +184,26 @@ export function createOccasionsNudgeSurface(
     return lines.length;
   };
 
+  // Single-flight: the ledger is read before the pull's await and replaced
+  // after it, so two overlapping raises would both decide against the old
+  // ledger and say the same line twice. A caller arriving mid-pull shares that
+  // pull's result; the next turn's call pulls afresh.
+  let inFlight: Promise<number> | null = null;
+
   return {
-    raiseNow: async (): Promise<number> => {
-      try {
-        return await raiseNow();
-      } catch (error) {
-        logger.debug('occasions: raise failed', { error: summarizeError(error) });
-        return 0;
-      }
+    raiseNow: (): Promise<number> => {
+      if (inFlight) return inFlight;
+      inFlight = (async (): Promise<number> => {
+        try {
+          return await raiseNow();
+        } catch (error) {
+          logger.debug('occasions: raise failed', { error: summarizeError(error) });
+          return 0;
+        } finally {
+          inFlight = null;
+        }
+      })();
+      return inFlight;
     },
   };
 }

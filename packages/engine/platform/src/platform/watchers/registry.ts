@@ -11,6 +11,7 @@ import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
 import {
   emitWatcherFailed,
+  emitWatcherCheckpointAdvanced,
   emitWatcherHeartbeat,
   emitWatcherStarted,
   emitWatcherStopped,
@@ -20,7 +21,7 @@ import {
   resolveWatcherStorePath,
   saveWatcherSnapshotToPathSafe,
 } from './store.js';
-import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { postToPublicWebhook } from '../utils/url-safety.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 
@@ -54,6 +55,21 @@ export interface WatcherRegistryOptions {
    * process start instead of the next restore.
    */
   readonly recoveryWindowMinutes?: (() => number) | undefined;
+  /**
+   * Sends a url/webhook watcher's request. Defaults to the platform's guarded
+   * request (public hosts only, resolved addresses checked, redirects not followed).
+   */
+  readonly fetchUrl?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
+  /** How long one url/webhook run may take, request and body together. */
+  readonly runTimeoutMs?: number | undefined;
+  /**
+   * Resolves a `goodvibes://secrets/` header value to the secret at request
+   * time, so no header credential is stored in the watcher record. Without it
+   * such a value is sent as written.
+   */
+  readonly resolveHeaderValue?: ((value: string) => Promise<string | null>) | undefined;
+  /** Reads whether a failure can clear on the next run. Defaults to the platform reading. */
+  readonly readTransience?: ((error: unknown, site: string) => Promise<{ readonly failureClass: string }>) | undefined;
 }
 
 /**
@@ -84,6 +100,9 @@ function runOutcomeApplies(ranFrom: WatcherState, now: WatcherState, outcome: Wa
   if (now === 'stopped' && ranFrom !== 'stopped') return false;
   return now === outcome || watcherLifecycle.can(now, outcome);
 }
+
+/** A run that has not answered by then has failed; its in-flight slot is released. */
+const DEFAULT_RUN_TIMEOUT_MS = 30_000;
 
 /** The shipped `watchers.recoveryWindowMinutes` default, for hosts that pass none. */
 const DEFAULT_RECOVERY_WINDOW_MINUTES = 10;
@@ -184,12 +203,27 @@ export class WatcherRegistry {
   private readonly featureFlags: FeatureFlagReader;
   private readonly readRecoveryWindowMinutes: () => number;
   private loaded = false;
+  /**
+   * Restored watchers whose work lives in a closure only their owner can
+   * supply. They are not armed, and do not report a heartbeat, until the owner
+   * registers them again.
+   */
+  private readonly awaitingRegistration = new Set<string>();
+  private readonly fetchUrl: (url: string, init: RequestInit) => Promise<Response>;
+  private readonly runTimeoutMs: number;
+  private readonly resolveHeaderValue: ((value: string) => Promise<string | null>) | undefined;
+  private readonly readTransience: (error: unknown, site: string) => Promise<{ readonly failureClass: string }>;
 
   constructor(options: WatcherRegistryOptions = {}) {
     this.storePath = resolveWatcherStorePath(options.storePath);
     this.featureFlags = options.featureFlags ?? null;
     this.readRecoveryWindowMinutes = options.recoveryWindowMinutes
       ?? ((): number => DEFAULT_RECOVERY_WINDOW_MINUTES);
+    this.fetchUrl = options.fetchUrl
+      ?? ((url, init) => postToPublicWebhook(url, init, { allowHttp: true }));
+    this.runTimeoutMs = options.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
+    this.resolveHeaderValue = options.resolveHeaderValue;
+    this.readTransience = options.readTransience ?? readFailureTransience;
   }
 
   /**
@@ -210,7 +244,11 @@ export class WatcherRegistry {
 
   private isEnabled(): boolean {
     const enabled = isFeatureGateEnabled(this.featureFlags, 'watcher-framework');
-    if (!enabled) this.clearTimers();
+    if (!enabled) {
+      this.clearTimers();
+      // The next enabled call must arm the running watchers again.
+      this.loaded = false;
+    }
     return enabled;
   }
 
@@ -272,9 +310,12 @@ export class WatcherRegistry {
       record,
       run: input.run ?? this.buildRunStrategy(record),
     });
+    // Only a registration that brings the work ends the wait; an update without
+    // a run (the PATCH route) must not turn the stand-in on.
+    if (input.run !== undefined || this.hasStandaloneStrategy(record)) this.awaitingRegistration.delete(record.id);
     this.persist();
     this.runtimeDispatch?.syncWatcher(record, 'watchers.register');
-    if (wasRunning) {
+    if (wasRunning && !this.awaitingRegistration.has(record.id)) {
       return this.startWatcher(record.id) ?? record;
     }
     return record;
@@ -322,6 +363,7 @@ export class WatcherRegistry {
     this.ensureLoaded();
     const watcher = this.watchers.get(id);
     if (!watcher) return null;
+    this.refuseWhileAwaitingOwner(id, 'start');
     if (this.timers.has(id)) return watcher.record;
 
     const started: WatcherRecord = this.normalizeRecord({
@@ -415,6 +457,7 @@ export class WatcherRegistry {
     this.ensureLoaded();
     const watcher = this.watchers.get(id);
     if (!watcher) return null;
+    this.refuseWhileAwaitingOwner(id, 'run');
     await this.runWatcher(id);
     return this.getWatcher(id);
   }
@@ -428,14 +471,7 @@ export class WatcherRegistry {
     const removed = this.watchers.delete(id);
     if (removed) {
       this.persist();
-      this.runtimeDispatch?.syncWatcher({
-        ...watcher.record,
-        state: 'stopped',
-        metadata: {
-          ...watcher.record.metadata,
-          removed: true,
-        },
-      }, 'watchers.remove');
+      this.runtimeDispatch?.removeWatcher(id, 'watchers.remove');
     }
     return removed;
   }
@@ -445,13 +481,15 @@ export class WatcherRegistry {
     if (this.loaded) return;
     const snapshot = loadWatcherSnapshotFromPath(this.storePath);
     if (snapshot) {
-      this.watchers.clear();
+      // A watcher registered in this process keeps its closure; the snapshot only adds the rest.
       for (const record of snapshot.watchers) {
+        if (this.watchers.has(record.id)) continue;
         const normalized = this.normalizeRecord(record);
         this.watchers.set(normalized.id, {
           record: normalized,
           run: this.buildRunStrategy(normalized),
         });
+        if (!this.hasStandaloneStrategy(normalized)) this.awaitingRegistration.add(normalized.id);
       }
     }
     this.loaded = true;
@@ -468,7 +506,12 @@ export class WatcherRegistry {
         (normalized.state === 'running' || normalized.state === 'degraded' || normalized.state === 'starting')
         && normalized.kind !== 'manual'
         && Number(normalized.intervalMs ?? 0) > 0
+        && !this.timers.has(normalized.id)
       ) {
+        if (this.awaitingRegistration.has(normalized.id)) {
+          logger.info('Restored watcher waits for its owner to register it again', { watcherId: normalized.id });
+          continue;
+        }
         const timer = setInterval(() => {
           void this.runWatcher(normalized.id).catch((error: unknown) => {
             logger.warn('Watcher interval run failed', { watcherId: normalized.id, error: summarizeError(error) });
@@ -479,6 +522,20 @@ export class WatcherRegistry {
         this.catchUpAfterRestart(normalized, restoredAt, recoveryWindowMs);
       }
     }
+  }
+
+  /**
+   * Whether the record carries what its run needs (an inline result, a path or
+   * a url). Without it the work is a closure only the registering owner holds.
+   */
+  private hasStandaloneStrategy(record: WatcherRecord): boolean {
+    const merged = { ...(record.source.metadata ?? {}), ...(record.metadata ?? {}) };
+    if (typeof merged.run === 'string' && merged.run.trim().length > 0) return true;
+    if (record.kind === 'filesystem') return true;
+    if (record.kind === 'webhook') return true;
+    if (record.kind === 'manual') return true;
+    if (record.kind === 'integration' || record.kind === 'socket') return false;
+    return typeof merged.url === 'string' || typeof merged.endpoint === 'string';
   }
 
   /**
@@ -526,9 +583,21 @@ export class WatcherRegistry {
     };
   }
 
+  /**
+   * A restored watcher whose work lives only in its owner's closure would run a
+   * stand-in that reports healthy without checking anything; it is refused with
+   * the state and the way out instead.
+   */
+  private refuseWhileAwaitingOwner(id: string, operation: 'start' | 'run'): void {
+    if (!this.awaitingRegistration.has(id)) return;
+    throw new Error(`Cannot ${operation} watcher "${id}": it was restored from disk and its work is held by the component that registered it. It runs again once that component registers it; until then it reports no heartbeat.`);
+  }
+
   private async runWatcher(id: string): Promise<void> {
     if (!this.isEnabled()) return;
     if (this.inFlight.has(id)) return;
+    // No timer is armed for such a watcher, but a pending interval or a stale caller must not run the stand-in either.
+    if (this.awaitingRegistration.has(id)) return;
     const watcher = this.watchers.get(id);
     if (!watcher) return;
     this.inFlight.add(id);
@@ -536,10 +605,15 @@ export class WatcherRegistry {
       const checkpoint = await watcher.run();
       // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
       const current = this.watchers.get(id);
-      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, 'running')) return;
+      // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
+      // The same holds for a timer-driven watcher whose manual run failed first (stopped, then failed): with no timer it is not running.
+      const undriven = watcher.record.state === 'stopped'
+        || (watcher.record.state === 'failed' && !this.timers.has(id) && watcher.record.kind !== 'manual');
+      const successState: WatcherState = undriven ? 'stopped' : 'running';
+      if (!current || !runOutcomeApplies(watcher.record.state, current.record.state, successState)) return;
       const updated: WatcherRecord = this.normalizeRecord({
         ...current.record,
-        state: 'running',
+        state: successState,
         lastHeartbeatAt: now(),
         lastCheckpoint: checkpoint ? String(checkpoint) : watcher.record.lastCheckpoint,
         lastError: undefined,
@@ -561,6 +635,18 @@ export class WatcherRegistry {
           seenAt: updated.lastHeartbeatAt ?? now(),
           checkpoint: updated.lastCheckpoint ?? '',
         });
+        // The heartbeat says the watcher ran; this says the source moved.
+        if (checkpoint && updated.lastCheckpoint !== watcher.record.lastCheckpoint) {
+          emitWatcherCheckpointAdvanced(this.runtimeBus, {
+            sessionId: 'watchers',
+            source: 'watcher-registry',
+            traceId: id,
+          }, {
+            watcherId: id,
+            sourceKind: toWatcherSourceKind(updated.kind),
+            checkpoint: updated.lastCheckpoint ?? '',
+          });
+        }
       }
     } catch (error) {
       const current = this.watchers.get(id);
@@ -580,8 +666,20 @@ export class WatcherRegistry {
       this.runtimeDispatch?.syncWatcher(failed, 'watchers.failed');
       if (this.runtimeBus) {
         // Whether the next interval's run can clear this failure is read from
-        // the error, not asserted for every failure.
-        const transience = await readFailureTransience(error, 'watchers.run');
+        // the error, not asserted for every failure. The reading may reach a
+        // model: when it cannot be made the failure is still published, as retryable.
+        let retryable = true;
+        try {
+          retryable = (await this.readTransience(error, 'watchers.run')).failureClass === 'retryable';
+        } catch (readingError) {
+          logger.warn('Watcher failure transience could not be read; publishing it as retryable', {
+            watcherId: id,
+            error: summarizeError(readingError),
+          });
+        }
+        // The watcher may have been stopped or removed during the reading; a
+        // failure event after its stop event would end the stream on the wrong state.
+        if (this.watchers.get(id)?.record.state !== 'failed') return;
         emitWatcherFailed(this.runtimeBus, {
           sessionId: 'watchers',
           source: 'watcher-registry',
@@ -590,7 +688,7 @@ export class WatcherRegistry {
           watcherId: id,
           sourceKind: toWatcherSourceKind(failed.kind),
           error: failed.lastError ?? 'watcher failed',
-          retryable: transience.failureClass === 'retryable',
+          retryable,
         });
       }
     } finally {
@@ -610,7 +708,9 @@ export class WatcherRegistry {
     if (record.kind === 'filesystem') {
       const path = typeof merged.path === 'string' ? merged.path : typeof merged.filePath === 'string' ? merged.filePath : '';
       return () => {
-        if (!path) return `${record.id}:filesystem-no-path`;
+        // A watcher with nothing to look at is a failed watcher, not a quiet one.
+        if (!path) throw new Error('Filesystem watcher has no path to watch. Re-register it with a path.');
+        // A missing file is a checkpoint change, so a file that appears or is removed is seen as an event.
         if (!existsSync(path)) return `${path}:missing`;
         const stat = statSync(path);
         return `${path}:${stat.size}:${Math.floor(stat.mtimeMs)}`;
@@ -619,17 +719,9 @@ export class WatcherRegistry {
 
     if (record.kind === 'webhook') {
       const url = typeof merged.url === 'string' ? merged.url : '';
-      return async () => {
-        if (!url) return `${record.id}:webhook-no-url`;
-        const headers = typeof merged.headers === 'object' && merged.headers !== null
-          ? Object.fromEntries(Object.entries(merged.headers).filter(([, value]) => typeof value === 'string')) as Record<string, string>
-          : undefined;
-        const response = await instrumentedFetch(url, {
-          method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
-          ...(headers !== undefined ? { headers } : {}),
-        } as RequestInit);
-        const text = await response.text().catch(() => '');
-        return `${response.status}:${text.slice(0, 120)}`;
+      return () => {
+        if (!url) throw new Error('Webhook watcher has no url to call. Re-register it with a url.');
+        return this.pollUrl(url, merged);
       };
     }
 
@@ -641,26 +733,45 @@ export class WatcherRegistry {
       return () => `socket:${typeof merged.address === 'string' ? merged.address : record.label}`;
     }
 
-    if (record.kind === 'manual') {
-      return () => `${record.label}:${new Date().toISOString()}`;
-    }
+    // A manual run has no source to bracket: a timestamp would "advance" on every run.
+    if (record.kind === 'manual') return () => undefined;
 
     const url = typeof merged.url === 'string' ? merged.url : typeof merged.endpoint === 'string' ? merged.endpoint : '';
-    if (url) {
-      return async () => {
-        const headers2 = typeof merged.headers === 'object' && merged.headers !== null
-          ? Object.fromEntries(Object.entries(merged.headers).filter(([, value]) => typeof value === 'string')) as Record<string, string>
-          : undefined;
-        const response = await instrumentedFetch(url, {
-          method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
-          ...(headers2 !== undefined ? { headers: headers2 } : {}),
-        } as RequestInit);
-        const text = await response.text().catch(() => '');
-        return `${response.status}:${text.slice(0, 120)}`;
-      };
-    }
+    if (url) return () => this.pollUrl(url, merged);
 
-    return () => `${record.id}:${record.kind}:${Date.now()}`;
+    return () => undefined;
+  }
+
+  /**
+   * One request of a url/webhook watcher. The whole run, request and body, is
+   * bounded by one timeout so a stalled endpoint fails the run instead of
+   * holding the watcher's in-flight slot forever, and a non-2xx answer fails
+   * it too: an unreachable or unauthorised source is not a healthy one.
+   */
+  private async pollUrl(url: string, merged: Record<string, unknown>): Promise<string> {
+    const headers = typeof merged.headers === 'object' && merged.headers !== null
+      ? Object.fromEntries(Object.entries(merged.headers).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+      : undefined;
+    if (headers !== undefined && this.resolveHeaderValue) {
+      for (const [name, value] of Object.entries(headers)) {
+        if (!value.trim().startsWith('goodvibes://secrets/')) continue;
+        const resolved = await this.resolveHeaderValue(value);
+        // Sending the request without its credential would report an auth failure as the source's.
+        if (resolved === null) throw new Error(`Header "${name}" refers to a secret that could not be read; the request was not sent`);
+        headers[name] = resolved;
+      }
+    }
+    const response = await this.fetchUrl(url, {
+      method: typeof merged.method === 'string' ? merged.method.toUpperCase() : 'GET',
+      ...(headers !== undefined ? { headers } : {}),
+      signal: AbortSignal.timeout(this.runTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`Watched url answered HTTP ${response.status}`);
+    }
+    const text = await response.text();
+    return `${response.status}:${text.slice(0, 120)}`;
   }
 
   /**

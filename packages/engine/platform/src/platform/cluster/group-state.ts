@@ -232,10 +232,15 @@ function normalizeGroupState(state: GroupStateDocument): GroupStateDocument {
     if (!existing || tombstone.gen > existing.gen) tombstones.set(tombstone.nodeId, tombstone);
   }
   // A tombstone at or above a member's generation removes it. Equal generations
-  // resolve to REMOVED deliberately: see mergeGroupState.
+  // resolve to REMOVED deliberately: see mergeGroupState. A tombstone BELOW a
+  // member's generation is history: the machine was put back after it, and the
+  // record is dropped so no copy still carrying it can count the machine as
+  // removed again.
   for (const [nodeId, tombstone] of tombstones) {
     const member = members.get(nodeId);
-    if (member && tombstone.gen >= member.gen) members.delete(nodeId);
+    if (!member) continue;
+    if (tombstone.gen >= member.gen) members.delete(nodeId);
+    else tombstones.delete(nodeId);
   }
   return {
     ...state,
@@ -320,9 +325,17 @@ export function isCurrentMember(state: GroupStateDocument, nodeId: string): bool
   return state.members.some((entry) => entry.nodeId === nodeId);
 }
 
-/** The removal record for `nodeId`, if the group holds one. */
+/**
+ * The removal record that still applies to `nodeId`, if the group holds one.
+ *
+ * A record older than the machine's current membership generation does not
+ * apply: the machine was put back after it.
+ */
 export function findTombstone(state: GroupStateDocument, nodeId: string): GroupTombstone | null {
-  return state.tombstones.find((entry) => entry.nodeId === nodeId) ?? null;
+  const tombstone = state.tombstones.find((entry) => entry.nodeId === nodeId);
+  if (!tombstone) return null;
+  const member = state.members.find((entry) => entry.nodeId === nodeId);
+  return member && tombstone.gen < member.gen ? null : tombstone;
 }
 
 export interface AdmitMemberInput {
@@ -452,6 +465,36 @@ export function renameGroup(state: GroupStateDocument, displayName: string): Gro
     ...state,
     displayName: normalizeDisplayName(displayName, DEFAULT_GROUP_DISPLAY_NAME),
     displayNameGen: state.displayNameGen + 1,
+  };
+}
+
+// ── fitting a datagram ──────────────────────────────────────────────────────
+
+/**
+ * Trim a document so its JSON is at most `maxBytes`, by dropping the OLDEST
+ * removal records. Members are never dropped: a roster without them would be
+ * wrong, not smaller.
+ *
+ * Used only for what is put on the wire. A receiver merges what it hears into
+ * its own copy, so an older removal left out of one datagram is still held by
+ * everyone who already had it; the local document is never trimmed here.
+ */
+export function fitStateToBytes(
+  state: GroupStateDocument,
+  maxBytes: number,
+): { readonly state: GroupStateDocument; readonly droppedTombstones: number } {
+  if (Buffer.byteLength(JSON.stringify(state), 'utf8') <= maxBytes) return { state, droppedTombstones: 0 };
+  const newestFirst = [...state.tombstones].sort((a, b) => b.at - a.at);
+  let low = 0, high = newestFirst.length;
+  // Largest prefix of the newest tombstones that still fits.
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = { ...state, tombstones: newestFirst.slice(0, mid) };
+    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') <= maxBytes) low = mid; else high = mid - 1;
+  }
+  return {
+    state: { ...state, tombstones: newestFirst.slice(0, low) },
+    droppedTombstones: state.tombstones.length - low,
   };
 }
 

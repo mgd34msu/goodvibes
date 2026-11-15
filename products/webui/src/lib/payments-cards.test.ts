@@ -2,8 +2,8 @@
  * payments-cards.test.ts, the rules card entry rests on, asserted rather than
  * trusted.
  *
- * Two of these are structural pins rather than ordinary unit tests, and they
- * are the important ones:
+ * One of these is a structural pin rather than an ordinary unit test, and it
+ * is the important one:
  *
  *  - the entry gate is the platform's allowlist, not a local list. If the owner ever
  *    closes the webui again, the platform edit alone must switch this surface off;
@@ -11,11 +11,9 @@
  *    stops saying so, instead of this app silently keeping a form the ruling
  *    no longer covers.
  *
- *  - the create route stays POST. invokeOperator sends a GET method's input as
- *    a query string, so a route flipped to GET would put a card number in the
- *    URL, browser history, referrer headers, every access log, with no change
- *    to any file that mentions cards. The pin against the generated contracts
- *    facade is what makes that a red test rather than a silent leak.
+ * The create route staying POST (so a card number never lands in a URL) is pinned
+ * against the generated contracts facade in
+ * components/settings/PaymentCardEntry.containment.test.tsx.
  */
 import { describe, expect, test } from 'bun:test';
 import { mayEnterCardDetails, mayOfferCardEntryFlow } from '@goodvibes-jev/engine/platform/platform/payments/browser';

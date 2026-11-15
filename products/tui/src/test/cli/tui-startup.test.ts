@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { resetAnsweredRecoveryOffersForTest } from '../../runtime/recovery-prompt.ts';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { createShellPathService, persistConversation, writeRecoveryFile } from '@/runtime/index.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { CommandRegistry } from '../../input/command-registry.ts';
@@ -15,11 +14,15 @@ import type { CommandContext } from '../../input/command-registry.ts';
 import type { InputHandler } from '../../input/handler.ts';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
 import { makeTestSurface } from '../helpers/session-surface.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
+const tempRoots: string[] = [];
+const makeRoot = (prefix: string): string => { const root = makeProjectTempDir(prefix); tempRoots.push(root); return root; };
 beforeEach(() => { resetAnsweredRecoveryOffersForTest(); });
+afterEach(() => { for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function makeShellPaths() {
-  const root = join(tmpdir(), `gv-tui-startup-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const root = makeRoot('gv-tui-startup');
   return createShellPathService({
     workingDirectory: join(root, 'workspace'),
     homeDirectory: join(root, 'home'),
@@ -211,7 +214,7 @@ describe('initial TUI onboarding startup check', () => {
 
 describe('session lifecycle flags at startup', () => {
   function makeSessionShellPaths() {
-    const root = join(tmpdir(), `gv-tui-session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const root = makeRoot('gv-tui-session');
     const workspace = join(root, 'workspace');
     const home = join(root, 'home');
     mkdirSync(workspace, { recursive: true });
@@ -355,7 +358,7 @@ describe('session lifecycle flags at startup', () => {
 
 describe('recovery-aware --continue / bare --resume', () => {
   function makeRecoveryShellPaths() {
-    const root = join(tmpdir(), `gv-tui-recovery-continue-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const root = makeRoot('gv-tui-recovery-continue');
     const workspace = join(root, 'workspace');
     const home = join(root, 'home');
     mkdirSync(workspace, { recursive: true });
@@ -373,7 +376,7 @@ describe('recovery-aware --continue / bare --resume', () => {
     };
   }
 
-  /** A durable store save, then (after a real gap so mtimes order correctly) a STRICTLY NEWER recovery snapshot for the same session, the exact shape a mid-turn crash leaves behind. */
+  /** A durable store save, then (the store file aged so mtimes order correctly) a STRICTLY NEWER recovery snapshot for the same session, the exact shape a mid-turn crash leaves behind. */
   async function persistSessionThenNewerCrash(shellPaths: ReturnType<typeof makeRecoveryShellPaths>, sessionId: string, tailMessage: string) {
     const surface = makeTestSurface(shellPaths.workingDirectory, shellPaths.homeDirectory);
     void new SessionManager(shellPaths.workingDirectory, { surface });
@@ -382,7 +385,11 @@ describe('recovery-aware --continue / bare --resume', () => {
       { messages: [{ role: 'user', content: 'saved before the crash' }], timestamp: Date.now(), titleSource: 'user', returnContext: undefined as never },
       'openai:gpt-5.2', 'openai', sessionId, { surface },
     );
-    await Bun.sleep(20); // real gap so the recovery snapshot's mtime is unambiguously newer than the store's
+    // Age the store file so the snapshot written next is unambiguously newer, without waiting on the clock.
+    const stored = new SessionManager(shellPaths.workingDirectory, { surface }).list().find((entry) => entry.name === sessionId);
+    expect(stored).toBeDefined();
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(stored!.filePath, past, past);
     writeRecoveryFile(
       { messages: [{ role: 'user', content: 'saved before the crash' }, { role: 'assistant', content: 'working...' }, { role: 'user', content: tailMessage }], title: 'Crash tail', timestamp: Date.now() },
       sessionId, 'Crash tail', { surface },
@@ -528,15 +535,27 @@ describe('registration self-records at startup (no modal, ever)', () => {
   function makeWorkspaceCommandContext(opts: {
     readonly trusted: boolean;
     readonly offerRegister: boolean;
-  }): { readonly commandContext: CommandContext; readonly registerCalls: Array<string | undefined> } {
+  }): {
+    readonly commandContext: CommandContext;
+    readonly registerCalls: Array<string | undefined>;
+    /** Settles when the fire-and-forget registration has evaluated / registered. */
+    readonly evaluated: Promise<void>;
+    readonly registered: Promise<void>;
+  } {
     const registerCalls: Array<string | undefined> = [];
+    let markEvaluated!: () => void;
+    let markRegistered!: () => void;
+    const evaluated = new Promise<void>((resolve) => { markEvaluated = resolve; });
+    const registered = new Promise<void>((resolve) => { markRegistered = resolve; });
     const commandContext = {
       workspace: {
         workspaceTrustManager: {
           isTrusted: () => opts.trusted,
         },
         workspaceRegistrationManager: {
-          evaluate: async () => ({
+          evaluate: async () => {
+            markEvaluated();
+            return {
             root: '/project',
             status: opts.offerRegister ? ('unknown' as const) : ('covered' as const),
             coveredBy: opts.offerRegister ? null : '/project',
@@ -544,21 +563,26 @@ describe('registration self-records at startup (no modal, ever)', () => {
             broad: false,
             offerRegister: opts.offerRegister,
             reason: 'test',
-          }),
+            };
+          },
           register: async (label?: string) => {
             registerCalls.push(label);
+            markRegistered();
             return { registered: true as const, result: { record: {} as never, alreadyRegistered: false } };
           },
         },
       },
     } as unknown as CommandContext;
-    return { commandContext, registerCalls };
+    return { commandContext, registerCalls, evaluated, registered };
   }
+
+  /** One full macrotask turn: every already-queued promise continuation has run by the time it resolves. */
+  const drain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
   test('self-records (labeled "via TUI") on startup when the workspace is already trusted and unregistered', async () => {
     const shellPaths = makeShellPaths();
     writeOnboardingCheckMarker(shellPaths, { scope: 'user', source: 'wizard', mode: 'new' });
-    const { commandContext, registerCalls } = makeWorkspaceCommandContext({ trusted: true, offerRegister: true });
+    const { commandContext, registerCalls, registered } = makeWorkspaceCommandContext({ trusted: true, offerRegister: true });
     const input = { prompt: '', cursorPos: 0, openOnboardingWizard: () => {} } as unknown as InputHandler;
 
     applyInitialTuiCliState({
@@ -570,9 +594,8 @@ describe('registration self-records at startup (no modal, ever)', () => {
       surface: makeTestSurface(shellPaths.workingDirectory, shellPaths.homeDirectory),
       render: () => {},
     });
-    // Fire-and-forget, give the microtask queue a turn to run it.
-    await Promise.resolve();
-    await Promise.resolve();
+    // Fire-and-forget: wait for the registration itself, not for a guessed number of microtask turns.
+    await registered;
 
     expect(registerCalls).toEqual(['via TUI']);
   });
@@ -592,8 +615,7 @@ describe('registration self-records at startup (no modal, ever)', () => {
       surface: makeTestSurface(shellPaths.workingDirectory, shellPaths.homeDirectory),
       render: () => {},
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await drain();
 
     expect(registerCalls).toEqual([]);
   });
@@ -601,7 +623,7 @@ describe('registration self-records at startup (no modal, ever)', () => {
   test('never self-records when the registry already covers/declines the root, even if trusted', async () => {
     const shellPaths = makeShellPaths();
     writeOnboardingCheckMarker(shellPaths, { scope: 'user', source: 'wizard', mode: 'new' });
-    const { commandContext, registerCalls } = makeWorkspaceCommandContext({ trusted: true, offerRegister: false });
+    const { commandContext, registerCalls, evaluated } = makeWorkspaceCommandContext({ trusted: true, offerRegister: false });
     const input = { prompt: '', cursorPos: 0, openOnboardingWizard: () => {} } as unknown as InputHandler;
 
     applyInitialTuiCliState({
@@ -613,8 +635,9 @@ describe('registration self-records at startup (no modal, ever)', () => {
       surface: makeTestSurface(shellPaths.workingDirectory, shellPaths.homeDirectory),
       render: () => {},
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    // The registry was consulted, said nothing to offer, and a full turn later nothing registered.
+    await evaluated;
+    await drain();
 
     expect(registerCalls).toEqual([]);
   });
@@ -622,7 +645,7 @@ describe('registration self-records at startup (no modal, ever)', () => {
   test('no selection/modal surface is ever opened for registration; commandContext.openSelection is never called', async () => {
     const shellPaths = makeShellPaths();
     writeOnboardingCheckMarker(shellPaths, { scope: 'user', source: 'wizard', mode: 'new' });
-    const { commandContext } = makeWorkspaceCommandContext({ trusted: true, offerRegister: true });
+    const { commandContext, registered } = makeWorkspaceCommandContext({ trusted: true, offerRegister: true });
     let openSelectionCalls = 0;
     (commandContext as unknown as { openSelection: () => void }).openSelection = () => { openSelectionCalls += 1; };
     const input = { prompt: '', cursorPos: 0, openOnboardingWizard: () => {} } as unknown as InputHandler;
@@ -636,8 +659,8 @@ describe('registration self-records at startup (no modal, ever)', () => {
       surface: makeTestSurface(shellPaths.workingDirectory, shellPaths.homeDirectory),
       render: () => {},
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    await registered;
+    await drain();
 
     expect(openSelectionCalls).toBe(0);
   });

@@ -38,8 +38,15 @@ export function onSemanticSummaryReady(listener: () => void): () => void {
 function beforeAfter(diff: string): { before: string; after: string } {
   const before: string[] = [];
   const after: string[] = [];
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') || line.startsWith('diff ') || line.startsWith('index ')) continue;
+  const lines = diff.split('\n');
+  // Only the `--- a` / `+++ b` pair outside a hunk is a header; inside one, a
+  // removed `-- x` or added `++x` line is content that merely looks like it.
+  let inHunk = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.startsWith('@@')) { inHunk = true; continue; }
+    if (line.startsWith('diff ') || line.startsWith('index ')) { inHunk = false; continue; }
+    if (!inHunk && line.startsWith('--- ') && lines[i + 1]?.startsWith('+++ ')) { i++; continue; }
     if (line.startsWith('+')) after.push(line.slice(1));
     else if (line.startsWith('-')) before.push(line.slice(1));
     else if (line.startsWith(' ')) { before.push(line.slice(1)); after.push(line.slice(1)); }

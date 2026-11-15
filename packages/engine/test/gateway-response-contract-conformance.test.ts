@@ -29,15 +29,14 @@
  *
  * Every store here is pointed at a fresh `mkdtemp` directory and torn down
  * afterwards. Nothing reads or writes `~/.goodvibes` or the owner's real
- * profile: `OwnerProfileStore` takes an explicit `path`, and the assertion in
- * "every fixture path stays inside the temp directory" holds that in place
- * rather than trusting it.
+ * profile: `OwnerProfileStore` and `OccasionStateStore` take explicit paths
+ * under that directory.
  *
  * ## Families covered
  *
  * `profile.*` (all nine verbs, reads and writes, present/absent/invalid/refused
- * shapes), `occasions.*` (sixteen verbs over a real OccasionsService and a real
- * state store), and `runtime.metrics.get`. Those are the families whose real
+ * shapes), `occasions.*` (every occasions verb in the contract, over a real
+ * OccasionsService and a real state store), and `runtime.metrics.get`. Those are the families whose real
  * implementations can be constructed in-process without a daemon; a family
  * exercised through a stub would only be asserting the stub's shape, which is
  * why none are here.
@@ -71,7 +70,10 @@ const CONTRACT_METHODS = new Map(
   OPERATOR_CONTRACT.operator.methods.map((method) => [method.id, method] as const),
 );
 
-const ctx = { context: { admin: true } } as const;
+const ctx = { context: { admin: true }, isAuthorized: () => true } as const;
+
+/** Every method id answered through `invokeAndCheck` so far. */
+const invokedIds = new Set<string>();
 
 const dirs: string[] = [];
 function mkTemp(prefix: string): string {
@@ -98,9 +100,12 @@ async function invokeAndCheck(
 ): Promise<unknown> {
   const method = CONTRACT_METHODS.get(id);
   expect(method, `${id} is not in the generated operator contract`).toBeDefined();
-  const response = await catalog.invoke(id, { ...ctx, body });
+  invokedIds.add(id);
+  // The client validates what came over the wire, where undefined fields are absent.
+  const response: unknown = JSON.parse(JSON.stringify(await catalog.invoke(id, { ...ctx, body })));
   const schema = method?.outputSchema;
-  if (!schema || typeof schema !== 'object') return response;
+  expect(schema, `${id} declares no outputSchema, so nothing would hold its answer to the contract`).toBeDefined();
+  expect(typeof schema).toBe('object');
   const failure = firstJsonSchemaFailure(schema as Record<string, unknown>, response);
   expect(
     failure === undefined ? 'conforms' : `${failure.path}: expected ${failure.expected}, received ${failure.received}`,
@@ -325,6 +330,13 @@ function occasionsHarness(): GatewayMethodCatalog {
 }
 
 describe('occasions.* responses conform to the published contract', () => {
+  test('acknowledge and conflict resolution', async () => {
+    const catalog = occasionsHarness();
+    await invokeAndCheck(catalog, 'occasions.acknowledge', { occasionId: "sarah's birthday" }, 'an occurrence in hand');
+    await invokeAndCheck(catalog, 'occasions.acknowledge', { occasionId: 'no-such-occasion' }, 'unknown occasion refused in-band');
+    await invokeAndCheck(catalog, 'occasions.conflict.resolve', { occasionId: "sarah's birthday" }, 'no open conflict item');
+  });
+
   test('the read verbs', async () => {
     const catalog = occasionsHarness();
     await invokeAndCheck(catalog, 'occasions.list', {}, 'one annual occasion on file');
@@ -405,6 +417,14 @@ describe('occasions.* responses conform to the published contract', () => {
       { occasionId: "sarah's birthday" },
       'what it landed on',
     );
+  });
+});
+
+describe('occasions verb coverage', () => {
+  test('every occasions verb the contract publishes is invoked and checked in this file', () => {
+    const published = [...CONTRACT_METHODS.keys()].filter((id) => id.startsWith('occasions.')).sort();
+    const checked = [...invokedIds].filter((id) => id.startsWith('occasions.')).sort();
+    expect(checked).toEqual(published);
   });
 });
 

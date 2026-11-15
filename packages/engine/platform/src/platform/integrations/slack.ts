@@ -159,7 +159,14 @@ export interface SlackSocketModeClientOptions {
    * machine take the workspace.
    */
   readonly onClosed?: ((reason: string) => void) | undefined;
+  /** How long `start()` waits for the socket to open before reporting that it did not. */
+  readonly openTimeoutMs?: number | undefined;
+  /** Timer seam for the open deadline; returns its own cancel function. */
+  readonly setTimer?: ((fn: () => void, ms: number) => () => void) | undefined;
 }
+
+/** A socket that has not opened by now will not; 30 s is well past a slow handshake. */
+const SOCKET_OPEN_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // SlackIntegration
@@ -525,6 +532,12 @@ export class SlackIntegration {
   }
 }
 
+function defaultSocketTimer(fn: () => void, ms: number): () => void {
+  const handle = setTimeout(fn, ms);
+  (handle as unknown as { unref?: () => void }).unref?.();
+  return () => { clearTimeout(handle); };
+}
+
 export class SlackSocketModeClient {
   private socket: WebSocket | null = null;
   private started = false;
@@ -558,24 +571,50 @@ export class SlackSocketModeClient {
     }
     // stop() ran while the connection URL was being fetched: do not open a socket nobody wants.
     if (epoch !== this.epoch) return { ok: false, error: 'stopped before the connection opened' };
-    this.started = true;
     const socket = new this.WebSocketImpl(connection.url);
     this.socket = socket;
+    // `started` means the socket is open, not that one was constructed: a start
+    // that resolved at construction reported a connection that had not been made.
+    let opened = false;
+    const opening = new Promise<SlackSocketModeConnection>((resolve) => {
+      const schedule = this.options.setTimer ?? defaultSocketTimer;
+      const cancelDeadline = schedule(() => fail('the Slack Socket Mode connection did not open in time'),
+        this.options.openTimeoutMs ?? SOCKET_OPEN_TIMEOUT_MS);
+      const fail = (error: string): void => {
+        cancelDeadline();
+        if (opened || this.socket !== socket) return resolve({ ok: false, error });
+        this.socket = null;
+        socket.close();
+        resolve({ ok: false, error });
+      };
+      socket.addEventListener('open', () => {
+        if (this.socket !== socket || opened) return;
+        opened = true;
+        cancelDeadline();
+        this.started = true;
+        resolve(connection);
+      });
+      socket.addEventListener('error', () => {
+        if (!opened) fail('the Slack Socket Mode connection failed before it opened');
+      });
+      socket.addEventListener('close', () => {
+        // A socket that is no longer current was either closed on purpose (stop()
+        // detaches it first) or replaced; its close says nothing about the live one.
+        // Before it opened, even a deliberate stop() has to settle the start.
+        if (!opened) return fail('the Slack Socket Mode connection closed before it opened');
+        if (this.socket !== socket) return;
+        this.started = false;
+        this.socket = null;
+        this.options.onClosed?.('the Slack Socket Mode connection closed');
+      });
+    });
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return;
       void this.handleMessage(event.data).catch((error: unknown) => {
         logger.warn('[slack] socket message handling failed', { error: summarizeError(error) });
       });
     });
-    socket.addEventListener('close', () => {
-      // A socket that is no longer current was either closed on purpose (stop()
-      // detaches it first) or replaced; its close says nothing about the live one.
-      if (this.socket !== socket) return;
-      this.started = false;
-      this.socket = null;
-      this.options.onClosed?.('the Slack Socket Mode connection closed');
-    });
-    return connection;
+    return opening;
   }
 
   stop(): void {

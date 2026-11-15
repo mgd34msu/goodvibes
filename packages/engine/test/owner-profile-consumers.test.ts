@@ -88,10 +88,9 @@ function mkTemp(): string {
   tmpDirs.push(dir);
   return dir;
 }
-// installOwnerProfileConsumers registers three PROCESS-level readers, and the
-// suite runs every test file in one process. Leaving them installed would let
-// this file's fixture profile redact strings in a later file's assertions, a
-// cross-file failure that looks like a defect in whichever file ran next.
+// installOwnerProfileConsumers registers three PROCESS-level readers. Tests in
+// this file share that process, so leaving them installed would let one test's
+// fixture profile redact strings in the next test's assertions.
 afterEach(() => {
   registerSignupBaseAddressFallback(null);
   registerProfileRedactionValues(null);
@@ -233,8 +232,8 @@ describe('§4.3: an invalid mechanical value falls back exactly like an unset on
   });
 });
 
-describe('§13.1: rows for keys that do not exist yet are inert', () => {
-  test('the declared map covers the design table, and the payments rows are absent from the schema', async () => {
+describe('§13.1: every declared fallback row names a key the schema declares', () => {
+  test('the declared map covers the design table, and the schema declares the keys the rows name', async () => {
     const store = await loadedStore();
     const keys = CONSUMER_FALLBACKS.map((row) => row.configKey);
     expect(keys).toContain('checkin.quietHours');

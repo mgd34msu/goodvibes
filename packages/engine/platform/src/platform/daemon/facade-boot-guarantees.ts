@@ -83,10 +83,20 @@ export function migrateDaemonOwnedConfigOnBoot(
     // rewrites settings every component on the machine reads. Record the floor
     // BEFORE the reload, so the file a reader sees never carries a migrated
     // shape without the version that explains it.
+    let floorError: unknown;
     if (daemonTierPath !== null) {
-      raiseReaderFloorInFile(daemonTierPath, SWEPT_CREDENTIAL_READER_FLOOR, 'daemon-owned-config-migration');
+      try {
+        raiseReaderFloorInFile(daemonTierPath, SWEPT_CREDENTIAL_READER_FLOOR, 'daemon-owned-config-migration');
+      } catch (error) { floorError = error; }
     }
+    // The settings are already moved on disk; this process must read them even when the floor write failed.
     configManager.load();
+    if (floorError !== undefined) {
+      logger.error('DaemonServer: the reader floor for the migrated daemon store could not be recorded', {
+        error: summarizeError(floorError),
+        detail: 'the settings were moved and reloaded; an older reader of the daemon store may not know the new shape',
+      });
+    }
     logger.info('DaemonServer: folded daemon-owned settings into the daemon store', {
       movedTo: result.marker.movedTo,
       moved: result.marker.moved.map((entry) => entry.key),

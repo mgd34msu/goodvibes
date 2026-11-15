@@ -7,8 +7,10 @@ import {
   readFirstEnv,
   resolveAudioInput,
   trimToUndefined,
+  signalInit,
+  voiceFetch,
 } from './shared.js';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+
 
 const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_GOOGLE_STT_MODEL = 'gemini-2.5-flash';
@@ -69,9 +71,11 @@ async function uploadGoogleFile(
   buffer: Uint8Array,
   mimeType: string,
   displayName: string,
+  signal?: AbortSignal,
 ): Promise<{ name: string; uri: string; mimeType: string }> {
   const uploadBaseUrl = baseUrl.replace(/\/v1beta$/, '');
-  const startResponse = await instrumentedFetch(`${uploadBaseUrl}/upload/v1beta/files`, {
+  const startResponse = await voiceFetch(`${uploadBaseUrl}/upload/v1beta/files`, {
+    ...signalInit(signal),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -94,7 +98,8 @@ async function uploadGoogleFile(
   if (!uploadUrl) {
     throw new Error('Google file upload start response missing upload URL');
   }
-  const uploadResponse = await instrumentedFetch(uploadUrl, {
+  const uploadResponse = await voiceFetch(uploadUrl, {
+    ...signalInit(signal),
     method: 'POST',
     headers: {
       'Content-Length': String(buffer.byteLength),
@@ -112,7 +117,7 @@ async function uploadGoogleFile(
 
 async function deleteGoogleFile(baseUrl: string, apiKey: string, name: string): Promise<void> {
   try {
-    await instrumentedFetch(`${baseUrl}/${name}`, {
+    await voiceFetch(`${baseUrl}/${name}`, {
       method: 'DELETE',
       headers: {
         'x-goog-api-key': apiKey,
@@ -150,7 +155,7 @@ export function createGoogleProvider(): VoiceProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('Google API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), GEMINI_API_BASE_URL);
-      const { buffer, mimeType } = await resolveAudioInput(request.audio);
+      const { buffer, mimeType } = await resolveAudioInput(request.audio, request.signal);
       const model = request.modelId?.trim() || DEFAULT_GOOGLE_STT_MODEL;
       const prompt = request.prompt?.trim() || 'Transcribe the provided audio. Return only the transcript.';
       const metadata = asRecord(request.metadata);
@@ -166,9 +171,11 @@ export function createGoogleProvider(): VoiceProvider {
             buffer,
             effectiveMimeType,
             inferFilename(request.audio, '.wav'),
+            request.signal,
           );
         }
-        const response = await instrumentedFetch(`${baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
+        const response = await voiceFetch(`${baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
+          ...signalInit(request.signal),
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

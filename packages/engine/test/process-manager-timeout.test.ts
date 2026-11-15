@@ -2,14 +2,15 @@
  * ProcessManager.spawn timeout + SIGKILL deadline + error surfacing
  *
  * Tests:
- * a) Hanging process: spawn with timeout_ms:100, verifies killDeadline is set
- * b) Normal short-lived process: exits cleanly, no killDeadline
- * c) spawn returns a process_id and pid
+ * a) Normal short-lived process: exits cleanly, no killDeadline
+ * b) spawn returns a process_id and pid
+ * (The kill on timeout itself is covered in process-manager-kill-on-timeout.test.ts.)
  */
 import { describe, expect, test } from 'bun:test';
 import { readFile, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { tmpdir } from 'node:os';
 import { waitFor } from './_helpers/test-timeout.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
@@ -20,7 +21,7 @@ useToolReadings();
 describe('ProcessManager.spawn', () => {
   test('returns process_id and pid', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('echo hello', '/tmp', undefined, { timeout_ms: 5000 });
+    const result = await pm.spawn('echo hello', tmpdir(), undefined, { timeout_ms: 5000 });
     expect(result.success).toBe(true);
     expect(typeof result.process_id).toBe('string');
     expect(result.process_id!.startsWith('bg_')).toBe(true);
@@ -31,7 +32,7 @@ describe('ProcessManager.spawn', () => {
 
   test('normal short-lived process: done=true, no killDeadline after completion', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('echo done', '/tmp', undefined, { timeout_ms: 5000 });
+    const result = await pm.spawn('echo done', tmpdir(), undefined, { timeout_ms: 5000 });
     const id = result.process_id!;
 
     await waitFor(() => {
@@ -51,7 +52,7 @@ describe('ProcessManager.spawn', () => {
     let path: string | undefined;
     const expected = '🛰️'.repeat(90_000) + '\nLAST_OUTPUT_MARKER\n';
     try {
-      const result = await pm.spawnArgv(process.execPath, ['-e', "process.stdout.write('🛰️'.repeat(90000) + '\\nLAST_OUTPUT_MARKER\\n')"], '/tmp', undefined);
+      const result = await pm.spawnArgv(process.execPath, ['-e', "process.stdout.write('🛰️'.repeat(90000) + '\\nLAST_OUTPUT_MARKER\\n')"], tmpdir(), undefined);
       await waitFor(() => pm.getStatus(result.process_id!)?.done === true);
       const status = pm.getStatus(result.process_id!)!;
       expect(status.exitCode).toBe(0);
@@ -64,29 +65,9 @@ describe('ProcessManager.spawn', () => {
     }
   });
 
-  test('hanging process: SIGKILL deadline is set after timeout', async () => {
-    const pm = new ProcessManager();
-    const before = Date.now();
-    // Use a sleep that exceeds the short timeout but keeps the test bounded.
-    const result = await pm.spawn('sleep 10', '/tmp', undefined, {
-      timeout_ms: 50,
-      sigterm_grace_ms: 30,
-    });
-    const id = result.process_id!;
-
-    await waitFor(() => {
-      const status = pm.getStatus(id);
-      return status === undefined || status.killDeadline !== null;
-    }, { timeoutMs: 500 });
-
-    const status = pm.getStatus(id);
-    expect(status === undefined || status.killDeadline !== null).toBe(true);
-    if (status) expect(status.killDeadline!).toBeGreaterThan(before);
-  }, 2000);
-
   test('bg_list and bg_status commands work', async () => {
     const pm = new ProcessManager();
-    await pm.spawn('sleep 1', '/tmp', undefined, { timeout_ms: 5000 });
+    await pm.spawn('sleep 1', tmpdir(), undefined, { timeout_ms: 5000 });
     const listResult = pm.handleCommand('bg_list');
     expect(listResult).not.toBeNull();
     expect(listResult!.success).toBe(true);

@@ -33,7 +33,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 ## Compatible and gateway providers
 
-The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`. The current built-ins:
+The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`, with one exception: `cohere`, `deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux` and `zenmux-anthropic` read the environment variable only, once at startup, so export the variable before launching; a key stored with `/secrets` does not activate them. The current built-ins:
 
 | Provider | Display name | API key variable |
 | --- | --- | --- |
@@ -44,8 +44,8 @@ The runtime also supports a broad compatible/gateway layer. Each entry below is 
 | `cerebras` | Cerebras | `CEREBRAS_API_KEY` |
 | `mistral` | Mistral | `MISTRAL_API_KEY` |
 | `ollama-cloud` | Ollama Cloud | `OLLAMA_CLOUD_API_KEY` or `OLLAMA_API_KEY` |
-| `huggingface` | HuggingFace | `HF_API_KEY`, `HUGGINGFACE_API_KEY`, or `HF_TOKEN` |
-| `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
+| `huggingface` | HuggingFace | `HF_API_KEY`, `HUGGINGFACE_API_KEY`, `HF_TOKEN`, or `HUGGING_FACE_HUB_TOKEN` |
+| `nvidia` | NVIDIA | `NVIDIA_API_KEY` or `NIM_API_KEY` |
 | `llm7` | LLM7 | `LLM7_API_KEY` |
 | `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` |
 | `fireworks` | Fireworks | `FIREWORKS_API_KEY` |
@@ -110,7 +110,7 @@ export OPENROUTER_API_KEY="..."
 export AIHUBMIX_API_KEY="..."
 ```
 
-Then pick any model from the `synthetic` provider. Keys can equally be stored with `/secrets set <NAME> <value>`; environment variables win when both are set.
+Then pick any model from the `synthetic` provider. Keys can equally be stored with `/secrets set <NAME> <value>` for the providers that accept stored keys (see the exception under compatible and gateway providers); environment variables win when both are set.
 
 ### What synthetic models are
 
@@ -150,7 +150,7 @@ Synthetic models are split into **Top Models** (S-tier or A-tier by benchmark) a
 
 ### Failover notices and cost delta
 
-Besides the backend rotation inside a single synthetic model described above, the TUI has a second, broader failover path. When any turn ends in `TURN_ERROR` and an optimizer-driven fallback chain has a viable next provider that has not already been tried this turn, the TUI switches to it and resubmits the turn, whether or not the original model was synthetic. A synthetic model is itself a fallback ladder over real backends, so this broader path never fails over *into* a synthetic model after a real one failed, only between real providers.
+Besides the backend rotation inside a single synthetic model described above, the TUI has a second, broader failover path. When a turn ends in a provider failure (`TURN_ERROR` with a `provider_error` or `provider_exhausted` stop reason) before any tool has started, and an optimizer-driven fallback chain has a viable next provider that has not already been tried this turn, the TUI switches to it and resubmits the turn, whether or not the original model was synthetic. A turn that failed for another reason (a hook denied the call, for example), or in which a tool had already started, is not resubmitted: the error is shown instead, because a second run would repeat the tool's side effects. A synthetic model is itself a fallback ladder over real backends, so this broader path never fails over *into* a synthetic model after a real one failed, only between real providers.
 
 When this happens, the transcript shows a notice naming both the source and destination providers alongside the full user-facing error description (the same message-and-action text a plain `[Error]` line would show). If the catalog contains per-1M-token pricing for both models, the notice also includes the cost delta in the form:
 
@@ -241,7 +241,7 @@ For example:
 
 A model's `contextWindow` is optional. Leave it out when the endpoint does not state one: the model's window is then shown as unknown (the status line reads `context 29.9k / unknown`) and no compaction or small-model prompt is driven by a guessed number. `/provider add` writes it only when the endpoint reported a window. When a provider accepts a request larger than a model's stated window, that window is treated as disproven and shown as unknown too.
 
-Provider JSON is hot-reloaded, so custom provider definitions appear in the model/runtime surfaces without restarting the process. Use the `/add-provider` skill for interactive guided setup with smart defaults for popular providers.
+Provider JSON is hot-reloaded, so custom provider definitions appear in the model/runtime surfaces without restarting the process. Use `/provider add` for interactive guided setup.
 
 ## Daemon OpenAI-Compatible API
 

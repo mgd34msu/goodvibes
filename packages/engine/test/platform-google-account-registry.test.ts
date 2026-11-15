@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -7,6 +7,7 @@ import {
   ACCOUNT_REGISTRY_PATH_SEGMENTS,
   MAX_ACCOUNT_RECORDS,
 } from '../platform/src/platform/google/account-registry.ts';
+import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 import { mintAddressFor } from '../platform/src/platform/google/signup-address.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,18 +119,50 @@ describe('AgentAccountRegistry', () => {
     expect(() => registry.record(validInput({ purpose: `signup account, ${SECRET_PASSWORD}` }))).toThrow('secret-looking');
   });
 
-  test('survives a corrupt store file without throwing and stays writable', () => {
+  test('lists a corrupt store as empty but flags it, and refuses to overwrite it', () => {
     const { registry, storePath } = tempRegistry();
     registry.record(validInput());
-    writeFileSync(storePath, '{ this is not json at all', 'utf-8');
+    const corrupt = '{ this is not json at all';
+    writeFileSync(storePath, corrupt, 'utf-8');
 
     expect(() => registry.list()).not.toThrow();
     expect(registry.list()).toHaveLength(0);
     expect(registry.snapshot().path).toBe(storePath);
+    expect(registry.snapshot().unreadable).toContain('not valid JSON');
 
-    const recovered = registry.record(validInput());
-    expect(recovered.id).toBe('github-com');
-    expect(registry.list()).toHaveLength(1);
+    expect(() => registry.record(validInput())).toThrow('was not changed');
+    expect(() => registry.sweep()).toThrow('was not changed');
+    expect(readFileSync(storePath, 'utf-8')).toBe(corrupt);
+  });
+
+  test('keeps a copy of the file when a rewrite drops entries the current check rejects', () => {
+    const { registry, storePath } = tempRegistry();
+    registry.record(validInput());
+    registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' }));
+    const before = readFileSync(storePath, 'utf-8');
+
+    const stricter = new AgentAccountRegistry({ storePath, containsSecretLikeText: (text) => text.includes('other.com') });
+    expect(stricter.list().map((account) => account.id)).toEqual(['github-com']);
+    stricter.sweep();
+
+    const copies = readdirSync(dirname(storePath)).filter((name) => name.includes('.dropped-') && name.endsWith('.bak'));
+    expect(copies).toHaveLength(1);
+    expect(readFileSync(join(dirname(storePath), copies[0]!), 'utf-8')).toBe(before);
+  });
+
+  test('refuses a change while another process holds the store lock, then succeeds once it is released', () => {
+    const { registry, storePath } = tempRegistry();
+    registry.record(validInput());
+    const release = tryAcquireCrossProcessLock(`${storePath}.lock`);
+    expect(release).not.toBeNull();
+    const before = readFileSync(storePath, 'utf-8');
+    try {
+      expect(() => registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' }))).toThrow('Another process');
+      expect(readFileSync(storePath, 'utf-8')).toBe(before);
+    } finally {
+      release?.();
+    }
+    expect(registry.record(validInput({ serviceDomain: 'other.com', serviceUrl: 'https://other.com/signup', aliasAddress: 'mike+gv-other-com-bbbbbbbb@example.com', credentialSecretKey: 'signup/other.com/b' })).id).toBe('other-com');
   });
 
   test('drops malformed records on read instead of failing the whole listing', () => {

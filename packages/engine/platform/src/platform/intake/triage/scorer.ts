@@ -1,5 +1,6 @@
 import { fanOut, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { logger } from '../../utils/logger.js';
 import type { InboxTriageSourceObservation } from '../cursor-store.js';
 import { inboxTriage } from './battery.js';
 import { captureTriageData, captureTriageInputs, captureTriageReceiptScope, triageConclusion, triageBinding, type CapturedTriageInput } from './evidence.js';
@@ -74,7 +75,17 @@ export async function scoreCapturedTriage(items: readonly CapturedTriageInput[],
       // message body or content commitment is retained with the conclusion.
       return Object.freeze({ ...triageBinding(item, source?.bindingFor(item.id)), ...attribution, ...conclusion });
     }));
-  } catch (error) { drainOwned(error); return unavailable(); }
+  } catch (error) {
+    drainOwned(error);
+    logger.warn('Inbox triage judgment unavailable', { reason: failureClass(error) });
+    return unavailable();
+  }
+}
+
+/** The kind of failure and nothing else: a message could carry provider or mail text. */
+function failureClass(error: unknown): string {
+  try { return error instanceof Error && /^\w{1,64}$/.test(error.name) ? error.name : typeof error; }
+  catch { return 'unreadable'; }
 }
 /** One injected, typed judgment request per nonempty admissible batch; never creates a provider. */
 export async function scoreInboxTriage(items: readonly TriageInput[], port?: JudgmentPort, signal?: AbortSignal): Promise<readonly TriageReceipt[]> {

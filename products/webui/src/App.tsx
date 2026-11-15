@@ -13,7 +13,9 @@ import type { ViewId } from './lib/router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDaemonHealth } from './hooks/useDaemonHealth';
 import { usePairingHandoff } from './hooks/usePairingHandoff';
+import { usePreloadErrorReload } from './hooks/usePreloadErrorReload';
 import { useRelayPairingHandoff } from './hooks/useRelayPairingHandoff';
+import { RelayPairingOffer } from './components/auth/RelayPairingOffer';
 import { usePushSubscriptionReconcile } from './hooks/usePushSubscriptionReconcile';
 import { useRealtimeInvalidation } from './hooks/useRealtimeInvalidation';
 import { useSessionRealtime } from './hooks/useSessionRealtime';
@@ -35,7 +37,8 @@ import { SignedOutGate } from './components/auth/SignedOutGate';
 import { DaemonUnreachableGate } from './components/auth/DaemonUnreachableGate';
 import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
-import { attentionCount } from './lib/fleet';
+import { needsYouCount } from './lib/needs-you';
+import { unpairRelay } from './lib/relay-connection';
 import { asRecord, bestId, bestTitle, firstString } from './lib/object';
 import { nonEmpty } from './lib/non-empty';
 import {
@@ -72,11 +75,14 @@ export default function App() {
   // validated. `pending` shows the pairing splash instead of the gate; `error` surfaces
   // on the gate. See usePairingHandoff.
   const pairing = usePairingHandoff();
+  // A lazily loaded chunk that fails because this page is an older build than the daemon serves reloads once.
+  usePreloadErrorReload();
   // Relay pairing hand-off: a `#relay=<gvrelay1.…>` fragment is consumed once at
   // mount, same discipline as the token pairing above, but for a DIFFERENT payload,
-  // transport bootstrap, not identity. Storing it is synchronous/local (no daemon
-  // round trip), so it never gates first paint the way `pairing.status === 'pending'`
-  // does; only a malformed code surfaces, as a banner on the signed-out gate.
+  // transport bootstrap, not identity. It never gates first paint the way
+  // `pairing.status === 'pending'` does: a decoded pairing waits as an offer the
+  // operator confirms (relayOffer below), and a malformed code surfaces as a banner on
+  // the signed-out gate.
   const relayPairing = useRelayPairingHandoff();
   const boot = useQuery({
     queryKey: ['boot'],
@@ -138,9 +144,29 @@ export default function App() {
     enabled: auth.isSuccess,
     refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
   });
+  // The badge counts what the Work page lists under "Needs you", which also holds
+  // pending approvals and ready best-of-N groups. Both queries share the Work page's
+  // cache keys, so opening the page re-uses these reads rather than adding more.
+  const approvalList = useQuery({
+    queryKey: queryKeys.approvals,
+    queryFn: () => platformClient.operator.approvals.list(),
+    enabled: auth.isSuccess,
+    refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
+  });
+  const attemptGroupList = useQuery({
+    queryKey: queryKeys.fleetAttempts,
+    queryFn: () => platformClient.operator.fleet.attempts.list(),
+    enabled: auth.isSuccess,
+    refetchInterval: fleetSubscriptionActive ? 60_000 : 15_000,
+    retry: false,
+  });
   const fleetAttentionCount = useMemo(
-    () => attentionCount(fleetSnapshot.data?.nodes ?? []),
-    [fleetSnapshot.data],
+    () => needsYouCount({
+      approvals: approvalList.data?.approvals ?? [],
+      nodes: fleetSnapshot.data?.nodes ?? [],
+      attemptGroups: attemptGroupList.isError ? [] : attemptGroupList.data?.groups ?? [],
+    }),
+    [approvalList.data, fleetSnapshot.data, attemptGroupList.data, attemptGroupList.isError],
   );
   const chatSessions = useQuery({
     queryKey: ['companion-chat', 'sessions'],
@@ -398,7 +424,11 @@ export default function App() {
     getCommands().find((command) => command.id === 'system.palette')?.run();
   }, []);
   const handleSignOut = useCallback(() => {
-    void clearStoredAuthToken().then(() => queryClient.invalidateQueries());
+    // A relay pairing routes this browser's requests to one daemon; signing out must not leave it behind.
+    void clearStoredAuthToken().then(() => {
+      unpairRelay();
+      return queryClient.invalidateQueries();
+    });
   }, [queryClient]);
 
   // Honest login gate. Signed-out (auth.current 401 → query error) shows the front door
@@ -453,9 +483,14 @@ export default function App() {
     );
   }
 
+  const relayOffer = relayPairing.status === 'pending' && relayPairing.pairing !== null
+    ? <RelayPairingOffer pairing={relayPairing.pairing} onConfirm={relayPairing.confirm} onDismiss={relayPairing.dismiss} />
+    : null;
+
   if (signedOut) {
     return (
       <AppShell view={view} onNavigate={handleNavigate} onOpenSettings={openSettings}>
+        {relayOffer}
         <SignedOutGate
           pairingError={pairing.status === 'error' ? pairing.error : undefined}
           relayPairingError={relayPairing.status === 'error' ? relayPairing.error : undefined}
@@ -500,6 +535,7 @@ export default function App() {
     {pairing.offers.length === 0 && pairing.postureNotice && (
       <PairingPostureNotice notice={pairing.postureNotice} onDismiss={pairing.dismissPostureNotice} />
     )}
+    {relayOffer}
     <RelayOverflowBanner />
     {/* voice.wake.indicator: 'banner' is the prominent persistent listening marker.
         Renders nothing for 'statusline' (the header's WakeChip owns that) or 'off'. */}
@@ -511,7 +547,12 @@ export default function App() {
         <DaemonUnreachableGate
           detail={formatError(auth.error)}
           retrying={auth.isFetching}
-          onRetry={() => void auth.refetch()}
+          // The health poll can still say 'down' for up to a probe interval after the daemon
+          // is back; Retry re-runs those probes now so the overlay does not outlive recovery.
+          onRetry={() => {
+            void queryClient.refetchQueries({ queryKey: ['daemon-health'] });
+            void auth.refetch();
+          }}
         />
       </div>
     )}

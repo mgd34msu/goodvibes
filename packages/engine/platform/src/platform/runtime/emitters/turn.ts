@@ -208,6 +208,8 @@ export function emitTurnError(
   data: {
     turnId: string;
     error: string;
+    status?: number | undefined;
+    code?: string | undefined;
     stopReason:
       | 'preflight_failed'
       | 'context_overflow'

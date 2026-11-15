@@ -13,13 +13,21 @@ import {
   NUMBER_SCHEMA,
   objectSchema,
   arraySchema,
+  branchedSchema,
+  requirementBranch,
 } from './method-catalog-shared.js';
 import { enumSchema, nullableSchema } from './operator-contract-schemas-shared.js';
 
 export const MCP_SCOPE_SCHEMA = enumSchema(['project', 'global']);
-export const MCP_SERVER_CONFIG_SCHEMA = objectSchema({
+/**
+ * A server to write: `command` starts a stdio process, `url` names a remote
+ * HTTP endpoint, and exactly one of them is given (the route refuses both and
+ * neither), so the schema requires at least one.
+ */
+export const MCP_SERVER_CONFIG_SCHEMA = branchedSchema(objectSchema({
   name: STRING_SCHEMA,
   command: STRING_SCHEMA,
+  url: STRING_SCHEMA,
   args: arraySchema(STRING_SCHEMA),
   env: objectSchema({}, [], { additionalProperties: true }),
   envKeys: arraySchema(STRING_SCHEMA),
@@ -27,16 +35,21 @@ export const MCP_SERVER_CONFIG_SCHEMA = objectSchema({
   trustMode: nullableSchema(STRING_SCHEMA),
   allowedPaths: arraySchema(STRING_SCHEMA),
   allowedHosts: arraySchema(STRING_SCHEMA),
-}, ['name', 'command']);
+}, ['name']), [
+  requirementBranch({ command: STRING_SCHEMA }, ['command']),
+  requirementBranch({ url: STRING_SCHEMA }, ['url']),
+]);
 export const MCP_CONFIG_SOURCE_SCHEMA = objectSchema({
   scope: STRING_SCHEMA,
   kind: STRING_SCHEMA,
   path: STRING_SCHEMA,
   writable: BOOLEAN_SCHEMA,
 }, ['scope', 'kind', 'path', 'writable']);
+/** `command` is null for an HTTP server and `url` is null for a stdio one; credentials in `url` and `args` read as `***` here. */
 export const MCP_CONFIG_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
-  command: STRING_SCHEMA,
+  command: nullableSchema(STRING_SCHEMA),
+  url: nullableSchema(STRING_SCHEMA),
   args: arraySchema(STRING_SCHEMA),
   envKeys: arraySchema(STRING_SCHEMA),
   role: nullableSchema(STRING_SCHEMA),
@@ -44,7 +57,7 @@ export const MCP_CONFIG_SERVER_SCHEMA = objectSchema({
   allowedPaths: arraySchema(STRING_SCHEMA),
   allowedHosts: arraySchema(STRING_SCHEMA),
   source: MCP_CONFIG_SOURCE_SCHEMA,
-}, ['name', 'command', 'args', 'envKeys', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
+}, ['name', 'command', 'url', 'args', 'envKeys', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
 export const MCP_RELOAD_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   action: enumSchema(['added', 'changed', 'removed', 'unchanged']),
@@ -64,7 +77,8 @@ export const MCP_CONFIG_RESPONSE_SCHEMA = objectSchema({
 /** The redacted server record plus its env VALUES. Admin-only, see mcp.servers.reveal. */
 export const MCP_REVEALED_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
-  command: STRING_SCHEMA,
+  command: nullableSchema(STRING_SCHEMA),
+  url: nullableSchema(STRING_SCHEMA),
   args: arraySchema(STRING_SCHEMA),
   envKeys: arraySchema(STRING_SCHEMA),
   env: objectSchema({}, [], { additionalProperties: true }),
@@ -73,7 +87,7 @@ export const MCP_REVEALED_SERVER_SCHEMA = objectSchema({
   allowedPaths: arraySchema(STRING_SCHEMA),
   allowedHosts: arraySchema(STRING_SCHEMA),
   source: MCP_CONFIG_SOURCE_SCHEMA,
-}, ['name', 'command', 'args', 'envKeys', 'env', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
+}, ['name', 'command', 'url', 'args', 'envKeys', 'env', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
 export const MCP_REVEAL_RESPONSE_SCHEMA = objectSchema({
   locations: arraySchema(MCP_CONFIG_SOURCE_SCHEMA),
   servers: arraySchema(MCP_REVEALED_SERVER_SCHEMA),
@@ -88,6 +102,13 @@ export const MCP_CONFIG_MUTATION_RESPONSE_SCHEMA = objectSchema({
 export const MCP_SERVER_STATUS_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   connected: BOOLEAN_SCHEMA,
+  transport: enumSchema(['stdio', 'http']),
+  protocolVersion: STRING_SCHEMA,
+  protocolEra: enumSchema(['modern', 'legacy']),
+  /** Where the client is in its connect/restart cycle; `gave-up` means it stopped retrying. */
+  phase: enumSchema(['idle', 'starting', 'negotiating', 'ready', 'restart-wait', 'gave-up', 'closed']),
+  /** The last connect or runtime failure, while it still describes the server. */
+  lastError: STRING_SCHEMA,
 }, ['name', 'connected']);
 export const MCP_SERVERS_RESPONSE_SCHEMA = objectSchema({
   servers: arraySchema(MCP_SERVER_STATUS_SCHEMA),

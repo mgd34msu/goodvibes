@@ -45,6 +45,7 @@ async function fixture() {
   const undo = new FileUndoManager(); const history = join(root, 'history.txt');
   undo.snapshot({ path: history, beforeContent: 'history original', afterContent: 'history before', tool: 'write' });
   undo.snapshot({ path: history, beforeContent: 'history before', afterContent: 'history after', tool: 'write' });
+  writeFileSync(history, 'history after');
   undo.undo(); const previous = undo.peekUndo();
   let thrown: unknown;
   const tool = (chat: () => Promise<string>, missingBackend = false) => {

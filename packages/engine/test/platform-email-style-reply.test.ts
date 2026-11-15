@@ -2,6 +2,10 @@
  * Tests for the writing-style-matched draft reply composer and lane descriptor.
  *
  * Recorded semantic answers run against the real protected loopback source owner. No external mail or provider service is contacted.
+ *
+ * The judgment answers here come from a per-body fact table, so the tone, greeting and
+ * frequency cases prove the wiring from corpus to profile, not the reading itself; the reading
+ * contract is covered in platform-email-style-readings.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -56,6 +60,7 @@ function makeSummary(overrides: Partial<EmailSummary> = {}): EmailSummary {
 
 let source: ReturnType<typeof taskRouteSourceFixture>;
 let prior: ReturnType<typeof installJudgmentPort>;
+let styles: ReturnType<typeof recordedStyles>;
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Unexpected style fixture shape');
   return Object.fromEntries(Object.entries(value));
@@ -135,7 +140,7 @@ function recordedStyles() {
     throw new Error('Unknown complete style fixture request');
   });
 }
-beforeEach(() => { source = taskRouteSourceFixture(); prior = installJudgmentPort(recordedStyles().port); });
+beforeEach(() => { source = taskRouteSourceFixture(); styles = recordedStyles(); prior = installJudgmentPort(styles.port); });
 afterEach(async () => { installJudgmentPort(prior); await source.close(); });
 const options = () => ({ sourceOwner: source.owner });
 const countSentences = (text: string) => nativeCountSentences(text, options());
@@ -370,16 +375,15 @@ describe('extractStyleProfile: corpus with bodies', () => {
     expect(profile.tone).toBe('formal');
   });
 
-  it('ignores messages with empty bodyPreview', async () => {
+  it('sent messages with empty bodyPreview give the default profile and ask the judgment port nothing', async () => {
     const sent = [
       makeSummary({ bodyPreview: '' }),
       makeSummary({ bodyPreview: '' }),
     ];
-    // Falls back to defaults since no usable bodies
     const profile = await extractStyleProfile(sent);
-    // Should not throw; greeting and signOff are still valid strings
-    expect(typeof profile.greeting).toBe('string');
-    expect(typeof profile.signOff).toBe('string');
+    // No readable text means nothing was learned, so the values are the defaults and say so.
+    expect(profile).toEqual({ greeting: 'Hi', signOff: 'Thanks', medianSentenceCount: 3, tone: 'neutral', isDefault: true });
+    expect(styles.requests).toEqual([]);
   });
 });
 
@@ -450,9 +454,10 @@ describe('composeDraftReply', () => {
 
   it('body does not contain secret-like text for normal inputs', async () => {
     const result = await composeDraftReply(inbound, defaultProfile, '', testContainsSecretLikeText);
-    // Verify the body passes the assertNoSecretLikeText check indirectly
-    // (no throw means it passed during composition)
-    expect(result.body).toBeTruthy();
+    // Composition runs the secret check on its own output, so reaching here means it passed;
+    // the assertion is that the composed text is clean by the same predicate.
+    expect(testContainsSecretLikeText(result.body)).toBe(false);
+    expect(result.body.length).toBeGreaterThan(defaultProfile.greeting.length);
   });
 
   it('handles inbound with no sender name gracefully', async () => {

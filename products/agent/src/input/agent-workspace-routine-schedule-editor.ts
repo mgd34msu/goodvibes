@@ -1,5 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceLocalLibraryItem } from './agent-workspace-types.ts';
-import { isAffirmative } from './agent-workspace-editors.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
@@ -97,7 +97,7 @@ export function buildAgentRoutineScheduleEditorSubmission(
   if (scheduleName.length > 0) parts.push('--name', quoteSlashCommandArg(scheduleName));
   const deliveryChannel = readField('deliveryChannel');
   if (deliveryChannel.length > 0) parts.push('--delivery-channel', quoteSlashCommandArg(deliveryChannel));
-  if (isOptionalAffirmative(readField('disabled'))) parts.push('--disabled');
+  if (isAffirmative(readField('disabled'))) parts.push('--disabled');
   parts.push('--yes');
   const command = parts.join(' ');
 
@@ -119,9 +119,4 @@ function readScheduleKind(value: string): RoutineScheduleKind | null {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'cron' || normalized === 'every' || normalized === 'at') return normalized;
   return null;
-}
-
-function isOptionalAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'y' || normalized === 'true' || normalized === 'enabled' || normalized === 'on';
 }

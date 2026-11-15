@@ -172,7 +172,10 @@ describe('MCP call route actual admission', () => {
       if (changed === 'revoked') f.setMode('plan');
       if (changed === 'cancelled') controller.abort();
     });
-    const result = await f.run(call(), controller.signal).catch(() => undefined); expect(result?.success).not.toBe(true); expect(f.calls).toHaveLength(0);
+    const result = await f.run(call(), controller.signal);
+    const expected = { policy: 'recorded source or execution authority changed', schema: 'recorded source or execution authority changed',
+      revoked: 'failed at the connected server boundary', cancelled: 'was cancelled while it was running' }[changed];
+    expect(result.success).toBe(false); expect(String(result.error)).toContain(expected); expect(f.calls).toHaveLength(0);
   });
   test('a schema accessor replacement is rejected without executing the accessor', async () => {
     const f = fixture(); let reads = 0; f.beforeCall(() => {

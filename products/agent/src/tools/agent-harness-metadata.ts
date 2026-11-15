@@ -1,4 +1,5 @@
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 export { describeCliCommandPolicy } from './agent-harness-cli-command-policy.ts';
 // Re-exported so this module stays the one import site for harness metadata,
 // exactly as describeCliCommandPolicy above already is.
@@ -92,7 +93,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'mixed',
       confirmation,
       preferredModelTool: settingsActions('list', 'get', 'set', 'reset', 'import'),
-      boundary: 'Settings can be changed through the first-class settings adapter, including daemon-owned ones, a write routes to the runtime that owns the key and reports the store it landed in. A short list of keys that turn off approval gates, weaken the exec sandbox, or expose this host to the network needs the user to ask first; the refusal names the key and says why.',
+      boundary: 'Settings can be changed through the first-class settings adapter, including daemon-owned ones, a write routes to the runtime that owns the key and reports the store it landed in. A change is applied only for what the owner asked in this turn, and confirm or explicitUserRequest arguments are not authority; owner-only keys such as payments.* are refused with the key and the reason.',
     };
   }
   if (root === 'model' || root === 'effort') {
@@ -267,7 +268,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       // ci.*/principals.*/channels.profiles.*, pointing the model there would
       // dead-end in "unknown action".
       preferredModelTool: 'agent_operator_method (methodId "ci.status", "ci.watches.*", "principals.*", "channels.profiles.*")',
-      boundary: 'CI status/watches, principal identity mappings, and per-channel profile defaults live on the connected host. Reads run through agent_operator_method without confirmation; writes require confirm + explicitUserRequest there, and mutating slash/CLI subcommands require --yes.',
+      boundary: `CI status/watches, principal identity mappings, and per-channel profile defaults live on the connected host. Reads run through agent_operator_method without confirmation. Writes there: ${EFFECT_ADMISSION_SENTENCE} Mutating slash/CLI subcommands require --yes.`,
     };
   }
   if (root === 'schedule' || root === 'remind' || root === 'reminder') {
@@ -291,15 +292,15 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'external-network',
       confirmation,
       preferredModelTool: `${agentHarnessModes('run_command')} (use /email set to configure, /email config to view settings)`,
-      boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. The generic settings action cannot set email.* keys, /email set is the only supported path.',
+      boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. /email set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /email set.',
     };
   }
   if (root === 'calendar' || root === 'cal') {
     return {
-      effect: 'local-state',
+      effect: 'mixed',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: 'Calendar commands manage local ICS events only; import/export and mutations require explicit --yes confirmation. Calendar configuration is set via /calendar subcommands, not the generic settings action.',
+      boundary: '/calendar list, add, delete, import and export work on local ICS events; import/export and mutations require explicit --yes confirmation. subscribe, unsubscribe and refresh fetch or store external feed URLs, and connect, disconnect and accounts run connected-calendar OAuth; those are owner-terminal flows that a model invocation is refused, and the command carries the outward-effect floor, not the local one. Calendar configuration is set via /calendar subcommands.',
     };
   }
   if (root === 'channels' || root === 'channel' || root === 'notify') {
@@ -423,10 +424,10 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
   }
   if (root === 'qrcode') {
     return {
-      effect: 'read-only',
+      effect: 'connected-host-state',
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: 'Pairing details are displayed for explicit operator use; the Agent does not manage connected-host listener lifecycle.',
+      boundary: 'Pairing details embed the connected host operator token, so only the owner typing the command in the live terminal receives them; a model invocation is refused. The Agent does not manage connected-host listener lifecycle.',
     };
   }
   return {
@@ -442,6 +443,5 @@ export function settingsPolicySummary(): Record<string, unknown> {
     mutation: 'Use settings action:"set" or action:"reset" with key, target, or query; the complete resolved effect plan requires current recorded admission. Ambiguous lookups are refused.',
     secretHandling: 'Raw secret values require the secure provisioning path and are refused before judgment, including through aliases. Stored references are opaque; reset/clear captures exact scoped secret deletion.',
     writablePolicy: 'Each setting descriptor includes writable and visibleInWorkspace. Managed or read-only owners refuse mutations. The current source, privacy floor and recorded permission decision govern every proposed effect.',
-    protectedRawDangerKeys: ['danger.httpListener'],
   };
 }

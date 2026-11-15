@@ -24,6 +24,9 @@ import {
  * parallel storage is invented. See openclaw-import.ts for the targeted layout.
  */
 
+/** Categories whose blanket allow lets the Agent change files or reach the network and the shell. */
+const BROAD_CATEGORIES: ReadonlySet<string> = new Set(['exec', 'write', 'edit', 'fetch']);
+
 interface ApplyCounts {
   created: number;
   skipped: number;
@@ -48,7 +51,13 @@ function planSummaryLines(plan: OpenClawImportPlan): string[] {
   for (const skill of plan.skills) lines.push(`    - ${skill.name}  (${skill.sourcePath})`);
   const perm = plan.permissions;
   lines.push(`  permission allowlist: ${perm.categories.length} categor${perm.categories.length === 1 ? 'y' : 'ies'}${perm.sourcePath ? ` (${perm.sourcePath})` : ''}`);
-  if (perm.categories.length > 0) lines.push(`    - allow: ${perm.categories.join(', ')}  (mode -> custom)`);
+  if (perm.categories.length > 0) {
+    lines.push(`    - allow: ${perm.categories.join(', ')}  (recorded as per-tool entries; they follow the execution mode, which is not changed)`);
+    const broad = perm.categories.filter((category) => BROAD_CATEGORIES.has(category));
+    if (broad.length > 0) {
+      lines.push(`    - warning: ${broad.join(', ')} would be allowed for every tool in the category, not only the arguments the OpenClaw entry named`);
+    }
+  }
   lines.push(`  skipped: ${plan.skipped.length}`);
   for (const entry of plan.skipped) lines.push(`    - ${entry.path}: ${entry.reason}`);
   return lines;
@@ -79,6 +88,17 @@ async function applyMemories(
   try {
     for (const memory of plan.memories) {
       try {
+        // The store gives every record a fresh id and never dedupes, so a
+        // second import would double the memories. A record from the same
+        // source file with the same summary is the one this import made.
+        const ref = `openclaw-import:${memory.sourcePath}`;
+        const existing = store.retrieve({ query: memory.summary })
+          .some((record) => record.summary === memory.summary && record.provenance.some((link) => link.ref === ref));
+        if (existing) {
+          counts.skipped += 1;
+          notes.push(`  memory skipped (${memory.summary}): already imported from ${memory.sourcePath}`);
+          continue;
+        }
         assertNoSecretLikeMemoryText([memory.summary, memory.detail ?? '', ...memory.tags]);
         await registry.add({
           scope: memory.scope as 'session' | 'project' | 'team',
@@ -86,7 +106,7 @@ async function applyMemories(
           summary: memory.summary,
           detail: memory.detail,
           tags: [...memory.tags],
-          provenance: [{ kind: 'event', ref: `openclaw-import:${memory.sourcePath}` }],
+          provenance: [{ kind: 'event', ref }],
         });
         counts.created += 1;
       } catch (error) {
@@ -149,29 +169,34 @@ function applySkills(runtime: CliCommandRuntime, plan: OpenClawImportPlan, notes
 function applyPermissions(runtime: CliCommandRuntime, plan: OpenClawImportPlan): number {
   const categories = plan.permissions.categories;
   if (categories.length === 0) return 0;
-  runtime.configManager.setDynamic('permissions.mode', 'custom');
+  // The execution mode is the owner's choice and is left as it is; the per-tool
+  // entries are what the OpenClaw allowlist said, and they follow that mode.
   for (const category of categories) {
     runtime.configManager.setDynamic(`permissions.tools.${category}` as never, 'allow');
   }
   return categories.length;
 }
 
-async function renderApply(runtime: CliCommandRuntime, plan: OpenClawImportPlan): Promise<string> {
+async function renderApply(runtime: CliCommandRuntime, plan: OpenClawImportPlan): Promise<{ readonly text: string; readonly skipped: number }> {
   const notes: string[] = [];
   const personas = applyPersonas(runtime, plan, notes);
   const memories = await applyMemories(runtime, plan, notes);
   const skills = applySkills(runtime, plan, notes);
   const permissionCategories = applyPermissions(runtime, plan);
-  return [
+  const skippedItems = personas.skipped + memories.skipped + skills.skipped;
+  const text = [
     `OpenClaw import (applied), layout ${OPENCLAW_LAYOUT_VERSION}`,
     `  source ${plan.sourcePath}`,
     `  personas created ${personas.created}${personas.skipped ? ` (skipped ${personas.skipped})` : ''}`,
     `  memory records created ${memories.created}${memories.skipped ? ` (skipped ${memories.skipped})` : ''}`,
     `  skills created ${skills.created}${skills.skipped ? ` (skipped ${skills.skipped})` : ''}`,
-    `  permission categories allowed ${permissionCategories}${permissionCategories ? ` (${plan.permissions.categories.join(', ')}; mode -> custom)` : ''}`,
+    `  permission categories recorded ${permissionCategories}${permissionCategories ? ` (${plan.permissions.categories.join(', ')})` : ''}`,
+    `  execution mode ${String(runtime.configManager.get('permissions.mode'))}${permissionCategories ? '; the per-tool allow entries follow this mode and do not change it' : ''}`,
     `  input files skipped ${plan.skipped.length}`,
+    ...(skippedItems > 0 ? [`  result partial: ${skippedItems} item${skippedItems === 1 ? '' : 's'} not created (see notes); exit 1`] : []),
     ...notes,
   ].join('\n');
+  return { text, skipped: skippedItems };
 }
 
 function usageImport(): string {
@@ -197,8 +222,8 @@ export async function handleImportCommand(runtime: CliCommandRuntime): Promise<C
       return failure(runtime, 'openclaw_workspace_missing', message, 1);
     }
     if (apply) {
-      const output = await renderApply(runtime, plan);
-      return success(runtime, 'agent.import.openclaw.apply', plan, output);
+      const applied = await renderApply(runtime, plan);
+      return { ...success(runtime, 'agent.import.openclaw.apply', { ...plan, itemsSkipped: applied.skipped }, applied.text), exitCode: applied.skipped > 0 ? 1 : 0 };
     }
     return success(runtime, 'agent.import.openclaw.dryRun', plan, renderDryRun(plan));
   } catch (error) {

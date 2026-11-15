@@ -68,10 +68,10 @@ export async function runTuiHostCommand(
     const preview = await previewTuiHostPairing({ configManager, homeDirectory: roots.homeDirectory, bootstrapShared }, name, controller.signal);
     io.write(formatTuiHostPairing(preview.result));
     if (!apply || !preview.confirm || !preview.result.confirmation) return controller.signal.aborted ? 130 : ['preview', 'already-paired'].includes(preview.result.status) ? 0 : 1;
-    const answer = await io.question(`Type ${preview.result.confirmation} to create this host-bound administrative credential, or press Enter to cancel: `, controller.signal);
+    const answer = await io.question(`Type ${preview.result.confirmation} to ${preview.result.confirmationPrompt ?? 'create this host-bound administrative credential'}, or press Enter to cancel: `, controller.signal);
     const result = await preview.confirm(answer, controller.signal);
     io.write(formatTuiHostPairing(result));
-    return controller.signal.aborted ? 130 : result.status === 'paired' ? 0 : result.status === 'cancelled' ? 2 : 1;
+    return controller.signal.aborted ? 130 : ['paired', 'cleared'].includes(result.status) ? 0 : result.status === 'cancelled' ? 2 : 1;
   } catch {
     io.write('Pairing interrupted. If a request may have started, run goodvibes host pair to inspect its outcome before taking further action.');
     return controller.signal.aborted ? 130 : 1;

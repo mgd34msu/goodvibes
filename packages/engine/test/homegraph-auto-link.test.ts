@@ -11,14 +11,14 @@ import { readHomeGraphState } from '../platform/src/platform/knowledge/home-grap
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:auto-link-fixture', installationId = 'auto-link-fixture';
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-auto-link-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const metadata = { knowledgeSpaceId: spaceId };
   const node = await seedHomeAssistantObservation(store, { id: 'LOCAL_DEVICE', kind: 'ha_device', slug: 'appliance',
     title: 'Kitchen appliance', aliases: [], status: 'active', metadata: { ...metadata, model: 'OV-7', private: 'DO_NOT_TRANSMIT' } });

@@ -7,6 +7,8 @@ import { AGENT_WORKSPACE_CATEGORIES, buildWorkspaceEditorContext, createWorkspac
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceEditorAction } from './agent-harness-workspace-editor-runner.ts';
 import { error, output, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
+import { formatHarnessError } from '../agent/harness-control.ts';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { assertModelReadingInputCurrent, captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -14,6 +16,13 @@ import { capturedHarnessSettingsImportPreview, harnessCatalogExecutionGuard, ret
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath, writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
+
+/** Editors that read the runtime snapshot (templates, selected routine, handoff artifacts, review defaults, OAuth status); the rest run the same on the empty fallback. */
+const EDITOR_KINDS_USING_RUNTIME_CONTEXT: ReadonlySet<string> = new Set([
+  'profile', 'routine-schedule', 'calendar-oauth-google', 'calendar-oauth-outlook',
+  'document-export', 'document-review-packet-preset', 'document-review-packet-share',
+  'model-compare-handoff-diff', 'model-compare-apply', 'model-compare-route-decision', 'model-compare-export',
+]);
 
 export async function runWorkspaceAction(
   deps: AgentHarnessToolDeps,
@@ -93,10 +102,23 @@ export async function runWorkspaceAction(
             return output({ status: 'confirmation_required', action: describeWorkspaceAction(category, action, { lookup }),
               preview: captured.preview, next: 'Use action:"import" with current recorded settings admission to apply this source.' });
           });
-      } catch { return error('Settings import preview is unavailable or its captured source is no longer current.'); }
+      } catch (err) {
+        // A stale or held source is a typed, retry-able outcome and an abort is the caller's: neither is "unavailable".
+        options?.signal?.throwIfAborted();
+        if (err instanceof ToolInputProjectionError) throw err;
+        return error(`Settings import preview is unavailable or its captured source is no longer current: ${formatHarnessError(err)}`);
+      }
     }
     try { return await executeAdmittedAgentSettingsImport(deps.commandContext, args, options); }
-    catch { return error('Settings import requires a current recorded effect-owner admission.'); }
+    catch (err) {
+      options?.signal?.throwIfAborted();
+      // Admission is refused with a typed held error before anything is written; anything else happened after the commit began.
+      if (err instanceof ToolInputProjectionError) {
+        if (err.problem === 'held') return error('Settings import requires a current recorded effect-owner admission. Nothing was written; ask the person to approve the import in the visible approval prompt, then call it again.');
+        throw err;
+      }
+      return error(`Settings import failed after it started and may be partially applied: ${formatHarnessError(err)}. Inspect the settings before retrying; nothing was retried.`);
+    }
   }
   if (action.kind === 'setup-checkpoint') {
     const operation = action.setupCheckpointOperation ?? 'show';
@@ -114,14 +136,21 @@ export async function runWorkspaceAction(
     const result = operation === 'clear'
       ? clearSetupCheckpoint(deps.commandContext, args, options)
       : await markSetupCheckpoint(deps.commandContext, args, options);
-    return output({
-      status: 'checkpoint_action_completed',
-      action: describeWorkspaceAction(category, action, { lookup }),
-      result,
-    });
+    const innerStatus = (result as { readonly status?: unknown }).status;
+    const written = innerStatus === 'checkpoint_saved' || innerStatus === 'checkpoint_cleared';
+    const body = { status: written ? 'checkpoint_action_completed' : typeof innerStatus === 'string' ? innerStatus : 'checkpoint_not_written',
+      action: describeWorkspaceAction(category, action, { lookup }), result };
+    if (written) return output(body);
+    const reason = (result as { readonly reason?: unknown }).reason;
+    return { success: false, output: JSON.stringify(body, null, 2), error: `${body.status}: ${typeof reason === 'string' ? reason : 'no setup checkpoint was written.'}` };
   }
   if (action.kind === 'editor' && action.editorKind) {
-    const editor = createWorkspaceEditor(action.editorKind, buildWorkspaceEditorContext(deps.commandContext, args));
+    const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
+    // An editor built on the empty fallback context has no selected routine, templates or handoff artifacts to act on.
+    if (editorContext?.contextUnavailable && EDITOR_KINDS_USING_RUNTIME_CONTEXT.has(action.editorKind)) {
+      return error(`Workspace action ${action.id} was not run and nothing was changed: ${editorContext.contextUnavailable} Fix the cause, then call this action again.`);
+    }
+    const editor = createWorkspaceEditor(action.editorKind, editorContext);
     if (!editor) return error(`No workspace editor route exists for ${action.editorKind}.`);
     return runWorkspaceEditorAction(deps, action, editor, args, options);
   }
@@ -146,14 +175,12 @@ export async function runWorkspaceAction(
       explicitUserRequest,
       checkMarker: {
         exists: checkMarker.exists,
-        path: checkMarker.path,
         updatedAt: checkMarker.payload?.updatedAt ?? null,
         source: checkMarker.payload?.source ?? null,
         mode: checkMarker.payload?.mode ?? null,
       },
       completionMarker: {
         exists: completionMarker.exists,
-        path: completionMarker.path,
         updatedAt: completionMarker.payload?.updatedAt ?? null,
         source: completionMarker.payload?.source ?? null,
         mode: completionMarker.payload?.mode ?? null,

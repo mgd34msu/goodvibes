@@ -130,3 +130,37 @@ export function extractAuthorizationCode(input: string): string | null {
     return null;
   }
 }
+
+export type AuthorizationInput =
+  | { readonly ok: true; readonly code: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Read what a user pasted for `login ... finish`: a redirect URL or a bare code.
+ * A redirect URL must carry a code, must not report a provider error, and, when
+ * the login's pending state is known, must echo that state.
+ */
+export function readAuthorizationInput(input: string, pendingState?: string | undefined): AuthorizationInput {
+  const trimmed = input.trim();
+  if (!trimmed) return { ok: false, reason: 'No authorization code was given.' };
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return { ok: true, code: trimmed };
+  }
+  // Only a web redirect is a URL here; a code such as `abc:def` is still a code.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: true, code: trimmed };
+  const error = url.searchParams.get('error');
+  if (error) {
+    const description = url.searchParams.get('error_description');
+    return { ok: false, reason: `The provider returned an error: ${error}${description ? ` (${description})` : ''}. Start the login again.` };
+  }
+  const state = url.searchParams.get('state');
+  if (pendingState !== undefined && state !== null && state !== pendingState) {
+    return { ok: false, reason: 'The pasted address belongs to a different login attempt (state mismatch). Paste the redirect from the latest start, or start again.' };
+  }
+  const code = url.searchParams.get('code');
+  if (!code) return { ok: false, reason: 'The pasted address has no code parameter. Paste the full redirect address or the code itself.' };
+  return { ok: true, code };
+}

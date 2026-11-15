@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { GOOGLE_REFERENCED_COMMANDS } from '@goodvibes-jev/engine/platform/platform/google';
-import { CommandRegistry } from '../../input/command-registry.ts';
+import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerGoogleRuntimeCommands } from '../../input/commands/google-runtime.ts';
 
 /** The registry with the Google command actually registered on it. */
@@ -57,6 +57,30 @@ describe('every command the Google flow names actually resolves', () => {
     }
 
     expect(missing).toEqual([]);
+  });
+
+  test('every declared or referenced /google subcommand reaches a handler branch, not the unknown-subcommand usage', async () => {
+    // The hint list is only text; this runs each name through the real
+    // dispatcher. A context with no services makes every branch that does work
+    // fail fast and print its own failure, while a name the dispatcher does not
+    // know falls through to the usage text.
+    const run = async (sub: string): Promise<string> => {
+      const out: string[] = [];
+      const ctx = { print: (text: string) => { out.push(text); } } as unknown as CommandContext;
+      await registry.get('google')!.handler([sub], ctx);
+      return out.join('\n');
+    };
+    const unknownUsage = await run('no-such-subcommand');
+    expect(unknownUsage).toContain('connect');
+
+    const referenced = GOOGLE_REFERENCED_COMMANDS.map((invocation) => invocation.slice(1).split(' '))
+      .filter(([command, sub]) => command === 'google' && sub !== undefined)
+      .map(([, sub]) => sub!);
+    const dead: string[] = [];
+    for (const sub of new Set([...declaredSubcommands(registry, 'google'), ...referenced])) {
+      if (await run(sub) === unknownUsage) dead.push(sub);
+    }
+    expect(dead).toEqual([]);
   });
 
   test('the commands the incident named by hand are all present', () => {

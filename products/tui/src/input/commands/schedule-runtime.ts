@@ -1,4 +1,4 @@
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
   formatEveryInterval,
   normalizeCronStaggerMs,
@@ -89,8 +89,28 @@ function formatPrompt(job: AutomationJob): string {
   return prompt.length > 60 ? `${prompt.slice(0, 60)}...` : prompt;
 }
 
-function resolveJob(manager: AutomationManager, id: string): AutomationJob | undefined {
-  return manager.listJobs().find((job) => job.id === id || job.id.startsWith(id));
+/**
+ * An exact id wins; otherwise a prefix must name exactly one job. `remove`,
+ * `disable` and `run` act on the result, so an ambiguous prefix is refused with
+ * the candidates instead of acting on whichever job is listed first.
+ */
+function resolveJob(manager: AutomationManager, id: string, ctx: CommandContext): AutomationJob | undefined {
+  const jobs = manager.listJobs();
+  const exact = jobs.find((job) => job.id === id);
+  if (exact) return exact;
+  const matches = jobs.filter((job) => job.id.startsWith(id));
+  if (matches.length === 0) {
+    ctx.print(`Automation job not found: ${id}`);
+    return undefined;
+  }
+  if (matches.length > 1) {
+    ctx.print(
+      `Ambiguous automation job "${id}": ${matches.length} jobs start with it. Nothing was changed. Use a longer id:\n`
+      + matches.map((job) => `  ${job.id}  ${job.name}`).join('\n'),
+    );
+    return undefined;
+  }
+  return matches[0];
 }
 
 function parseAtValue(raw: string): number {
@@ -122,7 +142,9 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
       const reading = sub === 'add' && args[1] === 'when'
         ? ctx.scheduleReading?.begin(JSON.stringify(args)) : undefined;
       if (sub === 'add' && args[1] === 'when' && !reading) {
-        ctx.print('Schedule reading is unavailable or this submission is already pending.');
+        ctx.print('Schedule reading is unavailable or this submission is already pending. Nothing was created; your text is back in the prompt.');
+        // Nothing was sent, so the typed description returns to an empty composer rather than being lost.
+        ctx.restoreDraft?.(`/schedule ${args.join(' ')}`);
         return;
       }
       const submittedAt = Date.now();
@@ -321,11 +343,8 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Usage: /schedule remove <id>');
           return;
         }
-        const job = resolveJob(manager, id);
-        if (!job) {
-          ctx.print(`Automation job not found: ${id}`);
-          return;
-        }
+        const job = resolveJob(manager, id, ctx);
+        if (!job) return;
         await manager.removeJob(job.id);
         ctx.print(`Removed automation job: ${job.id} (${job.name})`);
         return;
@@ -337,11 +356,8 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
           ctx.print(`Usage: /schedule ${sub} <id>`);
           return;
         }
-        const job = resolveJob(manager, id);
-        if (!job) {
-          ctx.print(`Automation job not found: ${id}`);
-          return;
-        }
+        const job = resolveJob(manager, id, ctx);
+        if (!job) return;
         const updated = await manager.setEnabled(job.id, sub === 'enable');
         if (!updated) {
           ctx.print(`Automation job not found: ${id}`);
@@ -360,11 +376,8 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Usage: /schedule run <id>');
           return;
         }
-        const job = resolveJob(manager, id);
-        if (!job) {
-          ctx.print(`Automation job not found: ${id}`);
-          return;
-        }
+        const job = resolveJob(manager, id, ctx);
+        if (!job) return;
         try {
           const run = await manager.runNow(job.id);
           ctx.print(

@@ -124,7 +124,7 @@ export class OpsPanel {
    */
   public getSnapshot(filter?: DiagnosticFilter): OpsAuditEntry[] {
     const entries = this._audit.map((r) => ({ ...r }) as OpsAuditEntry);
-    return applyFilter(entries, filter, (e) => e.ts);
+    return applyFilter(entries, filter, (e) => e.ts, this._config.bufferLimit);
   }
 
   /**

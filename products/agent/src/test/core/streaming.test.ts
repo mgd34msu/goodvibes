@@ -1,9 +1,7 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately per-repo test, kept per repo and not expected to match the sibling product's copy: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
-import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createTestConfigManager } from '../helpers/test-managers.ts';
-import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 
 // ---------------------------------------------------------------------------
 // ConversationManager streaming block lifecycle
@@ -83,43 +81,4 @@ describe('ConversationManager streaming block lifecycle', () => {
     expect(msgs[0]).toMatchObject({ role: 'assistant', content: 'previous response' });
     expect(msgs[1]).toMatchObject({ role: 'user', content: 'follow-up' });
   });
-});
-
-// ---------------------------------------------------------------------------
-// Abort during streaming: orchestrator cleanup
-// ---------------------------------------------------------------------------
-
-describe('Orchestrator: abort during streaming cleanup', () => {
-  async function buildOrchestrator() {
-    const { Orchestrator } = await import('@goodvibes-jev/engine/platform/platform/core');
-    const { ConversationManager } = await import('../../core/conversation.ts');
-    const { PermissionManager, createPermissionConfigReader } = await import('@goodvibes-jev/engine/platform/platform/permissions');
-    const { ToolRegistry } = await import('@goodvibes-jev/engine/platform/platform/tools');
-    const configManager = createTestConfigManager();
-    const cm = new ConversationManager(() => 80, configManager);
-    const policyRuntimeState = new PolicyRuntimeState();
-    const pm = new PermissionManager(async () => ({ approved: true }), createPermissionConfigReader(configManager), policyRuntimeState);
-    const tr = new ToolRegistry();
-    const orch = new Orchestrator({
-      conversation: cm,
-      getViewportHeight: () => 24,
-      scrollToEnd: () => {},
-      toolRegistry: tr,
-      permissionManager: pm,
-      getSystemPrompt: () => '',
-      services: {
-        agentManager: new AgentManager({ configManager }),
-        contractRunner: { list: () => [] },
-        contractIntake: { intake: async () => ({ kind: 'turn' }) },
-      },
-    });
-    return { orch, cm };
-  }
-
-  test('isStreaming flag starts false on a fresh orchestrator', async () => {
-    const { orch } = await buildOrchestrator();
-    // Access via type cast since it is private
-    expect((orch as unknown as { isStreaming: boolean }).isStreaming).toBe(false);
-  });
-
 });

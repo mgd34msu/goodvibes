@@ -26,6 +26,7 @@ import {
   redactHarnessSettingValue,
   setHarnessSetting,
 } from '../../agent/harness-control.ts';
+import { AgentConfigManager } from '../../config/host-settings.ts';
 import { ensureDaemonConfigMigrated } from '../../config/ensure-daemon-config-migrated.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -162,8 +163,8 @@ describe('startup migration', () => {
     expect(first).toContain('Daemon-owned settings');
     expect(ensureDaemonConfigMigrated(h)).toBeNull();
 
-    // And any surface now resolves it from the daemon store.
-    const config = agentConfig(h);
+    // And the Agent resolves it from the daemon store the migration wrote, wherever that home is.
+    const config = new AgentConfigManager({ homeDir: h, surfaceRoot: 'agent' });
     expect(config.get('surfaces.telegram.botUsername')).toBe('legacy_bot');
     expect(config.describeConfigKeySource('surfaces.telegram.botUsername').tier).toBe('daemon');
   });

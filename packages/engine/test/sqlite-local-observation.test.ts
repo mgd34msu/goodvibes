@@ -167,7 +167,6 @@ test('full fresh parsed column types detect writable_schema divergence across ex
 });
 
 
-// Regression source intentionally UNRUN during the coding-first pass.
 test('exact private logical comparisons preserve clean rollback without computing a digest', async () => {
   const db = await database(); db.run("INSERT INTO evidence VALUES ('original private value')");
   const hash = spyOn(crypto, 'createHash');

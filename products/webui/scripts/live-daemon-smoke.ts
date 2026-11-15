@@ -48,19 +48,24 @@ function log(step: string): void {
   process.stdout.write(`  • ${step}\n`);
 }
 
-function sessionId(value: unknown): string {
-  const record = (value ?? {}) as Record<string, unknown>;
-  const direct = record.sessionId ?? record.id;
-  if (typeof direct === 'string' && direct) return direct;
-  const nested = (record.session ?? {}) as Record<string, unknown>;
-  const inner = nested.sessionId ?? nested.id;
-  return typeof inner === 'string' ? inner : '';
+// One wire shape, the one the typed client and the generated facade rely on:
+// sessions.create -> { session: { id } }, sessions.list -> { sessions: [{ id }] }.
+// Accepting alternatives here would let a shape change pass this lane while the
+// app's own client broke against the same daemon.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function sessionsFrom(value: unknown): Record<string, unknown>[] {
-  const record = (value ?? {}) as Record<string, unknown>;
-  const list = Array.isArray(record.sessions) ? record.sessions : Array.isArray(value) ? value : [];
-  return list.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object');
+function createdSessionId(value: unknown): string {
+  assert.ok(isRecord(value) && isRecord(value.session), 'sessions.create returns { session: { id } }');
+  const id = value.session.id;
+  assert.ok(typeof id === 'string' && id !== '', 'sessions.create returns a session with a string id');
+  return id;
+}
+
+function listedSessionIds(value: unknown): string[] {
+  assert.ok(isRecord(value) && Array.isArray(value.sessions), 'sessions.list returns { sessions: [...] }');
+  return value.sessions.flatMap((entry) => (isRecord(entry) && typeof entry.id === 'string' ? [entry.id] : []));
 }
 
 /**
@@ -199,12 +204,11 @@ async function main(): Promise<void> {
     // 2) A real mutating round-trip: create a session, then read it back from the list.
     log('creating a session…');
     const created = await engine.operator.invoke('sessions.create', { title: SESSION_TITLE });
-    const createdId = sessionId(created);
-    assert.ok(createdId, 'sessions.create returned a session id');
+    const createdId = createdSessionId(created);
 
     log('listing sessions and asserting the new one is present…');
     const listed = await engine.operator.invoke('sessions.list', {});
-    const found = sessionsFrom(listed).some((entry) => sessionId(entry) === createdId);
+    const found = listedSessionIds(listed).includes(createdId);
     assert.ok(found, `the created session (${createdId}) appears in the real daemon's session list`);
 
     // 3) Real streamed state: open the live control-plane SSE against the daemon and assert

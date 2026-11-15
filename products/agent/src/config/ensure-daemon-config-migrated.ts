@@ -10,8 +10,10 @@
  */
 
 import {
+  daemonConfigPathForHome,
   describeDaemonConfigMigration,
   migrateDaemonOwnedConfig,
+  resolveGoodVibesDaemonHome,
   type DaemonConfigMigrationResult,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -30,7 +32,9 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 export function ensureDaemonConfigMigrated(homeDir: string): string | null {
   let result: DaemonConfigMigrationResult;
   try {
-    result = migrateDaemonOwnedConfig({ homeDir, primarySurface: 'tui' });
+    // The daemon reads the store under its own resolved home, which GOODVIBES_DAEMON_HOME can move.
+    const daemonStorePath = daemonConfigPathForHome(resolveGoodVibesDaemonHome(homeDir));
+    result = migrateDaemonOwnedConfig({ homeDir, primarySurface: 'tui', daemonStorePath });
   } catch (error) {
     logger.warn('[config] daemon-owned config migration failed; settings were left where they are', {
       homeDir,

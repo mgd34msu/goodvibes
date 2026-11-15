@@ -91,6 +91,9 @@ type RetiredAgentCost = {
 export class CostTracker {
   private usage: CostTrackerUsage = EMPTY_USAGE;
   private model = 'unknown';
+  /** Cost of usage already settled at the model that produced it, and the counters that cost covers. */
+  private settledCost = 0;
+  private settledUsage: CostTrackerUsage = EMPTY_USAGE;
   private history: number[] = [];
   private lastSessionCost = 0;
   private readonly agentRows = new Map<string, MutableAgentCost>();
@@ -155,7 +158,16 @@ export class CostTracker {
   }
 
   private takeUsage(usage: CostTrackerUsage & { readonly model?: string | undefined }): void {
-    this.usage = { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite };
+    const next = { input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite };
+    if (next.input < this.usage.input || next.output < this.usage.output
+      || next.cacheRead < this.usage.cacheRead || next.cacheWrite < this.usage.cacheWrite) {
+      // The counters restarted (a new session), so nothing settled applies to them.
+      this.settledCost = 0; this.settledUsage = EMPTY_USAGE;
+    } else if (usage.model && usage.model !== this.model) {
+      // Tokens counted so far were produced by the outgoing model; they keep its price.
+      this.settledCost = this.sessionCost(); this.settledUsage = this.usage;
+    }
+    this.usage = next;
     if (usage.model) this.model = usage.model;
   }
 
@@ -284,10 +296,11 @@ export class CostTracker {
 
   sessionUsage(): CostTrackerUsage { return this.usage; }
   sessionModel(): string { return this.model; }
-  /** The session's cost so far, priced on its current model. */
+  /** The session's cost so far: usage before a model switch at the old model's price, the rest at the current model's. */
   sessionCost(): number {
     const { input, output, cacheRead, cacheWrite } = this.usage;
-    return this.price(input, output, cacheRead, cacheWrite, this.model).cost;
+    const base = this.settledUsage;
+    return this.settledCost + this.price(input - base.input, output - base.output, cacheRead - base.cacheRead, cacheWrite - base.cacheWrite, this.model).cost;
   }
   /** Cost added per refresh, oldest first, at most the history length. */
   costHistory(): readonly number[] { return this.history; }

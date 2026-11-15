@@ -8,7 +8,7 @@
  * allow to deny or touching the frozen catastrophic block. Pins: broker
  * attribution, approve/deny passthrough, annotate-only default, auto-approve
  * opt-in path only on a confident looks-safe reading, the allow-to-deny
- * invariant, an uncertain reading annotating, and a port failure surfacing.
+ * invariant, an uncertain reading annotating, and a port failure still asking the owner.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -146,14 +146,16 @@ describe('sandbox judgment tier', () => {
     expect(outcome.judgmentReceipt?.verdict).toBe('uncertain');
   });
 
-  test('a missing judgment port surfaces as an error, never a silent pass', async () => {
+  test('an unavailable advisory still asks the owner, never a silent pass', async () => {
     installJudgmentPort(undefined);
-    const { requester, seen } = spyApproval(true);
+    const { requester, seen } = spyApproval(false);
     const handler = createSandboxEscalationApprovalHandler(requester, {
       config: { enabled: true, autoApprove: true },
     });
-    await expect(handler(req())).rejects.toThrow();
-    expect(seen).toHaveLength(0);
+    const outcome = await handler(req());
+    expect(outcome.approved).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.analysis.reasons.some((x) => x.includes('advisory reading was unavailable'))).toBe(true);
   });
 
   test('disabled tier does not read at all', async () => {

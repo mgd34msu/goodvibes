@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { writeStoreJson } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreJson } from '@/utils/store-file.ts';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { captureCatalogMethods, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from '../tools/agent-harness-model-reading-source.ts';
 import { type LearningCandidateCollection, type LearningCuratorNativeContext } from '../tools/agent-harness-learning-curator-source.ts';
@@ -129,6 +130,47 @@ function sameLedgerFile(expected: LedgerFile, actual: LedgerFile): boolean {
       && sameLedgerIdentity(expected.stat, actual.stat);
 }
 
+/** Whether rewriting a ledger from what `parseLedger` kept would drop part of what is on disk. */
+function ledgerRewriteWouldLoseData(bytes: string, keptEntries: number): boolean {
+  try {
+    const raw: unknown = JSON.parse(bytes);
+    if (!isRecord(raw)) return true;
+    return Array.isArray(raw.entries) ? raw.entries.length > keptEntries : false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Persist the ledger entries for skills this pass already created when the pass
+ * then fails. The skills exist either way; without their entries a later pass
+ * would propose the same candidates again. It re-reads the ledger under the
+ * store lock and merges, so it never replaces entries another writer added, and
+ * it never throws over the error that is already being reported.
+ */
+function recordCreatedDraftsAfterFailure(ledgerPath: string, entries: readonly SkillDraftLedgerEntry[]): void {
+  try {
+    runStoreFileUpdateSync(ledgerPath, () => {
+      const file = readLedgerFile(ledgerPath);
+      const current = parseLedger(file.kind === 'file' ? file.bytes : undefined);
+      if (file.kind === 'file' && ledgerRewriteWouldLoseData(file.bytes, current.entries.length)) {
+        fs.writeFileSync(`${ledgerPath}.corrupt`, file.bytes, 'utf8');
+      }
+      const known = new Set(current.entries.map((entry) => entry.skillId));
+      writeStoreJson(ledgerPath, {
+        version: LEDGER_VERSION,
+        entries: [...current.entries, ...entries.filter((entry) => !known.has(entry.skillId))],
+      });
+    });
+  } catch (error) {
+    logger.error('Skill draft ledger could not record skills created before the pass failed', {
+      path: ledgerPath,
+      skillIds: entries.map((entry) => entry.skillId),
+      error: summarizeError(error),
+    });
+  }
+}
+
 function readLedger(ledgerPath: string): SkillDraftLedgerFile {
   const file = readLedgerFile(ledgerPath);
   return parseLedger(file.kind === 'file' ? file.bytes : undefined);
@@ -228,68 +270,88 @@ export async function runSkillDraftProposer(
   const drafts = proposeSkillDrafts({ candidates: collection.candidates, existingSkillNames, previouslyProposedNames, previouslyProposedCandidateIds });
   const newEntries: SkillDraftLedgerEntry[] = [];
   const skillIds: string[] = [];
-  for (const draft of drafts) {
-    assertCurrent();
-    const candidate = collection.candidates.find(candidate => candidate.id === draft.candidateId);
-    if (!candidate) throw new ToolInputProjectionError('held');
-    collection.assertCandidateCurrent(candidate);
-    assertCurrent();
-    const input = {
-      name: draft.name, description: draft.description, procedure: draft.procedure,
-      triggers: draft.triggers, tags: draft.tags, requirements: draft.requirements,
-      enabled: false, source: 'agent', provenance: draft.provenance,
-    } satisfies Parameters<AgentSkillRegistry['create']>[0];
-    const transition = collection.prepareTransition({ kind: 'create', domain: 'skill', input });
-    let restrictionFailed = false;
-    let returned = false;
-    try {
-      const writer = AgentSkillRegistry.fromShellPaths(shellPaths, {
-        assertCurrent: () => {
-          try {
-            assertOwnership(); assertLearningCandidateCollection(collection, context, options); transition.effects.assertCurrent();
-            if (typeof priorCurrent === 'function') {
-              const result: unknown = priorCurrent.call(priorEffects);
-              if (result !== undefined) {
-                if (nodeTypes.isPromise(result)) Promise.prototype.then.call(result, undefined, () => {});
-                throw new ToolInputProjectionError('stale');
-              }
-            }
-            assertOwnership(); assertLearningCandidateCollection(collection, context, options); transition.effects.assertCurrent();
-          } catch (error) { restrictionFailed = true; throw error; }
-        },
-        onEffect: published => {
-          try {
-            transition.effects.onEffect?.(published);
-            if (typeof priorEffect === 'function') {
-              const result: unknown = priorEffect.call(priorEffects, published);
-              if (result !== undefined) {
-                if (nodeTypes.isPromise(result)) Promise.prototype.then.call(result, undefined, () => {});
-                throw new ToolInputProjectionError('stale');
-              }
-            }
-            assertOptions(); assertSignal(); assertNativeRegistry(); assertFileMethods(); assertPrior();
-            signal?.throwIfAborted();
-          } catch (error) { restrictionFailed = true; throw error; }
-        },
-      });
-      transition.effects.assertCurrent(); assertOwnership();
-      const skill = writer.create(input);
-      returned = true;
-      transition.commit(skill); assertCurrent();
-      const entry: SkillDraftLedgerEntry = {
-        skillId: skill.id, name: skill.name, candidateId: draft.candidateId,
-        proposedAt: new Date().toISOString(),
-      };
-      newEntries.push(entry); skillIds.push(skill.id);
-    } catch (error) {
-      transition.abort();
-      if (returned || restrictionFailed || error instanceof ToolInputProjectionError || signal?.aborted) throw error;
-      // Only an unchanged pre-publication validation failure may skip a draft.
+  try {
+    for (const draft of drafts) {
       assertCurrent();
+      const candidate = collection.candidates.find(candidate => candidate.id === draft.candidateId);
+      if (!candidate) throw new ToolInputProjectionError('held');
+      collection.assertCandidateCurrent(candidate);
+      assertCurrent();
+      const input = {
+        name: draft.name, description: draft.description, procedure: draft.procedure,
+        triggers: draft.triggers, tags: draft.tags, requirements: draft.requirements,
+        enabled: false, source: 'agent', provenance: draft.provenance,
+      } satisfies Parameters<AgentSkillRegistry['create']>[0];
+      const transition = collection.prepareTransition({ kind: 'create', domain: 'skill', input });
+      let restrictionFailed = false;
+      let returned = false;
+      try {
+        const writer = AgentSkillRegistry.fromShellPaths(shellPaths, {
+          assertCurrent: () => {
+            try {
+              assertOwnership(); assertLearningCandidateCollection(collection, context, options); transition.effects.assertCurrent();
+              if (typeof priorCurrent === 'function') {
+                const result: unknown = priorCurrent.call(priorEffects);
+                if (result !== undefined) {
+                  if (nodeTypes.isPromise(result)) Promise.prototype.then.call(result, undefined, () => {});
+                  throw new ToolInputProjectionError('stale');
+                }
+              }
+              assertOwnership(); assertLearningCandidateCollection(collection, context, options); transition.effects.assertCurrent();
+            } catch (error) { restrictionFailed = true; throw error; }
+          },
+          onEffect: published => {
+            try {
+              transition.effects.onEffect?.(published);
+              if (typeof priorEffect === 'function') {
+                const result: unknown = priorEffect.call(priorEffects, published);
+                if (result !== undefined) {
+                  if (nodeTypes.isPromise(result)) Promise.prototype.then.call(result, undefined, () => {});
+                  throw new ToolInputProjectionError('stale');
+                }
+              }
+              assertOptions(); assertSignal(); assertNativeRegistry(); assertFileMethods(); assertPrior();
+              signal?.throwIfAborted();
+            } catch (error) { restrictionFailed = true; throw error; }
+          },
+        });
+        transition.effects.assertCurrent(); assertOwnership();
+        const skill = writer.create(input);
+        returned = true;
+        // Recorded the moment the skill exists, so a later check that fails still leaves it in the ledger.
+        newEntries.push({
+          skillId: skill.id, name: skill.name, candidateId: draft.candidateId,
+          proposedAt: new Date().toISOString(),
+        });
+        skillIds.push(skill.id);
+        transition.commit(skill); assertCurrent();
+      } catch (error) {
+        transition.abort();
+        if (!returned) {
+          // A check that fails after the skill was published leaves it without a returned record.
+          try {
+            const published = AgentSkillRegistry.fromShellPaths(shellPaths).get(draft.name);
+            if (published && published.provenance === draft.provenance) {
+              newEntries.push({ skillId: published.id, name: published.name, candidateId: draft.candidateId, proposedAt: new Date().toISOString() });
+              skillIds.push(published.id);
+            }
+          } catch { /* the original error is the one to report */ }
+        }
+        if (returned || restrictionFailed || error instanceof ToolInputProjectionError || signal?.aborted) throw error;
+        // Only an unchanged pre-publication validation failure may skip a draft.
+        assertCurrent();
+      }
     }
+  } catch (error) {
+    if (newEntries.length > 0) recordCreatedDraftsAfterFailure(ledgerPath, newEntries);
+    throw error;
   }
   if (newEntries.length > 0) {
     assertCurrent();
+    // A ledger this release could only partly read is kept beside the new one, never silently replaced.
+    if (ledgerFile.kind === 'file' && ledgerRewriteWouldLoseData(ledgerFile.bytes, ledger.entries.length)) {
+      fs.writeFileSync(`${ledgerPath}.corrupt`, ledgerFile.bytes, 'utf8');
+    }
     const expected = { version: LEDGER_VERSION, entries: [...ledger.entries, ...newEntries] };
     const expectedBytes = `${JSON.stringify(expected, null, 2)}\n`;
     let published = false;

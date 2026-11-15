@@ -26,7 +26,7 @@ import type { FeatureFlagManager } from '../feature-flags/index.js';
 import { OtlpExporter } from './exporters/index.js';
 import type { OtlpConfig } from './exporters/index.js';
 import { logger } from '../../utils/logger.js';
-import { installPlatformTracer } from '../metrics.js';
+import { installPlatformTracer, platformTracer } from '../metrics.js';
 
 // Re-export all public types
 export type {
@@ -240,7 +240,28 @@ export function createTelemetryProvider(config?: TelemetryConfig, options: Telem
 export function installComposedTelemetry(
   featureFlags: Pick<FeatureFlagManager, 'isEnabled'>,
 ): { tracer: RuntimeTracer; meter: RuntimeMeter } {
+  composedTelemetryHolders += 1;
   const provider = createTelemetryProvider(undefined, { featureFlags });
+  const previous = platformTracer();
   installPlatformTracer(provider.tracer);
+  // A tracer this replaces would otherwise keep spans still waiting in its exporters, unsent.
+  if (previous !== provider.tracer) void previous.shutdown();
   return provider;
+}
+
+/** Compositions that installed telemetry and have not released it. The tracer is process-wide, so it outlives all but the last. */
+let composedTelemetryHolders = 0;
+
+/**
+ * Release one composition's hold on the process tracer. Only the last release
+ * shuts the tracer down (sending the spans its exporters still hold) and puts
+ * the recording-nothing tracer back: while another composition is live, its
+ * spans still go to this tracer and a shut-down exporter would drop them.
+ */
+export async function releaseComposedTelemetry(): Promise<void> {
+  composedTelemetryHolders = Math.max(0, composedTelemetryHolders - 1);
+  if (composedTelemetryHolders > 0) return;
+  const tracer = platformTracer();
+  installPlatformTracer(null);
+  await tracer.shutdown();
 }

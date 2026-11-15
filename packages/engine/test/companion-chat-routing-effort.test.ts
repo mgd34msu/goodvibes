@@ -9,6 +9,7 @@ import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import { AtomicWriteDurabilityError } from '../platform/src/platform/utils/atomic-json-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 
 const managers: CompanionChatManager[] = [], roots: string[] = [], expectedCloseFailure = new Set<CompanionChatManager>();
 afterEach(async () => {
@@ -26,7 +27,9 @@ function fixture(options: Partial<CompanionChatManagerConfig> = {}, directory?: 
   managers.push(manager); return { root, manager, calls };
 }
 const barrier = () => Promise.withResolvers<void>();
-async function until(check: () => boolean) { for (let i = 0; i < 100; i++) { if (check()) return; await Bun.sleep(2); } throw new Error('Companion fixture did not settle'); }
+// Event-loop turns, not wall-clock time: a close that does not wait for the held work settles within a few.
+async function turns(count = 5) { for (let i = 0; i < count; i++) await new Promise<void>((resolve) => { setImmediate(resolve); }); }
+const until = (check: () => boolean) => waitFor(check);
 
 test('session-only route and requested effort are durable before acknowledgment and survive real reopen', async () => {
   const declarations: string[] = [];
@@ -97,7 +100,7 @@ test.each(['false', 'async', 'throw-promise'] as const)('invalid %s native floor
   const path = join(f.root, `${session.id}.json`), original = readFileSync(path);
   await expect(f.manager.updateSessionPersisted(session.id, { reasoningEffort: 'max' })).rejects.toThrow();
   expect(readFileSync(path)).toEqual(original); expect(Object.hasOwn(f.manager.getSession(session.id)!, 'reasoningEffort')).toBe(false);
-  expect(f.calls).toHaveLength(0); expect(attempted).toBe(1); await Bun.sleep(0);
+  expect(f.calls).toHaveLength(0); expect(attempted).toBe(1); await turns(1);
 });
 
 test('before-publication failure leaves old route bytes and metadata intact and holds future execution', async () => {
@@ -118,7 +121,7 @@ test('close drains a genuinely accepted gated save before clearing the original 
   const f = fixture(), session = f.manager.createSession({ title: 'Must survive immediate shutdown', provider: 'answer', model: 'model', reasoningEffort: 'max' });
   let closed = false; await entered.promise; const closing = f.manager.close().then(() => { closed = true; });
   try {
-    await Bun.sleep(5); expect(closed).toBe(false); expect(existsSync(join(f.root, `${session.id}.json`))).toBe(false);
+    await turns(); expect(closed).toBe(false); expect(existsSync(join(f.root, `${session.id}.json`))).toBe(false);
   } finally { release.resolve(); save.mockRestore(); }
   await closing;
   expect(JSON.parse(readFileSync(join(f.root, `${session.id}.json`), 'utf8')).meta).toMatchObject({ title: 'Must survive immediate shutdown', reasoningEffort: 'max' });
@@ -168,7 +171,7 @@ test('close waits for the exact admitted provider completion even when the provi
   const session = f.manager.createSession({ provider: 'original', model: 'model' }); await f.manager.flushSession(session.id);
   await f.manager.postMessage(session.id, 'Held native invocation'); await entered.promise;
   let closed = false; const closing = f.manager.close().then(() => { closed = true; });
-  try { await Bun.sleep(5); expect(closed).toBe(false); } finally { release.resolve(); }
+  try { await turns(); expect(closed).toBe(false); } finally { release.resolve(); }
   await closing;
   const stored = JSON.parse(readFileSync(join(f.root, `${session.id}.json`), 'utf8')) as { messages: { role: string; content: string }[] };
   expect(stored.messages.some(message => message.role === 'assistant' && message.content.includes('late ignored output'))).toBe(false);

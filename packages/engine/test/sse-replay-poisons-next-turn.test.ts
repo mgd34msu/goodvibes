@@ -48,6 +48,13 @@ function sseResponse(chunks: readonly string[]): Response {
   }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
+/** Settles when a stream whose server closes it has been read to the end. */
+function streamClosed(): { readonly promise: Promise<void>; readonly onClose: () => void } {
+  let onClose: () => void = () => {};
+  const promise = new Promise<void>((resolve) => { onClose = resolve; });
+  return { promise, onClose };
+}
+
 function fetchStub(factory: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch {
   return factory as unknown as typeof fetch;
 }
@@ -146,6 +153,7 @@ describe('the gateway replays only what a client has not already seen', () => {
 describe('the stream surfaces the position it reached', () => {
   test('the id of every frame is reported, and the handle carries the last one', async () => {
     const ids: string[] = [];
+    const closed = streamClosed();
     const stop = await openRawServerSentEventStream(
       fetchStub(async () => sseResponse([
         'event: ready\ndata: {}\n\n',
@@ -153,10 +161,10 @@ describe('the stream surfaces the position it reached', () => {
         'id: evt-2\nevent: turn\ndata: {"type":"TURN_COMPLETED"}\n\n',
       ])),
       'http://127.0.0.1:3210/api/control-plane/events?domains=turn',
-      { onEventId: (id) => { ids.push(id); } },
+      { onEventId: (id) => { ids.push(id); }, onClose: closed.onClose },
       { reconnect: { enabled: false } },
     );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await closed.promise;
 
     expect(ids).toEqual(['evt-1', 'evt-2']);
     // A caller that closes this stream and opens the next one for the following
@@ -166,29 +174,31 @@ describe('the stream surfaces the position it reached', () => {
   });
 
   test('a stream that never saw an id reports no position rather than a stale one', async () => {
+    const closed = streamClosed();
     const stop = await openRawServerSentEventStream(
       fetchStub(async () => sseResponse(['event: ready\ndata: {}\n\n'])),
       'http://127.0.0.1:3210/api/control-plane/events?domains=turn',
-      {},
+      { onClose: closed.onClose },
       { reconnect: { enabled: false } },
     );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await closed.promise;
     expect(stop.lastEventId).toBeNull();
     stop();
   });
 
   test('a position handed in up front is presented on the very first request', async () => {
     const headers: Array<string | null> = [];
+    const closed = streamClosed();
     const stop = await openRawServerSentEventStream(
       fetchStub(async (_input, init) => {
         headers.push(new Headers(init?.headers).get('last-event-id'));
         return sseResponse(['event: ready\ndata: {}\n\n']);
       }),
       'http://127.0.0.1:3210/api/control-plane/events?domains=turn',
-      {},
+      { onClose: closed.onClose },
       { reconnect: { enabled: false }, lastEventId: 'evt-7' },
     );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await closed.promise;
     expect(headers).toEqual(['evt-7']);
     stop();
   });

@@ -1,26 +1,10 @@
 /**
- * Shell completion generator for the goodvibes CLI.
+ * Shell completion generator for the goodvibes CLI, and the one command
+ * table behind `goodvibes completion <shell>`.
  *
- * Data derivation: the internal COMMAND_ALIASES, COMMANDS, OPTIONS, and
- * COMMAND_HELP constants in src/cli/completion.ts and src/cli/help.ts are
- * unexported, so they cannot be imported directly. The GoodVibesCliCommand
- * union type IS exported and is used here to produce a typed completion
- * surface. Flag names are derived from the parser logic visible in
- * src/cli/parser.ts (each `if (name === '--foo')` branch). Subcommands per
- * command are derived from the usage strings documented in help.ts's
- * COMMAND_HELP table (read-only reference; no mutation of existing files).
- *
- * Deferred wiring (one-line changes to existing files, NOT done here):
- *   src/cli/completion.ts: replace renderCompletion() body with
- *     ```
- *     import { generateCompletion } from './completions/generate.ts';
- *     const normalized = (shell === 'zsh' || shell === 'fish') ? shell : 'bash';
- *     return generateCompletion(normalized, binary);
- *     ```
- *   src/cli/entrypoint.ts (or wherever 'completion' command is dispatched):
- *     ensure `completions <shell>` subcommand routes to generateCompletion.
- *   package.json scripts (optional convenience):
- *     `"completions": "bun run src/cli/completions/generate.ts"` to write files.
+ * Flag names follow the parser (each `if (name === '--foo')` branch).
+ * Subcommands per command follow the usage strings in the COMMAND_HELP table
+ * in help.ts. A command listed in `goodvibes help` belongs here too.
  */
 
 import type { GoodVibesCliCommand } from '@goodvibes-jev/engine/terminal-shell';
@@ -47,8 +31,8 @@ export interface CompletionFlag {
 
 /** Per-command completion metadata. */
 export interface CompletionCommand {
-  /** The canonical command name (matches GoodVibesCliCommand union) */
-  readonly name: GoodVibesCliCommand;
+  /** The canonical command name (the GoodVibesCliCommand union, plus `acp` and `host`, which are served before the shared parser runs) */
+  readonly name: GoodVibesCliCommand | 'acp' | 'host';
   /** All tokens that map to this command (aliases included) */
   readonly aliases: readonly string[];
   /** One-line description */
@@ -140,6 +124,10 @@ export const GLOBAL_FLAGS: readonly CompletionFlag[] = [
   },
   { name: '--continue', takesValue: false, description: 'Continue the latest session' },
   { name: '--fork', takesValue: false, description: 'Fork session when supported' },
+  { name: '--timeout', takesValue: true, description: 'run: stop after this long (90, 90s, 5m, 1h)' },
+  { name: '--max-turns', takesValue: true, description: 'run: stop after n model answers that still ask for tools' },
+  { name: '--omit-accumulated', takesValue: false, description: 'run: with stream-json, leave accumulated out of STREAM_DELTA' },
+  { name: '--answer-permissions', takesValue: false, description: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts' },
   { name: '--yes', short: '-y', takesValue: false, description: 'Auto-confirm prompts (non-interactive)' },
   { name: '--non-interactive', takesValue: false, description: 'Disable all interactive prompts (implies --yes)' },
   { name: '--strict', takesValue: false, description: 'doctor: also fail on advisory findings, for CI' },
@@ -165,12 +153,6 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     subcommands: [],
   },
   {
-    name: 'serve',
-    aliases: ['serve', 'daemon', 'server'],
-    description: 'Start the daemon/API host',
-    subcommands: [],
-  },
-  {
     name: 'web',
     aliases: ['web'],
     description: 'Show browser surface bind URL and enablement',
@@ -192,7 +174,7 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     name: 'doctor',
     aliases: ['doctor'],
     description: 'Print status plus setup warnings',
-    subcommands: [],
+    subcommands: ['explain', 'routing', 'hooks'],
   },
   {
     name: 'onboarding',
@@ -216,7 +198,7 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     name: 'auth',
     aliases: ['auth'],
     description: 'Inspect and manage local users, sessions, and bootstrap auth',
-    subcommands: ['status', 'users', 'sessions', 'add-user', 'clear-bootstrap'],
+    subcommands: ['status', 'users', 'sessions', 'add-user', 'delete-user', 'rotate-password', 'revoke-session', 'revoke-sessions', 'clear-bootstrap'],
   },
   {
     name: 'subscription',
@@ -241,6 +223,12 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
     aliases: ['tasks', 'task'],
     description: 'List/show in-process tasks or submit a non-interactive task',
     subcommands: ['list', 'show', 'submit'],
+  },
+  {
+    name: 'acp',
+    aliases: ['acp'],
+    description: 'Run as an Agent Client Protocol agent over stdio (for editors)',
+    subcommands: [],
   },
   {
     name: 'pair',
@@ -293,8 +281,14 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
   {
     name: 'plugin',
     aliases: ['plugin', 'plugins'],
-    description: 'Scaffold or validate a plugin directory',
-    subcommands: ['init', 'validate'],
+    description: 'Scaffold a plugin, validate a plugin directory, or manage capability bundles',
+    subcommands: ['init', 'validate', 'bundles'],
+  },
+  {
+    name: 'host',
+    aliases: ['host'],
+    description: 'Review explicit TUI host pairing',
+    subcommands: ['pair'],
   },
   {
     name: 'completion',
@@ -500,33 +494,12 @@ export function generateZsh(surface: CompletionSurface): string {
   lines.push(`  local state;`);
   lines.push('');
   lines.push(`  _arguments \\`);
-  lines.push(`    '(-h --help)'{-h,--help}'[Print help]' \\`);
-  lines.push(`    '(-v --version)'{-v,--version}'[Print version]' \\`);
-  lines.push(`    '(-m --model)'{-m,--model}'[Override model]:model:' \\`);
-  lines.push(`    '--provider[Override provider]:provider:' \\`);
-  lines.push(`    '(-C --cd --working-dir)'{-C,--cd}'[Set working directory]:dir:_files -/' \\`);
-  lines.push(`    '--working-dir[Alias for --cd]:dir:_files -/' \\`);
-  lines.push(`    '--daemon-home[Override daemon home]:dir:_files -/' \\`);
-  lines.push(`    '(-c --config)'{-c,--config}'[Override config value]:key=value:' \\`);
-  lines.push(`    '--enable[Enable platform feature]:feature:' \\`);
-  lines.push(`    '--disable[Disable platform feature]:feature:' \\`);
-  lines.push(`    '(-p --prompt)'{-p,--prompt}'[Run non-interactive prompt]:text:' \\`);
-  lines.push(`    '--print[Non-interactive run mode]' \\`);
-  lines.push(`    '(-o --output --output-format)'{-o,--output}'[Output format]:format:(text json stream-json)' \\`);
-  lines.push(`    '--output-format[Output format alias]:format:(text json stream-json)' \\`);
-  lines.push(`    '--json[Alias for --output-format json]' \\`);
-  lines.push(`    '--no-worries-just-vibes[Auto-approve tools and access outside the project for this launch]' \\`);
-  lines.push(`    '--no-alt-screen[Keep output in normal terminal scrollback]' \\`);
-  lines.push(`    '--port[Port for server/web commands]:port:' \\`);
-  lines.push(`    '--hostname[Hostname for server/web commands]:host:' \\`);
-  lines.push(`    '--host[Hostname alias]:host:' \\`);
-  lines.push(`    '--open[Open browser when supported]' \\`);
-  lines.push(`    '(-r --resume)'{-r,--resume}'[Resume saved session]:id:' \\`);
-  lines.push(`    '(-s --session)'{-s,--session}'[Use a specific session]:id:' \\`);
-  lines.push(`    '--continue[Continue the latest session]' \\`);
-  lines.push(`    '--fork[Fork session when supported]' \\`);
-  lines.push(`    '(-y --yes)'{-y,--yes}'[Auto-confirm prompts]' \\`);
-  lines.push(`    '--non-interactive[Disable all interactive prompts]' \\`);
+  for (const flag of globalFlags) {
+    const description = flag.description.replace(/[\[\]':]/g, '');
+    const value = flag.takesValue ? `:value:${flag.valueEnum !== undefined ? `(${flag.valueEnum.join(' ')})` : ''}` : '';
+    const names = [flag.name, ...(flag.aliases ?? []), ...(flag.short !== undefined ? [flag.short] : [])];
+    for (const name of names) lines.push(`    '${name}[${description}]${value}' \\`);
+  }
   lines.push(`    '1:command:->cmd' \\`);
   lines.push(`    '*:args:->args';`);
   lines.push('');
@@ -537,7 +510,7 @@ export function generateZsh(surface: CompletionSurface): string {
 
   for (const cmd of commands) {
     const desc = cmd.description.replace(/'/g, '');
-    lines.push(`        '${cmd.name}:${desc}'`);
+    for (const token of cmd.aliases.includes(cmd.name) ? cmd.aliases : [cmd.name, ...cmd.aliases]) lines.push(`        '${token}:${desc}'`);
   }
 
   lines.push(`      );`);
@@ -633,7 +606,7 @@ export function generateFish(surface: CompletionSurface): string {
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher, mirrors the existing renderCompletion(shell) API
+// Dispatcher
 // ---------------------------------------------------------------------------
 
 /**

@@ -23,7 +23,7 @@ import type {
   GatewayMethodInvocation,
   GatewayMethodInvocationContext,
 } from './method-catalog-shared.js';
-import { GatewayVerbError } from './routes/gateway-verb-error.js';
+import { GatewayVerbError, readGatewayVerbRefusal } from './routes/gateway-verb-error.js';
 
 /** Code emitted when a confirmation-gated method is invoked without explicit user confirmation. */
 export const REQUIRE_CONFIRM = 'REQUIRE_CONFIRM';
@@ -110,6 +110,43 @@ function normalizeQuery(query: GatewayMethodInvocation['query']): Record<string,
 }
 
 /**
+ * The body a handler sees: the invocation body with the query folded in
+ * underneath it (body keys win), the way `readInvocationParams` does for the
+ * other handler-registered verbs. GET and DELETE inputs travel in the query on
+ * the HTTP transports, so a handler that reads only the body would otherwise
+ * ignore every filter. Query strings are typed by the descriptor's input
+ * schema (`integer`, `number`, `boolean`); an unparseable value is passed on as
+ * the string so the handler's own validation refuses it.
+ *
+ * `confirm` is never taken from the query: a confirmation must be an explicit
+ * body field, so a link or a prefetch cannot confirm a mutation.
+ */
+function foldQueryIntoBody(
+  body: unknown,
+  query: Record<string, string>,
+  inputSchema: Record<string, unknown> | undefined,
+): unknown {
+  const keys = Object.keys(query).filter((key) => key !== 'confirm');
+  if (keys.length === 0) return body;
+  const isRecordBody = typeof body === 'object' && body !== null && !Array.isArray(body);
+  if (body !== undefined && body !== null && !isRecordBody) return body;
+  const properties = (inputSchema?.['properties'] ?? {}) as Record<string, { type?: unknown } | undefined>;
+  const folded: Record<string, unknown> = {};
+  for (const key of keys) {
+    const raw = query[key]!;
+    const type = properties[key]?.type;
+    if ((type === 'integer' || type === 'number') && raw.trim() !== '' && Number.isFinite(Number(raw))) {
+      folded[key] = Number(raw);
+    } else if (type === 'boolean' && (raw === 'true' || raw === 'false')) {
+      folded[key] = raw === 'true';
+    } else {
+      folded[key] = raw;
+    }
+  }
+  return { ...folded, ...(isRecordBody ? body as Record<string, unknown> : {}) };
+}
+
+/**
  * Guard a confirmation-gated mutation. Throws `GatewayVerbError(REQUIRE_CONFIRM, 403)`
  * unless the caller both set `body.confirm === true` and the request was an
  * explicit user request.
@@ -147,12 +184,17 @@ export function registerCatalogHandler<TBody, TResult>(
     const context: HandlerContextEnvelope = { ...normalizeContext(inv.context), ...(inv.signal ? { signal: inv.signal } : {}),
       ...(inv.nativeExecutionAuthority ? { nativeExecutionAuthority: inv.nativeExecutionAuthority } : {}),
       ...(inv.isAuthorized ? { isAuthorized: inv.isAuthorized } : {}) };
-    const body = inv.body as TBody;
+    const query = normalizeQuery(inv.query);
+    const body = foldQueryIntoBody(inv.body, query, descriptor.inputSchema) as TBody;
     if (options?.confirm) assertConfirmed(inv.body, context);
     try {
-      return await handler({ body, query: normalizeQuery(inv.query), context });
+      return await handler({ body, query, context });
     } catch (error) {
       if (error instanceof HandlerError) throw error;
+      // A service error that carries an HTTP status and a machine code is a
+      // refusal the caller can act on, not a handler fault.
+      const refusal = readGatewayVerbRefusal(error);
+      if (refusal) throw new HandlerError(refusal.message, refusal.code, refusal.status, refusal.field);
       throw new HandlerError(errorMessage(error), 'HANDLER_FAILED', 500);
     }
   };

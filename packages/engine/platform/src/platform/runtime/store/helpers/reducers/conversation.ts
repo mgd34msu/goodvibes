@@ -31,9 +31,7 @@ export function updateConversationState(
 ): ConversationDomainState {
   const source = event.type;
   if ('callId' in event) {
-    if (!isCurrentTurnEvent(domain, event.turnId) || isTerminalTurnState(domain.turnState)) {
-      return domain;
-    }
+    if (!isCurrentTurnEvent(domain, event.turnId)) return domain;
     const activeToolCalls = new Map(domain.activeToolCalls);
     const existing = activeToolCalls.get(event.callId);
     const stateByEvent: Partial<Record<ToolEvent['type'], ToolExecutionState>> = {
@@ -52,6 +50,13 @@ export function updateConversationState(
       BUDGET_EXCEEDED_COST: 'failed',
     };
     const nextState = stateByEvent[event.type];
+    // A tool still running when its turn was cancelled or errored reports its end
+    // afterwards. That end is recorded, so the call is not left unfinished for
+    // good; any other tool event for an ended turn is still dropped.
+    if (isTerminalTurnState(domain.turnState)
+      && !(existing && !TERMINAL_TOOL_STATES.has(existing.state) && nextState !== undefined && TERMINAL_TOOL_STATES.has(nextState))) {
+      return domain;
+    }
     // A call that has succeeded, failed or been cancelled is settled: a later event
     // for the same callId (a stale phase event, a cancel racing a failure) must not
     // rewrite what the UI already shows. The same terminal state may still refine its
@@ -111,14 +116,17 @@ export function updateConversationState(
         messageCount: domain.messageCount + 1,
       };
     case 'PREFLIGHT_OK':
-      if (!isCurrentTurnEvent(domain, event.turnId) || domain.turnState !== 'preflight') return domain;
+      // The check runs again before each provider call, so it also follows a finished tool batch.
+      if (!isCurrentTurnEvent(domain, event.turnId) || (domain.turnState !== 'preflight' && domain.turnState !== 'post_hooks')) return domain;
       return {
         ...updateDomainMetadata(domain, source),
         currentTurnId: event.turnId,
         turnState: 'preflight',
       };
     case 'PREFLIGHT_FAIL':
-      if (!isCurrentTurnEvent(domain, event.turnId) || domain.turnState !== 'preflight') return domain;
+      // The context-window preflight runs again before every provider call of a
+      // turn, so it can end the turn after tools have run, not only first.
+      if (!isCurrentTurnEvent(domain, event.turnId) || isTerminalTurnState(domain.turnState)) return domain;
       return {
         ...updateDomainMetadata(domain, source),
         currentTurnId: event.turnId,

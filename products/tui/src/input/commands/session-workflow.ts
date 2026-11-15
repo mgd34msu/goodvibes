@@ -22,7 +22,7 @@ import {
 import { requireProviderApi, requireSessionManager, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
 import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
 
@@ -40,19 +40,37 @@ function copySessionSidecars(ctx: CommandContext, destination: string): void {
   saveWorkTreeFolds(surface.sessionsDir, destination, tree.foldState(), tree.turnOutcomes());
 }
 
-function printSessionExport(
+/** Text of a message whose content is a string or an array of parts; non-text parts show as a labelled placeholder, never `[object Object]`. */
+function flattenMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return String(content ?? '');
+  return content
+    .map((part: unknown) => {
+      if (typeof part === 'string') return part;
+      if (typeof part === 'object' && part !== null) {
+        const record = part as { type?: unknown; text?: unknown };
+        if (typeof record.text === 'string') return record.text;
+        return `[${typeof record.type === 'string' ? record.type : 'non-text'} part omitted]`;
+      }
+      return String(part);
+    })
+    .join('\n');
+}
+
+async function printSessionExport(
   ctx: { print: (text: string) => void },
   sessionId: string,
   title: string,
   messages: Array<Record<string, unknown>>,
   format: string,
-): void {
+): Promise<void> {
   const formatted = formatSessionExport(sessionId, title, messages, format, {
     role: (message) => String(message.role ?? 'unknown'),
-    content: (message) => String(message.content ?? ''),
+    content: (message) => flattenMessageContent(message.content),
     tool: (message) => String(message.toolName ?? 'tool'),
   });
-  ctx.print(formatted);
+  // A printed transcript is redacted like the exported file; a failed redaction prints nothing.
+  ctx.print(await redactSensitiveDataAsync(formatted, { purpose: 'export' }));
 }
 
 // session-mgmt / smgmt was removed in TASK-032.
@@ -73,7 +91,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
   headingSuffix: ':',
   detailSeparator: ': ',
   postureSeparator: '=',
-  confirmDelete: false,
+  confirmDelete: true,
   reviewSeparator: ': ',
   reviewDetailSeparator: ': ',
   field(view, key, value) {
@@ -174,6 +192,9 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         if (journalReplay.replayed > 0) {
           ctx.print(`  [Recovery] Replayed ${journalReplay.replayed} journal record(s): restored turns since last snapshot.`);
         }
+        if (journalReplay.failed !== undefined) {
+          ctx.print(`  [Recovery] Recovery of the journal failed (${journalReplay.failed}); it was kept and will be retried on the next resume.`);
+        }
         if (journalReplay.hadCorruptTail && journalReplay.replayed === 0) {
           ctx.print('  [Recovery] Journal tail was corrupt or unrecognised (quarantined). Proceeding with snapshot only.');
         } else if (journalReplay.hadCorruptTail) {
@@ -194,9 +215,16 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           }
           if (returnContextMode === 'assisted') {
             const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
+            const resumedSessionId = ctx.session.runtime.sessionId;
             void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
               if (!assisted.assistedNarrative) return;
+              // The helper answers late; do not print its line into a different session.
+              if (ctx.session.runtime.sessionId !== resumedSessionId) return;
               ctx.print(`  Assist: ${assisted.assistedNarrative}`);
+              ctx.renderRequest();
+            }).catch((error: unknown) => {
+              if (ctx.session.runtime.sessionId !== resumedSessionId) return;
+              ctx.print(`  Assist: summary unavailable (${summarizeError(error)}).`);
               ctx.renderRequest();
             });
           }
@@ -217,18 +245,24 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       if (!request) return true;
       const { target, format, sessionId, found } = request;
       if (!found && target !== '.') {
+        let loaded: ReturnType<typeof sm.load>;
         try {
-          const { meta, messages } = sm.load(sessionId);
-          printSessionExport(ctx, sessionId, meta.title, messages as Array<Record<string, unknown>>, format);
+          loaded = sm.load(sessionId);
         } catch {
           ctx.print(`Session not found: ${sessionId}`);
+          return true;
+        }
+        try {
+          await printSessionExport(ctx, sessionId, loaded.meta.title, loaded.messages as Array<Record<string, unknown>>, format);
+        } catch (e) {
+          ctx.print(`Failed to export session: ${summarizeError(e)}`);
         }
         return true;
       }
       const loadName = found ? found.name : sessionId;
       try {
         const { meta, messages } = sm.load(loadName);
-        printSessionExport(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format);
+        await printSessionExport(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format);
       } catch (e) {
         ctx.print(`Failed to export session: ${summarizeError(e)}`);
       }

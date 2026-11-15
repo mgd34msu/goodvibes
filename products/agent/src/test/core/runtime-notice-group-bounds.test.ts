@@ -27,29 +27,35 @@ test('fixed burst keys have bounded identity retention and only evicted groups l
   for (let i = 0; i < 200100; i++) append(feed, i);
   expect(feed.list()).toHaveLength(2000);
   expect(total(feed)).toBe(200000);
-  // Inspect the storage bound as well as visible rows: a row cap alone did not bound identity memory.
-  const index = (feed as unknown as { eventEntries: ReadonlyMap<string, string> }).eventEntries;
-  expect(index.size).toBe(200000);
+  // Identity retention is observable through replay: a row cap alone did not bound identity memory, so
+  // a retained occurrence must dedupe and an evicted one must count again.
   append(feed, 100);
   append(feed, 200099);
   expect(total(feed)).toBe(200000);
   append(feed, 0); // The first group left the retained history; this is outside its replay horizon.
   expect(total(feed)).toBe(199901);
-  expect(index.size).toBe(199901);
   expect(feed.list()).toHaveLength(2000);
 });
 
 test('active group index is cleaned on eviction, dismissal and clear', () => {
   const feed = new NotificationFeed();
   for (let i = 0; i < 2100; i++) append(feed, i, `batch-${i}`);
-  const active = (feed as unknown as { activeGroups: ReadonlyMap<string, string> }).activeGroups;
-  expect(active.size).toBe(2000);
-  expect(feed.dismiss(feed.list()[0]!.key)).toBe(true);
-  expect(active.size).toBe(1999);
+  expect(feed.list()).toHaveLength(2000);
+  // batch-0 was evicted: its key must start a fresh row instead of joining a group that no longer exists.
+  append(feed, 5000, 'batch-0');
+  expect(feed.list()).toHaveLength(2000);
+  expect(feed.list().filter((entry) => entry.collapsedCount === 1)).toHaveLength(2000);
+  const dismissed = feed.list()[0]!;
+  expect(feed.dismiss(dismissed.key)).toBe(true);
+  expect(feed.list()).toHaveLength(1999);
+  append(feed, 5001, 'batch-0');
+  expect(feed.list()).toHaveLength(2000);
+  expect(feed.list().every((entry) => entry.collapsedCount === 1)).toBe(true);
   feed.clear();
-  expect(active.size).toBe(0);
-  append(feed, 2100);
+  expect(feed.list()).toHaveLength(0);
+  append(feed, 2100, 'batch-0');
   expect(feed.list()).toHaveLength(1);
+  expect(feed.list()[0]?.collapsedCount).toBe(1);
 });
 
 test('distinct occurrence identities cannot overwrite each other through a reused delivery id', () => {
@@ -108,17 +114,19 @@ test('dismissal and clear retire occurrence diagnostics with their history row',
   const feed = new NotificationFeed();
   append(feed, 1);
   feed.recordNotice({ domain: 'agents', level: 'warning', title: 'Agent failed', body: 'Private local diagnostic', timestamp: 1000, eventKey: 'occurrence-1' });
-  const details = feed as unknown as { noticeDetails: ReadonlyMap<string, string>; groupDetails: ReadonlyMap<string, ReadonlyMap<string, string>> };
-  expect(details.noticeDetails.size).toBe(1);
-  expect(details.groupDetails.size).toBe(1);
+  expect(feed.list()[0]?.body).toContain('Private local diagnostic');
   feed.dismiss(feed.list()[0]!.key);
-  expect(details.noticeDetails.size).toBe(0);
-  expect(details.groupDetails.size).toBe(0);
+  // The same occurrence arriving again is a new row that carries none of the retired diagnostic.
+  append(feed, 1);
+  expect(feed.list()).toHaveLength(1);
+  expect(feed.list()[0]?.body ?? '').not.toContain('Private local diagnostic');
   append(feed, 2);
   feed.recordNotice({ domain: 'agents', level: 'warning', title: 'Agent failed', body: 'Other local diagnostic', timestamp: 1000, eventKey: 'occurrence-2' });
+  expect(feed.list()[0]?.body).toContain('Other local diagnostic');
   feed.clear();
-  expect(details.noticeDetails.size).toBe(0);
-  expect(details.groupDetails.size).toBe(0);
+  append(feed, 2);
+  expect(feed.list()).toHaveLength(1);
+  expect(feed.list()[0]?.body ?? '').not.toContain('Other local diagnostic');
 });
 
 

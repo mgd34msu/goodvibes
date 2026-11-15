@@ -2,6 +2,7 @@ import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -65,11 +66,47 @@ function inspectAuthBundle(bundle: AuthReviewBundle): string {
   ].join('\n');
 }
 
+const AUTH_LOGIN_TIMEOUT_MS = 15_000;
+
+async function exchangeServiceLogin(
+  ctx: CommandContext,
+  input: { target: 'daemon' | 'listener'; baseUrl: string; username: string; password: string; secretKey: string },
+): Promise<void> {
+  try {
+    const url = buildUrl(input.baseUrl, '/login');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: input.username, password: input.password }),
+      signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      // The body is not echoed: a login endpoint may reflect the submitted credentials.
+      ctx.print(`Auth login failed (HTTP ${response.status}). Check the base URL, username and password, then retry.`);
+      return;
+    }
+    const body = (await response.json()) as { token?: unknown };
+    if (typeof body.token !== 'string') {
+      ctx.print('Auth login response did not include a session token.');
+      return;
+    }
+    await requireSecretsManager(ctx).set(input.secretKey, body.token);
+    ctx.print(`Stored ${input.target} session token in secure storage as ${input.secretKey}.`);
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    ctx.print(
+      timedOut
+        ? `Auth login timed out after ${AUTH_LOGIN_TIMEOUT_MS / 1000}s waiting for ${input.baseUrl}. Nothing was stored.`
+        : `Auth login failed: ${error instanceof Error ? error.message : String(error)}. Nothing was stored.`,
+    );
+  }
+}
+
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'login',
     description: 'Front-door login flow for provider subscriptions and local service sessions',
-    usage: '[provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> <password> [secretKey]]',
+    usage: '[provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]',
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const target = (args[0] ?? '').toLowerCase();
@@ -92,11 +129,11 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
           await ctx.executeCommand('auth', ['login', ...args.slice(1)]);
           return;
         }
-        ctx.print('Use /auth login <daemon|listener> <baseUrl> <username> <password> [secretKey]');
+        ctx.print('Use /auth login <daemon|listener> <baseUrl> <username> [password] [secretKey]');
         return;
       }
       ctx.print(
-        'Usage: /login [provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> <password> [secretKey]]',
+        'Usage: /login [provider <name> start|finish <code>|service <daemon|listener> <baseUrl> <username> [password] [secretKey]]',
       );
     },
   });
@@ -143,11 +180,11 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
       if (sub === 'bundle') {
         const mode = args[1];
         const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /install bundle ${mode} <path>`);
+        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
+          ctx.print(`Usage: /install bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
           return;
         }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
         if (mode === 'export') {
           const profiles = requireProfileManager(ctx).list();
           const secretKeys = await requireSecretsManager(ctx).list();
@@ -182,7 +219,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     name: 'auth',
     description: 'Review auth posture and exchange session login tokens with local services',
     usage:
-      '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> <password> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
+      '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';
@@ -211,33 +248,38 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
         const username = args[3];
         const password = args[4];
         const secretKey = args[5] ?? `${target?.toUpperCase() ?? 'SERVICE'}_SESSION_TOKEN`;
-        if ((target !== 'daemon' && target !== 'listener') || !baseUrl || !username || !password) {
-          ctx.print('Usage: /auth login <daemon|listener> <baseUrl> <username> <password> [secretKey]');
+        if ((target !== 'daemon' && target !== 'listener') || !baseUrl || !username) {
+          ctx.print('Usage: /auth login <daemon|listener> <baseUrl> <username> [password] [secretKey]  (omit the password to be asked for it with masked input)');
           return;
         }
-        const url = new URL('/login', baseUrl).toString();
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+        const exchange = (secret: string): Promise<void> =>
+          exchangeServiceLogin(ctx, { target, baseUrl, username, password: secret, secretKey });
+        if (password) {
+          ctx.print('Warning: a password typed on the command line stays visible on screen. Omit it to be asked with masked input.');
+          await exchange(password);
+          return;
+        }
+        if (!ctx.beginConcealedInput) {
+          ctx.print('Masked input is unavailable on this surface; pass the password as the fifth argument.');
+          return;
+        }
+        ctx.print(`Enter the ${target} password for ${username}: masked; Enter to sign in, Esc to cancel.`);
+        ctx.beginConcealedInput({
+          label: `${target} password`,
+          onSubmit: async (value) => {
+            if (value.length === 0) {
+              ctx.print('Auth login cancelled: no password entered.');
+              return;
+            }
+            await exchange(value);
+          },
+          onCancel: () => ctx.print('Auth login cancelled.'),
         });
-        if (!response.ok) {
-          const body = await response.text();
-          ctx.print(`Auth login failed (${response.status}): ${body}`);
-          return;
-        }
-        const body = (await response.json()) as { token?: unknown };
-        if (typeof body.token !== 'string') {
-          ctx.print('Auth login response did not include a session token.');
-          return;
-        }
-        await requireSecretsManager(ctx).set(secretKey, body.token);
-        ctx.print(`Stored ${target} session token in secure storage as ${secretKey}.`);
         return;
       }
 
       ctx.print(
-        'Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> <password> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
+        'Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
       );
     },
   });

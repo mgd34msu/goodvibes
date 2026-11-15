@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
@@ -157,7 +157,8 @@ describe('Agent host notification setting through actual settings surfaces', () 
   test('runtime-bus fake sink follows current platform literal-false admission and live revocation', async () => {
     const { config } = fixture();
     const sent: string[] = [];
-    const sink = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async (text: string) => { sent.push(text); });
+    let delivered: (() => void) | null = null;
+    const sink = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async (text: string) => { sent.push(text); delivered?.(); });
     const registry = { resolveSecret: async (service: string, key: string) => (
       service === 'slack' && key === 'webhookUrl' ? 'https://hooks.slack.example/fake-sink' : null
     ) };
@@ -167,11 +168,12 @@ describe('Agent host notification setting through actual settings surfaces', () 
     try {
       for (const value of [undefined, true, false, true]) {
         if (value !== undefined) config.getHostBooleanSetting(KEY).set(value);
+        const next = new Promise<void>((resolve) => { delivered = resolve; });
         bus.emit('contracts', createEventEnvelope('CONTRACT_FAILED', {
           type: 'CONTRACT_FAILED', contractId: 'private-contract', reason: 'private failure reason',
           failureKind: 'other', membersSettled: true,
         }, { sessionId: 'host-setting-test', traceId: 'test', source: 'test' }));
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await next;
       }
       expect(sent).toEqual([
         'GoodVibes: notification available',
@@ -191,10 +193,11 @@ test.each(['malformed', 'unreadable'])('actual modal preserves %s policy and dis
   const { root, configDir, config } = fixture();
   config.getHostBooleanSetting(KEY).set(false);
   const policyPath = join(configDir, 'settings-sync.json');
-  const raw = failure === 'malformed' ? '{invalid policy' : JSON.stringify(defaultStore());
-  writeFileSync(policyPath, raw);
+  const raw = '{invalid policy';
+  // A directory at the policy path cannot be read as a file for any user; a
+  // mode-0 file is still readable when the suite runs as root.
+  if (failure === 'malformed') writeFileSync(policyPath, raw); else mkdirSync(policyPath);
   const names = readdirSync(configDir);
-  if (failure === 'unreadable') chmodSync(policyPath, 0);
   const modal = new SettingsModal();
   try {
     modal.open(config, createFeatureFlagManager(), new SubscriptionManager(join(root, 'subscriptions.json')), { getAll: () => ({}) });
@@ -218,9 +221,9 @@ test.each(['malformed', 'unreadable'])('actual modal preserves %s policy and dis
     expect(readdirSync(configDir)).toEqual(names);
   } finally {
     modal.close();
-    if (failure === 'unreadable') chmodSync(policyPath, 0o600);
   }
-  expect(readFileSync(policyPath, 'utf8')).toBe(raw);
+  if (failure === 'malformed') expect(readFileSync(policyPath, 'utf8')).toBe(raw);
+  else expect(statSync(policyPath).isDirectory()).toBe(true);
 });
 
 test('a policy failure after open blocks the next edit without recovery writes, and readable recovery restores editing', () => {

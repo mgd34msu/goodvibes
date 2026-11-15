@@ -53,15 +53,29 @@ export function isLocalHostname(hostname: string): boolean {
     || normalized === '[::1]';
 }
 
-export function extractForwardedClientIp(req: Request, trustProxy: boolean): string | undefined {
+/**
+ * The client address a trusted reverse proxy reported.
+ *
+ * `X-Forwarded-For` lists addresses left to right, and each proxy appends the
+ * peer it saw. Only the entries a trusted proxy appended can be believed: the
+ * leftmost entries are whatever the client sent, so reading the first one lets
+ * any caller pick the address that rate limiting and the audit log record.
+ * `trustedProxyHops` is how many proxies in front of the daemon append to the
+ * header (default 1); the address is the entry that many positions from the
+ * right. A header with fewer entries than that did not pass through every
+ * trusted proxy, so no address is returned and the caller falls back to the
+ * socket peer. `X-Real-IP` is not read: nothing guarantees the proxy overwrites
+ * it, and a client can send its own.
+ */
+export function extractForwardedClientIp(req: Request, trustProxy: boolean, trustedProxyHops = 1): string | undefined {
   if (!trustProxy) return undefined;
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',').map((value) => value.trim()).find(Boolean);
-    if (first) return first;
-  }
-  const realIp = req.headers.get('x-real-ip')?.trim();
-  return realIp ? realIp : undefined;
+  const hops = Number.isInteger(trustedProxyHops) && trustedProxyHops >= 1 ? trustedProxyHops : 1;
+  const entries = (req.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (entries.length < hops) return undefined;
+  return entries[entries.length - hops];
 }
 
 export function inspectPrivateKeyPermissions(path: string): {

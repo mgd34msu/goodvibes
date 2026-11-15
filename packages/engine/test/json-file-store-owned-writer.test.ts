@@ -1,4 +1,3 @@
-/** UNRUN: real asynchronous FD writes and original publication ownership. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';

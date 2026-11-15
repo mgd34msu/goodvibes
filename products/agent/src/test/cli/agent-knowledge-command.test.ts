@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { handleAgentKnowledgeCommand, handleAgentKnowledgeShortcutCommand } from '../../cli/agent-knowledge-command.ts';
-import { formatEntityList } from '../../cli/agent-knowledge-format.ts';
+import { formatEntityList, formatReindex } from '../../cli/agent-knowledge-format.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -537,6 +537,30 @@ describe('Agent Knowledge CLI route isolation', () => {
         kind: 'agentKnowledge.reindex',
         route: '/api/goodvibes-agent/knowledge/reindex',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reindex reports sources the host could not recompile and exits non-zero', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async () => new Response(JSON.stringify({
+      status: { ready: true, sourceCount: 2, nodeCount: 1, edgeCount: 0, issueCount: 0 },
+      issues: [],
+      recompileFailed: 1,
+      recompileFailures: [{ sourceId: 'src-bad', error: 'extractor crashed' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    try {
+      const reindex = await handleAgentKnowledgeCommand(createRuntime(['reindex', '--yes']));
+      expect(reindex.exitCode).toBe(1);
+      expect(JSON.parse(reindex.output)).toMatchObject({
+        ok: true,
+        data: { recompileFailures: [{ sourceId: 'src-bad', error: 'extractor crashed' }] },
+      });
+      const text = formatReindex({ status: {}, recompileFailures: [{ sourceId: 'src-bad', error: 'extractor crashed' }] });
+      expect(text).toContain('finished with 1 source(s) not recompiled');
+      expect(text).toContain('src-bad: extractor crashed');
+      expect(text).not.toContain('reindex complete');
     } finally {
       globalThis.fetch = originalFetch;
     }

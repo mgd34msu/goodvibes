@@ -3,7 +3,7 @@ import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { createHookExecution, type HookExecutionOptions } from '../execution.js';
+import { createHookExecution, hookTimeoutSeconds, type HookExecutionOptions } from '../execution.js';
 
 /**
  * Prompt hook runner, sends event data to an LLM via ToolLLM.
@@ -29,7 +29,8 @@ export async function run(
   }
 
   const resolvedPrompt = promptTemplate.replaceAll('$ARGUMENTS', JSON.stringify(event));
-  const timeoutMs = (hook.timeout ?? 0) * 1000;
+  const timeoutSeconds = hookTimeoutSeconds(hook, 'prompt');
+  const timeoutMs = timeoutSeconds * 1000;
 
   logger.debug('prompt hook: sending to LLM', {
     event: event.path,
@@ -37,7 +38,7 @@ export async function run(
   });
 
   let timerId: ReturnType<typeof setTimeout> | undefined;
-  const execution = options === undefined ? undefined : createHookExecution(options, hook.timeout ?? 0, 'prompt');
+  const execution = options === undefined ? undefined : createHookExecution(options, timeoutSeconds, 'prompt');
 
   try {
     let response: string;
@@ -50,7 +51,7 @@ export async function run(
     } else {
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         if (timeoutMs > 0) timerId = setTimeout(() => {
-          reject(new Error(`prompt hook timed out after ${hook.timeout ?? 0}s`));
+          reject(new Error(`prompt hook timed out after ${timeoutSeconds}s`));
         }, timeoutMs);
         timerId?.unref?.();
       });

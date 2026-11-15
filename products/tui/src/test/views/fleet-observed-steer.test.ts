@@ -16,6 +16,9 @@ import { renderObservedDetailLines, type ObservedNode } from '../../views/fleet-
 import type { FleetGateway, FleetObservedSteerResult } from '../../views/fleet-gateway.ts';
 import { lineToString } from '../setup.ts';
 
+/** Lets every already-queued promise continuation run, however many awaits the code under test makes. */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 function observedNode(steerKind: 'tmux' | 'none'): ObservedNode {
   return {
     id: 'observed:4242',
@@ -79,8 +82,7 @@ describe('observed-agent drill-in steer', () => {
     // Enter submits; the composer closes immediately.
     acts.handleObservedSteerInput('return');
     expect(acts.observedSteerActive()).toBe(false);
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(calls).toEqual([{ id: 'observed:4242', text: 'run the tests' }]);
     expect(notes.some((n) => /delivered to the foreign session/i.test(n))).toBe(true);
@@ -94,7 +96,7 @@ describe('observed-agent drill-in steer', () => {
     typeText(acts, 'abc');
     acts.handleObservedSteerInput('escape');
     expect(acts.observedSteerActive()).toBe(false);
-    await Promise.resolve();
+    await flush();
     expect(calls).toEqual([]);
   });
 
@@ -112,8 +114,7 @@ describe('observed-agent drill-in steer', () => {
     acts.handleTreeKey('s', node as ProcessNode);
     typeText(acts, 'hi');
     acts.handleObservedSteerInput('return');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(notes.some((n) => /refused/i.test(n) && /pane went away/i.test(n))).toBe(true);
   });
 

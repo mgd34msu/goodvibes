@@ -195,3 +195,42 @@ describe('push-to-talk takes the device from wake detection', () => {
     expect(resumes).toBe(0);
   });
 });
+
+describe('a second open that overlaps a pending first open', () => {
+  test('is refused while the first opener has not resolved, and the device opens once', async () => {
+    let opens = 0;
+    let finishOpen: () => void = () => undefined;
+    const arbiter = new MicArbiter(async () => {
+      opens += 1;
+      await new Promise<void>((resolve) => {
+        finishOpen = resolve;
+      });
+      return { label: 'fake', deviceSelectable: true, stop: async () => undefined };
+    });
+
+    const first = arbiter.openCapture(REQUEST, HANDLERS);
+    const second = await arbiter.openCapture(REQUEST, HANDLERS).catch((e: unknown) => e);
+    expect(second).toBeInstanceOf(AudioCaptureError);
+    expect((second as AudioCaptureError).reason).toBe('device-unavailable');
+
+    finishOpen();
+    const stream = await first;
+    expect(opens).toBe(1);
+    expect(arbiter.openStreams).toBe(1);
+    await stream.stop();
+    expect(arbiter.openStreams).toBe(0);
+  });
+
+  test('an opener that throws gives the reservation back', async () => {
+    let fail = true;
+    const arbiter = new MicArbiter(async () => {
+      if (fail) throw new AudioCaptureError('device-unavailable', 'no device');
+      return { label: 'fake', deviceSelectable: true, stop: async () => undefined };
+    });
+    await arbiter.openCapture(REQUEST, HANDLERS).catch(() => undefined);
+    expect(arbiter.openStreams).toBe(0);
+    fail = false;
+    await arbiter.openCapture(REQUEST, HANDLERS);
+    expect(arbiter.openStreams).toBe(1);
+  });
+});

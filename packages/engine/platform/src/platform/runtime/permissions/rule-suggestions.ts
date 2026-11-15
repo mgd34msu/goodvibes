@@ -27,9 +27,10 @@ export function buildPermissionRuleSuggestions(
       return {
         id: key,
         tool: sample.tool,
-        command: `/policy simulate ${sample.tool}${target ? ` --target ${JSON.stringify(target)}` : ''}`,
+        // `/permissions rules` exists on every terminal surface; there is no command that adds a rule from a target.
+        command: '/permissions rules',
         summary: `Repeated denials for ${sample.tool}`,
-        reason: `${entries.length} denials suggest a durable scoped rule or policy review may be appropriate.`,
+        reason: `${entries.length} denials of ${sample.tool}${target ? ` (${target})` : ''} suggest a durable scoped rule or policy review may be appropriate: approve it once with a remember tier to store a scoped rule, or review the remembered rules.`,
       } satisfies PermissionRuleSuggestion;
     })
     .sort((a, b) => a.tool.localeCompare(b.tool));

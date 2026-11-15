@@ -8,8 +8,10 @@ export {
   mayOfferCardEntryFlow,
   describeCardEntryRefusal,
 } from './entry-policy.js';
+export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
+export { minorUnitExponent } from './money-parsing.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer } from './window-view.js';
-export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation } from './window-view.js';
 
 /**
  * What every surface must show at the moment someone selects
@@ -25,9 +27,9 @@ export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus } fr
  */
 export const CVV_PROMPT_TRADEOFF_WARNING =
   'Choosing "prompt" disables unattended purchasing. The card verification value will not be '
-  + 'stored, so every purchase stops and waits for you to type it, including purchases that are '
-  + 'within budget and would otherwise have gone ahead on their own. The veto window still runs, '
-  + 'but nothing completes while you are away.';
+  + 'stored, and there is not yet a place to type it at purchase time, so every purchase is '
+  + 'refused as having no usable card, including purchases that are within budget and would '
+  + 'otherwise have gone ahead on their own. Choose it only to keep purchasing off for the card.';
 
 
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';

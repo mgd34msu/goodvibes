@@ -34,14 +34,9 @@ useMemoryReadings();
 
 /**
  * A timer for the scheduler's `setTimer` seam that never fires during a test.
- *
- * `scheduleNext()` assigns `this.timer` without clearing the handle it replaces.
- * In production that is harmless, because `tick()` only ever runs from the timer
- * that just fired and so consumed itself. These tests drive `tick()` by hand
- * while a handle is still pending, so every manual tick strands the previous
- * one, and `stop()` only clears the last. Registering each handle means the
- * suite clears them all, instead of leaving 1000-second timers behind in a
- * process that every other test file shares.
+ * Ticks are driven by hand; registering each handle means the suite clears
+ * any left armed, instead of leaving 1000-second timers behind in a process
+ * that every other test file shares.
  */
 function inertTimer(): ReturnType<typeof setTimeout> {
   const handle = setTimeout(() => {}, 1_000_000);
@@ -255,5 +250,41 @@ describe('memory consolidation scheduler: the daemon runs the engine', () => {
     } finally {
       installJudgmentPort(previous);
     }
+  });
+});
+
+describe('memory consolidation scheduler: one timer, one run at a time', () => {
+  function countingTimers() {
+    const pending = new Set<ReturnType<typeof setTimeout>>();
+    return {
+      pending,
+      setTimer: (_fn: () => void, _ms: number) => { const handle = inertTimer(); pending.add(handle); return handle; },
+      clearTimer: (handle: ReturnType<typeof setTimeout>) => { pending.delete(handle); clearTimeout(handle); },
+    };
+  }
+
+  test('repeated external ticks leave exactly one pending timer', async () => {
+    const timers = countingTimers();
+    const scheduler = new MemoryConsolidationScheduler({
+      memoryRegistry: new FakeRegistry([]), configSource: configSource(), isIdle: () => false, now: () => NOW,
+      setTimer: timers.setTimer, clearTimer: timers.clearTimer,
+    });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(timers.pending.size).toBe(1);
+    await scheduler.runNow();
+    expect(timers.pending.size).toBe(1);
+    scheduler.stop();
+    expect(timers.pending.size).toBe(0);
+  });
+
+  test('a tick that arrives while a run is in flight joins it instead of starting a second pass', async () => {
+    const registry = new FakeRegistry([rec({ id: 'a', summary: 'same' }), rec({ id: 'b', summary: 'same' })]);
+    const { scheduler, receipts } = makeScheduler({ registry, idle: true, config: { minIdleMs: 0 } });
+    await Promise.all([scheduler.tick(), scheduler.runNow(), scheduler.tick()]);
+    scheduler.stop();
+    expect(receipts.length).toBe(1);
   });
 });

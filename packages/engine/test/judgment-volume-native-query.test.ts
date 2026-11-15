@@ -1,4 +1,3 @@
-/** Native metadata projection regressions, UNRUN until coding is complete. */
 import { expect, spyOn, test } from 'bun:test';
 import { SqliteDecisionLog, isoTime, type JudgmentLineage, type NewDecisionEntry, type StateHash } from '@goodvibes-jev/judgment';
 import { judgmentVolume, judgmentVolumeBreaches } from '../platform/src/platform/observe/judgment-volume.ts';
@@ -75,7 +74,9 @@ test('malformed saved dispatch evidence cannot produce a healthy native volume r
   const alerts: JudgmentVolumeAlert[] = [];
   using monitor = startJudgmentVolumeMonitor({ log, settings: { budgets: [{ name: 'All', maxLogicalDecisions: 100, maxWireAttempts: 100 }],
     intervalMs: 1000, windowMs: 60_000, limit: 10 }, now: () => at.getTime() + 1, notify: alert => alerts.push(alert) });
-  monitor.check(); expect(alerts).toEqual([{ kind: 'unavailable' }]);
+  monitor.check(); expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toMatchObject({ kind: 'unavailable', reason: expect.any(String) });
+  expect(monitor.lastAlert()).toBe(alerts[0]);
 });
 
 test('budget checks use exact counters without building/parsing unused per-site reports', () => {

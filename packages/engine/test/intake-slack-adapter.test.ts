@@ -29,6 +29,7 @@ const ok = (body: Record<string, unknown>): Reply => ({ ok: true, body: { ok: tr
 function message(ts: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { ts, user: 'UOTHER', text: RAW, ...extra };
 }
+const protocolViolations: string[] = [];
 function fixture(options: {
   reply?: (request: Request) => Reply | Promise<Reply>;
   credential?: AdapterContext['credentials']['resolveConfigSecret'];
@@ -49,8 +50,10 @@ function fixture(options: {
   const ports: SlackInboxPorts = {
     now: options.now ?? (() => NOW), mapItem: options.mapItem ?? mapper,
     http: async (url, request) => {
-      expect(url.origin).toBe('https://slack.com');
-      expect(request.method).toBe('GET');
+      // Recorded, not asserted here: the adapter turns a port exception into a generic
+      // `unavailable`, which would hide a wrong origin or method behind a passing negative test.
+      if (url.origin !== 'https://slack.com') protocolViolations.push(`origin ${url.origin}`);
+      if (request.method !== 'GET') protocolViolations.push(`method ${request.method}`);
       const call = { method: url.pathname.slice('/api/'.length), params: url.searchParams, request };
       calls.push(call);
       if (options.reply) return options.reply(call);
@@ -72,7 +75,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  expect(protocolViolations.splice(0)).toEqual([]);
+});
 async function integrated(f: ReturnType<typeof fixture>, limit = 50) {
   const dir = makeProjectTempDir('slack-inbox');
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
@@ -325,7 +331,7 @@ describe('bounded complete scans and real poller continuity', () => {
       expect(poller.snapshotStatuses()[0]!.state).toBe('unavailable');
       expect(lists).toBeLessThanOrEqual(50); expect(histories).toBeLessThanOrEqual(200);
       if (mode === 'list-bound') expect(lists).toBe(50);
-      if (mode === 'history-bound') expect(histories).toBe(20);
+      if (mode === 'history-bound') expect(histories).toBe(160);
       if (mode === 'total-bound') expect(histories).toBe(200);
     });
   test('null cursors end list and history pagination without an invented extra page', async () => {
@@ -345,6 +351,57 @@ describe('bounded complete scans and real poller continuity', () => {
       ...(count < 20 ? { response_metadata: { next_cursor: String(count) } } : {}) }); }) });
     const result = await f.adapter.poll({ limit: 50 });
     expect(result.state).toBe('ready'); expect(result.items).toHaveLength(20); expect(count).toBe(20);
+  });
+});
+
+describe('busy conversations narrow the window instead of failing the poll', () => {
+  const BIG_NOW = 90_000_000;
+  const HOUR = 3_600_000;
+  const stamp = (ms: number) => (ms / 1_000).toFixed(6);
+  // Serves conversations.list (100 per page) and conversations.history (50 per page, newest first) for per-conversation millisecond lists.
+  function server(data: Record<string, number[]>, ids: string[]) {
+    return (request: Request): Reply => {
+      if (request.method === 'auth.test') return ok({ user_id: 'USELF' });
+      if (request.method === 'conversations.list') {
+        const offset = Number(request.params.get('cursor') ?? 0);
+        const page = ids.slice(offset, offset + 100);
+        return ok({ channels: page.map(id => ({ id })), ...(offset + 100 < ids.length ? { response_metadata: { next_cursor: String(offset + 100) } } : {}) });
+      }
+      const latest = Math.round(Number(request.params.get('latest')) * 1_000);
+      const oldest = Math.round(Number(request.params.get('oldest')) * 1_000);
+      const rows = (data[request.params.get('channel')!] ?? []).filter(ms => ms > oldest && ms < latest).sort((a, b) => b - a);
+      // Rows sharing one millisecond get distinct microsecond digits, as separate Slack messages do.
+      const stamped = rows.map((ms, i) => ({ ms, n: rows.slice(0, i).filter(other => other === ms).length }));
+      const offset = Number(request.params.get('cursor') ?? 0);
+      const more = offset + 50 < rows.length;
+      return ok({ messages: stamped.slice(offset, offset + 50).map(({ ms, n }) => message(n === 0 ? stamp(ms) : `${stamp(ms).slice(0, -1)}${n}`)), has_more: more,
+        ...(more ? { response_metadata: { next_cursor: String(offset + 50) } } : {}) });
+    };
+  }
+  const burst = (from: number, span: number) => Array.from({ length: 1_200 }, (_, i) => from + Math.floor(i * span / 1_200));
+  const quietIds = (count: number) => Array.from({ length: count }, (_, i) => `Q${i}`);
+  test.each([
+    { name: 'concentrated in the last hour, no other conversations', quiet: 0, from: BIG_NOW - HOUR, span: HOUR - 1_000 },
+    { name: 'concentrated in the last hour, 120 quiet conversations', quiet: 120, from: BIG_NOW - HOUR, span: HOUR - 1_000 },
+    { name: 'spread over a day, 170 quiet conversations', quiet: 170, from: BIG_NOW - 24 * HOUR, span: 24 * HOUR - 1_000 },
+  ])('1,200 messages $name still completes with the oldest items', async ({ quiet, from, span }) => {
+    const busy = burst(from, span);
+    const data: Record<string, number[]> = { BUSY: busy };
+    for (const id of quietIds(quiet)) data[id] = [BIG_NOW - 500];
+    const f = fixture({ now: () => BIG_NOW, reply: server(data, [...quietIds(quiet), 'BUSY']) });
+    const result = await f.adapter.poll({ limit: 5 });
+    expect(result.state).toBe('ready');
+    expect(result.items.map(item => item.receivedAt)).toEqual([...busy].sort((a, b) => a - b).slice(0, 5));
+    expect(f.calls.filter(call => call.method === 'conversations.history').length).toBeLessThan(200);
+  });
+  test('two messages sharing the millisecond where the dense pages stop are still delivered', async () => {
+    const first = BIG_NOW - HOUR;
+    const rows = [first, first, ...Array.from({ length: 1_999 }, (_, i) => first + 1_000 + i * 1_000)];
+    const f = fixture({ now: () => BIG_NOW, reply: server({ BUSY: rows }, ['BUSY']) });
+    const result = await f.adapter.poll({ limit: 5 });
+    expect(result.state).toBe('ready');
+    // The oldest stretch, including both messages of the shared millisecond, is delivered; the rest waits for the next poll.
+    expect(result.items.map(item => item.receivedAt).slice(0, 3)).toEqual([first, first, first + 1_000]);
   });
 });
 

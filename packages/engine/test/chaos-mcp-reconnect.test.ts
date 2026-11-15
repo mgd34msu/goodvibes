@@ -1,170 +1,143 @@
 /**
- * Chaos: MCP reconnect flapping and auth-expiry simulation.
+ * Chaos: MCP reconnect flapping and auth-expiry.
  *
- * Tests the MCP lifecycle state machine under rapid connect/disconnect
- * cycles and the reconnect configuration limits. No real network calls.
- *
- * MCP state machine transitions:
- *   configured -> connecting -> connected -> reconnecting -> connecting (loop)
- *   connecting -> reconnecting (direct, on transient failure before connected)
- *   reconnecting -> disconnected (give up)
- *   disconnected -> connecting (restart)
+ * The real lifecycle manager is driven with a client whose connection fails or
+ * flaps, and a fake clock for the back-off timers, so what is checked is what the
+ * manager does: it retries a bounded number of times, gives up as `disconnected`
+ * and says so, recovers when a retry lands, and stops retrying once stopped. No
+ * real network or timer is involved.
  */
 
-import { describe, test, expect } from 'bun:test';
-import {
-  canTransition,
-  applyTransition,
-  isOperational,
-  isTerminal,
-  reachableFrom,
-} from './_helpers/runtime-seam.ts';
+import { afterEach, describe, expect, jest, spyOn, test } from 'bun:test';
+import { McpClient } from '../platform/src/platform/mcp/client.ts';
+import { McpLifecycleManager } from '../platform/src/platform/runtime/mcp/index.ts';
+import type { McpEvent } from '../platform/src/events/mcp.ts';
 import { McpPermissionManager } from './_helpers/runtime-seam.ts';
-import { DEFAULT_RECONNECT_CONFIG } from './_helpers/runtime-seam.ts';
-import type { McpServerState } from './_helpers/runtime-seam.ts';
 
-// ---------------------------------------------------------------------------
-// MCP lifecycle state transitions
-// ---------------------------------------------------------------------------
+const restores: Array<() => void> = [];
+afterEach(() => {
+  while (restores.length) restores.pop()!();
+  jest.useRealTimers();
+});
+
+const RECONNECT = { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 100 } as const;
+const SERVER = { name: 'flaky', command: 'unused', args: [] } as never;
+
+/** Lets the promise chains a connect attempt started run to the end; no timer is involved. */
+async function flushMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 30; turn += 1) await Promise.resolve();
+}
+
+/** A client whose connect() fails for the first `failures` attempts and then succeeds. */
+function stubClient(failures: number): { readonly attempts: () => number } {
+  let attempts = 0;
+  const connect = spyOn(McpClient.prototype, 'connect').mockImplementation(async () => {
+    attempts += 1;
+    if (attempts <= failures) throw new Error('401 Unauthorized: token expired');
+  });
+  const listTools = spyOn(McpClient.prototype, 'listTools').mockImplementation(async () => []);
+  const disconnect = spyOn(McpClient.prototype, 'disconnect').mockImplementation(async () => {});
+  restores.push(() => { connect.mockRestore(); listTools.mockRestore(); disconnect.mockRestore(); });
+  return { attempts: () => attempts };
+}
+
+function watch(manager: McpLifecycleManager): McpEvent[] {
+  const events: McpEvent[] = [];
+  manager.onEvent((event) => events.push(event));
+  return events;
+}
 
 describe('chaos: MCP reconnect flapping', () => {
-  describe('basic state machine transitions', () => {
-    test('configured -> connecting is valid', () => {
-      expect(canTransition('configured', 'connecting')).toBe(true);
-    });
+  test('a server that never connects is retried maxAttempts times, then given up on as disconnected', async () => {
+    jest.useFakeTimers();
+    const client = stubClient(Number.POSITIVE_INFINITY);
+    const manager = new McpLifecycleManager({ reconnect: RECONNECT });
+    const events = watch(manager);
 
-    test('connecting -> connected is valid', () => {
-      expect(canTransition('connecting', 'connected')).toBe(true);
-    });
+    await manager.startServer(SERVER);
+    expect(manager.getState('flaky')).toBe('reconnecting');
+    for (let attempt = 0; attempt < RECONNECT.maxAttempts; attempt += 1) {
+      jest.advanceTimersByTime(RECONNECT.maxDelayMs);
+      await flushMicrotasks();
+    }
 
-    test('connected -> reconnecting is valid', () => {
-      expect(canTransition('connected', 'reconnecting')).toBe(true);
-    });
+    // The first try plus one per scheduled reconnect, and no more.
+    expect(client.attempts()).toBe(1 + RECONNECT.maxAttempts);
+    expect(manager.getState('flaky')).toBe('disconnected');
+    expect(events.filter((event) => event.type === 'MCP_RECONNECTING').map((event) => (event as { attempt: number }).attempt)).toEqual([1, 2, 3]);
+    const gaveUp = events.filter((event) => event.type === 'MCP_DISCONNECTED');
+    expect(gaveUp).toHaveLength(1);
+    expect(gaveUp[0]).toMatchObject({ willRetry: false, reason: 'max reconnect attempts (3) exceeded' });
 
-    test('reconnecting -> connecting is valid (retry loop)', () => {
-      expect(canTransition('reconnecting', 'connecting')).toBe(true);
-    });
-
-    test('reconnecting -> disconnected is valid (give up)', () => {
-      expect(canTransition('reconnecting', 'disconnected')).toBe(true);
-    });
-
-    test('connected -> disconnected is valid (clean disconnect)', () => {
-      expect(canTransition('connected', 'disconnected')).toBe(true);
-    });
-
-    test('disconnected -> connecting is valid (restart)', () => {
-      expect(canTransition('disconnected', 'connecting')).toBe(true);
-    });
-
-    test('auth_required -> connecting is valid (retry after auth)', () => {
-      expect(canTransition('auth_required', 'connecting')).toBe(true);
-    });
+    // Nothing is left scheduled: time passing does not start another attempt.
+    jest.advanceTimersByTime(10_000);
+    await flushMicrotasks();
+    expect(client.attempts()).toBe(1 + RECONNECT.maxAttempts);
   });
 
-  describe('flapping: rapid connect/disconnect cycles', () => {
-    test('single flap cycle: configured -> connecting -> connected -> reconnecting', () => {
-      let state: McpServerState = 'configured';
+  test('the back-off doubles per attempt and is capped by maxDelayMs', async () => {
+    jest.useFakeTimers();
+    const client = stubClient(Number.POSITIVE_INFINITY);
+    const manager = new McpLifecycleManager({ reconnect: { maxAttempts: 4, baseDelayMs: 10, maxDelayMs: 25 } });
 
-      const r1 = applyTransition(state, 'connecting');
-      expect(r1.success).toBe(true);
-      if (r1.success) state = r1.next;
-      expect(state).toBe('connecting');
-
-      const r2 = applyTransition(state, 'connected');
-      expect(r2.success).toBe(true);
-      if (r2.success) state = r2.next;
-      expect(state).toBe('connected');
-
-      const r3 = applyTransition(state, 'reconnecting');
-      expect(r3.success).toBe(true);
-      if (r3.success) state = r3.next;
-      expect(state).toBe('reconnecting');
-    });
-
-    test('reconnecting state can re-enter connecting (retry)', () => {
-      let state: McpServerState = 'reconnecting';
-      const r = applyTransition(state, 'connecting');
-      expect(r.success).toBe(true);
-      if (r.success) state = r.next;
-      expect(state).toBe('connecting');
-    });
-
-    test('reconnecting state is not operational (tools should be blocked)', () => {
-      expect(isOperational('reconnecting')).toBe(false);
-    });
-
-    test('connected state is operational', () => {
-      expect(isOperational('connected')).toBe(true);
-    });
-
-    test('disconnected state is not operational', () => {
-      expect(isOperational('disconnected')).toBe(false);
-    });
-
-    test('degraded state is operational', () => {
-      expect(isOperational('degraded')).toBe(true);
-    });
+    await manager.startServer(SERVER);
+    // Waits are 10, 20, then 25 (not 40), then 25.
+    for (const [waited, expectedAttempts] of [[9, 1], [1, 2], [19, 2], [1, 3], [24, 3], [1, 4], [24, 4], [1, 5]] as const) {
+      jest.advanceTimersByTime(waited);
+      await flushMicrotasks();
+      expect(client.attempts()).toBe(expectedAttempts);
+    }
   });
 
-  describe('auth-expiry: reconnect exhaustion', () => {
-    test('DEFAULT_RECONNECT_CONFIG has sensible maxAttempts', () => {
-      expect(DEFAULT_RECONNECT_CONFIG.maxAttempts).toBeGreaterThan(0);
-      expect(DEFAULT_RECONNECT_CONFIG.maxAttempts).toBeLessThanOrEqual(20);
-    });
+  test('a server that comes back on a retry is connected again with its retry budget restored', async () => {
+    jest.useFakeTimers();
+    const client = stubClient(2);
+    const manager = new McpLifecycleManager({ reconnect: RECONNECT });
+    const events = watch(manager);
 
-    test('DEFAULT_RECONNECT_CONFIG base delay is positive', () => {
-      expect(DEFAULT_RECONNECT_CONFIG.baseDelayMs).toBeGreaterThan(0);
-    });
+    await manager.startServer(SERVER);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      jest.advanceTimersByTime(RECONNECT.maxDelayMs);
+      await flushMicrotasks();
+    }
 
-    test('after exhausted reconnect attempts, can transition to disconnected', () => {
-      // Simulate: N reconnect attempts -> then give up -> disconnected
-      let state: McpServerState = 'reconnecting';
-
-      for (let i = 0; i < DEFAULT_RECONNECT_CONFIG.maxAttempts; i++) {
-        // Attempt to reconnect (reconnecting -> connecting)
-        const tryConnect = applyTransition(state, 'connecting');
-        if (tryConnect.success) {
-          state = tryConnect.next;
-          // Auth expiry: fail back to reconnecting from connecting
-          const failBack = applyTransition(state, 'reconnecting');
-          if (failBack.success) state = failBack.next;
-        }
-      }
-
-      // After exhausting retries, state is still 'reconnecting'; give up -> disconnected
-      expect(state).toBe('reconnecting');
-      const giveUp = applyTransition(state, 'disconnected');
-      expect(giveUp.success).toBe(true);
-      if (giveUp.success) expect(giveUp.next).toBe('disconnected');
-    });
-
-    test('disconnected is a terminal state (isTerminal)', () => {
-      expect(isTerminal('disconnected')).toBe(true);
-    });
-
-    test('reconnecting is not terminal (can still retry)', () => {
-      expect(isTerminal('reconnecting')).toBe(false);
-    });
+    expect(client.attempts()).toBe(3);
+    expect(manager.getState('flaky')).toBe('connected');
+    expect(manager.getServer('flaky')?.reconnectAttempts).toBe(0);
+    expect(events.some((event) => event.type === 'MCP_CONNECTED')).toBe(true);
+    expect(events.some((event) => event.type === 'MCP_DISCONNECTED')).toBe(false);
   });
 
-  describe('reachableFrom: state graph integrity', () => {
-    test('configured has reachable states', () => {
-      const reachable = reachableFrom('configured');
-      expect(reachable.size).toBeGreaterThan(0);
-    });
+  test('stopping a server that is waiting to reconnect cancels the pending attempt', async () => {
+    jest.useFakeTimers();
+    const client = stubClient(Number.POSITIVE_INFINITY);
+    const manager = new McpLifecycleManager({ reconnect: RECONNECT });
 
-    test('reconnecting can reach connecting or disconnected', () => {
-      const reachable = reachableFrom('reconnecting');
-      expect(reachable.has('connecting')).toBe(true);
-      expect(reachable.has('disconnected')).toBe(true);
-    });
+    await manager.startServer(SERVER);
+    expect(manager.getState('flaky')).toBe('reconnecting');
+    await manager.stopServer('flaky', 'operator stop');
+    jest.advanceTimersByTime(10_000);
+    await flushMicrotasks();
 
-    test('disconnected can reconnect (reachable states not empty)', () => {
-      const reachable = reachableFrom('disconnected');
-      expect(reachable.size).toBeGreaterThan(0);
-      expect(reachable.has('connecting')).toBe(true);
-    });
+    expect(client.attempts()).toBe(1);
+    expect(manager.getState('flaky')).toBe('disconnected');
+  });
+
+  test('a server given up on can be started again and then connects', async () => {
+    jest.useFakeTimers();
+    const client = stubClient(1 + RECONNECT.maxAttempts);
+    const manager = new McpLifecycleManager({ reconnect: RECONNECT });
+
+    await manager.startServer(SERVER);
+    for (let attempt = 0; attempt < RECONNECT.maxAttempts; attempt += 1) {
+      jest.advanceTimersByTime(RECONNECT.maxDelayMs);
+      await flushMicrotasks();
+    }
+    expect(manager.getState('flaky')).toBe('disconnected');
+
+    await manager.startServer(SERVER);
+    expect(client.attempts()).toBe(2 + RECONNECT.maxAttempts);
+    expect(manager.getState('flaky')).toBe('connected');
   });
 
   describe('MCP permission manager: trust enforcement during flap', () => {

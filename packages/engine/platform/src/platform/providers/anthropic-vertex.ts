@@ -18,6 +18,9 @@
  * for either package survives on the module graph.
  */
 
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { BaseAnthropic, ClientOptions } from '@anthropic-ai/sdk/client';
 import type * as Resources from '@anthropic-ai/sdk/resources/index';
 import type { AuthClient, GoogleAuth } from 'google-auth-library';
@@ -213,6 +216,10 @@ async function buildAnthropicVertexClientClass(): Promise<AnthropicVertexClientC
     return resource;
   }
 
+  // One GoogleAuth for every client this factory builds: it caches the resolved
+  // credentials, so each request no longer repeats the ADC / metadata-server lookup.
+  let sharedGoogleAuth: GoogleAuth | undefined;
+
   class AnthropicVertexClient extends BaseAnthropicClass {
     readonly messages: Resources.Messages;
     readonly beta: Resources.Beta;
@@ -245,7 +252,11 @@ async function buildAnthropicVertexClientClass(): Promise<AnthropicVertexClientC
       this.projectId = projectId;
       this.authClientPromise = authClient
         ? Promise.resolve(authClient)
-        : (googleAuth ?? new GoogleAuthClass({ scopes: 'https://www.googleapis.com/auth/cloud-platform' })).getClient();
+        : (googleAuth ?? (sharedGoogleAuth ??= new GoogleAuthClass({ scopes: 'https://www.googleapis.com/auth/cloud-platform' }))).getClient();
+      // The lookup starts now but is first awaited when the request is prepared. A
+      // request that fails before that point must not turn a failed lookup into an
+      // unhandled rejection; a request that does reach it still sees the rejection.
+      this.authClientPromise.catch(() => undefined);
     }
 
     protected override validateHeaders(): void {
@@ -333,10 +344,27 @@ function resolveVertexProjectId(): string | null {
     ?? null;
 }
 
+/**
+ * Where `gcloud auth application-default login` writes its credentials: the
+ * file the Google client library falls back to when GOOGLE_APPLICATION_CREDENTIALS
+ * is not set, which is how most developer machines authenticate.
+ */
+function wellKnownAdcPath(): string {
+  const configDir = process.env['CLOUDSDK_CONFIG']
+    ?? (process.platform === 'win32'
+      ? join(process.env['APPDATA'] ?? '', 'gcloud')
+      : join(homedir(), '.config', 'gcloud'));
+  return join(configDir, 'application_default_credentials.json');
+}
+
 function hasVertexCredentials(): boolean {
   return Boolean(
     resolveVertexProjectId()
-    && (process.env['GOOGLE_APPLICATION_CREDENTIALS'] || process.env['ANTHROPIC_VERTEX_USE_GCP_METADATA'] === '1'),
+    && (
+      process.env['GOOGLE_APPLICATION_CREDENTIALS']
+      || process.env['ANTHROPIC_VERTEX_USE_GCP_METADATA'] === '1'
+      || existsSync(wellKnownAdcPath())
+    ),
   );
 }
 
@@ -409,7 +437,6 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
    * `fetchVertexModelIds`). Production callers leave this unset.
    */
   constructor(modelsCachePath?: string, discoveryAuthClient?: Pick<AuthClient, 'getRequestHeaders'>) {
-    const configured = hasVertexCredentials();
     super({
       name: 'anthropic-vertex',
       label: 'Anthropic Vertex',
@@ -422,24 +449,28 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
         projectId: resolveVertexProjectId(),
         region: process.env['GOOGLE_CLOUD_LOCATION'] ?? process.env['CLOUD_ML_REGION'] ?? 'global',
       }),
-      auth: {
-        mode: configured ? 'api-key' : 'anonymous',
-        configured,
-        detail: configured
-          ? 'Google Cloud Vertex credentials are available for Anthropic Vertex.'
-          : 'Configure project ID plus GOOGLE_APPLICATION_CREDENTIALS or metadata-based auth for Anthropic Vertex.',
-        envVars: [
-          'ANTHROPIC_VERTEX_PROJECT_ID',
-          'GOOGLE_CLOUD_PROJECT',
-          'GOOGLE_CLOUD_PROJECT_ID',
-          'GOOGLE_CLOUD_LOCATION',
-          'CLOUD_ML_REGION',
-          'GOOGLE_APPLICATION_CREDENTIALS',
-          'ANTHROPIC_VERTEX_USE_GCP_METADATA',
-        ],
-        allowAnonymous: true,
-        anonymousConfigured: Boolean(resolveVertexProjectId()),
-        anonymousDetail: 'Anthropic Vertex can use Google ADC or workload identity without a stored API key.',
+      // Read per call: credentials set or removed after boot change the answer.
+      auth: () => {
+        const configured = hasVertexCredentials();
+        return {
+          mode: configured ? 'api-key' : 'anonymous',
+          configured,
+          detail: configured
+            ? 'Google Cloud Vertex credentials are available for Anthropic Vertex.'
+            : 'Configure project ID plus GOOGLE_APPLICATION_CREDENTIALS, `gcloud auth application-default login` or metadata-based auth for Anthropic Vertex.',
+          envVars: [
+            'ANTHROPIC_VERTEX_PROJECT_ID',
+            'GOOGLE_CLOUD_PROJECT',
+            'GOOGLE_CLOUD_PROJECT_ID',
+            'GOOGLE_CLOUD_LOCATION',
+            'CLOUD_ML_REGION',
+            'GOOGLE_APPLICATION_CREDENTIALS',
+            'ANTHROPIC_VERTEX_USE_GCP_METADATA',
+          ],
+          allowAnonymous: true,
+          anonymousConfigured: Boolean(resolveVertexProjectId()),
+          anonymousDetail: 'Anthropic Vertex can use Google ADC or workload identity without a stored API key.',
+        };
       },
       streamProtocol: 'anthropic-sdk-stream',
       notes: ['Anthropic Vertex is backed by Google ADC / Vertex auth rather than a provider API key.'],

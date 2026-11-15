@@ -1,5 +1,5 @@
 import { DEFAULT_CONFIG, type GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BUILTIN_PROVIDER_ENV_KEYS, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { isDeepEqual } from './onboarding-values.js';
 import type {
   OnboardingAcknowledgementState,
@@ -27,44 +27,15 @@ export interface OnboardingSignalSnapshot {
   } | null;
   readonly acknowledgements: OnboardingAcknowledgementSnapshot;
 }
-const PROVIDER_SECRET_ENV_ALIASES = {
-  openai: ['OPENAI_API_KEY', 'OPENAI_KEY'],
-  anthropic: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
-  gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_API_KEY'],
-  inceptionlabs: ['INCEPTION_API_KEY'],
-  openrouter: ['OPENROUTER_API_KEY'],
-  aihubmix: ['AIHUBMIX_API_KEY'],
-  groq: ['GROQ_API_KEY'],
-  cerebras: ['CEREBRAS_API_KEY'],
-  mistral: ['MISTRAL_API_KEY'],
-  'ollama-cloud': ['OLLAMA_CLOUD_API_KEY', 'OLLAMA_API_KEY'],
-  huggingface: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'],
-  nvidia: ['NVIDIA_API_KEY'],
-  llm7: ['LLM7_API_KEY'],
-  deepseek: ['DEEPSEEK_API_KEY'],
-  fireworks: ['FIREWORKS_API_KEY'],
-  'github-copilot': ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
-  'microsoft-foundry': ['AZURE_OPENAI_API_KEY'],
-  minimax: ['MINIMAX_API_KEY'],
-  moonshot: ['MOONSHOT_API_KEY'],
-  qianfan: ['QIANFAN_API_KEY'],
-  qwen: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'MODELSTUDIO_API_KEY'],
-  sglang: ['SGLANG_API_KEY'],
-  stepfun: ['STEPFUN_API_KEY'],
-  together: ['TOGETHER_API_KEY'],
-  venice: ['VENICE_API_KEY'],
-  volcengine: ['VOLCANO_ENGINE_API_KEY'],
-  xai: ['XAI_API_KEY'],
-  xiaomi: ['XIAOMI_API_KEY'],
-  zai: ['ZAI_API_KEY', 'Z_AI_API_KEY'],
-  'cloudflare-ai-gateway': ['CLOUDFLARE_AI_GATEWAY_API_KEY'],
-  'vercel-ai-gateway': ['AI_GATEWAY_API_KEY'],
-  litellm: ['LITELLM_API_KEY'],
-  'copilot-proxy': ['COPILOT_PROXY_API_KEY'],
-} as const satisfies Record<string, readonly string[]>;
-const SECRET_KEY_TO_PROVIDER_IDS = new Map<string, readonly string[]>(
-  Object.entries(PROVIDER_SECRET_ENV_ALIASES).flatMap(([providerId, aliases]) => aliases.map((alias) => [alias, [providerId] as const])),
-);
+// Several providers share one variable (the AWS and DashScope names), so each key maps to every provider that declares it.
+const SECRET_KEY_TO_PROVIDER_IDS = new Map<string, string[]>();
+for (const [providerId, envNames] of Object.entries(BUILTIN_PROVIDER_ENV_KEYS)) {
+  for (const envName of envNames) {
+    const providerIds = SECRET_KEY_TO_PROVIDER_IDS.get(envName);
+    if (providerIds) providerIds.push(providerId);
+    else SECRET_KEY_TO_PROVIDER_IDS.set(envName, [providerId]);
+  }
+}
 const INBOUND_EVENT_SURFACE_KINDS = new Set<string>([
   'bluebubbles',
   'discord',
@@ -165,7 +136,7 @@ export function hasCustomizedWorkspaceDefaults(snapshot: OnboardingSignalSnapsho
 export function getProviderIdentityIds(snapshot: OnboardingSignalSnapshot): Set<string> {
   return new Set<string>(
     [
-      ...Object.keys(PROVIDER_SECRET_ENV_ALIASES),
+      ...Object.keys(BUILTIN_PROVIDER_ENV_KEYS),
       ...getConfiguredProviderSignalIds(snapshot),
       snapshot.providerRouting.primaryProviderId,
       snapshot.providerRouting.embeddingProviderId,

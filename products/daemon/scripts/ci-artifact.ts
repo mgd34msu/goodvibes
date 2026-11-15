@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseDaemonCiArtifact, parseNativeReaderCapabilities, realUpdateFileIo, type NativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { retainNativeArtifactFiles } from '@goodvibes-jev/engine/toolchain';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { drainNativeProcessGroup, signalNativeProcessGroup } from './native-execution-process.mjs';
+import { drainNativeProcessGroup, signalNativeProcessGroup, spawnNativeProcessGroup } from './native-execution-process.mjs';
 
-import { daemonCiPayloads, daemonNativeHost, type DaemonArtifactSource, type DaemonCiArtifact } from '../src/cli/native-artifact.ts';
+import { daemonCiPayloads, daemonCiPayloadSpecs, daemonNativeHost, type DaemonArtifactSource, type DaemonCiArtifact } from '../src/cli/native-artifact.ts';
 export { DAEMON_CI_PAYLOADS, type DaemonArtifactSource, type DaemonCiArtifact } from '../src/cli/native-artifact.ts';
 
 function captureSource(source: DaemonArtifactSource): DaemonArtifactSource {
@@ -19,9 +20,9 @@ function captureSource(source: DaemonArtifactSource): DaemonArtifactSource {
 }
 
 function inspect(root: string, source: DaemonArtifactSource, includeManifest = false) {
-  const target = source.target ?? 'linux-x64', payloads = daemonCiPayloads(target);
+  const target = source.target ?? 'linux-x64', specs = daemonCiPayloadSpecs(target), payloads = daemonCiPayloads(target);
   const retained = retainNativeArtifactFiles(resolve(root, 'native'), [
-    ...payloads.map(path => ({ path, executable: path === payloads[0] || path.endsWith('.bun') })),
+    ...specs.map(spec => ({ path: spec.relativePath, executable: spec.executable })),
     ...(includeManifest ? [{ path: 'ci-artifact.json', mode: 0o644, pin: false }] : []),
   ], { directoryRevisions: includeManifest });
   const files = retained.files.slice(0, payloads.length).map(({ path, sha256, mode, size }) => ({ path, sha256: sha256!, mode, size }));
@@ -39,8 +40,12 @@ function immutableArtifact(artifact: DaemonCiArtifact): DaemonCiArtifact {
  * A timeout/output failure kills its owned group and waits for actual close. */
 async function readCompiledReaders(command: string): Promise<NativeReaderCapabilities> {
   const detached = process.platform !== 'win32';
-  const child = spawn(command, ['check-install-reader', '--describe'], { cwd: dirname(command), detached,
-    env: { PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C', NO_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const args = ['check-install-reader', '--describe'], cwd = dirname(command);
+  const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C', NO_COLOR: '1' };
+  // The group helper signals the group the moment the leader exits, so a reused pid is never signalled later.
+  const child = detached
+    ? spawnNativeProcessGroup(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }) as ChildProcessByStdio<null, Readable, Readable>
+    : spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const stdout: Buffer[] = []; let size = 0, failed = false, stopped = false;
   const stop = () => {
     failed = true;

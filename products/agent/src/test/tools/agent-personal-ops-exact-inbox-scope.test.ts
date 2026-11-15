@@ -10,7 +10,9 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import type { CommandContext } from '../../input/command-registry.ts';
 import { captureModelReadingInput } from '../../tools/agent-harness-model-reading-source.ts';
 import { describePersonalOpsLane, runPersonalOpsRead } from '../../tools/agent-harness-personal-ops.ts';
+import { CONTRACT_DISCOVERY_BATCH_SIZE, CONTRACT_DISCOVERY_LANES } from '../../tools/agent-harness-personal-ops-discovery.ts';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
+import { expectHeld } from '../helpers/expect-held.ts';
 
 // Authored synthetic protocol controls: the complete native catalog and real
 // source/permission owners are exercised without genuine semantic claims.
@@ -25,10 +27,6 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 function fixture() {
-  const thread = { threadId: 'synthetic-thread', subject: 'Synthetic selected inbox source', status: 'unread' };
-  const event = { eventId: 'synthetic-event', title: 'Synthetic nonselected calendar source', status: 'confirmed' };
-  const reminder = { reminderId: 'synthetic-reminder', title: 'Synthetic nonselected reminder source', status: 'pending',
-    readRoute: 'synthetic_read reminderId:"synthetic-reminder"' };
   const security = [
     { name: 'synthetic-correspondence', connected: true, trustMode: 'sandbox', role: 'default', schemaFreshness: 'fresh', allowedHosts: ['synthetic.invalid'] },
     { name: 'synthetic-agenda', connected: true, trustMode: 'sandbox', role: 'default', schemaFreshness: 'fresh', allowedHosts: ['synthetic.invalid'] },
@@ -42,9 +40,6 @@ function fixture() {
     inputSchema: { type: 'object', properties: { reference: { type: 'string', description: 'Identifier of the isolated thread or event.' } }, required: ['reference'] },
   }]));
   const counters = { lists: 0, schemaReads: [] as string[], calls: 0 };
-  const inbox = { getSnapshot: () => ({ threads: [thread] }) };
-  const calendar = { getSnapshot: () => ({ events: [event] }) };
-  const reminders = { getSnapshot: () => ({ reminders: [reminder] }) };
   const api = {
     listServerSecurity() { return security; },
     async listAllTools() { counters.lists++; return tools; },
@@ -53,9 +48,9 @@ function fixture() {
   };
   // No installed interactive session or provider: these are native host DTOs
   // and an inert local MCP API, not a fabricated tool invocation authority.
-  const context = { platform: { config: {}, readModels: { personalOps: { inboxThreads: inbox, calendarEvents: calendar, reminders } } },
+  const context = { platform: { config: {} },
     clients: { mcpApi: api }, session: { runtime: { sessionId: 'exact-inbox-synthetic' } } } as unknown as CommandContext;
-  return { context, thread, event, reminder, security, tools, schemas, counters, api };
+  return { context, security, tools, schemas, counters, api };
 }
 
 function reader(source: ReturnType<typeof fixture>, beforeAnswer?: (name: string, state: unknown) => void) {
@@ -134,7 +129,7 @@ describe('Personal Ops exact native inbox contract dependencies', () => {
     const source = fixture();
     const exactReader = reader(source); installJudgmentPort(exactReader.fake.port);
     const exact = await describePersonalOpsLane(source.context, { laneId: 'inbox', includeParameters: true }, readingOptions());
-    expect(exact).toMatchObject({ status: 'found', lane: { id: 'inbox', status: 'ready', methodIds: expect.any(Array),
+    expect(exact).toMatchObject({ status: 'found', lane: { id: 'inbox', status: 'partial', methodIds: expect.any(Array),
       connectorSignals: expect.any(Array), workflows: expect.any(Array), liveRecords: expect.any(Array) } });
     expect(exactReader.seen.size).toBe(exactReader.native.length);
     expect([...exactReader.seen.values()].every(count => count === 1)).toBe(true);
@@ -143,7 +138,7 @@ describe('Personal Ops exact native inbox contract dependencies', () => {
       const fullReader = reader(source); installJudgmentPort(fullReader.fake.port);
       expect(await describePersonalOpsLane(source.context, args, readingOptions())).toEqual(exact);
       expect(fullReader.seen.size).toBe(fullReader.native.length);
-      expect([...fullReader.seen.values()].every(count => count === 4)).toBe(true);
+      expect([...fullReader.seen.values()].every(count => count === CONTRACT_DISCOVERY_LANES.length)).toBe(true);
     }
     expect(source.counters.calls).toBe(0);
   }, 60_000);
@@ -161,7 +156,7 @@ describe('Personal Ops exact native inbox contract dependencies', () => {
       expect(scripted.seen.size).toBe(scripted.native.length);
       expect([...scripted.seen.values()].every(count => count === 1)).toBe(true);
     }
-    expect(source.counters.lists).toBe(4); expect(source.counters.schemaReads).toHaveLength(4 * source.tools.length);
+    expect(source.counters.lists).toBe(CONTRACT_DISCOVERY_LANES.length); expect(source.counters.schemaReads).toHaveLength(CONTRACT_DISCOVERY_LANES.length * source.tools.length);
     expect(source.counters.calls).toBe(0);
   }, 60_000);
 
@@ -175,7 +170,7 @@ describe('Personal Ops exact native inbox contract dependencies', () => {
       expect(await runPersonalOpsRead(source.context, { laneId: 'inbox', ...lookup,
         fields: { reference: 'synthetic-thread' } }, readingOptions())).toEqual(exact);
       expect(fullReader.seen.size).toBe(fullReader.native.length);
-      expect([...fullReader.seen.values()].every(count => count === 4)).toBe(true);
+      expect([...fullReader.seen.values()].every(count => count === CONTRACT_DISCOVERY_LANES.length)).toBe(true);
     expect(source.counters.calls).toBe(0);
   }, 60_000);
 
@@ -185,48 +180,26 @@ describe('Personal Ops exact native inbox contract dependencies', () => {
     if (!schema) throw new Error('Missing original nonselected schema');
     const scripted = reader(source); installJudgmentPort(scripted.fake.port);
     Object.defineProperty(schema, 'opaqueMetadata', { configurable: true, enumerable: false, get() { getters++; return 'unused'; } });
-    await expect(describePersonalOpsLane(source.context, { laneId: 'inbox' }, { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } })).rejects.toThrow();
+    await expectHeld(describePersonalOpsLane(source.context, { laneId: 'inbox' }, { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } }));
     expect(source.counters.schemaReads).toEqual([...source.schemas.keys()]);
     expect(scripted.seen.size).toBe(0); expect(getters).toBe(0); expect(published).toBe(0);
   });
 
-  test('hidden nonselected provider metadata remains refused without accessor calls or selected publication', async () => {
-    const source = fixture(); let getters = 0, published = 0;
-    const scripted = reader(source); installJudgmentPort(scripted.fake.port);
-    Object.defineProperty(source.event, 'opaqueMetadata', { enumerable: false, get() { getters++; return 'unused'; } });
-    await expect(describePersonalOpsLane(source.context, { laneId: 'inbox' },
-      { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } })).rejects.toThrow();
-    expect(getters).toBe(0); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
-  });
-
-  test('a nonselected calendar source changing during its actual privacy read prevents inbox record publication', async () => {
-    const source = fixture(); let changed = false, published = 0;
-    const scripted = reader(source, (name, state) => {
-      if (!changed && name !== 'match' && JSON.stringify(state).includes(source.event.title)) {
-        changed = true; source.event.title = 'Competing native nonselected calendar source';
-      }
-    });
-    installJudgmentPort(scripted.fake.port);
-    await expect(runPersonalOpsRead(source.context, { laneId: 'inbox', recordId: readId, fields: { reference: 'synthetic-thread' } },
-      { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } })).rejects.toThrow();
-    expect(changed).toBe(true); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
-  }, 60_000);
-
   test('caller cancellation during the complete inbox method response prevents later selection and publication', async () => {
     const source = fixture(); const controller = new AbortController(); let matches = 0, published = 0;
-    const scripted = reader(source, name => { if (name === 'match' && ++matches === 17) controller.abort(new Error('Synthetic caller cancellation')); });
+    const scripted = reader(source, name => { if (name === 'match' && ++matches === CONTRACT_DISCOVERY_BATCH_SIZE + 1) controller.abort(new Error('Synthetic caller cancellation')); });
     installJudgmentPort(scripted.fake.port);
-    await expect(runPersonalOpsRead(source.context, { laneId: 'inbox', recordId: readId }, { ...readingOptions(), signal: controller.signal,
-      retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } })).rejects.toThrow();
-    expect(matches).toBeGreaterThanOrEqual(17); expect(matches).toBeLessThanOrEqual(32); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
+    await expectHeld(runPersonalOpsRead(source.context, { laneId: 'inbox', recordId: readId }, { ...readingOptions(), signal: controller.signal,
+      retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } }));
+    expect(matches).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE); expect(matches).toBeLessThanOrEqual(2 * CONTRACT_DISCOVERY_BATCH_SIZE); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
   });
 
   test('native reader retirement during the inbox method response cannot publish or execute a record', async () => {
     const source = fixture(); let matches = 0, published = 0;
-    const scripted = reader(source, name => { if (name === 'match' && ++matches === 17) installJudgmentPort(undefined); });
+    const scripted = reader(source, name => { if (name === 'match' && ++matches === CONTRACT_DISCOVERY_BATCH_SIZE + 1) installJudgmentPort(undefined); });
     installJudgmentPort(scripted.fake.port);
-    await expect(runPersonalOpsRead(source.context, { laneId: 'inbox', recordId: readId }, { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } })).rejects.toThrow();
-    expect(matches).toBeGreaterThanOrEqual(17); expect(matches).toBeLessThanOrEqual(32); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
+    await expectHeld(runPersonalOpsRead(source.context, { laneId: 'inbox', recordId: readId }, { ...readingOptions(), retainCurrent(_guard, key) { if (key === 'personal-ops-lanes') published++; } }));
+    expect(matches).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE); expect(matches).toBeLessThanOrEqual(2 * CONTRACT_DISCOVERY_BATCH_SIZE); expect(published).toBe(0); expect(source.counters.calls).toBe(0);
   });
 
   test('a recorded native admission remains live through the literal inbox source read and refuses revocation before publication', async () => {

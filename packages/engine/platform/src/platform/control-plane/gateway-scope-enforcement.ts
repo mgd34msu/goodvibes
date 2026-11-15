@@ -23,6 +23,20 @@ import type { RuntimeEventDomain } from '../runtime/events/index.js';
 export const CHANNEL_REQUIRED_SCOPE: Readonly<Record<string, string>> = {
   'session-update': 'read:sessions',
   'hosted-session-update': 'read:sessions',
+  // Remote runtime events carry peer identity, addresses, and device results (location, clipboard).
+  'remote-pair-requested': 'read:remote',
+  'remote-pair-approved': 'read:remote',
+  'remote-pair-rejected': 'read:remote',
+  'remote-pair-verified': 'read:remote',
+  'remote-peer': 'read:remote',
+  'remote-peer-heartbeat': 'read:remote',
+  'remote-peer-disconnected': 'read:remote',
+  'remote-token-rotated': 'read:remote',
+  'remote-token-revoked': 'read:remote',
+  'remote-work-queued': 'read:remote',
+  'remote-work-claimed': 'read:remote',
+  'remote-work-settled': 'read:remote',
+  'remote-work-cancelled': 'read:remote',
 };
 
 /** The subset of a live client this decision needs. */

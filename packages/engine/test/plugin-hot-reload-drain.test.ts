@@ -117,6 +117,8 @@ async function loadedFixture(inFlight?: PluginInFlightTracker) {
   loaded.set('drainer', first!);
   const lcm = new PluginLifecycleManager();
   lcm.registerDiscovered(manifest, pluginDir);
+  // The host loaded this instance itself; the record is made to say so, since a reload needs a plugin that is running.
+  (lcm.getRecord('drainer') as { state: string }).state = 'active';
   const options = {
     getLoadedPlugin: (name: string) => loaded.get(name),
     removeLoadedPlugin: (name: string) => { loaded.delete(name); },
@@ -193,13 +195,41 @@ describe('runHotReload phase 1 drains in-flight plugin calls', () => {
   });
 });
 
+describe('a reload that succeeds after a failed one', () => {
+  test('the plugin goes from error back to active, and a failing health check then degrades it', async () => {
+    const fx = await loadedFixture(new PluginInFlightTracker());
+    writeFileSync(join(fx.pluginDir, 'index.js'), 'export function init() { throw new Error("broken build"); }', 'utf-8');
+    const failed = await runHotReload('drainer', fx.manifest, fx.pluginDir, fx.deps, fx.lcm, fx.options);
+    expect(failed.success).toBe(false);
+    expect(fx.lcm.getRecord('drainer')!.state).toBe('error');
+
+    writeFileSync(join(fx.pluginDir, 'index.js'), PLUGIN_SOURCE, 'utf-8');
+    const retried = await runHotReload('drainer', fx.manifest, fx.pluginDir, fx.deps, fx.lcm, fx.options);
+    expect(retried.success).toBe(true);
+    expect(retried.degraded).toBe(false);
+    expect(fx.lcm.getRecord('drainer')!.state).toBe('active');
+
+    const unhealthy = await runHotReload('drainer', fx.manifest, fx.pluginDir, fx.deps, fx.lcm, {
+      ...fx.options,
+      healthCheck: async () => ({ healthy: false, message: 'probe failed', durationMs: 0 }),
+    });
+    expect(unhealthy.degraded).toBe(true);
+    expect(fx.lcm.getRecord('drainer')!.state).toBe('degraded');
+
+    const recovered = await runHotReload('drainer', fx.manifest, fx.pluginDir, fx.deps, fx.lcm, fx.options);
+    expect(recovered.degraded).toBe(false);
+    expect(fx.lcm.getRecord('drainer')!.state).toBe('active');
+  });
+});
+
 describe('PluginManager.reload drains the same way', () => {
   test('a busy plugin is left on its instance and reported; once idle it reloads', async () => {
     const base = mkdtempSync(join(tmpdir(), 'gv-drain-manager-'));
     roots.push(base);
-    writePlugin(join(base, 'project', '.goodvibes', 'plugins', 'drainer'));
+    const pluginDir = join(base, 'project', '.goodvibes', 'plugins', 'drainer');
+    writePlugin(pluginDir);
     const stateFilePath = join(base, 'plugins.json');
-    writeFileSync(stateFilePath, JSON.stringify({ enabled: { drainer: true } }), 'utf-8');
+    writeFileSync(stateFilePath, JSON.stringify({ enabled: { drainer: true }, enabledDirs: { drainer: pluginDir } }), 'utf-8');
     const harness = makeDeps();
     const manager = new PluginManager({ pathOptions: { cwd: join(base, 'project'), homeDir: join(base, 'home') }, stateFilePath });
     await manager.init(harness.deps);

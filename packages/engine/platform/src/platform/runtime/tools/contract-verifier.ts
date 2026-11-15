@@ -24,7 +24,7 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import { descriptionQuality } from './batteries/description-quality.js';
 import type { PhasedTool } from './adapter.js';
-import type { ToolClass } from './output-policy.js';
+import { TOOL_CLASS_BY_CATEGORY } from './output-policy.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,16 +35,6 @@ const SIDE_EFFECTING_CATEGORIES: ReadonlySet<string> = new Set([
   'network',
   'delegate',
 ]);
-
-/** Mapping from PhasedTool.category to ToolClass for output policy checks. */
-const CATEGORY_TO_TOOL_CLASS: Readonly<Record<string, ToolClass>> = {
-  read: 'read',
-  write: 'write',
-  execute: 'execute',
-  network: 'network',
-  delegate: 'read', // delegate spawns sub-agents; output is typically small
-  analyze: 'analyze',
-};
 
 /** Valid JSON Schema primitive types. */
 const VALID_JSON_SCHEMA_TYPES: ReadonlySet<string> = new Set([
@@ -319,13 +309,13 @@ function checkOutputPolicy(phased: Partial<PhasedTool>, toolName: string): Contr
     return violations;
   }
 
-  const toolClass = CATEGORY_TO_TOOL_CLASS[phased.category];
+  const toolClass = TOOL_CLASS_BY_CATEGORY[phased.category];
   if (toolClass === undefined) {
     violations.push({
       dimension: 'output-policy',
       severity: 'error',
       message: `Tool '${toolName}': category '${phased.category}' has no output policy mapping.`,
-      hint: `Add a CATEGORY_TO_TOOL_CLASS entry or register a custom output policy for '${phased.category}'.`,
+      hint: `Add a TOOL_CLASS_BY_CATEGORY entry or register a custom output policy for '${phased.category}'.`,
     });
   }
 

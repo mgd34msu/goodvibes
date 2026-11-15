@@ -35,7 +35,7 @@ function localModelSmokeTargetFromDefault(endpoint: LocalModelServerDefaultEndpo
     modelsUrl: endpoint.modelsUrl,
     smokeCommand: endpoint.smokeCommand,
     smokeRoute: localEndpointSmokeRoute(endpoint.id),
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after verifying the local server."',
+    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     addProviderRoute: endpoint.addProviderRoute,
     source: 'suggested-default',
     notes: [endpoint.startHint],
@@ -180,6 +180,27 @@ function extractModelIdsFromPayload(payload: unknown): { readonly ids: readonly 
   return { ids: distinct.slice(0, 12), total: distinct.length };
 }
 
+const SMOKE_BODY_LIMIT_BYTES = 1_000_000;
+
+/** Reads at most `SMOKE_BODY_LIMIT_BYTES`; a longer body is cut off and reported as truncated rather than buffered. */
+async function readBoundedBody(response: Response): Promise<{ readonly text: string; readonly truncated: boolean }> {
+  if (!response.body) return { text: await response.text(), truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { text: text + decoder.decode(), truncated: false };
+    received += value.byteLength;
+    if (received > SMOKE_BODY_LIMIT_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return { text, truncated: true };
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
 function safeSmokeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return previewHarnessText(message.replace(/https?:\/\/\S+/g, '[redacted-url]'), 180);
@@ -192,7 +213,7 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
     return {
       ...target,
       status: 'blocked',
-      liveProbe: 'confirmed',
+      liveProbe: 'not-run',
       networkScope: network.scope,
       failure: network.reason,
       nextActions: ['Inspect the endpoint route and correct the base URL before running smoke again.'],
@@ -206,22 +227,26 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
     const response = await fetch(target.modelsUrl, {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      // A redirect could leave the local/private scope that was checked above, so it is reported, never followed.
+      redirect: 'manual',
       signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
     });
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const elapsedMs = Date.now() - started;
     const contentType = response.headers.get('content-type') ?? '';
-    const text = await response.text();
+    const { text, truncated } = await readBoundedBody(response);
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     let payload: unknown = null;
     let jsonValid = false;
     try {
+      if (truncated) throw new Error('body too large');
       payload = text ? JSON.parse(text) : null;
       jsonValid = true;
     } catch {
       jsonValid = false;
     }
     const models = jsonValid ? extractModelIdsFromPayload(payload) : { ids: [] as readonly string[], total: 0 };
+    const redirected = response.status >= 300 && response.status < 400;
     const status = !response.ok
       ? 'http-error'
       : !jsonValid
@@ -239,7 +264,10 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
       elapsedMs,
       jsonValid,
       modelCount: models.total,
-      sampleModelIds: models.ids.slice(0, 5),
+      // Model ids come from whatever process answers on the port, so they are shortened and are data only.
+      sampleModelIds: models.ids.slice(0, 5).map((id) => previewHarnessText(id, 80)),
+      ...(truncated ? { failure: `The response was larger than ${SMOKE_BODY_LIMIT_BYTES} bytes and was not read in full.` } : {}),
+      ...(redirected ? { failure: `The server answered with a redirect (HTTP ${response.status}). Redirects are not followed; use the final base URL directly.` } : {}),
       success: status === 'passed',
       nextActions: status === 'passed'
         ? ['Refresh the model catalog, then run a local benchmark before changing the default model.']
@@ -312,10 +340,11 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
   assertCurrent();
   const passed = results.filter((result) => result.success === true);
   const blocked = results.filter((result) => result.status === 'blocked');
+  const probed = results.length - blocked.length;
   return {
     kind: 'local-model-smoke',
     status: passed.length > 0 ? 'ready' : blocked.length === results.length ? 'blocked' : 'needs-attention',
-    liveProbe: 'confirmed',
+    liveProbe: probed === 0 ? 'not-run' : probed < results.length ? 'partial' : 'confirmed',
     checkedAt,
     timeoutMs,
     endpointCount: results.length,
@@ -333,6 +362,6 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
       ? ['Refresh the model catalog and run the local benchmark action before changing the default route.']
       : ['Start a local model server, load one model, and rerun this confirmed smoke check.'],
     cookbookRoute: 'models action:"local" includeParameters:true',
-    policy: 'Confirmed read-only local model smoke. Agent only sends bounded GET requests to discovered or suggested local/private model-list endpoints; it does not add providers, refresh catalogs, benchmark, download models, or change routes.',
+    policy: `${probed === 0 ? 'No request was sent: every target was blocked before probing. Read-only local model smoke.' : 'Confirmed read-only local model smoke.'} Agent only sends bounded GET requests to discovered or suggested local/private model-list endpoints; it does not add providers, refresh catalogs, benchmark, download models, or change routes. Redirects are not followed.`,
   };
 }

@@ -17,6 +17,7 @@ import { execFile } from 'node:child_process';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { CiJob, CiStatusSource } from './types.js';
+import { isGitHubRepoName, isGitRefName } from './git-names.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -41,6 +42,35 @@ function tailLog(raw: string): string {
   const tail = trimmed.slice(-MAX_JOB_LOG_BYTES);
   const firstNewline = tail.indexOf('\n');
   return `… (truncated to the last ${MAX_JOB_LOG_BYTES} bytes)\n${firstNewline > -1 ? tail.slice(firstNewline + 1) : tail}`;
+}
+
+
+/**
+ * `repo` and `ref` come from callers (and, for refs, from model-authored
+ * command text) and are interpolated into the path of an authenticated GitHub
+ * API call. Anything that could change which endpoint is read is refused, and
+ * each ref segment is encoded.
+ */
+function checkRepo(repo: string): string {
+  if (!isGitHubRepoName(repo)) {
+    throw new Error(`repo "${repo}" is not a GitHub owner/name`);
+  }
+  return repo;
+}
+
+function refPath(ref: string): string {
+  if (!isGitRefName(ref)) throw new Error(`ref "${ref}" is not a valid git ref`);
+  return ref.split('/').map(encodeURIComponent).join('/');
+}
+
+function parseCheckRuns(out: string): GhCheckRun[] {
+  // --paginate --jq '.check_runs' may emit several JSON arrays (one per page); join them.
+  const chunks = out.trim().split('\n').filter((line) => line.trim().length > 0);
+  return chunks.flatMap((chunk) => {
+    const parsed: unknown = JSON.parse(chunk);
+    if (!Array.isArray(parsed)) throw new Error('the response had no check_runs list');
+    return parsed as GhCheckRun[];
+  });
 }
 
 function runGh(args: readonly string[], timeoutMs: number): Promise<string> {
@@ -80,12 +110,13 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
 
   async function resolveRef(repo: string, ref?: string, prNumber?: number): Promise<string> {
     if (prNumber !== undefined) {
-      const out = await runGh(['api', `repos/${repo}/pulls/${prNumber}`, '--jq', '.head.sha'], timeoutMs);
+      if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new Error(`PR number ${prNumber} is not valid`);
+      const out = await runGh(['api', `repos/${checkRepo(repo)}/pulls/${prNumber}`, '--jq', '.head.sha'], timeoutMs);
       const sha = out.trim();
       if (!sha) throw new Error(`could not resolve head sha for ${repo} PR #${prNumber}`);
       return sha;
     }
-    if (ref) return ref;
+    if (ref) return refPath(ref);
     throw new Error('a ref or prNumber is required to resolve CI status');
   }
 
@@ -93,14 +124,12 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
     fetchJobs: async ({ repo, ref, prNumber }): Promise<readonly CiJob[]> => {
       const resolvedRef = await resolveRef(repo, ref, prNumber);
       const out = await runGh(
-        ['api', `repos/${repo}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
+        ['api', `repos/${checkRepo(repo)}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
         timeoutMs,
       );
       let runs: GhCheckRun[];
       try {
-        // --paginate --jq '.check_runs' may emit several JSON arrays (one per page); join them.
-        const chunks = out.trim().split('\n').filter((line) => line.trim().length > 0);
-        runs = chunks.flatMap((chunk) => JSON.parse(chunk) as GhCheckRun[]);
+        runs = parseCheckRuns(out);
       } catch (error) {
         throw new Error(`could not parse gh check-runs output: ${summarizeError(error)}`);
       }
@@ -123,7 +152,7 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
         const sections: string[] = [];
         for (const job of jobs.slice(0, MAX_LOG_JOBS)) {
           if (!job.jobId || !/^[0-9]+$/.test(job.jobId)) { sections.push(`--- ${job.name}: exact Actions job identity unavailable ---`); continue; }
-          try { sections.push(`--- ${job.name} (job ${job.jobId}, log tail) ---\n${tailLog(await runGh(['api', `repos/${repo}/actions/jobs/${job.jobId}/logs`], timeoutMs))}`); }
+          try { sections.push(`--- ${job.name} (job ${job.jobId}, log tail) ---\n${tailLog(await runGh(['api', `repos/${checkRepo(repo)}/actions/jobs/${job.jobId}/logs`], timeoutMs))}`); }
           catch (error) { sections.push(`--- ${job.name}: log fetch failed (${summarizeError(error)}) ---`); }
         }
         if (jobs.length > MAX_LOG_JOBS) sections.push(`(+${jobs.length - MAX_LOG_JOBS} more failing jobs, logs omitted)`);
@@ -133,17 +162,16 @@ export function createGhCliCiSource(options: GhCliCiSourceOptions = {}): CiStatu
       try {
         const resolvedRef = await resolveRef(repo, ref, prNumber);
         const out = await runGh(
-          ['api', `repos/${repo}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
+          ['api', `repos/${checkRepo(repo)}/commits/${resolvedRef}/check-runs`, '--paginate', '--jq', '.check_runs'],
           timeoutMs,
         );
-        const chunks = out.trim().split('\n').filter((line) => line.trim().length > 0);
-        const runs = chunks.flatMap((chunk) => JSON.parse(chunk) as GhCheckRun[]);
+        const runs = parseCheckRuns(out);
         const wanted = new Set(jobNames);
         const failingRuns = runs.filter((run) => run.id !== undefined && run.name !== undefined && wanted.has(run.name));
         const sections: string[] = [];
         for (const run of failingRuns.slice(0, MAX_LOG_JOBS)) {
           try {
-            const raw = await runGh(['api', `repos/${repo}/actions/jobs/${run.id}/logs`], timeoutMs);
+            const raw = await runGh(['api', `repos/${checkRepo(repo)}/actions/jobs/${run.id}/logs`], timeoutMs);
             sections.push(`--- ${run.name} (log tail) ---\n${tailLog(raw)}`);
           } catch (error) {
             sections.push(`--- ${run.name}: log fetch failed (${summarizeError(error)}); expand with: gh run view --log-failed (in a clone of ${repo}) ---`);

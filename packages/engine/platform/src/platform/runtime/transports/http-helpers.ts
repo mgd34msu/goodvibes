@@ -32,18 +32,37 @@ export function maybeObject<T extends object>(value: unknown): T | null {
 
 
 
+/**
+ * The records under `key` (or the body itself when it is a bare array). A body
+ * with neither is a changed daemon contract, not an empty list, so it throws.
+ */
 export function readArrayResponse<T>(body: unknown, key: string): readonly T[] {
+  const found = findArrayResponse<T>(body, key);
+  if (found) return found;
+  throw new Error(`Unexpected response: expected an array or an object with an array "${key}", got ${describeShape(body)}`);
+}
+
+function findArrayResponse<T>(body: unknown, key: string): readonly T[] | undefined {
   if (Array.isArray(body)) return body as readonly T[];
-  if (isRecord(body)) {
-    const maybeEntries = body[key]!;
-    if (Array.isArray(maybeEntries)) return maybeEntries as readonly T[];
-  }
-  return [];
+  if (isRecord(body) && Array.isArray(body[key])) return body[key] as readonly T[];
+  return undefined;
+}
+
+function describeShape(body: unknown): string {
+  if (body === null) return 'null';
+  if (isRecord(body)) return `an object with keys [${Object.keys(body).join(', ')}]`;
+  return typeof body;
+}
+
+function requireObject(body: unknown, key: string, endpoint: string): Record<string, unknown> {
+  const value = isRecord(body) ? body[key] : undefined;
+  if (isRecord(value)) return value;
+  throw new Error(`Unexpected ${endpoint} response: missing object "${key}", got ${describeShape(body)}`);
 }
 
 function readControlPlaneClients(body: unknown): readonly ControlPlaneClientRecord[] {
-  if (!isRecord(body)) return [];
-  return Array.isArray(body.clients) ? body.clients as readonly ControlPlaneClientRecord[] : [];
+  if (isRecord(body) && Array.isArray(body.clients)) return body.clients as readonly ControlPlaneClientRecord[];
+  throw new Error(`Unexpected control-plane response: missing array "clients", got ${describeShape(body)}`);
 }
 
 function readControlPlaneEvents(body: unknown): readonly ControlPlaneRecentEvent[] {
@@ -83,11 +102,14 @@ export async function readControlPlaneSnapshot(
       createJsonRequestInit(token),
     ),
   ]);
-  const server = maybeObject<Record<string, unknown>>(isRecord(gatewaySnapshot) ? gatewaySnapshot.server : null) ?? {};
-  const totals = maybeObject<Record<string, unknown>>(isRecord(gatewaySnapshot) ? gatewaySnapshot.totals : null) ?? {};
+  const server = requireObject(gatewaySnapshot, 'server', 'control-plane');
+  const totals = requireObject(gatewaySnapshot, 'totals', 'control-plane');
   const clients = readControlPlaneClients(gatewaySnapshot);
   const recentEvents = readControlPlaneEvents(gatewaySnapshot).slice(0, 6);
-  const sessionList = readArrayResponse<SharedSessionRecord>(sessions, 'sessions');
+  // Older daemons name the list `session`.
+  const sessionList = findArrayResponse<SharedSessionRecord>(sessions, 'sessions')
+    ?? findArrayResponse<SharedSessionRecord>(sessions, 'session')
+    ?? readArrayResponse<SharedSessionRecord>(sessions, 'sessions');
   const approvalList = readArrayResponse<SharedApprovalRecord>(approvals, 'approvals');
   return {
     connectionState: readString(server.connectionState, 'unknown'),
@@ -98,9 +120,7 @@ export async function readControlPlaneSnapshot(
     port: readNumber(server.port),
     clients,
     approvals: approvalList.slice(0, 6),
-    sessions: sessionList.length > 0
-      ? sessionList.slice(0, 6)
-      : readArrayResponse<SharedSessionRecord>(sessions, 'session').slice(0, 6),
+    sessions: sessionList.slice(0, 6),
     recentEvents,
   };
 }

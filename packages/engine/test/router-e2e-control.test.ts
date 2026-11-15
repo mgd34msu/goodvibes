@@ -106,27 +106,19 @@ describe('router-e2e control: GET /status (happy path)', () => {
     });
   });
 
-  test('returns the control.status response shape', async () => {
-    const handlers = makeDefaultDaemonHandlerStub();
-    const req = makeRequest('GET', 'http://localhost/status');
-    const res = await dispatchOperatorRoutes(req, handlers);
-    expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    const body = await res!.json() as Record<string, unknown>;
-    expect(body.status).toBe('running');
-    expect(body.version).toBe('0.0.0-test');
-  });
-
-  test('delegates to getControlPlaneSnapshot for GET /api/control-plane', async () => {
-    const handlers = makeDefaultDaemonHandlerStub();
+  test('delegates GET /api/control-plane to getControlPlaneSnapshot and returns its response unchanged', async () => {
+    let calls = 0;
+    const handlers = makeDefaultDaemonHandlerStub({
+      getControlPlaneSnapshot: () => {
+        calls++;
+        return Response.json({ totals: { clients: 41 } }, { status: 202 });
+      },
+    });
     const req = makeRequest('GET', 'http://localhost/api/control-plane');
     const res = await dispatchOperatorRoutes(req, handlers);
-    expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    const body = await res!.json() as Record<string, unknown>;
-    expect(body).toHaveProperty('totals');
-    const totals = body.totals as Record<string, number>;
-    expect(typeof totals.clients).toBe('number');
+    expect(calls).toBe(1);
+    expect(res!.status).toBe(202);
+    expect(await res!.json()).toEqual({ totals: { clients: 41 } });
   });
 
   test('getControlPlaneRecentEvents returns events array and respects limit param', async () => {

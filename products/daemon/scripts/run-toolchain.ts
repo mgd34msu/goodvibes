@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withBuildPreparationLock } from './build-preparation-lock.ts';
+import { runNativeBuildCommand } from './native-execution-process.mjs';
 
 const COMMANDS = {
   build: 'goodvibes-build-binaries',
@@ -45,11 +46,18 @@ export async function runWorkspaceToolchain(productRoot: string, command: string
   validateToolchainArguments(command, args);
   const cli = resolveWorkspaceToolchain(productRoot, command);
   return withBuildPreparationLock(productRoot, async () => {
-    const child = Bun.spawn([process.execPath, cli, ...args], { cwd: productRoot, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });
-    const stop = (): void => { child.kill('SIGTERM'); };
+    // The build runs as its own process group, drained before the lock is
+    // released: a grandchild that outlived its parent could otherwise keep
+    // writing under native/ while the next preparation starts.
+    const interrupted = new AbortController();
+    const stop = (): void => { interrupted.abort(new Error('The native build was interrupted before it finished.')); };
     process.on('SIGINT', stop); process.on('SIGTERM', stop);
-    try { return await child.exited; }
-    finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+    try {
+      const { exitCode } = await runNativeBuildCommand(process.execPath, [cli, ...args], {
+        cwd: productRoot, signal: interrupted.signal, timeoutMs: 2 * 60 * 60 * 1000, maxOutputBytes: 512 * 1024 * 1024,
+      });
+      return exitCode;
+    } finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
   });
 }
 

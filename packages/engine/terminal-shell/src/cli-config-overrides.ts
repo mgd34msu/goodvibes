@@ -5,6 +5,7 @@
  */
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
+import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
 import type { RuntimeEndpointId } from './cli-endpoints.js';
@@ -93,7 +94,7 @@ export function applyRuntimeConfigOverrides(
 }
 
 /**
- * Session-only feature overrides (--enable-feature / --disable-feature).
+ * Session-only feature overrides (--enable / --disable).
  * Each feature is switched through its real domain settings key (e.g.
  * sandbox.enabled, behavior.compactionStrategy) in the runtime config layer;
  * features without an off position (constant capabilities on non-boolean
@@ -113,14 +114,14 @@ export function applyRuntimeFeatureFlagOverrides(
     if (!write) {
       errors.push(getFeatureSetting(feature)
         ? `${flagName} ${feature}: this capability has no ${enabled ? 'on' : 'off'} switch (its domain settings govern it directly).`
-        : `${flagName} ${feature}: unknown feature id.`);
+        : `${flagName} ${feature}: unknown feature id. The value is a feature id, not a settings key. Known ids: ${FEATURE_SETTINGS.map((entry) => entry.id).join(', ')}.`);
       return;
     }
     try { applyRuntimeConfigValue(configManager, write.key, write.value); }
     catch (error) { errors.push(error instanceof Error ? `${flagName}: ${error.message}` : `Invalid ${flagName}.`); }
   };
-  for (const feature of options.enableFeatures) apply(feature, true, '--enable-feature');
-  for (const feature of options.disableFeatures) apply(feature, false, '--disable-feature');
+  for (const feature of options.enableFeatures) apply(feature, true, '--enable');
+  for (const feature of options.disableFeatures) apply(feature, false, '--disable');
   return errors;
 }
 

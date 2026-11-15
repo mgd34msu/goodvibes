@@ -39,18 +39,30 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+/**
+ * A number from a body or from the query string, where it always arrives as
+ * text. An absent value is absent; a present one that is not a finite number is
+ * refused, because dropping it would silently widen the call (a watch for the
+ * ref instead of the pull request).
+ */
+function optionalNumber(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = typeof value === 'string' ? Number(value.trim()) : value;
+  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) {
+    throw new GatewayVerbError(`${field} must be a number`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return parsed;
 }
 
 function createStatusHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
+    const prNumber = optionalNumber(params.prNumber, 'prNumber');
     try {
       const report = await service.status({
         repo: requireString(params.repo, 'repo'),
         ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
-        ...(optionalNumber(params.prNumber) !== undefined ? { prNumber: optionalNumber(params.prNumber)! } : {}),
+        ...(prNumber !== undefined ? { prNumber } : {}),
       });
       return { report };
     } catch (error) {
@@ -66,11 +78,12 @@ function createListHandler(service: CiWatchGatewayService): GatewayMethodHandler
 function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
+    const prNumber = optionalNumber(params.prNumber, 'prNumber');
     try {
       const watch = await service.createWatch({
         repo: requireString(params.repo, 'repo'),
         ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
-        ...(optionalNumber(params.prNumber) !== undefined ? { prNumber: optionalNumber(params.prNumber)! } : {}),
+        ...(prNumber !== undefined ? { prNumber } : {}),
         deliveryChannel: requireString(params.deliveryChannel, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });
@@ -106,6 +119,7 @@ function createRunHandler(service: CiWatchGatewayService): GatewayMethodHandler 
         fixSessionTriggered: result.fixSessionTriggered,
         ...(result.fixSessionId ? { fixSessionId: result.fixSessionId } : {}),
         ...(result.fixSessionError ? { fixSessionError: result.fixSessionError } : {}),
+        ...(result.retired ? { retired: true } : {}),
       };
     } catch (error) {
       rethrow(error);

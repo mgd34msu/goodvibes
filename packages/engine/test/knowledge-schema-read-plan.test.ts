@@ -52,6 +52,15 @@ test('the authentic empty-authority profile uses one unloaned image without an e
     expect(images.privateImages).toHaveLength(1);
     expect(images.privateImages[0]).toBe(images.current[0]);
     expect(images.exports()).toBe(0);
+    // An unchanged persisted state reuses the idle image instead of opening another.
+    sqlite.assertPersistedReadFrame(() => { read(sqlite); });
+    expect(images.privateImages).toHaveLength(1);
+    expect(images.exports()).toBe(0);
+    // Any persisted change must retire it: the next frame reads a fresh image.
+    const ledger = createEmptyWorkLedgerState('native-schema-plan');
+    sqlite.run('INSERT INTO work_ledgers(project_id,format_version,revision,state_json) VALUES(?,?,?,?)',
+      [ledger.projectId, ledger.version, ledger.revision, JSON.stringify(ledger)]);
+    await sqlite.save();
     sqlite.assertPersistedReadFrame(() => { read(sqlite); });
     expect(images.privateImages).toHaveLength(2);
     expect(images.privateImages[1]).not.toBe(images.privateImages[0]);

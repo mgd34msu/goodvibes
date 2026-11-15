@@ -5,8 +5,9 @@
  * An explicit public URL is authoritative. The bundled WebUI shares the
  * control-plane listener: its fallback must use that binding, not the declared
  * web port, which has no separate bundle listener. Other web surfaces retain
- * their declared endpoint fallback. The bundled case treats the exact shipped
- * public URL placeholder like an empty value, as the daemon webui command does.
+ * their declared endpoint fallback. Every mode treats the exact shipped public
+ * URL placeholder like an empty value: nothing listens on it, so a link built
+ * from it would point a phone at its own loopback.
  */
 import type { ConfigManager } from '../config/manager.js';
 import { resolveHostBinding, resolveWebPort } from '../daemon/host-resolver.js';
@@ -21,6 +22,9 @@ export interface PairingWebOrigin {
   /** True when the origin came verbatim from a user-set web.publicBaseUrl. */
   readonly fromPublicBaseUrl: boolean;
 }
+
+/** The shipped `web.publicBaseUrl` default; a placeholder, never a user's choice of origin. */
+const SHIPPED_PUBLIC_BASE_URL = 'http://127.0.0.1:3423';
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
@@ -68,7 +72,7 @@ export function resolvePairingWebOrigin(
 ): PairingWebOrigin {
   const publicBaseUrl = trimTrailingSlash(String(configManager.get('web.publicBaseUrl') ?? '').trim());
   const bundled = configManager.get('controlPlane.webui.serve') === true;
-  if (publicBaseUrl && !(bundled && publicBaseUrl === 'http://127.0.0.1:3423')) {
+  if (publicBaseUrl && publicBaseUrl !== SHIPPED_PUBLIC_BASE_URL) {
     return {
       origin: publicBaseUrl,
       resolvedHost: { host: hostnameOf(publicBaseUrl), kind: 'gateway-interface', stable: true },
@@ -103,7 +107,9 @@ function hostnameOf(origin: string): string {
  * Persist web.publicBaseUrl once, from the stable-name resolution, and only when
  * it is empty AND the resolution produced a stable name (a DHCP-bound address is
  * not worth freezing into config). Returns the resolved origin either way. Never
- * overwrites a user-set value.
+ * overwrites a stored value, the shipped placeholder included: other surfaces
+ * (notifications, channels) read that setting as a public URL, and pairing does
+ * not decide that a LAN name should become one.
  */
 export function ensurePublicBaseUrl(
   configManager: Pick<ConfigManager, 'get' | 'setDynamic'>,

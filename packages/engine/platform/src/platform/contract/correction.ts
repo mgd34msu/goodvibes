@@ -111,6 +111,19 @@ function engineItem(run: ContractRun, itemId: string): WorkItem | undefined {
 /** How a unit's item integration into the contract branch ended. */
 type Integration = { readonly kind: 'merged' } | { readonly kind: 'conflict'; readonly branch: string; readonly files: readonly string[] } | { readonly kind: 'ended' };
 
+/**
+ * True when the same problems were already found in an earlier fix plan. A
+ * code-check problem repeats whatever the plan says; a problem read by Jev
+ * repeats only for the same plan text.
+ */
+function repeatsRejectedFixPlan(seen: Set<string>, output: string, checked: { readonly plan?: ContractPlan; readonly problems: readonly PlanProblem[] }): boolean {
+  const problems = checked.problems.map((problem) => JSON.stringify([problem.code, problem.targetId ?? null, problem.message])).sort();
+  const key = JSON.stringify([checked.plan === undefined ? null : output, problems]);
+  if (seen.has(key)) return true;
+  seen.add(key);
+  return false;
+}
+
 export function createCorrection(context: StepContext, escalations: Pick<Escalations, 'raise'> & Rejudge): Correction {
   const config = () => readContractConfig(context.configManager);
 
@@ -260,6 +273,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         if (candidate?.version === 1 && candidate.binding === binding && typeof candidate.output === 'string') retained = candidate.output;
       } catch { /* Invalid candidate records grant no authority and cannot skip planning. */ }
     }
+    const rejectedPlans = new Set<string>();
     for (let attempt = 0; ; attempt += 1) {
       await input.assertCurrent();
       let output = retained;
@@ -294,7 +308,8 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         startFixGroup(run, brief, round, group, units, checked.decisionIds, route);
         return;
       }
-      if (config().planRepairLimit > 0 && attempt >= config().planRepairLimit) {
+      // With no repair limit a planner that answers with the same rejected plan would be asked again for ever: the owner decides instead.
+      if ((config().planRepairLimit > 0 && attempt >= config().planRepairLimit) || (config().planRepairLimit === 0 && repeatsRejectedFixPlan(rejectedPlans, output, checked))) {
         escalations.raise(run, {
           scope: brief.scope,
           targetId: brief.targetId,
@@ -668,7 +683,10 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
   async function resumeNative(run: ContractRun): Promise<void> {
     const contract = run.contract;
-    if (contract.nativeSource === undefined && contract.status === 'awaiting-owner') return;
+    // A target the owner was asked about waits for the reply; every other
+    // target whose repair round was interrupted before its fix was scheduled is planned again.
+    // Native contracts never wait on an owner reply.
+    const asked = new Set(contract.nativeSource !== undefined ? [] : contract.escalations.filter(item => item.resolvedAt === undefined).map(item => item.targetId));
     // A changed acceptance policy requires a real check of the retained result,
     // rather than asking workers to repair a rejection made under old questions.
     // Active or already scheduled repairs keep their existing identities.
@@ -686,7 +704,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
     ];
     for (const target of targets) {
       if (run.terminal) return;
-      if (hasScheduledFix(contract, target.targetId, target.round)) continue;
+      if (asked.has(target.targetId) || hasScheduledFix(contract, target.targetId, target.round)) continue;
       if (target.scope === 'unit') { const unit = run.unit(target.targetId); if (unit !== undefined) await planFix(run, unitBrief(run, unit), target.round); }
       else {
         const group = target.scope === 'group' ? run.group(target.targetId) : undefined;

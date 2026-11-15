@@ -33,6 +33,7 @@ import type {
   ParsedCalendar,
 } from './types.js';
 import { describeRecurrence } from './rrule.js';
+import { parseContentLine as parseWireContentLine, unescapeText } from './caldav-ics.js';
 
 interface ContentLine {
   readonly name: string;
@@ -60,44 +61,21 @@ function unfold(text: string): { raw: string; line: number }[] {
   return out;
 }
 
-/** Parse one content line into name/params/value (RFC 5545 §3.1). */
+/**
+ * Parse one content line into name/params/value (RFC 5545 §3.1). The split
+ * honours DQUOTE-quoted parameter values, so `ORGANIZER;CN="Team: Eng":mailto:x`
+ * keeps its address, and it is the same codec the CalDAV backend reads with.
+ */
 function parseContentLine(raw: string, line: number): ContentLine | undefined {
-  const colon = raw.indexOf(':');
-  if (colon < 0) return undefined;
-  const head = raw.slice(0, colon);
-  const value = raw.slice(colon + 1);
-  const segments = head.split(';');
-  const name = (segments[0] ?? '').trim().toUpperCase();
-  if (name === '') return undefined;
-  const params = new Map<string, string>();
-  for (let i = 1; i < segments.length; i++) {
-    const seg = segments[i] ?? '';
-    const eq = seg.indexOf('=');
-    if (eq < 0) continue;
-    const pName = seg.slice(0, eq).trim().toUpperCase();
-    let pVal = seg.slice(eq + 1).trim();
-    if (pVal.startsWith('"') && pVal.endsWith('"')) pVal = pVal.slice(1, -1);
-    params.set(pName, pVal);
-  }
-  return { name, params, value, line };
-}
-
-/** Unescape RFC 5545 TEXT (\\n, \\N, \\,, \\;, \\\\). */
-function unescapeText(value: string): string {
-  let out = '';
-  for (let i = 0; i < value.length; i++) {
-    const ch = value[i];
-    if (ch === '\\' && i + 1 < value.length) {
-      const next = value[i + 1]!;
-      if (next === 'n' || next === 'N') out += '\n';
-      else if (next === ',' || next === ';' || next === '\\') out += next;
-      else out += next;
-      i++;
-    } else {
-      out += ch ?? '';
-    }
-  }
-  return out;
+  if (!raw.includes(':')) return undefined;
+  const parsed = parseWireContentLine(raw);
+  if (parsed.name === '') return undefined;
+  return {
+    name: parsed.name,
+    params: new Map(Object.entries(parsed.params).map(([key, value]): [string, string] => [key, value.trim()])),
+    value: parsed.value,
+    line,
+  };
 }
 
 const DATE_ONLY = /^(\d{4})(\d{2})(\d{2})$/;
@@ -149,9 +127,12 @@ interface VEventDraft {
   location?: string;
   description?: string;
   organizer?: string;
+  attendees?: string[];
   start?: EventDateTime;
   end?: EventDateTime;
   rrule?: string;
+  /** Properties that change which occurrences a series has (EXDATE, RDATE, RECURRENCE-ID). */
+  seriesParts: string[];
   startLine: number;
 }
 
@@ -163,12 +144,16 @@ interface VEventDraft {
 export function parseIcs(text: string): ParsedCalendar {
   const lines = unfold(text);
   const events: CalendarEvent[] = [];
+  const overrideUids: string[] = [];
   const skipped: ParseDiagnostic[] = [];
   const diagnostics: ParseDiagnostic[] = [];
   let calendarName: string | undefined;
 
   let inEvent = false;
   let draft: VEventDraft | undefined;
+  // Depth of child components (VALARM) open inside the VEVENT: their properties
+  // are not the event's.
+  let childDepth = 0;
 
   for (const { raw, line } of lines) {
     if (raw.trim() === '') continue;
@@ -177,11 +162,20 @@ export function parseIcs(text: string): ParsedCalendar {
 
     if (cl.name === 'BEGIN' && cl.value.trim().toUpperCase() === 'VEVENT') {
       inEvent = true;
-      draft = { startLine: line };
+      draft = { startLine: line, seriesParts: [] };
+      childDepth = 0;
+      continue;
+    }
+    if (inEvent && cl.name === 'BEGIN') {
+      childDepth += 1;
+      continue;
+    }
+    if (inEvent && cl.name === 'END' && childDepth > 0) {
+      childDepth -= 1;
       continue;
     }
     if (cl.name === 'END' && cl.value.trim().toUpperCase() === 'VEVENT') {
-      if (draft) finalizeEvent(draft, events, skipped, diagnostics);
+      if (draft) finalizeEvent(draft, events, skipped, diagnostics, overrideUids);
       inEvent = false;
       draft = undefined;
       continue;
@@ -191,7 +185,7 @@ export function parseIcs(text: string): ParsedCalendar {
       if (cl.name === 'X-WR-CALNAME') calendarName = unescapeText(cl.value).trim();
       continue;
     }
-    if (!draft) continue;
+    if (!draft || childDepth > 0) continue;
 
     switch (cl.name) {
       case 'UID':
@@ -215,6 +209,11 @@ export function parseIcs(text: string): ParsedCalendar {
         if (address.length > 0) draft.organizer = address;
         break;
       }
+      case 'ATTENDEE': {
+        const address = cl.value.trim().replace(/^mailto:/i, '').trim();
+        if (address.length > 0) (draft.attendees ??= []).push(address);
+        break;
+      }
       case 'DTSTART': {
         const parsed = parseDateValue(cl.value, cl.params);
         if (parsed) draft.start = parsed;
@@ -230,6 +229,11 @@ export function parseIcs(text: string): ParsedCalendar {
       case 'RRULE':
         draft.rrule = cl.value.trim();
         break;
+      case 'EXDATE':
+      case 'RDATE':
+      case 'RECURRENCE-ID':
+        if (!draft.seriesParts.includes(cl.name)) draft.seriesParts.push(cl.name);
+        break;
       default:
         break;
     }
@@ -237,12 +241,25 @@ export function parseIcs(text: string): ParsedCalendar {
 
   if (inEvent && draft) {
     diagnostics.push({ line: draft.startLine, component: 'VEVENT', message: 'VEVENT was not closed with END:VEVENT before end of feed, finalised anyway.' });
-    finalizeEvent(draft, events, skipped, diagnostics);
+    finalizeEvent(draft, events, skipped, diagnostics, overrideUids);
   }
+
+  // A RECURRENCE-ID override moves or replaces one occurrence of the series
+  // sharing its UID, so that series cannot be expanded from its RRULE alone.
+  const overridden = new Set(overrideUids);
+  const finalEvents = events.map((event) => {
+    if (!event.recurrence || event.isOverride === true || !overridden.has(event.uid)) return event;
+    if (event.recurrence.expansion !== 'full') return { ...event, hasSeriesExceptions: true as const };
+    const recurrence = describeRecurrence(event.recurrence.rule, ['RECURRENCE-ID overrides']);
+    if (recurrence.unsupportedReason) {
+      diagnostics.push({ line: 0, component: 'RRULE', message: `Event '${event.summary}': ${recurrence.unsupportedReason}` });
+    }
+    return { ...event, recurrence, hasSeriesExceptions: true as const };
+  });
 
   return {
     ...(calendarName !== undefined ? { calendarName } : {}),
-    events,
+    events: finalEvents,
     skipped,
     diagnostics,
   };
@@ -253,6 +270,7 @@ function finalizeEvent(
   events: CalendarEvent[],
   skipped: ParseDiagnostic[],
   diagnostics: ParseDiagnostic[],
+  overrideUids: string[],
 ): void {
   if (!draft.start) {
     skipped.push({ line: draft.startLine, component: 'VEVENT', message: `Skipped VEVENT '${draft.summary ?? draft.uid ?? 'untitled'}', no usable DTSTART.` });
@@ -263,9 +281,16 @@ function finalizeEvent(
 
   let recurrence;
   if (draft.rrule) {
-    recurrence = describeRecurrence(draft.rrule);
+    recurrence = describeRecurrence(draft.rrule, draft.seriesParts.filter((part) => part !== 'RECURRENCE-ID'));
     if (recurrence.expansion === 'unsupported' && recurrence.unsupportedReason) {
       diagnostics.push({ line: draft.startLine, component: 'RRULE', message: `Event '${summary}': ${recurrence.unsupportedReason}` });
+    }
+  } else {
+    // RDATE or EXDATE without an RRULE still makes a series; reading it as a one-off would drop those dates silently.
+    const dateParts = draft.seriesParts.filter((part) => part === 'RDATE' || part === 'EXDATE');
+    if (dateParts.length > 0) {
+      recurrence = describeRecurrence('', dateParts);
+      diagnostics.push({ line: draft.startLine, component: dateParts[0]!, message: `Event '${summary}': ${recurrence.unsupportedReason}` });
     }
   }
 
@@ -278,6 +303,10 @@ function finalizeEvent(
     start: draft.start,
     ...(draft.end !== undefined ? { end: draft.end } : {}),
     ...(recurrence !== undefined ? { recurrence } : {}),
+    ...(draft.attendees !== undefined ? { attendees: draft.attendees } : {}),
+    ...(draft.seriesParts.includes('RECURRENCE-ID') ? { isOverride: true as const } : {}),
+    ...(recurrence !== undefined && draft.seriesParts.some((part) => part === 'RDATE' || part === 'EXDATE') ? { hasSeriesExceptions: true as const } : {}),
   };
   events.push(event);
+  if (draft.seriesParts.includes('RECURRENCE-ID')) overrideUids.push(uid);
 }

@@ -51,8 +51,8 @@ export function normalizeProvisionHostnames(input: {
     }
   }
 
-  if (!zoneName && input.needsDaemonHostname && isPlaceholderHostname(daemonHostname)) {
-    input.steps.push({ name: 'daemon-hostname', status: 'warning', message: `Configured daemonHostname ${daemonHostname} is a placeholder; Cloudflare daemon hostname automation will be skipped until a real zone hostname is configured.` });
+  if (!zoneName && input.needsDaemonHostname && (isPlaceholderHostname(daemonHostname) || isLocalHostname(daemonHostname))) {
+    input.steps.push({ name: 'daemon-hostname', status: 'warning', message: `Configured daemonHostname ${daemonHostname} is a placeholder or local name; Cloudflare daemon hostname automation will be skipped until a real zone hostname is configured.` });
     daemonHostname = '';
   }
   if (!zoneName && input.needsWorkerHostname && isPlaceholderHostname(workerHostname)) {

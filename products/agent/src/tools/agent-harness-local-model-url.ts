@@ -65,9 +65,21 @@ export function normalizeLocalBaseUrl(raw: string, stackHint?: string | null): s
   url.pathname = pathname || '';
   url.search = '';
   url.hash = '';
+  // A gateway credential in the URL must never reach model-visible endpoints, ids or suggested commands.
+  url.username = '';
+  url.password = '';
   return url.toString().replace(/\/+$/g, '');
 }
 
 export function modelsUrlFor(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/g, '')}/models`;
+}
+
+/** Removes userinfo, query and fragment from a URL-looking string for display; text that is not a URL is returned unchanged. */
+export function stripUrlCredentials(raw: string): string {
+  const url = parseUrlCandidate(raw);
+  if (!url || !/^https?:$/.test(url.protocol) || (!url.username && !url.password)) return raw;
+  url.username = '';
+  url.password = '';
+  return url.toString();
 }

@@ -77,7 +77,7 @@ describe('channel-profiles CLI command', () => {
 
   test('sets, lists, gets, and deletes a channel profile with confirmation', async () => {
     const originalFetch = globalThis.fetch;
-    const requests: Array<{ readonly url: string; readonly method: string; readonly body: string }> = [];
+    const requests: Array<{ readonly url: string; readonly method: string; readonly body: string; readonly authorization: string | null }> = [];
     const binding = {
       id: 'binding-1',
       surfaceKind: 'slack',
@@ -90,7 +90,7 @@ describe('channel-profiles CLI command', () => {
       const url = inputUrl(input);
       const method = init?.method ?? 'GET';
       const body = typeof init?.body === 'string' ? init.body : '';
-      requests.push({ url, method, body });
+      requests.push({ url, method, body, authorization: new Headers(init?.headers).get('authorization') });
       if (method === 'POST' && url.endsWith('/api/channels/profiles')) {
         return jsonResponse({ binding });
       }
@@ -132,6 +132,10 @@ describe('channel-profiles CLI command', () => {
       const deleted = await handleChannelProfilesCommand(runtime(['delete', 'slack', '--yes']));
       expect(deleted.exitCode).toBe(0);
       expect(deleted.output).toContain('Deleted channel profile slack');
+
+      // Every call to the connected host carried the operator token.
+      expect(requests.length).toBeGreaterThanOrEqual(4);
+      expect(requests.map((request) => request.authorization)).toEqual(requests.map(() => 'Bearer channel-profiles-cli-token'));
     } finally {
       globalThis.fetch = originalFetch;
     }

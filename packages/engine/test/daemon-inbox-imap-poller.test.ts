@@ -73,13 +73,21 @@ describe('canonical IMAP checkpoint poller', () => {
   });
 
   test('leadership loss at the final persistence fence prevents rows and progress together', async () => {
-    let calls = 0; let fenceCalls = 0; let stopping: Promise<void> | undefined;
-    const { store, poller } = await fixture(async () => ++calls === 1 ? pending : { state: 'ready', items: [row], checkpointAdvance: advance }, {
-      assertCurrent() { if (++fenceCalls === 4) stopping = poller.stopProvider('email'); },
-    });
-    await poller.pollOnce(); await poller.pollOnce(); await stopping;
-    expect(store.getImapCheckpoint('email')).toEqual(baseline);
-    expect(store.countItems()).toBe(0);
+    // Run the seed poll and the advancing poll once undisturbed to learn how many currentness
+    // checks they make, then lose leadership at the last one: after every earlier check passed.
+    async function run(loseAt: number) {
+      let calls = 0; let fenceCalls = 0; let stopping: Promise<void> | undefined;
+      const made = await fixture(async () => ++calls === 1 ? pending : { state: 'ready', items: [row], checkpointAdvance: advance }, {
+        assertCurrent() { if (++fenceCalls === loseAt) stopping = made.poller.stopProvider('email'); },
+      });
+      await made.poller.pollOnce(); await made.poller.pollOnce(); await stopping;
+      return { store: made.store, fenceCalls };
+    }
+    const undisturbed = await run(Number.POSITIVE_INFINITY);
+    expect(undisturbed.store.countItems()).toBe(1);
+    const revoked = await run(undisturbed.fenceCalls);
+    expect(revoked.store.getImapCheckpoint('email')).toEqual(baseline);
+    expect(revoked.store.countItems()).toBe(0);
   });
 
   test('persistence failure remains pending and the next poll receives exactly the same checkpoint', async () => {

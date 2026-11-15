@@ -42,6 +42,8 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const UNKNOWN_SECURITY_ACTION = 'Unknown security action. Use one of: status, finding, explain.';
+
 function normalizeSecurityAction(value: unknown): AgentSecurityAction | null {
   const action = readString(value).toLowerCase().replace(/-/g, '_');
   if (!action) return null;
@@ -124,7 +126,7 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
       const args = snapshotJudgmentInput(rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSecurityToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
-      if (!action) return error('Unknown security action. Use action:"status" or action:"explain".');
+      if (!action) return error(UNKNOWN_SECURITY_ACTION);
 
       if (action === 'status') return forward(statusArgs(args));
       if (action === 'finding') return forward(findingArgs(args));
@@ -135,7 +137,7 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
         return error(resolved.usage);
       }
 
-      return error('Unknown security action. Use action:"status" or action:"explain".');
+      return error(UNKNOWN_SECURITY_ACTION);
     },
   };
 }

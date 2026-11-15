@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings, READ_ONLY } from './_helpers/gate-readings.ts';
 import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
@@ -45,13 +45,13 @@ for (const name of ['find', 'analyze'] as const) for (const captured of [false, 
     const started = latch(); const release = latch();
     const gate = gateReadingsPort([['', READ_ONLY]]);
     const autonomous = fakePort((_key, question) => choiceAnswer(question, 'act', 0.99));
-    const directories = fakePort((key, _question, state) => {
-      const candidate = (state as { directories: { id: string; name: string }[] }).directories.find(value => value.id === key)!;
-      return noulAnswer(candidate.name.startsWith('.') ? 0.99 : 0.01);
-    });
+    let skipDirectoryAsks = 0;
     const port: JudgmentPort = { ...gate.port, async ask(request) {
       request.beforeAttempt?.();
-      if (request.context?.battery === 'engine.walk.skip-directory') throw new Error('Directory discovery must not call Jev');
+      if (request.context?.battery === 'engine.walk.skip-directory') {
+        skipDirectoryAsks += 1;
+        throw new Error('Directory discovery must not call Jev');
+      }
       return 'disposition' in request.questions ? autonomous.port.ask(request) : gate.port.ask(request);
     } };
     const log = new SqliteDecisionLog(':memory:');
@@ -60,7 +60,7 @@ for (const name of ['find', 'analyze'] as const) for (const captured of [false, 
     try {
       let authority: Awaited<ReturnType<typeof createContractInputAuthority>> | undefined;
       if (captured) {
-        git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Michael Davis'); git(root, 'config', 'user.email', 'mgd34msu@gmail.com');
+        git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture Author'); git(root, 'config', 'user.email', 'fixture@example.invalid');
         writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
         git(root, 'add', '.'); git(root, 'commit', '-qm', 'directory admission fixture');
         const snapshot = await captureContractInput(root); view = contractInputPath(snapshot);
@@ -89,14 +89,13 @@ for (const name of ['find', 'analyze'] as const) for (const captured of [false, 
       release.resolve();
       const result = await pending;
       expect(result[0]?.success).toBe(!revoked);
+      // Directory discovery must never reach Jev, so a revoked run stopped because
+      // the owner was revoked, not because a forbidden directory question threw.
+      expect(skipDirectoryAsks).toBe(0);
       if (revoked) {
-        expect(directories.requests).toHaveLength(0);
         expect(result[0]?.output).toBeUndefined();
-        // A read-only body notices revocation within its bounded fence window, so a
-        // path may still be asked about; what must hold is that nothing is published.
       } else {
         expect(result[0]?.output).toContain('owned-marker.txt');
-        expect(directories.requests).toHaveLength(0);
       }
     } finally {
       release.resolve(); await pending?.catch(() => {});
@@ -110,7 +109,7 @@ for (const revoked of [false, true]) {
   test(`cheap captured checkpoint uses original admitted invocation ${revoked ? 'after revocation' : 'while current'}`, async () => {
     forgetGateReadings();
     const root = mkdtempSync(join(tmpdir(), 'gv-walk-cheap-admission-')); roots.push(root);
-    git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Michael Davis'); git(root, 'config', 'user.email', 'mgd34msu@gmail.com');
+    git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture Author'); git(root, 'config', 'user.email', 'fixture@example.invalid');
     writeFileSync(join(root, '.gitignore'), '.goodvibes/\n'); writeFileSync(join(root, 'owned.txt'), 'owned');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'cheap checkpoint fixture');
     const snapshot = await captureContractInput(root); const view = contractInputPath(snapshot);

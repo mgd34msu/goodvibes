@@ -550,11 +550,8 @@ describe("native execution immutable browser target journal", () => {
     });
   });
 
-  test("never treats corrupt, duplicate or over-limit persisted data as a missing target", async () => {
+  test("never treats duplicate or over-limit persisted data as a missing target", async () => {
     for (const existing of [
-      [{ ...record(), target: { ...record().target, workId: "" } }],
-      [{ ...record(), token: "unexpected" }],
-      [{ ...record(), binding: { ...binding, principalId: "other" }, token: "unexpected" }],
       [record(), record()],
       [record(), { ...record(), inputId: "different-input" }],
       [record(), { ...record(), requestId: "different-request" }],

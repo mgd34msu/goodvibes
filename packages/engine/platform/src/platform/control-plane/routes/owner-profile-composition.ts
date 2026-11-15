@@ -121,6 +121,9 @@ export function composeOwnerProfile(
   deps: OwnerProfileCompositionDeps,
 ): OwnerProfileComposition {
   const config = deps.configManager;
+  // `profile.enabled`, `profile.path` and `profile.reloadThrottleMs` are read here,
+  // once; a change to them applies after a daemon restart. The `profile.*` keys read
+  // through `config.get` below are live.
   const store = new OwnerProfileStore({
     // One resolver, honouring `profile.path`, then `--daemon-home`, then
     // GOODVIBES_DAEMON_HOME, then the runtime's own home directory (falling

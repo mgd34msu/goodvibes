@@ -6,6 +6,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { MarkdownMessage } from './MarkdownMessage';
+import { ToastProvider, useToastContext } from '../lib/toast';
+
+let capturedToasts: { title: string; description?: string }[] = [];
+function ToastProbe(): null {
+  capturedToasts = useToastContext().toasts;
+  return null;
+}
 
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
@@ -40,5 +47,45 @@ describe('MarkdownMessage', () => {
   test('without line numbers no hidden numbering spans exist', () => {
     const el = render(<MarkdownMessage content={'```bash\nbun test\n```'} lineNumbers={false} />);
     expect(el.querySelectorAll('pre [aria-hidden="true"]')).toHaveLength(0);
+  });
+
+  describe('copying code', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    afterEach(() => {
+      capturedToasts = [];
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    });
+    const setClipboard = (value: unknown) => Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+    const renderCode = () => render(<ToastProvider><ToastProbe /><MarkdownMessage content={'```ts\nconst a = 1;\n```'} /></ToastProvider>);
+    const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    test('a missing clipboard toasts and never shows Copied', async () => {
+      setClipboard(undefined);
+      const el = renderCode();
+      flushSync(() => el.querySelector<HTMLButtonElement>('button[aria-label="Copy code"]')!.click());
+      await settle();
+      expect(capturedToasts.some((t) => t.description === 'Clipboard API unavailable')).toBe(true);
+      expect(el.querySelector('button[aria-label="Copied"]')).toBeNull();
+    });
+
+    test('a rejected write toasts and never shows Copied', async () => {
+      setClipboard({ writeText: () => Promise.reject(new Error('denied')) });
+      const el = renderCode();
+      flushSync(() => el.querySelector<HTMLButtonElement>('button[aria-label="Copy code"]')!.click());
+      await settle();
+      expect(capturedToasts.some((t) => t.description === 'Could not write to clipboard')).toBe(true);
+      expect(el.querySelector('button[aria-label="Copied"]')).toBeNull();
+    });
+
+    test('a successful write shows Copied', async () => {
+      const written: string[] = [];
+      setClipboard({ writeText: (t: string) => { written.push(t); return Promise.resolve(); } });
+      const el = renderCode();
+      flushSync(() => el.querySelector<HTMLButtonElement>('button[aria-label="Copy code"]')!.click());
+      await settle();
+      expect(written[0]).toContain('const a = 1;');
+      expect(el.querySelector('button[aria-label="Copied"]')).not.toBeNull();
+    });
   });
 });

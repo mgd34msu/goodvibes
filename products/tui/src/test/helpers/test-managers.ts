@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
@@ -64,9 +65,21 @@ export function patchTestProviderRegistry(providerRegistry: ProviderRegistry): v
   }) as ProviderRegistry['register'];
 }
 
+const managerRoots = new Set<string>();
+/** Roots are removed when the process exits, so a run outside the runner's own temp directory leaves nothing behind. */
+function trackManagerRoot(rootDir: string): void {
+  if (managerRoots.size === 0) {
+    process.once('exit', () => {
+      for (const root of managerRoots) rmSync(root, { recursive: true, force: true });
+    });
+  }
+  managerRoots.add(rootDir);
+}
+
 export function createTestManagers(): TestManagers {
   const suffix = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   const rootDir = join(tmpdir(), `gv-test-managers-${suffix}`);
+  trackManagerRoot(rootDir);
   const workingDir = join(rootDir, 'workspace');
   const homeDir = join(rootDir, 'home');
   const configDir = join(homeDir, '.goodvibes', 'tui');

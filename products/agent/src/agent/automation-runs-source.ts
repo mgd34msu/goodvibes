@@ -61,9 +61,18 @@ export interface AutomationRunDelivery {
 export interface AutomationRunsSinceResult {
   readonly runs: readonly AutomationRunOutcome[];
   readonly deliveries: readonly AutomationRunDelivery[];
+  /**
+   * Why the connected host could not be asked, when it could not. Absent when the
+   * host answered, including an answer of no runs, so a caller can tell "nothing
+   * ran" from "could not check" and say so.
+   */
+  readonly unavailable?: string;
+  /** `not_configured`: no host to ask, which is not news. `no_answer`: a configured host did not answer. */
+  readonly unavailableKind?: 'not_configured' | 'no_answer';
 }
 
-const EMPTY_RESULT: AutomationRunsSinceResult = { runs: [], deliveries: [] };
+const unavailableResult = (reason: string, unavailableKind: 'not_configured' | 'no_answer'): AutomationRunsSinceResult =>
+  ({ runs: [], deliveries: [], unavailable: reason, unavailableKind });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -113,15 +122,15 @@ function readDeliveries(run: Record<string, unknown>): readonly AutomationRunDel
  * Fetch every automation run active on or after `since` (epoch ms) from the
  * connected host, normalized into outcomes + sent deliveries. Returns an
  * empty result (never throws) when there is no token, the host is
- * unreachable, or the response cannot be parsed, callers must not fall back
- * to a local read on failure; "nothing to report" is the honest answer when
- * the connected host cannot be reached.
+ * unreachable, or the response cannot be parsed, with `unavailable` naming why,
+ * so a caller can say it could not check rather than that nothing ran. Callers
+ * must not fall back to a local read on failure.
  */
 export async function listAutomationRunsSince(
   connection: AgentConnectedHostConnection,
   since: number,
 ): Promise<AutomationRunsSinceResult> {
-  if (!connection.token) return EMPTY_RESULT;
+  if (!connection.token) return unavailableResult('no connected-host operator token', 'not_configured');
   try {
     const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
     const output: unknown = await platformClient.operator.invoke(AUTOMATION_RUNS_LIST_METHOD, { since });
@@ -136,7 +145,7 @@ export async function listAutomationRunsSince(
     }
     return { runs, deliveries };
   } catch {
-    return EMPTY_RESULT;
+    return unavailableResult('the connected host did not answer', 'no_answer');
   }
 }
 

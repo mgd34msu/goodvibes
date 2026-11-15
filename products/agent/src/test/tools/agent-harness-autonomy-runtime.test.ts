@@ -25,7 +25,7 @@ beforeEach(() => {
     fixtureLog = new SqliteDecisionLog(':memory:');
     previousPort = installJudgmentPort(withDecisionLog(createHarnessFixtureReadings(), fixtureLog));
   });
-afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); });
+afterEach(() => { setSystemTime(); resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); });
 
 
   test.each(['summary', 'queue', 'item', 'researchItem', 'action'] as const)('exposes a visible autonomy queue with owners and cancel routes: %s', async surface => {
@@ -421,16 +421,17 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         const routines = queue.queue.find((item) => item.queueItemId === 'routine-schedule-promotions');
         expect(workPlan?.owner).toBe('agent');
         expect(workPlan?.cancellable).toBe(true);
-        expect(workPlan?.cancelRoute).toContain('workplan-status');
+        expect(workPlan?.cancelRoute).toContain('agent_work_plan action:"set_status"');
         expect(researchRuns?.status).toBe('attention');
         expect(researchRuns?.liveRecords?.[0]?.id).toBe('market-map-research');
         expect(researchRuns?.liveRecords?.[0]?.status).toBe('blocked');
         expect(researchRuns?.liveRecords?.[0]?.progress).toBe(35);
-        expect(researchRuns?.liveRecords?.[0]?.inspectRoute).toContain('research action:"run"');
-        expect(researchRuns?.liveRecords?.[0]?.cancelRoute).toContain('research action:"cancel"');
-        expect(researchRuns?.liveRecords?.[0]?.checkpointRoute).toContain('research action:"checkpoint"');
-        expect(researchRuns?.liveRecords?.[0]?.pauseRoute).toContain('research action:"pause"');
-        expect(researchRuns?.liveRecords?.[0]?.resumeRoute).toContain('research action:"resume"');
+        // Arguments use the key:"value" form of every other research route, with the id quoted.
+        expect(researchRuns?.liveRecords?.[0]?.inspectRoute).toBe('research action:"run" runId:"market-map-research"');
+        expect(researchRuns?.liveRecords?.[0]?.cancelRoute).toBe('research action:"cancel" id:"market-map-research" note:"..."');
+        expect(researchRuns?.liveRecords?.[0]?.checkpointRoute).toContain('research action:"checkpoint" id:"market-map-research"');
+        expect(researchRuns?.liveRecords?.[0]?.pauseRoute).toBe('research action:"pause" id:"market-map-research" note:"..."');
+        expect(researchRuns?.liveRecords?.[0]?.resumeRoute).toBe('research action:"resume" id:"market-map-research" note:"..."');
         expect(researchRuns?.liveRecords?.[0]?.availableControls).toContain('checkpoint');
         expect(researchRuns?.liveRecords?.[0]?.availableControls).toContain('pause');
         expect(researchRuns?.liveRecords?.[0]?.availableControls).toContain('resume');
@@ -444,13 +445,13 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(hostTasks?.cancellable).toBe(true);
         expect(hostTasks?.cancelRoute).toContain('tasks.cancel');
         expect(hostTasks?.liveRecords?.[0]?.id).toBe('host-task-live');
-        expect(hostTasks?.liveRecords?.[0]?.inspectRoute).toBe('/tasks show host-task-live');
+        expect(hostTasks?.liveRecords?.[0]?.inspectRoute).toBe('workspace action:"run_command" command:"/tasks show host-task-live"');
         expect(hostTasks?.liveRecords?.[0]?.cancelRoute).toContain('tasks.cancel');
         expect(hostTasks?.liveRecords?.[0]?.availableControls).toContain('cancel');
         expect(hostTasks?.liveRecords?.[0]?.output?.status).toBe('route-only');
-        expect(hostTasks?.liveRecords?.[0]?.output?.route).toBe('/tasks output host-task-live');
+        expect(hostTasks?.liveRecords?.[0]?.output?.route).toBe('workspace action:"run_command" command:"/tasks output host-task-live"');
         expect(hostTasks?.liveRecords?.[0]?.output?.source).toBe('not-published');
-        expect(hostTasks?.liveRecords?.[0]?.diagnostics?.join('\n')).toContain('output route /tasks output host-task-live');
+        expect(hostTasks?.liveRecords?.[0]?.diagnostics?.join('\n')).toContain('output route workspace action:"run_command" command:"/tasks output host-task-live"');
         expect(hostTasks?.liveRecords?.[0]?.controls?.find((control) => control.id === 'cancel')?.confirmationRequired).toBe(true);
         expect(hostTasks?.liveRecords?.[0]?.controls?.find((control) => control.id === 'cancel')?.modelRoute).toContain('tasks.cancel');
         const failedHostTask = hostTasks?.liveRecords?.find((record) => record.id === 'host-task-failed');
@@ -460,7 +461,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(failedHostTask?.logTail?.join('\n')).toContain('network timeout');
         expect(failedHostTask?.logTail?.join('\n')).not.toContain('host-secret-token');
         expect(failedHostTask?.output?.status).toBe('preview');
-        expect(failedHostTask?.output?.route).toBe('/tasks output host-task-failed');
+        expect(failedHostTask?.output?.route).toBe('workspace action:"run_command" command:"/tasks output host-task-failed"');
         expect(failedHostTask?.output?.source).toBe('runtime-task-error');
         expect(failedHostTask?.output?.preview).toContain('token=[REDACTED]');
         expect(failedHostTask?.output?.preview).not.toContain('host-secret-token');
@@ -521,7 +522,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(watcherRecord?.phase).toBe('gmail-message');
         expect(watcherRecord?.summary).toContain('Redaction metadata-only');
         expect(watcherRecord?.summary).toContain('Payload redacted');
-        expect(watcherRecord?.inspectRoute).toBe(`agent_artifacts show artifactId:"${watcherReceipt.id}" includeContent:false`);
+        expect(watcherRecord?.inspectRoute).toBe(`agent_artifacts mode:"show" artifactId:"${watcherReceipt.id}" includeContent:false`);
         expect(watcherRecord?.availableControls).toEqual(['inspect', 'queue']);
         expect(watcherRecord?.controls?.every((control) => control.effect === 'read-only')).toBe(true);
         expect(watcherRecord?.sourceIds).toContain('watcher-gmail-inbox');
@@ -530,14 +531,14 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(autonomousScheduleRequests?.modelRoute).toBe('schedule action:"create"');
         expect(autonomousScheduleRequests?.createRoute).toContain('successCriteria');
         expect(schedules?.status).toBe('active');
-        expect(schedules?.cancellable).toBe(true);
-        expect(schedules?.cancelRoute).toContain('schedule action:"pause"');
+        expect(schedules?.cancellable).toBe(false);
+        expect(schedules?.cancelRoute).toBeUndefined();
         expect(schedules?.liveRecords?.[0]?.id).toBe('sched-live-1');
         expect(schedules?.liveRecords?.[0]?.nextSteps?.join('\n')).toContain('schedule action:"run"');
         expect(schedules?.liveRecords?.[0]?.nextSteps?.join('\n')).toContain('schedule action:"edit"');
         expect(schedules?.liveRecords?.[0]?.nextSteps?.join('\n')).toContain('schedule action:"pause"');
         expect(schedules?.liveRecords?.[0]?.nextSteps?.join('\n')).toContain('schedule action:"delete"');
-        expect(schedules?.liveRecords?.[0]?.cancelRoute).toContain('schedule action:"pause"');
+        expect(schedules?.liveRecords?.[0]?.cancelRoute).toBeUndefined();
         expect(schedules?.liveRecords?.[0]?.pauseRoute).toContain('schedule action:"pause"');
         expect(schedules?.liveRecords?.[0]?.availableControls).toContain('run');
         expect(schedules?.liveRecords?.[0]?.availableControls).toContain('pause');
@@ -545,7 +546,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(schedules?.liveRecords?.[0]?.controls?.find((control) => control.id === 'delete')?.confirmationRequired).toBe(true);
         expect(schedules?.modelRoute).toContain('schedule action:"list|edit|run|pause|resume|delete"');
         expect(schedules?.createRoute).toContain('schedule action:"create"');
-        expect(routines?.inspectRoute).toContain('schedule-receipts');
+        expect(routines?.inspectRoute).toContain('schedule-receipt');
         return;
       }
 
@@ -559,7 +560,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(item.routes?.cancel).toContain('automation-run-cancel');
         expect(item.liveRecords?.[0]?.id).toBe('auto-run-1');
         expect(item.liveRecords?.[0]?.cancelRoute).toContain('automation.runs.cancel');
-        expect(item.liveRecords?.find((record) => record.id === `watcher-receipt:${watcherReceipt.id}`)?.inspectRoute).toContain('agent_artifacts show');
+        expect(item.liveRecords?.find((record) => record.id === `watcher-receipt:${watcherReceipt.id}`)?.inspectRoute).toContain('agent_artifacts mode:"show"');
         return;
       }
 
@@ -586,7 +587,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
 
     } finally {
       setSystemTime();
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -785,7 +786,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(gmail?.evidenceContract?.providerSourceContract.supportedSourceKinds).toContain('gmail');
       expect(gmail?.policy).toContain('does not poll or read mail silently');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1090,7 +1091,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(inspectedDelegation.delegationDecisionCards?.find((card) => card.lane === 'tui-shared-session')?.requiredFields.join('\n')).toContain('delegation reason');
       expect(inspectedDelegation.delegationDecisionCards?.find((card) => card.lane === 'hidden-fanout-blocked')?.confirmationBoundary).toContain('never confirmed');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1098,7 +1099,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
   test.each(['posture', 'plan', 'capabilities', 'setupItem'] as const)('consumes certified daemon interactive runtime records for process PTY sudo and browser control posture: %s', async surface => {
     const fixture = makeFixture();
     try {
-      for (const name of ['read', 'edit', 'exec']) registerStubTool(fixture.toolRegistry, name);
+      for (const name of ['read', 'edit', 'exec', 'agent_operator_method']) registerStubTool(fixture.toolRegistry, name);
       const readModels = (fixture.context.platform as unknown as { readModels: Record<string, unknown> }).readModels;
       readModels.execution = {
         interactiveRuntime: {
@@ -1109,11 +1110,11 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               processId: 'host-proc-1',
               pid: 4321,
               status: 'running',
-              command: 'npm run dev --token=[REDACTED]',
+              command: 'npm run dev --token=host-secret',
               outputChunks: [{
                 chunkId: 'chunk-1',
                 stream: 'stdout',
-                text: 'server ready token=[REDACTED]',
+                text: 'server ready token=chunk-secret',
                 bytes: 31,
                 truncated: false,
                 createdAt: '2026-06-08T12:00:00.000Z',
@@ -1126,7 +1127,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               },
               schemaStatus: 'certified',
               schemaVersion: 'goodvibes.execution.process.v1',
-              publicationGuarantee: 'daemon publishes live process chunks token=[REDACTED]',
+              publicationGuarantee: 'daemon publishes live process chunks token=host-secret',
               publisher: 'goodvibes-daemon',
               provenance: ['method processes.list', 'sourceTool execution.processRuntime'],
               updatedAt: '2026-06-08T12:00:00.000Z',
@@ -1162,7 +1163,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               },
               schemaStatus: 'certified',
               schemaVersion: 'goodvibes.execution.sudo-mediation.v1',
-              publicationGuarantee: 'daemon mediates sudo prompts password=[REDACTED]',
+              publicationGuarantee: 'daemon mediates sudo prompts secret=sudo-secret',
               publisher: 'goodvibes-daemon',
               provenance: ['method credentials.sudo.status', 'sourceTool credential-mediation'],
               updatedAt: '2026-06-08T12:00:02.000Z',
@@ -1180,7 +1181,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               action: 'screenshot',
               surface: 'browser',
               status: 'succeeded',
-              summary: 'Captured browser page secret=[REDACTED]',
+              summary: 'Captured browser page secret=browser-token',
               routes: {
                 inspect: 'computer action:"control" includeParameters:true',
                 execute: 'agent_operator_method methodId:"browser.control.execute" confirm:true explicitUserRequest:"..."',
@@ -1188,7 +1189,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               },
               schemaStatus: 'certified',
               schemaVersion: 'goodvibes.computer.browser-control-receipt.v1',
-              publicationGuarantee: 'daemon publishes browser control receipts token=[REDACTED]',
+              publicationGuarantee: 'daemon publishes browser control receipts token=browser-token',
               publisher: 'goodvibes-daemon',
               provenance: ['method browser.control.receipts', 'sourceTool browser.control'],
               updatedAt: '2026-06-08T12:00:03.000Z',
@@ -1295,7 +1296,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1525,7 +1526,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(stopped.status).toBe('stopped');
       expect(stopped.processId).toBe(started.processId);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1627,7 +1628,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(stoppedJson.status).toBe('stopped');
       expect(stoppedJson.processId).toBe(startedJson.processId);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1646,29 +1647,35 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(fixture.processManager.list()).toEqual([]);
       expect(String(held)).not.toContain(processId);
       expect(String(held)).not.toContain('1700000000004');
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
   test('rejects an uncertified PTY method and blocks background sudo prompts', async () => {
     const fixture = makeFixture();
     try {
-      const pty = await executeHarnessJson<{ readonly status: string; readonly capability: string; readonly guidance: string }>(fixture, {
+      const ptyResult = await fixture.admittedTool.execute({
         mode: 'run_background_process',
         processAction: 'start',
         command: 'python',
         pty: true,
       });
+      // An unsupported start is a failed result that still carries the explanatory body.
+      expect(ptyResult.success).toBe(false);
+      const pty = JSON.parse(ptyResult.output ?? '{}') as { readonly status: string; readonly capability: string; readonly guidance: string };
       expect(pty.status).toBe('unsupported');
       expect(pty.capability).toBe('pty');
       expect(pty.guidance).toContain('Interactive PTY');
 
-      const write = await executeHarnessJson<{ readonly status: string; readonly usage: string }>(fixture, {
+      // A lookup that finds nothing is a failed result that still carries the explanatory body.
+      const writeResult = await fixture.admittedTool.execute({
         mode: 'run_background_process',
         processAction: 'status',
         processId: 'bg_missing',
         data: 'y\n',
       });
+      expect(writeResult.success).toBe(false);
+      const write = JSON.parse(writeResult.output ?? '{}') as { readonly status: string; readonly usage: string };
       expect(write.status).toBe('missing_lookup');
       expect(write.usage).toContain('Unknown background process bg_missing');
 
@@ -1693,7 +1700,16 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(fixture.processManager.list()).toEqual([]);
       } finally { stdin.mockRestore(); }
 
-      const sudo = await executeHarnessJson<{
+      const sudoResult = await fixture.admittedTool.execute({
+        mode: 'run_background_process',
+        processAction: 'start',
+        command: 'sudo true',
+        confirm: true,
+        explicitUserRequest: 'Try a sudo background command.',
+      });
+      // A blocked start is a failed result that still carries the explanatory body.
+      expect(sudoResult.success).toBe(false);
+      const sudo = JSON.parse(sudoResult.output ?? '{}') as {
         readonly status: string;
         readonly capability: string;
         readonly reason: string;
@@ -1702,13 +1718,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           readonly credentialSignal: { readonly rawValueReturned: boolean };
           readonly blockedRoutes: readonly { readonly id: string }[];
         };
-      }>(fixture, {
-        mode: 'run_background_process',
-        processAction: 'start',
-        command: 'sudo true',
-        confirm: true,
-        explicitUserRequest: 'Try a sudo background command.',
-      });
+      };
       expect(sudo.status).toBe('blocked');
       expect(sudo.capability).toBe('sudo');
       expect(sudo.reason).toContain('Background sudo prompts');
@@ -1738,7 +1748,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(capabilities.capabilities.sudo.credentialSignal.rawValueReturned).toBe(false);
       expect(capabilities.policy).toContain('read-only');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1807,7 +1817,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(stopped.status).toBe('stopped');
     } finally {
       writeSpy.mockRestore();
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1832,9 +1842,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           routeKind: 'shell',
           status: 'succeeded',
           phase: 'TOOL_SUCCEEDED',
-          receivedAt: now - 2000,
-          updatedAt: now - 1000,
-          completedAt: now - 1000,
+          receivedAt: now + 2000,
+          updatedAt: now + 3000,
+          completedAt: now + 3000,
           durationMs: 1000,
           permissionApproved: true,
           argsPreview: '{"command":"bun test","pat":"[redacted]"}',
@@ -1851,8 +1861,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           status: 'succeeded',
           phase: 'TOOL_SUCCEEDED',
           receivedAt: now - 4000,
-          updatedAt: now - 3000,
-          completedAt: now - 3000,
+          updatedAt: now + 1000,
+          completedAt: now + 1000,
           durationMs: 1000,
           argsPreview: '{"path":"history-edit.txt","content":"after"}',
           argsKeys: ['content', 'path'],
@@ -1962,7 +1972,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(inspected.policy?.values).toContain('redacted args');
       expect(inspected.modelAccess?.fileRecovery).toContain('execution action:"recovery"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -2043,7 +2053,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(redo).toMatchObject({ status: 'applied', recoveryAction: 'redo', path: 'recoverable.txt' });
       expect(readFileSync(target, 'utf-8')).toBe('after content');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -2062,7 +2072,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       await expect(fixture.tool.execute({ mode })).rejects.toMatchObject({ problem: 'held' });
       expect(reached).toBe(true);
       expect(fixture.openedSurfaces).toEqual([]);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
@@ -2081,7 +2091,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(reached).toBe(true); expect(fixture.openedSurfaces).toEqual([]);
     } finally {
       if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

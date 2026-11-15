@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 export const QUERY_TOOL_SCHEMA: ToolDefinition = {
   name: 'query',
-  description: 'Track operator queries, answers, escalation, and closure.',
+  description: 'Keep your own notes on questions, answers, and closure. Queries are stored in a file; asking one does not deliver it to an operator or any surface, and the answer is whatever you record.',
   parameters: {
     type: 'object',
     properties: {

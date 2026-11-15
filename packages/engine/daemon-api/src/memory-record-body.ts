@@ -3,14 +3,14 @@
  * routes (add / search / update-review).
  *
  * These build the loose, wire-shaped input objects the route handlers hand to the
- * memory registry. Validation is honest but forgiving of extra fields: required
- * fields missing → 400 with a stated reason; unknown enum-ish values are passed
- * through for the store to normalize (the store already clamps confidence and
- * normalizes scope/reviewState), never silently dropped.
+ * memory registry. A required field that is missing, a field of the wrong type, and
+ * a value outside a closed set (scope, review state) are each a 400 that names the
+ * field; nothing is dropped silently. Free-form values (cls, tags, text) are passed
+ * through for the store to normalize (the store clamps confidence).
  */
 
 import { jsonErrorResponse } from './error-response.js';
-import { isJsonRecord, readOptionalStringField, readStringArrayField, type JsonRecord } from './route-helpers.js';
+import { isJsonRecord, readOptionalStringField, type JsonRecord } from './route-helpers.js';
 import type {
   MemoryBundleInput,
   MemoryLinkInput,
@@ -21,28 +21,77 @@ import type {
   MemoryRecordUpdateInput,
 } from './integration-route-types.js';
 
-function readOptionalNumberField(body: JsonRecord, key: string): number | undefined {
-  const value = body[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+const MEMORY_SCOPES: readonly string[] = ['session', 'project', 'team'];
+const MEMORY_REVIEW_STATES: readonly string[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
+const MAX_MEMORY_TAGS = 128;
+
+function invalidField(field: string, expected: string): Response {
+  return jsonErrorResponse({ error: `${field} must be ${expected}.`, code: 'INVALID_REQUEST' }, { status: 400 });
 }
 
-function readOptionalBooleanField(body: JsonRecord, key: string): boolean | undefined {
+/** A field that is absent or JSON null is "not supplied"; anything else must pass its reader. */
+function isSupplied(body: JsonRecord, key: string): boolean {
+  return body[key] !== undefined && body[key] !== null;
+}
+
+type Read<T> = { readonly value: T | undefined } | Response;
+
+function readString(body: JsonRecord, key: string): Read<string> {
+  if (!isSupplied(body, key)) return { value: undefined };
   const value = body[key];
-  return typeof value === 'boolean' ? value : undefined;
+  if (typeof value !== 'string') return invalidField(key, 'a string');
+  const trimmed = value.trim();
+  return { value: trimmed.length > 0 ? trimmed : undefined };
+}
+
+function readEnum(body: JsonRecord, key: string, allowed: readonly string[]): Read<string> {
+  const read = readString(body, key);
+  if (read instanceof Response || read.value === undefined) return read;
+  return allowed.includes(read.value) ? read : invalidField(key, `one of ${allowed.join(', ')}`);
+}
+
+function readNumber(body: JsonRecord, key: string, check?: (value: number) => boolean, expected = 'a finite number'): Read<number> {
+  if (!isSupplied(body, key)) return { value: undefined };
+  const value = body[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || (check && !check(value))) return invalidField(key, expected);
+  return { value };
+}
+
+function readBoolean(body: JsonRecord, key: string): Read<boolean> {
+  if (!isSupplied(body, key)) return { value: undefined };
+  const value = body[key];
+  return typeof value === 'boolean' ? { value } : invalidField(key, 'true or false');
+}
+
+/** An array of strings. An empty array is returned as empty so a caller can tell "clear" from "absent". */
+function readStrings(body: JsonRecord, key: string, allowed?: readonly string[]): Read<readonly string[]> {
+  if (!isSupplied(body, key)) return { value: undefined };
+  const value = body[key];
+  if (!Array.isArray(value) || value.length > MAX_MEMORY_TAGS || value.some((entry) => typeof entry !== 'string')) {
+    return invalidField(key, `an array of at most ${MAX_MEMORY_TAGS} strings`);
+  }
+  const entries = (value as string[]).map((entry) => entry.trim()).filter(Boolean);
+  if (allowed && entries.some((entry) => !allowed.includes(entry))) return invalidField(key, `made of ${allowed.join(', ')}`);
+  return { value: entries };
+}
+
+/** A string or an array of strings, normalized to an array. */
+function readStringOrStrings(body: JsonRecord, key: string, allowed: readonly string[]): Read<readonly string[]> {
+  if (typeof body[key] === 'string') return readStrings({ [key]: [body[key]] }, key, allowed);
+  return readStrings(body, key, allowed);
 }
 
 /**
  * Read a nullable-number field, preserving the three distinct states the store's
  * temporal window needs: a finite number SETS the bound, an explicit `null`
- * CLEARS it, and any other value (including absent) returns `undefined` so the
- * bound is left UNCHANGED. Used only where null-to-clear is meaningful
- * (validFrom/validUntil).
+ * CLEARS it, and an absent field leaves it UNCHANGED. Any other value is a 400.
+ * Used only where null-to-clear is meaningful (validFrom/validUntil).
  */
-function readNullableNumberField(body: JsonRecord, key: string): number | null | undefined {
-  if (!(key in body)) return undefined;
+function readNullableNumber(body: JsonRecord, key: string): Read<number | null> {
+  if (!(key in body) || body[key] === undefined) return { value: undefined };
   const value = body[key];
-  if (value === null) return null;
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  if (value === null) return { value: null };
+  return typeof value === 'number' && Number.isFinite(value) ? { value } : invalidField(key, 'a finite number or null');
 }
 
 /** Parse a provenance link array: each entry needs kind+ref; label is optional. Invalid entries are skipped. */
@@ -62,68 +111,119 @@ function readProvenanceField(body: JsonRecord, max = 64): readonly MemoryProvena
   return output.length > 0 ? output : undefined;
 }
 
-function readReviewField(body: JsonRecord): MemoryRecordAddInput['review'] | undefined {
-  const value = body.review;
-  if (!isJsonRecord(value)) return undefined;
-  const state = readOptionalStringField(value, 'state');
-  const confidence = readOptionalNumberField(value, 'confidence');
-  const reviewedBy = readOptionalStringField(value, 'reviewedBy');
-  const staleReason = readOptionalStringField(value, 'staleReason');
-  if (state === undefined && confidence === undefined && reviewedBy === undefined && staleReason === undefined) {
-    return undefined;
-  }
+/** The review fields shared by an add's `review` object and the review route's body. */
+function readReviewFields(source: JsonRecord, prefix: string): MemoryRecordReviewInput | Response {
+  const named = (key: string) => (prefix ? `${prefix}.${key}` : key);
+  const state = readEnum(source, 'state', MEMORY_REVIEW_STATES);
+  if (state instanceof Response) return invalidField(named('state'), `one of ${MEMORY_REVIEW_STATES.join(', ')}`);
+  const confidence = readNumber(source, 'confidence');
+  if (confidence instanceof Response) return invalidField(named('confidence'), 'a finite number');
+  const reviewedBy = readString(source, 'reviewedBy');
+  if (reviewedBy instanceof Response) return invalidField(named('reviewedBy'), 'a string');
+  const staleReason = readString(source, 'staleReason');
+  if (staleReason instanceof Response) return invalidField(named('staleReason'), 'a string');
   return {
-    ...(state ? { state } : {}),
-    ...(confidence !== undefined ? { confidence } : {}),
-    ...(reviewedBy ? { reviewedBy } : {}),
-    ...(staleReason ? { staleReason } : {}),
+    ...(state.value ? { state: state.value } : {}),
+    ...(confidence.value !== undefined ? { confidence: confidence.value } : {}),
+    ...(reviewedBy.value ? { reviewedBy: reviewedBy.value } : {}),
+    ...(staleReason.value ? { staleReason: staleReason.value } : {}),
   };
 }
 
-/** Parse POST /api/memory/records, cls and summary are required. */
+function readReviewField(body: JsonRecord): MemoryRecordAddInput['review'] | undefined | Response {
+  const value = body.review;
+  if (value === undefined || value === null) return undefined;
+  if (!isJsonRecord(value)) return invalidField('review', 'an object');
+  const fields = readReviewFields(value, 'review');
+  if (fields instanceof Response) return fields;
+  return Object.keys(fields).length > 0 ? fields : undefined;
+}
+
+/**
+ * Parse POST /api/memory/records, cls and summary are required. `scope` and
+ * `review.state` are closed sets: the store writes them as given but reads them
+ * back strictly, so one record with another value would make every later read fail.
+ */
 export function parseMemoryRecordAddBody(body: JsonRecord): MemoryRecordAddInput | Response {
-  const cls = readOptionalStringField(body, 'cls');
-  const summary = readOptionalStringField(body, 'summary');
-  if (!cls) return jsonErrorResponse({ error: 'Missing cls', code: 'INVALID_REQUEST' }, { status: 400 });
-  if (!summary) return jsonErrorResponse({ error: 'Missing summary', code: 'INVALID_REQUEST' }, { status: 400 });
-  const scope = readOptionalStringField(body, 'scope');
-  const detail = readOptionalStringField(body, 'detail');
-  const tags = readStringArrayField(body, 'tags');
-  const provenance = readProvenanceField(body);
+  const cls = readString(body, 'cls');
+  if (cls instanceof Response) return cls;
+  const summary = readString(body, 'summary');
+  if (summary instanceof Response) return summary;
+  if (!cls.value) return jsonErrorResponse({ error: 'Missing cls', code: 'INVALID_REQUEST' }, { status: 400 });
+  if (!summary.value) return jsonErrorResponse({ error: 'Missing summary', code: 'INVALID_REQUEST' }, { status: 400 });
+  const scope = readEnum(body, 'scope', MEMORY_SCOPES);
+  if (scope instanceof Response) return scope;
+  const detail = readString(body, 'detail');
+  if (detail instanceof Response) return detail;
+  const tags = readStrings(body, 'tags');
+  if (tags instanceof Response) return tags;
   const review = readReviewField(body);
+  if (review instanceof Response) return review;
+  const provenance = readProvenanceField(body);
   return {
-    cls,
-    summary,
-    ...(scope ? { scope } : {}),
-    ...(detail ? { detail } : {}),
-    ...(tags ? { tags } : {}),
+    cls: cls.value,
+    summary: summary.value,
+    ...(scope.value ? { scope: scope.value } : {}),
+    ...(detail.value ? { detail: detail.value } : {}),
+    ...(tags.value && tags.value.length > 0 ? { tags: tags.value } : {}),
     ...(provenance ? { provenance } : {}),
     ...(review ? { review } : {}),
   };
 }
 
-/** Parse a memory search filter, every field optional; unknowns ignored. Shared by search/list/searchSemantic/export. */
-export function parseMemoryRecordFilterBody(body: JsonRecord): MemoryRecordSearchFilterInput {
+/**
+ * Parse a memory search filter, every field optional but each one checked. Shared by
+ * search/list/searchSemantic/export. A field of the wrong type is a 400, not a wider
+ * result: an export asked for `stale` records must never return every record.
+ */
+export function parseMemoryRecordFilterBody(body: JsonRecord): MemoryRecordSearchFilterInput | Response {
+  const scope = readEnum(body, 'scope', MEMORY_SCOPES);
+  if (scope instanceof Response) return scope;
+  const cls = readString(body, 'cls');
+  if (cls instanceof Response) return cls;
+  const tags = readStrings(body, 'tags');
+  if (tags instanceof Response) return tags;
+  const query = readString(body, 'query');
+  if (query instanceof Response) return query;
+  const semantic = readBoolean(body, 'semantic');
+  if (semantic instanceof Response) return semantic;
+  const since = readNumber(body, 'since');
+  if (since instanceof Response) return since;
+  const reviewState = readStringOrStrings(body, 'reviewState', MEMORY_REVIEW_STATES);
+  if (reviewState instanceof Response) return reviewState;
+  const minConfidence = readNumber(body, 'minConfidence');
+  if (minConfidence instanceof Response) return minConfidence;
+  const provenanceKinds = readStrings(body, 'provenanceKinds');
+  if (provenanceKinds instanceof Response) return provenanceKinds;
+  const staleOnly = readBoolean(body, 'staleOnly');
+  if (staleOnly instanceof Response) return staleOnly;
+  // A negative limit would reach Array.prototype.slice(0, -n), which keeps all but the last n.
+  const limit = readNumber(body, 'limit', (value) => Number.isInteger(value) && value >= 0, 'a whole number of at least 0');
+  if (limit instanceof Response) return limit;
   return {
-    ...(readOptionalStringField(body, 'scope') ? { scope: readOptionalStringField(body, 'scope') } : {}),
-    ...(readOptionalStringField(body, 'cls') ? { cls: readOptionalStringField(body, 'cls') } : {}),
-    ...(readStringArrayField(body, 'tags') ? { tags: readStringArrayField(body, 'tags') } : {}),
-    ...(readOptionalStringField(body, 'query') ? { query: readOptionalStringField(body, 'query') } : {}),
-    ...(readOptionalBooleanField(body, 'semantic') !== undefined ? { semantic: readOptionalBooleanField(body, 'semantic') } : {}),
-    ...(readOptionalNumberField(body, 'since') !== undefined ? { since: readOptionalNumberField(body, 'since') } : {}),
-    ...(readStringArrayField(body, 'reviewState') ? { reviewState: readStringArrayField(body, 'reviewState') } : {}),
-    ...(readOptionalNumberField(body, 'minConfidence') !== undefined ? { minConfidence: readOptionalNumberField(body, 'minConfidence') } : {}),
-    ...(readStringArrayField(body, 'provenanceKinds') ? { provenanceKinds: readStringArrayField(body, 'provenanceKinds') } : {}),
-    ...(readOptionalBooleanField(body, 'staleOnly') !== undefined ? { staleOnly: readOptionalBooleanField(body, 'staleOnly') } : {}),
-    ...(readOptionalNumberField(body, 'limit') !== undefined ? { limit: readOptionalNumberField(body, 'limit') } : {}),
+    ...(scope.value ? { scope: scope.value } : {}),
+    ...(cls.value ? { cls: cls.value } : {}),
+    ...(tags.value && tags.value.length > 0 ? { tags: tags.value } : {}),
+    ...(query.value ? { query: query.value } : {}),
+    ...(semantic.value !== undefined ? { semantic: semantic.value } : {}),
+    ...(since.value !== undefined ? { since: since.value } : {}),
+    ...(reviewState.value && reviewState.value.length > 0 ? { reviewState: reviewState.value } : {}),
+    ...(minConfidence.value !== undefined ? { minConfidence: minConfidence.value } : {}),
+    ...(provenanceKinds.value && provenanceKinds.value.length > 0 ? { provenanceKinds: provenanceKinds.value } : {}),
+    ...(staleOnly.value !== undefined ? { staleOnly: staleOnly.value } : {}),
+    ...(limit.value !== undefined ? { limit: limit.value } : {}),
   };
 }
 
-/** Parse POST /api/memory/records/search, every field optional; unknowns ignored. */
+/** Parse POST /api/memory/records/search, every field optional. */
 export function parseMemoryRecordSearchBody(
   body: JsonRecord,
-): { readonly filter: MemoryRecordSearchFilterInput; readonly recall: boolean } {
-  return { filter: parseMemoryRecordFilterBody(body), recall: readOptionalBooleanField(body, 'recall') === true };
+): { readonly filter: MemoryRecordSearchFilterInput; readonly recall: boolean } | Response {
+  const filter = parseMemoryRecordFilterBody(body);
+  if (filter instanceof Response) return filter;
+  const recall = readBoolean(body, 'recall');
+  if (recall instanceof Response) return recall;
+  return { filter, recall: recall.value === true };
 }
 
 /**
@@ -134,22 +234,34 @@ export function parseMemoryRecordSearchBody(
  *
  * validFrom/validUntil carry the store's three-state window semantics: a number
  * sets the bound, an explicit `null` clears it, and an absent field leaves it
- * unchanged, so a proposal that changes only the window round-trips.
+ * unchanged, so a proposal that changes only the window round-trips. `tags: []`
+ * clears the tags; an absent `tags` leaves them unchanged.
  */
-export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdateInput {
-  const scope = readOptionalStringField(body, 'scope');
-  const summary = readOptionalStringField(body, 'summary');
-  const detail = body.detail === null ? '' : readOptionalStringField(body, 'detail');
-  const tags = readStringArrayField(body, 'tags');
-  const validFrom = readNullableNumberField(body, 'validFrom');
-  const validUntil = readNullableNumberField(body, 'validUntil');
+export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdateInput | Response {
+  const scope = readEnum(body, 'scope', MEMORY_SCOPES);
+  if (scope instanceof Response) return scope;
+  const summary = readString(body, 'summary');
+  if (summary instanceof Response) return summary;
+  let detail: string | undefined;
+  if (body.detail === null) detail = '';
+  else {
+    const read = readString(body, 'detail');
+    if (read instanceof Response) return read;
+    detail = read.value;
+  }
+  const tags = readStrings(body, 'tags');
+  if (tags instanceof Response) return tags;
+  const validFrom = readNullableNumber(body, 'validFrom');
+  if (validFrom instanceof Response) return validFrom;
+  const validUntil = readNullableNumber(body, 'validUntil');
+  if (validUntil instanceof Response) return validUntil;
   return {
-    ...(scope ? { scope } : {}),
-    ...(summary ? { summary } : {}),
+    ...(scope.value ? { scope: scope.value } : {}),
+    ...(summary.value ? { summary: summary.value } : {}),
     ...(detail !== undefined ? { detail } : {}),
-    ...(tags ? { tags } : {}),
-    ...(validFrom !== undefined ? { validFrom } : {}),
-    ...(validUntil !== undefined ? { validUntil } : {}),
+    ...(tags.value ? { tags: tags.value } : {}),
+    ...(validFrom.value !== undefined ? { validFrom: validFrom.value } : {}),
+    ...(validUntil.value !== undefined ? { validUntil: validUntil.value } : {}),
   };
 }
 
@@ -182,15 +294,6 @@ export function parseMemoryBundleImportBody(body: JsonRecord): MemoryBundleInput
 }
 
 /** Parse POST /api/memory/records/:id/review, all review fields optional; id comes from the path. */
-export function parseMemoryRecordReviewBody(body: JsonRecord): MemoryRecordReviewInput {
-  const state = readOptionalStringField(body, 'state');
-  const confidence = readOptionalNumberField(body, 'confidence');
-  const reviewedBy = readOptionalStringField(body, 'reviewedBy');
-  const staleReason = readOptionalStringField(body, 'staleReason');
-  return {
-    ...(state ? { state } : {}),
-    ...(confidence !== undefined ? { confidence } : {}),
-    ...(reviewedBy ? { reviewedBy } : {}),
-    ...(staleReason ? { staleReason } : {}),
-  };
+export function parseMemoryRecordReviewBody(body: JsonRecord): MemoryRecordReviewInput | Response {
+  return readReviewFields(body, '');
 }

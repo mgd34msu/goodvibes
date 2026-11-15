@@ -26,7 +26,7 @@ import { revalidateProviderAttempt } from '../platform/src/platform/providers/at
 import { buildContractPlannerRequest } from '../platform/src/platform/contract/planner.js';
 import { shapeOf } from './contract/plan-support.js';
 import { knowledgeScopeSelection } from '../platform/src/platform/knowledge/batteries/scope-selection.js';
-import { authoredErrorReadingsPort, errorText } from './_helpers/authored-error-readings.js';
+import { authoredErrorReadingsPort, errorText, type AuthoredFailure } from './_helpers/authored-error-readings.js';
 import { fieldKind } from '../platform/src/platform/utils/batteries/field-kind.js';
 import { redactionCredential, residualCredential } from '../platform/src/platform/utils/batteries/redaction.js';
 
@@ -75,12 +75,13 @@ function runnerContext(deps: Awaited<ReturnType<typeof fixture>>['deps'], provid
     resolveProviderForRecord: () => ({ provider, modelId: model.id, requestedModelId: model.registryKey }),
     resolveFallbackModelRoutes: () => [] };
 }
-function readings(probability = 0.99) {
+function readings(probability = 0.99, extraFailures: readonly AuthoredFailure[] = []) {
   const staleMessage = new KnowledgeEvidenceRelevanceHeldError('stale').message;
   const diagnostic = authoredErrorReadingsPort({ parts: [[errorText(staleMessage)]], fields: { error: 'content' } },
     [
       { message: staleMessage, errorName: 'KnowledgeEvidenceRelevanceHeldError', reading: { category: 'unknown', connection: 'none' } },
       { message: staleMessage, errorName: 'ProviderAttemptDeniedError', reading: { category: 'unknown', connection: 'none' } },
+      ...extraFailures,
     ]);
   const feature = fakePort((name, question, state) => {
     if (name === 'completion_required') return noulAnswer(.99);
@@ -220,6 +221,26 @@ describe('orchestrator prepared curated knowledge', () => {
     } finally { installJudgmentPort(previous); }
   });
 
+  test('the packet is asked about the brief\'s leading sections, and that same text validates it at every later read', async () => {
+    const { deps } = await fixture(); const fake = readings();
+    const asked: string[] = [];
+    const inner = deps.knowledgeService;
+    const capped = { ...deps, knowledgeService: { preparePromptPacket: (task: string, ...rest: Parameters<KnowledgeService['preparePromptPacket']> extends [string, ...infer R] ? R : never) => {
+      asked.push(task); return inner.preparePromptPacket(task, ...rest);
+    } } };
+    const agent = { ...record(), task: `release the project\n\n${'inventory line\n'.repeat(50_000)}` };
+    const previous = installJudgmentPort(fake.port);
+    try {
+      expect(agent.task.length).toBeGreaterThan(500_000);
+      const prepared = await prepareOrchestratorPromptContext(agent, capped);
+      expect(asked).toHaveLength(1);
+      expect(asked[0]!.length).toBeLessThanOrEqual(2_048);
+      expect(asked[0]).toStartWith('release the project');
+      assertOrchestratorKnowledgeCurrent(agent, prepared);
+      expect(buildOrchestratorSystemPrompt(agent, undefined, prepared)).toContain('Release instructions');
+    } finally { installJudgmentPort(previous); }
+  });
+
   test('a later rebuild prepares changed evidence instead of reusing a stale prompt handle', async () => {
     const { store, source, deps, preparations } = await fixture(); const agent = record(); const fake = readings();
     const previous = installJudgmentPort(fake.port);
@@ -290,6 +311,28 @@ describe('orchestrator prepared curated knowledge', () => {
       await runAgentTask(context, agent);
       expect(agent.status).toBe('failed'); expect(agent.error).toContain('stale');
       expect(transmissions).toBe(0); expect(preparations()).toBe(1);
+    } finally { installJudgmentPort(previous); }
+  });
+
+  test('knowledge changed after a context-size rejection is still caught on the turns that follow it', async () => {
+    const contextWording = 'prompt is too long for this model context window';
+    const { store, source, deps } = await fixture(); const agent = { ...record(), tools: ['read_progress'] };
+    const fake = readings(0.99, [{ message: contextWording, errorName: 'Error', reading: { category: 'unknown', connection: 'none', contextExceeded: true } }]);
+    let calls = 0;
+    const provider: LLMProvider = { name: 'fixture', models: ['fixture-model'], async chat() {
+      calls += 1;
+      if (calls === 1) throw new Error(contextWording);
+      if (calls === 2) return { content: '', toolCalls: [{ id: 'c1', name: 'read_progress', arguments: {} }], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'tool_call' };
+      return { content: 'done', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
+    } };
+    const registry = new ToolRegistry();
+    registry.register({ definition: { name: 'read_progress', description: 'Read', parameters: { type: 'object' } },
+      execute: async () => { await store.upsertSource({ ...source, summary: 'Changed after the emergency prompt served.' }); return { success: true, output: 'read' }; } });
+    const previous = installJudgmentPort(fake.port);
+    try {
+      await runAgentTask({ ...runnerContext(deps, provider), getFullRegistry: () => registry }, agent);
+      expect(agent.status).toBe('failed'); expect(agent.error).toContain('stale');
+      expect(calls).toBe(2);
     } finally { installJudgmentPort(previous); }
   });
 

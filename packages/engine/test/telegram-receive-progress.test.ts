@@ -24,13 +24,13 @@ test('queue silence requires an empty request started after the deadline, after 
   f.at(50); f.progress.completeRequest(beforeDeadline, true);
   let settled = false;
   const waiting = pin.waitFor(0, 40, f.lifetime.signal, scope).then(assertCurrent => { settled = true; return assertCurrent; });
-  await Promise.resolve(); expect(settled).toBe(false); expect(f.progress.timeoutSeconds(25)).toBe(1);
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(settled).toBe(false); expect(f.progress.timeoutSeconds(25)).toBe(1);
   f.at(60); const nonempty = f.progress.beginRequest(); f.at(61); f.progress.completeRequest(nonempty, false);
-  await Promise.resolve(); expect(settled).toBe(false);
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(settled).toBe(false);
   f.at(70); const empty = f.progress.beginRequest(); f.at(71);
   // Merely entering the request or receiving its response cannot publish
   // progress before the caller has dispatched and persisted that batch.
-  await Promise.resolve(); expect(settled).toBe(false); f.progress.completeRequest(empty, true);
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(settled).toBe(false); f.progress.completeRequest(empty, true);
   const assertCurrent = await waiting; expect(() => assertCurrent()).not.toThrow(); expect(f.progress.timeoutSeconds(25)).toBe(25);
   f.at(80); f.progress.gap(scope); expect(() => assertCurrent()).toThrow();
 });
@@ -55,10 +55,23 @@ test.each(['retention', 'clock', 'stop', 'conflict'] as const)('an original rece
   const f = fixture(), pin = f.progress.retain();
   const waiting = pin.waitFor(0, 10, f.lifetime.signal, scope);
   if (reason === 'retention') { f.at(24 * 60 * 60 * 1000); f.progress.beginRequest(); }
-  if (reason === 'clock') { f.at(2); f.progress.beginRequest(); f.at(1); expect(() => f.progress.beginRequest()).toThrow(); }
+  if (reason === 'clock') { f.at(2); f.progress.beginRequest(); f.at(1); expect(() => f.progress.beginRequest()).not.toThrow(); }
   if (reason === 'stop') f.lifetime.abort();
   if (reason === 'conflict') f.progress.gap();
   await expect(waiting).rejects.toThrow();
+});
+
+test('a clock step during a request invalidates open claims without ending receiving', async () => {
+  const f = fixture(), pin = f.progress.retain();
+  f.at(100); const started = f.progress.beginRequest();
+  const waiting = pin.waitFor(100, 100, f.lifetime.signal, scope);
+  f.at(50);
+  expect(() => f.progress.completeRequest(started, true)).not.toThrow();
+  await expect(waiting).rejects.toThrow();
+  f.at(60); const next = f.progress.beginRequest(); f.at(61);
+  expect(() => f.progress.completeRequest(next, true)).not.toThrow();
+  const fresh = f.progress.retain(); f.at(70); const empty = f.progress.beginRequest(); f.at(71); f.progress.completeRequest(empty, true);
+  await expect(fresh.waitFor(70, 70, f.lifetime.signal, scope)).resolves.toBeInstanceOf(Function);
 });
 
 test('caller cancellation removes its barrier without retiring unrelated receive work', async () => {

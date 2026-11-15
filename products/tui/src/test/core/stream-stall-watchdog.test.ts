@@ -1,12 +1,9 @@
 /**
- * Tests for StreamStallWatchdog.
- *
- * Uses real setTimeout with a very short threshold (10ms) instead of fake
- * timers (not available in bun:test as of this codebase) to keep tests fast
- * while exercising the real timer contract.
+ * Tests for StreamStallWatchdog, driven by a virtual clock through the
+ * watchdog's timer seam so no test depends on real scheduling latency.
  */
 import { describe, test, expect } from 'bun:test';
-import { createStreamStallWatchdog, type WatchdogTurnEvents } from '../../core/stream-stall-watchdog.ts';
+import { createStreamStallWatchdog, type StallTimers, type WatchdogTurnEvents } from '../../core/stream-stall-watchdog.ts';
 
 // ---------------------------------------------------------------------------
 // Minimal event surface stub
@@ -46,15 +43,43 @@ function makeEvents(): WatchdogTurnEvents & { emit: (event: SupportedEvent) => v
   };
 }
 
-/** Wait at least `ms` milliseconds (real time). */
-const wait = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/** A virtual clock: timers fire, in order, only when `advance` moves time past them. */
+class VirtualClock implements StallTimers {
+  private now = 0;
+  private nextId = 1;
+  private readonly pending = new Map<number, { at: number; callback: () => void }>();
+
+  setTimeout(callback: () => void, ms: number): number {
+    const id = this.nextId++;
+    this.pending.set(id, { at: this.now + ms, callback });
+    return id;
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.pending.delete(handle as number);
+  }
+
+  get armed(): number {
+    return this.pending.size;
+  }
+
+  advance(ms: number): void {
+    const target = this.now + ms;
+    for (;;) {
+      const due = [...this.pending.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!due) break;
+      this.pending.delete(due[0]);
+      this.now = due[1].at;
+      due[1].callback();
+    }
+    this.now = target;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Short threshold for tests to keep suite fast. */
 const TEST_THRESHOLD_MS = 20;
 
 // ---------------------------------------------------------------------------
@@ -63,18 +88,20 @@ const TEST_THRESHOLD_MS = 20;
 
 describe('StreamStallWatchdog', () => {
 
-  test('fires onStall exactly once after STREAM_START with no delta', async () => {
+  test('fires onStall exactly once after STREAM_START with no delta', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: (provider) => stallCalls.push(provider),
       getProviderName: () => 'anthropic',
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(1);
     expect(stallCalls[0]).toBe('anthropic');
@@ -82,11 +109,13 @@ describe('StreamStallWatchdog', () => {
     watchdog.dispose();
   });
 
-  test('does NOT fire when the gap after STREAM_DELTA stays under threshold', async () => {
+  test('does NOT fire when the gap after STREAM_DELTA stays under threshold', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: (provider) => stallCalls.push(provider),
       thresholdMs: TEST_THRESHOLD_MS,
     });
@@ -94,198 +123,220 @@ describe('StreamStallWatchdog', () => {
     events.emit('STREAM_START');
     // Delta arrives well before threshold, and nothing exceeds the
     // (re-armed) threshold afterwards either.
-    await wait(5);
+    clock.advance(5);
     events.emit('STREAM_DELTA');
-    await wait(TEST_THRESHOLD_MS - 10);
+    clock.advance(TEST_THRESHOLD_MS - 1);
 
     expect(stallCalls).toHaveLength(0);
     watchdog.dispose();
   });
 
-  test('DOES fire on a mid-stream stall; silence after a delta re-arms the watchdog', async () => {
+  test('DOES fire on a mid-stream stall; silence after a delta re-arms the watchdog', () => {
     // Regression test for the reported multi-minute mid-turn stall: tokens
     // were already flowing (so a delta had arrived), then the stream went
     // silent for longer than the threshold. The watchdog must still fire,
     // it must NOT be permanently disarmed by the first delta.
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: Array<{ provider: string; episode: number }> = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: (provider, episode) => stallCalls.push({ provider, episode }),
       getProviderName: () => 'anthropic',
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
     events.emit('STREAM_DELTA');
     // No further deltas, silence exceeds the threshold from this point on.
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(1);
     expect(stallCalls[0]).toEqual({ provider: 'anthropic', episode: 1 });
     watchdog.dispose();
   });
 
-  test('fires again for a second stall episode after a recovery', async () => {
+  test('fires again for a second stall episode after a recovery', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: Array<{ provider: string; episode: number }> = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: (provider, episode) => stallCalls.push({ provider, episode }),
       getProviderName: () => 'anthropic',
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
     expect(stallCalls).toHaveLength(1);
     expect(stallCalls[0].episode).toBe(1);
 
     // Stream recovers (a delta arrives), then stalls again.
     events.emit('STREAM_DELTA');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(2);
     expect(stallCalls[1].episode).toBe(2);
     watchdog.dispose();
   });
 
-  test('fires only ONCE per turn even if threshold elapses multiple times', async () => {
+  test('fires only ONCE per turn even if threshold elapses multiple times', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
     // Wait for the stall to fire
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
     // Wait again well past the threshold, should not fire again
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(1);
     watchdog.dispose();
   });
 
-  test('re-arms on next STREAM_START after a stall', async () => {
+  test('re-arms on next STREAM_START after a stall', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     // First turn stalls
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
     expect(stallCalls).toHaveLength(1);
 
     // Second turn also stalls, should fire again (re-armed)
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
     expect(stallCalls).toHaveLength(2);
 
     watchdog.dispose();
   });
 
-  test('disarms on TURN_COMPLETED: no stall fires after turn ends', async () => {
+  test('disarms on TURN_COMPLETED: no stall fires after turn ends', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
     events.emit('TURN_COMPLETED');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
     watchdog.dispose();
   });
 
-  test('disarms on TURN_ERROR: no stall fires after error', async () => {
+  test('disarms on TURN_ERROR: no stall fires after error', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
     events.emit('TURN_ERROR');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
     watchdog.dispose();
   });
 
-  test('disarms on TURN_CANCEL', async () => {
+  test('disarms on TURN_CANCEL', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
     events.emit('TURN_CANCEL');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
     watchdog.dispose();
   });
 
-  test('disarms on STREAM_END', async () => {
+  test('disarms on STREAM_END', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
     events.emit('STREAM_END');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
     watchdog.dispose();
   });
 
-  test('dispose() cancels pending timer: no stall fires after dispose', async () => {
+  test('dispose() cancels pending timer: no stall fires after dispose', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
 
     events.emit('STREAM_START');
-    await wait(5);
+    clock.advance(5);
+    expect(clock.armed).toBe(1);
     watchdog.dispose();
-    await wait(TEST_THRESHOLD_MS + 10);
+    expect(clock.armed).toBe(0);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
   });
 
-  test('dispose() removes all event subscriptions', async () => {
+  test('dispose() removes all event subscriptions', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: () => stallCalls.push('fired'),
       thresholdMs: TEST_THRESHOLD_MS,
     });
@@ -293,23 +344,25 @@ describe('StreamStallWatchdog', () => {
 
     // Emitting after dispose should not trigger anything
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls).toHaveLength(0);
   });
 
-  test('uses default provider name when getProviderName not supplied', async () => {
+  test('uses default provider name when getProviderName not supplied', () => {
     const events = makeEvents();
+    const clock = new VirtualClock();
     const stallCalls: string[] = [];
     const watchdog = createStreamStallWatchdog({
       events,
+      timers: clock,
       onStall: (name) => stallCalls.push(name),
       thresholdMs: TEST_THRESHOLD_MS,
       // No getProviderName
     });
 
     events.emit('STREAM_START');
-    await wait(TEST_THRESHOLD_MS + 10);
+    clock.advance(TEST_THRESHOLD_MS);
 
     expect(stallCalls[0]).toBe('provider');
     watchdog.dispose();

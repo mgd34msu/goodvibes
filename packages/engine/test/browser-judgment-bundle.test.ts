@@ -10,7 +10,12 @@ describe('browser judgment public boundary', () => {
   });
 
   test('bundles the public browser judgment contract without Node builtins', async () => {
-    const output = await bundleBrowserEntrypoint(fileURLToPath(import.meta.resolve('@goodvibes-jev/engine/daemon-api/browser-judgment-contract')));
+    // Bun stubs a Node builtin to an empty object in a browser bundle, so a plain build cannot fail on one. Keeping builtins external leaves the specifier in the output.
+    const output = await bundleBrowserEntrypoint(
+      fileURLToPath(import.meta.resolve('@goodvibes-jev/engine/daemon-api/browser-judgment-contract')),
+      { externals: ['node:*', 'fs', 'path', 'os', 'crypto', 'child_process', 'net', 'http', 'https', 'url', 'util', 'stream', 'buffer'] },
+    );
     expect(output.length).toBeGreaterThan(0);
+    expect(output.match(/(?:from|import|require)\s*\(?\s*["'](?:node:[^"']+|fs|path|os|crypto|child_process|net|http|https|url|util|stream|buffer)["']/g) ?? []).toEqual([]);
   });
 });

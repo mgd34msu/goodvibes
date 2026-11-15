@@ -202,7 +202,6 @@ describe('restartOntoUpdatedBinary', () => {
   });
 });
 
-// New suite wiring regressions are source only until the coding pass finishes.
 test('launch passes the original served-bundle getter and rejects changes before applying effects', async () => {
   let selected = '/fixture/webui/3.1.2', receipts = 0;
   const configManager = { get: (key: string) => key === 'controlPlane.webui.bundleDir' ? selected : undefined };

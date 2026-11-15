@@ -10,7 +10,7 @@ export interface LocalCompanionMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
-  deliveryState?: 'sent' | 'failed' | 'local' | 'cancelled' | 'queued';
+  deliveryState?: 'sent' | 'failed' | 'local' | 'cancelled' | 'queued' | 'unanswered';
   attachments?: readonly {
     artifactId: string;
     label?: string;
@@ -187,6 +187,15 @@ function comparableMessageRole(message: unknown): string {
   return firstString(message, ['role', 'author', 'kind', 'source']).toLowerCase();
 }
 
+/** How far a fetched message's timestamp may trail the local one and still be
+ *  read as that message (browser and daemon clocks are not synchronized). */
+const FETCHED_CLOCK_SKEW_MS = 5 * 60_000;
+
+function messageCreatedAt(message: unknown): number | null {
+  const value = asRecord(message).createdAt;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 export function mergeCompanionMessages(
   fetchedMessages: unknown[],
   localMessages: LocalCompanionMessage[],
@@ -194,18 +203,31 @@ export function mergeCompanionMessages(
 ): unknown[] {
   const rendered = [...fetchedMessages];
   const fetchedIds = new Set(fetchedMessages.map(extractMessageId).filter(Boolean));
+  // Each fetched message stands in for at most one local message.
+  const consumed = new Set<number>();
   for (const message of localMessages) {
     if (message.sessionId !== sessionId) continue;
     if (fetchedIds.has(message.id)) continue;
-    const localText = comparableMessageText(message);
-    const localRole = comparableMessageRole(message);
-    const localAttachments = comparableMessageAttachments(message);
-    const alreadyFetched = fetchedMessages.some((fetched) => (
-      comparableMessageText(fetched) === localText
-      && comparableMessageRole(fetched) === localRole
-      && comparableMessageAttachments(fetched) === localAttachments
-    ));
-    if (alreadyFetched) continue;
+    // A failed or still-pending send must stay visible, even when the same
+    // text was sent earlier and the daemon lists that earlier message. Text
+    // matching is only for sent messages whose client id the daemon did not echo.
+    if (message.deliveryState !== 'failed' && message.deliveryState !== 'local') {
+      const localText = comparableMessageText(message);
+      const localRole = comparableMessageRole(message);
+      const localAttachments = comparableMessageAttachments(message);
+      const match = fetchedMessages.findIndex((fetched, index) => {
+        if (consumed.has(index)) return false;
+        const fetchedAt = messageCreatedAt(fetched);
+        if (fetchedAt === null || fetchedAt < message.createdAt - FETCHED_CLOCK_SKEW_MS) return false;
+        return comparableMessageText(fetched) === localText
+          && comparableMessageRole(fetched) === localRole
+          && comparableMessageAttachments(fetched) === localAttachments;
+      });
+      if (match >= 0) {
+        consumed.add(match);
+        continue;
+      }
+    }
     rendered.push(message);
   }
   return rendered;

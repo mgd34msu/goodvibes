@@ -22,6 +22,8 @@ import {
   type MemoryTripwireReceipt,
 } from '../platform/src/platform/runtime/memory/index.js';
 
+import { PRESSURE_RETRIM_INTERVAL_MS } from '../platform/src/platform/runtime/memory/memory-governor.js';
+
 const MB = 1024 * 1024;
 
 describe('CacheRegistry membership gate (fails loudly)', () => {
@@ -155,6 +157,33 @@ describe('MemoryGovernor tier machine', () => {
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toMatch(/critical memory pressure/i);
     expect(h.opsEvents.at(-1)?.tier).toBe('critical');
+  });
+
+  test('a daemon parked at critical flushes its caches again on a schedule instead of only on the tier change', () => {
+    const h = makeGovernor({ budgetMb: 100 });
+    h.setRssMb(97);
+    h.gov.sampleOnce();
+    const afterEntry = h.trims.length;
+    h.advance(PRESSURE_RETRIM_INTERVAL_MS - 1);
+    h.gov.sampleOnce();
+    expect(h.trims.length).toBe(afterEntry);
+    h.advance(1);
+    h.gov.sampleOnce();
+    expect(h.trims.length).toBe(afterEntry + 1);
+    expect(h.trims.at(-1)).toBe('flush');
+    h.advance(PRESSURE_RETRIM_INTERVAL_MS);
+    h.gov.sampleOnce();
+    expect(h.trims.length).toBe(afterEntry + 2);
+  });
+
+  test('elevated pressure does not re-flush on a schedule', () => {
+    const h = makeGovernor({ budgetMb: 100 });
+    h.setRssMb(65);
+    h.gov.sampleOnce();
+    const afterEntry = h.trims.length;
+    h.advance(PRESSURE_RETRIM_INTERVAL_MS * 3);
+    h.gov.sampleOnce();
+    expect(h.trims.length).toBe(afterEntry);
   });
 
   test('recovering below high resumes paused jobs and allows work again', () => {
@@ -569,5 +598,46 @@ describe('memory allocation pressure and failure handling', () => {
     expect(brokerTrims).toEqual(['flush']);
     expect(cacheRegistry.footprints().find((f) => f.id === 'knowledge-store')!.entries).toBe(0);
     void rss;
+  });
+});
+
+describe('MemoryGovernor exit latch', () => {
+  test('a failing ops emit while firing the tripwire still exits the process', async () => {
+    let rssBytes = 85 * MB, clock = 0;
+    let exited: MemoryTripwireReceipt | null = null;
+    const gov = new MemoryGovernor(
+      { budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, tripwireRateMbPerSec: 25, tripwireSustainSec: 60 },
+      {
+        caches: new CacheRegistry(),
+        pauses: new PauseController(),
+        sampler: (): MemorySample => ({ rssBytes, heapUsedBytes: rssBytes / 2, heapTotalBytes: rssBytes }),
+        now: () => clock,
+        gc: () => {},
+        resolveSystemRamMb: () => 1024 * 1024,
+        emitOps: (event) => { if (event.tripwire) throw new Error('ops bus unavailable'); },
+        exit: (receipt) => { exited = receipt; },
+      },
+    );
+    gov.sampleOnce();
+    for (let i = 0; i < 61 && !exited; i++) {
+      clock += 1000;
+      rssBytes = (85 + (i + 1) * 40) * MB;
+      gov.sampleOnce();
+    }
+    for (let i = 0; i < 50 && !exited; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(exited).not.toBeNull();
+  });
+
+  test('the critical-tier refusal names the threshold it refuses at', () => {
+    const gov = new MemoryGovernor(
+      { budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, tripwireRateMbPerSec: 25, tripwireSustainSec: 60 },
+      {
+        caches: new CacheRegistry(), pauses: new PauseController(),
+        sampler: (): MemorySample => ({ rssBytes: 97 * MB, heapUsedBytes: 40 * MB, heapTotalBytes: 97 * MB }),
+        now: () => 0, gc: () => {}, resolveSystemRamMb: () => 1024 * 1024, exit: () => {},
+      },
+    );
+    gov.sampleOnce();
+    expect(gov.admitExpensiveWork('reindex').reason).toContain('RSS >= 95% of the 100MB budget');
   });
 });

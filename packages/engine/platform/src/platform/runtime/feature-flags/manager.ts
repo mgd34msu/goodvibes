@@ -1,5 +1,5 @@
 /**
- * FeatureFlagManager, runtime feature gate and emergency kill-switch controller.
+ * FeatureFlagManager, runtime feature gate controller.
  *
  * Responsibilities:
  *   - Initialises all flags from the registry with their default states.
@@ -25,6 +25,9 @@ export function captureFeatureFlagReadSource(manager: object): () => void {
   return capture();
 }
 
+/** Most recent transitions kept in the in-process audit log. */
+const MAX_RECORDED_TRANSITIONS = 1000;
+
 /** Subscriber callback type for flag state changes */
 export type FlagSubscriber = (
   flagId: string,
@@ -43,10 +46,7 @@ class FeatureFlagManagerImpl {
   /** Current state for each registered flag */
   private readonly _states: Map<string, FlagState> = new Map();
 
-  /** Kill reasons stored separately to survive a disable() then re-kill cycle */
-  private readonly _killReasons: Map<string, string> = new Map();
-
-  /** In-process ordered audit log of all state transitions */
+  /** In-process ordered audit log of the most recent state transitions (capped) */
   private readonly _transitions: FlagTransition[] = [];
 
   /** Active subscriber callbacks */
@@ -85,15 +85,6 @@ class FeatureFlagManagerImpl {
    */
   isEnabled(flagId: string): boolean {
     return this._states.get(flagId) === 'enabled';
-  }
-
-  /**
-   * Returns `true` if the flag has been emergency-killed.
-   *
-   * @param flagId - The flag's kebab-case identifier.
-   */
-  isKilled(flagId: string): boolean {
-    return this._states.get(flagId) === 'killed';
   }
 
   /**
@@ -158,11 +149,12 @@ class FeatureFlagManagerImpl {
   }
 
   /**
-   * Returns the ordered audit log of all flag state transitions recorded
-   * in this process lifetime.
+   * Returns a copy of the ordered audit log of flag state transitions
+   * recorded in this process lifetime; once more than
+   * {@link MAX_RECORDED_TRANSITIONS} have happened, only the latest are kept.
    */
   getTransitions(): readonly FlagTransition[] {
-    return this._transitions;
+    return [...this._transitions];
   }
 
   // ── Write API ───────────────────────────────────────────────────────────
@@ -203,7 +195,8 @@ class FeatureFlagManagerImpl {
   /**
    * Disables a flag (or un-kills it, resetting to `'disabled'`).
    *
-   * This is the only way to move a flag out of the `'killed'` state.
+   * This is the only way to move a flag out of the `'killed'` state; settings
+   * writes never clear a kill.
    *
    * Throws if the flag is not `runtimeToggleable` and is not currently killed
    * (un-killing a killed flag is always permitted regardless of toggleability).
@@ -222,38 +215,7 @@ class FeatureFlagManagerImpl {
       );
     }
 
-    this._killReasons.delete(flagId);
     this._transition(flagId, previous, 'disabled');
-  }
-
-  /**
-   * Emergency-kills a flag with a mandatory reason.
-   *
-   * A killed flag:
-   *   - Returns `false` from `isEnabled()`.
-   *   - Cannot be re-enabled until `disable()` is called first.
-   *   - Records the kill reason in the audit log and the `_killReasons` map.
-   *
-   * Calling `kill()` on an already-killed flag updates the reason and
-   * records a new transition (idempotent on state, not on reason).
-   *
-   * **Note:** `kill()` intentionally bypasses `runtimeToggleable`, it is an
-   * emergency override and must never be blocked by flag configuration.
-   *
-   * @param flagId - The flag's kebab-case identifier.
-   * @param reason - Human-readable explanation of why the flag was killed.
-   */
-  kill(flagId: string, reason: string): void {
-    if (!reason || reason.trim().length === 0) {
-      throw new Error(`[FeatureFlagManager] Kill reason is required for flag '${flagId}'`);
-    }
-
-    this._requireFlag(flagId);
-    const previous = this._states.get(flagId) as FlagState;
-
-    this._killReasons.set(flagId, reason);
-
-    this._transition(flagId, previous, 'killed', reason);
   }
 
   // ── Config integration ──────────────────────────────────────────────────
@@ -264,8 +226,8 @@ class FeatureFlagManagerImpl {
    * - Unknown flag ids are rejected so stale configs cannot hide misspelled gates.
    * - Skips non-toggleable flags if the current state is already non-default
    *   (allows startup-only flags to be seeded via config without error).
-   * - A config-level `'killed'` state is applied without a reason string;
-   *   use `kill()` directly for operator-initiated kills with reasons.
+   * - A config-level `'killed'` state is applied as-is; nothing else in the
+   *   platform can put a flag into that state.
    *
    * This is the boot-time path, called once, before the runtime event loop
    * begins, so it applies EVERY flag's desired state directly regardless of
@@ -292,7 +254,7 @@ class FeatureFlagManagerImpl {
    * see `bindFeatureFlagConfigBridge`), honoring `runtimeToggleable`:
    *
    * - Runtime-toggleable flags apply immediately through the same
-   *   transition path `enable()`/`disable()`/`kill()` use, so subscribers
+   *   transition path `enable()`/`disable()` use, so subscribers
    *   fire exactly as they would for a direct manager toggle.
    * - Startup-gated flags are never faked live: the effective state is left
    *   untouched and the persisted value is recorded as pending a restart
@@ -331,16 +293,13 @@ class FeatureFlagManagerImpl {
     if (current === desiredState) return; // already correct, skip
 
     if (desiredState === 'killed') {
-      this._killReasons.set(id, 'Loaded from config');
       this._transition(id, current, 'killed', 'Loaded from config');
       return;
     }
 
-    if (desiredState === 'enabled' && current === 'killed') {
-      // Config wants enabled but flag is killed, skip; kill takes precedence
-      return;
-    }
-
+    // A kill ends only through disable(): a settings write, in either
+    // direction, must not undo an emergency switch-off made in this process.
+    if (current === 'killed') return;
     this._transition(id, current, desiredState);
   }
 
@@ -397,6 +356,7 @@ class FeatureFlagManagerImpl {
       ...(reason !== undefined ? { reason } : {}),
     };
     this._transitions.push(entry);
+    if (this._transitions.length > MAX_RECORDED_TRANSITIONS) this._transitions.shift();
 
     for (const subscriber of this._subscribers) {
       try {

@@ -1,5 +1,4 @@
-/** Regression source UNRUN during the coding-first pass. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,25 +45,30 @@ test('fresh CI successor and source tokens are issued once, saved before effects
   expect(nativeCiSourceBinding('project', request)).toBe(record.issue.successorSourceBinding);
 });
 
-test('only independently checked issue/watch/claim commitments hash once per immutable original, not every native saved-row guard', () => {
-  const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
-  try {
-    let record = watched(); expect(count()).toBe(1);
-    nativeCiWatchCommitment(record.watch!); expect(count()).toBe(2);
-    if (record.version !== 2) throw new Error('Fixture version');
-    record = parseNativeCiContinuation({ ...record, state: 'claimed', failureRevision: 'd'.repeat(64), successor: { workId: record.issue.originalKey.workId, workRevision: 4, criteriaRevision: 1, attemptId: record.issue.successorAttemptId, attemptRevision: 1 } }, record);
-    nativeCiConsumption(record); expect(count()).toBe(3);
-    for (let index = 0; index < 8; index++) {
-      record = parseNativeCiContinuationJson(JSON.stringify(record), record);
-      nativeCiIssueCommitment(record.issue); nativeCiWatchCommitment(record.watch!); nativeCiConsumption(record); nativeCiSuccessorId(record);
-    }
-    expect(count()).toBe(3);
-    const adopted = parseNativeCiContinuationJson(JSON.stringify(record)); expect(count()).toBe(4);
-    nativeCiWatchCommitment(adopted.watch!); nativeCiConsumption(adopted); expect(count()).toBe(6);
-  } finally { hash.mockRestore(); }
+test('re-reading a saved CI continuation with its verified original keeps every commitment stable; adopting it cold still verifies', () => {
+  let record = watched();
+  const issueCommitment = nativeCiIssueCommitment(record.issue), watchCommitment = nativeCiWatchCommitment(record.watch!);
+  if (record.version !== 2) throw new Error('Fixture version');
+  record = parseNativeCiContinuation({ ...record, state: 'claimed', failureRevision: 'd'.repeat(64), successor: { workId: record.issue.originalKey.workId, workRevision: 4, criteriaRevision: 1, attemptId: record.issue.successorAttemptId, attemptRevision: 1 } }, record);
+  const consumption = nativeCiConsumption(record), successorId = nativeCiSuccessorId(record);
+  for (let index = 0; index < 8; index++) {
+    record = parseNativeCiContinuationJson(JSON.stringify(record), record);
+    expect(nativeCiIssueCommitment(record.issue)).toBe(issueCommitment);
+    expect(nativeCiWatchCommitment(record.watch!)).toBe(watchCommitment);
+    expect(nativeCiConsumption(record)).toBe(consumption);
+    expect(nativeCiSuccessorId(record)).toBe(successorId);
+  }
+  const adopted = parseNativeCiContinuationJson(JSON.stringify(record));
+  expect(adopted).toEqual(record);
+  expect(nativeCiWatchCommitment(adopted.watch!)).toBe(watchCommitment);
+  expect(nativeCiConsumption(adopted)).toBe(consumption);
+  const tampered = JSON.parse(JSON.stringify(record));
+  tampered.grant.binding = (tampered.grant.binding[0] === '0' ? '1' : '0') + tampered.grant.binding.slice(1);
+  expect(() => parseNativeCiContinuationJson(JSON.stringify(tampered), record)).toThrow();
+  expect(() => parseNativeCiContinuationJson(JSON.stringify(tampered))).toThrow();
 });
 
-test('impossible saved associations and states hash nothing; a viable cold grant verifies its actual commitment once', () => {
+test('impossible saved associations and states are rejected; a viable cold grant verifies and a wrong binding does not', () => {
   const base = structuredClone(watched());
   if (base.version !== 2 || !base.watch) throw new Error('Expected native watched fixture');
   const successor = { workId: base.issue.originalKey.workId, workRevision: 4, criteriaRevision: 1,
@@ -78,29 +82,21 @@ test('impossible saved associations and states hash nothing; a viable cold grant
     { ...base, state: 'claimed', failureRevision: 'd'.repeat(64) },
     { ...base, state: 'claimed', failureRevision: 'd'.repeat(64), successor: { ...successor, attemptId: 'attempt-ci-' + opaqueUuid() } },
   ];
-  const hash = spyOn(crypto, 'createHash'), count = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
-  try {
-    for (const row of impossible) expect(() => parseNativeCiContinuation(row)).toThrow();
-    expect(count()).toBe(0);
-    const saved = parseNativeCiContinuation(base); expect(count()).toBe(1);
-    expect(parseNativeCiContinuationJson(JSON.stringify(saved), saved)).toEqual(saved); expect(count()).toBe(1);
-    const changed = (base.grant.binding[0] === '0' ? '1' : '0') + base.grant.binding.slice(1);
-    expect(() => parseNativeCiContinuation({ ...base, grant: { ...base.grant, binding: changed } })).toThrow();
-    expect(count()).toBe(2); // A viable but incorrect binding still needs verification.
-  } finally { hash.mockRestore(); }
+  for (const row of impossible) expect(() => parseNativeCiContinuation(row)).toThrow();
+  const saved = parseNativeCiContinuation(base);
+  expect(parseNativeCiContinuationJson(JSON.stringify(saved), saved)).toEqual(saved);
+  const changed = (base.grant.binding[0] === '0' ? '1' : '0') + base.grant.binding.slice(1);
+  expect(() => parseNativeCiContinuation({ ...base, grant: { ...base.grant, binding: changed } })).toThrow();
 });
 
-test('old CI issue, successor and grant-consumption recipes remain readable without rehashing every live guard', () => {
+test('old CI issue, successor and grant-consumption recipes remain readable across repeated saved round-trips', () => {
   const owner = originalIssue(), issue = captureNativeCiIssue(1, { projectId: owner.projectId, originalKey: owner.originalKey, originalPayloadRevision: owner.originalPayloadRevision,
     principalId: owner.principalId, authorityRevision: owner.authorityRevision, authorityScopes: owner.authorityScopes, scopeId: owner.scopeId, scopeRevision: owner.scopeRevision,
     ledgerSourceRevision: 'b'.repeat(64), policyRevision: 'c'.repeat(64), seedRevision: 'd'.repeat(64) });
   const grant = { id: 'historical-grant', binding: oldDigest(issue) }, expected = `attempt-ci-${oldDigest(grant).slice(0, 40)}`;
   let record = parseNativeCiContinuation({ version: 1, id: grant.id, issue, grant, watch: null, state: 'issued', failureRevision: null, successor: null });
-  const hash = spyOn(crypto, 'createHash');
-  try {
-    for (let index = 0; index < 8; index++) { expect(nativeCiSuccessorId(record)).toBe(expected); record = parseNativeCiContinuationJson(JSON.stringify(record), record); }
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
-  } finally { hash.mockRestore(); }
+  for (let index = 0; index < 8; index++) { expect(nativeCiSuccessorId(record)).toBe(expected); record = parseNativeCiContinuationJson(JSON.stringify(record), record); }
+  expect(() => parseNativeCiContinuation({ version: 1, id: grant.id, issue, grant: { ...grant, binding: oldDigest('other') }, watch: null, state: 'issued', failureRevision: null, successor: null })).toThrow();
 });
 
 test('untrusted getters, proxies, public verification flags and later intrinsic overrides cannot mint CI source provenance', () => {

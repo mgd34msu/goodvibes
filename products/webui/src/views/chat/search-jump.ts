@@ -56,13 +56,39 @@ export function isScrollTargetReady(
   return lineageNodes.some((node) => bestId(node.message) === target.messageId);
 }
 
-/** Find the rendered message element for `messageId` among `container`'s direct children. */
+/**
+ * Find the rendered message element for `messageId` anywhere under `container`.
+ * The articles sit inside the column wrapper, not directly under the scroll
+ * container, so this searches descendants.
+ */
 export function findMessageElement(
   container: Element | null | undefined,
   messageId: string,
 ): HTMLElement | undefined {
   if (!container) return undefined;
-  return [...container.children].find(
-    (child) => child.getAttribute('data-message-id') === messageId,
-  ) as HTMLElement | undefined;
+  // Compare the attribute rather than building a selector from the id, so any
+  // id characters are safe.
+  for (const element of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
+    if (element.getAttribute('data-message-id') === messageId) return element;
+  }
+  return undefined;
+}
+
+/**
+ * True when a pending target can never be satisfied and should be dropped: the
+ * operator moved to another session after the target's session had been shown,
+ * or the target's session finished loading and the message is not among the
+ * active ones (it only exists as retained history, or was removed). A target
+ * left armed would jump unexpectedly on a later visit to that session.
+ */
+export function isScrollTargetStale(
+  target: ScrollTarget | null,
+  activeSessionId: string,
+  targetSessionWasActive: boolean,
+  messagesSettled: boolean,
+  lineageNodes: readonly LineageNode[],
+): boolean {
+  if (!target) return false;
+  if (target.sessionId !== activeSessionId) return targetSessionWasActive;
+  return messagesSettled && !isScrollTargetReady(target, activeSessionId, lineageNodes);
 }

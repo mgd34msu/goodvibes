@@ -27,6 +27,8 @@ export interface MultimodalEntityAssessment {
   readonly entities: readonly string[];
   readonly assertCurrent: () => void;
   readonly provenance?: 'classic';
+  /** Why no ranking was attempted: the source is larger than one ranking request may carry. */
+  readonly skipped?: 'budget';
   readonly assessment: 'not-evaluated' | 'assessed' | 'not-needed';
 }
 
@@ -43,8 +45,12 @@ export async function rankMultimodalEntities(source: string, limit: number, opti
     return decisionOrClassic<MultimodalEntityAssessment>(async () => {
       const terms = [...new Set(owned.source.match(/[\p{L}\p{N}_]+(?:[./:-][\p{L}\p{N}_]+)*/gu) ?? [])];
       if (terms.length === 0) return { entities: Object.freeze([]), assertCurrent: options.assertCurrent, assessment: 'not-needed' as const };
-      // Transport bounds refuse rather than silently discard late central terms.
-      if (terms.length > 128 || owned.source.length > 32_000) throw new MultimodalEntityHeldError('budget');
+      // Entity ranking is enrichment: a source too large for one ranking request is
+      // reported as not evaluated rather than failing the analysis, and rather than
+      // ranking a sample that would silently discard late central terms.
+      if (terms.length > 128 || owned.source.length > 32_000) {
+        return { entities: Object.freeze([]), assertCurrent: options.assertCurrent, assessment: 'not-evaluated' as const, skipped: 'budget' as const };
+      }
       const authority = options.authority;
       if (!authority) throw new MultimodalEntityHeldError('unavailable');
       const check = () => { options.assertCurrent(); authority.assertCurrent(); };

@@ -2,6 +2,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import { expectNoHorizontalScroll } from "./support/app";
+import { E2E_OPERATOR_TOKEN } from "./support/seed";
 import {
   installNativeExecutionDaemon,
   isLegacyExecutionMutation,
@@ -117,7 +118,7 @@ test("one Submit commits source and exact execution target before automatically 
   ).toBe(true);
   expect(
     daemon.executionRequests.every(
-      (request) => request.authorization === "Bearer e2e-operator-token"
+      (request) => request.authorization === `Bearer ${E2E_OPERATOR_TOKEN}`
     )
   ).toBe(true);
   expect(await dialog.locator("pre").textContent()).toBe(daemon.capture.input.text);

@@ -79,7 +79,7 @@ function observeCaptures(store: KnowledgeStore) {
   } };
 }
 
-test.each(['authority', 'subjects'] as const)('%s initial complete admissions share one image and later assertions open a fresh image', async mode => {
+test.each(['authority', 'subjects'] as const)('%s initial complete admissions share one image and later assertions reuse it until the store changes', async mode => {
   const item = await fixture(), fake = readings(), captures = observeCaptures(item.store);
   try {
     const prepared = await prepare(mode, item);
@@ -89,7 +89,11 @@ test.each(['authority', 'subjects'] as const)('%s initial complete admissions sh
     expect(captures.events.map(({ kind, id }) => [kind, id])).toEqual(expected);
     expect(captures.events[0]!.after - captures.events[0]!.before).toBe(1);
     expect(new Set(captures.events.map(event => event.after)).size).toBe(1);
-    const images = captures.count(); prepared.assertCurrent(); expect(captures.count()).toBeGreaterThan(images);
+    // Nothing changed since admission, so the re-check reuses the idle image.
+    const images = captures.count(); prepared.assertCurrent(); expect(captures.count()).toBe(images);
+    await item.store.upsertSource({ id: 'manual', connectorId: 'synthetic', sourceType: 'manual', title: 'AC-7 revised specifications',
+      canonicalUri: 'https://example.test/ac-seven', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
+    expect(() => prepared.assertCurrent()).toThrow();
     expect(JSON.stringify(fake.requests)).not.toContain('DO_NOT_TRANSMIT');
   } finally { captures.restore(); }
 });

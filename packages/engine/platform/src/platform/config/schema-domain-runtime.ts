@@ -35,7 +35,7 @@ declare module './schema-types.js' {
 export const runtimeConfigDefaults = {
   runtime: {
     companionChatLimiter: {
-      perSessionLimit: 10,
+      perSessionLimit: 0,
     },
     eventBus: {
       maxListeners: 100,
@@ -236,7 +236,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'automation.catchUpWindowMinutes',
     type: 'number',
     default: 30,
-    description: 'How long after startup the engine should catch up missed runs',
+    description: 'How long after startup the engine should catch up missed runs. The same window (at least 5 minutes) is also how long a running run whose agent has vanished is left before it is failed as "Agent state lost", so a large value keeps such a run holding a concurrency slot for as long.',
     ...intRange(0, 24 * 60),
   },
   {
@@ -250,7 +250,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'automation.deleteAfterRun',
     type: 'boolean',
     default: false,
-    description: 'Delete one-shot automation jobs after their first successful run',
+    description: 'Default for the deleteAfterRun flag of newly created one-shot (at) automation jobs: a job with the flag is deleted after its first successful run. Recurring jobs are never deleted by this default. Existing jobs keep the value they were created with.',
   },
   {
     key: 'checkin.enabled',
@@ -268,19 +268,19 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'checkin.deliveryChannel',
     type: 'string',
     default: '',
-    description: 'Where a proactive check-in message is delivered: "surfaceKind" or "surfaceKind:address" (e.g. "slack:C123")',
+    description: 'Where a proactive check-in message is delivered: "surfaceKind" or "surfaceKind:address" (e.g. "slack:C123"). Empty falls back to the owner profile field contactMe.channel.',
   },
   {
     key: 'checkin.quietHours',
     type: 'string',
     default: '',
-    description: 'Proactive check-in quiet hours as "HH:MM-HH:MM" local time (empty disables); no message is sent during this window',
+    description: 'Proactive check-in quiet hours as "HH:MM-HH:MM" local time; no message is sent during this window. Empty falls back to the owner profile field contactMe.quietHours, and disables quiet hours only when the profile has none.',
   },
   {
     key: 'controlPlane.enabled',
     type: 'boolean',
     default: false,
-    description: 'Enable the standalone control-plane HTTP server',
+    description: 'Informational: whether the standalone control-plane HTTP server is meant to run. Status and readiness checks report it; changing it does not start or stop a running listener.',
   },
   {
     key: 'controlPlane.gateway',
@@ -292,14 +292,14 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.hostMode',
     type: 'enum',
     default: 'local',
-    description: 'Network binding mode: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (editable host and port)',
+    description: 'Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds; controlPlane.allowRemote does not change it.',
     enumValues: ['local', 'network', 'custom'],
   },
   {
     key: 'controlPlane.host',
     type: 'string',
     default: '127.0.0.1',
-    description: 'Bind host for the control-plane HTTP server',
+    description: 'Bind host for the control-plane HTTP server, used when controlPlane.hostMode is custom',
   },
   {
     key: 'controlPlane.port',
@@ -321,14 +321,14 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.streamMode',
     type: 'enum',
     default: 'sse',
-    description: 'Live update stream mode for control-plane clients',
+    description: 'Informational: the live update stream mode reported to control-plane clients. It is echoed in status; the SSE and WebSocket endpoints are both served whatever it says.',
     enumValues: ['sse', 'websocket', 'both'],
   },
   {
     key: 'controlPlane.allowRemote',
     type: 'boolean',
     default: false,
-    description: 'Allow remote clients to connect to the control plane',
+    description: 'Deprecated: nothing reads this, and the terminal setup no longer writes it. It does not open or close the listener: the bind comes only from controlPlane.hostMode and controlPlane.host, so set those to widen or narrow exposure (authentication still applies either way).',
   },
   {
     key: 'controlPlane.trustProxy',
@@ -347,7 +347,8 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '/v1',
     description: 'Path prefix for the daemon OpenAI-compatible routes',
-    validate: (v) => typeof v === 'string' && v.startsWith('/') && !v.includes('..'),
+    validate: (v) => typeof v === 'string' && /^(\/[A-Za-z0-9._~-]+)+$/.test(v) && !v.includes('..'),
+    validationHint: 'a path such as /v1: segments of letters, digits, . _ ~ -, with no trailing slash and not just /',
   },
   {
     key: 'controlPlane.webui.serve',
@@ -371,7 +372,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.cors.allowedOrigins',
     type: 'string',
     default: '',
-    description: 'Comma-separated explicit allowlist of browser origins permitted to make cross-origin requests when controlPlane.cors.enabled is true (e.g. http://localhost:5173). Empty refuses every cross-origin request.',
+    description: 'Comma-separated explicit allowlist of browser origins permitted to make cross-origin requests when controlPlane.cors.enabled is true (e.g. http://localhost:5173). Empty refuses every cross-origin request. The WebSocket upgrade origin check reads this list on its own, whether or not controlPlane.cors.enabled is true.',
   },
   {
     key: 'controlPlane.tls.mode',
@@ -384,13 +385,13 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.tls.certFile',
     type: 'string',
     default: '',
-    description: 'Certificate chain PEM path for direct control-plane TLS (empty = ~/.goodvibes/certs/fullchain.pem)',
+    description: 'Certificate chain PEM path for direct control-plane TLS (empty = certs/fullchain.pem under this surface\'s settings directory, e.g. ~/.goodvibes/tui/certs/fullchain.pem for the terminal app and the daemon)',
   },
   {
     key: 'controlPlane.tls.keyFile',
     type: 'string',
     default: '',
-    description: 'Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses ~/.goodvibes/certs/privkey.pem.',
+    description: 'Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses certs/privkey.pem under this surface\'s settings directory (e.g. ~/.goodvibes/tui/certs/privkey.pem for the terminal app and the daemon).',
   },
   {
     key: 'httpListener.hostMode',
@@ -435,45 +436,45 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'httpListener.tls.certFile',
     type: 'string',
     default: '',
-    description: 'Certificate chain PEM path for direct webhook-listener TLS (empty = ~/.goodvibes/certs/fullchain.pem)',
+    description: 'Certificate chain PEM path for direct webhook-listener TLS (empty = certs/fullchain.pem under this surface\'s settings directory)',
   },
   {
     key: 'httpListener.tls.keyFile',
     type: 'string',
     default: '',
-    description: 'Private key PEM path for direct webhook-listener TLS (empty = ~/.goodvibes/certs/privkey.pem)',
+    description: 'Private key PEM path for direct webhook-listener TLS (empty = certs/privkey.pem under this surface\'s settings directory)',
   },
   {
     key: 'web.enabled',
     type: 'boolean',
     default: true,
-    description: 'Enable the browser-based operator surface. Default on, bound to loopback (web.hostMode local): served on this machine only until deliberately widened via web.hostMode. The URL is announced once at daemon start.',
+    description: 'Declare the browser-based operator surface as available (status and links). This does not bind a listener: the bundle is served by the control-plane listener when controlPlane.webui.serve is true, so who can reach it follows controlPlane.hostMode and controlPlane.host.',
   },
   {
     key: 'web.hostMode',
     type: 'enum',
     default: 'local',
-    description: 'Network binding mode: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (editable host and port)',
+    description: 'Declared endpoint mode for the web surface links (local, network or custom). Nothing binds it; exposure of the served bundle follows controlPlane.hostMode.',
     enumValues: ['local', 'network', 'custom'],
   },
   {
     key: 'web.host',
     type: 'string',
     default: '127.0.0.1',
-    description: 'Bind host for the web surface',
+    description: 'Declared host of the web surface endpoint, used for links. Nothing listens on web.host:web.port; the served bundle follows controlPlane.host and controlPlane.port.',
   },
   {
     key: 'web.port',
     type: 'number',
     default: 3423,
-    description: 'Bind port for the web surface',
+    description: 'Declared port of the web surface endpoint, used for links and development servers. The daemon does not bind it; the served bundle uses controlPlane.port.',
     ...port(),
   },
   {
     key: 'web.publicBaseUrl',
     type: 'string',
     default: 'http://127.0.0.1:3423',
-    description: 'Public base URL for web links and ntfy/notification deep links',
+    description: 'Public base URL for web links and ntfy/notification deep links. The default is a placeholder: nothing listens on its port, so set it to the address people actually reach (usually the control-plane address).',
   },
   {
     key: 'web.staticAssetsDir',
@@ -494,7 +495,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'watchers.pollIntervalMs',
     type: 'number',
     default: 60_000,
-    description: 'Polling interval for watcher sources in milliseconds',
+    description: 'Default polling interval in milliseconds for new watchers registered through the API; existing watchers and other registration paths keep their own interval',
     ...intRange(1_000, 24 * 60 * 60 * 1000),
   },
   {
@@ -508,7 +509,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'watchers.ciPollIntervalMs',
     type: 'number',
     default: 60_000,
-    description: 'Cadence (ms) for the daemon\'s recurring CI-watch poll; the poller enforces a 15s floor to respect the status source\'s rate limits',
+    description: 'Cadence (ms) for the daemon\'s recurring CI-watch poll; the poller enforces a 15s floor to respect the status source\'s rate limits. Read once when the daemon starts: a new value applies after the next restart.',
     ...intRange(1_000, 24 * 60 * 60 * 1000),
   },
   {
@@ -547,7 +548,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'service.serviceName',
     type: 'string',
     default: 'goodvibes',
-    description: 'Service name used for host integration and install scripts',
+    description: 'Service name used for host integration and install scripts. An unset value resolves per platform: goodvibes on Linux and Windows, sh.goodvibes.daemon on macOS (the launchd label).',
   },
   {
     key: 'service.logPath',
@@ -619,11 +620,12 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'runtime.companionChatLimiter.perSessionLimit',
     type: 'number',
-    default: 10,
+    default: 0,
     description:
       'Max companion chat messages per 60-second window per session. ' +
-      'Overrides the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (env is read once at daemon startup; ' +
-      'this config key is read on each check() call and takes precedence when set to a positive integer).',
+      '0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. ' +
+      'A positive integer overrides the env var and is read on each check() call.',
+    ...intRange(0, 100_000),
   },
   {
     key: 'runtime.eventBus.maxListeners',
@@ -666,28 +668,28 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.mode',
     type: 'enum',
     default: 'off',
-    description: 'Daemon provider Batch API mode: off, explicit per request, or eligible-by-default for batch-capable daemon requests',
+    description: 'Daemon provider Batch API mode: off, explicit per request, or eligible-by-default (accepted and reported to clients, not yet enforced by the daemon; behaves like explicit)',
     enumValues: ['off', 'explicit', 'eligible-by-default'],
   },
   {
     key: 'batch.fallback',
     type: 'enum',
     default: 'live',
-    description: 'Fallback behavior when a batch-requested job is not eligible: live allows callers to choose live execution, fail rejects the batch job',
+    description: 'Reported in the batch runtime description only. Job creation always rejects a live execution mode for a batch job whatever this says.',
     enumValues: ['live', 'fail'],
   },
   {
     key: 'batch.queueBackend',
     type: 'enum',
     default: 'local',
-    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare requires cloudflare.enabled.',
+    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare is meant to be used with cloudflare.enabled; the pairing is reported, not enforced.',
     enumValues: ['local', 'cloudflare'],
   },
   {
     key: 'batch.tickIntervalMs',
     type: 'number',
     default: 60_000,
-    description: 'Daemon-local batch scheduler tick interval in milliseconds',
+    description: 'Daemon-local batch scheduler tick interval in milliseconds. Read once when the scheduler starts: a new value applies after the next restart.',
     ...intRange(5_000, 60 * 60 * 1000),
   },
   {
@@ -708,14 +710,14 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.maxQueuePayloadBytes',
     type: 'number',
     default: 16 * 1024,
-    description: 'Recommended maximum Cloudflare queue message payload size; queue messages should be signals, not full prompt archives',
+    description: 'Maximum Cloudflare queue message payload size in bytes; a larger cloudflare-queue job is refused (HTTP 413). Queue messages should be signals, not full prompt archives',
     ...intRange(1024, 128 * 1024),
   },
   {
     key: 'batch.maxQueueMessagesPerDay',
     type: 'number',
     default: 1_000,
-    description: 'platform-side free-tier guardrail for Cloudflare queue message volume',
+    description: 'Reported only: the intended daily Cloudflare queue message budget. Nothing counts queue messages or refuses past it yet.',
     ...intRange(0, 10_000_000),
   },
   {
@@ -728,7 +730,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.freeTierMode',
     type: 'boolean',
     default: true,
-    description: 'Prefer Cloudflare usage patterns that fit the free tier: small queue signals, local daemon storage, and bounded daily queue volume',
+    description: 'Reported only: marks the intent to use Cloudflare within the free tier (small queue signals, local daemon storage). It does not change daemon behavior.',
   },
   {
     key: 'cloudflare.accountId',
@@ -903,7 +905,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.maxQueueOpsPerDay',
     type: 'number',
     default: 10_000,
-    description: 'Free-tier queue operation budget used by clients to warn before Cloudflare queue usage exceeds the intended budget',
+    description: 'Reported only: the intended daily Cloudflare queue operation budget. Nothing counts operations or warns against it yet.',
     ...intRange(0, 10_000_000),
   },
 ];

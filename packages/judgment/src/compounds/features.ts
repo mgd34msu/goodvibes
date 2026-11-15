@@ -1,5 +1,5 @@
 import type { ChoiceResponse, EntryType, JudgmentPort, NoulResponse, Question, Questions, ScoreResponse } from '../port/types.ts';
-import { recordReadings } from '../batteries/asking.ts';
+import { recordReadings, type CallOptions } from '../batteries/asking.ts';
 import { mapLimit } from '../patterns/common.ts';
 
 /** How a Score answer becomes columns: its mean alone, or its mean and spread. */
@@ -65,13 +65,26 @@ export async function featurize(
   port: JudgmentPort,
   questions: Questions,
   states: readonly EntryType[],
-  options: { readonly encoding?: ScoreEncoding; readonly concurrency?: number; readonly label?: string } = {},
+  options: CallOptions & { readonly encoding?: ScoreEncoding; readonly concurrency?: number; readonly label?: string } = {},
 ): Promise<Column[]> {
   const encoding = options.encoding ?? 'mean_spread';
-  encodeColumns(questions, [], encoding);
-  const context = { pattern: 'features', ...(options.label === undefined ? {} : { battery: options.label }) };
+  // No states still has columns: the downstream model needs the schema, with no rows.
+  const schema = encodeColumns(questions, [], encoding);
+  if (states.length === 0) return schema;
+  const context = {
+    pattern: 'features',
+    ...(options.label === undefined ? {} : { battery: options.label }),
+    ...(options.site === undefined ? {} : { site: options.site }),
+    ...(options.fixture === undefined ? {} : { fixture: options.fixture }),
+  };
   const rows = await mapLimit(states, options.concurrency ?? 8, async (state) => {
-    const result = await port.ask({ state, questions, context });
+    const result = await port.ask({
+      state, questions, context,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),
+      ...(options.beforeAsyncAttempt === undefined ? {} : { beforeAsyncAttempt: options.beforeAsyncAttempt }),
+      ...(options.onRetry === undefined ? {} : { onRetry: options.onRetry }),
+    });
     const row = rowOf(encodeColumns(questions, [result.answers as Readonly<Record<string, Answer>>], encoding));
     recordReadings(port, result, { columns: Object.fromEntries(row) });
     return row;

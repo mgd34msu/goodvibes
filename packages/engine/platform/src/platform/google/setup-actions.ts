@@ -17,6 +17,8 @@ import {
   OAUTH_SCOPES,
   REQUIRED_SERVICES,
 } from './setup-plan.js';
+import { GoogleReadingError } from './browser-readings.js';
+import { GoogleSetupWriteCommittedError } from './setup-effect.js';
 import type { GoogleStepRunner, GoogleStepRunnerResult } from './setup-flow.js';
 import type { GoogleSecretPort, GoogleSetupPath, GoogleStepId } from './types.js';
 import type { GoogleClientIntakeChoice, GoogleSetupActionDeps } from './setup-action-deps.js';
@@ -53,12 +55,35 @@ function readString(value: unknown): string | null {
 
 /** True when a secret exists and is non-empty. Never returns the value. */
 async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
+  return (await secretState(secrets, key)) === 'present';
+}
+
+/**
+ * Whether a secret is there, not there, or could not be read. A read failure is
+ * not an absence: acting on it as one would create a second credential and
+ * overwrite the stored one.
+ */
+async function secretState(secrets: GoogleSecretPort, key: string): Promise<'present' | 'absent' | 'unreadable'> {
   try {
     const value = await secrets.get(key);
-    return typeof value === 'string' && value.trim().length > 0;
-  } catch {
-    return false;
+    return typeof value === 'string' && value.trim().length > 0 ? 'present' : 'absent';
+  } catch (error) {
+    // A superseded request is not a store failure; it must keep unwinding.
+    if (error instanceof GoogleReadingError) throw error;
+    return 'unreadable';
   }
+}
+
+/**
+ * What to say about the seven-day Testing expiry. Only a status that was read
+ * as Testing is a fact; an unread status is reported as unchecked, never as
+ * "not published" (an existing client's app is usually already published).
+ */
+function publishingWarnings(config: GoogleSetupActionDeps['config'], whenTesting: string): readonly string[] {
+  const status = safeConfigGet(config, GOOGLE_CONFIG_KEYS.oauthPublishingStatus);
+  if (status === 'in-production') return [];
+  if (status === 'testing') return [whenTesting];
+  return ['Whether the app is published was not checked, so this credential would expire seven days after it was issued only if the app is still in Testing.'];
 }
 
 function done(detail: string, warnings?: readonly string[]): GoogleStepRunnerResult {
@@ -147,8 +172,16 @@ function twoStepRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
 
 function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
-    if (await secretPresent(deps.secrets, GOOGLE_SECRET_KEYS.appPassword)) {
+    const existing = await secretState(deps.secrets, GOOGLE_SECRET_KEYS.appPassword);
+    if (existing === 'present') {
       return alreadyDone(`An app password labelled ${APP_PASSWORD_LABEL} is already in the encrypted store.`);
+    }
+    if (existing === 'unreadable') {
+      return failed(
+        'The encrypted secret store could not be read.',
+        'Whether an app password is already stored is unknown, and creating another could overwrite it.',
+        'Unlock or repair the secret store, then re-run.',
+      );
     }
     requireDecisionFeature('automatic Google app-password creation; create and store the credential through secure manual setup');
     const browser = await deps.browser();
@@ -160,7 +193,18 @@ function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       return failed('The app password was not created.', result.problem, result.fix);
     }
     // The only place the value is touched: straight into the encrypted store.
-    await deps.secrets.set(GOOGLE_SECRET_KEYS.appPassword, result.password);
+    try {
+      await deps.secrets.set(GOOGLE_SECRET_KEYS.appPassword, result.password);
+    } catch (error) {
+      // The write committed; "could not be stored" would be untrue, so keep unwinding to the truthful report.
+      if (error instanceof GoogleReadingError || error instanceof GoogleSetupWriteCommittedError) throw error;
+      // Google shows the password once; say that the entry now exists there so it can be removed.
+      return failed(
+        'The app password was created but could not be stored.',
+        `The encrypted secret store refused the write (${error instanceof Error ? error.message : 'unknown error'}), and Google shows an app password only once.`,
+        `Remove the unused "${APP_PASSWORD_LABEL}" app password at https://myaccount.google.com/apppasswords, fix the secret store, then re-run.`,
+      );
+    }
     deps.config.set(GOOGLE_CONFIG_KEYS.emailPasswordRef, GOOGLE_CONFIG_KEYS.emailPasswordRef);
     return done('Created a Gmail app password and stored it in the encrypted secret store.');
   };
@@ -300,7 +344,15 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps): Promise<Goo
 function oauthClientRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
     const storedId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
-    if (storedId !== null && (await secretPresent(deps.secrets, GOOGLE_SECRET_KEYS.oauthClientSecret))) {
+    const storedSecret = await secretState(deps.secrets, GOOGLE_SECRET_KEYS.oauthClientSecret);
+    if (storedSecret === 'unreadable') {
+      return failed(
+        'The encrypted secret store could not be read.',
+        'Whether an OAuth client secret is already stored is unknown, and creating a client now could overwrite it.',
+        'Unlock or repair the secret store, then re-run.',
+      );
+    }
+    if (storedId !== null && storedSecret === 'present') {
       return alreadyDone('An OAuth client is already configured.');
     }
 
@@ -330,8 +382,16 @@ function oauthClientRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  */
 function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
-    if (await secretPresent(deps.secrets, GOOGLE_SECRET_KEYS.oauthRefreshToken)) {
+    const storedToken = await secretState(deps.secrets, GOOGLE_SECRET_KEYS.oauthRefreshToken);
+    if (storedToken === 'present') {
       return alreadyDone('The agent is already authorized; a refresh token is in the encrypted store.');
+    }
+    if (storedToken === 'unreadable') {
+      return failed(
+        'The encrypted secret store could not be read.',
+        'Whether a refresh token is already stored is unknown, and a new consent would overwrite it.',
+        'Unlock or repair the secret store, then re-run.',
+      );
     }
 
     const clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
@@ -422,9 +482,7 @@ function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       }
 
       await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, tokens.refreshToken);
-      const warnings = safeConfigGet(deps.config, GOOGLE_CONFIG_KEYS.oauthPublishingStatus) === 'in-production'
-        ? []
-        : ['The app is not published, so this refresh token expires seven days after it was issued. Publish the app and authorize again.'];
+      const warnings = publishingWarnings(deps.config, 'The app is in Testing, so this refresh token expires seven days after it was issued. Publish the app and authorize again.');
       return done('Authorized. The refresh token went straight into the encrypted store.', warnings);
     } finally {
       listener.close();
@@ -451,10 +509,7 @@ function oauthVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       );
     }
 
-    const status = safeConfigGet(deps.config, GOOGLE_CONFIG_KEYS.oauthPublishingStatus);
-    const warnings = status === 'in-production'
-      ? []
-      : ['Publishing status is not "In production", so the stored credential expires seven days after it was issued.'];
+    const warnings = publishingWarnings(deps.config, 'Publishing status is "Testing", so the stored credential expires seven days after it was issued.');
 
     const prove = deps.proveConnection;
     if (prove === undefined) {

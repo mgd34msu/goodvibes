@@ -54,3 +54,20 @@ test('the session registry resolves live ownership and unregister withdraws it',
   unregisterSessionConversation(SESSION);
   expect(await port.preview({ sessionId: SESSION })).toMatchObject({ available: false });
 });
+
+test('restoring the pre-rewind copy reports the newer history it would replace', async () => {
+  const fixture = conversation(4); const port = createConversationRewindPort(() => fixture.port);
+  recordTurnAnchor(SESSION, { turnId: 'guard', label: 'fixture', messageCount: 2, at: 1 });
+  const { undoSnapshotId } = await port.rewind({ sessionId: SESSION, turnId: 'guard' });
+  expect(port.messagesSinceRewind(undoSnapshotId)).toBe(0);
+  fixture.port.fromJSON(['fixture-0', 'fixture-1', 'later-a', 'later-b']);
+  expect(port.messagesSinceRewind(undoSnapshotId)).toBe(2);
+});
+
+test('only the newest rewinds stay undoable so closed conversations are not pinned forever', async () => {
+  const fixture = conversation(3); const port = createConversationRewindPort(() => fixture.port);
+  recordTurnAnchor(SESSION, { turnId: 'bound', label: 'fixture', messageCount: 1, at: 1 });
+  const first = await port.rewind({ sessionId: SESSION, turnId: 'bound' });
+  for (let index = 0; index < 40; index++) await port.rewind({ sessionId: SESSION, turnId: 'bound' });
+  expect(port.restoreBefore(first.undoSnapshotId)).toBe(false);
+});

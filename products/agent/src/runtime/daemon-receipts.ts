@@ -4,10 +4,10 @@
  * The daemon keeps honesty receipts ("updated from X to Y", "restarted
  * after a crash at HH:MM", settings-migration notes) and delivers the
  * undelivered ones ONLY to a `/status` read that opts in with
- * `?receipts=consume`, a plain `/status` read is receipt-neutral. Delivery is
- * destructive at the daemon (served exactly once to the consuming reader), so
- * whichever read consumes them must render them or they are lost. The agent's
- * consuming reader is a single `?receipts=consume` read issued once per attach
+ * `?receipts=` read (peek then ack, or consume against an older daemon), a
+ * plain `/status` read is receipt-neutral. Each receipt is delivered once, so
+ * whichever read takes them must render them or they are lost. The agent's
+ * consuming reader runs once per attach
  * (createSessionSpineReceiptConsumer, platform platform/runtime/session-spine,
  * wired through services.consumeDaemonReceipts); the frequent liveness
  * keepalive probe stays plain and never touches receipts. Every consumed
@@ -24,6 +24,7 @@
  */
 
 import type { DaemonReceipt } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
+import type { DaemonBuildGuard, DaemonStatusConnection } from './daemon-build-compatibility.ts';
 
 export type { DaemonReceipt };
 
@@ -50,4 +51,28 @@ export class AgentDaemonReceiptFeed {
     this.deliver = deliver;
     for (const receipt of this.buffered.splice(0)) deliver(receipt);
   }
+}
+
+/**
+ * What runs once per attach: a plain `/status` read for the daemon's build, then
+ * the receipt-taking read, whose receipts go to the feed. Two separate reads of
+ * the same route because taking receipts has a side effect and the build check
+ * must not be the thing that drains them.
+ */
+export function createDaemonReceiptConsumption(deps: {
+  readonly resolveConnection: () => DaemonStatusConnection;
+  readonly readStatus: (connection: DaemonStatusConnection) => Promise<unknown | null>;
+  readonly guard: Pick<DaemonBuildGuard, 'observeStatus'>;
+  readonly consumeReceipts: () => Promise<readonly DaemonReceipt[]>;
+  readonly feed: Pick<AgentDaemonReceiptFeed, 'push'>;
+  readonly afterAttach: () => Promise<void>;
+}): () => Promise<void> {
+  return async () => {
+    const connection = deps.resolveConnection();
+    const status = await deps.readStatus(connection);
+    if (status !== null) deps.guard.observeStatus(status, connection.baseUrl);
+    const receipts = await deps.consumeReceipts();
+    if (receipts.length > 0) deps.feed.push(receipts);
+    await deps.afterAttach();
+  };
 }

@@ -131,7 +131,7 @@ test('failed validator waits for every admitted validation before owner storage 
   await bind(ctx, [a.owned, b.owned]); const reading = read(ctx); void reading.catch(() => {});
   try {
     await entered.promise; let closed = false; const closing = b.owned.close().then(() => { closed = true; });
-    await Promise.resolve(); expect(closed).toBe(false); resume.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0)); expect(closed).toBe(false); resume.resolve();
     await expect(reading).rejects.toMatchObject({ code: 'INBOX_SCOPE_UNAVAILABLE' }); await closing;
     expect(ctx.catalog.hasHandler(INBOX_LIST_METHOD_ID)).toBe(true);
   } finally { resume.resolve(); await Promise.allSettled([reading]); }

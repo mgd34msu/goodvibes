@@ -9,15 +9,10 @@
  * which test file ran before it in the same `bun test` process.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConversationManager } from '../../core/conversation.ts';
 import { renderCodeBlock, settleSyntaxHighlighting, syntaxHighlightGeneration, syntaxHighlightMisses } from '../../renderer/code-block.ts';
 import { SyntaxHighlighter } from '../../renderer/syntax-highlighter.ts';
-
-const grammar = existsSync(join(process.cwd(), 'node_modules', 'web-tree-sitter', 'web-tree-sitter.wasm'))
-  && existsSync(join(process.cwd(), 'node_modules', 'tree-sitter-typescript', 'tree-sitter-typescript.wasm'));
 
 const styles = (lines: readonly Line[]): string => lines.map((l) => l.map((c) => `${c.char}${c.fg ?? ''}`).join('')).join('\n');
 
@@ -27,7 +22,7 @@ function uniqueCode(tag: string): string[] {
 }
 
 describe('syntax highlighting settles the same way whatever drew first', () => {
-  test.skipIf(!grammar)('a transcript that drew the placeholder redraws the real highlighting once the parse lands', async () => {
+  test('a transcript that drew the placeholder redraws the real highlighting once the parse lands', async () => {
     const code = uniqueCode('transcript');
     const cm = new ConversationManager(() => 100);
     cm.addUserMessage('show me');
@@ -50,7 +45,7 @@ describe('syntax highlighting settles the same way whatever drew first', () => {
     expect(styles(fresh.getDisplayBlocks())).toBe(redrawn);
   }, 10_000);
 
-  test.skipIf(!grammar)('a settled frame is identical whether the code was parsed before or not', async () => {
+  test('a settled frame is identical whether the code was parsed before or not', async () => {
     const code = uniqueCode('order');
     // Cold: nothing parsed this snippet yet.
     renderCodeBlock(code, 'ts', 80);
@@ -102,7 +97,7 @@ describe('parses in flight together never share a tree', () => {
     return hl.highlight(code.join('\n'), 'ts');
   }
 
-  test.skipIf(!grammar)('blocks highlighted together get the tokens each gets alone', async () => {
+  test('blocks highlighted together get the tokens each gets alone', async () => {
     // Many blocks in flight at once, as a transcript with several fences (or
     // a test file that never settles) leaves them.
     const blocks = [codeA, codeB, ...Array.from({ length: 24 }, (_, i) => [

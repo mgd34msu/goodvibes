@@ -19,6 +19,7 @@ import type { CommandContext } from './command-registry.ts';
 import { isAffirmative } from './agent-workspace-editors.ts';
 import { requireSecretsManager } from './commands/runtime-services.ts';
 import { persistSecretBackedConfigValue } from '../config/secret-config.ts';
+import { routeConfigWrite } from '../config/daemon-config-routing.ts';
 import type { ConfigKey } from '../config/index.ts';
 import {
   CALENDAR_OAUTH_CLIENT_ID_KEYS,
@@ -125,8 +126,12 @@ export async function submitAgentWorkspaceCalendarOAuthEditor(
       setDynamic: (key: ConfigKey, value: unknown) => void;
       save: () => void;
     };
-    // Client id is not a secret, a plain config value.
-    cm.setDynamic(CALENDAR_OAUTH_CLIENT_ID_KEYS[provider] as unknown as ConfigKey, clientId);
+    // Client id is not a secret, a plain config value. It is daemon-owned like the
+    // secret ref below, so it routes the same way: both halves of the pair must land
+    // in the same store.
+    const configManager = context.platform.configManager;
+    const homeDir = configManager.getHomeDirectory();
+    await routeConfigWrite(configManager, CALENDAR_OAUTH_CLIENT_ID_KEYS[provider], clientId, homeDir ? { homeDir } : {});
     // Client secret (if any) goes through the secret-backed path: a ref in config,
     // the raw value only in the secret manager.
     const secret = readField('clientSecret');

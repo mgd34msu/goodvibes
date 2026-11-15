@@ -10,6 +10,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { imapFixturePort } from './_helpers/imap-semantic-port.ts';
 import { readFileSync, readdirSync } from 'node:fs';
+import ts from 'typescript';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, expect, test } from 'bun:test';
 
@@ -437,38 +438,48 @@ describe('protocol details', () => {
   });
 });
 
+const SPAWN_CAPABILITY_NAMES: readonly string[] = [
+  'trySpawnAgent',
+  'sessionBroker',
+  'AgentManager',
+  'queueSurfaceReplyFromBinding',
+  'publishConversationFollowup',
+  'SurfaceAdapterContext',
+];
+
+/**
+ * The spawn-capability names a source file uses as code. Read with the
+ * TypeScript parser: comments and string contents are not identifiers, an
+ * aliased import still names the original on its import clause, and code that
+ * follows a `//` inside a string on the same line is still code.
+ */
+function spawnCapabilityNamesIn(source: string): string[] {
+  const found = new Set<string>();
+  const file = ts.createSourceFile('inbound.ts', source, ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && SPAWN_CAPABILITY_NAMES.includes(node.text)) found.add(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...found];
+}
+
 describe('the inbound path has no way to start work', () => {
-  test('no file under platform/email/inbound references a spawn capability', () => {
-    const banned = [
-      'trySpawnAgent',
-      'sessionBroker',
-      'AgentManager',
-      'queueSurfaceReplyFromBinding',
-      'publishConversationFollowup',
-      'SurfaceAdapterContext',
-    ];
+  test('no file under platform/email/inbound, at any depth, references a spawn capability', () => {
     const offences: string[] = [];
-    for (const entry of readdirSync(INBOUND_DIR)) {
+    for (const entry of readdirSync(INBOUND_DIR, { recursive: true, encoding: 'utf8' })) {
       if (!entry.endsWith('.ts')) continue;
-      // Comments are stripped first: these files EXPLAIN that they are not
-      // given a spawn capability, and naming the thing you do not have is not
-      // having it. The assertion is about code.
-      const source = stripComments(readFileSync(join(INBOUND_DIR, entry), 'utf8'));
-      for (const name of banned) {
-        if (source.includes(name)) offences.push(`${entry}: ${name}`);
-      }
+      for (const name of spawnCapabilityNamesIn(readFileSync(join(INBOUND_DIR, entry), 'utf8'))) offences.push(`${entry}: ${name}`);
     }
     expect(offences).toEqual([]);
   });
-});
 
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n');
-}
+  test('the reader sees code after a URL on the same line and an aliased import, and ignores comments and strings', () => {
+    expect(spawnCapabilityNamesIn("const url = 'https://x'; trySpawnAgent(url);")).toEqual(['trySpawnAgent']);
+    expect(spawnCapabilityNamesIn("import { AgentManager as Quiet } from '../agents/manager.js';")).toEqual(['AgentManager']);
+    expect(spawnCapabilityNamesIn("// AgentManager is not given here\n/* sessionBroker */ const note = 'trySpawnAgent';")).toEqual([]);
+  });
+});
 
 function stubWire(lines: readonly string[], onSend?: (text: string) => void): MailboxWire {
   return {

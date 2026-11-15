@@ -72,8 +72,8 @@ describe('command-editor engine: access domain', () => {
   test('voice-enable and voice-disable share one dynamic spec but differ in wording', () => {
     const enable = createAgentWorkspaceAccessCommandEditor('voice-enable');
     const disable = createAgentWorkspaceAccessCommandEditor('voice-disable');
-    expect(enable.title).toBe('Enable Voice Interaction');
-    expect(disable.title).toBe('Disable Voice Interaction');
+    expect(enable.title).toBe('Enable Always-Speak');
+    expect(disable.title).toBe('Disable Always-Speak');
     expect(enable.fields[0]?.hint).toBe('Type yes to run /voice enable with --yes.');
     expect(disable.fields[0]?.hint).toBe('Type yes to run /voice disable with --yes.');
   });
@@ -210,11 +210,11 @@ describe('command-editor engine: remaining domains render and dispatch', () => {
       expectCommand: '/media generate "a cat" --yes',
     },
     {
-      label: 'plan-seed',
-      editor: createAgentWorkspaceOperationsCommandEditor('plan-seed'),
+      label: 'health-repair',
+      editor: createAgentWorkspaceOperationsCommandEditor('health-repair'),
       submit: buildAgentWorkspaceOperationsCommandEditorSubmission,
-      fields: { goal: 'ship it' },
-      expectCommand: '/plan "ship it"',
+      fields: { domain: 'auth' },
+      expectCommand: '/health repair auth',
     },
     {
       label: 'session-rename',

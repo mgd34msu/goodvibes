@@ -5,6 +5,8 @@ import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayVerbGroupDeps } from './register-gateway-verb-groups.js';
 import { registerCheckinGatewayMethods } from './checkin.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
 export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCatalog, deps: Pick<GatewayVerbGroupDeps,
@@ -18,9 +20,11 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     // the check-in's string-keyed config surface.
     const configManager = deps.configManager;
     const onDidInvalidate = deps.configManager.onDidInvalidate.bind(configManager);
+    const subscribe = configManager.subscribe?.bind(configManager);
     const checkinConfig = {
       get: (key: string): unknown => configManager.get(key as ConfigKey),
       onDidInvalidate: (listener: () => void) => onDidInvalidate(listener),
+      ...(subscribe ? { subscribe: (key: string, listener: () => void) => subscribe(key as ConfigKey, listener) } : {}),
       set: (key: string, value: string | boolean): void => configManager.set(key as ConfigKey, value as never),
     };
     const checkinService = new CheckinService({
@@ -48,9 +52,14 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     });
     deps.disposal?.add('check-in evaluation lifetime', () => checkinService.dispose());
     registerCheckinGatewayMethods(catalog, checkinService);
-    void checkinService.attach().catch(() => {
+    void checkinService.attach().catch((error: unknown) => {
       // Automation may be disabled at construction; the schedule syncs on the
-      // next checkin.config.set once it is enabled. Never fail construction.
+      // next checkin.config.set once it is enabled. Never fail construction,
+      // but say why the schedule is not running: a corrupt receipts file or a
+      // config error would otherwise leave check-ins silently off.
+      logger.warn('check-in: the schedule could not be attached; scheduled check-ins will not run until config is set again', {
+        error: summarizeError(error),
+      });
     });
   }
 

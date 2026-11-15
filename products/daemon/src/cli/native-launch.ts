@@ -12,6 +12,12 @@ export function assertNativeInstallationIdle(prefix: string): void {
   }
 }
 
+/**
+ * Verification of the installed cohort at this moment, not a lock on it. The
+ * launch execs a path, so a process of the same user that replaces the files
+ * after this returns is not caught; this guards against a stale or mismatched
+ * installation, not against tampering by the account that owns it.
+ */
 export function verifiedDaemonNativePath(prefix: string, expected: string | DaemonInstallOwner): string {
   assertNativeInstallHost(); assertNativeInstallationIdle(prefix);
   const receipt = inspectInstallation(prefix, '');

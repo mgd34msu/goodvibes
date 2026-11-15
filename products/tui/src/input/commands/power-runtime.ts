@@ -1,5 +1,11 @@
+import { KEEP_AWAKE_NOT_HELD } from '@goodvibes-jev/engine/platform/platform/power';
 import type { CommandRegistry } from '../command-registry.ts';
-import { powerStatusLines } from '../../core/power-status.ts';
+import { powerStatusLines, type PowerSurfaceState } from '../../core/power-status.ts';
+
+/** The surface state carries the platform's refused note when keep-awake is on but the OS granted nothing. */
+function keepAwakeRefused(state: PowerSurfaceState): boolean {
+  return state.keepAwake && state.note === KEEP_AWAKE_NOT_HELD;
+}
 
 // ---------------------------------------------------------------------------
 // /power, host sleep ownership (the ops/status idiom surface for power.*).
@@ -28,9 +34,11 @@ export function registerPowerRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         const lines = ['Host sleep ownership:', ...powerStatusLines(state).map((l) => `  ${l}`)];
-        lines.push(state.keepAwake
-          ? 'Keep-awake is ON. Turn it off with /power off.'
-          : 'Keep-awake is OFF. Turn it on with /power on.');
+        lines.push(keepAwakeRefused(state)
+          ? 'Keep-awake is ON but NOT holding: the OS refused it, so this host can still sleep. Retry with /power on, or turn it off with /power off.'
+          : state.keepAwake
+            ? 'Keep-awake is ON. Turn it off with /power off.'
+            : 'Keep-awake is OFF. Turn it on with /power on.');
         ctx.print(lines.join('\n'));
         return;
       }
@@ -43,7 +51,9 @@ export function registerPowerRuntimeCommands(registry: CommandRegistry): void {
         const current = ctx.getPowerState().keepAwake;
         const next = sub === 'on' ? true : sub === 'off' ? false : !current;
         const state = await ctx.setKeepAwake(next);
-        const lines = [state.keepAwake ? 'Keep-awake ON: this host will not idle-sleep.' : 'Keep-awake OFF.'];
+        const lines = [keepAwakeRefused(state)
+          ? 'Keep-awake ON, but the OS refused the sleep inhibitor: this host can still sleep.'
+          : state.keepAwake ? 'Keep-awake ON: this host will not idle-sleep.' : 'Keep-awake OFF.'];
         // Surface the honest lid-split note verbatim if the platform served one.
         if (state.note) lines.push(`  ${state.note}`);
         ctx.print(lines.join('\n'));

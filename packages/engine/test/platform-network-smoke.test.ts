@@ -1,64 +1,58 @@
 /**
- * Coverage-gap smoke test, platform/runtime/network
- * Verifies inbound/outbound TLS inspection functions return correct observable shapes.
- * Closes coverage gap: platform/runtime/network
+ * TLS posture behaviour of platform/runtime/network that the CA-file tests do
+ * not reach: configured listener addresses, direct mode without files, and the
+ * localhost opt-out on outbound requests.
  */
 
 import { describe, expect, test } from 'bun:test';
-import {
-  inspectInboundTls,
-  resolveInboundTlsContext,
-} from '../platform/src/platform/runtime/network/inbound.js';
-import {
-  inspectOutboundTls,
-  applyOutboundTlsToFetchInit,
-  GlobalNetworkTransportInstaller,
-} from '../platform/src/platform/runtime/network/outbound.js';
+import { inspectInboundTls, resolveInboundTlsContext } from '../platform/src/platform/runtime/network/inbound.js';
+import { applyOutboundTlsToFetchInit } from '../platform/src/platform/runtime/network/outbound.js';
 
-/** Minimal config reader that returns undefined for all keys. */
-function makeConfig() {
+function makeConfig(values: Record<string, unknown> = {}) {
   return {
-    get: (_path: string) => undefined,
-    getControlPlaneConfigDir: () => '/tmp',
+    get: (path: string) => values[path],
+    getControlPlaneConfigDir: () => '/nonexistent-goodvibes',
   };
 }
 
-describe('platform/runtime/network: behavior smoke', () => {
-  test('inspectInboundTls for controlPlane returns snapshot with surface and mode', () => {
-    const snapshot = inspectInboundTls(makeConfig(), 'controlPlane');
-    expect(snapshot).toHaveProperty('mode');
-    expect(snapshot.surface).toBe('controlPlane');
-    expect('mode' in snapshot).toBe(true);
-    expect(typeof snapshot.host).toBe('string');
-    expect(typeof snapshot.port).toBe('number');
+describe('platform/runtime/network: behavior', () => {
+  test('inbound inspection reports the configured host, port and proxy trust', () => {
+    const snapshot = inspectInboundTls(
+      makeConfig({ 'controlPlane.host': ' 0.0.0.0 ', 'controlPlane.port': 4000, 'controlPlane.trustProxy': true }),
+      'controlPlane',
+    );
+    expect(snapshot).toMatchObject({ surface: 'controlPlane', host: '0.0.0.0', port: 4000, trustProxy: true, mode: 'off' });
   });
 
-  test('inspectInboundTls for httpListener returns snapshot with httpListener surface', () => {
-    const snapshot = inspectInboundTls(makeConfig(), 'httpListener');
-    expect(snapshot.surface).toBe('httpListener');
+  test('direct mode without certificate files is not ready and refuses to resolve', () => {
+    const cfg = makeConfig({ 'httpListener.tls.mode': 'direct' });
+    const snapshot = inspectInboundTls(cfg, 'httpListener');
+    expect(snapshot.ready).toBe(false);
+    expect(snapshot.scheme).toBe('https');
+    expect(snapshot.errors.join(' ')).toContain('Certificate file not found');
+    expect(() => resolveInboundTlsContext(cfg, 'httpListener')).toThrow('certificate files are not ready');
   });
 
-  test('resolveInboundTlsContext returns context with tls undefined in default (off) mode', () => {
+  test('plain http inbound resolves with no TLS credentials', () => {
     const ctx = resolveInboundTlsContext(makeConfig(), 'controlPlane');
-    expect(ctx).not.toBeNull(); // presence-only: context returned
-    // In 'off' mode no TLS credentials, tls is undefined
+    expect(ctx.mode).toBe('off');
     expect(ctx.tls).toBeUndefined();
   });
 
-  test('inspectOutboundTls returns snapshot with mode and trustMode fields', () => {
-    const snapshot = inspectOutboundTls(makeConfig());
-    expect(snapshot).toHaveProperty('mode'); // presence-only refined: check mode field
-    expect('mode' in snapshot).toBe(true);
+  test('allowInsecureLocalhost turns off certificate checks for localhost only', () => {
+    const cfg = makeConfig({ 'network.outboundTls.mode': 'bundled', 'network.outboundTls.allowInsecureLocalhost': true });
+    const local = applyOutboundTlsToFetchInit('https://localhost:8443/', { method: 'GET' }, cfg);
+    expect(local.method).toBe('GET');
+    expect(local.tls?.rejectUnauthorized).toBe(false);
+    const remote = applyOutboundTlsToFetchInit('https://example.test/', { method: 'GET' }, cfg);
+    expect(remote.tls).toBeUndefined();
+    const callerInit: RequestInit & { tls: { rejectUnauthorized: boolean } } = { tls: { rejectUnauthorized: true } };
+    const explicit = applyOutboundTlsToFetchInit('https://localhost:8443/', callerInit, cfg);
+    expect(explicit.tls?.rejectUnauthorized).toBe(true);
   });
 
-  test('applyOutboundTlsToFetchInit preserves method in the returned init object', () => {
-    const init = applyOutboundTlsToFetchInit('https://example.test/', { method: 'GET' }, makeConfig());
-    expect((init as RequestInit).method).toBe('GET');
-  });
-
-  test('GlobalNetworkTransportInstaller instance exposes install and setConfigManager', () => {
-    const installer = new GlobalNetworkTransportInstaller();
-    expect(typeof installer.install).toBe('function');
-    expect(typeof installer.setConfigManager).toBe('function');
+  test('a plain http request is passed through untouched even with the localhost opt-out', () => {
+    const cfg = makeConfig({ 'network.outboundTls.mode': 'bundled', 'network.outboundTls.allowInsecureLocalhost': true });
+    expect(applyOutboundTlsToFetchInit('http://localhost:8080/', { method: 'POST' }, cfg)).toEqual({ method: 'POST' });
   });
 });

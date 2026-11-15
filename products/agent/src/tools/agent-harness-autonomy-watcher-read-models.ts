@@ -171,15 +171,20 @@ function readRoute(value: unknown): string {
   return firstString(route, ['modelRoute', 'route', 'command', 'action', 'href']);
 }
 
+/** A producer route is one short call line; anything longer or multi-line is prose, not a route. */
+function singleLineRoute(route: string): string {
+  return route.length <= 400 && !/[\r\n]/.test(route) ? route : '';
+}
+
 function routeFromKeys(record: Record<string, unknown>, keys: readonly string[]): string {
   for (const key of keys) {
-    const route = readRoute(record[key]);
+    const route = singleLineRoute(readRoute(record[key]));
     if (route) return route;
   }
   for (const containerKey of ['routes', 'effectRoutes', 'actions', 'controls']) {
     const routes = readRecord(record[containerKey]);
     for (const key of keys) {
-      const route = readRoute(routes[key]);
+      const route = singleLineRoute(readRoute(routes[key]));
       if (route) return route;
     }
   }
@@ -203,7 +208,8 @@ function nativeStatus(record: Record<string, unknown>, lane: WatcherReadModelLan
     }
   } else {
     const enabled = record.enabled;
-    if (typeof enabled === 'boolean') return enabled ? 'ready' : 'blocked';
+    // A source the owner switched off is paused, not a fault that needs attention.
+    if (typeof enabled === 'boolean') return enabled ? 'ready' : 'paused';
   }
   return 'unknown';
 }
@@ -328,6 +334,25 @@ export function watcherReadModelNativeFacts(context: CommandContext): readonly {
   source.assertCurrent(); return result;
 }
 
+/** Which watcher record lanes the host currently publishes, read from the same capture the queue uses. */
+export function watcherReadModelPublication(context: CommandContext): { readonly runs: boolean; readonly providerSources: boolean; readonly omitted: number } {
+  const source = captureWatcherRecords(context);
+  const lanes = new Set(source.entries.map(entry => entry.lane));
+  source.assertCurrent();
+  return { runs: lanes.has('watcher-run'), providerSources: lanes.has('provider-source'), omitted: Math.max(0, source.entries.length - WATCHER_RECORD_LIMIT) };
+}
+
+const WATCHER_RECORD_LIMIT = 20;
+
+/** Statuses a person would act on come first; an unread status could be anything, so it counts. */
+function watcherAttentionRank(status: string): number {
+  return ['queued', 'running', 'starting', 'degraded', 'failed', 'blocked', 'unknown'].includes(status) ? 0 : 1;
+}
+
+/** Every control route not built by this program is copied from the host record; its label says so. */
+const HOST_ROUTE_NOTE = ' (route from host record)';
+const fromHost = (label: string): string => `${label}${HOST_ROUTE_NOTE}`;
+
 function availableControl(id: string, label: string, effect: AutonomyQueueRecordControl['effect'], modelRoute: string): AutonomyQueueRecordControl {
   return {
     id,
@@ -358,7 +383,7 @@ function effectControl(
   disabledReason: string,
 ): AutonomyQueueRecordControl {
   return route && enabled
-    ? availableControl(id, label, 'confirmed-effect', route)
+    ? availableControl(id, fromHost(label), 'confirmed-effect', route)
     : unavailableControl(id, label, route ? disabledReason : `The ${label.toLowerCase()} route was not published by this watcher read model.`);
 }
 
@@ -410,10 +435,10 @@ function normalizeRun(entry: CollectedWatcherRecord, index: number, status: stri
   const output = runOutputDescriptor(entry.record, outputRoute, inspectRoute);
   const controls = [
     availableControl('inspect', 'Inspect watcher run', 'read-only', inspectRoute),
-    ...(outputRoute ? [availableControl('output', 'Show watcher output', 'read-only', outputRoute)] : []),
+    ...(outputRoute ? [availableControl('output', fromHost('Show watcher output'), 'read-only', outputRoute)] : []),
     effectControl('cancel', 'Cancel watcher run', cancelRoute, active, `Watcher run is ${status}; cancel is only offered for queued or running runs.`),
     effectControl('retry', 'Retry watcher run', retryRoute, retryable, `Watcher run is ${status}; retry is only offered for failed, blocked, or cancelled runs.`),
-    ...(checkpointRoute ? [availableControl('checkpoint', 'Checkpoint watcher run', 'confirmed-effect', checkpointRoute)] : []),
+    ...(checkpointRoute ? [availableControl('checkpoint', fromHost('Checkpoint watcher run'), 'confirmed-effect', checkpointRoute)] : []),
     ...(pauseRoute ? [effectControl('pause', 'Pause watcher run', pauseRoute, active, `Watcher run is ${status}; pause is only offered for queued or running runs.`)] : []),
     ...(resumeRoute ? [effectControl('resume', 'Resume watcher run', resumeRoute, status === 'paused' || status === 'blocked', `Watcher run is ${status}; resume is only offered for paused or blocked runs.`)] : []),
   ];
@@ -433,10 +458,11 @@ function normalizeRun(entry: CollectedWatcherRecord, index: number, status: stri
       output ? 'Live output route or chunk preview is published.' : 'No live output chunk route is published for this run.',
       error ? `Failure ${safePreview(error, 160)}.` : '',
       controls.some((control) => control.effect === 'confirmed-effect' && control.state === 'available')
-        ? 'Published run effects are exact confirmed controls.'
+        ? 'Run effect routes are copied from the host record, not from this build: confirm the named tool exists and the owner asked for the effect before calling one.'
         : 'No confirmed run effect route is currently available.',
     ].filter(Boolean).join(' '),
     inspectRoute,
+    routeOrigin: 'host-record',
     ...(active && cancelRoute ? { cancelRoute } : {}),
     ...(checkpointRoute ? { checkpointRoute } : {}),
     ...(pauseRoute && active ? { pauseRoute } : {}),
@@ -509,6 +535,7 @@ function normalizeProviderSource(entry: CollectedWatcherRecord, index: number, s
       lastError ? `Last error ${safePreview(lastError, 160)}.` : '',
     ].filter(Boolean).join(' '),
     inspectRoute,
+    routeOrigin: 'host-record',
     nextSteps: [
       inspectRoute,
       ...(refreshRoute ? [refreshRoute] : []),
@@ -533,7 +560,7 @@ function normalizeProviderSource(entry: CollectedWatcherRecord, index: number, s
     ].filter(Boolean),
     controls: [
       availableControl('inspect', 'Inspect provider source', 'read-only', inspectRoute),
-      ...(refreshRoute ? [availableControl('refresh', 'Refresh provider source', 'read-only', refreshRoute)] : []),
+      ...(refreshRoute ? [availableControl('refresh', fromHost('Refresh provider source'), 'read-only', refreshRoute)] : []),
     ],
   };
 }
@@ -577,18 +604,20 @@ async function ownedWatcherReadModelLiveRecords(context: CommandContext, options
       safeEntries.push({ ...entry, record });
     }
   }
-  const records: AutonomyQueueLiveRecord[] = [];
-  for (const [index, entry] of source.entries.entries()) {
+  // Runs that need attention are read first and kept; only the kept entries cost a status reading.
+  const natives = source.entries.map(entry => nativeStatus(entry.record, entry.lane));
+  const order = natives.map((_, index) => index).sort((left, right) => watcherAttentionRank(natives[left]!) - watcherAttentionRank(natives[right]!) || left - right);
+  const kept: { readonly index: number; readonly record: AutonomyQueueLiveRecord }[] = [];
+  const seen = new Set<string>();
+  for (const index of order) {
+    if (kept.length >= WATCHER_RECORD_LIMIT) break;
     assertCurrent();
-    const safeEntry = safeEntries[index];
-    if (!safeEntry) throw new ToolInputProjectionError('held');
-    const record = safeEntry.record;
-    const native = nativeStatus(entry.record, entry.lane);
-    const status = native === 'unknown' && entry.lane !== 'native-watcher' ? await readPersonalOpsReceiptStatus(record, current) : native;
+    const entry = source.entries[index], safeEntry = safeEntries[index], native = natives[index];
+    if (!entry || !safeEntry || native === undefined) throw new ToolInputProjectionError('held');
+    const status = native === 'unknown' && entry.lane !== 'native-watcher' ? await readPersonalOpsReceiptStatus(safeEntry.record, current) : native;
     const result = entry.lane === 'watcher-run' ? normalizeRun(safeEntry, index, status) : normalizeProviderSource(safeEntry, index, status);
-    if (result) records.push(result);
+    if (result && !seen.has(result.id)) { seen.add(result.id); kept.push({ index, record: result }); }
   }
   assertCurrent(); retainCurrent?.(assertSource, 'personal-ops-watcher-source'); assertCurrent();
-  const seen = new Set<string>();
-  return records.filter(record => { if (seen.has(record.id)) return false; seen.add(record.id); return true; }).slice(0, 20);
+  return kept.sort((left, right) => left.index - right.index).map(entry => entry.record);
 }

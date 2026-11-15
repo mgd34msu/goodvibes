@@ -75,9 +75,9 @@ describe('prompt-cache capability', () => {
     expect(getCacheCapability('openrouter')).toEqual({ type: 'automatic', readDiscount: 0.5 });
   });
 
-  test('a provider registered on the Anthropic-compatible adapter caches the way Anthropic does, whatever its name', () => {
+  test('a provider on the Anthropic-compatible adapter claims no explicit caching, because that adapter sends no cache_control', () => {
     makeRegistry().register(stubProvider('corp-claude-proxy', 'anthropic-compat'));
-    expect(getCacheCapability('corp-claude-proxy')).toBe(getCacheCapability('anthropic'));
+    expect(getCacheCapability('corp-claude-proxy')).toEqual({ type: 'none' });
   });
 
   test('a name that only contains a known provider name borrows nothing', () => {

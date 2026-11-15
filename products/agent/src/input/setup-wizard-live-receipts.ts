@@ -1,3 +1,4 @@
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
 import { buildSetupWizardDurableReceiptsFromReadModel, mergeSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
 import type { AgentSetupWizardDurableReceipt } from '../agent/setup-wizard.ts';
@@ -44,33 +45,62 @@ function setupReceiptReadModelSources(context: CommandContext): readonly SetupRe
   ];
 }
 
-function readSnapshot(source: unknown): unknown {
-  if (typeof source === 'function') {
-    const result = (source as () => unknown)();
-    return result instanceof Promise ? undefined : result;
+/** Thrown for a source that can only answer asynchronously: its receipts cannot be read here. */
+class AsyncReceiptSourceError extends Error {
+  constructor() {
+    super('the read model answers asynchronously');
   }
+}
+
+function settled(result: unknown): unknown {
+  if (result instanceof Promise) {
+    // Nothing waits on it, so a rejection must not surface as an unhandled one.
+    result.catch(() => {});
+    throw new AsyncReceiptSourceError();
+  }
+  return result;
+}
+
+function readSnapshot(source: unknown): unknown {
+  if (typeof source === 'function') return settled((source as () => unknown)());
   const record = readRecord(source);
   for (const methodName of ['getSnapshot', 'snapshot', 'list', 'listReceipts', 'listEvents', 'listReceiptEvents', 'readEvents']) {
     const method = record[methodName];
-    if (typeof method === 'function') {
-      const result = (method as () => unknown)();
-      return result instanceof Promise ? undefined : result;
-    }
+    if (typeof method === 'function') return settled((method as () => unknown)());
   }
   return source;
 }
 
-export function setupWizardLiveDurableReceipts(context: CommandContext, acquiredSources?: readonly SetupReceiptReadModelSource[]): readonly AgentSetupWizardDurableReceipt[] {
+export interface SetupWizardLiveReceipts {
+  readonly receipts: readonly AgentSetupWizardDurableReceipt[];
+  /** Read-model paths that exist but could not be read, so an empty list is not mistaken for "no receipts". */
+  readonly unavailable: readonly string[];
+}
+
+export function readSetupWizardLiveDurableReceipts(
+  context: CommandContext,
+  acquiredSources?: readonly SetupReceiptReadModelSource[],
+): SetupWizardLiveReceipts {
   const receipts: AgentSetupWizardDurableReceipt[][] = [];
+  const unavailable: string[] = [];
   for (const entry of acquiredSources ?? setupReceiptReadModelSources(context)) {
     if (entry.source === undefined || entry.source === null) continue;
     try {
       receipts.push([...buildSetupWizardDurableReceiptsFromReadModel(readSnapshot(entry.source), entry.path)]);
-    } catch {
-      // Broken host read models should not hide local setup posture.
+    } catch (error) {
+      // A broken host read model must not hide local setup posture, but it is reported.
+      unavailable.push(entry.path);
+      logger.debug('setup receipts: a read model could not be read', {
+        path: entry.path,
+        error: error instanceof AsyncReceiptSourceError ? error.message : summarizeError(error),
+      });
     }
   }
-  return mergeSetupWizardDurableReceipts(...receipts);
+  return { receipts: mergeSetupWizardDurableReceipts(...receipts), unavailable };
+}
+
+export function setupWizardLiveDurableReceipts(context: CommandContext, acquiredSources?: readonly SetupReceiptReadModelSource[]): readonly AgentSetupWizardDurableReceipt[] {
+  return readSetupWizardLiveDurableReceipts(context, acquiredSources).receipts;
 }
 
 export { mergeSetupWizardDurableReceipts };

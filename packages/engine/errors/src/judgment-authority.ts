@@ -131,6 +131,18 @@ function retainPropertyPlan(subject: object, keys: readonly string[]): () => voi
   };
 }
 
+/** A slot that resolves to a data property cannot run foreign code when read. */
+function isPureSlot(subject: object | undefined, key: string): boolean {
+  let owner: object | null = subject ?? null;
+  for (let depth = 0; owner !== null; depth++) {
+    if (depth >= 64) throw new JudgmentAuthorityRetiredError();
+    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+    if (descriptor) return 'value' in descriptor;
+    owner = Object.getPrototypeOf(owner) as object | null;
+  }
+  return true;
+}
+
 function readCurrentProperty<T>(assertCurrent: () => void, read: () => T): T {
   assertCurrent();
   try { return read(); }
@@ -175,10 +187,18 @@ function capture(site: string, options: JudgmentReadingOptions): JudgmentPortCap
     assertProperties();
     if (consumed || signal.aborted) throw new JudgmentAuthorityRetiredError();
   };
-  const readObservation = <T>(property: () => T): T => readCurrentProperty(assertObservationProperties, property);
+  // Reading a data slot runs no code, so the descriptor proof that precedes a
+  // group of reads already covers them. Only an accessor is fenced on each side.
+  const pure = new Set<() => unknown>();
+  for (const [reader, subject, key] of [[readOwnerIdentity, owner, 'identity'], [readOwnerSignal, owner, 'signal'], [readSourceCurrent, owner, 'assertCurrent'],
+    [readPortModel, base, 'model'], [readPortAsk, base, 'ask'], [readPortHealth, base, 'health'], [readPortRecorder, base, 'recorder'],
+    [readRecorderReadings, recorder, 'recordReadings'], [readRecorderAction, recorder, 'recordAction']] as const) {
+    if (isPureSlot(subject, key)) pure.add(reader);
+  }
+  const readObservation = <T>(property: () => T): T => pure.has(property) ? property() : readCurrentProperty(assertObservationProperties, property);
   const installationCurrent = (observation = false) => {
-    const readInstalled = observation ? readObservation : read;
-    assertProperties();
+    const readInstalled = <T>(property: () => T): T => pure.has(property) ? property() : readCurrentProperty(observation ? assertObservationProperties : assertProperties, property);
+    if (observation) assertObservationProperties(); else assertProperties();
     if (installation.signal.aborted || binding.controller.signal.aborted || owners.get(base) !== binding
       || readInstalled(readOwnerIdentity) !== ownerIdentity || readInstalled(readOwnerSignal) !== ownerSignal || readInstalled(readSourceCurrent) !== sourceCurrent
       || readInstalled(readPortModel) !== model || readInstalled(readPortAsk) !== ask || readInstalled(readPortHealth) !== health || readInstalled(readPortRecorder) !== recorder

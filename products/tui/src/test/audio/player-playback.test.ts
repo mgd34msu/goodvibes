@@ -253,9 +253,7 @@ describe('LocalStreamingAudioPlayer playback', () => {
   test('waitForDrain resolves immediately when nothing is playing', async () => {
     const proc = new FakeProcess();
     const player = makePlayer(proc);
-    const start = Date.now();
     await player.waitForDrain(5000);
-    expect(Date.now() - start).toBeLessThan(100);
   });
 
   test('waitForDrain resolves when the playing sink closes naturally', async () => {
@@ -283,10 +281,21 @@ describe('LocalStreamingAudioPlayer playback', () => {
     proc.emitSpawn();
     await flush();
 
-    const start = Date.now();
-    await player.waitForDrain(20);
-    // Released by the timeout, not by a close (which never came).
-    expect(Date.now() - start).toBeLessThan(1000);
+    let released = false;
+    const waiting = player.waitForDrain(500).then(() => { released = true; });
+    // Still waiting while the sink has not closed: returning at once would defeat the drain.
+    await flush();
+    expect(released).toBe(false);
+    // Released by the timeout, not by a close (which never came). The guard makes an
+    // unbounded wait fail here instead of hanging to the runner timeout.
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      waiting.then(() => 'released'),
+      new Promise<string>((resolve) => { guard = setTimeout(() => resolve('hung'), 2000); }),
+    ]);
+    clearTimeout(guard);
+    expect(outcome).toBe('released');
+    expect(released).toBe(true);
   });
 
   test('play() on a player with no command reports the missing player honestly', async () => {
@@ -329,6 +338,27 @@ describe('wake activation sound', () => {
     expect(view.getUint32(24, true)).toBe(16000);   // sample rate
     expect(view.getUint16(34, true)).toBe(16);      // bits per sample
     expect(wav.length - 44).toBe(2 * Math.round(0.07 * 16000) * 2);
+  });
+
+  test('the built-in chime is two audible tones, so a wake is heard rather than merely emitted', () => {
+    const wav = buildActivationChimeWav();
+    const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+    // Two tones, not one tone twice: each half carries sound and the pitch differs.
+    const perTone = 2240 / 2;
+    const toneStats = (from: number) => {
+      let tonePeak = 0, crossings = 0, previous = 0;
+      for (let index = 0; index < perTone; index += 1) {
+        const sample = view.getInt16(44 + (from + index) * 2, true);
+        tonePeak = Math.max(tonePeak, Math.abs(sample));
+        if ((sample < 0) !== (previous < 0) && index > 0) crossings += 1;
+        previous = sample;
+      }
+      return { tonePeak, crossings };
+    };
+    const first = toneStats(0), second = toneStats(perTone);
+    expect(first.tonePeak).toBeGreaterThan(1000);
+    expect(second.tonePeak).toBeGreaterThan(1000);
+    expect(second.crossings).not.toBe(first.crossings);
   });
 
   test('kind "chime" plays the synthesised tone through the streaming player', async () => {

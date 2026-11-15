@@ -43,10 +43,12 @@
  * write here, so "read a stranger's page, then send mail" is visible to the
  * outward-effect guard as ONE composition rather than two unrelated acts.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { findContentTaint, describeContentTaint, type TaintFinding, type TaintOptions, type TaintSource } from './content-taint.js';
 import { captureOwnedJson, judgmentInputProblem } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
+import { exceedsDerivationBudget } from './batteries/content-derivation.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import {
   checkOwnerApproval,
@@ -223,7 +225,38 @@ export interface UntrustedIngest {
    * than to no check.
    */
   readonly content?: string | undefined;
+  /**
+   * Whose turn this was read in, when the recorder knows (a daemon serves
+   * several owners from one ledger). A scoped ingest is part of the turn of
+   * the same scope only (a connection's scope, `<principal>:connection:<id>`, also sees its principal's own); an ingest with no scope is part of every scope's turn,
+   * so a recorder that cannot say stays visible to all of them.
+   * Defaults to the scope of the running work, see {@link withUntrustedContentScope}.
+   */
+  readonly scope?: string | undefined;
 }
+
+const contentScope = new AsyncLocalStorage<{ readonly scope: string | undefined }>();
+
+/**
+ * Runs work whose ingests and turn boundaries belong to one scope.
+ *
+ * In a daemon every owner's work shares one ledger, so without a scope one
+ * owner's fresh request would move the turn watermark past what another owner's
+ * session had just read, erasing the evidence before that session's send. Scope
+ * comes from the async context so recorders and checks deep in a verb need not
+ * thread it. Work outside any scope sees everything since the shared watermark.
+ */
+export function withUntrustedContentScope<T>(scope: string | undefined, fn: () => T): T {
+  return contentScope.run({ scope }, fn);
+}
+
+/** The scope of the work running now, or undefined outside one. */
+export function currentUntrustedContentScope(): string | undefined {
+  return contentScope.getStore()?.scope;
+}
+
+/** Scopes whose own turn watermark is remembered; the oldest is forgotten first, which only widens what that scope sees. */
+const MAX_SCOPE_WATERMARKS = 1_024;
 
 /** Longest excerpt retained per ingest, so a daemon's ledger stays bounded. */
 const MAX_RETAINED_CONTENT_CHARS = 20_000;
@@ -291,12 +324,15 @@ export class UntrustedContentLedger {
    * {@link UntrustedContentLedger.taintSourcesSinceLastTurnBoundary}.
    */
   private previousTurnStartSequence = 0;
+  private readonly scopeWatermarks = new Map<string, { start: number; previous: number }>();
 
   record(ingest: UntrustedIngest): void {
     this.#publicationRevision++;
     this.ingestSequence++;
     const content = ingest.content;
+    const scope = ingest.scope ?? currentUntrustedContentScope();
     const retained: UntrustedIngest = Object.freeze({ surface: ingest.surface, origin: ingest.origin, at: ingest.at,
+      ...(scope === undefined ? {} : { scope }),
       ...(content === undefined ? {} : { content: content.slice(0, MAX_RETAINED_CONTENT_CHARS) }) });
     if (content === undefined || !content.trim()) this.incompleteIngests.set(retained, 'missing');
     else if (content.length > MAX_RETAINED_CONTENT_CHARS) this.incompleteIngests.set(retained, 'truncated');
@@ -308,22 +344,48 @@ export class UntrustedContentLedger {
   }
 
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
-  startTurn(): void {
+  startTurn(scope: string | undefined = currentUntrustedContentScope()): void {
     this.#publicationRevision++;
-    this.previousTurnStartSequence = this.turnStartSequence;
-    this.turnStartSequence = this.ingestSequence;
+    if (scope === undefined) {
+      this.previousTurnStartSequence = this.turnStartSequence;
+      this.turnStartSequence = this.ingestSequence;
+      return;
+    }
+    // A scoped turn moves only its own watermark: another scope's exposure stays.
+    const previous = this.turnStartOf(scope);
+    this.scopeWatermarks.delete(scope);
+    this.scopeWatermarks.set(scope, { start: this.ingestSequence, previous });
+    if (this.scopeWatermarks.size > MAX_SCOPE_WATERMARKS) {
+      const oldest = this.scopeWatermarks.keys().next();
+      if (!oldest.done) this.scopeWatermarks.delete(oldest.value);
+    }
+  }
+
+  private turnStartOf(scope: string | undefined): number {
+    return Math.max(this.turnStartSequence, scope === undefined ? 0 : this.scopeWatermarks.get(scope)?.start ?? 0);
+  }
+
+  private previousTurnStartOf(scope: string | undefined): number {
+    return Math.max(this.previousTurnStartSequence, scope === undefined ? 0 : this.scopeWatermarks.get(scope)?.previous ?? 0);
   }
 
   /** Native turn/source incarnation, including an empty turn or same-value ingest. */
   getPublicationRevision(): number { return this.#publicationRevision; }
 
   ingestedThisTurn(): readonly UntrustedIngest[] {
-    return this.ingestedSince(this.turnStartSequence);
+    const scope = currentUntrustedContentScope();
+    return this.ingestedSince(this.turnStartOf(scope), scope);
   }
 
-  private ingestedSince(sequence: number): readonly UntrustedIngest[] {
+  /** Ingests after `sequence`; with a scope, only that scope's own and the unscoped ones. */
+  private ingestedSince(sequence: number, scope?: string): readonly UntrustedIngest[] {
     const firstRetained = this.ingestSequence - this.ingests.length;
-    return this.ingests.slice(Math.max(0, sequence - firstRetained));
+    const tail = this.ingests.slice(Math.max(0, sequence - firstRetained));
+    if (scope === undefined) return tail;
+    // A call with no connection (HTTP) is scoped to its principal alone; every connection of that
+    // principal still sees what it read, so a page fetched over HTTP is not forgotten by a websocket turn.
+    const principalScope = scope.includes(':connection:') ? scope.slice(0, scope.indexOf(':connection:')) : undefined;
+    return tail.filter(entry => entry.scope === undefined || entry.scope === scope || (principalScope !== undefined && entry.scope === principalScope));
   }
 
   all(): readonly UntrustedIngest[] {
@@ -376,11 +438,15 @@ export class UntrustedContentLedger {
   /** One immutable coverage model for semantic turn windows and retained exact comparisons. */
   captureTaintEvidence(window: TaintEvidenceWindow = 'turn'): TaintEvidence {
     const revision = this.#publicationRevision;
-    const start = window === 'turn' ? this.turnStartSequence : window === 'since-last-boundary' ? this.previousTurnStartSequence : 0;
-    const ingests = this.ingestedSince(start);
+    const scope = window === 'retained' ? undefined : currentUntrustedContentScope();
+    const start = window === 'turn' ? this.turnStartOf(scope) : window === 'since-last-boundary' ? this.previousTurnStartOf(scope) : 0;
+    const ingests = this.ingestedSince(start, scope);
     const missing = ingests.some(ingest => this.incompleteIngests.get(ingest) === 'missing');
     const truncated = ingests.some(ingest => this.incompleteIngests.get(ingest) === 'truncated');
-    const evicted = start < this.ingestSequence - this.ingests.length;
+    // The retained window is by definition everything still kept, so the retention cap
+    // evicting older ingests is not missing evidence for it; a turn window that reaches
+    // back past the cap is.
+    const evicted = window !== 'retained' && start < this.ingestSequence - this.ingests.length;
     return Object.freeze({ sources: toTaintSources(ingests), complete: !missing && !truncated && !evicted,
       missing, truncated, evicted, revision,
       assertCurrent: () => {
@@ -407,7 +473,8 @@ export class UntrustedContentLedger {
    * legitimate work and gets switched off.
    */
   taintSourcesSinceLastTurnBoundary(): readonly TaintSource[] {
-    return toTaintSources(this.ingestedSince(this.previousTurnStartSequence));
+    const scope = currentUntrustedContentScope();
+    return toTaintSources(this.ingestedSince(this.previousTurnStartOf(scope), scope));
   }
 
   /**
@@ -435,7 +502,7 @@ function toTaintSources(ingests: readonly UntrustedIngest[]): readonly TaintSour
 export type OutwardContentAssessment =
   | { readonly kind: 'clean'; readonly findings: readonly TaintFinding[] }
   | { readonly kind: 'tainted'; readonly findings: readonly TaintFinding[] }
-  | { readonly kind: 'incomplete'; readonly findings: readonly TaintFinding[]; readonly reason: 'missing-content' | 'missing-sources' | 'protected-input' | 'decision-model-disabled' };
+  | { readonly kind: 'incomplete'; readonly findings: readonly TaintFinding[]; readonly reason: 'missing-content' | 'missing-sources' | 'protected-input' | 'over-limit' | 'decision-model-disabled' };
 
 /** Shared evidence comparison; callers select the relevant window without widening semantic reads. */
 export async function assessOutwardContent(
@@ -494,6 +561,8 @@ async function assessEvidence(
   if (judgmentInputProblem(fields) || evidence.sources.some(source => judgmentInputProblem(source))) {
     return { kind: 'incomplete', findings: [], reason: 'protected-input' };
   }
+  // An over-long field or source cannot be read whole, so it is an unanswerable assessment, not a thrown refusal.
+  if (exceedsDerivationBudget(fields, evidence.sources)) return { kind: 'incomplete', findings: [], reason: 'over-limit' };
   return decisionOrClassic<OutwardContentAssessment>(async () => {
     const findings = await findContentTaint(fields, evidence.sources, options);
     if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
@@ -687,6 +756,8 @@ export async function evaluateOutwardEffect(input: {
     ? 'this action did not say which of its fields are about to leave'
     : assessment.reason === 'protected-input'
       ? 'protected material cannot be sent for a derivation reading'
+      : assessment.reason === 'over-limit'
+        ? 'a field or a source it would be compared with is too long to be read whole; shorten it and send it in parts'
       : assessment.reason === 'decision-model-disabled'
         ? 'Classic does not assess semantic derivation from untrusted input'
         : 'some source text is missing, empty, truncated, or no longer retained';

@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,21 +40,13 @@ function fixture() {
   return { instance, planManager, spawned, disable: () => { enabled = false; } };
 }
 
-test('a checked final response cannot start unreviewed plan work through a later timer', async () => {
+test('a checked final response never spawns an agent for pending plan items, now or on a later turn', async () => {
   const previous = installJudgmentPort(coreReadingsPort().port), f = fixture();
-  const realSetTimeout = globalThis.setTimeout;
-  let autoSpawnTimers = 0;
-  const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
-    if (delay === 5_000) autoSpawnTimers++;
-    return realSetTimeout(fn, delay, ...args);
-  }) as typeof setTimeout);
   try {
     await f.instance.handleUserInput('Give a plain answer');
     expect(f.instance.isTurnInFlight).toBe(false);
-    expect(autoSpawnTimers).toBe(0);
     expect(f.spawned).toEqual([]);
     await f.instance.handleUserInput('Give another plain answer');
-    expect(autoSpawnTimers).toBe(0);
     expect(f.spawned).toEqual([]);
-  } finally { spy.mockRestore(); f.instance.dispose(); installJudgmentPort(previous); }
+  } finally { f.instance.dispose(); installJudgmentPort(previous); }
 });

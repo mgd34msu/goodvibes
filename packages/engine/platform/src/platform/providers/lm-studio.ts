@@ -17,6 +17,7 @@ import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import {
@@ -39,9 +40,14 @@ import {
   toNativeChatInput,
   toRecord,
 } from './lm-studio-helpers.js';
-import { parseToolCallArguments } from './tool-formats.js';
+import { toolCallArgumentFields } from './tool-formats.js';
 import { shouldUseOtherApi } from './provider-error.js';
 import { mapLmStudioStopReason } from './stop-reason-maps.js';
+
+const DELEGATE_TO_COMPAT = Symbol('lm-studio-delegate-to-compat');
+
+/** Most conversations whose native-chat response ids are kept; the oldest are forgotten first. */
+const NATIVE_RESPONSE_ID_LIMIT = 256;
 
 export interface LMStudioProviderOptions extends OpenAICompatOptions {
   nativeFetch?: NativeFetch | undefined;
@@ -81,33 +87,53 @@ export class LMStudioProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    return (await instrumentedLlmCall(
-      () => withRetry(async () => {
-      const model = params.model || this.defaultModel;
-      const nativeContext = this.getNativeChatContext(model, params.systemPrompt, params.messages, params.tools);
+    // After any answer text has reached the caller a retry would repeat it, so
+    // the error becomes final (the same rule the other providers apply).
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
+    const tracked: ChatRequest = onDelta ? { ...params, onDelta } : params;
+    const outcome = (await instrumentedLlmCall(
+      () => withRetry(async (): Promise<ChatResponse | typeof DELEGATE_TO_COMPAT> => {
+        const model = params.model || this.defaultModel;
+        const nativeContext = this.getNativeChatContext(model, params.systemPrompt, params.messages, params.tools);
+        // Once this attempt has shown the caller any text, another API would
+        // start the answer over and the stream would repeat it; the failure
+        // surfaces instead.
+        let emitted = false;
+        const attemptParams: ChatRequest = tracked.onDelta
+          ? { ...tracked, onDelta: (delta) => { emitted = true; tracked.onDelta?.(delta); } }
+          : tracked;
 
-      if (nativeContext) {
+        if (nativeContext) {
+          try {
+            return await this.chatViaNativeChat(attemptParams, model, nativeContext);
+          } catch (err: unknown) {
+            if (err instanceof ProviderAttemptDeniedError) throw err;
+            if (emitted || !(await shouldUseOtherApi(err, 'providers.lm-studio.native-chat'))) {
+              throw normalizeProviderError(err, this.name, 'chat', 'request');
+            }
+          }
+        }
+
         try {
-          return await this.chatViaNativeChat(params, model, nativeContext);
+          return await this.chatViaResponses(attemptParams, model);
         } catch (err: unknown) {
           if (err instanceof ProviderAttemptDeniedError) throw err;
-          if (!(await shouldUseOtherApi(err, 'providers.lm-studio.native-chat'))) {
+          if (emitted || !(await shouldUseOtherApi(err, 'providers.lm-studio.responses'))) {
             throw normalizeProviderError(err, this.name, 'chat', 'request');
           }
         }
-      }
 
-      try {
-        return await this.chatViaResponses(params, model);
-      } catch (err: unknown) {
-        if (err instanceof ProviderAttemptDeniedError) throw err;
-        if (!(await shouldUseOtherApi(err, 'providers.lm-studio.responses'))) {
-          throw normalizeProviderError(err, this.name, 'chat', 'request');
-        }
-      }
-
-      return this.compatProvider.chat(params);
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry), { provider: this.name, model: params.model || this.defaultModel })).result;
+        return DELEGATE_TO_COMPAT;
+      }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry),
+      {
+        provider: this.name,
+        model: params.model || this.defaultModel,
+        // The compat provider retries and records the call itself.
+        isHandover: (result) => result === DELEGATE_TO_COMPAT,
+      },
+    )).result;
+    if (outcome === DELEGATE_TO_COMPAT) return this.compatProvider.chat(params);
+    return outcome;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -185,6 +211,9 @@ export class LMStudioProvider implements LLMProvider {
       const previousKey = makeTranscriptKey(model, systemPrompt, previousMessages);
       previousResponseId = this.nativeResponseIds.get(previousKey);
       if (!previousResponseId) return null;
+      // Mark as most recently used.
+      this.nativeResponseIds.delete(previousKey);
+      this.nativeResponseIds.set(previousKey, previousResponseId);
     }
 
     return {
@@ -205,7 +234,13 @@ export class LMStudioProvider implements LLMProvider {
       ...requestMessages,
       { role: 'assistant', content: assistantContent },
     ]);
+    this.nativeResponseIds.delete(key);
     this.nativeResponseIds.set(key, responseId);
+    while (this.nativeResponseIds.size > NATIVE_RESPONSE_ID_LIMIT) {
+      const oldest = this.nativeResponseIds.keys().next().value;
+      if (oldest === undefined) break;
+      this.nativeResponseIds.delete(oldest);
+    }
   }
 
   private async chatViaNativeChat(
@@ -371,6 +406,8 @@ export class LMStudioProvider implements LLMProvider {
     let outputTokens = 0;
     let cacheReadTokens = 0;
     let status = 'completed';
+    let incompleteReason: string | undefined;
+    let sawCompleted = false;
     const toolStarts = new Map<string, PartialToolCall>();
     const toolItemIds = new Map<string, string>();
     const toolArgs = new Map<string, string>();
@@ -448,23 +485,20 @@ export class LMStudioProvider implements LLMProvider {
           ? item['arguments']
           : (toolArgs.get(callId) ?? '{}');
         if (!callId || !name) continue;
-        const parsedArguments = parseToolCallArguments(argumentsText, {
-          provider: this.name,
-          toolName: name,
-          callId,
-        });
-        if (parsedArguments === undefined) continue;
         toolCalls.set(callId, {
           id: callId,
           name,
-          arguments: parsedArguments,
+          ...toolCallArgumentFields(argumentsText, { provider: this.name, toolName: name, callId }),
         });
         continue;
       }
 
-      if (type === 'response.completed') {
+      if (type === 'response.completed' || type === 'response.incomplete') {
+        sawCompleted = true;
         const completed = toRecord(record['response']);
         status = typeof completed['status'] === 'string' ? completed['status'] : status;
+        const incompleteReasonValue = toRecord(completed['incomplete_details'])['reason'];
+        if (typeof incompleteReasonValue === 'string') incompleteReason = incompleteReasonValue;
         const usage = toRecord(completed['usage']);
         const input = typeof usage['input_tokens'] === 'number' ? usage['input_tokens'] : 0;
         const output = typeof usage['output_tokens'] === 'number' ? usage['output_tokens'] : 0;
@@ -490,6 +524,16 @@ export class LMStudioProvider implements LLMProvider {
       }
     }
 
+    // A stream that ends without response.completed was cut off, and its text
+    // is partial; reporting it as a finished turn would hide that.
+    if (!sawCompleted) {
+      throw new ProviderError('LM Studio Responses stream ended before the response completed.', {
+        statusCode: 502,
+        provider: this.name,
+        operation: 'chat',
+        phase: 'stream',
+      });
+    }
     const resolvedToolCalls = [...toolCalls.values()];
     const response: ChatResponse = {
       content: text,
@@ -499,7 +543,7 @@ export class LMStudioProvider implements LLMProvider {
         outputTokens,
         ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
       },
-      stopReason: mapLmStudioStopReason(status, resolvedToolCalls.length > 0),
+      stopReason: mapLmStudioStopReason(status, resolvedToolCalls.length > 0, incompleteReason),
       ...(status !== 'completed' ? { providerStopReason: status } : {}),
     };
 

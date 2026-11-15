@@ -298,8 +298,10 @@ describe('modal space actions', () => {
 
   test('settings modal toggles the selected value on space', () => {
     const dir = makeProjectTempDir(`gv-settings-space-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    let cmRef: ConfigManager | undefined;
     try {
-      const cm = new ConfigManager({ surfaceRoot: 'tui',  workingDir: dir, configDir: join(dir, '.goodvibes', 'tui') });
+      const cm = new ConfigManager({ surfaceRoot: 'tui',  workingDir: dir, configDir: join(dir, '.goodvibes', 'tui'), homeDir: dir });
+      cmRef = cm;
       const subscriptionManager = new SubscriptionManager(join(dir, '.goodvibes', 'tui', 'subscriptions.json'));
       const serviceRegistry = new ServiceRegistry(join(dir, '.goodvibes', 'tui', 'services.json'), {
         secretsManager: new SecretsManager({ projectRoot: dir, globalHome: dir, configManager: cm }),
@@ -325,6 +327,7 @@ describe('modal space actions', () => {
       expect(handled).toBe(true);
       expect(cm.get('display.stream')).toBe(!before);
     } finally {
+      cmRef?.stopWatchingConfigFiles();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -362,8 +365,10 @@ describe('modal space actions', () => {
 
   test('settings modal arrow navigation keeps class method binding', () => {
     const dir = makeProjectTempDir(`gv-settings-arrow-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    let cmRef: ConfigManager | undefined;
     try {
-      const cm = new ConfigManager({ surfaceRoot: 'tui', workingDir: dir, configDir: join(dir, '.goodvibes', 'tui') });
+      const cm = new ConfigManager({ surfaceRoot: 'tui', workingDir: dir, configDir: join(dir, '.goodvibes', 'tui'), homeDir: dir });
+      cmRef = cm;
       const subscriptionManager = new SubscriptionManager(join(dir, '.goodvibes', 'tui', 'subscriptions.json'));
       const serviceRegistry = new ServiceRegistry(join(dir, '.goodvibes', 'tui', 'services.json'), {
         secretsManager: new SecretsManager({ projectRoot: dir, globalHome: dir, configManager: cm }),
@@ -389,6 +394,7 @@ describe('modal space actions', () => {
       expect(handled).toBe(true);
       expect(modal.selectedIndex).toBe(before + 1);
     } finally {
+      cmRef?.stopWatchingConfigFiles();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -434,8 +440,10 @@ describe('modal space actions', () => {
 
   test('settings modal applies left/right adjustments to booleans and numbers', () => {
     const dir = makeProjectTempDir(`gv-settings-adjust-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    let cmRef: ConfigManager | undefined;
     try {
-      const cm = new ConfigManager({ surfaceRoot: 'tui',  workingDir: dir, configDir: join(dir, '.goodvibes', 'tui') });
+      const cm = new ConfigManager({ surfaceRoot: 'tui',  workingDir: dir, configDir: join(dir, '.goodvibes', 'tui'), homeDir: dir });
+      cmRef = cm;
       const subscriptionManager = new SubscriptionManager(join(dir, '.goodvibes', 'tui', 'subscriptions.json'));
       const serviceRegistry = new ServiceRegistry(join(dir, '.goodvibes', 'tui', 'services.json'), {
         secretsManager: new SecretsManager({ projectRoot: dir, globalHome: dir, configManager: cm }),
@@ -465,6 +473,7 @@ describe('modal space actions', () => {
       modal.adjustSelected('left', 1);
       expect(cm.get('display.collapseThreshold')).toBe(before + 9);
     } finally {
+      cmRef?.stopWatchingConfigFiles();
       rmSync(dir, { recursive: true, force: true });
     }
   });

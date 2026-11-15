@@ -50,6 +50,13 @@ function splitScope(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+/** The budget as typed: undefined when blank, null when it is not a positive number. */
+function parseBudget(text: string): number | undefined | null {
+  if (!text.trim()) return undefined;
+  const budget = Number(text);
+  return Number.isFinite(budget) && budget > 0 ? budget : null;
+}
+
 export function KnowledgePacketPanel() {
   const [task, setTask] = useState('');
   const [writeScope, setWriteScope] = useState('');
@@ -59,20 +66,22 @@ export function KnowledgePacketPanel() {
   const packet = useMutation({
     mutationFn: () => {
       const scope = splitScope(writeScope);
-      const budget = Number(budgetLimit);
+      const budget = parseBudget(budgetLimit);
       return invokeMethod('knowledge.packet', {
         task: task.trim(),
         detail,
         ...(scope.length ? { writeScope: scope } : {}),
-        ...(budgetLimit.trim() && Number.isFinite(budget) && budget > 0 ? { budgetLimit: budget } : {}),
+        ...(typeof budget === 'number' ? { budgetLimit: budget } : {}),
       });
     },
   });
 
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (task.trim()) packet.mutate();
+    if (task.trim() && !budgetInvalid) packet.mutate();
   }
+
+  const budgetInvalid = parseBudget(budgetLimit) === null;
 
   const items = firstArray(packet.data, ['items']);
   const estimatedTokens = countFrom(packet.data, ['estimatedTokens']);
@@ -102,7 +111,7 @@ export function KnowledgePacketPanel() {
               ]}
             />
           </Field>
-          <Field label="Budget (tokens)">
+          <Field label="Budget (tokens)" error={budgetInvalid ? 'Enter a number above 0, or leave it blank for no limit.' : undefined}>
             <Input
               value={budgetLimit}
               onChange={(event) => setBudgetLimit(event.target.value)}
@@ -121,14 +130,14 @@ export function KnowledgePacketPanel() {
           />
         </Field>
         <div>
-          <Button type="submit" variant="secondary" disabled={packet.isPending || !task.trim()} aria-busy={packet.isPending}>
+          <Button type="submit" variant="secondary" disabled={packet.isPending || !task.trim() || budgetInvalid} aria-busy={packet.isPending}>
             {packet.isPending ? 'Building…' : 'Build packet'}
           </Button>
         </div>
       </form>
 
       {packet.error ? (
-        <ErrorState error={packet.error} onRetry={() => { if (task.trim()) packet.mutate(); }} title="Packet build failed" />
+        <ErrorState error={packet.error} onRetry={() => { if (task.trim() && !budgetInvalid) packet.mutate(); }} title="Packet build failed" />
       ) : packet.data ? (
         items.length === 0 ? (
           <EmptyState icon={<PackageSearch />} title="Packet has no items">

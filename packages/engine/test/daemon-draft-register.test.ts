@@ -221,9 +221,9 @@ describe('registerDraftMethods', () => {
     expect(b.draft.webhook).toBe('[redacted]');
   });
 
-  test('save rejects a non-writable status and a missing message', async () => {
+  test('save rejects an unknown status and a missing message', async () => {
     await expect(
-      catalog.invoke(SAVE, confirmedSave({ message: 'm', status: 'sent' })),
+      catalog.invoke(SAVE, confirmedSave({ message: 'm', status: 'archived' })),
     ).rejects.toThrow(/status/i);
     await expect(catalog.invoke(SAVE, confirmedSave({}))).rejects.toThrow(/message/i);
   });

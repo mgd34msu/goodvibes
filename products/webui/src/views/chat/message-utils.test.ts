@@ -18,7 +18,9 @@ import {
   workingStatusLabel,
   settledTurnLabel,
   nextTurnStatus,
+  canResendUserMessage,
   TURN_STATES,
+  deliveryState,
 } from './message-utils';
 
 describe('toolFriendlyLabel', () => {
@@ -196,6 +198,7 @@ describe('nextTurnStatus: guarded turn-status transitions for racing writers', (
   test('a late delta/tool frame does not un-stop a turn the user already stopped', () => {
     expect(nextTurnStatus('stopping', 'streaming')).toBe('stopping');
     expect(nextTurnStatus('stopping', 'tooling')).toBe('stopping');
+    expect(nextTurnStatus('stopping', 'reconnecting')).toBe('stopping');
   });
 
   test('frames still advance every non-stopping live status', () => {
@@ -238,5 +241,38 @@ describe('nextTurnStatus: guarded turn-status transitions for racing writers', (
       }
     }
     expect(nextTurnStatus('not-a-state', 'streaming')).toBe('streaming');
+  });
+});
+
+describe('deliveryState: markers the daemon writes are never shown as an ordinary sent message', () => {
+  test('a queued message that will never run reads unanswered, not sent', () => {
+    expect(deliveryState({ role: 'user', deliveryState: 'unanswered' })).toBe('unanswered');
+  });
+
+  test('the other daemon markers keep their own meaning, and a plain user message is sent', () => {
+    expect(deliveryState({ role: 'user', deliveryState: 'queued' })).toBe('queued');
+    expect(deliveryState({ role: 'assistant', deliveryState: 'cancelled' })).toBe('cancelled');
+    expect(deliveryState({ role: 'user' })).toBe('sent');
+  });
+});
+
+describe('canResendUserMessage', () => {
+  test('a text-only message can be resent', () => {
+    expect(canResendUserMessage({ role: 'user', content: 'hello' }, false)).toBe(true);
+  });
+
+  test('a message with files can be resent only while its files are held', () => {
+    const message = { role: 'user', content: 'see this', attachments: [{ artifactId: 'a1', filename: 'a.pdf' }] };
+    expect(canResendUserMessage(message, false)).toBe(false);
+    expect(canResendUserMessage(message, true)).toBe(true);
+  });
+
+  test('an attachments-only message can be resent when its files are held', () => {
+    const message = { role: 'user', content: '', attachments: [{ artifactId: 'a1' }] };
+    expect(canResendUserMessage(message, true)).toBe(true);
+  });
+
+  test('an empty message with nothing attached cannot', () => {
+    expect(canResendUserMessage({ role: 'user', content: '' }, true)).toBe(false);
   });
 });

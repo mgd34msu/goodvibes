@@ -806,6 +806,8 @@ export function reapOwnedQuarantineDirectories(directories: readonly string[], a
     return separator > 0 && acceptsSource(base) === true ? base : undefined;
   }, options);
 }
+/** How long an empty receipt may exist before it is treated as the leftover of an interrupted quarantine. */
+const EMPTY_RECEIPT_GRACE_MS = 60_000;
 function reapQuarantineScopes(directories: readonly string[], sourceForArchive: (name: string) => string | undefined, options: OwnedQuarantineReapOptions): OwnedQuarantineReapSummary {
   const guard = options.assertCurrent?.bind(options), effect = options.onEffect?.bind(options), now = options.now ?? Date.now(), cap = options.maxFiles ?? CORRUPT_QUARANTINE_MAX_FILES, age = options.maximumAgeMs, currentName = options.currentName;
   if (!Number.isSafeInteger(cap) || cap < 0 || !Number.isFinite(now) || (age !== undefined && (!Number.isFinite(age) || age < 0))) quarantineUnavailable();
@@ -833,6 +835,15 @@ function reapQuarantineScopes(directories: readonly string[], sourceForArchive: 
         data = captureQuarantineSource(path); receipt = captureQuarantineSource(why); if (!data || !receipt) { preservedUnknown++; continue; }
         const native = originalQuarantineSource(data), originalReceipt = originalQuarantineSource(receipt);
         if (originalReceipt.original.size > 65536n) { preservedUnknown++; continue; }
+        if (originalReceipt.original.size === 0n) {
+          // A process that died between unlinking the source and writing the receipt leaves an owned archive with an
+          // empty receipt. Past the grace window no writer can still be mid-publication, so the pair ages and counts
+          // against retention like any other instead of being preserved as unknown forever.
+          const receiptCreatedAt = Number(originalReceipt.original.mtimeNs / 1_000_000n);
+          if (now - receiptCreatedAt <= EMPTY_RECEIPT_GRACE_MS || (native.original.mode & 0o777n) !== 0o600n || (originalReceipt.original.mode & 0o777n) !== 0o600n) { preservedUnknown++; continue; }
+          data.assertCurrent(); receipt.assertCurrent(); rows.push({ name, path, why, dataPhysical: atomicFileStamp(native.original), receiptPhysical: atomicFileStamp(originalReceipt.original), createdAt: receiptCreatedAt, bytes: Number(native.original.size), current });
+          continue;
+        }
         const record = receiptDocument(JSON.parse(receipt.read()) as unknown, base, name);
         if (!record || atomicFileStamp(native.original) !== record.physical || (native.original.mode & 0o777n) !== 0o600n || (originalReceipt.original.mode & 0o777n) !== 0o600n) { preservedUnknown++; continue; }
         data.assertCurrent(); receipt.assertCurrent(); rows.push({ name, path, why, dataPhysical: atomicFileStamp(native.original), receiptPhysical: atomicFileStamp(originalReceipt.original), createdAt: record.createdAt, bytes: Number(native.original.size + originalReceipt.original.size), current });

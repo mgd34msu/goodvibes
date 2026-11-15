@@ -10,6 +10,7 @@ import { guardExecCommand } from '../platform/src/platform/tools/exec/ast-guard.
 import { createPhasedExecutor } from '../platform/src/platform/runtime/tools/index.js';
 import { DeliveryQueue } from '../platform/src/platform/integrations/delivery.js';
 import { Notifier } from '../platform/src/platform/integrations/notifier.js';
+import { createChannelComposition } from '../platform/src/platform/runtime/channel-composition.js';
 import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.js';
 import { ChannelPluginRegistry, SurfaceRegistry } from '../platform/src/platform/channels/index.js';
 import { bindProviderOptimizerFeatureFlag } from '../platform/src/platform/runtime/services.js';
@@ -1370,7 +1371,26 @@ describe('feature flag safe-default gates', () => {
 
     expect(disabled.status().actionError).toMatch(/service management is turned off .*service\.enabled/);
     expect(() => disabled.install()).toThrow(/service-management feature is turned off .*service\.enabled/);
-    expect(enabled.status().actionError).toBeUndefined();
+    // Whether the service manager can be reached depends on the machine; the flag must not be what stops it.
+    expect(enabled.status().actionError ?? '').not.toMatch(/turned off/);
+  }));
+
+  test('the channel composition hands the feature-flag manager to the surface and plugin registries', () => withTempDir((dir) => {
+    const configManager = testConfigManager(join(dir, 'config'));
+    configManager.set('surfaces.slack.enabled', true);
+    const featureFlags = createFeatureFlagManager();
+    featureFlags.loadFromConfig({ flags: { 'slack-surface': 'disabled' } });
+
+    const { surfaceRegistry, channelPlugins } = createChannelComposition({
+      configManager,
+      runtimeStore: createRuntimeStore(),
+      runtimeBus: new RuntimeEventBus(),
+      featureFlags,
+    });
+    channelPlugins.register({ id: 'slack', surface: 'slack', displayName: 'Slack', capabilities: ['egress'] });
+
+    expect(surfaceRegistry.syncConfiguredSurfaces().find((surface) => surface.kind === 'slack')?.enabled).toBe(false);
+    expect(channelPlugins.getBySurface('slack')).toBeNull();
   }));
 
   test('surface flags gate configured surfaces and channel plugins', () => withTempDir((dir) => {
@@ -1471,9 +1491,14 @@ describe('feature flag safe-default gates', () => {
       featureFlags: flags(['automation-domain']),
     });
 
-    expect(disabled.listJobs()).toEqual([]);
-    await expect(disabled.createJob({} as never)).rejects.toThrow(/automation-domain feature is turned off .*automation\.enabled/);
-    expect(enabled.listJobs()).toEqual([]);
+    try {
+      expect(disabled.listJobs()).toEqual([]);
+      await expect(disabled.createJob({} as never)).rejects.toThrow(/automation-domain feature is turned off .*automation\.enabled/);
+      expect(enabled.listJobs()).toEqual([]);
+    } finally {
+      disabled.stop();
+      enabled.stop();
+    }
   }));
 
   test('automation jobs require provider-qualified model routes while preserving explicit failover', async () => withTempDir(async (dir) => {
@@ -1587,11 +1612,14 @@ describe('feature flag safe-default gates', () => {
     // With nothing configured, a task manager built from a real (default)
     // config resolves enabled, the fix that closed this gap in TUI/agent
     // composition roots changes nothing for an existing install.
-    const configManager = new ConfigManager({ configDir: mkdtempSync(join(tmpdir(), 'gv-unified-tasks-default-')) });
-    expect(configManager.get('runtime.unifiedTasks')).toBe(true);
-    const { deriveFeatureStates } = await import('../platform/src/platform/runtime/feature-flags/feature-settings.js');
-    const states = deriveFeatureStates(configManager);
-    expect(states['unified-runtime-task']).toBe('enabled');
+    const configDir = mkdtempSync(join(tmpdir(), 'gv-unified-tasks-default-'));
+    try {
+      const configManager = new ConfigManager({ configDir });
+      expect(configManager.get('runtime.unifiedTasks')).toBe(true);
+      const { deriveFeatureStates } = await import('../platform/src/platform/runtime/feature-flags/feature-settings.js');
+      const states = deriveFeatureStates(configManager);
+      expect(states['unified-runtime-task']).toBe('enabled');
+    } finally { rmSync(configDir, { recursive: true, force: true }); }
   });
 
   test('permission-divergence-dashboard and policy-as-code gate factories', () => {

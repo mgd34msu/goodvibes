@@ -296,7 +296,7 @@ export function buildHomeAssistantManifest(deps: Pick<BuiltinChannelRuntimeDeps,
   // substitutes this host's LAN address, or yields nothing so the manifest
   // advertises no URL rather than an unreachable one.
   const baseUrl = resolveReachableBaseUrl(deps.configManager, 'off-host') ?? '';
-  const eventType = String(deps.configManager.get('surfaces.homeassistant.eventType') ?? HOME_ASSISTANT_DEFAULT_EVENT_TYPE);
+  const eventType = resolveHomeAssistantEventType(deps.configManager);
   const deviceId = String(deps.configManager.get('surfaces.homeassistant.deviceId') ?? 'goodvibes-daemon') || 'goodvibes-daemon';
   return {
     protocolVersion: 1,
@@ -346,12 +346,13 @@ export function buildHomeAssistantManifest(deps: Pick<BuiltinChannelRuntimeDeps,
     events: {
       outboundEventType: eventType,
       inboundWebhookPath: HOME_ASSISTANT_WEBHOOK_PATH,
-      inboundSecretHeaders: ['x-goodvibes-homeassistant-secret', 'authorization'],
+      inboundSecretHeaders: ['x-goodvibes-homeassistant-secret', 'x-goodvibes-webhook-secret', 'authorization'],
     },
     recommendedServices: [
       { name: 'goodvibes.prompt', target: 'config_entry', description: 'Submit a normal prompt through an isolated daemon chat session.' },
       { name: 'goodvibes.cancel', target: 'config_entry', description: 'Cancel an active Home Assistant conversation session.' },
       { name: 'goodvibes.status', target: 'config_entry', description: 'Inspect daemon and Home Assistant conversation status.' },
+      { name: 'goodvibes.call_tool', target: 'config_entry', description: 'Call a daemon tool from Home Assistant.' },
     ],
     metadata: {
       configKeys: [
@@ -395,10 +396,23 @@ export async function resolveHomeAssistantAccessToken(deps: {
   readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
   readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveSecret'> | undefined;
 }): Promise<string | null> {
-  return await deps.serviceRegistry?.resolveSecret('homeassistant', 'primary')
-    || await resolveConfiguredSecret(deps, deps.configManager.get('surfaces.homeassistant.accessToken'))
-    || firstNonEmpty(...HOME_ASSISTANT_TOKEN_ENV.map((key) => process.env[key]))
-    || null;
+  const registered = await deps.serviceRegistry?.resolveSecret('homeassistant', 'primary');
+  if (registered) return registered;
+  const configured = deps.configManager.get('surfaces.homeassistant.accessToken');
+  if (configured !== undefined && configured !== null && (typeof configured !== 'string' || configured.trim().length > 0)) {
+    // A configured reference that does not resolve must not quietly switch to
+    // whichever account the environment happens to name.
+    const resolved = await resolveConfiguredSecret(deps, configured);
+    if (!resolved) throw new Error('Could not resolve the Home Assistant access token referenced by surfaces.homeassistant.accessToken');
+    return resolved;
+  }
+  return firstNonEmpty(...HOME_ASSISTANT_TOKEN_ENV.map((key) => process.env[key])) ?? null;
+}
+
+/** The event type outbound messages are published as; an empty setting means the default. */
+export function resolveHomeAssistantEventType(configManager: ConfigReader): string {
+  return firstNonEmpty(String(configManager.get('surfaces.homeassistant.eventType') ?? ''))
+    ?? HOME_ASSISTANT_DEFAULT_EVENT_TYPE;
 }
 
 export async function resolveHomeAssistantWebhookSecret(deps: {
@@ -414,8 +428,13 @@ export async function resolveHomeAssistantWebhookSecret(deps: {
 
 async function checkHomeAssistantStatus(deps: BuiltinChannelRuntimeDeps): Promise<Record<string, unknown>> {
   const baseUrl = resolveHomeAssistantBaseUrl(deps.configManager, deps.serviceRegistry);
-  const token = await resolveHomeAssistantAccessToken(deps);
   if (!baseUrl) return { ok: false, configured: false, error: 'Home Assistant instance URL is not configured.' };
+  let token: string | null;
+  try {
+    token = await resolveHomeAssistantAccessToken(deps);
+  } catch (error) {
+    return { ok: false, configured: true, baseUrl, error: error instanceof Error ? error.message : String(error) };
+  }
   const client = new HomeAssistantIntegration({ baseUrl, accessToken: token ?? undefined });
   try {
     const api = await client.getApiStatus();
@@ -503,7 +522,7 @@ async function publishGoodVibesEvent(deps: BuiltinChannelRuntimeDeps, input?: Re
   const body = readString(input?.body ?? input?.message ?? input?.text);
   if (!body) return { ok: false, error: 'body is required.' };
   const eventType = readString(input?.eventType ?? input?.event_type)
-    ?? String(deps.configManager.get('surfaces.homeassistant.eventType') || HOME_ASSISTANT_DEFAULT_EVENT_TYPE);
+    ?? resolveHomeAssistantEventType(deps.configManager);
   const result = await (await createHomeAssistantClient(deps)).publishGoodVibesEvent(eventType, {
     type: readString(input?.type) ?? 'message',
     body,

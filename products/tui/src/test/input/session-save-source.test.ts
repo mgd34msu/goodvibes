@@ -8,8 +8,8 @@
  *   'user', the operator directly asked for this file to exist: /save,
  *            /session save, /session fork, /session rename's backfill, and
  *            the crash-recovery restore they accepted in the startup modal.
- *   'auto', machinery: per-turn persistence and the journal-replay
- *            gap-closure write.
+ *   'auto', machinery: per-turn persistence and the write that closes a
+ *            replayed journal gap (covered in core/session-resume-core.test.ts).
  *
  * Getting this backwards is silent and slow: a session the user deliberately
  * kept quietly disappears on a later sweep, and nothing points at the save
@@ -21,6 +21,7 @@ import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions
 import type { SessionSurface } from '@/runtime/index.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { ConversationManager } from '../../core/conversation.ts';
+import { wireTurnEventHandlers, type WireTurnEventHandlersOptions } from '../../core/turn-event-wiring.ts';
 import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';
 import { registerSessionContentCommands } from '../../input/commands/session-content.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
@@ -128,6 +129,37 @@ describe('the standalone /save command', () => {
 });
 
 describe('automatic persistence is stamped as automatic', () => {
+  test('the save at the end of a turn is an automatic save', () => {
+    const sm = new SessionManager(tmpDir, { surface });
+    const listeners = new Map<string, Array<(event: unknown) => void>>();
+    const bus = { on: (type: string, handler: (event: unknown) => void) => { listeners.set(type, [...(listeners.get(type) ?? []), handler]); return () => {}; } };
+    const conversation = new ConversationManager(() => 80);
+    conversation.fromJSON({ messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'hi' }] as never[], title: 'Turn title', titleSource: 'auto' as never });
+    wireTurnEventHandlers({
+      events: { turns: bus, tools: bus, agents: bus, contracts: bus } as unknown as WireTurnEventHandlersOptions['events'],
+      conversation,
+      runtime: { sessionId: 'per-turn-session', model: 'm', provider: 'p' },
+      orchestrator: { lastInputTokens: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      configManager: { get: (): unknown => undefined },
+      providerRegistry: {
+        getCurrentModel: () => ({ contextWindow: 200_000, id: 'm' }),
+        getContextWindowForModel: (m: { contextWindow: number }) => m.contextWindow,
+      },
+      systemMessageRouter: { high: () => {}, low: () => {}, routeSystemMessage: () => {} },
+      hookDispatcher: { fire: async () => ({ ok: true }) } as unknown as WireTurnEventHandlersOptions['hookDispatcher'],
+      surface,
+      gitStatusProvider: { refresh: async () => null },
+      lastGitInfoRef: { value: null },
+      buildSessionContinuityHints: () => ({ pendingApprovals: 0 }),
+      render: () => {},
+      webhookNotifier: null,
+      _clock: () => 0,
+    });
+
+    for (const handler of listeners.get('TURN_COMPLETED') ?? []) handler({ type: 'TURN_COMPLETED', turnId: 't1', response: 'hi', stopReason: 'completed' });
+
+    expect(sm.getMeta('per-turn-session')?.saveSource).toBe('auto');
+  });
 });
 
 test.each([{ args: [] }, { args: ['Finish', 'the', 'existing', 'review.'] }])('/retry preserves completed tool receipts while submitting the requested retry', async ({ args }) => {
@@ -162,7 +194,8 @@ for (const command of ['fork', 'save', 'resume'] as const) {
     };
     try {
       await native.waiting; expect(native.orchestrator.isThinking).toBe(false);
-      await handleSessionWorkflowCommand([command, 'destination'], ctx);
+      // The destination holds another conversation, so saving over it is confirmed.
+      await handleSessionWorkflowCommand(command === 'save' ? [command, 'destination', '--yes'] : [command, 'destination'], ctx);
       expect(cancelled).toBe(1); expect(ctx.session.runtime.sessionId).not.toBe('current-session');
       native.release(); expect(await result).toMatchObject({ status: 'rejected', reason: { name: 'AbortError' }, signalAborted: true, messageCount: 0 });
       expect(native.conversation.getMessageCount()).toBe(0);

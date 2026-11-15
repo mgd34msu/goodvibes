@@ -15,6 +15,9 @@ const fields: Readonly<Record<FieldKind, ReadonlySet<string>>> = {
     'domain', 'eventtype', 'source', 'turnid', 'stopreason', 'model', 'modelid', 'provider', 'providerid', 'registrykey', 'site', 'universe', 'kind', 'type', 'category', 'code', 'status', 'state',
     'count', 'tokencount', 'maxtokens', 'maxoutputtokens', 'totaltokens', 'inputtokens', 'outputtokens', 'cachereadtokens', 'cachewritetokens',
     'durationms', 'latencyms', 'elapsedms', 'timestamp', 'at', 'attempt', 'attempts', 'retryafterms', 'size', 'bytes', 'limit', 'total',
+    // Where and why a file or process operation failed. `command` is the program name, never its arguments.
+    'path', 'filepath', 'stalepath', 'quarantinepath', 'syscall', 'command', 'exitcode', 'signal', 'label',
+    'depth', 'maxdepth', 'reaped', 'preservedunknown', 'argcount', 'agems', 'delayms',
     'active', 'enabled', 'success', 'valid', 'complete', 'cached', 'recoverable', 'stable', 'found',
     'loadedmodels', 'loadedmodelcount', 'toolsupport', 'schemastatus', 'resourcepressure', 'memoryusagepercent', 'vramusagepercent']),
 };

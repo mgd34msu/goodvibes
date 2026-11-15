@@ -2,6 +2,18 @@ import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 
+/**
+ * Shows a path under the home directory as `~/...`. The account name and
+ * layout of the home directory are not needed by a model or a provider log;
+ * the owner can still find the file.
+ */
+export function homeRelativePath(path: string, home: string | null | undefined): string {
+  const root = home?.replace(/[\\/]+$/, '');
+  if (!root || !path) return path;
+  if (path === root) return '~';
+  return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`) ? `~${path.slice(root.length)}` : path;
+}
+
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -159,13 +171,57 @@ export function output(value: unknown): { readonly success: true; readonly outpu
   };
 }
 
+/**
+ * Reports the outcome of a nested model-tool dispatch. A failed nested call is
+ * a failed tool result at this layer too, so retry policy, tool cards and
+ * execution history do not record a success for an effect that did not happen.
+ * The status body stays in `output` for callers that read it.
+ */
+export function nestedToolOutput(
+  result: { readonly success: boolean },
+  body: Readonly<Record<string, unknown>>,
+): { readonly success: boolean; readonly output: string; readonly error?: string } {
+  const text = JSON.stringify({ status: result.success ? 'executed_model_tool' : 'model_tool_failed', ...body }, null, 2);
+  if (result.success) return { success: true, output: text };
+  const reason = typeof body.error === 'string' && body.error.trim() ? body.error : 'The nested model tool reported a failure.';
+  return { success: false, output: text, error: `${typeof body.tool === 'string' ? `${body.tool} failed: ` : ''}${reason}` };
+}
+
+const EFFECT_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+  'held', 'unavailable', 'blocked', 'unsupported', 'failed', 'not_found', 'no_checkpoint_written',
+  'keybinding_route_unavailable', 'model_tool_failed', 'missing_action', 'unsupported_setup_item', 'missing_smoke_plan',
+  // The handler ran its check and did not do what was asked: the binding is not live, the clipboard or surface was not used,
+  // or the request named nothing / more than one thing, so no effect was chosen.
+  'not_applied', 'unsupported_keybinding_action', 'not_pasted', 'not_opened', 'ambiguous', 'missing_lookup', 'reading-held',
+  'ambiguous_ui_surface', 'unknown_ui_surface',
+]);
+
+/**
+ * Reports the result of an effect handler. A handler that refused, could not
+ * run, or wrote nothing answers with one of the failure statuses; that is a
+ * failed tool result, with the handler's own body kept in `output`, so the
+ * result flag and tool cards agree with the status. Real no-ops
+ * (`nothing_to_recover`, `completed`) stay successes.
+ */
+export function effectOutput(value: unknown): { readonly success: boolean; readonly output: string; readonly error?: string } {
+  const body = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
+  const status = body?.status;
+  if (!body || typeof status !== 'string' || !EFFECT_FAILURE_STATUSES.has(status)) return output(value);
+  const reason = [body.error, body.reason, body.usage, body.note].find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+  return { success: false, output: JSON.stringify(value, null, 2), error: `${status}: ${reason ?? (Array.isArray(body.candidates) ? 'the request matched more than one target, so nothing was done. Repeat with one exact id from candidates.' : 'the requested effect did not happen.')}` };
+}
+
 export function error(message: string): { readonly success: false; readonly error: string } { return { success: false, error: message }; }
 
+function admissionRefusal(action: string): string {
+  return `${action} was not run and nothing was changed: it needs the owner to grant current recorded effect admission for this action. confirm and explicitUserRequest are context only and do not grant it. Ask the owner to approve the action in the visible approval prompt, then repeat the call unchanged.`;
+}
+
 export function requireConfirmedAction(args: Record<string, unknown>, options: Parameters<Tool['execute']>[1], action: string): string | null {
-  if (!harnessCatalogInvocationAuthority(args, options)) return `${action} requires current recorded effect admission.`;
+  if (!harnessCatalogInvocationAuthority(args, options)) return admissionRefusal(action);
   const mode = Object.getOwnPropertyDescriptor(args, 'mode');
   const outward = mode && 'value' in mode && typeof mode.value === 'string' && ['run_setup_smoke', 'run_local_model_smoke', 'run_memory_refinement',
     'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel'].includes(mode.value);
   return harnessCatalogInvocationAuthority(args, options, outward ? 'send' : 'write')
-    ? null : `${action} requires current recorded effect admission.`;
+    ? null : admissionRefusal(action);
 }

@@ -1,4 +1,5 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { isTextBackspace } from '@goodvibes-jev/engine/terminal-shell';
 import type { AgentWorkspace } from './agent-workspace.ts';
 
 /** Lines per PageUp/PageDown in the action-result block. */
@@ -20,7 +21,7 @@ export function handleAgentWorkspaceToken(
       else if (token.logicalName === 'enter') workspace.submitEditorFieldOrForm(requestRender);
       else if (token.logicalName === 'tab' || token.logicalName === 'down') workspace.moveEditorField(1);
       else if (token.logicalName === 'up') workspace.moveEditorField(-1);
-      else if (token.logicalName === 'backspace' || token.logicalName === 'delete') workspace.editorBackspace();
+      else if (isTextBackspace(token.logicalName)) workspace.editorBackspace();
       else if (token.logicalName === 'j' && token.ctrl === true) workspace.appendEditorNewline();
     }
     requestRender();
@@ -35,7 +36,7 @@ export function handleAgentWorkspaceToken(
       else if (token.logicalName === 'down') workspace.moveDown();
       else if (token.logicalName === 'home') workspace.jumpHome();
       else if (token.logicalName === 'end') workspace.jumpEnd();
-      else if (token.logicalName === 'backspace' || token.logicalName === 'delete') workspace.actionSearchBackspace();
+      else if (isTextBackspace(token.logicalName)) workspace.actionSearchBackspace();
       else if (token.logicalName === 'space') workspace.appendActionSearchText(' ');
       requestRender();
       return true;

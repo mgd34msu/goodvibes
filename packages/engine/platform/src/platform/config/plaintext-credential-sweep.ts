@@ -52,7 +52,7 @@ import type { SecretScope, SecretStorageMedium } from './secrets.js';
 export type PlaintextSweepOutcome =
   /** The literal moved into the store and the config now holds a reference. */
   | 'moved'
-  /** The store already held it; the config now holds a reference. */
+  /** The store already held this exact value; the config now holds a reference. */
   | 'already-stored'
   /** The store write, or its read-back, failed. The literal was left in place. */
   | 'left-in-place';
@@ -102,6 +102,10 @@ export function secretReferenceFor(secretKey: string): string {
   return `goodvibes://secrets/goodvibes/${encodeURIComponent(secretKey)}`;
 }
 
+/** Said when the config literal and the stored secret under the same name disagree. */
+export const DIFFERS_FROM_STORED_DETAIL =
+  'the value in the settings file differs from the one already in the secret store, so neither was changed; remove the one you do not want';
+
 /** Read a config value without letting a missing section throw. */
 function safeRead(config: SweepableConfig, key: string): string | null {
   try {
@@ -129,10 +133,12 @@ async function sweepOne(
 
   const existing = await secrets.get(secretKey);
   if (existing !== null && existing.length > 0) {
-    // The store already has a value under this name. Do NOT overwrite it with
-    // the config literal: the stored one is what every reader has been
-    // resolving, and the literal may be an older copy someone pasted. Point the
-    // config at the store and leave the value alone.
+    if (existing !== literal) {
+      // The owner may have pasted a newer credential into the file, or the file
+      // may hold an older copy; nothing here can tell which. Discarding either
+      // loses a credential, so both stay where they are and the owner decides.
+      return { ...base, outcome: 'left-in-place', detail: DIFFERS_FROM_STORED_DETAIL };
+    }
     config.set(configKey, secretReferenceFor(secretKey));
     return { ...base, outcome: 'already-stored' };
   }
@@ -256,7 +262,9 @@ export function describePlaintextSweep(report: PlaintextSweepReport): string {
   const parts: string[] = [];
   if (report.moved > 0) parts.push(`${report.moved} moved out of config into the encrypted store`);
   const already = report.entries.filter((entry) => entry.outcome === 'already-stored').length;
-  if (already > 0) parts.push(`${already} config entries now point at the copy already in the store`);
-  if (report.failed > 0) parts.push(`${report.failed} could not be verified in the store and were left exactly as they were`);
+  if (already > 0) parts.push(`${already} config entries now point at the identical copy already in the store`);
+  const differing = report.entries.filter((entry) => entry.detail === DIFFERS_FROM_STORED_DETAIL).length;
+  if (differing > 0) parts.push(`${differing} differ from the value already in the store and were left exactly as they were`);
+  if (report.failed - differing > 0) parts.push(`${report.failed - differing} could not be verified in the store and were left exactly as they were`);
   return `Credentials in config: ${parts.join('; ')}.`;
 }

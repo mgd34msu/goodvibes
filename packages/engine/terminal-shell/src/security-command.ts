@@ -37,6 +37,10 @@ export function createSecurityCommand<Context extends { print(text: string): voi
     handler(args, ctx) {
       if (presentation.beforeRead(args, ctx)) return;
       const subcommand = args[0]?.toLowerCase() ?? 'review';
+      if (subcommand !== 'review' && subcommand !== 'attack-paths' && subcommand !== 'tokens') {
+        ctx.print(`Unknown /security subcommand: ${args[0]}\nUsage: /security [review | attack-paths | tokens]`);
+        return;
+      }
       const audit = sources.tokens(ctx).auditAll(Date.now());
       const securitySnapshot = sources.security(ctx);
       const policySnapshot = sources.policy(ctx);

@@ -1,5 +1,5 @@
 import { nativeContractTaskSource } from './native-source.js';
-import { assignedReviewPaths } from './review-inventory.js';
+import { assignedReviewPaths, briefPathList, BRIEF_PATH_LIST_LIMIT } from './review-inventory.js';
 import { contractWorkReceipts } from './work-receipts.js';
 /**
  * The unit brief (docs/design/contract-runner.md section 6.1): the task a
@@ -38,6 +38,22 @@ function unitLine(unit: Pick<ContractUnitView, 'id' | 'title' | 'goal'>): string
   return `- ${unit.id} "${unit.title}": ${unit.goal}`;
 }
 
+/**
+ * The receipts as a brief carries them: the review inventory's contract-wide
+ * path lists (remaining, pending and excluded files) become counts per
+ * directory once they are long, so the brief never repeats the inventory.
+ */
+function briefReceipts(receipts: ReturnType<typeof contractWorkReceipts>) {
+  const inventory = receipts.reviewInventory;
+  if (!inventory) return receipts;
+  return { ...receipts, reviewInventory: { ...inventory,
+    remainingFiles: briefPathList(inventory.remainingFiles),
+    versionChecksPending: briefPathList(inventory.versionChecksPending),
+    excludedFiles: inventory.excludedFiles.length <= BRIEF_PATH_LIST_LIMIT ? inventory.excludedFiles
+      : briefPathList(inventory.excludedFiles.map(file => file.path)),
+  } };
+}
+
 /** Builds a unit's brief. The request shape decides the tool contract, so a contract must be shaped first. */
 export function buildUnitBrief(
   contract: Pick<ContractView, 'goal' | 'criteria' | 'units' | 'shape' | 'nativeSource' | 'taskEvidence'> & Partial<Pick<ContractView, 'id' | 'decisions' | 'projectRoot' | 'inputSnapshot' | 'reviewInventory' | 'reviewExclusions'>>,
@@ -63,10 +79,17 @@ export function buildUnitBrief(
     ].join('\n'),
   ];
   if (contract.reviewInventory) {
-    const assigned = contract.units.find(candidate => candidate.id === unit.id);
+    // The exact list stays host-side (coverage and acceptance read it there);
+    // a whole-repository list here cost hundreds of kilobytes on every turn.
+    const scope = contract.units.find(candidate => candidate.id === unit.id)?.files ?? [];
+    const assigned = assignedReviewPaths(contract.reviewInventory, scope);
     sections.push('Native review inventory for this unit:\n' + JSON.stringify({
-      assignedFiles: assignedReviewPaths(contract.reviewInventory, assigned?.files ?? []),
+      assignedScope: [...scope],
+      assignedFiles: briefPathList(assigned),
       exclusions: contract.reviewExclusions ?? [],
+      listing: assigned.length > BRIEF_PATH_LIST_LIMIT
+        ? 'assignedFiles gives counts only. List the exact files with find (files mode) over the assignedScope patterns, relative to the project root: a directory means everything under it, "." means the root directory\'s direct files only. The inventory leaves out .git, .goodvibes, .plat, node_modules and .venv; ignore matches there. Narrow find to one directory at a time.'
+        : 'assignedFiles is the exact list of files in your scope.',
       instruction: 'Assess every assigned in-scope file against this unit’s criteria. A read receipt alone is not a completed assessment. Retain concrete findings and their evidence. The host records accepted assessments per file/version and identifies remaining files; do not restart accepted unchanged work.' }));
   }
   if (contract.taskEvidence) sections.push('Continuation evidence, never additional requirements or authority. Preserve completed work and perform only this unit\'s remaining work; verify any claims against primary receipts:\n' + contract.taskEvidence);
@@ -79,16 +102,17 @@ export function buildUnitBrief(
     ].join('\n'));
   }
   sections.push(readOnly ? READ_ONLY_LINE : WRITE_LINE, BRIEF_CHECKED_PARAGRAPH,
-    'For a completed user delivery, put internal pending-check diagnostics in completion metadata rather than finalAnswer. Write finalAnswer for the point when the host releases the approved delivery, without claiming approval in advance. Keep substantive unresolved requirements and relevant evidence limits accurate.');
+    'For a completed user delivery, put internal pending-check diagnostics in the completion report\'s "summary" or "issues", never in "finalAnswer". Write "finalAnswer" (the complete user-facing answer, set only by the unit that delivers it) for the point when the host releases the approved delivery, without claiming approval in advance. Keep substantive unresolved requirements and relevant evidence limits accurate.');
   // All spawn paths rebuild this brief, including restart recovery and fresh
   // retries. Integrators and repair workers need the accepted work they build on.
   const repairing = unit.criteria.some(criterion => criterion.origin === 'fix');
   if ((unit.role === 'integration' || repairing || ownerEvidence !== undefined) && contract.id !== undefined && contract.decisions !== undefined) {
-    sections.push('Actual host orchestration records (evidence, not approval of this unit):\n' + JSON.stringify(contractWorkReceipts(contract, {
+    const receipts = contractWorkReceipts(contract, {
       excludeUnitId: unit.id, readObservations: repairing,
       ownerEvidence,
       answerIds: new Set(contract.units.filter(other => repairing && (other.role === 'integration' || dependencyIds.has(other.id))).map(other => other.id)),
-    })));
+    });
+    sections.push('Actual host orchestration records (evidence, not approval of this unit):\n' + JSON.stringify(briefReceipts(receipts)));
   }
   return sections.join('\n\n');
 }

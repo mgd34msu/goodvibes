@@ -1,5 +1,6 @@
 import { ProviderAttemptDeniedError, revalidateProviderAttempt } from './attempt-guard.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { ProviderError } from '../types/errors.js';
 import type { ToolCall, ToolDefinition } from '../types/tools.js';
@@ -43,6 +44,7 @@ type OllamaChatChunk = {
     }>;
   };
   done?: boolean | undefined;
+  error?: unknown;
   done_reason?: string | undefined;
   prompt_eval_count?: number | undefined;
   eval_count?: number | undefined;
@@ -86,23 +88,36 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    return (await instrumentedLlmCall(
-      () => withRetry(async () => {
-      const model = params.model || this.defaultModel;
+    const model = params.model || this.defaultModel;
 
-      if (canUseNativeOllamaChat(params.messages)) {
-        try {
-          return await this.chatViaNativeOllama(params, model);
-        } catch (err: unknown) {
-          if (err instanceof ProviderAttemptDeniedError) throw err;
-          if (!(await shouldUseOtherApi(err, 'providers.ollama.native-chat'))) {
-            throw normalizeProviderError(err, this.name, 'chat', 'request');
+    if (canUseNativeOllamaChat(params.messages)) {
+      // A retry after text reached the caller would deliver the answer twice.
+      const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
+      const nativeParams: ChatRequest = onDelta ? { ...params, onDelta } : params;
+      // Only the native attempt is retried and recorded here. The compat
+      // provider retries and records its own call, so running it inside this
+      // wrapper would multiply the attempts and count one logical call twice.
+      const native = (await instrumentedLlmCall(
+        () => withRetry(async (): Promise<ChatResponse | null> => {
+          try {
+            return await this.chatViaNativeOllama(nativeParams, model);
+          } catch (err: unknown) {
+            if (err instanceof ProviderAttemptDeniedError) throw err;
+            // Once the stream has produced output the other API would answer from the start again.
+            if (err instanceof ProviderError && err.phase === 'stream') throw err;
+            if (!(await shouldUseOtherApi(err, 'providers.ollama.native-chat'))) {
+              throw normalizeProviderError(err, this.name, 'chat', 'request');
+            }
+            return null;
           }
-        }
-      }
+        }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry),
+        // A null result hands the request to the compat provider, which records it.
+        { provider: this.name, model, isHandover: (result) => result === null },
+      )).result;
+      if (native) return native;
+    }
 
-      return this.compatProvider.chat(params);
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry), { provider: this.name, model: params.model || this.defaultModel })).result;
+    return this.compatProvider.chat(params);
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -174,7 +189,6 @@ export class OllamaProvider implements LLMProvider {
       models: {
         models: this.models,
         embeddingModel: this.embeddingModel,
-        embeddingDimensions: 384,
       },
       usage: {
         streaming: true,
@@ -241,10 +255,19 @@ export class OllamaProvider implements LLMProvider {
     let inputTokens = 0;
     let outputTokens = 0;
     let doneReason = '';
-    let finalToolCalls: ToolCall[] = [];
-    const emittedToolCalls = new Set<string>();
+    let sawDone = false;
+    const finalToolCalls: ToolCall[] = [];
 
     await consumeNDJSON(response.body, (chunk) => {
+      if (chunk.error !== undefined && chunk.error !== null) {
+        const detail = typeof chunk.error === 'string' ? chunk.error : JSON.stringify(chunk.error);
+        throw new ProviderError(`Ollama native chat failed mid-stream: ${detail}`, {
+          statusCode: 502,
+          provider: this.name,
+          operation: 'chat',
+          phase: 'stream',
+        });
+      }
       const message = chunk.message;
       const content = typeof message?.content === 'string' ? message.content : '';
       if (content) {
@@ -258,11 +281,12 @@ export class OllamaProvider implements LLMProvider {
       }
 
       if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
-        const normalized = normalizeOllamaToolCalls(message.tool_calls);
-        finalToolCalls = normalized;
-        normalized.forEach((call, index) => {
-          if (emittedToolCalls.has(call.id)) return;
-          emittedToolCalls.add(call.id);
+        // Each chunk carries the calls it adds; ids continue from the calls
+        // already seen so parallel calls streamed in separate chunks stay distinct.
+        const normalized = normalizeOllamaToolCalls(message.tool_calls, finalToolCalls.length);
+        normalized.forEach((call) => {
+          const index = finalToolCalls.length;
+          finalToolCalls.push(call);
           const argumentsText = JSON.stringify(call.arguments);
           const partial: PartialToolCall = {
             index,
@@ -275,11 +299,23 @@ export class OllamaProvider implements LLMProvider {
       }
 
       if (chunk.done) {
+        sawDone = true;
         doneReason = typeof chunk.done_reason === 'string' ? chunk.done_reason : doneReason;
         inputTokens = typeof chunk.prompt_eval_count === 'number' ? chunk.prompt_eval_count : inputTokens;
         outputTokens = typeof chunk.eval_count === 'number' ? chunk.eval_count : outputTokens;
       }
     });
+
+    if (!sawDone) {
+      // A cut connection or an unloaded model ends the stream without the final
+      // chunk; reporting that as a finished turn would hide a truncated answer.
+      throw new ProviderError('Ollama native chat stream ended before the final chunk; the answer is incomplete.', {
+        statusCode: 502,
+        provider: this.name,
+        operation: 'chat',
+        phase: 'stream',
+      });
+    }
 
     const stopReason = await readOllamaStopReason(doneReason, finalToolCalls.length > 0, 'providers.ollama.stop-reason');
 
@@ -366,12 +402,14 @@ function contentPartsToOllamaMessage(
 
 function normalizeOllamaToolCalls(
   calls: NonNullable<NonNullable<OllamaChatChunk['message']>['tool_calls']>,
+  firstIndex: number,
 ): ToolCall[] {
-  return calls.flatMap((call, index) => {
+  let next = firstIndex;
+  return calls.flatMap((call) => {
     const fn = call.function;
     if (!fn || typeof fn.name !== 'string' || fn.name.length === 0) return [];
     return [{
-      id: `ollama_call_${index}`,
+      id: `ollama_call_${next++}`,
       name: fn.name,
       arguments: fn.arguments && typeof fn.arguments === 'object' ? fn.arguments : {},
     }];
@@ -401,24 +439,29 @@ async function consumeNDJSON(
   let buffer = '';
 
   const reader = body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      onChunk(JSON.parse(trimmed) as OllamaChatChunk);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        onChunk(JSON.parse(trimmed) as OllamaChatChunk);
+      }
     }
-  }
 
-  buffer += decoder.decode();
-  const trailing = buffer.trim();
-  if (trailing) {
-    onChunk(JSON.parse(trailing) as OllamaChatChunk);
+    buffer += decoder.decode();
+    const trailing = buffer.trim();
+    if (trailing) {
+      onChunk(JSON.parse(trailing) as OllamaChatChunk);
+    }
+  } finally {
+    // Release the socket when a chunk handler throws or the line is not JSON.
+    await reader.cancel().catch(() => undefined);
   }
 }
 

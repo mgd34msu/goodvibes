@@ -1,3 +1,5 @@
+import { envFlag } from './platform/utils/env-flag.js';
+
 export interface GoodVibesCloudflareQueue<Body = unknown> {
   send(message: Body): Promise<void>;
 }
@@ -33,6 +35,8 @@ export type GoodVibesCloudflareQueuePayload =
   | {
       readonly type: 'batch.job.create';
       readonly body: Record<string, unknown>;
+      /** Stable id minted when the job is queued; every redelivery sends the same one as `source.id`. */
+      readonly jobId?: string | undefined;
       readonly enqueuedAt?: number | undefined;
     };
 
@@ -88,7 +92,7 @@ export function createGoodVibesCloudflareWorker(
       if (!daemonPath) return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
 
       if (url.pathname === '/batch/jobs/enqueue' && request.method === 'POST') {
-        if (!options.queueJobPayloads && env.GOODVIBES_QUEUE_JOB_PAYLOADS !== 'true') {
+        if (!options.queueJobPayloads && !envFlag(env.GOODVIBES_QUEUE_JOB_PAYLOADS)) {
           return json({
             error: 'Queueing full batch job payloads is disabled. Post /batch/jobs to proxy directly to the daemon, or enable queueJobPayloads explicitly.',
             code: 'QUEUE_PAYLOADS_DISABLED',
@@ -101,6 +105,7 @@ export function createGoodVibesCloudflareWorker(
         await queue.send({
           type: 'batch.job.create',
           body: toRecord(body),
+          jobId: crypto.randomUUID(),
           enqueuedAt: Date.now(),
         });
         return json({ queued: true }, 202);
@@ -111,11 +116,22 @@ export function createGoodVibesCloudflareWorker(
     async queue(batch, env, _ctx) {
       for (const message of batch.messages) {
         try {
+          const payload = message.body as { readonly type?: unknown } | null | undefined;
+          if (payload?.type !== 'batch.tick' && payload?.type !== 'batch.job.create') {
+            // A message of an unknown shape can never succeed; redelivering it only loops.
+            console.warn('GoodVibes worker queue message dropped: unknown type', { type: payload?.type });
+            message.ack?.();
+            continue;
+          }
           const response = await handleQueuePayload(message.body, env, options);
           if (response.ok) {
             message.ack?.();
-          } else {
+          } else if (isRetryableStatus(response.status)) {
             message.retry?.();
+          } else {
+            // Any other 4xx (a bad body) fails the same way every time.
+            console.warn('GoodVibes worker queue message rejected by the daemon', { status: response.status });
+            message.ack?.();
           }
         } catch (error) {
           // Warn rather than re-throw: a thrown error here would surface as an
@@ -126,12 +142,22 @@ export function createGoodVibesCloudflareWorker(
       }
     },
     async scheduled(_event, env) {
-      await proxyDaemonJson(env, options, '/api/batch/tick', {
+      const response = await proxyDaemonJson(env, options, '/api/batch/tick', {
         method: 'POST',
         body: JSON.stringify({ force: false }),
       });
+      if (!response.ok) {
+        // Throwing makes Cloudflare record the cron invocation as failed instead of green.
+        const excerpt = (await response.text().catch(() => '')).slice(0, 200);
+        throw new Error(`GoodVibes batch tick failed: daemon answered ${response.status}${excerpt ? ` ${excerpt}` : ''}`);
+      }
     },
   };
+}
+
+function isRetryableStatus(status: number): boolean {
+  // 401 and 403 are retried too: an operator who rotates the daemon token fixes them, and acking would lose the job.
+  return status === 408 || status === 429 || status === 401 || status === 403 || status >= 500;
 }
 
 async function handleQueuePayload(
@@ -151,7 +177,7 @@ async function handleQueuePayload(
       ...payload.body,
       source: {
         kind: 'cloudflare-queue',
-        id: typeof payload.body['id'] === 'string' ? payload.body['id'] : undefined,
+        id: typeof payload.body['id'] === 'string' ? payload.body['id'] : payload.jobId,
       },
     }),
   });

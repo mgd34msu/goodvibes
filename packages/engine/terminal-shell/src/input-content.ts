@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, lstatSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { basename, relative } from 'node:path';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import { pasteImageFromClipboard, pasteFromClipboard } from './clipboard.js';
+import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 const URL_REFERENCE_REGEX = /^https?:\/\/[^\s]+$/i;
 const CONTEXT_REFERENCE_REGEX = /(^|\s)@([^\s]+)/g;
 const CONTEXT_REFERENCE_TRAILING_PUNCTUATION = /[),.;:!?]+$/;
@@ -170,7 +171,8 @@ export function registerPaste(state: PasteRegistryState, content: string, projec
     if (IMAGE_EXTENSIONS.some(ext => trimmed.toLowerCase().endsWith(ext))) {
         try {
             const resolvedPath = resolveAndValidatePath(trimmed, projectRoot);
-            if (existsSync(resolvedPath)) {
+            // An oversize image stays a plain pasted path instead of being read into memory.
+            if (existsSync(resolvedPath) && statSync(resolvedPath).size <= MAX_IMAGE_ATTACH_BYTES) {
                 const data = readFileSync(resolvedPath);
                 const base64 = data.toString('base64');
                 const ext = trimmed.slice(trimmed.lastIndexOf('.'));
@@ -215,7 +217,9 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
     data: string;
     mediaType: string;
 }>, text: string, projectRoot: string, contextReferences = false): string | ContentPart[] {
-    let expanded = expandTextPastes(pasteRegistry, text);
+    // Inject files named in what the user typed BEFORE pasted text is spliced in: a paste of more than
+    // eight lines is shown only as a marker, so a `!@path` inside it was never seen or chosen by the user.
+    let expanded = text;
     const injectRegex = /(?:^|(?<=\s))!@(\S+)/g;
     let injectMatch;
     while ((injectMatch = injectRegex.exec(expanded)) !== null) {
@@ -230,8 +234,10 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
             logger.debug('expandPrompt: failed to read injected file', { path: filePath, error: summarizeError(err) });
         }
     }
+    // Same rule for `@path` references: only what the user typed is expanded, never text inside a collapsed paste.
     if (contextReferences)
         expanded = expandContextReferences(expanded, projectRoot);
+    expanded = expandTextPastes(pasteRegistry, expanded);
     const imageMarkerRegex = /\[IMAGE: (img\d+), [^\]]+\]/g;
     const imageMarkers: {
         marker: string;

@@ -335,12 +335,17 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
         deps.receipt(
           result.refusal === 'no-snapshot'
             ? 'Recovery snapshot could not be read; it was left on disk and will be offered again next launch.'
-            : `Recovery snapshot for session ${info.sessionId} could not be restored; the file was damaged, and reading it retired it. Nothing was changed in this session.`,
+            : result.refusal === 'apply-failed'
+              ? `Recovery snapshot for session ${info.sessionId} could not be restored; it was left on disk and will be offered again next launch. Nothing was changed in this session.`
+              : `Recovery snapshot for session ${info.sessionId} could not be restored; the file was damaged and held no conversation, so it was discarded. Nothing was changed in this session.`,
         );
         deps.render();
         return 'resume-failed';
       }
       deps.receipt(`Recovery snapshot restored: ${result.messageCount} message(s) from session ${info.sessionId}. The recovery point has been retired.`);
+      if (result.journalReplay.failed !== undefined) {
+        deps.receipt(`Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`);
+      }
       deps.render();
       return 'resumed';
     }

@@ -54,7 +54,7 @@ export function createAgentChannelSendTool(
   return {
     definition: {
       name: 'agent_channel_send',
-      description: 'Preview or deliver one message through one configured Agent target. Delivery requires current recorded effect admission.',
+      description: 'Preview or deliver one message through one configured Agent target. Exactly one of channel, route or webhook is required. Delivery requires current recorded effect admission.',
       parameters: {
         type: 'object',
         properties: {
@@ -68,19 +68,15 @@ export function createAgentChannelSendTool(
           },
           channel: {
             type: 'string',
-            description: 'Optional channel target. Use exactly one target field.',
+            description: 'Channel target. Give exactly one of channel, route or webhook.',
           },
           route: {
             type: 'string',
-            description: 'Optional route id or route:label. Use exactly one target field.',
+            description: 'Route id or route:label. Give exactly one of channel, route or webhook.',
           },
           webhook: {
             type: 'string',
-            description: 'Optional http(s) webhook URL. Use exactly one target field.',
-          },
-          link: {
-            type: 'string',
-            description: 'Optional link delivery target. Use exactly one target field.',
+            description: 'http(s) webhook URL. Give exactly one of channel, route or webhook.',
           },
           confirm: {
             type: 'boolean',
@@ -110,6 +106,11 @@ export function createAgentChannelSendTool(
         ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
         ...(readString(args.link) ? { link: readString(args.link) } : {}),
       };
+      // No delivery strategy handles a link target, so accepting one would pass
+      // the preview and the safety gate and then fail at delivery.
+      if (input.link) {
+        return failure('agent_channel_send cannot deliver to a link: no delivery strategy handles one. Use exactly one of channel, route or webhook.');
+      }
       let preview: ReturnType<typeof buildAgentChannelDeliveryPreview>;
       try {
         preview = buildAgentChannelDeliveryPreview(input);
@@ -124,7 +125,12 @@ export function createAgentChannelSendTool(
       const sources = ledgerSnapshot();
       const receiptPaths = options.shellPaths, receiptResolver = receiptPaths?.resolveUserPath, receiptHome = receiptPaths?.homeDirectory;
       const receiptPath = receiptPaths && agentChannelDeliveryReceiptPath(receiptPaths);
-      const receiptRoot = receiptHome && realpathSync(receiptHome);
+      let receiptRoot: string | undefined;
+      try {
+        receiptRoot = receiptHome ? realpathSync(receiptHome) : undefined;
+      } catch (error) {
+        return failure(`The Agent home directory is not available, so nothing was sent: ${error instanceof Error ? error.message : String(error)}`);
+      }
       const deliver = channelDeliveryRouter.deliver, listStrategies = channelDeliveryRouter.listStrategies;
       const strategies = listStrategies.call(channelDeliveryRouter).map(strategy => ({ strategy, canHandle: strategy.canHandle, deliver: strategy.deliver }));
       const assertCurrent = () => {
@@ -154,7 +160,7 @@ export function createAgentChannelSendTool(
           action: 'channel.send',
           // The target as the caller named it, not the resolved target object:
           // a refusal has to say the thing the reader typed.
-          description: `sending a channel message to ${input.channel ?? input.route ?? input.webhook ?? input.link ?? 'the configured target'}`,
+          description: `sending a channel message to ${input.channel ?? input.route ?? input.webhook ?? input.link ?? 'the named target'}`,
         },
         ledger,
         content: {
@@ -175,10 +181,22 @@ export function createAgentChannelSendTool(
       });
       assertCurrent();
       if (!outwardDecision.allowed) {
-        return failure(outwardDecision.reason ?? 'Outward channel delivery held.');
+        return failure([outwardDecision.reason ?? 'Outward channel delivery held.', outwardDecision.fix].filter(Boolean).join(' '));
       }
+      // Whether the provider already accepted the message. A check that fails
+      // after that point does not make the send a failure, and saying "held"
+      // would invite a retry that sends it twice.
+      let accepted: { readonly responseId: string | undefined } | undefined;
+      const trackedRouter = {
+        deliver: async (request: Parameters<typeof deliver>[0]) => {
+          const responseId = await deliver.call(channelDeliveryRouter, request);
+          accepted = { responseId };
+          return responseId;
+        },
+        listStrategies: () => listStrategies.call(channelDeliveryRouter),
+      };
       try {
-        const result = await deliverAgentChannelMessage(channelDeliveryRouter, input, { signal: executionOptions?.signal, assertCurrent });
+        const result = await deliverAgentChannelMessage(trackedRouter, input, { signal: executionOptions?.signal, assertCurrent });
         const lines = [formatAgentChannelDeliveryResult(result)];
         if (options.shellPaths) {
           try {
@@ -200,7 +218,16 @@ export function createAgentChannelSendTool(
         }
         return output(lines.join('\n'));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        const reason = error instanceof Error ? error.message : String(error);
+        if (accepted) {
+          return output([
+            'Agent channel delivery sent',
+            `  target ${input.channel ?? input.route ?? input.webhook}`,
+            ...(accepted.responseId ? [`  response ${accepted.responseId}`] : []),
+            `  note the message was accepted for delivery, then a follow-up check failed (${reason}); no delivery receipt was recorded and the send was not retried. Do not send it again.`,
+          ].join('\n'));
+        }
+        return failure(reason);
       }
     },
   };

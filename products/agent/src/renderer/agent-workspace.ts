@@ -301,11 +301,6 @@ function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
     case 'task-list-filter': return 'Filter task list';
     case 'task-show': return 'Show task';
     case 'task-output': return 'View task output';
-    case 'plan-seed': return 'Seed plan';
-    case 'plan-show': return 'Show plan';
-    case 'plan-approve': return 'Approve plan';
-    case 'plan-override': return 'Override plan';
-    case 'plan-clear': return 'Clear plan';
     case 'health-repair': return 'Repair health issue';
     case 'approval-review': return 'Review approval';
     case 'approval-approve': return 'Approve request';

@@ -18,6 +18,7 @@
  *             launched it, so a credential it executes with has exactly one
  *             home, and the TUI, the agent and the web UI all read that one.
  *
+ * Project stores are read last: they never shadow a user or daemon credential.
  * Read order puts the daemon tier FIRST among the file stores, which is the
  * secret-store form of the rule daemon-config-tier.ts already states for
  * settings: a stale copy left behind in a surface silo must never beat the
@@ -147,6 +148,18 @@ function userStore(layout: SecretStoreLayout, medium: SecretStorageMedium): Secr
     };
 }
 
+/**
+ * An ancestor-walk entry, except that the user's own store keeps its user tier.
+ * A project under the home directory reaches `<home>/.goodvibes/...` through the
+ * walk; labelling it `project` would make the operator's own references look
+ * like untrusted checkout data. The entry stays at its walk position.
+ */
+function ancestorStore(layout: SecretStoreLayout, root: string, medium: SecretStorageMedium): SecretStorePath {
+  const project = projectStore(layout, root, medium);
+  const user = userStore(layout, medium);
+  return project.path === user.path ? user : project;
+}
+
 function projectStore(layout: SecretStoreLayout, root: string, medium: SecretStorageMedium): SecretStorePath {
   return medium === 'secure'
     ? {
@@ -229,13 +242,18 @@ export function secretReadOrder(layout: SecretStoreLayout, includePlaintext: boo
   const ordered: SecretStorePath[] = [daemonStore(layout, 'secure')];
   if (includePlaintext) ordered.push(daemonStore(layout, 'plaintext'));
 
+  // Project stores sit in a checkout that may have come from anywhere, so they
+  // fill a gap and never shadow a credential the user or daemon already set.
+  const projectStores: SecretStorePath[] = [];
   for (const root of collectAncestorRoots(layout.projectRoot)) {
-    ordered.push(projectStore(layout, root, 'secure'));
-    if (includePlaintext) ordered.push(projectStore(layout, root, 'plaintext'));
+    const walked = [ancestorStore(layout, root, 'secure')];
+    if (includePlaintext) walked.push(ancestorStore(layout, root, 'plaintext'));
+    for (const store of walked) (store.scope === 'project' ? projectStores : ordered).push(store);
   }
 
   ordered.push(userStore(layout, 'secure'));
   if (includePlaintext) ordered.push(userStore(layout, 'plaintext'));
+  ordered.push(...projectStores);
   return uniquePaths(ordered);
 }
 
@@ -243,7 +261,7 @@ export function secretReadOrder(layout: SecretStoreLayout, includePlaintext: boo
 export function allSecretStores(layout: SecretStoreLayout): SecretStorePath[] {
   const ordered: SecretStorePath[] = [daemonStore(layout, 'secure'), daemonStore(layout, 'plaintext')];
   for (const root of collectAncestorRoots(layout.projectRoot)) {
-    ordered.push(projectStore(layout, root, 'secure'), projectStore(layout, root, 'plaintext'));
+    ordered.push(ancestorStore(layout, root, 'secure'), ancestorStore(layout, root, 'plaintext'));
   }
   ordered.push(userStore(layout, 'secure'), userStore(layout, 'plaintext'));
   return uniquePaths(ordered);

@@ -20,34 +20,45 @@ function describeNpmPackOutput(raw: string): string {
   return `${trimmed.length} characters of output beginning: ${preview}`;
 }
 // npm wrappers (version-manager shims, "npm notice" lines) sometimes print plain text
-// on stdout alongside the JSON document. Take the first balanced JSON value and ignore
-// whatever surrounds it, tracking string literals so braces inside paths do not confuse
-// the depth count.
-function extractJsonDocument(raw: string): string | undefined {
-  const start = raw.search(/[[{]/);
-  if (start < 0) return undefined;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < raw.length; index += 1) {
-    const char = raw[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === '"') inString = false;
+// on stdout alongside the JSON document, and that text can itself contain brackets
+// ("[notice] ...", "[1/3] ..."). Yield each balanced bracketed span in order so the
+// caller can keep the first one that is the report, tracking string literals so braces
+// inside paths do not confuse the depth count.
+function* jsonCandidates(raw: string): Generator<string> {
+  let from = 0;
+  for (;;) {
+    const start = raw.slice(from).search(/[[{]/);
+    if (start < 0) return;
+    const first = from + start;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let index = first; index < raw.length && end < 0; index += 1) {
+      const char = raw[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === '[' || char === '{') depth += 1;
+      else if (char === ']' || char === '}') {
+        depth -= 1;
+        if (depth === 0) end = index;
+      }
+    }
+    if (end < 0) {
+      from = first + 1;
       continue;
     }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-    if (char === '[' || char === '{') depth += 1;
-    else if (char === ']' || char === '}') {
-      depth -= 1;
-      if (depth === 0) return raw.slice(start, index + 1);
-    }
+    yield raw.slice(first, end + 1);
+    from = end + 1;
   }
-  return undefined;
 }
 function looksLikePackEntry(value: unknown): value is NpmPackJsonEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -63,21 +74,30 @@ function selectPackEntry(parsed: unknown): NpmPackJsonEntry | undefined {
   return undefined;
 }
 export function parseNpmPackJson(raw: string): NpmPackDryRunResult {
-  const document = extractJsonDocument(raw);
-  if (document === undefined) {
+  let sawCandidate = false;
+  let firstParseError: string | undefined;
+  let entry: NpmPackJsonEntry | undefined;
+  for (const candidate of jsonCandidates(raw)) {
+    sawCandidate = true;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (error) {
+      firstParseError ??= error instanceof Error ? error.message : String(error);
+      continue;
+    }
+    entry = selectPackEntry(parsed);
+    if (entry) break;
+  }
+  if (!sawCandidate) {
     throw new Error(`npm pack --json --dry-run printed no JSON document; npm emitted ${describeNpmPackOutput(raw)}`);
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(document);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `npm pack --json --dry-run printed JSON that could not be parsed (${reason}); npm emitted ${describeNpmPackOutput(raw)}`,
-    );
-  }
-  const entry = selectPackEntry(parsed);
   if (!entry) {
+    if (firstParseError !== undefined) {
+      throw new Error(
+        `npm pack --json --dry-run printed JSON that could not be parsed (${firstParseError}); npm emitted ${describeNpmPackOutput(raw)}`,
+      );
+    }
     throw new Error(
       `npm pack --json --dry-run returned an unrecognized JSON shape; expected an array of pack results or an object keyed by package name, but npm emitted ${describeNpmPackOutput(raw)}`,
     );

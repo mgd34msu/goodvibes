@@ -3,6 +3,7 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibe
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry, assertCurrentToolEffect } from '../platform/src/platform/tools/registry.ts';
+import { ToolInputProjectionError } from '../platform/src/platform/tools/input-projection.ts';
 import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
 import { DEFAULT_CONFIG } from '../platform/src/platform/config/index.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
@@ -47,7 +48,7 @@ test.each(['registered-projector', 'returned-projector', 'prepare-caller', 'admi
         async project(request) { return { status: 'projected', args: request.args,
           ...(location === 'returned-projector' ? { assertCurrent } : {}) }; },
       } });
-    let refused = false;
+    let refused = false, refusal: unknown;
     try {
       const call = await registry.prepareCall('sync-authority', NAME, {},
         location === 'prepare-caller' ? { assertCurrent } : undefined);
@@ -59,8 +60,13 @@ test.each(['registered-projector', 'returned-projector', 'prepare-caller', 'admi
       expect(admission.result.approved).toBe(true);
       await registry.executePrepared(call, admission,
         location === 'execute-caller' || location === 'sync-control' ? { assertCurrent } : undefined);
-    } catch (error) { if (guardStarts === 0) throw error; refused = true; }
+    } catch (error) { if (guardStarts === 0) throw error; refused = true; refusal = error; }
     expect(guardStarts).toBeGreaterThan(0);
+    // The refusal is the projection layer's own, not an unrelated failure.
+    if (refused) {
+      expect(refusal).toBeInstanceOf(ToolInputProjectionError);
+      expect(['stale', 'invalid']).toContain((refusal as ToolInputProjectionError).problem);
+    }
     expect({ refused, effects }).toEqual(location === 'sync-control'
       ? { refused: false, effects: 1 } : { refused: true, effects: 0 });
   });

@@ -169,6 +169,7 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
       this.form.scope = nextEnumValue(['project', 'global'] as const, this.form.scope, direction);
     } else if (field.id === 'trustMode') {
       this.form.trustMode = nextEnumValue(MCP_FORM_TRUST_MODES, this.form.trustMode, direction);
+      this.form.trustTouched = true;
     }
   }
   appendFormText(text: string): void {

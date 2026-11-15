@@ -83,9 +83,10 @@ export function endTurnSpan(span: Span, ctx: TurnSpanEndContext): void {
     });
   }
 
-  if (ctx.outcome === 'error' && ctx.error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error });
-    span.setAttribute('turn.error', ctx.error);
+  if (ctx.outcome === 'error') {
+    // A failure without a message is still a failure: it must not export as OK.
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error || 'error' });
+    if (ctx.error) span.setAttribute('turn.error', ctx.error);
   } else if (ctx.outcome === 'cancelled') {
     span.setStatus({ code: SpanStatusCode.OK });
     if (ctx.cancelReason) {

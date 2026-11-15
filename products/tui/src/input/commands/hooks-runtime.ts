@@ -6,7 +6,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
     name: 'hooks',
     aliases: [],
     description: 'Inspect, author, simulate, and reload managed hook workflows',
-    usage: '[contracts [filter] | reload | scaffold <name> <match> <type> | chain <name> <event1,event2,...> | remove <name> | enable <name> | disable <name> | simulate <eventPath> | inspect <path> | import <path> [merge|replace] | export [path]]',
+    usage: '[contracts [filter] | reload | scaffold <name> <match> <type> | chain <name> <event1,event2,...> | remove <name> | enable <name> | disable <name> | simulate <eventPath> | inspect <path> | import <path> [merge|replace [--yes]] | export [path]]',
     argsHint: '[subcommand]',
     async handler(args, ctx) {
       const hookApi = requireHookApi(ctx);
@@ -113,13 +113,29 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
       }
       if (subcommand === 'import') {
         const path = args[1];
-        const strategy = args[2] === 'replace' ? 'replace' : 'merge';
-        if (!path) {
-          ctx.print('Usage: /hooks import <path> [merge|replace]');
+        const yes = args.includes('--yes');
+        const strategyWords = args.slice(2).filter((word) => word !== '--yes');
+        const strategyWord = strategyWords[0] ?? 'merge';
+        if (!path || strategyWords.length > 1 || (strategyWord !== 'merge' && strategyWord !== 'replace')) {
+          ctx.print(path && strategyWords.length > 0
+            ? `Unknown import strategy "${strategyWords.join(' ')}": use merge or replace. Nothing was imported.`
+            : 'Usage: /hooks import <path> [merge|replace [--yes]]');
           return;
         }
-        await workbench.import(path, strategy);
-        ctx.print(`Imported managed hooks from ${path} using ${strategy} strategy.`);
+        const strategy = strategyWord;
+        if (strategy === 'replace' && !yes) {
+          const incoming = workbench.inspect(path);
+          ctx.print([
+            `Replacing discards every managed hook and chain now in ${workbench.getFilePath()} (${workbench.listManagedHooks().length} hooks, ${workbench.listManagedChains().length} chains) and installs the bundle's ${incoming.hookCount} hooks and ${incoming.chainCount} chains.`,
+            'Nothing was imported. Run /hooks import <path> replace --yes to confirm, or use merge to keep the existing entries.',
+          ].join('\n'));
+          return;
+        }
+        const rejected = await workbench.import(path, strategy);
+        ctx.print([
+          `Imported managed hooks from ${path} using ${strategy} strategy.${rejected.length > 0 ? ` ${rejected.length} entries in the bundle were left out:` : ''}`,
+          ...rejected.map((reason) => `  - ${reason}`),
+        ].join('\n'));
         return;
       }
 

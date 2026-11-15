@@ -4,6 +4,11 @@ import {
   daemonMailboxConfigSettings,
 } from './schema-domain-daemon-mailbox.js';
 
+/** Canonical Discord ID: up to 20 digits with no leading zero, below 2^64. */
+function isDiscordSnowflake(value: string): boolean {
+  return /^[1-9]\d{0,19}$/.test(value) && BigInt(value) < (1n << 64n);
+}
+
 export const surfaceConfigDefaults = {
   hostedInboxScreening: 'disabled',
   slack: {
@@ -120,6 +125,7 @@ export const surfaceConfigDefaults = {
     enabled: false,
     appId: '',
     appPassword: '',
+    webhookSecret: '',
     tenantId: '',
     serviceUrl: '',
     botId: '',
@@ -139,6 +145,7 @@ export const surfaceConfigDefaults = {
     enabled: false,
     baseUrl: '',
     botToken: '',
+    webhookSecret: '',
     teamId: '',
     defaultChannelId: '',
     setupVersion: 0,
@@ -147,6 +154,7 @@ export const surfaceConfigDefaults = {
     enabled: false,
     homeserverUrl: '',
     accessToken: '',
+    webhookSecret: '',
     userId: '',
     defaultRoomId: '',
     setupVersion: 0,
@@ -209,8 +217,10 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     default: '',
     description: 'Expected Slack user ID for protected inbox reads; configure it explicitly. '
       + 'The token must prove this identity before reading messages. Empty keeps the inbox unconfigured.',
-    validate: (value) => typeof value === 'string',
-    validationHint: 'an explicitly configured Slack user ID, or empty to keep the inbox unconfigured',
+    validate: (value) => typeof value === 'string'
+      // Not trimmed: the inbox reader refuses a padded id, so accepting one here would defer the failure to inbox start.
+      && (value === '' || /^[UW][A-Za-z0-9_-]{1,199}$/.test(value)),
+    validationHint: 'a Slack user ID such as U012ABCDEF, or empty to keep the inbox unconfigured',
   },
   {
     key: 'surfaces.discord.enabled',
@@ -241,12 +251,21 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description: 'Expected Discord bot user ID for protected inbox reads; the token must prove this identity before any message history is requested',
+    validate: (value) => typeof value === 'string' && (value === '' || isDiscordSnowflake(value)),
+    validationHint: 'a Discord snowflake ID (digits), or empty',
   },
   {
     key: 'surfaces.discord.inboxChannelIds',
     type: 'string',
     default: '',
     description: 'Comma-separated explicit bot-readable one-to-one DM channel IDs for protected inbox reads (1–200 unique IDs); group DMs and inferred historical discovery are unsupported',
+    validate: (value) => {
+      if (typeof value !== 'string' || value.length > 4_300) return false;
+      if (value.trim() === '') return true;
+      const ids = value.split(',').map((id) => id.trim());
+      return ids.length <= 200 && ids.every(isDiscordSnowflake) && new Set(ids).size === ids.length;
+    },
+    validationHint: '1-200 unique Discord snowflake IDs separated by commas (at most 4300 characters), or empty',
   },
   {
     key: 'surfaces.discord.defaultChannelId',
@@ -332,7 +351,7 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.webhook.secret',
     type: 'string',
     default: '',
-    description: 'Shared secret used to sign or verify webhook payloads',
+    description: 'Shared secret that verifies inbound webhook payloads. Outbound webhook deliveries are not signed with it.',
   },
   {
     key: 'surfaces.homeassistant.enabled',
@@ -553,14 +572,14 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.telephony.provider',
     type: 'enum',
     default: 'twilio',
-    description: 'Telephony provider mode: direct Twilio API or bridge',
+    description: 'Telephony provider mode: direct Twilio API or bridge. Delivery goes through the bridge when either this or the delivery mode below is bridge.',
     enumValues: ['twilio', 'bridge'],
   },
   {
     key: 'surfaces.telephony.mode',
     type: 'enum',
     default: 'sms',
-    description: 'Telephony delivery mode: SMS, voice call, or bridge',
+    description: 'Telephony delivery mode: SMS, voice call, or bridge. Choosing bridge here also sends through the bridge, so set the bridge URL.',
     enumValues: ['sms', 'voice', 'bridge'],
   },
   {
@@ -660,6 +679,12 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     description: 'Microsoft Teams bot application password (client secret)',
   },
   {
+    key: 'surfaces.msteams.webhookSecret',
+    type: 'string',
+    default: '',
+    description: 'Microsoft Teams inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret.',
+  },
+  {
     key: 'surfaces.msteams.tenantId',
     type: 'string',
     default: '',
@@ -738,6 +763,12 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     description: 'Mattermost bot access token',
   },
   {
+    key: 'surfaces.mattermost.webhookSecret',
+    type: 'string',
+    default: '',
+    description: 'Mattermost inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret.',
+  },
+  {
     key: 'surfaces.mattermost.teamId',
     type: 'string',
     default: '',
@@ -766,6 +797,12 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description: 'Matrix account access token',
+  },
+  {
+    key: 'surfaces.matrix.webhookSecret',
+    type: 'string',
+    default: '',
+    description: 'Matrix inbound webhook secret, kept apart from the account credential used for delivery. Unset: the account credential is the inbound secret.',
   },
   {
     key: 'surfaces.matrix.userId',

@@ -10,6 +10,13 @@ export const CONFIG_SNAPSHOT_PART = 'CONFIG_SNAPSHOT_PART';
 export const CONFIG_BODY_LIMIT = MAX_ENVELOPE_BYTES - 1024;
 const CHUNK_BYTES = 12 * 1024;
 const MAX_BYTES = 32 * 1024 * 1024;
+/**
+ * One sender's share of the buffer. The replicated document is bounded well
+ * under this, so a larger announced size is not a real snapshot, and without a
+ * share one member could keep the shared buffer full and get every other
+ * member's snapshot refused.
+ */
+export const MAX_SENDER_BYTES = 8 * 1024 * 1024;
 const MAX_PARTS = Math.ceil(MAX_BYTES / CHUNK_BYTES);
 const MAX_SENDERS = MAX_GROUP_MEMBERS;
 const TTL_MS = 30_000;
@@ -78,6 +85,7 @@ export class ConfigSnapshotTransfers {
     }
     if (!frame) {
       if (this.frames.size >= MAX_SENDERS || (!this.retired.has(sender) && this.retired.size >= MAX_SENDERS)) return null;
+      if (part.bytes > MAX_SENDER_BYTES) { this.retired.set(sender, { id: part.id, at: now }); return null; }
       assertCurrent();
       frame = { header: { id: part.id, revision: part.revision, bytes: part.bytes, count: part.count }, groupId: envelope.groupId, keyGen: envelope.keyGen, createdAt: now,
         assertCurrent, parts: new Map(), received: 0, seq: envelope.seq };

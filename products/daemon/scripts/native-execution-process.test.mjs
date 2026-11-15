@@ -32,7 +32,8 @@ test('native build deadline drains descendants that retain inherited output', as
     setInterval(()=>{},1000);`;
   let output = '';
   await assert.rejects(runNativeBuildCommand(process.execPath, ['-e', source], {
-    timeoutMs: 2_000, onStdout: chunk => { output += chunk; }, onStderr: () => {},
+    // The deadline counts from spawn, so it is generous enough that the child has printed its pids first on a slow host.
+    timeoutMs: 5_000, onStdout: chunk => { output += chunk; }, onStderr: () => {},
   }), /Native build command exceeded its deadline/);
   const owner = JSON.parse(output.trim());
   assert(Number.isSafeInteger(owner.descendant) && owner.descendant > 0);
@@ -57,7 +58,8 @@ test('native build abort preserves its reason and drains the exact owned group',
     setInterval(()=>{},1000);`;
   let output = '';
   await assert.rejects(runNativeBuildCommand(process.execPath, ['-e', source], {
-    timeoutMs: 2_000, signal: controller.signal,
+    // The abort ends the run; the deadline is only a backstop and must not race the child's startup.
+    timeoutMs: 60_000, signal: controller.signal,
     onStdout: chunk => { output += chunk; if (output.includes('\n')) controller.abort(reason); }, onStderr: () => {},
   }), error => error === reason);
   const owner = JSON.parse(output.trim());

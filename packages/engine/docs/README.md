@@ -47,8 +47,12 @@ history, including upstream releases.
 - [Tool safety](./tool-safety.md)
 - [Contract criteria](./contract-criteria.md)
 - [Project review inventory](./contract-criteria.md#project-review-inventory): inspected files, accepted assessments and current versions.
-- Architecture
-- Platform architecture
+- [Autonomous ACP and MCP protocol decisions](./autonomous-protocol-permissions.md)
+- [Receipt-bound passive code context](./captured-passive-code-context.md)
+- [Cluster operation outcomes](./cluster-operations.md)
+- [Cluster ranking during upgrades](./cluster-ranking.md)
+- [Gemini response identity](./gemini-response-identity.md)
+- [Cancel one hosted turn without ending its session](./hosted-turn-cancellation.md)
 
 ## Knowledge, media, and search
 
@@ -91,15 +95,14 @@ history, including upstream releases.
 - [Error handling](./error-handling.md): consumer patterns for catching structured errors.
 - [Error kinds reference](./error-kinds.md): public `EngineErrorKind` reference table.
 - [Troubleshooting](./troubleshooting.md)
-- Testing and validation: commands and CI gates.
-- Testing architecture: suite structure and intent.
-- Release policy
+- [Saved-data compatibility and native updates](./native-reader-compatibility.md)
 - [Semver policy](./semver-policy.md)
 - [OpenAPI operator contract](./openapi-contract.md): the published OpenAPI 3.1 document and how it is generated.
 
 ## Generated references
 
 - [Operator API reference](./reference-operator.md)
+- [Agent API index](./agent-api-index.md): one line per session, task, contract, approval and event operation, with its [OpenAPI slice](./agent-api.openapi.json).
 - [Peer API reference](./reference-peer.md)
 - [Runtime events reference](./reference-runtime-events.md)
 

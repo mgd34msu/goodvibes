@@ -11,6 +11,7 @@ import {
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { findAgentKnowledgeScopeContamination } from '../cli/agent-knowledge-runtime.ts';
 import { normalizeAgentKnowledgeJsonText } from '../agent/knowledge-scope-alias.ts';
@@ -83,6 +84,11 @@ const PROVIDERS_RELEASE_DETAIL =
   'Provider inventory command completed; provider names and credential posture omitted from release artifact.';
 const DOCTOR_RELEASE_DETAIL =
   'Doctor command completed without findings; provider/model identifiers and credential posture omitted from release artifact.';
+const KNOWLEDGE_RELEASE_DETAIL = 'Response body omitted from release artifact; it can hold the operator\'s knowledge text.';
+
+function doctorAdvisoryDetail(count: number): string {
+  return `Doctor command completed with ${count} operator-configuration risk advisory(ies) and no errors; provider/model identifiers and credential posture omitted from release artifact.`;
+}
 
 /**
  * The doctor exits non-zero for ANY finding, including `[risk:*]` advisories
@@ -126,6 +132,8 @@ export interface LiveVerificationReport {
 export interface LiveVerificationRedactionContext {
   homeDir: string;
   userHomeDir: string;
+  /** The account's real home directory, masked as well when it differs from `userHomeDir`. */
+  realHomeDir?: string;
   projectRoot: string;
   binaryPath: string;
   /** Operator/daemon tokens that must never appear verbatim in release artifacts. */
@@ -154,6 +162,7 @@ function redactLocalPaths(text: string, context: LiveVerificationRedactionContex
     [context.projectRoot, '[project-root]'],
     [context.homeDir, '[goodvibes-home]'],
     [context.userHomeDir, '[home]'],
+    [context.realHomeDir ?? '', '[home]'],
   ] as const;
   return replacements
     .filter(([value]) => value.length > 1)
@@ -196,6 +205,7 @@ function resolveConnectedHostBaseUrl(homeDir: string, explicit?: string): string
     explicit,
     ['GOODVIBES_CONNECTED_HOST_URL', 'GOODVIBES_AGENT_RUNTIME_URL', 'GOODVIBES_DAEMON_URL'],
     readJsonFile,
+    join(homeDir, 'agent', 'settings.json'),
   );
 }
 
@@ -297,7 +307,7 @@ function validateAgentKnowledgeJsonBody(
       detail: `${contamination}\n${compact(body)}`,
     };
   }
-  return { status: 'pass', summary: passSummary };
+  return { status: 'pass', summary: passSummary, detail: KNOWLEDGE_RELEASE_DETAIL };
 }
 
 function validateAgentKnowledgeJsonRoute(
@@ -385,7 +395,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
         doctorAdvisories !== null && doctorAdvisories > 0
           ? `Doctor completed; ${doctorAdvisories} operator-configuration risk advisory(ies) noted (intentional trust posture, not a release defect).`
           : 'Doctor completed without findings.',
-        { warnOnNonZero: true, passDetail: DOCTOR_RELEASE_DETAIL },
+        { warnOnNonZero: true, passDetail: doctorAdvisories !== null && doctorAdvisories > 0 ? doctorAdvisoryDetail(doctorAdvisories) : DOCTOR_RELEASE_DETAIL },
       ),
     );
   }
@@ -514,7 +524,9 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   }
 
   const counts = countStatuses(checks);
-  const ok = counts.fail === 0 && (!options.strict || counts.warn === 0);
+  // A skipped check verified nothing: strict mode does not accept one, so a
+  // missing token cannot turn the isolation checks into a PASS.
+  const ok = counts.fail === 0 && (!options.strict || (counts.warn === 0 && counts.skip === 0));
   return sanitizeLiveVerificationReport(
     {
       generatedAt: new Date().toISOString(),
@@ -526,7 +538,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       counts,
       ok,
     },
-    { homeDir, userHomeDir: dirname(homeDir), projectRoot, binaryPath, tokens: token ? [token] : undefined },
+    { homeDir, userHomeDir: dirname(homeDir), realHomeDir: homedir(), projectRoot, binaryPath, tokens: token ? [token] : undefined },
   );
 }
 

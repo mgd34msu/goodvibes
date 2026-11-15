@@ -548,7 +548,7 @@ describe('SettingsModal', () => {
     expect(modal.lastSettingEffectMessage).toBeNull();
   });
 
-  test('clearing a secret keeps its reference until deletion completes', async () => {
+  test('clearing a secret unpublishes its reference before the stored value is deleted', async () => {
     let finish!: () => void;
     const cleared = new Promise<void>((resolve) => { finish = resolve; });
     const reference = buildGoodVibesSecretRef(buildGoodVibesSecretKey('surfaces.homeassistant.accessToken'));
@@ -560,7 +560,7 @@ describe('SettingsModal', () => {
     modal.activateSelected();
     modal.editBuffer = '';
     expect(modal.commitEdit()).toBe(true);
-    expect(cm.get('surfaces.homeassistant.accessToken')).toBe(reference);
+    expect(cm.get('surfaces.homeassistant.accessToken')).toBe('');
     const completion = modal.pendingSecretWrite;
     finish();
     expect(await completion).toBe(true);
@@ -624,7 +624,7 @@ describe('SettingsModal', () => {
   });
 
   for (const rejects of [false, true]) {
-    test(`selected secret reset waits for deletion and reports ${rejects ? 'failure' : 'completion'}`, async () => {
+    test(`selected secret reset unpublishes the reference, then waits for deletion and reports ${rejects ? 'the leftover value' : 'completion'}`, async () => {
       let finish!: () => void;
       let fail!: (error: Error) => void;
       const removed = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
@@ -640,19 +640,21 @@ describe('SettingsModal', () => {
       expect(modal.resetSelected()).toBeNull();
       const completion = modal.pendingSecretWrite;
       expect(completion).not.toBeNull();
-      expect(cm.get('surfaces.homeassistant.accessToken')).toBe(reference);
-      expect(applied).toBe(0);
+      expect(cm.get('surfaces.homeassistant.accessToken')).toBe('');
+      expect(applied).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(deletes).toBe(1);
       expect(modal.resetSelected()).toBeNull();
       expect(deletes).toBe(1);
       if (rejects) fail(new Error('deletion failed with synthetic-hidden-token'));
       else finish();
-      expect(await completion).toBe(!rejects);
-      expect(cm.get('surfaces.homeassistant.accessToken')).toBe(rejects ? reference : '');
-      expect(applied).toBe(rejects ? 0 : 1);
+      expect(await completion).toBe(true);
+      expect(cm.get('surfaces.homeassistant.accessToken')).toBe('');
+      expect(applied).toBe(1);
       expect(modal.pendingSecretWrite).toBeNull();
       expect(modal.lastSettingEffectMessage).not.toContain('synthetic-hidden-token');
-      if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/failed/i);
+      if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/could not be removed/i);
+      else expect(modal.lastSettingEffectMessage).not.toMatch(/could not be removed/i);
     });
   }
 
@@ -682,7 +684,7 @@ describe('SettingsModal', () => {
 
   for (const mode of ['category', 'all'] as const) {
     for (const rejects of [false, true]) {
-      test(`${mode} secret reset awaits its batch and reports ${rejects ? 'failure' : 'completion'}`, async () => {
+      test(`${mode} secret reset unpublishes the reference, awaits its batch and reports ${rejects ? 'the leftover value' : 'completion'}`, async () => {
         let finish!: () => void;
         let fail!: (error: Error) => void;
         const removed = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
@@ -700,13 +702,14 @@ describe('SettingsModal', () => {
         expect(modal.handleResetConfirmKey('enter')).toEqual({ result: 'confirmed', entries: [] });
         const completion = modal.pendingSecretWrite;
         expect(completion).not.toBeNull();
+        expect(cm.get('surfaces.homeassistant.accessToken')).toBe('');
+        await new Promise((resolve) => setTimeout(resolve, 0));
         expect(deletes).toBe(1);
-        expect(cm.get('surfaces.homeassistant.accessToken')).toBe(reference);
         if (rejects) fail(new Error('synthetic-batch-delete-error'));
         else finish();
-        expect(await completion).toBe(!rejects);
-        expect(cm.get('surfaces.homeassistant.accessToken')).toBe(rejects ? reference : '');
-        if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/failed/i);
+        expect(await completion).toBe(true);
+        expect(cm.get('surfaces.homeassistant.accessToken')).toBe('');
+        if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/could not be removed/i);
       });
     }
   }
@@ -767,6 +770,7 @@ describe('SettingsModal', () => {
     modal.handleResetConfirmKey('enter');
     const completion = modal.pendingSecretWrite;
     expect(completion).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(oldDeletes).toBe(1);
     expect(newDeletes).toBe(0);
     expect(modal.lastSettingEffectMessage).toBeNull();

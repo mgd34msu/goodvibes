@@ -18,7 +18,7 @@ import { AppError, ProviderError, type PlatformErrorCategory, type PlatformError
 import type { StructuredDaemonErrorBody } from '../types/daemon-error-contract.js';
 import { captureFailureSnapshot } from '../gate/failure-input-snapshot.js';
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
-import { captureRedactionSource, redactSensitiveData, redactSensitiveDataAsync } from './redaction.js';
+import { captureRedactionSource, redactDiagnosticText, redactSensitiveData, redactSensitiveDataAsync } from './redaction.js';
 import { assertRedactionCurrent } from './redaction-reading.js';
 import { displayPayload, MAX_DISPLAY_MESSAGE_CHARS, payloadSpans } from './batteries/display-payload.js';
 import { MAX_RETRY_WAIT_MESSAGE_CHARS, numberSpans, retryWait } from '../types/batteries/retry-wait.js';
@@ -71,7 +71,9 @@ export interface ProviderErrorNormalizationOptions extends ProviderErrorOptions 
   readonly fallbackMessage?: string | undefined;
 }
 
-function inferHint(category: PlatformErrorCategory, statusCode?: number): string | undefined {
+function inferHint(category: PlatformErrorCategory, statusCode: number | undefined, providerAttributed: boolean): string | undefined {
+  // The model-id and tool-schema hints describe an LLM request; a 400 or 404 from a tool, gateway verb or local service gets none.
+  if (!providerAttributed && (category === 'bad_request' || category === 'not_found')) return undefined;
   switch (category) {
     case 'rate_limit':
       return 'The caller may retry automatically. If this persists, wait, lower request volume, or switch models/providers.';
@@ -121,6 +123,10 @@ function inferSource(error: unknown, override: PlatformErrorSource | undefined, 
  * bearer tokens, API keys, or other sensitive data. Do NOT use for logger
  * fields, structured result/error fields, or diagnostic context, use
  * `summarizeError` or the structured `normalizeError` for those.
+ *
+ * Outside classic mode the first call for a message returns only redaction
+ * markers; the message appears on a later call once its reading has settled
+ * (see `redactSensitiveData`).
  */
 export function redactedErrorMessage(error: unknown): string {
   return redactSensitiveData(extractErrorMessage(error));
@@ -276,7 +282,7 @@ function normalizeWith(error: unknown, options: ErrorNormalizationOptions, displ
   // the guidance the error was built with for that provisional category.
   const hint = error instanceof AppError && error.guidance && category === fixed
     ? error.guidance
-    : inferHint(category, statusCode);
+    : inferHint(category, statusCode, fromProvider);
   const retryAfterMs = (error instanceof AppError ? error.retryAfterMs : undefined) ?? options.retryWaitMs;
 
   return {
@@ -300,6 +306,16 @@ function normalizeWith(error: unknown, options: ErrorNormalizationOptions, displ
 }
 
 /**
+ * The structure with its message masked locally. `normalizeError` keeps the
+ * raw message for local diagnostics, but the normalized error a reading returns
+ * is stored on records, published and written to session files, so the paths
+ * that run without a semantic redaction reading mask credential material here.
+ */
+function protectedStructure(error: unknown, options: ErrorNormalizationOptions, native = structureOf(error, options)): ErrorStructure {
+  return { ...native, rawMessage: redactDiagnosticText(native.rawMessage) };
+}
+
+/**
  * {@link normalizeError} with the error's wording read by Jev where it can
  * change what is shown: the category or source when structure leaves them
  * open, the connection-failure summary when no HTTP response came back, and
@@ -314,7 +330,7 @@ export async function readNormalizedError(
 ): Promise<NormalizedError> {
   return decisionOrClassic(() => readDecisionNormalizedError(error, options), () => {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const result = normalizeError(error, options);
+    const result = normalizeWith(error, options, undefined, protectedStructure(error, options));
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     return result;
   });
@@ -332,7 +348,7 @@ async function readDecisionNormalizedError(error: unknown, options: ErrorReading
   catch (failure) {
     if (!(failure instanceof JudgmentPortMissingError)) throw failure;
     assertSource();
-    const normalized = normalizeWith(error, { ...options, failure: undefined }, undefined, native);
+    const normalized = normalizeWith(error, { ...options, failure: undefined }, undefined, protectedStructure(error, options, native));
     assertSource();
     return normalized;
   }
@@ -357,7 +373,7 @@ async function readDecisionNormalizedError(error: unknown, options: ErrorReading
     if (!(failure instanceof JudgmentInputError)
       || (failure.problem !== 'credential-material' && failure.problem !== 'card-material')) throw failure;
     assertCurrent();
-    const normalized = normalizeWith(error, { ...options, failure: undefined }, undefined, native);
+    const normalized = normalizeWith(error, { ...options, failure: undefined }, undefined, protectedStructure(error, options, native));
     assertCurrent();
     return normalized;
   }
@@ -480,6 +496,7 @@ export function toProviderError(error: unknown, options: ProviderErrorNormalizat
       providerType: error.providerType ?? options.providerType,
       retryAfterMs: error.retryAfterMs ?? options.retryAfterMs,
       rawMessage: error.rawMessage ?? options.rawMessage ?? error.message,
+      ...(error.cause !== undefined ? { cause: error.cause } : {}),
     });
   }
 
@@ -505,6 +522,8 @@ export function toProviderError(error: unknown, options: ProviderErrorNormalizat
         : {}),
     ...(options.detail ? { detail: options.detail } : {}),
     source: 'provider',
+    // The original failure rides along so a transport errno (ECONNRESET) still marks the error recoverable.
+    ...(error !== undefined && error !== null ? { cause: error } : {}),
     ...(options.provider ?? normalized.provider ? { provider: options.provider ?? normalized.provider } : {}),
     ...(options.operation ? { operation: options.operation } : {}),
     ...(options.phase ? { phase: options.phase } : {}),

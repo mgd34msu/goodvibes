@@ -170,6 +170,25 @@ describe('the payments module never emits card material', () => {
     expect(offenders).toEqual([]);
   });
 
+  test('no payments source file, host files included, passes card material to a logger or console call', async () => {
+    const { Glob } = await import('bun');
+    const dir = new URL('../platform/src/platform/payments/', import.meta.url).pathname;
+    const offenders: string[] = [];
+    let calls = 0;
+    for await (const file of new Glob('**/*.ts').scan({ cwd: dir })) {
+      const text = await Bun.file(`${dir}${file}`).text();
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      // Each call up to its statement end, so arguments wrapped across lines are included.
+      for (const call of code.matchAll(/\b(?:console|logger)\.\w+\([\s\S]*?\);/g)) {
+        calls++;
+        if (/\b(cvv|cvc|securityCode|cardNumber|pan|material|expiry)\b/i.test(call[0])) offenders.push(`${file}: ${call[0].slice(0, 80)}`);
+      }
+    }
+    // The scan must actually see the host logging calls, or an empty result proves nothing.
+    expect(calls).toBeGreaterThan(5);
+    expect(offenders).toEqual([]);
+  });
+
   test('the modules that DO hold card material cannot log, serialize or echo it', async () => {
     const dir = new URL('../platform/src/platform/payments/', import.meta.url).pathname;
     for (const file of ['card-material.ts', 'card-redaction.ts', 'fill-card.ts', 'payments-gateway-service.ts']) {

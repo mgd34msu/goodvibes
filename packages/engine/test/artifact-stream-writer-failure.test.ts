@@ -3,7 +3,7 @@ import { chmodSync, statSync, readdirSync, rmSync } from 'node:fs';
 import { ArtifactStore } from '../platform/src/platform/artifacts/store.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
-test('a spool open failure rejects and cancels a producer waiting for its next chunk', async () => {
+test('a writer failure after the spool opens rejects, cancels a producer waiting for its next chunk and removes the spool', async () => {
   const root = makeProjectTempDir('artifact-spool-failure');
   let cancelled = false;
   const stream = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
@@ -11,11 +11,14 @@ test('a spool open failure rejects and cancels a producer waiting for its next c
   let checks = 0;
   try {
     await expect(store.createFromStream({ stream, mimeType: 'image/png', filename: 'test.png', acquisitionMode: 'inline-data', fetchMode: 'not-applicable' }, {
-      assertCurrent() { if (++checks === 2) chmodSync(root, 0o500); },
-    })).rejects.toThrow();
+      // Two checks precede the spool, so the third is the first one made inside the writer, when the spool has just
+      // opened and the producer has produced nothing. Failing there destroys the writer under a waiting producer.
+      assertCurrent() { if (++checks === 3) throw new Error('storage owner changed after open'); },
+    })).rejects.toThrow('storage owner changed after open');
+    expect(checks).toBeGreaterThanOrEqual(3);
     expect(cancelled).toBe(true);
     expect(readdirSync(root)).toEqual([]);
-  } finally { chmodSync(root, 0o700); rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 

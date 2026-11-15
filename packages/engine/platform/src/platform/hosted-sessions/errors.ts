@@ -21,6 +21,14 @@ export class HostedSessionUnavailableError extends Error {
   }
 }
 
+/** A client id that another principal attached under, so this caller may not renew or remove it. */
+export class HostedSessionClientOwnerError extends Error {
+  constructor(public readonly sessionId: string, public readonly clientId: string) {
+    super(`Client ${clientId} is attached to hosted session ${sessionId} by a different principal, so it cannot be changed from this one. Use a clientId of your own.`);
+    this.name = 'HostedSessionClientOwnerError';
+  }
+}
+
 /** A malformed request argument. */
 export class HostedSessionArgumentError extends Error {
   constructor(message: string) {

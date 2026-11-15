@@ -10,6 +10,9 @@
  * manager. Assembled anywhere but in one place, a half-wired graph looks
  * correct and silently drops either the snapshot bridge or the contracts.
  *
+ * The platform's own loop graph (agent-graph.ts) wires the same links without a contract runner;
+ * a link added to one belongs in the other.
+ *
  * It is also the graph whose runs `cancelHostedAgentRuns` cancels at disposal:
  * the manager returned here is the one the runtime hands to the platform's
  * `cancelAllAgentRuns`. `dispose` releases the runner and its store.
@@ -43,13 +46,13 @@ export interface AgentExecutionGraphOptions {
   readonly additionalFleetOwnership?: (() => ReturnType<AgentManager['fleetOwnership']>) | undefined;
 }
 
-export interface AgentGraph extends AgentExecutionGraph {
+export interface ContractedAgentGraph extends AgentExecutionGraph {
   readonly contractRunner: ContractRunner;
   /** Releases the contract runner and its store. */
   dispose(): void;
 }
 
-export interface AgentGraphOptions extends AgentExecutionGraphOptions {
+export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions {
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
   readonly surfaceRoot?: string | undefined;
@@ -62,7 +65,7 @@ export interface AgentGraphOptions extends AgentExecutionGraphOptions {
  * Construct the shared execution collaborators and their snapshot bridge.
  * This does not install or resume a contract runner. A host using this lower
  * level factory must compose and own exactly one runner before admitting work;
- * use createAgentGraph when its native-only fleet and resume policy apply.
+ * use createContractedAgentGraph when its native-only fleet and resume policy apply.
  */
 export function createAgentExecutionGraph(options: AgentExecutionGraphOptions): AgentExecutionGraph {
   const agentMessageBus = new AgentMessageBus();
@@ -89,12 +92,16 @@ export function createAgentExecutionGraph(options: AgentExecutionGraphOptions): 
     register: (agentId, source) => agentManager.registerConversationSource(agentId, source),
     release: (agentId) => agentManager.releaseConversationSource(agentId),
   });
+  // Without this bridge a cancel never reaches an in-flight exec, fetch or judgment call.
+  agentOrchestrator.setCancellationSource({
+    get: (agentId) => agentManager.getCancellationSignal(agentId),
+  });
   agentManager.setRuntimeBus(options.runtimeBus);
   return { agentMessageBus, archetypeLoader, agentOrchestrator, agentManager, contextAccountingHolder };
 }
 
 /** Build the complete default graph and resume its contracts once per project root. */
-export function createAgentGraph(options: AgentGraphOptions): AgentGraph {
+export function createContractedAgentGraph(options: ContractedAgentGraphOptions): ContractedAgentGraph {
   const graph = createAgentExecutionGraph(options);
   const { agentMessageBus, agentManager } = graph;
   const composed = composeContractRunner({

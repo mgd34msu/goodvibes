@@ -16,6 +16,7 @@ interface Attempt {
 const attempts: Attempt[] = [];
 const relayReplies: Response[] = [];
 const mintSignals: (AbortSignal | undefined)[] = [];
+const mintInputs: unknown[] = [];
 const mintReplies: Promise<StepUpMintChallengeResult>[] = [];
 const credentialRequests: (CredentialRequestOptions | undefined)[] = [];
 const credentialReplies: Promise<Credential | null>[] = [];
@@ -40,7 +41,8 @@ const relayClient: RelayClient = {
 };
 mock.module('@goodvibes-jev/engine/transport-realtime', () => ({ createRelayClient: () => relayClient }));
 mock.module('../../lib/goodvibes', () => ({ client: { operator: { stepup: {
-  mintChallenge: (_input: unknown, signal?: AbortSignal) => {
+  mintChallenge: (input: unknown, signal?: AbortSignal) => {
+    mintInputs.push(input);
     mintSignals.push(signal);
     const reply = mintReplies.shift();
     if (!reply) return Promise.reject(new Error('Unexpected synthetic challenge request'));
@@ -164,7 +166,7 @@ afterEach(async () => {
   setActiveRoute('direct');
   localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
   for (const restore of restoreProperties.splice(0).reverse()) restore();
-  attempts.length = relayReplies.length = mintSignals.length = mintReplies.length = 0;
+  attempts.length = relayReplies.length = mintSignals.length = mintReplies.length = mintInputs.length = 0;
   credentialRequests.length = credentialReplies.length = 0;
 });
 
@@ -320,4 +322,16 @@ test('explicit init null detaches the input Request signal throughout the live p
   expect(original.signal.aborted).toBe(true);
   expect(attempts).toHaveLength(2);
   expect(attempts.every(value => !value.signal.aborted && value.body === 'retained body')).toBe(true);
+});
+
+test('the challenge is minted bound to the method and path of the request being retried', async () => {
+  relayReplies.push(required(), new Response('bound result'));
+  mintReplies.push(Promise.resolve(challenge));
+  credentialReplies.push(Promise.resolve(credential('bound-credential')));
+  renderHost();
+  const pending = outcome(routedFetch(firstUrl, { method: 'post', body: 'owned request' }));
+  await waitFor(() => Boolean(dialog()));
+  click('Verify with passkey');
+  expect(await response(await pending).text()).toBe('bound result');
+  expect(mintInputs).toEqual([{ method: 'POST', path: '/api/owned-stepup-mutation' }]);
 });

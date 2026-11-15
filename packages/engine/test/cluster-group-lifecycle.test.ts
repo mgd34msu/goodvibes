@@ -11,8 +11,8 @@ async function turns() { for (let i = 0; i < 10; i++) await Promise.resolve(); }
 function fixture(get: () => Promise<string | null>, startHook?: () => Promise<void>) {
   if (process.env.GOODVIBES_ENGINE_TEST_RUNNER !== '1') throw new Error('Use guarded runner');
   const root = mkdtempSync(join(tmpdir(), 'cluster-lifecycle-fixture-')); roots.push(root);
-  const timers = new Set<() => void>(); let running = false; let starts = 0; let stops = 0;
-  const clock: ClusterClock = { now: () => 1000, monotonicNow: () => 1000, setTimer(fn) { timers.add(fn); return () => { timers.delete(fn); }; } };
+  const timers = new Set<() => void>(); const delays = new Map<() => void, number>(); let running = false; let starts = 0; let stops = 0;
+  const clock: ClusterClock = { now: () => 1000, monotonicNow: () => 1000, setTimer(fn, ms) { timers.add(fn); delays.set(fn, ms); return () => { timers.delete(fn); }; } };
   const transport: ClusterTransport = {
     async start() { starts++; await startHook?.(); running = true; }, async stop() { running = false; stops++; }, async send() {},
     describe: () => ({ mode: 'in-memory', group: 'fixture', port: 0, peers: [] }),
@@ -23,7 +23,7 @@ function fixture(get: () => Promise<string | null>, startHook?: () => Promise<vo
     stateDirectory: root, nodeId: 'fixture-node', nodeDisplayName: 'Fixture', version: '1.0.0',
     logger: { debug() {}, info() {}, warn() {}, error() {} },
   });
-  return { runtime, timers, get running() { return running; }, get starts() { return starts; }, get stops() { return stops; }, async cleanup() { await runtime.stop(); await transport.stop(); timers.clear(); } };
+  return { runtime, timers, timerWithDelay: (ms: number) => [...delays].find(([fn, delay]) => delay === ms && timers.has(fn))?.[0], get running() { return running; }, get starts() { return starts; }, get stops() { return stops; }, async cleanup() { await runtime.stop(); await transport.stop(); timers.clear(); } };
 }
 
 test('concurrent starts both wait for the actual owned startup', async () => {
@@ -47,17 +47,6 @@ test('stop owns startup already in flight and leaves no late transport or timer'
   } finally { hold.release(); await Promise.allSettled([starting, stopping]); await f.cleanup(); }
 });
 
-test('a completed stop cannot be followed by late transport activation or timers', async () => {
-  const hold = deferred(); const entered = deferred();
-  const f = fixture(async () => { entered.release(); await hold.promise; return null; });
-  const starting = f.runtime.start(); await entered.promise;
-  const stopping = f.runtime.stop();
-  try {
-    await turns(); hold.release(); await Promise.allSettled([starting, stopping]);
-    expect({ running: f.running, timers: f.timers.size }).toEqual({ running: false, timers: 0 });
-  } finally { hold.release(); await Promise.allSettled([starting, stopping]); await f.cleanup(); }
-});
-
 test('failed startup is not retained as a successful already-started state', async () => {
   let attempts = 0; const f = fixture(async () => null, async () => { if (++attempts === 1) throw new Error('fixture transport failure'); });
   try {
@@ -72,7 +61,9 @@ test('runtime stop drains its accepted housekeeping before closing the transport
   const hold = deferred();
   f.runtime.runHousekeeping = async () => { entered.release(); await hold.promise; };
   await f.runtime.start();
-  const housekeepingTick = [...f.timers][1]!;
+  // The housekeeping timer is the one armed with its 30 s interval, whatever order start arms its timers in.
+  const housekeepingTick = f.timerWithDelay(30_000);
+  if (!housekeepingTick) throw new Error('start armed no 30 s housekeeping timer');
   f.timers.delete(housekeepingTick);
   housekeepingTick();
   await entered.promise;

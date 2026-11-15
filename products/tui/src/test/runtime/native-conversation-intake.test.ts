@@ -1,16 +1,31 @@
 import { nativeConversationIntakeFixture as fixture } from '../helpers/native-conversation-intake.ts';
 import { expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 
+function projectWith(...entries: string[]): string {
+  const root = mkdtempSync(join(tmpdir(), 'intake-ref-'));
+  for (const entry of entries) entry.endsWith('/') ? mkdirSync(join(root, entry)) : writeFileSync(join(root, entry), 'x');
+  return root;
+}
+
 const original = { text: '  Explain the answer\r\n界 e\u0301 😀  ', unsupportedSources: [] };
 
 test('captures exact original text before trim, references and image expansion', () => {
-  const source = captureNativeConversationInput('  Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]\r\n ');
+  const source = captureNativeConversationInput('  Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]\r\n ', undefined, projectWith('folder/'));
   expect(source.text.startsWith('  ')).toBe(true); expect(source.text.endsWith('\r\n ')).toBe(true);
   expect(source.unsupportedSources.map(ref => ref.kind)).toEqual(['context', 'image', 'file', 'context']);
   expect(Object.isFrozen(source)).toBe(true);
+});
+test('prose @ tokens are not context sources; existing paths and URLs are', () => {
+  const root = projectWith('src/', 'notes.md');
+  const text = 'ping @alice about @Override and @model:fast then @src, @notes.md and @https://example.com/x. also @missing.ts';
+  expect(captureNativeConversationInput(text, undefined, root).unsupportedSources.map(ref => ref.label)).toEqual(['@src,', '@notes.md', '@https://example.com/x.']);
+  expect(captureNativeConversationInput('ping @alice about the bug', undefined, root).unsupportedSources).toEqual([]);
 });
 test('persists and confirms exact identity before capture; claims settled turn without execution', async () => {
   const f = fixture(); const result = await f.controls.submit(original);
@@ -67,13 +82,14 @@ test('unavailable and unsupported sources never have a legacy fallback', async (
   let dispatched = 0; const notices: string[] = [];
   await routeNativeConversationInput({ intake: undefined, source: original, notify: line => notices.push(line), dispatch: async () => { dispatched++; } });
   expect(dispatched).toBe(0); expect(notices.join(' ')).toContain('No ordinary turn');
-  const f = fixture(); f.setOutcome('blocked'); await routeNativeConversationInput({ intake: f.controls, source: captureNativeConversationInput('Use @file'), notify: () => {}, dispatch: async () => { dispatched++; } });
+  const f = fixture(); f.setOutcome('blocked'); await routeNativeConversationInput({ intake: f.controls, source: captureNativeConversationInput('Use @file', undefined, projectWith('file')), notify: () => {}, dispatch: async () => { dispatched++; } });
   expect(dispatched).toBe(0); expect(f.captures[0]?.unsupportedSources).toEqual([{ kind: 'context', label: '@file' }]);
 });
 test('host change while capture is pending discards stale result and claim', async () => {
   const f = fixture(); let resolve!: (value: NativeConversationIntakeResult) => void;
-  f.client.capture = async () => new Promise(done => { resolve = done; }); const pending = f.controls.submit(original);
-  for (let n = 0; n < 30; n++) await Promise.resolve(); f.replaceHost();
+  const arrived = Promise.withResolvers<void>();
+  f.client.capture = async () => { arrived.resolve(); return new Promise(done => { resolve = done; }); }; const pending = f.controls.submit(original);
+  await arrived.promise; f.replaceHost();
   resolve({ kind: 'captured', projectId: 'project', requestId: 'id-1', sourceRef: { version: 1, inputId: 'id-2', sourceId: 'source', sourceRevision: 'r1', sessionId: 'host-session' } });
   expect(await pending).toBeUndefined(); expect(f.calls).not.toContain('admit'); expect(f.calls).not.toContain('claim');
 });
@@ -84,8 +100,9 @@ test('another principal cannot recover or replay the earlier input', async () =>
 
 test('explicit cancel interrupts the local wait, looks up its durable input and cancels without stale dispatch', async () => {
   const f = fixture(); let finish!: (result: NativeConversationIntakeResult) => void;
-  f.client.admit = async () => { f.calls.push('held-admit'); return new Promise(resolve => { finish = resolve; }); };
-  const pending = f.controls.submit(original); for (let n = 0; n < 40; n++) await Promise.resolve();
+  const arrived = Promise.withResolvers<void>();
+  f.client.admit = async () => { f.calls.push('held-admit'); arrived.resolve(); return new Promise(resolve => { finish = resolve; }); };
+  const pending = f.controls.submit(original); await arrived.promise;
   expect(f.calls).toContain('held-admit');
   const cancelled = await f.controls.cancel(); expect(cancelled?.result?.kind).toBe('cancelled');
   expect(f.calls.slice(-4)).toEqual(['read', 'get', 'confirm', 'cancel']);

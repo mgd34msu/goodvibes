@@ -46,7 +46,7 @@ test('late SSE acquisition is closed after this caller has already cancelled', a
   const raise = createClientApprovalRaiser({ verbs: wire.caller, actor: 'synthetic', localPrompt: () => (_request, options) => { promptSignal = options?.signal; return prompt.promise; }, subscribeApprovalUpdates: async () => { started = true; return opening.promise; } });
   const result = caught(raise({ request, signal: controller.signal }));
   await until(() => started); controller.abort(new Error(PRIVATE_REASON)); cancelled(await result);
-  expect(promptSignal).toBe(controller.signal);
+  expect(promptSignal?.aborted).toBe(true);
   opening.resolve({ close }); prompt.resolve({ approved: true, rememberTier: 'tool' }); await turn();
   expect(close).toHaveBeenCalledTimes(1); noRemoteMutation(wire.calls);
 });

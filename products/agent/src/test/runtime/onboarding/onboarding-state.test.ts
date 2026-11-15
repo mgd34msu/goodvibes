@@ -421,32 +421,6 @@ describe('deriveOnboardingState: categoryId mapping', () => {
     });
     expect(state.steps[0]?.categoryId).toBe('setup');
   });
-
-  test('all plan item ids in PLAN_ITEM_CATEGORY_MAP are covered by the full plan', () => {
-    // Verify the full plan emits all the key mapped items so the mapping table stays exercised.
-    const plan = makeFullPlan();
-    const coveredIds = new Set(plan.map((item) => item.id));
-    const knownMappedIds = [
-      'connected-host-readiness',
-      'connected-host-auth',
-      'goodvibes-settings-import',
-      'provider-access',
-      'install-smoke',
-      'local-model-readiness',
-      'agent-knowledge',
-      'vibe-personality',
-      'local-behavior',
-      'communication-channels',
-      'automation-review',
-      'browser-desktop-control',
-      'sudo-execution-posture',
-      'build-delegation',
-      'finish-onboarding',
-    ];
-    for (const id of knownMappedIds) {
-      expect(coveredIds.has(id), `plan should include item ${id}`).toBe(true);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ import { spawnSync } from 'node:child_process';
 
 const PKG_DIR = resolve(import.meta.dir, '../../toolchain');
 const DISPATCHER_SRC = resolve(PKG_DIR, 'src/bin/toolchain.ts');
-const DISPATCHER_DIST = resolve(PKG_DIR, 'dist/bin/toolchain.js');
 
 // The toolchain's bins live in the engine manifest, with paths under ./toolchain/.
 function binMap(): Record<string, string> {
@@ -43,7 +42,7 @@ describe('goodvibes-toolchain dispatcher', () => {
 
   test('unknown or missing tool names exit 2 with usage, never fall through to a tool', () => {
     for (const argv of [[], ['no-such-tool']]) {
-      const res = spawnSync('bun', [DISPATCHER_DIST, ...argv], { encoding: 'utf8', timeout: 30_000 });
+      const res = spawnSync('bun', [DISPATCHER_SRC, ...argv], { encoding: 'utf8', timeout: 30_000 });
       expect(res.status).toBe(2);
       expect(res.stderr).toContain('Usage: goodvibes-toolchain <tool>');
     }
@@ -53,7 +52,7 @@ describe('goodvibes-toolchain dispatcher', () => {
     // train-status with no --manifest exits 2 with its own named error,
     // proof the dispatcher reached the real tool with a clean argv.
     for (const name of ['train-status', 'goodvibes-train-status']) {
-      const res = spawnSync('bun', [DISPATCHER_DIST, name], {
+      const res = spawnSync('bun', [DISPATCHER_SRC, name], {
         encoding: 'utf8',
         timeout: 30_000,
       });

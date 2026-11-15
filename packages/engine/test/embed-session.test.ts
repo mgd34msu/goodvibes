@@ -43,6 +43,7 @@ describe('createEmbeddedSession', () => {
       boot: { daemonHomeDir: join(home, 'daemon'), port: 0, host: '127.0.0.1' },
       requestPermission: async (request) => {
         approved.push(request.callId);
+        if (request.callId === 'call-callback-throws') throw new Error('callback failed');
         return { approved: request.category === 'read' };
       },
     });
@@ -77,6 +78,33 @@ describe('createEmbeddedSession', () => {
       timeoutMs: 5000,
     });
     expect(denial.approved).toBe(false);
+  });
+
+  test('a failing permission callback denies the ask instead of leaving it pending', async () => {
+    const decision = await session.approvals.requestApproval({
+      request: makeRequest('call-callback-throws'),
+      timeoutMs: 5000,
+    });
+    expect(decision.approved).toBe(false);
+  });
+
+  test('an ask that needs the owner decision is denied without consulting the embedder callback', async () => {
+    const raised = await session.approvals.raiseOwnerApproval({
+      request: makeRequest('call-owner-only'),
+      requireOwnerDecision: { assertCurrent: () => undefined },
+      timeoutMs: 5000,
+    });
+    const decision = await raised.decision;
+    expect(decision.approved).toBe(false);
+    expect(approved).not.toContain('call-owner-only');
+  });
+
+  test('a spawn-mode submit whose contract is refused fails its recorded input', async () => {
+    const record = await session.sessions.createSession({ project: work, title: 'blank ask' });
+    await expect(session.submit({ body: '   ', sessionId: record.id })).rejects.toThrow('ask is required');
+    const inputs = session.sessions.getInputs(record.id);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toMatchObject({ state: 'failed' });
   });
 
   test('the session broker seam creates a workspace-bound session', async () => {

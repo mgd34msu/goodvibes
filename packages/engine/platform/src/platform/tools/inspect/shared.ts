@@ -1,6 +1,6 @@
 import { assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import { ContractInputReadDeniedError } from '../../contract/input-authority.js';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { readdir } from 'node:fs/promises';
 import type {
@@ -26,30 +26,9 @@ import type {
   ClientBoundaryInfo,
   ErrorBoundaryInfo,
 } from './schema.js';
+import { INSPECT_MODES } from './schema.js';
 
-export const VALID_MODES: InspectMode[] = [
-  'project',
-  'api',
-  'api_spec',
-  'api_validate',
-  'api_sync',
-  'database',
-  'components',
-  'layout',
-  'accessibility',
-  'scaffold',
-  'component_state',
-  'render_triggers',
-  'hooks',
-  'overflow',
-  'sizing',
-  'stacking',
-  'responsive',
-  'events',
-  'tailwind',
-  'client_boundary',
-  'error_boundary',
-];
+export const VALID_MODES: readonly InspectMode[] = INSPECT_MODES;
 
 export const JSON_OUTPUT_INDENT = 2;
 const SUMMARY_SAMPLE_LIMIT = 5;
@@ -77,6 +56,13 @@ function takeSample<T>(items: readonly T[] | undefined, limit = SUMMARY_SAMPLE_L
   return Array.isArray(items) ? items.slice(0, limit) : [];
 }
 
+/** What a scan could not cover is part of the answer in every format: files left out and limits reached. */
+function carriedCoverage(record: Record<string, unknown>): Record<string, unknown> {
+  const carried: Record<string, unknown> = {};
+  for (const key of ['unavailable_files', 'warning', 'warnings']) if (record[key] !== undefined) carried[key] = record[key];
+  return carried;
+}
+
 export function summarizeInspectValue(mode: InspectMode, value: unknown): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
@@ -96,6 +82,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'api':
       return {
+        ...carriedCoverage(record),
         count: record.count ?? 0,
         routes: takeSample(record.routes as Array<Record<string, unknown>> | undefined).map((route) => ({
           method: route.method ?? null,
@@ -113,6 +100,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
         valueCount: Array.isArray(entry.values) ? entry.values.length : 0,
       }));
       return {
+        ...carriedCoverage(record),
         modelCount: Array.isArray(record.models) ? record.models.length : 0,
         enumCount: Array.isArray(record.enums) ? record.enums.length : 0,
         models,
@@ -149,6 +137,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'api_spec':
       return {
+        ...carriedCoverage(record),
         openapi: record.openapi ?? null,
         pathCount:
           record.paths && typeof record.paths === 'object'
@@ -158,12 +147,15 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'api_validate':
       return {
+        ...carriedCoverage(record),
         valid: record.valid ?? false,
         missingFromSpec: takeSample(record.missing_from_spec as string[] | undefined),
         missingFromCode: takeSample(record.missing_from_code as string[] | undefined),
+        mismatchedMethods: takeSample(record.mismatched_methods as Array<Record<string, unknown>> | undefined),
       };
     case 'api_sync':
       return {
+        ...carriedCoverage(record),
         driftDetected: record.drift_detected ?? false,
         fetchCallCount: Array.isArray(record.fetch_calls) ? record.fetch_calls.length : 0,
         unmatchedFetches: takeSample(record.unmatched_fetches as Array<Record<string, unknown>> | undefined).map(
@@ -194,7 +186,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
         count: record.count ?? 0,
         triggers: takeSample(record.triggers as Array<Record<string, unknown>> | undefined).map((trigger) => ({
           kind: trigger.kind ?? null,
-          cause: trigger.cause ?? null,
+          name: trigger.name ?? null,
         })),
       };
     case 'hooks':
@@ -203,6 +195,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
         hooks: takeSample(record.hooks as Array<Record<string, unknown>> | undefined).map((hook) => ({
           hookKind: hook.hookKind ?? null,
           deps: takeSample(hook.deps as string[] | undefined),
+          omitsDependency: hook.omitsDependency ?? null,
         })),
       };
     case 'overflow':
@@ -219,6 +212,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
         items: takeSample(record.items as Array<Record<string, unknown>> | undefined).map((item) => ({
           kind: item.kind ?? null,
           line: item.line ?? null,
+          flagged: item.flagged ?? false,
         })),
       };
     case 'stacking':
@@ -228,6 +222,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
           value: item.value ?? null,
           line: item.line ?? null,
         })),
+        potentialConflicts: takeSample(record.potentialConflicts as Array<Record<string, unknown>> | undefined),
       };
     case 'responsive':
       return {
@@ -274,20 +269,56 @@ export function serializeInspectOutput(value: unknown, format: string, mode: Ins
   return JSON.stringify(shaped, null, format === 'json' ? JSON_OUTPUT_INDENT : 0);
 }
 
+/** Folders that hold dependencies or build output rather than the project's own source; every scan of the tree skips them. */
+export const SKIPPED_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.git',
+  'target',
+  'dist',
+  'build',
+  'vendor',
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.next',
+  '.cache',
+  'out',
+  'coverage',
+]);
+
+const WALK_MAX_DEPTH = 10;
+
+/**
+ * Every file under `dir` the filter accepts. What the scan could not cover (a directory it could
+ * not read, the depth limit) is added to `notes` so a short result is not mistaken for a complete one.
+ */
 export async function walk(
   dir: string,
   filter: (p: string) => boolean,
-  skipDirs: Set<string> = new Set(['.git', 'node_modules', 'dist', '.next', '.cache', '__pycache__']),
+  skipDirs: ReadonlySet<string> = SKIPPED_DIRS,
   depth = 0,
+  notes?: string[],
+  current?: () => void,
 ): Promise<string[]> {
-  if (depth > 10) return [];
+  current?.();
+  if (depth > WALK_MAX_DEPTH) {
+    const note = `Directories deeper than ${WALK_MAX_DEPTH} levels were not scanned (first reached at ${dir}).`;
+    if (notes && !notes.some((n) => n.startsWith('Directories deeper'))) notes.push(note);
+    return [];
+  }
   const results: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    notes?.push(`Could not read directory ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!skipDirs.has(entry.name)) {
-        const sub = await walk(full, filter, skipDirs, depth + 1);
+        const sub = await walk(full, filter, skipDirs, depth + 1, notes, current);
         results.push(...sub);
       }
     } else if (filter(full)) {
@@ -297,19 +328,18 @@ export async function walk(
   return results;
 }
 
+/** Reads a file the caller already knows exists; any failure (a directory, permissions) is an error, never an empty file. */
 export async function safeRead(filePath: string): Promise<string> {
   await assertCapturedToolReadAccess(filePath);
-  try {
-    return readFileSync(filePath, 'utf-8');
-  } catch {
-    return '';
-  }
+  return readFileSync(filePath, 'utf-8');
 }
 
 /**
  * A discovery-scan read. A captured view's read policy denying one incidental
  * file excludes that file from the scan and records it, instead of failing the
- * whole inspection; the denied file contributes nothing. Every other failure
+ * whole inspection; the denied file contributes nothing. A file that cannot be
+ * read for another reason is excluded and recorded the same way, so it is not
+ * mistaken for an empty file. Every other failure
  * still aborts: outside-project policy and captured-input ownership stay
  * separate mechanisms, and nothing here grants access the policy denied.
  */
@@ -325,7 +355,9 @@ export async function scanRead(filePath: string, unavailable?: string[]): Promis
   }
   try {
     return readFileSync(filePath, 'utf-8');
-  } catch {
+  } catch (error) {
+    // A file that is not there (a project with no package.json) is absent, not unreadable; a dangling link is.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || lstatSync(filePath, { throwIfNoEntry: false }) !== undefined) unavailable?.push(filePath);
     return '';
   }
 }

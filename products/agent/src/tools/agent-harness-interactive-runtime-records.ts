@@ -7,7 +7,7 @@ import { captureNativeReadModelObservation } from './agent-harness-autonomy-live
 import { modelReadingServicePath, modelReadingOptions, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { readRuntimeBoolean, readRuntimeKind, readRuntimeRoute, readRuntimeSchema, readRuntimeStatus, type InteractiveRuntimeEvidence } from './agent-harness-interactive-runtime-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { harnessPreviewCuts, redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
 
 export type AgentHarnessInteractiveRuntimeKind = 'process-output' | 'pty-session' | 'sudo-mediation' | 'browser-desktop-receipt' | 'unassessed';
@@ -51,26 +51,16 @@ export interface AgentHarnessInteractiveRuntimeRecord {
   readonly action?: string;
   readonly receiptId?: string;
   readonly outputChunks?: readonly Record<string, unknown>[];
+  /** Output chunks the publisher sent beyond the five shown here. */
+  readonly droppedChunks?: number;
   readonly routes: readonly AgentHarnessInteractiveRuntimeRoute[];
   readonly updatedAt?: string;
   readonly certification: AgentHarnessInteractiveRuntimeCertification;
 }
 
-const SECRET_PATTERNS: readonly [RegExp, string][] = [
-  [/secret:\/\/[^\s,'"}]+/gi, 'secret://<redacted>'],
-  [/("?\b(?:api[-_]?key|apikey|token|secret|password|passwd|credential|authorization)\b"?\s*:\s*)("[^"]*"|'[^']*'|[^\s,}]+)/gi, '$1"<redacted>"'],
-  [/\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTHORIZATION|BEARER)[A-Z0-9_]*)=("[^"]*"|'[^']*'|[^\s]+)/gi, '$1=<redacted>'],
-  [/(\b(?:token|secret|password|passwd|api[-_]?key|apikey|authorization|credential)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}]+)/gi, '$1<redacted>'],
-  [/(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>'],
-];
-
 function redactedPreview(value: unknown, limit = 180): string {
-  const raw = readString(value);
-  const redacted = SECRET_PATTERNS.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), raw);
-  return previewHarnessText(redacted, limit);
+  return redactedHarnessPreview(readString(value), limit);
 }
-
-
 
 function readNumber(value: unknown): number | undefined {
   const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
@@ -148,8 +138,10 @@ async function routesFor(kind: AgentHarnessInteractiveRuntimeKind, evidence: Int
       const role = await readRuntimeRoute({ ...evidence, key, value, routeContainerPath: container.path }, options);
       options.signal?.throwIfAborted(); options.assertCurrent?.();
       if (role === 'none') continue;
-      const modelRoute = routeValue(value);
-      if (!modelRoute) throw new ToolInputProjectionError('held');
+      const published = routeValue(value);
+      if (!published) throw new ToolInputProjectionError('held');
+      // A route is published text shown as the thing to call: redact and bound it like every other field.
+      const modelRoute = redactedPreview(published, 240);
       // Effects are a closed native mapping from the recorded role, never the publisher key.
       const spec = specs[role];
       routes.push({ id: role, label: spec.label, modelRoute, effect: spec.effect });
@@ -158,7 +150,7 @@ async function routesFor(kind: AgentHarnessInteractiveRuntimeKind, evidence: Int
   return routes;
 }
 
-async function outputChunks(evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<readonly Record<string, unknown>[]> {
+async function outputChunks(evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<{ readonly chunks: readonly Record<string, unknown>[]; readonly dropped: number }> {
   const record = evidence.record;
   const output = readRecord(record.output);
   const rawChunks = Array.isArray(record.outputChunks) ? record.outputChunks
@@ -168,7 +160,9 @@ async function outputChunks(evidence: InteractiveRuntimeEvidence, options: Catal
   const chunks: Record<string, unknown>[] = [];
   for (const [index, entry] of rawChunks.entries()) {
     const chunk = readRecord(entry);
-    const text = redactedPreview(chunk.text ?? chunk.preview ?? chunk.data ?? chunk.content, 600);
+    const rawText = readString(chunk.text ?? chunk.preview ?? chunk.data ?? chunk.content);
+    const text = redactedPreview(rawText, 600);
+    const cutHere = harnessPreviewCuts(rawText, 600);
     const truncated = await readRuntimeBoolean(evidence, `outputChunks[${index}].truncated`, chunk.truncated, 'Whether this published output chunk omits output because it was truncated.', options);
     if (text) chunks.push({
       chunkId: readString(chunk.chunkId) || readString(chunk.id) || `${index + 1}`,
@@ -176,15 +170,19 @@ async function outputChunks(evidence: InteractiveRuntimeEvidence, options: Catal
       text,
       chars: readNumber(chunk.chars) ?? text.length,
       bytes: readNumber(chunk.bytes) ?? Buffer.byteLength(text),
-      truncated: truncated === undefined ? (isClassicOperation() ? null : false) : truncated,
+      // A clipped preview is truncated whatever the publisher claimed.
+      truncated: cutHere ? true : truncated === undefined ? (isClassicOperation() ? null : false) : truncated,
       createdAt: readTimestamp(chunk.createdAt ?? chunk.timestamp),
     });
   }
-  if (chunks.length > 0) return chunks.slice(0, 5);
-  return ['stdoutTail', 'stderrTail', 'stdout', 'stderr'].flatMap((key) => {
-    const text = redactedPreview(record[key] ?? output[key], 600);
-    return text ? [{ chunkId: key, stream: key.includes('stderr') ? 'stderr' : 'stdout', text, chars: text.length, bytes: Buffer.byteLength(text), truncated: isClassicOperation() ? null : false }] : [];
-  }).slice(0, 5);
+  if (chunks.length > 0) return { chunks: chunks.slice(0, 5), dropped: Math.max(0, chunks.length - 5) };
+  const tails = ['stdoutTail', 'stderrTail', 'stdout', 'stderr'].flatMap((key) => {
+    const rawText = readString(record[key] ?? output[key]);
+    const text = redactedPreview(rawText, 600);
+    const cutHere = harnessPreviewCuts(rawText, 600);
+    return text ? [{ chunkId: key, stream: key.includes('stderr') ? 'stderr' : 'stdout', text, chars: text.length, bytes: Buffer.byteLength(text), truncated: cutHere ? true : isClassicOperation() ? null : false }] : [];
+  });
+  return { chunks: tails.slice(0, 5), dropped: Math.max(0, tails.length - 5) };
 }
 
 async function certification(input: {
@@ -247,7 +245,7 @@ async function normalizeRecord(evidence: InteractiveRuntimeEvidence, options: Ca
   const id = readId(record, kind);
   if (!id) return null;
   const routes = await routesFor(kind, evidence, options);
-  const chunks = await outputChunks(evidence, options);
+  const { chunks, dropped } = await outputChunks(evidence, options);
   const command = redactedPreview(record.command ?? record.cmd, 180);
   const receiptId = readString(record.receiptId) || readString(record.operationReceiptId) || readString(record.commandReceiptId);
   return {
@@ -265,6 +263,7 @@ async function normalizeRecord(evidence: InteractiveRuntimeEvidence, options: Ca
     ...(readString(record.action) ? { action: redactedPreview(record.action, 80) } : {}),
     ...(receiptId ? { receiptId: redactedPreview(receiptId, 96) } : {}),
     ...(chunks.length > 0 ? { outputChunks: chunks } : {}),
+    ...(dropped > 0 ? { droppedChunks: dropped } : {}),
     routes,
     ...(readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) ? { updatedAt: readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) } : {}),
     certification: await certification({ record, source, kind, id, routes, chunks, evidence, options, startedClassic }),

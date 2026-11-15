@@ -78,6 +78,7 @@ List all registered providers and their models. Returns configured status, auth 
 | `providers[].envVars` | `string[]` | Environment variable names that configure this provider |
 | `providers[].routes` | `ProviderAuthRouteDescriptor[] \| undefined` | Runtime auth routes declared by the provider, such as `"api-key"`, `"secret-ref"`, `"service-oauth"`, `"subscription-oauth"`, `"anonymous"`, or `"none"`. See the descriptor field table below for the full per-route shape. |
 | `providers[].models` | `ProviderModelEntry[]` | All models exposed by this provider |
+| `providers[].models[].reasoningOptions` | `object \| undefined` | Present only for a model that reasons. `levels` lists the reasoning levels the model accepts, `source` says where that list came from, and `effectiveByRequested` maps each requested level to the level the model will actually use (`null` when it has none). |
 | `providers[].models[].registryKey` | `string` | Provider-qualified model identity. Use it with `PATCH /api/models/current` for shared/TUI model selection. For companion chat sessions, pair the selected runtime provider row id with that row's model id, or with the registry key when the runtime provider is an alias for the catalog provider. Do not use a bare model id without a provider because different providers can expose the same `id`. |
 | `currentModel` | `ProviderModelRef \| null` | Daemon/TUI currently-selected model; `null` if none configured |
 | `secretsResolutionSkipped` | `boolean` | `true` when no `SecretsManager` was available during this response; `false` when a secrets manager was consulted regardless of whether it resolved any keys. Always present. |
@@ -111,7 +112,7 @@ curl -H "Authorization: Bearer $GV_TOKEN" \
 
 Return the daemon/TUI currently-selected model and its configured status.
 
-The optional `routes` array, when present, mirrors `providers[].routes` from `GET /api/models` for the selected model's provider.
+The optional `routes` array, when present, mirrors `providers[].routes` from `GET /api/models` for the selected model's provider. `effort` is the persisted reasoning level, or `null` when none has been set (the provider default applies).
 
 **Response `200 OK`**
 
@@ -133,7 +134,8 @@ The optional `routes` array, when present, mirrors `providers[].routes` from `GE
       "freshness": "healthy",
       "envVars": ["INCEPTION_API_KEY"]
     }
-  ]
+  ],
+  "effort": null
 }
 ```
 
@@ -142,7 +144,8 @@ When no model is configured:
 ```json
 {
   "model": null,
-  "configured": false
+  "configured": false,
+  "effort": null
 }
 ```
 
@@ -159,17 +162,18 @@ curl -H "Authorization: Bearer $GV_TOKEN" \
 
 Switch the active model live. No daemon restart required. Persists the selection to config and emits a `MODEL_CHANGED` event to all subscribers.
 
-This route is intentionally global. Use it for the live TUI/shared-session model picker. Do not use it for an isolated companion remote chat session that should keep its own provider/model.
+This route is intentionally global. Use it for the live TUI/shared-session model picker. Do not use it for an isolated companion remote chat session that should keep its own provider/model. It changes the model for every surface, so it needs the admin role: any other authenticated caller gets `403` with `{"error":"Admin role required"}`.
 
 **Request body**
 
 ```json
-{ "registryKey": "inceptionlabs:mercury-2" }
+{ "registryKey": "inceptionlabs:mercury-2", "effort": "high" }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `registryKey` | `string` | The `registryKey` from `GET /api/models` (format: `provider:modelId`) |
+| `registryKey` | `string` | The `registryKey` from `GET /api/models` (format: `provider:modelId`). A bare model id is also accepted when exactly one model has that id; an unknown or ambiguous bare id is refused with `400 INVALID_REQUEST` and a message naming the real candidates. |
+| `effort` | `string \| null` (optional) | The reasoning level to persist with the selection. Omit it to leave the stored level untouched; send `null` to clear it back to the provider default. Which levels a model accepts is listed in its `reasoningOptions`; a level the model does not offer snaps down at turn time. |
 
 **Response `200 OK`.** Same shape as `GET /api/models/current` with the new model, plus `persisted`.
 
@@ -192,20 +196,22 @@ This route is intentionally global. Use it for the live TUI/shared-session model
       "envVars": ["INCEPTION_API_KEY"]
     }
   ],
+  "effort": "high",
   "persisted": true
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `persisted` | `boolean` | `true` if the selection was durably written to config; `false` if persistence failed (model is still switched in memory and the event is still emitted). |
+| `effort` | `string \| null` | The persisted reasoning level after this request. |
+| `persisted` | `boolean` | `true` if the selection (and the `effort` value, when sent) was durably written to config; `false` if persistence of either failed (model is still switched in memory and the event is still emitted). |
 
 **Error responses**
 
 | Status | `code` | Meaning |
 |--------|--------|---------|
-| `400` | `INVALID_REQUEST` | Missing or non-string `registryKey` |
-| `400` | `MODEL_NOT_FOUND` | `registryKey` not in the model registry |
+| `400` | `INVALID_REQUEST` | Missing or non-string `registryKey`; a bare model id that is unknown or ambiguous; an `effort` that is not a known reasoning level |
+| `400` | `MODEL_NOT_FOUND` | A provider-qualified `registryKey` not in the model registry |
 | `400` | `SET_MODEL_FAILED` | Model found but not selectable |
 | `409` | `PROVIDER_NOT_CONFIGURED` | Provider exists but has no credentials; `missingEnvVars` lists what's needed |
 
@@ -241,16 +247,17 @@ curl -X PATCH \
 
 ## SSE: `providers`-domain events
 
-The daemon emits four event types on the `providers` RuntimeEventBus domain. Subscribers on a stream that includes the providers domain receive all of them.
+The daemon emits five event types on the `providers` RuntimeEventBus domain. Subscribers on a stream that includes the providers domain receive all of them.
 
 | Event `type` | Emitted when | Payload fields |
 |--------------|--------------|----------------|
 | `PROVIDERS_CHANGED` | The set of registered providers changes | `added: string[]`, `removed: string[]`, `updated: string[]` |
 | `PROVIDER_WARNING` | A provider raises a non-fatal warning | `message: string` |
 | `MODEL_FALLBACK` | The runtime falls back from one model to another | `from: string`, `to: string`, `provider: string` |
+| `PROVIDER_VOICE_USAGE` | One billable voice call on a metered provider (a local engine emits nothing) | `provider: string`, optional `modelId: string`, `kind: 'tts' \| 'stt'`, `billableUnits: number`, `unit: 'characters' \| 'seconds'` |
 | `MODEL_CHANGED` | The current model is switched (see below) | `registryKey: string`, `provider: string`, optional `previous: { registryKey, provider }` |
 
-Only `MODEL_CHANGED` has an exported Zod contract (`ModelChangedEventSchema`); the other three are emitter-only event shapes.
+Only `MODEL_CHANGED` has an exported Zod contract (`ModelChangedEventSchema`); the other four are emitter-only event shapes.
 
 ### `MODEL_CHANGED`
 
@@ -334,10 +341,12 @@ ceiling at least as large as the floor may restore known capacity. Explicit
 user overrides remain deliberate constraints and are never disproven this way.
 Clearing an override clears learned ceilings and accepted floors too.
 
-`knownFallbackContextWindow(provider, modelId)` returns the existing Jev-read
-family estimate, or `FALLBACK_CONTEXT_WINDOW` (`128000`) before a family reading
-settles. `readFallbackContextWindow(provider, modelId, site)` requests that
-reading. Neither API turns a family estimate into an observed capacity.
+`knownFallbackContextWindow(provider, modelId)` returns the fixed default budget
+estimate, `FALLBACK_CONTEXT_WINDOW` (`128000`), for every provider and model: it
+does no model-family inference and makes no request.
+`readFallbackContextWindow(provider, modelId, site)` is the asynchronous form of
+the same call and returns the same number. Neither API turns the estimate into an
+observed capacity.
 
 The session `sessions.contextUsage.get` operator method and its REST route
 `GET /api/sessions/{sessionId}/context-usage` expose the known capacity as
@@ -362,8 +371,7 @@ or a guarantee of session-correlated accounting across multiple hosted loops.
 Automatic preflight, post-turn and independent session compaction skip unknown
 windows; a provider's explicit context-full warning still permits recovery.
 Small-window keep-last-N compaction does nothing when all messages are already
-within the kept set. Session resume repair preserves history when no known
-ceiling can justify token-based trimming; explicit manual recovery is unchanged.
+within the kept set. Explicit manual recovery is unchanged.
 
 ---
 
@@ -399,16 +407,13 @@ async function switchModel(registryKey: string, token: string): Promise<void> {
 
 ## Turn-time error posture
 
-If the currently-selected provider is unconfigured and a companion chat turn is attempted, the provider adapter yields a structured error chunk **before** making any network call:
+If the currently-selected provider is unconfigured and a companion chat turn is attempted, the provider adapter refuses the turn **before** making any network call. The refusal is thrown as a provider error, and the daemon publishes it on the existing SSE `companion-chat.turn.error` event; it is not a streamed `error` chunk. For example:
 
-```json
-{
-  "type": "error",
-  "error": "Provider 'venice' is not configured. Set VENICE_API_KEY or configure via the TUI settings."
-}
+```text
+Provider "venice" has no API key configured, the request for model "venice-uncensored" was not sent. To use this provider, set VENICE_API_KEY, or store a key for "venice".
 ```
 
-The error arrives on the existing SSE `companion-chat.turn.error` event.
+The exact wording is not stable and names the provider, the model and the credential it needs. Match on the event type, not on the text.
 
 ---
 
@@ -430,6 +435,8 @@ Content-Type: application/json
 
 { "title": "Mobile chat", "provider": "openai-subscriber", "model": "gpt-5.5" }
 ```
+
+`provider` and `model` must be sent together, on create and on `PATCH`. Sending only one answers `400` with `code: "INVALID_MODEL_ROUTE"`, so a client that wants to change just the model sends the session's current `provider` with it. Creating a session with no body, when the daemon has no current model to fall back on, answers `400` with `code: "NO_MODEL_CONFIGURED"`.
 
 `provider` is the selected runtime provider row id from `GET /api/models`.
 `model` is the selected model id for that provider row. If the provider row is

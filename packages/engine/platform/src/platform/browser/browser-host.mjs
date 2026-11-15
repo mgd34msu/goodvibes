@@ -20,6 +20,8 @@
  */
 import { createInterface } from 'node:readline';
 import { createRequire } from 'node:module';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
@@ -73,13 +75,35 @@ function compileFunction(source) {
   return new Function(`return (${source});`)();
 }
 
+/**
+ * Loads the driver the parent resolved, checked against the version the parent
+ * expects. The parent knows where the driver is (beside the executable, in the
+ * managed directory, a vendored copy) and this script may sit nowhere near it,
+ * so the directory is passed in rather than searched for. Without one, the
+ * driver is looked up from this script's own location.
+ */
+function loadDriver(driverDirectory, expectedVersion) {
+  if (typeof expectedVersion !== 'string' || expectedVersion.length === 0) {
+    throw new Error('The browser host was not told which driver version this build requires.');
+  }
+  const manifest = typeof driverDirectory === 'string' ? join(driverDirectory, 'package.json') : null;
+  const fromDirectory = manifest !== null && existsSync(manifest);
+  const version = fromDirectory
+    ? JSON.parse(readFileSync(manifest, 'utf8')).version
+    : require('playwright-core/package.json').version;
+  if (version !== expectedVersion) {
+    throw new Error(`This browser driver (${String(version)}) does not support the action cancellation required by this build, which needs ${expectedVersion}.`);
+  }
+  return fromDirectory ? createRequire(manifest)(driverDirectory) : require('playwright-core');
+}
+
 const handlers = {
-  async attach({ endpoint, original }) {
-    if (require('playwright-core/package.json').version !== '1.62.0') {
-      throw new Error('This browser driver does not support the action cancellation required by this build.');
-    }
-    const { chromium } = require('playwright-core');
+  async attach({ endpoint, original, driverDirectory, driverVersion }) {
+    const { chromium } = loadDriver(driverDirectory, driverVersion);
     state.browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 });
+    // Tell the parent when the person closes the browser, so it stops being
+    // offered as a live session.
+    state.browser.on('disconnected', () => send({ event: 'disconnected' }));
     const contexts = state.browser.contexts();
     let selected = null;
     if (original !== undefined) {

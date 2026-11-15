@@ -88,7 +88,9 @@ export function memoryStatusLines(snapshot: MemoryGovernorSnapshotResult): strin
     : `  paused jobs: ${snapshot.pausedJobs.join(', ')}`);
 
   if (snapshot.tripwire.armed) {
-    lines.push(`  tripwire: ARMED, watching for a sustained >${snapshot.tripwire.rateMbPerSec} MB/s post-flush leak (held ${Math.round(snapshot.tripwire.sustainedSec)}s)`);
+    const { rateMbPerSec, thresholdMbPerSec, sustainedSec } = snapshot.tripwire;
+    const limit = thresholdMbPerSec !== undefined ? `a sustained >${thresholdMbPerSec} MB/s post-flush leak` : 'a sustained post-flush leak';
+    lines.push(`  tripwire: ARMED, watching for ${limit} (currently ${rateMbPerSec} MB/s, held ${Math.round(sustainedSec)}s)`);
   } else {
     lines.push('  tripwire: disarmed (no post-flush leak growth under watch)');
   }

@@ -7,6 +7,15 @@ import {
   type SecretScope,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatJsonOrText, yesNo } from './cli-output.js';
+const SECRET_WRITE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--stdin']);
+
+/** The value without the one trailing newline a piped `echo` adds. */
+async function readProcessStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf-8').replace(/\r?\n$/, '');
+}
+
 interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
 }
@@ -17,6 +26,8 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
   readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
   readonly deleteScope: (key: string, requested: SecretScope | undefined) => SecretScope | undefined;
   readonly relocation: (key: string, requested: SecretScope) => readonly string[];
+  /** Test seam and non-process input for `--stdin`; defaults to the process's standard input. */
+  readonly readStdin?: (() => Promise<string>) | undefined;
 }) {
   async function handleSecrets(runtime: Runtime): Promise<string> {
     const secrets = policy.createSecrets(runtime);
@@ -49,10 +60,19 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
     }
     if (sub === 'set' || sub === 'link') {
       const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
-      const values = rest.filter((arg) => !arg.startsWith('--'));
-      const [key, ...rawValueParts] = values;
-      const value = rawValueParts.join(' ');
-      if (!key || !value) return `Usage: ${policy.binary(runtime)} secrets ${sub} <KEY> <value> [--user|--project] [--secure|--plaintext]`;
+      const usage = `Usage: ${policy.binary(runtime)} secrets ${sub} <KEY> <value> [--user|--project] [--secure|--plaintext] (or <KEY> --stdin to read the value from standard input)`;
+      const unknownFlags = [...flags].filter((flag) => !SECRET_WRITE_FLAGS.has(flag));
+      if (unknownFlags.length > 0) {
+        return `Not stored: unknown option ${unknownFlags.join(', ')}. A value that starts with -- or contains spaces must be quoted as one argument, or read with --stdin. ${usage}`;
+      }
+      const positionals = rest.filter((arg) => !arg.startsWith('--'));
+      const [key, ...valueParts] = positionals;
+      // The value is exactly one argument: joining several would store a different secret than the one typed.
+      if (valueParts.length > 1) {
+        return `Not stored: ${valueParts.length} values were given for ${key}. Quote the value as one argument, or read it with --stdin. ${usage}`;
+      }
+      const value = flags.has('--stdin') ? (valueParts.length === 0 ? await (policy.readStdin ?? readProcessStdin)() : '') : (valueParts[0] ?? '');
+      if (!key || !value) return usage;
       if (sub === 'link' && (!value.startsWith('goodvibes://secrets/') || !isSecretRefInput(value))) {
         return 'Invalid secret reference. Use goodvibes://secrets/<source>/...';
       }

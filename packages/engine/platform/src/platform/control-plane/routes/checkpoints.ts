@@ -113,6 +113,24 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return value as string[];
 }
 
+/**
+ * A restore scope must name at least one path: an empty list would otherwise
+ * be read as "no scope" by a caller that selected nothing. Whole-workspace
+ * restore is requested by omitting `paths`.
+ */
+function restorePaths(value: unknown): string[] | undefined {
+  const paths = optionalStringArray(value);
+  if (paths !== undefined && paths.length === 0) {
+    throw new GatewayVerbError(
+      'paths is an empty list, so nothing was restored and no confirmToken was spent. Name at least one path, or omit paths to restore the whole workspace.',
+      'INVALID_ARGUMENT',
+      400,
+      'paths',
+    );
+  }
+  return paths;
+}
+
 function optionalBoolean(value: unknown, field: string): boolean | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'boolean') {
@@ -160,7 +178,8 @@ function clampLimit(raw: unknown): number {
 }
 
 /** Structural deps, the read/write surface `checkpoints.*` + `sessions.changes.get` needs. */
-export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'>;
+export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot'>
+  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure'>>;
 
 export function createCheckpointsListHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
   return async (invocation) => {
@@ -170,7 +189,10 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
     const since = optionalNumber(params.since, 'since');
     const limit = clampLimit(params.limit);
     const checkpoints = await manager.list({ kind, sessionId, since, limit });
-    return { checkpoints };
+    // Present only while the last automatic retention sweep is failing, so a
+    // store that is growing past its limits says why instead of looking healthy.
+    const retentionFailure = manager.retentionFailure?.() ?? null;
+    return retentionFailure ? { checkpoints, retentionFailure } : { checkpoints };
   };
 }
 
@@ -263,8 +285,21 @@ export function createCheckpointsRestoreHandler(
     const id = requiredString(body.id, 'id');
     const confirm = optionalBoolean(body.confirm, 'confirm');
     const confirmToken = optionalString(body.confirmToken);
+    // Checked before the token is spent so a rejected scope costs no re-preview.
+    const paths = restorePaths(body.paths);
 
     if (confirmToken !== undefined) {
+      // The preview a token vouches for described a restore with its undo
+      // point. Letting the same token skip that undo point would run something
+      // the preview never showed, so it is refused before the token is spent.
+      if (optionalBoolean(body.safetyCheckpoint, 'safetyCheckpoint') === false) {
+        throw new GatewayVerbError(
+          'A restore confirmed with a confirmToken always creates its safety checkpoint, so safetyCheckpoint: false is refused and the token was not spent. Omit safetyCheckpoint, or confirm with confirm: true instead of a token to restore without an undo point.',
+          'INVALID_ARGUMENT',
+          400,
+          'safetyCheckpoint',
+        );
+      }
       // An explicit token that does not check out is a real failure of the
       // caller's confirm attempt (not the "you didn't confirm" refusal), so it
       // is an honest 400 that names the remedy, mint a fresh one.
@@ -292,7 +327,7 @@ export function createCheckpointsRestoreHandler(
     }
 
     const result = await callOrHonestNotFound(() => manager.restore(id, {
-      paths: optionalStringArray(body.paths),
+      paths,
       safetyCheckpoint: optionalBoolean(body.safetyCheckpoint, 'safetyCheckpoint'),
     }));
     return { result, refused: false, refusal: null };

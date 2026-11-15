@@ -162,7 +162,9 @@ export function PairingHandoffOffers({ offers, onDone, postureNotice }: PairingH
     <Dialog
       open
       title="Finish pairing this device"
-      onClose={onDone}
+      // Closing mid-ceremony would dismiss the offers while the push or passkey
+      // registration still runs, hiding its outcome and any way to retry.
+      onClose={phase === 'submitting' ? () => undefined : onDone}
       footer={phase === 'done' ? (
         <Button variant="primary" onClick={onDone}>
           Continue to the app

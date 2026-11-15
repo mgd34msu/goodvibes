@@ -142,9 +142,9 @@ describe('runtime-only CLI feature overrides', () => {
       disableFeatures: ['slack-surface'],
     });
     expect(errors.length).toBe(2);
-    expect(errors[0]).toContain('Invalid --enable-feature not-a-feature.');
+    expect(errors[0]).toContain('Invalid --enable not-a-feature.');
     expect(errors[0]).toContain('Unknown feature');
-    expect(errors[1]).toContain('Invalid --disable-feature slack-surface.');
+    expect(errors[1]).toContain('Invalid --disable slack-surface.');
     expect(errors[1]).toContain('surfaces.slack.enabled');
   });
 });

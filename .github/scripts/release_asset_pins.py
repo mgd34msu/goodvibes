@@ -9,6 +9,11 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
+
+if sys.flags.optimize:
+    # Every integrity check here is an assert; -O or PYTHONOPTIMIZE would silently remove them all.
+    raise SystemExit('Release integrity checks need assertions; run without -O or PYTHONOPTIMIZE.')
 
 PROFILE = re.compile(r'(goodvibes(?:-agent|-daemon)?)-(linux|macos)-(x64|arm64)\.(reader-ci-artifact|ci-artifact)\.json')
 SQLITE = re.compile(r'sqlite-darwin-(?:x64|arm64)\.dylib\.json')
@@ -46,7 +51,7 @@ def reader_member_assets(name):
 
 
 def validate_reader_assets(pins, metadata, tag, source=None):
-    assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
+    assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Invalid release tag: only stable vN.N.N tags are published'
     version = tag[1:]
     for name in pins:
         if re.fullmatch(r'goodvibes(?:-agent|-daemon)?-(?:linux|macos)-(?:x64|arm64)', name):
@@ -100,10 +105,16 @@ def validate_reader_assets(pins, metadata, tag, source=None):
 
 def resume_existing_assets(assets, checks, incoming, checksum_name='SHA256SUMS.txt'):
     """Admit only exact candidate bytes left unlisted by a prior partial upload."""
-    assert set(checks) <= set(assets), 'A previously checksummed immutable asset is missing'
+    # A checksummed name the release lost (a payload upload that failed after the manifest landed) is
+    # uploaded again, but only from a candidate with exactly the digest the manifest recorded.
+    for name in sorted(set(checks) - set(assets)):
+        assert name in incoming and incoming[name]['sha256'] == checks[name], (
+            f'A previously checksummed immutable asset is missing and no candidate has its recorded digest: {name}')
     pending = sorted(set(assets) - set(checks) - {checksum_name})
     for name in pending:
-        assert name in incoming and assets[name]['digest'] == 'sha256:' + incoming[name]['sha256'] and assets[name]['size'] == incoming[name]['size'], f'Unknown partial upload: {name}'
+        assert name in incoming and assets[name]['digest'] == 'sha256:' + incoming[name]['sha256'] and assets[name]['size'] == incoming[name]['size'], (
+            f'Unknown partial upload: {name}. The release holds it but no checksum entry lists it and the rebuilt bytes differ. '
+            f'Delete {name} from the release and run the completion again, or rerun with the original build output.')
     for name in pending:
         checks[name] = incoming[name]['sha256']
     return pending

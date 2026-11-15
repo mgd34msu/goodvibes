@@ -123,7 +123,9 @@ describe('goodvibes doctor subcommands', () => {
     const snapshot = buildCliStatusSnapshot(opts);
     expect(snapshot.auth.permissionLabel).toBe('YOLO');
     expect(snapshot.auth.permissionDetail).toBe(GATE_PRESETS.yolo.summary);
-    expect(snapshot.findings.some(f => f.id === 'auto-approve-permissions' && f.severity === 'risk')).toBe(true);
+    expect(snapshot.findings.some(f => f.id === 'auto-approve-enabled' && f.severity === 'risk')).toBe(true);
+    expect(snapshot.auth.automaticApprovals).toBe(true);
+    expect(snapshot.auth.autoApprove).toBe(true);
   });
 
   test('auto-approve override is reported instead of promising the underlying preset will ask', async () => {

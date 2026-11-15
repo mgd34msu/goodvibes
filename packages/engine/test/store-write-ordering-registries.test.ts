@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
-import { makeControllableStore, readOnDisk, replaceInternalStore } from './_helpers/controllable-store.js';
+import { makeControllableStore, readOnDisk, replaceInternalStore, settleCompetingWrite } from './_helpers/controllable-store.js';
 
 import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.js';
 import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.js';
@@ -117,11 +117,14 @@ describe('AutomationRunStore: a completed run does not read back as running', ()
       // The daemon runs up to `automation.maxConcurrentRuns` (4) at once and
       // every one of them saves the WHOLE run map. This is a second run's save,
       // carrying the view in which the first run is still going.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const neighbour = runs.save([running]);
       await waitFor(() => store.started >= 2);
 
-      await runs.save([makeAutomationRun({ status: 'completed', endedAt: Date.now() })]);
+      const completing = runs.save([makeAutomationRun({ status: 'completed', endedAt: Date.now() })]);
+      await settleCompetingWrite(store, 2);
+      release();
+      await completing;
       await neighbour;
       await waitFor(() => store.finished >= 3);
 
@@ -146,11 +149,14 @@ describe('AutomationJobStore: a disabled job does not come back enabled', () => 
       const other = makeAutomationJob({ id: 'job-neighbour', name: 'Neighbouring run' });
       await jobs.save([enabled, other]);
 
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const neighbour = jobs.save([enabled, { ...other, runCount: 1 }]);
       await waitFor(() => store.started >= 2);
 
-      await jobs.save([{ ...enabled, enabled: false, status: 'paused' }, { ...other, runCount: 1 }]);
+      const pausing = jobs.save([{ ...enabled, enabled: false, status: 'paused' }, { ...other, runCount: 1 }]);
+      await settleCompetingWrite(store, 2);
+      release();
+      await pausing;
       await neighbour;
       await waitFor(() => store.finished >= 3);
 
@@ -180,11 +186,14 @@ describe('AutomationRouteStore: a removed route binding does not come back', () 
 
       // AutomationService.upsertRun rewrites this whole file on every run, and
       // removeJob rewrites it to drop the deleted job's bindings. They overlap.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const upserting = routes.save([binding]);
       await waitFor(() => store.started >= 2);
 
-      await routes.save([]);
+      const clearing = routes.save([]);
+      await settleCompetingWrite(store, 2);
+      release();
+      await clearing;
       await upserting;
       await waitFor(() => store.finished >= 3);
 
@@ -213,11 +222,14 @@ describe('AutomationSourceStore: a removed source does not come back', () => {
 
       // AutomationService writes this file from upsertJob AND upsertRun, both
       // of which fire it inside a Promise.all alongside other stores.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const upserting = sources.save([source]);
       await waitFor(() => store.started >= 2);
 
-      await sources.save([]);
+      const clearing = sources.save([]);
+      await settleCompetingWrite(store, 2);
+      release();
+      await clearing;
       await upserting;
       await waitFor(() => store.finished >= 3);
 
@@ -315,11 +327,13 @@ describe('TaskScheduler: a removed task does not come back', () => {
 
       // None of add/remove/setEnabled waits for its own write, so two of them
       // are trivially in flight at once.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       scheduler.setEnabled(task.id, true);
       await waitFor(() => store.started >= 2);
 
       expect(scheduler.remove(task.id)).toBe(true);
+      await settleCompetingWrite(store, 2);
+      release();
       await waitFor(() => store.finished >= 3);
 
       // A task on disk is a cron the next daemon start arms a timer for, so
@@ -353,11 +367,14 @@ describe('CiWatchService: a deleted watch does not come back', () => {
 
       // checkWatch polls the forge and only writes when that returns, so its
       // write is requested long before it lands.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const checking = service.checkWatch(watch.id);
       await waitFor(() => store.started >= 2);
 
-      expect(await service.deleteWatch(watch.id)).toBe(true);
+      const deleting = service.deleteWatch(watch.id);
+      await settleCompetingWrite(store, 2);
+      release();
+      expect(await deleting).toBe(true);
       await checking;
       await waitFor(() => store.finished >= 3);
 
@@ -388,11 +405,14 @@ describe('PrincipalRegistry: a deleted principal does not come back', () => {
         identities: [{ channel: 'telegram', value: '4242' }],
       });
 
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const creating = registry.create({ name: 'Bot', kind: 'bot' });
       await waitFor(() => store.started >= 2);
 
-      expect(await registry.delete(person.id)).toBe(true);
+      const deleting = registry.delete(person.id);
+      await settleCompetingWrite(store, 2);
+      release();
+      expect(await deleting).toBe(true);
       await creating;
       await waitFor(() => store.finished >= 3);
 
@@ -422,11 +442,14 @@ describe('ChannelProfileRegistry: a deleted binding does not come back', () => {
 
       await registry.set({ surfaceKind: 'telegram', channelId: 'chat-9', model: 'expensive-model' });
 
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const setting = registry.set({ surfaceKind: 'slack', model: 'other-model' });
       await waitFor(() => store.started >= 2);
 
-      expect(await registry.delete('telegram', 'chat-9')).toBe(true);
+      const deleting = registry.delete('telegram', 'chat-9');
+      await settleCompetingWrite(store, 2);
+      release();
+      expect(await deleting).toBe(true);
       await setting;
       await waitFor(() => store.finished >= 3);
 

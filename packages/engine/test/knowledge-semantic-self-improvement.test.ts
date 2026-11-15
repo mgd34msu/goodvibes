@@ -21,10 +21,13 @@ import {
   WeakFeatureAnswerLlm,
   createStores,
   waitFor,
+  useStoreCleanup,
 } from './_helpers/knowledge-semantic-fixtures.js';
 import { settleEvents, withTestTimeout } from './_helpers/test-timeout.js';
 import { useKnowledgeAnswerReadings } from './_helpers/knowledge-answer-readings.js';
 import { semanticRepairProfileValues, semanticRepairUsefulValues, semanticRepairSentenceKinds } from './_helpers/repair-profile-fixture-readings.js';
+
+useStoreCleanup();
 
 const answerReadings = useKnowledgeAnswerReadings({ extractedKinds: semanticRepairSentenceKinds, repairProfile: semanticRepairProfileValues, repairUseful: semanticRepairUsefulValues, objectAlignment: [
   { query: 'What HDR and display features does the TV have?', objects: [{ title: 'LG webOS Smart TV', concreteObject: 0.99, integrationObject: 0.01, aligned: 0.99 }] },
@@ -210,9 +213,16 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
       },
       metadata: { knowledgeSpaceId: spaceId },
     });
+    let repairEntered!: () => void;
+    const repairing = new Promise<void>((resolve) => { repairEntered = resolve; });
+    let releaseRepair!: () => void;
+    const repairHeld = new Promise<void>((resolve) => { releaseRepair = resolve; });
+    let repairCompleted = false;
     const semantic = new KnowledgeSemanticService(store, {
       gapRepairer: async () => {
-        await settleEvents(150);
+        repairEntered();
+        await repairHeld;
+        repairCompleted = true;
         return {
           searched: true,
           evidenceSufficient: true,
@@ -241,8 +251,9 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
       force: true,
       maxRunMs: 5_000,
     });
-    await settleEvents(10);
-    const answer = await semantic.answer({
+    // The foreground answer starts only once the repair is inside its repairer and held there.
+    await withTestTimeout(repairing);
+    const answering = semantic.answer({
       knowledgeSpaceId: spaceId,
       query: 'What features does the LG 86NANO90UNA have?',
       includeSources: true,
@@ -252,7 +263,12 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
       candidateSourceIds: [generated.id],
       timeoutMs: 30_000,
     });
+    await settleEvents(10);
+    releaseRepair();
+    const answer = await answering;
     await background;
+
+    expect(repairCompleted).toBe(true);
 
     expect(answer.answer.gaps).toHaveLength(0);
     expect(answer.answer.sources[0]?.id).toBe(official.id);
@@ -443,7 +459,7 @@ describe('semantic knowledge/wiki enrichment: self-improvement', () => {
     expect(result.processedGaps).toBe(1);
     // Honest partial-result flags: the stop is reported, never silent.
     expect(result.truncated).toBe(true);
-    expect(result.budgetExhausted).toBe(true);
+    expect(result.budgetExhausted).toBe(false);
     // WITHOUT stopWhenPaused (a foreground/operator run), the pause does not
     // stop it, the flag is a background-run contract, not a global gate.
     paused = false;

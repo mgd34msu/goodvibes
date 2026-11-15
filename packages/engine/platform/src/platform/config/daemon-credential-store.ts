@@ -18,6 +18,14 @@ export interface DaemonCredentialStore {
    */
   resolveRef(ref: string): Promise<string | null>;
   /**
+   * Resolve a reference held by one config key, but only when the reference
+   * names that key's own secret (`daemonSecretKeyFor(configKey)`). A setting
+   * that carries a credential to a URL (an ntfy token, a CalDAV password) must
+   * never be able to name another credential and send it there. Null when the
+   * reference names anything else; the caller reports that, it is not "absent".
+   */
+  resolveBoundRef?(configKey: string, ref: string): Promise<string | null>;
+  /**
    * Resolve a config-key-derived secret
    * (e.g. 'surfaces.slack.botToken' → GOODVIBES_SURFACES_SLACK_BOT_TOKEN).
    */
@@ -71,6 +79,10 @@ export function createDaemonCredentialStore(secrets: Pick<SecretsManager, 'get' 
     async resolveRef(ref: string): Promise<string | null> {
       const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
       return secrets.get(key);
+    },
+    async resolveBoundRef(configKey: string, ref: string): Promise<string | null> {
+      const key = isSecretReferenceValue(ref) ? secretKeyFromReference(ref) : ref;
+      return key === daemonSecretKeyFor(configKey) ? secrets.get(key) : null;
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {
       return secrets.get(daemonSecretKeyFor(configKey));

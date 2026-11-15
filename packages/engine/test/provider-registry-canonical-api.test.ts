@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { join } from 'node:path';
 import { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 import { ProviderNotFoundError } from '../platform/src/platform/providers/provider-not-found-error.js';
@@ -47,8 +48,10 @@ function makeProvider(name: string, models: readonly string[] = []): LLMProvider
 }
 
 /** Build a ProviderRegistry with the minimum required options provided by test doubles. */
+const DEFAULT_REGISTRY_ROOT = makeProjectTempDir('gv-registry-root');
+
 function makeRegistry(
-  root = '/tmp/test-registry',
+  root = DEFAULT_REGISTRY_ROOT,
   config: Readonly<Record<string, unknown>> = {},
 ): ProviderRegistry {
   const configManager = {
@@ -354,56 +357,81 @@ describe('ProviderRegistry model catalog cache', () => {
     // 'gpt-5.4' exists on several providers' baselines: the construction-time
     // error routes through the shared resolver, listing the actual candidate
     // registryKeys plus the accepted forms with a concrete example.
-    expect(() => makeRegistry('/tmp/test-registry', { 'provider.model': 'gpt-5.4' })).toThrow(
+    expect(() => makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'gpt-5.4' })).toThrow(
       /provider\.model 'gpt-5\.4' could not be resolved: Model id 'gpt-5\.4' is ambiguous.*openai:gpt-5\.4.*Accepted forms: a provider-qualified registryKey \(e\.g\. '.+:.+'\)/,
     );
   });
 
   test('a configured UNKNOWN bare model gets closest-match suggestions plus a concrete valid example', () => {
-    expect(() => makeRegistry('/tmp/test-registry', { 'provider.model': 'gpt-5x4' })).toThrow(
+    expect(() => makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'gpt-5x4' })).toThrow(
       /provider\.model 'gpt-5x4' could not be resolved: Unknown model 'gpt-5x4'\. Did you mean: .+\. Accepted forms/,
     );
   });
 
   test('a configured UNIQUE bare model id auto-qualifies at construction through the shared resolver', () => {
-    const registry = makeRegistry('/tmp/test-registry', { 'provider.model': 'openrouter/free' });
+    const registry = makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'openrouter/free' });
     expect(registry.getCurrentModel().registryKey).toBe('openrouter:openrouter/free');
   });
 
-  // 'gpt-5.4' is a real model id that now appears in more than one provider's
-  // dated-static baseline (openai, openai-subscriber, github-copilot), the
-  // shared resolver reports it as ambiguous with the real candidate keys,
-  // never a silent guess and never the old abstract format lecture.
+  // A model id served by two providers cannot be resolved from the bare id:
+  // the shared resolver reports it as ambiguous with the real candidate keys,
+  // never a silent guess. Doubles keep this independent of the shipped baselines.
   test('bare model ids: ambiguous across providers reports the real candidates; unique auto-qualifies', () => {
     const registry = makeRegistry();
-    expect(() => registry.getForModel('gpt-5.4')).toThrow(/ambiguous/);
-    expect(() => registry.setCurrentModel('gpt-5.4')).toThrow(/ambiguous/);
-    expect(() => registry.getCapabilityForModel('gpt-5.4')).toThrow(/ambiguous/);
+    registry.register(makeProvider('alpha-double', ['shared-model', 'alpha-only-model']));
+    registry.register(makeProvider('beta-double', ['shared-model']));
+    expect(() => registry.getForModel('shared-model')).toThrow(/ambiguous.*alpha-double:shared-model.*beta-double:shared-model/);
+    expect(() => registry.setCurrentModel('shared-model')).toThrow(/ambiguous/);
+    expect(() => registry.getCapabilityForModel('shared-model')).toThrow(/ambiguous/);
 
-    // 'claude-fable-5' is unique to Anthropic's dated-static baseline, it
-    // auto-qualifies and resolves to the real provider, no format required.
-    expect(registry.getForModel('claude-fable-5').name).toBe('anthropic');
+    // An id only one provider serves auto-qualifies and resolves to it.
+    expect(registry.getForModel('alpha-only-model').name).toBe('alpha-double');
   });
 
   test('custom provider changes and catalog override warnings use registry keys', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-provider-registry-'));
     try {
       saveCatalogCache(
-        [makeCatalogModel('shared-model', 'openai')],
+        [makeCatalogModel('shared-model', 'acme-hosted')],
         getCatalogCachePath(root),
         getCatalogTmpPath(root),
       );
-      writeCustomProvider(root, 'openai', 'shared-model');
+      writeCustomProvider(root, 'acme-hosted', 'shared-model');
       writeCustomProvider(root, 'custom-ai', 'shared-model');
 
       const registry = makeRegistry(root);
       registry.initCatalog();
       const result = await registry.loadCustomProviders();
 
-      expect(result.added).toContain('openai:shared-model');
+      expect(result.added).toContain('acme-hosted:shared-model');
       expect(result.added).toContain('custom-ai:shared-model');
-      expect(result.warnings).toContain("[registry] Custom model 'openai:shared-model' overrides catalog model.");
+      expect(result.warnings).toContain("[registry] Custom model 'acme-hosted:shared-model' overrides catalog model.");
       expect(result.warnings.some((warning) => warning.includes("'custom-ai:shared-model' overrides"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a custom provider file named like a built-in does not replace it, and a renamed copy is added', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'goodvibes-provider-registry-'));
+    try {
+      writeCustomProvider(root, 'openai', 'shadow-model');
+      const registry = makeRegistry(root);
+      const builtin = registry.get('openai');
+      const result = await registry.loadCustomProviders();
+
+      expect(registry.get('openai')).toBe(builtin);
+      expect(result.added).not.toContain('openai:shadow-model');
+      expect(result.warnings.some((warning) => warning.includes("'openai' is a built-in provider name"))).toBe(true);
+
+      // A custom provider from an earlier load stays reloadable under its own name.
+      writeCustomProvider(root, 'custom-ai', 'one');
+      await registry.loadCustomProviders();
+      const first = registry.get('custom-ai');
+      const again = await registry.loadCustomProviders();
+      expect(registry.get('custom-ai')).not.toBe(builtin);
+      expect(first).toBeDefined();
+      expect(again.warnings.some((warning) => warning.includes("'custom-ai' is a built-in"))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -441,14 +469,14 @@ describe('ProviderRegistry.getCurrentModel(): fresh-home default fallback', () =
   });
 
   test('a genuinely unknown provider in the configured ref still throws honestly', () => {
-    const registry = makeRegistry('/tmp/test-registry', { 'provider.model': 'ghost-provider:ghost-model' });
+    const registry = makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'ghost-provider:ghost-model' });
     expect(() => registry.getCurrentModel()).toThrow(
       "Current model 'ghost-provider:ghost-model' not in registry.",
     );
   });
 
   test('a registered provider whose own model list omits the configured id still throws honestly', () => {
-    const registry = makeRegistry('/tmp/test-registry', { 'provider.model': 'openrouter:not-a-real-model' });
+    const registry = makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'openrouter:not-a-real-model' });
     expect(() => registry.getCurrentModel()).toThrow(
       "Current model 'openrouter:not-a-real-model' not in registry.",
     );
@@ -499,7 +527,7 @@ describe('getProviderUsageSnapshot(): honest degrade on an unresolvable current 
   });
 
   test('does not throw and omits currentModelRegistryKey when the configured ref is unresolvable', async () => {
-    const registry = makeRegistry('/tmp/test-registry', { 'provider.model': 'ghost-provider:ghost-model' });
+    const registry = makeRegistry(DEFAULT_REGISTRY_ROOT, { 'provider.model': 'ghost-provider:ghost-model' });
     registry.register(makeProvider('anthropic'));
     const snapshot = await getProviderUsageSnapshot(registry, 'anthropic');
     expect(snapshot).not.toBeNull();

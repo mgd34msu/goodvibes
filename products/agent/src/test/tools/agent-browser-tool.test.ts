@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createToolRegistryDouble } from '../helpers/tool-registry-double.ts';
 import type { BrowserEngine } from '@goodvibes-jev/engine/platform/platform/browser';
 import { BrowserSessionError } from '@goodvibes-jev/engine/platform/platform/browser';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import {
   BROWSER_TOOL_ACTIONS,
   BROWSER_TOOL_READ_ONLY_ACTIONS,
@@ -160,6 +161,41 @@ describe('browser tool surface', () => {
     }
   });
 
+  test('every browser tool action is served by a daemon browser verb', () => {
+    // The daemon must not be a smaller browser than the agent tool: an action with no verb is only found when an agent calls it.
+    const daemonVerb: Readonly<Record<string, string>> = {
+      status: 'browser.status',
+      provision: 'browser.provision',
+      launch: 'browser.sessions.launch',
+      attach: 'browser.sessions.attach',
+      release: 'browser.sessions.release',
+      close: 'browser.sessions.close',
+      navigate: 'browser.navigate',
+      snapshot: 'browser.snapshot',
+      click: 'browser.click',
+      type: 'browser.type',
+      select: 'browser.select',
+      press: 'browser.press',
+      scroll: 'browser.scroll',
+      wait_for: 'browser.waitFor',
+      read_text: 'browser.readText',
+      screenshot: 'browser.screenshot',
+      tabs: 'browser.tabs.list',
+      new_tab: 'browser.tabs.create',
+      switch_tab: 'browser.tabs.switch',
+      close_tab: 'browser.tabs.close',
+      back: 'browser.history.back',
+      forward: 'browser.history.forward',
+      extract: 'browser.extract',
+    };
+    const served = new Set(new GatewayMethodCatalog().list().map((descriptor) => descriptor.id));
+    for (const action of BROWSER_TOOL_ACTIONS) {
+      const methodId = daemonVerb[action];
+      expect(methodId, `browser tool action "${action}" has no daemon verb mapped in this test`).toBeDefined();
+      expect(served.has(methodId!), `browser tool action "${action}" has no daemon verb (${methodId})`).toBe(true);
+    }
+  });
+
   test('registering the tool never starts a browser', async () => {
     const registry = createToolRegistryDouble();
     registerAgentBrowserTool(registry, { screenshotDirectory: '/tmp/does-not-matter' });
@@ -274,5 +310,62 @@ describe('registered browser caller lifetime', () => {
       expect(outcome instanceof Error || Boolean(outcome && typeof outcome === 'object' && 'success' in outcome && outcome.success === false)).toBe(true);
       expect(JSON.stringify(outcome)).not.toContain('private cancellation fixture'); expect(getters).toBe(0); expect(calls).toEqual([]);
     } finally { release(); await result; }
+  });
+});
+
+describe('browser tool refusals that protect the owner', () => {
+  test('type without text refuses instead of clearing the field, and text:"" still clears on purpose', async () => {
+    const calls: RecordedCall[] = [];
+    const tool = createAgentBrowserTool({ engine: fakeEngine(calls) });
+
+    const omitted = await tool.execute({ action: 'type', ref: 'e12' });
+    expect(omitted.success).toBe(false);
+    expect(omitted.error).toContain('needs text');
+    expect(calls).toEqual([]);
+
+    const cleared = await tool.execute({ action: 'type', ref: 'e12', text: '' });
+    expect(cleared.success).toBe(true);
+    expect(calls.map((entry) => entry.method)).toEqual(['type']);
+  });
+
+  test('select without values refuses instead of clearing the selection', async () => {
+    const calls: RecordedCall[] = [];
+    const tool = createAgentBrowserTool({ engine: fakeEngine(calls) });
+    const result = await tool.execute({ action: 'select', ref: 'e3' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('needs values');
+    expect(calls).toEqual([]);
+  });
+
+  test('extract with only unknown fields refuses instead of silently reading the default', async () => {
+    const calls: RecordedCall[] = [];
+    const tool = createAgentBrowserTool({ engine: fakeEngine(calls) });
+    const result = await tool.execute({ action: 'extract', selector: 'p', fields: ['innerHTML'] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('text, html, value, attributes');
+    expect(calls).toEqual([]);
+  });
+
+  test('a file: address is refused without a read policy, and held to it when there is one', async () => {
+    const calls: RecordedCall[] = [];
+    const bare = createAgentBrowserTool({ engine: fakeEngine(calls) });
+    const refused = await bare.execute({ action: 'navigate', url: 'file:///home/user/.ssh/id_rsa' });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain('read tool');
+
+    const checked: string[] = [];
+    const guarded = createAgentBrowserTool({
+      engine: fakeEngine(calls),
+      readAccess: async (path) => { checked.push(path); return !path.includes('.ssh'); },
+    });
+    const blocked = await guarded.execute({ action: 'navigate', url: 'file:///home/user/.ssh/id_rsa' });
+    expect(blocked.success).toBe(false);
+    expect(blocked.error).toContain('read policy');
+    const blockedTab = await guarded.execute({ action: 'new_tab', url: 'file:///home/user/.ssh/id_rsa' });
+    expect(blockedTab.success).toBe(false);
+    const allowed = await guarded.execute({ action: 'navigate', url: 'file:///home/user/notes.txt' });
+    expect(allowed.success).toBe(true);
+    expect(checked).toEqual(['/home/user/.ssh/id_rsa', '/home/user/.ssh/id_rsa', '/home/user/notes.txt']);
+    expect(calls.map((entry) => entry.method)).toEqual(['navigate']);
   });
 });

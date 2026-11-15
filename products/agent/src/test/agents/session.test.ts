@@ -4,7 +4,6 @@ import { join } from 'path';
 
 import { AgentSession } from '@goodvibes-jev/engine/platform/platform/agents';
 import { ConversationManager } from '@goodvibes-jev/engine/platform/platform/core';
-import { KVState } from '@goodvibes-jev/engine/platform/platform/state';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 
 const TEST_TMP_ROOT = join(import.meta.dir, '../../../.tmp-tests');
@@ -47,10 +46,6 @@ describe('AgentSession', () => {
 
     test('creates a ConversationManager', () => {
       expect(session.conversation).toBeInstanceOf(ConversationManager);
-    });
-
-    test('creates a KVState', () => {
-      expect(session.kvState).toBeInstanceOf(KVState);
     });
 
     test('sets sessionFile path with agent prefix', () => {
@@ -106,23 +101,6 @@ describe('AgentSession', () => {
       for (const line of lines) {
         expect(() => JSON.parse(line)).not.toThrow();
       }
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // KVState namespace isolation
-  // -------------------------------------------------------------------------
-
-  describe('kvState namespace', () => {
-    test('kvState session ID includes agent prefix', () => {
-      const sessionId = session.kvState.getSessionId();
-      expect(sessionId).toBe(agentId);
-    });
-
-    test('two AgentSessions have different kvState instances', async () => {
-      const other = new AgentSession('other-agent', model, provider, sessionPaths(rootDir));
-      expect(session.kvState).not.toBe(other.kvState);
-      await other.dispose();
     });
   });
 

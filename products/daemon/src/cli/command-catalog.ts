@@ -50,6 +50,7 @@ export type DaemonCommand =
   | 'status'
   | 'pair'
   | 'sessions'
+  | 'mcp'
   | 'config'
   | 'update'
   | 'send'
@@ -122,6 +123,13 @@ export interface DaemonMachineQuery {
   };
 }
 
+/** A flag a passthrough command parses for itself. */
+export interface DaemonPassthroughFlag {
+  readonly tokens: readonly string[];
+  readonly takesValue: boolean;
+  readonly summary: string;
+}
+
 /**
  * A command entry, narrowed the same way.
  *
@@ -130,6 +138,11 @@ export interface DaemonMachineQuery {
  * binary has a `help <command>` page for every command it answers to.
  */
 export type DaemonCommandSpec = CommandSpec<DaemonCommand, DaemonCliFlagField> & {
+  /**
+   * The flags a passthrough command reads from its own arguments. The parser never
+   * sees them (it hands those arguments over verbatim); shell completion offers them.
+   */
+  readonly passthroughFlags?: readonly DaemonPassthroughFlag[];
   readonly summary: string;
   readonly usage: string;
   readonly detail: readonly string[];
@@ -141,7 +154,10 @@ export type DaemonCommandSpec = CommandSpec<DaemonCommand, DaemonCliFlagField> &
 // Flags
 // ---------------------------------------------------------------------------
 
-/** Accepted before or after any command, on every command. */
+/**
+ * Accepted before or after any command, except the passthrough commands, which
+ * take their remaining arguments verbatim and are selected by environment instead.
+ */
 export const GLOBAL_FLAGS: readonly DaemonCommandFlagSpec[] = [
   {
     tokens: ['--daemon-home'],
@@ -452,7 +468,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     name: 'status',
     aliases: [],
     summary: 'Ask a running daemon what it is doing.',
-    usage: 'goodvibes-daemon status [--json] [--host <name>] [--port <n>] [--token <t>]',
+    usage: 'goodvibes-daemon status [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]',
     detail: [
       'Talk to a daemon that is already running and report: its version, how long it',
       'has been up, the address it actually bound, what its last update did, whether',
@@ -460,7 +476,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'sessions it is hosting.',
       '',
       'With no flags it asks the daemon on this machine. --host/--port/--token ask',
-      'another one; the token defaults to this machine\'s operator token, which is not',
+      'another one (--host needs http:// or https:// for another machine); the token defaults to this machine\'s operator token, which is not',
       'the right credential for a different machine.',
       '',
       'The update, uptime and rollback lines come from files this daemon writes on its',
@@ -477,7 +493,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     name: 'pair',
     aliases: ['qr', 'qrcode'],
     summary: 'Print the pairing link and QR code again, or mint one on a remote daemon.',
-    usage: 'goodvibes-daemon pair [--json] [--host <name>] [--port <n>] [--token <t>] [-y]',
+    usage: 'goodvibes-daemon pair [--json] [--host <http(s)://name>] [--port <n>] [--token <t>] [-y]',
     detail: [
       'LOCAL FORM (no --host, or one naming this machine): print the same pairing',
       'block a daemon prints once at startup: the web origin, the offers a new',
@@ -488,7 +504,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'printed here and one printed at boot are the same link. Scrolling the startup',
       'banner off the screen therefore costs nothing.',
       '',
-      'REMOTE FORM (--host naming another machine): ask THAT daemon to MINT A NEW',
+      'REMOTE FORM (--host http(s)://name of another machine): ask THAT daemon to MINT A NEW',
       'per-device pairing token and print the pairing block for it. Minting is a',
       'different act than reprinting: it is a fresh token, and every token that',
       'daemon already issued, its shared token included, is left untouched.',
@@ -534,25 +550,54 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     subcommands: ['list', 'kill'],
   },
   {
+    name: 'mcp',
+    aliases: [],
+    summary: 'Serve the operator surface of a running daemon to an MCP client over stdio.',
+    usage: 'goodvibes-daemon mcp serve [--host <http(s)://name>] [--port <n>] [--token <t>]',
+    detail: [
+      'mcp serve              speak the Model Context Protocol on stdin/stdout, with one tool',
+      '                       per operator method of the daemon it connects to (session',
+      '                       lifecycle first), so an MCP client can drive GoodVibes.',
+      '',
+      'It connects the way status and sessions do: with no flags to the daemon on this',
+      'machine using this machine\'s operator token; --host/--port/--token pick another (--host needs http:// or https://).',
+      'The daemon is checked before the first frame. When it is not running, or the token',
+      'is missing or refused, the command prints one line naming the prerequisite on',
+      'stderr and exits 1; nothing is written to stdout.',
+      '',
+      'Stdout carries only protocol frames; every message for a person goes to stderr.',
+      'The command ends, exit 0, when the client closes stdin.',
+      '',
+      'Client configuration: { "command": "goodvibes-daemon", "args": ["mcp", "serve"] }.',
+    ],
+    flags: [...REMOTE_TARGET_FLAGS],
+    passthrough: false,
+    subcommands: ['serve'],
+  },
+  {
     name: 'config',
     aliases: [],
     summary: 'Read and write this daemon\'s settings.',
     usage: 'goodvibes-daemon config list|get <key>|set <key> <value>|unset <key> [--json]',
     detail: [
-      'config list            every setting with a value, and where the value came from.',
+      'config list            every setting with its current value; the settings file it names',
+      '                       is the global one, not the file every key lives in.',
       'config get <key>       one setting.',
       'config set <key> <v>   write one setting to disk. The value is checked against the',
       '                       schema first, and a daemon-owned key lands in the daemon\'s',
-      '                       own settings file rather than the shared one.',
-      'config unset <key>     put one setting back to its shipped default.',
+      '                       own settings file rather than the shared one. A credential',
+      '                       key is never written as plain text: it is stored in the',
+      '                       secret store and the settings file keeps a reference.',
+      'config unset <key>     remove the global, daemon and shared value of one setting. A',
+      '                       project settings value is untouched and can still apply.',
       '',
       'Values are read and written on this machine\'s settings files directly, so this',
       'works whether or not a daemon is running. A running daemon picks up most',
-      'changes live; the ones that only apply at bind time say so.',
+      'changes live, including a changed control-plane host or port; a setting that is',
+      'only read at startup applies the next time the daemon starts.',
       '',
       'Anything that reads like a credential (a token, a password, an API key) is',
-      'printed as <redacted>. `config set` still writes the real value; it is the',
-      'OUTPUT that is redacted, so a settings dump pasted into an issue carries none.',
+      'printed as <redacted>, so a settings dump pasted into an issue carries none.',
     ],
     flags: [JSON_FLAG],
     passthrough: false,
@@ -607,6 +652,13 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'not arrival at the recipient; uncertain sends are never retried automatically.',
     ],
     flags: [],
+    passthroughFlags: [
+      { tokens: ['--channel', '-c'], takesValue: true, summary: 'The channel to send through.' },
+      { tokens: ['--to'], takesValue: true, summary: 'A topic, chat or room inside the channel.' },
+      { tokens: ['--title'], takesValue: true, summary: 'A title for the message.' },
+      { tokens: ['--list'], takesValue: false, summary: 'Show every channel and where it would send.' },
+      { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
+    ],
     passthrough: true,
     subcommands: [],
   },
@@ -633,6 +685,20 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       '`status` uses; --json gives a scriptable answer.',
     ],
     flags: [],
+    passthroughFlags: [
+      { tokens: ['--group'], takesValue: true, summary: 'The group to join.' },
+      { tokens: ['--key'], takesValue: true, summary: 'The join key.' },
+      { tokens: ['--name'], takesValue: true, summary: 'A name for the group.' },
+      { tokens: ['--passphrase'], takesValue: true, summary: 'The group passphrase.' },
+      { tokens: ['--host'], takesValue: true, summary: 'The machine whose daemon to ask.' },
+      { tokens: ['--port'], takesValue: true, summary: 'That daemon\'s port.' },
+      { tokens: ['--token'], takesValue: true, summary: 'The operator token for that daemon.' },
+      { tokens: ['--now'], takesValue: false, summary: 'Rotate immediately.' },
+      { tokens: ['--qr'], takesValue: false, summary: 'Print the join key as a QR code.' },
+      { tokens: ['--yes', '-y'], takesValue: false, summary: 'Answer yes to confirmations.' },
+      { tokens: ['--json'], takesValue: false, summary: 'Print one JSON document instead of prose.' },
+      { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
+    ],
     passthrough: true,
     subcommands: ['status', 'create', 'join', 'key', 'nodes', 'forget', 'rotate', 'leave', 'rename', 'groups'],
   },
@@ -657,6 +723,13 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'takes it back, and both are stated in the receipt.',
     ],
     flags: [],
+    passthroughFlags: [
+      { tokens: ['--bundle-dir'], takesValue: true, summary: 'The directory holding the built web UI.' },
+      { tokens: ['--lan'], takesValue: false, summary: 'Bind every interface.' },
+      { tokens: ['--loopback'], takesValue: false, summary: 'Take the binding back to this machine only.' },
+      { tokens: ['--json'], takesValue: false, summary: 'Print the configured web.* binding as JSON.' },
+      { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
+    ],
     passthrough: true,
     subcommands: ['enable', 'disable', 'status'],
     machineQueries: [WEBUI_BINDING_QUERY],
@@ -675,6 +748,10 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'perfectly good daemon.',
     ],
     flags: [],
+    passthroughFlags: [
+      { tokens: ['--strict'], takesValue: false, summary: 'Exit nonzero when a download fails.' },
+      { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
+    ],
     passthrough: true,
     subcommands: [],
   },
@@ -722,6 +799,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'The release installer invokes its verified staged binary before replacing installed programs.',
       '--describe reports the readers compiled into this binary for the native CI artifact producer.'],
     flags: [],
+    passthroughFlags: [
+      { tokens: ['--describe'], takesValue: false, summary: 'Report the readers compiled into this binary.' },
+    ],
     passthrough: true,
     subcommands: [],
   },
@@ -774,7 +854,9 @@ function createDefaultFlags(): DaemonCliFlags {
 }
 
 /**
- * `provider:model` and `provider/model` name the provider inside the model id.
+ * `provider:model` names the provider inside the model id. A slash is not a
+ * provider separator: ids such as `meta-llama/Llama-3.1-8B` carry one inside the
+ * model name, so a slash-form id keeps the configured provider.
  *
  * Applied once, over the finished parse, rather than at the moment `--model`
  * is read: a `--provider` the operator typed explicitly always wins, and
@@ -786,9 +868,7 @@ function inferProviderFromModel(
 ): EngineParseResult<DaemonCommand, DaemonCliFlags> {
   const { provider, model } = result.flags;
   if (provider !== undefined || model === undefined) return result;
-  const inferred = model.includes(':')
-    ? model.split(':')[0]
-    : model.includes('/') ? model.split('/')[0] : undefined;
+  const inferred = model.includes(':') ? model.split(':')[0] : undefined;
   if (inferred === undefined) return result;
   return { ...result, flags: { ...result.flags, provider: inferred } };
 }

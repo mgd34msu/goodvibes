@@ -55,11 +55,13 @@ export interface MintPairingHandoffInput {
 /**
  * A default name for a freshly-minted pairing token when the user did not supply
  * one. Names are shown and editable later in the device management surface, so a
- * date-stamped default is enough to tell two devices apart at a glance.
+ * date-stamped default is enough to tell two devices apart at a glance. The
+ * stamp is UTC and says so; read as local time it would put devices on the
+ * wrong day.
  */
 export function defaultPairingTokenName(now: Date = new Date()): string {
   const stamp = now.toISOString().slice(0, 16).replace('T', ' ');
-  return `paired device (${stamp})`;
+  return `paired device (${stamp} UTC)`;
 }
 
 export function mintPairingHandoff(input: MintPairingHandoffInput): PairingHandoff {

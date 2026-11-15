@@ -37,6 +37,24 @@ function requirePrincipal(invocation: GatewayMethodInvocation): string {
   return principalId;
 }
 
+/**
+ * Registering a device is how pushes reach a phone, and every push this daemon
+ * sends (an approval summary, a blocked task's label, a finished run) is an
+ * operator event pushed to every registered device. A principal without
+ * operator authority could otherwise register a device and read all of it, so
+ * only an admin principal (the shared token, a paired device, an admin user)
+ * may register one.
+ */
+function requireOperatorAuthority(invocation: GatewayMethodInvocation): void {
+  if (invocation.context.admin !== true) {
+    throw new GatewayVerbError(
+      'Push notifications carry operator-only approval and run details, so only an admin principal can register a device; this principal is not an admin',
+      'FORBIDDEN',
+      403,
+    );
+  }
+}
+
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new GatewayVerbError(`Missing or invalid ${field}`, 'INVALID_ARGUMENT', 400, field);
@@ -88,6 +106,7 @@ function optionalDeviceId(value: unknown): string | undefined {
 function createSubscribeHandler(service: PushGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const principalId = requirePrincipal(invocation);
+    requireOperatorAuthority(invocation);
     const params = readInvocationParams(invocation);
     const endpoint = requireHttpsEndpoint(params.endpoint);
     const keys = requireKeys(params.keys);
@@ -100,6 +119,7 @@ function createSubscribeHandler(service: PushGatewayService): GatewayMethodHandl
 function createReconcileHandler(service: PushGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const principalId = requirePrincipal(invocation);
+    requireOperatorAuthority(invocation);
     const params = readInvocationParams(invocation);
     const endpoint = requireHttpsEndpoint(params.endpoint);
     const keys = requireKeys(params.keys);

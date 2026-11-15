@@ -1,12 +1,8 @@
 /** Credential-bearing local pairing output, separate from startup diagnostics. */
-import { accessSync, constants, statSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
-
-/** This equality is the webui command's placeholder rule, not authorship evidence. */
-const SHIPPED_PUBLIC_BASE_URL = 'http://127.0.0.1:3423';
+import { SHIPPED_PUBLIC_BASE_URL, hasReadableWebuiBundle } from '../config/webui-bundle.js';
 
 export function renderDaemonStartupPairing(
   config: Pick<ConfigManager, 'get'>,
@@ -20,13 +16,7 @@ export function renderDaemonStartupPairing(
     if (config.get('controlPlane.webui.serve') !== true) {
       return 'Device pairing link unavailable: enable a WebUI bundle or configure its public URL.';
     }
-    // Match the router's directory precedence and process-relative resolution.
-    const bundle = String(config.get('controlPlane.webui.bundleDir') ?? '').trim()
-      || String(config.get('web.staticAssetsDir') ?? '').trim();
-    try {
-      if (!bundle || !statSync(resolve(bundle, 'index.html')).isFile()) throw new Error('Unavailable bundle');
-      accessSync(resolve(bundle, 'index.html'), constants.R_OK);
-    } catch {
+    if (!hasReadableWebuiBundle(config)) {
       return 'Device pairing link unavailable: the configured WebUI bundle has no readable app shell.';
     }
   }

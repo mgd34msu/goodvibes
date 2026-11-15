@@ -57,6 +57,11 @@ let heldChat: ((request: ChatRequest) => Promise<ChatResponse>) | undefined;
 let readings: ReturnType<typeof installHostedSessionReadings>;
 let approvalRequests: number;
 
+/** Lets already-queued continuations and I/O callbacks run before a test asserts that nothing happened. */
+async function drainEventLoop(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+}
+
 function textAnswer(content: string): ChatResponse {
   return {
     content,
@@ -416,12 +421,13 @@ test('cancelling a slow provider retains the user turn and queues a newer turn u
     const first = session.submit('first request');
     await started;
     expect(session.cancel()).toBe(true);
-    await session.submit('newer request');
+    // A queued submission settles when its own turn ends, not on queueing.
+    const newer = session.submit('newer request');
     expect(session.orchestrator.listQueuedMessages()).toHaveLength(1);
     expect(requests).toHaveLength(1);
     heldChat = undefined; answers.push(textAnswer('answered the newer request'));
     release();
-    await first;
+    await first; await newer;
     expect(requests).toHaveLength(2);
     const transcript = session.conversation.getMessageSnapshot();
     expect(transcript.filter((message) => message.role === 'user').map((message) => message.content)).toEqual(['first request', 'newer request']);
@@ -441,23 +447,22 @@ test('expected cancellation during submitted notification is admitted before dis
   const session = cancellationSession();
   const ids: string[] = [];
   const cancelled: string[] = [];
+  // The bus swallows listener exceptions, so the listener records what it saw and the test asserts after the submit.
+  const reentrant: Array<{ status: string; cancelledBefore: number }> = [];
   runtimeBus.on('TURN_CANCEL', (event) => { if (event.payload.type !== 'TURN_CANCEL') return; cancelled.push(event.payload.turnId); });
   runtimeBus.on('TURN_SUBMITTED', (event) => { if (event.payload.type !== 'TURN_SUBMITTED') return;
     ids.push(event.payload.turnId);
-    if (ids.length === 1) {
-      expect(session.liveTurnControls.cancelTurn!(ids[0]!).status).toBe('cancellation-requested');
-      expect(cancelled).toHaveLength(0);
-    } else {
-      expect(session.liveTurnControls.cancelTurn!(ids[0]!).status).toBe('already-ended');
-    }
+    reentrant.push({ status: session.liveTurnControls.cancelTurn!(ids[0]!).status, cancelledBefore: cancelled.length });
   });
   try {
     expect(session.liveTurnControls.cancelTurn!('unknown').status).toBe('turn-not-found');
     await session.submit('identical prompt');
     expect(requests).toHaveLength(0);
     expect(cancelled).toEqual([ids[0]!]);
+    expect(reentrant).toEqual([{ status: 'cancellation-requested', cancelledBefore: 0 }]);
     expect(session.liveTurnControls.cancelTurn!(ids[0]!).status).toBe('already-ended');
     await session.submit('identical prompt');
+    expect(reentrant[1]).toEqual({ status: 'already-ended', cancelledBefore: 1 });
     expect(ids[1]).not.toBe(ids[0]);
     expect(requests).toHaveLength(1);
   } finally { session.dispose(); }
@@ -485,11 +490,11 @@ test('held provider cancellation is idempotent, settles honestly, and cannot can
     expect(signal?.aborted).toBe(true);
     expect(session.liveTurnControls.cancelTurn!(ids[0]!).status).toBe('cancellation-requested');
     expect(cancelled).toHaveLength(0);
-    await session.submit('future', 'caller:future');
+    const future = session.submit('future', 'caller:future');
     expect(session.isRunning()).toBe(true);
     heldChat = undefined;
     release();
-    await first;
+    await first; await future;
     expect(cancelled).toEqual([ids[0]!]);
     expect(requests).toHaveLength(2);
     expect(origins).toEqual([
@@ -518,7 +523,7 @@ test('shutdown aborts the same held turn and never admits future work', async ()
   release();
   await turn;
   expect(session.liveTurnControls.cancelTurn!(id).status).toBe('already-ended');
-  await session.submit('never');
+  await expect(session.submit('never')).rejects.toThrow('shut down before this message was delivered');
   expect(requests).toHaveLength(1);
 });
 
@@ -552,15 +557,17 @@ test('whole-turn request aborts a held actual tool and the following turn uses f
 test('a cancellation reentered from TURN_COMPLETED is already-ended and cannot rewrite the completed transcript', async () => {
   const session = cancellationSession();
   const terminal: string[] = [];
+  const reentrantStatuses: string[] = [];
   runtimeBus.on('TURN_COMPLETED', (event) => { if (event.payload.type !== 'TURN_COMPLETED') return;
     terminal.push('completed');
-    expect(session.liveTurnControls.cancelTurn!(event.payload.turnId).status).toBe('already-ended');
+    reentrantStatuses.push(session.liveTurnControls.cancelTurn!(event.payload.turnId).status);
   });
   runtimeBus.on('TURN_CANCEL', () => { terminal.push('cancel'); });
   answers.push(textAnswer('completed answer'));
   try {
     await session.submit('finish');
     expect(terminal).toEqual(['completed']);
+    expect(reentrantStatuses).toEqual(['already-ended']);
     expect(session.conversation.getMessageSnapshot().some((m) => m.content === 'completed answer')).toBe(true);
     expect(session.conversation.getMessageSnapshot().some((m) => m.content === '[Response cancelled]')).toBe(false);
   } finally { session.dispose(); }
@@ -616,13 +623,15 @@ for (const eventType of ['TOOL_RECEIVED', 'TOOL_PERMISSIONED', 'TOOL_EXECUTING',
     let turnId = '';
     let cancelled = false;
     runtimeBus.on('TURN_SUBMITTED', (event) => { if (event.payload.type === 'TURN_SUBMITTED') turnId = event.payload.turnId; });
-    runtimeBus.on(eventType, () => { if (!cancelled) { cancelled = true; expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('cancellation-requested'); } });
+    const statuses: string[] = [];
+    runtimeBus.on(eventType, () => { if (!cancelled) { cancelled = true; statuses.push(session.liveTurnControls.cancelTurn!(turnId).status); } });
     session.toolRegistry.unregister('read');
     session.toolRegistry.register({ definition: { name: 'read', description: 'Read test note.', parameters: { type: 'object', properties: {} } }, execute: async () => { calls.push('read'); return { success: true, output: 'done' }; } });
     answers.push({ content: '', toolCalls: [{ id: 'first', name: 'read', arguments: {} }, { id: 'second', name: 'read', arguments: {} }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse);
     try {
       await session.submit('two reads');
       expect(cancelled).toBe(true);
+      expect(statuses).toEqual(['cancellation-requested']);
       expect(calls).toEqual(eventType === 'TOOL_SUCCEEDED' ? ['read'] : []);
       expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('already-ended');
     } finally { session.dispose(); }
@@ -676,7 +685,7 @@ for (const toolName of ['write', 'edit'] as const) {
         await Promise.race([entered, turn.then(() => { throw new Error(`Turn ended without reaching the expected file hook: ${errors.join('; ')}`); })]);
         expect(readings.requests.some(request => request.context?.site === 'engine.gate.autonomous-tool')).toBe(false);
         expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('cancellation-requested');
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await drainEventLoop();
         expect(terminal).toEqual([]);
         expect(settled).toBe(false);
         expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('cancellation-requested');
@@ -721,7 +730,8 @@ for (const cancel of [false, true]) {
     const turn = session.submit('read and answer').then(() => { ended = true; });
     try {
       await Promise.race([Promise.all(started), turn.then(() => { throw new Error('Turn settled before both async hooks were owned'); })]);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // The second provider call is the positive event that proves the turn moved past the held hooks.
+      for (let attempt = 0; attempt < 400 && requests.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
       expect(requests).toHaveLength(2); // async hooks did not block the next provider call
       expect(ended).toBe(false);
       expect(terminals).toEqual([]);
@@ -731,12 +741,15 @@ for (const cancel of [false, true]) {
         expect(records.two!.signal?.aborted).toBe(true);
       }
       releases[0]!();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await drainEventLoop();
       expect(ended).toBe(false);
       expect(terminals).toEqual([]);
       releases[1]!();
       await turn;
-      expect(terminals).toEqual([cancel ? 'cancel' : 'completed']);
+      // The answer was already in the transcript: cancelling stops the hooks
+      // that follow it (their signals aborted above) but cannot withdraw it.
+      expect(terminals).toEqual(['completed']);
+      expect(session.conversation.getMessageSnapshot().some((message) => message.content === 'answer before hooks finish')).toBe(true);
       expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('already-ended');
     } finally { for (const release of releases) release(); await turn; delete globals.__hostedOwnedHookProbe; session.dispose(); }
   });
@@ -762,14 +775,18 @@ for (const cancel of [false, true]) {
     answers.push({ content: '', toolCalls: [{ id: 'read-for-command', name: 'read', arguments: { files: [{ path: 'note.txt' }] } }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' } as unknown as ChatResponse, textAnswer('provider finished'));
     const turn = session.submit('read the note');
     try {
-      for (let i = 0; i < 200 && !existsSync(startedPath); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+      for (let i = 0; i < 2000 && !existsSync(startedPath); i++) await new Promise((resolve) => setTimeout(resolve, 5));
       expect(existsSync(startedPath)).toBe(true);
       expect(terminals).toEqual([]);
       expect(existsSync(mutationPath)).toBe(false);
       if (cancel) expect(session.liveTurnControls.cancelTurn!(turnId).status).toBe('cancellation-requested');
-      else writeFileSync(releasePath, 'release');
+      // Released right away in both arms: a descendant that survived the cancellation sees it and writes the mutation.
+      writeFileSync(releasePath, 'release');
       await turn;
-      expect(terminals).toEqual([cancel ? 'cancel' : 'completed']);
+      // The descendant polls every 20 ms; give a survivor many periods to act on the release before judging.
+      if (cancel) for (let i = 0; i < 50 && !existsSync(mutationPath); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+      // Cancelling after the answer stops the hook's descendants; the answered turn still completes.
+      expect(terminals).toEqual(['completed']);
       expect(existsSync(mutationPath)).toBe(!cancel);
     } finally { writeFileSync(releasePath, 'release'); session.dispose(); await turn; }
   });

@@ -62,8 +62,11 @@ confidential registration only if you specifically want one.
 6. Set it:
 
    ```bash
-   goodvibes config set calendar.google.clientId <CLIENT_ID>
+   goodvibes-daemon config set calendar.google.clientId <CLIENT_ID>
    ```
+
+   Inside the terminal app, `/config set calendar.google.clientId <CLIENT_ID>` does
+   the same.
 
    If you registered a Web-app (confidential) client instead, also store its secret
    and point `calendar.google.clientSecretRef` at it.
@@ -71,7 +74,7 @@ confidential registration only if you specifically want one.
 The scopes requested are `calendar.readonly` and `calendar.events`, which together
 grant read access plus event creation. There is no config key that narrows this from
 the CLI. An embedder calling the platform's calendar connector directly can pass its own
-scope list to ask for read-only access instead, but a `goodvibes config set` install
+scope list to ask for read-only access instead, but a `config set` install
 always gets both.
 
 ## Microsoft
@@ -91,8 +94,11 @@ always gets both.
 6. Copy the **Application (client) ID** and set it:
 
    ```bash
-   goodvibes config set calendar.microsoft.clientId <CLIENT_ID>
+   goodvibes-daemon config set calendar.microsoft.clientId <CLIENT_ID>
    ```
+
+   Inside the terminal app, `/config set calendar.microsoft.clientId <CLIENT_ID>`
+   does the same.
 
    A confidential registration additionally needs its secret stored and referenced in
    `calendar.microsoft.clientSecretRef`.
@@ -115,7 +121,7 @@ same way, so a headless install cannot slip past the check.
 ## Verifying it took
 
 ```bash
-goodvibes config get calendar.google.clientId
+goodvibes-daemon config get calendar.google.clientId
 ```
 
 Then run the connect flow. The authorization URL it opens carries your client id in

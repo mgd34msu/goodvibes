@@ -89,6 +89,7 @@ export const SHARED_CATEGORY_INFO = {
 
 export const SHARED_SETTING_ENUM_DESCRIPTIONS = {
   'behavior.hitlMode': {
+    off: 'Keep the baseline notification delivery policy; verbosity mode changes are rejected.',
     quiet: 'Minimize operational interruptions and surface fewer Human-in-the-Loop prompts.',
     balanced: 'Show important Human-in-the-Loop prompts without turning routine work into noise.',
   },

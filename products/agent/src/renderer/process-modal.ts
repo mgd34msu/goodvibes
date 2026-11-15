@@ -72,6 +72,10 @@ export class ProcessModal {
 
   refresh(): void {
     const now = Date.now();
+    // The highlight follows the process, not the row number: entries shift when a
+    // process finishes or starts, and an index left in place would point `k` at a
+    // different process than the one the user selected.
+    const selectedId = this.entries[this.selectedIndex]?.id;
     const result: ProcessEntry[] = [];
 
     for (const process of this.deps.processManager.list()) {
@@ -88,7 +92,10 @@ export class ProcessModal {
     }
 
     this.entries = result;
-    if (this.selectedIndex >= this.entries.length) {
+    const followed = selectedId === undefined ? -1 : result.findIndex((entry) => entry.id === selectedId);
+    if (followed >= 0) {
+      this.selectedIndex = followed;
+    } else if (this.selectedIndex >= this.entries.length) {
       this.selectedIndex = Math.max(0, this.entries.length - 1);
     }
   }

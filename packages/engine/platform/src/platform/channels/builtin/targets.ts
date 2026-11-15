@@ -13,6 +13,16 @@ import { resolveDiscordBotToken, resolveSlackBotToken } from './surfaces.js';
 // One rule applied identically on every surface: a conversation that has
 // already written to us is a target with no configuration at all.
 import { directoryEntriesFromBindings } from './directory-bindings.js';
+import { logger } from '../../utils/logger.js';
+
+/** Provider pages are fetched at a fixed size; `limit` only bounds what is returned. */
+const PROVIDER_PAGE_SIZE = 200;
+/** A workspace larger than this many pages is searched up to the cap and the result says so in the log. */
+const PROVIDER_MAX_PAGES = 10;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 interface BuiltinTargetContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -29,17 +39,32 @@ export async function resolveBuiltinTarget(
   const explicit = parseBuiltinExplicitTarget(surface, input, options);
   const search = explicit?.to ?? input;
   const scope = scopeForTargetKind(explicit?.kind ?? options.preferredKind);
-  const directoryEntries = await context.deps.channelPlugins.queryDirectory(surface, {
-    query: search,
-    limit: 5,
-    ...(scope ? { scope } : {}),
-    ...(options.live ? { live: true } : {}),
-  });
+  // A lookup that could not be answered is not the same as "no such
+  // conversation": the target is still returned so a send is not lost, and it
+  // carries the reason in its metadata.
+  let directoryError: string | undefined;
+  let directoryEntries: readonly ChannelDirectoryEntry[] = [];
+  try {
+    directoryEntries = await context.deps.channelPlugins.queryDirectory(surface, {
+      query: search,
+      limit: 5,
+      ...(scope ? { scope } : {}),
+      ...(options.live ? { live: true } : {}),
+    });
+  } catch (error) {
+    directoryError = errorText(error);
+    logger.warn('Channel directory lookup failed; the target is not verified against the provider', {
+      surface,
+      error: directoryError,
+    });
+  }
   const directoryEntry = pickBestDirectoryEntry(directoryEntries, search);
   if (directoryEntry) {
     return resolveDirectoryEntryTarget(surface, options, directoryEntry, explicit);
   }
-  if (explicit) return explicit;
+  if (explicit) {
+    return directoryError ? { ...explicit, metadata: { ...explicit.metadata, directoryError } } : explicit;
+  }
 
   const kind = inferBuiltinTargetConversationKind(input, options);
   const normalized = input.toLowerCase();
@@ -55,6 +80,7 @@ export async function resolveBuiltinTarget(
     metadata: {
       fallback: true,
       createIfMissing: Boolean(options.createIfMissing),
+      ...(directoryError ? { directoryError } : {}),
     },
   };
   return {
@@ -193,7 +219,25 @@ export async function lookupBuiltinDirectory(
 ): Promise<ChannelDirectoryEntry[]> {
   const routeEntries = await lookupBuiltinRouteDirectory(context, surface, query, options);
   if (!options?.live || surface === 'webhook') return routeEntries;
-  const providerEntries = await lookupBuiltinProviderDirectory(context, surface, query, options).catch(() => [] as ChannelDirectoryEntry[]);
+  let providerEntries: ChannelDirectoryEntry[];
+  try {
+    providerEntries = await lookupBuiltinProviderDirectory(context, surface, query, options);
+  } catch (error) {
+    // With nothing known locally an empty answer would read as "no such
+    // conversation", so the cause is raised. Known conversations are still
+    // returned, labelled as the partial answer they are in the log.
+    logger.warn('Live provider directory lookup failed', {
+      surface,
+      error: errorText(error),
+      action: routeEntries.length > 0
+        ? 'only conversations that have already written to this daemon are listed'
+        : 'check the surface credential',
+    });
+    if (routeEntries.length === 0) {
+      throw new Error(`The ${surface} directory could not be read: ${errorText(error)}`, { cause: error });
+    }
+    providerEntries = [];
+  }
   const seen = new Set<string>();
   return [...routeEntries, ...providerEntries].filter((entry) => {
     const key = `${entry.surface}:${entry.id}`;
@@ -220,46 +264,73 @@ export async function lookupBuiltinProviderDirectory(
     if (!token) return filterProviderDirectory(directoryEntriesFromBindings(context, surface, 'slack'), needle, limit);
     const slack = new SlackIntegration(undefined, token);
     const entries: ChannelDirectoryEntry[] = [];
-    if (scope === 'all' || scope === 'channels' || scope === 'groups' || scope === 'peers') {
-      const page = await slack.listConversations({ token, limit, types: ['public_channel', 'private_channel', 'mpim', 'im'] });
-      for (const channel of page.entries) {
-        const label = channel.name ?? channel.id;
-        entries.push({
-          id: channel.id,
-          surface,
-          kind: channel.is_im ? 'user' : channel.is_mpim ? 'group' : channel.is_group ? 'group' : 'channel',
-          label,
-          handle: channel.name ? `#${channel.name}` : channel.id,
-          workspaceId: String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined,
-          groupId: channel.id,
-          memberCount: channel.num_members,
-          isDirect: Boolean(channel.is_im),
-          isGroupConversation: !channel.is_im,
-          searchText: [channel.id, channel.name].filter(Boolean).join(' '),
-          metadata: { provider: 'slack', raw: channel },
-        });
+    // A token may be allowed one half (channels:read without users:read). A half that is refused is
+    // left out and logged; the lookup fails only when every half it tried failed.
+    let halvesTried = 0;
+    const halfFailures: unknown[] = [];
+    const readHalf = async (what: string, read: () => Promise<ChannelDirectoryEntry[]>): Promise<void> => {
+      halvesTried += 1;
+      try {
+        entries.push(...await read());
+      } catch (error) {
+        halfFailures.push(error);
+        logger.warn(`Slack ${what} directory could not be read; the rest is still searched`, { surface, error: errorText(error) });
       }
+    };
+    if (scope === 'all' || scope === 'channels' || scope === 'groups' || scope === 'peers') {
+      await readHalf('conversations', () => collectMatchingPages('slack conversations', needle, limit, async (cursor) => {
+        const page = await slack.listConversations({
+          token,
+          limit: PROVIDER_PAGE_SIZE,
+          types: ['public_channel', 'private_channel', 'mpim', 'im'],
+          ...(cursor ? { cursor } : {}),
+        });
+        if (!page.ok) throw new Error(`Slack conversations.list failed: ${page.error ?? 'no reason given'}`);
+        return {
+          next: page.nextCursor || undefined,
+          entries: page.entries.map((channel): ChannelDirectoryEntry => ({
+            id: channel.id,
+            surface,
+            kind: channel.is_im ? 'user' : channel.is_mpim ? 'group' : channel.is_group ? 'group' : 'channel',
+            label: channel.name ?? channel.id,
+            handle: channel.name ? `#${channel.name}` : channel.id,
+            workspaceId: String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined,
+            groupId: channel.id,
+            memberCount: channel.num_members,
+            isDirect: Boolean(channel.is_im),
+            isGroupConversation: !channel.is_im,
+            searchText: [channel.id, channel.name].filter(Boolean).join(' '),
+            metadata: { provider: 'slack', raw: channel },
+          })),
+        };
+      }));
     }
     if (scope === 'all' || scope === 'users' || scope === 'members' || scope === 'peers') {
-      const page = await slack.listUsers({ token, limit });
-      for (const user of page.entries) {
-        if (user.deleted) continue;
-        const display = typeof user.profile?.display_name === 'string' && user.profile.display_name
-          ? user.profile.display_name
-          : user.real_name ?? user.name ?? user.id;
-        entries.push({
-          id: user.id,
-          surface,
-          kind: user.is_bot ? 'service' : 'user',
-          label: display,
-          handle: user.name ? `@${user.name}` : user.id,
-          workspaceId: String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined,
-          isDirect: true,
-          searchText: [user.id, user.name, user.real_name, display].filter(Boolean).join(' '),
-          metadata: { provider: 'slack', raw: user },
-        });
-      }
+      await readHalf('users', () => collectMatchingPages('slack users', needle, limit, async (cursor) => {
+        const page = await slack.listUsers({ token, limit: PROVIDER_PAGE_SIZE, ...(cursor ? { cursor } : {}) });
+        if (!page.ok) throw new Error(`Slack users.list failed: ${page.error ?? 'no reason given'}`);
+        return {
+          next: page.nextCursor || undefined,
+          entries: page.entries.filter((user) => !user.deleted).map((user): ChannelDirectoryEntry => {
+            const display = typeof user.profile?.display_name === 'string' && user.profile.display_name
+              ? user.profile.display_name
+              : user.real_name ?? user.name ?? user.id;
+            return {
+              id: user.id,
+              surface,
+              kind: user.is_bot ? 'service' : 'user',
+              label: display,
+              handle: user.name ? `@${user.name}` : user.id,
+              workspaceId: String(context.deps.configManager.get('surfaces.slack.workspaceId') || '') || undefined,
+              isDirect: true,
+              searchText: [user.id, user.name, user.real_name, display].filter(Boolean).join(' '),
+              metadata: { provider: 'slack', raw: user },
+            };
+          }),
+        };
+      }));
     }
+    if (halvesTried > 0 && halfFailures.length === halvesTried) throw halfFailures[0];
     return filterProviderDirectory(entries, needle, limit);
   }
 
@@ -295,23 +366,43 @@ export async function lookupBuiltinProviderDirectory(
       }
     }
     if (scope === 'all' || scope === 'users' || scope === 'members' || scope === 'peers') {
-      const members = await discord.listGuildMembers(guildId, { token, limit }).catch(() => [] as Array<Record<string, unknown>>);
-      for (const member of members) {
-        const user = (member.user ?? {}) as Record<string, unknown>;
-        const id = typeof user.id === 'string' ? user.id : '';
-        if (!id) continue;
-        const username = typeof user.username === 'string' ? user.username : id;
-        const nick = typeof member.nick === 'string' ? member.nick : undefined;
-        entries.push({
-          id,
+      // Listing members needs a privileged gateway intent; channels are still
+      // searchable without it, so a refusal here leaves the answer partial.
+      try {
+        entries.push(...await collectMatchingPages('discord members', needle, limit, async (cursor) => {
+          const members = await discord.listGuildMembers(guildId, {
+            token,
+            limit: PROVIDER_PAGE_SIZE,
+            ...(cursor ? { after: cursor } : {}),
+          });
+          const lastUser = (members.at(-1)?.user ?? {}) as Record<string, unknown>;
+          const lastId = typeof lastUser.id === 'string' ? lastUser.id : undefined;
+          return {
+            next: members.length >= PROVIDER_PAGE_SIZE ? lastId : undefined,
+            entries: members.flatMap((member): ChannelDirectoryEntry[] => {
+              const user = (member.user ?? {}) as Record<string, unknown>;
+              const id = typeof user.id === 'string' ? user.id : '';
+              if (!id) return [];
+              const username = typeof user.username === 'string' ? user.username : id;
+              const nick = typeof member.nick === 'string' ? member.nick : undefined;
+              return [{
+                id,
+                surface,
+                kind: 'user',
+                label: nick ?? username,
+                handle: `@${username}`,
+                workspaceId: guildId,
+                isDirect: true,
+                searchText: [id, username, nick].filter(Boolean).join(' '),
+                metadata: { provider: 'discord', raw: member },
+              }];
+            }),
+          };
+        }));
+      } catch (error) {
+        logger.warn('Discord member directory could not be read; only channels are listed', {
           surface,
-          kind: 'user',
-          label: nick ?? username,
-          handle: `@${username}`,
-          workspaceId: guildId,
-          isDirect: true,
-          searchText: [id, username, nick].filter(Boolean).join(' '),
-          metadata: { provider: 'discord', raw: member },
+          error: errorText(error),
         });
       }
     }
@@ -761,6 +852,9 @@ function kindForDirectoryEntry(entry: ChannelDirectoryEntry): ChannelConversatio
 
 function pickBestDirectoryEntry(entries: readonly ChannelDirectoryEntry[], query: string): ChannelDirectoryEntry | undefined {
   const normalized = query.trim().replace(/^[@#]/, '').toLowerCase();
+  // Only an exact match resolves. A name that merely contains the input is a
+  // candidate for a directory listing, not the conversation the caller meant:
+  // sending to it, or allow-listing it, would reach somebody else.
   return entries.find((entry) => [
     entry.id,
     entry.handle,
@@ -768,7 +862,30 @@ function pickBestDirectoryEntry(entries: readonly ChannelDirectoryEntry[], query
     entry.groupId,
     entry.threadId,
     ...(entry.aliases ?? []),
-  ].some((value) => typeof value === 'string' && value.replace(/^[@#]/, '').toLowerCase() === normalized)) ?? entries[0]!;
+  ].some((value) => typeof value === 'string' && value.replace(/^[@#]/, '').toLowerCase() === normalized));
+}
+
+/**
+ * Follow a provider's pages until `limit` entries match the needle or the pages
+ * run out. The needle is applied to every page before anything is truncated, so
+ * a name in the second page of a large workspace is found.
+ */
+async function collectMatchingPages(
+  what: string,
+  needle: string,
+  limit: number,
+  fetchPage: (cursor: string | undefined) => Promise<{ readonly entries: readonly ChannelDirectoryEntry[]; readonly next: string | undefined }>,
+): Promise<ChannelDirectoryEntry[]> {
+  const found: ChannelDirectoryEntry[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < PROVIDER_MAX_PAGES; page += 1) {
+    const result = await fetchPage(cursor);
+    found.push(...filterProviderDirectory(result.entries, needle, Number.MAX_SAFE_INTEGER));
+    if (found.length >= limit || !result.next) return found;
+    cursor = result.next;
+  }
+  logger.warn('Provider directory search stopped at its page cap', { what, pages: PROVIDER_MAX_PAGES, matches: found.length });
+  return found;
 }
 
 function filterProviderDirectory(entries: readonly ChannelDirectoryEntry[], needle: string, limit: number): ChannelDirectoryEntry[] {

@@ -4,11 +4,10 @@
  * revoke-shared-token action, each destructive step gated by the real
  * ConfirmSheet with a plain-language consequence, never a bare click-to-destroy.
  *
- * The cross-device revoke proof uses TWO Playwright contexts sharing one
- * MockPairingStore (support/mock-daemon.ts), standing in for the operator's
- * own browser and a second paired device, so revoking the device's token from
- * the operator's session is checked against a REAL 401 on the device's own
- * next authenticated request, not just a UI state change.
+ * The revoke proof is what the app sends: the confirm gates a
+ * pairing.tokens.delete naming that device, and the operator's own session (a
+ * different token) stays signed in. The mock daemon, not the app, turns a
+ * revoked token into 401s, so that behaviour is the daemon's to prove.
  */
 import { test, expect } from '@playwright/test';
 import { installMockDaemon, createMockPairingStore } from './support/mock-daemon';
@@ -66,41 +65,24 @@ test('touch targets on the pairing tokens panel clear 44px at phone width', asyn
   await expectTappable(page, '.pairing-tokens-legacy__actions button', 'give this browser its own token');
 });
 
-test('revoking one device 401s it while the current session (a different token) keeps working', async ({ page, browser }) => {
+test('revoking a device sends pairing.tokens.delete for that device only after its confirm, and leaves this session signed in', async ({ page }) => {
   const pairingStore = createMockPairingStore([
     { id: 'tok-phone', name: 'Phone', token: 'e2e-phone-token', createdAt: 1_700_000_000_000 },
   ]);
-  // The operator's own browser: the default seeded session token, unrelated to
-  // (and never affected by) anything that happens to the phone's token below.
-  await installMockDaemon(page, { pairingStore });
-
-  // A second, independent context/page stands in for the paired phone,
-  // authenticated with the pairing token this test is about to revoke.
-  const phoneContext = await browser.newContext();
-  const phonePage = await phoneContext.newPage();
-  await installMockDaemon(phonePage, { pairingStore, signedIn: false });
-  await phonePage.addInitScript((token) => {
-    window.localStorage.setItem('goodvibes.webui.token', token);
-  }, 'e2e-phone-token');
-  await phonePage.goto('/?view=chat');
-  // Genuinely signed in, before the revoke.
-  await expect(phonePage.locator('.app-shell')).toBeVisible();
+  // The operator's own browser keeps the default seeded session token, unrelated
+  // to the phone's token being revoked.
+  const daemon = await installMockDaemon(page, { pairingStore });
 
   await openPairingSettings(page);
   const phoneRow = page.locator('.pairing-token-row', { hasText: 'Phone' });
   await phoneRow.getByRole('button', { name: /Revoke/ }).click();
   await expect(page.locator('.gv-confirm')).toBeVisible();
   expect(pairingStore.tokens).toHaveLength(1);
+  expect(daemon.invocations('pairing.tokens.delete')).toHaveLength(0);
   await page.locator('.gv-confirm__confirm').click();
   await expect(pairingPanel(page).locator('.pairing-token-row')).toHaveCount(0);
+  expect(daemon.invocations('pairing.tokens.delete')).toEqual([{ id: 'tok-phone' }]);
   expect(pairingStore.revokedTokenValues.has('e2e-phone-token')).toBe(true);
-
-  // The phone's own token is now revoked, its next authenticated call 401s.
-  const status = await phonePage.evaluate(async () => {
-    const res = await fetch('/api/control-plane/auth', { headers: { Authorization: 'Bearer e2e-phone-token' } });
-    return res.status;
-  });
-  expect(status).toBe(401);
 
   // The operator's OWN session (a different token entirely) is unaffected: a
   // reload lands back in the signed-in shell with the settings dialog reopened
@@ -108,8 +90,6 @@ test('revoking one device 401s it while the current session (a different token) 
   await page.reload();
   await expect(page.locator('.app-shell')).toBeVisible();
   await expect(pairingPanel(page)).toBeVisible();
-
-  await phoneContext.close();
 });
 
 test('migrate mints this browser its own token; revoke-shared runs only after its confirm', async ({ page }) => {

@@ -54,58 +54,6 @@
     "bannerPrefix": "goodvibes-agent ",
     "binaryDefault": "dist/goodvibes-agent-linux-x64"
   },
-  "releaseCut": {
-    "branch": "main",
-    "versionFiles": [],
-    "syncCommands": [
-      [
-        "bun",
-        "run",
-        "scripts/release-prepare.ts",
-        "--no-bump",
-        "--no-changelog",
-        "--no-install",
-        "--no-live"
-      ]
-    ],
-    "commitPaths": [
-      "package.json",
-      "src/version.ts",
-      "README.md",
-      "CHANGELOG.md",
-      "docs/README.md",
-      "docs/google-setup-runbook.md",
-      "release/release-notes.md",
-      ".github/workflows"
-    ],
-    "changelogHeading": "plain",
-    "changelogInsertMarker": "top"
-  },
-  "publish": {
-    "packageName": "@goodvibes-jev/agent",
-    "defaultRegistry": "https://registry.npmjs.org",
-    "requiredTarballPaths": [
-      "README.md",
-      "CHANGELOG.md",
-      "LICENSE",
-      "package.json",
-      "src/main.ts",
-      "dist/package/main.js",
-      "bin/goodvibes-agent.ts",
-      "tsconfig.json",
-      "release/release-notes.md"
-    ],
-    "forbiddenTarballPrefixes": [
-      ".github/",
-      "src/test/",
-      "src/.test/",
-      "src/verification/",
-      "src/daemon/",
-      ".goodvibes/",
-      "vendor/"
-    ],
-    "maxTarballBytes": 52428800
-  },
   "perJobGreen": {
     "owner": "mgd34msu",
     "repo": "goodvibes-agent",

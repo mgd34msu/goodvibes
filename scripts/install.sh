@@ -1,6 +1,9 @@
 #!/bin/sh
 # GoodVibes release installer — https://goodvibes.sh/install.sh
 # Installs prebuilt, checksum-verified release assets from one monorepo tag.
+# Trust root: that tag's GitHub release, over HTTPS. SHA256SUMS.txt comes from
+# the same origin as the assets, so the checksums catch a corrupt or mismatched
+# download, not a compromised release origin.
 # No Git checkout, package-manager install, compiler, Bun or Node is required.
 #
 # curl -fsSL https://goodvibes.sh/install.sh | sh
@@ -36,6 +39,9 @@ UNINSTALL="${GOODVIBES_UNINSTALL:-0}"
 # under it mid-request. A new version lands in its own directory, the daemon is
 # pointed at it, and previous/custom bundles stay available to running readers
 # and explicit rollback. Their directory names do not prove they can be deleted.
+# The installer is the only writer that follows this rule: a native self-update
+# replaces the contents of the configured directory in place and rewrites its
+# release marker, so a directory named for an older release can hold a newer one.
 WEBUI_ROOT="$INSTALL_DIR/webui"
 
 # Set by install_webui() once the daemon has actually been configured to serve
@@ -230,15 +236,29 @@ path_export_line() {
 PATH_LINE_ADDED=0
 RC_FILE_USED=""
 
+# Whether an rc file already carries the marker-tagged export for THIS
+# $INSTALL_DIR: the marker comment immediately followed by its exact export
+# line. A marker written for another install directory does not count, so a
+# second install into a different directory still gets its own line.
+rc_has_path_line() {
+  [ -f "$1" ] || return 1
+  awk -v marker="$INSTALLER_MARKER" -v line="$(path_export_line)" '
+    after_marker && $0 == line { found = 1 }
+    { after_marker = (index($0, marker) > 0) }
+    END { exit !found }
+  ' "$1" 2>/dev/null
+}
+
 # Idempotent: does nothing if $INSTALL_DIR is already on PATH, or if a prior
-# run already added the marker-tagged line (this shell just hasn't re-sourced
-# its rc file yet). Otherwise appends the marker comment + export line.
+# run already added the marker-tagged line for this directory (this shell just
+# hasn't re-sourced its rc file yet). Otherwise appends the marker comment +
+# export line.
 ensure_path_on_shell_rc() {
   case ":$PATH:" in
     *":$INSTALL_DIR:"*) return 0 ;;
   esac
   rc_file=$(resolve_shell_rc)
-  if [ -f "$rc_file" ] && grep -qF "$INSTALLER_MARKER" "$rc_file" 2>/dev/null; then
+  if rc_has_path_line "$rc_file"; then
     return 0
   fi
   mkdir -p "$(dirname "$rc_file")" 2>/dev/null || true
@@ -250,17 +270,18 @@ ensure_path_on_shell_rc() {
 }
 
 # Uninstall-side removal of the PATH line: only the marker comment line and
-# the one export/set line immediately after it — the exact two lines
-# ensure_path_on_shell_rc() appended — never anything else in the file.
+# the export/set line for THIS $INSTALL_DIR immediately after it — the exact two
+# lines ensure_path_on_shell_rc() appended — never anything else in the file, and
+# never the pair another install directory wrote.
 uninstall_shell_rc_path_line() {
   rc_file=$(resolve_shell_rc)
-  [ -f "$rc_file" ] || return 0
-  grep -qF "$INSTALLER_MARKER" "$rc_file" 2>/dev/null || return 0
+  rc_has_path_line "$rc_file" || return 0
   tmp_file="$rc_file.goodvibes-uninstall-tmp"
-  awk -v marker="$INSTALLER_MARKER" '
-    index($0, marker) > 0 { skip = 1; next }
-    skip > 0 { skip--; next }
+  awk -v marker="$INSTALLER_MARKER" -v line="$(path_export_line)" '
+    held != "" { if ($0 == line) { held = ""; next } print held; held = "" }
+    index($0, marker) > 0 { held = $0; next }
     { print }
+    END { if (held != "") print held }
   ' "$rc_file" > "$tmp_file" && mv "$tmp_file" "$rc_file"
   say "  removed    PATH line from $rc_file"
   record_removed "PATH line in $rc_file (installer-managed)"
@@ -302,7 +323,9 @@ fetch() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 --retry 3 -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$2" "$1"
+    # wget has no switch that restricts redirects to https for a single
+    # download, so only the curl path enforces that; both bound the wait.
+    wget -q --timeout=30 --tries=3 -O "$2" "$1"
   else
     fail "need curl or wget"
   fi
@@ -611,6 +634,44 @@ Check that the installed programs run, then remove them all and re-run the insta
 If an installed program is broken, put its backup back first: mv -f <file>.goodvibes-previous <file>"
 }
 
+# The native updater keeps the release it replaced as <program>.previous, and a
+# crash-loop rollback or `/update rollback` restores that set. An installer upgrade
+# replaces the programs without refreshing it, so the set would still hold a release
+# older than the one just replaced, and a rollback would land two releases back
+# while reporting the previous one. When the daemon program was replaced by different
+# bytes, drop the stale single files so a rollback truthfully finds nothing to
+# restore. Directory copies are left alone: a set missing its programs is refused as
+# incomplete. A republish of the same release keeps the set, which is still correct.
+# Best effort and only while the claims are provably held.
+discard_stale_previous_cohort() {
+  [ -f "$INSTALL_DIR/goodvibes-daemon.goodvibes-previous" ] && [ ! -L "$INSTALL_DIR/goodvibes-daemon.goodvibes-previous" ] || return 0
+  ! cmp -s "$INSTALL_DIR/goodvibes-daemon.goodvibes-previous" "$INSTALL_DIR/goodvibes-daemon" || return 0
+  ( assert_install_claims ) >/dev/null 2>&1 || return 0
+  _stale_candidates="$INSTALL_DIR/daemon-installation.json.previous
+$INSTALL_DIR/lib/sqlite-vec-${VEC_OS}-${arch_tag}/vec0.${VEC_SUFFIX}.previous
+$INSTALL_DIR/lib/sqlite-darwin-${arch_tag}/libsqlite3.dylib.previous
+$INSTALL_DIR/lib/sqlite-darwin-${arch_tag}/libsqlite3.dylib.json.previous"
+  for _stale_name in goodvibes goodvibes-daemon goodvibes-agent; do
+    for _stale_companion in '' .bun .bun.json .bun.LICENSE.md .readers.json; do
+      _stale_candidates="$_stale_candidates
+$INSTALL_DIR/$_stale_name$_stale_companion.previous"
+    done
+  done
+  for _stale_companion in '' .bun .bun.json .bun.LICENSE.md; do
+    _stale_candidates="$_stale_candidates
+$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX$_stale_companion.previous"
+  done
+  _stale_old_ifs=$IFS
+  IFS='
+'
+  for _stale_file in $_stale_candidates; do
+    [ -f "$_stale_file" ] && [ ! -L "$_stale_file" ] || continue
+    ( assert_install_claims ) >/dev/null 2>&1 || break
+    rm -f "$_stale_file" && say "  removed    $_stale_file (a rollback copy of a release older than the one just replaced)"
+  done
+  IFS=$_stale_old_ifs
+}
+
 # The swap finished: the previous bytes are no longer needed, and a superseded published
 # directory (queued as "O") can now go, because nothing can roll back to it any more.
 commit_install_journal() {
@@ -736,7 +797,11 @@ claim_release_install() {
     # following a symlink or treating an existing directory as a destination.
     _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
     [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ] || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
-    (umask 077; set -C; printf 'GoodVibes suite installation %s\nInterrupted replacement: inspect installed programs and retained claims before recovery.\n' "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    # The native updater shares this claim file and treats a claim as a live
+    # transaction only when it parses as JSON with a numeric pid and a startedAt
+    # in milliseconds. Written that way, a daemon that checks for updates during
+    # this install defers instead of reading the claim as a crashed transaction.
+    (umask 077; set -C; printf '{"pid":%s,"startedAt":%s000,"owner":"install.sh","version":"%s","note":"Interrupted replacement: inspect installed programs and retained claims before recovery."}\n' "$$" "$(date +%s)" "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
     INSTALL_CLAIM_COUNT=$((INSTALL_CLAIM_COUNT + 1))
     case "$_claim_product" in
       goodvibes-daemon) exec 5< "$_claim_path"; _created_claim_fd=5 ;;
@@ -1002,6 +1067,52 @@ proc_belongs_to_install_dir() {
   esac
 }
 
+# The first argument (one per line on stdin, executable already dropped) that
+# names a subcommand, or nothing when the process was started bare or with flags
+# only (a server). Arguments holding a '/' (a bun-embedded script path) are not
+# subcommands.
+args_subcommand() {
+  awk 'index($0, "/") > 0 { next } { if (NF && substr($0, 1, 1) != "-") print; exit }'
+}
+proc_subcommand() {
+  if [ -r "/proc/$1/cmdline" ]; then
+    tr '\0' '\n' < "/proc/$1/cmdline" | tail -n +2 | args_subcommand
+  else
+    ps -o args= -p "$1" 2>/dev/null | tr ' ' '\n' | tail -n +2 | args_subcommand
+  fi
+}
+
+# Whether a pgrep match is the long-running program itself. `pgrep -f` also
+# matches a short-lived call of the same binary (`goodvibes-daemon status
+# --json`, `config get`) and any other process that merely carries the name in
+# its arguments, such as the terminal UI; SIGTERM on those would kill a
+# person's unrelated command and the relaunch would start a daemon nobody asked
+# for. The executable must be the named program, and for the daemon the only
+# subcommand that means "run" is `serve`, for the agent it is `tui` or none.
+proc_is_the_program() {
+  _pitp_name=$(printf '%s' "$2" | tr -d '[]')
+  _pitp_exe=$(proc_exe_path "$1")
+  case "${_pitp_exe##*/}" in
+    "$_pitp_name"|"$_pitp_name".*|"$_pitp_name"-*) : ;;
+    *) return 1 ;;
+  esac
+  case "$_pitp_name" in
+    goodvibes-daemon)
+      case "$(proc_subcommand "$1")" in
+        ''|serve) return 0 ;;
+        *) return 1 ;;
+      esac ;;
+    goodvibes-agent)
+      # The agent's long-running program is the terminal UI (bare, or `tui`);
+      # `run`, `memory` and `doctor` are one-shot calls that must not be stopped.
+      case "$(proc_subcommand "$1")" in
+        ''|tui) return 0 ;;
+        *) return 1 ;;
+      esac ;;
+    *) return 0 ;;
+  esac
+}
+
 # pids_owned_by_install <pgrep-pattern> — pids matching the pattern whose
 # executable resolves under $INSTALL_DIR.
 #
@@ -1015,7 +1126,7 @@ pids_owned_by_install() {
   _matched=$(pgrep -f "$1" 2>/dev/null || true)
   [ -n "$_matched" ] || return 0
   for _p in $_matched; do
-    if proc_belongs_to_install_dir "$_p"; then
+    if proc_belongs_to_install_dir "$_p" && proc_is_the_program "$_p" "$1"; then
       printf '%s\n' "$_p"
     fi
   done
@@ -1146,7 +1257,8 @@ pid_supervision() {
         _lrc=0
         _lout=$(launchctl print "gui/$(id -u)/$_label" 2>/dev/null) || _lrc=$?
         if [ "$_lrc" -eq 0 ]; then
-          if printf '%s\n' "$_lout" | grep -q "pid = $_q"; then
+          # Anchored: pid 123 must not match an agent that runs as pid 1234.
+          if printf '%s\n' "$_lout" | grep -Eq "^[[:space:]]*pid = $_q[[:space:]]*$"; then
             printf 'supervised'
             return 0
           fi
@@ -1279,8 +1391,9 @@ unit_daemon_home_is_canonical() {
 
 # One-line reason a unit's launch arguments are stale, or nothing when they
 # are current. Both writers below derive everything else from settings at
-# boot, so staleness is exactly: pinned endpoint flags, or a --daemon-home
-# that is absent or names the wrong directory.
+# boot, so staleness is exactly: pinned endpoint flags, or any explicit
+# --daemon-home (the canonical launch carries none, so the daemon uses its
+# own default home and keeps updating itself).
 unit_launch_stale_reason() {
   if unit_is_endpoint_pinned "$1"; then
     printf 'pins endpoint flags (--hostname/--port) from an older release, which override the controlPlane settings on every boot'
@@ -1314,7 +1427,7 @@ backup_unit_file() {
 
 # Upgrade-time content currency for the CANONICAL unit (Linux): a
 # platform-managed unit whose launch arguments are stale — pinned endpoint
-# flags, or a --daemon-home that is absent or names the wrong directory — is
+# flags, or an explicit --daemon-home override — is
 # regenerated to the current shape (file + daemon-reload only — the ordinary
 # restart path right after this applies it to a running daemon). A
 # hand-written unit is never rewritten: honest notice naming the problem
@@ -1333,7 +1446,7 @@ refresh_stale_canonical_unit() {
       backup_unit_file "$_rp"
       write_systemd_unit "$_rp"
       command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload 2>/dev/null || true
-      say "  rewrote    $_rp (config-derived launch, --daemon-home $HOME/.goodvibes/daemon)"
+      say "  rewrote    $_rp (config-derived launch: no endpoint flags and no explicit home override)"
       if [ "$RESTART_DAEMON" != "1" ]; then
         say "  NOTE: GOODVIBES_RESTART_DAEMON=0; the running daemon keeps the old launch arguments until restarted."
       fi
@@ -1342,8 +1455,9 @@ refresh_stale_canonical_unit() {
       say ""
       say "NOTE: $SYSTEMD_DAEMON_UNIT at $_rp $_reason,"
       say "  and the unit is not recognizably platform-managed, so it was left untouched."
-      say "  Fix the launch arguments yourself so the daemon runs with its own state directory:"
-      say "    --daemon-home $HOME/.goodvibes/daemon"
+      say "  Remove --hostname/--port and any --daemon-home from its launch line yourself, so the daemon"
+      say "  follows your settings and uses its own default state directory (an explicit --daemon-home"
+      say "  turns off its automatic updates)."
       ;;
   esac
 }
@@ -1432,9 +1546,8 @@ restart_bare_processes() {
   # scratch directory got killed and relaunched with its own captured
   # `/$bunfs/root/goodvibes-daemon-linux-x64 --daemon-home ./fresh-home
   # --port 3499`, in whatever directory the installer happened to be run
-  # from. write_systemd_unit's canonical shape
-  # ("$INSTALL_DIR/goodvibes-daemon" --daemon-home "$HOME/.goodvibes/daemon")
-  # is used instead
+  # from. write_systemd_unit's canonical shape (the bare
+  # "$INSTALL_DIR/goodvibes-daemon", no arguments) is used instead
   # for the daemon: it resolves everything else (host/port, etc.) from
   # settings at startup, so nothing is lost by not replaying old flags, and
   # the relaunch runs from $HOME rather than the installer's own (possibly
@@ -1534,12 +1647,12 @@ restart_bare_processes() {
     fi
 
     if [ "$_is_daemon" = "1" ]; then
-      # Canonical relaunch: fixed binary + the daemon's own state directory,
-      # matching write_systemd_unit's ExecStart exactly, run from $HOME —
-      # never the installer's own (possibly scratch/temp) cwd, and never any
-      # argv carried over from the process just stopped. The state directory
-      # ($HOME/.goodvibes/daemon) is what --daemon-home names; $HOME stays the
-      # working directory, which is what the unit gets from systemd by default.
+      # Canonical relaunch: the fixed binary with no arguments, matching
+      # write_systemd_unit's ExecStart exactly, run from $HOME — never the
+      # installer's own (possibly scratch/temp) cwd, and never any argv carried
+      # over from the process just stopped. The daemon resolves its own default
+      # state directory; $HOME stays the working directory, which is what the
+      # unit gets from systemd by default.
       (
         cd "$HOME" 2>/dev/null || cd / 2>/dev/null || true
         exec nohup "$new_bin" >/dev/null 2>&1
@@ -2021,9 +2134,9 @@ migrate_legacy_systemd_unit() {
     say ""
     say "Transferring daemon supervision from $LEGACY_SYSTEMD_DAEMON_UNIT to $SYSTEMD_DAEMON_UNIT ..."
     # A pre-existing canonical unit with stale launch arguments — pinned
-    # endpoint flags, or a wrong/absent --daemon-home — would make the
-    # transfer start a daemon on the WRONG endpoint or against the WRONG
-    # state directory, and retire the legacy unit that was serving the
+    # endpoint flags, or an explicit --daemon-home override — would make the
+    # transfer start a daemon on the WRONG endpoint or with automatic updates
+    # off, and retire the legacy unit that was serving the
     # configured one — behind a receipt that only verifies liveness.
     # Platform-managed stale units are re-derived first; a hand-written
     # stale unit refuses the transfer honestly.
@@ -2041,8 +2154,8 @@ migrate_legacy_systemd_unit() {
         *)
           say "  NOTE: the existing $SYSTEMD_DAEMON_UNIT $transfer_stale_reason and is not"
           say "  recognizably platform-managed; transferring supervision onto it could run the daemon wrong."
-          say "  The units were not changed; fix the launch arguments yourself (the daemon's own state directory"
-          say "  is --daemon-home $HOME/.goodvibes/daemon), or migrate deliberately with:"
+          say "  The units were not changed; remove --hostname/--port and any --daemon-home from its launch line"
+          say "  yourself (an explicit --daemon-home turns off automatic updates), or migrate deliberately with:"
           say "    goodvibes-daemon migrate-service"
           # The restart path deferred the in-place restart to this transfer
           # ('the migration step below transfers it') — the promise must not
@@ -2202,8 +2315,8 @@ migrate_one_launchd_plist() {
   plist_path="$1"
   plist_label="$2"
   [ -f "$plist_path" ] || return 0
-  # Already the current launch form — nothing to migrate. Current means the
-  # CANONICAL --daemon-home value, no pinned endpoint flags, and an explicit
+  # Already the current launch form — nothing to migrate. Current means no
+  # --daemon-home override, no pinned endpoint flags, and an explicit
   # working directory. Without it launchd inherits '/', while daemon startup
   # opens project resources beneath its cwd. Preserve an existing chosen cwd.
   # The middle generation carried --daemon-home PLUS --hostname/--port, and keying the
@@ -2237,8 +2350,9 @@ migrate_one_launchd_plist() {
       say ""
       say "NOTE: the LaunchAgent at $plist_path $_plr,"
       say "  and it is not recognizably platform-managed, so it was left untouched."
-      say "  Fix the launch arguments yourself so the daemon follows your settings and runs with its own"
-      say "  state directory: --daemon-home $HOME/.goodvibes/daemon"
+      say "  Remove --hostname/--port and any --daemon-home from its launch arguments yourself, so the daemon"
+      say "  follows your settings and uses its own default state directory (an explicit --daemon-home"
+      say "  turns off its automatic updates)."
     fi
     return 0
   fi
@@ -2464,6 +2578,13 @@ publish_release_directory() (
     exec 6< "$_directory_target"
     installer_open_file_matches 6 "$_directory_target" || fail 'Could not retain the original installed directory.'
     _directory_had_old=1
+  fi
+  # A repair run, or any re-run of the same release, finds exactly the files it was
+  # about to publish. Swapping them would park a full copy of the old tree that
+  # nothing ever deletes (the marker is not a deletion receipt) and would rename a
+  # directory a running daemon may be serving, for no change. Leave it in place.
+  if [ "$_directory_had_old" = 1 ] && diff -r "$_directory_source" "$_directory_target" >/dev/null 2>&1; then
+    return 0
   fi
   _directory_work=$(mktemp -d "$_directory_parent/.goodvibes-directory-install.XXXXXX") || fail 'Could not reserve private directory staging.'
   exec 5< "$_directory_work"
@@ -2756,7 +2877,7 @@ shadow_effective_path() {
     return 0
   fi
   shadow_effective_rc=$(resolve_shell_rc)
-  if [ -f "$shadow_effective_rc" ] && grep -qF "$INSTALLER_MARKER" "$shadow_effective_rc" 2>/dev/null; then
+  if rc_has_path_line "$shadow_effective_rc"; then
     printf '%s:%s' "$shadow_effective_dir" "${PATH:-}"
     return 0
   fi
@@ -3409,6 +3530,20 @@ stop_bare_processes() {
   done
 }
 
+# Whether uninstall may remove this unit/plist: the installer marker, or for the
+# canonical daemon unit/plist the product writer's own fingerprint, the same
+# provenance the upgrade path uses. The product's install-service, onboarding and
+# the updater rewrite these files without the installer marker, and leaving that
+# unit behind would start a daemon whose program has just been removed.
+uninstall_unit_is_managed() {
+  [ -f "$2" ] || return 1
+  if grep -q "$INSTALLER_MARKER" "$2" 2>/dev/null; then return 0; fi
+  case "$1" in
+    "$SYSTEMD_DAEMON_UNIT"|"$LAUNCHD_DAEMON_LABEL"|goodvibes) [ "$(canonical_unit_provenance "$2")" = managed ] ;;
+    *) return 1 ;;
+  esac
+}
+
 uninstall_systemd_service() {
   # uninstall_systemd_service <unit> <unit_path>
   unit="$1"
@@ -3421,7 +3556,7 @@ uninstall_systemd_service() {
   [ "$unit_present" = "1" ] || return 0
 
   managed=0
-  [ -f "$unit_path" ] && grep -q "$INSTALLER_MARKER" "$unit_path" 2>/dev/null && managed=1
+  uninstall_unit_is_managed "$unit" "$unit_path" && managed=1
 
   if [ "$managed" = "1" ]; then
     say "Stopping and removing installer-managed $unit ..."
@@ -3447,6 +3582,14 @@ uninstall_systemd_service() {
         say "  KEPT       $unit_path is not installer-managed (no marker); leaving it in place."
         say "  Remove it yourself:"
       fi
+      # The program this unit starts is removed by this uninstall: an enabled unit
+      # would fail at every login. Disabling is reversible and keeps the file.
+      case "$exec_bin" in
+        "$INSTALL_DIR"/*)
+          if systemctl --user disable "$unit" 2>/dev/null; then
+            say "  disabled   $unit (it starts $exec_bin, which this uninstall removes); the unit file was kept"
+          fi ;;
+      esac
       say "    systemctl --user disable --now $unit && rm $unit_path && systemctl --user daemon-reload"
       record_kept "$unit_path (hand-written $unit; not installer-managed)"
     fi
@@ -3466,7 +3609,7 @@ uninstall_launchd_agent() {
   [ "$present" = "1" ] || return 0
 
   managed=0
-  [ -f "$plist_path" ] && grep -q "$INSTALLER_MARKER" "$plist_path" 2>/dev/null && managed=1
+  uninstall_unit_is_managed "$label" "$plist_path" && managed=1
 
   say "Stopping launchd user agent $label ..."
   launchctl bootout "gui/$uid/$label" 2>/dev/null ||
@@ -3740,6 +3883,23 @@ run_uninstall() (
 )
 
 DECISION_POLICY=''
+DECISION_POLICY_UNSAVED=0
+
+# The programs are already replaced and committed by now, so a failed policy
+# write must not end the install half-done (no restart, no service, no WebUI
+# configuration). Say what was not saved and how to set it, and carry on, the
+# way the other late configuration steps do.
+apply_decision_policy() {
+  [ -n "$DECISION_POLICY" ] || return 0
+  if "$INSTALL_DIR/goodvibes-daemon" config set judgment.policy "$DECISION_POLICY"; then
+    return 0
+  fi
+  DECISION_POLICY_UNSAVED=1
+  say ""
+  say "  NOTE: the decision policy was not saved; the install continues. Set it afterwards with:"
+  say "    $INSTALL_DIR/goodvibes-daemon config set judgment.policy '$DECISION_POLICY'"
+}
+
 parse_options() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -3863,13 +4023,12 @@ main() {
 
   # All program and companion writes are complete before a service may start
   # the new cohort. Startup must not see our own in-flight update claims.
+  discard_stale_previous_cohort
   INSTALL_SWAP_FINISHED=1
   commit_install_journal
   release_install_claims || fail 'Suite files were installed, but changed transaction claims require inspection before starting services.'
 
-  if [ -n "$DECISION_POLICY" ]; then
-    "$INSTALL_DIR/goodvibes-daemon" config set judgment.policy "$DECISION_POLICY"
-  fi
+  apply_decision_policy
   # Both commands may load configuration and publish native data. Their real
   # writer checks must see a complete, idle suite, never our own in-flight
   # installation. Provisioning still precedes the first service start.
@@ -3924,6 +4083,9 @@ main() {
   fi
   if [ "$WITH_AGENT" = "1" ]; then
     say "Personal agent:   goodvibes-agent"
+  fi
+  if [ "$DECISION_POLICY_UNSAVED" = "1" ]; then
+    say "Decision policy:  NOT saved (the daemon refused the write); set it with: $INSTALL_DIR/goodvibes-daemon config set judgment.policy '$DECISION_POLICY'"
   fi
   if [ "$WEBUI_INSTALLED" = "1" ] && [ -n "$WEBUI_URL" ]; then
     # The posture line follows the URL the daemon actually reported, so a host

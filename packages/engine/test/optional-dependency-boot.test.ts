@@ -5,16 +5,16 @@ import { withHtmlExtractionReadings } from './_helpers/html-extraction-readings.
  *
  * ── What this measures ────────────────────────────────────────────────────
  *
- * `platform/package.json` declares thirty packages under
+ * `package.json` declares its packages under
  * `optionalDependencies`. That is a promise that an install without them still
  * produces a working platform. `knowledge/html-readability.ts` broke the promise for
  * every graph that reaches knowledge extraction, the daemon's included,
  * because it imported `jsdom` and `@mozilla/readability` statically.
  *
- * Measured in this repository with `platform/node_modules/jsdom` moved
+ * Measured in this repository with `node_modules/jsdom` moved
  * aside, before the fix:
  *
- *   bun build packages/platform/src/platform/daemon/cli.ts --compile
+ *   bun build packages/engine/platform/src/platform/daemon/cli.ts --compile
  *     → error: Could not resolve: "jsdom"   (no daemon binary at all)
  *
  *   the same graph run from source
@@ -40,11 +40,14 @@ import { withHtmlExtractionReadings } from './_helpers/html-extraction-readings.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const COMPILE_TIMEOUT_MS = 120_000;
 const RUN_TIMEOUT_MS = 30_000;
+/** Two compiles run in one hook; the hook gets its own ceiling instead of the runner's per-test default. */
+const BEFORE_ALL_TIMEOUT_MS = 2 * COMPILE_TIMEOUT_MS + 30_000;
 const REPO_ROOT = join(import.meta.dir, '..');
 
 /** The extraction packages the first pair of fixtures covers. */
@@ -72,7 +75,8 @@ interface CompiledEntry {
 }
 
 /**
- * Compile one fixture entry, leaving the named optional packages as runtime
+ * Compile one fixture entry for the host (no `--target`, so no runtime is
+ * downloaded and the binary runs on this machine), leaving the named optional packages as runtime
  * specifiers so the artifact can be run in the absent condition.
  */
 function compileWithExternalOptionals(
@@ -87,7 +91,6 @@ function compileWithExternalOptionals(
     [
       'build', join(REPO_ROOT, entry),
       '--compile',
-      '--target=bun-linux-x64',
       ...externals.flatMap((pkg) => ['--external', pkg]),
       '--outfile', binary,
     ],
@@ -133,7 +136,7 @@ describe('an absent optional dependency does not take the process down', () => {
       'test/fixtures/optional-dependency-static-entry.ts', 'gv-static', EXTRACTION_OPTIONALS,
     );
     emptyCwd = mkdtempSync(join(tmpdir(), 'gv-optional-cwd-'));
-  });
+  }, BEFORE_ALL_TIMEOUT_MS);
 
   afterAll(() => {
     for (const dir of [lazy?.dir, staticImport?.dir, emptyCwd]) {
@@ -190,7 +193,7 @@ describe('an absent optional client package does not take the process down', () 
     );
     emptyCwd = mkdtempSync(join(tmpdir(), 'gv-optional-clients-cwd-'));
     lazyRun = runWhereOptionalsAreAbsent(lazy.binary, emptyCwd);
-  });
+  }, BEFORE_ALL_TIMEOUT_MS);
 
   afterAll(() => {
     for (const dir of [lazy?.dir, staticImport?.dir, emptyCwd]) {
@@ -304,13 +307,23 @@ describe('the same code path with the packages installed', () => {
 
   test('simple-git: the lazily-built client is built once and still runs git', async () => {
     const { GitService } = await import('../platform/src/platform/git/service.ts');
-    const service = new GitService(REPO_ROOT);
+    const repo = makeProjectTempDir('gv-optional-git');
+    try {
+      const init = spawnSync('git', ['init', '--quiet'], { cwd: repo, encoding: 'utf-8' });
+      expect(init.status).toBe(0);
+      await assertMemoisedGitClient(new GitService(repo));
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  async function assertMemoisedGitClient(service: { status(): Promise<{ isClean(): boolean; current: string | null }> }): Promise<void> {
     const status = await service.status();
     expect(typeof status.isClean()).toBe('boolean');
     // Memoised: the second call reuses the instance the first one built.
     const again = await service.status();
     expect(again.current).toBe(status.current);
-  });
+  }
 
   test('openai: the provider constructs, reports itself, and resolves its client', async () => {
     const { OpenAIProvider } = await import('../platform/src/platform/providers/openai.ts');

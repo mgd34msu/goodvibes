@@ -17,18 +17,22 @@ describe('the agent Slack/Discord notifier', () => {
 
   test('contains legacy event content under both metadata-only settings', async () => {
     const sent: string[] = [];
-    spy = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async (text: string) => { sent.push(text); });
+    let onSend: (() => void) | null = null;
+    const nextSend = (): Promise<void> => new Promise<void>((resolve) => { onSend = resolve; });
+    spy = spyOn(SlackIntegration.prototype, 'postWebhook').mockImplementation(async (text: string) => { sent.push(text); onSend?.(); });
     const settings: Record<string, unknown> = {};
     const registry = { resolveSecret: async (service: string, key: string) => (service === 'slack' && key === 'webhookUrl' ? 'https://hooks.slack.example/x' : null) };
     const notifier = await createRuntimeNotifier(registry as never, (key) => settings[key]);
     const bus = new RuntimeEventBus();
     notifier.attachToRuntimeBus(bus);
     try {
+      const first = nextSend();
       bus.emit('contracts', createEventEnvelope('CONTRACT_FAILED', { type: 'CONTRACT_FAILED', contractId: 'c1', reason: 'review score 4/10', failureKind: 'other', membersSettled: true }, ctx));
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await first;
       settings['behavior.notificationsMetadataOnly'] = true;
+      const second = nextSend();
       bus.emit('contracts', createEventEnvelope('CONTRACT_FAILED', { type: 'CONTRACT_FAILED', contractId: 'c2', reason: 'private reason', failureKind: 'other', membersSettled: true }, ctx));
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await second;
     } finally {
       notifier.detach();
       await notifier.close();
@@ -37,5 +41,23 @@ describe('the agent Slack/Discord notifier', () => {
       'GoodVibes: notification available',
       'GoodVibes: notification available',
     ]);
+  });
+  test('the configured Slack bot token reaches the notifier', async () => {
+    const saved = { slack: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
+    delete process.env.SLACK_BOT_TOKEN;
+    delete process.env.SLACK_WEBHOOK_URL;
+    try {
+      const registry = { resolveSecret: async () => null };
+      const config = { get: (key: string) => (key === 'surfaces.slack.botToken' ? 'xoxb-t' : undefined) } as never;
+      const without = await createRuntimeNotifier(registry as never, () => false);
+      expect(without.getQueueStatus()).toHaveLength(0);
+      const notifier = await createRuntimeNotifier(registry as never, () => false, config);
+      expect(notifier.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
+      await without.close();
+      await notifier.close();
+    } finally {
+      if (saved.slack !== undefined) process.env.SLACK_BOT_TOKEN = saved.slack;
+      if (saved.hook !== undefined) process.env.SLACK_WEBHOOK_URL = saved.hook;
+    }
   });
 });

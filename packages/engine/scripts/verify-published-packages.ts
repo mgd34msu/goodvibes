@@ -152,11 +152,11 @@ function readPublishedVersion(packageName: string, options: VerifyPublishedOptio
 /**
  * The `gitHead` the registry holds for an already-published version.
  *
- * Absent is normal, not exceptional: npm records gitHead only when it can read
- * a git repo from the directory it packs, and this release publishes from a
- * staged copy in a temp directory. A registry response with no gitHead field
- * prints nothing and exits 0, which is why an empty read is null rather than an
- * error.
+ * Absent is possible, not exceptional: the staged copy lives under the
+ * repository's `.tmp`, which is inside the work tree, so npm may or may not
+ * record gitHead for it; either reading is handled. A registry response with no
+ * gitHead field prints nothing and exits 0, which is why an empty read is null
+ * rather than an error.
  */
 function readPublishedGitHead(packageName: string, options: VerifyPublishedOptions): string | null {
   try {
@@ -203,7 +203,7 @@ function getPublishedState(options: VerifyPublishedOptions): PublishedState[] {
  * Decide whether the publish loop may run against the registry state it found.
  *
  * A partial state at EXACTLY the version being cut is the shape a mid-loop
- * publish failure leaves behind (say 6 of 11 packages up), and it is exactly
+ * publish failure leaves behind (say the judgment package up and the engine not), and it is exactly
  * what `scripts/publish-packages.ts` converges: its per-package `isPublished`
  * skip means a re-run finishes the remaining packages and touches none of the
  * ones already up. Refusing that state permanently wedged the release, the
@@ -222,10 +222,10 @@ function getPublishedState(options: VerifyPublishedOptions): PublishedState[] {
  *     published this version from another commit. Hard refuse, naming the
  *     package and both SHAs, because finishing the remaining packages would
  *     ship a version assembled from two different trees.
- *   - gitHead absent: npm records it only when it can read a git repo from the
- *     directory it packs, and this release publishes from a staged copy in a
- *     temp directory, so absence is the EXPECTED reading here rather than a
- *     red flag. Warn loudly, naming the packages, and treat it as a resume:
+ *   - gitHead absent: the registry did not record the commit (npm records it
+ *     only when it finds a git repo for the directory it packs), so this check
+ *     cannot see which tree published the version. Warn loudly, naming the
+ *     packages, and treat it as a resume:
  *     a check that cannot see the commit must not manufacture a refusal, which
  *     would restore exactly the wedge this function exists to remove.
  *   - `releaseSha` unknown (a local run with no SHA in the environment): same
@@ -276,8 +276,8 @@ export function classifyPrepublishRegistryState(
   } else if (headless.length > 0) {
     warnings.push(
       `The registry carries no gitHead for ${headless.map((state) => `${state.packageName}@${version}`).join(', ')}, `
-      + `so they could not be confirmed to come from ${releaseSha}. npm omits gitHead when the packed directory is not a `
-      + 'git checkout, which is the normal case for this release (it publishes from a staged temp copy). Proceeding.',
+      + `so they could not be confirmed to come from ${releaseSha}. npm records gitHead only when it finds a git `
+      + 'repository for the packed directory, so this check cannot see which commit published them. Proceeding on the version match.',
     );
   }
 

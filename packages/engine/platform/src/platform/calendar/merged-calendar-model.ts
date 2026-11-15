@@ -120,6 +120,8 @@ interface GraphEvent {
    * event (specified by the organizer property of the event)."
    */
   isOrganizer?: unknown;
+  /** True for a meeting the organizer cancelled; the entry stays on the calendar. */
+  isCancelled?: unknown;
 }
 
 function graphDateTime(value: GraphDate | undefined, isAllDay: boolean): EventDateTime | null {
@@ -145,6 +147,7 @@ export function normalizeGraphEvent(
   calendarLabel: string,
 ): MergedCalendarEvent | null {
   const ev = (raw ?? {}) as GraphEvent;
+  if (ev.isCancelled === true) return null;
   const isAllDay = ev.isAllDay === true;
   const start = graphDateTime(ev.start, isAllDay);
   if (!start) return null;

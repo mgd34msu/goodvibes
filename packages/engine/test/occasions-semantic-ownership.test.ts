@@ -126,6 +126,11 @@ const yes = { occasionId: 'annual reunion', answer: 'yes' as const };
   expect(result.interview?.nextStep?.opensFrom).toBe('');
   expect(result.interview?.nextStep?.prompt).toBe('What has Jo been into lately?');
 });
+// Each condition must stop for its own reason; a bare "throws" would also pass on an unrelated regression.
+const refusal = {
+  uncertain: /unavailable, unsettled or no longer current/, 'fit-uncertain': /unavailable, unsettled or no longer current/,
+  unavailable: /synthetic offline/, missing: /No judgment port is installed/, malformed: /no answer for question/,
+} as const;
 for (const condition of ['uncertain', 'fit-uncertain', 'unavailable', 'missing', 'malformed'] as const) {
  test(`${condition} interview reading cannot persist yes, an interview or render a guessed question`, async () => {
   const fake = recorded(condition === 'uncertain' ? { confidence: 0.5 } : condition === 'fit-uncertain' ? { fit: 0.5 } : {});
@@ -134,7 +139,7 @@ for (const condition of ['uncertain', 'fit-uncertain', 'unavailable', 'missing',
     if (condition === 'malformed') return { ...(await fake.port.ask(request)), answers: { pick: { type: 'choice', choice: 'not-offered' } } } as never;
     return fake.port.ask(request);
   } });
-  const h = harness(); await expect(h.service.answer(yes)).rejects.toThrow();
+  const h = harness(); await expect(h.service.answer(yes)).rejects.toThrow(refusal[condition]);
   expect(await h.state.acknowledgements()).toEqual([]); expect((await h.state.disclose()).interviews).toBe(0);
   expect(h.deliveries).toEqual([]);
  });
@@ -257,7 +262,7 @@ for (const verdict of ['owner', 'other', 'unknown'] as const) {
  });
  test('uncertain name inclusion never delivers or marks the nudge served', async () => {
   install(recorded({ names: 0.5 }).port); const h = harness(); h.setConfig('occasions.nudgeChannel', 'agent');
-  await expect(h.service.sweep()).rejects.toThrow(); expect(h.deliveries).toEqual([]); expect(await h.state.openItems()).toEqual([]);
+  await expect(h.service.sweep()).rejects.toThrow(/unavailable, unsettled or no longer current/); expect(h.deliveries).toEqual([]); expect(await h.state.openItems()).toEqual([]);
  });
  test('retirement between destinations prevents a second external delivery', async () => {
   install(recorded().port); const h = harness();
@@ -267,7 +272,7 @@ for (const verdict of ['owner', 'other', 'unknown'] as const) {
     now: () => Date.parse('2026-03-06T10:00:00Z'),
     deliverer: { deliver: async ({ channel }) => { h.deliveries.push(channel); controller.abort(); return 'landed'; } },
   });
-  await expect(service.sweep({ signal: controller.signal })).rejects.toThrow(); expect(h.deliveries).toEqual(['telegram']);
+  await expect(service.sweep({ signal: controller.signal })).rejects.toThrow(/aborted/); expect(h.deliveries).toEqual(['telegram']);
  });
 for (const reason of ['cancel', 'authorization'] as const) {
  test(`actual gateway ${reason} retirement cannot persist the pending interview`, async () => {

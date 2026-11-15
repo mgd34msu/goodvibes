@@ -1,4 +1,4 @@
-import { withResearchCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
+import { withResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
@@ -13,6 +13,7 @@ import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 interface AgentHarnessResearchRunArgs {
   readonly runId?: unknown;
@@ -46,9 +47,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(200, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 200);
 }
 
 function statusPriority(status: AgentResearchRunStatus): number {
@@ -78,32 +77,32 @@ function nextForRun(run: AgentResearchRunRecord): string {
 function buildRunItem(run: AgentResearchRunRecord): ResearchRunItem {
   const mutable = isMutable(run.status);
   const checkpointRoute = mutable
-    ? `research action:"checkpoint" id="${run.id}" confirm:true explicitUserRequest="..."`
+    ? researchCheckpointRoute(run.id, run.progress)
     : '';
   const pauseRoute = run.status === 'running' || run.status === 'blocked'
-    ? `research action:"pause" id="${run.id}" confirm:true explicitUserRequest="..."`
+    ? `research action:"pause" id:${routeString(run.id)}`
     : '';
   const resumeRoute = run.status === 'paused' || run.status === 'planned' || run.status === 'blocked'
-    ? `research action:"resume" id="${run.id}" confirm:true explicitUserRequest="..."`
+    ? `research action:"resume" id:${routeString(run.id)}`
     : '';
   const cancelRoute = mutable
-    ? `research action:"cancel" id="${run.id}" note="..." confirm:true explicitUserRequest="..."`
+    ? `research action:"cancel" id:${routeString(run.id)} note:"..."`
     : '';
   const completeRoute = mutable
-    ? `research action:"complete" id="${run.id}" reportArtifactId="..." confirm:true explicitUserRequest="..."`
+    ? `research action:"complete" id:${routeString(run.id)} reportArtifactId:"..."`
     : '';
   return {
     run,
     priority: statusPriority(run.status) + Math.min(20, Math.round(run.progress / 5)),
     next: nextForRun(run),
     modelRoute: 'research action:"run"',
-    inspectRoute: `research action:"run" runId="${run.id}"`,
+    inspectRoute: `research action:"run" runId:${routeString(run.id)}`,
     ...(checkpointRoute ? { checkpointRoute } : {}),
     ...(pauseRoute ? { pauseRoute } : {}),
     ...(resumeRoute ? { resumeRoute } : {}),
     ...(cancelRoute ? { cancelRoute } : {}),
     ...(completeRoute ? { completeRoute } : {}),
-    reportRoute: 'research action:"report" confirm:true explicitUserRequest:"..."',
+    reportRoute: 'research action:"report"',
   };
 }
 
@@ -192,9 +191,9 @@ function researchRunnerPosture(context: CommandContext, includeParameters: boole
       route: certifiedVisualReports[0]?.modelRoute ?? 'research action:"reports"',
     },
     sourceQueueRoute: 'research action:"sources"',
-    sourceReviewRoute: 'research action:"review_source" confirm:true explicitUserRequest:"..."',
-    reportRoute: 'research action:"report" confirm:true explicitUserRequest:"..."',
-    knowledgePromotionRoute: 'agent_knowledge_ingest sourceKind:"artifact" artifactId:"..." confirm:true explicitUserRequest:"..."',
+    sourceReviewRoute: 'research action:"review_source"',
+    reportRoute: 'research action:"report"',
+    knowledgePromotionRoute: 'agent_knowledge_ingest sourceKind:"artifact" artifactId:"..."',
     policy: 'Use browser-backed research only when browser/desktop control is ready or reviewed. Public web research can use web/fetch routes; report saving and Knowledge promotion remain separate confirmed effects.',
   };
 }

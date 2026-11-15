@@ -50,12 +50,12 @@ test('the product gateway drives the real modal over HTTP and re-resolves after 
   });
   async function refreshUntil(text: string) {
     surface.onClose?.();
-    surface.onOpen?.(() => {});
-    for (let n = 0; n < 100; n++) {
-      if (tabText(surface.buildView(), 'proposals').includes(text)) return;
-      await Bun.sleep(10);
-    }
-    expect(tabText(surface.buildView(), 'proposals')).toContain(text);
+    // Settled by the surface's own render notification, never by elapsed time.
+    await new Promise<void>((resolve) => {
+      const check = () => { if (tabText(surface.buildView(), 'proposals').includes(text)) resolve(); };
+      surface.onOpen?.(check);
+      check();
+    });
   }
   try {
     expect(requests).toEqual([]);

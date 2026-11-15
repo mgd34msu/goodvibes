@@ -104,12 +104,17 @@ for (const outcome of ['success', 'refused', 'claim-race', 'policy-race', 'confi
     const submission = await broker.followUpMessage({ sessionId: 'session', routeId: 'route', surfaceKind: 'ntfy', surfaceId: 'ntfy', externalId: 'topic', threadId: 'topic', body: 'Fix login' });
     inputId = submission.input.id;
     if (outcome.endsWith('-race')) {
-      await expect(broker.completeAgent('session', 'old-agent', 'Done')).rejects.toBeDefined();
-      expect(broker.getInputs('session')[0]?.state).toBe(outcome === 'claim-race' ? 'failed' : 'queued');
+      // The guard refuses the transfer; the follow-up ends failed with the reason instead of staying queued as busy forever.
+      await broker.completeAgent('session', 'old-agent', 'Done');
+      const row = broker.getInputs('session')[0];
+      expect(row?.state).toBe('failed');
+      expect(row?.error).toContain(outcome === 'claim-race' ? 'synthetic cancellation' : 'The follow-up was not started');
       expect(proposalStore.listPending()).toEqual([]);
     } else {
       await broker.completeAgent('session', 'old-agent', 'Done');
-      expect(broker.getInputs('session')[0]?.state).toBe(outcome === 'success' ? 'completed' : 'queued');
+      // A proposal that could not be delivered starts nothing; the follow-up
+      // ends failed with that reason rather than staying queued with no runner.
+      expect(broker.getInputs('session')[0]?.state).toBe(outcome === 'success' ? 'completed' : 'failed');
       expect(proposalStore.listPending()).toHaveLength(outcome === 'success' ? 1 : 0);
       if (outcome === 'success') await broker.completeAgent('session', 'old-agent', 'Duplicate completion reporter');
     }

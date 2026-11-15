@@ -23,7 +23,6 @@ function commandCategory(commandName: string): string {
       'delegate',
       'schedule',
       'workplan',
-      'plan',
     ].includes(commandName)
   )
     return 'Agent Operator';
@@ -202,9 +201,17 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
     aliases: [],
     description: 'Summarize conversation to free context window',
     async handler(_args, ctx) {
+      if (ctx.isGenerating?.()) {
+        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /compact.');
+        return;
+      }
       ctx.print('Compacting conversation...');
-      await compactConversation(ctx);
-      ctx.print('Conversation compacted.');
+      const receipt = await compactConversation(ctx);
+      ctx.print(
+        receipt
+          ? `Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`
+          : 'Nothing was compacted: the conversation is already short enough or compaction was declined.',
+      );
       ctx.renderRequest();
     },
   });

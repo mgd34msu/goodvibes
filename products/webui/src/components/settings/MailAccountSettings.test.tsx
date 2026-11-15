@@ -106,6 +106,37 @@ describe('MailAccountSettings: status pills', () => {
   });
 });
 
+describe('MailAccountSettings: calendar status pill', () => {
+  async function calendarRow(): Promise<{ row: Element | null; unmount: () => void }> {
+    const { el, unmount } = render();
+    await waitFor(() => Boolean(el.querySelector('[data-testid="mail-account-settings"]')));
+    return { row: el.querySelector('[data-testid="calendar-surface-status"]'), unmount };
+  }
+
+  test('a calendar probe that answers reports ready, independent of mail', async () => {
+    mailProbe = () => refusal(501, { error: 'Gateway method is not invokable', code: 'METHOD_NOT_INVOKABLE' });
+    const { row, unmount } = await calendarRow();
+    expect(row?.getAttribute('data-state')).toBe('ready');
+    unmount();
+  });
+
+  test('a 501 calendar probe reports not-available while mail stays ready', async () => {
+    calendarProbe = () => refusal(501, { error: 'Gateway method is not invokable', code: 'METHOD_NOT_INVOKABLE' });
+    const { row, unmount } = await calendarRow();
+    expect(row?.getAttribute('data-state')).toBe('not-available');
+    expect(document.querySelector('[data-testid="mail-surface-status"]')?.getAttribute('data-state')).toBe('ready');
+    unmount();
+  });
+
+  test('any other calendar failure reports an error state carrying the failure text', async () => {
+    calendarProbe = () => Promise.reject(new Error('calendar exploded'));
+    const { row, unmount } = await calendarRow();
+    expect(row?.getAttribute('data-state')).toBe('error');
+    expect(row?.textContent).toContain('calendar exploded');
+    unmount();
+  });
+});
+
 describe('MailAccountSettings: credential isolation', () => {
   test('the panel contains no secret input fields: editing lives in the schema-driven settings modal', async () => {
     const { el, unmount } = render();

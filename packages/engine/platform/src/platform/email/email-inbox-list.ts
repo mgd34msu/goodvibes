@@ -9,7 +9,9 @@ import type { ImapEnvelope } from './imap-client.js';
 export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig,
   sourceRead: EmailReplySubjectRead | undefined, input: EmailInboxListInput,
 ): Promise<{ buildResult: () => EmailInboxListResult; ingest: readonly { from: string; text: string }[] }> {
-  const limit = input.limit ?? 10;
+  // slice(-0) keeps everything, so a zero, negative or non-numeric limit must not reach it.
+  const requested = input.limit ?? 10;
+  const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 10;
   const unreadOnly = input.unreadOnly ?? true;
   return withEmailReadConnection(deps, config, sourceRead, input.signal, async (client, current) => {
     const uids = unreadOnly

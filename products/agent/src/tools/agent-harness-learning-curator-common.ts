@@ -1,5 +1,18 @@
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { LearningCandidateDraft, LearningCandidateStatus, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
+import { MIN_PROMPT_MEMORY_CONFIDENCE } from '../agent/memory-prompt.ts';
+export { MIN_PROMPT_MEMORY_CONFIDENCE };
+
+/**
+ * Whether a stored memory is injected into prompts: the platform's own recall floor, plus the exclusions it applies
+ * (stale or contradicted records, and records outside their validity window).
+ */
+export function isMemoryPromptEligible(item: AgentWorkspaceLocalLibraryItem): boolean {
+  if (item.reviewState === 'stale' || item.reviewState === 'contradicted') return false;
+  if (item.temporalStatus !== undefined && item.temporalStatus !== 'active') return false;
+  return (item.confidence ?? 0) >= MIN_PROMPT_MEMORY_CONFIDENCE;
+}
+
 export function isReviewed(item: AgentWorkspaceLocalLibraryItem): boolean {
   return item.reviewState === 'reviewed';
 }

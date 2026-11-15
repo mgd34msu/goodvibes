@@ -18,5 +18,4 @@ const stdout: string[] = []; const stderr: string[] = [];
 const exitCode = await runDaemonCli(['send', '--channel', 'ntfy', '--to', 'synthetic-topic', 'synthetic body'], {
   stdout: (line) => stdout.push(line), stderr: (line) => stderr.push(line),
 });
-console.log(JSON.stringify({ exitCode, stdout, stderr, secretLookups, serviceLookups, fetches, stacks,
-  hasSyntheticEnvironmentToken: process.env.NTFY_ACCESS_TOKEN === 'synthetic-environment-token' }));
+console.log(JSON.stringify({ exitCode, stdout, stderr, secretLookups, serviceLookups, fetches, stacks }));

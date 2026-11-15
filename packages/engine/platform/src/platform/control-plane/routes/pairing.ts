@@ -100,7 +100,10 @@ function createRenameHandler(service: PairingGatewayService): GatewayMethodHandl
   };
 }
 
-function createRevokeHandler(service: PairingGatewayService): GatewayMethodHandler {
+/** Told after a paired-device token was really revoked. */
+export type PairingRevokedListener = (event: { readonly id: string; readonly principalId: string | undefined }) => void;
+
+function createRevokeHandler(service: PairingGatewayService, onRevoked?: PairingRevokedListener): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
@@ -108,6 +111,7 @@ function createRevokeHandler(service: PairingGatewayService): GatewayMethodHandl
     if (!service.revoke(id)) {
       throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     }
+    onRevoked?.({ id, principalId: invocation.context.principalId });
     return { id, revoked: true };
   };
 }
@@ -120,7 +124,7 @@ function createRevokeSharedHandler(service: PairingGatewayService): GatewayMetho
   };
 }
 
-const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewayService) => GatewayMethodHandler>> = {
+const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewayService, onRevoked?: PairingRevokedListener) => GatewayMethodHandler>> = {
   'pairing.tokens.list': createListHandler,
   'pairing.tokens.create': createMintHandler,
   'pairing.tokens.migrate': createMigrateHandler,
@@ -135,11 +139,11 @@ const PAIRING_HANDLER_FACTORIES: Readonly<Record<string, (service: PairingGatewa
  * never fail because one verb failed to register; the operator-contract gates
  * catch a real drift.
  */
-export function registerPairingGatewayMethods(catalog: GatewayMethodCatalog, service: PairingGatewayService): void {
+export function registerPairingGatewayMethods(catalog: GatewayMethodCatalog, service: PairingGatewayService, onRevoked?: PairingRevokedListener): void {
   for (const [methodId, factory] of Object.entries(PAIRING_HANDLER_FACTORIES)) {
     const descriptor = catalog.get(methodId);
     if (descriptor) {
-      catalog.register(descriptor, factory(service), { replace: true });
+      catalog.register(descriptor, factory(service, onRevoked), { replace: true });
     }
   }
 }

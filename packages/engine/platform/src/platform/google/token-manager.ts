@@ -18,6 +18,8 @@
  */
 
 import type { GoogleOAuthCredentials } from './credential-adoption.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /** Result of exchanging a refresh token for a new access token. */
 export interface GoogleRefreshResult {
@@ -66,6 +68,8 @@ export interface GoogleAccessToken {
   readonly expiresAtMs: number | null;
   /** True when this call performed a refresh rather than reusing a cached token. */
   readonly refreshed: boolean;
+  /** Present and false when the fresh token is usable now but could not be saved, so a restart will refresh again. */
+  readonly persisted?: false;
 }
 
 export type GoogleAccessTokenOutcome =
@@ -197,12 +201,23 @@ export class GoogleTokenManager {
   }
 
   private async performRefresh(): Promise<GoogleAccessTokenOutcome> {
-    const outcome = await this.deps.refresh({
-      clientId: this.credentials.clientId,
-      clientSecret: this.credentials.clientSecret,
-      refreshToken: this.credentials.refreshToken,
-      tokenUri: this.credentials.tokenUri,
-    });
+    let outcome: GoogleRefreshOutcome;
+    try {
+      outcome = await this.deps.refresh({
+        clientId: this.credentials.clientId,
+        clientSecret: this.credentials.clientSecret,
+        refreshToken: this.credentials.refreshToken,
+        tokenUri: this.credentials.tokenUri,
+      });
+    } catch (error) {
+      // A refresh function that rejects is a failed attempt, not a dead grant: it may succeed next time.
+      return {
+        ok: false,
+        failure: 'transient',
+        problem: `The token refresh could not be completed: ${summarizeError(error)}`,
+        fix: 'Try again in a moment.',
+      };
+    }
 
     if (!outcome.ok) {
       // Record a dead grant so this exact request is never sent again. A
@@ -224,13 +239,20 @@ export class GoogleTokenManager {
 
     // Adopted credentials belong to another tool that is still running against
     // them. Reading them is fine; writing them back is not.
+    let persisted = true;
     if (this.deps.persist !== undefined && this.credentials.origin === 'secret-store') {
-      await this.deps.persist({ accessToken: outcome.result.accessToken, expiresAtMs });
+      try {
+        await this.deps.persist({ accessToken: outcome.result.accessToken, expiresAtMs });
+      } catch (error) {
+        // The token in hand works; failing the caller would hide that. The next start refreshes again.
+        persisted = false;
+        logger.warn('Google access token refreshed but could not be saved', { error: summarizeError(error) });
+      }
     }
 
     return {
       ok: true,
-      token: { accessToken: outcome.result.accessToken, expiresAtMs, refreshed: true },
+      token: { accessToken: outcome.result.accessToken, expiresAtMs, refreshed: true, ...(persisted ? {} : { persisted: false as const }) },
     };
   }
 }

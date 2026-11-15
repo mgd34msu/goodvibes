@@ -2,13 +2,12 @@ import { createOAuthLocalListener, resolveDaemonEnabled } from '@goodvibes-jev/e
 import { beginOpenAICodexLogin, exchangeOpenAICodexCode } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
-import { enrichProviderAccountsSnapshot } from '../runtime/onboarding/provider-key-capture.ts';
+import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
+import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { handleConnectExistingDaemonForHandler, handleMigrateLegacyDaemonServiceForHandler } from './handler-onboarding-daemon-adopt.ts';
-import { detectLegacyUnit, resolveConfiguredServiceName } from '../runtime/legacy-daemon-migration.ts';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardApplyFeedback } from './onboarding/onboarding-wizard.ts';
 import { handleCloudflareOnboardingActionForHandler, maybeProvisionCloudflareOnFinalApplyForHandler } from './handler-onboarding-cloudflare.ts';
-import { applyOnboardingRequest, collectOnboardingSnapshot, deleteWizardProgress, verifyOnboardingRequest, writeOnboardingCheckMarker, writeWizardProgress } from '../runtime/onboarding/index.ts';
+import { applyOnboardingRequest, deleteWizardProgress, verifyOnboardingRequest, writeOnboardingCheckMarker, writeWizardProgress } from '../runtime/onboarding/index.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
 import {
   dedupeOnboardingVerificationItems,
@@ -308,11 +307,22 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
             `Onboarding check marker could not be written: ${summarizeError(markerError)}`,
           );
         }
-        const activationVerification = await handler.restartOnboardingExternalServicesIfNeeded(request);
-        runtimeWarnings = dedupeOnboardingVerificationItems([...activationVerification, ...handler.verifyOnboardingRuntimePosture(request)]
-          .map((item): OnboardingVerificationItem => item.status === 'fail'
-            ? { ...item, status: 'warn' }
-            : item));
+        // The settings are saved by now, so a failure in the follow-up restart or posture
+        // check is a warning about the runtime, never "could not persist".
+        try {
+          const activationVerification = await handler.restartOnboardingExternalServicesIfNeeded(request);
+          runtimeWarnings = dedupeOnboardingVerificationItems([...activationVerification, ...handler.verifyOnboardingRuntimePosture(request)]
+            .map((item): OnboardingVerificationItem => item.status === 'fail'
+              ? { ...item, status: 'warn' }
+              : item));
+        } catch (followUpError) {
+          runtimeWarnings = [{
+            id: 'runtime:post-apply',
+            status: 'warn',
+            message: `Settings were saved, but restarting services or checking the runtime failed: ${summarizeError(followUpError)}`,
+            target: 'runtime',
+          }];
+        }
         verificationItems = dedupeOnboardingVerificationItems([...verificationItems, ...runtimeWarnings]);
         const cloudflareItems = await maybeProvisionCloudflareOnFinalApplyForHandler(handler);
         verificationItems = dedupeOnboardingVerificationItems([...verificationItems, ...cloudflareItems]);
@@ -364,29 +374,8 @@ export async function refreshOnboardingHydrationForHandler(handler: InputHandler
     handler.onboardingWizard.beginRuntimeHydration();
     handler.requestRender();
     try {
-      const snapshot = await collectOnboardingSnapshot({
-        config: handler.uiServices.platform.configManager,
-        shellPaths: handler.uiServices.environment.shellPaths,
-        acknowledgementScope: 'project',
-        subscriptions: handler.uiServices.platform.subscriptionManager,
-        secrets: handler.uiServices.platform.secretsManager,
-        auth: handler.uiServices.platform.localUserAuthManager,
-        services: handler.uiServices.platform.serviceRegistry,
-        surfaces: {
-          list: () => handler.uiServices.platform.surfaceRegistry.syncConfiguredSurfaces(),
-        },
-        providerAccounts: {
-          loadSnapshot: async () => enrichProviderAccountsSnapshot(await buildProviderAccountSnapshot({
-            providerRegistry: handler.uiServices.providers.providerRegistry,
-            serviceRegistry: handler.uiServices.platform.serviceRegistry,
-            subscriptionManager: handler.uiServices.platform.subscriptionManager,
-            secretsManager: handler.uiServices.platform.secretsManager,
-          }), handler.uiServices.providers.providerRegistry),
-        },
-        legacyDaemon: {
-          detect: () => ({ ...detectLegacyUnit({ homeDir: handler.uiServices.environment.homeDirectory }), trackedServiceName: resolveConfiguredServiceName(handler.uiServices.platform.configManager) }),
-        },
-      });
+      const snapshot = await collectOnboardingSnapshotForHandler(handler);
+      recordFeatureEnablement(handler.onboardingWizard, handler.uiServices.platform.configManager);
       if (!handler.onboardingWizard.active || hydrationSerial !== handler.onboardingHydrationSerial) return;
       handler.onboardingWizard.hydrateRuntimeState({ snapshot }, { resetValues: !(options.preserveValues ?? false) });
       if (options.targetStepId) {
@@ -628,8 +617,7 @@ export function getOnboardingRuntimePostureForHandler(handler: InputHandler, req
     const webEnabled = getConfigValue('web.enabled') === true;
     const controlPlaneRemote = getConfigValue('controlPlane.hostMode') === 'network'
       || (getConfigValue('controlPlane.hostMode') === 'custom'
-        && !isLoopbackHostValue(String(getConfigValue('controlPlane.host') ?? '')))
-      || getConfigValue('controlPlane.allowRemote') === true;
+        && !isLoopbackHostValue(String(getConfigValue('controlPlane.host') ?? '')));
     const listenerRemote = getConfigValue('httpListener.hostMode') === 'network'
       || (getConfigValue('httpListener.hostMode') === 'custom'
         && !isLoopbackHostValue(String(getConfigValue('httpListener.host') ?? '')));

@@ -22,7 +22,7 @@ describe('createDiscoveredProvider', () => {
     expect(provider).toBeInstanceOf(LMStudioProvider);
   });
 
-  test('keeps generic compat providers for other discovered servers', () => {
+  test('uses OllamaProvider for detected Ollama servers', () => {
     const server: DiscoveredServer = {
       name: 'Ollama',
       host: '127.0.0.1',

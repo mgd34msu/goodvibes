@@ -1,5 +1,5 @@
 {
-  "id": "ctr-57415cdd",
+  "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
   "durableAdmission": {
     "binding": {
       "actionId": "start-native-contract",
@@ -26,36 +26,36 @@
         ]
       },
       "origin": "turn",
-      "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
+      "projectRoot": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI",
       "sessionId": "inspection-schema"
     },
     "key": {
-      "attemptId": "attempt-1",
+      "workId": "native-work",
       "criteriaId": "native-criteria",
       "criteriaRevision": "1",
-      "workId": "native-work"
+      "attemptId": "attempt-1"
     },
     "schemaVersion": 2,
-    "contractId": "ctr-57415cdd",
-    "ownerAgentId": "agent-2ba82d20",
-    "payloadRevision": "049f671005082a83063a1b1fc63ba4883244dd2c3310157382c5c47c416d7d6a",
+    "contractId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+    "ownerAgentId": "agent-b4076851",
+    "payloadRevision": "bbdd7596080c7c89e4713be4956bd02ba4ec40a839f81bf2519e043e59e82220",
     "execution": {
       "isolation": "worktree",
-      "branch": "contract/57415cdd",
-      "worktreePath": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
+      "branch": "contract/agehjdpi-blik-emno-kbml-joheehacccbh",
+      "worktreePath": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI/.goodvibes/.worktrees/contract/agehjdpi-blik-emno-kbml-joheehacccbh",
       "baseBranch": "main"
     }
   },
   "durableLaunchState": "launch-claimed",
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "sessionId": "inspection-schema",
   "origin": "turn",
   "ask": "Parser display request",
-  "ownerAgentId": "agent-2ba82d20",
-  "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
+  "ownerAgentId": "agent-b4076851",
+  "projectRoot": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI",
   "isolation": "worktree",
-  "branch": "contract/57415cdd",
-  "worktreePath": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.goodvibes/.worktrees/contract/57415cdd",
+  "branch": "contract/agehjdpi-blik-emno-kbml-joheehacccbh",
+  "worktreePath": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI/.goodvibes/.worktrees/contract/agehjdpi-blik-emno-kbml-joheehacccbh",
   "baseBranch": "main",
   "nativeSource": {
     "sourceId": "native-work",
@@ -89,36 +89,36 @@
   "escalations": [],
   "decisions": [
     {
-      "id": "ctr-57415cdd.d1",
-      "at": 1791199706504,
+      "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh.d1",
+      "at": 1794643685903,
       "action": "created",
-      "targetId": "ctr-57415cdd",
+      "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
       "reason": "origin turn; worktree isolation",
       "decisionIds": []
     },
     {
-      "id": "ctr-57415cdd.d2",
-      "at": 1791199706595,
+      "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh.d2",
+      "at": 1794643686032,
       "action": "created",
-      "targetId": "ctr-57415cdd",
-      "reason": "admitted local input generation cklecatm-qmar-ossm-aktq-tqqeqbosdtrl; captured 2 paths",
+      "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+      "reason": "admitted local input generation cnfqmflb-lqbq-oecq-tfdt-msddlfqrolte; captured 2 paths",
       "decisionIds": []
     },
     {
-      "id": "ctr-57415cdd.d3",
-      "at": 1791199706602,
+      "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh.d3",
+      "at": 1794643686036,
       "action": "shaped",
-      "targetId": "ctr-57415cdd",
+      "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
       "reason": "forbids delegation no (act); parallel agents no (act); forbids writing no (act); attempts no (act)",
       "decisionIds": [
-        "01a10bd2-7dea-7000-992c-0dea71dbabde"
+        "abkbnjbj-hcjd-haaa-lelp-gglainebhbfe"
       ]
     },
     {
-      "id": "ctr-57415cdd.d4",
-      "at": 1791199706627,
+      "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh.d4",
+      "at": 1794643686073,
       "action": "spawned",
-      "targetId": "ctr-57415cdd",
+      "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
       "reason": "planner route: test tier",
       "decisionIds": [],
       "route": {
@@ -128,10 +128,10 @@
       }
     },
     {
-      "id": "ctr-57415cdd.d5",
-      "at": 1791199706657,
+      "id": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh.d5",
+      "at": 1794643686278,
       "action": "planned",
-      "targetId": "ctr-57415cdd",
+      "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
       "reason": "the planner wrote a plan",
       "decisionIds": []
     }
@@ -155,19 +155,19 @@
   "plannerAgentIds": [
     "planner-1"
   ],
-  "createdAt": 1791199706503,
+  "createdAt": 1794643685891,
   "inputSnapshot": {
-    "version": 1,
-    "id": "cklecatm-qmar-ossm-aktq-tqqeqbosdtrl",
-    "sourceRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d",
-    "sourceIdentity": "39:8804",
-    "gitIdentity": "39:8805|/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805|/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-cuyh9d/.git|39:8805",
-    "ownerHead": "be6f726d27dcfe3655b0bd41a3e004d961d4849e",
+    "version": 2,
+    "id": "cnfqmflb-lqbq-oecq-tfdt-msddlfqrolte",
+    "sourceRoot": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI",
+    "sourceIdentity": "56:8129376",
+    "gitIdentity": "56:8129377|/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI/.git|56:8129377|/tmp/goodvibes-testrun-UYsQt9/contract-runner-oYNRrI/.git|56:8129377",
+    "ownerHead": "bb38a4268edac196b2510128bdb9e012ec3d215e",
     "ownerRef": "main",
     "indexFingerprint": "2083d4500dbbd99a37d66b58095065327c097368f5931fd75076615981c2aa52",
     "inputTree": "55fc8d39402f75515cfd1434f4359ed2674adfde",
-    "inputCommit": "be6f726d27dcfe3655b0bd41a3e004d961d4849e",
-    "capturedAt": 1791199706538,
+    "inputCommit": "bb38a4268edac196b2510128bdb9e012ec3d215e",
+    "capturedAt": 1794643685948,
     "dirty": false,
     "exclusions": [
       ".git",
@@ -181,21 +181,26 @@
         "path": ".gitignore",
         "kind": "file",
         "mode": "100644",
+        "oid": "a9c7ab03f5b153761afe8f261c91f79fb981e338",
         "digest": "e4a272249eca7bdbf186302b4e77ce774fa9138be2ae2156cb1d8a181477a68c",
-        "identity": "39:8839:33188:12:1791199706490530840:1791199706490530840",
-        "oid": "a9c7ab03f5b153761afe8f261c91f79fb981e338"
+        "identity": "56:8129412:33188:12:1794643685873285840:1794643685873285840"
       },
       {
         "path": "README.md",
         "kind": "file",
         "mode": "100644",
+        "oid": "fc72a5c1094e203eefcd1c710f060957ebbbaac4",
         "digest": "bc70e26f40b8816eb177813dda1f5f529a27a4641d45aa19cae2348a8c6a5fe9",
-        "identity": "39:8840:33188:7:1791199706490530840:1791199706490530840",
-        "oid": "fc72a5c1094e203eefcd1c710f060957ebbbaac4"
+        "identity": "56:8129413:33188:7:1794643685873285840:1794643685873285840"
       }
     ]
   },
   "shape": {
+    "project_review": {
+      "verdict": "no",
+      "probability": 0.03,
+      "outcome": "act"
+    },
     "forbids_delegation": {
       "verdict": "no",
       "probability": 0.03,
@@ -217,7 +222,7 @@
       "outcome": "act"
     },
     "decisionIds": [
-      "01a10bd2-7dea-7000-992c-0dea71dbabde"
+      "abkbnjbj-hcjd-haaa-lelp-gglainebhbfe"
     ]
   },
   "nativeDecisions": {
@@ -226,35 +231,35 @@
       {
         "schemaVersion": 1,
         "stage": "plan",
-        "targetId": "ctr-57415cdd",
-        "operationRevision": "533ccca02ca220f72e93388941e5d3cef62eceeb86108241dd0ae4e0c7d42dee",
+        "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+        "operationRevision": "c8bdcb89e8d5d9ac8d3c8408af571a63eebcf17d206195527a8afa6fc0f8ffab",
         "decision": {
           "schemaVersion": 1,
-          "decisionId": "b2e9527d-67ce-4e93-9a00-7a8047f23ba5",
+          "decisionId": "5c26f0dc-b7d7-4837-9c8f-0b243c96ca83",
           "binding": {
             "sourceId": "native-work",
             "inputRevision": "input-1",
-            "actionId": "ctr-57415cdd:plan:ctr-57415cdd",
-            "actionRevision": "3fe81052e7cf8f8304f7e65a0d8fecef6493f3e93d84aef50d7b257681e53d1b",
+            "actionId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh:plan:ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+            "actionRevision": "dbe293c6-e98b-4036-b0ab-8f109629531b",
             "authorityId": "host",
             "authorityRevision": "1",
             "scopeId": "project",
             "scopeRevision": "1"
           },
           "judgmentDecisionIds": [
-            "01a10bd2-7dea-7000-992c-0dea71dbabde",
-            "01a10bd2-7e24-7000-8cc1-56a04ef95946",
-            "01a10bd2-7e24-7001-bf9d-7a50a481416c",
-            "01a10bd2-7e3a-7000-ad44-5c85f9bf084c"
+            "abkbnjbj-hcjd-haaa-lelp-gglainebhbfe",
+            "abkbnjbj-hdim-haaa-kjhl-fjoadpnbgomh",
+            "abkbnjbj-hdin-haaa-kpag-knflhlpjopbn",
+            "abkbnjbj-hdkj-haaa-jcob-bgmnilmpklpc"
           ],
           "evidence": [
             {
               "id": "native-source",
-              "revision": "9653c61e44890489e1da6fb2fcf65da3c4542faf7bea2f53eb97442992c4ace4"
+              "revision": "dbe293c6-e98b-4036-b0ab-8f109629531b"
             },
             {
               "id": "operation-evidence",
-              "revision": "d7c7999fa86fd414de1cfa3eda18748ca85a0e981afed0961b2d18aa0f7f4ba6"
+              "revision": "dbe293c6-e98b-4036-b0ab-8f109629531b"
             },
             {
               "id": "native-criteria",
@@ -275,38 +280,38 @@
       }
     ],
     "pending": {
-      "plan:ctr-57415cdd": {
+      "plan:ctr-agehjdpi-blik-emno-kbml-joheehacccbh": {
         "schemaVersion": 1,
         "stage": "plan",
-        "targetId": "ctr-57415cdd",
-        "operationRevision": "533ccca02ca220f72e93388941e5d3cef62eceeb86108241dd0ae4e0c7d42dee",
+        "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+        "operationRevision": "c8bdcb89e8d5d9ac8d3c8408af571a63eebcf17d206195527a8afa6fc0f8ffab",
         "decision": {
           "schemaVersion": 1,
-          "decisionId": "b2e9527d-67ce-4e93-9a00-7a8047f23ba5",
+          "decisionId": "5c26f0dc-b7d7-4837-9c8f-0b243c96ca83",
           "binding": {
             "sourceId": "native-work",
             "inputRevision": "input-1",
-            "actionId": "ctr-57415cdd:plan:ctr-57415cdd",
-            "actionRevision": "3fe81052e7cf8f8304f7e65a0d8fecef6493f3e93d84aef50d7b257681e53d1b",
+            "actionId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh:plan:ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
+            "actionRevision": "dbe293c6-e98b-4036-b0ab-8f109629531b",
             "authorityId": "host",
             "authorityRevision": "1",
             "scopeId": "project",
             "scopeRevision": "1"
           },
           "judgmentDecisionIds": [
-            "01a10bd2-7dea-7000-992c-0dea71dbabde",
-            "01a10bd2-7e24-7000-8cc1-56a04ef95946",
-            "01a10bd2-7e24-7001-bf9d-7a50a481416c",
-            "01a10bd2-7e3a-7000-ad44-5c85f9bf084c"
+            "abkbnjbj-hcjd-haaa-lelp-gglainebhbfe",
+            "abkbnjbj-hdim-haaa-kjhl-fjoadpnbgomh",
+            "abkbnjbj-hdin-haaa-kpag-knflhlpjopbn",
+            "abkbnjbj-hdkj-haaa-jcob-bgmnilmpklpc"
           ],
           "evidence": [
             {
               "id": "native-source",
-              "revision": "9653c61e44890489e1da6fb2fcf65da3c4542faf7bea2f53eb97442992c4ace4"
+              "revision": "dbe293c6-e98b-4036-b0ab-8f109629531b"
             },
             {
               "id": "operation-evidence",
-              "revision": "d7c7999fa86fd414de1cfa3eda18748ca85a0e981afed0961b2d18aa0f7f4ba6"
+              "revision": "dbe293c6-e98b-4036-b0ab-8f109629531b"
             },
             {
               "id": "native-criteria",
@@ -339,7 +344,7 @@
     "schemaVersion": 1,
     "state": "deferred",
     "stage": "plan",
-    "targetId": "ctr-57415cdd",
+    "targetId": "ctr-agehjdpi-blik-emno-kbml-joheehacccbh",
     "until": {
       "id": "evidence-ready",
       "revision": "1"

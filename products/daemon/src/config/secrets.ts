@@ -10,68 +10,18 @@ export type {
 } from '@goodvibes-jev/engine/platform/platform/config';
 
 import {
-  SecretsManager as PlatformSecretsManager,
+  LiteralSecretsManager,
   type SecretsManagerOptions as PlatformSecretsManagerOptions,
 } from '@goodvibes-jev/engine/platform/platform/config';
-import { isSecretRefInput } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from './surface.ts';
 
 export type SecretsManagerOptions = Omit<PlatformSecretsManagerOptions, 'surfaceRoot'>;
 
-const RAW_SECRET_LITERAL_PREFIX = '__GOODVIBES_LITERAL_V1__';
-
-function isGoodVibesSecretRefInput(value: string): boolean {
-  const normalized = value.trim();
-  return normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized);
-}
-
-function shouldStoreAsLiteral(value: string): boolean {
-  return value.startsWith(RAW_SECRET_LITERAL_PREFIX)
-    || (isSecretRefInput(value) && !isGoodVibesSecretRefInput(value));
-}
-
-function encodeLiteralSecret(value: string): string {
-  return `${RAW_SECRET_LITERAL_PREFIX}${Buffer.from(JSON.stringify({ value }), 'utf-8').toString('base64url')}`;
-}
-
-function decodeLiteralSecret(value: string): string | null {
-  if (!value.startsWith(RAW_SECRET_LITERAL_PREFIX)) return null;
-  try {
-    const decoded = Buffer.from(value.slice(RAW_SECRET_LITERAL_PREFIX.length), 'base64url').toString('utf-8');
-    const parsed = JSON.parse(decoded) as unknown;
-    if (!parsed || typeof parsed !== 'object' || typeof (parsed as { value?: unknown }).value !== 'string') return null;
-    return (parsed as { value: string }).value;
-  } catch {
-    return null;
-  }
-}
-
-export class SecretsManager extends PlatformSecretsManager {
+export class SecretsManager extends LiteralSecretsManager {
   constructor(options: SecretsManagerOptions) {
     super({
       ...options,
       surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
     });
-  }
-
-  override async get(key: string): Promise<string | null> {
-    const envValue = process.env[key];
-    if (envValue !== undefined && shouldStoreAsLiteral(envValue)) {
-      return decodeLiteralSecret(envValue) ?? envValue;
-    }
-
-    const value = await super.get(key);
-    if (value === null) return null;
-    return decodeLiteralSecret(value) ?? value;
-  }
-
-  override resolveLocalCredentialSnapshot(key: string): ReturnType<PlatformSecretsManager['resolveLocalCredentialSnapshot']> {
-    const snapshot = super.resolveLocalCredentialSnapshot(key);
-    if (snapshot.state !== 'resolved') return snapshot;
-    return { ...snapshot, value: decodeLiteralSecret(snapshot.value) ?? snapshot.value };
-  }
-
-  override async set(key: string, value: string, options?: Parameters<PlatformSecretsManager['set']>[2]): Promise<void> {
-    await super.set(key, shouldStoreAsLiteral(value) ? encodeLiteralSecret(value) : value, options);
   }
 }

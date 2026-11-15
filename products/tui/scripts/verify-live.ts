@@ -23,7 +23,7 @@ if (args.includes('--help') || args.includes('-h')) {
     '                       GOODVIBES_HOME, or ~/.goodvibes when that is unset.',
     '  --binary <path>      Compiled goodvibes binary. Defaults to dist/goodvibes.',
     '  --daemon-url <url>   Daemon base URL. Defaults to configured control-plane port on 127.0.0.1.',
-    '  --strict            Treat warnings as failures.',
+    '  --strict            Treat warnings and skipped checks as failures.',
     '  --json              Print JSON instead of Markdown.',
     '  --out <dir>         Write live-verification.{json,md} to a directory.',
     '  --help              Show this help.',

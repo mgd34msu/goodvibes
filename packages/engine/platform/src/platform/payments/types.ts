@@ -150,6 +150,8 @@ export type RefusalCode =
   | 'disabled'
   | 'no-card'
   | 'no-shipping-address'
+  /** No complete billing address is stored. */
+  | 'no-billing-address'
   | 'not-owner-request'
   | 'derived-from-untrusted-content'
   | 'link-validation-failed'
@@ -175,3 +177,32 @@ export type RefusalCode =
    */
   | 'submit-not-attempted'
   | 'cart-mismatch';
+
+/**
+ * Refusals the checkout execution layer can produce that the decision layer
+ * has no code for.
+ *
+ * Kept apart from `RefusalCode` because they are execution-layer facts: a
+ * listing format we will not buy, an approval window that closed for a reason
+ * that had nothing to do with the budget, a hold another purchase still owns.
+ * Folding them into the budget codes would make
+ * `payments.purchases.list` report "over budget" for a purchase that was well
+ * within it and simply happened at a merchant the owner had not vouched for.
+ */
+export type ExecutionRefusalCode =
+  | 'extraction-failed'
+  /** An auction, a Best Offer, or a format we could not confirm as fixed-price. */
+  | 'listing-not-purchasable'
+  | 'merchant-not-recognised-denied'
+  | 'merchant-not-recognised-expired'
+  | 'merchant-not-recognised-undeliverable'
+  /** The card could not be typed into the page; no click was attempted. */
+  | 'card-fill-failed'
+  /** The stored address, payment settings, pairing or page changed while the purchase ran. */
+  | 'owner-changed'
+  /** The purchase notice could not be prepared or sent. */
+  | 'notice-unavailable'
+  /** Another purchase in flight holds the budget this one needs. */
+  | 'budget-held'
+  /** The click was made and no answer was seen: the order may or may not have been placed. */
+  | 'submit-outcome-unknown';

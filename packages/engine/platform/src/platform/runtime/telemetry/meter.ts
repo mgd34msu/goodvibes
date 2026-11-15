@@ -31,6 +31,11 @@ function labelKey(labels?: MetricLabels): string {
     .join(',');
 }
 
+/** Writes and reads key on the same allowlisted labels, so a read of a recorded series finds it. */
+function recordedLabelKey(labels?: MetricLabels): string {
+  return labelKey(labels ? (filterMetricLabels(labels) as MetricLabels) : labels);
+}
+
 // ── CounterImpl ──────────────────────────────────────────────────────────────────
 
 class CounterImpl implements Counter {
@@ -38,13 +43,12 @@ class CounterImpl implements Counter {
 
   add(delta = 1, labels?: MetricLabels): void {
     if (delta < 0) return; // Counters are monotonically increasing
-    const filtered = labels ? (filterMetricLabels(labels) as MetricLabels) : labels;
-    const key = labelKey(filtered);
+    const key = recordedLabelKey(labels);
     this._values.set(key, (this._values.get(key) ?? 0) + delta);
   }
 
   value(labels?: MetricLabels): number {
-    return this._values.get(labelKey(labels)) ?? 0;
+    return this._values.get(recordedLabelKey(labels)) ?? 0;
   }
 
   /** reset all accumulated values (for test isolation). */
@@ -66,8 +70,7 @@ class HistogramImpl implements Histogram {
   private readonly _accumulators = new Map<string, HistogramAccumulator>();
 
   record(value: number, labels?: MetricLabels): void {
-    const filtered = labels ? (filterMetricLabels(labels) as MetricLabels) : labels;
-    const key = labelKey(filtered);
+    const key = recordedLabelKey(labels);
     const acc = this._accumulators.get(key);
     if (acc === undefined) {
       this._accumulators.set(key, { count: 1, sum: value, min: value, max: value });
@@ -80,7 +83,7 @@ class HistogramImpl implements Histogram {
   }
 
   snapshot(labels?: MetricLabels): HistogramSnapshot {
-    const acc = this._accumulators.get(labelKey(labels));
+    const acc = this._accumulators.get(recordedLabelKey(labels));
     if (!acc) {
       return { count: 0, sum: 0, min: 0, max: 0, mean: 0 };
     }
@@ -105,12 +108,11 @@ class GaugeImpl implements Gauge {
   private readonly _values = new Map<string, number>();
 
   set(value: number, labels?: MetricLabels): void {
-    const filtered = labels ? (filterMetricLabels(labels) as MetricLabels) : labels;
-    this._values.set(labelKey(filtered), value);
+    this._values.set(recordedLabelKey(labels), value);
   }
 
   value(labels?: MetricLabels): number {
-    return this._values.get(labelKey(labels)) ?? 0;
+    return this._values.get(recordedLabelKey(labels)) ?? 0;
   }
 
   /** reset all accumulated values (for test isolation). */

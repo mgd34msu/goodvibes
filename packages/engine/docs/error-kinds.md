@@ -65,7 +65,7 @@ Every error thrown by the platform's public surface is an instance of `GoodVibes
 
 **When it fires:** The HTTP fetch failed before a response was received (DNS failure, connection refused, SSE stream error, transport timeout).
 
-**Remediation:** Check connectivity and retry with exponential backoff. The platform's built-in retry policy (`DEFAULT_HTTP_RETRY_POLICY`) handles common transient cases automatically.
+**Remediation:** Check connectivity and retry with exponential backoff. Retrying is off by default (`DEFAULT_HTTP_RETRY_POLICY.maxAttempts` is `1`); once you raise it, safe methods (`GET`, `HEAD`, `OPTIONS`) are retried and mutations are not unless you opt them in (see [Retries and reconnect](./retries-and-reconnect.md)).
 
 **Retryable:** Yes. `err.recoverable` will be `true`.
 
@@ -87,7 +87,7 @@ Every error thrown by the platform's public surface is an instance of `GoodVibes
 
 **When it fires:** The remote server returned HTTP 429.
 
-**Remediation:** Wait for `err.retryAfterMs` milliseconds (if present) or use exponential backoff, then retry. The platform's retry policy handles this automatically.
+**Remediation:** Wait for `err.retryAfterMs` milliseconds (if present) or use exponential backoff, then retry. With retrying enabled (it is off by default) the platform waits at least `Retry-After` before a safe method is tried again, except when the reply says `recoverable: false` or category `billing`, which is never retried.
 
 **Retryable:** Yes. `err.recoverable` will be `true`.
 

@@ -16,6 +16,7 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/pla
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 
 export interface StartRecoveryAutosaveOptions {
@@ -36,13 +37,23 @@ export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): Re
   const { conversation, runtime, surface, buildSessionContinuityHints, intervalMs = 60_000 } = options;
   writeLivenessMarker(surface, runtime.sessionId);
   return setInterval(() => {
-    const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
-    const persisted = buildPersistedSessionContextFromFacts(
-      snapshot.messages,
-      conversation.getTitleSource(),
-      buildSessionContinuityHints(),
-    );
-    writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
-    writeLivenessMarker(surface, runtime.sessionId);
+    // A timer callback that throws becomes an uncaught exception and ends the
+    // TUI; a failed tick only costs this snapshot, and the next tick retries.
+    try {
+      const snapshot = conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
+      const persisted = buildPersistedSessionContextFromFacts(
+        snapshot.messages,
+        conversation.getTitleSource(),
+        buildSessionContinuityHints(),
+      );
+      writeRecoveryFile({ ...snapshot, ...persisted }, runtime.sessionId, conversation.title ?? '', { surface });
+    } catch (error) {
+      logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
+    }
+    try {
+      writeLivenessMarker(surface, runtime.sessionId);
+    } catch (error) {
+      logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
+    }
   }, intervalMs);
 }

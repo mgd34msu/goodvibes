@@ -33,6 +33,11 @@ const VIEWS: readonly PanelRegistrationLike[] = [
   { id: 'sessions', name: 'Sessions', category: 'views', description: 'Saved, hosted and cross-surface sessions' },
 ];
 
+/** The ids panels.list serves, for any caller that names what the terminal can open. */
+export function listViewPanelIds(): readonly string[] {
+  return VIEWS.map((view) => view.id);
+}
+
 const NO_PANES: PanelPaneLike = { panels: [], activeIndex: 0 };
 
 export interface ViewPanelAdapter extends PanelManagerLike {

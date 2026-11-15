@@ -496,6 +496,14 @@ export interface RecoveryRestoreResult {
   readonly info: RecoveryFileInfo;
   /** The one-line receipt describing the restore. */
   readonly receipt: string;
+  /**
+   * False when the snapshot file could not be retired (it changed on disk after
+   * it was read, or the delete failed). The snapshot is still returned, so the
+   * conversation is not lost, but the file stays and would be offered again on
+   * the next start: a caller that applies this result should persist it as a
+   * saved session so the leftover snapshot is superseded.
+   */
+  readonly retired: boolean;
 }
 
 /** Build the one-line restore receipt, verbatim. */
@@ -539,8 +547,11 @@ export function autoRestoreRecovery(
   // restored (never a directory sweep, and never a path re-derived from the
   // meta's session id, which a snapshot with an empty/foreign id would not
   // resolve back to).
-  deleteRecoverySnapshotAt(path, loaded.physical);
-  return { snapshot, info, receipt };
+  const retired = deleteRecoverySnapshotAt(path, loaded.physical);
+  if (!retired) {
+    logger.warn('[Recovery] Restored snapshot could not be retired; it will be offered again until the session is saved', { sessionId: info.sessionId });
+  }
+  return { snapshot, info, receipt, retired };
 }
 
 /** The outcome of the prompted "yes, resume it" recovery flow (`consumeRecovery`). */

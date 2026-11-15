@@ -30,12 +30,15 @@ export function adaptCodeIndex(service: CodeIndexProcessSource, now: number): Pr
   const stats = service.stats();
   const lastBuild = stats.lastBuild;
 
-  const state: ProcessState = building ? 'executing-tool' : lastBuild ? 'done' : 'idle';
+  const buildError = building ? undefined : stats.lastBuildError;
+  const state: ProcessState = building ? 'executing-tool' : buildError ? 'failed' : lastBuild ? 'done' : 'idle';
 
   const label = building
     ? progress
       ? `Code index: building ${progress.scanned}/${progress.total} files`
       : 'Code index: building'
+    : buildError
+      ? `Code index: build failed (${buildError})`
     : lastBuild
       ? `Code index: ${stats.indexedFiles} files, ${stats.indexedChunks} chunks`
       : 'Code index: idle';

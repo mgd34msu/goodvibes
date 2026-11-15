@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { resolveTargets, buildCompileArgs, runBuildBinaries, captureLogger, resolveOptionalExternals, readDependencyManifest, type BuildConfig, type DependencyManifest } from '@goodvibes-jev/engine/toolchain';
 import { scriptedExec, fakeFs } from './_helpers.ts';
 
+/** The compile target for this machine, so the produced binary runs here without fetching another runtime. */
+const HOST_TARGET = `bun-${process.platform === 'win32' ? 'windows' : process.platform}-${process.arch}`;
+
 const build: BuildConfig = {
   appEntrypoint: 'src/main.ts',
   daemonEntrypoint: 'src/daemon/cli.ts',
@@ -236,9 +239,9 @@ describe('build-binaries dependency manifest reading', () => {
     expect(readDependencyManifest(fs, 'package.json', 'fallback')?.required).toEqual(['@goodvibes-jev/engine']);
   });
 
-  test('a missing or unparseable manifest screens nothing rather than failing the build', () => {
+  test('a missing manifest screens nothing, an unparseable one fails the build', () => {
     expect(readDependencyManifest(fakeFs({}), 'package.json', 'fallback')).toBeNull();
-    expect(readDependencyManifest(fakeFs({ 'package.json': '{ not json' }), 'package.json', 'fallback')).toBeNull();
+    expect(() => readDependencyManifest(fakeFs({ 'package.json': '{ not json' }), 'package.json', 'fallback')).toThrow('Cannot read package.json');
   });
 });
 
@@ -301,7 +304,7 @@ describe('the screened compile survives a genuinely absent optional package', ()
     ].join('\n'), 'utf-8');
 
     const binary = join(dir, 'fixture-binary');
-    const args = buildCompileArgs(entry, 'bun-linux-x64', binary, screened.externals);
+    const args = buildCompileArgs(entry, HOST_TARGET, binary, screened.externals);
     expect(args).toContain('--external');
     expect(args).toContain(ABSENT_OPTIONAL);
 
@@ -326,7 +329,7 @@ describe('the screened compile survives a genuinely absent optional package', ()
     writeFileSync(entry, `import x from '${ABSENT_OPTIONAL}';\nprocess.stdout.write(String(x));\n`, 'utf-8');
     const built = spawnSync(
       process.execPath,
-      buildCompileArgs(entry, 'bun-linux-x64', join(dir, 'control-binary'), []),
+      buildCompileArgs(entry, HOST_TARGET, join(dir, 'control-binary'), []),
       { cwd: dir, encoding: 'utf-8', timeout: 120_000 },
     );
     expect(built.status).not.toBe(0);

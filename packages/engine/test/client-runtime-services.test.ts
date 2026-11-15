@@ -24,7 +24,7 @@
 
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -292,8 +292,17 @@ test('the remembered-approval store lands at the one control-plane path', async 
   } as never);
   const expected = join(configManager.getControlPlaneConfigDir(), 'permission-rules.json');
   expect(existsSync(expected)).toBe(true);
-  // The client composition's own store is the same one, at the same path.
-  expect(client.userPermissionRuleStore.rules().length).toBeGreaterThanOrEqual(0);
+  // The client composition's own store writes to the same file: a rule added
+  // through it lands in the file at `expected`, next to the one written above.
+  await client.userPermissionRuleStore.add({
+    rule: { id: 'client-store-rule', tool: 'exec', match: { command: 'pwd' }, decision: 'allow' } as never,
+    createdAt: Date.now(),
+    tier: 'project',
+    tool: 'exec',
+  } as never);
+  const onDisk = JSON.parse(readFileSync(expected, 'utf8')) as { rules: { rule: { id?: string } }[] };
+  expect(onDisk.rules.map((record) => record.rule.id)).toContain('client-store-rule');
+  expect(client.userPermissionRuleStore.rules().map((rule) => rule.id)).toContain('client-store-rule');
 });
 
 // These adapters must be installed by the real compositions, not just pass in
@@ -308,6 +317,7 @@ test('both real runtime compositions install autonomous MCP input resolution wit
   const gate = gateReadingsPort();
   const semantic = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
   const startAsks = asks.length;
+  const trustDecidedBefore = workspaceTrust.isDecided();
   for (const services of [client, daemon]) {
     const original = services.judgment.port.ask;
     const intercepted = withDecisionLog({ model: gate.port.model, ask(request) {
@@ -329,7 +339,7 @@ test('both real runtime compositions install autonomous MCP input resolution wit
   }
   expect(asks.length).toBe(startAsks);
   // Per-action Jev admission must not silently persist a workspace grant.
-  expect(workspaceTrust.isDecided()).toBe(false);
+  expect(workspaceTrust.isDecided()).toBe(trustDecidedBefore);
 });
 
 test('real client composition refuses external MCP input in plan mode before judgment or human input', async () => {

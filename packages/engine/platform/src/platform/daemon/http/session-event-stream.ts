@@ -24,6 +24,7 @@
  * defaults again.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { ControlPlaneGateway } from '../../control-plane/index.js';
 import { RENDER_GRADE_SESSION_DOMAINS } from '../../control-plane/gateway-utils.js';
 
@@ -31,6 +32,8 @@ export interface SessionEventStreamOptions {
   /** Distinguishes this route's subscribers, e.g. `shared-session`. */
   readonly clientPrefix: string;
   readonly sessionId: string;
+  /** Called with the connection's client id before the stream opens, for a caller that publishes to that client. */
+  readonly onClientId?: (clientId: string) => void;
 }
 
 /** Open a render-grade, session-scoped SSE stream for one session. */
@@ -39,11 +42,15 @@ export function openScopedSessionEventStream(
   request: Request,
   options: SessionEventStreamOptions,
 ): Response {
-  const clientId = `${options.clientPrefix}:${options.sessionId}`;
+  // One id per connection: two readers of the same session (two tabs, or a
+  // reconnect before the old stream is torn down) must not share a gateway
+  // client entry, or the first to close would remove the survivor's.
+  const clientId = `${options.clientPrefix}:${options.sessionId}:${randomUUID().slice(0, 8)}`;
+  options.onClientId?.(clientId);
   return gateway.createEventStream(request, {
     clientId,
     // The gateway's kind union has no 'companion'; these are browser-shaped
-    // readers either way, and isolation is by clientId, not by kind.
+    // readers either way, and isolation is by the per-connection clientId, not by kind.
     clientKind: 'web',
     sessionId: options.sessionId,
     sessionScopedDelivery: true,

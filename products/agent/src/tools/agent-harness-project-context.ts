@@ -179,10 +179,12 @@ export async function projectContextSummary(context: ProjectCatalogContext, args
 export async function describeProjectContextFile(context: ProjectCatalogContext, args: AgentHarnessProjectContextArgs,
   options: CatalogRankingOptions = {}): Promise<ProjectContextFileResolution> {
   const { request, snapshot } = captureProjectContext(context, args, options);
-  const input = readString(request.input.contextFileId || request.input.target || request.input.query);
-  if (!input) return { status: 'missing_lookup', usage: 'context action:"file" requires contextFileId, target, or query. Use context action:"files" to inspect available context files.' };
+  // target also steers discovery to a directory, so it names the file only when nothing else does.
+  const input = readString(request.input.contextFileId || request.input.query || request.input.target);
+  if (!input) return { status: 'missing_lookup', usage: 'context action:"file" requires contextFileId, query, or target. Use context action:"files" to inspect available context files.' };
   if (!snapshot) return { status: 'missing_lookup', usage: 'Project context discovery requires workspace shell paths.' };
   return withModelReadingSource({ invocation: request.input, snapshot }, request.options, async (captured, current): Promise<ProjectContextFileResolution> => {
+    // A single file is a detail view, so its body is included unless the caller opts out; the list stays compact unless asked.
     const includeParameters = captured.invocation.includeParameters !== false;
     const records: readonly ProjectContextRecord[] = [...captured.snapshot.files, ...captured.snapshot.blocked];
     const exact = records.find(record => record.id === input || record.path === input);

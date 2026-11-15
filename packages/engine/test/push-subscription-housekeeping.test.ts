@@ -19,7 +19,8 @@
  *    signature still verifies; an invalid one is rejected rather than signed.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { allowLocalPushEndpoints } from './_helpers/local-push-endpoints.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +29,7 @@ import {
   createPushService,
   createPushSubscriptionStore,
 } from '../platform/src/platform/control-plane/routes/push-composition.ts';
+import { createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import {
   DEFAULT_VAPID_SUBJECT,
@@ -59,24 +61,9 @@ function realKeys(): { p256dh: string; auth: string } {
  * real VAPID JWT signing, a real HTTP delivery to a real local socket, and real
  * file writes. A ceiling, not a target: nothing waits it out, so a fast host is
  * unaffected. bun's implicit 5 s default is an idle machine's number for that
- * mix, and this suite runs all 645 of its files in ONE process alongside
- * everything else.
+ * mix.
  */
 const REAL_WORK_BUDGET_MS = 60_000;
-
-/**
- * A sweep interval no test run can outlive.
- *
- * `createPushService` builds its own subscription store internally and starts
- * that store's periodic sweep; the store is private, so a caller has no way to
- * stop it. In a suite that runs every file in one process, a sweeper left
- * running on a directory a later `afterEach` deletes is a cross-file hazard
- * that only shows up when the machine is slow enough for the timer to land in
- * the wrong place. Configuring the interval past any plausible run removes the
- * hazard from these tests without pretending the underlying lifecycle gap is
- * fixed.
- */
-const SWEEP_NEVER_MINUTES = 24 * 60;
 
 let dir: string;
 let storePath: string;
@@ -351,7 +338,30 @@ describe('reaping requires evidence the subscription is already dead', () => {
     expect(second.retained).toBe(1);
   });
 
-  test('a record another process registered mid-sweep survives the sweep', async () => {
+  test('a record written to the file after the sweep read it survives the sweep', async () => {
+    seed([record({ id: 'push-dead', consecutiveFailures: 9 })]);
+    const store = makeStore({ failureThreshold: 5 });
+    // Hold the sweep right after its first read: a writer that does not honour
+    // the lock lands a record in the window between that read and the write.
+    const file = (store as unknown as { store: { load(): Promise<unknown> } }).store;
+    const realLoad = file.load.bind(file);
+    let loads = 0;
+    const load = spyOn(file, 'load').mockImplementation(async () => {
+      const snapshot = await realLoad();
+      if (++loads === 1) seed([...readStored(), record({ id: 'push-new', principalId: 'op-2' })]);
+      return snapshot;
+    });
+    try {
+      const report = await store.sweep('manual');
+      expect(report.removed.map((r) => r.subscriptionId)).toEqual(['push-dead']);
+    } finally {
+      load.mockRestore();
+    }
+    const ids = readStored().map((r) => (r as { id: string }).id);
+    expect(ids).toEqual(['push-new']);
+  });
+
+  test('a second store registering while a sweep holds the file waits its turn and both outcomes land', async () => {
     seed([record({ id: 'push-dead', consecutiveFailures: 9 })]);
     const store = makeStore({ failureThreshold: 5 });
     const other = makeStore({ failureThreshold: 5 });
@@ -361,9 +371,9 @@ describe('reaping requires evidence the subscription is already dead', () => {
       other.register({ principalId: 'op-2', endpoint: 'https://push.example/new', keys: realKeys() }),
     ]);
     expect(sweepReport.removed.map((r) => r.subscriptionId)).toEqual(['push-dead']);
-    const ids = (await store.all()).map((r) => r.principalId);
-    expect(ids).toContain('op-2');
-    expect((await store.all()).some((r) => r.id === 'push-dead')).toBe(false);
+    const all = await store.all();
+    expect(all.map((r) => r.principalId)).toContain('op-2');
+    expect(all.some((r) => r.id === 'push-dead')).toBe(false);
   });
 
   test('a delete of an already-absent id is honest about it', async () => {
@@ -514,6 +524,7 @@ describe('the VAPID sub contact', () => {
 // The composition root: config key -> a real signed delivery
 // ---------------------------------------------------------------------------
 describe('push.vapidSubject reaches a real delivery', () => {
+  allowLocalPushEndpoints();
   test('the configured contact is the `sub` of the JWT a live delivery carries', async () => {
     const received: Array<{ authorization: string }> = [];
     const sink = Bun.serve({
@@ -528,12 +539,12 @@ describe('push.vapidSubject reaches a real delivery', () => {
     const secrets = new Map<string, string>();
     const config: Partial<Record<ConfigKey, unknown>> = {
       'push.vapidSubject': 'mailto:ops@example.test',
-      // Keep the periodic sweep out of this test's way, and out of every
-      // later file's way, since the service's own store is private and its
-      // sweeper cannot be stopped from here.
-      'push.subscriptions.sweepIntervalMinutes': SWEEP_NEVER_MINUTES,
     };
+    // The composition root registers its periodic sweep on this scope, so
+    // disposing it stops the sweep before the directory is removed.
+    const disposal = createDisposalScope('push-vapid-delivery-test');
     const deps = {
+      disposal: disposal.registry,
       secretsManager: {
         get: async (key: string): Promise<string | null> => secrets.get(key) ?? null,
         set: async (key: string, value: string): Promise<void> => {
@@ -546,14 +557,8 @@ describe('push.vapidSubject reaches a real delivery', () => {
     };
     try {
       const service = createPushService(deps);
-      // createPushService builds its OWN store and starts that store's periodic
-      // sweep, so stopping only the store created below would leave the
-      // service's sweep running for the rest of the shared test process. The
-      // field is TS-private but present at runtime.
-      (service as unknown as { store: { stopPeriodicSweep(): void } }).store.stopPeriodicSweep();
       // The store the service built is the same file this one addresses.
       const store = createPushSubscriptionStore(deps);
-      store.stopPeriodicSweep();
       const registered = await store.register({
         principalId: 'op-1',
         endpoint: `${sinkOrigin}/push/device`,
@@ -569,6 +574,7 @@ describe('push.vapidSubject reaches a real delivery', () => {
       expect(payload.sub).toBe('mailto:ops@example.test');
       expect(payload.aud).toBe(sinkOrigin);
     } finally {
+      disposal.dispose();
       sink.stop(true);
     }
   }, REAL_WORK_BUDGET_MS);
@@ -576,13 +582,10 @@ describe('push.vapidSubject reaches a real delivery', () => {
   test('an invalid configured contact falls back rather than crashing construction', () => {
     const config: Partial<Record<ConfigKey, unknown>> = {
       'push.vapidSubject': 'ops@example.test',
-      // Same reason as the test above: createPushService starts a sweeper on a
-      // store it does not hand back, and this test's directory is removed by
-      // afterEach. Without this the default 60-minute interval is armed against
-      // a path that will not exist.
-      'push.subscriptions.sweepIntervalMinutes': SWEEP_NEVER_MINUTES,
     };
+    const disposal = createDisposalScope('push-invalid-subject-test');
     const deps = {
+      disposal: disposal.registry,
       secretsManager: {
         get: async (): Promise<string | null> => null,
         set: async (): Promise<void> => undefined,
@@ -593,11 +596,11 @@ describe('push.vapidSubject reaches a real delivery', () => {
     };
     // Construction succeeds (a hand-edited config file must not wedge the
     // daemon) and the bad contact is dropped rather than signed into a JWT.
-    const service = createPushService(deps);
-    expect(service).toBeDefined();
-    // Even a service built only to prove construction succeeds has already
-    // started its store's periodic sweep, which would outlive this test.
-    (service as unknown as { store: { stopPeriodicSweep(): void } }).store.stopPeriodicSweep();
+    try {
+      expect(createPushService(deps)).toBeDefined();
+    } finally {
+      disposal.dispose();
+    }
   });
 });
 

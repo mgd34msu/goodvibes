@@ -3,9 +3,10 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { buildLearningCandidateCounts, buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
-import { localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
+import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { LearningCandidateCollection } from './agent-harness-learning-curator-source.ts';
 import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './agent-harness-learning-curator-types.ts';
 
 function readString(value: unknown): string {
@@ -13,9 +14,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(200, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 200);
 }
 
 function describeCandidate(candidate: LearningCandidate, includeParameters: boolean, lookup?: Record<string, unknown>): Record<string, unknown> {
@@ -55,10 +54,11 @@ function describeCandidate(candidate: LearningCandidate, includeParameters: bool
         review: candidate.reviewRoute ?? null,
         stale: candidate.staleRoute ?? null,
         update: candidate.updateRoute ?? null,
-        apply: candidate.consolidation ? `agent_learning_consolidation mode=preview candidateId:"${routeValue(candidate.id)}"` : null,
-        merge: candidate.consolidation ? `agent_learning_consolidation mode=merge candidateId:"${routeValue(candidate.id)}"` : null,
-        stalePhase: candidate.consolidation ? `agent_learning_consolidation mode=stale candidateId:"${routeValue(candidate.id)}"` : null,
-        deletePhase: candidate.consolidation ? `agent_learning_consolidation mode=delete candidateId:"${routeValue(candidate.id)}"` : null,
+        preview: candidate.consolidation ? `agent_learning_consolidation mode:"preview" candidateId:"${routeValue(candidate.id)}"` : null,
+        // The merge phase only exists when the plan carries survivor fields to write.
+        merge: candidate.consolidation && candidate.updateRoute ? `agent_learning_consolidation mode:"merge" candidateId:"${routeValue(candidate.id)}"` : null,
+        stalePhase: candidate.consolidation ? `agent_learning_consolidation mode:"stale" candidateId:"${routeValue(candidate.id)}"` : null,
+        deletePhase: candidate.consolidation ? `agent_learning_consolidation mode:"delete" candidateId:"${routeValue(candidate.id)}"` : null,
         create: candidate.createRoute ?? null,
         delete: candidate.deleteRoute ?? null,
       },
@@ -96,10 +96,10 @@ function learningConsolidationBatchPlan(
       diffFields: consolidation.diffs.map((diff) => diff.field),
       detailRoute: `memory action:"candidate" candidateId:"${routeValue(candidate.id)}"`,
       ...(candidate.updateRoute ? { updateRoute: candidate.updateRoute } : {}),
-      applyRoute: `agent_learning_consolidation mode=preview candidateId:"${routeValue(candidate.id)}"`,
-      mergeRoute: `agent_learning_consolidation mode=merge candidateId:"${routeValue(candidate.id)}"`,
-      stalePhaseRoute: `agent_learning_consolidation mode=stale candidateId:"${routeValue(candidate.id)}"`,
-      deletePhaseRoute: `agent_learning_consolidation mode=delete candidateId:"${routeValue(candidate.id)}"`,
+      previewRoute: `agent_learning_consolidation mode:"preview" candidateId:"${routeValue(candidate.id)}"`,
+      ...(candidate.updateRoute ? { mergeRoute: `agent_learning_consolidation mode:"merge" candidateId:"${routeValue(candidate.id)}"` } : {}),
+      stalePhaseRoute: `agent_learning_consolidation mode:"stale" candidateId:"${routeValue(candidate.id)}"`,
+      deletePhaseRoute: `agent_learning_consolidation mode:"delete" candidateId:"${routeValue(candidate.id)}"`,
       ...(candidate.staleRoute ? { staleRoute: candidate.staleRoute } : {}),
       ...(candidate.deleteRoute ? { deleteRoute: candidate.deleteRoute } : {}),
       ...(includeParameters ? {
@@ -126,12 +126,12 @@ function learningConsolidationBatchPlan(
         goal: 'Open the candidate detail and survivor/duplicate records before changing durable context.',
         route: 'memory action:"curator" query:"consolidation" includeParameters:true',
       },
-      {
+      ...(consolidationCandidates.some((candidate) => candidate.updateRoute) ? [{
         id: 'merge-survivor',
         label: 'Merge visible survivor fields',
         goal: 'Apply the survivor update route only when the visible diffs preserve useful names, descriptions, tags, and triggers.',
         route: 'Use each topCandidates[].mergeRoute under current recorded admission.',
-      },
+      }] : []),
       {
         id: 'stale-duplicates',
         label: 'Stage duplicates as stale',
@@ -194,7 +194,7 @@ function promptRecordEntry(record: LearningCandidateCollection['promptRecords'][
     reason: priority === null
       ? 'Native stored review, confidence and enabled/active fields determine existing prompt eligibility; no new semantic grade was produced.'
       : domain === 'memory'
-      ? 'High-confidence memory (confidence ≥ 70) is eligible for prompt recall.'
+      ? `Memory at confidence ${MIN_PROMPT_MEMORY_CONFIDENCE} or higher that is not stale, contradicted or outside its validity window is eligible for prompt recall.`
       : domain === 'persona'
         ? 'Active persona is eligible for prompt personality context.'
         : 'Enabled, setup-ready behavior is eligible for prompt context.',
@@ -250,7 +250,7 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     consolidationQueue: consolidationCandidates.slice(0, includeParameters ? 8 : 3).map((candidate) => promptPlanCandidate(candidate, includeParameters)),
     suppressed,
     orderingRules: [
-      'Prompt context is limited to high-confidence memory (confidence ≥ 70), active personas, and enabled setup-ready behavior.',
+      `Prompt context is limited to memory at confidence ${MIN_PROMPT_MEMORY_CONFIDENCE} or higher that is not stale, contradicted or outside its validity window, active personas, and enabled setup-ready behavior.`,
       isClassicOperation() ? 'Classic lists native eligibility and review facts with unassessed scores/priority; stable label ordering is not a quality ranking.'
         : 'Current admitted curator readings grade usefulness, freshness, source quality, risk, confidence and priority. Sorting uses the settled priority grade.',
       'Low-confidence, stale, setup-blocked, blocked VIBE.md, and duplicate records stay suppressed until their confidence or enabled/active state is repaired.',
@@ -260,7 +260,7 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
       memoryPosture: 'memory action:"status"',
       curator: 'memory action:"curator" includeParameters:true',
       candidate: 'memory action:"candidate" candidateId:"<candidateId>"',
-      consolidation: 'agent_learning_consolidation mode=preview candidateId:"<candidateId>"',
+      consolidation: 'agent_learning_consolidation mode:"preview" candidateId:"<candidateId>"',
     },
     policy: 'This prompt plan is read-only. It explains what can guide the assistant now, what remains suppressed, and which reviewed route should run before any durable memory, skill, routine, persona, or consolidation change.',
   };

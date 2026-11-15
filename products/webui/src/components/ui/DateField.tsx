@@ -94,8 +94,23 @@ export function DateField({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const position = useFloatingPosition(open, wrapRef, popRef, 'bottom-start');
   useOutsidePress(open, [wrapRef, popRef], () => setOpen(false));
+
+  // Typed text that is not a date never reaches the parent, which keeps the last
+  // valid value. Keeping the text visible after blur, and failing the form's own
+  // validation, stops that older date being saved as if it had been entered.
+  const invalidDraft = draft !== null && draft.trim() !== '' && normalizeDateText(draft, time) === null;
+  useEffect(() => {
+    inputRef.current?.setCustomValidity(
+      invalidDraft ? `Enter a date as ${time ? 'YYYY-MM-DD HH:MM' : 'YYYY-MM-DD'}.` : '',
+    );
+  }, [invalidDraft, time]);
+  // A value set by the parent (a reset, a picked day) replaces unparseable text.
+  useEffect(() => {
+    setDraft((current) => (current !== null && current.trim() !== '' && normalizeDateText(current, time) === null ? null : current));
+  }, [value, time]);
 
   const datePart = value.slice(0, 10);
   const timePart = time ? (value.slice(11, 16) || '09:00') : '';
@@ -156,6 +171,7 @@ export function DateField({
       className={['gv-date', disabled ? 'gv-date--disabled' : '', className ?? ''].filter(Boolean).join(' ')}
     >
       <input
+        ref={inputRef}
         id={id}
         className="gv-input gv-date__input"
         type="text"
@@ -168,7 +184,7 @@ export function DateField({
         disabled={disabled}
         aria-label={aria['aria-label']}
         aria-describedby={aria['aria-describedby']}
-        aria-invalid={aria['aria-invalid'] ?? (draft !== null && draft !== '' && normalizeDateText(draft, time) === null)}
+        aria-invalid={aria['aria-invalid'] ?? invalidDraft}
         onChange={(event) => {
           const text = event.target.value;
           setDraft(text);
@@ -179,7 +195,7 @@ export function DateField({
           const normalized = normalizeDateText(text, time);
           if (normalized !== null) onChange(normalized);
         }}
-        onBlur={() => setDraft(null)}
+        onBlur={() => { if (!invalidDraft) setDraft(null); }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' && event.altKey) {
             event.preventDefault();

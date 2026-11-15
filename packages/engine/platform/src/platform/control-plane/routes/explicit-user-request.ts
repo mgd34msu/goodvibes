@@ -11,10 +11,10 @@
  * Why not require `true` outright, which is what the product wrapper did? Two
  * facts about who invokes these verbs:
  *
- *  - **No live transport sets the field.** Neither the daemon's HTTP dispatch
- *    nor its WebSocket dispatch populates `context.metadata`, so requiring
- *    `true` would refuse every real caller, the verbs would answer 403
- *    forever, which is not a stricter guarantee, it is a dead capability.
+ *  - **Most callers never set the field.** Only a WebSocket frame from a
+ *    login session or a paired device can carry the claim; the shared operator
+ *    token, bots and peers cannot, so requiring `true` would refuse nearly
+ *    every real caller, which is a dead capability, not a stricter guarantee.
  *  - **The daemon's job includes callers that are honestly not a person.**
  *    Scheduled work, triggers and channel-driven work are exactly why these
  *    verbs are served with no product process attached. A reminder that sends
@@ -32,6 +32,12 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 
 /**
  * Refuse a write whose caller declared it was not a user request.
+ *
+ * This is an opt-out the caller can take, not a check of who is calling: it
+ * cannot stop an unattended or injected caller that simply says nothing. What
+ * stands between such a caller and the write is `confirm: true` and, for mail,
+ * the untrusted-content check; do not read this function as proof of human
+ * origin.
  *
  * @param invocation - the invocation whose context may carry the claim.
  * @param action - the verb id, for the message.

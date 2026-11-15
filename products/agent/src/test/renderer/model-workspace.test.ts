@@ -158,6 +158,8 @@ describe('modelHardwareFitLine (via detailLines)', () => {
     // Verify it doesn't fall through to the 7B representative label.
     // Extract only the Hardware: line to avoid false positives from model id text.
     const hwLine = text.split('\n').find((line) => line.includes('Hardware:')) ?? '';
+    expect(hwLine).not.toBe('');
+    expect(hwLine).toContain('70B');
     expect(hwLine).not.toContain('7B');
   });
 });
@@ -212,5 +214,13 @@ describe('renderModelWorkspace', () => {
     expect(text).toContain('tab  target');
     expect(text).toContain('ctrl+t  price');
     expect(text).toContain('ctrl+g  group');
+  });
+  test('the context-cap step shows the validation message when the cap is out of range', () => {
+    const picker = makePicker();
+    picker.mode = 'contextCap';
+    picker.contextCapPendingModel = picker.models[0] ?? null;
+    picker.contextCapError = 'Context cap must be 1–10,000,000';
+    const text = layerText(renderModelWorkspace(picker, W, H)).join('\n');
+    expect(text).toContain('Context cap must be 1–10,000,000');
   });
 });

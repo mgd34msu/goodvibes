@@ -6,9 +6,12 @@ import { createMcpTool } from '../platform/src/platform/tools/mcp/index.ts';
 import { withTurnSurface } from '../platform/src/platform/security/turn-boundary.ts';
 import type { McpRegistry } from '../platform/src/platform/mcp/registry.ts';
 
-function toolWithRecorder() {
+function toolWithRecorder(schemaFreshness = 'quarantined') {
   const approvals: Array<[string, string]> = [];
-  const registry = { approveSchemaQuarantine: (server: string, operator: string) => { approvals.push([server, operator]); } } as unknown as McpRegistry;
+  const registry = {
+    listServerSecurity: () => [{ name: 'docs', schemaFreshness }],
+    approveSchemaQuarantine: (server: string, operator: string) => { approvals.push([server, operator]); },
+  } as unknown as McpRegistry;
   return { tool: createMcpTool(registry), approvals };
 }
 
@@ -31,5 +34,30 @@ describe('mcp approve-quarantine approver', () => {
     expect(tool.definition.parameters.properties).not.toHaveProperty('operatorId');
     await tool.execute({ mode: 'approve-quarantine', serverName: 'docs', operatorId: 'operator-henry' });
     expect(approvals.map(([, operator]) => operator)).not.toContain('operator-henry');
+  });
+
+  test('a server that is not quarantined is refused without calling the registry', async () => {
+    const { tool, approvals } = toolWithRecorder('fresh');
+    const result = await tool.execute({ mode: 'approve-quarantine', serverName: 'docs' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('is not quarantined');
+    expect(approvals).toEqual([]);
+  });
+
+  test('an unknown server is refused with the known names', async () => {
+    const { tool, approvals } = toolWithRecorder();
+    const result = await tool.execute({ mode: 'approve-quarantine', serverName: 'nope' });
+    expect(result.error).toContain('Known servers: docs');
+    expect(approvals).toEqual([]);
+  });
+});
+
+describe('mcp schema refusal', () => {
+  test('an unknown tool names why and how to list current names', async () => {
+    const registry = { listServerSecurity: () => [{ name: 'docs', schemaFreshness: 'fresh' }], getToolSchema: async () => null } as unknown as McpRegistry;
+    const tool = createMcpTool(registry);
+    expect((await tool.execute({ mode: 'schema', qualifiedName: 'search' })).error).toContain('not a qualified name');
+    expect((await tool.execute({ mode: 'schema', qualifiedName: 'mcp:other:search' })).error).toContain("no MCP server named 'other'");
+    expect((await tool.execute({ mode: 'schema', qualifiedName: 'mcp:docs:search' })).error).toContain('mode=tools');
   });
 });

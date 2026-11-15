@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { waitFor } from './_helpers/test-timeout.js';
-import { makeControllableStore, readOnDisk, replaceInternalStore } from './_helpers/controllable-store.js';
+import { makeControllableStore, readOnDisk, replaceInternalStore, settleCompetingWrite } from './_helpers/controllable-store.js';
 
 import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.js';
 import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
@@ -50,13 +50,16 @@ describe('distributed runtime store: a rejected pair request does not read back 
       // The request's write is the slow one. The record is in the map before
       // that write lands, so an operator can reject it from the pairing screen
       // while the write that created it is still in flight.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const pairing = manager.requestPairing({ peerKind: 'node', label: 'unknown laptop' });
       await waitFor(() => store.started >= 2);
 
       const pending = manager.listPairRequests()[0];
       expect(pending?.status).toBe('pending');
-      const rejected = await manager.rejectPairRequest(pending?.id as string, { actor: 'owner' });
+      const rejecting = manager.rejectPairRequest(pending?.id as string, { actor: 'owner' });
+      await settleCompetingWrite(store, 2);
+      release();
+      const rejected = await rejecting;
       expect(rejected?.status).toBe('rejected');
       await pairing;
       await waitFor(() => store.finished >= 3);
@@ -99,11 +102,14 @@ describe('CheckinReceiptStore: a delivered check-in leaves a receipt', () => {
       // delivers over a channel, so the scheduled run and the manual verb
       // overlap readily, and the earlier one's snapshot does not contain the
       // later one's receipt.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const first = receipts.append(receipt('checkin-quiet', 'quiet'));
       await waitFor(() => store.started >= 1);
 
-      await receipts.append(receipt('checkin-delivered', 'delivered'));
+      const second = receipts.append(receipt('checkin-delivered', 'delivered'));
+      await settleCompetingWrite(store, 1);
+      release();
+      await second;
       await first;
       await waitFor(() => store.finished >= 2);
 
@@ -129,17 +135,24 @@ describe('CheckinReceiptStore: a delivered check-in leaves a receipt', () => {
  * is slow after its bytes exist.
  */
 class SlowJsonFileStore extends JsonFileStore<Record<string, unknown>> {
-  delayNextMs = 0;
+  private gate: Promise<void> | null = null;
   started = 0;
   finished = 0;
 
+  /** Park the next save, after its bytes are captured, until the returned function is called. */
+  holdNext(): () => void {
+    let release: () => void = () => {};
+    this.gate = new Promise<void>((resolve) => { release = resolve; });
+    return release;
+  }
+
   override async save(data: Record<string, unknown>): Promise<void> {
     this.started += 1;
-    const delay = this.delayNextMs;
-    this.delayNextMs = 0;
+    const gate = this.gate;
+    this.gate = null;
     const captured = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
     try {
-      if (delay > 0) await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
+      if (gate) await gate;
       await super.save(captured);
     } finally {
       this.finished += 1;
@@ -151,9 +164,11 @@ describe('KVState: a cleared key does not come back', () => {
   test('a debounced write already in flight cannot restore a key cleared after it', async () => {
     const dir = tempDir('kv-order');
     const path = join(dir, 'session_abcdef12.json');
+    const disposables: KVState[] = [];
     try {
       const slow = new SlowJsonFileStore(path);
       const kv = new KVState({ sessionId: 'abcdef12', stateDir: dir });
+      disposables.push(kv);
       replaceInternalStore(kv, 'store', slow);
       await kv.load();
 
@@ -163,20 +178,24 @@ describe('KVState: a cleared key does not come back', () => {
       // Two writers, and nothing ordered them: the 5-second debounce armed by
       // set/clear, and dispose(), which clears the timer and writes directly.
       // Clearing a timer that has ALREADY fired stops nothing.
-      slow.delayNextMs = 250;
+      const release = slow.holdNext();
       const inFlight = kv.persist();
       await waitFor(() => slow.started >= 2);
 
-      await kv.clear(['deploy_token']);
-      await kv.persist();
+      const clearing = kv.clear(['deploy_token']).then(() => kv.persist());
+      await settleCompetingWrite(slow, 2);
+      release();
+      await clearing;
       await inFlight;
       await waitFor(() => slow.finished >= 3);
 
       // What a resumed session reads back.
       const resumed = new KVState({ sessionId: 'abcdef12', stateDir: dir });
+      disposables.push(resumed);
       await resumed.load();
       expect(await resumed.get(['deploy_token'])).toEqual({});
     } finally {
+      for (const state of disposables) await state.dispose();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -221,11 +240,14 @@ describe('InboundMailHousekeeper: no sweep goes undisclosed', () => {
       // re-runs; the periodic sweep runs on a 6-hour timer. Each one READS the
       // log and writes it back with its own entry appended, so overlapping them
       // makes the second read a copy that does not have the first entry in it.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const recovery = housekeeper.sweep('recovery');
       await waitFor(() => store.started >= 1);
 
-      await housekeeper.sweep('periodic');
+      const periodic = housekeeper.sweep('periodic');
+      await settleCompetingWrite(store, 1);
+      release();
+      await periodic;
       await recovery;
       await waitFor(() => store.finished >= 2);
 

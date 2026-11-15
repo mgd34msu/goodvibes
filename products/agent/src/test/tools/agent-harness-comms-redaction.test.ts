@@ -13,6 +13,7 @@ import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 beforeEach(() => {
+  secretValues.clear();
   log = new SqliteDecisionLog(':memory:');
   const answers = fakePort((name, question) => question.type === 'noul' ? noulAnswer(0.001)
     : choiceAnswer(question, name === 'disposition' ? 'act' : name.replace(/^(effect|risk|edge)__/, '') === 'kind' ? 'read' : 'generic', 0.999));
@@ -29,8 +30,15 @@ function makeShellPaths(root: string) {
   return createShellPathService({ homeDirectory: root, workingDirectory: root });
 }
 
+const secretValues = new Map<string, string>();
+const webhookSecrets = {
+  get: async (key: string) => secretValues.get(key) ?? null,
+  set: async (key: string, value: string) => { secretValues.set(key, value); },
+  delete: async (key: string) => { secretValues.delete(key); },
+};
+
 function makeContext(shellPaths: ReturnType<typeof makeShellPaths>): CommandContext {
-  return { workspace: { shellPaths } } as unknown as CommandContext;
+  return { workspace: { shellPaths }, platform: { secretsManager: webhookSecrets } } as unknown as CommandContext;
 }
 
 describe('agent-harness-comms webhook redaction', () => {
@@ -38,7 +46,7 @@ describe('agent-harness-comms webhook redaction', () => {
     const root = makeProjectTempDir('gv-comms');
     try {
       const shellPaths = makeShellPaths(root);
-      await saveDraft(shellPaths, { message: 'hello', webhook: WEBHOOK });
+      await saveDraft(shellPaths, { message: 'hello', webhook: WEBHOOK }, { webhookSecrets });
       const result = await channelDraftsSummary(makeContext(shellPaths), {});
       const drafts = result.drafts as ReadonlyArray<{ readonly webhook?: string }>;
       expect(drafts.length).toBeGreaterThan(0);
@@ -55,11 +63,13 @@ describe('agent-harness-comms webhook redaction', () => {
     const root = makeProjectTempDir('gv-comms');
     try {
       const shellPaths = makeShellPaths(root);
-      const saved = await saveDraft(shellPaths, { message: 'hello', webhook: WEBHOOK });
+      const saved = await saveDraft(shellPaths, { message: 'hello', webhook: WEBHOOK }, { webhookSecrets });
       const result = await channelDraftsSummary(makeContext(shellPaths), { draftId: saved.draft.id });
       const draft = result.draft as { readonly webhook?: string };
       expect(draft.webhook).toBe('[redacted]');
       expect(JSON.stringify(result)).not.toContain(WEBHOOK);
+      expect(JSON.stringify(result)).not.toContain('webhookSecretKey');
+      expect([...secretValues.values()]).toEqual([WEBHOOK]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

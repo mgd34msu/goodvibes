@@ -80,7 +80,7 @@ export function snapshotFixture(options: {
     'email.enabled': true, 'email.imapHost': 'fixture.invalid', 'email.imapPort': 993,
     'email.smtpHost': 'fixture.invalid', 'email.smtpPort': 587,
     'email.username': 'synthetic@example.invalid', 'email.fromAddress': 'synthetic@example.invalid',
-    'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_PASSWORD', 'email.mailbox': 'INBOX',
+    'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_MAIL_PASSWORD', 'email.mailbox': 'INBOX',
   };
   const deps: EmailServiceDeps = {
     getConfig: key => config[key], secretsManager: { get: async () => { secrets++; return 'synthetic'; } },

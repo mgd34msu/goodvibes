@@ -69,7 +69,17 @@ export interface AgentDaemonVerbCallerOptions {
   readonly observation?: OwnedSelectionObservation;
   /** Injectable for tests, so a seam under test never reaches a real port. */
   readonly fetchImpl?: typeof fetch;
+  /**
+   * How long one verb call may take before it is abandoned. Default 2 minutes,
+   * long enough for `sessions.hosted.create`. A daemon that accepts the
+   * connection and never answers would otherwise hang the caller forever.
+   */
+  readonly invokeTimeoutMs?: number;
+  /** Test seam: the signal that bounds one verb call. Overrides `invokeTimeoutMs`. */
+  readonly invokeSignal?: () => AbortSignal;
 }
+
+const DEFAULT_INVOKE_TIMEOUT_MS = 120_000;
 
 interface ResolvedConnection {
   readonly baseUrl: string;
@@ -155,6 +165,16 @@ export class ConnectedHostVerbError extends Error {
     this.name = 'ConnectedHostVerbError';
     this.status = status;
   }
+}
+
+/**
+ * Whether the host positively refused the call (a 4xx other than a request
+ * timeout). Anything else, a dropped connection, a timeout, a 5xx, leaves it
+ * unknown whether the host already acted, so a caller must not redo the work
+ * somewhere else as if nothing had happened.
+ */
+export function isDefiniteHostRefusal(error: unknown): boolean {
+  return error instanceof ConnectedHostVerbError && error.status >= 400 && error.status < 500 && error.status !== 408;
 }
 
 /**
@@ -250,17 +270,39 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
       const resolved = resolveConnection(options);
       if ('reason' in resolved) throw new Error(`cannot invoke '${methodId}': ${resolved.reason}`);
-      const response = await fetchImpl(
-        `${resolved.baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json' },
-          // The envelope the route requires: `body` must be PRESENT even when
-          // empty, or the route refuses with a 400 naming the shape it wanted.
-          body: JSON.stringify({ body: input ?? {} }),
-        },
-      );
-      const payload = await response.json().catch(() => null) as unknown;
+      const timeoutMs = options.invokeTimeoutMs ?? DEFAULT_INVOKE_TIMEOUT_MS;
+      const signal = options.invokeSignal ? options.invokeSignal() : AbortSignal.timeout(timeoutMs);
+      let response: Response;
+      let payload: unknown;
+      try {
+        response = await fetchImpl(
+          `${resolved.baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json' },
+            // The envelope the route requires: `body` must be PRESENT even when
+            // empty, or the route refuses with a 400 naming the shape it wanted.
+            body: JSON.stringify({ body: input ?? {} }),
+            signal,
+          },
+        );
+        payload = await response.json().catch(() => null) as unknown;
+        // A stalled body surfaces as a swallowed parse failure; the abort is the
+        // truth, and a null payload must not pass as a successful empty answer.
+        if (signal.aborted) throw new Error('aborted while reading the response body');
+      } catch (error) {
+        if (signal.aborted) {
+          // Named TimeoutError so callers that must not repeat a call the host may
+          // have run (speech-to-text routing) can recognise the unknown outcome.
+          const timeout = new Error(
+            `'${methodId}' got no answer from the connected host within ${Math.round(timeoutMs / 1000)}s, `
+            + 'so the call was abandoned. The host may be hung or unreachable; the result of the call is unknown.',
+          );
+          timeout.name = 'TimeoutError';
+          throw timeout;
+        }
+        throw error;
+      }
       if (!response.ok) {
         const described = payload && typeof payload === 'object' && 'error' in payload
           ? String((payload as { error: unknown }).error)

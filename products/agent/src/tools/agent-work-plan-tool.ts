@@ -1,6 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { failureMessage } from './agent-projection-failure.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
   captureWorkPlanLocation,
@@ -26,6 +27,7 @@ export interface AgentWorkPlanToolArgs {
   readonly ids?: unknown;
   readonly title?: unknown;
   readonly status?: unknown;
+  readonly limit?: unknown;
   readonly owner?: unknown;
   readonly source?: unknown;
   readonly notes?: unknown;
@@ -186,18 +188,29 @@ function resolveItem(store: WorkPlanStore, idOrPrefix: string): WorkPlanItem {
   throw new Error(`Work plan item not found ${needle}`);
 }
 
-function listOutput(store: WorkPlanStore): string {
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 200;
+
+function readListLimit(value: unknown): number {
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return DEFAULT_LIST_LIMIT;
+  const limit = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(limit) || limit < 1) throw new Error(`limit must be a number from 1 to ${MAX_LIST_LIMIT}.`);
+  return Math.min(Math.trunc(limit), MAX_LIST_LIMIT);
+}
+
+function listOutput(store: WorkPlanStore, filter?: WorkPlanItemStatus, limit = DEFAULT_LIST_LIMIT): string {
   const plan = store.getActivePlan({ readOnly: true });
   const counts = new Map<WorkPlanItemStatus, number>(WORK_PLAN_STATUSES.map((status) => [status, 0]));
   for (const item of plan.items) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+  const matching = filter ? plan.items.filter((item) => item.status === filter) : plan.items;
   const lines = [
     'Agent local work plan',
     '  Local todos only. Adding or updating does not execute work; local done is not native verified completion.',
     plan.registration === 'unregistered' && !plan.id ? '  plan not saved; adding the first item creates it' : `  plan ${plan.id}`,
     `  project ${plan.projectRoot}`,
-    `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}`,
+    `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}; failed ${counts.get('failed') ?? 0}; cancelled ${counts.get('cancelled') ?? 0}`,
   ];
-  if (plan.housekeeping?.recoveryRequired) lines.push('Saved local plan is unreadable and requires recovery; this inspection left the file unchanged.');
+  if (plan.housekeeping?.recoveryRequired) lines.push('Saved local plan is unreadable; this inspection left the file unchanged. The next create or update moves it aside to a recovery copy next to it and starts a fresh plan; nothing is deleted.');
   if (plan.housekeeping?.preservedUnverifiedQuarantines) lines.push(`${plan.housekeeping.preservedUnverifiedQuarantines} unverified historical recovery path(s) were preserved for inspection.`);
   if (plan.unassignedPlanPaths?.length) {
     lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:', ...plan.unassignedPlanPaths);
@@ -206,8 +219,12 @@ function listOutput(store: WorkPlanStore): string {
     lines.push('', 'No local work plan items.');
     return lines.join('\n');
   }
-  lines.push('', ...plan.items.slice(0, 20).map(formatItem));
-  if (plan.items.length > 20) lines.push(`${plan.items.length - 20} more item(s) omitted.`);
+  if (matching.length === 0) {
+    lines.push('', `No ${filter ? `${formatStatus(filter)} ` : ''}items.`);
+  } else {
+    lines.push('', ...matching.slice(0, limit).map(formatItem));
+    if (matching.length > limit) lines.push(`${matching.length - limit} more ${filter ? `${formatStatus(filter)} ` : ''}item(s) omitted; raise limit (at most ${MAX_LIST_LIMIT}) or filter with status to see them.`);
+  }
   lines.push('', 'Native owner route: /work submit-file <JSON-path>; submission does not start execution.');
   return lines.join('\n');
 }
@@ -227,14 +244,15 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
   return {
     definition: {
       name: 'agent_work_plan',
-      description: 'Manage local, non-executing Agent todo records. Local done is not native verified completion.',
+      description: 'Manage local, non-executing Agent todo records. Local done is not native verified completion. clear_completed removes done and cancelled items; failed items stay.',
       parameters: {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ACTIONS.filter(action => action !== 'dispatch_agents') },
           id: { type: 'string', description: 'Work plan item id or unique id prefix for get/update/set_status/remove.' },
           title: { type: 'string', description: 'Work plan item title for create/update.' },
-          status: { type: 'string', enum: [...WORK_PLAN_STATUSES], description: 'Work plan item status.' },
+          status: { type: 'string', enum: [...WORK_PLAN_STATUSES], description: 'Work plan item status; with action:list it shows only items in that status.' },
+          limit: { type: 'number', description: `action:list only: items to show (default ${DEFAULT_LIST_LIMIT}, at most ${MAX_LIST_LIMIT}).` },
           owner: { type: 'string', description: 'Optional owner label.' },
           source: { type: 'string', description: 'Optional source/provenance label.' },
           notes: { type: 'string', description: 'Optional work-plan notes.' },
@@ -252,7 +270,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
         options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
         if (!isAction(args.action)) return failure(`Unknown Agent work plan action. Valid values ${ACTIONS.join(', ')}.`);
         if (args.action === 'list' || args.action === 'get') {
-          const result = args.action === 'list' ? listOutput(store) : formatItemDetail(resolveItem(store, requireId(args)));
+          const result = args.action === 'list' ? listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(resolveItem(store, requireId(args)));
           assertAgentLocalStateCurrent(rawArgs, options); return output(result);
         }
         if (args.action === 'dispatch_agents') return failure('Legacy work-plan dispatch is unavailable: model fields, labels, and explicitUserRequest are not original owner authority. Keep this as a local todo, or have the owner submit exact source through /work submit-file <JSON-path> (recover with /work submission-status or /work submission-retry). Submission does not start execution.');
@@ -272,7 +290,9 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
           ].join('\n'));
         }
         if (args.action === 'update') {
-          const item = store.updateItem(requireId(args), updatePatch(args), effects);
+          const patch = updatePatch(args);
+          if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
+          const item = store.updateItem(requireId(args), patch, effects);
           return output([
             'Updated Agent work plan item',
             '  Local record only; no execution. Local done is not native verified completion.',
@@ -306,7 +326,7 @@ export function createAgentWorkPlanTool(store: WorkPlanStore, _options: AgentWor
           `  count ${count}`,
         ].join('\n'));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(failureMessage(error, options?.signal));
       }
     },
   };

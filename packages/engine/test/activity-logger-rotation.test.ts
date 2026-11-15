@@ -28,11 +28,6 @@ function tempLogDir(): string {
   return dir;
 }
 
-/** Let the buffered writer's 100ms flush timer drain. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 200));
-}
-
 afterEach(() => {
   // Configured loggers are tracked for the process-exit flush; drop them so a
   // test instance does not outlive its temp directory.
@@ -55,7 +50,7 @@ describe('ActivityLogger rotation', () => {
     loggers.push(logger);
     logger.configure(dir, { maxBytes: 1024 });
     logger.info('first message after configure');
-    await settle();
+    logger.flushSync();
 
     // The seeded content was rotated to the backup, and the live file now holds
     // only the post-rotation message.
@@ -75,13 +70,13 @@ describe('ActivityLogger rotation', () => {
 
     // Drive enough volume to cross the cap at least twice.
     logger.info('A'.repeat(600));
-    await settle();
+    logger.flushSync();
     logger.info('boundary marker one');
-    await settle();
+    logger.flushSync();
     logger.info('B'.repeat(600));
-    await settle();
+    logger.flushSync();
     logger.info('boundary marker two');
-    await settle();
+    logger.flushSync();
 
     // Exactly one backup file exists (no .2), and the live file stays bounded.
     expect(existsSync(`${activity}.1`)).toBe(true);
@@ -96,7 +91,7 @@ describe('ActivityLogger rotation', () => {
     loggers.push(logger);
     logger.configure(dir, { maxBytes: 10 * 1024 * 1024 });
     logger.info('a modest line');
-    await settle();
+    logger.flushSync();
     expect(existsSync(activity)).toBe(true);
     expect(existsSync(`${activity}.1`)).toBe(false);
   });

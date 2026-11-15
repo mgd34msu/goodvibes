@@ -118,23 +118,36 @@ export async function postHomeAssistantSurfaceChatMessage(
     );
     const response = result.response?.trim();
     const error = result.error ?? (response ? undefined : 'No response from Home Assistant remote chat');
+    // The turn ran. A failure to publish its reply must not be reported as a failed turn
+    // (a second "Error:" event, an empty session id): the session and answer are kept.
+    let publishError: string | undefined;
     if (input.publishEvent !== false) {
-      await publishHomeAssistantChatReply(deps, input, {
-        sessionId: result.session.id,
-        routeId: result.binding.id,
-        assistantMessageId: result.assistantMessageId,
-        response: response || `Error: ${error}`,
-        status: error ? 'failed' : 'completed',
-      });
+      try {
+        await publishHomeAssistantChatReply(deps, input, {
+          sessionId: result.session.id,
+          routeId: result.binding.id,
+          assistantMessageId: result.assistantMessageId,
+          response: response || `Error: ${error}`,
+          status: error ? 'failed' : 'completed',
+        });
+      } catch (caught) {
+        publishError = `The reply was produced but could not be published to Home Assistant: ${summarizeError(caught)}`;
+        logger.warn('DaemonSurfaceActionHelper: failed to publish Home Assistant chat reply', {
+          conversationId: input.conversationId,
+          sessionId: result.session.id,
+          error: summarizeError(caught),
+        });
+      }
     }
+    const reportedError = error ?? publishError;
     return {
       sessionId: result.session.id,
       routeId: result.binding.id,
       messageId: input.messageId,
       ...(result.assistantMessageId ? { assistantMessageId: result.assistantMessageId } : {}),
       ...(response ? { response } : {}),
-      delivered: !error,
-      ...(error ? { error } : {}),
+      delivered: !reportedError,
+      ...(reportedError ? { error: reportedError } : {}),
     };
   } catch (error) {
     const errorMessage = summarizeError(error);

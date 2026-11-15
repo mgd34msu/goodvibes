@@ -61,32 +61,11 @@ describe('parseCliFlags', () => {
     expect(parsed.command).toBe('tui');
   });
 
-  // ---------------------------------------------------------------------------
-  // Env var precedence (flags win, env is fallback)
-  // ---------------------------------------------------------------------------
-  // parseCliFlags itself does not read env vars, it only returns parsed flag
-  // values. The shell entrypoint is responsible for setting env
-  // vars from the returned flags. Agent exposes a working-directory override;
-  // connected-host token locations stay derived from the Agent home.
-
-  test('env GOODVIBES_WORKING_DIR is the fallback when flag absent', () => {
-    const flags = parseCliFlags([]);
-    expect(flags.workingDir).toBeUndefined();
-  });
-
-  test('flag overrides env for working-dir: flag present, env set', () => {
-    const savedEnv = process.env['GOODVIBES_WORKING_DIR'];
-    try {
-      process.env['GOODVIBES_WORKING_DIR'] = '/from/env';
-      const flags = parseCliFlags(['--working-dir=/from/flag']);
-      expect(flags.workingDir).toBe('/from/flag');
-    } finally {
-      if (savedEnv === undefined) {
-        delete process.env['GOODVIBES_WORKING_DIR'];
-      } else {
-        process.env['GOODVIBES_WORKING_DIR'] = savedEnv;
-      }
-    }
+  // parseCliFlags does not read the environment. The precedence of --working-dir over
+  // GOODVIBES_WORKING_DIR is decided at the entrypoint, see entrypoint-profile.test.ts.
+  test('--working-dir is parsed, and absent when not given', () => {
+    expect(parseCliFlags(['--working-dir=/from/flag']).workingDir).toBe('/from/flag');
+    expect(parseCliFlags([]).workingDir).toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------
@@ -136,9 +115,9 @@ describe('parseCliFlags', () => {
   });
 
   test('infers provider from provider:model format in --model', () => {
-    const flags = parseCliFlags(['--model', 'inception:mercury-2']);
-    expect(flags.model).toBe('inception:mercury-2');
-    expect(flags.provider).toBe('inception');
+    const flags = parseCliFlags(['--model', 'inceptionlabs:mercury-2']);
+    expect(flags.model).toBe('inceptionlabs:mercury-2');
+    expect(flags.provider).toBe('inceptionlabs');
   });
 
   test('returns all undefined when no flags are provided', () => {
@@ -430,7 +409,7 @@ describe('parseCliFlags', () => {
       configDir: join(importRoot, '.goodvibes', 'tui'),
       workingDir: importRoot,
     });
-    const imported = await captureGoodVibesCliCommand(['bundle', 'import', join(root, 'support-bundle.json')], importedConfig, importRoot);
+    const imported = await captureGoodVibesCliCommand(['bundle', 'import', join(root, 'support-bundle.json'), '--yes'], importedConfig, importRoot);
     expect(imported.result).toEqual({ handled: true, exitCode: 0 });
     expect(imported.output).toContain('redacted values skipped');
     expect(importedConfig.get('surfaces.slack.signingSecret')).toBe('');

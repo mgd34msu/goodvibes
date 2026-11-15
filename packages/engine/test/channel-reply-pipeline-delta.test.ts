@@ -356,9 +356,9 @@ describe('the report reaches nobody in its prose form either', () => {
     ].join('\n'));
 
     // An empty reply is honest; a reply made of paperwork is not.
-    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    // The pipeline forgets the run once it has finished deciding what to send.
+    await waitFor(() => !h.pipeline.has('agent-hollow'));
     expect(h.published).toHaveLength(0);
-    expect(h.pipeline.has('agent-hollow')).toBe(false);
   });
 
   test('ordinary prose that merely mentions a section word is left alone', async () => {

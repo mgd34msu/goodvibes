@@ -13,7 +13,7 @@ import { buildAgentLocalRequirements } from './agent-local-registry-requirements
 import {
   AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,
-  readAffirmative,
+  readActivation,
   readString,
   readStringList,
   registryError,
@@ -22,6 +22,8 @@ import {
   requireId,
   requireName,
   requireTextField,
+  requireUpdateFields,
+  invalidAction,
 } from './agent-local-registry-args.ts';
 import { handleMemory, MEMORY_CLASSES, MEMORY_SCOPES } from './agent-local-registry-memory.ts';
 
@@ -84,6 +86,7 @@ function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryActi
     ].join('\n');
   }
   if (action === 'update') {
+    requireUpdateFields('note', { title: args.title ?? args.name ?? args.summary, body: args.body ?? args.detail ?? args.description, tags: args.tags, sourceUrl: args.sourceUrl === undefined ? undefined : true });
     const note = registry.update(requireId(args), {
       title: readString(args.title ?? args.name ?? args.summary) || undefined,
       body: readString(args.body ?? args.detail ?? args.description) || undefined,
@@ -119,7 +122,7 @@ function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryActi
       `  title ${note.title}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for notes.`);
+  throw new Error(invalidAction(action, 'notes', 'note'));
 }
 
 function formatPersona(persona: AgentPersonaRecord, activeId: string | null): string {
@@ -184,6 +187,7 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'create') {
+    const activate = readActivation(args.activate);
     const persona = registry.create({
       name: requireName(args),
       description: requireDescription(args),
@@ -193,7 +197,10 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       source: 'agent',
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
     });
-    if (args.activate !== undefined && readAffirmative(args.activate)) registry.setActive(persona.id);
+    if (activate === true) {
+      try { registry.setActive(persona.id); }
+      catch (error) { throw new Error(`Created Agent-local persona ${persona.id}, but activating it failed: ${error instanceof Error ? error.message : String(error)}. Use action:"use" id:"${persona.id}" to retry.`); }
+    }
     return [
       'Created Agent-local persona',
       `  id ${persona.id}`,
@@ -201,7 +208,9 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'update') {
+    const activate = readActivation(args.activate);
     const wasActive = registry.snapshot().activePersonaId === requireId(args);
+    requireUpdateFields('persona', { name: args.name, description: args.description, body: args.body, tags: args.tags, triggers: args.triggers, activate: activate });
     const persona = registry.update(requireId(args), {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
@@ -210,7 +219,10 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
     });
-    if (args.activate !== undefined) { if (readAffirmative(args.activate)) registry.setActive(persona.id); else if (wasActive) registry.clearActive(); }
+    if (activate !== undefined) {
+      try { if (activate) registry.setActive(persona.id); else if (wasActive) registry.clearActive(); }
+      catch (error) { throw new Error(`Updated Agent-local persona ${persona.id}, but changing its active state failed: ${error instanceof Error ? error.message : String(error)}.`); }
+    }
     return [
       'Updated Agent-local persona',
       `  id ${persona.id}`,
@@ -251,7 +263,7 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       `  name ${persona.name}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for personas.`);
+  throw new Error(invalidAction(action, 'personas', 'persona'));
 }
 
 function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
@@ -290,15 +302,19 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     ].join('\n');
   }
   if (action === 'update') {
-    const skill = registry.update(requireId(args), {
+    const id = requireId(args);
+    requireUpdateFields('skill', { name: args.name, description: args.description, procedure: args.procedure, triggers: args.triggers, tags: args.tags,
+      requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
+    const skill = registry.update(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       procedure: readString(args.procedure) || undefined,
       triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
       tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands),
+      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
     });
+    if (typeof args.enabled === 'boolean') registry.setEnabled(skill.id, args.enabled);
     return [
       'Updated Agent-local skill',
       `  id ${skill.id}`,
@@ -335,7 +351,7 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
       `  name ${skill.name}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for skills.`);
+  throw new Error(invalidAction(action, 'skills', 'skill'));
 }
 
 function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
@@ -369,12 +385,15 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
     ].join('\n');
   }
   if (action === 'update') {
-    const bundle = registry.updateBundle(requireId(args), {
+    const id = requireId(args);
+    requireUpdateFields('skill bundle', { name: args.name, description: args.description, skillIds: args.skillIds ?? args.skills, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
+    const bundle = registry.updateBundle(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       skillIds: args.skillIds === undefined && args.skills === undefined ? undefined : readStringList(args.skillIds ?? args.skills),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
     });
+    if (typeof args.enabled === 'boolean') registry.setBundleEnabled(bundle.id, args.enabled);
     return [
       'Updated Agent-local skill bundle',
       `  id ${bundle.id}`,
@@ -411,7 +430,7 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
       `  name ${bundle.name}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for skill bundles.`);
+  throw new Error(invalidAction(action, 'skill bundles', 'skill_bundle'));
 }
 
 function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
@@ -449,15 +468,19 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
     ].join('\n');
   }
   if (action === 'update') {
-    const routine = registry.update(requireId(args), {
+    const id = requireId(args);
+    requireUpdateFields('routine', { name: args.name, description: args.description, steps: args.steps, triggers: args.triggers, tags: args.tags,
+      requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
+    const routine = registry.update(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       steps: readString(args.steps) || undefined,
       triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
       tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands),
+      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
     });
+    if (typeof args.enabled === 'boolean') registry.setEnabled(routine.id, args.enabled);
     return [
       'Updated Agent-local routine',
       `  id ${routine.id}`,
@@ -505,21 +528,22 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
       `  name ${routine.name}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for routines.`);
+  throw new Error(invalidAction(action, 'routines', 'routine'));
 }
 
 export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess): Tool {
   return {
     definition: {
       name: 'agent_local_registry',
-      description: 'Inspect or update Agent-local records.',
+      description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission.',
       parameters: {
         type: 'object',
         properties: {
-          domain: { type: 'string', enum: [...DOMAINS] },
-          action: { type: 'string', enum: [...ACTIONS] },
-          id: { type: 'string' },
-          query: { type: 'string' },
+          domain: { type: 'string', enum: [...DOMAINS], description: 'Which kind of record to work on.' },
+          action: { type: 'string', enum: [...ACTIONS], description: 'What to do; each domain accepts only some actions (see the tool description).' },
+          id: { type: 'string', description: 'Record id for get, update, review, stale, delete, use, enable, disable and start.' },
+          query: { type: 'string', description: 'Search text for action search.' },
+          limit: { type: 'number', description: 'Memory list or search: maximum rows (search default 10, at most 50).' },
           semantic: { type: 'boolean', description: 'Memory search: semantic by default; false forces literal matching.' },
           cls: { type: 'string', enum: [...MEMORY_CLASSES], description: 'Memory class when domain is memory.' },
           scope: { type: 'string', enum: [...MEMORY_SCOPES], description: 'Memory scope when domain is memory.' },
@@ -527,8 +551,8 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           detail: { type: 'string', description: 'Memory detail when domain is memory.' },
           confidence: { type: 'number', description: 'Memory review confidence from 0 to 100.' },
           title: { type: 'string', description: 'Note title when domain is note.' },
-          name: { type: 'string' },
-          description: { type: 'string' },
+          name: { type: 'string', description: 'Name of a persona, skill, skill_bundle or routine.' },
+          description: { type: 'string', description: 'Description of a persona, skill, skill_bundle or routine.' },
           body: { type: 'string', description: 'Note body or persona body/instructions.' },
           sourceUrl: { type: 'string', description: 'Optional source URL when domain is note.' },
           procedure: { type: 'string', description: 'Skill procedure.' },
@@ -537,12 +561,12 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           skillIds: { type: 'array', items: { type: 'string' }, description: 'Skill ids for skill_bundle create/update.' },
           requiresEnv: { type: 'array', items: { type: 'string' }, description: 'Required environment variable names.' },
           requiresCommands: { type: 'array', items: { type: 'string' }, description: 'Command names required by a skill or routine.' },
-          triggers: { type: 'array', items: { type: 'string' } },
-          tags: { type: 'array', items: { type: 'string' } },
-          reason: { type: 'string' },
-          enabled: { type: 'boolean' },
-          activate: { type: 'boolean', description: 'Activate or clear the persona.' },
-          provenance: { type: 'string' },
+          triggers: { type: 'array', items: { type: 'string' }, description: 'Trigger phrases for a persona, skill or routine.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Tags on any record.' },
+          reason: { type: 'string', description: 'Why a record is marked stale.' },
+          enabled: { type: 'boolean', description: 'Skill, skill_bundle or routine: initial state on create, or the new state on update.' },
+          activate: { type: 'boolean', description: 'Persona create or update: true makes it the active persona, false clears it if it is active.' },
+          provenance: { type: 'string', description: 'Where the record came from.' },
           confirm: { type: 'boolean', description: 'Optional caller audit field; recorded admission controls writes.' },
           explicitUserRequest: { type: 'string', description: 'Optional audit note; it does not grant authority.' },
         },

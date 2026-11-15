@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
@@ -16,6 +19,16 @@ import { createOperationsReadModels } from '@goodvibes-jev/engine/platform/platf
 import { registerControlRoomRuntimeCommands } from '../../input/commands/control-room-runtime.ts';
 import { preparePublicErrorText, publicErrorTextAnswer } from '../helpers/user-error-reading.ts';
 
+/** Writes a policy bundle file holding `ruleCount` allow rules and returns its absolute path. */
+function bundleFile(bundleId: string, ruleCount = 0): string {
+  const rules = Array.from({ length: ruleCount }, (_, index) => ({
+    type: 'prefix', id: `${bundleId}-rule-${index}`, description: `Rule ${index}`, origin: 'user', effect: 'allow', toolPattern: '*', commandPrefixes: [],
+  }));
+  const path = join(mkdtempSync(join(tmpdir(), 'gv-policy-bundle-')), `${bundleId}.json`);
+  writeFileSync(path, JSON.stringify({ bundleId, issuedAt: '2026-01-01T00:00:00.000Z', payload: { version: 1, rules } }));
+  return path;
+}
+
 async function dispatchPolicyCommand(args: string[], context: CommandContext): Promise<void> {
   await policyCommand.handler(args, context);
 }
@@ -28,7 +41,7 @@ async function dispatchPolicyCommand(args: string[], context: CommandContext): P
 
 function makeContext(out: string[], policyRuntimeState: PolicyRuntimeState, contracts: readonly ContractRecord[] = []): CommandContext {
   const root = makeProjectTempDir('gv-policy-command');
-  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root });
+  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root, homeDir: root });
   const runtimeStore = createRuntimeStore();
   runtimeStore.setState((state) => ({ contracts: { ...state.contracts, contracts: new Map(contracts.map((contract) => [contract.id, contract])) } }));
   const readModels = createOperationsReadModels({
@@ -113,7 +126,7 @@ describe('/policy async readers', () => {
   test('load refreshes the actual cached lint snapshot', async () => {
     const out: string[] = [];
     const state = new PolicyRuntimeState();
-    await dispatchPolicyCommand(['load', 'test-candidate', '1'], makeContext(out, state));
+    await dispatchPolicyCommand(['load', bundleFile('test-candidate', 1)], makeContext(out, state));
     expect(state.getSnapshot().lintFindings).toHaveLength(1);
     expect(state.getSnapshot().lintFindings[0]?.ruleId).toBe('test-candidate-rule-0');
   });
@@ -140,7 +153,7 @@ describe('/policy async readers', () => {
     const previous = installJudgmentPort(fake.port);
     try {
       await preparePublicErrorText(publicLines);
-      await dispatchPolicyCommand(['load', 'new-candidate'], ctx);
+      await dispatchPolicyCommand(['load', bundleFile('new-candidate')], ctx);
       expect(registry.getCandidate()?.bundle.bundleId).toBe('new-candidate');
       expect(registry.getCurrent()?.bundle.bundleId).toBe('active');
       expect(out.join('\n')).toContain('Candidate loaded: new-candidate');
@@ -156,7 +169,7 @@ describe('/policy async readers', () => {
     const out: string[] = [];
     const state = new PolicyRuntimeState();
     const ctx = makeContext(out, state);
-    await dispatchPolicyCommand(['load', 'test-candidate', '1'], ctx);
+    await dispatchPolicyCommand(['load', bundleFile('test-candidate', 1)], ctx);
     out.length = 0;
 
     await dispatchPolicyCommand(['lint'], ctx);
@@ -169,7 +182,7 @@ describe('/policy async readers', () => {
     const out: string[] = [];
     const state = new PolicyRuntimeState();
     const ctx = makeContext(out, state);
-    await dispatchPolicyCommand(['load', 'test-candidate'], ctx);
+    await dispatchPolicyCommand(['load', bundleFile('test-candidate')], ctx);
     const { port } = fakePort((name, question) => question.type === 'choice'
       ? choiceAnswer(question, name === 'kind' ? 'other' : 'generic')
       : noulAnswer(0.03));
@@ -189,7 +202,7 @@ describe('/policy async readers', () => {
     const out: string[] = [];
     const state = new PolicyRuntimeState();
     const ctx = makeContext(out, state);
-    await dispatchPolicyCommand(['load', 'test-candidate', '1'], ctx);
+    await dispatchPolicyCommand(['load', bundleFile('test-candidate', 1)], ctx);
     await dispatchPolicyCommand(['preflight'], ctx);
     expect(state.getSnapshot().lastPreflightReview?.status).toBe('block');
     expect(state.getSnapshot().lastPreflightReview?.issues.some((issue) => issue.source === 'policy')).toBe(true);
@@ -200,7 +213,7 @@ describe('/policy async readers', () => {
     const out: string[] = [];
     const state = new PolicyRuntimeState();
     const ctx = makeContext(out, state);
-    await dispatchPolicyCommand(['load', 'old-candidate'], ctx);
+    await dispatchPolicyCommand(['load', bundleFile('old-candidate')], ctx);
     let release = () => {};
     const pendingRead = new Promise<void>((resolve) => { release = resolve; });
     const { port } = fakePort((name, question) => question.type === 'choice'

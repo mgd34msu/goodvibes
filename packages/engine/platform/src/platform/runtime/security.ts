@@ -75,3 +75,5 @@ export type {
 } from './permissions/index.js';
 
 export { capturePolicyRuntimeReadSource } from './permissions/policy-runtime.js';
+export { createTokenAuditBusEmitter } from './token-audit-events.js';
+export { startPairingTokenAudit } from './pairing-token-audit.js';

@@ -48,7 +48,7 @@ const PAIRABLE_SURFACE_SET = {
   mattermost: true,
   matrix: true,
 } satisfies Record<PairableSurface, true>;
-const PAIRABLE_SURFACES: readonly PairableSurface[] = Object.keys(PAIRABLE_SURFACE_SET) as PairableSurface[];
+export const PAIRABLE_SURFACES: readonly PairableSurface[] = Object.keys(PAIRABLE_SURFACE_SET) as PairableSurface[];
 
 function findSchema(surface: string): ChannelSetupSchema | undefined {
   return PAIRABLE_SURFACES.includes(surface as PairableSurface) ? getBuiltinSetupSchema(surface as PairableSurface) : undefined;
@@ -123,9 +123,17 @@ function promptMissingSecrets(
   schema: ChannelSetupSchema,
   missing: readonly ChannelSetupFieldDescriptor[],
   index: number,
+  /** Labels of fields that ended up with no stored value (skipped, left empty, or a failed write). */
+  notStored: readonly string[] = [],
 ): void {
   const configManager = ctx.platform.configManager;
   if (index >= missing.length) {
+    if (notStored.length > 0) {
+      // Enabling a surface with credentials missing would start it half-configured.
+      ctx.print(`\n${schema.label} was NOT enabled: still missing ${notStored.join(', ')}. Re-run /channel pair ${schema.surface} to enter ${notStored.length === 1 ? 'it' : 'them'}.`);
+      ctx.renderRequest();
+      return;
+    }
     const enabledKey = enabledConfigKey(schema);
     if (enabledKey !== undefined) configManager.setDynamic(enabledKey, true);
     ctx.print(`\n${schema.label} credentials stored${enabledKey !== undefined ? ' and the surface is enabled' : ''}. Verify with: /channel pair ${schema.surface} verify`);
@@ -135,7 +143,7 @@ function promptMissingSecrets(
   const field = missing[index]!;
   if (!field.configKey) {
     ctx.print(`[pair] ${field.label} has no config key declared; skipping.`);
-    promptMissingSecrets(ctx, schema, missing, index + 1);
+    promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
     return;
   }
   const configKey = field.configKey as ConfigKey;
@@ -149,17 +157,17 @@ function promptMissingSecrets(
     onSubmit: (value) => {
       if (value.length === 0) {
         ctx.print(`[pair] ${field.label} left unset.`);
-        promptMissingSecrets(ctx, schema, missing, index + 1);
+        promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
         return;
       }
       void persistSecretBackedConfigValue(configManager, ctx.platform.secretsManager, configKey, value)
         .then(() => {
           ctx.print(`[pair] ${field.label} stored securely (hidden).`);
-          promptMissingSecrets(ctx, schema, missing, index + 1);
+          promptMissingSecrets(ctx, schema, missing, index + 1, notStored);
         })
         .catch((error: unknown) => {
           ctx.print(`[pair] Failed to store ${field.label}: ${error instanceof Error ? error.message : String(error)}`);
-          promptMissingSecrets(ctx, schema, missing, index + 1);
+          promptMissingSecrets(ctx, schema, missing, index + 1, [...notStored, field.label]);
         });
     },
     onCancel: () => {

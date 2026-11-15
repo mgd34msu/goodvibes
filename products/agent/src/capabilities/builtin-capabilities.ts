@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { DRIVER_REQUIRED_FILES } from '@goodvibes-jev/engine/platform/platform/browser';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import { driverRemediation } from '../runtime/browser-driver-profile.ts';
 import { agentDriverSearchDirectories } from '../runtime/agent-browser.ts';
 import { registerCapability, registerFallbackCapability } from './capability-index.ts';
@@ -88,46 +89,52 @@ export function browserControlDeclaration(options: BuiltinCapabilityOptions): Ca
  * on disk.
  *
  * They now declare the route that is actually served: the in-process `google`
- * tool, backed by the native connector. The prerequisite is a credential from
- * either source the connector genuinely reads, its own encrypted store, or an
- * existing install on this machine, so a machine that has one reports ready
- * and a machine that has neither reports the one step that fixes it.
+ * tool, backed by the native connector. The prerequisite is exactly what the
+ * connector resolves credentials from: a client id, a client secret and a
+ * refresh token in the encrypted store. A credential file left by another tool
+ * (`~/.gmail-mcp`) is NOT one: the connector only reads it when the owner runs
+ * `/google adopt`, so it is configuration evidence, which turns the capability
+ * into "needs setup" with the adopt step rather than "ready".
  */
 
-/** The credential sources the connector actually reads, in the order it reads them. */
-function googleAccountProbe(options: BuiltinCapabilityOptions): CapabilityProbe {
+/** What the connector's credential resolution requires; a partial set cannot call anything. */
+function googleAccountPrerequisites(): readonly CapabilityPrerequisite[] {
+  return [
+    {
+      id: 'google-client-id',
+      label: 'A Google client id',
+      probe: { kind: 'config-value-present', key: GOOGLE_CONFIG_KEYS.oauthClientId, label: 'A Google client id' },
+      fix: GOOGLE_ACCOUNT_FIX,
+    },
+    {
+      id: 'google-client-secret',
+      label: 'A Google client secret',
+      probe: { kind: 'secret-present', key: GOOGLE_SECRET_KEYS.oauthClientSecret, label: 'A Google client secret' },
+      fix: GOOGLE_ACCOUNT_FIX,
+    },
+    {
+      id: 'google-refresh-token',
+      label: 'A Google refresh token',
+      probe: { kind: 'secret-present', key: GOOGLE_SECRET_KEYS.oauthRefreshToken, label: 'A Google refresh token' },
+      fix: GOOGLE_ACCOUNT_FIX,
+    },
+  ];
+}
+
+/** Credentials another tool left on this machine. Evidence of what could be adopted, never a prerequisite. */
+function googleAdoptableEvidence(options: BuiltinCapabilityOptions): CapabilityProbe {
   return {
-    kind: 'any-of',
-    label: 'A connected Google account',
-    probes: [
-      {
-        kind: 'config-value-present',
-        key: 'calendar.google.clientId',
-        label: 'A Google account connected through the built-in setup',
-      },
-      {
-        kind: 'any-file-present',
-        paths: [
-          join(options.homeDirectory, '.gmail-mcp', 'gcp-oauth.keys.json'),
-          join(options.homeDirectory, '.gmail-mcp', 'google-workspace-credentials.json'),
-          join(options.homeDirectory, '.gmail-mcp', 'credentials.json'),
-        ],
-        label: 'Google credentials already on this machine',
-      },
+    kind: 'any-file-present',
+    paths: [
+      join(options.homeDirectory, '.gmail-mcp', 'gcp-oauth.keys.json'),
+      join(options.homeDirectory, '.gmail-mcp', 'google-workspace-credentials.json'),
+      join(options.homeDirectory, '.gmail-mcp', 'credentials.json'),
     ],
+    label: 'Google credentials already on this machine',
   };
 }
 
 const GOOGLE_ACCOUNT_FIX = 'Connect a Google account with: /google connect, it works out the shortest route and asks you to approve one consent link';
-
-function googlePrerequisite(options: BuiltinCapabilityOptions): CapabilityPrerequisite {
-  return {
-    id: 'google-account',
-    label: 'A connected Google account',
-    probe: googleAccountProbe(options),
-    fix: GOOGLE_ACCOUNT_FIX,
-  };
-}
 
 function emailSend(options: BuiltinCapabilityOptions): CapabilityDeclaration {
   return {
@@ -143,8 +150,8 @@ function emailSend(options: BuiltinCapabilityOptions): CapabilityDeclaration {
         availability: { kind: 'model-tool-registered', toolName: 'google' },
       },
     ],
-    prerequisites: [googlePrerequisite(options)],
-    configurationEvidence: [googleAccountProbe(options)],
+    prerequisites: googleAccountPrerequisites(),
+    configurationEvidence: [googleAdoptableEvidence(options)],
   };
 }
 
@@ -162,8 +169,8 @@ function emailRead(options: BuiltinCapabilityOptions): CapabilityDeclaration {
         availability: { kind: 'model-tool-registered', toolName: 'google' },
       },
     ],
-    prerequisites: [googlePrerequisite(options)],
-    configurationEvidence: [googleAccountProbe(options)],
+    prerequisites: googleAccountPrerequisites(),
+    configurationEvidence: [googleAdoptableEvidence(options)],
   };
 }
 
@@ -181,9 +188,9 @@ function calendarRead(options: BuiltinCapabilityOptions): CapabilityDeclaration 
         availability: { kind: 'model-tool-registered', toolName: 'google' },
       },
     ],
-    prerequisites: [googlePrerequisite(options)],
+    prerequisites: googleAccountPrerequisites(),
     configurationEvidence: [
-      googleAccountProbe(options),
+      googleAdoptableEvidence(options),
       // A private ICS feed reads a calendar without OAuth at all.
       {
         kind: 'config-value-present',

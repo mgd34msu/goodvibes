@@ -63,6 +63,13 @@ export interface AwayDigestInput {
    * the scheduled time) since lastSeenAt, same wire source as failedRuns.
    */
   readonly missedRuns?: readonly AwayDigestRunItem[];
+  /**
+   * Why the host's run outcomes could not be read, when a configured host did
+   * not answer. Without it a host outage reads as "nothing failed or was missed";
+   * with it the digest says the check did not happen. Null or absent when the
+   * runs were read, or no host is configured so there was nothing to ask.
+   */
+  readonly runsUnavailableReason?: string | null | undefined;
 }
 
 export interface AwayDigest {
@@ -146,7 +153,7 @@ export function buildAwayDigest(input: AwayDigestInput): AwayDigest | null {
   if (doneTasks.length === 1) {
     const t = doneTasks[0]!;
     const when = t.completedAt ? ` (${formatDigestTime(t.completedAt, now)})` : '';
-    lines.push(`Research task finished: ${t.title}${when}`);
+    lines.push(`A task finished: ${t.title}${when}`);
   } else if (doneTasks.length > 1) {
     lines.push(`${doneTasks.length} tasks finished since you were away`);
   }
@@ -204,16 +211,25 @@ export function buildAwayDigest(input: AwayDigestInput): AwayDigest | null {
   // by itself news, the Activity modal and /health approvals are where that is asked
   // and answered, and announcing it at every launch of an agent with no host
   // configured would be noise, not honesty.
-  if (lines.length === 0) return null;
+  if (lines.length === 0 && !input.runsUnavailableReason) return null;
 
   // But once the digest IS rendering, the approvals count in it must not be
   // read as complete when it is not. The line goes LAST so it qualifies the
   // count above rather than displacing anything, and it is emitted whether the
   // count is zero or not, a short count and an absent one are equally
   // misleading if the owner cannot tell which they are looking at.
-  const qualified = input.approvalsUnavailableReason
-    ? [...lines.slice(0, MAX_LINES - 1), `Approvals on the connected host could not be read, so any approval count above may be short: ${input.approvalsUnavailableReason}`]
-    : lines.slice(0, MAX_LINES);
+  const reserved = (input.approvalsUnavailableReason ? 1 : 0) + (input.runsUnavailableReason ? 1 : 0);
+  const capacity = MAX_LINES - reserved;
+  const shown = lines.length > capacity
+    ? [...lines.slice(0, capacity - 1), `and ${lines.length - (capacity - 1)} more in Activity`]
+    : lines;
+  const qualified = [
+    ...shown,
+    ...(input.runsUnavailableReason ? [`Could not check for failed or missed scheduled runs: ${input.runsUnavailableReason}`] : []),
+    ...(input.approvalsUnavailableReason
+      ? [`Approvals on the connected host could not be read, so any approval count above may be short: ${input.approvalsUnavailableReason}`]
+      : []),
+  ];
 
   return {
     headline: 'While you were away',

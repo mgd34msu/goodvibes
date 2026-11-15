@@ -24,7 +24,7 @@ import { registerTailscaleGatewayMethods } from './tailscale.js';
 import { registerAcpGatewayMethods } from './acp.js';
 import { discoverAcpAgents, type AcpHostService } from '../../acp/host.js';
 import { createFleetConflictsListHandler, createFleetConflictsResolveHandler, type FleetConflictsDeps } from './fleet.js';
-import { startConflictResolutionSession } from './seeded-sessions.js';
+import { createResolutionRunTracker, startConflictResolutionSession } from './seeded-sessions.js';
 // Compatibility re-export: consumers/tests import startCiFixSession from here.
 export { startCiFixSession, startConflictResolutionSession } from './seeded-sessions.js';
 import { defaultTailscaleRunner, TailscaleServeReceiptStore, type TailscaleCommandRunner } from '../../remote-access/tailscale.js';
@@ -33,8 +33,6 @@ import { registerPrincipalsGatewayMethods } from './principals.js';
 import { composeOwnerProfile } from './owner-profile-composition.js';
 import { PrincipalRegistry, PrincipalStore } from '../../principals/index.js';
 import { registerChannelProfilesGatewayMethods } from './channel-profiles.js';
-import { registerChannelSyncGatewayMethods } from './channel-sync.js';
-import { ChannelSyncRegistry, ChannelSyncStore } from '../../channel-sync/index.js';
 import { registerChannelTestGatewayMethods } from './channel-test.js';
 import { registerWorktreeSetupGatewayMethods } from './worktree-setup.js';
 import { WorktreeRegistry } from '../../runtime/worktree/registry.js';
@@ -64,9 +62,8 @@ import type { ProviderRegistry } from '../../providers/registry.js';
 import type { AutomationManager } from '../../automation/index.js';
 import type { ChannelDeliveryRouter } from '../../channels/delivery-router.js';
 import { composeCiWatchGatewayVerbs } from './ci-watch-composition.js';
-import type { CiPollingHost, FixSessionStartOutcome } from '../../ci-watch/index.js';
+import type { CiPollingHost } from '../../ci-watch/index.js';
 import { summarizeError } from '../../utils/error-display.js';
-import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
 import { logger } from '../../utils/logger.js';
 import { registerFlagsGraduationGatewayMethods } from './flags-graduation.js';
 import { registerRuntimeMetricsGatewayMethods } from './runtime-metrics.js';
@@ -82,6 +79,7 @@ import { WorkspaceRegistrationStore } from '../../workspace/registration/index.j
 import { UnifiedRewindService } from '../../rewind/index.js';
 import type { RewindConversationPort } from '../../rewind/index.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
+import { emitCompanionTokenRevoked } from '../../runtime/emitters/security.js';
 import type { WorkspaceEvent } from '../../../events/workspace.js';
 
 import { createSessionRuntimeControls, registerSessionRuntimeGatewayMethods, type SessionLiveTurnControlsHolder } from './session-runtime.js';
@@ -97,7 +95,8 @@ import { registerEmailGatewayMethods, type EmailGatewayService } from './email.j
 import { registerDaemonEmailVerbs, type EmailCompositionDeps } from './email-composition.js';
 import { bindCostAttributionIngest } from './attribution-ingest.js';
 import type { ConfigManager } from '../../config/manager.js';
-import type { DisposalRegistry } from '../../runtime/disposal.js';
+import type { AsyncDisposalRegistry } from '../../runtime/async-disposal.js';
+import type { ProcessRegistry } from '../../runtime/fleet/types.js';
 import type { ConfigKey } from '../../config/schema.js';
 import type { RuntimeStore } from '../../runtime/store/index.js';
 import { FileSystemSkillStore, SkillService } from '../../skills/index.js';
@@ -126,26 +125,9 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * unreachable from the graph that owns it. Optional: a narrow composition
    * that never tears down passes nothing and keeps today's behaviour.
    */
-  readonly disposal?: DisposalRegistry | undefined;
+  readonly disposal?: AsyncDisposalRegistry | undefined;
   /** The approval broker, the real event source push fans out from. */
   readonly approvalBroker: ApprovalSource;
-  /**
-   * Optional: stamp the session an accepted ci fix-this offer spawned onto
-   * its RESOLVED approval record (ApprovalBroker.stampFixSession). Present
-   * when the real broker is wired (the runtime composition root); absent in
-   * narrower compositions, the id then travels only via the channel
-   * notification.
-   */
-  readonly stampFixSessionOnApproval?: ((offerCallId: string, outcome: FixSessionStartOutcome) => Promise<unknown>) | undefined;
-  /**
-   * Optional: raise an ask through the shared approval broker. When present,
-   * a watched CI run going red produces a "fix this?" offer whose acceptance
-   * starts the fix-session. Absent → red runs only notify.
-   */
-  readonly requestApproval?: ((input: {
-    readonly request: PermissionPromptRequest;
-    readonly metadata?: Record<string, unknown> | undefined;
-  }) => Promise<PermissionPromptDecision>) | undefined;
   /**
    * Optional: the daemon's watcher registry, the recurring-poll host. When
    * present, registered CI watches are polled on the watchers.ciPollIntervalMs
@@ -207,7 +189,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * read/write. A set flows to surfaces as runtime.permissions via the
    * already-wired mode-change binding.
    */
-  readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback'>>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback' | 'subscribe'>>;
   /**
    * Runtime store backing sessions.contextUsage.get and the local-session
    * resolution the session-runtime verbs gate on (getState().session.id).
@@ -365,6 +347,20 @@ function toFleetNotice(event: FleetEvent): FleetNotice {
   };
 }
 
+/** One notice per fleet node currently waiting on the operator, in the shape the live event would have carried. */
+export function blockedFleetNotices(registry: Pick<ProcessRegistry, 'query'>): FleetNotice[] {
+  return registry.query().nodes.flatMap((node): FleetNotice[] => node.needsAttention
+    ? [{
+        type: 'FLEET_NODE_BLOCKED_ON_USER',
+        nodeId: node.id,
+        label: node.label,
+        reason: node.needsAttention.reason,
+        ...(node.sessionRef?.sessionId ? { sessionId: node.sessionRef.sessionId } : {}),
+        kind: node.kind,
+      }]
+    : []);
+}
+
 export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: GatewayVerbGroupDeps): void {
   registerFleetCheckpointsSearchGatewayMethods(catalog, deps);
   if (deps.triggerSupervisor) registerTriggerSupervisorGatewayMethods(catalog, deps.triggerSupervisor);
@@ -377,15 +373,25 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   if (attemptsEngine?.listWorkstreams && attemptsEngine.stampConflictSession && attemptsEngine.retryItemIntegration && deps.automationManager) {
     const automation = deps.automationManager;
     const engine = attemptsEngine;
-    /** jobId -> itemId for started resolution sessions awaiting run completion. */
-    const pendingResolutions = new Map<string, string>();
+    /** Resolution sessions awaiting run completion. */
+    const resolutionRuns = createResolutionRunTracker();
     const conflictsDeps: FleetConflictsDeps = {
+      // A second resolve is refused while the first session still works in the kept tree.
+      isSessionLive: resolutionRuns.isSessionLive,
       listWorkstreams: () => engine.listWorkstreams!(),
       stampConflictSession: (itemId, sessionId) => engine.stampConflictSession!(itemId, sessionId),
       startResolutionSession: async (seed) => {
-        const started = await startConflictResolutionSession(automation, seed);
-        if ('error' in started) return started;
-        pendingResolutions.set(started.jobId, seed.itemId);
+        // Tracked from job creation: a run can finish before runNow returns.
+        const trackedJobIds: string[] = [];
+        const started = await startConflictResolutionSession(automation, seed, (jobId) => {
+          trackedJobIds.push(jobId);
+          resolutionRuns.begin(jobId, seed.itemId);
+        });
+        if ('error' in started) {
+          for (const jobId of trackedJobIds) resolutionRuns.abandon(jobId);
+          return started;
+        }
+        resolutionRuns.started(started.jobId, started.sessionId);
         return { sessionId: started.sessionId };
       },
     };
@@ -399,17 +405,17 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     // successfully re-attempts the merge through the same integration lane,
     // a clean merge removes the kept tree; a re-conflict honestly stays flagged.
     if (deps.runtimeBus) {
-      deps.runtimeBus.onDomain('automation', (envelope) => {
+      const offAutomation = deps.runtimeBus.onDomain('automation', (envelope) => {
         const payload = envelope.payload as { type?: string; jobId?: string; outcome?: string };
         if (payload.type !== 'AUTOMATION_RUN_COMPLETED' || !payload.jobId) return;
-        const itemId = pendingResolutions.get(payload.jobId);
+        const itemId = resolutionRuns.complete(payload.jobId);
         if (!itemId) return;
-        pendingResolutions.delete(payload.jobId);
         if (payload.outcome !== 'success') return;
         void engine.retryItemIntegration!(itemId).catch((error) => {
           logger.warn('fleet.conflicts: post-resolution re-merge failed', { itemId, error: summarizeError(error) });
         });
       });
+      deps.disposal?.add('fleet conflict resolution reclaim', offAutomation);
     }
   }
 
@@ -457,12 +463,14 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // stay cataloged-but-unhandled, the same graceful degrade the other optional
   // groups use, instead of one optional family throwing and taking every other
   // verb group in this registrar down with it.
+  // Built before the profile so the occasions loop can mirror into the same calendar the verbs serve.
+  const calendarGateway = createDaemonCalendarGatewayService(deps);
   if (deps.configManager?.attachProfileFallback !== undefined) {
     const ownerProfile = composeOwnerProfile(catalog, {
       nativeMutationHost: deps.ciAutonomousHost?.(),
       configManager: deps.configManager,
       postalProviders: deps.providerRegistry,
-      occasions: deps,
+      occasions: { ...deps, calendarGateway: calendarGateway ?? undefined },
       ...(deps.personalCapture === undefined ? {} : { personalCapture: deps.personalCapture }),
       // The runtime's own home, so an injected home resolves the profile under
       // it instead of falling through to whoever is logged in.
@@ -481,16 +489,13 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   );
   registerChannelProfilesGatewayMethods(catalog, channelProfileRegistry);
 
-  // The channel routing table and the draft mirror: what a surface needs to
-  // draw the same channel screen on a second device. Same snapshot pattern and
-  // the same state directory as the profile bindings above; the two are
-  // deliberately separate tables (see platform/channel-sync's header).
-  registerChannelSyncGatewayMethods(
-    catalog,
-    new ChannelSyncRegistry(
-      new ChannelSyncStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'channel-sync.json')),
-    ),
-  );
+  // `channels.routing.*` and `channels.drafts.*` are NOT served from here. The
+  // daemon host attaches them (channels/host-routing, channels/host-drafts) over
+  // its own stores with the confirmation gate and encrypted draft bodies; a
+  // second implementation here (routes/channel-sync.ts over channel-sync.json)
+  // would answer, without that gate, in any process that composes these groups
+  // but not the host, and its data would be invisible to the host. Those verbs
+  // answer 501 NOT_INVOKABLE until a host registers them.
 
   // Wire the inbound-intake enrichment onto the transport intake chokepoint: from
   // here on, every channel-originated session is attributed to its sending
@@ -543,7 +548,6 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   if (deps.deviceCapabilities) registerDevicesGatewayMethods(catalog, deps.deviceCapabilities);
   if (deps.memoryGovernor) registerMemoryGatewayMethods(catalog, deps.memoryGovernor);
   if (deps.voiceSetup) registerVoiceSetupGatewayMethods(catalog, deps.voiceSetup);
-  const calendarGateway = createDaemonCalendarGatewayService(deps);
   if (calendarGateway) registerCalendarGatewayMethods(catalog, calendarGateway);
   registerDaemonEmailVerbs(catalog, { ...deps, configManager: deps.configManager });
   const browserGateway = composeDaemonBrowser(deps);
@@ -581,7 +585,10 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // over the daemon's PairingTokenManager. Only when the composition root
   // threads it (a graceful degrade for narrower embeds).
   if (deps.pairingTokens) {
-    registerPairingGatewayMethods(catalog, deps.pairingTokens);
+    registerPairingGatewayMethods(catalog, deps.pairingTokens, deps.runtimeBus
+      ? ({ id, principalId }) => emitCompanionTokenRevoked(deps.runtimeBus!, { sessionId: 'system', traceId: `pairing-revoke:${id}`, source: 'pairing-tokens' },
+        { clientIp: 'unknown', reason: `paired device token ${id} revoked${principalId ? ` by ${principalId}` : ''}` })
+      : undefined);
     // Pairing hand-off bundle: one exchange carries the notifications/relay/
     // passkey offer set for a surface to complete in one pass, each declinable.
     registerPairingHandoffGatewayMethods(catalog, {
@@ -630,6 +637,8 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     const bus = deps.runtimeBus;
     const source: FleetNoticeSource = {
       subscribe: (listener) => bus.onDomain('fleet', (envelope) => listener(toFleetNotice(envelope.payload))),
+      // Asks already waiting when this source attaches (a daemon restart) keep their escalation.
+      currentlyBlocked: () => blockedFleetNotices(deps.processRegistry),
     };
     pushSubscriptions.push(pushService.attachFleetNeedsInputSource(source, deps.sessionPresence));
     // Third event source: a tracked run reaching a terminal state -> a
@@ -753,7 +762,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
 
   if (deps.runtimeBus) {
     // LLM + metered-voice usage -> the attribution ledger (see attribution-ingest.ts).
-    bindCostAttributionIngest(deps.runtimeBus, costAttribution, quotaWindow);
+    deps.disposal?.add('cost attribution ingest', bindCostAttributionIngest(deps.runtimeBus, costAttribution, quotaWindow));
   }
 }
 

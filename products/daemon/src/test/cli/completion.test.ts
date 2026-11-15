@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DAEMON_COMMANDS } from '../../cli/command-catalog.ts';
+import { DAEMON_COMMANDS, GLOBAL_FLAGS } from '../../cli/command-catalog.ts';
 import {
   COMPLETION_SHELLS,
   completionCommandWords,
@@ -8,30 +8,87 @@ import {
   runCompletionCommand,
 } from '../../cli/completion.ts';
 
+const BINARY = 'goodvibes-daemon';
+
+/** What a script offers for one command, read back out of the rendered text. */
+interface Offered {
+  readonly words: readonly string[];
+  readonly subs: readonly string[];
+  readonly flags: readonly string[];
+}
+
+function quoted(text: string): string[] {
+  return [...text.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((match) => match[1]!);
+}
+
+function offeredBy(shell: (typeof COMPLETION_SHELLS)[number], script: string, spec: (typeof DAEMON_COMMANDS)[number]): Offered {
+  const words = [spec.name, ...spec.aliases];
+  if (shell === 'bash') {
+    const arm = script.match(new RegExp(`^    ${words.join('\\|')}\\)\\n      __gvd_flags="(.*)"\\n      __gvd_subs="(.*)"$`, 'm'));
+    if (!arm) throw new Error(`bash script has no case arm for ${words.join('|')}`);
+    return { words, flags: arm[1]!.split(' ').filter(Boolean), subs: arm[2]!.split(' ').filter(Boolean) };
+  }
+  if (shell === 'zsh') {
+    const arm = script.match(new RegExp(`^      ${words.join('\\|')}\\)\\n        __gvd_flags=\\((.*)\\)\\n        __gvd_subs=\\((.*)\\)$`, 'm'));
+    if (!arm) throw new Error(`zsh script has no case arm for ${words.join('|')}`);
+    return { words, flags: quoted(arm[1]!), subs: quoted(arm[2]!) };
+  }
+  const seen = `-n '__fish_seen_subcommand_from ${words.join(' ')}'`;
+  const lines = script.split('\n').filter((line) => line.includes(seen));
+  const subs = lines.flatMap((line) => line.match(/ -a '([^']*)'/)?.[1] ?? []);
+  const flags = lines.flatMap((line) => {
+    const option = line.match(/ -(l|s) (\S+)/);
+    return option ? [`${option[1] === 'l' ? '--' : '-'}${option[2]}`] : [];
+  });
+  return { words, flags, subs };
+}
+
 describe('the completion scripts are generated from the catalog', () => {
   test.each([...COMPLETION_SHELLS])('the %s script offers every command', (shell) => {
-    const script = renderCompletionScript(shell, 'goodvibes-daemon');
+    const script = renderCompletionScript(shell, BINARY);
+    if (shell === 'bash') {
+      const line = script.match(/local __gvd_commands="(.*)"/)?.[1] ?? '';
+      expect(line.split(' ')).toEqual([...completionCommandWords()]);
+      return;
+    }
     for (const spec of DAEMON_COMMANDS) {
-      expect(script).toContain(spec.name);
+      const entry = shell === 'zsh' ? `    '${spec.name}:` : `-a '${spec.name}' -d `;
+      expect(script, `${spec.name} is not offered as a command`).toContain(entry);
     }
   });
 
   test.each([...COMPLETION_SHELLS])('the %s script offers every alias', (shell) => {
-    const script = renderCompletionScript(shell, 'goodvibes-daemon');
-    // fish completes command names only; bash and zsh carry the aliases too.
-    if (shell === 'fish') return;
-    for (const alias of ['session', 'qr', 'qrcode', 'completions']) {
-      expect(script).toContain(alias);
+    const script = renderCompletionScript(shell, BINARY);
+    // fish offers the command names and unlocks sub-words and flags for the aliases too.
+    for (const spec of DAEMON_COMMANDS) {
+      expect(offeredBy(shell, script, spec).words).toEqual([spec.name, ...spec.aliases]);
+    }
+    if (shell === 'bash') {
+      const line = script.match(/local __gvd_commands="(.*)"/)?.[1] ?? '';
+      for (const alias of ['session', 'qr', 'qrcode', 'completions']) expect(line.split(' ')).toContain(alias);
     }
   });
 
-  test.each([...COMPLETION_SHELLS])('the %s script offers sub-words and flags', (shell) => {
-    const script = renderCompletionScript(shell, 'goodvibes-daemon');
-    for (const word of ['list', 'kill', 'get', 'set', 'unset', 'enable', 'disable']) {
-      expect(script).toContain(word);
+  test.each([...COMPLETION_SHELLS])('the %s script offers each command its own sub-words and flags', (shell) => {
+    const script = renderCompletionScript(shell, BINARY);
+    for (const spec of DAEMON_COMMANDS) {
+      const offered = offeredBy(shell, script, spec);
+      expect(offered.subs, `${spec.name} sub-words`).toEqual([...spec.subcommands]);
+      // fish offers the global flags once, for every command, so its per-command list is the command's own.
+      const own = spec.passthrough ? completionFlagsFor(spec.name) : spec.flags.flatMap((flag) => flag.tokens);
+      expect(offered.flags, `${spec.name} flags`).toEqual([...(shell === 'fish' ? own : completionFlagsFor(spec.name))]);
     }
-    for (const flag of ['json', 'host', 'port', 'token', 'daemon-home']) {
-      expect(script).toContain(flag);
+  });
+
+  test('the fish script offers every global flag, except after a passthrough command', () => {
+    const script = renderCompletionScript('fish', BINARY);
+    const passthrough = DAEMON_COMMANDS.filter((spec) => spec.passthrough).flatMap((spec) => [spec.name, ...spec.aliases]);
+    expect(passthrough.length).toBeGreaterThan(0);
+    for (const flag of GLOBAL_FLAGS) {
+      for (const token of flag.tokens) {
+        const option = token.startsWith('--') ? `-l ${token.slice(2)}` : `-s ${token.slice(1)}`;
+        expect(script, `${token} is not offered`).toContain(`complete -c ${BINARY} -n 'not __fish_seen_subcommand_from ${passthrough.join(' ')}' ${option}`);
+      }
     }
   });
 
@@ -100,5 +157,21 @@ describe('the completion command itself', () => {
     const result = runCompletionCommand(['bash', 'zsh'], 'goodvibes-daemon');
     expect(result.exitCode).toBe(2);
     expect(result.lines.join('\n')).toContain('one argument too many');
+  });
+});
+
+describe('passthrough commands are completed with their own flags, not the global ones they refuse', () => {
+  test('send completes --channel and none of the global flags', () => {
+    const flags = completionFlagsFor('send');
+    expect(flags).toContain('--channel');
+    expect(flags).toContain('--list');
+    expect(flags).not.toContain('--daemon-home');
+    expect(renderCompletionScript('bash', 'goodvibes-daemon')).toContain('__gvd_flags="--channel -c --to --title --list --help -h"');
+  });
+
+  test('the fish script unlocks an alias\'s sub-words and flags with the same guard as its command', () => {
+    const script = renderCompletionScript('fish', 'goodvibes-daemon');
+    expect(script).toContain("__fish_seen_subcommand_from sessions session' -a 'list'");
+    expect(script).toContain("__fish_seen_subcommand_from send' -l channel -r");
   });
 });

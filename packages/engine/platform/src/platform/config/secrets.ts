@@ -49,10 +49,12 @@ import {
   assertCachedKeyIsCurrent,
   decryptStore as decrypt,
   encryptStore as encrypt,
+  loadExistingKeyfile,
   loadOrCreateKeyfile,
   type EncryptedStoreEnvelope,
 } from './secrets-keyfile.js';
 export { SecretStoreUnreadableError } from './secrets-keyfile.js';
+import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
 import { getSecretRefSource, isSecretRefInput, normalizeSecretRef, resolveSecretRef } from './secret-refs.js';
 import { listMigratableSecrets, migratableStores } from './secrets-migration-view.js';
 import { logger } from '../utils/logger.js';
@@ -125,6 +127,8 @@ interface SecretImportRecord {
   readonly publications: readonly { readonly path: string; readonly payload: unknown; readonly keyfile: boolean }[];
   phase: 'prepared' | 'pending' | 'committing' | 'committed' | 'failed';
   transition?: PreparedSecretImportTransition;
+  /** Set once the pending counts and generation were settled, so a second settle is a no-op. */
+  settled?: boolean;
 }
 export interface SecretWriteOptions {
   /** Optional exact effect transaction; never grants permission by itself. */
@@ -307,6 +311,11 @@ export function captureSecretsReadSource(owner: SecretsManager): () => void {
   return capture();
 }
 
+/** An environment value only when `key` is really a variable, so names such as `__proto__` never read an inherited property. */
+function ownEnvValue(key: string): string | undefined {
+  return Object.hasOwn(process.env, key) ? process.env[key] : undefined;
+}
+
 export class SecretsManager {
   /** Restriction only, captured from this manager's actual native stores. */
   captureReadSource(): () => void {
@@ -408,7 +417,7 @@ export class SecretsManager {
     if (this.encKey && keyObservation.raw !== null && !this.encKey.equals(key)) throw new Error('Secret keyfile changed.');
     const observations = [{ path: this.keyFilePath, observation: keyObservation }];
     const targets = new Map<string, { readonly store: SecretStorePath; readonly values: Record<string, string>; encryptionKey: Buffer }>();
-    const items = values.map(entry => ({ key: entry.key, value: entry.value, operation: entry.operation ?? 'set', scope: resolveSecretWriteScope(entry.key, entry.scope) }));
+    const items = values.map(entry => ({ key: entry.key, value: entry.operation !== 'delete' && typeof entry.value === 'string' && shouldStoreAsLiteral(entry.value) ? encodeLiteralSecret(entry.value) : entry.value, operation: entry.operation ?? 'set', scope: resolveSecretWriteScope(entry.key, entry.scope) }));
     for (const entry of items) {
       const stores = entry.operation === 'delete' ? [this.resolveWriteTarget(entry.scope, 'secure'), this.resolveWriteTarget(entry.scope, 'plaintext')]
         : [this.resolveWriteTarget(entry.scope, medium)];
@@ -524,12 +533,21 @@ export class SecretsManager {
       return await this.withStoreMutations(record.publications.map(publication => publication.path),
         () => this.finishPreparedImportOwned(handle, transition, beforeEffect), [], current);
     } catch {
+      // Files were already published and settled: a later failure (for example
+      // releasing the store lock) must not turn a committed import into 'unknown'.
+      // The owned step advances the phase; read it through a function so the 'committing' assignment above does not narrow it.
+      const phaseNow = (): SecretImportRecord['phase'] => record.phase;
+      if (phaseNow() === 'committed') {
+        return Object.freeze({ status: 'committed', completedPaths: Object.freeze(record.publications.map(publication => publication.path)) });
+      }
       record.phase = 'failed'; this.settlePreparedImport(record);
       return Object.freeze({ status: 'unknown', completedPaths: Object.freeze([]),
         ...(record.publications[0] ? { uncertainPath: record.publications[0].path } : {}) });
     }
   }
   private settlePreparedImport(record: SecretImportRecord): void {
+    if (record.settled) return;
+    record.settled = true;
     this.credentialMutationGeneration++;
     for (const item of record.facts.items) {
       const remaining = (this.pendingLocalMutations.get(item.key) ?? 1) - 1;
@@ -729,6 +747,12 @@ export class SecretsManager {
     return this.encKey;
   }
 
+  /** The key for reading a store: never mints a keyfile, since a read must not create durable state. */
+  private getReadEncryptionKey(): Buffer | null {
+    this.encKey ??= loadExistingKeyfile(this.keyFilePath);
+    return this.encKey;
+  }
+
   getGlobalHome(): string {
     return this.options.globalHome;
   }
@@ -775,16 +799,19 @@ export class SecretsManager {
   resolveLocalSecretSync(key: string):
     | { readonly state: 'resolved'; readonly value: string }
     | { readonly state: 'absent' | 'unsupported' } {
-    const capture = (value: unknown): ReturnType<SecretsManager['resolveLocalSecretSync']> =>
-      typeof value !== 'string' || isSecretRefInput(value)
-        ? { state: 'unsupported' }
-        : { state: 'resolved', value };
-    if (process.env[key] !== undefined) return capture(process.env[key]);
+    const capture = (value: unknown): ReturnType<SecretsManager['resolveLocalSecretSync']> => {
+      if (typeof value !== 'string') return { state: 'unsupported' };
+      const literal = decodeLiteralSecret(value);
+      if (literal !== null) return { state: 'resolved', value: literal };
+      return isSecretRefInput(value) ? { state: 'unsupported' } : { state: 'resolved', value };
+    };
+    const envValue = ownEnvValue(key);
+    if (envValue !== undefined) return capture(envValue);
     if (this.pendingLocalMutations.has(key)) return { state: 'unsupported' };
     for (const path of this.getReadOrder()) {
       const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
       if (result.status === 'unreadable') return { state: 'unsupported' };
-      if (result.status === 'ok' && key in result.secrets) return capture(result.secrets[key]);
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key)) return capture(result.secrets[key]);
     }
     return { state: 'absent' };
   }
@@ -807,7 +834,7 @@ export class SecretsManager {
     };
     let current = key;
     for (let depth = 0; depth < 32; depth++) {
-      if (seen.has(current) || this.pendingLocalMutations.has(current) || process.env[current] !== undefined) return { state: 'unsupported' };
+      if (seen.has(current) || this.pendingLocalMutations.has(current) || ownEnvValue(current) !== undefined) return { state: 'unsupported' };
       seen.add(current);
       let value: string | undefined;
       for (const path of this.getReadOrder()) {
@@ -820,6 +847,8 @@ export class SecretsManager {
       if (value === undefined) return depth === 0 ? { state: 'absent', revision: revision() } : { state: 'unsupported' };
       if (typeof value !== 'string') return { state: 'unsupported' };
       chain.push(value);
+      const literal = decodeLiteralSecret(value);
+      if (literal !== null) return { state: 'resolved', value: literal, revision: revision() };
       if (!isSecretRefInput(value)) return { state: 'resolved', value, revision: revision() };
       const ref = normalizeSecretRef(value);
       if (!ref || ref.source !== 'goodvibes') return { state: 'unsupported' };
@@ -850,13 +879,13 @@ export class SecretsManager {
     for (const path of stores.call(this)) {
       if (storePath !== undefined ? path.path !== storePath : path.scope !== scope) continue;
       const secrets = path.secure ? this.readEncryptedFile(path.path) : this.readPlaintextFile(path.path);
-      if (secrets !== null && key in secrets) return secrets[key] ?? null;
+      if (secrets !== null && Object.hasOwn(secrets, key)) return secrets[key] ?? null;
     }
     return null;
   }
 
   private async getInternal(key: string, seen: Set<string>): Promise<string | null> {
-    const envValue = process.env[key]!;
+    const envValue = ownEnvValue(key);
     if (envValue !== undefined) {
       logger.debug('SecretsManager: resolved from env', { key });
       return this.resolveMaybeReferencedValue(key, envValue, seen);
@@ -866,23 +895,40 @@ export class SecretsManager {
       const secrets = path.secure
         ? this.readEncryptedFile(path.path)
         : this.readPlaintextFile(path.path);
-      if (secrets !== null && key in secrets) {
+      if (secrets !== null && Object.hasOwn(secrets, key)) {
         logger.debug('SecretsManager: resolved from store', { key, source: path.source });
         const value = secrets[key]!;
-        return value === undefined ? null : this.resolveMaybeReferencedValue(key, value, seen);
+        if (value === undefined) return null;
+        // A wrapped literal is the credential itself, never a pointer to follow.
+        const literal = decodeLiteralSecret(value);
+        if (literal !== null) return literal;
+        return this.resolveMaybeReferencedValue(key, value, seen, path.scope === 'project');
       }
     }
 
     return null;
   }
 
-  private async resolveMaybeReferencedValue(key: string, value: string, seen: Set<string>): Promise<string | null> {
+  private async resolveMaybeReferencedValue(key: string, value: string, seen: Set<string>, fromProjectStore = false): Promise<string | null> {
     const current = captureSecurityReadBindings(this, ['options', 'getInternal']);
     const optionsCurrent = captureSecurityReadBindings(this.options, ['globalHome', 'diagnosticMode']);
     const read = this.getInternal;
     const assertCurrent = () => { current(); optionsCurrent(); };
     assertCurrent();
     if (!isSecretRefInput(value)) return value;
+
+    // A project store lives inside a directory that may have been cloned from
+    // anywhere, so it is data, not a place to run commands or read files from.
+    // Only references that stay inside GoodVibes follow; an env: reference
+    // would let a checkout name any variable of the user's environment.
+    const refSource = getSecretRefSource(value);
+    if (fromProjectStore && refSource !== 'goodvibes') {
+      logger.warn('SecretsManager: refused a secret reference found in a project store; move it to the user store (scope user) to use it', {
+        key,
+        refSource: refSource ?? 'unknown',
+      });
+      return null;
+    }
 
     try {
       const resolved = await resolveSecretRef(value, {
@@ -1048,6 +1094,7 @@ export class SecretsManager {
 
     const target = this.resolveWriteTarget(scope, medium);
     const existing = this.readStoreForWrite(target);
+    const replacesSecureCopy = target.secure && Object.hasOwn(existing, key);
     existing[key] = value;
 
     try {
@@ -1065,6 +1112,15 @@ export class SecretsManager {
       if (policy === 'preferred_secure' && target.secure && !(error instanceof SecretStoreUnreadableError)) {
         const fallback = this.resolveWriteTarget(scope, 'plaintext');
         if (!this.ownedMutationPaths.has(fallback.path)) throw error;
+        // Reads consult the secure store before the plaintext one, so a plaintext
+        // copy written beside an existing secure copy would be saved but never
+        // read, leaving the old (possibly rotated-out) credential in force.
+        if (replacesSecureCopy) {
+          throw new Error(
+            `Secret ${key} was not changed: the secure store write failed (${summarizeError(error)}) and a plaintext fallback would be ignored while the old secure copy exists. Fix the secure store and retry.`,
+            { cause: error },
+          );
+        }
         const fallbackExisting = this.readStoreForWrite(fallback);
         fallbackExisting[key] = value;
         effect?.beforeWrite();
@@ -1096,7 +1152,8 @@ export class SecretsManager {
         `Refusing to write to the secrets store at ${target.path}: the file exists but cannot be read (${result.reason}). Overwriting it would destroy its contents; restore or move the file first.`,
       );
     }
-    return result.status === 'ok' ? { ...result.secrets } : {};
+    // No prototype, so a key such as `__proto__` is stored as data instead of being dropped.
+    return Object.assign(Object.create(null) as Record<string, string>, result.status === 'ok' ? result.secrets : {});
   }
 
   async list(): Promise<string[]> {
@@ -1234,19 +1291,23 @@ export class SecretsManager {
 
   private deleteOwned(key: string, stores: readonly SecretStorePath[]): void {
     let removed = false;
-    for (const store of stores) {
-      const values = store.secure
-        ? this.readEncryptedFile(store.path)
-        : this.readPlaintextFile(store.path);
-      if (!values || !(key in values)) continue;
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete (values as Record<string, unknown>)[key];
-      if (store.secure) this.writeEncryptedFile(store.path, values);
-      else this.writePlaintextFile(store.path, values);
-      logger.debug('SecretsManager: deleted secret', { key, source: store.source });
-      removed = true;
+    try {
+      for (const store of stores) {
+        const values = store.secure
+          ? this.readEncryptedFile(store.path)
+          : this.readPlaintextFile(store.path);
+        if (!values || !Object.hasOwn(values, key)) continue;
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (values as Record<string, unknown>)[key];
+        if (store.secure) this.writeEncryptedFile(store.path, values);
+        else this.writePlaintextFile(store.path, values);
+        logger.debug('SecretsManager: deleted secret', { key, source: store.source });
+        removed = true;
+      }
+    } finally {
+      // A later store failing must not leave listeners holding a credential an earlier store already lost.
+      if (removed) this.notifyChanged(key);
     }
-    if (removed) this.notifyChanged(key);
   }
 
   /**
@@ -1265,17 +1326,20 @@ export class SecretsManager {
 
   private deleteFromScopeOwned(key: string, stores: readonly SecretStorePath[]): void {
     let removed = false;
-    for (const store of stores) {
-      const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
-      if (!values || !(key in values)) continue;
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete (values as Record<string, unknown>)[key];
-      if (store.secure) this.writeEncryptedFile(store.path, values);
-      else this.writePlaintextFile(store.path, values);
-      logger.debug('SecretsManager: removed one tier copy', { key, source: store.source });
-      removed = true;
+    try {
+      for (const store of stores) {
+        const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
+        if (!values || !Object.hasOwn(values, key)) continue;
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (values as Record<string, unknown>)[key];
+        if (store.secure) this.writeEncryptedFile(store.path, values);
+        else this.writePlaintextFile(store.path, values);
+        logger.debug('SecretsManager: removed one tier copy', { key, source: store.source });
+        removed = true;
+      }
+    } finally {
+      if (removed) this.notifyChanged(key);
     }
-    if (removed) this.notifyChanged(key);
   }
 
   private getPolicy(): SecretStorageMode {
@@ -1346,12 +1410,19 @@ export class SecretsManager {
     if (envelope.version !== SECRETS_STORE_FORMAT_VERSION) {
       return {
         status: 'unreadable',
-        reason: `store format version ${envelope.version} is not supported by this platform version`,
+        reason: `store format version ${typeof envelope.version === 'number' ? envelope.version : '(not a number)'} is not supported by this platform version`,
       };
     }
 
     try {
-      const secrets = JSON.parse(decrypt(envelope as EncryptedStoreEnvelope, this.getEncryptionKey())) as Record<string, string>;
+      const readKey = this.getReadEncryptionKey();
+      if (readKey === null) {
+        return {
+          status: 'unreadable',
+          reason: `the keyfile at ${this.keyFilePath} is missing; restore it next to the store, a new key was not created`,
+        };
+      }
+      const secrets = JSON.parse(decrypt(envelope as EncryptedStoreEnvelope, readKey)) as Record<string, string>;
       return { status: 'ok', secrets };
     } catch (err) {
       return {

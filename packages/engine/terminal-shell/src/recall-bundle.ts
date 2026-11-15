@@ -1,17 +1,30 @@
-import { dirname } from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryBundle, MemorySearchFilter } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, resolveBundlePath } from './recall-shared.js';
+import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, resolveConfinedBundlePath } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
+function isMemoryBundle(value: unknown): value is MemoryBundle {
+  if (typeof value !== 'object' || value === null) return false;
+  const bundle = value as Record<string, unknown>;
+  return (
+    bundle['schemaVersion'] === 'v1' &&
+    typeof bundle['exportedAt'] === 'number' &&
+    typeof bundle['scope'] === 'string' &&
+    typeof bundle['recordCount'] === 'number' &&
+    typeof bundle['linkCount'] === 'number' &&
+    Array.isArray(bundle['records']) &&
+    Array.isArray(bundle['links'])
+  );
+}
 export function createRecallBundleCommands<Context extends RecallQueryContext>(
   getMemory: (context: Context) => {
     exportBundle(filter: MemorySearchFilter): MemoryBundle | Promise<MemoryBundle>;
     importBundle: MemoryApi['importBundle'];
   } | null,
-  getPaths: (context: Context) => Pick<ShellPathService, 'resolveWorkspacePath'>,
+  getPaths: (context: Context) => Pick<ShellPathService, 'resolveWorkspacePath' | 'isWithinWorkingDirectory'>,
   presentation: {
     readonly tag: string;
     readonly command: string;
@@ -24,6 +37,25 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     readonly linksLabel: string;
   },
 ) {
+  /** The resolved bundle path, or undefined after printing why a model-run command may not use it. */
+  function bundlePath(pathArg: string, context: Context): string | undefined {
+    const resolved = resolveConfinedBundlePath(pathArg, getPaths(context), context.invokedByModel);
+    if (resolved === undefined) {
+      context.print(
+        `${presentation.tag} Refused: ${pathArg} is outside the workspace. A command run by the model may only use paths inside the workspace; ask the owner to run it for another location.`,
+      );
+    }
+    return resolved;
+  }
+  function writeBundle(targetPath: string, bundle: MemoryBundle): void {
+    // Owner-only and atomic: the bundle is durable project memory and may replace an existing file.
+    atomicWriteFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', { mkdirp: true });
+  }
+  function readBundle(targetPath: string): MemoryBundle {
+    const parsed: unknown = JSON.parse(readFileSync(targetPath, 'utf-8'));
+    if (!isMemoryBundle(parsed)) throw new Error('the file is not a memory bundle (expected schemaVersion "v1" with records and links)');
+    return parsed;
+  }
   function handleRecallExport(args: string[], context: Context): void | Promise<void> {
     const parsed = mutationArguments(args, presentation.confirmMutations);
     args = parsed.rest;
@@ -68,9 +100,9 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       filter.cls = cls;
     }
     return afterMemory(memory.exportBundle(filter), (bundle) => {
-      const targetPath = resolveBundlePath(pathArg, getPaths(context));
-      mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+      const targetPath = bundlePath(pathArg, context);
+      if (targetPath === undefined) return;
+      writeBundle(targetPath, bundle);
       context.print(`${presentation.tag} Exported ${bundle.recordCount} record(s) and ${bundle.linkCount} link(s) to ${targetPath}`);
     });
   }
@@ -92,10 +124,11 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       );
       return;
     }
-    const targetPath = resolveBundlePath(pathArg, getPaths(context));
+    const targetPath = bundlePath(pathArg, context);
+    if (targetPath === undefined) return;
     let bundle: MemoryBundle;
     try {
-      bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as MemoryBundle;
+      bundle = readBundle(targetPath);
     } catch (error) {
       context.print(`${presentation.tag} Failed to read memory bundle${presentation.errorSeparator}${summarizeError(error)}`);
       return;
@@ -143,9 +176,9 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       return;
     }
     return afterMemory(memory.exportBundle({ scope: scopeRaw }), (bundle) => {
-      const targetPath = resolveBundlePath(pathArg, getPaths(context));
-      mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+      const targetPath = bundlePath(pathArg, context);
+      if (targetPath === undefined) return;
+      writeBundle(targetPath, bundle);
       context.print(`${presentation.tag} Exported ${scopeRaw} handoff bundle to ${targetPath}`);
     });
   }
@@ -155,10 +188,10 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       context.print(`${presentation.tag} Usage: /${presentation.command} handoff-inspect <path>`);
       return;
     }
-    const targetPath = resolveBundlePath(pathArg, getPaths(context));
+    const targetPath = bundlePath(pathArg, context);
+    if (targetPath === undefined) return;
     try {
-      const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as MemoryBundle;
-      context.print(inspectBundle(bundle));
+      context.print(inspectBundle(readBundle(targetPath)));
     } catch (error) {
       context.print(`${presentation.tag} Failed to inspect handoff bundle${presentation.errorSeparator}${summarizeError(error)}`);
     }

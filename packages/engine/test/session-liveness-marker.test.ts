@@ -4,7 +4,7 @@
  * pid-not-alive) that the boot resume notice's suppression and /session
  * resume's confirm gate both build on.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
@@ -54,14 +54,18 @@ describe('writeLivenessMarker / removeLivenessMarker', () => {
     expect(existsSync(livenessMarkerPathFor(surface, 'ses-nested'))).toBe(true);
   });
 
-  test('a second write refreshes updatedAt in place', async () => {
-    writeLivenessMarker(surface, 'ses-refresh', 1);
+  test('a second write refreshes updatedAt in place', () => {
     const path = livenessMarkerPathFor(surface, 'ses-refresh');
-    const first = JSON.parse(readFileSync(path, 'utf-8')).updatedAt;
-    await new Promise((r) => setTimeout(r, 5));
-    writeLivenessMarker(surface, 'ses-refresh', 1);
-    const second = JSON.parse(readFileSync(path, 'utf-8')).updatedAt;
-    expect(second).toBeGreaterThanOrEqual(first);
+    try {
+      setSystemTime(new Date(1_000_000));
+      writeLivenessMarker(surface, 'ses-refresh', 1);
+      expect(JSON.parse(readFileSync(path, 'utf-8')).updatedAt).toBe(1_000_000);
+      setSystemTime(new Date(1_005_000));
+      writeLivenessMarker(surface, 'ses-refresh', 1);
+      expect(JSON.parse(readFileSync(path, 'utf-8')).updatedAt).toBe(1_005_000);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('removeLivenessMarker deletes the file', () => {

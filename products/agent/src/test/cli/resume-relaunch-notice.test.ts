@@ -200,19 +200,4 @@ describe('surfaceResumeRelaunchNotice', () => {
     })).not.toThrow();
     expect(printed).toEqual([]);
   });
-
-  test('never auto-resumes: printing the notice is the only side effect', () => {
-    let resumeCalls = 0;
-    const printed: string[] = [];
-    surfaceResumeRelaunchNotice({
-      getLastSessionPointer: () => 'user-abc123',
-      isRecoveryPending: () => false,
-      findSession: (id) => ({ sessionId: id, title: 'x', timestamp: Date.now(), messageCount: 1 }),
-      print: (text) => { printed.push(text); },
-    });
-    // Nothing in this module can call a resume action directly, resumeCalls
-    // stays 0 because there is no resume-invoking dependency to call.
-    expect(resumeCalls).toBe(0);
-    expect(printed).toHaveLength(1);
-  });
 });

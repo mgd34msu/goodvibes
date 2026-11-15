@@ -200,7 +200,9 @@ export function createInboundTerminalFailureAnnouncer(
 
       void pending.then(
         (result) => {
-          inFlight.delete(key);
+          // A recovery cleared the set; a newer send for the same key may now
+          // own the marker, so only this send's own generation may remove it.
+          if (sentAt === generation) inFlight.delete(key);
           // A port that answered with something other than a delivery verdict
           //, an untyped embedder returning `undefined`, say. It has not said
           // the owner was reached, so they were not reached. Reading `.delivered`
@@ -240,7 +242,7 @@ export function createInboundTerminalFailureAnnouncer(
           });
         },
         (error: unknown) => {
-          inFlight.delete(key);
+          if (sentAt === generation) inFlight.delete(key);
           undelivered(summarizeError(error), 'send-rejected');
         },
       );

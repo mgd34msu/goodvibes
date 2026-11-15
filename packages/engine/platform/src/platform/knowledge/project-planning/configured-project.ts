@@ -72,12 +72,12 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   const selectedPath = join(workspace.configDirectory, file), source = sources.get(selectedPath)!;
   const plans = [join(workspace.configDirectory, 'work-plans')];
   if (home) for (const surface of ['tui', 'agent', 'daemon']) plans.push(join(home, '.goodvibes', surface, 'work-plans'));
-  const ownership = [...new Set(plans)].map(path => inspectWorkPlanProjects(path, workspace.directory!));
-  const known = new Set(ownership.flatMap(plan => plan.projectIds));
+  const ownership = [...new Set(plans)].map(path => ({ path, inspection: inspectWorkPlanProjects(path, workspace.directory!) }));
+  const known = new Set(ownership.flatMap(plan => plan.inspection.projectIds));
   const originalSourcesCurrent = () => {
     current(); registered?.assertCurrent();
     for (const selected of sources.values()) selected.assertInitialImage();
-    for (const plan of ownership) plan.assertCurrent();
+    for (const plan of ownership) assertWorkPlanOwnershipCurrent(plan, workspace.directory!);
   };
   originalSourcesCurrent();
   const associatedProjectId = registered?.projectId ?? (known.size === 1 ? [...known][0] : undefined);
@@ -97,6 +97,15 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   }
   originalSourcesCurrent();
   return Object.freeze({ registration: 'registered', projectId: registered.projectId });
+}
+/** Another surface sharing the home may save a work plan between inspection and this check.
+ * Re-inspect once: if the workspace's owning projects are unchanged the new listing is
+ * equally valid, so only a real ownership change is refused. */
+function assertWorkPlanOwnershipCurrent(plan: { readonly path: string; inspection: ReturnType<typeof inspectWorkPlanProjects> }, workspace: string): void {
+  try { plan.inspection.assertCurrent(); return; } catch (error) { if (!(error instanceof ProjectIdentityUnavailableError)) throw error; }
+  const next = inspectWorkPlanProjects(plan.path, workspace), before = plan.inspection.projectIds;
+  if (next.projectIds.length !== before.length || next.projectIds.some((id, index) => id !== before[index])) throw new ProjectIdentityUnavailableError();
+  plan.inspection = next;
 }
 function requirePreparedProject(config: ConfigManager, file: string): PreparedProject {
   selectedFile(file); const prepared = mapGet(weakGet(preparations, config), file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();
@@ -120,7 +129,7 @@ export function assertConfiguredProjectContextReady(config: ConfigManager, worki
 export function createConfiguredPlanningStore(config: ConfigManager, file = REGULAR_KNOWLEDGE_DB_FILE,
   options: Pick<KnowledgeStoreConfig, 'nativeDataWriter' | 'family'> = {}): KnowledgeStore {
   const prepared = requirePreparedProject(config, file);
-  const store = new nativeStoreConstructor({ ...options, configManager: config, dbFileName: file, beforeInitialRead: () => { prepared.assertCurrent(); prepared.source.assertInitialImage(); } });
+  const store = new nativeStoreConstructor({ family: file === GOODVIBES_AGENT_KNOWLEDGE_DB_FILE ? 'agent' : 'wiki', ...options, configManager: config, dbFileName: file, beforeInitialRead: () => { prepared.assertCurrent(); prepared.source.assertInitialImage(); } });
   prepared.assertCurrent(); weakSet(constructedStores, store, prepared); return store;
 }
 /** Used only by the native configured factory. An ID, parsed JSON, borrowed

@@ -182,7 +182,8 @@ export class RuntimeTracer {
       return new NoopSpan();
     }
 
-    const traceId = opts?.traceId ?? generateTraceId();
+    // An empty id (an envelope with no trace) is absent, not a valid trace id.
+    const traceId = opts?.traceId || generateTraceId();
     const span = new SpanImpl({
       name,
       kind: opts?.kind ?? SpanKind.INTERNAL,

@@ -79,14 +79,28 @@ export class DecisionRouterProvider implements LLMProvider {
     };
   }
 
-  async prepare(input: DecisionRouterPrepareInput): Promise<PreparedDecisionRoute> {
+  prepare(input: DecisionRouterPrepareInput): Promise<PreparedDecisionRoute> {
+    return this.prepareTurn(input, false);
+  }
+
+  private async prepareTurn(input: DecisionRouterPrepareInput, retried: boolean): Promise<PreparedDecisionRoute> {
     if (routingScope.getStore()) throw new Error('Nested Decision Router routes are forbidden.');
     input.signal?.throwIfAborted(); input.assertCurrent?.();
     const key = input.context ? JSON.stringify([input.context.sessionId ?? '', input.context.turnId]) : undefined;
     if (key !== undefined) {
       const previous = this.turns.get(key);
       if (previous) {
-        const result = await previous.result;
+        let result: PreparedDecisionRoute;
+        try {
+          result = await previous.result;
+        } catch (error) {
+          // The first caller's failure (its own abort, usually) is not this
+          // caller's: while this caller is still live it prepares the turn itself.
+          input.signal?.throwIfAborted(); input.assertCurrent?.();
+          if (this.turns.get(key) === previous) this.turns.delete(key);
+          if (!retried) return this.prepareTurn(input, true);
+          throw error;
+        }
         input.signal?.throwIfAborted(); input.assertCurrent?.(); result.assertCurrent();
         return result;
       }
@@ -99,7 +113,7 @@ export class DecisionRouterProvider implements LLMProvider {
     const result = decisionOrClassic(() => this.choose(input), () => this.classicGeneral(input));
     if (key !== undefined) {
       const entry = { result, pending: true }; this.turns.set(key, entry);
-      void result.then(() => { entry.pending = false; }, () => { this.turns.delete(key); });
+      void result.then(() => { entry.pending = false; }, () => { if (this.turns.get(key) === entry) this.turns.delete(key); });
     }
     return result;
   }

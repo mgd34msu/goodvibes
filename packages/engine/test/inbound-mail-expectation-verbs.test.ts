@@ -72,6 +72,18 @@ describe('email.expectation.open', () => {
     expect(registry.list().length).toBe(1);
   });
 
+  test('says whether a mailbox is being read, so a caller learns now that nothing can arrive', async () => {
+    const registry = newRegistry();
+    const idle = { running: false, reason: 'Inbound mail is switched off.' };
+    const open = createEmailExpectationOpenHandler(registry, () => idle);
+
+    const result = await open(invocation(VALID)) as Record<string, unknown>;
+
+    // Not refused: a standby node legitimately watches nothing.
+    expect(registry.list().length).toBe(1);
+    expect(result.watching).toEqual(idle);
+  });
+
   test.each([
     ['serviceDomain', { ...VALID, serviceDomain: '' }],
     ['recipientAddress', { ...VALID, recipientAddress: '   ' }],

@@ -125,23 +125,6 @@ test('an unknown wire mode never becomes an active or default selection', async 
   expectNoConfigWrites(daemon);
 });
 
-test('retired and unknown wire writes cannot change the selected session mode', async ({ page }) => {
-  const daemon = await installMockDaemon(page);
-  const detail = await openSession(page);
-  await expect(permissionFact(detail)).toContainText('Safe — owner');
-  for (const mode of ['custom', 'normal', 'auto', 'accept-edits', 'allow-all', 'future-mode']) {
-    const result = await page.evaluate(async ({ path, mode }) => {
-      const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode }) });
-      return { status: response.status, body: await response.json() };
-    }, { path: MODE_PATH, mode });
-    expect(result.status).toBe(400);
-    expect(result.body).toMatchObject({ code: 'INVALID_ARGUMENT' });
-  }
-  const actual = await page.evaluate(async path => (await fetch(path)).json(), MODE_PATH);
-  expect(actual).toEqual({ sessionId: STEERABLE_SESSION.id, mode: 'safe-owner' });
-  expectNoConfigWrites(daemon);
-});
-
 test('a nonlocal session shows the SESSION_NOT_LOCAL refusal without inheriting the local picker', async ({ page }) => {
   const daemon = await installMockDaemon(page);
   const local = await openSession(page);

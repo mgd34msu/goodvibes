@@ -13,7 +13,28 @@ import type { ContextAccountingSource } from '@goodvibes-jev/engine/platform/pla
  * would be a 3-file cycle (see check-architecture.ts's cycle detector).
  */
 export interface CompactionActivityBus {
-  on(eventType: string, callback: () => void): () => void;
+  on(eventType: CompactionActivityEventType, callback: (envelope: CompactionActivityEnvelope) => void): () => void;
+}
+
+/** The runtime-bus event types the compaction tracker subscribes to. */
+export type CompactionActivityEventType =
+  | 'COMPACTION_CHECK'
+  | 'COMPACTION_AUTOCOMPACT'
+  | 'COMPACTION_REACTIVE'
+  | 'COMPACTION_MICROCOMPACT'
+  | 'COMPACTION_COLLAPSE'
+  | 'COMPACTION_DONE'
+  | 'COMPACTION_FAILED'
+  | 'COMPACTION_RECEIPT';
+
+/** The slice of a runtime-bus envelope the compaction tracker reads; the payload differs per event type, so its fields are read by name. */
+export interface CompactionActivityEnvelope {
+  readonly payload?: unknown;
+}
+
+function payloadField(envelope: CompactionActivityEnvelope, field: string): unknown {
+  const payload = envelope.payload;
+  return typeof payload === 'object' && payload !== null && field in payload ? payload[field as keyof typeof payload] : undefined;
 }
 
 /**
@@ -41,12 +62,25 @@ export interface ContextAccountingSourceDeps {
   readonly sessionLineageTracker: Pick<SessionLineageTracker, 'getCompactionCount'>;
   readonly runtimeBus?: CompactionActivityBus | null | undefined;
   readonly sessionId: string;
+  /**
+   * The session id in force now, for a terminal whose session changes on resume.
+   * A compaction event for this id or for `sessionId` is the main session's;
+   * any other id is another session's (a background agent) and is ignored.
+   */
+  readonly currentSessionId?: (() => string) | undefined;
   /** Human-readable scope label, e.g. "main session". Defaults to 'main session'. */
   readonly scope?: string | undefined;
 }
 
-/** Events that mark a compaction run starting. */
-const COMPACTION_START_EVENT_TYPES = [
+/**
+ * Events that mark a compaction run in progress. The platform emits these after
+ * the strategy was chosen and before the boundary commit, so the run is
+ * already under way when they arrive. COMPACTION_CHECK opens every run, and the
+ * manager runs its strategy after every check (a run forced by the provider's
+ * context-full warning can start under the threshold), so a check always starts
+ * the state.
+ */
+const COMPACTION_ACTIVE_EVENT_TYPES = [
   'COMPACTION_AUTOCOMPACT',
   'COMPACTION_REACTIVE',
   'COMPACTION_MICROCOMPACT',
@@ -67,17 +101,30 @@ export function createContextAccountingSource(deps: ContextAccountingSourceDeps)
   const unsubs: Array<() => void> = [];
   if (deps.runtimeBus) {
     const bus = deps.runtimeBus;
-    for (const type of COMPACTION_START_EVENT_TYPES) {
+    // Compaction events of a background agent share this bus; only the main
+    // session's may flip the flag, or its idle would read as ours.
+    const isMainSession = (envelope: CompactionActivityEnvelope): boolean => {
+      const sessionId = payloadField(envelope, 'sessionId');
+      if (typeof sessionId !== 'string') return true;
+      return sessionId === deps.sessionId || sessionId === deps.currentSessionId?.();
+    };
+    unsubs.push(
+      bus.on('COMPACTION_CHECK', (envelope) => {
+        if (!isMainSession(envelope)) return;
+        isCompacting = true;
+      }),
+    );
+    for (const type of COMPACTION_ACTIVE_EVENT_TYPES) {
       unsubs.push(
-        bus.on(type, () => {
-          isCompacting = true;
+        bus.on(type, (envelope) => {
+          if (isMainSession(envelope)) isCompacting = true;
         }),
       );
     }
     for (const type of COMPACTION_END_EVENT_TYPES) {
       unsubs.push(
-        bus.on(type, () => {
-          isCompacting = false;
+        bus.on(type, (envelope) => {
+          if (isMainSession(envelope)) isCompacting = false;
         }),
       );
     }

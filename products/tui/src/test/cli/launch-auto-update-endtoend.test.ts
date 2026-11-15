@@ -1,5 +1,5 @@
 /** Actual launch/apply/respawn/rollback with a complete synthetic release and
- * real native file/directory transactions. Authored source; execution deferred. */
+ * real native file/directory transactions. */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,7 +50,7 @@ async function run(installation: ReturnType<typeof install>, base: string, args:
   return { stdout: out + err, code };
 }
 const supported = ['linux', 'darwin'].includes(process.platform) && ['x64', 'arm64'].includes(process.arch);
-describe.if(supported)('TUI suite launch update, actual filesystem and respawn', () => {
+describe.skipIf(!supported)('TUI suite launch update, actual filesystem and respawn', () => {
   test('updates every selected companion and configured WebUI, restarts, then restores the complete original release', async () => {
     const f = install(), release = serve(), output = await run(f, release.base, ['--session', 'alpha']);
     expect(output.code).toBe(0); expect(output.stdout).toContain(`Updated GoodVibes ${NEXT}: goodvibes.`);

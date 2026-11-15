@@ -181,9 +181,13 @@ describe('writeSkillStandardFile', () => {
   test('overwrites with flag', () => {
     const tmpDir = makeProjectTempDir('goodvibes-skill-standard');
     const skill = { name: 'Status Review', description: 'Check status.', procedure: 'Inspect.' };
-    writeSkillStandardFile(skill, tmpDir);
-    const written = writeSkillStandardFile(skill, tmpDir, true);
-    expect(written).toBeTruthy();
+    const first = writeSkillStandardFile(skill, tmpDir);
+    expect(readFileSync(first, 'utf-8')).toContain('Inspect.');
+    const written = writeSkillStandardFile({ ...skill, procedure: 'Inspect twice, then report.' }, tmpDir, true);
+    expect(written).toBe(first);
+    const content = readFileSync(written, 'utf-8');
+    expect(content).toContain('Inspect twice, then report.');
+    expect(content).not.toContain('Inspect.\n');
   });
 
   test('throws on name that produces empty slug', () => {

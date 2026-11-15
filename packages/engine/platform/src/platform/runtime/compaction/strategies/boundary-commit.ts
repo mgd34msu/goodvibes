@@ -4,10 +4,9 @@
  * Boundary commit, persists a compacted snapshot as a named checkpoint with
  * full lineage tracking for replay-safe session resumption.
  *
- * A boundary commit is always created after a successful compaction strategy
- * run (microcompact, collapse, autocompact, or reactive). It forms the
- * persistent anchor point that the resume-repair pipeline uses to restore
- * a session from a corrupted or partial state.
+ * A boundary commit is created after each compaction the session applies
+ * (microcompact, collapse, autocompact, or reactive), and is the anchor the
+ * next commit's lineage chains to.
  *
  * Lineage is append-only: each commit appends its own checkpointId to the
  * parent's lineage array. This means any checkpoint can be sliced from any

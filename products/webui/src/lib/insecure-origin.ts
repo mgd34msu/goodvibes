@@ -40,7 +40,7 @@ export const INSECURE_ORIGIN_BODY =
 /**
  * The baseUrl the platform transport would be handed, identical source to
  * `GOODVIBES_BASE_URL` in lib/goodvibes.ts, re-derived here so we never import that
- * (throwing) module. `VITE_GOODVIBES_BASE_URL` wins if set; otherwise the page origin.
+ * (throwing) module. `VITE_GOODVIBES_BASE_URL` wins if non-empty; otherwise the page origin.
  */
 function effectiveBaseUrl(): string {
   const configured = import.meta.env?.VITE_GOODVIBES_BASE_URL as string | undefined;
@@ -51,13 +51,15 @@ function effectiveBaseUrl(): string {
 
 /**
  * Mirror of `isPrivateNetworkHost` (packages/transport-http/src/paths.ts, platform 1.8.0):
- * loopback, an RFC 1918 range, or an mDNS `.local` name. Kept as a local, dependency-free
+ * loopback, a wildcard bind address, an RFC 1918 range, or an mDNS `.local` name. Kept as a local, dependency-free
  * duplicate rather than an import for the reason in the file header, this predicate must
  * stay correct even if the platform package can't be loaded at all.
  */
-function isPrivateNetworkHost(hostname: string): boolean {
+export function isPrivateNetworkHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (host === 'localhost' || host === '::1' || host.endsWith('.localhost')) return true;
+  // Wildcard bind addresses dial the local machine, never a public origin.
+  if (host === '0.0.0.0' || host === '::' || host === '0:0:0:0:0:0:0:0') return true;
   if (host.endsWith('.local')) return true; // mDNS
   const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (!ipv4) return false;
@@ -82,7 +84,9 @@ export function isInsecureTransportOrigin(): boolean {
   // Honor the same explicit override the platform guard honors, so an intentional insecure
   // deployment does not get the message.
   const runtimeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-  if (runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT === 'true') return false;
+  // Same switch grammar as transport-http paths.ts and the platform envFlag: 1/true on, anything else off.
+  const insecureSwitch = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT?.trim().toLowerCase();
+  if (insecureSwitch === '1' || insecureSwitch === 'true') return false;
 
   const base = effectiveBaseUrl();
   if (!base) return false;

@@ -64,9 +64,19 @@ export class WakeDetector {
     return this.#tuning;
   }
 
-  /** Milliseconds of cooldown left at `now`, or 0 when not in cooldown. */
+  /**
+   * Milliseconds of cooldown left at `now`, or 0 when not in cooldown. A stamp
+   * further ahead than one cooldown can only come from a clock that stepped
+   * backwards after a wake fired; it is dropped so the wake word is not deaf
+   * until the clock catches up.
+   */
   cooldownRemaining(now: number): number {
-    return Math.max(0, this.#cooldownUntil - now);
+    const remaining = this.#cooldownUntil - now;
+    if (remaining > this.#tuning.cooldownMs) {
+      this.#cooldownUntil = 0;
+      return 0;
+    }
+    return Math.max(0, remaining);
   }
 
   /**

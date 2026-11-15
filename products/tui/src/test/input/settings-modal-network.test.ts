@@ -261,27 +261,22 @@ describe('SettingsModal: network category', () => {
     expect(modal.lastSaveTriggeredRestart).toBe('web');
   });
 
-  test('no-op write does not set lastSaveTriggeredRestart', () => {
+  test('committing an unchanged value does not set lastSaveTriggeredRestart, a changed one does', () => {
     openOnNetworkTab();
-    const items = modal.currentItems;
-    // Set controlPlane.hostMode to its current value (no change)
-    const cpHostModeEntry = items.find(e => e.setting.key === 'controlPlane.hostMode')!;
-    const currentVal = cpHostModeEntry.currentValue;
-    // Directly call adjustSelected twice (left then right) to ensure net no-op
-    const cpHostModeIdx = items.findIndex(e => e.setting.key === 'controlPlane.hostMode');
-    modal.selectedIndex = cpHostModeIdx;
-    modal.adjustSelected('right');
-    const after = modal.lastSaveTriggeredRestart;
-    // cycling right changes the value so restart fires; cycle back
-    modal.adjustSelected('left');
-    // After cycling back, we made two real changes so restart is still set from first
-    // The key test: a genuine write triggers restart, a same-value write does not
-    // Verify by resetting and writing the same value manually via _setValue path
-    modal.close();
-    modal.open(cm, ffm, subscriptionManager, serviceRegistry, emptyMcpRegistry);
-    modal.categoryIndex = SETTINGS_CATEGORIES.indexOf('network');
-    // Now write same value as current (no-op) via adjustSelected left then right to net zero
+    modal.selectedIndex = modal.currentItems.findIndex(e => e.setting.key === 'controlPlane.port');
+    expect(modal.selectedIndex).toBeGreaterThanOrEqual(0);
+
+    // Edit mode starts with the current value in the buffer; committing it
+    // untouched is a write of the same value.
+    modal.activateSelected();
+    expect(modal.editingMode).toBe(true);
+    expect(modal.commitEdit()).toBe(true);
     expect(modal.lastSaveTriggeredRestart).toBeNull();
+
+    modal.activateSelected();
+    modal.editChar('0');
+    expect(modal.commitEdit()).toBe(true);
+    expect(modal.lastSaveTriggeredRestart).toBe('control-plane');
   });
 
   // ── M3: render-layer banner test ─────────────────────────────────────────

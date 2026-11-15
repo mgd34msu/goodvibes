@@ -16,6 +16,21 @@ import { createFeatureFlagManager, type FeatureFlagManager } from './feature-fla
 import { bindFeatureSettingsBridge, deriveFeatureStates } from './feature-flags/feature-settings.js';
 import { installComposedTelemetry } from './telemetry/index.js';
 
+/** Config-subscription teardown for the managers this module created. */
+const bridgeTeardowns = new WeakMap<FeatureFlagManager, () => void>();
+
+/**
+ * Detach the settings bridge that `resolveRuntimeFeatureFlags` attached to a
+ * manager it created, so a disposed runtime no longer stays reachable from the
+ * config manager's subscriptions. A manager the caller supplied is left alone.
+ */
+export function disposeRuntimeFeatureFlags(featureFlags: FeatureFlagManager): void {
+  const teardown = bridgeTeardowns.get(featureFlags);
+  if (teardown === undefined) return;
+  bridgeTeardowns.delete(featureFlags);
+  teardown();
+}
+
 export interface RuntimeFeatureFlagOptions {
   readonly configManager: ConfigManager;
   /** The caller's manager. Present ⇒ used as-is (the caller already loaded and bridged it). */
@@ -32,7 +47,7 @@ export function resolveRuntimeFeatureFlags(options: RuntimeFeatureFlagOptions): 
     // Gate states derive from domain settings keys; the bridge keeps live
     // config.set changes flowing. Wired only for a manager this call owns.
     featureFlags.loadFromConfig({ flags: deriveFeatureStates(options.configManager) });
-    bindFeatureSettingsBridge(options.configManager, featureFlags);
+    bridgeTeardowns.set(featureFlags, bindFeatureSettingsBridge(options.configManager, featureFlags));
   }
   installComposedTelemetry(featureFlags); // telemetry.otelMode -> the process tracer
   return featureFlags;

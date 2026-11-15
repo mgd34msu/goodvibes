@@ -7,12 +7,15 @@ import { getBinaryPath, ensureBinary } from './binary-downloader.js';
 import type { ShellPathService } from '../../runtime/shell-paths.js';
 import { summarizeError } from '../../utils/error-display.js';
 
-type LspRoots = Pick<ShellPathService, 'workingDirectory' | 'resolveProjectPath'>;
+type LspRoots = Pick<ShellPathService, 'workingDirectory' | 'resolveUserPath'>;
 
 const ENGINE_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../');
 
-function bundledCommandPath(command: string, workingDirectory: string): string | null {
-  const candidates = [join(workingDirectory, 'node_modules', '.bin', command)];
+// A server binary inside the opened repository is never chosen: opening a repo
+// must not let it pick the program the editor runs. Only the engine install,
+// the user's own download directory and PATH are searched.
+function bundledCommandPath(command: string): string | null {
+  const candidates: string[] = [];
   let current = ENGINE_PACKAGE_ROOT;
   for (let depth = 0; depth < 8; depth += 1) {
     candidates.push(join(current, 'node_modules', '.bin', command));
@@ -36,15 +39,15 @@ function bundledCommandPath(command: string, workingDirectory: string): string |
 }
 
 /**
- * Resolve a server command: check node_modules/.bin/ first (bundled),
- * then fall back to system PATH via Bun.which().
+ * Resolve a server command: check the engine install's node_modules/.bin/
+ * (bundled), then the user download directory, then system PATH via Bun.which().
  * Returns the resolved command path, or the original command if neither found.
  */
-function resolveCommand(command: string, workingDirectory: string): string {
-  const bundled = bundledCommandPath(command, workingDirectory);
+function resolveCommand(command: string, userBinaryDir: string): string {
+  const bundled = bundledCommandPath(command);
   if (bundled) return bundled;
-  // Try .goodvibes/bin/ (downloaded binaries)
-  const downloaded = getBinaryPath(join(workingDirectory, '.goodvibes', 'bin'), command);
+  // Try the user's ~/.goodvibes/bin/ (downloaded binaries)
+  const downloaded = getBinaryPath(userBinaryDir, command);
   if (existsSync(downloaded)) return downloaded;
   // Try system PATH
   const system = Bun.which(command);
@@ -122,7 +125,7 @@ export class LspService {
     const config = this.configs.get(langId);
     if (!config) return null;
 
-    const resolvedCommand = resolveCommand(config.command, this.roots.workingDirectory);
+    const resolvedCommand = resolveCommand(config.command, this.roots.resolveUserPath('bin'));
     const client = new LspClient(resolvedCommand, config.args);
     try {
       await client.start();
@@ -152,9 +155,9 @@ export class LspService {
     const config = this.configs.get(langId);
     if (!config) return false;
     // Check bundled first
-    if (bundledCommandPath(config.command, this.roots.workingDirectory)) return true;
+    if (bundledCommandPath(config.command)) return true;
     // Check downloaded binaries
-    const downloaded = getBinaryPath(this.roots.resolveProjectPath('bin'), config.command);
+    const downloaded = getBinaryPath(this.roots.resolveUserPath('bin'), config.command);
     if (existsSync(downloaded)) return true;
     // Then system PATH
     try {
@@ -203,13 +206,13 @@ export class LspService {
 
     for (const { command, langIds, args } of WELL_KNOWN_SERVERS) {
       let found = false;
-      // Check bundled first, then .goodvibes/bin/, then system PATH
-      if (bundledCommandPath(command, this.roots.workingDirectory)) {
+      // Check bundled first, then ~/.goodvibes/bin/, then system PATH
+      if (bundledCommandPath(command)) {
         found = true;
       }
-      // Check .goodvibes/bin/ (downloaded binaries)
+      // Check ~/.goodvibes/bin/ (downloaded binaries)
       if (!found) {
-        const downloaded = getBinaryPath(this.roots.resolveProjectPath('bin'), command);
+        const downloaded = getBinaryPath(this.roots.resolveUserPath('bin'), command);
         found = existsSync(downloaded);
       }
       if (!found) {
@@ -253,6 +256,6 @@ export class LspService {
     if (available) return;
 
     // Try to download/install the binary
-    await ensureBinary(this.roots.resolveProjectPath('bin'), config.command);
+    await ensureBinary(this.roots.resolveUserPath('bin'), config.command);
   }
 }

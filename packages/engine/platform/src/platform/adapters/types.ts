@@ -24,9 +24,33 @@ import type { ServiceRegistry } from '../config/service-registry.js';
  */
 export type SurfaceIngressDecision = Pick<ChannelPolicyDecision, 'allowed' | 'reason'>;
 
+/**
+ * Refusals the channel policy produces for ordinary traffic: a group message that did not address the
+ * bot, a sender not on the allowlist. They will not change when the provider delivers the same message
+ * again, so a surface whose provider redelivers on failure acknowledges them instead of failing the delivery.
+ * Any other refusal (for example a failed source-account check) is still answered with a failure status.
+ */
+const ORDINARY_INGRESS_REFUSALS: ReadonlySet<string> = new Set([
+  'surface-disabled', 'direct-messages-disabled', 'group-messages-disabled', 'thread-messages-disabled',
+  'group-not-allowlisted', 'missing-group-identity', 'user-not-allowlisted', 'missing-user-identity',
+  'channel-not-allowlisted', 'missing-channel-identity', 'mention-required', 'command-not-allowed',
+]);
+export function isOrdinaryIngressRefusal(reason: string): boolean {
+  return ORDINARY_INGRESS_REFUSALS.has(reason);
+}
+
 export interface SurfaceControlCommand {
   readonly action: 'status' | 'cancel' | 'retry';
   readonly id: string;
+}
+
+/** Which conversation a control command arrived from, so the owner of the command can check the target belongs to it. */
+export interface SurfaceControlOrigin {
+  readonly surface: string;
+  /** The route binding the message arrived on. */
+  readonly routeId: string;
+  readonly userId?: string | undefined;
+  readonly channelId?: string | undefined;
 }
 
 export interface QueueSurfaceReplyInput {
@@ -109,12 +133,19 @@ export interface SurfaceAdapterContext {
    * wires no alarm is unaffected.
    */
   readonly reportIngressFailure?: ((surface: import('../channels/types.js').ChannelSurface, detail: string) => void) | undefined;
+  /**
+   * Sends one short notice to the conversation a route binding points at. A refusal comes back
+   * as a result naming its reason; it never throws. Absent when the embedder wires no delivery.
+   */
+  readonly deliverSurfaceNotice?: ((binding: AutomationRouteBinding | undefined, text: string) => Promise<import('../daemon/types.js').SurfaceNoticeDelivery>) | undefined;
   readonly parseSurfaceControlCommand: (text: string, options?: import('@goodvibes-jev/judgment/decisions').CallOptions) => SurfaceControlCommand | null | Promise<SurfaceControlCommand | null>;
-  readonly performSurfaceControlCommand: (command: SurfaceControlCommand) => Promise<string>;
+  readonly performSurfaceControlCommand: (command: SurfaceControlCommand, origin?: SurfaceControlOrigin) => Promise<string>;
   readonly performInteractiveSurfaceAction: (
     actionId: string,
     surface: 'slack' | 'discord',
     req: Request,
+    /** The platform user id the surface's verified payload names as the person who pressed the button. */
+    userId?: string | undefined,
   ) => Promise<string>;
   readonly trySpawnAgent: (...args: Parameters<TrySpawnAgentFn>) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
   readonly queueSurfaceReplyFromBinding: (

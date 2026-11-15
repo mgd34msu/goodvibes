@@ -11,6 +11,15 @@ function parseJsonRecord(rawBody: string): Record<string, unknown> | Response {
   }
 }
 
+/** Binding fields a caller may describe itself with; anything else it sends is not copied onto the shared binding. */
+const BINDING_PROFILE_FIELDS = ['userId', 'displayName', 'workspaceId', 'groupId', 'conversationKind'] as const;
+
+/** Keys under `goodvibes.` are the platform's own markers (such as work authorization); a caller never supplies them. */
+function withoutReservedMetadata(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => !key.startsWith('goodvibes.')));
+}
+
 export async function handleGenericWebhookSurface(req: Request, context: GenericWebhookAdapterContext): Promise<Response> {
   const credential = await resolveSurfaceCredential(context, { kind: 'config', key: 'surfaces.webhook.secret' });
   if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('webhook', credential);
@@ -55,6 +64,9 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
       ?? threadId
       ?? channelId
       ?? surfaceId;
+  if (body.callbackUrl !== undefined && typeof body.callbackUrl !== 'string') {
+    return Response.json({ error: 'callbackUrl must be a string URL' }, { status: 400 });
+  }
   let callbackUrl = typeof body.callbackUrl === 'string' ? body.callbackUrl : undefined;
   if (callbackUrl) {
     const validation = validatePublicWebhookUrl(callbackUrl);
@@ -96,6 +108,14 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
   if (!policy.allowed) {
     return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
   }
+  // A caller may continue a conversation that came through this webhook, not step into one from another surface.
+  const requestedSessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined;
+  if (requestedSessionId) {
+    const existing = context.sessionBroker.getSession(requestedSessionId);
+    if (existing && !existing.surfaceKinds.includes('webhook')) {
+      return Response.json({ error: 'sessionId belongs to a conversation that did not come through this webhook. Omit sessionId to start a new conversation.' }, { status: 403 });
+    }
+  }
 
   const binding = await context.routeBindings.upsertBinding({
     kind: threadId ? 'thread' : channelId ? 'channel' : 'message',
@@ -107,10 +127,12 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
     title: typeof body.title === 'string' ? body.title : externalId,
     metadata: {
-      ...body,
-      ...(callbackUrl ? { callbackUrl } : {}),
-      ...(correlationId ? { correlationId } : {}),
-      ...(typeof body.callbackSignature === 'string' ? { callbackSignature: body.callbackSignature } : {}),
+      ...Object.fromEntries(BINDING_PROFILE_FIELDS.filter((field) => typeof body[field] === 'string').map((field) => [field, body[field]])),
+      // The binding is shared by every call on this route, and its metadata is merged over what an earlier call left.
+      // Written explicitly (undefined when this call has none) so a callback never outlives the request that supplied it.
+      callbackUrl,
+      correlationId,
+      callbackSignature: typeof body.callbackSignature === 'string' ? body.callbackSignature : undefined,
     },
   });
 
@@ -135,11 +157,9 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
     title: typeof body.title === 'string' ? body.title : externalId,
     body: task,
-    metadata: typeof body.metadata === 'object' && body.metadata !== null
-      ? { ...body.metadata as Record<string, unknown>, ...(correlationId ? { correlationId } : {}) }
-      : { ...(correlationId ? { correlationId } : {}) },
+    metadata: { ...withoutReservedMetadata(body.metadata), ...(correlationId ? { correlationId } : {}) },
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     return Response.json({
       acknowledged: true,
       queued: true,
@@ -158,7 +178,7 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
     submission.session.id,
   );
   if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   let callbackDelivery: Record<string, unknown>;
   if (callbackUrl && context.surfaceDeliveryEnabled('webhook')) {
     context.queueWebhookReply({

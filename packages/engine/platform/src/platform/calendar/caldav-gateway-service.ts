@@ -44,8 +44,9 @@ import type {
 } from '../control-plane/routes/calendar.js';
 import { CalDavClient, type CalDavHttpPort } from '../google/caldav-client.js';
 import { isCalendarResourceType, parseMultistatus } from '../google/caldav-parse.js';
-import { parseICS, type ParsedICalEvent } from './caldav-ics.js';
-import { generateCalendar, generateICS, type GenerateICalInput } from './caldav-ics-generate.js';
+import { parseICSDetailed, type ParsedICalEvent } from './caldav-ics.js';
+import { generateCalendar, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
+import { logger } from '../utils/logger.js';
 import {
   collectionPathOrRoot,
   collectionUrlFor,
@@ -60,7 +61,6 @@ import {
   type CalDavSecretPort,
 } from './caldav-gateway-config.js';
 import {
-  organizerIsOwnerIdentity,
   recordCalendarEventIngest,
   type CalendarUntrustedIngestRecorder,
 } from './untrusted-events.js';
@@ -142,6 +142,9 @@ function validateIsoDate(value: string, field: string): string {
  * will give me", and a caller asking for 0 has a bug that an empty page would
  * hide.
  */
+/** How far back an unwindowed `listEvents` reaches, so a meeting that just started still shows. */
+const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
 function resolveLimit(limit: number | undefined): number {
   if (limit === undefined) return 20;
   return Math.max(1, Math.min(200, Math.floor(limit)));
@@ -208,8 +211,19 @@ function eventsFromMultistatus(xml: string, calendarId: string): CalDavEvent[] {
     const calendarData = entry.props['calendar-data'];
     if (!calendarData) continue;
     const href = toRelativeHref(entry.href);
-    for (const event of parseICS(calendarData)) {
+    const parsed = parseICSDetailed(calendarData);
+    for (const event of parsed.events) {
       events.push({ ...event, href, calendarId });
+    }
+    // One unreadable VEVENT must not make the rest of the collection
+    // unreadable; it is named in the log and left out of the answer.
+    for (const failure of parsed.errors) {
+      logger.warn('CalDAV event skipped: it could not be read', {
+        calendarId,
+        href,
+        ...(failure.uid === undefined ? {} : { uid: failure.uid }),
+        reason: failure.message,
+      });
     }
   }
   return events;
@@ -250,25 +264,16 @@ export function createCalDavCalendarGatewayService(
    * and never reaches a gateway response, which continues to carry display
    * names only.
    *
-   * A CalDAV collection is the owner's own server: it holds both the entries
-   * they created and the invitations delivered to them. Recording every event
-   * on it would mark the ordinary act of reading their own calendar as
-   * untrusted ingest
-   * and refuse every outward action for the rest of the turn, and refuse it
-   * COARSELY, because `createUntrustedContentPort` calls `evaluateOutwardEffect`
-   * with `request`, `ledger` and `approval` only, no `content`, so a port
-   * consumer such as `platform/browser/browser-engine.ts` takes the "any origin
-   * -> refuse" branch and no content-derivation check ever runs. So the claimed
-   * ORGANIZER is compared against the CONFIGURED CalDAV account, and only a
-   * positive match is treated as the owner's own. Absent, unparseable or
-   * unmatched all stay external; an unconfigured account matches nothing.
-   *
-   * The identity comes from `surfaces.calendar.caldavUser`, configuration,
-   * exactly as the mail exemption reads only configured owner addresses
-   * (`platform/security/owner-identity.ts`). It is never read from an event.
+   * Every CalDAV event is recorded, including one whose ORGANIZER matches the
+   * configured account. The ORGANIZER line is text inside the event body, and
+   * nothing here can tell whether the server verified who wrote it: a shared or
+   * delegated collection, a server without scheduling, or one that accepts
+   * inbound invitations without checking the sender will all hand over an event
+   * naming the owner as organizer. Exempting on that claim would let such an
+   * event's text steer outward actions unchecked, so no CalDAV event is treated
+   * as the owner's own.
    */
   function recordEventsRead(
-    config: CalDavGatewayConfig,
     calendarId: string,
     events: readonly CalDavEvent[],
   ): void {
@@ -283,11 +288,22 @@ export function createCalDavCalendarGatewayService(
           description: event.description,
           attendees: displayAttendees(event),
           organizer,
-          organizerIsOwner: organizerIsOwnerIdentity(organizer, config.username),
         };
       }),
       at: stampNow(),
     });
+  }
+
+  /**
+   * The resource name an event is PUT under. A UID from an imported file is
+   * somebody else's text and is a path segment here: one carrying `/`, `\`,
+   * `?`, `#`, whitespace or control characters, or made only of dots, would
+   * name a resource outside the collection (or cut the URL short), so such a
+   * UID gets a generated name instead. The UID itself stays inside the event
+   * body.
+   */
+  function resourceNameFor(uid: string): string {
+    return /^[A-Za-z0-9._@+=~-]+$/.test(uid) && !/^\.+$/.test(uid) ? uid : `${randomUuid()}@goodvibes`;
   }
 
   function newUid(): string {
@@ -315,18 +331,19 @@ export function createCalDavCalendarGatewayService(
   /**
    * Write one .ics resource into a collection and report the host-relative
    * href it now lives at. `If-None-Match: *` on a create refuses to overwrite
-   * an existing resource that happens to share the uid.
+   * an existing resource that happens to share the name. `resourceName` is one
+   * path segment: callers pass `resourceNameFor(uid)`, never a raw UID.
    */
   async function putEvent(
     config: CalDavGatewayConfig,
     request: CalDavRequest,
     calendarId: string,
-    uid: string,
+    resourceName: string,
     ics: string,
     guardAgainstOverwrite: boolean,
   ): Promise<string> {
     const collectionUrl = collectionUrlFor(config, calendarId);
-    const resourcePath = `${uid}.ics`;
+    const resourcePath = `${resourceName}.ics`;
     const response = await request(
       joinUrl(collectionUrl, resourcePath),
       'PUT',
@@ -376,13 +393,19 @@ export function createCalDavCalendarGatewayService(
     },
 
     async listEvents(input: CalendarGatewayListInput): Promise<readonly CalendarGatewayEventSummary[]> {
-      const { config, events } = await readEvents(input);
-      const sorted = [...events].sort((a, b) => a.start.localeCompare(b.start));
+      // With no window the answer is what is coming up, not the oldest events
+      // the collection has ever held (export, which shares `readEvents`, keeps
+      // reading everything).
+      const windowed = input.from === undefined && input.to === undefined
+        ? { ...input, from: new Date(now() - DEFAULT_LOOKBACK_MS).toISOString() }
+        : input;
+      const { events } = await readEvents(windowed);
+      const sorted = [...events].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
       const page = sorted.slice(0, resolveLimit(input.limit));
       // Only the page is recorded: it is what the caller actually receives, and
       // recording the rest would claim exposure to text nobody was handed.
       const first = page[0];
-      if (first !== undefined) recordEventsRead(config, first.calendarId, page);
+      if (first !== undefined) recordEventsRead(first.calendarId, page);
       return page.map(toSummary);
     },
 
@@ -413,11 +436,19 @@ export function createCalDavCalendarGatewayService(
           }
           throw error;
         }
-        const parsed = parseICS(body);
-        const first = parsed[0];
+        const parsed = parseICSDetailed(body);
+        const first = parsed.events[0];
+        const unreadable = parsed.errors[0];
+        if (first === undefined && unreadable !== undefined) {
+          throw new GatewayVerbError(
+            `Event ${eventId} could not be read: ${unreadable.message}`,
+            'CALENDAR_EVENT_UNREADABLE',
+            422,
+          );
+        }
         if (first === undefined) throw notFound(eventId);
         const event = { ...first, href: toRelativeHref(eventId), calendarId: id };
-        recordEventsRead(config, id, [event]);
+        recordEventsRead(id, [event]);
         return toDetail(event);
       }
 
@@ -428,7 +459,7 @@ export function createCalDavCalendarGatewayService(
       const response = await request(collectionUrl, 'REPORT', calendarQueryByUidBody(eventId), { Depth: '1' });
       const found = eventsFromMultistatus(response.body, id).find((event) => event.uid === eventId);
       if (found === undefined) throw notFound(eventId);
-      recordEventsRead(config, id, [found]);
+      recordEventsRead(id, [found]);
       return toDetail(found);
     },
 
@@ -448,31 +479,25 @@ export function createCalDavCalendarGatewayService(
         : config.defaultCalendarId;
       const uid = newUid();
       const createdAt = stampNow();
-      const href = await putEvent(
-        config,
-        request,
-        calendarId,
+      const ics = generateICSOrRefuse({
         uid,
-        generateICS({
-          uid,
-          summary: input.title,
-          start,
-          end,
-          dtStamp: createdAt,
-          ...(input.description === undefined ? {} : { description: input.description }),
-          ...(input.location === undefined ? {} : { location: input.location }),
-          ...(input.attendees === undefined ? {} : { attendees: input.attendees }),
-          status: 'confirmed',
-        }),
-        true,
-      );
+        summary: input.title,
+        start,
+        end,
+        dtStamp: createdAt,
+        ...(input.description === undefined ? {} : { description: input.description }),
+        ...(input.location === undefined ? {} : { location: input.location }),
+        ...(input.attendees === undefined ? {} : { attendees: input.attendees }),
+        status: 'confirmed',
+      });
+      const href = await putEvent(config, request, calendarId, uid, ics, true);
       return { eventId: href, uid, createdAt };
     },
 
     async exportIcs(input: CalendarGatewayListInput): Promise<CalendarGatewayIcsExport> {
-      const { config, events } = await readEvents(input);
+      const { events } = await readEvents(input);
       const first = events[0];
-      if (first !== undefined) recordEventsRead(config, first.calendarId, events);
+      if (first !== undefined) recordEventsRead(first.calendarId, events);
       const dtStamp = stampNow();
       const inputs = events.map((event) =>
         toGenerateInput(event, event.uid || newUid(), dtStamp),
@@ -484,8 +509,8 @@ export function createCalDavCalendarGatewayService(
       icsContent: string,
       calendarId?: string | undefined,
     ): Promise<CalendarGatewayIcsImport> {
-      const parsed = parseICS(icsContent);
-      if (parsed.length === 0) {
+      const { events: parsed, errors: unreadable } = parseICSDetailed(icsContent);
+      if (parsed.length === 0 && unreadable.length === 0) {
         throw new GatewayVerbError(
           'No VEVENT components found in .ics content.',
           'CALENDAR_EMPTY_ICS',
@@ -509,7 +534,9 @@ export function createCalDavCalendarGatewayService(
       const { config, request } = await connect();
       const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
       const eventIds: string[] = [];
-      const errors: string[] = [];
+      const errors: string[] = unreadable.map(
+        (failure) => `${failure.uid ?? '(no uid)'}: ${failure.message}`,
+      );
       for (const event of parsed) {
         const uid = event.uid && event.uid.length > 0 ? event.uid : newUid();
         try {
@@ -517,7 +544,7 @@ export function createCalDavCalendarGatewayService(
             config,
             request,
             id,
-            uid,
+            resourceNameFor(uid),
             generateICS(toGenerateInput(event, uid, stampNow())),
             false,
           );
@@ -529,6 +556,18 @@ export function createCalDavCalendarGatewayService(
       return { imported: eventIds.length, eventIds, errors };
     },
   };
+}
+
+/** Generate the .ics for a create, turning a value that would corrupt the event into a 400. */
+function generateICSOrRefuse(input: GenerateICalInput): string {
+  try {
+    return generateICS(input);
+  } catch (error) {
+    if (error instanceof ICalValueError) {
+      throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
+    }
+    throw error;
+  }
 }
 
 function notFound(eventId: string): GatewayVerbError {

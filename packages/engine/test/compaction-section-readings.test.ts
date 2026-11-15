@@ -114,7 +114,13 @@ describe('structured compaction canonical source selection', () => {
   test('transport failure propagates without source-bearing logging', async () => {
     const { port } = fakePort(() => { throw new Error('synthetic unavailable'); });
     installJudgmentPort(port);
-    await expect(compactMessages(context(), providers)).rejects.toThrow('selection unavailable');
+    const spies = (['debug', 'info', 'warn', 'error'] as const).map(level => spyOn(logger, level));
+    try {
+      await expect(compactMessages(context(), providers)).rejects.toThrow('selection unavailable');
+      const logged = JSON.stringify(spies.flatMap(spy => spy.mock.calls));
+      expect(logged).not.toContain('Preserve the API.');
+      expect(logged).not.toContain('Fixed the parser');
+    } finally { for (const spy of spies) spy.mockRestore(); }
   });
   test('cancellation returns promptly even for an uncooperative dependency', async () => {
     let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });

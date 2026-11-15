@@ -12,7 +12,7 @@ import { makeHarness, makeRepo, oneUnitPlan, runnerPort, startContract, waitFor,
 import { contractOf, finishes, terminal } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => { harness?.dispose(); harness = undefined; });
+afterEach(async () => { const finished = harness; harness = undefined; await finished?.dispose(); });
 
 test('the staged-delivery calibration fixture contains an applicable patch and its actual passing assertions', () => {
   const fixture = ORIGINAL_OBLIGATION_COVERAGE.high.fixtures.find(item => item.name === 'pending native delivery does not undo demonstrated staged work');

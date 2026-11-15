@@ -1,4 +1,5 @@
 import { types as nodeTypes } from 'node:util';
+import { logger } from '../utils/logger.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { beginDeviceRequest, type DeviceAutonomousOwner, type DeviceAdmission, type DeviceRequestOwner } from './device-autonomous.js';
 /**
@@ -367,6 +368,8 @@ export class DeviceCapabilityService {
     }
 
     let owner: DeviceRequestOwner | undefined;
+    let deviceActed = false;
+    let authorityEnded = false;
     try {
     if (this.autonomous) owner = beginDeviceRequest(this.autonomous, this.grants, node.nodeId, this.resolvePolicy, this.listNodes, policy, node, resolveDeviceRequestTimeoutMs(policy, input.timeoutMs));
     let authority: 'existing-grant' | 'confirmed-once' | 'confirmed-always' = 'confirmed-once';
@@ -456,9 +459,19 @@ export class DeviceCapabilityService {
       timeoutMs: resolveDeviceRequestTimeoutMs(policy, input.timeoutMs),
       ...(dispatchAdmission ? { admission: dispatchAdmission } : {}),
     });
-
-    owner?.assertCurrent();
     if (owner && !dispatchClaimed) throw new Error('Device transport did not claim its exact admission');
+    // From here the device has acted unless it failed. A revocation, a
+    // cancellation or an expired deadline still discards the result, but a
+    // failure to record it is not a refusal: a refusal tells the caller nothing
+    // happened, and it would repeat a photo, a notification or a link.
+    deviceActed = dispatched.ok;
+    // The ledger bytes are not re-compared here: another request's use of its
+    // own grant rewrites that file while this phone was answering, and that is
+    // not a change to this request's authority (revocations are tracked apart).
+    const stillCurrent = (): void => {
+      try { owner?.assertCurrent(false, true); } catch (error) { authorityEnded = true; throw error; }
+    };
+    stillCurrent();
     if (!dispatched.ok) {
       return {
         ok: false,
@@ -478,13 +491,17 @@ export class DeviceCapabilityService {
         mediaType: dispatched.mediaType ?? 'application/octet-stream',
         bytes: dispatched.bytes,
         ttlMs: Math.min(policy.captureRetentionMs, this.getPolicy().captureRetentionMs),
-        ...(owner ? { assertCurrent: owner.assertCurrent } : {}),
+        ...(owner ? { assertCurrent: stillCurrent } : {}),
         ...(dispatched.workId ? { workId: dispatched.workId } : {}),
         reason: input.reason,
       });
     }
 
-    if (grant) await this.grants.markUsed(grant.id, owner?.assertCurrent);
+    if (grant) {
+      // Usage bookkeeping must not turn a completed action into an error.
+      try { await this.grants.markUsed(grant.id); }
+      catch (error) { logger.warn('Device grant use could not be recorded', { grantId: grant.id, error: error instanceof Error ? error.message : String(error) }); }
+    }
     return {
       ok: true,
       capabilityId: descriptor.id,
@@ -495,9 +512,14 @@ export class DeviceCapabilityService {
       ...(artifact ? { artifact } : {}),
     };
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Device ownership refused';
+      if (deviceActed && !authorityEnded) {
+        return { ok: false, nodeId: node.nodeId, capabilityId: descriptor.id, refusal: 'dispatch-failed',
+          detail: `${node.label} carried out ${descriptor.title}, but the result could not be recorded (${message}). Do not repeat the request without checking the device.` };
+      }
       if (!this.autonomous) throw error;
       return { ok: false, nodeId: input.nodeId, capabilityId: input.capabilityId, refusal: 'denied-by-jev',
-        detail: error instanceof Error ? error.message : 'Device ownership refused' };
+        detail: deviceActed ? `${message}. ${node.label} had already acted; its result was discarded.` : message };
     } finally { owner?.close(); }
   }
 }

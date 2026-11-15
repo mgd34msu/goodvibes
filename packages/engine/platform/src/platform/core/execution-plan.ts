@@ -7,7 +7,8 @@
  */
 
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput } from '../gate/judgment-input.js';
+import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { planItemStatus } from './batteries/plan-item-status.js';
 import { existsSync, readdirSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -107,6 +108,22 @@ export class PlanStatusUnavailableError extends Error {
   constructor() { super('Plan status reading is unavailable. The existing plan was retained; retry when the reader is available.'); this.name = 'PlanStatusUnavailableError'; }
 }
 
+/**
+ * Only a reader that could not answer is the retryable "status unavailable"
+ * case. A cancel, a refused input, a retired authority or a programming error
+ * keeps its own identity: retrying those cannot succeed, and hiding them
+ * behind a retry message would send callers into a loop.
+ */
+function planParseFailure(err: unknown, aborted: boolean): unknown {
+  if (aborted
+    || (err instanceof Error && err.name === 'AbortError')
+    || err instanceof PlanStatusUnavailableError
+    || err instanceof JudgmentInputError
+    || err instanceof JudgmentAuthorityRetiredError
+    || err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError || err instanceof SyntaxError) return err;
+  return new PlanStatusUnavailableError();
+}
+
 function canonicalStatus(label: string | undefined): PlanItemStatus | undefined {
   return (Object.keys(STATUS_LABEL) as PlanItemStatus[]).find(status => label === STATUS_LABEL[status] || label === status);
 }
@@ -169,6 +186,7 @@ export class ExecutionPlanManager {
   private readonly projectRoot: string;
   private readonly plansDir: string;
   private readonly activeFile: string;
+  private readonly activeDir: string;
   private lastCreatedAtMs = 0;
   private incarnation: object = {};
 
@@ -178,7 +196,30 @@ export class ExecutionPlanManager {
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
     this.plansDir = join(this.projectRoot, '.goodvibes', 'plans');
+    // `active.json` holds the most recent pointer for callers without a
+    // session; each session also owns a pointer under `active/`, so two
+    // sessions sharing a project never overwrite each other's active plan.
+    // The subdirectory keeps the plans listing (and older readers, which treat
+    // every top-level .json file as a plan) unaffected.
     this.activeFile = join(this.plansDir, 'active.json');
+    this.activeDir = join(this.plansDir, 'active');
+  }
+
+  private sessionPointerFile(sessionId: string): string {
+    return join(this.activeDir, `${encodeURIComponent(sessionId)}.json`);
+  }
+
+  private readPointer(file: string, label: string): { planId: string | null; sessionId?: string | null } | null {
+    return readJsonFileOrQuarantine<{ planId: string | null; sessionId?: string | null }>(file, {
+      label,
+      recovery: 'No plan is marked active; the next plan created or resumed becomes the active one.',
+      validate: (parsed) => {
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('active-plan pointer is not a JSON object');
+        }
+        return parsed as { planId: string | null; sessionId?: string | null };
+      },
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -214,16 +255,19 @@ export class ExecutionPlanManager {
   /** Get the active plan for the current session, if any. */
   getActive(sessionId?: string): ExecutionPlan | null {
     try {
-      const pointer = readJsonFileOrQuarantine<{ planId: string | null; sessionId?: string | null }>(this.activeFile, {
-        label: 'core/execution-plan-pointer',
-        recovery: 'No plan is marked active; the next plan created or resumed becomes the active one.',
-        validate: (parsed) => {
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            throw new Error('active-plan pointer is not a JSON object');
-          }
-          return parsed as { planId: string | null; sessionId?: string | null };
-        },
-      });
+      let pointer: { planId: string | null; sessionId?: string | null } | null = null;
+      if (sessionId) {
+        // The session's own pointer is authoritative once it exists, even when
+        // it records "no active plan". A pointer written before per-session
+        // pointers existed is honoured only for the session it names.
+        pointer = this.readPointer(this.sessionPointerFile(sessionId), 'core/execution-plan-pointer');
+        if (!pointer) {
+          const legacy = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
+          if (legacy && legacy.sessionId === sessionId) pointer = legacy;
+        }
+      } else {
+        pointer = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
+      }
       if (!pointer) return null;
       const { planId, sessionId: activeSessionId } = pointer;
       if (!planId) return null;
@@ -242,12 +286,32 @@ export class ExecutionPlanManager {
 
   private setActive(planId: string | null, sessionId?: string | null): void {
     this.incarnation = {};
+    if (sessionId) {
+      writeJsonFileAtomic(this.sessionPointerFile(sessionId), { planId, sessionId });
+    }
     if (planId === null) {
       // Only rewrite an existing pointer, absence already means "no active plan".
-      if (existsSync(this.activeFile)) {
-        writeJsonFileAtomic(this.activeFile, { planId: null, sessionId: sessionId ?? null });
+      // The shared pointer is cleared only when it still belongs to this
+      // session: clearing another session's pointer would hide its plan.
+      if (!existsSync(this.activeFile)) return;
+      if (sessionId) {
+        let shared: { planId: string | null; sessionId?: string | null } | null = null;
+        try { shared = this.readPointer(this.activeFile, 'core/execution-plan-pointer'); } catch { shared = null; }
+        if (shared?.sessionId && shared.sessionId !== sessionId) return;
       }
+      writeJsonFileAtomic(this.activeFile, { planId: null, sessionId: sessionId ?? null });
       return;
+    }
+    // Carry a pointer written before per-session pointers existed over to its
+    // own session before the shared pointer is replaced.
+    try {
+      const shared = this.readPointer(this.activeFile, 'core/execution-plan-pointer');
+      if (shared?.planId && shared.sessionId && shared.sessionId !== sessionId
+        && !existsSync(this.sessionPointerFile(shared.sessionId))) {
+        writeJsonFileAtomic(this.sessionPointerFile(shared.sessionId), { planId: shared.planId, sessionId: shared.sessionId });
+      }
+    } catch (err) {
+      logger.warn('ExecutionPlanManager: could not carry the previous active plan pointer over', { error: String(err) });
     }
     writeJsonFileAtomic(this.activeFile, { planId, sessionId: sessionId ?? null });
   }
@@ -570,7 +634,7 @@ export class ExecutionPlanManager {
         ...(parseIssues.length > 0 ? { parseIssues } : {}),
         assertCurrent,
       };
-    } catch { throw new PlanStatusUnavailableError(); }
+    } catch (err) { throw planParseFailure(err, signal.aborted); }
   }
 
   // --------------------------------------------------------------------------

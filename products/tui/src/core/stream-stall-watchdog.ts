@@ -60,6 +60,13 @@ export interface StreamStallWatchdogOptions {
    * Exposed for unit tests.
    */
   thresholdMs?: number;
+  /** Timer seam so tests can drive the clock; defaults to the global timers. */
+  timers?: StallTimers;
+}
+
+export interface StallTimers {
+  setTimeout(callback: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
 }
 
 export interface StreamStallWatchdog {
@@ -75,15 +82,16 @@ export interface StreamStallWatchdog {
  */
 export function createStreamStallWatchdog(opts: StreamStallWatchdogOptions): StreamStallWatchdog {
   const { events, onStall, getProviderName, thresholdMs = STALL_THRESHOLD_MS } = opts;
+  const timers: StallTimers = opts.timers ?? { setTimeout: (callback, ms) => setTimeout(callback, ms), clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
 
-  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallTimer: unknown = null;
   let hintFiredForEpisode = false;
   let episodeCount = 0;
 
   function arm(): void {
     disarm();
     hintFiredForEpisode = false;
-    stallTimer = setTimeout(() => {
+    stallTimer = timers.setTimeout(() => {
       stallTimer = null;
       if (!hintFiredForEpisode) {
         hintFiredForEpisode = true;
@@ -96,7 +104,7 @@ export function createStreamStallWatchdog(opts: StreamStallWatchdogOptions): Str
 
   function disarm(): void {
     if (stallTimer !== null) {
-      clearTimeout(stallTimer);
+      timers.clearTimeout(stallTimer);
       stallTimer = null;
     }
   }

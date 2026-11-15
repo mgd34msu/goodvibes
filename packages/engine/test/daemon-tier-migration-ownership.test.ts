@@ -16,16 +16,33 @@
  * non-owning reader migrates its in-memory view, writes no bytes, and files no
  * receipt, a receipt without the rename on disk would be a lie.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import * as atomicJsonStore from '../platform/src/platform/utils/atomic-json-store.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { ingestSettingsFile } from '../platform/src/platform/config/settings-ingestion.ts';
 import {
   PAYMENTS_BUDGET_AMOUNTS_READER_FLOOR,
   readSettingsReaderFloor,
 } from '../platform/src/platform/config/settings-reader-floor.ts';
+
+// Every daemon-tier write is recorded (and still performed), so the atomicity
+// test can see how many writes a migration takes instead of only the end state.
+const realAtomicJsonStore = { ...atomicJsonStore };
+const jsonWrites: Array<{ path: string; value: Record<string, unknown> }> = [];
+mock.module('../platform/src/platform/utils/atomic-json-store.ts', () => ({
+  ...realAtomicJsonStore,
+  writeJsonFileAtomic: (
+    path: string,
+    value: unknown,
+    options?: atomicJsonStore.AtomicJsonWriteOptions,
+  ): void => {
+    jsonWrites.push({ path, value: structuredClone(value) as Record<string, unknown> });
+    realAtomicJsonStore.writeJsonFileAtomic(path, value, options);
+  },
+}));
 
 /** An old-keys daemon store, plus the surface dirs a manager needs. */
 function makeHomeWithOldKeysFile(label: string, surface: string): {
@@ -161,15 +178,20 @@ describe('the migrated file says which reader can understand it', () => {
 
   test('the rename and the floor land in ONE write: no file state has one without the other', () => {
     const { home, configDir, daemonTierPath } = makeHomeWithOldKeysFile('gv-floor-atomic', 'goodvibes');
+    jsonWrites.length = 0;
 
     new ConfigManager({
       configDir, homeDir: home, surfaceRoot: 'goodvibes', daemonTierPath, ownsDaemonTier: true,
     });
 
-    // Whatever an older daemon reads next, it reads both facts together.
-    const text = readFileSync(daemonTierPath, 'utf-8');
-    expect(text).toContain('"perPurchaseCeiling": 100');
-    expect(text).toContain('$goodvibes');
+    // An older daemon reading between two writes would see renamed keys with
+    // no floor, so the migration must publish the file exactly once.
+    const tierWrites = jsonWrites.filter((write) => write.path === daemonTierPath);
+    expect(tierWrites).toHaveLength(1);
+    const written = JSON.stringify(tierWrites[0]!.value);
+    expect(written).toContain('"perPurchaseCeiling":100');
+    expect(written).toContain('$goodvibes');
+    expect(readFileSync(daemonTierPath, 'utf-8')).toContain('$goodvibes');
   });
 
   test('the client raises NOTHING: it wrote nothing to record a floor about', () => {

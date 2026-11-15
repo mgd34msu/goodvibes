@@ -80,6 +80,13 @@ function isReadOnly(method: OperatorMethodContract): boolean {
 function toInputSchema(schema: JsonSchema | undefined): JsonSchema {
   if (!schema || typeof schema !== 'object') return { ...EMPTY_OBJECT_INPUT_SCHEMA };
   if (schema.type === 'object') return schema;
+  // A union of object shapes is an object at the tool boundary; keep its alternatives
+  // rather than replacing them with an empty schema that would drop every input.
+  const alternatives = (schema as { anyOf?: unknown; oneOf?: unknown }).anyOf ?? (schema as { oneOf?: unknown }).oneOf;
+  if (Array.isArray(alternatives) && alternatives.length > 0
+    && alternatives.every((entry) => typeof entry === 'object' && entry !== null && (entry as { type?: unknown }).type === 'object')) {
+    return { type: 'object', ...schema };
+  }
   // A non-object operator input is wrapped so the MCP contract always presents
   // an object at the tool boundary, as MCP clients expect.
   return { type: 'object', properties: {} };

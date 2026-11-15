@@ -109,19 +109,35 @@ export interface ServiceRegistryOptions {
   readonly diagnosticMode?: 'default' | 'structural' | undefined;
 }
 
-function readServicesFile(filePath: string): Record<string, ServiceConfig> {
+interface ServicesFileRead {
+  readonly services: Record<string, ServiceConfig>;
+  /** Why the file could not be used, or null when it is absent or readable. */
+  readonly problem: string | null;
+}
+
+function readServicesFile(filePath: string): ServicesFileRead {
+  let raw: string;
   try {
-    const raw = readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw) as Record<string, ServiceConfig>;
+    raw = readFileSync(filePath, 'utf-8');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      logger.error('ServiceRegistry: failed to read services file, treating as empty', {
-        path: filePath,
-      });
-    }
-    return {};
+    if (code === 'ENOENT') return { services: {}, problem: null };
+    logger.error('ServiceRegistry: failed to read services file, treating as empty', { path: filePath });
+    return { services: {}, problem: `could not be read (${code ?? 'unknown error'})` };
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    logger.error('ServiceRegistry: services file is not valid JSON, treating as empty', { path: filePath });
+    return { services: {}, problem: 'is not valid JSON' };
+  }
+  // `null`, an array or a scalar parses fine and would make every lookup throw.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    logger.error('ServiceRegistry: services file is not a JSON object, treating as empty', { path: filePath });
+    return { services: {}, problem: 'is not a JSON object keyed by service name' };
+  }
+  return { services: parsed as Record<string, ServiceConfig>, problem: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +181,17 @@ export class ServiceRegistry {
    * Return all registered service configs.
    */
   getAll(): Record<string, ServiceConfig> {
-    return readServicesFile(this.servicesFilePath);
+    return readServicesFile(this.servicesFilePath).services;
+  }
+
+  /**
+   * Why the services file cannot be used right now, or null when it is absent
+   * or fine. An unusable file reads as "no services", which looks the same as
+   * an unknown service; this is how a status surface tells them apart.
+   */
+  unreadableReason(): string | null {
+    const { problem } = readServicesFile(this.servicesFilePath);
+    return problem === null ? null : `${this.servicesFilePath} ${problem}`;
   }
 
   /**
@@ -173,7 +199,7 @@ export class ServiceRegistry {
    */
   get(serviceName: string): ServiceConfig | null {
     const all = this.getAll();
-    return all[serviceName] ?? null;
+    return Object.hasOwn(all, serviceName) ? (all[serviceName] ?? null) : null;
   }
 
   private async resolveConfiguredSecret(
@@ -223,11 +249,17 @@ export class ServiceRegistry {
   async resolveAuth(serviceName: string): Promise<Record<string, string> | null> {
     const config = this.get(serviceName);
     if (!config) {
-      logger.debug('ServiceRegistry: unknown service', { serviceName });
+      const unreadable = this.unreadableReason();
+      if (unreadable) logger.warn('ServiceRegistry: no credentials resolved because the services file is unusable', { serviceName, reason: unreadable });
+      else logger.debug('ServiceRegistry: unknown service', { serviceName });
       return null;
     }
 
-    const providerOverride = this.subscriptionManager.getAccessToken(config.providerId ?? serviceName);
+    // A subscription token is a bearer token; it must not replace the header an
+    // api-key or basic service is configured to send.
+    const providerOverride = config.authType === 'bearer' || config.authType === 'oauth'
+      ? this.subscriptionManager.getAccessToken(config.providerId ?? serviceName)
+      : null;
     if (providerOverride) {
       return { Authorization: `Bearer ${providerOverride}` };
     }
@@ -351,7 +383,13 @@ export class ServiceRegistry {
   async testConnection(serviceName: string): Promise<ServiceConnectionTestResult> {
     const config = this.get(serviceName);
     if (!config) {
-      return { ok: false, status: null, testedUrl: null, error: 'Unknown service' };
+      const unreadable = this.unreadableReason();
+      return {
+        ok: false,
+        status: null,
+        testedUrl: null,
+        error: unreadable ? `Service list unusable: ${unreadable}` : 'Unknown service',
+      };
     }
 
     const baseUrl = config.baseUrl?.trim() ?? '';
@@ -360,9 +398,19 @@ export class ServiceRegistry {
     }
 
     const headers = await this.resolveAuth(serviceName);
+    if (!headers) {
+      // A public /health answering 200 says nothing about the credential, and
+      // "connected" is the claim this result makes.
+      return {
+        ok: false,
+        status: null,
+        testedUrl: null,
+        error: `No ${config.authType} credential could be resolved for ${serviceName}; nothing was sent`,
+      };
+    }
     const reqHeaders: Record<string, string> = {
       Accept: 'application/json',
-      ...(headers ?? {}),
+      ...headers,
     };
     const candidates = [
       `${baseUrl.replace(/\/$/, '')}/health`,

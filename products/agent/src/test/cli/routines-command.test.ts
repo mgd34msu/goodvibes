@@ -66,6 +66,8 @@ function runtime(argv: readonly string[]) {
     source: 'user',
     provenance: 'test',
   });
+  // Promotion to a recurring schedule requires a reviewed routine.
+  registry.markReviewed('daily-operations-sweep');
   return {
     cli: parseGoodVibesCli(['routines', ...argv]),
     configManager,
@@ -418,6 +420,7 @@ describe('routines CLI command', () => {
       expect(result.output).toContain('automation.schedules.create /api/automation/schedules');
       expect(result.output).toContain('delivery: webhook (1 target)');
       expect(result.output).not.toContain('secret-token');
+      expect(result.output).toContain('--delivery-webhook "<webhook-url>"');
       expect(calls).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -516,6 +519,73 @@ describe('routines CLI command', () => {
       expect(requests.map((request) => `${request.method} ${request.url}`)).toContain(
         'GET http://127.0.0.1:3421/api/automation/schedules',
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('promoting the same routine twice refuses the repeat while the host still holds the schedule', async () => {
+    const requests: Array<{ readonly method: string }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async (_input, init) => {
+      requests.push({ method: init?.method ?? 'GET' });
+      if ((init?.method ?? 'GET') === 'GET') return schedulesListResponse();
+      return scheduleResponse();
+    });
+    try {
+      const baseRuntime = runtime(['promote', 'daily-operations-sweep', '--cron', '0 8 * * *', '--yes', '--json']);
+      const first = await handleRoutinesCommand(baseRuntime);
+      expect(first.exitCode).toBe(0);
+      expect(requests.map((request) => request.method)).toEqual(['POST']);
+
+      const second = await handleRoutinesCommand(baseRuntime);
+      const payload = JSON.parse(second.output) as { readonly kind?: unknown; readonly error?: unknown };
+      expect(second.exitCode).toBe(1);
+      expect(payload.kind).toBe('schedule_already_exists');
+      expect(String(payload.error)).toContain('Nothing was created');
+      // The repeat only read the host's schedules; a second POST would have made a duplicate.
+      expect(requests.map((request) => request.method)).toEqual(['POST', 'GET']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('a repeat is allowed once the host no longer holds the earlier schedule', async () => {
+    const requests: Array<{ readonly method: string }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async (_input, init) => {
+      requests.push({ method: init?.method ?? 'GET' });
+      if ((init?.method ?? 'GET') === 'GET') return new Response(JSON.stringify({ jobs: [], runs: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return scheduleResponse();
+    });
+    try {
+      const baseRuntime = runtime(['promote', 'daily-operations-sweep', '--cron', '0 8 * * *', '--yes', '--json']);
+      expect((await handleRoutinesCommand(baseRuntime)).exitCode).toBe(0);
+      expect((await handleRoutinesCommand(baseRuntime)).exitCode).toBe(0);
+      expect(requests.map((request) => request.method)).toEqual(['POST', 'GET', 'POST']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('a retry after a failure with no known outcome checks the host before creating anything', async () => {
+    const requests: Array<{ readonly method: string }> = [];
+    const originalFetch = globalThis.fetch;
+    let failFirstWrite = true;
+    globalThis.fetch = mockFetch(async (_input, init) => {
+      requests.push({ method: init?.method ?? 'GET' });
+      if ((init?.method ?? 'GET') === 'GET') return schedulesListResponse();
+      if (failFirstWrite) { failFirstWrite = false; throw new Error('Route not found: /api/automation/schedules (404)'); }
+      return scheduleResponse();
+    });
+    try {
+      const baseRuntime = runtime(['promote', 'daily-operations-sweep', '--cron', '0 8 * * *', '--yes', '--json']);
+      const first = await withPublicTransportError('Route not found: /api/automation/schedules (404)', () => handleRoutinesCommand(baseRuntime));
+      expect(first.exitCode).toBe(1);
+      const second = await handleRoutinesCommand(baseRuntime);
+      expect(second.exitCode).toBe(1);
+      expect((JSON.parse(second.output) as { readonly kind?: unknown }).kind).toBe('schedule_already_exists');
+      expect(requests.map((request) => request.method)).toEqual(['POST', 'GET']);
     } finally {
       globalThis.fetch = originalFetch;
     }

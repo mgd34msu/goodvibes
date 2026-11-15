@@ -190,6 +190,10 @@ export class ProcessTaskAdapter {
       this._idToTask.delete(processId);
       this._taskToId.delete(taskId);
     }
+    // A process the manager no longer lists never reports an exit; its pid entry would stay.
+    for (const [pid, processId] of [...this._pidToId.entries()]) {
+      if (!liveIds.has(processId)) this._pidToId.delete(pid);
+    }
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────

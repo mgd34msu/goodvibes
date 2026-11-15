@@ -195,7 +195,7 @@ describe('a disabled feature never opens a device', () => {
     expect(h.spawns).toHaveLength(0);
   });
 
-  test('a blocking row refuses before capture: vadThreshold has no VAD model to run', async () => {
+  test('a blocking row refuses before capture: a surface without the speech gate cannot run a non-zero vadThreshold', async () => {
     const h = harness({ 'voice.wake.enabled': true, 'voice.wake.vadThreshold': 0.5 });
     const outcome = await h.listener.start();
     expect(outcome.started === false && outcome.refusal).toBe('blocked');

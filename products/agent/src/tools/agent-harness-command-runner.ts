@@ -10,6 +10,15 @@ import { error, output } from './agent-harness-tool-utils.ts';
 import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
 
+/** The calendar verbs that only read local state; the rest of the command keeps the outward floor. */
+const CALENDAR_READ_VERBS: ReadonlySet<string> = new Set(['list', 'all', 'upcoming', 'subscriptions', 'subs', 'accounts']);
+
+/** Verbs of otherwise state-changing commands that only show records; the first argument is the verb, absent means the default. */
+const READ_ONLY_COMMAND_VERBS: Readonly<Record<string, { readonly verbs: ReadonlySet<string>; readonly fallback: string }>> = {
+  tasks: { verbs: new Set(['list', 'show', 'output']), fallback: 'list' },
+  approval: { verbs: new Set(['matrix', 'review']), fallback: 'matrix' },
+};
+
 function invocationArgsFromLookup(lookup: CommandDetailLookup): readonly string[] {
   return lookup.resolvedBy === 'description' ? [] : lookup.parsedArgs;
 }
@@ -56,7 +65,9 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     const policy = describeCommandPolicy(name);
     // These work-import verbs are host-owned reads. Every mutation keeps the
     // original invocation floor as well as the command's own host authority.
-    const read = policy.effect === 'read-only' || name === 'work-import' && ['preview', 'status'].includes(commandArgs[0] ?? '');
+    const read = policy.effect === 'read-only' || name === 'work-import' && ['preview', 'status'].includes(commandArgs[0] ?? '')
+      || (name === 'calendar' || name === 'cal') && CALENDAR_READ_VERBS.has((commandArgs[0] ?? 'list').toLowerCase())
+      || (READ_ONLY_COMMAND_VERBS[name]?.verbs.has((commandArgs[0] ?? READ_ONLY_COMMAND_VERBS[name]!.fallback).toLowerCase()) ?? false);
     if (!read && !harnessCatalogInvocationAuthority(args, executionOptions,
       ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send')) throw new ToolInputProjectionError('held');
     resolved.assertCurrent?.(); assertCommandMethods();
@@ -118,9 +129,19 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   if (!handled) return error(`Unknown slash command /${resolved.command.name}.`);
   const raw = printed.length > 0 ? printed.join('\n') : '(no text output)';
   const printedText = raw;
-  return output([
-    `Command ${safeCommandDisplay(resolved.command.name)} completed.`,
+  // A handler that refuses or rejects its arguments prints that and returns
+  // normally, so returning is not evidence the command did anything. The
+  // owners' `Refused:` and `Usage:` openings are the signal; their text is not changed.
+  // A refusal printed after earlier output still means the change did not apply,
+  // so every printed chunk is checked for `Refused:`; `Usage:` only opens a
+  // refused call, so only the first chunk counts for it.
+  const opening = (chunk: string) => chunk.split('\n').find((line) => line.trim() !== '')?.trim() ?? '';
+  const refused = /^(Refused|Usage):/.test(opening(printed[0] ?? ''))
+    || printed.some((chunk) => /^Refused:/.test(opening(chunk)));
+  const body = [
+    `Command ${safeCommandDisplay(resolved.command.name)} ${refused ? 'ran but did not apply; it printed' : 'ran and printed'}:`,
     `Resolved by ${resolved.lookup.source} ${resolved.lookup.resolvedBy}.`,
     printedText,
-  ].join('\n'));
+  ].join('\n');
+  return refused ? error(body) : output(body);
 }

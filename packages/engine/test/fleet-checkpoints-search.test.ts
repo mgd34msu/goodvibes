@@ -372,13 +372,13 @@ describe('fleet/checkpoints/search: checkpoints.list / create / diff / restore',
     const token = preview.json.token;
 
     // The token authorizes the restore of this checkpoint.
-    const restored = await invokeVerb<CheckpointsRestoreResponse>('checkpoints.restore', { body: { id: checkpointId, safetyCheckpoint: false, confirmToken: token } });
+    const restored = await invokeVerb<CheckpointsRestoreResponse>('checkpoints.restore', { body: { id: checkpointId, confirmToken: token } });
     expect(restored.status).toBe(200);
     expect(restored.json.refused).toBe(false);
     expect(restored.json.result!.checkpointId).toBe(checkpointId);
 
     // Single-use: the same token cannot be replayed.
-    const replay = await invokeVerb<CheckpointsRestoreResponse>('checkpoints.restore', { body: { id: checkpointId, safetyCheckpoint: false, confirmToken: token } });
+    const replay = await invokeVerb<CheckpointsRestoreResponse>('checkpoints.restore', { body: { id: checkpointId, confirmToken: token } });
     expect(replay.status).toBe(400);
     expect(typeof replay.json.error).toBe('string');
     expect(replay.json.code).toBe('INVALID_ARGUMENT');

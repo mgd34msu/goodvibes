@@ -256,7 +256,7 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
           }
           try {
             const taskId = createModeTask(mode, title, ctx);
-            ctx.print(`Created teamwork task ${taskId} using mode ${mode.id}.`);
+            ctx.print(`Created teamwork task ${taskId} using mode ${mode.id}. It is a queued record only: nothing starts it automatically, so it stays queued until an agent claims it.`);
           } catch (error) {
             ctx.print(String(summarizeError(error) ?? error));
           }
@@ -377,7 +377,7 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
           try {
             observation?.();
             const taskId = createResolvedModeTask(mode, title, ctx);
-            ctx.print(`Created teamwork task ${taskId} using archetype ${mode.id}.`);
+            ctx.print(`Created teamwork task ${taskId} using archetype ${mode.id}. It is a queued record only: nothing starts it automatically, so it stays queued until an agent claims it.`);
           } catch (error) {
             ctx.print(String(summarizeError(error) ?? error));
           }
@@ -385,8 +385,13 @@ export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void
         }
 
         ctx.print('Usage: /teamwork [review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id>|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]');
-      } catch {
-        if (!submission?.signal.aborted) ctx.print('Teamwork archetype reading is unavailable or retired. No archetype task was created.');
+      } catch (error) {
+        if (!submission?.signal.aborted) {
+          const cause = String(summarizeError(error) ?? error);
+          ctx.print(args[0]?.toLowerCase() === 'create-archetype'
+            ? `Teamwork archetype reading is unavailable or retired: ${cause}. No archetype task was created.`
+            : `/teamwork failed: ${cause}`);
+        }
       } finally { submission?.finish(); }
     },
   });

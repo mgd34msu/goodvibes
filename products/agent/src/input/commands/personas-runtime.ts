@@ -257,6 +257,10 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
             ctx.print('Usage: /personas review <id>');
             return;
           }
+          if (ctx.invokedByModel === true) {
+            ctx.print('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use.');
+            return;
+          }
           const persona = registryStore.markReviewed(id);
           ctx.print(formatPersonaReceipt('Reviewed Agent persona', persona));
           return;

@@ -25,7 +25,8 @@ const identity = (s: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; 
 
 /** Construction only. Source mode admits its running interpreter; compiled
  * products must supply their packaged ordinary Bun executable explicitly.
- * Missing, changed and failed first admissions are terminal for this owner.
+ * Missing, changed and failed first admissions are terminal for this owner;
+ * a caller cancelling its own wait is not one.
  */
 export function createCapturedExecBunRuntimeAdmission(
   binding: Binding,
@@ -52,7 +53,10 @@ export function createCapturedExecBunRuntimeAdmission(
       const original = pinned;
       const filter = binding.readAccessFilter;
       if (!filter) throw new Error('Bun runtime requires original-owner read authorization');
-      const combined = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
+      // One admission serves every call of this owner, so it runs under the owner's signal only.
+      // A caller's own signal cancels that caller's wait (executePolicyCheck below), never the shared work:
+      // otherwise one cancelled first call would leave a rejected promise for every later call.
+      const combined = binding.signal;
       const check = async (current: AbortSignal | undefined = binding.signal): Promise<void> => {
         current = binding.signal && current ? AbortSignal.any([binding.signal, current]) : binding.signal ?? current;
         await assertContractInputAuthority(binding.authority, binding.root, current);

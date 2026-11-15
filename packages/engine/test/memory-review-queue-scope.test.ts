@@ -21,8 +21,11 @@ useMemoryReadings();
  */
 
 const tmpRoots: string[] = [];
+const stores: MemoryStore[] = [];
 
 afterEach(() => {
+  // Close before the directory goes: the sqlite file must not be open while it is removed.
+  for (const store of stores.splice(0)) store.close();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -34,6 +37,7 @@ function makeStore(root: string) {
     embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
     enableVectorIndex: false,
   });
+  stores.push(store);
   return store;
 }
 
@@ -173,6 +177,7 @@ describe('HTTP handler: GET /api/memory/review-queue', () => {
       embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
       enableVectorIndex: false,
     });
+    stores.push(store);
     await store.init();
     const memoryRegistry = new MemoryRegistry(store);
     // Minimal context stub

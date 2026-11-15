@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
@@ -10,7 +9,7 @@ import { createSystemOnePort, judgmentConfigFromEnv } from '@goodvibes-jev/judgm
 import { readNativeAddonEvidence, proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { nativeExecutionSource, retainNativeExecutionFiles, verifyNativeExecutionArtifact } from './native-execution-artifact.mjs';
-import { assertNativeProcessGroupDrained, boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from './native-execution-process.mjs';
+import { assertNativeProcessGroupDrained, boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup, spawnNativeProcessGroup } from './native-execution-process.mjs';
 import { assertNativeStartupActive, assertNativeStartupBanners, hasNativeStartupReadyBanner, retainNativeStartupProgress } from './native-startup-liveness.mjs';
 
 // Portable original Darwin boot/vector obligation. Linux keeps the stronger
@@ -122,7 +121,7 @@ try {
   writeJson(join(work, 'package.json'), { name: '@fixture/foreign-package', version: '99.8.7', type: 'module' });
   async function run(argv) {
     original.retained.assertCurrent(); relocated.assertCurrent();
-    const child = spawn(binary, argv, { cwd: work, env: childEnv, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnNativeProcessGroup(binary, argv, { cwd: work, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', expired = false;
     const capture = key => chunk => {
       if (key === 'stdout') stdout += chunk; else stderr += chunk;
@@ -177,8 +176,8 @@ try {
   const port = lease.address().port; await closeServer(lease);
   original.retained.assertCurrent(); relocated.assertCurrent();
   const startupProgress = retainNativeStartupProgress();
-  host = spawn(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-    cwd: work, env: { ...childEnv, ...judgmentEnv, GOODVIBES_DAEMON_TOKEN: token, GOODVIBES_NATIVE_STARTUP_OBSERVATION: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+  host = spawnNativeProcessGroup(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
+    cwd: work, env: { ...childEnv, ...judgmentEnv, GOODVIBES_DAEMON_TOKEN: token, GOODVIBES_NATIVE_STARTUP_OBSERVATION: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   hostPid = host.pid; let output = '', errors = '', startupBannerObservedAt;
   host.stdout.on('data', chunk => {

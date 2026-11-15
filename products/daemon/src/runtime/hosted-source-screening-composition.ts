@@ -4,6 +4,7 @@ import { types } from 'node:util';
 import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { SecretsManager } from '../config/secrets.js';
+import { InboxAdmissionRefusal } from './inbox-admission-refusal.js';
 
 export type HostedInboxScreeningSource = 'discord-bot-dms' | 'slack-inbox' | 'email-inbox';
 export interface HostedInboxScreeningOperation {
@@ -30,7 +31,7 @@ function captureCredential(key: string, secrets: CredentialOwner): { value: stri
   if (environment !== undefined) {
     const usableLiteral = environment.length > 0 && environment.trim() === environment && !/[\r\n\0]/.test(environment);
     if (!isSecretRefInput(environment)) {
-      if (!usableLiteral) throw new Error('Hosted inbox screening credential is unavailable');
+      if (!usableLiteral) throw new InboxAdmissionRefusal('credential-unavailable', 'Hosted inbox screening credential is unavailable');
       return { value: environment, assertCurrent() {
         if (process.env[key] !== environment) throw new Error('Hosted inbox screening credential changed');
       } };
@@ -41,7 +42,7 @@ function captureCredential(key: string, secrets: CredentialOwner): { value: stri
   }
   const snapshot = secrets.resolveLocalCredentialSnapshot(localKey);
   if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value
-    || /[\r\n\0]/.test(snapshot.value)) throw new Error('Hosted inbox screening credential is unavailable');
+    || /[\r\n\0]/.test(snapshot.value)) throw new InboxAdmissionRefusal('credential-unavailable', 'Hosted inbox screening credential is unavailable');
   return { value: snapshot.value, assertCurrent() {
     if (process.env[key] !== environment) throw new Error('Hosted inbox screening credential changed');
     const next = secrets.resolveLocalCredentialSnapshot(localKey);
@@ -84,6 +85,9 @@ export async function acquireHostedInboxScreening(host: HostedInboxScreeningHost
       signal.throwIfAborted();
       const quarantine = config.getIngestionQuarantine();
       const reader: { get(key: string): unknown } = config;
+      if (reader.get('surfaces.hostedInboxScreening') !== 'abacus-typesafe-provider-managed') {
+        throw new InboxAdmissionRefusal('consent-missing', 'Hosted inbox screening consent or source changed');
+      }
       if (closed || host.config !== config || host.secrets !== secrets || host.signal !== hostSignal
         || operation.signal !== operationSignal || operation.assertCurrent !== accountCurrent
         || config.getConfigurationIncarnation() !== incarnation || secrets.getCredentialMutationState().pending
@@ -92,7 +96,6 @@ export async function acquireHostedInboxScreening(host: HostedInboxScreeningHost
           secrets.resolveLocalCredentialSnapshot, secrets.getCredentialMutationState,
           secrets.captureLocalCredentialReadset][index])
         || (durableIncarnation !== undefined && config.getDurableConfigurationIncarnation() !== durableIncarnation)
-        || reader.get('surfaces.hostedInboxScreening') !== 'abacus-typesafe-provider-managed'
         || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
           || entry.key === 'surfaces.hostedInboxScreening')) throw new Error('Hosted inbox screening consent or source changed');
       assertCredentials();

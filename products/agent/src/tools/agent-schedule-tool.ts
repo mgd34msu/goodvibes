@@ -39,7 +39,6 @@ interface AgentScheduleToolArgs {
   readonly deliveryChannel?: unknown;
   readonly deliveryRoute?: unknown;
   readonly deliveryWebhook?: unknown;
-  readonly deliveryLink?: unknown;
   readonly disabled?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
@@ -93,13 +92,30 @@ function hasEditFields(args: AgentScheduleToolArgs): boolean {
   );
 }
 
-function readAction(args: AgentScheduleToolArgs): ScheduleAction {
-  const explicit = normalizeAction(args.action) ?? normalizeAction(args.mode);
-  if (explicit) return explicit;
-  if (readString(args.message)) return 'reminder';
-  if (readString(args.task)) return readScheduleId(args) && hasEditFields(args) ? 'edit' : 'create';
-  if (readScheduleId(args) && hasEditFields(args)) return 'edit';
-  return 'list';
+const SCHEDULE_ACTION_WORDS = ['list', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'] as const;
+
+/** The action to take, or a refusal naming why none can be chosen. */
+function readAction(args: AgentScheduleToolArgs): { readonly action: ScheduleAction } | { readonly refusal: string } {
+  // A word that was sent but is not an action is refused: inferring one from the
+  // other fields would carry out something the caller did not ask for.
+  const word = readString(args.action) || readString(args.mode);
+  if (word) {
+    const explicit = normalizeAction(word);
+    if (!explicit) return { refusal: `Unknown schedule action "${word}". Use one of: ${SCHEDULE_ACTION_WORDS.join(', ')}.` };
+    return { action: explicit };
+  }
+  const scheduleId = readScheduleId(args);
+  if (readString(args.message)) {
+    // `message` is the text of a new reminder; no edit path accepts it. Creating
+    // a second reminder while the named one keeps firing would look like a success.
+    if (scheduleId) {
+      return { refusal: `schedule {scheduleId, message} would create a new reminder and leave ${scheduleId} unchanged: a reminder's text cannot be edited with message. Use action:edit with prompt to change what ${scheduleId} says, or action:delete and then action:reminder to replace it.` };
+    }
+    return { action: 'reminder' };
+  }
+  if (readString(args.task)) return { action: scheduleId && hasEditFields(args) ? 'edit' : 'create' };
+  if (scheduleId && hasEditFields(args)) return { action: 'edit' };
+  return { action: 'list' };
 }
 
 function scheduleKind(args: AgentScheduleToolArgs): string {
@@ -132,7 +148,6 @@ function sharedCreateArgs(args: AgentScheduleToolArgs): Record<string, unknown> 
     deliveryChannel: args.deliveryChannel,
     deliveryRoute: args.deliveryRoute,
     deliveryWebhook: args.deliveryWebhook,
-    deliveryLink: args.deliveryLink,
     disabled: args.disabled,
     confirm: args.confirm,
     explicitUserRequest: args.explicitUserRequest,
@@ -159,7 +174,9 @@ function editArgs(args: AgentScheduleToolArgs): Record<string, unknown> {
   return {
     scheduleId: readScheduleId(args),
     scheduleKind: kind || undefined,
-    scheduleValue: kind ? scheduleValue(args, kind) : undefined,
+    // Passed on even with no kind, so the edit tool refuses the half-given pair
+    // instead of this call dropping the value and reporting an edit.
+    scheduleValue: scheduleValue(args, kind) || undefined,
     timezone: args.timezone,
     staggerMs: args.staggerMs,
     name: args.name,
@@ -200,7 +217,7 @@ export function createAgentScheduleTool(
           jobId: { type: 'string', description: 'Alias for scheduleId.' },
           targetId: { type: 'string', description: 'Alias for scheduleId.' },
           task: { type: 'string', description: 'Autonomous task for action:create, or replacement task for action:edit.' },
-          message: { type: 'string', description: 'Reminder text for action:reminder.' },
+          message: { type: 'string', description: 'Reminder text for action:reminder (creates a new reminder; it cannot edit one).' },
           successCriteria: { type: 'string', description: 'Required for autonomous scheduled tasks.' },
           scheduleKind: { type: 'string', enum: ['at', 'every', 'cron'], description: 'Schedule kind.' },
           kind: { type: 'string', enum: ['at', 'every', 'cron'], description: 'Alias for scheduleKind.' },
@@ -218,7 +235,6 @@ export function createAgentScheduleTool(
           deliveryChannel: { type: 'string', description: 'Optional delivery channel target.' },
           deliveryRoute: { type: 'string', description: 'Optional connected route target.' },
           deliveryWebhook: { type: 'string', description: 'Optional webhook target.' },
-          deliveryLink: { type: 'string', description: 'Optional link delivery target.' },
           disabled: { type: 'boolean', description: 'Create schedule disabled.' },
           query: { type: 'string', description: 'Optional list query or schedule lookup text.' },
           limit: { type: 'number', description: 'Optional list limit when supported by the connected host.' },
@@ -237,7 +253,12 @@ export function createAgentScheduleTool(
       const args: AgentScheduleToolArgs = rawArgs;
       const run = (name: string, input: Record<string, unknown>) => registry.executeNested(randomUUID(), name,
         Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)), options);
-      const action = readAction(args);
+      const chosen = readAction(args);
+      if ('refusal' in chosen) return { success: false, error: chosen.refusal };
+      const action = chosen.action;
+      if ((action === 'create' || action === 'reminder') && readScheduleId(args)) {
+        return { success: false, error: `schedule action:${action} creates a new schedule and takes no scheduleId; to change ${readScheduleId(args)} use action:edit.` };
+      }
       if (action === 'list') {
         return run('agent_operator_method', {
           methodId: 'automation.schedules.list',

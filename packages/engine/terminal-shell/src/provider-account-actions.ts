@@ -44,10 +44,18 @@ export function presentRecommendedActions(ctx: RecommendedActionContext, provide
       if (!action) return;
       if (action.command) {
         const args = [...action.command.args];
-        void (
-          ctx.executeCommand?.(action.command.name, args) ??
-          Promise.resolve(ctx.print(`Cannot run /${action.command.name}: command execution is unavailable here.`))
-        );
+        const name = action.command.name;
+        const failed = (error: unknown): void =>
+          ctx.print(`/${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (!ctx.executeCommand) {
+          ctx.print(`Cannot run /${name}: command execution is unavailable here.`);
+          return;
+        }
+        try {
+          void Promise.resolve(ctx.executeCommand(name, args)).catch(failed);
+        } catch (error) {
+          failed(error);
+        }
         return;
       }
       ctx.print(action.description);

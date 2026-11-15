@@ -1,6 +1,7 @@
 import { cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
@@ -111,7 +112,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(allActionPayload.actions.filter((entry) => (
           typeof entry.modelRoute !== 'string'
           || entry.modelRoute.length === 0
-          || entry.modelRoute.length > 72
+          || entry.modelRoute.endsWith('...')
         ))).toEqual([]);
         expect(allActionPayload.actions.find((entry) => entry.id === 'assistant-personal-ops-lane')?.modelRoute).toBe('workspace action:"open"');
         expect(allActionPayload.actions.find((entry) => entry.id === 'personal-ops-briefing')?.modelRoute).toBe('personal_ops action:"briefing"');
@@ -173,7 +174,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -208,7 +209,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(scheduleEditAction.output).toContain('"modelRoute": "schedule action:\\"edit\\""');
       expect(scheduleEditAction.output).toContain('"id": "scheduleId"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -233,12 +234,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       // The boundary told the model that connected-host lifecycle/listener
       // settings were read-only. That stopped being true when those keys became
       // daemon-owned and their writes started routing to the daemon, so the text
-      // now describes routing plus the confirmation gate that replaced the lock.
+      // now describes routing plus the recorded-admission rule that replaced the lock.
       expect(settingsJson.policy?.boundary).toContain('routes to the runtime that owns the key');
-      expect(settingsJson.policy?.boundary).toContain('needs the user to ask first');
+      expect(settingsJson.policy?.boundary).toContain('only for what the owner asked in this turn');
       expect(settingsJson.policy?.boundary).not.toContain('remain read-only');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -304,7 +305,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       };
       expectCompactSummaryFields(compactPayload);
       expect(compactPayload.commands.filter((command) => !command.effect || !command.modelRoute)).toEqual([]);
-      expect(compactPayload.commands.filter((command) => (command.modelRoute?.length ?? 0) > 72)).toEqual([]);
+      // A route is returned whole: a clipped one names a call the model cannot make.
+      expect(compactPayload.commands.filter((command) => command.modelRoute?.endsWith('...'))).toEqual([]);
 
       const profileAlias = await fixture.tool.execute({ mode: 'command', command: '/agent-profiles list' });
       expect(profileAlias.success).toBe(true);
@@ -319,7 +321,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(profilePayload.lookup.parsedArgs).toEqual(['list']);
       expect(profilePayload.policy?.preferredModelTool).toContain('workspace_actions');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -477,13 +479,23 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(mcpQualified.error).toContain('not a directly callable tool');
       expect(mcpQualified.error).toContain('mcp mode:"call" qualifiedName:"mcp:playwright:browser_tabs"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
 
-  test.each(['summary', 'evidence', 'notesArtifact', 'ambiguousArtifact', 'missingArtifact', 'inventory', 'inventoryWithQuality', 'item', 'ambiguous', 'missing'] as const)('reports shipped release notes and unavailable private development evidence honestly: %s', async view => {
-    const fixture = makeFixture();
+  // A package root of its own, so these cases never read the checkout's generated `release/` output.
+  const RELEASE_NOTES = '# Synthetic release\n\n- First change\n- Second change\n';
+  function makeReleaseRoot(readiness?: unknown): string {
+    const root = makeProjectTempDir('harness-release-root');
+    mkdirSync(join(root, 'release'));
+    writeFileSync(join(root, 'release', 'release-notes.md'), RELEASE_NOTES);
+    if (readiness !== undefined) writeFileSync(join(root, 'release', 'release-readiness.json'), JSON.stringify(readiness));
+    return root;
+  }
+
+  test.each(['summary', 'evidence', 'notesArtifact', 'ambiguousArtifact', 'missingArtifact', 'inventory', 'inventoryWithQuality', 'item'] as const)('reports shipped release notes and unavailable private development evidence honestly: %s', async view => {
+    const fixture = makeFixture({ releaseRoot: makeReleaseRoot() });
     try {
       if (view === 'summary') {
         const summary = await fixture.tool.execute({ mode: 'summary', includeParameters: true });
@@ -550,17 +562,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(notesArtifactJson.artifact.id).toBe('release-notes');
         expect(notesArtifactJson.artifact.path).toBe('release/release-notes.md');
         expect(notesArtifactJson.artifact.status).toBe('available');
-        // Return the actual shipped artifact, including canonical suite links,
-        // rather than requiring release prose to use a particular list style.
-        const root = join(import.meta.dir, '..', '..', '..');
-        const notes = readFileSync(join(root, 'release', 'release-notes.md'), 'utf8');
-        const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
-        expect(notesArtifactJson.artifact.content).toBe(notes);
-        expect(notes.trim()).not.toBe('');
-        expect(notes.trimEnd()).toMatch(new RegExp(`GoodVibes Agent ${version.replaceAll('.', '\\.')} - \\d{4}-\\d{2}-\\d{2}$`));
-        const title = notes.split(/\r?\n/).find(line => line.startsWith('# '))?.slice(2).trim();
-        expect(notesArtifactJson.artifact.summary?.title).toBe(title);
-        expect(notesArtifactJson.artifact.summary?.bullets).toBe(notes.split(/\r?\n/).filter(line => /^-\s+/.test(line)).length);
+        expect(notesArtifactJson.artifact.content).toBe(RELEASE_NOTES);
+        expect(notesArtifactJson.artifact.summary?.title).toBe('Synthetic release');
+        expect(notesArtifactJson.artifact.summary?.bullets).toBe(2);
         return;
       }
 
@@ -622,25 +626,42 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         return;
       }
 
-      if (view === 'ambiguous') {
-        const ambiguous = await fixture.tool.execute({ mode: 'release_readiness_item', query: 'Agent' });
-        expect(ambiguous.success).toBe(true);
-        expect(JSON.parse(ambiguous.output!)).toMatchObject({ status: 'unavailable' });
-        return;
-      }
-
-      if (view === 'missing') {
-        const missing = await fixture.tool.execute({ mode: 'release_readiness_item', itemId: 'not-a-readiness-item' });
-        expect(missing.success).toBe(true);
-        expect(JSON.parse(missing.output!)).toMatchObject({ status: 'unavailable' });
-        return;
-      }
-
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
+
+  test('looks up release readiness items in a present inventory', async () => {
+    const quality = { capabilityCoverage: 'covered', userAccess: 'covered', modelAccess: 'covered', safetyBoundary: 'covered', releaseEvidence: 'covered' };
+    const fixture = makeFixture({ releaseRoot: makeReleaseRoot({ schemaVersion: 1, gate: 'open', checkedAt: '2026-01-01T00:00:00.000Z', items: [
+      { id: 'inventory-gate', capability: 'Release inventory gate', owner: 'release', status: 'ready', evidence: 'synthetic', action: 'none', quality },
+      { id: 'terminal-startup', capability: 'Terminal startup', owner: 'agent', status: 'blocked', evidence: 'synthetic', action: 'fix', quality },
+    ] }) });
+    try {
+      const summary = await fixture.tool.execute({ mode: 'summary' });
+      expect(summary.success, summary.error).toBe(true);
+      expect((JSON.parse(summary.output!) as { readonly releaseReadiness?: unknown }).releaseReadiness).toMatchObject({ status: 'available', items: 2 });
+
+      const byId = await fixture.tool.execute({ mode: 'release_readiness_item', itemId: 'inventory-gate' });
+      expect(byId.success, byId.error).toBe(true);
+      expect(JSON.parse(byId.output!)).toMatchObject({ status: 'found', lookup: { resolvedBy: 'id' }, item: { id: 'inventory-gate', status: 'ready' } });
+
+      const byCapability = await fixture.tool.execute({ mode: 'release_readiness_item', itemId: 'TERMINAL STARTUP' });
+      expect(byCapability.success, byCapability.error).toBe(true);
+      expect(JSON.parse(byCapability.output!)).toMatchObject({ status: 'found', lookup: { resolvedBy: 'capability' }, item: { id: 'terminal-startup', status: 'blocked' } });
+
+      const unknown = await fixture.tool.execute({ mode: 'release_readiness_item', itemId: 'not-a-readiness-item' });
+      expect(unknown.success).toBe(false);
+      expect(unknown.error).toContain('Unknown release readiness item not-a-readiness-item');
+
+      const none = await fixture.tool.execute({ mode: 'release_readiness_item' });
+      expect(none.success).toBe(false);
+      expect(none.error).toContain('itemId, target, or query');
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   test('exposes operator method catalog and service posture as read-only model surfaces', async () => {
     const fixture = makeFixture();
@@ -726,7 +747,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(endpointJson.policy.effect).toBe('read-only');
       expect(endpointJson.policy.lifecycle).toContain('confirmed GoodVibes daemon operator methods');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -765,7 +786,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(result).toMatchObject({ supported: false, token: 'daemon' }); expect(result.errors.length).toBeGreaterThan(0);
       }
       expect(fixture.printed).toEqual([]);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 

@@ -61,10 +61,6 @@ Do not reformat search results into local answer snippets. The platform response
 
 platform 0.28.0 adds durable semantic refinement tasks for the base knowledge layer. Refinement records preserve the gap, subject, state, trace, source assessments, blocked reasons, accepted facts, rejected evidence, and follow-up state so clients can explain what the knowledge system attempted instead of only reporting "skipped".
 
-platform 0.28.1 makes refinement runs budget-aware and non-blocking for user-facing routes. Ask routes should answer from current evidence and return `refinementTaskIds` when repair work is queued or still running. Reindex should queue repair instead of waiting for every repair to finish. Broad `refinement/run` calls cap effective work per run and report truncation or budget exhaustion rather than pinning the daemon. Stale `searching` or `evaluating` tasks older than the platform recovery window are moved back to a retriable blocked state on the next run.
-
-platform 0.28.2 fixes the published dist guardrail path for refinement budgets. Runtime dist uses 12 refinement gaps as the default run size and 24 as the maximum effective limit. It also reopens historical `No semantic gap repairer is configured` tasks once the host has wired the platform web-backed repairer, so old blocked tasks should no longer look like current host composition failures after a run reaches them.
-
 platform 0.28.3 coalesces overlapping semantic repair runs so repeated or concurrent refinement triggers should be bounded instead of piling up duplicate repair work. Home Graph repair-source metadata now preserves `linkedObjects` through answer rendering.
 
 Daemon routes:
@@ -80,7 +76,7 @@ The list route accepts filters such as `knowledgeSpaceId` or `spaceId`, `state`,
 
 Use these platform routes directly for task inspection and manual repair runs. Do not duplicate the refinement state machine in the TUI.
 
-The TUI daemon runtime wires platform semantic refinement to the platform web gap repairer. Gap repair uses the configured GoodVibes web search providers for source discovery and the knowledge ingest service for accepted repair sources. If web search providers are unavailable or disabled, tasks may still become blocked by search/provider readiness, but they should not report `No semantic gap repairer is configured`.
+The daemon runtime wires platform semantic refinement to the platform web gap repairer. Gap repair uses the configured GoodVibes web search providers for source discovery and the knowledge ingest service for accepted repair sources. If web search providers are unavailable or disabled, tasks may still become blocked by search/provider readiness, but they should not report `No semantic gap repairer is configured`.
 
 ## Issue review
 
@@ -121,8 +117,7 @@ running binary. Every install channel ships it:
   (`sqlite-vec-<os>-<arch>.<suffix>`, covered by `SHA256SUMS.txt`) and places it
   in `lib/` next to `goodvibes`, `goodvibes-daemon`, and `goodvibes-agent`. One
   copy serves all three. `/update` refreshes it in the same download-verify-swap
-  pass as the binaries, so it never goes stale beside a new build. Set
-  `GOODVIBES_VECTOR=0` to skip installing it.
+  pass as the binaries, so it never goes stale beside a new build.
 
 **macOS limitation:** on macOS, `bun:sqlite` links Apple's system SQLite, which
 ships with extension loading disabled. The addon is still installed for
@@ -165,7 +160,7 @@ the media and voice subsystems.
 
 ## Jobs and schedules
 
-Eight knowledge job kinds can be run directly or saved as schedules through the runtime:
+Ten knowledge job kinds can be run directly or saved as schedules through the runtime:
 
 | Job | What it does |
 | --- | --- |
@@ -173,7 +168,9 @@ Eight knowledge job kinds can be run directly or saved as schedules through the 
 | `reindex` | Re-run compile and structured memory sync across the current store |
 | `refresh-stale` | Recrawl stale, failed, or aging remote sources |
 | `refresh-bookmarks` | Recrawl bookmark and URL-list sources to refresh summaries and links |
+| `sync-browser-history` | Index local browser history and bookmarks as metadata-first structured knowledge |
 | `rebuild-projections` | Render and materialize the major derived markdown/wiki projections |
+| `semantic-enrichment` | Extract durable facts, entities, wiki pages and gaps from indexed sources |
 | `semantic-self-improvement` | Classify semantic gaps and repair eligible concrete subjects with corroborated source-backed ingest |
 | `light-consolidation` | Score recent usage, refresh candidate promotions, and write a deterministic consolidation report |
 | `deep-consolidation` | Run the full consolidation loop, including high-confidence memory promotion and deterministic reporting |

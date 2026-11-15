@@ -18,6 +18,8 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 
 `/tts stop` cancels queued spoken output and active playback without cancelling the text transcript.
 
+`ui.voiceEnabled` (shown in settings as "Always speak replies", switched with `/voice enable --yes` and `/voice disable --yes`) makes every submitted turn spoken aloud through live TTS. It does not open a microphone; listening is the wake-word capture described below. The setting is saved to Agent configuration, so it stays on across restarts until you turn it off.
+
 `/config tts` opens the fullscreen configuration workspace for streaming provider, voice, and spoken-turn model routing.
 
 The model can inspect the same settings through `settings action:"list|get"`, use `device action:"voice|provider"` for voice/media posture and provider inspection, open the visible TTS provider or voice picker through `device action:"open_tts_provider|open_tts_voice"` with confirmation, and change Agent-owned TTS settings with `settings action:"set"` plus explicit confirmation.
@@ -53,12 +55,15 @@ What happens when both enablement rows are on:
 1. The recorder subprocess starts. A named recorder that is not installed is
    reported, not silently replaced.
 2. Every 80 ms frame is scored against the pinned "hey goodvibes" classifier through
-   onnxruntime-web on its WASM backend. The models are NOT downloaded automatically.
-   Run `/voice wake status` to see what is on disk (verified by content, so a
-   truncated file reads as corrupt rather than present) and `/voice wake setup --yes`
-   to download them. The same provision also fetches the speech gate
+   onnxruntime-web on its WASM backend. When the models are missing, turning both
+   rows on makes Agent say so ("fetching and verifying them now") and download
+   them, checksum-verified, before the detector starts; that is the one network
+   fetch wake detection makes. Run `/voice wake status` to see what is on disk
+   (verified by content, so a truncated file reads as corrupt rather than present)
+   and `/voice wake setup --yes` to download them ahead of time, without enabling
+   anything. The same provision also fetches the speech gate
    `voice.wake.vadThreshold` uses, reported separately because the detector runs
-   without it. An enabled detector with no models says so instead of
+   without it. If the download fails, the detector says so instead of
    pretending to listen.
 3. A confirmed wake plays `voice.wake.activationSound` and shows a persistent
    listening row in the footer per `voice.wake.indicator`. An always-on microphone
@@ -178,11 +183,16 @@ independently-maintained ones, and a regression test fails if Agent ever reads a
 `tts.*` key outside the shared schema or stops reading it through the shared
 `ConfigManager`.
 
-Sharing covers the schema, not the stored values. Each surface still persists its own
-values to its own settings file (Agent's under its own surface root, the TUI's under
-its own), which is the general per-surface config storage model rather than anything
-voice-specific. Setting `tts.voice` on one surface sets the same conceptual value the
-other surfaces read under that name, even though each surface keeps its own copy.
+Sharing covers the stored values too. These five keys are the shared settings tier:
+every surface reads them from, and writes them to, one file,
+`<tree-root>/.goodvibes/shared/settings.json`, not to its own surface settings file.
+Resolution order is schema defaults, then the global surface file, then the project
+surface file, then the shared file, then launch overrides. A value present in the shared
+file therefore wins over a `tts.*` entry in Agent's own global or project
+`settings.json`, and setting `tts.voice` in Agent changes the voice the TUI and the
+daemon use as well. A surface with no shared value falls back to its own setting.
+Writes to that file are serialized across processes, so two surfaces saving different
+`tts.*` keys at the same moment keep both.
 
 Two deliberate boundaries follow from Agent's local-first design:
 

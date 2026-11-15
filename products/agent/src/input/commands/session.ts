@@ -78,7 +78,7 @@ export const sessionCommand: SlashCommand = {
         if (!handled) {
           const usage = [
             'Usage: /session <subcommand>',
-            '  list | rename <name> | resume <id|name> | fork [name] | save [name] | info [id] | export <id> [format] | search <query> | delete <id> --yes',
+            '  list | rename <name> | resume <id|name> [--force] | fork [name] | save [name] | info [id] | export <id> [format] | search <query> | delete <id> --yes',
             '                                , Session continuity, export, resume, and pruning',
             '  events [kind] | groups [kind] | hotspots',
             '                                , Transcript structure: event log, grouped view, hotspot summary',

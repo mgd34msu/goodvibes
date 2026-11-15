@@ -29,7 +29,10 @@ function fakeWorkspace(overrides: Partial<{
   diffFiles: string[];
   restoreCalls: Array<{ id: string; safety: boolean | undefined }>;
 }> = {}): RewindWorkspacePort {
+  // A newer checkpoint of ANOTHER session shares turn-1's id and sorts first, so a
+  // service that stopped scoping its list by session would pick it.
   const checkpoints = overrides.checkpoints ?? [
+    { id: 'wcp_other_session', turnId: 'turn-1', createdAt: 900, label: 'other session turn 1' },
     { id: 'wcp_a', turnId: 'turn-1', createdAt: 100, label: 'turn 1' },
     { id: 'wcp_b', turnId: 'turn-2', createdAt: 200, label: 'turn 2' },
   ];
@@ -41,7 +44,8 @@ function fakeWorkspace(overrides: Partial<{
   };
   const restoreCalls = overrides.restoreCalls ?? [];
   return {
-    list: async (filter) => checkpoints.filter((c) => !filter?.sessionId || true),
+    list: async (filter) =>
+      checkpoints.filter((c) => !filter?.sessionId || (c.id === 'wcp_other_session' ? 's2' : 's1') === filter.sessionId),
     diff: async () => ({ files: overrides.diffFiles ?? ['src/a.ts', 'src/b.ts', 'src/c.ts'] }),
     restore: async (id, opts) => {
       restoreCalls.push({ id, safety: opts?.safetyCheckpoint });
@@ -65,7 +69,14 @@ describe('rewind.plan: dry-run preview + confirm token', () => {
     expect(plan.conversation).toBeNull();
     expect(plan.token).toBeTruthy();
     expect(plan.expiresAt).toBeGreaterThan(0);
-    expect(plan.warnings).toHaveLength(0);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain('resets the whole workspace');
+  });
+
+  test('applying a files rewind warns that other writers\' edits are reverted too', async () => {
+    const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
+    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    expect(receipt.warnings.join(' ')).toContain('other sessions, agents or you');
   });
 
   test('conversation is reported unavailable (with a warning) when no store is wired', async () => {
@@ -85,7 +96,15 @@ describe('rewind.plan: dry-run preview + confirm token', () => {
   test('with no turnId, the most-recent checkpoint for the session is chosen', async () => {
     const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
     const plan = await service.plan({ sessionId: 's1' }, 'files');
-    expect(plan.files?.checkpointId).toBe('wcp_b'); // createdAt 200 > 100
+    expect(plan.files?.checkpointId).toBe('wcp_b'); // createdAt 200 > 100; the other session's 900 is out of scope
+  });
+
+  test("a turn anchor resolves inside its own session even when another session's checkpoint carries the same turn id", async () => {
+    const service = new UnifiedRewindService({ workspace: fakeWorkspace() });
+    const s1 = await service.plan({ sessionId: 's1', turnId: 'turn-1' }, 'files');
+    expect(s1.files?.checkpointId).toBe('wcp_a');
+    const s2 = await service.plan({ sessionId: 's2', turnId: 'turn-1' }, 'files');
+    expect(s2.files?.checkpointId).toBe('wcp_other_session');
   });
 });
 
@@ -135,6 +154,19 @@ describe('rewind.apply: symmetric undo point (restore-the-restore)', () => {
     expect(receipt.undo.files).toEqual({ restoreCheckpointId: 'wcp_safety' });
     expect(receipt.files?.restoredFileCount).toBe(2);
     expect(receipt.files?.removedFileCount).toBe(1);
+  });
+
+  test('a restore that could not apply every path is reported as partial and keeps the undo point', async () => {
+    const service = new UnifiedRewindService({
+      workspace: fakeWorkspace({
+        restore: { checkpointId: 'wcp_a', safetyCheckpointId: 'wcp_safety', restoredFiles: ['src/a.ts'], removedFiles: [], failedPaths: [{ path: 'src/b.ts', reason: 'permission denied' }] },
+      }),
+    });
+    const receipt = (await service.apply(anchor, 'files', { confirm: true })).receipt!;
+    expect(receipt.files?.restored).toBe(false);
+    expect(receipt.undo.files).toEqual({ restoreCheckpointId: 'wcp_safety' });
+    expect(receipt.warnings.join(' ')).toContain('src/b.ts: permission denied');
+    expect(receipt.warnings.join(' ')).toContain('wcp_safety');
   });
 
   test('both scope records undo points for files and conversation', async () => {
@@ -245,8 +277,8 @@ describe('conversation rewind hosts', () => {
     const expected: Readonly<Record<string, string>> = {
       'rewind.conversation.host.register': 'write:sessions',
       'rewind.conversation.host.release': 'write:sessions',
-      'rewind.conversation.hosts.list': 'read:sessions',
-      'rewind.conversation.requests.take': 'read:sessions',
+      'rewind.conversation.hosts.list': 'write:sessions',
+      'rewind.conversation.requests.take': 'write:sessions',
       'rewind.conversation.requests.answer': 'write:sessions',
     };
     for (const [id, scope] of Object.entries(expected)) {
@@ -402,7 +434,7 @@ describe('conversation rewind hosts', () => {
     await expect(h.catalog.invoke('rewind.conversation.requests.take', {
       ...HOST_CONTEXT,
       body: { hostId },
-    })).rejects.toThrow(/is not registered/);
+    })).rejects.toThrow(/took over hosting/);
   });
 
   test('a lapsed lease stops the surface being consulted, and says which surface lapsed', async () => {
@@ -447,10 +479,19 @@ describe('conversation rewind hosts', () => {
 
   test('shutdown answers everything outstanding rather than stranding a caller', async () => {
     const h = hostHarness({ answerTimeoutMs: 60_000 });
-    await registerHost(h, 'sess-1');
+    const hostId = await registerHost(h, 'sess-1');
     const planned = h.rewind.plan({ sessionId: 'sess-1' }, 'conversation');
-    // Give the ask a tick to reach the broker's pending map.
-    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    // The host takes the request without answering it: the ask is now observably
+    // outstanding in the broker, which is the state shutdown has to resolve.
+    let taken = 0;
+    for (let attempt = 0; attempt < 200 && taken === 0; attempt += 1) {
+      const result = await h.catalog.invoke('rewind.conversation.requests.take', {
+        ...HOST_CONTEXT,
+        body: { hostId, waitMs: 50 },
+      }) as { requests: readonly unknown[] };
+      taken = result.requests.length;
+    }
+    expect(taken).toBe(1);
     h.broker.shutdown();
     const plan = await planned;
     expect(plan.conversation?.available).toBe(false);

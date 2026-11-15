@@ -190,6 +190,7 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
     } catch (error) { drainOwned(error); /* Committed facts remain reported; a later run rechecks cold. */ }
     const decisions: HomeGraphTriageDecision[] = applications.map(({ issue, plan, category }) => ({
       issueId: issue.id, code: issue.code, action: plan.action, category, confidence: plan.probability * 100,
+      ...(plan.heldReason ? { reason: `held-${plan.heldReason}` } : {}),
       applied: plan.action === 'reject', ...(Object.keys(plan.facts).length ? { appliedFacts: { ...plan.facts } } : {}),
       source: 'homegraph-triage',
     }));

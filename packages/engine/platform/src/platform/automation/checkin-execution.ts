@@ -122,6 +122,15 @@ export async function executeCheckinJob(
     const end = Date.now();
     const message = error instanceof Error ? error.message : String(error);
     const stored = context.runs.get(baseRun.id);
+    if (written && stored === written) {
+      // The evaluation finished and its outcome is recorded; only saving or
+      // announcing it failed. Rewriting the run as failed would contradict a
+      // check-in that was already delivered, so the outcome stands.
+      logger.warn('AutomationManager: check-in outcome recorded but could not be saved or announced', {
+        jobId: job.id, runId: baseRun.id, status: written.status, error: message,
+      });
+      return written;
+    }
     if (stored && stored !== written && !canSettleStoredRun(stored, 'failed')) {
       logger.warn('AutomationManager: check-in failed after its run was already settled; keeping its recorded status', {
         jobId: job.id, runId: baseRun.id, status: stored.status, error: message,

@@ -400,13 +400,17 @@ export function toEffortModel(model: EffortModelLike): EffortModelLike {
 }
 
 
-/** Explicit stored preference; null means the user restored provider defaults. */
+/**
+ * Explicit stored preference; null means the user restored provider defaults.
+ * A config read that fails throws: reporting it as "defaults" would show a
+ * preference the user may have set as if it had been cleared.
+ */
 export function requestedEffortOverride(config: RequestedEffortReader & {
   describeConfigKeySource(key: 'provider.reasoningEffort'): { readonly effectiveOrigin?: string | undefined; readonly tier?: string | undefined };
 }): string | null {
-  try {
-    const source = config.describeConfigKeySource('provider.reasoningEffort');
-    if ((source.effectiveOrigin ?? source.tier) === 'default') return null;
-    return requestedEffortLevel(config) || null;
-  } catch { return null; }
+  // A narrow reader that cannot say where a value came from has no explicit preference to report.
+  if (typeof config.describeConfigKeySource !== 'function') return null;
+  const source = config.describeConfigKeySource('provider.reasoningEffort');
+  if ((source.effectiveOrigin ?? source.tier) === 'default') return null;
+  return requestedEffortLevel(config) || null;
 }

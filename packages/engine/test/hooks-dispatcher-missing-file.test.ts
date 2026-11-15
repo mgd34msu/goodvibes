@@ -28,6 +28,7 @@ describe('HookDispatcher.loadFromFile with no hooks file', () => {
     dispatcher.loadFromFile(join(tmpdir(), 'goodvibes-test-does-not-exist', 'hooks.json'));
 
     expect(calls).toEqual([]);
+    expect(dispatcher.getHooks().size).toBe(0);
   });
 
   test('present file still loads hooks', () => {
@@ -35,7 +36,7 @@ describe('HookDispatcher.loadFromFile with no hooks file', () => {
     try {
       const path = join(dir, 'hooks.json');
       writeFileSync(path, JSON.stringify({
-        hooks: { 'tool.pre': [{ type: 'command', match: '*', command: 'echo ok' }] },
+        hooks: { 'Pre:tool:*': [{ type: 'command', match: 'Pre:tool:*', command: 'echo ok' }] },
       }));
       const errors: string[] = [];
       logger.error = ((message: string) => { errors.push(message); }) as typeof logger.error;
@@ -44,6 +45,7 @@ describe('HookDispatcher.loadFromFile with no hooks file', () => {
       dispatcher.loadFromFile(path);
 
       expect(errors).toEqual([]);
+      expect(dispatcher.getHooks().get('Pre:tool:*')).toHaveLength(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

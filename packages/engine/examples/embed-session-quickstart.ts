@@ -29,16 +29,27 @@ async function main(): Promise<void> {
   });
 
   // 2. Subscribe to typed runtime events. Every service emits on this bus.
+  //    The turn runs after submit() resolves, so keep the subscription open
+  //    until the turn reports a terminal event.
+  let finishTurn: () => void = () => {};
+  const turnFinished = new Promise<void>((resolve) => {
+    finishTurn = resolve;
+  });
   const unsubscribe = session.events.onDomain('turn', (envelope) => {
     const event: AnyRuntimeEvent = envelope.payload;
     console.log(`[turn] ${envelope.type} (${event.type})`);
+    if (envelope.type === 'TURN_COMPLETED' || envelope.type === 'TURN_ERROR' || envelope.type === 'TURN_CANCEL' || envelope.type === 'PREFLIGHT_FAIL') {
+      finishTurn();
+    }
   });
 
   // 3. Send input to the session.
   const submission = await session.submit('Summarize the README.');
   console.log(`submitted to session ${submission.session.id} (mode: ${submission.mode})`);
 
-  // 4. Shut down when done. Idempotent.
+  // 4. Wait for the turn to end, then shut down. stop() aborts a turn that is
+  //    still running, so it must not be called before the terminal event. Idempotent.
+  await turnFinished;
   unsubscribe();
   await session.stop();
 }

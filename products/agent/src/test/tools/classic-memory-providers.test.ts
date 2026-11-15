@@ -36,7 +36,7 @@ test('Classic provider inspection retains native facts and exact-purpose receipt
       readReady: null, readRoute: null, certification: { schemaStatus: 'unassessed' } }]);
     expect(setupStatusFromLiveRecord(providers[0]!)).toBe('unassessed');
     const receipts = await externalMemoryReceiptEvidence(f.context, f.options);
-    expect(receipts).toMatchObject([{ artifactId: 'receipt-one', providerId: 'honcho', operation: 'sync', status: 'unassessed',
+    expect([...receipts]).toMatchObject([{ artifactId: 'receipt-one', providerId: 'honcho', operation: 'sync', status: 'unassessed',
       operationProvenance: 'classic', certification: { schemaStatus: 'unassessed' } }]);
     expect(asks).toBe(0); expect(f.privacy.calls).toEqual([]);
   });
@@ -105,7 +105,7 @@ test('Classic full memory posture and exact provider detail expose the limitatio
       } });
       expect(asks).toBe(0); expect(f.privacy.calls).toEqual([]);
     });
-  } finally { harness.cleanup(); }
+  } finally { await harness.cleanup(); }
 });
 
 for (const change of ['cancel', 'source'] as const) test(`memory ${change} revocation prevents fallback after an availability error`, async () => {

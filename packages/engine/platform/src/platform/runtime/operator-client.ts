@@ -70,6 +70,8 @@ export interface OperatorSessionsClient {
  */
 export interface SurfaceInputDeliveryOptions {
   readonly consumed?: boolean | undefined;
+  /** Take the input before working on it; refused when another surface already holds it. */
+  readonly claim?: boolean | undefined;
   readonly agentId?: string | undefined;
   readonly answer?: string | undefined;
   readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;

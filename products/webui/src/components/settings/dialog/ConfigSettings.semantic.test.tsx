@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { invalidateClientLifetime } from "../../../lib/client-lifetime";
 import { ToastProvider } from "../../../lib/toast";
+import { judgmentResponse } from "../../../test-support/judgment-response";
 
 type Request = BrowserJudgmentRequest<"webui.config.credential-key" | "webui.settings.card-material-key">;
 let pending: {
@@ -47,33 +48,7 @@ const fixture = () => ({
   cluster: { groupMaterial: "synthetic-declared-secret-1234" },
 });
 function response(request: Request, matches = request.input.keys.map(() => false), held = false) {
-  return {
-    protocolVersion: 1,
-    batteryVersion: 1,
-    battery: request.battery,
-    requestId: request.requestId,
-    status: held ? "held" : "settled",
-    ...(held ? { reason: "uncertain" } : { value: { matches } }),
-    outcome: held ? "confirm" : "act",
-    readings: Object.fromEntries(
-      matches.map((match, index) => [
-        `key_${index}`,
-        {
-          kind: "yes-no",
-          probability: held ? 0.5 : match ? 0.99 : 0.01,
-          verdict: held ? "uncertain" : match ? "yes" : "no",
-          outcome: held ? "confirm" : "act",
-        },
-      ])
-    ),
-    evidence: matches.map((_, index) => ({
-      decisionId: `synthetic-${index}`,
-      model: "fixture",
-      requestedModel: "fixture",
-      usage: { inputTokens: 1, outputTokens: 1 },
-      latencyMs: 1,
-    })),
-  };
+  return judgmentResponse(request, matches, held);
 }
 type ReadingRound = { credential: (typeof pending)[number]; card: (typeof pending)[number] };
 function readingRound(index: number): ReadingRound {
@@ -373,16 +348,21 @@ test("closing settings aborts transport and a late result cannot clear a replace
   expect(next.shown("extension.label")).toBeUndefined();
 });
 
-test("oversized unknown-key inventory remains excluded without partial or guessed clearance", async () => {
+test("an inventory over one reading's limit is read in batches and stays excluded until every batch settles", async () => {
   const ui = mount({
     extension: Object.fromEntries(
       Array.from({ length: 65 }, (_, index) => [`key${index}`, privateValue])
     ),
   });
+  await waitFor(() => pending.length === 4);
+  expect(pending.map(call => call.request.input.keys.length).sort((x, y) => x - y)).toEqual([1, 1, 64, 64]);
+  pending.filter(call => call.request.input.keys.length === 64).forEach(call => call.finish(response(call.request)));
   await settle();
-  expect(pending).toHaveLength(0);
   expect(ui.el.querySelectorAll(".settings-readable__row")).toHaveLength(0);
   expect(ui.el.textContent).not.toContain(privateValue);
+  pending.filter(call => call.request.input.keys.length === 1).forEach(call => call.finish(response(call.request)));
+  await waitFor(() => ui.shown("extension.key0") === privateValue);
+  expect(ui.shown("extension.key64")).toBe(privateValue);
 });
 
 test("loss of config read access never leaves a cleared cached value displayed", async () => {

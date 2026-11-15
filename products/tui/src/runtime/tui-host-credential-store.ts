@@ -26,6 +26,7 @@ export const {
   readHostPairing: readTuiHostPairing,
   beginHostPairing: beginTuiHostPairing,
   completeHostPairing: completeTuiHostPairing,
+  clearHostPairingAttempt: clearTuiHostPairingAttempt,
 } = createHostPairingStore({
   unavailableReason: TUI_HOST_PAIRING_UNAVAILABLE_REASON,
   surfaceRoot: 'tui',

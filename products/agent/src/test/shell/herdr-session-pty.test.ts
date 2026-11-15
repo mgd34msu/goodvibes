@@ -35,7 +35,7 @@ if (argv[1] === 'release-agent' && argv[argv.indexOf('--source') + 1] === 'goodv
   const calls = (): string[][] => existsSync(callsPath) ? readFileSync(callsPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const state = (argv: string[]) => argv[argv.indexOf('--state') + 1];
   try {
-    await waitFor('native Agent initial report', () => calls().find(argv => argv[1] === 'report-agent'), 20_000, 20);
+    await waitFor('native Agent initial report', () => calls().find(argv => argv[1] === 'report-agent'), 20_000, 20).catch(error => { throw new Error(`${String(error)}\n${frame.text()}\n${JSON.stringify(calls())}`); });
     await waitFor('native Agent owner question report', () => calls().find(argv => argv[1] === 'report-agent' && state(argv) === 'blocked'), 20_000, 20);
     const reports = calls().filter(argv => argv[1] === 'report-agent');
     const sessionFlag = reports[0]?.find(flag => flag.startsWith('--agent-session-id='));

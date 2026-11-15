@@ -1,7 +1,7 @@
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 export type MarkdownFrontmatterValue = string | string[];
 
@@ -159,21 +159,59 @@ export function readMarkdownDisclosure(filePath: string): MarkdownDisclosure {
   };
 }
 
+/**
+ * Expands `@file` lines. An include must live under the directory of the file
+ * being materialized (links resolved), so a skill or archetype that arrives with
+ * a cloned repository cannot splice `@/etc/...` or `@../../.env` into the text a
+ * model reads; a refused include is replaced by a visible marker. A line naming
+ * a file that does not exist is kept as written, since it is text such as
+ * `@mention`.
+ */
 export function materializeMarkdownBody(filePath: string, body?: string): string {
   const resolvedPath = resolve(filePath);
   const sourceBody = body ?? readMarkdownDisclosure(resolvedPath).body;
-  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>());
+  return resolveMarkdownIncludes(resolvedPath, sourceBody, new Set<string>(), dirname(resolvedPath), 0, { expanded: 0, chars: 0 });
+}
+
+// Nesting and total expansions are bounded: without the bounds a few small
+// files that each repeat an include ten times expand exponentially.
+const MAX_INCLUDE_DEPTH = 5;
+const MAX_INCLUDE_EXPANSIONS = 200;
+// Total size of all included bodies; the expansion count alone lets one large
+// file included many times multiply into hundreds of megabytes.
+const MAX_INCLUDE_CHARS = 1_000_000;
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isInsideDirectory(root: string, candidate: string): boolean {
+  try {
+    const rel = relative(realpathSync(root), realpathSync(candidate));
+    return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
+  } catch {
+    return false;
+  }
 }
 
 function resolveMarkdownIncludes(
   sourcePath: string,
   body: string,
-  visited: Set<string>,
+  chain: Set<string>,
+  root: string,
+  depth: number,
+  budget: { expanded: number; chars: number },
 ): string {
 
   const resolvedSourcePath = resolve(sourcePath);
-  if (visited.has(resolvedSourcePath)) return '';
-  visited.add(resolvedSourcePath);
+  // The chain holds only the files being expanded right now, so a cycle is cut
+  // while the same fragment included twice from siblings is still expanded.
+  if (chain.has(resolvedSourcePath)) return '';
+  chain.add(resolvedSourcePath);
 
   const baseDir = dirname(resolvedSourcePath);
   const lines = body.split('\n');
@@ -195,15 +233,31 @@ function resolveMarkdownIncludes(
 
     const includeTarget = includeMatch[1]!;
     const includePath = resolve(baseDir, includeTarget.split('#')[0]!);
-    if (!existsSync(includePath)) {
+    if (!isFile(includePath)) {
+      result.push(line);
+      continue;
+    }
+    if (!isInsideDirectory(root, includePath)) {
+      result.push(`[include refused: ${includeTarget.split('#')[0]} is outside ${basename(root)}/]`);
       continue;
     }
 
+    if (depth >= MAX_INCLUDE_DEPTH || budget.expanded >= MAX_INCLUDE_EXPANSIONS) {
+      result.push(`[include skipped: ${includeTarget.split('#')[0]} exceeds the include limit]`);
+      continue;
+    }
     const included = readMarkdownDisclosure(includePath);
-    const materialized = resolveMarkdownIncludes(includePath, included.body, visited);
+    if (budget.chars + included.body.length > MAX_INCLUDE_CHARS) {
+      result.push(`[include skipped: ${includeTarget.split('#')[0]} exceeds the include limit]`);
+      continue;
+    }
+    budget.expanded += 1;
+    budget.chars += included.body.length;
+    const materialized = resolveMarkdownIncludes(includePath, included.body, chain, root, depth + 1, budget);
     if (!materialized) continue;
     result.push(materialized);
   }
 
+  chain.delete(resolvedSourcePath);
   return result.join('\n');
 }

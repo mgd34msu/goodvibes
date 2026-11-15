@@ -118,6 +118,29 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
+/** The most of the daemon's own reason that is passed on to a caller. */
+const DAEMON_REASON_LIMIT = 200;
+
+/**
+ * The daemon's stated reason for a refusal, bounded and with addresses and
+ * control characters removed, so a refused draft says why instead of just
+ * "HTTP 422". Returns '' when the body carries no readable message.
+ */
+function daemonReason(body: unknown): string {
+  const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  const raw = typeof body === 'string' ? body
+    : typeof record?.error === 'string' ? record.error
+    : typeof record?.message === 'string' ? record.message
+    : '';
+  const cleaned = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[address]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > DAEMON_REASON_LIMIT ? `${cleaned.slice(0, DAEMON_REASON_LIMIT)}...` : cleaned;
+}
+
 function classifyStatus(status: number): DaemonInvokeFailureKind {
   if (status === 401 || status === 403) return 'auth_required';
   if (status === 404) return 'connected_host_route_unavailable';
@@ -212,17 +235,22 @@ export function createDaemonOperatorInvoke(
           methodId,
           route,
           kind: classifyStatus(response.status),
-          error: `HTTP ${response.status}`,
+          error: (() => { const reason = daemonReason(body); return reason ? `HTTP ${response.status}: ${reason}` : `HTTP ${response.status}`; })(),
         };
       }
       return { ok: true, methodId, route, body };
-    } catch {
+    } catch (error) {
+      // A call the caller cancelled is not a dead host; say which it was.
+      const cancelled = signal?.aborted === true
+        || (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'));
       return {
         ok: false,
         methodId,
         route,
         kind: 'connected_host_unavailable',
-        error: 'Connected-host invocation failed or its authority changed.',
+        error: cancelled
+          ? 'Connected-host call was cancelled or timed out before the daemon answered.'
+          : 'Connected-host invocation failed or its authority changed.',
       };
     }
   };

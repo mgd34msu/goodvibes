@@ -78,6 +78,11 @@ function readResult(keyword: string): SenderProtocolResult {
 /**
  * Parse one `Authentication-Results` value.
  *
+ * `dkim` is the first DKIM result the receiver stamped, for whichever domain
+ * signed: a message signed by an unrelated domain still reads `pass`. Whether
+ * the signing domain matches `From:` is what `dmarc` reports, so `dmarc` is the
+ * aligned verdict and `dkim` is a statement about a signature only.
+ *
  * Tolerant by design: the header is free-form enough in practice that a strict
  * grammar would reject real mail. Anything unrecognised yields no result for
  * that method, which surfaces as `unverified` rather than as a false pass.
@@ -91,11 +96,15 @@ export function parseAuthenticationResults(headerValue: string): SenderAuthentic
 
   if (typeof headerValue !== 'string' || headerValue.trim().length === 0) return checks;
 
+  // RFC 8601 comments are free text: a "(was dkim=pass earlier)" in one must
+  // not be read as a result.
+  const withoutComments = headerValue.replace(/\([^()]*\)/g, ' ');
+
   for (const method of METHODS) {
     // `dkim=pass`, `dkim = pass`, `dkim=pass (good signature)`. The first
     // occurrence of each method wins; a repeated method later in the same
     // header does not get to overwrite it.
-    const match = new RegExp(`(?:^|[;\\s])${method}\\s*=\\s*([a-z]+)`, 'i').exec(headerValue);
+    const match = new RegExp(`(?:^|[;\\s])${method}\\s*=\\s*([a-z]+)`, 'i').exec(withoutComments);
     if (match?.[1] === undefined) continue;
     checks[method] = readResult(match[1]);
   }

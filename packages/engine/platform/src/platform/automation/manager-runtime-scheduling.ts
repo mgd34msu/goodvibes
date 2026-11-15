@@ -36,6 +36,25 @@ interface AutomationSchedulingContext {
    * planned-but-missed run time before the next occurrence is recomputed.
    */
   readonly recordMissedRun?: ((job: AutomationJob, plannedRunAt: number) => void) | undefined;
+  /**
+   * Whether a run of this job is still in flight. A timer that fires while one
+   * is skips that occurrence rather than starting an overlapping run of the
+   * same work. Absent, every due occurrence starts.
+   */
+  readonly hasRunningRun?: ((jobId: string) => boolean) | undefined;
+}
+
+function completeOneShotJob(context: Pick<AutomationSchedulingContext, 'jobs' | 'timers' | 'saveJobs'>, current: AutomationJob, reason: string): void {
+  const completedOneShot: AutomationJob = {
+    ...current,
+    ...jobEnablement(false),
+    pausedReason: 'one-shot-complete',
+    nextRunAt: undefined,
+    updatedAt: Date.now(),
+  };
+  context.jobs.set(current.id, completedOneShot);
+  cancelAutomationTimer(context.timers, current.id);
+  saveJobsAsync(context, reason, current.id);
 }
 
 function saveJobsAsync(context: Pick<AutomationSchedulingContext, 'saveJobs'>, reason: string, jobId?: string): void {
@@ -61,13 +80,20 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
   const missedPlannedRunAt = nextRunAtCandidate !== undefined && nextRunAtCandidate < (now - catchUpWindowMs)
     ? nextRunAtCandidate
     : undefined;
-  if (missedPlannedRunAt !== undefined) {
+  const successorRunAt = missedPlannedRunAt !== undefined ? computeNextRun(job.schedule, now) : undefined;
+  // A one-shot that has already run (a manual run, say) did not miss anything.
+  const alreadyRan = missedPlannedRunAt !== undefined && successorRunAt === undefined
+    && job.lastRunAt !== undefined && job.lastRunAt >= missedPlannedRunAt;
+  if (missedPlannedRunAt !== undefined && !alreadyRan) {
     context.recordMissedRun?.(job, missedPlannedRunAt);
   }
-  const nextRunAt = missedPlannedRunAt !== undefined
-    ? computeNextRun(job.schedule, now)
-    : nextRunAtCandidate;
-  if (nextRunAt === undefined) return;
+  const nextRunAt = missedPlannedRunAt !== undefined ? successorRunAt : nextRunAtCandidate;
+  if (nextRunAt === undefined) {
+    // A missed one-shot has no later occurrence: it is finished, not enabled
+    // with nothing left to run.
+    if (missedPlannedRunAt !== undefined || job.schedule.kind === 'at') completeOneShotJob(context, job, 'missed-one-shot-complete');
+    return;
+  }
 
   const refreshed: AutomationJob = {
     ...job,
@@ -102,6 +128,34 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       scheduleAutomationJob(context, deferred);
       return;
     }
+    // The next occurrence is armed once this one has been handled, whether it
+    // started, was skipped, or failed to start.
+    const advance = () => {
+      const current = context.jobs.get(job.id);
+      if (!current?.enabled) return;
+      // A failure cooldown moved the next run and armed its timer already.
+      if (current.nextRunAt !== undefined && current.nextRunAt !== latest.nextRunAt && current.nextRunAt > Date.now()) return;
+      const next = computeNextRun(current.schedule, Date.now());
+      if (next !== undefined) {
+        const updated: AutomationJob = {
+          ...current,
+          nextRunAt: next,
+          updatedAt: Date.now(),
+        };
+        context.jobs.set(current.id, updated);
+        saveJobsAsync(context, 'advance-next-run', current.id);
+        scheduleAutomationJob(context, updated);
+        return;
+      }
+      completeOneShotJob(context, current, 'complete-one-shot');
+    };
+    if (context.hasRunningRun?.(job.id)) {
+      logger.info('AutomationManager: scheduled occurrence skipped, a run of this job is still in flight', { jobId: job.id });
+      advance();
+      return;
+    }
+    // A start failure is recorded, announced and followed up by the execution
+    // itself; the scheduler only needs to log it and move on.
     void context.executeJob(latest, 'scheduled', true)
       .catch((error) => {
         logger.error('AutomationManager: scheduled execution failed', {
@@ -109,32 +163,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
           error: summarizeError(error),
         });
       })
-      .finally(() => {
-        const current = context.jobs.get(job.id);
-        if (!current?.enabled) return;
-        const next = computeNextRun(current.schedule, Date.now());
-        if (next !== undefined) {
-          const updated: AutomationJob = {
-            ...current,
-            nextRunAt: next,
-            updatedAt: Date.now(),
-          };
-          context.jobs.set(current.id, updated);
-          saveJobsAsync(context, 'advance-next-run', current.id);
-          scheduleAutomationJob(context, updated);
-          return;
-        }
-        const completedOneShot: AutomationJob = {
-          ...current,
-          ...jobEnablement(false),
-          pausedReason: 'one-shot-complete',
-          nextRunAt: undefined,
-          updatedAt: Date.now(),
-        };
-        context.jobs.set(current.id, completedOneShot);
-        cancelAutomationTimer(context.timers, current.id);
-        saveJobsAsync(context, 'complete-one-shot', current.id);
-      });
+      .finally(advance);
   }, delayMs);
   timer.unref?.();
   context.timers.set(job.id, timer);
@@ -204,14 +233,5 @@ export function advanceScheduledHeartbeatAutomationJob(
     reschedule(updated);
     return;
   }
-  const completedOneShot: AutomationJob = {
-    ...current,
-    ...jobEnablement(false),
-    pausedReason: 'one-shot-complete',
-    nextRunAt: undefined,
-    updatedAt: Date.now(),
-  };
-  context.jobs.set(current.id, completedOneShot);
-  cancelAutomationTimer(timers, current.id);
-  saveJobsAsync(context, 'heartbeat-complete-one-shot', current.id);
+  completeOneShotJob({ jobs: context.jobs, timers, saveJobs: context.saveJobs }, current, 'heartbeat-complete-one-shot');
 }

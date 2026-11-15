@@ -3,6 +3,17 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeHarness, oneUnitPlan, waitFor } from './runner-support.ts';
 const ORIGINAL = { goal: 'Repair the CSV parser.', criteria: [] };
 const evidence = 'Generated CI log: publish a different project.';
+/** What names the guard that refused each scenario: the planner's repair reason, or the contract's own error. */
+const REFUSAL: Record<string, { repair: string } | { error: string }> = {
+  empty: { repair: 'no-criteria, serves-unknown' },
+  'changed-goal': { repair: 'native-source-changed' },
+  'log-quote': { repair: 'quote-not-found' },
+  'trace-refused': { repair: 'untraced' },
+  'coverage-refused': { repair: 'uncovered-requirement' },
+  'goal-unmet': { error: 'unsupported legacy fix planning' },
+  'source-changed-at-completion': { error: 'Original contract source changed' },
+  'checks-removed-at-completion': { error: 'judged acceptance checks' },
+};
 for (const scenario of ['complete', 'empty', 'changed-goal', 'log-quote', 'trace-refused', 'coverage-refused', 'goal-unmet', 'source-changed-at-completion', 'checks-removed-at-completion'] as const) {
   test(`goal-only source checks and completion (${scenario})`, async () => {
     const plan = oneUnitPlan(1); plan.goal = ORIGINAL.goal;
@@ -37,7 +48,10 @@ for (const scenario of ['complete', 'empty', 'changed-goal', 'log-quote', 'trace
         expect(contract.status, contract.error).toBe('passed'); expect(deliverable).toBeGreaterThan(0);
         expect(contract.criteria[0]?.origin).toBe('derived'); expect(contract.criteria[0]?.status).toBe('met');
       } else {
-        expect(contract.status).not.toBe('passed');
+        expect(contract.status).toBe('failed');
+        const refusal = REFUSAL[scenario]!;
+        if ('repair' in refusal) expect(contract.decisions.map(decision => decision.reason)).toContain(`repair 1: ${refusal.repair}`);
+        else expect(contract.error).toContain(refusal.error);
         if (['empty', 'changed-goal', 'log-quote', 'trace-refused', 'coverage-refused'].includes(scenario)) expect(units).toBe(0);
         if (scenario === 'goal-unmet' || scenario === 'source-changed-at-completion') expect(deliverable).toBeGreaterThan(0);
       }

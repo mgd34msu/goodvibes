@@ -20,9 +20,11 @@
  *   1. HANDLER-ATTACHED, answered in this process by catalog.invoke.
  *   2. ROUTE-SERVED, no in-process handler, but the descriptor advertises an
  *      HTTP binding and this daemon's router really serves that path. The
- *      probe is an UNAUTHENTICATED request: a route that exists refuses with
- *      401, a path nothing serves answers 404. Nothing reaches a handler body,
- *      so probing a destructive verb costs nothing and changes nothing.
+ *      probe is an AUTHENTICATED request with no body: the router answers a
+ *      path nothing serves with a 404 whose error is `Route not found:`, and
+ *      any other answer (400 for the missing body, 404 for a missing resource,
+ *      200) means a route matched. The auth gate sits in front of dispatch,
+ *      so an anonymous probe would read 401 whether or not a route exists.
  *   3. DECLARED UNCALLABLE, `invokable: false`, the descriptor's own way of
  *      saying "cataloged so the contract is honest about the shape; this build
  *      does not serve it". An advertisement that already says don't call me
@@ -31,13 +33,14 @@
  * Anything in none of the three is a verb this daemon advertises, claims is
  * callable, and serves nowhere. That is the failure, and it names the ids.
  *
- * ── Why an unauthenticated probe rather than a real call ──────────────────
+ * ── Why a body-less probe rather than a real call ────────────────────────
  *
- * The alternative, invoke every verb, would run automation jobs, send email,
- * revoke pairing tokens and delete watchers. The auth gate sits in front of
- * every route and answers before dispatch, so 401-vs-404 reads the routing
- * table without executing anything. `server.test.ts` pins both halves of that
- * behaviour ("returns 401 without token", "unknown route returns 404").
+ * The alternative, invoke every verb with a real payload, would run automation
+ * jobs, send email, revoke pairing tokens and delete watchers. A request with
+ * no JSON body and a placeholder path segment is refused by input validation or
+ * answers "not found" for the placeholder resource, so it reads the routing
+ * table without doing the verb's work. A control path nothing serves proves
+ * the probe can tell "no route" from "route, missing resource".
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { DaemonFixture } from '../../testing/daemon-fixture.js';
@@ -45,17 +48,14 @@ import { startGatewayFixture as startDaemonFixture } from '../helpers/gateway-ro
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
 
 /**
- * Path prefixes served by a specialized sub-router that this daemon mounts
- * ahead of the generic API dispatch, and which answer 404 to an anonymous
- * request for a path they do serve (they resolve the target before they
- * authenticate). Kept as an explicit, short allowlist so growth here is a
- * decision somebody made rather than scope creep, the same treatment the platform's
- * own route reconcile gives its sub-router list.
- *
- * Empty until a probe result proves an entry is needed; each entry must carry
- * the reason it is here.
+ * Paths the probe must not send: a handler that answers by calling an external
+ * service would reach the network even for a body-less request. Kept as an
+ * explicit, short allowlist so growth here is a decision somebody made rather
+ * than scope creep. Each entry must carry the reason it is here.
  */
-const ANONYMOUS_PROBE_BLIND_PREFIXES: readonly { readonly prefix: string; readonly reason: string }[] = [];
+const PROBE_BLIND_PREFIXES: readonly { readonly prefix: string; readonly reason: string }[] = [
+  { prefix: '/api/voice/voices', reason: 'lists voices by calling an external speech service' },
+];
 
 /**
  * Verbs this daemon catalogs, advertises as callable, and serves from nowhere,
@@ -74,13 +74,20 @@ const ANONYMOUS_PROBE_BLIND_PREFIXES: readonly { readonly prefix: string; readon
  */
 const KNOWN_STRANDED: readonly { readonly id: string; readonly finding: string }[] = [];
 
+/** True when the router itself answered "no route here", not a handler answering 404 for a missing resource. */
+async function isRouteNotFound(response: Response): Promise<boolean> {
+  if (response.status !== 404) return false;
+  const body = await response.json().catch(() => null) as { readonly error?: unknown; readonly code?: unknown } | null;
+  return body?.code === 'NOT_FOUND' && typeof body.error === 'string' && body.error.startsWith('Route not found:');
+}
+
 /** Replace `{param}` template segments with an opaque single-segment placeholder. */
 function resolveTemplatePath(template: string): string {
   return template.replace(/\{[^/}]+\}/g, 'catalog-sweep-probe-placeholder');
 }
 
 function isBlindPrefix(path: string): boolean {
-  return ANONYMOUS_PROBE_BLIND_PREFIXES.some(
+  return PROBE_BLIND_PREFIXES.some(
     (entry) => path === entry.prefix || path.startsWith(`${entry.prefix}/`),
   );
 }
@@ -153,14 +160,19 @@ describe('every descriptor this daemon composes is handled, routed, or declared 
     const probed = rows.filter((row) => !row.handled && row.http !== null && !isBlindPrefix(row.http.path));
     expect(probed.length).toBeGreaterThan(50);
 
+    // The probe must be able to fail: a path nothing serves reads as unserved.
+    const control = await fixture.fetch('/api/v1/catalog-sweep-unserved-control-path', { method: 'GET' });
+    expect(await isRouteNotFound(control), 'the probe cannot tell an unserved path from a served one').toBe(true);
+
     const unserved: string[] = [];
     for (const row of probed) {
       const http = row.http!;
-      const response = await fixture.fetchAnonymous(resolveTemplatePath(http.path), { method: http.method });
-      // 404 is the router saying it has nothing for this path at all. Every
-      // other status, 401 refused, 200 public, 405 wrong verb, 400 bad body,
-      // means a route matched and something answered.
-      if (response.status === 404) unserved.push(`${row.id} (${http.method} ${http.path})`);
+      // A body that is not JSON keeps a write verb at input validation: nothing runs.
+      const init: RequestInit = http.method === 'GET' || http.method === 'HEAD'
+        ? { method: http.method }
+        : { method: http.method, body: '{' };
+      const response = await fixture.fetch(resolveTemplatePath(http.path), init);
+      if (await isRouteNotFound(response)) unserved.push(`${row.id} (${http.method} ${http.path})`);
     }
 
     // A descriptor may honestly say "this build does not serve me". One that

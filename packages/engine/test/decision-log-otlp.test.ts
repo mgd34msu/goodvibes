@@ -9,7 +9,7 @@
  * proving the on-the-wire body parses back into the OTLP shape.
  */
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { describe, expect, test, afterAll, afterEach } from 'bun:test';
+import { describe, expect, test, afterAll, afterEach, beforeEach, spyOn, type Mock } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,7 @@ import {
   type OtlpLogsPayload,
   type OtlpKeyValue,
 } from '../platform/src/platform/runtime/permissions/decision-otlp.js';
+import * as decisionOtlp from '../platform/src/platform/runtime/permissions/decision-otlp.js';
 import type { DecisionLogEntry } from '../platform/src/platform/runtime/permissions/decision-log.js';
 import type { PermissionDecision } from '../platform/src/platform/runtime/permissions/types.js';
 
@@ -259,11 +260,25 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
   const endpoint = `http://localhost:${server.port}`;
   afterAll(() => { server.stop(true); });
 
-  /** Wait for the fire-and-forget export, or give up after ~1s. */
-  async function settle(expected: number): Promise<void> {
-    for (let i = 0; i < 100 && received.length < expected; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+  // The manager exports fire-and-forget. Passing each export call through here
+  // hands the test its promise, so it waits for the export to finish (or to
+  // refuse) instead of guessing how long that takes.
+  const exports: Array<ReturnType<typeof decisionOtlp.exportDecisions>> = [];
+  let exportSpy: Mock<typeof decisionOtlp.exportDecisions>;
+  beforeEach(() => {
+    exports.length = 0;
+    const real = decisionOtlp.exportDecisions;
+    exportSpy = spyOn(decisionOtlp, 'exportDecisions').mockImplementation((...args) => {
+      const pending = real(...args);
+      exports.push(pending);
+      return pending;
+    });
+  });
+  afterEach(() => { exportSpy.mockRestore(); });
+
+  /** Wait for every export the manager started to finish and return their results. */
+  async function settleExports(): Promise<Awaited<ReturnType<typeof decisionOtlp.exportDecisions>>[]> {
+    return Promise.all(exports);
   }
 
   function managerFor(config: ConfigManager): PermissionManager {
@@ -285,7 +300,7 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       'telemetry.decisionOtlpSignal': 'span',
     }));
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    await settle(1);
+    expect(await settleExports()).toEqual([{ exported: true, signals: ['span'] }]);
 
     expect(received).toHaveLength(1);
     expect(received[0]?.path).toBe('/v1/traces');
@@ -304,8 +319,9 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       'telemetry.decisionOtlpEndpoint': endpoint,
     }));
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    // Give a would-be export the same window the enabled case needed.
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // The manager starts an export synchronously inside the decision, so a
+    // decision that finished without calling it will never export.
+    expect(exportSpy).not.toHaveBeenCalled();
     expect(received).toEqual([]);
   });
 
@@ -315,7 +331,7 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       'telemetry.decisionOtlpEnabled': true,
     }));
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(exportSpy).not.toHaveBeenCalled();
     expect(received).toEqual([]);
   });
 
@@ -327,7 +343,7 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       'telemetry.decisionOtlpSignal': 'log',
     }));
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    await settle(1);
+    await settleExports();
 
     expect(received.map((r) => r.path)).toEqual(['/v1/logs']);
     validateLogsPayload(received[0]!.body as OtlpLogsPayload);
@@ -341,7 +357,7 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       'telemetry.decisionOtlpSignal': 'both',
     }));
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    await settle(2);
+    await settleExports();
 
     expect(received.map((r) => r.path).sort()).toEqual(['/v1/logs', '/v1/traces']);
   });
@@ -355,7 +371,8 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
     }));
     const result = await manager.checkDetailed('exec', { command: 'ls -la' });
     expect(result.approved).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // The failed export is reported, never thrown.
+    expect(await settleExports()).toEqual([{ exported: false, reason: 'all OTLP exports failed', signals: [], failedSignals: ['span'] }]);
   });
 
   test('a reader with no decision-OTLP accessor exports nothing and still decides', async () => {
@@ -379,7 +396,7 @@ describe('telemetry.decisionOtlp*: the export the permission layer performs', ()
       null,
     );
     await manager.checkDetailed('exec', { command: 'ls -la' });
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(exportSpy).not.toHaveBeenCalled();
     expect(received).toEqual([]);
   });
 });

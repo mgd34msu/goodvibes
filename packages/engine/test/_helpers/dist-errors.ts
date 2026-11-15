@@ -1,20 +1,15 @@
 /**
- * Error-class re-exports from the COMPILED dist bundle.
+ * Error-class re-exports for `instanceof` assertions.
  *
- * WHY NOT SOURCE: `instanceof` checks inside transport-http/dist/ use the
- * error constructors from `errors/dist/index.js`. If a test imports
- * from `errors/src/index.ts`, those are a separate module instance
- * and `instanceof` returns false across the boundary.
- *
- * For tests that assert `err instanceof GoodVibesError`, use these re-exports.
- *
- * Wire the dist-staleness sentinel so dist-loading tests
- * fail loudly when the compiled output is older than the TypeScript source.
+ * Transport sources import the error classes through `@goodvibes-jev/engine/errors`,
+ * which resolves to `errors/src/index.ts` under Bun. Importing the same file here
+ * keeps one module instance, so `err instanceof GoodVibesError` holds across the
+ * boundary. Import from the source, never from `errors/dist`: a stale build would
+ * give a second set of constructors and the tests would judge old code.
  */
-import './dist-mtime-check.js';
 export {
   GoodVibesError,
   HttpStatusError,
   ConfigurationError,
   ContractError,
-} from '../../errors/dist/index.js';
+} from '../../errors/src/index.js';

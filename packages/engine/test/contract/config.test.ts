@@ -5,8 +5,8 @@
  * loop's keys are gone is held by settings-migration.test.ts, beside the
  * migration that moves them.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../../platform/src/platform/config/schema.js';
@@ -19,9 +19,13 @@ import {
   type ContractConfigReader,
 } from '../../platform/src/platform/contract/index.js';
 
+const configDirs: string[] = [];
+afterEach(() => { for (const dir of configDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 function makeConfigManager(): ConfigManager {
   const configDir = join(tmpdir(), `gv-contract-config-${Date.now()}-${crypto.randomUUID()}`);
   mkdirSync(configDir, { recursive: true });
+  configDirs.push(configDir);
   return new ConfigManager({ configDir });
 }
 

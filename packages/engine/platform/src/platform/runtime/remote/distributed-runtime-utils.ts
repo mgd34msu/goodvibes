@@ -112,6 +112,7 @@ export function sanitizePairRequest(request: StoredPairRequest): DistributedRunt
     expiresAt: request.expiresAt,
     peerId: request.peerId,
     remoteAddress: request.remoteAddress,
+    ...(request.replacesPeerId ? { replacesPeerId: request.replacesPeerId } : {}),
     metadata: request.metadata,
   };
 }

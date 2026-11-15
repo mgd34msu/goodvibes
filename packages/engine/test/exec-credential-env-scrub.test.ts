@@ -6,8 +6,8 @@
  * on the exec result. A per-command env override and a config allowlist both
  * re-admit a variable explicitly.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
@@ -18,23 +18,9 @@ import {
   resolveCredentialEnvScrub,
   scrubCredentialEnv,
 } from '../platform/src/platform/tools/exec/credential-env.ts';
-import { useToolReadings } from './_helpers/tool-readings.ts';
 import { EXEC_GATE_TABLE, useGateReadings } from './_helpers/gate-readings.ts';
 
 useGateReadings(EXEC_GATE_TABLE);
-
-// Jev reads each variable NAME; these fakes stand in for it. Names no entry
-// matches read as not a credential.
-const CREDENTIAL = { credential: true } as const;
-const readings = useToolReadings([
-  ['"AWS_SECRET_ACCESS_KEY"', CREDENTIAL],
-  ['"AWS_ACCESS_KEY_ID"', CREDENTIAL],
-  ['"GITHUB_TOKEN"', CREDENTIAL],
-  ['"NPM_TOKEN"', CREDENTIAL],
-  ['"OPENAI_API_KEY"', CREDENTIAL],
-  ['"DB_PASSWORD"', CREDENTIAL],
-  ['"SCRUB_TEST_API_KEY"', CREDENTIAL],
-]);
 
 describe('scrubCredentialEnv', () => {
   test('withholds conventional credential variables, keeps the rest', async () => {
@@ -59,42 +45,47 @@ describe('scrubCredentialEnv', () => {
     expect(withheld).toEqual(['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'DB_PASSWORD', 'GITHUB_TOKEN', 'OPENAI_API_KEY']);
   });
 
-  test('only names are read, never values', async () => {
-    await scrubCredentialEnv({ GITHUB_TOKEN: 'ght-value-1234', PATH: '/usr/bin' }, resolveCredentialEnvScrub());
-    const sent = JSON.stringify(readings.requests.map((request) => request.state));
-    expect(readings.requests).toHaveLength(0);
-    expect(sent).not.toContain('ght-value-1234');
-    expect(sent).not.toContain('/usr/bin');
+  test('the withheld list carries names, never values', async () => {
+    const { withheld } = await scrubCredentialEnv({ GITHUB_TOKEN: 'ght-value-1234', PATH: '/usr/bin' }, resolveCredentialEnvScrub());
+    expect(withheld).toEqual(['GITHUB_TOKEN']);
+    expect(JSON.stringify(withheld)).not.toContain('ght-value-1234');
   });
 
-  test('allowlist re-admits a named var without reading it', async () => {
+  test('allowlist re-admits a named var case-insensitively', async () => {
     const { env, withheld } = await scrubCredentialEnv(
       { GITHUB_TOKEN: 'ght', NPM_TOKEN: 'npm' },
-      resolveCredentialEnvScrub({ allowlist: ['GITHUB_TOKEN'] }),
+      resolveCredentialEnvScrub({ allowlist: ['github_token'] }),
     );
     expect(env.GITHUB_TOKEN).toBe('ght');
     expect(env.NPM_TOKEN).toBeUndefined();
     expect(withheld).toEqual(['NPM_TOKEN']);
-    expect(JSON.stringify(readings.requests.map((request) => request.state))).not.toContain('GITHUB_TOKEN');
   });
 
-  test('disabled passes env through untouched and reads nothing', async () => {
+  test('a variable whose value is a URL with an embedded password is withheld whatever its name', async () => {
+    const { env, withheld } = await scrubCredentialEnv(
+      { MIRROR: 'https://user:hunter2@example.com/repo', PLAIN_URL: 'https://example.com/repo' },
+      resolveCredentialEnvScrub(),
+    );
+    expect(withheld).toEqual(['MIRROR']);
+    expect(env.PLAIN_URL).toBe('https://example.com/repo');
+  });
+
+  test('disabled passes env through untouched', async () => {
     const { env, withheld } = await scrubCredentialEnv({ GITHUB_TOKEN: 'ght' }, resolveCredentialEnvScrub({ enabled: false }));
     expect(env.GITHUB_TOKEN).toBe('ght');
     expect(withheld).toEqual([]);
-    expect(readings.requests).toHaveLength(0);
   });
 
-  test('each name is read once per process, case-insensitively', async () => {
-    expect(await readCredentialEnvName('GITHUB_TOKEN')).toBe(true);
-    expect(await readCredentialEnvName('github_token')).toBe(true);
-    expect(await readCredentialEnvName('AWS_REGION')).toBe(false);
-    expect(readings.requests).toHaveLength(0);
+  test('credential names are recognised case-insensitively', async () => {
+    expect(readCredentialEnvName('GITHUB_TOKEN')).toBe(true);
+    expect(readCredentialEnvName('github_token')).toBe(true);
+    expect(readCredentialEnvName('AWS_REGION')).toBe(false);
   });
 });
 
 describe('exec tool: env scrub end to end', () => {
   const root = mkdtempSync(join(tmpdir(), 'gv-exec-scrub-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
 
   test('a credential var in this process env is absent from the child and reported as withheld', async () => {
     process.env.SCRUB_TEST_API_KEY = 'super-secret';

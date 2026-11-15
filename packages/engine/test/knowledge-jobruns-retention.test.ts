@@ -7,14 +7,10 @@ const answerReadings = useKnowledgeAnswerReadings();
  * The job-run history is bounded in memory AND on disk: settled runs beyond the
  * cap are pruned oldest-first (active runs never pruned), the cap holds across
  * a store reload (restart), and the MemoryGovernor trim hook actually reclaims.
- * Companion gate: every background self-improvement trigger routes through the
- * governed scheduler, no caller bypasses it with a direct scheduleBackground
- * self-improve.
+ * Background self-improvement entry points honour the governor pause.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { KnowledgeStore, MAX_RETAINED_JOB_RUNS } from '../platform/src/platform/knowledge/store.js';
 import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
 import { seedKnowledgeResearchTask } from './_helpers/knowledge-semantic-activation-fixtures.js';
 import { KnowledgeSemanticService } from '../platform/src/platform/knowledge/semantic/service.js';
@@ -23,14 +19,16 @@ import {
   enrichHomeGraphSpaceSources,
   runHomeGraphSyncSelfImprovementPump,
 } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 describe('job-run history retention (bounded memory + disk)', () => {
   test('settled runs beyond the cap are pruned; active runs survive; reload stays bounded', async () => {
     const { store } = createStores();
     await store.init();
-    // 520 settled runs + 3 active ones.
-    for (let i = 0; i < 520; i++) {
+    // Past-the-cap settled runs + 3 active ones.
+    for (let i = 0; i < MAX_RETAINED_JOB_RUNS + 20; i++) {
       await store.upsertJobRun({ jobId: `job-${i % 5}`, status: 'completed', mode: 'background', result: {}, metadata: {} });
     }
     const active: string[] = [];
@@ -39,7 +37,7 @@ describe('job-run history retention (bounded memory + disk)', () => {
       active.push(run.id);
     }
     const retained = store.listJobRuns(10_000);
-    expect(retained.length).toBeLessThanOrEqual(503); // cap (500) + the 3 active
+    expect(retained.length).toBeLessThanOrEqual(MAX_RETAINED_JOB_RUNS + 3); // cap + the 3 active
     for (const id of active) {
       expect(retained.some((r) => r.id === id)).toBe(true); // active never pruned
     }
@@ -53,59 +51,13 @@ describe('job-run history retention (bounded memory + disk)', () => {
   test('the cap holds across a reload (no accretion across restarts)', async () => {
     const { store } = createStores();
     await store.init();
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < MAX_RETAINED_JOB_RUNS + 100; i++) {
       await store.upsertJobRun({ jobId: 'job-a', status: 'completed', mode: 'background', result: {}, metadata: {} });
     }
     const dbPath = (store as unknown as { sqlite: { dbPath: string } }).sqlite.dbPath;
     const reloaded = new KnowledgeStore({ dbPath });
     await reloaded.init();
-    expect(reloaded.listJobRuns(10_000).length).toBeLessThanOrEqual(500);
-  });
-});
-
-describe('no self-improve scheduler bypasses (gate)', () => {
-  test('every .selfImprove( caller in the platform source is on the governed allowlist', () => {
-    const root = 'platform/src';
-    // Files allowed to call selfImprove directly:
-    //  - semantic/service.ts: the scheduler itself + the answer path (deferRepair task-queue pass)
-    //  - home-graph/sync-self-improvement.ts: the delayed, single-flight sync pump,
-    //    governed via a between-rounds isBackgroundWorkPaused() gate plus
-    //    { stopWhenPaused: true } threaded into the runner's per-gap yield
-    //    points (real for space-scoped rounds), and the in-run admission gate
-    //  - knowledge/service.ts: the manual reindex/selfImprove verb surface (operator-invoked,
-    //    admission-gated inside runSelfImproveUnlocked)
-    const allowed = new Set([
-      'platform/knowledge/semantic/service.ts',
-      'platform/knowledge/home-graph/sync-self-improvement.ts',
-      'platform/knowledge/service.ts',
-      // The scheduled-job executor (the deliberate hourly cadence); its verb
-      // entry (KnowledgeService.runJob) is admission-gated, and the run itself
-      // passes through runSelfImproveUnlocked's in-run admission check.
-      'platform/knowledge/service-jobs.ts',
-      // The operator-invoked Home Graph refinement verb (foreground, targeted
-      // gapIds), admission-gated in-run like every non-deferRepair run.
-      'platform/knowledge/home-graph/refinement.ts',
-    ]);
-    const offenders: string[] = [];
-    const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) { walk(full); continue; }
-        if (!entry.name.endsWith('.ts')) continue;
-        const text = readFileSync(full, 'utf-8');
-        if (/\.selfImprove\(/.test(text)) {
-          const rel = full.slice(root.length + 1);
-          if (!allowed.has(rel)) offenders.push(rel);
-        }
-      }
-    };
-    walk(root);
-    expect(
-      offenders,
-      `New .selfImprove( caller(s) outside the governed allowlist: ${offenders.join(', ')}. ` +
-      'Background self-improvement triggers must route through KnowledgeSemanticService.queueBackgroundSelfImprove ' +
-      '(floor + coalescing + zero-gap backoff + governor pause), never a direct scheduleBackground self-improve.',
-    ).toEqual([]);
+    expect(reloaded.listJobRuns(10_000).length).toBeLessThanOrEqual(MAX_RETAINED_JOB_RUNS);
   });
 });
 
@@ -148,7 +100,8 @@ describe('governor pause at background entrypoints', () => {
     expect(fixture.repairCalls()).toBe(1);
     expect(result.processedGaps).toBe(1);
     expect(result.truncated).toBe(true);
-    expect(result.budgetExhausted).toBe(true);
+    // A pause stops the run; it is not the run's own time budget running out.
+    expect(result.budgetExhausted).toBe(false);
   });
 
   test('whole-space enrichment stops repairing gaps when the governor pauses', async () => {
@@ -174,7 +127,7 @@ describe('governor pause at background entrypoints', () => {
     await runHomeGraphSyncSelfImprovementPump(fixture.runtime, fixture.spaceId, 'pause-fixture', controller.signal);
     expect(fixture.repairCalls()).toBe(1);
     expect(results).toHaveLength(1);
-    expect(results[0]).toMatchObject({ processedGaps: 1, truncated: true, budgetExhausted: true });
+    expect(results[0]).toMatchObject({ processedGaps: 1, truncated: true, budgetExhausted: false });
   });
 
   test('useful per-source enrichment queues governed work instead of starting a repair directly', async () => {

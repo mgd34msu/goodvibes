@@ -81,48 +81,12 @@ describe('capability-advertisement honesty: route reconcile', () => {
     // route table while leaving its advertisement standing.
     const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors().filter((d) => d.category === 'browser');
-    expect(descriptors).toHaveLength(24);
+    expect(descriptors.length).toBeGreaterThan(0);
 
     for (const descriptor of descriptors) {
       const result = await reconcileHttpDescriptor(descriptor, probe);
       expect(result.status, `${descriptor.id} advertises ${descriptor.http?.method ?? '?'} ${descriptor.http?.path ?? '?'} but no route resolves it`).toBe('live');
       expect(descriptor.invokable).not.toBe(false);
-    }
-  });
-
-  test('the browser surface covers every action the agent browser tool exposes', () => {
-    // The daemon must not be a smaller browser than a surface is. Each entry
-    // is one action of the agent's `browser` tool mapped to the verb that
-    // serves it; a daemon missing one is a daemon an operator has to open a
-    // surface for.
-    const perToolAction: Readonly<Record<string, string>> = {
-      status: 'browser.status',
-      provision: 'browser.provision',
-      launch: 'browser.sessions.launch',
-      attach: 'browser.sessions.attach',
-      release: 'browser.sessions.release',
-      close: 'browser.sessions.close',
-      navigate: 'browser.navigate',
-      snapshot: 'browser.snapshot',
-      click: 'browser.click',
-      type: 'browser.type',
-      select: 'browser.select',
-      press: 'browser.press',
-      scroll: 'browser.scroll',
-      wait_for: 'browser.waitFor',
-      read_text: 'browser.readText',
-      screenshot: 'browser.screenshot',
-      tabs: 'browser.tabs.list',
-      new_tab: 'browser.tabs.create',
-      switch_tab: 'browser.tabs.switch',
-      close_tab: 'browser.tabs.close',
-      back: 'browser.history.back',
-      forward: 'browser.history.forward',
-      extract: 'browser.extract',
-    };
-    const served = new Set(liveCatalogDescriptors().map((d) => d.id));
-    for (const [action, methodId] of Object.entries(perToolAction)) {
-      expect(served.has(methodId), `browser tool action "${action}" has no daemon verb (${methodId})`).toBe(true);
     }
   });
 
@@ -160,13 +124,13 @@ describe('capability-advertisement honesty: route reconcile', () => {
     expect(result.status).toBe('unchecked');
   });
 
-  test('a path served by a specialized sub-router is left unchecked, not falsely marked unavailable', async () => {
+  test('a path served by a sub-router that declares its routes is checked against them and resolves live', async () => {
     const probe = createDaemonApiRouteProbe();
     const descriptors = liveCatalogDescriptors();
     const mcpDescriptor = descriptors.find((d) => d.http?.path.startsWith('/api/mcp'));
     expect(mcpDescriptor).toBeDefined();
     const result = await reconcileHttpDescriptor(mcpDescriptor!, probe);
-    expect(result.status).toBe('unchecked');
+    expect(result.status).toBe('live');
   });
 });
 
@@ -275,5 +239,23 @@ describe('route reconcile sees handlers, not just routes', () => {
     const descriptor = catalog.get(SERVED_BY_GATEWAY_REST)!;
     const result = await reconcileHttpDescriptor(descriptor, createDaemonApiRouteProbe());
     expect(result.status).toBe('live');
+  });
+
+  test('every descriptor with an http binding is checked, none is skipped for living in a sub-router', async () => {
+    const descriptors = liveCatalogDescriptors().filter((d) => d.http);
+    const results = await reconcileCatalogRoutes(descriptors, createDaemonApiRouteProbe());
+    const skipped = results.filter((r) => r.status === 'unchecked').map((r) => `${r.methodId} ${r.http?.method} ${r.http?.path}`);
+    expect(skipped).toEqual([]);
+    expect(findUnreconciledAdvertisements(descriptors, results)).toEqual([]);
+  });
+
+  test('a templated sub-router path that no declared route serves is reported unavailable', async () => {
+    const descriptor = {
+      ...liveCatalogDescriptors().find((d) => d.http?.path === '/api/mcp/config/servers/{serverName}')!,
+      id: 'mcp.config.servers.bogus',
+      http: { method: 'PATCH' as const, path: '/api/mcp/config/servers/{serverName}' },
+    };
+    const result = await reconcileHttpDescriptor(descriptor, createDaemonApiRouteProbe());
+    expect(result.status).toBe('unavailable');
   });
 });

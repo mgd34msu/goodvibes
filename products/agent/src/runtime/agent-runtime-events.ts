@@ -1,7 +1,7 @@
 import type { GateEvent } from '@goodvibes-jev/engine/platform/events';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
-import { registerContractRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { checkCohortCompletion, registerContractRuntimeEvents, type HostRuntimeMessageRouter } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -109,6 +109,9 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
   unsubs.push(runtimeBus.onDomain('turn', (env) => {
     domainDispatch.dispatchTurnEvent(env.payload);
   }));
+  unsubs.push(runtimeBus.onDomain('tools', (env) => {
+    domainDispatch.dispatchToolEvent(env.payload);
+  }));
   unsubs.push(runtimeBus.onDomain('agents', (env) => {
     domainDispatch.dispatchAgentEvent(env.payload);
   }));
@@ -120,6 +123,14 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
   }));
   unsubs.push(runtimeBus.onDomain('compaction', (env) => {
     domainDispatch.dispatchCompactionEvent(env.payload);
+  }));
+  // The MCP registry and plugin manager publish their lifecycle on the bus; the
+  // runtime store (health, read models, recommendations) only learns of it here.
+  unsubs.push(runtimeBus.onDomain('mcp', (env) => {
+    domainDispatch.dispatchMcpEvent(env.payload);
+  }));
+  unsubs.push(runtimeBus.onDomain('plugins', (env) => {
+    domainDispatch.dispatchPluginEvent(env.payload);
   }));
   // The mandatory post-compaction receipt (platform 1.6.1, emitted after every
   // automatic and manual compaction path, see the platform's own doc comment on
@@ -178,11 +189,15 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
       withRouter(getSystemMessageRouter, (router) => {
         router.low(`[Delegated task] ${record.template} ${payload.agentId.slice(-8)} completed in ${durationSeconds}s "${taskSnippet}"`, payload);
       });
-      queueConversationFollowUp?.({
+      // A contract delivers its checked answer when the owner finishes; its
+      // planner and unit agents are milestones, not separate replies to the user.
+      if (!record.contractId) queueConversationFollowUp?.({
         key: `agent:${payload.agentId}:completed`,
         summary: `${record.template} delegated task ${payload.agentId.slice(-8)} completed "${taskSnippet}" in ${durationSeconds}s after ${record.toolCallCount} tool calls.`,
+        ...(record.fullOutput?.trim() ? { result: record.fullOutput.trim() } : {}),
       });
     }
+    checkCohortCompletion(agentManager, contractRunner, record ?? null, getSystemMessageRouter, queueConversationFollowUp);
     requestRender();
   }));
   unsubs.push(runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', ({ payload }) => {
@@ -208,10 +223,11 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
         withRouter(getSystemMessageRouter, (router) => {
           router.low(`[Delegated task] ${record.template} ${payload.agentId.slice(-8)} spent its turn budget in ${durationSeconds}s, ${limit} turns (${sourceLabel}) while working on "${taskSnippet}"`, payload);
         });
-        queueConversationFollowUp?.({
+        if (!record.contractId) queueConversationFollowUp?.({
           key: `agent:${payload.agentId}:failed`,
           summary: `${record.template} delegated task ${payload.agentId.slice(-8)} spent its ${limit}-turn budget (${sourceLabel}) while working on "${taskSnippet}".`,
         });
+        checkCohortCompletion(agentManager, contractRunner, record, getSystemMessageRouter, queueConversationFollowUp);
         requestRender();
         return;
       }
@@ -227,11 +243,12 @@ export function registerAgentRuntimeEvents(options: AgentRuntimeEventBridgeOptio
         });
         requestRender();
       });
-      queueConversationFollowUp?.({
+      if (!record.contractId) queueConversationFollowUp?.({
         key: `agent:${payload.agentId}:failed`,
         summary: `${record.template} delegated task ${payload.agentId.slice(-8)} failed while working on "${taskSnippet}" ${payload.error.slice(0, 120)}`,
       });
     }
+    checkCohortCompletion(agentManager, contractRunner, record ?? null, getSystemMessageRouter, queueConversationFollowUp);
     requestRender();
   }));
 

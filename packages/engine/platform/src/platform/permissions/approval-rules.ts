@@ -10,7 +10,8 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
  *   - 'session'      , the classic in-memory session cache only
  *
  * A tiered decision becomes a durable user-origin PolicyRule (the same shape
- * evaluateRuntimePolicy consults), stored per project and matched live. The
+ * evaluateRuntimePolicy consults), stored with the project root it was made in
+ * and matched live only in that project. The
  * session approval map holds only session-tier decisions. The tier options
  * ride on the broker's ask payload so ANY surface can offer them.
  */
@@ -24,7 +25,7 @@ import {
   evaluatePathScopeRule,
   evaluatePrefixRule,
 } from '../runtime/permissions/rules/index.js';
-import { extractCommandArgs } from '../runtime/permissions/rules/prefix.js';
+import { execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 
 /** How far a remembered approval decision reaches. */
@@ -88,12 +89,54 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     label: `always for the ${toolName} tool in this project`,
     detail: `every ${toolName} call, any arguments`,
   });
+  const session = sessionScope(toolName, args);
   options.push({
     tier: 'session',
-    label: 'for the rest of this session',
-    detail: 'in-memory only; forgotten on restart',
+    label: `${session} this session`,
+    detail: 'in-memory only; forgotten when the session ends',
   });
   return options;
+}
+
+/**
+ * What a session-tier answer covers, in words, exactly as `sessionApprovalKey` keys it: the command
+ * class, the touched paths, one command, or the whole tool.
+ */
+function sessionScope(toolName: string, args: Record<string, unknown>): string {
+  const commands = extractCommandArgs(args);
+  if (toolName === 'exec' && commands.length > 0) {
+    if (commands.some(isCompound)) return commands.length === 1 ? 'this exact command' : 'these exact commands';
+    const classes = uniqueSorted(commands.map(commandClassOf).filter((cls) => cls.length > 0));
+    if (classes.length > 0) return `every ${classes.join(' / ')} command`;
+  }
+  const paths = extractPathArgs(args);
+  if (paths.length > 0) return `${toolName} on ${uniqueSorted(paths).join(', ')}`;
+  if (typeof args['command'] === 'string') return `this exact ${toolName} command`;
+  return `every ${toolName} call`;
+}
+
+/** A command with a control operator, substitution or redirection is more than its first word. */
+function isCompound(command: string): boolean {
+  const split = splitShellCommand(command);
+  return split.opaque || split.segments.length > 1;
+}
+
+/**
+ * The key a session-tier answer is stored and looked up under. A command class covers every simple
+ * command of the class; a compound command is keyed exactly, so `git status; rm -rf ~` is never
+ * covered by an answer about `git status`.
+ */
+export function sessionApprovalKey(toolName: string, args: Record<string, unknown>): string {
+  const commands = extractCommandArgs(args);
+  if (toolName === 'exec' && commands.length > 0) {
+    if (commands.some(isCompound)) return `${toolName}:exact:${JSON.stringify(commands)}`;
+    const classes = uniqueSorted(commands.map(commandClassOf).filter((cls) => cls.length > 0));
+    if (classes.length > 0) return `${toolName}:class:${classes.join('+')}`;
+  }
+  const paths = extractPathArgs(args);
+  if (paths.length > 0) return `${toolName}:path:${JSON.stringify(uniqueSorted(paths))}`;
+  if (typeof args['command'] === 'string') return `${toolName}:${args['command']}`;
+  return toolName;
 }
 
 /**
@@ -126,6 +169,7 @@ export function buildDurableRuleForDecision(input: {
         effect,
         toolPattern: toolName,
         exactCommands: uniqueSorted(commands),
+        exactContext: execContextOf(args),
         description: `${effect} exactly: ${commands.join(' ; ')}`,
       };
     }
@@ -180,10 +224,12 @@ export interface DurableRuleMatch {
 }
 
 /**
- * First-match-wins evaluation of durable user rules against a call, the
- * lightweight matcher alongside explicit session decisions (it must work
- * with the policy engine flag on OR off, so it does not go through the full layered
- * evaluator).
+ * Evaluation of durable user rules against a call, the lightweight matcher
+ * alongside explicit session decisions (it must work with the policy engine
+ * flag on OR off, so it does not go through the full layered evaluator).
+ * A matching deny wins over any matching allow, whatever their order, so a
+ * later "deny always" is enforced even under an older, broader allow; among
+ * rules of one effect the first match is reported.
  */
 /** @deprecated Synchronous compatibility; production callers use matchDurableRulesAsync. */
 export function matchDurableRules(
@@ -192,6 +238,7 @@ export function matchDurableRules(
   args: Record<string, unknown>,
   options: { readonly projectRoot?: string | undefined } = {},
 ): DurableRuleMatch | null {
+  let firstAllow: DurableRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
@@ -214,9 +261,12 @@ export function matchDurableRules(
         matched = false;
         break;
     }
-    if (matched) return { effect: rule.effect, ruleId: rule.id };
+    if (matched) {
+      if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
+      firstAllow ??= { effect: 'allow', ruleId: rule.id };
+    }
   }
-  return null;
+  return firstAllow;
 }
 
 export async function matchDurableRulesAsync(
@@ -231,6 +281,7 @@ export async function matchDurableRulesAsync(
     if (JSON.stringify([rules, args, options.projectRoot]) !== before) throw new Error('Durable permission rules changed while reading');
   };
   current();
+  let firstAllow: DurableRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
@@ -254,7 +305,10 @@ export async function matchDurableRulesAsync(
         break;
     }
     current();
-    if (matched) return { effect: rule.effect, ruleId: rule.id };
+    if (matched) {
+      if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
+      firstAllow ??= { effect: 'allow', ruleId: rule.id };
+    }
   }
-  return null;
+  return firstAllow;
 }

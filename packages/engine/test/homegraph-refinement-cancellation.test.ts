@@ -169,3 +169,20 @@ for (const retirement of ['caller-abort', 'provider-retired'] as const) {
     }
   });
 }
+
+test('refinement refuses a limit that is not a whole number of at least 1 before any work', async () => {
+  const { root, store, semantic } = fixture();
+  const improve = spyOn(semantic, 'selfImprove');
+  try {
+    for (const limit of [0, -1, 1.5, Number.NaN]) {
+      const error = await runHomeGraphRefinement({ store, semanticService: semantic, limit })
+        .then(() => undefined, (failure: unknown) => failure);
+      expect((error as Error | undefined)?.message).toContain('Refinement limit');
+    }
+    expect(improve).not.toHaveBeenCalled();
+  } finally {
+    improve.mockRestore();
+    await semantic.dispose(); await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,8 @@ export interface BasicShellCommandContext {
   readonly pasteFromClipboard?: (() => { readonly pasted: boolean }) | undefined;
   readonly reloadSystemPrompt?: (() => string) | undefined;
   readonly renderRequest: () => void;
+  /** Lets go of a daemon-hosted session so the next message starts a new one. */
+  readonly abandonHostedSession?: (() => void) | undefined;
   readonly session: {
     readonly conversationManager: { resetAll(): void; rebuildHistory(): unknown };
     readonly runtime: { systemPrompt: string };
@@ -33,6 +35,7 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
       description: 'Full reset: clear display and conversation context',
       handler(_args, context) {
         context.session.conversationManager.resetAll();
+        context.abandonHostedSession?.();
         if (context.reloadSystemPrompt) context.session.runtime.systemPrompt = context.reloadSystemPrompt();
         context.session.conversationManager.rebuildHistory();
         context.renderRequest();

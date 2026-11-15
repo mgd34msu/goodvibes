@@ -59,6 +59,7 @@ function bounded(value: unknown, limit: number): boolean {
   try { const json = JSON.stringify(value); return typeof json === 'string' && new TextEncoder().encode(json).byteLength <= limit; }
   catch { return false; }
 }
+const MAX_REMEMBERED_SOURCES = 256;
 type Operation = 'capture' | 'get' | 'admit' | 'resume' | 'cancel';
 type Request = NativeConversationIntakeCaptureRequest | NativeConversationIntakeLookupRequest | NativeConversationIntakeTransitionRequest;
 type SourceIdentity = { requestId: string; sourceRef: NativeConversationIntakeSourceRef; text?: string };
@@ -69,7 +70,13 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
   const invokeOperator: OperatorRemoteClient['invoke'] = client.invoke.bind(client);
   let disposed = false;
   const requests = new Set<AbortController>();
+  // Most-recently-used identities; a long-lived client keeps a bounded number
+  // (an evicted input is simply validated without the cross-response check).
   const sources = new Map<string, SourceIdentity>();
+  const rememberSource = (inputId: string, value: SourceIdentity): void => {
+    sources.delete(inputId); sources.set(inputId, value);
+    if (sources.size > MAX_REMEMBERED_SOURCES) sources.delete(sources.keys().next().value as string);
+  };
   const eligibleTurns = new WeakMap<NativeConversationIntakeResult, NativeConversationTurnSource>();
   const boundTurns = new WeakMap<NativeConversationIntakeResult, NativeConversationTurnPermit>();
   function eligible(result: NativeConversationIntakeResult): void {
@@ -121,7 +128,7 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
     if (text !== undefined && ((result.kind === 'work' && result.receipt.goal !== text)
       || (result.kind === 'turn' && result.text !== text))) throw new NativeConversationIntakeClientError('invalid_response');
     // Detached state: callers cannot mutate the identity used by later responses.
-    sources.set(identity.inputId, { requestId: result.requestId, sourceRef: structuredClone(sourceRef), ...(text === undefined ? {} : { text }) });
+    rememberSource(identity.inputId, { requestId: result.requestId, sourceRef: structuredClone(sourceRef), ...(text === undefined ? {} : { text }) });
   }
   function parseResult(value: unknown): NativeConversationIntakeResult {
     const result = nativeConversationIntakeResultSchema.safeParse(value);

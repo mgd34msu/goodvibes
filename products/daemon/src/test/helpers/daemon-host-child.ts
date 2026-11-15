@@ -90,7 +90,7 @@ if (mode === 'plugin') {
   `);
   const preferences = join(homeDirectory, '.goodvibes', 'tui', 'plugins.json');
   mkdirSync(join(preferences, '..'), { recursive: true });
-  writeFileSync(preferences, JSON.stringify({ enabled: { 'signal-owned': true }, config: {}, trust: {}, quarantine: {} }));
+  writeFileSync(preferences, JSON.stringify({ enabled: { 'signal-owned': true }, enabledDirs: { 'signal-owned': pluginDir }, config: {}, trust: {}, quarantine: {} }));
 }
 
 const host = createDaemonHost({

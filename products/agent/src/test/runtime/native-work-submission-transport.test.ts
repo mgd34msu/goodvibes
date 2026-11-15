@@ -9,13 +9,18 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { registerAgentWorkspaceRuntimeCommands } from '../../input/commands/agent-workspace-runtime.ts';
 import { parseSlashCommand } from '../../input/slash-command-parser.ts';
 
+const guarded = (violations: string[], handle: (request: Request) => Promise<Response>) => async (request: Request): Promise<Response> => {
+  // A failed assertion in a handler becomes an HTTP 500 the client may treat as an expected failure; keep it for the test body.
+  try { return await handle(request); } catch (error) { violations.push(error instanceof Error ? error.message : String(error)); throw error; }
+};
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'native-submit-product-'));
   const sourcePath = join(home, 'source with spaces.json');
   const original = { goal: '  Exact goal\nwith line break  ', criteria: [' first ', 'second\nline', ' first '] };
   writeFileSync(sourcePath, JSON.stringify(original));
+  const violations: string[] = [];
   const requests: string[] = []; const submissions: NativeWorkSubmissionRequest[] = []; const lookups: string[] = [];
-  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-submission-token');
     const path = new URL(request.url).pathname; requests.push(path);
     if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'paired-principal-fixture', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger'], roles: [] });
@@ -33,14 +38,14 @@ function fixture() {
       return Response.json({ kind: 'found', receipt: { projectId: 'p', requestId: command.requestId, inputId: command.inputId, ledgerRevision: 1, workId: 'new-native-work', attemptId: 'new-native-attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 }, source: { version: 1, sourceId: 'source-fixture', sourceRevision: 'source-v1', sessionId: 'session-fixture' }, goal: command.goal, criteria: command.criteria } });
     }
     throw new Error(`Unexpected native action ${path}`);
-  } });
+  }) });
   const baseUrl = `http://127.0.0.1:${server.port}`;
   const view = createNativeWorkLedgerView(() => ({ baseUrl, token: 'synthetic-submission-token', workspace: home, journalPath: join(home, 'agent-state', 'native-submissions.json') }), () => {});
   const printed: string[] = []; const registry = new CommandRegistry(); registerAgentWorkspaceRuntimeCommands(registry);
   const context = { nativeWorkLedger: view, print: (text: string) => printed.push(text) } as unknown as CommandContext;
   const run = async (action: string, path?: string) => { const parsed = parseSlashCommand(`/work ${action}${path ? ` ${path}` : ''}`); await registry.execute(parsed.name, [...parsed.args], context); };
   return { home, sourcePath, original, requests, submissions, lookups, run, printed,
-    close() { view.close(); server.stop(true); rmSync(home, { recursive: true, force: true }); } };
+    close() { view.close(); server.stop(true); rmSync(home, { recursive: true, force: true }); expect(violations).toEqual([]); } };
 }
 
 test('real product command preserves source and uses original-ID lookup after lost acknowledgement without executing', async () => {

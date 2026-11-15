@@ -24,6 +24,7 @@ describe('RuntimePollerOwners is satisfiable from the published surface', () => 
     const calls: string[] = [];
     let release!: () => void;
     const pendingChild = new Promise<void>((resolve) => { release = resolve; });
+    const draining = Promise.withResolvers<void>();
     let fleetStopped = false;
     const stub = { dispose() {}, stop() {} };
     registerRuntimePollers(scope.registry, {
@@ -36,14 +37,14 @@ describe('RuntimePollerOwners is satisfiable from the published surface', () => 
       cancelHostedAgentRuns() { calls.push('agents cancelled'); return 0; },
       triggerManager: {
         shutdown() { expect(fleetStopped).toBe(true); calls.push('triggers stopped'); },
-        async join() { calls.push('child draining'); await pendingChild; calls.push('child drained'); },
+        async join() { calls.push('child draining'); draining.resolve(); await pendingChild; calls.push('child drained'); },
       },
     });
     const closing = scope.close();
     try {
       // Async disposal advances one owner at a time; wait until the child is
       // actually held so the assertion covers the entire shutdown interval.
-      for (let turn = 0; turn < 50 && !calls.includes('child draining'); turn++) await Promise.resolve();
+      await draining.promise;
       expect(calls).toEqual(['agents cancelled', 'fleet stopped', 'triggers stopped', 'child draining']);
     } finally { release(); await closing; }
     expect(calls.at(-1)).toBe('child drained');

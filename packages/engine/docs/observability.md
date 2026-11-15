@@ -31,8 +31,8 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 logger.info('session started', { sessionId });
 logger.warn('retry triggered', { attempt, delayMs });
-logger.error('provider call failed', { error: err.message });
-logger.debug('[AdaptivePlanner] auto-selected', { strategy, score });
+logger.error('provider call failed', { status, code });
+logger.debug('[AdaptivePlanner] auto-selected', { sessionId, durationMs });
 ```
 
 Each call produces a structured Markdown entry (the outer four-backtick fence escapes the inner triple-backtick `json` block):
@@ -58,7 +58,14 @@ The live file rotates once it reaches 10 MB. It is renamed to `activity.md.1` (a
 
 If the log directory disappears while the process is running, the logger recreates it and retries the write. If the destination still cannot be written after 3 consecutive flush failures, the logger reports that once to `stderr` and then stops accepting entries for that destination rather than retrying (and failing) on every flush forever.
 
-Values under any key that looks sensitive, matching a pattern for `authorization`, API keys, tokens, passwords, secrets, credentials, or cookies, are automatically replaced with `[REDACTED]` before an entry is written. This is a safety net, not a substitute for care: still avoid passing secrets or PII into log data your own key names would not catch.
+Log data is redacted by declared field name, not by guessing from the name or reading the value. Every field name belongs to one of four kinds, declared in `platform/src/platform/utils/field-kind-reading.ts`:
+
+- `secret`: the value is written as `[REDACTED]` (`password`, `token`, `apiKey`, `authorization`, `cookie`, ...).
+- `owner_profile`: the value is written as `[REDACTED_PROFILE]` (addresses, phone numbers, quiet hours).
+- `content`: free-form text such as `error`, `message`, `stdout`, `stderr` and `summary`. A scalar value is written as `[REDACTED_TEXT]`; an object is searched field by field.
+- `other`: counts, durations, identifiers, statuses and file or process facts (`attempt`, `durationMs`, `sessionId`, `code`, `path`, `syscall`, `command`). The value is written as is.
+
+A name that is not declared is withheld as `[REDACTED]`, so a new diagnostic field appears in `activity.md` only after its name is added to the declared list under the kind that matches what it holds. Put the failure reason in a declared field such as `code` or `syscall`, and never put secrets or personal data in an `other` field.
 
 ---
 
@@ -233,75 +240,24 @@ interface RuntimeEventFeeds<TDomain, TEvent> {
 
 ### Session telemetry state
 
-The `telemetry` store domain accumulates session-level metrics, correlation IDs, and a recent-event ring buffer. Access it via the selector:
+The `telemetry` store domain defines session metrics, correlation IDs, a recent-event buffer and a trace context, but nothing in the runtime writes to it yet. It keeps its initial values for the whole session: `sessionMetrics` stays at zero, both correlation IDs stay empty, `recentEvents` stays empty and `traceContext` stays `undefined`, even when an OpenTelemetry exporter is active. Telemetry endpoints that read it report those initial values, so do not build dashboards or alerts on them.
 
 ```ts
 import { selectTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 const telemetry = selectTelemetry(state);
-
-// Session-level aggregates
-console.log(telemetry.sessionMetrics);
-// {
-//   turns: 12,
-//   toolCalls: 47,
-//   toolErrors: 2,
-//   agentsSpawned: 5,
-//   inputTokens: 38420,
-//   outputTokens: 12300,
-//   cacheReadTokens: 8000,
-//   permissionPrompts: 6,
-//   permissionDenials: 1,
-//   errors: 3,
-//   warnings: 8,
-// }
+console.log(telemetry.sessionMetrics.turns); // 0, always
 ```
 
-### Correlation IDs
-
-Two correlation IDs are tracked:
-
-- `sessionCorrelationId`: set at session start, never changes. Use it to correlate all events from a session.
-- `currentTurnCorrelationId`: changes each turn. Use it to correlate events within a single turn.
-
-```ts
-const { sessionCorrelationId, currentTurnCorrelationId } = telemetry;
-```
-
-### OTel integration
-
-When OpenTelemetry is active, `traceContext` is populated with OTel-compatible IDs:
-
-```ts
-const { traceContext } = telemetry;
-if (traceContext?.exportActive) {
-  console.log(traceContext.traceId);    // 128-bit hex
-  console.log(traceContext.rootSpanId); // 64-bit hex
-  console.log(traceContext.endpoint);   // OTel collector URL
-}
-```
-
-### Telemetry event buffer
-
-The `recentEvents` ring buffer holds the last 500 `TelemetryEventRecord` entries by default. Each record carries:
-
-```ts
-interface TelemetryEventRecord {
-  eventType: string;
-  correlationId: string;
-  source: string;        // emitting subsystem
-  timestamp: number;     // epoch ms
-  meta?: Record<string, unknown>;
-}
-```
+For live counts, subscribe to the runtime event feeds described above instead: `turn`, `tools`, `agents` and `gate` events carry everything the metrics fields name (turns, tool calls and failures, agents spawned, token usage, permission prompts and denials).
 
 ### Tool call telemetry
 
 Tool calls are tracked individually through the `tools` event domain. Subscribe to `tools` events to build per-tool latency histograms or error-rate dashboards.
 
-### Token usage tracking
+### Token usage
 
-Input and output token counts accumulate in `sessionMetrics.inputTokens` and `sessionMetrics.outputTokens`. `cacheReadTokens` tracks cache hits to quantify cost savings from prompt caching.
+Token counts arrive on the `turn` domain's `LLM_RESPONSE_RECEIVED` events; the conversation domain keeps per-turn and per-session usage (`currentTurnUsage`, `sessionUsage`).
 
 ---
 
@@ -330,7 +286,7 @@ import {
 // Aggregate across all health domains
 const systemHealth = selectSystemHealth(state);
 // {
-//   status: 'healthy' | 'degraded' | 'failed',
+//   status: 'healthy' | 'degraded' | 'critical' | 'unknown',
 //   hasCritical: boolean,
 //   hasDegraded: boolean,
 //   domains: {
@@ -422,10 +378,12 @@ The `ForensicsClassifier` maps event context to a `FailureClass` using priority-
 | `compaction_error` | Compaction failure recorded |
 | `permission_denied` | Permission denial or `hook_denied` stop reason |
 | `tool_failure` | Tool execution failure or `tool_loop_circuit_breaker` |
-| `cascade_failure` | Health cascade events present |
-| `turn_timeout` | Error message contains `timeout` / `timed out` |
-| `llm_error` | API errors, rate limits, network failures, 5xx responses |
+| `cascade_failure` | A health cascade (`CASCADE_APPLIED`) was observed for the session while the turn or task was in flight |
+| `turn_timeout` | The error message is read as a timeout |
+| `llm_error` | The error message is read as a rate limit, billing, authentication, authorization, service, network or protocol failure, or the stop reason is `provider_exhausted`, `provider_error`, `error`, `stop_sequence` or `content_filter` |
 | `unknown` | No pattern matched |
+
+The error message is not matched against words. The failure reading (a Jev decision) assigns it a category, and only that category maps to a class. In Classic operation, or when the reading is unsure, the category is `unknown`, so a failure that has only a message (for example "request timed out") is classified `unknown` unless one of the stop reasons above applies. Error text is stored with credential-shaped spans masked.
 
 ### FailureReport structure
 
@@ -443,6 +401,9 @@ interface FailureReport {
   turnId?: string;
   agentId?: string;
   phaseTimings: PhaseTimingEntry[];  // PREFLIGHT, STREAM, TOOL_BATCH, POST_HOOKS, ...
+  slowPhases: string[];              // phases read as unusually long for their kind
+  slowPhaseAssessment?: 'semantic' | 'not-needed' | 'not-evaluated'; // an empty slowPhases is a finding only when 'semantic'
+  operationProvenance?: 'classic';   // present on reports produced in Classic operation
   phaseLedger: PhaseLedgerEntry[];   // explicit phase transition log
   causalChain: CausalChainEntry[];   // root cause first
   cascadeEvents: CausalChainEntry[];
@@ -451,6 +412,8 @@ interface FailureReport {
   jumpLinks: ForensicsJumpLink[];    // navigable panel/command references
 }
 ```
+
+An incident bundle carries `slowPhases` in its evidence. When several failures share one trace, the report ids stay distinct (`3fa91c2e`, `3fa91c2e-2`, ...) so each id resolves to its own report.
 
 ### ForensicsRegistry
 
@@ -527,15 +490,12 @@ for (const link of report.jumpLinks) {
 
 ### ForensicsDataPanel
 
-`ForensicsDataPanel` bridges `ForensicsRegistry` into the diagnostics panel subscription model:
+`ForensicsDataPanel` bridges `ForensicsRegistry` into the diagnostics panel subscription model. It is built from a registry directly; the diagnostics provider does not create it:
 
 ```ts
-import { createDiagnosticsProvider } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import { ForensicsDataPanel } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
-// createDiagnosticsProvider assembles all panels from runtimeServices;
-// the forensics panel is available as diag.forensics
-const diag = createDiagnosticsProvider(runtimeServices);
-const panel = diag.forensics;
+const panel = new ForensicsDataPanel(forensicsRegistry);
 
 const all = panel.getAll();               // capped at bufferLimit
 const latest = panel.latest();            // most recent report
@@ -562,6 +522,7 @@ The diagnostics subsystem provides data providers for the following built-in pan
 | Agents | `AgentsPanel` | Agent lifecycle and state |
 | Events | `EventsPanel` | Recent event stream |
 | Tool calls | `ToolCallsPanel` | Tool dispatch history |
+| Tool contracts | `ToolContractsPanel` | Tool contract verification results |
 | Ops | `OpsPanel` | Operations-plane state |
 | Tasks | `TasksPanel` | Task queue and status |
 | State inspector | `StateInspectorPanel` | Raw domain state |
@@ -586,15 +547,27 @@ const ph = selectProviderHealth(state);
 
 ### Accessing diagnostics
 
+`createDiagnosticsProvider` takes the event bus and the health aggregator, plus optional extras:
+
 ```ts
 import { createDiagnosticsProvider } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 
-const diag = createDiagnosticsProvider(runtimeServices);
+const diag = createDiagnosticsProvider({
+  eventBus,                 // RuntimeEventBus the event-driven panels listen to
+  healthAggregator,         // RuntimeHealthAggregator behind the health dashboard
+  sloCollector,             // optional: adds SLO rows to the health dashboard
+  cascadeTimer,             // optional: adds remediation suggestions
+  domains,                  // optional: InspectableDomain[] for the state inspector
+  panelConfig,              // optional: per-panel buffer limits
+});
 
-// Access individual panels
-const health = diag.health.getSnapshot();
-const forensics = diag.forensics.getAll();
+const health = diag.getHealthDashboard();
+const toolCalls = diag.getToolCalls({ taskId: 't1' });
+const unsubscribe = diag.subscribe('health', () => render());
+diag.dispose();
 ```
+
+The provider builds the tool-calls, agents, tasks, events, state-inspector, health and tool-contracts panels. The other panels in the table above are constructed directly from their own data sources.
 
 ---
 
@@ -613,6 +586,9 @@ export interface PlatformObserver {
 
   /** Called when the platform catches and is about to rethrow a GoodVibesError. */
   onError?(err: GoodVibesError): void;
+
+  /** Called when another callback throws at a transport seam. Notification only. */
+  onObserverError?(err: Error): void;
 
   /** Called at HTTP/SSE/WS transport boundaries. */
   onTransportActivity?(activity: {
@@ -704,6 +680,8 @@ Spans emitted:
 | `platform.auth.transition` | On each auth state transition |
 | `platform.error` | On each `GoodVibesError` |
 
+Transport seams (HTTP, SSE and WebSocket `onTransportActivity`, `onEvent` and `onError`) use a transport-level helper instead. A throwing callback there goes to the observer's optional `onObserverError(err)` when it defines one; otherwise it is reported once to `console.warn` and never disrupts the transport.
+
 ### Wire-up status
 
 The following table shows which `PlatformObserver` callbacks each transport seam calls. "Wired" means the seam actively invokes the callback; "Not wired" means that seam is not observed.
@@ -733,16 +711,17 @@ import {
   injectTraceparentAsync,
 } from '@goodvibes-jev/engine/platform/transport-core';
 
-// Synchronous: uses require-based OTel detection. Use for HTTP requests.
+// Async: uses dynamic import on first call, then caches. Use this for HTTP, SSE and WebSocket requests.
 const headers: Record<string, string> = {};
-injectTraceparent(headers);
+await injectTraceparentAsync(headers);
 // headers['traceparent'] = '00-<traceId>-<spanId>-01'  (if OTel span active)
 
-// Async: uses dynamic import on first call, then caches. Use for SSE/WS setup.
-await injectTraceparentAsync(headers);
+// Synchronous: detects OTel only where a global `require` exists (CommonJS hosts).
+// In Bun and Node ES modules it finds nothing and sets no header.
+injectTraceparent(headers);
 ```
 
-Both functions are no-ops when `@opentelemetry/api` is not installed or no active span exists. There is no hard dependency on `@opentelemetry/*`. Detection happens at runtime via dynamic import (async) or `require` (sync). Bundlers see no statically-analysable `import('@opentelemetry/api')`.
+Both functions are no-ops when `@opentelemetry/api` is not installed or no active span exists. There is no hard dependency on `@opentelemetry/*`. Detection happens at runtime via dynamic import (async) or a global `require` (sync, CommonJS hosts only). Bundlers see no statically-analysable `import('@opentelemetry/api')`.
 
 ---
 
@@ -776,6 +755,8 @@ A unit passes only when every judged criterion reads met. `CONTRACT_PASSED`, `CO
 
 Every Jev reading the engine takes is recorded in the state layer's decision log (`<workspace>/.goodvibes/<surface>/decisions.sqlite`): the call, what the decision concluded (a `readings` note), what code did with it (an `action` note) and, once known, what was right (a `truth` note from a calibration fixture, an owner correction or an observed outcome). The observe subsystem (`@goodvibes-jev/engine/platform/platform/observe`) reads it without making new calls:
 
+A decision log written by a build this one does not recognise (a newer schema version) or a file that is not a database is never deleted and never stops start-up: it is moved to `decisions.sqlite.unrecognized-<n>` beside the log, a new log starts, and the composition's `decisionLogNotice` and the activity log say where the old one went.
+
 | Analysis | What it reads |
 |---|---|
 | Accuracy against confidence | Per decision, the share of ground-truth checks it got right, per confidence bin, against its registered accuracy floor |
@@ -785,7 +766,21 @@ Every Jev reading the engine takes is recorded in the state layer's decision log
 | Calls outside a registered battery | Logged calls naming no registered decision |
 | Judgment cost | Jev calls, tokens and latency by decision and site, priced through the cost attribution pricing (unpriced, never $0, for an unknown model) |
 
-`bun run observe:report` prints every analysis for a log (`--log`, or the one surface log under `--workspace`), plus the `judgment-accuracy` eval suite: one eval scenario per decision with ground truth, whose quality dimension scores accuracy against the decision's floor, so the eval scorecard, baseline and gate cover judgment accuracy. `--check` exits 1 when a decision is below its floor or a call was made outside a registered battery. `bun run observe:proof` seeds a fresh log from a live calibration run and shows every analysis producing output.
+`bun run observe:report` prints every analysis for a log (`--log`, or the one surface log under `--workspace`, narrowed with `--surface`), plus the `judgment-accuracy` eval suite: one eval scenario per decision with ground truth, whose quality dimension scores accuracy against the decision's floor, so the eval scorecard, baseline and gate cover judgment accuracy. `--check` exits 1 when a decision is below its floor or a call was made outside a registered battery. `bun run observe:proof` seeds a fresh log from a live calibration run and shows every analysis producing output; it needs a live `TYPESAFE_API_KEY` endpoint, and takes `--all` (calibrate every registered decision) or `--only a,b`.
+
+| Option | Effect |
+|---|---|
+| `--since <iso>`, `--until <iso>` | Limit the readings to a time range |
+| `--battery <name>`, `--site <site>` | Limit the readings to one decision or one call site |
+| `--no-calibration` | Leave out the calibration (fixture) readings |
+| `--thresholds 0.6,0.7,0.8` | The thresholds the sweep re-bands at |
+| `--window 30m\|6h\|1d` or `--windows <n>` | The drift window size, or how many windows to compare |
+| `--limit <n>` | The most readings to load |
+| `--budgets <json-file>` | Explicit per-decision volume limits |
+| `--check-volume` | Exit 1 when a decision's call volume breaches its budget; requires `--budgets` and refuses a truncated window (raise `--limit` or narrow the window) |
+| `--json` | Print the analysis as JSON |
+
+A usage error exits 2.
 
 `bun run judgment:lint` runs in `validate`: it fails when a registered decision has no fixture expecting one of its answers (each yes or no, option, rubric level or route), or when engine source asks Jev outside a registered decision.
 

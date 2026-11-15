@@ -10,7 +10,14 @@
  * Swap policy:
  *   - Refused with WORKSPACE_BUSY when any session has pendingInputCount > 0.
  *   - Returns INVALID_PATH when the new path cannot be created.
- *   - On success, persists the new path to <daemonHomeDir>/daemon-settings.json.
+ *   - Returns REROOT_FAILED when the stores could not be re-opened at the new
+ *     path, or when a before-swap fence listener threw (a daemon-side failure,
+ *     not a bad path). The previous workspace stays current. Fences that already
+ *     ran stay revoked: authority is dropped, never silently re-granted, and the
+ *     next admitted swap or a restart re-arms it.
+ *   - On success, persists the new path to <daemonHomeDir>/daemon-settings.json
+ *     and reports `persisted` and the subsystems that keep the old root until
+ *     the next restart (`requiresRestart`).
  *
  * Events emitted on runtimeBus (domain: 'workspace'):
  *   WORKSPACE_SWAP_STARTED  , before swap begins
@@ -43,9 +50,15 @@ export interface WorkspaceSwapDeps {
   /**
    * Called after the manager validates the new path.
    * Implementations must close existing stores and re-open them at newWorkingDir.
-   * May throw; the manager catches and returns INVALID_PATH.
+   * May throw; the manager catches and returns REROOT_FAILED. May report the
+   * subsystems that cannot follow a live swap and keep the old root.
    */
-  readonly rerootStores: (newWorkingDir: string) => Promise<void>;
+  readonly rerootStores: (newWorkingDir: string) => Promise<void | WorkspaceRerootOutcome>;
+}
+
+export interface WorkspaceRerootOutcome {
+  /** Subsystems still bound to the previous working directory until the next restart. */
+  readonly requiresRestart?: readonly string[] | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,9 +66,18 @@ export interface WorkspaceSwapDeps {
 // ---------------------------------------------------------------------------
 
 export type WorkspaceSwapResult =
-  | { ok: true; previous: string; current: string }
+  | {
+    ok: true;
+    previous: string;
+    current: string;
+    /** False when the new path could not be saved, so it will not survive a restart. */
+    persisted: boolean;
+    /** Subsystems that keep using the previous working directory until restart. */
+    requiresRestart: readonly string[];
+  }
   | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
-  | { ok: false; code: 'INVALID_PATH'; reason: string };
+  | { ok: false; code: 'INVALID_PATH'; reason: string }
+  | { ok: false; code: 'REROOT_FAILED'; reason: string };
 
 // ---------------------------------------------------------------------------
 // WorkspaceSwapManager
@@ -81,6 +103,15 @@ export class WorkspaceSwapManager {
   /** Every admitted transition retires the old epoch, including failed or same-path reroots. */
   getWorkspaceRevision(): number {
     return this.workspaceRevision;
+  }
+
+  /**
+   * True from admission until the swap finishes. Input intake can read this to
+   * hold new turns while stores move; the busy-session check only sees input
+   * that was pending when the swap was requested.
+   */
+  isSwapping(): boolean {
+    return this.swapInProgress;
   }
 
   /** Synchronous authority fences run before any workspace mutation or async event dispatch. */
@@ -126,10 +157,12 @@ export class WorkspaceSwapManager {
     this.workspaceRevision++;
     try {
       for (const listener of [...this.beforeSwapListeners]) listener();
-    } catch {
+    } catch (err: unknown) {
       const reason = 'Workspace transition fence failed; no workspace stores were re-rooted.';
-      this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'UNKNOWN', reason });
-      return { ok: false, code: 'INVALID_PATH', reason };
+      logger.warn('[WorkspaceSwap] before-swap fence threw', { error: summarizeError(err), from, to });
+      // REROOT_FAILED is the existing daemon-side failure code (HTTP 500), so the caller is not told to fix a path that is fine.
+      this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'REROOT_FAILED', reason });
+      return { ok: false, code: 'REROOT_FAILED', reason };
     }
 
     // Swap is proceeding, emit STARTED now that busy check and fences passed.
@@ -150,15 +183,17 @@ export class WorkspaceSwapManager {
     }
 
     // Re-root all stores
+    let requiresRestart: readonly string[] = [];
     try {
-      await this.deps.rerootStores(resolved);
+      const outcome = await this.deps.rerootStores(resolved);
+      if (outcome) requiresRestart = outcome.requiresRestart ?? [];
     } catch (err: unknown) {
       const reason = `Failed to re-initialize stores at '${resolved}': ${
         err instanceof Error ? err.message : String(err)
       }`;
       // emit WORKSPACE_SWAP_FAILED so subscribers that saw STARTED get terminal resolution
       this._emit({ type: 'WORKSPACE_SWAP_FAILED', from, to, code: 'REROOT_FAILED', reason });
-      return { ok: false, code: 'INVALID_PATH', reason };
+      return { ok: false, code: 'REROOT_FAILED', reason };
     }
 
     this.currentWorkingDir = resolved;
@@ -179,7 +214,7 @@ export class WorkspaceSwapManager {
 
     this._emit({ type: 'WORKSPACE_SWAP_COMPLETED', from, to: resolved, persistedInDaemonSettings });
 
-    return { ok: true, previous: from, current: resolved };
+    return { ok: true, previous: from, current: resolved, persisted: persistedInDaemonSettings, requiresRestart };
   }
 
   private _emit(payload: WorkspaceEvent): void {

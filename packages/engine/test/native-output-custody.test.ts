@@ -13,6 +13,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0).reverse()) rmSync(root, { recursive: true, force: true }); });
 function scratch() { const root = makeProjectTempDir('native-output-custody'); roots.push(root); return root; }
 function nativeCohort() {
+  if (!Bun.which('tar')) throw new Error('These tests archive and list native cohorts with the system tar, which is not on PATH.');
   const root = scratch(), product = join(root, 'products/daemon'); mkdirSync(product, { recursive: true });
   copyFileSync(new URL('../../../products/daemon/toolchain.config.json', import.meta.url), join(product, 'toolchain.config.json'));
   writeFileSync(join(product, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/daemon', version: '3.1.2' }));

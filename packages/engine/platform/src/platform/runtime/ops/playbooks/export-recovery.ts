@@ -30,8 +30,9 @@ export const exportRecoveryPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'OTLP endpoint reachability requires live network context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'curl -sf -X POST <otlpEndpoint> -d "{}" -H "Content-Type: application/json"' },
         })),
     },
@@ -42,8 +43,9 @@ export const exportRecoveryPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Queue size requires live ExportQueue reference.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Inspect exportQueue.size vs exportQueue config.maxSize' },
         })),
     },
@@ -54,8 +56,9 @@ export const exportRecoveryPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Ledger writeability requires live filesystem access.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Run: touch <ledgerFilePath> to test writability' },
         })),
     },
@@ -68,9 +71,8 @@ export const exportRecoveryPlaybook: Playbook = {
         'Verify the configured OTLP endpoint is reachable. ' +
         'A minimal POST should return HTTP 200 or 204.',
       kind: 'observe',
-      command: 'curl -sf -X POST <otlpEndpoint>/v1/traces -H "Content-Type: application/json" -d \'{"resourceSpans":[]}\' ',
       expectedOutcome: 'HTTP 200 or 204 response.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 2,
@@ -79,9 +81,8 @@ export const exportRecoveryPlaybook: Playbook = {
         'Confirm the local ledger file path exists and is writable. ' +
         'Check disk space if the file exists but is not growing.',
       kind: 'observe',
-      command: 'ls -lh <ledgerFilePath> && df -h <ledgerDirectory>',
       expectedOutcome: 'File exists and is writable; adequate disk space.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 3,
@@ -90,7 +91,6 @@ export const exportRecoveryPlaybook: Playbook = {
         'If spans are being dropped due to queue overflow, increase the queue ' +
         'maxSize in the OtlpExporter configuration and restart the exporter.',
       kind: 'config',
-      command: 'new OtlpExporter({ ..., queue: { maxSize: 512 } })',
       expectedOutcome: 'Queue overflow warnings cease; no more span drops.',
       automatable: false,
     },
@@ -101,7 +101,6 @@ export const exportRecoveryPlaybook: Playbook = {
         'Replace the failing OTLP exporter with a ConsoleExporter to preserve ' +
         'span visibility while the pipeline is being restored.',
       kind: 'config',
-      command: 'tracer.config.exporters = [new ConsoleExporter({ verbosity: "compact" })]',
       expectedOutcome: 'Spans visible in console output; no data lost.',
       automatable: false,
     },
@@ -112,7 +111,6 @@ export const exportRecoveryPlaybook: Playbook = {
         'After fixing the endpoint or configuration, re-add the OtlpExporter. ' +
         'Verify the first batch of spans is acknowledged by the OTLP receiver.',
       kind: 'config',
-      command: 'tracer.config.exporters.push(new OtlpExporter({ endpoint: "<fixed-endpoint>" }))',
       expectedOutcome: 'Export result callback reports code: "success".',
       automatable: false,
     },

@@ -20,6 +20,8 @@
 import {
   HomeGraphService,
   GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
+  HOME_GRAPH_KNOWLEDGE_DB_FILE,
+  REGULAR_KNOWLEDGE_DB_FILE,
   HOME_GRAPH_KNOWLEDGE_EXTENSION,
   KnowledgeService,
   KnowledgeSemanticService,
@@ -38,9 +40,6 @@ import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow'
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { AsyncDisposalRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createNativeWorkLedgerOwner, type NativeWorkLedgerOwner } from './work-ledger-composition.js';
-
-const REGULAR_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
-const HOME_GRAPH_KNOWLEDGE_DB_FILE = 'knowledge-home-graph.sqlite';
 
 export interface KnowledgeServicesDeps {
   /** Acquire owners immediately, including when a later constructor fails. */
@@ -83,9 +82,9 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   const { configManager, providerRegistry, artifactStore, memoryRegistry, runtimeBus, isBackgroundPaused, admitExpensiveWork } = deps;
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { family: 'wiki' });
   deps.ownership.registry.add('regular knowledge store', () => knowledgeStore.close());
-  const agentKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE });
+  const agentKnowledgeStore = KnowledgeStore.forFamily({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
   deps.ownership.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
-  const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
+  const homeGraphKnowledgeStore = KnowledgeStore.forFamily({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
   deps.ownership.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });

@@ -7,6 +7,7 @@
 // real recorded state, measured token counts are reported as fact; anything
 // estimated (block token cost, context-used percent) is flagged as an estimate,
 // never presented as measured.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Tool, ToolDefinition, ToolResult } from '../../types/tools.js';
 import type { TurnInjectionRecord } from '../../agents/turn-knowledge-injection.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -39,6 +40,23 @@ export interface ContextAccountingSource {
   getTurnInjections(): readonly TurnInjectionRecord[];
   getTokenState(): ContextTokenState;
   getCompactionState(): { readonly isCompacting: boolean; readonly compactionCount?: number | undefined };
+  /** Turns used and the turn limit, when the session has one (worker agents do). */
+  getTurnState?(): { readonly used: number; readonly limit: number | null };
+  /** What a worker is doing now, when the source knows (a foreground session leaves it out). */
+  getRunState?(): { readonly mode?: string | undefined; readonly toolCalls?: number | undefined; readonly activeChildren?: number | undefined };
+}
+
+/** Share of the turn limit at which the model is told to wrap up. */
+export const TURN_LIMIT_WARNING_RATIO = 0.8;
+
+/**
+ * The model-facing warning once `used` reaches 80% of `limit`, else undefined.
+ * A runner can append it to tool results; this tool reports it too.
+ */
+export function turnLimitWarning(used: number, limit: number | null): string | undefined {
+  if (limit === null || !Number.isFinite(limit) || limit <= 0 || used < Math.ceil(limit * TURN_LIMIT_WARNING_RATIO)) return undefined;
+  const remaining = Math.max(0, limit - used);
+  return `Turn ${used} of ${limit}: ${remaining} turn(s) left before this run is stopped. Finish the current step and give your final answer; do not start new work.`;
 }
 
 /**
@@ -49,11 +67,20 @@ export interface ContextAccountingSource {
  */
 export class ContextAccountingHolder {
   private source: ContextAccountingSource | null = null;
+  /**
+   * One holder serves every concurrent worker, so a worker's source is scoped to the async call chain it
+   * runs in rather than set on the shared holder, where the last worker to start would answer for all of them.
+   */
+  private readonly scoped = new AsyncLocalStorage<ContextAccountingSource>();
   setSource(source: ContextAccountingSource | null): void {
     this.source = source;
   }
+  /** Run `fn` with `source` answering for any context_accounting call made inside it. */
+  runWithSource<T>(source: ContextAccountingSource, fn: () => T): T {
+    return this.scoped.run(source, fn);
+  }
   getSource(): ContextAccountingSource | null {
-    return this.source;
+    return this.scoped.getStore() ?? this.source;
   }
 }
 
@@ -128,7 +155,8 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
           success: true,
           output: JSON.stringify({
             available: false,
-            reason: 'No live session context is bound to this tool instance. Context accounting is populated on the interactive session.',
+            reason: 'No live session context is bound to this tool instance (background runs without a session have none). '
+              + 'Nothing is wrong with your call; do not retry it. Continue the task.',
           }),
         };
       }
@@ -136,6 +164,9 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
       const latest = injections.length > 0 ? injections[injections.length - 1] : undefined;
       const tokens = source.getTokenState();
       const compaction = source.getCompactionState();
+      const turnState = source.getTurnState?.();
+      const runState = source.getRunState?.();
+      const turnWarning = turnState ? turnLimitWarning(turnState.used, turnState.limit) : undefined;
       const contextUsedPct = tokens.contextWindow && tokens.contextWindow > 0
         ? Math.round((tokens.lastInputTokens / tokens.contextWindow) * 1000) / 10
         : null;
@@ -158,6 +189,12 @@ export function createContextAccountingTool(holder: ContextAccountingHolder): To
             contextUsedPctEstimated: contextUsedPct,
           },
           compaction,
+          ...(turnState ? { turns: { used: turnState.used, limit: turnState.limit,
+            ...(turnState.limit !== null ? { remaining: Math.max(0, turnState.limit - turnState.used) } : {}),
+            ...(turnWarning ? { warning: turnWarning } : {}) } } : {}),
+          ...(runState ? { run: { ...(runState.mode !== undefined ? { mode: runState.mode } : {}),
+            ...(runState.toolCalls !== undefined ? { toolCalls: runState.toolCalls } : {}),
+            ...(runState.activeChildren !== undefined ? { activeChildren: runState.activeChildren } : {}) } } : {}),
           estimates: {
             note: 'Fields named *Estimated (per-turn injection tokenCost, contextUsedPct) are heuristic estimates, '
               + 'not provider-measured. The tokenBudget.measured counts are provider-reported and authoritative.',

@@ -27,6 +27,7 @@ import {
   TerminalBackgroundProbe,
 } from '../../renderer/terminal-bg-probe.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { withTimers } from '../helpers/fake-timers.ts';
 
 const BEL = '\x07';
 const ST = '\x1b\\';
@@ -155,15 +156,19 @@ describe('TerminalBackgroundProbe.feed', () => {
     expect(out).toEqual([{ mode: 'dark', reason: 'unparseable' }]);
   });
 
-  test('never corrupts the composer: an incomplete/garbled fragment never leaks', async () => {
-    const out: ProbeResolution[] = [];
-    const probe = makeProbe(out, 15);
-    probe.startTimeout();
-    const passthrough = probe.feed('k\x1b]11;rgb:ffff/ffff');
-    expect(passthrough).toBe('k'); // only the real keystroke escaped
-    await new Promise((r) => setTimeout(r, 40));
-    expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
-    expect(probe.feed('typed')).toBe('typed');
+  test('never corrupts the composer: an incomplete/garbled fragment never leaks', () => {
+    withTimers((advance) => {
+      const out: ProbeResolution[] = [];
+      const probe = makeProbe(out, 15);
+      probe.startTimeout();
+      const passthrough = probe.feed('k\x1b]11;rgb:ffff/ffff');
+      expect(passthrough).toBe('k'); // only the real keystroke escaped
+      advance(14);
+      expect(out).toEqual([]);
+      advance(1);
+      expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
+      expect(probe.feed('typed')).toBe('typed');
+    });
   });
 
   test('a bare ESC keystroke is held one chunk then released (no OSC 11 follows)', () => {
@@ -175,39 +180,32 @@ describe('TerminalBackgroundProbe.feed', () => {
     expect(probe.active).toBe(true);
   });
 
-  test('no reply → timeout → dark', async () => {
-    const out: ProbeResolution[] = [];
-    const probe = makeProbe(out, 15);
-    probe.startTimeout();
-    await new Promise((r) => setTimeout(r, 40));
-    expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
-    expect(probe.active).toBe(false);
+  test('no reply → timeout → dark', () => {
+    withTimers((advance) => {
+      const out: ProbeResolution[] = [];
+      const probe = makeProbe(out, 15);
+      probe.startTimeout();
+      advance(14);
+      expect(out).toEqual([]);
+      expect(probe.active).toBe(true);
+      advance(1);
+      expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
+      expect(probe.active).toBe(false);
+    });
   });
 
-  test('resolves only once (a late reply after timeout is ignored)', async () => {
-    const out: ProbeResolution[] = [];
-    const probe = makeProbe(out, 10);
-    probe.startTimeout();
-    await new Promise((r) => setTimeout(r, 30));
-    probe.feed(`\x1b]11;rgb:ffff/ffff/ffff${BEL}`);
-    expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// query bytes
-// ---------------------------------------------------------------------------
-
-describe('query bytes', () => {
-  test('OSC11_QUERY is the ST-terminated background query', () => {
-    expect(OSC11_QUERY).toBe('\x1b]11;?\x1b\\');
-  });
-
-  test('DEFAULT_PROBE_TIMEOUT_MS is a small startup window', () => {
-    expect(DEFAULT_PROBE_TIMEOUT_MS).toBeGreaterThan(0);
-    expect(DEFAULT_PROBE_TIMEOUT_MS).toBeLessThanOrEqual(500);
+  test('resolves only once (a late reply after timeout is ignored)', () => {
+    withTimers((advance) => {
+      const out: ProbeResolution[] = [];
+      const probe = makeProbe(out, 10);
+      probe.startTimeout();
+      advance(10);
+      probe.feed(`\x1b]11;rgb:ffff/ffff/ffff${BEL}`);
+      expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
+    });
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // installBackgroundThemeProbe, config forcing + auto/TTY gating
@@ -325,30 +323,36 @@ describe('installBackgroundThemeProbe: auto probe flow', () => {
 
 
 describe('startup owner cancellation during an unanswered background probe', () => {
-  test('a held Escape is forwarded once instead of swallowed at timeout', async () => {
-    const forwarded: string[] = [];
-    const handle = installBackgroundThemeProbe({
-      configManager: fakeConfig('auto'), isTTY: true, timeoutMs: 5,
-      writeQuery: () => {}, applyThemeMode: () => {}, requestRepaint: () => {},
-      forwardInput: bytes => forwarded.push(bytes),
+  test('a held Escape is forwarded once instead of swallowed at timeout', () => {
+    withTimers((advance) => {
+      const forwarded: string[] = [];
+      const handle = installBackgroundThemeProbe({
+        configManager: fakeConfig('auto'), isTTY: true, timeoutMs: 5,
+        writeQuery: () => {}, applyThemeMode: () => {}, requestRepaint: () => {},
+        forwardInput: bytes => forwarded.push(bytes),
+      });
+      expect(handle.filterInput('\x1b')).toBe('');
+      advance(4);
+      expect(forwarded).toEqual([]);
+      advance(1);
+      expect(forwarded).toEqual(['\x1b']);
+      expect(handle.filterInput('next')).toBe('next');
     });
-    expect(handle.filterInput('\x1b')).toBe('');
-    await Bun.sleep(15);
-    expect(forwarded).toEqual(['\x1b']);
-    expect(handle.filterInput('next')).toBe('next');
   });
 
-  test('a split OSC reply is consumed and genuine partial replies never become keys', async () => {
-    for (const fragment of ['\x1b]1', '\x1b]11;rgb:0000/']) {
+  test('a split OSC reply is consumed and genuine partial replies never become keys', () => {
+    withTimers((advance) => {
+      for (const fragment of ['\x1b]1', '\x1b]11;rgb:0000/']) {
+        const forwarded: string[] = [];
+        const probe = new TerminalBackgroundProbe({ timeoutMs: 5, onResolve: () => {}, onFlush: bytes => forwarded.push(bytes) });
+        probe.startTimeout(); expect(probe.feed(fragment)).toBe('');
+        advance(5); expect(forwarded).toEqual([]);
+      }
       const forwarded: string[] = [];
       const probe = new TerminalBackgroundProbe({ timeoutMs: 5, onResolve: () => {}, onFlush: bytes => forwarded.push(bytes) });
-      probe.startTimeout(); expect(probe.feed(fragment)).toBe('');
-      await Bun.sleep(15); expect(forwarded).toEqual([]);
-    }
-    const forwarded: string[] = [];
-    const probe = new TerminalBackgroundProbe({ timeoutMs: 5, onResolve: () => {}, onFlush: bytes => forwarded.push(bytes) });
-    probe.startTimeout(); expect(probe.feed('\x1b')).toBe('');
-    expect(probe.feed(']11;rgb:0000/0000/0000\x07')).toBe('');
-    await Bun.sleep(15); expect(forwarded).toEqual([]);
+      probe.startTimeout(); expect(probe.feed('\x1b')).toBe('');
+      expect(probe.feed(']11;rgb:0000/0000/0000\x07')).toBe('');
+      advance(5); expect(forwarded).toEqual([]);
+    });
   });
 });

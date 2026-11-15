@@ -32,6 +32,9 @@ const readings = useApprovalReadings();
 
 const disposables = trackDisposables();
 
+/** Unique across harnesses: the ntfy handler remembers message ids for the life of the process. */
+let ingressSequence = 0;
+
 const CARD = '4111111111111111';
 const CARD_SPACED = '4111 1111 1111 1111';
 const AGENT_TOPIC = 'goodvibes-agent';
@@ -224,6 +227,8 @@ function buildHarness(options: HarnessOptions = {}) {
           resolveApproval: async (id: string, resolution: Record<string, unknown>) => {
             stages.push('resolveApproval');
             approvalResolutions.push({ id, ...resolution });
+            // The broker answers with the record it settled; a reply that gets nothing back is not a resolution.
+            return { id, status: resolution['approved'] === true ? 'approved' : 'denied' };
           },
         }
       : undefined,
@@ -239,7 +244,6 @@ function buildHarness(options: HarnessOptions = {}) {
     context as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0],
   );
 
-  let messageSeq = 0;
   return {
     helper,
     stages,
@@ -276,18 +280,30 @@ function buildHarness(options: HarnessOptions = {}) {
     },
     /** Drive the REAL ntfy adapter through the REAL adapter-context factory. */
     async send(message: string) {
-      messageSeq += 1;
+      ingressSequence += 1;
       return handleNtfySurfacePayload(
-        { topic: AGENT_TOPIC, message, id: `ntfy-${messageSeq}-${Math.random()}` },
+        { topic: AGENT_TOPIC, message, id: `ntfy-${ingressSequence}` },
         helper.buildSurfaceAdapterContext(),
       );
     },
   };
 }
 
+/**
+ * The four-digit group is only a leak when it stands alone. Inside a longer run
+ * of digits or letters it is a timestamp, a counter or part of a random id,
+ * which would make this check fail about once in two thousand runs on a UUID.
+ * The longer fragments are specific enough to match anywhere.
+ */
+const SHORT_FRAGMENT_STANDALONE = /(?<![0-9A-Za-z])4111(?![0-9A-Za-z])/;
+
+function containsFragment(contents: string, fragment: string): boolean {
+  return fragment === '4111' ? SHORT_FRAGMENT_STANDALONE.test(contents) : contents.includes(fragment);
+}
+
 function expectTierClean(label: string, contents: string): void {
   for (const fragment of CARD_FRAGMENTS) {
-    if (contents.includes(fragment)) {
+    if (containsFragment(contents, fragment)) {
       throw new Error(`${label} contains the card fragment ${JSON.stringify(fragment)}: ${contents.slice(0, 400)}`);
     }
   }
@@ -363,16 +379,11 @@ describe('a card number on a remote channel is refused', () => {
     expectTierClean('the delivered notices', harness.tiers.notices());
   });
 
-  test('the old substring check rejects ordinary proposal metadata before any ingress', async () => {
-    const harness = buildHarness({ pendingProposal: true, proposalNow: () => 1790826411125 });
-    const proposal = harness.proposals.listPending()[0]!;
-    expect(proposal.task).toBe('refactor the parser');
-    expect(proposal.summary).toBe('refactor the parser');
-    expect(() => expectTierClean('generated timestamp', JSON.stringify({ createdAt: proposal.createdAt })))
-      .toThrow('contains the card fragment "4111"');
-    const persisted = await harness.tiers.workProposals();
-    expect(() => expectTierClean('the existing proposal', persisted))
-      .toThrow('contains the card fragment "4111"');
+  test('the output check ignores digits inside a timestamp or id, and still flags a standalone group', () => {
+    expect(() => expectTierClean('a timestamp', JSON.stringify({ createdAt: 1790826411125 }))).not.toThrow();
+    expect(() => expectTierClean('a generated id', 'proposal 3f2a4111-9c1b-4e0a-8d2f-0a1b2c3d4e5f')).not.toThrow();
+    expect(() => expectTierClean('a truncated card', 'card ending 4111')).toThrow('contains the card fragment "4111"');
+    expect(() => expectTierClean('a card prefix', 'bin 411111 declined')).toThrow('contains the card fragment "411111"');
   });
 
   test.each(CARD_FRAGMENTS)('the store snapshot check catches newly persisted card material %s', async (fragment) => {
@@ -660,37 +671,47 @@ describe('every remote adapter call site is covered by the shared hook', () => {
       .sort();
   }
 
-  test('there are exactly nineteen call sites, and they all go through authorizeSurfaceIngress', () => {
-    let total = 0;
+  /** Every source file of an adapter, so a spawn moved out of `index.ts` is still seen. */
+  function adapterFiles(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (current: string): void => {
+      for (const entry of readdirSync(current, { withFileTypes: true })) {
+        const full = join(current, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts')) found.push(full);
+      }
+    };
+    walk(join(ADAPTERS_DIR, dir));
+    return found.sort();
+  }
+
+  /** Call expressions named `name` in a source text, by the compiler's own tree. */
+  function callsOf(fileName: string, source: string, name: string): number {
+    let count = 0;
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const called = ts.isPropertyAccessExpression(callee) ? callee.name.text : (ts.isIdentifier(callee) ? callee.text : '');
+        if (called === name) count += 1;
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
+    return count;
+  }
+
+  test('every channel adapter authorizes ingress, and the documented exception does not', () => {
     const perAdapter: Record<string, number> = {};
     for (const dir of adapterDirs()) {
-      const source = readFileSync(join(ADAPTERS_DIR, dir, 'index.ts'), 'utf8');
-      const count = source.match(/context\.authorizeSurfaceIngress\(/g)?.length ?? 0;
-      perAdapter[dir] = count;
-      total += count;
+      perAdapter[dir] = adapterFiles(dir)
+        .reduce((sum, file) => sum + callsOf(file, readFileSync(file, 'utf8'), 'authorizeSurfaceIngress'), 0);
     }
-
-    // §11.0's count, pinned. A new adapter raises it; this test is where that
-    // is noticed, and where someone confirms the new one is gated.
-    expect(total).toBe(19);
-    expect(perAdapter).toEqual({
-      bluebubbles: 1,
-      discord: 3,
-      github: 0,
-      'google-chat': 1,
-      homeassistant: 1,
-      imessage: 1,
-      matrix: 1,
-      mattermost: 1,
-      msteams: 1,
-      ntfy: 1,
-      signal: 1,
-      slack: 3,
-      telegram: 1,
-      telephony: 1,
-      webhook: 1,
-      whatsapp: 1,
-    });
+    // A new adapter that never calls the hook fails here, whatever else it has.
+    const ungated = Object.entries(perAdapter)
+      .filter(([dir, count]) => count === 0 && !DOCUMENTED_NON_CHANNEL_ADAPTERS.has(dir))
+      .map(([dir]) => dir);
+    expect(ungated).toEqual([]);
+    expect(perAdapter['github']).toBe(0);
   });
 
   /**
@@ -854,10 +875,11 @@ describe('every remote adapter call site is covered by the shared hook', () => {
     let spawnSitesSeen = 0;
     for (const dir of adapterDirs()) {
       if (DOCUMENTED_NON_CHANNEL_ADAPTERS.has(dir)) continue;
-      const file = join(ADAPTERS_DIR, dir, 'index.ts');
-      const source = readFileSync(file, 'utf8');
-      spawnSitesSeen += (source.match(/trySpawnAgent\(/g) ?? []).length;
-      bypassing.push(...ungatedSpawnSites(`${dir}/index.ts`, source));
+      for (const file of adapterFiles(dir)) {
+        const source = readFileSync(file, 'utf8');
+        spawnSitesSeen += callsOf(file, source, 'trySpawnAgent');
+        bypassing.push(...ungatedSpawnSites(file.slice(ADAPTERS_DIR.length + 1), source));
+      }
     }
     expect(bypassing).toEqual([]);
     // There ARE spawn sites to check. Without this the assertion above would
@@ -871,14 +893,16 @@ describe('every remote adapter call site is covered by the shared hook', () => {
       join(import.meta.dir, '..', 'platform', 'src', 'platform', 'daemon', 'surface-actions.ts'),
       'utf8',
     );
-    expect(source).toContain('refuseCardShapedIngress');
+    expect(callsOf('surface-actions.ts', source, 'refuseCardShapedIngress')).toBeGreaterThan(0);
 
     // Nothing under adapters/ carries its own copy, a per-adapter fix is what
-    // leaves the other seventeen open.
+    // leaves the other adapters open.
     for (const dir of adapterDirs()) {
-      const adapterSource = readFileSync(join(ADAPTERS_DIR, dir, 'index.ts'), 'utf8');
-      expect(adapterSource).not.toContain('detectCardShapes');
-      expect(adapterSource).not.toContain('refuseCardShapedIngress');
+      for (const file of adapterFiles(dir)) {
+        const adapterSource = readFileSync(file, 'utf8');
+        expect(callsOf(file, adapterSource, 'detectCardShapes')).toBe(0);
+        expect(callsOf(file, adapterSource, 'refuseCardShapedIngress')).toBe(0);
+      }
     }
   });
 });

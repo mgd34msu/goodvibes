@@ -17,9 +17,7 @@ export type ModalStackState = ActiveModalState & {
 export function modalOpened(state: ModalStackState, name: string): void {
     if (!isModalName(name))
         return;
-    if (getActiveModalName(state) === null && state.modalStack.length > 0) {
-        state.modalStack.length = 0;
-    }
+    pruneStaleModalStack(state);
     if (state.modalStack[state.modalStack.length - 1] === name)
         return;
     if (state.modalStack.includes(name))
@@ -28,6 +26,26 @@ export function modalOpened(state: ModalStackState, name: string): void {
         state.modalReturnFocus = state.indicatorFocused ? 'indicator' : 'prompt';
     }
     state.modalStack.push(name);
+}
+/**
+ * Forget stacked names when no modal is on screen. A modal that closed itself
+ * by any path (a pick, a dismissing key, its own last entry going away) leaves
+ * its name behind; with nothing shown the whole stack is stale, and the next
+ * Esc must reach the prompt instead of popping a name that does nothing.
+ */
+export function pruneStaleModalStack(state: ModalStackState): void {
+    if (state.modalStack.length > 0 && getActiveModalName(state) === null)
+        state.modalStack.length = 0;
+}
+/**
+ * Record a modal that closed itself (a pick, an action, a key that dismisses
+ * it). Without this its name stays stacked and the next Esc is spent popping a
+ * modal that is no longer on screen instead of reaching the prompt.
+ */
+export function modalClosed(state: { modalStack: string[] }, name: ModalName): void {
+    const index = state.modalStack.lastIndexOf(name);
+    if (index >= 0)
+        state.modalStack.splice(index, 1);
 }
 export function clearModalStack(modalStack: string[]): void {
     modalStack.length = 0;
@@ -240,6 +258,7 @@ export function handleEscape(state: EscapeState, clearCommandText = false): {
             },
         });
     };
+    pruneStaleModalStack({ ...state, helpOverlayActive, shortcutsOverlayActive, commandMode });
     if (state.modalStack.length > 0) {
         const current = state.modalStack.pop();
         if (current === undefined)

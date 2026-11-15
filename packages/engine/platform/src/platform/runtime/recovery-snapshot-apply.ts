@@ -12,8 +12,8 @@
  *
  * What lives here and what does not
  * ─────────────────────────────────
- * Here: read the snapshot, retire it, check what came back is a conversation,
- * put it on the live conversation, fold in any journal records newer than it,
+ * Here: read the snapshot, check what came back is a conversation,
+ * put it on the live conversation, retire the snapshot, fold in any journal records newer than it,
  * and report how many messages ended up there.
  *
  * Not here: WHETHER to restore. That is a question for the user, asked in
@@ -35,14 +35,15 @@
  *     {@link confirmRecoveryRestore}, whose single argument is the answer the
  *     user gave. There is no flag, no config key, and no default that produces
  *     one, a caller that has not asked has nothing to pass.
- *  2. Retirement happens INSIDE this function, via `consumeRecovery`'s
- *     load-then-delete. A caller cannot apply a snapshot and keep it: applying
- *     is the same operation as retiring it. That closes the hand-rolled
+ *  2. Retirement happens INSIDE this function, once the conversation has
+ *     accepted the snapshot. A caller cannot apply a snapshot and keep it:
+ *     applying is the same operation as retiring it. That closes the hand-rolled
  *     "load, apply, forget to delete" sequence, which is how the same crash
- *     conversation gets offered again on the next launch.
+ *     conversation gets offered again on the next launch. A snapshot the
+ *     conversation refuses stays on disk, and the live conversation is put back.
  */
 
-import { consumeRecovery } from './session-recovery.js';
+import { loadRecoveryConversation, removeRecoveryPoint } from './session-recovery.js';
 import { replayJournalForSession, type ReplayIntoConversationResult } from './transcript-journal-replay.js';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.js';
 import type { SessionSurface } from './session-surface.js';
@@ -107,11 +108,11 @@ export interface ApplyRecoverySnapshotOptions {
 
 /** Why a restore did not happen. Each value is a fact a surface can report as-is. */
 export type RecoveryApplyRefusal =
-  /** Nothing was on disk to consume, or the file could not be read. The snapshot, if any, was left alone. */
+  /** Nothing was on disk to load, or the file could not be read. The snapshot, if any, was left alone. */
   | 'no-snapshot'
-  /** A snapshot loaded but did not contain a conversation. It was already retired by the load. */
+  /** A snapshot loaded but did not contain a conversation. It had nothing to restore, so it was retired. */
   | 'unusable-snapshot'
-  /** The conversation rejected the restored state. The snapshot was already retired by the load. */
+  /** The conversation rejected the restored state. The snapshot is still on disk and the live conversation was put back. */
   | 'apply-failed';
 
 export interface ApplyRecoverySnapshotResult {
@@ -120,10 +121,9 @@ export interface ApplyRecoverySnapshotResult {
   /** Set when `applied` is false. */
   readonly refusal?: RecoveryApplyRefusal | undefined;
   /**
-   * True once the snapshot file is gone. Always true after a successful apply,
-   * and true for the refusals that follow a successful load, the read is what
-   * retires the file, so a snapshot that loaded is retired whether or not its
-   * contents turned out to be usable.
+   * True once the snapshot file is gone: after a successful apply, and after an
+   * `unusable-snapshot` refusal. False for `no-snapshot` and `apply-failed`,
+   * where the file is left on disk, and when the file could not be deleted.
    */
   readonly retired: boolean;
   /** Messages the conversation holds once the snapshot (plus any journal tail) is in place. 0 when nothing was applied. */
@@ -188,26 +188,37 @@ function readOptionalNumber(snapshot: unknown, key: string): number | undefined 
 export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): ApplyRecoverySnapshotResult {
   const { surface, sessionId, conversation, persistSnapshot } = options;
 
-  // Reading the snapshot is what retires it: consumeRecovery deletes the file
-  // only after a successful load, so a read failure leaves it on disk to be
-  // offered again rather than destroying state that was never recovered.
-  const { snapshot, consumed } = consumeRecovery(surface, sessionId);
-  if (!snapshot || !consumed) {
+  // Loading does not retire the file: it is deleted only once the conversation has
+  // accepted it, so a snapshot the current build cannot restore is still on disk
+  // for a later attempt instead of being the only copy lost with the refusal.
+  const snapshot = loadRecoveryConversation({ surface }, sessionId);
+  if (!snapshot) {
     return { applied: false, refusal: 'no-snapshot', retired: false, messageCount: 0, journalReplay: NOTHING_REPLAYED };
   }
 
+  const retire = (): boolean => {
+    try {
+      return removeRecoveryPoint(surface, sessionId).removed;
+    } catch (error) {
+      logger.warn('[Recovery] Could not retire the recovery snapshot', { sessionId, error: summarizeError(error) });
+      return false;
+    }
+  };
+
   const messages = readRestorableMessages(snapshot);
   if (!messages) {
+    // Nothing in it can be restored, so keeping it would only re-offer an empty crash every launch.
     logger.warn('[Recovery] Snapshot loaded but carried no conversation, nothing was applied', { sessionId });
     return {
       applied: false,
       refusal: 'unusable-snapshot',
-      retired: true,
+      retired: retire(),
       messageCount: 0,
       journalReplay: NOTHING_REPLAYED,
     };
   }
 
+  const before = conversation.toJSON();
   try {
     conversation.resetAll();
     conversation.fromJSON({
@@ -218,14 +229,23 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
     conversation.rebuildHistory?.();
   } catch (error) {
     logger.warn('[Recovery] Conversation rejected the restored snapshot', { sessionId, error: summarizeError(error) });
+    // Put back what the user was looking at; the snapshot stays on disk.
+    try {
+      conversation.resetAll();
+      conversation.fromJSON(before as Parameters<RestorableConversation['fromJSON']>[0]);
+      conversation.rebuildHistory?.();
+    } catch (restoreError) {
+      logger.warn('[Recovery] Could not put the live conversation back after a refused restore', { sessionId, error: summarizeError(restoreError) });
+    }
     return {
       applied: false,
       refusal: 'apply-failed',
-      retired: true,
+      retired: false,
       messageCount: 0,
       journalReplay: NOTHING_REPLAYED,
     };
   }
+  const retired = retire();
 
   // Anything the journal recorded after the snapshot was written goes on top,
   // so a restore is never older than the last thing the process managed to log.
@@ -239,7 +259,7 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
 
   return {
     applied: true,
-    retired: true,
+    retired,
     messageCount: conversation.getMessageCount(),
     journalReplay,
   };

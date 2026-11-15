@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import {
@@ -26,6 +27,7 @@ import {
   formatItem,
   formatMap,
   formatReindex,
+  reindexFailures,
   formatSearch,
   formatStatus,
 } from './agent-knowledge-format.ts';
@@ -50,6 +52,11 @@ interface DelegationResult {
   readonly message: unknown;
   readonly task: string;
   readonly reviewRequested: boolean;
+}
+
+function itemWasFound(data: unknown): boolean {
+  const record = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+  return Boolean(record.source || record.node || record.issue);
 }
 
 function buildDelegationBody(task: string, reviewRequested: boolean): string {
@@ -104,7 +111,10 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const query = commandValues(rest).join(' ').trim();
     if (!query) return { output: 'Usage: goodvibes-agent knowledge ask <question> [--limit <n>] [--mode concise|standard|detailed]', exitCode: 2 };
     const mode = readOptionValue(rest, '--mode');
-    const selectedMode = mode === 'concise' || mode === 'standard' || mode === 'detailed' ? mode : 'standard';
+    if (mode !== undefined && mode !== 'concise' && mode !== 'standard' && mode !== 'detailed') {
+      return { output: `Unknown --mode ${mode}. Use concise, standard or detailed.\nUsage: goodvibes-agent knowledge ask <question> [--limit <n>] [--mode concise|standard|detailed]`, exitCode: 2 };
+    }
+    const selectedMode = mode ?? 'standard';
     const limit = readPositiveInt(rest, '--limit', 8);
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ask, async (connection) => (
       await createAgentPlatform(connection).knowledge.ask({
@@ -166,7 +176,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
       output: formatJsonOrText(runtime.cli)(result, formatItem(result.data, id)),
-      exitCode: 0,
+      exitCode: itemWasFound(result.data) ? 0 : 1,
     };
   }
 
@@ -174,7 +184,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const limit = readPositiveInt(rest, '--limit', 50);
     const query = commandValues(rest).join(' ').trim();
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.map, async (connection) => (
-      await getAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.map.route, { limit, query })
+      await getAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.map.route, { limit, query, includeIssues: true })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
@@ -304,7 +314,9 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const connectorId = readOptionValue(rest, '--connector') ?? 'goodvibes-agent-file';
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestArtifact, async (connection) => (
       await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestArtifact.route, {
-        path,
+        // The host resolves a relative path against its own directory, so send
+        // the one this command was started in.
+        path: resolve(runtime.workingDirectory, path),
         title,
         tags,
         folderPath,
@@ -395,7 +407,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     }
     const result = await runKnowledgeCall(runtime, method, async (connection) => (
       await postAgentKnowledgeJson(connection, method.route, {
-        path,
+        path: resolve(runtime.workingDirectory, path),
         allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
         metadata: { originSurface: 'goodvibes-agent-cli' },
       })
@@ -466,7 +478,9 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
       await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestConnector.route, {
         connectorId,
         input,
-        path,
+        // The host resolves a relative path against its own directory, so send
+        // the one this command was run from.
+        path: path ? resolve(runtime.workingDirectory, path) : path,
         content,
         allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
         sessionId: 'goodvibes-agent-cli',
@@ -498,7 +512,8 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
       output: formatJsonOrText(runtime.cli)(result, formatReindex(result.data)),
-      exitCode: 0,
+      // A partial reindex is not a success: scripts must see the failed sources.
+      exitCode: isRecord(result.data) && reindexFailures(result.data).length > 0 ? 1 : 0,
     };
   }
 
@@ -575,6 +590,7 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
       exitCode: 2,
     };
   }
+  let createdSessionId: string | null = null;
   const result = await runKnowledgeCall<DelegationResult>(runtime, DELEGATION_METHOD, async (connection) => {
     const platformClient = createAgentPlatform(connection);
     const created = await platformClient.operator.invoke('sessions.create', {
@@ -586,6 +602,7 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
       ? created.session.id
       : null;
     if (!sessionId) throw new Error('sessions.create returned no session id.');
+    createdSessionId = sessionId;
     const message = await platformClient.operator.invoke('sessions.messages.create', {
       sessionId,
       body: buildDelegationBody(task, reviewRequested),
@@ -606,8 +623,22 @@ export async function handleDelegateCommand(runtime: CliCommandRuntime): Promise
       },
     });
     return { sessionId, message, task, reviewRequested };
-  });
-  if (!result.ok) return { output: formatFailure(result, runtime.cli.flags.outputFormat === 'json'), exitCode: 1 };
+  }, { scanScope: false });
+  if (!result.ok) {
+    const json = runtime.cli.flags.outputFormat === 'json';
+    // The session exists on the host even though the task message did not land;
+    // name it so the caller can reuse or close it instead of leaving an orphan.
+    if (createdSessionId === null) return { output: formatFailure(result, json), exitCode: 1 };
+    return {
+      output: json
+        ? JSON.stringify({ ...result, sessionId: createdSessionId }, null, 2)
+        : [
+          formatFailure(result, false),
+          `  session ${createdSessionId} was created on the host but the task message was not accepted; no task is running.`,
+        ].join('\n'),
+      exitCode: 1,
+    };
+  }
   const text = [
     'Delegation submitted to GoodVibes TUI/shared-session routes.',
     `  session ${result.data.sessionId}`,

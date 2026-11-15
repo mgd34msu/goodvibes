@@ -19,6 +19,10 @@ function sessionTone(state: SandboxSession['state']): Tone {
   }
 }
 
+function firstLine(text: string): string {
+  return text.trim().split('\n')[0]?.trim() ?? '';
+}
+
 function profileIdOf(row: ConfigModalRow | null): SandboxProfile['id'] | null {
   return row?.id.startsWith('profile:') ? (row.id.slice('profile:'.length) as SandboxProfile['id']) : null;
 }
@@ -32,9 +36,10 @@ function sessionIdOf(row: ConfigModalRow | null): string | null {
  * (buildSandboxReview, listSandboxProfiles, sessions.list) are synchronous, so
  * buildView reads them live each tick. The earlier view's single profile+session
  * selectable list becomes two real tabs. s/x/e call the SandboxSessionRegistry
- * directly (these were never slash commands), start/execute are wrapped so a
- * rejection surfaces via ctx.setStatus instead of an unhandled rejection,
- * matching the earlier view's try/catch + setError behaviour.
+ * directly (these were never slash commands). start's rejection and execute's
+ * throw surface via ctx.setStatus, and execute reports the probe's exit status
+ * and first output line. execute is async: the key handler returns at once
+ * and the probe's result lands in the status line when it finishes (5 s timeout).
  */
 class SandboxModalSurface implements ConfigModalSurface {
   readonly name = 'sandbox-modal';
@@ -121,18 +126,25 @@ class SandboxModalSurface implements ConfigModalSurface {
       case 'stop': {
         const sessionId = sessionIdOf(ctx.row);
         if (!sessionId) return;
-        this.sessions.stop(sessionId);
+        const stopped = this.sessions.stop(sessionId);
+        ctx.setStatus(!stopped ? `Session ${sessionId} no longer exists; nothing to stop.`
+          : stopped.state === 'stopped' ? `Stopped ${sessionId}.`
+          : `Released one holder of ${sessionId}; it keeps running for the others.`);
         break;
       }
       case 'execute': {
         const sessionId = sessionIdOf(ctx.row);
         if (!sessionId) return;
-        try {
-          this.sessions.execute(sessionId, process.execPath, ['-e', "console.log('sandbox modal probe ok')"], { timeoutMs: 5_000 });
-        } catch (error) {
-          ctx.setStatus(summarizeError(error));
-        }
-        break;
+        // The probe runs in the background (up to its 5 s timeout) so the screen stays live; the result is shown when it ends.
+        ctx.setStatus(`Running probe in ${sessionId}...`);
+        void this.sessions.execute(sessionId, process.execPath, ['-e', "console.log('sandbox modal probe ok')"], { timeoutMs: 5_000 })
+          .then((result) => {
+            const detail = firstLine(result.stdout) || firstLine(result.stderr);
+            ctx.setStatus(`Probe ${result.status === 0 ? 'succeeded' : `failed (exit ${result.status ?? 'none'})`}${detail ? `: ${detail}` : ''}`);
+          })
+          .catch((error: unknown) => ctx.setStatus(`Probe failed: ${summarizeError(error)}`))
+          .finally(() => this.requestRender());
+        return;
       }
       default:
         return;

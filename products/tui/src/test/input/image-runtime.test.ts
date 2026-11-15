@@ -91,9 +91,6 @@ function makeCtx(mediaProviders?: ReturnType<typeof makeFakeMediaProviders>, art
   return { ctx, printed };
 }
 
-describe('/imagine command registration', () => {
-});
-
 describe('/imagine: honest degradation', () => {
   test('prints an honest message when mediaProviders/artifactStore are not available', async () => {
     const registry = new CommandRegistry();
@@ -166,7 +163,7 @@ describe('/imagine: honest degradation', () => {
     expect(printed[0]).toContain('provider API rejected the request');
   });
 
-  test('a provider failure stays readable and cannot store an artifact', async () => {
+  test('a provider failure never prints the credential it echoes and cannot store an artifact', async () => {
     const registry = new CommandRegistry();
     registerImageRuntimeCommands(registry);
     const provider = makeFakeProvider({ throwError: new Error('Bearer synthetic-private-provider-token') });
@@ -178,7 +175,8 @@ describe('/imagine: honest degradation', () => {
     expect(provider.calls).toHaveLength(1);
     expect(artifactStore.created).toEqual([]);
     expect(printed).toHaveLength(1);
-    expect(printed[0]).toBe('Image generation failed: Bearer synthetic-private-provider-token');
+    expect(printed[0]).toStartWith('Image generation failed:');
+    expect(printed[0]).not.toContain('synthetic-private-provider-token');
     expect(printed.join('\n')).not.toContain('Generated');
   });
 });
@@ -252,5 +250,39 @@ describe('/imagine: success paths', () => {
 
     const text = printed.join('\n');
     expect(text).toContain('BytePlus produced video/mp4, not an image');
+  });
+});
+
+describe('/imagine: partial storage', () => {
+  test('a storage failure on the second artifact still reports the first and counts what was kept', async () => {
+    const registry = new CommandRegistry();
+    registerImageRuntimeCommands(registry);
+    const provider = makeFakeProvider({
+      generateResult: {
+        providerId: 'fake-gen',
+        artifacts: [
+          { mimeType: 'image/png', dataBase64: 'ZmFrZS1ieXRlcw==', filename: 'one.png', metadata: {} },
+          { mimeType: 'image/png', dataBase64: 'ZmFrZS1ieXRlcw==', filename: 'two.png', metadata: {} },
+        ],
+        metadata: {},
+      },
+    });
+    const artifactStore = makeFakeArtifactStore();
+    const realCreate = artifactStore.create;
+    let calls = 0;
+    artifactStore.create = async (input: Record<string, unknown>) => {
+      calls += 1;
+      if (calls === 2) throw new Error('disk full');
+      return realCreate(input);
+    };
+    const { ctx, printed } = makeCtx(makeFakeMediaProviders(provider), artifactStore);
+
+    await registry.execute('imagine', ['a', 'cat'], ctx);
+
+    const text = printed.join('\n');
+    expect(text).toContain('artifact: artifact-1');
+    expect(text).toContain('artifact 2: could not be stored');
+    expect(text).toContain('1 of 2 artifact(s) were stored');
+    expect(text).not.toContain('Image generation failed');
   });
 });

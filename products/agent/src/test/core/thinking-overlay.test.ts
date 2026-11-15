@@ -9,7 +9,7 @@ const STALL = 3_000; // > THINKING_STALL_FREEZE_MS (2500)
 
 function fakeOrchestrator(over: Partial<ThinkingOverlayDeps['orchestrator']> = {}): ThinkingOverlayDeps['orchestrator'] {
   return {
-    isThinking: true,
+    isTurnActive: true,
     getSpinner: () => '-',
     thinkingFrame: 0,
     streamingInputTokens: 0,
@@ -39,6 +39,19 @@ describe('ThinkingStallClock', () => {
     clock.tick(5, false, 1000 + STALL); // tokens advanced → clock moves forward
     const info = clock.tick(5, false, 1000 + STALL + 10);
     expect(info?.msSinceLastDelta).toBe(10);
+  });
+
+  test('a reconnect shows its attempt until the next token or the end of the turn', () => {
+    const clock = new ThinkingStallClock();
+    clock.tick(3, false, 1000);
+    clock.noteReconnect(2, 4);
+    expect(clock.tick(3, false, 1000 + STALL)?.reconnect).toEqual({ attempt: 2, maxAttempts: 4 });
+    expect(clock.tick(4, false, 1000 + STALL + 10)?.reconnect).toBeUndefined();
+
+    clock.noteReconnect(1, 4);
+    clock.reset();
+    clock.tick(0, false, 9000);
+    expect(clock.tick(0, false, 9000 + STALL)?.reconnect).toBeUndefined();
   });
 
   test('tool active suppresses stall detection', () => {
@@ -73,7 +86,7 @@ describe('buildThrobberState and buildThinkingOverlay', () => {
   test('the throbber state is null at rest and the clock resets', () => {
     const clock = new ThinkingStallClock();
     clock.tick(0, false, 1000); // seed it
-    expect(buildThrobberState(base({ orchestrator: fakeOrchestrator({ isThinking: false }), clock }))).toBeNull();
+    expect(buildThrobberState(base({ orchestrator: fakeOrchestrator({ isTurnActive: false }), clock }))).toBeNull();
     // clock was reset → next tick re-seeds (no stall)
     expect(clock.tick(0, false, 99_999)?.msSinceLastDelta).toBe(0);
   });
@@ -100,12 +113,12 @@ describe('buildThrobberState and buildThinkingOverlay', () => {
   });
 
   test('a compaction shows even with no turn running', () => {
-    const state = buildThrobberState(base({ orchestrator: fakeOrchestrator({ isThinking: false }), compacting: true, compactingSinceMs: Date.now() - 4_000 }));
+    const state = buildThrobberState(base({ orchestrator: fakeOrchestrator({ isTurnActive: false }), compacting: true, compactingSinceMs: Date.now() - 4_000 }));
     expect(state!.activity.kind).toBe('compacting');
   });
 
   test('the transcript gets no rows of its own unless the tool preview is on', () => {
-    expect(buildThinkingOverlay(base({ orchestrator: fakeOrchestrator({ isThinking: false }) }))).toEqual([]);
+    expect(buildThinkingOverlay(base({ orchestrator: fakeOrchestrator({ isTurnActive: false }) }))).toEqual([]);
     expect(buildThinkingOverlay(base({ streamToolPreview: 'web_search {"q": "fares"}' })).length).toBeLessThanOrEqual(1);
   });
 });
@@ -136,14 +149,14 @@ describe('the throbber source', () => {
     tools.emit('TOOL_RECEIVED', { callId: 'c1', tool: 'exec', args: { command: 'bun test' } });
     tools.emit('TOOL_EXECUTING', { callId: 'c1', tool: 'exec', startedAt: Date.now() });
     expect(source.state({ ...deps(), pendingApproval: null })!.activity).toMatchObject({ kind: 'tool', argument: 'bun test' });
-    expect(source.state({ ...deps({ orchestrator: fakeOrchestrator({ isThinking: false }) }), pendingApproval: null })).toBeNull();
+    expect(source.state({ ...deps({ orchestrator: fakeOrchestrator({ isTurnActive: false }) }), pendingApproval: null })).toBeNull();
     expect(source.state({ ...deps(), pendingApproval: null })!.activity.kind).toBe('model');
   });
 
   test('a compaction shows with its own elapsed clock, and goes when it ends', () => {
     let compacting = true;
     const source = createThrobberSource(fakeTools() as never, () => compacting);
-    const idle = { ...deps({ orchestrator: fakeOrchestrator({ isThinking: false }) }), pendingApproval: null };
+    const idle = { ...deps({ orchestrator: fakeOrchestrator({ isTurnActive: false }) }), pendingApproval: null };
     const state = source.state(idle);
     expect(state!.activity.kind).toBe('compacting');
     if (state!.activity.kind === 'compacting') expect(state!.activity.elapsedMs).toBeGreaterThanOrEqual(0);

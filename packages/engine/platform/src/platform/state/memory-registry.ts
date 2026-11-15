@@ -3,6 +3,8 @@ import { assertMemoryPreparedAddOptionsBinding, captureMemoryPreparedAddOptions,
 import type { MemoryClass, MemoryPreparedAdd, MemoryPreparedAddCommitOptions, MemoryAddPublication, MemoryAddOptions, MemoryBundle, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult, MemoryStore } from './memory-store.js';
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import type { MemoryImportResult } from './memory-store.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { runHonestMemorySearch, type HonestMemorySearchOptions, type HonestMemorySearchResult } from './memory-recall-contract.js';
 
 /**
@@ -50,13 +52,23 @@ export class MemoryRegistry {
   }
 
   private notify(operation: MemoryOperationOptions): void {
-    for (const fn of this.listeners) { assertMemoryOperationCurrent(operation); fn(); }
+    for (const fn of this.listeners) {
+      assertMemoryOperationCurrent(operation);
+      // The write is already durable: a panel that throws must not make the
+      // write look failed (a retry would store the memory twice) or starve the
+      // listeners after it.
+      try { fn(); } catch (error) { logger.warn('MemoryRegistry: a listener threw', { error: summarizeError(error) }); }
+    }
     assertMemoryOperationCurrent(operation);
   }
 
   async add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
     const operation = captureMemoryOperation(options);
-    const record = await awaitMemoryOperation(() => this.store.add(opts, operation), operation);
+    // A new record may not claim the reserved consolidation reviewer either (see review()).
+    const claimsAutomation = options?.automatedReview !== true && opts.review?.reviewedBy?.trim().toLowerCase() === 'consolidation';
+    if (claimsAutomation) logger.warn('MemoryRegistry: add claimed the reserved consolidation reviewer; recorded as operator');
+    const safeOpts = claimsAutomation ? { ...opts, review: { ...opts.review, reviewedBy: 'operator' } } : opts;
+    const record = await awaitMemoryOperation(() => this.store.add(safeOpts, operation), operation);
     this.notify(operation);
     return record;
   }
@@ -139,8 +151,12 @@ export class MemoryRegistry {
   }
 
   review(id: string, patch: MemoryReviewPatch, options?: MemoryOperationOptions): MemoryRecord | null {
+    // Consolidation treats `reviewedBy: 'consolidation'` as automation that a person's review overrides, so
+    // no other caller may claim it; the review still applies, under the neutral operator name.
+    const claimsAutomation = options?.automatedReview !== true && patch.reviewedBy?.trim().toLowerCase() === 'consolidation';
+    if (claimsAutomation) logger.warn('MemoryRegistry: review claimed the reserved consolidation reviewer; recorded as operator', { id });
     const operation = captureMemoryOperation(options);
-    const record = this.store.review(id, patch, operation);
+    const record = this.store.review(id, claimsAutomation ? { ...patch, reviewedBy: 'operator' } : patch, operation);
     if (record) this.notify(operation);
     return record;
   }
@@ -154,6 +170,19 @@ export class MemoryRegistry {
 
   getAll(): MemoryRecord[] {
     return this.store.retrieve({});
+  }
+
+  /**
+   * Reload the store when another process saved the memory file since this
+   * process loaded it (see MemoryStore.reloadIfChanged), then tell listeners
+   * so panels show that process's records.
+   */
+  async reloadIfChanged(): Promise<void> {
+    const store = this.store, before = store.captureOperationScope();
+    await store.reloadIfChanged();
+    try { before(); } catch {
+      for (const fn of this.listeners) fn();
+    }
   }
 }
 
@@ -208,11 +237,13 @@ export function prepareMemoryRegistryAdd(registry: object, input: MemoryAddOptio
           }
         },
       });
-      assertCurrent();
+      // The row is published and saved: only the callers' lifecycles can
+      // still retire the result, not an unrelated write that landed since.
+      assertCommitCurrent();
       // Reuse the original observable path after durable save, with the same restrictions.
-      const operation = captureMemoryOperation({ signal: commitLifecycle.signal, assertCurrent });
+      const operation = captureMemoryOperation({ signal: commitLifecycle.signal, assertCurrent: assertCommitCurrent });
       owner.notify(operation);
-      assertCurrent();
+      assertCommitCurrent();
       return result;
     },
   });

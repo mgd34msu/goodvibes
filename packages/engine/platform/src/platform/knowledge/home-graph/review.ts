@@ -57,7 +57,15 @@ export async function reviewHomeGraphFact(
         review: reviewMetadata(input, reviewedAt),
         ...(suppression ? { suppression } : {}),
       }), ...(typeof issue.metadata.namespace === 'string' ? { namespace: issue.metadata.namespace } : {}) },
-    }, issueMutation);
+    }, issueMutation).catch((error: unknown) => {
+      if (!appliedFacts) throw error;
+      // The node write and the issue write are separate stores calls. Say so
+      // instead of reporting a plain failure; repeating the review is safe
+      // because it writes the same values.
+      throw new GoodVibesError(`Home Graph fact review was applied to node ${appliedFacts.node?.id ?? issue.nodeId}, but the issue ${issue.id} was not updated (${error instanceof Error ? error.message : String(error)}). Repeat the review to finish.`, {
+        category: 'service', source: 'runtime', operation: 'homegraph.review', recoverable: true, cause: error,
+      });
+    });
     const node = appliedFacts?.node ?? subjectNode ?? undefined;
     return {
       ok: true,
@@ -79,7 +87,9 @@ export async function reviewHomeGraphFact(
     }
     const facts = normalizeReviewFacts(input);
     const mutation = createKnowledgeNodeOperatorMutation(node, {
-      action: input.action === 'forget' || input.action === 'reject' ? 'reject' : input.action === 'accept' ? 'accept' : 'revise',
+      // The store derives node status from the operator action, so bringing a retired node back has to be an accept.
+      action: input.action === 'forget' || input.action === 'reject' ? 'reject'
+        : input.action === 'accept' || (input.action === 'reopen' && node.status === 'stale') ? 'accept' : 'revise',
       reviewer: input.reviewer ?? 'homeassistant', facts,
       ...(['edit', 'reopen', 'resolve'].includes(input.action) && Object.keys(facts).length > 0
         ? { fieldCorrections: Object.entries(facts).map(([key, value]) => ({ path: ['metadata', key], value })) } : {}),
@@ -91,10 +101,12 @@ export async function reviewHomeGraphFact(
       title: node.title,
       summary: node.summary,
       aliases: node.aliases,
-      status: input.action === 'forget' ? 'stale' : node.status,
+      status: nodeStatusForAction(input.action, node.status),
       confidence: input.action === 'accept' ? 100 : node.confidence,
       sourceId: node.sourceId,
+      // The saved Home Assistant identity (object id and kind) travels with the write; without it the store rejects the node as malformed.
       metadata: buildHomeGraphMetadata(spaceId, installationId, {
+        homeAssistant: readRecord(node.metadata.homeAssistant),
         ...facts,
       }),
     }, mutation);
@@ -120,7 +132,7 @@ export async function reviewHomeGraphFact(
       description: source.description,
       tags: source.tags,
       folderPath: source.folderPath,
-      status: input.action === 'forget' ? 'stale' : source.status,
+      status: sourceStatusForAction(input.action, source.status),
       artifactId: source.artifactId,
       contentHash: source.contentHash,
       lastCrawledAt: source.lastCrawledAt,
@@ -215,15 +227,32 @@ function normalizeReviewFacts(input: HomeGraphReviewInput): Record<string, unkno
     'purchaseDate',
     'warrantyExpiration',
   ]) {
-    if (key in source) allowed[key] = source[key];
+    if (!(key in source)) continue;
+    const value = source[key];
+    const kind = FACT_VALUE_KINDS[key];
+    if (kind && typeof value !== kind) {
+      throw new GoodVibesError(`Home Graph review value "${key}" must be a ${kind}, got ${value === null ? 'null' : typeof value}.`, {
+        category: 'bad_request', source: 'runtime', operation: 'homegraph.review', recoverable: true,
+      });
+    }
+    allowed[key] = value;
   }
   return allowed;
 }
+
+// Later quality and passport readers treat these as typed declarations and
+// hold the whole space when one is malformed, so a bad value stops here.
+const FACT_VALUE_KINDS: Record<string, 'boolean' | 'string' | undefined> = {
+  batteryPowered: 'boolean',
+  manualRequired: 'boolean',
+  batteryType: 'string',
+};
 
 function reviewMetadata(input: HomeGraphReviewInput, reviewedAt: number): Record<string, unknown> {
   return {
     action: input.action,
     reviewer: input.reviewer ?? 'homeassistant',
+    ...(input.claimedReviewer ? { claimedReviewer: input.claimedReviewer } : {}),
     reviewedAt,
     ...(input.value ? { value: input.value } : {}),
   };
@@ -240,6 +269,7 @@ function buildSuppression(
     action: input.action,
     reviewedAt,
     reviewer: input.reviewer ?? 'homeassistant',
+    ...(input.claimedReviewer ? { claimedReviewer: input.claimedReviewer } : {}),
     issueId: issue.id,
     code: issue.code,
     subjectId: issue.metadata.subjectId ?? issue.nodeId ?? issue.sourceId ?? issue.id,
@@ -247,8 +277,19 @@ function buildSuppression(
 }
 
 function issueStatusForAction(action: HomeGraphReviewInput['action'], current: KnowledgeIssueRecord['status']): KnowledgeIssueRecord['status'] {
-  if (action === 'edit') return 'open';
+  if (action === 'edit' || action === 'reopen') return 'open';
   return action === 'reject' || action === 'resolve' || action === 'accept' ? 'resolved' : current;
+}
+
+/** `forget` retires a record from every read; reopening or accepting a retired record brings it back. */
+function nodeStatusForAction(action: HomeGraphReviewInput['action'], current: KnowledgeNodeRecord['status']): KnowledgeNodeRecord['status'] {
+  if (action === 'forget') return 'stale';
+  return (action === 'reopen' || action === 'accept') && current === 'stale' ? 'active' : current;
+}
+
+function sourceStatusForAction(action: HomeGraphReviewInput['action'], current: KnowledgeSourceRecord['status']): KnowledgeSourceRecord['status'] {
+  if (action === 'forget') return 'stale';
+  return (action === 'reopen' || action === 'accept') && current === 'stale' ? 'indexed' : current;
 }
 
 function readCategory(input: HomeGraphReviewInput): string | undefined {

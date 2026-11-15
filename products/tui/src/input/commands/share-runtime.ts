@@ -1,6 +1,7 @@
 import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { getSharedNotificationFeed } from '../../views/notifications-feed.ts';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { writeFile } from 'node:fs/promises';
 import type { CommandRegistry } from '../command-registry.ts';
 import {
@@ -43,7 +44,7 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
           + '  json  — structured JSON (machine-readable)\n'
           + '  md    — Markdown\n\n'
           + 'Options:\n'
-          + '  --redact  Redact API keys and personal paths from output\n'
+          + '  --redact  Redact API keys, tokens, and this account\'s home path and login name (other users\' paths are not matched)\n'
           + '  --upload  Upload export as a secret GitHub Gist and print the share link\n'
           + '  --copy    Copy the export file path to the clipboard\n'
           + '  --open    Open HTML export in the default browser\n\n'
@@ -60,6 +61,20 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       const pathArgs = remainingArgs.filter(
         (a) => a !== '--redact' && a !== '--upload' && a !== '--copy' && a !== '--open',
       );
+      // A mistyped flag must never become the output path: with --upload it would
+      // publish an unredacted export while looking like a successful share.
+      const unknownFlags = pathArgs.filter((a) => a.startsWith('--'));
+      if (unknownFlags.length > 0) {
+        ctx.print(
+          `Unknown option${unknownFlags.length > 1 ? 's' : ''}: ${unknownFlags.join(', ')}. Nothing was exported or uploaded. `
+          + 'Valid options: --redact, --upload, --copy, --open. For a path that starts with "--", write it as ./<path>.',
+        );
+        return;
+      }
+      if (pathArgs.length > 1) {
+        ctx.print(`Expected at most one output path but got ${pathArgs.length}: ${pathArgs.join(' ')}. Nothing was exported or uploaded.`);
+        return;
+      }
       const reading = upload ? ctx.shareReading?.begin(JSON.stringify(args)) : undefined;
       if (upload && !reading) {
         ctx.print('Gist upload is unavailable or this submission is already pending.');
@@ -263,8 +278,9 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       }
 
       // Open the exported HTML in the default browser if requested.
+      let openResult = '';
       if (doOpen && format === 'html') {
-        openBrowser(`file://${outputPath}`);
+        openResult = openBrowser(pathToFileURL(outputPath).href, { allowFile: true });
       }
 
       // Emit the summary line, with all post-export hints inline.
@@ -273,7 +289,7 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       if (shareLink) hints.push(`Share link: ${shareLink}`);
       if (uploadReceipt) hints.push(`Upload receipt: ${uploadReceipt}`);
       if (doCopy) hints.push('(path copied to clipboard)');
-      if (doOpen && format === 'html') hints.push('(opened in browser)');
+      if (doOpen && format === 'html') hints.push(openResult === 'browser open requested' ? '(opened in browser)' : `(not opened: ${openResult})`);
       if (doOpen && format !== 'html') hints.push('(--open ignored: only applies to html)');
 
       const hint = hints.length > 0 ? '  ' + hints.join('  ') : '';

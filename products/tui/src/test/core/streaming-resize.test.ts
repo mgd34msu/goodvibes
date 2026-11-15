@@ -58,13 +58,8 @@ function manager(getWidth: () => number): ConversationManager {
   return cm;
 }
 
-/** Read the private streamingStartLine for assertions. */
-function startLine(cm: ConversationManager): number {
-  return (cm as unknown as { streamingStartLine: number }).streamingStartLine;
-}
-
 describe('ConversationManager: terminal resize mid-stream', () => {
-  test('re-anchors streamingStartLine when width changes between deltas', () => {
+  test('re-anchors the streaming block when width changes between deltas', () => {
     let width = WIDE;
     const cm = manager(() => width);
 
@@ -79,14 +74,14 @@ describe('ConversationManager: terminal resize mid-stream', () => {
     cm.updateStreamingBlock(STREAM_A);
 
     const buffer = cm.getDisplayBlocks();
-    const anchor = startLine(cm);
     const expectedTail = streamed(STREAM_A, NARROW);
+    const anchor = buffer.length - expectedTail.length;
 
-    // The streamed content occupies exactly the tail of the buffer, starting at
-    // the re-anchored streamingStartLine. If the anchor were stale, this slice
-    // would include leaked (re-wrapped) user-message lines and fail to match.
+    // The streamed content occupies exactly the tail of the buffer, after the
+    // re-wrapped user message. A stale anchor would leak or drop lines of the
+    // preceding message, so the tail would not match and the head would differ
+    // from a transcript that never streamed.
     expect(anchor).toBeGreaterThan(0);
-    expect(anchor).toBe(buffer.length - expectedTail.length);
     expect(buffer.slice(anchor)).toEqual(expectedTail);
   });
 
@@ -104,21 +99,17 @@ describe('ConversationManager: terminal resize mid-stream', () => {
     width = NARROW;
     cm.getDisplayBlocks();
 
-    const anchorAfterRebuild = startLine(cm);
-    expect(anchorAfterRebuild).toBeGreaterThan(0);
-    expect(anchorAfterRebuild).toBe(
-      cm.getDisplayBlocks().length -
-        streamed(STREAM_A, NARROW).length,
-    );
+    const rebuilt = cm.getDisplayBlocks();
+    const rebuiltTail = streamed(STREAM_A, NARROW);
+    expect(rebuilt.length - rebuiltTail.length).toBeGreaterThan(0);
+    expect(rebuilt.slice(rebuilt.length - rebuiltTail.length)).toEqual(rebuiltTail);
 
     // A subsequent delta (more content) must land at the re-anchored offset.
     cm.updateStreamingBlock(STREAM_B);
     const buffer = cm.getDisplayBlocks();
-    const anchor = startLine(cm);
     const expectedTail = streamed(STREAM_B, NARROW);
 
-    expect(anchor).toBe(buffer.length - expectedTail.length);
-    expect(buffer.slice(anchor)).toEqual(expectedTail);
+    expect(buffer.slice(buffer.length - expectedTail.length)).toEqual(expectedTail);
   });
 
   test('resized-mid-stream buffer matches a stream rendered natively at the narrow width', () => {
@@ -139,7 +130,6 @@ describe('ConversationManager: terminal resize mid-stream', () => {
     native.startStreamingBlock();
     native.updateStreamingBlock(STREAM_A);
 
-    expect(startLine(resized)).toBe(startLine(native));
     expect(resized.getDisplayBlocks()).toEqual(native.getDisplayBlocks());
   });
 });

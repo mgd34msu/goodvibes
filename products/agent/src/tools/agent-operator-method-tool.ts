@@ -7,7 +7,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
-import { createOperatorInputProjector, findConnectedOperatorMethod, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsReadOnly, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
+import { assertSafeOperatorPathValue, createOperatorInputProjector, findConnectedOperatorMethod, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsReadOnly, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -51,6 +51,14 @@ type WatcherMethodId =
   | 'watchers.delete';
 
 const READ_ONLY_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+// The daemon requires a person's own confirmation (a confirm flag and the explicit-request header) for
+// these, and a model-supplied string must not stand in for it. Refused here with the way the owner does it.
+const OWNER_ONLY_PAYMENT_METHOD_IDS = new Set([
+  'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
+  'payments.purchase.reconcile', 'payments.checkout.begin',
+]);
+// The profile tool owns these reads and its disclosure rules; the generic path has none of them.
+const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get']);
 // These native routes independently admit this paired invocation on the server.
 const AUTONOMOUS_NATIVE_STATE_METHOD_IDS = new Set([
   'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
@@ -94,7 +102,9 @@ function cloneInput(input: unknown): JsonRecord {
 
 function encodePathValue(value: unknown, name: string): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return encodeURIComponent(String(value));
+    const text = String(value);
+    assertSafeOperatorPathValue(text, name);
+    return encodeURIComponent(text);
   }
   throw new Error(`operator method path parameter '${name}' must be a string, number, or boolean.`);
 }
@@ -597,6 +607,18 @@ export function createAgentOperatorMethodTool(
           error: `Unknown GoodVibes operator method '${methodId}'. Inspect host action:"methods" first.`,
         };
       }
+      if (OWNER_ONLY_PAYMENT_METHOD_IDS.has(method.id)) {
+        return {
+          success: false,
+          error: `operator method '${method.id}' moves or settles money and needs the owner's own confirmation, which this tool cannot give. Nothing was sent. Ask the owner to do it themselves with /payments or in the WebUI; payments.purchase.status and payments.purchases.list can be read here to tell them where it stands.`,
+        };
+      }
+      if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {
+        return {
+          success: false,
+          error: `operator method '${method.id}' is not callable through agent_operator_method: it returns the owner's personal profile data, which only the profile tool may read (it withholds the People section and requires the owner's own words to name a person). Call the profile tool with action:"read", "get" or "person" instead.`,
+        };
+      }
       // Capability-advertisement honesty: the operator contract marks a
       // cataloged-but-not-route-backed method invokable:false (email.inbox.list,
       // email.send, etc., see @goodvibes-jev/engine/platform's method-catalog-route-reconcile).
@@ -620,6 +642,10 @@ export function createAgentOperatorMethodTool(
         return { success: false, error: summarizeError(error) };
       }
 
+      if (methodSnapshot.id === 'occasions.remove' && route.payload.confirmed !== true) {
+        // The same ask-once rule the occasions tool enforces: removal also drops the machine's records for it.
+        return { success: false, error: `Ask the owner once to confirm removing ${String(route.payload.occasionId ?? 'this occasion')}, then call occasions.remove again with input.confirmed:true. One question, not a negotiation.` };
+      }
       const preview = summarizePreview(route);
       if (readBoolean(args.dryRun)) {
         try {
@@ -636,9 +662,10 @@ export function createAgentOperatorMethodTool(
         return { success: false, error: 'Connected operator effects require current recorded effect admission.' };
       }
 
-      const requestPath = READ_ONLY_HTTP_METHODS.has(route.httpMethod)
-        ? appendQuery(route.path, route.payload)
-        : route.path;
+      const readOnlyHttp = READ_ONLY_HTTP_METHODS.has(route.httpMethod);
+      // Once the request is on the wire a throw no longer means "not done": a write may have landed.
+      let stage: 'before-send' | 'sending' | 'answered' = 'before-send';
+      let httpStatus: number | undefined;
       try {
         const assertInvocation = () => {
           options?.signal?.throwIfAborted();
@@ -661,6 +688,9 @@ export function createAgentOperatorMethodTool(
             ...(methodSnapshot.id === 'occasions.remove' ? { confirmed: true } : {}) }
           : AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
             ? { ...retainedPayload, admission: 'autonomous' } : retainedPayload;
+        // A read-only HTTP method carries its input in the query, so the query is built from the
+        // same payload that is screened below, not from the pre-projection one.
+        const requestPath = readOnlyHttp ? appendQuery(route.path, wirePayload) : route.path;
         if (requiresEffect) {
           const requestPolicy = operatorExecutionRequestPolicy(rawArgs, options, shellPaths, configManager, 'method');
           if (!requestPolicy) throw new Error('Connected operator source policy is unavailable.');
@@ -668,6 +698,7 @@ export function createAgentOperatorMethodTool(
             endpoint: `${connection.baseUrl}${requestPath}`, payload: wirePayload }, { signal: options?.signal, assertCurrent });
         }
         assertCurrent();
+        stage = 'sending';
         const response = await fetch(`${connection.baseUrl}${requestPath}`, {
           signal: options?.signal,
           redirect: 'error',
@@ -678,6 +709,7 @@ export function createAgentOperatorMethodTool(
           },
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(wirePayload) }),
         });
+        stage = 'answered'; httpStatus = response.status;
         assertCurrent();
         const body = await readResponseBody(response);
         assertCurrent();
@@ -698,14 +730,24 @@ export function createAgentOperatorMethodTool(
         publishOperatorMethodReceipt(route.method.id, rawArgs, options, body);
         assertCurrent();
         return { success: true, output: formatted };
-      } catch {
-        return {
-          success: false,
-          error: 'connected_host_unavailable: current recorded effect admission and an unchanged connection are required.',
-        };
+      } catch (error) {
+        return { success: false, error: operatorMethodFailure(stage, readOnlyHttp, httpStatus, route.method.id, error) };
       }
     },
   };
+}
+
+function operatorMethodFailure(stage: 'before-send' | 'sending' | 'answered', readOnlyHttp: boolean,
+  httpStatus: number | undefined, methodId: string, error: unknown): string {
+  const cause = summarizeError(error);
+  if (stage === 'before-send') {
+    return `connected_host_unavailable: the request was not sent (${cause}). Current recorded effect admission and an unchanged connection are required.`;
+  }
+  if (readOnlyHttp) {
+    return `connected_host_unavailable: ${stage === 'answered' ? `the host answered HTTP ${httpStatus} but the answer could not be used` : 'the host could not be reached'} (${cause}). This was a read; it is safe to retry.`;
+  }
+  // No receipt is published here: the effect is unconfirmed, so the next step is a read, not a retry.
+  return `outcome_unknown: ${methodId} was sent to the host${stage === 'answered' ? ` and the host answered HTTP ${httpStatus}` : ' and no answer was received'}, then it failed (${cause}). The daemon may have applied it. Read the current state with a list or status method before retrying, and do not repeat the call blindly.`;
 }
 
 export function registerAgentOperatorMethodTool(

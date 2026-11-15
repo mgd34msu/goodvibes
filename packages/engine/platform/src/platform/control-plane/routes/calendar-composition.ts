@@ -38,6 +38,7 @@ import {
   type UntrustedContentLedger,
 } from '../../security/untrusted-content.js';
 import type { CalendarGatewayService } from './calendar.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
 
 /** The slice of the verb-group deps this composition needs. */
 export interface CalendarCompositionDeps {
@@ -96,20 +97,22 @@ export function createDaemonCalendarGatewayService(
   //, where a Google credential can be present on the machine for any number of
   // other reasons, and answering an operator's own calendar server with
   // somebody's Gmail calendar would be the wrong calendar, silently.
-  if (configString(deps, CALDAV_URL_KEY).length > 0 && configString(deps, CALDAV_USER_KEY).length > 0) {
-    return createCalDavCalendarGatewayService({
-      config: { get: (key) => deps.configManager.get(key as never) },
-      secrets: createCalDavSecretPort(deps.secretsManager),
-      http: deps.caldavHttp ?? createFetchCalDavHttpPort(),
-      recordUntrustedIngest,
-    });
-  }
+  const caldavConfigured = (): boolean =>
+    configString(deps, CALDAV_URL_KEY).length > 0 && configString(deps, CALDAV_USER_KEY).length > 0;
 
-  if (deps.homeDirectory === undefined) return null;
-  return createGoogleCalendarGatewayService({
+  let caldav: CalendarGatewayService | undefined;
+  let google: CalendarGatewayService | undefined;
+  const homeDirectory = deps.homeDirectory;
+  const createCalDav = (): CalendarGatewayService => createCalDavCalendarGatewayService({
+    config: { get: (key) => deps.configManager.get(key as never) },
+    secrets: createCalDavSecretPort(deps.secretsManager),
+    http: deps.caldavHttp ?? createFetchCalDavHttpPort(),
+    recordUntrustedIngest,
+  });
+  const createGoogle = (home: string): CalendarGatewayService => createGoogleCalendarGatewayService({
     sources: {
       files: nodeGoogleFilePort,
-      homeDirectory: deps.homeDirectory,
+      homeDirectory: home,
       // `get` throws on a config section that does not exist yet, the mail
       // and calendar sections are app-layer and absent on a machine where
       // nobody has run setup. The connector reads every config value through
@@ -122,4 +125,32 @@ export function createDaemonCalendarGatewayService(
     fetch: deps.calendarFetch ?? { fetch: (url, init) => fetch(url, init) },
     recordUntrustedIngest,
   });
+
+  // A composition with no home directory and no CalDAV server has no calendar
+  // to answer with; leaving the verbs unregistered says so honestly.
+  if (homeDirectory === undefined && !caldavConfigured()) return null;
+
+  // The backend is chosen on each call, not once here: a CalDAV server entered
+  // in settings after the daemon started is used by the next verb call, and
+  // removing it falls back to Google, with no restart in between.
+  const select = (): CalendarGatewayService => {
+    if (caldavConfigured()) return (caldav ??= createCalDav());
+    if (homeDirectory === undefined) {
+      throw new GatewayVerbError(
+        'No calendar is connected: set surfaces.calendar.caldavUrl and surfaces.calendar.caldavUser to use a CalDAV server.',
+        'CALENDAR_NOT_CONFIGURED',
+        400,
+      );
+    }
+    return (google ??= createGoogle(homeDirectory));
+  };
+  return {
+    // async, so a refusal from `select` reaches the caller as a rejection like
+    // every other failure of these verbs rather than as a synchronous throw.
+    listEvents: async (input) => select().listEvents(input),
+    getEvent: async (eventId, calendarId) => select().getEvent(eventId, calendarId),
+    createEvent: async (input) => select().createEvent(input),
+    exportIcs: async (input) => select().exportIcs(input),
+    importIcs: async (icsContent, calendarId) => select().importIcs(icsContent, calendarId),
+  };
 }

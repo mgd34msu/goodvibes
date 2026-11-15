@@ -1,13 +1,29 @@
-import { acquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
+import { acquireCrossProcessLock, tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { withFileWriteLockSync } from '../../workspace/checkpoint/sync-write-lock.js';
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { GitService } from '../../git/service.js';
+import { isMarkedProductWorktree } from '../../git/product-worktree-marker.js';
 import { logger } from '../../utils/logger.js';
+import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveScopedDirectory } from '../surface-root.js';
 import type { WorktreeSetupResult } from './setup.js';
+import {
+  assessWorktree,
+  describeLocalState,
+  DEFAULT_WORKTREE_RETENTION_MS,
+  DEFAULT_KEPT_WORKTREE_NOTICE_BYTES,
+  evaluateWorktree,
+  formatAge,
+  formatBytes,
+  isProductWorktreePath,
+  runGit,
+  worktreeSizeBytes,
+  type WorktreeKeepReason,
+  type WorktreeOwnerInfo,
+} from './retention.js';
 
 /** Current schema version of the persisted worktree store. */
 const STORE_VERSION = 1;
@@ -138,12 +154,109 @@ export interface WorktreeRegistryPaths {
   readonly surfaceRoot?: string | undefined;
 }
 
+/**
+ * The one register file for a working directory. Every surface, the daemon,
+ * the gateway and orchestration read and write this same file; a register
+ * per surface let `/worktree keep` and `/worktree inspect` disagree about the
+ * same worktree. A surface-scoped file left by an earlier version is merged
+ * into it once (see {@link mergeSurfaceScopedStoreOnce}).
+ */
 function getStorePath(workingDirectory: string, surfaceRoot?: string): string {
-  return resolveScopedDirectory(workingDirectory, surfaceRoot, 'worktrees.json');
+  if (surfaceRoot) mergeSurfaceScopedStoreOnce(workingDirectory, surfaceRoot);
+  return resolveScopedDirectory(workingDirectory, undefined, 'worktrees.json');
+}
+
+const mergedSurfaceStores = new Set<string>();
+
+/**
+ * Fold a surface-scoped register written by an earlier version into the
+ * shared one, keeping the newer copy of a record both hold, so no `kept`
+ * tombstone or attachment is lost. The scoped file is then renamed aside
+ * (never deleted), and a failure leaves it in place to be retried.
+ */
+function mergeSurfaceScopedStoreOnce(workingDirectory: string, surfaceRoot: string): void {
+  const scopedPath = resolveScopedDirectory(workingDirectory, surfaceRoot, 'worktrees.json');
+  if (mergedSurfaceStores.has(scopedPath)) return;
+  const sharedPath = resolveScopedDirectory(workingDirectory, undefined, 'worktrees.json');
+  try {
+    statSync(scopedPath);
+  } catch {
+    mergedSurfaceStores.add(scopedPath);
+    return;
+  }
+  try {
+    withRegistryWriteLock(sharedPath, () => {
+      const scoped = readStore(scopedPath, true, true);
+      const shared = readStore(sharedPath, true, true);
+      for (const [path, record] of Object.entries(scoped.records)) {
+        const existing = shared.records[path];
+        if (!existing || record.updatedAt > existing.updatedAt) shared.records[path] = record;
+      }
+      writeStore(shared, sharedPath);
+      try {
+        renameSync(scopedPath, `${scopedPath}.merged-${Date.now()}`);
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ENOENT') throw error;
+      }
+    });
+    mergedSurfaceStores.add(scopedPath);
+    logger.info('worktree registry: merged a surface-scoped register into the shared one', { scopedPath, sharedPath });
+  } catch (error) {
+    logger.warn('worktree registry: could not merge the surface-scoped register yet; will retry', {
+      scopedPath,
+      error: summarizeError(error),
+    });
+  }
+}
+
+/** How long a register write waits for another writer before refusing. */
+const WRITER_LOCK_WAIT_MS = 2_000;
+const WRITER_LOCK_RETRY_MS = 25;
+const lockWaitCell = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Run a register write under its writer lock, waiting briefly when another
+ * writer (or the polled `list()`) holds it instead of failing at once. The
+ * register's writes are short, so a holder normally releases within
+ * milliseconds; one that does not is refused with a message that says so.
+ */
+function withRegistryWriteLock<T>(storePath: string, write: () => T): T {
+  const deadline = Date.now() + WRITER_LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      return withFileWriteLockSync(storePath, write);
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'FILE_WRITER_BUSY') throw error;
+      if (Date.now() >= deadline) {
+        throw Object.assign(
+          new Error(`The worktree register (${storePath}) is being updated by another process: its writer lock is already owned and stayed held for ${WRITER_LOCK_WAIT_MS}ms. Nothing was changed; retry the command.`),
+          { code: 'FILE_WRITER_BUSY' },
+        );
+      }
+      // A lock left by a process that died mid-write is not held by anyone:
+      // the strict lock replaces it only when its owner is provably gone, and
+      // refuses a live one. Releasing it at once leaves the retry free to take it.
+      let cleared = false;
+      try {
+        const release = tryAcquireCrossProcessLock(`${storePath}.lock`);
+        if (release) { release(); cleared = true; }
+      } catch {
+        // Treated as held: wait for the holder below.
+      }
+      if (cleared) continue;
+      Atomics.wait(lockWaitCell, 0, 0, WRITER_LOCK_RETRY_MS);
+    }
+  }
 }
 
 function defaultStore(): WorktreeStore {
   return { version: 1, records: {} };
+}
+
+/** The resolved path with symlinks followed when it exists, so two spellings of one directory compare equal. */
+function comparablePath(path: string): string {
+  const absolute = resolve(path);
+  try { return realpathSync(absolute); } catch { return absolute; }
 }
 
 function normalizePath(path: string, workingDirectory: string): string {
@@ -346,12 +459,17 @@ function removeFile(path: string): boolean {
  * asked for stay recoverable) before an empty register is returned, the old
  * behaviour discarded them silently.
  */
-function readStore(storePath: string, preserveUnreadable = true): WorktreeStore {
+function readStore(storePath: string, preserveUnreadable = true, forWrite = false): WorktreeStore {
   let text: string;
   try {
     text = readFileSync(storePath, 'utf-8');
   } catch (error) {
     const code = (error as { code?: string }).code;
+    // A writer that fell back to an empty register would publish it over the
+    // real file and drop every other record, `kept` tombstones included.
+    if (code !== 'ENOENT' && forWrite) {
+      throw new Error(`The worktree register (${storePath}) could not be read (${summarizeError(error)}), so it was not changed. Fix the file's permissions or the disk fault, then retry.`, { cause: error });
+    }
     if (code !== 'ENOENT') {
       logger.warn('worktree registry: could not read register', { storePath, error: summarizeError(error) });
     }
@@ -443,14 +561,7 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
 /** Atomically publish the registry while its writer lock is held. */
 function writeStore(store: WorktreeStore, storePath: string): void {
   mkdirSync(dirname(storePath), { recursive: true });
-  const tempPath = `${storePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tempPath, `${JSON.stringify(store, null, 2)}\n`, 'utf-8');
-    renameSync(tempPath, storePath);
-  } catch (error) {
-    removeFile(tempPath);
-    throw error;
-  }
+  writeJsonFileAtomic(storePath, store, { durable: false });
 }
 
 function classifyWorktreePath(path: string, workingDirectory: string): Pick<ManagedWorktreeMeta, 'kind' | 'ownerId'> {
@@ -489,7 +600,7 @@ export class WorktreeRegistry {
     const listed = await this.git.worktreeList();
     const release = await acquireCrossProcessLock(`${getStorePath(this.workingDirectory, this.surfaceRoot)}.lock`, { strictOwnership: true });
     try {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
+      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       const present = new Set(listed.map((entry) => normalizePath(entry.path, this.workingDirectory)));
       const records: WorktreeStatusRecord[] = listed.map((entry) => {
         const path = normalizePath(entry.path, this.workingDirectory);
@@ -571,11 +682,185 @@ export class WorktreeRegistry {
     } finally { release(); }
   }
 
+  /**
+   * Apply the retention policy (see retention.ts) to the product's own
+   * worktrees under `.goodvibes/.worktrees`: clean worktrees with nothing
+   * unique go at once, clean ones with unmerged commits lose their directory
+   * after the retention period with the branch kept, and anything with
+   * uncommitted changes, a running owner or unreadable git state is left
+   * alone, as is one with ignored files (removal would delete them). A
+   * worktree is only considered when it carries the marker written when this
+   * product created it, and is not marked kept, paused or attached to a
+   * session or task; a directory that merely sits under `.goodvibes` is never
+   * touched. Each removal is re-decided under the register lock, which is
+   * released before the removal itself so a slow removal does not stall other
+   * register writers.
+   *
+   * `only` limits the pass to those paths (the contract end uses it).
+   */
+  public async sweepRetention(options: WorktreeRetentionOptions = {}): Promise<WorktreeSweepReport> {
+    const now = (options.now ?? Date.now)();
+    const retentionMs = options.retentionMs ?? DEFAULT_WORKTREE_RETENTION_MS;
+    const owner = options.owner ?? await this.defaultOwnerResolver();
+    const onlyPaths = options.only ? new Set([...options.only].map((path) => normalizePath(path, this.workingDirectory))) : undefined;
+    const report: { removed: SweptWorktree[]; kept: KeptWorktree[]; failed: Array<{ path: string; error: string }> } = { removed: [], kept: [], failed: [] };
+    let rows: WorktreeStatusRecord[];
+    try {
+      rows = await this.list();
+    } catch (error) {
+      logger.warn('worktree retention: the register could not be read; nothing was removed', { error: summarizeError(error) });
+      return report;
+    }
+    const storePath = getStorePath(this.workingDirectory, this.surfaceRoot);
+    for (const row of rows) {
+      if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
+      if (onlyPaths && !onlyPaths.has(row.path)) continue;
+      const decide = () => evaluateWorktree({ path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner: owner(row.path), now, retentionMs });
+      const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, reason });
+      const guarded = sweepProtection(row);
+      if (guarded) { keepReason(guarded); continue; }
+      let evaluation = await decide();
+      if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
+      // The decision is made again with the lock held, against the register as it is now: another process may have
+      // acted, the owner may have moved on, or the worktree may have been marked kept. The lock is released before the
+      // removal itself, which can take long on a large tree and would otherwise make every other register writer
+      // wait out its limit. Git's own refusal to remove a tree with changes is the last check.
+      let release: (() => void) | undefined;
+      try {
+        release = await acquireCrossProcessLock(`${storePath}.lock`, { strictOwnership: true });
+        const current = readStore(storePath).records[row.path];
+        const guardedNow = current ? sweepProtection({ ...row, state: current.state, sessionId: current.sessionId, taskId: current.taskId }) : null;
+        if (guardedNow) { keepReason(guardedNow); continue; }
+        evaluation = await decide();
+        if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
+      } catch (error) {
+        const message = summarizeError(error);
+        report.failed.push({ path: row.path, error: message });
+        logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
+        continue;
+      } finally {
+        release?.();
+      }
+      try {
+        await this.git.worktreeRemove(row.path);
+        const branch = evaluation.assessment.kind === 'nothing-unique' || evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.branch : null;
+        let branchDeleted = false;
+        if (evaluation.action === 'remove-all' && branch) {
+          // `-d` refuses a branch that is not merged, so a commit the base lacks can never be dropped here.
+          branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
+        } else if (branch?.startsWith('contract-input/')) {
+          // A captured-input view of a dirty checkout sits on a synthetic commit that is no deliverable; the person's files stay in their own checkout, so the branch is dropped with the directory.
+          branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
+        }
+        await this.forgetRemoved(storePath, row.path);
+        const note = evaluation.action === 'prune-directory' && !branchDeleted
+          ? `directory pruned after retention; branch ${branch ?? '(none)'} kept so its commits stay reachable`
+          : branchDeleted ? 'removed with its branch' : `removed; branch ${branch ?? '(none)'} kept`;
+        report.removed.push({ path: row.path, branch, branchDeleted, pruned: evaluation.action === 'prune-directory', note });
+        logger.info('worktree retention: removed a worktree', { path: row.path, branch, note });
+      } catch (error) {
+        // Another process sweeping at the same moment may have removed it first; that is not a failure here.
+        if (!existsSync(row.path)) continue;
+        const message = summarizeError(error);
+        report.failed.push({ path: row.path, error: message });
+        logger.warn('worktree retention: a worktree was kept because its removal did not complete', { path: row.path, error: message });
+      }
+    }
+    return report;
+  }
+
+  /** Drop the register entry of a worktree whose directory is gone. Best effort: the next list() reaps it otherwise. */
+  private async forgetRemoved(storePath: string, path: string): Promise<void> {
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${storePath}.lock`, { strictOwnership: true });
+      const store = readStore(storePath, true, true);
+      delete store.records[path];
+      writeStore(store, storePath);
+    } catch (error) {
+      logger.warn('worktree retention: the register entry of a removed worktree could not be dropped yet', { path, error: summarizeError(error) });
+    } finally { release?.(); }
+  }
+
+  /**
+   * Release the worktrees of an owner that just reached a terminal state
+   * (passed, failed, cancelled): ones with nothing unique go at once, the rest
+   * stay for the retention period. `baseBranch` is the branch each was made from.
+   */
+  public releaseEnded(
+    targets: ReadonlyArray<{ readonly path: string; readonly baseBranch?: string | undefined }>,
+    options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs'> = {},
+  ): Promise<WorktreeSweepReport> {
+    const now = (options.now ?? Date.now)();
+    const bases = new Map(targets.map((target) => [normalizePath(target.path, this.workingDirectory), target.baseBranch]));
+    return this.sweepRetention({
+      ...options,
+      now: () => now,
+      only: targets.map((target) => target.path),
+      owner: (path) => ({ state: 'ended', endedAt: now, baseBranch: bases.get(path) }),
+    });
+  }
+
+  private defaultOwnerCache: ((path: string) => WorktreeOwnerInfo) | undefined;
+
+  private async defaultOwnerResolver(): Promise<(path: string) => WorktreeOwnerInfo> {
+    if (this.defaultOwnerCache) return this.defaultOwnerCache;
+    const [{ ContractStore }, { createContractOwnerResolver }] = await Promise.all([
+      import('../../contract/store.js'),
+      import('./owners.js'),
+    ]);
+    this.defaultOwnerCache = createContractOwnerResolver(this.workingDirectory, new ContractStore({ projectRoot: this.workingDirectory }));
+    return this.defaultOwnerCache;
+  }
+
+  /**
+   * The product's worktrees with why each is still on disk: age, size, and
+   * the reason (running, uncommitted changes, unmerged commits with the days
+   * left before pruning). Read-only.
+   */
+  public async describeKept(options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> = {}): Promise<KeptWorktreeInfo[]> {
+    const now = (options.now ?? Date.now)();
+    const retentionMs = options.retentionMs ?? DEFAULT_WORKTREE_RETENTION_MS;
+    const owner = options.owner ?? await this.defaultOwnerResolver();
+    const rows = await this.list();
+    const infos: KeptWorktreeInfo[] = [];
+    for (const row of rows) {
+      if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
+      const evaluation = await evaluateWorktree({ path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner: owner(row.path), now, retentionMs });
+      const guarded = sweepProtection(row);
+      const sizeBytes = await worktreeSizeBytes(row.path);
+      infos.push({
+        path: row.path,
+        branch: row.branch,
+        ageMs: Math.max(0, now - evaluation.sinceMs),
+        ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+        reason: guarded ?? evaluation.reason,
+        willBeRemoved: guarded === null && evaluation.action !== 'keep',
+        summary: `age ${formatAge(Math.max(0, now - evaluation.sinceMs))}, ${sizeBytes !== undefined ? formatBytes(sizeBytes) : 'size unknown'}: ${(guarded ?? evaluation.reason).detail}`,
+      });
+    }
+    return infos;
+  }
+
+  /** One line for startup when kept worktrees hold more than `thresholdBytes` in total, else null. */
+  public async keptWorktreeNotice(options: { readonly thresholdBytes?: number; readonly owner?: WorktreeRetentionOptions['owner'] } = {}): Promise<string | null> {
+    const infos = await this.describeKept(options.owner ? { owner: options.owner } : {});
+    const total = infos.reduce((sum, info) => sum + (info.sizeBytes ?? 0), 0);
+    if (total <= (options.thresholdBytes ?? DEFAULT_KEPT_WORKTREE_NOTICE_BYTES) || infos.length === 0) return null;
+    return `${infos.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; review with /worktree review, discard one with /worktree discard <path>.`;
+  }
+
   public attach(path: string, target: { sessionId?: string; taskId?: string }): void {
-    withFileWriteLockSync(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
-      const normalized = normalizePath(path, this.workingDirectory);
-      const existing = store.records[normalized]!;
+    const normalized = normalizePath(path, this.workingDirectory);
+    // Git is asked before the register lock is taken, so a slow `git` never holds other writers up.
+    const gitKnows = this.gitListsWorktreeSync(normalized);
+    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
+      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+      const existing = store.records[normalized];
+      // A typo must not mint an active record that sessions, sweeps and review would then have to carry.
+      if (!existing && !gitKnows) {
+        throw new Error(`No worktree exists at ${normalized}, so nothing was attached. List worktrees to see the paths git knows about, then retry with one of those.`);
+      }
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
       store.records[normalized] = {
         path: normalized,
@@ -591,16 +876,30 @@ export class WorktreeRegistry {
     });
   }
 
+  /** True when `git worktree list` names this path (the main checkout counts); false when git cannot answer. */
+  private gitListsWorktreeSync(normalized: string): boolean {
+    const result = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], { cwd: this.workingDirectory, stdout: 'pipe', stderr: 'ignore' });
+    if (result.exitCode !== 0) return false;
+    const wanted = comparablePath(normalized);
+    return new TextDecoder().decode(result.stdout).split('\n')
+      .some((line) => line.startsWith('worktree ') && comparablePath(line.slice('worktree '.length)) === wanted);
+  }
+
   public setState(path: string, state: ManagedWorktreeState): void {
-    withFileWriteLockSync(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
+    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
+      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       const normalized = normalizePath(path, this.workingDirectory);
-      const existing = store.records[normalized]!;
-      if (existing) worktreeStateLifecycle.assert(existing.state, state);
+      const existing = store.records[normalized];
+      // A typo must not create a record (a `kept` one would linger as a
+      // tombstone for months). `list()` registers every worktree git knows.
+      if (!existing) {
+        throw new Error(`No worktree is registered at ${normalized}; nothing was changed. List worktrees to register the ones git knows about, then retry with one of those paths.`);
+      }
+      worktreeStateLifecycle.assert(existing.state, state);
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
       store.records[normalized] = {
         path: normalized,
-        kind: existing?.kind ?? classified.kind,
+        kind: existing.kind,
         state,
         ...(existing?.ownerId ?? classified.ownerId ? { ownerId: existing?.ownerId ?? classified.ownerId } : {}),
         ...(existing?.sessionId ? { sessionId: existing.sessionId } : {}),
@@ -619,8 +918,8 @@ export class WorktreeRegistry {
    * worktree was otherwise registered.
    */
   public recordSetup(path: string, setup: WorktreeSetupResult): void {
-    withFileWriteLockSync(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
+    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
+      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       const normalized = normalizePath(path, this.workingDirectory);
       const existing = store.records[normalized];
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
@@ -641,8 +940,8 @@ export class WorktreeRegistry {
   public async cleanup(path: string): Promise<void> {
     const normalized = isAbsolute(path) ? path : normalizePath(path, this.workingDirectory);
     await this.git.worktreeRemove(normalized);
-    withFileWriteLockSync(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
+    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
+      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
       delete store.records[normalized];
       writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
     });
@@ -661,6 +960,21 @@ export class WorktreeRegistry {
   public async discard(path: string): Promise<WorktreeDiscardReceipt> {
     const normalized = isAbsolute(path) ? path : normalizePath(path, this.workingDirectory);
     const discardedAt = Date.now();
+    // Discard commits whatever is dirty in the directory it is given, so it
+    // must be a linked worktree of this repository before git is touched there.
+    const unmanaged = await this.refuseUnlinkedWorktree(normalized);
+    if (unmanaged) {
+      return { path: normalized, ok: false, discardedAt, detail: `discard refused: ${unmanaged} Nothing was committed or removed.` };
+    }
+    const owner = await this.ownerOf(normalized);
+    if (owner.state === 'running') {
+      return {
+        path: normalized,
+        ok: false,
+        discardedAt,
+        detail: `discard refused: its contract or agent is still running, so removing the directory would take the files it is working in. ${await this.describeAtStake(normalized)} Cancel the contract or agent first, then discard.`,
+      };
+    }
     const worktreeGit = this.createWorktreeGit(normalized);
     let branch: string | undefined;
     let preservedCommit: string | undefined;
@@ -683,8 +997,31 @@ export class WorktreeRegistry {
         ok: false,
         ...(branch ? { branch } : {}),
         discardedAt,
-        detail: `discard refused: could not preserve uncommitted state (${String(error instanceof Error ? error.message : error)})`,
+        detail: `discard refused: could not preserve uncommitted state (${String(error instanceof Error ? error.message : error)}). ${await this.describeAtStake(normalized)} Nothing was removed.`,
       };
+    }
+    // Removing the directory also deletes what git ignores, and no commit can hold it; say how much, plainly.
+    const ignored = (await runGit(normalized, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored'])).out
+      .split('\n').filter((line) => line.startsWith('!! ')).length;
+    // A detached HEAD that no branch holds would leave its commits unreachable once the directory is gone.
+    let detachedBranch: string | undefined;
+    const head = await runGit(normalized, ['rev-parse', '--verify', '-q', 'HEAD']);
+    if (head.ok && head.out.length > 0 && !(await runGit(normalized, ['symbolic-ref', '-q', 'HEAD'])).ok) {
+      const holders = await runGit(normalized, ['for-each-ref', '--contains', head.out, '--format=%(refname)', 'refs/heads']);
+      if (holders.ok && holders.out.length === 0) {
+        const name = `goodvibes/discarded-${head.out.slice(0, 12)}`;
+        if (!(await runGit(normalized, ['branch', name, head.out])).ok) {
+          return {
+            path: normalized,
+            ok: false,
+            ...(preservedCommit ? { preservedCommit } : {}),
+            discardedAt,
+            detail: `discard refused: HEAD is detached and no branch holds its commits, and a branch to keep them could not be created. Create a branch in ${normalized} (git switch -c <name>), then discard. Nothing was removed.`,
+          };
+        }
+        detachedBranch = name;
+        branch = name;
+      }
     }
     try {
       await this.git.worktreeRemove(normalized);
@@ -695,30 +1032,139 @@ export class WorktreeRegistry {
         ...(branch ? { branch } : {}),
         ...(preservedCommit ? { preservedCommit } : {}),
         discardedAt,
-        detail: `discard failed: worktree removal did not complete (${String(error instanceof Error ? error.message : error)})`,
+        detail: `discard failed: worktree removal did not complete (${String(error instanceof Error ? error.message : error)}). ${await this.describeAtStake(normalized)} Nothing was removed.`,
       };
     }
-    withFileWriteLockSync(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot));
-      delete store.records[normalized];
-      writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
-    });
+    // The directory is already gone; a register that cannot be updated now
+    // must not turn this into a failure that hides the preserved commit. The
+    // next list() reaps the record, since its worktree is no longer on disk.
+    let registerNote = '';
+    try {
+      withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
+        const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+        delete store.records[normalized];
+        writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+      });
+    } catch (error) {
+      registerNote = `; the register entry could not be removed yet (${summarizeError(error)}) and is reclaimed by the next list`;
+    }
     return {
       path: normalized,
       ok: true,
       ...(branch ? { branch } : {}),
       ...(preservedCommit ? { preservedCommit } : {}),
       discardedAt,
-      detail: preservedCommit
+      detail: (preservedCommit
         ? `worktree removed; uncommitted state preserved as ${preservedCommit.slice(0, 12)} on kept branch ${branch ?? '(unknown)'}`
-        : `worktree removed; branch ${branch ?? '(unknown)'} kept`,
+        : `worktree removed; branch ${branch ?? '(unknown)'} kept`)
+        + (detachedBranch ? `; HEAD was detached, so its commits were kept on new branch ${detachedBranch}` : '')
+        + (ignored > 0 ? `; ${ignored} ignored file(s) or folder(s) were deleted with the directory and are NOT preserved (git does not hold them)` : '')
+        + registerNote,
     };
+  }
+
+  /** Why `normalized` may not be discarded (not a linked worktree of this project), or null when it may. */
+  private async refuseUnlinkedWorktree(normalized: string): Promise<string | null> {
+    let listed: Array<{ path: string }>;
+    try {
+      listed = await this.git.worktreeList();
+    } catch (error) {
+      return `git could not list this project's worktrees (${summarizeError(error)}), so ${normalized} cannot be confirmed as one.`;
+    }
+    const wanted = comparablePath(normalized);
+    const index = listed.findIndex((entry) => comparablePath(entry.path) === wanted);
+    if (index < 0) {
+      return `${normalized} is not a worktree of this project. List the project's worktrees and pass one of their paths.`;
+    }
+    if (index === 0 || wanted === comparablePath(this.workingDirectory)) {
+      return `${normalized} is the main checkout (or the directory this session works in), not a linked worktree.`;
+    }
+    return null;
+  }
+
+  private async ownerOf(path: string): Promise<WorktreeOwnerInfo> {
+    try {
+      return (await this.defaultOwnerResolver())(path);
+    } catch {
+      return { state: 'unknown' };
+    }
+  }
+
+  /** What discarding this worktree would put at risk, in words, for a refusal. */
+  private async describeAtStake(path: string): Promise<string> {
+    const owner = await this.ownerOf(path);
+    const assessment = await assessWorktree(path, this.workingDirectory, owner.baseBranch);
+    switch (assessment.kind) {
+      case 'uncommitted': return `At stake: ${describeLocalState(assessment.changes, assessment.ignored)}. Discard commits the uncommitted changes onto the branch first; ignored files cannot be preserved and are deleted with the directory.`;
+      case 'unmerged': return `At stake: ${assessment.commits} commit(s) not in ${assessment.base}; they stay on branch ${assessment.branch ?? '(detached HEAD, no branch holds them)'}.`;
+      case 'nothing-unique': return 'At stake: nothing unique (clean, all commits already in its base).';
+      case 'unreadable': return `What is at stake could not be read (${assessment.reason}).`;
+    }
   }
 
   /** Injectable seam for tests: a GitService rooted INSIDE the worktree being discarded. */
   protected createWorktreeGit(worktreePath: string): Pick<GitService, 'branch' | 'status' | 'addAll' | 'commit'> {
     return new GitService(worktreePath);
   }
+}
+
+/**
+ * Why the automatic sweep must leave a worktree alone regardless of what it
+ * holds, or null. Only a worktree this product created (its marker, written
+ * when it was added) is ever swept, and not one the user kept or paused or
+ * attached to a session or task: `list()` registers every worktree git knows,
+ * so a register row alone says nothing about who made it.
+ */
+function sweepProtection(row: Pick<WorktreeStatusRecord, 'path' | 'state' | 'sessionId' | 'taskId'>): WorktreeKeepReason | null {
+  if (row.state === 'kept') return { why: 'protected', detail: 'marked kept; only /worktree discard removes it' };
+  if (row.state === 'paused') return { why: 'protected', detail: 'paused; resume or discard it explicitly' };
+  if (row.sessionId || row.taskId) return { why: 'protected', detail: `attached to ${row.sessionId ? `session ${row.sessionId}` : `task ${row.taskId}`}; detach or discard it explicitly` };
+  if (!isMarkedProductWorktree(row.path)) return { why: 'protected', detail: 'not recorded as created by this version of the product; never removed automatically' };
+  return null;
+}
+
+export interface WorktreeRetentionOptions {
+  /** Injected clock; defaults to the wall clock. */
+  readonly now?: (() => number) | undefined;
+  /** How long after its owner ended a clean worktree with unmerged commits stays. Default 14 days. */
+  readonly retentionMs?: number | undefined;
+  /** Who owns a worktree. Defaults to the contract store's record of it. */
+  readonly owner?: ((path: string) => WorktreeOwnerInfo) | undefined;
+  /** Restrict the pass to these paths. */
+  readonly only?: readonly string[] | undefined;
+}
+
+export interface SweptWorktree {
+  readonly path: string;
+  readonly branch: string | null;
+  readonly branchDeleted: boolean;
+  /** True when the directory was removed after the retention period with its branch kept. */
+  readonly pruned: boolean;
+  readonly note: string;
+}
+
+export interface KeptWorktree {
+  readonly path: string;
+  readonly branch: string;
+  readonly reason: WorktreeKeepReason;
+}
+
+export interface WorktreeSweepReport {
+  readonly removed: readonly SweptWorktree[];
+  readonly kept: readonly KeptWorktree[];
+  readonly failed: ReadonlyArray<{ readonly path: string; readonly error: string }>;
+}
+
+export interface KeptWorktreeInfo {
+  readonly path: string;
+  readonly branch: string;
+  readonly ageMs: number;
+  readonly sizeBytes?: number;
+  readonly reason: WorktreeKeepReason;
+  /** True when the next sweep would remove it. */
+  readonly willBeRemoved: boolean;
+  /** Age, size and the reason it is kept, as one human-readable string. */
+  readonly summary: string;
 }
 
 /** The honest record of one discard: what came off disk, what was kept, what was preserved. */

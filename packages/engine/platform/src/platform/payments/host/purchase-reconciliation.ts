@@ -76,7 +76,11 @@ function retainEvidence(deps: ReconciliationDeps, purchaseId: string, operationI
 }
 export class PurchaseReconciliationError extends Error {
   override readonly name = 'PurchaseReconciliationError';
-  constructor() { super('This purchase cannot be reconciled from its current evidence. Refresh status, inspect the original merchant history and repeat only the finding already saved. No new order was submitted.'); }
+  /** `reason` names what in the current evidence stops this finding; it
+   * never quotes the evidence itself. */
+  constructor(reason?: string) {
+    super(`${reason ?? 'This purchase cannot be reconciled from its current payment evidence, which changed or does not match. Refresh its status and inspect the merchant history.'} No new order was submitted.`);
+  }
 }
 
 /** Independent of sockets and browser drivers. The real execution lease must
@@ -99,21 +103,34 @@ export class PurchaseReconciliations {
       if (!writer) throw new PaymentOperationStoreError('busy');
       try {
         const operation = writer.read();
-        if (operation.operationId !== operationId) throw new PurchaseReconciliationError();
+        if (operation.operationId !== operationId) throw new PurchaseReconciliationError(
+          `That operationId is not purchase ${purchaseId}'s current operation. Read payments.purchase.status for the operationId to reconcile.`);
         let checkpoint = writer.reconciliation();
-        if (checkpoint && checkpoint.outcome !== outcome) throw new PurchaseReconciliationError();
+        if (checkpoint && checkpoint.outcome !== outcome) throw new PurchaseReconciliationError(
+          `Your earlier finding for purchase ${purchaseId} (${checkpoint.outcome}) is already saved. Repeat that same finding to finish settling it.`);
+        // Already settled: the spend and receipt may have been pruned since, so the evidence
+        // pins below would fail a repeat of the same finding that should simply answer again.
+        if (checkpoint && operation.outcome === `owner-confirmed-${checkpoint.outcome}`) return operation;
         const evidence = retainEvidence(this.deps, purchaseId, operationId, checkpoint);
         const current = () => { this.current(); authorized(); writer.assertCurrent(); evidence.assertCurrent(); };
         current();
         if (!checkpoint) {
-          if (!canReconcilePaymentOperation(operation)) throw new PurchaseReconciliationError();
+          if (!canReconcilePaymentOperation(operation)) throw new PurchaseReconciliationError(
+            `Purchase ${purchaseId} is ${operation.state}; only an uncertain, verification-pending or unverified submission can be reconciled.`);
           const records = await this.deps.journal.list(); current();
           const journal = records.find(row => row.purchaseId === purchaseId) ?? null;
           const purchase = this.deps.purchases.get(purchaseId);
-          if (journal && !['submit-pending', 'submitted'].includes(journal.phase)) throw new PurchaseReconciliationError();
+          if (journal && !['submit-pending', 'submitted'].includes(journal.phase)) throw new PurchaseReconciliationError(
+            `Purchase ${purchaseId}'s checkout journal shows it never reached submission, so there is no merchant order to confirm.`);
+          if (!journal && !purchase) throw new PurchaseReconciliationError(
+            `Purchase ${purchaseId} has neither a checkout journal entry nor a purchase record, so there is no submission to reconcile. Inspect the merchant history directly.`);
           const state = this.deps.budget.state(), reservation = state.reservations.find(row => row.id === purchaseId) ?? null;
           const spend = state.spend.find(row => row.purchaseId === purchaseId) ?? null;
           if ((!journal && !purchase) || (reservation && spend) || (!reservation && !spend && !purchase)) throw new PurchaseReconciliationError();
+          // Saving this finding first would lock the owner to 'purchased' while settlement can never
+          // charge the budget: neither a hold nor a spend exists to convert.
+          if (outcome === 'purchased' && !reservation && !spend) throw new PurchaseReconciliationError(
+            `Purchase ${purchaseId} has no budget hold and no recorded spend, so it cannot be settled as bought without leaving the budget uncharged. Nothing was saved.`);
           const draw = journal?.draw;
           if (reservation && (!draw || journal?.reservationId !== purchaseId || reservation.retainUntilSettled !== true
             || reservation.itemMinorUnits !== draw.itemMinorUnits || reservation.overageMinorUnits !== draw.overageMinorUnits

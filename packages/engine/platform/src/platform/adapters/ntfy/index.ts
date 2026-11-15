@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, declaredMention, ingressMetadata, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { inboundDedupKey, ntfyInboundDedup } from '../inbound-dedup.js';
@@ -130,7 +130,8 @@ async function authorizeNtfyPayload(
     groupId: topic,
     conversationKind: 'channel',
     text: message,
-    mentioned: true,
+    // A message published to the bot's topic is addressed to it by construction.
+    mentioned: declaredMention(body, true),
     metadata: body,
   });
   if (!policy.allowed) {
@@ -249,7 +250,7 @@ async function handleNtfyAgentPayload(
     externalId: topic,
     channelId: topic,
     title: typeof body.title === 'string' ? body.title : topic,
-    metadata: body,
+    metadata: ingressMetadata(body),
   });
 
   if (!message) {
@@ -266,15 +267,16 @@ async function handleNtfyAgentPayload(
   const submission = await context.sessionBroker.submitMessage({
     ...(preferredTuiSession ? { sessionId: preferredTuiSession.id } : {}),
     routeId: binding.id,
+    ...(typeof body.id === 'string' && body.id ? { providerMessageId: body.id } : {}),
     surfaceKind: 'ntfy',
     surfaceId: binding.surfaceId,
     externalId: topic,
     threadId: topic,
     title: typeof body.title === 'string' ? body.title : topic,
     body: message,
-    metadata: body,
+    metadata: ingressMetadata(body),
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     committed();
     return Response.json({
       acknowledged: true,
@@ -293,7 +295,7 @@ async function handleNtfyAgentPayload(
   );
   if (spawnResult instanceof Response) return spawnResult;
   committed();
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
     agentId: spawnResult.id,
     task: message,

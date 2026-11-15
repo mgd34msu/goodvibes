@@ -48,10 +48,13 @@ function parseJsonBookmarks(value: unknown, inheritedFolder?: string): Knowledge
   }
 
   const record = value as Record<string, unknown>;
+  // A named container extends the folder it sits in, as in the Netscape format.
+  const containerName = typeof record.name === 'string' && !record.url && !record.href && !record.uri
+    ? normalizeFolderPath(record.name) : undefined;
   const folderName = normalizeFolderPath(
     typeof record.folderPath === 'string' ? record.folderPath
       : typeof record.folder === 'string' ? record.folder
-        : typeof record.name === 'string' && !record.url && !record.href && !record.uri ? record.name
+        : containerName ? [inheritedFolder, containerName].filter(Boolean).join(' / ')
           : inheritedFolder,
   );
   const url = typeof record.url === 'string'
@@ -149,11 +152,14 @@ export function parseBookmarkSeeds(content: string): KnowledgeBookmarkSeed[] {
   if (!trimmed) return [];
 
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    let parsed: unknown;
     try {
-      return parseJsonBookmarks(JSON.parse(trimmed));
-    } catch {
-      return parseUrlList(trimmed);
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      // A truncated export must not look like an empty, successful import.
+      throw new Error(`Bookmark input looks like JSON but could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
     }
+    return parseJsonBookmarks(parsed);
   }
 
   if (/<A\s/i.test(trimmed) && /<DL/i.test(trimmed)) {

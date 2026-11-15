@@ -9,6 +9,7 @@ import type {
   PrefixRule,
   EvaluationStep,
 } from '../types.js';
+import { execListedCommandTexts } from '../exec-command-text.js';
 
 /** Result returned by evaluatePrefixRule. */
 export interface PrefixRuleResult {
@@ -32,25 +33,94 @@ function toolMatchesPrefixPattern(
 
 /**
  * extractCommandArgs, Extracts EVERY command string from args.
- * Understands the exec tool's real shape (`commands: [{ cmd }, ...]`) as well
- * as flat `command`/`cmd` strings; falls back to the first string value.
+ * Understands the exec tool's real shape (`commands: [{ cmd | cmd_base64 }, ...]`)
+ * as well as flat `command`/`cmd` strings; falls back to the first string value
+ * only for a call that has no `commands` list at all.
  */
 export function extractCommandArgs(args: Record<string, unknown>): string[] {
-  const commands = args['commands'];
-  if (Array.isArray(commands)) {
-    const cmds = commands
-      .map((entry) => (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>)['cmd'] === 'string'
-        ? (entry as Record<string, unknown>)['cmd'] as string
-        : null))
-      .filter((cmd): cmd is string => cmd !== null);
-    if (cmds.length > 0) return cmds;
-  }
+  const listed = execListedCommandTexts(args);
+  if (listed.length > 0) return listed;
+  // A `commands` list that carries no text must not hand rules some other argument (the working directory) to judge.
+  if (Array.isArray(args['commands'])) return [];
   if (typeof args['command'] === 'string') return [args['command']];
   if (typeof args['cmd'] === 'string') return [args['cmd']];
   for (const v of Object.values(args)) {
     if (typeof v === 'string') return [v];
   }
   return [];
+}
+
+
+/**
+ * The shell command split at its top-level control operators (`;`, `&&`, `||`, `|`, `&`, newline).
+ * `opaque` is true when the text also carries something that can run or write elsewhere without
+ * being a separate segment: a command substitution (backticks, `$(`), a redirection, a subshell,
+ * or a quote left open. Quoted text is data, except that backticks and `$(` still run inside double quotes.
+ */
+export function splitShellCommand(command: string): { readonly segments: readonly string[]; readonly opaque: boolean } {
+  const segments: string[] = [];
+  let current = '';
+  let opaque = false;
+  let quote: '' | '\'' | '"' = '';
+  const flush = (): void => { segments.push(current.trim()); current = ''; };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote === '\'') {
+      if (ch === '\'') quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === '\\') { current += ch + (command[i + 1] ?? ''); i++; continue; }
+    if (ch === '`' || (ch === '$' && command[i + 1] === '(')) { opaque = true; current += ch; continue; }
+    if (quote === '"') {
+      if (ch === '"') quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === '\'' || ch === '"') { quote = ch; current += ch; continue; }
+    if (ch === '>') {
+      // Joining one output stream to another, or discarding output, runs nothing and writes no file.
+      const harmless = /^(?:>&(?:\d+|-)|>>?[ \t]*\/dev\/null)(?=$|[\s;&|])/.exec(command.slice(i));
+      if (harmless) { current += harmless[0]; i += harmless[0].length - 1; continue; }
+    }
+    if (ch === '>' || ch === '<' || ch === '(' || ch === ')') { opaque = true; current += ch; continue; }
+    if (ch === ';' || ch === '\n' || ch === '\r') { flush(); continue; }
+    if (ch === '&' || ch === '|') {
+      if (command[i + 1] === ch) i++;
+      flush();
+      continue;
+    }
+    current += ch;
+  }
+  if (quote !== '') opaque = true;
+  flush();
+  const parts = segments.filter((segment) => segment.length > 0);
+  return { segments: parts, opaque };
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * What else an exec call fixes besides its command text: where it runs, its environment, whether it
+ * detaches, and any file operations run first. An exact rule is bound to this as it was approved.
+ */
+export function execContextOf(args: Record<string, unknown>): string {
+  const commands = Array.isArray(args['commands']) ? args['commands'] as unknown[] : [];
+  const perCommand = commands.map((entry) => {
+    const record = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    return { env: record['env'], working_dir: record['working_dir'], background: record['background'], cmd_base64: record['cmd_base64'] };
+  });
+  const fixed = canonicalJson({ working_dir: args['working_dir'], env: args['env'], file_ops: args['file_ops'], commands: perCommand });
+  // A call that fixes none of these is the empty context, however many commands it has.
+  return fixed === canonicalJson({ commands: perCommand.map(() => ({})) }) ? '' : fixed;
 }
 
 /**
@@ -115,14 +185,31 @@ export function evaluatePrefixRule(
     };
   }
 
-  const commandMatches = (command: string): boolean => {
-    if (rule.exactCommands?.some((exact) => command === exact)) return true;
+  const classRule = rule.exactCommandMatch === 'command-class';
+  const exactLiteral = (command: string): boolean => rule.exactCommands?.some((exact) => command === exact) ?? false;
+  // An exact allow holds only for the environment, directory and detachment it was approved with.
+  const contextHolds = rule.effect === 'deny' || classRule || execContextOf(args) === (rule.exactContext ?? execContextOf({}));
+
+  const segmentMatches = (command: string, whole = false): boolean => {
+    if (whole && exactLiteral(command)) return contextHolds;
     const normalized = command.trim().toLowerCase();
     // Only an explicitly broad class rule may normalize a bare executable.
     // Never lowercase or trim an exact command's arguments or target path.
-    if (rule.exactCommandMatch === 'command-class' && normalized.length > 0 && !/\s/.test(normalized)
+    if (classRule && normalized.length > 0 && !/\s/.test(normalized)
       && rule.exactCommands?.some((exact) => normalized === exact.trim().toLowerCase())) return true;
     return rule.commandPrefixes?.some((prefix) => normalized.startsWith(prefix.toLowerCase())) ?? false;
+  };
+
+  // A prefix or class cannot vouch for what follows a control operator: `git status; rm -rf ~` is not
+  // "a git command". An allow needs every segment to match on its own and nothing opaque such as a
+  // substitution or redirection; a deny matches when any segment does. A literal exact command is
+  // matched whole, as approved.
+  const commandMatches = (command: string): boolean => {
+    if (exactLiteral(command) && contextHolds) return true;
+    const split = splitShellCommand(command);
+    if (!split.opaque && split.segments.length <= 1) return segmentMatches(command, true);
+    if (rule.effect === 'deny') return segmentMatches(command, true) || split.segments.some((segment) => segmentMatches(segment));
+    return !split.opaque && split.segments.every((segment) => segmentMatches(segment));
   };
 
   // Effect-aware batch semantics: an allow rule only matches when EVERY

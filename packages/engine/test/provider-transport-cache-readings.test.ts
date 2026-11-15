@@ -173,13 +173,15 @@ describe('Gemini cache minimum', () => {
     expect(requests).toHaveLength(1);
   });
 
-  test('an uncertain cache reading holds instead of storing a cacheability decision', async () => {
+  test('an uncertain cache reading sends the request uncached and stores no cacheability decision', async () => {
     const { port, requests } = yesNoPort('belowMinimum', 0.55);
     installJudgmentPort(port);
-    failCacheCreation(400, BELOW_MINIMUM);
-    await expect(gemini().ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro'))
-      .rejects.toMatchObject({ name: 'JudgmentHeldError', outcome: 'held' });
-    expect(requests).toHaveLength(1);
+    const cache = failCacheCreation(400, BELOW_MINIMUM);
+    const provider = gemini();
+    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
+    expect(await provider.ensureCachedContent(LONG_PROMPT, undefined, 'gemini-2.5-pro')).toBeNull();
+    expect(cache.posts()).toBe(2);
+    expect(requests.length).toBeGreaterThan(0);
   });
 
   test('a status other than 400 is not read and leaves the prompt cacheable', async () => {

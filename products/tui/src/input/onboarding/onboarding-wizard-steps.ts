@@ -1,4 +1,5 @@
 import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
+import { GOODVIBES_NTFY_AGENT_TOPIC, GOODVIBES_NTFY_CHAT_TOPIC, GOODVIBES_NTFY_REMOTE_TOPIC } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
 import { shouldShowCloudflareStep } from './onboarding-wizard-cloudflare.ts';
 import { buildCloudflareStep } from './onboarding-wizard-cloudflare-step.ts';
@@ -203,10 +204,11 @@ export function buildProvidersStep(controller: OnboardingWizardControllerLike): 
             defaultValue: '',
           },
           {
-            kind: 'text' as const,
+            // Masked so the single-use authorization code is never shown or written to the saved wizard progress.
+            kind: 'masked' as const,
             id: 'providers.openai-callback-code',
             label: 'OpenAI callback code or URL',
-            hint: 'Paste the callback code or redirected URL after completing browser sign-in.',
+            hint: 'Paste the callback code or redirected URL after completing browser sign-in. It is hidden and never saved with wizard progress.',
             placeholder: 'code or callback URL',
             defaultValue: '',
           },
@@ -412,9 +414,9 @@ function buildExternalSurfaceStep(
     });
     const ntfyTopicSummary = surface.id === 'ntfy'
       ? [
-          `Chat topic: ${controller.getStringFieldValue('external-services.ntfy.chat-topic', 'goodvibes-chat')}`,
-          `Agent topic: ${controller.getStringFieldValue('external-services.ntfy.agent-topic', 'goodvibes-agent')}`,
-          `Daemon-only remote topic: ${controller.getStringFieldValue('external-services.ntfy.remote-topic', 'goodvibes-ntfy')}`,
+          `Chat topic: ${controller.getStringFieldValue('external-services.ntfy.chat-topic', GOODVIBES_NTFY_CHAT_TOPIC)}`,
+          `Agent topic: ${controller.getStringFieldValue('external-services.ntfy.agent-topic', GOODVIBES_NTFY_AGENT_TOPIC)}`,
+          `Daemon-only remote topic: ${controller.getStringFieldValue('external-services.ntfy.remote-topic', GOODVIBES_NTFY_REMOTE_TOPIC)}`,
         ]
       : [];
     const title = `${surface.label.replace(/ surface$/i, '')} setup`;

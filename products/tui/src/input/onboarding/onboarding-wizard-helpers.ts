@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { isLoopbackHostValue } from './onboarding-verification-helpers.ts';
 import { deriveOnboardingStepState, type OnboardingStep1CapabilityItem, type OnboardingStepDerivationState } from '../../runtime/onboarding/index.ts';
 import { DEFAULT_CAPABILITIES } from './onboarding-wizard-constants.ts';
 import { EXTERNAL_SURFACE_SPECS, type ExternalSurfaceSetupFieldSpec, type ExternalSurfaceSpec } from './onboarding-wizard-external-surfaces.ts';
@@ -39,12 +40,7 @@ export function isValidHostValue(value: string): boolean {
 }
 
 export function isLoopbackAddress(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'localhost'
-    || normalized === '::1'
-    || normalized === '[::1]'
-    || normalized === '0:0:0:0:0:0:0:1'
-    || /^127(?:\.\d{1,3}){3}$/.test(normalized);
+  return isLoopbackHostValue(value);
 }
 
 export function uniqueNonEmpty(values: readonly string[]): readonly string[] {

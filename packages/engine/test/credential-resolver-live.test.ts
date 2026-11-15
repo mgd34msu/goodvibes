@@ -89,18 +89,19 @@ describe('request-time credential resolution', () => {
       const secrets = makeSecrets(root);
       const registry = makeRegistry(root, secrets);
       // The composition-root wiring under test: change -> live refresh.
-      secrets.onDidChange(() => void registry.refreshProviderCredentials());
+      const refreshes: Promise<void>[] = [];
+      secrets.onDidChange(() => { refreshes.push(registry.refreshProviderCredentials()); });
 
       expect(registry.getRegistered('groq').isConfigured?.()).toBe(false);
 
       await secrets.set(GROQ_ENV, 'gsk_live_test_value');
-      await Bun.sleep(20); // listener refresh is async
+      await Promise.all(refreshes); // the change listener starts the refresh asynchronously
 
       expect(registry.getRegistered('groq').isConfigured?.()).toBe(true);
 
       // Delete/rotate likewise: removing the key de-configures live.
       await secrets.delete(GROQ_ENV);
-      await Bun.sleep(20);
+      await Promise.all(refreshes);
       expect(registry.getRegistered('groq').isConfigured?.()).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });

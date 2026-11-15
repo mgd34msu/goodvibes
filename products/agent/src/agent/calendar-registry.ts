@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
@@ -170,36 +171,40 @@ export class AgentCalendarRegistry {
   }
 
   public create(input: AgentCalendarEventCreateInput): AgentCalendarEvent {
-    const store = this.readStore();
-    const title = input.title.trim();
-    const start = input.start.trim();
-    if (!title) throw new Error('Event title is required.');
-    if (!start) throw new Error('Event start is required.');
-    assertNoCalendarSecretLikeText([title, input.notes ?? '', input.location ?? '']);
-    const timestamp = nowIso();
-    const event: AgentCalendarEvent = {
-      id: this.nextId(title, store.events),
-      title,
-      start,
-      end: input.end?.trim() || undefined,
-      allDay: input.allDay ?? !start.includes('T'),
-      location: input.location?.trim() || undefined,
-      notes: input.notes?.trim() || undefined,
-      tzid: input.tzid?.trim() || undefined,
-      sourceProvenance: input.sourceProvenance?.trim() || undefined,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({ ...store, events: [...store.events, event] });
-    return event;
+    return this.locked(() => {
+      const store = this.readStore();
+      const title = input.title.trim();
+      const start = input.start.trim();
+      if (!title) throw new Error('Event title is required.');
+      if (!start) throw new Error('Event start is required.');
+      assertNoCalendarSecretLikeText([title, input.notes ?? '', input.location ?? '']);
+      const timestamp = nowIso();
+      const event: AgentCalendarEvent = {
+        id: this.nextId(title, store.events),
+        title,
+        start,
+        end: input.end?.trim() || undefined,
+        allDay: input.allDay ?? !start.includes('T'),
+        location: input.location?.trim() || undefined,
+        notes: input.notes?.trim() || undefined,
+        tzid: input.tzid?.trim() || undefined,
+        sourceProvenance: input.sourceProvenance?.trim() || undefined,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({ ...store, events: [...store.events, event] });
+      return event;
+    });
   }
 
   public delete(id: string): AgentCalendarEvent {
-    const store = this.readStore();
-    const existing = this.findInStore(store, id);
-    if (!existing) throw new Error(`Unknown calendar event ${id}`);
-    this.writeStore({ ...store, events: store.events.filter((e) => e.id !== existing.id) });
-    return existing;
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, id);
+      if (!existing) throw new Error(`Unknown calendar event ${id}`);
+      this.writeStore({ ...store, events: store.events.filter((e) => e.id !== existing.id) });
+      return existing;
+    });
   }
 
   /**
@@ -314,7 +319,15 @@ export class AgentCalendarRegistry {
     }
   }
 
+  /** One read-modify-write at a time across the CLI and every agent process using this file. */
+  private locked<T>(update: () => T): T {
+    return runStoreFileUpdateSync(this.storePath, update);
+  }
+
   private writeStore(store: CalendarStoreFile): void {
+    // An entry the parser rejects was not carried into `store`; keep the file
+    // as it was before this write drops it.
+    keepUnreadableStoreCopy(this.storePath, 'events', parseEvent);
     writeStoreFile(this.storePath, formatStore(store));
   }
 }

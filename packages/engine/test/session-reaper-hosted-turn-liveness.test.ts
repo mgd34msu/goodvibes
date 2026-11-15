@@ -90,11 +90,11 @@ function sweepAt(
 }
 
 describe('idle reaper: a live hosted turn is activity', () => {
-  test('without a liveness probe the stale-clocked hosted session IS reaped (the reported defect)', () => {
+  test('the sweep alone has no knowledge of hosted liveness: it judges by the broker clocks only', () => {
     const sessions = new Map([['hosted-1', brokerRecord()]]);
     sweepAt(sessions, NOW);
-    // Documents the behaviour the probe exists to correct: every signal the
-    // reaper reads is stale, so it closes a session whose turn is still going.
+    // Without a probe the reaper reads only the broker's own signals, all stale
+    // here. Hosted-turn liveness is supplied by the probe, which the tests below cover.
     expect(sessions.get('hosted-1')!.status).toBe('closed');
     expect(readSessionCloseReason(sessions.get('hosted-1')!)).toBe('idle-reaped');
   });

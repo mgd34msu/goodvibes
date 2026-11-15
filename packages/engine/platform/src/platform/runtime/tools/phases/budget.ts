@@ -7,8 +7,10 @@ import type { BudgetExceedReason, PhaseResult, ToolExecutionPhase, ToolExecution
  * budget, Budget enforcement phase for the tool execution pipeline.
  *
  * This phase is inserted at two points:
- *  - "entry": just before execute (checks elapsed wall-clock time).
- *  - "exit": just after mapOutput (checks token and cost budgets).
+ *  - "entry": just before execute. The time budget only starts with the execute
+ *    phase, so nothing is measured yet.
+ *  - "exit": just after mapOutput (checks the time the tool ran, then token and
+ *    cost budgets).
  *
  * When a hard budget is exceeded the phase returns `abort: true` with a
  * typed `budgetExceedReason` so the executor can surface a diagnostic
@@ -41,16 +43,19 @@ export async function budgetPhase(
     return ok(start, phaseName);
   }
 
-  const elapsedMs = performance.now() - record.startedAt;
-
-  // ── Time budget (checked at both entry and exit) ────────────────────────
+  // ── Time budget ─────────────────────────────────────────────────────────
+  // Measured from the start of the execute phase: time spent in prehooks or
+  // waiting for a person to answer a permission prompt is not the tool's.
   // All budget comparisons use strict > so that a value exactly at the limit is
   // still allowed, enforcement fires only when the limit is truly exceeded.
-  if (budget.maxMs !== undefined && elapsedMs > budget.maxMs) {
-    return exceed(start, phaseName, 'BUDGET_EXCEEDED_MS', {
-      limitMs: budget.maxMs,
-      elapsedMs,
-    });
+  if (record.executeStartedAt !== undefined && budget.maxMs !== undefined) {
+    const elapsedMs = performance.now() - record.executeStartedAt;
+    if (elapsedMs > budget.maxMs) {
+      return exceed(start, phaseName, 'BUDGET_EXCEEDED_MS', {
+        limitMs: budget.maxMs,
+        elapsedMs,
+      });
+    }
   }
 
   // ── Token and cost budgets (only meaningful at exit after execute ran) ──

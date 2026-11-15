@@ -23,6 +23,7 @@
  * its constructor options, and `process.env`; it has no product dependency.
  */
 import { ProviderRegistry } from './registry.js';
+import { getBuiltinProviderEnvVars } from '../config/provider-credential-catalog.js';
 
 const PROVIDER_STARTUP_PLACEHOLDER_API_KEY = 'goodvibes-launch-tolerant-startup-placeholder';
 
@@ -41,40 +42,44 @@ interface MutableConfiguredProvider {
   configured: boolean;
 }
 
-const PROVIDER_STARTUP_PLACEHOLDER_ENVS: readonly ProviderStartupEnv[] = [
-  { providerId: 'openai', envVars: ['OPENAI_API_KEY', 'OPENAI_KEY'] },
-  { providerId: 'inceptionlabs', envVars: ['INCEPTION_API_KEY'] },
-  { providerId: 'openrouter', envVars: ['OPENROUTER_API_KEY'] },
-  { providerId: 'aihubmix', envVars: ['AIHUBMIX_API_KEY'] },
-  { providerId: 'groq', envVars: ['GROQ_API_KEY'] },
-  { providerId: 'cerebras', envVars: ['CEREBRAS_API_KEY'] },
-  { providerId: 'mistral', envVars: ['MISTRAL_API_KEY'] },
-  { providerId: 'ollama-cloud', envVars: ['OLLAMA_CLOUD_API_KEY', 'OLLAMA_API_KEY'] },
-  { providerId: 'huggingface', envVars: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'] },
-  { providerId: 'nvidia', envVars: ['NVIDIA_API_KEY'] },
-  { providerId: 'llm7', envVars: ['LLM7_API_KEY'] },
-  { providerId: 'deepseek', envVars: ['DEEPSEEK_API_KEY'] },
-  { providerId: 'fireworks', envVars: ['FIREWORKS_API_KEY'] },
-  { providerId: 'microsoft-foundry', envVars: ['AZURE_OPENAI_API_KEY'] },
-  { providerId: 'moonshot', envVars: ['MOONSHOT_API_KEY'] },
-  { providerId: 'qianfan', envVars: ['QIANFAN_API_KEY'] },
-  { providerId: 'qwen', envVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'MODELSTUDIO_API_KEY'] },
-  { providerId: 'sglang', envVars: ['SGLANG_API_KEY'] },
-  { providerId: 'stepfun', envVars: ['STEPFUN_API_KEY'] },
-  { providerId: 'together', envVars: ['TOGETHER_API_KEY'] },
-  { providerId: 'venice', envVars: ['VENICE_API_KEY'] },
-  { providerId: 'volcengine', envVars: ['VOLCANO_ENGINE_API_KEY'] },
-  { providerId: 'xai', envVars: ['XAI_API_KEY'] },
-  { providerId: 'xiaomi', envVars: ['XIAOMI_API_KEY'] },
-  { providerId: 'zai', envVars: ['ZAI_API_KEY', 'Z_AI_API_KEY'] },
-  {
-    providerId: ['cloud', 'flare-ai-gateway'].join(''),
-    envVars: [['CLOUD', 'FLARE_AI_GATEWAY_API_KEY'].join('')],
-  },
-  { providerId: 'vercel-ai-gateway', envVars: ['AI_GATEWAY_API_KEY'] },
-  { providerId: 'litellm', envVars: ['LITELLM_API_KEY'] },
-  { providerId: 'copilot-proxy', envVars: ['COPILOT_PROXY_API_KEY'] },
+// Environment names come from the credential catalog, so an alias added there
+// is seen here too; only the provider ids are listed.
+const PROVIDER_STARTUP_PLACEHOLDER_PROVIDER_IDS: readonly string[] = [
+  'openai',
+  'inceptionlabs',
+  'openrouter',
+  'aihubmix',
+  'groq',
+  'cerebras',
+  'mistral',
+  'ollama-cloud',
+  'huggingface',
+  'nvidia',
+  'llm7',
+  'deepseek',
+  'fireworks',
+  'microsoft-foundry',
+  'moonshot',
+  'qianfan',
+  'qwen',
+  'sglang',
+  'stepfun',
+  'together',
+  'venice',
+  'volcengine',
+  'xai',
+  'xiaomi',
+  'zai',
+  ['cloud', 'flare-ai-gateway'].join(''),
+  'vercel-ai-gateway',
+  'litellm',
+  'copilot-proxy',
 ];
+
+const PROVIDER_STARTUP_PLACEHOLDER_ENVS: readonly ProviderStartupEnv[] = PROVIDER_STARTUP_PLACEHOLDER_PROVIDER_IDS.map((providerId) => ({
+  providerId,
+  envVars: getBuiltinProviderEnvVars(providerId),
+}));
 
 function hasMutableApiKeyProvider(value: unknown): value is MutableApiKeyProvider {
   if (typeof value !== 'object' || value === null) return false;

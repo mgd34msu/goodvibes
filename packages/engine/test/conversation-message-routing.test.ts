@@ -4,9 +4,8 @@
  * Tests for companion message routing:
  *   - kind='message' (default) skips bindAgent, publishes conversation.followup.companion
  *   - kind='task' preserves explicit bindAgent behavior
- *   - envelope shape is valid ConversationMessageEnvelope
  *   - unknown kind returns 400
- *   - envelope shape consistency between chat-mode and companion routing
+ *   - followup events reach only TUI clients of a real control-plane gateway
  */
 
 import { describe, expect, test, beforeEach } from 'bun:test';
@@ -14,10 +13,8 @@ import { randomUUID } from 'node:crypto';
 import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
 import type { ConversationMessageEnvelope } from '../platform/src/platform/control-plane/conversation-message.js';
-import type {
-  CompanionChatTurnStartedEvent,
-  CompanionChatTurnCompletedEvent,
-} from '../platform/src/platform/companion/companion-chat-types.js';
+import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,12 +53,14 @@ function makeContext(opts: {
   bindAgentCallCount?: { value: number };
   followupEvents?: FollowupPayload[];
   appendCompanionCallCount?: { value: number };
+  submitMessageCallCount?: { value: number };
   publishConversationFollowup?: DaemonRuntimeRouteContext['publishConversationFollowup'];
 }): DaemonRuntimeRouteContext {
   const sessions = opts.sessions ?? new Map<string, MockSessionRecord>();
   const bindAgentCallCount = opts.bindAgentCallCount ?? { value: 0 };
   const followupEvents = opts.followupEvents ?? [];
   const appendCompanionCallCount = opts.appendCompanionCallCount ?? { value: 0 };
+  const submitMessageCallCount = opts.submitMessageCallCount ?? { value: 0 };
 
   return {
     parseJsonBody: async (req: Request) => {
@@ -85,6 +84,7 @@ function makeContext(opts: {
     sessionBroker: {
       start: async () => {},
       submitMessage: async (input: SubmitMessageInput) => {
+        submitMessageCallCount.value += 1;
         const sessionId = input.sessionId ?? randomUUID();
         const session: MockSessionRecord = sessions.get(sessionId) ?? {
           id: sessionId,
@@ -272,6 +272,7 @@ describe('message routing: kind=message persists and emits runtime bus event (no
   let sessions: Map<string, MockSessionRecord>;
   let bindAgentCallCount: { value: number };
   let appendCompanionCallCount: { value: number };
+  let submitMessageCallCount: { value: number };
   let followupEvents: FollowupPayload[];
   let ctx: DaemonRuntimeRouteContext;
 
@@ -280,8 +281,9 @@ describe('message routing: kind=message persists and emits runtime bus event (no
     sessions = new Map([[sessionId, { id: sessionId, status: 'active', messageCount: 0 }]]);
     bindAgentCallCount = { value: 0 };
     appendCompanionCallCount = { value: 0 };
+    submitMessageCallCount = { value: 0 };
     followupEvents = [];
-    ctx = makeContext({ sessions, bindAgentCallCount, followupEvents, appendCompanionCallCount });
+    ctx = makeContext({ sessions, bindAgentCallCount, followupEvents, appendCompanionCallCount, submitMessageCallCount });
   });
 
   test('does NOT call bindAgent or submitMessage (short-circuits before spawn path)', async () => {
@@ -295,6 +297,7 @@ describe('message routing: kind=message persists and emits runtime bus event (no
     expect(res.status).toBe(202);
     // kind='message' short-circuits BEFORE submitMessage, no bindAgent spawn
     expect(bindAgentCallCount.value).toBe(0);
+    expect(submitMessageCallCount.value).toBe(0);
     // appendCompanionMessage must be called to persist the message
     expect(appendCompanionCallCount.value).toBe(1);
     // publishConversationFollowup must fire to emit COMPANION_MESSAGE_RECEIVED
@@ -459,125 +462,66 @@ describe('message routing: unknown kind returns 400', () => {
 });
 
 describe('gateway scoping: only TUI clients receive followup events', () => {
+  type Received = Array<{ event: string; payload: unknown }>;
 
-  /**
-   * Approach B: spy on publishConversationFollowup via a minimal fake gateway.
-   *
-   * The real router (router.ts) wires publishConversationFollowup to call:
-   *   gateway.publishEvent('conversation.followup.companion', payload, { clientKind: 'tui' })
-   *
-   * The load-bearing test below constructs that exact call path in miniature:
-   * a fake gateway with two registered clients (TUI + companion) and applies
-   * the clientKind filter, directly proving the filter excludes non-TUI clients.
-   *
-   * The cross-session-isolation test is kept below: it proves independent contexts
-   * never share envelope state (a separate, still-valid invariant).
-   */
+  function connect(gateway: ControlPlaneGateway, clientKind: 'tui' | 'web', clientId: string): Received {
+    const received: Received = [];
+    gateway.openWebSocketClient({ clientId, clientKind }, (event, payload) => { received.push({ event, payload }); });
+    return received;
+  }
 
-  // ---------------------------------------------------------------------------
-  // LOAD-BEARING: clientKind:'tui' filter excludes non-TUI subscribers
-  // ---------------------------------------------------------------------------
+  const followups = (received: Received) => received.filter((entry) => entry.event === 'conversation.followup.companion');
 
-  test('gateway filter clientKind:tui delivers followup to TUI subscriber, not companion subscriber', async () => {
-    // Minimal fake gateway: two clients, one TUI, one companion.
-    // Replicates the ControlPlaneGateway.publishEvent clientKind filter logic
-    // exactly as it exists in production (gateway.ts ~line 276).
-    type FakeClient = { kind: string; received: Array<{ event: string; payload: unknown }> };
-    const tuiClient: FakeClient = { kind: 'tui', received: [] };
-    const companionClient: FakeClient = { kind: 'companion', received: [] };
-    const fakeClients: FakeClient[] = [tuiClient, companionClient];
-
-    function fakePublishEvent(
-      event: string,
-      payload: unknown,
-      filter?: { clientKind?: string },
-    ): void {
-      for (const client of fakeClients) {
-        if (filter?.clientKind && client.kind !== filter.clientKind) continue;
-        client.received.push({ event, payload });
-      }
-    }
-
-    const sessionId = randomUUID();
-    const sessions = new Map([[sessionId, { id: sessionId, status: 'active', messageCount: 0 }]]);
-
-    // Wire publishConversationFollowup to call fakePublishEvent with { clientKind: 'tui' },
-    // matching router.ts in production.
-    const ctx = makeContext({
-      sessions,
+  // The handler publishes through the context's publishConversationFollowup, which the
+  // daemon router wires to the gateway with a tui-only filter. The gateway is real here, so
+  // the filter that decides who sees the message is the production one.
+  function gatewayContext(gateway: ControlPlaneGateway, sessionId: string): DaemonRuntimeRouteContext {
+    return makeContext({
+      sessions: new Map([[sessionId, { id: sessionId, status: 'active', messageCount: 0 }]]),
       publishConversationFollowup: (sid, envelope) => {
-        fakePublishEvent('conversation.followup.companion', { sessionId: sid, ...envelope }, { clientKind: 'tui' });
+        gateway.publishEvent('conversation.followup.companion', { sessionId: sid, ...envelope }, { clientKind: 'tui' });
       },
     });
+  }
 
-    const handlers = createDaemonRuntimeSessionRouteHandlers(ctx);
-    const req = makeRequest(
-      'POST',
-      `http://localhost/api/sessions/${sessionId}/messages`,
-      { body: 'Hello TUI only', kind: 'message' },
+  test('a followup reaches the TUI client and never a web client', async () => {
+    const gateway = new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() });
+    const tui = connect(gateway, 'tui', 'client-tui');
+    const web = connect(gateway, 'web', 'client-web');
+    const sessionId = randomUUID();
+    const handlers = createDaemonRuntimeSessionRouteHandlers(gatewayContext(gateway, sessionId));
+
+    const res = await handlers.postSharedSessionMessage(
+      sessionId,
+      makeRequest('POST', `http://localhost/api/sessions/${sessionId}/messages`, { body: 'Hello TUI only', kind: 'message' }),
     );
-    const res = await handlers.postSharedSessionMessage(sessionId, req);
     expect(res.status).toBe(202);
 
-    // TUI subscriber received the conversation.followup.companion event
-    expect(tuiClient.received).toHaveLength(1);
-    expect(tuiClient.received[0]!.event).toBe('conversation.followup.companion');
-
-    // Non-TUI (companion) subscriber received NOTHING, filter excluded it
-    expect(companionClient.received).toHaveLength(0);
+    const delivered = followups(tui);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.payload).toMatchObject({ sessionId, body: 'Hello TUI only' });
+    expect(followups(web)).toHaveLength(0);
   });
 
-  // ---------------------------------------------------------------------------
-  // cross-session-isolation: independent contexts maintain separate envelope state
-  // ---------------------------------------------------------------------------
-
-  test('cross-session-isolation: independent contexts maintain separate envelope state', async () => {
+  test('a followup posted to one session is delivered once, tagged with that session', async () => {
+    const gateway = new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() });
+    const tui = connect(gateway, 'tui', 'client-tui');
     const sessionIdA = randomUUID();
     const sessionIdB = randomUUID();
+    const handlersA = createDaemonRuntimeSessionRouteHandlers(gatewayContext(gateway, sessionIdA));
+    const handlersB = createDaemonRuntimeSessionRouteHandlers(gatewayContext(gateway, sessionIdB));
 
-    // Two independent contexts simulate two different gateway subscribers
-    const followupEventsA: FollowupPayload[] = [];
-    const followupEventsB: FollowupPayload[] = [];
-
-    const sessionsA = new Map([[sessionIdA, { id: sessionIdA, status: 'active', messageCount: 0 }]]);
-    const sessionsB = new Map([[sessionIdB, { id: sessionIdB, status: 'active', messageCount: 0 }]]);
-
-    const ctxA = makeContext({ sessions: sessionsA, followupEvents: followupEventsA });
-    const ctxB = makeContext({ sessions: sessionsB, followupEvents: followupEventsB });
-
-    const handlersA = createDaemonRuntimeSessionRouteHandlers(ctxA);
-
-    // Post a kind=message to session A
-    const req = makeRequest(
-      'POST',
-      `http://localhost/api/sessions/${sessionIdA}/messages`,
-      { body: 'Hello session A', kind: 'message' },
+    await handlersA.postSharedSessionMessage(
+      sessionIdA,
+      makeRequest('POST', `http://localhost/api/sessions/${sessionIdA}/messages`, { body: 'Hello session A', kind: 'message' }),
     );
-    const res = await handlersA.postSharedSessionMessage(sessionIdA, req);
-    expect(res.status).toBe(202);
+    expect(followups(tui).map((entry) => (entry.payload as { sessionId: string }).sessionId)).toEqual([sessionIdA]);
 
-    // Session A context received the event
-    expect(followupEventsA).toHaveLength(1);
-    expect(followupEventsA[0]!.sessionId).toBe(sessionIdA);
-
-    // Session B context (different subscriber) received zero events
-    expect(followupEventsB).toHaveLength(0);
-
-    // Confirm no cross-session contamination: the event sessionId is A, not B
-    expect(followupEventsA[0]!.sessionId).not.toBe(sessionIdB);
-
-    // Confirm ctxB handlers for session B would produce their own isolated events
-    const handlersB = createDaemonRuntimeSessionRouteHandlers(ctxB);
-    const reqB = makeRequest(
-      'POST',
-      `http://localhost/api/sessions/${sessionIdB}/messages`,
-      { body: 'Hello session B', kind: 'message' },
+    await handlersB.postSharedSessionMessage(
+      sessionIdB,
+      makeRequest('POST', `http://localhost/api/sessions/${sessionIdB}/messages`, { body: 'Hello session B', kind: 'message' }),
     );
-    await handlersB.postSharedSessionMessage(sessionIdB, reqB);
-    expect(followupEventsB).toHaveLength(1);
-    expect(followupEventsB[0]!.sessionId).toBe(sessionIdB);
-    // A still has only 1 event (no bleed from B)
-    expect(followupEventsA).toHaveLength(1);
+    expect(followups(tui).map((entry) => (entry.payload as { sessionId: string }).sessionId)).toEqual([sessionIdA, sessionIdB]);
   });
 });
 
@@ -608,84 +552,5 @@ describe('body size handling', () => {
     expect(res.status).toBe(202);
     expect(followupEvents).toHaveLength(1);
     expect(followupEvents[0]!.envelope.body).toBe(oversizedBody);
-  });
-});
-
-describe('envelope shape consistency: chat-mode vs follow-up mode', () => {
-  /**
-   * Cross-cutting test: asserts that CompanionChatTurnStartedEvent.envelope and
-   * ConversationMessageEnvelope share the same structural shape. TypeScript ensures
-   * this at compile time; here we verify at runtime by constructing both and
-   * asserting structural equivalence.
-   */
-  test('ConversationMessageEnvelope fields are a structural subset of turn.started envelope', () => {
-    const envelope: ConversationMessageEnvelope = {
-      sessionId: 'sess-1',
-      messageId: 'msg-1',
-      body: 'Hello',
-      source: 'companion-chat-user',
-      timestamp: Date.now(),
-    };
-
-    // Simulate what _runTurn emits on turn.started
-    const turnStartedPayload: CompanionChatTurnStartedEvent = {
-      type: 'turn.started',
-      sessionId: envelope.sessionId,
-      messageId: envelope.messageId,
-      turnId: randomUUID(),
-      envelope,
-    };
-
-    expect(turnStartedPayload.envelope).not.toBeUndefined(); // presence-only: envelope field
-    expect(turnStartedPayload.envelope.sessionId).toBe(envelope.sessionId);
-    expect(turnStartedPayload.envelope.messageId).toBe(envelope.messageId);
-    expect(turnStartedPayload.envelope.body).toBe(envelope.body);
-    expect(turnStartedPayload.envelope.source).toBe('companion-chat-user');
-    expect(typeof turnStartedPayload.envelope.timestamp).toBe('number');
-  });
-
-  test('ConversationMessageEnvelope fields are a structural subset of turn.completed envelope', () => {
-    const envelope: ConversationMessageEnvelope = {
-      sessionId: 'sess-1',
-      messageId: 'assistant-msg-1',
-      body: 'Hello from assistant',
-      source: 'companion-chat-assistant',
-      timestamp: Date.now(),
-    };
-
-    const turnCompletedPayload: CompanionChatTurnCompletedEvent = {
-      type: 'turn.completed',
-      sessionId: envelope.sessionId,
-      turnId: randomUUID(),
-      assistantMessageId: envelope.messageId,
-      envelope,
-    };
-
-    expect(turnCompletedPayload.envelope).not.toBeUndefined(); // presence-only: envelope field
-    expect(turnCompletedPayload.envelope.source).toBe('companion-chat-assistant');
-    expect(turnCompletedPayload.envelope.body).toBe('Hello from assistant');
-  });
-
-  test('follow-up mode follow-up envelope is structurally identical to chat-mode envelope', () => {
-    // Both must satisfy ConversationMessageEnvelope, confirmed by TypeScript.
-    // At runtime: verify that a companion-message envelope and a chat-mode envelope
-    // have exactly the same required keys.
-    const chatEnvelope: ConversationMessageEnvelope = {
-      sessionId: 'sess-1',
-      messageId: 'msg-1',
-      body: 'test',
-      source: 'companion-chat-user',
-      timestamp: 1000,
-    };
-    const followupEnvelope: ConversationMessageEnvelope = {
-      sessionId: 'sess-1',
-      messageId: 'msg-2',
-      body: 'test',
-      source: 'companion-followup',
-      timestamp: 1000,
-    };
-    const chatKeys = Object.keys(chatEnvelope).sort();
-    const followupKeys = Object.keys(followupEnvelope).sort();
-    expect(chatKeys).toEqual(followupKeys);
   });
 });

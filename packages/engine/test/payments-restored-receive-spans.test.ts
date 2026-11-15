@@ -1,5 +1,5 @@
 /** Native cursor, account, ingress and encrypted archive are real; only the
- * Telegram wire and judgment answers are synthetic. Not executed in coding phase. */
+ * Telegram wire and judgment answers are synthetic. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
 import { requireShellPaths } from './runtime-services.ts';
@@ -10,7 +10,7 @@ export function registerIncidentRuntimeCommands(registry: CommandRegistry): void
     name: 'incident',
     aliases: [],
     description: 'Open, export, and capture incident review bundles',
-    usage: '[open | latest | show <id|latest> | export <id|latest> <path> | capture <id|latest>]',
+    usage: '[open | latest | show <id|latest> | export <id|latest> <path> [--overwrite] | capture <id|latest>]',
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const subcommand = (args[0] ?? 'open').toLowerCase();
@@ -33,7 +33,7 @@ export function registerIncidentRuntimeCommands(registry: CommandRegistry): void
         : forensicRegistry.getById(requestedId);
       if (subcommand === 'latest' || subcommand === 'show') {
         if (!report) {
-          ctx.print('No incident bundle is available.');
+          ctx.print(requestedId && requestedId !== 'latest' ? `Incident not found: ${requestedId}` : 'No incident bundle is available.');
           return;
         }
         const bundle = forensicRegistry.buildBundle(report.id);
@@ -55,7 +55,7 @@ export function registerIncidentRuntimeCommands(registry: CommandRegistry): void
       if (subcommand === 'export') {
         const pathArg = args[2];
         if (!requestedId || !pathArg) {
-          ctx.print('Usage: /incident export <id|latest> <path>');
+          ctx.print('Usage: /incident export <id|latest> <path> [--overwrite]');
           return;
         }
         if (!report) {
@@ -68,6 +68,10 @@ export function registerIncidentRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         const targetPath = shellPaths.resolveWorkspacePath(pathArg);
+        if (existsSync(targetPath) && !args.includes('--overwrite')) {
+          ctx.print(`${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
+          return;
+        }
         mkdirSync(dirname(targetPath), { recursive: true });
         writeFileSync(targetPath, `${bundleJson}\n`, 'utf-8');
         ctx.print(`Exported incident bundle ${report.id} to ${targetPath}`);
@@ -85,11 +89,19 @@ export function registerIncidentRuntimeCommands(registry: CommandRegistry): void
           ctx.print(`Failed to build incident bundle for ${report.id}.`);
           return;
         }
-        const record = await memory.add(buildIncidentMemoryAddOptions(bundle));
+        // One durable record per incident: the id tag is what a repeat capture looks for.
+        const incidentTag = `incident:${report.id}`;
+        const existing = await memory.list({ cls: 'incident', tags: [incidentTag], limit: 1 });
+        if (existing[0]) {
+          ctx.print(`Incident ${report.id} is already in durable memory as ${existing[0].id}; nothing was added.`);
+          return;
+        }
+        const options = buildIncidentMemoryAddOptions(bundle);
+        const record = await memory.add({ ...options, tags: [...(options.tags ?? []), incidentTag] });
         ctx.print(`Captured incident ${report.id} into durable memory as ${record.id}`);
         return;
       }
-      ctx.print('Usage: /incident [open | latest | show <id|latest> | export <id|latest> <path> | capture <id|latest>]');
+      ctx.print('Usage: /incident [open | latest | show <id|latest> | export <id|latest> <path> [--overwrite] | capture <id|latest>]');
     },
   });
 }

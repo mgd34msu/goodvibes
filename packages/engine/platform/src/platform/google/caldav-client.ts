@@ -47,6 +47,8 @@ export interface CalDavHttpRequest {
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: string;
+  /** Aborts the request; the port also applies its own timeout. */
+  readonly signal?: AbortSignal;
 }
 
 export interface CalDavHttpPort {
@@ -193,15 +195,25 @@ function buildCalendarQueryBody(start: Date, end: Date): string {
 export interface CalDavClientOptions {
   readonly http: CalDavHttpPort;
   readonly auth: CalDavAuth;
+  /** Passed to every request, so a cancelled tool call stops waiting on the server. */
+  readonly signal?: AbortSignal;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
 export class CalDavClient {
   private readonly http: CalDavHttpPort;
   private readonly auth: CalDavAuth;
+  private readonly signal: AbortSignal | undefined;
+  /** The server this client talks to: set by the first request, the only origin the credentials may reach. */
+  private pinnedOrigin: string | null = null;
 
   constructor(options: CalDavClientOptions) {
     this.http = options.http;
     this.auth = options.auth;
+    this.signal = options.signal;
   }
 
   /** PROPFIND Depth 0 for `current-user-principal`. */
@@ -258,6 +270,9 @@ export class CalDavClient {
     calendarUrl: string,
     range: { readonly start: Date; readonly end: Date },
   ): Promise<CalDavResult<{ readonly events: readonly CalDavListedEvent[] }>> {
+    if (Number.isNaN(range.start.getTime()) || Number.isNaN(range.end.getTime())) {
+      return { ok: false, problem: 'the time range for the calendar query is not a valid date', fix: 'give a valid start and end' };
+    }
     const sent = await this.send('REPORT', calendarUrl, buildCalendarQueryBody(range.start, range.end), '1');
     if (!sent.ok) return sent;
     const entries = parseMultistatus(sent.body);
@@ -316,6 +331,32 @@ export class CalDavClient {
     body: string,
     depth: '0' | '1',
   ): Promise<CalDavResult<{ readonly body: string }>> {
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch {
+      return { ok: false, problem: 'the calendar server address is not a valid URL', fix: 'check the server address' };
+    }
+    if (this.pinnedOrigin === null) {
+      // Credentials go only to a server the person chose, over TLS (a
+      // loopback server is exempt, for local testing).
+      if (target.protocol !== 'https:' && !(target.protocol === 'http:' && isLoopbackHost(target.hostname))) {
+        return {
+          ok: false,
+          problem: 'the calendar server address does not use https, so the account credentials would travel unprotected',
+          fix: 'use the https address of the calendar server',
+        };
+      }
+      this.pinnedOrigin = target.origin;
+    } else if (target.origin !== this.pinnedOrigin) {
+      // Hrefs come from the server's own answers: one naming another host
+      // must not receive the Authorization header.
+      return {
+        ok: false,
+        problem: `the calendar server pointed to a different address (${target.origin}), and the account credentials were not sent there`,
+        fix: 'use the calendar server address that your provider documents for this account',
+      };
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/xml; charset=utf-8',
       Depth: depth,
@@ -323,7 +364,7 @@ export class CalDavClient {
     };
     let response: CalDavHttpResponse;
     try {
-      response = await this.http.request({ method, url, headers, body });
+      response = await this.http.request({ method, url, headers, body, ...(this.signal ? { signal: this.signal } : {}) });
     } catch (error) {
       return {
         ok: false,

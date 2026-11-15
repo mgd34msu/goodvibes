@@ -85,13 +85,13 @@ function cockpitStatusColor(status: AssistantCockpitStatus): string {
 }
 
 function cockpitLaneColor(state: AssistantCockpitLaneState): string {
-  return state === 'attention' ? PALETTE.warn : state === 'setup' ? PALETTE.info : PALETTE.good;
+  return state === 'attention' ? PALETTE.warn : state === 'setup' || state === 'unmeasured' ? PALETTE.info : PALETTE.good;
 }
 
 function cockpitLaneLine(lane: AssistantCockpitLane): ContextLine {
-  const state = lane.state === 'attention' ? 'Attention' : lane.state === 'setup' ? 'Setup' : 'Ready';
+  const state = lane.state === 'attention' ? 'Attention' : lane.state === 'setup' ? 'Setup' : lane.state === 'unmeasured' ? 'Not measured' : 'Ready';
   return {
-    text: `${state}: ${lane.label} - ${compactText(lane.summary, 40)}`,
+    text: lane.state === 'unmeasured' ? `${state}: ${lane.label}` : `${state}: ${lane.label} - ${compactText(lane.summary, 40)}`,
     fg: cockpitLaneColor(lane.state),
     bold: lane.state === 'attention',
   };
@@ -160,6 +160,16 @@ function compactLocalLibraryLines(
     lines.push({ text: `Missing setup: ${selected.missingRequirements.join(', ')}`, fg: PALETTE.warn });
   }
   return lines;
+}
+
+/** Email and calendar posture from what is configured, not a fixed instruction. */
+function emailCalendarLine(snapshot: AgentWorkspaceRuntimeSnapshot): ContextLine {
+  const email = snapshot.emailConnectStatus?.connected === true;
+  const calendar = snapshot.calendarOAuthConfigStatus?.google === true || snapshot.calendarOAuthConfigStatus?.microsoft === true;
+  if (email && calendar) return { text: 'Email/calendar: email connected; calendar sign-in configured.', fg: PALETTE.good };
+  if (email) return { text: 'Email/calendar: email connected; calendar connector setup still needed for agenda workflows.', fg: PALETTE.warn };
+  if (calendar) return { text: 'Email/calendar: calendar sign-in configured; email connector setup still needed for inbox triage.', fg: PALETTE.warn };
+  return { text: 'Email/calendar: connector setup needed before inbox triage or agenda workflows are first-class.', fg: PALETTE.warn };
 }
 
 type LocalRoutineItem = AgentWorkspaceRuntimeSnapshot['localRoutines'][number];
@@ -418,7 +428,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: `Embedding: ${snapshot.embeddingProvider}; reasoning ${snapshot.reasoningEffort}.`, fg: PALETTE.info },
       { text: `Helper: ${snapshot.helperEnabled ? 'enabled' : 'disabled'}; Tool LLM: ${snapshot.toolLlmEnabled ? 'enabled' : 'disabled'}.`, fg: snapshot.helperEnabled || snapshot.toolLlmEnabled ? PALETTE.good : PALETTE.muted },
       { text: 'Route readiness: scores, missing signals, pinned state, and safe route keys via models action:"status".', fg: PALETTE.good },
-      { text: 'Local cookbook: Ollama first, llama.cpp offline, vLLM for GPU throughput.', fg: PALETTE.good },
+      { text: 'Tip: for local models, Ollama first, llama.cpp offline, vLLM for GPU throughput.', fg: PALETTE.muted },
       { text: 'Local servers: endpoint map, model-list smoke checks, and refresh routes before benchmarks.', fg: PALETTE.good },
       { text: 'Benchmark evidence: run local compare, review saved judgments, then apply routes separately.', fg: PALETTE.info },
       { text: `Cache: ${snapshot.cacheEnabled ? snapshot.cacheStableTtl : 'off'}; monitor ${snapshot.cacheMonitorHitRate ? snapshot.cacheHitRateWarningThreshold : 'off'}; failure hints ${snapshot.providerFailureHints ? 'on' : 'off'}.`, fg: snapshot.cacheEnabled ? PALETTE.info : PALETTE.muted },
@@ -441,7 +451,6 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     base.push(
       { text: `Theme: ${snapshot.theme}; streaming ${snapshot.stream ? 'on' : 'off'}; line numbers ${snapshot.lineNumbers}.`, fg: PALETTE.info },
       { text: `Messages: operational ${snapshot.operationalMessages}; system ${snapshot.systemMessages}.`, fg: PALETTE.info },
-      { text: `Release channel: ${snapshot.releaseChannel}.`, fg: PALETTE.muted },
     );
   } else if (category.id === 'onboarding-channels') {
     const enabledCount = snapshot.channels.filter((channel) => channel.enabled).length;
@@ -457,9 +466,10 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
     );
   } else if (category.id === 'onboarding-voice-media') {
     const readiness = snapshot.voiceMediaReadiness;
+    const agentEnvOnly = [...readiness.voiceProviders, ...readiness.mediaProviders].filter((provider) => provider.setupState === 'ready-agent-env').length;
     base.push(
       { text: `Voice: ${snapshot.voiceSurfaceEnabled ? 'enabled' : 'disabled'}; TTS ${snapshot.ttsProvider}; voice ${snapshot.ttsVoice}.`, fg: snapshot.voiceSurfaceEnabled ? PALETTE.good : PALETTE.info },
-      { text: `Media readiness: ${readiness.readyMediaProviderCount}/${snapshot.mediaProviderCount}; generation providers ${snapshot.mediaGenerationProviderCount}.`, fg: readiness.readyMediaProviderCount > 0 ? PALETTE.good : PALETTE.muted },
+      { text: `Media readiness: ${readiness.readyMediaProviderCount}/${snapshot.mediaProviderCount}; generation providers ${snapshot.mediaGenerationProviderCount}.${agentEnvOnly > 0 ? ` ${agentEnvOnly} more have a key in this Agent environment only (host not checked).` : ''}`, fg: readiness.readyMediaProviderCount > 0 ? PALETTE.good : PALETTE.muted },
       { text: `Telephony channel: ${snapshot.channels.find((channel) => channel.id === 'telephony')?.setupState ?? 'disabled'}.`, fg: PALETTE.info },
     );
   } else if (category.id === 'onboarding-context') {
@@ -501,7 +511,7 @@ export function snapshotLines(workspace: AgentWorkspace, category: AgentWorkspac
       { text: 'Review queue: saved inbox threads/calendar events, refresh routes, and follow-up boundaries stay in one read-only list.', fg: PALETTE.good },
       { text: 'Autonomy queue: inspect owners, status, and cancel/recovery routes before adding background work.', fg: PALETTE.good },
       { text: `Delivery: ${readyChannels}/${snapshot.channels.length} channels ready; ${enabledChannels} enabled; ${configuredTargets} configured target(s).`, fg: readyChannels > 0 ? PALETTE.good : PALETTE.warn },
-      { text: 'Email/calendar: connector setup needed before inbox triage or agenda workflows are first-class.', fg: PALETTE.warn },
+      emailCalendarLine(snapshot),
       { text: 'Model route: personal_ops action:"briefing|status|queue|intake|lane|read".', fg: PALETTE.muted },
     );
   } else if (category.id === 'knowledge') {

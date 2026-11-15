@@ -30,6 +30,7 @@ import {
 } from '../../renderer/terminal-palette.ts';
 import { activeTheme, refreshForTerminalPalette, resolveTheme, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { withTimers } from '../helpers/fake-timers.ts';
 
 afterEach(() => {
   setActiveThemeName('goodvibes');
@@ -68,8 +69,6 @@ function expectedFullPalette(): TerminalPalette {
 function makeProbe(out: PaletteProbeResolution[], timeoutMs = 1_000): TerminalPaletteProbe {
   return new TerminalPaletteProbe({ timeoutMs, onResolve: (r) => out.push(r) });
 }
-
-const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
 // parseOscColorToHex
@@ -121,22 +120,6 @@ describe('parseOscColorToHex', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Query bytes + budget
-// ---------------------------------------------------------------------------
-
-describe('palette queries and budget', () => {
-  test('PALETTE_QUERIES is ST-terminated OSC 10 then OSC 4;0..15 in order', () => {
-    let expected = '\x1b]10;?\x1b\\';
-    for (let i = 0; i < 16; i++) expected += `\x1b]4;${i};?\x1b\\`;
-    expect(PALETTE_QUERIES).toBe(expected);
-  });
-
-  test('palette window is the background window (150 ms) plus a 25 ms margin', () => {
-    expect(DEFAULT_PROBE_TIMEOUT_MS).toBe(150);
-    expect(PALETTE_PROBE_TIMEOUT_MS).toBe(DEFAULT_PROBE_TIMEOUT_MS + 25);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // TerminalPaletteProbe.feed
@@ -240,13 +223,16 @@ describe('TerminalPaletteProbe.feed', () => {
     expect(out[0]?.palette.background).toBe('#ffffff');
   });
 
-  test('partial replies then timeout: answered slots kept, rest undefined, fragment discarded', async () => {
+  test('partial replies then timeout: answered slots kept, rest undefined, fragment discarded', () => {
+    withTimers((advance) => {
     const out: PaletteProbeResolution[] = [];
     const probe = makeProbe(out, 15);
     probe.startTimeout();
     const s = osc('11', 'rgb:10/20/30') + ansiReply(1, 'rgb:ff/00/00') + 'k' + '\x1b]4;2;rgb:00/ff';
     expect(probe.feed(s)).toBe('k');
-    await wait(40);
+    advance(14);
+    expect(out.length).toBe(0);
+    advance(1);
     expect(out.length).toBe(1);
     const res = out[0]!;
     expect(res.reason).toBe('timeout');
@@ -257,28 +243,33 @@ describe('TerminalPaletteProbe.feed', () => {
     expect(res.palette.ansi[1]).toBe('#ff0000');
     expect(res.palette.ansi[2]).toBeUndefined();
     expect(probe.feed('typed')).toBe('typed');
+    });
   });
 
-  test('no replies → timeout with an all-undefined palette', async () => {
-    const out: PaletteProbeResolution[] = [];
-    const probe = makeProbe(out, 10);
-    probe.startTimeout();
-    await wait(30);
-    expect(out).toEqual([{
-      palette: { ansi: new Array(16).fill(undefined) },
-      reason: 'timeout',
-      replies: 0,
-    }]);
+  test('no replies → timeout with an all-undefined palette', () => {
+    withTimers((advance) => {
+      const out: PaletteProbeResolution[] = [];
+      const probe = makeProbe(out, 10);
+      probe.startTimeout();
+      advance(10);
+      expect(out).toEqual([{
+        palette: { ansi: new Array(16).fill(undefined) },
+        reason: 'timeout',
+        replies: 0,
+      }]);
+    });
   });
 
-  test('resolves once: replies after timeout pass through untouched', async () => {
-    const out: PaletteProbeResolution[] = [];
-    const probe = makeProbe(out, 10);
-    probe.startTimeout();
-    await wait(30);
-    const late = fullReplies();
-    expect(probe.feed(late)).toBe(late);
-    expect(out.length).toBe(1);
+  test('resolves once: replies after timeout pass through untouched', () => {
+    withTimers((advance) => {
+      const out: PaletteProbeResolution[] = [];
+      const probe = makeProbe(out, 10);
+      probe.startTimeout();
+      advance(10);
+      const late = fullReplies();
+      expect(probe.feed(late)).toBe(late);
+      expect(out.length).toBe(1);
+    });
   });
 });
 
@@ -370,19 +361,21 @@ describe('installBackgroundThemeProbe: palette batching', () => {
     expect(getTerminalPalette()).toEqual(expectedFullPalette());
   });
 
-  test('auto: background times out first, late OSC 11 still consumed by the palette filter', async () => {
-    const paletteResults: PaletteProbeResolution[] = [];
-    const handle = installBackgroundThemeProbe({
-      applyThemeMode: setActiveThemeMode,
-      configManager: fakeConfig('auto'), isTTY: true, probePalette: true,
-      timeoutMs: 5, paletteTimeoutMs: 1_000,
-      writeQuery: () => {}, requestRepaint: () => {},
-      onPaletteResolve: (r) => paletteResults.push(r),
+  test('auto: background times out first, late OSC 11 still consumed by the palette filter', () => {
+    withTimers((advance) => {
+      const paletteResults: PaletteProbeResolution[] = [];
+      const handle = installBackgroundThemeProbe({
+        applyThemeMode: setActiveThemeMode,
+        configManager: fakeConfig('auto'), isTTY: true, probePalette: true,
+        timeoutMs: 5, paletteTimeoutMs: 1_000,
+        writeQuery: () => {}, requestRepaint: () => {},
+        onPaletteResolve: (r) => paletteResults.push(r),
+      });
+      advance(5);
+      expect(handle.filterInput(fullReplies())).toBe('');
+      expect(paletteResults[0]?.reason).toBe('complete');
+      expect(activeTheme()).toBe(resolveTheme('dark'));
     });
-    await wait(20);
-    expect(handle.filterInput(fullReplies())).toBe('');
-    expect(paletteResults[0]?.reason).toBe('complete');
-    expect(activeTheme()).toBe(resolveTheme('dark'));
   });
 
   test('forced light + TTY: palette batch still goes out and is collected', () => {
@@ -411,7 +404,8 @@ describe('installBackgroundThemeProbe: palette batching', () => {
     expect(getTerminalPalette()).toBeNull();
   });
 
-  test('no replies: palette window closes and stores an all-undefined palette', async () => {
+  test('no replies: palette window closes and stores an all-undefined palette', () => {
+    withTimers((advance) => {
     const paletteResults: PaletteProbeResolution[] = [];
     installBackgroundThemeProbe({
       applyThemeMode: setActiveThemeMode,
@@ -420,9 +414,12 @@ describe('installBackgroundThemeProbe: palette batching', () => {
       writeQuery: () => {}, requestRepaint: () => {},
       onPaletteResolve: (r) => paletteResults.push(r),
     });
-    await wait(40);
+    advance(14);
+    expect(paletteResults).toEqual([]);
+    advance(1);
     expect(paletteResults.map((r) => r.reason)).toEqual(['timeout']);
     expect(getTerminalPalette()).toEqual({ ansi: new Array(16).fill(undefined) });
+    });
   });
 });
 

@@ -68,10 +68,11 @@ test('invalid shutdown ownership refuses before token acquisition', () => {
 
 test('token publication failure exits unsuccessfully before acquiring the runtime', async () => {
   const f = fixture();
-  const rename = fs.renameSync;
-  const failure = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-    if (String(to) === f.tokenPath) throw new Error('Synthetic token publication failure');
-    return rename(from, to);
+  // A first token is staged beside the store and linked into place, so the link is the publication step.
+  const link = fs.linkSync;
+  const failure = spyOn(fs, 'linkSync').mockImplementation((from, to) => {
+    if (String(to) === f.tokenPath) throw Object.assign(new Error('Synthetic token publication failure'), { code: 'EIO' });
+    return link(from, to);
   });
   try {
     const handle = runConfiguredDaemonCli(f.configuration, f.runtime, f.env, { process: f.target });

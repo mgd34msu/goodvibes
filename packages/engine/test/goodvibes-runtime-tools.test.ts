@@ -9,6 +9,8 @@ import {
   createGoodVibesContextTool,
   createGoodVibesSettingsTool,
 } from '../platform/src/platform/tools/goodvibes-runtime/index.js';
+import { isSecretBearingConfigKey } from '../platform/src/platform/config/secret-bearing-config-keys.js';
+import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { useConfigReadings } from './_helpers/config-readings.ts';
 
 function makeConfigManager(): ConfigManager {
@@ -166,6 +168,43 @@ describe('what the runtime tools show of a stored value', () => {
 
     expect(result.output).toContain('"source": "goodvibes-secret-ref"');
     expect(valueReadings()).toHaveLength(0);
+  });
+
+  const customStringKeys = (configManager: ConfigManager, count: number): string[] => configManager.getSchema()
+    .filter((setting) => setting.type === 'string' && setting.validate === undefined && !isSecretBearingConfigKey(setting.key) && setting.key !== 'surfaces.ntfy.topic')
+    .map((setting) => setting.key)
+    .filter((key) => { try { configManager.set(key as never, `custom-${key}` as never); return configManager.get(key as never) === `custom-${key}`; } catch { return false; } })
+    .slice(0, count);
+
+  test('a full config dump reads each distinct value once, and a second dump reads none', async () => {
+    const configManager = makeConfigManager();
+    const keys = customStringKeys(configManager, 50);
+    expect(keys.length).toBeGreaterThan(10);
+    const tool = createGoodVibesContextTool(makeDeps(configManager));
+    const before = valueReadings().length;
+    await tool.execute({ mode: 'config_get', includeSchema: false });
+    const first = valueReadings().length - before;
+    expect(first).toBeGreaterThanOrEqual(keys.length);
+    await tool.execute({ mode: 'config_get', includeSchema: false });
+    expect(valueReadings().length - before).toBe(first);
+  });
+
+  test('limit bounds a config dump and says how much was left out', async () => {
+    const result = await createGoodVibesContextTool(makeDeps()).execute({ mode: 'config_get', limit: 10, includeSchema: false });
+    const body = JSON.parse(result.output!) as { settings: unknown[]; truncated?: { returned: number; total: number } };
+    expect(body.settings).toHaveLength(10);
+    expect(body.truncated?.returned).toBe(10);
+    expect(body.truncated!.total).toBeGreaterThan(10);
+  });
+
+  test('a value read while decision models were off is read again when they are on', async () => {
+    const configManager = makeConfigManager();
+    configManager.set('surfaces.ntfy.topic', 'plainlooking-topic-9aB3xQ');
+    const tool = createGoodVibesContextTool(makeDeps(configManager));
+    const classic = await withDecisionModelPolicy(() => 'Classic - Off', () => tool.execute({ mode: 'config_get', key: 'surfaces.ntfy.topic' }));
+    expect(classic.output).toContain('plainlooking-topic-9aB3xQ');
+    const decided = await tool.execute({ mode: 'config_get', key: 'surfaces.ntfy.topic' });
+    expect(decided.output).not.toContain('plainlooking-topic-9aB3xQ');
   });
 
   test('the schema default is not read: it is the same text on every install', async () => {

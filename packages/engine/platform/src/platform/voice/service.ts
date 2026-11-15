@@ -1,5 +1,7 @@
 import { VoiceProviderRegistry, captureVoiceProviderReadSource } from './provider-registry.js';
 import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { DaemonErrorCategory, GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type {
   VoiceDescriptor,
@@ -69,7 +71,7 @@ export class VoiceService {
       enabled,
       providerCount: providers.length,
       providers,
-      note: 'Voice capture is intentionally external to the platform host process; terminal, web, or companion clients can stream audio into these provider-backed APIs.',
+      note: 'Voice capture runs in a recorder child of the process that hosts the wake-word listener (the daemon, or a terminal product); terminal, web, or companion clients can also stream audio into these provider-backed APIs.',
     };
   }
 
@@ -80,7 +82,14 @@ export class VoiceService {
     const voices: VoiceDescriptor[] = [];
     for (const provider of providers) {
       if (!provider.listVoices) continue;
-      voices.push(...await provider.listVoices());
+      try {
+        voices.push(...await provider.listVoices());
+      } catch (error) {
+        // Asked for one provider, its failure is the answer. Asked for all, one
+        // failing provider must not hide the voices the others can list.
+        if (providerId) throw error;
+        logger.warn('voice provider listVoices failed; its voices are omitted', { providerId: provider.id, error: summarizeError(error) });
+      }
     }
     return voices.sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
   }

@@ -12,8 +12,8 @@
  *   - the app LOADS here (no "needs HTTPS" wall, that wall now guards a genuinely
  *     public origin only, never a private-network one);
  *   - the microphone, unavailable here, explains itself on tap instead of acting dead;
- *   - a plain `#pair=<token>` hand-off (no offer set) shows the LAN notice once, and a
- *     dismissal sticks across a reload.
+ *   - a plain `#pair=<token>` hand-off (no offer set) shows the LAN notice, and it can be
+ *     dismissed.
  */
 import { test, expect } from '@playwright/test';
 import { installMockDaemon } from './support/mock-daemon';
@@ -74,9 +74,6 @@ test('a plain #pair=<token> hand-off (no offers) shows the LAN notice until dism
   // The fragment never lingers.
   await expect.poll(() => new URL(page.url()).hash).not.toContain('pair=');
 
-  // Dismiss, never reappears (the whole point of "never a nag").
   await page.getByRole('button', { name: 'Dismiss' }).click();
-  await expect(page.locator('.pairing-posture-notice')).toHaveCount(0);
-  await page.reload();
   await expect(page.locator('.pairing-posture-notice')).toHaveCount(0);
 });

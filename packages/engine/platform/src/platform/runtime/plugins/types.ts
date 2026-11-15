@@ -202,4 +202,19 @@ export interface PluginLifecycleManagerOptions {
    * When omitted, the manager creates an isolated in-memory bus.
    */
   runtimeBus?: import('../events/index.js').RuntimeEventBus | undefined;
+  /**
+   * Trust store to read and write tiers in. Pass the persisted store so a tier set here and the one
+   * the host enforces are the same record. Defaults to a store private to this manager.
+   */
+  trustStore?: import('./trust.js').PluginTrustStore | undefined;
+  /**
+   * Quarantine engine to apply and consult. Pass the persisted engine so a restored quarantine is
+   * in force for plugins registered here. Defaults to an engine private to this manager.
+   */
+  quarantine?: import('./quarantine.js').PluginQuarantineEngine | undefined;
 }
+
+/** What `PluginLifecycleManager.unloadPlugin` did: the plugin is now disabled, or the reason it was left as it was. */
+export type PluginUnloadResult =
+  | { readonly unloaded: true; /** Set when the plugin's cleanup threw; the plugin is still disabled. */ readonly cleanupError?: string | undefined }
+  | { readonly unloaded: false; readonly reason: string };

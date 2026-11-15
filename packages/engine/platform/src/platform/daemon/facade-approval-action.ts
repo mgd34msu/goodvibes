@@ -4,6 +4,8 @@ interface InteractiveApprovalContext {
   readonly broker: Pick<ApprovalBroker, 'claimApproval' | 'resolveApproval' | 'cancelApproval'>;
   parseBody(request: Request): Promise<Record<string, unknown> | Response | null>;
   actor(request: Request): string;
+  /** The surface the answer came from; absent means the web API. */
+  surface?(request: Request): string;
   record(request: Request, path: string, response: Response): Response;
 }
 
@@ -15,17 +17,20 @@ export async function handleInteractiveApprovalAction(
   req: Request,
 ): Promise<Response> {
   const body = await context.parseBody(req);
-  const payload = body instanceof Response || body === null ? {} : body;
+  // A body that could not be read must not become an approve/deny without its note or remember choice.
+  if (body instanceof Response) return body;
+  const payload = body ?? {};
   const actor = context.actor(req);
+  const surface = context.surface?.(req) ?? 'web';
   const note = typeof payload.note === 'string' ? payload.note : undefined;
   if (action === 'claim') {
-    const approval = await context.broker.claimApproval(approvalId, actor, 'web', note);
+    const approval = await context.broker.claimApproval(approvalId, actor, surface, note);
     return approval
       ? context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
       : context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ error: 'Unknown approval' }, { status: 404 }));
   }
   if (action === 'cancel') {
-    const approval = await context.broker.cancelApproval(approvalId, actor, 'web', note);
+    const approval = await context.broker.cancelApproval(approvalId, actor, surface, note);
     return approval
       ? context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
       : context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({ error: 'Unknown approval' }, { status: 404 }));
@@ -37,7 +42,7 @@ export async function handleInteractiveApprovalAction(
     disposition: action === 'approve' ? 'approved' : 'denied',
     remember: typeof payload.remember === 'boolean' ? payload.remember : false,
     actor,
-    actorSurface: 'web',
+    actorSurface: surface,
     note,
   });
   return approval

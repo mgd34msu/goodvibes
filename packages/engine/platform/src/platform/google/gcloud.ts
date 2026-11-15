@@ -36,6 +36,17 @@ import type { GoogleCommandPort, GoogleCommandResult } from './types.js';
 export const GCLOUD_DEFAULT_DOWNLOAD_URL =
   'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz';
 
+/**
+ * The archive name Google publishes for a platform, or null where there is no
+ * no-root tarball (Windows, other architectures).
+ */
+export function gcloudArchiveName(os: string, arch: string): string | null {
+  const osName = os === 'linux' ? 'linux' : os === 'darwin' ? 'darwin' : null;
+  const archName = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'arm' : null;
+  if (osName === null || archName === null) return null;
+  return `google-cloud-cli-${osName}-${archName}.tar.gz`;
+}
+
 /** Default per-command wall clock for the gcloud driver. */
 export const GCLOUD_DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -69,6 +80,8 @@ async function tryVersion(port: GoogleCommandPort, executable: string): Promise<
 export interface InstallOptions {
   readonly homeDirectory: string;
   readonly downloadUrl?: string;
+  /** The machine to pick the archive for. Defaults to this process's platform and architecture. */
+  readonly platform?: { readonly os: string; readonly arch: string };
 }
 export interface InstallAlreadyInstalled {
   readonly ok: true;
@@ -94,7 +107,6 @@ export type InstallResult = InstallAlreadyInstalled | InstallInstalled | Install
  */
 export async function installGcloud(port: GoogleCommandPort, options: InstallOptions): Promise<InstallResult> {
   const { homeDirectory } = options;
-  const downloadUrl = options.downloadUrl ?? GCLOUD_DEFAULT_DOWNLOAD_URL;
   const binaryPath = `${homeDirectory}/google-cloud-sdk/bin/gcloud`;
 
   const already = await tryVersion(port, binaryPath);
@@ -102,25 +114,51 @@ export async function installGcloud(port: GoogleCommandPort, options: InstallOpt
     return { ok: true, outcome: 'already-installed', path: binaryPath };
   }
 
-  const tarballPath = `${homeDirectory}/google-cloud-cli-linux-x86_64.tar.gz`;
-  const download = await port.run('curl', ['-sSL', '-o', tarballPath, downloadUrl], { timeoutMs: 300_000 });
-  const downloadProblem = commandProblem(download, 'Downloading the Google Cloud CLI archive');
-  if (downloadProblem) {
+  const platform = options.platform ?? { os: process.platform, arch: process.arch };
+  const archive = gcloudArchiveName(platform.os, platform.arch);
+  if (options.downloadUrl === undefined && archive === null) {
     return {
       ok: false,
-      problem: downloadProblem,
-      fix: 'Check network access to dl.google.com, or download the archive manually and extract it into your home directory.',
+      problem: `There is no no-root Google Cloud CLI archive for ${platform.os} on ${platform.arch}, so it was not downloaded.`,
+      fix: 'Install the Google Cloud CLI with your system package manager, or from https://cloud.google.com/sdk/docs/install, then re-run this step.',
     };
   }
-
-  const extract = await port.run('tar', ['-xzf', tarballPath, '-C', homeDirectory], { timeoutMs: 300_000 });
-  const extractProblem = commandProblem(extract, 'Extracting the Google Cloud CLI archive');
-  if (extractProblem) {
+  const downloadUrl = options.downloadUrl
+    ?? `https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${archive}`;
+  // The archive's install script is executed, and TLS is the only integrity check on it,
+  // so a plain-http or non-URL override is refused before anything is fetched.
+  if (!downloadUrl.startsWith('https://')) {
     return {
       ok: false,
-      problem: extractProblem,
-      fix: 'Make sure the downloaded archive is a valid gzip tarball and that the home directory is writable.',
+      problem: 'The Google Cloud CLI download URL is not an https URL, so nothing was downloaded or run.',
+      fix: 'Use an https download URL, or install the Google Cloud CLI with your system package manager and re-run this step.',
     };
+  }
+  const tarballPath = `${homeDirectory}/${archive ?? 'google-cloud-cli.tar.gz'}`;
+  try {
+    // -f: an HTTP error must fail the download, not be saved as the "archive".
+    const download = await port.run('curl', ['-fsSL', '-o', tarballPath, downloadUrl], { timeoutMs: 300_000 });
+    const downloadProblem = commandProblem(download, 'Downloading the Google Cloud CLI archive');
+    if (downloadProblem) {
+      return {
+        ok: false,
+        problem: downloadProblem,
+        fix: 'Check network access to dl.google.com, or download the archive manually and extract it into your home directory.',
+      };
+    }
+
+    const extract = await port.run('tar', ['-xzf', tarballPath, '-C', homeDirectory], { timeoutMs: 300_000 });
+    const extractProblem = commandProblem(extract, 'Extracting the Google Cloud CLI archive');
+    if (extractProblem) {
+      return {
+        ok: false,
+        problem: extractProblem,
+        fix: 'Make sure the downloaded archive is a valid gzip tarball and that the home directory is writable.',
+      };
+    }
+  } finally {
+    // The archive is over 100 MB and is of no use once extracted.
+    await port.run('rm', ['-f', tarballPath]).catch(() => undefined);
   }
 
   const installScript = `${homeDirectory}/google-cloud-sdk/install.sh`;

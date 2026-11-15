@@ -215,6 +215,7 @@ export function createRepoMapTool(options: {
       let output = header;
       let included = 0;
       let restrictedCount = 0;
+      let unreadableCount = 0;
       // Read access is asked a window of ranked files at a time (bounded
       // concurrency), continuing through all files unless a budget was requested.
       const restrictedFiles = new Set<string>();
@@ -232,6 +233,12 @@ export function createRepoMapTool(options: {
         }
         const absolute = resolve(root, file.rel);
         let block: string;
+        if (!restrictedFiles.has(file.rel) && options.capturedReadAccess) {
+          // A denial, or a filter that cannot answer, withholds the symbols exactly like a live restriction.
+          let allowed = false;
+          try { allowed = await options.capturedReadAccess(absolute); } catch { allowed = false; }
+          if (!allowed) restrictedFiles.add(file.rel);
+        }
         if (restrictedFiles.has(file.rel)) {
           // Read-side deny enforcement: keep the ranked path (existence is not a
           // leak) but withhold the exported symbols, which would require reading
@@ -239,13 +246,14 @@ export function createRepoMapTool(options: {
           block = `\n  ${file.rel}  (dependents: ${file.dependents}, ${formatBytes(file.bytes)}) [access-restricted]`;
         } else {
           try {
-            if (options.capturedReadAccess && !await options.capturedReadAccess(absolute)) throw new Error('captured map path is access-restricted');
             assertCapturedInputPathContext(absolute);
             const exports = extractTopLevelExports(await readFile(absolute, 'utf-8'));
             const exportsLine = exports.length > 0 ? `\n    exports: ${exports.join(', ')}` : '';
             block = `\n  ${file.rel}  (dependents: ${file.dependents}, ${formatBytes(file.bytes)})${exportsLine}`;
           } catch {
-            block = `\n  ${file.rel}  (dependents: ${file.dependents}, ${formatBytes(file.bytes)})`;
+            // Not the same as "no exports": say that the file could not be read.
+            block = `\n  ${file.rel}  (dependents: ${file.dependents}, ${formatBytes(file.bytes)}) [unreadable]`;
+            unreadableCount++;
           }
         }
         if (budgetTokens !== undefined && estimateTokens(output + block) > budgetTokens) {
@@ -264,6 +272,10 @@ export function createRepoMapTool(options: {
       assertModeCurrent();
       const restrictedNote = accessRestrictedNote(restrictedCount);
       if (restrictedNote) output += `\n\n${restrictedNote} (paths shown, exported symbols withheld).`;
+      if (unreadableCount > 0) output += `\n\n${unreadableCount} file(s) could not be read (paths shown, exported symbols missing).`;
+      // The graph notes what it skipped; a map built without them would read as complete.
+      const warnings = graph.getWarnings();
+      if (warnings.length > 0) output += `\n\nDiscovery warnings (the map lacks these parts):\n${warnings.join('\n')}`;
 
       return { success: true, output };
     } catch (err) {

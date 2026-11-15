@@ -19,6 +19,12 @@ export interface PowerInhibitHandle {
   /** The requested classes the OS refused (served honestly, never papered over). */
   readonly deniedClasses: readonly PowerInhibitClass[];
   release(): Promise<void>;
+  /**
+   * Register a callback for the OS hold ending on its own (the inhibit child
+   * was killed, the system bus restarted). Never fires after `release()`; fires
+   * at most once. Optional: a seam that cannot observe loss simply omits it.
+   */
+  onLost?(callback: () => void): void;
 }
 
 /** The OS seam. All methods are best-effort; null = nothing could be held. */

@@ -34,7 +34,8 @@ import {
   type RoutingChannelRoute,
   type RoutingRouteListItem,
 } from './route-store.js';
-import { createRoutingResolver, type RoutingResolver } from './routing-resolver.js';
+import { createRoutingResolver, WILDCARD_SURFACE, type RoutingResolver } from './routing-resolver.js';
+import { ROUTE_SURFACE_KINDS } from '../../../events/routes.js';
 
 export { createInboxRouteResolver, type RouteResolver, type RouteResolverInput } from './inbox-bridge.js';
 export {
@@ -105,6 +106,48 @@ const DELETE_METHOD = 'channels.routing.delete';
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** Route surfaces, the mail inbox (routed by provider name, not a delivery surface), and the wildcard. */
+const ASSIGNABLE_SURFACE_KINDS: readonly string[] = [...ROUTE_SURFACE_KINDS, 'email', WILDCARD_SURFACE];
+
+/**
+ * An assignment that can never match an inbound route is refused when it is
+ * made, not left to look created. A surface the daemon does not route, or a
+ * surfaceKind/routeId that disagrees with the channelId it came with, would
+ * be stored and silently never apply.
+ */
+function assertAssignableChannel(channelId: string, surfaceKind: string | undefined, routeId: string | undefined): void {
+  const parsed = parseChannelId(channelId);
+  if (!ASSIGNABLE_SURFACE_KINDS.includes(parsed.surfaceKind)) {
+    throw new HandlerError(
+      `Unknown surfaceKind '${parsed.surfaceKind}'; use one of: ${ASSIGNABLE_SURFACE_KINDS.join(', ')}`,
+      'ROUTING_INVALID_SURFACE_KIND',
+      400,
+    );
+  }
+  if (surfaceKind !== undefined && surfaceKind !== parsed.surfaceKind) {
+    throw new HandlerError(
+      `surfaceKind '${surfaceKind}' does not match channelId '${channelId}'; send one or the other`,
+      'ROUTING_INVALID_CHANNEL_ID',
+      400,
+    );
+  }
+  // A routeId beside a channelId that names none would otherwise be dropped, storing a broader assignment than asked for.
+  if (routeId !== undefined && parsed.routeId !== routeId) {
+    throw new HandlerError(
+      `routeId '${routeId}' does not match channelId '${channelId}'; send one or the other`,
+      'ROUTING_INVALID_CHANNEL_ID',
+      400,
+    );
+  }
+  if (parsed.surfaceKind === WILDCARD_SURFACE && parsed.routeId !== undefined) {
+    throw new HandlerError(
+      `'${WILDCARD_SURFACE}' assigns a profile to every surface and cannot be limited to a route; use a specific surfaceKind with the route, or '${WILDCARD_SURFACE}' alone`,
+      'ROUTING_INVALID_CHANNEL_ID',
+      400,
+    );
+  }
 }
 
 function clampLimit(value: unknown): number | undefined {
@@ -188,11 +231,13 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     });
     const limit = clampLimit(body.limit);
     const limited = limit !== undefined ? routes.slice(0, limit) : routes;
+    // `total` counts every matching assignment, as the drafts list does, so a
+    // caller that asked for a page can tell there are more.
     // Project to the platform `channels.routing.list` item shape: emit `id`
     // (= assignmentId) and drop the daemon-internal `channelId`/`assignmentId`,
     // which additionalProperties:false forbids.
     const items = limited.map(toRouteListItem);
-    return { routes: items, total: items.length };
+    return { routes: items, total: routes.length };
   };
 
   const assignHandler: TypedHandler<RoutingAssignBody, RoutingAssignResult> = async ({ body, context }) => {
@@ -204,7 +249,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     assertRequest(); context.signal?.throwIfAborted();
     const profileId = optionalString(body.profileId);
     if (profileId === undefined) {
-      throw new Error('profileId is required');
+      throw new HandlerError('profileId is required', 'ROUTING_INVALID_PROFILE_ID', 400);
     }
     // The platform contract accepts either a composite `channelId` or the
     // `surfaceKind` (+ optional `routeId`) parts. Prefer an explicit
@@ -216,8 +261,9 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
       surfaceKind !== undefined ? buildChannelId(surfaceKind, routeId) : undefined
     );
     if (channelId === undefined) {
-      throw new Error('surfaceKind (or channelId) is required');
+      throw new HandlerError('surfaceKind (or channelId) is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
     }
+    assertAssignableChannel(channelId, surfaceKind, routeId);
     const label = optionalString(body.label);
     const input = {
       channelId,
@@ -228,6 +274,14 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     const { route, created } = await runNativeMutation({ host: ctx.nativeMutationHost, method: ASSIGN_METHOD, body, context,
       target: { channelId, current: target?.target ?? null }, assertTargetCurrent: () => { assertRequest(); if (closed) throw closedError(); target?.assertCurrent(); },
       mutate: (assertCurrent, _admission, withPublication) => store.upsert(input, autonomous ? assertCurrent : undefined, withPublication) });
+    // A surface that owns its own profiles can legitimately name one this host has never seen,
+    // so a typo is surfaced to the operator log rather than refused.
+    if (ctx.hasProfile !== undefined && !ctx.hasProfile(profileId)) {
+      ctx.logger.warn('channels.routing.assign: no profile with this id is known to this host; the assignment was saved and applies only if the surface that owns profiles has it', {
+        assignmentId: route.assignmentId,
+        profileId,
+      });
+    }
     ctx.logger.info('channels.routing.assign', {
       assignmentId: route.assignmentId,
       channelId: route.channelId,

@@ -5,12 +5,11 @@
  * Exercises dispatchAutomationRoutes which handles:
  *   GET  /api/review
  *   GET  /api/automation/jobs
- *   POST /api/automation/jobs
  *   GET  /api/automation/runs
  *   GET  /api/automation/runs/:id
  *   POST /api/automation/runs/:id/(cancel|retry)
- *   PATCH/DELETE /api/automation/jobs/:id
- *   POST /api/automation/jobs/:id/(enable|disable|run)
+ *   (create, update, delete, enable, disable are gateway-table only)
+ *   POST /api/automation/jobs/:id/(pause|resume|run)
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -88,20 +87,6 @@ describe('router-e2e automation: GET /api/automation/jobs (happy path)', () => {
     expect(body.jobs).toBeInstanceOf(Array);
     expect(body.jobs.length).toBeGreaterThanOrEqual(1);
   });
-
-  test('POST /api/automation/jobs creates a job and returns 201', async () => {
-    const handlers = makeAutomationHandlers();
-    const req = makeRequest('POST', 'http://localhost/api/automation/jobs', {
-      name: 'New Job',
-      trigger: { type: 'every', interval: '1h' },
-      task: 'do something',
-    });
-    const res = await dispatchAutomationRoutes(req, handlers);
-    expect(res).not.toBeNull();
-    expect(res!.status).toBe(201);
-    const body = await res!.json() as Record<string, unknown>;
-    expect(typeof body.id).toBe('string'); // id is a string
-  });
 });
 
 describe('router-e2e automation: runs (happy path)', () => {
@@ -165,18 +150,95 @@ describe('router-e2e automation: failure paths', () => {
     expect(res).toBeNull();
   });
 
-  test('DELETE /api/automation/jobs/:id removes job', async () => {
-    const capturedId: { value: string | null } = { value: null };
+  test('job and schedule create, update, delete, enable and disable are not served here, only by the gateway table', async () => {
+    const calls: string[] = [];
     const handlers = makeAutomationHandlers({
-      deleteAutomationJob: (jobId, _req) => {
-        capturedId.value = jobId;
-        return Response.json({ ok: true, jobId });
-      },
+      postAutomationJob: () => { calls.push('postAutomationJob'); return Response.json({}); },
+      patchAutomationJob: () => { calls.push('patchAutomationJob'); return Response.json({}); },
+      deleteAutomationJob: () => { calls.push('deleteAutomationJob'); return Response.json({}); },
+      setAutomationJobEnabled: () => { calls.push('setAutomationJobEnabled'); return Response.json({}); },
+      postSchedule: () => { calls.push('postSchedule'); return Response.json({}); },
+      deleteSchedule: () => { calls.push('deleteSchedule'); return Response.json({}); },
+      setScheduleEnabled: () => { calls.push('setScheduleEnabled'); return Response.json({}); },
     });
-    const req = makeRequest('DELETE', 'http://localhost/api/automation/jobs/job-abc');
-    const res = await dispatchAutomationRoutes(req, handlers);
-    expect(res).not.toBeNull();
-    expect(res!.status).toBe(200);
-    expect(capturedId.value).toBe('job-abc');
+    const paths: Array<[string, string]> = [
+      ['POST', '/api/automation/jobs'],
+      ['PATCH', '/api/automation/jobs/j'],
+      ['DELETE', '/api/automation/jobs/j'],
+      ['POST', '/api/automation/jobs/j/enable'],
+      ['POST', '/api/automation/jobs/j/disable'],
+      ['POST', '/api/automation/schedules'],
+      ['DELETE', '/api/automation/schedules/s'],
+      ['POST', '/api/automation/schedules/s/enable'],
+      ['POST', '/api/automation/schedules/s/disable'],
+    ];
+    for (const [method, path] of paths) {
+      expect(await dispatchAutomationRoutes(makeRequest(method, `http://localhost${path}`), handlers)).toBeNull();
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describe: every mutating route reaches its handler with the exact arguments
+// ---------------------------------------------------------------------------
+
+describe('router-e2e automation: handler arguments per route', () => {
+  type Call = { handler: string; args: unknown[]; req: Request };
+
+  function recordingHandlers(calls: Call[]): DaemonApiRouteHandlers {
+    const record = (handler: string) => (...all: unknown[]) => {
+      const req = all.find((a): a is Request => a instanceof Request) as Request;
+      calls.push({ handler, args: all.filter((a) => !(a instanceof Request)), req });
+      return Response.json({ ok: true });
+    };
+    return {
+      patchAutomationJob: record('patchAutomationJob'),
+      deleteAutomationJob: record('deleteAutomationJob'),
+      setAutomationJobEnabled: record('setAutomationJobEnabled'),
+      runAutomationJobNow: record('runAutomationJobNow'),
+      automationRunAction: record('automationRunAction'),
+      setScheduleEnabled: record('setScheduleEnabled'),
+      runScheduleNow: record('runScheduleNow'),
+    } as unknown as DaemonApiRouteHandlers;
+  }
+
+  const cases: Array<{ method: string; path: string; handler: string; args: unknown[] }> = [
+    { method: 'POST', path: '/api/automation/jobs/job-9/resume', handler: 'setAutomationJobEnabled', args: ['job-9', true] },
+    { method: 'POST', path: '/api/automation/jobs/job-9/pause', handler: 'setAutomationJobEnabled', args: ['job-9', false] },
+    { method: 'POST', path: '/api/automation/jobs/job-9/run', handler: 'runAutomationJobNow', args: ['job-9'] },
+    { method: 'POST', path: '/api/automation/runs/run-7/retry', handler: 'automationRunAction', args: ['run-7', 'retry'] },
+    { method: 'POST', path: '/api/automation/runs/run-7/cancel', handler: 'automationRunAction', args: ['run-7', 'cancel'] },
+    { method: 'POST', path: '/api/automation/schedules/s-1/run', handler: 'runScheduleNow', args: ['s-1'] },
+  ];
+
+  for (const c of cases) {
+    test(`${c.method} ${c.path} calls ${c.handler}(${c.args.map(String).join(', ')}) with the request`, async () => {
+      const calls: Call[] = [];
+      const req = makeRequest(c.method, `http://localhost${c.path}`);
+      const res = await dispatchAutomationRoutes(req, recordingHandlers(calls));
+      expect(res?.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.handler).toBe(c.handler);
+      expect(calls[0]!.args).toEqual(c.args);
+      expect(calls[0]!.req).toBe(req);
+    });
+  }
+
+  test('a percent-encoded job id is decoded before it reaches the handler', async () => {
+    const calls: Call[] = [];
+    const req = makeRequest('POST', 'http://localhost/api/automation/jobs/job%2Fwith%20space/pause');
+    await dispatchAutomationRoutes(req, recordingHandlers(calls));
+    expect(calls[0]!.args).toEqual(['job/with space', false]);
+  });
+
+  test('a method that does not match the route is not dispatched', async () => {
+    const calls: Call[] = [];
+    const res = await dispatchAutomationRoutes(
+      makeRequest('GET', 'http://localhost/api/automation/jobs/job-9/pause'),
+      recordingHandlers(calls),
+    );
+    expect(res).toBeNull();
+    expect(calls).toEqual([]);
   });
 });

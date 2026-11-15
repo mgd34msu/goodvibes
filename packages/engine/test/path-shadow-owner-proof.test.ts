@@ -1,4 +1,3 @@
-/** Ownership regressions, authored and UNRUN during coding first. */
 import { expect, test } from 'bun:test';
 import { discoverGlobalPackageOwner } from '../platform/src/platform/runtime/global-package-owner.ts';
 import { quoteShadowArgument, removableShadows, scanCommandShadows, splitPathEntries, type ShadowScanInput } from '../platform/src/platform/runtime/path-shadow.ts';

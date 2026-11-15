@@ -10,7 +10,8 @@ import {
   type OAuthProviderConfig,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
-import { extractAuthorizationCode, hasCommandFlag } from './cli-arguments.js';
+import { hasCommandFlag } from './cli-arguments.js';
+import { readAuthorizationInput } from './settings-subscriptions.js';
 import { openBrowser } from './cli-environment.js';
 
 interface SubscriptionRuntime {
@@ -123,8 +124,8 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
           ].join('\n'),
         );
       }
-      if (sub === 'login' || sub === 'start') {
-        const provider = sub === 'start' ? rest[0] : rest[0];
+      if ((sub === 'login' && rest[1]?.toLowerCase() !== 'finish') || sub === 'start') {
+        const provider = rest[0];
         const mode = sub === 'start' ? 'start' : rest[1]?.toLowerCase();
         if (!provider || mode !== 'start') return `Usage: ${policy.binary(runtime)} subscription login <provider> start [--open]`;
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
@@ -171,7 +172,9 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
         if (!provider || !codeInput) return `Usage: ${policy.binary(runtime)} subscription login <provider> finish <code-or-url>`;
         const resolved = getSubscriptionProviderConfig(provider, services.serviceRegistry.get(provider));
         if (!resolved) return `No subscription provider found: ${provider}`;
-        const code = extractAuthorizationCode(codeInput);
+        const authorization = readAuthorizationInput(codeInput, services.subscriptionManager.getPending(provider)?.state);
+        if (!authorization.ok) return authorization.reason;
+        const code = authorization.code;
         if (provider === 'openai' && resolved.source === 'builtin') {
           const pendingLogin = services.subscriptionManager.getPending(provider);
           if (!pendingLogin) return `No pending OAuth login for ${provider}.`;

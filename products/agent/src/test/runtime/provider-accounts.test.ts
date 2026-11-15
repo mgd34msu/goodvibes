@@ -162,3 +162,23 @@ describe('provider account snapshot', () => {
     expect(provider?.recommendedActions.join('\n')).not.toContain('/services');
   });
 });
+
+describe('provider account snapshot with an unusable services file', () => {
+  test('a services file that is not valid JSON is named and counted as an issue', async () => {
+    const root = makeProjectTempDir('gv-provider-accounts-bad');
+    const file = join(root, 'services.json');
+    writeFileSync(file, '{bad');
+    const testManagers = createTestManagers();
+    const snapshot = await buildProviderAccountSnapshot({
+      providerModels: testManagers.providerRegistry,
+      services: new ServiceRegistry(file, {
+        secretsManager: new SecretsManager({ projectRoot: root, globalHome: root }),
+        subscriptionManager: testManagers.subscriptionManager,
+      }),
+      subscriptions: testManagers.subscriptionManager,
+      environment: { hasEnvironmentVariable: () => false },
+    });
+    expect(snapshot.servicesUnreadable).toContain('services.json');
+    expect(snapshot.issueCount).toBeGreaterThanOrEqual(1);
+  });
+});

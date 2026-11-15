@@ -20,9 +20,10 @@
  * inside the ConfigManager.
  */
 import type { ConfigManager } from '../config/manager.js';
+import { DEFAULT_CONFIG } from '../config/schema.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { AgentManager } from '../tools/agent/index.js';
-import { SlackIntegration, DiscordIntegration, NtfyIntegration } from '../integrations/index.js';
+import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
@@ -37,9 +38,23 @@ export interface SurfaceDirectDeliveryDeps {
   readonly resolveSlackBotToken: () => Promise<string | null>;
   /** surfaces.webhook.defaultTarget, resolved when it is a secret reference. */
   readonly resolveWebhookDefaultTarget: () => Promise<string | null>;
+  /** The ntfy access token: registry, then `surfaces.ntfy.token`, then the environment. Registry and environment only when absent. */
+  readonly resolveNtfyToken?: (() => Promise<string | null>) | undefined;
+  /** The Discord bot token: registry, then `surfaces.discord.botToken`, then the environment. Registry and environment only when absent. */
+  readonly resolveDiscordBotToken?: (() => Promise<string | null>) | undefined;
   readonly signWebhookPayload: (body: string, secret: string) => string;
   /** Resolves a delivery host before posting; the system resolver when absent (utils/url-safety.ts). */
   readonly resolveHost?: HostResolver | undefined;
+}
+
+async function ntfyToken(deps: SurfaceDirectDeliveryDeps): Promise<string | undefined> {
+  if (deps.resolveNtfyToken) return await deps.resolveNtfyToken() ?? undefined;
+  return await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined;
+}
+
+async function discordBotToken(deps: SurfaceDirectDeliveryDeps): Promise<string | undefined> {
+  if (deps.resolveDiscordBotToken) return await deps.resolveDiscordBotToken() ?? undefined;
+  return await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN ?? undefined;
 }
 
 /**
@@ -77,7 +92,7 @@ export async function deliverSurfaceProgress(
   if (pending.surfaceKind === 'discord') {
     const discord = new DiscordIntegration(
       await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL ?? undefined,
-      await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN ?? undefined,
+      await discordBotToken(deps),
     );
     if (pending.applicationId && pending.interactionToken) {
       await discord.editOriginalResponse(pending.applicationId, pending.interactionToken, `Progress: ${progress.slice(0, 180)}`);
@@ -93,10 +108,11 @@ export async function deliverSurfaceProgress(
     if (!topic) return;
     const ntfy = new NtfyIntegration(
       String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
-      await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined,
+      await ntfyToken(deps),
     );
     await ntfy.publish(topic, progress.slice(0, 300), {
       title: `Agent ${pending.agentId}`,
+      ...ntfyPriority(deps),
       markGoodVibesOrigin: true,
     });
     return;
@@ -141,7 +157,7 @@ export async function deliverDiscordAgentReply(
 ): Promise<void> {
   const discord = new DiscordIntegration(
     await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl') ?? process.env.DISCORD_WEBHOOK_URL ?? undefined,
-    await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN ?? undefined,
+    await discordBotToken(deps),
   );
   if (pending.applicationId && pending.interactionToken) {
     await discord.editOriginalResponse(
@@ -157,6 +173,11 @@ export async function deliverDiscordAgentReply(
   }
 }
 
+function ntfyPriority(deps: SurfaceDirectDeliveryDeps): { priority?: 1 | 2 | 3 | 4 | 5 } {
+  const priority = resolveNtfyDefaultPriority(deps.configManager.get('surfaces.ntfy.defaultPriority'));
+  return priority === undefined ? {} : { priority };
+}
+
 export async function deliverNtfyAgentReply(
   deps: SurfaceDirectDeliveryDeps,
   pending: PendingSurfaceReply,
@@ -166,13 +187,14 @@ export async function deliverNtfyAgentReply(
   if (!topic) return;
   const ntfy = new NtfyIntegration(
     String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
-    await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined,
+    await ntfyToken(deps),
   );
   // undefined = nothing configured resolves to an address a phone could
   // reach; publish without a click target rather than with a dead one.
   const baseAction = resolveReachableBaseUrl(deps.configManager as ConfigManager, 'off-host');
   await ntfy.publish(topic, message, {
     title: `Agent ${pending.agentId}`,
+    ...ntfyPriority(deps),
     ...(baseAction
       ? {
           click: `${baseAction}/api/control-plane/web`,
@@ -200,7 +222,7 @@ export async function deliverWebhookAgentReply(
     });
     return;
   }
-  const timeoutMs = Number(deps.configManager.get('surfaces.webhook.timeoutMs') ?? 15_000);
+  const timeoutMs = Number(deps.configManager.get('surfaces.webhook.timeoutMs') ?? DEFAULT_CONFIG.surfaces.webhook.timeoutMs);
   const body = JSON.stringify({
     agentId: pending.agentId,
     sessionId: pending.sessionId ?? null,

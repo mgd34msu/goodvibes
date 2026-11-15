@@ -179,20 +179,30 @@ export class RemoteStateSyncer {
   }
 
   private _applyHealth(session: RemoteSession, health: RemoteHealth): void {
-    // Map remote health status to ACP transport state
-    const transportState = (() => {
-      switch (health.status) {
-        case 'healthy': return 'connected' as const;
-        case 'degraded': return 'degraded' as const;
-        case 'unreachable': return 'reconnecting' as const;
-      }
-    })();
-
+    // A health report describes a live connection. After a terminal failure or a
+    // disconnect, or while a reconnect is running, a late or replayed report must
+    // not overwrite the transport state the reconnect engine owns.
+    if (session.transportState !== 'connected' && session.transportState !== 'degraded') {
+      logger.debug('RemoteStateSyncer: ignoring health report outside a live connection', {
+        transportState: session.transportState,
+        healthStatus: health.status,
+      });
+      return;
+    }
     this.callbacks.updateAcpConnection(session.identity.agentId, {
-      transportState,
+      transportState: transportStateForHealth(health),
       lastError: health.degradedReason,
     });
   }
+}
+
+/**
+ * The transport state a health report implies for a live connection. A report of
+ * `unreachable` is the remote's own view, not a reconnect in progress, so it reads
+ * `degraded`; only the reconnect engine reports `reconnecting`.
+ */
+export function transportStateForHealth(health: RemoteHealth): 'connected' | 'degraded' {
+  return health.status === 'healthy' ? 'connected' : 'degraded';
 }
 
 // ── No-op sync callbacks (for testing or disabled sync) ──────────────────────

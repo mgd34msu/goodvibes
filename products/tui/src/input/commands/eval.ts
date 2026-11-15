@@ -36,6 +36,29 @@ function getRegistry(context: CommandContext): EvalRegistry | undefined {
   return context.extensions.evalRegistry;
 }
 
+/**
+ * Runs `work` with the registry marked running, and always clears the mark. A
+ * second run while one is active is refused: the flag is a boolean, so the
+ * first run to finish would otherwise report idle while the other still runs.
+ * Reports `refused` when another run is active.
+ */
+async function withEvalRunning<T>(
+  registry: EvalRegistry | undefined,
+  context: CommandContext,
+  work: () => Promise<T>,
+): Promise<{ readonly refused: true } | { readonly refused: false; readonly value: T }> {
+  if (registry?.isRunning()) {
+    context.print('[eval] An eval run is already in progress; wait for it to finish before starting another.');
+    return { refused: true };
+  }
+  registry?.setRunning(true);
+  try {
+    return { refused: false, value: await work() };
+  } finally {
+    registry?.setRunning(false);
+  }
+}
+
 // ── /eval list ────────────────────────────────────────────────────────────────
 
 function handleList(_args: string[], context: CommandContext): void {
@@ -61,24 +84,22 @@ async function handleRun(args: string[], context: CommandContext): Promise<void>
   }
 
   const runner = new EvalRunner();
-  registry?.setRunning(true);
+  await withEvalRunning(registry, context, async () => {
+    for (const name of suitesToRun) {
+      const scenarios = BUILTIN_SUITES[name];
+      if (!scenarios) continue;
 
-  for (const name of suitesToRun) {
-    const scenarios = BUILTIN_SUITES[name];
-    if (!scenarios) continue;
+      context.print(`[eval] Running suite: ${name} (${scenarios.length} scenarios)...`);
+      const result = await runner.runSuite(name, scenarios);
+      registry?.push(result);
 
-    context.print(`[eval] Running suite: ${name} (${scenarios.length} scenarios)...`);
-    const result = await runner.runSuite(name, scenarios);
-    registry?.push(result);
+      context.print(formatSuiteResult(result));
 
-    context.print(formatSuiteResult(result));
-
-    for (const r of result.results) {
-      context.print(formatScorecard(r.scorecard));
+      for (const r of result.results) {
+        context.print(formatScorecard(r.scorecard));
+      }
     }
-  }
-
-  registry?.setRunning(false);
+  });
 }
 
 // ── /eval compare ─────────────────────────────────────────────────────────────
@@ -130,10 +151,13 @@ async function handleGate(args: string[], context: CommandContext): Promise<void
   const runner = new EvalRunner();
 
   context.print(`[eval] Gate: running suite "${suiteName}"...`);
-  registry?.setRunning(true);
-  const fresh = await runner.runSuite(suiteName, scenarios);
-  registry?.push(fresh);
-  registry?.setRunning(false);
+  const run = await withEvalRunning(registry, context, async () => {
+    const result = await runner.runSuite(suiteName, scenarios);
+    registry?.push(result);
+    return result;
+  });
+  if (run.refused) return;
+  const fresh = run.value;
 
   const baseline = await loadBaseline(baselineFile, projectRoot);
   const gate = runner.evaluateGate(fresh, baseline);

@@ -9,9 +9,13 @@
  * exec-time denial.
  */
 import { describe, expect, test } from 'bun:test';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildBwrapArgv,
   detectSandboxAvailability,
+  probeSandboxHost,
   resolveExecSandboxPlan,
   type ExecSandboxConfig,
   type SandboxAvailability,
@@ -58,11 +62,11 @@ describe('detectSandboxAvailability', () => {
     expect(a.networkIsolationGuaranteed).toBe(true);
   });
 
-  test('bwrap present but net-unshare probe failed → available but network NOT guaranteed', () => {
+  test('bwrap present but net-unshare probe failed → unavailable, since every boundary run needs a network namespace', () => {
     const a = detectSandboxAvailability(probe({ netUnshareWorks: false }));
-    expect(a.available).toBe(true);
+    expect(a.available).toBe(false);
     expect(a.networkIsolationGuaranteed).toBe(false);
-    expect(a.reason).toContain('NOT confirmed');
+    expect(a.reason).toContain('cannot create a network namespace');
   });
 
   test('no bwrap on PATH → unavailable with a stated reason', () => {
@@ -221,21 +225,57 @@ describe('decideSandboxedExec', () => {
   });
 });
 
-// ── The catastrophic check is unaffected by the sandbox ──────────────────────
+// ── Catastrophic blocking belongs to the permission gate, not to these two ───
+// The gate refuses a catastrophic reading before either of these runs (see the
+// catastrophic case in gate.test.ts); neither the guard nor the sandbox policy
+// is a second veto.
 
-describe('the catastrophic check stays in force (a sandbox never buys it an allow)', () => {
+describe('the exec guard and the sandbox policy do not decide catastrophe', () => {
   useGateReadings([
     ['"rm -rf /"', { mutates: true, catastrophic: true }],
     [':(){', { mutates: true, catastrophic: true }],
   ]);
 
-  test('Jev does not add a command veto outside configured sandbox rules', async () => {
+  test('the guard allows a command the gate reads as catastrophic: blocking is the gate\'s job', async () => {
     expect((await guardExecCommand('rm -rf /')).allowed).toBe(true);
     expect((await guardExecCommand(':(){ :|:& };:')).allowed).toBe(true);
   });
 
-  test('the sandbox policy only ever relaxes ask to allow; it never decides catastrophe', () => {
+  test('the sandbox policy decides on host-access needs alone, so a local command is auto-allowed whatever it says', () => {
     const d = decideSandboxedExec({ command: 'rm -rf /', needs: LOCAL, sandboxActive: true, egressAllowlist: [], baseEffectWhenNotSandboxed: 'ask' });
-    expect(d.effect === 'allow' || d.effect === 'ask').toBe(true);
+    expect(d.effect).toBe('allow');
+  });
+});
+
+describe('probeSandboxHost', () => {
+  test.skipIf(process.platform !== 'linux')('a host whose real boundary argv fails is unavailable even though a bare bwrap would start', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-fake-bwrap-'));
+    try {
+      // Succeeds for a plain bind of / and fails once the namespaces and tmpfs mounts of a real run are asked for.
+      writeFileSync(join(dir, 'bwrap'), '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--unshare-pid" ] && exit 1; done\nexit 0\n');
+      chmodSync(join(dir, 'bwrap'), 0o755);
+      const probe = probeSandboxHost({ PATH: `${dir}:/usr/bin:/bin` });
+      expect(probe.bwrapPath).toBe(join(dir, 'bwrap'));
+      expect(probe.bwrapWorks).toBe(false);
+      expect(detectSandboxAvailability(probe).available).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform !== 'linux')('an unusable temp directory makes the probe report unavailable instead of throwing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-fake-bwrap-'));
+    const saved = process.env.TMPDIR;
+    try {
+      writeFileSync(join(dir, 'bwrap'), '#!/bin/sh\nexit 0\n');
+      chmodSync(join(dir, 'bwrap'), 0o755);
+      process.env.TMPDIR = join(dir, 'missing');
+      const probe = probeSandboxHost({ PATH: `${dir}:/usr/bin:/bin` });
+      expect(probe.bwrapWorks).toBe(false);
+      expect(probe.netUnshareWorks).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

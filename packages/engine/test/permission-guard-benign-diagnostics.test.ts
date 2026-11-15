@@ -7,8 +7,9 @@
  * through. Whether a command is written to hide what it does is now the gate's
  * side-effect reading (`obfuscated`, gate/batteries/side-effect.ts, whose
  * fixtures carry these pairs), and an obfuscated command is critical stakes,
- * so every preset asks the owner. The exec-time verdict keeps only the frozen
- * catastrophic block, and the parser still structures every shape below.
+ * so every preset asks the owner. The exec-time verdict no longer refuses on
+ * the text of a command at all (the catastrophic list moved to the gate's
+ * boundary reading too), and the parser still structures every shape below.
  */
 import { describe, expect, test } from 'bun:test';
 import { normalizeCommandWithVerdicts } from '../platform/src/platform/runtime/permissions/normalization/index.js';
@@ -28,7 +29,7 @@ function verdict(cmd: string) {
   return { allowed: normalizeCommandWithVerdicts(cmd).allowed };
 }
 
-/** [label, benign command that must pass, malicious neighbour that must not] */
+/** [label, benign command, malicious neighbour]: the exec-time verdict allows both; the gate reading is what tells them apart. */
 const PAIRS: Array<[string, string, string]> = [
   [
     'reading a null-delimited file with tr',
@@ -93,7 +94,7 @@ const PAIRS: Array<[string, string, string]> = [
 
 describe('the exec-time verdict leaves obfuscation to the gate reading', () => {
   for (const [label, benign, neighbour] of PAIRS) {
-    test(`${label}: neither shape is refused at exec time`, () => {
+    test(`${label}: the exec-time verdict allows both shapes`, () => {
       expect(verdict(benign).allowed).toBe(true);
       expect(verdict(neighbour).allowed).toBe(true);
     });
@@ -139,7 +140,7 @@ describe('backtick command-name assembly is parsed whole', () => {
 });
 
 describe('catastrophe is not decided by the verdict', () => {
-  test('rm -rf / parses to a runnable segment; the gate and the exec guard read it', () => {
+  test('rm -rf / parses to a runnable segment and the exec-time verdict allows it; the gate\'s boundary reading decides', () => {
     expect(verdict('rm -rf /').allowed).toBe(true);
   });
 });

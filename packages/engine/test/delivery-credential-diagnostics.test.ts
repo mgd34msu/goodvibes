@@ -29,7 +29,7 @@ function secrets(root: string, diagnosticMode: 'default' | 'structural') {
     surfaceRoot: 'daemon', diagnosticMode });
 }
 for (const mode of ['default', 'structural'] as const) {
-  test(`direct resolver ${mode} diagnostics retain resolution behavior`, async () => {
+  test(`direct resolver ${mode} diagnostics retain resolution behavior and never quote the secret file`, async () => {
     const { root, ref, logs } = fixture();
     expect(await resolveSecretInput(ref, { homeDirectory: root, diagnosticMode: mode })).toBeNull();
     const published = JSON.stringify(logs);
@@ -38,9 +38,9 @@ for (const mode of ['default', 'structural'] as const) {
       expect(published).not.toContain('owned-reference.json');
       expect(published).toContain('resolution-failed');
     } else {
-      expect(published).toContain('JSON Parse error');
+      expect(published).toContain('not valid JSON');
       expect(published).toContain('owned-reference.json');
-      expect(published).toContain(sentinel);
+      expect(published).not.toContain(sentinel);
     }
   });
   test(`registry ${mode} diagnostics preserve null resolution with the configured error detail`, async () => {
@@ -53,9 +53,9 @@ for (const mode of ['default', 'structural'] as const) {
     const published = JSON.stringify(logs);
     if (mode === 'structural') { expect(published).not.toContain(sentinel); expect(published).toContain('resolution-failed'); }
     else {
-      expect(published).toContain('JSON Parse error');
+      expect(published).toContain('not valid JSON');
       expect(published).toContain('owned-reference.json');
-      expect(published).toContain(sentinel);
+      expect(published).not.toContain(sentinel);
     }
   });
   test(`secret store ${mode} diagnostics keep unvalidated envelope text private`, async () => {
@@ -67,7 +67,7 @@ for (const mode of ['default', 'structural'] as const) {
     expect(await manager.get('owned-missing-key')).toBeNull();
     const published = JSON.stringify(logs);
     if (mode === 'structural') { expect(published).not.toContain(sentinel); expect(published).toContain('secret store could not be read'); }
-    else expect(published).toContain(sentinel);
+    else { expect(published).not.toContain(sentinel); expect(published).toContain('format version (not a number)'); }
   });
 }
 test('nested secret references use the same structural read owner', async () => {

@@ -106,7 +106,8 @@ export function createContractFleetControls(deps: ContractFleetControlsDeps): Co
     const split = splitQualifiedId(qualified);
     if (split === null) throw new AttemptError(`${what} ${qualified} does not name a contract; use <contractId>:<id>`);
     const run = runOf(split.contractId);
-    if (run === undefined || run.engine === null) throw new AttemptError(`contract ${split.contractId} is not running work`);
+    if (run === undefined) throw new AttemptError(`contract ${split.contractId} is not running; only a running contract's attempts and conflicts can be acted on`);
+    if (run.engine === null) throw new AttemptError(`contract ${split.contractId} is ${run.contract.status} and has not started its plan; its attempts can be acted on once its plan runs`);
     return { run, id: split.id, engine: run.engine };
   }
 
@@ -150,8 +151,8 @@ export function createContractFleetControls(deps: ContractFleetControlsDeps): Co
       if (winner === null || winner.contractId !== run.id) throw new AttemptError(`item ${winnerItemId} is not an attempt of contract ${run.id}`);
       const unit = run.contract.units.find((candidate) => candidate.attemptSelection?.engineGroupId === engineGroupId);
       const selection = unit?.attemptSelection;
-      if (unit === undefined || selection === undefined) throw new AttemptError(`attempt group ${groupId} has no selection to pick from yet`);
-      if (selection.pickedId !== undefined) throw new AttemptError(`unit ${unit.id} already took attempt ${selection.pickedId}`);
+      if (unit === undefined || selection === undefined) throw new AttemptError(`attempt group ${groupId} has no selection to pick from yet; a pick is available once every attempt finished and the selection was read`);
+      if (selection.pickedId !== undefined) throw new AttemptError(`unit ${unit.id} already took attempt ${selection.pickedId}; nothing is left to pick`);
       if (!selection.candidateIds.includes(winner.id)) {
         throw new AttemptError(`${winner.id} is not a passing attempt of unit ${unit.id}; the candidates are ${selection.candidateIds.join(', ')}`);
       }

@@ -345,8 +345,8 @@ export class AgentWorkspace {
     return Boolean(this.context?.submitInput && this.dispatchPrompt);
   }
 
-  dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit'): void {
-    this.dispatchCommand?.(command, behavior);
+  dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void {
+    this.dispatchCommand?.(command, behavior, displayCommand);
   }
 
   dispatchWorkspacePrompt(prompt: string): void {
@@ -631,7 +631,17 @@ export class AgentWorkspace {
         requestRender?.();
         return;
       }
-      void this.submitMemoryEditor(editor).finally(() => requestRender?.());
+      // The editor stays open while the save is awaited, so a second Enter would add a second record.
+      if (this.memorySaveInFlight) {
+        this.status = 'Still saving Agent memory; waiting for the first save to finish.';
+        requestRender?.();
+        return;
+      }
+      this.memorySaveInFlight = true;
+      void this.submitMemoryEditor(editor).finally(() => {
+        this.memorySaveInFlight = false;
+        requestRender?.();
+      });
       return;
     }
     const shellPaths = this.context?.workspace?.shellPaths;
@@ -710,7 +720,7 @@ export class AgentWorkspace {
       this.dispatchWorkspacePrompt(result.prompt);
       return;
     }
-    this.dispatchWorkspaceCommand(result.command);
+    this.dispatchWorkspaceCommand(result.command, undefined, result.actionResult.command);
   }
 
   private submitLocalDeleteEditor(shellPaths: ShellPathService, editor: AgentWorkspaceLocalEditor): void {
@@ -738,6 +748,7 @@ export class AgentWorkspace {
       finishLocalDelete: (kind, id, name) => { workspace.finishLocalDelete(kind, id, name); },
     };
   }
+  private memorySaveInFlight = false;
   private async submitMemoryEditor(editor: AgentWorkspaceLocalEditor): Promise<void> {
     try {
       this.status = 'Saving Agent memory...';

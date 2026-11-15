@@ -15,9 +15,11 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { writeJsonFileAtomic as writeJsonFileAtomicUnacknowledged } from '../utils/atomic-json-store.js';
+import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
 import type { ConfigKey } from './schema.js';
 import { raiseSettingsReaderFloor } from './settings-reader-floor.js';
+import { withSyncFileLock } from './sync-file-lock.js';
 
 /**
  * The keys that ride the shared, surface-root-independent tier. Currently the
@@ -36,6 +38,12 @@ const SHARED_CONFIG_KEY_SET = new Set<string>(SHARED_CONFIG_KEYS);
 /** True when `key` resolves from/writes to the shared tier rather than a surface silo. */
 export function isSharedConfigKey(key: string): key is ConfigKey {
   return SHARED_CONFIG_KEY_SET.has(key);
+}
+
+/** A write by this process is not an outside change: tell any watcher it already holds it. */
+function writeJsonFileAtomic(path: string, value: unknown): void {
+  writeJsonFileAtomicUnacknowledged(path, value);
+  acknowledgeConfigFileWrite(path);
 }
 
 /**
@@ -114,9 +122,13 @@ export function writeTierDotPath(root: Record<string, unknown>, key: string, val
  * explicitly-set key so unrelated surface-local values are not silently promoted.
  */
 export function persistSharedKey(path: string, key: string, value: unknown): void {
-  const existing = readSharedTierFile(path);
-  writeDotPath(existing, key, value);
-  writeJsonFileAtomic(path, existing);
+  // Every surface writes this file: the read and the rename must be one step, or
+  // a key another process saved in between is dropped.
+  withSyncFileLock(path, () => {
+    const existing = readSharedTierFile(path);
+    writeDotPath(existing, key, value);
+    writeJsonFileAtomic(path, existing);
+  });
 }
 
 /**
@@ -139,11 +151,13 @@ export function persistSharedKey(path: string, key: string, value: unknown): voi
  */
 export function raiseReaderFloorInFile(path: string, minReaderVersion: string, setBy: string): boolean {
   if (!existsSync(path)) return false;
-  const existing = readSharedTierFile(path);
-  const { raised } = raiseSettingsReaderFloor(existing, minReaderVersion, setBy);
-  if (!raised) return false;
-  writeJsonFileAtomic(path, existing);
-  return true;
+  return withSyncFileLock(path, () => {
+    const existing = readSharedTierFile(path);
+    const { raised } = raiseSettingsReaderFloor(existing, minReaderVersion, setBy);
+    if (!raised) return false;
+    writeJsonFileAtomic(path, existing);
+    return true;
+  });
 }
 
 /**
@@ -153,6 +167,10 @@ export function raiseReaderFloorInFile(path: string, minReaderVersion: string, s
  */
 export function removeSharedKey(path: string, key: string): void {
   if (!existsSync(path)) return;
+  withSyncFileLock(path, () => removeSharedKeyLocked(path, key));
+}
+
+function removeSharedKeyLocked(path: string, key: string): void {
   const existing = readSharedTierFile(path);
   const parts = key.split('.');
   const parents: Array<Record<string, unknown>> = [existing];

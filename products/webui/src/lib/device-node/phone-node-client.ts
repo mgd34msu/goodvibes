@@ -92,6 +92,12 @@ export interface PhoneNodeStorage {
   writeExecuted?(entries: readonly (readonly [string, ExecutedWorkRecord])[]): void;
 }
 
+function isExecutedWorkRecord(value: unknown): value is ExecutedWorkRecord {
+  if (value === null || typeof value !== 'object') return false;
+  const status = (value as { status?: unknown }).status;
+  return status === 'completed' || status === 'failed';
+}
+
 export function browserPhoneNodeStorage(): PhoneNodeStorage {
   return {
     read(): PhoneNodeIdentity | null {
@@ -132,7 +138,7 @@ export function browserPhoneNodeStorage(): PhoneNodeStorage {
         // entry is dropped rather than fed back in as a false dedupe marker.
         if (!Array.isArray(parsed)) return [];
         return parsed.filter((entry): entry is [string, ExecutedWorkRecord] => (
-          Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string'
+          Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string' && isExecutedWorkRecord(entry[1])
         ));
       } catch {
         return [];
@@ -194,6 +200,9 @@ const DEFAULT_MAX_ACTIVITY = 50;
  */
 const DEFAULT_MAX_EXECUTED = 50;
 
+const MISSING_PERMISSION_MESSAGE = 'The daemon refused this device\'s request because its token lacks a permission. The pairing is kept; ask the operator to grant the permission, or unpair and pair again.';
+const PAIRED_IDLE_MESSAGE = 'Paired. Waiting for requests.';
+
 export class PhoneNodeClient {
   private readonly options: PhoneNodeClientOptions;
   private readonly fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -216,6 +225,10 @@ export class PhoneNodeClient {
    * same tab. See runWork(), rememberExecuted(), and completeWork().
    */
   private readonly executedWork: Map<string, ExecutedWorkRecord>;
+  /** Item ids whose capability is running now, across stop()/start() lifetimes of this client. */
+  private readonly inFlightWork = new Set<string>();
+  /** Calls the daemon is currently refusing for a missing scope; each call needs its own scope. */
+  private readonly refusedCalls = new Set<'heartbeat' | 'pull' | 'complete'>();
 
   constructor(options: PhoneNodeClientOptions) {
     this.options = options;
@@ -409,6 +422,7 @@ export class PhoneNodeClient {
   unpair(): void {
     this.stop();
     this.identity = null;
+    this.refusedCalls.clear();
     this.executedWork.clear();
     this.options.storage.clear();
     this.setState({ status: 'unpaired', nodeId: '', pendingRequestId: '', message: 'This device is no longer paired here.' });
@@ -421,6 +435,7 @@ export class PhoneNodeClient {
   private handleAuthFailure(): void {
     this.stop();
     this.identity = null;
+    this.refusedCalls.clear();
     this.executedWork.clear();
     this.options.storage.clear();
     this.setState({
@@ -428,6 +443,25 @@ export class PhoneNodeClient {
       nodeId: '',
       message: 'The daemon no longer accepts this device\'s token. It was revoked or rotated. Pair again to reconnect.',
     });
+  }
+
+  /**
+   * A valid token the daemon refuses for lack of a scope is a permission gap, not a
+   * revocation: the pairing and its redelivery markers stay, and the message says
+   * what is missing so the operator can grant it instead of pairing again.
+   */
+  private handleMissingPermission(call: 'heartbeat' | 'pull' | 'complete'): void {
+    this.refusedCalls.add(call);
+    this.setState({ message: MISSING_PERMISSION_MESSAGE });
+  }
+
+  /**
+   * Heartbeat, pull and complete need separate scopes, so a success of one call
+   * must not hide a refusal of another: the notice goes only when none remain.
+   */
+  private clearMissingPermission(call: 'heartbeat' | 'pull' | 'complete'): void {
+    this.refusedCalls.delete(call);
+    if (this.refusedCalls.size === 0 && this.state.message === MISSING_PERMISSION_MESSAGE) this.setState({ message: PAIRED_IDLE_MESSAGE });
   }
 
   private async heartbeat(): Promise<void> {
@@ -448,10 +482,15 @@ export class PhoneNodeClient {
       },
     }, this.identity.token);
     if (!this.isCurrent(lifetime)) return;
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       this.handleAuthFailure();
       return;
     }
+    if (status === 403) {
+      this.handleMissingPermission('heartbeat');
+      return;
+    }
+    if (status < 400) this.clearMissingPermission('heartbeat');
     if (this.state.announced.join(',') !== announced.join(',')) this.setState({ announced });
   }
 
@@ -463,11 +502,16 @@ export class PhoneNodeClient {
     try {
       const { status, json } = await this.post('/api/remote/work/pull', { maxItems: 3 }, this.identity.token);
       if (!this.isCurrent(lifetime)) return;
-      if (status === 401 || status === 403) {
+      if (status === 401) {
         this.handleAuthFailure();
         return;
       }
+      if (status === 403) {
+        this.handleMissingPermission('pull');
+        return;
+      }
       if (status >= 400) return;
+      this.clearMissingPermission('pull');
       const items = Array.isArray((json as { work?: unknown }).work) ? (json as { work: WorkItem[] }).work : [];
       for (const item of items) {
         if (!this.isCurrent(lifetime)) break;
@@ -492,6 +536,10 @@ export class PhoneNodeClient {
       await this.completeWork(item.id, executed.status, executed.result, executed.error);
       return;
     }
+    // Another lifetime of this client (stop() then start()) may still be inside the
+    // capability for this same item, for example waiting on a browser permission
+    // prompt, when the daemon redelivers it after the lease expires.
+    if (this.inFlightWork.has(item.id)) return;
     const payload = (item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload)
       ? item.payload
       : {}) as Record<string, unknown>;
@@ -505,7 +553,13 @@ export class PhoneNodeClient {
       : {}) as Record<string, unknown>;
     const runner = this.options.runCapability
       ?? ((id: string, capabilityInput: Record<string, unknown>) => runWebNodeCapability(id, capabilityInput, this.bindings));
-    const result = await runner(capabilityId, input);
+    this.inFlightWork.add(item.id);
+    let result: CapabilityRunResult;
+    try {
+      result = await runner(capabilityId, input);
+    } finally {
+      this.inFlightWork.delete(item.id);
+    }
     if (identity !== this.identity) return;
     if (this.isCurrent(lifetime)) this.note(capabilityId, result.ok, result.ok ? 'Served' : (result.error ?? 'Failed'));
     const status = result.ok ? 'completed' : 'failed';
@@ -525,7 +579,7 @@ export class PhoneNodeClient {
     // Unpairing changes identity and returns above without repopulating cleared storage.
     this.rememberExecuted(item.id, status, completionResult, completionError);
     if (!this.isCurrent(lifetime)) return;
-    await this.completeWork(item.id, status, completionResult, completionError);
+    await this.completeWork(item.id, status, completionResult, completionError, capabilityId);
   }
 
   /**
@@ -545,14 +599,25 @@ export class PhoneNodeClient {
     this.options.storage.writeExecuted?.([...this.executedWork.entries()]);
   }
 
-  private async completeWork(workId: string, status: 'completed' | 'failed', result: unknown, error?: string): Promise<void> {
+  private async completeWork(workId: string, status: 'completed' | 'failed', result: unknown, error?: string, capabilityId = ''): Promise<void> {
     if (!this.identity) return;
-    await this.post(`/api/remote/work/${encodeURIComponent(workId)}/complete`, {
+    const { status: httpStatus } = await this.post(`/api/remote/work/${encodeURIComponent(workId)}/complete`, {
       workId,
       status,
       ...(result === undefined ? {} : { result }),
       ...(error ? { error } : {}),
     }, this.identity.token);
+    if (httpStatus === 401) {
+      this.handleAuthFailure();
+      return;
+    }
+    if (httpStatus === 403 && this.isCurrent(this.lifetime)) this.handleMissingPermission('complete');
+    else if (httpStatus < 400) this.clearMissingPermission('complete');
+    // 499 is this client's own cancellation (stop or unpair), not a daemon answer.
+    if (httpStatus >= 400 && httpStatus !== 499 && this.isCurrent(this.lifetime)) {
+      // The marker stays, so the daemon's redelivery retries only this report.
+      this.note(capabilityId || 'device.report', false, `The daemon did not record the completion report (HTTP ${httpStatus}); it will be sent again if the work is redelivered.`);
+    }
   }
 
   /** Start heartbeating and pulling work. */

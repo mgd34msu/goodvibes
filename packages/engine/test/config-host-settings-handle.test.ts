@@ -7,6 +7,8 @@ import { defaultStore, getSettingsControlPlaneSnapshot, readStore } from '../pla
 import * as atomicJson from '../platform/src/platform/utils/atomic-json-store.ts';
 import * as hostSettingsIo from '../platform/src/platform/config/manager-host-settings.ts';
 
+const runsAsRoot = process.getuid?.() === 0; // chmod does not deny uid 0, so the denial cases cannot run there
+
 const FIRST = 'behavior.hostHandleFirst';
 const SECOND = 'behavior.hostHandleSecond';
 const definitions: readonly HostBooleanSetting[] = [FIRST, SECOND].map(key => ({ key, type: 'boolean', default: true, description: 'Synthetic restrictive host preference' }));
@@ -127,6 +129,7 @@ test('handles reject nonboolean JavaScript calls and retain managed/read-only gu
 });
 
 test('host watcher sees chmod-only read failure and restoration once, with stable failure avoiding churn', async () => {
+  if (runsAsRoot) return;
   const { config } = fixture();
   const { first, changes, events } = observe(config);
   first.set(false); changes.length = 0; events.length = 0;
@@ -154,6 +157,7 @@ test('host watcher sees chmod-only read failure and restoration once, with stabl
 });
 
 test('no-host watcher keeps stat-only behavior across chmod-only changes', async () => {
+  if (runsAsRoot) return;
   const { config } = fixture([]);
   config.set('behavior.autoApprove', true);
   const path = config.getConfigPath();
@@ -169,7 +173,8 @@ test('no-host watcher keeps stat-only behavior across chmod-only changes', async
   } finally { chmodSync(path, 0o600); stop(); loads.mockRestore(); }
 });
 
-test.each(['global', 'project', 'reset-global', 'reset-project'])('failed %s persistence revokes all host leaves once before rethrowing', (scope) => {
+test.each(['project', 'reset-project'])('failed %s persistence revokes all host leaves once before rethrowing', (scope) => {
+  if (runsAsRoot) return;
   const { config } = fixture();
   const { first, second, changes, events } = observe(config);
   first.set(false); second.set(false);
@@ -187,6 +192,23 @@ test.each(['global', 'project', 'reset-global', 'reset-project'])('failed %s per
     expect(attempt).toThrow();
     expect(events).toHaveLength(2);
   } finally { chmodSync(directory, 0o700); }
+});
+
+test.each(['global', 'reset-global'])('%s write is refused before anything changes when the policy store cannot be read', (scope) => {
+  if (runsAsRoot) return;
+  const { config } = fixture();
+  const { first, second, changes, events } = observe(config);
+  first.set(false); second.set(false);
+  changes.length = 0; events.length = 0;
+  const directory = dirname(config.getConfigPath());
+  chmodSync(directory, 0);
+  try {
+    expect(() => scope === 'reset-global' ? first.reset() : first.set(true)).toThrow('Managed locks are not changed');
+    expect([first.get(), second.get()]).toEqual([false, false]);
+    expect(changes).toEqual([]);
+    expect(events).toEqual([]);
+  } finally { chmodSync(directory, 0o700); }
+  expect(JSON.parse(readFileSync(config.getConfigPath(), 'utf8')).behavior.hostHandleFirst).toBe(false);
 });
 
 test.each(['global', 'project', 'reset'])('failed %s write preserves original error identity while publishing external host changes', (scope) => {
@@ -226,6 +248,7 @@ test('successful scalar refresh hooks every changed host once and repeated same-
 });
 
 test('failed privacy refresh does not replace the original write error and revokes every host leaf', () => {
+  if (runsAsRoot) return;
   const { config } = fixture();
   const { first, second, changes, events } = observe(config);
   first.set(false); second.set(false); first.setProjectValue(false);
@@ -251,6 +274,7 @@ test('failed privacy refresh does not replace the original write error and revok
 });
 
 test.each(['unreadable', 'malformed', 'invalid-parent'])('host set refuses %s project ownership before changing either destination', (failure) => {
+  if (failure === 'unreadable' && runsAsRoot) return;
   const { config } = fixture();
   const { first, changes, events } = observe(config);
   first.set(true); first.setProjectValue(false); changes.length = 0; events.length = 0;
@@ -341,6 +365,7 @@ test.each([
 });
 
 test('unreadable policy metadata throws a bounded error and recovers after readability returns', () => {
+  if (runsAsRoot) return;
   const { config, options } = fixture();
   const handle = config.getHostBooleanSetting(FIRST); handle.set(false);
   const policyPath = join(options.configDir, 'settings-sync.json');

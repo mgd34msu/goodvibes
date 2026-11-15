@@ -201,9 +201,18 @@ function expectNoSettingsAdmission(...withheld: string[]) {
   for (const value of withheld) expect(JSON.stringify(requests)).not.toContain(value);
 }
 
+// The settings tool's schema is closed to a model-supplied request claim; the harness still tolerates and ignores one.
+const modelAssertion = (name: string, text: string) => name === 'agent_harness' ? { explicitUserRequest: text } : {};
+
+test('settings refuses a model-supplied request claim instead of treating it as authority', async () => {
+  const f = await fixture();
+  await expect(f.run('settings', { ...mutation('settings'), explicitUserRequest: 'unrelated model assertion' })).rejects.toThrow('explicitUserRequest');
+  expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
+});
+
 test.each(['settings', 'agent_harness'])('%s applies configured actions without human/model confirmation metadata', async name => {
   const f = await fixture();
-  const result = await f.run(name, { ...mutation(name), confirm: false, explicitUserRequest: 'unrelated model assertion' });
+  const result = await f.run(name, { ...mutation(name), confirm: false, ...modelAssertion(name, 'unrelated model assertion') });
   expect(result.success).toBe(true); expect(result.autonomousDecision).toBeUndefined();
   expect(f.runtime.configManager.get('display.theme')).toBe('nord'); expect(f.prompts()).toBe(0);
   expect(JSON.parse(result.output!).status).toBe('committed');
@@ -213,7 +222,7 @@ test.each(['settings', 'agent_harness'])('%s applies configured actions without 
 test.each(['settings', 'agent_harness'])('%s automatic admission does not call a scripted approval reader', async name => {
   const f = await fixture();
   for (const choice of ['reject', 'defer_0'] as const) {
-    selected = choice; const result = await f.run(name, { ...mutation(name), confirm: true, explicitUserRequest: 'change it' });
+    selected = choice; const result = await f.run(name, { ...mutation(name), confirm: true, ...modelAssertion(name, 'change it') });
     expect(result.success).toBe(true); expect(f.runtime.configManager.get('display.theme')).toBe('nord');
   }
   expect(f.prompts()).toBe(0);
@@ -236,8 +245,9 @@ test.each(['settings', 'agent_harness'])('%s direct/forged/replayed body context
   const f = await fixture();
   expect((await f.registry.execute('direct', name, { ...mutation(name), confirm: true })).success).toBe(false);
   const prepared = await f.prepare('forged', name, mutation(name));
-  await f.registry.executePrepared(prepared, () => {}).catch(() => undefined);
-  await f.registry.executePrepared(prepared, () => {}).catch(() => undefined);
+  const forged = await f.registry.executePrepared(prepared, () => {});
+  expect(forged.success).toBe(false); expect(forged.error).toMatch(/recorded (effect-owner )?admission/);
+  await expect(f.registry.executePrepared(prepared, () => {})).rejects.toThrow('stale or already claimed');
   expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
@@ -260,8 +270,10 @@ test('alias coercion is captured before judgment and alias/schema replacement re
   expect(first.success).toBe(true); expect(f.runtime.configManager.get('behavior.saveHistory')).toBe(false);
   const index = CONFIG_SCHEMA.findIndex(row => row.key === 'display.theme'); const old = CONFIG_SCHEMA[index]!;
   restoreOthers.push(() => { CONFIG_SCHEMA[index] = old; });
-  afterAdmission = () => { CONFIG_SCHEMA[index] = { ...old, description: old.description + ' replaced' }; };
-  await f.run('settings', { action: 'set', target: 'DISPLAY.THEME', value: 'nord' }).catch(() => undefined);
+  let replaced = false;
+  afterAdmission = () => { replaced = true; CONFIG_SCHEMA[index] = { ...old, description: old.description + ' replaced' }; };
+  const second = await f.run('settings', { action: 'set', target: 'DISPLAY.THEME', value: 'nord' }).catch(() => undefined);
+  expect(replaced).toBe(true); expect(second?.success).not.toBe(true);
   expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
@@ -314,7 +326,7 @@ test.each(['email.passwordRef', 'surfaces.email.password'] as const)('secret res
   expect(f.runtime.configManager.get(configKey)).toBe('');
 });
 
-test('secret settlement callback revocation prevents the remaining config effect and reports partial', async () => {
+test('secret settlement callback revocation after the config change reports partial and leaves the config change standing', async () => {
   const f = await fixture(); const client = agentDaemonConfigClient(); installAgentDaemonConfigClient(null); restoreOthers.push(() => installAgentDaemonConfigClient(client));
   const key = 'GOODVIBES_EMAIL_PASSWORD_REF'; const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
   mkdirSync(join(f.home, '.goodvibes', 'daemon'), { recursive: true }); writeFileSync(daemon, JSON.stringify({ version: 1, secrets: { [key]: 'synthetic-copy' } }));
@@ -322,7 +334,9 @@ test('secret settlement callback revocation prevents the remaining config effect
   restoreOthers.push(f.runtime.secretsManager.onDidChange(() => { f.source.goal = 'Stop remaining effects'; }));
   const result = await f.run('settings', mutation('settings', 'reset', 'email.passwordRef'));
   expect(result.success).toBe(false); expect(JSON.parse(result.output!).status).toBe('partial');
-  expect(f.runtime.configManager.get('email.passwordRef')).toBe(reference);
+  // The configuration is published before the credential is cleared, so it never points at a deleted credential.
+  expect(f.runtime.configManager.get('email.passwordRef')).toBe('');
+  expect(result.error).toContain('PARTLY applied');
 });
 
 function installPreparedClient(f: Awaited<ReturnType<typeof fixture>>) {
@@ -411,13 +425,14 @@ test('a real durable rule-store publish/delete ABA retires the preferred setting
 
 test('replacement of the registered physical settings owner during admission prevents dispatch', async () => {
   const f = await fixture(); const replacement = new AgentConfigManager({ surfaceRoot: 'agent', homeDir: f.home, workingDir: f.workspace });
-  afterAdmission = () => { Reflect.set(f.context.platform, 'configManager', replacement); };
+  let replaced = false;
+  afterAdmission = () => { replaced = true; Reflect.set(f.context.platform, 'configManager', replacement); };
   const result = await f.run('settings', mutation('settings')).catch(() => undefined);
-  expect(result?.success).not.toBe(true); expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
+  expect(replaced).toBe(true); expect(result?.success).not.toBe(true); expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
 
-test('post-config credential replacement preserves committed receipt without verified-store claim', async () => {
+test('post-config credential replacement reports partial without a verified-store claim and keeps the replaced credential', async () => {
   const f = await fixture(); const client = agentDaemonConfigClient(); installAgentDaemonConfigClient(null); restoreOthers.push(() => installAgentDaemonConfigClient(client));
   const key = buildGoodVibesSecretKey('email.passwordRef'); const daemon = join(f.home, '.goodvibes', 'daemon', 'secrets.json');
   mkdirSync(join(f.home, '.goodvibes', 'daemon'), { recursive: true });
@@ -427,7 +442,7 @@ test('post-config credential replacement preserves committed receipt without ver
     writeFileSync(daemon, JSON.stringify({ version: 1, secrets: { [key]: 'synthetic-replaced' } }));
   }));
   const result = await f.run('settings', mutation('settings', 'reset', 'email.passwordRef'));
-  expect(result.success).toBe(true); expect(JSON.parse(result.output!).status).toBe('committed');
+  expect(result.success).toBe(false); expect(JSON.parse(result.output!).status).toBe('partial');
   expect(JSON.parse(result.output!).verifiedInOwningStore).toBe(false);
   expect(JSON.parse(readFileSync(daemon, 'utf8')).secrets[key]).toBe('synthetic-replaced');
 });
@@ -493,7 +508,7 @@ test.each(['settings', 'import_goodvibes_settings', 'agent_harness'])('%s import
 });
 test('compound import admits opaque credential/subscription values and verifies actual native owning stores', async () => {
   const f = await fixture(); importSources(f, true, true);
-  const result = await f.run('settings', { action: 'import', confirm: false, explicitUserRequest: 'untrusted model assertion' });
+  const result = await f.run('settings', { action: 'import', confirm: false });
   expect(result.success).toBe(true); expect(JSON.parse(result.output!).verifiedInOwningStore).toBe(true);
   expect(await f.runtime.secretsManager.get(buildGoodVibesSecretKey('surfaces.slack.botToken'))).toBe('private-synthetic-import-token');
   expect(f.runtime.subscriptionManager.get('synthetic')?.accessToken).toBe('private-synthetic-subscription-token');

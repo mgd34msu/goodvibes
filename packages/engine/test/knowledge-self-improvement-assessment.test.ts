@@ -208,7 +208,9 @@ describe('native semantic self-improvement assessment', () => {
     let repairs = 0;
     const service = new KnowledgeSemanticService(item.store, { gapRepairer: async () => { repairs++;
       return { searched: true, acceptedSourceIds: [], ingestedSourceIds: [], skippedUrls: [] }; } });
-    await held(service.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [item.gap.id], force: true }), 'uncertain');
+    const result = await service.selfImprove({ knowledgeSpaceId: spaceId, gapIds: [item.gap.id], force: true });
+    expect(result.errors).toEqual([{ gapId: item.gap.id, error: new Held('uncertain').message }]);
+    expect(result.skippedGaps).toBe(1);
     expect(repairs).toBe(0); expect(item.store.listRefinementTasks()).toEqual([]); expect(snapshot(item.store)).toBe(before);
   });
   test('one accepted fact can settle an exact request even when it includes full', async () => {

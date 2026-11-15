@@ -42,11 +42,16 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
 import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, type SharedSessionContinuationOutcome } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createAsyncDisposalScope, createRuntimeStopRequests } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { registerSurfaceRuntimePollers } from './disposal-wiring.ts';
+import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
+import { createAutomationSpawnTask } from './automation-spawn.ts';
+import { buildContinuationSpawnInput } from './continuation-spawn.ts';
+import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { composeCredentialServices } from './credential-composition.ts';
 import { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
 import { assertConfiguredProjectContextReady, createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/platform/knowledge';
@@ -62,13 +67,15 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/state';
 import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
-import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
+import { createNotificationDispatcher, startNotificationFlush, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createDomainDispatch } from './store/index.ts';
 import {
   DistributedRuntimeManager,
+  RemoteRunnerRegistry,
+  RemoteSupervisor,
   IntegrationHelperService,
   IdempotencyStore,
   ComponentHealthMonitor,
@@ -87,7 +94,6 @@ import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles
 import { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { createRemoteExecutionServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createContractIntake, createContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
 import {
@@ -107,7 +113,7 @@ import {
   createStoreRerooter,
   isCodeInjectionSettingEnabled,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { WorkspaceTrustManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WorkspaceTrustManager, trustGatedApprovalRaiser, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
@@ -130,6 +136,7 @@ import { VERSION } from '../version.ts';
 import { createSessionConversationRewindPort, hasSessionConversation } from './conversation-rewind-port.ts';
 import { createFleetReadModel } from '../views/fleet-read-model.ts';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { sandboxAwareApprovalRaiser, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 
@@ -155,7 +162,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // Owned manager: gate states derive from domain settings keys + live
     // bridge (mirrors the platform composition root; a passed manager is the caller's to wire).
     featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-    bindFeatureSettingsBridge(configManager, featureFlags);
+    disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
   }
 
   // ── The client seams: one resolution of "which daemon", shared by all of them.
@@ -195,9 +202,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     // The "local prompt" is this surface's own broker plus the terminal ask:
     // that is what puts the ask on the approval card and in the modal while the
     // daemon holds the record every other surface reads.
-    localPrompt: () => (request) =>
+    // The signal is the raiser's: a decision made on another surface aborts it,
+    // which retires this broker's record and clears the card here.
+    localPrompt: () => (request, options) =>
       approvalBroker.requestApproval({
         request,
+        ...(options?.signal ? { signal: options.signal } : {}),
         ...(liveSessionIdRef.value ? { sessionId: liveSessionIdRef.value } : {}),
         localPrompt: (prompt) => localPromptRef.requestPermission(prompt),
       }),
@@ -210,6 +220,23 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
 
   // ── The platform's client floor: everything a turn needs in this process.
   const workspaceTrustManager = new WorkspaceTrustManager({ shellPaths, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT });
+  // The trust question has one owner here: the terminal UI patches `trustPromptRef` once it exists, and
+  // every trust gate (the turn's and the workers') asks through `requestTrustDecision`, which keeps a
+  // single prompt open however many gates reach an undecided workspace at once.
+  const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> } = {
+    requestTrustDecision: async () => 'restricted',
+  };
+  let pendingTrustDecision: Promise<WorkspaceTrustLevel> | null = null;
+  const requestTrustDecision = (): Promise<WorkspaceTrustLevel> => {
+    pendingTrustDecision ??= trustPromptRef.requestTrustDecision().finally(() => { pendingTrustDecision = null; });
+    return pendingTrustDecision;
+  };
+  // One gated raiser for every consumer that asks on a worker's or tool's behalf (the client floor and the
+  // approval-derived handlers), so a restricted workspace refuses them all the same way.
+  // A contained command the turn runs without a prompt must not prompt for a worker either: the sandbox-aware
+  // exec gate sits inside the trust gate here exactly as it does for the turn (see createTuiTurnPermissionManager).
+  const sandboxAwareRequestApproval = sandboxAwareApprovalRaiser(sandboxExecAskDepsFromRuntime(configManager, featureFlags), requestApproval);
+  const trustGatedRequestApproval = trustGatedApprovalRaiser(workspaceTrustManager, sandboxAwareRequestApproval, requestTrustDecision);
   const client = createClientRuntimeServices({
     workspaceTrust: workspaceTrustManager,
     runtimeBus: options.runtimeBus,
@@ -219,7 +246,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     workingDir: workingDirectory,
     homeDirectory,
     featureFlags,
-    requestApproval,
+    // Workers (background agents, subagents) ask through the same trust gate as the turn: a restricted
+    // workspace refuses their writes, commands and delegation without raising an approval.
+    requestApproval: trustGatedRequestApproval,
     ...(options.modelDiscovery === undefined ? {} : { modelDiscovery: options.modelDiscovery }),
     ...(options.daemonHomeDirectory === undefined ? {} : { daemonHome: options.daemonHomeDirectory }),
   });
@@ -249,8 +278,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     artifactStore,
     webSearchProviders,
     webSearchService,
-    mcpRegistry: clientMcpRegistry,
-    sandboxSessionRegistry: clientSandboxRegistry,
+    mcpRegistry,
+    sandboxSessionRegistry,
     processManager,
     modeManager,
     fileUndoManager,
@@ -260,8 +289,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     projectIndex,
     sessionOrchestration,
   } = client;
-  void clientMcpRegistry;
-  void clientSandboxRegistry;
   disposalScope.registry.add('client runtime services', () => client.close());
   const contractOperator = createContractOperatorService({ runner: contractRunner, workingDirectory });
   const contractIntake = createContractIntake({ runner: contractRunner, projectRoot: workingDirectory });
@@ -297,12 +324,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     runtimeBus: options.runtimeBus,
     featureFlags,
   });
-  // An EMPTY catalog. This product answers no verbs; the field exists only
-  // because the platform's startExternalServices takes a daemon-grade graph even in
-  // the adopt-only mode this surface runs in, and because plugin loading is
-  // handed one. With adoptOnly no DaemonServer is constructed, so nothing is
-  // ever served off it.
+  // This product serves no verbs itself, and with adoptOnly no DaemonServer is
+  // constructed, so nothing is ever served off this catalog. It exists because the
+  // platform's startExternalServices takes a daemon-grade graph, plugin loading
+  // is handed one, and the mail, calendar and review surfaces call it: each
+  // built-in verb is answered by the daemon (gateway-daemon-forward.ts).
   const gatewayMethods = new GatewayMethodCatalog();
+  forwardGatewayMethodsToDaemon(gatewayMethods, verbs);
   // The credential/identity seam (credential-composition.ts), this
   // installation's own pairing tokens and step-up service.
   const { stepUpService, pairingTokens } = composeCredentialServices({
@@ -365,34 +393,22 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // re-declared: a hand-written copy would drift from the routing options the
   // spawn actually forwards, and the drift would be silent.
   type ContinuationRequest = Parameters<NonNullable<Parameters<typeof sessionBroker.setContinuationRunner>[0]>>[0];
-  const continuationRunner = async ({ task, input }: ContinuationRequest): Promise<{ agentId: string } | null> => {
+  const continuationRunner = async ({ task, input }: ContinuationRequest): Promise<SharedSessionContinuationOutcome> => {
     // Too old for the live daemon: refuse the work instead of doing it the old
-    // way. The owner has already been told to restart this terminal.
+    // way. The owner has already been told to restart this terminal. Held, not
+    // declined with null: null reads as "consumed", and the message would be
+    // lost instead of waiting for the restarted terminal.
     if (!clientBuildGuard.maySharedSessionWork()) {
       logger.warn('declined a shared-session continuation: this build is below the daemon floor', {
         sessionId: input.sessionId,
         floor: clientBuildGuard.current().floor,
       });
-      return null;
+      return { disposition: 'held', reason: 'this terminal build is below the daemon floor; restart it to process this message' };
     }
-    const record = agentManager.spawn({
-      mode: 'spawn',
-      task,
-      ...(input.routing?.modelId ? { model: input.routing.modelId } : {}),
-      ...(input.routing?.providerId ? { provider: input.routing.providerId } : {}),
-      ...(input.routing?.tools?.length ? { tools: [...input.routing.tools], restrictTools: true } : {}),
-      ...(input.routing
-        ? {
-            routing: {
-              providerSelection: input.routing.providerSelection ?? (input.routing.providerId ? 'concrete' : 'inherit-current'),
-              providerFailurePolicy: input.routing.providerFailurePolicy ?? 'ordered-fallbacks',
-              ...(input.routing.fallbackModels?.length ? { fallbackModels: [...input.routing.fallbackModels] } : {}),
-            },
-          }
-        : {}),
-      ...(input.routing?.reasoningEffort ? { reasoningEffort: input.routing.reasoningEffort } : {}),
-      context: `shared-session:${input.sessionId}`,
-    });
+    const record = agentManager.spawn(buildContinuationSpawnInput({ task, input }, {
+      configReader: configManager,
+      modelCandidates: providerRegistry.listModels(),
+    }));
     return { agentId: record.id };
   };
   sessionBroker.setContinuationRunner(continuationRunner);
@@ -404,6 +420,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     embeddingRegistry: memoryEmbeddingRegistry,
   });
   const memoryRegistry = new MemoryRegistry(memoryStore);
+  disposalScope.registry.add('memory store', () => memoryStore.close());
   // Local-until-adopted access facade for spine-shaped consumers (the Memory
   // modal): bootstrap.ts activates the wire transport when a compatible
   // external daemon is adopted, same signal as the session spine.
@@ -428,22 +445,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     deliveryManager,
     providerRegistry,
     featureFlags,
-    spawnTask: (input) => {
-      const record = agentManager.spawn({
-        mode: 'spawn',
-        task: input.prompt,
-        ...(input.modelId ? { model: input.modelId } : {}),
-        ...(input.modelProvider ? { provider: input.modelProvider } : {}),
-        ...(input.fallbackModels !== undefined ? { fallbackModels: [...input.fallbackModels] } : {}),
-        ...(input.routing ? { routing: input.routing } : {}),
-        ...(input.executionIntent ? { executionIntent: input.executionIntent } : {}),
-        ...(input.template ? { template: input.template } : {}),
-        ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
-        ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
-        ...(input.context ? { context: input.context } : {}),
-      });
-      return record.id;
-    },
+    spawnTask: createAutomationSpawnTask(agentManager),
   });
   // Knowledge/wiki + home-graph stack (governor backpressure wired in), see knowledge-services.ts.
   const {
@@ -502,17 +504,16 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     automationBridge: automationManager,
   });
 
-  // Remote runners and the sandboxes tool calls are confined to; see
-  // remote-execution-composition.ts for why the four are built as one.
-  const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry } = createRemoteExecutionServices({
-    agentManager,
-    workingDirectory,
-    hookDispatcher,
-    configManager,
-    runtimeBus: options.runtimeBus,
-  });
+  // The MCP registry and sandbox session registry are the client's: it wires the
+  // permission host and elicitation handler onto that MCP registry, and the
+  // workflow and tool deps hold that sandbox registry, so a second pair would run
+  // MCP tools without either and hide sandbox sessions from the workflow.
+  const remoteRunnerRegistry = new RemoteRunnerRegistry(agentManager, workingDirectory);
+  const remoteSupervisor = new RemoteSupervisor(remoteRunnerRegistry);
   const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags });
   const componentHealthMonitor = new ComponentHealthMonitor();
+  const healthSystem = createWiredHealthSystem(options.runtimeBus);
+  disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
   const worktreeRegistry = new WorktreeRegistry(workingDirectory);
   const webhookNotifier = new WebhookNotifier([], {
     metadataOnly: () => readTuiNotificationsMetadataOnly(configManager),
@@ -538,12 +539,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // Repo source-tree code index, sharing memoryEmbeddingRegistry with MemoryStore.
   const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({
     workingDirectory,
+    // A workspace swap moves the project index; relative reindex paths follow it.
+    getWorkingDirectory: () => projectIndex.baseDir,
     surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
     configManager,
     memoryEmbeddingRegistry,
     isReindexPaused: () => pauseController.isPaused('code-index-reindex'),
     admitExpensiveWork,
   });
+  disposalScope.registry.add('code index store', () => codeIndexStore.close());
   const codeInjectionOrchestratorDeps = {
     codeIndex: codeIndexStore,
     isCodeInjectionSettingEnabled: () => isCodeInjectionSettingEnabled(configManager),
@@ -595,6 +599,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     port: createSessionConversationRewindPort(),
     hosts: hasSessionConversation,
     label: 'the terminal app',
+    surface,
   });
   const requestConversationRewindStop = () => {
     conversationRewindClosing ??= conversationRewindHost.stop();
@@ -609,7 +614,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({
     configManager,
-    memoryRegistry,
+    // Consolidation writes the store, so it runs here only while no daemon owns it.
+    memoryRegistry: gateConsolidationToLocalWriter(memoryRegistry, memorySpine),
     runtimeBus: options.runtimeBus,
     isIdle: () =>
       sessionBroker.countBusySessions() === 0 &&
@@ -677,7 +683,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       signal: promptLifetime.signal,
       workspaceTrust: workspaceTrustManager,
     },
-    requestApproval,
+    requestApproval: trustGatedRequestApproval,
     configManager,
     featureFlags,
     announcementStore: new FeatureAnnouncementStore(featureAnnouncementsPath(configManager)),
@@ -723,6 +729,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const notificationDispatcher = createNotificationDispatcher(configManager);
   wireRuntimeNotificationBridge(options.runtimeBus, notificationDispatcher);
   wireMemoryPressureNotice(options.runtimeBus, notificationDispatcher);
+  disposalScope.registry.add('notification flush', startNotificationFlush(notificationDispatcher));
 
   const stopRequests = createRuntimeStopRequests(disposalScope.registry, {
     homeGraphService: { dispose: () => { homeGraphClosing = homeGraphService.dispose(); return homeGraphClosing; } },
@@ -737,6 +744,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     surface,
     shellPaths,
     workspaceTrustManager,
+    trustPromptRef,
+    requestTrustDecision,
     configManager,
     featureFlags,
     runtimeBus: options.runtimeBus,
@@ -804,6 +813,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     mcpRegistry,
     tokenAuditor,
     componentHealthMonitor,
+    healthAggregator: healthSystem.aggregator,
     worktreeRegistry,
     sandboxSessionRegistry,
     webhookNotifier,

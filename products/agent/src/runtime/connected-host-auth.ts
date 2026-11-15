@@ -2,6 +2,7 @@ import { canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } 
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -19,7 +20,7 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 export function connectedHostOperatorTokenPath(homeDirectory: string): string {
-  return join(homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
+  return join(resolveGoodVibesDaemonHome(homeDirectory), 'operator-tokens.json');
 }
 
 /** A live caller supplies its actual observer; passive snapshots issue no ID. */

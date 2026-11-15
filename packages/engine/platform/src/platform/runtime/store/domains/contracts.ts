@@ -106,6 +106,8 @@ export interface ContractDomainState {
   totalCancelled: number;
   /** Spawns refused by the spawn guard (recursion limits, a unit trying to spawn). */
   spawnGuardTrips: number;
+  /** Ids of ended contracts dropped from `contracts` (newest last, bounded); a late event for one is ignored rather than recreating it as a live contract. */
+  evictedContractIds?: readonly string[] | undefined;
 }
 
 export function createInitialContractsState(): ContractDomainState {
@@ -120,5 +122,6 @@ export function createInitialContractsState(): ContractDomainState {
     totalFailed: 0,
     totalCancelled: 0,
     spawnGuardTrips: 0,
+    evictedContractIds: [],
   };
 }

@@ -1,4 +1,3 @@
-/** Regression source UNRUN during the coding-first pass. */
 import { expect, test } from 'bun:test';
 import { createSystemOnePort, observeJudgmentModel, reuseObservedJudgmentResult, SqliteDecisionLog, withDecisionLog } from '../src/index.ts';
 import { fakePort, noulAnswer } from '../src/testing/fake-port.ts';

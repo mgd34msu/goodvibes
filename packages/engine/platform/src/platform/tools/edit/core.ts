@@ -3,7 +3,6 @@ import { captureFileEffectRevision } from '../shared/file-effect-revision.js';
 import type { CapturedWriteRevision } from '../shared/captured-write-revision.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { relative } from 'node:path';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
 import { logger } from '../../utils/logger.js';
 import type { SessionChangeTracker } from '../../sessions/change-tracker.js';
@@ -11,7 +10,7 @@ import { FileUndoManager } from '../../state/file-undo.js';
 import { FileStateCache, unifiedDiff } from '../../state/file-cache.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
-import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { resolveWritablePath } from '../../utils/path-safety.js';
 import { assertCapturedToolWriteRevision, captureCapturedToolWriteRevision, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, hasCapturedToolInvocation } from '../shared/captured-input-tools.js';
 import { editSchema } from './schema.js';
 import { healToolFile, type CapturedAutoHealBackend } from '../shared/captured-auto-heal.js';
@@ -21,6 +20,7 @@ import {
   type DiagnosticsProvider,
 } from '../shared/post-edit-diagnostics.js';
 import { ImportGraph } from '../../intelligence/index.js';
+import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
 import {
   buildFailedEditResult,
   classifyEditFailure,
@@ -29,8 +29,9 @@ import {
   computeSingleEdit,
 } from './match.js';
 import type { EditInput, EditItem, EditResult, EditResultStatus, ValidatorName } from './types.js';
-import { executeNotebookEdit } from './notebook.js';
+import { executeNotebookEdit, occConflictMessage } from './notebook.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { describeUnexpectedToolError } from '../input-projection.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import {
   runValidators as runSharedValidators,
@@ -41,9 +42,11 @@ import {
 
 const DIFF_TRUNCATE_THRESHOLD = 5000;
 const DIFF_PREVIEW_LENGTH = 500;
+/** How long the post-edit dependents scan may run before it stops and says so. */
+const IMPORT_GRAPH_MAX_MS = 10_000;
 
-async function runValidators(validators: ValidatorName[], cwd: string, runner?: ValidatorRunner, assertCurrent?: () => void): Promise<ValidatorResult | null> {
-  const failures = await runSharedValidators(validators, cwd, runner, assertCurrent);
+async function runValidators(validators: ValidatorName[], cwd: string, runner?: ValidatorRunner, assertCurrent?: () => void, signal?: AbortSignal): Promise<ValidatorResult | null> {
+  const failures = await runSharedValidators(validators, cwd, runner, assertCurrent, signal);
   return failures[0] ?? null;
 }
 
@@ -55,6 +58,8 @@ interface EditExecutionContext {
   readonly signal?: AbortSignal | undefined;
   capturedRevisions: Map<string, CapturedWriteRevision>;
   capturedWritten: Set<string>;
+  /** Paths this call wrote and has not rolled back (every mode). */
+  written: Set<string>;
   fileCache: FileStateCache;
   cwd: string;
   fileUndoManager?: FileUndoManager | undefined;
@@ -69,6 +74,8 @@ interface EditExecutionContext {
 interface ResolvedTextEditInput {
   resolvedPaths: Map<string, string>;
   fileContents: Map<string, string>;
+  /** Why a path was refused (non-atomic modes only); such a path is never read. */
+  pathErrors: Map<string, string>;
   fileReadErrors: Map<string, string>;
   workingContents: Map<string, string>;
 }
@@ -85,27 +92,30 @@ async function prepareTextEditInput(
   transactionMode: 'atomic' | 'partial' | 'none',
 ): Promise<ResolvedTextEditInput | { error: string }> {
   const resolvedPaths: Map<string, string> = new Map();
+  const pathErrors: Map<string, string> = new Map();
   for (const item of input.edits!) {
-    if (resolvedPaths.has(item.path)) continue;
+    if (resolvedPaths.has(item.path) || pathErrors.has(item.path)) continue;
     try {
-      resolvedPaths.set(item.path, resolveAndValidatePath(item.path, env.cwd));
+      resolvedPaths.set(item.path, resolveWritablePath(item.path, env.cwd));
     } catch (err) {
-      const msg = summarizeError(err);
+      const msg = `Path error for '${item.path}': ${summarizeError(err)}`;
       if (transactionMode === 'atomic') {
-        return { error: `Path error for '${item.path}': ${msg}` };
+        return { error: msg };
       }
+      pathErrors.set(item.path, msg);
     }
   }
 
-  const uniquePaths = new Set((input.edits ?? []).map((e) => resolvedPaths.get(e.path) ?? e.path));
+  // Only validated paths are read; a refused one is reported per edit and never touched.
+  const uniquePaths = new Set(resolvedPaths.values());
   const fileContents: Map<string, string> = new Map();
   const fileReadErrors: Map<string, string> = new Map();
 
   for (const resolvedPath of uniquePaths) {
     await assertCapturedToolReadAccess(resolvedPath);
-    const cacheResult = env.fileCache.lookup(resolvedPath);
+    const cacheResult = env.fileCache.peek(resolvedPath);
     if (cacheResult.status === 'modified') {
-      const msg = `OCC conflict: '${resolvedPath}' was modified externally since last read`;
+      const msg = occConflictMessage(resolvedPath);
       if (transactionMode === 'atomic') {
         return { error: msg };
       }
@@ -113,14 +123,26 @@ async function prepareTextEditInput(
       continue;
     }
 
+    await assertCapturedToolReadAccess(resolvedPath);
+    let content: string;
     try {
-      await assertCapturedToolReadAccess(resolvedPath);
-      const content = readFileSync(resolvedPath, 'utf-8');
+      content = readFileSync(resolvedPath, 'utf-8');
+    } catch {
+      const msg = `File not found or unreadable: '${resolvedPath}'`;
+      if (transactionMode === 'atomic') {
+        return { error: msg };
+      }
+      fileReadErrors.set(resolvedPath, msg);
+      continue;
+    }
+    try {
       if (env.authenticated && !input.dry_run) env.initialRevisions.set(resolvedPath, captureFileEffectRevision(resolvedPath, Buffer.from(content)));
       fileContents.set(resolvedPath, content);
       if (hasCapturedToolInvocation() && !input.dry_run) env.capturedRevisions.set(resolvedPath, captureCapturedToolWriteRevision(resolvedPath, Buffer.from(content)));
-    } catch {
-      const msg = `File not found or unreadable: '${resolvedPath}'`;
+    } catch (err) {
+      // The file read fine; it is its kind (link, alias, encoding) that cannot be edited here.
+      fileContents.delete(resolvedPath);
+      const msg = `Cannot edit '${resolvedPath}': ${summarizeError(err)}. Nothing was changed; edit the link target or a plain UTF-8 file instead.`;
       if (transactionMode === 'atomic') {
         return { error: msg };
       }
@@ -130,6 +152,7 @@ async function prepareTextEditInput(
 
   return {
     resolvedPaths,
+    pathErrors,
     fileContents,
     fileReadErrors,
     workingContents: new Map(fileContents),
@@ -140,7 +163,6 @@ async function writeSuccessfulTextEdits(
   results: EditResult[],
   resolvedPaths: Map<string, string>,
   workingContents: Map<string, string>,
-  fileContents: Map<string, string>,
   env: EditExecutionContext,
   writtenPaths: Set<string>,
 ): Promise<void> {
@@ -170,20 +192,10 @@ async function writeSuccessfulTextEdits(
       if (env.authenticated) env.ownedRevisions.set(resolvedPath, captureFileEffectRevision(resolvedPath, Buffer.from(newContent)));
       env.fileCache.update(resolvedPath, newContent);
       writtenPaths.add(resolvedPath);
-      if (env.fileUndoManager && !hasCapturedToolInvocation()) {
-        try {
-          const originalContent = fileContents.get(resolvedPath) ?? null;
-          env.fileUndoManager.snapshot({
-            path: resolvedPath,
-            beforeContent: originalContent,
-            afterContent: newContent,
-            tool: 'edit',
-          });
-        } catch {
-          // Undo snapshot failure should not fail the edit.
-        }
-      }
-      env.changeTracker?.recordChange(resolvedPath);
+      env.written.add(resolvedPath);
+      // Undo snapshots and change records wait for the final outcome
+      // (finalizeUncapturedBookkeeping, or the captured block of the caller's
+      // finally), so a rollback leaves none.
     } catch (err) {
       const msg = `Write failed for '${resolvedPath}': ${summarizeError(err)}`;
       for (const res of results) {
@@ -196,11 +208,34 @@ async function writeSuccessfulTextEdits(
   }
 }
 
-async function buildImportGraphWarning(cwd: string, writtenPaths: Set<string>, assertCurrent: () => void): Promise<string | undefined> {
+/**
+ * Names the files that import what this call wrote. It never compiles or runs
+ * anything: a compiler picked up from the project would run outside the exec
+ * tool's approval path, and checking a few files without the project's
+ * tsconfig reports errors the project does not have.
+ */
+export async function buildImportGraphWarning(
+  cwd: string,
+  writtenPaths: Set<string>,
+  assertCurrent: () => void,
+  signal?: AbortSignal,
+  limits: { maxMs?: number; now?: () => number } = {},
+): Promise<string | undefined> {
+  const maxMs = limits.maxMs ?? IMPORT_GRAPH_MAX_MS;
+  const now = limits.now ?? Date.now;
   try {
     const graph = new ImportGraph();
     graph.markDirty();
+    // build() takes no signal or limit, so the read-access filter, which it calls
+    // before reading each file, stops the scan: past the time limit or after a
+    // cancel it refuses every remaining file and the scan finishes without reading them.
+    const startedAt = now();
+    let stopped = false;
     await graph.build(cwd, async (path) => {
+      if (stopped || signal?.aborted || now() - startedAt > maxMs) {
+        stopped = true;
+        return false;
+      }
       try {
         await assertCapturedToolReadAccess(path);
         return true;
@@ -208,6 +243,11 @@ async function buildImportGraphWarning(cwd: string, writtenPaths: Set<string>, a
         return false;
       }
     });
+    assertCurrent();
+    if (signal?.aborted) return undefined;
+    if (stopped) {
+      return `\nImport graph: scan stopped after ${Math.round(maxMs / 1000)}s, so dependents of this edit were not computed; run the project's type check to verify.`;
+    }
 
     const editedAbsPaths = [...writtenPaths];
     const affectedSet = new Set<string>();
@@ -223,29 +263,7 @@ async function buildImportGraphWarning(cwd: string, writtenPaths: Set<string>, a
     if (affectedSet.size === 0) return undefined;
     if (hasCapturedToolInvocation())
       return `\nImport graph: ${affectedSet.size} transitive dependent(s) affected. Automatic dependency diagnostics are unavailable for captured edits; use the contained exec build/test workflow to verify the change.`;
-
-    const affectedList = Array.from(affectedSet);
-    assertCurrent();
-    const proc = Bun.spawn(['npx', 'tsc', '--noEmit', ...affectedList], {
-      cwd,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [exitCode, stdoutText, stderrText] = await Promise.all([
-      proc.exited,
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    if (exitCode === 0) return undefined;
-
-    const relAffected = affectedList.map((f) => relative(cwd, f));
-    const outputLines = (stderrText + '\n' + stdoutText)
-      .split('\n')
-      .filter((line) => relAffected.some((rel) => line.includes(rel)));
-    if (outputLines.length > 0) {
-      return `\n⚠ Import graph: ${affectedSet.size} transitive dependent(s) affected by this edit, type errors detected in downstream files:\n${outputLines.join('\n')}`;
-    }
-    return `\n⚠ Import graph: ${affectedSet.size} transitive dependent(s) affected. tsc reported errors outside the affected set, check unrelated files.`;
+    return `\nImport graph: ${affectedSet.size} transitive dependent(s) affected; dependents were not type-checked. Verify with the project's type check or build through the exec tool.`;
   } catch (err) {
     logger.warn('[import-graph] Import graph tracing failed', { error: summarizeError(err) });
     return undefined;
@@ -257,6 +275,7 @@ async function restoreOriginalContents(fileContents: Map<string, string>, env: E
   for (const [resolvedPath, originalContent] of fileContents) {
     try {
       if (env.authenticated && !env.ownedRevisions.has(resolvedPath)) continue;
+      if (!env.authenticated && !hasCapturedToolInvocation() && !env.written.has(resolvedPath)) continue;
       await assertCapturedToolReadAccess(resolvedPath);
       assertCapturedToolMutationCurrent(resolvedPath);
       if (env.authenticated) env.ownedRevisions.get(resolvedPath)!();
@@ -271,9 +290,10 @@ async function restoreOriginalContents(fileContents: Map<string, string>, env: E
       else if (env.authenticated) writeFileSync(resolvedPath, originalContent, 'utf-8');
       else await writeFile(resolvedPath, originalContent, 'utf-8');
       env.ownedRevisions.delete(resolvedPath);
+      env.written.delete(resolvedPath);
       env.fileCache.update(resolvedPath, originalContent);
     } catch (error) {
-      if (hasCapturedToolInvocation() || env.authenticated) failures.push(`Rollback held for '${resolvedPath}': ${summarizeError(error)}`);
+      failures.push(`Rollback held for '${resolvedPath}': ${summarizeError(error)}`);
     }
   }
   return failures;
@@ -298,7 +318,7 @@ async function repairAfterValidationFailure(
       env.configManager && env.toolLLM
         ? await healToolFile(env.configManager, env.toolLLM, resolvedPath, newContent, failureMessages, env.capturedAutoHeal, env.authenticated ? env.assertCurrent : undefined, env.signal)
         : { healed: false, content: newContent, assertCurrent: async () => {}, assertCurrentSynchronous: () => {}, warnings: undefined };
-    if (hasCapturedToolInvocation()) warnings.push(...(healResult.warnings ?? []));
+    warnings.push(...(healResult.warnings ?? []));
     if (healResult.healed) {
       try {
         if (hasCapturedToolInvocation()) {
@@ -310,8 +330,8 @@ async function repairAfterValidationFailure(
         if (env.authenticated) env.ownedRevisions.get(resolvedPath)!();
         writeFileSync(resolvedPath, healResult.content, 'utf-8');
         if (env.authenticated) env.ownedRevisions.set(resolvedPath, captureFileEffectRevision(resolvedPath, Buffer.from(healResult.content)));
+        workingContents.set(resolvedPath, healResult.content);
         if (hasCapturedToolInvocation()) {
-          workingContents.set(resolvedPath, healResult.content);
           env.capturedRevisions.set(resolvedPath, captureCapturedToolWriteRevision(resolvedPath, Buffer.from(healResult.content)));
         }
         env.fileCache.update(resolvedPath, healResult.content);
@@ -334,13 +354,13 @@ async function validateAfterTextEdits(
   env: EditExecutionContext,
 ): Promise<{ error?: string; warnings?: string[]; healedPaths?: ReadonlySet<string> }> {
   try {
-    const failure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent);
+    const failure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal);
     if (!failure) return {};
 
     const failureMessages = [formatValidatorFailure(failure)];
     const repair = await repairAfterValidationFailure(fileContents, workingContents, failureMessages, env);
     if (repair.healed) {
-      const healFailure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent);
+      const healFailure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal);
       if (!healFailure) {
         return { warnings: repair.warnings, healedPaths: repair.healedPaths };
       }
@@ -350,10 +370,12 @@ async function validateAfterTextEdits(
     return {
       warnings: [...repair.warnings, ...rollbackFailures],
       healedPaths: repair.healedPaths,
-      error: `Post-edit validation failed${transactionMode === 'atomic' ? (rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back') : ''}. ${formatValidatorFailure(failure)}`,
+      error: `Post-edit validation failed${transactionMode === 'atomic' ? (rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back') : remainingEditsNote(env)}. ${formatValidatorFailure(failure)}`,
     };
   } catch (error) {
-    if ((!hasCapturedToolInvocation() && !env.authenticated) || transactionMode !== 'atomic') throw error;
+    if (transactionMode !== 'atomic') {
+      return { error: `Post-edit validation or repair failed${remainingEditsNote(env)}. ${summarizeError(error)}` };
+    }
     const rollbackFailures = await restoreOriginalContents(fileContents, env);
     return {
       error: `Post-edit validation or repair failed${rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back'}. ${summarizeError(error)}`,
@@ -362,17 +384,55 @@ async function validateAfterTextEdits(
   }
 }
 
+/** For a non-atomic failure: which files still hold this call's edits. */
+function remainingEditsNote(env: EditExecutionContext): string {
+  return env.written.size > 0 ? `; edits remain applied to: ${[...env.written].join(', ')}` : '';
+}
+
+/**
+ * Undo snapshots and change records for uncaptured edits, made once the
+ * outcome is final so a rolled-back file leaves neither behind.
+ */
+function finalizeUncapturedBookkeeping(
+  fileContents: Map<string, string>,
+  workingContents: Map<string, string>,
+  env: EditExecutionContext,
+): void {
+  for (const path of env.written) {
+    const afterContent = workingContents.get(path);
+    if (afterContent === undefined) continue;
+    if (env.fileUndoManager) {
+      try {
+        env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent, tool: 'edit' });
+      } catch {
+        // Undo snapshot failure should not fail the edit.
+      }
+    }
+    env.changeTracker?.recordChange(path);
+  }
+}
+
 function formatOutput(
   results: EditResult[],
   format: 'count_only' | 'minimal' | 'with_diff' | 'verbose',
   dryRun: boolean,
+  notes: readonly string[] = [],
 ): string {
   const totalApplied = results.filter((r) => r.success).length;
   const totalFailed = results.filter((r) => !r.success).length;
   const dryTag = dryRun ? ' (dry run)' : '';
 
   if (format === 'count_only') {
-    return JSON.stringify({ applied: totalApplied, failed: totalFailed, dry_run: dryRun });
+    // Counts alone leave the model guessing which edit failed, so name each failure.
+    const failedEdits = results.filter((r) => !r.success)
+      .map((r) => ({ path: r.path, ...(r.id !== undefined ? { id: r.id } : {}), status: r.status ?? 'failed', ...(r.error !== undefined ? { error: r.error } : {}) }));
+    // Notes stay inside the JSON: text after it would make the whole output unparseable.
+    const trimmed = notes.map((note) => note.trim()).filter(Boolean);
+    return JSON.stringify({
+      applied: totalApplied, failed: totalFailed, dry_run: dryRun,
+      ...(failedEdits.length > 0 ? { failed_edits: failedEdits } : {}),
+      ...(trimmed.length > 0 ? { notes: trimmed } : {}),
+    });
   }
 
   const lines: string[] = [];
@@ -444,7 +504,7 @@ async function executeTextEdits(
   const cwd = env.cwd;
 
   if (!dryRun && validateBefore.length > 0) {
-    const failure = await runValidators(validateBefore, cwd, env.validatorRunner, env.assertCurrent);
+    const failure = await runValidators(validateBefore, cwd, env.validatorRunner, env.assertCurrent, env.signal);
     if (failure) {
       return { success: false, error: `Pre-edit validation failed. ${formatValidatorFailure(failure)}` };
     }
@@ -455,7 +515,7 @@ async function executeTextEdits(
     return { success: false, error: prepResult.error };
   }
 
-  const { resolvedPaths, fileContents, fileReadErrors, workingContents } = prepResult;
+  const { resolvedPaths, pathErrors, fileContents, fileReadErrors, workingContents } = prepResult;
   const results: EditResult[] = [];
   let atomicFailed = false;
   let atomicFailError = '';
@@ -464,10 +524,11 @@ async function executeTextEdits(
     const resolvedPath = resolvedPaths.get(item.path);
 
     if (!resolvedPath) {
-      results.push(buildFailedEditResult(item, `Path resolution failed for '${item.path}'`, 'failed'));
+      const pathMsg = pathErrors.get(item.path) ?? `Path resolution failed for '${item.path}'`;
+      results.push(buildFailedEditResult(item, pathMsg, 'failed'));
       if (transactionMode === 'atomic') {
         atomicFailed = true;
-        atomicFailError = `Path resolution failed for '${item.path}'`;
+        atomicFailError = pathMsg;
         break;
       }
       continue;
@@ -579,8 +640,12 @@ async function executeTextEdits(
   const writtenPaths = new Set<string>();
   try {
     if (!dryRun) {
-      await writeSuccessfulTextEdits(results, resolvedPaths, workingContents, fileContents, env, writtenPaths);
-      if ((hasCapturedToolInvocation() || env.authenticated) && transactionMode === 'atomic' && results.some((result) => !result.success)) {
+      try {
+        await writeSuccessfulTextEdits(results, resolvedPaths, workingContents, env, writtenPaths);
+      } finally {
+        noteProjectFilesChanged();
+      }
+      if (transactionMode === 'atomic' && results.some((result) => !result.success)) {
         const rollbackFailures = await restoreOriginalContents(fileContents, env);
         return { success: false, error: `Atomic edit publication failed${rollbackFailures.length ? ', rollback incomplete' : ', edits rolled back'}. ${results.filter((result) => !result.success).map((result) => result.error).join('; ')}${rollbackFailures.length ? `\n${rollbackFailures.join('\n')}` : ''}` };
       }
@@ -590,7 +655,7 @@ async function executeTextEdits(
 
     let importGraphWarning: string | undefined;
     if (!dryRun && anySuccess) {
-      importGraphWarning = await buildImportGraphWarning(cwd, writtenPaths, env.assertCurrent);
+      importGraphWarning = await buildImportGraphWarning(cwd, writtenPaths, env.assertCurrent, env.signal);
     }
 
     let repairWarnings: string[] = [];
@@ -617,8 +682,19 @@ async function executeTextEdits(
           }
         }
       }
+      if (validationResult.healedPaths?.size) {
+        for (const result of results) {
+          const path = resolvedPaths.get(result.path);
+          if (!result.success || !path || !validationResult.healedPaths.has(path) || hasCapturedToolInvocation()) continue;
+          result.warning = [result.warning, 'Auto-heal applied; the file now holds the repaired content, not exactly your replacement.'].filter(Boolean).join(' ');
+        }
+      }
       if (validationResult.error) {
-        return { success: false, error: validationResult.error + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : '') };
+        return {
+          success: false,
+          error: validationResult.error + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : ''),
+          ...(transactionMode === 'atomic' ? {} : { output: formatOutput(results, outputFormat, dryRun) }),
+        };
       }
     }
 
@@ -639,11 +715,22 @@ async function executeTextEdits(
       diagnosticsBlock = formatDiagnosticsBlock(await collectPostEditDiagnostics(env.diagnosticsProvider, touched));
     }
 
+    const failures = results.filter((r) => !r.success);
     return {
       success: anySuccess,
-      output: formatOutput(results, outputFormat, dryRun) + (importGraphWarning ?? '') + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : '') + diagnosticsBlock,
+      output: outputFormat === 'count_only'
+        ? formatOutput(results, outputFormat, dryRun, [importGraphWarning ?? '', ...repairWarnings, diagnosticsBlock])
+        : formatOutput(results, outputFormat, dryRun) + (importGraphWarning ?? '') + (repairWarnings.length ? `\n${repairWarnings.join('\n')}` : '') + diagnosticsBlock,
+      ...(!anySuccess && failures.length > 0
+        ? { error: `No edits applied (${failures.length} failed). First failure: ${failures[0]!.path}: ${failures[0]!.error ?? 'failed'}` }
+        : {}),
     };
   } finally {
+    if (!dryRun && !hasCapturedToolInvocation()) finalizeUncapturedBookkeeping(fileContents, workingContents, env);
+    // Captured writes still held after any rollback are the final changes.
+    if (!dryRun && hasCapturedToolInvocation()) {
+      for (const path of env.capturedWritten) env.changeTracker?.recordChange(path);
+    }
     // A failed validator/repair can leave successful edits in place. Finalize
     // only revisions we still own; rollback, revocation and a newer writer must
     // never create an executable snapshot of stale or unauthorized contents.
@@ -706,7 +793,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
     description:
       'Edit files by finding and replacing text. Supports exact, fuzzy, and regex matching. ' +
       'Handles multiple edits in one call with atomic or partial transaction semantics. ' +
-      'Detects OCC conflicts when files have been modified externally. ' +
+      'Read a file before editing it: an edit is refused (OCC conflict) when the file changed since your last read, and stays refused until you read it again. ' +
       'Also supports Jupyter notebook (.ipynb) cell operations via notebook_operations field.',
     parameters: toRecord(editSchema),
     sideEffects: ['write_fs'],
@@ -733,6 +820,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
         authenticated, assertCurrent, ownedRevisions: new Map(), initialRevisions: new Map(), signal: executeOptions?.signal,
         capturedRevisions: new Map(),
         capturedWritten: new Set(),
+        written: new Set(),
         fileCache,
         cwd,
         fileUndoManager: options?.fileUndoManager,
@@ -745,11 +833,17 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
       };
 
       if (input.notebook_operations) {
+        // These fields shape text edits only. Accepting them silently would let
+        // the model believe a validator ran or a transaction mode applied.
+        const ignored = (['validate', 'match', 'transaction'] as const).filter((field) => input[field] !== undefined);
+        if (ignored.length > 0) {
+          return { success: false, error: `notebook_operations does not support ${ignored.join(', ')}. Nothing was changed; resend without ${ignored.length > 1 ? 'them' : 'it'}, and run any validator separately.` };
+        }
         return await executeNotebookEdit(input, env);
       }
       return await executeTextEdits(input, env);
     } catch (err) {
-      return { success: false, error: `Unexpected error: ${summarizeError(err)}` };
+      return { success: false, error: describeUnexpectedToolError(err, summarizeError) };
     }
   }
 

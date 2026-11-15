@@ -1,4 +1,6 @@
 import { SQLiteStore } from './sqlite-store.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 export interface ToolCallRecord {
   id: number;
@@ -175,7 +177,16 @@ export class TelemetryDB {
     return this.store.save();
   }
 
+  /**
+   * Calls are recorded in memory and written only by save(), so closing writes them first: a
+   * file-backed store's save runs synchronously up to its write, before the handle is released.
+   */
   close(): void {
+    if (this.store.isReady) {
+      this.store.save().catch((error: unknown) => {
+        logger.warn('TelemetryDB: recorded calls could not be saved on close', { error: summarizeError(error) });
+      });
+    }
     this.store.close();
   }
 

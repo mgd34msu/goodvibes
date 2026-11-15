@@ -95,3 +95,18 @@ test('changing the lookup identity during permission review retires the original
   const input = { ...request, async readAccessFilter() { input.agentId = 'agent-other'; return true; } };
   await expect(readAgentSessionHistory(input)).rejects.toThrow('Historical worker lookup source changed');
 });
+
+test('agent get names a saved journal it cannot read instead of reporting an unknown agent', async () => {
+  const { root, session } = await savedWorker();
+  writeFileSync(session.sessionFile, readFileSync(session.sessionFile, 'utf8') + '{broken final journal row\n');
+  const manager = new AgentManager(), messageBus = new AgentMessageBus();
+  const tool = createAgentTool({ manager, messageBus, configManager: { get() { throw new Error('History lookup must not read unrelated settings'); } },
+    contractRunner: { start() { throw new Error('Historical lookup cannot start contracts'); }, list: () => [], get: () => null },
+    projectRoot: root, surfaceRoot: 'tui', resolveSessionId: () => 'owner' });
+  const result = await tool.execute({ mode: 'get', agentId: session.agentId });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('saved history that cannot be read');
+  expect(result.error).not.toContain('Unknown agent');
+  const unknown = await tool.execute({ mode: 'get', agentId: 'agent-never-existed' });
+  expect(unknown.error).toContain('Unknown agent');
+});

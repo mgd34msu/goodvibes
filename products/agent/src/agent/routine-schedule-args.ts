@@ -137,6 +137,9 @@ export function parseRoutineSchedulePromotionArgs(args: readonly string[]): Pars
 
   if (!routineId) errors.push('Routine id or name is required.');
   if (!schedule) errors.push('Schedule is required: use --cron <expr>, --every <interval>, or --at <iso-time>.');
+  if (timezone && schedule && schedule.kind !== 'cron') {
+    errors.push(`--timezone only applies to --cron schedules; a --${schedule.kind} schedule would ignore it. Remove --timezone or use --cron.`);
+  }
   const deliveryError = validateDeliveryTargets(deliveryTargets, 'routine promotion command');
   if (deliveryError) errors.push(deliveryError);
   return { routineId, schedule, deliveryTargets, name, timezone, provider, model, enabled, yes, errors };

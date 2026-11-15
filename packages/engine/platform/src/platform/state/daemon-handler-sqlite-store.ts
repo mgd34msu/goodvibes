@@ -1,14 +1,21 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase, SqlJsDatabaseAllocationError } from './sqljs-database.js';
 import { open } from 'node:fs/promises';
-import { fstatSync, lstatSync, renameSync, unlinkSync, type BigIntStats } from 'node:fs';
-import { join } from 'node:path';
+import { fstatSync, lstatSync, readdirSync, renameSync, unlinkSync, type BigIntStats } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { MutationPublication } from '../utils/file-mutation.js';
 import { logger } from '../utils/logger.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { captureQuarantineSource, quarantineCorruptFile, reapOwnedQuarantines, type QuarantineSource, type QuarantineOutcome } from '../utils/atomic-json-store.js';
 import { capturePrivateSqliteDirectory, readPrivateSqliteImage } from './private-sqlite-path.js';
 import { loadSqlJsEngine, type SqlDatabase } from './sqlite-store.js';
+import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+
+/** How long a second process waits for the store's writer before it refuses to open. */
+const WRITER_LOCK_WAIT_MS = 2_000;
+
+/** Writer locks this process holds, shared by every instance over one file so only the first takes it. */
+const writerLocks = new Map<string, { holders: number; release: Promise<() => void> }>();
 
 /** Synchronous transaction view; callers must not retain it past the callback. */
 export interface HandlerSqliteTransaction {
@@ -26,6 +33,8 @@ export interface HandlerSqliteStoreOptions {
   schema: string[];
   /** Native format declaration/restriction before each actual image publication. */
   beforeWrite?: (() => void) | undefined;
+  /** How long to wait for another process to let go of this store before refusing to open it. Default 2000. */
+  writerLockWaitMs?: number | undefined;
 }
 
 /**
@@ -74,6 +83,17 @@ export class HandlerSqliteStore {
   private mutationRevision = 0;
   private stagedTransactions = 0;
   private closed = false;
+  /**
+   * The database image as of close(), kept only when a save was still waiting
+   * behind a staged transaction (it captures its bytes when it runs, so the
+   * database it would have exported is gone by then).
+   */
+  private finalImage: Uint8Array | null = null;
+  /** Identity of the database file as this instance last read or published it. */
+  private knownFileIdentity: string | undefined;
+  private foreignWriter = false;
+  private holdsWriterLock = false;
+  private recovery: string | undefined;
   private assertStorageCurrent: () => void = () => { throw new Error('HandlerSqliteStore is not initialized'); };
 
   constructor(options: HandlerSqliteStoreOptions) {
@@ -92,9 +112,101 @@ export class HandlerSqliteStore {
     return this.resolvedPath;
   }
 
+  /**
+   * True once another process was seen to replace this database file. Each save rewrites
+   * the whole image from this process's memory, so rows the other process wrote since this
+   * one loaded are overwritten; callers that can tell the operator should.
+   */
+  foreignWriterDetected(): boolean {
+    return this.foreignWriter;
+  }
+
+  /** Set when init found the database unreadable and started a fresh one: what happened and where the old file went. */
+  recoveryNotice(): string | undefined {
+    return this.recovery;
+  }
+
+  /**
+   * Each save rewrites the whole database from this process's memory, so two processes
+   * holding the same store would erase each other's rows. The second one refuses to open
+   * instead; a lock that cannot be created at all (read-only disk) does not stop a
+   * single process from working.
+   */
+  private async acquireWriterLock(): Promise<void> {
+    if (this.holdsWriterLock) return;
+    let entry = writerLocks.get(this.resolvedPath);
+    if (!entry) {
+      entry = { holders: 0, release: acquireCrossProcessLock(join(dirname(dirname(this.resolvedPath)), `${this.options.fileName}.writer-lock`), { totalTimeoutMs: this.options.writerLockWaitMs ?? WRITER_LOCK_WAIT_MS }) };
+      writerLocks.set(this.resolvedPath, entry);
+    }
+    entry.holders++;
+    this.holdsWriterLock = true;
+    try {
+      await entry.release;
+    } catch (error) {
+      this.releaseWriterLock();
+      if (error instanceof Error && /timed out/.test(error.message)) {
+        throw new Error(`The ${this.options.fileName} store is open in another process using ${this.options.workingDirectory}. `
+          + 'Two processes would overwrite each other\'s saved rows, so this one did not open it. Stop the other GoodVibes process for this directory, then retry.');
+      }
+      logger.warn('daemon store writer lock unavailable; opening without it', {
+        store: this.options.fileName, reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private releaseWriterLock(): void {
+    if (!this.holdsWriterLock) return;
+    this.holdsWriterLock = false;
+    const entry = writerLocks.get(this.resolvedPath);
+    if (!entry || --entry.holders > 0) return;
+    writerLocks.delete(this.resolvedPath);
+    void entry.release.then((release) => release(), () => {});
+  }
+
+  /** Called immediately before a rename that publishes this instance's image. */
+  private noteForeignWriter(): void {
+    let current: string | undefined;
+    try { current = fileObservationIdentity(this.resolvedPath); } catch { return; }
+    // A file that exists while this instance has neither read nor published one was written by someone else.
+    if (current !== this.knownFileIdentity && !this.foreignWriter) {
+      this.foreignWriter = true;
+      logger.warn('daemon store was changed by another process; saving now overwrites that process\'s rows', {
+        store: this.options.fileName, path: this.resolvedPath,
+      });
+    }
+  }
+
+  private rememberPublishedIdentity(): void {
+    try { this.knownFileIdentity = fileObservationIdentity(this.resolvedPath); } catch { this.knownFileIdentity = undefined; }
+  }
+
+  /** Remove staging files left by a process that no longer exists (a crash between stage and rename). */
+  private reapDeadStagingFiles(): void {
+    const directory = dirname(this.resolvedPath);
+    const prefix = `${this.options.fileName}.`;
+    let names: string[];
+    try { names = readdirSync(directory); } catch { return; }
+    for (const name of names) {
+      const match = name.startsWith(prefix) ? /^(\d+)\.\d+\.\d+\.tmp$/.exec(name.slice(prefix.length)) : null;
+      if (!match) continue;
+      const pid = Number(match[1]);
+      if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) continue;
+      try { process.kill(pid, 0); continue; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; }
+      try {
+        const path = join(directory, name);
+        const stat = lstatSync(path, { throwIfNoEntry: false });
+        if (stat?.isFile()) unlinkSync(path);
+      } catch (error) { logger.warn('daemon store could not remove a stale staging file', { file: name, error: String(error) }); }
+    }
+  }
+
   private requireDb(): SqlDatabase {
     if (!this.db) {
-      throw new Error(`HandlerSqliteStore not initialized: ${this.resolvedPath}`);
+      throw new Error(this.closed
+        ? `HandlerSqliteStore is closed: ${this.resolvedPath}. Open a new store to read or write it.`
+        : `HandlerSqliteStore not initialized: ${this.resolvedPath}`);
     }
     return this.db;
   }
@@ -137,6 +249,9 @@ export class HandlerSqliteStore {
     this.initPromise = this.initialize();
     try {
       await this.initPromise;
+    } catch (error) {
+      if (!this.db) this.releaseWriterLock();
+      throw error;
     } finally {
       this.initPromise = null;
     }
@@ -146,6 +261,7 @@ export class HandlerSqliteStore {
     if (this.closed) throw new Error('HandlerSqliteStore is closed');
     const storage = capturePrivateSqliteDirectory(this.options.workingDirectory, { create: true, assertCurrent() {} });
     this.assertStorageCurrent = storage.assertCurrent;
+    await this.acquireWriterLock(); this.assertActiveStorage();
     const SQL = await loadSqlJsEngine(); this.assertActiveStorage();
     this.databaseFactory = (data) => createSqlJsDatabase(SQL.Database, data);
     this.persistenceBlocked = false;
@@ -164,6 +280,8 @@ export class HandlerSqliteStore {
     // before reading a private database. Unsafe ownership is never quarantined
     // or replaced by an apparently fresh store.
     const original = readPrivateSqliteImage(this.resolvedPath, () => this.assertActiveStorage());
+    this.knownFileIdentity = original?.physical;
+    this.reapDeadStagingFiles();
     const source = original ? captureQuarantineSource(this.resolvedPath) : null;
     try {
       // Bind the recovery descriptor to the exact private image already read,
@@ -229,6 +347,8 @@ export class HandlerSqliteStore {
       // Disclosure: starting a store from scratch is data loss from the user's
       // point of view, so it is never allowed to happen quietly.
       if (quarantineReason) {
+        this.recovery = `The ${this.options.fileName} store could not be opened (${quarantineReason}); a fresh one was started. `
+          + (quarantined?.quarantinePath ? `The old file was kept at ${quarantined.quarantinePath}.` : 'The old file was left in place and saving is blocked.');
         logger.warn('daemon store could not be opened; starting a fresh one', {
           store: this.options.fileName,
           path: this.resolvedPath,
@@ -291,6 +411,8 @@ export class HandlerSqliteStore {
       if (!owns(lstatSync(path, { bigint: true, throwIfNoEntry: false }))) throw new Error('SQLite staging source changed');
       await handle.chmod(0o600); assertCurrent();
       await handle.writeFile(bytes); assertCurrent();
+      // Without this a power loss after the rename can leave an empty or partial file that the next init quarantines.
+      await handle.sync(); assertCurrent();
       const prepared = fstatSync(handle.fd, { bigint: true });
       if (!owns(prepared) || (prepared.mode & 0o777n) !== 0o600n) throw new Error('SQLite staging permissions are unavailable');
       const assertPreparedCurrent = () => {
@@ -339,8 +461,9 @@ export class HandlerSqliteStore {
       try {
         const current = () => { assertStorageCurrent(); if (this.options.beforeWrite) synchronousFence(this.options.beforeWrite); assertStorageCurrent(); };
         current();
-        prepared = await this.stageImage(tmpPath, data ?? this.requireDb().export(), current);
-        current(); prepared.assertCurrent(); renameSync(tmpPath, this.resolvedPath);
+        prepared = await this.stageImage(tmpPath, data ?? (this.db ? this.db.export() : this.finalImage ?? this.requireDb().export()), current);
+        current(); prepared.assertCurrent(); this.noteForeignWriter(); renameSync(tmpPath, this.resolvedPath);
+        this.rememberPublishedIdentity();
       } finally { prepared?.cleanup(); }
     });
     const tail = saving.catch(() => {});
@@ -405,7 +528,9 @@ export class HandlerSqliteStore {
             synchronousFence(publicationCurrent); synchronousFence(assertCurrent); current(); staged.assertCurrent();
             if (this.db !== live) throw new Error('HandlerSqliteStore transaction lost its database');
             if (this.mutationRevision !== revision) { finished = true; return; }
+            this.noteForeignWriter();
             renameSync(tmpPath, this.resolvedPath);
+            this.rememberPublishedIdentity();
             this.db = candidate;
             this.mutationRevision += 1;
             published = true;
@@ -436,7 +561,12 @@ export class HandlerSqliteStore {
 
   close(): void {
     this.closed = true;
+    this.releaseWriterLock();
     if (this.db) {
+      // A save admitted behind a staged transaction exports when it runs; keep
+      // the last image so closing does not turn that save into a failure that
+      // drops the writes made before it.
+      if (this.stagedTransactions > 0) this.finalImage = this.db.export();
       this.db.close();
       this.db = null;
     }

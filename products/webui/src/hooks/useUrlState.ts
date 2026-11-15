@@ -9,7 +9,7 @@
  *   useUrlState() => current state + setters
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createChatSelectionTracker, type ChatSelectionTracker } from '../lib/chat-selection';
 import {
   type AppUrlState,
@@ -54,6 +54,11 @@ function initializeUrl(): AppUrlState {
 export function useUrlState(): UseUrlStateReturn {
   const [urlState, setLocalState] = useState<AppUrlState>(initializeUrl);
   const [chatSelection] = useState(() => createChatSelectionTracker(urlState.view, urlState.session));
+  // Setters build the next state from this ref, not from the render's closure: two
+  // setters called in one event handler (before React re-renders) each start from
+  // the other's result instead of from the same stale base.
+  const latest = useRef(urlState);
+  useLayoutEffect(() => { latest.current = urlState; }, [urlState]);
 
   // Normalize the URL on first mount: if no `view` param, silently replace
   // so a bare `/` becomes `/?view=chat` without adding a history entry.
@@ -88,6 +93,7 @@ export function useUrlState(): UseUrlStateReturn {
     function handlePopState(): void {
       const nextState = decodeUrlState();
       chatSelection.update(nextState.view, nextState.session);
+      latest.current = nextState;
       setLocalState(nextState);
     }
     window.addEventListener('popstate', handlePopState);
@@ -97,12 +103,13 @@ export function useUrlState(): UseUrlStateReturn {
   }, [chatSelection]);
 
   const setView = useCallback((view: ViewId, options?: { replace?: boolean; tab?: string }): void => {
-    // Compute next state from the current closure value, NOT inside the
+    // Compute next state from the latest committed value (`latest`, advanced by each
+    // setter at once so two setters in one handler compose), NOT inside the
     // setLocalState updater. This ensures the history side-effect fires exactly
     // once per call even under React StrictMode, which double-invokes updaters.
     // A tab belongs to its destination: moving to another view drops it.
-    const tab = options?.tab ?? (view === urlState.view ? urlState.tab : undefined);
-    const { tab: _previousTab, ...rest } = urlState;
+    const tab = options?.tab ?? (view === latest.current.view ? latest.current.tab : undefined);
+    const { tab: _previousTab, ...rest } = latest.current;
     const nextState: AppUrlState = tab ? { ...rest, view, tab } : { ...rest, view };
     if (options?.replace) {
       replaceState(nextState);
@@ -110,11 +117,12 @@ export function useUrlState(): UseUrlStateReturn {
       pushState(nextState);
     }
     chatSelection.update(nextState.view, nextState.session);
+    latest.current = nextState;
     setLocalState(nextState);
-  }, [urlState, chatSelection]);
+  }, [chatSelection]);
 
   const setTab = useCallback((tab: string, options?: { replace?: boolean }): void => {
-    const { tab: _previousTab, ...rest } = urlState;
+    const { tab: _previousTab, ...rest } = latest.current;
     const nextState: AppUrlState = tab ? { ...rest, tab } : rest;
     if (options?.replace === false) {
       pushState(nextState);
@@ -122,23 +130,25 @@ export function useUrlState(): UseUrlStateReturn {
       replaceState(nextState);
     }
     chatSelection.update(nextState.view, nextState.session);
+    latest.current = nextState;
     setLocalState(nextState);
-  }, [urlState, chatSelection]);
+  }, [chatSelection]);
 
   const setSession = useCallback((session: string, options?: { replace?: boolean }): void => {
-    const nextState: AppUrlState = { ...urlState, session };
+    const nextState: AppUrlState = { ...latest.current, session };
     if (options?.replace) {
       replaceState(nextState);
     } else {
       pushState(nextState);
     }
     chatSelection.update(nextState.view, nextState.session, true);
+    latest.current = nextState;
     setLocalState(nextState);
-  }, [urlState, chatSelection]);
+  }, [chatSelection]);
 
   const setFilters = useCallback(
     (updates: Record<string, string | undefined>, options?: { replace?: boolean }): void => {
-      const next: Record<string, string> = { ...urlState.filters };
+      const next: Record<string, string> = { ...latest.current.filters };
       for (const [key, value] of Object.entries(updates)) {
         if (value === undefined) {
           delete next[key];
@@ -146,44 +156,47 @@ export function useUrlState(): UseUrlStateReturn {
           next[key] = value;
         }
       }
-      const nextState: AppUrlState = { ...urlState, filters: next };
+      const nextState: AppUrlState = { ...latest.current, filters: next };
       if (options?.replace) {
         replaceState(nextState);
       } else {
         pushState(nextState);
       }
       chatSelection.update(nextState.view, nextState.session);
-      setLocalState(nextState);
+      latest.current = nextState;
+    setLocalState(nextState);
     },
-    [urlState, chatSelection],
+    [chatSelection],
   );
 
   const resetFilters = useCallback(
     (filters: Record<string, string>, options?: { replace?: boolean }): void => {
-      const nextState: AppUrlState = { ...urlState, filters };
+      const nextState: AppUrlState = { ...latest.current, filters };
       if (options?.replace) {
         replaceState(nextState);
       } else {
         pushState(nextState);
       }
       chatSelection.update(nextState.view, nextState.session);
-      setLocalState(nextState);
+      latest.current = nextState;
+    setLocalState(nextState);
     },
-    [urlState, chatSelection],
+    [chatSelection],
   );
 
   const setUrlState = useCallback(
     (partial: Partial<AppUrlState>, options?: { replace?: boolean }): void => {
-      const nextState: AppUrlState = { ...urlState, ...partial };
+      const nextState: AppUrlState = { ...latest.current, ...partial };
       if (options?.replace) {
         replaceState(nextState);
       } else {
         pushState(nextState);
       }
       chatSelection.update(nextState.view, nextState.session, Object.hasOwn(partial, 'session'));
-      setLocalState(nextState);
+      latest.current = nextState;
+    setLocalState(nextState);
     },
-    [urlState, chatSelection],
+    [chatSelection],
   );
 
   return {

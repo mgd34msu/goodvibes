@@ -47,11 +47,12 @@ function fixturePort(port: JudgmentPort, returned: Set<string>, models: Set<stri
 /**
  * Attaches each fixture's checks to the newest calibration call recorded for
  * it during this execution with this exact decision name and version. Checks
- * on a composed result are not truth about a helper's different question.
+ * on a composed result are not truth about a helper's different question, so
+ * a fixture that made more than one call receives no truth.
  * Opaque IDs carry no chronology, including mixed legacy keys.
  * Requires append-only immutable entries and stable query ordering, so entries
  * outside the prior window cannot enter the later window. Calls displaced by
- * its cap receive no truth rather than an unscoped fallback. Returns how many fixtures had a call to attach to.
+ * its cap receive no truth rather than an unscoped fallback. Returns how many fixtures received truth.
  */
 function recordFixtureTruth(
   log: DecisionLog, decision: NamedDecision, checks: readonly FixtureCheck[], before: ReadonlySet<string>, returned: ReadonlySet<string>,
@@ -69,7 +70,12 @@ function recordFixtureTruth(
   const fixtures = [...new Set(checks.map((check) => check.fixture))];
   let recorded = 0;
   for (const fixture of fixtures) {
-    const call = calls.find(entry => entry.context.fixture === fixture);
+    // A composed decision (beam walk, recheck, tournament) makes several calls
+    // per fixture, each asking a different question. Its checks are about the
+    // composed answer, so they are attached only when exactly one call can
+    // carry them; guessing among several would pair truth with a wrong question.
+    const matching = calls.filter(entry => entry.context.fixture === fixture);
+    const call = matching.length === 1 ? matching[0] : undefined;
     if (call === undefined) continue;
     log.attach(call.id, { kind: 'truth', truth: { source: 'fixture', checks: checks.filter((check) => check.fixture === fixture) } });
     recorded++;

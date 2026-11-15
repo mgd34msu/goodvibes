@@ -34,14 +34,22 @@ function fixture(beforeSettingsProjection?: () => Promise<void>) {
   const projector = createPreferredSettingsProjector(context.platform, undefined, { registry: owner.registry, context });
   owner.registry.register(settings, { inputProjection: { async project(request) { await beforeSettingsProjection?.(); return projector.project(request); } } });
   const content = JSON.stringify({ schema: 'goodvibes.agent.model_compare_judgment.v1', judgmentId: 'judgment-native', comparisonId: 'comparison-native',
-    winnerBlindId: 'B', reasons: 'Synthetic native route winner.', notes: '', revealIncludedInJudgment: true,
+    winnerBlindId: 'B', reasons: 'Synthetic native route winner.', notes: '', revealIncludedInJudgment: true, sourceArtifactId: 'comparison-native-artifact',
     winnerModel: { registryKey: 'synthetic:b', modelId: 'b', providerId: 'synthetic', displayName: 'Synthetic B' } });
   let record: ArtifactRecord = { id: 'judgment-native', kind: 'data', mimeType: 'application/json', sizeBytes: Buffer.byteLength(content),
     createdAt: 1, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
     metadata: { purpose: 'agent-model-compare-judgment' }, contentPath: '/synthetic/judgment', metadataPath: '/synthetic/judgment-metadata' };
+  // The judgment's winner is only applied when the comparison it names shows the same model for that label.
+  const comparisonContent = JSON.stringify({ schema: 'goodvibes.agent.model_compare.v1', comparisonId: 'comparison-native', prompt: 'p', candidates: [
+    { blindId: 'A', status: 'completed', content: 'a', model: { registryKey: 'synthetic:a', modelId: 'a', providerId: 'synthetic', displayName: 'Synthetic A' } },
+    { blindId: 'B', status: 'completed', content: 'b', model: { registryKey: 'synthetic:b', modelId: 'b', providerId: 'synthetic', displayName: 'Synthetic B' } }] });
+  const comparison: ArtifactRecord = { id: 'comparison-native-artifact', kind: 'data', mimeType: 'application/json', sizeBytes: Buffer.byteLength(comparisonContent),
+    createdAt: 0, acquisitionMode: 'inline-data', fetchMode: 'not-applicable',
+    metadata: { purpose: 'agent-model-compare', comparisonId: 'comparison-native' }, contentPath: '/synthetic/comparison', metadataPath: '/synthetic/comparison-metadata' };
   let writes = 0, usage = 0;
   const store: AgentModelCompareArtifactStore = {
-    get: id => id === record.id ? record : null, list: () => [record], async readContent() { return { record, buffer: Buffer.from(content) }; },
+    get: id => id === record.id ? record : id === comparison.id ? comparison : null, list: () => [record, comparison],
+    async readContent(id) { return id === comparison.id ? { record: comparison, buffer: Buffer.from(comparisonContent) } : { record, buffer: Buffer.from(content) }; },
     async create(input, ownership) { ownership?.assertCurrent?.(); writes++; return { ...record, id: `receipt-${writes}`, metadata: input.metadata ?? {} }; },
   };
   const raw = createAgentModelCompareTool({ toolRegistry: owner.registry, artifactStore: store,

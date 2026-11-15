@@ -86,6 +86,8 @@ export interface UseChatSearchReturn {
   results: ChatSearchResult[];
   /** True while messages are being fetched for an active query. */
   isSearching: boolean;
+  /** How many chats could not be read in the last message search, so a "no match" is not final. */
+  unreadableSessions: number;
   /** Session-discovery results from sessions.search (title/id match, full history). */
   sessionResults: ChatSessionSearchResult[];
   /** Lifecycle of the session-search stage, see SessionSearchState. */
@@ -105,7 +107,15 @@ export interface UseChatSearchReturn {
   loadMoreSessions: () => void;
 }
 
-/** Messages keyed by sessionId. */
+/** What changes when a chat gets a new message, so its cached messages go stale. */
+function sessionActivityStamp(session: unknown): string {
+  if (typeof session !== 'object' || session === null) return '';
+  const record = session as Record<string, unknown>;
+  const stamp = record.lastActivityAt ?? record.updatedAt;
+  return typeof stamp === 'number' || typeof stamp === 'string' ? String(stamp) : '';
+}
+
+/** Messages keyed by sessionId and activity stamp. */
 type MessageCache = Map<string, ChatMessage[]>;
 
 const SNIPPET_CONTEXT = 80;
@@ -214,6 +224,7 @@ export function useChatSearch(
 ): UseChatSearchReturn {
   const [results, setResults] = useState<ChatSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [unreadableSessions, setUnreadableSessions] = useState(0);
 
   // Session-search stage (sessions.search), a separate concern from the
   // message-content stage above: different backend, different default
@@ -237,7 +248,9 @@ export function useChatSearch(
   // results. Comparing the generation captured at load-more time closes that hole.
   const searchGenerationRef = useRef(0);
 
-  // Persistent message cache, keyed by sessionId, reset when sessions identity changes.
+  // Persistent message cache, keyed by sessionId plus the session's last-activity
+  // stamp, so a chat that has a newer message is read again. Reset when the
+  // session list identity changes.
   const cacheRef = useRef<MessageCache>(new Map());
   // Abort controller to cancel stale searches.
   const abortRef = useRef<AbortController | null>(null);
@@ -259,6 +272,7 @@ export function useChatSearch(
     async (term: string, signal: AbortSignal): Promise<void> => {
       if (!term.trim()) {
         setResults([]);
+        setUnreadableSessions(0);
         setIsSearching(false);
         return;
       }
@@ -266,6 +280,7 @@ export function useChatSearch(
       setIsSearching(true);
       const termLower = term.toLowerCase();
       const found: ChatSearchResult[] = [];
+      let unreadable = 0;
 
       for (const session of sessions) {
         if (signal.aborted) break;
@@ -276,15 +291,19 @@ export function useChatSearch(
         const sessionTitle = extractSessionTitle(session);
 
         // Fetch messages (cached)
-        let messages = cacheRef.current.get(sessionId);
+        const cacheKey = `${sessionId}:${sessionActivityStamp(session)}`;
+        let messages = cacheRef.current.get(cacheKey);
         if (!messages) {
           try {
             messages = await fetchMessages(sessionId);
             if (!signal.aborted) {
-              cacheRef.current.set(sessionId, messages);
+              cacheRef.current.set(cacheKey, messages);
             }
           } catch {
-            continue; // Skip sessions whose messages can't be loaded
+            // The chat cannot be searched; counted so the panel never presents
+            // the result as complete.
+            unreadable += 1;
+            continue;
           }
         }
 
@@ -313,6 +332,7 @@ export function useChatSearch(
         // Sort: most recent sessions first
         found.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
         setResults(found);
+        setUnreadableSessions(unreadable);
         setIsSearching(false);
       }
     },
@@ -453,6 +473,7 @@ export function useChatSearch(
   return {
     results,
     isSearching,
+    unreadableSessions,
     sessionResults,
     sessionSearchState,
     includeClosed,

@@ -8,7 +8,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { getKnowledgeSpaceId } from '../platform/src/platform/knowledge/spaces.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 describe('knowledge store bounded paging', () => {
   test('listSourcesPage caps each page and an offset loop visits every source', async () => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { revalidateProviderAttempt } from './attempt-guard.js';
 import type OpenAI from 'openai';
 import { createOpenAIClient } from './optional-openai.js';
@@ -311,11 +312,13 @@ export function makeTranscriptKey(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
 ): string {
-  return stableStringify({
+  // Hashed: the transcript (image data included) grows every turn and would
+  // otherwise be held in full as a map key.
+  return createHash('sha256').update(stableStringify({
     model,
     ...(systemPrompt ? { systemPrompt } : {}),
     messages,
-  });
+  })).digest('hex');
 }
 
 function stableStringify(value: unknown): string {

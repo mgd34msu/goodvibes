@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { captureJudgmentVolumeMonitorControl, captureJudgmentVolumeMonitorSettings, startJudgmentVolumeMonitor, type JudgmentVolumeMonitorSettings, type JudgmentVolumeLog } from '../observe/judgment-volume-monitor.js';
+import { captureJudgmentVolumeMonitorControl, captureJudgmentVolumeMonitorSettings, startJudgmentVolumeMonitor, type JudgmentVolumeAlert, type JudgmentVolumeMonitorSettings, type JudgmentVolumeLog } from '../observe/judgment-volume-monitor.js';
 import { logger } from '../utils/logger.js';
 import type { DisposalRegistry } from './disposal.js';
 
@@ -7,6 +7,12 @@ interface VolumeSettingsSource {
   get(key: 'judgment.volumeMonitor'): unknown;
   subscribe?(key: 'judgment.volumeMonitor', listener: () => void): () => void;
   onDidChangeIncarnation?(listener: () => void): () => void;
+}
+
+/** Read side of the composed monitor, for a status surface. */
+export interface JudgmentVolumeMonitorHandle {
+  /** The most recent alert state change (budget breach, unreadable log, recovery); undefined until one happens or when monitoring is off. */
+  lastAlert(): JudgmentVolumeAlert | undefined;
 }
 
 /** Product settings own local recurring alerts; the explicit budget-file
@@ -17,7 +23,7 @@ export function composeJudgmentVolumeMonitor(
   env: Readonly<Record<string, string | undefined>>,
   disposal: DisposalRegistry,
   config?: VolumeSettingsSource,
-): void {
+): JudgmentVolumeMonitorHandle {
   const file = env['GOODVIBES_JUDGMENT_MONITOR']?.trim();
   let monitor: ReturnType<typeof startJudgmentVolumeMonitor> | undefined;
   let signature: string | undefined, disposed = false;
@@ -27,7 +33,8 @@ export function composeJudgmentVolumeMonitor(
     try { unsubscribe(); }
     finally { monitor?.dispose(); monitor = undefined; }
   });
-  if (disposed) return;
+  const handle: JudgmentVolumeMonitorHandle = { lastAlert: () => monitor?.lastAlert() };
+  if (disposed) return handle;
   const reload = () => {
     if (disposed) return;
     try {
@@ -68,4 +75,5 @@ export function composeJudgmentVolumeMonitor(
     : config?.onDidChangeIncarnation?.(queueReload);
   if (release) { if (disposed) release(); else unsubscribe = release; }
   reload();
+  return handle;
 }

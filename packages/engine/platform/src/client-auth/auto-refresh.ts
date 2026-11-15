@@ -100,6 +100,17 @@ export interface AutoRefreshCoordinatorOptions {
   readonly observer?: PlatformObserver | undefined;
 }
 
+/**
+ * What a refresh attempt did to the stored token.
+ * - `'refreshed'`: a new token was stored.
+ * - `'cleared'`: the refresh was rejected for good (revoked or invalid
+ *   credentials) and the stored token was cleared.
+ * - `'not-refreshed'`: nothing changed (no refresh endpoint, a transient
+ *   failure that keeps the token, the token was not near expiry, or the store
+ *   was changed by someone else while the refresh was in flight).
+ */
+export type RefreshOutcome = 'refreshed' | 'cleared' | 'not-refreshed';
+
 // ---------------------------------------------------------------------------
 // Coordinator implementation
 // ---------------------------------------------------------------------------
@@ -112,7 +123,7 @@ export class AutoRefreshCoordinator {
   readonly #observer: PlatformObserver | undefined;
 
   /** Promise shared across all waiters during an active refresh. */
-  #refreshingPromise: Promise<void> | null = null;
+  #refreshingPromise: Promise<RefreshOutcome> | null = null;
 
   readonly #now: () => number;
 
@@ -174,18 +185,28 @@ export class AutoRefreshCoordinator {
    * Both report the error to `onError`. A failure that cannot be read at all
    * rejects the refresh with that error and leaves the token as it was.
    */
-  async #doRefresh(): Promise<void> {
+  async #doRefresh(): Promise<RefreshOutcome> {
     if (this.#refreshingPromise) {
       return this.#refreshingPromise;
     }
 
-    const promise = (async () => {
+    const promise = (async (): Promise<RefreshOutcome> => {
       if (!this.#refresh) {
         // No refresh endpoint, graceful no-op.
-        return;
+        return 'not-refreshed';
       }
+      // The token this refresh replaces. A logout or a new login while it is
+      // in flight changes the stored token; its answer must not overwrite that.
+      // An unreadable store at the start leaves nothing to compare (undefined).
+      let startedFrom: string | null | undefined;
+      try { startedFrom = await this.#tokenStore.getToken(); } catch { startedFrom = undefined; }
+      const storeChanged = async (): Promise<boolean> => {
+        if (startedFrom === undefined) return false;
+        try { return (await this.#tokenStore.getToken()) !== startedFrom; } catch { return false; }
+      };
       try {
         const { token, expiresAt } = await this.#refresh();
+        if (await storeChanged()) return 'not-refreshed';
         const store = this.#tokenStore as GoodVibesTokenStore & {
           setTokenEntry?: ((token: string | null, expiresAt?: number) => Promise<void>) | undefined;
         };
@@ -201,6 +222,7 @@ export class AutoRefreshCoordinator {
             reason: 'refresh',
           }),
         );
+        return 'refreshed';
       } catch (err) {
         const transience = await readFailureTransience(err, 'client-auth.refresh');
         const terminal = transience.failureClass === 'terminal';
@@ -218,8 +240,10 @@ export class AutoRefreshCoordinator {
                 cause: err,
               },
             );
-        if (terminal) {
+        let outcome: RefreshOutcome = 'not-refreshed';
+        if (terminal && !await storeChanged()) {
           await this.#tokenStore.clearToken();
+          outcome = 'cleared';
           invokeObserver(() =>
             this.#observer?.onAuthTransition?.({
               from: 'token',
@@ -229,6 +253,7 @@ export class AutoRefreshCoordinator {
           );
         }
         invokeObserver(() => this.#observer?.onError?.(refreshError), { label: 'onError' });
+        return outcome;
       }
     })();
 
@@ -248,12 +273,31 @@ export class AutoRefreshCoordinator {
    * `refreshLeewayMs`), refreshes before the request goes out.
    *
    * If `autoRefresh` is disabled, this is a no-op.
+   *
+   * Resolves with what the refresh did to the stored token, so a caller can
+   * tell `'cleared'` (the session was rejected and the token removed) from a
+   * token that is simply still current (`'not-refreshed'`).
    */
-  async ensureFreshToken(): Promise<void> {
-    if (!this.#autoRefresh) return;
+  async ensureFreshToken(): Promise<RefreshOutcome> {
+    if (!this.#autoRefresh) return 'not-refreshed';
     const nearExpiry = await this.#isNearExpiry();
-    if (nearExpiry) {
-      await this.#doRefresh();
+    if (!nearExpiry) return 'not-refreshed';
+    return this.#doRefresh();
+  }
+
+  /**
+   * True when the rejected request carried a token that is no longer the one
+   * in the store: another refresh already replaced it, so refreshing again
+   * would only rotate the new token away. A refresh already in flight is
+   * joined instead (its result is the one to retry with).
+   */
+  async #usedTokenIsStale(usedToken: string | null | undefined): Promise<boolean> {
+    if (!usedToken || this.#refreshingPromise) return false;
+    try {
+      const current = await this.#tokenStore.getToken();
+      return current !== null && current !== usedToken;
+    } catch {
+      return false;
     }
   }
 
@@ -269,8 +313,11 @@ export class AutoRefreshCoordinator {
    *
    * @param fn - The request function to execute. Must be side-effect-safe to
    *   call twice (called at most twice).
+   * @param usedToken - The bearer token the first attempt was sent with. When
+   *   the store already holds a different token, a refresh has completed since
+   *   and `fn` is retried without refreshing again.
    */
-  async withRetryOn401<T>(fn: () => Promise<T>): Promise<T> {
+  async withRetryOn401<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T> {
     try {
       return await fn();
     } catch (firstError) {
@@ -280,7 +327,9 @@ export class AutoRefreshCoordinator {
 
       // Trigger refresh (queued if already in progress).
       const wasExpired = await this.#isExpired();
-      await this.#doRefresh();
+      if (!await this.#usedTokenIsStale(usedToken)) {
+        await this.#doRefresh();
+      }
 
       // Retry once.
       try {
@@ -327,11 +376,16 @@ export class AutoRefreshCoordinator {
    * when the middleware already observed the initial 401 from `next()`.
    *
    * @param fn - The retry request to execute after the refresh completes.
+   * @param usedToken - The bearer token the rejected request was sent with.
+   *   When the store already holds a different token, a refresh has completed
+   *   since and `fn` runs without refreshing again.
    */
-  async refreshAndRetryOnce<T>(fn: () => Promise<T>): Promise<T> {
+  async refreshAndRetryOnce<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T> {
     const wasExpired = await this.#isExpired();
     // Refresh (serialised, if one is already in progress, join it).
-    await this.#doRefresh();
+    if (!await this.#usedTokenIsStale(usedToken)) {
+      await this.#doRefresh();
+    }
     // Single retry attempt.
     try {
       return await fn();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ABANDONED_QUEUE_MS,
@@ -13,6 +13,7 @@ import {
   queueDraftToSend,
   readChannelDrafts,
   saveDraft,
+  type ChannelDraftWebhookSecrets,
 } from '../../agent/channel-draft.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -23,6 +24,16 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 function makeShellPaths(root: string) {
   return {
     resolveUserPath: (...parts: string[]) => join(root, ...parts),
+  };
+}
+
+function memorySecrets(): ChannelDraftWebhookSecrets & { readonly values: Map<string, string> } {
+  const values = new Map<string, string>();
+  return {
+    values,
+    get: async (key) => values.get(key) ?? null,
+    set: async (key, value) => { values.set(key, value); },
+    delete: async (key) => { values.delete(key); },
   };
 }
 
@@ -351,9 +362,11 @@ describe('channel-draft', () => {
     const root = makeProjectTempDir('gv-drafts');
     try {
       const shellPaths = makeShellPaths(root);
-      const saved = await saveDraft(shellPaths, { message: 'Webhook msg', webhook: 'https://example.test/hook' });
-      const queued = await queueDraftToSend(shellPaths, saved.draft.id);
+      const secrets = memorySecrets();
+      const saved = await saveDraft(shellPaths, { message: 'Webhook msg', webhook: 'https://example.test/hook' }, { webhookSecrets: secrets });
+      const queued = await queueDraftToSend(shellPaths, saved.draft.id, { webhookSecrets: secrets });
       expect(queued.deliveryInput.webhook).toBe('https://example.test/hook');
+      expect(readFileSync(readChannelDrafts(shellPaths).path, 'utf-8')).not.toContain('example.test/hook');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

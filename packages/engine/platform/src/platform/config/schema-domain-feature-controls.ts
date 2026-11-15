@@ -111,14 +111,14 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Enforce per-phase runtime budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd) checked at phase entry and exit, terminating the pipeline on a hard breach with a typed diagnostic event. Default off until budget attribution wiring lands.',
+      'Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The check runs after the tool returns, so a call over its limit is reported to the model as failed with its output kept and a note that its action may have taken effect. Token and cost limits apply only to tools that report tokenCount or costUsd.',
   },
   {
     key: 'runtime.toolBudget.maxMs',
     type: 'number',
     default: 0,
     description:
-      'Default per-phase wall-clock budget (ms) for tool execution when runtime.toolBudget.enforced is true. 0 = unlimited. A per-call ToolRuntimeContext.budget.maxMs overrides this default.',
+      'Wall-clock budget (ms) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns. 0 = unlimited.',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {
@@ -126,7 +126,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'number',
     default: 0,
     description:
-      'Default token budget for a single tool execution when runtime.toolBudget.enforced is true (checked against a tool result tokenCount annotation at phase exit). 0 = unlimited. A per-call ToolRuntimeContext.budget.maxTokens overrides.',
+      'Token budget for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the tokenCount the result reports. 0 = unlimited.',
     ...intRange(0, 100_000_000),
   },
   {
@@ -134,7 +134,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'number',
     default: 0,
     description:
-      'Default cost budget (USD) for a single tool execution when runtime.toolBudget.enforced is true (checked against a tool result costUsd annotation at phase exit). 0 = unlimited. A per-call ToolRuntimeContext.budget.maxCostUsd overrides.',
+      'Cost budget (USD) for one tool call when runtime.toolBudget.enforced is true, checked when the tool returns against the costUsd the result reports. 0 = unlimited.',
     ...numRange(0, 1_000_000),
   },
   {

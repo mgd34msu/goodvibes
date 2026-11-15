@@ -1,5 +1,5 @@
 import type { TelegramSourceAccountHandle, TelegramWebhookAccountLease } from '../../channels/telegram/source-account.js';
-import type { SurfaceAdapterContext } from '../types.js';
+import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
 import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
@@ -71,6 +71,16 @@ function extractTelegramTask(message: Record<string, unknown>, botUsername?: str
   return trimmed.replace(commandPattern, '').trim();
 }
 
+const TELEGRAM_ATTACHMENT_FIELDS: readonly (readonly [string, string])[] = [
+  ['photo', 'photo'], ['voice', 'voice note'], ['audio', 'audio file'], ['video', 'video'], ['video_note', 'video message'],
+  ['document', 'file'], ['sticker', 'sticker'], ['animation', 'animation'],
+];
+
+/** What kind of attachment a message carries, in words for a person; undefined when it has none. */
+function telegramAttachmentKind(message: Record<string, unknown>): string | undefined {
+  return TELEGRAM_ATTACHMENT_FIELDS.find(([field]) => message[field] !== undefined)?.[1];
+}
+
 function telegramConversationKind(chatType?: string, threadId?: string): import('../../channels/index.js').ChannelConversationKind {
   if (threadId) return 'thread';
   if (chatType === 'private') return 'direct';
@@ -105,8 +115,10 @@ export async function handleTelegramSurfaceWebhook(
   if (!registration) {
     const credential = await resolveSurfaceCredential(
       context,
-      { kind: 'config', key: 'surfaces.telegram.webhookSecret' },
+      // The order the registration side hands Telegram (channels/telegram/ingress.ts), so the
+      // secret Telegram sends is the one checked here.
       { kind: 'registry', service: 'telegram', field: 'signingSecret' },
+      { kind: 'config', key: 'surfaces.telegram.webhookSecret' },
       { kind: 'env', name: 'TELEGRAM_WEBHOOK_SECRET' },
     );
     if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('telegram', credential);
@@ -222,7 +234,21 @@ export async function processTelegramUpdate(
     if (policy.reason === 'payment-reply-recorded') return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', recorded: true });
     const paymentAnswer = /^payment-reply-(approve|deny|acknowledge|object)$/.exec(policy.reason)?.[1];
     if (paymentAnswer) return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', answer: paymentAnswer });
+    // Telegram redelivers an update it was answered with a failure status, and an ordinary refusal
+    // (an unaddressed group message, a user not on the allowlist) will not change on redelivery.
+    if (isOrdinaryIngressRefusal(policy.reason)) {
+      logger.info('processTelegramUpdate: update ignored by channel policy', { reason: policy.reason, chatId });
+      return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
+    }
     return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
+  }
+
+  // An edit is requested only so a purchase answer can be corrected, and the policy above has already
+  // offered it to an open purchase window. Anything else is the sender fixing a typo in a message that was
+  // already acted on, so it must not bind, spawn or answer a second time. A delegated chat reports edits itself.
+  if (!delegated && (payload.edited_message === message || payload.edited_channel_post === message)) {
+    logger.info('processTelegramUpdate: edited message ignored', { chatId, updateId: readNumberString(payload.update_id) });
+    return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'edited-message' });
   }
 
   const binding = await context.routeBindings.upsertBinding({
@@ -302,30 +328,56 @@ export async function processTelegramUpdate(
   }
 
   if (!task) {
+    // A photo, voice note or file carries nothing this adapter can read. Say so in a private chat,
+    // where the sender is talking to the bot; stay silent in groups, where an unaddressed
+    // attachment is ordinary chatter.
+    const attachment = telegramAttachmentKind(message);
+    const unsupportedReply = attachment && readString(chat?.type) === 'private'
+      ? `I cannot read ${attachment}s yet. Send the request as text.` : undefined;
+    let notified = false;
+    if (unsupportedReply && deps.sendMessage) {
+      try {
+        await deps.sendMessage({ chatId, text: unsupportedReply, threadId });
+        notified = true;
+      } catch (error) {
+        logger.warn('processTelegramUpdate: unsupported-attachment reply failed', { chatId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     logger.info('handleTelegramSurfaceWebhook: message acknowledged without queueing', {
-      reason: 'no-actionable-text',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment } : {}),
       bindingId: binding.id,
       chatId,
       threadId,
     });
     return Response.json({
+      ...(unsupportedReply ? {
+        // Webhook mode can answer inline, as for standard commands; the poller uses sendMessage.
+        method: 'sendMessage', chat_id: chatId, text: unsupportedReply,
+        ...(threadId && /^\d+$/.test(threadId) ? { message_thread_id: Number(threadId) } : {}),
+        notified,
+      } : {}),
       ok: true,
       acknowledged: true,
       queued: false,
       outcome: 'ignored',
-      reason: 'no-actionable-text',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment } : {}),
       bindingId: binding.id,
     });
   }
 
   const controlCommand = await context.parseSurfaceControlCommand(task, deps.signal ? { signal: deps.signal } : {});
   if (controlCommand) {
-    const message = await context.performSurfaceControlCommand(controlCommand);
+    const message = await context.performSurfaceControlCommand(controlCommand, {
+      surface: 'telegram', routeId: binding.id, channelId: chatId, ...(readNumberString(from?.id) ? { userId: readNumberString(from?.id)! } : {}),
+    });
     return Response.json({ ok: true, acknowledged: true, message });
   }
 
   const submission = await context.sessionBroker.submitMessage({
     routeId: binding.id,
+    ...(readNumberString(payload.update_id) ? { providerMessageId: readNumberString(payload.update_id) } : {}),
     surfaceKind: 'telegram',
     surfaceId: binding.surfaceId,
     externalId: binding.externalId,
@@ -339,7 +391,7 @@ export async function processTelegramUpdate(
       updateId: readNumberString(payload.update_id),
     },
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     return Response.json({ ok: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
   }
 
@@ -349,7 +401,7 @@ export async function processTelegramUpdate(
     submission.session.id,
   );
   if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
     agentId: spawnResult.id,
     task,

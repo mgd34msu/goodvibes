@@ -9,6 +9,7 @@ import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { captureJudgmentFallbackSettings } from '../platform/src/platform/config/judgment-fallback-settings.ts';
 import { createJudgmentSourceLifetime } from '../platform/src/platform/runtime/judgment-source-lifetime.ts';
 import { createSettingsJudgmentPort, judgmentConfigFromSettings, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -199,7 +200,7 @@ test('cancellation while acquiring a fallback secret prevents every transmission
     const pending = withDecisionLog(port, log).ask({ ...request, signal: controller.signal });
     await entered.promise; controller.abort();
     await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
-    credential.resolve('synthetic-late-secret'); await Bun.sleep(5);
+    credential.resolve('synthetic-late-secret'); await eventLoopTurns();
     expect(primary.calls).toHaveLength(0); expect(next.calls).toHaveLength(0);
     expect(log.query()).toMatchObject([{ status: 'failed', error: { kind: 'aborted' } }]);
     expect(log.query()).toHaveLength(1);

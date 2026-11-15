@@ -46,7 +46,7 @@ export interface UsageTotals {
   readonly cacheWrite: number;
 }
 
-export type UsageAgentStatus = 'running' | 'done' | 'failed';
+export type UsageAgentStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
 /** One spawned agent's tokens and cost. */
 export interface UsageAgentEntry {
@@ -112,13 +112,26 @@ export class UsageTracker {
   private readonly agentMap = new Map<string, MutableAgent>();
   private prevCumulative: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private lastSessionCost = 0;
+  /** True from a turn's submission until it ends; usage that moves outside one is a resume or rewind, not the turn's. */
+  private turnOpen = false;
   private readonly unsubs: Array<() => void> = [];
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly deps: UsageTrackerDeps) {
-    this.unsubs.push(deps.turnEvents.on('TURN_COMPLETED', () => this.recordTurn()));
+    this.unsubs.push(deps.turnEvents.on('TURN_COMPLETED', () => { this.turnOpen = false; this.recordTurn(); }));
+    this.unsubs.push(deps.turnEvents.on('TURN_CANCEL', () => { this.turnOpen = false; }));
+    this.unsubs.push(deps.turnEvents.on('PREFLIGHT_FAIL', () => { this.turnOpen = false; }));
+    this.unsubs.push(deps.turnEvents.on('TURN_ERROR', () => { this.turnOpen = false; }));
     this.unsubs.push(deps.turnEvents.on('LLM_RESPONSE_RECEIVED', () => this.recordCostPoint()));
-    this.unsubs.push(deps.turnEvents.on('TURN_SUBMITTED', () => this.emit()));
+    this.unsubs.push(deps.turnEvents.on('TURN_SUBMITTED', () => {
+      // A resumed, rewound or imported session re-hydrates the orchestrator's
+      // cumulative usage between turns. Re-baseline at the start of a fresh
+      // turn so the restored history is not recorded as this turn's usage. A
+      // submission inside an open turn (a failover retry) keeps the baseline.
+      if (!this.turnOpen) this.rebase();
+      this.turnOpen = true;
+      this.emit();
+    }));
     this.unsubs.push(deps.agentEvents.on('AGENT_SPAWNING', (payload) => {
       this.agentMap.set(payload.agentId, {
         agentId: payload.agentId,
@@ -146,6 +159,14 @@ export class UsageTracker {
       this.readAgentUsage(entry);
       this.emit();
     }));
+    this.unsubs.push(deps.agentEvents.on('AGENT_CANCELLED', (payload) => {
+      const entry = this.agentMap.get(payload.agentId);
+      if (!entry) return;
+      // Take the final read now: a cancelled agent that spent tokens keeps its cost.
+      entry.status = 'cancelled';
+      this.readAgentUsage(entry);
+      this.emit();
+    }));
   }
 
   dispose(): void {
@@ -166,6 +187,13 @@ export class UsageTracker {
   }
 
   // ── Recording ──────────────────────────────────────────────────────────────
+
+  /** Treat the orchestrator's current cumulative usage and cost as the starting point for the next turn. */
+  private rebase(): void {
+    if (!this.available()) return;
+    this.prevCumulative = this.totals();
+    this.lastSessionCost = this.sessionCost().usd;
+  }
 
   /** Snapshot a completed turn (the delta since the previous one). */
   recordTurn(now: number = Date.now()): void {

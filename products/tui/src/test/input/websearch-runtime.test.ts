@@ -64,6 +64,17 @@ function makeCtx(webSearchService?: ReturnType<typeof makeFakeService>) {
 }
 
 describe('/search command registration', () => {
+  test('registers /search through the registry so it dispatches to the handler', async () => {
+    const registry = new CommandRegistry();
+    registerWebSearchRuntimeCommands(registry);
+    const service = makeFakeService();
+    const { ctx } = makeCtx(service);
+
+    expect(registry.getAll().map((command) => command.name)).toContain('search');
+    await registry.execute('search', ['weather'], ctx);
+
+    expect(service.calls).toEqual([{ query: 'weather' }]);
+  });
 });
 
 describe('/search: honest degradation', () => {

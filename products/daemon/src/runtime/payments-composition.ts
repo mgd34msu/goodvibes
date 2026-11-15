@@ -18,7 +18,7 @@
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox } from '@goodvibes-jev/engine/platform/platform/payments';
+import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/platform/platform/payments';
 import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -32,16 +32,20 @@ import {
   DurableBudgetLedger,
   DurableCheckoutJournal,
   DurablePaymentOperations,
+  MAX_PURCHASE_LIST_LIMIT,
   ProtectedPaymentRequests,
   createNativeCheckoutWindowRestorer,
   channelBackedPaymentNotifier,
   configBackedAddressStore,
+  readNotifyChannels,
   registerPaymentsMethods,
   type CheckoutComposition,
+  type PaymentNotifier,
   type PaymentsSecretStore,
 } from '@goodvibes-jev/engine/platform/platform/payments';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { BrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
+import type { OwnerMailHandler, OwnerMailRelay } from './owner-mail-relay.js';
 
 export interface PaymentsCompositionOptions {
   readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
@@ -62,6 +66,52 @@ export interface PaymentsCompositionOptions {
   readonly checkoutSeam: BrowserCheckoutSeamHolder['get'];
   /** Delivers a purchase notice; the SAME router every other channel send in this daemon uses. */
   readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
+  /** Where the owner's mailbox hands over each screened message; absent means no order-confirmation reports. */
+  readonly ownerMail?: Pick<OwnerMailRelay, 'attach'> | undefined;
+}
+
+/** Most messages remembered so a poll that offers one again is not reported twice. */
+const REPORTED_MAIL_MEMORY = 512;
+
+/**
+ * Reads each message on the owner's mailbox against the purchase ledger and, when
+ * it confirms one purchase, sends the owner a report of that purchase through the
+ * payment notifier. Messages are handled one at a time. Nothing here can fail the
+ * mailbox poll: a refusal (Classic operation has no decision models) or a send
+ * failure is logged and the message simply gets no report.
+ */
+export function createOrderMailObserver(deps: {
+  readonly purchases: Pick<DaemonPurchaseLedger, 'list'>;
+  readonly notifier: Pick<PaymentNotifier, 'deliver'>;
+}): OwnerMailHandler {
+  const seen = new Set<string>();
+  let tail: Promise<void> = Promise.resolve();
+  return (mail) => {
+    if (seen.has(mail.id)) return;
+    seen.add(mail.id);
+    if (seen.size > REPORTED_MAIL_MEMORY) {
+      const oldest = seen.values().next();
+      if (!oldest.done) seen.delete(oldest.value);
+    }
+    tail = tail.then(async () => {
+      const { purchases } = deps.purchases.list({ limit: MAX_PURCHASE_LIST_LIMIT, dayKey: undefined });
+      if (purchases.length === 0) return;
+      const outcome = await reportOrderConfirmation({
+        mail: { senderAddress: mailboxAddress(mail.senderAddress), receivedAtMs: mail.receivedAtMs, subject: mail.subject, body: mail.body },
+        purchases,
+        send: async (message) => {
+          const deliveries = await deps.notifier.deliver({ kind: 'notice', message });
+          if (!deliveries.some(delivery => delivery.delivered)) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
+        },
+      });
+      if (outcome.kind === 'not-reported' && outcome.reason === 'ambiguous') {
+        logger.info('A store mail reads as about more than one purchase; no confirmation report was sent');
+      }
+    }).catch((error: unknown) => {
+      // Fixed text and the error name only: the underlying message can carry mail text.
+      logger.warn('A store mail could not be checked against purchases', { error: error instanceof Error ? error.name : 'unknown' });
+    });
+  };
 }
 
 export interface PaymentsServices {
@@ -71,8 +121,8 @@ export interface PaymentsServices {
   /**
    * Resolves once every payments verb is attached; the platform runs its boot
    * recovery sweep first, so attachment lands a beat after composition.
-   * Rejects if attaching the daemon's local handlers failed, so whoever drops
-   * this promise must handle that (daemon-handler-composition.ts logs it).
+   * Rejects if attaching the daemon's local handlers failed. The daemon's
+   * handler registration awaits it, so a rejection stops runtime startup.
    */
   readonly ready: Promise<void>;
   /** Borrowed by DaemonConfig; this payment composition owns its lifetime. */
@@ -103,6 +153,38 @@ function daemonScopedSecrets(secretsManager: Pick<SecretsManager, 'get' | 'set' 
 /** Read live, per call: a budget raised five minutes ago applies to the next read. */
 function livePaymentsConfig(configManager: Pick<ConfigManager, 'get'>): PaymentsConfigReader {
   return { get: (key: string) => configManager.get(key as Parameters<ConfigManager['get']>[0]) };
+}
+
+/**
+ * A notifier that follows `payments.notifyChannels` as it changes.
+ *
+ * The platform notifier resolves its channel list once, when it is built, so a
+ * list set after boot would never be notified until a restart. This rebuilds
+ * it whenever the configured list differs from the one the current notifier was
+ * built with. A window already prepared keeps the channel report its own call
+ * took, so a change between preparing and arming never moves that window.
+ */
+export function liveChannelPaymentNotifier(
+  config: PaymentsConfigReader,
+  router: Parameters<typeof channelBackedPaymentNotifier>[1],
+  replies: Parameters<typeof channelBackedPaymentNotifier>[2],
+): PaymentNotifier {
+  let listKey = readNotifyChannels(config).join(',');
+  let current = channelBackedPaymentNotifier(config, router, replies);
+  const fresh = (): PaymentNotifier => {
+    const key = readNotifyChannels(config).join(',');
+    if (key !== listKey) {
+      current = channelBackedPaymentNotifier(config, router, replies);
+      listKey = key;
+    }
+    return current;
+  };
+  const prepare = current.prepareWindow;
+  return {
+    ...(prepare ? { prepareWindow: (input: Parameters<NonNullable<PaymentNotifier['prepareWindow']>>[0]) => fresh().prepareWindow!(input) } : {}),
+    deliver: (input) => fresh().deliver(input),
+    awaitAnswer: (input) => fresh().awaitAnswer(input),
+  };
 }
 
 /**
@@ -142,10 +224,12 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       || operations.list().some(operation => operation.totalMinorUnits !== null
         && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
   );
+  const notifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);
+  const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier }));
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),
-    notifier: channelBackedPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies),
+    notifier,
     replies: paymentReplies,
     ...(options.paymentContinuationOwner ? { restoreWindow: createNativeCheckoutWindowRestorer({
       ...options.paymentContinuationOwner, catalog: options.gatewayMethods, config,
@@ -190,6 +274,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     let resolve!: () => void, reject!: (error: unknown) => void;
     closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     const errors: unknown[] = [], jobs: Promise<void>[] = [];
+    detachOwnerMail?.();
     // Retire both owners synchronously. Attempt both even if one close fails.
     try { jobs.push(registration.close()); } catch (error) { errors.push(error); }
     try { jobs.push(paymentReplies.close()); } catch (error) { errors.push(error); }

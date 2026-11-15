@@ -12,7 +12,7 @@ import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { APPROVAL_REFUSED_LINE, ASK_AGAIN_LINE, NAME_AN_ATTEMPT_LINE, type EscalationReason, type OwnerReplyOutcome } from '../../platform/src/platform/contract/index.js';
 import { unsettledReadingsNote } from '../../platform/src/platform/contract/escalation.js';
 import { QUALITY_EVIDENCE_SENTENCES } from '../../platform/src/platform/contract/nudge.js';
-import { unitTitleOf, type AnswerContext } from './plan-support.js';
+import { plannerOutput, unitTitleOf, type AnswerContext } from './plan-support.js';
 import { ASK, makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness, type HarnessOptions } from './runner-support.js';
 import {
   MET,
@@ -20,6 +20,7 @@ import {
   answers,
   contractOf,
   finishes,
+  fixPlan,
   judgeOf,
   keepsFailing,
   replyAnswers,
@@ -30,9 +31,10 @@ import {
 } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 type Reading = 'approve' | 'amend' | 'reject' | 'unclear';
@@ -273,21 +275,27 @@ describe('owner replies (6.3)', () => {
     expect(outcome).toMatchObject({ reading: 'approve', outcome: 'confirm', action: 'asked-again' });
   }, 25_000);
 
+  test('fix rounds that really ran and failed again escalate to the owner as exhausted', async () => {
+    // No counter is set by hand: the one allowed round is planned, run, and fails its own check.
+    const planner = stepPlanner(oneUnitPlan(1), { fix: () => plannerOutput(fixPlan([{ serves: ['u1.c1'], files: ['src/csv.ts'] }])) });
+    const h = makeHarness({ plan: oneUnitPlan(1), contract: { stallLimit: 2, maxFixRounds: 1 }, planner: planner.runner,
+      scripts: { u1: keepsFailing(3), 'u1.f1.u1': finishes('fixed the parser') },
+      // The repair unit passes on its own work; the original unit still reads unmet when re-checked after it.
+      port: answers((context) => judgeOf(context) === 'unit' ? noulAnswer(context.state['output'] === 'fixed the parser' ? MET : 0.97) : undefined, routeAnswer('split')) });
+    harness = h;
+    const { contract } = await startContract(h);
+    await waitFor(() => contractOf(h, contract.id).status === 'awaiting-owner', 'the exhausted escalation', 15_000);
+    const done = contractOf(h, contract.id);
+    expect(done.units[0]!.fixRounds).toBe(1);
+    expect(done.escalations.at(-1)!.reason).toBe('fix-rounds-exhausted');
+  }, 25_000);
+
   test('an attempt asked for by position is read and taken', async () => {
     const s = await SETUPS['attempts-undecided']('amend');
     const outcome = await s.reply('Take the second one.');
     if (outcome.action !== 'amended') {
       const contract = contractOf(s.h, s.contractId);
-      console.error('owner reply refusal diagnostics', JSON.stringify({
-        outcome,
-        question: contract.escalations.at(-1)?.question,
-        selection: contract.units[0]?.attemptSelection,
-        attempts: contract.units[0]?.attemptUnits?.map(({ id, status, failureReason, checks }) => ({ id, status, failureReason, lastCheck: checks.at(-1) })),
-        agents: s.h.manager.list().filter(({ contractUnitId }) => contractUnitId === 'u1#a1')
-          .map(({ id, status, error, failureReason, fullOutput }) => ({ id, status, error, failureReason, fullOutput })),
-        decisions: contract.decisions.filter(({ targetId }) => targetId === 'u1#a1'),
-        events: s.h.events.filter((event) => 'unitId' in event && (event.unitId === 'u1' || event.unitId === 'u1#a1')),
-      }, null, 2));
+      throw new Error(`the position reply was not taken: ${JSON.stringify({ outcome, question: contract.escalations.at(-1)?.question, selection: contract.units[0]?.attemptSelection })}`);
     }
     expect(outcome.action).toBe('amended');
     await waitFor(() => terminal(s.h, s.contractId), 'the contract to end', 15_000);
@@ -332,6 +340,30 @@ describe('owner replies (6.3)', () => {
   }, 25_000);
 });
 
+describe('one reply per question', () => {
+  test('a second reply while the first is still being read is refused, and only the first acts', async () => {
+    const s = await SETUPS.stalled('unclear');
+    const id = contractOf(s.h, s.contractId).escalations.at(-1)!.id;
+    const first = s.h.runner.reply(s.contractId, id, TEXTS.unclear);
+    const second = s.h.runner.reply(s.contractId, id, TEXTS.unclear);
+    await expect(second).rejects.toThrow(`a reply to ${id} is already being read; wait for its result`);
+    expect((await first).action).toBe('asked-again');
+    const contract = contractOf(s.h, s.contractId);
+    expect(contract.status).toBe('awaiting-owner');
+    expect(contract.escalations.filter((escalation) => escalation.reply !== undefined)).toHaveLength(1);
+  }, 25_000);
+
+  test('a reply that cannot be read leaves the question open instead of failing the contract', async () => {
+    const s = await SETUPS.stalled('unclear');
+    const { nextEscalationId } = await s.reply(TEXTS.unclear);
+    // No reading is scripted for a second reply, so it cannot be read.
+    await expect(s.reply(TEXTS.unclear)).rejects.toThrow('the question is still open, so reply again');
+    const contract = contractOf(s.h, s.contractId);
+    expect(contract.status).toBe('awaiting-owner');
+    expect(contract.escalations.find((escalation) => escalation.id === nextEscalationId)?.resolvedAt).toBeUndefined();
+  }, 25_000);
+});
+
 describe('an unsettled question names every reading approval would accept', () => {
   const clean = { verdict: 'no', outcome: 'act' } as const;
   test('an unshown goal and quality items that did not read clean are named; settled ones are not', () => {
@@ -354,7 +386,7 @@ describe('an unsettled question names every reading approval would accept', () =
 
 describe('what an owner-approved plan names', () => {
   test('the plan-accepted decision names the plan readings the owner settled and the reply', async () => {
-    const log = new SqliteDecisionLog(':memory:');
+    using log = new SqliteDecisionLog(':memory:');
     let shapes = 0;
     const narrowsOnce = (context: AnswerContext): unknown => {
       if (!context.name.startsWith('narrows_') || unitTitleOf(context.state) === undefined) return undefined;
@@ -379,6 +411,5 @@ describe('what an owner-approved plan names', () => {
     const reply = contractOf(h, contract.id).escalations.at(-1)!.reply!;
     expect(accepted.decisionIds).toEqual(expect.arrayContaining([...escalation.decisionIds!, reply.decisionId!]));
     for (const id of accepted.decisionIds) expect(log.get(id)).toBeDefined();
-    log[Symbol.dispose]();
   }, 20_000);
 });

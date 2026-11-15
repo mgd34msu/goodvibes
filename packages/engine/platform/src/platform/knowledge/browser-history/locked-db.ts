@@ -24,13 +24,21 @@ export async function copyLockedBrowserSqlite(sourcePath: string): Promise<Locke
   const tempDir = await mkdtemp(join(tmpdir(), 'goodvibes-browser-db-'));
   const baseName = basename(sourcePath);
   const copiedDbPath = join(tempDir, baseName);
-  await copyFile(sourcePath, copiedDbPath);
-
-  for (const suffix of ['-wal', '-shm']) {
-    const source = `${sourcePath}${suffix}`;
-    if (await exists(source)) {
-      await copyFile(source, join(tempDir, `${baseName}${suffix}`));
+  try {
+    // The journal files go first: a browser that checkpoints between the copies
+    // then leaves a main file newer than its journal, which SQLite tolerates,
+    // instead of a journal newer than the main file.
+    for (const suffix of ['-wal', '-shm']) {
+      const source = `${sourcePath}${suffix}`;
+      if (await exists(source)) {
+        await copyFile(source, join(tempDir, `${baseName}${suffix}`));
+      }
     }
+    await copyFile(sourcePath, copiedDbPath);
+  } catch (error) {
+    // The directory holds a partial copy of the user's browsing history.
+    await rm(tempDir, { recursive: true, force: true });
+    throw error;
   }
 
   let cleaned = false;

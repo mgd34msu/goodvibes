@@ -8,6 +8,11 @@ import { assertCapturedToolReadAccess } from '../tools/shared/captured-input-too
 import { addFindWarning, type FindDiagnostics } from '../tools/find/shared.js';
 import { summarizeError } from '../utils/error-display.js';
 
+/** The observed source (or one of its ancestor directories) is no longer the one that was read. */
+export class CodeSourceChangedError extends Error {
+  override readonly name = 'CodeSourceChangedError';
+}
+
 export interface CodeFileObservation {
   readonly content: string;
   readonly revision: string;
@@ -37,8 +42,14 @@ export function captureCodeFileObservation(root: string, path: string, maxBytes 
   const observation = readFileObservation(selected, { maxBytes });
   const physical = observation.physical;
   const assertCurrent = () => {
-    rootOwner.assertCurrent(); parent.assertCurrent();
-    if (fileObservationIdentity(selected) !== physical) throw new Error('Code source changed after reading');
+    try {
+      rootOwner.assertCurrent(); parent.assertCurrent();
+      if (fileObservationIdentity(selected) !== physical) throw new Error('Code source changed after reading');
+    } catch (error) {
+      // Callers tell "the file moved under us" apart from their own failures by this type.
+      if (error instanceof CodeSourceChangedError) throw error;
+      throw new CodeSourceChangedError(error instanceof Error ? error.message : String(error), { cause: error });
+    }
   };
   assertCurrent();
   const content = new TextDecoder('utf-8').decode(observation.bytes);

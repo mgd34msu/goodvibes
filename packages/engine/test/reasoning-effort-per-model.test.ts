@@ -95,6 +95,8 @@ afterEach(() => {
 });
 import { applyAnthropicReasoning } from '../platform/src/platform/providers/anthropic-stream.ts';
 import { AnthropicMessagesProvider } from '../platform/src/platform/providers/anthropic-messages-provider.ts';
+import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.ts';
+import type { ChatRequest } from '../platform/src/platform/providers/interface.ts';
 import { GeminiProvider } from '../platform/src/platform/providers/gemini.ts';
 import { getCatalogModelDefinitionsFrom } from '../platform/src/platform/providers/model-catalog.ts';
 import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.ts';
@@ -508,19 +510,38 @@ describe('request-time rejections name the effort level', () => {
     }
   });
 
-  test('an Anthropic-compat provider resolves against its default model, not an empty id', () => {
+  test('an Anthropic-compat provider resolves against its default model, not an empty id', async () => {
     // The compat adapter allows an omitted model and falls back to its own
     // default. Resolving against the omitted value would miss the family row
     // and hand a Claude 4.7 model a token budget.
-    const body: Record<string, unknown> = {};
-    applyAnthropicReasoning(body, { model: 'claude-opus-4-7', reasoningEffort: 'high' }, Infinity);
-    expect(body['output_config']).toEqual({ effort: 'high' });
-
-    const unresolved: Record<string, unknown> = {};
-    applyAnthropicReasoning(unresolved, { model: '', reasoningEffort: 'high' }, Infinity);
-    // An empty id matches no family and lands on the labelled guess, which is
-    // exactly the wrong answer for a real Claude model, hence the fix.
-    expect(unresolved['thinking']).toBeUndefined();
+    const originalFetch = globalThis.fetch;
+    let sentBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const frames = [
+        'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+      ];
+      return new Response(frames.join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof globalThis.fetch;
+    try {
+      const provider = new AnthropicCompatProvider({
+        name: 'compat-default-model',
+        baseURL: 'https://compat.example.test/v1',
+        apiKey: 'k',
+        defaultModel: 'claude-opus-4-7',
+        models: ['claude-opus-4-7'],
+        modelListing: 'none',
+      });
+      // The compat adapter accepts an omitted model at runtime; the request type does not.
+      await provider.chat({ messages: [{ role: 'user', content: 'hi' }], reasoningEffort: 'high' } as ChatRequest);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(sentBody?.['model']).toBe('claude-opus-4-7');
+    expect(sentBody?.['output_config']).toEqual({ effort: 'high' });
+    expect(sentBody?.['thinking']).toBeUndefined();
   });
 });
 
@@ -956,12 +977,19 @@ describe('published reasoning options do not bleed between sessions', () => {
     setActiveReasoningEffortOptions(['low', 'medium', 'high'], 'session-b');
     expect(isAcceptableReasoningEffortSetting('xhigh', 'session-a')).toBe(true);
     expect(isAcceptableReasoningEffortSetting('xhigh', 'session-b')).toBe(false);
-    // The config schema's validator holds no session, so a level that is real
-    // on any live session is accepted rather than rejected by whoever ran last.
+    // The config schema's validator holds no session, so it answers from the
+    // severity ladder alone, never from whichever sessions are live.
     expect(isAcceptableReasoningEffortSetting('xhigh')).toBe(true);
     // Stored preferences remain valid even when no current session offers them.
     expect(isAcceptableReasoningEffortSetting('minimal')).toBe(true);
     expect(isAcceptableReasoningEffortSetting('turbo')).toBe(false);
+  });
+
+  test('a custom level gets the same sessionless answer with zero sessions and with one offering it', () => {
+    const before = isAcceptableReasoningEffortSetting('ultra-deep');
+    setActiveReasoningEffortOptions(['low', 'ultra-deep'], 'session-a');
+    expect(isAcceptableReasoningEffortSetting('ultra-deep')).toBe(before);
+    expect(isAcceptableReasoningEffortSetting('ultra-deep', 'session-a')).toBe(true);
   });
 
   test('a session with nothing published falls back to the process-wide slot', () => {

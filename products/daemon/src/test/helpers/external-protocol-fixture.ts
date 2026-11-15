@@ -15,10 +15,7 @@ import { makeOwnedTempDir } from './owned-temp.js';
 
 export type Reading = JudgmentRequest<Questions>;
 export function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
-export async function until(check: () => boolean, label: string) {
-  const end = Date.now() + 5000;
-  while (!check()) { if (Date.now() > end) throw new Error(label); await new Promise(done => setTimeout(done, 5)); }
-}
+export { until } from './wait.js';
 export async function externalProtocolFixture(options: { watchIntervalMs?: number } = {}) {
   const restores: Array<() => void> = [];
   const keep = <T extends { mockRestore(): void }>(spy: T): T => { restores.push(() => spy.mockRestore()); return spy; };
@@ -76,34 +73,56 @@ export async function externalProtocolFixture(options: { watchIntervalMs?: numbe
     } finally { if (abort) signal?.removeEventListener('abort', abort); }
   }));
   let acp: AcpHostService | undefined;
+  const acpRefusals: string[] = [];
   const spawn = AcpHostService.prototype.spawnAgent;
-  keep(spyOn(AcpHostService.prototype, 'spawnAgent').mockImplementation(function (this: AcpHostService, input) { acp = this; return spawn.call(this, input); }));
-  const bin = join(root, 'bin'); mkdirSync(bin);
+  keep(spyOn(AcpHostService.prototype, 'spawnAgent').mockImplementation(function (this: AcpHostService, input) {
+    acp = this;
+    // The gateway redacts the failure body, so the refusal text is recorded here.
+    return spawn.call(this, input).catch((error: unknown) => { acpRefusals.push(error instanceof Error ? error.message : String(error)); throw error; });
+  }));
+  const bin = join(root, 'bin');
   const fakeAgent = resolve(import.meta.dir, '../../../../../packages/engine/test/fixtures/fake-acp-agent.ts');
-  writeFileSync(join(bin, 'claude-code-acp'), `#!/bin/sh\nexec '${process.execPath}' run '${fakeAgent}' permission-reject-first\n`, { mode: 0o700 });
-  const priorPath = process.env.PATH; process.env.PATH = `${bin}:${priorPath ?? ''}`;
-  restores.push(() => { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; });
   const calls: Array<Record<string, unknown>> = [];
   let elicit = false;
   let formField = 'name';
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-    if (request.method !== 'POST') return new Response(null, { status: 405 });
-    const body = await request.json() as Record<string, unknown>;
-    const params = (body.params ?? {}) as Record<string, unknown>;
-    let result: unknown;
-    if (body.method === 'server/discover') result = { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {} }, serverInfo: { name: 'owned-protocol', version: '1' } };
-    else if (body.method === 'tools/list') result = { resultType: 'complete', tools: [{ name: 'write', description: 'Synthetic write', inputSchema: { type: 'object' } }] };
-    else if (body.method === 'tools/call') {
-      calls.push(params);
-      result = elicit && !params.inputResponses ? { resultType: 'input_required', inputRequests: { form: { method: 'elicitation/create', params: {
-        message: 'Untrusted remote asks for a name', requestedSchema: { type: 'object', properties: { [formField]: { type: 'string' } }, required: [formField] },
-      } } } } : { resultType: 'complete', done: true, received: params };
-    } else return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Unknown fixture method' } });
-    return Response.json({ jsonrpc: '2.0', id: body.id, result });
-  } });
-  const registry = daemon.services.mcpRegistry;
-  await daemon.daemon.registerMcpServer({ name: 'owned-protocol', url: `http://127.0.0.1:${server.port}/mcp` });
   const operationLifetime = new AbortController();
+  let server: ReturnType<typeof Bun.serve> | undefined;
+  // Each step runs even when an earlier one throws, so a failing test leaves
+  // no listener, PATH prefix, spy or daemon behind; the first failure is rethrown.
+  const teardown = async (steps: ReadonlyArray<() => unknown>): Promise<void> => {
+    const failures: unknown[] = [];
+    for (const step of steps) { try { await step(); } catch (error) { failures.push(error); } }
+    if (failures.length > 0) throw failures[0];
+  };
+  const unwind = (extra: ReadonlyArray<() => unknown> = []) => teardown([
+    ...extra,
+    () => daemon.stop(),
+    () => server?.stop(true),
+    () => { for (const restore of restores.reverse()) restore(); },
+  ]);
+  try {
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'claude-code-acp'), `#!/bin/sh\nexec '${process.execPath}' run '${fakeAgent}' permission-reject-first\n`, { mode: 0o700 });
+    const priorPath = process.env.PATH; process.env.PATH = `${bin}:${priorPath ?? ''}`;
+    restores.push(() => { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; });
+    server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      if (request.method !== 'POST') return new Response(null, { status: 405 });
+      const body = await request.json() as Record<string, unknown>;
+      const params = (body.params ?? {}) as Record<string, unknown>;
+      let result: unknown;
+      if (body.method === 'server/discover') result = { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {} }, serverInfo: { name: 'owned-protocol', version: '1' } };
+      else if (body.method === 'tools/list') result = { resultType: 'complete', tools: [{ name: 'write', description: 'Synthetic write', inputSchema: { type: 'object' } }] };
+      else if (body.method === 'tools/call') {
+        calls.push(params);
+        result = elicit && !params.inputResponses ? { resultType: 'input_required', inputRequests: { form: { method: 'elicitation/create', params: {
+          message: 'Untrusted remote asks for a name', requestedSchema: { type: 'object', properties: { [formField]: { type: 'string' } }, required: [formField] },
+        } } } } : { resultType: 'complete', done: true, received: params };
+      } else return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Unknown fixture method' } });
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    } });
+    await daemon.daemon.registerMcpServer({ name: 'owned-protocol', url: `http://127.0.0.1:${server.port}/mcp` });
+  } catch (error) { await unwind().catch(() => {}); throw error; }
+  const registry = daemon.services.mcpRegistry;
   let goal = 'Original caller: write the synthetic record using the supplied name Alice.';
   return { daemon, registry, calls, readings, human, admissions, admissionSources, operationLifetime,
     get acp() { if (!acp) throw new Error('ACP host not reached'); return acp; },
@@ -140,6 +159,7 @@ export async function externalProtocolFixture(options: { watchIntervalMs?: numbe
       if (!results[0]?.success) throw failure ?? new Error(`MCP source admission did not act: ${results[0]?.error ?? 'no result'}`);
       return value;
     },
+    acpRefusals,
     async spawn(prompt?: string, mode = 'permission-reject-first', cwd = daemon.workingDirectory) {
       writeFileSync(join(bin, 'claude-code-acp'), `#!/bin/sh\nexec '${process.execPath}' run '${fakeAgent}' '${mode}'\n`, { mode: 0o700 });
       const response = await daemon.fetch('/api/control-plane/methods/acp.sessions.create/invoke', { method: 'POST', body: JSON.stringify({ body: {
@@ -151,8 +171,10 @@ export async function externalProtocolFixture(options: { watchIntervalMs?: numbe
     },
     async close() {
       operationLifetime.abort();
-      try { if (acp) await Promise.all(acp.list().map(row => acp!.stop(row.id))); await registry.disconnectAll(); await daemon.stop(); }
-      finally { server.stop(true); for (const restore of restores.reverse()) restore(); }
+      await unwind([
+        () => acp ? Promise.all(acp.list().map(row => acp!.stop(row.id))) : undefined,
+        () => registry.disconnectAll(),
+      ]);
     },
   };
 }

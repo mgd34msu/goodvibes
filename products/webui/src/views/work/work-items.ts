@@ -41,6 +41,7 @@ import { readExecPromptAsk, isTerminalApprovalStatus } from '../../lib/approvals
 import { hostedStatusLabel } from '../../lib/hosted-sessions';
 import { isClosedStatus, isReapedStatus, kindLabel as sessionKindLabel, projectLabel, type UnionSessionRecord } from '../../lib/sessions-union';
 import { whenLabel } from '../../lib/when-label';
+import type { ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 /**
  * A relative time for a row or a detail, or '' when the record carries no
@@ -103,31 +104,32 @@ export interface WorkSources {
 }
 
 /** Fleet kinds that are an agent (a model loop) rather than a process around one. */
-const AGENT_KINDS = new Set(['agent', 'acp-agent', 'observed-external', 'wrfc-chain', 'wrfc-subtask']);
+const AGENT_KINDS = new Set<string>(['agent', 'acp-agent', 'observed-external'] satisfies ProcessKind[]);
 
 export function fleetKindOf(node: Pick<FleetProcessNode, 'kind'>): WorkKind {
   return AGENT_KINDS.has(node.kind) ? 'agents' : 'processes';
 }
 
-/** Plain words for a fleet kind, sentence case. Unknown kinds render verbatim. */
+/** One phrase per engine process kind: adding a kind to the engine fails the typecheck here. */
+const FLEET_KIND_PHRASES: Record<ProcessKind, string> = {
+  'agent': 'Agent',
+  'acp-agent': 'External agent',
+  'observed-external': 'External',
+  'contract': 'Contract',
+  'contract-group': 'Contract group',
+  'contract-unit': 'Contract unit',
+  'workflow': 'Workflow',
+  'trigger': 'Trigger',
+  'schedule': 'Schedule',
+  'watcher': 'Watcher',
+  'background-process': 'Background process',
+  'code-index': 'Code index',
+};
+
+/** Plain words for a fleet kind, sentence case. A kind this client does not know renders verbatim. */
 export function fleetKindPhrase(kind: string): string {
-  switch (kind) {
-    case 'agent': return 'Agent';
-    case 'acp-agent': return 'External agent';
-    case 'observed-external': return 'External';
-    case 'wrfc-chain': return 'Review chain';
-    case 'wrfc-subtask': return 'Review step';
-    case 'workflow': return 'Workflow';
-    case 'trigger': return 'Trigger';
-    case 'schedule': return 'Schedule';
-    case 'watcher': return 'Watcher';
-    case 'background-process': return 'Background process';
-    case 'workstream': return 'Workstream';
-    case 'phase': return 'Phase';
-    case 'work-item': return 'Work item';
-    case 'code-index': return 'Code index';
-    default: return kind.trim() || 'Unknown kind';
-  }
+  const known = Object.hasOwn(FLEET_KIND_PHRASES, kind) ? FLEET_KIND_PHRASES[kind as ProcessKind] : undefined;
+  return known ?? (kind.trim() || 'Unknown kind');
 }
 
 /** Plain words for a fleet process state. Unknown states render verbatim. */
@@ -472,9 +474,12 @@ export function groupWorkItems(
 /**
  * The page's one-line description: "6 running · 3 need you". Observed external
  * agents are GoodVibes' to watch, not its own work, so they are counted on
- * their own ("· 2 external"), never folded into "running".
+ * their own ("· 2 external"), never folded into "running". In the archive the
+ * line counts what is archived instead.
  */
-export function workSummary(items: readonly WorkItem[]): string {
+export function workSummary(items: readonly WorkItem[], archived = false): string {
+  // The archive lists only finished work, so "running" and "needs you" would read as zeros.
+  if (archived) return items.length === 0 ? 'nothing archived' : `${items.length} archived`;
   const running = items.filter((i) => i.group === 'running' && !i.external).length;
   const external = items.filter((i) => i.group !== 'finished' && i.external).length;
   const needs = items.filter((i) => i.group === 'needs').length;

@@ -67,29 +67,54 @@ export interface LiveModelDiscoverySweepResult {
  * on-disk TTL cache, `force: true` bypasses it.
  *
  * Always resolves with one report per checked provider, a provider whose
- * live fetch fails still gets an honest report (see
+ * live fetch fails or throws still gets an honest report (see
  * `LiveModelDiscoveryResult.error`), never a thrown exception that would
- * abort the whole sweep.
+ * abort the whole sweep. Providers are checked in parallel, so one slow
+ * endpoint does not hold back the rest.
+ *
+ * The sweep awaits the network, and providers can register or unregister while
+ * it runs. `providerNativeModels` may therefore be a function: it is read once
+ * all providers have answered, and only the entries of providers that are
+ * still registered (`options.isRegistered`) are replaced, so the sweep never
+ * writes a stale snapshot over a newer list.
  */
 export async function sweepLiveModelDiscovery(
   providers: Iterable<ProviderRefreshableModel>,
-  providerNativeModels: readonly ModelDefinition[],
+  providerNativeModels: readonly ModelDefinition[] | (() => readonly ModelDefinition[]),
   providerId: string | undefined,
-  options: { force?: boolean },
+  options: { force?: boolean; isRegistered?: (providerName: string) => boolean },
 ): Promise<LiveModelDiscoverySweepResult> {
   const all = [...providers];
-  const targets = providerId ? all.filter((p) => p.name === providerId) : all;
+  const targets = (providerId ? all.filter((p) => p.name === providerId) : all)
+    .filter((provider) => typeof provider.refreshModels === 'function');
 
-  let nextProviderNativeModels = [...providerNativeModels];
-  const reports: Array<{ providerId: string } & LiveModelDiscoveryResult> = [];
-  for (const provider of targets) {
-    if (typeof provider.refreshModels !== 'function') continue;
-    const result = await provider.refreshModels(options.force ?? false, { skipUnavailableLocal: providerId === undefined });
+  const checked = await Promise.all(targets.map(async (provider) => {
+    try {
+      const result = await provider.refreshModels!(options.force ?? false, { skipUnavailableLocal: providerId === undefined });
+      return { report: { providerId: provider.name, ...result }, threw: false };
+    } catch (error: unknown) {
+      // No list came back, so the provider keeps the one it has.
+      const report: { providerId: string } & LiveModelDiscoveryResult = {
+        providerId: provider.name,
+        models: [],
+        source: 'dated-static',
+        added: [],
+        removed: [],
+        error: summarizeError(error),
+      };
+      return { report, threw: true };
+    }
+  }));
+  const reports = checked.map((entry) => entry.report);
+
+  let nextProviderNativeModels = [...(typeof providerNativeModels === 'function' ? providerNativeModels() : providerNativeModels)];
+  for (const { report, threw } of checked) {
+    if (threw) continue;
+    if (options.isRegistered && !options.isRegistered(report.providerId)) continue;
     nextProviderNativeModels = [
-      ...nextProviderNativeModels.filter((model) => model.provider !== provider.name),
-      ...result.models.map((id) => buildProviderNativeModelDefinition(provider.name, id)),
+      ...nextProviderNativeModels.filter((model) => model.provider !== report.providerId),
+      ...report.models.map((id) => buildProviderNativeModelDefinition(report.providerId, id)),
     ];
-    reports.push({ providerId: provider.name, ...result });
   }
   return { providerNativeModels: nextProviderNativeModels, reports };
 }

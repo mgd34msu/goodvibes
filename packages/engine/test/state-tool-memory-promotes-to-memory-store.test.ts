@@ -60,14 +60,19 @@ afterEach(() => {
 });
 
 const tmpRoots: string[] = [];
+const harnessStores: MemoryStore[] = [];
+const harnessKvStates: KVState[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  // Closing twice is harmless, so a test that already closed its store is fine.
+  for (const store of harnessStores.splice(0)) store.close();
+  for (const kv of harnessKvStates.splice(0)) await kv.dispose();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-async function makeHarness(opts: { withRegistry: boolean }): Promise<{
+async function makeHarness(opts: { withRegistry: boolean; overWire?: () => boolean }): Promise<{
   tool: ReturnType<typeof createStateTool>;
   memoryRegistry: MemoryRegistry;
   memoryDir: string;
@@ -87,11 +92,14 @@ async function makeHarness(opts: { withRegistry: boolean }): Promise<{
   const memoryRegistry = new MemoryRegistry(memoryStore);
 
   const kvState = new KVState({ stateDir: join(root, 'state') });
+  harnessStores.push(memoryStore);
+  harnessKvStates.push(kvState);
   const projectIndex = new ProjectIndex(root);
   const tool = createStateTool(kvState, projectIndex, {
     memoryDir,
     workingDir: root,
     ...(opts.withRegistry ? { memoryRegistry } : {}),
+    ...(opts.overWire ? { memoryRoutedOverWire: opts.overWire } : {}),
   });
   return { tool, memoryRegistry, memoryDir, memoryStore };
 }
@@ -326,4 +334,25 @@ test('an internal memory classifier fault stops before a mirror plan or flat-fil
     expect(h.memoryRegistry.getAll()).toHaveLength(0);
     expect(existsSync(join(h.memoryDir, 'synthetic_key.json'))).toBe(false);
   } finally { h.memoryStore.close(); }
+
+});
+
+test('while memory is served by a connected host the local registry is not written, and the result says why', async () => {
+  let overWire = true;
+  const { tool, memoryRegistry, memoryDir, memoryStore } = await makeHarness({ withRegistry: true, overWire: () => overWire });
+  const set = (value: string) => tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'wired_pref', memoryValue: value });
+
+  try {
+    const wired = await set('A preference stated while attached to the connected host.');
+    expect(wired.success).toBe(true);
+    expect(wired.output).toContain('"retrievable":false');
+    expect(wired.output).toContain('connected host');
+    expect(existsSync(join(memoryDir, 'wired_pref.json'))).toBe(true);
+    expect(memoryRegistry.getAll()).toHaveLength(0);
+
+    overWire = false;
+    const local = await set('The same preference once the host is gone.');
+    expect(local.output).toContain('"retrievable":true');
+    expect(memoryRegistry.getAll().filter((r) => r.tags.includes('state-memory:wired_pref'))).toHaveLength(1);
+  } finally { memoryStore.close(); }
 });

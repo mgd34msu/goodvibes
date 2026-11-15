@@ -15,7 +15,7 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
-import { SlackIntegration, DiscordIntegration, NtfyIntegration } from '../integrations/index.js';
+import { SlackIntegration, DiscordIntegration, NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
 import type { HostResolver } from '../tools/fetch/pinned-request.js';
@@ -31,6 +31,10 @@ export interface SurfaceApprovalDeliveryDeps {
   ) => string | undefined;
   readonly resolveSlackWebhookUrl: () => Promise<string | null>;
   readonly resolveSlackBotToken: () => Promise<string | null>;
+  /** The ntfy access token: registry, then `surfaces.ntfy.token`, then the environment. Registry and environment only when absent. */
+  readonly resolveNtfyToken?: (() => Promise<string | null>) | undefined;
+  /** The Discord bot token: registry, then `surfaces.discord.botToken`, then the environment. Registry and environment only when absent. */
+  readonly resolveDiscordBotToken?: (() => Promise<string | null>) | undefined;
   readonly signWebhookPayload: (body: string, secret: string) => string;
   /** Resolves a delivery host before posting; the system resolver when absent (utils/url-safety.ts). */
   readonly resolveHost?: HostResolver | undefined;
@@ -68,7 +72,7 @@ export async function deliverSlackApprovalUpdate(
   const text = isPending ? `Approval required: ${summary}` : `Approval ${approval.status}: ${summary}`;
   if (typeof binding.metadata.responseUrl === 'string' && binding.metadata.responseUrl.startsWith('https://')) {
     // Held to the webhook rules: resolved, every answer checked, pinned, no redirects.
-    await postToPublicWebhook(binding.metadata.responseUrl, {
+    const delivered = await postToPublicWebhook(binding.metadata.responseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -76,11 +80,17 @@ export async function deliverSlackApprovalUpdate(
         text,
         ...(blocks ? { blocks } : {}),
       }),
-    }, { resolveHost: deps.resolveHost }).catch((error) => logger.warn('Slack approval response delivery failed', {
-      approvalId: approval.id,
-      error: summarizeError(error),
-    }));
-    return;
+    }, { resolveHost: deps.resolveHost }).then(() => true, (error: unknown) => {
+      // The approval prompt is the one message a person must see. Without a
+      // channel to fall back to, surface the refusal so the caller records it.
+      if (!binding.channelId) throw error;
+      logger.warn('Slack approval response delivery failed; posting to the bound channel instead', {
+        approvalId: approval.id,
+        error: summarizeError(error),
+      });
+      return false;
+    });
+    if (delivered) return;
   }
   if (binding.channelId) {
     await slack.postMessage(binding.channelId, text, blocks);
@@ -98,9 +108,9 @@ export async function deliverDiscordApprovalUpdate(
   const webhookUrl =
     await deps.serviceRegistry.resolveSecret('discord', 'webhookUrl')
     ?? process.env.DISCORD_WEBHOOK_URL;
-  const botToken =
-    await deps.serviceRegistry.resolveSecret('discord', 'primary')
-    ?? process.env.DISCORD_BOT_TOKEN;
+  const botToken = deps.resolveDiscordBotToken
+    ? await deps.resolveDiscordBotToken() ?? undefined
+    : await deps.serviceRegistry.resolveSecret('discord', 'primary') ?? process.env.DISCORD_BOT_TOKEN;
   const discord = new DiscordIntegration(webhookUrl ?? undefined, botToken ?? undefined);
   const content = isPending
     ? `Approval required for \`${approval.request.tool}\`: ${summary}${webUrl ? `\n${webUrl}` : ''}`
@@ -139,10 +149,14 @@ export async function deliverNtfyApprovalUpdate(
   const summary = approval.request.analysis.summary;
   const ntfy = new NtfyIntegration(
     String(deps.configManager.get('surfaces.ntfy.baseUrl') ?? 'https://ntfy.sh'),
-    await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined,
+    deps.resolveNtfyToken
+      ? await deps.resolveNtfyToken() ?? undefined
+      : await deps.serviceRegistry.resolveSecret('ntfy', 'primary') ?? process.env.NTFY_ACCESS_TOKEN ?? undefined,
   );
+  const priority = resolveNtfyDefaultPriority(deps.configManager.get('surfaces.ntfy.defaultPriority'));
   await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
     title: approval.request.tool,
+    ...(priority === undefined ? {} : { priority }),
     ...(webUrl ? { click: webUrl } : {}),
     markGoodVibesOrigin: true,
   }).catch((error) => logger.warn('ntfy approval update failed', {

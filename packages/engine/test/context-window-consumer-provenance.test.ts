@@ -1,16 +1,8 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { compactionQualityPort } from './_helpers/compaction-quality.ts';
-import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.js';
-import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
-import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
-import { createSessionCompactionManager } from '../platform/src/platform/core/compaction-lifecycle-route.js';
+import { describe, expect, test } from 'bun:test';
 import { readModelContextWindow } from '../platform/src/platform/providers/context-window-reading.js';
 import { createSessionRuntimeControls } from '../platform/src/platform/control-plane/routes/session-runtime.js';
 import { ModelLimitsService } from '../platform/src/platform/providers/model-limits.js';
 import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
-import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
-import type { BoundaryCommit } from '../platform/src/platform/runtime/compaction/types.js';
 import { enrichModelEntries } from '../platform/src/platform/runtime/ui/model-picker/health-enrichment.js';
 import { createInitialModelState } from '../platform/src/platform/runtime/store/domains/model.js';
 import { createInitialProviderHealthState } from '../platform/src/platform/runtime/store/domains/provider-health.js';
@@ -18,9 +10,6 @@ import { createInitialProviderHealthState } from '../platform/src/platform/runti
 const model: ModelDefinition = { id: 'm', provider: 'p', registryKey: 'p:m', displayName: 'm', description: '', selectable: true,
   capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false }, contextWindow: 8192 };
 const limits = new ModelLimitsService({ cachePath: '/unused/consumer-context-limits.json' });
-const messages: ProviderMessage[] = Array.from({ length: 14 }, (_, i) => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: `retain fact ${i}: ${'context '.repeat(50)}` }));
-let previous: ReturnType<typeof installJudgmentPort>;
-afterEach(() => { installJudgmentPort(previous); });
 
 function picker(definition: ModelDefinition) {
   return enrichModelEntries([definition], createInitialProviderHealthState(), createInitialModelState(), new Set(),
@@ -62,97 +51,5 @@ describe('picker carries numeric budget separately from known capacity', () => {
     const entry = picker({ ...model, contextWindowProvenance: source });
     expect(entry.knownContextWindow).toBeNull();
     expect(entry.contextWindowSource).toBe(source);
-  });
-});
-
-describe('independent session compaction respects unknown ceilings', () => {
-  test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('automatic path with %s emits nothing and changes nothing', async (window) => {
-    const bus = new RuntimeEventBus(); const events: string[] = [];
-    const off = bus.onDomain('compaction', (event) => { events.push(event.payload.type); });
-    const flags = createFeatureFlagManager(); flags.enable('session-compaction');
-    const manager = new CompactionManager({ sessionId: 'unknown', bus, flags, contextWindow: window });
-    const original = structuredClone(messages);
-    expect(await manager.compact({ messages, tokenCount: 999999, trigger: 'auto' })).toBeNull();
-    expect(events).toEqual([]);
-    expect(manager.lastCommit).toBeNull();
-    expect(manager.state).toBe('idle');
-    expect(messages).toEqual(original);
-    manager.dispose(); off();
-  });
-
-  test('factory re-reads knowledge after a model change and skips again if it becomes unknown', async () => {
-    previous = installJudgmentPort(compactionQualityPort({ substance: 3, relation: 'supports' }).port);
-    const bus = new RuntimeEventBus(); const events: string[] = [];
-    const off = bus.onDomain('compaction', (event) => { events.push(event.payload.type); });
-    const flags = createFeatureFlagManager(); flags.enable('session-compaction');
-    let current: ModelDefinition = { ...model, contextWindowProvenance: 'fallback' };
-    const manager = createSessionCompactionManager('switching', bus, flags, () => ({
-      getCurrentModel: () => current,
-      getKnownContextWindowForModel: (entry) => limits.getKnownContextWindowForModel(entry),
-    }))!;
-    expect(await manager.compact({ messages, tokenCount: 7000, trigger: 'auto' })).toBeNull();
-    expect(events).toEqual([]);
-    current = { ...model, contextWindowProvenance: 'provider_api' };
-    expect(await manager.compact({ messages, tokenCount: 7000, trigger: 'auto' })).not.toBeNull();
-    expect(events).toContain('COMPACTION_BOUNDARY_COMMIT');
-    const saved = manager.lastCommit;
-    events.length = 0;
-    current = { ...model, contextWindowProvenance: 'accepted_floor' };
-    expect(await manager.compact({ messages, tokenCount: 7000, trigger: 'auto' })).toBeNull();
-    expect(events).toEqual([]);
-    expect(manager.lastCommit).toBe(saved);
-    manager.dispose(); off();
-  });
-
-  test.each(['manual', 'prompt_too_long', 'auto-warning'] as const)('%s still performs explicitly requested recovery with unknown capacity', async (kind) => {
-    previous = installJudgmentPort(compactionQualityPort({ substance: 3, relation: 'supports' }).port);
-    const flags = createFeatureFlagManager(); flags.enable('session-compaction');
-    const manager = new CompactionManager({ sessionId: 'recovery', bus: new RuntimeEventBus(), flags, contextWindow: 0 });
-    const result = await manager.compact({ messages, tokenCount: 10000,
-      trigger: kind === 'auto-warning' ? 'auto' : kind, ...(kind === 'auto-warning' ? { isPromptTooLong: true } : {}) });
-    expect(result).not.toBeNull();
-    expect(manager.lastCommit).not.toBeNull();
-    manager.dispose();
-  });
-
-  test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('resume repair with %s preserves every message without a guessed trim ceiling', (window) => {
-    const flags = createFeatureFlagManager(); flags.enable('session-compaction');
-    const manager = new CompactionManager({ sessionId: 'repair', bus: new RuntimeEventBus(), flags, contextWindow: window });
-    const commit: BoundaryCommit = { checkpointId: 'cpt-1', sessionId: 'repair', createdAt: 1, strategy: 'autocompact', parentCheckpointId: null, lineage: [], messages, tokenCount: 10000, tokensBefore: 20000, summary: 'kept facts' };
-    const repaired = manager.repair(commit);
-    expect(repaired.messages).toEqual(messages);
-    expect(repaired.actions).toEqual([]);
-    expect(JSON.stringify(repaired)).not.toContain('maxTokens');
-    expect(commit.messages).toBe(messages);
-    manager.dispose();
-  });
-});
-
-
-describe('picker and session context use the same projection', () => {
-  test.each(['provider_api', 'configured_cap', 'observed_limit', 'catalog', 'fallback', 'accepted_floor'] as const)('%s metadata agrees while budget remains separate', source => {
-    const definition: ModelDefinition = { ...model, contextWindowProvenance: source, contextWindowAcceptedFloor: 4000 };
-    const entry = picker(definition);
-    const controls = createSessionRuntimeControls({ config: { get: () => 'prompt', set: () => {} },
-      store: { getState: () => ({ session: { id: 'local' }, conversation: { estimatedContextTokens: 2000 } }) },
-      providerRegistry: { getCurrentModel: () => definition,
-        getContextWindowForModel: current => limits.getContextWindowForModel(current),
-        getKnownContextWindowForModel: current => limits.getKnownContextWindowForModel(current) } });
-    const usage = controls.getContextUsage('local');
-    expect(usage.contextWindow).toBe(entry.knownContextWindow);
-    expect(usage.contextWindowSource).toBe(entry.contextWindowSource);
-    expect(usage.contextWindowOrigin).toEqual(entry.contextWindowOrigin);
-    expect(usage.contextWindowAcceptedFloor).toBe(entry.contextWindowAcceptedFloor);
-  });
-
-  test('effective OpenRouter resolution does not retain a contradictory source origin', () => {
-    const definition: ModelDefinition = { ...model, contextWindowProvenance: 'fallback', contextWindowOrigin: { kind: 'provider_file' } };
-    const registry = { getContextWindowForModel: () => 100_000, getKnownContextWindowForModel: () => 100_000 };
-    const reading = readModelContextWindow(definition, registry);
-    const entry = enrichModelEntries([definition], createInitialProviderHealthState(), createInitialModelState(), new Set(),
-      { getBenchmarks: () => undefined }, { ...registry, getSyntheticModelInfoFromCatalog: () => null }, () => undefined)[0]!;
-    expect(reading).toEqual({ contextWindow: 100_000, knownContextWindow: 100_000, contextWindowSource: 'openrouter' });
-    expect(entry.contextWindowSource).toBe(reading.contextWindowSource);
-    expect(entry.contextWindowOrigin).toBeUndefined();
   });
 });

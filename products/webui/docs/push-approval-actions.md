@@ -5,20 +5,32 @@ shell shows it with two action buttons: **Allow** and **Deny**.
 
 ## What ships today (works against the current daemon)
 
-- **In-app buttons.** The Approvals view (`ApprovalsTasksView`) has Approve /
+- **In-app buttons.** The Approvals section of the Work view has Approve /
   Deny / Claim / Cancel buttons backed by the real `approvals.*` operator
   methods. This is the primary way to decide an approval and needs nothing new.
 - **Notification action buttons that hand off to the app.** The service worker
   (`public/sw.js`) adds `Allow` / `Deny` buttons to an approval notification.
   Tapping one opens the app at
   `/?view=approvals-tasks#approval-action=<approve|deny>&approval-id=<id>`.
-  The app, which holds the operator token, reads that fragment on open,
-  runs the real `approvals.approve` / `approvals.deny` call, scrubs the
-  fragment, and toasts the result. See:
+  The app, which holds the operator token, reads that fragment on open and
+  scrubs it. **Allow** opens that approval in Work so you can read what is being
+  asked and press Approve yourself: a link in a page or a message must not be able
+  to approve a tool call just by being opened. **Deny** is applied on open
+  (refusing is always safe) and toasts the result. A tap on a notification
+  whose approval already ended (it expired, or another surface answered it
+  first) toasts "Already expired, nothing changed" (or the actual state) instead
+  of "Denied": the daemon answers such a call with `applied: false`. See:
   - `src/lib/push/notification-link.ts` (and the hand-kept copy in
     `public/sw.js`): builds the deep link.
   - `src/lib/push/approval-action-link.ts`: parses and strips the fragment.
-  - `ApprovalsTasksView` `ApprovalsSection`: the mount-once hand-off effect.
+  - `useApprovalActions` (`src/views/work/useApprovalActions.ts`), mounted by
+    the Work view: the mount-once hand-off effect (Allow opens the approval, Deny
+    denies it).
+
+  The link the service worker emits still uses the older `?view=approvals-tasks`
+  form. The router rewrites it to the Work view and keeps the `#` fragment
+  (`LEGACY_VIEW_REDIRECTS` in `src/lib/router.ts`), so that redirect has to stay
+  while `public/sw.js` emits the old form.
 
 Platforms without notification-action support simply omit the buttons and a
 body tap still opens the approvals list, a graceful degrade, never a dead tap.

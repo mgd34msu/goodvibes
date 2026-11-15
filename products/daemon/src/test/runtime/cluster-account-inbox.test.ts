@@ -19,6 +19,7 @@ import type { HandlerContext } from '../../daemon/handlers/context.js';
 import { createSlackDaemonInboxFactory } from '../../runtime/slack-inbox-composition.js';
 import { inboxPollerGate } from '../../runtime/cluster-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { settleTurns } from '../helpers/turns.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 const releases: Array<() => void> = [];
@@ -177,7 +178,7 @@ test('held content screening and transport uncertainty retain verified election 
   const gate = hold(); remote.holdSource(gate.promise);
   const a = await node(bus, clock, 'node-a', remote); await a.registration.ready;
   await advance(clock, 2000); await until(() => remote.sourceCalls.length > 0);
-  remote.outage(); await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));
+  remote.outage(); await advance(clock, 31000); await settleTurns();
   expect(a.enrollments).toBe(1); expect(a.coordinator.status().surfaces).toHaveLength(1);
   expect(a.stored()).toEqual({ rows: 0, cursor: 0 }); gate.resolve();
 });
@@ -192,7 +193,9 @@ test('account cursor is node-local: a cold successor starts cold, returning owne
   expect(b.remote.slackCalls.filter(call => call.path.endsWith('history'))).toHaveLength(0);
   await a.registration.close(); await a.coordinator.stop();
   await advance(clock, 5000); await until(() => b.stored().rows === 1);
-  expect(b.remote.slackCalls.find(call => call.path.endsWith('history'))?.oldest).toBeNull();
+  // A cold start reads back over the whole seed window. Had it adopted node A's cursor, it would start from about the present.
+  const coldOldest = Number(b.remote.slackCalls.find(call => call.path.endsWith('history'))?.oldest) * 1000;
+  expect(coldOldest).toBeLessThan(Date.now() - 29 * 24 * 60 * 60 * 1000);
   const returned = await node(bus, clock, 'node-a', endpoints(), a.root); await returned.registration.ready;
   expect(returned.stored()).toEqual(prior);
 });
@@ -286,7 +289,7 @@ test.each(['credential', 'source'] as const)('revoked %s drains held incumbent s
   expect(receivedAt).toBeLessThan(Math.round(Number(nextPoll?.latest) * 1000));
   expect(events).not.toContain('node-a:poll-drained'); expect(events).not.toContain('node-b:poll-start');
   const sourceCalls = remote.sourceCalls.length;
-  await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));
+  await advance(clock, 31000); await settleTurns();
   expect(a.enrollments).toBe(1); expect(remote.sourceCalls).toHaveLength(sourceCalls);
   expect(events).not.toContain('node-b:poll-start');
   if (reason === 'source') remote.revokeSource(); else { remote.setToken(null); a.invalidate(); }
@@ -299,7 +302,7 @@ test.each(['credential', 'source'] as const)('revoked %s drains held incumbent s
   expect(successor).toBeGreaterThan(events.indexOf('node-a:poll-drained'));
   expect(successor).toBeGreaterThan(events.indexOf('node-a:consumer-drained'));
   expect(a.stored()).toEqual(before);
-  source.resolve(); await Promise.allSettled([polling]); await new Promise(resolve => setTimeout(resolve, 20));
+  source.resolve(); await Promise.allSettled([polling]); await settleTurns();
   expect(a.stored()).toEqual(before);
 });
 
@@ -310,7 +313,7 @@ test('semantic held outcome alone keeps membership without an eligibility-trigge
   await a.registration.ready; await advance(clock, 2000); await until(() => events.includes('node-a:poll-drained'));
   const calls = remote.sourceCalls.length; expect(calls).toBeGreaterThan(0);
   expect(a.stored()).toEqual({ rows: 0, cursor: 0 });
-  await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));
+  await advance(clock, 31000); await settleTurns();
   expect(a.enrollments).toBe(1); expect(a.coordinator.status().surfaces).toHaveLength(1);
   expect(remote.sourceCalls).toHaveLength(calls);
   expect(events.filter(event => event === 'node-a:poll-start')).toHaveLength(1);
@@ -344,7 +347,7 @@ test('held initial screening cannot suppress holder heartbeats or admit a second
   const b = await node(bus, clock, 'node-b', endpoints(), makeOwnedTempDir('cluster-held-initial-standby'), events);
   await b.registration.ready;
   const beforeHeartbeats = bus.sent.filter(row => row.from === 'node-a' && JSON.parse(row.raw).type === 'HEARTBEAT').length;
-  await advance(clock, 31000); await new Promise(resolve => setTimeout(resolve, 20));
+  await advance(clock, 31000); await settleTurns();
   expect(bus.sent.filter(row => row.from === 'node-a' && JSON.parse(row.raw).type === 'HEARTBEAT').length).toBeGreaterThan(beforeHeartbeats);
   expect(events).not.toContain('node-a:poll-drained');
   expect(events).not.toContain('node-b:poll-start');
@@ -356,6 +359,6 @@ test('held initial screening cannot suppress holder heartbeats or admit a second
   expect(events.indexOf('node-b:poll-start')).toBeGreaterThan(events.indexOf('node-a:poll-drained'));
   expect(events.indexOf('node-b:poll-start')).toBeGreaterThan(events.indexOf('node-a:consumer-drained'));
   expect(a.stored()).toEqual({ rows: 0, cursor: 0 });
-  source.resolve(); await new Promise(resolve => setTimeout(resolve, 20));
+  source.resolve(); await settleTurns();
   expect(a.stored()).toEqual({ rows: 0, cursor: 0 });
 });

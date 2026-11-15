@@ -9,6 +9,7 @@ import {
 import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ModelPickerModal } from './model-picker.js';
 import type { CapabilityFilter, CategoryFilter } from './model-picker-types.js';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isTextBackspace } from './delete-key-policy.js';
 export interface ModelPickerCommandContext {
   readonly provider: {
@@ -48,7 +49,8 @@ export function closeModelPickerRoute(state: {
 }
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;
-  readonly validateContextCap: boolean;
+  /** Ignored: a cap outside 1-10,000,000 is always refused with an error, never dropped silently. */
+  readonly validateContextCap?: boolean | undefined;
   readonly extraControls: boolean;
   readonly commitBeforeClose: boolean;
   readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>) => void;
@@ -84,11 +86,30 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
     const requested = readRequestedEffort(state) ?? 'medium';
     return servingEffortForLevel(requested, toEffortModel(model as never)).effective ?? requested;
   }
+  // /pin and /unpin each read the stored favorites first, so they must run in
+  // the order the keys were pressed; one chain per picker keeps them ordered.
+  const pinChains = new WeakMap<object, Promise<void>>();
   function togglePin(state: State): void {
-    const model = state.modelPicker.getSelected();
+    const picker = state.modelPicker;
+    const model = picker.getSelected();
     if (!model) return;
-    const pinned = state.modelPicker.togglePinnedLocal(model);
-    void state.commandContext?.executeCommand?.(pinned ? 'pin' : 'unpin', [model.registryKey]);
+    const pinned = picker.togglePinnedLocal(model);
+    const context = state.commandContext;
+    if (!context?.executeCommand) return;
+    const chain = (pinChains.get(picker) ?? Promise.resolve()).then(async () => {
+      let done = false;
+      try {
+        done = (await context.executeCommand?.(pinned ? 'pin' : 'unpin', [model.registryKey])) ?? false;
+      } catch (error) {
+        logger.warn('model picker: pin command failed', { model: model.registryKey, error: summarizeError(error) });
+      }
+      // Show what is stored: undo the local flip unless a later toggle already changed it.
+      if (!done && picker.isPinned(model) === pinned) {
+        picker.togglePinnedLocal(model);
+        state.requestRender();
+      }
+    });
+    pinChains.set(picker, chain);
   }
   function cycleCapabilityFilter(modelPicker: ModelPickerModal): void {
     const cycle: CapabilityFilter[] = ['none', 'reasoning', 'toolUse', 'multimodal'];
@@ -147,11 +168,11 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
           if (model) {
             const raw = picker.contextCapQuery.trim();
             const parsed = raw.length ? parseInt(raw, 10) : null;
-            if (policy.validateContextCap && parsed !== null && (parsed <= 0 || parsed > 10000000)) {
+            if (parsed !== null && (parsed <= 0 || parsed > 10000000)) {
               picker.contextCapError = 'Context cap must be 1–10,000,000';
             } else {
-              if (policy.validateContextCap) picker.contextCapError = null;
-              const valid = parsed !== null && parsed > 0 && parsed <= 10000000 ? parsed : null;
+              picker.contextCapError = null;
+              const valid = parsed;
               commitSelection(state, { model, effort: readRequestedEffort(state) ?? 'medium', contextCap: valid, target: picker.target });
             }
           } else closeModelPickerRoute(state);

@@ -13,12 +13,13 @@
  *      returnContext.openPanels; it loads, and the loaded return context
  *      no longer carries the pane list.
  *
- * Also proves parity: two independent "seam-shaped" calls against the same
- * saved session produce the identical outcome.
+ * Parity of the two real seams on one saved session is in seam-replay.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { journalPathFor, openTranscriptJournal } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ConversationManager } from '../../core/conversation.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
@@ -39,6 +40,33 @@ afterEach(() => {
 function makeRuntime(sessionId = 'previous-session') {
   return { sessionId, model: 'old-model', provider: 'old-provider' };
 }
+
+describe('resumeSessionCore journal replay', () => {
+  test('the write that closes a replayed journal gap is stamped as an automatic save, not one the user asked for', async () => {
+    const surface = makeTestSurface(tmpDir);
+    const sm = new SessionManager(tmpDir, { surface });
+    sm.save('sess-gap', [{ role: 'user', content: 'snapshot message' }], {
+      title: 'Gap', model: 'm', provider: 'p', timestamp: Date.now() - 5000, saveSource: 'auto',
+    });
+    const journalPath = journalPathFor(surface, 'sess-gap');
+    mkdirSync(join(journalPath, '..'), { recursive: true });
+    openTranscriptJournal(journalPath, 'sess-gap').appendRecord('assistant_turn', [
+      { role: 'user', content: 'journaled question' },
+      { role: 'assistant', content: 'journaled answer' },
+    ] as never);
+
+    const outcome = await resumeSessionCore('sess-gap', {
+      sessionManager: sm,
+      conversation: new ConversationManager(() => 80),
+      runtime: makeRuntime(),
+      surface,
+    });
+
+    expect(outcome.journalReplay.replayed).toBeGreaterThan(0);
+    // The snapshot was an automatic save; a replay that stamped 'user' would upgrade it.
+    expect(sm.getMeta('sess-gap')?.saveSource).toBe('auto');
+  });
+});
 
 describe('resumeSessionCore', () => {
   test('resets and restores the conversation from the saved session, not appending to whatever was already live', async () => {
@@ -178,55 +206,5 @@ describe('resumeSessionCore', () => {
     expect(outcome.meta.returnContext?.lines.some((line) => line.startsWith('Open panels'))).toBe(false);
     expect(outcome.meta.returnContext?.lines).toEqual(['Activity: idle', 'Status: idle']);
     expect(Object.keys(outcome)).not.toContain('panels');
-  });
-});
-
-describe('parity: both resume seams reach an identical outcome for the same saved session', () => {
-  test('a session-workflow-shaped call and a bootstrap-hook-bridge-shaped call produce the same restoredAnchorCount and resumedMessageCount', async () => {
-    const sessionId = 'sess-parity';
-    clearTurnAnchors(sessionId);
-    recordTurnAnchor(sessionId, { turnId: 't1', label: 'parity turn', messageCount: 2, at: Date.now() });
-    persistTurnAnchors(sessionId, makeTestSurface(tmpDir));
-    clearTurnAnchors(sessionId);
-
-    const sm = new SessionManager(tmpDir, { surface: makeTestSurface(tmpDir) });
-    sm.save(sessionId, [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }], {
-      title: 'Parity', model: 'shared-model', provider: 'shared-provider', timestamp: Date.now(),
-      returnContext: {
-        activityLabel: 'idle', statusLabel: 'idle', pendingApprovals: 0, toolCallCount: 0,
-        toolResultCount: 0, assistantTurnCount: 0, userTurnCount: 0, lines: [],
-      },
-    });
-
-    // Seam 1 shape: session-workflow.ts (with a selectModel reselection fn wired).
-    clearTurnAnchors(sessionId); // each call starts from a fresh in-memory registry, mirroring separate processes
-    const conversationA = new ConversationManager(() => 80);
-    const runtimeA = makeRuntime();
-    const outcomeA = await resumeSessionCore(sessionId, {
-      sessionManager: sm,
-      conversation: conversationA,
-      runtime: runtimeA,
-      surface: makeTestSurface(tmpDir),
-      selectModel: async (model) => ({ registryKey: model, providerId: 'shared-provider' }),
-    });
-
-    // Seam 2 shape: bootstrap-hook-bridge.ts (selectModel now ALSO wired, per
-    // this fix, the very divergence this parity test guards against).
-    clearTurnAnchors(sessionId);
-    const conversationB = new ConversationManager(() => 80);
-    const runtimeB = makeRuntime();
-    const outcomeB = await resumeSessionCore(sessionId, {
-      sessionManager: sm,
-      conversation: conversationB,
-      runtime: runtimeB,
-      surface: makeTestSurface(tmpDir),
-      selectModel: async (model) => ({ registryKey: model, providerId: 'shared-provider' }),
-    });
-
-    expect(outcomeA.restoredAnchorCount).toBe(outcomeB.restoredAnchorCount);
-    expect(outcomeA.restoredAnchorCount).toBe(1);
-    expect(outcomeA.resumedMessageCount).toBe(outcomeB.resumedMessageCount);
-    expect(runtimeA.model).toBe(runtimeB.model);
-    expect(runtimeA.provider).toBe(runtimeB.provider);
   });
 });

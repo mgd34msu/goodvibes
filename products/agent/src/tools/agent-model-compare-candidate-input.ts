@@ -15,12 +15,12 @@ export function assertComparisonCandidateSource(args: Record<string, unknown>): 
 /** Whole values retain their key paths when the complete source needs several batches. */
 function sourceBatches(source: unknown): readonly (readonly string[])[] {
   const serialized = JSON.stringify(source);
-  if (typeof serialized !== 'string' || serialized.length > 1_000_000) throw new ToolInputProjectionError('held');
+  if (typeof serialized !== 'string' || serialized.length > 1_000_000) throw new ToolInputProjectionError('invalid'); // source too large
   const parts: string[] = [];
   const collect = (value: unknown, path: readonly string[]) => {
     const part = path.length ? JSON.stringify({ path, value }) : serialized;
     if (part.length <= SOURCE_SCREENING_LIMITS.characters) { parts.push(part); return; }
-    if (!value || typeof value !== 'object' || !Object.keys(value).length) throw new ToolInputProjectionError('held');
+    if (!value || typeof value !== 'object' || !Object.keys(value).length) throw new ToolInputProjectionError('invalid'); // cannot be split for screening
     for (const [key, entry] of Object.entries(value)) collect(entry, [...path, key]);
   };
   collect(source, []);
@@ -28,14 +28,14 @@ function sourceBatches(source: unknown): readonly (readonly string[])[] {
   let size = 0, total = 0;
   for (const part of parts) {
     total += part.length;
-    if (total > 1_000_000) throw new ToolInputProjectionError('held');
+    if (total > 1_000_000) throw new ToolInputProjectionError('invalid');
     let batch = batches.at(-1);
     if (!batch || batch.length >= SOURCE_SCREENING_LIMITS.parts || size + part.length > SOURCE_SCREENING_LIMITS.characters) {
       batch = []; batches.push(batch); size = 0;
     }
     batch.push(part); size += part.length;
   }
-  if (batches.length > SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
+  if (batches.length > SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('invalid');
   return batches;
 }
 

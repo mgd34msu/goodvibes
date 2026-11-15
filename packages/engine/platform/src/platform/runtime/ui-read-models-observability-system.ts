@@ -10,6 +10,7 @@ import { isClassicOperation } from './decision-policy.js';
 import type { RuntimeServices } from './services.js';
 import type { UiReadModel } from './ui-read-models-base.js';
 import { combineSubscriptions, createStoreBackedReadModel } from './ui-read-model-helpers.js';
+import { countUndecidedApprovals } from './ui-read-models-core.js';
 import type {
   ContinuitySnapshot as IntegrationContinuitySnapshot,
   SettingsSnapshot as IntegrationSettingsSnapshot,
@@ -93,6 +94,9 @@ function candidatesKey(candidates: readonly RecommendationCandidates[]): string 
   return JSON.stringify(candidates.map((candidate) => [candidate.need, candidate.reason, candidate.entries]));
 }
 
+/** How long after a failed ranking the same candidates wait before Jev is asked again. */
+const RANKING_RETRY_MS = 60_000;
+
 /**
  * The marketplace read model. Startup issues are counted from the store on
  * every snapshot. Recommendations are read by Jev, which is asynchronous, so
@@ -100,8 +104,13 @@ function candidatesKey(candidates: readonly RecommendationCandidates[]): string 
  * needs and uninstalled entries (code, as before), and when they differ from
  * the ones last ranked a ranking starts; its result replaces the list and
  * notifies subscribers. A ranking overtaken by a newer one is discarded.
+ * A failed ranking leaves the list empty, says so in the startup issues, and
+ * is tried again for the same candidates once RANKING_RETRY_MS has passed.
  */
-function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiReadModel<UiMarketplaceSnapshot> {
+function createMarketplaceReadModel(
+  runtimeServices: RuntimeServices,
+  now: () => number = Date.now,
+): UiReadModel<UiMarketplaceSnapshot> {
   const { runtimeStore } = runtimeServices;
   const catalogOptions = {
     cwd: runtimeServices.shellPaths.workingDirectory,
@@ -110,10 +119,24 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiReadMod
   const listeners = new Set<() => void>();
   let recommendations: readonly EcosystemRecommendation[] = [];
   let rankedKey: string | undefined;
+  let failure: { readonly key: string; readonly at: number; readonly message: string } | undefined;
 
   const publish = (key: string, next: readonly EcosystemRecommendation[]): void => {
     if (rankedKey !== key) return;
+    failure = undefined;
     recommendations = next;
+    for (const listener of [...listeners]) listener();
+  };
+
+  const rankingFailed = (key: string, err: unknown): void => {
+    // A ranking overtaken by a newer one says nothing about the current candidates.
+    if (rankedKey !== key) return;
+    const message = summarizeError(err);
+    logger.warn('Marketplace recommendations could not be ranked', { error: message });
+    // Forget the key so the next snapshot can ask again (after the retry delay), and say why the list is empty.
+    rankedKey = undefined;
+    failure = { key, at: now(), message };
+    recommendations = [];
     for (const listener of [...listeners]) listener();
   };
 
@@ -121,13 +144,12 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiReadMod
     const candidates = collectRecommendationCandidates(runtimeStore, catalogOptions);
     const key = candidatesKey(candidates);
     if (key === rankedKey) return;
+    if (failure && failure.key !== key) failure = undefined;
+    if (failure && failure.key === key && now() - failure.at < RANKING_RETRY_MS) return;
     rankedKey = key;
     rankRecommendationCandidates(candidates).then(
       (ranked) => publish(key, ranked),
-      (err: unknown) => {
-        logger.warn('Marketplace recommendations could not be ranked', { error: summarizeError(err) });
-        publish(key, []);
-      },
+      (err: unknown) => rankingFailed(key, err),
     );
   };
 
@@ -147,9 +169,12 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiReadMod
         startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
       }
       if (isClassicOperation()) {
-        rankedKey = undefined; recommendations = [];
+        rankedKey = undefined; failure = undefined; recommendations = [];
         startupIssues.push('Classic mode: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
-      } else refreshRecommendations();
+      } else {
+        refreshRecommendations();
+        if (failure) startupIssues.push(`Marketplace recommendations could not be ranked (${failure.message}); they are tried again automatically.`);
+      }
       return { startupIssues, recommendations };
     },
     subscribe(listener) {
@@ -188,7 +213,7 @@ export function createSystemObservabilityReadModels(
         diagnostics: state.diagnostics,
       };
     }),
-    marketplace: createMarketplaceReadModel(runtimeServices),
+    marketplace: createMarketplaceReadModel(runtimeServices, options.now),
     cockpit: {
       getSnapshot() {
         const state = runtimeStore.getState();
@@ -215,7 +240,12 @@ export function createSystemObservabilityReadModels(
           activeContracts: state.contracts.activeContractIds.length,
           spawnGuardTrips: state.contracts.spawnGuardTrips,
           blockedMessages: state.communication.totalBlocked,
-          pendingPermissions: state.permissions.awaitingDecision ? 1 : 0,
+          // The gate reports its request only after the decision, so the store
+          // flag is never true while a prompt is open; the broker holds the
+          // undecided ones.
+          pendingPermissions: runtimeServices.approvalBroker
+            ? countUndecidedApprovals(runtimeServices.approvalBroker)
+            : state.permissions.awaitingDecision ? 1 : 0,
           deniedPermissions: state.permissions.denialCount,
           preflightStatus: preflight?.status ?? 'n/a',
           preflightIssueCount: preflight?.issueCount ?? 0,
@@ -239,7 +269,15 @@ export function createSystemObservabilityReadModels(
         };
       },
       subscribe(listener) {
-        const unsubs: Array<() => void> = [runtimeStore.subscribe(listener)];
+        // Every source the snapshot reads that announces change: the approval
+        // broker (a raised ask never touches the store), plugins and policy state.
+        // The token auditor has no change event.
+        const unsubs: Array<() => void> = [
+          runtimeStore.subscribe(listener),
+          runtimeServices.pluginManager.subscribe(listener),
+          runtimeServices.policyRuntimeState.subscribe(listener),
+          ...(runtimeServices.approvalBroker ? [runtimeServices.approvalBroker.subscribe(() => listener())] : []),
+        ];
         if (options.forensicsRegistry) {
           unsubs.push(options.forensicsRegistry.subscribe(listener));
         }

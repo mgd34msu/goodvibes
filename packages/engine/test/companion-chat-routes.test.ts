@@ -737,3 +737,50 @@ describe('companion-chat-routes: turn cancel + steer', () => {
     expect(body.code).toBe('INVALID_ARGUMENT');
   });
 });
+
+describe('companion-chat-routes: rate limits over HTTP', () => {
+  function postMessage(sessionId: string, authorization?: string): Request {
+    return new Request(`http://localhost/api/companion/chat/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(authorization ? { authorization } : {}) },
+      body: JSON.stringify({ body: 'hi' }),
+    });
+  }
+
+  test('a second message past the session limit is a 429 with a retry hint', async () => {
+    const manager = disposables.add(new CompanionChatManager({
+      provider: makeMockProvider(),
+      eventPublisher: makeEventPublisher(),
+      gcIntervalMs: 999_999,
+      rateLimiter: { perSessionLimit: 1 },
+    }));
+    const ctx = makeContext(manager);
+    const session = manager.createSession({ provider: 'anthropic', model: 'claude-sonnet' });
+
+    expect((await dispatchCompanionChatRoutes(postMessage(session.id), ctx))!.status).toBe(202);
+    const res = await dispatchCompanionChatRoutes(postMessage(session.id), ctx);
+    expect(res!.status).toBe(429);
+    expect(Number(res!.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    const body = await res!.json();
+    expect(body.code).toBe('COMPANION_CHAT_SESSION_RATE_LIMIT');
+    expect(body.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  test('the per-client limit applies across sessions to one credential, not to another', async () => {
+    const manager = disposables.add(new CompanionChatManager({
+      provider: makeMockProvider(),
+      eventPublisher: makeEventPublisher(),
+      gcIntervalMs: 999_999,
+      rateLimiter: { perClientLimit: 1 },
+    }));
+    const ctx = makeContext(manager);
+    const a = manager.createSession({ provider: 'anthropic', model: 'claude-sonnet' });
+    const b = manager.createSession({ provider: 'anthropic', model: 'claude-sonnet' });
+
+    expect((await dispatchCompanionChatRoutes(postMessage(a.id, 'Bearer one'), ctx))!.status).toBe(202);
+    const limited = await dispatchCompanionChatRoutes(postMessage(b.id, 'Bearer one'), ctx);
+    expect(limited!.status).toBe(429);
+    expect((await limited!.json()).code).toBe('COMPANION_CHAT_CLIENT_RATE_LIMIT');
+    expect((await dispatchCompanionChatRoutes(postMessage(b.id, 'Bearer two'), ctx))!.status).toBe(202);
+  });
+});

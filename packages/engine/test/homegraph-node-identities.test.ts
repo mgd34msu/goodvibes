@@ -1,5 +1,5 @@
 import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
-/** Source regressions for the complete node16 producer/read/migration family. UNRUN. */
+/** Source regressions for the complete node16 producer/read/migration family. */
 import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.js';
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, spyOn, test } from 'bun:test';
@@ -49,12 +49,12 @@ test('old native IDs, slugs, edges and object references survive changed display
 
 test('once-per-mutation opaque IDs avoid old delimiter and normalized-slug collisions', async () => {
   const f = await fixture();
-  const first = await f.sync({ knowledgeSpaceId: 'tenant:ha_device', devices: [{ id: 'value' }, { id: 'a-b' }, { id: 'a b' }] });
-  await f.sync({ knowledgeSpaceId: 'tenant', devices: [{ id: 'ha_device:value' }] });
+  const first = await f.sync({ knowledgeSpaceId: 'homeassistant:tenant:ha_device', devices: [{ id: 'value' }, { id: 'a-b' }, { id: 'a b' }] });
+  await f.sync({ knowledgeSpaceId: 'homeassistant:tenant', devices: [{ id: 'ha_device:value' }] });
   const nodes = f.store.listNodes().filter(node => node.kind === 'ha_device'); expect(nodes).toHaveLength(4);
   expect(new Set(nodes.map(node => node.id)).size).toBe(4); expect(new Set(nodes.map(node => node.slug)).size).toBe(4);
   for (const node of nodes) expect(node.id).toMatch(/^hg-node-[a-p-]+$/);
-  await f.sync({ knowledgeSpaceId: 'tenant:ha_device', devices: [{ id: 'value', title: 'Updated' }, { id: 'a-b' }, { id: 'a b' }] });
+  await f.sync({ knowledgeSpaceId: 'homeassistant:tenant:ha_device', devices: [{ id: 'value', title: 'Updated' }, { id: 'a-b' }, { id: 'a b' }] });
   expect(f.store.listNodes().filter(node => node.kind === 'ha_device')).toHaveLength(4); expect(first.counts.devices).toBe(3);
 });
 
@@ -137,7 +137,7 @@ test('native tuple index drives EXPLAIN, rejects duplicate v1 rows and is added 
   const snapshot = f.store.getRecordSnapshot('node', original.id); await f.store.close();
   const before15 = new Database(f.dbPath); try { for (const index of [...homeGraphNodeIdentityIndexes, ...homeGraphSourceIdentityIndexes]) before15.run(`DROP INDEX ${index.name}`); before15.run('PRAGMA user_version=15'); } finally { before15.close(); }
   const before = readFileSync(f.dbPath); let declared = false;
-  const denied = new KnowledgeStore({ dbPath: f.dbPath, nativeDataWriter: { declare(format) { if (format === 'knowledge-schema-v17') { declared = true; throw Error('Reader floor held'); } } } }); stores.push(denied);
+  const denied = new KnowledgeStore({ dbPath: f.dbPath, nativeDataWriter: { declare(format) { if (format === `knowledge-schema-v${KNOWLEDGE_SCHEMA_VERSION}`) { declared = true; throw Error('Reader floor held'); } } } }); stores.push(denied);
   await expect(denied.init()).rejects.toThrow('Reader floor held'); expect(declared).toBe(true); expect(readFileSync(f.dbPath)).toEqual(before); await denied.close();
   const next = await fixture(f.dbPath); expect(next.store.getNode(original.id)).toEqual(original); expect(next.store.getRecordSnapshot('node', original.id).generation).toBe(snapshot.generation);
   const sqlite = (next.store as unknown as { sqlite: SQLiteStore }).sqlite, query = homeGraphNodeCandidateQuery(selector);
@@ -171,6 +171,6 @@ test('actual snapshot sync preserves installation identity across recognized Hom
   expect(device?.id).toBe(before.id); expect(device?.title).toBe('Updated device');
   expect(device?.metadata.homeAssistant).toMatchObject({ installationId: 'my-house', objectId: 'device' });
   expect(f.store.listNodes().filter(node => node.kind === 'ha_device')).toHaveLength(1);
-  const custom = await f.sync({ knowledgeSpaceId: 'Project:My House', installationId: 'Other Installation', devices: [] });
-  expect(custom.spaceId).toBe('Project:My House'); expect(custom.installationId).toBe('other-installation');
+  // A space that is not a Home Assistant space is another surface's data and is refused.
+  await expect(f.sync({ knowledgeSpaceId: 'Project:My House', installationId: 'Other Installation', devices: [] })).rejects.toThrow(/only address Home Assistant spaces/);
 });

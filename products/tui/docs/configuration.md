@@ -49,18 +49,18 @@ for reference.
 | `provider.model` | `openrouter:openrouter/free` | Active model ID, provider-qualified as `<provider>:<model>` |
 | `provider.reasoningEffort` | `medium` | Reasoning depth for supported models |
 | `provider.systemPromptFile` | `` | Path to a custom system prompt file |
-| `behavior.autoApprove` | `false` | Auto-approve all tool permission prompts |
+| `behavior.autoApprove` | `false` | Deprecated alias for the `yolo` execution mode |
 | `behavior.autoCompactThreshold` | `80` | Context % before auto-compact triggers |
 | `behavior.saveHistory` | `true` | Persist conversation history |
 | `behavior.returnContextMode` | `off` | Session return-context mode: `off`, `local`, `assisted` |
-| `behavior.notifyOnComplete` | `true` | Emit terminal bell and desktop notification when a long turn completes |
+| `behavior.notifyOnComplete` | `true` | Emit terminal bell and desktop notification when a long turn completes or fails (not when you cancel it) |
 | `behavior.guidanceMode` | `minimal` | Operational guidance mode: `off`, `minimal`, `guided` |
 | `storage.secretPolicy` | `preferred_secure` | Secret storage policy: prefer secure backing store, fall back when allowed |
-| `permissions.mode` | `prompt` | Permission mode: `prompt`, `accept-edits`, `plan`, `allow-all`, `custom` |
+| `permissions.mode` | `safe-owner` | Execution mode: `safe-owner`, `safe-jev`, `yolo`, or `plan` |
 | `permissions.backgroundAgents` | `inherit` | How background/subagent tool calls consult the permission layer: `inherit` or `allow-all` |
 | `ui.systemMessages` | `panel` | Routing target for general system messages (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `ui.operationalMessages` | `panel` | Routing target for operational runtime notices (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
-| `ui.wrfcMessages` | `both` | Routing target for WRFC/orchestration updates (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
+| `ui.contractMessages` | `both` | Routing target for contract lifecycle updates: status, checks, corrections, owner questions and the outcome (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `service.enabled` | `true` | Enable service-install and daemon-management verbs, including the standalone daemon's self-promotion to a supervised service at its first idle moment |
 | `service.autostart` | `false` | Install/enable or disable/remove the OS autostart service |
 | `service.restartOnFailure` | `true` | Restart managed daemon services after failure |
@@ -75,7 +75,7 @@ for reference.
 | `daemon.enabled` | `true` | Whether this client adopts a running daemon at all. It does not start one itself; see [deployment-and-services.md](deployment-and-services.md) |
 | `danger.httpListener` | `false` | Enable HTTP webhook listener |
 | `tools.autoHeal` | `false` | Auto-fix syntax errors on write/edit |
-| `tools.hooksFile` | `hooks.json` | Hook configuration file name |
+| `tools.hooksFile` | `hooks.json` | Hook configuration file name, relative to the project working directory (the default is `<project>/hooks.json`) |
 | `cache.enabled` | `true` | Enable provider-aware prompt caching |
 | `cache.stableTtl` | `1h` | TTL for stable content (system prompt + tools) |
 | `cache.monitorHitRate` | `true` | Track and warn on low cache hit rates |
@@ -85,20 +85,27 @@ for reference.
 
 ## Permission modes
 
-`permissions.mode` takes five values. Two of them display under a different label in the UI than the value stored in config:
+`permissions.mode` takes four values:
 
-| Value | Shown as | Behavior |
-| --- | --- | --- |
-| `prompt` (default) | `normal` | Auto-approves reads and asks before write, edit, exec, fetch, agent, workflow, and MCP calls |
-| `accept-edits` | `accept-edits` | Auto-approves file write and edit tools; exec and the other risky classes still ask |
-| `plan` | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
-| `allow-all` | `auto` | Never prompts and allows everything |
-| `custom` | `custom` | Applies per-tool overrides using `permissions.tools.<name>` keys, each set to `allow`, `prompt`, or `deny` |
+| Value | Behavior |
+| --- | --- |
+| `safe-owner` (default) | Ordinary work (reads, writes, edits, ordinary commands) runs without asking; dangerous actions wait for the owner's reply, bound to the exact action |
+| `safe-jev` | Jev stands in for the owner: it permits ordinary work and justified risk and refuses genuinely harmful actions |
+| `yolo` | Runs authorized actions without general safety decisions or prompts; host containment, secret storage and payment rules still apply |
+| `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
 
-`Shift+Tab` cycles the four session postures in this order, `normal` → `accept-edits`
-→ `plan` → `auto` → `normal`. `/plan` toggles plan mode directly. `custom`
-is a per-rule policy rather than a session posture, so it is left out of the
-cycle; cycling from `custom` starts again at `normal`.
+Older settings files keep working: `prompt`, `normal`, `accept-edits` and
+`custom` load as `safe-owner`, `auto` loads as `safe-jev`, and `allow-all`
+loads as `yolo`. `behavior.autoApprove` is a deprecated alias for `yolo`;
+selecting an execution mode clears it. Per-tool overrides are the separate
+`permissions.tools.<name>` keys, each `allow`, `prompt` or `deny`; an explicit
+`deny` blocks that tool in the safe modes.
+
+`Shift+Tab` cycles the execution modes in this order: `safe-owner` →
+`safe-jev` → `yolo` → `safe-owner`. `/plan` toggles plan mode directly and `/plan off`
+returns to the mode you were in when you ran `/plan on` (it does nothing when plan
+mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a plan mode that
+`/plan` did not enter, starts again at `safe-owner`.
 
 `permissions.backgroundAgents` decides how background and subagent tool calls
 consult that mode. `inherit` (the default) runs them through the same session
@@ -191,16 +198,16 @@ behavior group alongside the schema-owned keys.
 
 `behavior.notifyAfterSeconds` gates the long-running-turn notification, and
 four separate boolean keys gate point-in-time alert classes covering a budget
-breach, an agent failure, a WRFC chain failure, and a tool call blocked on
+breach, an agent failure, a contract failure or cancellation, and a tool call blocked on
 your approval. `behavior.notifyOnlyWhenUnfocused` is the master gate over all
 of them.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `behavior.notifyAfterSeconds` | number | `60` | Seconds a turn must run before a push notification fires; `0` turns it off. Delivers to the desktop (`notify-send` / `osascript`) and to any configured ntfy/webhook URLs. Notification text is metadata only: task kind, elapsed time, ok/fail, session id. Never conversation content. |
-| `behavior.notifyOnBudgetBreach` | boolean | `true` | Alert when session cost crosses the configured budget (set via the Usage modal's `b` key). |
+| `behavior.notifyOnBudgetBreach` | boolean | `true` | Alert when session cost crosses the configured budget (set via the Usage modal's `b` key). `GOODVIBES_COST_BUDGET_USD=<usd>` seeds the budget on first run when no budget has been set yet; it never overrides one you set. |
 | `behavior.notifyOnAgentFailure` | boolean | `true` | Alert when a delegated or background agent fails. |
-| `behavior.notifyOnChainFailure` | boolean | `true` | Alert when a WRFC review chain fails. |
+| `behavior.notifyOnChainFailure` | boolean | `true` | Alert when a contract fails or is cancelled. |
 | `behavior.notifyOnApprovalPending` | boolean | `true` | Alert the moment a tool call becomes a real, user-blocking permission prompt. Message text is tool name and permission category only, never the call's arguments. |
 | `behavior.notifyOnlyWhenUnfocused` | boolean | `true` | Master gate over the four alert-class keys above and over `notifyAfterSeconds`: alerts fire only when the terminal is unfocused, or when focus state was never observed. Set `false` to fire regardless of focus. |
 

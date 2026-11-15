@@ -4,7 +4,9 @@
  * TWO JOBS, and a hard line between them:
  *
  *  1. Cache the APP SHELL (the HTML document + the hashed JS/CSS/icons Vite
- *     emits) so the installed app opens instantly, even with no network.
+ *     emits) so the installed app opens even with no network. A page load
+ *     prefers the daemon's current shell and falls back to the cached one
+ *     after a short wait, so an upgrade never runs a stale shell.
  *
  *  2. Receive Web Push notifications (approvals / completions the daemon fans
  *     out) and deep-link a tap into the right view.
@@ -33,6 +35,10 @@ const ASSET_CACHE = `goodvibes-assets-${CACHE_VERSION}`;
 // icons. Hashed JS/CSS chunks are filled in at runtime (cache-first) the first
 // time they are fetched, their names are build-generated, so they cannot be
 // listed here by hand.
+// Hashed assets from older deploys are never evicted by version, so the asset cache
+// is capped: past this many entries the oldest-stored ones (earlier builds) go first.
+const MAX_ASSET_ENTRIES = 300;
+
 const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/goodvibes-icon.png'];
 
 // Paths whose responses must NEVER be cached, the daemon owns this data and it
@@ -94,21 +100,44 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-async function staleWhileRevalidateShell(request) {
+// How long a page load waits for the daemon's current shell before opening the
+// cached one. The shell names this build's hashed chunks: a cached shell from
+// before an upgrade names chunks the daemon no longer serves, so a feature
+// loaded on demand (QR pairing, wake word) would fail for that whole load.
+// A reachable daemon answers well inside this; offline fails at once.
+const SHELL_NETWORK_WAIT_MS = 1500;
+
+// Only an HTML document may stand in for the app shell offline: a same-origin
+// navigation can also land on a JSON or file response, which must not replace it.
+function isHtmlResponse(response) {
+  const type = response.headers.get('content-type') || '';
+  return type.toLowerCase().includes('text/html');
+}
+
+async function networkFirstShell(event, request) {
   const cache = await caches.open(SHELL_CACHE);
-  const cached = await cache.match('/index.html', { ignoreSearch: true });
   const network = fetch(request)
     .then((response) => {
-      if (response && response.ok) cache.put('/index.html', response.clone());
+      if (response && response.ok && isHtmlResponse(response)) {
+        // waitUntil keeps the worker alive until the write lands; a failed write
+        // only costs the next offline open, never this page load.
+        event.waitUntil(cache.put('/index.html', response.clone()).catch(() => undefined));
+      }
       return response;
     })
     .catch(() => undefined);
-  // Instant open: serve the cached shell immediately when we have it, and let
-  // the network copy refresh the cache for next time (best-effort, the promise
-  // carries its own .catch so a failed revalidation is never unhandled). With no
-  // cache yet, wait for the network; if that also fails, an honest offline page.
+  let timer;
+  const waited = new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), SHELL_NETWORK_WAIT_MS); });
+  const first = await Promise.race([network, waited]);
+  clearTimeout(timer);
+  if (first && first.ok) return first;
+  // Offline, slow or failing: the cached shell still opens the app, and a late
+  // network copy refreshes the cache for next time (the promise carries its own
+  // .catch, so a failed revalidation is never unhandled). With no cache yet,
+  // wait for the network; if that also fails, an honest offline page.
+  const cached = await cache.match('/index.html', { ignoreSearch: true });
   if (cached) return cached;
-  const fresh = await network;
+  const fresh = first ?? (await network);
   return fresh ?? offlineDocument();
 }
 
@@ -124,14 +153,22 @@ function offlineDocument() {
   );
 }
 
-async function cacheFirstAsset(request) {
+async function trimAssetCache(cache) {
+  const keys = await cache.keys();
+  const excess = keys.length - MAX_ASSET_ENTRIES;
+  for (let i = 0; i < excess; i += 1) await cache.delete(keys[i]);
+}
+
+async function cacheFirstAsset(event, request) {
   const cache = await caches.open(ASSET_CACHE);
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
   // Only cache successful, same-origin, basic responses, never an opaque or
   // error response (which would poison the cache with a broken asset).
-  if (response && response.ok && response.type === 'basic') cache.put(request, response.clone());
+  if (response && response.ok && response.type === 'basic') {
+    event.waitUntil(cache.put(request, response.clone()).then(() => trimAssetCache(cache)).catch(() => undefined));
+  }
   return response;
 }
 
@@ -150,14 +187,14 @@ self.addEventListener('fetch', (event) => {
 
   // Navigation (opening the app / a deep link) → the app shell.
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidateShell(request));
+    event.respondWith(networkFirstShell(event, request));
     return;
   }
 
   // Immutable build assets (hashed, /icons, manifest) → cache-first. Everything
   // else (dev modules, anything unrecognized) falls through to the network.
   if (isCacheableAsset(url)) {
-    event.respondWith(cacheFirstAsset(request));
+    event.respondWith(cacheFirstAsset(event, request));
   }
 });
 

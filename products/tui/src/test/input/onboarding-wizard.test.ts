@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { InputHandler } from '../../input/handler.ts';
@@ -380,7 +381,6 @@ describe('OnboardingWizardController', () => {
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.enabled', value: true });
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.hostMode', value: 'local' });
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.host', value: '127.0.0.1' });
-    expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.allowRemote', value: false });
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'httpListener.hostMode', value: 'network' });
   });
 
@@ -413,7 +413,6 @@ describe('OnboardingWizardController', () => {
     const request = wizard.buildApplyRequest();
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.hostMode', value: 'local' });
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.host', value: '127.0.0.1' });
-    expect(request.operations).toContainEqual({ kind: 'set-config', key: 'controlPlane.allowRemote', value: false });
     expect(request.operations).toContainEqual({ kind: 'set-config', key: 'httpListener.hostMode', value: 'network' });
   });
 
@@ -705,7 +704,7 @@ describe('OnboardingWizardController', () => {
     expect(configValues.get('controlPlane.hostMode')).toBe('custom');
     expect(configValues.get('controlPlane.host')).toBe('10.0.0.10');
     expect(configValues.get('controlPlane.port')).toBe(4551);
-    expect(configValues.get('controlPlane.allowRemote')).toBe(true);
+    expect(configValues.has('controlPlane.allowRemote')).toBe(false);
     expect(configValues.get('web.hostMode')).toBe('custom');
     expect(configValues.get('web.host')).toBe('10.0.0.11');
     expect(configValues.get('web.port')).toBe(4552);
@@ -755,38 +754,28 @@ describe('OnboardingWizardController', () => {
     expect(configValues.get('surfaces.webhook.enabled')).toBe(true);
   });
 
-  // behavior.hitlMode is gated by the hitl-ux-modes feature flag: ModeManager
-  // (platform-owned, test-guarded there) only applies the chosen preset to the
-  // notification router when that flag is enabled. The TUI's job at the apply
-  // seam is to never emit a hitlMode choice without its gating flag, otherwise
-  // the choice is silently inert. These two tests pin that seam.
-  test('a non-default hitlMode enables the gating flag so the choice takes effect', () => {
+  // behavior.hitlMode is the only hitl write the wizard emits; there is no
+  // separate gating flag, so the whole set of hitl-related operations is the
+  // one behavior.hitlMode set-config.
+  const hitlOperations = (wizard: OnboardingWizardController) =>
+    wizard.buildApplyRequest().operations.filter(
+      (operation) => operation.kind === 'set-config' && /hitl/i.test(operation.key),
+    );
+
+  test('a non-default hitlMode is written as the only hitl operation', () => {
     const wizard = new OnboardingWizardController();
     wizard.open('new');
     wizard.setFieldValue('experience.hitl', 'quiet');
 
-    const configValues = new Map<string, unknown>();
-    for (const operation of wizard.buildApplyRequest().operations) {
-      if (operation.kind === 'set-config') configValues.set(operation.key, operation.value);
-    }
-
-    expect(configValues.get('behavior.hitlMode')).toBe('quiet');
+    expect(hitlOperations(wizard)).toEqual([{ kind: 'set-config', key: 'behavior.hitlMode', value: 'quiet' }]);
   });
 
-  test('the default hitlMode writes the schema default and nothing else', () => {
+  test('the default hitlMode writes the schema default as the only hitl operation', () => {
     const wizard = new OnboardingWizardController();
     wizard.open('new');
-    // Leave experience.hitl at its schema default ('balanced'): the single
-    // behavior.hitlMode write is the whole story, no extra enablement
-    // namespace exists to flip.
     wizard.setFieldValue('experience.hitl', 'balanced');
 
-    const configValues = new Map<string, unknown>();
-    for (const operation of wizard.buildApplyRequest().operations) {
-      if (operation.kind === 'set-config') configValues.set(operation.key, operation.value);
-    }
-
-    expect(configValues.get('behavior.hitlMode')).toBe('balanced');
+    expect(hitlOperations(wizard)).toEqual([{ kind: 'set-config', key: 'behavior.hitlMode', value: 'balanced' }]);
   });
 
   test('does not block selected external surfaces when setup values are blank', () => {
@@ -1250,10 +1239,17 @@ describe('InputHandler onboarding integration', () => {
     expect(input.onboardingWizard.active).toBe(true);
     expect(input.onboardingWizard.currentStep.id).toBe('network');
     expect(input.onboardingWizard.applyFeedback).toBeNull();
-    // Nothing persisted: both keys still read their stock defaults (which
-    // ship enabled now).
-    expect(uiServices.platform.configManager.get('service.enabled')).toBe(DEFAULT_CONFIG.service.enabled);
-    expect(uiServices.platform.configManager.get('web.enabled')).toBe(DEFAULT_CONFIG.web.enabled);
+    // Nothing persisted. With browser-access the wizard would write
+    // controlPlane.hostMode = 'custom', which differs from the stock default,
+    // so an apply here would be visible (service.enabled/web.enabled default
+    // to true and could not show it).
+    expect(DEFAULT_CONFIG.controlPlane.hostMode).not.toBe('custom');
+    expect(input.onboardingWizard.buildApplyRequest().operations).toContainEqual({
+      kind: 'set-config',
+      key: 'controlPlane.hostMode',
+      value: 'custom',
+    });
+    expect(uiServices.platform.configManager.get('controlPlane.hostMode')).toBe(DEFAULT_CONFIG.controlPlane.hostMode);
     expect(prints).toEqual([]);
   });
 
@@ -1290,8 +1286,10 @@ describe('InputHandler onboarding integration', () => {
     expect(input.onboardingWizard.active).toBe(true);
     expect(input.onboardingWizard.currentStep.id).toBe('network');
     expect(input.onboardingWizard.applyFeedback).toBeNull();
-    // Nothing persisted: the key still reads its stock default (enabled now).
-    expect(uiServices.platform.configManager.get('service.enabled')).toBe(DEFAULT_CONFIG.service.enabled);
+    // Nothing persisted: controlPlane.hostMode (written as 'custom' by the
+    // wizard with browser-access) still reads its non-custom stock default.
+    expect(DEFAULT_CONFIG.controlPlane.hostMode).not.toBe('custom');
+    expect(uiServices.platform.configManager.get('controlPlane.hostMode')).toBe(DEFAULT_CONFIG.controlPlane.hostMode);
     expect(prints).toEqual([]);
   });
 
@@ -2412,13 +2410,21 @@ describe('network step: migrate the install-script daemon service', () => {
     resetTestRuntimeServices();
     const uiServices = (await createDefaultUiRuntimeServices());
     ensureLocalAdminAuth(uiServices);
-    // A distinctive, unlikely-to-be-bound high port, never 3421/4444, so this
-    // exercises the engine's real (uninjected) TCP port probe deterministically
-    // without depending on, or risking interaction with, any real GoodVibes
-    // daemon. The test's homeDirectory is an ephemeral per-test tempdir, so
-    // detectLegacyUnit's unit-file check is guaranteed to report absent.
+    // The engine's real TCP port probe runs here, so the port must be one the
+    // OS just proved free: bind port 0, read the number, release it. The test's
+    // homeDirectory is an ephemeral per-test tempdir, so detectLegacyUnit's
+    // unit-file check is guaranteed to report absent.
+    const freePort = await new Promise<number>((resolve, reject) => {
+      const probe = createServer();
+      probe.once('error', reject);
+      probe.listen(0, '127.0.0.1', () => {
+        const address = probe.address();
+        const port = typeof address === 'object' && address !== null ? address.port : 0;
+        probe.close(() => resolve(port));
+      });
+    });
     uiServices.platform.configManager.setDynamic('controlPlane.host', '127.0.0.1');
-    uiServices.platform.configManager.setDynamic('controlPlane.port', 58921);
+    uiServices.platform.configManager.setDynamic('controlPlane.port', freePort);
     const input = (await makeInput(uiServices));
     const prints: string[] = [];
     input.setCommandRegistry(new CommandRegistry(), {

@@ -48,7 +48,8 @@ test.each(['permission', 'revision', 'unknown-message', 'out-of-bounds', 'protec
     if (kind === 'revision') Object.assign(input.input, { contentRevision: 'retired-message-revision' });
     if (kind === 'unknown-message') Object.assign(input.input, { messageId: 'unknown' });
     if (kind === 'out-of-bounds') Object.assign(input.input, { end: 9000 });
-    await expect(f.run(input)).rejects.toBeDefined(); expect(f.calls).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
+    const code = { permission: 'JUDGMENT_PERMISSION_HELD', revision: 'JUDGMENT_REFERENCE_HELD', 'unknown-message': 'JUDGMENT_REFERENCE_HELD', 'out-of-bounds': 'JUDGMENT_INPUT_HELD', 'protected-outside-block': 'JUDGMENT_INPUT_HELD' }[kind];
+    await expect(f.run(input)).rejects.toMatchObject({ code }); expect(f.calls).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
   } finally { await f.close(); }
 });
 test.each(['message-change', 'session-change', 'identity', 'unbind', 'abort'] as const)('%s rejects an in-flight language answer', async kind => {
@@ -57,7 +58,8 @@ test.each(['message-change', 'session-change', 'identity', 'unbind', 'abort'] as
   try {
     const pending = f.run(request(), abort.signal); await started.promise;
     if (kind === 'message-change') f.mutate(); else if (kind === 'session-change') f.mutateSession(); else if (kind === 'identity') f.changeActor(); else if (kind === 'unbind') f.release(); else abort.abort();
-    finish.resolve(); await expect(pending).rejects.toBeDefined();
+    const code = kind === 'identity' ? 'JUDGMENT_AUTH_REQUIRED' : kind === 'abort' ? 'JUDGMENT_ABORTED' : 'JUDGMENT_REFERENCE_HELD';
+    finish.resolve(); await expect(pending).rejects.toMatchObject({ code });
   } finally { finish.resolve(); await f.close(); }
 });
 test('held language readings contain no executable display value', async () => {
@@ -72,6 +74,6 @@ test('fence grammar does not cross earlier closure or accept prose/partial block
 });
 
 test('a wrong canonical session object cannot authorize a message', async () => {
-  const f = fixture(); try { f.mutateSession(); await expect(f.run()).rejects.toBeDefined(); expect(f.calls).toHaveLength(0); }
+  const f = fixture(); try { f.mutateSession(); await expect(f.run()).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' }); expect(f.calls).toHaveLength(0); }
   finally { await f.close(); }
 });

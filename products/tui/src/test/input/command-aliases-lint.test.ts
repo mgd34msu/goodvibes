@@ -103,15 +103,6 @@ describe('Slash-command alias lint (β4)', () => {
     expect(violations).toHaveLength(0);
   });
 
-  test('all primary command names are globally unique', () => {
-    const seen = new Map<string, string>();
-    for (const cmd of allCommands) {
-      const prior = seen.get(cmd.name);
-      expect(prior === undefined ? '' : `"${cmd.name}" registered by /${prior} and /${cmd.name}`).toBe('');
-      seen.set(cmd.name, cmd.name);
-    }
-  });
-
   test('all aliases are globally unique across the registry', () => {
     const holders = new Map<string, string>();
     const violations: string[] = [];

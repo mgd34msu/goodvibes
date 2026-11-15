@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { noteSkippedContainment } from './_helpers/exec-containment-proof.ts';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,19 +24,20 @@ const broken = 'export function value() { return 1;\n';
 const repaired = 'export function value() { return 1; }\n';
 const config: Pick<ConfigManager, 'get'> = { get: (() => true) as ConfigManager['get'] };
 const available = (await probeCapturedExecAvailability()).available;
+noteSkippedContainment('captured-auto-heal.test.ts', available);
 function install(port: JudgmentPort): void { const previous = installJudgmentPort(port); restorers.push(() => { installJudgmentPort(previous); }); }
 function readings() { return toolReadingsPort([['', { fixesErrors: true, onlyTheFix: true }]]); }
 function git(root: string, ...args: string[]): void { const result = spawnSync('git', ['-C', root, ...args]); if (result.status !== 0) throw Error(result.stderr.toString()); }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
-async function fixture(stage?: 'formatter' | 'linter' | 'biome', mutable = true) {
+async function fixture(stage?: 'formatter' | 'linter', mutable = true) {
   const owner = mkdtempSync(join(tmpdir(), 'captured-auto-heal-')); roots.push(owner);
   git(owner, 'init', '-q'); git(owner, 'config', 'user.name', 'Fixture'); git(owner, 'config', 'user.email', 'fixture@example.invalid');
   writeFileSync(join(owner, 'value.ts'), 'export const original = 1;\n');
   writeFileSync(join(owner, '.gitignore'), '.goodvibes/\n');
   if (stage) {
     mkdirSync(join(owner, 'node_modules/.bin'), { recursive: true });
-    const path = join(owner, 'node_modules/.bin', stage === 'formatter' ? 'prettier' : stage === 'biome' ? 'biome' : 'eslint');
-    writeFileSync(path, `#!/bin/sh\ncase "$*" in *--no-config*|*--config-path=/tmp/biome.json*) ;; *) exit 9;; esac\nfor target do :; done\nprintf '%s' '${repaired}' > "$target"\nprintf forbidden > side-effect.txt\n`);
+    const path = join(owner, 'node_modules/.bin', stage === 'formatter' ? 'prettier' : 'eslint');
+    writeFileSync(path, `#!/bin/sh\ncase "$*" in *--no-config*) ;; *) exit 9;; esac\nfor target do :; done\nprintf '%s' '${repaired}' > "$target"\nprintf forbidden > side-effect.txt\n`);
     chmodSync(path, 0o755);
     writeFileSync(join(owner, 'prettier.config.js'), 'throw Error("project config must not execute")');
   }
@@ -52,12 +54,17 @@ async function fixture(stage?: 'formatter' | 'linter' | 'biome', mutable = true)
 }
 const args = { files: [{ path: 'value.ts', content: broken, mode: 'overwrite' }], verbosity: 'verbose' };
 
-test('required captured repair stage proof cannot skip containment', () => { if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1') expect(available).toBe(true); });
-for (const stage of ['formatter', 'linter', 'biome'] as const) test.skipIf(!available)(`captured ${stage} candidate is judged before target-only publication`, async () => {
+test('required captured repair stage proof cannot skip containment', () => {
+  if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT !== undefined) {
+    expect(process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT).toBe('1');
+    expect(available).toBe(true);
+  }
+});
+for (const stage of ['formatter', 'linter'] as const) test.skipIf(!available)(`captured ${stage} candidate is judged before target-only publication`, async () => {
   const f = await fixture(stage); const port = readings(); install(port.port); let calls = 0;
   const result = await f.tool(async () => { calls++; return repaired; }).execute(args);
   expect(result.success).toBe(true); expect(calls).toBe(0);
-  expect(JSON.parse(result.output!).files[0].auto_heal).toEqual({ attempted: true, healed: true, method: stage === 'biome' ? 'formatter' : stage });
+  expect(JSON.parse(result.output!).files[0].auto_heal).toEqual({ attempted: true, healed: true, method: stage });
   expect(readFileSync(join(f.root, 'value.ts'), 'utf8')).toBe(repaired);
   expect(existsSync(join(f.root, 'side-effect.txt'))).toBe(false); expect(existsSync(join(f.owner, 'side-effect.txt'))).toBe(false);
   expect(readFileSync(join(f.owner, 'value.ts'), 'utf8')).toContain('original');

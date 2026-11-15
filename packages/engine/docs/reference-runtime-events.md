@@ -698,12 +698,6 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -1864,7 +1858,7 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `escalationId` | string | yes |
 | `reading` | enum: `approve`, `reject`, `amend`, `unclear` | yes |
 | `outcome` | enum: `act`, `confirm`, `escalate` | yes |
-| `action` | string | yes |
+| `action` | enum: `approved`, `amended`, `stopped`, `asked-again`, `refused` | yes |
 
 ### `CONTRACT_GATE_RESULT`
 

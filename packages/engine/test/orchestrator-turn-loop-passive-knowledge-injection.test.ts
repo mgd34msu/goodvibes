@@ -47,6 +47,8 @@ import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.j
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../platform/src/platform/tools/goodvibes-runtime/index.js';
 import { FINAL_RESPONSE_REVIEW_INSTRUCTIONS } from '../platform/src/platform/core/verification/response-prompt.js';
+import { estimateConversationTokens, estimateTokens } from '../platform/src/platform/core/context-compaction.js';
+import type { ProviderMessage } from '../platform/src/platform/providers/interface.js';
 import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.js';
 import type { ModelDefinition } from '../platform/src/platform/providers/registry-types.js';
 import type { HelperModel } from '../platform/src/platform/config/helper-model.js';
@@ -220,7 +222,6 @@ function makeContext(opts: TestContextOverrides): {
     getMessageQueueLength: () => 0,
     isReconciliationEnabled: () => true,
     setPendingToolCalls: () => {},
-    setAutoSpawnTimeout: () => {},
     setStreamingActive: () => {},
     setStreamingInputTokens: () => {},
     addStreamingOutputTokens: () => {},
@@ -394,21 +395,25 @@ describe('orchestrator-turn-loop: main-session per-turn passive knowledge inject
       }),
     ]);
 
-    // A context window sized so the block (measured at 221 tokens for this fixture) fits
-    // against the SHORT iteration-1 conversation, but the tool result appended after
-    // iteration 1 (1500 tokens of padding) pushes live tokens far past the same threshold
-    // by the time iteration 2's call is composed. The budget override (800) is generous on
-    // purpose so the headroom clamp, not the budget, is what this test exercises.
+    // A context window sized so the block fits against the SHORT iteration-1
+    // conversation, but the tool result appended after iteration 1 (1500 tokens of
+    // padding) pushes live tokens far past the same threshold by the time iteration
+    // 2's call is composed. The budget override (800) is generous on purpose so the
+    // headroom clamp, not the budget, is what this test exercises.
     //
-    // DERIVED, not hard-coded: the base+awareness system prompt is real product text that
-    // grows when the awareness instructions change, and a literal here silently turns any
-    // such edit into a failure of this unrelated test. estimateTokens is ~chars/4 and the
-    // threshold is 85% of the window.
-    const BLOCK_TOKENS = 221;
-    const USER_TEXT_TOKENS = 7;
+    // Measured, not hard-coded: one unconstrained run shows what the block costs under
+    // the runner's own estimator, so a change to the block text or the estimator moves
+    // the window with it. The threshold is 85% of the window.
+    const USER_TEXT = 'tell me about rate limiting';
+    const probe = makeContext({ text: USER_TEXT, provider: finalResponseProvider(), memoryRegistry, budgetTokens: 800 });
+    await executeOrchestratorTurnLoop(probe.context);
+    const probedPrompt = probe.capturedSystemPrompts[0] ?? '';
+    expect(probedPrompt).toContain('mem_ratelimit');
+    const basePromptTokens = estimateTokens(EXPECTED_BASE_PROMPT);
+    const blockTokens = estimateTokens(probedPrompt) - basePromptTokens;
+    const userTextTokens = estimateConversationTokens([{ role: 'user', content: USER_TEXT } as ProviderMessage]);
     const HEADROOM_TOKENS = 40;
-    const basePromptTokens = Math.ceil(EXPECTED_BASE_PROMPT.length / 4);
-    const contextWindow = Math.ceil((basePromptTokens + USER_TEXT_TOKENS + BLOCK_TOKENS + HEADROOM_TOKENS) / 0.85);
+    const contextWindow = Math.ceil((basePromptTokens + userTextTokens + blockTokens + HEADROOM_TOKENS) / 0.85);
 
     let chatCallCount = 0;
     const provider: LLMProvider = {
@@ -424,7 +429,7 @@ describe('orchestrator-turn-loop: main-session per-turn passive knowledge inject
     };
 
     const { context, capturedSystemPrompts } = makeContext({
-      text: 'tell me about rate limiting',
+      text: USER_TEXT,
       provider,
       memoryRegistry,
       contextWindow,
@@ -714,22 +719,42 @@ test.each(['success', 'retry', 'continuation', 'policy-retry', 'file-continuatio
   const live = await createCanonicalLiveCodeSource();
   try {
   let dispatched = 0;
+  // Facts observed inside chat are recorded and asserted after the run: an
+  // expect() thrown there would reject the loop for a reason the rejection hides.
+  let promptHadCode = false; let hadBeforeAttempt = false; let returnedToolCall = false;
+  let secondAttemptError: unknown;
   const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
     dispatched++;
-    expect(request.systemPrompt).toContain('backoff.ts');
-    expect(request.beforeAttempt).toBeDefined();
+    promptHadCode = (request.systemPrompt ?? '').includes('backoff.ts');
+    hadBeforeAttempt = request.beforeAttempt !== undefined;
     await request.beforeAttempt!();
     if (mode === 'success') return { content: 'done', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
     if (mode === 'policy-retry') live.deny();
     else if (mode === 'file-continuation') live.mutate();
     else installJudgmentPort(fakePort(name => noulAnswer(['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification', 'weakened_criteria', 'missing_results', 'unresolved_conflict'].includes(name) ? .01 : .99)).port);
-    if (mode === 'retry' || mode === 'policy-retry') await request.beforeAttempt!();
+    if (mode === 'retry' || mode === 'policy-retry') {
+      try { await request.beforeAttempt!(); } catch (error) { secondAttemptError = error; throw error; }
+    }
+    returnedToolCall = true;
     return { content: '', toolCalls: [{ id: 'next', name: 'nonexistent_tool', arguments: {} }], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'tool_call' };
   } };
   const { context } = makeContext({ text: 'backoff', provider, memoryRegistry: { getAll: () => [] } });
   const work = executeOrchestratorTurnLoop({ ...context, codeIndex: live.store, codeReadAccessFilter: live.readAccessFilter, isPassiveCodeInjectionEnabled: () => true });
-  if (mode === 'success') await work; else await expect(work).rejects.toThrow();
+  let rejection: unknown;
+  if (mode === 'success') await work;
+  else rejection = await work.then(() => undefined, (error: unknown) => error ?? new Error('rejected without a reason'));
+  // The first request carried the code block and the retry hook, so a rejection below is the authority check, not a broken fixture.
+  expect(promptHadCode).toBe(true);
+  expect(hadBeforeAttempt).toBe(true);
   expect(dispatched).toBe(1);
+  if (mode !== 'success') {
+    expect(rejection).toBeInstanceOf(Error);
+    const expected = { retry: 'no longer current', continuation: 'no longer current', 'policy-retry': 'access-restricted', 'file-continuation': 'is stale' }[mode];
+    expect((rejection as Error).message).toContain(expected);
+    // A retry is refused before any response exists; a continuation is refused after the first response, before a second request.
+    expect(returnedToolCall).toBe(mode === 'continuation' || mode === 'file-continuation');
+    if (mode === 'retry' || mode === 'policy-retry') expect(secondAttemptError).toBe(rejection);
+  }
   } finally { live.dispose(); }
 });
 

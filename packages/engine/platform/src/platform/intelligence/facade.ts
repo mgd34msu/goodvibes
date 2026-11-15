@@ -8,6 +8,7 @@
  *   - On initialization, language configs are read and registered with LspService
  *     so user/project overrides in the configured languages directory take effect.
  */
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { loadLanguageConfigs } from './config.js';
@@ -56,6 +57,7 @@ function collectSyntaxErrors(tree: Tree, cap = 20): SyntaxDiagnostic[] {
   return out;
 }
 import { LspService } from './lsp/service.js';
+import type { LspClient } from './lsp/client.js';
 import { detectLanguage } from './tree-sitter/languages.js';
 import { extractSymbols, extractOutline, findEnclosingScope } from './tree-sitter/queries.js';
 import { logger } from '../utils/logger.js';
@@ -91,10 +93,12 @@ export function uriToPath(uri: string): string {
 export class CodeIntelligence {
   private treeSitter: TreeSitterService;
   private lsp: LspService | null;
-  private readonly shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath'> | null;
+  private readonly shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'> | null;
+  /** Documents each server has been told about, with the text and version it last received. */
+  private readonly openedDocuments = new WeakMap<LspClient, Map<string, { text: string; version: number }>>();
 
   constructor(options: {
-    shellPaths?: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath'> | undefined;
+    shellPaths?: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'> | undefined;
     treeSitter?: TreeSitterService | undefined;
     lsp?: LspService | undefined;
   } = {}) {
@@ -164,25 +168,52 @@ export class CodeIntelligence {
   // -------------------------------------------------------------------------
 
   /**
-   * Parse a file and load its tree-sitter language in one step.
+   * Parse a file and run `use` on the tree before anything else can touch it.
    * Returns null if the language is unknown or grammar unavailable.
    */
-  private async _parseFile(
+  private async _withParsed<T>(
     filePath: string,
     content: string,
-  ): Promise<ParseResult | null> {
+    use: (parsed: ParseResult) => T,
+  ): Promise<T | null> {
     const lang = detectLanguage(filePath);
     if (!lang) return null;
-    const tree = await this.treeSitter.parse(filePath, content, lang);
-    if (!tree) return null;
-    const language = await this.treeSitter.loadLanguage(lang);
-    if (!language) return null;
-    return { tree, language, lang };
+    return this.treeSitter.withParsedTree(content, lang, (tree, language) => use({ tree, language, lang }));
   }
 
   // -------------------------------------------------------------------------
   // Tree-sitter operations
   // -------------------------------------------------------------------------
+
+  /**
+   * Tell the server about a document before asking it anything about it: a
+   * server answers only for documents it was opened with. Sends the text once,
+   * and again (as a full change) when it differs from what the server has.
+   * Returns false when the text cannot be read, so the caller can skip the request.
+   */
+  private _syncDocument(client: LspClient, filePath: string, lang: string, content?: string): boolean {
+    let text = content;
+    if (text === undefined) {
+      try { text = readFileSync(filePath, 'utf-8'); }
+      catch (err) {
+        logger.warn('CodeIntelligence: cannot read a document to open it in the language server', { filePath, error: summarizeError(err) });
+        return false;
+      }
+    }
+    const uri = pathToUri(filePath);
+    let documents = this.openedDocuments.get(client);
+    if (!documents) { documents = new Map(); this.openedDocuments.set(client, documents); }
+    const known = documents.get(uri);
+    if (!known) {
+      client.notify('textDocument/didOpen', { textDocument: { uri, languageId: lang, version: 1, text } });
+      documents.set(uri, { text, version: 1 });
+    } else if (known.text !== text) {
+      const version = known.version + 1;
+      client.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
+      documents.set(uri, { text, version });
+    }
+    return true;
+  }
 
   /** Detect the language of a file by its extension. */
   detectLanguage(filePath: string): string | null {
@@ -202,9 +233,7 @@ export class CodeIntelligence {
    */
   async getSymbols(filePath: string, content: string): Promise<SymbolInfo[]> {
     try {
-      const parsed = await this._parseFile(filePath, content);
-      if (!parsed) return [];
-      return extractSymbols(parsed.tree, parsed.language, parsed.lang);
+      return await this._withParsed(filePath, content, (parsed) => extractSymbols(parsed.tree, parsed.language, parsed.lang)) ?? [];
     } catch (err) {
       logger.warn('CodeIntelligence.getSymbols error', { filePath, error: summarizeError(err) });
       return [];
@@ -217,9 +246,7 @@ export class CodeIntelligence {
    */
   async getOutline(filePath: string, content: string): Promise<OutlineEntry[]> {
     try {
-      const parsed = await this._parseFile(filePath, content);
-      if (!parsed) return [];
-      return extractOutline(parsed.tree, parsed.language, parsed.lang);
+      return await this._withParsed(filePath, content, (parsed) => extractOutline(parsed.tree, parsed.language, parsed.lang)) ?? [];
     } catch (err) {
       logger.warn('CodeIntelligence.getOutline error', { filePath, error: summarizeError(err) });
       return [];
@@ -234,9 +261,7 @@ export class CodeIntelligence {
    */
   async getSyntaxDiagnostics(filePath: string, content: string): Promise<SyntaxDiagnostic[]> {
     try {
-      const parsed = await this._parseFile(filePath, content);
-      if (!parsed) return [];
-      return collectSyntaxErrors(parsed.tree);
+      return await this._withParsed(filePath, content, (parsed) => collectSyntaxErrors(parsed.tree)) ?? [];
     } catch (err) {
       logger.warn('CodeIntelligence.getSyntaxDiagnostics error', { filePath, error: summarizeError(err) });
       return [];
@@ -253,9 +278,7 @@ export class CodeIntelligence {
     line: number,
   ): Promise<{ kind: string; name: string; startLine: number; endLine: number } | null> {
     try {
-      const parsed = await this._parseFile(filePath, content);
-      if (!parsed) return null;
-      return findEnclosingScope(parsed.tree, parsed.language, parsed.lang, line);
+      return await this._withParsed(filePath, content, (parsed) => findEnclosingScope(parsed.tree, parsed.language, parsed.lang, line));
     } catch (err) {
       logger.warn('CodeIntelligence.getEnclosingScope error', { filePath, error: summarizeError(err) });
       return null;
@@ -292,6 +315,7 @@ export class CodeIntelligence {
     try {
       const client = await this.lsp?.getClient(lang);
       if (!client) return null;
+      if (!this._syncDocument(client, filePath, lang)) return null;
       const uri = pathToUri(filePath);
       const result = await client.request<Location | Location[] | null>('textDocument/definition', {
         textDocument: { uri },
@@ -320,6 +344,7 @@ export class CodeIntelligence {
     try {
       const client = await this.lsp?.getClient(lang);
       if (!client) return [];
+      if (!this._syncDocument(client, filePath, lang)) return [];
       const uri = pathToUri(filePath);
       const result = await client.request<Location[]>('textDocument/references', {
         textDocument: { uri },
@@ -346,7 +371,7 @@ export class CodeIntelligence {
     if (lang) {
       try {
         const client = await this.lsp?.getClient(lang);
-        if (client) {
+        if (client && this._syncDocument(client, filePath, lang, content)) {
           const uri = pathToUri(filePath);
           const lspSymbols = await client.request<DocumentSymbol[]>(
             'textDocument/documentSymbol',
@@ -376,6 +401,7 @@ export class CodeIntelligence {
     try {
       const client = await this.lsp?.getClient(lang);
       if (!client) return null;
+      if (!this._syncDocument(client, filePath, lang)) return null;
       const uri = pathToUri(filePath);
       return await client.request<Hover | null>('textDocument/hover', {
         textDocument: { uri },
@@ -399,6 +425,7 @@ export class CodeIntelligence {
     try {
       const client = await this.lsp?.getClient(lang);
       if (!client) return [];
+      if (!this._syncDocument(client, filePath, lang)) return [];
       const uri = pathToUri(filePath);
       const diagnosticNotifications = client.takeNotifications((notification) => {
         if (notification.method !== 'textDocument/publishDiagnostics') return false;
@@ -409,7 +436,9 @@ export class CodeIntelligence {
           && (params as { uri?: unknown }).uri === uri
         );
       });
-      for (const notification of diagnosticNotifications) {
+      // The server republishes the whole list for a file each time, so the
+      // newest notification is the current one.
+      for (const notification of diagnosticNotifications.reverse()) {
         const params = notification.params;
         if (
           typeof params === 'object'

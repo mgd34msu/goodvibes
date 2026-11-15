@@ -181,7 +181,9 @@ test.each(['finish', 'close', 'write-failure'] as const)(
     if (outcome === 'close') {
       let closed = false; const closing = operations.close().then(() => { closed = true; });
       await Promise.resolve(); expect(closed).toBe(false); publish.resolve(); finish.resolve(); await closing;
-      expect(resolved).toBe(false); expect(store.get(original.purchaseId)?.state).toBe('cancelled');
+      // The window was durably saved, so the stop leaves it as a crash would for the next boot.
+      expect(resolved).toBe(false); expect(store.get(original.purchaseId)).toMatchObject({ state: 'running', phase: 'awaiting-window', outcome: null });
+      expect(await journal.list()).toEqual([checkpoint.record]);
     } else {
       publish.resolve();
       if (outcome === 'finish') {

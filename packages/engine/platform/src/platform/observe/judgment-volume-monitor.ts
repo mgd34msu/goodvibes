@@ -21,7 +21,8 @@ export interface JudgmentVolumeMonitorControl extends JudgmentVolumeMonitorSetti
 export type JudgmentVolumeAlert =
   | { readonly kind: 'budget-exceeded'; readonly breaches: readonly JudgmentVolumeBreach[] }
   | { readonly kind: 'incomplete-window'; readonly limit: number }
-  | { readonly kind: 'unavailable' }
+  /** The decision log could not be read; `reason` is the failure's summary, so the cause is not lost. */
+  | { readonly kind: 'unavailable'; readonly reason: string }
   | { readonly kind: 'recovered' };
 const settingsSchema = strictObject({
   budgets: unknown(),
@@ -48,6 +49,19 @@ export function captureJudgmentVolumeMonitorControl(value: unknown): JudgmentVol
   return Object.freeze({ ...parsed, budgets: Object.freeze(budgets.map(budget => Object.freeze(budget))) });
 }
 
+/**
+ * What can be said about an unreadable log without repeating its message: a
+ * machine code such as SQLITE_BUSY when the failure carries one, else its class.
+ * Messages can quote paths and values, so they are never echoed. Kept local:
+ * this module is loaded by the config schema, so it cannot import the shared
+ * error helpers.
+ */
+function failureReason(error: unknown): string {
+  if (!(error instanceof Error)) return 'non-error failure';
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{3,40}$/.test(code) ? code : error.name;
+}
+
 /** Local observation only: budget alerts neither call models nor authorize/stop actions. */
 export function startJudgmentVolumeMonitor(options: {
   readonly log: JudgmentVolumeLog;
@@ -59,6 +73,7 @@ export function startJudgmentVolumeMonitor(options: {
   let disposed = false,
     checking = false;
   let signature: string | undefined;
+  let latest: JudgmentVolumeAlert | undefined;
   const check = (): void => {
     if (disposed || checking) return;
     checking = true;
@@ -78,8 +93,8 @@ export function startJudgmentVolumeMonitor(options: {
         const breaches = judgmentVolumeBreaches(entries, settings.budgets);
         alert = breaches.length ? { kind: 'budget-exceeded', breaches } : { kind: 'recovered' };
       }
-    } catch {
-      alert = { kind: 'unavailable' };
+    } catch (error) {
+      alert = { kind: 'unavailable', reason: failureReason(error) };
     }
     // Keep the reentrancy fence through notification; an observer can dispose
     // this owner, invoke another check, or throw without restarting its timer.
@@ -92,6 +107,7 @@ export function startJudgmentVolumeMonitor(options: {
       if (next === signature) return;
       const previous = signature;
       signature = next;
+      latest = alert;
       if (alert.kind === 'recovered' && previous === undefined) return;
       try {
         options.notify(alert);
@@ -108,5 +124,11 @@ export function startJudgmentVolumeMonitor(options: {
     disposed = true;
     clearInterval(timer);
   };
-  return { check, dispose, [Symbol.dispose]: dispose };
+  return {
+    check,
+    dispose,
+    /** The most recent alert state change (budget breach, unreadable log, recovery), for a status read. */
+    lastAlert: (): JudgmentVolumeAlert | undefined => latest,
+    [Symbol.dispose]: dispose,
+  };
 }

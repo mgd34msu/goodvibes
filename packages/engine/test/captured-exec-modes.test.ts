@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as childProcess from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,6 +53,24 @@ async function fixture(nodeRuntime = false) {
   return { owner, root, authority, manager, tool, binding };
 }
 const output = (result: { output?: string | undefined }) => JSON.parse(result.output ?? '{}') as { stdout?: string; success?: boolean; process_id?: string; pty?: boolean; prompts_answered?: number };
+/** Collects the contained processes whose command line mentions `marker`, so a test can wait for one to end instead of sleeping. */
+function watchContained(marker: string): { children: childProcess.ChildProcess[]; restore: () => void } {
+  const originalSpawn = childProcess.spawn;
+  const children: childProcess.ChildProcess[] = [];
+  const tap = spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
+    const child = originalSpawn(...args);
+    if (String(args[0]) === '/usr/bin/bwrap' && JSON.stringify(args[1]).includes(marker)) children.push(child);
+    return child;
+  }) as typeof childProcess.spawn);
+  return { children, restore: () => tap.mockRestore() };
+}
+/** Resolves when the contained process has ended; the snippets here finish cleanly on their own, so a SIGKILL proves it was stopped. */
+async function killedChild(watch: { children: childProcess.ChildProcess[] }): Promise<void> {
+  const child = watch.children[0];
+  if (!child) throw new Error('contained process was never started');
+  if (child.exitCode === null && child.signalCode === null) await new Promise<void>((resolve) => child.once('close', () => resolve()));
+  expect(child.signalCode).toBe('SIGKILL');
+}
 async function waitUntil(predicate: () => boolean | Promise<boolean>) { const deadline = Date.now() + 5000; while (!await predicate()) { if (Date.now() > deadline) throw new Error('fixture did not settle'); await new Promise((r) => setTimeout(r, 20)); } }
 
 for (const mode of ['background', 'interactive'] as const)
@@ -97,12 +116,15 @@ test.skipIf(!supported)('captured background job has live scoped output, commits
 for (const stop of ['bg_stop', 'close', 'revoke'] as const)
   test.skipIf(!supported)(`captured background ${stop} owns termination and withholds delayed writes`, async () => {
     const f = await fixture();
-    const started = await f.tool.execute({ commands: [{ cmd: 'echo READY; sleep 1; echo late > late.txt', background: true }] });
-    const id = output(started).process_id!;
-    if (stop === 'bg_stop') expect((await f.tool.execute({ commands: [{ cmd: `bg_stop ${id}` }] })).success).toBe(true);
-    else if (stop === 'close') await f.manager.close();
-    else { revokeContractInputAuthority(f.authority); await waitUntil(() => f.manager.getStatus(id)?.done === true); }
-    await new Promise((r) => setTimeout(r, 1100));
+    const watch = watchContained('late > late.txt');
+    try {
+      const started = await f.tool.execute({ commands: [{ cmd: 'echo READY; sleep 1; echo late > late.txt', background: true }] });
+      const id = output(started).process_id!;
+      if (stop === 'bg_stop') expect((await f.tool.execute({ commands: [{ cmd: `bg_stop ${id}` }] })).success).toBe(true);
+      else if (stop === 'close') await f.manager.close();
+      else { revokeContractInputAuthority(f.authority); await waitUntil(() => f.manager.getStatus(id)?.done === true); }
+      await killedChild(watch);
+    } finally { watch.restore(); }
     expect(existsSync(join(f.root, 'late.txt'))).toBe(false);
   });
 
@@ -117,9 +139,21 @@ test.skipIf(!supported)('captured PTY uses existing prompt/answer flow inside th
 for (const kill of [true, false])
   test.skipIf(!supported)(`captured until match ${kill ? 'terminates' : 'promotes an owned job'}`, async () => {
     const f = await fixture();
-    const result = await f.tool.execute({ commands: [{ cmd: 'echo READY; sleep 1; echo late > late.txt', until: { pattern: 'READY', kill_after: kill, timeout_ms: 2000 } }] });
-    expect(result.success).toBe(true); expect(output(result).stdout).toContain('READY');
-    if (!kill) { const id = output(result).process_id!; expect(id).toBeString(); await f.tool.execute({ commands: [{ cmd: `bg_stop ${id}` }] }); }
+    const watch = watchContained('late > late.txt');
+    try {
+      const result = await f.tool.execute({ commands: [{ cmd: 'echo READY; sleep 1; echo late > late.txt', until: { pattern: 'READY', kill_after: kill, timeout_ms: 2000 } }] });
+      expect(result.success).toBe(true); expect(output(result).stdout).toContain('READY');
+      if (kill) expect(output(result).process_id).toBeUndefined();
+      else {
+        const id = output(result).process_id!; expect(id).toBeString();
+        // Promoted, not killed: still running until the owner stops it.
+        const entry = f.manager.getStatus(id)!;
+        expect(entry.done).toBe(false);
+        expect((await f.tool.execute({ commands: [{ cmd: `bg_stop ${id}` }] })).success).toBe(true);
+        expect(entry.done).toBe(true);
+      }
+      await killedChild(watch);
+    } finally { watch.restore(); }
     expect(existsSync(join(f.root, 'late.txt'))).toBe(false);
   });
 
@@ -152,12 +186,24 @@ test.skipIf(!supported)('cancelled PTY cannot accept a late prompt answer or pub
   const tool = createExecTool(f.manager, { capturedInput: f.binding, defaultWorkingDirectory: f.root, overflowHandler: new OverflowHandler({ baseDir: f.root }),
     interaction: { availability: detectPtyAvailability(probePtyHost()), quietWindowMs: 30,
       requestPromptAnswer: async () => { asked = true; return new Promise<{ answered: boolean; text: string }>((resolve) => { answer = resolve; }); } } });
-  const pending = tool.execute({ commands: [{ cmd: 'printf "CAPTURE_PROMPT: "; read answer; echo "$answer" > late.txt', interactive: true }] }, { signal: controller.signal });
-  await waitUntil(() => asked); controller.abort();
-  const result = await pending;
-  expect(result.success).toBe(false); expect(output(result).stdout ?? '').toBe('');
-  answer({ answered: true, text: 'too-late' });
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  const procs: Array<ReturnType<typeof Bun.spawn>> = [];
+  const originalSpawn = Bun.spawn;
+  const tap = spyOn(Bun, 'spawn').mockImplementation(((...args: Parameters<typeof Bun.spawn>) => {
+    const proc = (originalSpawn as (...a: Parameters<typeof Bun.spawn>) => ReturnType<typeof Bun.spawn>)(...args);
+    if (JSON.stringify(args[0]).includes('late.txt')) procs.push(proc);
+    return proc;
+  }) as unknown as typeof Bun.spawn);
+  try {
+    const pending = tool.execute({ commands: [{ cmd: 'printf "CAPTURE_PROMPT: "; read answer; echo "$answer" > late.txt', interactive: true }] }, { signal: controller.signal });
+    await waitUntil(() => asked); controller.abort();
+    const result = await pending;
+    expect(result.success).toBe(false); expect(output(result).stdout ?? '').toBe('');
+    answer({ answered: true, text: 'too-late' });
+    // The only writer of late.txt is the contained PTY child: once it has ended without success, nothing can land later.
+    const proc = procs[0];
+    if (!proc) throw new Error('contained PTY process was never started');
+    expect(await proc.exited).not.toBe(0);
+  } finally { tap.mockRestore(); }
   expect(existsSync(join(f.root, 'late.txt'))).toBe(false);
 });
 
@@ -172,12 +218,32 @@ test.skipIf(!supported)('noisy until no-match completion retains full output in 
   expect(readFileSync(join(f.root, overflow!), 'utf8')).toBe('x'.repeat(600000));
 });
 
+test.skipIf(!supported)('a captured command that prints without end keeps a bounded prefix, so a marker past the cap never matches', async () => {
+  const f = await fixture();
+  const result = await f.tool.execute({ commands: [{ cmd: 'head -c 4500000 /dev/zero | tr "\\0" x; echo READY', until: { pattern: 'READY' } }] });
+  expect(result.success).toBe(false);
+  expect(JSON.parse(result.output ?? '{}').stdout_truncated).toBe(true);
+});
+
 test.skipIf(!supported)('until no-match completion retains authorized diagnostics and exit status', async () => {
   const f = await fixture();
   const result = await f.tool.execute({ commands: [{ cmd: 'echo diagnostic; exit 2', until: { pattern: 'NEVER' } }] });
   expect(result.success).toBe(false);
   expect(output(result).stdout).toContain('diagnostic');
   expect(JSON.parse(result.output!).exit_code).toBe(2);
+});
+
+test.skipIf(!supported)('a failed captured file_op reports which operation failed and what already applied', async () => {
+  const f = await fixture();
+  const result = await f.tool.execute({ file_ops: [
+    { op: 'copy', source: 'source.txt', destination: 'first.txt' },
+    { op: 'delete', source: 'missing.txt' },
+  ], commands: [{ cmd: 'true' }] });
+  expect(result.success).toBe(false);
+  const body = JSON.parse(result.output ?? '{}') as { failed_op_index?: number; file_ops?: unknown[]; commands_run?: boolean };
+  expect(body.failed_op_index).toBe(1);
+  expect(body.file_ops).toHaveLength(1);
+  expect(body.commands_run).toBe(false);
 });
 
 test.skipIf(!supported)('file_ops preserve empty directory copy/move/delete topology', async () => {

@@ -10,6 +10,7 @@ import { delegationDecisionCards } from './agent-harness-delegation-posture.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessExecutionArgs {
   readonly executionRouteId?: unknown;
@@ -58,9 +59,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function lookupFromArgs(args: AgentHarnessExecutionArgs): { readonly source: ExecutionLookupSource; readonly input: string } | null {

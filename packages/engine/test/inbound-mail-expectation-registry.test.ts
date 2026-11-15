@@ -24,7 +24,8 @@ import {
   type ExpectationExpiryReport,
 } from '../platform/src/platform/email/inbound/expectation-registry.ts';
 import { PersistedExpectationStore } from '../platform/src/platform/email/inbound/expectation-store.ts';
-import { capabilityVerdict } from '../platform/src/platform/email/inbound/capability.ts';
+import { capabilityVerdict, stateForReason } from '../platform/src/platform/email/inbound/capability.ts';
+import { ALL_REASONS } from './_helpers/inbound-capability-reasons.ts';
 import type { InboundCapabilityVerdict } from '../platform/src/platform/email/inbound/ports.ts';
 import {
   MAX_VERIFICATION_WINDOW_MS,
@@ -109,7 +110,7 @@ describe('a workstream registers an expectation before it submits the form', () 
     expect(match.kind).toBe('matched');
   });
 
-  test('a message for a DIFFERENT service domain does not satisfy it', async () => {
+  test('a message from an unrelated sender domain does not satisfy it and does not close it', async () => {
     // Scoped to what was declared. Convenience is not a reason to widen.
     const { registry } = build();
     await registry.open({
@@ -122,11 +123,13 @@ describe('a workstream registers an expectation before it submits the form', () 
       arrival({ deliveredTo: 'signup-a1@alias.test', from: 'no-reply@evil.test' }),
       NOW,
     );
-    // The delivery address is what gates the match, so this still matches the
-    // expectation, but the sender is recorded as unrelated, which is what
-    // stops a link from the wrong host being followed downstream.
-    if (match.kind !== 'matched') throw new Error(`expected a match, got ${match.kind}`);
-    expect(match.senderCorroboration).toBe('sender-domain-unrelated');
+    expect(match.kind).toBe('sender-unrelated');
+    await registry.matcher.consumeMatch(match);
+    const genuine = await registry.matcher.matchCandidate(
+      arrival({ deliveredTo: 'signup-a1@alias.test', from: 'no-reply@example.com' }),
+      NOW,
+    );
+    expect(genuine.kind).toBe('matched');
   });
 
   test('a message delivered to a DIFFERENT address does not satisfy it', async () => {
@@ -347,10 +350,21 @@ describe('a restart restores the original window, never a fresh one', () => {
       windowMs: 15 * 60_000,
     });
 
-    const second = build({ storePath, startMs: start + 20 * 60_000 });
+    const reports: ExpectationExpiryReport[] = [];
+    const second = build({ storePath, startMs: start + 20 * 60_000, onExpired: (report) => reports.push(report) });
     const hydrated = await second.registry.hydrate();
     expect(hydrated.restored).toBe(0);
     expect(second.registry.list().length).toBe(0);
+
+    // The window ran out while the daemon was down. The workstream waiting on it
+    // is told so, rather than the expectation vanishing with no outcome.
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.reason).toBe('window-elapsed');
+    expect(reports[0]?.recipientAddress).toBe('signup-a1@alias.test');
+
+    // A rebuild repeats the recovery; the same expectation is reported once.
+    await second.registry.hydrate();
+    expect(reports).toHaveLength(1);
   });
 });
 
@@ -565,16 +579,11 @@ describe('a watcher in reconnect backoff does NOT fail expectations', () => {
   });
 
   test('every degraded reason is a wait, not a failure', async () => {
-    // Table-driven over the reasons that map to `degraded`, so a future reason
-    // added to the degraded tier cannot start failing expectations by being
-    // forgotten here.
-    for (const reason of [
-      'reconnecting',
-      'server-unavailable',
-      'polling-no-idle',
-      'polling-idle-refused',
-      'polling-capability-unknown',
-    ] as const) {
+    // Derived from the reason table, so a future reason added to the degraded
+    // tier cannot start failing expectations by being forgotten here.
+    const degraded = ALL_REASONS.filter((reason) => stateForReason(reason) === 'degraded');
+    expect(degraded.length).toBeGreaterThan(5);
+    for (const reason of degraded) {
       const { registry } = build();
       await registry.open({
         serviceDomain: 'example.com',

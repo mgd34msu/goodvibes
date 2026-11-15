@@ -108,27 +108,6 @@ export type FixSessionStartOutcome =
 /** Starts a fix-session pre-briefed with the failing jobs' context. */
 export type FixSessionStarter = (brief: FixSessionBrief) => Promise<FixSessionStartOutcome | string | undefined>;
 
-/**
- * The offer's outcome. The object form carries the approval ask's callId so
- * the service can stamp the started session's id back onto the RESOLVED
- * approval record (broker seam), giving the surface that accepted an
- * in-process handle to the session its acceptance spawned. The bare boolean
- * form remains valid for wirings without an approval record.
- */
-export type FixSessionOfferOutcome =
-  | boolean
-  | { readonly accepted: boolean; readonly offerCallId?: string | undefined };
-
-/**
- * The "fix this?" offer for a red run on a watch that did NOT opt into
- * auto-start: surfaced through the approval/attention machinery (wired at the
- * historical standalone integrations). Resolves accepted=true when the
- * operator accepts, the service then starts the fix-session with the SAME
- * brief, and (given an offerCallId) stamps the started id onto the approval
- * record.
- */
-export type FixSessionOffer = (brief: FixSessionBrief) => Promise<FixSessionOfferOutcome>;
-
 /** Delivers a channel notification; returns a delivery id when known. */
 export type CiNotifier = (channel: string, title: string, body: string) => Promise<string | undefined>;
 

@@ -39,11 +39,10 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import type { ConfigManager, DaemonConfigPatch } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import { SHIPPED_PUBLIC_BASE_URL } from '../config/webui-bundle.js';
 import { WEBUI_BINDING_RESULT } from '../cli/machine-contracts.js';
 import { describeOriginPosture, formatHttpOrigin, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 
-/** The shipped `web.publicBaseUrl` placeholder, a port nothing binds. */
-const SHIPPED_PUBLIC_BASE_URL = 'http://127.0.0.1:3423';
 
 export interface WebuiCommandResult {
   readonly exitCode: number;
@@ -135,6 +134,13 @@ function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
     errors.push('--lan and --loopback ask for opposite things; pass one of them');
   }
   const posture: Posture = lan ? 'lan' : loopback ? 'loopback' : 'unchanged';
+  if (subcommand !== 'enable') {
+    // Only `enable` writes a bundle or a listener posture; accepting the flags
+    // elsewhere would let a user believe exposure had been narrowed.
+    if (lan) errors.push(`--lan only applies to 'webui enable', not '${subcommand}'`);
+    if (loopback) errors.push(`--loopback only applies to 'webui enable', not '${subcommand}'`);
+    if (bundleDir !== undefined) errors.push(`--bundle-dir only applies to 'webui enable', not '${subcommand}'`);
+  }
   if (json && (subcommand !== 'status' || posture !== 'unchanged' || bundleDir !== undefined)) {
     errors.push('--json only supports the read-only status query, without bundle or exposure flags');
   }
@@ -240,7 +246,9 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
 
   if (parsed.subcommand === 'disable') {
     try {
-      config.set('controlPlane.webui.serve', false);
+      // `enable` declares the web surface too, so `disable` withdraws it in the
+      // same write; otherwise status keeps reporting it enabled.
+      config.setDaemonValues({ 'controlPlane.webui.serve': false, 'web.enabled': false });
     } catch (error) {
       return { exitCode: 1, lines: [`webui: could not write settings: ${message(error)}`] };
     }

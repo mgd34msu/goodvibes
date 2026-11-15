@@ -26,7 +26,8 @@ import {
   sourcesForObject,
   uniqueById,
 } from './self-improvement-graph.js';
-import { readString, readStringArray, semanticMetadata, uniqueStrings } from './utils.js';
+import { readString, semanticMetadata } from './utils.js';
+import { exactKnowledgeIds } from './fact-support-write-plan.js';
 
 export interface GapContext {
   readonly assertCurrent?: (() => void) | undefined;
@@ -37,11 +38,17 @@ export interface GapContext {
   readonly repairSourceIds: readonly string[];
 }
 
+/** Ids saved on a gap are exact values: `A1` and `a1` are different records. */
+export function exactStoredIds(value: unknown): string[] {
+  return Array.isArray(value) ? exactKnowledgeIds(value.filter((entry): entry is string => typeof entry === 'string')) : [];
+}
+
 export interface GapClassification {
   readonly assertCurrent?: (() => void) | undefined;
   readonly action: 'repair' | 'skip' | 'suppress';
   readonly reason?: string | undefined;
-  readonly status?: string | undefined;
+  /** Why a gap is skipped; only `needs_context` is also recorded on the gap. */
+  readonly status?: 'repaired' | 'already_repaired' | 'retry_wait' | 'needs_context' | undefined;
   readonly markAttempt?: boolean | undefined;
 }
 
@@ -68,16 +75,16 @@ export async function buildGapContext(
   spaceId: string,
   gap: KnowledgeNodeRecord,
   objectProfiles: readonly KnowledgeObjectProfilePolicy[],
-  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined; readonly timeoutMs?: number | undefined } = {},
 ): Promise<GapContext> {
   const graph = await buildKnowledgeSemanticGraphIndex(store, spaceId, options);
   if (!graph.nodesById.has(gap.id)) throw new KnowledgeScopeSelectionHeldError('stale');
   const edges = graph.edges;
   const sourcesById = graph.sourcesById;
   const nodesById = graph.nodesById;
-  const sourceIds = uniqueStrings([
+  const sourceIds = exactKnowledgeIds([
     gap.sourceId,
-    ...readStringArray(gap.metadata.sourceIds),
+    ...exactStoredIds(gap.metadata.sourceIds),
     ...edges
       .filter((edge) => edge.toKind === 'node' && edge.toId === gap.id && edge.fromKind === 'source')
       .map((edge) => edge.fromId),
@@ -89,7 +96,7 @@ export async function buildGapContext(
     text: `${gap.title} ${gap.summary ?? ''}`,
     objectProfiles,
     nodes: [
-      ...readStringArray(gap.metadata.linkedObjectIds).map((id) => nodesById.get(id)).filter((node): node is KnowledgeNodeRecord => Boolean(node)),
+      ...exactStoredIds(gap.metadata.linkedObjectIds).map((id) => nodesById.get(id)).filter((node): node is KnowledgeNodeRecord => Boolean(node)),
       ...sourceIds.flatMap((sourceId) => linkedObjectsForSource(sourceId, edges, nodesById)),
       ...edges
         .filter((edge) => edge.fromKind === 'node' && edge.toKind === 'node' && edge.toId === gap.id)
@@ -108,7 +115,7 @@ export async function buildGapContext(
     ...sources.flatMap((source) => factsForSource(source.id, edges, nodesById)),
     ...linkedObjects.flatMap((object) => factsForObject(object.id, edges, nodesById)),
   ]);
-  const repairSourceIds = uniqueStrings(edges
+  const repairSourceIds = exactKnowledgeIds(edges
     .filter((edge) => edge.fromKind === 'source'
       && edge.toKind === 'node'
       && edge.toId === gap.id
@@ -122,7 +129,7 @@ export async function classifyGap(
   force: boolean,
   objectProfiles: readonly KnowledgeObjectProfilePolicy[],
   store: KnowledgeStore,
-  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined; readonly timeoutMs?: number | undefined } = {},
 ): Promise<GapClassification> {
   const status = readString(context.gap.metadata.repairStatus);
   const nextAttemptAt = readNumber(context.gap.metadata.nextRepairAttemptAt);
@@ -134,7 +141,7 @@ export async function classifyGap(
     guard.watch(`gap:${context.gap.id}`, () => store.getNode(context.gap.id), context.gap);
     const reader = createKnowledgeFactQualityReader(store, { spaceId: getKnowledgeSpaceId(context.gap),
       purpose: 'repair', query: [context.gap.title, context.gap.summary].filter(Boolean).join('\n\n'),
-      subjects: context.linkedObjects, signal: options.signal, guard });
+      subjects: context.linkedObjects, signal: options.signal, timeoutMs: options.timeoutMs, guard });
     const candidates = repairEvidenceCandidates(context);
     const quality = await reader.prepare(candidates);
     assertCurrent = () => { context.assertCurrent?.(); quality.assertCurrent(); };
@@ -213,7 +220,7 @@ function gapMatchesSourceFilter(
   edges: readonly KnowledgeEdgeRecord[],
 ): boolean {
   if (gap.sourceId && sourceIdFilter.has(gap.sourceId)) return true;
-  if (readStringArray(gap.metadata.sourceIds).some((sourceId) => sourceIdFilter.has(sourceId))) return true;
+  if (exactStoredIds(gap.metadata.sourceIds).some((sourceId) => sourceIdFilter.has(sourceId))) return true;
   return edges.some((edge) => (
     edge.fromKind === 'source'
     && sourceIdFilter.has(edge.fromId)
@@ -248,20 +255,20 @@ async function repairSubjectsForGap(
   const graph = await buildKnowledgeSemanticGraphIndex(store, spaceId, { signal, shouldStop });
   const edges = graph.edges;
   const nodesById = graph.nodesById;
-  const sourceIds = uniqueStrings([
+  const sourceIds = exactKnowledgeIds([
     gap.sourceId,
-    ...readStringArray(gap.metadata.sourceIds),
+    ...exactStoredIds(gap.metadata.sourceIds),
     ...edges
       .filter((edge) => edge.toKind === 'node' && edge.toId === gap.id && edge.fromKind === 'source')
       .map((edge) => edge.fromId),
   ]);
   const guard = captureRepairSubjectReadSet(store, gap, evidenceSourceIds, signal, shouldStop);
   const selected = await canonicalRepairSubjectNodes({ store, spaceId, context: { gap }, shouldStop, signal,
-    evidenceSources: uniqueStrings([...sourceIds, ...evidenceSourceIds]).map(id => store.getSource(id)).filter((source): source is KnowledgeSourceRecord => source !== null),
+    evidenceSources: exactKnowledgeIds([...sourceIds, ...evidenceSourceIds]).map(id => store.getSource(id)).filter((source): source is KnowledgeSourceRecord => source !== null),
     text: `${gap.title} ${gap.summary ?? ''}`,
     objectProfiles,
     nodes: [
-      ...readStringArray(gap.metadata.linkedObjectIds).map((nodeId) => nodesById.get(nodeId)),
+      ...exactStoredIds(gap.metadata.linkedObjectIds).map((nodeId) => nodesById.get(nodeId)),
       ...edges
         .filter((edge) => edge.fromKind === 'node' && edge.toKind === 'node' && edge.toId === gap.id)
         .map((edge) => nodesById.get(edge.fromId)),

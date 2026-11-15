@@ -18,6 +18,15 @@ function findSandboxProfile(configManager: CommandContext['platform']['configMan
 }
 
 export async function handleSandboxSessionCommand(args: string[], ctx: CommandContext): Promise<boolean> {
+  try {
+    return await runSandboxSessionCommand(args, ctx);
+  } catch (error) {
+    ctx.print(`Sandbox session command failed: ${summarizeError(error)}`);
+    return true;
+  }
+}
+
+async function runSandboxSessionCommand(args: string[], ctx: CommandContext): Promise<boolean> {
   const sessions = ctx.workspace.sandboxSessionRegistry;
   if (!sessions) {
     ctx.print('Sandbox session registry is not wired into this runtime.');
@@ -84,7 +93,7 @@ export async function handleSandboxSessionCommand(args: string[], ctx: CommandCo
       return true;
     }
     try {
-      const result = sessions.execute(sessionId, command, commandArgs, { timeoutMs: 10000 });
+      const result = await sessions.execute(sessionId, command, commandArgs, { timeoutMs: 10000 });
       const lines = [`Sandbox session run ${sessionId}`, `  status: ${result.status ?? 'n/a'}`];
       const stdout = result.stdout.trim();
       const stderr = result.stderr.trim();

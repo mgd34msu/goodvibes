@@ -14,6 +14,11 @@ const MAX_LIST_PAGES = 50;
 const MAX_HISTORY_PAGES = 20;
 const MAX_TOTAL_HISTORY_PAGES = 200;
 const MAX_ITEMS = 1_000;
+/** A poll with no cursor starts this far back, so a long-lived account is not paged from its first message. */
+const SEED_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+/** Window scans one poll may make while narrowing past a page budget or crossing empty windows. */
+const MAX_WINDOW_SCANS = 8;
+const MIN_WINDOW_MS = 2_000;
 
 /**
  * Resolves only after response decoding and resource cleanup. The host owns
@@ -190,52 +195,114 @@ export function createSlackInboxAdapter(ctx: AdapterContext, ports: SlackInboxPo
           if (listCursors.has(cursor)) fail('Slack conversation cursor repeated');
           listCursors.add(cursor);
         }
-        // Keep only the oldest limit+1 distinct candidates. A complete scan is
-        // mandatory before advancing the poller's single global timestamp.
-        const candidates: Candidate[] = [];
+        // Keep only the oldest limit+1 distinct candidates. A window is scanned
+        // completely before the poller's single global timestamp may pass it.
+        // One request budget for the whole poll, however many windows it tries.
         let totalHistoryPages = 0;
-        for (const [channelId, channelUser] of channels) {
-          let historyCursor: string | undefined;
-          const historyCursors = new Set<string>();
-          for (let page = 0; ; page += 1) {
-            if (page >= MAX_HISTORY_PAGES || totalHistoryPages >= MAX_TOTAL_HISTORY_PAGES) {
-              fail('Slack history page budget exhausted');
+        // A conversation read completely stays valid for any narrower window, so a rescan only re-reads the
+        // conversation that overflowed. A truncated read (more than limit+1 candidates) kept only the oldest ones, so
+        // it also serves a later floor only while the new upper bound stays at or below its newest kept candidate.
+        const complete = new Map<string, { floor: number; upper: number; truncated: boolean; items: Candidate[] }>();
+        // Where the overflowing conversation's newest pages ended: everything at or after it is already known to be
+        // dense, so the next window can end there instead of searching blindly.
+        let overflowReachedMs: number | undefined;
+        const scan = async (floor: number, upper: number): Promise<Candidate[] | undefined> => {
+          const found: Candidate[] = [];
+          for (const [channelId, channelUser] of channels) {
+            const cached = complete.get(channelId);
+            if (cached && cached.floor <= floor && upper <= cached.upper
+              && (!cached.truncated || cached.floor === floor || upper <= (cached.items[cached.items.length - 1]?.receivedAt ?? 0))) {
+              for (const candidate of cached.items) {
+                if (candidate.receivedAt >= upper || candidate.receivedAt <= floor || found.some(other => other.key === candidate.key)) continue;
+                found.push(candidate); found.sort(compare);
+                if (found.length > limit + 1) found.pop();
+              }
+              continue;
             }
-            totalHistoryPages += 1;
-            const history = await get('conversations.history', {
-              channel: channelId, limit: '50', latest: (cutoff / 1_000).toFixed(6),
-              ...(since === undefined ? {} : { oldest: (since / 1_000).toFixed(6) }),
-              ...(historyCursor ? { cursor: historyCursor } : {}),
-            });
-            if (history.is_limited === true) fail('Slack history is limited');
-            if (history.is_limited !== undefined && typeof history.is_limited !== 'boolean') fail('Slack response shape invalid');
-            for (const entry of rows(history.messages, 50)) {
-              const message = record(entry);
-              const subtype = optionalString(message.subtype, 200);
-              const bot = optionalString(message.bot_id, 200);
-              if (subtype === 'bot_message' || bot) continue;
-              const { ts, receivedAt } = timestamp(message.ts);
-              // Exclude the cutoff's entire rounded-ms bucket. A later poll
-              // will see it whole, including arrivals during this scan.
-              if (receivedAt <= (since ?? 0) || receivedAt >= cutoff) continue;
-              const text = optionalString(message.text, 40_000) ?? '';
-              const senderId = optionalString(message.user, 200) || channelUser || channelId;
-              const key = `${channelId}:${ts}`;
-              if (candidates.some(candidate => candidate.key === key)) continue;
-              candidates.push({ key, channelId, senderId, text, ts, receivedAt, kind: classify(message, self, text, ts) });
-              candidates.sort(compare);
-              if (candidates.length > limit + 1) candidates.pop();
+            const own: Candidate[] = [];
+            let truncated = false;
+            let oldestSeenMs = Number.POSITIVE_INFINITY;
+            let historyCursor: string | undefined;
+            const historyCursors = new Set<string>();
+            for (let page = 0; ; page += 1) {
+              if (totalHistoryPages >= MAX_TOTAL_HISTORY_PAGES) fail('Slack history page budget exhausted');
+              // A conversation too busy for this window is narrowed by the caller; a window is never committed partially.
+              if (page >= MAX_HISTORY_PAGES) {
+                overflowReachedMs = Number.isFinite(oldestSeenMs) ? oldestSeenMs : undefined;
+                return undefined;
+              }
+              totalHistoryPages += 1;
+              const history = await get('conversations.history', {
+                channel: channelId, limit: '50', latest: (upper / 1_000).toFixed(6),
+                oldest: (floor / 1_000).toFixed(6),
+                ...(historyCursor ? { cursor: historyCursor } : {}),
+              });
+              if (history.is_limited === true) fail('Slack history is limited');
+              if (history.is_limited !== undefined && typeof history.is_limited !== 'boolean') fail('Slack response shape invalid');
+              for (const entry of rows(history.messages, 50)) {
+                const message = record(entry);
+                const subtype = optionalString(message.subtype, 200);
+                const bot = optionalString(message.bot_id, 200);
+                if (subtype === 'bot_message' || bot) {
+                  // Skipped rows still count toward the pages read, so they still tell where the pages ended.
+                  try { oldestSeenMs = Math.min(oldestSeenMs, timestamp(message.ts).receivedAt); } catch { /* An unreadable skipped row only loses the hint. */ }
+                  continue;
+                }
+                const { ts, receivedAt } = timestamp(message.ts);
+                oldestSeenMs = Math.min(oldestSeenMs, receivedAt);
+                // Exclude the upper bound's entire rounded-ms bucket. A later poll
+                // will see it whole, including arrivals during this scan.
+                if (receivedAt <= floor || receivedAt >= upper) continue;
+                const text = optionalString(message.text, 40_000) ?? '';
+                const senderId = optionalString(message.user, 200) || channelUser || channelId;
+                const key = `${channelId}:${ts}`;
+                if (found.some(candidate => candidate.key === key)) continue;
+                const candidate = { key, channelId, senderId, text, ts, receivedAt, kind: classify(message, self, text, ts) };
+                found.push(candidate); found.sort(compare);
+                if (found.length > limit + 1) found.pop();
+                own.push(candidate); own.sort(compare);
+                if (own.length > limit + 1) { own.pop(); truncated = true; }
+              }
+              historyCursor = nextCursor(history);
+              if (history.has_more !== undefined && typeof history.has_more !== 'boolean') fail('Slack response shape invalid');
+              if (!historyCursor) {
+                if (history.has_more === true) fail('Slack history continuation missing');
+                break;
+              }
+              // A cursor remains authoritative even on an empty or short page.
+              if (historyCursors.has(historyCursor)) fail('Slack history cursor repeated');
+              historyCursors.add(historyCursor);
             }
-            historyCursor = nextCursor(history);
-            if (history.has_more !== undefined && typeof history.has_more !== 'boolean') fail('Slack response shape invalid');
-            if (!historyCursor) {
-              if (history.has_more === true) fail('Slack history continuation missing');
-              break;
-            }
-            // A cursor remains authoritative even on an empty or short page.
-            if (historyCursors.has(historyCursor)) fail('Slack history cursor repeated');
-            historyCursors.add(historyCursor);
+            complete.set(channelId, { floor, upper, truncated, items: own });
           }
+          return found;
+        };
+        let floor = since ?? Math.max(0, cutoff - SEED_WINDOW_MS), upper = cutoff;
+        let candidates: Candidate[] = [];
+        let endedAtStop = false;
+        for (let scans = 1; ; scans += 1) {
+          const found = await scan(floor, upper);
+          if (found === undefined) {
+            // End the next window where the overflowing pages stopped; without that, halve toward the floor. The
+            // oldest complete prefix is what the cursor may pass.
+            if (scans >= MAX_WINDOW_SCANS || upper - floor < MIN_WINDOW_MS) fail('Slack history page budget exhausted');
+            // The upper bound excludes its whole millisecond, so end one past the stop to read that bucket whole.
+            const stopEnd = overflowReachedMs === undefined ? undefined : overflowReachedMs + 1;
+            endedAtStop = stopEnd !== undefined && stopEnd > floor + 1 && stopEnd < upper;
+            upper = endedAtStop && stopEnd !== undefined ? stopEnd : floor + Math.floor((upper - floor) / 2);
+            overflowReachedMs = undefined;
+            continue;
+          }
+          candidates = found;
+          // A complete but empty window moves the floor, so a quiet stretch cannot hold the cursor behind a busy one.
+          if (candidates.length > 0 || upper >= cutoff) break;
+          // Never report "empty" for a poll that stopped short of the cutoff.
+          if (scans >= MAX_WINDOW_SCANS) fail('Slack history page budget exhausted');
+          // The upper bound's own millisecond was excluded from this scan, so the next window starts one before it.
+          floor = upper - 1;
+          // A window that ended at an overflow stop would hit the same stop again from the cutoff, so halve instead.
+          upper = endedAtStop ? floor + Math.floor((cutoff - floor) / 2) : cutoff;
+          endedAtStop = false;
         }
         let selected = candidates.slice(0, limit);
         const omitted = candidates[limit];

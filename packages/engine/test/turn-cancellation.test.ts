@@ -70,8 +70,8 @@ test('public typed operator client sends expected identity through the native RE
 
 
 test('OpenAPI REST body requires only expectedTurnId while the path retains sessionId', async () => {
-  for (const location of ['../contracts/artifacts/operator-openapi.json', '../docs/operator-openapi.json']) {
-    const document = await Bun.file(new URL(location, import.meta.url)).json();
+  {
+    const document = await Bun.file(new URL('../contracts/artifacts/operator-openapi.json', import.meta.url)).json();
     const operation = document.paths['/api/sessions/{sessionId}/turns/cancel'].post;
     expect(operation.requestBody.content['application/json'].schema.required).toEqual(['expectedTurnId']);
     expect(operation.requestBody.content['application/json'].schema.properties.sessionId).toBeUndefined();

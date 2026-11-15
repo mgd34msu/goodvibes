@@ -1,6 +1,6 @@
 /**
  * DaemonReceipts, the connect-time receipt notices.
- * Pins: control.status is called with { receipts: 'consume' } exactly once on
+ * Pins: control.status is called with { receipts: 'peek' } exactly once on
  * the attach edge (connected + signed-in), each returned receipt renders as a
  * dismissible one-line notice, a plain (disconnected / signed-out) state never
  * consumes, and a dismissed receipt is gone, the "shows once" contract.
@@ -13,8 +13,11 @@ import { RELAY_PAIRING_STORAGE_KEY, getStoredRelayPairing } from '../../lib/rela
 
 // Controllable control.status stub: records every call's input and returns the
 // staged receipts on the first consume, then nothing (marked delivered).
-const statusCalls: ({ receipts?: 'consume' } | undefined)[] = [];
+const statusCalls: ({ receipts?: 'consume' | 'peek' | 'ack'; ids?: string } | undefined)[] = [];
+// Undelivered on the daemon: peek offers them, only an ack removes them.
 let stagedReceipts: { id: string; text: string; at: number }[] = [];
+let failNextPeek = false;
+let legacyDaemon = false;
 
 mock.module('../../lib/goodvibes', () => ({
   getCurrentAuth: () => null,
@@ -22,8 +25,19 @@ mock.module('../../lib/goodvibes', () => ({
   client: {
     operator: {
       control: {
-        status: (input?: { receipts?: 'consume' }) => {
+        status: (input?: { receipts?: 'consume' | 'peek' | 'ack'; ids?: string }) => {
           statusCalls.push(input);
+          if (input?.receipts === 'peek') {
+            if (failNextPeek) { failNextPeek = false; return Promise.reject(new Error('ECONNRESET')); }
+            return Promise.resolve(legacyDaemon
+              ? { ok: true, status: 'running' }
+              : { ok: true, status: 'running', receipts: [...stagedReceipts] });
+          }
+          if (input?.receipts === 'ack') {
+            const ids = (input.ids ?? '').split(',');
+            stagedReceipts = stagedReceipts.filter((receipt) => !ids.includes(receipt.id));
+            return Promise.resolve({ ok: true, status: 'running' });
+          }
           if (input?.receipts === 'consume') {
             const delivered = stagedReceipts;
             stagedReceipts = [];
@@ -74,6 +88,8 @@ function notices(el: HTMLElement): HTMLElement[] {
 afterEach(() => {
   statusCalls.length = 0;
   stagedReceipts = [];
+  failNextPeek = false;
+  legacyDaemon = false;
   document.body.innerHTML = '';
   window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
 });
@@ -91,7 +107,7 @@ describe('DaemonReceipts', () => {
     expect(rows[0].textContent).toContain('Daemon restarted after a crash at 14:03');
     expect(rows[1].textContent).toContain('Updated to 1.7.1');
     // Exactly one consuming status call.
-    expect(statusCalls.filter((c) => c?.receipts === 'consume')).toHaveLength(1);
+    expect(statusCalls.filter((c) => c?.receipts === 'peek')).toHaveLength(1);
     unmount();
   });
 
@@ -103,7 +119,7 @@ describe('DaemonReceipts', () => {
     const signedOut = render({ connected: true, signedIn: false });
     await settle();
     expect(notices(signedOut.el)).toHaveLength(0);
-    expect(statusCalls.filter((c) => c?.receipts === 'consume')).toHaveLength(0);
+    expect(statusCalls.filter((c) => c?.receipts === 'peek')).toHaveLength(0);
     signedOut.unmount();
     unmount();
   });
@@ -116,7 +132,7 @@ describe('DaemonReceipts', () => {
     // Re-render with the same attached props, no second consume.
     rerender({ connected: true, signedIn: true });
     await settle();
-    expect(statusCalls.filter((c) => c?.receipts === 'consume')).toHaveLength(1);
+    expect(statusCalls.filter((c) => c?.receipts === 'peek')).toHaveLength(1);
     // Still exactly the one receipt (a re-consume would have returned none anyway).
     expect(notices(el)).toHaveLength(1);
     unmount();
@@ -152,7 +168,7 @@ describe('DaemonReceipts', () => {
     const rows = notices(el);
     expect(rows).toHaveLength(1);
     // Never re-consumed daemon-side (this surface never attached).
-    expect(statusCalls.filter((c) => c?.receipts === 'consume')).toHaveLength(0);
+    expect(statusCalls.filter((c) => c?.receipts === 'peek')).toHaveLength(0);
     unmount();
   });
 
@@ -168,12 +184,15 @@ describe('DaemonReceipts', () => {
     });
     await settle();
     expect(notices(el)).toHaveLength(0);
-    // A reconnect re-consumes (the daemon already delivered r1, so it returns
-    // none) and the dismissed id never resurfaces.
+    // A reconnect re-consumes and the daemon replays the same receipt id; the
+    // dismissed id must not resurface.
+    stagedReceipts = [{ id: 'r1', text: 'Updated to 1.7.1', at: 1 }];
     rerender({ connected: false, signedIn: true });
     await settle();
     rerender({ connected: true, signedIn: true });
     await settle();
+    expect(statusCalls.filter((call) => call?.receipts === 'peek')).toHaveLength(2);
+    expect(stagedReceipts).toHaveLength(0);
     expect(notices(el)).toHaveLength(0);
     unmount();
   });
@@ -185,7 +204,7 @@ describe('receipt replay and repeated attachment', () => {
     stagedReceipts = [{ id: 'strict-r1', text: 'Host completion receipt', at: 1 }];
     const { el, unmount } = render({ connected: true, signedIn: true }, true);
     await settle();
-    expect(statusCalls.filter((call) => call?.receipts === 'consume')).toHaveLength(1);
+    expect(statusCalls.filter((call) => call?.receipts === 'peek')).toHaveLength(1);
     expect(notices(el)).toHaveLength(1);
     expect(el.textContent).toContain('Host completion receipt');
     unmount();
@@ -204,10 +223,45 @@ describe('receipt replay and repeated attachment', () => {
     ];
     rerender({ connected: true, signedIn: true });
     await settle();
-    expect(statusCalls.filter((call) => call?.receipts === 'consume')).toHaveLength(2);
+    expect(statusCalls.filter((call) => call?.receipts === 'peek')).toHaveLength(2);
     expect(notices(el)).toHaveLength(1);
     expect(el.textContent).toContain('Another completion');
     expect(el.textContent).not.toContain('Completed once');
+    unmount();
+  });
+
+  test('a peek that never arrives leaves the receipt with the daemon, and the next attach shows it', async () => {
+    stagedReceipts = [{ id: 'lost-r1', text: 'Updated while offline', at: 1 }];
+    failNextPeek = true;
+    const { el, rerender, unmount } = render({ connected: true, signedIn: true });
+    await settle();
+    expect(notices(el)).toHaveLength(0);
+    expect(statusCalls.some((call) => call?.receipts === 'ack')).toBe(false);
+    expect(stagedReceipts).toHaveLength(1);
+    rerender({ connected: false, signedIn: true });
+    await settle();
+    rerender({ connected: true, signedIn: true });
+    await settle();
+    expect(notices(el)).toHaveLength(1);
+    expect(stagedReceipts).toHaveLength(0);
+    unmount();
+  });
+
+  test('receipts are acknowledged by id after they are shown', async () => {
+    stagedReceipts = [{ id: 'a1', text: 'One', at: 1 }, { id: 'a2', text: 'Two', at: 2 }];
+    const { unmount } = render({ connected: true, signedIn: true });
+    await settle();
+    expect(statusCalls.filter((call) => call?.receipts === 'ack')).toEqual([{ receipts: 'ack', ids: 'a1,a2' }]);
+    unmount();
+  });
+
+  test('a daemon that predates peek is read with consume', async () => {
+    legacyDaemon = true;
+    stagedReceipts = [{ id: 'old-r1', text: 'Restarted', at: 1 }];
+    const { el, unmount } = render({ connected: true, signedIn: true });
+    await settle();
+    expect(statusCalls.map((call) => call?.receipts)).toEqual(['peek', 'consume']);
+    expect(notices(el)).toHaveLength(1);
     unmount();
   });
 });

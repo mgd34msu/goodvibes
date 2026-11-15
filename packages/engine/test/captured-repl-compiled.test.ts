@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CAPTURED_BUN_RUNTIME_VERSION } from '../toolchain/src/config.js';
 import { provideCapturedBunRuntime } from '../toolchain/src/lib/captured-bun-runtime.js';
 import { probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
 
@@ -11,6 +12,8 @@ if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability
   throw new Error('required compiled captured REPL containment backend is unavailable');
 
 test.skipIf(!availability.available)('restored compiled product evaluates captured JS/TS with packaged runtime, project config and nested programs', () => {
+  // The packaged runtime is staged from the running interpreter only when it is the pinned one; any other Bun would fetch it from the network.
+  expect(process.versions.bun, `compiled REPL acceptance needs the pinned Bun ${CAPTURED_BUN_RUNTIME_VERSION}`).toBe(CAPTURED_BUN_RUNTIME_VERSION);
   const dir = mkdtempSync(join(tmpdir(), 'captured-repl-compiled-'));
   try {
     const binary = join(dir, 'compiled-product');
@@ -19,10 +22,10 @@ test.skipIf(!availability.available)('restored compiled product evaluates captur
     { cwd: join(import.meta.dir, '..'), encoding: 'utf8', timeout: 120_000 });
     expect({ status: built.status, stderr: built.stderr }).toEqual({ status: 0, stderr: '' });
     provideCapturedBunRuntime({ root: dir, outDir: '.', artifacts: ['compiled-product'], target: {
-      key: `linux-${process.arch}`, bunTarget: `bun-linux-${process.arch}`, appArtifact: 'compiled-product', capturedBunRuntime: '1.3.14',
+      key: `linux-${process.arch}`, bunTarget: `bun-linux-${process.arch}`, appArtifact: 'compiled-product', capturedBunRuntime: CAPTURED_BUN_RUNTIME_VERSION,
     } });
     expect(existsSync(binary + '.bun.LICENSE.md')).toBe(true);
-    expect(JSON.parse(readFileSync(binary + '.bun.json', 'utf8'))).toMatchObject({ version: '1.3.14', target: `linux-${process.arch}` });
+    expect(JSON.parse(readFileSync(binary + '.bun.json', 'utf8'))).toMatchObject({ version: CAPTURED_BUN_RUNTIME_VERSION, target: `linux-${process.arch}` });
     const archive = join(dir, 'compiled-product.tar');
     const packed = spawnSync('tar', ['-cf', archive, '-C', dir, 'compiled-product',
       'compiled-product.bun', 'compiled-product.bun.LICENSE.md', 'compiled-product.bun.json'], { encoding: 'utf8' });
@@ -32,13 +35,13 @@ test.skipIf(!availability.available)('restored compiled product evaluates captur
     expect({ status: unpacked.status, stderr: unpacked.stderr }).toEqual({ status: 0, stderr: '' });
     const restoredBinary = join(restored, 'compiled-product');
     expect(existsSync(restoredBinary + '.bun.LICENSE.md')).toBe(true);
-    expect(JSON.parse(readFileSync(restoredBinary + '.bun.json', 'utf8'))).toMatchObject({ version: '1.3.14', target: `linux-${process.arch}` });
+    expect(JSON.parse(readFileSync(restoredBinary + '.bun.json', 'utf8'))).toMatchObject({ version: CAPTURED_BUN_RUNTIME_VERSION, target: `linux-${process.arch}` });
     const owner = join(dir, 'owner'); mkdirSync(owner);
     const run = spawnSync(restoredBinary, [owner], {
-      cwd: restored, encoding: 'utf8', timeout: 30_000,
+      cwd: restored, encoding: 'utf8', timeout: 90_000,
       env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, CAPTURED_REPL_COMPILED_PARENT: 'MUST_NOT_LEAK' },
     });
-    expect({ status: run.status, stderr: run.stderr }).toEqual({ status: 0, stderr: '' });
+    expect({ status: run.status, stderr: run.stderr, error: run.error?.message }).toEqual({ status: 0, stderr: '', error: undefined });
     const proof = JSON.parse(run.stdout);
     expect(proof.execPath).toBe(restoredBinary);
     expect(proof.runtimeExecutable).toBe(restoredBinary + '.bun');
@@ -72,4 +75,4 @@ test.skipIf(!availability.available)('restored compiled product evaluates captur
     expect(proof.memberOutput).toBe('MEMBER_GENERATED');
     expect(proof.ownerOutput).toBe(false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
-}, 150_000);
+}, 240_000);

@@ -78,13 +78,20 @@ describe('what may cross the network', () => {
   test('every daemon-owned path is ruled on, one way or the other', () => {
     // The point of this test: a NEW daemon-owned domain must not slip in
     // unclassified. `classifyDaemonConfigPath` fails closed, so an unruled
-    // domain lands as node-local with the "no ruling" reason, which this test
-    // reports by name so it is fixed deliberately rather than discovered later.
+    // domain lands as node-local with `ruled: false`, which this test reports
+    // by name so it is fixed deliberately rather than discovered later.
     const unruled = listDaemonConfigClassifications()
-      .filter((entry) => entry.reason.startsWith('no ruling'))
+      .filter((entry) => !entry.ruled)
       .map((entry) => entry.path);
     expect(unruled, `these daemon-owned paths need a ruling in config-replication-policy.ts: ${unruled.join(', ')}`)
       .toEqual([]);
+  });
+
+  test('a domain nobody has ruled on is reported unruled and stays local', () => {
+    const verdict = classifyDaemonConfigPath('someUnrulededDomain.setting');
+    expect(verdict.ruled).toBe(false);
+    expect(verdict.replication).toBe('node-local');
+    expect(classifyDaemonConfigPath('controlPlane.port').ruled).toBe(true);
   });
 
   test('nothing outside the daemon-owned set can replicate, whatever the domain lists say', () => {
@@ -98,11 +105,15 @@ describe('what may cross the network', () => {
   });
 
   test('no port replicates, wherever it lives', () => {
-    const ports = listDaemonOwnedConfigPaths().filter((path) => isPortConfigKey(path));
+    // Ports of a remote mail server are ruled individually: they pair with a replicated host.
+    const ports = listDaemonOwnedConfigPaths().filter((path) => isPortConfigKey(path) && !REPLICATED_CONFIG_KEYS.includes(path));
     expect(ports.length).toBeGreaterThan(0);
     for (const path of ports) {
       expect(isReplicatedConfigPath(path), `${path} is a port and must not replicate`).toBe(false);
       expect(classifyDaemonConfigPath(path).reason).toContain('port');
+    }
+    for (const path of REPLICATED_CONFIG_KEYS.filter((key) => isPortConfigKey(key))) {
+      expect(isReplicatedConfigPath(path), `${path} addresses a remote server and must replicate`).toBe(true);
     }
     // The live case that motivated the rule.
     expect(isReplicatedConfigPath('controlPlane.port')).toBe(false);

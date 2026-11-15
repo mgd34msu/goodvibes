@@ -41,7 +41,7 @@ export interface ReplayCommandDeps {
  *                     satisfies it). When omitted, the handler reports that
  *                     no ledger is configured.
  */
-export function handleReplayCommand(
+export async function handleReplayCommand(
   deps: ReplayCommandDeps,
   subcommand: string,
   args: string[],
@@ -51,7 +51,7 @@ export function handleReplayCommand(
     /** The runtime state snapshot stored when the run started, or null if none was stored. */
     readRunSnapshot: (runId: string) => RuntimeStateSnapshot | null;
   },
-): ReplayCommandResult {
+): Promise<ReplayCommandResult> {
   const engine = deps.replayEngine;
 
   switch (subcommand.toLowerCase()) {
@@ -221,6 +221,13 @@ export function handleReplayCommand(
 
       const mismatches = engine.diff();
 
+      if (engine.getSnapshot().diffSource === 'none') {
+        return {
+          ok: false,
+          output: 'No replay source: nothing was compared. A re-execution of the run must supply its events; an empty result here is not evidence of determinism.',
+        };
+      }
+
       if (mismatches.length === 0) {
         return {
           ok: true,
@@ -260,17 +267,20 @@ export function handleReplayCommand(
         };
       }
 
-      // engine.export() is async and validates the path before writing.
-      // We fire-and-forget here and report optimistically; errors are logged
-      // by the engine. Callers that need the result can await the returned promise.
-      engine.export(filePath).catch((err: unknown) => {
+      try {
+        await engine.export(filePath);
+      } catch (err: unknown) {
         logger.warn('[ReplayCommandHandler] export failed', { filePath, err: summarizeError(err) });
-      });
-      logger.info('[ReplayCommandHandler] export triggered', { filePath, runId: snap.runId });
+        return {
+          ok: false,
+          output: `Report export failed, no file was written: ${summarizeError(err)}\n  Path: ${filePath}\n  Use a path inside the project directory or the temp directory.`,
+        };
+      }
+      logger.info('[ReplayCommandHandler] export written', { filePath, runId: snap.runId });
 
       return {
         ok: true,
-        output: `Report export started: ${filePath}\n  Run: ${snap.runId}\n  Revisions: ${snap.totalRevisions}\n  Mismatches: ${snap.mismatches.length}`,
+        output: `Report exported: ${filePath}\n  Run: ${snap.runId}\n  Revisions: ${snap.totalRevisions}\n  Mismatches: ${snap.mismatches.length}`,
       };
     }
 

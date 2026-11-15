@@ -55,3 +55,17 @@ test('Work result paging remains reachable while Ctrl+PageDown independently pag
   expect(frame()).toContain('report line 0');
   workspace.close();
 });
+
+test('enum-typed ledger fields cannot carry terminal escapes into the rendered lines', async () => {
+  const { nativeWorkLedgerLines } = await import('../../renderer/native-work-ledger.ts');
+  const esc = '\u001b[31m';
+  const state = { status: 'ready', cursor: 0, history: [], snapshot: { projectId: 'p', cursor: 0, revision: 0, works: [{
+    work: { source: null, id: 'w', title: 't', goal: 'g', revision: 1, criteriaRevision: 1, reportedState: `${esc}complete`, currentAttemptId: 'a', createdAt: 1, updatedAt: 1, criteria: [] },
+    attempt: { id: 'a', workId: 'w', predecessorId: null, ownerId: 'o', revision: 1, state: `${esc}running`, report: null, blocker: null, createdAt: 1, updatedAt: 1 },
+    verification: { state: `${esc}stale`, reason: 'r', evidence: { id: 'e', target: { workId: 'w', workRevision: 1, criteriaRevision: 1, attemptId: 'a', attemptRevision: 1 }, outcome: `${esc}verified`, reason: 'r', source: `${esc}host_check`, criteriaResults: [{ criterionIndex: 0, status: `${esc}met`, references: [] }], actorId: 'x', at: 1, references: [{ kind: `${esc}commit`, ref: 'c' }] } },
+    attention: [{ kind: `${esc}verification`, reason: 'r' }],
+  }] } } as unknown as NativeWorkLedgerState;
+  const lines = nativeWorkLedgerLines(state);
+  for (const line of lines) expect(/[\u0000-\u001f\u007f-\u009f]/.test(line)).toBe(false);
+  expect(lines.join('\n')).toContain('complete');
+});

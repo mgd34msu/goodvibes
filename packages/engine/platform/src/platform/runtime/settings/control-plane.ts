@@ -12,9 +12,11 @@ import {
   readBundleRisk,
   makeRollbackToken,
   readStore,
+  readStoreForWrite,
   sourcePriority,
   toLayerRecord,
   trimStore,
+  withStoreLock,
   writeStore,
   type ManagedBundleChange,
   type ManagedRollbackRecord,
@@ -50,28 +52,37 @@ export type {
 };
 
 export function recordSettingsSyncEvent(event: SettingsSyncEvent, configDir: string): void {
-  const store = readStore(configDir);
-  writeStore(trimStore({ ...store, events: [...store.events, event] }), configDir);
+  withStoreLock(configDir, () => {
+    const store = readStoreForWrite(configDir);
+    writeStore(trimStore({ ...store, events: [...store.events, event] }), configDir);
+  });
 }
 
 export function recordSettingsSyncFailure(surface: SyncSurface, message: string, configDir: string): void {
-  const store = readStore(configDir);
-  writeStore(trimStore({
-    ...store,
-    failures: [...store.failures, { surface, message, timestamp: Date.now() }],
-  }), configDir);
+  withStoreLock(configDir, () => {
+    const store = readStoreForWrite(configDir);
+    writeStore(trimStore({
+      ...store,
+      failures: [...store.failures, { surface, message, timestamp: Date.now() }],
+    }), configDir);
+  });
 }
 
 export function isManagedSettingLocked(key: ConfigKey, configDir: string): boolean {
   return readStore(configDir).managedLocks.some((entry) => entry.key === key);
 }
 
+/** Guards writes, so an unreadable store throws instead of reading as "no locks". */
 export function getManagedSettingLock(key: ConfigKey, configDir: string): ManagedSettingLock | null {
-  return readStore(configDir).managedLocks.find((entry) => entry.key === key) ?? null;
+  return readStoreForWrite(configDir).managedLocks.find((entry) => entry.key === key) ?? null;
 }
 
 export function setManagedSettingLock(key: ConfigKey, source: string, reason: string, configDir: string): void {
-  const store = readStore(configDir);
+  withStoreLock(configDir, () => setManagedSettingLockLocked(key, source, reason, configDir));
+}
+
+function setManagedSettingLockLocked(key: ConfigKey, source: string, reason: string, configDir: string): void {
+  const store = readStoreForWrite(configDir);
   const nextLocks = store.managedLocks.filter((entry) => entry.key !== key);
   nextLocks.push({ key, source, reason, updatedAt: Date.now() });
   const nextManaged = store.managedSettings.map((entry) => entry.key === key
@@ -85,7 +96,11 @@ export function setManagedSettingLock(key: ConfigKey, source: string, reason: st
 }
 
 export function clearManagedSettingLock(key: ConfigKey, configDir: string): boolean {
-  const store = readStore(configDir);
+  return withStoreLock(configDir, () => clearManagedSettingLockLocked(key, configDir));
+}
+
+function clearManagedSettingLockLocked(key: ConfigKey, configDir: string): boolean {
+  const store = readStoreForWrite(configDir);
   const nextLocks = store.managedLocks.filter((entry) => entry.key !== key);
   if (nextLocks.length === store.managedLocks.length) return false;
   const nextManaged = store.managedSettings.map((entry) => entry.key === key
@@ -108,34 +123,60 @@ export function applySettingsSyncBundle(
   configManager: ConfigManager,
   bundle: SettingsSyncBundle,
   path: string,
-): { appliedCount: number; conflictCount: number } {
+): { appliedCount: number; conflictCount: number; skippedLockedKeys?: readonly ConfigKey[] } {
+  const configDir = getConfigControlPlaneDir(configManager);
+  return withStoreLock(configDir, () => applySettingsSyncBundleLocked(configManager, bundle, path, configDir));
+}
+
+function applySettingsSyncBundleLocked(
+  configManager: ConfigManager,
+  bundle: SettingsSyncBundle,
+  path: string,
+  configDir: string,
+): { appliedCount: number; conflictCount: number; skippedLockedKeys?: readonly ConfigKey[] } {
   const before = configSnapshot(configManager);
-  const store = readStore(getConfigControlPlaneDir(configManager));
+  const store = readStoreForWrite(configDir);
   const nextSynced: SettingsLayerRecord[] = [...store.syncedSettings];
   const nextConflicts = store.conflicts.filter((entry) => entry.source !== 'synced');
+  const lockedKeys = new Set(store.managedLocks.map((entry) => entry.key));
+  const accepted: Array<{ key: ConfigKey; value: unknown }> = [];
+  const skippedLockedKeys: ConfigKey[] = [];
+  for (const [rawKey, nextValue] of Object.entries(bundle.settings)) {
+    if (!CONFIG_SCHEMA.some((entry) => entry.key === rawKey)) continue;
+    const key = rawKey as ConfigKey;
+    // A managed lock outranks a pulled value; the managed layer is the effective one.
+    if (lockedKeys.has(key)) { skippedLockedKeys.push(key); continue; }
+    accepted.push({ key, value: nextValue });
+  }
+  // Refuse the whole bundle before the first write: setDynamic persists per key.
+  for (const { key, value } of accepted) configManager.validateDynamic(key, value, { bypassManagedLock: true });
   let appliedCount = 0;
   let conflictCount = 0;
-  for (const [rawKey, nextValue] of Object.entries(bundle.settings)) {
-    const schema = CONFIG_SCHEMA.find((entry) => entry.key === rawKey);
-    if (!schema) continue;
-    const key = rawKey as ConfigKey;
-    const previousValue = before[key]!;
-    if (JSON.stringify(previousValue) !== JSON.stringify(nextValue)) {
-      conflictCount++;
-      nextConflicts.push({
-        key,
-        localValue: structuredClone(previousValue),
-        incomingValue: structuredClone(nextValue),
-        source: 'synced',
-        path,
-        updatedAt: Date.now(),
-      });
+  const written: ConfigKey[] = [];
+  try {
+    for (const { key, value: nextValue } of accepted) {
+      const previousValue = before[key]!;
+      if (JSON.stringify(previousValue) !== JSON.stringify(nextValue)) {
+        conflictCount++;
+        nextConflicts.push({
+          key,
+          localValue: structuredClone(previousValue),
+          incomingValue: structuredClone(nextValue),
+          source: 'synced',
+          path,
+          updatedAt: Date.now(),
+        });
+      }
+      configManager.setDynamic(key, nextValue, { bypassManagedLock: true });
+      written.push(key);
+      const filtered = nextSynced.filter((entry) => entry.key !== key);
+      filtered.push(toLayerRecord(key, nextValue, 'synced', 'settings-sync', `Pulled from ${path}`, path, false));
+      nextSynced.splice(0, nextSynced.length, ...filtered);
+      appliedCount++;
     }
-    configManager.setDynamic(key, nextValue, { bypassManagedLock: true });
-    const filtered = nextSynced.filter((entry) => entry.key !== key);
-    filtered.push(toLayerRecord(key, nextValue, 'synced', 'settings-sync', `Pulled from ${path}`, path, false));
-    nextSynced.splice(0, nextSynced.length, ...filtered);
-    appliedCount++;
+  } catch (error) {
+    restoreWrittenSettings(configManager, written, before);
+    throw error;
   }
   writeStore(trimStore({
     ...store,
@@ -146,10 +187,21 @@ export function applySettingsSyncBundle(
       direction: 'pull',
       path,
       timestamp: Date.now(),
-      detail: `${appliedCount} settings pulled`,
+      detail: `${appliedCount} settings pulled${skippedLockedKeys.length > 0 ? `, ${skippedLockedKeys.length} skipped because managed locks own them: ${skippedLockedKeys.join(', ')}` : ''}`,
     }],
-  }), getConfigControlPlaneDir(configManager));
-  return { appliedCount, conflictCount };
+  }), configDir);
+  return { appliedCount, conflictCount, ...(skippedLockedKeys.length > 0 ? { skippedLockedKeys } : {}) };
+}
+
+/** Put keys written by a bundle that then failed back to the values they had, so a failed apply leaves no half-applied state. */
+function restoreWrittenSettings(configManager: ConfigManager, written: readonly ConfigKey[], before: Readonly<Record<ConfigKey, unknown>>): void {
+  for (const key of written) {
+    try {
+      configManager.setDynamic(key, structuredClone(before[key]), { bypassManagedLock: true });
+    } catch {
+      // Best effort: the original error is the one reported.
+    }
+  }
 }
 
 export function resolveSettingsSyncConflict(
@@ -158,7 +210,16 @@ export function resolveSettingsSyncConflict(
   resolution: SettingsConflictResolution,
 ): boolean {
   const configDir = getConfigControlPlaneDir(configManager);
-  const store = readStore(configDir);
+  return withStoreLock(configDir, () => resolveSettingsSyncConflictLocked(configManager, key, resolution, configDir));
+}
+
+function resolveSettingsSyncConflictLocked(
+  configManager: ConfigManager,
+  key: ConfigKey,
+  resolution: SettingsConflictResolution,
+  configDir: string,
+): boolean {
+  const store = readStoreForWrite(configDir);
   const conflict = store.conflicts.find((entry) => entry.key === key && entry.source === 'synced');
   if (!conflict) return false;
 
@@ -198,16 +259,36 @@ export function resolveSettingsSyncConflict(
   return true;
 }
 
-export async function stageManagedSettingsBundle(
+/** Refuse anything that is not a version 1 managed settings bundle, naming what is wrong. */
+function assertManagedBundleShape(bundle: unknown): asserts bundle is ManagedSettingsBundle {
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    throw new Error('Not a managed settings bundle: expected a JSON object with version, profileName and settings.');
+  }
+  const candidate = bundle as Record<string, unknown>;
+  if (candidate.version !== 1) {
+    throw new Error(`Unsupported managed settings bundle version ${JSON.stringify(candidate.version)}: this build reads version 1. Re-export the bundle from a matching release.`);
+  }
+  if (typeof candidate.profileName !== 'string' || candidate.profileName.trim() === '') {
+    throw new Error('Not a managed settings bundle: profileName must be a non-empty string.');
+  }
+  if (!candidate.settings || typeof candidate.settings !== 'object' || Array.isArray(candidate.settings)) {
+    throw new Error('Not a managed settings bundle: settings must be an object of key/value pairs.');
+  }
+}
+
+/** Build the stage for a bundle without persisting anything. */
+async function buildManagedStage(
   configManager: ConfigManager,
   bundle: ManagedSettingsBundle,
   path: string,
 ): Promise<StagedManagedBundle> {
+  assertManagedBundleShape(bundle);
   const current = configSnapshot(configManager);
   const changes: ManagedBundleChange[] = [];
+  const ignoredKeys: string[] = [];
   for (const [rawKey, nextValue] of Object.entries(bundle.settings)) {
     const schema = CONFIG_SCHEMA.find((entry) => entry.key === rawKey);
-    if (!schema) continue;
+    if (!schema) { ignoredKeys.push(rawKey); continue; }
     const key = rawKey as ConfigKey;
     const previousValue = current[key]!;
     changes.push({
@@ -220,7 +301,7 @@ export async function stageManagedSettingsBundle(
       reason: `Managed bundle ${bundle.profileName}`,
     });
   }
-  const stage: StagedManagedBundle = {
+  return {
     id: makeRollbackToken(),
     profileName: bundle.profileName,
     path,
@@ -228,19 +309,31 @@ export async function stageManagedSettingsBundle(
     changeCount: changes.filter((entry) => entry.changed).length,
     risk: await readBundleRisk(changes, 'runtime.settings.stage-bundle-risk'),
     changes,
+    ...(ignoredKeys.length > 0 ? { ignoredKeys } : {}),
   };
-  const store = readStore(getConfigControlPlaneDir(configManager));
-  writeStore(trimStore({
-    ...store,
-    stagedManagedBundle: stage,
-    events: [...store.events, {
-      surface: 'managed',
-      direction: 'import',
-      path,
-      timestamp: Date.now(),
-      detail: `${stage.changeCount} managed settings staged from ${bundle.profileName}`,
-    }],
-  }), getConfigControlPlaneDir(configManager));
+}
+
+export async function stageManagedSettingsBundle(
+  configManager: ConfigManager,
+  bundle: ManagedSettingsBundle,
+  path: string,
+): Promise<StagedManagedBundle> {
+  const stage = await buildManagedStage(configManager, bundle, path);
+  const configDir = getConfigControlPlaneDir(configManager);
+  withStoreLock(configDir, () => {
+    const store = readStoreForWrite(configDir);
+    writeStore(trimStore({
+      ...store,
+      stagedManagedBundle: stage,
+      events: [...store.events, {
+        surface: 'managed',
+        direction: 'import',
+        path,
+        timestamp: Date.now(),
+        detail: `${stage.changeCount} managed settings staged from ${stage.profileName}${stage.ignoredKeys ? `; ignored unknown keys: ${stage.ignoredKeys.join(', ')}` : ''}`,
+      }],
+    }), configDir);
+  });
   return stage;
 }
 
@@ -248,51 +341,95 @@ export async function applyStagedManagedBundle(
   configManager: ConfigManager,
   selectedKeys?: readonly ConfigKey[],
 ): Promise<{ rollbackToken: string; appliedCount: number; remainingCount: number }> {
-  const store = readStore(getConfigControlPlaneDir(configManager));
-  const stage = store.stagedManagedBundle;
-  if (!stage) {
-    throw new Error('No staged managed settings bundle is available.');
-  }
+  const configDir = getConfigControlPlaneDir(configManager);
   const selectedSet = selectedKeys && selectedKeys.length > 0
     ? new Set(selectedKeys)
     : null;
-  const stagedChanges = selectedSet
-    ? stage.changes.filter((change) => selectedSet.has(change.key))
-    : [...stage.changes];
-  if (stagedChanges.length === 0) {
+  const planned = readStoreForWrite(configDir).stagedManagedBundle;
+  if (!planned) {
+    throw new Error('No staged managed settings bundle is available.');
+  }
+  const split = (stage: StagedManagedBundle) => {
+    const staged = selectedSet
+      ? stage.changes.filter((change) => selectedSet.has(change.key))
+      : [...stage.changes];
+    return { staged, remaining: stage.changes.filter((change) => !staged.some((candidate) => candidate.key === change.key)) };
+  };
+  const plan = split(planned);
+  if (plan.staged.length === 0) {
     throw new Error('No staged managed settings matched the requested keys.');
   }
-  const remainingChanges = stage.changes.filter((change) => !stagedChanges.some((candidate) => candidate.key === change.key));
+  // The risk read is a judgment call that awaits; read it first and take the store
+  // only afterwards, so nothing written while waiting is overwritten.
+  const remainingRisk = plan.remaining.length > 0
+    ? await readBundleRisk(plan.remaining, 'runtime.settings.remaining-bundle-risk')
+    : undefined;
+  return withStoreLock(configDir, () => applyPlannedManagedBundleLocked(configManager, configDir, planned, selectedSet, remainingRisk));
+}
+
+function applyPlannedManagedBundleLocked(
+  configManager: ConfigManager,
+  configDir: string,
+  planned: StagedManagedBundle,
+  selectedSet: ReadonlySet<ConfigKey> | null,
+  remainingRisk: StagedManagedBundle['risk'] | undefined,
+): { rollbackToken: string; appliedCount: number; remainingCount: number } {
+  const split = (stage: StagedManagedBundle) => {
+    const staged = selectedSet
+      ? stage.changes.filter((change) => selectedSet.has(change.key))
+      : [...stage.changes];
+    return { staged, remaining: stage.changes.filter((change) => !staged.some((candidate) => candidate.key === change.key)) };
+  };
+  const store = readStoreForWrite(configDir);
+  const stage = store.stagedManagedBundle;
+  if (!stage || stage.id !== planned.id || stage.changes.map((change) => change.key).join('\0') !== planned.changes.map((change) => change.key).join('\0')) {
+    throw new Error('The staged managed settings bundle changed while it was being applied; nothing was applied. Review it with /managed staged and apply again.');
+  }
+  const { staged: stagedChanges, remaining: remainingChanges } = split(stage);
+  const before = configSnapshot(configManager);
+  // Refuse the whole apply before the first write: setDynamic persists per key.
+  for (const change of stagedChanges) configManager.validateDynamic(change.key, change.nextValue, { bypassManagedLock: true });
   const previousValues: Partial<Record<ConfigKey, unknown>> = {};
-  const nextManaged = store.managedSettings.filter((entry) => !stagedChanges.some((change) => change.key === entry.key));
-  const nextLocks = store.managedLocks.filter((entry) => !stagedChanges.some((change) => change.key === entry.key));
+  const appliedKeys = stagedChanges.map((change) => change.key);
+  const replacedLayers = store.managedSettings.filter((entry) => appliedKeys.includes(entry.key));
+  const replacedLocks = store.managedLocks.filter((entry) => appliedKeys.includes(entry.key));
+  const nextManaged = store.managedSettings.filter((entry) => !appliedKeys.includes(entry.key));
+  const nextLocks = store.managedLocks.filter((entry) => !appliedKeys.includes(entry.key));
   const restoredKeys: ConfigKey[] = [];
+  const written: ConfigKey[] = [];
   const rollbackToken = makeRollbackToken();
-  for (const change of stagedChanges) {
-    previousValues[change.key] = structuredClone(change.previousValue);
-    configManager.setDynamic(change.key, change.nextValue, { bypassManagedLock: true });
-    nextManaged.push(toLayerRecord(
-      change.key,
-      change.nextValue,
-      'managed',
-      change.source,
-      change.reason,
-      stage.path,
-      true,
-    ));
-    nextLocks.push({
-      key: change.key,
-      source: change.source,
-      reason: change.reason,
-      updatedAt: Date.now(),
-    });
-    if (change.changed) restoredKeys.push(change.key);
+  try {
+    for (const change of stagedChanges) {
+      // The value to roll back to is the one in effect now, not the one seen at staging.
+      previousValues[change.key] = structuredClone(before[change.key]);
+      configManager.setDynamic(change.key, change.nextValue, { bypassManagedLock: true });
+      written.push(change.key);
+      nextManaged.push(toLayerRecord(
+        change.key,
+        change.nextValue,
+        'managed',
+        change.source,
+        change.reason,
+        stage.path,
+        true,
+      ));
+      nextLocks.push({
+        key: change.key,
+        source: change.source,
+        reason: change.reason,
+        updatedAt: Date.now(),
+      });
+      if (JSON.stringify(before[change.key]) !== JSON.stringify(change.nextValue)) restoredKeys.push(change.key);
+    }
+  } catch (error) {
+    restoreWrittenSettings(configManager, written, before);
+    throw error;
   }
   const nextStage = remainingChanges.length > 0
     ? {
         ...stage,
         changeCount: remainingChanges.filter((entry) => entry.changed).length,
-        risk: await readBundleRisk(remainingChanges, 'runtime.settings.remaining-bundle-risk'),
+        risk: remainingRisk ?? 'unassessed',
         changes: remainingChanges,
       }
     : undefined;
@@ -310,6 +447,9 @@ export async function applyStagedManagedBundle(
         appliedAt: Date.now(),
         restoredKeys,
         previousValues,
+        appliedKeys,
+        ...(replacedLayers.length > 0 ? { replacedLayers } : {}),
+        ...(replacedLocks.length > 0 ? { replacedLocks } : {}),
       },
     ],
     events: [...store.events, {
@@ -319,17 +459,37 @@ export async function applyStagedManagedBundle(
       timestamp: Date.now(),
       detail: `${restoredKeys.length} managed settings applied from ${stage.profileName}${remainingChanges.length > 0 ? ` (${remainingChanges.length} still staged)` : ''}`,
     }],
-  }), getConfigControlPlaneDir(configManager));
+  }), configDir);
   return { rollbackToken, appliedCount: restoredKeys.length, remainingCount: remainingChanges.length };
 }
 
 export function rollbackManagedApply(configManager: ConfigManager, token: string): number {
-  const store = readStore(getConfigControlPlaneDir(configManager));
+  const configDir = getConfigControlPlaneDir(configManager);
+  return withStoreLock(configDir, () => rollbackManagedApplyLocked(configManager, token, configDir));
+}
+
+function rollbackManagedApplyLocked(configManager: ConfigManager, token: string, configDir: string): number {
+  const store = readStoreForWrite(configDir);
   const record = store.rollbackHistory.find((entry) => entry.token === token);
-  if (!record) throw new Error(`Unknown managed rollback token: ${token}`);
+  if (!record) throw new Error(`Unknown managed rollback token: ${token}. A token works once; rolled-back tokens are removed from the history (see /managed rollback-history).`);
+  const releasedKeys = record.appliedKeys ?? record.restoredKeys;
+  // A later apply recorded this record's layers and values as what it replaced; rolling this one back first
+  // would let the later rollback re-install them. Roll back newest first.
+  const laterOverlap = store.rollbackHistory
+    .slice(store.rollbackHistory.indexOf(record) + 1)
+    .find((entry) => (entry.appliedKeys ?? entry.restoredKeys).some((key) => releasedKeys.includes(key)));
+  if (laterOverlap) {
+    throw new Error(`Managed rollback ${token} was not performed: the later apply ${laterOverlap.token} changed some of the same settings. Roll back ${laterOverlap.token} first, then ${token}.`);
+  }
   let restored = 0;
-  const nextManaged = store.managedSettings.filter((entry) => !record.restoredKeys.includes(entry.key));
-  const nextLocks = store.managedLocks.filter((entry) => !record.restoredKeys.includes(entry.key));
+  const nextManaged = [
+    ...store.managedSettings.filter((entry) => !releasedKeys.includes(entry.key)),
+    ...(record.replacedLayers ?? []),
+  ].sort((a, b) => a.key.localeCompare(b.key));
+  const nextLocks = [
+    ...store.managedLocks.filter((entry) => !releasedKeys.includes(entry.key)),
+    ...(record.replacedLocks ?? []),
+  ].sort((a, b) => a.key.localeCompare(b.key));
   for (const key of record.restoredKeys) {
     const previousValue = record.previousValues[key]!;
     if (previousValue !== undefined) {
@@ -346,6 +506,7 @@ export function rollbackManagedApply(configManager: ConfigManager, token: string
     ...store,
     managedSettings: nextManaged,
     managedLocks: nextLocks,
+    rollbackHistory: store.rollbackHistory.filter((entry) => entry.token !== token),
     events: [...store.events, {
       surface: 'managed',
       direction: 'rollback',
@@ -353,7 +514,7 @@ export function rollbackManagedApply(configManager: ConfigManager, token: string
       timestamp: Date.now(),
       detail: `${restored} managed settings rolled back from ${record.profileName}`,
     }],
-  }), getConfigControlPlaneDir(configManager));
+  }), configDir);
   return restored;
 }
 
@@ -523,6 +684,7 @@ export function formatStagedManagedBundleReview(configManager: ConfigManager): s
     `  changeCount: ${stage.changeCount}/${stage.changes.length}`,
     `  path: ${stage.path}`,
   ];
+  if (stage.ignoredKeys) lines.push(`  ignored unknown keys: ${stage.ignoredKeys.join(', ')}`);
   for (const change of stage.changes.slice(0, 20)) {
     lines.push(`  ${change.key}`);
     lines.push(`    changed: ${change.changed ? 'yes' : 'no'}`);
@@ -541,16 +703,18 @@ export async function inspectManagedSettingsBundle(
   bundle: ManagedSettingsBundle,
   path: string,
 ): Promise<string> {
-  const stage = await stageManagedSettingsBundle(configManager, bundle, path);
+  // Read-only: staging would replace whatever bundle is staged now.
+  const stage = await buildManagedStage(configManager, bundle, path);
   const changePreview = stage.changes.slice(0, 8).map((change) =>
     `  ${change.key}  ${change.changed ? 'change' : 'same'}  source=${change.source}`);
   return [
-    'Managed Settings Review',
+    'Managed Settings Review (inspected only; nothing staged)',
     `  profileName: ${bundle.profileName}`,
     `  importedAt: ${new Date(stage.importedAt).toISOString()}`,
     `  changes: ${stage.changeCount}/${stage.changes.length}`,
     `  risk: ${stage.risk}`,
     ...changePreview,
+    ...(stage.ignoredKeys ? [`  ignored unknown keys: ${stage.ignoredKeys.join(', ')}`] : []),
   ].join('\n');
 }
 

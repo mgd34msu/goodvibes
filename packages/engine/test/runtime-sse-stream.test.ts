@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { openServerSentEventStream } from './_helpers/runtime-seam.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 
 function createSseResponse(chunks: readonly string[], status = 200): Response {
   const encoder = new TextEncoder();
@@ -45,7 +46,7 @@ describe('openServerSentEventStream', () => {
       },
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitFor(() => readyPayloads.length >= 1 && events.length >= 1);
     stop();
 
     expect(readyPayloads).toEqual([{ ok: true }]);
@@ -116,7 +117,7 @@ describe('openServerSentEventStream', () => {
       },
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitFor(() => events.length >= 2 && reconnects.length >= 1);
 
     expect(events).toEqual([
       { eventName: 'telemetry', payload: { step: 1 } },
@@ -146,9 +147,95 @@ test('an incomplete SSE frame cannot advance the replay cursor', async () => {
   const received: unknown[] = [];
   const close = await openServerSentEventStream(createFetchStub(async (_url, init) => {
     ids.push(new Headers(init?.headers).get('Last-Event-ID'));
-    return createSseResponse(++calls === 1 ? ['id: 1\ndata: first\n\nid: 2\ndata: lost'] : ['id: 2\ndata: replayed\n\n']);
+    // After the replay the server keeps the stream open: a stream that delivers a frame on
+    // every connect and then closes would, rightly, reconnect for as long as it keeps delivering.
+    if (++calls > 2) return new Response(new ReadableStream({ start() {} }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    return createSseResponse(calls === 1 ? ['id: 1\ndata: first\n\nid: 2\ndata: lost'] : ['id: 2\ndata: replayed\n\n']);
   }), 'https://example.test/events', { onEvent: (_name, data) => received.push(data) },
   { reconnect: { enabled: true, baseDelayMs: 1, maxDelayMs: 1, maxAttempts: 1 } });
-  await new Promise(resolve => setTimeout(resolve, 30)); close();
+  await waitFor(() => received.length >= 2); close();
   expect(ids[1]).toBe('1'); expect(received).toEqual(['first', 'replayed']);
+});
+
+test('a stream that is greeted with ready and closed at once runs out of reconnect attempts', async () => {
+  let calls = 0;
+  const terminated: number[] = [];
+  await openServerSentEventStream(createFetchStub(async () => {
+    calls += 1;
+    return createSseResponse(['event: ready\ndata: {"ok":true}\n\n']);
+  }), 'https://example.test/events', { onTerminate: (info) => terminated.push(info.reconnectAttempts), onError: () => {} },
+  { reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0, maxAttempts: 2 } });
+  await waitFor(() => terminated.length >= 1);
+  expect(calls).toBe(3);
+  expect(terminated).toEqual([3]);
+});
+
+test('a Retry-After on a refused reconnect is a floor under the reconnect delay', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const close = await openServerSentEventStream(createFetchStub(async () => {
+    calls += 1;
+    if (calls === 1) return createSseResponse([]);
+    return new Response('slow down', { status: 429, headers: { 'Retry-After': '7' } });
+  }), 'https://example.test/events', {
+    onReconnect: (info) => { delays.push(info.delayMs); if (delays.length >= 2) close(); },
+    onError: () => {},
+  }, { reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0, maxAttempts: 5 } });
+  await waitFor(() => delays.length >= 2);
+  expect(delays).toEqual([0, 7000]);
+});
+
+test('a stream that stayed connected long enough starts a fresh reconnect budget when it drops', async () => {
+  const realNow = Date.now;
+  let clock = 1_000_000;
+  Date.now = () => clock;
+  try {
+    const attempts: number[] = [];
+    const terminated: number[] = [];
+    // Closing inside the callback stops the loop synchronously; a zero-delay reconnect loop
+    // yields only microtasks, so polling with waitFor would never get a turn.
+    const close = await openServerSentEventStream(createFetchStub(async () => (
+      createSseResponse(['event: ready\ndata: {"ok":true}\n\n'])
+    )), 'https://example.test/events', {
+      // The greeting arrives after the connection is recorded, so this is the connection living a minute.
+      onReady: () => { clock += 60_000; },
+      onReconnect: (info) => { attempts.push(info.attempt); if (attempts.length >= 6) close(); },
+      onTerminate: (info) => terminated.push(info.reconnectAttempts),
+      onError: () => {},
+    }, { reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0, maxAttempts: 2 } });
+    await waitFor(() => attempts.length >= 6);
+    expect(attempts).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(terminated).toEqual([]);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('a stream that stayed connected long enough and then fails with a read error starts a fresh reconnect budget', async () => {
+  const realNow = Date.now;
+  let clock = 1_000_000;
+  Date.now = () => clock;
+  try {
+    const attempts: number[] = [];
+    const terminated: number[] = [];
+    const encoder = new TextEncoder();
+    const close = await openServerSentEventStream(createFetchStub(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: ready\ndata: {"ok":true}\n\n'));
+      },
+      pull() {
+        throw new Error('connection reset');
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })), 'https://example.test/events', {
+      onReady: () => { clock += 60_000; },
+      onReconnect: (info) => { attempts.push(info.attempt); if (attempts.length >= 6) close(); },
+      onTerminate: (info) => terminated.push(info.reconnectAttempts),
+      onError: () => {},
+    }, { reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0, maxAttempts: 2 } });
+    await waitFor(() => attempts.length >= 6);
+    expect(attempts).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(terminated).toEqual([]);
+  } finally {
+    Date.now = realNow;
+  }
 });

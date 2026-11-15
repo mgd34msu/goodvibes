@@ -536,9 +536,6 @@ function compileTimePayloadExactness(): void {
   }
 }
 
-describe('compile-time payload exactness', () => {
-});
-
 describe('write payloads conform to the declared contract input', () => {
   const WRITE_RESULT = { ok: true, reason: null, changes: [], disclosure: 'Noted.' };
 

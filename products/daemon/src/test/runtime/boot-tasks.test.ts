@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { setImmediate } from 'node:timers/promises';
 import { createDaemonBootController, type DaemonBootAttachment, type DaemonBootOperations } from '../../runtime/boot-tasks.js';
 
 function gate<T = void>() {
@@ -7,6 +8,9 @@ function gate<T = void>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+/** Lets every promise continuation already queued run, so an absence check is not satisfied only because nothing had yet had a turn. */
+async function drain(): Promise<void> { for (let turn = 0; turn < 5; turn++) await setImmediate(); }
 
 function fixture(overrides: Partial<DaemonBootOperations> = {}) {
   const events: string[] = [];
@@ -68,6 +72,7 @@ test('held acquisition is closed after arrival without late attachment or later 
   expect(closed).toBe(false);
   acquired.resolve({ attach() { fx.events.push('late-attachment'); }, close() { cleanupEntered.resolve(); return cleanup.promise; } });
   await cleanupEntered.promise;
+  await drain();
   expect(closed).toBe(false);
   expect(fx.events).not.toContain('late-attachment');
   cleanup.resolve();
@@ -108,7 +113,7 @@ test('shutdown fences later tasks while an uncancellable memory fold remains vis
   const starting = fx.controller.start(); await entered.promise;
   let done = false;
   const closing = fx.controller.close().then(() => { done = true; });
-  await Promise.resolve();
+  await drain();
   expect(done).toBe(false);
   expect(fx.controller.snapshot().state).toBe('closing');
   expect(fx.controller.snapshot().steps.find((step) => step.name === 'memory-fold')?.state).toBe('running');
@@ -187,6 +192,7 @@ test('close owns a held reporting promise and fences subsequent boot steps', asy
   await entered.promise;
   let closed = false;
   const closing = fx.controller.close().then(() => { closed = true; });
+  await drain();
   expect(closed).toBe(false);
   expect(fx.controller.snapshot().state).toBe('closing');
   expect(fx.controller.snapshot().steps.find((step) => step.name === 'memory-fold')?.state).toBe('failed');

@@ -3,6 +3,12 @@ import type { ZodType } from 'zod/v4';
 import type { HttpTransport } from './http.js';
 import { openRawServerSentEventStream, type ServerSentEventHandlers } from './sse-stream.js';
 
+/**
+ * Said on a response-shape failure of a request that changes state: the
+ * transport only gets here after a 2xx answer, so the daemon already acted.
+ */
+const REQUEST_APPLIED_NOTICE = 'The daemon answered successfully, so this request was applied; only its response did not match the expected shape. Do not repeat the request: check the resulting state instead.';
+
 export interface ContractRouteDefinition {
   readonly method: string;
   readonly path: string;
@@ -64,9 +70,10 @@ export async function invokeContractRoute<T = unknown>(
       const fieldPath = issue ? issue.path.join('.') || '(root)' : '(unknown)';
       const expected = issue ? (issue as { readonly expected?: string }).expected ?? issue.code : 'unknown';
       const received = issue ? (issue as { readonly received?: string }).received ?? 'unknown' : 'unknown';
+      const applied = !['GET', 'HEAD'].includes(route.method.toUpperCase());
       throw new ContractError(
-        `Response validation failed for "${route.method} ${route.path}": field "${fieldPath}" expected ${expected} but received ${received}. Ensure the server is running the matching GoodVibes contract version.`,
-        { source: 'contract' },
+        `Response validation failed for "${route.method} ${route.path}": field "${fieldPath}" expected ${expected} but received ${received}. Ensure the server is running the matching GoodVibes contract version.${applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''}`,
+        { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
       );
     }
     return result.data as T;

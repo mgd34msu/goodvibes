@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { basename, join } from 'node:path';

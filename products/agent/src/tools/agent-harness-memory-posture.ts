@@ -17,8 +17,10 @@ import { modelReadingServicePath } from './agent-harness-model-reading-source.ts
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { EXTERNAL_MEMORY_RECEIPT_FIELDS, EXTERNAL_MEMORY_REQUIRED_CONTRACTS, aggregateExternalProviderLiveRecord, aggregateExternalProviderSetupStatus, externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence, externalProviderLiveReady, liveRecordForProvider, receiptEvidenceForProvider, setupStatusFromLiveRecord } from './agent-harness-memory-external-providers.ts';
-import type { ExternalMemoryProviderCatalogEntry, MemoryExternalProviderContractCheck, MemoryExternalProviderContractStatus, MemoryExternalProviderLiveRecord, MemoryExternalProviderReceiptContract, MemoryExternalProviderReceiptEvidence, MemoryExternalProviderRoute, MemoryExternalProviderSetupGuide, MemoryExternalProviderStatus, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
+import type { ExternalMemoryProviderCatalogEntry, MemoryExternalProviderContractCheck, MemoryExternalProviderContractStatus, MemoryExternalProviderLiveRecord, MemoryExternalProviderReceiptContract, MemoryExternalProviderReceiptEvidence, MemoryExternalProviderReceiptEvidenceList, MemoryExternalProviderRoute, MemoryExternalProviderSetupGuide, MemoryExternalProviderStatus, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 type MemoryPostureStatus = 'ready' | 'needs-review' | 'empty' | 'unavailable';
 type MemoryVectorPostureStatus = 'ready' | 'attention' | 'disabled' | 'unavailable';
@@ -35,9 +37,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(200, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 200);
 }
 
 type MemoryPostureSnapshot = Pick<ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>, 'localMemoryCount' | 'localMemoryReviewQueueCount'
@@ -47,6 +47,15 @@ function memoryPostureSnapshot(context: CommandContext): MemoryPostureSnapshot {
   return { localMemoryCount: memory.count, localMemoryReviewQueueCount: memory.reviewQueueCount, localMemoryPromptActiveCount: memory.promptActiveCount,
     localMemoryTemporallyPendingCount: memory.temporallyPendingCount, localMemoryTemporallyExpiredCount: memory.temporallyExpiredCount,
     sessionMemoryCount: buildAgentWorkspaceSessionMemoryCount(context), embeddingProvider: readConfigString(context, 'provider.embeddingProvider', '(provider default)') };
+}
+
+/**
+ * The facts a long reading must see unchanged. Prompt-active and temporal counts follow the wall
+ * clock, so a memory crossing its validity boundary mid-reading would otherwise look like an edit.
+ */
+function stableMemoryPostureFacts(snapshot: MemoryPostureSnapshot): Pick<MemoryPostureSnapshot, 'localMemoryCount' | 'localMemoryReviewQueueCount' | 'sessionMemoryCount' | 'embeddingProvider'> {
+  return { localMemoryCount: snapshot.localMemoryCount, localMemoryReviewQueueCount: snapshot.localMemoryReviewQueueCount,
+    sessionMemoryCount: snapshot.sessionMemoryCount, embeddingProvider: snapshot.embeddingProvider };
 }
 
 function memoryApi(context: CommandContext): {
@@ -77,10 +86,10 @@ function memoryReadingOptions(context: CommandContext, args: unknown, originalOp
     const service = modelReadingServicePath(context, binding.path);
     if (service !== undefined && service !== null) { if (typeof service !== 'object') throw new ToolInputProjectionError('held'); guards.push(captureCatalogMethods(service, binding.keys)); }
   }
-  const counts = capturePersonalOpsSnapshot(memoryPostureSnapshot(context));
+  const counts = capturePersonalOpsSnapshot(stableMemoryPostureFacts(memoryPostureSnapshot(context)));
   const assertSources = () => { options.signal?.throwIfAborted(); for (const guard of guards) guard(); apiCurrent?.();
     input.assertCurrent(args); if (memoryApi(context) !== api) throw new ToolInputProjectionError('held');
-    counts.assertCurrent(memoryPostureSnapshot(context)); for (const guard of guards) guard(); apiCurrent?.();
+    counts.assertCurrent(stableMemoryPostureFacts(memoryPostureSnapshot(context))); for (const guard of guards) guard(); apiCurrent?.();
   };
   options.retainCurrent?.(assertSources, 'agent.memory.posture-native');
   const assertCurrent = () => { assertMemoryCurrent(options); assertSources(); };
@@ -161,20 +170,53 @@ async function protectMemoryDoctor(value: MemoryDoctorReport, options: CatalogRa
  * instrumentation. Read-only view built from the same durable sidecar the runtime
  * writes; null when there is no active workspace to resolve the path from.
  */
-function readMemoryUsageSummary(context: CommandContext): MemoryUsageSummary | null {
+function readMemoryUsageSummary(context: CommandContext): MemoryUsageRead {
   const shellPaths = context.workspace?.shellPaths;
-  if (!shellPaths) return null;
+  if (!shellPaths) return { summary: null };
   try {
     const store = new MemoryUsageStatsStore(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'learning', 'memory-usage.json'));
-    return store.summary();
-  } catch {
-    return null;
+    const summary = store.summary();
+    // The counters file only ever grows, so a deleted or merged memory keeps its entry. Counting
+    // only memories that still exist keeps the totals and the sampled ids resolvable.
+    if (!memoryApi(context)) return { summary };
+    const liveIds = new Set(buildAgentWorkspaceMemorySnapshot(context).items.map((item) => item.id));
+    return { summary: liveUsageSummary(store, liveIds, summary.signalNote) };
+  } catch (error) {
+    logger.warn('Memory usage counters could not be read', { error: summarizeError(error) });
+    return { summary: null, readError: previewHarnessText(summarizeError(error), 160) };
   }
 }
 
-function buildUsageSection(summary: MemoryUsageSummary | null): Record<string, unknown> {
+export function liveUsageSummary(store: MemoryUsageStatsStore, liveIds: ReadonlySet<string>, signalNote: string, sampleLimit = 5): MemoryUsageSummary {
+  const all = [...liveIds].flatMap((id) => { const entry = store.get(id); return entry ? [{ id, ...entry }] : []; });
+  const everInjected = all.filter((entry) => entry.injectedCount > 0);
+  const everReferenced = all.filter((entry) => entry.referencedCount > 0);
+  const neverReferenced = everInjected.filter((entry) => entry.referencedCount === 0);
+  return {
+    totalTracked: all.length,
+    everInjected: everInjected.length,
+    everReferenced: everReferenced.length,
+    neverReferenced: neverReferenced.length,
+    mostReferenced: [...everReferenced]
+      .sort((left, right) => right.referencedCount - left.referencedCount || (right.lastReferencedAt ?? 0) - (left.lastReferencedAt ?? 0))
+      .slice(0, sampleLimit),
+    neverReferencedSample: [...neverReferenced].sort((left, right) => right.injectedCount - left.injectedCount).slice(0, sampleLimit),
+    signalNote,
+  };
+}
+
+interface MemoryUsageRead {
+  readonly summary: MemoryUsageSummary | null;
+  /** Set when the counters file could not be read, as opposed to there being none. */
+  readonly readError?: string;
+}
+
+function buildUsageSection(read: MemoryUsageRead): Record<string, unknown> {
+  const summary = read.summary;
   if (!summary) {
-    return { status: 'unavailable', signal: 'jev-reading', note: 'No usage instrumentation available in this runtime.' };
+    return read.readError
+      ? { status: 'unavailable', signal: 'jev-reading', note: 'Usage counters exist but could not be read.', readError: read.readError }
+      : { status: 'unavailable', signal: 'jev-reading', note: 'No usage instrumentation available in this runtime.' };
   }
   return {
     status: summary.everInjected > 0 ? 'tracked' : 'empty',
@@ -186,30 +228,51 @@ function buildUsageSection(summary: MemoryUsageSummary | null): Record<string, u
     neverReferenced: summary.neverReferenced,
     mostReferenced: summary.mostReferenced.map((entry) => ({ id: entry.id, injectedCount: entry.injectedCount, referencedCount: entry.referencedCount, lastReferencedAt: entry.lastReferencedAt })),
     neverReferencedSample: summary.neverReferencedSample.map((entry) => ({ id: entry.id, injectedCount: entry.injectedCount, lastInjectedAt: entry.lastInjectedAt })),
-    policy: 'Referenced means the model output overlapped this memory\'s distinctive content (heuristic, not ground truth). Never-referenced injected memories decay first during idle consolidation.',
+    policy: 'Referenced means the model output overlapped this memory\'s distinctive content (heuristic, not ground truth). Never-referenced injected memories decay first during idle consolidation. Counts cover memories that still exist.',
   };
 }
 
-async function readMemoryDoctor(context: CommandContext, options: CatalogRankingOptions): Promise<MemoryDoctorReport | null> {
+/** A status source that throws is logged and named in `errors`, so a failing dependency is not shown as an absent one. */
+function noteMemoryReadFailure(errors: string[] | undefined, source: string, error: unknown): void {
+  logger.warn('Memory posture source could not be read', { source, error: summarizeError(error) });
+  errors?.push(`${source}: ${previewHarnessText(summarizeError(error), 120)}`);
+}
+
+async function readMemoryDoctor(context: CommandContext, options: CatalogRankingOptions, errors?: string[]): Promise<MemoryDoctorReport | null> {
   assertMemoryCurrent(options);
   const memory = memoryApi(context);
   if (!memory || typeof memory.doctor !== 'function') return null;
   let report: MemoryDoctorReport;
   try { report = await awaitMemoryRead(memory.doctor(), options.signal); }
-  catch (error: unknown) { assertMemoryCurrent(options); if (error instanceof ToolInputProjectionError) throw error; return null; }
+  catch (error: unknown) { assertMemoryCurrent(options); if (error instanceof ToolInputProjectionError) throw error; noteMemoryReadFailure(errors, 'memory.doctor', error); return null; }
   assertMemoryCurrent(options);
-  return protectMemoryDoctor(report, options);
+  return protectedMemoryRead(() => protectMemoryDoctor(report, options), options, errors, 'memory.doctor');
 }
 
-async function readVectorStats(context: CommandContext, doctor: MemoryDoctorReport | null, options: CatalogRankingOptions): Promise<MemoryVectorStats | null> {
+/**
+ * A value the redaction layer would not return unchanged is that read's own
+ * unavailable state. A held outcome while the sources moved is still the
+ * call's retry-able outcome and is rethrown.
+ */
+async function protectedMemoryRead<T>(read: () => Promise<T>, options: CatalogRankingOptions, errors: string[] | undefined, source: string): Promise<T | null> {
+  try { return await read(); }
+  catch (error: unknown) {
+    if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
+    assertMemoryCurrent(options); options.assertCurrent?.();
+    noteMemoryReadFailure(errors, source, error);
+    return null;
+  }
+}
+
+async function readVectorStats(context: CommandContext, doctor: MemoryDoctorReport | null, options: CatalogRankingOptions, errors?: string[]): Promise<MemoryVectorStats | null> {
   assertMemoryCurrent(options);
   if (doctor?.vector) return doctor.vector;
   const memory = memoryApi(context);
   if (!memory || typeof memory.vectorStats !== 'function') return null;
   let vector: MemoryVectorStats;
   try { vector = memory.vectorStats(); }
-  catch (error: unknown) { assertMemoryCurrent(options); if (error instanceof ToolInputProjectionError) throw error; return null; }
-  options.assertCurrent?.(); return protectMemoryVector(vector, options);
+  catch (error: unknown) { assertMemoryCurrent(options); if (error instanceof ToolInputProjectionError) throw error; noteMemoryReadFailure(errors, 'memory.vectorStats', error); return null; }
+  options.assertCurrent?.(); return protectedMemoryRead(() => protectMemoryVector(vector, options), options, errors, 'memory.vectorStats');
 }
 
 function memoryStatus(snapshot: MemoryPostureSnapshot, memoryAvailable: boolean): MemoryPostureStatus {
@@ -238,7 +301,7 @@ function describeEmbeddingProvider(
     status: provider.state,
     summary: previewHarnessText(provider.detail ?? `${provider.configured ? 'configured' : 'not configured'} memory embedding provider`, includeParameters ? 180 : 96),
     modelRoute: `memory action:"provider" providerId:${JSON.stringify(provider.id)}`,
-    setupRoute: `settings action:"set" key:"provider.embeddingProvider" value:"${provider.id}" confirm:true explicitUserRequest:"..."`,
+    setupRoute: `settings action:"set" key:"provider.embeddingProvider" value:"${provider.id}" explicitUserRequest:"<the user request, in their own words>"`,
     configured: provider.configured,
     active: provider.id === activeProviderId,
     dimensions: provider.dimensions,
@@ -267,7 +330,7 @@ function externalProviderNextRoutes(
       label: 'Write provider memory',
       modelRoute: liveRecord.writeRoute,
       effect: 'confirmed',
-      why: 'External memory writes require explicit user request, confirmation, and a durable provider receipt.',
+      why: 'External memory writes require explicit user request, recorded effect admission, and a durable provider receipt.',
     });
   }
   if (liveRecord?.syncRoute) {
@@ -276,7 +339,7 @@ function externalProviderNextRoutes(
       label: 'Sync provider memory',
       modelRoute: liveRecord.syncRoute,
       effect: 'confirmed',
-      why: 'Provider sync/import/export crosses a boundary and needs confirmation plus durable receipt evidence.',
+      why: 'Provider sync/import/export crosses a boundary and needs recorded effect admission plus durable receipt evidence.',
     });
   }
   if (liveRecord?.forgetRoute) {
@@ -380,7 +443,7 @@ function externalProviderContractChecklist(
       id: 'confirmed-write-upsert',
       label: 'Confirmed write/upsert/import route',
       status: writeStatus,
-      requiredFor: 'Write external memories only after explicit user request and confirmation.',
+      requiredFor: 'Write external memories only after explicit user request and recorded effect admission.',
       owner: 'goodvibes-platform-or-daemon',
       inspectRoute: liveRecord?.writeRoute ?? `host action:"capability" query:${JSON.stringify(providerQuery)}`,
     },
@@ -491,7 +554,7 @@ function externalProviderSetupGuide(
     ...(latestReceipt ? { latestReceipt, receiptHistory: receipts.slice(0, 5) } : {}),
     requiredHostContracts: EXTERNAL_MEMORY_REQUIRED_CONTRACTS,
     credentialPolicy: 'Provider credentials must use secret refs or connected-host auth state; raw API keys, tokens, and user memory payloads are never returned by posture inspection.',
-    confirmationPolicy: 'External memory writes, sync, import, export, forget/delete, and prompt-eligibility changes require explicit user request, confirmation, and durable receipts.',
+    confirmationPolicy: 'External memory writes, sync, import, export, forget/delete, and prompt-eligibility changes require explicit user request, recorded effect admission, and durable receipts.',
   };
 }
 
@@ -518,7 +581,8 @@ function describeExternalProvider(
       : 'External memory backend records are not published by the current GoodVibes platform/daemon contract.', includeParameters ? 180 : 96),
     modelRoute: `memory action:"provider" providerId:${JSON.stringify(provider.id)}`,
     setupRoute: 'host action:"capability" query:"memory provider"',
-    configured: liveRecord?.configured ?? (liveRecord ? externalProviderLiveReady(liveRecord) : latestReceipt ? latestReceipt.status === 'succeeded' : false),
+    // Past receipts are history, not state: only a live provider record can say a provider is configured.
+    configured: liveRecord?.configured ?? (liveRecord ? externalProviderLiveReady(liveRecord) : false),
     ...(includeParameters && liveRecord ? { liveRecord } : {}),
     ...(latestReceipt ? { latestReceipt } : {}),
     ...(includeParameters && receipts.length > 0 ? { receiptEvidence: receipts.slice(0, 5) } : {}),
@@ -623,12 +687,14 @@ async function buildProviderRecords(
   readonly doctor: MemoryDoctorReport | null;
   readonly vector: MemoryVectorStats | null;
   readonly providers: readonly MemoryPostureProvider[];
-  readonly receiptEvidence: readonly MemoryExternalProviderReceiptEvidence[];
+  readonly receiptEvidence: MemoryExternalProviderReceiptEvidenceList;
   readonly liveRecords: readonly MemoryExternalProviderLiveRecord[];
+  readonly readErrors: readonly string[];
 }> {
   const includeParameters = args.includeParameters === true;
-  const doctor = await readMemoryDoctor(context, options);
-  const vector = await readVectorStats(context, doctor, options);
+  const readErrors: string[] = [];
+  const doctor = await readMemoryDoctor(context, options, readErrors);
+  const vector = await readVectorStats(context, doctor, options, readErrors);
   const receiptEvidence = await externalMemoryReceiptEvidence(context, options);
   const liveRecords = await externalMemoryLiveProviderRecords(context, options);
   const embeddingProviders = (doctor?.embeddings.providers ?? []).map((provider) => (
@@ -648,6 +714,7 @@ async function buildProviderRecords(
     providers: [...embeddingProviders, ...externalProviders],
     receiptEvidence,
     liveRecords,
+    readErrors,
   };
 }
 
@@ -687,7 +754,7 @@ function compactVector(vector: MemoryVectorStats | null): Record<string, unknown
     ...(vector.error ? { error: previewHarnessText(vector.error, 160) } : {}),
     modelRoute: 'agent_harness mode:"workspace_action" actionId:"memory-vector-status"',
     doctorRoute: 'agent_harness mode:"workspace_action" actionId:"memory-vector-doctor"',
-    rebuildRoute: 'agent_harness mode:"run_workspace_action" actionId:"memory-vector-rebuild" confirm:true explicitUserRequest:"..."',
+    rebuildRoute: 'agent_harness mode:"run_workspace_action" actionId:"memory-vector-rebuild" explicitUserRequest:"<the user request, in their own words>"',
   };
 }
 
@@ -698,13 +765,14 @@ export async function memoryPostureCatalogStatus(context: CommandContext, readin
 async function ownedMemoryPostureCatalogStatus(context: CommandContext, reading: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const options = memoryReadingOptions(context, undefined, reading);
   const snapshot = memoryPostureSnapshot(context);
-  const doctor = await readMemoryDoctor(context, options);
-  const vector = await readVectorStats(context, doctor, options);
+  const readErrors: string[] = [];
+  const doctor = await readMemoryDoctor(context, options, readErrors);
+  const vector = await readVectorStats(context, doctor, options, readErrors);
   const receiptEvidence = await externalMemoryReceiptEvidence(context, options);
   const liveRecords = await externalMemoryLiveProviderRecords(context, options);
   const status = memoryStatus(snapshot, Boolean(memoryApi(context)));
   const vectorState = vectorStatus(vector);
-  const usageSummary = readMemoryUsageSummary(context);
+  const usageSummary = readMemoryUsageSummary(context).summary;
   return {
     ...(isClassicOperation() ? { operationProvenance: 'classic', externalInterpretation: 'unassessed',
       interpretationNotice: 'Classic shows native local-memory and provider facts. Automatic external route, receipt discovery and certification interpretation is unavailable.' } : {}),
@@ -728,6 +796,8 @@ async function ownedMemoryPostureCatalogStatus(context: CommandContext, reading:
     externalProviderLiveRecordCount: liveRecords.length,
     externalProviderReceiptEvidenceFound: receiptEvidence.length > 0,
     externalProviderReceiptEvidenceCount: receiptEvidence.length,
+    ...(receiptEvidence.windowFull ? { externalProviderReceiptEvidenceTruncated: true } : {}),
+    ...(readErrors.length > 0 ? { readErrors } : {}),
     externalProviderSetupGuideStatus: aggregateExternalProviderSetupStatus(liveRecords, receiptEvidence),
   };
 }
@@ -742,7 +812,7 @@ async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHar
   const limit = readLimit(args.limit, 100);
   const query = readString(args.query);
   const snapshot = memoryPostureSnapshot(context);
-  const { doctor, vector, providers, receiptEvidence, liveRecords } = await buildProviderRecords(context, args, options);
+  const { doctor, vector, providers, receiptEvidence, liveRecords, readErrors } = await buildProviderRecords(context, args, options);
   const status = memoryStatus(snapshot, Boolean(memoryApi(context)));
   const vectorState = vectorStatus(vector);
   const aggregateLiveRecord = aggregateExternalProviderLiveRecord(liveRecords);
@@ -783,6 +853,7 @@ async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHar
       syncProviders: doctor?.embeddings.syncProviders ?? [],
       asyncProviders: doctor?.embeddings.asyncProviders ?? [],
     },
+    ...(readErrors.length > 0 ? { readErrors } : {}),
     providers: filteredProviders,
     returned: filteredProviders.length,
     totalProviders: providers.length,
@@ -793,6 +864,7 @@ async function ownedMemoryPostureSummary(context: CommandContext, args: AgentHar
       latestLiveProviderRecords: liveRecords.slice(0, 5),
       receiptEvidenceFound: receiptEvidence.length > 0,
       receiptEvidenceCount: receiptEvidence.length,
+      ...(receiptEvidence.windowFull ? { receiptEvidenceNote: 'Only the newest saved artifacts were searched for receipts; an older receipt would not appear here.' } : {}),
       latestReceipts: receiptEvidence.slice(0, 5),
       setupGuideStatus: aggregateExternalProviderSetupStatus(liveRecords, receiptEvidence),
       checkedProviders: externalMemoryProviderCatalog(liveRecords, receiptEvidence).map((provider) => provider.id),

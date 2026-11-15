@@ -6,11 +6,11 @@
  * - client.ts: createPeerApiClient (covered by existing peer-client.test.ts, but adding missing paths)
  */
 import { describe, expect, test } from 'bun:test';
-import { createPeerApiClient } from '../peer-client/dist/index.js';
+import { createPeerApiClient } from '../peer-client/src/index.js';
 import { createPeerRemoteClient } from '../peer-client/src/client-core.js';
-import { createHttpTransport } from '../transport-http/dist/index.js';
-import { getPeerContract } from '../contracts/dist/index.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+import { createHttpTransport } from '../transport-http/src/index.js';
+import { getPeerContract } from '../contracts/src/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -93,73 +93,73 @@ describe('createPeerRemoteClient: invoke generic overload', () => {
     expect(calls).toHaveLength(1);
   });
 
-  test('invoke throws for unknown endpoint id', () => {
+  test('invoke rejects for unknown endpoint id', async () => {
     const transport = makeTransport(async () => createJsonResponse({ ok: true }));
     const contract = getPeerContract();
     const client = createPeerRemoteClient(transport, contract);
-    // requireContractRoute throws synchronously when endpoint is not found
-    expect(() => client.invoke('unknown.endpoint' as never)).toThrow(GoodVibesError);
+    // The failure arrives on the returned promise, not as a synchronous throw.
+    await expect(client.invoke('unknown.endpoint' as never)).rejects.toBeInstanceOf(GoodVibesError);
   });
 });
 
 describe('createPeerRemoteClient: shorthand methods', () => {
   test('pairing.verify calls the verify endpoint', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ url: string; method: string | undefined }> = [];
     const platformClient = createPeerApiClient({
       baseUrl: 'http://127.0.0.1:3210',
       validateResponses: false,
-      fetch: stubFetch(async (input, _init) => {
-        calls.push(String(input));
+      fetch: stubFetch(async (input, init) => {
+        calls.push({ url: String(input), method: init?.method });
         return createJsonResponse({ verified: true });
       }),
     });
     const result = await platformClient.pairing.verify({ requestId: 'pair-1', challenge: '123456' });
-    expect(calls[0]).toContain('pair');
+    expect(calls).toEqual([{ url: 'http://127.0.0.1:3210/api/remote/pair/verify', method: 'POST' }]);
     expect(result).toMatchObject({ verified: true });
   });
 
   test('peer.heartbeat calls the heartbeat endpoint', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ url: string; method: string | undefined }> = [];
     const platformClient = createPeerApiClient({
       baseUrl: 'http://127.0.0.1:3210',
       validateResponses: false,
-      fetch: stubFetch(async (input, _init) => {
-        calls.push(String(input));
+      fetch: stubFetch(async (input, init) => {
+        calls.push({ url: String(input), method: init?.method });
         return createJsonResponse({ ok: true });
       }),
     });
     const result = await platformClient.peer.heartbeat({ peerId: 'node-a' });
-    expect(calls[0]).toContain('heartbeat');
+    expect(calls).toEqual([{ url: 'http://127.0.0.1:3210/api/remote/heartbeat', method: 'POST' }]);
     expect(result).toMatchObject({ ok: true });
   });
 
   test('work.pull calls the pull endpoint', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ url: string; method: string | undefined }> = [];
     const platformClient = createPeerApiClient({
       baseUrl: 'http://127.0.0.1:3210',
       validateResponses: false,
-      fetch: stubFetch(async (input, _init) => {
-        calls.push(String(input));
+      fetch: stubFetch(async (input, init) => {
+        calls.push({ url: String(input), method: init?.method });
         return createJsonResponse({ work: null });
       }),
     });
     const result = await platformClient.work.pull({ peerId: 'node-a' });
-    expect(calls[0]).toContain('work');
+    expect(calls).toEqual([{ url: 'http://127.0.0.1:3210/api/remote/work/pull', method: 'POST' }]);
     expect(result).toMatchObject({ work: null });
   });
 
   test('operator.snapshot calls the operator snapshot endpoint', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ url: string; method: string | undefined }> = [];
     const platformClient = createPeerApiClient({
       baseUrl: 'http://127.0.0.1:3210',
       validateResponses: false,
-      fetch: stubFetch(async (input, _init) => {
-        calls.push(String(input));
+      fetch: stubFetch(async (input, init) => {
+        calls.push({ url: String(input), method: init?.method });
         return createJsonResponse({ snapshot: {} });
       }),
     });
     const result = await platformClient.operator.snapshot();
-    expect(calls[0]).toContain('remote');
+    expect(calls).toEqual([{ url: 'http://127.0.0.1:3210/api/remote', method: 'GET' }]);
     expect(result).toMatchObject({ snapshot: {} });
   });
 });

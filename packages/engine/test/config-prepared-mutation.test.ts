@@ -42,6 +42,19 @@ function changeValidator(callback: (value: unknown) => boolean) {
 }
 
 describe('ConfigManager prepared same-owner mutation', () => {
+  test('a prepared write still completes when the project settings file is the global settings file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'config-prepared-')); roots.push(root);
+    const workingDir = join(root, 'workspace'); mkdirSync(workingDir);
+    const projectPath = new ConfigManager({ configDir: join(root, 'probe'), workingDir, surfaceRoot: 'tui' }).getProjectConfigPath()!;
+    const manager = new ConfigManager({ configDir: dirname(projectPath), workingDir, surfaceRoot: 'tui' });
+    expect(manager.getProjectConfigPath()).toBe(manager.getConfigPath());
+    const handle = model(manager);
+    const receipt = finish(manager, handle);
+    expect(receipt.status).toBe('committed');
+    expect(() => manager.assertCompletedMutation(handle)).not.toThrow();
+    expect(manager.get('provider.model')).toBe('openai:fixture-prepared');
+  });
+
   test('normalizes before admission, exposes detached facts, and permits exactly its own transition', () => {
     const { manager } = fixture();
     const handle = manager.prepareSettingMutation({ operation: 'set', key: 'payments.budget.perPurchaseCeiling', value: '$12.34' });

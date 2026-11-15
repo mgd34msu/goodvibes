@@ -28,7 +28,7 @@ import { validateCheckpointManifest, CheckpointManifestShapeError, type Manifest
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -39,16 +39,13 @@ import { captureQuarantineSource, quarantineCorruptFile } from '../../utils/atom
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { AgentEvent } from '../../../events/agents.js';
-import {
-  RetentionPolicy,
-  type RetentionConfig,
-  type RetentionClass,
-  type PruneResult,
-} from '../../runtime/retention/index.js';
+import { RetentionPolicy, type RetentionConfig, type RetentionClass, type PruneResult } from '../../runtime/retention/index.js';
 import { SideGitRunner, CHECKPOINT_REF_PREFIX, EMPTY_TREE_HASH, detectGitToplevel } from './side-git.js';
 import { acquireCrossProcessLock } from './cross-process-lock.js';
 import { WorkspaceCheckpointPruner } from './pruner.js';
 import { computeSessionChanges } from './session-changes.js';
+import { applyRestore } from './restore.js';
+import { recordsForUnlistedRefs, deleteUnlistedRefs } from './unlisted-refs.js';
 import { CheckpointDiffObservations } from './diff-observations.js';
 import {
   BROAD_ROOT_OVERRIDE,
@@ -57,7 +54,7 @@ import {
   broadRootRefusalMessage,
   firstSnapshotTooLargeMessage,
 } from './root-guard.js';
-import type { WorkspaceCheckpoint, CheckpointKind, CheckpointDiff, RestoreResult, CheckpointSessionChanges } from './types.js';
+import { CheckpointRestoreError, type WorkspaceCheckpoint, type CheckpointKind, type CheckpointDiff, type RestoreResult, type CheckpointSessionChanges } from './types.js';
 
 const ID_PREFIX = 'wcp';
 
@@ -72,9 +69,7 @@ function defaultRetentionClassFor(kind: CheckpointKind): RetentionClass {
   return kind === 'manual' ? 'forensic' : 'standard';
 }
 
-// Public option/filter shapes live in manager-options.ts (split out to stay
-// under the repo's 800-line file cap) and are re-exported here so every
-// existing `from './manager.js'` import site keeps working unchanged.
+// Option shapes live in manager-options.ts (800-line cap), re-exported here.
 export type {
   CreateCheckpointOptions,
   RestoreOptions,
@@ -122,59 +117,45 @@ export class WorkspaceCheckpointManager {
   private readonly allowLargeFirstSnapshot: boolean;
   private readonly maxFirstSnapshotFiles: number;
   private readonly autoRetention: boolean;
+  private readonly lockTimeoutMs: number | undefined;
   private readonly homeDir: string;
   private readonly daemonStateDir: string;
   /** Non-null (the honest refusal message) when the resolved root was refused as too broad; drives both the skipped auto-subscription and rejected explicit `create()` calls. */
+  private lastRetentionFailure: { readonly error: string; readonly at: number } | null = null;
   private rootRefusal: string | null = null;
 
   private checkpoints = new Map<string, WorkspaceCheckpoint>();
   private readonly diffObservations = new CheckpointDiffObservations();
   private initialized = false;
+  private manifestReadOk = false; // the last manifest read under the lock succeeded
+  private manifestQuarantined = false; // init moved an unreadable index aside; its refs are re-listed once
   private initPromise: Promise<void> | null = null;
 
   /**
-   * Promise-chain mutex serializing every public operation that touches the
-   * side repo's shared index or shared object store: `create`, `restore`,
-   * `gc`, and `diff` (see each method's `*Internal` body below). Without
-   * this, an auto-snapshot `create()` firing on a bus event (TURN_COMPLETED,
-   * TURN_ERROR, TURN_CANCEL, or AGENT_COMPLETED) could run its `git add -A`
-   * in between `restore()`'s
-   * `read-tree --reset` and `checkout-index -a -f`, silently corrupting the
-   * restore; two concurrent `create()` calls share the same hazard on the
-   * index, and a same-tick `gc()` could treat a not-yet-ref'd loose commit
-   * from an in-flight `create()` as unreachable and prune it out from under
-   * it. `diff()` is included too: the single-argument `git diff <tree-ish>`
-   * form (diffing a checkpoint against the live working tree) refreshes the
-   * index's stat cache as a side effect, which is itself a write.
-   *
-   * Each public method below only does `await this.init()` (idempotent, safe
-   * to race) before calling `withLock`; the actual git-touching work lives in
-   * a same-named `*Internal` method. Internal callers that need another
-   * locked operation's behavior (e.g. `restore()`'s safety checkpoint) call
-   * the `*Internal` method directly, never the public wrapper, so a single
-   * logical operation never tries to re-enter its own lock.
-   *
-   * This in-process chain only serializes callers within THIS process. Two
-   * separate processes sharing the same checkpoint directory (two daemon
-   * instances, or a daemon and a CLI invocation, pointed at the same
-   * workspace) have no in-process chain in common, see the cross-process
-   * file lock acquired alongside it below (cross-process-lock.ts).
+   * Promise-chain mutex serializing every operation that touches the side
+   * repo's shared index or object store: `create`, `restore`, `gc` and `diff`
+   * (the one-argument `git diff` refreshes the index stat cache, a write).
+   * Without it an auto-snapshot's `git add -A` could land between restore's
+   * `read-tree --reset` and `checkout-index -a -f`, two creates could share the
+   * index, and a `gc()` could prune an in-flight create's not-yet-ref'd commit.
+   * Public methods `await this.init()` and then `withLock`; the git work lives
+   * in `*Internal` methods, which internal callers use directly so one logical
+   * operation never re-enters its own lock. The chain covers this process
+   * only; the cross-process lock file acquired inside it covers other
+   * processes sharing the checkpoint directory (cross-process-lock.ts).
    */
   private lockChain: Promise<void> = Promise.resolve();
 
   private withLock<T>(fn: () => Promise<T>): Promise<T> {
-    // `lockChain` is constructed below so it never itself rejects (its
-    // continuation always swallows both outcomes), chaining with a single
-    // `.then(...)` is enough to guarantee the body only starts after every
-    // previously-queued operation (in this process) has settled, regardless
-    // of whether that prior operation resolved or rejected. The body itself
-    // additionally acquires the cross-process lock file before running `fn`,
-    // so a concurrent operation in ANOTHER process sharing this same
-    // checkpoint directory is serialized too, released in `finally` even if
-    // `fn` throws.
+    // `lockChain` never rejects, so one `.then` waits for every earlier
+    // operation whatever its outcome; the lock file is released in `finally`.
     const result = this.lockChain.then(async () => {
-      const release = await acquireCrossProcessLock(join(this.sideGit.gitDir, '.gv-lock'));
+      const release = await this.acquireStoreLock();
       try {
+        // Another process sharing this store may have written the manifest
+        // since we loaded it; every rewrite below saves the whole index, so
+        // it must start from what is on disk.
+        if (this.initialized) await this.reloadManifest();
         return await fn();
       } finally {
         release();
@@ -185,6 +166,20 @@ export class WorkspaceCheckpointManager {
       () => undefined,
     );
     return result;
+  }
+
+  /**
+   * Take the cross-process lock on the side repo. Strict: a holder that is
+   * alive but frozen past the stale window (stopped, swapped out, host asleep)
+   * keeps its lock and waiters time out, because taking it by age would let two
+   * processes run git against the same index when it resumes. Only a holder
+   * whose process is gone is taken over.
+   */
+  private acquireStoreLock(): Promise<() => void> {
+    return acquireCrossProcessLock(join(this.sideGit.gitDir, '.gv-lock'), {
+      strictOwnership: true,
+      ...(this.lockTimeoutMs !== undefined ? { totalTimeoutMs: this.lockTimeoutMs } : {}),
+    });
   }
 
   constructor(opts: WorkspaceCheckpointManagerOptions) {
@@ -200,6 +195,7 @@ export class WorkspaceCheckpointManager {
     this.allowLargeFirstSnapshot = opts.allowLargeFirstSnapshot ?? false;
     this.maxFirstSnapshotFiles = opts.maxFirstSnapshotFiles ?? DEFAULT_MAX_FIRST_SNAPSHOT_FILES;
     this.autoRetention = opts.autoRetention ?? true;
+    this.lockTimeoutMs = opts.lockTimeoutMs;
     this.homeDir = opts.homeDir ?? homedir();
     this.daemonStateDir = opts.daemonStateDir ?? join(this.homeDir, '.goodvibes');
     // Build against the raw root first; init() may rebuild once the git-root
@@ -277,24 +273,15 @@ export class WorkspaceCheckpointManager {
     // overlap), before any of the create/restore/gc/diff critical sections
     // are ever reached.
     {
-      const release = await acquireCrossProcessLock(join(this.sideGit.gitDir, '.gv-lock'));
+      const release = await this.acquireStoreLock();
       try {
         await this.sideGit.init();
       } finally {
         release();
       }
     }
-    const manifest = await this.loadManifestOrQuarantine();
-    this.checkpoints = new Map((manifest?.checkpoints ?? []).map((c) => [c.id, c]));
-    for (const checkpoint of this.checkpoints.values()) {
-      this.retentionPolicy.register({
-        id: checkpoint.id,
-        createdAt: checkpoint.createdAt,
-        sizeBytes: checkpoint.sizeBytes,
-        retentionClass: checkpoint.retentionClass,
-        path: this.sideGit.gitDir,
-      });
-    }
+    await this.reloadManifest();
+    if (this.manifestQuarantined) await this.adoptUnlistedRefs();
     if (this.runtimeBus) {
       if (this.rootRefusal) {
         logger.warn('WorkspaceCheckpointManager: refusing automatic snapshot subscription for a broad root', {
@@ -334,21 +321,33 @@ export class WorkspaceCheckpointManager {
     this.rootRefusal = reason && !this.allowBroadRoot ? broadRootRefusalMessage(resolved, reason) : null;
   }
 
+  /**
+   * The most recent automatic retention sweep failure, or null once a sweep
+   * has succeeded again. A locked or full side repository fails every sweep
+   * quietly otherwise, and the store grows with nothing reporting why.
+   */
+  retentionFailure(): { readonly error: string; readonly at: number } | null {
+    return this.lastRetentionFailure;
+  }
+
   /** Cheap, non-blocking retention sweep: skips when auto-retention is off, the root was refused, or nothing is over-limit; else fires the lock-serialized `gc()` fire-and-forget (like the auto-snapshot path). */
   private maybeRunRetention(): void {
     if (!this.autoRetention || this.rootRefusal) return;
     let due = false;
     try {
       due = this.retentionPolicy.needsPrune();
-    } catch {
-      due = false;
+    } catch (err) {
+      this.recordRetentionFailure(err);
+      return;
     }
     if (!due) return;
-    void this.gc().catch((err) => {
-      logger.warn('WorkspaceCheckpointManager: automatic retention sweep failed', {
-        error: summarizeError(err),
-      });
-    });
+    void this.gc().catch((err) => this.recordRetentionFailure(err));
+  }
+
+  private recordRetentionFailure(err: unknown): void {
+    const error = summarizeError(err);
+    this.lastRetentionFailure = { error, at: Date.now() };
+    logger.warn('WorkspaceCheckpointManager: automatic retention sweep failed', { error });
   }
 
   // ---------------------------------------------------------------------------
@@ -452,8 +451,24 @@ export class WorkspaceCheckpointManager {
     const label = opts.label ?? this.defaultLabel(kind, id);
     const message = `wcp: ${kind} ${label}`.trim();
     const commit = await this.sideGit.commitTree(treeHash, message);
-    await this.sideGit.updateRef(`${CHECKPOINT_REF_PREFIX}${id}`, commit);
+    const ref = `${CHECKPOINT_REF_PREFIX}${id}`;
+    await this.sideGit.updateRef(ref, commit);
+    try {
+      return await this.recordCheckpoint(opts, { id, kind, label, retentionClass, commit, parent });
+    } catch (error) {
+      // A ref without a manifest record can never be listed, restored or pruned.
+      this.checkpoints.delete(id);
+      this.retentionPolicy.unregister(id);
+      await this.sideGit.deleteRef(ref).catch(() => undefined);
+      throw error;
+    }
+  }
 
+  private async recordCheckpoint(
+    opts: CreateCheckpointOptions,
+    made: { id: string; kind: CheckpointKind; label: string; retentionClass: RetentionClass; commit: string; parent: WorkspaceCheckpoint | null },
+  ): Promise<WorkspaceCheckpoint> {
+    const { id, kind, label, retentionClass, commit, parent } = made;
     const changedPaths = parent
       ? await this.sideGit.diffNameOnly(parent.commit, commit)
       : await this.sideGit.listTrackedFiles(commit);
@@ -504,8 +519,8 @@ export class WorkspaceCheckpointManager {
    *
    * Serialized against every other index-touching operation on this manager
    *, see `withLock`. The single-argument form (`b` omitted, diffing against
-   * the live working tree) refreshes the side index's stat cache as a side
-   * effect, so it is not purely read-only.
+   * the live working tree) stages the work tree into the side index first, so
+   * it is not purely read-only.
    */
   async diff(a: string, b?: string): Promise<CheckpointDiff> {
     await this.init();
@@ -515,6 +530,10 @@ export class WorkspaceCheckpointManager {
   private async diffInternal(a: string, b?: string): Promise<CheckpointDiff> {
     const fromCheckpoint = this.requireCheckpoint(a);
     const toCheckpoint = b ? this.requireCheckpoint(b) : undefined;
+    // The one-argument form compares against the side index, which only knows
+    // files staged by an earlier snapshot; stage first so files created since
+    // are listed. A refused root is never swept.
+    if (!toCheckpoint && !this.rootRefusal) await this.sideGit.stageAll();
 
     const [unifiedDiff, stat_, files] = await Promise.all([
       this.sideGit.diff(fromCheckpoint.commit, toCheckpoint?.commit),
@@ -573,6 +592,11 @@ export class WorkspaceCheckpointManager {
    * and `checkout-index -a -f` calls below, silently corrupting the restore.
    */
   async restore(id: string, opts?: RestoreOptions): Promise<RestoreResult> {
+    // An empty list is not "no scope": treating it as a whole-workspace restore
+    // would rewrite and delete files for a caller that selected nothing.
+    if (opts?.paths && opts.paths.length === 0) {
+      throw new Error('WorkspaceCheckpointManager.restore: `paths` is an empty list. Name the paths to restore, or omit `paths` to restore the whole workspace.');
+    }
     await this.init();
     return this.withLock(() => this.restoreInternal(id, opts));
   }
@@ -587,8 +611,10 @@ export class WorkspaceCheckpointManager {
       // Calls createInternal directly (not the public, lock-acquiring
       // `create()`), this whole method already holds the lock.
       const safety = await this.createInternal({ kind: 'manual', label: `pre-restore safety (before ${id})`, retentionClass: 'forensic' });
-      safetyCheckpointId = safety?.id ?? null;
+      // A null safety means the tree already equals the most recent
+      // checkpoint, which is then the undo point.
       const current = safety ?? this.mostRecentCheckpoint();
+      safetyCheckpointId = current?.id ?? null;
       beforeFiles = current ? await this.sideGit.listTrackedFiles(current.commit) : [];
     } else {
       await this.sideGit.stageAll();
@@ -596,50 +622,12 @@ export class WorkspaceCheckpointManager {
       beforeFiles = await this.sideGit.listTrackedFiles(transientTree);
     }
 
-    if (opts?.paths && opts.paths.length > 0) {
-      const restoredFiles: string[] = [];
-      for (const path of opts.paths) {
-        try {
-          await this.sideGit.raw(['checkout', target.commit, '--', path]);
-          restoredFiles.push(path);
-        } catch (err) {
-          logger.warn('WorkspaceCheckpointManager.restore: scoped path checkout failed', {
-            id,
-            path,
-            error: summarizeError(err),
-          });
-        }
-      }
-      return { checkpointId: id, safetyCheckpointId, restoredFiles, removedFiles: [] };
+    try {
+      return await applyRestore(this.sideGit, this.workspaceRoot, target, safetyCheckpointId, beforeFiles, opts?.paths);
+    } catch (error) {
+      if (safetyCheckpointId === null) throw error;
+      throw new CheckpointRestoreError(id, safetyCheckpointId, error);
     }
-
-    const targetFiles = await this.sideGit.listTrackedFiles(target.commit);
-    const targetFileSet = new Set(targetFiles);
-    const removedFiles = beforeFiles.filter((path) => !targetFileSet.has(path));
-
-    await this.sideGit.readTreeReset(target.commit);
-    await this.sideGit.checkoutIndexAll();
-
-    for (const path of removedFiles) {
-      try {
-        rmSync(join(this.workspaceRoot, path), { force: true });
-      } catch (err) {
-        logger.warn('WorkspaceCheckpointManager.restore: failed to remove file added after checkpoint', {
-          id,
-          path,
-          error: summarizeError(err),
-        });
-      }
-    }
-
-    logger.debug('WorkspaceCheckpointManager.restore: restored', {
-      id,
-      safetyCheckpointId,
-      restoredCount: targetFiles.length,
-      removedCount: removedFiles.length,
-    });
-
-    return { checkpointId: id, safetyCheckpointId, restoredFiles: targetFiles, removedFiles };
   }
 
   /**
@@ -662,12 +650,17 @@ export class WorkspaceCheckpointManager {
    */
   async gc(): Promise<PruneResult> {
     await this.init();
-    return this.withLock(() => this.gcInternal());
+    const result = await this.withLock(() => this.gcInternal());
+    this.lastRetentionFailure = null;
+    return result;
   }
 
   private async gcInternal(): Promise<PruneResult> {
     const result = await this.retentionPolicy.prune();
-    if (result.deletedCount > 0) {
+    // Refs the index does not list are unrestorable and keep their objects
+    // alive; only sweep them when the index was read successfully under this lock.
+    const orphans = this.manifestReadOk ? await deleteUnlistedRefs(this.sideGit, new Set(this.checkpoints.keys())) : 0;
+    if (result.deletedCount > 0 || orphans > 0) {
       await this.persistManifest();
       await this.sideGit.gc();
     }
@@ -784,13 +777,51 @@ export class WorkspaceCheckpointManager {
       catch (error) {
         source.assertCurrent();
         if (!(error instanceof JsonFileStoreParseError) && !(error instanceof CheckpointManifestShapeError)) throw error;
+        this.manifestQuarantined = true;
         quarantineCorruptFile(this.manifestPath, { source,
           label: 'workspace/checkpoints', reason: 'checkpoint index JSON or metadata shape is invalid',
-          recovery: 'The checkpoint index was rebuilt empty; snapshot commits in the side repo are untouched but are no longer listed',
+          recovery: 'The checkpoint index was rebuilt from the snapshot refs in the side repo; labels, parents and sizes of those checkpoints were not recoverable',
         });
         return null;
       }
     } finally { source.close(); }
+  }
+
+  /**
+   * Replace the in-memory index (and retention's view of it) with the manifest
+   * on disk. Under the lock an unreadable or missing manifest keeps the
+   * in-memory index, which the next save writes back, rather than forgetting it.
+   */
+  private async reloadManifest(): Promise<void> {
+    let manifest: Manifest | null;
+    if (!this.initialized) { manifest = await this.loadManifestOrQuarantine(); this.manifestReadOk = true; }
+    else {
+      try { const raw = await this.manifestStore.load(); manifest = raw === null ? null : validateCheckpointManifest(raw); this.manifestReadOk = true; } catch { manifest = null; this.manifestReadOk = false; }
+      if (!manifest) return;
+    }
+    const loaded = new Map((manifest?.checkpoints ?? []).map((c) => [c.id, c]));
+    for (const id of this.checkpoints.keys()) if (!loaded.has(id)) this.retentionPolicy.unregister(id);
+    this.checkpoints = loaded;
+    for (const c of loaded.values()) {
+      this.retentionPolicy.register({ id: c.id, createdAt: c.createdAt, sizeBytes: c.sizeBytes, retentionClass: c.retentionClass, path: this.sideGit.gitDir });
+    }
+  }
+
+  /** After a quarantined index, list the snapshot refs still in the side repo again instead of leaving them unreachable. */
+  private async adoptUnlistedRefs(): Promise<void> {
+    const release = await this.acquireStoreLock();
+    try {
+      const records = await recordsForUnlistedRefs(this.sideGit, new Set(this.checkpoints.keys()), this.now);
+      if (records.length === 0) return;
+      for (const c of records) {
+        this.checkpoints.set(c.id, c);
+        this.retentionPolicy.register({ id: c.id, createdAt: c.createdAt, sizeBytes: c.sizeBytes, retentionClass: c.retentionClass, path: this.sideGit.gitDir });
+      }
+      await this.persistManifest();
+      logger.warn('WorkspaceCheckpointManager: re-listed checkpoint refs after the index was quarantined', { count: records.length });
+    } finally {
+      release();
+    }
   }
 
   private async persistManifest(): Promise<void> {

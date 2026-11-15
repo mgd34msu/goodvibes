@@ -39,7 +39,7 @@ describe('a child process that raises an injected fatal', () => {
     const home = tempHome();
     const probe = join(import.meta.dir, '..', 'fixtures', 'crash-capture-probe.ts');
 
-    const result = spawnSync('bun', [probe, home], { encoding: 'utf-8', timeout: 60_000 });
+    const result = spawnSync(process.execPath, [probe, home], { encoding: 'utf-8', timeout: 60_000 });
 
     // The process died on the fault, and said so on a descriptor the
     // full-screen output guard cannot intercept.

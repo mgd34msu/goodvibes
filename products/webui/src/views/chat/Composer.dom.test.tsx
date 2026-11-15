@@ -9,7 +9,7 @@
  * Uses react-dom/client + happy-dom (via bunfig.toml preload).
  * Pattern follows src/lib/toast.dom.test.tsx.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import React, { createRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
@@ -388,16 +388,23 @@ describe('press-and-hold steer', () => {
   const pointer = (el: Element, type: string) => flushSync(() => {
     el.dispatchEvent(new window.Event(type, { bubbles: true }));
   });
-  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
 
   test('a second press restarts the hold instead of leaving the first timer to fire too', async () => {
     let steers = 0;
     const { container, unmount } = mountComposer(makeProps({ draft: 'hi', onSteer: () => { steers += 1; } }));
     const send = container.querySelector('.send-button')!;
     pointer(send, 'pointerdown');
-    await sleep(300);
+    jest.advanceTimersByTime(300);
+    expect(steers).toBe(0);
     pointer(send, 'pointerdown');
-    await sleep(900);
+    // 300 ms into the second hold the first timer's 550 ms mark has passed.
+    jest.advanceTimersByTime(300);
+    expect(steers).toBe(0);
+    jest.advanceTimersByTime(250);
+    expect(steers).toBe(1);
+    jest.advanceTimersByTime(900);
     expect(steers).toBe(1);
     unmount();
   });
@@ -407,7 +414,7 @@ describe('press-and-hold steer', () => {
     const { container, unmount } = mountComposer(makeProps({ draft: 'hi', onSteer: () => { steers += 1; } }));
     pointer(container.querySelector('.send-button')!, 'pointerdown');
     unmount();
-    await sleep(700);
+    jest.advanceTimersByTime(700);
     expect(steers).toBe(0);
   });
 });

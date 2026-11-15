@@ -6,6 +6,8 @@ All notable changes to GoodVibes TUI.
 
 ## Unreleased
 
+- Add `goodvibes acp`, which runs GoodVibes as an Agent Client Protocol agent over stdio from the installed binary, and `goodvibes-daemon mcp serve`, which serves the operator surface of a running daemon to an MCP client over stdio. Both write only protocol frames to stdout and end when the client closes stdin.
+
 - Keep contract and agent activity visible while the main turn waits for delegated
   work, instead of showing stale model latency and token-speed measurements.
 

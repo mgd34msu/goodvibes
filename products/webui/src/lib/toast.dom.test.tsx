@@ -2,9 +2,8 @@
  * DOM tests for useAutoDismiss (src/lib/toast.ts).
  * Exercises the REAL hook via react-dom/client + happy-dom (bunfig.toml preload).
  *
- * Uses real timers with short durations (50 ms baseline) so tests run fast
- * without fake-timer / Date.now coordination complexity. This matches the
- * timer approach in src/hooks/useAnnouncer.test.tsx.
+ * Uses jest fake timers (installed in beforeEach, restored in afterEach) so
+ * dismissal is driven by advancing the clock, never by waiting.
  */
 import { afterEach, beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import React from 'react';

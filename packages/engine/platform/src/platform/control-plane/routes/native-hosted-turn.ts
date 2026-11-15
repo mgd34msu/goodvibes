@@ -3,7 +3,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { NATIVE_HOSTED_TURN_SCOPES, NativeHostedTurnError, type NativeHostedTurnHost } from '../../hosted-sessions/native-turn-host.js';
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, nativeHostedTurnLookupSchema, nativeHostedSessionRequestSchema, nativeHostedSessionLookupSchema } from '../../hosted-sessions/native-turn-wire.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
+import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 function authorize(invocation: GatewayMethodInvocation) {
   const context = invocation.context, authority = invocation.nativeExecutionAuthority, current = authority?.current();
@@ -49,7 +49,10 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
         const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => {
           try { authorize(invocation); return true; } catch { return false; }
         } });
-        authorize(invocation);
+        if (operation === 'status') authorize(invocation);
+        else {
+          try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, `The ${operation} request was applied.`); }
+        }
         return nativeHostedTurnLookupSchema.parse(result);
       } catch (error) {
         if (error instanceof GatewayVerbError) throw error;

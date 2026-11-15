@@ -239,6 +239,13 @@ export async function admitRegex(source: string, flags: string, options: RegexAd
   } catch { worker?.stop(); stop(); throw new RegexAdmissionError(operation, 'isolated worker startup is unavailable'); }
   let yieldAt = performance.now() + 4;
   const call = async <T>(kind: string, input: string, lastIndex = 0, replacement = '', inputLimit = maximum): Promise<T> => {
+    // A bad argument is that call's own mistake: it is refused here, before the
+    // executor is involved, so a caller that handles the refusal (an oversize
+    // file in a search over many) can keep using the same admitted expression.
+    // Only an executor failure, a deadline or a change of owner retires it.
+    const bound = limit(inputLimit, maximum, maximum);
+    if (input.length > bound) throw new RegexAdmissionError(operation, `input exceeds ${bound} characters`);
+    if (!Number.isSafeInteger(lastIndex) || lastIndex < 0) throw new RegexAdmissionError(operation, 'invalid operation input');
     try {
       // Worker replies can continuously replenish the message/microtask queue
       // during a line-by-line search. Give input and timers a turn as well.
@@ -248,9 +255,6 @@ export async function admitRegex(source: string, flags: string, options: RegexAd
       }
       owner.assertCurrent();
       if (retired) throw new RegexAdmissionError(operation, 'executor is unavailable');
-      const bound = limit(inputLimit, maximum, maximum);
-      if (input.length > bound) throw new RegexAdmissionError(operation, `input exceeds ${bound} characters`);
-      if (!Number.isSafeInteger(lastIndex) || lastIndex < 0) throw new RegexAdmissionError(operation, 'invalid operation input');
       const id = ++sequence;
       const result = await new Promise<T>((resolve, reject) => {
         pending.set(id, { resolve: value => resolve(value as T), reject, request: { id, source, flags, operation: kind, input, lastIndex, replacement } });

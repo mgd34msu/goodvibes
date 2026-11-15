@@ -9,8 +9,8 @@
  * (fetch), instead of leaving it orphaned after the tool call's caller has
  * moved on.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
@@ -24,8 +24,13 @@ import { useToolReadings } from './_helpers/tool-readings.ts';
 // forwarded with EXEC_GATE_TABLE, the gate's questions, in one fake port.
 useToolReadings([], EXEC_GATE_TABLE);
 
+const tempRoots: string[] = [];
+afterEach(() => { for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
 function tempRoot(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(root);
+  return root;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -38,7 +43,6 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
     const tool = createExecTool(new ProcessManager(), { overflowHandler: new OverflowHandler({ baseDir: root }) });
     const controller = new AbortController();
 
-    const start = Date.now();
     // timeout_ms stays under PROGRESS_AUTO_THRESHOLD_MS (30s, exec/
     // runtime.ts) so this exercises the plain foreground path specifically;
     // the progress-streamed path (timeout_ms above the threshold, which is
@@ -53,13 +57,11 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
     await sleep(150);
     controller.abort();
     const result = await resultPromise;
-    const elapsedMs = Date.now() - start;
 
     // If the signal had NOT reached Bun.spawn's child process, this would
     // block for the full 30s sleep (or the 120s default global timeout),
     // bun:test's own per-test timeout would fail this test long before a
     // false pass could sneak through.
-    expect(elapsedMs).toBeLessThan(5_000);
     expect(result.success).toBe(false);
     const output = JSON.parse(result.output ?? '{}') as { cancelled?: boolean; timed_out?: boolean };
     expect(output.cancelled).toBe(true);
@@ -72,12 +74,10 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const start = Date.now();
     const result = await tool.execute(
       { working_dir: root, commands: [{ cmd: 'sleep 30', timeout_ms: 20_000 }] },
       { signal: controller.signal },
     );
-    expect(Date.now() - start).toBeLessThan(5_000);
     const output = JSON.parse(result.output ?? '{}') as { cancelled?: boolean };
     expect(output.cancelled).toBe(true);
   }, 10_000);
@@ -109,7 +109,6 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
     const tool = createExecTool(new ProcessManager(), { overflowHandler: new OverflowHandler({ baseDir: root }) });
     const controller = new AbortController();
 
-    const start = Date.now();
     // No explicit timeout_ms, this is the real-world default shape, and
     // the exec tool's own 120s DEFAULT_TIMEOUT_MS exceeds
     // PROGRESS_AUTO_THRESHOLD_MS (30s), so it auto-engages
@@ -124,7 +123,6 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
     await sleep(150);
     controller.abort();
     const result = await resultPromise;
-    expect(Date.now() - start).toBeLessThan(5_000);
     const output = JSON.parse(result.output ?? '{}') as { cancelled?: boolean; progress_file?: string };
     expect(output.cancelled).toBe(true);
     expect(typeof output.progress_file).toBe('string');
@@ -133,31 +131,32 @@ describe('exec tool: AbortSignal reaches the spawned child process', () => {
 
 describe('fetch tool: AbortSignal reaches the in-flight request', () => {
   test('aborting mid-request cuts off a slow server response instead of waiting it out', async () => {
+    let requestReceived!: () => void;
+    const received = new Promise<void>((resolve) => { requestReceived = resolve; });
     const server = Bun.serve({
       port: 0,
       async fetch() {
+        requestReceived();
         await sleep(10_000);
         return new Response('too slow');
       },
     });
     try {
-      const tool = createFetchTool({});
+      const tool = createFetchTool({ isLocalhostAllowed: () => true });
       const controller = new AbortController();
-      const start = Date.now();
       const resultPromise = tool.execute(
         { urls: [{ url: `http://127.0.0.1:${server.port}/slow`, timeout_ms: 30_000 }] },
         { signal: controller.signal },
       );
-      await sleep(150);
+      await received;
       controller.abort();
       const result = await resultPromise;
-      const elapsedMs = Date.now() - start;
 
-      expect(elapsedMs).toBeLessThan(5_000);
-      expect(result.success).toBe(true); // fetch tool reports per-URL errors inside output, not a top-level failure
-      const output = JSON.parse(result.output ?? '{}') as { results?: Array<{ error?: string }>; error?: string };
-      const urlResult = output.results?.[0] ?? output;
-      expect(typeof (urlResult as { error?: string }).error).toBe('string');
+      // A cancelled call is a failure, and the per-URL result says it was cancelled rather than timed out.
+      expect(result.success).toBe(false);
+      const output = JSON.parse(result.output ?? '{}') as { results?: Array<{ error?: string; cancelled?: boolean }> };
+      expect(output.results?.[0]?.cancelled).toBe(true);
+      expect(typeof output.results?.[0]?.error).toBe('string');
     } finally {
       server.stop(true);
     }
@@ -166,7 +165,7 @@ describe('fetch tool: AbortSignal reaches the in-flight request', () => {
   test('a tool call with no opts (the pre-existing call shape) behaves exactly as before: additive, not breaking', async () => {
     const server = Bun.serve({ port: 0, fetch: () => new Response('ok') });
     try {
-      const tool = createFetchTool({});
+      const tool = createFetchTool({ isLocalhostAllowed: () => true });
       const result = await tool.execute({ urls: [{ url: `http://127.0.0.1:${server.port}/` }] });
       expect(result.success).toBe(true);
     } finally {

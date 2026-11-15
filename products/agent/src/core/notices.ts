@@ -5,6 +5,7 @@ import {
   type NoticeOptions,
 } from '@goodvibes-jev/engine/terminal-shell/notice-publication';
 import { runtimeEventOfNotice, runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Notification } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import { delegatedTaskEventOfNotice } from './delegated-task-notices.ts';
 import { getSharedNotificationFeed, type NotificationFeed } from './notifications-feed.ts';
@@ -28,5 +29,7 @@ export async function publishNotice(feed: NotificationFeed, text: string, option
   await publish(feed, text, options);
 }
 export function publishToSharedFeed(content: string, options: NoticeOptions & { readonly restored: boolean }): void {
-  void publishNotice(getSharedNotificationFeed(), content, options);
+  publishNotice(getSharedNotificationFeed(), content, options).catch((error: unknown) => {
+    logger.warn('Notice publication failed', { error: summarizeError(error) });
+  });
 }

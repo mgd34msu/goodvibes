@@ -22,6 +22,7 @@ export type WatcherEvent =
       seenAt: number;
       checkpoint: string;
     }
+  /** Published after a run whose checkpoint differs from the previous one; a run that sees the same checkpoint publishes only WATCHER_HEARTBEAT. */
   | {
       type: 'WATCHER_CHECKPOINT_ADVANCED';
       watcherId: string;

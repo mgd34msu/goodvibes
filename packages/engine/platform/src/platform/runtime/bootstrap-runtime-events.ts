@@ -66,7 +66,14 @@ function buildCohortFollowUp(agentManager: AgentManager, cohort: string): Conver
   };
 }
 
-function checkCohortCompletion(
+/**
+ * The last finished state reported for each cohort, so a late event for an agent that already
+ * ended (the same terminal statuses) does not repeat the completion line.
+ */
+const reportedCohortStates = new WeakMap<AgentManager, Map<string, string>>();
+
+/** Report a cohort once every agent and contract in it has ended; hosts call it from their own agent-end handlers. */
+export function checkCohortCompletion(
   agentManager: AgentManager,
   contractRunner: Pick<ContractRunner, 'list'>,
   record: { cohort?: string | undefined } | null,
@@ -85,6 +92,12 @@ function checkCohortCompletion(
   );
   const terminalStatuses = new Set(['passed', 'failed', 'cancelled']);
   if (!cohortContracts.every((contract) => terminalStatuses.has(contract.status))) return;
+
+  const state = cohortAgents.map((agent) => `${agent.id}:${agent.status}`).sort().join('|');
+  let reported = reportedCohortStates.get(agentManager);
+  if (!reported) { reported = new Map(); reportedCohortStates.set(agentManager, reported); }
+  if (reported.get(record.cohort) === state) return;
+  reported.set(record.cohort, state);
 
   withRouter(getSystemMessageRouter, (router) => {
     router.low(buildCohortReport(agentManager, record.cohort!));
@@ -224,6 +237,10 @@ export function registerHostRuntimeEvents(
   unsubs.push(runtimeBus.onDomain('turn', (env) => {
     domainDispatch.dispatchTurnEvent(env.payload);
   }));
+  // The store's unfinished-tool-call list, read by the stuck-turn diagnostic, is fed only from here.
+  unsubs.push(runtimeBus.onDomain('tools', (env) => {
+    domainDispatch.dispatchToolEvent(env.payload);
+  }));
   unsubs.push(runtimeBus.onDomain('agents', (env) => {
     domainDispatch.dispatchAgentEvent(env.payload);
   }));
@@ -238,6 +255,14 @@ export function registerHostRuntimeEvents(
   }));
   unsubs.push(runtimeBus.onDomain('transport', (env) => {
     domainDispatch.dispatchTransportEvent(env.payload);
+  }));
+  // The MCP registry and plugin manager publish their lifecycle on the bus; the
+  // runtime store (health, read models, recommendations) only learns of it here.
+  unsubs.push(runtimeBus.onDomain('mcp', (env) => {
+    domainDispatch.dispatchMcpEvent(env.payload);
+  }));
+  unsubs.push(runtimeBus.onDomain('plugins', (env) => {
+    domainDispatch.dispatchPluginEvent(env.payload);
   }));
 
   unsubs.push(runtimeBus.on<Extract<ProviderEvent, { type: 'MODEL_FALLBACK' }>>('MODEL_FALLBACK', ({ payload }) => {

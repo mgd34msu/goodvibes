@@ -22,11 +22,10 @@
  * covered in test/contract/runner.test.ts.)
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
 import { trackDisposables } from './_helpers/disposables.ts';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
 import { AgentManager, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
 import {
@@ -183,39 +182,32 @@ describe('an agent contributes one message to the transcript, not two', () => {
     }, 100);
 
     expect(findAgentCompletionMessage(store, 'session-1', 'agent-a')?.body).toBe('sunny and 74 degrees');
-    // A message from the same agent WITHOUT a terminal status (a progress note)
-    // is not a completion and must not suppress the real one.
     expect(findAgentCompletionMessage(store, 'session-1', 'agent-b')).toBeUndefined();
   });
 
-  test('the continuation prompt carries each assistant answer once', () => {
-    const store = createStore('session-2');
-    const append = (input: Parameters<typeof appendSharedSessionMessage>[1]): void => {
-      // Exactly what the broker does now: the second reporter for an agent that
-      // already reported is not stored again.
-      if (input.agentId && findAgentCompletionMessage(store, input.sessionId, input.agentId)) return;
-      appendSharedSessionMessage(store, input, 100);
-    };
+  test('a progress note from the same agent is not a completion and does not suppress the real one', () => {
+    const store = createStore('session-1');
+    appendSharedSessionMessage(store, {
+      sessionId: 'session-1',
+      role: 'assistant',
+      body: 'still working',
+      agentId: 'agent-a',
+      metadata: { status: 'running' },
+    }, 100);
+    expect(findAgentCompletionMessage(store, 'session-1', 'agent-a')).toBeUndefined();
 
-    append({ sessionId: 'session-2', role: 'user', body: 'How\'s the weather', displayName: 'Avery' });
-    // The runtime event bus reports the finished agent...
-    append({ sessionId: 'session-2', role: 'assistant', body: 'Sunny and 74.', agentId: 'agent-w', metadata: { status: 'completed' } });
-    // ...and the pending-surface-reply poller reports the same one.
-    append({ sessionId: 'session-2', role: 'assistant', body: 'Sunny and 74.', agentId: 'agent-w', metadata: { status: 'completed' } });
-
-    const messages = store.messages.get('session-2') ?? [];
-    expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
-
-    const prompt = buildSharedSessionContinuationTask({
-      session: store.sessions.get('session-2') ?? null,
-      messages,
-      fallbackSessionId: 'session-2',
-    });
-    expect(prompt.split('Assistant: Sunny and 74.').length - 1).toBe(1);
+    appendSharedSessionMessage(store, {
+      sessionId: 'session-1',
+      role: 'assistant',
+      body: 'done',
+      agentId: 'agent-a',
+      metadata: { status: 'failed' },
+    }, 100);
+    expect(findAgentCompletionMessage(store, 'session-1', 'agent-a')?.body).toBe('done');
   });
 
   test('the real broker stores one message when both reporters call completeAgent', async () => {
-    const storePath = join(mkdtempSync(join(tmpdir(), 'gv-chain-authority-')), 'sessions.json');
+    const storePath = join(makeProjectTempDir('gv-chain-authority'), 'sessions.json');
     const broker = disposables.add(new SharedSessionBroker({
       storePath,
       routeBindings: {
@@ -242,5 +234,13 @@ describe('an agent contributes one message to the transcript, not two', () => {
     expect(stored).toHaveLength(1);
     expect(stored[0]?.body).toBe('Your flight leaves DAL at 07:55.');
     expect(stored[0]?.role).toBe('assistant');
+
+    // The next turn's prompt is built from this transcript: the answer is shown once.
+    const prompt = buildSharedSessionContinuationTask({
+      session: broker.getSession('session-both'),
+      messages: broker.getMessages('session-both', 100),
+      fallbackSessionId: 'session-both',
+    });
+    expect(prompt.split('Assistant: Your flight leaves DAL at 07:55.').length - 1).toBe(1);
   });
 });

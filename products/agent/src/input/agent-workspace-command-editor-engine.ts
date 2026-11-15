@@ -66,8 +66,32 @@ export type AgentWorkspaceCommandEditorSubmission =
 
 export type AgentWorkspaceCommandDispatchSafety = NonNullable<AgentWorkspaceActionResult['safety']>;
 
+/**
+ * The one confirmation gate for every form: only an explicit y / yes / true counts.
+ * A blank or unknown answer is a refusal, so a confirm field that loses `required`
+ * can never confirm by default.
+ */
 export function isAffirmative(value: string): boolean {
   return /^(y|yes|true)$/i.test(value.trim());
+}
+
+/**
+ * A webhook URL carries its token in the path or query, so the result pane shows only
+ * the origin. The dispatched command keeps the full URL.
+ */
+export function redactWebhookForDisplay(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}/<redacted>`;
+  } catch {
+    return '<redacted>';
+  }
+}
+
+/** `KEY=value` becomes `KEY=<redacted>` so an environment value never reaches the result pane. */
+export function redactEnvEntryForDisplay(entry: string): string {
+  const eq = entry.indexOf('=');
+  return eq > 0 ? `${entry.slice(0, eq)}=<redacted>` : '<redacted>';
 }
 
 export function splitCommaList(value: string): readonly string[] {
@@ -91,12 +115,15 @@ export function dispatchCommandEditorSubmission(
   title: string,
   detail: string,
   safety: AgentWorkspaceCommandDispatchSafety,
+  displayCommand: string = command,
 ): AgentWorkspaceCommandEditorSubmission {
+  // `displayCommand` is what the result pane shows. It differs from `command` only
+  // when the command carries a secret that must be dispatched but not displayed.
   return {
     kind: 'dispatch',
     command,
     status: `${title}.`,
-    actionResult: { kind: 'dispatched', title, detail, command, safety },
+    actionResult: { kind: 'dispatched', title, detail, command: displayCommand, safety },
   };
 }
 

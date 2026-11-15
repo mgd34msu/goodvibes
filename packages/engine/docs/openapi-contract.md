@@ -7,19 +7,26 @@ from the committed contract artifact and kept honest by a drift gate.
 
 - **Package export:** `@goodvibes-jev/engine/contracts/operator-openapi.json` and
   `@goodvibes-jev/engine/platform/contracts/operator-openapi.json`
-- **Repo copy:** `docs/operator-openapi.json` (byte-identical to the package
-  artifact; the generator writes both)
+- **In the repository:** `contracts/artifacts/operator-openapi.json`, the only
+  tracked copy. A second byte-identical file under `docs/` was removed; link to
+  this one. Agents that only need sessions, tasks, contracts, approvals and
+  events should start from the [small agent-facing spec](#small-agent-facing-spec).
 
 ## What it contains
 
-- Every cataloged operator method. Methods with a dedicated REST binding appear
-  as path operations (435 operations, one per method's declared HTTP verb and
-  path); methods without one are reachable only through the generic invoke
-  endpoint (`POST /api/control/gateway-methods/{methodId}/invoke`, 72 methods)
-  and are listed on it under `x-invoke-only-methods`. `x-operator-methods` is a
-  flat index of all 507 cataloged methods, REST-bound or invoke-only, each with
-  its category, access level, resolved REST route (or `null` for invoke-only),
-  and schema/typed-IO coverage.
+- Every cataloged operator method. The paragraph between the markers is written
+  by `scripts/generate-openapi-contract.ts` from the contract, so its counts
+  cannot drift from the document.
+  <!-- openapi-counts:start -->
+  Methods with a dedicated REST binding appear as path operations (497 operations, one per
+  method's declared HTTP verb and path); methods without one are reachable only through the
+  generic invoke endpoint (`POST /api/control/gateway-methods/{methodId}/invoke`, operation 498,
+  75 methods) and are listed on it under `x-invoke-only-methods`.
+  `x-operator-methods` is a flat index of all 572 cataloged methods, REST-bound
+  or invoke-only, each with its category, access level, resolved REST route (or
+  `null` for invoke-only), and schema/typed-IO coverage.
+  <!-- openapi-counts:end -->
+  `x-operator-methods` in the document is authoritative.
 - Real JSON Schemas for request/response bodies, embedded directly from the
   contract (OpenAPI 3.1 uses full JSON Schema, so they transfer unmodified).
   A method whose contract schema is absent or a bare object with no declared
@@ -45,7 +52,7 @@ from the committed contract artifact and kept honest by a drift gate.
 ## Regeneration and drift (the generated-artifact idiom)
 
 ```
-bun run openapi:generate   # regenerate both copies
+bun run openapi:generate   # regenerate the document and the counts above
 bun run openapi:check      # exit 1 on drift
 ```
 
@@ -54,3 +61,36 @@ operator contract that is not reflected in the committed OpenAPI document, or a
 hand-edit to the document, fails gates. The generator's inputs are themselves
 committed artifacts (`operator-contract.json` plus the typed-client-IO ratchet
 inputs), so generation is deterministic.
+
+## Streams and replay
+
+- The two server-sent event routes (`control.events.stream`, `companion.chat.events.stream`)
+  declare a `text/event-stream` 200 response, not a JSON body.
+- Operations that already replay safely name their replay key in an
+  `x-replay-key` extension (`in: body`, `name`, `behavior`) and in their
+  description: `sessions.register` (`sessionId`), `workLedger.submit`,
+  `workLedger.intake.capture` and `workLedger.importLegacy` (`requestId`). There
+  is no `Idempotency-Key` header; the key is a field of the request body.
+
+## Small agent-facing spec
+
+The full document is large. For an agent or script that only needs sessions,
+tasks, contracts, approvals and the event stream there is a generated slice:
+
+- `docs/agent-api.openapi.json`: those operations only, with repeated schemas
+  shared under `components.schemas`, the real error body, and the error
+  responses each operation can return (`400`, `401`, `403` with the missing
+  scopes, `404`, `409`, and `default`).
+- `docs/agent-api-index.md`: one line per operation (id, route, scopes, replay
+  key, what it does), the event ids and domains, the replay keys, and the error
+  codes with their status.
+
+```
+bun run agent-spec:generate   # write both files from the committed contract
+bun run agent-spec:check      # exit 1 when they are stale
+```
+
+No build, test or gate writes these files; run the generate command after a
+change to the sessions, tasks, contracts or approvals methods (or their events)
+and commit the result. They are derived from the same
+`contracts/artifacts/operator-contract.json` as the full document.

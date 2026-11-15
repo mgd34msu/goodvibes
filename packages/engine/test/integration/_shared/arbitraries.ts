@@ -3,7 +3,8 @@
  *
  * Exports:
  *   - `jsonValueArb`          , recursive JSON-value arbitrary (null | bool | finite number | string | array | object)
- *   - `KNOWN_EVENT_TYPES`     , Set<string> of all known AnyRuntimeEvent discriminants
+ *   - `KNOWN_EVENT_TYPES`     , Set<string> of the AnyRuntimeEvent discriminants that have a fixture
+ *   - `FIXTURELESS_EVENT_TYPES`, declared event types that do not have a fixture yet
  *   - `REQUIRED_FIELDS_BY_TYPE`, required-field map per event type
  *   - `FIXTURE_EVENTS`        , one canonical minimal instance per event kind
  */
@@ -70,7 +71,7 @@ export const jsonValueArb: fc.Arbitrary<unknown> = fc.letrec((tie) => ({
 // Known event type registry
 // ---------------------------------------------------------------------------
 
-/** All known AnyRuntimeEvent type literals. Derived from the domain-map source of truth. */
+/** AnyRuntimeEvent type literals that have a fixture below; the event sources are checked against this set and FIXTURELESS_EVENT_TYPES. */
 export const KNOWN_EVENT_TYPES = new Set<string>([
   // session
   'SESSION_STARTED', 'SESSION_LOADING', 'SESSION_RESUMED', 'SESSION_REPAIRING',
@@ -129,7 +130,7 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   'OPS_TASK_CANCELLED', 'OPS_TASK_PAUSED', 'OPS_TASK_RESUMED',
   'OPS_TASK_RETRIED', 'OPS_AGENT_CANCELLED', 'OPS_AUDIT',
   // forensics
-  'FORENSICS_REPORT_CREATED', 'FORENSICS_REPORT_EXPORTED',
+  'FORENSICS_REPORT_CREATED',
   // security
   'TOKEN_SCOPE_VIOLATION', 'TOKEN_ROTATION_WARNING', 'TOKEN_ROTATION_EXPIRED', 'TOKEN_BLOCKED',
   // automation
@@ -160,6 +161,26 @@ export const KNOWN_EVENT_TYPES = new Set<string>([
   'KNOWLEDGE_PACKET_BUILT', 'KNOWLEDGE_PROJECTION_RENDERED',
   'KNOWLEDGE_PROJECTION_MATERIALIZED', 'KNOWLEDGE_JOB_QUEUED',
   'KNOWLEDGE_JOB_STARTED', 'KNOWLEDGE_JOB_COMPLETED', 'KNOWLEDGE_JOB_FAILED',
+]);
+
+/**
+ * Event types declared in the event sources that have no fixture yet. The
+ * coverage test fails for a declared type that is in neither this list nor
+ * KNOWN_EVENT_TYPES, so adding an event means adding a fixture or listing it
+ * here on purpose; remove an entry when its fixture is added.
+ */
+export const FIXTURELESS_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
+  'COMMUNICATION_CONSUMED', 'COMPACTION_RECEIPT', 'CONFIG_KEY_CHANGED', 'FLEET_NODE_STARTED',
+  'FLEET_NODE_STATE_CHANGED', 'FLEET_NODE_FINISHED', 'FLEET_NODE_BLOCKED_ON_USER', 'FLEET_NODE_UNBLOCKED',
+  'OPS_POWER_STATE_CHANGED', 'OPS_LISTENER_MISBEHAVING', 'OPS_MEMORY_PRESSURE', 'WORK_PLAN_TASK_CREATED',
+  'WORK_PLAN_TASK_UPDATED', 'WORK_PLAN_TASK_STATUS_CHANGED', 'WORK_PLAN_TASK_DELETED',
+  'WORK_PLAN_SNAPSHOT_INVALIDATED', 'PROVIDER_VOICE_USAGE', 'MODEL_CHANGED', 'AUTH_SUCCEEDED', 'AUTH_FAILED',
+  'COMPANION_PAIR_REQUESTED', 'COMPANION_PAIR_VERIFIED', 'COMPANION_TOKEN_ROTATED',
+  'COMPANION_TOKEN_REVOKED', 'QUEUED_MESSAGES_CHANGED', 'COMPANION_MESSAGE_RECEIVED',
+  'TRANSPORT_RETRY_SCHEDULED', 'TRANSPORT_RETRY_EXECUTED', 'STREAM_SUBSCRIBER_CONNECTED',
+  'STREAM_SUBSCRIBER_DISCONNECTED', 'TRANSPORT_BACKPRESSURE', 'TRANSPORT_CONNECTION_STATE',
+  'TRANSPORT_RECONNECT_ATTEMPT', 'LLM_REQUEST_STARTED', 'WORKSPACE_SWAP_STARTED', 'WORKSPACE_SWAP_COMPLETED',
+  'WORKSPACE_SWAP_REFUSED', 'WORKSPACE_SWAP_FAILED', 'REWIND_PLANNED', 'REWIND_APPLIED', 'HUNK_REVERTED',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -329,7 +350,6 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   OPS_AGENT_CANCELLED: ['agentId', 'reason'],
   OPS_AUDIT: ['action', 'targetId', 'targetKind', 'reason', 'outcome'],
   FORENSICS_REPORT_CREATED: ['reportId', 'classification'],
-  FORENSICS_REPORT_EXPORTED: ['reportId', 'destination'],
   TOKEN_SCOPE_VIOLATION: ['tokenId', 'label', 'policyId', 'excessScopes'],
   TOKEN_ROTATION_WARNING: ['tokenId', 'label', 'msUntilDue', 'dueAt', 'ageMs'],
   TOKEN_ROTATION_EXPIRED: ['tokenId', 'label', 'ageMs', 'cadenceMs', 'dueAt'],
@@ -359,7 +379,7 @@ export const REQUIRED_FIELDS_BY_TYPE: {
   CONTROL_PLANE_AUTH_REJECTED: ['clientId', 'principalId', 'reason'],
   DELIVERY_QUEUED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'deliveryKind'],
   DELIVERY_STARTED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'startedAt'],
-  DELIVERY_SUCCEEDED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'completedAt', 'durationMs', 'statusCode'],
+  DELIVERY_SUCCEEDED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'completedAt', 'durationMs'],
   DELIVERY_FAILED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'failedAt', 'error', 'retryable'],
   DELIVERY_DEAD_LETTERED: ['deliveryId', 'jobId', 'runId', 'surfaceKind', 'targetId', 'reason', 'attempts'],
   WATCHER_STARTED: ['watcherId', 'sourceKind', 'name'],
@@ -537,7 +557,6 @@ export const FIXTURE_EVENTS: ReadonlyArray<{ type: string } & Record<string, unk
   { type: 'OPS_AUDIT', action: 'cancel', targetId: 'task1', targetKind: 'task', reason: 'user_requested', outcome: 'success' } satisfies OpsEvent,
   // forensics
   { type: 'FORENSICS_REPORT_CREATED', reportId: 'r1', classification: 'tool_failure' } satisfies ForensicsEvent,
-  { type: 'FORENSICS_REPORT_EXPORTED', reportId: 'r1', destination: 'stdout' } satisfies ForensicsEvent,
   // security
   { type: 'TOKEN_SCOPE_VIOLATION', tokenId: 'tok1', label: 'my-token', policyId: 'pol1', excessScopes: ['write'] } satisfies SecurityEvent,
   { type: 'TOKEN_ROTATION_WARNING', tokenId: 'tok1', label: 'my-token', msUntilDue: 3600000, dueAt: Date.now() + 3600000, ageMs: 86400000 } satisfies SecurityEvent,

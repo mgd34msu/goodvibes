@@ -235,7 +235,10 @@ export async function refreshHomeGraphDevicePassport(
   const store = context.store, artifactStore = context.artifactStore, signal = context.signal, requestInput = context.input, requestData = context.state, requestAuthority = context.assertCurrent;
   const requestState = () => JSON.stringify({ input: context.input, spaceId: context.spaceId, installationId: context.installationId,
     sameAuthority: context.assertCurrent === requestAuthority, sameInput: context.input === requestInput, sameData: context.state === requestData, sameStore: context.store === store, sameArtifacts: context.artifactStore === artifactStore, sameSignal: context.signal === signal });
-  return withDevicePageRefresh(store, JSON.stringify([context.spaceId, context.input.deviceId]), signal, requestState,
+  // device.id, objectId and deviceId all name one passport; queue on the node id so spellings cannot overlap.
+  const queued = context.input.deviceId
+    ? findHomeAssistantNode(store.listNodesInSpace(context.spaceId), 'ha_device', context.input.deviceId) : undefined;
+  return withDevicePageRefresh(store, JSON.stringify([context.spaceId, queued?.id ?? context.input.deviceId]), signal, requestState,
     (assertQueueCurrent) => refreshHomeGraphDevicePassportNow({ ...context, assertCurrent: () => { assertQueueCurrent(); assertKnowledgeRestriction(requestAuthority); } }));
 }
 
@@ -341,13 +344,21 @@ async function refreshHomeGraphDevicePassportNow(
     proposedFacts: new Set(proposedFacts),
   });
   const factPlan = await factReader.prepare(candidateFacts);
+  // Set when a complete page check has run; the publication check below reads
+  // it inside its own read frame to avoid repeating that identical check.
+  let pageVerified = false;
+  // True only while the publication check below is running inside its one
+  // read frame, where a page check that already passed cannot have gone stale.
+  let inPublicationFrame = false;
   const assertPageCurrent = () => {
+    if (inPublicationFrame && pageVerified) return;
     store.assertRecordSnapshotFrame(() => {
       assertKnowledgeRestriction(assertCallerCurrent);
       assertPageInputsCurrent();
       factPlan.assertCurrent();
       sourceReader.assertCurrent((id) => store.getSource(id));
     });
+    pageVerified = true;
   };
   assertFactQualityCurrent = assertPageCurrent;
   const semanticFacts = candidateFacts.filter((fact) => factPlan.accepts(fact));
@@ -369,16 +380,27 @@ async function refreshHomeGraphDevicePassportNow(
   const assertPublicationCurrent = () => {
     store.assertRecordSnapshotFrame(() => {
       passportIdentity.assertCurrent();
-      for (const check of qualityGuards) check();
-      throwIfAborted(context.signal);
-      assertKnowledgeRestriction(assertCallerCurrent);
-      assertPageInputsCurrent();
-      sourceReader.assertCurrent((id) => store.getSource(id));
-      writeGuard.assertCurrent();
-      // Input-only plans retain source/scoring/identity currentness. The actual
-      // atomic graph publisher activates the complete graph at publication.
-      preparedProfileFacts.assertCurrent();
-      factPlan.assertCurrent();
+      // Every quality guard re-runs the complete page check (restriction,
+      // retained inputs, fact plan, sources) before its own. Within this one
+      // read frame nothing can change between those reads, so when a guard has
+      // just run it, repeating it below would verify nothing new.
+      pageVerified = false;
+      inPublicationFrame = true;
+      try {
+        for (const check of qualityGuards) check();
+        const pageChecked = pageVerified;
+        throwIfAborted(context.signal);
+        if (!pageChecked) {
+          assertKnowledgeRestriction(assertCallerCurrent);
+          assertPageInputsCurrent();
+          sourceReader.assertCurrent((id) => store.getSource(id));
+        }
+        writeGuard.assertCurrent();
+        // Input-only plans retain source/scoring/identity currentness. The actual
+        // atomic graph publisher activates the complete graph at publication.
+        preparedProfileFacts.assertCurrent();
+        if (!pageChecked) factPlan.assertCurrent();
+      } finally { inPublicationFrame = false; pageVerified = false; }
     });
   };
   assertPublicationCurrent();
@@ -394,7 +416,8 @@ async function refreshHomeGraphDevicePassportNow(
       metadata: buildHomeGraphMetadata(spaceId, installationId, {
         homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
         homeAssistant: { installationId, objectKind: 'device_passport', objectId: passportIdentity.objectId },
-        deviceId: input.deviceId,
+        // The device's own object id, so alternating caller spellings never rewrite this field.
+        deviceId: deviceObjectId,
         missingFields,
         // Artifact reuse compares the actual markdown bytes. A refresh clock
         // records this completed refresh, independently of content changes.
@@ -431,7 +454,7 @@ async function refreshHomeGraphDevicePassportNow(
       signal: context.signal,
       metadata: {
         ...(input.metadata ?? {}),
-        deviceId: input.deviceId,
+        deviceId: deviceObjectId,
       },
     }, graph);
   // Register only nodes returned by this actual atomic native publication.
@@ -638,10 +661,15 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
       ? { target: { kind: 'node' as const, id: input.targetNodeId, relation: input.relation ?? 'source_for' } }
       : {}),
   };
+  // The projection verifies its owner guard and its graph guard together in one
+  // read frame. When both are the caller's single guard, which `assertCurrent`
+  // above already runs, the second run in that frame verifies nothing new.
+  const publicationGraph = graph && graph.assertCurrent !== undefined && graph.assertCurrent === input.assertCurrent
+    ? { ...graph, assertCurrent: () => {} } : graph;
   let generated: Awaited<ReturnType<typeof materializeGeneratedKnowledgeProjection>> & { readonly nodes?: readonly KnowledgeNodeRecord[] };
   try {
-    generated = graph
-      ? await materializeGeneratedKnowledgeGraphProjection(projectionInput, graph)
+    generated = publicationGraph
+      ? await materializeGeneratedKnowledgeGraphProjection(projectionInput, publicationGraph)
       : await materializeGeneratedKnowledgeProjection(projectionInput);
   } catch (error) { throwIfAborted(input.signal); throw error; }
   return {

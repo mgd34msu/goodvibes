@@ -48,12 +48,21 @@ function isBundledRun(): boolean {
   return isCompiledBunModuleUrl(import.meta.url);
 }
 
-export function resolveSqliteVecPath(): string {
-  if (isBundledRun()) {
-    const os = process.platform === 'win32' ? 'windows' : process.platform;
-    const arch = process.arch;
-    const suffix = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
-    return join(dirname(process.execPath), 'lib', `sqlite-vec-${os}-${arch}`, `vec0.${suffix}`);
+/** The process facts the resolver reads, injectable so a test can stand in for a compiled binary. */
+export interface SqliteVecPathContext {
+  readonly moduleUrl?: string | undefined;
+  readonly execPath?: string | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly arch?: string | undefined;
+}
+
+export function resolveSqliteVecPath(context: SqliteVecPathContext = {}): string {
+  if (isCompiledBunModuleUrl(context.moduleUrl ?? import.meta.url)) {
+    const platform = context.platform ?? process.platform;
+    const os = platform === 'win32' ? 'windows' : platform;
+    const arch = context.arch ?? process.arch;
+    const suffix = platform === 'win32' ? 'dll' : platform === 'darwin' ? 'dylib' : 'so';
+    return join(dirname(context.execPath ?? process.execPath), 'lib', `sqlite-vec-${os}-${arch}`, `vec0.${suffix}`);
   }
   // In dev mode, delegate to sqlite-vec's own resolver.
   return '';

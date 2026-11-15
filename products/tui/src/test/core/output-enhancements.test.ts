@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ConversationManager, parseDiffForApply, applyDiffContent } from '../../core/conversation';
+import { createTestConfigManager } from '../helpers/test-managers.ts';
 
 describe('parseDiffForApply', () => {
   test('parses a valid unified diff', () => {
@@ -64,15 +65,28 @@ describe('ConversationManager: collapse state', () => {
     cm = new ConversationManager(() => 80);
   });
 
-  test('tool results over threshold are auto-collapsed', () => {
-    // Add a tool result with more than 30 lines (default threshold)
-    const longContent = Array.from({ length: 35 }, (_, i) => `line ${i + 1}`).join('\n');
-    cm.addUserMessage('run something');
-    cm.addToolResults([{ callId: 'c1', success: true, output: longContent }]);
-    cm.getDisplayBlocks(); // trigger render
+  const codeFence = (lineCount: number): string => '```ts\n' + Array.from({ length: lineCount }, (_, i) => `const v${i} = ${i};`).join('\n') + '\n```';
 
-    // The first block (index 0) should be auto-collapsed
-    expect(cm.isCollapsed(0)).toBe(true);
+  function firstCodeBlockCollapsed(manager: ConversationManager, lineCount: number): boolean {
+    manager.addUserMessage('show code');
+    manager.addAssistantMessage(codeFence(lineCount));
+    manager.getDisplayBlocks();
+    const block = manager.getBlockRegistry().find((entry) => entry.type === 'code');
+    if (!block) throw new Error('no code block was registered');
+    return manager.isCollapsed(block.blockIndex);
+  }
+
+  test('a code block is collapsed only when it is longer than the collapse threshold', () => {
+    expect(firstCodeBlockCollapsed(cm, 35)).toBe(true);
+    expect(firstCodeBlockCollapsed(new ConversationManager(() => 80), 5)).toBe(false);
+  });
+
+  test('the configured collapse threshold decides, not a fixed line count', () => {
+    const config = createTestConfigManager();
+    config.set('display.collapseThreshold', 3);
+    expect(firstCodeBlockCollapsed(new ConversationManager(() => 80, config), 5)).toBe(true);
+    config.set('display.collapseThreshold', 50);
+    expect(firstCodeBlockCollapsed(new ConversationManager(() => 80, config), 35)).toBe(false);
   });
 
   test('toggleCollapseAtLine toggles collapse state and marks dirty', () => {

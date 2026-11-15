@@ -133,6 +133,15 @@ export function withTurnSurface<T>(origin: TurnInputOrigin | undefined, fn: () =
 }
 
 /**
+ * Runs work that outlives the call (an agent spawned for a channel message) with
+ * the surface it was triggered from in scope, so its tool calls meet the gate's
+ * surface-authority check instead of being taken for the local owner's.
+ */
+export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T): T {
+  return turnSurfaceScope.run({ surface }, fn);
+}
+
+/**
  * Who is acting in the current turn, for recording an approval the turn made:
  * `owner` for owner-direct input (and outside a turn, the owner's own process),
  * else `surface:<id>` for the surface the turn's input arrived on. It comes

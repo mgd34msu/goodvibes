@@ -81,9 +81,8 @@ describe('engine-dev alias', () => {
     expect(output).toMatch(/engine-dev: (clean|OVERLAY ACTIVE)/);
   });
 
-  test('usage message is printed and exit is non-zero for an unknown command', () => {
-    // Only meaningful once forwarding succeeds, so gate on the checkout too.
-    if (!ENGINE_TOOL_AVAILABLE) return;
+  // Only meaningful once forwarding succeeds, so gate on the checkout too.
+  test.skipIf(!ENGINE_TOOL_AVAILABLE)('usage message is printed and exit is non-zero for an unknown command', () => {
     const { exitCode, output } = run(['bogus']);
     expect(exitCode).toBe(1);
     expect(output).toContain('usage: bun scripts/engine-dev.ts');

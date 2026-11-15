@@ -8,18 +8,28 @@ import type { CompactionReceipt, CompactionResult, CompactionStrategyChoice } fr
 import { CompactionQualityError } from './compaction-types.js';
 import { distillConversation, DistillerUnavailableError } from './distiller-compaction.js';
 import { computeQualityScore, LOW_QUALITY_THRESHOLD } from '../runtime/compaction/quality-score.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { CompactionQualityScore } from '../runtime/compaction/quality-score.js';
 import type { SessionMemoryStore } from './session-memory.js';
 import type { SessionLineageTracker } from './session-lineage.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** Score a compaction result through the shared compaction quality scorer. */
-function scoreResult(
+/**
+ * Score a compaction result through the shared compaction quality scorer.
+ * Classic operation takes no semantic score, so it resolves to null: the
+ * no-reduction guard still protects the conversation, and nothing claims a grade.
+ */
+async function scoreResult(
   llmMessages: ProviderMessage[],
   result: CompactionResult,
   contextWindow: number,
   work: OwnedJudgmentWork,
-): Promise<CompactionQualityScore> {
+): Promise<CompactionQualityScore | null> {
+  if (isClassicOperation()) {
+    work.assertCurrent();
+    logger.warn('Classic compaction: no independent semantic quality score was taken; the no-reduction guard still applies.');
+    return null;
+  }
   return computeQualityScore(
     {
       sessionId: '',
@@ -67,10 +77,10 @@ async function produceCompaction(
       const quality = await scoreResult(llmMessages, distilled, compactionContext.contextWindow, work);
       work.assertCurrent();
       const noReduction = distilled.tokensAfterEstimate >= distilled.tokensBeforeEstimate;
-      if (!quality.isLowQuality && !noReduction) {
+      if (!quality?.isLowQuality && !noReduction) {
         return { result: distilled, strategy: 'distiller', requestedStrategy: 'distiller' };
       }
-      const reason = quality.isLowQuality
+      const reason = quality?.isLowQuality
         ? `distillation quality ${quality.score.toFixed(2)} (${quality.grade}) below floor ${LOW_QUALITY_THRESHOLD}; fell back to structured`
         : `distillation produced no token reduction; fell back to structured`;
       logger.warn('Distiller fell back to structured compaction', { reason });
@@ -181,6 +191,8 @@ export async function compactConversation(
     work.assertCurrent();
 
     const strategyFellBack = produced.strategy !== produced.requestedStrategy;
+    // Classic operation takes no semantic score: the receipt carries no grade
+    // and says why, instead of a fabricated one.
     const receiptBase = {
       trigger,
       strategy: produced.strategy,
@@ -188,9 +200,9 @@ export async function compactConversation(
       tokensAfter: result.tokensAfterEstimate,
       messagesBefore: result.event.messagesBeforeCompaction,
       messagesAfter: result.event.messagesAfterCompaction,
-      qualityScore: quality.score,
-      qualityGrade: quality.grade,
-      lowQuality: quality.isLowQuality,
+      qualityScore: quality?.score ?? 0,
+      qualityGrade: quality?.grade ?? '',
+      lowQuality: quality?.isLowQuality ?? false,
       instructionsReinjected: result.event.instructionsReinjected ?? false,
       validationPassed: result.validationWarnings.length === 0,
       sectionsIncluded: result.sections.map((s) => s.id),
@@ -205,8 +217,8 @@ export async function compactConversation(
     // no-net-reduction result is treated as a failure and the conversation is
     // kept rather than swapping in a summary that did not help.
     const noReduction = result.tokensAfterEstimate >= result.tokensBeforeEstimate;
-    if (quality.isLowQuality || noReduction) {
-      const detail = quality.isLowQuality
+    if (quality?.isLowQuality || noReduction) {
+      const detail = quality?.isLowQuality
         ? `Compaction quality ${quality.score.toFixed(2)} (${quality.grade}) below threshold ${LOW_QUALITY_THRESHOLD}; conversation retained. ${quality.description}`
         : `Compaction produced no token reduction (${result.tokensBeforeEstimate} -> ${result.tokensAfterEstimate}); conversation retained.`;
       logger.warn('Compaction rejected by quality guard, conversation kept', { detail, trigger });
@@ -216,33 +228,43 @@ export async function compactConversation(
     work.assertCurrent();
     host.replaceMessagesForLLM(result.messages);
     applied = true;
-    const receipt: CompactionReceipt = { ...receiptBase, outcome: 'applied' };
-    // Disposal during a host callback cannot undo already-applied messages.
-    if (!work.current) return receipt;
-    const memoryStore = host.getSessionMemoryStore();
-    if (!work.current) return receipt;
-    const memoriesCount = memoryStore?.list().length ?? 0;
-    if (!work.current) return receipt;
-    const memoriesPart = memoriesCount > 0 ? `, ${memoriesCount} pinned memories` : '';
-    const saved = result.tokensBeforeEstimate - result.tokensAfterEstimate;
-    const savedKTokens = Math.round(saved / 1000);
-    const lineage = host.getSessionLineageTracker();
-    if (!work.current) return receipt;
-    lineage.addCompactionEntry(
-      `${trigger} compact, saved ~${savedKTokens}K tokens${memoriesPart}.`,
-    );
+    const receipt: CompactionReceipt = {
+      ...receiptBase,
+      outcome: 'applied',
+      ...(quality === null ? { detail: 'Classic compaction: no independent semantic quality score was taken.' } : {}),
+    };
+    // The conversation is already replaced. A failure in the bookkeeping below
+    // (memory read, lineage entry, log) must not turn an applied compaction
+    // into a "failed" one, so it is logged and the receipt still returns.
+    try {
+      // Disposal during a host callback cannot undo already-applied messages.
+      if (!work.current) return receipt;
+      const memoryStore = host.getSessionMemoryStore();
+      if (!work.current) return receipt;
+      const memoriesCount = memoryStore?.list().length ?? 0;
+      if (!work.current) return receipt;
+      const memoriesPart = memoriesCount > 0 ? `, ${memoriesCount} pinned memories` : '';
+      const saved = result.tokensBeforeEstimate - result.tokensAfterEstimate;
+      const savedKTokens = Math.round(saved / 1000);
+      const lineage = host.getSessionLineageTracker();
+      if (!work.current) return receipt;
+      lineage.addCompactionEntry(
+        `${trigger} compact, saved ~${savedKTokens}K tokens${memoriesPart}.`,
+      );
 
-    if (!work.current) return receipt;
-    logger.info('Conversation compacted', {
-      trigger,
-      messagesBeforeCompaction: result.event.messagesBeforeCompaction,
-      messagesAfterCompaction: result.event.messagesAfterCompaction,
-      tokensBeforeEstimate: result.tokensBeforeEstimate,
-      tokensAfterEstimate: result.tokensAfterEstimate,
-      tokensSaved: saved,
-      qualityScore: quality.score,
-      qualityGrade: quality.grade,
-    });
+      if (!work.current) return receipt;
+      logger.info('Conversation compacted', {
+        trigger,
+        messagesBeforeCompaction: result.event.messagesBeforeCompaction,
+        messagesAfterCompaction: result.event.messagesAfterCompaction,
+        tokensBeforeEstimate: result.tokensBeforeEstimate,
+        tokensAfterEstimate: result.tokensAfterEstimate,
+        tokensSaved: saved,
+        ...(quality ? { qualityScore: quality.score, qualityGrade: quality.grade } : {}),
+      });
+    } catch (bookkeepingError: unknown) {
+      logger.warn('Compaction applied, but recording it failed', { error: summarizeError(bookkeepingError), trigger });
+    }
 
     return receipt;
   } catch (err: unknown) {

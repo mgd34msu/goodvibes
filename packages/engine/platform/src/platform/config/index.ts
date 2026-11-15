@@ -253,12 +253,14 @@ export function getWorkingDirectory(configManager: Pick<ConfigManager, 'getWorki
   return configManager.getWorkingDirectory();
 }
 
+const warnedSystemPromptFiles = new Set<string>();
+
 /**
  * The contents of `provider.systemPromptFile`, or undefined when no file is
  * configured or the configured file cannot be read.
  *
  * An unreadable file degrades to "no configured system prompt" and says so at
- * debug level rather than throwing: the setting names a file the user may have
+ * warn level (once per path) rather than throwing: the setting names a file the user may have
  * since moved or deleted, and a boot that dies because of it strands the
  * session over an optional preference.
  */
@@ -268,7 +270,13 @@ export function getConfiguredSystemPrompt(configManager: Pick<ConfigManager, 'ge
   try {
     return readFileSync(file, 'utf-8');
   } catch (err) {
-    logger.debug('systemPrompt file read failed (non-fatal)', { file, error: summarizeError(err) });
+    // Warn once per path: this runs on every session, and the first sentence is
+    // the one that tells the operator the session is running without the prompt
+    // they configured.
+    if (!warnedSystemPromptFiles.has(file)) {
+      warnedSystemPromptFiles.add(file);
+      logger.warn('Configured provider.systemPromptFile could not be read; this session runs WITHOUT it', { file, error: summarizeError(err) });
+    }
     return undefined;
   }
 }
@@ -419,12 +427,14 @@ export type {
 
 export { atomicWriteFileSync } from './atomic-write.js';
 export type { AtomicWriteOptions } from './atomic-write.js';
+export { withSyncFileLock } from './sync-file-lock.js';
 
 export {
   QUARANTINE_MAX_FILES_PER_DIR,
   QUARANTINE_RETENTION_MS,
   readVersioned,
   reapQuarantinedFiles,
+  setAsideNewerVersionFile,
   UNRECOGNIZED_SUFFIX,
 } from './read-versioned.js';
 export type {

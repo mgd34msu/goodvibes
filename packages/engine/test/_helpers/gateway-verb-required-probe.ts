@@ -315,7 +315,9 @@ export type VerbVerdict =
   /** Handler rejected a declared-required field on VALUE grounds; probe stops there. */
   | 'value-rejected'
   /** Input-shaped refusal that names no field, the probe cannot attribute it. */
-  | 'unattributed-refusal';
+  | 'unattributed-refusal'
+  /** A plain `Error` escaped the handler: the probe cannot tell a refused input from a failing stub. */
+  | 'unclassified-throw';
 
 export interface VerbConformance {
   readonly id: string;
@@ -376,13 +378,23 @@ export async function probeVerb(
     return { ...base, verdict: 'declared-satisfied', field: undefined, code: undefined, message: undefined };
   } catch (error) {
     if (!isGatewayVerbError(error)) {
-      // Past input validation and into the stub. The input was accepted.
-      return { ...base, verdict: 'declared-satisfied', field: undefined, code: undefined, message: undefined };
+      // A TypeError, RangeError or ReferenceError comes from the stub services
+      // dereferencing something they do not model: past input validation, so
+      // the input was accepted. A plain `Error` is how a handler words a
+      // refusal, which the probe cannot attribute, so it gets its own verdict.
+      const failure = error instanceof Error ? error : undefined;
+      const fromStub = failure instanceof TypeError || failure instanceof RangeError || failure instanceof ReferenceError;
+      if (fromStub || failure === undefined) {
+        return { ...base, verdict: 'declared-satisfied', field: undefined, code: undefined, message: undefined };
+      }
+      return { ...base, verdict: 'unclassified-throw', field: undefined, code: failure.name, message: failure.message };
     }
     const verbError = error as GatewayVerbError;
-    if (!INPUT_SHAPE_CODES.has(verbError.code)) {
+    if (!INPUT_SHAPE_CODES.has(verbError.code) && verbError.field === undefined) {
       // A refusal about the state of the world (unknown id, wrong node kind,
-      // missing principal), not about the caller's input shape.
+      // missing principal), not about the caller's input shape. A refusal that
+      // names a field is about input whatever its code (CALENDAR_BAD_RANGE,
+      // INVALID_CURSOR, ...), so it falls through to be attributed.
       return { ...base, verdict: 'declared-satisfied', field: undefined, code: verbError.code, message: undefined };
     }
     const details = { field: verbError.field, code: verbError.code, message: verbError.message };

@@ -28,7 +28,7 @@ Select `Use Cloudflare for batch or remote daemon work` on the first onboarding 
 The wizard supports these paths:
 
 - Save settings only: persist configuration and provision later.
-- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token.
+- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The wizard makes one operational token per component selection in a session and reuses it for retries and the final apply; the token does not expire and earlier tokens are never revoked, so delete any you no longer use in Cloudflare.
 - Read bootstrap token from environment: same as pasted bootstrap token, but the TUI reads the value from an environment variable in the current process.
 - Paste final operational token: the TUI stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN`.
 - Use final token from environment: the TUI writes a `goodvibes://secrets/env/<ENV_NAME>` reference, usually `CLOUDFLARE_API_TOKEN`.
@@ -47,11 +47,17 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare discover --token-env CLOUDFLARE_API_TOKEN
 /cloudflare validate --token-env CLOUDFLARE_API_TOKEN
 /cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/CLOUDFLARE_TUNNEL_TOKEN
-/cloudflare verify
-/cloudflare disable
+/cloudflare verify [--worker-url <url>] [--worker-token <token> | --worker-token-ref <ref>]
+/cloudflare disable --yes
 ```
 
 `/cloudflare setup` opens onboarding in edit mode. All other subcommands call platform-owned daemon routes under local daemon admin/auth.
+
+Every flag that takes a value must be given one: `/cloudflare validate --token-env` with no name is refused with a message, instead of falling back to the stored token.
+
+`/cloudflare disable` turns the integration off and saves that in config. Without `--yes` it only describes what it would do and changes nothing. By default it also disables the Worker cron; add `--keep-cron` to leave the cron running, and `--disable-worker-subdomain` to turn off the workers.dev subdomain too.
+
+`/cloudflare provision` also accepts `--no-verify` (skip the check after provisioning), `--no-store-token` (do not store the API token), `--no-workers-dev` (do not enable the workers.dev route), `--worker-cron`, `--daemon-url`, `--worker-url`, `--dlq`, and the plain-value `--operator-token` and `--worker-client-token` (the `-ref` forms are preferred, because a value typed on the command line stays visible in the transcript).
 
 `/cloudflare provision` accepts the same major platform daemon fields the onboarding screen exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--do-namespace-id`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
 
@@ -71,7 +77,7 @@ The TUI integrates with these daemon routes, each backing the matching `/cloudfl
 | `POST /api/cloudflare/verify` | Verify the provisioned resources |
 | `POST /api/cloudflare/disable` | Turn the integration off |
 
-Errors return JSON with `error` and `code`. The TUI displays route failures as actionable wizard or command output and does not block normal local daemon usage unless the user explicitly depends on Cloudflare provisioning.
+Errors return JSON with `error`; failures raised by the Cloudflare integration also carry a `code`. Sign-in and request-body failures (401, 403, 400) carry only `error`. The TUI displays route failures as actionable wizard or command output and does not block normal local daemon usage unless the user explicitly depends on Cloudflare provisioning.
 
 ## Batch modes
 
@@ -79,9 +85,9 @@ Errors return JSON with `error` and `code`. The TUI displays route failures as a
 
 `explicit` uses Cloudflare only for requests explicitly marked for batch execution.
 
-`eligible-by-default` lets eligible daemon work use the configured batch path unless the caller opts out.
+`eligible-by-default` is accepted and reported to clients, but the daemon does not yet enforce it: it behaves like `explicit`, and ordinary daemon chat stays live.
 
-For most users, keep `off` or `explicit`. `eligible-by-default` is intended for always-on/background deployments such as a Mac mini or remote node.
+For most users, keep `off` or `explicit`.
 
 ## Secrets
 

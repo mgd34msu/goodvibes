@@ -1,5 +1,8 @@
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
+/** Encodings `content` may be written in. `content` is text, so hex and base64 (which re-read it as encoded bytes) are not among them: send bytes as `content_base64`. */
+export const WRITE_TEXT_ENCODINGS = ['utf-8', 'utf8', 'ascii', 'latin1', 'binary'] as const;
+
 /**
  * JSON Schema definition for the write tool input.
  */
@@ -18,16 +21,17 @@ export const WRITE_SCHEMA = {
           },
           content: {
             type: 'string',
-            description: 'UTF-8 file content to write.',
+            description: 'Text file content to write. Exactly one of content or content_base64 is required (content may be an empty string).',
           },
           content_base64: {
             type: 'string',
             description:
-              'Base64-encoded file content. Use when content contains single quotes, backticks, or ${} patterns.',
+              'Base64-encoded file bytes, written exactly as decoded (use it for binary files, or when content contains single quotes, backticks, or ${} patterns). Exactly one of content or content_base64 is required.',
           },
           encoding: {
             type: 'string',
-            description: 'File encoding. Default: utf-8.',
+            enum: [...WRITE_TEXT_ENCODINGS],
+            description: 'How the text in content is encoded on disk. Default: utf-8. Ignored for content_base64, which is written as raw bytes.',
             default: 'utf-8',
           },
           mode: {

@@ -34,7 +34,13 @@ export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCat
       const parsed = workLedgerCommandSchema.safeParse(input);
       if (!parsed.success || parsed.data.type !== 'import_legacy') throw new GatewayVerbError('Invalid exact import command', 'INVALID_ARGUMENT', 400);
       const result = await native.run(parsed.data, authority, { signal: invocation.signal, isAuthorized: () => invocation.isAuthorized?.(NATIVE_IMPORT_SCOPES) === true });
-      if (invocation.isAuthorized(NATIVE_IMPORT_SCOPES) !== true) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
+      if (invocation.isAuthorized(NATIVE_IMPORT_SCOPES) !== true) {
+        // An accepted import is already durable, so the refusal must not read as "nothing happened".
+        const applied = (result as { readonly kind?: unknown }).kind === 'accepted';
+        throw new GatewayVerbError(applied
+          ? 'Owner authorization changed after the import was applied. The import was not rolled back; read the work ledger to see its result before sending it again.'
+          : 'Owner authorization changed', 'FORBIDDEN', 403);
+      }
       return result;
     }
     const actor = host.authority.issueActor({ projectId: host.projectId, role: 'coordinator',

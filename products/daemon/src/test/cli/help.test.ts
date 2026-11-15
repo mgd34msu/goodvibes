@@ -12,7 +12,7 @@ describe('the top-level help lists exactly what the binary does', () => {
   test('names every command in the catalog', () => {
     for (const spec of DAEMON_COMMANDS) {
       if (spec.name === 'serve') continue; // documented as the bare invocation
-      expect(help).toContain(spec.name);
+      expect(help, `${spec.name} has no row in the Commands list`).toMatch(new RegExp(`^  ${spec.name} {2,}\\S`, 'm'));
     }
   });
 
@@ -53,17 +53,17 @@ describe('the top-level help lists exactly what the binary does', () => {
 
   test('documents --json on the commands that take it', () => {
     for (const command of ['status', 'service-status', 'sessions', 'config', 'update']) {
-      expect(renderDaemonCommandHelp(command, 'goodvibes-daemon', 'linux')).toContain('--json');
+      expect(renderDaemonCommandHelp(command, 'goodvibes-daemon', 'linux')).toMatch(/^ +(?:-\w, )?--json\b/m);
     }
   });
 
   test('documents every exit code the binary uses', () => {
     expect(help).toContain('Exit codes:');
-    for (const code of ['  0', '  1', '  2', '  3', '  4']) {
-      expect(help).toContain(code);
-    }
-    expect(help).toContain('installed, but not running');
-    expect(help).toContain('not installed');
+    const rows = help.slice(help.indexOf('Exit codes:')).split('\n').slice(1)
+      .map((line) => line.match(/^ {2}(\d) {2,}(\S.*)$/)).filter((match) => match !== null);
+    expect(rows.map((match) => match![1])).toEqual(['0', '1', '2', '3', '4']);
+    expect(rows[3]![2]).toBe('service-status only: installed, but not running');
+    expect(rows[4]![2]).toBe('service-status only: not installed');
   });
 
   test('says systemd on Linux, launchd on macOS and a Scheduled Task on Windows', () => {

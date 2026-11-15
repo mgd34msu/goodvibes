@@ -1,4 +1,5 @@
 import type { JsonValue } from '@goodvibes-jev/judgment';
+import { REPAIR_READER_DEFAULT_TIMEOUT_MS } from '../self-improvement-budget.js';
 
 export interface SelfImprovementAssessmentInput {
   readonly query: string;
@@ -30,5 +31,5 @@ export class KnowledgeSelfImprovementAssessmentHeldError extends Error {
 }
 export const SELF_IMPROVEMENT_ASSESSMENT_LIMITS = Object.freeze({
   subjects: Number.POSITIVE_INFINITY, facts: Number.POSITIVE_INFINITY, sources: Number.POSITIVE_INFINITY, profiles: Number.POSITIVE_INFINITY, characters: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY,
-  defaultTimeoutMs: 0, timeoutMs: 2_147_483_647,
+  defaultTimeoutMs: REPAIR_READER_DEFAULT_TIMEOUT_MS, timeoutMs: 2_147_483_647,
 });

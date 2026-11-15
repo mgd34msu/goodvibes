@@ -55,11 +55,13 @@ import {
 } from './distributed-runtime-work.js';
 
 function peerLifecycleSignature(peer: StoredPeerRecord): string {
-  // Routine presence/token-use timestamps do not change device authority.
+  // Only fields that decide who the peer is and what it may do. Presence data a
+  // heartbeat refreshes (remote address, version, free-form metadata) and token
+  // use times must not cancel host-admitted work that is waiting to be pulled.
   return JSON.stringify([peer.id, peer.kind, peer.requestedId, peer.label,
-    peer.platform, peer.deviceFamily, peer.version, peer.clientMode, peer.capabilities,
-    peer.commands, peer.permissions, ['disconnected', 'revoked'].includes(peer.status) ? peer.status : 'available', peer.activeTokenId, peer.lastRemoteAddress,
-    peer.metadata, peer.tokens.map(({ lastUsedAt: _lastUsedAt, ...token }) => token)]);
+    peer.platform, peer.deviceFamily, peer.capabilities,
+    peer.commands, peer.permissions, ['disconnected', 'revoked'].includes(peer.status) ? peer.status : 'available', peer.activeTokenId,
+    peer.tokens.map(({ lastUsedAt: _lastUsedAt, ...token }) => token)]);
 }
 
 /** Observe mutations themselves, not just snapshots, so an A→B→A transition stays visible. */
@@ -189,6 +191,7 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
       readonly note?: string | undefined;
       readonly label?: string | undefined;
       readonly metadata?: Record<string, unknown> | undefined;
+      readonly confirmReplace?: boolean | undefined;
     } = {},
   ): Promise<{ request: DistributedRuntimePairRequest; peer: DistributedPeerRecord } | null> {
     return approveDistributedPairRequest(this, requestId, input);

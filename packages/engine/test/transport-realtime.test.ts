@@ -11,7 +11,7 @@ import {
   forSession,
   getStreamReconnectDelay,
   normalizeStreamReconnectPolicy,
-} from '../platform/dist/index.js';
+} from '../platform/src/index.js';
 import { settleEvents, waitFor } from './_helpers/test-timeout.js';
 
 function createFetchStub(factory: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch {
@@ -154,7 +154,7 @@ describe('transport realtime', () => {
       'http://127.0.0.1:3210/api/control-plane/events?domains=agents',
     );
     expect(buildWebSocketUrl('https://example.com/root', ['agents', 'knowledge'])).toBe(
-      'wss://example.com/api/control-plane/ws?clientKind=web&domains=agents%2Cknowledge',
+      'wss://example.com/root/api/control-plane/ws?clientKind=web&domains=agents%2Cknowledge',
     );
   });
 
@@ -358,36 +358,41 @@ describe('transport realtime', () => {
 
   test('WebSocket connector: omitting maxAttempts uses DEFAULT_WS_MAX_ATTEMPTS, not POSITIVE_INFINITY', async () => {
     const { MockWebSocket, instances } = createMockWebSocketClass();
+    const attempts: number[] = [];
+    const states: string[] = [];
 
     // Connect with reconnect enabled but no explicit maxAttempts.
     const connector = createWebSocketConnector(
       'http://127.0.0.1:3210',
       'token-abc',
       MockWebSocket,
-      { reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0 } },
+      {
+        reconnect: { enabled: true, baseDelayMs: 0, maxDelayMs: 0 },
+        onReconnectAttempt: (info) => { attempts.push(info.attempt); },
+        onConnectionStateChange: (state) => { states.push(state); },
+      },
     );
 
     const stop = await connector('agents', () => {});
     expect(typeof stop).toBe('function');
     if (typeof stop !== 'function') throw new Error('expected connector to return a stop function');
-
-    // There should be exactly one instance created.
     expect(instances).toHaveLength(1);
 
-    // Exhaust max reconnects by simulating open + close cycles up to the default limit.
-    // After DEFAULT_WS_MAX_ATTEMPTS closes, no additional reconnect timers should fire.
-    for (let i = 0; i < DEFAULT_WS_MAX_ATTEMPTS + 5; i++) {
-      const ws = instances[instances.length - 1];
-      if (!ws) break;
+    // Each drop reconnects until the default budget is spent; wait for every new socket by count.
+    for (let drop = 1; drop <= DEFAULT_WS_MAX_ATTEMPTS; drop++) {
+      const ws = instances[instances.length - 1]!;
       ws.simulateOpen();
-      await settleEvents(0); // allow onOpen to settle
       ws.simulateClose();
-      await settleEvents(0); // allow scheduleReconnect to settle
+      await waitFor(() => instances.length === drop + 1);
     }
+    expect(attempts).toEqual(Array.from({ length: DEFAULT_WS_MAX_ATTEMPTS }, (_, i) => i + 1));
 
-    // Reconnects are bounded: total instances <= DEFAULT_WS_MAX_ATTEMPTS + 1 (original connection).
-    expect(instances.length).toBeLessThanOrEqual(DEFAULT_WS_MAX_ATTEMPTS + 1);
-    expect(instances.length).not.toBe(DEFAULT_WS_MAX_ATTEMPTS + 6); // would be true if infinite
+    // The next drop finds the budget empty: it gives up synchronously instead of scheduling another socket.
+    instances[instances.length - 1]!.simulateOpen();
+    instances[instances.length - 1]!.simulateClose();
+    expect(attempts).toHaveLength(DEFAULT_WS_MAX_ATTEMPTS);
+    expect(states[states.length - 1]).toBe('failed');
+    expect(instances).toHaveLength(DEFAULT_WS_MAX_ATTEMPTS + 1);
 
     stop();
   });
@@ -478,32 +483,27 @@ describe('transport realtime', () => {
     expect(authFrame.domains).toContain('agents');
   });
 
-  test('SSE and WS backoff schedules are identical for equivalent policy inputs', () => {
-    // Both connectors call getStreamReconnectDelay with a 1-based attempt counter.
-    // WS: nextAttempt = reconnectAttempt + 1, then getStreamReconnectDelay(nextAttempt, policy).
-    // SSE: nextAttempt = reconnectAttempts + 1, then getStreamReconnectDelay(nextAttempt, policy).
-    // Both forms are symmetric, verified by inspecting the single shared helper path.
-    // This test validates the shared helper's output, which both connectors consume identically.
-    const policy = normalizeStreamReconnectPolicy({
-      enabled: true,
-      baseDelayMs: 500,
-      maxDelayMs: 5_000,
-      backoffFactor: 2,
-      maxAttempts: 10,
-    });
+  test('WebSocket connector schedules each reconnect with the shared backoff delay for its policy', async () => {
+    const reconnect = { enabled: true, baseDelayMs: 1, maxDelayMs: 4, backoffFactor: 2, maxAttempts: 10 };
+    const policy = normalizeStreamReconnectPolicy(reconnect);
+    const expected = [1, 2, 3, 4].map((attempt) => getStreamReconnectDelay(attempt, policy));
+    // Doubling from the base, then held at the cap.
+    expect(expected).toEqual([1, 2, 4, 4]);
 
-    const expectedSchedule = [1, 2, 3, 4, 5, 6, 7, 8].map((attempt) =>
-      getStreamReconnectDelay(attempt, policy),
-    );
+    const { MockWebSocket, instances } = createMockWebSocketClass();
+    const scheduled: Array<{ attempt: number; delayMs: number }> = [];
+    const stop = await createWebSocketConnector('http://127.0.0.1:3210', 'token-abc', MockWebSocket, {
+      reconnect,
+      onReconnectAttempt: (info) => { scheduled.push({ attempt: info.attempt, delayMs: info.delayMs }); },
+    })('agents', () => {});
 
-    // Verify the schedule is monotonically non-decreasing and capped at maxDelayMs.
-    for (let i = 1; i < expectedSchedule.length; i++) {
-      expect(expectedSchedule[i]).toBeGreaterThanOrEqual(expectedSchedule[i - 1]!);
+    for (let drop = 1; drop <= expected.length; drop++) {
+      instances[instances.length - 1]!.simulateOpen();
+      instances[instances.length - 1]!.simulateClose();
+      await waitFor(() => instances.length === drop + 1);
     }
-    // Attempt 1 is the first retry and waits the base delay; attempt 0 is the
-    // initial no-delay try and is not part of the reconnect schedule.
-    expect(expectedSchedule[0]).toBe(500);
-    // After several retries the delay reaches maxDelayMs.
-    expect(expectedSchedule[expectedSchedule.length - 1]).toBe(5_000);
+    if (typeof stop === 'function') stop();
+
+    expect(scheduled).toEqual(expected.map((delayMs, index) => ({ attempt: index + 1, delayMs })));
   });
 });

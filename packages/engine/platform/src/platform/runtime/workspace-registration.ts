@@ -27,7 +27,7 @@
  */
 import { dirname } from 'node:path';
 import { legacyWorkspaceRegisterPath, sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
-import { parse as parsePath } from 'node:path';
+import { broadRootReason } from '../workspace/checkpoint/root-guard.js';
 import {
   WorkspaceRegistrationStore,
   WorkspaceRegistrationError,
@@ -42,9 +42,6 @@ export interface WorkspaceRegistrationShellPaths {
   readonly homeDirectory: string;
   resolveUserPath(...segments: string[]): string;
 }
-
-/** Filename of the shared control-plane registry document (matches the daemon composition). */
-
 
 export interface WorkspaceRegistrationEvaluation {
   /** Normalized absolute working directory the prompt would ask about. */
@@ -106,17 +103,14 @@ export class WorkspaceRegistrationManager {
   }
 
   /**
-   * isBroadRoot, mirrors the platform store's broad-root refusal SET (filesystem
-   * root, home directory, daemon state dir) so the register half is never
-   * offered for a root the store would refuse. This is a UI-suppression predicate
-   * only; the store's `add` remains the enforcement authority (see register()),
-   * which is why register() also catches WorkspaceRegistrationError.
+   * Whether the store would refuse this root as too broad. Asks the same
+   * predicate the store enforces with, so the prompt offer and the refusal
+   * cannot drift apart. A UI-suppression check only; the store's `add` stays the
+   * enforcement authority (see register()), which is why register() also
+   * catches WorkspaceRegistrationError.
    */
   private isBroadRoot(normalizedRoot: string): boolean {
-    if (normalizedRoot === parsePath(normalizedRoot).root) return true;
-    if (normalizedRoot === normalizeWorkspaceRoot(this.homeDir)) return true;
-    if (normalizedRoot === normalizeWorkspaceRoot(this.daemonStateDir)) return true;
-    return false;
+    return broadRootReason(normalizedRoot, this.homeDir, this.daemonStateDir) !== null;
   }
 
   /**

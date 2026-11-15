@@ -5,5 +5,4 @@ export const { registerMcpRuntimeCommands } = createMcpRuntimeCommands<CommandCo
   hidden: true,
   confirmMutations: true,
   allowAllOnAdd: false,
-  present: (message) => message,
 });

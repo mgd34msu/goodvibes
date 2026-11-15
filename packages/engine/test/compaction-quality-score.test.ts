@@ -4,17 +4,14 @@
  * The compaction quality score: compression in code, retention read by Jev
  * (the retention rubric times the chance the written text does not contradict
  * the conversation), composed as the geometric mean. Pins the composition,
- * what is asked and when nothing is, the views the readings see, and the
- * compaction manager's escalation and scoring-failure paths.
+ * what is asked and when nothing is, and the views the readings see.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { computeQualityScore } from '../platform/src/platform/runtime/compaction/quality-score.ts';
 import { compactionViews } from '../platform/src/platform/runtime/compaction/judged-views.ts';
-import { CompactionManager } from '../platform/src/platform/runtime/compaction/manager.ts';
 import type { StrategyInput, StrategyOutput } from '../platform/src/platform/runtime/compaction/types.ts';
 import type { ProviderMessage } from '../platform/src/platform/providers/interface.ts';
-import type { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { compactionQualityPort } from './_helpers/compaction-quality.ts';
 
 const TASK: ProviderMessage = { role: 'user', content: 'Fix the CSV export dropping its last row.' };
@@ -160,59 +157,3 @@ describe('the score', () => {
     await expect(computeQualityScore(input([TASK, FOUND, RECENT]), output([SUMMARY, RECENT]))).rejects.toBeInstanceOf(JudgmentPortMissingError);
   });
 });
-
-describe('the compaction manager', () => {
-  const conversation = Array.from({ length: 30 }, (_, i): ProviderMessage => ({
-    role: i % 2 === 0 ? 'user' : 'assistant',
-    content: `message ${i} ` + 'lorem ipsum dolor sit amet '.repeat(20),
-  }));
-
-  function makeManager(events: Array<{ type: string }>): CompactionManager {
-    const bus = { emit: (_channel: string, env: { payload: { type: string } }) => { events.push(env.payload); } } as unknown as RuntimeEventBus;
-    return new CompactionManager({
-      sessionId: 's',
-      bus,
-      flags: { isEnabled: () => true } as unknown as ConstructorParameters<typeof CompactionManager>[0]['flags'],
-      contextWindow: 100_000,
-    });
-  }
-
-  test('a low score escalates to the next strategy and re-scores it', async () => {
-    const { port, requests } = compactionQualityPort({ substance: 0 });
-    installJudgmentPort(port);
-    const events: Array<{ type: string }> = [];
-    const manager = makeManager(events);
-    const result = await manager.compact({ messages: conversation, tokenCount: 70_000, trigger: 'manual' });
-    expect(result).toBeNull();
-    expect(manager.lastCommit).toBeNull();
-    expect(events.map(event => event.type)).toContain('COMPACTION_FAILED');
-    expect(events.map((e) => e.type)).toContain('COMPACTION_STRATEGY_SWITCH');
-    // Autocompact and collapse are each read by the rubric and the fidelity
-    // check; collapse first reads which messages to keep, in one request.
-    assertReadingPartition(requests, ['engine.compaction.retention', 'engine.compaction.fidelity', 'engine.compaction.collapse-keep', 'engine.compaction.retention', 'engine.compaction.fidelity']);
-  });
-
-  test('a good score commits the first strategy', async () => {
-    installJudgmentPort(compactionQualityPort({ substance: 3 }).port);
-    const events: Array<{ type: string }> = [];
-    const result = await makeManager(events).compact({ messages: conversation, tokenCount: 70_000, trigger: 'manual' });
-    expect(result!.strategy).toBe('autocompact');
-    expect(result!.strategySwitchReason).toBeNull();
-    expect(events.map((e) => e.type)).toContain('COMPACTION_QUALITY_SCORE');
-  });
-
-  test('a scoring failure ends the run as failed and commits nothing', async () => {
-    const events: Array<{ type: string }> = [];
-    const manager = makeManager(events);
-    const result = await manager.compact({ messages: conversation, tokenCount: 70_000, trigger: 'manual' });
-    expect(result).toBeNull();
-    expect(manager.state).toBe('idle');
-    expect(manager.lastCommit).toBeNull();
-    expect(events.map((e) => e.type)).toContain('COMPACTION_FAILED');
-  });
-});
-
-function assertReadingPartition(requests: ReadonlyArray<{ context?: { battery?: string }; questions: object; state: unknown }>, batteries: readonly string[]) {
-  expect(requests.map(request => request.context?.battery)).toEqual([...batteries]);
-  return requests;
-}

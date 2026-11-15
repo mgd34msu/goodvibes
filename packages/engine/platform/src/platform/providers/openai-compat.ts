@@ -22,6 +22,7 @@ import {
 import type { ProviderCapability } from './capabilities.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import {
   toOpenAITools,
@@ -31,7 +32,7 @@ import type { OpenAIToolCall } from './tool-formats.js';
 import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
 import type { OpenAIChunkUsage } from './openai-stream-helpers.js';
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
-import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import { getCacheCapability } from './cache-capability.js';
 import type { ProviderCacheCapability } from './cache-capability.js';
 import type { CacheHitTracker } from './cache-strategy.js';
@@ -348,9 +349,9 @@ export class OpenAICompatProvider implements LLMProvider {
       systemPrompt,
       reasoningEffort,
       reasoningSummary,
-      onDelta,
       onRetry,
     } = params;
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     this.assertConfiguredForChat(model);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
@@ -517,8 +518,11 @@ export class OpenAICompatProvider implements LLMProvider {
           detail: diagnostic.detail,
           rawMessage: diagnostic.rawMessage,
         });
+        const retryAfterMs = openAiRetryAfterMs(err);
         throw new ProviderError(message, {
           statusCode: diagnostic.status,
+          ...(diagnostic.status === 429 && isOpenAiSpentQuota(err) ? { category: 'billing' as const } : {}),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
           provider: this.name,
           operation: 'chat',
           phase,
@@ -569,7 +573,7 @@ export class OpenAICompatProvider implements LLMProvider {
       });
 
       return response;
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {

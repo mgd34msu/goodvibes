@@ -27,6 +27,8 @@ export interface BatteryDrift {
   readonly windows: readonly DriftWindow[];
   /** Whether any window changed from the one before it. */
   readonly changed: boolean;
+  /** Readings left out because their time could not be read; absent when none were. */
+  readonly skippedReadings?: number;
 }
 
 export interface DriftOptions {
@@ -108,7 +110,13 @@ export function readingDrift(readings: readonly LoggedReading[], options: DriftO
   const { minReadings } = OBSERVE_THRESHOLDS.drift;
   return [...byBattery]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([battery, list]) => {
+    .map(([battery, all]) => {
+      // One malformed timestamp must not fail the analysis of every decision, so
+      // such a reading is left out of the windows and counted instead.
+      const list = all.filter((reading) => Number.isFinite(Date.parse(reading.at)));
+      const skipped = all.length - list.length;
+      const skippedField = skipped > 0 ? { skippedReadings: skipped } : {};
+      if (list.length === 0) return { battery, windows: [], changed: false, ...skippedField };
       const times = list.map((reading) => Date.parse(reading.at));
       const { start, length } = windowing(times, options);
       const buckets = new Map<number, LoggedReading[]>();
@@ -128,6 +136,6 @@ export function readingDrift(readings: readonly LoggedReading[], options: DriftO
         windows.push({ ...stats, changed: reasons.length > 0, reasons });
         if (enough) comparable = stats;
       }
-      return { battery, windows, changed: windows.some((window) => window.changed) };
+      return { battery, windows, changed: windows.some((window) => window.changed), ...skippedField };
     });
 }

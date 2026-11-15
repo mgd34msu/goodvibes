@@ -1,19 +1,23 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { SystemMessageRouter, createSystemMessageRouter, type SystemMessageKind, type SystemMessagePriority, type SystemMessageTarget } from '../../core/system-message-router.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import type { ActivityFeed } from '../../core/activity-feed.ts';
 import type { ConversationManager } from '../../core/conversation';
 
-// The router consumes a semantic priority reading; fixture answers are explicit
-// per case so the test exercises async delivery, not a local text classifier.
-let priorityAnswer: SystemMessagePriority = 'high';
+// The router consumes a semantic priority reading it does not compute itself. The fake answers per message
+// text, so a case only passes when the router asked about that message and delivered that message's answer;
+// asking about any other text fails loudly.
+const judged = new Map<string, SystemMessagePriority>();
 let previousJudgmentPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => {
-  priorityAnswer = 'high';
-  previousJudgmentPort = installJudgmentPort(fakePort((name, question) => {
+  judged.clear();
+  previousJudgmentPort = installJudgmentPort(fakePort((name, question, state) => {
     if (name !== 'priority') throw new Error(`Unexpected priority question: ${name}`);
-    return choiceAnswer(question, priorityAnswer, 0.97);
+    const answer = judged.get(String(state));
+    if (answer === undefined) throw new Error(`Priority asked about an unexpected message: ${String(state)}`);
+    return choiceAnswer(question, answer, 0.97);
   }).port);
 });
 afterEach(() => { installJudgmentPort(previousJudgmentPort); });
@@ -42,10 +46,10 @@ function makeTargetResolver(
 }
 
 // ---------------------------------------------------------------------------
-// classifyPriority, tested indirectly through routeAuto
+// routeAuto: the judged priority reaches the feed with its own message
 // ---------------------------------------------------------------------------
 
-describe('classifyPriority (via routeAuto)', () => {
+describe('routeAuto priority delivery', () => {
   let conv: ReturnType<typeof makeConversation>;
   let panel: ReturnType<typeof makePanel>;
   let router: SystemMessageRouter;
@@ -60,72 +64,51 @@ describe('classifyPriority (via routeAuto)', () => {
     );
   });
 
-  test('messages with [Model] prefix classify as high', async () => {
-    await router.routeAuto('[Model] Switched to gpt-5 (openai)');
+  const cases: readonly (readonly [string, SystemMessagePriority])[] = [
+    ['[Model] Switched to gpt-5 (openai)', 'high'],
+    ['[Session] saved abc123', 'high'],
+    ['[Recovery] Failed to restore: disk error', 'high'],
+    ['A fatal error occurred', 'high'],
+    ['[Scan] Found ollama at localhost:11434', 'low'],
+    ['[MCP] Discovered server myserver (npx myserver-mcp).', 'low'],
+    ['[Agents] ✓ abc12345 completed', 'low'],
+  ];
+
+  test('each message reaches the feed with the priority judged for that message', async () => {
+    for (const [text, priority] of cases) judged.set(text, priority);
+    for (const [text] of cases) await router.routeAuto(text);
     expect(conv.addSystemMessage).not.toHaveBeenCalled();
-    expect(panel.push).toHaveBeenCalledTimes(1);
-    expect(panel._pushed[0]?.priority).toBe('high');
+    expect(panel._pushed).toEqual(cases.map(([text, priority]) => ({ text, priority })));
   });
 
-  test('messages with [Session] saved classify as high', async () => {
-    await router.routeAuto('[Session] saved abc123');
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
-    expect(panel.push).toHaveBeenCalledTimes(1);
-    expect(panel._pushed[0]?.priority).toBe('high');
+  test('the same text takes whichever priority is judged, so the feed priority is not fixed by the router', async () => {
+    const text = '[Scan] Found ollama at localhost:11434';
+    judged.set(text, 'high');
+    await router.routeAuto(text);
+    judged.set(text, 'low');
+    await router.routeAuto(text);
+    expect(panel._pushed.map((entry) => entry.priority)).toEqual(['high', 'low']);
   });
 
-  test('messages with [Recovery] Failed classify as high', async () => {
-    await router.routeAuto('[Recovery] Failed to restore: disk error');
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
-    expect(panel.push).toHaveBeenCalledTimes(1);
-    expect(panel._pushed[0]?.priority).toBe('high');
-  });
-
-  test('messages with fatal classify as high', async () => {
-    await router.routeAuto('A fatal error occurred');
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
-    expect(panel.push).toHaveBeenCalledTimes(1);
-    expect(panel._pushed[0]?.priority).toBe('high');
-  });
-
-  test('[Scan] messages classify as low (not sent to conversation)', async () => {
-    priorityAnswer = 'low';
-    await router.routeAuto('[Scan] Found ollama at localhost:11434');
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
-    expect(panel.push).toHaveBeenCalledTimes(1);
-    expect(panel._pushed[0]!.priority).toBe('low');
-  });
-
-  test('[Agents] periodic running-snapshot is dropped by the noise gate', async () => {
+  test('[Agents] periodic running-snapshot is dropped by the noise gate whatever its priority', async () => {
     // The 30s "[Agents] N running:" churn is dropped from the feed; the live
     // detail stays on the fleet/agents surface + footer count.
-    priorityAnswer = 'low';
+    judged.set('[Agents] 3 running:\n  abc12345: working', 'high');
     await router.routeAuto('[Agents] 3 running:\n  abc12345: working');
     expect(conv.addSystemMessage).not.toHaveBeenCalled();
     expect(panel.push).not.toHaveBeenCalled();
   });
 
-  test('[Agents] lifecycle (non-snapshot) still routes to the feed', async () => {
-    priorityAnswer = 'low';
-    await router.routeAuto('[Agents] ✓ abc12345 completed');
-    expect(panel.push).toHaveBeenCalledTimes(1);
-  });
-
-  test('[Tool] activity messages classify as operational and can route separately', async () => {
+  test('[Tool] activity messages resolve to the operational target and can route separately', async () => {
     const opsRouter = createSystemMessageRouter(
       conv as unknown as ConversationManager,
       panel as unknown as ActivityFeed,
       makeTargetResolver({ operational: 'conversation' }),
     );
-    priorityAnswer = 'low';
+    judged.set('[Tool] edit applied to src/main.ts', 'low');
     await opsRouter.routeAuto('[Tool] edit applied to src/main.ts');
     expect(conv.addSystemMessage).toHaveBeenCalledWith('[Tool] edit applied to src/main.ts');
-  });
-
-  test('[MCP] discovery messages classify as low', async () => {
-    priorityAnswer = 'low';
-    await router.routeAuto('[MCP] Discovered server myserver (npx myserver-mcp).');
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
+    expect(panel.push).not.toHaveBeenCalled();
   });
 });
 
@@ -209,54 +192,29 @@ describe('routeSystemMessage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// routeAuto, classification
+// routeAuto with no panel attached
 // ---------------------------------------------------------------------------
 
-describe('routeAuto classification', () => {
-  let conv: ReturnType<typeof makeConversation>;
-  let router: SystemMessageRouter;
+describe('routeAuto without a panel', () => {
+  const messages: readonly (readonly [string, SystemMessagePriority])[] = [
+    ['[Model] Switched to claude-4', 'high'],
+    ['fatal error in module', 'high'],
+    ['[Scan] Found server at localhost', 'low'],
+    ['[Plugin] loaded my-plugin', 'low'],
+  ];
 
-  beforeEach(() => {
-    conv = makeConversation();
-    router = createSystemMessageRouter(conv as unknown as ConversationManager, null, makeTargetResolver());
+  test.each(messages)('delivers "%s" to the conversation whatever its priority', async (text, priority) => {
+    const conv = makeConversation();
+    const router = createSystemMessageRouter(conv as unknown as ConversationManager, null, makeTargetResolver());
+    judged.set(text, priority);
+    await router.routeAuto(text);
+    expect(conv.addSystemMessage).toHaveBeenCalledWith(text);
   });
 
-  const highCases = [
-    '[Model] Switched to claude-4',
-    '[Compaction] Compacted context',
-    '[Recovery] Failed to restore',
-    'fatal error in module',
-    'crash detected',
-    '[Provider] switch to anthropic',
-    '[Session] loaded abc',
-    '[Session] restored abc',
-    'An unhandled exception was thrown',
-  ];
-
-  const lowCases = [
-    '[Scan] Found server at localhost',
-    '[Local] ollama at localhost:11434',
-    '[MCP] Discovered server foo',
-    '[Plugin] loaded my-plugin',
-    '[Tool] edit wrote app.ts',
-  ];
-
-  for (const msg of highCases) {
-    test(`classifies as high: "${msg.slice(0, 40)}"`, async () => {
-      await router.routeAuto(msg);
-      expect(conv.addSystemMessage).toHaveBeenCalledWith(msg);
-    });
-  }
-
-  for (const msg of lowCases) {
-    test(`classifies as low: "${msg.slice(0, 40)}"`, async () => {
-      priorityAnswer = 'low';
-      await router.routeAuto(msg);
-      expect(conv.addSystemMessage).toHaveBeenCalledWith(msg);
-    });
-  }
-
   test('contract messages follow the contract target policy', async () => {
+    const conv = makeConversation();
+    const router = createSystemMessageRouter(conv as unknown as ConversationManager, null, makeTargetResolver());
+    judged.set('[Contract] Chain abc123 started', 'high');
     await router.routeAuto('[Contract] Chain abc123 started');
     expect(conv.addSystemMessage).toHaveBeenCalledWith('[Contract] Chain abc123 started');
   });
@@ -331,17 +289,54 @@ describe('noise gate', () => {
     expect(panel.push).toHaveBeenCalledWith('[Terminal] resized to 120x40', 'low');
   });
 
-  test('provider "from last session" replay folds off the feed (buffered, not pushed)', () => {
-    const conv = makeConversation();
-    const panel = makePanel();
-    const router = createSystemMessageRouter(
-      conv as unknown as ConversationManager,
-      panel as unknown as ActivityFeed,
-      makeTargetResolver(),
-    );
-    router.low('[Local] ollama at localhost:11434 (2 models) — from last session');
-    expect(panel.push).not.toHaveBeenCalled();
-    expect(conv.addSystemMessage).not.toHaveBeenCalled();
+  describe('provider "from last session" replay', () => {
+    const replay = (name: string, models: number) => `[Local] ${name} at localhost:11434 (${models} models) — from last session`;
+
+    function setup() {
+      const conv = makeConversation();
+      const panel = makePanel();
+      const router = createSystemMessageRouter(
+        conv as unknown as ConversationManager,
+        panel as unknown as ActivityFeed,
+        makeTargetResolver(),
+      );
+      return { conv, panel, router };
+    }
+
+    test('stays off the feed and the conversation, and each burst is folded into its own logged summary', async () => {
+      const info = spyOn(logger, 'info').mockImplementation(() => {});
+      try {
+        const { conv, panel, router } = setup();
+        router.low(replay('ollama', 2));
+        router.low(replay('lmstudio', 1));
+        // Nothing is logged until the microtask that closes the burst has run.
+        expect(info).not.toHaveBeenCalled();
+        await Promise.resolve();
+        expect(info).toHaveBeenCalledTimes(1);
+        expect(info.mock.calls[0]?.[0]).toBe('[Local] Restored 2 providers from last session (ollama, lmstudio)');
+
+        // A later burst starts from an empty buffer instead of accumulating onto the first.
+        router.low(replay('vllm', 3));
+        await Promise.resolve();
+        expect(info).toHaveBeenCalledTimes(2);
+        expect(info.mock.calls[1]?.[0]).toBe('[Local] Restored 1 provider from last session (vllm)');
+
+        expect(panel.push).not.toHaveBeenCalled();
+        expect(conv.addSystemMessage).not.toHaveBeenCalled();
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    test('a flush with nothing buffered logs nothing', () => {
+      const info = spyOn(logger, 'info').mockImplementation(() => {});
+      try {
+        setup().router.flushProviderReplay();
+        expect(info).not.toHaveBeenCalled();
+      } finally {
+        info.mockRestore();
+      }
+    });
   });
 
   test('a WRFC replay for a terminal chain is dropped when isChainTerminal says so', () => {

@@ -2,7 +2,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { daemonCiPayloads, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
+import { daemonCiPayloads, daemonCiPayloadSpecs, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
 const PACKAGE = '@goodvibes-jev/daemon';
 const RECEIPT = 'daemon-installation.json';
 export interface DaemonInstallOwner extends DaemonArtifactSource { readonly version: string; readonly target: DaemonNativeTarget; }
@@ -28,9 +28,9 @@ export function assertPath(path: string): void {
 }
 export function targetPaths(prefix: string, target: DaemonNativeTarget = daemonNativeHost()) {
   assertPath(prefix);
-  return [...daemonCiPayloads(target), RECEIPT].map((path, index) => {
-    const target = join(prefix, path); assertPath(target);
-    return { label: path, path: target, assetName: `member-${index}`, executable: index < 2 };
+  return [...daemonCiPayloadSpecs(target), { relativePath: RECEIPT, executable: false }].map((spec, index) => {
+    const path = spec.relativePath, target = join(prefix, path); assertPath(target);
+    return { label: path, path: target, assetName: `member-${index}`, executable: spec.executable };
   });
 }
 export function expectedModes(artifact: DaemonCiArtifact): void {

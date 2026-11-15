@@ -13,7 +13,7 @@ import type {
   ProjectWorkPlanTaskStatusInput,
   ProjectWorkPlanTaskUpdateInput,
 } from '../../knowledge/index.js';
-import { readJsonErrorResponse } from './error-response.js';
+import { requireParsedBody, routeFailureResponse } from './route-helpers.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -23,6 +23,31 @@ interface ProjectPlanningRouteContext {
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
 }
+
+/**
+ * The paths the project planning routes serve.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const PROJECT_PLANNING_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/projects/planning/status' },
+  { method: 'GET', path: '/api/projects/planning/state' },
+  { method: 'POST', path: '/api/projects/planning/state' },
+  { method: 'POST', path: '/api/projects/planning/evaluate' },
+  { method: 'GET', path: '/api/projects/planning/decisions' },
+  { method: 'POST', path: '/api/projects/planning/decisions' },
+  { method: 'GET', path: '/api/projects/planning/language' },
+  { method: 'POST', path: '/api/projects/planning/language' },
+  { method: 'GET', path: '/api/projects/planning/work-plan' },
+  { method: 'GET', path: '/api/projects/planning/work-plan/tasks' },
+  { method: 'POST', path: '/api/projects/planning/work-plan/tasks' },
+  { method: 'POST', path: '/api/projects/planning/work-plan/tasks/reorder' },
+  { method: 'POST', path: '/api/projects/planning/work-plan/clear-completed' },
+  { method: 'GET', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+  { method: 'PATCH', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+  { method: 'DELETE', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+  { method: 'POST', path: '/api/projects/planning/work-plan/tasks/{taskId}/status' },
+];
 
 export class ProjectPlanningRoutes {
   constructor(private readonly context: ProjectPlanningRouteContext) {}
@@ -41,7 +66,7 @@ export class ProjectPlanningRoutes {
         }));
       }
       if (url.pathname === '/api/projects/planning/state' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.upsertState(await this.readBody<ProjectPlanningStateUpsertInput>(req), { signal: req.signal }),
         ));
       }
@@ -52,7 +77,7 @@ export class ProjectPlanningRoutes {
         return Response.json(await this.context.projectPlanningService.listDecisions(readProjectSpaceFromUrl(url)));
       }
       if (url.pathname === '/api/projects/planning/decisions' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.recordDecision(await this.readBody<ProjectPlanningDecisionRecordInput>(req)),
         ));
       }
@@ -60,7 +85,7 @@ export class ProjectPlanningRoutes {
         return Response.json(await this.context.projectPlanningService.getLanguage(readProjectSpaceFromUrl(url)));
       }
       if (url.pathname === '/api/projects/planning/language' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.upsertLanguage(await this.readBody<ProjectPlanningLanguageUpsertInput>(req)),
         ));
       }
@@ -71,7 +96,7 @@ export class ProjectPlanningRoutes {
         return Response.json(await this.context.projectPlanningService.getWorkPlanSnapshot(readWorkPlanQuery(url)));
       }
       if (url.pathname === '/api/projects/planning/work-plan/tasks' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.createWorkPlanTask({
             ...readWorkPlanQuery(url),
             ...(await this.readBody<ProjectWorkPlanTaskCreateInput>(req)),
@@ -79,7 +104,7 @@ export class ProjectPlanningRoutes {
         ));
       }
       if (url.pathname === '/api/projects/planning/work-plan/tasks/reorder' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.reorderWorkPlanTasks({
             ...readWorkPlanQuery(url),
             ...(await this.readBody<ProjectWorkPlanTaskReorderInput>(req)),
@@ -87,7 +112,7 @@ export class ProjectPlanningRoutes {
         ));
       }
       if (url.pathname === '/api/projects/planning/work-plan/clear-completed' && req.method === 'POST') {
-        return this.admin(req, async () => Response.json(
+        return await this.admin(req, async () => Response.json(
           await this.context.projectPlanningService.clearCompletedWorkPlanTasks({
             ...readWorkPlanQuery(url),
             ...(await this.readOptionalBody<ProjectWorkPlanClearCompletedInput>(req)),
@@ -105,7 +130,7 @@ export class ProjectPlanningRoutes {
           } satisfies ProjectWorkPlanTaskGetInput));
         }
         if (!isStatusRoute && req.method === 'PATCH') {
-          return this.admin(req, async () => Response.json(
+          return await this.admin(req, async () => Response.json(
             await this.context.projectPlanningService.updateWorkPlanTask({
               ...readWorkPlanQuery(url),
               ...(await this.readBody<Omit<ProjectWorkPlanTaskUpdateInput, 'taskId'>>(req)),
@@ -114,7 +139,7 @@ export class ProjectPlanningRoutes {
           ));
         }
         if (!isStatusRoute && req.method === 'DELETE') {
-          return this.admin(req, async () => Response.json(
+          return await this.admin(req, async () => Response.json(
             await this.context.projectPlanningService.deleteWorkPlanTask({
               ...readWorkPlanQuery(url),
               taskId,
@@ -122,7 +147,7 @@ export class ProjectPlanningRoutes {
           ));
         }
         if (isStatusRoute && req.method === 'POST') {
-          return this.admin(req, async () => Response.json(
+          return await this.admin(req, async () => Response.json(
             await this.context.projectPlanningService.setWorkPlanTaskStatus({
               ...readWorkPlanQuery(url),
               ...(await this.readBody<Omit<ProjectWorkPlanTaskStatusInput, 'taskId'>>(req)),
@@ -133,7 +158,7 @@ export class ProjectPlanningRoutes {
       }
       return Response.json({ error: 'Unknown project planning route' }, { status: 404 });
     } catch (error) {
-      return readJsonErrorResponse(error, { status: 400 });
+      return routeFailureResponse(error);
     }
   }
 
@@ -145,14 +170,12 @@ export class ProjectPlanningRoutes {
 
   private async readBody<T>(req: Request): Promise<T> {
     const body = await this.context.parseJsonBody(req);
-    if (body instanceof Response) throw new Error(await body.text());
-    return body as T;
+    return requireParsedBody(body) as T;
   }
 
   private async readOptionalBody<T>(req: Request): Promise<T> {
     const body = await this.context.parseOptionalJsonBody(req);
-    if (body instanceof Response) throw new Error(await body.text());
-    return (body ?? {}) as T;
+    return (requireParsedBody(body) ?? {}) as T;
   }
 }
 

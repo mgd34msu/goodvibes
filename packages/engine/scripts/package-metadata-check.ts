@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOURCE_CONDITION } from './export-conditions.ts';
+import { reexportedNames } from './reexported-names.ts';
 import { packageDirs, publicPackageDirs, REPO_ROOT } from './release-shared.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -161,7 +162,8 @@ function collectGeneratedFoundationTypeNames(): readonly string[] {
 
 function assertContractsGeneratedTypesReexported(): void {
   const source = readFileSync(resolve(ENGINE_ROOT, 'contracts/src/index.ts'), 'utf8');
-  const missing = collectGeneratedFoundationTypeNames().filter((name) => !new RegExp(`\\b${name}\\b`).test(source));
+  const reexported = reexportedNames(source, './generated/foundation-client-types.js');
+  const missing = collectGeneratedFoundationTypeNames().filter((name) => reexported !== null && !reexported.has(name));
   if (missing.length > 0) {
     throw new Error(`contracts/src/index.ts must re-export generated foundation client types: ${missing.join(', ')}`);
   }

@@ -1,7 +1,7 @@
 import { answerExecPrompt, commitExecPromptAnswer, discardExecPromptAnswer } from '../platform/src/platform/runtime/permissions/autonomous-tool-prompts.ts';
 import { runInteractiveCommand, detectPtyAvailability, probePtyHost } from '../platform/src/platform/tools/exec/interactive.ts';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withDecisionLog, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
@@ -12,26 +12,27 @@ import { createRuntimeStore } from '../platform/src/platform/runtime/store/index
 import { createClientRuntimeServices, type ClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 import { createHostedSessionRuntime, type HostedSessionRuntime } from '../platform/src/platform/hosted-sessions/session-runtime.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
-import { admitSandboxEscalation } from '../platform/src/platform/runtime/permissions/autonomous-sandbox-escalation.ts';
 import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
 import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
-import { detectSandboxAvailability, probeSandboxHost, resolveExecSandboxPlan } from '../platform/src/platform/tools/exec/sandbox.ts';
+import { detectSandboxAvailability, probeSandboxHost } from '../platform/src/platform/tools/exec/sandbox.ts';
 import { toolReadingsPort } from './_helpers/tool-readings.ts';
-import { forgetCredentialEnvReadings } from '../platform/src/platform/tools/exec/credential-env.ts';
 import { forgetGateReadings } from './_helpers/gate-readings.ts';
+import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
 
 const command = 'printf "Continue? [y/n]: " > /dev/tty; read ans < /dev/tty; if [ "$ans" = "y" ]; then echo owned-terminal-receipt; else exit 1; fi';
 const availability = detectSandboxAvailability(probeSandboxHost());
+requireLiveHost('sandbox', availability.available);
+const ptyAvailable = detectPtyAvailability(probePtyHost()).available;
+requireLiveHost('PTY', ptyAvailable);
 let root: string; let workspaceTrust: WorkspaceTrustManager; let services: ClientRuntimeServices; let runtime: HostedSessionRuntime;
 let restore: () => void; let deps: ToolExecutionDeps;
-let denyEscalation: boolean; let revokeBeforeSpawn: (() => void | Promise<void>) | undefined; let sawEscalation: boolean;
 let terminalControlChoice: 'revise_0' | 'reject';
 let humanAsks: string[]; let requests: JudgmentRequest<Questions>[];
 
 beforeEach(() => {
   terminalControlChoice = 'revise_0';
-  forgetGateReadings(); forgetCredentialEnvReadings(); humanAsks = []; requests = []; denyEscalation = false; sawEscalation = false; revokeBeforeSpawn = undefined;
+  forgetGateReadings(); humanAsks = []; requests = [];
   root = mkdtempSync(join(tmpdir(), 'hosted-autonomous-prompts-'));
   const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, 'config'), workingDir: root, homeDir: root });
   configManager.set('sandbox.enabled', false);
@@ -46,8 +47,6 @@ beforeEach(() => {
   const semantic = fakePort((_name, question, state) => choiceAnswer(question, question.type === 'choice' && 'revise_0' in question.criteria && !('act' in question.criteria) ? terminalControlChoice : 'act', 0.97));
   const recorded = withDecisionLog({ model: readings.port.model, async ask(request) {
     request.signal?.throwIfAborted(); request.beforeAttempt?.(); requests.push(request as JudgmentRequest<Questions>);
-    if ('disposition' in request.questions && JSON.stringify(request.state).includes('sandboxEscalation')) sawEscalation = true;
-    if (sawEscalation && 'credential' in request.questions && revokeBeforeSpawn) { const revoke = revokeBeforeSpawn; revokeBeforeSpawn = undefined; await revoke(); }
     return 'disposition' in request.questions ? semantic.port.ask(request) : readings.port.ask(request);
   } }, services.judgment.decisionLog);
   const spy = spyOn(services.judgment.port, 'ask').mockImplementation(recorded.ask); restore = () => spy.mockRestore();
@@ -59,14 +58,14 @@ beforeEach(() => {
 });
 afterEach(() => { runtime?.dispose(); restore?.(); services?.dispose(); if (root) rmSync(root, { recursive: true, force: true }); forgetGateReadings(); });
 
-test('actual hosted terminal selects exact Jev control without a human or saved trust', async () => {
+test.skipIf(!ptyAvailable)('actual hosted terminal selects exact Jev control without a human or saved trust', async () => {
   const result = await executeToolCalls(deps, 'terminal', [{ id: 'terminal-call', name: 'exec', arguments: { commands: [{ cmd: command, interactive: true, timeout_ms: 5000 }] } }]);
   expect(humanAsks).toEqual([]); expect(result[0]!.success).toBe(true);
   expect(result[0]!.output).toContain('owned-terminal-receipt'); expect(workspaceTrust.isDecided()).toBe(false);
   expect(requests.some(item => item.context?.site === 'engine.exec.prompt-control')).toBe(true);
 }, 15000);
 
-test('explicit restricted terminal control refuses without persisted escalation', async () => {
+test.skipIf(!ptyAvailable)('explicit restricted terminal control refuses without persisted escalation', async () => {
   await workspaceTrust.setLevel('restricted');
   await expect(executeToolCalls(deps, 'terminal-restricted', [{ id: 'terminal-restricted-call', name: 'exec', arguments: { commands: [{ cmd: command, interactive: true, timeout_ms: 3000 }] } }])).rejects.toThrow('restricted');
   expect(humanAsks).toEqual([]);
@@ -119,7 +118,7 @@ test('Jev may refuse fixed terminal controls without a human fallback', async ()
   expect(result).toEqual({ answered: false }); expect(humanAsks).toEqual([]);
 });
 
-test.skipIf(!detectPtyAvailability(probePtyHost()).available)('real PTY output changed during callback prevents old bytes from being sent', async () => {
+test.skipIf(!ptyAvailable)('real PTY output changed during callback prevents old bytes from being sent', async () => {
   let firstPrompt: string | undefined;
   let observedNativeStale = false;
   const result = await runInteractiveCommand({ cmdStr: 'printf "Continue? [y/n]: "; while [ ! -f prompt-change-ready ]; do sleep 0.01; done; printf "changed prompt: "; read answer; echo "SENT=$answer"',

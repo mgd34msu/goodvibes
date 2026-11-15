@@ -69,6 +69,9 @@ export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependen
   return {
     ...state,
     bindSettings: {
+      // Always false on purpose: `daemon.enabled` only says this terminal ADOPTS a
+      // session daemon (default on). It is not a server this install turned on, so
+      // reading it would make every default install look network-capable.
       daemonEnabled: false,
       httpListenerEnabled: Boolean(config.danger.httpListener),
       controlPlane: config.controlPlane,

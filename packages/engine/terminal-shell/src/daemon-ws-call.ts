@@ -133,7 +133,18 @@ export async function callDaemonWsVerb<T>(
     let settled = false;
     let authSent = false;
     let callSent = false;
+    // Once the call frame is out the daemon may have acted on it, so a lost
+    // answer is an unknown outcome, not a refusal: retrying blindly could act twice.
+    const outcomeUnknown = (why: string): DaemonVerbOutcome<T> => ({
+      ok: false,
+      error: `${why}; ${methodId} may or may not have taken effect`,
+      fix: 'check the result first (for example the session list) before retrying, so the action is not done twice',
+    });
     const timer = setTimeout(() => {
+      if (callSent) {
+        finish(outcomeUnknown(`${where} did not answer within ${Math.round(timeoutMs / 1000)}s after the request was sent`));
+        return;
+      }
       finish({
         ok: false,
         error: `${where} did not answer within ${Math.round(timeoutMs / 1000)}s`,
@@ -221,7 +232,9 @@ export async function callDaemonWsVerb<T>(
         return;
       }
       const body = (frame.body ?? {}) as { error?: unknown; fix?: unknown };
-      if (frame.status === 404) {
+      // Only the daemon's own unknown-method answer means "older build"; a
+      // handler's 404 (a session or origin that does not exist) carries its own message.
+      if (frame.status === 404 && (body as { code?: unknown }).code === 'METHOD_NOT_FOUND') {
         finish({
           ok: false,
           error: `${where} does not know the verb ${methodId}`,
@@ -239,6 +252,10 @@ export async function callDaemonWsVerb<T>(
     };
 
     socket.onerror = (): void => {
+      if (callSent) {
+        finish(outcomeUnknown(`the connection to ${where} failed after the request was sent`));
+        return;
+      }
       finish({
         ok: false,
         error: `could not reach ${where}`,
@@ -251,6 +268,10 @@ export async function callDaemonWsVerb<T>(
     socket.onclose = (): void => {
       // A close before an answer is a refusal too, most often the upgrade
       // itself was rejected, which happens before any frame is sent.
+      if (callSent) {
+        finish(outcomeUnknown(`${where} closed the connection before answering`));
+        return;
+      }
       finish({
         ok: false,
         error: `${where} closed the connection before answering`,

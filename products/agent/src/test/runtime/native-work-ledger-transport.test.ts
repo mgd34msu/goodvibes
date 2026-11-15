@@ -24,6 +24,11 @@ function serverFixture() {
   const host = { baseUrl: `http://127.0.0.1:${server.port}`, token, workspace: '/synthetic-project' };
   return { host, requests, revoke() { token = 'revoked'; }, denyDiscovery() { discovery = false; }, close() { server.stop(true); } };
 }
+const guarded = (violations: string[], handle: (request: Request) => Promise<Response>) => async (request: Request): Promise<Response> => {
+  // A failed assertion in a handler becomes an HTTP 500 the client may treat as an expected failure; keep it for the test body.
+  try { return await handle(request); } catch (error) { violations.push(error instanceof Error ? error.message : String(error)); throw error; }
+};
+
 test('production discovery and native reader authenticate and send only GET read methods', async () => {
   const fixture = serverFixture(); const view = createNativeWorkLedgerView(() => fixture.host, () => {});
   try {
@@ -55,7 +60,8 @@ test('real Agent command routes native start/status/cancel/explicit resume over 
   const operations: { method: string; body: unknown }[] = [];
   const work = { source: null, id: 'native-work', title: 'Ship exact work', goal: 'Preserve the original goal', criteria: ['Original criterion'], revision: 3, criteriaRevision: 2, reportedState: 'in_progress', currentAttemptId: 'native-attempt', createdAt: 1, updatedAt: 1 };
   const attempt = { id: 'native-attempt', workId: work.id, predecessorId: null, ownerId: 'paired', revision: 4, state: 'active', report: null, blocker: null, createdAt: 1, updatedAt: 1 };
-  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
+  const violations: string[] = [];
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-control-token');
     const path = new URL(request.url).pathname;
     if (path === '/api/work-ledger/project') return Response.json({ projectId: 'p' });
@@ -67,7 +73,7 @@ test('real Agent command routes native start/status/cancel/explicit resume over 
       return Response.json({ kind: 'execution', ...body, currentRevision: body.expectedRevision, currentAttempt: true, stale: false, state: path.endsWith('/cancel') ? 'cancelled' : 'launch-claimed', recovery: path.endsWith('/cancel') ? 'cancelled' : 'required', receipt: { contractId: 'receipt-contract', ownerAgentId: 'receipt-owner' }, progress: { status: 'running', sessionMode: true, semanticState: 'deferred', stage: 'checking', retrying: true, units: { total: 2, passed: 1, failed: 0 }, criteria: { total: 1, met: 0, unmet: 0, unshown: 1 } } });
     }
     throw new Error(`Unexpected path: ${path}`);
-  } });
+  }) });
   const view = createNativeWorkLedgerView(() => ({ baseUrl: `http://127.0.0.1:${server.port}`, token: 'synthetic-control-token', workspace: '/synthetic' }), () => {});
   const printed: string[] = [];
   const context = { nativeWorkLedger: view, print: (text: string) => printed.push(text) } as unknown as import('../../input/command-registry.ts').CommandContext;
@@ -80,6 +86,7 @@ test('real Agent command routes native start/status/cancel/explicit resume over 
     const rendered = nativeWorkLedgerLines(view.state).join('\n');
     expect(rendered).toContain('Original criterion'); expect(rendered).toContain('receipt-contract'); expect(rendered).toContain('semantic deferred'); expect(rendered).toContain('Verification: unverified');
     expect(printed.join(' ')).not.toContain('approval');
+    expect(violations).toEqual([]);
   } finally { view.close(); server.stop(true); }
 });
 
@@ -89,7 +96,8 @@ test('native command distinguishes intent wire variants without manufacturing ad
   let intentState: 'admitting' | 'refused' | 'cancelled' = 'admitting'; const operations: string[] = [];
   const work = { source: null, id: 'intent-work', title: 'Original task', goal: 'Original intent', criteria: ['Original criterion'], revision: 3, criteriaRevision: 2, reportedState: 'in_progress', currentAttemptId: 'intent-attempt', createdAt: 1, updatedAt: 1 };
   const attempt = { id: 'intent-attempt', workId: work.id, predecessorId: null, ownerId: 'paired', revision: 4, state: 'active', report: null, blocker: null, createdAt: 1, updatedAt: 1 };
-  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
+  const violations: string[] = [];
+  const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe('Bearer synthetic-intent-token'); const path = new URL(request.url).pathname;
     if (path === '/api/work-ledger/project') return Response.json({ projectId: 'p' });
     if (path.endsWith('/snapshot')) return Response.json({ projectId: 'p', cursor: 0, revision: 0, works: [{ work, attempt, verification: { state: 'unverified', reason: 'No evidence', evidence: null }, attention: [] }] });
@@ -101,7 +109,7 @@ test('native command distinguishes intent wire variants without manufacturing ad
     return Response.json(intentState === 'cancelled'
       ? { ...common, kind: 'prevented-before-admission', state: 'cancelled', recovery: 'cancelled' }
       : { ...common, kind: 'pending-intent', state: intentState, recovery: intentState === 'admitting' ? 'pending' : 'required' });
-  } });
+  }) });
   const view = createNativeWorkLedgerView(() => ({ baseUrl: `http://127.0.0.1:${server.port}`, token: 'synthetic-intent-token', workspace: '/synthetic' }), () => {});
   const printed: string[] = []; const registry = new CommandRegistry(); registerAgentWorkspaceRuntimeCommands(registry);
   const context = { nativeWorkLedger: view, print: (text: string) => printed.push(text) } as unknown as import('../../input/command-registry.ts').CommandContext;
@@ -112,6 +120,7 @@ test('native command distinguishes intent wire variants without manufacturing ad
       expect(text).not.toContain('Admitted revisions'); expect(text).not.toContain('Receipt:'); expect(text).not.toContain('Progress:');
     }
     expect(operations).toEqual(['status', 'status', 'status']);
+    expect(violations).toEqual([]);
   } finally { view.close(); server.stop(true); }
 });
 

@@ -3,27 +3,16 @@ import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from '
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { gateJudgmentRegistry, readingState } from '@goodvibes-jev/engine/platform/platform/gate';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { personalOpsLaneMember } from '@goodvibes-jev/engine/platform/platform/routing';
 import { isDeepStrictEqual } from 'node:util';
-import { mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { ProcessManager, ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
-import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
-import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
-import { ConfigManager } from '../../config/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
-import { createShellPathService } from '@/runtime/index.ts';
-import { registerAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
+import { rmSync } from 'node:fs';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { AGENT_HARNESS_MODES } from '../../tools/agent-harness-tool-schema.ts';
 import { HARNESS_MODE_DESCRIPTORS } from '../../tools/agent-harness-mode-catalog.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
+import { makeHandoffFixture } from './agent-harness-handoff-fixture.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 
 let previousPort: ReturnType<typeof installJudgmentPort>;
@@ -33,7 +22,6 @@ type ParityJudgmentRequest = Parameters<JudgmentPort['ask']>[0];
 let unavailableLaneRequests: ParityJudgmentRequest[];
 const SEMANTIC_CATALOG_MODES = new Set(['personal_ops_queue', 'personal_ops_lane', 'personal_ops_intake', 'run_personal_ops_read',
   'personal_ops_briefing', 'personal_ops', 'autonomy_queue', 'autonomy_queue_item']);
-const UNADMITTED_HELD_MODES = new Set(['run_background_process', 'set_setting', 'reset_setting']);
 beforeEach(async () => {
   laneUnavailable = new JudgmentError('unavailable', 'This parity fixture has no lane membership answer.');
   unavailableLaneRequests = [];
@@ -76,113 +64,11 @@ afterEach(() => { installJudgmentPort(previousPort); });
 afterAll(cleanupResearchScreeningFixtures);
 
 function makeParityFixture(options: { sourceOwner?: boolean } = {}) {
-  const root = makeProjectTempDir('gv-parity');
-  mkdirSync(join(root, '.goodvibes', 'daemon'), { recursive: true });
-  const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-  const commandRegistry = new CommandRegistry();
-  const configManager = new ConfigManager({
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    configDir: paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT),
-    workingDir: paths.workingDirectory,
-    homeDir: paths.homeDirectory,
-  });
-  configManager.flushConfigFileChanges();
-  const permissionManager = new PermissionManager(undefined, createPermissionConfigReader(configManager), new PolicyRuntimeState());
-  const toolRegistry = new ToolRegistry(permissionManager);
-  if (options.sourceOwner !== false) bindAgentResearchSourceOwner(toolRegistry, ordinaryResearchOwner());
-  const processManager = new ProcessManager();
-  const spawn = spyOn(processManager, 'spawn').mockImplementation(async () => { throw new Error('Parity must never spawn a process.'); });
-  const fileUndoManager = new FileUndoManager();
-  const workPlanStore = new WorkPlanStore({ homeDirectory: root, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, projectId: 'parity-test', projectRoot: root });
-
-  const context = {
-    print: (_text: string) => {},
-    renderRequest: () => {},
-    executeCommand: async (name: string, args: string[]) => commandRegistry.execute(name, args, context as CommandContext),
-    openWorkspacePicker: () => {},
-    openAgentWorkspace: () => {},
-    dismissAgentWorkspace: () => false,
-    openSettingsModal: () => {},
-    openMcpWorkspace: () => {},
-    openModelPicker: () => {},
-    openModelPickerWithTarget: () => true,
-    openProviderPicker: () => {},
-    openProviderModelPickerWithTarget: () => true,
-    openReasoningEffortPicker: () => ({ opened: true, model: 'test', levels: [] }),
-    openSessionPicker: () => {},
-    openProfilePicker: () => {},
-    openBookmarkModal: () => {},
-    openProcessModal: () => {},
-    openLiveTail: () => ({ opened: true, processId: 'bg-test', label: 'test' }),
-    openConversationSearch: () => {},
-    openPromptHistorySearch: () => {},
-    openSlashCommandMode: () => true,
-    openFilePicker: () => true,
-    openBlockActions: () => true,
-    openContextInspector: () => {},
-    openHelpOverlay: () => {},
-    openShortcutsOverlay: () => {},
-    openSelection: () => {},
-    workspace: { shellPaths: paths, processManager, bookmarkManager: { list: () => [], listSavedFiles: () => [] }, fileUndoManager, workPlanStore },
-    platform: {
-      configManager,
-      serviceRegistry: { getAll: () => ({}), inspect: async () => null },
-      localUserAuthManager: {
-        inspect: () => ({
-          userStorePath: join(root, '.goodvibes', 'auth', 'users.json'),
-          bootstrapCredentialPath: join(root, '.goodvibes', 'auth', 'bootstrap.txt'),
-          persisted: true,
-          bootstrapCredentialPresent: false,
-          userCount: 0,
-          sessionCount: 0,
-          users: [],
-          sessions: [],
-        }),
-      },
-      subscriptionManager: { list: () => [], listPending: () => [], get: () => null, getPending: () => null },
-      voiceProviderRegistry: new VoiceProviderRegistry(),
-      voiceService: { listVoices: async () => [] },
-      readModels: {
-        security: {
-          getSnapshot: () => ({
-            audit: { totalTokens: 0, results: [], blocked: [], scopeViolations: [], rotationWarnings: [], rotationOverdue: [] },
-            policy: { preflightStatus: 'ok', preflightIssueCount: 0, lintFindingCount: 0 },
-            mcpServers: [], plugins: [], incidents: [], deniedPermissions: 0,
-          }),
-        },
-      },
-    },
-    clients: {
-      mcpApi: {
-        listServerSecurity: () => [],
-        listAllTools: async () => [],
-        captureToolCatalog: () => ({ listAllTools: async () => [], assertCurrent() {} }),
-      },
-    },
-    session: {
-      runtime: { sessionId: 'parity-session', provider: 'openai', model: 'gpt-4.1', reasoningEffort: 'medium' },
-      conversationManager: { title: 'Parity test', getMessageCount: () => 0, getMessageSnapshot: () => [], getTranscriptEventIndex: () => ({ events: [], groups: [] }) },
-      sessionManager: { list: () => [], search: () => [] },
-    },
-    provider: {
-      providerRegistry: {
-        listModels: () => [],
-        getContextWindowForModel: () => 128_000,
-      },
-    },
-    ops: {
-      executionLedger: {
-        getSnapshot: () => ({ records: [], total: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 }),
-        subscribe: () => () => {},
-        dispose: () => {},
-      },
-    },
-    extensions: { toolRegistry },
-  } as unknown as CommandContext;
-
-  registerAgentHarnessTool(toolRegistry, commandRegistry, context);
-  const tool = toolRegistry.list().find(candidate => candidate.definition.name === 'agent_harness');
-  if (!tool) throw new Error('Registered parity harness fixture is unavailable.');
+  const base = makeHandoffFixture({ label: 'gv-parity', prepare: ({ toolRegistry }) => {
+    if (options.sourceOwner !== false) bindAgentResearchSourceOwner(toolRegistry, ordinaryResearchOwner());
+  } });
+  const { root, tool, toolRegistry, commandRegistry } = base;
+  const spawn = spyOn(base.processManager, 'spawn').mockImplementation(async () => { throw new Error('Parity must never spawn a process.'); });
 
   async function admitPrintingCommand() {
     const args = { mode: 'run_command', command: '/print-long-output' };
@@ -232,14 +118,8 @@ function makeParityFixture(options: { sourceOwner?: boolean } = {}) {
     const log = new SqliteDecisionLog(':memory:');
     const previous = installJudgmentPort(withDecisionLog(port, log));
     try {
-      const call = await toolRegistry.prepareCall('synthetic-parity-command', 'agent_harness', args);
-      const admission = await permissionManager.admitAutonomous(call.callId, call.name, call.args, {
-        sourceOf: () => source,
-        schemaRevision: call.schemaRevision, preparedCall: { registry: toolRegistry, call },
-      });
-      expect(admission.result.approved).toBe(true);
-      expect(admission.result.autonomousDecision).toBeUndefined();
-    return await toolRegistry.executePrepared(call, admission);
+      const { call, admission } = await base.admit(source, args);
+      return await toolRegistry.executePrepared(call, admission);
     } finally { installJudgmentPort(previous); log[Symbol.dispose](); }
   }
 
@@ -252,10 +132,17 @@ function makeParityFixture(options: { sourceOwner?: boolean } = {}) {
   };
 }
 
+/** Minimal arguments that satisfy each mode's own input checks, so the admission gate is the only thing left to refuse. */
 function parityArgs(mode: typeof AGENT_HARNESS_MODES[number]): Record<string, unknown> {
-  // Exercise the real start guard, not an invalid-action exception. No fixture
-  // grants confirmation or replaces the protected-source/process contracts.
-  return mode === 'run_background_process' ? { mode, processAction: 'start', command: 'printf parity' } : { mode };
+  switch (mode) {
+    case 'run_background_process': return { mode, processAction: 'start', command: 'printf parity' };
+    case 'run_command': return { mode, command: '/print-long-output' };
+    case 'run_workspace_action': return { mode, actionId: 'import-goodvibes-tui-settings' };
+    case 'remote_pair_approve': case 'remote_pair_reject': return { mode, requestId: 'pair-request-1' };
+    case 'remote_peers_invoke': return { mode, peerId: 'peer-1', command: 'inspect-fixture' };
+    case 'remote_work_cancel': return { mode, workId: 'work-1' };
+    default: return { mode };
+  }
 }
 
 async function expectEffectHeld(pending: Promise<unknown>): Promise<void> {
@@ -273,59 +160,34 @@ describe('agent_harness parity', () => {
 
       // Sanity: there must be at least one effect mode or the test is vacuous.
       expect(effectDescriptors.length).toBeGreaterThan(0);
-
-      // Statuses that indicate the effect was NOT executed (refusals/guards).
-      // Any of these is an acceptable outcome when invoked without confirmation.
-      const ACCEPTABLE_GUARD_STATUSES = new Set([
-        'needs_confirmation',
-        'confirmation_required',
-        'missing_lookup',
-        'ambiguous',
-        'guidance',
-        'no_direct_effect',
-        'not_found',
-      ]);
+      let commandCalls = 0;
+      fixture.commandRegistry.register({ name: 'print-long-output', description: 'parity fixture command', handler: () => { commandCalls++; } });
 
       const failures: string[] = [];
-
       for (const descriptor of effectDescriptors) {
-        if (UNADMITTED_HELD_MODES.has(descriptor.id)) {
-          await expectEffectHeld(fixture.tool.execute(parityArgs(descriptor.id)));
-          continue;
+        // These read through a lane-membership judgment that this fixture
+        // deliberately cannot answer, so they never reach the admission gate here.
+        if (SEMANTIC_CATALOG_MODES.has(descriptor.id)) continue;
+        let outcome: string;
+        try {
+          const result = await fixture.tool.execute(parityArgs(descriptor.id));
+          // A workspace action answers an unadmitted call with its own preview and runs nothing.
+          const previewOnly = descriptor.id === 'run_workspace_action' && result.success
+            && (JSON.parse(result.output ?? '{}') as { status?: unknown }).status === 'confirmation_required';
+          outcome = previewOnly ? 'refused' : result.success
+            ? `executed (success:true) ${(result.output ?? '').slice(0, 80)}`
+            : /recorded effect admission/.test(result.error ?? '') ? 'refused' : `refused for another reason: ${(result.error ?? '').slice(0, 120)}`;
+        } catch (error) {
+          outcome = error instanceof ToolInputProjectionError && error.problem === 'held' ? 'refused' : `threw ${String(error).slice(0, 120)}`;
         }
-        const priorLaneRequests = unavailableLaneRequests.length;
-        let result: Awaited<ReturnType<typeof fixture.tool.execute>>;
-        try { result = await fixture.tool.execute(parityArgs(descriptor.id)); }
-        catch (error) {
-          if (!SEMANTIC_CATALOG_MODES.has(descriptor.id) || error !== laneUnavailable) throw error;
-          expect(unavailableLaneRequests.length).toBeGreaterThan(priorLaneRequests);
-          continue;
-        }
-
-        // Accepted refusal patterns:
-        //   success:false , hard error/validation refusal (always acceptable)
-        //   success:true with a guard/refusal status (never an executed effect)
-        if (result.success) {
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(result.output ?? '{}') as Record<string, unknown>;
-          } catch {
-            failures.push(`mode '${descriptor.id}': success:true but output is not JSON`);
-            continue;
-          }
-          if (!ACCEPTABLE_GUARD_STATUSES.has(String(parsed.status))) {
-            failures.push(
-              `mode '${descriptor.id}': success:true with status='${String(parsed.status)}', expected a guard/refusal status or success:false`,
-            );
-          }
-        }
-        // success:false is always an acceptable refusal
+        if (outcome !== 'refused') failures.push(`mode '${descriptor.id}': ${outcome}`);
       }
 
       expect(failures).toEqual([]);
+      expect(commandCalls).toBe(0);
       expect(fixture.spawn).not.toHaveBeenCalled();
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -335,7 +197,7 @@ describe('agent_harness parity', () => {
       await expect(fixture.tool.execute({ mode })).rejects.toBeInstanceOf(ToolInputProjectionError);
       expect(readings.requests).toHaveLength(0);
       expect(fixture.spawn).not.toHaveBeenCalled();
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
   test('background process dispatch still rejects a missing action without spawning', async () => {
@@ -344,7 +206,7 @@ describe('agent_harness parity', () => {
       await expect(fixture.tool.execute({ mode: 'run_background_process' })).rejects.toThrow('run_background_process requires processAction');
       expect(fixture.spawn).not.toHaveBeenCalled();
       expect(readings.requests).toHaveLength(0);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
   test.each([{ confirm: true }, { explicitUserRequest: 'Run the parity fixture command.' }])('background start refuses caller confirmation fields without recorded admission: %j', async partial => {
@@ -353,7 +215,40 @@ describe('agent_harness parity', () => {
       await expectEffectHeld(fixture.tool.execute({ ...parityArgs('run_background_process'), ...partial }));
       expect(fixture.spawn).not.toHaveBeenCalled();
       expect(readings.requests).toHaveLength(0);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
+  });
+
+  test('/calendar read verbs run without admission while subscribe and connect are held', async () => {
+    const fixture = makeParityFixture();
+    try {
+      const ran: string[][] = [];
+      fixture.commandRegistry.register({ name: 'calendar', aliases: ['cal'], description: 'calendar', handler: (args, ctx) => { ran.push([...args]); ctx.print('ok'); } });
+      const list = await fixture.tool.execute({ mode: 'run_command', command: '/calendar list' });
+      expect(list.success).toBe(true);
+      await fixture.tool.execute({ mode: 'run_command', command: '/calendar' });
+      await fixture.tool.execute({ mode: 'run_command', command: '/cal subscriptions' });
+      expect(ran).toEqual([['list'], [], ['subscriptions']]);
+      await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/calendar subscribe https://example.com/a.ics' }));
+      await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/calendar connect google' }));
+      expect(ran).toHaveLength(3);
+    } finally { await fixture.cleanup(); }
+  });
+
+  test('/tasks and /approval show verbs run without admission while task changes are held', async () => {
+    const fixture = makeParityFixture();
+    try {
+      const ran: string[][] = [];
+      for (const name of ['tasks', 'approval']) {
+        fixture.commandRegistry.register({ name, description: name, handler: (args, ctx) => { ran.push([name, ...args]); ctx.print('ok'); } });
+      }
+      expect((await fixture.tool.execute({ mode: 'run_command', command: '/tasks show t1' })).success).toBe(true);
+      await fixture.tool.execute({ mode: 'run_command', command: '/tasks output t1' });
+      await fixture.tool.execute({ mode: 'run_command', command: '/approval matrix' });
+      expect(ran).toEqual([['tasks', 'show', 't1'], ['tasks', 'output', 't1'], ['approval', 'matrix']]);
+      await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/tasks cancel t1' }));
+      await expectEffectHeld(fixture.tool.execute({ mode: 'run_command', command: '/approval open' }));
+      expect(ran).toHaveLength(3);
+    } finally { await fixture.cleanup(); }
   });
 
   test('command runner preserves the complete printed output', async () => {
@@ -380,7 +275,7 @@ describe('agent_harness parity', () => {
       expect(result.output).toContain(Array.from({ length: 80 }, () => longLine).join('\n'));
       expect(result.output).not.toContain('... output truncated');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

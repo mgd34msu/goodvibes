@@ -1,8 +1,8 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspace-trust.ts';
+import { dirname, join } from 'node:path';
+import { WorkspaceTrustManager, readPersistedWorkspaceTrust } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -68,4 +68,46 @@ test('a new action cannot treat an in-flight explicit trusted mutation as settle
   try { await expect(trust.prepareAutonomousConstraint('execute')).rejects.toThrow('pending'); }
   finally { release(); await pending; spy.mockRestore(); }
   (await trust.prepareAutonomousConstraint('execute'))();
+});
+
+function writeTrustFile(trust: WorkspaceTrustManager, text: string): string {
+  const file = (trust as unknown as { file: string }).file;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+  return file;
+}
+
+test('a damaged trust record keeps autonomous work restricted and is reported', async () => {
+  const trust = fixture();
+  writeTrustFile(trust, '{"level": "restr');
+  await trust.load();
+  expect(trust.getLoadFault()).toContain('could not be read');
+  await expect(trust.prepareAutonomousConstraint('execute')).rejects.toThrow('treated as restricted');
+  (await trust.prepareAutonomousConstraint('read'))();
+  // Nobody is deciding on the owner's behalf: a person at the keyboard is still asked.
+  expect(trust.isDecided()).toBe(false);
+});
+
+test('a workspace that never had a trust record is not restricted by a fault', async () => {
+  const trust = fixture();
+  await trust.load();
+  expect(trust.getLoadFault()).toBeNull();
+  (await trust.prepareAutonomousConstraint('execute'))();
+});
+
+test('choosing a trust level replaces a damaged record', async () => {
+  const trust = fixture();
+  writeTrustFile(trust, 'not json');
+  await trust.load();
+  await trust.setLevel('trusted');
+  expect(trust.getLoadFault()).toBeNull();
+  (await trust.prepareAutonomousConstraint('execute'))();
+});
+
+test('the read-only reader says a damaged record is damaged', () => {
+  const trust = fixture();
+  const file = writeTrustFile(trust, 'not json');
+  const view = readPersistedWorkspaceTrust({ projectGoodVibesRoot: dirname(file), resolveProjectPath: () => file }, 'tui');
+  expect(view.level).toBe('undecided');
+  expect(view.fault).toContain('could not be read');
 });

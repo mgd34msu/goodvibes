@@ -35,8 +35,13 @@ export function completionCommandWords(): readonly string[] {
   return DAEMON_COMMANDS.flatMap((spec) => [spec.name, ...spec.aliases]);
 }
 
-/** Long and short flag tokens a command accepts, its own plus the global ones. */
+/**
+ * Long and short flag tokens a command accepts. A passthrough command refuses the
+ * global flags and reads its own, so it is offered those and nothing else.
+ */
 export function completionFlagsFor(command: DaemonCommand): readonly string[] {
+  const spec = daemonCommandSpec(command);
+  if (spec.passthrough) return (spec.passthroughFlags ?? []).flatMap((flag) => flag.tokens);
   return flagsForCommand(command).flatMap((flag) => flag.tokens);
 }
 
@@ -217,27 +222,31 @@ function fishScript(binary: string): string {
   lines.push('');
 
   for (const spec of DAEMON_COMMANDS) {
+    // An alias selects the same command, so it unlocks the same sub-words and flags.
+    const seen = `__fish_seen_subcommand_from ${[spec.name, ...spec.aliases].join(' ')}`;
     for (const sub of spec.subcommands) {
-      lines.push(`complete -c ${binary} -n '__fish_seen_subcommand_from ${spec.name}' -a '${fishEscape(sub)}'`);
+      lines.push(`complete -c ${binary} -n '${seen}' -a '${fishEscape(sub)}'`);
     }
-    for (const flag of daemonCommandSpec(spec.name).flags) {
+    const flags = spec.passthrough
+      ? (spec.passthroughFlags ?? []).map(({ tokens, takesValue, summary }) => ({ tokens, takesValue, summary }))
+      : daemonCommandSpec(spec.name).flags.map(({ tokens, kind, summary }) => ({ tokens, takesValue: kind !== 'boolean', summary }));
+    for (const flag of flags) {
       for (const token of flag.tokens) {
         const option = token.startsWith('--') ? `-l ${token.slice(2)}` : `-s ${token.slice(1)}`;
-        const takesValue = flag.kind === 'boolean' ? '' : ' -r';
-        lines.push(
-          `complete -c ${binary} -n '__fish_seen_subcommand_from ${spec.name}' `
-            + `${option}${takesValue} -d '${fishEscape(flag.summary)}'`,
-        );
+        lines.push(`complete -c ${binary} -n '${seen}' ${option}${flag.takesValue ? ' -r' : ''} -d '${fishEscape(flag.summary)}'`);
       }
     }
   }
 
   lines.push('');
+  // A passthrough command parses its own arguments and refuses the global flags, so they are not offered after one.
+  const passthroughWords = DAEMON_COMMANDS.filter((spec) => spec.passthrough).flatMap((spec) => [spec.name, ...spec.aliases]);
+  const globalCondition = passthroughWords.length > 0 ? ` -n 'not __fish_seen_subcommand_from ${passthroughWords.join(' ')}'` : '';
   for (const flag of GLOBAL_FLAGS) {
     for (const token of flag.tokens) {
       const option = token.startsWith('--') ? `-l ${token.slice(2)}` : `-s ${token.slice(1)}`;
       const takesValue = flag.kind === 'boolean' ? '' : ' -r';
-      lines.push(`complete -c ${binary} ${option}${takesValue} -d '${fishEscape(flag.summary)}'`);
+      lines.push(`complete -c ${binary}${globalCondition} ${option}${takesValue} -d '${fishEscape(flag.summary)}'`);
     }
   }
   lines.push('');

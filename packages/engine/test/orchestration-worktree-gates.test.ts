@@ -13,7 +13,7 @@
  *    in dependency-respecting order, A merges before B, because B cannot even
  *    start (let alone pass and enqueue) until A has passed and enqueued.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,10 @@ import { engineerReportOutput, makeRecord } from './_helpers/orchestration-harne
 
 const ctx = { sessionId: 'test', traceId: 'test', source: 'test' } as const;
 
+// Engines and fixture directories are released after every test, so a failed assertion leaks neither.
+const cleanups: Array<() => void> = [];
+afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
+
 function runGit(cwd: string, args: string[]): void {
   const r = Bun.spawnSync(['git', ...args], { cwd });
   if (r.exitCode !== 0) throw new Error(Buffer.from(r.stderr).toString('utf8'));
@@ -36,6 +40,7 @@ function runGit(cwd: string, args: string[]): void {
 
 function freshRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'wt-gates-'));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   runGit(dir, ['init']);
   // Merge commits need a fixture-owned identity; the guarded runner deliberately
   // isolates HOME and must not depend on the developer's global Git config.
@@ -133,6 +138,7 @@ describe('worktree-mode gates + dependency composition', () => {
       persist: false,
       skipClaimVerification: true,
     });
+    cleanups.push(() => engine.dispose());
     engine.on((e) => events.push(e));
 
     const spec = workstreamOf([
@@ -180,13 +186,12 @@ describe('worktree-mode gates + dependency composition', () => {
       expect(cwd).not.toBe(root);
     }
 
-    engine.dispose();
-    rmSync(root, { recursive: true, force: true });
   }, 40_000);
 
   test('claims are checked by the phase kind, not by the archetype the agent names: an engineer phase that changed nothing fails the phantom-work guard', async () => {
     const root = freshRepo();
     const logDir = mkdtempSync(join(tmpdir(), 'wt-gates-log-'));
+    cleanups.push(() => rmSync(logDir, { recursive: true, force: true }));
     const h = makeHarness();
     const engine = createOrchestrationEngine({
       agentManager: h.agentManager,
@@ -196,6 +201,7 @@ describe('worktree-mode gates + dependency composition', () => {
       projectRoot: root,
       persist: false,
     });
+    cleanups.push(() => engine.dispose());
     const ws = engine.createWorkstream(workstreamOf([{ id: 'a', title: 'A', task: 'do A' }]));
     engine.start(ws.id);
     await waitUntil(() => hasRunningAgentFor(h, 'a'));
@@ -205,9 +211,6 @@ describe('worktree-mode gates + dependency composition', () => {
     const [result] = engine.getPhaseResults(ws.id);
     expect(result!.gate.passed).toBe(false);
     expect(result!.gate.results.find((gate) => gate.gate === 'phantom-work-guard')?.passed).toBe(false);
-    engine.dispose();
-    rmSync(root, { recursive: true, force: true });
-    rmSync(logDir, { recursive: true, force: true });
   }, 20_000);
 
   test('shared mode: gates run in the project root, not in a per-item worktree', async () => {
@@ -222,6 +225,7 @@ describe('worktree-mode gates + dependency composition', () => {
       persist: false,
       skipClaimVerification: true,
     });
+    cleanups.push(() => engine.dispose());
     const spec = workstreamOf([{ id: 'a', title: 'A', task: 'do A' }]);
     const ws = engine.createWorkstream(spec); // default: shared isolation
     engine.start(ws.id);
@@ -236,7 +240,5 @@ describe('worktree-mode gates + dependency composition', () => {
       expect([root, realpathSync(root)]).toContain(cwd);
     }
 
-    engine.dispose();
-    rmSync(root, { recursive: true, force: true });
   }, 20_000);
 });

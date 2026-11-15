@@ -304,6 +304,7 @@ test('compiled native Integration distinguishes current repair from recorded con
     expect(() => assertUnchangedIntegrationPane(beforeLateDelivery, repairedConflictPane)).toThrow();
     expect(await f.host.releaseStatus()).toBe(staleOrdinal);
     // Assert before issuing any newer request: a refresh could mask stale adoption.
+    // A black-box binary exposes no signal for a response it ignored, so this is a bounded quiet period, not proof of never.
     await Bun.sleep(1_200);
     assertUnchangedIntegrationPane(beforeLateDelivery, tui.screen());
     expect(f.paths.filter(path => path.startsWith('/api/work-ledger/execution/'))).toEqual(beforeFenceRequests);

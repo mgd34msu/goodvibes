@@ -15,6 +15,11 @@ const PAGE_SIZE = 50;
 const MAX_HISTORY_PAGES = 20;
 const MAX_TOTAL_HISTORY_PAGES = 200;
 const MAX_ITEMS = 1_000;
+/** A poll with no cursor starts this far back, so a long-lived account is not paged from its first message. */
+const SEED_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+/** Window scans one poll may make while narrowing past a page budget or crossing empty windows. */
+const MAX_WINDOW_SCANS = 8;
+const MIN_WINDOW_MS = 2_000;
 
 /** Resolves after decoding/cleanup; the host owns deadlines and body-byte caps. */
 export type DiscordInboxHttp = (url: URL, request: {
@@ -147,7 +152,6 @@ export function createDiscordInboxAdapter(ctx: AdapterContext, ports: DiscordInb
           || (since !== undefined && (!Number.isSafeInteger(since) || since < 0))) {
           fail('Discord poll bounds invalid');
         }
-        const horizon = BigInt(cutoff - EPOCH_MS) << 22n;
         stage = 'Discord credential lookup failed';
         const token = await ctx.credentials.resolveConfigSecret(CREDENTIAL_KEY);
         checkActive(signal);
@@ -184,49 +188,107 @@ export function createDiscordInboxAdapter(ctx: AdapterContext, ports: DiscordInb
         }
         // Only the oldest limit+1 distinct candidates are retained, but ALL
         // channels/window pages must finish before the global cursor can move.
-        const candidates: Candidate[] = [];
+        // One request budget for the whole poll, however many windows it tries.
         let totalHistoryPages = 0;
-        for (const channelId of channels) {
-          let before = horizon;
-          for (let page = 0; ; page += 1) {
-            if (page >= MAX_HISTORY_PAGES || totalHistoryPages >= MAX_TOTAL_HISTORY_PAGES) {
-              fail('Discord history page budget exhausted');
-            }
-            totalHistoryPages += 1;
-            const messages = rows(await get(`/channels/${channelId}/messages`, 'history', {
-              limit: String(PAGE_SIZE), before: before.toString(),
-            }), PAGE_SIZE);
-            let oldest = before;
-            for (const entry of messages) {
-              const message = record(entry);
-              const id = snowflake(message.id);
-              if (id.value >= before) fail('Discord history cursor did not advance');
-              if (id.value < oldest) oldest = id.value;
-              if (message.channel_id !== undefined && snowflake(message.channel_id).id !== channelId) {
-                fail('Discord history channel mismatch');
+        // A conversation read completely stays valid for any narrower window, so a rescan only re-reads the
+        // conversation that overflowed. A truncated read (more than limit+1 candidates) kept only the oldest ones, so
+        // it also serves a later floor only while the new upper bound stays at or below its newest kept candidate.
+        const complete = new Map<string, { floor: number; upper: number; truncated: boolean; items: Candidate[] }>();
+        // Where the overflowing conversation's newest pages ended: everything at or after it is already known to be
+        // dense, so the next window can end there instead of searching blindly.
+        let overflowReachedMs: number | undefined;
+        const scan = async (floor: number, upper: number): Promise<Candidate[] | undefined> => {
+          const found: Candidate[] = [];
+          const horizon = BigInt(upper - EPOCH_MS) << 22n;
+          for (const channelId of channels) {
+            const cached = complete.get(channelId);
+            if (cached && cached.floor <= floor && upper <= cached.upper
+              && (!cached.truncated || cached.floor === floor || upper <= (cached.items[cached.items.length - 1]?.receivedAt ?? 0))) {
+              for (const candidate of cached.items) {
+                if (candidate.receivedAt >= upper || candidate.receivedAt <= floor || found.some(other => other.key === candidate.key)) continue;
+                found.push(candidate); found.sort(compare);
+                if (found.length > limit + 1) found.pop();
               }
-              // One ordering for pagination, horizon and persisted watermark.
-              // Discord's optional timestamp is not assumed equal to its ID.
-              const receivedAt = id.ms;
-              const authorValue = message.author;
-              const author = authorValue === undefined ? undefined : record(authorValue);
-              const bot = author?.bot;
-              if (bot !== undefined && typeof bot !== 'boolean') fail('Discord response shape invalid');
-              if (bot === true || receivedAt <= (since ?? 0)) continue;
-              const authorId = author === undefined ? undefined : snowflake(author.id).id;
-              const senderId = authorId ?? channelId;
-              const text = message.content ?? '';
-              if (typeof text !== 'string' || text.length > 40_000) fail('Discord response shape invalid');
-              const key = `${channelId}:${id.id}`;
-              if (candidates.some(candidate => candidate.key === key)) continue;
-              candidates.push({ key, channelId, senderId, text, receivedAt,
-                kind: classify(message, authorId, self) });
-              candidates.sort(compare);
-              if (candidates.length > limit + 1) candidates.pop();
+              continue;
             }
-            if (messages.length < PAGE_SIZE || Number(oldest >> 22n) + EPOCH_MS <= (since ?? 0)) break;
-            before = oldest;
+            const own: Candidate[] = [];
+            let truncated = false;
+            let oldestSeenMs = Number.POSITIVE_INFINITY;
+            let before = horizon;
+            for (let page = 0; ; page += 1) {
+              if (totalHistoryPages >= MAX_TOTAL_HISTORY_PAGES) fail('Discord history page budget exhausted');
+              // A conversation too busy for this window is narrowed by the caller; a window is never committed partially.
+              if (page >= MAX_HISTORY_PAGES) {
+                overflowReachedMs = Number.isFinite(oldestSeenMs) ? oldestSeenMs : undefined;
+                return undefined;
+              }
+              totalHistoryPages += 1;
+              const messages = rows(await get(`/channels/${channelId}/messages`, 'history', {
+                limit: String(PAGE_SIZE), before: before.toString(),
+              }), PAGE_SIZE);
+              let oldest = before;
+              for (const entry of messages) {
+                const message = record(entry);
+                const id = snowflake(message.id);
+                if (id.value >= before) fail('Discord history cursor did not advance');
+                if (id.value < oldest) oldest = id.value;
+                if (message.channel_id !== undefined && snowflake(message.channel_id).id !== channelId) {
+                  fail('Discord history channel mismatch');
+                }
+                // One ordering for pagination, horizon and persisted watermark.
+                // Discord's optional timestamp is not assumed equal to its ID.
+                const receivedAt = id.ms;
+                const authorValue = message.author;
+                const author = authorValue === undefined ? undefined : record(authorValue);
+                const bot = author?.bot;
+                if (bot !== undefined && typeof bot !== 'boolean') fail('Discord response shape invalid');
+                if (bot === true || receivedAt <= floor) continue;
+                const authorId = author === undefined ? undefined : snowflake(author.id).id;
+                const senderId = authorId ?? channelId;
+                const text = message.content ?? '';
+                if (typeof text !== 'string' || text.length > 40_000) fail('Discord response shape invalid');
+                const key = `${channelId}:${id.id}`;
+                if (found.some(candidate => candidate.key === key)) continue;
+                const candidate = { key, channelId, senderId, text, receivedAt, kind: classify(message, authorId, self) };
+                found.push(candidate); found.sort(compare);
+                if (found.length > limit + 1) found.pop();
+                own.push(candidate); own.sort(compare);
+                if (own.length > limit + 1) { own.pop(); truncated = true; }
+              }
+              oldestSeenMs = Math.min(oldestSeenMs, Number(oldest >> 22n) + EPOCH_MS);
+              if (messages.length < PAGE_SIZE || Number(oldest >> 22n) + EPOCH_MS <= floor) break;
+              before = oldest;
+            }
+            complete.set(channelId, { floor, upper, truncated, items: own });
           }
+          return found;
+        };
+        let floor = since ?? Math.max(0, cutoff - SEED_WINDOW_MS), upper = cutoff;
+        let candidates: Candidate[] = [];
+        let endedAtStop = false;
+        for (let scans = 1; ; scans += 1) {
+          const found = await scan(floor, upper);
+          if (found === undefined) {
+            // End the next window where the overflowing pages stopped; without that, halve toward the floor. The
+            // oldest complete prefix is what the cursor may pass.
+            if (scans >= MAX_WINDOW_SCANS || upper - floor < MIN_WINDOW_MS) fail('Discord history page budget exhausted');
+            // The upper bound excludes its whole millisecond, so end one past the stop to read that bucket whole.
+            const stopEnd = overflowReachedMs === undefined ? undefined : overflowReachedMs + 1;
+            endedAtStop = stopEnd !== undefined && stopEnd > floor + 1 && stopEnd < upper;
+            upper = endedAtStop && stopEnd !== undefined ? stopEnd : floor + Math.floor((upper - floor) / 2);
+            overflowReachedMs = undefined;
+            continue;
+          }
+          candidates = found;
+          // A complete but empty window moves the floor, so a quiet stretch cannot hold the cursor behind a busy one.
+          if (candidates.length > 0 || upper >= cutoff) break;
+          // Never report "empty" for a poll that stopped short of the cutoff.
+          if (scans >= MAX_WINDOW_SCANS) fail('Discord history page budget exhausted');
+          // The upper bound's own millisecond was excluded from this scan, so the next window starts one before it.
+          floor = upper - 1;
+          // A window that ended at an overflow stop would hit the same stop again from the cutoff, so halve instead.
+          upper = endedAtStop ? floor + Math.floor((cutoff - floor) / 2) : cutoff;
+          endedAtStop = false;
         }
         let selected = candidates.slice(0, limit);
         const omitted = candidates[limit];

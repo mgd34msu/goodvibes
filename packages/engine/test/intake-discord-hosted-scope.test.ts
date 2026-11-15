@@ -7,7 +7,12 @@ import type { ProtectedSourceOwnerOptions } from '../platform/src/platform/secur
 
 let identityDirectory: string | undefined;
 const cleanups: Array<() => void | Promise<void>> = [];
-afterEach(async () => { identityDirectory = undefined; for (const close of cleanups.splice(0).reverse()) await close(); });
+const wrongAuthorization: string[] = [];
+afterEach(async () => {
+  identityDirectory = undefined;
+  for (const close of cleanups.splice(0).reverse()) await close();
+  expect(wrongAuthorization.splice(0)).toEqual([]);
+});
 
 const botId = '100000000000000001';
 const channelId = '100000000000000002';
@@ -35,7 +40,8 @@ async function fixture(input: {
   const remote = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
     calls.push(path);
-    expect(request.headers.get('authorization')).toBe(`Bot ${token}`);
+    // Recorded, not asserted here: a throw in this handler is a 500 the adapter reports as a generic unavailable.
+    if (request.headers.get('authorization') !== `Bot ${token}`) wrongAuthorization.push(path);
     if (path === '/api/v10/users/@me') return Response.json({ id: userId, bot: true });
     for (const id of channelIds) {
       if (path === `/api/v10/channels/${id}`) return Response.json({ id, type: 1 });

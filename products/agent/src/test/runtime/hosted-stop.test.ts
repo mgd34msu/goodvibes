@@ -6,7 +6,7 @@
  * These are caller acceptance tests. The fixture deliberately does not model
  * backend execution admission, and cannot establish that admission is safe.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import {
@@ -70,10 +70,19 @@ interface EventStream {
   closedByServer: boolean;
 }
 
+// Checked after each test rather than in dispose(), which runs in a `finally`:
+// a failed assertion there would replace the test's own, more useful failure.
+const fixtureUnexpected: string[][] = [];
+afterEach(() => {
+  const all = fixtureUnexpected.splice(0).flat();
+  expect(all).toEqual([]);
+});
+
 function fixture(options: { readonly reconnect?: boolean; readonly routeTurns?: boolean } = {}) {
   const calls: { method: string; input: Record<string, unknown> }[] = [];
   const cancellations: CancelCall[] = [];
   const unexpected: string[] = [];
+  fixtureUnexpected.push(unexpected);
   const streams: EventStream[] = [];
   const frames: HostedSessionFrame[] = [];
   const cancelAttempts: string[] = [];
@@ -153,6 +162,7 @@ function fixture(options: { readonly reconnect?: boolean; readonly routeTurns?: 
         if (call.method === 'sessions.hosted.create') return behavior.create();
         if (call.method === 'sessions.steer') return behavior.steer();
         if (call.method === 'sessions.hosted.list') return Response.json({ sessions: [] });
+        if (call.method === 'sessions.hosted.detach') return Response.json({});
         if (call.method === 'sessions.hosted.attach') {
           // No persistence side effects are needed to test Stop.
           return Response.json({ session: { id: SESSION }, history: [] });
@@ -273,7 +283,6 @@ function fixture(options: { readonly reconnect?: boolean; readonly routeTurns?: 
       for (const gate of gates) gate.resolve();
       for (const dispose of disposers) dispose();
       server.stop(true);
-      expect(unexpected).toEqual([]);
     },
   };
 }
@@ -599,6 +608,10 @@ describe('Stop during hosted admission and shell activity', () => {
       held.resolve();
       expect(await submitting).toMatchObject({ routed: false, chosen: true, cancelled: true });
       expect(f.calls.filter((call) => call.method === 'sessions.steer')).toHaveLength(0);
+      // Stop does not retire the router, so the session the held create returned
+      // is the one it keeps for the next message; nothing is left orphaned.
+      expect(f.router.hostedSessionId()).toBe(SESSION);
+      expect(f.calls.some((call) => call.method === 'sessions.hosted.detach')).toBe(false);
       expect(f.router.cancelTurn()).toBe(false);
     } finally { f.dispose(); }
   });
@@ -713,6 +726,7 @@ describe('Stop during hosted admission and shell activity', () => {
       expect(f.calls.filter((call) => call.method === 'sessions.steer')).toHaveLength(0);
       expect(f.cancellations).toHaveLength(0);
       expect(f.streams).toHaveLength(0);
+      await until(() => f.calls.some((call) => call.method === 'sessions.hosted.detach' && call.input.sessionId === SESSION), 'late-created session is detached');
     } finally { f.dispose(); }
   });
 
@@ -875,12 +889,16 @@ test('a superseded hosted reply still mirrors its terminal outcome without endin
 
 test('Stop during stream preparation never sends cancellation for a replayed pre-steer turn', async () => {
   const f = fixture();
+  // Recorded here and asserted below: this runs inside the fixture server's
+  // stream, where a thrown assertion would error the SSE stream, not the test.
+  let stopped: boolean | undefined;
   f.behavior.stream = () => {
     f.send('TURN_SUBMITTED', 'preexisting-replayed-turn', { origin: undefined });
-    expect(f.router.cancelTurn()).toBe(true);
+    stopped = f.router.cancelTurn();
   };
   try {
     const outcome = await f.router.submit('do not submit this message');
+    expect(stopped).toBe(true);
     expect(outcome).toMatchObject({ routed: false, chosen: true, cancelled: true });
     expect(f.calls.filter((call) => call.method === 'sessions.steer')).toEqual([]);
     expect(f.cancelAttempts).toEqual([]);
@@ -965,6 +983,7 @@ describe('submission correlation is required before hosted ownership', () => {
       f.send('TURN_COMPLETED', 'turn-1'); await first.outcome.completion;
       const second = routed(await f.router.submit('identical input'));
       expect(second.action).toBe('recreated');
+      expect(f.system.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
       const ids = f.calls.filter(call => call.method === 'sessions.steer').map(call => (call.input.metadata as { correlationId: string }).correlationId);
       expect(ids).toHaveLength(3); expect(ids[0]).toBe(firstCorrelation); expect(ids[1]).not.toBe(ids[0]); expect(ids[2]).toBe(ids[1]);
       f.router.cancelTurn();

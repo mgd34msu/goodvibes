@@ -10,13 +10,24 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { requireActingReading } from '../types/judgment-held.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 
-const outputCapRows = new Map<string, AnthropicOutputCapRow | null>();
-const outputCapMemo = new ReadingMemo<AnthropicOutputCapRow | null>(256);
+interface OutputCapReadings {
+  readonly rows: Map<string, AnthropicOutputCapRow | null>;
+  readonly memo: ReadingMemo<AnthropicOutputCapRow | null>;
+}
+// Scoped to the installed judgment port: a cap read by a retired decision model must not outlive it.
+let readingsByPort = new WeakMap<object, OutputCapReadings>();
+function readingsFor(port: object): OutputCapReadings {
+  let readings = readingsByPort.get(port);
+  if (!readings) { readings = { rows: new Map(), memo: new ReadingMemo(256) }; readingsByPort.set(port, readings); }
+  return readings;
+}
 
 /** The remembered output-cap row of an Anthropic model id: a row, null for none, undefined when not read. */
 export function knownAnthropicOutputCapRow(modelId: string): AnthropicOutputCapRow | null | undefined {
   if (isClassicOperation()) return undefined;
-  return outputCapRows.get(modelId);
+  let port: object;
+  try { port = judgmentPort('routing.model-limits.known'); } catch { return undefined; }
+  return readingsFor(port).rows.get(modelId);
 }
 
 /** Reads which documented output-cap row an Anthropic model id belongs to; null only for a settled none; uncertainty remains held. */
@@ -27,14 +38,16 @@ export function readAnthropicOutputCapRow(modelId: string, site: string): Promis
 }
 function readDecisionAnthropicOutputCapRow(modelId: string, site: string): Promise<AnthropicOutputCapRow | null> {
   assertJudgmentInput({ modelId });
-  const known = outputCapRows.get(modelId);
+  const port = judgmentPort(site);
+  const { rows, memo } = readingsFor(port);
+  const known = rows.get(modelId);
   if (known !== undefined) return Promise.resolve(known);
-  return outputCapMemo.get(modelId, async () => {
-    const dispatched = await anthropicOutputCap.route(judgmentPort(site), { model_id: modelId }, { site });
+  return memo.get(modelId, async () => {
+    const dispatched = await anthropicOutputCap.route(port, { model_id: modelId }, { site });
     requireActingReading(dispatched.reading);
     const row = dispatched.route !== 'none' ? dispatched.route : null;
     dispatched.recordAction(`cap:${row ?? 'none'}`);
-    outputCapRows.set(modelId, row);
+    rows.set(modelId, row);
     return row;
   });
 }
@@ -51,6 +64,5 @@ export async function readChatModelIds(provider: string, modelIds: readonly stri
 
 /** Forgets every remembered model-fact reading; for tests that swap the judgment port. */
 export function forgetModelLimitReadings(): void {
-  outputCapRows.clear();
-  outputCapMemo.clear();
+  readingsByPort = new WeakMap();
 }

@@ -124,8 +124,19 @@ export function requireOperatorHttpBinding(methodId: string): OperatorHttpBindin
   return binding;
 }
 
+/**
+ * A path parameter of `.`, `..` or nothing is collapsed or dropped by URL parsing even when
+ * percent-encoded as a whole, so the request would reach another route than the declared one.
+ */
+export function assertSafeOperatorPathValue(value: string, name: string): void {
+  if (value === '' || value === '.' || value === '..') {
+    throw new Error(`operator path parameter '${name}' must be a real identifier, not '${value}'.`);
+  }
+}
+
 function encodePathValue(value: unknown, name: string): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    assertSafeOperatorPathValue(String(value), name);
     return encodeURIComponent(String(value));
   }
   throw new Error(`operator method path parameter '${name}' must be a string, number, or boolean.`);

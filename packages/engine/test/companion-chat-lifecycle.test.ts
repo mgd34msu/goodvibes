@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { settleEvents } from './_helpers/test-timeout.js';
+import { installFrozenNow, waitFor } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 import type {
@@ -63,8 +63,7 @@ describe('create → message → close lifecycle', () => {
     const messageId = await manager.postMessage(session.id, 'Hello');
     expect(typeof messageId).toBe('string');
 
-    // Give async turn a tick
-    await settleEvents();
+    await waitFor(() => manager.getMessages(session.id).some((message) => message.role === 'assistant'));
 
     // Messages should include user + assistant
     const messages = manager.getMessages(session.id);
@@ -189,7 +188,7 @@ describe('GC closes active sessions after idleActiveMs', () => {
     const session = manager.createSession();
 
     await manager.postMessage(session.id, 'Hello');
-    await settleEvents();
+    await waitFor(() => manager.getMessages(session.id).some((message) => message.role === 'assistant'));
 
     expect(manager.getMessages(session.id).map((message) => message.role)).toEqual(['user', 'assistant']);
 
@@ -214,10 +213,16 @@ describe('GC does not close recently-active sessions', () => {
     const session = manager.createSession();
 
     await manager.postMessage(session.id, 'Recent message');
-    await settleEvents(20);
+    await waitFor(() => manager.getMessages(session.id).some((message) => message.role === 'assistant'));
 
-    // lastActivityAt is fresh (< 100ms ago)
-    manager._gcSweep();
+    // The clock is held at the activity time, so a slow host cannot age the session past the window.
+    const restore = installFrozenNow(Date.now());
+    try {
+      (manager as unknown as { sessions: Map<string, { lastActivityAt: number }> }).sessions.get(session.id)!.lastActivityAt = Date.now();
+      manager._gcSweep();
+    } finally {
+      restore();
+    }
 
     expect(manager.getSession(session.id)?.status).toBe('active');
   });

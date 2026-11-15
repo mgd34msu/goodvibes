@@ -125,6 +125,16 @@ const EXACT_METHOD_EXEMPTIONS: Readonly<Record<string, string>> = Object.freeze(
   // binds that surface to one admitted source. It is not a generic start alias
   // or a caller-supplied surface selector; lookalike namespaces stay refused.
   'workLedger.turn.startAgent': 'native-conversation-agent-delivery',
+  // One utterance handed to the Home Assistant conversation agent and its
+  // reply returned, and the liveness probe of that same agent. Neither is
+  // generic create or status for a record; the family's stream and cancel
+  // use core verbs.
+  'homeassistant.conversation.submit': 'homeassistant-conversation-turn',
+  'homeassistant.conversation.health': 'homeassistant-conversation-liveness',
+  // Unregisters one passkey (a lost device). It removes a credential from the
+  // step-up service, not a stored record a caller could list-and-delete
+  // generically, and it grants no `remove` elsewhere in the namespace.
+  'stepup.credentials.remove': 'step-up-passkey-removal',
 });
 
 /**

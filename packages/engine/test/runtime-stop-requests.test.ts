@@ -24,9 +24,10 @@ test('the actual platform graph cancels independent owners before held trigger d
   if (!trigger) throw new Error('The full platform graph must own its native trigger supervisor');
   const triggerEntered = Promise.withResolvers<void>(), releaseTrigger = Promise.withResolvers<void>();
   const releaseHomeGraph = Promise.withResolvers<void>();
+  const joined = Promise.withResolvers<void>();
   const nativeJoin = trigger.join.bind(trigger), nativeHomeGraphDispose = services.homeGraphService.dispose.bind(services.homeGraphService);
   const triggerJoin = spyOn(trigger, 'join').mockImplementation(async () => {
-    triggerEntered.resolve(); await releaseTrigger.promise; await nativeJoin();
+    triggerEntered.resolve(); await releaseTrigger.promise; await nativeJoin(); joined.resolve();
   });
   const homeGraphDispose = spyOn(services.homeGraphService, 'dispose').mockImplementation(async () => {
     await nativeHomeGraphDispose(); await releaseHomeGraph.promise;
@@ -42,7 +43,9 @@ test('the actual platform graph cancels independent owners before held trigger d
     let settled = false; void closing.then(() => { settled = true; }, () => {});
     expect(settled).toBe(false);
     releaseTrigger.resolve();
-    await Promise.resolve(); await Promise.resolve();
+    await joined.promise;
+    // A macrotask turn runs every pending promise continuation first, so closing has done all it can while the drain is held.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(settled).toBe(false);
     expect(homeGraphDispose).toHaveBeenCalledTimes(1);
     releaseHomeGraph.resolve(); await closing;
@@ -151,7 +154,7 @@ test('reentrant close sees the reserved original child drain before any dependen
   expect(stops.homeGraph()).toBe(held.promise);
   expect(calls).toEqual(['child stop', 'governor', 'watchers']);
   try {
-    await Promise.resolve(); await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(calls).not.toContain('store closed');
   } finally { held.resolve(); await closing; }
   expect(calls).toEqual(['child stop', 'governor', 'watchers', 'store closed']);

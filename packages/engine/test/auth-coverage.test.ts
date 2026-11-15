@@ -14,6 +14,8 @@ import {
   createBrowserTokenStore,
   createGoodVibesAuthClient,
   createMemoryTokenStore,
+  SessionManager,
+  TokenStore,
 } from '../platform/src/auth.js';
 import { ConfigurationError } from '../errors/src/index.js';
 import type { OperatorApiClient } from '../operator-client/src/index.js';
@@ -276,12 +278,12 @@ describe('createGoodVibesAuthClient: getters', () => {
   test('tokenStore getter returns TokenStore instance when tokenStore provided', () => {
     const store = createMemoryTokenStore();
     const client = createGoodVibesAuthClient(makeOperator(), store);
-    expect(client.tokenStore).not.toBeNull();
+    expect(client.tokenStore).toBeInstanceOf(TokenStore);
   });
 
   test('sessionManager getter is accessible', () => {
     const client = createGoodVibesAuthClient(makeOperator(), createMemoryTokenStore());
-    expect(client.sessionManager).not.toBeNull(); // presence-only: sessionManager exposed
+    expect(client.sessionManager).toBeInstanceOf(SessionManager);
   });
 
   test('permissionResolver builds a resolver from a snapshot', () => {

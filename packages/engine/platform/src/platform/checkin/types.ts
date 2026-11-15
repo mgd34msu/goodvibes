@@ -102,5 +102,8 @@ export const CHECKIN_CONFIG_KEYS = {
   quietHours: 'checkin.quietHours',
 } as const;
 
-/** The durable automation job id the check-in schedule is synced to. */
+/**
+ * Reserved id for the check-in schedule. The scheduled job is found by its
+ * `kind: 'checkin'`, not by this id, so nothing reads it today.
+ */
 export const CHECKIN_JOB_ID = 'checkin-scheduled';

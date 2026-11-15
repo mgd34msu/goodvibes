@@ -36,7 +36,16 @@ function makeRoot(): string {
   return root;
 }
 
+const stores: CodeIndexStore[] = [];
+/** Every store a test opens is closed in afterEach, so a failed assertion cannot leak a handle. */
+function openStore(...args: ConstructorParameters<typeof CodeIndexStore>): CodeIndexStore {
+  const store = new CodeIndexStore(...args);
+  stores.push(store);
+  return store;
+}
+
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   while (roots.length > 0) {
     const root = roots.pop()!;
     rmSync(root, { recursive: true, force: true });
@@ -44,14 +53,14 @@ afterEach(() => {
 });
 
 describe('CodeIndexStore: no-embedding-provider degradation', () => {
-  test('with only the hashed provider active, semantic retrieval is unavailable and the reason is stated exactly once', async () => {
+  test('with only the hashed provider active, semantic retrieval is unavailable and the reason is the same on every call', async () => {
     const root = makeRoot();
     writeFileSync(join(root, 'a.ts'), 'export function foo(): number {\n  return 1;\n}\n');
     const configManager = new ConfigManager({ configDir: join(root, '.config') });
     const registry = new MemoryEmbeddingProviderRegistry({ configManager });
     expect(registry.getDefaultProviderId()).toBe(HASHED_MEMORY_EMBEDDING_PROVIDER.id);
 
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     expect(store.hasSemanticProvider()).toBe(false);
@@ -69,7 +78,7 @@ describe('CodeIndexStore: no-embedding-provider degradation', () => {
     writeFileSync(join(root, 'a.ts'), 'export function foo(): number {\n  return 1;\n}\n');
     const configManager = new ConfigManager({ configDir: join(root, '.config') });
     const registry = new MemoryEmbeddingProviderRegistry({ configManager });
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
     await store.buildFull();
 
@@ -85,7 +94,7 @@ describe('CodeIndexStore: no-embedding-provider degradation', () => {
     writeFileSync(join(root, 'a.ts'), 'export function foo(): number {\n  return 1;\n}\n');
     const configManager = new ConfigManager({ configDir: join(root, '.config') });
     const registry = new MemoryEmbeddingProviderRegistry({ configManager });
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const realProvider: MemoryEmbeddingProvider = {

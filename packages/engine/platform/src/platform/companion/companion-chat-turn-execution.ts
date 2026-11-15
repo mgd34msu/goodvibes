@@ -22,7 +22,8 @@ import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
-import { executeToolCalls as executeOrchestratorToolCalls } from '../core/orchestrator-tool-runtime.js';
+import type { ConfigManager } from '../config/manager.js';
+import { executeToolCalls as executeOrchestratorToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
 
 type HookDispatcherLike = {
@@ -98,6 +99,7 @@ export interface CompanionToolExecutionDeps {
   readonly permissionManager: PermissionManager | null;
   readonly hookDispatcher: HookDispatcherLike | null;
   readonly runtimeBus: RuntimeEventBus | null;
+  readonly configManager?: Pick<ConfigManager, 'get'> | undefined;
 }
 
 /**
@@ -142,6 +144,7 @@ export async function executeCompanionToolCalls(
     hookDispatcher: deps.hookDispatcher,
     runtimeBus: deps.runtimeBus,
     sessionId,
+    toolBudget: () => toolBudgetFromConfig(deps.configManager),
     emitterContext: (id) => ({
       sessionId,
       traceId: `${sessionId}:${id}`,

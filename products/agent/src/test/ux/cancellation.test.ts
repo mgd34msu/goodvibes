@@ -1,275 +1,164 @@
 /**
- * UX Anti-Regression: Cancellation During Heavy Updates (v3 §18.5)
+ * UX Anti-Regression: Cancellation During Heavy Updates
  *
- * Verifies that aborting a turn during heavy tool/agent updates cleanly
- * resets conversation state, no tool calls left dangling, agent counts
- * reconcile, and turn state lands in 'cancelled'.
- *
- * All tests use pure state manipulation, no real I/O, no event bus.
+ * Drives the real runtime store through its domain dispatch: a turn is cancelled
+ * while tools and agents are in flight, and the resulting conversation and agent
+ * state is what the UI would render.
  */
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { createInitialRuntimeState } from '../../runtime/store/state.ts';
-import type { RuntimeState } from '../../runtime/store/state.ts';
+import { describe, test, expect } from 'bun:test';
+import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import {
   selectConversation,
   selectAgents,
   selectIsTurnActive,
   selectRunningAgents,
 } from '../../runtime/store/selectors/index.ts';
-import type { ConversationDomainState, ActiveToolCall } from '@/runtime/index.ts';
-import type { RuntimeAgent, AgentDomainState } from '@/runtime/index.ts';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const TURN_ID = 'turn-cancel-001';
 
-/** Fixed timestamp used in test helpers to avoid non-deterministic Date.now() calls. */
-const TEST_TIMESTAMP = 1700000000000;
+function startBusyTurn(toolCount: number, agentCount: number) {
+  const store = createRuntimeStore();
+  const dispatch = createDomainDispatch(store);
 
-function makeToolCall(callId: string, toolName: string): ActiveToolCall {
-  return {
-    callId,
-    toolName,
-    args: '{}',
-    state: 'executing',
-    stateEnteredAt: TEST_TIMESTAMP - 100,
-    phaseTimestamps: { received: TEST_TIMESTAMP - 200, executing: TEST_TIMESTAMP - 100 },
-  };
-}
-
-function makeRunningAgent(id: string): RuntimeAgent {
-  return {
-    id,
-    label: `Agent ${id}`,
-    role: 'engineer',
-    status: 'running',
-    providerId: 'anthropic',
-    modelId: 'claude-sonnet-4-6',
-    childAgentIds: [],
-    turnCount: 2,
-    toolCallCount: 5,
-    latestOutput: 'working...',
-    spawnedAt: TEST_TIMESTAMP - 5000,
-  };
-}
-
-/** Simulate a busy state: streaming with N tool calls and M agents active. */
-function makeBusyState(
-  base: RuntimeState,
-  toolCallCount: number,
-  agentCount: number,
-): RuntimeState {
-  const toolCalls = new Map<string, ActiveToolCall>();
-  for (let i = 0; i < toolCallCount; i++) {
-    toolCalls.set(`tc-${i}`, makeToolCall(`tc-${i}`, `Tool${i}`));
+  dispatch.dispatchTurnEvent({ type: 'TURN_SUBMITTED', turnId: TURN_ID, prompt: 'work' });
+  dispatch.dispatchTurnEvent({ type: 'STREAM_START', turnId: TURN_ID });
+  dispatch.dispatchTurnEvent({
+    type: 'STREAM_DELTA',
+    turnId: TURN_ID,
+    content: 'partial...',
+    accumulated: 'partial...',
+    toolCalls: [],
+  });
+  for (let i = 0; i < toolCount; i++) {
+    const callId = `tc-${i}`;
+    dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId, turnId: TURN_ID, tool: `Tool${i}`, args: {} });
+    dispatch.dispatchToolEvent({ type: 'TOOL_EXECUTING', callId, turnId: TURN_ID, tool: `Tool${i}`, startedAt: 1 });
   }
-
-  const agents = new Map<string, RuntimeAgent>();
-  const agentIds: string[] = [];
   for (let i = 0; i < agentCount; i++) {
-    const agent = makeRunningAgent(`agent-${i}`);
-    agents.set(agent.id, agent);
-    agentIds.push(agent.id);
+    dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: `agent-${i}`, task: `task ${i}` });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: `agent-${i}` });
   }
-
-  return {
-    ...base,
-    conversation: {
-      ...base.conversation,
-      turnState: 'streaming',
-      currentTurnId: 'turn-cancel-001',
-      turnStartedAt: TEST_TIMESTAMP - 2000,
-      activeToolCalls: toolCalls,
-      toolCallsThisTurn: toolCallCount,
-      stream: {
-        accumulated: 'partial...',
-        reasoningAccumulated: '',
-        deltaCount: 30,
-        firstDeltaAt: TEST_TIMESTAMP - 1900,
-        lastDeltaAt: TEST_TIMESTAMP - 50,
-      },
-      revision: 10,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'busy-setup',
-    },
-    agents: {
-      ...base.agents,
-      agents,
-      activeAgentIds: agentIds,
-      totalSpawned: agentCount,
-      peakConcurrency: agentCount,
-      revision: agentCount,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'busy-setup',
-    },
-  };
+  return { store, dispatch };
 }
-
-/** Simulate cancellation: all tool calls → 'cancelled', turn → 'cancelled', agents → terminal. */
-function applyCancel(busyState: RuntimeState): RuntimeState {
-  const cancelledTools = new Map<string, ActiveToolCall>();
-  for (const [id, tc] of busyState.conversation.activeToolCalls) {
-    cancelledTools.set(id, { ...tc, state: 'cancelled' });
-  }
-
-  const cancelledAgents = new Map<string, RuntimeAgent>();
-  for (const [id, agent] of busyState.agents.agents) {
-    cancelledAgents.set(id, { ...agent, status: 'cancelled', endedAt: TEST_TIMESTAMP });
-  }
-
-  return {
-    ...busyState,
-    conversation: {
-      ...busyState.conversation,
-      turnState: 'cancelled',
-      currentTurnId: undefined,
-      turnEndedAt: TEST_TIMESTAMP,
-      activeToolCalls: cancelledTools,
-      stream: {
-        accumulated: '',
-        reasoningAccumulated: '',
-        deltaCount: 0,
-        firstDeltaAt: undefined,
-        lastDeltaAt: undefined,
-      },
-      revision: busyState.conversation.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'cancellation',
-    },
-    agents: {
-      ...busyState.agents,
-      agents: cancelledAgents,
-      activeAgentIds: [],
-      revision: busyState.agents.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'cancellation',
-    },
-  };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ux:cancellation: abort during heavy tool/agent updates', () => {
-  let state: RuntimeState;
-
-  beforeEach(() => {
-    state = createInitialRuntimeState();
+  test('setup leaves the turn streaming with every tool executing and every agent running', () => {
+    const { store } = startBusyTurn(4, 3);
+    const conversation = selectConversation(store.getState());
+    expect(conversation.turnState).toBe('streaming');
+    expect(selectIsTurnActive(store.getState())).toBe(true);
+    expect([...conversation.activeToolCalls.values()].every((tc) => tc.state === 'executing')).toBe(true);
+    expect(selectRunningAgents(store.getState())).toHaveLength(3);
   });
 
-  describe('turn state after cancellation', () => {
-    test('turnState transitions to cancelled after abort', () => {
-      const busy = makeBusyState(state, 5, 3);
-      expect(selectConversation(busy).turnState).toBe('streaming');
+  test('TURN_CANCEL ends the turn: cancelled, no longer active, reason recorded', () => {
+    const { store, dispatch } = startBusyTurn(3, 0);
+    const before = selectConversation(store.getState());
 
-      const cancelled = applyCancel(busy);
-      expect(selectConversation(cancelled).turnState).toBe('cancelled');
-    });
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, reason: 'user abort', stopReason: 'cancelled' });
 
-    test('isTurnActive returns false after cancellation', () => {
-      const busy = makeBusyState(state, 3, 2);
-      // During streaming it may be active
-      const cancelled = applyCancel(busy);
-      expect(selectIsTurnActive(cancelled)).toBe(false);
-    });
-
-    test('currentTurnId is cleared after cancellation', () => {
-      const busy = makeBusyState(state, 4, 2);
-      expect(selectConversation(busy).currentTurnId).toBe('turn-cancel-001');
-
-      const cancelled = applyCancel(busy);
-      expect(selectConversation(cancelled).currentTurnId).toBeUndefined();
-    });
-
-    test('turnEndedAt is populated after cancellation', () => {
-      const busy = makeBusyState(state, 2, 1);
-      expect(selectConversation(busy).turnEndedAt).toBeUndefined();
-
-      const cancelled = applyCancel(busy);
-      expect(selectConversation(cancelled).turnEndedAt).toBe(TEST_TIMESTAMP);
-    });
+    const after = selectConversation(store.getState());
+    expect(after.turnState).toBe('cancelled');
+    expect(selectIsTurnActive(store.getState())).toBe(false);
+    expect(after.turnEndedAt).toBeDefined();
+    expect(after.lastTurnError).toBe('user abort');
+    expect(after.lastTurnStopReason).toBe('cancelled');
+    expect(after.revision).toBeGreaterThan(before.revision);
+    expect(after.source).toBe('TURN_CANCEL');
   });
 
-  describe('tool call cleanup after cancellation', () => {
-    test('all active tool calls are moved to cancelled state', () => {
-      const busy = makeBusyState(state, 8, 0);
-      expect(selectConversation(busy).activeToolCalls.size).toBe(8);
+  test('tools still executing at cancel are settled by their own TOOL_CANCELLED, none left executing', () => {
+    const { store, dispatch } = startBusyTurn(8, 0);
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, stopReason: 'cancelled' });
 
-      const cancelled = applyCancel(busy);
-      const { activeToolCalls } = selectConversation(cancelled);
-      expect(activeToolCalls.size).toBe(8);
-      for (const [, tc] of activeToolCalls) {
-        expect(tc.state).toBe('cancelled');
-      }
-    });
+    for (let i = 0; i < 8; i++) {
+      dispatch.dispatchToolEvent({ type: 'TOOL_CANCELLED', callId: `tc-${i}`, turnId: TURN_ID, tool: `Tool${i}` });
+    }
 
-    test('stream buffer is cleared after cancellation', () => {
-      const busy = makeBusyState(state, 3, 1);
-      expect(selectConversation(busy).stream.accumulated).toBe('partial...');
-
-      const cancelled = applyCancel(busy);
-      const { stream } = selectConversation(cancelled);
-      expect(stream.accumulated).toBe('');
-      expect(stream.deltaCount).toBe(0);
-      expect(stream.firstDeltaAt).toBeUndefined();
-      expect(stream.lastDeltaAt).toBeUndefined();
-    });
-
-    test('no tool calls remain in executing state after cancellation', () => {
-      const busy = makeBusyState(state, 10, 0);
-      const cancelled = applyCancel(busy);
-      const { activeToolCalls } = selectConversation(cancelled);
-      for (const [, tc] of activeToolCalls) {
-        expect(tc.state).not.toBe('executing');
-      }
-    });
+    const { activeToolCalls } = selectConversation(store.getState());
+    expect(activeToolCalls.size).toBe(8);
+    expect([...activeToolCalls.values()].map((tc) => tc.state)).toEqual(Array(8).fill('cancelled'));
   });
 
-  describe('agent cleanup after cancellation', () => {
-    test('no agents remain active after cancellation', () => {
-      const busy = makeBusyState(state, 3, 5);
-      expect(selectRunningAgents(busy)).toHaveLength(5);
+  test('a tool that already succeeded is not rewritten to cancelled by a late cancel', () => {
+    const { store, dispatch } = startBusyTurn(2, 0);
+    dispatch.dispatchToolEvent({ type: 'TOOL_SUCCEEDED', callId: 'tc-0', turnId: TURN_ID, tool: 'Tool0', durationMs: 5 });
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, stopReason: 'cancelled' });
+    dispatch.dispatchToolEvent({ type: 'TOOL_CANCELLED', callId: 'tc-0', turnId: TURN_ID, tool: 'Tool0' });
+    dispatch.dispatchToolEvent({ type: 'TOOL_CANCELLED', callId: 'tc-1', turnId: TURN_ID, tool: 'Tool1' });
 
-      const cancelled = applyCancel(busy);
-      expect(selectAgents(cancelled).activeAgentIds).toHaveLength(0);
-    });
-
-    test('all agents are in terminal state after cancellation', () => {
-      const busy = makeBusyState(state, 2, 4);
-      const cancelled = applyCancel(busy);
-
-      for (const [, agent] of selectAgents(cancelled).agents) {
-        expect(agent.status).toBe('cancelled');
-        expect(agent.endedAt).toEqual(TEST_TIMESTAMP);
-      }
-    });
-
-    test('activeAgentIds is empty after cancellation', () => {
-      const busy = makeBusyState(state, 1, 6);
-      const cancelled = applyCancel(busy);
-      expect(selectAgents(cancelled).activeAgentIds).toHaveLength(0);
-    });
+    const { activeToolCalls } = selectConversation(store.getState());
+    expect(activeToolCalls.get('tc-0')?.state).toBe('succeeded');
+    expect(activeToolCalls.get('tc-1')?.state).toBe('cancelled');
   });
 
-  describe('state consistency after cancellation', () => {
-    test('revision increments after cancellation mutation', () => {
-      const busy = makeBusyState(state, 3, 2);
-      const preRev = selectConversation(busy).revision;
+  test('a stream delta arriving after the cancel does not revive the turn', () => {
+    const { store, dispatch } = startBusyTurn(1, 0);
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, stopReason: 'cancelled' });
+    const cancelled = selectConversation(store.getState());
 
-      const cancelled = applyCancel(busy);
-      expect(selectConversation(cancelled).revision).toBeGreaterThan(preRev);
+    dispatch.dispatchTurnEvent({
+      type: 'STREAM_DELTA',
+      turnId: TURN_ID,
+      content: 'late',
+      accumulated: 'partial...late',
+      toolCalls: [],
     });
 
-    test('source is set to cancellation after cancel', () => {
-      const busy = makeBusyState(state, 2, 1);
-      const cancelled = applyCancel(busy);
-      expect(selectConversation(cancelled).source).toBe('cancellation');
-      expect(selectAgents(cancelled).source).toBe('cancellation');
-    });
+    const after = selectConversation(store.getState());
+    expect(after.turnState).toBe('cancelled');
+    expect(after.stream.accumulated).toBe(cancelled.stream.accumulated);
+  });
 
-    test('cancellation from initial state produces valid cancelled state', () => {
-      // Edge case: cancel on idle turn (no active turn)
-      const idleBusy = makeBusyState(state, 0, 0);
-      const cancelled = applyCancel(idleBusy);
-      expect(selectConversation(cancelled).turnState).toBe('cancelled');
-      expect(selectConversation(cancelled).activeToolCalls.size).toBe(0);
-    });
+  test('cancelling twice keeps the first end time and reason', () => {
+    const { store, dispatch } = startBusyTurn(0, 0);
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, reason: 'first', stopReason: 'cancelled' });
+    const first = selectConversation(store.getState());
+
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, reason: 'second', stopReason: 'cancelled' });
+
+    const second = selectConversation(store.getState());
+    expect(second.lastTurnError).toBe('first');
+    expect(second.turnEndedAt).toBe(first.turnEndedAt);
+    expect(second.revision).toBe(first.revision);
+  });
+
+  test('a cancel for a different turn id is ignored', () => {
+    const { store, dispatch } = startBusyTurn(1, 0);
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: 'some-other-turn', stopReason: 'cancelled' });
+    expect(selectConversation(store.getState()).turnState).toBe('streaming');
+  });
+
+  test('cancelled agents leave the running set and keep a terminal status with an end time', () => {
+    const { store, dispatch } = startBusyTurn(2, 5);
+    expect(selectRunningAgents(store.getState())).toHaveLength(5);
+
+    for (let i = 0; i < 5; i++) {
+      dispatch.dispatchAgentEvent({ type: 'AGENT_CANCELLED', agentId: `agent-${i}`, reason: 'user abort' });
+    }
+
+    const agents = selectAgents(store.getState());
+    expect(agents.activeAgentIds).toHaveLength(0);
+    expect(selectRunningAgents(store.getState())).toHaveLength(0);
+    for (const agent of agents.agents.values()) {
+      expect(agent.status).toBe('cancelled');
+      expect(agent.endedAt).toBeDefined();
+    }
+  });
+
+  test('a late AGENT_RUNNING does not bring a cancelled agent back', () => {
+    const { store, dispatch } = startBusyTurn(0, 1);
+    dispatch.dispatchAgentEvent({ type: 'AGENT_CANCELLED', agentId: 'agent-0' });
+    dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: 'agent-0' });
+
+    expect(selectAgents(store.getState()).agents.get('agent-0')?.status).toBe('cancelled');
+    expect(selectRunningAgents(store.getState())).toHaveLength(0);
+  });
+
+  test('cancelling an idle store changes nothing', () => {
+    const store = createRuntimeStore();
+    const dispatch = createDomainDispatch(store);
+    dispatch.dispatchTurnEvent({ type: 'TURN_CANCEL', turnId: TURN_ID, stopReason: 'cancelled' });
+    expect(selectConversation(store.getState()).turnState).toBe('idle');
   });
 });

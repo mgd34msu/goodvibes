@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAgentAccountsTool, registerAgentAccountsTool } from '../../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry } from '@goodvibes-jev/engine/platform/platform/google';
@@ -101,6 +101,26 @@ describe('the account register', () => {
     expect(listed.output).toContain('agent+example@owner.test');
     // Revocation starts from the key name, so it has to be in the listing.
     expect(listed.output).toContain('GOODVIBES_ACCOUNT_EXAMPLE_COM');
+  });
+
+  test('an unreadable register is reported as unreadable, not as empty', async () => {
+    writeFileSync(join(home, 'accounts.json'), '{ not json');
+    const listed = await run({ action: 'list' });
+    expect(listed.success).toBe(false);
+    expect(listed.error ?? listed.output).toContain('could not be read');
+    expect(listed.error ?? listed.output).not.toContain('No accounts have been recorded');
+    expect(readFileSync(join(home, 'accounts.json'), 'utf8')).toBe('{ not json');
+  });
+
+  test('a register whose only record is malformed is not reported as empty', async () => {
+    const raw = JSON.stringify({ version: 1, accounts: [{ id: 'broken' }] });
+    writeFileSync(join(home, 'accounts.json'), raw);
+    const listed = await run({ action: 'list' });
+    const text = listed.error ?? listed.output ?? '';
+    expect(listed.success).toBe(false);
+    expect(text).toContain('1 record(s) could not be read');
+    expect(text).not.toContain('No accounts have been recorded');
+    expect(readFileSync(join(home, 'accounts.json'), 'utf8')).toBe(raw);
   });
 
   test('the record is revocable, and forgetting says what it did not do', async () => {

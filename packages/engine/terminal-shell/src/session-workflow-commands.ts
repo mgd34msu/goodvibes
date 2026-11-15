@@ -8,7 +8,7 @@ import {
   TRANSCRIPT_UNAVAILABLE,
   type TranscriptCommandContext,
 } from './transcript-reading.js';
-import { parseTranscriptKind } from './transcript-kinds.js';
+import { describeUnknownTranscriptKind, readTranscriptKind } from './transcript-kinds.js';
 import { createTranscriptReviewFormatter } from './transcript-review.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 export interface SessionWorkflowContext extends TranscriptCommandContext<TerminalConversationManager> {
@@ -121,7 +121,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
             // Materializing a file for an explicit rename is a user save;
             // retention must preserve this deliberately named conversation.
             saveSource: 'user',
-          });
+          }, undefined, undefined, ctx.session.conversationManager.branchState());
         }
         sm.rename(sessionId, newName);
         ctx.session.conversationManager.title = newName;
@@ -137,9 +137,32 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       const operation = sub;
       const source = ctx.session.runtime.sessionId;
       const newId = sub === 'fork' ? 'user-' + randomBytes(4).toString('hex') : undefined;
-      const snapshot = policy.captureSession(ctx);
+      const confirmation = sub === 'save' ? stripYesFlag(args.slice(1)) : { rest: args.slice(1), yes: false };
+      const requested = confirmation.rest.join(' ').trim();
       const currentTitle = ctx.session.conversationManager.title;
-      const name = args[1] ? args.slice(1).join(' ').trim() : sub === 'fork' ? 'fork-of-' + source.slice(0, 8) : currentTitle || source;
+      // Names with no file-name characters (for example a title written only
+      // in CJK script) all collapse to the same fallback id, so two different
+      // conversations would share one file.
+      const usable = (candidate: string): boolean => /[a-z0-9_]/.test(candidate.toLowerCase());
+      if (sub === 'save' && requested && !usable(requested)) {
+        ctx.print(`Cannot save as "${requested}": the name has no letters a-z, digits or underscores to use as a file name, so it would share a file with other such names. Give a name such as /session save my-notes.`);
+        return true;
+      }
+      const name = requested
+        ? requested
+        : sub === 'fork'
+          ? 'fork-of-' + source.slice(0, 8)
+          : currentTitle && usable(currentTitle) ? currentTitle : source;
+      if (sub === 'save' && !confirmation.yes) {
+        const target = sm.sanitizeName(name);
+        const existing = target === source ? null : sm.getMeta(target);
+        if (existing) {
+          const title = existing.title ? ` ("${existing.title}")` : '';
+          ctx.print(`Not saved: a different saved session already uses the id ${target}${title}, and saving would replace it. Choose another name with /session save <name>, or replace it with /session save ${name} --yes.`);
+          return true;
+        }
+      }
+      const snapshot = policy.captureSession(ctx);
       const metadata: SessionMeta = {
         title: sub === 'fork' ? name : currentTitle,
         model: ctx.session.runtime.model,
@@ -149,7 +172,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         saveSource: 'user',
       };
       try {
-        const result = sm.save(newId ?? name, snapshot.messages, metadata);
+        const result = sm.save(newId ?? name, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState());
         const destination = newId ?? result.sanitizedName;
         policy.copySidecars(ctx, source, destination);
         policy.beforeSwitch(ctx, operation, source, destination);
@@ -224,7 +247,11 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     }
 
     if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-      const kind = parseTranscriptKind(args[1]);
+      const kind = readTranscriptKind(args[1]);
+      if (kind === undefined) {
+        ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
+        return true;
+      }
       const source = captureTranscriptSource(ctx);
       try {
         const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);

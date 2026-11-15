@@ -72,9 +72,9 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
 });
  test('settled no returns no lines; uncertainty and missing port never fall back to text matching', async () => {
   const { store } = fixture();
-  await expect(store.person('Jo')).rejects.toThrow();
+  await expect(store.person('Jo')).rejects.toThrow('No judgment port is installed');
   installJudgmentPort(recorded(0.01).port); expect(await store.person('Jo')).toEqual([]);
-  installJudgmentPort(recorded(0.5).port); await expect(store.person('Jo')).rejects.toThrow();
+  installJudgmentPort(recorded(0.5).port); await expect(store.person('Jo')).rejects.toThrow('unavailable, unsettled or no longer current');
 });
  test('punctuation is a negative structural guard and cannot enumerate People', async () => {
   const { store } = fixture();
@@ -86,46 +86,46 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
   // A synthetic credential assignment in original provenance must not reach the port.
   Object.assign(line, { provenance: { surface: 'tui', at: '2026-01-01', said: 'password=synthetic-secret' } });
   const fake = recorded(); installJudgmentPort(fake.port);
-  await expect(store.person('Jo')).rejects.toThrow(); expect(contentRequests(fake)).toHaveLength(0);
+  await expect(store.person('Jo')).rejects.toThrow('inline credential material'); expect(contentRequests(fake)).toHaveLength(0);
 });
  test('a same-bytes profile reload retires a pending person reading', async () => {
   const h = fixture(), b = blocked(); const pending = h.store.person('Jo'); void pending.catch(() => {});
   await b.entered.promise; h.store.loadSync(); b.release.resolve();
-  await expect(pending).rejects.toThrow();
+  await expect(pending).rejects.toThrow('profile reading is no longer current');
 });
  test('an in-place original People mutation retires a pending person reading', async () => {
   const h = fixture(), b = blocked(); const pending = h.store.person('Jo'); void pending.catch(() => {});
   await b.entered.promise;
   Object.assign(h.store.read().sections.find(section => section.heading === 'People')!.prose[0]!, { text: '- Different person.' });
-  b.release.resolve(); await expect(pending).rejects.toThrow();
+  b.release.resolve(); await expect(pending).rejects.toThrow('unavailable, unsettled or no longer current');
 });
  test('caller abort interrupts a non-cooperating port', async () => {
   const { store } = fixture(), b = blocked(), controller = new AbortController();
   const pending = store.person('Jo', { signal: controller.signal }); void pending.catch(() => {});
   await b.entered.promise; controller.abort();
-  await expect(pending).rejects.toThrow(); b.release.resolve();
+  await expect(pending).rejects.toThrow('aborted'); b.release.resolve();
 });
  test('port replacement and restoration cannot revive a pending reading', async () => {
   const { store } = fixture(), b = blocked(); const pending = store.person('Jo'); void pending.catch(() => {});
   await b.entered.promise; installJudgmentPort(recorded().port); installJudgmentPort(b.port);
-  await expect(pending).rejects.toThrow(); b.release.resolve();
+  await expect(pending).rejects.toThrow('judgment reading owner is no longer current'); b.release.resolve();
 });
  test('malformed answers and requested-model mismatch fail closed', async () => {
   const { store } = fixture(); const fake = recorded();
   installJudgmentPort({ ...fake.port, async ask(request) { const response = await fake.port.ask(request); return { ...response, answers: {} as typeof response.answers }; } });
-  await expect(store.person('Jo')).rejects.toThrow();
+  await expect(store.person('Jo')).rejects.toThrow('no answer for question');
   installJudgmentPort({ ...fake.port, async ask(request) { return { ...await fake.port.ask(request), requestedModel: 'different-model' }; } });
-  await expect(store.person('Jo')).rejects.toThrow();
+  await expect(store.person('Jo')).rejects.toThrow('unavailable, unsettled or no longer current');
 });
  test('gateway retains the source restriction after the store promise settles', async () => {
   const h = fixture(); installJudgmentPort(recorded().port);
   const catalog = gateway(h.store, () => h.store.loadSync());
-  await expect(catalog.invoke('profile.person', { body: { name: 'Jo' }, context: {} })).rejects.toThrow();
+  await expect(catalog.invoke('profile.person', { body: { name: 'Jo' }, context: {} })).rejects.toThrow('profile reading is no longer current');
 });
  test('gateway retains the port restriction after the store promise settles', async () => {
   const h = fixture(); installJudgmentPort(recorded().port);
   const catalog = gateway(h.store, () => { installJudgmentPort(recorded().port); });
-  await expect(catalog.invoke('profile.person', { body: { name: 'Jo' }, context: {} })).rejects.toThrow();
+  await expect(catalog.invoke('profile.person', { body: { name: 'Jo' }, context: {} })).rejects.toThrow('judgment reading owner is no longer current');
 });
  test('gateway refuses changed input or caller authorization while reading', async () => {
   for (const change of ['input', 'authorization']) {
@@ -134,12 +134,12 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
     const pending = catalog.invoke('profile.person', { body, context: {}, isAuthorized: () => authorized }); void pending.catch(() => {});
     await b.entered.promise;
     if (change === 'input') body.name = 'Dave'; else authorized = false;
-    b.release.resolve(); await expect(pending).rejects.toThrow();
+    b.release.resolve(); await expect(pending).rejects.toThrow('request is no longer current');
   }
 });
  test('gateway validates shadowed original query values before starting a reading', async () => {
   const h = fixture(), fake = recorded(); installJudgmentPort(fake.port);
-  await expect(gateway(h.store).invoke('profile.person', { body: { name: 'Jo' }, query: { name: 'password=synthetic-secret' }, context: {} })).rejects.toThrow();
+  await expect(gateway(h.store).invoke('profile.person', { body: { name: 'Jo' }, query: { name: 'password=synthetic-secret' }, context: {} })).rejects.toThrow('inline credential material');
   expect(contentRequests(fake)).toHaveLength(0);
 });
  test('a returned observation cannot be retained across profile changes', async () => {
@@ -154,7 +154,7 @@ function gateway(store: OwnerProfileStore, afterRead?: () => void, retainBeforeR
   const catalog = gateway(h.store, undefined, () => { authorized = false; });
   await expect(catalog.invoke('profile.person', {
     body: { name: 'Jo' }, context: {}, isAuthorized: () => authorized,
-  })).rejects.toThrow();
+  })).rejects.toThrow('request is no longer current');
   expect(authorized).toBe(false);
 });
 
@@ -182,7 +182,7 @@ test('Classic named-person cancellation outranks capability reporting without so
   const fake = recorded(); installJudgmentPort(fake.port);
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const f = fixture(); const controller = new AbortController(); controller.abort();
-    await expect(f.store.person('Jo', { signal: controller.signal })).rejects.toThrow();
+    await expect(f.store.person('Jo', { signal: controller.signal })).rejects.toThrow('aborted');
     expect(contentRequests(fake)).toHaveLength(0);
   });
 });

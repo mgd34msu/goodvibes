@@ -15,9 +15,9 @@ import type { ContractResult } from './shared.js';
 
 export function validatePluginLoaded(v: unknown): ContractResult {
   return validateEventFields('PLUGIN_LOADED', v, [
-    { key: 'pluginName', kind: 'string' },
+    { key: 'pluginId', kind: 'string' },
     { key: 'version', kind: 'string' },
-    { key: 'toolCount', kind: 'number' },
+    { key: 'capabilities', kind: 'string[]' },
   ]);
 }
 
@@ -256,7 +256,7 @@ export function validateDeliverySucceeded(v: unknown): ContractResult {
     { key: 'targetId', kind: 'string' },
     { key: 'completedAt', kind: 'number' },
     { key: 'durationMs', kind: 'number' },
-    { key: 'statusCode', kind: 'number' },
+    { key: 'statusCode', kind: 'number', optional: true },
   ]);
 }
 

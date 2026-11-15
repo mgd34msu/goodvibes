@@ -105,9 +105,10 @@ export function endAgentSpan(span: Span, ctx: AgentSpanEndContext): void {
 
   span.addEvent(`agent.${ctx.outcome}`);
 
-  if (ctx.outcome === 'failed' && ctx.error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error });
-    span.setAttribute('agent.error', ctx.error);
+  if (ctx.outcome === 'failed') {
+    // A failure without a message is still a failure: it must not export as OK.
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error || 'failed' });
+    if (ctx.error) span.setAttribute('agent.error', ctx.error);
   } else if (ctx.outcome === 'cancelled') {
     span.setStatus({ code: SpanStatusCode.OK });
     if (ctx.reason) {

@@ -283,10 +283,15 @@ export function retainImportedWorkstreamSnapshot(projectRoot: SnapshotRoot, work
   nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, captureSnapshotFrame(projectRoot, workstream, false)]);
 }
 
-export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream, completedResults: readonly PhaseResult[]): void {
+/**
+ * Returns false when the snapshot could not be written (the failure is logged and the
+ * original is preserved), true when it was written or there was nothing to write, so a
+ * caller can report that the workstream is no longer persisting.
+ */
+export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: Workstream, completedResults: readonly PhaseResult[]): boolean {
   let path: string;
   try { path = snapshotPath(projectRoot, workstream.id); }
-  catch { logger.warn('orchestration persistence: invalid snapshot location refused'); return; }
+  catch { logger.warn('orchestration persistence: invalid snapshot location refused'); return false; }
   let release: (() => void) | null = null;
   try {
     // A direct first writer can create an absent checkpoint. Existing leaves
@@ -304,23 +309,26 @@ export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: W
     const assertCurrent = () => { assertSnapshotFrame(frame); if (release) assertCrossProcessLockCurrent(release); };
     assertCurrent();
     const json = serializeWorkstreamSnapshot(workstream, completedResults);
-    if (json === null) return;
+    if (json === null) return true;
     assertCurrent();
     let publication: string | undefined;
     writeFileAtomic(path, json, { replaceExisting: frame.physical !== null, assertCurrent, cleanupStaleTemps: false, onEffect(published) {
       if (published) {
+        publication = fileObservationIdentity(frame.path);
+        // The file is on disk from here on. Follow it before any check that can throw, or a lost
+        // lock right after publication would leave every later write refused against the old identity.
+        nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, { ...frame, physical: publication }]);
         frame.parent.assertCurrent();
         if (release) assertCrossProcessLockCurrent(release);
-        publication = fileObservationIdentity(frame.path);
       }
     } });
-    // Advance the model only after complete, original publication returns.
     frame.parent.assertCurrent();
     if (release) assertCrossProcessLockCurrent(release);
     if (publication === undefined || fileObservationIdentity(frame.path) !== publication) throw new Error('Original snapshot publication changed');
-    nativeApply(nativeWeakSet, snapshotWriteFrames, [workstream, { ...frame, physical: publication }]);
+    return true;
   } catch (error) {
     logger.error('orchestration persistence: snapshot write failed; original preserved', { path, error: summarizeError(error) });
+    return false;
   } finally {
     try { release?.(); }
     catch (error) { logger.error('orchestration persistence: original snapshot writer lock did not retire', { error: summarizeError(error) }); }
@@ -563,6 +571,7 @@ export function attachDebouncedWriter(
   getCompletedResults: (workstreamId: string) => readonly PhaseResult[],
   subscribe: (listener: (event: OrchestrationEvent) => void) => () => void,
   sweepIntervalMs: number = SWEEP_INTERVAL_MS,
+  onWriteFailed?: (workstreamId: string) => void,
 ): () => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -581,6 +590,11 @@ export function attachDebouncedWriter(
     sweepTimer.unref?.();
   }
 
+  function reportFailure(workstreamId: string): void {
+    try { onWriteFailed?.(workstreamId); }
+    catch (error) { logger.warn('orchestration persistence: failure listener threw', { error: summarizeError(error) }); }
+  }
+
   function scheduleWrite(workstreamId: string): void {
     const existing = timers.get(workstreamId);
     if (existing) clearTimeout(existing);
@@ -588,7 +602,7 @@ export function attachDebouncedWriter(
       timers.delete(workstreamId);
       const workstream = getWorkstream(workstreamId);
       if (!workstream) return;
-      writeWorkstreamSnapshot(projectRoot, workstream, getCompletedResults(workstreamId));
+      if (!writeWorkstreamSnapshot(projectRoot, workstream, getCompletedResults(workstreamId))) reportFailure(workstreamId);
     }, DEBOUNCE_MS);
     timer.unref?.();
     timers.set(workstreamId, timer);
@@ -596,7 +610,8 @@ export function attachDebouncedWriter(
 
   const unsubscribe = subscribe((event) => {
     // Engine-wide inventory observations cannot schedule a workstream write.
-    if (event.type === 'dirty-tree-at-launch' || event.type === 'unattributed-worktree-discovered') return;
+    // A failure notice must not schedule the write that just failed, or a persistent fault would retry forever.
+    if (event.type === 'dirty-tree-at-launch' || event.type === 'unattributed-worktree-discovered' || event.type === 'workstream-persistence-failed') return;
     scheduleWrite(event.workstreamId);
   });
 
@@ -607,7 +622,7 @@ export function attachDebouncedWriter(
     for (const [workstreamId, timer] of timers) {
       clearTimeout(timer);
       const workstream = getWorkstream(workstreamId);
-      if (workstream) writeWorkstreamSnapshot(projectRoot, workstream, getCompletedResults(workstreamId));
+      if (workstream && !writeWorkstreamSnapshot(projectRoot, workstream, getCompletedResults(workstreamId))) reportFailure(workstreamId);
     }
     timers.clear();
     if (sweepTimer !== null) {

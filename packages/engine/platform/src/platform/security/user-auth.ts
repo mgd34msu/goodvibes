@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'crypto';
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
-import { confirmFileDurable } from '../utils/atomic-json-store.js';
+import { confirmFileDurable, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity } from '../utils/file-observation.js';
+import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { SettingsAuthorityUnavailableError } from './settings-authority.js';
 
 export interface AuthUser {
@@ -16,6 +17,14 @@ export interface AuthSession {
   token: string;
   username: string;
   expiresAt: number;
+}
+
+/** The accounts and signed-in sessions of a manager, copied so later changes do not alter it. */
+export interface UserAuthState {
+  readonly users: readonly AuthUser[];
+  readonly sessions: readonly AuthSession[];
+  /** Whether the last user-store write had failed, and whether settings changes were held back. Absent in a state made by an older build. */
+  readonly faults?: { readonly persist: boolean; readonly settings: boolean } | undefined;
 }
 
 declare const settingsSessionAuthorityBrand: unique symbol;
@@ -204,41 +213,12 @@ function readBootstrapUsers(filePath: string, observedRecovery?: () => void, fre
 }
 
 /**
- * Write secret file content atomically at 0600 (owner read/write only).
- * Uses write-to-tmp-then-rename for atomicity; chmod applied at both
- * sides to defeat filesystem-reset behaviour on rename (observed on
- * some Linux fs drivers).
+ * Write secret file content atomically at 0600 (owner read/write only), through
+ * the shared exclusive-staging writer: a pre-planted symlink or a concurrent
+ * writer at a fixed `<file>.tmp` can neither redirect nor tear the write.
  */
 function atomicWriteSecretFile(filePath: string, content: string): void {
-  const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true });
-  const tmpPath = filePath + '.tmp';
-  writeFileSync(tmpPath, content, { encoding: 'utf-8', mode: 0o600 });
-  try {
-    chmodSync(tmpPath, 0o600);
-  } catch (error) {
-    logger.warn('User auth secret temp chmod failed', { path: tmpPath, error: String(error) });
-  }
-  // fsync the file data before rename so the content survives power loss.
-  const fd = openSync(tmpPath, 'r+');
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmpPath, filePath);
-  // fsync the parent directory so the directory entry (rename) is durable.
-  const dirFd = openSync(dir, 'r');
-  try {
-    fsyncSync(dirFd);
-  } finally {
-    closeSync(dirFd);
-  }
-  try {
-    chmodSync(filePath, 0o600);
-  } catch (error) {
-    logger.warn('User auth secret chmod failed after rename', { path: filePath, error: String(error) });
-  }
+  writeFileAtomic(filePath, content, { mode: 0o600, durable: true });
 }
 
 function writeBootstrapUsers(filePath: string, users: AuthUser[]): void {
@@ -260,9 +240,46 @@ function writeBootstrapCredentialFile(filePath: string, username: string, passwo
   );
 }
 
+function sameUser(a: AuthUser | undefined, b: AuthUser | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.passwordHash === b.passwordHash && JSON.stringify(a.roles ?? []) === JSON.stringify(b.roles ?? []);
+}
+
+/**
+ * A user this process did not change takes the other writer's version (including its
+ * deletion); one this process changed keeps this process's version. `base` is what the
+ * file held when this process last read or wrote it.
+ */
+function mergeUserStores(base: ReadonlyMap<string, AuthUser>, theirs: ReadonlyMap<string, AuthUser>, ours: ReadonlyMap<string, AuthUser>): Map<string, AuthUser> {
+  const merged = new Map<string, AuthUser>();
+  for (const username of new Set([...base.keys(), ...theirs.keys(), ...ours.keys()])) {
+    const user = sameUser(base.get(username), ours.get(username)) ? theirs.get(username) : ours.get(username);
+    if (user) merged.set(username, user);
+  }
+  return merged;
+}
+
+/** Session checks look at the user file at most this often. */
+const DISK_CHECK_INTERVAL_MS = 1_000;
+const USER_STORE_LOCK_ATTEMPTS = 50;
+const USER_STORE_LOCK_PAUSE_MS = 20;
+
 function loadOrBootstrapUsers(filePath: string, credentialPath: string, observedRecovery?: () => void, freshAbsence = false, params = DEFAULT_SCRYPT_PARAMS): AuthUser[] {
   const existing = readBootstrapUsers(filePath, observedRecovery, freshAbsence);
   if (existing) return existing;
+
+  // An unreadable or unparseable store still holds the previous users and hashes;
+  // keep those bytes aside so the regenerated admin never silently destroys them.
+  if (existsSync(filePath)) {
+    const aside = `${filePath}.corrupt-${Date.now()}`;
+    try {
+      renameSync(filePath, aside);
+      logger.warn('User auth store could not be read; it was kept aside and a new admin was generated', { path: filePath, keptAt: aside });
+    } catch (error) {
+      throw new Error(`The local auth user store ${filePath} could not be read and could not be moved aside (${error instanceof Error ? error.message : String(error)}); `
+        + 'refusing to overwrite it. Repair or remove the file, then restart.', { cause: error });
+    }
+  }
 
   const initialPassword = generateInitialPassword();
   const username = 'admin';
@@ -365,7 +382,10 @@ function validateSettingsUserStore(parsed: Partial<AuthUserStore> | null): void 
 
 export class UserAuthManager {
   private users = new Map<string, AuthUser>();
+  /** The store could not be verified at startup, or the bootstrap credential file fell behind; held until restart. */
   private settingsFaulted = false;
+  /** The last user-store write failed, so disk may differ from memory; cleared by the next successful write. */
+  private persistFaulted = false;
   private readonly settingsAuthorities = new WeakMap<SettingsSessionAuthority, SettingsSessionAuthorityRecord>();
   private sessions = new Map<string, AuthSession>();
   /** Per-username failure counters for account-level lockout (independent of IP throttling). */
@@ -376,6 +396,10 @@ export class UserAuthManager {
   private readonly userStorePath: string;
   private readonly bootstrapCredentialPath: string;
   private readonly persistUsers: boolean;
+  /** The users the file held when this process last read or wrote it, and that file's identity then. */
+  private storedUsers = new Map<string, AuthUser>();
+  private storedIdentity: string | undefined;
+  private lastDiskCheck = 0;
   private readonly scryptParams: ScryptParams;
   /** Injectable clock, defaults to Date.now for production. */
   private readonly nowFn: () => number;
@@ -408,7 +432,49 @@ export class UserAuthManager {
     // should not trigger spurious warnings.
     if (this.persistUsers) {
       detectBootstrapCredentialDrift(seedUsers, this.bootstrapCredentialPath, this.userStorePath);
+      this.rememberStore(this.users.values());
     }
+  }
+
+  private rememberStore(users: Iterable<AuthUser>): void {
+    this.storedUsers = new Map([...users].map(user => [user.username, user]));
+    try { this.storedIdentity = fileObservationIdentity(this.userStorePath); } catch { this.storedIdentity = undefined; }
+  }
+
+  /** Sessions of users another writer removed or gave a new password, compared with what this process holds. */
+  private foreignlyChangedUsers(next: ReadonlyMap<string, AuthUser>): string[] {
+    return [...this.users].filter(([username, user]) => next.get(username)?.passwordHash !== user.passwordHash).map(([username]) => username);
+  }
+
+  /**
+   * Pick up changes another process (the CLI) made to the user file since this one last
+   * looked, so a deleted user or a rotated password takes effect here without a restart.
+   */
+  private refreshFromDisk(throttled = false): void {
+    if (!this.persistUsers) return;
+    if (throttled) {
+      const now = this.nowFn();
+      if (now - this.lastDiskCheck < DISK_CHECK_INTERVAL_MS) return;
+      this.lastDiskCheck = now;
+    }
+    let identity: string;
+    try { identity = fileObservationIdentity(this.userStorePath); } catch { return; }
+    if (identity === this.storedIdentity) return;
+    const onDisk = readBootstrapUsers(this.userStorePath);
+    if (!onDisk) return;
+    const next = new Map(onDisk.map(user => [user.username, user]));
+    for (const username of this.foreignlyChangedUsers(next)) this.revokeSessionsForUser(username);
+    this.users = next;
+    this.rememberStore(onDisk);
+  }
+
+  private lockUserStore(): () => void {
+    for (let attempt = 0; attempt < USER_STORE_LOCK_ATTEMPTS; attempt++) {
+      const release = tryAcquireCrossProcessLock(`${this.userStorePath}.lock`);
+      if (release) return release;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, USER_STORE_LOCK_PAUSE_MS);
+    }
+    throw new Error('The local auth user store is being changed by another process. Nothing was saved; try again.');
   }
 
   static hashPassword(password: string, params?: ScryptParams): string {
@@ -426,6 +492,7 @@ export class UserAuthManager {
    */
   authenticate(username: string, password: string): AuthenticateResult {
     const now = this.nowFn();
+    this.refreshFromDisk();
     const lockState = this.accountLocks.get(username);
 
     // Check account lock (before touching user store; avoids user-existence side-channel).
@@ -454,10 +521,10 @@ export class UserAuthManager {
       // Never downgrade a stronger stored dimension during an automatic upgrade.
       const params = { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) };
       const updated = { ...user, passwordHash: hashPassword(password, params) };
-      this.users.set(username, updated);
-      try { this.persist(); }
-      catch (error) { this.users.set(username, user); throw error; }
-      user = updated;
+      // The login itself is already verified; a failed upgrade write only keeps the old hash.
+      // A password another writer changed while the scrypt check ran is theirs: the upgrade is dropped, never written over it.
+      try { if (this.persist(new Map(this.users).set(username, updated), { username, passwordHash: user.passwordHash })) user = updated; }
+      catch (error) { logger.warn('Password hash upgrade could not be saved; the login continues', { username, error: String(error) }); }
     }
 
     // Determine whether this login used the bootstrap credential.
@@ -580,16 +647,17 @@ export class UserAuthManager {
       id: `auth-session-${randomUUID()}`,
       token,
       username,
-      expiresAt: Date.now() + this.sessionTtlMs,
+      expiresAt: this.nowFn() + this.sessionTtlMs,
     };
     this.sessions.set(token, session);
     return session;
   }
 
   validateSession(token: string): AuthSession | null {
+    this.refreshFromDisk(true);
     const session = this.sessions.get(token);
     if (!session) return null;
-    if (Date.now() > session.expiresAt) {
+    if (this.nowFn() > session.expiresAt) {
       this.sessions.delete(token);
       return null;
     }
@@ -598,9 +666,9 @@ export class UserAuthManager {
 
   /** Capture the exact in-memory session and current user, never username alone. */
   captureSettingsAuthority(token: string): SettingsSessionAuthority | null {
-    if (this.settingsFaulted) return null;
+    if (this.settingsFaulted || this.persistFaulted) return null;
     const session = this.sessions.get(token);
-    if (!session || session.token !== token || !Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt) return null;
+    if (!session || session.token !== token || !Number.isFinite(session.expiresAt) || this.nowFn() >= session.expiresAt) return null;
     const user = this.users.get(session.username);
     if (!user || user.username !== session.username || (user.roles !== undefined
       && (!Array.isArray(user.roles) || user.roles.some(role => typeof role !== 'string')))) return null;
@@ -614,13 +682,13 @@ export class UserAuthManager {
   /** Synchronous final check after every reentrant preparation callback. */
   assertSettingsAuthorityCurrent(authority: SettingsSessionAuthority): void {
     const expected = this.settingsAuthorities.get(authority);
-    if (!expected || this.settingsFaulted) throw new SettingsAuthorityUnavailableError();
+    if (!expected || this.settingsFaulted || this.persistFaulted) throw new SettingsAuthorityUnavailableError();
     const session = this.sessions.get(expected.token);
     const user = this.users.get(expected.username);
     const roles = user?.roles ?? [];
     if (session !== expected.session || user !== expected.user
       || session.token !== expected.token || session.username !== expected.username
-      || session.expiresAt !== expected.expiresAt || Date.now() >= expected.expiresAt
+      || session.expiresAt !== expected.expiresAt || this.nowFn() >= expected.expiresAt
       || user.username !== expected.username || user.passwordHash !== expected.passwordHash
       || roles.length !== expected.roles.length || roles.some((role, index) => role !== expected.roles[index])) {
       throw new SettingsAuthorityUnavailableError();
@@ -679,8 +747,7 @@ export class UserAuthManager {
       passwordHash: hashPassword(password, this.scryptParams),
       roles: [...new Set(roles.filter(Boolean))],
     };
-    this.users.set(normalized, user);
-    this.persist();
+    this.persist(new Map(this.users).set(normalized, user));
     return { username: user.username, roles: Object.freeze([...(user.roles ?? [])]) };
   }
 
@@ -691,9 +758,15 @@ export class UserAuthManager {
     if (this.users.size <= 1) {
       throw new Error('Cannot delete the last local auth user.');
     }
-    this.users.delete(normalized);
+    // No session without the admin role can pass the admin check, so the last admin is protected too.
+    const isAdmin = (user: AuthUser): boolean => user.roles?.includes('admin') === true;
+    if (isAdmin(existing) && ![...this.users.values()].some(user => user.username !== normalized && isAdmin(user))) {
+      throw new Error(`Cannot delete ${normalized}: it is the last local auth user with the admin role. Give another user the admin role first.`);
+    }
+    const next = new Map(this.users);
+    next.delete(normalized);
+    this.persist(next);
     this.revokeSessionsForUser(normalized);
-    this.persist();
     return true;
   }
 
@@ -702,16 +775,44 @@ export class UserAuthManager {
     const existing = this.users.get(normalized);
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
     if (!nextPassword || nextPassword.length < 8) throw new Error('Password must be at least 8 characters.');
-    this.users.set(normalized, {
+    this.persist(new Map(this.users).set(normalized, {
       ...existing,
       passwordHash: hashPassword(nextPassword, this.scryptParams),
-    });
+    }));
     this.revokeSessionsForUser(normalized);
-    this.persist();
     if (normalized === 'admin') {
       try { writeBootstrapCredentialFile(this.bootstrapCredentialPath, normalized, nextPassword); }
-      catch (error) { this.settingsFaulted = true; throw error; }
+      catch (error) {
+        this.settingsFaulted = true;
+        throw new Error(`The admin password was changed and saved, but the bootstrap credential file ${this.bootstrapCredentialPath} `
+          + `could not be updated (${error instanceof Error ? error.message : String(error)}); it still holds the old password. `
+          + 'Remove that file or rewrite it; settings changes from web sessions stay refused until the daemon restarts.', { cause: error });
+      }
     }
+  }
+
+  /** A copy of the accounts (with their password hashes) and sessions, for putting them back with {@link restoreState}. */
+  snapshotState(): UserAuthState {
+    return {
+      users: [...this.users.values()].map(user => ({ ...user, ...(user.roles ? { roles: [...user.roles] } : {}) })),
+      sessions: [...this.sessions.values()].map(session => ({ ...session })),
+      faults: { persist: this.persistFaulted, settings: this.settingsFaulted },
+    };
+  }
+
+  /**
+   * Replace the live accounts and sessions with a snapshot. Memory only: the caller owns the user
+   * file and has already put it back, so this does not write it.
+   */
+  restoreState(state: UserAuthState): void {
+    this.users = new Map(state.users.map(user => [user.username, { ...user, ...(user.roles ? { roles: [...user.roles] } : {}) }]));
+    this.sessions = new Map(state.sessions.map(session => [session.token, { ...session }]));
+    // A write that failed after the snapshot left disk and memory disagreeing; with the file put back they agree again.
+    if (state.faults) {
+      this.persistFaulted = state.faults.persist;
+      this.settingsFaulted = state.faults.settings;
+    }
+    if (this.persistUsers) this.rememberStore(this.users.values());
   }
 
   inspect(): LocalAuthSnapshot {
@@ -739,7 +840,7 @@ export class UserAuthManager {
   }
 
   private pruneExpiredSessions(): void {
-    const now = Date.now();
+    const now = this.nowFn();
     for (const [token, session] of this.sessions.entries()) {
       if (session.expiresAt <= now) {
         this.sessions.delete(token);
@@ -747,9 +848,29 @@ export class UserAuthManager {
     }
   }
 
-  private persist(): void {
-    if (!this.persistUsers) return;
-    try { writeBootstrapUsers(this.userStorePath, [...this.users.values()]); }
-    catch (error) { this.settingsFaulted = true; throw error; }
+  /** Write the candidate users, then make them live; a failed write changes nothing in memory. */
+  private persist(next: Map<string, AuthUser>, onlyIfHash?: { readonly username: string; readonly passwordHash: string }): boolean {
+    if (this.persistUsers) {
+      try {
+        const release = this.lockUserStore();
+        try {
+          // Another process may have changed the file since this one read it: its changes to
+          // users this call does not touch are kept rather than written over.
+          let identity: string | undefined;
+          try { identity = fileObservationIdentity(this.userStorePath); } catch { identity = undefined; }
+          const onDisk = identity !== undefined && identity !== this.storedIdentity ? readBootstrapUsers(this.userStorePath) : null;
+          if (onlyIfHash && onDisk && onDisk.find(user => user.username === onlyIfHash.username)?.passwordHash !== onlyIfHash.passwordHash) return false;
+          const merged = onDisk ? mergeUserStores(this.storedUsers, new Map(onDisk.map(user => [user.username, user])), next) : next;
+          writeBootstrapUsers(this.userStorePath, [...merged.values()]);
+          this.rememberStore(merged.values());
+          // What the other writer changed ends this process's sessions for those users; what this call changed is the caller's to revoke.
+          for (const username of this.foreignlyChangedUsers(merged)) if (!sameUser(merged.get(username), next.get(username))) this.revokeSessionsForUser(username);
+          next = merged;
+        } finally { release(); }
+      } catch (error) { this.persistFaulted = true; throw error; }
+      this.persistFaulted = false;
+    }
+    this.users = next;
+    return true;
   }
 }

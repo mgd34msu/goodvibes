@@ -21,7 +21,7 @@ async function waitFor(predicate: () => boolean, label: string, milliseconds = 3
   }
 }
 
-test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission lifecycle, mode=%s', async (mode) => {
+test.each(['active', 'pending', 'handoff', 'asking'] as const)('actual Agent permission lifecycle, mode=%s', async (mode) => {
   const cancel = mode !== 'active';
   const root = mkdtempSync(join(tmpdir(), 'engine-permission-cancel-'));
   // Isolate project discovery from the enclosing checkout. No shell tool executes.
@@ -76,6 +76,8 @@ test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission li
     if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.99);
     if (name === 'kind') return choiceAnswer(question, 'write', 0.99);
     if (name === 'mutates') return noulAnswer(0.99);
+    // The asking mode reads the write as irreversible, which the preset answers by asking the owner.
+    if (mode === 'asking' && name === 'irreversible') return noulAnswer(0.99);
     if (['outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity', 'cardDetails'].includes(name)) return noulAnswer(0.01);
     throw new Error(`Unscripted synthetic reading: ${name}`);
   }).port);
@@ -91,18 +93,29 @@ test.each(['active', 'pending', 'handoff'] as const)('actual Agent permission li
   try {
     const record = runtime.agentManager.spawn({ mode: 'spawn', outsideContract: true, template: 'general', task: 'Write the synthetic permission fixture', tools: ['write'], model: 'permission-fixture:fixture', provider: 'permission-fixture' });
     agentId = record.id;
+    if (mode === 'asking') {
+      // The write needs the owner's answer: the broker holds a pending record while the agent waits on it.
+      await waitFor(() => broker.listApprovals().some((item) => item.status === 'pending'), 'the write approval to be raised');
+      expect(runtime.agentManager.cancel(record.id)).toBe(true);
+    }
     if (mode === 'pending') {
       await providerEntered.promise;
       expect(runtime.agentManager.cancel(record.id)).toBe(true);
       providerRelease.resolve();
     }
     await waitFor(() => settled, 'the agent execution to finish'); await done;
-    expect(broker.listApprovals()).toEqual([]);
+    if (mode === 'asking') {
+      // Cancelling the agent withdraws its ask; nothing is left for an owner to answer.
+      expect(broker.listApprovals().length).toBeGreaterThan(0);
+      expect(broker.listApprovals().filter((item) => item.status === 'pending' || item.status === 'claimed')).toEqual([]);
+    } else {
+      expect(broker.listApprovals()).toEqual([]);
+    }
     expect(existsSync(join(root, path))).toBe(!cancel);
     const persisted = new UserPermissionRuleStore(join(config.getControlPlaneConfigDir(), 'permission-rules.json'));
     await persisted.init(); expect(persisted.list()).toEqual([]);
     expect(record.status).toBe(cancel ? 'cancelled' : 'completed');
-    expect(await runtime.permissionManager.checkDetailed('write', args)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset', reasonCode: 'preset_allow' });
+    if (mode !== 'asking') expect(await runtime.permissionManager.checkDetailed('write', args)).toMatchObject({ approved: true, persisted: false, sourceLayer: 'stakes_preset', reasonCode: 'preset_allow' });
     if (!cancel) expect(executionError).toBeUndefined();
   } finally {
     providerRelease.resolve();

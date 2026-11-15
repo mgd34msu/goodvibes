@@ -15,7 +15,7 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
 export type BackgroundPermissionManager = Pick<
   PermissionManager,
   'checkDetailed' | 'check' | 'getBackgroundAgentsMode' | 'passesBoundary'
-> & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'getMode' | 'captureExecutionMode'>>;
+> & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'admitAutonomous' | 'autonomousPreparation' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'retireAutonomousSource' | 'getMode' | 'captureExecutionMode'>>;
 
 export type BackgroundPermissionOutcome =
   | { readonly approved: true; readonly modifiedArgs?: Record<string, unknown> | undefined }

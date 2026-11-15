@@ -12,7 +12,7 @@ import { nativeCohortFixture, nativeCohortReleaseFixture } from './_helpers/daem
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-const nativeTest = process.platform === 'linux' ? test : test.skip;
+const nativeTest = process.platform === 'linux' ? test : test.if(false);
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'daemon-real-native-cohort-')); roots.push(root);

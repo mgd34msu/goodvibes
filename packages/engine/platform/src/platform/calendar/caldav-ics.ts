@@ -118,14 +118,22 @@ export function unescapeText(value: string): string {
 
 /**
  * Parse an iCalendar date or date-time value into an ISO-8601 string.
- * Supports YYYYMMDD (DATE), YYYYMMDDTHHMMSSZ (UTC), and YYYYMMDDTHHMMSS
- * (floating/local).
+ * Supports YYYYMMDD (DATE), YYYYMMDDTHHMMSSZ (UTC), YYYYMMDDTHHMMSS
+ * (floating/local) and YYYYMMDDTHHMMSS with a TZID parameter, which is
+ * converted to the real UTC instant through the runtime's tz database. A TZID
+ * the runtime does not know (a Windows zone name, a private VTIMEZONE id) throws
+ * rather than guessing: a computed UTC for a zone nobody resolved is a wrong
+ * instant that a later PUT would write back to the server.
  */
-export function parseICalDate(value: string): { readonly iso: string; readonly allDay: boolean } {
+export function parseICalDate(
+  value: string,
+  tzid?: string | undefined,
+): { readonly iso: string; readonly allDay: boolean } {
   const trimmed = value.trim();
   const dateOnly = /^(\d{4})(\d{2})(\d{2})$/.exec(trimmed);
   if (dateOnly) {
     const [, y, m, d] = dateOnly;
+    assertRealDateTime(value, Number(y), Number(m), Number(d), 0, 0, 0);
     const iso = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), 0, 0, 0)).toISOString();
     return { iso, allDay: true };
   }
@@ -138,6 +146,11 @@ export function parseICalDate(value: string): { readonly iso: string; readonly a
     // would relabel that wall-clock as UTC and shift the resulting ISO instant
     // by the local offset on round-trip; we instead build it through the local
     // Date constructor so the ISO reflects the same wall-clock in local time.
+    assertRealDateTime(value, Number(y), Number(m), Number(d), Number(hh), Number(mm), Number(ss));
+    if (!zulu && tzid !== undefined && tzid.length > 0) {
+      const wall = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+      return { iso: new Date(zonedWallClockToUtcMs(wall, tzid)).toISOString(), allDay: false };
+    }
     const date = zulu
       ? new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss)))
       : new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
@@ -146,11 +159,66 @@ export function parseICalDate(value: string): { readonly iso: string; readonly a
   throw new Error(`Unrecognised iCalendar date value: ${value}`);
 }
 
+/** Refuse an impossible calendar value (month 13, 31 June) instead of letting Date roll it over. */
+function assertRealDateTime(
+  value: string,
+  y: number,
+  m: number,
+  d: number,
+  hh: number,
+  mm: number,
+  ss: number,
+): void {
+  const probe = new Date(Date.UTC(y, m - 1, d, hh, mm, ss));
+  if (
+    probe.getUTCFullYear() !== y
+    || probe.getUTCMonth() !== m - 1
+    || probe.getUTCDate() !== d
+    || hh > 23
+    || mm > 59
+    || ss > 59
+  ) {
+    throw new Error(`Unrecognised iCalendar date value: ${value}`);
+  }
+}
+
+/** The offset of `timeZone` from UTC, in ms, at the UTC instant `utcMs`. */
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const part = (type: string): number =>
+    Number(parts.find((candidate) => candidate.type === type)?.value ?? '0');
+  const asUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
+  return asUtc - Math.floor(utcMs / 1000) * 1000;
+}
+
+/**
+ * The UTC instant at which `timeZone`'s wall clock reads `wallMs` (the wall
+ * clock expressed as if it were UTC). Two passes settle the offset across a
+ * DST boundary.
+ */
+function zonedWallClockToUtcMs(wallMs: number, timeZone: string): number {
+  try {
+    const first = wallMs - zoneOffsetMs(wallMs, timeZone);
+    return wallMs - zoneOffsetMs(first, timeZone);
+  } catch {
+    throw new Error(`Unsupported iCalendar TZID '${timeZone}': it is not a time zone this runtime knows.`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Property line parsing
 // ---------------------------------------------------------------------------
 
-interface ContentLine {
+export interface ContentLine {
   readonly name: string;
   readonly params: Readonly<Record<string, string>>;
   readonly value: string;
@@ -177,7 +245,7 @@ function splitParams(input: string): string[] {
   return result;
 }
 
-function parseContentLine(line: string): ContentLine {
+export function parseContentLine(line: string): ContentLine {
   // Split name(+params) from value at the first unquoted colon.
   let colonIndex = -1;
   let inQuotes = false;
@@ -268,7 +336,7 @@ function applyProperty(target: ParsingEvent, line: ContentLine): void {
       target.recurrence = line.value.trim();
       break;
     case 'DTSTART': {
-      const { iso, allDay } = parseICalDate(line.value);
+      const { iso, allDay } = parseICalDate(line.value, line.params['TZID']);
       // A value is DATE-typed when explicitly tagged VALUE=DATE or when the
       // serialised form carries no time component (parseICalDate -> allDay).
       const isDate = line.params['VALUE'] === 'DATE' || allDay;
@@ -278,7 +346,7 @@ function applyProperty(target: ParsingEvent, line: ContentLine): void {
       break;
     }
     case 'DTEND': {
-      const { iso, allDay } = parseICalDate(line.value);
+      const { iso, allDay } = parseICalDate(line.value, line.params['TZID']);
       const isDate = line.params['VALUE'] === 'DATE' || allDay;
       target.end = iso;
       target.endIsDate = isDate;
@@ -332,6 +400,82 @@ function finaliseEvent(partial: ParsingEvent): ParsedICalEvent {
   };
 }
 
+/** One VEVENT that could not be read, with the UID it declared (if it got that far). */
+export interface ICalEventParseError {
+  readonly uid?: string;
+  readonly message: string;
+}
+
+/**
+ * Parse a full .ics document and return every VEVENT it holds, plus the ones it
+ * could not read. A VEVENT with a date value this module cannot read, or with a
+ * DTSTART/DTEND VALUE-type mismatch, is reported in `errors` instead of
+ * failing its neighbours: one hostile or damaged invitation must not make the
+ * rest of a collection unreadable.
+ *
+ * Properties of child components (a VALARM's DESCRIPTION, ACTION, TRIGGER) are
+ * not the event's: they are skipped while a nested BEGIN/END pair is open.
+ */
+export function parseICSDetailed(content: string): {
+  readonly events: ParsedICalEvent[];
+  readonly errors: ICalEventParseError[];
+} {
+  const lines = unfoldLines(content);
+  const events: ParsedICalEvent[] = [];
+  const errors: ICalEventParseError[] = [];
+  let current: ParsingEvent | null = null;
+  let failure: string | undefined;
+  let depth = 0;
+
+  for (const line of lines) {
+    const upper = line.toUpperCase();
+    if (current === null) {
+      if (upper === 'BEGIN:VEVENT') {
+        current = { attendees: [], raw: {} };
+        failure = undefined;
+        depth = 0;
+      }
+      continue;
+    }
+    if (upper === 'BEGIN:VEVENT' && depth === 0) {
+      // A VEVENT left unclosed: the next one starts a fresh event.
+      current = { attendees: [], raw: {} };
+      failure = undefined;
+      continue;
+    }
+    if (upper === 'END:VEVENT' && depth === 0) {
+      if (failure === undefined) {
+        try {
+          events.push(finaliseEvent(current));
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+      }
+      if (failure !== undefined) {
+        errors.push({ ...(current.uid ? { uid: current.uid } : {}), message: failure });
+      }
+      current = null;
+      continue;
+    }
+    if (upper.startsWith('BEGIN:')) {
+      depth += 1;
+      continue;
+    }
+    if (upper.startsWith('END:')) {
+      if (depth > 0) depth -= 1;
+      continue;
+    }
+    if (depth > 0 || failure !== undefined) continue;
+    try {
+      applyProperty(current, parseContentLine(line));
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return { events, errors };
+}
+
 /**
  * Parse a full .ics document and return every VEVENT component in it. Multiple
  * VEVENTs (a VCALENDAR carrying recurrence overrides, or a whole collection
@@ -339,30 +483,13 @@ function finaliseEvent(partial: ParsingEvent): ParsedICalEvent {
  *
  * Throws, rather than dropping the event, on a date value it cannot read or
  * on a DTSTART/DTEND VALUE-type mismatch: a calendar entry silently landing on
- * the wrong day is worse than a refusal that names the file.
+ * the wrong day is worse than a refusal that names the file. Callers that must
+ * survive a bad neighbour use `parseICSDetailed`.
  */
 export function parseICS(content: string): ParsedICalEvent[] {
-  const lines = unfoldLines(content);
-  const events: ParsedICalEvent[] = [];
-  let current: ParsingEvent | null = null;
-
-  for (const line of lines) {
-    const upper = line.toUpperCase();
-    if (upper === 'BEGIN:VEVENT') {
-      current = { attendees: [], raw: {} };
-      continue;
-    }
-    if (upper === 'END:VEVENT') {
-      if (current) {
-        events.push(finaliseEvent(current));
-        current = null;
-      }
-      continue;
-    }
-    if (!current) continue;
-    applyProperty(current, parseContentLine(line));
-  }
-
+  const { events, errors } = parseICSDetailed(content);
+  const first = errors[0];
+  if (first !== undefined) throw new Error(first.message);
   return events;
 }
 

@@ -10,7 +10,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from '../products/daemon/scripts/native-execution-process.mjs';
 
-const repository = 'mgd34msu/goodvibes';
+/** The installer's own `REPO=` line is the release source: it is piped from curl, so it
+ * cannot import a constant, and the acceptance run must verify exactly the repository
+ * that installer downloads from. */
+function readInstallerRepository() {
+  const text = readFileSync(fileURLToPath(new URL('./install.sh', import.meta.url)), 'utf8');
+  const match = /^REPO="([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)"$/m.exec(text);
+  assert.ok(match, 'scripts/install.sh does not declare its release repository.');
+  return match[1];
+}
+export const repository = readInstallerRepository();
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const products = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'];
 const unit = 'goodvibes.service', label = 'sh.goodvibes.daemon';
 
@@ -20,7 +30,7 @@ export function consumeAcceptanceMetadataFetch(env = process.env, fetchImpl = fe
   const token = env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN;
   delete env.GOODVIBES_ACCEPTANCE_METADATA_TOKEN;
   const tag = 'v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?';
-  const route = new RegExp(`^https://api\\.github\\.com/repos/mgd34msu/goodvibes/(?:releases/(?:latest|tags/${tag})|git/ref/tags/${tag}|git/tags/[a-f0-9]{40})$`);
+  const route = new RegExp(`^https://api\\.github\\.com/repos/${escapeRegExp(repository)}/(?:releases/(?:latest|tags/${tag})|git/ref/tags/${tag}|git/tags/[a-f0-9]{40})$`);
   return {
     authentication: token ? 'read-only-ci-token' : 'anonymous',
     fetch(url, options) {
@@ -312,7 +322,6 @@ export async function runAcceptanceSteps(host) {
   try {
     attempted = true; await host.install();
     await host.verifyInstalled(); await host.verifyDefaults();
-    await host.verifyNativeLifecycle?.();
     await host.disableUpdates(); await host.restartAndVerifyOptOut();
     await host.install(); await host.verifyOptOut();
     await host.uninstall(); await host.verifyPreserved();
@@ -320,33 +329,11 @@ export async function runAcceptanceSteps(host) {
     await host.install(); await host.verifyInstalled(); await host.verifyOptOut();
   } catch (error) {
     primary = error;
-    try { await host.diagnoseFailure?.(); }
-    catch (error) { primary = new AggregateError([primary, error], 'Acceptance and failure diagnostics failed.'); }
   }
   finally {
     if (attempted) {
       try { await host.uninstall(); await host.verifyPreserved(); }
       catch (error) { primary = primary ? new AggregateError([primary, error], 'Acceptance and owned cleanup failed.') : error; }
-    }
-  }
-  if (primary) throw primary;
-}
-
-/** Linux historical delivery uses the actual old unattended updater. The
- * current installer is reserved for finally-cleanup, never upgrade repair. */
-export async function runHistoricalUpgradeSteps(host) {
-  await host.admit();
-  let attempted = false, primary;
-  try {
-    attempted = true; await host.installPrevious();
-    await host.verifyPrevious(); await host.seedPreviousData();
-    await host.startPreviousService(); await host.awaitAutomaticUpgrade();
-    await host.verifyUpgradedData(); await host.verifyRollbackRefusal();
-  } catch (error) { primary = error; }
-  finally {
-    if (attempted) {
-      try { await host.uninstall(); await host.verifyPreserved(); }
-      catch (error) { primary = primary ? new AggregateError([primary, error], 'Historical acceptance and owned cleanup failed.') : error; }
     }
   }
   if (primary) throw primary;
@@ -452,65 +439,6 @@ export async function verifyCompiledSuiteRollback({ host, target, source, source
   return { updatedPid, rolledBackPid };
 }
 
-/** Explicit public-installer recovery, independent of the old automatic
- * updater. A running opted-out old service is migrated by the real installer. */
-export async function runInstallerMigrationSteps(host) {
-  await host.admit();
-  let attempted = false, primary;
-  try {
-    attempted = true; await host.installPrevious();
-    await host.verifyPrevious(); await host.seedPreviousData(); await host.disablePreviousUpdates();
-    await host.startPreviousService(); await host.verifyPreviousService();
-    await host.installCurrent(); await host.verifyCurrent(); await host.verifyMigratedData();
-    await host.restartAndVerifyMigrated();
-  } catch (error) { primary = error; }
-  finally {
-    if (attempted) {
-      try { await host.uninstall(); await host.verifyPreserved(); }
-      catch (error) { primary = primary ? new AggregateError([primary, error], 'Installer migration and owned cleanup failed.') : error; }
-    }
-  }
-  if (primary) throw primary;
-}
-
-/** Invoke the actual platform API against the downloaded installed tree.
- * The separately built verifier supplies no installed bytes and does not claim
- * an interactive compiled /update rollback was driven by this acceptance. */
-export async function assertHistoricalRollbackRefusal(input, verifier) {
-  input.signal?.throwIfAborted();
-  const modulePath = name => input.sourceRoot
-    ? pathToFileURL(join(input.sourceRoot, 'packages/engine/platform/dist/platform/runtime', name)).href
-    : new URL(`../packages/engine/platform/dist/platform/runtime/${name}`, import.meta.url).href;
-  const api = verifier ?? await import(modulePath('self-update.js'));
-  const sources = verifier ?? await import(modulePath('compiled-native-startup.js'));
-  const trees = verifier ?? await import(modulePath('update-directories.js'));
-  const options = { execPath: join(input.bin, 'goodvibes-daemon'), platform: 'linux', arch: process.arch,
-    currentVersion: input.version, version: input.version, webuiDirectory: input.webuiDirectory };
-  const plan = api.resolveSuiteUpdatePlan(options);
-  // This is the real historical absence, not a constructed invalid argument.
-  assert.ok(plan.files.some(file => !existsSync(file.path + '.previous')), 'The historical previous native cohort is unexpectedly complete.');
-  const files = sources.retainNativeUpdateSources(plan.files.flatMap(file => ['', '.previous'].map(tail => file.path + tail)),
-    api.captureUpdateFileIo(api.realUpdateFileIo));
-  const transient = sources.retainNativeUpdateSources(plan.files.flatMap(file => ['.update-transaction', '.update-download', '.update-previous', '.rollback-exchange'].map(tail => file.path + tail)),
-    api.captureUpdateFileIo(api.realUpdateFileIo));
-  const directories = plan.directories.flatMap(directory => [directory.path, directory.path + '.previous']).map(path => trees.retainNativeUpdateTree(path));
-  const current = () => { input.signal?.throwIfAborted(); plan.assertCurrent(); files(); for (const directory of directories) directory.assertCurrent(); };
-  let commitReached = false, refusal;
-  current(); transient();
-  try {
-    api.rollbackSuiteUpdate({ ...options, assertCurrent: current, beforeCommit() {
-      commitReached = true; throw new Error('Historical rollback unexpectedly reached the commit boundary.');
-    } });
-  } catch (error) { refusal = error; }
-  assert.equal(commitReached, false, 'The historical rollback must refuse before admission to effects.');
-  assert.ok(refusal instanceof api.UpdateTransactionError, 'Only the actual incomplete native-cohort refusal counts.');
-  assert.equal(refusal.receipt.operation, 'rollback'); assert.equal(refusal.receipt.phase, 'admission');
-  assert.equal(refusal.receipt.committed, false); assert.equal(refusal.receipt.recoveryRequired, false);
-  assert.ok(refusal.cause instanceof Error);
-  assert.equal(refusal.cause.message, 'Previous native cohort is incomplete; refusing partial rollback');
-  current(); transient();
-}
-
 /** These are the actual public per-program producer descriptors. The suite
  * archive's suite-release-source-* inventory is intentionally not published. */
 export async function readPublishedReaders(input, load) {
@@ -556,8 +484,17 @@ async function fetchBytes(url, limit = 1_048_576, signal, onHttpStatus, fetchImp
 }
 
 /** The actual public admission path, with fixed checkpoints and status-only
- * observations. The injected fetch seam supplies owned HTTP fixtures in tests. */
-export async function readPublicAcceptanceDelivery({ tag, source, target, signal, checkpoint, onHttpStatus }, fetchImpl = fetch) {
+ * observations. The injected fetch seam supplies owned HTTP fixtures in tests.
+ *
+ * `release` (the default) runs when the release is published and keeps both
+ * moving-target comparisons: the tag must still be the repository's latest and the
+ * public installer must equal the one in the release's source commit. `recheck`
+ * re-verifies bytes that were published earlier, when either may legitimately have
+ * moved on (a newer release, a later change to the installer on main): it installs
+ * the tag explicitly from the installer committed at its source, and compares
+ * neither. The staged, pre-publication path never uses `recheck`. */
+export async function readPublicAcceptanceDelivery({ tag, source, target, signal, checkpoint, onHttpStatus, mode = 'release' }, fetchImpl = fetch) {
+  assert.ok(mode === 'release' || mode === 'recheck', 'Unknown published acceptance mode.');
   const api = `https://api.github.com/repos/${repository}`;
   const request = async (check, url, limit) => {
     checkpoint(check);
@@ -577,16 +514,19 @@ export async function readPublicAcceptanceDelivery({ tag, source, target, signal
     const value = JSON.parse((await request(`catalog.reader.${command}.http`, `https://github.com/${repository}/releases/download/${tag}/${name}`, 131_072)).bytes);
     return value;
   });
-  const latest = JSON.parse((await request('catalog.latest.http', `${api}/releases/latest`)).bytes);
-  checkpoint('catalog.latest.tag');
-  assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
+  if (mode === 'release') {
+    const latest = JSON.parse((await request('catalog.latest.http', `${api}/releases/latest`)).bytes);
+    checkpoint('catalog.latest.tag');
+    assert.equal(latest.tag_name, tag, 'Default updater acceptance requires this exact tag to be latest.');
+  }
   const immutable = await request('installer.immutable.http', `https://raw.githubusercontent.com/${repository}/${source}/scripts/install.sh`);
+  if (mode === 'recheck') return { readers, published: { bytes: immutable.bytes, url: immutable.url }, immutable, mode };
   const published = await request('installer.public.http', 'https://goodvibes.sh/install.sh');
   checkpoint('installer.public.redirect');
-  assert.match(published.url, /^https:\/\/raw\.githubusercontent\.com\/mgd34msu\/goodvibes\/(?:main|[a-f0-9]{40})\/scripts\/install\.sh$/);
+  assert.match(published.url, new RegExp(`^https://raw\\.githubusercontent\\.com/${escapeRegExp(repository)}/(?:main|[a-f0-9]{40})/scripts/install\\.sh$`));
   checkpoint('installer.public.bytes');
   assert.ok(published.bytes.equals(immutable.bytes), 'The public installer differs from the accepted release source.');
-  return { readers, published, immutable };
+  return { readers, published, immutable, mode };
 }
 
 /** A real public previous cohort need not be latest. Require its immutable tag
@@ -625,7 +565,8 @@ export async function acceptPublishedSuite(input) {
   try { await performPublishedAcceptance(input, evidence, metadata.fetch); }
   catch (error) {
     error = preserveAcceptanceCancellation(error, input.signal);
-    const diagnostic = { tag: input.tag, source: input.source, target: input.target, accepted: false, metadataInspection: evidence.metadataInspection,
+    const diagnostic = { tag: input.tag, source: input.source, target: input.target, accepted: false,
+      ...(input.delivery ? {} : { mode: input.mode ?? 'release' }), metadataInspection: evidence.metadataInspection,
       failures: evidence.failures.length ? evidence.failures : [acceptanceFailureRecord(evidence, error)],
       diagnostic: input.delivery ? 'Staged native install/service/cleanup acceptance failed.' : 'Published native install/service/cleanup acceptance failed.' };
     if (evidence.root) writeFileSync(join(evidence.root, 'acceptance-result.json'), JSON.stringify(diagnostic) + '\n', { flag: 'wx', mode: 0o600 });
@@ -634,22 +575,12 @@ export async function acceptPublishedSuite(input) {
   }
 }
 
-async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource }, evidence, metadataFetch) {
-  assert.ok(scenario === 'fresh' || scenario === 'upgrade-v3.1.1' || scenario === 'installer-migrate-v3.1.1' || scenario === 'upgrade-previous', 'Unknown published acceptance scenario.');
-  const historical = scenario === 'upgrade-v3.1.1';
-  const migration = scenario === 'installer-migrate-v3.1.1';
+async function performPublishedAcceptance({ tag, source, target, signal, scenario = 'fresh', delivery, previousTag, previousSource: selectedPreviousSource, mode = 'release' }, evidence, metadataFetch) {
+  assert.ok(delivery === undefined || mode === 'release', 'A staged candidate is accepted before publication; recheck applies to published releases only.');
+  assert.ok(scenario === 'fresh' || scenario === 'upgrade-previous', 'Unknown published acceptance scenario.');
   const previousRelease = scenario === 'upgrade-previous';
   if (previousRelease) assertPreviousReleaseInputs({ tag, previousTag, previousSource: selectedPreviousSource });
   else assert.ok(previousTag === undefined && selectedPreviousSource === undefined, 'Previous inputs belong to previous-release acceptance only.');
-  if (historical) {
-    assert.equal(process.platform, 'linux', 'The published old automatic updater supports Linux only.');
-    assert.equal(tag, 'v3.1.2', 'This scenario verifies the actual v3.1.1 to v3.1.2 delivery contract.');
-  }
-  if (migration) {
-    assert.equal(process.platform, 'linux', 'The installer migration fixture requires the actual old Linux release cohort.');
-    assert.equal(tag, 'v3.1.2', 'Installer migration verifies actual public v3.1.1 to v3.1.2 delivery.');
-    assert.equal(delivery, undefined, 'Installer migration must exercise the actual public installer and release.');
-  }
   const account = userInfo(), home = realpathSync(process.env.HOME ?? '');
   assertHostedContext({ env: process.env, platform: process.platform, arch: process.arch,
     home, accountHome: realpathSync(account.homedir), uid: account.uid, tag, source, target });
@@ -709,7 +640,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     ({ readers, published, installer } = await delivery.admit({ tag, source, target, root, signal }));
   } else {
     let immutable;
-    ({ readers, published, immutable } = await readPublicAcceptanceDelivery({ tag, source, target, signal,
+    ({ readers, published, immutable } = await readPublicAcceptanceDelivery({ tag, source, target, signal, mode,
       checkpoint(check) { evidence.stage = check.startsWith('installer.') ? 'public-installer' : 'published-catalog'; checkpoint(check); },
       onHttpStatus(status) { evidence.httpStatus = status; },
     }, metadataFetch));
@@ -717,37 +648,13 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     writeFileSync(join(root, 'immutable-install.sh'), immutable.bytes, { flag: 'wx', mode: 0o600 });
   }
   const installEnv = { GOODVIBES_VERSION: tag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0' };
-  let previousInstaller, previousSource, previousReader, previousReaders;
+  let previousInstaller, previousSource, previousReaders;
   if (previousRelease) {
     evidence.stage = 'previous-release-source';
     const cohort = await readPreviousReleaseCohort({ tag: previousTag, source: selectedPreviousSource, target, signal,
       checkpoint, onHttpStatus(status) { evidence.httpStatus = status; } }, metadataFetch);
     previousSource = selectedPreviousSource; previousReaders = cohort.readers;
     previousInstaller = join(root, 'install-previous.sh'); writeFileSync(previousInstaller, cohort.installer, { flag: 'wx', mode: 0o600 });
-  }
-  if (historical || migration) {
-    evidence.stage = 'historical-source';
-    const oldRelease = JSON.parse((await fetchBytes(`${api}/releases/tags/v3.1.1`, undefined, signal, undefined, metadataFetch)).bytes);
-    assert.equal(oldRelease.tag_name, 'v3.1.1'); assert.equal(oldRelease.draft, false);
-    const oldNames = new Set(oldRelease.assets.map(asset => asset.name));
-    const suffix = target;
-    for (const name of [...products.flatMap(command => ['', '.bun', '.bun.json', '.bun.LICENSE.md'].map(tail => `${command}-${suffix}${tail}`)),
-      `goodvibes-daemon-${suffix}.ci-artifact.json`, `sqlite-vec-${target}.so`, 'browser-driver.tar.gz', 'goodvibes-webui-bundle-3.1.1.tar.gz', 'SHA256SUMS.txt']) {
-      assert.ok(oldNames.has(name), 'The actual old Linux release cohort is incomplete.');
-    }
-    const reference = JSON.parse((await fetchBytes(`${api}/git/ref/tags/v3.1.1`, 131_072, signal, undefined, metadataFetch)).bytes);
-    assert.equal(reference.ref, 'refs/tags/v3.1.1');
-    let object = reference.object; assert.match(object.sha, /^[a-f0-9]{40}$/);
-    if (object.type === 'tag') {
-      const annotated = JSON.parse((await fetchBytes(`${api}/git/tags/${object.sha}`, 131_072, signal, undefined, metadataFetch)).bytes);
-      assert.equal(annotated.sha, object.sha); assert.equal(annotated.tag, 'v3.1.1'); object = annotated.object;
-    }
-    assert.equal(object.type, 'commit'); previousSource = object.sha; assert.match(previousSource, /^[a-f0-9]{40}$/);
-    previousReader = JSON.parse((await fetchBytes(`https://github.com/${repository}/releases/download/v3.1.1/goodvibes-daemon-${target}.ci-artifact.json`, 131_072, signal)).bytes);
-    assert.equal(previousReader.target, target); assert.equal(previousReader.sourceCommit, previousSource); assert.equal(previousReader.headCommit, previousSource);
-    const old = await fetchBytes(`https://raw.githubusercontent.com/${repository}/${previousSource}/scripts/install.sh`, undefined, signal);
-    previousInstaller = join(root, 'install-v3.1.1.sh');
-    writeFileSync(previousInstaller, old.bytes, { flag: 'wx', mode: 0o600 });
   }
   const daemon = join(bin, 'goodvibes-daemon'), version = tag.slice(1);
   const setting = async key => {
@@ -820,8 +727,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
         assert.ok(Number.isInteger(port) && port > 0 && port < 65536);
         const bundle = await setting('controlPlane.webui.bundleDir'); checkpoint('webui.bundle-selection');
         if (expected.webuiDirectory !== undefined) assert.equal(resolve(bundle), expected.webuiDirectory);
-        else if (!historical) assert.equal(resolve(bundle), join(bin, 'webui', version));
-        else assert.equal(resolve(bundle), originalWebui, 'Automatic upgrade must preserve the actual configured WebUI selection.');
+        else assert.equal(resolve(bundle), join(bin, 'webui', version));
         checkpoint('webui.release-marker');
         const marker = JSON.parse(readFileSync(join(bundle, '.goodvibes-release.json'), 'utf8')); assert.equal(marker.version, expectedVersion);
         assert.equal(await setting('controlPlane.webui.serve'), true);
@@ -868,97 +774,6 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
         if (process.platform === 'linux') await invoke('systemctl', ['--user', 'start', unit]);
         else await invoke('launchctl', ['bootstrap', `gui/${account.uid}`, servicePath]);
       },
-  };
-  if (delivery?.verifyNativeLifecycle) {
-    assert.equal(process.platform, 'darwin', 'The unpublished native lifecycle fixture is Mac-only.');
-    host.verifyNativeLifecycle = () => delivery.verifyNativeLifecycle(nativeLifecycle);
-  }
-  const previousInstallEnv = { GOODVIBES_VERSION: 'v3.1.1', GOODVIBES_WAKE_MODEL: '0' };
-  const upgrade = {
-    admit: host.admit,
-    async installPrevious() { await invoke('sh', [previousInstaller], { ...previousInstallEnv, GOODVIBES_DAEMON_SERVICE: '0' }, false, readFileSync(previousInstaller, 'utf8')); },
-    async verifyPrevious() {
-      for (const name of products) assert.equal(await invoke(join(bin, name), ['--version']), `${name} 3.1.1`);
-      await host.verifyDefaults();
-      const installed = JSON.parse(readFileSync(join(bin, 'daemon-installation.json'), 'utf8'));
-      assert.equal(installed.version, '3.1.1'); assert.deepEqual(installed.artifact, previousReader);
-      assert.equal(lstatSync(servicePath, { throwIfNoEntry: false }), undefined, 'Old programs must be recorded before service activation.');
-      originalWebui = resolve(await setting('controlPlane.webui.bundleDir'));
-      assert.equal(originalWebui, join(bin, 'webui', '3.1.1'));
-    },
-    async seedPreviousData() {
-      mkdirSync(data, { recursive: true }); preserved = migration ? 'Original 3.1.1 data survives the actual public installer migration.\n'
-        : 'Original 3.1.1 data survives the actual automatic delivery and refusal.\n';
-      writeFileSync(sentinel, preserved, { flag: 'wx', mode: 0o600 });
-      // A real supported saved value, distinct from its default, must survive.
-      await invoke(daemon, ['config', 'set', 'update.intervalMinutes', '61']);
-      assert.equal(await setting('update.intervalMinutes'), 61);
-      if (delivery) await delivery.preparePrevious({ invoke, daemon, setting });
-    },
-    async startPreviousService() {
-      // Deliberately re-run the OLD installer. No current installer or direct
-      // apply API is permitted to perform the version transition being proved.
-      await invoke('sh', [previousInstaller], previousInstallEnv, false, readFileSync(previousInstaller, 'utf8'));
-    },
-    async awaitAutomaticUpgrade() {
-      await waitForAcceptanceReadiness(async () => {
-        await service('check');
-        for (const name of products) {
-          checkpoint(`upgraded.${name}.version`);
-          assert.equal(await invoke(join(bin, name), ['--version']), `${name} ${version}`);
-        }
-      }, () => host.verifyInstalled(), { signal, timeoutMs: 10 * 60_000, intervalMs: 1000 });
-      await host.verifyDefaults();
-    },
-    async verifyUpgradedData() {
-      assert.equal(readFileSync(sentinel, 'utf8'), preserved);
-      assert.equal(await setting('update.intervalMinutes'), 61);
-      assert.equal(resolve(await setting('controlPlane.webui.bundleDir')), originalWebui);
-    },
-    async verifyRollbackRefusal() {
-      await host.verifyInstalled(); await upgrade.verifyUpgradedData();
-      // Retire the real periodic owner before its installed-tree API check.
-      await invoke(daemon, ['config', 'set', 'update.auto', 'false']);
-      await service('restart'); await host.verifyInstalled(); await upgrade.verifyUpgradedData();
-      // Implemented below through the actual source-bound platform rollback
-      // API, never by inventing old reader metadata or a nonexistent CLI verb.
-      await assertHistoricalRollbackRefusal({ bin, version, webuiDirectory: originalWebui, signal,
-        ...(delivery?.rollbackSourceRoot ? { sourceRoot: delivery.rollbackSourceRoot } : {}) });
-      await host.verifyInstalled(); await upgrade.verifyUpgradedData();
-    },
-    uninstall: host.uninstall, verifyPreserved,
-  };
-  const installerMigration = {
-    admit: upgrade.admit, installPrevious: upgrade.installPrevious, verifyPrevious: upgrade.verifyPrevious,
-    seedPreviousData: upgrade.seedPreviousData, startPreviousService: upgrade.startPreviousService,
-    async disablePreviousUpdates() {
-      for (const key of ['update.auto', 'update.autoUpdateAtLaunch']) await invoke(daemon, ['config', 'set', key, 'false']);
-      await verifyOptOut();
-    },
-    async verifyPreviousService() {
-      await waitForAcceptanceReadiness(() => service('check'), async () => {
-        checkpoint('migration.previous.status-version');
-        const status = JSON.parse(await invoke(daemon, ['status', '--json']));
-        assert.equal(status.ok, true); assert.equal(status.data.identity.version, '3.1.1');
-        const port = await setting('controlPlane.port'); checkpoint('migration.previous.webui-port');
-        assert.ok(Number.isInteger(port) && port > 0 && port < 65536);
-        assert.equal(resolve(await setting('controlPlane.webui.bundleDir')), originalWebui);
-        assert.equal(await setting('controlPlane.webui.serve'), true);
-        checkpoint('migration.previous.webui-http');
-        const page = await fetchBytes(`http://127.0.0.1:${port}/`, 2_097_152, signal);
-        assert.ok(page.bytes.equals(readFileSync(join(originalWebui, 'index.html'))));
-      }, { signal });
-      await installerMigration.verifyMigratedData();
-    },
-    installCurrent: host.install, verifyCurrent: host.verifyInstalled,
-    async verifyMigratedData() {
-      checkpoint('migration.saved-data'); assert.equal(readFileSync(sentinel, 'utf8'), preserved);
-      assert.equal(await setting('update.intervalMinutes'), 61); await verifyOptOut();
-    },
-    async restartAndVerifyMigrated() {
-      await service('restart'); await host.verifyInstalled(); await installerMigration.verifyMigratedData();
-    },
-    uninstall: host.uninstall, verifyPreserved,
   };
   let initialPid, updatedPid, rolledBackPid, previousRuntimeObservation, previousPort, previousWebuiIndex;
   const canonicalFeed = `https://github.com/${repository}/releases/latest`;
@@ -1063,51 +878,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     },
     uninstall: host.uninstall, verifyPreserved,
   };
-  if (process.platform === 'darwin' && delivery && process.env.GOODVIBES_ACCEPTANCE_DIAGNOSTICS === '1') {
-    host.diagnoseFailure = async () => {
-      if (signal?.aborted) return;
-      checkpoint('native.failure-diagnostics');
-      const records = []; let diagnosticFailure;
-      try {
-        const { diagnoseMacosNative } = await import('./diagnose-macos-native.mjs');
-        await diagnoseMacosNative({ daemon, home, env, signal, onSafeEvidence: record => { records.push(record); }, stopService: async stopSignal => {
-          const activeSignal = stopSignal ?? signal;
-          let stopCheckpoint = 'ownership';
-          const observeStop = () => { records.push({ phase: 'inspector', event: 'service-stop-checkpoint', checkpoint: stopCheckpoint }); };
-          try {
-            activeSignal?.throwIfAborted(); observeStop(); assertServiceOwned();
-            stopCheckpoint = 'bootout'; observeStop();
-            const bootout = await runOwnedCommand('launchctl', ['bootout', `gui/${account.uid}/${label}`], { cwd: home, env, timeoutMs: 300_000, signal: activeSignal });
-            records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint,
-              exitCode: bootout.code, signal: bootout.exitSignal ?? null });
-            stopCheckpoint = 'home-after-bootout'; observeStop(); assertHome();
-            stopCheckpoint = 'print'; observeStop();
-            await waitForNativeServiceRetirement(() => runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`],
-              { cwd: home, env, timeoutMs: 300_000, signal: activeSignal }), {
-              signal: activeSignal, onObservation: result => {
-                records.push({ phase: 'inspector', event: 'service-stop-result', checkpoint: stopCheckpoint, ...result });
-              },
-            });
-            stopCheckpoint = 'retired'; observeStop();
-          } catch (error) {
-            const safe = safeError(error);
-            records.push({ phase: 'inspector', event: 'service-stop-failed', checkpoint: stopCheckpoint,
-              errorName: safe.name, errorCode: safe.code ?? 'unknown' });
-            throw error;
-          }
-        } });
-      } catch (error) { diagnosticFailure = error; }
-      try {
-        // The owned controller admits only bounded fixed codes/numbers and
-        // sanitized public source coordinates, never runtime values or output.
-        writeFileSync(join(root, 'native-diagnostics.json'), JSON.stringify({ target, evidence: records }) + '\n', { flag: 'wx', mode: 0o600 });
-      } catch (error) {
-        diagnosticFailure = diagnosticFailure ? new AggregateError([diagnosticFailure, error], 'Native diagnosis and evidence publication failed.') : error;
-      }
-      if (diagnosticFailure) throw diagnosticFailure;
-    };
-  }
-  const selectedHost = historical ? upgrade : migration ? installerMigration : previousRelease ? previousUpgrade : host;
+  const selectedHost = previousRelease ? previousUpgrade : host;
   for (const name of Object.keys(selectedHost)) {
     const original = selectedHost[name];
     selectedHost[name] = async (...args) => {
@@ -1116,18 +887,18 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       catch (error) { evidence.failures.push(acceptanceFailureRecord({ ...evidence, stage: name }, error)); throw error; }
     };
   }
-  if (historical) await runHistoricalUpgradeSteps(selectedHost);
-  else if (migration) await runInstallerMigrationSteps(selectedHost);
-  else if (previousRelease) await runPreviousReleaseUpgradeSteps(selectedHost);
+  if (previousRelease) await runPreviousReleaseUpgradeSteps(selectedHost);
   else await runAcceptanceSteps(selectedHost);
   await finishAcceptance({ signal, finish: delivery?.finish ? async () => {
     evidence.stage = 'staged-delivery-drain'; checkpoint('delivery.finish'); await delivery.finish();
   } : undefined, assertCurrent: () => delivery?.assertCurrent(), writeReceipt: () => {
     writeFileSync(join(root, 'acceptance-result.json'), JSON.stringify({ tag, source, target, scenario, metadataInspection: evidence.metadataInspection,
-    ...(historical || migration ? { previousTag: 'v3.1.1', previousSource } : previousRelease ? { previousTag, previousSource } : {}),
-    ...(delivery ? { delivery: historical || previousRelease ? 'exact staged candidate; installer fetch adapter and owned loopback update feed'
-      : 'exact staged candidate; installer fetch adapter', candidateInstaller: published.url, publicDelivery: 'not claimed' } : { publicInstaller: published.url }),
-    installedProducts: [...products, 'goodvibes-webui'], defaultService: true, updateDefaults: !migration, optOutPersisted: !(historical || previousRelease),
+    ...(previousRelease ? { previousTag, previousSource } : {}),
+    ...(delivery ? { delivery: previousRelease ? 'exact staged candidate; installer fetch adapter and owned loopback update feed'
+      : 'exact staged candidate; installer fetch adapter', candidateInstaller: published.url, publicDelivery: 'not claimed' }
+      : mode === 'recheck' ? { mode, publicInstaller: 'not compared: recheck of an earlier release', releaseInstaller: published.url }
+        : { mode, publicInstaller: published.url }),
+    installedProducts: [...products, 'goodvibes-webui'], defaultService: true, updateDefaults: true, optOutPersisted: !previousRelease,
     ...(previousRelease ? { unattendedUpdateVerified: true, completeCohortRollbackVerified: true,
       upgradeDelivery: delivery ? 'owned loopback custom feed; public default delivery not claimed' : 'untouched canonical public default feed',
       previousInstaller: `git:${previousSource}:scripts/install.sh`, baselineVersion: previousTag.slice(1), updatedVersion: version,
@@ -1135,9 +906,8 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       previousRuntimeObservation, replacementPidObserved: initialPid !== undefined,
       rollbackTrigger: 'three failed-start history entries seeded through the source lifecycle writer while service stopped; crashes not observed',
       savedDataAndSettingsPreserved: true, configuredWebuiPathPreserved: true, readerRequirementsPreserved: true } : {}),
-    ...(migration ? { installerMigration: 'actual public installer; running v3.1.1 service to v3.1.2; saved data, interval61 and updater opt-out preserved through restart' } : {}),
-    uninstallPreservedData: true, futureVersionUpgrade: historical ? 'actual old unattended daemon plus pre-graph suite repair' : 'not claimed',
-    publicRollback: historical ? 'incomplete historical cohort refused without effects' : previousRelease
+    uninstallPreservedData: true, futureVersionUpgrade: 'not claimed',
+    publicRollback: previousRelease
       ? delivery ? 'actual compiled startup rollback of staged candidate to public previous cohort; seeded failed-start history'
         : 'actual compiled startup rollback of public release to public previous cohort; seeded failed-start history' : 'not claimed' }) + '\n', { flag: 'wx', mode: 0o600 });
   } });
@@ -1146,8 +916,10 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [tag, source, target, scenario = 'fresh', previousTag, previousSource] = process.argv.slice(2);
+  // Set to `recheck` to re-verify an already published release (see readPublicAcceptanceDelivery).
+  const mode = process.env.GOODVIBES_ACCEPTANCE_MODE === 'recheck' ? 'recheck' : 'release';
   const controller = new AbortController(), stop = () => controller.abort(new Error('Acceptance owner stopped.'));
   process.once('SIGTERM', stop); process.once('SIGINT', stop);
-  acceptPublishedSuite({ tag, source, target, scenario, previousTag, previousSource, signal: controller.signal }).catch(() => { console.error('Published suite acceptance failed; no successful native install claim was emitted.'); process.exitCode = 1; })
+  acceptPublishedSuite({ tag, source, target, scenario, previousTag, previousSource, mode, signal: controller.signal }).catch(() => { console.error('Published suite acceptance failed; no successful native install claim was emitted.'); process.exitCode = 1; })
     .finally(() => { process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); });
 }

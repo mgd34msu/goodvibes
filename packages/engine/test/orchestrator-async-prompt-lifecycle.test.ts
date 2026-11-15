@@ -24,6 +24,12 @@ useCoreReadings({ intent: 'chat', needsPlan: false, risk: 0 });
 const orchestrators: Orchestrator[] = [];
 afterEach(() => { for (const orchestrator of orchestrators.splice(0)) orchestrator.dispose(); });
 
+/** One macrotask boundary: every promise chain already queued has run to its end, with no wall-clock wait. */
+const drain = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+/** Follow-ups still waiting to be delivered; a retry timer can only ever replay what is in this queue. */
+const pendingFollowUps = (orchestrator: Orchestrator): number =>
+  (orchestrator as unknown as { followUpRuntime: { queue: readonly unknown[] } }).followUpRuntime.queue.length;
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((yes) => { resolve = yes; });
@@ -250,8 +256,9 @@ describe('Orchestrator async prompt lifecycle wiring', () => {
     expect(f.requests[1]?.systemPrompt).toContain('fresh memory 2');
     expect(JSON.stringify(f.requests[0]?.messages)).toContain('Build completed');
     expect(new Set(f.signals).size).toBe(2);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await drain();
     expect(f.requests).toHaveLength(2); // The retired background batch must not replay after the queued user turn.
+    expect(pendingFollowUps(f.orchestrator)).toBe(0); // ...and nothing is left for a retry timer to replay later.
   });
 });
 
@@ -286,8 +293,9 @@ test('background evidence cannot restart explicitly cancelled work or mint a nat
     if (native) f.orchestrator.bindNativeConversationProject('project');
     else f.conversation.markLastUserMessageCancelled();
     f.orchestrator.enqueueConversationFollowUp({ key: 'failed-contract', summary: 'Contract failed.' });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await drain();
     expect(f.requests).toHaveLength(0);
+    expect(pendingFollowUps(f.orchestrator)).toBe(0); // not parked for a later retry either
     expect(f.conversation.getMessageSnapshot().filter(message => message.role === 'assistant')).toHaveLength(0);
   }
 });

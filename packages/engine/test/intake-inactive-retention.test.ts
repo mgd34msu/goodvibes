@@ -1,4 +1,3 @@
-/** Regression source intentionally unrun during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';

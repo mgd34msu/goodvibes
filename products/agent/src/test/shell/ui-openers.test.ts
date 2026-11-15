@@ -73,7 +73,6 @@ describe('wireShellUiOpeners', () => {
       expect(entry.currentValue).toBe('goodvibes');
       expect(entry.isDefault).toBe(true);
       const values = entry.setting.enumValues!;
-      expect(values).toHaveLength(13);
       expect([...values].sort()).toEqual([...listThemeChoices().map(choice => choice.name), 'vaporwave'].sort());
 
       // Enter keeps the dedicated live-preview picker; arrows use the enum.

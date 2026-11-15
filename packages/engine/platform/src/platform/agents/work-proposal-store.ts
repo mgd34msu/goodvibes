@@ -15,9 +15,10 @@
  *   why, so a silently vanished proposal is never a mystery
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -57,6 +58,8 @@ export interface WorkProposalRecord {
   readonly channelId?: string | undefined;
   readonly userId?: string | undefined;
   readonly sessionId?: string | undefined;
+  /** The queued session input holding the owner's message, so agreeing starts the work for that message and no other. */
+  readonly inputId?: string | undefined;
   /** The prompt that would be spawned if the owner agrees. */
   readonly task: string;
   /** One short line naming the work, for the proposal message. */
@@ -148,14 +151,31 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
     ...(optionalString(value.channelId) ? { channelId: optionalString(value.channelId) } : {}),
     ...(optionalString(value.userId) ? { userId: optionalString(value.userId) } : {}),
     ...(optionalString(value.sessionId) ? { sessionId: optionalString(value.sessionId) } : {}),
+    ...(optionalString(value.inputId) ? { inputId: optionalString(value.inputId) } : {}),
   };
+}
+
+/** Throws, with the reason, for anything but a proposals file of the current schema version. */
+function parsePersistedFile(parsed: unknown): PersistedFile {
+  if (!isRecord(parsed) || !Array.isArray(parsed.proposals)) throw new Error('proposals file is not an object with a proposals list');
+  if (parsed.version !== WORK_PROPOSAL_SCHEMA_VERSION) {
+    throw new Error(`proposals file was written by schema version ${String(parsed.version)}, expected ${WORK_PROPOSAL_SCHEMA_VERSION}`);
+  }
+  return parsed as unknown as PersistedFile;
 }
 
 export interface WorkProposalStoreOptions {
   /** Absent = memory only (tests, isolated contexts). */
   readonly storePath?: string | undefined;
-  readonly maxPending?: number | undefined;
+  /** A function is read on every prune, so a config change applies without a restart. */
+  readonly maxPending?: number | (() => number) | undefined;
   readonly now?: (() => number) | undefined;
+  /**
+   * Called for a pending proposal that is dropped without an answer (expired or
+   * pushed out by the cap), so the held message behind it can be closed instead
+   * of waiting forever. A throw is logged and does not stop the reap.
+   */
+  readonly onUnanswered?: ((proposal: WorkProposalRecord) => void) | undefined;
 }
 
 export interface CreateWorkProposalInput {
@@ -170,24 +190,37 @@ export interface CreateWorkProposalInput {
   readonly channelId?: string | undefined;
   readonly userId?: string | undefined;
   readonly sessionId?: string | undefined;
+  readonly inputId?: string | undefined;
 }
 
 export class WorkProposalStore {
   private readonly proposals = new Map<string, WorkProposalRecord>();
   private readonly storePath: string | undefined;
-  private readonly maxPending: number;
+  private readonly maxPending: () => number;
   private readonly now: () => number;
+  private readonly onUnanswered: ((proposal: WorkProposalRecord) => void) | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private sweepInterval = WORK_PROPOSAL_SWEEP_INTERVAL_MS;
   private sweepEnabled = true;
   private lastReap: WorkProposalReapSummary = EMPTY_WORK_PROPOSAL_REAP_SUMMARY;
   private loadMalformed = 0;
+  /**
+   * Set when a store file existed but could not be used. The file is moved
+   * aside (`preserved`) so the first write cannot destroy it; when even that
+   * fails the file is left in place and writes are withheld for this run.
+   */
+  private unreadableStore: { readonly preserved: boolean; readonly detail: string } | null = null;
   private writeChain: Promise<void> = Promise.resolve();
   private initialization: Promise<WorkProposalReapSummary> | null = null;
 
   constructor(options: WorkProposalStoreOptions = {}) {
     this.storePath = options.storePath;
-    this.maxPending = Math.max(1, options.maxPending ?? 20);
+    this.onUnanswered = options.onUnanswered;
+    const configured = options.maxPending ?? 20;
+    this.maxPending = () => {
+      const value = typeof configured === 'function' ? configured() : configured;
+      return Number.isFinite(value) ? Math.max(1, value) : 20;
+    };
     this.now = options.now ?? (() => Date.now());
   }
 
@@ -195,6 +228,7 @@ export class WorkProposalStore {
    * Load, validate, and reap. Fail-safe: an unreadable or corrupt store means
    * no pending proposals, never a crash, the worst case is that the owner
    * has to ask again, which is strictly better than answering a bad record.
+   * The unusable file itself is preserved, not overwritten by the next write.
    */
   init(): Promise<WorkProposalReapSummary> {
     return this.initialization ??= this.load();
@@ -203,36 +237,59 @@ export class WorkProposalStore {
   private async load(): Promise<WorkProposalReapSummary> {
     if (this.storePath) {
       try {
-        const text = await readFile(this.storePath, 'utf-8');
-        const parsed: unknown = JSON.parse(text);
-        if (isRecord(parsed) && Array.isArray(parsed.proposals)) {
-          const file = parsed as unknown as PersistedFile;
-          if (file.version === WORK_PROPOSAL_SCHEMA_VERSION) {
-            for (const entry of parsed.proposals) {
-              const record = validateWorkProposal(entry);
-              if (!record) {
-                this.loadMalformed += 1;
-                continue;
-              }
-              this.proposals.set(record.id, record);
+        const file = await this.readStoreFile(this.storePath);
+        if (file) {
+          for (const entry of file.proposals) {
+            const record = validateWorkProposal(entry);
+            if (!record) {
+              this.loadMalformed += 1;
+              continue;
             }
-          } else {
-            logger.info('WorkProposalStore: dropping proposals written by a different schema version', {
-              found: file.version,
-              expected: WORK_PROPOSAL_SCHEMA_VERSION,
-            });
+            this.proposals.set(record.id, record);
           }
         }
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException | undefined)?.code;
-        if (code !== 'ENOENT') {
-          logger.warn('WorkProposalStore: unreadable store; starting empty', { error: summarizeError(error) });
-        }
+        // Not "no such file": the file is there but could not be read or moved
+        // aside. Leave it alone rather than replace it.
+        const reason = summarizeError(error);
+        this.unreadableStore = { preserved: false, detail: `${basename(this.storePath)} could not be read or moved aside (${reason}); writes are withheld so it is not overwritten` };
+        logger.warn('WorkProposalStore: store file could not be read or preserved; starting empty and withholding writes so it is not overwritten', { error: reason });
       }
     }
     const summary = this.reap();
     this.ensureSweep();
     return summary;
+  }
+
+  /**
+   * The store's contents, or null when there is no usable file. A file that is
+   * present but unusable (not JSON, wrong shape, another schema version) is
+   * moved aside with a receipt before anything can overwrite it.
+   */
+  private async readStoreFile(path: string): Promise<PersistedFile | null> {
+    let text: string;
+    try {
+      text = await readFile(path, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null;
+      throw error;
+    }
+    try {
+      return parsePersistedFile(JSON.parse(text));
+    } catch {
+      // Re-read under the quarantine's ownership checks: it archives exactly
+      // the file it judged unusable, or hands back one that has become usable.
+      const file = readJsonFileOrQuarantine<PersistedFile>(path, {
+        label: 'work-proposals',
+        recovery: 'Pending work proposals started empty, so the owner has to ask again; the proposals the preserved copy held are not applied and can be read from it by hand.',
+        validate: parsePersistedFile,
+      });
+      if (!file) {
+        const name = basename(path);
+        this.unreadableStore = { preserved: true, detail: `${name} could not be used and was moved aside as ${name}.corrupt-<time>; pending proposals started empty` };
+      }
+      return file;
+    }
   }
 
   /** Resume housekeeping explicitly, including after an owner's restart. */
@@ -290,6 +347,7 @@ export class WorkProposalStore {
       ...(input.channelId ? { channelId: input.channelId } : {}),
       ...(input.userId ? { userId: input.userId } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.inputId ? { inputId: input.inputId } : {}),
     };
     this.proposals.set(record.id, record);
     this.ensureSweep();
@@ -405,6 +463,7 @@ export class WorkProposalStore {
       }
       if (record.expiresAt <= now) {
         this.proposals.delete(id);
+        this.notifyUnanswered(record);
         expired += 1;
       }
     }
@@ -440,6 +499,8 @@ export class WorkProposalStore {
     readonly awaitingDelivery: number;
     readonly tracked: number;
     readonly reaped: WorkProposalReapSummary;
+    /** Present when the store file on disk could not be used; says whether it was kept and why proposals started empty. */
+    readonly unreadableStore?: { readonly preserved: boolean; readonly detail: string };
   } {
     const pending = [...this.proposals.values()].filter((record) => record.status === 'pending');
     return {
@@ -448,6 +509,7 @@ export class WorkProposalStore {
       awaitingDelivery: pending.filter((record) => !record.delivered).length,
       tracked: this.proposals.size,
       reaped: this.lastReap,
+      ...(this.unreadableStore ? { unreadableStore: this.unreadableStore } : {}),
     };
   }
 
@@ -455,10 +517,26 @@ export class WorkProposalStore {
     const pending = [...this.proposals.values()]
       .filter((record) => record.status === 'pending')
       .sort((a, b) => a.createdAt - b.createdAt);
-    if (pending.length <= this.maxPending) return 0;
-    const excess = pending.slice(0, pending.length - this.maxPending);
-    for (const record of excess) this.proposals.delete(record.id);
+    const maxPending = this.maxPending();
+    if (pending.length <= maxPending) return 0;
+    const excess = pending.slice(0, pending.length - maxPending);
+    for (const record of excess) {
+      this.proposals.delete(record.id);
+      this.notifyUnanswered(record);
+    }
     return excess.length;
+  }
+
+  private notifyUnanswered(record: WorkProposalRecord): void {
+    if (!this.onUnanswered) return;
+    try {
+      this.onUnanswered(record);
+    } catch (error) {
+      logger.warn('A dropped work proposal could not be settled', {
+        proposalId: record.id,
+        error: summarizeError(error),
+      });
+    }
   }
 
   /** Best-effort durable write, serialized so concurrent resolves cannot interleave. */
@@ -471,14 +549,13 @@ export class WorkProposalStore {
         // write chain. Never overwrite persisted proposals with a pre-load
         // snapshot, and let flush() drain the read needed by accepted writes.
         await this.initialization;
+        // The existing file could not be preserved: replacing it would destroy it.
+        if (this.unreadableStore && !this.unreadableStore.preserved) return;
         const snapshot: PersistedFile = {
           version: WORK_PROPOSAL_SCHEMA_VERSION,
           proposals: [...this.proposals.values()],
         };
-        await mkdir(dirname(path), { recursive: true });
-        const temp = `${path}.tmp`;
-        await writeFile(temp, JSON.stringify(snapshot, null, 2), 'utf-8');
-        await rename(temp, path);
+        writeJsonFileAtomic(path, snapshot, { durable: false });
       } catch (error) {
         logger.warn('WorkProposalStore: persist failed', { error: summarizeError(error) });
       }

@@ -9,7 +9,8 @@ import { createAttemptsCoordinator } from '../platform/src/platform/orchestratio
 import { createWorktreeIsolationManager } from '../platform/src/platform/orchestration/worktree-isolation.js';
 import type { WorkItem, WorkItemSpec } from '../platform/src/platform/orchestration/types.js';
 import { emptyWorkItemUsage } from '../platform/src/platform/orchestration/types.js';
-import { createOrchestrationHarness, engineerReportOutput, flushMicrotasks, makeFakeConfigManager } from './_helpers/orchestration-harness.js';
+import { createOrchestrationHarness, engineerReportOutput, makeFakeConfigManager } from './_helpers/orchestration-harness.js';
+import { waitFor } from './_helpers/test-timeout.js';
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -46,10 +47,13 @@ function fixture(overrides: Partial<OrchestrationEngineDeps> = {}) {
   return { root, h, engine, makeStream };
 }
 
-function observe(promise: Promise<void>): () => boolean {
-  let settled = false;
-  void promise.then(() => { settled = true; });
-  return () => settled;
+/**
+ * Appends 'joined' to `log` when `promise` settles. A test pushes a label just
+ * before it releases each barrier, so "join stayed pending until the barrier
+ * was released" is an ordering in the log rather than a count of turns waited.
+ */
+function recordSettled(promise: Promise<void>, log: string[]): void {
+  void promise.then(() => { log.push('joined'); });
 }
 
 function stubIsolatedCleanup(): void {
@@ -61,35 +65,57 @@ function stubIsolatedCleanup(): void {
   cleanups.push(() => { useNativeWorktrees = false; clean.mockRestore(); remove.mockRestore(); });
 }
 
+describe('a phase whose agent ends without a terminal event', () => {
+  test('settles from the ended record once the agent execution drained', async () => {
+    const { engine, h, makeStream } = fixture();
+    const execution = deferred();
+    h.agentManager.join = () => execution.promise;
+    const ws = makeStream();
+    engine.start(ws.id);
+    await waitFor(() => h.spawnedRecords.length === 1);
+    const record = h.agentManager.getStatus(ws.items[0]!.agentId!)!;
+    record.status = 'failed';
+    record.error = 'observation held';
+    execution.resolve();
+    await waitFor(() => ws.items[0]!.state === 'failed');
+    expect(ws.items[0]!.state).toBe('failed');
+  });
+});
+
 describe('OrchestrationEngine.join', () => {
   test('waits through a terminal event, executor finally, and phase cleanup after passive disposal', async () => {
     const { engine, h, makeStream } = fixture();
     const execution = deferred();
     const cleanup = deferred();
     const cleanupEntered = deferred();
-    h.agentManager.join = () => execution.promise;
+    const executionEntered = deferred();
+    const log: string[] = [];
+    h.agentManager.join = () => { executionEntered.resolve(); return execution.promise; };
     h.worktree.cleanup = async () => { cleanupEntered.resolve(); await cleanup.promise; };
     const ws = makeStream();
     engine.start(ws.id);
     h.completeAgent(ws.items[0]!.agentId!, engineerReportOutput({}));
     engine.dispose();
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    await executionEntered.promise;
     expect(h.worktree.commits).toHaveLength(0);
+    log.push('executor-exits');
     execution.resolve();
     await cleanupEntered.promise;
-    expect(finished()).toBe(false);
+    log.push('cleanup-exits');
     cleanup.resolve();
     await joined;
+    expect(log).toEqual(['executor-exits', 'cleanup-exits', 'joined']);
     expect(ws.items[0]!.state).toBe('passed');
   });
 
   test('reserves admission before spawn reentrantly kills, disposes, and joins', async () => {
     const { engine, h, makeStream } = fixture();
     const execution = deferred();
-    h.agentManager.join = () => execution.promise;
+    const executionEntered = deferred();
+    const log: string[] = [];
+    h.agentManager.join = () => { executionEntered.resolve(); return execution.promise; };
     const originalSpawn = h.agentManager.spawn;
     let joined!: Promise<void>;
     h.agentManager.spawn = (input, binding) => {
@@ -101,13 +127,14 @@ describe('OrchestrationEngine.join', () => {
     };
     const ws = makeStream();
     engine.start(ws.id);
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    await executionEntered.promise;
     expect(h.cancelCalls.some((call) => call.agentId === 'agent-1')).toBe(true);
     expect(h.worktree.cleanups).toHaveLength(0);
+    log.push('executor-exits');
     execution.resolve();
     await joined;
+    expect(log).toEqual(['executor-exits', 'joined']);
     expect(h.worktree.cleanups).toEqual(['agent-1']);
     expect(ws.items[0]!.state).toBe('failed');
   });
@@ -140,39 +167,55 @@ describe('OrchestrationEngine.join', () => {
   test('requeue waits for the old executor to exit before admitting its replacement', async () => {
     const { engine, h, makeStream } = fixture();
     const firstExecution = deferred();
-    h.agentManager.join = (id) => id === 'agent-1' ? firstExecution.promise : Promise.resolve();
+    const firstExecutionEntered = deferred();
+    const log: string[] = [];
+    h.agentManager.join = (id) => {
+      if (id !== 'agent-1') return Promise.resolve();
+      firstExecutionEntered.resolve();
+      return firstExecution.promise;
+    };
     const ws = makeStream();
     engine.start(ws.id);
     expect(engine.requeueItem('item', 'fresh run')).toBe(true);
-    await flushMicrotasks();
+    await firstExecutionEntered.promise;
     expect(h.spawnedRecords).toHaveLength(1);
     const joined = engine.join();
-    const finished = observe(joined);
+    recordSettled(joined, log);
+    log.push('old-executor-exits');
     firstExecution.resolve();
-    await flushMicrotasks(30);
-    expect(h.spawnedRecords).toHaveLength(2);
-    expect(finished()).toBe(false);
+    await waitFor(() => h.spawnedRecords.length === 2);
+    log.push('replacement-completes');
     h.completeAgent('agent-2', engineerReportOutput({}));
     await joined;
+    expect(log).toEqual(['old-executor-exits', 'replacement-completes', 'joined']);
     expect(ws.items[0]!.state).toBe('passed');
   });
 
   test('retry after kill cannot be overwritten by the cancelled phase settling later', async () => {
     const { engine, h, makeStream } = fixture();
     const firstExecution = deferred();
-    h.agentManager.join = (id) => id === 'agent-1' ? firstExecution.promise : Promise.resolve();
+    const firstExecutionEntered = deferred();
+    const log: string[] = [];
+    h.agentManager.join = (id) => {
+      if (id !== 'agent-1') return Promise.resolve();
+      firstExecutionEntered.resolve();
+      return firstExecution.promise;
+    };
     const ws = makeStream();
     engine.start(ws.id);
     engine.kill('item');
     expect(engine.retryItem('item')).toBe(true);
     const joined = engine.join();
-    await flushMicrotasks();
+    recordSettled(joined, log);
+    await firstExecutionEntered.promise;
     expect(h.spawnedRecords).toHaveLength(1);
+    log.push('old-executor-exits');
     firstExecution.resolve();
-    await flushMicrotasks(30);
-    expect(h.spawnedRecords).toHaveLength(2);
+    await waitFor(() => h.spawnedRecords.length === 2);
+    log.push('replacement-completes');
     h.completeAgent('agent-2', engineerReportOutput({}));
     await joined;
+    expect(log).toEqual(['old-executor-exits', 'replacement-completes', 'joined']);
     expect(ws.items[0]!.state).toBe('passed');
   });
 
@@ -183,21 +226,24 @@ describe('OrchestrationEngine.join', () => {
       phases: [1, 2].map((n) => ({ id: `phase-${n}`, kind: 'engineer', role: 'engineer', capacity: 1, gate: { scope: 'off', gates: [] } })),
     });
     engine.start(ws.id);
+    const log: string[] = [];
     const joined = engine.join();
-    const finished = observe(joined);
+    recordSettled(joined, log);
     h.completeAgent('agent-1', engineerReportOutput({}));
-    await flushMicrotasks(30);
-    expect(h.spawnedRecords).toHaveLength(2);
-    expect(finished()).toBe(false);
+    await waitFor(() => h.spawnedRecords.length === 2);
+    log.push('second-phase-completes');
     h.completeAgent('agent-2', engineerReportOutput({}));
     await joined;
+    expect(log).toEqual(['second-phase-completes', 'joined']);
     expect(engine.getPhaseResults(ws.id)).toHaveLength(2);
   });
 
   test('abort during contract pre-spawn waits for it but never starts its late spawn decision', async () => {
     const decision = deferred<{ kind: 'spawn' }>();
+    const decisionRequested = deferred();
+    const log: string[] = [];
     const { engine, h, makeStream } = fixture({ contractUnitSettlement: {
-      beforeSpawn: () => decision.promise,
+      beforeSpawn: () => { decisionRequested.resolve(); return decision.promise; },
       settle: async () => 'completed',
     } });
     const ws = makeStream([{ id: 'item', title: 'Unit', task: 'Do work', contractId: 'contract', contractUnitId: 'unit' }]);
@@ -205,30 +251,34 @@ describe('OrchestrationEngine.join', () => {
     engine.kill('item');
     engine.dispose();
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    await decisionRequested.promise;
+    log.push('decision-arrives');
     decision.resolve({ kind: 'spawn' });
     await joined;
+    expect(log).toEqual(['decision-arrives', 'joined']);
     expect(h.spawnedRecords).toHaveLength(0);
   });
 
   test('contract semantic settlement also waits for its agent executor finally', async () => {
     const execution = deferred();
+    const executionEntered = deferred();
+    const log: string[] = [];
     const { engine, h, makeStream } = fixture({ contractUnitSettlement: {
       beforeSpawn: async () => ({ kind: 'spawn' }),
       settle: async () => 'completed',
     } });
-    h.agentManager.join = () => execution.promise;
+    h.agentManager.join = () => { executionEntered.resolve(); return execution.promise; };
     const ws = makeStream([{ id: 'item', title: 'Unit', task: 'Do work', contractId: 'contract', contractUnitId: 'unit' }]);
     engine.start(ws.id);
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    await executionEntered.promise;
     expect(h.worktree.cleanups).toHaveLength(0);
+    log.push('executor-exits');
     execution.resolve();
     await joined;
+    expect(log).toEqual(['executor-exits', 'joined']);
     expect(ws.items[0]!.state).toBe('passed');
   });
 
@@ -236,18 +286,19 @@ describe('OrchestrationEngine.join', () => {
     stubIsolatedCleanup();
     const setup = deferred();
     const entered = deferred();
+    const log: string[] = [];
     const { engine, h, makeStream } = fixture({ runWorktreeSetup: async () => { entered.resolve(); await setup.promise; } });
     const ws = makeStream(undefined, 'worktree');
     engine.start(ws.id);
     await entered.promise;
     engine.kill('item');
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
     expect(ws.items[0]!.worktreePath).toBeDefined();
+    log.push('setup-finishes');
     setup.resolve();
     await joined;
+    expect(log).toEqual(['setup-finishes', 'joined']);
     expect(h.spawnedRecords).toHaveLength(0);
     expect(ws.items[0]!.worktreePath).toBeUndefined();
     engine.dispose();
@@ -257,9 +308,11 @@ describe('OrchestrationEngine.join', () => {
     stubIsolatedCleanup();
     const execution = deferred();
     const removed: string[] = [];
+    const log: string[] = [];
     const integrate = spyOn(IsolatedWorktree.prototype, 'integrate').mockResolvedValue({ status: 'empty' });
     const remove = spyOn(IsolatedWorktree.prototype, 'remove').mockImplementation(async function (this: IsolatedWorktree) {
       removed.push(this.path);
+      log.push(`removed:${this.path}`);
     });
     cleanups.push(() => { integrate.mockRestore(); remove.mockRestore(); });
     const loserSpawned = deferred();
@@ -287,7 +340,12 @@ describe('OrchestrationEngine.join', () => {
     const loser = ws.items[1]!;
     expect(winner.agentId).toBe('agent-2');
     expect(loser.agentId).toBe('agent-1');
-    h.agentManager.join = id => id === loser.agentId ? execution.promise : Promise.resolve();
+    const loserExecutionEntered = deferred();
+    h.agentManager.join = id => {
+      if (id !== loser.agentId) return Promise.resolve();
+      loserExecutionEntered.resolve();
+      return execution.promise;
+    };
     const loserPath = loser.worktreePath!;
     const held = deferred();
     const unlisten = engine.on(event => {
@@ -299,15 +357,17 @@ describe('OrchestrationEngine.join', () => {
     expect(winner.state).toBe('held-merge');
     engine.kill(loser.id);
     await engine.pickAttemptWinner(winner.attemptGroupId!, winner.id);
-    await flushMicrotasks(30);
+    await loserExecutionEntered.promise;
     expect(removed).not.toContain(loserPath);
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    log.push('executor-exits');
     execution.resolve();
     await joined;
     expect(removed).toContain(loserPath);
+    // The loser's directory went only after its executor exited, and join waited for both.
+    expect(log.indexOf('executor-exits')).toBeLessThan(log.indexOf(`removed:${loserPath}`));
+    expect(log.at(-1)).toBe('joined');
     engine.dispose();
   });
 
@@ -327,15 +387,16 @@ describe('OrchestrationEngine.join', () => {
     ws.items[0]!.currentPhaseId = null;
     expect(engine.importWorkstream(engine.serializeWorkstream(ws.id)!)).toBe(true);
     engine.dispose();
+    const log: string[] = [];
     const joined = engine.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    log.push('integration-finishes');
     integration.resolve({ status: 'empty' });
     await removalEntered.promise;
-    expect(finished()).toBe(false);
+    log.push('removal-finishes');
     removal.resolve();
     await joined;
+    expect(log).toEqual(['integration-finishes', 'removal-finishes', 'joined']);
   });
 });
 
@@ -358,14 +419,15 @@ describe('orchestration nested work', () => {
     });
     ws.items = coordinator.expandItems(ws.id, 'worktree', [{ id: 'item', title: 'Try', task: 'Do work', attempts: 2, autoAcceptWinner: true }], item);
     for (const sibling of ws.items) coordinator.onItemPassedTerminal(ws, sibling);
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    const log: string[] = [];
+    recordSettled(joined, log);
+    log.push('judgment-arrives');
     judgment.resolve({ winnerItemId: ws.items[0]!.id, reasons: ['best'] });
-    await flushMicrotasks(30);
-    expect(finished()).toBe(false);
+    await waitFor(() => ws.items[0]!.attemptWinner === true);
+    log.push('loser-cleanup-finishes');
     loserCleanup.resolve();
     await joined;
+    expect(log).toEqual(['judgment-arrives', 'loser-cleanup-finishes', 'joined']);
     expect(ws.items[0]!.attemptWinner).toBe(true);
   });
 
@@ -381,12 +443,13 @@ describe('orchestration nested work', () => {
     const ws = { id: 'ws', title: 'Work', schemaVersion: 1, phases: [], items: [workItem], isolation: 'worktree' as const, createdAt: 0 };
     await isolation.ensureWorktree(ws, workItem);
     await isolation.cleanupTerminated(ws, workItem);
+    const log: string[] = [];
     const joined = isolation.join();
-    const finished = observe(joined);
-    await flushMicrotasks();
-    expect(finished()).toBe(false);
+    recordSettled(joined, log);
+    log.push('eviction-finishes');
     eviction.resolve({ preservedCommit: 'saved' });
     await joined;
+    expect(log).toEqual(['eviction-finishes', 'joined']);
     expect(workItem.worktreePath).toBeUndefined();
   });
 });

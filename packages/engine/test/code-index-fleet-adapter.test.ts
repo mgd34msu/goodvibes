@@ -79,6 +79,18 @@ describe('adapters/code-index: node id + shape', () => {
     expect(node.capabilities).toEqual({ interruptible: false, killable: false, pausable: false, resumable: false, steerable: false });
   });
 
+  test('failed: a build that recorded an error is not shown as done or idle', () => {
+    const source: CodeIndexProcessSource = {
+      isBuilding: () => false,
+      buildProgress: () => null,
+      buildStartedAt: () => null,
+      stats: () => makeStats({ lastBuild: makeBuildStats(), lastBuildError: 'build finished with 2 file(s) not indexed; first error: embed failed' }),
+    };
+    const node = adaptCodeIndex(source, T0 + 1000);
+    expect(node.state).toBe('failed');
+    expect(node.label).toContain('embed failed');
+  });
+
   test('building: progress surfaces in the label and currentActivity', () => {
     const source: CodeIndexProcessSource = {
       isBuilding: () => true,

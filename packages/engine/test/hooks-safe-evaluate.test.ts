@@ -125,6 +125,34 @@ describe('safeEvaluate', () => {
     });
   });
 
+  describe('absent and inherited data', () => {
+    test('an absent key reads as undefined, so negation and inequality on it are true', () => {
+      expect(safeEvaluate('!blocked', {})).toBe(true);
+      expect(safeEvaluate("status !== 'done'", {})).toBe(true);
+      expect(safeEvaluate("status === 'done'", {})).toBe(false);
+    });
+
+    test('inherited properties are not payload data', () => {
+      expect(safeEvaluate('payload.constructor', { payload: {} })).toBe(false);
+      expect(safeEvaluate('payload.__proto__', { payload: {} })).toBe(false);
+      expect(safeEvaluate('payload.toString', { payload: {} })).toBe(false);
+      expect(safeEvaluate('payload.kind', { payload: { kind: 'x' } })).toBe(true);
+    });
+  });
+
+  describe('malformed expressions evaluate to false', () => {
+    test('an unterminated string is refused, not read as the text so far', () => {
+      expect(safeEvaluate("status === 'done", { status: 'done' })).toBe(false);
+      expect(safeEvaluate("!status === 'done", { status: 'other' })).toBe(false);
+    });
+
+    test('unbalanced parentheses are refused', () => {
+      expect(safeEvaluate('(count > 5', { count: 10 })).toBe(false);
+      expect(safeEvaluate('count > 5)', { count: 10 })).toBe(false);
+      expect(safeEvaluate("message.startsWith('a'", { message: 'abc' })).toBe(false);
+    });
+  });
+
   describe('grouping', () => {
     test('parenthesized expressions evaluate correctly', () => {
       expect(safeEvaluate('(count > 0)', { count: 5 })).toBe(true);

@@ -117,7 +117,8 @@ export class CompanionChatRateLimiter {
    *
    * Runtime config key `runtime.companionChatLimiter.perSessionLimit` takes
    * precedence over the constructor-time baseline when it resolves to a
-   * positive integer.
+   * positive integer; the schema default 0 means unset and leaves the baseline
+   * (env var, else 10) in force.
    */
   private resolvePerSessionLimit(): number {
     if (this.configManager) {

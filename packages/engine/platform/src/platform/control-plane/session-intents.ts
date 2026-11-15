@@ -6,12 +6,31 @@ import type {
 } from '../automation/types.js';
 import type { ExecutionIntent } from '../runtime/execution-intents.js';
 import { resolveModelReference, type ModelIdCandidate } from '../providers/model-id-resolution.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export const SHARED_SESSION_INPUT_INTENTS = ['submit', 'steer', 'follow-up'] as const;
 export const SHARED_SESSION_INPUT_STATES = ['queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected'] as const;
 
 export type SharedSessionInputIntent = typeof SHARED_SESSION_INPUT_INTENTS[number];
 export type SharedSessionInputState = typeof SHARED_SESSION_INPUT_STATES[number];
+
+/**
+ * Where a session input may go next. `queued` is waiting for whoever answers it
+ * (a spawned agent, a live agent, a surface); `delivered` and `spawned` are
+ * being answered; the rest are final. Refusals read as
+ * "session input is spawned and cannot become cancelled; from spawned it can
+ * become completed, failed, cancelled", which is what the cancel and deliver
+ * verbs answer with.
+ */
+export const sharedSessionInputLifecycle = defineLifecycle<SharedSessionInputState>('session input', {
+  queued: ['delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected'],
+  delivered: ['completed', 'failed', 'cancelled'],
+  spawned: ['completed', 'failed', 'cancelled'],
+  completed: [],
+  cancelled: [],
+  failed: [],
+  rejected: [],
+});
 
 /** Persisted quarantine only. This public value NEVER establishes a source binding. */
 export const SHARED_SESSION_DELEGATED_INPUT_METADATA_KEY = 'delegatedInputQuarantined';

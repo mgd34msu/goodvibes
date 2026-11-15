@@ -11,6 +11,8 @@ export interface OpenAICompatibleRouteContext {
   readonly providerRegistry: Pick<ProviderRegistry, 'listModels' | 'getCurrentModel' | 'getForModel'>;
   readonly parseJsonBody: (request: Request) => Promise<JsonRecord | Response>;
   readonly recordApiResponse: (request: Request, path: string, response: Response) => Response;
+  /** Null when the caller may spend provider money; the refusal otherwise. */
+  readonly requireAdmin?: ((request: Request) => Response | null) | undefined;
 }
 
 interface ResolvedModel {
@@ -46,6 +48,8 @@ export async function dispatchOpenAICompatibleRoutes(
   }
 
   if (request.method === 'POST' && routePath === '/chat/completions') {
+    const adminError = context.requireAdmin?.(request) ?? null;
+    if (adminError) return context.recordApiResponse(request, `${prefix}/chat/completions`, adminError);
     const response = await handleChatCompletions(request, context);
     return context.recordApiResponse(request, `${prefix}/chat/completions`, response);
   }
@@ -341,7 +345,22 @@ function streamChatCompletion(input: {
     start(controller) {
       const send = (payload: JsonRecord | '[DONE]') => {
         if (closed) return;
-        controller.enqueue(encoder.encode(`data: ${payload === '[DONE]' ? payload : JSON.stringify(payload)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${payload === '[DONE]' ? payload : JSON.stringify(payload)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      // A client disconnect closes the controller; closing it again throws, and an
+      // unhandled rejection takes the whole daemon down.
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          // already closed by the consumer
+        }
       };
 
       send({
@@ -406,14 +425,12 @@ function streamChatCompletion(input: {
           usage: buildUsage(response),
         });
         send('[DONE]');
-        closed = true;
-        controller.close();
+        finish();
       }).catch((error) => {
         send({ error: openAIErrorBody(summarizeError(error), 'server_error', 'provider_error') });
         send('[DONE]');
-        closed = true;
-        controller.close();
-      });
+        finish();
+      }).catch(() => {});
     },
     cancel() {
       closed = true;

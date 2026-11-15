@@ -179,6 +179,18 @@ describe('runGatedLanScan: consent gate (test doubles only: never a real network
     expect(low.filter((m) => m.includes('Discovered'))).toHaveLength(2);
   });
 
+  test('a granted scan opts in to registering servers found on the network', () => {
+    const root = makeProjectTempDir('gv-lan-consent');
+    const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
+    saveLanScanConsent(shellPaths, SURFACE_ROOT, 'granted');
+    let seen: boolean | undefined;
+    runGatedLanScan(makeGateOptions(root, { startDiscovery: (opts) => {
+      seen = opts.registerNetworkServers;
+      return { stopped: false, stop() {} };
+    } }));
+    expect(seen).toBe(true);
+  });
+
   test('consenting -> framed summary output only, no raw host:port spew, detail deferred to /provider', () => {
     const root = makeProjectTempDir('gv-lan-consent');
     const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });

@@ -184,6 +184,18 @@ describe('MessageList: message layout and timestamps', () => {
     unmount();
   });
 
+  test('a queued message that will never run says it was not answered, not that it was sent', () => {
+    const nodes: LineageNode[] = [
+      { message: { id: 'u1', role: 'user', content: 'asked while a reply ran', createdAt: Date.now(), deliveryState: 'unanswered' } as ChatMessage, priorMessages: [] },
+    ];
+    const { container, unmount } = renderMessageList({ nodes });
+    const indicator = container.querySelector('.delivery-indicator');
+    expect(indicator?.className).toContain('unanswered');
+    expect(indicator?.textContent).toContain('Not answered');
+    expect(indicator?.getAttribute('title')).toContain('Send it again');
+    unmount();
+  });
+
   test('a known time renders in a <time> element in the footer', () => {
     const at = new Date(2026, 8, 30, 15, 42).getTime();
     const nodes: LineageNode[] = [
@@ -286,6 +298,59 @@ describe('MessageList: search jump-to-message highlight', () => {
     unmount();
   });
 
+  test('highlightedMessageId marks exactly the matching message', () => {
+    const { container, unmount } = renderMessageList({ nodes, highlightedMessageId: 'msg-2' });
+    const marked = container.querySelectorAll('article.message--search-highlight');
+    expect(marked.length).toBe(1);
+    expect(marked[0]?.getAttribute('data-message-id')).toBe('msg-2');
+    unmount();
+  });
+
+  test('no message is marked when highlightedMessageId is empty or matches nothing', () => {
+    const none = renderMessageList({ nodes, highlightedMessageId: '' });
+    expect(none.container.querySelectorAll('.message--search-highlight').length).toBe(0);
+    none.unmount();
+    const unknown = renderMessageList({ nodes, highlightedMessageId: 'msg-9' });
+    expect(unknown.container.querySelectorAll('.message--search-highlight').length).toBe(0);
+    unknown.unmount();
+  });
+
+});
+
+describe('MessageList: stream caret', () => {
+  test('shows only while streaming with live text', () => {
+    const streaming = renderMessageList({ isStreaming: true, liveText: 'typing' });
+    expect(streaming.container.querySelector('.stream-caret')).not.toBeNull();
+    streaming.unmount();
+
+    const noText = renderMessageList({ isStreaming: true, liveText: '' });
+    expect(noText.container.querySelector('.stream-caret')).toBeNull();
+    noText.unmount();
+
+    const finished = renderMessageList({ isStreaming: false, liveText: 'typing' });
+    expect(finished.container.querySelector('.stream-caret')).toBeNull();
+    finished.unmount();
+  });
+
+  test('carries the reduced-motion classes only when the viewer prefers reduced motion', () => {
+    const normal = renderMessageList({ isStreaming: true, liveText: 'typing' });
+    expect(normal.container.querySelector('.stream-caret--reduced')).toBeNull();
+    expect(normal.container.querySelector('.chat-working__label--still')).toBeNull();
+    normal.unmount();
+
+    installGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }));
+    const reduced = renderMessageList({ isStreaming: true, liveText: 'typing' });
+    expect(reduced.container.querySelector('.stream-caret--reduced')).not.toBeNull();
+    expect(reduced.container.querySelector('.chat-working__label--still')).not.toBeNull();
+    reduced.unmount();
+  });
 });
 
 describe('MessageList: running tool calls + cancel (platform 1.8.0 interaction-wins round)', () => {

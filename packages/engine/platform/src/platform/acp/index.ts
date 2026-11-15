@@ -13,6 +13,7 @@ export {
   mapStopReason,
   mapPermissionOutcome,
   type AcpAgentOptions,
+  type AcpStdio,
   type EmbeddedSessionFactory,
 } from './agent.js';
 export {

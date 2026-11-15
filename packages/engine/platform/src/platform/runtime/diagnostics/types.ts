@@ -256,7 +256,7 @@ export interface RuntimeStateSnapshot {
 /**
  * Gate status for a single SLO metric.
  * - `ok`: current p95 is within the target threshold.
- * - `warn`: current p95 is within 20% above threshold (approaching violation).
+ * - `warn`: current p95 is above 1/1.2 (about 83%) of the target but not over it (approaching violation).
  * - `violated`: current p95 exceeds the threshold.
  * - `no_data`: no samples have been collected yet.
  */
@@ -632,32 +632,61 @@ export interface TokenAuditDiagnostics {
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
+const LEVEL_RANK: Readonly<Record<DiagnosticLevel, number>> = { debug: 0, info: 1, warn: 2, error: 3 };
+
 /**
  * Apply a DiagnosticFilter to an array of entries.
- * Entries must have at minimum: `sessionId`, `traceId`, and a timestamp field.
- * The `timestampField` parameter names the property used for time range checks.
+ * Entries must have at minimum: `sessionId` and `traceId`; the timestamp is
+ * read through `getTimestamp`. `domains`, `turnId`, `taskId` and `level` are
+ * matched against the entry field of the same name (`domain`, `turnId`,
+ * `taskId`, `level`). An entry without that field does not match a filter that
+ * names it, so a filtered view never lists rows the filter did not select. No
+ * panel entry records a `level` today, so a `level` filter matches nothing.
  *
  * @param entries - Source array (most recent last).
  * @param filter - Filter to apply.
  * @param getTimestamp - Accessor for the entry's primary timestamp.
+ * @param defaultLimit - Cap used when the filter sets no `limit`; the panel's buffer limit.
  * @returns Filtered array, most recent first, capped at filter.limit.
  */
 export function applyFilter<T extends { sessionId: string; traceId: string }>(
   entries: readonly T[],
   filter: DiagnosticFilter | undefined,
   getTimestamp: (entry: T) => number,
+  defaultLimit: number = DEFAULT_BUFFER_LIMIT,
 ): T[] {
   if (!filter) {
     return [...entries].reverse();
   }
 
   let result = [...entries];
+  const field = (entry: T, name: string): unknown => (entry as unknown as Record<string, unknown>)[name];
 
   if (filter.sessionId !== undefined) {
     result = result.filter((e) => e.sessionId === filter.sessionId);
   }
   if (filter.traceId !== undefined) {
     result = result.filter((e) => e.traceId === filter.traceId);
+  }
+  if (filter.turnId !== undefined) {
+    result = result.filter((e) => field(e, 'turnId') === filter.turnId);
+  }
+  if (filter.taskId !== undefined) {
+    result = result.filter((e) => field(e, 'taskId') === filter.taskId);
+  }
+  if (filter.domains !== undefined && filter.domains.length > 0) {
+    const domains = new Set(filter.domains);
+    result = result.filter((e) => {
+      const domain = field(e, 'domain');
+      return typeof domain === 'string' && domains.has(domain);
+    });
+  }
+  if (filter.level !== undefined) {
+    const minimum = LEVEL_RANK[filter.level];
+    result = result.filter((e) => {
+      const level = field(e, 'level');
+      return typeof level === 'string' && level in LEVEL_RANK && LEVEL_RANK[level as DiagnosticLevel] >= minimum;
+    });
   }
   if (filter.since !== undefined) {
     const since = filter.since;
@@ -671,7 +700,7 @@ export function applyFilter<T extends { sessionId: string; traceId: string }>(
   // Most recent first
   result.reverse();
 
-  const limit = filter.limit ?? DEFAULT_BUFFER_LIMIT;
+  const limit = filter.limit ?? defaultLimit;
   return result.slice(0, limit);
 }
 

@@ -84,23 +84,11 @@ export function parseBrowserJudgmentRequest(value: unknown): BrowserJudgmentRequ
     if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > 64) return invalid();
     const seen = new Set<string>();
     for (const key of input.keys) { const name = judgmentText(key, 256); if (seen.has(name)) return invalid(); seen.add(name); }
-  } else if (battery === 'webui.pwa.install-platform') {
-    const input = judgmentRecord(request.input, ['userAgent', 'platform', 'maxTouchPoints']);
-    judgmentText(input.userAgent, 2048);
-    if (typeof input.platform !== 'string' || input.platform.length > 128 || typeof input.maxTouchPoints !== 'number'
-      || !Number.isInteger(input.maxTouchPoints) || input.maxTouchPoints < 0 || input.maxTouchPoints > 256) return invalid();
   } else if (battery === 'webui.errors.daemon-refusal') {
     const input = judgmentRecord(request.input, ['errorRef']); judgmentText(input.errorRef);
   } else if (battery === 'webui.mail.reply-subject') {
     const input = judgmentRecord(request.input, ['subjectRef']); judgmentText(input.subjectRef);
-  } else if (battery === 'webui.status.badge-tone') {
-    const input = judgmentRecord(request.input, ['vocabulary', 'source']);
-    if (input.vocabulary !== 'badge' && input.vocabulary !== 'library-dot') return invalid();
-    const source = input.source as Record<string, unknown> | null;
-    if (source?.kind === 'catalog') judgmentText(judgmentRecord(source, ['kind', 'labelId']).labelId);
-    else if (source?.kind === 'daemon') judgmentText(judgmentRecord(source, ['kind', 'statusRef']).statusRef);
-    else return invalid();
-  } else {
+  } else if (battery === 'webui.palette.command-rank') {
     const input = judgmentRecord(request.input, ['query', 'registryVersion', 'candidates']);
     judgmentText(input.registryVersion);
     const query = input.query as Record<string, unknown> | null;
@@ -118,6 +106,9 @@ export function parseBrowserJudgmentRequest(value: unknown): BrowserJudgmentRequ
       else return invalid();
       if (ids.has(id)) return invalid(); ids.add(id);
     }
+  } else {
+    // A battery id added to the list without a branch above must be refused, not read as a palette request.
+    throw new BrowserJudgmentError('JUDGMENT_BATTERY_UNKNOWN');
   }
   return request as unknown as BrowserJudgmentRequest;
 }

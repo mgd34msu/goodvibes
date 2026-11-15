@@ -13,7 +13,13 @@ import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConversationManager } from '../../core/conversation.ts';
 import { activeTheme, registerThemeRefresh, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 
+// The registry has no way to unregister, so register one refresher for the file and point it at the
+// current test's conversation; earlier conversations are released instead of staying wired to later theme changes.
+let wired: ConversationManager | null = null;
+registerThemeRefresh(() => wired?.invalidateRenderedLines());
+
 afterEach(() => {
+  wired = null;
   setActiveThemeName('goodvibes');
   setActiveThemeMode('dark');
 });
@@ -21,7 +27,7 @@ afterEach(() => {
 /** A conversation wired the way main.ts wires the real one. */
 function wiredConversation(): ConversationManager {
   const cm = new ConversationManager(() => 80);
-  registerThemeRefresh(() => cm.invalidateRenderedLines());
+  wired = cm;
   return cm;
 }
 

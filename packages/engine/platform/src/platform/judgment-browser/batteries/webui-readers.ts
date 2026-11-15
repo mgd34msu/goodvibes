@@ -1,20 +1,15 @@
-import { JudgmentError, type JudgmentPort, type Outcome, type YesNoReading } from '@goodvibes-jev/judgment';
 import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { commandRankBattery, daemonRefusalBattery, statusToneBattery } from './webui-specs.js';
 import {
-  BADGE_TONES, LIBRARY_DOT_TONES, REFUSAL_ITEMS, STATUS_DOMAINS, WEBUI_READER_LIMITS as LIMITS,
-  type CommandRankValue, type DaemonRefusalItem, type DaemonRefusalValue,
-  type ResolvedCommandRank, type ResolvedDaemonRefusal, type ResolvedStatus,
-  type StatusValue, type WebuiReaderOptions, type WebuiReadResult,
+  WEBUI_READER_LIMITS as LIMITS,
+  type DaemonRefusalItem, type DaemonRefusalValue,
+  type ResolvedCommandRank, type ResolvedDaemonRefusal, type WebuiReadResult,
 } from './webui-types.js';
 
-type NotReady = Exclude<WebuiReadResult<never>, { status: 'ready' }>;
 class Hold extends Error {
   constructor(readonly reason: 'budget' | 'unsupported-input') { super('WebUI reading held.'); }
 }
 const unsupported = (): never => { throw new Hold('unsupported-input'); };
 const budget = (): never => { throw new Hold('budget'); };
-const aborted = (): NotReady => ({ status: 'unavailable', reason: 'aborted' });
 
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return unsupported();
@@ -31,27 +26,6 @@ function member<T extends string>(value: unknown, options: readonly T[]): T {
   return value as T;
 }
 
-function failure(error: unknown, options: WebuiReaderOptions): NotReady {
-  if (options.signal?.aborted) return aborted();
-  if (error instanceof JudgmentInputError) return { status: 'held', reason: error.problem === 'unsupported-input' ? 'unsupported-input' : 'unsafe-input' };
-  if (error instanceof Hold) return { status: 'held', reason: error.reason };
-  if (error instanceof JudgmentError) {
-    if (error.kind === 'aborted') return aborted();
-    if (error.kind === 'internal') return { status: 'unavailable', reason: 'internal' };
-    if (error.kind === 'invalid-response' || error.kind === 'invalid-request') return { status: 'unavailable', reason: 'invalid-response' };
-  }
-  return { status: 'unavailable', reason: error instanceof JudgmentError ? 'offline' : 'internal' };
-}
-function unresolved(outcomes: readonly Outcome[]): NotReady | undefined {
-  if (outcomes.includes('escalate')) return { status: 'uncertain', reason: 'unsettled', outcome: 'escalate' };
-  if (outcomes.includes('confirm')) return { status: 'uncertain', reason: 'unsettled', outcome: 'confirm' };
-  return undefined;
-}
-function decisionIds(ids: readonly (string | undefined)[]): { readonly decisionIds?: readonly string[] } {
-  const present = ids.filter((id): id is string => id !== undefined);
-  return present.length === 0 ? {} : { decisionIds: present };
-}
-
 export function snapshotWebuiCode(input: unknown): { readonly code: string; readonly tag: string } {
   const source = object(snapshotJudgmentInput(input), ['code', 'tag']);
   return { code: text(source['code'], 8192), tag: text(source['tag'], 128, true) };
@@ -65,14 +39,6 @@ export function snapshotWebuiCredentialNames(input: unknown): { readonly provide
   const keys = names.map(name => text(name, 256));
   if (new Set(keys).size !== keys.length) return unsupported();
   return { providerId: text(source['providerId'], 128), keys };
-}
-
-/** Complete browser metadata only. Protected text holds before source issuance and logging. */
-export function snapshotWebuiInstallPlatform(input: unknown): { readonly userAgent: string; readonly platform: string; readonly maxTouchPoints: number } {
-  const source = object(snapshotJudgmentInput(input), ['userAgent', 'platform', 'maxTouchPoints']);
-  const maxTouchPoints = source['maxTouchPoints'];
-  if (typeof maxTouchPoints !== 'number' || !Number.isInteger(maxTouchPoints) || maxTouchPoints < 0 || maxTouchPoints > 256) return unsupported();
-  return { userAgent: text(source['userAgent'], 2048), platform: text(source['platform'], 128, true), maxTouchPoints };
 }
 
 /** Screen the whole original subject before the cap; never clip, redact, or normalize it. */
@@ -126,72 +92,11 @@ export function readStructuredDaemonRefusal(input: ResolvedDaemonRefusal): Webui
   try {
     const value = structuredRefusal(snapshotWebuiDaemonRefusal(input));
     return value === undefined ? undefined : { status: 'ready', value, basis: 'structured' };
-  } catch (error) { return failure(error, {}); }
-}
-
-/**
- * Server-only interpretation of an admitted, unresolved projection. Known
- * structural cases belong to readStructuredDaemonRefusal before the endpoint;
- * they hold here rather than manufacture recorded readings. The caller must
- * independently authorize source access, processing route and log retention.
- * The injected port must validate answers/failures BEFORE decision logging.
- */
-export async function readDaemonRefusal(port: JudgmentPort | undefined, input: ResolvedDaemonRefusal, options: WebuiReaderOptions = {}): Promise<WebuiReadResult<DaemonRefusalValue>> {
-  try {
-    if (options.signal?.aborted) return aborted();
-    const source = snapshotWebuiDaemonRefusal(input);
-    if (structuredRefusal(source) !== undefined) return { status: 'held', reason: 'unsupported-input' };
-    if (!source.message.trim()) return { status: 'held', reason: 'unsupported-input' };
-    if (!port) return { status: 'unavailable', reason: 'unconfigured' };
-    const only = REFUSAL_ITEMS.filter((item) => item !== 'method_unknown' || source.status === 404);
-    const run = await daemonRefusalBattery.run(port, { ...source }, { ...options, only, site: 'webui.errors.daemon-refusal' });
-    if (options.signal?.aborted) { run.recordAction('aborted'); return aborted(); }
-    const waiting = unresolved(only.map((item) => run.readings[item].outcome));
-    if (waiting) { run.recordAction(waiting.status === 'uncertain' ? waiting.outcome : 'unavailable'); return waiting; }
-    const value = emptyRefusal();
-    for (const item of only) value[item] = run.readings[item].verdict === 'yes';
-    // Missing resource conflicts with claims it exists. Closed and active are
-    // mutually exclusive. Locality can coexist with a known active/closed state.
-    const conflict = (value.session_not_found && (value.session_closed || value.session_active || value.session_not_local))
-      || (value.session_closed && value.session_active)
-      || (value.method_unknown && (value.session_not_found || value.session_closed || value.session_active || value.session_not_local));
-    if (conflict) { run.recordAction('conflicting-evidence'); return { status: 'uncertain', reason: 'conflicting-evidence', outcome: 'escalate' }; }
-    run.recordAction('ready');
-    return { status: 'ready', value, basis: 'judgment', ...decisionIds([run.result.decisionId]) };
-  } catch (error) { return failure(error, options); }
-}
-
-export function snapshotWebuiStatus(input: unknown): ResolvedStatus {
-  const source = object(snapshotJudgmentInput(input), ['kind', 'vocabulary', 'tone', 'status', 'domain']);
-  const vocabulary = member(source['vocabulary'], ['badge', 'library-dot'] as const);
-  if (source['kind'] === 'structured') {
-    if (Object.hasOwn(source, 'status') || Object.hasOwn(source, 'domain')) return unsupported();
-    return vocabulary === 'badge'
-      ? { kind: 'structured', vocabulary, tone: member(source['tone'], BADGE_TONES) }
-      : { kind: 'structured', vocabulary, tone: member(source['tone'], LIBRARY_DOT_TONES) };
+  } catch (error) {
+    if (error instanceof JudgmentInputError) return { status: 'held', reason: error.problem === 'unsupported-input' ? 'unsupported-input' : 'unsafe-input' };
+    if (error instanceof Hold) return { status: 'held', reason: error.reason };
+    throw error;
   }
-  if (source['kind'] !== 'text' || Object.hasOwn(source, 'tone')) return unsupported();
-  return { kind: 'text', vocabulary, status: text(source['status'], LIMITS.statusChars), domain: member(source['domain'], STATUS_DOMAINS) };
-}
-
-/** One fixed server-selected item; known authoritative tones require no port. */
-export async function readStatusTone(port: JudgmentPort | undefined, input: ResolvedStatus, options: WebuiReaderOptions = {}): Promise<WebuiReadResult<StatusValue>> {
-  try {
-    if (options.signal?.aborted) return aborted();
-    const source = snapshotWebuiStatus(input);
-    if (source.kind === 'structured') return { status: 'ready', value: { vocabulary: source.vocabulary, tone: source.tone } as StatusValue, basis: 'structured' };
-    if (!port) return { status: 'unavailable', reason: 'unconfigured' };
-    const item = source.vocabulary === 'badge' ? 'badge' : 'library_dot';
-    const run = await statusToneBattery.run(port, { status: source.status, domain: source.domain }, { ...options, only: [item], site: 'webui.status.badge-tone' });
-    if (options.signal?.aborted) { run.recordAction('aborted'); return aborted(); }
-    const waiting = unresolved([run.readings[item].outcome]);
-    if (waiting) { run.recordAction(waiting.status === 'uncertain' ? waiting.outcome : 'unavailable'); return waiting; }
-    const value: StatusValue = source.vocabulary === 'badge'
-      ? { vocabulary: 'badge', tone: run.readings.badge.choice }
-      : { vocabulary: 'library-dot', tone: run.readings.library_dot.choice };
-    run.recordAction('ready');
-    return { status: 'ready', value, basis: 'judgment', ...decisionIds([run.result.decisionId]) };
-  } catch (error) { return failure(error, options); }
 }
 
 export function snapshotWebuiCommandRank(input: unknown): ResolvedCommandRank {
@@ -214,57 +119,6 @@ export function snapshotWebuiCommandRank(input: unknown): ResolvedCommandRank {
     return { title, ...(group === undefined ? {} : { group }), ...(keywords === undefined ? {} : { keywords }) };
   });
   return { query, registryVersion, candidates };
-}
-
-/**
- * Every candidate is scored, at most four concurrently. The index is the only
- * candidate identity recorded; session IDs never enter this reader's schema.
- * The service also owns the aggregate outbound-attempt and deadline budgets.
- */
-export async function readCommandRank(port: JudgmentPort | undefined, input: ResolvedCommandRank, options: WebuiReaderOptions = {}): Promise<WebuiReadResult<CommandRankValue>> {
-  try {
-    if (options.signal?.aborted) return aborted();
-    const source = snapshotWebuiCommandRank(input);
-    if (source.candidates.length === 0) return { status: 'ready', basis: 'structured', value: { registryVersion: source.registryVersion, accepted: [], rejected: [] } };
-    if (!port) return { status: 'unavailable', reason: 'unconfigured' };
-    const runs: { reading: YesNoReading; decisionId: string | undefined; recordAction: (action: string) => void }[] = [];
-    let next = 0;
-    let failed: NotReady | undefined;
-    const worker = async (): Promise<void> => {
-      while (!options.signal?.aborted && !failed && next < source.candidates.length) {
-        const candidateIndex = next++;
-        try {
-          const candidate = source.candidates[candidateIndex]!;
-          const state = { query: source.query, candidate: { title: candidate.title,
-            ...(candidate.group === undefined ? {} : { group: candidate.group }),
-            ...(candidate.keywords === undefined ? {} : { keywords: [...candidate.keywords] }) } };
-          const run = await commandRankBattery.run(port, state, { ...options, site: 'webui.palette.command-rank', pattern: 'rerank' });
-          const reading = run.readings.match;
-          if (run.result.decisionId !== undefined) port.recorder?.recordReadings(run.result.decisionId, { candidateIndex, match: { ...reading } });
-          runs[candidateIndex] = { reading, decisionId: run.result.decisionId, recordAction: run.recordAction };
-        } catch (error) { failed ??= failure(error, options); }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(LIMITS.concurrency, source.candidates.length) }, worker));
-    if (options.signal?.aborted || failed) {
-      for (const run of runs) run?.recordAction(options.signal?.aborted ? 'aborted' : 'unavailable');
-      return options.signal?.aborted ? aborted() : failed!;
-    }
-    const waiting = unresolved(runs.map((run) => run.reading.outcome));
-    if (waiting) {
-      for (const run of runs) run.recordAction(waiting.status === 'uncertain' ? waiting.outcome : 'unavailable');
-      return waiting;
-    }
-    const accepted: { candidateIndex: number; probability: number }[] = [];
-    const rejected: number[] = [];
-    runs.forEach(({ reading }, candidateIndex) => {
-      if (reading.verdict === 'yes') accepted.push({ candidateIndex, probability: reading.probability });
-      else rejected.push(candidateIndex);
-    });
-    accepted.sort((a, b) => b.probability - a.probability || a.candidateIndex - b.candidateIndex);
-    for (const run of runs) run.recordAction('ready');
-    return { status: 'ready', basis: 'judgment', value: { registryVersion: source.registryVersion, accepted, rejected }, ...decisionIds(runs.map((run) => run.decisionId)) };
-  } catch (error) { return failure(error, options); }
 }
 
 /** Canonical key names and descriptions only. Values are never part of this source. */

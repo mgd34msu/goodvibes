@@ -5,7 +5,7 @@
  * "299 on disk, serves 0" scenario expressed as a test. Seed many closed
  * sessions whose closedAt is ancient (far past any grace), boot, run the GC
  * sweep repeatedly, and assert that ALL of them remain listable and on disk,
- * memory eviction may drop bodies, but nothing is ever deleted off disk by the
+ * memory eviction may drop replay state, but nothing is ever deleted off disk by the
  * default sweep. Covers BOTH deletion authorities: the companion manager
  * (_gcSweep) and the broker (gcSweep / sweepSharedSessions).
  */
@@ -98,11 +98,11 @@ describe('inversion guard: the 299-closed-chat scenario is never mass-deleted', 
       expect(listed).toHaveLength(N); // NOTHING deleted
       for (const s of listed) expect(s.status).toBe('closed');
 
-      // Memory bounded: bodies evicted from RAM for every session that had them.
-      let bodiesInMemory = 0;
-      for (let i = 0; i < N; i++) bodiesInMemory += manager.getMessages(`chat-${i}`).length;
-      expect(bodiesInMemory).toBe(0);
-      // But meta.messageCount stays honest for the ones that had bodies.
+      // The sweep never empties a transcript the routes still serve: every chat
+      // that had messages still returns all of them, matching its count.
+      for (let i = 0; i < N; i++) {
+        expect(manager.getMessages(`chat-${i}`)).toHaveLength(i % 2 === 0 ? 6 : 0);
+      }
       expect(manager.getSession('chat-0')?.messageCount).toBe(6);
       manager.dispose();
 

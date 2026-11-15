@@ -49,14 +49,14 @@ The compiled binary built by `bun run build` includes this path because it compi
 
 ## Running the daemon
 
-`goodvibes-daemon` is built and released from its own repository. Run it directly:
+`goodvibes-daemon` is the daemon product in this repository (`products/daemon`) and ships in the same release as the TUI. Run it directly:
 
 ```sh
 goodvibes-daemon                      # run in the foreground
 goodvibes-daemon install-service      # install and start the user service unit
 ```
 
-This path is useful for service-style deployments, automation entrypoints, and local integrations that do not need the interactive terminal UI. See that repository's own documentation for its full CLI and configuration reference.
+This path is useful for service-style deployments, automation entrypoints, and local integrations that do not need the interactive terminal UI. See the [daemon command reference](../../daemon/docs/commands-reference.md) and [daemon configuration](../../daemon/docs/configuration.md) for its full CLI and configuration reference.
 
 The installed package also exposes a `goodvibes-daemon` launcher. The suite installer (`goodvibes.sh/install.sh`) puts both `goodvibes` and `goodvibes-daemon` on `PATH`.
 
@@ -92,7 +92,7 @@ The fullscreen `/config` workspace exposes service settings under `Service`:
 | `service.autostart` | `false` | Install/enable or disable/remove the OS autostart service |
 | `service.restartOnFailure` | `true` | Restart the managed daemon service after failure |
 | `service.platform` | `auto` | Target service manager platform |
-| `service.serviceName` | `goodvibes` | Service name used for host integration and install scripts |
+| `service.serviceName` | `goodvibes-jev` in this CLI (the unit the release installer registers); the shared default elsewhere is `goodvibes` | Service name used for host integration and install scripts |
 | `service.logPath` | *(empty)* | File path for daemon/service logs; empty means the platform default under the configured service directory |
 
 Changing `service.autostart` from the TUI is intended to reconcile the OS service, not just update JSON. On Linux this means writing/enabling/disabling the user `systemd` service. When service mode is enabled for the first time, the TUI installs the service definition, reloads user units, and starts/enables the daemon service if autostart is on. Disabling service mode or autostart removes/disables the OS-level autostart path.
@@ -127,7 +127,7 @@ Host modes resolve as:
 - `network`: bind all interfaces (`0.0.0.0`)
 - `custom`: bind the configured host
 
-When the WebUI is launched by external tooling rather than by the TUI, it should read the same TUI settings file or be launched with matching env overrides. The canonical setting file is `~/.goodvibes/tui/settings.json`; setting `GOODVIBES_HOME` relocates the whole `.goodvibes` tree root, which moves that file to `<GOODVIBES_HOME>/.goodvibes/tui/settings.json`.
+When the WebUI is launched by external tooling rather than by the TUI, it should read the same settings or be launched with matching env overrides. Surface preferences live in `~/.goodvibes/tui/settings.json`, but the daemon-owned keys named here (`controlPlane.*`, `httpListener.*`, `web.*`, `surfaces.*`) live in the daemon's settings file, `~/.goodvibes/daemon/settings.json`, and are changed with `goodvibes-daemon config set <key> <value>`; a value in the daemon file overrides the TUI file. Setting `GOODVIBES_HOME` relocates the whole `.goodvibes` tree root, which moves both files under `<GOODVIBES_HOME>/.goodvibes/`.
 
 ## Inbound TLS
 
@@ -150,6 +150,7 @@ The control-plane daemon and the webhook listener each carry the same shape of T
 - GoodVibes still binds plain HTTP locally
 - a reverse proxy such as Nginx, Caddy, Traefik, or Nginx Proxy Manager terminates HTTPS
 - GoodVibes only trusts forwarded headers when the relevant `trustProxy` setting is enabled
+- with `trustProxy` on, the client address is the last `X-Forwarded-For` entry, the one your proxy appended; entries to its left are whatever the client sent and are ignored, and `X-Real-IP` is not read. A request that arrives without the header is attributed to the connecting address
 
 This is the right shape when a future web UI, browser clients, SSE, and WebSocket clients all need to share one public HTTPS origin.
 
@@ -162,13 +163,15 @@ If no explicit certificate paths are configured, GoodVibes looks for:
 - `~/.goodvibes/tui/certs/fullchain.pem`
 - `~/.goodvibes/tui/certs/privkey.pem`
 
+The `certs` directory sits under the settings directory of the program that starts the listener. The terminal app and the daemon share `~/.goodvibes/tui`; another program, such as the Agent, looks under its own settings directory.
+
 That convention also works well with self-hosted Let's Encrypt deployment patterns where the operator copies or syncs certificate material into the GoodVibes home directory.
 
 If `direct` is enabled and the certificate files are missing or invalid, GoodVibes fails that server startup clearly instead of silently downgrading to plain HTTP.
 
 ### TLS plaintext warning
 
-If a control plane or HTTP listener is configured with `hostMode` other than `local` and `tls.mode = off`, GoodVibes emits a `[SECURITY]` warning as a WRFC message at startup (routed by `ui.wrfcMessages`). The same warning appears in the onboarding wizard network step whenever a network-facing service is selected without TLS.
+If a control plane or HTTP listener is configured with `hostMode` other than `local` and `tls.mode = off`, GoodVibes emits a `[SECURITY]` warning at startup. The same warning appears in the onboarding wizard network step whenever a network-facing service is selected without TLS.
 
 To suppress the warning, set `controlPlane.tls.mode` or `httpListener.tls.mode` to `direct` (or use the `proxy` deployment shape with a terminating reverse proxy).
 
@@ -192,20 +195,14 @@ The two `trustProxy` keys let the login rate-limiter key on the client address t
 
 CORS enforcement is off by default (permissive, no origin checking) and is meant for multi-user, internet-exposed, or enterprise deployments where browser-based CSRF is a concern.
 
-The listener takes `enforceCors` and `allowedOrigins` as constructor parameters, and neither is a `ConfigKey` the onboarding wizard can write. What it does read from config when the constructor says nothing is the shared control-plane allowlist, so those are the settings to write:
+The listener takes `enforceCors` and `allowedOrigins` as constructor parameters, and neither is a `ConfigKey` the onboarding wizard can write. What it does read from config when the constructor says nothing is the shared control-plane allowlist, so those are the settings to write. They are daemon-owned, so set them through the daemon rather than by editing the TUI settings file:
 
-```json
-{
-  "controlPlane": {
-    "cors": {
-      "enabled": true,
-      "allowedOrigins": "https://your-origin.example.com,https://another.example.com"
-    }
-  }
-}
+```sh
+goodvibes-daemon config set controlPlane.cors.enabled true
+goodvibes-daemon config set controlPlane.cors.allowedOrigins "https://your-origin.example.com,https://another.example.com"
 ```
 
-`allowedOrigins` is a comma-separated string, and the same allowlist governs the control-plane router and the webhook listener. Restart the daemon after editing. With enforcement on, a listener bound to a network address refuses to start on an empty allowlist rather than serving every origin.
+`allowedOrigins` is a comma-separated string, and the same allowlist governs the control-plane router and the webhook listener. Restart the daemon after changing it. With enforcement on, a listener bound to a network address refuses to start on an empty allowlist rather than serving every origin.
 
 ## Outbound HTTPS trust
 
@@ -216,7 +213,7 @@ Four keys configure it:
 | Key | Default | What it does |
 | --- | --- | --- |
 | `network.outboundTls.mode` | `bundled` | `bundled` uses Bun's default bundled root certificates; `bundled+custom` adds operator-provided PEM roots on top; `custom` trusts only the configured custom roots |
-| `network.outboundTls.customCaFile` | *(empty)* | Additional PEM file to trust in `bundled+custom` or `custom` mode |
+| `network.outboundTls.customCaFile` | *(empty)* | Additional PEM file to trust in `bundled+custom` or `custom` mode. If it is missing or unreadable, https requests fail with an error naming it rather than falling back to the bundled roots |
 | `network.outboundTls.customCaDir` | *(empty)* | Directory of PEM/CRT/CER files to trust in `bundled+custom` or `custom` mode |
 | `network.outboundTls.allowInsecureLocalhost` | `false` | Disable certificate verification only for loopback HTTPS targets; intended for local development |
 
@@ -229,7 +226,7 @@ This is the right place to add enterprise or internal roots for outbound HTTPS a
 - entrypoint: `src/main.ts`
 - output: `dist/goodvibes`
 
-This build does not produce a daemon executable. The daemon binary is built and released from the `goodvibes-daemon` repository.
+This build does not produce a daemon executable. The daemon binary is built from `products/daemon` and ships in the same release (see the [daemon command reference](../../daemon/docs/commands-reference.md)).
 
 ## Local auth and service tokens
 
@@ -305,7 +302,7 @@ The daemon exposes broad HTTP and streaming surfaces. The most important entrypo
 | `GET /api/control-plane/ws` | The WebSocket transport |
 | `POST /task` | Task submission |
 | `GET /api/tasks` | The task list |
-| `GET /api/service/status` | Managed-service status |
+| `GET /api/service/status` | Managed-service status (admin only; it includes the installed unit file) |
 
 The control-plane method catalog is the canonical typed surface for external clients. For every method it describes the method itself, its category and scopes, its input and output schemas, its event domains, and its transport metadata.
 

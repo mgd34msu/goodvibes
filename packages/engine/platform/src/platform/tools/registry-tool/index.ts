@@ -1,4 +1,4 @@
-import { join, resolve, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
@@ -17,7 +17,7 @@ import { toRecord } from '../../utils/record-coerce.js';
 import type { RegistryInput } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ContractInputAuthority } from '../../contract/input-authority.js';
-import { liveRegistrySource, registryMarkdown, materializeRegistryMarkdown, type RegistryToolSource } from './source.js';
+import { createLiveRegistrySource, liveRegistryScope, registryMarkdown, materializeRegistryMarkdown, type RegistryToolSource } from './source.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
@@ -171,7 +171,7 @@ async function rankDecisionAgainst(items: readonly RegistryMatch[], query: strin
     ...(port.recorder === undefined ? {} : { recorder: port.recorder }),
     ...(port.health === undefined ? {} : { health: port.health }),
     ask: async (request) => {
-      if (source === liveRegistrySource) return port.ask(request);
+      if (source.live) return port.ask(request);
       const previous = priorJudgment;
       let release!: () => void;
       priorJudgment = new Promise<void>((resolve) => { release = resolve; });
@@ -242,6 +242,7 @@ export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryTo
   roots = Object.freeze(captured
     ? { workingDirectory: captured.workingDirectory, homeDirectory: captured.homeDirectory }
     : { workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory });
+  const liveSource = createLiveRegistrySource(roots);
   const definition: ToolDefinition = {
     name: 'registry',
     description:
@@ -261,7 +262,7 @@ export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryTo
   }
   async function executeUnderPolicy(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string }> {
     const signal = options?.signal;
-    const source = captured?.source(signal) ?? liveRegistrySource;
+    const source = captured?.source(signal) ?? liveSource;
     try {
       args = structuredClone(args);
       signal?.throwIfAborted();
@@ -394,55 +395,43 @@ async function runDependencies(
     });
   }
 
-  let filePath: string | null = null;
+  // A name is a name, never a path: it cannot reach outside the skill directories.
+  if (/[\\/]/.test(skillName) || skillName === '.' || skillName === '..') {
+    return {
+      success: false,
+      error: `"skillName" must be a skill name, not a path (got "${skillName}"). Use mode=search to list skill names, or mode=content with a path.`,
+    };
+  }
 
+  // Same scan as search, so a name that search returns (frontmatter name,
+  // file name, or the directory of a SKILL.md) resolves here too.
+  let found: RegistryMatch | undefined;
   for (const dir of getSkillDirs(roots)) {
-    const candidate = join(dir, `${skillName}.md`);
-    if (await source.exists(candidate)) {
-      filePath = candidate;
-      break;
-    }
-    // Also try exact match without .md appended (caller may have included extension)
-    const candidateExact = join(dir, skillName);
-    if (await source.exists(candidateExact)) {
-      filePath = candidateExact;
-      break;
-    }
-  }
-
-  if (!filePath) {
-    return Promise.resolve({
-      success: false,
-      error: `Skill not found: ${skillName}`,
+    found = (await scanDirectoryAll(dir, 'skill', source)).find((match) => {
+      const file = basename(match.path);
+      const stem = file === 'SKILL.md' ? basename(dirname(match.path)) : file.replace(/\.md$/, '');
+      return match.name === skillName || stem === skillName || file === skillName;
     });
+    if (found) break;
   }
 
-  let content: string;
-  try {
-    content = await source.read(filePath);
-  } catch (err) {
-    return Promise.resolve({
+  if (!found) {
+    return {
       success: false,
-      error: `Failed to read skill file: ${summarizeError(err)}`,
-    });
+      error: `Skill not found: ${skillName}. Use mode=search type=skills to list the available skill names.`,
+    };
   }
 
-  const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
-
-  // Parse depends_on: can be a comma-separated string or single name
-  const dependencies = normalizeFrontmatterList(frontmatter['depends_on']);
-  const includes = collectMarkdownReferences(body);
-
-  return Promise.resolve({
+  return {
     success: true,
     output: JSON.stringify({
       mode: 'dependencies',
       skillName,
-      path: filePath,
-      depends_on: dependencies,
-      includes,
+      path: found.path,
+      depends_on: found.dependencies ?? [],
+      includes: found.includes ?? [],
     }),
-  });
+  };
 }
 
 async function runPreview(
@@ -483,16 +472,22 @@ async function runContent(
   const resolvedPath = await resolveRegistryPath(input.path, roots, source);
   if (!resolvedPath.ok) return Promise.resolve({ success: false, error: resolvedPath.error });
 
-  const disclosure = await registryMarkdown(source, resolvedPath.path);
-  return Promise.resolve({
-    success: true,
-    output: JSON.stringify({
-      mode: 'content',
-      path: resolvedPath.path,
-      metadata: disclosure.metadata,
-      content: await materializeRegistryMarkdown(source, resolvedPath.path, disclosure.body),
-    }),
-  });
+  try {
+    const disclosure = await registryMarkdown(source, resolvedPath.path);
+    return {
+      success: true,
+      output: JSON.stringify({
+        mode: 'content',
+        path: resolvedPath.path,
+        metadata: disclosure.metadata,
+        content: await materializeRegistryMarkdown(source, resolvedPath.path, disclosure.body),
+      }),
+    };
+  } catch (err) {
+    // Captured sources hold content through the outer handler; a live refusal names its reason.
+    if (!source.live) throw err;
+    return { success: false, error: `Failed to read file: ${summarizeError(err)}` };
+  }
 }
 
 async function resolveRegistryPath(path: string | undefined, roots: RegistryToolRoots, source: RegistryToolSource): Promise<
@@ -505,14 +500,18 @@ async function resolveRegistryPath(path: string | undefined, roots: RegistryTool
     };
   }
 
-  const resolvedPath = isAbsolute(path)
-    ? path
-    : resolve(roots.workingDirectory, path);
+  // Normalise first so `..` segments cannot hide an escape; live reads also
+  // resolve symlinks (in the live source) before touching the file.
+  const resolvedPath = isAbsolute(path) ? resolve(path) : resolve(roots.workingDirectory, path);
+  const insideScope = liveRegistryScope(roots).some((root) => {
+    const rel = relative(root, resolvedPath);
+    return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+  });
 
-  if (!resolvedPath.includes('.goodvibes/')) {
+  if (!insideScope) {
     return {
       ok: false,
-      error: 'mode can only read files within .goodvibes/ directories',
+      error: `mode can only read files inside .goodvibes/skills or .goodvibes/agents (of the project or the home directory); ${resolvedPath} is outside them. Use mode=search to list the available files.`,
     };
   }
 

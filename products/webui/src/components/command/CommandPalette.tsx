@@ -38,6 +38,9 @@ interface QueryInput { readonly text: string; readonly lifetime?: ClientLifetime
 const EMPTY_QUERY: QueryInput = Object.freeze({ text: '' });
 
 /** "mod+shift+n" → "Ctrl Shift N"; "g c" → "G then C". */
+/** How long a query settles before it is sent for ranking. */
+export const SEARCH_DEBOUNCE_MS = 200;
+
 export function formatShortcut(shortcut: string): string {
   const isMac = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform ?? '');
   if (shortcut.includes(' ') && !shortcut.includes('+')) {
@@ -117,7 +120,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         if (current()) setSearch({ query, revision: snapshot.revision, lifetime,
           result: { status: 'unavailable', reason: 'unavailable' } });
       });
-    }, 200);
+    }, SEARCH_DEBOUNCE_MS);
     return () => { unsubscribe(); clearTimeout(timer); abort.abort(); };
   }, [open, query, queryInput.lifetime, snapshot]);
 

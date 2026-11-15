@@ -1,9 +1,6 @@
 import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { createShellPathService } from '@/runtime/index.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
-import { withRuntimeServices } from './management-utils.ts';
+import { readAuthPaths, withRuntimeServices } from './management-utils.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../config/secrets.ts';
@@ -13,23 +10,6 @@ import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from '../providers/provider-classification.ts';
 import { buildCliServicePosture } from './service-posture.ts';
 
-function readAuthPosture(runtime: CliCommandRuntime) {
-  const shellPaths = createShellPathService({
-    workingDirectory: runtime.workingDirectory,
-    homeDirectory: runtime.homeDirectory,
-  });
-  const userStorePath = shellPaths.resolveUserPath('tui', 'auth-users.json');
-  const bootstrapCredentialPath = shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt');
-  const operatorTokenPath = join(runtime.homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
-  return {
-    userStorePath,
-    userStorePresent: existsSync(userStorePath),
-    bootstrapCredentialPath,
-    bootstrapCredentialPresent: existsSync(bootstrapCredentialPath),
-    operatorTokenPath,
-    operatorTokenPresent: existsSync(operatorTokenPath),
-  };
-}
 export const handleBundleCommand = createSupportBundleCommand<
   CliCommandRuntime,
   RuntimeServices,
@@ -47,7 +27,7 @@ export const handleBundleCommand = createSupportBundleCommand<
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,
     servicePosture: buildCliServicePosture,
-    authPosture: readAuthPosture,
+    authPosture: readAuthPaths,
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
     applySetting(runtime, key, value) {

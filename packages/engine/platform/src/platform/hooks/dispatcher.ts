@@ -17,7 +17,10 @@ import * as promptRunner from './runners/prompt.js';
 import * as agentRunner from './runners/agent.js';
 import * as httpRunner from './runners/http.js';
 import * as tsRunner from './runners/typescript.js';
-import { fireTriggers } from '../workflow/trigger-executor.js';
+import { ChainEngine } from './chain-engine.js';
+import { fireTriggers, killTriggerActions } from '../workflow/trigger-executor.js';
+import { guardExecCommand } from '../tools/exec/ast-guard.js';
+import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { TriggerManagerLike } from '../workflow/trigger-executor.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -55,10 +58,62 @@ function runHook(
   }
 }
 
+/**
+ * Why a hooks file must not be loaded, or null. Hook commands run with this
+ * process's privileges, so a file any local user can rewrite, or one owned by
+ * a user other than this one (or root), is refused rather than executed.
+ */
+export function hooksFileRefusal(filePath: string): string | null {
+  if (process.platform === 'win32') return null;
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(filePath);
+  } catch (err) {
+    logger.warn('HookDispatcher: failed to inspect hooks.json permissions; continuing with load', {
+      filePath,
+      error: summarizeError(err),
+    });
+    return null;
+  }
+  if ((st.mode & 0o002) !== 0) return 'it is writable by every user on this machine; remove that permission (chmod o-w) and reload';
+  const uid = process.getuid?.();
+  if (uid !== undefined && st.uid !== uid && st.uid !== 0) return `it is owned by another user (uid ${st.uid}); take ownership of it and reload`;
+  return null;
+}
+
+const VALID_HOOK_TYPES = new Set(['command', 'prompt', 'agent', 'http', 'ts']);
+
+/** What is wrong with a hook definition read from a file, or null when it is accepted. */
+export function hookDefinitionProblem(def: unknown): string | null {
+  if (typeof def !== 'object' || def === null) return 'hook definition must be an object';
+  const d = def as Record<string, unknown>;
+  if (typeof d.type !== 'string' || !VALID_HOOK_TYPES.has(d.type)) return 'hook is missing a valid "type" field';
+  if (typeof d.match !== 'string') return 'hook is missing its "match" field';
+  return null;
+}
+
+/** What is wrong with a chain read from a file, or null when it is accepted. */
+export function chainProblem(chain: unknown): string | null {
+  if (typeof chain !== 'object' || chain === null) return 'chain entry must be an object';
+  const c = chain as Record<string, unknown>;
+  if (typeof c.name !== 'string') return 'chain is missing its "name" field';
+  if (!Array.isArray(c.steps)) return `chain "${c.name}" is missing its "steps" array`;
+  if (typeof c.action !== 'object' || c.action === null) return `chain "${c.name}" is missing its "action" object`;
+  const action = c.action as Record<string, unknown>;
+  if (typeof action.type !== 'string' || !VALID_HOOK_TYPES.has(action.type)) return `chain "${c.name}" action is missing a valid "type" field`;
+  if (typeof action.match !== 'string') return `chain "${c.name}" action is missing its "match" field`;
+  return null;
+}
+
 export class HookDispatcher {
   private hooks = new Map<string, HookDefinition[]>();
   private chains: HookChain[] = [];
+  /** Hooks and chains that came from a hooks file, so a reload replaces only those. */
+  private readonly loadedHooks = new WeakSet<HookDefinition>();
+  private readonly loadedChains = new WeakSet<HookChain>();
+  private readonly chainEngine: ChainEngine;
   private triggerManager: TriggerManagerLike | null = null;
+  private triggerFlags: Pick<FeatureFlagManager, 'isEnabled'> | null = null;
   private hooksBaseDirectory: string | null = null;
   private readonly runnerDeps: HookRunnerDeps;
   private readonly activityTracker: HookActivityTracker;
@@ -68,6 +123,10 @@ export class HookDispatcher {
   constructor(runnerDeps: HookRunnerDeps = {}, activityTracker: HookActivityTracker = new HookActivityTracker()) {
     this.runnerDeps = runnerDeps;
     this.activityTracker = activityTracker;
+    // A chain's action runs through the runner directly, never back through
+    // fire(): its event path is the action's own and would otherwise feed the
+    // chain that just completed.
+    this.chainEngine = new ChainEngine(this, (chain, event) => this.runChainAction(chain, event));
   }
 
   /** Actual runner lifetimes, including detached asynchronous hooks. */
@@ -97,9 +156,19 @@ export class HookDispatcher {
     finally { release(); }
   }
 
-  /** Attach a TriggerManager so hook events automatically fire matching triggers. */
-  setTriggerManager(tm: TriggerManagerLike | null): void {
+  /**
+   * Attach a TriggerManager so hook events automatically fire matching triggers.
+   * Trigger commands go through the same command guard as the exec tool, using
+   * `featureFlags` for its AST setting. Returns a disposer that detaches the
+   * manager and kills any trigger action still running.
+   */
+  setTriggerManager(tm: TriggerManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => void {
     this.triggerManager = tm;
+    this.triggerFlags = featureFlags ?? null;
+    return () => {
+      this.triggerManager = null;
+      killTriggerActions();
+    };
   }
 
   /** Load hooks from hooks.json file */
@@ -113,27 +182,14 @@ export class HookDispatcher {
       return;
     }
     try {
-      // Warn if hooks.json is world-writable, it is a trust boundary.
-      try {
-        const st = statSync(filePath);
-        // st.mode & 0o002 is the world-writable bit
-        if ((st.mode & 0o002) !== 0) {
-          logger.info(
-            'HookDispatcher: hooks.json is world-writable, only load trusted hooks files',
-            { filePath },
-          );
-        }
-      } catch (err) {
-        logger.warn('HookDispatcher: failed to inspect hooks.json permissions; continuing with load', {
-          filePath,
-          error: summarizeError(err),
-        });
+      const refusal = hooksFileRefusal(filePath);
+      if (refusal !== null) {
+        logger.warn(`HookDispatcher: hooks file not loaded because ${refusal}`, { filePath });
+        return;
       }
 
       const raw = readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-      const VALID_HOOK_TYPES = new Set(['command', 'prompt', 'agent', 'http', 'ts']);
 
       // Validate and load hooks
       if (parsed.hooks !== undefined) {
@@ -146,20 +202,14 @@ export class HookDispatcher {
               continue;
             }
             for (const def of defs as unknown[]) {
-              if (typeof def !== 'object' || def === null) {
-                logger.info('HookDispatcher: hook definition must be an object, skipping', { filePath, pattern });
+              const problem = hookDefinitionProblem(def);
+              if (problem !== null) {
+                logger.info(`HookDispatcher: ${problem}, skipping`, { filePath, pattern });
                 continue;
               }
-              const d = def as Record<string, unknown>;
-              if (typeof d.type !== 'string' || !VALID_HOOK_TYPES.has(d.type)) {
-                logger.info('HookDispatcher: hook missing valid "type" field, skipping', { filePath, pattern, type: d.type });
-                continue;
-              }
-              if (typeof d.match !== 'string') {
-                logger.info('HookDispatcher: hook missing "match" field, skipping', { filePath, pattern });
-                continue;
-              }
-              this.register(pattern, d as unknown as import('./types.js').HookDefinition);
+              const loaded = def as HookDefinition;
+              this.register(pattern, loaded);
+              this.loadedHooks.add(loaded);
             }
           }
         }
@@ -171,33 +221,13 @@ export class HookDispatcher {
           logger.info('HookDispatcher: hooks.json "chains" field must be an array, skipping', { filePath });
         } else {
           for (const chain of parsed.chains as unknown[]) {
-            if (typeof chain !== 'object' || chain === null) {
-              logger.info('HookDispatcher: chain entry must be an object, skipping', { filePath });
+            const problem = chainProblem(chain);
+            if (problem !== null) {
+              logger.info(`HookDispatcher: ${problem}, skipping`, { filePath });
               continue;
             }
-            const c = chain as Record<string, unknown>;
-            if (typeof c.name !== 'string') {
-              logger.info('HookDispatcher: chain missing "name" field, skipping', { filePath });
-              continue;
-            }
-            if (!Array.isArray(c.steps)) {
-              logger.info('HookDispatcher: chain missing "steps" array, skipping', { filePath, name: c.name });
-              continue;
-            }
-            if (typeof c.action !== 'object' || c.action === null) {
-              logger.info('HookDispatcher: chain missing "action" object, skipping', { filePath, name: c.name });
-              continue;
-            }
-            const action = c.action as Record<string, unknown>;
-            if (typeof action.type !== 'string' || !VALID_HOOK_TYPES.has(action.type)) {
-              logger.info('HookDispatcher: chain action missing valid "type" field, skipping', { filePath, name: c.name });
-              continue;
-            }
-            if (typeof action.match !== 'string') {
-              logger.info('HookDispatcher: chain action missing "match" field, skipping', { filePath, name: c.name });
-              continue;
-            }
-            this.registerChain(c as unknown as import('./types.js').HookChain);
+            const loaded = chain as HookChain;
+            if (this.registerChain(loaded)) this.loadedChains.add(loaded);
           }
         }
       }
@@ -219,9 +249,19 @@ export class HookDispatcher {
     }
   }
 
-  /** Register a chain programmatically */
-  registerChain(chain: HookChain): void {
+  /**
+   * Register a chain programmatically. Returns false, and logs why, when a
+   * chain of that name is already registered: chains are tracked by name.
+   */
+  registerChain(chain: HookChain): boolean {
+    try {
+      this.chainEngine.register(chain);
+    } catch (err) {
+      logger.warn('HookDispatcher: chain not registered', { chain: chain.name, error: summarizeError(err) });
+      return false;
+    }
     this.chains.push(chain);
+    return true;
   }
 
   /**
@@ -231,7 +271,8 @@ export class HookDispatcher {
    * the aggregated decision; subsequent hooks still execute (for
    * logging/auditing) but their deny decisions don't change the outcome.
    * For all hooks: additionalContext strings are concatenated.
-   * Once hooks are auto-removed after first execution.
+   * Once hooks are removed as they are selected to run, so two overlapping fires run one once.
+   * Chains advance on every event and run their action when their last step matches.
    * Async hooks fire and forget.
    */
   async fire(event: HookEvent, options?: HookDispatchOptions): Promise<HookResult> {
@@ -261,17 +302,45 @@ export class HookDispatcher {
       }
     }
 
-    if (matchingEntries.length === 0) {
-      return { ok: true };
-    }
-
     const aggregated: HookResult = { ok: true };
     const contextParts: string[] = [];
-    let updatedInput: Record<string, unknown> | undefined;
-    const onceToRemove: Array<{ pattern: string; hook: HookDefinition }> = [];
+    let updatedInput = undefined as Record<string, unknown> | undefined;
+
+    const canDeny = contract?.canDeny ?? event.phase === 'Pre';
+    // Folds one hook's (or chain action's) result into the event's outcome.
+    const absorb = (result: HookResult): void => {
+      if (!result.ok) {
+        aggregated.ok = false;
+        if (!aggregated.error) aggregated.error = result.error;
+        if (!aggregated.code) aggregated.code = result.code;
+      }
+
+      // For Pre hooks: first deny wins
+      if (canDeny && result.decision === 'deny') {
+        if (aggregated.decision !== 'deny') {
+          aggregated.decision = 'deny';
+          aggregated.reason = result.reason;
+        }
+      } else if (result.decision && canDeny && aggregated.decision !== 'deny') {
+        aggregated.decision = result.decision;
+        if (result.reason) aggregated.reason = result.reason;
+      }
+
+      // Last updatedInput wins
+      if (result.updatedInput && (contract?.canMutateInput ?? true)) {
+        updatedInput = result.updatedInput;
+      }
+
+      if (result.additionalContext && (contract?.canInjectContext ?? true)) {
+        contextParts.push(result.additionalContext);
+      }
+    };
 
     for (const { pattern, hook } of matchingEntries) {
       if (owner?.signal.aborted) break;
+      // A once hook is claimed before it runs, so a second fire that selected
+      // it while this one is still awaiting it does not run it again.
+      if (hook.once && !this.claimOnce(pattern, hook)) continue;
       // Async hooks run concurrently; a turn owner joins them before settlement.
       if (hook.async) {
         const asyncStart = Date.now();
@@ -309,7 +378,6 @@ export class HookDispatcher {
         void running.catch((error) => {
           if (!owner?.signal.aborted) logger.warn('Hook dispatch admission failed', { path: event.path, error: summarizeError(error) });
         });
-        if (hook.once) onceToRemove.push({ pattern, hook });
         continue;
       }
 
@@ -337,42 +405,16 @@ export class HookDispatcher {
         turnId: owner?.turnId,
       });
 
-      if (hook.once) onceToRemove.push({ pattern, hook });
-
-      if (!result.ok) {
-        aggregated.ok = false;
-        if (!aggregated.error) aggregated.error = result.error;
-        if (!aggregated.code) aggregated.code = result.code;
-      }
-
-      // For Pre hooks: first deny wins
-      if ((contract?.canDeny ?? event.phase === 'Pre') && result.decision === 'deny') {
-        if (aggregated.decision !== 'deny') {
-          aggregated.decision = 'deny';
-          aggregated.reason = result.reason;
-        }
-      } else if (result.decision && (contract?.canDeny ?? event.phase === 'Pre') && aggregated.decision !== 'deny') {
-        aggregated.decision = result.decision;
-        if (result.reason) aggregated.reason = result.reason;
-      }
-
-      // Last updatedInput wins
-      if (result.updatedInput && (contract?.canMutateInput ?? true)) {
-        updatedInput = result.updatedInput;
-      }
-
-      if (result.additionalContext && (contract?.canInjectContext ?? true)) {
-        contextParts.push(result.additionalContext);
-      }
+      absorb(result);
     }
 
-    // Remove once hooks
-    for (const { pattern, hook } of onceToRemove) {
-      const defs = this.hooks.get(pattern);
-      if (defs) {
-        const idx = defs.indexOf(hook);
-        if (idx !== -1) defs.splice(idx, 1);
-        if (defs.length === 0) this.hooks.delete(pattern);
+    // Chains advance on every event, including one no hook matched.
+    if (!owner?.signal.aborted) {
+      try {
+        const chainResult = await this.chainEngine.evaluate(event, (chain, chainEvent) => this.runChainAction(chain, chainEvent, owner, admitHook));
+        if (chainResult) absorb(chainResult);
+      } catch (err) {
+        logger.error('HookDispatcher: chain evaluation failed', { path: event.path, error: summarizeError(err) });
       }
     }
 
@@ -382,7 +424,12 @@ export class HookDispatcher {
     // Trigger dispatch is asynchronous; failures are logged and do not change
     // the hook result returned to the caller.
     if (this.triggerManager && !owner?.signal.aborted) {
-      fireTriggers(event, this.triggerManager).catch((err) => {
+      fireTriggers(event, this.triggerManager, {
+        guardCommand: async (command) => {
+          const guard = await guardExecCommand(command, this.triggerFlags);
+          return guard.allowed ? undefined : (guard.denialMessage ?? 'Command refused by the command guard.');
+        },
+      }).catch((err) => {
         logger.warn('HookDispatcher: trigger dispatch failed', {
           path: event.path,
           error: summarizeError(err),
@@ -391,6 +438,47 @@ export class HookDispatcher {
     }
 
     return aggregated;
+  }
+
+  /** Removes a once hook from the registry; false when another fire already took it. */
+  private claimOnce(pattern: string, hook: HookDefinition): boolean {
+    const defs = this.hooks.get(pattern);
+    const idx = defs?.indexOf(hook) ?? -1;
+    if (!defs || idx === -1) return false;
+    defs.splice(idx, 1);
+    if (defs.length === 0) this.hooks.delete(pattern);
+    return true;
+  }
+
+  private async runChainAction(
+    chain: HookChain,
+    event: HookEvent,
+    owner?: TurnHookOwner,
+    admitHook?: HookWorkAdmission,
+  ): Promise<HookResult> {
+    const hook = chain.action;
+    if (hook.enabled === false) return { ok: true };
+    const start = Date.now();
+    let result: HookResult;
+    try {
+      result = await (admitHook
+        ? admitHook((signal) => this.runTrackedHook(hook, event, { signal }))
+        : this.runTrackedHook(hook, event));
+    } catch (err) {
+      const message = summarizeError(err);
+      logger.error('HookDispatcher: chain action threw unexpectedly', { chain: chain.name, path: event.path, error: message });
+      result = { ok: false, error: message };
+    }
+    this.activityTracker.record(event, {
+      pattern: `chain:${chain.name}`,
+      hookName: hook.name ?? chain.name,
+      hookType: hook.type,
+      result,
+      durationMs: Date.now() - start,
+      async: false,
+      turnId: owner?.turnId,
+    });
+    return result;
   }
 
   /** Get all registered hooks (for debugging/inspection) */
@@ -407,6 +495,25 @@ export class HookDispatcher {
   clear(): void {
     this.hooks.clear();
     this.chains = [];
+    this.chainEngine.clear();
+  }
+
+  /**
+   * Remove the hooks and chains that were read from a hooks file, leaving
+   * those registered at runtime (for example by an approved `hooks add`).
+   * A reload calls this before loading the file again.
+   */
+  clearLoaded(): void {
+    for (const [pattern, defs] of [...this.hooks.entries()]) {
+      const kept = defs.filter((hook) => !this.loadedHooks.has(hook));
+      if (kept.length === 0) this.hooks.delete(pattern);
+      else this.hooks.set(pattern, kept);
+    }
+    this.chains = this.chains.filter((chain) => {
+      if (!this.loadedChains.has(chain)) return true;
+      this.chainEngine.unregister(chain.name);
+      return false;
+    });
   }
 
   /**

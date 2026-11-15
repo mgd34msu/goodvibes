@@ -1,7 +1,6 @@
 /** Actual paired HTTP -> canonical broker -> real hosted runtime -> owned loopback model. */
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { exportAndCompareFixture } from '../helpers/webui-fixture-parity.ts';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { getOperatorContract, type OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
@@ -163,9 +162,9 @@ for (const scenario of [
     const prevented = await wire('workLedger.turn.start', cancelledIdentity);
     expect(prevented.body).toBe(cancellation.body); expect(requests).toHaveLength(count);
     const directory = process.env.GOODVIBES_TEST_NATIVE_HOSTED_FIXTURE_DIR;
-    if (directory && scenario.policy === 'Default - On') { mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'cancelled.json'), JSON.stringify({ source: 'owned loopback model; real paired DaemonServer cancellation-before-dispatch', input: cancelledInput, identity: cancelledIdentity, auth, project, capture: cancelledCapture, admit: cancelledAdmit, get: cancelledGet, absent: cancelledAbsent, cancel: cancellation, status: cancelledStatus, start: prevented }, null, 2) + '\n');
-      writeFileSync(join(directory, 'completed.json'), JSON.stringify({ source: 'owned loopback model; real paired DaemonServer hosted delivery', input, identity, auth, project, capture, admit, get, absent, start, status, duplicate, attachment }, null, 2) + '\n'); }
+    if (scenario.policy === 'Default - On') {
+      exportAndCompareFixture(directory, 'cancelled.json', JSON.stringify({ source: 'owned loopback model; real paired DaemonServer cancellation-before-dispatch', input: cancelledInput, identity: cancelledIdentity, auth, project, capture: cancelledCapture, admit: cancelledAdmit, get: cancelledGet, absent: cancelledAbsent, cancel: cancellation, status: cancelledStatus, start: prevented }, null, 2) + '\n', new URL('../../../../webui/e2e/support/fixtures/native-hosted-turn/', import.meta.url));
+      exportAndCompareFixture(directory, 'completed.json', JSON.stringify({ source: 'owned loopback model; real paired DaemonServer hosted delivery', input, identity, auth, project, capture, admit, get, absent, start, status, duplicate, attachment }, null, 2) + '\n', new URL('../../../../webui/e2e/support/fixtures/native-hosted-turn/', import.meta.url)); }
   } finally {
     try {
       await f.stop();

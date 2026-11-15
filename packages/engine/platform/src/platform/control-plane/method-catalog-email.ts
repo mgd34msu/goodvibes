@@ -85,7 +85,7 @@ const EMAIL_MESSAGE_DETAIL_SCHEMA = objectSchema({
  * that a match occurred: satisfying an expectation establishes control of an
  * address and grants no command authority at all.
  */
-const EMAIL_EXPECTATION_SCHEMA = objectSchema({
+const EMAIL_EXPECTATION_PROPERTIES = {
   id: STRING_SCHEMA,
   kind: STRING_SCHEMA,
   serviceDomain: STRING_SCHEMA,
@@ -95,10 +95,25 @@ const EMAIL_EXPECTATION_SCHEMA = objectSchema({
   expiresAt: STRING_SCHEMA,
   authority: STRING_SCHEMA,
   remainingMs: NUMBER_SCHEMA,
-}, [
+};
+const EMAIL_EXPECTATION_REQUIRED = [
   'id', 'kind', 'serviceDomain', 'recipientAddress', 'purpose',
   'openedAt', 'expiresAt', 'authority',
-]);
+];
+const EMAIL_EXPECTATION_SCHEMA = objectSchema(EMAIL_EXPECTATION_PROPERTIES, EMAIL_EXPECTATION_REQUIRED);
+
+/**
+ * What opening an expectation answers: the expectation, plus whether any
+ * mailbox is being read right now. An expectation registered while nothing
+ * watches the mailbox can only run out, and the caller should learn that now.
+ */
+const EMAIL_EXPECTATION_OPENED_SCHEMA = objectSchema({
+  ...EMAIL_EXPECTATION_PROPERTIES,
+  watching: objectSchema({
+    running: BOOLEAN_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['running', 'reason']),
+}, [...EMAIL_EXPECTATION_REQUIRED, 'watching']);
 
 /**
  * One persisted cursor, disclosed.
@@ -178,7 +193,9 @@ const EMAIL_INBOUND_RETENTION_SCHEMA = objectSchema({
     sweptAt: NUMBER_SCHEMA,
     trigger: STRING_SCHEMA,
     summary: STRING_SCHEMA,
-  }, ['sweptAt', 'trigger', 'summary']),
+    // One "<store>: <detail>" line per store the sweep could not clean.
+    failures: arraySchema(STRING_SCHEMA),
+  }, ['sweptAt', 'trigger', 'summary', 'failures']),
 }, ['cursors', 'records', 'expectations']);
 
 /**
@@ -265,7 +282,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.draft.create',
     title: 'Create Email Draft',
     description:
-      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. Requires explicit confirmation.',
+      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field.',
     category: 'email',
     scopes: ['write:email'],
     access: 'admin',
@@ -337,7 +354,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     transport: ['ws'],
     title: 'Open Verification Expectation',
     description:
-      'Register, in advance, that a verification message is expected at one address from one service domain, within a bounded window. Called by the workstream that already holds authority BEFORE it submits the signup or checkout form. Grants evidence-only authority: a matching message proves control of the address and can never start work, widen the expectation or extend its window.',
+      'Register, in advance, that a verification message is expected at one address from one service domain, within a bounded window. Called by the workstream that already holds authority BEFORE it submits the signup or checkout form. Grants evidence-only authority: a matching message proves control of the address and can never start work, widen the expectation or extend its window. The answer carries `watching`: whether a mailbox is being read right now and, when not, why. Opening is not refused while nothing watches (a cluster standby legitimately does not), but a message cannot arrive then.',
     category: 'email',
     scopes: ['write:email'],
     access: 'admin',
@@ -348,7 +365,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
       windowMs: NUMBER_SCHEMA,
       kind: STRING_SCHEMA,
     }, ['serviceDomain', 'recipientAddress', 'purpose']),
-    outputSchema: EMAIL_EXPECTATION_SCHEMA,
+    outputSchema: EMAIL_EXPECTATION_OPENED_SCHEMA,
   }),
   methodDescriptor({
     id: 'email.expectation.list',

@@ -36,7 +36,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import { attemptUnitsFor, createContractAttemptJudge, selectAttempts, type AttemptSteps } from './best-of-n.js';
 import { briefWithPreviousChecks, buildUnitBrief } from './brief.js';
 import { failureFromError, isAbortError, type ContractRun, type SpawnPurpose } from './run-context.js';
-import { isTerminalUnitStatus, type ContractFailureKind, type ContractGroup, type ContractRouteSelector, type ContractUnit } from './types.js';
+import { IllegalContractTransitionError, isTerminalUnitStatus, type ContractFailureKind, type ContractGroup, type ContractRouteSelector, type ContractUnit } from './types.js';
 import { rollUpContractUsage, type UsagePricing } from './usage.js';
 import type { UnitWatchdog } from './watchdog.js';
 import { acquireSharedTree, groupWorkstreamInput } from './workstreams.js';
@@ -138,6 +138,8 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
 
   function attachEngine(run: ContractRun): OrchestrationEngine {
     const { contract } = run;
+    // A second engine would own none of the first one's workstreams, so no unit could ever pass.
+    if (run.engine !== null) throw new Error(`contract ${contract.id} already runs its plan on an engine; it cannot start the plan again`);
     const engine = deps.createEngine({
       projectRoot: contract.worktreePath ?? contract.projectRoot,
       stateRoot: contract.projectRoot,
@@ -307,12 +309,27 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
 
   function onEngineEvent(run: ContractRun, event: OrchestrationEvent): void {
     if (run.terminal) return;
+    try {
+      translateEngineEvent(run, event);
+    } catch (error) {
+      // The engine only logs a listener's throw; a unit that silently diverged from its item would never finish.
+      if (!(error instanceof IllegalContractTransitionError)) throw error;
+      deps.failContract(run, 'other', `the contract could not follow its work (${event.type}${'itemId' in event ? ` for ${event.itemId}` : ''}): ${error.message}`);
+    }
+  }
+
+  function translateEngineEvent(run: ContractRun, event: OrchestrationEvent): void {
     switch (event.type) {
       case 'item-agent-spawned':
         unitSpawned(run, event.itemId, event.agentId);
         return;
-      case 'item-blocked-dependency':
       case 'item-blocked-budget': {
+        // Nothing raises a contract's budget while it runs, so a unit blocked on it would wait forever.
+        const unit = unitOfItem(run, event.itemId);
+        deps.failContract(run, 'budget', `the contract's budget is used up (${event.reason}), so unit ${unit?.id ?? event.itemId} cannot start; the work done so far is kept`);
+        return;
+      }
+      case 'item-blocked-dependency': {
         const unit = unitOfItem(run, event.itemId);
         if (unit?.status === 'pending') run.moveUnit(unit, 'blocked');
         if (unit !== undefined) mirrorBlocked(run, unit);
@@ -336,7 +353,9 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
         markMerged(run, event.itemId);
         return;
       case 'item-worktree-removed':
-        // A branch with nothing to merge integrates as an empty merge: no merged event, the worktree is just removed.
+      case 'item-worktree-kept':
+        // A branch with nothing to merge integrates as an empty merge: no merged event, the worktree is just
+        // removed, or kept when its removal did not complete. Either way the item merged.
         if (engineItem(run, event.itemId)?.mergeState === 'merged') markMerged(run, event.itemId);
         return;
       case 'item-merge-conflict': {

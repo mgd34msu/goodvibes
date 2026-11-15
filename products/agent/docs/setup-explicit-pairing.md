@@ -39,6 +39,16 @@ Run `/setup pair` or `goodvibes-agent setup status` to inspect/reverify rather t
 retrying or revoking. Pairing success does not establish provider, workspace,
 Jev or execution readiness.
 
+Two outcomes are the exception to "remains unknown". When the host answers the
+migration request with a definite refusal (a 4xx other than a timeout or a
+conflict) or is not listening at all, nothing was created: the attempt is
+cleared, the result says `rejected`, and the next preview pairs normally. An
+unknown outcome that stays after a lost reply is cleared only by the owner:
+`/setup pair --apply` (or `goodvibes-agent setup pair --apply`) on an unknown
+host offers a `CLEAR ...` phrase that forgets the local marker. Do that only
+after checking on the host that no pairing token exists for the attempt; a
+token that does exist stays valid until you revoke it there.
+
 In the standalone command, Enter or an incorrect phrase cancels with exit code 2.
 From the confirmation
 prompt onward, Ctrl-C and terminal EOF (Ctrl-D) interrupt with exit code 130,
@@ -96,45 +106,16 @@ Companion QR/manual export is a separate existing bootstrap route, not an export
 of the Agent-owned credential.
 
 A verified pair establishes native intake identity only. Provider, workspace,
-Jev availability and execution remain separate checks. This is a bounded THE-105
-increment; it does not retire the legacy planning workflow or establish hosted,
-inbound or derived-continuation authority. Development tests use synthetic
-loopback endpoints and scratch homes only.
-
-## Compiled terminal qualification
-
-`src/test/e2e/setup-pair-terminal.e2e.test.ts` runs the native compiled Agent in
-a real POSIX PTY against an owned loopback daemon. It types the displayed exact
-phrase rather than injecting terminal answers. The suite covers positive
-pairing, Enter/incorrect-answer cancellation, Ctrl-C/EOF and process-signal
-interruptions, post-storage verification, restart readiness, a killed process
-and a daemon-committed migration whose reply is withheld until client timeout.
-Unknown outcomes stay blocked after restart, without falling back to the shared
-token or minting another credential. Secret redaction, private store modes and
-the unchanged legacy token file are checked. No real accounts or providers are
-used, and this does not establish hosted/WebUI or cross-platform release parity.
-
-After building the engine and `bun run --cwd products/agent build:binary`, run:
-
-```sh
-bun packages/engine/scripts/test.ts --cwd ../../products/agent src/test/e2e/setup-pair-terminal.e2e.test.ts
-```
-
-The compiled interactive suite `src/test/e2e/setup-pair-interactive.e2e.test.ts`
-drives the actual composer through a POSIX PTY against an owned daemon and
-scratch home. It covers the owner phrase, read-only preview, cancellation and
-replacement before/after confirmation, interrupted verification, restart without
-remint, environment precedence, secret redaction and unchanged legacy storage.
-Controller and actual harness-runner tests additionally cover stale responses,
-missing shell ownership and nested/model refusal. This is Agent acceptance only;
-TUI credential unification, hosted/WebUI and cross-platform parity remain separate.
+Jev availability and execution remain separate checks, and pairing does not
+establish hosted, inbound or derived-continuation authority.
 
 ## Native intake setup readiness
 
 Setup status is a read-only observation, never an authority grant. Agent uses the
 same selected-host resolver and effective token precedence as native intake:
-GOODVIBES_CONNECTED_HOST_TOKEN, GOODVIBES_DAEMON_TOKEN, then the existing daemon
-operator token file. A fresh `control.auth.current` response must identify an
+`GOODVIBES_CONNECTED_HOST_TOKEN`, `GOODVIBES_DAEMON_TOKEN`, the Agent-owned
+pairing for the exact selected origin, then the existing daemon operator token
+file (only when no host pairing exists). A fresh `control.auth.current` response must identify an
 authenticated admin token principal other than `shared-token`, with
 `read:work-ledger` and `write:work-ledger` (or `*`). The coarse `authMode` is not
 pairing evidence. Intake and setup share this predicate.
@@ -156,9 +137,3 @@ Provider/model selection, workspace configuration, Jev availability, execution
 scope (`write:fleet`), and a successful assistant turn remain separate checks.
 A ready auth row does not prove any of them. Execution still revalidates its own
 host-issued authority; setup output never authorizes execution.
-
-This increment does not create or migrate paired credentials, modify a real
-daemon, change credential storage ownership, retire the legacy planning flow,
-or complete THE-105. Explicit fresh-device pairing and host-bound Agent storage
-remain separate work. Tests use synthetic loopback or injected transports and
-scratch configuration only.

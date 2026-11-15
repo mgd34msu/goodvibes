@@ -30,6 +30,7 @@
  * The file lives in the control-plane config dir, so both layers reach every
  * consumer of the same home (TUI, daemon, agent) without extra wiring.
  */
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -112,8 +113,11 @@ export function loadContextWindowOverrides(filePath: string): LoadedContextWindo
   }
 }
 
-/** Persist state. Write failures are logged, not thrown, the in-memory values still apply this session. */
-export function saveContextWindowOverrides(filePath: string, state: LoadedContextWindowState): void {
+/**
+ * Persist state. Write failures are logged, not thrown, the in-memory values still apply this session.
+ * Returns null when the file was written, otherwise the reason it was not, so a caller can tell the user.
+ */
+export function saveContextWindowOverrides(filePath: string, state: LoadedContextWindowState): string | null {
   const sorted = (map: ReadonlyMap<string, number>): Record<string, number> =>
     Object.fromEntries([...map.entries()].sort(([a], [b]) => a.localeCompare(b)));
   const file: ContextWindowOverridesFile = {
@@ -124,11 +128,13 @@ export function saveContextWindowOverrides(filePath: string, state: LoadedContex
   };
   try {
     writeJsonFileAtomic(filePath, file);
+    return null;
   } catch (error) {
     logger.warn('[context-window-overrides] Failed to persist overrides', {
       filePath,
       error: summarizeError(error),
     });
+    return summarizeError(error);
   }
 }
 
@@ -140,16 +146,36 @@ export function saveContextWindowOverrides(filePath: string, state: LoadedContex
  */
 export class ContextWindowOverrideStore {
   private state: LoadedContextWindowState | null = null;
+  /** Size and mtime of the file when `state` was read or last written; a different value means another process wrote it. */
+  private signature: string | null = null;
 
   constructor(private readonly filePath: string) {}
 
+  private fileSignature(): string {
+    try {
+      const stat = statSync(this.filePath);
+      return `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      return 'absent';
+    }
+  }
+
+  /** The state as it is on disk now: read again when another process (TUI, daemon, agent sharing this home) has written the file since. */
   private load(): LoadedContextWindowState {
-    this.state ??= loadContextWindowOverrides(this.filePath);
+    const signature = this.fileSignature();
+    if (this.state === null || signature !== this.signature) {
+      this.state = loadContextWindowOverrides(this.filePath);
+      this.signature = signature;
+    }
     return this.state;
   }
 
-  private persist(): void {
-    saveContextWindowOverrides(this.filePath, this.load());
+  private persist(): string | null {
+    // Writes the state the mutation just changed, not a fresh read that would drop it.
+    if (this.state === null) return null;
+    const failure = saveContextWindowOverrides(this.filePath, this.state);
+    this.signature = this.fileSignature();
+    return failure;
   }
 
   /** The user-configured window for a model, or null when automatic. */
@@ -162,11 +188,15 @@ export class ContextWindowOverrideStore {
     return this.load().observed.get(registryKey) ?? null;
   }
 
-  /** Validate, store, and persist a user override. Returns false (and stores nothing) for invalid caps. */
-  set(registryKey: string, cap: number): boolean {
+  /**
+   * Validate, store, and persist a user override. Returns false (and stores nothing) for invalid caps.
+   * A valid cap always applies to this session; `onNotSaved` receives the reason when it could not be written to disk.
+   */
+  set(registryKey: string, cap: number, onNotSaved?: (reason: string) => void): boolean {
     if (!isValidContextWindowOverride(cap)) return false;
     this.load().overrides.set(registryKey, cap);
-    this.persist();
+    const failure = this.persist();
+    if (failure !== null) onNotSaved?.(failure);
     return true;
   }
 

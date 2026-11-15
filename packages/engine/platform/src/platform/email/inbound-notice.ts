@@ -253,7 +253,12 @@ export const CONTROL_OR_LINE_BREAK = new RegExp(
   // U+0085 (NEL) is a line break to a renderer and was not in this class. It
   // sits outside the C0 range, so "control characters and the two Unicode
   // separators" missed it by exactly one code point.
-  '[\\u0000-\\u001F\\u007F\\u0085\\u2028\\u2029]',
+  // The bidi controls are here too: an embedding or isolate override in a
+  // sender-written field can visually reorder the owner's notice, so what is
+  // read is not what was sent. They are not line breaks, but they are the same
+  // kind of character, one that changes what a line looks like without being
+  // visible itself.
+  '[\\u0000-\\u001F\\u007F\\u0085\\u061C\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069]',
   'g',
 );
 
@@ -389,10 +394,10 @@ async function deliveredToField(deliveredTo: DeliveredRecipient | null): Promise
   return { label: 'Delivered to', value: [untrusted(await displaySafe(deliveredTo.address))] };
 }
 
-function outcomeField(outcome: InboundOutcome): NoticeField {
+async function outcomeField(outcome: InboundOutcome): Promise<NoticeField> {
   switch (outcome.kind) {
     case 'matched-expectation': {
-      const purpose = stripControlAndLineBreaks(outcome.purpose);
+      const purpose = await displaySafe(outcome.purpose);
       const domain = safeRegistrableDomain(outcome.serviceDomain);
       return {
         label: 'Outcome',
@@ -429,7 +434,7 @@ function outcomeField(outcome: InboundOutcome): NoticeField {
         // line-safe and left it markup-live.
         value: [
           literal('LIMITED VIEW, this account cannot currently '),
-          untrusted(outcome.missingCapability),
+          untrusted(await displaySafe(outcome.missingCapability)),
           literal(
             '. Read from envelope fields only; nothing here could match or '
             + 'satisfy a verification.',
@@ -489,7 +494,7 @@ export async function renderInboundMailNotice(input: InboundMailNoticeInput): Pr
     await senderField(input.senderDisplay),
     await subjectField(input.subject),
     await deliveredToField(input.deliveredTo),
-    outcomeField(input.outcome),
+    await outcomeField(input.outcome),
     ...input.links.map(linkField),
     receivedAtField(input.receivedAt),
   ];

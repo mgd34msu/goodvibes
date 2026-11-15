@@ -41,6 +41,8 @@ import { Toggle } from '../ui/Toggle';
 interface FeatureUnitCardProps {
   readonly unit: FeatureUnitModel;
   readonly onCommit: (key: string, value: unknown) => Promise<void>;
+  /** Removes one key's explicit value so it reads as its default; forwarded to each field. */
+  readonly onReset?: (key: string) => Promise<void>;
   /** What the daemon reported for the last successful config.set of each key this session
    *  (SettingsModal's persistedByKey), keyed by config key, looked up here per field and
    *  for the enablement key itself. */
@@ -57,6 +59,7 @@ interface FeatureUnitCardProps {
 export function FeatureUnitCard({
   unit,
   onCommit,
+  onReset,
   persistedByKey,
   pendingRestart,
   onEnablementCommitted,
@@ -178,6 +181,7 @@ export function FeatureUnitCard({
               key={field.key}
               field={field}
               onCommit={onCommit}
+              {...(onReset ? { onReset } : {})}
               persisted={persistedByKey[field.key]}
               currency={currency}
             />

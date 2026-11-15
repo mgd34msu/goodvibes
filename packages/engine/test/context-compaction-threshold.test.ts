@@ -93,8 +93,7 @@ describe('context auto-compaction threshold', () => {
         safetyBufferTokens: 15_000,
         reason: 'safety-buffer',
       });
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 50 && fired.length === 0; turn++) await new Promise((resolve) => setImmediate(resolve));
 
       expect(fired).toHaveLength(1);
       expect(fired[0]).toMatchObject({

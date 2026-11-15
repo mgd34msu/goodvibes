@@ -15,11 +15,12 @@ import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../lib/toast';
 
-const postureResult: unknown = { posture: { origin: 'http://192.168.0.131:3423', scheme: 'http', privateNetwork: true, secureContext: false, notice: 'lan notice', capabilities: [
+let postureResult: unknown = { posture: { origin: 'http://192.168.0.131:3423', scheme: 'http', privateNetwork: true, secureContext: false, notice: 'lan notice', capabilities: [
   { capability: 'service-worker', available: false, reason: 'needs https, available via tailscale' },
   { capability: 'push', available: false, reason: 'needs https, available via tailscale' },
   { capability: 'microphone', available: false, reason: 'needs https, available via tailscale' },
 ] } };
+const defaultPostureResult: unknown = postureResult;
 let postureRejects = false;
 
 mock.module('../../lib/goodvibes', () => ({
@@ -84,6 +85,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void
 
 afterEach(() => {
   postureRejects = false;
+  postureResult = defaultPostureResult;
   pushSupportValue = 'insecure-context';
   installAffordanceValue = 'none';
 });
@@ -103,6 +105,14 @@ describe('push capability label', () => {
     await waitFor(() => client.getQueryCache().getAll().some((query) => query.state.status === 'error') && client.isFetching() === 0);
     flushSync(() => {});
     expect(el.textContent).not.toContain('needs https, available via tailscale');
+    // Never a blank label: the still-true generic HTTPS pointer takes its place.
+    expect(el.textContent).toContain('Web Push needs a secure (HTTPS) connection');
+    unmount();
+  });
+
+  test('shows the generic HTTPS pointer while the posture read is still pending', () => {
+    const { el, unmount } = render();
+    expect(el.textContent).toContain('Web Push needs a secure (HTTPS) connection');
     unmount();
   });
 
@@ -125,6 +135,15 @@ describe('install (service-worker) capability label', () => {
     // it (not just the push section) by checking it appears at least twice.
     const occurrences = el.textContent?.split('needs https, available via tailscale').length ?? 1;
     expect(occurrences - 1).toBeGreaterThanOrEqual(2);
+    unmount();
+  });
+
+  test('an insecure origin whose posture names no service-worker reason falls back to the generic install pointer', async () => {
+    installAffordanceValue = 'none';
+    postureResult = { posture: { origin: 'http://192.168.0.131:3423', scheme: 'http', privateNetwork: true, secureContext: false, notice: 'lan notice', capabilities: [] } };
+    const { el, unmount } = render();
+    await waitFor(() => el.textContent?.includes('Installing needs a secure (HTTPS) connection') === true);
+    expect(el.textContent).toContain('Installing needs a secure (HTTPS) connection');
     unmount();
   });
 

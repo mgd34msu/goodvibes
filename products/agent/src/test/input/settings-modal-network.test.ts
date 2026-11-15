@@ -1,8 +1,7 @@
 /**
- * Regression tests for Agent settings boundaries around copied service-hosting
- * config. GoodVibes Agent connects to a GoodVibes host owned outside this product; the settings
- * workspace must not expose controls that imply it owns daemon, listener,
- * browser host, raw network, service, or WRFC lifecycle.
+ * Agent settings keep the service-hosting, daemon, listener, browser-host and
+ * network keys visible and reachable: nothing is policy-hidden, so an operator
+ * can inspect and change them from the settings workspace.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync, existsSync } from 'fs';
@@ -25,10 +24,10 @@ function makeTmpDir(): string {
 
 function createConfigManager(root: string): ConfigManager {
   return new ConfigManager({
-    surfaceRoot: 'tui',
+    surfaceRoot: 'agent',
     workingDir: root,
     homeDir: root,
-    configDir: join(root, '.goodvibes', 'global-tui'),
+    configDir: join(root, '.goodvibes', 'global-agent'),
   });
 }
 
@@ -71,12 +70,12 @@ describe('SettingsModal: Agent service-hosting boundaries', () => {
     cm = createConfigManager(tmpDir);
     ffm = createFeatureFlagManager();
     modal = new SettingsModal();
-    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'tui', 'subscriptions.json'));
-    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'tui', 'services.json'), {
+    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'agent', 'subscriptions.json'));
+    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: new SecretsManager({ projectRoot: tmpDir, globalHome: tmpDir, configManager: cm }),
       subscriptionManager,
     });
-    mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+    mkdirSync(join(tmpDir, '.goodvibes', 'agent'), { recursive: true });
   });
 
   afterEach(() => {
@@ -101,16 +100,11 @@ describe('SettingsModal: Agent service-hosting boundaries', () => {
     expect(SETTINGS_CATEGORIES).toContain('orchestration');
   });
 
-  test('only the internal WRFC message setting is policy-hidden', () => {
-    // Hiding is reserved for keys with nothing for the owner to decide. Anything
-    // hazardous is shown and gated instead, so the refusal can name the key and
-    // say why, `danger.httpListener` moved from this list to that treatment.
+  test('no settings key is policy-hidden', () => {
+    // Anything hazardous is shown and gated instead, so the refusal can name the
+    // key and say why; `danger.httpListener` moved from hiding to that treatment.
     for (const key of [
-      'ui.wrfcMessages',
-    ]) {
-      expect(isAgentHiddenSettingKey(key)).toBe(true);
-    }
-    for (const key of [
+      'ui.contractMessages',
       'danger.httpListener',
       'controlPlane.hostMode',
       'controlPlane.port',
@@ -138,17 +132,13 @@ describe('SettingsModal: Agent service-hosting boundaries', () => {
       'runtime.eventBus.maxListeners',
       'orchestration.recursionEnabled',
       'contract.gateTimeoutMs',
+      'ui.contractMessages',
     ]) {
       expect(keys.has(key)).toBe(true);
     }
-    for (const key of [
-      'ui.wrfcMessages',
-    ]) {
-      expect(keys.has(key)).toBe(false);
-    }
   });
 
-  test('selectTarget navigates to daemon runtime keys and to the danger toggle, but not to hidden keys', () => {
+  test('selectTarget navigates to daemon runtime keys and to the danger toggle, but not to unknown keys', () => {
     openSettings();
     modal.selectTarget('controlPlane.port');
     expect(modal.getSelected()?.setting.key).toBe('controlPlane.port');
@@ -159,7 +149,7 @@ describe('SettingsModal: Agent service-hosting boundaries', () => {
     expect(modal.getSelected()?.setting.key).toBe('danger.httpListener');
 
     const before = modal.getSelected()?.setting.key;
-    modal.selectTarget('ui.wrfcMessages');
+    modal.selectTarget('ui.noSuchSetting');
     expect(modal.getSelected()?.setting.key).toBe(before);
   });
 

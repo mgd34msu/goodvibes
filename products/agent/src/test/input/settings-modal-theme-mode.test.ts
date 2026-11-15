@@ -48,20 +48,20 @@ describe('display.themeMode settings-modal entry (schema-driven)', () => {
     process.env.HOME = tmpDir;
     process.chdir(tmpDir);
     cm = new ConfigManager({
-      surfaceRoot: 'tui',
+      surfaceRoot: 'agent',
       workingDir: tmpDir,
       homeDir: tmpDir,
-      configDir: join(tmpDir, '.goodvibes', 'global-tui'),
+      configDir: join(tmpDir, '.goodvibes', 'global-agent'),
     });
     ffm = createFeatureFlagManager();
     modal = new SettingsModal();
-    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'tui', 'subscriptions.json'));
-    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'tui', 'services.json'), {
+    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'agent', 'subscriptions.json'));
+    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: new SecretsManager({ projectRoot: tmpDir, globalHome: tmpDir, configManager: cm }),
       subscriptionManager,
     });
     mcpRegistry = { listServerSecurity: () => [], setServerTrustMode: () => {} } as unknown as McpRegistry;
-    mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+    mkdirSync(join(tmpDir, '.goodvibes', 'agent'), { recursive: true });
   });
 
   afterEach(() => {

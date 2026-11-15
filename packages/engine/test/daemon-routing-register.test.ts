@@ -104,7 +104,7 @@ describe('registerRoutingMethods: catalog attachment', () => {
       total: number;
     };
     expect(limited.routes.length).toBe(1);
-    expect(limited.total).toBe(1);
+    expect(limited.total).toBe(3);
   });
 
   test('assign returns the platform output shape and supports channelId or surfaceKind+routeId', async () => {

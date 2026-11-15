@@ -10,8 +10,8 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
-  detectTailscale,
-  enableTailscaleServe,
+  detectTailscaleAsync,
+  enableTailscaleServeAsync,
   type TailscaleCommandRunner,
   type TailscaleServeReceiptStore,
 } from '../../remote-access/tailscale.js';
@@ -37,7 +37,7 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
 function createGetHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
-    const detection = detectTailscale(deps.runner);
+    const detection = await detectTailscaleAsync(deps.runner);
     const lastServe = deps.receipts.latest();
     return { ...detection, ...(lastServe ? { lastServe } : {}) };
   };
@@ -46,9 +46,18 @@ function createGetHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
 function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
-    const receipt = enableTailscaleServe(deps.resolveWebPort(), deps.runner);
+    const receipt = await enableTailscaleServeAsync(deps.resolveWebPort(), deps.runner);
     // The attempt is recorded either way, an honest receipt, never a silent failure.
-    deps.receipts.append(receipt);
+    // A store that cannot take the record must not turn a serve that is already active into an error.
+    let receiptRecorded = true;
+    try {
+      deps.receipts.append(receipt);
+    } catch (error) {
+      receiptRecorded = false;
+      logger.warn('tailscale.serve.run: the receipt could not be recorded', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     let publicBaseUrlUpdated = false;
     if (receipt.ok && receipt.url) {
       try {
@@ -60,7 +69,7 @@ function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler
         });
       }
     }
-    return { receipt, publicBaseUrlUpdated };
+    return { receipt, publicBaseUrlUpdated, ...(receiptRecorded ? {} : { receiptRecorded }) };
   };
 }
 

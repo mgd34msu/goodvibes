@@ -140,7 +140,10 @@ function ownedServices(services: NativeContractServices | undefined): NativeCont
 function authority(contract: Contract, services: NativeContractServices): NativeContractAuthority {
   assertNativeContractSource(contract);
   if (contract.durableAdmission !== undefined) assertDurableCheckpoint(contract, contract.durableAdmission);
-  const result = services.host.authorityOf(structuredClone(contract));
+  // The host reads identity and admission, never the captured file manifest or the decision history, which grow with the
+  // repository and the contract; this runs before and after every attempt, so a full copy would be paid many times over.
+  const { inputSnapshot: _manifest, nativeDecisions: _history, ...identityFields } = contract;
+  const result = services.host.authorityOf(structuredClone(identityFields));
   const binding = captureJevDecisionContext({ decisionId: 'authority', binding: { sourceId: 'source', inputRevision: 'input', actionId: 'action', actionRevision: 'revision', ...result }, judgmentDecisionIds: [], evidence: [], continuations: [], resumeConditions: [] }).binding;
   return { authorityId: binding.authorityId, authorityRevision: binding.authorityRevision, scopeId: binding.scopeId, scopeRevision: binding.scopeRevision };
 }
@@ -269,6 +272,23 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
   return { id: source.criteriaId, revision: source.criteriaRevision };
 }
 
+/** Native decisions being read now, per contract: several units can decide at once. */
+const decidingNow = new WeakMap<Contract, Map<string, { readonly stage: string; readonly targetId: string }>>();
+
+/**
+ * The one progress value shown for every concurrent decision: a deferral that
+ * still waits outranks a reading in flight, so a unit deciding cannot hide another unit's wait.
+ */
+function showNativeProgress(contract: Contract): void {
+  const deferred = Object.values(contract.nativeDecisions?.pending ?? {}).find(record => record.decision.outcome === 'defer');
+  if (deferred !== undefined && deferred.decision.outcome === 'defer') {
+    contract.nativeProgress = { schemaVersion: 1, state: 'deferred', stage: deferred.stage, targetId: deferred.targetId, until: deferred.decision.until };
+    return;
+  }
+  const deciding = [...(decidingNow.get(contract)?.values() ?? [])].at(-1);
+  contract.nativeProgress = deciding === undefined ? undefined : { schemaVersion: 1, state: 'deciding', stage: deciding.stage, targetId: deciding.targetId };
+}
+
 /** Reconstructs current bindings after a real external change. No stored receipt is replayed on resume. */
 export async function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
   requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
@@ -323,7 +343,11 @@ export async function decideNativeContract(contract: Contract, services: NativeC
         if (current.id !== captured.id || current.revision !== captured.revision) { owner.cancel?.(contract, 'Native condition catalog changed'); throw new JudgmentError('aborted', 'Native condition catalog changed'); }
       }
     };
-    contract.nativeProgress = { schemaVersion: 1, state: 'deciding', stage: input.stage, targetId: input.targetId }; owner.changed(contract);
+    let inFlight = decidingNow.get(contract);
+    if (inFlight === undefined) { inFlight = new Map(); decidingNow.set(contract, inFlight); }
+    inFlight.set(key, { stage: input.stage, targetId: input.targetId });
+    showNativeProgress(contract); owner.changed(contract);
+    const deciding = inFlight;
     const result = await decideAutonomous({ port: nativeSemanticPort(contract, owner, input.signal),
       site: `contract.native.${input.stage}`, instructions: INSTRUCTIONS, actionDescription: input.action, binding,
       state: { source: autonomousSourceEvidence(source), evidence, externalConditions: capturedConditions.map(condition => ({ description: condition.description })) } as unknown as EntryType,
@@ -334,6 +358,10 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       supportingDecisionIds: input.decisionIds,
       continuations: input.continuations.map(continuation => ({ ref: { id: continuation.id, kind: continuation.kind, revision: actionRevision }, description: continuation.description, input: continuation.input ?? null })),
       conditions: capturedConditions, allowAct: input.allowAct, assertCurrent: active, signal: input.signal,
+    }).finally(() => {
+      deciding.delete(key);
+      // A reading that threw leaves nothing deciding for this target.
+      if (contract.nativeProgress?.state !== 'refused') showNativeProgress(contract);
     });
     result.assertCurrent();
     const record: NativeContractDecisionRecord = { schemaVersion: 1, stage: input.stage, targetId: input.targetId,
@@ -342,11 +370,12 @@ export async function decideNativeContract(contract: Contract, services: NativeC
     try { owner.host.onDecision?.(contract.id, structuredClone(record)); } catch { /* An observer cannot decide or duplicate execution. */ }
     if (result.decision.outcome === 'defer') {
       state.pending[key] = record;
-      contract.nativeProgress = { schemaVersion: 1, state: 'deferred', stage: input.stage, targetId: input.targetId, until: result.decision.until };
+      showNativeProgress(contract);
       if (owner.checkpoint !== undefined) owner.checkpoint(contract); else owner.changed(contract);
       continue;
     }
-    contract.nativeProgress = result.decision.outcome === 'reject' ? { schemaVersion: 1, state: 'refused', stage: input.stage, targetId: input.targetId } : undefined;
+    if (result.decision.outcome === 'reject') contract.nativeProgress = { schemaVersion: 1, state: 'refused', stage: input.stage, targetId: input.targetId };
+    else showNativeProgress(contract);
     if (owner.checkpoint !== undefined) owner.checkpoint(contract); else owner.changed(contract);
     return { ...result, ...(result.decision.outcome === 'revise' ? { continuationId: result.decision.next.id } : {}) };
   }

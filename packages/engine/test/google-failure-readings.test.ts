@@ -35,10 +35,10 @@ test('a client word and Testing status do not establish a mismatched client or e
   expect(fake.requests[0]!.state).toEqual({ ...grant });
 });
 
-test('known account mismatch stays local; an unavailable or weak diagnosis stays unknown', async () => {
+test('a differing signed-in account explains only a failure Google did not explain; a weak diagnosis stays unknown', async () => {
   const fake = fakePort(() => noulAnswer(0.55)); installJudgmentPort(fake.port);
   expect((await diagnoseInvalidGrant({ ...grant, intendedAccount: 'a@example.com', signedInAccount: 'b@example.com' })).cause).toBe('account-mismatch');
-  expect(fake.requests).toHaveLength(0);
+  expect(fake.requests).toHaveLength(1);
   expect((await diagnoseInvalidGrant(grant)).cause).toBe('unknown');
   installJudgmentPort(undefined);
   expect((await diagnoseInvalidGrant(grant)).cause).toBe('unknown');

@@ -8,6 +8,9 @@ import { registerSessionContentCommands } from '../../input/commands/session-con
 import { sessionCommand } from '../../input/commands/session.ts';
 import type { ShellModeManagerService } from '../../runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { fakePort } from '@goodvibes-jev/judgment/testing';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic-readings.ts';
 
 function makeShellPaths(root: string) {
   return {
@@ -37,6 +40,14 @@ function baseContext(root: string, out: string[]): CommandContext {
 describe('write/export command confirmation', () => {
   test('conversation export requires --yes before writing a transcript file', async () => {
     const root = makeProjectTempDir('gv-export-confirm');
+    // The file is redacted before it is written, and an unscripted reading fails
+    // closed to "[REDACTED]", so the transcript's plain lines are authored here.
+    const answer = authoredPrivacyAnswer({ parts: [[errorText('[USER]')], [errorText('hello')], [errorText('')]] });
+    const previousPort = installJudgmentPort(fakePort((name, question, state) => {
+      const result = answer(name, question, state);
+      if (result === undefined) throw new Error(`Unscripted export question: ${name}`);
+      return result;
+    }).port);
     try {
       const registry = new CommandRegistry();
       registerSessionContentCommands(registry);
@@ -57,15 +68,16 @@ describe('write/export command confirmation', () => {
       } as unknown as CommandContext;
       const target = join(root, 'conversation.md');
 
-      await registry.get('export')!.handler([target], ctx);
+      await registry.get('export')!.handler(['txt', target], ctx);
       expect(existsSync(target)).toBe(false);
       expect(out.join('\n')).toContain('Refusing to export conversation');
 
       out.length = 0;
-      await registry.get('export')!.handler([target, '--yes'], ctx);
+      await registry.get('export')!.handler(['txt', target, '--yes'], ctx);
       expect(existsSync(target)).toBe(true);
       expect(readFileSync(target, 'utf-8')).toContain('hello');
     } finally {
+      installJudgmentPort(previousPort);
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { triageSource } from './_helpers/triage-source.ts';
+import { triageSource, useTriageSourceCleanup } from './_helpers/triage-source.ts';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { captureTriageInputs, checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
 import { inboxTriage, TRIAGE_MODEL } from '../platform/src/platform/intake/triage/battery.js';
 import { enrichItemsWithTriage, readTriageMetadataBatch, runInboxTriage } from '../platform/src/platform/intake/triage/pipeline.js';
 import type { TriageInput, TriageReceipt, TriageStore, TriageStoredRecord } from '../platform/src/platform/intake/triage/types.js';
+
+useTriageSourceCleanup();
 const item = (id = 'fixture-a', subject = 'Synthetic message'): TriageInput => ({ id, surface: 'synthetic', subject, snippet: 'A synthetic offline fixture.', unread: true });
 const answer = (spam = .01, urgency = .01) => fakePort(name => noulAnswer(name.endsWith('spam') ? spam : urgency));
 const memory = (): TriageStore & { rows: Map<string, TriageStoredRecord>; calls: string[] } => {
@@ -203,16 +205,15 @@ test('late triage imports keep earlier native decision policies current while tr
   `;
   const child = Bun.spawn({ cmd: [process.execPath, '--conditions=bun', '--eval', script], cwd: new URL('..', import.meta.url).pathname,
     env: {}, stdout: 'pipe', stderr: 'pipe' });
-  let exited = false;
-  const deadline = setTimeout(() => child.kill(), 4_000);
+  // A fresh process is the point (import order is the subject), so a slow
+  // machine gets the generous test timeout below instead of a kill deadline.
   try {
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-    exited = true;
     expect(stderr).toBe(''); expect(code).toBe(0); expect(stdout).toBe('native policy ownership retained\n');
   } finally {
-    clearTimeout(deadline); if (!exited) child.kill(); await child.exited;
+    child.kill(); await child.exited;
   }
-});
+}, 120_000);
 
 
 test('only native source/account bindings enrich and private scope stays out of the model request', async () => {

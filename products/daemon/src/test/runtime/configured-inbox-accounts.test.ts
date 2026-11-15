@@ -69,8 +69,8 @@ test('native Discord selector admits only the explicit bot-bound canonical one-t
   expect(selected.account).toEqual({ userId: '100000000000000001', channelIds: ['100000000000000002', '100000000000000003'] });
   f.config.set('surfaces.discord.inboxChannelIds', '100000000000000099'); f.config.set('surfaces.discord.inboxChannelIds', '100000000000000002,100000000000000003');
   expect(() => selected.operation.assertCurrent()).toThrow(); selected.close(); expect(f.subscriptions).toBe(0);
-  f.config.set('surfaces.discord.inboxChannelIds', '100000000000000002,100000000000000002');
-  expect(() => selectConfiguredDiscordInboxAccount(f.context, f.controls)).toThrow('unique canonical');
+  expect(() => f.config.set('surfaces.discord.inboxChannelIds', '100000000000000002,100000000000000002')).toThrow('unique Discord snowflake');
+  expect(f.config.get('surfaces.discord.inboxChannelIds')).toBe('100000000000000002,100000000000000003');
   expect(f.subscriptions).toBe(0); expect(f.credentials).toBe(0);
 });
 

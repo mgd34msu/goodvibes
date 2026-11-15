@@ -145,7 +145,11 @@ export interface AgentWorkspaceActionSearchResult {
   readonly actionIndex: number;
 }
 
-export type AgentWorkspaceCommandDispatcher = (command: string, behavior?: 'inline' | 'compose' | 'exit') => void;
+/**
+ * `displayCommand` is what the result pane may show for the command. It differs from
+ * `command` only when the dispatched text carries a secret that must run but not be drawn.
+ */
+export type AgentWorkspaceCommandDispatcher = (command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string) => void;
 export type AgentWorkspacePromptDispatcher = (prompt: string) => void;
 
 export type AgentWorkspaceActionResultKind = 'guidance' | 'blocked' | 'dispatched' | 'refreshed' | 'error' | 'recap';
@@ -478,7 +482,6 @@ export interface AgentWorkspaceRuntimeSnapshot {
   readonly lineNumbers: string;
   readonly operationalMessages: string;
   readonly systemMessages: string;
-  readonly releaseChannel: string;
   readonly permissionMode: string;
   readonly toolAutoHeal: boolean;
   readonly toolsDefaultTokenBudget: number;

@@ -9,7 +9,8 @@ import { JudgmentHeldError } from '../platform/src/platform/types/judgment-held.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.ts';
 import { findPlaybooksBySymptom, getPlaybookRegistry } from '../platform/src/platform/runtime/ops/index.ts';
 
 /** A port that reads each playbook's match from `probabilities` by playbook name (default no). */
@@ -56,7 +57,7 @@ describe('findPlaybooksBySymptom', () => {
 
 test('protected query tails refuse the whole playbook search before dispatch', async () => {
   const fixture = playbookPort({}); installJudgmentPort(fixture.port);
-  await expect(findPlaybooksBySymptom('slow response '.repeat(200) + ' password=synthetic-private-value')).rejects.toThrow();
+  await expect(findPlaybooksBySymptom('slow response '.repeat(200) + ' password=synthetic-private-value')).rejects.toBeInstanceOf(JudgmentInputError);
   expect(fixture.requests).toHaveLength(0);
 });
 
@@ -66,5 +67,5 @@ test('retiring the Jev installation prevents a pending playbook search from retu
   installJudgmentPort({ model: fixture.port.model, async ask(request) { entered.resolve(); await release.promise; return fixture.port.ask(request); } });
   const pending = findPlaybooksBySymptom('stuck turn');
   await entered.promise; installJudgmentPort(playbookPort({}).port); release.resolve();
-  await expect(pending).rejects.toThrow();
+  await expect(pending).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
 });

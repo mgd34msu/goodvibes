@@ -26,7 +26,14 @@ export interface StreamRuntime {
   timer: ReturnType<typeof setInterval> | null;
   ready?: boolean;
   pendingExit?: { readonly code: number | null };
+  /** An agent turn for an earlier batch is still running; later lines stay queued. */
+  inFlight?: boolean;
+  /** When the last batch started a turn. The executor returns as soon as the agent is spawned, so this gap is what spaces turns. */
+  lastTurnAt?: number;
 }
+
+/** Least time between two unforced agent turns from one stream; queued lines wait, and the queue is bounded. */
+export const STREAM_TURN_MIN_GAP_MS = 30_000;
 
 /** Exactly what the stream lifecycle needs from the supervisor. */
 export interface StreamOwner {
@@ -122,6 +129,8 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
   if (!runtime || !record || record.definition.spec.kind !== 'stream' || runtime.ready === false || !owner.config().enabled) return;
   const spec = record.definition.spec;
   for (;;) {
+    if (!force && (runtime.inFlight
+      || (runtime.lastTurnAt !== undefined && owner.now() - runtime.lastTurnAt < STREAM_TURN_MIN_GAP_MS))) break;
     const batch = runtime.processor.takeBatch(owner.now(), force);
     if (!batch) break;
     const now = owner.now();
@@ -139,6 +148,7 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
       });
     }
     const prompt = renderStreamPrompt(batch, record.definition.label, spec.match.pattern);
+    runtime.inFlight = true; runtime.lastTurnAt = now;
     void owner.fireAction(
       id,
       `${batch.lines.length} line(s) matched ${spec.match.pattern}`,
@@ -147,8 +157,9 @@ export function drainStreamTrigger(owner: StreamOwner, id: string, force = false
       prompt,
     ).catch((error: unknown) => {
       logger.warn('Stream trigger action failed', { triggerId: id, error: summarizeError(error) });
-    });
-    if (force) break;
+    }).finally(() => { runtime.inFlight = false; });
+    // A forced drain (the stream ended) keeps going until the queue is empty: the
+    // processor is discarded right after, so a single batch would lose the rest.
   }
 }
 

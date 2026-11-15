@@ -178,10 +178,9 @@ export function extractCheckout(
         'Refused: I cannot read a delivery option\'s price on this checkout as an exact amount.',
       );
     }
-    // The label is retained for the audit record only. `shipping.ts` ranks by
-    // cost and never reads the words, because merchants describe delivery in
-    // incomparable ways and a rule written against those words breaks on the
-    // next merchant.
+    // The label is retained for the audit record and for Jev's reading of which
+    // option is which tier (batteries/shipping-tier.ts). The ladder after that
+    // is arithmetic on cost; no rule here is written against the words.
     shippingOptions.push({ rawLabel: sanitizeNoticeField(option.label, 60), costMinorUnits: cost });
   }
   if (shippingOptions.length === 0) {

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { basename } from 'node:path';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeStoreJson } from '@/utils/store-file.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -13,6 +14,7 @@ import {
   type KeyCombo,
   type KeybindingsManager,
 } from '../input/keybindings.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = [
   { key: 'Enter', description: 'Send prompt' },
@@ -63,7 +65,7 @@ type KeybindingContext = Pick<CommandContext, 'workspace'>;
 type KeybindingExecutionContext = KeybindingContext & Pick<CommandContext,
   'renderRequest' | 'cancelGeneration' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace'
   | 'dismissAgentWorkspace' | 'focusPrompt' | 'openPromptHistorySearch' | 'openConversationSearch'
-  | 'pasteFromClipboard' | 'openBlockActions'>;
+  | 'pasteFromClipboard' | 'openBlockActions' | 'isGenerating'>;
 
 interface KeybindingLookup {
   readonly source: 'actionId' | 'target' | 'key' | 'query';
@@ -89,9 +91,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readFieldMap(value: unknown): Readonly<Record<string, string>> {
@@ -122,10 +122,27 @@ function isKeyAction(action: string): action is KeyAction {
   return Object.hasOwn(ACTION_DESCRIPTIONS, action);
 }
 
+const MODIFIER_NAMES: ReadonlySet<string> = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'meta', 'cmd', 'command']);
+const NAMED_KEYS: ReadonlySet<string> = new Set(['enter', 'escape', 'tab', 'backspace', 'delete', 'insert', 'space', 'up', 'down', 'left', 'right',
+  'home', 'end', 'pageup', 'pagedown', ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`)]);
+const KEY_NAME_ALIASES: Readonly<Record<string, string>> = { esc: 'escape', return: 'enter', pgup: 'pageup', pgdn: 'pagedown', del: 'delete', ins: 'insert' };
+
+/** The shell matches keys by lowercase logical name, so a combo stored as "G" or "Esc" would never fire. */
+function normalizeKeyName(key: string): string {
+  const lower = key.trim().toLowerCase();
+  return KEY_NAME_ALIASES[lower] ?? lower;
+}
+
+function invalidKeyReason(key: string): string | null {
+  if (MODIFIER_NAMES.has(key)) return `"${key}" is a modifier; set it with ctrl, shift or alt and name the key that goes with it.`;
+  if ([...key].length === 1 || NAMED_KEYS.has(key)) return null;
+  return `"${key}" is not a key the shell can match. Use one character or one of: ${[...NAMED_KEYS].join(', ')}.`;
+}
+
 async function normalizeCombo(value: unknown, evidence: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo | null> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const raw = captureCatalogData(value), fields = Object.getOwnPropertyDescriptors(raw);
-  const key = readString(fields.key?.value);
+  const key = normalizeKeyName(readString(fields.key?.value));
   if (!key) return null;
   const combo: KeyCombo = { key };
   for (const parameter of ['ctrl', 'shift', 'alt'] as const) {
@@ -142,7 +159,7 @@ function parseComboLabel(value: string): KeyCombo | null {
   if (parts.length === 0) return null;
   const key = parts.at(-1);
   if (!key) return null;
-  const combo: KeyCombo = { key: key.length === 1 ? key.toLowerCase() : key.toLowerCase() };
+  const combo: KeyCombo = { key: normalizeKeyName(key) };
   for (const part of parts.slice(0, -1)) {
     const normalized = part.toLowerCase();
     if (normalized === 'ctrl' || normalized === 'control') combo.ctrl = true;
@@ -154,6 +171,15 @@ function parseComboLabel(value: string): KeyCombo | null {
 }
 
 async function combosFromArgs(args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo[]> {
+  const combos = await readCombosFromArgs(args, options);
+  for (const combo of combos) {
+    const reason = invalidKeyReason(combo.key);
+    if (reason) throw new Error(`set_keybinding was not applied: ${reason}`);
+  }
+  return combos;
+}
+
+async function readCombosFromArgs(args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo[]> {
   if (Array.isArray(args.combos)) {
     const combos: Array<KeyCombo | null> = [];
     for (const value of args.combos) combos.push(await normalizeCombo(value, args, options));
@@ -166,11 +192,11 @@ async function combosFromArgs(args: HarnessKeybindingArgs, options: CatalogRanki
   if (fieldCombo) return [fieldCombo];
   const labelCombo = parseComboLabel(readString(args.value));
   if (labelCombo) return [labelCombo];
-  throw new Error('set_keybinding requires combo, combos, fields.key, or a value such as "Ctrl+G".');
+  throw new Error('set_keybinding requires combo, combos, fields (key plus optional ctrl/shift/alt), or a value such as "Ctrl+G".');
 }
 
 function comboFingerprint(combo: KeyCombo): string {
-  return `${combo.key}:${combo.ctrl ? 1 : 0}:${combo.shift ? 1 : 0}:${combo.alt ? 1 : 0}`;
+  return `${combo.key.toLowerCase()}:${combo.ctrl ? 1 : 0}:${combo.shift ? 1 : 0}:${combo.alt ? 1 : 0}`;
 }
 
 function combosEqual(left: readonly KeyCombo[], right: readonly KeyCombo[]): boolean {
@@ -410,9 +436,16 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
         note: 'Runs the paste route and reports whether text, image, or nothing was pasted.',
       };
+    case 'block-save':
+      return {
+        supported: false,
+        effect: 'disabled',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'No model operation is exposed.',
+        note: 'Saving a block to a file is disabled in the Agent. Use block-copy to copy the block, or export the conversation instead.',
+      };
     case 'block-copy':
     case 'bookmark':
-    case 'block-save':
       return {
         supported: true,
         effect: 'visible-ui-interaction',
@@ -428,7 +461,7 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         effect: 'visible-ui-navigation',
         preferredMode: 'open_ui_surface',
         surfaceId: 'agent-workspace',
-        confirmation: 'Use open_ui_surface with confirm:true and an explicit categoryId/target instead of cycling hidden UI state.',
+        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission; open the workspace with agent_harness mode:"open_ui_surface" and an explicit categoryId or target instead of cycling hidden UI state.',
         note: 'Category cycling depends on the live workspace focus position. The model should open the intended Agent workspace category directly.',
       };
     case 'copy-selection':
@@ -466,17 +499,21 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
 
 /**
  * Preserve an unreadable keybindings file instead of overwriting it: it is
- * renamed to a single fixed `.corrupt` slot, overwritten each time so the
- * quarantine cannot accumulate. Paths and byte counts are logged, never contents.
+ * renamed to the first free `.corrupt` slot, so an earlier quarantine is never
+ * overwritten. Paths and byte counts are logged, never contents.
  */
-function quarantineOverrideFile(configPath: string, bytes: number, reason: string): void {
-  const quarantinePath = `${configPath}.corrupt`;
+function quarantineOverrideFile(configPath: string, bytes: number, reason: string): { readonly preserved: boolean; readonly quarantinePath?: string } {
+  const slots = [`${configPath}.corrupt`, ...[1, 2, 3, 4].map((index) => `${configPath}.corrupt.${index}`)];
+  // With every slot taken there is nowhere safe to move it: refusing keeps both the new file and all earlier quarantines.
+  const quarantinePath = slots.find((slot) => !existsSync(slot));
   let preserved = false;
-  try {
-    renameSync(configPath, quarantinePath);
-    preserved = true;
-  } catch {
-    preserved = false;
+  if (quarantinePath !== undefined) {
+    try {
+      renameSync(configPath, quarantinePath);
+      preserved = true;
+    } catch {
+      preserved = false;
+    }
   }
   logger.error('Keybindings config was unreadable; continuing with no overrides', {
     configPath,
@@ -485,6 +522,15 @@ function quarantineOverrideFile(configPath: string, bytes: number, reason: strin
     ...(preserved ? { quarantinePath } : {}),
     reason,
   });
+  return preserved ? { preserved, quarantinePath } : { preserved };
+}
+
+interface OverrideRead {
+  readonly overrides: KeybindingsOverrideFile;
+  /** What happened to a file that could not be used as it was; shown to the caller of a write. */
+  readonly notice?: string;
+  /** Set when writing now would destroy the user's file; the write must not go ahead. */
+  readonly blocked?: string;
 }
 
 /**
@@ -493,8 +539,8 @@ function quarantineOverrideFile(configPath: string, bytes: number, reason: strin
  * JSON body, or a body that is not a JSON object. Existence is not validity, and
  * a torn file must not take down every read path that touches keybindings.
  */
-function readOverrideFile(configPath: string): KeybindingsOverrideFile {
-  if (!existsSync(configPath)) return {};
+function readOverrideFile(configPath: string): OverrideRead {
+  if (!existsSync(configPath)) return { overrides: {} };
   let raw = '';
   try {
     raw = readFileSync(configPath, 'utf-8');
@@ -503,27 +549,33 @@ function readOverrideFile(configPath: string): KeybindingsOverrideFile {
       configPath,
       error: summarizeError(error),
     });
-    return {};
+    return { overrides: {}, blocked: `${basename(configPath)} could not be read, so it was left unchanged and no binding was written. Fix its permissions or move it aside, then retry.` };
   }
   if (!raw.trim()) {
     logger.warn('Keybindings config is empty (torn or interrupted write); continuing with no overrides', {
       configPath,
       bytes: Buffer.byteLength(raw, 'utf-8'),
     });
-    return {};
+    return { overrides: {} };
   }
   let parsed: unknown;
+  let reason: string;
   try {
     parsed = JSON.parse(raw) as unknown;
+    reason = 'keybindings config is not a JSON object';
   } catch (error) {
-    quarantineOverrideFile(configPath, Buffer.byteLength(raw, 'utf-8'), summarizeError(error));
-    return {};
+    parsed = undefined;
+    reason = summarizeError(error);
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    quarantineOverrideFile(configPath, Buffer.byteLength(raw, 'utf-8'), 'keybindings config is not a JSON object');
-    return {};
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) return { overrides: parsed as KeybindingsOverrideFile };
+  const moved = quarantineOverrideFile(configPath, Buffer.byteLength(raw, 'utf-8'), reason);
+  if (!moved.preserved) {
+    return { overrides: {}, blocked: `${basename(configPath)} is not valid JSON and could not be moved aside (it was left unchanged, and the five earlier .corrupt copies may all be taken), so no binding was written. Repair or move it, then retry.` };
   }
-  return parsed as KeybindingsOverrideFile;
+  return {
+    overrides: {},
+    notice: `${basename(configPath)} was not valid JSON. It was moved to ${basename(moved.quarantinePath ?? configPath)}, and the custom bindings it held were not carried over; copy them back from that file if you want them.`,
+  };
 }
 
 function writeOverrideFile(configPath: string, overrides: KeybindingsOverrideFile): void {
@@ -652,7 +704,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
   sources.assertCurrent();
   if (resolved?.status === 'ambiguous') return { status: 'ambiguous', input: resolved.input, candidates: resolved.candidates };
-  if (!resolved) throw new Error('run_keybinding requires a valid keybinding action id, target, key, or query.');
+  if (!resolved) throw new Error('run_keybinding requires a valid keybinding actionId, key, target or query.');
   const entry = manager.getAll().find((candidate) => candidate.action === resolved.action);
   if (!entry) throw new Error(`No live keybinding entry found for ${resolved.action}.`);
   const route = keybindingOperationRoute(resolved.action);
@@ -667,12 +719,16 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       action: resolved.action,
       keybinding: descriptor,
       modelOperation: route,
+      reason: route.note,
     };
   }
 
   switch (resolved.action) {
     case 'clear-cancel':
       if (!context.cancelGeneration) return runUnavailable(resolved.action, route, 'Cancel-generation route is unavailable.');
+      if (context.isGenerating && !context.isGenerating()) {
+        return { status: 'nothing_to_cancel', action: resolved.action, reason: 'No generation is running, so nothing was cancelled.', keybinding: descriptor };
+      }
       context.cancelGeneration();
       return { status: 'executed', action: resolved.action, effect: 'cancel-generation', keybinding: descriptor };
     case 'screen-clear':
@@ -690,7 +746,8 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       }
       return runUnavailable(resolved.action, route, 'No workspace picker or Agent workspace route is available.');
     case 'workspace-close': {
-      const dismissedAgentWorkspace = context.dismissAgentWorkspace?.() ?? false;
+      if (!context.dismissAgentWorkspace) return runUnavailable(resolved.action, route, 'Agent workspace dismiss route is unavailable.');
+      const dismissedAgentWorkspace = context.dismissAgentWorkspace();
       if (dismissedAgentWorkspace) {
         return {
           status: 'executed',
@@ -700,18 +757,12 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
           keybinding: descriptor,
         };
       }
-      if (!context.focusPrompt) return runUnavailable(resolved.action, route, 'No active Agent workspace or prompt focus route is available.');
-      context.focusPrompt();
-      context.renderRequest();
-      return {
-        status: 'executed',
-        action: resolved.action,
-        effect: 'prompt-focused',
-        keybinding: descriptor,
-      };
+      // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
+      return { status: 'nothing_to_dismiss', action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
     }
     case 'workspace-close-all': {
-      const dismissedAgentWorkspace = context.dismissAgentWorkspace?.() ?? false;
+      if (!context.dismissAgentWorkspace) return runUnavailable(resolved.action, route, 'Agent workspace dismiss route is unavailable.');
+      const dismissedAgentWorkspace = context.dismissAgentWorkspace();
       if (dismissedAgentWorkspace) {
         return {
           status: 'executed',
@@ -721,15 +772,8 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
           keybinding: descriptor,
         };
       }
-      if (!context.focusPrompt) return runUnavailable(resolved.action, route, 'No active Agent workspace or prompt focus route is available.');
-      context.focusPrompt();
-      context.renderRequest();
-      return {
-        status: 'executed',
-        action: resolved.action,
-        effect: 'prompt-focused',
-        keybinding: descriptor,
-      };
+      // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
+      return { status: 'nothing_to_dismiss', action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
     }
     case 'history-search': {
       if (!context.openPromptHistorySearch) return runUnavailable(resolved.action, route, 'Prompt history search route is unavailable.');
@@ -744,13 +788,15 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       return { status: 'executed', action: resolved.action, effect: 'conversation-search-opened', query, keybinding: descriptor };
     }
     case 'paste': {
-      if (!context.pasteFromClipboard) return runUnavailable(resolved.action, route, 'Paste route is unavailable.');
+      if (!context.pasteFromClipboard) return runUnavailable(resolved.action, route, 'This Agent shell does not give commands a clipboard paste route. Ctrl+V in the prompt still pastes; ask the user to paste directly.');
       const pasted = context.pasteFromClipboard();
+      if (!pasted.pasted) {
+        return { status: 'not_pasted', action: resolved.action, effect: 'paste-from-clipboard', reason: 'The clipboard holds no supported text or image data, so nothing was pasted.', pasted, keybinding: descriptor };
+      }
       return { status: 'executed', action: resolved.action, effect: 'paste-from-clipboard', pasted, keybinding: descriptor };
     }
     case 'block-copy':
-    case 'bookmark':
-    case 'block-save': {
+    case 'bookmark': {
       if (!context.openBlockActions) return runUnavailable(resolved.action, route, 'Block action surface route is unavailable.');
       const opened = context.openBlockActions();
       return opened
@@ -779,33 +825,99 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   }
 }
 
+/** Chords the shell handles itself before configurable bindings are consulted. */
+const FIXED_CHORDS: readonly { readonly key: string; readonly ctrl?: boolean; readonly shift?: boolean; readonly description: string }[] = [
+  { key: 'enter', description: 'Send prompt' },
+  { key: 'enter', shift: true, description: 'Insert newline' },
+  { key: 'j', ctrl: true, description: 'Insert newline' },
+  { key: 'tab', description: 'Autocomplete slash command or file mention' },
+  { key: 'escape', description: 'Close overlays, pickers, and transient input modes' },
+  { key: '?', description: 'Toggle help overlay' },
+  { key: 'f1', description: 'Toggle help overlay' },
+  { key: 'f2', description: 'Open runtime activity monitor' },
+];
+
+/** Other actions that use one of `combos`, and which of the two wins (the later action in catalog order takes the chord). */
+function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: readonly KeyCombo[]): Record<string, unknown>[] {
+  const mine = new Set(combos.map(comboFingerprint));
+  const all = manager.getAll();
+  const position = all.findIndex((entry) => entry.action === action);
+  const conflicts: Record<string, unknown>[] = [];
+  all.forEach((entry, index) => {
+    if (entry.action === action) return;
+    const shared = entry.combos.filter((combo) => mine.has(comboFingerprint(combo)));
+    if (shared.length === 0) return;
+    conflicts.push({ action: entry.action, chord: formatCombo(manager, shared[0]!), takesTheChord: index > position ? entry.action : action });
+  });
+  for (const combo of combos) {
+    const fixed = FIXED_CHORDS.find((entry) => entry.key === combo.key.toLowerCase() && !!entry.ctrl === !!combo.ctrl && !!entry.shift === !!combo.shift && !combo.alt);
+    if (fixed) conflicts.push({ fixedShortcut: fixed.description, chord: formatCombo(manager, combo) });
+  }
+  return conflicts;
+}
+
+/** Entries in the override file that are not an action name; a legacy alias for an action is one of these and can override the canonical entry. */
+function unrecognizedOverrideKeys(overrides: KeybindingsOverrideFile): string[] {
+  return Object.keys(overrides).filter((key) => !isKeyAction(key));
+}
+
 export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const manager = requireKeybindingsManager(context);
   const sources = captureKeybindingSources(context, args, options, false);
   const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
   sources.assertCurrent();
   if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
-  if (!resolved) throw new Error('set_keybinding requires a valid keybinding action id, target, or query.');
+  if (!resolved) throw new Error('set_keybinding requires a valid keybinding actionId, key, target or query.');
   const modifierGuards = new Set<() => void>();
-  const assertModifiersCurrent = () => { sources.assertCurrent(); for (const guard of modifierGuards) guard(); };
+  // The guards compare against the keybindings as they were before this call; once the file is written they would
+  // report the call's own change as an outside edit and fail a write that already happened.
+  let written = false;
+  const assertModifiersCurrent = () => { if (!written) sources.assertCurrent(); for (const guard of modifierGuards) guard(); };
   const combos = await combosFromArgs(sources.input, { ...options, assertCurrent: assertModifiersCurrent,
     retainCurrent(guard, key) { modifierGuards.add(guard); options.retainCurrent?.(guard, key); } });
   assertModifiersCurrent();
   const configPath = manager.getConfigPath();
-  const overrides = readOverrideFile(configPath);
+  const existing = readOverrideFile(configPath);
+  if (existing.blocked) throw new Error(`set_keybinding was not applied: ${existing.blocked}`);
+  const overrides = existing.overrides;
   overrides[resolved.action] = combos.length === 1 ? combos[0] : combos;
   assertModifiersCurrent();
   writeOverrideFile(configPath, overrides);
-  manager.loadFromDisk();
+  written = true;
+  const loadNotices = manager.loadFromDisk() ?? [];
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  for (const guard of modifierGuards) guard();
+  const live = manager.getAll().find((entry) => entry.action === resolved.action);
+  const applied = live !== undefined && combosEqual(live.combos, combos);
+  const other = unrecognizedOverrideKeys(overrides);
+  if (!applied) {
+    return {
+      status: 'not_applied',
+      configPath,
+      keybinding,
+      requested: combos.map((combo) => describeCombo(manager, combo)),
+      reason: `The binding was written to ${basename(configPath)} but the live keybindings do not hold it.${other.length > 0
+        ? ` The file also has entries under other names (${other.join(', ')}); a legacy name for this action there can override the one just written. Remove it from the file.`
+        : ''}${loadNotices.length > 0 ? ` Loader notices: ${loadNotices.join(' ')}` : ''}`,
+      lookup: resolved.lookup,
+      ...(existing.notice ? { warnings: [existing.notice] } : {}),
+    };
+  }
+  const conflicts = chordConflicts(manager, resolved.action, combos);
+  const warnings = [
+    ...(existing.notice ? [existing.notice] : []),
+    ...loadNotices,
+    // The loader already names a chord two actions share; only a clash it cannot see (a fixed shortcut) needs this text.
+    ...(conflicts.some((conflict) => 'fixedShortcut' in conflict) || (conflicts.length > 0 && !loadNotices.some((notice) => notice.includes(' is bound to '))) ? ['The chord is also used elsewhere (see conflicts); only one binding takes it. Rebind the other action, or reset this one, if that was not intended.'] : []),
+  ];
   return {
     status: 'updated',
     configPath,
     keybinding,
     lookup: resolved.lookup,
+    ...(conflicts.length > 0 ? { conflicts } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     ...(resolved.judgment ? { selectionJudgment: resolved.judgment } : {}),
   };
 }
@@ -816,21 +928,39 @@ export async function resetHarnessKeybinding(context: KeybindingContext, args: H
   const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
   sources.assertCurrent();
   if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
-  if (!resolved) throw new Error('reset_keybinding requires a valid keybinding action id, target, or query.');
+  if (!resolved) throw new Error('reset_keybinding requires a valid keybinding actionId, key, target or query.');
   const configPath = manager.getConfigPath();
-  const overrides = readOverrideFile(configPath);
+  const existing = readOverrideFile(configPath);
+  if (existing.blocked) throw new Error(`reset_keybinding was not applied: ${existing.blocked}`);
+  const overrides = existing.overrides;
   delete overrides[resolved.action];
   sources.assertCurrent();
   writeOverrideFile(configPath, overrides);
-  manager.loadFromDisk();
+  const loadNotices = manager.loadFromDisk() ?? [];
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const live = manager.getAll().find((entry) => entry.action === resolved.action);
+  const other = unrecognizedOverrideKeys(overrides);
+  if (live === undefined || !combosEqual(live.combos, DEFAULT_KEYBINDINGS[resolved.action])) {
+    return {
+      status: 'not_applied',
+      configPath,
+      keybinding,
+      reason: `The override was removed from ${basename(configPath)} but the live binding is still not the default.${other.length > 0
+        ? ` The file also has entries under other names (${other.join(', ')}); a legacy name for this action there keeps applying. Remove it from the file.`
+        : ''}${loadNotices.length > 0 ? ` Loader notices: ${loadNotices.join(' ')}` : ''}`,
+      lookup: resolved.lookup,
+      ...(existing.notice ? { warnings: [existing.notice] } : {}),
+    };
+  }
+  const warnings = [...(existing.notice ? [existing.notice] : []), ...loadNotices];
   return {
     status: 'reset',
     configPath,
     keybinding,
     lookup: resolved.lookup,
+    ...(warnings.length > 0 ? { warnings } : {}),
     ...(resolved.judgment ? { selectionJudgment: resolved.judgment } : {}),
   };
 }

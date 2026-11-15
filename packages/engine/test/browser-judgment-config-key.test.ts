@@ -7,10 +7,10 @@ import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-brows
 const owner: AuthenticatedPrincipal = { principalId: 'config-fixture', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
 const request = (keys = ['custom.label']): BrowserJudgmentRequest<'webui.config.credential-key'> => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery: 'webui.config.credential-key', batteryVersion: 1, input: { keys } });
 function fixture(options: { probability?: number; barrier?: Promise<void>; names?: readonly { key: string; description: string }[] } = {}) {
-  const calls: unknown[] = []; const log = new SqliteDecisionLog(':memory:');
+  const calls: unknown[] = []; const entered = Promise.withResolvers<void>(); const log = new SqliteDecisionLog(':memory:');
   const lifetime = new AbortController(); let actor = owner; let allowed = true; let revision = 1;
   const port: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
-    calls.push(input.state); await options.barrier;
+    calls.push(input.state); entered.resolve(); await options.barrier;
     return { model: 'jev-1.13.0', requestedModel: 'jev-1.13.0', usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
       answers: { credential: { type: 'noul', noul: options.probability ?? 0.001 } } } as never;
   } };
@@ -21,7 +21,7 @@ function fixture(options: { probability?: number; barrier?: Promise<void>; names
     currentRoute: () => ({ revision: 'fixture', kind: 'local', port: withDecisionLog(withWebuiAnswerBoundary(port), log), assertCurrent() {} }),
     authorize: input => allowed && input.battery === 'webui.config.credential-key' && input.sources[0] === 'config-key-names',
   });
-  return { calls, lifetime, setActor(value: AuthenticatedPrincipal) { actor = value; }, deny() { allowed = false; }, change() { revision++; },
+  return { calls, entered: entered.promise, lifetime, setActor(value: AuthenticatedPrincipal) { actor = value; }, deny() { allowed = false; }, change() { revision++; },
     run: (input: unknown = request(), signal = new AbortController().signal) => service.execute(input, owner, signal, () => actor),
     async close() { await service.close(); log[Symbol.dispose](); },
   };
@@ -42,7 +42,7 @@ test.each(['principal', 'grant', 'config', 'cancel', 'epoch'] as const)('%s chan
   const barrier = Promise.withResolvers<void>(); const f = fixture({ barrier: barrier.promise }); const abort = new AbortController();
   try {
     const result = f.run(request(), abort.signal); const observed = result.then(() => 'unexpected-settled', () => 'held');
-    for (let i = 0; i < 100 && !f.calls.length; i++) await Bun.sleep(1);
+    await f.entered;
     expect(f.calls).toHaveLength(1);
     if (kind === 'principal') f.setActor({ ...owner, admin: false });
     if (kind === 'grant') f.deny();

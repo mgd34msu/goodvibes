@@ -182,7 +182,7 @@ describe('nearestAnsi16Fg', () => {
     expect(nearestAnsi16Fg(255, 255, 255)).toBe(97);
   });
 
-  test('pure red (255,0,0) → 91 (bright red)', () => {
+  test('pure red (255,0,0) → 31 (red)', () => {
     // palette[9] = [255,85,85,91]; dist to pure red (255,0,0):
     // palette[1]=[170,0,0,31]: d=(85^2+0+0)=7225
     // palette[9]=[255,85,85,91]: d=(0+85^2+85^2)=14450
@@ -190,7 +190,7 @@ describe('nearestAnsi16Fg', () => {
     expect(nearestAnsi16Fg(255, 0, 0)).toBe(31);
   });
 
-  test('pure green (0,255,0) → 92 (bright green)', () => {
+  test('pure green (0,255,0) → 32 (green)', () => {
     // palette[10]=[85,255,85,92]: d=(85^2+0+85^2)=14450
     // palette[2]=[0,170,0,32]: d=(0+85^2+0)=7225 => 32 wins
     expect(nearestAnsi16Fg(0, 255, 0)).toBe(32);

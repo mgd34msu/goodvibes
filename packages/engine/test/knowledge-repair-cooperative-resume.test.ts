@@ -140,40 +140,33 @@ async function usefulFixture(combined = false) {
 }
 
 describe('repair passes resume under their original caller', () => {
-  test('native timer cancellation before the next pass prevents questions and bookkeeping', async () => {
+  test('caller cancellation after the first check prevents questions and bookkeeping', async () => {
     const item = await fixture(), before = item.snapshot(), controller = new AbortController();
-    const observed = Promise.withResolvers<void>();
-    const timer = setTimeout(() => { controller.abort(); observed.resolve(); }, 0);
-    try {
-      await expect(promoteRepairSources({ store: item.store, shouldStop: () => controller.signal.aborted },
-        spaceId, item.gap, [item.source.id], item.task, Date.now() + 5_000))
-        .rejects.toMatchObject({ name: 'KnowledgeSourceQualityHeldError', reason: 'aborted' });
-      await observed.promise;
-      expect(controller.signal.aborted).toBe(true);
-      expect(item.requests()).toBe(0);
-      expect(item.snapshot()).toBe(before);
-      expect(item.store.getRefinementTask(item.task.id)).toBe(item.task);
-    } finally {
-      clearTimeout(timer);
-    }
+    let checks = 0;
+    // The caller cancels while the pass is between two of its own checks, so the
+    // next check is the first to see it.
+    const shouldStop = () => { if (++checks === 1) controller.abort(); return controller.signal.aborted && checks > 1; };
+    await expect(promoteRepairSources({ store: item.store, shouldStop },
+      spaceId, item.gap, [item.source.id], item.task, Date.now() + 5_000))
+      .rejects.toMatchObject({ name: 'KnowledgeSourceQualityHeldError', reason: 'aborted' });
+    expect(checks).toBeGreaterThan(1);
+    expect(item.requests()).toBe(0);
+    expect(item.snapshot()).toBe(before);
+    expect(item.store.getRefinementTask(item.task.id)).toBe(item.task);
   });
 
-  test('native timer mutation of the original request cannot become a new pass baseline', async () => {
+  test('caller mutation of the original request once the pass has begun cannot become a new pass baseline', async () => {
     const item = await fixture(), before = item.snapshot(), sourceIds = [item.source.id];
-    const observed = Promise.withResolvers<void>();
-    const timer = setTimeout(() => { sourceIds.push('later-source'); observed.resolve(); }, 0);
-    try {
-      await expect(promoteRepairSources({ store: item.store },
-        spaceId, item.gap, sourceIds, item.task, Date.now() + 5_000))
-        .rejects.toMatchObject({ name: 'KnowledgeRepairSourceAuthorityHeldError', reason: 'stale' });
-      await observed.promise;
-      expect(sourceIds).toEqual([item.source.id, 'later-source']);
-      expect(item.requests()).toBe(0);
-      expect(item.snapshot()).toBe(before);
-      expect(item.store.getRefinementTask(item.task.id)).toBe(item.task);
-    } finally {
-      clearTimeout(timer);
-    }
+    let checks = 0;
+    const shouldStop = () => { if (++checks === 2) sourceIds.push('later-source'); return false; };
+    await expect(promoteRepairSources({ store: item.store, shouldStop },
+      spaceId, item.gap, sourceIds, item.task, Date.now() + 5_000))
+      .rejects.toMatchObject({ name: 'KnowledgeRepairSourceAuthorityHeldError', reason: 'stale' });
+    expect(checks).toBeGreaterThanOrEqual(2);
+    expect(sourceIds).toEqual([item.source.id, 'later-source']);
+    expect(item.requests()).toBe(0);
+    expect(item.snapshot()).toBe(before);
+    expect(item.store.getRefinementTask(item.task.id)).toBe(item.task);
   });
 
   test('a completed sufficient pass preserves its actual native fact receipt through durable task publication', async () => {

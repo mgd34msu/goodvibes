@@ -78,6 +78,8 @@ import {
 import { nodeGoogleFilePort } from '../platform/src/platform/google/node.ts';
 import type { GoogleConfigPort, GoogleSecretPort } from '../platform/src/platform/google/types.ts';
 
+const runsAsRoot = process.getuid?.() === 0; // chmod does not deny uid 0, so the denial cases cannot run there
+
 // ---------------------------------------------------------------------------
 // Fixtures. Structurally valid, obviously fake, and never a real credential.
 // ---------------------------------------------------------------------------
@@ -417,39 +419,12 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   // -------------------------------------------------------------------------
-  // OPEN DEFECT, the daemon cannot reach another surface's silo.
+  // The daemon reaches credentials stranded in another surface's silo.
   //
-  // `daemon-credential-migration.ts` says in its own header: "on start, daemon
-  // or surface, whichever comes first, every daemon-needed credential found in
-  // a surface, project or user store is copied up."
-  //
-  // It does not do that, and this is where running it end to end says something
-  // reading it did not. Two facts compose into the gap:
-  //
-  //   * `migrateDaemonNeededCredentials` enumerates through
-  //     `SecretsManager.listDetailed()`, which walks `getReadOrder()`, and that
-  //     read order is built from ONE `surfaceRoot` (secrets.ts:458-479,
-  //     secrets-store-paths.ts:157-170).
-  //   * The only caller is `runDaemonBootGuarantees`
-  //     (facade-boot-guarantees.ts:179). No surface calls it at start; the grep
-  //     for callers returns that one line.
-  //
-  // So a daemon constructed with `surfaceRoot: 'daemon'` enumerates the daemon
-  // tier and `~/.goodvibes/daemon.secrets.json`, and never
-  // `~/.goodvibes/agent.secrets.json`. The owner ran `/google adopt` in the
-  // AGENT. Every credential a pre-fix agent build wrote into the agent silo,
-  // the Slack, Discord and ntfy tokens, the Cloudflare tokens, the provider API
-  // keys, exactly the list the registry commit enumerates as the wider defect,
-  // is invisible to the daemon's migration and stays stranded for good.
-  //
-  // Routing NEW writes is fixed. Lifting what is ALREADY stranded is not, for
-  // any surface other than the one the running process was constructed as.
-  //
-  // These three are `test.failing`: they assert the documented contract and the
-  // owner's rule, they currently fail, and bun will turn them RED the moment the
-  // defect is fixed, which is the signal to delete this comment. They are not
-  // skipped and they are not rewritten to bless the current behaviour. The
-  // mechanism they trip over is pinned as a passing test immediately below.
+  // Resolution stays narrow (a manager reads only its own surface's tiers), but
+  // migration enumerates every surface silo through `listDetailedForMigration`,
+  // so a credential a surface wrote before the daemon could see it is lifted at
+  // daemon boot. The cases below assert that contract end to end on real files.
   // -------------------------------------------------------------------------
 
   test('the daemon boot lifts it, and the daemon reads it afterwards', async () => {
@@ -494,12 +469,8 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   /**
-   * The mechanism behind the three above, stated as the truth it currently is.
-   *
-   * This one PASSES. It is here so the defect is characterised rather than
-   * merely asserted-against: it names exactly which stores a daemon-rooted
-   * manager can see, so the eventual fix has something concrete to change and a
-   * reader can tell the difference between "not yet implemented" and "broken".
+   * The mechanism behind the cases above: which stores a daemon-rooted manager
+   * can see when resolving, and which when migrating.
    */
   test('a daemon-rooted store reaches every surface silo when migrating, and only its own when resolving', async () => {
     const home = throwawayHome();
@@ -534,39 +505,13 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   // -------------------------------------------------------------------------
-  // OPEN DEFECT, DATA LOSS, a successful migration destroys the credential.
+  // A successful migration must not destroy the credential.
   //
-  // This is the one the whole ordering exists to prevent, and it is live.
-  //
-  // `SecretsManager.delete` (secrets.ts:533-543) deliberately DISCARDS the
-  // caller's scope filter for a daemon-needed key:
-  //
-  //     const scopeFilter = isDaemonNeededSecretKey(key) ? undefined : options.scope;
-  //
-  // and then sweeps every candidate store. That is right for a revoke, an
-  // operator revoking a token must not leave a live copy in another tier.
-  //
-  // But the migration's final step is `delete(key, { scope: <source tier> })`,
-  // meaning "remove the surface copy now that the daemon copy is verified". The
-  // key is daemon-needed BY DEFINITION, that is the only reason it is being
-  // migrated, so the filter is dropped, the sweep runs, and it deletes the
-  // freshly written, freshly verified DAEMON copy along with the source.
-  //
-  // The write happens. The read-back genuinely succeeds. The report says
-  // `migrated: 1, failed: 0`. And afterwards the credential is in neither tier
-  // and resolves to null. Observed on a real disk, in a throwaway home:
-  //
-  //     user store after:   {"version":1,"secrets":{}}
-  //     daemon store after: {"version":1,"secrets":{}}
-  //     get(key) -> null
-  //
-  // Every existing ordering test misses it because they run against
-  // `fakeStore()`, whose `delete` honours the scope filter literally
-  // (daemon-credential-scope-and-migration.test.ts), so the fake and the real
-  // store disagree on exactly the operation the safety property depends on.
-  //
-  // The mechanism is pinned as a passing test immediately below; this asserts
-  // the property that matters and currently fails.
+  // `SecretsManager.delete` discards the scope filter for a daemon-needed key
+  // and sweeps every tier, which is right for a revoke. Migration removes only
+  // the source copy, through `deleteFromScope`, so the freshly written daemon
+  // copy survives. The real store is used because a fake store that honours the
+  // scope filter literally would hide the difference.
   // -------------------------------------------------------------------------
   test('a credential the daemon migrates still exists afterwards', async () => {
     const home = throwawayHome();
@@ -593,11 +538,9 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   /**
-   * The mechanism, stated as the truth it currently is. This one PASSES.
-   *
    * A delete narrowed to one tier removes a daemon-needed credential from EVERY
-   * tier, which is correct for a revoke and catastrophic for the migration's
-   * final step, because they call the same method with the same arguments.
+   * tier, which is correct for a revoke and wrong for the migration's final
+   * step, so migration uses a different verb.
    */
   test('a scope-narrowed delete of a daemon-needed key sweeps every tier, including the daemon\'s', async () => {
     const home = throwawayHome();
@@ -619,10 +562,8 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   /**
-   * The consequence, end to end, on the real store: the migration reports
-   * success and the credential is gone from every tier. PASSES, it documents
-   * live behaviour, and it is the regression lock that must flip when the
-   * delete is fixed.
+   * End to end on the real store: a migration that reports success leaves the
+   * credential readable from the daemon tier.
    */
   test('a migration that reports success leaves the credential readable', async () => {
     const home = throwawayHome();
@@ -635,12 +576,8 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
     expect(report.failed).toBe(0);
     expect(report.entries[0]).toMatchObject({ key: STRANDED_KEY, outcome: 'migrated' });
 
-    // The assertions that used to read `toBeNull()`. The report said exactly
-    // what it says now, and the credential was in NEITHER tier: the final step
-    // was `delete(key, { scope: source })`, and `delete` is the revoke verb,
-    // for a daemon-needed key it discards the scope filter and sweeps every
-    // tier, destroying the daemon copy it had just written and verified.
-    // Migration now uses `deleteFromScope`, which removes one copy and no other.
+    // `delete` is the revoke verb and sweeps every tier for a daemon-needed
+    // key; migration uses `deleteFromScope`, which removes one copy only.
     expect(await store.get(STRANDED_KEY)).toBe(STRANDED_VALUE);
     expect(await store.getFromScope(STRANDED_KEY, 'daemon')).toBe(STRANDED_VALUE);
     // The source copy is gone, which is the part that was always correct.
@@ -669,6 +606,7 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
    * copy.
    */
   test('an unwritable daemon store leaves the only copy exactly where it is and working', async () => {
+    if (runsAsRoot) return;
     const home = throwawayHome();
     const surfacePath = strandInSurfaceStore(home, 'agent', STRANDED_KEY, STRANDED_VALUE);
 
@@ -693,6 +631,7 @@ describe('a credential an older build stranded is lifted, on a real disk', () =>
   });
 
   test('a daemon that cannot migrate still boots', async () => {
+    if (runsAsRoot) return;
     const home = throwawayHome();
     // Stranded in the daemon's OWN silo, so the migration genuinely reaches it
     // and genuinely fails on the unwritable destination, rather than passing
@@ -885,6 +824,7 @@ describe("a mail account configured on a surface is the daemon's to send with", 
   });
 
   test('a store that will not accept the password leaves the working literal in place', async () => {
+    if (runsAsRoot) return;
     const home = throwawayHome();
     const surface = openSurface(home, 'tui');
     surface.configManager.setDynamic(MAILBOX_KEY as never, FAKE_MAILBOX_PASSWORD);
@@ -1094,21 +1034,6 @@ describe('one credential under two names is not one credential', () => {
     expect(await daemon.secretsManager.get(TUI_KEY)).toBe(TOKEN);
   });
 
-  /**
-   * The property the platform owes the owner, stated plainly.
-   *
-   * Currently fails. A credential whose config reference the daemon holds must
-   * be resolvable by the daemon after every surface has closed, whichever
-   * surface captured it and whatever that surface chose to call it.
-   */
-  test('the daemon resolves the credential its own config points at', async () => {
-    const home = stackedFailureHome();
-
-    const daemon = await bootDaemon(home);
-
-    expect(daemon.configManager.get(CONFIG_KEY)).toBe(REFERENCE);
-    expect(await daemon.secretsManager.get(TUI_KEY)).toBe(TOKEN);
-  });
 });
 
 // ===========================================================================

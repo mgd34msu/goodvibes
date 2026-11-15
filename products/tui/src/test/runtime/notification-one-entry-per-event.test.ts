@@ -7,6 +7,7 @@ import { emitContractPassed } from '@goodvibes-jev/engine/platform/platform/runt
 import { NotificationFeed } from '../../views/notifications-feed.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 import { SAMPLES } from '../helpers/contract-event-samples.ts';
+import { busDrained } from '../helpers/bus-drained.ts';
 
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
@@ -28,7 +29,7 @@ for (const traceId of ['shared-trace', undefined]) {
         const payload = { type: 'AGENT_COMPLETED' as const, agentId: 'reused-agent', durationMs: 1000 };
         expect(runtimeEventKey(payload.type, payload)).toBeUndefined();
         bus.emit('agents', { ...createEventEnvelope(payload.type, payload, { ...context, traceId }), ts: 1000 });
-        await Promise.resolve();
+        await busDrained(bus);
       }
       const entries = feed.list();
       expect(entries).toHaveLength(2);
@@ -46,7 +47,7 @@ test('different domains can share one trace and timestamp without overwriting ea
   try {
     bus.emit('agents', { ...createEventEnvelope('AGENT_COMPLETED', { type: 'AGENT_COMPLETED', agentId: 'fixture-agent', durationMs: 1000 }, context), ts: 1000 });
     bus.emit('contracts', { ...createEventEnvelope('CONTRACT_PASSED', SAMPLES.CONTRACT_PASSED, context), ts: 1000 });
-    await Promise.resolve();
+    await busDrained(bus);
     expect(feed.list().map((entry) => entry.title).sort()).toEqual(['Agent finished', 'Workstream passed']);
   } finally { stop(); }
 });
@@ -86,7 +87,7 @@ for (const bridgeFirst of [true, false]) {
     const stopAfter = bridgeFirst ? undefined : wireRuntimeNotificationBridge(bus, dispatcher);
     try {
       emitContractPassed(bus, context, SAMPLES.CONTRACT_PASSED);
-      await Promise.resolve();
+      await busDrained(bus);
       expect(feed.list()).toHaveLength(1);
       expect(feed.list().every((entry) => entry.title === 'Workstream passed')).toBe(true);
     } finally {
@@ -112,13 +113,20 @@ test('unknown legacy operator lines retain their original text as independent no
 
 test('keyless memory-pressure deliveries also receive unique notification identities', async () => {
   const received: string[] = [];
+  const both = Promise.withResolvers<void>();
   const bus = new RuntimeEventBus();
-  const stop = wireMemoryPressureNotice(bus, { dispatch: (notice) => { received.push(notice.id); return { target: 'status_bar', reasonCode: 'allowed' }; } });
+  const stop = wireMemoryPressureNotice(bus, {
+    dispatch: (notice) => {
+      received.push(notice.id);
+      if (received.length === 2) both.resolve();
+      return { target: 'status_bar', reasonCode: 'allowed' };
+    },
+  });
   try {
     const payload = { type: 'OPS_MEMORY_PRESSURE' as const, tier: 'high' as const, previousTier: 'elevated' as const, rssMb: 90, heapMb: 50, budgetMb: 100, usedPct: 90 };
     const event = { ...createEventEnvelope(payload.type, payload, context), ts: 1000 };
     bus.emit('ops', event); bus.emit('ops', event);
-    await Promise.resolve();
+    await both.promise;
     expect(received).toHaveLength(2);
     expect(new Set(received).size).toBe(2);
   } finally { stop(); }

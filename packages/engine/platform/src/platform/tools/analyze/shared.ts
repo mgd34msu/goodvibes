@@ -2,33 +2,45 @@ import { assertCapturedToolReadAccess, assertCapturedToolAccessCurrent, assertCa
 import { existsSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { dirname, extname, join, relative, resolve } from 'node:path';
+import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { walkDir, type WalkDirOptions } from '../../utils/walk-dir.js';
 import type { AnalyzeInput, JsonObject, DiffStatFile } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { DEFAULT_CEILING_TOKENS, capToolText } from '../../runtime/tools/output-policy.js';
 
 export const BINARY_CHECK_BYTES = 8192;
 /** Default discovery covers the requested scope; callers may supply a finite page budget. */
 export const MAX_SCAN_FILES = Number.POSITIVE_INFINITY;
-export const MAX_SCAN_MS = Number.POSITIVE_INFINITY;
+/** A project scan stops by itself after this long and says it did, instead of holding the turn on a very large tree. */
+export const MAX_SCAN_MS = 60_000;
 export const ANALYZE_SUMMARY_SAMPLE_LIMIT = 5;
 
-export async function isBinary(filePath: string): Promise<boolean> {
+/** What the start of a file says about it: text, binary content, or a file that could not be read at all. */
+async function probeFile(filePath: string): Promise<'text' | 'binary' | 'unreadable'> {
   try {
     await assertCapturedToolReadAccess(filePath);
     const file = Bun.file(filePath);
-    if (file.size === 0) return false;
+    if (file.size === 0) return 'text';
     const chunk = await file.slice(0, BINARY_CHECK_BYTES).arrayBuffer();
     const bytes = new Uint8Array(chunk);
     for (const byte of bytes) {
-      if (byte === 0) return true;
+      if (byte === 0) return 'binary';
     }
-    return false;
+    return 'text';
   } catch {
-    return true;
+    return 'unreadable';
   }
 }
 
-export async function collectTextFiles(dirPath: string, limit = MAX_SCAN_FILES, deadline?: number, walkOptions: WalkDirOptions = {}): Promise<string[]> {
+export async function isBinary(filePath: string): Promise<boolean> {
+  return (await probeFile(filePath)) !== 'text';
+}
+
+/**
+ * The text files under a directory. A file that cannot be read is not text and not binary: when
+ * `unreadable` is given its path is added there, so the caller can say it was not scanned.
+ */
+export async function collectTextFiles(dirPath: string, limit = MAX_SCAN_FILES, deadline?: number, walkOptions: WalkDirOptions = {}, unreadable?: string[]): Promise<string[]> {
   const files: string[] = [];
   for await (const filePath of walkDir(dirPath, {
     ...walkOptions, beforeAttempt: () => {
@@ -43,14 +55,13 @@ export async function collectTextFiles(dirPath: string, limit = MAX_SCAN_FILES, 
   })) {
     if (files.length >= limit) break;
     if (deadline && Date.now() > deadline) break;
-    const binary = await isBinary(filePath);
+    const probe = await probeFile(filePath);
     await assertCapturedToolAccessCurrent();
     walkOptions.signal?.throwIfAborted();
     walkOptions.beforeAttempt?.();
     if (deadline !== undefined && Date.now() > deadline) break;
-    if (!binary) {
-      files.push(filePath);
-    }
+    if (probe === 'text') files.push(filePath);
+    else if (probe === 'unreadable') unreadable?.push(filePath);
   }
   return files;
 }
@@ -70,6 +81,16 @@ export function validatePath(inputPath: string, root: string): string | { error:
   } catch (err) {
     return { error: summarizeError(err) };
   }
+}
+
+/**
+ * A model-supplied path resolved against the root. It must stay inside the
+ * root, lexically and through links, the same rule the edit tool applies;
+ * otherwise this throws and nothing is read.
+ */
+export function resolveInsideRoot(inputPath: string, root: string): string {
+  resolveAndValidatePath(inputPath, root);
+  return resolve(root, inputPath);
 }
 
 export async function readTextFile(filePath: string): Promise<string | null> {
@@ -104,7 +125,7 @@ export async function collectInputFiles(
     if (files.length >= limit) break;
     if (deadline && Date.now() > deadline) break;
 
-    const resolved = resolve(projectRoot, inputFile);
+    const resolved = resolveInsideRoot(inputFile, projectRoot);
     let info: Awaited<ReturnType<typeof stat>>;
     try {
       info = await stat(resolved);
@@ -145,19 +166,24 @@ export function summarizeAnalyzeResult(
   }
   return summary;
 }
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
 function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<string, unknown>): Record<string, unknown> {
   switch (mode) {
-    case 'dependencies':
-      return {
-        mode,
-        has_cycles: result.has_cycles ?? false,
-        fileCount:
-          result.graph && typeof result.graph === 'object'
-            ? Object.keys(result.graph as Record<string, unknown>).length
-            : 0,
-        cycleCount: Array.isArray(result.cycles) ? result.cycles.length : 0,
-        cycles: sampleArray<string[]>(result.cycles),
-      };
+    case 'dependencies': {
+      const summary: Record<string, unknown> = { mode };
+      if (isRecord(result.graph)) summary.fileCount = Object.keys(result.graph).length;
+      if (Array.isArray(result.cycles)) {
+        summary.has_cycles = result.has_cycles ?? result.cycles.length > 0;
+        summary.cycleCount = result.cycles.length;
+        summary.cycles = sampleArray<string[]>(result.cycles);
+      }
+      if (Array.isArray(result.packages)) {
+        summary.packageCount = result.packages.length;
+        summary.packages = sampleArray<string>(result.packages);
+      }
+      return summary;
+    }
     case 'dead_code':
       return {
         mode,
@@ -167,6 +193,7 @@ function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<stri
           name: entry.name ?? null,
           file: entry.file ?? null,
         })),
+        ...(result.unverified_count !== undefined ? { unverified_count: result.unverified_count } : {}),
       };
     case 'security': {
       const secrets = (result.secrets as Record<string, unknown> | undefined) ?? {};
@@ -198,14 +225,27 @@ function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<stri
     case 'impact':
       return {
         mode,
-        summary: result.summary ?? null,
-        changed_files: sampleArray<string>(result.changed_files),
-        affected: sampleArray<Record<string, unknown>>(result.affected).map((entry) => ({
+        exported_count: Array.isArray(result.exported_names) ? result.exported_names.length : 0,
+        exported_names: sampleArray<string>(result.exported_names),
+        total_affected: result.total_affected ?? (Array.isArray(result.affected_files) ? result.affected_files.length : 0),
+        affected_files: sampleArray<Record<string, unknown>>(result.affected_files).map((entry) => ({
           file: entry.file ?? null,
-          reason: entry.reason ?? null,
+          referenceCount: Array.isArray(entry.references) ? entry.references.length : 0,
         })),
       };
-    case 'diff':
+    case 'diff': {
+      const files = Array.isArray(result.files) ? (result.files as Array<Record<string, unknown>>) : [];
+      return {
+        mode,
+        before: result.before ?? null,
+        after: result.after ?? null,
+        fileCount: files.length,
+        insertions: files.reduce((n, f) => n + (typeof f.insertions === 'number' ? f.insertions : 0), 0),
+        deletions: files.reduce((n, f) => n + (typeof f.deletions === 'number' ? f.deletions : 0), 0),
+        files: sampleArray<Record<string, unknown>>(files).map((f) => ({ file: f.file ?? null, insertions: f.insertions ?? null, deletions: f.deletions ?? null })),
+        ...(result.diff_error !== undefined ? { diff_error: result.diff_error } : {}),
+      };
+    }
     case 'semantic_diff':
       return {
         mode,
@@ -214,59 +254,123 @@ function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<stri
         impact: sampleArray<string>(result.impact),
         changed_files: sampleArray<string>(result.changed_files),
       };
+    case 'breaking': {
+      // Classic mode returns the raw diff and assesses nothing; it must not read as "no breaking changes".
+      if (!Array.isArray(result.breaking_changes)) {
+        const files = Array.isArray(result.files) ? (result.files as Array<Record<string, unknown>>) : [];
+        return {
+          mode,
+          before: result.before ?? null,
+          after: result.after ?? null,
+          fileCount: files.length,
+          files: sampleArray<Record<string, unknown>>(files).map((f) => ({ file: f.file ?? null, insertions: f.insertions ?? null, deletions: f.deletions ?? null })),
+        };
+      }
+      return {
+        mode,
+        before: result.before ?? null,
+        after: result.after ?? null,
+        total_breaking: result.total_breaking ?? 0,
+        total_additions: result.total_additions ?? 0,
+        breaking_changes: sampleArray<Record<string, unknown>>(result.breaking_changes).map((change) => ({
+          file: change.file ?? null,
+          name: change.name ?? null,
+          reason: change.reason ?? null,
+        })),
+      };
+    }
     case 'coverage':
       return {
         mode,
         source: result.source ?? null,
-        line_pct: result.line_pct ?? null,
-        branch_pct: result.branch_pct ?? null,
-        function_pct: result.function_pct ?? null,
-        statement_pct: result.statement_pct ?? null,
+        lines: result.lines ?? null,
+        statements: result.statements ?? null,
+        branches: result.branches ?? null,
+        functions: result.functions ?? null,
       };
-    case 'bundle':
+    case 'bundle': {
+      const data = isRecord(result.data) ? result.data : {};
       return {
         mode,
         source: result.source ?? null,
-        assetCount: Array.isArray(result.assets) ? result.assets.length : 0,
-        chunkCount: Array.isArray(result.chunks) ? result.chunks.length : 0,
-        assets: sampleArray<Record<string, unknown>>(result.assets).map((asset) => ({
+        topLevelKeys: sampleArray<string>(Object.keys(data), 20),
+        assetCount: Array.isArray(data.assets) ? data.assets.length : 0,
+        chunkCount: Array.isArray(data.chunks) ? data.chunks.length : 0,
+        assets: sampleArray<Record<string, unknown>>(data.assets).map((asset) => ({
           name: asset.name ?? null,
           size: asset.size ?? null,
         })),
       };
-    case 'upgrade':
+    }
+    case 'upgrade': {
+      const outdated = (Array.isArray(result.packages) ? (result.packages as Array<Record<string, unknown>>) : [])
+        .filter((pkg) => isOutdated(String(pkg.current ?? ''), String(pkg.latest ?? '')));
       return {
         mode,
         packageCount: Array.isArray(result.packages) ? result.packages.length : 0,
-        outdated: sampleArray<Record<string, unknown>>(result.packages)
-          .filter((pkg) => pkg.current !== pkg.latest)
-          .map((pkg) => ({
-            name: pkg.name ?? null,
-            current: pkg.current ?? null,
-            latest: pkg.latest ?? null,
-          })),
+        outdatedCount: outdated.length,
+        outdated: sampleArray<Record<string, unknown>>(outdated).map((pkg) => ({
+          name: pkg.name ?? null,
+          current: pkg.current ?? null,
+          latest: pkg.latest ?? null,
+        })),
       };
+    }
     case 'permissions':
-    case 'env_audit':
-    case 'test_find':
-    case 'preview':
-    case 'breaking':
       return {
         mode,
-        summary: result.summary ?? null,
-        count: result.count ?? null,
-        findings: sampleArray<Record<string, unknown>>(result.findings),
+        total: result.total ?? 0,
+        dismissed: result.dismissed ?? 0,
+        files_scanned: result.files_scanned ?? 0,
+        files_affected: result.files_affected ?? 0,
+        by_severity: result.by_severity ?? null,
+        findings: sampleArray<Record<string, unknown>>(result.findings).map((finding) => ({
+          file: finding.file ?? null,
+          line: finding.line ?? null,
+          severity: finding.severity ?? null,
+        })),
+      };
+    case 'env_audit': {
+      const missing = Array.isArray(result.missing) ? result.missing : [];
+      const extra = Array.isArray(result.extra) ? result.extra : [];
+      return {
+        mode,
+        files: result.files ?? [],
+        reference: result.reference ?? null,
+        missingCount: missing.length,
+        missing: sampleArray<Record<string, unknown>>(missing),
+        extraCount: extra.length,
+        extra: sampleArray<Record<string, unknown>>(extra),
+        ...(result.uncertain !== undefined ? { uncertain: result.uncertain } : {}),
+      };
+    }
+    case 'test_find':
+      return {
+        mode,
+        total: result.total ?? 0,
+        found: result.found ?? 0,
+        missing: result.missing ?? 0,
+        mappings: sampleArray<Record<string, unknown>>(result.mappings).map((mapping) => ({
+          source: mapping.source ?? null,
+          test: mapping.test ?? null,
+          exists: mapping.exists ?? false,
+        })),
+      };
+    case 'preview':
+      return {
+        mode,
+        file: result.file ?? null,
+        changed_lines: result.changed_lines ?? null,
       };
     default:
       return result;
   }
 }
 
+/** The call's `max_tokens`, or the shared default ceiling; a cut result says so and how to get less or more. */
 export function applyAnalyzeTokenBudget(output: string, maxTokens: number | undefined): string {
-  if (typeof maxTokens !== 'number' || maxTokens <= 0) return output;
-  const maxChars = Math.max(32, maxTokens * 4);
-  if (output.length <= maxChars) return output;
-  return `${output.slice(0, maxChars - 1)}…`;
+  const limit = typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : DEFAULT_CEILING_TOKENS.analyze;
+  return capToolText(output, limit, "Pass output.format 'summary', narrow the files or mode options, or raise output.max_tokens to see more.");
 }
 
 export async function readJsonFile<T extends JsonObject = JsonObject>(filePath: string): Promise<T | null> {
@@ -279,7 +383,7 @@ export async function readJsonFile<T extends JsonObject = JsonObject>(filePath: 
 }
 
 export function resolveScanRoot(input: AnalyzeInput, projectRoot: string): string {
-  return input.files && input.files.length > 0 ? resolve(projectRoot, input.files[0]!) : projectRoot;
+  return input.files && input.files.length > 0 ? resolveInsideRoot(input.files[0]!, projectRoot) : projectRoot;
 }
 
 export function collectExistingPaths(projectRoot: string, names: string[]): string[] {
@@ -300,6 +404,26 @@ export function loadDependencyVersions(pkgJson: JsonObject): Record<string, stri
   };
 }
 
+const GIT_SIMPLE_ESCAPES: Record<string, number> = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92, '"': 34 };
+
+/** A path as git prints it: names with non-ASCII bytes or special characters arrive quoted with C escapes. */
+export function unquoteGitPath(text: string): string {
+  if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) return text;
+  const inner = text.slice(1, -1);
+  const bytes: number[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]!;
+    if (ch !== '\\') { bytes.push(...Buffer.from(ch, 'utf8')); continue; }
+    const octal = inner.slice(i + 1, i + 4).match(/^[0-7]{3}/);
+    if (octal) { bytes.push(parseInt(octal[0], 8)); i += 3; continue; }
+    const next = inner[i + 1] ?? '';
+    const simple = GIT_SIMPLE_ESCAPES[next];
+    if (simple !== undefined) { bytes.push(simple); i += 1; continue; }
+    bytes.push(92);
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 export function parseDiffStats(statOutput: string): DiffStatFile[] {
   const files: DiffStatFile[] = [];
   for (const line of statOutput.trim().split('\n')) {
@@ -307,7 +431,7 @@ export function parseDiffStats(statOutput: string): DiffStatFile[] {
     if (!m) continue;
     const plusMinus = m[3] ?? '';
     files.push({
-      file: (m[1] ?? '').trim(),
+      file: unquoteGitPath((m[1] ?? '').trim()),
       insertions: (plusMinus.match(/\+/g) ?? []).length,
       deletions: (plusMinus.match(/-/g) ?? []).length,
     });
@@ -333,6 +457,10 @@ export function validateGitRefs(
   if (!safeRefPattern.test(before) || !safeRefPattern.test(after)) {
     return { error: 'Invalid git ref format', before, after };
   }
+  // A leading dash would be read by git as an option (`--output <path>` writes a file), never as a revision.
+  if (before.startsWith('-') || after.startsWith('-')) {
+    return { error: "Invalid git ref: a ref must not start with '-'", before, after };
+  }
   return null;
 }
 
@@ -351,6 +479,21 @@ export function parseSemver(version: string): [number, number, number] {
   const clean = version.replace(/^[^0-9]*/, '');
   const parts = clean.split('.').map((p) => parseInt(p, 10) || 0);
   return [parts[0]! ?? 0, parts[1]! ?? 0, parts[2]! ?? 0];
+}
+
+/** Whether a manifest spec begins with a version number, after range operators. */
+export function hasVersion(spec: string): boolean {
+  return /^[\^~<>=v\s]*\d/.test(spec);
+}
+
+/** Whether the registry's latest is newer than what the manifest range starts at; a range at the latest version is current. */
+export function isOutdated(current: string, latest: string): boolean {
+  if (!hasVersion(current) || !hasVersion(latest)) return false;
+  const [cur, lat] = [parseSemver(current), parseSemver(latest)];
+  for (let i = 0; i < 3; i++) {
+    if (lat[i]! !== cur[i]!) return lat[i]! > cur[i]!;
+  }
+  return false;
 }
 
 export function isBreakingUpgrade(current: string, latest: string): boolean {

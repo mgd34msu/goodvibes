@@ -1,3 +1,5 @@
+import { AGENT_TEMPLATES as ENGINE_AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
+
 export const AGENT_TOOL_MODES = [
   'spawn',
   'batch-spawn',
@@ -10,13 +12,14 @@ export const AGENT_TOOL_MODES = [
   'wait',
   'message',
   'cancel',
-  'wrfc-chains',
-  'wrfc-history',
+  'contracts',
+  'contract-history',
   'cohort-status',
   'cohort-report',
 ] as const;
 
-export const AGENT_TEMPLATES = ['orchestrator', 'engineer', 'reviewer', 'tester', 'researcher', 'integrator', 'general'] as const;
+/** Read from the engine's own template table so a template added there is advertised here. */
+export const AGENT_TEMPLATES: readonly string[] = Object.keys(ENGINE_AGENT_TEMPLATES);
 
 export function agentOrchestrationDecisionCards(agentToolAvailable: boolean): readonly Record<string, unknown>[] {
   return [
@@ -61,7 +64,7 @@ export function agentOrchestrationDecisionCards(agentToolAvailable: boolean): re
       id: 'inspect-or-control-visible-agent',
       label: 'Inspect or control a visible agent',
       status: agentToolAvailable ? 'ready' : 'unavailable',
-      chooseWhen: ['The user asks for progress, budget, plan, message, wait, cancel, WRFC chain, or cohort status.'],
+      chooseWhen: ['The user asks for progress, budget, plan, message, wait, cancel, contract status, or cohort status.'],
       modelRoutes: ['agent { mode: "list" }', 'agent { mode: "get" }', 'agent { mode: "message" }', 'agent { mode: "wait" }', 'agent { mode: "cancel" }'],
     },
     {

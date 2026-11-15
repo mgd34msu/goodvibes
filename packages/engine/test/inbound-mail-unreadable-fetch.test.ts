@@ -97,7 +97,7 @@ interface ScriptedMailboxOptions {
   readonly present: readonly number[];
   /** UIDs the FETCH answers for. Anything in `present` and not here is absent. */
   readonly readable: readonly number[];
-  /** The unreadable responses each FETCH comes back with. */
+  /** The unreadable responses a FETCH comes back with, for the UIDs it asked about. */
   readonly unreadable: readonly ImapFetchProblem[];
 }
 
@@ -133,7 +133,10 @@ class ScriptedMailbox implements MailboxConnectionPort {
           envelopes: uids
             .filter((uid) => options.readable.includes(uid))
             .map((uid) => envelope(uid)),
-          unreadable: options.unreadable,
+          // As the real session does: a problem is reported with the batch it
+          // arrived in. A named one belongs to a requested UID; an anonymous one
+          // cannot be attributed, so it travels with whichever batch it hit.
+          unreadable: options.unreadable.filter((problem) => problem.uid === null || uids.includes(problem.uid)),
         };
       },
     };

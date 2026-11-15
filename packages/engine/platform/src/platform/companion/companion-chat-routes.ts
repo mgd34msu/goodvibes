@@ -20,8 +20,11 @@
  * dispatching to API routes).
  */
 
+import { createHash } from 'node:crypto';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type {
   CancelCompanionChatTurnInput,
   CompanionChatMessageAttachmentInput,
@@ -53,6 +56,27 @@ const COMPANION_CHAT_PATH_PREFIX = '/api/companion/chat/';
 export function isCompanionChatPath(url: URL): boolean {
   return url.pathname.startsWith(COMPANION_CHAT_PATH_PREFIX);
 }
+
+/**
+ * The paths the companion chat routes serve.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const COMPANION_CHAT_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'POST', path: '/api/companion/chat/sessions' },
+  { method: 'GET', path: '/api/companion/chat/sessions' },
+  { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}' },
+  { method: 'PATCH', path: '/api/companion/chat/sessions/{sessionId}' },
+  { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/close' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages' },
+  { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/messages' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/retry' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/edit' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/steer' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/turns/cancel' },
+  { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/events' },
+];
 
 export async function dispatchCompanionChatRoutes(
   req: Request,
@@ -336,12 +360,7 @@ async function handleUpdateSession(
     await context.chatManager.flushBrokerSync();
     return Response.json({ session });
   } catch (err: unknown) {
-    const e = err as { code?: string; status?: number; message?: string };
-    const status = e.status ?? 500;
-    return Response.json(
-      { error: e.message ?? 'Internal error', code: e.code ?? 'INTERNAL_ERROR' },
-      { status },
-    );
+    return respondWithManagerError(err);
   }
 }
 
@@ -379,12 +398,7 @@ async function handleDeleteSession(
     await context.chatManager.flushBrokerSync();
     return Response.json(result);
   } catch (err: unknown) {
-    const e = err as { code?: string; status?: number; message?: string };
-    const status = e.status ?? 500;
-    return Response.json(
-      { error: e.message ?? 'Internal error', code: e.code ?? 'INTERNAL_ERROR' },
-      { status },
-    );
+    return respondWithManagerError(err);
   }
 }
 
@@ -444,6 +458,21 @@ function readCompanionChatAttachments(
   return attachments;
 }
 
+const MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
+
+/** The sender's idempotency id for a send: absent, a usable string, or the 400 that names the problem. */
+function readClientMessageId(body: Record<string, unknown>): string | undefined | Response {
+  const raw = body['clientMessageId'];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'string' || raw.trim().length === 0 || raw.length > MAX_CLIENT_MESSAGE_ID_LENGTH) {
+    return Response.json(
+      { error: `clientMessageId must be a non-empty string of at most ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters`, code: 'INVALID_ARGUMENT' },
+      { status: 400 },
+    );
+  }
+  return raw;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/companion/chat/sessions/:sessionId/messages
 // ---------------------------------------------------------------------------
@@ -472,6 +501,10 @@ async function handlePostMessage(
         : '';
   const attachments = readCompanionChatAttachments(body);
   if (attachments instanceof Response) return attachments;
+  const clientMessageId = readClientMessageId(body);
+  if (clientMessageId instanceof Response) return clientMessageId;
+  const attachmentRefusal = refuseUnreadableAttachments(req, attachments, context);
+  if (attachmentRefusal) return attachmentRefusal;
   const input: PostCompanionChatMessageInput = {
     content: rawContent,
     attachments,
@@ -488,43 +521,113 @@ async function handlePostMessage(
   }
 
   try {
-    const messageId = await context.chatManager.postMessage(sessionId, input.content, '', {
+    const messageId = await context.chatManager.postMessage(sessionId, input.content, requestClientId(req, context), {
       attachments: input.attachments,
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      // This route sits behind the daemon's bearer-token auth, validated by
+      ...(clientMessageId === undefined ? {} : { clientMessageId }),
+      // This route sits behind the daemon's auth, validated by
       // DaemonHttpRouter.handleRequest before any API route is dispatched (see
-      // this file's header). Holding that token IS being the owner, it is the
-      // same credential the TUI and the operator API use, so the daemon can
-      // honestly attest this message is theirs, and does.
+      // this file's header). The daemon's own credential (shared token, paired
+      // device, admin user) IS being the owner, so for those the daemon can
+      // honestly attest this message is theirs, and does. A user session
+      // without the admin role does not get the attestation, and the router
+      // already refuses it the write:sessions scope this route needs.
       //
       // This is what gives the webui a turn boundary. Without it the window
       // never reset for anything the owner typed there, and the taint guard
       // would weigh a page read an hour ago against a message they are
       // writing now.
-      ownerDirect: true,
+      ownerDirect: isOwnerRequest(req, context),
     });
     return Response.json({ messageId }, { status: 202 });
   } catch (err: unknown) {
-    const e = err as { code?: string; status?: number; message?: string };
-    const status = e.status ?? 500;
-    return Response.json(
-      { error: e.message ?? 'Internal error', code: e.code ?? 'INTERNAL_ERROR' },
-      { status },
-    );
+    return respondWithManagerError(err);
   }
 }
 
 /**
- * Map a `{ code, status }`-carrying manager error to an honest JSON error
- * response, mirroring the catch blocks used by the update/delete handlers.
+ * Map a manager error to a JSON error response.
+ *
+ * Only errors the manager raised on purpose (a string `code` and a client-error
+ * status, or a rate-limit refusal) reach the caller with their own message. Any
+ * other failure, and the persistence failure whose message names a storage path,
+ * is logged in full and answered with a fixed sentence: a paired device or a
+ * signed-in user gets what it can act on, not filesystem detail.
  */
 function respondWithManagerError(err: unknown): Response {
-  const e = err as { code?: string; status?: number; message?: string };
-  const status = e.status ?? 500;
-  return Response.json(
-    { error: e.message ?? 'Internal error', code: e.code ?? 'INTERNAL_ERROR' },
-    { status },
-  );
+  const e = (typeof err === 'object' && err !== null ? err : {}) as {
+    code?: unknown; status?: unknown; message?: unknown; category?: unknown; retryAfterMs?: unknown;
+  };
+  const code = typeof e.code === 'string' ? e.code : undefined;
+  const status = typeof e.status === 'number' ? e.status : undefined;
+  const message = typeof e.message === 'string' ? e.message : '';
+  if (e.category === 'rate_limit' && code !== undefined) {
+    return Response.json(
+      { error: message, code, ...(typeof e.retryAfterMs === 'number' ? { retryAfterMs: e.retryAfterMs } : {}) },
+      {
+        status: 429,
+        ...(typeof e.retryAfterMs === 'number'
+          ? { headers: { 'Retry-After': String(Math.max(1, Math.ceil(e.retryAfterMs / 1000))) } }
+          : {}),
+      },
+    );
+  }
+  if (code === 'CHAT_PERSISTENCE_UNAVAILABLE') {
+    logger.warn('Companion chat storage unavailable', { error: message });
+    return Response.json(
+      {
+        error: 'Saving this chat failed, so it accepts no more changes for now. The daemon retries on its own; check that the companion chat storage directory is writable and has space, then try again in a minute.',
+        code,
+      },
+      { status: 503 },
+    );
+  }
+  if (code !== undefined && status !== undefined && status >= 400 && status < 500) {
+    return Response.json({ error: message, code }, { status });
+  }
+  logger.error('Companion chat request failed', { error: summarizeError(err) });
+  return Response.json({ error: 'Internal error', code: 'INTERNAL_ERROR' }, { status: 500 });
+}
+
+/**
+ * Whether this request may attest that the owner typed the message. The caller
+ * holds the daemon's own credential only when it is an admin (the shared token,
+ * a paired device, or an admin user); a signed-in user without that role is
+ * authenticated but is not the owner. A context that cannot tell keeps the
+ * historical answer, because the router already validated the credential.
+ */
+function isOwnerRequest(req: Request, context: CompanionChatRouteContext): boolean {
+  return context.requireAdmin ? context.requireAdmin(req) === null : true;
+}
+
+/**
+ * Attaching an artifact makes its content part of the chat, so a caller that
+ * may write sessions but not read artifacts must not be able to use a message
+ * to reach one (nor to learn from the answer which artifact ids exist). Returns
+ * the refusal to send, or null when there is nothing attached or the caller may
+ * read artifacts. A context that cannot tell leaves the check to the router.
+ */
+function refuseUnreadableAttachments(
+  req: Request,
+  attachments: readonly CompanionChatMessageAttachmentInput[],
+  context: CompanionChatRouteContext,
+): Response | null {
+  if (attachments.length === 0) return null;
+  return context.requireScope?.(req, 'read:artifacts') ?? null;
+}
+
+/**
+ * The identity the per-client message cap counts against, taken from the
+ * request's own credential and never from the body. The credential is hashed so
+ * the token is never kept in the limiter or printed in its refusal. Empty only
+ * for a request that carries none, which skips the per-client cap.
+ */
+function requestClientId(req: Request, context: CompanionChatRouteContext): string {
+  const explicit = context.resolveClientId?.(req);
+  if (explicit) return explicit;
+  const credential = `${req.headers.get('authorization') ?? ''}\n${req.headers.get('cookie') ?? ''}`;
+  if (credential.trim() === '') return '';
+  return `credential:${createHash('sha256').update(credential).digest('hex').slice(0, 16)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -548,7 +651,7 @@ async function handleRegenerateMessage(
     messageId: typeof body['messageId'] === 'string' ? body['messageId'] : undefined,
   };
   try {
-    return Response.json(context.chatManager.regenerateMessage(sessionId, input), { status: 202 });
+    return Response.json(context.chatManager.regenerateMessage(sessionId, input, { clientId: requestClientId(req, context) }), { status: 202 });
   } catch (err: unknown) {
     return respondWithManagerError(err);
   }
@@ -579,6 +682,8 @@ async function handleEditMessage(
   }
   const attachments = readCompanionChatAttachments(body);
   if (attachments instanceof Response) return attachments;
+  const attachmentRefusal = refuseUnreadableAttachments(req, attachments, context);
+  if (attachmentRefusal) return attachmentRefusal;
 
   const input: EditCompanionChatMessageInput = {
     messageId,
@@ -589,7 +694,12 @@ async function handleEditMessage(
       : undefined,
   };
   try {
-    return Response.json(context.chatManager.editMessage(sessionId, input), { status: 202 });
+    // Same attestation as a posted message: an edit is new owner input, which is
+    // what restarts the untrusted-content window. A regenerate is not, and passes none.
+    return Response.json(
+      context.chatManager.editMessage(sessionId, input, { ownerDirect: isOwnerRequest(req, context), clientId: requestClientId(req, context) }),
+      { status: 202 },
+    );
   } catch (err: unknown) {
     return respondWithManagerError(err);
   }
@@ -666,6 +776,10 @@ async function handleSteerMessage(
   const rawContent = readCompanionChatMessageBody(body);
   const attachments = readCompanionChatAttachments(body);
   if (attachments instanceof Response) return attachments;
+  const clientMessageId = readClientMessageId(body);
+  if (clientMessageId instanceof Response) return clientMessageId;
+  const attachmentRefusal = refuseUnreadableAttachments(req, attachments, context);
+  if (attachmentRefusal) return attachmentRefusal;
   if (!rawContent.trim() && attachments.length === 0) {
     return Response.json(
       { error: 'content, body, or attachments are required', code: 'INVALID_ARGUMENT' },
@@ -673,16 +787,17 @@ async function handleSteerMessage(
     );
   }
   try {
-    const result = await context.chatManager.steerMessage(sessionId, rawContent, '', {
+    const result = await context.chatManager.steerMessage(sessionId, rawContent, requestClientId(req, context), {
       attachments,
       metadata: typeof body['metadata'] === 'object' && body['metadata'] !== null
         ? (body['metadata'] as Record<string, unknown>)
         : undefined,
-      // Same bearer-token auth as the post route above, so the same attestation.
+      ...(clientMessageId === undefined ? {} : { clientMessageId }),
+      // Same auth as the post route above, so the same attestation.
       // A steer is the owner speaking with more urgency, not less authority,
       // wiring one and not the other would leave them a way to start a turn
       // that silently did not end the previous one.
-      ownerDirect: true,
+      ownerDirect: isOwnerRequest(req, context),
     });
     return Response.json(result, { status: 202 });
   } catch (err: unknown) {

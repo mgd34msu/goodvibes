@@ -54,7 +54,10 @@ export interface ProfilePickerRouteState<Config> extends ModalRouteState {
 }
 export function createProfilePickerTokenRoute<Config>(cancelDeleteConfirmation: boolean) {
   type State = ProfilePickerRouteState<Config>;
-  const act = (state: State, key: string): void => {
+  // Letter shortcuts act only on a bare key with an empty query, like the
+  // session picker: Ctrl+D / Ctrl+S must not delete or save a profile.
+  const act = (state: State, key: string, ctrl = false): void => {
+    if (ctrl || state.profilePickerModal.query.length) return;
     if (key === 'd') state.profilePickerModal.deleteSelected();
     else if (key === 's') {
       const config = state.commandContext?.platform.configManager;

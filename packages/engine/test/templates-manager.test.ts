@@ -167,16 +167,17 @@ describe('TemplateManager', () => {
       expect(result).toBe('{{template:missing}}');
     });
 
-    test('template chaining respects max depth of 3', () => {
-      // depth 0 calls depth 1 calls depth 2 calls depth 3, depth 4 would be skipped
+    test('template chaining stops at depth 3 and leaves the deeper reference literal', () => {
       manager.save('d1', 'D1:{{template:d2}}');
       manager.save('d2', 'D2:{{template:d3}}');
       manager.save('d3', 'D3:{{template:d4}}');
       manager.save('d4', 'D4-LEAF');
-      const result = manager.expand('Root:{{template:d1}}', {});
-      // At depth 3 (expanding d3), it calls expand at depth=3 which is the limit
-      // d3 contains {{template:d4}}, _depth=3, so max depth check triggers
-      expect(result).toContain('Root:D1:D2:D3:');
+      expect(manager.expand('Root:{{template:d1}}', {})).toBe('Root:D1:D2:D3:{{template:d4}}');
+    });
+
+    test('a template that references itself terminates at the depth cap', () => {
+      manager.save('a', 'A{{template:a}}');
+      expect(manager.expand('{{template:a}}', {})).toBe('AAA{{template:a}}');
     });
   });
 });

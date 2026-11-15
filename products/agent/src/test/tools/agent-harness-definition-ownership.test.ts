@@ -42,7 +42,7 @@ function fixture() {
   return { deps, tool, registry };
 }
 
-function modeSchema(tool: Tool): object {
+function modeSchema(tool: Tool): { readonly description?: unknown } {
   const properties: unknown = tool.definition.parameters.properties;
   if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw new Error('Native harness properties missing.');
   const mode: unknown = Object.getOwnPropertyDescriptor(properties, 'mode')?.value;
@@ -176,7 +176,11 @@ test('native compaction preserves original compacted bytes and ordinary definiti
   expect(JSON.stringify(f.tool.definition)).toBe(JSON.stringify(ordinary.definition));
   expect(Object.keys(f.tool.definition)).toEqual(Object.keys(ordinary.definition));
   expect(f.tool.definition.description).toBe('Harness catalog: modes, settings, commands, UI, tools.');
-  expect(JSON.stringify(f.tool.definition.parameters)).not.toContain('"description"');
+  // Only the top-level `mode` description and the short text of a destructive parameter (`force`) survive compaction of a non-core tool.
+  const kept = Object.entries((f.tool.definition.parameters as { properties: Record<string, { description?: string }> }).properties)
+    .filter(([, property]) => property.description !== undefined).map(([name]) => name);
+  expect(kept).toEqual(['mode', 'force']);
+  expect(modeSchema(f.tool).description).toBe(AGENT_HARNESS_PARAMETER_PROPERTIES.mode.description);
   expect(f.tool.definition.parameters.required).toEqual(['mode']);
   expect(f.tool.definition.parameters.additionalProperties).toBe(false);
   expect(Reflect.set(modeSchema(f.tool), 'type', 'number')).toBe(false);

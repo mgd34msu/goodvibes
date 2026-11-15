@@ -58,3 +58,15 @@ describe('PermissionPromptUI attribution rendering (platform 1.6.1 PermissionAtt
     expect(factCount(request)).toBe(factCount(baseRequest()));
   });
 });
+
+describe('PermissionPromptUI remembered allows', () => {
+  test('offers "Allow for session" for an ask a remembered allow skips', () => {
+    expect(renderedText(baseRequest())).toContain('Allow for session');
+  });
+
+  test('does not offer "Allow for session" for an ask the mode always puts to the owner again', () => {
+    const text = renderedText({ ...baseRequest(), rememberEffect: 'owner-asked-again' });
+    expect(text).toContain('Allow once');
+    expect(text).not.toContain('Allow for session');
+  });
+});

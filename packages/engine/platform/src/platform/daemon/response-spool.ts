@@ -2,14 +2,22 @@ import { mkdtemp, open, readFile, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** Drain finite response bodies to disk so a large/slow body does not accumulate in RAM. */
-export async function readResponseSpool(response: Response, signal?: AbortSignal): Promise<string> {
+/** Largest response body the spool will read back into a string. */
+export const RESPONSE_SPOOL_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
+ * Drain a finite response body through a private file, then read it back as text.
+ * The text still lands in memory, so a body over `maxBytes` is refused while
+ * it streams, before it can fill the disk or the heap.
+ */
+export async function readResponseSpool(response: Response, signal?: AbortSignal, maxBytes = RESPONSE_SPOOL_MAX_BYTES): Promise<string> {
   signal?.throwIfAborted();
   if (!response.body) return '';
   const directory = await mkdtemp(join(tmpdir(), 'goodvibes-response-'));
   const path = join(directory, 'body');
   let file: FileHandle | undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let total = 0;
   const abort = () => { void reader?.cancel(signal?.reason).catch(() => {}); };
   try {
     file = await open(path, 'wx', 0o600);
@@ -20,6 +28,8 @@ export async function readResponseSpool(response: Response, signal?: AbortSignal
       const chunk = await reader.read();
       signal?.throwIfAborted();
       if (chunk.done) break;
+      total += chunk.value.length;
+      if (total > maxBytes) throw new Error(`Response body is larger than the ${maxBytes} byte limit`);
       let offset = 0;
       while (offset < chunk.value.length) {
         signal?.throwIfAborted();

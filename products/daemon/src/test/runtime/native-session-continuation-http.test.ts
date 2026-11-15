@@ -1,7 +1,6 @@
 /** Paired HTTP → real native owner → canonical broker → real Orchestrator/model. */
 import { expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { exportAndCompareFixture } from '../helpers/webui-fixture-parity.ts';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import { nativeConversationIntakeLookupResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { nativeHostedSessionLookupSchema, nativeHostedTurnLookupSchema, type NativeHostedTurnRequest } from '@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client';
@@ -188,9 +187,7 @@ test('native continuation HTTP reuses the real session, snapshots completed cont
     const otherAttachment = await attachment(otherSessionId);
     const otherDiscovery = await wire('workLedger.turn.session', { sessionId: otherSessionId });
     const directory = process.env.GOODVIBES_TEST_NATIVE_CONTINUATION_FIXTURE_DIR;
-    if (directory) {
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'lifecycle.json'), JSON.stringify({ source: 'Real paired DaemonServer; actual native Orchestrator; owned loopback streaming model. Every wire body is unchanged Response.text().', auth, project, sessionId, discovery, busyDiscovery, legacy,
+    exportAndCompareFixture(directory, 'lifecycle.json', JSON.stringify({ source: 'Real paired DaemonServer; actual native Orchestrator; owned loopback streaming model. Every wire body is unchanged Response.text().', auth, project, sessionId, discovery, busyDiscovery, legacy,
         initial: { ...initial, start: initialStart, status: initialStatus, attachment: initialAttachment },
         second: { ...second, start: secondStart, status: secondStatus, duplicate: secondDuplicate, attachment: secondAttachment },
         active: { ...active, start: activeStart, status: activeStatus },
@@ -200,7 +197,6 @@ test('native continuation HTTP reuses the real session, snapshots completed cont
         other: { ...other, start: otherStart, status: otherStatus, attachment: otherAttachment, discovery: otherDiscovery },
         modelObservation: 'Original user/assistant message objects selected from the actual streamed second model request; unrelated system and tool definitions omitted.',
         modelRequests: requests.filter(request => request.stream && lastUser(request) === SECOND).map(request => ({ stream: request.stream, messages: request.messages.filter(message => message.role === 'user' || message.role === 'assistant') })),
-      }, null, 2) + '\n');
-    }
+      }, null, 2) + '\n', new URL('../../../../webui/e2e/support/fixtures/native-session-continuation/', import.meta.url));
   } finally { activeBarrier.resolve(); cancelBarrier.resolve(); await f.stop(); server.stop(true); }
 }, 90_000);

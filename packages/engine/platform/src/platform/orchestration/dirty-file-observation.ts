@@ -1,7 +1,8 @@
 /** Native local dirty-file reads. No content hash, pathname-keyed byte cache or
  * following a dirty symlink into another file. Callers retain only their own
  * original observations for the lifetime of the launch/baseline owner. */
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, type BigIntStats } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export type CapturedDirtyFile =
@@ -59,7 +60,7 @@ export function captureDirtyTreeRoot(cwd: string): DirtyTreeRoot {
 }
 /** A synchronous detached source read, or explicit unavailable. A read failure
  * cannot become the missing-file state used for a real working-tree deletion. */
-export function captureDirtyFile(cwd: string, path: string, selectedRoot?: DirtyTreeRoot): CapturedDirtyFile {
+export function captureDirtyFile(cwd: string, path: string, selectedRoot?: DirtyTreeRoot, maxBytes?: number): CapturedDirtyFile {
   try {
     const root = selectedRoot ?? captureDirtyTreeRoot(cwd);
     if (!nativeRoots.has(root) || root.path !== resolve(cwd)) throw new Error('Original dirty snapshot root is unavailable');
@@ -83,7 +84,9 @@ export function captureDirtyFile(cwd: string, path: string, selectedRoot?: Dirty
       const bytes = readlinkSync(absolute, { encoding: 'buffer' }); assertCurrent();
       return Object.freeze({ kind: 'symlink', root: resolve(cwd), bytes, executable: false, revision, assertCurrent });
     }
-    if (!before.isFile()) return Object.freeze({ kind: 'unavailable', revision: null });
+    // A file past the caller's bound is not read into memory: it is reported
+    // unavailable, the state callers already treat as uncertain.
+    if (!before.isFile() || (maxBytes !== undefined && before.size > BigInt(Math.max(0, Math.floor(maxBytes))))) return Object.freeze({ kind: 'unavailable', revision: null });
     const descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       assertCurrent(); if (facts(fstatSync(descriptor, { bigint: true })) !== original) throw new Error('Dirty snapshot descriptor changed');
@@ -98,4 +101,31 @@ export function equalDirtyFiles(left: CapturedDirtyFile, right: CapturedDirtyFil
   if (left.kind !== right.kind) return false;
   if (left.kind === 'missing' || right.kind === 'missing') return true;
   return left.executable === right.executable && left.bytes.equals(right.bytes);
+}
+
+/** What a regular file held when it was too large to keep in memory: its content digest, read in chunks. */
+export type DirtyFileDigest =
+  | { readonly kind: 'file'; readonly digest: string; readonly executable: boolean }
+  | { readonly kind: 'missing' };
+/** Streams a regular file through sha256 without holding it. Undefined when the file is not an ordinary
+ * readable file or changed while it was read, so the caller keeps treating it as uncertain. */
+export function digestDirtyFile(cwd: string, path: string, selectedRoot: DirtyTreeRoot, maxBytes: number): DirtyFileDigest | undefined {
+  try {
+    if (!nativeRoots.has(selectedRoot) || selectedRoot.path !== resolve(cwd)) return undefined;
+    selectedRoot.assertCurrent();
+    const absolute = selectedPath(selectedRoot.resolvedPath, path);
+    const before = leaf(absolute);
+    if (before === null) return { kind: 'missing' };
+    if (!before.isFile() || before.size > BigInt(maxBytes)) return undefined;
+    const original = facts(before);
+    const descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      if (facts(fstatSync(descriptor, { bigint: true })) !== original) return undefined;
+      const hash = createHash('sha256'), chunk = Buffer.allocUnsafe(1024 * 1024);
+      for (let read = readSync(descriptor, chunk, 0, chunk.length, null); read > 0; read = readSync(descriptor, chunk, 0, chunk.length, null)) hash.update(chunk.subarray(0, read));
+      if (facts(fstatSync(descriptor, { bigint: true })) !== original) return undefined;
+      selectedRoot.assertCurrent();
+      return { kind: 'file', digest: hash.digest('hex'), executable: (before.mode & 0o111n) !== 0n };
+    } finally { closeSync(descriptor); }
+  } catch { return undefined; }
 }

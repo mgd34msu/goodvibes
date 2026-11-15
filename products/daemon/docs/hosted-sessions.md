@@ -52,8 +52,10 @@ declares these WebSocket verbs. They require authenticated access; listing decla
 Creation resolves a supplied `modelId` against the host's live model registry.
 Unknown or ambiguous models are refused. `clientId` attaches the creating client;
 `originSurface` preserves the originating product's settings identity across
-restarts. Creation submits `initialPrompt` without waiting for its turn to finish.
+restarts and must be `agent`, `tui` or `webui`; any other value is refused
+before the session is created. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.
+A `clientId` belongs to the principal that first attached it: another principal that attaches or detaches the same `clientId` is refused with 403 `HOSTED_CLIENT_FORBIDDEN`, so choose a `clientId` of your own.
 
 There are no dedicated REST routes for these five hosted verbs. The daemon also
 accepts them through its generic authenticated
@@ -119,7 +121,7 @@ defines these defaults:
 | `hostedSessions.attachmentTtlMs` | `600000` | Attachment lease, clamped to 30 seconds through 24 hours |
 | `hostedSessions.maxSessions` | `8` | Maximum live sessions; terminated sessions do not count |
 | `hostedSessions.maxMessagesPerSession` | `500` | Most recent messages persisted per session |
-| `hostedSessions.terminatedRetentionMs` | `86400000` | Retention for terminated records |
+| `hostedSessions.terminatedRetentionMs` | `86400000` | Retention for terminated records; the daemon retires them (file and memory) on its attachment sweep once they are older |
 
 The [attachment implementation](../../../packages/engine/platform/src/platform/hosted-sessions/attachments.ts)
 sweeps leases at intervals between 15 and 60 seconds. Expiry is applied by that
@@ -133,8 +135,10 @@ retained conversation can be replayed, its transcript states that a
 turn interrupted by restart did not finish. Malformed conversation state can
 restore without that history and produces a warning. In-flight execution
 does not resume from its previous instruction. A kill-policy session restores
-terminated with reason `daemon-shutdown`. A failed loop rebuild records
-`restart-unresumable`. Changing a session's effective policy before recovery
+terminated with reason `daemon-shutdown`. A loop rebuild that fails because the
+workspace could not be acquired or the stored model could not be resolved leaves
+the session restored and idle, and the next attach or delivery retries it; any
+other rebuild failure records `restart-unresumable`. Changing a session's effective policy before recovery
 changes how recovery treats it.
 
 Persistence failures are logged; a `survive` policy cannot guarantee recovery
@@ -149,15 +153,3 @@ Hosted handlers distinguish `INVALID_ARGUMENT` with status 400,
 `HOSTED_SESSION_LIMIT_REACHED` with 429. Authentication failure is separate.
 A host without hosted-session composition refuses the capability; its method
 catalog alone does not prove that a session can run.
-
-## Verification limits
-
-The [daemon parity tests](../src/test/runtime/hosted-sessions-parity.test.ts)
-cover composition, workspace trust, detach policy, and persisted recovery.
-[Gateway tests](../src/test/daemon/gateway-hosted-session-failures.test.ts)
-cover attached handlers and wire refusal shapes.
-The [compiled-host proof](../scripts/hosted-session-proof.mjs) exercises
-HTTP invocation, streaming, retained history, detach, kill, and restart with
-synthetic model and judgment peers. It does not establish live-provider semantic
-calibration or execution on another platform. The existence of these checks is
-not a claim that they have passed in a particular checkout or release.

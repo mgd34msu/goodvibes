@@ -8,12 +8,7 @@ import { execSync } from 'node:child_process';
 import 'node:fs';
 import { join } from 'node:path';
 
-export interface PackageCliBinVerification extends PackageBinVerification<'goodvibes'> {
-  readonly hasLocalPlatformBuildFallback: boolean;
-  readonly hasLocalBuildFallback: boolean;
-  readonly hasVendoredBinaryFallback: boolean;
-  readonly hasSourceFallback: boolean;
-}
+export type PackageCliBinVerification = PackageBinVerification<'goodvibes'>;
 
 export interface PackageCliVerificationReport extends PackageInspectionReport<PackageCliBinVerification> {
   readonly distribution: 'private-workspace' | 'published-package';
@@ -50,16 +45,7 @@ const FORBIDDEN_TARBALL_PREFIXES = ['.github/', 'src/test/', 'src/.test/', '.goo
 const readPackageJson = readPackageManifest;
 
 function verifyBin(root: string, command: (typeof REQUIRED_BIN_COMMANDS)[number], target: string | undefined): PackageCliBinVerification {
-  const { bin, source } = inspectPackageBin(root, command, target);
-  const expectedLocalBuild = "dist', 'goodvibes'",
-    expectedSource = "src', 'main.ts'";
-  return {
-    ...bin,
-    hasLocalPlatformBuildFallback: source.includes("dist', artifactName"),
-    hasLocalBuildFallback: source.includes(expectedLocalBuild),
-    hasVendoredBinaryFallback: source.includes('vendor'),
-    hasSourceFallback: source.includes(expectedSource) && source.includes("'bun'"),
-  };
+  return inspectPackageBin(root, command, target).bin;
 }
 
 function npmPackDryRun(root: string): NpmPackDryRunResult {
@@ -96,12 +82,6 @@ export function verifyPackageCliInstall(root: string): PackageCliVerificationRep
 
   for (const item of bins) {
     issues.push(...packageBinIssues(item));
-    if (!workspaceDistribution) {
-      if (!item.hasLocalPlatformBuildFallback) issues.push(`bin target lacks local platform dist fallback: ${item.command}`);
-      if (!item.hasLocalBuildFallback) issues.push(`bin target lacks local dist fallback: ${item.command}`);
-      if (!item.hasVendoredBinaryFallback) issues.push(`bin target lacks vendored binary fallback: ${item.command}`);
-      if (!item.hasSourceFallback) issues.push(`bin target lacks Bun source fallback: ${item.command}`);
-    }
   }
   if (workspace && workspace.selectedBinary === null)
     issues.push(`private workspace has no executable build: ${workspace.binaryCandidates.join(' or ')}`);

@@ -3,6 +3,11 @@ import hashlib
 import os
 from pathlib import Path
 import stat
+import sys
+
+if sys.flags.optimize:
+    # Every integrity check here is an assert; -O or PYTHONOPTIMIZE would silently remove them all.
+    raise SystemExit('Release integrity checks need assertions; run without -O or PYTHONOPTIMIZE.')
 
 
 def file_revision(value):

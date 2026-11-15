@@ -41,13 +41,32 @@ heartbeat processing, and scheduler capacity.
 | `automation.runs.list` | Return run history, optionally paginated and filterable with `since` for away-digest reads |
 | `automation.runs.get` | Return a single run record |
 | `automation.runs.cancel` | Cancel an active run |
-| `automation.runs.retry` | Retry a completed or failed run |
+| `automation.runs.retry` | Retry a failed, cancelled or missed run; a run that is still running or completed is refused |
 | `automation.heartbeat.list` | Return jobs queued for the next heartbeat |
 | `automation.heartbeat.run` | Process jobs queued for the next heartbeat |
 | `scheduler.capacity` | Return the scheduler capacity snapshot: total slots, in-use slots, queue depth, and oldest queued run age |
 
 A cancelled run stays cancelled. If its evaluator or execution finishes after
 the cancel, that late result does not change the stored run.
+
+When a run fails, the job's failure policy decides what follows. With the
+`retry` action the failed run is tried again up to the retry policy's
+`maxAttempts` (a job's own `execution.maxAttempts`, when set, takes
+precedence), waiting by the policy's `delayMs`, `strategy`, `maxDelayMs` and
+`jitterMs`, and only when the failure could succeed on another attempt. A run
+that fails to start (for example its target session is missing or the agent
+cannot be spawned) is handled the same way: its failure notice goes to the
+job's delivery targets (or its explicit failure route), the job is reported as
+auto-disabled when the failure threshold pauses it, and the retry policy
+applies. A failed run produces one failure message, not a failure notice plus
+the ordinary run message. A scheduled occurrence that comes due while an
+earlier run of the same job is still running is skipped rather than started
+alongside it.
+
+A one-time (`at`) job is finished once its time has come: if the daemon was
+down past the catch-up window, the missed occurrence is recorded and the job is
+disabled with `one-shot-complete`. Enabling a one-time job whose time has
+already passed leaves it disabled with the reason `schedule-expired`.
 
 `automation.jobs.create` accepts a `kind` of `cron`, `every`, or `at`, and the
 schedule field required alongside it depends on which kind is chosen. It is a cron
@@ -66,7 +85,7 @@ runs at once, and how long its history is kept:
 | `automation.enabled` | `true` | Master gate for the subsystem: durable jobs, schedule evaluation, run history. With no jobs defined it idles. |
 | `automation.maxConcurrentRuns` | `4` | How many automation runs may execute at the same time. |
 | `automation.runHistoryLimit` | `100` | Run history entries retained per job before the oldest are dropped. |
-| `automation.defaultTimeoutMs` | `900000` (15 minutes) | Execution timeout applied to a run that does not set its own. |
+| `automation.defaultTimeoutMs` | `0` (no deadline) | Execution timeout in milliseconds applied to a run that does not set its own `timeoutMs`; `0` means such a run has no deadline and ends only when it finishes or is cancelled. |
 | `automation.catchUpWindowMinutes` | `30` | How long after daemon startup the engine will still catch up runs it missed while it was down. |
 | `automation.failureCooldownMs` | `300000` (5 minutes) | Cooldown enforced after a failed run before the job is eligible to run again. |
 | `automation.deleteAfterRun` | `false` | Whether a one-shot job (`kind: 'at'`) deletes itself after its first successful run. |
@@ -193,6 +212,13 @@ window rather than re-running from scratch.
 > `watchers.update`, the same rename applied to `automation.jobs.patch` and
 > `routes.bindings.patch` above. The HTTP route
 > (`PATCH /api/watchers/{watcherId}`) is unaffected.
+
+A url or webhook watcher can send request headers. A header that carries a
+credential must be given as a `goodvibes://secrets/<name>` reference: the
+watcher stores the reference, never the value, and the daemon reads the secret
+when it makes the request. Creating or updating a watcher with a plain-text
+header value is refused with `WATCHER_HEADER_LITERAL`. A run whose referenced
+secret cannot be read fails without sending the request.
 
 Watcher config controls whether the subsystem runs, how often it polls, and
 how it recovers from a restart:

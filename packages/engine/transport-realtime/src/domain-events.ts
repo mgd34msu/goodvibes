@@ -23,6 +23,14 @@ export type DomainEventConnector<
 > = (
   domain: TDomain,
   onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void,
+  /**
+   * Call once when the connection ends on its own and will not come back
+   * without a new connect (the stream closed with reconnect off or spent, the
+   * socket was refused or gave up). The feed then forgets the connection, so
+   * the next `on()` opens a new one. Not called for the cleanup function the
+   * feed itself invoked.
+   */
+  onEnded?: () => void,
 ) => void | Promise<() => void>;
 
 export type DomainEvents<
@@ -145,8 +153,21 @@ function createRemoteDomainEventFeed<
     || hasAnyListener(envelopeListeners as Map<string, Set<unknown>>)
   );
 
+  // The connection the feed currently believes in. A late onEnded from a
+  // connection the feed already let go of must not tear down its successor.
+  let activeAttempt: { ended: boolean; handedOver: boolean } | null = null;
+
   const maybeConnect = (): void => {
     if (connected || disconnect || connectPromise) return;
+    const attempt = { ended: false, handedOver: false };
+    activeAttempt = attempt;
+    const onEnded = (): void => {
+      if (attempt.ended) return;
+      attempt.ended = true;
+      // Still being handed over: the then-handler below settles it.
+      if (!attempt.handedOver) return;
+      forgetConnection(attempt);
+    };
     connectPromise = Promise.resolve(connect(domain, (envelope) => {
       const eventType = typeof envelope.type === 'string' ? envelope.type : '';
       if (!eventType) return;
@@ -160,11 +181,16 @@ function createRemoteDomainEventFeed<
       for (const listener of [...(envelopeListeners.get(eventType) ?? [])]) {
         dispatchToListener(listener, typedEnvelope, domain, options);
       }
-    })).then((cleanup) => {
+    }, onEnded)).then((cleanup) => {
+      attempt.handedOver = true;
       // when connect() returns a non-function cleanup (void), we have no
       // way to honour a pending disconnect request. Log the gap and bail. Callers
       // must return a cleanup function whenever they establish a real connection.
       if (typeof cleanup !== 'function') {
+        if (attempt.ended) {
+          forgetConnection(attempt);
+          return;
+        }
         connected = true;
         if (disconnectPending) {
           reportUnexpectedConnectionError(
@@ -176,12 +202,19 @@ function createRemoteDomainEventFeed<
         return;
       }
       if (disconnectPending && !hasListeners()) {
+        activeAttempt = null;
         cleanup();
+        return;
+      }
+      if (attempt.ended) {
+        // The connection died before the connector finished handing it over.
+        forgetConnection(attempt, cleanup);
         return;
       }
       connected = true;
       disconnect = cleanup;
     }).catch((error: unknown) => {
+      if (activeAttempt === attempt) activeAttempt = null;
       if (!isExpectedDisconnectError(error)) {
         reportUnexpectedConnectionError(error, domain, options);
       }
@@ -191,9 +224,28 @@ function createRemoteDomainEventFeed<
     });
   };
 
+  /** The connection ended by itself: let go of it and say so, the next on() reconnects. */
+  const forgetConnection = (attempt: { ended: boolean; handedOver: boolean }, cleanup: (() => void) | null = disconnect): void => {
+    if (activeAttempt !== attempt) return;
+    activeAttempt = null;
+    disconnect = null;
+    connected = false;
+    try {
+      cleanup?.();
+    } catch (error) {
+      reportUnexpectedConnectionError(error, domain, options);
+    }
+    reportUnexpectedConnectionError(
+      new Error(`Remote event stream for "${domain}" ended and will not reconnect on its own. Registering a listener again opens a new connection.`),
+      domain,
+      options,
+    );
+  };
+
   const maybeDisconnect = (): void => {
     if (hasListeners()) return;
     if (disconnect) {
+      activeAttempt = null;
       disconnect();
       disconnect = null;
       connected = false;

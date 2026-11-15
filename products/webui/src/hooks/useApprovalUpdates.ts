@@ -50,10 +50,10 @@ export function useApprovalUpdates(enabled: boolean): UseApprovalUpdatesResult {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled) {
-      setConnected(false);
-      return undefined;
-    }
+    // A new stream starts unconnected and without the last stream's error.
+    setConnected(false);
+    setError(null);
+    if (!enabled) return undefined;
     let disposed = false;
     let close: (() => void) | null = null;
 

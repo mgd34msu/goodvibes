@@ -21,6 +21,7 @@ export type {
   ObservedSteerChannel,
   ObservedLiveness,
   ProcessObserved,
+  ProcessControlFailure,
   ProcessNode,
   FleetSnapshot,
   FleetQueryFilter,

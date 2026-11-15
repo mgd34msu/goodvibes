@@ -91,8 +91,8 @@ async function main() {
     const credential: unknown = JSON.parse(readFileSync(connectedHostOperatorTokenPath(root), 'utf8'));
     assert(credential && typeof credential === 'object' && 'token' in credential && typeof credential.token === 'string');
     assert(!encoded.includes(privateId)); assert(!encoded.includes(credential.token));
-    process.stdout.write(encoded);
     assert.deepEqual(delivery, [message], result.output); assert.equal(getDraft(paths, privateId)?.status, 'sent', result.output);
+    process.stdout.write(encoded);
   } finally {
     await cleanupResearchScreeningFixtures();
     installJudgmentPort(previous); log[Symbol.dispose](); resetSessionUntrustedContentLedgerForTests();

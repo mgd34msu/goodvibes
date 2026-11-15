@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { ArtifactReference, ArtifactStore } from '../artifacts/index.js';
 import { ChannelDeliveryRouter, RouteBindingManager } from '../channels/index.js';
 import { ServiceRegistry } from '../config/service-registry.js';
@@ -7,12 +7,14 @@ import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { RouteSurfaceKind } from '../../events/routes.js';
 import {
+  emitDeliveryDeadLettered,
   emitDeliveryFailed,
   emitDeliveryQueued,
   emitDeliveryStarted,
   emitDeliverySucceeded,
 } from '../runtime/emitters/index.js';
 import type { AutomationDeliveryAttempt, AutomationDeliveryTarget } from './delivery.js';
+import { calculateRetryDelay } from './failures.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRouteBinding } from './routes.js';
 import type { AutomationRun } from './runs.js';
@@ -22,13 +24,6 @@ import { logger } from '../utils/logger.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
 import { sleep } from '../utils/concurrency.js';
-
-function calculateRetryDelay(baseDelayMs: number, attempt: number, strategy: 'fixed' | 'linear' | 'exponential', maxDelayMs?: number, jitterMs?: number): number {
-  const multiplier = strategy === 'fixed' ? 1 : strategy === 'linear' ? attempt : Math.pow(2, attempt - 1);
-  const base = baseDelayMs * multiplier;
-  const jitter = jitterMs ? randomInt(0, Math.max(1, Math.floor(jitterMs) + 1)) : 0;
-  return Math.min(base + jitter, maxDelayMs ?? Number.MAX_SAFE_INTEGER);
-}
 
 function buildDeliveryMessage(job: AutomationJob, run: AutomationRun): string {
   const lines = [
@@ -101,6 +96,7 @@ export class AutomationDeliveryManager {
   private readonly routeBindings: RouteBindingManager;
   private readonly deliveryRouter: ChannelDeliveryRouter;
   private readonly featureFlags: FeatureFlagReader;
+  private readonly artifactStore: Pick<ArtifactStore, 'get'> | undefined;
   private runtimeDispatch: DomainDispatch | null = null;
   private runtimeBus: RuntimeEventBus | null = null;
 
@@ -116,6 +112,7 @@ export class AutomationDeliveryManager {
     readonly featureFlags?: FeatureFlagReader | undefined;
   }) {
     this.routeBindings = config.routeBindings;
+    this.artifactStore = config.artifactStore;
     this.featureFlags = config.featureFlags ?? null;
     if (config.deliveryRouter) {
       this.deliveryRouter = config.deliveryRouter;
@@ -271,7 +268,10 @@ export class AutomationDeliveryManager {
               error: lastError,
             };
             attempts[attempts.length - 1] = attempt;
-            this.syncAttempt(attempt, run, 'failed', lastError, retryable);
+            // Reporting is observability: a throwing report must not stop the
+            // remaining targets from being tried.
+            try { this.syncAttempt(attempt, run, 'failed', lastError, retryable, attemptIndex); }
+            catch (reportError) { logger.warn('Delivery failed and its failure could not be reported', { deliveryId, error: summarizeError(reportError) }); }
             break;
           }
           const delayMs = calculateRetryDelay(
@@ -323,9 +323,33 @@ export class AutomationDeliveryManager {
       runId: run.id,
       status: run.status,
       includeLinks: job.delivery.includeLinks,
-      ...(run.result !== undefined ? { attachments: extractArtifactReferences(run.result) } : {}),
+      ...(run.result !== undefined ? { attachments: this.attachableArtifacts(run) } : {}),
       ...(run.agentId ? { agentId: run.agentId } : {}),
       ...(resolved.binding ? { binding: resolved.binding } : {}),
+    });
+  }
+
+  /**
+   * The artifacts named in a run's result that this run could have produced.
+   * The result is agent or remote-peer output, so an id in it proves nothing:
+   * only an artifact that exists and was created after the run started is
+   * attached, which keeps a result from pulling an unrelated stored artifact
+   * out to the job's targets. Without a store to check against, nothing is
+   * attached.
+   */
+  private attachableArtifacts(run: AutomationRun): ArtifactReference[] {
+    const references = extractArtifactReferences(run.result);
+    if (references.length === 0) return references;
+    if (!this.artifactStore) {
+      logger.warn('Delivery attachments skipped: no artifact store to confirm the run created them', { runId: run.id, count: references.length });
+      return [];
+    }
+    const startedAt = run.startedAt ?? run.queuedAt;
+    return references.filter((reference) => {
+      const descriptor = this.artifactStore?.get(reference.artifactId);
+      const owned = descriptor !== null && descriptor !== undefined && descriptor.createdAt >= startedAt;
+      if (!owned) logger.warn('Delivery attachment skipped: the artifact was not created by this run', { runId: run.id, artifactId: reference.artifactId });
+      return owned;
     });
   }
 
@@ -335,6 +359,7 @@ export class AutomationDeliveryManager {
     phase: 'queued' | 'started' | 'succeeded' | 'failed',
     error?: string,
     retryable = false,
+    attempts = 1,
   ): void {
     this.runtimeDispatch?.syncDeliveryAttempt(attempt, `deliveries.${phase}`);
     if (!this.runtimeBus) return;
@@ -376,10 +401,13 @@ export class AutomationDeliveryManager {
         targetId,
         completedAt: attempt.endedAt ?? Date.now(),
         durationMs: Math.max(0, (attempt.endedAt ?? Date.now()) - (attempt.startedAt ?? Date.now())),
-        statusCode: 200,
       });
       return;
     }
+    const failureText = error ?? attempt.error ?? 'delivery failed';
+    // A dead-lettered attempt used every try it had: no further attempt is
+    // coming, so the failure is final and the exhaustion is its own event.
+    const exhausted = attempt.status === 'dead_lettered';
     emitDeliveryFailed(this.runtimeBus, ctx, {
       deliveryId: attempt.id,
       jobId: attempt.jobId,
@@ -387,8 +415,19 @@ export class AutomationDeliveryManager {
       surfaceKind,
       targetId,
       failedAt: attempt.endedAt ?? Date.now(),
-      error: error ?? attempt.error ?? 'delivery failed',
-      retryable,
+      error: failureText,
+      retryable: exhausted ? false : retryable,
     });
+    if (exhausted) {
+      emitDeliveryDeadLettered(this.runtimeBus, ctx, {
+        deliveryId: attempt.id,
+        jobId: attempt.jobId,
+        runId: attempt.runId,
+        surfaceKind,
+        targetId,
+        reason: failureText,
+        attempts,
+      });
+    }
   }
 }

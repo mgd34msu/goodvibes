@@ -103,6 +103,98 @@ describe('syncServiceSettingToPlatform', () => {
     expect(result.message).toBe('OS service installed and started');
   });
 
+  test('a failed install turns the settings back off so the toggle does not read ON with no service', () => {
+    const configManager = createConfig();
+    configManager.setDynamic('service.enabled', false);
+    configManager.setDynamic('service.autostart', true);
+    const calls: string[] = [];
+    const base = createManager(calls, createStatus({ installed: false, running: false }));
+    const failing: ServiceManagerLike = {
+      ...base,
+      install: () => { calls.push('install'); return createStatus({ installed: false, actionError: 'systemctl not found' }); },
+    };
+
+    const result = syncServiceSettingToPlatform(
+      { configManager, workingDirectory: root, homeDirectory: root },
+      { key: 'service.autostart', previousValue: false, value: true },
+      { createManager: () => failing, runCommand: () => ({ status: 0 }) },
+    );
+
+    expect(result.error).toBe('systemctl not found');
+    expect(result.message).toContain('Service install failed: systemctl not found');
+    expect(result.message).toContain('turned back off');
+    expect(configManager.get('service.autostart')).toBe(false);
+    expect(configManager.get('service.enabled')).toBe(false);
+  });
+
+  test('a failed systemctl reload after install is reported as a failure, never as installed and started, and the settings turn back off', () => {
+    const configManager = createConfig();
+    configManager.setDynamic('service.enabled', false);
+    configManager.setDynamic('service.autostart', true);
+    const calls: string[] = [];
+
+    const result = syncServiceSettingToPlatform(
+      { configManager, workingDirectory: root, homeDirectory: root },
+      { key: 'service.autostart', previousValue: false, value: true },
+      {
+        createManager: () => createManager(calls, createStatus({ installed: false, running: false })),
+        runCommand: (): CommandResult => ({ status: 1, stderr: 'boom' }),
+      },
+    );
+
+    expect(result.error).toBe('boom');
+    expect(result.message).toContain('Service install failed: boom');
+    expect(result.message).not.toContain('installed and started');
+    // The service is never started after a reload that did not take.
+    expect(calls).toEqual(['install']);
+    expect(configManager.get('service.autostart')).toBe(false);
+    expect(configManager.get('service.enabled')).toBe(false);
+  });
+
+  test('a failed start after install is reported as a failure and the settings turn back off', () => {
+    const configManager = createConfig();
+    configManager.setDynamic('service.enabled', false);
+    configManager.setDynamic('service.autostart', true);
+    const calls: string[] = [];
+    const base = createManager(calls, createStatus({ installed: false, running: false }));
+    const failing: ServiceManagerLike = {
+      ...base,
+      start: () => { calls.push('start'); return createStatus({ actionError: 'unit failed to start' }); },
+    };
+
+    const result = syncServiceSettingToPlatform(
+      { configManager, workingDirectory: root, homeDirectory: root },
+      { key: 'service.autostart', previousValue: false, value: true },
+      { createManager: () => failing, runCommand: () => ({ status: 0 }) },
+    );
+
+    expect(calls).toEqual(['install', 'start']);
+    expect(result.error).toBe('unit failed to start');
+    expect(result.message).toContain('Service start failed: unit failed to start');
+    expect(result.message).not.toContain('installed and started');
+    expect(configManager.get('service.autostart')).toBe(false);
+    expect(configManager.get('service.enabled')).toBe(false);
+  });
+
+  test('a failed systemctl disable is reported as a failure, not as disabled', () => {
+    const configManager = createConfig();
+    configManager.setDynamic('service.enabled', true);
+    configManager.setDynamic('service.autostart', false);
+    const calls: string[] = [];
+
+    const result = syncServiceSettingToPlatform(
+      { configManager, workingDirectory: root, homeDirectory: root },
+      { key: 'service.autostart', previousValue: true, value: false },
+      {
+        createManager: () => createManager(calls, createStatus({ installed: true, running: true })),
+        runCommand: (): CommandResult => ({ status: 1, stderr: 'boom' }),
+      },
+    );
+
+    expect(result.error).toBe('boom');
+    expect(result.message).toBe('Service disable failed: boom');
+  });
+
   test('turning autostart off disables and removes the systemd service', () => {
     const configManager = createConfig();
     configManager.setDynamic('service.enabled', true);
@@ -124,7 +216,7 @@ describe('syncServiceSettingToPlatform', () => {
 
     expect(calls).toEqual(['uninstall']);
     expect(commands).toEqual([
-      'systemctl --user disable --now goodvibes.service',
+      'systemctl --user disable --now goodvibes-jev.service',
       'systemctl --user daemon-reload',
     ]);
     expect(result.message).toBe('OS service disabled');
@@ -151,7 +243,7 @@ describe('syncServiceSettingToPlatform', () => {
 
     expect(configManager.get('service.autostart')).toBe(false);
     expect(calls).toEqual(['uninstall']);
-    expect(commands).toContain('systemctl --user disable --now goodvibes.service');
+    expect(commands).toContain('systemctl --user disable --now goodvibes-jev.service');
   });
 
   test('service definition changes rewrite and restart an installed autostart service', () => {

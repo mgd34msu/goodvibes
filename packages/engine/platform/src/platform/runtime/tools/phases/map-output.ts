@@ -5,7 +5,7 @@ import type { ToolRuntimeContext } from '../context.js';
 import type { PhaseResult, ToolExecutionRecord } from '../types.js';
 import type { PhasedTool } from '../adapter.js';
 import type { ToolClass } from '../output-policy.js';
-import { applyOutputPolicy, getPolicy } from '../output-policy.js';
+import { applyOutputPolicy, getPolicy, toolClassForCategory } from '../output-policy.js';
 import { summarizeError } from '../../../utils/error-display.js';
 import { attachVisibleToolWarning } from './warnings.js';
 
@@ -26,20 +26,9 @@ function isPhasedTool(tool: Tool): tool is PhasedTool {
   return 'category' in tool && typeof (tool as PhasedTool).category === 'string';
 }
 
-/**
- * Maps a PhasedTool category to the ToolClass used by output-policy.
- * `delegate` has no direct output-policy class; treat as `analyze`.
- */
+/** The tool class from the shared category table; a tool without phased metadata reads as `read`. */
 function resolveToolClass(tool: Tool): ToolClass {
-  if (!isPhasedTool(tool)) return 'read';
-  switch (tool.category) {
-    case 'read':     return 'read';
-    case 'write':    return 'write';
-    case 'execute':  return 'execute';
-    case 'network':  return 'network';
-    case 'delegate': return 'analyze';
-    default:         return 'read';
-  }
+  return isPhasedTool(tool) ? toolClassForCategory(tool.category) : 'read';
 }
 
 export async function mapOutputPhase(
@@ -79,7 +68,7 @@ export async function mapOutputPhase(
     // Apply output policy enforcement after auto-repair annotation
     const toolClass = resolveToolClass(tool);
     const policy = getPolicy(toolClass);
-    const auditedResult = await applyOutputPolicy(record.result, policy, _context.overflowHandler!, `${call.name} ${JSON.stringify(call.arguments)}`);
+    const auditedResult = await applyOutputPolicy(record.result, policy, _context.overflowHandler, `${call.name} ${JSON.stringify(call.arguments)}`);
     record.result = auditedResult.result;
 
     // Surface spill backend in phase metadata when overflow occurred

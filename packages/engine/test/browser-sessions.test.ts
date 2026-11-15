@@ -1,7 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, test, beforeEach, afterEach, afterAll } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -14,7 +15,15 @@ import type { BrowserProvisionIo } from '../platform/src/platform/browser/browse
 // bypassing the TMPDIR redirection scripts/test.ts sets up for the whole
 // suite. Routing it through tmpdir() keeps it inside this run's sandboxed
 // temp root like everything else.
-const PROFILE_ROOT = join(tmpdir(), 'goodvibes-test-profiles');
+const PROFILE_ROOT = mkdtempSync(join(tmpdir(), 'goodvibes-test-profiles-'));
+afterAll(() => rmSync(PROFILE_ROOT, { recursive: true, force: true }));
+
+/** Every manager a test builds is shut down afterwards, so none outlives its test. */
+const managers: BrowserSessionManager[] = [];
+function tracked(manager: BrowserSessionManager): BrowserSessionManager {
+  managers.push(manager);
+  return manager;
+}
 
 interface FakeContext {
   readonly closes: string[];
@@ -61,7 +70,7 @@ function readyProvisionIo(): BrowserProvisionIo {
 }
 
 function createManager(closes: string[]): BrowserSessionManager {
-  return new BrowserSessionManager({
+  return tracked(new BrowserSessionManager({
     profileRoot: PROFILE_ROOT,
     surfaceRoot: 'test-surface',
     io: readyProvisionIo(),
@@ -74,7 +83,7 @@ function createManager(closes: string[]): BrowserSessionManager {
       },
     }),
     probeEndpoint: async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/x' }),
-  });
+  }));
 }
 
 /**
@@ -86,7 +95,7 @@ function createManager(closes: string[]): BrowserSessionManager {
 function createControllableManager(
   launchPersistentContext: () => Promise<BrowserContext>,
 ): BrowserSessionManager {
-  return new BrowserSessionManager({
+  return tracked(new BrowserSessionManager({
     profileRoot: PROFILE_ROOT,
     surfaceRoot: 'test-surface',
     io: readyProvisionIo(),
@@ -96,14 +105,14 @@ function createControllableManager(
         connectOverCDP: async () => ({ contexts: () => [] } as unknown as Browser),
       },
     }),
-  });
+  }));
 }
 
 function attachManager(connect: (endpoint: string) => Promise<Browser>, probe?: BrowserSessionManagerDeps['probeEndpoint']) {
-  return new BrowserSessionManager({ profileRoot: PROFILE_ROOT, surfaceRoot: 'test-surface', io: readyProvisionIo(),
+  return tracked(new BrowserSessionManager({ profileRoot: PROFILE_ROOT, surfaceRoot: 'test-surface', io: readyProvisionIo(),
     loadDriver: () => ({ chromium: { launchPersistentContext: async () => fakeContext('unexpected-launch', []).context,
       connectOverCDP: connect } }), ...(probe ? { probeEndpoint: probe } : {}),
-  });
+  }));
 }
 
 describe('exact browser attachment identity', () => {
@@ -329,7 +338,7 @@ describe('browser session ownership', () => {
   });
 
   test('a launch failure explains a profile that is already open', async () => {
-    const manager = new BrowserSessionManager({
+    const manager = tracked(new BrowserSessionManager({
       profileRoot: PROFILE_ROOT,
       surfaceRoot: 'test-surface',
       io: readyProvisionIo(),
@@ -341,7 +350,7 @@ describe('browser session ownership', () => {
           connectOverCDP: async () => ({ contexts: () => [] } as unknown as Browser),
         },
       }),
-    });
+    }));
 
     try {
       await manager.launch({ profileName: 'busy' });
@@ -354,7 +363,7 @@ describe('browser session ownership', () => {
   });
 
   test('an unreachable endpoint is reported as no browser listening, with the fix', async () => {
-    const manager = new BrowserSessionManager({
+    const manager = tracked(new BrowserSessionManager({
       profileRoot: PROFILE_ROOT,
       surfaceRoot: 'test-surface',
       io: readyProvisionIo(),
@@ -365,7 +374,7 @@ describe('browser session ownership', () => {
         },
       }),
       probeEndpoint: async () => null,
-    });
+    }));
 
     try {
       await manager.attach({ cdpEndpoint: '9999' });
@@ -487,6 +496,83 @@ describe('single managed session, bounded retries', () => {
     await expect(manager.launch({})).rejects.toThrow(/stopped retrying/);
   });
 
+  test('the refusal after two failures re-arms one real attempt, so fixing the cause and launching again works', async () => {
+    let attempt = 0;
+    const manager = createControllableManager(async () => {
+      attempt += 1;
+      if (attempt <= 2) throw new Error('boom: browser refused to start');
+      return fakeContext('launched', []).context;
+    });
+
+    await expect(manager.launch({})).rejects.toThrow(/boom/);
+    await expect(manager.launch({})).rejects.toThrow(/boom/);
+    await expect(manager.launch({})).rejects.toMatchObject({
+      message: expect.stringMatching(/stopped retrying/),
+      fix: expect.stringMatching(/next action:"launch" will try exactly once more/),
+    });
+    expect(attempt).toBe(2);
+    const recovered = await manager.launch({});
+    expect(recovered.reused).toBe(false);
+    expect(attempt).toBe(3);
+  });
+
+  test('a failure after the re-armed attempt is refused again rather than retried in a loop', async () => {
+    let attempt = 0;
+    const manager = createControllableManager(async () => {
+      attempt += 1;
+      throw new Error('boom: browser refused to start');
+    });
+
+    for (let i = 0; i < 2; i += 1) await expect(manager.launch({})).rejects.toThrow(/boom/);
+    await expect(manager.launch({})).rejects.toThrow(/stopped retrying/);
+    await expect(manager.launch({})).rejects.toThrow(/boom/);
+    await expect(manager.launch({})).rejects.toThrow(/stopped retrying/);
+    expect(attempt).toBe(3);
+  });
+
+  test('a cancelled launch is not counted as a launch failure', async () => {
+    let attempt = 0;
+    let turn = new AbortController();
+    const manager = createControllableManager(async () => {
+      attempt += 1;
+      // The turn is cancelled while the browser is still starting.
+      if (attempt <= 2) { turn.abort(); throw new Error('aborted by the turn'); }
+      return fakeContext('launched', []).context;
+    });
+    for (let i = 0; i < 2; i += 1) {
+      turn = new AbortController();
+      await expect(manager.launch({ signal: turn.signal })).rejects.toThrow();
+    }
+    await expect(manager.launch({})).resolves.toMatchObject({ reused: false });
+  });
+
+  test('a launched browser the person closes stops being the default session', async () => {
+    let onClose: (() => void) | undefined;
+    const fake = fakeContext('launched', []);
+    let closed = false;
+    const context = Object.assign(Object.create(null) as object, fake.context, {
+      on: (event: string, listener: () => void) => { if (event === 'close') onClose = listener; },
+      isClosed: () => closed,
+    }) as unknown as BrowserContext;
+    const manager = createControllableManager(async () => context);
+    const launched = await manager.launch({});
+    expect(manager.defaultSessionId()).toBe(launched.sessionId);
+    closed = true;
+    onClose?.();
+    expect(manager.defaultSessionId()).toBeNull();
+    expect(manager.list()).toHaveLength(0);
+  });
+
+  test('a closed browser that never announced it is not chosen as the default', async () => {
+    let closed = false;
+    const fake = fakeContext('launched', []);
+    const context = Object.assign(Object.create(null) as object, fake.context, { isClosed: () => closed }) as unknown as BrowserContext;
+    const manager = createControllableManager(async () => context);
+    await manager.launch({});
+    closed = true;
+    expect(manager.defaultSessionId()).toBeNull();
+  });
+
   test('a success after failures resets the count, so the cap is not permanent', async () => {
     let attempt = 0;
     const closes: string[] = [];
@@ -538,4 +624,8 @@ beforeEach(() => {
   });
   prior = installJudgmentPort({ model: readings.port.model, ask: request => request.context?.battery === 'engine.browser.launch-cause' ? readings.port.ask(request) : prior!.ask(request) });
 });
-afterEach(() => installJudgmentPort(prior));
+afterEach(async () => {
+  installJudgmentPort(prior);
+  // A test may already have shut its manager down; shutting down again must stay harmless.
+  for (const manager of managers.splice(0)) await manager.shutdown();
+});

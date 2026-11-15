@@ -1,4 +1,4 @@
-import type { CliCatalog, CommandFlagSpec, CommandSpec } from '@goodvibes-jev/engine/terminal-shell';
+import { inferProviderFromModel, type CliCatalog, type CommandFlagSpec, type CommandSpec } from '@goodvibes-jev/engine/terminal-shell';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 export const COMMAND_ALIASES: Readonly<Record<string, GoodVibesCliCommand>> = {
   run: 'run',
@@ -129,11 +129,8 @@ function createDefaultFlags(): GoodVibesCliFlags {
     acceptRawOutputRisk: false,
   };
 }
-function inferProviderFromModel(model: string, currentProvider: string | undefined): string | undefined {
-  if (currentProvider !== undefined) return currentProvider;
-  if (model.includes(':')) return model.split(':')[0];
-  if (model.includes('/')) return model.split('/')[0];
-  return undefined;
+function inferProviderForFlag(model: string, currentProvider: string | undefined): string | undefined {
+  return currentProvider ?? inferProviderFromModel(model);
 }
 type FlagField = keyof GoodVibesCliFlags;
 const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
@@ -155,7 +152,7 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     field: 'print',
     tokens: ['--print'],
     kind: 'boolean',
-    summary: 'Agent print',
+    summary: 'Print the response and exit (same as run)',
     allowInlineValue: true,
   },
   {
@@ -187,27 +184,9 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     summary: 'Agent continueLast',
     allowInlineValue: true,
   },
-  {
-    field: 'fork',
-    tokens: ['--fork'],
-    kind: 'boolean',
-    summary: 'Agent fork',
-    allowInlineValue: true,
-  },
-  {
-    field: 'rawOutput',
-    tokens: ['--raw-output'],
-    kind: 'boolean',
-    summary: 'Agent rawOutput',
-    allowInlineValue: true,
-  },
-  {
-    field: 'acceptRawOutputRisk',
-    tokens: ['--accept-raw-output-risk'],
-    kind: 'boolean',
-    summary: 'Agent acceptRawOutputRisk',
-    allowInlineValue: true,
-  },
+
+
+
   {
     field: 'provider',
     tokens: ['--provider'],
@@ -274,13 +253,13 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     field: 'port',
     tokens: ['--port'],
     kind: 'port',
-    summary: 'Agent port',
+    summary: 'pair: port to print in the pairing endpoint',
   },
   {
     field: 'hostname',
     tokens: ['--hostname', '--host'],
     kind: 'string',
-    summary: 'Agent hostname',
+    summary: 'pair: host to print in the pairing endpoint',
   },
   {
     field: 'resume',
@@ -295,6 +274,11 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     kind: 'string',
     summary: 'Agent session',
   },
+  // run limits: consumed by extractHeadlessRunFlags before this parser runs; declared so help and completions list them.
+  { field: 'timeout', tokens: ['--timeout'], kind: 'string', summary: 'run: stop after this long (90, 90s, 5m, 1h); exits 124' },
+  { field: 'maxTurns', tokens: ['--max-turns'], kind: 'string', summary: 'run: stop once the model has answered this many times and still asks for tools; exits 1' },
+  { field: 'omitAccumulated', tokens: ['--omit-accumulated'], kind: 'boolean', summary: 'run: with stream-json, leave accumulated out of STREAM_DELTA frames' },
+  { field: 'answerPermissions', tokens: ['--answer-permissions'], kind: 'boolean', summary: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for the owner prompts the run raises' },
 ];
 const names = [...new Set<GoodVibesCliCommand>(['tui', ...Object.values(COMMAND_ALIASES)])];
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
@@ -326,7 +310,7 @@ export const AGENT_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, FlagField, GoodV
   unknownOptionError: (name) => 'Unknown option: ' + name,
   postFlag(flags, spec) {
     return spec.field === 'model' && flags.model !== undefined
-      ? { ...flags, provider: inferProviderFromModel(flags.model, flags.provider) }
+      ? { ...flags, provider: inferProviderForFlag(flags.model, flags.provider) }
       : flags;
   },
   postProcess(result) {
@@ -336,6 +320,17 @@ export const AGENT_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, FlagField, GoodV
     if (flags.prompt === undefined && (command === 'run' || flags.print) && result.positionals.length)
       flags = { ...flags, prompt: result.positionals.join(' ') };
     const errors = [...result.errors];
+    // These parse everywhere but only act in one place; refuse them where they
+    // would be silently ignored instead of starting something the user did not ask for.
+    if (command !== 'run' && (flags.continueLast || flags.session !== undefined)) {
+      errors.push(`${flags.continueLast ? '--continue' : '--session'} is only supported with run in goodvibes-agent. Use --resume to reopen a session in the interactive shell.`);
+    }
+    if (flags.continueLast && flags.resume !== undefined) {
+      errors.push('Conflicting session lifecycle flags: --continue and --resume. Use only one of --continue or --resume.');
+    }
+    if ((flags.port !== undefined || flags.hostname !== undefined) && command !== 'pair' && command !== 'unknown') {
+      errors.push(`${flags.port !== undefined ? '--port' : '--hostname'} only applies to the pair command.`);
+    }
     if (command === 'unknown' && result.rawCommand !== undefined) {
       const key = result.rawCommand.toLowerCase();
       const hint = Object.hasOwn(BLOCKED_PRODUCT_COMMAND_HINTS, key) ? BLOCKED_PRODUCT_COMMAND_HINTS[key] : undefined;

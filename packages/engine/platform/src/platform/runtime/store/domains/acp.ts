@@ -43,8 +43,19 @@ export interface AcpDomainState {
   source: string;
 
   // ── Transport ─────────────────────────────────────────────────────────────
-  /** Current ACP manager transport state. */
+  /**
+   * Aggregate ACP transport state, derived from {@link transportStates}: a
+   * failed connection beside live ones reads `degraded`, failures alone read
+   * `terminal_failure`, and live connections read `syncing` or `connected`.
+   */
   managerTransportState: AcpTransportState;
+  /**
+   * Transport state per subagent connection, keyed by transport id. A
+   * connection leaves this map when it disconnects; failed connections stay
+   * until no live connection remains, so one finishing agent cannot hide
+   * another's failure or overwrite a running agent's state.
+   */
+  transportStates: Map<string, AcpTransportState>;
   /** Whether the ACP subsystem has been initialized. */
   initialized: boolean;
 
@@ -74,6 +85,7 @@ export function createInitialAcpState(): AcpDomainState {
     lastUpdatedAt: 0,
     source: 'init',
     managerTransportState: 'disconnected',
+    transportStates: new Map(),
     initialized: false,
     connections: new Map(),
     activeConnectionIds: [],

@@ -8,6 +8,7 @@ import {
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
+import { checkSessionLiveness, removeLivenessMarker, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
   readOnboardingCheckMarker,
   readOnboardingCompletionMarker,
@@ -116,6 +117,8 @@ export function wireSessionPersistenceAndRecovery(
   let streamStartTime = 0;
   let streamDeltaCount = 0;
 
+  // One notice per failing streak: a full disk would otherwise repeat it every turn.
+  let autosaveFailing = false;
   unsubs.push(uiServicesTurns.on('TURN_COMPLETED', () => {
     // Auto-save after every LLM turn so kills don't lose the session
     try {
@@ -132,8 +135,15 @@ export function wireSessionPersistenceAndRecovery(
         // in input/commands/session-content.ts).
         'auto',
       );
+      autosaveFailing = false;
       hookDispatcher.fire({ path: 'Lifecycle:session:save' as HookEventPath, phase: 'Lifecycle' as HookPhase, category: 'session' as HookCategory, specific: 'save', sessionId: runtime.sessionId, timestamp: Date.now(), payload: { sessionId: runtime.sessionId } }).catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
-    } catch (e) { logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) }); }
+    } catch (e) {
+      logger.warn('auto-save on turn:complete failed', { error: summarizeError(e) });
+      if (!autosaveFailing) {
+        autosaveFailing = true;
+        systemMessageRouter.high('[Session] This session could not be saved after the last turn, so it may be lost if the process stops. Check free disk space and write access to the sessions directory; saving is retried after every turn.');
+      }
+    }
   }));
 
   unsubs.push(uiServicesTurns.on('STREAM_START', () => {
@@ -152,7 +162,11 @@ export function wireSessionPersistenceAndRecovery(
   // Runs after the first render so the message lands as ambient context.
   let recoveryPending: string | null = null;
   const recoveryInfo = checkRecoveryFile({ surface });
-  if (recoveryInfo) {
+  // Another agent terminal refreshing this snapshot right now means it is that
+  // terminal's live state, not an orphaned crash: offering it here would let
+  // Ctrl+R take and delete the file the other terminal is still writing.
+  const recoveryOwner = recoveryInfo ? checkSessionLiveness(surface, recoveryInfo.sessionId) : null;
+  if (recoveryInfo && !(recoveryOwner?.live && recoveryOwner.pid !== process.pid)) {
     systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(recoveryInfo.timestamp).toLocaleString()}. Title: "${recoveryInfo.title}". Press Ctrl+R to restore, Esc to discard, or start typing to ignore it.`);
     for (const line of formatReturnContextForDisplay(recoveryInfo.returnContext)) {
       systemMessageRouter.low(`[Recovery] ${line}`);
@@ -164,14 +178,39 @@ export function wireSessionPersistenceAndRecovery(
     recoveryPending = recoveryInfo.sessionId;
   }
 
+  // The marker tells a second terminal this session is open here, so it neither
+  // offers this terminal's live recovery snapshot nor forks the session. Written
+  // now rather than on the first tick so a terminal started within the minute sees it.
+  const refreshLivenessMarker = (): void => {
+    try {
+      writeLivenessMarker(surface, runtime.sessionId);
+    } catch (error) {
+      logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
+    }
+  };
+  refreshLivenessMarker();
+  unsubs.push(() => {
+    try {
+      removeLivenessMarker(surface, runtime.sessionId);
+    } catch (error) {
+      logger.warn('[Recovery] Liveness marker removal failed', { error: summarizeError(error) });
+    }
+  });
   const recoveryInterval = setInterval(() => {
-    const snapshot = buildCurrentSessionSnapshot();
-    writeRecoveryFile(
-      snapshot,
-      runtime.sessionId,
-      conversation.title ?? '',
-      { surface },
-    );
+    // A timer callback that throws becomes an uncaught exception and ends the
+    // process; a failed tick only costs this snapshot, and the next tick retries.
+    try {
+      const snapshot = buildCurrentSessionSnapshot();
+      writeRecoveryFile(
+        snapshot,
+        runtime.sessionId,
+        conversation.title ?? '',
+        { surface },
+      );
+    } catch (error) {
+      logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
+    }
+    refreshLivenessMarker();
   }, 60_000);
 
   // First-start registration prompt (owner-approved design): only when this
@@ -224,7 +263,7 @@ export function wireSessionPersistenceAndRecovery(
       const root = normalizeWorkspaceRoot(workingDir);
       workspaceRegistrationAsked = root;
       deps.askWorkspaceRegistration(root, (accepted) => {
-        answerWorkspaceRegistrationPrompt(shellPaths, root, accepted);
+        void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted);
         systemMessageRouter.high(accepted
           ? `[Workspace] Registered ${root}, automatic checkpoints are now allowed here.`
           : `[Workspace] Not registered, automatic checkpoints stay off here (won't ask again for this location).`);

@@ -1,4 +1,6 @@
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
+import { customProviderKeyName } from './local-provider-commands.js';
 export function deriveConfiguredVia(
   providerId: string,
   configuredIds: Set<string>,
@@ -29,6 +31,8 @@ export function buildConfiguredViaMap(
   }
   return map;
 }
+const declaredEnvNames = (providerId: string): readonly string[] =>
+  Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, providerId) ? BUILTIN_PROVIDER_ENV_KEYS[providerId]! : [];
 export async function resolveSecretProviderIds(
   getConfiguredProviderIds: () => readonly string[],
   secretsManager?:
@@ -36,15 +40,21 @@ export async function resolveSecretProviderIds(
         readonly get: (key: string) => Promise<string | null>;
       }
     | undefined,
+  /** Extra secret names a provider's key may be stored under, beyond the two derived from its id. Defaults to the provider's declared environment names. */
+  extraKeyNames: (providerId: string) => readonly string[] = declaredEnvNames,
 ): Promise<ReadonlySet<string>> {
   if (!secretsManager) return new Set<string>();
   const configuredIds = new Set(getConfiguredProviderIds());
-  // For each configured provider, check if secretsManager has a key for it by provider ID.
-  // We use provider ID as the lookup key since we don't have BUILTIN_PROVIDER_ENV_KEYS here.
+  // Keys are stored under their environment-variable style names (OPENAI_API_KEY,
+  // <NAME>_API_KEY), not under the bare provider id, so every plausible name is tried.
   const results = await Promise.all(
     [...configuredIds].map(async (providerId) => {
-      const val = await secretsManager.get(providerId).catch(() => null);
-      return val !== null ? providerId : null;
+      const names = new Set([providerId, customProviderKeyName(providerId), ...extraKeyNames(providerId)]);
+      for (const name of names) {
+        const val = await secretsManager.get(name).catch(() => null);
+        if (typeof val === 'string' && val !== '') return providerId;
+      }
+      return null;
     }),
   );
   return new Set(results.filter((v): v is string => v !== null));

@@ -224,10 +224,15 @@ export function createSecurityObservabilityReadModels(
         };
       },
       subscribe(listener) {
-        return runtimeStore.subscribe(listener);
+        return combineSubscriptions(
+          runtimeStore.subscribe(listener),
+          runtimeServices.mcpRegistry.subscribeSecurityDecisions(() => listener()),
+        );
       },
     },
     localAuth: {
+      // The user store and bootstrap credential are files; nothing announces a change.
+      pollOnly: true,
       getSnapshot() {
         const snapshot = runtimeServices.localUserAuthManager.inspect();
         return {

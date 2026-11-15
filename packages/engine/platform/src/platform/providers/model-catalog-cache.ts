@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import type { CatalogModel } from './model-catalog.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isTtlCacheStale, validateTtlCacheEnvelope } from './json-ttl-cache.js';
@@ -285,7 +286,8 @@ function loadCatalogCache(cachePath: string): CatalogCacheFile | null {
   }
 }
 
-function saveCatalogCache(models: CatalogModel[], cachePath: string, tmpPath: string): void {
+/** `_tmpPath` is kept for existing callers; the write picks its own unique temporary file so two processes refreshing at once cannot collide. */
+function saveCatalogCache(models: CatalogModel[], cachePath: string, _tmpPath?: string): void {
   try {
     fs.mkdirSync(dirname(cachePath), { recursive: true });
     const payload: CatalogCacheFile = {
@@ -294,8 +296,7 @@ function saveCatalogCache(models: CatalogModel[], cachePath: string, tmpPath: st
       ttlMs: CATALOG_TTL_MS,
       models,
     };
-    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, cachePath);
+    writeJsonFileAtomic(cachePath, payload);
   } catch (err) {
     logger.warn('[model-catalog] Cache write failed', { error: summarizeError(err) });
   }

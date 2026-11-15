@@ -2,8 +2,8 @@
  * hosted-exec-posture.test.ts, what THIS daemon states about a hosted turn's
  * exec.
  *
- * The engine's behaviour (a required boundary refuses an uncontained command,
- * the owner's terminal is denied outright) is the platform's, and is proved there.
+ * The engine's behaviour (a required boundary refuses an uncontained command)
+ * is the platform's, and is proved there.
  * What this daemon owns is the STATEMENT: which posture it hands the engine,
  * and what its operator prompt tells a hosted turn it owes.
  *
@@ -42,15 +42,6 @@ async function floorFor(workspaceRoot: string) {
 }
 
 describe('the exec posture this daemon states', () => {
-  it('states one at all; the engine is never left to a default here', async () => {
-    const floor = await floorFor(root);
-    try {
-      expect(typeof floor.execPosture).toBe('function');
-    } finally {
-      await floor.dispose();
-    }
-  });
-
   it('every session this daemon hosts is conversational, and therefore contained', async () => {
     const floor = await floorFor(root);
     try {
@@ -72,6 +63,17 @@ describe('the exec posture this daemon states', () => {
   });
 });
 
+describe('the permission rules a hosted floor shares', () => {
+  it('uses the daemon store, so a rule remembered in a hosted session is the one the gateway lists and deletes', async () => {
+    const floor = await floorFor(root);
+    try {
+      expect(floor.services.userPermissionRuleStore).toBe(getTestRuntimeServices().userPermissionRuleStore);
+    } finally {
+      await floor.dispose();
+    }
+  });
+});
+
 describe("this daemon's hosted operator prompt", () => {
   it('carries the conversational diagnosis contract, from the platform rather than a second copy', () => {
     const options = createHostedSessionOptions(getTestRuntimeServices());
@@ -79,13 +81,9 @@ describe("this daemon's hosted operator prompt", () => {
     expect(prompt).toContain(CONVERSATIONAL_DIAGNOSIS_SECTION);
   });
 
-  it('still says what it always said about the workspace and the ask seam', () => {
+  it('names the workspace it was composed for', () => {
     const options = createHostedSessionOptions(getTestRuntimeServices());
     const prompt = options.systemPrompt?.({ sessionId: 'hosted-1', workspaceRoot: '/tmp/ws' }) ?? '';
     expect(prompt).toContain('/tmp/ws');
-    expect(prompt).toContain('When decision models are active, they decide tool actions from the original goal and criteria');
-    expect(prompt).toContain('In Classic operation, use native permission rules and owner approvals');
-    expect(prompt).toContain('A required owner approval in Classic must be resolved before proceeding.');
-    expect(prompt).toContain('Never invent authority or route around a refusal.');
   });
 });

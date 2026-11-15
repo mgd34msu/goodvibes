@@ -98,7 +98,7 @@ export const AccountsSnapshotResponseSchema: z.ZodObject<{
             detail: z.ZodString;
             issues: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
-    }, z.core.$strict>>;
+    }, z.core.$strip>>;
     configuredCount: z.ZodNumber;
     issueCount: z.ZodNumber;
 }, z.core.$strict>;
@@ -150,6 +150,7 @@ export type AgentEvent =
     contractId?: string | undefined;
     contractRole?: 'owner' | 'unit' | 'planner' | undefined;
     contractUnitId?: string | undefined;
+    wake?: true | undefined;
 }
 /** Agent emitted a textual progress update. */
 | {
@@ -376,9 +377,10 @@ export type AutomationScheduleKind = (typeof AUTOMATION_SCHEDULE_KINDS)[number];
 // @public (undocumented)
 export class AutoRefreshCoordinator {
     constructor(options: AutoRefreshCoordinatorOptions);
-    ensureFreshToken(): Promise<void>;
-    refreshAndRetryOnce<T>(fn: () => Promise<T>): Promise<T>;
-    withRetryOn401<T>(fn: () => Promise<T>): Promise<T>;
+    // Warning: (ae-forgotten-export) The symbol "RefreshOutcome" needs to be exported by the entry point index.d.ts
+    ensureFreshToken(): Promise<RefreshOutcome>;
+    refreshAndRetryOnce<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T>;
+    withRetryOn401<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T>;
 }
 
 // @public (undocumented)
@@ -1013,7 +1015,7 @@ export type ContractEvent = ({
     escalationId: string;
     reading: OwnerReplyReading;
     outcome: ContractOutcome;
-    action: string;
+    action: OwnerReplyAction;
 } | {
     type: 'CONTRACT_GATE_RESULT';
     contractId: string;
@@ -1363,9 +1365,17 @@ export type ControlStatusResponse = z.infer<typeof ControlStatusResponseSchema>;
 export const ControlStatusResponseSchema: z.ZodObject<{
     status: z.ZodString;
     version: z.ZodString;
+    buildVersion: z.ZodOptional<z.ZodString>;
+    platformVersion: z.ZodOptional<z.ZodString>;
+    receipts: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        text: z.ZodString;
+        at: z.ZodNumber;
+    }, z.core.$strip>>>;
+    cluster: z.ZodOptional<z.ZodUnknown>;
 }, z.core.$strict>;
 
-// @public (undocumented)
+// @public
 export function createBrowserGoodVibesPlatform(options?: BrowserGoodVibesPlatformOptions): GoodVibesPlatform;
 
 // @public
@@ -1414,7 +1424,7 @@ export const createJsonInit: typeof createJsonRequestInit;
 // @public (undocumented)
 export function createJsonRequestInit(token: string | null | undefined, body?: unknown, method?: string, headers?: HeadersInit, signal?: AbortSignal, defaultHeaders?: HeadersInit): RequestInit;
 
-// @public
+// @public (undocumented)
 export function createMemoryTokenStore(initialToken?: string | null, initialExpiresAt?: number): GoodVibesExpiringTokenStore;
 
 // @public
@@ -1643,7 +1653,7 @@ export type DeliveryEvent = {
     targetId: string;
     completedAt: number;
     durationMs: number;
-    statusCode: number;
+    statusCode?: number;
 } | {
     type: 'DELIVERY_FAILED';
     deliveryId: string;
@@ -1690,7 +1700,8 @@ export type DistributedWorkStatus = 'queued' | 'claimed' | 'completed' | 'failed
 export type DistributedWorkType = (typeof DISTRIBUTED_WORK_TYPES)[number];
 
 // @public (undocumented)
-export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void) => void | Promise<() => void>;
+export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void,
+onEnded?: () => void) => void | Promise<() => void>;
 
 // @public
 export type DomainEventMap = {
@@ -1982,13 +1993,6 @@ export type ForensicsEvent =
     errorMessage?: string | undefined;
     taskId?: string | undefined;
     turnId?: string | undefined;
-}
-/** A report was exported (to stdout or file). */
-| {
-    type: 'FORENSICS_REPORT_EXPORTED';
-    reportId: string;
-    destination: 'stdout' | 'file';
-    path?: string | undefined;
 };
 
 // @public
@@ -2005,8 +2009,8 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.2.0";
-    readonly operatorMethodCount: 549;
+    readonly productVersion: "3.3.0";
+    readonly operatorMethodCount: 572;
     readonly operatorEventCount: 34;
     readonly peerEndpointCount: 6;
 };
@@ -2182,6 +2186,7 @@ export interface GoodVibesAuthClient {
     clearToken(): Promise<void>;
     // (undocumented)
     current(): Promise<GoodVibesCurrentAuth>;
+    ensureFreshToken(): Promise<void>;
     getToken(): Promise<string | null>;
     // (undocumented)
     login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>;
@@ -2234,6 +2239,7 @@ export type GoodVibesCloudflareQueuePayload = {
 } | {
     readonly type: 'batch.job.create';
     readonly body: Record<string, unknown>;
+    readonly jobId?: string | undefined;
     readonly enqueuedAt?: number | undefined;
 };
 
@@ -2741,31 +2747,6 @@ export type KnowledgeEvent = {
     connectorId: string;
     sourceType: string;
     uri?: string | undefined;
-}
-/**
-* Granular progress update during a knowledge ingest pipeline run.
-*
-* Emitted by the knowledge ingest engine at each processing phase so UIs can
-* render live progress bars for long-running ingest operations (e.g. large
-* document sets, semantic indexing).
-*
-* **Integration note:** Emission sites live in `platform/knowledge`. Wire by calling
-* `bus.emit('knowledge', { type: 'KNOWLEDGE_INGEST_PROGRESS', ... })` at each
-* phase-transition or item-complete checkpoint in the ingest pipeline. The contract
-* is defined here so platform consumers can subscribe without depending on the internal
-* knowledge module.
-*
-* **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
-* for the guard that ties progress events to their originating operation lifecycle.
-*/
-| {
-    type: 'KNOWLEDGE_INGEST_PROGRESS';
-    operationId: string;
-    phase: string;
-    completed: number;
-    total?: number | undefined;
-    percent?: number | undefined;
-    message?: string | undefined;
 } | {
     type: 'KNOWLEDGE_INGEST_COMPLETED';
     sourceId: string;
@@ -3152,7 +3133,7 @@ export function openServerSentEventStream(transport: HttpTransport, pathOrUrl: s
 export const OPERATOR_CONTRACT: OperatorContractManifest;
 
 // @public (undocumented)
-export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.events.create", "calendar.events.get", "calendar.events.list", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.set", "continuity.snapshot", "contracts.cancel", "contracts.get", "contracts.list", "contracts.reply", "contracts.start", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.draft.create", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.send", "flags.graduation.report", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.graph.get", "fleet.list", "fleet.observed.steer", "fleet.snapshot", "fleet.unarchive", "health.snapshot", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.revoke", "inbound.telegram.status", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.begin", "payments.checkout.fillCard", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.status", "payments.purchases.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.evaluate", "projectPlanning.language.get", "projectPlanning.language.upsert", "projectPlanning.state.get", "projectPlanning.state.upsert", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.register", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.migrate", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
+export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.events.create", "calendar.events.get", "calendar.events.list", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "continuity.snapshot", "contracts.cancel", "contracts.get", "contracts.list", "contracts.reply", "contracts.start", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.draft.create", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.send", "flags.graduation.report", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.graph.get", "fleet.list", "fleet.observed.steer", "fleet.snapshot", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.checkout.fillCard", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.status", "payments.purchases.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.evaluate", "projectPlanning.language.get", "projectPlanning.language.upsert", "projectPlanning.state.get", "projectPlanning.state.upsert", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.migrate", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
@@ -3531,6 +3512,8 @@ export interface OperatorMethodInputMap {
         approvalId: string;
         note?: string;
         remember?: boolean;
+        release?: boolean;
+        holdId?: string;
     };
     // (undocumented)
     "approvals.claim": {
@@ -3546,7 +3529,9 @@ export interface OperatorMethodInputMap {
         reason?: string;
     };
     // (undocumented)
-    "approvals.list": {};
+    "approvals.list": {
+        approvalId?: string;
+    };
     // (undocumented)
     "approvals.raise": {
         request: {
@@ -3768,7 +3753,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "automation.jobs.update": ({
-        jobId?: string;
+        jobId: string;
         expectedMutationRevision?: string;
         admission?: "autonomous";
         name?: string;
@@ -3985,6 +3970,56 @@ export interface OperatorMethodInputMap {
     "automation.schedules.run": {
         scheduleId: string;
     };
+    // (undocumented)
+    "batch.jobs.cancel": {
+        jobId: string;
+    };
+    // (undocumented)
+    "batch.jobs.create": ({
+        provider?: string;
+        model?: string;
+        request: ({
+            messages: readonly (({} & {
+                readonly [key: string]: unknown;
+            }))[];
+            tools?: readonly (({} & {
+                readonly [key: string]: unknown;
+            }))[];
+            systemPrompt?: string;
+            maxTokens?: number;
+            reasoningEffort?: string;
+            reasoningSummary?: boolean;
+        } & {
+            readonly [key: string]: unknown;
+        });
+        executionMode?: string;
+        source?: {
+            kind?: "automation" | "client" | "cloudflare-queue" | "cloudflare-worker" | "daemon-api";
+            id?: string;
+        };
+        metadata?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        flush?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "batch.jobs.get": {
+        jobId: string;
+    };
+    // (undocumented)
+    "batch.jobs.list": {
+        limit?: number;
+    };
+    // (undocumented)
+    "batch.run": ({
+        force?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "batch.runtime.get": {};
     // (undocumented)
     "browser.click": ({
         sessionId?: string;
@@ -4216,6 +4251,8 @@ export interface OperatorMethodInputMap {
     });
     // (undocumented)
     "channels.accounts.action.default": ({
+        surface: string;
+        action: string;
         accountId?: string;
         metadata?: ({} & {
             readonly [key: string]: ({} & {
@@ -4227,7 +4264,9 @@ export interface OperatorMethodInputMap {
     });
     // (undocumented)
     "channels.accounts.action.named": ({
-        accountId?: string;
+        surface: string;
+        action: string;
+        accountId: string;
         metadata?: ({} & {
             readonly [key: string]: ({} & {
                 readonly [key: string]: JsonValue;
@@ -4249,6 +4288,8 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "channels.actions.invoke": ({
+        surface: string;
+        actionId: string;
         accountId?: string;
         metadata?: ({} & {
             readonly [key: string]: ({} & {
@@ -4272,6 +4313,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "channels.allowlist.edit": ({
+        surface: string;
         add?: readonly string[];
         remove?: readonly string[];
         groupId?: string;
@@ -4288,6 +4330,7 @@ export interface OperatorMethodInputMap {
     });
     // (undocumented)
     "channels.allowlist.resolve": ({
+        surface: string;
         add?: readonly string[];
         remove?: readonly string[];
         groupId?: string;
@@ -4304,6 +4347,7 @@ export interface OperatorMethodInputMap {
     });
     // (undocumented)
     "channels.authorize": ({
+        surface: string;
         actionId: string;
         actorId?: string;
         accountId?: string;
@@ -4389,6 +4433,7 @@ export interface OperatorMethodInputMap {
     "channels.policies.list": {};
     // (undocumented)
     "channels.policies.update": ({
+        surface: string;
         enabled?: boolean;
         requireMention?: boolean;
         allowDirectMessages?: boolean;
@@ -4488,6 +4533,7 @@ export interface OperatorMethodInputMap {
     "channels.status": {};
     // (undocumented)
     "channels.targets.resolve": ({
+        surface: string;
         target?: string;
         input?: string;
         query?: string;
@@ -4519,6 +4565,8 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "channels.tools.invoke": ({
+        surface: string;
+        toolId: string;
         accountId?: string;
         metadata?: ({} & {
             readonly [key: string]: ({} & {
@@ -4582,7 +4630,6 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "checkpoints.restorePreview": {
         id: string;
-        paths?: readonly string[];
     };
     // (undocumented)
     "checkpoints.revertHunk": {
@@ -4623,12 +4670,165 @@ export interface OperatorMethodInputMap {
         watchId: string;
     };
     // (undocumented)
+    "cloudflare.credentials.verify": ({
+        accountId?: string;
+        apiToken?: string;
+        apiTokenRef?: string;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.disable": ({
+        accountId?: string;
+        apiToken?: string;
+        apiTokenRef?: string;
+        workerName?: string;
+        disableWorkerSubdomain?: boolean;
+        disableCron?: boolean;
+        persistConfig?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.provision": ({
+        accountId?: string;
+        apiToken?: string;
+        apiTokenRef?: string;
+        components?: {
+            workers?: boolean;
+            queues?: boolean;
+            zeroTrustTunnel?: boolean;
+            zeroTrustAccess?: boolean;
+            dns?: boolean;
+            kv?: boolean;
+            durableObjects?: boolean;
+            secretsStore?: boolean;
+            r2?: boolean;
+        };
+        batchMode?: "eligible-by-default" | "explicit" | "off";
+        workerName?: string;
+        workerSubdomain?: string;
+        workerHostname?: string;
+        workerBaseUrl?: string;
+        daemonBaseUrl?: string;
+        daemonHostname?: string;
+        zoneId?: string;
+        zoneName?: string;
+        queueName?: string;
+        deadLetterQueueName?: string;
+        tunnelName?: string;
+        tunnelId?: string;
+        tunnelServiceUrl?: string;
+        tunnelTokenRef?: string;
+        accessAppId?: string;
+        accessServiceTokenId?: string;
+        accessServiceTokenRef?: string;
+        kvNamespaceName?: string;
+        kvNamespaceId?: string;
+        durableObjectNamespaceName?: string;
+        durableObjectNamespaceId?: string;
+        r2BucketName?: string;
+        secretsStoreName?: string;
+        secretsStoreId?: string;
+        workerCron?: string;
+        operatorToken?: string;
+        operatorTokenRef?: string;
+        workerClientToken?: string;
+        workerClientTokenRef?: string;
+        storeApiToken?: boolean;
+        storeOperatorToken?: boolean;
+        storeWorkerClientToken?: boolean;
+        returnGeneratedSecrets?: boolean;
+        enableWorkersDev?: boolean;
+        queueJobPayloads?: boolean;
+        verify?: boolean;
+        persistConfig?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.resources.list": ({
+        accountId?: string;
+        apiToken?: string;
+        apiTokenRef?: string;
+        components?: {
+            workers?: boolean;
+            queues?: boolean;
+            zeroTrustTunnel?: boolean;
+            zeroTrustAccess?: boolean;
+            dns?: boolean;
+            kv?: boolean;
+            durableObjects?: boolean;
+            secretsStore?: boolean;
+            r2?: boolean;
+        };
+        zoneId?: string;
+        zoneName?: string;
+        includeResources?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.status": {};
+    // (undocumented)
+    "cloudflare.token.create": ({
+        components?: {
+            workers?: boolean;
+            queues?: boolean;
+            zeroTrustTunnel?: boolean;
+            zeroTrustAccess?: boolean;
+            dns?: boolean;
+            kv?: boolean;
+            durableObjects?: boolean;
+            secretsStore?: boolean;
+            r2?: boolean;
+        };
+        includeBootstrap?: boolean;
+        accountId?: string;
+        zoneId?: string;
+        zoneName?: string;
+        bootstrapToken: string;
+        tokenName?: string;
+        expiresOn?: string;
+        persistConfig?: boolean;
+        storeApiToken?: boolean;
+        returnGeneratedToken?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.token.requirements.get": ({
+        components?: {
+            workers?: boolean;
+            queues?: boolean;
+            zeroTrustTunnel?: boolean;
+            zeroTrustAccess?: boolean;
+            dns?: boolean;
+            kv?: boolean;
+            durableObjects?: boolean;
+            secretsStore?: boolean;
+            r2?: boolean;
+        };
+        includeBootstrap?: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "cloudflare.worker.verify": ({
+        workerBaseUrl?: string;
+        workerClientToken?: string;
+        workerClientTokenRef?: string;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
     "companion.chat.events.stream": {
         sessionId: string;
     };
     // (undocumented)
     "companion.chat.messages.create": ({
         sessionId: string;
+        clientMessageId?: string;
         body?: string;
         content?: string;
         attachments?: readonly ({
@@ -4681,6 +4881,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "companion.chat.messages.retry": ({
+        sessionId: string;
         messageId?: string;
     } & {
         readonly [key: string]: unknown;
@@ -4688,6 +4889,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "companion.chat.messages.steer": ({
         sessionId: string;
+        clientMessageId?: string;
         body?: string;
         content?: string;
         attachments?: readonly ({
@@ -4767,6 +4969,10 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "config.get": {};
     // (undocumented)
+    "config.reset": {
+        key: string;
+    };
+    // (undocumented)
     "config.set": ({
         key: string;
     } & {
@@ -4836,7 +5042,8 @@ export interface OperatorMethodInputMap {
     "control.snapshot": {};
     // (undocumented)
     "control.status": {
-        receipts?: "consume";
+        receipts?: "ack" | "consume" | "peek";
+        ids?: string;
     };
     // (undocumented)
     "control.web": {};
@@ -5002,6 +5209,41 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "health.snapshot": {};
+    // (undocumented)
+    "homeassistant.conversation.cancel": ({
+        sessionId?: string;
+        messageId?: string;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "homeassistant.conversation.health": {};
+    // (undocumented)
+    "homeassistant.conversation.stream": ({
+        message: string;
+        conversationId?: string;
+        messageId?: string;
+        threadId?: string;
+        surfaceId?: string;
+        providerId?: string;
+        modelId?: string;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "homeassistant.conversation.submit": ({
+        message: string;
+        conversationId?: string;
+        messageId?: string;
+        threadId?: string;
+        surfaceId?: string;
+        providerId?: string;
+        modelId?: string;
+        wait?: boolean;
+        timeoutMs?: number;
+    } & {
+        readonly [key: string]: unknown;
+    });
     // (undocumented)
     "homeassistant.homeGraph.askHomeGraph": ({
         installationId?: string;
@@ -5446,6 +5688,13 @@ export interface OperatorMethodInputMap {
         };
     };
     // (undocumented)
+    "inbound.telegram.release": {
+        configurationId: string;
+    } | {
+        chatId: string;
+        threadId?: string;
+    };
+    // (undocumented)
     "inbound.telegram.revoke": {
         configurationId: string;
     };
@@ -5486,21 +5735,6 @@ export interface OperatorMethodInputMap {
     } | {
         protocolVersion: 1;
         requestId: string;
-        battery: "webui.status.badge-tone";
-        batteryVersion: 1;
-        input: {
-            vocabulary: "badge" | "library-dot";
-            source: {
-                kind: "catalog";
-                labelId: string;
-            } | {
-                kind: "daemon";
-                statusRef: string;
-            };
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
         battery: "webui.palette.command-rank";
         batteryVersion: 1;
         input: {
@@ -5527,16 +5761,6 @@ export interface OperatorMethodInputMap {
         batteryVersion: 1;
         input: {
             subjectRef: string;
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.pwa.install-platform";
-        batteryVersion: 1;
-        input: {
-            userAgent: string;
-            platform: string;
-            maxTouchPoints: number;
         };
     } | {
         protocolVersion: 1;
@@ -5608,6 +5832,7 @@ export interface OperatorMethodInputMap {
     });
     // (undocumented)
     "knowledge.candidate.decide": ({
+        id: string;
         decision: "accept" | "reject" | "supersede";
         decidedBy?: string;
         reason?: string;
@@ -5717,32 +5942,22 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "knowledge.ingest.connector": {
         connectorId: string;
+        input?: ({} & {
+            readonly [key: string]: JsonValue;
+        }) | boolean | null | number | readonly JsonValue[] | string;
+        content?: string;
+        path?: string;
+        sessionId?: string;
+        allowPrivateHosts?: boolean;
+    } & ({
         input: ({} & {
             readonly [key: string]: JsonValue;
         }) | boolean | null | number | readonly JsonValue[] | string;
-        content?: string;
-        path?: string;
-        sessionId?: string;
-        allowPrivateHosts?: boolean;
     } | {
-        connectorId: string;
-        input?: ({} & {
-            readonly [key: string]: JsonValue;
-        }) | boolean | null | number | readonly JsonValue[] | string;
         content: string;
-        path?: string;
-        sessionId?: string;
-        allowPrivateHosts?: boolean;
     } | {
-        connectorId: string;
-        input?: ({} & {
-            readonly [key: string]: JsonValue;
-        }) | boolean | null | number | readonly JsonValue[] | string;
-        content?: string;
         path: string;
-        sessionId?: string;
-        allowPrivateHosts?: boolean;
-    };
+    });
     // (undocumented)
     "knowledge.ingest.url": ({
         url: string;
@@ -5807,6 +6022,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "knowledge.job.run": {
+        jobId: string;
         mode?: "background" | "inline";
         sourceIds?: readonly string[];
         limit?: number;
@@ -5940,6 +6156,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "knowledge.schedule.enable": ({
+        id: string;
         enabled: boolean;
     } & {
         readonly [key: string]: unknown;
@@ -6066,7 +6283,8 @@ export interface OperatorMethodInputMap {
         scope?: "global" | "project";
         server: {
             name: string;
-            command: string;
+            command?: string;
+            url?: string;
             args?: readonly string[];
             env?: ({} & {
                 readonly [key: string]: unknown;
@@ -6076,7 +6294,11 @@ export interface OperatorMethodInputMap {
             trustMode?: null | string;
             allowedPaths?: readonly string[];
             allowedHosts?: readonly string[];
-        };
+        } & ({
+            command: string;
+        } | {
+            url: string;
+        });
     } & {
         readonly [key: string]: unknown;
     });
@@ -6730,6 +6952,13 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "payments.cards.list": {};
     // (undocumented)
+    "payments.checkout.approve": {
+        confirm: boolean;
+        merchantDomain: string;
+        item: string;
+        amount: string;
+    };
+    // (undocumented)
     "payments.checkout.begin": {
         requestId: string;
         sessionId: string;
@@ -7192,6 +7421,7 @@ export interface OperatorMethodInputMap {
                 readonly [key: string]: JsonValue;
             }) | boolean | null | number | readonly JsonValue[] | string;
         });
+        confirmReplace?: boolean;
     } & {
         readonly [key: string]: unknown;
     });
@@ -7207,6 +7437,7 @@ export interface OperatorMethodInputMap {
                 readonly [key: string]: JsonValue;
             }) | boolean | null | number | readonly JsonValue[] | string;
         });
+        confirmReplace?: boolean;
     } & {
         readonly [key: string]: unknown;
     });
@@ -7348,7 +7579,7 @@ export interface OperatorMethodInputMap {
     "routes.bindings.list": {};
     // (undocumented)
     "routes.bindings.update": ({
-        bindingId?: string;
+        bindingId: string;
         sessionPolicy?: string;
         threadPolicy?: string;
         deliveryGuarantee?: string;
@@ -7417,6 +7648,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "sessions.followUp": ({
+        sessionId: string;
         body: string;
         surfaceKind?: string;
         surfaceId?: string;
@@ -7488,6 +7720,7 @@ export interface OperatorMethodInputMap {
         agentId?: string;
         answer?: string;
         status?: string;
+        claim?: boolean;
     };
     // (undocumented)
     "sessions.inputs.list": {
@@ -7502,6 +7735,7 @@ export interface OperatorMethodInputMap {
     "sessions.list": {};
     // (undocumented)
     "sessions.messages.create": ({
+        sessionId: string;
         body: string;
         surfaceKind?: string;
         surfaceId?: string;
@@ -7595,6 +7829,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "sessions.steer": ({
+        sessionId: string;
         body: string;
         surfaceKind?: string;
         surfaceId?: string;
@@ -7669,17 +7904,25 @@ export interface OperatorMethodInputMap {
     "stepup.challenge.mint": {
         rendezvousId?: string;
         sessionId?: string;
+        method?: string;
+        path?: string;
         ttlMs?: number;
     };
     // (undocumented)
+    "stepup.credentials.list": {};
+    // (undocumented)
     "stepup.credentials.register": {
         rpId: string;
-        origin: string;
+        origin: string | readonly string[];
         credentialId: string;
         publicKeyCose: string;
         signCount?: number;
         userVerification?: "discouraged" | "preferred" | "required";
         label?: string;
+    };
+    // (undocumented)
+    "stepup.credentials.remove": {
+        credentialId: string;
     };
     // (undocumented)
     "surfaces.list": {};
@@ -8044,7 +8287,7 @@ export interface OperatorMethodInputMap {
     "watchers.triggers.status": {};
     // (undocumented)
     "watchers.update": ({
-        watcherId?: string;
+        watcherId: string;
         label?: string;
         kind?: string;
         sourceId?: string;
@@ -8420,8 +8663,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8437,6 +8678,8 @@ export interface OperatorMethodOutputMap {
                 note?: string;
             })[];
         };
+        applied?: boolean;
+        refusal?: string;
         recorded?: {
             approved: boolean;
             rememberTier: null | "command-class" | "exact" | "path" | "session" | "tool";
@@ -8510,8 +8753,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8527,6 +8768,8 @@ export interface OperatorMethodOutputMap {
                 note?: string;
             })[];
         };
+        applied?: boolean;
+        refusal?: string;
         recorded?: {
             approved: boolean;
             rememberTier: null | "command-class" | "exact" | "path" | "session" | "tool";
@@ -8600,8 +8843,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8617,6 +8858,8 @@ export interface OperatorMethodOutputMap {
                 note?: string;
             })[];
         };
+        applied?: boolean;
+        refusal?: string;
         recorded?: {
             approved: boolean;
             rememberTier: null | "command-class" | "exact" | "path" | "session" | "tool";
@@ -8690,8 +8933,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8707,6 +8948,8 @@ export interface OperatorMethodOutputMap {
                 note?: string;
             })[];
         };
+        applied?: boolean;
+        refusal?: string;
         recorded?: {
             approved: boolean;
             rememberTier: null | "command-class" | "exact" | "path" | "session" | "tool";
@@ -8800,8 +9043,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8886,8 +9127,6 @@ export interface OperatorMethodOutputMap {
                 });
                 disposition?: "amended" | "approved" | "cancelled" | "denied" | "expired" | "remembered";
             };
-            fixSessionId?: string;
-            fixSessionError?: string;
             expiresAt?: number;
             metadata: ({} & {
                 readonly [key: string]: ({} & {
@@ -8905,6 +9144,7 @@ export interface OperatorMethodOutputMap {
         };
         coalesced: boolean;
         decided: boolean;
+        holdId?: string;
     };
     // (undocumented)
     "artifacts.content.get": {
@@ -9559,6 +9799,155 @@ export interface OperatorMethodOutputMap {
             title: string;
             body: string;
         };
+    } | {
+        items: readonly (({
+            id: string;
+            mutationRevision: string;
+            name: string;
+            description?: string;
+            labels: readonly string[];
+            createdAt: number;
+            updatedAt: number;
+            status: "archived" | "enabled" | "error" | "paused";
+            enabled: boolean;
+            schedule: {
+                kind: "at";
+                at: number;
+            } | {
+                kind: "every";
+                intervalMs: number;
+                anchorAt?: number;
+            } | {
+                kind: "cron";
+                expression: string;
+                timezone?: string;
+                staggerMs?: number;
+                staggerPhase?: number;
+            };
+            execution: {
+                prompt?: string;
+                template?: string;
+                target: {
+                    kind: "background" | "current" | "isolated" | "main" | "pinned" | "route" | "session";
+                    sessionId?: string;
+                    routeId?: string;
+                    threadId?: string;
+                    channelId?: string;
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    pinnedSessionId?: string;
+                    preserveThread?: boolean;
+                    createIfMissing?: boolean;
+                };
+                modelProvider?: string;
+                modelId?: string;
+                fallbackModels?: readonly string[];
+                routing?: {
+                    providerSelection?: "concrete" | "inherit-current" | "synthetic";
+                    providerFailurePolicy?: "fail" | "ordered-fallbacks";
+                    fallbackModels?: readonly string[];
+                };
+                executionIntent?: {
+                    riskClass?: "dangerous" | "elevated" | "safe";
+                    requiresApproval?: boolean;
+                    networkPolicy?: "allow" | "deny" | "inherit" | "scoped";
+                    filesystemPolicy?: "inherit" | "isolated" | "read-only" | "workspace-write";
+                };
+                reasoningEffort?: "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
+                thinking?: string;
+                wakeMode?: "next-heartbeat" | "now";
+                timeoutMs?: number;
+                maxAttempts?: number;
+                toolAllowlist?: readonly string[];
+                autoApprove?: boolean;
+                sandboxMode?: "inherit" | "isolate" | "off";
+                allowUnsafeExternalContent?: boolean;
+                externalContentSource?: "api" | "browser" | "channel_metadata" | "discord" | "email" | "gmail" | "ntfy" | "slack" | "unknown" | "web_fetch" | "web_search" | "webhook" | {
+                    kind: string;
+                    id?: string;
+                    url?: string;
+                    routeId?: string;
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    metadata?: ({} & {
+                        readonly [key: string]: ({} & {
+                            readonly [key: string]: JsonValue;
+                        }) | boolean | null | number | readonly JsonValue[] | string;
+                    });
+                };
+                lightContext?: boolean;
+            };
+            delivery: {
+                mode: "integration" | "link" | "none" | "surface" | "webhook";
+                targets: readonly ({
+                    kind: "integration" | "link" | "none" | "surface" | "webhook";
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    address?: string;
+                    routeId?: string;
+                    label?: string;
+                })[];
+                fallbackTargets: readonly ({
+                    kind: "integration" | "link" | "none" | "surface" | "webhook";
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    address?: string;
+                    routeId?: string;
+                    label?: string;
+                })[];
+                includeSummary: boolean;
+                includeTranscript: boolean;
+                includeLinks: boolean;
+                replyToRouteId?: string;
+            };
+            failure: {
+                action: "cooldown" | "dead_letter" | "disable" | "retry";
+                maxConsecutiveFailures: number;
+                cooldownMs: number;
+                retryPolicy: {
+                    maxAttempts: number;
+                    delayMs: number;
+                    strategy: "exponential" | "fixed" | "linear";
+                    maxDelayMs?: number;
+                    jitterMs?: number;
+                };
+                deadLetterRouteId?: string;
+                disableAfterFailures?: boolean;
+                notifyRouteId?: string;
+            };
+            source: ({
+                id: string;
+                kind: "hook" | "manual" | "schedule" | "surface" | "watcher" | "webhook";
+                label: string;
+                surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                routeId?: string;
+                enabled: boolean;
+                createdAt: number;
+                updatedAt: number;
+                lastSeenAt?: number;
+                metadata: ({} & {
+                    readonly [key: string]: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                });
+            } & {
+                readonly [key: string]: unknown;
+            });
+            nextRunAt?: number;
+            lastRunAt?: number;
+            lastRunId?: string;
+            runCount: number;
+            successCount: number;
+            failureCount: number;
+            pausedReason?: string;
+            deleteAfterRun: boolean;
+            archivedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
+        hasMore: boolean;
+        nextCursor?: string;
     };
     // (undocumented)
     "automation.jobs.run": ({
@@ -10289,6 +10678,191 @@ export interface OperatorMethodOutputMap {
         } & {
             readonly [key: string]: unknown;
         }))[];
+    } | {
+        items: readonly (({
+            id: string;
+            jobId: string;
+            labels: readonly string[];
+            createdAt: number;
+            updatedAt: number;
+            status: "cancelled" | "completed" | "failed" | "missed" | "queued" | "running";
+            agentId?: string;
+            triggeredBy: ({
+                id: string;
+                kind: "hook" | "manual" | "schedule" | "surface" | "watcher" | "webhook";
+                label: string;
+                surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                routeId?: string;
+                enabled: boolean;
+                createdAt: number;
+                updatedAt: number;
+                lastSeenAt?: number;
+                metadata: ({} & {
+                    readonly [key: string]: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                });
+            } & {
+                readonly [key: string]: unknown;
+            });
+            target: {
+                kind: "background" | "current" | "isolated" | "main" | "pinned" | "route" | "session";
+                sessionId?: string;
+                routeId?: string;
+                threadId?: string;
+                channelId?: string;
+                surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                pinnedSessionId?: string;
+                preserveThread?: boolean;
+                createIfMissing?: boolean;
+            };
+            execution: {
+                prompt?: string;
+                template?: string;
+                target: {
+                    kind: "background" | "current" | "isolated" | "main" | "pinned" | "route" | "session";
+                    sessionId?: string;
+                    routeId?: string;
+                    threadId?: string;
+                    channelId?: string;
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    pinnedSessionId?: string;
+                    preserveThread?: boolean;
+                    createIfMissing?: boolean;
+                };
+                modelProvider?: string;
+                modelId?: string;
+                fallbackModels?: readonly string[];
+                routing?: {
+                    providerSelection?: "concrete" | "inherit-current" | "synthetic";
+                    providerFailurePolicy?: "fail" | "ordered-fallbacks";
+                    fallbackModels?: readonly string[];
+                };
+                executionIntent?: {
+                    riskClass?: "dangerous" | "elevated" | "safe";
+                    requiresApproval?: boolean;
+                    networkPolicy?: "allow" | "deny" | "inherit" | "scoped";
+                    filesystemPolicy?: "inherit" | "isolated" | "read-only" | "workspace-write";
+                };
+                reasoningEffort?: "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh";
+                thinking?: string;
+                wakeMode?: "next-heartbeat" | "now";
+                timeoutMs?: number;
+                maxAttempts?: number;
+                toolAllowlist?: readonly string[];
+                autoApprove?: boolean;
+                sandboxMode?: "inherit" | "isolate" | "off";
+                allowUnsafeExternalContent?: boolean;
+                externalContentSource?: "api" | "browser" | "channel_metadata" | "discord" | "email" | "gmail" | "ntfy" | "slack" | "unknown" | "web_fetch" | "web_search" | "webhook" | {
+                    kind: string;
+                    id?: string;
+                    url?: string;
+                    routeId?: string;
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    metadata?: ({} & {
+                        readonly [key: string]: ({} & {
+                            readonly [key: string]: JsonValue;
+                        }) | boolean | null | number | readonly JsonValue[] | string;
+                    });
+                };
+                lightContext?: boolean;
+            };
+            scheduleKind?: "at" | "cron" | "every";
+            queuedAt: number;
+            startedAt?: number;
+            endedAt?: number;
+            durationMs?: number;
+            forceRun: boolean;
+            dueRun: boolean;
+            attempt: number;
+            sessionId?: string;
+            routeId?: string;
+            route?: ({
+                id: string;
+                kind: "channel" | "message" | "session" | "thread";
+                surfaceKind: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                surfaceId: string;
+                externalId: string;
+                sessionPolicy?: "continue-existing" | "create-or-bind" | "require-existing";
+                threadPolicy?: "detached" | "preserve" | "replace";
+                deliveryGuarantee?: "at-least-once" | "best-effort";
+                threadId?: string;
+                channelId?: string;
+                sessionId?: string;
+                jobId?: string;
+                runId?: string;
+                title?: string;
+                lastSeenAt: number;
+                createdAt: number;
+                updatedAt: number;
+                metadata: ({} & {
+                    readonly [key: string]: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                });
+            } & {
+                readonly [key: string]: unknown;
+            });
+            continuationMode?: "background" | "continued-live" | "shared-session" | "spawn";
+            executionIntent?: {
+                mode: "background" | "continued-live" | "shared-session" | "spawn";
+                targetKind: "background" | "current" | "isolated" | "main" | "pinned" | "route" | "session";
+            };
+            deliveryIds: readonly string[];
+            deliveryAttempts?: readonly (({
+                id: string;
+                runId: string;
+                jobId: string;
+                target: {
+                    kind: "integration" | "link" | "none" | "surface" | "webhook";
+                    surfaceKind?: "bluebubbles" | "discord" | "google-chat" | "homeassistant" | "imessage" | "matrix" | "mattermost" | "msteams" | "ntfy" | "service" | "signal" | "slack" | "telegram" | "telephony" | "tui" | "web" | "webhook" | "whatsapp";
+                    address?: string;
+                    routeId?: string;
+                    label?: string;
+                };
+                status: "dead_lettered" | "failed" | "pending" | "sending" | "sent";
+                startedAt?: number;
+                endedAt?: number;
+                error?: string;
+                responseId?: string;
+            } & {
+                readonly [key: string]: unknown;
+            }))[];
+            modelId?: string;
+            providerId?: string;
+            telemetry?: ({
+                usage: {
+                    inputTokens: number;
+                    outputTokens: number;
+                    cacheReadTokens: number;
+                    cacheWriteTokens: number;
+                    reasoningTokens?: number;
+                };
+                llmCallCount?: number;
+                toolCallCount?: number;
+                turnCount?: number;
+                modelId?: string;
+                providerId?: string;
+                reasoningSummaryPresent?: boolean;
+                source?: "local-agent" | "remote-device" | "remote-node" | "shared-session";
+            } & {
+                readonly [key: string]: unknown;
+            });
+            result?: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+            error?: string;
+            cancelledReason?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
+        hasMore: boolean;
+        nextCursor?: string;
     };
     // (undocumented)
     "automation.runs.retry": {
@@ -10984,6 +11558,179 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "batch.jobs.cancel": {
+        job: {
+            id: string;
+            provider: string;
+            model: string;
+            status: "cancelled" | "completed" | "dead_lettered" | "expired" | "failed" | "queued" | "running" | "submitted";
+            createdAt: number;
+            updatedAt: number;
+            request: ({} & {
+                readonly [key: string]: unknown;
+            });
+            source?: {
+                kind: string;
+                id?: string;
+            };
+            metadata?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            attempts: number;
+            providerBatchId?: string;
+            providerBatchStatus?: string;
+            submittedAt?: number;
+            completedAt?: number;
+            result?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            error?: ({
+                message: string;
+                code?: string;
+            } & {
+                readonly [key: string]: unknown;
+            });
+        };
+    };
+    // (undocumented)
+    "batch.jobs.create": {
+        job: {
+            id: string;
+            provider: string;
+            model: string;
+            status: "cancelled" | "completed" | "dead_lettered" | "expired" | "failed" | "queued" | "running" | "submitted";
+            createdAt: number;
+            updatedAt: number;
+            request: ({} & {
+                readonly [key: string]: unknown;
+            });
+            source?: {
+                kind: string;
+                id?: string;
+            };
+            metadata?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            attempts: number;
+            providerBatchId?: string;
+            providerBatchStatus?: string;
+            submittedAt?: number;
+            completedAt?: number;
+            result?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            error?: ({
+                message: string;
+                code?: string;
+            } & {
+                readonly [key: string]: unknown;
+            });
+        };
+    };
+    // (undocumented)
+    "batch.jobs.get": {
+        job: {
+            id: string;
+            provider: string;
+            model: string;
+            status: "cancelled" | "completed" | "dead_lettered" | "expired" | "failed" | "queued" | "running" | "submitted";
+            createdAt: number;
+            updatedAt: number;
+            request: ({} & {
+                readonly [key: string]: unknown;
+            });
+            source?: {
+                kind: string;
+                id?: string;
+            };
+            metadata?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            attempts: number;
+            providerBatchId?: string;
+            providerBatchStatus?: string;
+            submittedAt?: number;
+            completedAt?: number;
+            result?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            error?: ({
+                message: string;
+                code?: string;
+            } & {
+                readonly [key: string]: unknown;
+            });
+        };
+    };
+    // (undocumented)
+    "batch.jobs.list": {
+        jobs: readonly ({
+            id: string;
+            provider: string;
+            model: string;
+            status: "cancelled" | "completed" | "dead_lettered" | "expired" | "failed" | "queued" | "running" | "submitted";
+            createdAt: number;
+            updatedAt: number;
+            request: ({} & {
+                readonly [key: string]: unknown;
+            });
+            source?: {
+                kind: string;
+                id?: string;
+            };
+            metadata?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            attempts: number;
+            providerBatchId?: string;
+            providerBatchStatus?: string;
+            submittedAt?: number;
+            completedAt?: number;
+            result?: ({} & {
+                readonly [key: string]: unknown;
+            });
+            error?: ({
+                message: string;
+                code?: string;
+            } & {
+                readonly [key: string]: unknown;
+            });
+        })[];
+    };
+    // (undocumented)
+    "batch.run": {
+        submittedProviderBatches: number;
+        submittedJobs: number;
+        polledProviderBatches: number;
+        completedJobs: number;
+        failedJobs: number;
+    };
+    // (undocumented)
+    "batch.runtime.get": {
+        mode: "eligible-by-default" | "explicit" | "off";
+        fallback: "fail" | "live";
+        queueBackend: "cloudflare" | "local";
+        cloudflare: {
+            enabled: boolean;
+            freeTierMode: boolean;
+            accountId: string;
+            workerName: string;
+            workerBaseUrl: string;
+            daemonBaseUrl: string;
+            queueName: string;
+            deadLetterQueueName: string;
+            maxQueueOpsPerDay: number;
+        };
+        limits: {
+            tickIntervalMs: number;
+            maxDelayMs: number;
+            maxJobsPerProviderBatch: number;
+            maxQueuePayloadBytes: number;
+            maxQueueMessagesPerDay: number;
+        };
+        supportedProviders: readonly string[];
+    };
+    // (undocumented)
     "browser.click": ({
         sessionId: string;
         pageId: string;
@@ -11128,14 +11875,14 @@ export interface OperatorMethodOutputMap {
         session: {
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         };
         pages?: readonly ({
@@ -11153,14 +11900,14 @@ export interface OperatorMethodOutputMap {
         closed: {
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         };
     } & {
@@ -11171,14 +11918,14 @@ export interface OperatorMethodOutputMap {
         session: {
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         };
         setup?: string;
@@ -11191,14 +11938,14 @@ export interface OperatorMethodOutputMap {
         sessions: readonly ({
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         })[];
     };
@@ -11207,14 +11954,14 @@ export interface OperatorMethodOutputMap {
         released: {
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         };
         note?: string;
@@ -11247,30 +11994,30 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "browser.status": ({
         browserAvailable: boolean;
-        binarySource?: string;
-        executablePath?: string;
-        driverVersion?: string;
+        binarySource?: null | string;
+        executablePath?: null | string;
+        driverVersion?: null | string;
         browsersPath?: string;
         displayAvailable?: boolean;
         defaultMode?: string;
         sessions?: readonly ({
             sessionId: string;
             origin: string;
-            profileDirectory?: string;
-            cdpEndpoint?: string;
-            executablePath?: string;
-            source?: string;
+            profileDirectory?: null | string;
+            cdpEndpoint?: null | string;
+            executablePath?: null | string;
+            source?: null | string;
             headless: boolean;
             startedAt: string;
             pageCount: number;
-            activePageId?: string;
+            activePageId?: null | string;
             closableByAgent: boolean;
         })[];
         provisionSteps?: readonly (({} & {
             readonly [key: string]: JsonValue;
         }))[];
-        problem?: string;
-        fix?: string;
+        problem?: null | string;
+        fix?: null | string;
     } & {
         readonly [key: string]: unknown;
     });
@@ -12018,6 +12765,10 @@ export interface OperatorMethodOutputMap {
                 uidValidity: number;
                 pendingMessages: number;
             };
+            skippedMessages?: readonly ({
+                uid: number;
+                reason: string;
+            })[];
         })[];
         partial: boolean;
     };
@@ -12418,6 +13169,10 @@ export interface OperatorMethodOutputMap {
             deliveryChannel: string;
             quietHours: string;
         };
+        schedule?: {
+            state: "failed" | "not-needed" | "scheduled";
+            reason?: string;
+        };
     };
     // (undocumented)
     "checkin.receipts.list": {
@@ -12462,6 +13217,7 @@ export interface OperatorMethodOutputMap {
         outcome: "delivered" | "error" | "quiet" | "skipped";
         summary: string;
         deliveryId?: string;
+        error?: string;
     };
     // (undocumented)
     "checkpoints.create": {
@@ -12506,6 +13262,10 @@ export interface OperatorMethodOutputMap {
             commit: string;
             sizeBytes: number;
         })[];
+        retentionFailure?: {
+            error: string;
+            at: number;
+        };
     };
     // (undocumented)
     "checkpoints.restore": {
@@ -12514,6 +13274,10 @@ export interface OperatorMethodOutputMap {
             safetyCheckpointId: null | string;
             restoredFiles: readonly string[];
             removedFiles: readonly string[];
+            failedPaths?: readonly ({
+                path: string;
+                reason: string;
+            })[];
         };
         refused: boolean;
         refusal: null | {
@@ -12593,6 +13357,7 @@ export interface OperatorMethodOutputMap {
     "ci.watches.create": {
         watch: {
             id: string;
+            continuationId?: string;
             repo: string;
             ref?: string;
             prNumber?: number;
@@ -12612,6 +13377,7 @@ export interface OperatorMethodOutputMap {
     "ci.watches.list": {
         watches: readonly ({
             id: string;
+            continuationId?: string;
             repo: string;
             ref?: string;
             prNumber?: number;
@@ -12647,8 +13413,206 @@ export interface OperatorMethodOutputMap {
         fixSessionTriggered: boolean;
         fixSessionId?: string;
         fixSessionError?: string;
-        fixSessionOffered?: boolean;
         retired?: boolean;
+    };
+    // (undocumented)
+    "cloudflare.credentials.verify": {
+        ok: boolean;
+        account?: {
+            id: string;
+            name: string;
+            type?: string;
+        };
+        tokenSource: string;
+    };
+    // (undocumented)
+    "cloudflare.disable": {
+        ok: boolean;
+        steps: readonly ({
+            name: string;
+            status: "ok" | "skipped" | "warning";
+            message?: string;
+            resourceId?: string;
+        })[];
+        remote: "disabled" | "not-disabled";
+    };
+    // (undocumented)
+    "cloudflare.provision": {
+        ok: boolean;
+        dryRun: boolean;
+        steps: readonly ({
+            name: string;
+            status: "ok" | "skipped" | "warning";
+            message?: string;
+            resourceId?: string;
+        })[];
+        account?: {
+            id: string;
+            name: string;
+            type?: string;
+        };
+        worker?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        queues?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        tunnel?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        access?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        dns?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        kv?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        durableObjects?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        r2?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        secretsStore?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        verification?: {
+            ok: boolean;
+            workerHealth: {
+                ok: boolean;
+                status: number;
+                error?: string;
+            };
+            daemonBatchProxy?: {
+                ok: boolean;
+                status: number;
+                error?: string;
+            };
+        };
+        generatedSecrets?: ({} & {
+            readonly [key: string]: unknown;
+        });
+    };
+    // (undocumented)
+    "cloudflare.resources.list": {
+        ok: boolean;
+        tokenSource: string;
+        accounts: readonly ({
+            id: string;
+            name: string;
+            type?: string;
+        })[];
+        selectedAccount?: {
+            id: string;
+            name: string;
+            type?: string;
+        };
+        zones: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        selectedZone?: ({} & {
+            readonly [key: string]: unknown;
+        });
+        workerSubdomain?: string;
+        queues?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        kvNamespaces?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        durableObjectNamespaces?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        r2Buckets?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        secretsStores?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        tunnels?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        accessApplications?: readonly (({} & {
+            readonly [key: string]: unknown;
+        }))[];
+        warnings: readonly string[];
+    };
+    // (undocumented)
+    "cloudflare.status": {
+        enabled: boolean;
+        ready: boolean;
+        configured: ({} & {
+            readonly [key: string]: unknown;
+        });
+        config: ({} & {
+            readonly [key: string]: unknown;
+        });
+        warnings: readonly string[];
+    };
+    // (undocumented)
+    "cloudflare.token.create": {
+        ok: boolean;
+        tokenId?: string;
+        tokenName: string;
+        tokenSource: string;
+        apiTokenRef?: string;
+        generatedToken?: string;
+        accountId: string;
+        zoneId?: string;
+        permissions: readonly (({
+            component: string;
+            scope: string;
+            permission: string;
+            alternatives?: readonly string[];
+            reason: string;
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
+    };
+    // (undocumented)
+    "cloudflare.token.requirements.get": {
+        ok: boolean;
+        components: {
+            workers: boolean;
+            queues: boolean;
+            zeroTrustTunnel: boolean;
+            zeroTrustAccess: boolean;
+            dns: boolean;
+            kv: boolean;
+            durableObjects: boolean;
+            secretsStore: boolean;
+            r2: boolean;
+        };
+        permissions: readonly (({
+            component: string;
+            scope: string;
+            permission: string;
+            alternatives?: readonly string[];
+            reason: string;
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
+        bootstrapToken: {
+            requiredForPlatformCreation: boolean;
+            storeInGoodVibes: boolean;
+            instructions: readonly string[];
+        };
+    };
+    // (undocumented)
+    "cloudflare.worker.verify": {
+        ok: boolean;
+        workerHealth: {
+            ok: boolean;
+            status: number;
+            error?: string;
+        };
+        daemonBatchProxy?: {
+            ok: boolean;
+            status: number;
+            error?: string;
+        };
     };
     // (undocumented)
     "companion.chat.events.stream": {};
@@ -12696,7 +13660,7 @@ export interface OperatorMethodOutputMap {
                 readonly [key: string]: unknown;
             }))[];
             createdAt: number;
-            deliveryState?: "cancelled" | "queued";
+            deliveryState?: "cancelled" | "queued" | "unanswered";
             inReplyTo?: string;
         })[];
     };
@@ -12789,7 +13753,7 @@ export interface OperatorMethodOutputMap {
                 readonly [key: string]: unknown;
             }))[];
             createdAt: number;
-            deliveryState?: "cancelled" | "queued";
+            deliveryState?: "cancelled" | "queued" | "unanswered";
             inReplyTo?: string;
         })[];
     };
@@ -12892,6 +13856,19 @@ export interface OperatorMethodOutputMap {
                 readonly [key: string]: JsonValue;
             }) | boolean | null | number | readonly JsonValue[] | string;
         });
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "config.reset": ({
+        success: boolean;
+        key: string;
+        value?: ({} & {
+            readonly [key: string]: JsonValue;
+        }) | boolean | null | number | readonly JsonValue[] | string;
+        persistedTo?: string;
+        tier?: string;
+        daemonOwned?: boolean;
     } & {
         readonly [key: string]: unknown;
     });
@@ -13280,6 +14257,13 @@ export interface OperatorMethodOutputMap {
                     maxCostUsd?: number;
                 };
                 isolation?: "auto" | "shared" | "worktree";
+                selectedModel?: {
+                    id: string;
+                    provider: string;
+                    registryKey: string;
+                    displayName: string;
+                };
+                taskEvidence?: string;
             };
             contractId: string;
             ownerAgentId: string;
@@ -13326,6 +14310,13 @@ export interface OperatorMethodOutputMap {
                     maxCostUsd?: number;
                 };
                 isolation?: "auto" | "shared" | "worktree";
+                selectedModel?: {
+                    id: string;
+                    provider: string;
+                    registryKey: string;
+                    displayName: string;
+                };
+                taskEvidence?: string;
             };
             contractId: string;
             ownerAgentId: string;
@@ -13465,6 +14456,7 @@ export interface OperatorMethodOutputMap {
                 severity?: "critical" | "major" | "minor";
                 decisionId?: string;
                 severityDecisionId?: string;
+                rationale?: string;
             })[];
         })[];
         groups: readonly ({
@@ -13501,6 +14493,7 @@ export interface OperatorMethodOutputMap {
                     severity?: "critical" | "major" | "minor";
                     decisionId?: string;
                     severityDecisionId?: string;
+                    rationale?: string;
                 })[];
             })[];
             unitIds: readonly string[];
@@ -13641,6 +14634,7 @@ export interface OperatorMethodOutputMap {
                     severity?: "critical" | "major" | "minor";
                     decisionId?: string;
                     severityDecisionId?: string;
+                    rationale?: string;
                 })[];
             })[];
             status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -13881,6 +14875,7 @@ export interface OperatorMethodOutputMap {
                         severity?: "critical" | "major" | "minor";
                         decisionId?: string;
                         severityDecisionId?: string;
+                        rationale?: string;
                     })[];
                 })[];
                 status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -14211,6 +15206,7 @@ export interface OperatorMethodOutputMap {
             question: string;
             unmetCriterionIds: readonly string[];
             decisionIds?: readonly string[];
+            failurePause?: boolean;
             resolvedAt?: number;
             reply?: {
                 text: string;
@@ -14606,6 +15602,13 @@ export interface OperatorMethodOutputMap {
                         maxCostUsd?: number;
                     };
                     isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
                 };
                 contractId: string;
                 ownerAgentId: string;
@@ -14652,6 +15655,13 @@ export interface OperatorMethodOutputMap {
                         maxCostUsd?: number;
                     };
                     isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
                 };
                 contractId: string;
                 ownerAgentId: string;
@@ -14791,6 +15801,7 @@ export interface OperatorMethodOutputMap {
                     severity?: "critical" | "major" | "minor";
                     decisionId?: string;
                     severityDecisionId?: string;
+                    rationale?: string;
                 })[];
             })[];
             groups: readonly ({
@@ -14827,6 +15838,7 @@ export interface OperatorMethodOutputMap {
                         severity?: "critical" | "major" | "minor";
                         decisionId?: string;
                         severityDecisionId?: string;
+                        rationale?: string;
                     })[];
                 })[];
                 unitIds: readonly string[];
@@ -14967,6 +15979,7 @@ export interface OperatorMethodOutputMap {
                         severity?: "critical" | "major" | "minor";
                         decisionId?: string;
                         severityDecisionId?: string;
+                        rationale?: string;
                     })[];
                 })[];
                 status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -15207,6 +16220,7 @@ export interface OperatorMethodOutputMap {
                             severity?: "critical" | "major" | "minor";
                             decisionId?: string;
                             severityDecisionId?: string;
+                            rationale?: string;
                         })[];
                     })[];
                     status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -15537,6 +16551,7 @@ export interface OperatorMethodOutputMap {
                 question: string;
                 unmetCriterionIds: readonly string[];
                 decisionIds?: readonly string[];
+                failurePause?: boolean;
                 resolvedAt?: number;
                 reply?: {
                     text: string;
@@ -15941,6 +16956,13 @@ export interface OperatorMethodOutputMap {
                         maxCostUsd?: number;
                     };
                     isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
                 };
                 contractId: string;
                 ownerAgentId: string;
@@ -15987,6 +17009,13 @@ export interface OperatorMethodOutputMap {
                         maxCostUsd?: number;
                     };
                     isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
                 };
                 contractId: string;
                 ownerAgentId: string;
@@ -16126,6 +17155,7 @@ export interface OperatorMethodOutputMap {
                     severity?: "critical" | "major" | "minor";
                     decisionId?: string;
                     severityDecisionId?: string;
+                    rationale?: string;
                 })[];
             })[];
             groups: readonly ({
@@ -16162,6 +17192,7 @@ export interface OperatorMethodOutputMap {
                         severity?: "critical" | "major" | "minor";
                         decisionId?: string;
                         severityDecisionId?: string;
+                        rationale?: string;
                     })[];
                 })[];
                 unitIds: readonly string[];
@@ -16302,6 +17333,7 @@ export interface OperatorMethodOutputMap {
                         severity?: "critical" | "major" | "minor";
                         decisionId?: string;
                         severityDecisionId?: string;
+                        rationale?: string;
                     })[];
                 })[];
                 status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -16542,6 +17574,7 @@ export interface OperatorMethodOutputMap {
                             severity?: "critical" | "major" | "minor";
                             decisionId?: string;
                             severityDecisionId?: string;
+                            rationale?: string;
                         })[];
                     })[];
                     status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
@@ -16872,6 +17905,7 @@ export interface OperatorMethodOutputMap {
                 question: string;
                 unmetCriterionIds: readonly string[];
                 decisionIds?: readonly string[];
+                failurePause?: boolean;
                 resolvedAt?: number;
                 reply?: {
                     text: string;
@@ -17325,6 +18359,9 @@ export interface OperatorMethodOutputMap {
         version: string;
         buildVersion: string;
         platformVersion: string;
+        cluster?: ({} & {
+            readonly [key: string]: JsonValue;
+        }) | boolean | null | number | readonly JsonValue[] | string;
         receipts?: readonly ({
             id: string;
             text: string;
@@ -17651,6 +18688,10 @@ export interface OperatorMethodOutputMap {
         expiresAt: string;
         authority: string;
         remainingMs?: number;
+        watching: {
+            running: boolean;
+            reason: string;
+        };
     };
     // (undocumented)
     "email.inbound.status": {
@@ -17710,6 +18751,7 @@ export interface OperatorMethodOutputMap {
                 sweptAt: number;
                 trigger: string;
                 summary: string;
+                failures: readonly string[];
             };
         };
         stores: readonly ({
@@ -18321,6 +19363,33 @@ export interface OperatorMethodOutputMap {
                 readonly [key: string]: unknown;
             });
         };
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "homeassistant.conversation.cancel": ({
+        ok: boolean;
+        sessionId?: string;
+        status?: string;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "homeassistant.conversation.health": ({} & {
+        readonly [key: string]: JsonValue;
+    });
+    // (undocumented)
+    "homeassistant.conversation.stream": ({} & {
+        readonly [key: string]: JsonValue;
+    });
+    // (undocumented)
+    "homeassistant.conversation.submit": ({
+        ok: boolean;
+        status: string;
+        messageId?: string;
+        conversationId?: string;
+        sessionId?: string;
+        error?: string;
     } & {
         readonly [key: string]: unknown;
     });
@@ -20338,6 +21407,138 @@ export interface OperatorMethodOutputMap {
         };
     };
     // (undocumented)
+    "inbound.telegram.release": {
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
+        outcome?: string;
+        reason?: string;
+        ref?: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
+        };
+        configurationId?: string;
+        expiresAt?: number;
+        pendingRetentionMs?: number;
+        processing?: string;
+        restart?: string;
+        route?: string;
+        execution?: "not-started";
+        approvalId?: string;
+        source?: string;
+        recovery?: string;
+        record?: {
+            id: string;
+            ref: {
+                sessionId: string;
+                inputId: string;
+                sourceId: string;
+                sourceRevision: string;
+                requestId: string;
+            };
+            origin: {
+                kind: "external-original";
+                accountId: string;
+                accountRevision: string;
+                routeId: string;
+                routeRevision: string;
+            };
+            configurationId: string;
+            ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
+            workspaceRevision: string;
+            approvalId: string;
+            choices: {
+                processingPurpose: "accept-external-message-for-owner-review";
+                sourceRetention: "memory-only-until-review-close-or-deadline";
+                sourceRetentionMs: number;
+                derivedRecord: "external-source-reference-only-v1";
+                derivedRecordRetentionMs: number;
+                execution: "none";
+                ownerMayReadOriginal: true;
+            };
+            acceptedAt: number;
+            sourceExpiresAt: number;
+            recordExpiresAt: number;
+            state: "accepted-for-review" | "cancelled";
+            execution: "not-started";
+        };
+        records?: readonly ({
+            id: string;
+            ref: {
+                sessionId: string;
+                inputId: string;
+                sourceId: string;
+                sourceRevision: string;
+                requestId: string;
+            };
+            origin: {
+                kind: "external-original";
+                accountId: string;
+                accountRevision: string;
+                routeId: string;
+                routeRevision: string;
+            };
+            configurationId: string;
+            ownerRevision: string;
+            owner?: {
+                kind: "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
+            workspaceRevision: string;
+            approvalId: string;
+            choices: {
+                processingPurpose: "accept-external-message-for-owner-review";
+                sourceRetention: "memory-only-until-review-close-or-deadline";
+                sourceRetentionMs: number;
+                derivedRecord: "external-source-reference-only-v1";
+                derivedRecordRetentionMs: number;
+                execution: "none";
+                ownerMayReadOriginal: true;
+            };
+            acceptedAt: number;
+            sourceExpiresAt: number;
+            recordExpiresAt: number;
+            state: "accepted-for-review" | "cancelled";
+            execution: "not-started";
+        })[];
+        pending?: readonly ({
+            ref: {
+                sessionId: string;
+                inputId: string;
+                sourceId: string;
+                sourceRevision: string;
+                requestId: string;
+            };
+            approvalId: string;
+            sourceExpiresAt: number;
+            outcome: string;
+        })[];
+        original?: {
+            text: string;
+            unsupportedSources: readonly ({
+                kind: string;
+                label: string;
+            })[];
+        };
+    };
+    // (undocumented)
     "inbound.telegram.revoke": {
         accountIdentity?: {
             id: string;
@@ -20767,80 +21968,6 @@ export interface OperatorMethodOutputMap {
     } | {
         protocolVersion: 1;
         requestId: string;
-        battery: "webui.status.badge-tone";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            vocabulary: "badge";
-            tone: "bad" | "neutral" | "ok" | "warning";
-        } | {
-            vocabulary: "library-dot";
-            tone: "bad" | "idle" | "info" | "ok" | "warn";
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.status.badge-tone";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
         battery: "webui.palette.command-rank";
         batteryVersion: 1;
         status: "settled";
@@ -20953,76 +22080,6 @@ export interface OperatorMethodOutputMap {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.mail.reply-subject";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.pwa.install-platform";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            platform: "ios-share-menu" | "other";
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.pwa.install-platform";
         batteryVersion: 1;
         status: "held";
         reason: "uncertain";
@@ -22438,6 +23495,11 @@ export interface OperatorMethodOutputMap {
                 issueCount: number;
                 provenance?: "classic";
                 semanticEnrichment?: "attempted" | "not-evaluated";
+                recompileFailed?: number;
+                recompileFailures?: readonly ({
+                    sourceId: string;
+                    error: string;
+                })[];
             } | {
                 refreshed: number;
             } | {
@@ -22552,6 +23614,11 @@ export interface OperatorMethodOutputMap {
                 issueCount: number;
                 provenance?: "classic";
                 semanticEnrichment?: "attempted" | "not-evaluated";
+                recompileFailed?: number;
+                recompileFailures?: readonly ({
+                    sourceId: string;
+                    error: string;
+                })[];
             } | {
                 refreshed: number;
             } | {
@@ -22835,6 +23902,40 @@ export interface OperatorMethodOutputMap {
         } & {
             readonly [key: string]: unknown;
         }))[];
+    } | {
+        items: readonly (({
+            id: string;
+            kind: string;
+            slug: string;
+            title: string;
+            summary?: string;
+            aliases: readonly string[];
+            status: string;
+            confidence: number;
+            sourceId?: string;
+            subject?: string;
+            subjectIds?: readonly string[];
+            targetHints?: readonly (({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            }))[];
+            linkedObjectIds?: readonly string[];
+            metadata: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            createdAt: number;
+            updatedAt: number;
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
+        hasMore: boolean;
+        nextCursor?: string;
+        truncated?: boolean;
+        total?: number;
+        loaded?: number;
     };
     // (undocumented)
     "knowledge.packet": {
@@ -23559,6 +24660,9 @@ export interface OperatorMethodOutputMap {
         }))[];
         hasMore: boolean;
         nextCursor?: string;
+        truncated?: boolean;
+        total?: number;
+        loaded?: number;
     };
     // (undocumented)
     "knowledge.status": ({
@@ -23648,7 +24752,8 @@ export interface OperatorMethodOutputMap {
         })[];
         servers: readonly ({
             name: string;
-            command: string;
+            command: null | string;
+            url: null | string;
             args: readonly string[];
             envKeys: readonly string[];
             role: null | string;
@@ -23685,7 +24790,8 @@ export interface OperatorMethodOutputMap {
             })[];
             servers: readonly ({
                 name: string;
-                command: string;
+                command: null | string;
+                url: null | string;
                 args: readonly string[];
                 envKeys: readonly string[];
                 role: null | string;
@@ -23706,6 +24812,11 @@ export interface OperatorMethodOutputMap {
         servers: readonly ({
             name: string;
             connected: boolean;
+            transport?: "http" | "stdio";
+            protocolVersion?: string;
+            protocolEra?: "legacy" | "modern";
+            phase?: "closed" | "gave-up" | "idle" | "negotiating" | "ready" | "restart-wait" | "starting";
+            lastError?: string;
         })[];
         security: readonly (({} & {
             readonly [key: string]: unknown;
@@ -23739,7 +24850,8 @@ export interface OperatorMethodOutputMap {
             })[];
             servers: readonly ({
                 name: string;
-                command: string;
+                command: null | string;
+                url: null | string;
                 args: readonly string[];
                 envKeys: readonly string[];
                 role: null | string;
@@ -23765,7 +24877,8 @@ export interface OperatorMethodOutputMap {
         })[];
         servers: readonly ({
             name: string;
-            command: string;
+            command: null | string;
+            url: null | string;
             args: readonly string[];
             envKeys: readonly string[];
             env: ({} & {
@@ -23808,7 +24921,8 @@ export interface OperatorMethodOutputMap {
             })[];
             servers: readonly ({
                 name: string;
-                command: string;
+                command: null | string;
+                url: null | string;
                 args: readonly string[];
                 envKeys: readonly string[];
                 role: null | string;
@@ -24974,6 +26088,7 @@ export interface OperatorMethodOutputMap {
             armed: boolean;
             sustainedSec: number;
             rateMbPerSec: number;
+            thresholdMbPerSec?: number;
         };
         thresholds: {
             elevatedPct: number;
@@ -25155,6 +26270,15 @@ export interface OperatorMethodOutputMap {
         defaultCardId: string;
     };
     // (undocumented)
+    "payments.checkout.approve": {
+        approved: boolean;
+        action: string;
+        merchantDomain: string;
+        item: string;
+        amount: string;
+        expiresAt: string;
+    };
+    // (undocumented)
     "payments.checkout.begin": {
         outcome: string;
         purchaseId: null | string;
@@ -25230,6 +26354,10 @@ export interface OperatorMethodOutputMap {
             outcome: null | string;
             totalMinorUnits: null | number;
             currency: null | string;
+        })[];
+        unreadable?: readonly ({
+            purchaseId: string;
+            reason: string;
         })[];
     };
     // (undocumented)
@@ -25312,6 +26440,7 @@ export interface OperatorMethodOutputMap {
             grantedClasses: readonly ("handle-lid-switch" | "idle" | "sleep")[];
             deniedClasses: readonly ("handle-lid-switch" | "idle" | "sleep")[];
             note: null | string;
+            state?: "held" | "held-partial" | "off" | "refused";
         };
     };
     // (undocumented)
@@ -25333,6 +26462,7 @@ export interface OperatorMethodOutputMap {
             grantedClasses: readonly ("handle-lid-switch" | "idle" | "sleep")[];
             deniedClasses: readonly ("handle-lid-switch" | "idle" | "sleep")[];
             note: null | string;
+            state?: "held" | "held-partial" | "off" | "refused";
         };
     };
     // (undocumented)
@@ -25477,6 +26607,11 @@ export interface OperatorMethodOutputMap {
                 surface: string;
                 date: string;
                 said: string;
+                origin?: "autonomous" | "owner-direct";
+                source?: {
+                    goal: string;
+                    criteria: readonly string[];
+                };
             };
         };
         disclosure: string;
@@ -25492,6 +26627,11 @@ export interface OperatorMethodOutputMap {
                 surface: string;
                 date: string;
                 said: string;
+                origin?: "autonomous" | "owner-direct";
+                source?: {
+                    goal: string;
+                    criteria: readonly string[];
+                };
             };
         })[];
         disclosure: string;
@@ -25505,6 +26645,11 @@ export interface OperatorMethodOutputMap {
             surface: string;
             date: string;
             said: string;
+            origin?: "autonomous" | "owner-direct";
+            source?: {
+                goal: string;
+                criteria: readonly string[];
+            };
         };
         superseded: readonly ({
             lineIndex: number;
@@ -25518,6 +26663,11 @@ export interface OperatorMethodOutputMap {
                 surface: string;
                 date: string;
                 said: string;
+                origin?: "autonomous" | "owner-direct";
+                source?: {
+                    goal: string;
+                    criteria: readonly string[];
+                };
             };
         })[];
     };
@@ -25550,6 +26700,11 @@ export interface OperatorMethodOutputMap {
                     surface: string;
                     date: string;
                     said: string;
+                    origin?: "autonomous" | "owner-direct";
+                    source?: {
+                        goal: string;
+                        criteria: readonly string[];
+                    };
                 };
             })[];
             prose: readonly ({
@@ -25560,6 +26715,11 @@ export interface OperatorMethodOutputMap {
                     surface: string;
                     date: string;
                     said: string;
+                    origin?: "autonomous" | "owner-direct";
+                    source?: {
+                        goal: string;
+                        criteria: readonly string[];
+                    };
                 };
             })[];
         })[];
@@ -29108,6 +30268,8 @@ export interface OperatorMethodOutputMap {
         checkpointCount: number;
         checkpointIds: readonly string[];
         from: string;
+        baseUnavailable?: boolean;
+        attributionApproximate?: boolean;
         to: string;
         files: readonly string[];
         nativeRevision?: string;
@@ -29459,6 +30621,7 @@ export interface OperatorMethodOutputMap {
             content: string;
             at?: number;
         })[];
+        historyAsOf?: number;
     };
     // (undocumented)
     "sessions.hosted.create": {
@@ -30369,6 +31532,15 @@ export interface OperatorMethodOutputMap {
         expiresAt: number;
     };
     // (undocumented)
+    "stepup.credentials.list": {
+        credentials: readonly ({
+            credentialId: string;
+            label?: string;
+            createdAt: number;
+            signCount: number;
+        })[];
+    };
+    // (undocumented)
     "stepup.credentials.register": {
         credential: {
             credentialId: string;
@@ -30376,6 +31548,11 @@ export interface OperatorMethodOutputMap {
             createdAt: number;
             signCount: number;
         };
+    };
+    // (undocumented)
+    "stepup.credentials.remove": {
+        credentialId: string;
+        removed: boolean;
     };
     // (undocumented)
     "surfaces.list": {
@@ -30422,6 +31599,7 @@ export interface OperatorMethodOutputMap {
             detail: string;
         };
         publicBaseUrlUpdated: boolean;
+        receiptRecorded?: boolean;
     };
     // (undocumented)
     "tasks.cancel": ({
@@ -30521,13 +31699,31 @@ export interface OperatorMethodOutputMap {
             id: string;
             kind: "acp" | "agent" | "daemon" | "exec" | "integration" | "mcp" | "plugin" | "scheduler";
             title: string;
+            description?: string;
             status: "blocked" | "cancelled" | "completed" | "failed" | "queued" | "running";
             owner: string;
+            cancellable: boolean;
             parentTaskId?: string;
+            childTaskIds: readonly string[];
             queuedAt: number;
             startedAt?: number;
             endedAt?: number;
+            retryPolicy?: {
+                maxAttempts: number;
+                currentAttempt: number;
+                delayMs: number;
+                backoff: "exponential" | "fixed";
+                retryOn: readonly ("network" | "timeout" | "tool_error" | "transient")[];
+            };
+            retryDelayMs?: number;
+            retryAt?: number;
+            exitCode?: number;
             error?: string;
+            result?: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+            correlationId?: string;
+            turnId?: string;
         })[];
     };
     // (undocumented)
@@ -31079,6 +32275,17 @@ export interface OperatorMethodOutputMap {
         lastCheckFailure: null | string;
         pendingVersion: null | string;
         rejectedVersion: null | string;
+        recoveryRequired?: boolean;
+        transactionRecovery?: null | {
+            operation: "rollback" | "update";
+            phase: "admission" | "claim" | "cleanup" | "commit" | "stage";
+            committed: boolean;
+            recoveryRequired: boolean;
+            targets: readonly string[];
+            recoveryPaths: readonly string[];
+            recoveryErrors: readonly string[];
+        };
+        check: "already-in-flight" | "loop-off" | "ran";
     };
     // (undocumented)
     "update.status": {
@@ -31092,6 +32299,16 @@ export interface OperatorMethodOutputMap {
         lastCheckFailure: null | string;
         pendingVersion: null | string;
         rejectedVersion: null | string;
+        recoveryRequired?: boolean;
+        transactionRecovery?: null | {
+            operation: "rollback" | "update";
+            phase: "admission" | "claim" | "cleanup" | "commit" | "stage";
+            committed: boolean;
+            recoveryRequired: boolean;
+            targets: readonly string[];
+            recoveryPaths: readonly string[];
+            recoveryErrors: readonly string[];
+        };
     };
     // (undocumented)
     "voice.local.install": {
@@ -31141,6 +32358,11 @@ export interface OperatorMethodOutputMap {
             skipped: readonly ({
                 key: string;
                 reason: string;
+            })[];
+            superseded?: readonly ({
+                key: string;
+                previousValue: string;
+                value: string;
             })[];
         };
     };
@@ -31750,6 +32972,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
+            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -31879,6 +33102,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
+            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -32008,6 +33232,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
+            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -32137,6 +33362,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
+            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -32909,6 +34135,7 @@ export interface OperatorMethodOutputMap {
         };
         reason: "missing-context" | "unsupported-source";
         recovery: "required";
+        next?: "cancel-and-resubmit";
     } | {
         kind: "refused";
         projectId: string;
@@ -33247,6 +34474,7 @@ export interface OperatorMethodOutputMap {
         };
         reason: "missing-context" | "unsupported-source";
         recovery: "required";
+        next?: "cancel-and-resubmit";
     } | {
         kind: "refused";
         projectId: string;
@@ -33585,6 +34813,7 @@ export interface OperatorMethodOutputMap {
         };
         reason: "missing-context" | "unsupported-source";
         recovery: "required";
+        next?: "cancel-and-resubmit";
     } | {
         kind: "refused";
         projectId: string;
@@ -33923,6 +35152,7 @@ export interface OperatorMethodOutputMap {
         };
         reason: "missing-context" | "unsupported-source";
         recovery: "required";
+        next?: "cancel-and-resubmit";
     } | {
         kind: "refused";
         projectId: string;
@@ -34263,6 +35493,7 @@ export interface OperatorMethodOutputMap {
         };
         reason: "missing-context" | "unsupported-source";
         recovery: "required";
+        next?: "cancel-and-resubmit";
     } | {
         kind: "refused";
         projectId: string;
@@ -34855,8 +36086,7 @@ export interface OperatorRemoteClient {
     getOperation(methodId: string): OperatorMethodContract;
     // (undocumented)
     invoke<TMethodId extends OperatorTypedMethodId>(methodId: TMethodId, ...args: KnownMethodArgs<TMethodId>): Promise<OperatorMethodOutput<TMethodId>>;
-    // (undocumented)
-    invoke<T = unknown>(methodId: string, input?: Record<string, unknown>, options?: OperatorRemoteClientInvokeOptions): Promise<T>;
+    invoke<T = unknown, TMethodId extends string = string>(methodId: TMethodId extends OperatorTypedMethodId ? never : TMethodId, input?: Record<string, unknown>, options?: OperatorRemoteClientInvokeOptions): Promise<T>;
     listOperations(): readonly OperatorMethodContract[];
     // (undocumented)
     readonly localAuth: {
@@ -35141,7 +36371,13 @@ export interface OtelTracer {
 }
 
 // @public
+export const OWNER_REPLY_ACTIONS: readonly ["approved", "amended", "stopped", "asked-again", "refused"];
+
+// @public
 export const OWNER_REPLY_READINGS: readonly ["approve", "reject", "amend", "unclear"];
+
+// @public (undocumented)
+export type OwnerReplyAction = (typeof OWNER_REPLY_ACTIONS)[number];
 
 // @public (undocumented)
 export type OwnerReplyReading = (typeof OWNER_REPLY_READINGS)[number];
@@ -36699,6 +37935,7 @@ export type RuntimeDomainEventType<TDomain extends RuntimeEventTypedDomain> = ke
 export interface RuntimeEventConnectorOptions {
     // (undocumented)
     readonly observer?: TransportObserver | undefined;
+    // @deprecated (undocumented)
     readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined;
     readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
     readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined;
@@ -36839,6 +38076,7 @@ export function sendWebSocketMessage(socket: {
     send(data: string): unknown;
     readonly bufferedAmount?: number;
     getBufferedAmount?(): number;
+    readonly readyState?: number;
 }, text: string, signal?: AbortSignal): Promise<void>;
 
 // @public (undocumented)
@@ -37067,7 +38305,7 @@ export function summaryDependsOnWording(status: number | undefined): boolean;
 // @public
 export const SURFACE_KINDS: readonly ["tui", "web", "slack", "discord", "ntfy", "webhook", "homeassistant", "telegram", "google-chat", "signal", "whatsapp", "telephony", "imessage", "msteams", "bluebubbles", "mattermost", "matrix", "service", "agent", "webui", "companion", "automation"];
 
-// @public (undocumented)
+// @public
 export type SurfaceEvent = {
     type: 'SURFACE_ENABLED';
     surfaceKind: SurfaceKind;
@@ -37156,52 +38394,6 @@ export type TaskEvent =
     taskId: string;
     agentId?: string | undefined;
     reason?: string | undefined;
-}
-/**
-* Granular progress update for a batch job running as a task.
-*
-* Emitted by the batch processor as each item completes. UIs should use this
-* to render progress bars and ETA estimates for long-running batch operations.
-*
-* **Integration note:** Emission sites live in `platform/batch`. Wire by calling
-* `bus.emit('tasks', { type: 'BATCH_JOB_PROGRESS', ... })` at each item-complete
-* checkpoint inside the batch runner. The contract is defined here so platform consumers
-* can subscribe to it without depending on the internal batch module.
-*
-* **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
-* for the guard that ties progress events to their originating operation lifecycle.
-*/
-| {
-    type: 'BATCH_JOB_PROGRESS';
-    operationId: string;
-    phase: string;
-    completed: number;
-    total?: number | undefined;
-    percent?: number | undefined;
-    message?: string | undefined;
-}
-/**
-* Granular progress update for an export operation.
-*
-* Emitted by the export engine as records are serialised. UIs should use this
-* to render progress indicators for long-running export jobs.
-*
-* **Integration note:** Emission sites live in `platform/export`. Wire by calling
-* `bus.emit('tasks', { type: 'EXPORT_PROGRESS', ... })` at each record-write
-* checkpoint inside the export runner. The contract is defined here so platform consumers
-* can subscribe without depending on the internal export module.
-*
-* **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
-* for the guard that ties progress events to their originating operation lifecycle.
-*/
-| {
-    type: 'EXPORT_PROGRESS';
-    operationId: string;
-    phase: string;
-    completed: number;
-    total?: number | undefined;
-    percent?: number | undefined;
-    message?: string | undefined;
 };
 
 // @public
@@ -37492,14 +38684,9 @@ export type TransportEvent =
     reason?: string;
 }
 /**
-* The outbound WebSocket queue has saturated and messages are being dropped.
-*
-* This event is emitted when `MAX_OUTBOUND_QUEUE` entries or `MAX_OUTBOUND_QUEUE_BYTES`
-* total bytes are exceeded, or when a single message exceeds `MAX_OUTBOUND_MESSAGE_BYTES`.
-* Subscribe to this in UI layers to show a "connection lagging" indicator.
-*
-* The `onBackpressure` callback in `RuntimeEventConnectorOptions` fires at the same
-* time and provides identical information for non-event-bus consumers.
+* Declared, not yet emitted: the realtime connector's outbound queue is unbounded
+* (messages are retained in order across reconnects and never dropped), so nothing
+* publishes this event and `onBackpressure` is never called.
 */
 | {
     type: 'TRANSPORT_BACKPRESSURE';
@@ -37785,6 +38972,8 @@ export type TurnEvent =
     turnId: string;
     error: string;
     stopReason: Exclude<TurnStopReason, 'completed' | 'empty_response' | 'cancelled'>;
+    status?: number | undefined;
+    code?: string | undefined;
 }
 /** Turn was cancelled by the user or system. */
 | {
@@ -37892,7 +39081,9 @@ export type WatcherEvent = {
     sourceKind: WatcherSourceKind;
     seenAt: number;
     checkpoint: string;
-} | {
+}
+/** Published after a run whose checkpoint differs from the previous one; a run that sees the same checkpoint publishes only WATCHER_HEARTBEAT. */
+| {
     type: 'WATCHER_CHECKPOINT_ADVANCED';
     watcherId: string;
     sourceKind: WatcherSourceKind;

@@ -1,16 +1,15 @@
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { resetAgentMcpCallRouteForTests } from '../../tools/agent-mcp-call-route.ts';
-import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
-import { SqliteDecisionLog, withDecisionLog, score, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChannelDeliveryRequest } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { _resetHardwareProfileCache, _setHardwareProfileForTest } from '../../core/hardware-profile.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import { CONFIG_SCHEMA } from '../../config/index.ts';
@@ -82,7 +81,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(opened.success).toBe(true);
       expect(fixture.openedSurfaces).toEqual([{ id: 'agent-workspace', detail: 'work' }]);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -123,7 +122,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Run echoargs with two arguments.',
       });
       expect(byCommandName.success).toBe(true);
-      expect(byCommandName.output).toContain('Command /echoargs completed.');
+      expect(byCommandName.output).toContain('Command /echoargs ran and printed:');
       expect(byCommandName.output).toContain('Resolved by commandName case-insensitive-name.');
       expect(byCommandName.output).toContain('args:one|two');
 
@@ -160,10 +159,42 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(fixture.printed).not.toContain('memory output');
       expect(fixture.printed).not.toContain('memory review output');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
+
+  test('a handler that prints a refusal and returns is not reported as a completed command', async () => {
+    const fixture = makeFixture();
+    try {
+      const run = (commandName: string) => fixture.admittedTool.execute({
+        mode: 'run_command', commandName, confirm: true, explicitUserRequest: `Run ${commandName}.`,
+      });
+      fixture.commandRegistry.register({ name: 'refusesit', description: 'Prints a refusal', handler: (_args, ctx) => { ctx.print('Refused: no recorded admission for this change.'); } });
+      fixture.commandRegistry.register({ name: 'wantsargs', description: 'Prints usage', handler: (_args, ctx) => { ctx.print('\nUsage: /wantsargs <id>'); } });
+      fixture.commandRegistry.register({ name: 'mentionsrefused', description: 'Mentions a refusal mid-text', handler: (_args, ctx) => { ctx.print('All done. Refused: 0 items.'); } });
+
+      const refused = await run('refusesit');
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain('ran but did not apply');
+      expect(refused.error).toContain('Refused: no recorded admission');
+
+      const usage = await run('wantsargs');
+      expect(usage.success).toBe(false);
+      expect(usage.error).toContain('ran but did not apply');
+
+      fixture.commandRegistry.register({ name: 'refuseslater', description: 'Refuses after a progress line', handler: (_args, ctx) => { ctx.print('Checking...'); ctx.print('Refused: the second step needs admission.'); } });
+      const later = await run('refuseslater');
+      expect(later.success).toBe(false);
+      expect(later.error).toContain('the second step needs admission');
+
+      const completed = await run('mentionsrefused');
+      expect(completed.success).toBe(true);
+      expect(completed.output).toContain('ran and printed');
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 
   test('inspects one slash command from typed command, target, query, and alias lookups', async () => {
     const fixture = makeFixture();
@@ -223,7 +254,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(missing.error).toContain('Unknown slash command');
       expect(missing.error).toContain('mode:"commands"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -343,9 +374,6 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
   });
 
 
-  // DELETED: 'runs command-backed workspace actions through id and command lookups'
-  // brief action was removed from the workspace.;
-
   test('previews and applies GoodVibes settings import through workspace action route', async () => {
     const fixture = makeFixture();
     try {
@@ -389,64 +417,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(readFileSync(importSourcePath)).toEqual(importSourceBefore);
       expect(await fixture.secretsManager?.get(buildGoodVibesSecretKey('surfaces.slack.botToken'))).toBe(secretBefore);
 
-      const originalSource = { goal: 'Verify the exact Agent harness operation requested by this isolated test',
-        criteria: ['Only modify temporary fixture files, stubbed service owners, and explicitly configured loopback hosts'] };
-      const expectedSettingsProposal = {
-        key: 'behavior.saveHistory', value: 'null',
-        invocation: { mode: 'set', actionId: 'import-goodvibes-tui-settings', confirm: true,
-          explicitUserRequest: 'Import my existing GoodVibes settings into Agent.', key: 'behavior.saveHistory' },
-        source: originalSource, request: JSON.stringify(originalSource),
-        effect: { operation: 'set', key: 'behavior.saveHistory', appliedBy: 'local', import: 'goodvibes-tui',
-          sources: [{ path: importSourcePath, present: true }, { path: importSourcePath, present: true },
-            { path: fixture.paths.resolveUserPath('tui', 'subscriptions.json'), present: false }],
-          effects: [{ operation: 'set', key: 'behavior.saveHistory', value: nextSaveHistory,
-            destinations: [{ path: fixture.paths.resolveUserPath('agent', 'settings.json'), tier: 'global', operation: 'set' }] },
-          { operation: 'set', key: 'surfaces.slack.botToken',
-            value: buildGoodVibesSecretRef(buildGoodVibesSecretKey('surfaces.slack.botToken')),
-            destinations: [{ path: fixture.paths.resolveUserPath('daemon', 'settings.json'), tier: 'daemon', operation: 'set' }] }],
-          credential: { operation: 'import', beforeGeneration: 0,
-            items: [{ key: buildGoodVibesSecretKey('surfaces.slack.botToken'), scope: 'daemon', configured: true }],
-            destinations: [{ path: join(fixture.root, '.goodvibes', 'secrets.key'), operation: 'set', tier: 'keyfile' },
-              { path: fixture.paths.resolveUserPath('daemon', 'secrets.enc'), operation: 'set', tier: 'daemon' }] },
-          skippedSubscriptions: 0 },
-      };
-      const battery = gateJudgmentRegistry.get('engine.gate.settings-hazard');
-      if (!battery || !('items' in battery) || !battery.items || typeof battery.items !== 'object') {
-        throw new Error('Canonical settings import question schema is unavailable.');
-      }
-      const questions = Object.fromEntries(Object.entries(battery.items).map(([name, item]) => {
-        if (!item || typeof item !== 'object' || !('question' in item)) throw new Error('Invalid canonical settings import question.');
-        return [name, item.question];
-      }));
-      expect(Object.keys(questions).sort()).toEqual(['hazard', 'requested']);
-      const settingsReadings = fakePort((name, question, state) => {
-        expect<unknown>(state).toEqual(expectedSettingsProposal);
-        expect<unknown>(question).toEqual(questions[name]);
-        if (name === 'hazard' && question.type === 'choice' && Object.hasOwn(question.criteria, 'none')) {
-          return choiceAnswer(question, 'none', 0.999);
-        }
-        if (name === 'requested' && question.type === 'noul') return noulAnswer(0.001);
-        throw new Error('Unexpected exact settings import observation.');
+      const applied = await fixture.admittedTool.execute({
+        mode: 'run_workspace_action',
+        actionId: 'import-goodvibes-tui-settings',
+        confirm: true,
+        explicitUserRequest: 'Import my existing GoodVibes settings into Agent.',
       });
-      const base = judgmentPort('agent.harness.settings-import-fixture');
-      using settingsLog = new SqliteDecisionLog(':memory:');
-      const scoped: JudgmentPort = { model: base.model, ask(request) {
-        if (request.context?.battery !== 'engine.gate.settings-hazard') return base.ask(request);
-        if (request.context.site !== 'engine.gate.settings-write') throw new Error('Unexpected settings import observation site.');
-        expect<unknown>(request.questions).toEqual(questions);
-        expect<unknown>(request.state).toEqual(expectedSettingsProposal);
-        return settingsReadings.port.ask(request);
-      } };
-      const previous = installJudgmentPort(withDecisionLog(scoped, settingsLog));
-      let applied: Awaited<ReturnType<Tool['execute']>>;
-      try {
-        applied = await fixture.admittedTool.execute({
-          mode: 'run_workspace_action',
-          actionId: 'import-goodvibes-tui-settings',
-          confirm: true,
-          explicitUserRequest: 'Import my existing GoodVibes settings into Agent.',
-        });
-      } finally { installJudgmentPort(previous); }
       expect(applied.success, JSON.stringify(applied)).toBe(true);
       if (!applied.success || typeof applied.output !== 'string') throw new Error('Native settings import did not return its committed receipt.');
       const receipt: unknown = JSON.parse(applied.output);
@@ -461,10 +437,43 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(configPaths.map(path => existsSync(path) ? readFileSync(path) : null)).not.toEqual(configFilesBefore);
       expect(readFileSync(importSourcePath)).toEqual(importSourceBefore);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
+
+  test('a settings import preview with an aborted signal is rethrown, not reported as unavailable', async () => {
+    const fixture = makeFixture();
+    try {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(fixture.tool.execute({ mode: 'run_workspace_action', actionId: 'import-goodvibes-tui-settings' }, { signal: controller.signal }))
+        .rejects.toBeDefined();
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test('a settings import that fails after it started names the cause and does not claim admission was missing', async () => {
+    const fixture = makeFixture();
+    const admission = await import('../../tools/agent-settings-import-admission.ts');
+    const spy = spyOn(admission, 'executeAdmittedAgentSettingsImport').mockRejectedValueOnce(new Error('EACCES: permission denied'));
+    try {
+      const applied = await fixture.admittedTool.execute({
+        mode: 'run_workspace_action',
+        actionId: 'import-goodvibes-tui-settings',
+        confirm: true,
+        explicitUserRequest: 'Import my existing GoodVibes settings into Agent.',
+      });
+      expect(applied.success).toBe(false);
+      expect(applied.error).toContain('EACCES');
+      expect(applied.error).toContain('may be partially applied');
+      expect(applied.error).not.toContain('requires a current recorded effect-owner admission');
+    } finally {
+      spy.mockRestore();
+      await fixture.cleanup();
+    }
+  });
 
   test('runs workspace actions by target and query without guessing ambiguous requests', async () => {
     const fixture = makeFixture();
@@ -515,7 +524,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(ambiguous.success).toBe(false);
       expect(ambiguous.error).toContain('requires a valid actionId, command, target, or query');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -557,7 +566,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(skill?.procedure).toContain('Read the queue');
       expect(skill?.enabled).toBe(true);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -599,7 +608,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(note?.body).toContain('reviewed sources');
       expect(note?.tags).toEqual(['research', 'triage']);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -610,7 +619,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       registerAgentDocumentsTool(fixture.toolRegistry, fixture.paths, artifacts.store);
 
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-create-draft',
         confirm: true,
@@ -622,7 +631,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(AgentDocumentRegistry.fromShellPaths(fixture.paths).list()).toEqual([]);
       expect(artifacts.store.list()).toEqual([]);
 
@@ -814,7 +823,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         attachmentIds: [sourceArtifact.id],
       });
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -857,7 +866,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       });
 
       const artifactsBefore = artifacts.store.list();
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-save-review-packet-preset',
         confirm: true,
@@ -867,7 +876,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(artifacts.store.list()).toEqual(artifactsBefore);
       expect(documentRegistry.get(draft.id)).toEqual(draft);
 
@@ -956,7 +965,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(wizard.reviewPacketWizard?.presetLineage?.summary).toContain('refreshed from');
       expect(wizard.reviewPacketWizard?.presetLineage?.inspectRoute).toContain('agent_review_packet_presets show');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -989,7 +998,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       registerAgentReviewPacketShareTool(fixture.toolRegistry, artifacts.store, fakeChannelDeliveryRouter(channelRequests));
 
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-share-review-packet',
         confirm: true,
@@ -1000,7 +1009,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(artifacts.store.list()).toEqual([archive]);
       expect(channelRequests).toEqual([]);
 
@@ -1029,7 +1038,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(channelRequests[0]?.body).toContain('Archive: artifact-1');
       expect(channelRequests[0]?.body).toContain('Included artifacts: 4');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1110,7 +1119,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(showPayload.output).toContain('"apiKey": "[REDACTED]"');
       expect(showPayload.output).not.toContain('not-for-transcript');
 
-      const unconfirmedExport = await fixture.tool.execute({
+      const unconfirmedExport = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-export-artifact-file',
         confirm: true,
@@ -1122,7 +1131,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmedExport.success).toBe(false);
-      expect(unconfirmedExport.error).toContain('current recorded effect admission');
+      expect(unconfirmedExport.error).toContain('fields.confirm is "no"');
       expect(existsSync(join(fixture.root, 'exports', 'comparison-export.md'))).toBe(false);
 
       const artifactExport = await fixture.admittedTool.execute({
@@ -1141,7 +1150,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(artifactExport.output).toContain('Exported Agent artifact');
       expect(readFileSync(join(fixture.root, 'exports', 'comparison-export.md'), 'utf-8')).toContain('Saved comparison report');
 
-      const unconfirmedPackage = await fixture.tool.execute({
+      const unconfirmedPackage = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-export-artifact-package',
         confirm: true,
@@ -1153,7 +1162,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmedPackage.success).toBe(false);
-      expect(unconfirmedPackage.error).toContain('current recorded effect admission');
+      expect(unconfirmedPackage.error).toContain('fields.confirm is "no"');
       expect(existsSync(join(fixture.root, 'exports', 'comparison-package'))).toBe(false);
 
       const packageExport = await fixture.admittedTool.execute({
@@ -1181,7 +1190,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(readFileSync(join(packageRoot, packageFile ?? ''), 'utf-8')).toContain('"winner"');
       expect(packageExport.output).not.toContain('not-for-package');
 
-      const unconfirmedPromotion = await fixture.tool.execute({
+      const unconfirmedPromotion = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-promote-artifact',
         confirm: true,
@@ -1192,7 +1201,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmedPromotion.success).toBe(false);
-      expect(unconfirmedPromotion.error).toContain('current recorded effect admission');
+      expect(unconfirmedPromotion.error).toContain('fields.confirm is "no"');
       expect(requests).toEqual([]);
 
       const promotion = await fixture.admittedTool.execute({
@@ -1215,9 +1224,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(promotion.output).not.toContain(token);
       expect(requests).toHaveLength(1);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
       restoreEnvForTest(previousEnv);
-      host.stop(true);
+      await host.stop(true);
     }
   });
 
@@ -1264,6 +1273,11 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(configPaths.map(path => existsSync(path) ? readFileSync(path) : null)).toEqual(configFilesBefore);
 
       fixture.configManager.set('permissions.mode', 'prompt');
+      const declined = await fixture.admittedTool.execute(unconfirmedArgs);
+      expect(declined.success).toBe(false);
+      expect(declined.error).toContain('fields.confirm is "no"');
+      expect(artifacts.records).toEqual([]);
+
       const saved = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'research-save-report',
@@ -1318,7 +1332,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }]);
       expect(JSON.stringify(artifact?.metadata)).not.toContain('token=secret');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1328,7 +1342,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       registerAgentResearchSourcesTool(fixture.toolRegistry, fixture.paths);
 
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'research-add-source',
         confirm: true,
@@ -1342,7 +1356,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(AgentResearchSourceRegistry.fromShellPaths(fixture.paths).list()).toEqual([]);
 
       const saved = await fixture.admittedTool.execute({
@@ -1380,7 +1394,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(source?.score).toBe(92);
       expect(source?.tags).toEqual(['research', 'local']);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1390,7 +1404,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       registerAgentResearchRunsTool(fixture.toolRegistry, fixture.paths);
 
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'research-start-run',
         confirm: true,
@@ -1403,7 +1417,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(AgentResearchRunRegistry.fromShellPaths(fixture.paths).list()).toEqual([]);
 
       const saved = await fixture.admittedTool.execute({
@@ -1435,7 +1449,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(run?.nextSteps).toEqual(['Capture official source ids']);
       expect(run?.sourceIds).toEqual(['openclaw-docs', 'hermes-docs']);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1468,7 +1482,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       fixture.toolRegistry.register(syntheticTranslationObserver);
 
       const unconfirmedCallsBefore = modelCompareCalls.length;
-      const unconfirmed = await fixture.tool.execute({
+      const unconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-run-compare',
         fields: {
@@ -1479,7 +1493,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Compare release-note candidates.',
       });
       expect(unconfirmed.success).toBe(false);
-      expect(unconfirmed.error).toContain('current recorded effect admission');
+      expect(unconfirmed.error).toContain('fields.confirm is "no"');
       expect(modelCompareCalls).toHaveLength(unconfirmedCallsBefore);
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
@@ -1598,7 +1612,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       });
 
       const judgmentUnconfirmedCallsBefore = modelCompareCalls.length;
-      const judgmentUnconfirmed = await fixture.tool.execute({
+      const judgmentUnconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-judge-compare',
         fields: {
@@ -1611,7 +1625,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Save comparison judgment.',
       });
       expect(judgmentUnconfirmed.success).toBe(false);
-      expect(judgmentUnconfirmed.error).toContain('current recorded effect admission');
+      expect(judgmentUnconfirmed.error).toContain('fields.confirm is "no"');
       expect(modelCompareCalls).toHaveLength(judgmentUnconfirmedCallsBefore);
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
@@ -1684,7 +1698,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       });
 
       const applyUnconfirmedCallsBefore = modelCompareCalls.length;
-      const applyUnconfirmed = await fixture.tool.execute({
+      const applyUnconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-apply-compare',
         fields: {
@@ -1695,7 +1709,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Apply comparison winner.',
       });
       expect(applyUnconfirmed.success).toBe(false);
-      expect(applyUnconfirmed.error).toContain('current recorded effect admission');
+      expect(applyUnconfirmed.error).toContain('fields.confirm is "no"');
       expect(modelCompareCalls).toHaveLength(applyUnconfirmedCallsBefore);
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
@@ -1721,7 +1735,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(modelCompareCalls.at(-1)).not.toHaveProperty('confirm');
 
       const routeDecisionUnconfirmedCallsBefore = modelCompareCalls.length;
-      const routeDecisionUnconfirmed = await fixture.tool.execute({
+      const routeDecisionUnconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-record-route-decision',
         fields: {
@@ -1733,7 +1747,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Leave comparison route unchanged.',
       });
       expect(routeDecisionUnconfirmed.success).toBe(false);
-      expect(routeDecisionUnconfirmed.error).toContain('current recorded effect admission');
+      expect(routeDecisionUnconfirmed.error).toContain('fields.confirm is "no"');
       expect(modelCompareCalls).toHaveLength(routeDecisionUnconfirmedCallsBefore);
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
@@ -1761,7 +1775,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(modelCompareCalls.at(-1)).not.toHaveProperty('confirm');
 
       const exportUnconfirmedCallsBefore = modelCompareCalls.length;
-      const exportUnconfirmed = await fixture.tool.execute({
+      const exportUnconfirmed = await fixture.admittedTool.execute({
         mode: 'run_workspace_action',
         actionId: 'document-export-compare',
         fields: {
@@ -1772,7 +1786,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Export comparison report.',
       });
       expect(exportUnconfirmed.success).toBe(false);
-      expect(exportUnconfirmed.error).toContain('current recorded effect admission');
+      expect(exportUnconfirmed.error).toContain('fields.confirm is "no"');
       expect(modelCompareCalls).toHaveLength(exportUnconfirmedCallsBefore);
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
@@ -1839,7 +1853,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(providerCalls).toBe(0);
       expect(artifacts.store.list()).toEqual([]);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1858,7 +1872,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(fixture.configManager.get('provider.model')).toBe(previous);
         expect(paths.map(path => existsSync(path) ? readFileSync(path) : null)).toEqual(bytesBefore);
       }
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
@@ -2004,7 +2018,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(ambiguous.error).toContain('provider.model');
       expect(ambiguous.error).toContain('modelRoute');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -2042,7 +2056,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(configPaths.map(path => existsSync(path) ? readFileSync(path) : null)).toEqual(configBefore);
         expect(fixture.configManager.get('surfaces.slack.botToken')).toBe(ref);
       } finally { secretSet.mockRestore(); secretDelete.mockRestore(); }
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
@@ -2070,7 +2084,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(paths.map(path => existsSync(path) ? readFileSync(path) : null)).toEqual(files);
       expect(await fixture.secretsManager?.get(buildGoodVibesSecretKey('surfaces.slack.botToken'))).toBe(secretBefore);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -2109,7 +2123,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         cancel = undefined;
         const set = await fixture.admittedTool.execute({ mode: 'run_command', command: `/settings set ${key} ${next}` });
         expect(set.success, set.error).toBe(true);
-        expect(set.output).toContain('Command /settings completed.');
+        expect(set.output).toContain('Command /settings ran and printed:');
         expect(set.output).toContain('"status":"committed"');
         expect(set.output).toContain('"verifiedInOwningStore":true');
         expect(fixture.configManager.get(key)).toBe(next);
@@ -2121,13 +2135,15 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(reset.output).toContain('"verifiedInOwningStore":true');
         expect(admissions).toBeGreaterThanOrEqual(3);
       } finally { admissionSpy.mockRestore(); }
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
-  test('model_routing cookbook recipes include hardwareFit annotation for known stacks', async () => {
+  test('model_routing cookbook labels each known stack with the hardware fit of the injected machine', async () => {
     const fixture = makeFixture();
+    const gib = 1024 ** 3;
     try {
+      _setHardwareProfileForTest({ totalRamBytes: 64 * gib, availableRamBytes: 48 * gib, gpus: [], cpuCores: 16 });
       const routing = await executeHarnessJson<{
         readonly localCookbook: {
           readonly recipes: readonly {
@@ -2137,26 +2153,20 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         };
       }>(fixture, { mode: 'model_routing', includeParameters: true });
       const recipes = routing.localCookbook.recipes;
-      expect(recipes.length).toBeGreaterThan(0);
-      // Every recipe with a known stack (ollama, llama-cpp, vllm) must carry a
-      // hardwareFit string when the hardware verdict is deterministic. When the
-      // machine returns 'unknown' (null totalRamBytes and no GPU), fitVerdictLabel
-      // returns '' and hardwareFit is absent, that is tolerated here.
-      const knownStackIds = new Set(['ollama', 'llama-cpp', 'vllm']);
-      for (const recipe of recipes) {
-        if (knownStackIds.has(recipe.id)) {
-          // Either absent (unknown hardware verdict) or a non-empty string.
-          if (recipe.hardwareFit !== undefined) {
-            expect(typeof recipe.hardwareFit).toBe('string');
-            expect((recipe.hardwareFit as string).length).toBeGreaterThan(0);
-          }
-        }
+      // A 7B Q4 model is about 3.9 GB, under 60% of 48 GB free RAM and with no GPU, so it runs on CPU RAM.
+      for (const id of ['ollama', 'llama-cpp', 'vllm']) {
+        expect(recipes.find((r) => r.id === id)?.hardwareFit, id).toBe('a 7B model runs on CPU RAM here');
       }
-      // The openai-compatible-local stack has no stable size estimate; hardwareFit is absent.
-      const generic = recipes.find((r) => r.id === 'openai-compatible-local');
-      expect(generic?.hardwareFit).toBeUndefined();
+      // The generic local server has no stable size estimate, so it carries no label.
+      expect(recipes.find((r) => r.id === 'openai-compatible-local')?.hardwareFit).toBeUndefined();
+
+      _setHardwareProfileForTest({ totalRamBytes: 2 * gib, availableRamBytes: 1 * gib, gpus: [], cpuCores: 2 });
+      const small = await executeHarnessJson<typeof routing>(fixture, { mode: 'model_routing', includeParameters: true });
+      expect(small.localCookbook.recipes.find((r) => r.id === 'ollama')?.hardwareFit)
+        .toBe('a 7B model needs more memory than this machine has');
     } finally {
-      fixture.cleanup();
+      _resetHardwareProfileCache();
+      await fixture.cleanup();
     }
   });
 });

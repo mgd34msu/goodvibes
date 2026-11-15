@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,12 +10,20 @@ import {
   unreadableSettingsFileNotice,
 } from '../platform/src/platform/config/settings-ingestion.ts';
 
+const runsAsRoot = process.getuid?.() === 0; // chmod does not deny uid 0, so the denial cases cannot run there
+
+const tempDirs: string[] = [];
+afterEach(() => { for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 function tempDir(label: string): string {
-  return join(tmpdir(), `gv-${label}-${randomUUID()}`);
+  const dir = join(tmpdir(), `gv-${label}-${randomUUID()}`);
+  tempDirs.push(dir);
+  return dir;
 }
 
 describe('ConfigManager persistence', () => {
   test('an unreadable existing file is never replaced by a partial settings update', () => {
+    if (runsAsRoot) return;
     const configDir = tempDir('unreadable-config');
     mkdirSync(configDir, { recursive: true });
     const file = join(configDir, 'settings.json');
@@ -65,6 +73,7 @@ describe('ConfigManager persistence', () => {
   });
 
   test('rolls back in-memory config when persistence fails', () => {
+    if (runsAsRoot) return;
     const configDir = tempDir('readonly-config');
     mkdirSync(configDir, { recursive: true });
     const manager = new ConfigManager({ configDir });

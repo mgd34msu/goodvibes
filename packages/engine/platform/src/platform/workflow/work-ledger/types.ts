@@ -161,7 +161,7 @@ export const workLedgerCommandSchema = discriminatedUnion('type', [
     // display text must not consume the caller's accepted source-text budget.
     const input = { requestId: command.requestId, inputId: command.source.inputId, expectedRevision: command.expectedRevision, goal: command.goal, criteria: command.criteria };
     if (new TextEncoder().encode(JSON.stringify(input)).byteLength > NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES) {
-      context.addIssue({ code: 'custom', message: 'Native submission input exceeds 256 KiB' });
+      context.addIssue({ code: 'custom', message: 'Native submission input exceeds the request byte limit' });
     }
   }
 });
@@ -313,7 +313,11 @@ export interface WorkLedgerTransactionContext {
 export interface WorkLedgerStorage {
   read(): Promise<unknown>;
   transaction<T>(decide: (current: unknown, context?: WorkLedgerTransactionContext) => WorkLedgerDecision<T>): Promise<T>;
-  subscribe(listener: (state: WorkLedgerState) => void): () => void;
+  /**
+   * onUnavailable is called with the reason when the adapter cannot read the ledger to
+   * observe changes (once per distinct failure; listener keeps working when reads recover).
+   */
+  subscribe(listener: (state: WorkLedgerState) => void, onUnavailable?: (reason: string) => void): () => void;
 }
 
 export interface WorkLedgerClock {
@@ -338,7 +342,11 @@ export interface WorkLedgerService {
   /** Exact actor-scoped durable import replay, without evaluating or rereading sources. */
   lookupLegacyImport(command: unknown, actor: WorkLedgerActor): Promise<WorkLedgerResult | null>;
   /** Delta notification; readSnapshot is the authoritative initial view. */
-  subscribe(actor: WorkLedgerActor, listener: (snapshot: WorkLedgerSnapshot) => void): () => void;
+  /**
+   * onUnavailable reports that the ledger cannot be read to observe changes, so the listener
+   * is blind until it is called with no further notice; snapshots resume when reads recover.
+   */
+  subscribe(actor: WorkLedgerActor, listener: (snapshot: WorkLedgerSnapshot) => void, onUnavailable?: (reason: string) => void): () => void;
   execute(command: unknown, trustedHostActor: WorkLedgerActor, options?: { readonly signal?: AbortSignal | undefined; readonly isAuthorized?: (() => boolean) | undefined;
     /** Trusted composition only. Synchronous final guard for a new import, inside the native transaction. */
     readonly assertImportAdmission?: (() => void) | undefined }): Promise<WorkLedgerResult>;

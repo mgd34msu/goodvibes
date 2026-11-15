@@ -293,6 +293,12 @@ export function personalOpsEntry(value: unknown): EntryType {
   return typeof entry === 'boolean' || typeof entry === 'number' ? { value: entry } : entry;
 }
 
+/** Frozen declarations are proven unchanged once instead of at every redaction boundary. */
+function freezeDeclarations<T extends readonly { readonly path: readonly string[] }[]>(declarations: T): T {
+  for (const declaration of declarations) { Object.freeze(declaration.path); Object.freeze(declaration); }
+  return Object.freeze(declarations);
+}
+
 /** Native producer facts remain local until the complete DTO is protected. */
 export async function protectPersonalOpsData(value: unknown, options: CatalogRankingOptions = {}, schema?: PersonalOpsNativeSchema): Promise<unknown> {
   return protectPersonalOpsSource(value, options, true, schema);
@@ -309,14 +315,16 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
   const source = capturePersonalOpsSnapshot(value), captured = source.captured;
   const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const assertSource = () => {
+  const assertOptions = () => {
     optionsCurrent();
     if (options.signal !== signal || options.assertCurrent !== callerCurrent || options.retainCurrent !== retainCurrent) throw new ToolInputProjectionError('held');
     signal?.throwIfAborted();
-    source.assertCurrent(value);
   };
+  const assertSource = () => { assertOptions(); source.assertCurrent(value); };
+  // The caller is the only foreign code in a boundary, so the producer data is
+  // compared once, after it ran; the caller is only ever called with live options.
   const assertCurrent = () => {
-    assertSource();
+    assertOptions();
     const result: unknown = callerCurrent?.();
     if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
     assertSource();
@@ -326,7 +334,7 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
   // producer guard above, but avoid retaining its private copy as mutable data
   // at every redaction boundary.
   const result = await redactStructuredDataAsync(captureOwnedJson(captured), { signal: options.signal, assertCurrent,
-    declaredFields: nativeFacts ? personalOpsNativeFields(captured, schema) : personalOpsResultFields(captured),
+    declaredFields: freezeDeclarations(nativeFacts ? personalOpsNativeFields(captured, schema) : personalOpsResultFields(captured)),
   });
   const preserveFacts = (original: unknown, protectedValue: unknown): void => {
     if (typeof original === 'boolean' || typeof original === 'number' || original === null) {

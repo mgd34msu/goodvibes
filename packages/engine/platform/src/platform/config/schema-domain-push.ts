@@ -55,7 +55,7 @@ export const pushConfigSettings: ConfigSettingDefinition[] = [
     default: '',
     validate: (v) => typeof v === 'string' && (v.trim().length === 0 || isValidVapidSubject(v.trim())),
     validationHint: `empty, or ${VAPID_SUBJECT_HINT}`,
-    description: 'Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID "sub" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem.',
+    description: 'Who a push service contacts when it has a problem delivering your notifications. Every push the daemon sends is signed with this address in it (the VAPID "sub" claim), and it is the only way Apple, Google, or Mozilla can reach you about, say, a malformed payload or a rate limit. Set it to a mailto: address you read, or an https: page with contact details on it. Left empty it falls back to mailto:goodvibes-push@goodvibes.invalid, which is well-formed and accepted but reaches nobody, push still works, you just never hear about a problem. A change takes effect after the daemon restarts.',
   },
   {
     key: 'push.subscriptions.warnAbovePerPrincipal',
@@ -76,6 +76,6 @@ export const pushConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 60,
     ...intRange(1, 1440),
-    description: 'How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss.',
+    description: 'How often housekeeping re-reads the stored push subscriptions while the daemon is up, looking for records that are provably dead, unreadable key material, a torn record, or an endpoint past the refusal threshold. A sweep also runs at every start; this interval is what keeps a daemon that stays up for weeks from going that long without one. Each sweep writes what it removed and the evidence, so a removal is never indistinguishable from data loss. A change to the interval takes effect after the daemon restarts.',
   },
 ];

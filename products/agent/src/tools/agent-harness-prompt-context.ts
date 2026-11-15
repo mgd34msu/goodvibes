@@ -155,6 +155,18 @@ function promptModelInfo(context: CommandContext): PromptModelInfo {
   return { model, label: modelLabel(model), contextWindow };
 }
 
+/**
+ * Where a turn's prompt reads memory from. With the memory spine wired, that is
+ * its recall snapshot, the same records an attached turn carries; otherwise the
+ * local registry. Naming the source keeps the segment from describing a copy
+ * the turn does not use.
+ */
+function promptMemorySource(context: CommandContext): { readonly memory: PromptMemoryApi | undefined; readonly fromSpine: boolean } {
+  const spine = context.clients?.memorySpine;
+  if (spine && typeof spine.recallSnapshot === 'function') return { memory: { getAll: () => spine.recallSnapshot().records }, fromSpine: true };
+  return { memory: promptMemoryApi(context.clients?.agentKnowledgeApi?.memory), fromSpine: false };
+}
+
 function promptMemoryApi(value: unknown): PromptMemoryApi | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as { readonly getAll?: unknown };
@@ -196,11 +208,14 @@ function formatMemoryLine(record: MemoryRecord): string {
   return `- [${record.scope}/${record.cls} ${record.confidence}%${tags}${provenance}] ${record.summary}`;
 }
 
+// The turn prompt carries at most this many memory records; the segment, its suppressed reasons and the text agree on it.
+const PROMPT_MEMORY_LIMIT = 10;
+
 function promptMemoryRecords(memory: PromptMemoryApi | undefined): readonly MemoryRecord[] {
   if (!memory) return [];
   // Bound to one arg, see prompt-context-receipts.ts for why a bare
   // `.filter(isPromptActiveMemory)` leaks the array index in as `now`.
-  return memory.getAll().filter((record) => isPromptActiveMemory(record)).sort(memorySort).slice(0, 10);
+  return memory.getAll().filter((record) => isPromptActiveMemory(record)).sort(memorySort).slice(0, PROMPT_MEMORY_LIMIT);
 }
 
 function buildMemoryPromptFromRecords(records: readonly MemoryRecord[]): string {
@@ -211,7 +226,7 @@ function buildMemoryPromptFromRecords(records: readonly MemoryRecord[]): string 
   ].join('\n');
 }
 
-function memorySegment(memory: PromptMemoryApi | undefined, includeParameters: boolean): PromptContextSegment {
+function memorySegment(memory: PromptMemoryApi | undefined, includeParameters: boolean, fromSpine = false): PromptContextSegment {
   if (!memory) {
     return segment({
       id: 'memory',
@@ -246,7 +261,9 @@ function memorySegment(memory: PromptMemoryApi | undefined, includeParameters: b
     // scoring succeeds. Stating the ordering basis here up front keeps the
     // two memory surfaces from reading as contradictory when their orders
     // differ for the same eligible records.
-    note: 'Ordered by stored confidence/recency, not by relevance to the current turn, see context action:"receipt" for per-turn relevance scoring.',
+    note: fromSpine
+      ? 'Read from the memory spine\'s recall snapshot (the daemon\'s records when attached, the local registry otherwise), ordered by stored confidence/recency, not by relevance to the current turn. See context action:"receipt" for what a turn actually carried and its per-turn relevance scoring.'
+      : 'Read from this process\'s local memory registry, ordered by stored confidence/recency, not by relevance to the current turn. When attached to a daemon, a turn\'s prompt uses the daemon\'s recall snapshot instead: see context action:"receipt" for what a turn actually carried and its per-turn relevance scoring.',
     route: 'memory action:"status"',
     selected: active.map((record) => ({
       id: record.id,
@@ -267,7 +284,7 @@ function memorySegment(memory: PromptMemoryApi | undefined, includeParameters: b
         reviewState: record.reviewState,
         confidence: record.confidence,
         reason: eligibility.eligible
-          ? `eligible (${eligibility.reason}) but outside the top-10 prompt slice, budget-limited, not a trust problem`
+          ? `eligible (${eligibility.reason}) but outside the top-${PROMPT_MEMORY_LIMIT} prompt slice, budget-limited, not a trust problem`
           : eligibility.reason,
         inspectRoute: `agent_local_registry domain:"memory" action:"get" recordId:"${record.id}"`,
       };
@@ -376,13 +393,19 @@ function promptContextReceiptSummary(context: CommandContext, args: PromptContex
   };
 }
 
-async function promptContextSegments(context: CommandContext, includeParameters: boolean, signal?: AbortSignal): Promise<readonly PromptContextSegment[]> {
+async function promptContextSegments(context: CommandContext, includeParameters: boolean, modelInfo: PromptModelInfo, signal?: AbortSignal): Promise<readonly PromptContextSegment[]> {
   const shellPaths = context.workspace.shellPaths;
   const runtimePrompt = context.session.runtime.systemPrompt ?? '';
-  const { label: currentModel, contextWindow } = promptModelInfo(context);
+  const { label: currentModel, contextWindow } = modelInfo;
   const registry = context.provider.providerRegistry;
-  const tierPrompt = await readTierPromptSupplement(
-    factsFor({ catalog: registry }, registry.getCurrentModel()), registry.modelTiers,
+  let registryModel: ReturnType<typeof registry.getCurrentModel> | null = null;
+  try {
+    registryModel = registry.getCurrentModel();
+  } catch {
+    // promptModelInfo already fell back to the session's model label; with no registry model there is no tier supplement to read.
+  }
+  const tierPrompt = registryModel === null ? '' : await readTierPromptSupplement(
+    factsFor({ catalog: registry }, registryModel), registry.modelTiers,
     'agent.prompt-context-inspection', { audience: 'conversation', signal },
   );
   signal?.throwIfAborted();
@@ -414,6 +437,7 @@ async function promptContextSegments(context: CommandContext, includeParameters:
   const vibe = discoverVibeFiles(shellPaths);
   // Mirror the runtime, the VIBE prompt is a PROJECTION of persona records,
   // not a file re-read (discoverVibeFiles stays for the file-discovery receipt below).
+  // The runtime projects from the local registry even when the memory segment reads the spine's recall snapshot.
   const vibeMemory = promptMemoryApi(context.clients?.agentKnowledgeApi?.memory);
   const vibePrompt = (vibeMemory ? buildVibeProjectionPrompt(vibeMemory) : null) ?? '';
   const projectContext = discoverProjectContextFiles(shellPaths);
@@ -443,7 +467,7 @@ async function promptContextSegments(context: CommandContext, includeParameters:
   const suppressedSkills = skillSnapshot.skills.filter((skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id));
   const suppressedBundles = skillSnapshot.enabledBundles.filter((bundle) => !activeBundles.some((active) => active.id === bundle.id));
   const skillPrompt = buildEnabledSkillsPrompt(shellPaths) ?? '';
-  const memory = promptMemoryApi(context.clients?.agentKnowledgeApi?.memory);
+  const { memory, fromSpine: memoryFromSpine } = promptMemorySource(context);
 
   const capabilityIndex = capabilitySnapshot();
   const capabilityText = buildCapabilitySummaryPrompt(capabilityIndex) ?? '';
@@ -505,7 +529,7 @@ async function promptContextSegments(context: CommandContext, includeParameters:
       })),
       suppressed: projectContext.blocked.map((file) => ({ id: file.id, source: file.source, reason: file.reason })),
     }, includeParameters),
-    memorySegment(memory, includeParameters),
+    memorySegment(memory, includeParameters, memoryFromSpine),
     segment({
       id: 'routines',
       label: 'Reviewed setup-ready routines',
@@ -578,12 +602,14 @@ async function promptContextSegments(context: CommandContext, includeParameters:
 
 export async function promptContextSummary(context: CommandContext, args: PromptContextArgs, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
-  const segments = [...await promptContextSegments(context, includeParameters, signal)].sort((left, right) => left.order - right.order);
+  // One reading of the model feeds both the segments and the budget, so they cannot name different models or windows.
+  const modelInfo = promptModelInfo(context);
+  const segments = [...await promptContextSegments(context, includeParameters, modelInfo, signal)].sort((left, right) => left.order - right.order);
   const activeRecords = segments.reduce((total, entry) => total + entry.activeCount, 0);
   const suppressedRecords = segments.reduce((total, entry) => total + entry.suppressedCount, 0);
   const promptChars = segments.reduce((total, entry) => total + entry.promptChars, 0);
   const approxPromptTokens = segments.reduce((total, entry) => total + entry.approxTokens, 0);
-  const { label: currentModel, contextWindow } = promptModelInfo(context);
+  const { label: currentModel, contextWindow } = modelInfo;
   const status = segments.some((entry) => entry.status === 'unavailable')
     ? 'unavailable'
     : suppressedRecords > 0 || segments.some((entry) => entry.status === 'attention')
@@ -593,7 +619,7 @@ export async function promptContextSummary(context: CommandContext, args: Prompt
         : 'empty';
   return {
     status,
-    order: ['capabilities', 'base_system_prompt', 'vibe', 'project_context', 'operator_policy', 'memory', 'routines', 'skills', 'persona', 'context_window_supplement'],
+    order: segments.map((entry) => entry.id),
     model: currentModel,
     provider: context.session.runtime.provider,
     contextWindow,
@@ -606,6 +632,7 @@ export async function promptContextSummary(context: CommandContext, args: Prompt
       approxPromptTokens,
       contextWindow,
       percentOfWindow: contextWindow !== null && contextWindow > 0 ? Math.round((approxPromptTokens / contextWindow) * 1000) / 10 : null,
+      note: 'Counts the segments listed here. A turn receipt also counts the operator policy text, so use context action:"receipt" for a turn\'s exact totals.',
     },
     receipts: promptContextReceiptSummary(context, args, includeParameters),
     segments,

@@ -2,6 +2,7 @@ import { agentRecordNonce } from '../utils/record-nonce.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreJson } from '@/utils/store-file.ts';
+import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.ts';
 
@@ -251,13 +252,14 @@ export function recordAgentChannelDeliveryReceipt(
     ...(input.result.responseId ? { responseId: input.result.responseId } : {}),
     authorization: 'explicit-user-confirmed',
     userRoute: `/channels send --title "${safeRouteArg(title)}" ${targetInput(input.deliveryInput)} --message "[redacted]" --yes`,
-    modelRoute: 'agent_channel_send confirm:true explicitUserRequest:"..."',
+    modelRoute: 'agent_channel_send explicitUserRequest:"..."',
   };
   const current = readAgentChannelDeliveryReceipts(shellPaths).receipts;
   const next: AgentChannelDeliveryReceiptFile = {
     version: RECEIPT_VERSION,
     receipts: [receipt, ...current].slice(0, RECEIPT_LIMIT),
   };
+  keepUnreadableStoreCopy(path, 'receipts', parseReceipt);
   writeStoreJson(path, next);
   return receipt;
 }

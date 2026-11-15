@@ -183,8 +183,25 @@ export type VerificationMatch =
   | {
       readonly kind: 'matched';
       readonly expectation: VerificationExpectation;
-      /** Secondary signal only. Never gates the match. */
+      /**
+       * Always `sender-domain-matches` now: a message from an unrelated sender
+       * domain is answered `sender-unrelated` instead and spends nothing.
+       */
       readonly senderCorroboration: 'sender-domain-matches' | 'sender-domain-unrelated';
+    }
+  | {
+      /**
+       * The message reached the expectation's alias, but its sender domain is
+       * not the service's. The alias is not a secret (it can be listed, leaked
+       * or guessed), so this is not the awaited mail: nothing is extracted, the
+       * expectation stays open, and the genuine mail can still match it. A
+       * legitimate service that mails from another brand domain therefore
+       * stays unmatched until its window ends, which is the conservative side.
+       */
+      readonly kind: 'sender-unrelated';
+      readonly reason: string;
+      readonly expectation: VerificationExpectation;
+      readonly senderHost: string;
     }
   | { readonly kind: 'no-expectation'; readonly reason: string }
   | {
@@ -422,11 +439,22 @@ function senderCorroboration(
     : 'sender-domain-unrelated';
 }
 
+/** The platform's configuration forbids opening an expectation (email holds command authority); the request itself was fine. */
+export class ExpectationAuthorityError extends Error {
+  public override readonly name = 'ExpectationAuthorityError';
+}
+
+/** The request to open an expectation was refused for a reason its caller can fix. */
+export class ExpectationRefusalError extends Error {
+  public override readonly name = 'ExpectationRefusalError';
+}
+
 /**
  * In-memory book of open expectations.
  *
- * Deliberately not persisted: an expectation is a 15-minute grant, and a grant that
- * survives a restart is a grant nobody remembers issuing.
+ * The book itself holds nothing on disk. `InboundExpectationRegistry` mirrors it to a
+ * store and restores it through `hydrateExpectation`, which keeps the original window:
+ * a restart never extends a grant, and a grant that outlived its window is never revived.
  */
 export class VerificationExpectationBook {
   private readonly open = new Map<string, VerificationExpectation>();
@@ -442,7 +470,7 @@ export class VerificationExpectationBook {
   /** Registered explicitly when the agent initiates a signup. Nothing else opens one. */
   public openExpectation(input: OpenExpectationInput, assertCurrent?: () => void): VerificationExpectation {
     if (this.authority?.surfaceHasCommandAuthority(EMAIL_SURFACE) === true) {
-      throw new Error(
+      throw new ExpectationAuthorityError(
         'Email has been granted command authority; scoped verification expectations assume email is input-only. Refusing to open one.',
       );
     }
@@ -454,18 +482,18 @@ export class VerificationExpectationBook {
     // no file edit at all, and an expectation scoped to a bare TLD authorises
     // a link at every host beneath it.
     if (!isRegistrableServiceDomain(serviceDomain)) {
-      throw new Error(
+      throw new ExpectationRefusalError(
         `A verification expectation needs a registrable service domain, a name with a label below `
         + `a public suffix, like 'github.com'. '${serviceDomain || input.serviceDomain}' is a public `
         + `suffix or is not a hostname, and scoping an expectation to one would authorise every host beneath it.`,
       );
     }
     if (!recipientAddress.includes('@') || recipientAddress.length > MAX_RECIPIENT_ADDRESS_CHARS) {
-      throw new Error('A verification expectation requires the exact recipient address used at signup.');
+      throw new ExpectationRefusalError('A verification expectation requires the exact recipient address used at signup.');
     }
-    if (!purpose) throw new Error('A verification expectation requires a stated purpose.');
+    if (!purpose) throw new ExpectationRefusalError('A verification expectation requires a stated purpose.');
     if (purpose.length > MAX_PURPOSE_CHARS) {
-      throw new Error(`A verification expectation's purpose must be at most ${String(MAX_PURPOSE_CHARS)} characters.`);
+      throw new ExpectationRefusalError(`A verification expectation's purpose must be at most ${String(MAX_PURPOSE_CHARS)} characters.`);
     }
     // The SAME id rule the load path applies, refused here rather than left to
     // be dropped later. An id this accepted and `validatePersistedExpectation`
@@ -474,7 +502,7 @@ export class VerificationExpectationBook {
     const askedForId = input.id !== undefined && input.id.trim().length > 0;
     const suppliedId = askedForId ? normalizeExpectationId(input.id) : null;
     if (askedForId && suppliedId === null) {
-      throw new Error(
+      throw new ExpectationRefusalError(
         `A verification expectation's id must be at most ${String(MAX_EXPECTATION_ID_CHARS)} `
         + 'characters of letters, digits, dot, underscore, colon or hyphen. Omit it and one is '
         + 'minted.',
@@ -485,7 +513,15 @@ export class VerificationExpectationBook {
     assertCurrent?.();
     this.sweepExpired(now);
     if (this.open.size >= MAX_OPEN_EXPECTATIONS && !this.findByRecipient(recipientAddress)) {
-      throw new Error(`Too many open verification expectations (limit ${MAX_OPEN_EXPECTATIONS}). Close finished signups first.`);
+      throw new ExpectationRefusalError(`Too many open verification expectations (limit ${MAX_OPEN_EXPECTATIONS}). Close finished signups first.`);
+    }
+
+    // An id names one expectation. Reusing another address's id would silently replace it.
+    if (suppliedId !== null) {
+      const holder = this.open.get(suppliedId);
+      if (holder && holder.recipientAddress !== recipientAddress) {
+        throw new ExpectationRefusalError(`Verification expectation id "${suppliedId}" is already in use for another address; choose a different id or omit it.`);
+      }
     }
 
     // One expectation per address: re-opening replaces, it never stacks.
@@ -675,15 +711,27 @@ export class VerificationExpectationBook {
     const forRecipient = known.find((candidate) => candidate.recipientAddress === recipient);
     if (forRecipient) {
       if (hasElapsed(forRecipient, now)) {
-        this.open.delete(forRecipient.id);
+        // Not deleted here: the row is the only record that the window ran out,
+        // and `sweepExpired` turns it into the owner's expiry report.
         return {
           kind: 'expired',
           reason: `The verification expectation for "${forRecipient.recipientAddress}" expired at ${forRecipient.expiresAt}; this message arrived after it closed.`,
           expectation: forRecipient,
         };
       }
+      const corroboration = senderCorroboration(email, forRecipient);
+      if (corroboration === 'sender-domain-unrelated') {
+        const at = normalizeEmailAddress(email.from).lastIndexOf('@');
+        const senderHost = at >= 0 ? normalizeDomain(normalizeEmailAddress(email.from).slice(at + 1)) : '';
+        return {
+          kind: 'sender-unrelated',
+          expectation: forRecipient,
+          senderHost,
+          reason: `This message reached "${forRecipient.recipientAddress}", but its sender is ${senderHost ? `"${senderHost}"` : 'unknown'}, not ${forRecipient.serviceDomain}. It is not treated as the awaited verification and the expectation stays open.`,
+        };
+      }
       if (options?.consume !== false) this.open.delete(forRecipient.id);
-      return { kind: 'matched', expectation: forRecipient, senderCorroboration: senderCorroboration(email, forRecipient) };
+      return { kind: 'matched', expectation: forRecipient, senderCorroboration: corroboration };
     }
 
     // Filtered, not swept: this arm only needs to know which addresses are

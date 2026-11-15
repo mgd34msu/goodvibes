@@ -154,6 +154,49 @@ function ItemGroup({ label, kindLabel, prefix, items, query, pageSize, selectedK
   );
 }
 
+interface AskRequest {
+  mode: 'ask' | 'search';
+  query: string;
+}
+
+interface ProjectionGroupProps {
+  items: readonly ProjectionSelection[];
+  query: string;
+  selection: string | null;
+  onSelect: (key: string) => void;
+}
+
+function ProjectionGroup({ items, query, selection, onSelect }: ProjectionGroupProps) {
+  const [visible, setVisible] = useState<number>(PAGE_SIZE.projection);
+  const shown = useMemo(
+    () => items.filter((s) => includesText([bestTitle(s.target, s.kind), s.kind, s.id], query)),
+    [items, query],
+  );
+  if (shown.length === 0) return null;
+  return (
+    <>
+      <RowGroup label="Wiki projections" count={shown.length}>
+        {shown.slice(0, visible).map((s, index) => (
+          <Row
+            key={`${s.key}-${index}`}
+            title={bestTitle(s.target, s.kind)}
+            meta={`${sentence(s.kind)}${s.id ? ` · ${s.id}` : ''}`}
+            selected={selection === `projection:${s.key}`}
+            onSelect={() => onSelect(`projection:${s.key}`)}
+          />
+        ))}
+      </RowGroup>
+      {shown.length > visible && (
+        <div className="lib-more">
+          <Button variant="ghost" size="sm" aria-label="Show more wiki projections" onClick={() => setVisible((v) => v + PAGE_SIZE.projection)}>
+            Show more ({shown.length - visible} left)
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
 export interface KnowledgeViewProps {
   /** The Library's shared search text (already settled). */
   query?: string;
@@ -183,7 +226,9 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   });
 
   const ask = useMutation({
-    mutationFn: (mode: 'ask' | 'search') => mode === 'ask'
+    // The asked query travels with the mode, so the answer pane names what it
+    // answers even after the Library search box is edited.
+    mutationFn: ({ mode, query }: AskRequest) => mode === 'ask'
       ? platformClient.knowledge.ask({ query, limit: 10, includeSources: true, includeConfidence: true, includeLinkedObjects: true, timeoutMs: 20_000 })
       : platformClient.knowledge.search({ query, limit: 25, includeSources: true, includeNodes: true }),
   });
@@ -221,7 +266,7 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const runAsk = useCallback((mode: 'ask' | 'search') => {
     if (!query.trim()) return;
     setSelection('answer');
-    ask.mutate(mode);
+    ask.mutate({ mode, query });
   }, [ask, query]);
 
   const loadingAll = sources.isPending && nodes.isPending && issues.isPending && projections.isPending;
@@ -264,22 +309,7 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
       <ItemGroup label="Sources" kindLabel="Source" prefix="source" items={allSources} query={query} pageSize={PAGE_SIZE.source} selectedKey={selection} onSelect={setSelection} />
       <ItemGroup label="Nodes" kindLabel="Node" prefix="node" items={allNodes} query={query} pageSize={PAGE_SIZE.node} selectedKey={selection} onSelect={setSelection} />
       <ItemGroup label="Issues" kindLabel="Issue" prefix="issue" items={allIssues} query={query} pageSize={PAGE_SIZE.issue} selectedKey={selection} onSelect={setSelection} />
-      {projectionSelections.length > 0 && (
-        <RowGroup label="Wiki projections" count={projectionSelections.length}>
-          {projectionSelections
-            .filter((s) => includesText([bestTitle(s.target, s.kind), s.kind, s.id], query))
-            .slice(0, PAGE_SIZE.projection)
-            .map((s, index) => (
-              <Row
-                key={`${s.key}-${index}`}
-                title={bestTitle(s.target, s.kind)}
-                meta={`${sentence(s.kind)}${s.id ? ` · ${s.id}` : ''}`}
-                selected={selection === `projection:${s.key}`}
-                onSelect={() => setSelection(`projection:${s.key}`)}
-              />
-            ))}
-        </RowGroup>
-      )}
+      <ProjectionGroup items={projectionSelections} query={query} selection={selection} onSelect={setSelection} />
       {browseEmpty && (
         <EmptyState
           icon={<BookOpen />}
@@ -295,12 +325,12 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   let detail: ReactNode = null;
   if (selection === 'answer') {
     detail = (
-      <DetailPane title={ask.variables === 'search' ? 'Search results' : 'Answer'} meta={query.trim() ? `“${query.trim()}”` : undefined} onClose={() => setSelection(null)}>
+      <DetailPane title={ask.variables?.mode === 'search' ? 'Search results' : 'Answer'} meta={ask.variables?.query.trim() ? `“${ask.variables.query.trim()}”` : undefined} onClose={() => setSelection(null)}>
         {ask.isPending && <SkeletonRows count={3} label="Running the query" />}
         {ask.error && (
           <div className="dv-notice dv-notice--bad" role="alert">
             <span>Query failed: {formatError(ask.error)}</span>
-            <Button variant="ghost" size="sm" onClick={() => runAsk(ask.variables ?? 'ask')}>Retry</Button>
+            <Button variant="ghost" size="sm" onClick={() => ask.variables ? ask.mutate(ask.variables) : runAsk('ask')}>Retry</Button>
           </div>
         )}
         {ask.data !== undefined && ask.data !== null && (

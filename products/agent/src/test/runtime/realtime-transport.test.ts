@@ -119,10 +119,24 @@ describe('RealtimeTransport', () => {
     daemon.enable({ daemon: true }, TEST_TOKEN);
     await daemon.start();
 
+    // The daemon subscribes the client to its domains before it sends the
+    // authentication acknowledgment, so that frame is the readiness signal.
+    const subscribed = Promise.withResolvers<void>();
+    const AuthenticatedWebSocket = createAuthenticatedWebSocket(TEST_TOKEN);
+    class AckObservingWebSocket extends AuthenticatedWebSocket {
+      constructor(url: string | URL) {
+        super(url);
+        this.addEventListener('message', (message: MessageEvent<unknown>) => {
+          if (typeof message.data !== 'string') return;
+          const frame: unknown = JSON.parse(message.data);
+          if (typeof frame === 'object' && frame !== null && 'type' in frame && frame.type === 'auth' && 'ok' in frame && frame.ok === true) subscribed.resolve();
+        });
+      }
+    }
     const transport = createRealtimeTransport({
       baseUrl: `http://127.0.0.1:${port}`,
       authToken: TEST_TOKEN,
-      webSocketImpl: createAuthenticatedWebSocket(TEST_TOKEN),
+      webSocketImpl: AckObservingWebSocket,
     });
 
     const session = await transport.operator.sessions.ensureSession({
@@ -155,7 +169,7 @@ describe('RealtimeTransport', () => {
     const unsubscribe = transport.operator.events.agents.on('AGENT_SPAWNING', (event: Extract<AgentEvent, { type: 'AGENT_SPAWNING' }>) => {
       seen.push({ type: event.type, agentId: event.agentId });
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await subscribed.promise;
     if (!runtimeServices) throw new Error('The original transport runtime was not composed');
     const services = runtimeServices;
     const releaseStartup = Promise.withResolvers<void>();

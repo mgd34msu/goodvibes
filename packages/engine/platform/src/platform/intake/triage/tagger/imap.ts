@@ -192,7 +192,7 @@ export function imapStoreFlagOverTls(
       );
       return;
     }
-    type Step = { tag: string; isLogout: boolean; isSelect: boolean; resolve: () => void; reject: (e: Error) => void };
+    type Step = { tag: string; isLogout: boolean; isSelect: boolean; isStore: boolean; resolve: () => void; reject: (e: Error) => void };
 
     let done = false;
     let completed = false; // LOGOUT acknowledged (or BYE seen), so close is expected.
@@ -201,6 +201,7 @@ export function imapStoreFlagOverTls(
     let counter = 0;
     let greeted = false;
     let validity: number | undefined;
+    let flagConfirmed = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const abort = () => finish(new ImapStoreError('IMAP operation revoked', false));
 
@@ -231,13 +232,13 @@ export function imapStoreFlagOverTls(
       finish(new ImapStoreError('IMAP connection timed out', true)),
     );
 
-    const send = (command: string, isLogout = false, isSelect = false): Promise<void> =>
+    const send = (command: string, isLogout = false, isSelect = false, isStore = false): Promise<void> =>
       new Promise<void>((res, rej) => {
         if (done) { rej(new ImapStoreError('IMAP operation retired', false)); return; }
         args.signal.throwIfAborted(); args.assertCurrent();
         counter += 1;
         const tag = `A${counter}`;
-        pending = { tag, isLogout, isSelect, resolve: res, reject: rej };
+        pending = { tag, isLogout, isSelect, isStore, resolve: res, reject: rej };
         socket.write(`${tag} ${command}\r\n`);
       });
 
@@ -246,7 +247,7 @@ export function imapStoreFlagOverTls(
       validity = undefined;
       await send(`SELECT ${quoteImap(args.mailbox)}`, false, true);
       if (validity !== args.uidValidity) throw new ImapStoreError('IMAP UIDVALIDITY changed or unavailable', false);
-      await send(`UID STORE ${args.uid} +FLAGS (${args.flag})`);
+      await send(`UID STORE ${args.uid} +FLAGS (${args.flag})`, false, false, true);
       await send('LOGOUT', true);
     };
 
@@ -277,11 +278,24 @@ export function imapStoreFlagOverTls(
       }
 
       if (!pending) return;
-      if (!line.startsWith(`${pending.tag} `)) return; // untagged data line
+      if (!line.startsWith(`${pending.tag} `)) {
+        // Untagged data. A STORE that found its message answers with that
+        // message's flags; a tagged OK alone also follows a UID that no longer
+        // exists (deleted or moved since it was listed), which is not success.
+        if (pending.isStore) {
+          const flags = /^\* \d+ FETCH .*?\bFLAGS \(([^)]*)\)/i.exec(line)?.[1];
+          if (flags !== undefined && flags.split(/\s+/).some((flag) => flag.toLowerCase() === args.flag.toLowerCase())) flagConfirmed = true;
+        }
+        return;
+      }
       const status = line.slice(pending.tag.length + 1);
       const current = pending;
       pending = null;
       if (/^OK(?: |$)/i.test(status)) {
+        if (current.isStore && !flagConfirmed) {
+          current.reject(new ImapStoreError('IMAP flag not applied: the message is no longer in the mailbox, or the server did not accept the keyword', false));
+          return;
+        }
         current.resolve();
         if (current.isLogout) {
           completed = true;

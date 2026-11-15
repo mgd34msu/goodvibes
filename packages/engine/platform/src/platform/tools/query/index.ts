@@ -1,8 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Tool } from '../../types/tools.js';
 import { resolveScopedDirectory } from '../../runtime/surface-root.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
+import { writeFileAtomic } from '../../utils/atomic-json-store.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { QUERY_TOOL_SCHEMA, type QueryToolInput } from './schema.js';
 
 interface QueryRecord {
@@ -47,23 +49,35 @@ export function createQueryTool(
   const queriesDir = resolveScopedDirectory(workspaceRoot, surfaceRoot);
   const queriesPath = join(queriesDir, 'queries.json');
 
+  // Only a missing file is an empty store. An unreadable or malformed file must
+  // fail the call: treating it as empty would let the next write replace every record.
   function loadQueries(): QueryRecord[] {
+    let raw: string;
     try {
-      return JSON.parse(readFileSync(queriesPath, 'utf-8')) as QueryRecord[];
-    } catch {
-      return [];
+      raw = readFileSync(queriesPath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Cannot read ${queriesPath}: ${summarizeError(err)}. Nothing was changed.`);
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`${queriesPath} is not valid JSON (${summarizeError(err)}). Nothing was changed; repair or move the file aside.`);
+    }
+    if (!Array.isArray(parsed)) throw new Error(`${queriesPath} does not hold a list of querys. Nothing was changed; repair or move the file aside.`);
+    return parsed as QueryRecord[];
   }
 
   function saveQueries(records: readonly QueryRecord[]): void {
     mkdirSync(queriesDir, { recursive: true });
-    writeFileSync(queriesPath, `${JSON.stringify(records, null, 2)}\n`, 'utf-8');
+    writeFileAtomic(queriesPath, `${JSON.stringify(records, null, 2)}\n`);
   }
 
   return {
     definition: {
       name: 'query',
-      description: 'Track operator queries, answers, escalation, and closure.',
+      description: 'Keep your own notes on questions, answers, and closure. Queries are stored in a file; asking one does not deliver it to an operator or any surface, and the answer is whatever you record.',
       parameters: QUERY_TOOL_SCHEMA.parameters,
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',
@@ -74,12 +88,24 @@ export function createQueryTool(
         return { success: false, error: 'Invalid args: mode is required.' };
       }
       const input = args as unknown as QueryToolInput;
-      const records = loadQueries();
+      let records: QueryRecord[];
+      try {
+        records = loadQueries();
+      } catch (err) {
+        return { success: false, error: summarizeError(err) };
+      }
       const view = input.view ?? 'summary';
 
       if (input.mode === 'ask') {
         if (!input.queryId || !input.prompt) {
           return { success: false, error: 'ask requires queryId and prompt.' };
+        }
+        const existing = records.find((entry) => entry.id === input.queryId);
+        if (existing) {
+          return {
+            success: false,
+            error: `Query ${existing.id} already exists (status ${existing.status}); ask would replace it. Use show to read it, answer or close to change it, or choose a new queryId.`,
+          };
         }
         const now = Date.now();
         const record: QueryRecord = {
@@ -91,7 +117,7 @@ export function createQueryTool(
           createdAt: now,
           updatedAt: now,
         };
-        saveQueries([...records.filter((entry) => entry.id !== record.id), record]);
+        saveQueries([...records, record]);
         return { success: true, output: JSON.stringify(record) };
       }
 

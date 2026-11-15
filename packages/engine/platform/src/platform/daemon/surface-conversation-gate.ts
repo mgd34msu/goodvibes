@@ -72,7 +72,8 @@ export interface ConversationGateDeps {
   readonly captureReadingSource?: ((origin: SurfaceIngressOrigin | null) => () => void) | undefined;
   readonly configManager: ConversationGateConfigReader;
   readonly routeBindings: Pick<RouteBindingManager, 'getBinding' | 'resolve'>;
-  readonly sessionBroker: Pick<SharedSessionBroker, 'getSession' | 'bindAgent'>;
+  readonly sessionBroker: Pick<SharedSessionBroker, 'getSession' | 'bindAgent'>
+    & Partial<Pick<SharedSessionBroker, 'getInputs' | 'failInput' | 'beginSpawn'>>;
   readonly trySpawnAgent: (input: SpawnInput, logLabel?: string, sessionId?: string) => AgentRecord | Response;
   readonly queueSurfaceReplyFromBinding: (
     binding: AutomationRouteBinding | undefined,
@@ -104,7 +105,18 @@ export async function gateSurfaceSpawn(
   logLabel?: string,
   sessionId?: string,
 ): Promise<AgentRecord | Response> {
-  return withConfiguredDecisionModelPolicy(() => gateOwnedSurfaceSpawn(deps, origin, input, logLabel, sessionId));
+  // The broker is told a spawn is under way, so a second message for this session is queued behind it
+  // instead of starting a second agent; `bindAgent` ends the claim, and an answered gate ends it here.
+  const release = sessionId ? deps.sessionBroker.beginSpawn?.(sessionId) : undefined;
+  let result: AgentRecord | Response;
+  try {
+    result = await withConfiguredDecisionModelPolicy(() => gateOwnedSurfaceSpawn(deps, origin, input, logLabel, sessionId));
+  } catch (error) {
+    release?.();
+    throw error;
+  }
+  if (result instanceof Response) release?.();
+  return result;
 }
 
 async function gateOwnedSurfaceSpawn(
@@ -112,11 +124,12 @@ async function gateOwnedSurfaceSpawn(
 ): Promise<AgentRecord | Response> {
   const classic = isClassicOperation();
   const store = deps.workProposals;
-  if (!store && !classic) return deps.trySpawnAgent(input, logLabel, sessionId);
+  const spawn = (spawnInput: SpawnInput) => spawnOrSettle(deps, origin, spawnInput, logLabel, sessionId);
+  if (!store && !classic) return spawn(input);
 
   const config = readConversationGateConfig(deps.configManager);
   if (!isGatedSurface(config, origin?.surface) && !classic) {
-    return deps.trySpawnAgent(input, logLabel, sessionId);
+    return spawn(input);
   }
 
   // Classify the message the OWNER sent, not the enriched prompt the broker
@@ -136,13 +149,13 @@ async function gateOwnedSurfaceSpawn(
     }
   };
   assertCurrent();
-  const spawnClassic = () => {
+  const spawnClassic = async () => {
     assertCurrent();
     // No semantic statement about the message. Keep the same native first-turn
     // channel capabilities as conversation, with no autonomous contract launch.
-    const spawn = { ...input, ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
+    const spawnInput = { ...input, ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
       outsideContract: true, replyStyle: 'conversational' as const };
-    assertCurrent(); return deps.trySpawnAgent(spawn, logLabel, sessionId);
+    assertCurrent(); return spawn(spawnInput);
   };
   if (classic) return spawnClassic();
   let inboundText = '';
@@ -156,6 +169,9 @@ async function gateOwnedSurfaceSpawn(
   if (result === null) return spawnClassic();
   if (result.readings.reading.outcome !== 'act') {
     result.recordAction('held: inbound intent unsettled');
+    // Nothing was started; tell the sender, once, so the message does not vanish.
+    await deliverProposalNotice(deps, resolveOriginBinding(deps, origin, sessionId), 'I could not read that message just now. Please send it again.');
+    await failHeldInput(deps, origin, sessionId, 'The message was not acted on because it could not be read. Send it again.');
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-intent-unsettled' }, { status: 202 });
   }
   const needsAgreement = config.mode === 'confirm-all' || result.readings.reading.choice === 'work';
@@ -173,21 +189,18 @@ async function gateOwnedSurfaceSpawn(
     // you there?" was answered with a Summary/Changes/Decisions form. What the
     // message IS and what the reply should LOOK like are one decision, made
     // here, once.
-    return deps.trySpawnAgent(
-      {
-        ...input,
-        ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
-        outsideContract: true,
-        replyStyle: 'conversational',
-      },
-      logLabel,
-      sessionId,
-    );
+    return spawn({
+      ...input,
+      ...conversationalFirstTurnOptions(deps, origin, input.tools, sessionId),
+      outsideContract: true,
+      replyStyle: 'conversational',
+    });
   }
 
   if (!store) throw new Error('Conversation gate proposal store is unavailable');
   const summary = summarizeWorkRequest(inboundText);
   const binding = resolveOriginBinding(deps, origin, sessionId);
+  const inputId = findHeldInput(deps, origin, sessionId)?.id;
   const proposal = store.create({
     surfaceKind: origin?.surface ?? 'unknown',
     task: input.task ?? inboundText ?? '',
@@ -200,6 +213,7 @@ async function gateOwnedSurfaceSpawn(
     ...(origin?.channelId ? { channelId: origin.channelId } : {}),
     ...(origin?.userId ? { userId: origin.userId } : {}),
     ...(sessionId ? { sessionId } : {}),
+    ...(inputId ? { inputId } : {}),
   });
 
   // A proposal becomes answerable only once its notice is confirmed on the
@@ -211,10 +225,12 @@ async function gateOwnedSurfaceSpawn(
   catch (error) { store.markUndeliverable(proposal.id, 'source-invalidated'); throw error; }
   if (!delivery.delivered) {
     store.markUndeliverable(proposal.id, delivery.reason);
+    await failHeldInput(deps, origin, sessionId, 'The message was not acted on because the work proposal could not be shown. Send it again.', inputId);
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-proposal-undelivered' }, { status: 202 });
   }
   const delivered = store.markDelivered(proposal.id);
   if (!delivered || !store.listPending().includes(delivered)) {
+    await failHeldInput(deps, origin, sessionId, 'The work proposal expired before it could be answered. Send the message again.', inputId);
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-proposal-expired' }, { status: 202 });
   }
 
@@ -233,6 +249,63 @@ async function gateOwnedSurfaceSpawn(
     summary,
     ...(sessionId ? { sessionId } : {}),
   }, { status: 202 });
+}
+
+/**
+ * The session input that carries the message being gated: the newest one still
+ * queued from this channel (the adapter records it just before it spawns), so a
+ * held message is settled by its own row and never by an older one.
+ */
+function findHeldInput(
+  deps: Pick<ConversationGateDeps, 'sessionBroker'>,
+  origin: SurfaceIngressOrigin | null,
+  sessionId: string | undefined,
+): { readonly id: string } | undefined {
+  if (!sessionId) return undefined;
+  const queued = (deps.sessionBroker.getInputs?.(sessionId, 1_000) ?? []).filter((entry) => entry.state === 'queued'
+    && (origin?.surface === undefined || entry.surfaceKind === undefined || entry.surfaceKind === origin.surface)
+    && (origin?.text === undefined || entry.body === origin.text));
+  return queued.at(-1);
+}
+
+/** Close the row of a message that will not be acted on, with the reason, so it does not read as work waiting. */
+async function failHeldInput(
+  deps: Pick<ConversationGateDeps, 'sessionBroker'>,
+  origin: SurfaceIngressOrigin | null,
+  sessionId: string | undefined,
+  reason: string,
+  inputId?: string,
+): Promise<void> {
+  const id = inputId ?? findHeldInput(deps, origin, sessionId)?.id;
+  if (!sessionId || !id) return;
+  await deps.sessionBroker.failInput?.(sessionId, id, reason)?.catch((error: unknown) => {
+    logger.warn('A held message could not be closed', { sessionId, inputId: id, error: summarizeError(error) });
+  });
+}
+
+/** Close the row of a proposal that will not run (declined, or its agent could not start). */
+export async function settleUnstartedWork(
+  deps: Pick<ConversationGateDeps, 'sessionBroker'>,
+  proposal: WorkProposalRecord,
+  reason: string,
+): Promise<void> {
+  if (!proposal.sessionId || !proposal.inputId) return;
+  await failHeldInput(deps, null, proposal.sessionId, reason, proposal.inputId);
+}
+
+/** Spawn through the shared path; a refusal closes the message's row, since no agent will answer it. */
+async function spawnOrSettle(
+  deps: ConversationGateDeps,
+  origin: SurfaceIngressOrigin | null,
+  input: SpawnInput,
+  logLabel: string | undefined,
+  sessionId: string | undefined,
+): Promise<AgentRecord | Response> {
+  const spawned = deps.trySpawnAgent(input, logLabel, sessionId);
+  if (spawned instanceof Response) {
+    await failHeldInput(deps, origin, sessionId, `The message was not acted on: the agent could not be started (HTTP ${spawned.status}). Send it again.`);
+  }
+  return spawned;
 }
 
 /** Bind the current ingress identity, never another route in the same session. */
@@ -339,10 +412,11 @@ export async function startAgreedWork(
   if (spawned instanceof Response) {
     logger.warn('Agreed work could not be started', { proposalId: proposal.id, status: spawned.status });
     await deliverProposalNotice(deps, binding, `Could not start: ${proposal.summary}`);
+    await settleUnstartedWork(deps, proposal, 'The agreed work could not be started. Send the message again.');
     return;
   }
   if (proposal.sessionId) {
-    await deps.sessionBroker.bindAgent(proposal.sessionId, spawned.id).catch((error: unknown) => {
+    await deps.sessionBroker.bindAgent(proposal.sessionId, spawned.id, proposal.inputId).catch((error: unknown) => {
       logger.warn('Agreed work session binding failed', { proposalId: proposal.id, error: summarizeError(error) });
     });
   }

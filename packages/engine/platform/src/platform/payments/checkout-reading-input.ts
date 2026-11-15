@@ -52,13 +52,15 @@
  * what it costs, and only within a limit they set.
  */
 import type { RawCheckoutReading } from './checkout-extraction.js';
+import { MAX_SUMMARY_CHARS } from './batteries/recurring-charge.js';
 
 /** Bounds on a reading, so a malformed or hostile report cannot exhaust memory. */
 const MAX_LINES = 50;
 const MAX_FEES = 20;
 const MAX_SHIPPING_OPTIONS = 20;
 const MAX_FIELD_LENGTH = 400;
-const MAX_SUMMARY_LENGTH = 40_000;
+/** The recurring-charge reading takes the summary whole, so nothing it cannot read is accepted. */
+const MAX_SUMMARY_LENGTH = MAX_SUMMARY_CHARS;
 
 export type ReadingInputResult =
   | { readonly ok: true; readonly reading: RawCheckoutReading }

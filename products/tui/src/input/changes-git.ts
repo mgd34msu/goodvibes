@@ -202,16 +202,32 @@ export async function loadRepoSummary(cwd: string): Promise<RepoSummary | null> 
   }
 }
 
+/**
+ * The repository root, or `cwd` when git cannot name one. Diff paths are
+ * relative to this root, not to the directory the TUI was launched in.
+ */
+export async function repoRootOf(cwd: string): Promise<string> {
+  const top = await run(['rev-parse', '--show-toplevel'], cwd);
+  return top.ok ? top.out.trim() || cwd : cwd;
+}
+
+/** A diff path (repo-root-relative) as an absolute path. */
+export async function resolveRepoPath(cwd: string, path: string): Promise<string> {
+  return isAbsolute(path) ? path : join(await repoRootOf(cwd), path);
+}
+
 /** Stage (or with reverse, unstage) exactly one hunk. */
 export async function applyHunkToIndex(cwd: string, patch: string, reverse: boolean): Promise<string | null> {
   const args = ['apply', '--cached', '--recount', ...(reverse ? ['-R'] : []), '-'];
-  const result = await run(args, cwd, patch);
+  // From a subdirectory git resolves the patch's root-relative paths against that directory and stages nothing while exiting 0.
+  const result = await run(args, await repoRootOf(cwd), patch);
   return result.ok ? null : (result.err || 'git apply failed');
 }
 
 /** Stage or unstage a whole file. */
 export async function setFileStaged(cwd: string, path: string, staged: boolean): Promise<string | null> {
-  const result = staged ? await run(['add', '--', path], cwd) : await run(['reset', '-q', '--', path], cwd);
+  const root = await repoRootOf(cwd);
+  const result = staged ? await run(['add', '--', path], root) : await run(['reset', '-q', '--', path], root);
   return result.ok ? null : (result.err || `git ${staged ? 'add' : 'reset'} failed`);
 }
 

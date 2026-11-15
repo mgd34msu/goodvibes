@@ -174,7 +174,8 @@ export function handleHistorySearchToken(state: HistorySearchRouteState, token: 
             state.cursorPos = state.prompt.length;
         }
         else if (token.logicalName === 'enter' || token.logicalName === 'return') {
-            state.prompt = state.historySearch.accept();
+            // Nothing matched: accepting would replace the unsent draft with an empty prompt.
+            state.prompt = state.historySearch.currentMatch ? state.historySearch.accept() : state.historySearch.cancel();
             state.cursorPos = state.prompt.length;
         }
         else if (token.logicalName === 'backspace') {

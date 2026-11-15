@@ -222,7 +222,9 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   async function ensureWorktree(workstream: Workstream, item: WorkItem): Promise<ItemWorktreeHandle> {
     const registry = await identityRegistry(), key = identityKey(workstream, item);
     let row: StoredWorktreeIdentity | undefined = registry.find(key);
-    if (!item.worktreePath && !item.worktreeBranch) {
+    // A branch with no row is left over from a removed tree (its row was released); start fresh.
+    if (!item.worktreePath && (!item.worktreeBranch || !row)) {
+      item.worktreeBranch = undefined;
       row = await registry.reserve(key);
       const branchForReservation = row.branch;
       const resources = await rootGit.worktreeList();
@@ -294,7 +296,12 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
 
   function enforceKeptCap(): void {
     while (kept.length > keptCap) {
-      const oldest = kept.shift();
+      // A tree whose merge conflict is still unresolved is the only place its
+      // retry can run: evicting it would leave a conflicted item with no tree.
+      // Over the cap, an unresolved conflict outranks the bound.
+      const index = kept.findIndex((entry) => entry.item.mergeState !== 'conflict');
+      if (index < 0) break;
+      const [oldest] = kept.splice(index, 1);
       if (!oldest) break;
       void ownedWork.run(() => removeWorktree(oldest.workstream, oldest.item, oldest.instance, true)).catch((error) => {
         logger.error('worktree-isolation: eviction of oldest kept worktree did not complete', {
@@ -335,9 +342,18 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         return;
       }
     }
+    // The tree is gone from disk, so it no longer counts toward the kept cap
+    // (a stale entry would push real kept trees out early).
+    const keptIndex = kept.findIndex((entry) => entry.instance === instance);
+    if (keptIndex >= 0) kept.splice(keptIndex, 1);
     instances.delete(item);
     item.worktreePath = undefined;
-    if (!evicted) item.worktreeInitialized = undefined;
+    if (!evicted) {
+      item.worktreeInitialized = undefined;
+      // Rows describe resources that still exist; an evicted tree keeps its row because its branch stays.
+      try { await (await identityRegistry()).release(identityKey(workstream, item)); }
+      catch (error) { logger.warn('worktree-isolation: identity row of a removed worktree was not released', { itemId: item.id, error: summarizeError(error) }); }
+    }
     item.worktreeKept = false;
     deps.emit(
       evicted
@@ -350,19 +366,21 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   }
 
   async function integrateOne(workstream: Workstream, item: WorkItem): Promise<void> {
-    const branch = item.worktreeBranch;
-    if (!branch || !item.worktreePath) throw unavailable();
-    const path = item.worktreePath;
-    const registry = await identityRegistry(), row = registry.find(identityKey(workstream, item));
-    const instance = getOrCreateInstance(workstream, item, path, branch);
-    if (!resourceGuards.has(instance)) {
-      const binding = row && row.branch === branch && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
-      resourceGuards.set(instance, () => { repositoryGuard?.(); binding(); });
-    }
+    let instance: IsolatedWorktree | undefined;
     item.mergeState = 'pending';
     try {
+      const branch = item.worktreeBranch;
+      if (!branch || !item.worktreePath) throw unavailable();
+      const path = item.worktreePath;
+      const registry = await identityRegistry(), row = registry.find(identityKey(workstream, item));
+      instance = getOrCreateInstance(workstream, item, path, branch);
+      const bound = instance;
+      if (!resourceGuards.has(bound)) {
+        const binding = row && row.branch === branch && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
+        resourceGuards.set(bound, () => { repositoryGuard?.(); binding(); });
+      }
       if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
-      const outcome = await instance.integrate(() => { repositoryGuard?.(); resourceGuards.get(instance)?.(); });
+      const outcome = await bound.integrate(() => { repositoryGuard?.(); resourceGuards.get(bound)?.(); });
       if (outcome.status === 'merged') {
         item.mergeState = 'merged';
         item.mergeHash = outcome.hash;
@@ -370,8 +388,8 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         // reclaimed below and nothing may keep reading as conflicted.
         item.conflictFiles = undefined;
         item.worktreeKept = false;
-        deps.emit({ type: 'item-merged', workstreamId: workstream.id, itemId: item.id, branch: instance.branch, hash: outcome.hash });
-        await removeWorktree(workstream, item, instance, false);
+        deps.emit({ type: 'item-merged', workstreamId: workstream.id, itemId: item.id, branch: bound.branch, hash: outcome.hash });
+        await removeWorktree(workstream, item, bound, false);
         return;
       }
       if (outcome.status === 'conflict') {
@@ -382,24 +400,40 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         item.blockedReason = `merge-conflict: ${outcome.files.join(', ') || 'unknown files'}`;
         deps.emit({
           type: 'item-merge-conflict', workstreamId: workstream.id, itemId: item.id,
-          branch: instance.branch, path: instance.path, files: outcome.files,
+          branch: bound.branch, path: bound.path, files: outcome.files,
         });
-        keepWorktree(workstream, item, instance, `merge-conflict: ${outcome.files.join(', ') || 'unknown files'}`);
+        keepWorktree(workstream, item, bound, `merge-conflict: ${outcome.files.join(', ') || 'unknown files'}`);
         return;
       }
       // 'empty', the item branch carries no commits beyond base: an honest
       // no-op, not a failure. Nothing to merge, so trivially "merged" (no
       // hash, there is no merge commit to report) and the worktree is
-      // reclaimed like any other successfully-integrated item.
+      // reclaimed like any other successfully-integrated item. A removal that
+      // does not complete reports the tree kept, with the item still merged.
       item.mergeState = 'merged';
       item.conflictFiles = undefined;
       item.worktreeKept = false;
-      await removeWorktree(workstream, item, instance, false);
+      await removeWorktree(workstream, item, bound, false);
     } catch (error) {
       logger.error('worktree-isolation: integration attempt threw', { itemId: item.id, error: summarizeError(error) });
+      if (item.mergeState === 'merged') {
+        // The merge outcome was already reported; only the clean-up failed.
+        if (instance !== undefined) keepWorktree(workstream, item, instance, `clean-up after integration threw: ${summarizeError(error)}`);
+        return;
+      }
+      // The merge never got as far as comparing files, so this is an infrastructure failure, not a
+      // conflict with files to resolve. mergeState stays 'conflict' because that is the state every
+      // retry path accepts; the reason and the empty file list tell the two apart.
       item.mergeState = 'conflict';
-      item.blockedReason = `merge-conflict: integration did not complete (${summarizeError(error)})`;
-      keepWorktree(workstream, item, instance, `integration attempt threw: ${summarizeError(error)}`);
+      item.conflictFiles = undefined;
+      item.blockedReason = `integration-error: integration did not complete and no conflicting files were found (${summarizeError(error)}); retry the integration`;
+      // Listeners waiting on this item's integration need an outcome; an empty
+      // file list says the merge never got as far as comparing files.
+      deps.emit({
+        type: 'item-merge-conflict', workstreamId: workstream.id, itemId: item.id,
+        branch: instance?.branch ?? item.worktreeBranch ?? '', path: instance?.path ?? item.worktreePath ?? '', files: [],
+      });
+      if (instance !== undefined) keepWorktree(workstream, item, instance, `integration attempt threw: ${summarizeError(error)}`);
     }
   }
 
@@ -422,8 +456,14 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       resourceGuards.get(instance)?.();
       const clean = await instance.isClean();
       resourceGuards.get(instance)?.();
-      if (clean) {
+      const unique = clean ? await instance.uniqueCommitCount() : null;
+      resourceGuards.get(instance)?.();
+      if (clean && unique === 0) {
         await removeWorktree(workstream, item, instance, false);
+      } else if (clean) {
+        // Clean but carrying commits the base lacks (or git could not say): the
+        // retention sweep prunes the directory later and the branch stays.
+        keepWorktree(workstream, item, instance, unique === null ? 'git could not compare the branch with its base' : `${unique} commit(s) not merged into the base`);
       } else {
         keepWorktree(workstream, item, instance, 'dirty tree after item failed/killed');
       }

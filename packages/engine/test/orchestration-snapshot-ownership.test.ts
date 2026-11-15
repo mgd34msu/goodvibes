@@ -101,8 +101,12 @@ test('a later WeakMap method override cannot manufacture native snapshot ownersh
   const fabricated = { selection: f.path, path: join(directory, 'ws-owned.json'), physical: fileObservationIdentity(f.path),
     parent: { canonical: directory, assertCurrent() {} } };
   const override = spyOn(WeakMap.prototype, 'get').mockReturnValue(fabricated);
-  try { writeWorkstreamSnapshot(f.root, { ...original, title: 'Forged copied owner' }, []); }
-  finally { override.mockRestore(); }
+  try {
+    // Control: the override is live for ordinary WeakMap lookups while the writer runs; the writer
+    // must not read ownership through it, so the bytes below can only stay as they were by refusal.
+    expect(new WeakMap<object, unknown>().get({})).toBe(fabricated);
+    writeWorkstreamSnapshot(f.root, { ...original, title: 'Forged copied owner' }, []);
+  } finally { override.mockRestore(); }
   expect(fs.readFileSync(f.path)).toEqual(bytes);
 });
 

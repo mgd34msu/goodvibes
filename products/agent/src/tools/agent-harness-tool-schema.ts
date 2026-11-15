@@ -66,20 +66,12 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   command: {
     type: 'string',
-    description: 'Slash command string, or CLI command string in cli_command mode.',
-  },
-  cliCommand: {
-    type: 'string',
-    description: 'Top-level CLI command string for cli_command inspection.',
-  },
-  commandName: {
-    type: 'string',
-    description: 'Slash command root or top-level CLI command token.',
+    description: 'Slash command (name or "name args"), top-level CLI command in cli_command mode, or the peer command for remote_peers_invoke. commandName and cliCommand are accepted aliases in command and cli_command modes.',
   },
   args: {
     type: 'array',
     items: { type: 'string' },
-    description: 'Arguments for run_command when commandName is used.',
+    description: 'Arguments for run_command when command is a bare name.',
   },
   channelId: {
     type: 'string',
@@ -158,15 +150,15 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   timeoutMs: {
     type: 'number',
-    description: 'Timeout for process waits or local model smoke probes.',
+    description: 'Wait timeout in ms (0 = check once, capped at 600000); for a background start, 0 = no automatic deadline; also the local model smoke probe timeout.',
   },
   pty: {
     type: 'boolean',
-    description: 'Request PTY mode; currently reports unsupported.',
+    description: 'Request PTY mode; reports unsupported unless the process capability report lists a PTY contract (process action:"capabilities").',
   },
   data: {
     type: 'string',
-    description: 'Input data for process write; currently reports unsupported.',
+    description: 'Input data for process action:write to a running tracked process with native stdin; requires current recorded effect admission (process action:"capabilities" shows whether stdin write is supported).',
   },
   recoveryAction: {
     type: 'string',
@@ -215,15 +207,11 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   sessionId: {
     type: 'string',
-    description: 'Saved session id, or process session id in process modes.',
-  },
-  session_id: {
-    type: 'string',
-    description: 'Snake-case process session id alias.',
+    description: 'Saved session id (session mode), or process session id (process modes).',
   },
   categoryId: {
     type: 'string',
-    description: 'Workspace category id.',
+    description: 'Workspace category id. For open_ui_surface with surfaceId "agent-workspace", the workspace tab to open.',
   },
   surfaceId: {
     type: 'string',
@@ -236,7 +224,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   fields: {
     type: 'object',
     additionalProperties: { type: 'string' },
-    description: 'Editor field values for run_workspace_action.',
+    description: 'Editor field values for run_workspace_action, or combo fields (key, ctrl, shift, alt) for set_keybinding. For run_setup_smoke only agentBinaryOutput, statusJson, connectedHostStatusOutput, setupPostureOutput, firstAssistantTurn and notes are saved (8000 characters each, longer values are cut with a marker); other keys are listed as ignoredFields.',
   },
   combo: {
     ...KEY_COMBO_PARAMETER_SCHEMA,
@@ -275,7 +263,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   key: {
     type: 'string',
-    description: 'Agent setting key.',
+    description: 'Agent setting key, or a key-combo lookup such as "Ctrl+G" for keybinding, run_keybinding, set_keybinding and reset_keybinding.',
   },
   value: {
     anyOf: [
@@ -283,7 +271,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
       { type: 'number' },
       { type: 'boolean' },
     ],
-    description: 'Setting value, or visible search text for shortcut routes.',
+    description: 'Setting value, a combo label such as "Ctrl+G" for set_keybinding, or visible search text for shortcut routes.',
   },
   target: {
     type: 'string',
@@ -317,6 +305,18 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
     type: 'string',
     description: 'Alias for toolName in policy_explain mode.',
   },
+  commandName: {
+    type: 'string',
+    description: 'Alias for command in command and run_command modes.',
+  },
+  cliCommand: {
+    type: 'string',
+    description: 'Alias for command in cli_command mode.',
+  },
+  session_id: {
+    type: 'string',
+    description: 'Alias for processId on background-process routes.',
+  },
   toolArgs: {
     type: 'object',
     description: 'Model tool arguments for policy_explain mode.',
@@ -343,7 +343,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   confirm: {
     type: 'boolean',
-    description: 'Required true for documented confirmed harness effects; settings set/reset use recorded admission instead.',
+    description: 'Context only. Confirmed harness effects run only under current recorded effect admission (a visible approval from the person); sending confirm:true does not grant it. Without admission the call is refused and names the missing approval.',
   },
   explicitUserRequest: {
     type: 'string',
@@ -351,15 +351,15 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   peerId: {
     type: 'string',
-    description: 'Remote peer id for remote_peers_invoke or remote_peers_disconnect.',
+    description: 'Remote peer id for remote_peers_invoke.',
   },
   requestId: {
     type: 'string',
-    description: 'Pair request id for remote_pair_approve or remote_pair_reject.',
+    description: 'Pair request id for remote_pair_approve or remote_pair_reject (target is an accepted alias).',
   },
   workId: {
     type: 'string',
-    description: 'Remote work item id for remote_work_cancel.',
+    description: 'Remote work item id for remote_work_cancel (target is an accepted alias).',
   },
   payload: {
     type: 'object',
@@ -368,6 +368,10 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   note: {
     type: 'string',
     description: 'Optional note for remote pair request approve/reject.',
+  },
+  confirmReplace: {
+    type: 'boolean',
+    description: 'For remote_pair_approve: set true only when the request names an existing peer and it is the same device re-pairing; approving replaces that peer\'s capabilities, commands and tokens.',
   },
   reason: {
     type: 'string',

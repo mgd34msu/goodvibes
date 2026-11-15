@@ -251,6 +251,7 @@ describe('core-verbs conformance', () => {
   });
 
   test('update-verb split: no id uses "patch" anywhere (automation.jobs, routes.bindings, watchers all moved to "update")', () => {
+    expect(OPERATOR_METHOD_IDS.filter((id) => id.split('.').includes('patch'))).toEqual([]);
     const updateFamilies = ['automation.jobs.update', 'routes.bindings.update', 'watchers.update'];
     for (const id of updateFamilies) {
       expect(OPERATOR_METHOD_IDS as readonly string[], `expected ${id} to exist`).toContain(id);

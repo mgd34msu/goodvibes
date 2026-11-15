@@ -3,6 +3,9 @@ import type { ConfigManager } from '../config/manager.js';
 import type { SessionMaintenanceStatus } from './session-maintenance.js';
 import type { EcosystemRecommendation } from './ecosystem/recommendations.js';
 import { resolveSurfaceDirectory } from './surface-root.js';
+import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 export type GuidanceMode = 'off' | 'minimal' | 'guided';
 export type GuidanceCategory = 'onboarding' | 'operational' | 'recovery' | 'optimization';
@@ -50,7 +53,13 @@ function resolveGuidancePath(options?: GuidancePersistenceOptions): string {
   return resolveSurfaceDirectory(userRoot, options.surfaceRoot, 'guidance.json');
 }
 
-function readDismissals(options?: GuidancePersistenceOptions): GuidanceDismissalStore {
+/**
+ * The stored dismissals, an empty store when there is no file (or a corrupt one
+ * was set aside), and null when the file exists but could not be read. A
+ * failed read must never be turned into a write, or one unreadable file wipes
+ * every dismissal that was stored.
+ */
+function readDismissals(options?: GuidancePersistenceOptions): GuidanceDismissalStore | null {
   const empty: GuidanceDismissalStore = { version: 1, dismissed: {} };
   try {
     return (
@@ -69,8 +78,9 @@ function readDismissals(options?: GuidancePersistenceOptions): GuidanceDismissal
         },
       }) ?? empty
     );
-  } catch {
-    return empty;
+  } catch (error) {
+    logger.warn('runtime/guidance: the dismissal store could not be read', { error: summarizeError(error) });
+    return null;
   }
 }
 
@@ -78,20 +88,50 @@ function writeDismissals(store: GuidanceDismissalStore, options?: GuidancePersis
   writeJsonFileAtomic(resolveGuidancePath(options), store);
 }
 
-export function dismissGuidance(id: string, options?: GuidancePersistenceOptions): void {
-  const store = readDismissals(options);
-  store.dismissed[id] = Date.now();
-  writeDismissals(store, options);
+const LOCK_ATTEMPTS = 40;
+const LOCK_RETRY_MS = 25;
+
+/**
+ * Run a read-modify-write of the dismissal store while holding a cross-process
+ * lock, so two surfaces dismissing different ids cannot overwrite each other.
+ * Returns false, having changed nothing, when the lock stays busy or the store
+ * cannot be read.
+ */
+function updateDismissals(options: GuidancePersistenceOptions | undefined, update: (store: GuidanceDismissalStore) => void): boolean {
+  const lockPath = `${resolveGuidancePath(options)}.lock`;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  let unlock: (() => void) | null = null;
+  try {
+    for (let attempt = 0; attempt < LOCK_ATTEMPTS && !unlock; attempt++) {
+      unlock = tryAcquireCrossProcessLock(lockPath);
+      if (!unlock) Atomics.wait(pause, 0, 0, LOCK_RETRY_MS);
+    }
+    if (!unlock) {
+      logger.warn('runtime/guidance: another process is updating the dismissal store; nothing was changed', { lockPath });
+      return false;
+    }
+    const store = readDismissals(options);
+    if (!store) return false;
+    update(store);
+    writeDismissals(store, options);
+    return true;
+  } catch (error) {
+    logger.warn('runtime/guidance: updating the dismissal store failed; nothing was changed', { error: summarizeError(error) });
+    return false;
+  } finally { unlock?.(); }
 }
 
-export function resetGuidance(id?: string, options?: GuidancePersistenceOptions): void {
-  if (!id) {
-    writeDismissals({ version: 1, dismissed: {} }, options);
-    return;
-  }
-  const store = readDismissals(options);
-  delete store.dismissed[id];
-  writeDismissals(store, options);
+/** Remember that a guidance message was dismissed. False when it could not be saved. */
+export function dismissGuidance(id: string, options?: GuidancePersistenceOptions): boolean {
+  return updateDismissals(options, (store) => { store.dismissed[id] = Date.now(); });
+}
+
+/** Show a dismissed message again (all of them with no id). False when it could not be saved. */
+export function resetGuidance(id?: string, options?: GuidancePersistenceOptions): boolean {
+  return updateDismissals(options, (store) => {
+    if (id) delete store.dismissed[id];
+    else for (const key of Object.keys(store.dismissed)) delete store.dismissed[key];
+  });
 }
 
 export function evaluateContextualGuidance(
@@ -103,7 +143,7 @@ export function evaluateContextualGuidance(
   const mode = (configManager.get('behavior.guidanceMode') as GuidanceMode | undefined) ?? 'minimal';
   if (mode === 'off') return [];
 
-  const dismissed = readDismissals(options).dismissed;
+  const dismissed = readDismissals(options)?.dismissed ?? {};
   const items: GuidanceItem[] = [];
 
   if (maintenance.level === 'suggest-compact' || maintenance.level === 'needs-repair') {

@@ -89,6 +89,22 @@ describe('fleet acts over actual public contract adapter nodes', () => {
     expect(f.acts.pickModeActive()).toBe(false);
   });
 
+  test('a lost pick reply is reported as unknown once the group is no longer held, and as a failure while it still is', async () => {
+    const groups = [heldGroup()];
+    const f = fixture(waitingContract(), groups);
+    f.gateway.pick = async input => { if (input.confirm) throw new Error('socket closed'); return { applied: false, groupId: input.groupId, winnerItemId: input.winnerItemId, loserItemIds: [], auto: false, requiresConfirm: true, group: groups[0]! }; };
+    await f.acts.beginPick(f.node('unit:ctr:u1'));
+    f.acts.handlePickInput('enter'); await flush();
+    await f.confirms[0]!.onConfirm();
+    expect(f.notes.at(-1)).toContain('Pick failed: socket closed');
+
+    await f.acts.beginPick(f.node('unit:ctr:u1'));
+    f.acts.handlePickInput('enter'); await flush();
+    groups.splice(0);
+    await f.confirms[1]!.onConfirm();
+    expect(f.notes.at(-1)).toContain('Pick outcome unknown or already applied');
+  });
+
   test('cancelled choice never applies a pick', async () => {
     const f = fixture();
     await f.acts.beginPick(f.node('unit:ctr:u1'));
@@ -136,6 +152,17 @@ describe('fleet acts over actual public contract adapter nodes', () => {
     expect(f.calls).toEqual([{ action: 'resolve', value: 'ctr:u1' }, { action: 'attach', value: 'resolution-1' }]);
     await f.acts.resolveConflict({ ...f.node('unit:ctr:u1'), id: 'unit:other:u1' });
     expect(f.calls).toHaveLength(2);
+  });
+
+  test('a second resolve while the first is still starting does not start another session', async () => {
+    const f = fixture();
+    const first = f.acts.resolveConflict(f.node('unit:ctr:u1'));
+    await f.acts.resolveConflict(f.node('unit:ctr:u1'));
+    await first;
+    expect(f.calls.filter(call => call.action === 'resolve')).toHaveLength(1);
+    expect(f.notes.join('\n')).toContain('already starting');
+    await f.acts.resolveConflict(f.node('unit:ctr:u1'));
+    expect(f.calls.filter(call => call.action === 'resolve')).toHaveLength(2);
   });
 
   test('only a completed root owns a discardable worktree and still requires confirmation', async () => {

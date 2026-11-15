@@ -3,7 +3,7 @@ import type { UiReadModel, UiProvidersSnapshot } from '../../runtime/ui-read-mod
 import type { ProviderRuntimeSnapshot } from '@goodvibes-jev/engine/platform/platform/providers';
 import { buildAccountPosture, isRouteUsable } from '../provider-health-routes.ts';
 import { buildProviderHealthDomainSummaries, type ProviderHealthDomainInputs } from '../provider-health-domains.ts';
-import { toneStyle, statusGlyph, pad, postureLine, kv } from './modal-surface-helpers.ts';
+import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand } from './modal-surface-helpers.ts';
 
 /** The slice of ProviderRuntimeInspectionQuery this surface consumes. */
 export interface ProviderRuntimeInspect {
@@ -162,8 +162,7 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
     if (id === 'repair') {
       const provider = ctx.row?.id.startsWith('provider:') ? ctx.row.id.slice('provider:'.length) : null;
       if (!provider) return;
-      void ctx.executeCommand?.('accounts', ['repair', provider]);
-      ctx.setStatus(`Dispatched /accounts repair ${provider} (see transcript).`);
+      runModalCommand(ctx, 'accounts', ['repair', provider], `/accounts repair ${provider}`, { afterSettle: () => { void this.reinspect(); } });
     }
   }
 

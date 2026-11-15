@@ -28,6 +28,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
+  claimIrreversibleWrite,
   READ_INVOCATION_CONTEXT,
   errorText,
   probeConnection,
@@ -211,8 +212,9 @@ async function getEvent(ctx: CommandContext, gateway: Gateway, eventId: string |
 }
 
 async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
-  const raw = rest.filter((part) => part !== '--confirm').join(' ');
+  const raw = rest.filter((part) => part !== '--confirm' && part !== '--again').join(' ');
   const confirmed = rest.includes('--confirm');
+  const again = rest.includes('--again');
   const parsed = parseEventArgs(raw);
   if (parsed === null) {
     ctx.print([
@@ -230,8 +232,18 @@ async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly
       `  Start: ${formatWhen(parsed.start)}`,
       `  End:   ${formatWhen(parsed.end)}`,
       '',
-      'Nothing has been created. Re-run the same line with --confirm to create it.',
+      'Nothing has been created. Re-run the same line with --confirm to create it (add --again to create an identical event twice).',
     ].join('\n'));
+    return;
+  }
+
+  // The daemon treats this call as the user's own explicit request, so only the user's own line may make it.
+  if (ctx.invokedByModel === true) {
+    ctx.print('Refused: /calendar create must be typed by the user; a model-invoked create is not allowed. The preview above is all it can do.');
+    return;
+  }
+  if (!claimIrreversibleWrite(gateway, `calendar.create\0${parsed.title}\0${parsed.start}\0${parsed.end}`, again)) {
+    ctx.print('This exact event was already created (or a create was attempted and its outcome is unknown) from this session, so it was not created again. Check the calendar first; add --again to create it anyway.');
     return;
   }
 

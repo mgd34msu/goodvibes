@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * registerImageRuntimeCommands - `/imagine <prompt>`.
@@ -55,23 +55,33 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
 
+      let result: Awaited<ReturnType<NonNullable<typeof provider.generate>>>;
       try {
-        const result = await provider.generate({
+        result = await provider.generate({
           prompt,
           outputMimeType: 'image/png',
           metadata: { source: 'tui-image-command' },
         });
+      } catch (error) {
+        // A provider can echo the request's Authorization value in its error body.
+        ctx.print(`Image generation failed: ${await redactSensitiveDataAsync(summarizeError(error))}`);
+        return;
+      }
 
-        if (result.artifacts.length === 0) {
-          ctx.print(`${provider.label} returned no artifacts for this prompt.`);
-          return;
+      if (result.artifacts.length === 0) {
+        ctx.print(`${provider.label} returned no artifacts for this prompt.`);
+        return;
+      }
+
+      // The provider has produced (and may have charged for) every artifact by now, so a
+      // failure to keep one must not hide the others: each is stored on its own and reported.
+      const lines = [`Generated ${result.artifacts.length} artifact(s) via ${provider.label} (${result.providerId}).`];
+      let storeFailures = 0;
+      for (const [index, artifact] of result.artifacts.entries()) {
+        if (!artifact.mimeType.startsWith('image/')) {
+          lines.push(`  Note: ${provider.label} produced ${artifact.mimeType}, not an image; no image-capable provider is configured in this build.`);
         }
-
-        const lines = [`Generated ${result.artifacts.length} artifact(s) via ${provider.label} (${result.providerId}).`];
-        for (const artifact of result.artifacts) {
-          if (!artifact.mimeType.startsWith('image/')) {
-            lines.push(`  Note: ${provider.label} produced ${artifact.mimeType}, not an image; no image-capable provider is configured in this build.`);
-          }
+        try {
           if (artifact.dataBase64) {
             const descriptor = await artifactStore.create({
               dataBase64: artifact.dataBase64,
@@ -102,11 +112,15 @@ export function registerImageRuntimeCommands(registry: CommandRegistry): void {
           } else {
             lines.push('  artifact: (no retrievable content returned)');
           }
+        } catch (error) {
+          storeFailures += 1;
+          lines.push(`  artifact ${index + 1}: could not be stored (${await redactSensitiveDataAsync(summarizeError(error))})${artifact.uri ? `; provider url: ${artifact.uri}` : ''}`);
         }
-        ctx.print(lines.join('\n'));
-      } catch (error) {
-        ctx.print(`Image generation failed: ${summarizeError(error)}`);
       }
+      if (storeFailures > 0) {
+        lines.push(`${result.artifacts.length - storeFailures} of ${result.artifacts.length} artifact(s) were stored; the rest were generated but not kept.`);
+      }
+      ctx.print(lines.join('\n'));
     },
   });
 }

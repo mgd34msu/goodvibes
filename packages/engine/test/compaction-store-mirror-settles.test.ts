@@ -45,9 +45,16 @@ describe('compaction store mirror', () => {
   test('a failure stays visible until the next compaction starts', () => {
     const failed = run([{ type: 'COMPACTION_FAILED', sessionId: S, strategy: 'autocompact', error: 'x' }]);
     expect(failed.compactionState).toBe('failed');
-    expect(failed.recoveryError).toBe('x');
+    expect(failed.compactionError).toBe('x');
+    expect(failed.recoveryError).toBeUndefined();
     const next = updateSessionState(failed, { type: 'COMPACTION_CHECK', sessionId: S, tokenCount: 6000, threshold: 5000 });
     expect(next.compactionState).toBe('checking_threshold');
+  });
+
+  test('a later successful compaction clears the failure cause', () => {
+    const failed = run([{ type: 'COMPACTION_FAILED', sessionId: S, strategy: 'autocompact', error: 'x' }]);
+    const done = updateSessionState(failed, { type: 'COMPACTION_DONE', sessionId: S, strategy: 'autocompact', tokensBefore: 6000, tokensAfter: 2000, durationMs: 5 });
+    expect(done.compactionError).toBeUndefined();
   });
 });
 

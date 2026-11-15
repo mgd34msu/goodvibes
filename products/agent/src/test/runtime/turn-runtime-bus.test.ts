@@ -14,10 +14,11 @@ import { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createTestManagers } from '../helpers/test-managers.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 
-const configManager = new ConfigManager({ surfaceRoot: 'tui',
+const configManager = new ConfigManager({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
   configDir: makeProjectTempDir(`gv-turn-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`),
 });
 

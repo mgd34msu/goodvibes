@@ -20,6 +20,9 @@ export interface AgentOwner {
   sessionId: string;
 }
 
+/** Ended agents remembered so a wake of one gets a fresh task. */
+const MAX_ENDED_AGENTS = 1000;
+
 /** Terminal agent lifecycle states that map to terminal task states. */
 const TERMINAL_STATES: ReadonlySet<AgentLifecycleState> = new Set([
   'completed',
@@ -74,6 +77,8 @@ export class AgentTaskAdapter {
   private readonly _agentToTask = new Map<string, string>();
   /** Maps task ID → agent ID. */
   private readonly _taskToAgent = new Map<string, string>();
+  /** Agents whose task already ended here, so a later wake of the same agent starts a fresh task. Oldest dropped past the cap. */
+  private readonly _endedAgents = new Set<string>();
 
   private readonly _dispatch: DomainDispatch;
   /** Prevent double-wiring the runtime bus. */
@@ -86,7 +91,7 @@ export class AgentTaskAdapter {
   // ── Runtime bus wiring ──────────────────────────────────────────────────────
 
   /**
-   * Subscribe to AGENT_COMPLETED / AGENT_FAILED / AGENT_CANCELLED events on the
+   * Subscribe to AGENT_RUNNING / AGENT_COMPLETED / AGENT_FAILED / AGENT_CANCELLED events on the
    * RuntimeEventBus and propagate them into the task registry.
    *
    * This is the authoritative wire that ensures task records reach terminal state
@@ -117,7 +122,24 @@ export class AgentTaskAdapter {
         if (typeof envelope.payload?.agentId !== 'string') return;
         const taskId = this._agentToTask.get(envelope.payload.agentId);
         if (taskId === undefined) return;
-        this.handleAgentStateChange(envelope.payload.agentId, 'failed');
+        this.handleAgentStateChange(envelope.payload.agentId, 'failed', envelope.payload.error);
+      },
+    );
+    const onRunning = bus.on<{ type: 'AGENT_RUNNING'; agentId: string; taskId?: string; wake?: true }>(
+      'AGENT_RUNNING',
+      (envelope) => {
+        const agentId = envelope.payload?.agentId;
+        if (typeof agentId !== 'string') return;
+        if (this._agentToTask.has(agentId)) {
+          this.handleAgentStateChange(agentId, 'running');
+          return;
+        }
+        // A finished agent woken again is a new run: its first task is final, so it gets its own.
+        if (envelope.payload.wake === true && this._endedAgents.has(agentId)) {
+          this._endedAgents.delete(agentId);
+          this.wrapAgent(agentId, `Agent ${agentId} (resumed)`, { sessionId: envelope.sessionId ?? 'system' });
+          this.handleAgentStateChange(agentId, 'running');
+        }
       },
     );
     const onCancelled = bus.on<{ type: 'AGENT_CANCELLED'; agentId: string; taskId?: string; reason?: string }>(
@@ -132,6 +154,7 @@ export class AgentTaskAdapter {
     return () => {
       onCompleted();
       onFailed();
+      onRunning();
       onCancelled();
       this._busAttached = false;
     };
@@ -179,14 +202,15 @@ export class AgentTaskAdapter {
    * @param agentId - Unique agent ID from the agent system.
    * @param task - Human-readable description of what the agent is doing.
    * @param owner - Session that spawned this agent.
-   * @returns The new task ID.
+   * @param taskId - Reuse a task id the caller already registered for this agent, so one agent has one task row. A task already in the store under that id is kept as it is.
+   * @returns The task ID.
    */
-  wrapAgent(agentId: string, task: string, owner: AgentOwner): string {
+  wrapAgent(agentId: string, task: string, owner: AgentOwner, taskId: string = randomUUID()): string {
     // Idempotent: return existing task ID if already wrapped
     const existing = this._agentToTask.get(agentId);
     if (existing !== undefined) return existing;
 
-    const taskId = randomUUID();
+    this._endedAgents.delete(agentId);
     const now = Date.now();
 
     const runtimeTask: RuntimeTask = {
@@ -205,7 +229,7 @@ export class AgentTaskAdapter {
     this._agentToTask.set(agentId, taskId);
     this._taskToAgent.set(taskId, agentId);
 
-    this._upsertTask(runtimeTask);
+    if (!this._store.getState().tasks.tasks.has(taskId)) this._upsertTask(runtimeTask);
     return taskId;
   }
 
@@ -214,8 +238,9 @@ export class AgentTaskAdapter {
    *
    * @param agentId - The agent whose state changed.
    * @param state - New agent lifecycle state (AgentLifecycleState string).
+   * @param detail - Why a failed agent failed; carried into the task's error text.
    */
-  handleAgentStateChange(agentId: string, state: AgentLifecycleState): void {
+  handleAgentStateChange(agentId: string, state: AgentLifecycleState, detail?: string): void {
     const taskId = this._agentToTask.get(agentId);
     if (taskId === undefined) return;
 
@@ -224,13 +249,14 @@ export class AgentTaskAdapter {
 
     this._transitionTask(taskId, taskStatus, {
       isTerminal: TERMINAL_STATES.has(agentState),
-      error: agentState === 'failed' ? `Agent ${agentId} failed` : undefined,
+      error: agentState === 'failed' ? (detail ? `Agent ${agentId} failed: ${detail}` : `Agent ${agentId} failed`) : undefined,
     });
 
     // Clean up mappings once terminal
     if (TERMINAL_STATES.has(agentState)) {
       this._agentToTask.delete(agentId);
       this._taskToAgent.delete(taskId);
+      if (agentState !== 'cancelled') this._rememberEnded(agentId);
     }
   }
 
@@ -280,6 +306,15 @@ export class AgentTaskAdapter {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private _rememberEnded(agentId: string): void {
+    this._endedAgents.delete(agentId);
+    this._endedAgents.add(agentId);
+    if (this._endedAgents.size > MAX_ENDED_AGENTS) {
+      const oldest = this._endedAgents.values().next().value;
+      if (oldest !== undefined) this._endedAgents.delete(oldest);
+    }
+  }
 
   private _upsertTask(task: RuntimeTask): void {
     this._dispatch.syncRuntimeTask(task, 'agent-adapter');

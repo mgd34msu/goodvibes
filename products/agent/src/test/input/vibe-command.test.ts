@@ -26,6 +26,17 @@ function commandHarness(): {
 }
 
 describe('/vibe command', () => {
+  test('a model-run import cannot mark the persona reviewed', async () => {
+    const { registry, out, ctx } = commandHarness();
+    await registry.execute('vibe', ['init', '--yes'], ctx);
+    const modelCtx = { ...ctx, invokedByModel: true } as CommandContext;
+    await registry.execute('vibe', ['import-persona', 'project', '--review', '--use', '--yes'], modelCtx);
+    expect(out.join('\n')).toContain('Refused: marking a persona reviewed');
+    const shellPaths = ctx.workspace?.shellPaths;
+    if (!shellPaths) throw new Error('missing shell paths');
+    expect(AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot().activePersona).toBeNull();
+  });
+
   test('previews, creates, shows, and imports VIBE.md as a reviewed active persona', async () => {
     const { registry, out, ctx } = commandHarness();
 

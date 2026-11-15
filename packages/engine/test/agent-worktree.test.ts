@@ -1,9 +1,19 @@
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentWorktree } from '../platform/src/platform/agents/worktree.js';
+import { AgentWorktree, AgentWorktreeMergeConflictError } from '../platform/src/platform/agents/worktree.js';
 import { GitService } from '../platform/src/platform/git/service.js';
+
+const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+
+/** A fixture repository root, removed after the test. */
+function tempRoot(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(root);
+  return root;
+}
 
 function runGit(cwd: string, args: string[]): string {
   const result = Bun.spawnSync(['git', ...args], { cwd });
@@ -15,7 +25,7 @@ function runGit(cwd: string, args: string[]): string {
 
 describe('AgentWorktree', () => {
   test('a scoped no-op leaves unrelated staged work pending', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-scoped-noop-'));
+    const root = tempRoot('agent-worktree-scoped-noop-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', 'Native fixture']);
     runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
@@ -29,7 +39,7 @@ describe('AgentWorktree', () => {
   });
 
   test('a scoped initial commit excludes pre-existing staged owner files', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-initial-index-'));
+    const root = tempRoot('agent-worktree-initial-index-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', 'Native fixture']);
     runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
@@ -42,7 +52,7 @@ describe('AgentWorktree', () => {
   });
 
   test('failed commit does not roll back a newer owner index installed during the attempt', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-newer-index-'));
+    const root = tempRoot('agent-worktree-newer-index-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', 'Native fixture']);
     runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
@@ -67,7 +77,7 @@ describe('AgentWorktree', () => {
   });
 
   test.each([false, true])('a scoped commit preserves owner staging outside its paths (rejected: %s)', async rejected => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-owner-index-'));
+    const root = tempRoot('agent-worktree-owner-index-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', 'Native fixture']);
     runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
@@ -99,7 +109,7 @@ describe('AgentWorktree', () => {
   });
 
   for (const ignored of [false, true]) test(`commitWorkingTree commits project changes without staging GoodVibes internal state (ignored=${ignored})`, async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-'));
+    const root = tempRoot('agent-worktree-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', '']);
     runGit(root, ['config', 'user.email', '']);
@@ -129,7 +139,7 @@ describe('AgentWorktree', () => {
   });
 
   test('commitWorkingTree preserves a configured native identity instead of selecting its fallback', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-identity-'));
+    const root = tempRoot('agent-worktree-identity-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', 'Native fixture']);
     runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
@@ -143,7 +153,7 @@ describe('AgentWorktree', () => {
   });
 
   test.each(['absent', 'invalid'] as const)('GitService does not commit with an %s fallback and missing native identity', async fallback => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-invalid-identity-'));
+    const root = tempRoot('agent-worktree-invalid-identity-');
     runGit(root, ['init']);
     runGit(root, ['config', 'user.name', '']);
     runGit(root, ['config', 'user.email', '']);
@@ -163,7 +173,7 @@ describe('AgentWorktree', () => {
   });
 
   test('commitWorkingTree(message, paths) stages only the given paths, leaving other dirty files uncommitted', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-scoped-'));
+    const root = tempRoot('agent-worktree-scoped-');
     runGit(root, ['init']);
 
     writeFileSync(join(root, 'touched.ts'), 'export const touched = true;\n');
@@ -182,7 +192,7 @@ describe('AgentWorktree', () => {
   });
 
   test('commitWorkingTree(message, paths) tolerates a hallucinated path mixed into the batch', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-scoped-hallucinated-'));
+    const root = tempRoot('agent-worktree-scoped-hallucinated-');
     runGit(root, ['init']);
 
     writeFileSync(join(root, 'real.ts'), 'export const real = true;\n');
@@ -199,7 +209,7 @@ describe('AgentWorktree', () => {
   });
 
   test('commitWorkingTree(message, paths) stages a confirmed deletion even though the path no longer exists on disk', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-scoped-deleted-'));
+    const root = tempRoot('agent-worktree-scoped-deleted-');
     runGit(root, ['init']);
     writeFileSync(join(root, 'gone.ts'), 'export const gone = true;\n');
     runGit(root, ['add', 'gone.ts']);
@@ -221,7 +231,7 @@ describe('AgentWorktree', () => {
     // its own bookkeeping under .goodvibes/, so a self-reported ledger mixes a real deliverable
     // with an ignored path. `git add -A -- <deliverable> <ignored>` exits non-zero AFTER staging
     // the deliverable, the ignored path must be filtered out first.
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-ignored-'));
+    const root = tempRoot('agent-worktree-ignored-');
     runGit(root, ['init']);
     writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
     runGit(root, ['add', '.gitignore']);
@@ -248,7 +258,7 @@ describe('AgentWorktree', () => {
   });
 
   test('commitWorkingTree(message, paths) returns hash:null when every scoped path is gitignored, staging nothing', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-all-ignored-'));
+    const root = tempRoot('agent-worktree-all-ignored-');
     runGit(root, ['init']);
     writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');
     runGit(root, ['add', '.gitignore']);
@@ -272,7 +282,7 @@ describe('AgentWorktree', () => {
   ] as const)('commitWorkingTree restores the index when the commit step fails after staging (%s identity; diagnostic=%s)', async (identity, diagnostic) => {
     // A genuinely-failing commit (here: a pre-commit hook that rejects) must not leave the
     // deliverable staged in the user's index. The staged path is reset before the error propagates.
-    const root = mkdtempSync(join(tmpdir(), 'agent-worktree-restore-'));
+    const root = tempRoot('agent-worktree-restore-');
     runGit(root, ['init']);
     writeFileSync(join(root, 'seed.ts'), 'export const seed = 1;\n');
     runGit(root, ['add', 'seed.ts']);
@@ -304,5 +314,64 @@ describe('AgentWorktree', () => {
     expect(runGit(root, ['diff', '--cached', '--name-only']).trim()).toBe('');
     // And the working-tree file is untouched (still present, just not staged).
     expect(runGit(root, ['status', '--porcelain']).trim()).toContain('deliverable.ts');
+  });
+});
+
+describe('AgentWorktree.merge', () => {
+  function mergeFixture(prefix: string) {
+    const root = tempRoot(prefix);
+    runGit(root, ['init', '-b', 'main']);
+    runGit(root, ['config', 'user.name', 'Native fixture']);
+    runGit(root, ['config', 'user.email', 'native-fixture@example.test']);
+    writeFileSync(join(root, 'shared.ts'), 'base\n');
+    runGit(root, ['add', '.']); runGit(root, ['commit', '-m', 'baseline']);
+    return root;
+  }
+  function commitIn(path: string, message: string): void {
+    runGit(path, ['add', '-A']);
+    runGit(path, ['-c', 'user.name=t', '-c', 'user.email=t@t.t', 'commit', '-m', message]);
+  }
+  const branchOf = (root: string, name: string): boolean => Bun.spawnSync(['git', 'rev-parse', '--verify', '-q', `refs/heads/${name}`], { cwd: root }).exitCode === 0;
+
+  test('a conflicting merge keeps the worktree, its branch and its uncommitted work, and names the conflict', async () => {
+    const root = mergeFixture('agent-worktree-conflict-');
+    const agents = new AgentWorktree(root);
+    const path = await agents.create('a1');
+    writeFileSync(join(path, 'shared.ts'), 'agent\n');
+    commitIn(path, 'agent change');
+    writeFileSync(join(path, 'scratch.txt'), 'uncommitted\n');
+    writeFileSync(join(root, 'shared.ts'), 'main\n');
+    runGit(root, ['commit', '-am', 'main change']);
+    const failure = await agents.merge('a1').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AgentWorktreeMergeConflictError);
+    expect((failure as AgentWorktreeMergeConflictError).conflicts).toEqual(['shared.ts']);
+    expect(existsSync(path)).toBe(true);
+    expect(readFileSync(join(path, 'scratch.txt'), 'utf8')).toBe('uncommitted\n');
+    expect(branchOf(root, 'agent/a1')).toBe(true);
+    expect(runGit(root, ['status', '--porcelain', '--', ':!.goodvibes'])).toBe('');
+    expect(readFileSync(join(root, 'shared.ts'), 'utf8')).toBe('main\n');
+  });
+
+  test('a clean merge removes the worktree and deletes the merged branch', async () => {
+    const root = mergeFixture('agent-worktree-clean-merge-');
+    const agents = new AgentWorktree(root);
+    const path = await agents.create('a2');
+    writeFileSync(join(path, 'new.ts'), 'agent\n');
+    commitIn(path, 'agent change');
+    expect(await agents.merge('a2')).toBe(true);
+    expect(existsSync(path)).toBe(false);
+    expect(branchOf(root, 'agent/a2')).toBe(false);
+    expect(readFileSync(join(root, 'new.ts'), 'utf8')).toBe('agent\n');
+  });
+
+  test('a merged worktree that still holds uncommitted work is kept rather than forced away', async () => {
+    const root = mergeFixture('agent-worktree-dirty-merge-');
+    const agents = new AgentWorktree(root);
+    const path = await agents.create('a3');
+    writeFileSync(join(path, 'new.ts'), 'agent\n');
+    commitIn(path, 'agent change');
+    writeFileSync(join(path, 'late.txt'), 'written after the commit\n');
+    expect(await agents.merge('a3')).toBe(true);
+    expect(readFileSync(join(path, 'late.txt'), 'utf8')).toBe('written after the commit\n');
   });
 });

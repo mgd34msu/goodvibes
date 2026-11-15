@@ -571,10 +571,9 @@ describe('ImapClient literal size cap', () => {
     await expect(client.searchUnseen()).rejects.toThrow(/oversized literal/);
   });
 
-  test('literal at exactly the cap is accepted', async () => {
-    // The default cap is max(1MB, 4*4096) = 1MB. Send exactly 1 byte under.
+  test('literal one byte over the cap is rejected', async () => {
+    // The default cap is 1 MB; the literal announced below is one byte larger.
     const CAP = 1_048_576;
-    const safeSize = CAP; // test the boundary: exactly at cap should be rejected (> check)
 
     fakeServer = await makeFakeImapServer((sock) => {
       serverWrite(sock, '* OK IMAP4rev1 Fake Server ready');
@@ -586,11 +585,7 @@ describe('ImapClient literal size cap', () => {
           if (line.includes('LOGIN')) serverWrite(sock, `${tag} OK LOGIN completed`);
           else if (line.includes('EXAMINE')) serverWrite(sock, `${tag} OK [READ-ONLY] EXAMINE completed`);
           else if (line.includes('SEARCH')) {
-            // Exact cap size should also be rejected (requested > cap means > literal cap)
-            // Actually cap check is: requested > literalCap. So safeSize = CAP means
-            // requested(CAP) > literalCap(CAP) is false => accepted.
-            // Use CAP+1 to test rejection.
-            serverWrite(sock, `* SEARCH {${safeSize + 1}}`);
+            serverWrite(sock, `* SEARCH {${CAP + 1}}`);
             sock.write('X');
           }
         }
@@ -1326,7 +1321,7 @@ describe('ImapClient refusal classification', () => {
     expect(failure.serverMessage).toBe('');
   });
 
-  test('a too-many-connections refusal with no response code is read from its wording', async () => {
+  test('a refusal with no response code and a service-category reading maps to a non-terminal server-unavailable', async () => {
     const failure = await failureOf(refusing({
       login: (tag) => `${tag} NO Too many connections for this account, try again later`,
     }));
@@ -1344,7 +1339,7 @@ describe('ImapClient refusal classification', () => {
     expect(failure.terminal).toBe(true);
   });
 
-  test('a bad-credential refusal with no response code is still terminal', async () => {
+  test('a refusal with no response code and an authentication-category reading maps to a terminal authentication-rejected', async () => {
     const failure = await failureOf(refusing({
       login: (tag) => `${tag} NO Invalid username or password`,
     }));

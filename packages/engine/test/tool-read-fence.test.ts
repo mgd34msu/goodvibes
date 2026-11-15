@@ -86,16 +86,24 @@ test('an owner revoked while a relaxed body runs never has that body\'s result p
 });
 
 test('a relaxed body still sees revocation once the window has passed', async () => {
+  let sawRevocation = false;
   const f = fixture(['read_fs'], async (args, options) => {
     relaxCurrentToolReadFences(args, options);
     assertCurrentToolInvocation(args, options);
     f.owner.revoked = true;
-    await new Promise(resolve => setTimeout(resolve, 400));
-    expect(() => assertCurrentToolInvocation(args, options)).toThrow();
+    // The fence window is bounded (a few hundred ms at most); poll until the
+    // checkpoint stops passing. Waiting longer can only help, so a loaded
+    // machine does not make this flaky; a fence that never re-verifies runs the
+    // poll out and leaves the flag false.
+    for (let attempt = 0; attempt < 300 && !sawRevocation; attempt++) {
+      try { assertCurrentToolInvocation(args, options); } catch { sawRevocation = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     return { success: true, output: 'unreachable publication' };
   });
   let published: string | undefined;
   try { published = JSON.stringify(await f.run()); } catch { published = undefined; }
+  expect(sawRevocation).toBe(true);
   expect(published ?? '').not.toContain('unreachable publication');
 });
 

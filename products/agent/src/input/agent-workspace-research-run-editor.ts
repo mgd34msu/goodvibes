@@ -1,4 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -20,11 +21,6 @@ function splitList(value: string): readonly string[] {
     .split(/[\n,]/)
     .map((entry) => entry.replace(/^[-*]\s+/, '').trim())
     .filter(Boolean);
-}
-
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
 }
 
 export function createAgentResearchRunEditor(): AgentWorkspaceLocalEditor {
@@ -137,7 +133,7 @@ export function buildAgentResearchRunPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Research run',
-      detail: 'Submitted a request to create a visible checkpointable local research run.',
+      detail: 'Asked the model to create a visible checkpointable local research run. Nothing is created until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

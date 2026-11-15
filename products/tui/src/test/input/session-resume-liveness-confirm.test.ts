@@ -22,14 +22,30 @@ import { loadWorkTreeTurnOutcomes } from '../../core/work-tree-fold-store.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
 let tmpDir: string;
+const children: Array<ReturnType<typeof Bun.spawn>> = [];
 
 beforeEach(() => {
   tmpDir = makeProjectTempDir('gv-resume-liveness-confirm');
 });
 
 afterEach(() => {
+  while (children.length > 0) children.pop()!.kill();
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
 });
+
+/** A real second process that stays alive until the test ends, so its pid is "another live process" on any host. */
+function startOtherLiveProcess(): number {
+  const child = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1 << 30)'], { stdio: ['ignore', 'ignore', 'ignore'] });
+  children.push(child);
+  return child.pid;
+}
+
+/** The pid of a process that has already exited and been reaped. */
+async function exitedProcessPid(): Promise<number> {
+  const child = Bun.spawn([process.execPath, '-e', ''], { stdio: ['ignore', 'ignore', 'ignore'] });
+  await child.exited;
+  return child.pid;
+}
 
 function makeCtx(sm: SessionManager, printed: string[]): CommandContext {
   const conversation = new ConversationManager(() => 80);
@@ -67,12 +83,7 @@ describe('/session resume: multi-instance liveness confirm', () => {
   test('a live marker from a DIFFERENT pid warns and refuses without --force', async () => {
     const sm = new SessionManager(tmpDir, { surface: makeTestSurface(tmpDir) });
     sm.save('sess-b', [{ role: 'user', content: 'hi' }], { title: 'B', model: 'm', provider: 'p', timestamp: Date.now() });
-    // A pid guaranteed to differ from this test process's own pid, and (being
-    // pid 1 / init on any real machine, but here just an arbitrary alive-ish
-    // pid), use a pid this process itself IS, then assert against a marker
-    // for a pid that is NOT this process: init (pid 1) is virtually always a
-    // real running process on any POSIX host running this test.
-    const otherPid = 1;
+    const otherPid = startOtherLiveProcess();
     writeLivenessMarker(makeTestSurface(tmpDir), 'sess-b', otherPid);
     const printed: string[] = [];
     const ctx = makeCtx(sm, printed);
@@ -91,7 +102,7 @@ describe('/session resume: multi-instance liveness confirm', () => {
   test('the same live marker WITH --force proceeds to resume', async () => {
     const sm = new SessionManager(tmpDir, { surface: makeTestSurface(tmpDir) });
     sm.save('sess-c', [{ role: 'user', content: 'hi' }], { title: 'C', model: 'm', provider: 'p', timestamp: Date.now() });
-    writeLivenessMarker(makeTestSurface(tmpDir), 'sess-c', 1);
+    writeLivenessMarker(makeTestSurface(tmpDir), 'sess-c', startOtherLiveProcess());
     const printed: string[] = [];
     const ctx = makeCtx(sm, printed);
 
@@ -118,8 +129,7 @@ describe('/session resume: multi-instance liveness confirm', () => {
   test('a stale marker (pid no longer running) never blocks; best-effort, never a hard lock', async () => {
     const sm = new SessionManager(tmpDir, { surface: makeTestSurface(tmpDir) });
     sm.save('sess-stale', [{ role: 'user', content: 'hi' }], { title: 'Stale', model: 'm', provider: 'p', timestamp: Date.now() });
-    // A pid essentially guaranteed not to be running.
-    writeLivenessMarker(makeTestSurface(tmpDir), 'sess-stale', 2_147_483_000);
+    writeLivenessMarker(makeTestSurface(tmpDir), 'sess-stale', await exitedProcessPid());
     const printed: string[] = [];
     const ctx = makeCtx(sm, printed);
 

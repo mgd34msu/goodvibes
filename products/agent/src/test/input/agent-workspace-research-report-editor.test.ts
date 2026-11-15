@@ -5,11 +5,21 @@ import { buildAgentResearchReportToolArgs, buildAgentResearchReportPromptSubmiss
 // Pure structural/formatting regressions. Protected runtime adoption is exercised
 // separately with the actual asynchronous owner and workspace controller.
 function buildAgentResearchReportPromptSubmission(editor: ReturnType<typeof createAgentResearchReportEditor>, read: (id: string) => string, available: boolean) {
-  try { return formatPrompt(editor, read, available, buildAgentResearchReportToolArgs(read, 'Save a reviewed source-grounded research report as an Agent artifact.')); }
-  catch { return formatPrompt(editor, read, available); }
+  return formatPrompt(editor, read, available, buildAgentResearchReportToolArgs(read, 'Save a reviewed source-grounded research report as an Agent artifact.'));
 }
 
 afterAll(cleanupResearchScreeningFixtures);
+
+test('the report relay says the model was asked, not that the artifact was saved', () => {
+  const result = buildAgentResearchReportPromptSubmission(createAgentResearchReportEditor(), reader('Source | https://example.test/a | high | note'), true);
+  expect(result.kind === 'prompt' && result.actionResult.detail.startsWith('Asked the model')).toBe(true);
+});
+async function submitProtected(sources: string) {
+  const fixture = researchScreeningFixture({ recordCalls: false });
+  let result: ReturnType<typeof formatPrompt> | undefined;
+  await submitProtectedAgentResearchReport(createAgentResearchReportEditor(), { ...fields, sources }, true, fixture.owner, {}, value => { result = value; });
+  return result;
+}
 const fields = { title: 'Report', question: 'What is supported?', summary: 'Evidence [S1].', confirm: 'yes' };
 const reader = (sources: string) => (id: string): string => ({ ...fields, sources } as Record<string, string>)[id] ?? '';
 
@@ -64,9 +74,14 @@ describe('research report editor source containment', () => {
     test(`refuses declared credential syntax before prompt projection: ${url}`, () => {
       for (const sources of [url, `${url} | high`, `${url} | ${url} | high | ${url}`]) {
         expect(() => buildAgentResearchReportToolArgs(reader(sources), 'Save the report.')).toThrow('Refused before judgment');
-        const result = buildAgentResearchReportPromptSubmission(createAgentResearchReportEditor(), reader(sources), true);
-        expect(result.kind).toBe('editor');
-        expect(result.actionResult?.kind).toBe('error');
+        expect(() => buildAgentResearchReportPromptSubmission(createAgentResearchReportEditor(), reader(sources), true)).toThrow('Refused before judgment');
+      }
+    });
+    test(`the protected submission holds the editor open with an error for: ${url}`, async () => {
+      for (const sources of [url, `${url} | high`, `${url} | ${url} | high | ${url}`]) {
+        const result = await submitProtected(sources);
+        expect(result?.kind).toBe('editor');
+        expect(result?.actionResult?.kind).toBe('error');
         expect(JSON.stringify(result)).not.toContain('sentinel');
       }
     });
@@ -193,11 +208,12 @@ describe('research report editor source containment', () => {
     expect(JSON.stringify(result)).not.toContain('sentinel');
   });
 
-  test('refuses protected non-URL source text before any model prompt is returned', () => {
-    const result = buildAgentResearchReportPromptSubmission(createAgentResearchReportEditor(),
-      reader(`Document | https://example.test/document | high | ${'ordinary '.repeat(600)}authorization: Bearer sentinel`), true);
-    expect(result.kind).toBe('editor');
-    expect(result.actionResult?.kind).toBe('error');
+  test('refuses protected non-URL source text before any model prompt is returned', async () => {
+    const sources = `Document | https://example.test/document | high | ${'ordinary '.repeat(600)}authorization: Bearer sentinel`;
+    expect(() => buildAgentResearchReportToolArgs(reader(sources), 'Save the report.')).toThrow('Refused before judgment');
+    const result = await submitProtected(sources);
+    expect(result?.kind).toBe('editor');
+    expect(result?.actionResult?.kind).toBe('error');
     expect(JSON.stringify(result)).not.toContain('sentinel');
   });
 });

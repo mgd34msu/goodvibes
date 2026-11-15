@@ -14,7 +14,8 @@ type AgentSetupAction =
   | 'token'
   | 'smoke'
   | 'finish'
-  | 'import_settings';
+  | 'import_settings'
+  | 'apply_import';
 
 interface AgentSetupToolArgs {
   readonly action?: unknown;
@@ -59,13 +60,20 @@ function normalizeSetupAction(value: unknown): AgentSetupAction | null {
   if (action === 'token' || action === 'auth' || action === 'provision_token' || action === 'repair_token') return 'token';
   if (action === 'smoke' || action === 'run_smoke' || action === 'install_smoke') return 'smoke';
   if (action === 'finish' || action === 'closeout' || action === 'apply_close' || action === 'apply_and_close') return 'finish';
-  if (action === 'import' || action === 'import_settings' || action === 'settings_import') return 'import_settings';
+  if (action === 'import' || action === 'apply_import' || action === 'import_apply') return 'apply_import';
+  if (action === 'import_settings' || action === 'settings_import') return 'import_settings';
   return null;
 }
 
-function readAction(args: AgentSetupToolArgs): AgentSetupAction {
-  const explicit = normalizeSetupAction(args.action) ?? normalizeSetupAction(args.mode);
-  if (explicit) return explicit;
+const SETUP_ACTION_WORDS = ['status', 'item', 'repair', 'checkpoint', 'save_checkpoint', 'clear_checkpoint', 'token', 'smoke', 'finish', 'import_settings', 'import', 'apply_import'] as const;
+
+/**
+ * The action, inferred from the fields only when none was named. A word that was
+ * sent but is not an action gives null: falling back to `status` would answer a
+ * different request than the one made.
+ */
+function readAction(args: AgentSetupToolArgs): AgentSetupAction | null {
+  if (readString(args.action) || readString(args.mode)) return normalizeSetupAction(args.action) ?? normalizeSetupAction(args.mode);
   if (readString(args.setupItemId) || readString(args.itemId)) return 'item';
   return 'status';
 }
@@ -115,8 +123,8 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'item', 'repair', 'checkpoint', 'save_checkpoint', 'clear_checkpoint', 'token', 'smoke', 'finish', 'import_settings'],
-            description: 'Setup action; inspect status/item/checkpoint or request a supported effect.',
+            enum: [...SETUP_ACTION_WORDS],
+            description: 'Setup action; status/item/checkpoint read. import_settings previews the shared-settings import; import (or apply_import) applies it. Effects need a current recorded admission.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           setupItemId: { type: 'string', description: 'Setup item id.' },
@@ -126,7 +134,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           fields: { type: 'object', description: 'Optional user-run setup smoke output.' },
           includeParameters: { type: 'boolean', description: 'Include bounded route details and parameters where supported.' },
           limit: { type: 'number', description: 'Optional status list limit.' },
-          confirm: { type: 'boolean', description: 'Optional legacy context; never grants authority.' },
+          confirm: { type: 'boolean', description: 'Optional context; never grants authority. Only import_settings reads it, as a legacy way to ask for apply (use apply_import).' },
           explicitUserRequest: { type: 'string', description: 'Optional request context; never grants authority.' },
         },
         additionalProperties: false,
@@ -138,6 +146,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
       if (!assertCurrentToolInvocation(rawArgs as Record<string, unknown>, options)) return error('Setup requires a current recorded invocation.');
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSetupToolArgs;
       const action = readAction(args);
+      if (!action) return error(`Unknown setup action "${readString(args.action) || readString(args.mode)}". Use one of: ${SETUP_ACTION_WORDS.join(', ')}.`);
       const run = (name: string, input: Record<string, unknown>) => deps.toolRegistry.executeNested(randomUUID(), name, input, options);
 
       if (action === 'status') return run('agent_harness', setupStatusArgs(args));
@@ -193,14 +202,14 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           ...confirmedArgs(args),
         });
       }
-      if (action === 'import_settings') {
+      if (action === 'import_settings' || action === 'apply_import') {
         return run('import_goodvibes_settings', {
-          action: readBoolean(args.confirm) ? 'apply' : 'preview',
+          action: action === 'apply_import' || readBoolean(args.confirm) ? 'apply' : 'preview',
           ...confirmedArgs(args),
         });
       }
 
-      return error('Unknown setup action. Use action:"status" to inspect first-run setup.');
+      return error(`Unknown setup action. Use one of: ${SETUP_ACTION_WORDS.join(', ')}.`);
     },
   };
 }

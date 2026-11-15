@@ -90,7 +90,7 @@ export async function deactivate() {
 }
 `);
   const stateFilePath = join(root, 'plugins.json');
-  writeFileSync(stateFilePath, JSON.stringify({ enabled: { owned: options.enabled ?? true }, config: { owned: { marker: 'keep' } }, trust: {}, quarantine: {} }));
+  writeFileSync(stateFilePath, JSON.stringify({ enabled: { owned: options.enabled ?? true }, enabledDirs: { owned: pluginDir }, config: { owned: { marker: 'keep' } }, trust: {}, quarantine: {} }));
   const initialState = readFileSync(stateFilePath, 'utf8');
   const commands = new Map<string, HostSlashCommand>();
   const hooks = new Set<(event: { payload: unknown }) => void>();
@@ -262,7 +262,7 @@ describe('PluginManager owned shutdown', () => {
     mkdirSync(second);
     writeFileSync(join(second, 'manifest.json'), JSON.stringify({ name: 'second', version: '1.0.0', description: 'second fixture' }));
     writeFileSync(join(second, 'index.js'), readFileSync(join(first, 'index.js')));
-    writeFileSync(fx.stateFilePath, JSON.stringify({ enabled: { owned: true, second: true }, config: {}, trust: {}, quarantine: {} }));
+    writeFileSync(fx.stateFilePath, JSON.stringify({ enabled: { owned: true, second: true }, enabledDirs: { owned: first, second }, config: {}, trust: {}, quarantine: {} }));
     const before = fx.state();
     await fx.manager.init(fx.deps);
     fx.probe.failDeactivate = true;

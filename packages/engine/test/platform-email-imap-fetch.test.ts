@@ -90,7 +90,11 @@ function startFakeImap(
   const state: FakeState = { commands: [], literals: [], declaredBytes: [], receivedBytes: [] };
 
   return new Promise<FakeServer>((resolve) => {
+    // `server.close()` only stops the listener; open connections are ended with it.
+    const sockets = new Set<Socket>();
     const server: Server = createServer((socket: Socket) => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
       let buffer = Buffer.alloc(0);
       let literalRemaining = 0;
       let literalChunks: Buffer[] = [];
@@ -164,7 +168,10 @@ function startFakeImap(
       resolve({
         port: (address as { port: number }).port,
         state,
-        close: () => server.close(),
+        close: () => {
+          server.close();
+          for (const socket of sockets) socket.destroy();
+        },
       });
     });
   });
@@ -177,13 +184,14 @@ async function connectSocket(port: number): Promise<Socket> {
 }
 
 async function openClient(port: number): Promise<ImapClient> {
+  const socket = await connectSocket(port);
   const client = new ImapClient({
-    socket: await connectSocket(port),
+    socket,
     username: 'owner@example.test',
     password: 'app-password',
     timeoutMs: 3000,
   });
-  await client.open();
+  try { await client.open(); } catch (error) { socket.destroy(); throw error; }
   return client;
 }
 
@@ -642,7 +650,8 @@ describe('BODYSTRUCTURE parsing is defensive', () => {
     expect(decodeTextPart('caf=C3=A9', 'quoted-printable', 'utf-8')).toBe('café');
     expect(decodeTextPart('a=\r\nb', 'quoted-printable', 'utf-8')).toBe('ab');
     expect(decodeTextPart('plain\r\ntext', '7bit', '')).toBe('plain\ntext');
-    expect(decodeTextPart('%%%not base64%%%', 'base64', 'utf-8')).not.toBe(undefined);
+    // Lenient: characters outside the base64 alphabet are dropped and the rest is decoded.
+    expect(decodeTextPart('SGVs%%bG8=!!', 'base64', 'utf-8')).toBe('Hello');
     expect(decodeTextPart('', 'base64', 'utf-8')).toBe('');
   });
 });

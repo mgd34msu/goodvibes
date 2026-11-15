@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { captureDirtyFile, captureDirtyTreeRoot, equalDirtyFiles, type CapturedDirtyFile, type DirtyTreeRoot } from '../orchestration/dirty-file-observation.js';
-import { nativeDirtySnapshotEntries, nativeDirtySnapshotRoot, snapshotDirtyTree, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
+import { nativeDirtySnapshotEntries, nativeDirtySnapshotRoot, snapshotDirtyTreeWithin, type ScopedCommitExclusion } from '../orchestration/dirty-guard.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import type { Contract, TreeBaseline } from './types.js';
 
@@ -46,7 +46,8 @@ function isSavedObservation(value: string): boolean {
   } catch { return false; }
 }
 export function createTreeBaseline(cwd: string, head: string | null): TreeBaseline {
-  const snapshot = snapshotDirtyTree(cwd), entries = nativeDirtySnapshotEntries(snapshot, cwd), selection = nativeDirtySnapshotRoot(snapshot, cwd), dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
+  // A contract baseline must hold every owner edit exactly, so it is not bounded like the engine's launch snapshot.
+  const snapshot = snapshotDirtyTreeWithin(cwd, { perFileBytes: Number.MAX_SAFE_INTEGER, totalBytes: Number.MAX_SAFE_INTEGER }), entries = nativeDirtySnapshotEntries(snapshot, cwd), selection = nativeDirtySnapshotRoot(snapshot, cwd), dirty: Record<string, string | null> = Object.create(null) as Record<string, string | null>;
   for (const [path, file] of entries) {
     if (file.kind === 'unavailable') throw new Error('Original dirty baseline is unavailable; owner edits remain uncommitted');
     file.assertCurrent(); dirty[path] = commitment(file); file.assertCurrent();

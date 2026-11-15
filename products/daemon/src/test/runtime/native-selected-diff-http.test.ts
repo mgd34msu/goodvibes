@@ -1,6 +1,7 @@
 /** Real checkpoints + paired intake + production work and hosted-turn owners. */
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { exportAndCompareFixture } from '../helpers/webui-fixture-parity.ts';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
@@ -264,15 +265,12 @@ test('selected native diff stays exact host evidence through capture, changed wo
     const stale = { command: staleCommand, capture: await wire('workLedger.intake.capture', staleCommand), diff: sessionDiff };
     expect(stale.capture.status).toBe(409); expect(stale.capture.body).toContain('NATIVE_SELECTED_DIFF_STALE');
     const directory = process.env.GOODVIBES_TEST_NATIVE_SELECTED_DIFF_FIXTURE_DIR;
-    if (directory) {
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'lifecycle.json'), JSON.stringify({ source: 'Real paired DaemonServer, real WorkspaceCheckpointManager, actual native Orchestrator and work graph, owned loopback/synthetic models. All wire request/body strings unchanged.',
+    exportAndCompareFixture(directory, 'lifecycle.json', JSON.stringify({ source: 'Real paired DaemonServer, real WorkspaceCheckpointManager, actual native Orchestrator and work graph, owned loopback/synthetic models. All wire request/body strings unchanged.',
         projectId: first.identity.projectId, sessionId, auth, project, sessionList, sessionRow, sharedSession, discovery, discoveryDenied, busyDiscovery, checkpoints, legacy,
         changedSessionDiff, initial: { ...first, start: initialStart, status: initialStatus }, session, repeated, workspace, stale, cancel, queuedCancel, queuedDelivery,
         active: { ...active, start: activeStart, status: activeStatus },
         modelRequests: requests.filter(request => request.stream && [COMMENT, QUEUED_DELIVERY].includes(String(lastUser(request)))).map(request => ({ stream: request.stream, messages: request.messages.filter(message => message.role === 'user' || message.role === 'assistant' || (typeof message.content === 'string' && message.content.includes(JSON.stringify(exactSessionHunk).slice(1, -1)))) })),
-      }, null, 2) + '\n');
-    }
+      }, null, 2) + '\n', new URL('../../../../webui/e2e/support/fixtures/native-selected-diff/', import.meta.url));
     restoreJudgment?.(); restoreJudgment = undefined;
     await f.stop();
     restarted = await createNativeIntakeExecutionHttpFixture({ root: f.root, paired: f.paired, resumedSourceText: WORK });

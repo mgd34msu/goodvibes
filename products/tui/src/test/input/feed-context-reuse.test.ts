@@ -4,21 +4,25 @@
  * Verifies that the feedContext object reference is the same across multiple
  * feed() calls, confirming that no per-keystroke context allocation occurs.
  */
-import { describe, test, expect, mock, spyOn } from 'bun:test';
+import { afterEach, describe, test, expect, mock, spyOn } from 'bun:test';
 import type { InputFeedContext } from '../../input/handler-feed.ts';
 import * as handlerFeedModule from '../../input/handler-feed.ts';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 
 describe('InputFeedContext reuse (α1)', () => {
+  // Restored after every test, pass or fail, so one failed assertion cannot leave feedInputTokens mocked for the rest of the file.
+  const spies: Array<{ mockRestore(): void }> = [];
+  afterEach(() => { for (const spy of spies.splice(0)) spy.mockRestore(); });
+
   test('feedInputTokens receives the same context object on every feed() call', () => {
     // We spy on feedInputTokens to capture the context object passed to it.
     const capturedContextRefs: InputFeedContext[] = [];
-    const spy = spyOn(handlerFeedModule, 'feedInputTokens').mockImplementation(
+    spies.push(spyOn(handlerFeedModule, 'feedInputTokens').mockImplementation(
       (ctx: InputFeedContext) => {
         capturedContextRefs.push(ctx);
       },
-    );
+    ));
 
     // Build a minimal InputHandler, only needs enough to construct without crashing.
     // We import dynamically so the spy is in place before the module executes feedInputTokens.
@@ -97,21 +101,21 @@ describe('InputFeedContext reuse (α1)', () => {
       expect(capturedContextRefs[i]).toBe(firstRef);
     }
 
-    spy.mockRestore();
   });
 
   test('mutable fields on the context reflect updated handler state between feeds', () => {
     // This test verifies that per-feed sync correctly propagates prompt/cursorPos
     // changes between feeds, i.e., the context is not stale after the first feed.
     const capturedContexts: Array<{ prompt: string; cursorPos: number }> = [];
-    const spy = spyOn(handlerFeedModule, 'feedInputTokens').mockImplementation(
+    spies.push(spyOn(handlerFeedModule, 'feedInputTokens').mockImplementation(
       (ctx: InputFeedContext) => {
-        // Simulate what feedInputTokens does: mutate context fields
+        // Stands in for the real feed: what is under test is that the handler copies the mutated
+        // prompt and cursor back and hands them to the next feed, not what the stand-in writes.
         ctx.prompt = ctx.prompt + 'x';
         ctx.cursorPos = ctx.prompt.length;
         capturedContexts.push({ prompt: ctx.prompt, cursorPos: ctx.cursorPos });
       },
-    );
+    ));
 
     const { InputHandler } = require('../../input/handler.ts') as typeof import('../../input/handler.ts');
 
@@ -167,6 +171,5 @@ describe('InputFeedContext reuse (α1)', () => {
     expect(capturedContexts[1]?.prompt).toBe('xx');
     expect(capturedContexts[1]?.cursorPos).toBe(2);
 
-    spy.mockRestore();
   });
 });

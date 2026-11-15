@@ -313,6 +313,11 @@ describe('the composed daemon serves the whole devices.* family', () => {
 
 const requestBody = { nodeId: 'phone-1', capabilityId: 'device.camera.rear.capture', reason: 'Read the exact synthetic test capture' };
 const requestDevice = (h: Harness) => h.invoke('devices.capability.request', { ...CONTEXT, body: requestBody }) as Promise<{ ok: boolean; refusal: string; detail: string }>;
+/** The stores queue writes on a private chain; holding it open stalls every write. A rename fails here by name instead of silently stalling nothing. */
+function stallWrites(store: object, until: Promise<void>): void {
+  expect('writeChain' in store, 'store no longer has a write queue named writeChain; update this test seam').toBe(true);
+  (store as { writeChain: Promise<void> }).writeChain = until;
+}
 function barrier() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe('recorded current device ownership', () => {
@@ -349,8 +354,7 @@ describe('recorded current device ownership', () => {
   });
   test.each(['revoke', 'sweep'] as const)('a request beginning after pending %s intent cannot use old bytes', async mutation => {
     const h = harness(); h.approve('always'); expect(await requestDevice(h)).toMatchObject({ ok: true });
-    const release = barrier(); const store = h.service.grants as unknown as { writeChain: Promise<void> };
-    store.writeChain = release.promise;
+    const release = barrier(); stallWrites(h.service.grants, release.promise);
     const pending = mutation === 'revoke' ? h.service.grants.revoke({ nodeId: 'phone-1', actor: 'fixture' }) : h.service.grants.sweep();
     expect(h.service.grants.hasPendingRevocations()).toBe(true);
     expect(await requestDevice(h)).toMatchObject({ ok: false, refusal: 'denied-by-jev' });
@@ -395,7 +399,7 @@ describe('recorded current device ownership', () => {
   });
   test('revocation while retained capture index is queued prevents publication and removes unindexed bytes', async () => {
     const h = harness(); h.sendBytes(true); const release = barrier();
-    (h.service.artifacts as unknown as { writeChain: Promise<void> }).writeChain = release.promise;
+    stallWrites(h.service.artifacts, release.promise);
     const entered = barrier(); const original = h.transport.invokePeer.bind(h.transport);
     h.transport.invokePeer = async input => { const result = await original(input); entered.resolve(); return result; };
     const pending = requestDevice(h); await entered.promise;
@@ -410,8 +414,9 @@ test.each(['remove', 'rewrite-same'] as const)('external %s after admitted grant
   const h = harness(); h.approve('always'); const original = h.service.grants.record.bind(h.service.grants);
   const spy = spyOn(h.service.grants, 'record').mockImplementation(async input => {
     const grant = await original(input);
-    const store = h.service.grants as unknown as { store: { lockPath: string } };
-    const fs = await import('node:fs/promises'); const path = store.store.lockPath.slice(0, -5);
+    const store = h.service.grants as unknown as { store?: { lockPath?: unknown } };
+    expect(typeof store.store?.lockPath, 'grant store no longer exposes its lock path; update this test seam').toBe('string');
+    const fs = await import('node:fs/promises'); const path = (store.store!.lockPath as string).slice(0, -5);
     const snapshot = JSON.parse(await fs.readFile(path, 'utf8')); if (mode === 'remove') snapshot.grants = [];
     await fs.writeFile(path, JSON.stringify(snapshot)); return grant;
   });

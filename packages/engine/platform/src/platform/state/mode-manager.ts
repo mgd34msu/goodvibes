@@ -45,19 +45,19 @@ const VIBECODING_VERBOSITY: VerbosityDefaults = {
 const BUILT_IN_MODES: ModeDefinition[] = [
   {
     name: 'default',
-    description: 'Standard precision tool verbosity with confirmation prompts.',
+    description: 'Standard precision tool verbosity. Sets output detail only; it does not change what asks for confirmation.',
     verbosityDefaults: DEFAULT_VERBOSITY,
     enforcement: 'advisory',
   },
   {
     name: 'vibecoding',
-    description: 'Reduced verbosity for rapid iteration; still confirms destructive operations.',
+    description: 'Reduced tool verbosity for rapid iteration. Sets output detail only; it does not change what asks for confirmation.',
     verbosityDefaults: VIBECODING_VERBOSITY,
     enforcement: 'advisory',
   },
   {
     name: 'justvibes',
-    description: 'Minimal output, no confirmation prompts. Fast and autonomous.',
+    description: 'Same reduced tool verbosity as vibecoding. Sets output detail only; it does not skip confirmations (those follow the permission settings).',
     verbosityDefaults: VIBECODING_VERBOSITY,
     enforcement: 'advisory',
   },

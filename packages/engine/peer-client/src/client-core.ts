@@ -10,6 +10,7 @@ import type { HttpTransport } from '@goodvibes-jev/engine/transport-http';
 import {
   firstJsonSchemaFailureAsync,
   invokeContractRoute,
+  retainJsonSchemaSource,
   mergeClientInput,
   requireContractRoute,
   type ContractInvokeOptions,
@@ -137,21 +138,36 @@ export function createPeerRemoteClient(
     input?: Record<string, unknown>,
     options: PeerRemoteClientInvokeOptions = {},
   ): Promise<T> {
+    // An unknown endpoint id rejects the returned promise, as every other failure does.
+    try {
+      return startInvoke<T>(endpointId, input, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  function startInvoke<T>(
+    endpointId: string,
+    input: Record<string, unknown> | undefined,
+    options: PeerRemoteClientInvokeOptions,
+  ): Promise<T> {
     const endpoint = requireEndpoint(contract, endpointId);
     const validateResponse = clientOptions.validateResponses !== false;
     const getRegexReading = clientOptions.getRegexReading, configuredReading = clientOptions.regexReading;
     const outputSchema = endpoint.outputSchema;
-    const schemaIdentity = JSON.stringify(outputSchema);
+    // The schema graph is captured once per call, and only when it will be used.
+    const retainedSchema = validateResponse ? retainJsonSchemaSource(outputSchema) : undefined;
     const assertValidationCurrent = () => {
       options.signal?.throwIfAborted();
-      if (requireEndpoint(contract, endpointId) !== endpoint || clientOptions.getRegexReading !== getRegexReading || clientOptions.regexReading !== configuredReading || endpoint.id !== endpointId || endpoint.outputSchema !== outputSchema || JSON.stringify(outputSchema) !== schemaIdentity)
+      if (requireEndpoint(contract, endpointId) !== endpoint || clientOptions.getRegexReading !== getRegexReading || clientOptions.regexReading !== configuredReading || endpoint.id !== endpointId || endpoint.outputSchema !== outputSchema)
         throw new ContractError('Response schema owner changed during the request.');
+      retainedSchema?.assertCurrent();
     };
     return invokeContractRoute<T>(transport, endpoint, input, options).then(async (body) => {
       if (validateResponse) {
         assertValidationCurrent();
         const reading = getRegexReading && outputSchema
-          ? getRegexReading({ kind: 'peer', methodId: endpointId, outputSchema: structuredClone(outputSchema) as Record<string, unknown>, signal: options.signal, assertCurrent: assertValidationCurrent })
+          ? getRegexReading({ kind: 'peer', methodId: endpointId, outputSchema: structuredClone(retainedSchema?.snapshot) as Record<string, unknown>, signal: options.signal, assertCurrent: assertValidationCurrent })
           : configuredReading;
         assertValidationCurrent();
         await validateJsonSchemaResponse(endpoint, body, { signal: options.signal, reading, assertCurrent: assertValidationCurrent });
@@ -193,13 +209,25 @@ export function createPeerRemoteClient(
   return client;
 }
 
+/**
+ * Said on a response-shape failure of a request that changes state: the
+ * transport only gets here after a 2xx answer, so the daemon already acted.
+ */
+const REQUEST_APPLIED_NOTICE = 'The daemon answered successfully, so this request was applied; only its response did not match the expected shape. Do not repeat the request: check the resulting state instead.';
+
+function isMutatingRoute(method: unknown): boolean {
+  return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());
+}
+
 async function validateJsonSchemaResponse(endpoint: PeerEndpointContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined; readonly assertCurrent: () => void }): Promise<void> {
   const schema = endpoint.outputSchema;
   if (!schema || typeof schema !== 'object') return;
   const failure = await firstJsonSchemaFailureAsync(schema as Record<string, unknown>, body, options);
   if (!failure) return;
+  const applied = isMutatingRoute((endpoint as { readonly method?: unknown }).method);
   throw new ContractError(
-    `Response validation failed for peer endpoint "${endpoint.id}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the peer endpoint and client are using the same GoodVibes contract package version.`,
-    { source: 'contract' },
+    `Response validation failed for peer endpoint "${endpoint.id}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the peer endpoint and client are using the same GoodVibes contract package version.`
+      + (applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''),
+    { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
   );
 }

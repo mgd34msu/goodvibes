@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentEvidence } from '../../gate/judgment-input.js';
@@ -72,6 +72,8 @@ export class VerificationStore {
   private readonly historyKeys = new WeakMap<object, string>();
   private readonly archiveHistoryKeys = new Map<string, readonly string[]>();
   private readonly originals = new Map<string, VerificationJournalRecord>();
+  // Archived message bodies, each written once and referenced by id from the archive positions.
+  private readonly messageRecords = new Map<string, NonNullable<VerificationArchive['messageRecords']>[number]>();
   private readonly repairCheckpoints = new Map<string, VerificationRepairCheckpoint | null>();
   private readonly latestRepairOriginals = new Map<string, Pick<VerificationRepairCheckpoint, 'requestSource' | 'sourceIds'>>();
   private readonly path: string | undefined;
@@ -83,12 +85,33 @@ export class VerificationStore {
     if (!isAbsolute(root) || !/^[A-Za-z0-9_:-]+$/.test(sessionId)) throw new Error('Invalid verification journal location');
     // Native daemon sessions use namespaced IDs. Encode their colon so the
     // same identity has a portable filename; legacy session names stay exact.
-    this.path = join(resolve(root), '.goodvibes', 'verification', `${encodeURIComponent(sessionId)}.jsonl`);
+    const journalPath = join(resolve(root), '.goodvibes', 'verification', `${encodeURIComponent(sessionId)}.jsonl`);
+    this.path = journalPath;
     this.root = resolve(root);
+    try { this.load(journalPath); }
+    catch (error) {
+      // A journal the store refuses to trust would otherwise end every later turn of the session. Restored
+      // sources never carry authority (each needs a current qualification), so the file is set aside whole
+      // and the session continues on an empty store, with the move disclosed.
+      if (!(error instanceof VerificationHeldError)) throw error;
+      this.setAside(journalPath, error);
+    }
+  }
+  /** Set when an unreadable journal was moved out of the way; the caller tells the user. */
+  setAsideNotice: string | undefined;
+  private setAside(path: string, cause: VerificationHeldError): void {
+    const moved = `${path}.held-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    try { renameSync(path, moved); } catch { throw cause; }
+    for (const map of [this.sources, this.proposals, this.latestSources, this.latestReceipts, this.proposalRevisions, this.written,
+      this.histories, this.archiveHistoryKeys, this.originals, this.messageRecords, this.repairCheckpoints, this.latestRepairOriginals, this.archives] as Array<Map<unknown, unknown>>) map.clear();
+    this.archive = undefined;
+    this.setAsideNotice = `Earlier verification state for this session could not be trusted (${cause.message}), so it was set aside and checking starts fresh. The old journal is kept at ${moved}.`;
+  }
+  private load(path: string): void {
     try {
       this.assertDirectories();
-      if (lstatSync(this.path).isSymbolicLink()) throw new Error('Verification journal is a symbolic link');
-      for (const line of readFileSync(this.path, 'utf8').split('\n')) {
+      if (lstatSync(path).isSymbolicLink()) throw new Error('Verification journal is a symbolic link');
+      for (const line of readFileSync(path, 'utf8').split('\n')) {
         if (!line) continue;
         let record: unknown; try { record = JSON.parse(line); } catch { continue; }
         // Admissible bytes and matching local identities are still untrusted
@@ -106,6 +129,10 @@ export class VerificationStore {
         const value = record as { kind?: unknown; key?: unknown; value?: unknown };
         if (typeof value.key !== 'string') continue;
         if (value.kind === 'proposal' && typeof value.value === 'string') this.proposals.set(value.key, value.value);
+        if (value.kind === 'message' && value.value && typeof value.value === 'object') {
+          const row = value.value as NonNullable<VerificationArchive['messageRecords']>[number];
+          if (typeof row.id === 'string' && row.id === value.key) this.messageRecords.set(row.id, row);
+        }
         if (value.kind === 'original') {
           const original = VerificationJournalSource.restore(value.value as VerificationJournalRecord).stored();
           if (original.id !== value.key) throw new VerificationHeldError('invalid original record identity');
@@ -146,7 +173,14 @@ export class VerificationStore {
           }
         }
         if (value.kind === 'archive' && value.value && typeof value.value === 'object') {
-          const entry = value.value as VerificationArchive;
+          const stored = value.value as VerificationArchive & { messageRecordIds?: unknown };
+          let entry: VerificationArchive = stored;
+          // Newer journals name the message bodies by id; each body was written once as its own row.
+          if (Array.isArray(stored.messageRecordIds)) {
+            const rows = stored.messageRecordIds.map(id => typeof id === 'string' ? this.messageRecords.get(id) : undefined);
+            if (rows.some(row => row === undefined)) throw new VerificationHeldError('missing archived message record');
+            entry = { ...stored, messageRecords: rows as NonNullable<VerificationArchive['messageRecords']> };
+          }
           if (Array.isArray(entry.derived) && entry.derived.every(pair => Array.isArray(pair) && Number.isSafeInteger(pair[0]) && typeof pair[1] === 'string')) {
             if (entry.runtimeMessages !== undefined && (!Array.isArray(entry.runtimeMessages)
               || entry.runtimeMessages.some(pair => !Array.isArray(pair) || !Number.isSafeInteger(pair[0]) || pair[0] < 0 || typeof pair[1] !== 'string')))
@@ -177,7 +211,7 @@ export class VerificationStore {
             else this.archiveHistoryKeys.delete(this.archive.branch!);
           }
         }
-        if (value.kind === 'source' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence' || value.kind === 'original' || value.kind === 'repair') {
+        if (value.kind === 'source' || value.kind === 'message' || value.kind === 'proposal' || value.kind === 'history' || value.kind === 'index' || value.kind === 'evidence' || value.kind === 'original' || value.kind === 'repair') {
           this.written.set(JSON.stringify([value.kind, value.key]), value.value);
         }
       }
@@ -190,7 +224,7 @@ export class VerificationStore {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   }
-  private append<T>(kind: 'source' | 'proposal' | 'archive' | 'history' | 'index' | 'evidence' | 'original' | 'repair', key: string, value: T): T {
+  private append<T>(kind: 'source' | 'message' | 'proposal' | 'archive' | 'history' | 'index' | 'evidence' | 'original' | 'repair', key: string, value: T): T {
     let record: { readonly kind: typeof kind; readonly key: string; readonly value: T };
     try { record = snapshotJudgmentEvidence({ kind, key, value }) as typeof record; }
     catch (error) { throw new VerificationHeldError('generated verification record admission', { cause: error }); }
@@ -329,9 +363,12 @@ export class VerificationStore {
       this.historyKeys.set(history, key); this.historyKeys.set(retained, key);
       return key;
     });
+    // Each message body is journalled once; the position lists ids, so the journal grows with the
+    // messages retained rather than with the number of observations times the messages retained.
+    for (const record of value.messageRecords ?? []) this.messageRecords.set(record.id, this.append('message', record.id, record));
     const position = { branch, historyKeys: keys, derived: value.derived,
       ...(value.runtimeMessages?.length ? { runtimeMessages: value.runtimeMessages } : {}),
-      ...(value.messageRecords?.length ? { messageRecords: value.messageRecords } : {}) };
+      ...(value.messageRecords?.length ? { messageRecordIds: value.messageRecords.map(record => record.id) } : {}) };
     if (!previous || !isDeepStrictEqual(previous.derived, value.derived)
       || !isDeepStrictEqual(previous.runtimeMessages ?? [], value.runtimeMessages ?? [])
       || !isDeepStrictEqual(previous.messageRecords ?? [], value.messageRecords ?? [])

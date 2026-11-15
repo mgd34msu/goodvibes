@@ -41,7 +41,15 @@ interface Harness {
   readonly audit: CredentialWriteAuditEntry[];
 }
 
-function harness(options: { readonly breakReadBack?: boolean; readonly refuseWrite?: boolean } = {}): Harness {
+function harness(options: {
+  /** The first write is stored corrupted; later writes (a restore) are stored faithfully. */
+  readonly breakReadBack?: boolean;
+  /** Every write is stored corrupted, so a restore cannot succeed either. */
+  readonly breakEveryWrite?: boolean;
+  readonly refuseWrite?: boolean;
+  readonly failConfigWrite?: boolean;
+} = {}): Harness {
+  let writes = 0;
   const config = new Map<string, unknown>();
   const secrets = new Map<string, string>();
   const audit: CredentialWriteAuditEntry[] = [];
@@ -52,14 +60,19 @@ function harness(options: { readonly breakReadBack?: boolean; readonly refuseWri
     deps: {
       config: {
         get: (key) => config.get(key),
-        setDynamic: (key, value) => { config.set(key, value); },
+        setDynamic: (key, value) => {
+          if (options.failConfigWrite) throw new Error('the config file is read-only');
+          config.set(key, value);
+        },
       },
       secrets: {
         set: async (key, value) => {
           if (options.refuseWrite) throw new Error('the secret store is unavailable');
           // A store that "succeeds" and stores something else is the exact
           // shape the read-back check exists for.
-          secrets.set(key, options.breakReadBack ? `${value}-corrupted` : value);
+          writes += 1;
+          const corrupt = options.breakEveryWrite || (options.breakReadBack && writes === 1);
+          secrets.set(key, corrupt ? `${value}-corrupted` : value);
         },
         get: async (key) => secrets.get(key) ?? null,
         delete: async (key) => { secrets.delete(key); },
@@ -147,6 +160,55 @@ describe('credentials.set: refusals leave the setting exactly as it was', () => 
     expect(h.audit[0]?.outcome).toBe('refused');
   });
 
+  test('a failed read-back puts the previously stored credential back, and says so', async () => {
+    const h = harness({ breakReadBack: true });
+    h.secrets.set(SECRET_STORE_KEY, 'the-working-token');
+
+    await expect(
+      createCredentialSetHandler(h.deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN })),
+    ).rejects.toThrow(/stored credential were left exactly as they were/);
+
+    expect(h.secrets.get(SECRET_STORE_KEY)).toBe('the-working-token');
+  });
+
+  test('a failed read-back with nothing stored before leaves nothing stored', async () => {
+    const h = harness({ breakReadBack: true });
+    await expect(
+      createCredentialSetHandler(h.deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN })),
+    ).rejects.toThrow(/did not read back/);
+    expect(h.secrets.has(SECRET_STORE_KEY)).toBe(false);
+  });
+
+  test('when the previous credential cannot be put back, the refusal does not claim it was', async () => {
+    const h = harness({ breakEveryWrite: true });
+    h.secrets.set(SECRET_STORE_KEY, 'the-working-token');
+
+    let message = '';
+    try {
+      await createCredentialSetHandler(h.deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN }));
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('could not be put back');
+    expect(message).not.toContain('left exactly as they were');
+  });
+
+  test('a config write that throws after a good secret write restores the secret, is audited, and is refused', async () => {
+    const h = harness({ failConfigWrite: true });
+    h.secrets.set(SECRET_STORE_KEY, 'the-working-token');
+
+    let status: number | undefined;
+    try {
+      await createCredentialSetHandler(h.deps)(invocation({ key: SECRET_CONFIG_KEY, value: TOKEN }));
+    } catch (error) {
+      if (isGatewayVerbError(error)) status = error.status;
+    }
+    expect(status).toBe(503);
+    expect(h.secrets.get(SECRET_STORE_KEY)).toBe('the-working-token');
+    expect(h.audit).toHaveLength(1);
+    expect(h.audit[0]).toMatchObject({ action: 'set', outcome: 'refused', detail: 'the config file is read-only' });
+  });
+
   test('a store that refuses the write reports 503 and does not touch config', async () => {
     const h = harness({ refuseWrite: true });
     let status: number | undefined;
@@ -222,6 +284,32 @@ describe('credentials.delete', () => {
     expect(result['cleared']).toBe(true);
     expect(h.secrets.has(SECRET_STORE_KEY)).toBe(false);
     expect(h.config.get(SECRET_CONFIG_KEY)).toBe('');
+  });
+
+  test('a setting that cannot be cleared after the secret is gone is audited and said to be partly removed', async () => {
+    const failing = harness({ failConfigWrite: true });
+    failing.secrets.set(SECRET_STORE_KEY, TOKEN);
+    failing.config.set(SECRET_CONFIG_KEY, `goodvibes://secrets/goodvibes/${SECRET_STORE_KEY}`);
+
+    await expect(
+      createCredentialDeleteHandler(failing.deps)(invocation({ key: SECRET_CONFIG_KEY })),
+    ).rejects.toThrow(/only partly removed/);
+    expect(failing.audit).toHaveLength(1);
+    expect(failing.audit[0]).toMatchObject({ action: 'delete', outcome: 'refused' });
+  });
+
+  test('a secret store that refuses the delete is audited and leaves the setting alone', async () => {
+    const h = harness();
+    h.secrets.set(SECRET_STORE_KEY, TOKEN);
+    h.config.set(SECRET_CONFIG_KEY, `goodvibes://secrets/goodvibes/${SECRET_STORE_KEY}`);
+    const deps: CredentialWriteDeps = {
+      ...h.deps,
+      secrets: { ...h.deps.secrets, delete: async () => { throw new Error('the secret store is locked'); } },
+    };
+    await expect(createCredentialDeleteHandler(deps)(invocation({ key: SECRET_CONFIG_KEY }))).rejects.toThrow(/was not removed/);
+    expect(h.audit).toHaveLength(1);
+    expect(h.audit[0]).toMatchObject({ action: 'delete', outcome: 'refused', detail: 'the secret store is locked' });
+    expect(h.config.get(SECRET_CONFIG_KEY)).toBe(`goodvibes://secrets/goodvibes/${SECRET_STORE_KEY}`);
   });
 
   test('clearing something that was never stored is a miss, not an error', async () => {

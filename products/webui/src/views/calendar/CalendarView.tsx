@@ -58,24 +58,11 @@ import { DateField, parseIsoDate, toIsoDate, monthGrid } from '../../components/
 import { PersonalNotice, PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { CalendarEventBody, useCalendarEventDetail } from './CalendarEventPeek';
-import { CalendarMonth, eventDayKey } from './CalendarMonth';
+import { CalendarMonth } from './CalendarMonth';
+import { eventDayKey, eventTimeLabel, localDateOffset, localDayEndIso, localDayStartIso } from './calendar-time';
 import '../../styles/components/calendar.css';
 
 type CalendarLayout = 'agenda' | 'month';
-
-function isoDateOffset(days: number): string {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function toRangeStartIso(dateOnly: string): string {
-  return dateOnly ? `${dateOnly}T00:00:00.000Z` : '';
-}
-
-function toRangeEndIso(dateOnly: string): string {
-  return dateOnly ? `${dateOnly}T23:59:59.999Z` : '';
-}
 
 function splitAttendees(value: string): string[] | undefined {
   const list = value.split(',').map((item) => item.trim()).filter(Boolean);
@@ -138,11 +125,6 @@ function dayLabel(key: string): string {
   return text;
 }
 
-function timeLabel(start: string): string {
-  const parsed = new Date(start);
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-
 /**
  * The phone's one date-range button: "Oct 1 – 15" inside one month, "Sep 28 –
  * Oct 5" across months, with the year only when the range leaves this year.
@@ -180,8 +162,8 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const [rangeOpen, setRangeOpen] = useState(false);
 
   const [layout, setLayout] = useState<CalendarLayout>('agenda');
-  const [from, setFrom] = useState(() => isoDateOffset(0));
-  const [to, setTo] = useState(() => isoDateOffset(14));
+  const [from, setFrom] = useState(() => localDateOffset(0));
+  const [to, setTo] = useState(() => localDateOffset(14));
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [calendarId, setCalendarId] = useState('');
   const [selectedId, setSelectedId] = useState('');
@@ -202,17 +184,19 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const monthDays = useMemo(() => monthGrid(month), [month]);
   const rangeFromDate = layout === 'month' ? toIsoDate(monthDays[0]) : from;
   const rangeToDate = layout === 'month' ? toIsoDate(monthDays[monthDays.length - 1]) : to;
-  const rangeFrom = toRangeStartIso(rangeFromDate);
-  const rangeTo = toRangeEndIso(rangeToDate);
+  const rangeFrom = localDayStartIso(rangeFromDate);
+  const rangeTo = localDayEndIso(rangeToDate);
   const calendarFilter = calendarId.trim();
 
+  // The daemon caps a page at 200, so a larger ask would never read as full.
+  const eventLimit = layout === 'month' ? 200 : 100;
   const events = useQuery({
     queryKey: queryKeys.calendarEvents(rangeFrom, rangeTo, calendarId),
     queryFn: () => platformClient.operator.calendar.events.list({
       from: rangeFrom || undefined,
       to: rangeTo || undefined,
       ...(calendarFilter ? { calendarId: calendarFilter } : {}),
-      limit: layout === 'month' ? 250 : 100,
+      limit: eventLimit,
     }),
   });
 
@@ -294,7 +278,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const groups = useMemo(() => {
     const map = new Map<string, typeof sortedItems>();
     for (const item of sortedItems) {
-      const key = eventDayKey(item.start);
+      const key = eventDayKey(item.start, item.end);
       const list = map.get(key);
       if (list) list.push(item);
       else map.set(key, [item]);
@@ -421,7 +405,17 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     ? undefined
     : <Button variant="primary" icon={<Plus />} onClick={() => setNewOpen(true)}>New event</Button>;
 
-  const noticeNode = notice ? <PersonalNotice tone={notice.tone}>{notice.body}</PersonalNotice> : null;
+  const truncated = (events.data?.events.length ?? 0) >= eventLimit;
+  const noticeNode = (
+    <>
+      {notice ? <PersonalNotice tone={notice.tone}>{notice.body}</PersonalNotice> : null}
+      {truncated ? (
+        <PersonalNotice tone="warn">
+          Showing the first {eventLimit} events in this range. Narrow the dates to see the rest.
+        </PersonalNotice>
+      ) : null}
+    </>
+  );
 
   let content: ReactNode;
   if (events.isPending) {
@@ -487,7 +481,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
                   meta={item.location}
                   selected={item.id === selectedId}
                   onSelect={() => setSelectedId(item.id)}
-                  trailing={<span className="dv-value">{timeLabel(item.start)}</span>}
+                  trailing={<span className="dv-value">{eventTimeLabel(item.start, item.end)}</span>}
                 />
               ))}
             </RowGroup>

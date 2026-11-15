@@ -194,3 +194,31 @@ describe('occasions nudge surface', () => {
     expect(seen.renders.count).toBe(1);
   });
 });
+
+describe('overlapping raises', () => {
+  test('two raises that overlap say the nudge once', async () => {
+    const said: string[] = [];
+    let release: (result: OccasionsGatewayResult) => void = () => {};
+    let pulls = 0;
+    const invoke = (() => {
+      pulls += 1;
+      return new Promise<OccasionsGatewayResult>((resolve) => { release = resolve; });
+    }) as unknown as OccasionsGatewayInvoke;
+    const surface = createOccasionsNudgeSurface({
+      invoke,
+      conversation: { addAssistantMessage: (content: string) => { said.push(content); } },
+      requestRender: () => {},
+      isEnabled: () => true,
+    });
+
+    const first = surface.raiseNow();
+    const second = surface.raiseNow();
+    release({ ok: true, route: 'in-process', data: pendingPayload() } as unknown as OccasionsGatewayResult);
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(pulls).toBe(1);
+    expect(said).toEqual([NUDGE_MESSAGE]);
+    expect(a).toBe(b);
+  });
+});
+

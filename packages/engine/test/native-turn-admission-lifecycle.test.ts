@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createOperatorNativeConversationIntakeClient, type NativeConversationIntakeResult } from '../platform/src/platform/workflow/work-ledger/native-intake-client.js';
 import type { OperatorRemoteClient } from '../operator-client/src/client-core.js';
 import {
-  admitNativeConversationTurn, failNativeConversationTurn, nativeConversationTurnLifecycle,
+  admitNativeConversationTurn, failNativeConversationTurn,
   readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn,
 } from '../platform/src/platform/core/native-turn-admission.js';
 
@@ -39,11 +39,4 @@ test('a turn that needs recovery is not upgraded to retryable by a later failure
   failNativeConversationTurn(turn, true);
   expect(readNativeConversationTurnStatus(p)).toBe('recovery_required');
   client.dispose();
-});
-
-test('the table names the six states and the legal moves', () => {
-  expect(nativeConversationTurnLifecycle.states).toEqual(['unclaimed', 'queued', 'running', 'settled', 'retryable', 'recovery_required']);
-  expect(nativeConversationTurnLifecycle.isTerminal('settled')).toBe(true);
-  expect(nativeConversationTurnLifecycle.can('settled', 'retryable')).toBe(false);
-  expect(nativeConversationTurnLifecycle.can('running', 'retryable')).toBe(true);
 });

@@ -1,18 +1,14 @@
 /**
  * hosted-exec-containment.test.ts, a hosted conversational turn does not get
- * the host, and it does not get the owner's terminal.
+ * the host.
  *
- * Three layers, pinned separately so a regression says which one moved:
+ * Two layers, pinned separately so a regression says which one moved:
  *
  *  1. The containment decision (exec/containment.ts), pure. Whether a
  *     composition that REQUIRES the boundary may run a command given the plan
  *     the sandbox layer resolved, and whether an omitted posture changes
  *     anything (it must not).
- *  2. The owner-terminal guard (exec/owner-terminal-guard.ts): what it does
- *     with Jev's reading of the command. The benign/malicious pairs (for every
- *     refusal a neighbouring command that must still be allowed) are the
- *     calibration fixtures of engine.tools.owner-terminal.
- *  3. The exec tool end to end, a real `createExecTool` under each posture,
+ *  2. The exec tool end to end, a real `createExecTool` under each posture,
  *     because the decision functions being right is not the same claim as the
  *     tool consulting them on every path (foreground, retried, background).
  */
@@ -24,11 +20,6 @@ import {
   decideExecContainment,
   type ExecContainmentRequirement,
 } from '../platform/src/platform/tools/exec/containment.ts';
-import {
-  decideOwnerTerminalAccess,
-  PLATFORM_TMUX_SESSION_PREFIX,
-  type OwnerTerminalGuard,
-} from '../platform/src/platform/tools/exec/owner-terminal-guard.ts';
 import type { ExecSandboxPlan } from '../platform/src/platform/tools/exec/sandbox.ts';
 import { createExecTool } from '../platform/src/platform/tools/exec/index.ts';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
@@ -36,11 +27,9 @@ import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
-// The tools batteries exec reads (credential names, prompts, retries, the
-// owner-terminal reading) and, forwarded with EXEC_GATE_TABLE, the gate's
-// questions, in one fake port. Typing into the owner's `main` session reads as
-// driving a terminal the platform does not own; nothing else does.
-useToolReadings([['tmux send-keys -t main', { foreignTerminal: true }]], EXEC_GATE_TABLE);
+// The tools batteries exec reads (credential names, prompts, retries) and,
+// forwarded with EXEC_GATE_TABLE, the gate's questions, in one fake port.
+useToolReadings([], EXEC_GATE_TABLE);
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -52,7 +41,6 @@ const HOST_ALLOWED: ExecContainmentRequirement = {
   posture: 'host-allowed',
   reason: 'this hosted workstream was composed with the host explicitly granted',
 };
-const ENFORCED: OwnerTerminalGuard = { posture: 'enforced' };
 
 const contained: ExecSandboxPlan = {
   sandboxed: true,
@@ -117,21 +105,12 @@ describe('decideExecContainment', () => {
   });
 });
 
-describe('terminal access uses the common tool policy', () => {
-  const readings = useToolReadings([['fixture', { foreignTerminal: true }]], EXEC_GATE_TABLE);
-  test('no separate Jev refusal or confidence threshold', async () => {
-    expect((await decideOwnerTerminalAccess('printf fixture', ENFORCED)).allowed).toBe(true);
-    expect(readings.requests).toHaveLength(0);
-  });
-});
-
-// ── 3. The exec tool, end to end ────────────────────────────────────────────
+// ── 2. The exec tool, end to end ────────────────────────────────────────────
 
 describe('exec tool under a hosted conversational posture', () => {
   const roots: string[] = [];
   const makeTool = (over: {
     containment?: ExecContainmentRequirement | undefined;
-    ownerTerminal?: OwnerTerminalGuard | undefined;
   }) => {
     const root = mkdtempSync(join(tmpdir(), 'gv-hosted-exec-'));
     roots.push(root);
@@ -141,7 +120,6 @@ describe('exec tool under a hosted conversational posture', () => {
       // No sandbox wiring at all: the composition asked for containment and the
       // boundary is absent, which is exactly the shape the incident had.
       ...(over.containment ? { containment: over.containment } : {}),
-      ...(over.ownerTerminal ? { ownerTerminal: over.ownerTerminal } : {}),
     });
   };
   const run = async (tool: ReturnType<typeof createExecTool>, cmd: string, extra: Record<string, unknown> = {}) => {
@@ -175,23 +153,6 @@ describe('exec tool under a hosted conversational posture', () => {
     );
     expect(result.success).toBe(false);
     expect(String(output['stderr'])).toContain('background command cannot run inside the exec boundary');
-  });
-
-  test('terminal policy does not add a Jev veto inside the executable tool', async () => {
-    const { result, output } = await run(makeTool({ ownerTerminal: ENFORCED }), 'printf terminal-fixture');
-    expect(result.success).toBe(true);
-    expect(String(output['stdout'])).toBe('terminal-fixture');
-  });
-
-  test('the platform driving its OWN tmux session still works through the tool', async () => {
-    // Refused only if the guard fires; tmux itself need not be installed for
-    // the guard's verdict, so this asserts the guard let it through rather
-    // than asserting tmux succeeded.
-    const { output } = await run(
-      makeTool({ ownerTerminal: ENFORCED }),
-      `tmux has-session -t ${PLATFORM_TMUX_SESSION_PREFIX}build`,
-    );
-    expect(String(output['stderr'] ?? '')).not.toContain('owner\'s terminal is untouchable');
   });
 
   test('cleanup', () => {

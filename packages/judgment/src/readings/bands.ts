@@ -77,6 +77,20 @@ export function assertBand(band: ConfidenceBand | YesNoBand): void {
   if (!ordered || overlapping) throw new RangeError(`band thresholds out of order or overlapping: ${JSON.stringify(band)}`);
 }
 
+/**
+ * assertBand for a choice, plus its per-option bands: each must name an option
+ * the question has and be ordered. Definitions call this so a bad per-option
+ * band fails when the decision is defined, not on the one branch that reads it.
+ * `owner` names the definition in the error ("dispatch x").
+ */
+export function assertChoiceBand(owner: string, band: ChoiceBand, options: readonly string[]): void {
+  assertBand(band);
+  for (const [option, optionBand] of Object.entries(band.perOption ?? {})) {
+    if (!options.includes(option)) throw new RangeError(`${owner} has a band for unknown option "${option}"`);
+    assertBand(optionBand as ConfidenceBand);
+  }
+}
+
 /** The outcome a confidence reaches in a band. */
 export function outcomeForConfidence(confidence: number, band: ConfidenceBand): Outcome {
   return RISING_OUTCOMES[thresholdsOf(band).filter((threshold) => confidence >= threshold).length]!;

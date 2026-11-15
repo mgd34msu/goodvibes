@@ -28,6 +28,9 @@ import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
 import { useChatSend } from './chat/useChatSend';
+import { useSyncSettle } from './chat/useSyncSettle';
+import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
+import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
 import '../styles/components/chat-view.css';
@@ -37,13 +40,14 @@ import {
   messageCreatedAt,
   messageTone,
   messageText,
+  messageAttachments,
   IDLE_TURN_PHASE,
   settledTurnLabel,
   workingStatusLabel,
   type TurnPhase,
 } from './chat/message-utils';
 import { buildLineage } from './chat/lineage';
-import { resolveScrollTarget, isScrollTargetReady, findMessageElement } from './chat/search-jump';
+import { resolveScrollTarget, isScrollTargetReady, isScrollTargetStale, findMessageElement } from './chat/search-jump';
 import type { ChatViewProps, ChatMessage } from './chat/types';
 
 export type { ChatViewProps };
@@ -74,6 +78,7 @@ export function ChatView({
   userName,
 }: ChatViewProps) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const headerSlots = useHeaderSlots();
   const findRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -139,9 +144,12 @@ export function ChatView({
   // Search jump-to-message: set when a MESSAGE-level search result is selected
   // (session-level results carry messageId '' and never set this, see
   // ChatSearch's module doc). Cleared once the target message is found and
-  // scrolled to, or the operator navigates to a different session first.
+  // scrolled to, the operator navigates to a different session first, or the
+  // target's session loads without it among the active messages (see
+  // isScrollTargetStale).
   const [pendingScrollTarget, setPendingScrollTarget] = useState<{ sessionId: string; messageId: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
+  const scrollTargetSessionShownRef = useRef(false);
 
   const providers = useQuery({ queryKey: queryKeys.providers, queryFn: () => platformClient.operator.providers.list() });
   const modelCatalog = useQuery({ queryKey: ['models'], queryFn: () => platformClient.operator.models.list() });
@@ -301,6 +309,13 @@ export function ChatView({
     refetchInterval: ACTIVE_TURN_STATES.includes(turnState) || turnState === 'syncing' || turnState === 'stream paused' ? 1000 : false,
   });
 
+  // 'syncing' ends only when a new assistant message appears; a turn that
+  // persisted none must not poll forever, so it settles after a bounded wait.
+  useSyncSettle(turnState, messages.dataUpdatedAt, () => {
+    setPendingUserMessageId('');
+    setTurnState('completed');
+  });
+
   // Auth-expiry handoff shared by both chat hooks: re-probe auth.current so a
   // genuinely dead token (401 mid-stream or mid-send) flips the whole app to the
   // signed-out gate (App.tsx unmounts this view when auth.current confirms it),
@@ -448,6 +463,19 @@ export function ChatView({
     setPendingScrollTarget(null);
   }, [pendingScrollTarget, activeSessionId, lineageNodes]);
 
+  const messagesSettled = messages.isSuccess && !messages.isFetching;
+  useEffect(() => {
+    if (!pendingScrollTarget) {
+      scrollTargetSessionShownRef.current = false;
+      return;
+    }
+    if (pendingScrollTarget.sessionId === activeSessionId) scrollTargetSessionShownRef.current = true;
+    if (isScrollTargetStale(pendingScrollTarget, activeSessionId, scrollTargetSessionShownRef.current, messagesSettled, lineageNodes)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- drops a target that can never be reached
+      setPendingScrollTarget(null);
+    }
+  }, [pendingScrollTarget, activeSessionId, lineageNodes, messagesSettled]);
+
   // Auto-clear the search jump-to-message highlight after a brief flash. A
   // separate effect (keyed only on highlightedMessageId) so a fresh highlight
   // starting mid-flash restarts its own timer rather than racing the one
@@ -533,7 +561,9 @@ export function ChatView({
   useEffect(() => {
     wakeHandlerRef.current = (text: string, autoSubmit: boolean) => {
       if (!text) return;
-      if (autoSubmit) {
+      // A send already in flight would drop the dictated text, so it goes to the
+      // draft for review instead.
+      if (autoSubmit && !send.isPending) {
         sendText(text);
         return;
       }
@@ -554,14 +584,26 @@ export function ChatView({
     sendText(draft, attachedFiles, { steer: true });
   }
 
-  function sendText(text: string, files: File[] = [], options: { steer?: boolean } = {}) {
+  function sendText(text: string, files: File[] = [], options: { steer?: boolean; localMessageId?: string } = {}) {
     const body = text.trim();
     if (send.isPending || (!body && !files.length)) return;
+    if (!files.length && parseSlashCommand(body) === 'new') {
+      setDraft('');
+      onActiveSessionChange('');
+      onDraftSessionRequestedChange(true);
+      composerRef.current?.focus();
+      return;
+    }
     const filesToSend = [...files];
     setDraft('');
     setAttachedFiles([]);
     composerRef.current?.focus();
-    send.mutate({ body, files: filesToSend, ...(options.steer ? { steer: true } : {}) });
+    send.mutate({
+      body,
+      files: filesToSend,
+      ...(options.steer ? { steer: true } : {}),
+      ...(options.localMessageId ? { localMessageId: options.localMessageId } : {}),
+    });
   }
 
   function submit(event: FormEvent) {
@@ -584,14 +626,41 @@ export function ChatView({
     const id = bestId(message);
     const text = messageText(message);
     if (!text) return;
-    await navigator.clipboard?.writeText(text);
+    if (!navigator.clipboard) {
+      toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
+      return;
+    }
     setCopiedMessageId(id);
     window.setTimeout(() => setCopiedMessageId((current) => (current === id ? '' : current)), 1300);
   }
 
   function resendMessage(message: unknown) {
     const text = messageText(message);
-    sendText(text);
+    // Only a send that failed keeps its id, so the daemon can recognise a repeat of one it
+    // already accepted; resending any other message is a new message.
+    const failedId = bestId(message);
+    const retryOptions = (message as { deliveryState?: unknown } | null)?.deliveryState === 'failed' && failedId.startsWith('local-')
+      ? { localMessageId: failedId }
+      : {};
+    if (messageAttachments(message).length === 0) {
+      sendText(text, [], retryOptions);
+      return;
+    }
+    // A message with files is resent only with those files: sending the text alone
+    // would read as a normal send while the attachments were dropped.
+    if (send.isPending) return;
+    const id = bestId(message);
+    if (!send.hasHeldFiles(id)) {
+      setTurnError('The files of that message are no longer available. Attach them again and send a new message.');
+      return;
+    }
+    sendText(text, send.takeHeldFiles(id), retryOptions);
   }
 
   function addAttachedFiles(files: File[]) {
@@ -649,11 +718,6 @@ export function ChatView({
     }
   }
 
-  const slashCommands = [
-    { name: 'clear', description: 'Clear the current chat' },
-    { name: 'help', description: 'Show available commands' },
-    { name: 'new', description: 'Start a new chat session' },
-  ] as const;
 
   // Ctrl F opens the glass find bar (or refocuses its field when it is already
   // open). Scoped to the chat: it only exists while this view is mounted.
@@ -746,6 +810,7 @@ export function ChatView({
         copiedMessageId={copiedMessageId}
         highlightedMessageId={highlightedMessageId}
         scrollRef={scrollRef}
+        hasHeldFiles={send.hasHeldFiles}
         onScroll={handleMessagesScroll}
         onJumpToBottom={scrollMessagesToBottom}
         onCopyMessage={(message) => void copyMessage(message)}
@@ -779,7 +844,7 @@ export function ChatView({
           modelChangesDisabled={isStreaming || send.isPending}
           composerRef={composerRef}
           fileInputRef={fileInputRef}
-          slashCommands={slashCommands}
+          slashCommands={SLASH_COMMANDS}
           onDraftChange={setDraft}
           onComposerKeyDown={handleComposerKeyDown}
           onSubmit={submit}

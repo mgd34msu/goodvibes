@@ -7,6 +7,7 @@ import {
   HttpStatusError,
   readFailure,
   RETRYABLE_STATUS_CODES,
+  structuredTransience,
   type FailureConclusions,
   type FailureEvidence,
 } from '@goodvibes-jev/engine/errors';
@@ -66,7 +67,7 @@ export class ConfigError extends AppError {
   }
 }
 
-/** Thrown when an LLM provider API call fails. Recoverable when statusCode is in RETRYABLE_STATUS_CODES. */
+/** Thrown when an LLM provider API call fails. Recoverable when statusCode is in RETRYABLE_STATUS_CODES, or, with no status, when the failure is a network or timeout fault. */
 export class ProviderError extends AppError {
   declare readonly code: 'PROVIDER_ERROR';
   constructor(message: string, statusCode?: number);
@@ -81,7 +82,11 @@ export class ProviderError extends AppError {
     const category = options.category ?? categoryForStatus(statusCode) ?? 'unknown';
     const guidance = options.guidance ?? inferProviderGuidance(category, statusCode);
 
-    super(message, 'PROVIDER_ERROR', statusCode !== undefined && RETRYABLE_STATUS_CODES.includes(statusCode), {
+    // A failure that never reached an HTTP status (a reset, a timeout) is the one a
+    // retry most often clears; only a retryable status or a transport fault marks it recoverable.
+    const transportFault = statusCode === undefined
+      && (category === 'network' || category === 'timeout' || structuredTransience(options.cause)?.basis === 'errno');
+    super(message, 'PROVIDER_ERROR', statusCode !== undefined ? RETRYABLE_STATUS_CODES.includes(statusCode) : transportFault, {
       // retryAfterMs passes through as given: only the explicit value (a
       // Retry-After header or a structured field). A wait the message states
       // in words is read by Jev through readRetryWait.

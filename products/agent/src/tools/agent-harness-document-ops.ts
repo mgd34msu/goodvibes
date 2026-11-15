@@ -37,6 +37,18 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const MODEL_COMPARE_ACTION_IDS = [
+  'document-run-compare',
+  'document-review-compare',
+  'document-diff-handoffs',
+  'document-judge-compare',
+  'document-compare-analytics',
+  'document-apply-compare',
+  'document-record-route-decision',
+  'document-export-compare',
+  'document-model-routing',
+] as const;
+
 function workspaceActionIds(): ReadonlySet<string> {
   return new Set(AGENT_WORKSPACE_CATEGORIES.flatMap((category) => category.actions.map((action) => action.id)));
 }
@@ -47,14 +59,6 @@ function existingActions(ids: readonly string[], available: ReadonlySet<string>)
 
 function hasTool(context: CommandContext, toolName: string): boolean {
   return context.extensions.toolRegistry.has(toolName);
-}
-
-function statusRank(status: DocumentOpsStatus): number {
-  if (status === 'attention') return 5;
-  if (status === 'ready') return 4;
-  if (status === 'partial') return 3;
-  if (status === 'needs-setup') return 2;
-  return 1;
 }
 
 function searchText(lane: DocumentOpsLane): string {
@@ -123,16 +127,16 @@ function describeReviewerReadiness(checklist: ReviewerReadinessChecklist, includ
   };
 }
 
-function describeReviewPacketWizardStep(step: AgentWorkspaceReviewPacketWizardStep, includeParameters: boolean): Record<string, unknown> {
+export function describeReviewPacketWizardStep(step: AgentWorkspaceReviewPacketWizardStep, includeParameters: boolean): Record<string, unknown> {
   return {
     id: step.id,
     label: step.label,
     status: step.status,
     detail: previewHarnessText(step.detail, includeParameters ? 180 : 96),
     userRoute: previewHarnessText(step.userRoute, includeParameters ? 180 : 96),
-    modelRoute: previewHarnessText(step.modelRoute, includeParameters ? 220 : 120),
+    modelRoute: step.modelRoute,
     actionId: step.actionId,
-    ...(step.backtrackRoute ? { backtrackRoute: previewHarnessText(step.backtrackRoute, includeParameters ? 220 : 120) } : {}),
+    ...(step.backtrackRoute ? { backtrackRoute: step.backtrackRoute } : {}),
   };
 }
 
@@ -175,7 +179,7 @@ function describeReviewPacketWizard(wizard: AgentWorkspaceReviewPacketWizard, in
   };
 }
 
-function describeLane(lane: DocumentOpsLane, includeParameters: boolean): Record<string, unknown> {
+export function describeLane(lane: DocumentOpsLane, includeParameters: boolean): Record<string, unknown> {
   return {
     id: lane.id,
     label: lane.label,
@@ -184,7 +188,7 @@ function describeLane(lane: DocumentOpsLane, includeParameters: boolean): Record
     current: lane.current,
     next: lane.next,
     userRoute: previewHarnessText(lane.userRoute, 96),
-    modelRoute: previewHarnessText(lane.modelRoute, 96),
+    modelRoute: lane.modelRoute,
     signals: lane.signals,
     ...(lane.reviewerReadiness ? { reviewerReadiness: describeReviewerReadiness(lane.reviewerReadiness, includeParameters) } : {}),
     ...(lane.reviewPacketWizard ? { reviewPacketWizard: describeReviewPacketWizard(lane.reviewPacketWizard, includeParameters) } : {}),
@@ -243,13 +247,10 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
   const sourceActions = existingActions([
     'research-knowledge-search',
     'research-knowledge-ask',
-    'document-sources',
     'document-show-source',
   ], available);
   const mediaActions = existingActions([
-    'media-providers',
     'media-generate',
-    'document-media-providers',
     'document-generate-media',
   ], available);
   const artifactBrowserActions = existingActions([
@@ -261,19 +262,9 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
     'document-insert-artifact',
     'document-attach-artifact',
   ], available);
-  const modelCompareActions = existingActions([
-    'document-run-compare',
-    'document-review-compare',
-    'document-diff-handoffs',
-    'document-judge-compare',
-    'document-compare-analytics',
-    'document-apply-compare',
-    'document-record-route-decision',
-    'document-export-compare',
-    'document-model-routing',
-    'account-main-model',
-  ], available);
+  const modelCompareActions = existingActions(MODEL_COMPARE_ACTION_IDS, available);
   const modelCompareReady = hasTool(context, 'agent_model_compare') && modelCompareActions.includes('document-run-compare');
+  const modelCompareComplete = modelCompareReady && modelCompareActions.length === MODEL_COMPARE_ACTION_IDS.length;
   const documentsReady = hasTool(context, 'agent_documents')
     && documentActions.includes('document-browse-drafts')
     && documentActions.includes('document-show-draft')
@@ -379,7 +370,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Missing source artifacts ${reviewerReadiness.summary.documentsMissingSourceArtifacts}`,
         `Unrevealed comparisons ${reviewerReadiness.summary.unrevealedComparisons}`,
         `Hidden judgments ${reviewerReadiness.summary.hiddenJudgments}`,
-        `Route decisions ${reviewerReadiness.summary.revealedJudgments}`,
+        `Judgments awaiting a route decision ${reviewerReadiness.summary.judgmentsAwaitingRouteDecision}`,
         `Handoffs missing related evidence ${reviewerReadiness.summary.handoffsMissingRelatedArtifacts}`,
       ],
       actionIds: [
@@ -528,7 +519,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         ? 'Use package or ZIP archive exports across document, upload, generated media, session, comparison, and Knowledge artifacts.'
         : 'Wire agent_artifacts and browse/show workspace actions over the platform artifact store.',
       userRoute: 'Agent Workspace -> Documents & Files -> Browse artifacts, Export package, or Promote to Knowledge',
-      modelRoute: artifactBrowserReady ? 'agent_artifacts + agent_knowledge_ingest' : 'agent_harness mode:"workspace_actions" categoryId:"artifacts"',
+      modelRoute: artifactBrowserReady ? 'agent_artifacts + agent_knowledge_ingest' : 'agent_harness mode:"workspace_actions" categoryId:"documents"',
       signals: [
         `${uploadActions.length + exportActions.length + mediaActions.length} related artifact action(s)`,
         `Artifact browser tool: ${hasTool(context, 'agent_artifacts') ? 'available' : 'gap'}`,
@@ -536,16 +527,16 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Artifact list/read store: ${context.platform.artifactStore?.list && context.platform.artifactStore?.readContent ? 'available' : 'gap'}`,
         `Artifact export action: ${artifactBrowserActions.includes('document-export-artifact-file') ? 'available' : 'gap'}`,
         `Artifact package export action: ${artifactBrowserActions.includes('document-export-artifact-package') ? 'available' : 'gap'}`,
-        `Knowledge promotion action: ${artifactBrowserActions.includes('artifact-promote-knowledge') ? 'available' : 'gap'}`,
-        `Document attachment action: ${artifactBrowserActions.includes('artifact-attach-document') ? 'available' : 'gap'}`,
-        `Document insertion action: ${artifactBrowserActions.includes('artifact-insert-document') ? 'available' : 'gap'}`,
+        `Knowledge promotion action: ${artifactBrowserActions.includes('document-promote-artifact') ? 'available' : 'gap'}`,
+        `Document attachment action: ${artifactBrowserActions.includes('document-attach-artifact') ? 'available' : 'gap'}`,
+        `Document insertion action: ${artifactBrowserActions.includes('document-insert-artifact') ? 'available' : 'gap'}`,
       ],
       actionIds: artifactBrowserActions,
     },
     {
       id: 'model_compare',
       label: 'Blind Model Compare',
-      status: modelCompareReady ? 'partial' : 'gap',
+      status: modelCompareComplete ? 'ready' : modelCompareReady ? 'partial' : 'gap',
       outcome: 'Run the same prompt across multiple models, hide model identities while judging, save a judgment, then apply the revealed winner or record leave-unchanged evidence only after recorded effect admission.',
       current: modelCompareReady
         ? 'Agent has an admitted blind comparison runner with selectable or auto-selected candidates, identical prompt or saved text artifact delivery, rubric capture, delayed reveal, durable JSON comparison artifacts, read-only saved review boards, side-by-side reviewer views, visual reviewer handoff diffs, admitted saved judgment artifacts, task/document/benchmark-filtered preference analytics/synthesis, markdown report export, reviewer handoff artifacts, one-click reviewer handoff ZIP archives with source and matching route-decision receipt evidence, separately admitted winner route updates, and leave-unchanged route-decision receipts.'
@@ -592,7 +583,6 @@ export function documentOpsCatalogStatus(context: CommandContext): Record<string
     modes: ['document_ops', 'document_ops_lane'],
     lanes: lanes.length,
     ...counts,
-    bestReadyStatus: lanes.reduce((best, lane) => Math.max(best, statusRank(lane.status)), 0),
   };
 }
 

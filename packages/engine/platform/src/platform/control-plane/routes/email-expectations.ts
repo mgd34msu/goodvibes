@@ -37,6 +37,7 @@
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { ExpectationMailboxUnreadableError } from '../../email/inbound/expectation-registry.js';
+import { ExpectationAuthorityError, ExpectationRefusalError } from '../../google/verification-expectations.js';
 import type { GatewayMethodCatalog, GatewayMethodHandler } from '../method-catalog.js';
 import type {
   DisclosedExpectation,
@@ -95,21 +96,33 @@ function readOptionalKind(value: unknown): 'signup' | 'login' | undefined {
   );
 }
 
+/** Whether a mailbox is being read right now, and if not why not. */
+export interface EmailExpectationWatchState {
+  readonly running: boolean;
+  readonly reason: string;
+}
+
 export function createEmailExpectationOpenHandler(
   service: EmailExpectationService,
+  watchState?: () => EmailExpectationWatchState,
 ): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const windowMs = readOptionalWindowMs(params.windowMs);
     const kind = readOptionalKind(params.kind);
     try {
-      return await service.open({
+      const opened = await service.open({
         serviceDomain: readRequired(params.serviceDomain, 'serviceDomain', 'the domain the workstream is signing up at'),
         recipientAddress: readRequired(params.recipientAddress, 'recipientAddress', 'the exact address handed to the form'),
         purpose: readRequired(params.purpose, 'purpose', 'a stated purpose'),
         ...(windowMs === undefined ? {} : { windowMs }),
         ...(kind === undefined ? {} : { kind }),
       });
+      // Opening is not refused while nothing watches the mailbox (a cluster
+      // standby legitimately does not), so the answer says what the caller
+      // would otherwise discover only when the window runs out.
+      const watching = watchState?.();
+      return watching === undefined ? opened : { ...opened, watching: { running: watching.running, reason: watching.reason } };
     } catch (error) {
       // The book refuses for reasons that are the CALLER's to fix, too many
       // open expectations, an unusable domain or address, so they are 400s
@@ -119,13 +132,18 @@ export function createEmailExpectationOpenHandler(
       // configuration, and the unreadable-mailbox refusal is a statement about
       // the machine. A workstream that reads 400 retries with different
       // arguments; one that reads 409 knows the arguments were fine.
+      // Only the book's typed refusals are the caller's to fix. Anything else,
+      // a failed persist, a system error, a bug, is the daemon's own and stays
+      // a 500 instead of telling the caller to retry with different arguments.
+      if (!(error instanceof ExpectationRefusalError || error instanceof ExpectationMailboxUnreadableError || error instanceof ExpectationAuthorityError || error instanceof GatewayVerbError)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof ExpectationMailboxUnreadableError) {
         throw new GatewayVerbError(message, 'FAILED_PRECONDITION', 409);
       }
-      if (message.includes('command authority')) {
+      if (error instanceof ExpectationAuthorityError) {
         throw new GatewayVerbError(message, 'FAILED_PRECONDITION', 409);
       }
+      if (error instanceof GatewayVerbError) throw error;
       throw new GatewayVerbError(message, 'INVALID_ARGUMENT', 400);
     }
   };
@@ -163,12 +181,13 @@ export function createEmailExpectationCancelHandler(
 export function registerEmailExpectationGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: EmailExpectationService,
+  watchState?: () => EmailExpectationWatchState,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => {
     const descriptor = catalog.get(id);
     if (descriptor) catalog.register(descriptor, handler, { replace: true });
   };
-  attach('email.expectation.open', createEmailExpectationOpenHandler(service));
+  attach('email.expectation.open', createEmailExpectationOpenHandler(service, watchState));
   attach('email.expectation.list', createEmailExpectationListHandler(service));
   attach('email.expectation.cancel', createEmailExpectationCancelHandler(service));
 }

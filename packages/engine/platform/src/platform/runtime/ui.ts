@@ -54,9 +54,6 @@ export {
   enrichModelEntries,
   groupEntriesByProvider,
 } from './ui/model-picker/health-enrichment.js';
-export { ModelPickerDataProvider, createModelPickerData } from './ui/model-picker/index.js';
-export type { ModelPickerDataProviderOptions } from './ui/model-picker/index.js';
-export { ProviderHealthDataProvider, buildFallbackChainData, createProviderHealthData } from './ui/provider-health/index.js';
 export { NotificationRouter, createNotificationRouter } from './notifications/index.js';
 export type {
   Notification,

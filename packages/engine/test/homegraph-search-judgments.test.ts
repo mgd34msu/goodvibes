@@ -19,17 +19,18 @@ import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-f
 const spaceId = 'homeassistant:search-readings';
 const query = 'How do I reset the router?';
 const body = 'Hold the recessed switch for ten seconds to restore factory network settings.';
-const roots: string[] = [], services: HomeGraphService[] = [];
+const roots: string[] = [], services: HomeGraphService[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => {
+afterEach(async () => {
   installJudgmentPort(previous);
-  for (const service of services.splice(0)) service.dispose();
+  await Promise.all(services.splice(0).map(service => service.dispose()));
+  await Promise.all(stores.splice(0).map(store => store.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 async function fixture(semantic = false, generate: () => Promise<string> = async () => body) {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-search-readings-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await store.init();
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
   const semanticService = semantic ? new KnowledgeSemanticService(store, { llm: {
     async completeJson() { throw new Error('No enrichment in this synthetic fixture'); }, async completeText() { return generate(); },
   }, isBackgroundPaused: () => true }) : undefined;

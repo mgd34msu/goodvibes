@@ -60,14 +60,17 @@ function recordingConversation(into: Recorded): HostedFrameConversation {
 
 /**
  * A daemon that serves one scripted stream per open, and records the position
- * each open claimed.
+ * each open claimed. Frames are handed out one per read, so `ended[n]` settles
+ * only once the reader has taken every frame of stream n or has let it go.
  */
 function scriptedDaemon(streams: readonly (readonly Frame[])[]): {
   fetchImpl: typeof fetch;
   positions: (string | null)[];
+  ended: Promise<void>[];
   steer: (correlationId: string) => void;
 } {
   const positions: (string | null)[] = [];
+  const ended: Promise<void>[] = [];
   let opened = 0;
   let deliver: ((correlationId: string) => void) | undefined;
   const fetchImpl = (async (_url: string, init?: RequestInit) => {
@@ -77,21 +80,29 @@ function scriptedDaemon(streams: readonly (readonly Frame[])[]): {
     positions.push(headers.get('Last-Event-ID'));
     const frames = streams[opened] ?? [];
     opened += 1;
+    const end = Promise.withResolvers<void>();
+    ended.push(end.promise);
+    // A released watch aborts its request instead of cancelling the body.
+    if (init?.signal?.aborted) end.resolve(); else init?.signal?.addEventListener('abort', () => end.resolve(), { once: true });
+    const delivered = Promise.withResolvers<string>();
+    deliver = correlationId => delivered.resolve(correlationId);
+    let next = 0;
+    const encoder = new TextEncoder();
     return new Response(new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        const encoder = new TextEncoder();
-        deliver = correlationId => {
-          for (const frame of frames) controller.enqueue(encoder.encode(encodeFrame({ ...frame,
-            ...(frame.type === 'TURN_SUBMITTED' && !frame.fields?.origin ? { fields: { ...frame.fields,
-              origin: { source: 'hosted-session', surface: 'service', metadata: { correlationId } },
-            } } : {}),
-          })));
-          controller.close();
-        };
+      async pull(controller) {
+        const correlationId = await delivered.promise;
+        const frame = frames[next++];
+        if (!frame) { controller.close(); end.resolve(); return; }
+        controller.enqueue(encoder.encode(encodeFrame({ ...frame,
+          ...(frame.type === 'TURN_SUBMITTED' && !frame.fields?.origin ? { fields: { ...frame.fields,
+            origin: { source: 'hosted-session', surface: 'service', metadata: { correlationId } },
+          } } : {}),
+        })));
       },
-    }), { headers: { 'content-type': 'text/event-stream' } });
+      cancel() { end.resolve(); },
+    }, { highWaterMark: 0 }), { headers: { 'content-type': 'text/event-stream' } });
   }) as unknown as typeof fetch;
-  return { fetchImpl, positions, steer: correlationId => { if (!deliver) throw new Error('stream not open'); deliver(correlationId); } };
+  return { fetchImpl, positions, ended, steer: correlationId => { if (!deliver) throw new Error('stream not open'); deliver(correlationId); } };
 }
 
 function router(daemon: ReturnType<typeof scriptedDaemon>, conversation: HostedFrameConversation) {
@@ -218,9 +229,9 @@ describe('a second turn on a hosted conversation', () => {
       const first = await remote.submit('one');
       expect(first.routed).toBe(true);
       if (first.routed) await first.completion;
-      // Allow the already-buffered source to drain after the terminal released
-      // ownership. Its later frame must remain available for a future watcher.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // The first stream has handed over its later frame or been let go; that
+      // frame must remain available for a future watcher.
+      await daemon.ended[0];
       const second = await remote.submit('two');
       expect(second.routed).toBe(true);
       if (second.routed) await second.completion;

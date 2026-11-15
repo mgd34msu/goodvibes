@@ -16,13 +16,15 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootDaemon, type BootedDaemon } from '../platform/src/platform/daemon/boot.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { useArtifactKindReadings } from './helpers/artifact-kind-readings.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 
 // beforeEach runs after bootDaemon's beforeAll composition installed its live
 // port, and afterEach restores that port before the daemon is stopped.
@@ -39,6 +41,22 @@ function binaryFixture(byteLength: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(byteLength);
   for (let i = 0; i < byteLength; i += 1) bytes[i] = i % 256;
   return bytes;
+}
+
+/**
+ * What an in-flight upload holds on disk: the store's content file before its metadata exists (a finished
+ * artifact has both files, a failed write neither), and the multipart parser's temporary directory.
+ */
+function spoolFiles(home: string): string[] {
+  try {
+    const entries = readdirSync(home, { recursive: true, encoding: 'utf8' });
+    const present = new Set(entries);
+    const content = entries.filter((entry) => /(^|\/)artifact-[A-Za-z0-9-]+\.data$/.test(entry) && !present.has(`${entry.slice(0, -'.data'.length)}.json`));
+    const parsing = readdirSync(tmpdir()).filter((entry) => entry.startsWith('goodvibes-upload-'));
+    return [...content, ...parsing];
+  } catch {
+    return [];
+  }
 }
 
 describe('raw and multipart artifact uploads round-trip over a real daemon', () => {
@@ -135,28 +153,45 @@ describe('raw and multipart artifact uploads round-trip over a real daemon', () 
     expect(body.artifact.mimeType).toBe('text/plain');
   });
 
-  test.each(['raw', 'multipart'] as const)('an already aborted %s upload admits no artifact and preserves existing content', async (mode) => {
+  test.each(['raw', 'multipart'] as const)('a %s upload whose client disconnects mid-body admits no artifact and leaves no spool behind', async (mode) => {
     const beforeResponse = await fetch(`${daemon.url}/api/artifacts`, { headers: authHeaders() });
     expect(beforeResponse.status).toBe(200);
     const before: unknown = await beforeResponse.json();
-    const bytes = binaryFixture(2 * 1024 * 1024);
-    const form = new FormData();
-    form.append('file', new Blob([bytes], { type: 'application/octet-stream' }), 'aborted.bin');
-    const controller = new AbortController();
-    const reason = new DOMException('synthetic upload cancellation', 'AbortError');
-    controller.abort(reason);
 
-    await expect(fetch(`${daemon.url}/api/artifacts?filename=aborted.bin`, {
-      method: 'POST',
-      headers: authHeaders(mode === 'raw' ? { 'content-type': 'application/octet-stream' } : {}),
-      body: mode === 'raw' ? bytes : form,
-      signal: controller.signal,
-    })).rejects.toBe(reason);
+    // The declared length is far past what is sent, so the server is still reading when the client goes away.
+    const declaredBytes = 4 * 1024 * 1024;
+    const sentBytes = Buffer.from(binaryFixture(64 * 1024));
+    const boundary = 'goodvibes-abort-boundary';
+    const multipartHead = Buffer.from(
+      `--${boundary}\r\ncontent-disposition: form-data; name="file"; filename="aborted.bin"\r\ncontent-type: application/octet-stream\r\n\r\n`,
+    );
+    const head = [
+      `POST /api/artifacts${mode === 'raw' ? '?filename=aborted.bin' : ''} HTTP/1.1`,
+      `host: 127.0.0.1:${daemon.port}`,
+      `authorization: Bearer ${TOKEN}`,
+      `content-type: ${mode === 'raw' ? 'application/octet-stream' : `multipart/form-data; boundary=${boundary}`}`,
+      `content-length: ${declaredBytes + (mode === 'multipart' ? multipartHead.byteLength : 0)}`,
+      'connection: close',
+      '',
+      '',
+    ].join('\r\n');
 
+    const socket = connect({ host: '127.0.0.1', port: daemon.port });
+    socket.on('error', () => {});
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+    socket.write(Buffer.concat([Buffer.from(head), ...(mode === 'multipart' ? [multipartHead] : []), sentBytes]));
+
+    // The server has begun reading once it has opened a spool for the body.
+    await waitFor(() => spoolFiles(home).length > 0);
+    socket.destroy();
+
+    await waitFor(() => spoolFiles(home).length === 0);
     const afterResponse = await fetch(`${daemon.url}/api/artifacts`, { headers: authHeaders() });
     expect(afterResponse.status).toBe(200);
-    const after: unknown = await afterResponse.json();
-    expect(after).toEqual(before);
+    expect(await afterResponse.json()).toEqual(before);
     expect(readings.requests.filter((request) => request.context?.battery === 'engine.artifacts.kind')).toHaveLength(0);
   });
 });

@@ -118,6 +118,8 @@ function contractGroupTarget(node: ProcessNode): string | null {
 export class FleetActs {
   private pick: PickMode | null = null;
   private pickRequest: { readonly nodeId: string } | null = null;
+  /** Conflict rows whose resolution session is still being started, so a second Enter cannot start another agent in the same kept tree. */
+  private readonly conflictRequests = new Set<string>();
   private pickBusy = false;
   private pickPreviewOpen = false;
 
@@ -378,7 +380,17 @@ export class FleetActs {
             this.deps.notify(`[Fleet] Pick not applied for group ${shortId(group.groupId)}: the daemon still requires confirmation.`);
           }
         } catch (err) {
-          this.deps.notify(`Pick failed: ${summarizeError(err)}`);
+          // The reply may have been lost after the merge ran. The daemon keeps a
+          // group listed until its winner merge completed, so a group that is no
+          // longer held means the pick was applied.
+          let stillHeld = true;
+          try {
+            const { groups } = await gateway.listAttempts(group.workstreamId);
+            stillHeld = groups.some(g => g.groupId === group.groupId);
+          } catch { /* cannot tell: report the failure as it came */ }
+          this.deps.notify(stillHeld
+            ? `Pick failed: ${summarizeError(err)}`
+            : "Pick outcome unknown or already applied: the group is no longer held; check the winner's merge.");
         }
         // A confirmed request may finish after close/reopen: keep its receipt,
         // but never close or clear the newer modal's preview/picker.
@@ -401,8 +413,10 @@ export class FleetActs {
     const data = contractUnitData(node);
     const itemId = data ? workItemIdFromNodeId(node.id) : null;
     if (itemId === null) { this.deps.notify('This row is not a recorded contract unit.'); return; }
+    if (this.conflictRequests.has(itemId)) { this.deps.notify(`A resolution session for ${shortId(itemId)} is already starting.`); return; }
     const gateway = this.requireGateway();
     if (!gateway) return;
+    this.conflictRequests.add(itemId);
     try {
       const result = await gateway.resolveConflict(itemId);
       const files = result.files.length > 0 ? ` over ${result.files.length} conflicted file(s)` : '';
@@ -413,6 +427,8 @@ export class FleetActs {
       gateway.armFixSessionAttach(result.sessionId);
     } catch (err) {
       this.deps.notify(`Conflict resolution failed: ${summarizeError(err)}`);
+    } finally {
+      this.conflictRequests.delete(itemId);
     }
   }
 

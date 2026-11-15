@@ -24,16 +24,20 @@ const NATIVE_METADATA_PURPOSES = new Set([
  * arbitrary provider results and artifact metadata do not inherit these roles.
  * Unknown names stay withheld. A declaration never exempts a string from
  * credential screening or overrides a canonical secret/profile role. */
+// Filesystem locations (sourcePath, contentPath, metadataPath, workspacePath) and webhook URLs (which
+// commonly carry the secret in the path) are deliberately absent: they are transport details, not evidence,
+// and an undeclared field stays withheld.
 const NATIVE_FIELDS = new Set([
   'header', 'record', 'recordKind', 'recordId', 'records', 'entries', 'evidence', 'originalSources', 'nativeSnapshot',
-  'selectedStatusText', 'selectedOutcomeText', 'sourcePath', 'sourceCounts', 'sourceCount', 'sourceTool', 'sourceId',
+  'selectedStatusText', 'selectedOutcomeText', 'sourceCounts', 'sourceCount', 'sourceTool', 'sourceId',
+  'dropped', 'withoutRunner', 'duplicates', 'droppedNote', 'sourceErrors', 'sourceErrorNote',
   'schema', 'schemaStatus', 'schemaVersion', 'receiptSchemaVersion', 'receiptSchemaStatus', 'certificationStatus',
   'contract', 'contractVersion', 'publication', 'publicationGuarantee', 'publisher', 'publisherId', 'daemonId', 'hostId',
   'receiptId', 'receiptIds', 'operationReceiptId', 'captureReceiptId', 'exportReceiptId', 'closeoutReceiptId', 'workspaceReceiptId',
   'cursor', 'freshnessCursor', 'sequence', 'checkpoint', 'provenance', 'certification', 'missingSignals',
   'createdAt', 'updatedAt', 'expiresAt', 'startedAt', 'completedAt', 'lastReadAt', 'lastWriteAt', 'lastSyncAt',
   'mimeType', 'filename', 'sizeBytes', 'sha256', 'acquisitionMode', 'fetchMode', 'purpose', 'laneId',
-  'contentPath', 'metadataPath', 'sourceUri', 'lane', 'category', 'capability', 'capabilityTags', 'tags',
+  'sourceUri', 'lane', 'category', 'capability', 'capabilityTags', 'tags',
   'agents', 'agent', 'agentId', 'template', 'task', 'goal', 'detail', 'fullOutput', 'errorMessage',
   'parentId', 'parentAgentId', 'cohortId', 'toolCallCount', 'usage', 'inputTokens', 'outputTokens', 'cost',
   'pools', 'contracts', 'artifacts', 'outcomes', 'workspaces', 'runnerId', 'workspaceId', 'branch',
@@ -62,7 +66,7 @@ const NATIVE_FIELDS = new Set([
   'remoteEvidence', 'liveOutcomes', 'runnerIds', 'spawn', 'batchSpawn', 'listAgents', 'remoteContracts',
   'remoteArtifacts', 'remoteReadModelOutcomes', 'list', 'inspect', 'cancel', 'harness', 'chooseWhen',
   'doNotUseWhen', 'saferRoutes',
-  'workPlanItemCount', 'dispatchReceiptCount', 'remoteArtifactCount', 'remoteOutcomeCount', 'remoteReceiptCount',
+  'workPlanItemCount', 'dispatchReceiptCount', 'dispatchReceiptBasis', 'remoteArtifactCount', 'remoteOutcomeCount', 'remoteReceiptCount',
   'workspaceEvidenceCount', 'autoAttachReason', 'reviewRoutes', 'updateRoutes', 'workPlanItems',
   'probability', 'reading', 'confidence', 'verdict', 'outcome', 'score', 'rank',
   'poolId', 'sourceTransport', 'trustClass', 'transportState', 'allowedTools', 'capabilityCeilingTools',
@@ -71,7 +75,7 @@ const NATIVE_FIELDS = new Set([
   'messageCount', 'errorCount', 'hasKnowledgeInjections', 'receipt', 'redaction', 'redactionPolicy',
   'effect', 'requiresConfirmation', 'confirmationRequired', 'lastReviewedAt', 'latestDispatchReceipt',
   'itemId', 'owner', 'markDone', 'markBlocked', 'decisionId', 'probabilities', 'question', 'criterion',
-  'candidates', 'workspace', 'workspacePath',
+  'candidates', 'workspace',
   'lastUpdatedAt', 'transport', 'connectedAt', 'runnerContract', 'knowledgeInjections',
   'linked', 'notes', 'activePlan', 'workPlan', 'updatedBy',
   'researchFile',
@@ -114,7 +118,7 @@ const NATIVE_FIELDS = new Set([
   'requiresSourceOwner', 'prompt', 'modelProvider', 'fallbackModels', 'routing', 'reasoningEffort',
   'thinking', 'wakeMode', 'timeoutMs', 'toolAllowlist', 'autoApprove', 'sandboxMode',
   'allowUnsafeExternalContent', 'externalContentSource', 'lightContext', 'routeBindingId', 'watcherId', 'lastEventAt',
-  'providerSelection', 'providerFailurePolicy', 'targetKind', 'createdBy', 'model', 'webhookUrl',
+  'providerSelection', 'providerFailurePolicy', 'targetKind', 'createdBy', 'model',
   'onFailure', 'backoff', 'retryOn', 'exitCode', 'turnId', 'revision',
   'queuedIds', 'runningIds', 'blockedIds', 'totalCreated', 'totalCompleted', 'totalCancelled',
   'maxConcurrency',

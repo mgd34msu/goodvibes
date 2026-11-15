@@ -8,6 +8,7 @@ import { readExecutionMode } from '../permissions/execution-mode.ts';
 // instead of assembling everything inline. No behavior changes: same context reads,
 // same try/catch fallbacks, same field shapes.
 import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
@@ -32,6 +33,17 @@ import { readConfigBoolean, readConfigNumber, readConfigString } from './agent-w
 import type { AgentWorkspaceCalendarOAuthConfigStatus } from './agent-workspace-calendar-oauth-editor.ts';
 import type { AgentWorkspaceEmailConnectStatus } from './agent-workspace-types.ts';
 
+/**
+ * Store ids whose read failed, with the reason. A snapshot builder that cannot
+ * read its store reports it here instead of passing off an empty default as the
+ * real contents, so the workspace can say "unreadable" rather than "none yet".
+ */
+export type AgentWorkspaceReadFailures = Map<string, string>;
+
+function recordReadFailure(failures: AgentWorkspaceReadFailures | undefined, id: string, error: unknown): void {
+  failures?.set(id, error instanceof Error ? error.message : String(error));
+}
+
 export function buildAgentWorkspaceCurrentModelSnapshot(context: CommandContext): ReturnType<NonNullable<NonNullable<CommandContext['provider']>['providerRegistry']>['getCurrentModel']> | null | undefined {
   try {
     return context.provider?.providerRegistry?.getCurrentModel?.();
@@ -48,7 +60,7 @@ export function buildAgentWorkspaceSessionMemoryCount(context: CommandContext): 
   }
 }
 
-export function buildAgentWorkspacePersonaSnapshot(context: CommandContext) {
+export function buildAgentWorkspacePersonaSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, activeName: '(none)', items: [] };
@@ -58,12 +70,13 @@ export function buildAgentWorkspacePersonaSnapshot(context: CommandContext) {
       activeName: snapshot.activePersona?.name ?? '(none)',
       items: snapshot.personas.map((persona) => summarizePersonaItem(persona, snapshot.activePersonaId)),
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'personas', error);
     return { count: 0, activeName: '(unavailable)', items: [] };
   }
 }
 
-export function buildAgentWorkspaceNoteSnapshot(context: CommandContext) {
+export function buildAgentWorkspaceNoteSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, reviewQueueCount: 0, items: [] };
@@ -73,12 +86,13 @@ export function buildAgentWorkspaceNoteSnapshot(context: CommandContext) {
       reviewQueueCount: snapshot.reviewQueue.length,
       items: snapshot.notes.map(summarizeNoteItem),
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'notes', error);
     return { count: 0, reviewQueueCount: 0, items: [] };
   }
 }
 
-export function buildAgentWorkspaceSkillSnapshot(context: CommandContext) {
+export function buildAgentWorkspaceSkillSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, enabled: 0, active: 0, bundleCount: 0, enabledBundleCount: 0, items: [], bundleItems: [] };
@@ -92,12 +106,13 @@ export function buildAgentWorkspaceSkillSnapshot(context: CommandContext) {
       items: snapshot.skills.map(summarizeSkillItem),
       bundleItems: snapshot.bundles.map((bundle) => summarizeSkillBundleItem(bundle, snapshot.skills)),
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'skills', error);
     return { count: 0, enabled: 0, active: 0, bundleCount: 0, enabledBundleCount: 0, items: [], bundleItems: [] };
   }
 }
 
-export function buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context: CommandContext) {
+export function buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, successful: 0, failed: 0, latest: null };
@@ -108,12 +123,13 @@ export function buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context: Comm
       failed: receipts.filter((receipt) => receipt.status === 'failed').length,
       latest: receipts[0] ? summarizeRoutineScheduleReceipt(receipts[0]) : null,
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'routine-receipts', error);
     return { count: 0, successful: 0, failed: 0, latest: null };
   }
 }
 
-export function buildAgentWorkspaceResearchSourceSnapshot(context: CommandContext) {
+export function buildAgentWorkspaceResearchSourceSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, candidate: 0, reviewed: 0, rejected: 0, used: 0 };
@@ -125,12 +141,13 @@ export function buildAgentWorkspaceResearchSourceSnapshot(context: CommandContex
       rejected: snapshot.rejected.length,
       used: snapshot.used.length,
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'research-sources', error);
     return { count: 0, candidate: 0, reviewed: 0, rejected: 0, used: 0 };
   }
 }
 
-export function buildAgentWorkspaceResearchRunSnapshot(context: CommandContext) {
+export function buildAgentWorkspaceResearchRunSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return { count: 0, planned: 0, running: 0, paused: 0, blocked: 0, terminal: 0, items: [] };
@@ -153,22 +170,41 @@ export function buildAgentWorkspaceResearchRunSnapshot(context: CommandContext) 
       terminal: snapshot.cancelled.length + snapshot.completed.length + snapshot.failed.length,
       items: actionable.slice(0, 8).map(summarizeResearchRunItem),
     };
-  } catch {
+  } catch (error) {
+    recordReadFailure(failures, 'research-runs', error);
     return { count: 0, planned: 0, running: 0, paused: 0, blocked: 0, terminal: 0, items: [] };
   }
 }
 
-export function buildAgentWorkspaceArtifactListSnapshot(context: CommandContext) {
+/** The artifact list is a window onto the newest artifacts, not the whole store. */
+export const AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT = 100;
+
+export function buildAgentWorkspaceArtifactListSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures) {
   try {
     const store = context.platform?.artifactStore;
     const list = store?.list;
+    const items = [...(list?.call(store, AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT) ?? [])];
     return {
       available: Boolean(list),
-      items: [...(list?.call(store, 100) ?? [])],
+      items,
+      // A full page means older artifacts may exist that this snapshot never saw.
+      truncated: items.length >= AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT,
     };
-  } catch {
-    return { available: false, items: [] };
+  } catch (error) {
+    recordReadFailure(failures, 'artifacts', error);
+    return { available: false, items: [], truncated: false };
   }
+}
+
+/** Looks one artifact up by id, so a reference older than the list window is not reported missing. */
+export function buildAgentWorkspaceArtifactResolver(context: CommandContext): (artifactId: string) => ArtifactDescriptor | null {
+  return (artifactId) => {
+    try {
+      return context.platform?.artifactStore?.get?.(artifactId) ?? null;
+    } catch {
+      return null;
+    }
+  };
 }
 
 export function buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactItems: ReturnType<typeof buildAgentWorkspaceArtifactListSnapshot>['items']) {
@@ -365,7 +401,6 @@ export interface AgentWorkspaceConfigSettingsSnapshot {
   readonly lineNumbers: string;
   readonly operationalMessages: string;
   readonly systemMessages: string;
-  readonly releaseChannel: string;
   readonly permissionMode: string;
   readonly toolAutoHeal: boolean;
   readonly toolsDefaultTokenBudget: number;
@@ -383,50 +418,61 @@ export interface AgentWorkspaceConfigSettingsSnapshot {
   readonly voiceSurfaceEnabled: boolean;
 }
 
+function readPermissionMode(context: CommandContext, failures: AgentWorkspaceReadFailures | undefined): string {
+  try {
+    return (context.platform?.configManager ? readExecutionMode(context.platform.configManager) : undefined) ?? 'unavailable';
+  } catch (error) {
+    recordReadFailure(failures, 'config:permissions.mode', error);
+    return 'unavailable';
+  }
+}
+
 /** The flat sequence of config reads driving most of the runtime snapshot's settings fields. */
-export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContext): AgentWorkspaceConfigSettingsSnapshot {
+export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContext, failures?: AgentWorkspaceReadFailures): AgentWorkspaceConfigSettingsSnapshot {
+  const str = (key: string, fallback: string) => readConfigString(context, key, fallback, failures);
+  const num = (key: string, fallback: number) => readConfigNumber(context, key, fallback, failures);
+  const bool = (key: string, fallback: boolean) => readConfigBoolean(context, key, fallback, failures);
   return {
-    ttsProvider: readConfigString(context, 'tts.provider', '(provider default)'),
-    ttsVoice: readConfigString(context, 'tts.voice', '(voice default)'),
-    ttsLlmProvider: readConfigString(context, 'tts.llmProvider', ''),
-    ttsLlmModel: readConfigString(context, 'tts.llmModel', ''),
-    embeddingProvider: readConfigString(context, 'provider.embeddingProvider', '(provider default)'),
-    reasoningEffort: readConfigString(context, 'provider.reasoningEffort', '(default)'),
-    helperEnabled: readConfigBoolean(context, 'helper.enabled', false),
-    toolLlmEnabled: readConfigBoolean(context, 'tools.llmEnabled', false),
-    providerFailureHints: readConfigBoolean(context, 'behavior.suggestAlternativeOnProviderFail', false),
-    cacheEnabled: readConfigBoolean(context, 'cache.enabled', true),
-    cacheStableTtl: readConfigString(context, 'cache.stableTtl', '(default)'),
-    cacheMonitorHitRate: readConfigBoolean(context, 'cache.monitorHitRate', true),
-    cacheHitRateWarningThreshold: readConfigNumber(context, 'cache.hitRateWarningThreshold', 0.3),
-    hitlMode: readConfigString(context, 'behavior.hitlMode', '(default)'),
-    guidanceMode: readConfigString(context, 'behavior.guidanceMode', '(default)'),
-    saveHistory: readConfigBoolean(context, 'behavior.saveHistory', true),
-    autoApprove: readConfigBoolean(context, 'behavior.autoApprove', false),
-    autoCompactThreshold: readConfigNumber(context, 'behavior.autoCompactThreshold', 0),
-    staleContextWarnings: readConfigBoolean(context, 'behavior.staleContextWarnings', false),
-    showThinking: readConfigBoolean(context, 'display.showThinking', false),
-    showReasoningSummary: readConfigBoolean(context, 'display.showReasoningSummary', false),
-    theme: readConfigString(context, 'display.theme', '(default)'),
-    stream: readConfigBoolean(context, 'display.stream', true),
-    lineNumbers: readConfigString(context, 'display.lineNumbers', '(default)'),
-    operationalMessages: readConfigString(context, 'ui.operationalMessages', '(default)'),
-    systemMessages: readConfigString(context, 'ui.systemMessages', '(default)'),
-    releaseChannel: readConfigString(context, 'release.channel', '(default)'),
-    permissionMode: (context.platform?.configManager ? readExecutionMode(context.platform.configManager) : undefined) ?? 'unavailable',
-    toolAutoHeal: readConfigBoolean(context, 'tools.autoHeal', false),
-    toolsDefaultTokenBudget: readConfigNumber(context, 'tools.defaultTokenBudget', 0),
-    artifactMaxBytes: readConfigNumber(context, 'storage.artifacts.maxBytes', 512 * 1024 * 1024),
-    rawPromptTelemetry: readConfigBoolean(context, 'telemetry.includeRawPrompts', false),
-    automationEnabled: readConfigBoolean(context, 'automation.enabled', false),
-    automationMaxConcurrentRuns: readConfigNumber(context, 'automation.maxConcurrentRuns', 4),
-    automationRunHistoryLimit: readConfigNumber(context, 'automation.runHistoryLimit', 100),
-    automationDefaultTimeoutMs: readConfigNumber(context, 'automation.defaultTimeoutMs', 15 * 60 * 1000),
-    automationCatchUpWindowMinutes: readConfigNumber(context, 'automation.catchUpWindowMinutes', 30),
-    automationFailureCooldownMs: readConfigNumber(context, 'automation.failureCooldownMs', 5 * 60 * 1000),
-    automationDeleteAfterRun: readConfigBoolean(context, 'automation.deleteAfterRun', false),
-    browserPwaEnabled: readConfigBoolean(context, 'web.enabled', false),
-    browserPwaPublicBaseUrl: readConfigString(context, 'web.publicBaseUrl', '(not configured)'),
-    voiceSurfaceEnabled: readConfigBoolean(context, 'ui.voiceEnabled', false),
+    ttsProvider: str('tts.provider', '(provider default)'),
+    ttsVoice: str('tts.voice', '(voice default)'),
+    ttsLlmProvider: str('tts.llmProvider', ''),
+    ttsLlmModel: str('tts.llmModel', ''),
+    embeddingProvider: str('provider.embeddingProvider', '(provider default)'),
+    reasoningEffort: str('provider.reasoningEffort', '(default)'),
+    helperEnabled: bool('helper.enabled', false),
+    toolLlmEnabled: bool('tools.llmEnabled', false),
+    providerFailureHints: bool('behavior.suggestAlternativeOnProviderFail', false),
+    cacheEnabled: bool('cache.enabled', true),
+    cacheStableTtl: str('cache.stableTtl', '(default)'),
+    cacheMonitorHitRate: bool('cache.monitorHitRate', true),
+    cacheHitRateWarningThreshold: num('cache.hitRateWarningThreshold', 0.3),
+    hitlMode: str('behavior.hitlMode', '(default)'),
+    guidanceMode: str('behavior.guidanceMode', '(default)'),
+    saveHistory: bool('behavior.saveHistory', true),
+    autoApprove: bool('behavior.autoApprove', false),
+    autoCompactThreshold: num('behavior.autoCompactThreshold', 0),
+    staleContextWarnings: bool('behavior.staleContextWarnings', false),
+    showThinking: bool('display.showThinking', false),
+    showReasoningSummary: bool('display.showReasoningSummary', false),
+    theme: str('display.theme', '(default)'),
+    stream: bool('display.stream', true),
+    lineNumbers: str('display.lineNumbers', '(default)'),
+    operationalMessages: str('ui.operationalMessages', '(default)'),
+    systemMessages: str('ui.systemMessages', '(default)'),
+    permissionMode: readPermissionMode(context, failures),
+    toolAutoHeal: bool('tools.autoHeal', false),
+    toolsDefaultTokenBudget: num('tools.defaultTokenBudget', 0),
+    artifactMaxBytes: num('storage.artifacts.maxBytes', 512 * 1024 * 1024),
+    rawPromptTelemetry: bool('telemetry.includeRawPrompts', false),
+    automationEnabled: bool('automation.enabled', false),
+    automationMaxConcurrentRuns: num('automation.maxConcurrentRuns', 4),
+    automationRunHistoryLimit: num('automation.runHistoryLimit', 100),
+    automationDefaultTimeoutMs: num('automation.defaultTimeoutMs', 15 * 60 * 1000),
+    automationCatchUpWindowMinutes: num('automation.catchUpWindowMinutes', 30),
+    automationFailureCooldownMs: num('automation.failureCooldownMs', 5 * 60 * 1000),
+    automationDeleteAfterRun: bool('automation.deleteAfterRun', false),
+    browserPwaEnabled: bool('web.enabled', false),
+    browserPwaPublicBaseUrl: str('web.publicBaseUrl', '(not configured)'),
+    voiceSurfaceEnabled: bool('ui.voiceEnabled', false),
   };
 }

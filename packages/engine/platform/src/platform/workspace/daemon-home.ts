@@ -28,7 +28,8 @@
  * import identity state from other surfaces or workspace-scoped paths.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join, isAbsolute, resolve, dirname } from 'node:path';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import { logger } from '../utils/logger.js';
@@ -108,13 +109,23 @@ export function ensureDaemonHome(daemonHomeDir: string): DaemonHomeDirs {
     return { daemonHomeDir, freshInstall: false };
   }
 
-  mkdirSync(daemonHomeDir, { recursive: true });
+  // Owner-only: the directory holds identity and pairing state.
+  mkdirSync(daemonHomeDir, { recursive: true, mode: 0o700 });
   return { daemonHomeDir, freshInstall: true };
 }
 
 // ---------------------------------------------------------------------------
 // Operator token file write (global-only, mode 0600)
 // ---------------------------------------------------------------------------
+
+/** A temp name no other writer shares, so two writers cannot rename each other's file away. */
+function uniqueTmpPath(path: string): string {
+  return `${path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+}
+
+function removeQuietly(path: string): void {
+  try { unlinkSync(path); } catch { /* already gone */ }
+}
 
 /**
  * Write operator tokens to the global daemon-home path with mode 0600.
@@ -126,10 +137,15 @@ export function ensureDaemonHome(daemonHomeDir: string): DaemonHomeDirs {
 export function writeOperatorTokenFile(daemonHomeDir: string, content: string): void {
   const tokenPath = resolveOperatorTokenPath(daemonHomeDir);
   mkdirSync(dirname(tokenPath), { recursive: true });
-  const tmpPath = tokenPath + '.tmp';
-  writeFileSync(tmpPath, content, { encoding: 'utf-8', mode: 0o600 });
-  chmodSync(tmpPath, 0o600);
-  renameSync(tmpPath, tokenPath);
+  const tmpPath = uniqueTmpPath(tokenPath);
+  try {
+    writeFileSync(tmpPath, content, { encoding: 'utf-8', mode: 0o600 });
+    chmodSync(tmpPath, 0o600);
+    renameSync(tmpPath, tokenPath);
+  } catch (error) {
+    removeQuietly(tmpPath);
+    throw error;
+  }
   // Apply chmod again after rename, some filesystems reset permissions on rename
   try {
     chmodSync(tokenPath, 0o600);
@@ -184,30 +200,40 @@ export function readDaemonSetting(daemonHomeDir: string, key: string): string | 
 export function writeDaemonSetting(daemonHomeDir: string, key: string, value: string): void {
   mkdirSync(daemonHomeDir, { recursive: true });
   const settingsPath = join(daemonHomeDir, 'daemon-settings.json');
-  const tmpPath = settingsPath + '.tmp';
+  const tmpPath = uniqueTmpPath(settingsPath);
   let existing: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
     try {
       existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
     } catch (err: unknown) {
-      // Overwrite corrupt file; log so ops can see when this happens
-      logger.warn('[DaemonHome] daemon-settings.json parse failed, overwriting with fresh state', {
+      // Keep the unreadable bytes: the file may hold other keys (pairing
+      // state) that an operator can still recover. If they cannot be set
+      // aside, refuse the write rather than destroy them.
+      const aside = `${settingsPath}.corrupt-${Date.now()}`;
+      renameSync(settingsPath, aside);
+      logger.warn('[DaemonHome] daemon-settings.json could not be parsed; it was moved aside and a fresh file is being written', {
         path: settingsPath,
+        movedTo: aside,
         error: String(err),
       });
     }
   }
   // daemon-settings.json may contain sensitive pairing state; write at 0600.
-  writeFileSync(tmpPath, JSON.stringify({ ...existing, [key]: value }, null, 2), { encoding: 'utf-8', mode: 0o600 });
   try {
-    chmodSync(tmpPath, 0o600);
+    writeFileSync(tmpPath, JSON.stringify({ ...existing, [key]: value }, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    try {
+      chmodSync(tmpPath, 0o600);
+    } catch (error) {
+      logger.warn('daemon-home: failed to chmod temporary daemon settings file', {
+        path: tmpPath,
+        error: String(error),
+      });
+    }
+    renameSync(tmpPath, settingsPath);
   } catch (error) {
-    logger.warn('daemon-home: failed to chmod temporary daemon settings file', {
-      path: tmpPath,
-      error: String(error),
-    });
+    removeQuietly(tmpPath);
+    throw error;
   }
-  renameSync(tmpPath, settingsPath);
   try {
     chmodSync(settingsPath, 0o600);
   } catch (error) {

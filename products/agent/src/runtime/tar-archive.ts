@@ -9,9 +9,11 @@
  *
  * Scope is deliberately narrow, the archives this reads are ustar archives
  * this project or npm produced: regular files and directories, short paths, no
- * sparse entries. Anything else in the stream is skipped rather than guessed
- * at, and every extracted path is checked against its destination before a
- * single byte is written.
+ * sparse entries. Symlinks and other entry kinds are skipped. A truncated or
+ * malformed archive, and an entry whose real path lives in a GNU long-name or
+ * PAX `path` header, throw: skipping them would extract a different tree than
+ * the archive describes and report it as complete. Every extracted path is
+ * checked against its destination before a single byte is written.
  */
 import { gunzipSync } from 'node:zlib';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -45,11 +47,19 @@ function classify(typeflag: number | undefined, name: string): TarEntryKind {
   return 'other';
 }
 
+/** Whether a PAX extended header carries a `path` or `linkpath` record that this reader cannot apply. */
+function paxOverridesPath(data: Buffer): boolean {
+  const text = data.toString('utf-8');
+  return /(^|\n)\d+ (path|linkpath)=/.test(text);
+}
+
 /**
  * Walks every entry of a gzipped tar in archive order.
  *
- * Throws when the gzip stream does not decompress: a corrupted download must
- * fail loudly, never read as "the archive was empty".
+ * Throws when the gzip stream does not decompress, when a header or its data
+ * is cut short, or when an entry's path is carried by a long-name header: a
+ * corrupted download must fail loudly, never read as "the archive was empty"
+ * or hand back a partial tree.
  */
 export function* readTarGzEntries(archive: Buffer | Uint8Array): Generator<TarEntry> {
   const tar = gunzipSync(archive);
@@ -63,13 +73,20 @@ export function* readTarGzEntries(archive: Buffer | Uint8Array): Generator<TarEn
     const fullName = prefix ? `${prefix}/${name}` : name;
     const sizeOctal = readTarString(header, 124, 12).trim();
     const size = Number.parseInt(sizeOctal || '0', 8);
-    if (!Number.isFinite(size) || size < 0) return;
+    if (!Number.isFinite(size) || size < 0) throw new Error(`tar archive is malformed: unreadable size for the entry at byte ${offset}`);
     const modeOctal = readTarString(header, 100, 8).trim();
     const parsedMode = Number.parseInt(modeOctal || '0', 8);
     const kind = classify(header[156], fullName);
     const normalized = fullName.startsWith('./') ? fullName.slice(2) : fullName;
     const dataStart = offset + TAR_BLOCK;
-    if (dataStart + size > tar.length) return;
+    if (dataStart + size > tar.length) throw new Error(`tar archive is truncated: ${normalized} claims ${size} bytes but the archive ends first`);
+    const typeflag = header[156];
+    if (typeflag === 0x4c || typeflag === 0x4b) {
+      throw new Error(`tar archive entry ${normalized} uses a GNU long name, which this reader does not support`);
+    }
+    if (typeflag === 0x78 && paxOverridesPath(tar.subarray(dataStart, dataStart + size))) {
+      throw new Error(`tar archive entry ${normalized} uses a PAX path header, which this reader does not support`);
+    }
     yield {
       path: normalized,
       kind,

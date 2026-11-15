@@ -95,25 +95,18 @@ describe('injectTraceparent(): OTel present via injected state', () => {
     expect(headers['traceparent']).toBe('00-aabbccdd001122334455667788990011-0102030405060708-01');
   });
 
-  test('traceparent format is 00-{32hex}-{16hex}-{2hex}', () => {
-    const traceId = '0'.repeat(32);
-    const spanId = 'f'.repeat(16);
-    const flags = 255;
-    const flagsHex = (flags & 0xff).toString(16).padStart(2, '0');
-    const traceparent = `00-${traceId}-${spanId}-${flagsHex}`;
-    expect(traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
-  });
+  test.each([
+    { flags: 0, expected: '00' },
+    { flags: 1, expected: '01' },
+    { flags: 255, expected: 'ff' },
+    { flags: 256, expected: '00' },
+  ])('trace flags $flags are written as flag byte $expected', ({ flags, expected }) => {
+    setOtelModuleOverride(makeOtelApi(makeSpanContext({ traceFlags: flags }) as ReturnType<typeof makeSpanContext>) as never);
 
-  test('flags 0 produces 00 flag byte', () => {
-    const flags = 0;
-    const flagsHex = (flags & 0xff).toString(16).padStart(2, '0');
-    expect(flagsHex).toBe('00');
-  });
+    const headers: Record<string, string> = {};
+    injectTraceparent(headers);
 
-  test('sampled flag (1) produces 01 flag byte', () => {
-    const flags = 1;
-    const flagsHex = (flags & 0xff).toString(16).padStart(2, '0');
-    expect(flagsHex).toBe('01');
+    expect(headers['traceparent']).toBe(`00-aabbccdd001122334455667788990011-0102030405060708-${expected}`);
   });
 });
 
@@ -145,52 +138,48 @@ describe('injectTraceparentAsync(): OTel absent', () => {
 // ---------------------------------------------------------------------------
 
 describe('OTel error isolation', () => {
-  test('injectTraceparent() does not throw if internal OTel call fails', () => {
-    // Simulate a broken OTel API via patching globalThis.require
-    const origRequire = (globalThis as { require?: unknown }).require;
-    (globalThis as { require?: unknown }).require = (mod: string) => {
-      if (mod === '@opentelemetry/api') {
-        return {
-          trace: {
-            getActiveSpan: () => {
+  afterEach(() => {
+    resetOtelState();
+  });
+
+  function makeThrowingOtelApi(failIn: 'getActiveSpan' | 'spanContext'): never {
+    return {
+      trace: {
+        getActiveSpan: () => {
+          if (failIn === 'getActiveSpan') throw new Error('OTel internal error');
+          return {
+            spanContext: () => {
               throw new Error('OTel internal error');
             },
-          },
-        };
-      }
-      return origRequire ? (origRequire as (m: string) => unknown)(mod) : undefined;
-    };
+          };
+        },
+      },
+    } as never;
+  }
 
-    const headers: Record<string, string> = {};
-    let threw = false;
-    try {
-      injectTraceparent(headers);
-    } catch {
-      threw = true;
-    }
+  test.each(['getActiveSpan', 'spanContext'] as const)(
+    'injectTraceparent() does not throw or add headers when OTel %s throws',
+    (failIn) => {
+      resetOtelState();
+      setOtelModuleOverride(makeThrowingOtelApi(failIn));
 
-    // Restore
-    if (origRequire !== undefined) {
-      (globalThis as { require?: unknown }).require = origRequire;
-    } else {
-      delete (globalThis as { require?: unknown }).require;
-    }
-    resetOtelState();
+      const headers: Record<string, string> = { Authorization: 'Bearer token' };
+      expect(() => injectTraceparent(headers)).not.toThrow();
+      expect(headers).toEqual({ Authorization: 'Bearer token' });
+    },
+  );
 
-    expect(threw).toBe(false);
-    // Headers may or may not have been modified, but no exception must escape.
-  });
+  test.each(['getActiveSpan', 'spanContext'] as const)(
+    'injectTraceparentAsync() does not throw or add headers when OTel %s throws',
+    async (failIn) => {
+      resetOtelState();
+      setOtelModuleOverride(makeThrowingOtelApi(failIn));
 
-  test('injectTraceparentAsync() does not throw if dynamic import fails', async () => {
-    const headers: Record<string, string> = {};
-    let threw = false;
-    try {
-      await injectTraceparentAsync(headers);
-    } catch {
-      threw = true;
-    }
-    expect(threw).toBe(false);
-  });
+      const headers: Record<string, string> = { Authorization: 'Bearer token' };
+      await expect(injectTraceparentAsync(headers)).resolves.toBeUndefined();
+      expect(headers).toEqual({ Authorization: 'Bearer token' });
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -255,35 +244,16 @@ describe('injectTraceparent(): OTel present via test state', () => {
     }
   });
 
-  test('traceparent format verified for various flag values', () => {
-    // Verify the W3C format for different flag combinations.
-    const cases = [
-      { flags: 0, expected: '00' },
-      { flags: 1, expected: '01' },
-      { flags: 255, expected: 'ff' },
-    ];
-    for (const { flags, expected } of cases) {
-      const flagsHex = (flags & 0xff).toString(16).padStart(2, '0');
-      expect(flagsHex).toBe(expected);
-    }
-  });
-
-  test('tracestate header is injected when present in span context', async () => {
-    // Verify the seam in the async path exists and is callable.
-    const { injectTraceparentAsync } =
-      await import('../transport-core/src/otel.js') as {
-        injectTraceparentAsync: (h: Record<string, string>) => Promise<void>;
-      };
-
+  test('injectTraceparentAsync injects traceparent and tracestate from the active span', async () => {
     resetOtelState();
+    setOtelModuleOverride(makeOtelApi(makeSpanContext({ traceState: 'vendor=example' }) as ReturnType<typeof makeSpanContext>) as never);
 
-    // Without a real OTel module, async inject is a no-op. Verify it doesn't throw.
     const headers: Record<string, string> = {};
     await injectTraceparentAsync(headers);
-    // Headers unchanged when no span is active.
-    expect(Object.keys(headers).length).toBe(0);
-
     resetOtelState();
+
+    expect(headers['traceparent']).toBe('00-aabbccdd001122334455667788990011-0102030405060708-01');
+    expect(headers['tracestate']).toBe('vendor=example');
   });
 });
 
@@ -403,7 +373,7 @@ describe('SSE transport: traceparent in fetch headers when OTel is present', () 
     });
 
     const { createEventSourceConnector } =
-      await import('../transport-realtime/dist/runtime-events.js') as {
+      await import('../transport-realtime/src/runtime-events.js') as {
         createEventSourceConnector: (
           baseUrl: string,
           token: string,
@@ -469,7 +439,7 @@ describe('WebSocket transport: traceparent in auth frame when OTel is present', 
     });
 
     const { createWebSocketConnector } =
-      await import('../transport-realtime/dist/runtime-events.js') as {
+      await import('../transport-realtime/src/runtime-events.js') as {
         createWebSocketConnector: (
           baseUrl: string,
           token: string,

@@ -536,14 +536,22 @@ describe('client bootstrap cannot reach daemon composition code', () => {
   const MODULE_PATH = new URL('../platform/src/platform/runtime/bootstrap-services.ts', import.meta.url);
   const source = readFileSync(MODULE_PATH, 'utf8');
 
-  test('no dynamic import reaches platform/daemon', () => {
-    const dynamicDaemonImport = /import\s*\(\s*['"][^'"]*\/daemon\//;
-    expect(dynamicDaemonImport.test(source)).toBe(false);
+  /** Every module specifier the file names: static, dynamic, side-effect and require forms. */
+  const specifiers = [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)['"]([^'"]+)['"]/g)].map((match) => match[1]!);
+  // The identity proof is a pure HMAC helper (node:crypto only): the host needs it to verify a daemon it did not start, and it composes nothing.
+  const DAEMON_LEAF_MODULES = new Set(['../daemon/identity-proof.js']);
+  const reachesDaemon = (specifier: string): boolean => !DAEMON_LEAF_MODULES.has(specifier) && /(^|\/)daemon(\/|\.js$|\.ts$|$)/.test(specifier);
+
+  test('the scan sees this module\'s imports and recognises daemon paths', () => {
+    expect(specifiers.length).toBeGreaterThan(5);
+    for (const probe of ['../daemon/server.js', '../daemon.js', './daemon', '../platform/daemon/http-listener.js']) {
+      expect(reachesDaemon(probe)).toBe(true);
+    }
+    expect(reachesDaemon('../runtime/daemon-status.js')).toBe(false);
   });
 
-  test('no static import reaches platform/daemon either', () => {
-    const staticDaemonImport = /\bfrom\s+['"][^'"]*\/daemon\//;
-    expect(staticDaemonImport.test(source)).toBe(false);
+  test('no static, dynamic, side-effect or require import reaches platform/daemon', () => {
+    expect(specifiers.filter(reachesDaemon)).toEqual([]);
   });
 
   test('the daemon composition classes are neither bound nor constructed here', () => {

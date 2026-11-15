@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { createBrowserKnowledgePlatform } from '../platform/dist/browser-knowledge.js';
+import { createBrowserKnowledgePlatform } from '../platform/src/browser-knowledge.ts';
 import { openRawServerSentEventStream } from '@goodvibes-jev/engine/transport-http';
 import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
 

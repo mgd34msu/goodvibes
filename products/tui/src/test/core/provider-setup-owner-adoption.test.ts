@@ -23,14 +23,23 @@ function installSetupReader(wait?: Promise<void>, reject = false) {
   installJudgmentPort({ ...fake.port, async ask(request) { if (request.signal) signals.push(request.signal); await wait; if (reject) throw new JudgmentError('unavailable', 'unavailable'); return fake.port.ask(request); } });
   return { ...fake, signals };
 }
+/** Deadline timers that fire only when the test says the deadline has passed. */
+function manualTimers() {
+  const pending = new Map<number, () => void>(); let next = 1;
+  return {
+    timers: { setTimeout: (callback: () => void) => { pending.set(next, callback); return next++; }, clearTimeout: (handle: unknown) => { pending.delete(handle as number); } },
+    expire: () => { for (const [id, callback] of [...pending]) { pending.delete(id); callback(); } },
+  };
+}
 function fixture(options: { timeout?: number; metadataWait?: Promise<void>; noIdentity?: boolean } = {}) {
+  const deadline = manualTimers();
   const turns = bus(), tools = bus(), providers = bus(); const messages: string[] = [], retries: string[] = [];
   const instances = { first: {}, second: {} };
   let model = 'first:one', session = 'session-a', switches = 0, renders = 0, enabled = true;
   const wiring = wireStreamEventMetrics({
     events: { turns, tools, providers } as unknown as WireStreamEventMetricsOptions['events'],
     orchestrator: { streamingOutputTokens: 0 }, metrics: createStreamMetrics(), render: () => { renders++; },
-    getSessionId: () => session, errorNoticeTimeoutMs: options.timeout ?? 100,
+    getSessionId: () => session, errorNoticeTimeoutMs: options.timeout ?? 100, errorNoticeTimers: deadline.timers,
     providerRegistry: {
       getCurrentModel: () => ({ provider: model.split(':')[0]!, registryKey: model }),
       setCurrentModel: key => { model = key; switches++; },
@@ -42,7 +51,7 @@ function fixture(options: { timeout?: number; metadataWait?: Promise<void>; noId
     retryTurn: notice => { messages.length = 0; messages.push(notice ?? ''); retries.push(notice ?? ''); return true; },
   });
   turns.emit('TURN_SUBMITTED', { turnId: 'a' });
-  return { turns, providers, messages, retries, instances, wiring, switches: () => switches, renders: () => renders,
+  return { turns, providers, expire: deadline.expire, messages, retries, instances, wiring, switches: () => switches, renders: () => renders,
     error: () => turns.emit('TURN_ERROR', { turnId: 'a', error: { status: 429, message: '' } }), session: () => { session = 'b'; },
     enable: (value: boolean) => { enabled = value; },
     close: () => { for (const unsubscribe of wiring.unsubs) unsubscribe(); } };
@@ -72,7 +81,7 @@ describe('real failover caller joins setup facts to owned error delivery', () =>
   }
   test('setup deadline keeps a successful error reading and uses explicit Unknown without a late update', async () => {
     const held = gate(); const reader = installSetupReader(held.promise); const f = fixture({ timeout: 10 });
-    try { f.error(); await new Promise(r => setTimeout(r, 25));
+    try { f.error(); await flush(); f.expire(); await flush();
       expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Rate limit reached');
       expect(f.messages[0]).toContain('billing: Unknown → Unknown'); expect(f.messages[0]).not.toContain('Error details unavailable');
       expect(reader.signals.every(signal => signal.aborted)).toBe(true);
@@ -86,7 +95,7 @@ describe('real failover caller joins setup facts to owned error delivery', () =>
   });
   test('a hanging metadata provider is bounded by the same total notice deadline', async () => {
     const held = gate(); const reader = installSetupReader(); const f = fixture({ timeout: 10, metadataWait: held.promise });
-    try { f.error(); await new Promise(r => setTimeout(r, 25)); expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Unknown');
+    try { f.error(); await flush(); f.expire(); await flush(); expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Unknown');
       held.release(); await flush(); expect(reader.requests).toHaveLength(0); expect(f.retries).toHaveLength(1);
     } finally { f.close(); }
   });
@@ -166,7 +175,7 @@ describe('real failover caller joins setup facts to owned error delivery', () =>
 });
 
 test('the shared notice queue contains preparation rejection without losing a successful error', async () => {
-  const owner = createErrorNoticeOwner(10); const messages: string[] = [];
+  const owner = createErrorNoticeOwner(10, manualTimers().timers); const messages: string[] = [];
   owner.enqueue({ status: 429 }, 'test', { isCurrent: () => true, prepare: async () => { throw new Error('failed setup'); }, deliver: reading => { messages.push(reading?.kind ?? 'missing'); } });
   await flush(); expect(messages).toEqual(['rate-limit']); owner.dispose();
 });

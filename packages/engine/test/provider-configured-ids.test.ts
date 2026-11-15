@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { getConfiguredProviderIds } from '../platform/src/platform/providers/credentials.js';
 import { computeConfiguredProviderIds } from '../platform/src/platform/providers/registry-configured-ids.js';
 import type { LLMProvider } from '../platform/src/platform/providers/interface.js';
 import type { CatalogModel } from '../platform/src/platform/providers/model-catalog.js';
@@ -95,30 +94,6 @@ describe('configured provider id helpers', () => {
       catalogModels,
       providers,
       () => new Set(['synthetic-backend']),
-      () => {
-        throw new Error('config API key load failed');
-      },
-    )).toThrow('config API key load failed');
-  });
-
-  test('getConfiguredProviderIds preserves env, config, synthetic, and provider self-report signals', () => {
-    withTestEnv(() => {
-      const ids = getConfiguredProviderIds(
-        catalogModels,
-        new Set(['synthetic-backend']),
-        providers,
-        () => configApiKeys,
-      );
-
-      expectConfiguredSignals(ids);
-    });
-  });
-
-  test('getConfiguredProviderIds propagates config API key load failures', () => {
-    expect(() => getConfiguredProviderIds(
-      catalogModels,
-      new Set(['synthetic-backend']),
-      providers,
       () => {
         throw new Error('config API key load failed');
       },

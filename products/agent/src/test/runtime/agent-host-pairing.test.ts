@@ -164,6 +164,33 @@ describe('explicit Agent host pairing', () => {
     } finally { f.close(); }
   });
 
+  test('a definite refusal on the migration call clears the attempt so the shared token is used again', async () => {
+    const f = fixture({ migrationResponse: () => new Response('no', { status: 403 }) });
+    try {
+      const result = await confirm(f);
+      expect(result.status).toBe('rejected'); expect(f.migrations).toBe(1);
+      expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
+      const effective = resolveConnectedHostConnection(f);
+      expect('reason' in effective ? '' : effective.token).toBe(shared);
+    } finally { f.close(); }
+  });
+
+  test('a server error on the migration call stays unknown, and the owner can clear it with the typed phrase', async () => {
+    const f = fixture({ migrationResponse: () => new Response('lost', { status: 503 }) });
+    try {
+      expect((await confirm(f)).status).toBe('unknown');
+      expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
+      const preview = await previewAgentHostPairing(f);
+      expect(preview.result.status).toBe('unknown');
+      expect(preview.result.confirmation).toStartWith('CLEAR ');
+      expect((await preview.confirm!('yes')).status).toBe('cancelled');
+      expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
+      expect((await preview.confirm!(preview.result.confirmation!)).status).toBe('cleared');
+      expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
+      expect((await previewAgentHostPairing(f)).result.status).toBe('preview');
+    } finally { f.close(); }
+  });
+
   test('abort before action and disabled preview never mutate', async () => {
     const f = fixture(); try {
       const p = await previewAgentHostPairing(f); const controller = new AbortController(); controller.abort();

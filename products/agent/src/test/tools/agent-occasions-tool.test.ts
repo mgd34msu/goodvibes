@@ -21,6 +21,7 @@
  * authority, it is forwarded unchanged, and a refusal is never retried.
  */
 
+import { homedir } from 'node:os';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -260,7 +261,7 @@ describe('occasions tool: the interview', () => {
   test('an interview that no longer exists records nothing and says so', async () => {
     const { run } = toolWith(() => answers({ present: false, interview: null }));
     const result = await run({ action: 'interview_answer', interviewId: 'gone', stepId: 'step-1', text: 'anything' });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.output).toContain('nothing was recorded');
   });
 });
@@ -457,6 +458,7 @@ describe('occasions tool: reads that do carry dates', () => {
     expect(result.success).toBe(true);
     // §4.3: this IS the explicit ask that unlocks a closed-tier read.
     expect(result.output).toContain('2026-03-14');
+    expect(result.output).toContain('id sarahs-birthday');
     expect(result.output).toContain('Do not put a date from this list into a message');
   });
 
@@ -471,6 +473,25 @@ describe('occasions tool: reads that do carry dates', () => {
     const result = await run({ action: 'list' });
     expect(result.output).toContain('Grandma sometime in spring');
     expect(result.output).toContain('never rewrite it silently');
+  });
+
+  test('a conflict line names the occasion id that resolve_conflict needs', async () => {
+    const { run } = toolWith(() => answers({
+      today: '2026-03-01', timezone: 'UTC', occasions: [], unparsed: [],
+      conflicts: [{ occasionId: 'our-anniversary', title: 'Anniversary', dates: ['2020-06-01', '2020-06-02'], lineIndexes: [1, 2] }],
+    }));
+    const result = await run({ action: 'list' });
+    expect(result.output).toContain('occasionId our-anniversary');
+  });
+
+  test('state shows the store path relative to the home directory', async () => {
+    const { run } = toolWith(() => answers({
+      path: `${homedir()}/.goodvibes/occasions.json`, acknowledgements: 0, giftRecords: 0, openItems: 0,
+      interviews: 0, mirrors: 0, lastSweep: null, corruption: null,
+    }));
+    const result = await run({ action: 'state' });
+    expect(result.output).toContain('Occasions store: ~/.goodvibes/occasions.json');
+    expect(result.output).not.toContain(homedir());
   });
 
   test('state discloses counts and a corruption reason, never a value', async () => {

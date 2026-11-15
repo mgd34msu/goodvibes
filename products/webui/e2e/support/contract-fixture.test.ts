@@ -26,6 +26,7 @@ describe('contract inspection fixtures match the engine wire contract', () => {
     // Validate supplied values through the actual canonical wire validator.
     const schema = operatorContract.operator.methods.find(method => method.id === 'contracts.get')?.outputSchema;
     if (!schema) throw new ContractShapeError('Missing contracts.get output schema');
-    expect(firstJsonSchemaFailure(schema, { ...WAITING_CONTRACT, checks: [{ ...check, evidenceDigest: 42 }] })).not.toBeNull();
+    expect(firstJsonSchemaFailure(schema, { ...WAITING_CONTRACT, checks: [{ ...check, evidenceDigest: 'saved-check-digest' }] })).toBeUndefined();
+    expect(firstJsonSchemaFailure(schema, { ...WAITING_CONTRACT, checks: [{ ...check, evidenceDigest: 42 }] })).toBeDefined();
   });
 });

@@ -83,6 +83,21 @@ separate. Copying the files into a different owner directory does not transfer
 the authority to continue an earlier operation. Neither file stores the bearer.
 Previously issued v1 continuations retain their original read-only verifier.
 
+Issued continuations and cancelled native sources are kept in that file as
+revocation records: a consumed or revoked continuation must keep refusing its
+source. They are dropped only together with the pairing they were issued under.
+When a pairing is revoked, its continuations and the cancelled sources only
+they referenced go in the same write; the continuations of a pairing that still
+exists are never dropped, and neither is a cancellation no continuation ever
+referenced.
+
+If the pairing store cannot be read or written safely, settings changes made
+through paired or shared-token authority are refused as `PAIRING_STORE_FAULTED`
+(`owner-fault`). A read problem, or a pairing that failed to save, is
+re-checked at the next settings capture and clears once the store reads back
+cleanly. A failed revoke, rename or grant write is held until the daemon
+restarts, so a revocation that did not persist is never treated as undone.
+
 **The legacy shared token** is stored in a single global location under the daemon-home directory:
 
 ```
@@ -126,7 +141,7 @@ const offers = availablePairingOffers({
 
 const handoff = mintPairingHandoff({
   pairingTokens,             // a PairingTokenManager instance
-  name: defaultPairingTokenName(), // e.g. 'paired device (2026-08-21 10:00)'
+  name: defaultPairingTokenName(), // e.g. 'paired device (2026-08-21 10:00 UTC)'
   offers,
   webOrigin: 'https://app.example.com', // the web app origin the link opens
 });
@@ -161,7 +176,11 @@ independently declinable:
 
 - **`notifications`.** Registers the device for browser push (the response carries the VAPID
   public key needed to subscribe). Always available; browser push needs no server-side
-  prerequisite beyond the key the daemon mints on demand.
+  prerequisite beyond the key the daemon mints on demand. The device's push endpoint must be a
+  public `https` address (a browser vendor's push service): the daemon refuses loopback, private,
+  link-local and plain-`http` endpoints, and never follows a redirect from one. A development push
+  relay or local test sink on such an address needs `GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS=1` in the
+  daemon's environment.
 - **`relay`.** Acknowledges that the surface may connect through the rendezvous relay for
   off-LAN reach. Available only when the relay is configured; see
   [Zero-knowledge relay](./relay-zero-knowledge.md).

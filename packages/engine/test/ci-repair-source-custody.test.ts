@@ -46,11 +46,13 @@ for (const scenario of ['complete', 'cancel', 'changed', 'native-refusal'] as co
       expect(spawned).toHaveLength(1);
       expect(queued).not.toHaveBeenCalled();
       expect(spawnSources).toEqual([SOURCE]);
-      expect(automation.listJobs()[0]?.execution.requiresSourceOwner).toBe(true);
       if (scenario === 'native-refusal') {
+        // A start that was refused leaves no job behind to be retried against.
+        expect(automation.listJobs()).toEqual([]);
         expect(outcome).toMatchObject({ error: 'Native agent starts require source-bearing host admission' });
         expect(plannerSource).toBeUndefined(); return;
       }
+      expect(automation.listJobs()[0]?.execution.requiresSourceOwner).toBe(true);
       expect('sessionId' in outcome).toBe(true);
       await waitFor(() => h.runner.list({ includeTerminal: true }).some(contract => ['passed', 'failed', 'cancelled'].includes(contract.status)), 'the actual seeded contract to settle');
       const contract = h.runner.list({ includeTerminal: true })[0]!;

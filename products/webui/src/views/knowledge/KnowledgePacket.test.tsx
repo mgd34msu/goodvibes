@@ -78,6 +78,29 @@ test('building a packet sends the task and default "standard" detail level', asy
   unmount();
 });
 
+test('the budget and write scope are sent with the task, and omitted when blank', async () => {
+  const { el, unmount } = render();
+  flushSync(() => setNativeValue(el.querySelector('input[aria-label="Token budget limit"]') as HTMLInputElement, '4000'));
+  flushSync(() => setNativeValue(el.querySelector('input[aria-label="Write scope, comma separated"]') as HTMLInputElement, 'src/a.ts, src/b.ts ,'));
+  submitTask(el, 'Refactor the session spine');
+  await waitFor(() => lastInput !== undefined);
+  expect(lastInput).toEqual({
+    task: 'Refactor the session spine',
+    detail: 'standard',
+    writeScope: ['src/a.ts', 'src/b.ts'],
+    budgetLimit: 4000,
+  });
+  unmount();
+});
+
+test('a blank budget and scope send neither field', async () => {
+  const { el, unmount } = render();
+  submitTask(el, 'Refactor the session spine');
+  await waitFor(() => lastInput !== undefined);
+  expect(lastInput).toEqual({ task: 'Refactor the session spine', detail: 'standard' });
+  unmount();
+});
+
 test('a packet with items renders its token estimate and each item row', async () => {
   packetImpl = () => Promise.resolve({
     items: [
@@ -145,5 +168,24 @@ test('truncated:true with a non-numeric totalCandidates/droppedCount is treated 
   submitTask(el, 'Refactor the session spine');
   await waitFor(() => (el.textContent ?? '').includes('X'));
   expect(el.querySelector('.knowledge-packet__truncation-note')).toBeNull();
+  unmount();
+});
+
+test('an invalid token budget is refused with a message instead of building an unbudgeted packet', async () => {
+  const { el, unmount } = render();
+  flushSync(() => setNativeValue(el.querySelector('input[aria-label="Token budget limit"]') as HTMLInputElement, 'abc'));
+  submitTask(el, 'Refactor the session spine');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(lastInput).toBeUndefined();
+  expect(el.textContent).toContain('Enter a number above 0');
+  unmount();
+});
+
+test('a valid token budget is sent as a number', async () => {
+  const { el, unmount } = render();
+  flushSync(() => setNativeValue(el.querySelector('input[aria-label="Token budget limit"]') as HTMLInputElement, '2000'));
+  submitTask(el, 'Refactor the session spine');
+  await waitFor(() => lastInput !== undefined);
+  expect((lastInput as { budgetLimit?: number }).budgetLimit).toBe(2000);
   unmount();
 });

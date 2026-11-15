@@ -1,19 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   installEcosystemCatalogEntry,
   loadEcosystemCatalog,
-} from '../platform/dist/platform/runtime/ecosystem/catalog.js';
+} from '../platform/src/platform/runtime/ecosystem/catalog.js';
 
 describe('ecosystem catalog paths', () => {
-  const testTmpRoot = join(import.meta.dir, '.tmp-tests');
   let root = '';
   let homeDir = '';
 
   beforeEach(() => {
-    mkdirSync(testTmpRoot, { recursive: true });
-    root = mkdtempSync(join(testTmpRoot, 'ecosystem-paths-'));
+    root = mkdtempSync(join(tmpdir(), 'ecosystem-paths-'));
     homeDir = join(root, 'home');
     mkdirSync(homeDir, { recursive: true });
     mkdirSync(join(root, '.goodvibes', 'tui', 'ecosystem'), { recursive: true });

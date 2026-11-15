@@ -12,7 +12,7 @@ export function formatJsonOrText(cli: {
 export function commandTextExitCode(output: string, usagePrefixes: readonly string[], failurePrefixes: readonly string[]): number {
   if (usagePrefixes.some((prefix) => output.startsWith(prefix))) return 2;
   if (failurePrefixes.some((prefix) => output.startsWith(prefix))) return 1;
-  if (['No stored ', 'No pending ', 'No model ', 'No provider ', 'No auth ', 'Unknown '].some((prefix) => output.startsWith(prefix)))
+  if (['No stored ', 'No pending ', 'No model ', 'No provider ', 'No auth ', 'No subscription ', 'Unknown ', 'Ambiguous ', 'Not stored', 'Session not found'].some((prefix) => output.startsWith(prefix)))
     return 1;
   return output === 'Bundle has no config object to import.' ? 1 : 0;
 }

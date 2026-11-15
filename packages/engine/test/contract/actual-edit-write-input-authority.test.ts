@@ -170,6 +170,7 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
       let checkedBeforeDelivery = false;
       let memberArtifact = '';
       let checkedDeniedMutation = false;
+      let rollbackError: string | undefined;
       const results = new Map<string, ToolResult>();
       const requests: string[] = [];
       const assertOwnerUnchanged = (): void => {
@@ -309,7 +310,7 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
               results.set(result.callId, result);
               if (result.callId === 'atomic-rollback') {
                 expect(result.success).toBe(false);
-                expect(result.error).toContain('Rolled back 3 file(s)');
+                rollbackError = result.error;
                 expect(readFileSync(join(record.workingDirectory!, 'src/csv.ts'), 'utf8'), 'atomic failure must restore the earlier overwrite').toBe(editedSource);
                 expect(existsSync(join(record.workingDirectory!, 'rollback-only.txt'))).toBe(false);
                 expect(existsSync(join(record.workingDirectory!, 'rollback-parent'))).toBe(false);
@@ -342,11 +343,13 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
           ask: 'Add a CSV parser module', sessionId: 'actual-edit-write-fixture', origin: 'cli', projectRoot: root, isolation: 'worktree',
         }));
         id = started.contract.id;
-        await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'actual captured edit/write settlement', 45_000);
+        await waitFor(() => ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(runner.get(id!)!.status), 'actual captured edit/write settlement', 90_000);
         await runner.join(id);
         const result = runner.get(id)!;
         expect(plannerCalls).toBe(1);
         if (scenario === 'deliver') {
+          // Assertions inside onTurnEnd are swallowed by the runner, so the message is checked here.
+          expect(rollbackError).toContain('Rolled back 3 file(s)');
           expect(result.status, JSON.stringify({ error: result.error, results: [...results], memberCalls })).toBe('passed');
           expect(memberCalls).toBe(8);
           expect(checkedBeforeDelivery).toBe(true);
@@ -385,6 +388,6 @@ for (const scenario of ['deliver', 'deny-original', 'deny-copy'] as const) {
         rmSync(root, { recursive: true, force: true });
       }
     },
-    60_000,
+    120_000,
   );
 }

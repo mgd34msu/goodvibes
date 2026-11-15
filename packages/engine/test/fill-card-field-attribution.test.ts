@@ -73,7 +73,6 @@ async function armingRegistry(): Promise<CheckoutRegistry> {
     totalMinorUnits: null,
   };
   await registry.open(record);
-  await registry.advance('p1', 'arming-payment', {}, 0);
   return registry;
 }
 

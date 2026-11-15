@@ -184,8 +184,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -199,6 +197,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -270,8 +270,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -285,6 +283,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -356,8 +356,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -371,6 +369,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -442,8 +442,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -457,6 +455,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -549,8 +549,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "modifiedArgs": {},
             "disposition": "approved"
           },
-          "fixSessionId": "sample",
-          "fixSessionError": "sample",
           "expiresAt": 0,
           "metadata": {},
           "audit": [
@@ -627,8 +625,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -643,7 +639,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ]
       },
       "coalesced": false,
-      "decided": false
+      "decided": false,
+      "holdId": "sample"
     }
   },
   "artifacts.content.get": {
@@ -2712,6 +2709,193 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "status": "sample"
     }
   },
+  "batch.jobs.cancel": {
+    "methodId": "batch.jobs.cancel",
+    "http": {
+      "method": "POST",
+      "path": "/api/batch/jobs/{jobId}/cancel"
+    },
+    "status": 200,
+    "body": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.create": {
+    "methodId": "batch.jobs.create",
+    "http": {
+      "method": "POST",
+      "path": "/api/batch/jobs"
+    },
+    "status": 200,
+    "body": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.get": {
+    "methodId": "batch.jobs.get",
+    "http": {
+      "method": "GET",
+      "path": "/api/batch/jobs/{jobId}"
+    },
+    "status": 200,
+    "body": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.list": {
+    "methodId": "batch.jobs.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/batch/jobs"
+    },
+    "status": 200,
+    "body": {
+      "jobs": [
+        {
+          "id": "sample",
+          "provider": "sample",
+          "model": "sample",
+          "status": "queued",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "request": {},
+          "source": {
+            "kind": "sample",
+            "id": "sample"
+          },
+          "metadata": {},
+          "attempts": 0,
+          "providerBatchId": "sample",
+          "providerBatchStatus": "sample",
+          "submittedAt": 0,
+          "completedAt": 0,
+          "result": {},
+          "error": {
+            "message": "sample",
+            "code": "sample"
+          }
+        }
+      ]
+    }
+  },
+  "batch.run": {
+    "methodId": "batch.run",
+    "http": {
+      "method": "POST",
+      "path": "/api/batch/tick"
+    },
+    "status": 200,
+    "body": {
+      "submittedProviderBatches": 0,
+      "submittedJobs": 0,
+      "polledProviderBatches": 0,
+      "completedJobs": 0,
+      "failedJobs": 0
+    }
+  },
+  "batch.runtime.get": {
+    "methodId": "batch.runtime.get",
+    "http": {
+      "method": "GET",
+      "path": "/api/batch/runtime"
+    },
+    "status": 200,
+    "body": {
+      "mode": "off",
+      "fallback": "live",
+      "queueBackend": "local",
+      "cloudflare": {
+        "enabled": false,
+        "freeTierMode": false,
+        "accountId": "sample",
+        "workerName": "sample",
+        "workerBaseUrl": "sample",
+        "daemonBaseUrl": "sample",
+        "queueName": "sample",
+        "deadLetterQueueName": "sample",
+        "maxQueueOpsPerDay": 0
+      },
+      "limits": {
+        "tickIntervalMs": 0,
+        "maxDelayMs": 0,
+        "maxJobsPerProviderBatch": 0,
+        "maxQueuePayloadBytes": 0,
+        "maxQueueMessagesPerDay": 0
+      },
+      "supportedProviders": [
+        "sample"
+      ]
+    }
+  },
   "browser.click": {
     "methodId": "browser.click",
     "http": {
@@ -4039,7 +4223,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "mailboxProgress": {
             "uidValidity": 0,
             "pendingMessages": 0
-          }
+          },
+          "skippedMessages": [
+            {
+              "uid": 0,
+              "reason": "sample"
+            }
+          ]
         }
       ],
       "partial": false
@@ -4539,6 +4729,53 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "homeassistant.conversation.cancel": {
+    "methodId": "homeassistant.conversation.cancel",
+    "http": {
+      "method": "POST",
+      "path": "/api/homeassistant/conversation/cancel"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "sessionId": "sample",
+      "status": "sample"
+    }
+  },
+  "homeassistant.conversation.health": {
+    "methodId": "homeassistant.conversation.health",
+    "http": {
+      "method": "GET",
+      "path": "/api/homeassistant/health"
+    },
+    "status": 200,
+    "body": {}
+  },
+  "homeassistant.conversation.stream": {
+    "methodId": "homeassistant.conversation.stream",
+    "http": {
+      "method": "POST",
+      "path": "/api/homeassistant/conversation/stream"
+    },
+    "status": 200,
+    "body": {}
+  },
+  "homeassistant.conversation.submit": {
+    "methodId": "homeassistant.conversation.submit",
+    "http": {
+      "method": "POST",
+      "path": "/api/homeassistant/conversation"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "status": "sample",
+      "messageId": "sample",
+      "conversationId": "sample",
+      "sessionId": "sample",
+      "error": "sample"
+    }
+  },
   "checkin.config.get": {
     "methodId": "checkin.config.get",
     "http": {
@@ -4568,6 +4805,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "cadence": "sample",
         "deliveryChannel": "sample",
         "quietHours": "sample"
+      },
+      "schedule": {
+        "state": "scheduled",
+        "reason": "sample"
       }
     }
   },
@@ -4626,7 +4867,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "outcome": "delivered",
       "summary": "sample",
-      "deliveryId": "sample"
+      "deliveryId": "sample",
+      "error": "sample"
     }
   },
   "checkpoints.create": {
@@ -4686,7 +4928,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "commit": "sample",
           "sizeBytes": 0
         }
-      ]
+      ],
+      "retentionFailure": {
+        "error": "sample",
+        "at": 0
+      }
     }
   },
   "checkpoints.restore": {
@@ -4702,6 +4948,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "removedFiles": [
           "sample"
+        ],
+        "failedPaths": [
+          {
+            "path": "sample",
+            "reason": "sample"
+          }
         ]
       },
       "refused": false,
@@ -4818,6 +5070,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "watch": {
         "id": "sample",
+        "continuationId": "sample",
         "repo": "sample",
         "ref": "sample",
         "prNumber": 0,
@@ -4852,6 +5105,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "watches": [
         {
           "id": "sample",
+          "continuationId": "sample",
           "repo": "sample",
           "ref": "sample",
           "prNumber": 0,
@@ -4899,8 +5153,252 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "fixSessionTriggered": false,
       "fixSessionId": "sample",
       "fixSessionError": "sample",
-      "fixSessionOffered": false,
       "retired": false
+    }
+  },
+  "cloudflare.credentials.verify": {
+    "methodId": "cloudflare.credentials.verify",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/validate"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "account": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "tokenSource": "sample"
+    }
+  },
+  "cloudflare.disable": {
+    "methodId": "cloudflare.disable",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/disable"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "steps": [
+        {
+          "name": "sample",
+          "status": "ok",
+          "message": "sample",
+          "resourceId": "sample"
+        }
+      ],
+      "remote": "disabled"
+    }
+  },
+  "cloudflare.provision": {
+    "methodId": "cloudflare.provision",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/provision"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "dryRun": false,
+      "steps": [
+        {
+          "name": "sample",
+          "status": "ok",
+          "message": "sample",
+          "resourceId": "sample"
+        }
+      ],
+      "account": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "worker": {},
+      "queues": {},
+      "tunnel": {},
+      "access": {},
+      "dns": {},
+      "kv": {},
+      "durableObjects": {},
+      "r2": {},
+      "secretsStore": {},
+      "verification": {
+        "ok": false,
+        "workerHealth": {
+          "ok": false,
+          "status": 0,
+          "error": "sample"
+        },
+        "daemonBatchProxy": {
+          "ok": false,
+          "status": 0,
+          "error": "sample"
+        }
+      },
+      "generatedSecrets": {}
+    }
+  },
+  "cloudflare.resources.list": {
+    "methodId": "cloudflare.resources.list",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/discover"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "tokenSource": "sample",
+      "accounts": [
+        {
+          "id": "sample",
+          "name": "sample",
+          "type": "sample"
+        }
+      ],
+      "selectedAccount": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "zones": [
+        {}
+      ],
+      "selectedZone": {},
+      "workerSubdomain": "sample",
+      "queues": [
+        {}
+      ],
+      "kvNamespaces": [
+        {}
+      ],
+      "durableObjectNamespaces": [
+        {}
+      ],
+      "r2Buckets": [
+        {}
+      ],
+      "secretsStores": [
+        {}
+      ],
+      "tunnels": [
+        {}
+      ],
+      "accessApplications": [
+        {}
+      ],
+      "warnings": [
+        "sample"
+      ]
+    }
+  },
+  "cloudflare.status": {
+    "methodId": "cloudflare.status",
+    "http": {
+      "method": "GET",
+      "path": "/api/cloudflare/status"
+    },
+    "status": 200,
+    "body": {
+      "enabled": false,
+      "ready": false,
+      "configured": {},
+      "config": {},
+      "warnings": [
+        "sample"
+      ]
+    }
+  },
+  "cloudflare.token.create": {
+    "methodId": "cloudflare.token.create",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/token/create"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "tokenId": "sample",
+      "tokenName": "sample",
+      "tokenSource": "sample",
+      "apiTokenRef": "sample",
+      "generatedToken": "sample",
+      "accountId": "sample",
+      "zoneId": "sample",
+      "permissions": [
+        {
+          "component": "sample",
+          "scope": "sample",
+          "permission": "sample",
+          "alternatives": [
+            "sample"
+          ],
+          "reason": "sample"
+        }
+      ]
+    }
+  },
+  "cloudflare.token.requirements.get": {
+    "methodId": "cloudflare.token.requirements.get",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/token/requirements"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "permissions": [
+        {
+          "component": "sample",
+          "scope": "sample",
+          "permission": "sample",
+          "alternatives": [
+            "sample"
+          ],
+          "reason": "sample"
+        }
+      ],
+      "bootstrapToken": {
+        "requiredForPlatformCreation": false,
+        "storeInGoodVibes": false,
+        "instructions": [
+          "sample"
+        ]
+      }
+    }
+  },
+  "cloudflare.worker.verify": {
+    "methodId": "cloudflare.worker.verify",
+    "http": {
+      "method": "POST",
+      "path": "/api/cloudflare/verify"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "workerHealth": {
+        "ok": false,
+        "status": 0,
+        "error": "sample"
+      },
+      "daemonBatchProxy": {
+        "ok": false,
+        "status": 0,
+        "error": "sample"
+      }
     }
   },
   "companion.chat.events.stream": {
@@ -5204,6 +5702,22 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "channels": {},
       "watchers": {},
       "memory": {}
+    }
+  },
+  "config.reset": {
+    "methodId": "config.reset",
+    "http": {
+      "method": "POST",
+      "path": "/config/reset"
+    },
+    "status": 200,
+    "body": {
+      "success": false,
+      "key": "sample",
+      "value": "sample",
+      "persistedTo": "sample",
+      "tier": "sample",
+      "daemonOwned": false
     }
   },
   "config.set": {
@@ -5511,7 +6025,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "maxTokens": 0,
             "maxCostUsd": 0
           },
-          "isolation": "auto"
+          "isolation": "auto",
+          "selectedModel": {
+            "id": "sample",
+            "provider": "sample",
+            "registryKey": "sample",
+            "displayName": "sample"
+          },
+          "taskEvidence": "sample"
         },
         "contractId": "sample",
         "ownerAgentId": "sample",
@@ -5623,7 +6144,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "outcome": "act",
               "severity": "critical",
               "decisionId": "sample",
-              "severityDecisionId": "sample"
+              "severityDecisionId": "sample",
+              "rationale": "sample"
             }
           ]
         }
@@ -5670,7 +6192,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -5823,7 +6346,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -6086,7 +6610,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -6441,6 +6966,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "decisionIds": [
             "sample"
           ],
+          "failurePause": true,
           "resolvedAt": 0,
           "reply": {
             "text": "sample",
@@ -6694,7 +7220,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "maxTokens": 0,
                 "maxCostUsd": 0
               },
-              "isolation": "auto"
+              "isolation": "auto",
+              "selectedModel": {
+                "id": "sample",
+                "provider": "sample",
+                "registryKey": "sample",
+                "displayName": "sample"
+              },
+              "taskEvidence": "sample"
             },
             "contractId": "sample",
             "ownerAgentId": "sample",
@@ -6806,7 +7339,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -6853,7 +7387,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -7006,7 +7541,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -7269,7 +7805,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                           "outcome": "act",
                           "severity": "critical",
                           "decisionId": "sample",
-                          "severityDecisionId": "sample"
+                          "severityDecisionId": "sample",
+                          "rationale": "sample"
                         }
                       ]
                     }
@@ -7624,6 +8161,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "decisionIds": [
                 "sample"
               ],
+              "failurePause": true,
               "resolvedAt": 0,
               "reply": {
                 "text": "sample",
@@ -7893,7 +8431,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "maxTokens": 0,
               "maxCostUsd": 0
             },
-            "isolation": "auto"
+            "isolation": "auto",
+            "selectedModel": {
+              "id": "sample",
+              "provider": "sample",
+              "registryKey": "sample",
+              "displayName": "sample"
+            },
+            "taskEvidence": "sample"
           },
           "contractId": "sample",
           "ownerAgentId": "sample",
@@ -8005,7 +8550,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "outcome": "act",
                 "severity": "critical",
                 "decisionId": "sample",
-                "severityDecisionId": "sample"
+                "severityDecisionId": "sample",
+                "rationale": "sample"
               }
             ]
           }
@@ -8052,7 +8598,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "outcome": "act",
                     "severity": "critical",
                     "decisionId": "sample",
-                    "severityDecisionId": "sample"
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
                   }
                 ]
               }
@@ -8205,7 +8752,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "outcome": "act",
                     "severity": "critical",
                     "decisionId": "sample",
-                    "severityDecisionId": "sample"
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
                   }
                 ]
               }
@@ -8468,7 +9016,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                         "outcome": "act",
                         "severity": "critical",
                         "decisionId": "sample",
-                        "severityDecisionId": "sample"
+                        "severityDecisionId": "sample",
+                        "rationale": "sample"
                       }
                     ]
                   }
@@ -8823,6 +9372,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "decisionIds": [
               "sample"
             ],
+            "failurePause": true,
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -9394,6 +9944,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "version": "sample",
       "buildVersion": "sample",
       "platformVersion": "sample",
+      "cluster": "sample",
       "receipts": [
         {
           "id": "sample",
@@ -9452,7 +10003,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
-      "rejectedVersion": "sample"
+      "rejectedVersion": "sample",
+      "recoveryRequired": true,
+      "transactionRecovery": {
+        "operation": "update",
+        "phase": "claim",
+        "committed": false,
+        "recoveryRequired": false,
+        "targets": [
+          "sample"
+        ],
+        "recoveryPaths": [
+          "sample"
+        ],
+        "recoveryErrors": [
+          "sample"
+        ]
+      },
+      "check": "ran"
     }
   },
   "update.status": {
@@ -9469,7 +10037,23 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
-      "rejectedVersion": "sample"
+      "rejectedVersion": "sample",
+      "recoveryRequired": true,
+      "transactionRecovery": {
+        "operation": "update",
+        "phase": "claim",
+        "committed": false,
+        "recoveryRequired": false,
+        "targets": [
+          "sample"
+        ],
+        "recoveryPaths": [
+          "sample"
+        ],
+        "recoveryErrors": [
+          "sample"
+        ]
+      }
     }
   },
   "cost.attribution.get": {
@@ -9640,7 +10224,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "openedAt": "sample",
       "expiresAt": "sample",
       "authority": "sample",
-      "remainingMs": 0
+      "remainingMs": 0,
+      "watching": {
+        "running": false,
+        "reason": "sample"
+      }
     }
   },
   "email.inbound.status": {
@@ -9707,7 +10295,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastSweep": {
           "sweptAt": 0,
           "trigger": "sample",
-          "summary": "sample"
+          "summary": "sample",
+          "failures": [
+            "sample"
+          ]
         }
       },
       "stores": [
@@ -10495,7 +11086,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "tripwire": {
         "armed": false,
         "sustainedSec": 0,
-        "rateMbPerSec": 0
+        "rateMbPerSec": 0,
+        "thresholdMbPerSec": 0
       },
       "thresholds": {
         "elevatedPct": 0,
@@ -10538,7 +11130,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "deniedClasses": [
           "handle-lid-switch"
         ],
-        "note": "sample"
+        "note": "sample",
+        "state": "off"
       }
     }
   },
@@ -10576,7 +11169,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "deniedClasses": [
           "handle-lid-switch"
         ],
-        "note": "sample"
+        "note": "sample",
+        "state": "off"
       }
     }
   },
@@ -10641,6 +11235,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "key": "sample",
             "reason": "sample"
+          }
+        ],
+        "superseded": [
+          {
+            "key": "sample",
+            "previousValue": "sample",
+            "value": "sample"
           }
         ]
       }
@@ -11390,6 +11991,155 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "http": {
       "method": "POST",
       "path": "/api/inbound/telegram/read"
+    },
+    "status": 200,
+    "body": {
+      "accountIdentity": {
+        "id": "sample",
+        "username": "sample",
+        "revision": "sample"
+      },
+      "outcome": "sample",
+      "reason": "sample",
+      "ref": {
+        "sessionId": "sample",
+        "inputId": "sample",
+        "sourceId": "sample",
+        "sourceRevision": "sample",
+        "requestId": "sample"
+      },
+      "configurationId": "sample",
+      "expiresAt": 0,
+      "pendingRetentionMs": 0,
+      "processing": "sample",
+      "restart": "sample",
+      "route": "sample",
+      "execution": "not-started",
+      "approvalId": "sample",
+      "source": "sample",
+      "recovery": "sample",
+      "record": {
+        "id": "sample",
+        "ref": {
+          "sessionId": "sample",
+          "inputId": "sample",
+          "sourceId": "sample",
+          "sourceRevision": "sample",
+          "requestId": "sample"
+        },
+        "origin": {
+          "kind": "external-original",
+          "accountId": "sample",
+          "accountRevision": "sample",
+          "routeId": "sample",
+          "routeRevision": "sample"
+        },
+        "configurationId": "sample",
+        "ownerRevision": "sample",
+        "owner": {
+          "kind": "pairing-token",
+          "principalId": "sample",
+          "tokenId": "sample",
+          "authorityId": "sample",
+          "authorityRevision": "sample",
+          "scopes": [
+            "sample"
+          ]
+        },
+        "workspaceRevision": "sample",
+        "approvalId": "sample",
+        "choices": {
+          "processingPurpose": "accept-external-message-for-owner-review",
+          "sourceRetention": "memory-only-until-review-close-or-deadline",
+          "sourceRetentionMs": 0,
+          "derivedRecord": "external-source-reference-only-v1",
+          "derivedRecordRetentionMs": 0,
+          "execution": "none",
+          "ownerMayReadOriginal": true
+        },
+        "acceptedAt": 0,
+        "sourceExpiresAt": 0,
+        "recordExpiresAt": 0,
+        "state": "accepted-for-review",
+        "execution": "not-started"
+      },
+      "records": [
+        {
+          "id": "sample",
+          "ref": {
+            "sessionId": "sample",
+            "inputId": "sample",
+            "sourceId": "sample",
+            "sourceRevision": "sample",
+            "requestId": "sample"
+          },
+          "origin": {
+            "kind": "external-original",
+            "accountId": "sample",
+            "accountRevision": "sample",
+            "routeId": "sample",
+            "routeRevision": "sample"
+          },
+          "configurationId": "sample",
+          "ownerRevision": "sample",
+          "owner": {
+            "kind": "pairing-token",
+            "principalId": "sample",
+            "tokenId": "sample",
+            "authorityId": "sample",
+            "authorityRevision": "sample",
+            "scopes": [
+              "sample"
+            ]
+          },
+          "workspaceRevision": "sample",
+          "approvalId": "sample",
+          "choices": {
+            "processingPurpose": "accept-external-message-for-owner-review",
+            "sourceRetention": "memory-only-until-review-close-or-deadline",
+            "sourceRetentionMs": 0,
+            "derivedRecord": "external-source-reference-only-v1",
+            "derivedRecordRetentionMs": 0,
+            "execution": "none",
+            "ownerMayReadOriginal": true
+          },
+          "acceptedAt": 0,
+          "sourceExpiresAt": 0,
+          "recordExpiresAt": 0,
+          "state": "accepted-for-review",
+          "execution": "not-started"
+        }
+      ],
+      "pending": [
+        {
+          "ref": {
+            "sessionId": "sample",
+            "inputId": "sample",
+            "sourceId": "sample",
+            "sourceRevision": "sample",
+            "requestId": "sample"
+          },
+          "approvalId": "sample",
+          "sourceExpiresAt": 0,
+          "outcome": "sample"
+        }
+      ],
+      "original": {
+        "text": "sample",
+        "unsupportedSources": [
+          {
+            "kind": "sample",
+            "label": "sample"
+          }
+        ]
+      }
+    }
+  },
+  "inbound.telegram.release": {
+    "methodId": "inbound.telegram.release",
+    "http": {
+      "method": "POST",
+      "path": "/api/inbound/telegram/release"
     },
     "status": 200,
     "body": {
@@ -17081,6 +17831,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "name": "sample",
           "command": "sample",
+          "url": "sample",
           "args": [
             "sample"
           ],
@@ -17139,6 +17890,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -17175,7 +17927,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "servers": [
         {
           "name": "sample",
-          "connected": false
+          "connected": false,
+          "transport": "stdio",
+          "protocolVersion": "sample",
+          "protocolEra": "modern",
+          "phase": "idle",
+          "lastError": "sample"
         }
       ],
       "security": [
@@ -17223,6 +17980,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -17268,6 +18026,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "name": "sample",
           "command": "sample",
+          "url": "sample",
           "args": [
             "sample"
           ],
@@ -17330,6 +18089,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -19045,6 +19805,19 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "defaultCardId": "sample"
     }
   },
+  "payments.checkout.approve": {
+    "methodId": "payments.checkout.approve",
+    "http": null,
+    "status": 200,
+    "body": {
+      "approved": false,
+      "action": "sample",
+      "merchantDomain": "sample",
+      "item": "sample",
+      "amount": "sample",
+      "expiresAt": "sample"
+    }
+  },
   "payments.checkout.begin": {
     "methodId": "payments.checkout.begin",
     "http": {
@@ -19169,6 +19942,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "outcome": "sample",
           "totalMinorUnits": 0,
           "currency": "AAA"
+        }
+      ],
+      "unreadable": [
+        {
+          "purchaseId": "sample",
+          "reason": "sample"
         }
       ]
     }
@@ -19454,7 +20233,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "provenance": {
           "surface": "sample",
           "date": "sample",
-          "said": "sample"
+          "said": "sample",
+          "origin": "owner-direct",
+          "source": {
+            "goal": "sample",
+            "criteria": [
+              "sample"
+            ]
+          }
         }
       },
       "disclosure": "sample"
@@ -19477,7 +20263,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "provenance": {
             "surface": "sample",
             "date": "sample",
-            "said": "sample"
+            "said": "sample",
+            "origin": "owner-direct",
+            "source": {
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            }
           }
         }
       ],
@@ -19498,7 +20291,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "provenance": {
         "surface": "sample",
         "date": "sample",
-        "said": "sample"
+        "said": "sample",
+        "origin": "owner-direct",
+        "source": {
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ]
+        }
       },
       "superseded": [
         {
@@ -19512,7 +20312,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "provenance": {
             "surface": "sample",
             "date": "sample",
-            "said": "sample"
+            "said": "sample",
+            "origin": "owner-direct",
+            "source": {
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            }
           }
         }
       ]
@@ -19558,7 +20365,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "provenance": {
                 "surface": "sample",
                 "date": "sample",
-                "said": "sample"
+                "said": "sample",
+                "origin": "owner-direct",
+                "source": {
+                  "goal": "sample",
+                  "criteria": [
+                    "sample"
+                  ]
+                }
               }
             }
           ],
@@ -19570,7 +20384,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "provenance": {
                 "surface": "sample",
                 "date": "sample",
-                "said": "sample"
+                "said": "sample",
+                "origin": "owner-direct",
+                "source": {
+                  "goal": "sample",
+                  "criteria": [
+                    "sample"
+                  ]
+                }
               }
             }
           ]
@@ -20200,6 +21021,24 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "expiresAt": 0
     }
   },
+  "stepup.credentials.list": {
+    "methodId": "stepup.credentials.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/stepup/credentials"
+    },
+    "status": 200,
+    "body": {
+      "credentials": [
+        {
+          "credentialId": "sample",
+          "label": "sample",
+          "createdAt": 0,
+          "signCount": 0
+        }
+      ]
+    }
+  },
   "stepup.credentials.register": {
     "methodId": "stepup.credentials.register",
     "http": {
@@ -20214,6 +21053,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "createdAt": 0,
         "signCount": 0
       }
+    }
+  },
+  "stepup.credentials.remove": {
+    "methodId": "stepup.credentials.remove",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/stepup/credentials/{credentialId}"
+    },
+    "status": 200,
+    "body": {
+      "credentialId": "sample",
+      "removed": false
     }
   },
   "remote.node_host.contract": {
@@ -21034,7 +21885,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "url": "sample",
         "detail": "sample"
       },
-      "publicBaseUrlUpdated": false
+      "publicBaseUrlUpdated": false,
+      "receiptRecorded": false
     }
   },
   "review.snapshot": {
@@ -22110,6 +22962,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sample"
       ],
       "from": "sample",
+      "baseUnavailable": false,
+      "attributionApproximate": false,
       "to": "sample",
       "files": [
         "sample"
@@ -22510,7 +23364,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "content": "sample",
           "at": 0
         }
-      ]
+      ],
+      "historyAsOf": 0
     }
   },
   "sessions.hosted.create": {
@@ -23614,13 +24469,33 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "id": "sample",
           "kind": "exec",
           "title": "sample",
+          "description": "sample",
           "status": "queued",
           "owner": "sample",
+          "cancellable": false,
           "parentTaskId": "sample",
+          "childTaskIds": [
+            "sample"
+          ],
           "queuedAt": 0,
           "startedAt": 0,
           "endedAt": 0,
-          "error": "sample"
+          "retryPolicy": {
+            "maxAttempts": 0,
+            "currentAttempt": 0,
+            "delayMs": 0,
+            "backoff": "fixed",
+            "retryOn": [
+              "network"
+            ]
+          },
+          "retryDelayMs": 0,
+          "retryAt": 0,
+          "exitCode": 0,
+          "error": "sample",
+          "result": "sample",
+          "correlationId": "sample",
+          "turnId": "sample"
         }
       ]
     }
@@ -24728,7 +25603,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -24817,7 +25693,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -24906,7 +25783,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -24995,7 +25873,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",

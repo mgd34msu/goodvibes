@@ -3,10 +3,11 @@ import { WebSocketOutbox } from './websocket-outbox.js';
 import { WebSocketMessageAssembler } from '@goodvibes-jev/engine/transport-core';
 import type { AgentManager } from '../tools/agent/index.js';
 import { startTurnForOwnerRequest } from '../security/turn-boundary.js';
+import { withUntrustedContentScope } from '../security/untrusted-content.js';
 import type { UserAuthManager, SettingsSessionAuthority } from '../security/user-auth.js';
 import type { SettingsPairingAuthority } from '../pairing/pairing-token-store.js';
-import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
-import { pairingPrincipalId } from '../pairing/pairing-token-store.js';
+import { PairingStoreFaultedError, SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
+import { isPairingTokenShape, pairingPrincipalId } from '../pairing/pairing-token-store.js';
 import {
   authenticateOperatorRequest,
   authenticateOperatorToken,
@@ -28,7 +29,10 @@ import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { SYNTHESIZED_DISPATCH_HEADER, guardSelfDispatch, guardSynthesizedDepth } from './gateway-self-dispatch.js';
+import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
+import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
 import { buildErrorResponseBody } from './http/error-response.js';
@@ -88,6 +92,8 @@ export interface DaemonControlPlaneContext {
   readonly host: string;
   readonly port: number;
   readonly trustProxyEnabled: () => boolean;
+  /** Receives AUTH_FAILED for refused operator, peer and WebSocket credentials; absent = not reported. */
+  readonly runtimeBus?: RuntimeEventBus | undefined;
   readonly allowedBrowserOrigins?: (() => readonly string[]) | undefined;
   readonly dispatchApiRoutes: (req: Request) => Promise<Response | null>;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
@@ -129,6 +135,34 @@ interface SettingsAdminAuthorityRecord {
   readonly session?: SettingsSessionAuthority;
 }
 
+interface GatewayMethodCallInput {
+  readonly authToken: string;
+  readonly methodId: string;
+  readonly signal?: AbortSignal | undefined;
+  readonly query?: Record<string, unknown> | undefined;
+  readonly body?: unknown | undefined;
+  readonly context?: {
+    readonly principalId?: string | undefined;
+    readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
+    readonly admin?: boolean | undefined;
+    readonly scopes?: readonly string[] | undefined;
+    readonly clientKind?: string | undefined;
+    /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
+    readonly connectionId?: string | undefined;
+    /**
+     * True when a person asked for this, now. Set ONLY by transports that
+     * can honestly claim it; scheduled work and triggers leave it unset
+     * because they cannot. It gates the explicit-user-request refusal and
+     * starts a new untrusted-content turn, see
+     * control-plane/routes/explicit-user-request.ts and
+     * security/turn-boundary.ts.
+     */
+    readonly explicitUserRequest?: boolean | undefined;
+  };
+  /** Synthesized dispatches behind this call. 0 = a real client. */
+  readonly synthesizedDepth?: number | undefined;
+}
+
 export class DaemonControlPlaneHelper {
   /** Live WS 'call' invocations (full lifetime incl. response buffering). */
   private wsCallsInFlight = 0;
@@ -147,14 +181,17 @@ export class DaemonControlPlaneHelper {
   private sendFrame(ws: { data: ControlPlaneWebSocketData; send(message: string): void; getBufferedAmount?(): number }, message: string): void {
     if (this.socketSignal(ws).aborted) return;
     let outbox = this.outboxes.get(ws);
-    if (!outbox) { outbox = new WebSocketOutbox(ws); this.outboxes.set(ws, outbox); }
+    if (!outbox) { outbox = new WebSocketOutbox(ws, undefined, (count) => { this.wsEventsDropped += count; }); this.outboxes.set(ws, outbox); }
     outbox.send(message);
   }
 
   private readonly settingsLifetime: (() => object | null) | undefined;
   private readonly settingsAuthorities = new WeakMap<SettingsAdminAuthority, SettingsAdminAuthorityRecord>();
 
+  private readonly authFailures: AuthFailureAudit;
+
   constructor(private readonly context: DaemonControlPlaneContext) {
+    this.authFailures = createAuthFailureAudit(context.runtimeBus);
     // Capture the construction-owned accessor, never a request-provided callback.
     this.settingsLifetime = context.settingsLifetime;
   }
@@ -200,14 +237,21 @@ export class DaemonControlPlaneHelper {
 
   requireAdmin(req: Request): Response | null {
     const authenticated = authenticateOperatorRequest(req, this.authContext());
-    if (!authenticated) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!authenticated) {
+      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     if (!isOperatorAdmin(authenticated)) {
       return Response.json({ error: 'Admin role required' }, { status: 403 });
     }
     return null;
   }
 
-  /** Capture after request-body awaits, using only actual auth owners. */
+  /**
+   * Capture after request-body awaits, using only actual auth owners.
+   * @throws {PairingStoreFaultedError} when a paired or shared-token capture
+   *   failed because the pairing store is faulted, not because it is stale.
+   */
   captureSettingsAdminAuthority(req: Request): SettingsAdminAuthority | null {
     const lifetime = this.settingsLifetime?.();
     if (!lifetime) return null;
@@ -222,6 +266,8 @@ export class DaemonControlPlaneHelper {
       // Preserve the operator credential precedence, without ordinary auth's
       // cached shared fallback or last-seen persistence side effects.
       paired = pairingOwner?.captureSettingsAuthority?.({ kind: 'pairing-token', token }) ?? null;
+      // An empty capture from a faulted store is not stale; say so instead of inviting a retry.
+      if (!paired && isPairingTokenShape(token) && pairingOwner?.settingsAuthorityFaulted === true) throw new PairingStoreFaultedError();
       if (paired) {
         if (!pairingOwner?.withSettingsAuthority) return null;
         kind = 'pairing-token';
@@ -229,6 +275,7 @@ export class DaemonControlPlaneHelper {
         const shared = this.context.authToken();
         if (shared && matchesSharedToken(token, shared)) {
           paired = pairingOwner?.captureSettingsAuthority?.({ kind: 'shared-token' }) ?? null;
+          if (!paired && pairingOwner?.settingsAuthorityFaulted === true) throw new PairingStoreFaultedError();
           if (!paired || !pairingOwner?.withSettingsAuthority) return null;
           kind = 'shared-token';
         } else {
@@ -244,7 +291,10 @@ export class DaemonControlPlaneHelper {
         transport: req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim() ? 'header' : 'cookie',
         ...(paired ? { paired } : {}), ...(session ? { session } : {}) });
       return handle;
-    } catch { return null; }
+    } catch (error) {
+      if (error instanceof PairingStoreFaultedError) throw error;
+      return null;
+    }
   }
 
   /**
@@ -299,6 +349,7 @@ export class DaemonControlPlaneHelper {
       extractForwardedClientIp(req, this.trustProxyEnabled()),
     );
     if (!auth) {
+      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
       return Response.json({ error: 'Unauthorized remote peer' }, { status: 401 });
     }
     if (scope && !auth.token.scopes.includes(scope)) {
@@ -461,6 +512,7 @@ export class DaemonControlPlaneHelper {
     const token = this.extractAuthToken(req);
     const principal = resolveAuthenticatedPrincipal(req, this);
     if (!principal) {
+      this.authFailures.record(extractForwardedClientIp(req, this.trustProxyEnabled()) ?? 'unknown', 'control-plane');
       const error = 'Unauthorized: the WebSocket upgrade request itself must authenticate. Send an '
         + 'Authorization: Bearer token header on the upgrade (React Native and server runtimes support '
         + 'WebSocket constructor headers) or present an operator session cookie (same-origin browser '
@@ -529,10 +581,17 @@ export class DaemonControlPlaneHelper {
     ws.data.clientId = connection.clientId;
   }
 
+  /** A socket that has not authenticated and was refused cannot do anything else; close it with the reason so the client sees why instead of an idle open socket. */
+  private closeRefusedAuth(ws: { data: ControlPlaneWebSocketData; close?(code?: number, reason?: string): void }, reason: string): void {
+    if (ws.data.authenticated) return;
+    ws.close?.(1008, reason);
+  }
+
   async handleControlPlaneWebSocketMessage(
     ws: {
       data: ControlPlaneWebSocketData;
       send(message: string): void;
+      close?(code?: number, reason?: string): void;
     },
     message: string | Buffer | ArrayBuffer | Uint8Array,
   ): Promise<void> {
@@ -573,12 +632,15 @@ export class DaemonControlPlaneHelper {
       const token = typeof frame.token === 'string' ? frame.token : ws.data.authToken;
       const principal = this.describeAuthenticatedPrincipal(token);
       if (!principal) {
+        this.authFailures.record(ws.data.remoteAddress ?? 'unknown', 'control-plane');
         this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }));
+        this.closeRefusedAuth(ws, 'Unauthorized');
         return;
       }
       const domains = Array.isArray(frame.domains) ? normalizeFrameDomains(frame.domains) : undefined;
       if (domains instanceof Response) {
         this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Invalid runtime event domain' }));
+        this.closeRefusedAuth(ws, 'Invalid runtime event domain');
         return;
       }
       ws.data.authToken = token;
@@ -655,6 +717,7 @@ export class DaemonControlPlaneHelper {
               admin: ws.data.admin,
               scopes: ws.data.scopes,
               clientKind: ws.data.clientKind,
+              ...(ws.data.clientId === undefined ? {} : { connectionId: ws.data.clientId }),
               // The client says whether a person asked for this right now. Only
               // a literal `true` counts: an absent or malformed field means
               // "cannot claim it", which is the honest default for scheduled
@@ -714,10 +777,16 @@ export class DaemonControlPlaneHelper {
     /** Synthesized dispatches behind this call. 0 = a real client. */
     readonly synthesizedDepth?: number | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
+    // The router sees the normalised path, so the descriptor and its scope are looked up by that one,
+    // never by the raw text a client typed (`/api/x/../admin`, `/api/x?y`).
+    if (hasDotSegment(input.path)) {
+      return { status: 400, ok: false, body: refusalBody('The path contains a "." or ".." segment; send the final path.', 'INVALID_ARGUMENT', 400) };
+    }
+    const url = new URL(`http://${this.context.host}:${this.context.port}${input.path.startsWith('/') ? input.path : `/${input.path}`}`);
     const loop = guardSynthesizedDepth(input.synthesizedDepth,
-      this.context.gatewayMethods.findByHttpBinding(input.method, input.path)?.id, input.path);
+      this.context.gatewayMethods.findByHttpBinding(input.method, url.pathname)?.id, url.pathname);
     if (loop) return loop;
-    const matchedDescriptor = this.context.gatewayMethods.findByHttpBinding(input.method, input.path);
+    const matchedDescriptor = this.context.gatewayMethods.findByHttpBinding(input.method, url.pathname);
     if (matchedDescriptor) {
       const denied = this.validateGatewayInvocation(matchedDescriptor, input.context);
       if (denied) return denied;
@@ -730,7 +799,6 @@ export class DaemonControlPlaneHelper {
         }
       }
     }
-    const url = new URL(`http://${this.context.host}:${this.context.port}${input.path.startsWith('/') ? input.path : `/${input.path}`}`);
     for (const [key, value] of Object.entries(input.query ?? {})) {
       if (value === undefined || value === null) continue;
       url.searchParams.set(key, String(value));
@@ -821,35 +889,28 @@ export class DaemonControlPlaneHelper {
     };
   }
 
-  async invokeGatewayMethodCall(input: {
-    readonly authToken: string;
-    readonly methodId: string;
-    readonly signal?: AbortSignal | undefined;
-    readonly query?: Record<string, unknown> | undefined;
-    readonly body?: unknown | undefined;
-    readonly context?: {
-      readonly principalId?: string | undefined;
-      readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined;
-      readonly admin?: boolean | undefined;
-      readonly scopes?: readonly string[] | undefined;
-      readonly clientKind?: string | undefined;
-      /**
-       * True when a person asked for this, now. Set ONLY by transports that
-       * can honestly claim it; scheduled work and triggers leave it unset
-       * because they cannot. It gates the explicit-user-request refusal and
-       * starts a new untrusted-content turn, see
-       * control-plane/routes/explicit-user-request.ts and
-       * security/turn-boundary.ts.
-       */
-      readonly explicitUserRequest?: boolean | undefined;
-    };
-    /** Synthesized dispatches behind this call. 0 = a real client. */
-    readonly synthesizedDepth?: number | undefined;
-  }): Promise<{ status: number; ok: boolean; body: unknown }> {
-    // A fresh owner request resets the untrusted-content window; automated
-    // work deliberately does not. See security/turn-boundary.ts.
-    startTurnForOwnerRequest(input.context?.explicitUserRequest);
+  /**
+   * One gateway call. Its untrusted-content turn and ingests are scoped to the
+   * calling principal, so one owner's fresh request cannot move the watermark
+   * past what another principal's session just read.
+   */
+  async invokeGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown }> {
+    // Only a principal this daemon verified names a scope. A call it did not authenticate (a public
+    // method, a peer) shares one scope of its own, so what it claims about itself cannot reach another
+    // principal's window.
+    const descriptor = this.context.gatewayMethods.get(input.methodId);
+    const authenticates = !!descriptor && descriptor.access !== 'public' && descriptor.access !== 'remote-peer';
+    const principalId = authenticates ? this.describeAuthenticatedPrincipal(input.authToken)?.principalId : undefined;
+    // Clients of one principal (every shared-token client, every login of one user) each get their own
+    // window: a fresh request on one connection must not end what another connection just read.
+    const connectionId = principalId === undefined ? undefined : input.context?.connectionId;
+    const scope = principalId === undefined ? 'unauthenticated'
+      : connectionId === undefined ? `principal:${principalId}` : `principal:${principalId}:connection:${connectionId}`;
+    return withUntrustedContentScope(scope,
+      () => this.dispatchGatewayMethodCall(input));
+  }
 
+  private async dispatchGatewayMethodCall(input: GatewayMethodCallInput): Promise<{ status: number; ok: boolean; body: unknown }> {
     const descriptor = this.context.gatewayMethods.get(input.methodId);
     if (!descriptor) {
       return {
@@ -881,6 +942,13 @@ export class DaemonControlPlaneHelper {
     }
     const denied = this.validateGatewayInvocation(descriptor, context);
     if (denied) return denied;
+    // The client frame asserts that a person asked for this call. Only a principal
+    // the transport itself established as a person's (a login session or a paired
+    // device; the shared operator token is not one, automation drives it) can make that claim; a bot, service or peer cannot, so its claim is
+    // dropped before any handler reads it. A literal false stays: it only restricts.
+    if (context?.explicitUserRequest === true && context.principalKind !== 'user' && !(context.principalKind === 'token' && context.principalId !== 'shared-token')) {
+      context = { ...context, explicitUserRequest: undefined };
+    }
     // Input validation gate: reject a wrong-typed / missing-required body against
     // the verb's typed inputSchema before the handler runs (honest 400, not silent
     // coercion). Only body-carrying invocations are checked, a handler method
@@ -897,6 +965,12 @@ export class DaemonControlPlaneHelper {
         };
       }
     }
+    // A fresh owner request resets the untrusted-content window; automated
+    // work deliberately does not. It runs only once the call is known, the
+    // principal is current and its scopes allow it, so a refused or malformed
+    // frame cannot clear what strangers' content left behind. See security/turn-boundary.ts.
+    startTurnForOwnerRequest(context?.explicitUserRequest);
+
     if (this.context.gatewayMethods.hasHandler(input.methodId)) {
       // ONE contract: no WS call arm is unbounded. The registered-handler branch
       // shares the same in-flight counter as the direct http-dispatch path,
@@ -968,10 +1042,12 @@ export class DaemonControlPlaneHelper {
             body: refusalBody(refusal.message, refusal.code, refusal.status),
           };
         }
+        // redactSensitiveData outside classic mode answers only markers on its first call; local masking keeps the message readable.
+        const message = redactDiagnosticText(summarizeError(error));
         return {
           status: 500,
           ok: false,
-          body: buildErrorResponseBody(summarizeError(error), { status: 500 }),
+          body: buildErrorResponseBody(message, { status: 500 }),
         };
       } finally {
         this.wsCallsInFlight -= 1;
@@ -1019,6 +1095,16 @@ export class DaemonControlPlaneHelper {
       },
     });
   }
+}
+
+/** True when the path part holds a "." or ".." segment, written plainly, percent-encoded or with a backslash. */
+function hasDotSegment(path: string): boolean {
+  const pathOnly = path.split(/[?#]/, 1)[0] ?? '';
+  return pathOnly.split(/[/\\]/).some((segment) => {
+    let decoded = segment;
+    try { decoded = decodeURIComponent(segment); } catch { /* an undecodable segment cannot be a dot segment */ }
+    return decoded === '.' || decoded === '..';
+  });
 }
 
 function parseRuntimeDomains(rawDomains: string | null): RuntimeEventDomain[] | Response {

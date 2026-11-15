@@ -1,4 +1,3 @@
-/** Authored regression source; execution deferred until coding is complete. */
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

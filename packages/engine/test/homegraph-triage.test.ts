@@ -169,6 +169,36 @@ describe('Home Graph judgment issue triage', () => {
     }
   });
 
+  test('one ambiguous issue is held for review while the others in the pass are still triaged', async () => {
+    const { llm } = createFakeTriageLlm((record) => record.node?.title === 'Front Door Sensor'
+      ? { action: 'reject', confidence: 50, reason: 'ambiguous' }
+      : { action: 'reject', confidence: 96, reason: 'not battery tracked' });
+    const { root, store, service } = createTriageService(llm);
+    try {
+      await service.syncSnapshot(TRIAGE_SNAPSHOT);
+      const open = (await service.listIssues({ installationId: 'house-1', status: 'open' })).issues
+        .filter((issue) => issue.code === 'homegraph.device.unknown_battery');
+      const held = open.find((issue) => issue.nodeId && store.getNode(issue.nodeId)?.title === 'Front Door Sensor')!;
+      expect(open.length).toBeGreaterThan(1);
+
+      const result = await service.runRefinement({ installationId: 'house-1', triage: true, skipGapRefinement: true });
+      const triage = result.triage!;
+
+      expect(result.ok).toBe(true);
+      expect(triage.processed).toBeGreaterThanOrEqual(open.length);
+      expect(triage.decisions.find((decision) => decision.issueId === held.id)).toMatchObject({ applied: false, reason: 'held-unsettled' });
+      expect(store.getIssue(held.id)!.status).toBe('open');
+      const others = open.filter((issue) => issue.id !== held.id);
+      expect(others.every((issue) => store.getIssue(issue.id)!.status === 'resolved')).toBe(true);
+
+      // The held issue is cached, so the next pass does not pick it first again.
+      const rerun = await service.runRefinement({ installationId: 'house-1', triage: true, skipGapRefinement: true });
+      expect(rerun.triage!.decisions.some((decision) => decision.issueId === held.id)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('leaves a separate wiki knowledge space provably untouched (family wall)', async () => {
     const { llm } = createFakeTriageLlm(() => ({ action: 'reject', confidence: 99, reason: 'auto' }));
     const { root, store, service } = createTriageService(llm);
@@ -219,6 +249,9 @@ describe('Home Graph judgment issue triage', () => {
       expect(result.triage!.configured).toBe(false);
       expect(result.triage!.reason).toBe('triage-judgment-not-configured');
       expect(result.triage!.processed).toBe(0);
+      // A triage-only run that did nothing must not read as success.
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('triage-judgment-not-configured');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

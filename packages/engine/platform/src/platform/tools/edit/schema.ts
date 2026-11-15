@@ -9,7 +9,8 @@ export const editSchema = {
       minItems: 1,
       items: {
         type: 'object',
-        required: ['path', 'find', 'replace'],
+        // find/replace may each be sent as plain text or base64; the executor checks that one is present and non-empty.
+        required: ['path'],
         properties: {
           path: {
             type: 'string',
@@ -17,19 +18,19 @@ export const editSchema = {
           },
           find: {
             type: 'string',
-            description: 'Text to find in the file',
+            description: 'Text to find in the file. Required unless find_base64 is sent; must not be empty.',
           },
           find_base64: {
             type: 'string',
-            description: 'Base64-encoded text to find (alternative to find for binary-safe transport)',
+            description: 'Base64-encoded text to find, used instead of find for binary-safe transport. Send one of find or find_base64; if both are sent they must decode to the same text.',
           },
           replace: {
             type: 'string',
-            description: 'Replacement text',
+            description: 'Replacement text. Required unless replace_base64 is sent; an empty string deletes the match.',
           },
           replace_base64: {
             type: 'string',
-            description: 'Base64-encoded replacement text (alternative to replace for binary-safe transport)',
+            description: 'Base64-encoded replacement text, used instead of replace for binary-safe transport. Send one of replace or replace_base64; if both are sent they must decode to the same text.',
           },
           id: {
             type: 'string',
@@ -148,7 +149,7 @@ export const editSchema = {
             'with_diff: include unified diff per edit. ' +
             'verbose: full detail including pre/post content. ' +
             'Results include status field: applied | not_found | ambiguous | conflict | failed. ' +
-            'Failed results include hint field with actionable suggestions.',
+            'Failed results include hint field with actionable suggestions (count_only lists failed edits by path and status).',
           default: 'minimal',
         },
         diff_context: {
@@ -193,7 +194,8 @@ export const editSchema = {
     notebook_operations: {
       type: 'object',
       description:
-        'Jupyter notebook (.ipynb) cell operations. Alternative to edits, provide either edits or notebook_operations, not both.',
+        'Jupyter notebook (.ipynb) cell operations. Alternative to edits, provide either edits or notebook_operations, not both. ' +
+        'match, transaction and validate do not apply to notebook operations and are refused when sent with them.',
       properties: {
         path: { type: 'string', description: 'Path to .ipynb notebook file' },
         operations: {
@@ -211,7 +213,8 @@ export const editSchema = {
               cell: {
                 type: 'integer',
                 minimum: 0,
-                description: '0-based cell index (used by replace/delete when cell_id is not provided)',
+                description:
+                  '0-based cell index in the notebook as it was before any operation of this call (used by replace/delete when cell_id is not provided). Inserts and deletes earlier in the same call do not renumber it.',
               },
               cell_id: {
                 type: 'string',
@@ -220,7 +223,7 @@ export const editSchema = {
               after: {
                 type: 'integer',
                 minimum: -1,
-                description: 'For insert: insert after this 0-based index (-1 = insert at beginning). Omit to append at end.',
+                description: 'For insert: insert after this 0-based index, numbered as before any operation of this call (-1 = insert at beginning). Omit to append at end.',
               },
               source: {
                 type: 'string',

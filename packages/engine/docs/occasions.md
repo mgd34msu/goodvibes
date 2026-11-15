@@ -81,6 +81,10 @@ write them in any order and add one later. Anything unrecognised is kept verbati
 record by record (a malformed record is dropped and counted, never the file),
 reaped on schedule (an answer expires with its occurrence), swept (orphans and
 aged gift history), and it discloses what it holds through `occasions.state`.
+A profile that declares no occasions at all (unreadable, not loaded yet, or emptied) cannot
+tell "every line was removed" from "nothing could be read", so the orphan rules wait
+until at least one occasion is declared; expiry by date still runs, and removing an
+occasion through its verb still drops its own records.
 Every write is ordered through `StoreWriteQueue`, because the sweep runs on a timer while
 an answer arrives over a channel, and an unordered write would put the file back
 without the answer, so the owner would be asked again about something they had
@@ -172,7 +176,11 @@ was raised five times in one day). An occasion is raised ONCE when it enters its
 lead window, and at most once more on the day itself. Between those it stays open
 and quiet. The ceiling is structural. Each raise records which of the two
 boundaries it served, and a served boundary is never served again, so no sweep
-interval, restart or clock change can produce a third push.
+interval, restart or clock change can produce a third push. A boundary counts as served
+only once a destination accepted the push: if every destination refuses, the boundary stays
+available and the next sweep tries again.
+A date conflict and an unfinished gift conversation are pushed the same way, as a line that
+names the occasion and never a date.
 
 The earlier rhythm here was every `occasions.cadenceDays` days, then daily for
 the last `occasions.finalStretchDays`. That was an implementation choice rather
@@ -181,7 +189,7 @@ turned an hourly sweep into an hourly reminder.
 
 Two keys change as a result:
 
-- `occasions.cadenceDays` now governs only conflict re-raise (§4.14).
+- `occasions.cadenceDays` now governs only conflict re-raise (§4.12).
 - `occasions.finalStretchDays` is REMOVED, with a load-time migration that strips
   it from existing settings files and files a receipt. A count of two has nothing
   to tune, and a setting that changes nothing is worse than no setting.

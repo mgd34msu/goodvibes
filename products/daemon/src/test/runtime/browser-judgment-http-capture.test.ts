@@ -1,7 +1,6 @@
 /** Runtime-generated browser fixtures. The loopback System One answers are synthetic. */
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { exportAndCompareFixture } from '../helpers/webui-fixture-parity.ts';
 import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '@goodvibes-jev/engine/platform/platform/judgment-browser/catalogs';
@@ -68,7 +67,8 @@ test('capture production-composed browser palette and daemon-refusal HTTP wires'
       expect(JSON.parse(capture.body)).toMatchObject({ status: 'settled', outcome: 'act', evidence: expect.any(Array) });
       expect(JSON.parse(capture.body).evidence).toHaveLength(candidates.length);
     }
-    expect(candidates).toHaveLength(28);
+    // Every built-in command plus the one chat created above.
+    expect(candidates).toHaveLength(WEBUI_BUILTIN_COMMANDS.length + 1);
     expect(JSON.parse(held.body)).toMatchObject({ status: 'held', reason: 'uncertain' });
     expect(JSON.stringify(calls)).not.toContain(sessionId);
     expect(calls.some(call => call.state.candidate?.title === title)).toBe(true);
@@ -106,7 +106,8 @@ test('capture production-composed browser palette and daemon-refusal HTTP wires'
     const decisions = daemon.services.judgment.decisionLog.query({ battery: 'webui.errors.daemon-refusal' });
     expect(decisions).toHaveLength(2);
     const paletteDecisions = daemon.services.judgment.decisionLog.query({ battery: 'webui.palette.command-rank' });
-    expect(paletteDecisions).toHaveLength(84);
+    // One reading per candidate for each of the three palette requests.
+    expect(paletteDecisions).toHaveLength(candidates.length * 3);
     for (const capture of [library, chat, held, errorSettled, errorHeld]) {
       const evidence = (JSON.parse(capture.body) as { evidence: { decisionId: string; model: string; requestedModel: string; latencyMs: number; usage: unknown }[] }).evidence;
       for (const item of evidence) {
@@ -115,12 +116,9 @@ test('capture production-composed browser palette and daemon-refusal HTTP wires'
       }
     }
     const directory = process.env.GOODVIBES_TEST_BROWSER_JUDGMENT_FIXTURE_DIR;
-    if (directory) {
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'runtime.json'), `${JSON.stringify({
+    exportAndCompareFixture(directory, 'runtime.json', `${JSON.stringify({
         source: 'Owned loopback synthetic System One; actual default runtime composition and authenticated DaemonServer HTTP. No live model or credential.',
         title, sessionId, listBefore, session, library, chat, held, close, errorSettled, errorHeld, deleted, listAfter,
-      }, null, 2)}\n`);
-    }
+      }, null, 2)}\n`, new URL('../../../../webui/e2e/support/fixtures/browser-judgment-runtime/', import.meta.url));
   } finally { try { await daemon.stop(); } finally { secrets.mockRestore(); restore(); } }
 }, 30_000);

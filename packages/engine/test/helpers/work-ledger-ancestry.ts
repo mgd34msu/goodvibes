@@ -35,6 +35,7 @@ const { KnowledgeStore } = await import('../../platform/src/platform/knowledge/s
 const { createWorkLedger } = await import('../../platform/src/platform/workflow/work-ledger/service.js');
 const command = { type: 'create', requestId: 'durable', expectedRevision: 0, title: 'Durable', goal: 'Persist every ancestor', criteria: ['Ancestry durable'] };
 const attempts: string[] = [];
+const errors: string[] = [];
 let owner: InstanceType<typeof KnowledgeStore> | undefined;
 let ledger: ReturnType<typeof createWorkLedger> | undefined;
 let actor: ReturnType<ReturnType<typeof createWorkLedger>['authority']['issueActor']> | undefined;
@@ -48,7 +49,7 @@ for (let index = 0; index < 3; index++) {
     actor = ledger.authority.issueActor({ projectId: 'project', actorId: 'coordinator', role: 'coordinator' });
     const result = await ledger.service.execute(command, actor);
     attempts.push(result.kind === 'accepted' ? result.replayed ? 'replayed' : 'accepted' : result.kind);
-  } catch { attempts.push('failed'); }
+  } catch (error) { attempts.push('failed'); errors.push(error instanceof Error ? error.message : String(error)); }
   if (index < 2) { await ledger?.service.close(); await owner.close(); ledger = undefined; }
 }
 if (!ledger || !actor || !owner) throw new Error('Final healthy acquisition failed');
@@ -59,4 +60,4 @@ const replay = await ledger.service.execute(command, actor);
 const history = await ledger.service.history(0, actor);
 const unchanged = bytes.equals(native.readFileSync(input.dbPath));
 await ledger.service.close(); await owner.close();
-console.log(JSON.stringify({ attempts, uncertainReplay, replay, historyLength: history.length, unchanged, events }));
+console.log(JSON.stringify({ attempts, errors, uncertainReplay, replay, historyLength: history.length, unchanged, events }));

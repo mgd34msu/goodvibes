@@ -194,7 +194,14 @@ export class ChannelPluginRegistry {
     if (!this.ingressAlarm) return plugin.handleInbound(req);
     try {
       const response = await plugin.handleInbound(req);
-      this.ingressAlarm.recordSuccess(plugin.surface);
+      // Adapters answer a failure they cannot process with a 5xx Response rather
+      // than throwing; a surface that answers 503 to everything is not healthy.
+      // A 4xx is a refusal of one request (policy, malformed), not a fault.
+      if (response && response.status >= 500) {
+        this.ingressAlarm.recordFailure(plugin.surface, `${plugin.surface} inbound answered HTTP ${response.status}`);
+      } else {
+        this.ingressAlarm.recordSuccess(plugin.surface);
+      }
       return response;
     } catch (error) {
       this.ingressAlarm.recordFailure(plugin.surface, summarizeError(error));
@@ -463,12 +470,13 @@ export class ChannelPluginRegistry {
     if (explicit) return explicit;
     const directory = await this.queryDirectory(surface, {
       query: input,
-      limit: 1,
+      limit: 5,
       ...(options.preferredKind === 'direct' ? { scope: 'users' as const } : {}),
       ...(options.preferredKind === 'group' || options.preferredKind === 'channel' ? { scope: 'groups' as const } : {}),
       ...(options.threadId ? { scope: 'threads' as const } : {}),
     });
-    const entry = directory[0]!;
+    // A directory search is a fuzzy match; a send goes only to an entry the input names exactly.
+    const entry = directory.find((candidate) => directoryEntryNamedBy(candidate, input));
     if (entry) {
       const kind = entry.kind === 'user' || entry.kind === 'self' || entry.kind === 'member'
         ? 'direct'
@@ -597,4 +605,10 @@ export class ChannelPluginRegistry {
     }
     return [];
   }
+}
+
+function directoryEntryNamedBy(entry: ChannelDirectoryEntry, input: string): boolean {
+  const wanted = input.replace(/^[@#]/, '').toLowerCase();
+  const names = [entry.id, entry.handle, entry.label, entry.groupId, entry.threadId, ...(entry.aliases ?? [])];
+  return names.some((name) => name !== undefined && name.replace(/^[@#]/, '').toLowerCase() === wanted);
 }

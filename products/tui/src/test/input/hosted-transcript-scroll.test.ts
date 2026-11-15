@@ -24,7 +24,7 @@ function fixture(count = 80) {
     readModel: createStaticFleetReadModel(buildFleetSnapshot([])), hosted: feed, tickMs: 0,
     actions: { interrupt: () => false, resume: () => false, kill: id => { stops.push(id); return []; },
       getConversationSnapshot: () => [], resolveSessionLogPath: () => '', steer: () => ({ queued: false, reason: 'not used' }) },
-    steerHosted: text => sent.push(text), requestRender: () => { renders++; },
+    steerHosted: text => { sent.push(text); }, requestRender: () => { renders++; },
   });
   host.push(modal); modal.showHosted(); cleanup.push(() => host.clear());
   const key = (logicalName: string, ctrl = false) => {

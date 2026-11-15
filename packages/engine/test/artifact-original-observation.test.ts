@@ -1,4 +1,4 @@
-/** UNRUN: original physical/record binding without byte reads or hash guards. */
+/** Original physical/record binding without byte reads or hash guards. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,7 +11,15 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 async function fixture() { const root = mkdtempSync(join(tmpdir(), 'artifact-original-')); roots.push(root); const store = new ArtifactStore({ rootDir: root }), artifact = await store.create({ kind: 'document', text: 'original content', filename: 'document.txt' }); const record = store.getRecord(artifact.id); if (!record) throw Error('Missing actual stored artifact'); return { root, store, artifact, record }; }
 test('capturing/rechecking a genuine artifact reads no content or metadata body', async () => {
   const f = await fixture(), read = spyOn(fs, 'readFileSync').mockImplementation(() => { throw Error('Unexpected body reread'); });
-  try { const original = f.store.captureOriginal(f.artifact.id); original.assertCurrent(); expect(artifactOriginalId(original)).toBe(f.artifact.id); }
+  try {
+    const original = f.store.captureOriginal(f.artifact.id); original.assertCurrent(); expect(artifactOriginalId(original)).toBe(f.artifact.id);
+    expect(read).not.toHaveBeenCalled();
+    // Control: a spy on the same export observes the store's own metadata read when a root is reopened, so the silence above is meaningful.
+    read.mockRestore();
+    const control = spyOn(fs, 'readFileSync');
+    try { void new ArtifactStore({ rootDir: f.root }); expect(control).toHaveBeenCalled(); }
+    finally { control.mockRestore(); }
+  }
   finally { read.mockRestore(); }
 });
 test('same-byte original content replacement retires both observation and bound deletion', async () => {

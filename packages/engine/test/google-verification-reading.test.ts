@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { readVerificationArtifact } from '../platform/src/platform/google/verification-reading.js';
+import { JudgmentResultAdmissionError } from '../platform/src/platform/gate/judgment-result.js';
 import type { CandidateEmail, VerificationExpectation } from '../platform/src/platform/google/verification-expectations.js';
 import type { ProtectedSourceOwner } from '../platform/src/platform/security/source-screening/types.js';
 
@@ -49,5 +50,7 @@ test('mismatched domains are refused locally, and absent screening, weak or no-m
 test('message replacement during a held reading cannot return a token', async () => {
   const fixture = reading('artifact_0'); const source = email('Verify: https://example.com/path?t=secret');
   installJudgmentPort({ ...fixture.port, async ask(request) { Object.assign(source, { subject: 'replaced' }); return fixture.port.ask(request); } });
-  await expect(readVerificationArtifact(source, expectation, { sourceOwner: sourceOwner() })).rejects.toThrow();
+  const failure = await readVerificationArtifact(source, expectation, { sourceOwner: sourceOwner() }).then(() => undefined, (error: unknown) => error);
+  expect(failure).toBeInstanceOf(JudgmentResultAdmissionError);
+  expect((failure as JudgmentResultAdmissionError).problem).toBe('stale');
 });

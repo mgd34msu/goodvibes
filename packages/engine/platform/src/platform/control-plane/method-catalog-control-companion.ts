@@ -71,6 +71,8 @@ function companionChatMessageInputSchema(
  * INVALID_MODEL_ROUTE). Neither is required alone, this is a dependency
  * between two optional fields, which is what `dependentRequired` is for.
  */
+const CLIENT_MESSAGE_ID_SCHEMA = { type: 'string', minLength: 1, maxLength: 128 } as const;
+
 const COMPANION_MODEL_ROUTE_DEPENDENCY: Readonly<Record<string, readonly string[]>> = {
   model: ['provider'],
   provider: ['model'],
@@ -176,11 +178,11 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.create',
     title: 'Send Companion Chat Message',
-    description: 'Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`.',
+    description: 'Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`. A message queued behind a running turn whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`. Optional `clientMessageId` (1-128 characters) makes the send safe to repeat: a second send with the same id returns the first message\'s id and starts no second turn, so a client whose response was lost can resend. The id is remembered while the session stays loaded in the daemon; a daemon restart forgets it.',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages' },
-    inputSchema: companionChatMessageInputSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    inputSchema: companionChatMessageInputSchema({ sessionId: STRING_SCHEMA, clientMessageId: CLIENT_MESSAGE_ID_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
       messageId: STRING_SCHEMA,
     }, ['messageId']),
@@ -198,13 +200,14 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.retry',
     title: 'Regenerate Companion Chat Response',
-    description: 'Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate.',
+    description: 'Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/retry' },
     inputSchema: bodyEnvelopeSchema({
+      sessionId: STRING_SCHEMA,
       messageId: STRING_SCHEMA,
-    }, []),
+    }, ['sessionId']),
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
       regeneratedFrom: STRING_SCHEMA,
@@ -215,7 +218,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.edit',
     title: 'Edit Companion Chat Message And Branch',
-    description: 'Edit a user message and branch the conversation from it. `messageId` (required) is the user message to edit; the edited text is passed as `body` or `content` (as message create accepts), with optional `attachments` referencing artifacts. The original message and everything after it are SUPERSEDED, retained as history, never deleted, a new user message carrying `revisionOf` back to the original is appended, and a fresh turn answers it. Returns the new message id and the superseded ids for honest lineage. Same closed/unknown-session refusals as companion.chat.messages.retry.',
+    description: 'Edit a user message and branch the conversation from it. `messageId` (required) is the user message to edit; the edited text is passed as `body` or `content` (as message create accepts), with optional `attachments` referencing artifacts. The original message and everything after it are SUPERSEDED, retained as history, never deleted, a new user message carrying `revisionOf` back to the original is appended, and a fresh turn answers it. Returns the new message id and the superseded ids for honest lineage. Same closed/unknown-session refusals as companion.chat.messages.retry, and the same 409 CHAT_TURN_BUSY while a reply, a message being prepared, or queued sends are in flight (nothing is superseded).',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/edit' },
@@ -236,11 +239,11 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.steer',
     title: 'Steer Companion Chat (Interrupt And Send)',
-    description: 'Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is running. The message jumps to the front of the pending-turn queue; the active turn is cancelled through the same finalization path as companion.chat.turns.cancel (any non-empty partial reply is persisted with `deliveryState: "cancelled"` and the terminal `turn.cancelled` event reaches every subscriber), then the steered message\'s turn starts. Messages queued behind an active turn keep their places behind the steer. With no turn running this behaves as an ordinary send. Accepts the same payload as companion.chat.messages.create (`body`/`content`, `attachments`, `metadata`). Returns the new message id, `steered: true`, and `cancelledTurnId` when a turn was interrupted. Ordinary sends posted while a turn is running are QUEUED (transcript-visible immediately with `deliveryState: "queued"`, answered in order), steer is the explicit jump-the-line verb.',
+    description: 'Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is running. The message jumps to the front of the pending-turn queue; the active turn is cancelled through the same finalization path as companion.chat.turns.cancel (any non-empty partial reply is persisted with `deliveryState: "cancelled"` and the terminal `turn.cancelled` event reaches every subscriber), then the steered message\'s turn starts. Messages queued behind an active turn keep their places behind the steer. With no turn running this behaves as an ordinary send. Accepts the same payload as companion.chat.messages.create (`body`/`content`, `attachments`, `metadata`). Returns the new message id, `steered: true`, and `cancelledTurnId` when a turn was interrupted. Ordinary sends posted while a turn is running are QUEUED (transcript-visible immediately with `deliveryState: "queued"`, answered in order), steer is the explicit jump-the-line verb. A queued message whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`, never silently dropped.',
     category: 'companion',
     scopes: ['write:sessions'],
     http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/steer' },
-    inputSchema: companionChatMessageInputSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    inputSchema: companionChatMessageInputSchema({ sessionId: STRING_SCHEMA, clientMessageId: CLIENT_MESSAGE_ID_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,
       messageId: STRING_SCHEMA,

@@ -15,8 +15,10 @@ import {
   readFirstEnv,
   resolveAudioInput,
   trimToUndefined,
+  signalInit,
+  voiceFetch,
 } from './shared.js';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+
 
 const OPENAI_AUDIO_BASE_URL = 'https://api.openai.com/v1';
 const OPENAI_VOICES = [
@@ -176,7 +178,8 @@ export function createOpenAIProvider(): VoiceProvider {
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), OPENAI_AUDIO_BASE_URL);
       const responseFormat = resolveOpenAISpeechFormat(request.format);
       const metadata = asRecord(request.metadata);
-      const response = await instrumentedFetch(`${baseUrl}/audio/speech`, {
+      const response = await voiceFetch(`${baseUrl}/audio/speech`, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -223,7 +226,7 @@ export function createOpenAIProvider(): VoiceProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('OpenAI API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), OPENAI_AUDIO_BASE_URL);
-      const { buffer, mimeType } = await resolveAudioInput(request.audio);
+      const { buffer, mimeType } = await resolveAudioInput(request.audio, request.signal);
       const form = new FormData();
       form.append(
         'file',
@@ -235,7 +238,8 @@ export function createOpenAIProvider(): VoiceProvider {
       if (request.language?.trim()) form.append('language', request.language.trim());
       if (request.prompt?.trim()) form.append('prompt', request.prompt.trim());
 
-      const response = await instrumentedFetch(`${baseUrl}/audio/transcriptions`, {
+      const response = await voiceFetch(`${baseUrl}/audio/transcriptions`, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -282,7 +286,7 @@ export function createOpenAIProvider(): VoiceProvider {
       const voice = request.voiceId?.trim() || DEFAULT_OPENAI_VOICE;
       const inputFormat = resolveOpenAIRealtimeAudioFormat(request.inputFormat);
       const outputFormat = resolveOpenAIRealtimeAudioFormat(request.outputFormat);
-      const response = await instrumentedFetch(`${baseUrl}/realtime/client_secrets`, {
+      const response = await voiceFetch(`${baseUrl}/realtime/client_secrets`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,

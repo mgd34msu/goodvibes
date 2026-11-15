@@ -1,12 +1,13 @@
 /**
  * runtime-event-discriminated-union.test.ts
  *
- * Runtime tests verifying that the discriminated union event types narrow
- * correctly in TypeScript. These tests also serve as compile-time checks:
- * if the types are wrong, bun's TypeScript support will fail at parse time.
- *
- * Type-level assertions (compile = pass) verify exhaustive narrowing via a
- * `never` assertion in the default branch of switch statements.
+ * The value of this file is compile-time: the `Extract` assertions, the
+ * `never` default branches and the `Record<Type, Event>` sample tables fail
+ * the `engine-tests` typecheck when a union is wrong or a variant is added
+ * without a sample. Under `bun test` (which strips types) only the runtime
+ * checks below can fail, so run the typecheck for the type-level guarantees.
+ * The sample tables are keyed by the event type, so adding a variant to
+ * `AgentEvent` or `TurnEvent` is a type error until it gets a sample.
  *
  * Imports are from leaf event source files (no package-alias dependencies)
  * and from internal module paths that bun can resolve directly as TypeScript.
@@ -285,19 +286,20 @@ describe('discriminated union: AgentEvent', () => {
   });
 
   test('exhaustive switch: all variants covered (never check in default)', () => {
-    const events: AgentEvent[] = [
-      { type: 'AGENT_SPAWNING', agentId: 'a1', task: 'task' },
-      { type: 'AGENT_RUNNING', agentId: 'a1' },
-      { type: 'AGENT_PROGRESS', agentId: 'a1', progress: '50%' },
-      { type: 'AGENT_STREAM_DELTA', agentId: 'a1', content: 'chunk', accumulated: 'chunk' },
-      { type: 'AGENT_AWAITING_MESSAGE', agentId: 'a1' },
-      { type: 'AGENT_AWAITING_TOOL', agentId: 'a1', callId: 'c1', tool: 'bash' },
-      { type: 'AGENT_FINALIZING', agentId: 'a1' },
-      { type: 'AGENT_COMPLETED', agentId: 'a1', durationMs: 100 },
-      { type: 'AGENT_FAILED', agentId: 'a1', error: 'err', durationMs: 50 },
-      { type: 'AGENT_CANCELLED', agentId: 'a1' },
-    ];
-    for (const event of events) {
+    const samples: { readonly [T in AgentEvent['type']]: Extract<AgentEvent, { type: T }> } = {
+      AGENT_SPAWNING: { type: 'AGENT_SPAWNING', agentId: 'a1', task: 'task' },
+      AGENT_RUNNING: { type: 'AGENT_RUNNING', agentId: 'a1' },
+      AGENT_PROGRESS: { type: 'AGENT_PROGRESS', agentId: 'a1', progress: '50%' },
+      AGENT_STREAM_DELTA: { type: 'AGENT_STREAM_DELTA', agentId: 'a1', content: 'chunk', accumulated: 'chunk' },
+      AGENT_AWAITING_MESSAGE: { type: 'AGENT_AWAITING_MESSAGE', agentId: 'a1' },
+      AGENT_AWAITING_TOOL: { type: 'AGENT_AWAITING_TOOL', agentId: 'a1', callId: 'c1', tool: 'bash' },
+      AGENT_FINALIZING: { type: 'AGENT_FINALIZING', agentId: 'a1' },
+      AGENT_COMPLETED: { type: 'AGENT_COMPLETED', agentId: 'a1', durationMs: 100 },
+      AGENT_FAILED: { type: 'AGENT_FAILED', agentId: 'a1', error: 'err', durationMs: 50 },
+      AGENT_CANCELLED: { type: 'AGENT_CANCELLED', agentId: 'a1' },
+    };
+
+    for (const event of Object.values(samples)) {
       expect(exhaustiveAgentSwitch(event)).not.toBe('unknown');
     }
   });
@@ -315,24 +317,25 @@ describe('discriminated union: TurnEvent', () => {
   });
 
   test('exhaustive switch: all variants covered (never check in default)', () => {
-    const events: TurnEvent[] = [
-      { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hello' },
-      { type: 'PREFLIGHT_OK', turnId: 't1' },
-      { type: 'PREFLIGHT_FAIL', turnId: 't1', reason: 'overflow', stopReason: 'context_overflow' },
-      { type: 'STREAM_START', turnId: 't1' },
-      { type: 'STREAM_DELTA', turnId: 't1', content: 'hi', accumulated: 'hi' },
-      { type: 'STREAM_END', turnId: 't1' },
-      { type: 'STREAM_RETRY', turnId: 't1', provider: 'anthropic', attempt: 1, maxAttempts: 3, delayMs: 100, reason: 'transport error' },
-      { type: 'LLM_REQUEST_STARTED', turnId: 't1', provider: 'anthropic', model: 'claude-4', promptSummary: 'hello' },
-      { type: 'LLM_RESPONSE_RECEIVED', turnId: 't1', provider: 'anthropic', model: 'claude-4', contentSummary: 'hi', toolCallCount: 0, inputTokens: 10, outputTokens: 5 },
-      { type: 'TOOL_BATCH_READY', turnId: 't1', toolCalls: ['bash'] },
-      { type: 'TOOLS_DONE', turnId: 't1' },
-      { type: 'POST_HOOKS_DONE', turnId: 't1' },
-      { type: 'TURN_COMPLETED', turnId: 't1', response: 'done', stopReason: 'completed' },
-      { type: 'TURN_ERROR', turnId: 't1', error: 'fail', stopReason: 'provider_error' },
-      { type: 'TURN_CANCEL', turnId: 't1', stopReason: 'cancelled' },
-    ];
-    for (const event of events) {
+    const samples: { readonly [T in TurnEvent['type']]: Extract<TurnEvent, { type: T }> } = {
+      TURN_SUBMITTED: { type: 'TURN_SUBMITTED', turnId: 't1', prompt: 'hello' },
+      PREFLIGHT_OK: { type: 'PREFLIGHT_OK', turnId: 't1' },
+      PREFLIGHT_FAIL: { type: 'PREFLIGHT_FAIL', turnId: 't1', reason: 'overflow', stopReason: 'context_overflow' },
+      STREAM_START: { type: 'STREAM_START', turnId: 't1' },
+      STREAM_DELTA: { type: 'STREAM_DELTA', turnId: 't1', content: 'hi', accumulated: 'hi' },
+      STREAM_END: { type: 'STREAM_END', turnId: 't1' },
+      STREAM_RETRY: { type: 'STREAM_RETRY', turnId: 't1', provider: 'anthropic', attempt: 1, maxAttempts: 3, delayMs: 100, reason: 'transport error' },
+      LLM_REQUEST_STARTED: { type: 'LLM_REQUEST_STARTED', turnId: 't1', provider: 'anthropic', model: 'claude-4', promptSummary: 'hello' },
+      LLM_RESPONSE_RECEIVED: { type: 'LLM_RESPONSE_RECEIVED', turnId: 't1', provider: 'anthropic', model: 'claude-4', contentSummary: 'hi', toolCallCount: 0, inputTokens: 10, outputTokens: 5 },
+      TOOL_BATCH_READY: { type: 'TOOL_BATCH_READY', turnId: 't1', toolCalls: ['bash'] },
+      TOOLS_DONE: { type: 'TOOLS_DONE', turnId: 't1' },
+      POST_HOOKS_DONE: { type: 'POST_HOOKS_DONE', turnId: 't1' },
+      TURN_COMPLETED: { type: 'TURN_COMPLETED', turnId: 't1', response: 'done', stopReason: 'completed' },
+      TURN_ERROR: { type: 'TURN_ERROR', turnId: 't1', error: 'fail', stopReason: 'provider_error' },
+      TURN_CANCEL: { type: 'TURN_CANCEL', turnId: 't1', stopReason: 'cancelled' },
+    };
+
+    for (const event of Object.values(samples)) {
       expect(exhaustiveTurnSwitch(event)).not.toBe('unknown');
     }
   });

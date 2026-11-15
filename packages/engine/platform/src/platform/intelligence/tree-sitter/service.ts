@@ -151,6 +151,33 @@ export class TreeSitterService {
     }
   }
 
+  /**
+   * Parse `content`, hand the tree to `use`, and free it, with no await between
+   * the parse and the use. A tree handed out by {@link parse} belongs to the
+   * cache, so a concurrent parse of the same path (or an eviction) can free it
+   * while a caller is still waiting on something else; this one is private to
+   * the call. Returns null when the language or grammar is unavailable.
+   */
+  async withParsedTree<T>(
+    content: string,
+    langId: string,
+    use: (tree: Tree, language: Language) => T,
+  ): Promise<T | null> {
+    if (!this.initialized || !this.parser) return null;
+    const language = await this.loadLanguage(langId);
+    if (!language) return null;
+    // From here to the end of `use` nothing yields, so the shared parser and
+    // the tree cannot be touched by another call.
+    this.parser.setLanguage(language);
+    const tree = this.parser.parse(content);
+    if (!tree) return null;
+    try {
+      return use(tree, language);
+    } finally {
+      tree.delete();
+    }
+  }
+
   /** Invalidate the cached tree for a file (call after edits). */
   invalidate(filePath: string): void {
     const entry = this.treeCache.get(filePath);

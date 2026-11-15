@@ -27,7 +27,7 @@
  *
  * AppShell registers two commands not covered by CommandProvider:
  *   - system.toggleTheme  (group: 'system')
- *   - system.toggleDensity (group: 'view')
+ *   - view.toggleDensity   (group: 'view')
  *
  * CommandProvider already registers nav + chat + system.palette + system.shortcuts;
  * those are NOT re-registered here to prevent double-registration.

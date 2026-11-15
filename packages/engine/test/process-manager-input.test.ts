@@ -2,8 +2,13 @@ import { expect, spyOn, test } from 'bun:test';
 import { ProcessManager, type BgCommandResult } from '../platform/src/platform/tools/shared/process-manager.ts';
 import * as policyCheck from '../platform/src/platform/gate/execute-policy-check.ts';
 
+/** Portable stand-ins for sleep and true: the test runtime is always present, /bin/sleep is not. */
+const sleepArgs = (seconds: number): string[] => ['--no-env-file', '-e', `setTimeout(() => {}, ${seconds * 1000});`];
+const quietArgs: string[] = ['--no-env-file', '-e', ''];
+
+
 async function startEcho(manager: ProcessManager): Promise<string> {
-  const result = await manager.spawnArgv('/bin/cat', [], undefined, undefined, {
+  const result = await manager.spawnArgv(process.execPath, ['--no-env-file', '-e', 'process.stdin.pipe(process.stdout)'], undefined, undefined, {
     stdin: 'pipe', sigterm_grace_ms: 0,
     credentialEnvScrub: { enabled: false, allowlist: new Set() },
   });
@@ -155,7 +160,7 @@ test('native pipe writes reject unknown, stopped, completed, and closed processe
     const stopped = await startEcho(manager);
     manager.stop(stopped);
     await expect(manager.writeInput(stopped, 'private input')).rejects.toThrow('Unknown process');
-    const completed = await manager.spawnArgv('/bin/true', [], undefined, undefined, {
+    const completed = await manager.spawnArgv(process.execPath, quietArgs, undefined, undefined, {
       stdin: 'pipe', sigterm_grace_ms: 0,
       credentialEnvScrub: { enabled: false, allowlist: new Set() },
     });
@@ -177,7 +182,7 @@ test('ignored stdin and adopted executions cannot acquire a native pipe from a c
   const finish = Promise.withResolvers<BgCommandResult>();
   const output: BgCommandResult = { cmd: 'adopted fixture', stdout: '', stderr: '', exit_code: null, success: true };
   try {
-    const ignored = await manager.spawnArgv('/bin/sleep', ['5'], undefined, undefined, {
+    const ignored = await manager.spawnArgv(process.execPath, sleepArgs(5), undefined, undefined, {
       stdin: 'ignore', sigterm_grace_ms: 0,
       credentialEnvScrub: { enabled: false, allowlist: new Set() },
     });

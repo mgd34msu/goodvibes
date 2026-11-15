@@ -1,4 +1,4 @@
-/** Actual preparation/foreign validation, no provider or product mock. Tests UNRUN. */
+/** Actual preparation/foreign validation, no provider or product mock. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { canonicalJson, toJson } from '@goodvibes-jev/judgment';

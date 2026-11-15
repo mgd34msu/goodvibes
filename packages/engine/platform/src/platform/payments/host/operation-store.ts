@@ -12,16 +12,19 @@ import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
+import type { PaymentUnreadableOperation } from '../window-view.js';
 import { drainOwned } from '@goodvibes-jev/judgment';
 import { capturePaymentReconciliation, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 
 export class PaymentOperationStoreError extends Error {
   override readonly name = 'PaymentOperationStoreError';
-  constructor(readonly kind: 'invalid' | 'exists' | 'busy' | 'unavailable') {
-    super(kind === 'exists' ? 'This checkout identity was already admitted. Read its purchase status; do not begin it again.'
+  /** `message` replaces the kind's generic sentence when the caller knows the
+   * actual state and the allowed next step. It never carries stored evidence. */
+  constructor(readonly kind: 'invalid' | 'exists' | 'busy' | 'unavailable', message?: string) {
+    super(message ?? (kind === 'exists' ? 'This checkout identity was already admitted. Read its purchase status; do not begin it again.'
       : kind === 'busy' ? 'This checkout is owned by an active payment host. Read its status on that host.'
       : kind === 'invalid' ? 'Use a stable checkout requestId containing 1–128 letters, digits, dots, colons, underscores or hyphens.'
-      : 'Purchase-operation evidence is unavailable or changed. Inspect the original payment state before retrying.');
+      : 'Purchase-operation evidence is unavailable or changed. Inspect the original payment state before retrying.'));
   }
 }
 export function checkoutRequestId(value: unknown): string {
@@ -90,11 +93,25 @@ export class DurablePaymentOperations {
   }
   list(id?: string): readonly PaymentOperationView[] {
     if (id !== undefined) { const operation = this.get(id); return operation ? [operation] : []; }
+    const { operations, unreadable } = this.report();
+    const first = unreadable[0];
+    if (first) throw new PaymentOperationStoreError('unavailable', first.reason);
+    return operations;
+  }
+  /** Every readable row, and the records that could not be read by name, so one
+   * damaged file never hides the evidence of the other purchases. */
+  report(): { readonly operations: readonly PaymentOperationView[]; readonly unreadable: readonly PaymentUnreadableOperation[] } {
     const { value } = this.index();
-    return [...new Set([...value.open, ...value.recent])].map(key => {
-      const operation = this.get(key); if (!operation) throw new PaymentOperationStoreError('unavailable');
-      return operation;
-    }).sort((a, b) => b.updatedAtMs - a.updatedAtMs || a.purchaseId.localeCompare(b.purchaseId));
+    const operations: PaymentOperationView[] = [], unreadable: PaymentUnreadableOperation[] = [];
+    for (const key of new Set([...value.open, ...value.recent])) {
+      let operation: PaymentOperationView | null;
+      try { operation = this.get(key); } catch { operation = null; }
+      if (operation) operations.push(operation);
+      else unreadable.push(Object.freeze({ purchaseId: key, reason: `The status record for purchase ${key} is unreadable or missing. `
+        + 'Inspect that purchase\'s payment evidence (its journal entry and merchant history) before taking further action on it; its status cannot be shown.' }));
+    }
+    operations.sort((a, b) => b.updatedAtMs - a.updatedAtMs || a.purchaseId.localeCompare(b.purchaseId));
+    return { operations, unreadable };
   }
   private index(): { value: { version: 1; open: string[]; recent: string[] }; observed: FileObservation | null } {
     try {
@@ -142,7 +159,10 @@ export class DurablePaymentOperations {
     if (!release) throw new PaymentOperationStoreError('busy');
     try {
       const previous = this.index(), id = operation.purchaseId;
-      const retained = ['accepted', 'running', 'cancelling', 'attention', 'uncertain'].includes(operation.state);
+      // An order this daemon could not confirm stays listed until the owner reconciles it
+      // (which changes its outcome), however many later purchases push it out of `recent`.
+      const retained = ['accepted', 'running', 'cancelling', 'attention', 'uncertain'].includes(operation.state)
+        || (operation.state === 'completed' && operation.outcome === 'submitted-unverified');
       const open = previous.value.open.filter(key => key !== id);
       if (retained) open.push(id);
       if (open.length > 256) throw new PaymentOperationStoreError('busy');
@@ -180,10 +200,22 @@ export class DurablePaymentOperations {
       beforePublication();
       // link is create-if-absent, never a rename over an earlier admission.
       linkSync(staged, path); this.known.add(id);
-      unlinkSync(staged); staged = undefined; flushDirectory(this.directory);
-      const observation = readFileObservation(path), persisted = parse(observation.bytes);
-      if (JSON.stringify(persisted) !== JSON.stringify(row)) throw new Error();
-      this.indexOperation(operation);
+      let observation: FileObservation, persisted: StoredOperation;
+      try {
+        unlinkSync(staged); staged = undefined; flushDirectory(this.directory);
+        observation = readFileObservation(path); persisted = parse(observation.bytes);
+        if (JSON.stringify(persisted) !== JSON.stringify(row)) throw new Error();
+        this.indexOperation(operation);
+      } catch (error) {
+        // Published but never indexed (or not confirmed as written), with no
+        // executor to run it: status and boot recovery both find operations
+        // through the index, so the file would sit as `accepted` forever and a
+        // retry would answer `exists`. The lease is still held and nothing has
+        // started, so take it back.
+        this.known.delete(id);
+        try { unlinkSync(path); flushDirectory(this.directory); } catch { /* A file we cannot remove is reported by the original failure below. */ }
+        throw error;
+      }
       return this.writer(id, persisted, observation, release);
     } catch (error) {
       release();
@@ -229,6 +261,14 @@ export class DurablePaymentOperations {
   private writer(id: string, initial: StoredOperation, initialObservation: FileObservation, releaseLease: () => void): PaymentOperationWriter {
     const path = this.path(id), lock = this.lock(id), owner = lstatSync(lock, { bigint: true });
     let row = initial, observed = initialObservation, released = false, failed = false;
+    // The newest state whose index entry could not be written. The file is the
+    // record and is already durable, so a busy or changed index is repaired
+    // here later and is not a reason to stop writing.
+    let unindexed: PaymentOperationView | null = null;
+    const repairIndex = () => {
+      if (unindexed === null) return;
+      try { this.indexOperation(unindexed); unindexed = null; } catch { /* Still held elsewhere; tried again on the next write or release. */ }
+    };
     const assertCurrent = () => {
       if (released || failed) throw new PaymentOperationStoreError('unavailable');
       try {
@@ -248,8 +288,9 @@ export class DurablePaymentOperations {
         const file = readFileObservation(path);
         if (!file.bytes.equals(Buffer.from(contents))) throw new Error();
         row = stored; observed = file;
-        this.indexOperation(stored.operation);
       } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
+      unindexed = stored.operation;
+      repairIndex();
     };
     return Object.freeze({ purchaseId: id, principalId: initial.principalId, assertCurrent,
       read: () => { assertCurrent(); return row.operation; },
@@ -265,7 +306,7 @@ export class DurablePaymentOperations {
         if (next.purchaseId !== id || next.operationId !== initial.operation.operationId || next.createdAtMs !== initial.operation.createdAtMs) throw new PaymentOperationStoreError('invalid');
         save({ ...row, operation: next }, ownerCurrent);
       },
-      release: () => { if (released) return; released = true; releaseLease(); },
+      release: () => { if (released) return; repairIndex(); released = true; releaseLease(); },
     });
   }
 }

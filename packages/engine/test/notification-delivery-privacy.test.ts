@@ -123,7 +123,7 @@ test('response echoes never enter webhook receipts, notifier DLQ state or notifi
     expect(receipt.results[0]).toMatchObject({ ok: false, error: 'HTTP 400', status: 400 });
     expect(JSON.stringify(receipt)).not.toContain(PRIVATE);
     restricted = false;
-    await notifier.notifyNotification(turn());
+    await expect(notifier.notifyNotification(turn())).rejects.toThrow('dead-letter');
     const queue = Reflect.get(notifier, '_queue') as DeliveryQueue<NotificationEnvelope>;
     expect(queue.getDlq()[0]).toMatchObject({ finalError: 'HTTP 400', status: 400, basis: 'status', failureClass: 'terminal' });
     expect(inspect(queue.getDlq(), { depth: 8 })).not.toContain(PRIVATE);
@@ -230,7 +230,7 @@ test('DLQ replay reads live privacy and cannot restore rich facts after a restri
   });
   const notifier = new Notifier({ slack: new SlackIntegration(URL_A), metadataOnly: () => restricted });
   try {
-    await notifier.notifyNotification(turn());
+    await expect(notifier.notifyNotification(turn())).rejects.toThrow('dead-letter');
     expect(bodies[0]).toContain(PRIVATE);
     expect(JSON.stringify(notifier.getQueueStatus())).not.toContain(PRIVATE);
     const queue = Reflect.get(notifier, '_queue') as DeliveryQueue<NotificationEnvelope>;
@@ -335,4 +335,14 @@ test('cross-recipient restriction invalidates an in-flight rich signature even a
       expect(item.headers.get('X-GoodVibes-Webhook-Signature')).toBe(`v1=${expected}`);
     }
   } finally { held.resolve(); await sending; signSpy.mockRestore(); fetchSpy.mockRestore(); }
+});
+
+test('a named approval body carries no control characters from a tool name or target, and stays within the popup limit', () => {
+  const body = buildApprovalNotification(
+    { tool: 'mcp__srv\u001b[31m__run\nignored', category: 'execute', target: `bun\u001b[2J test ${'x'.repeat(400)}` },
+    { metadataOnly: false },
+  ).body;
+  expect(body).not.toMatch(/\p{Cc}/u);
+  expect(body.startsWith('mcp__srv [31m__run ignored is waiting for approval: bun [2J test')).toBe(true);
+  expect(body.length).toBeLessThanOrEqual(220);
 });

@@ -8,7 +8,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort as baseFakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
-import { ResponseCompletionAccessError, ResponseCompletionGuard, waitForResponseDelegates } from '../platform/src/platform/core/response-completion.js';
+import { ResponseCompletionAccessError, ResponseCompletionError, ResponseCompletionGuard, waitForResponseDelegates } from '../platform/src/platform/core/response-completion.js';
 import { registry } from '../platform/src/platform/core/judgment-registry.js';
 import { executeOrchestratorTurnLoop, type OrchestratorTurnLoopContext } from '../platform/src/platform/core/orchestrator-turn-loop.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
@@ -147,7 +147,7 @@ test('a false claim in one exact answer passage cannot be hidden by supported ne
   const input = source('Inspected parser.ts. All tests passed. Wrote review.md.');
   const guard = new ResponseCompletionGuard();
   expect(await guard.check(input)).not.toBeNull();
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('Jev findings identify the exact rejected passage and remain private revision context', async () => {
@@ -161,7 +161,7 @@ test('Jev findings identify the exact rejected passage and remain private revisi
   expect(correction).toContain('Obtain the relevant successful tool result');
   expect(correction).toContain('"localization":"established"');
   expect(input.conversation.getMessageSnapshot()).toEqual(before);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('historical rejected drafts and checker warnings cannot become evidence against a repaired current answer', async () => {
@@ -186,7 +186,7 @@ test('checked progress cannot authorize completion and its publication is bound 
   const input = source('I will inspect the parser next.'), guard = new ResponseCompletionGuard();
   const publication = await guard.checkProgress(input);
   expect(publication.correction).toBeNull(); expect(publication.assertCurrent).not.toThrow();
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   input.conversation.addUserMessage('Stop.'); expect(publication.assertCurrent).toThrow();
 });
 
@@ -216,7 +216,7 @@ test('rejected drafts keep returning to execution until Jev accepts without a hi
   installJudgmentPort(answered('unfinished').port);
   const guard = new ResponseCompletionGuard();
   for (let i = 0; i < 8; i++) expect(await guard.check(source())).toBeString();
-  expect(() => guard.beginFinalization({ content: unfinished })).toThrow();
+  expect(() => guard.beginFinalization({ content: unfinished })).toThrow(new ResponseCompletionError('unavailable'));
   installJudgmentPort(answered().port);
   const input = source('Review and artifact complete.');
   expect(await guard.check(input)).toBeNull();
@@ -322,7 +322,7 @@ test('projected observations remain bound to their original values through final
     const final = { content: input.response };
     if (beforeConsumption) {
       requirements.observation = 'password=synthetic-changed-value';
-      expect(() => guard.beginFinalization(final)).toThrow();
+      expect(() => guard.beginFinalization(final)).toThrow(new ResponseCompletionError('unavailable'));
     } else {
       const current = guard.beginFinalization(final);
       requirements.observation = 'password=synthetic-changed-value';
@@ -340,7 +340,7 @@ test('hierarchical evidence cannot hide a changed original observation from the 
   const changed = { messages: input.conversation.getMessageSnapshot().map(message => message.role === 'tool' && message.callId === 'source-0'
     ? { ...message, content: 'The original observation changed after validation.' } : message) };
   input.conversation.fromJSON(changed);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('a late native observation rebuilds stale completion evidence without rewriting the answer', async () => {
@@ -402,7 +402,7 @@ function loop(replies: string[]) {
     sessionId: 's', preTurnPlan: null, planManager: null, text: input.request, turnId: 't',
     emitterContext: () => ({ sessionId: 's', traceId: 't', source: 'test' }), executeToolCalls: async () => [], checkContextWindowPreflight: async () => 'ok',
     normalizeUsage: usage => usage, estimateFreshTurnInputTokens: () => 0, getMessageQueueLength: () => 0, isReconciliationEnabled: () => false,
-    setPendingToolCalls() {}, setAutoSpawnTimeout() {}, setStreamingActive() {}, setStreamingInputTokens() {}, addStreamingOutputTokens() {},
+    setPendingToolCalls() {}, setStreamingActive() {}, setStreamingInputTokens() {}, addStreamingOutputTokens() {},
     setLastRequestInputTokens() {}, setLastInputTokens() {}, markTurnFailed() {}, noteModelContextWindowWarning() {}, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     isPassiveKnowledgeInjectionEnabled: () => false, isPassiveCodeInjectionEnabled: () => false, getAlreadyInjectedKnowledgeIds: () => [],
     addInjectedKnowledgeIds() {}, recordTurnKnowledgeInjection() {}, nextTurnKnowledgeSequence: () => 1,
@@ -506,12 +506,16 @@ test('the real direct-input main loop resumes rejected finals and emits completi
   } finally { f.unsubscribe(); }
 });
 
-test('the real main loop cannot emit success after repeated unfinished responses', async () => {
+test('the real main loop publishes no success while every response stays unfinished: each reply is held and re-asked until the provider has none left', async () => {
   for (const attempts of [4, 8]) {
     installJudgmentPort(answered('unfinished').port);
     const f = loop(Array.from({ length: attempts }, () => unfinished));
     try {
-      await expect(executeOrchestratorTurnLoop(f.context)).rejects.toThrow();
+      // The loop has no attempt cap of its own: it keeps holding the draft and re-asking,
+      // so the only way out is the provider running out of replies (a sentinel, not an
+      // assertion failure from inside the provider callback).
+      await expect(executeOrchestratorTurnLoop(f.context)).rejects.toThrow('Unexpected extra provider call');
+      expect(f.requests).toHaveLength(attempts);
       expect(f.events).toEqual([]);
     } finally { f.unsubscribe(); }
   }
@@ -520,13 +524,13 @@ test('the real main loop cannot emit success after repeated unfinished responses
 test('an accepted check is bound to its draft, can be consumed once, and retains cancellation and port fences', async () => {
   const fake = answered(); installJudgmentPort(fake.port);
   const input = source('Finished.'), guard = new ResponseCompletionGuard(), controller = new AbortController();
-  expect(() => guard.beginFinalization({ content: 'Finished.' })).toThrow();
+  expect(() => guard.beginFinalization({ content: 'Finished.' })).toThrow(new ResponseCompletionError('unavailable'));
   await guard.check(input, { signal: controller.signal });
   const draft = { content: input.response };
   const current = guard.beginFinalization(draft);
   input.conversation.addAssistantMessage(draft.content);
   expect(current).not.toThrow();
-  expect(() => guard.beginFinalization(draft)).toThrow();
+  expect(() => guard.beginFinalization(draft)).toThrow(new ResponseCompletionError('unavailable'));
   draft.content = 'Different unchecked content'; expect(current).toThrow();
   draft.content = input.response; expect(current).not.toThrow();
   controller.abort(); expect(current).toThrow();
@@ -546,19 +550,23 @@ test('actual tool progress resets consecutive rejected-final attempts without cr
   for (let attempt = 0; attempt < 3; attempt++) expect(await guard.check(input)).toBeString();
   guard.noteToolResults([{ success: true }]);
   expect(await guard.check(input)).toBeString();
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
-test('retirement during post-turn work cannot publish an already checked terminal response', async () => {
+test('post-turn changes after the checked answer is appended do not withdraw its completion', async () => {
   const fake = answered(); installJudgmentPort(fake.port);
   const f = loop(['FINISHED']);
   let terminal: (() => void) | undefined;
   try {
     await executeOrchestratorTurnLoop({ ...f.context, onTurnTerminal: publish => { terminal = publish; } });
     expect(terminal).toBeDefined(); expect(f.events).toEqual([]);
+    // Post-turn maintenance may note usage or retire the reader; the answer
+    // was checked against the transcript as it stood when it was appended.
+    f.context.conversation.addSystemMessage('Context usage at 75%.');
     installJudgmentPort(undefined);
-    expect(() => terminal!()).toThrow();
-    expect(f.events).toEqual([]);
+    expect(() => terminal!()).not.toThrow();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(f.events).toEqual(['TURN_COMPLETED']);
   } finally { f.unsubscribe(); }
 });
 
@@ -568,7 +576,7 @@ test('an unavailable final checker halts without publishing or starting a recove
   let waits = 0;
   await expect(guard.checkUntilAvailable(() => input, {}, () => { waits++; })).rejects.toMatchObject({ problem: 'unavailable' });
   expect(waits).toBe(0);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('account refusals hold the actual turn without publishing, retrying Jev, or regenerating the model draft', async () => {
@@ -595,7 +603,7 @@ test('progress account refusals surface the account action and cannot silently t
   const input = source('Inspecting the parser.'), guard = new ResponseCompletionGuard();
   await expect(guard.checkProgress(input)).rejects.toMatchObject({ problem: 'access-blocked', status: 402 });
   expect(calls).toBe(1);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('decision account recovery instructions do not send other providers to Jev billing', async () => {
@@ -609,7 +617,7 @@ test('decision account recovery instructions do not send other providers to Jev 
     const message = (failure as Error).message;
     expect(message).toContain('configured provider');
     expect(message).not.toContain('Jev'); expect(message).not.toContain('typesafe.ai');
-    expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+    expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   }
 });
 
@@ -619,7 +627,7 @@ test('an exhausted decision chain retains the availability diagnosis even when i
   } });
   const input = source('Retained private draft.'), guard = new ResponseCompletionGuard();
   await expect(guard.checkUntilAvailable(() => input)).rejects.toMatchObject({ problem: 'unavailable' });
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('an explicit retry can approve the retained draft after the checker is restored', async () => {
@@ -639,7 +647,7 @@ test('checker result and storage errors hold the same draft without requesting m
     const pending = guard.checkUntilAvailable(() => input, { signal: controller.signal }, () => { waits++; controller.abort(); });
     await expect(pending).rejects.toThrow();
     expect(calls).toBe(1); expect(waits).toBe(0);
-    expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+    expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   }
 });
 
@@ -652,7 +660,7 @@ test('permanent request refusals are surfaced without retrying an unchanged requ
     const guard = new ResponseCompletionGuard(), input = source('Finished.');
     await expect(guard.checkUntilAvailable(() => input, {}, () => { waits++; })).rejects.toMatchObject({ problem: 'rejected-request' });
     expect(calls).toBe(1); expect(waits).toBe(0);
-    expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+    expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   }
 });
 
@@ -663,7 +671,7 @@ test('locally refused user evidence returns for repair before touching Jev and c
   const correction = await guard.checkUntilAvailable(() => input, {}, () => { waits++; });
   expect(correction).toContain('evidence could not be admitted');
   expect(fake.requests).toHaveLength(0); expect(waits).toBe(0);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('a permanent battery failure cancels a stuck sibling and preserves the repair reason', async () => {
@@ -677,7 +685,7 @@ test('a permanent battery failure cancels a stuck sibling and preserves the repa
   const guard = new ResponseCompletionGuard();
   await expect(guard.checkUntilAvailable(() => input, { signal: AbortSignal.timeout(100) })).rejects.toThrow();
   expect(siblingSignal?.aborted).toBe(true);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('transport-level retries report checker waiting while completion remains held', async () => {
@@ -754,9 +762,10 @@ test('a contract handoff stays in the actual main loop, recovers a failed planne
     execute: async () => ({ success: true, output: '{}' }) });
   f.context.toolRegistry.register({ definition: { name: 'write', description: 'Write the report', parameters: { type: 'object' } },
     execute: async () => ({ success: true }) });
+  let ownerPolls = 0;
   const pending = executeOrchestratorTurnLoop({ ...f.context, text: owner.task, getAbortSignal: () => controller.signal,
     providerRegistry: { ...f.context.providerRegistry, getForModel: () => provider },
-    agentManager: { list: () => [owner], spawn: () => { throw new Error('Unexpected automatic spawn'); } },
+    agentManager: { list: () => { ownerPolls++; return [owner]; }, spawn: () => { throw new Error('Unexpected automatic spawn'); } },
     executeToolCalls: async (_turn, calls) => calls.map(call => {
       if (call.name === 'agent') { handoff.resolve(); return { callId: call.id, success: true,
         output: JSON.stringify({ contractStarted: true, agentId: owner.id, contractId: 'contract' }) }; }
@@ -766,7 +775,11 @@ test('a contract handoff stays in the actual main loop, recovers a failed planne
   });
   try {
     await handoff.promise;
-    await new Promise(resolve => setTimeout(resolve, 10));
+    // The loop is observably holding on the running delegate once it has polled it
+    // more than once after the handoff; only then is "nothing was published" meaningful.
+    const pollsAtHandoff = ownerPolls;
+    for (let i = 0; i < 400 && ownerPolls < pollsAtHandoff + 2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    expect(ownerPolls).toBeGreaterThanOrEqual(pollsAtHandoff + 2);
     expect(f.events).toEqual([]); expect(requests).toHaveLength(1);
     owner.status = 'failed'; owner.error = 'planner failed: completion check HTTP 400';
     await pending;
@@ -820,7 +833,6 @@ test('native large responses use private provider proposals and publish one chec
   conversation.addAssistantMessage('', { toolCalls: [{ id: 'reference-read', name: 'read', arguments: { path: 'reference.txt' } }] });
   conversation.addToolResults([{ callId: 'reference-read', success: true, output: response }]);
   const fixture = loop([]), controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error('Large native verification did not settle')), 25_000);
   const nativeCheck = ResponseCompletionGuard.prototype.check;
   const checked = spyOn(ResponseCompletionGuard.prototype, 'check').mockImplementation(async function (this: ResponseCompletionGuard, ...args: Parameters<ResponseCompletionGuard['check']>) {
     try { return await nativeCheck.apply(this, args); }
@@ -896,5 +908,5 @@ test('native large responses use private provider proposals and publish one chec
         : value && typeof value === 'object' ? Object.values(value).flatMap(publicStrings) : [];
     const visible = publicStrings(publicEvents).join('\n');
     for (const payload of privatePayloads) expect(visible).not.toContain(payload);
-  } finally { clearTimeout(timer); controller.abort(); checked.mockRestore(); stopDelta(); stopResponse(); fixture.unsubscribe(); }
+  } finally { controller.abort(); checked.mockRestore(); stopDelta(); stopResponse(); fixture.unsubscribe(); }
 });

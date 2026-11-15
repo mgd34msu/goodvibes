@@ -81,7 +81,8 @@ function pascalStem(methodId: string): string {
 
 function literalOf(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return value ? 'True' : value === false ? 'False' : String(value);
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return String(value);
   if (value === null) return 'None';
   return 'Any';
 }
@@ -155,18 +156,27 @@ function emitTypedDict(name: string, schema: JsonSchema | undefined): string {
   const required = new Set<string>(
     Array.isArray(record!['required']) ? (record!['required'] as unknown[]).filter((v): v is string => typeof v === 'string') : [],
   );
-  const lines = [`class ${name}(TypedDict, total=True):`];
-  for (const key of Object.keys(properties)) {
+  const fields = Object.keys(properties).map((key) => {
     const fieldType = pyType(properties[key] as JsonSchema);
-    const annotated = required.has(key) ? fieldType : `NotRequired[${fieldType}]`;
-    lines.push(`    ${pyFieldKey(key)}: ${annotated}`);
+    return { key, annotated: required.has(key) ? fieldType : `NotRequired[${fieldType}]` };
+  });
+  // A key that is not a Python identifier (`from`, `foo-bar`) cannot be a class attribute; the
+  // functional form accepts any string key.
+  if (fields.some(({ key }) => !isPyIdentifier(key))) {
+    const entries = fields.map(({ key, annotated }) => `${JSON.stringify(key)}: ${annotated}`).join(', ');
+    return `${name} = TypedDict(${JSON.stringify(name)}, {${entries}}, total=True)`;
   }
-  return lines.join('\n');
+  return [`class ${name}(TypedDict, total=True):`, ...fields.map(({ key, annotated }) => `    ${key}: ${annotated}`)].join('\n');
 }
 
-/** JSON keys are arbitrary; a non-identifier key can't be a TypedDict field name. */
-function pyFieldKey(key: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : JSON.stringify(key);
+const PY_KEYWORDS: ReadonlySet<string> = new Set([
+  'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del',
+  'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal',
+  'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+]);
+
+function isPyIdentifier(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !PY_KEYWORDS.has(key);
 }
 
 export function consumedIdsFor(contract: OperatorContractManifest): string[] {
@@ -178,6 +188,10 @@ export function consumedIdsFor(contract: OperatorContractManifest): string[] {
   const missing = [...ids].filter((id) => !byId.has(id));
   if (missing.length > 0) {
     throw new Error(`[homeassistant-client] consumed method id(s) absent from contract: ${missing.join(', ')}`);
+  }
+  const unrouted = [...ids].filter((id) => byId.get(id)?.http === undefined);
+  if (unrouted.length > 0) {
+    throw new Error(`[homeassistant-client] consumed method id(s) with no REST binding: ${unrouted.join(', ')}`);
   }
   return [...ids].sort();
 }

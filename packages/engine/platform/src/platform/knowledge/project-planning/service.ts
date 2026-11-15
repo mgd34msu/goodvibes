@@ -16,6 +16,7 @@ import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
 import { KnowledgeSourcePublicationHeldError, type KnowledgeSourceSnapshot } from '../store-source-generation.js';
 import { KnowledgeStore } from '../store.js';
+import { KnowledgeStoreConflictError } from '../store-conflict.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import {
@@ -168,6 +169,15 @@ export const projectWorkPlanTaskLifecycle = defineLifecycle<ProjectWorkPlanTaskS
   cancelled: ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'],
 });
 
+const WORK_PLAN_MUTATION_ATTEMPTS = 3;
+
+/** Refusals raised before anything was written because the store moved under the read. */
+function isRetryableWorkPlanConflict(error: unknown): boolean {
+  return error instanceof SQLiteObservationRetiredError
+    || error instanceof KnowledgeSourcePublicationHeldError
+    || (error instanceof KnowledgeStoreConflictError && error.reloaded);
+}
+
 export class ProjectPlanningService {
   readonly #nativeDefault: NativePlanningDefault | undefined;
   private readonly defaultProjectId: string;
@@ -175,6 +185,8 @@ export class ProjectPlanningService {
   private runtimeBus: RuntimeEventBus | null;
   private runtimeBusEpoch = 0;
   private readonly readinessOwners = new WeakMap<ProjectPlanningEvaluation, () => void>();
+  /** Tail of the edit chain for each work plan; see mutateWorkPlan(). */
+  private readonly workPlanMutations = new Map<string, Promise<void>>();
 
   /** Native composition derives this identity from the actual configured workspace. */
   static forConfiguredWorkspace(
@@ -523,8 +535,10 @@ export class ProjectPlanningService {
       .filter(source => artifactKind(source) === 'decision').map(readDecision)
       .filter((decision): decision is ProjectPlanningDecision => decision !== null && decision.title === title) : [];
     if (matching.length > 1) throw new Error('Multiple saved decisions have this title; select the exact saved decision ID.');
+    // Re-recording by ID updates that decision, so it keeps its creation time and status unless the caller sets them.
+    const savedById = input.decision.id === undefined ? null : this.getArtifactSource(space.knowledgeSpaceId, 'decision', input.decision.id);
     observation();
-    const previous = matching[0], now = Date.now();
+    const previous = matching[0] ?? (savedById ? readDecision(savedById) ?? undefined : undefined), now = Date.now();
     const decision: ProjectPlanningDecision = {
       id: input.decision.id ?? previous?.id ?? `decision-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
       title,
@@ -533,7 +547,7 @@ export class ProjectPlanningService {
       ...(input.decision.alternatives ? { alternatives: [...input.decision.alternatives] } : {}),
       ...(input.decision.reasoning ? { reasoning: input.decision.reasoning } : {}),
       ...(input.decision.consequences ? { consequences: [...input.decision.consequences] } : {}),
-      status: input.decision.status ?? 'accepted',
+      status: input.decision.status ?? previous?.status ?? 'accepted',
       createdAt: input.decision.createdAt ?? previous?.createdAt ?? now,
       updatedAt: now,
       ...(input.decision.metadata ? { metadata: { ...input.decision.metadata } } : {}),
@@ -564,30 +578,35 @@ export class ProjectPlanningService {
 
   async upsertLanguage(input: ProjectPlanningLanguageUpsertInput): Promise<ProjectPlanningLanguageResult> {
     input = snapshotJudgmentInput(input) as ProjectPlanningLanguageUpsertInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const now = Date.now();
-    const existing = await this.getLanguage(space);
-    const language: ProjectPlanningLanguageArtifact = {
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      terms: input.language.terms ? [...input.language.terms] : existing.language?.terms ?? [],
-      ambiguities: input.language.ambiguities ? [...input.language.ambiguities] : existing.language?.ambiguities ?? [],
-      ...(input.language.examples ? { examples: [...input.language.examples] } : existing.language?.examples ? { examples: existing.language.examples } : {}),
-      updatedAt: now,
-      metadata: {
-        ...(existing.language?.metadata ?? {}),
-        ...(input.language.metadata ?? {}),
-      },
-    };
-    const source = await this.upsertArtifactSource(space, 'language', 'current', language);
-    return {
-      ok: true,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      language,
-      source,
-    };
+    // Terms merge onto the saved language, so concurrent upserts must not both merge onto the same base:
+    // they run one at a time, and each attempt is published against an observation taken before its read.
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const now = Date.now();
+      const observation = this.store.captureSourcePublication();
+      const existing = await this.getLanguage(space);
+      const language: ProjectPlanningLanguageArtifact = {
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        terms: input.language.terms ? [...input.language.terms] : existing.language?.terms ?? [],
+        ambiguities: input.language.ambiguities ? [...input.language.ambiguities] : existing.language?.ambiguities ?? [],
+        ...(input.language.examples ? { examples: [...input.language.examples] } : existing.language?.examples ? { examples: existing.language.examples } : {}),
+        updatedAt: now,
+        metadata: {
+          ...(existing.language?.metadata ?? {}),
+          ...(input.language.metadata ?? {}),
+        },
+      };
+      const source = await this.upsertArtifactSource(space, 'language', 'current', language, observation);
+      return {
+        ok: true as const,
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        language,
+        source,
+      };
+    }, 'language');
   }
 
   async getWorkPlanSnapshot(input: ProjectWorkPlanTaskListInput = {}): Promise<ProjectWorkPlanSnapshot> {
@@ -618,82 +637,94 @@ export class ProjectPlanningService {
 
   async createWorkPlanTask(input: ProjectWorkPlanTaskCreateInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskCreateInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    const existing = this.getWorkPlanArtifact(space, workPlanId);
-    const now = Date.now();
-    const task = normalizeWorkPlanTask(input.task, {
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      now,
-      fallbackOrder: nextWorkPlanOrder(existing.tasks),
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const workPlanId = normalizeWorkPlanId(input.workPlanId);
+      const existing = this.getWorkPlanArtifact(space, workPlanId);
+      const now = Date.now();
+      const task = normalizeWorkPlanTask(input.task, {
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        now,
+        fallbackOrder: nextWorkPlanOrder(existing.tasks),
+      });
+      if (existing.tasks.some((entry) => entry.taskId === task.taskId)) {
+        throw new WorkPlanTaskExistsError(task.taskId);
+      }
+      const stillDismissed = dismissedPlanningTaskIds(existing).filter((id) => id !== task.taskId);
+      const workPlan = await this.saveWorkPlanArtifact(space, {
+        ...existing,
+        tasks: sortWorkPlanTasks([...existing.tasks, task]),
+        updatedAt: now,
+        ...(existing.metadata ? { metadata: { ...existing.metadata, dismissedPlanningTaskIds: stillDismissed } } : {}),
+      });
+      const snapshot = snapshotFromWorkPlan(space, workPlan);
+      this.emitWorkPlanTaskCreated(snapshot, task);
+      return {
+        ok: true,
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        workPlanId,
+        task,
+        snapshot,
+      };
     });
-    if (existing.tasks.some((entry) => entry.taskId === task.taskId)) {
-      throw new WorkPlanTaskExistsError(task.taskId);
-    }
-    const workPlan = await this.saveWorkPlanArtifact(space, {
-      ...existing,
-      tasks: sortWorkPlanTasks([...existing.tasks, task]),
-      updatedAt: now,
-    });
-    const snapshot = snapshotFromWorkPlan(space, workPlan);
-    this.emitWorkPlanTaskCreated(snapshot, task);
-    return {
-      ok: true,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      workPlanId,
-      task,
-      snapshot,
-    };
   }
 
   async updateWorkPlanTask(input: ProjectWorkPlanTaskUpdateInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskUpdateInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    const existing = this.getWorkPlanArtifact(space, workPlanId);
-    const previousTask = existing.tasks.find((task) => task.taskId === input.taskId);
-    if (!previousTask) throw new Error(`Work plan task not found: ${input.taskId}`);
-    const now = Date.now();
-    const task = normalizeWorkPlanTask({
-      ...previousTask,
-      ...input.patch,
-      metadata: {
-        ...(previousTask.metadata ?? {}),
-        ...(input.patch.metadata ?? {}),
-      },
-      taskId: previousTask.taskId,
-      createdAt: previousTask.createdAt,
-      updatedAt: now,
-    }, {
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      now,
-      fallbackOrder: previousTask.order,
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const workPlanId = normalizeWorkPlanId(input.workPlanId);
+      const existing = this.getWorkPlanArtifact(space, workPlanId);
+      const previousTask = existing.tasks.find((task) => task.taskId === input.taskId);
+      if (!previousTask) throw new Error(`Work plan task not found: ${input.taskId}`);
+      const now = Date.now();
+      // A new status starts a new explanation and completion time: the old reason and
+      // completedAt described the previous status.
+      const statusChanging = input.patch.status !== undefined && normalizeWorkPlanStatus(input.patch.status) !== previousTask.status;
+      const carriedMetadata: Record<string, unknown> = { ...(previousTask.metadata ?? {}) };
+      if (statusChanging && !('statusReason' in (input.patch.metadata ?? {}))) delete carriedMetadata.statusReason;
+      const task = normalizeWorkPlanTask({
+        ...previousTask,
+        ...input.patch,
+        ...(statusChanging && input.patch.completedAt === undefined ? { completedAt: undefined } : {}),
+        metadata: {
+          ...carriedMetadata,
+          ...(input.patch.metadata ?? {}),
+        },
+        taskId: previousTask.taskId,
+        createdAt: previousTask.createdAt,
+        updatedAt: now,
+      }, {
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        now,
+        fallbackOrder: previousTask.order,
+      });
+      projectWorkPlanTaskLifecycle.assert(previousTask.status, task.status);
+      const workPlan = await this.saveWorkPlanArtifact(space, {
+        ...existing,
+        tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),
+        updatedAt: now,
+      });
+      const snapshot = snapshotFromWorkPlan(space, workPlan);
+      this.emitWorkPlanTaskUpdated(snapshot, task, previousTask);
+      if (previousTask.status !== task.status) {
+        this.emitWorkPlanTaskStatusChanged(snapshot, task, previousTask);
+      }
+      return {
+        ok: true,
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        workPlanId,
+        task,
+        previousTask,
+        snapshot,
+      };
     });
-    projectWorkPlanTaskLifecycle.assert(previousTask.status, task.status);
-    const workPlan = await this.saveWorkPlanArtifact(space, {
-      ...existing,
-      tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),
-      updatedAt: now,
-    });
-    const snapshot = snapshotFromWorkPlan(space, workPlan);
-    this.emitWorkPlanTaskUpdated(snapshot, task, previousTask);
-    if (previousTask.status !== task.status) {
-      this.emitWorkPlanTaskStatusChanged(snapshot, task, previousTask);
-    }
-    return {
-      ok: true,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      workPlanId,
-      task,
-      previousTask,
-      snapshot,
-    };
   }
 
   async setWorkPlanTaskStatus(input: ProjectWorkPlanTaskStatusInput): Promise<ProjectWorkPlanMutationResult> {
@@ -715,90 +746,135 @@ export class ProjectPlanningService {
 
   async reorderWorkPlanTasks(input: ProjectWorkPlanTaskReorderInput): Promise<ProjectWorkPlanSnapshot> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskReorderInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    const existing = this.getWorkPlanArtifact(space, workPlanId);
-    const previousById = new Map(existing.tasks.map((task) => [task.taskId, task]));
-    const orderById = new Map(input.orderedTaskIds.map((taskId, index) => [taskId, index]));
-    for (const taskId of orderById.keys()) {
-      if (!previousById.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
-    }
-    const now = Date.now();
-    const tasks = sortWorkPlanTasks(existing.tasks.map((task) => ({
-      ...task,
-      order: orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length,
-      updatedAt: orderById.has(task.taskId) ? now : task.updatedAt,
-    })));
-    const workPlan = await this.saveWorkPlanArtifact(space, {
-      ...existing,
-      tasks,
-      updatedAt: now,
-    });
-    const snapshot = snapshotFromWorkPlan(space, workPlan);
-    for (const task of tasks) {
-      const previousTask = previousById.get(task.taskId);
-      if (previousTask && previousTask.order !== task.order) {
-        this.emitWorkPlanTaskUpdated(snapshot, task, previousTask, true);
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const workPlanId = normalizeWorkPlanId(input.workPlanId);
+      const existing = this.getWorkPlanArtifact(space, workPlanId);
+      const previousById = new Map(existing.tasks.map((task) => [task.taskId, task]));
+      const orderById = new Map(input.orderedTaskIds.map((taskId, index) => [taskId, index]));
+      for (const taskId of orderById.keys()) {
+        if (!previousById.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
       }
-    }
-    this.emitWorkPlanSnapshotInvalidated(snapshot, 'reordered');
-    return snapshot;
+      const now = Date.now();
+      const tasks = sortWorkPlanTasks(existing.tasks.map((task) => ({
+        ...task,
+        order: orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length,
+        updatedAt: orderById.has(task.taskId) ? now : task.updatedAt,
+      })));
+      const workPlan = await this.saveWorkPlanArtifact(space, {
+        ...existing,
+        tasks,
+        updatedAt: now,
+      });
+      const snapshot = snapshotFromWorkPlan(space, workPlan);
+      for (const task of tasks) {
+        const previousTask = previousById.get(task.taskId);
+        if (previousTask && previousTask.order !== task.order) {
+          this.emitWorkPlanTaskUpdated(snapshot, task, previousTask, true);
+        }
+      }
+      this.emitWorkPlanSnapshotInvalidated(snapshot, 'reordered');
+      return snapshot;
+    });
   }
 
   async deleteWorkPlanTask(input: ProjectWorkPlanTaskDeleteInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskDeleteInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    const existing = this.getWorkPlanArtifact(space, workPlanId);
-    const deletedTask = existing.tasks.find((task) => task.taskId === input.taskId);
-    if (!deletedTask) throw new Error(`Work plan task not found: ${input.taskId}`);
-    const now = Date.now();
-    const workPlan = await this.saveWorkPlanArtifact(space, {
-      ...existing,
-      tasks: existing.tasks.filter((task) => task.taskId !== input.taskId),
-      updatedAt: now,
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const workPlanId = normalizeWorkPlanId(input.workPlanId);
+      const existing = this.getWorkPlanArtifact(space, workPlanId);
+      const deletedTask = existing.tasks.find((task) => task.taskId === input.taskId);
+      if (!deletedTask) throw new Error(`Work plan task not found: ${input.taskId}`);
+      const now = Date.now();
+      const workPlan = await this.saveWorkPlanArtifact(space, {
+        ...existing,
+        tasks: existing.tasks.filter((task) => task.taskId !== input.taskId),
+        updatedAt: now,
+        ...metadataPatch(withDismissedPlanningTasks(existing, [deletedTask])),
+      });
+      const snapshot = snapshotFromWorkPlan(space, workPlan);
+      this.emitWorkPlanTaskDeleted(snapshot, deletedTask);
+      return {
+        ok: true,
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        workPlanId,
+        deletedTask,
+        snapshot,
+      };
     });
-    const snapshot = snapshotFromWorkPlan(space, workPlan);
-    this.emitWorkPlanTaskDeleted(snapshot, deletedTask);
-    return {
-      ok: true,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      workPlanId,
-      deletedTask,
-      snapshot,
-    };
   }
 
   async clearCompletedWorkPlanTasks(input: ProjectWorkPlanClearCompletedInput = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanClearCompletedInput;
-    await this.initialize();
-    const space = this.resolveSpace(input);
-    const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    const existing = this.getWorkPlanArtifact(space, workPlanId);
-    const statuses = new Set(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done']);
-    const cleared = existing.tasks.filter((task) => statuses.has(task.status));
-    const now = Date.now();
-    const workPlan = await this.saveWorkPlanArtifact(space, {
-      ...existing,
-      tasks: existing.tasks.filter((task) => !statuses.has(task.status)),
-      updatedAt: now,
+    return this.mutateWorkPlan(input, async () => {
+      await this.initialize();
+      const space = this.resolveSpace(input);
+      const workPlanId = normalizeWorkPlanId(input.workPlanId);
+      const existing = this.getWorkPlanArtifact(space, workPlanId);
+      const statuses = new Set(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done']);
+      const cleared = existing.tasks.filter((task) => statuses.has(task.status));
+      const now = Date.now();
+      const workPlan = await this.saveWorkPlanArtifact(space, {
+        ...existing,
+        tasks: existing.tasks.filter((task) => !statuses.has(task.status)),
+        updatedAt: now,
+        ...metadataPatch(withDismissedPlanningTasks(existing, cleared)),
+      });
+      const snapshot = snapshotFromWorkPlan(space, workPlan);
+      for (const task of cleared) {
+        this.emitWorkPlanTaskDeleted(snapshot, task, true);
+      }
+      this.emitWorkPlanSnapshotInvalidated(snapshot, 'cleared-completed');
+      return {
+        ok: true,
+        projectId: space.projectId,
+        knowledgeSpaceId: space.knowledgeSpaceId,
+        workPlanId,
+        clearedTaskIds: cleared.map((task) => task.taskId),
+        snapshot,
+      };
     });
-    const snapshot = snapshotFromWorkPlan(space, workPlan);
-    for (const task of cleared) {
-      this.emitWorkPlanTaskDeleted(snapshot, task, true);
-    }
-    this.emitWorkPlanSnapshotInvalidated(snapshot, 'cleared-completed');
-    return {
-      ok: true,
-      projectId: space.projectId,
-      knowledgeSpaceId: space.knowledgeSpaceId,
-      workPlanId,
-      clearedTaskIds: cleared.map((task) => task.taskId),
-      snapshot,
+  }
+
+  /**
+   * Work-plan edits are whole-artifact read-modify-writes published against the
+   * observation taken at read time, so any other write to the store in between
+   * (another task's status change, a job run, a usage record) retires it. Edits
+   * to one plan run one at a time in this process, and an edit refused because
+   * the store moved is re-read and retried; each attempt re-runs its own checks,
+   * so a duplicate create still reports the existing task.
+   */
+  private async mutateWorkPlan<T>(input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined }, mutate: () => Promise<T>,
+    chain?: string): Promise<T> {
+    await this.initialize();
+    const run = async (): Promise<T> => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await mutate();
+        } catch (error) {
+          if (attempt >= WORK_PLAN_MUTATION_ATTEMPTS || !isRetryableWorkPlanConflict(error)) throw error;
+          await new Promise<void>((resolve) => { setTimeout(resolve, 20 * attempt).unref?.(); });
+        }
+      }
     };
+    let key: string;
+    try {
+      const space = this.resolveSpace(input);
+      key = JSON.stringify([space.projectId, space.knowledgeSpaceId, chain ?? normalizeWorkPlanId(input.workPlanId)]);
+    } catch {
+      // The mutation reports its own resolution failure.
+      return run();
+    }
+    const previous = this.workPlanMutations.get(key) ?? Promise.resolve();
+    const next = previous.then(run, run);
+    const settled = next.then(() => {}, () => {});
+    this.workPlanMutations.set(key, settled);
+    void settled.then(() => { if (this.workPlanMutations.get(key) === settled) this.workPlanMutations.delete(key); });
+    return next;
   }
 
   private resolveSpace(input: ProjectPlanningSpaceInput = {}) {
@@ -885,23 +961,45 @@ export class ProjectPlanningService {
       ? normalizeWorkPlanArtifact(readWorkPlan(workSnapshot.source)!, space, 'current')
       : normalizeWorkPlanArtifact({ id: 'current', tasks: [] }, space, 'current');
     const events: { task: ProjectWorkPlanTask; previous?: ProjectWorkPlanTask; snapshot: ProjectWorkPlanSnapshot }[] = [];
+    const dismissed = new Set(dismissedPlanningTaskIds(workPlan));
+    const syncedTaskIds = new Set<string>();
     for (const [index, task] of normalized.tasks.entries()) {
       if (!task.title?.trim()) continue;
       const taskId = normalizeWorkPlanTaskId(`planning-${normalized.id}-${task.id || task.title}`);
-      const workPlanTask = {
-        taskId,
-        title: task.title,
-        notes: task.why,
-        owner: task.recommendedAgent,
+      syncedTaskIds.add(taskId);
+      // An operator removed this task from the work plan; the planning state still lists it.
+      if (dismissed.has(taskId)) continue;
+      const prior = workPlan.tasks.find(entry => entry.taskId === taskId);
+      const planned: PlanningSyncMarker = {
         status: workPlanStatusFromPlanningTask(task),
-        priority: task.needsReview ? 10 : 0,
         order: index,
-        source: 'planning',
+        owner: task.recommendedAgent ?? null,
+        notes: task.why ?? null,
+        priority: task.needsReview ? 10 : 0,
         tags: [
           'planning',
           ...(task.needsReview ? ['needs-review'] : []),
           ...(task.blockedOnUserInput ? ['blocked-on-user-input'] : []),
         ],
+      };
+      const marker = prior ? readPlanningSyncMarker(prior) : undefined;
+      // The planning state only overwrites a field when the planning side changed since the
+      // last sync; otherwise the work-plan task keeps what an operator or the contract sync set.
+      const planningChanged = (key: keyof PlanningSyncMarker) => !marker || JSON.stringify(marker[key]) !== JSON.stringify(planned[key]);
+      const status = !prior ? planned.status
+        : marker ? (planningChanged('status') ? planned.status : prior.status)
+        // Saved before sync markers existed: honour a planning-side status, keep a work-plan-side one.
+        : planned.status !== 'pending' ? planned.status : prior.status;
+      const workPlanTask = {
+        taskId,
+        title: task.title,
+        notes: prior && !planningChanged('notes') ? prior.notes : task.why,
+        owner: prior && !planningChanged('owner') ? prior.owner : task.recommendedAgent,
+        status,
+        priority: prior && !planningChanged('priority') ? prior.priority : planned.priority,
+        order: prior && !planningChanged('order') ? prior.order : index,
+        source: 'planning',
+        tags: (prior && !planningChanged('tags') ? prior.tags : planned.tags).filter(tag => tag !== PLANNING_REMOVED_TAG),
         originSurface: 'daemon',
         metadata: {
           planningId: normalized.id,
@@ -910,17 +1008,34 @@ export class ProjectPlanningService {
           likelyFiles: task.likelyFiles ?? [],
           verification: task.verification ?? [],
           canRunConcurrently: task.canRunConcurrently === true,
+          planningSync: planned,
         },
       };
-      const prior = workPlan.tasks.find(entry => entry.taskId === taskId);
+      const priorMetadata: Record<string, unknown> = { ...(prior?.metadata ?? {}) };
+      delete priorMetadata.planningRemoved;
+      // A reason explains the status it was written for; a new status from planning makes it stale.
+      if (prior && prior.status !== status) delete priorMetadata.statusReason;
+      // A status the planning side did not change must not drag completion time with it.
       const updated = normalizeWorkPlanTask({ ...prior, ...workPlanTask,
-        metadata: { ...(prior?.metadata ?? {}), ...workPlanTask.metadata },
+        ...(prior && prior.status === status ? { completedAt: prior.completedAt } : { completedAt: undefined }),
+        metadata: { ...priorMetadata, ...workPlanTask.metadata },
         createdAt: prior?.createdAt ?? now, updatedAt: now,
       }, { ...space, now, fallbackOrder: index });
       workPlan = { ...workPlan, tasks: sortWorkPlanTasks(prior
         ? workPlan.tasks.map(entry => entry.taskId === taskId ? updated : entry)
         : [...workPlan.tasks, updated]), updatedAt: now };
       events.push({ task: updated, ...(prior ? { previous: prior } : {}), snapshot: snapshotFromWorkPlan(space, workPlan) });
+    }
+    // A planning task that left this state (or whose title, its fallback key, changed) is marked, not deleted:
+    // the work-plan task may carry progress an operator still needs.
+    for (const prior of [...workPlan.tasks]) {
+      if (prior.source !== 'planning' || prior.metadata?.planningId !== normalized.id || syncedTaskIds.has(prior.taskId)
+        || prior.metadata?.planningRemoved === true) continue;
+      const updated = normalizeWorkPlanTask({ ...prior, tags: [...prior.tags, PLANNING_REMOVED_TAG],
+        metadata: { ...(prior.metadata ?? {}), planningRemoved: true }, updatedAt: now,
+      }, { ...space, now, fallbackOrder: prior.order });
+      workPlan = { ...workPlan, tasks: sortWorkPlanTasks(workPlan.tasks.map(entry => entry.taskId === prior.taskId ? updated : entry)), updatedAt: now };
+      events.push({ task: updated, previous: prior, snapshot: snapshotFromWorkPlan(space, workPlan) });
     }
     const stateInput = this.artifactSourceInput(space, 'state', normalized.id, normalized, previous.source?.id);
     const writes = [{ input: { ...stateInput, id: previous.source?.id ?? stateInput.id! }, generation: previous.generation }];
@@ -929,28 +1044,35 @@ export class ProjectPlanningService {
       writes.push({ input: { ...workInput, id: workSnapshot.source?.id ?? workInput.id! }, generation: workSnapshot.generation });
     }
     let durable = false;
-    try {
-      const written = await this.store.upsertOwnedCanonicalSources(writes, reading.assertCurrent, (_sources, successor) => { observation = successor; durable = true; });
-      reading.assertCurrent();
+    let written: Awaited<ReturnType<KnowledgeStore['upsertOwnedCanonicalSources']>>;
+    // The write is durable: announce it even if the observation has retired since, otherwise
+    // subscribers keep a stale snapshot of a change that was committed. Retirement is reported by the caller.
+    const announce = () => {
       for (const event of events) {
-        reading.assertCurrent();
         if (event.previous) {
-          this.emitWorkPlanTaskUpdated(event.snapshot, event.task, event.previous, false, reading.assertCurrent);
-          reading.assertCurrent();
+          this.emitWorkPlanTaskUpdated(event.snapshot, event.task, event.previous);
           if (event.previous.status !== event.task.status) this.emitWorkPlanTaskStatusChanged(event.snapshot, event.task, event.previous);
-        } else this.emitWorkPlanTaskCreated(event.snapshot, event.task, reading.assertCurrent);
+        } else this.emitWorkPlanTaskCreated(event.snapshot, event.task);
       }
-      reading.assertCurrent();
-      const publicationCurrent = () => {
-        try { reading.assertCurrent(); }
-        catch (error) { throw new Error('Planning state was published, but its response observation retired.', { cause: error }); }
-      };
-      return { evaluation: reading.evaluation, source: written[0]!.source!, generation: written[0]!.generation!, assertCurrent: publicationCurrent };
+    };
+    try {
+      written = await this.store.upsertOwnedCanonicalSources(writes, reading.assertCurrent, (_sources, successor) => { observation = successor; durable = true; });
     } catch (error) {
-      // An effect already committed must never be reported as a no-write hold.
-      if (durable) throw new Error('Planning state was published, but its readiness observation retired before response publication.', { cause: error });
+      // An effect already committed must never be reported as a no-write hold, and its events must still go out.
+      if (durable) {
+        announce();
+        throw new Error('Planning state was published, but its readiness observation retired before response publication.', { cause: error });
+      }
       throw error;
     }
+    announce();
+    try { reading.assertCurrent(); }
+    catch (error) { throw new Error('Planning state was published, but its readiness observation retired before response publication.', { cause: error }); }
+    const publicationCurrent = () => {
+      try { reading.assertCurrent(); }
+      catch (error) { throw new Error('Planning state was published, but its response observation retired.', { cause: error }); }
+    };
+    return { evaluation: reading.evaluation, source: written[0]!.source!, generation: written[0]!.generation!, assertCurrent: publicationCurrent };
   }
 
   private async upsertArtifactSource(
@@ -962,11 +1084,17 @@ export class ProjectPlanningService {
   ): Promise<KnowledgeSourceRecord> {
     observation();
     const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
-    let current = observation;
-    const written = await this.store.upsertOwnedCanonicalSources([{
-      input: this.artifactSourceInput(space, kind, id, value, previous.source?.id), generation: previous.generation,
-    }], () => current(), (_sources, successor) => { current = successor; });
-    return written[0]!.source!;
+    let current = observation, durable = false;
+    try {
+      const written = await this.store.upsertOwnedCanonicalSources([{
+        input: this.artifactSourceInput(space, kind, id, value, previous.source?.id), generation: previous.generation,
+      }], () => current(), (_sources, successor) => { current = successor; durable = true; });
+      return written[0]!.source!;
+    } catch (error) {
+      // A committed write must not look like a refused one: a retry would apply it twice.
+      if (durable) throw new Error('Planning artifact was published, but its observation retired before the response.', { cause: error });
+      throw error;
+    }
   }
 
   private artifactSourceInput(
@@ -1072,6 +1200,47 @@ export class ProjectPlanningService {
       snapshot,
     });
   }
+}
+
+function metadataPatch(metadata: Record<string, unknown> | undefined): { readonly metadata?: Record<string, unknown> } {
+  return metadata ? { metadata } : {};
+}
+
+const PLANNING_REMOVED_TAG = 'planning-removed';
+
+/** What the planning state last wrote into a work-plan task, to tell a planning edit from an operator edit. */
+interface PlanningSyncMarker {
+  readonly status: ProjectWorkPlanTaskStatus;
+  readonly order: number;
+  readonly owner: string | null;
+  readonly notes: string | null;
+  readonly priority: number;
+  readonly tags: readonly string[];
+}
+
+function readPlanningSyncMarker(task: ProjectWorkPlanTask): PlanningSyncMarker | undefined {
+  const value = task.metadata?.planningSync;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const marker = value as Record<string, unknown>;
+  if (typeof marker.order !== 'number' || typeof marker.priority !== 'number' || !Array.isArray(marker.tags)) return undefined;
+  try {
+    return { status: normalizeWorkPlanStatus(marker.status), order: marker.order, priority: marker.priority,
+      owner: typeof marker.owner === 'string' ? marker.owner : null, notes: typeof marker.notes === 'string' ? marker.notes : null,
+      tags: stringList(marker.tags) };
+  } catch { return undefined; }
+}
+
+/** Planning-derived tasks an operator deleted or cleared; the planning state still lists them, so the sync must not bring them back. */
+function dismissedPlanningTaskIds(workPlan: ProjectWorkPlanArtifact): readonly string[] {
+  return stringList(workPlan.metadata?.dismissedPlanningTaskIds);
+}
+
+function withDismissedPlanningTasks(workPlan: ProjectWorkPlanArtifact, removed: readonly ProjectWorkPlanTask[]): Record<string, unknown> | undefined {
+  const ids = new Set(dismissedPlanningTaskIds(workPlan));
+  // A status patch can change `source`, so a planning task is recognised by what the sync stamped on it.
+  for (const task of removed) if (task.source === 'planning' || task.metadata?.planningSync !== undefined) ids.add(task.taskId);
+  if (ids.size === 0) return workPlan.metadata;
+  return { ...(workPlan.metadata ?? {}), dismissedPlanningTaskIds: [...ids] };
 }
 
 function normalizeState(

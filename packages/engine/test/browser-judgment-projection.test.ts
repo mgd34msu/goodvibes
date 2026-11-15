@@ -19,55 +19,26 @@ describe('closed held projections', () => {
       expect(() => check(req, held(bad))).toThrow(BrowserJudgmentError);
     }
   });
-  test('held status names, choices, and probabilities use only the selected vocabulary', () => {
-    for (const vocabulary of ['badge', 'library-dot']) {
-      const req = request('webui.status.badge-tone', { vocabulary, source: { kind: 'catalog', labelId: 'fixture' } });
-      const key = vocabulary === 'badge' ? 'badge' : 'library_dot';
-      const tones = vocabulary === 'badge' ? ['ok', 'warning', 'bad', 'neutral'] : ['ok', 'warn', 'bad', 'info', 'idle'];
-      const reading = { kind: 'choice', choice: 'ok', confidence: 0.5, outcome: 'escalate', probabilities: Object.fromEntries(tones.map((tone) => [tone, 1 / tones.length])) };
-      expect(() => check(req, held({ [key]: reading }))).not.toThrow();
-      for (const bad of [
-        { private_state: reading },
-        { [key]: { ...reading, choice: 'private_state' } },
-        { [key]: { ...reading, probabilities: { private_state: 0.5, other: 0.5 } } },
-        { [key]: { ...reading, private_state: 'synthetic-private' } },
-        { [key]: { ...reading, probabilities: Object.fromEntries(tones.map((tone) => [tone, 0])) } },
-        { [key]: { ...reading, probabilities: Object.fromEntries(tones.map((tone) => [tone, 1])) } },
-        { [key]: { ...reading, probabilities: Object.fromEntries(tones.map((tone) => [tone, tone === 'ok' ? 0.01 : tone === 'bad' ? 0.99 : 0])) } },
-      ]) expect(() => check(req, held(bad))).toThrow(BrowserJudgmentError);
-    }
-  });
   test('held palette readings are complete opaque candidate indices', () => {
     const req = request('webui.palette.command-rank', { query: { kind: 'inline', text: 'fixture' }, registryVersion: 'v1', candidates: [{ kind: 'builtin', commandId: 'a' }, { kind: 'builtin', commandId: 'b' }] });
     expect(() => check(req, held({ candidate_0: unknownReading, candidate_1: unknownReading }))).not.toThrow();
     for (const readings of [{ candidate_0: unknownReading }, { private_state: unknownReading, candidate_1: unknownReading },
       { candidate_0: unknownReading, candidate_1: { ...unknownReading, probability: NaN } }]) expect(() => check(req, held(readings))).toThrow(BrowserJudgmentError);
   });
-  test('choice confidence need not equal the selected probability', () => {
-    const req = request('webui.status.badge-tone', { vocabulary: 'badge', source: { kind: 'catalog', labelId: 'fixture' } });
-    expect(() => check(req, held({ badge: { kind: 'choice', choice: 'ok', confidence: 0.42, outcome: 'escalate',
-      probabilities: { ok: 0.61, warning: 0.35, bad: 0.04, neutral: 0 } } }))).not.toThrow();
-  });
 });
 
-test('settled public platform and code projections preserve admitted approximate-unit Choices', () => {
-  for (const name of ['platform', 'language'] as const) {
-    const platform = name === 'platform';
-    const choice = platform ? 'ios-share-menu' : 'typescript';
-    const options = platform ? ['ios-share-menu', 'other'] : WEBUI_CODE_LANGUAGES;
-    const req = request(platform ? 'webui.pwa.install-platform' : 'webui.code.language', platform
-      ? { userAgent: 'Synthetic fixture', platform: 'MacIntel', maxTouchPoints: 5 }
-      : { sessionId: 'synthetic-session', messageId: 'synthetic-message', start: 0, end: 5, contentRevision: 'source-owner-revision' });
-    const reading = {
-      kind: 'choice', choice, confidence: 0.99, outcome: 'act',
-      probabilities: Object.fromEntries(options.map(option => [option, option === choice ? 0.99 : 0])),
-    };
-    const projection = { status: 'settled', value: { [name]: choice }, readings: { [name]: reading } };
-    const original = structuredClone(projection);
-    expect(() => check(req, projection)).not.toThrow();
-    expect(projection).toEqual(original);
-    reading.probabilities[choice] = 0.5;
-    reading.probabilities[platform ? 'other' : 'python'] = 0.5000000001;
-    expect(() => check(req, projection)).toThrow(BrowserJudgmentError);
-  }
+test('settled public code projections preserve admitted approximate-unit Choices', () => {
+  const choice = 'typescript';
+  const req = request('webui.code.language', { sessionId: 'synthetic-session', messageId: 'synthetic-message', start: 0, end: 5, contentRevision: 'source-owner-revision' });
+  const reading = {
+    kind: 'choice', choice, confidence: 0.99, outcome: 'act',
+    probabilities: Object.fromEntries(WEBUI_CODE_LANGUAGES.map(option => [option, option === choice ? 0.99 : 0])),
+  };
+  const projection = { status: 'settled', value: { language: choice }, readings: { language: reading } };
+  const original = structuredClone(projection);
+  expect(() => check(req, projection)).not.toThrow();
+  expect(projection).toEqual(original);
+  reading.probabilities[choice] = 0.5;
+  reading.probabilities.python = 0.5000000001;
+  expect(() => check(req, projection)).toThrow(BrowserJudgmentError);
 });

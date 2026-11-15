@@ -114,8 +114,18 @@ export interface CheckpointSessionChanges {
   readonly checkpointCount: number;
   /** The session's checkpoint ids, oldest-first. */
   readonly checkpointIds: string[];
-  /** The base the aggregate diff is taken from: the parent checkpoint id, or the literal 'EMPTY' when the session opened the store. */
+  /** The base the aggregate diff is taken from: the parent checkpoint id, the literal 'EMPTY' when the session opened the store, or the session's earliest checkpoint when its parent was pruned (see `baseUnavailable`). */
   readonly from: string;
+  /** True when the session's earliest checkpoint had a parent that retention has since removed: the diff then starts at that earliest checkpoint and omits what it introduced. */
+  readonly baseUnavailable?: boolean;
+  /**
+   * Always true when the session has checkpoints. A checkpoint captures the
+   * whole workspace, so the diff may include edits another session, an agent
+   * or the user made (a checkpoint of another session inside the span is a
+   * known case, uncheckpointed edits are another); the attribution is by
+   * checkpoint boundary only.
+   */
+  readonly attributionApproximate?: boolean;
   /** The session's latest checkpoint id the aggregate diff is taken to, or the literal 'EMPTY' when the session has no checkpoints. */
   readonly to: string;
   /** Paths that differ across the session's aggregate change. */
@@ -131,13 +141,39 @@ export interface RestoreResult {
   /** The checkpoint id that was restored. */
   readonly checkpointId: string;
   /**
-   * id of the safety checkpoint taken immediately before restoring, or null
-   * when `safetyCheckpoint: false` was passed, or when the working tree was
-   * already identical to the checkpoint being restored (no-op dedupe).
+   * id of a checkpoint holding the pre-restore state, the undo point: the
+   * safety checkpoint taken immediately before restoring, or, when the working
+   * tree already matched the most recent checkpoint (so the safety snapshot
+   * was a no-op), that most recent checkpoint. Null only when
+   * `safetyCheckpoint: false` was passed.
    */
   readonly safetyCheckpointId: string | null;
   /** Paths written or overwritten to match the restored checkpoint. */
   readonly restoredFiles: string[];
-  /** Paths that existed (and were tracked by this engine) after the checkpoint but not in it, and were removed. */
+  /** Paths that existed (and were tracked by this engine) after the checkpoint but not in it, and were actually removed. */
   readonly removedFiles: string[];
+  /**
+   * Paths the restore could not apply, with the reason: a scoped path that is
+   * absent from the checkpoint, or a file that could not be removed. Absent or
+   * empty when everything requested was applied; a non-empty list means the
+   * restore was only partly applied. Present only then.
+   */
+  readonly failedPaths?: readonly { readonly path: string; readonly reason: string }[];
+}
+
+/**
+ * Thrown by `restore()` when the restore fails after the pre-restore state
+ * was saved. The workspace may be partly restored; `safetyCheckpointId` names
+ * the checkpoint that returns it to how it was before the attempt.
+ */
+export class CheckpointRestoreError extends Error {
+  override readonly name = 'CheckpointRestoreError';
+  readonly checkpointId: string;
+  readonly safetyCheckpointId: string;
+  constructor(checkpointId: string, safetyCheckpointId: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Restoring checkpoint ${checkpointId} failed part-way (${detail}); the workspace may be partly restored. The state before this restore is saved as checkpoint ${safetyCheckpointId}; restore that checkpoint to return to it.`, { cause });
+    this.checkpointId = checkpointId;
+    this.safetyCheckpointId = safetyCheckpointId;
+  }
 }

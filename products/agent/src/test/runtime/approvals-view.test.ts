@@ -197,6 +197,7 @@ describe('approvals view: transitions arrive on the push channel, with the poll 
   /** A subscribe seam a test drives by hand, standing in for the real stream. */
   function stream(): {
     readonly subscribe: NonNullable<Parameters<typeof createApprovalsView>[0]['subscribe']>;
+    readonly reopened: Promise<void>;
     push(record: SharedApprovalRecord): void;
     drop(): void;
     opened(): number;
@@ -206,9 +207,12 @@ describe('approvals view: transitions arrive on the push channel, with the poll 
     let onTerminate: ((error: unknown) => void) | null = null;
     let opens = 0;
     let closes = 0;
+    const reopened = Promise.withResolvers<void>();
     return {
+      reopened: reopened.promise,
       subscribe: async (handlers) => {
         opens += 1;
+        if (opens >= 2) reopened.resolve();
         onUpdate = handlers.onUpdate as typeof onUpdate;
         onTerminate = handlers.onTerminate;
         return { close: () => { closes += 1; } };
@@ -322,7 +326,8 @@ describe('approvals view: transitions arrive on the push channel, with the poll 
     channel.drop();
     expect(view.snapshot().liveUpdates).toBe(false);
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await channel.reopened;
+    await settle();
     expect(channel.opened()).toBeGreaterThan(1);
     expect(view.snapshot().liveUpdates).toBe(true);
 

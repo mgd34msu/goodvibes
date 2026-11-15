@@ -12,6 +12,7 @@ import type { RuntimeStore, DomainDispatch } from '../../store/index.js';
 import type { RuntimeTask } from '../../store/domains/tasks.js';
 import type { SubagentStatus } from '../../../acp/protocol.js';
 import type { AcpManager } from '../../../acp/manager.js';
+import type { RuntimeEventBus } from '../../events/index.js';
 import { logger } from '../../../utils/logger.js';
 import { summarizeError } from '../../../utils/error-display.js';
 
@@ -64,9 +65,49 @@ export class AcpTaskAdapter {
   private readonly _taskToRemote = new Map<string, string>();
 
   private readonly _dispatch: DomainDispatch;
+  private _busAttached = false;
 
   constructor(private readonly _store: RuntimeStore) {
     this._dispatch = createDomainDispatch(_store);
+  }
+
+  /**
+   * Follow ACP subagents through the runtime bus. The manager drops a
+   * connection the moment its run settles, so polling `getActive()` can never
+   * see a finished subagent; the connection's own completed/failed/cancelled
+   * events are the only place the outcome (and a failure's cause) is reported.
+   * Spawning is followed too, so a subagent shorter than one poll still gets a task.
+   *
+   * @returns An unsubscribe function.
+   */
+  attachRuntimeBus(bus: RuntimeEventBus): () => void {
+    if (this._busAttached) {
+      logger.warn('[AcpTaskAdapter] attachRuntimeBus called more than once, ignoring duplicate call');
+      return () => {};
+    }
+    this._busAttached = true;
+    const off = [
+      bus.on<{ type: 'AGENT_SPAWNING'; agentId: string; task: string }>('AGENT_SPAWNING', (envelope) => {
+        if (envelope.source !== 'acp-manager' || typeof envelope.payload?.agentId !== 'string') return;
+        this.wrapRemoteTask(envelope.payload.agentId, String(envelope.payload.task ?? envelope.payload.agentId));
+      }),
+      bus.on<{ type: 'AGENT_COMPLETED'; agentId: string; durationMs: number }>('AGENT_COMPLETED', (envelope) => {
+        if (envelope.source !== 'acp-connection' || typeof envelope.payload?.agentId !== 'string') return;
+        this.handleRemoteUpdate(envelope.payload.agentId, 'complete');
+      }),
+      bus.on<{ type: 'AGENT_FAILED'; agentId: string; error: string; durationMs: number }>('AGENT_FAILED', (envelope) => {
+        if (envelope.source !== 'acp-connection' || typeof envelope.payload?.agentId !== 'string') return;
+        this.handleRemoteUpdate(envelope.payload.agentId, 'error', envelope.payload.error);
+      }),
+      bus.on<{ type: 'AGENT_CANCELLED'; agentId: string }>('AGENT_CANCELLED', (envelope) => {
+        if (envelope.source !== 'acp-connection' || typeof envelope.payload?.agentId !== 'string') return;
+        this.handleRemoteUpdate(envelope.payload.agentId, 'cancelled');
+      }),
+    ];
+    return () => {
+      for (const unsubscribe of off) unsubscribe();
+      this._busAttached = false;
+    };
   }
 
   // ── Core API ────────────────────────────────────────────────────────────────
@@ -112,8 +153,9 @@ export class AcpTaskAdapter {
    *
    * @param remoteId - The ACP subagent ID.
    * @param status - New status string (SubagentStatus).
+   * @param detail - The failure's cause, kept in the task's error text.
    */
-  handleRemoteUpdate(remoteId: string, status: SubagentStatus): void {
+  handleRemoteUpdate(remoteId: string, status: SubagentStatus, detail?: string): void {
     const taskId = this._remoteToTask.get(remoteId);
     if (taskId === undefined) return;
 
@@ -123,7 +165,7 @@ export class AcpTaskAdapter {
 
     this._transitionTask(taskId, taskStatus, {
       isTerminal,
-      error: acpStatus === 'error' ? `ACP subagent ${remoteId} reported an error` : undefined,
+      error: acpStatus === 'error' ? (detail ? `ACP subagent ${remoteId} reported an error: ${detail}` : `ACP subagent ${remoteId} reported an error`) : undefined,
     });
 
     if (isTerminal) {
@@ -179,14 +221,18 @@ export class AcpTaskAdapter {
       }
     }
 
-    // Mark stale tracked subagents as cancelled
+    // A tracked subagent that left the manager without a terminal event reaching
+    // us has an unknown outcome: it is not reported as cancelled, nobody asked.
     const staleRemoteIds: string[] = [];
     for (const [remoteId] of this._remoteToTask.entries()) {
       if (!liveIds.has(remoteId)) staleRemoteIds.push(remoteId);
     }
     for (const remoteId of staleRemoteIds) {
       const taskId = this._remoteToTask.get(remoteId)!;
-      this._transitionTask(taskId, 'cancelled', { isTerminal: true });
+      this._transitionTask(taskId, 'failed', {
+        isTerminal: true,
+        error: `ACP subagent ${remoteId} is no longer active and reported no outcome`,
+      });
       this._remoteToTask.delete(remoteId);
       this._taskToRemote.delete(taskId);
     }

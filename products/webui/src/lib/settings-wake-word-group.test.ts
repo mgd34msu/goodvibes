@@ -5,6 +5,7 @@ import { groupLabelForNamespace } from './settings-model';
 describe('the voice settings group', () => {
   test('wake-word and local-engine keys share one group', () => {
     const voice = categoryLabelForKey('voice.wake.enabled');
+    expect(voice).toBe('Voice');
     expect(categoryLabelForKey('voice.wake.threshold')).toBe(voice);
     expect(categoryLabelForKey('voice.wake.surfaces.webui')).toBe(voice);
     expect(categoryLabelForKey('voice.local.sttEngine')).toBe(voice);

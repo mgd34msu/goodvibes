@@ -134,7 +134,7 @@ export function openLog(path: string): Database {
         db.exec(`PRAGMA user_version = ${++version};`);
       }
       if (version !== SCHEMA_VERSION) {
-        throw new RangeError(`decision log ${path} has schema version ${version}; this build writes version ${SCHEMA_VERSION}`);
+        throw new RangeError(`decision log ${path} has schema version ${version}; this build writes version ${SCHEMA_VERSION}. Open it with the build that wrote it, or move the file aside to start a new log.`);
       }
     }).immediate();
     return db;

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText, assertStoreRewritable, runLockedStoreUpdate } from './persona-registry.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
 import {
   evaluateAgentSkillReadiness,
@@ -163,15 +163,17 @@ function parseRoutine(value: unknown): AgentRoutineRecord | null {
   };
 }
 
-function parseStore(raw: string): RoutineStoreFile {
+function parseStore(raw: string, forWrite = false): RoutineStoreFile {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, routines: [] };
-  return {
-    version: STORE_VERSION,
-    routines: Array.isArray(parsed.routines)
-      ? parsed.routines.map(parseRoutine).filter((entry): entry is AgentRoutineRecord => entry !== null)
-      : [],
-  };
+  if (!isRecord(parsed)) {
+    if (forWrite) assertStoreRewritable(parsed, 'routines', 0, STORE_VERSION);
+    return { version: STORE_VERSION, routines: [] };
+  }
+  const routines = Array.isArray(parsed.routines)
+    ? parsed.routines.map(parseRoutine).filter((entry): entry is AgentRoutineRecord => entry !== null)
+    : [];
+  if (forWrite) assertStoreRewritable(parsed, 'routines', routines.length, STORE_VERSION);
+  return { version: STORE_VERSION, routines };
 }
 
 function formatStore(store: RoutineStoreFile): string {
@@ -224,138 +226,152 @@ export class AgentRoutineRegistry {
   }
 
   public create(input: AgentRoutineCreateInput): AgentRoutineRecord {
-    const store = this.readStore();
-    const name = normalizeName(input.name);
-    const description = input.description.trim();
-    const steps = input.steps.trim();
-    this.validateRequired(name, description, steps);
-    const requirements = normalizeAgentSkillRequirements(input.requirements);
-    assertNoSecretLikeText([name, description, steps, ...(input.tags ?? []), ...(input.triggers ?? []), ...requirements.flatMap((requirement) => [requirement.name, requirement.description ?? ''])], 'Routines');
-    const duplicate = store.routines.find((routine) => routine.name.toLowerCase() === name.toLowerCase());
-    if (duplicate) throw new Error(`Routine already exists ${duplicate.id}`);
-    const timestamp = nowIso();
-    const routine: AgentRoutineRecord = {
-      id: this.nextId(name, store.routines),
-      name,
-      description,
-      steps,
-      triggers: normalizeList(input.triggers),
-      tags: normalizeList(input.tags),
-      requirements,
-      enabled: input.enabled === true,
-      source: input.source ?? 'user',
-      provenance: input.provenance?.trim() || input.source || 'user',
-      reviewState: 'fresh',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      startCount: 0,
-    };
-    this.writeStore({ ...store, routines: [...store.routines, routine] });
-    return routine;
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const name = normalizeName(input.name);
+      const description = input.description.trim();
+      const steps = input.steps.trim();
+      this.validateRequired(name, description, steps);
+      const requirements = normalizeAgentSkillRequirements(input.requirements);
+      assertNoSecretLikeText([name, description, steps, ...(input.tags ?? []), ...(input.triggers ?? []), ...requirements.flatMap((requirement) => [requirement.name, requirement.description ?? ''])], 'Routines');
+      const duplicate = store.routines.find((routine) => routine.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) throw new Error(`Routine already exists ${duplicate.id}`);
+      const timestamp = nowIso();
+      const routine: AgentRoutineRecord = {
+        id: this.nextId(name, store.routines),
+        name,
+        description,
+        steps,
+        triggers: normalizeList(input.triggers),
+        tags: normalizeList(input.tags),
+        requirements,
+        enabled: input.enabled === true,
+        source: input.source ?? 'user',
+        provenance: input.provenance?.trim() || input.source || 'user',
+        reviewState: 'fresh',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        startCount: 0,
+      };
+      this.writeStore({ ...store, routines: [...store.routines, routine] });
+      return routine;
+    });
   }
 
   public update(idOrName: string, input: AgentRoutineUpdateInput): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    const name = input.name === undefined ? existing.name : normalizeName(input.name);
-    const description = input.description === undefined ? existing.description : input.description.trim();
-    const steps = input.steps === undefined ? existing.steps : input.steps.trim();
-    this.validateRequired(name, description, steps);
-    const requirements = input.requirements === undefined ? existing.requirements : normalizeAgentSkillRequirements(input.requirements);
-    assertNoSecretLikeText([name, description, steps, ...(input.tags ?? []), ...(input.triggers ?? []), ...requirements.flatMap((requirement) => [requirement.name, requirement.description ?? ''])], 'Routines');
-    const duplicate = store.routines.find((routine) => routine.id !== existing.id && routine.name.toLowerCase() === name.toLowerCase());
-    if (duplicate) throw new Error(`Routine already exists ${duplicate.id}`);
-    const updated: AgentRoutineRecord = {
-      ...existing,
-      name,
-      description,
-      steps,
-      triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
-      tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
-      requirements,
-      provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
-      ...freshReviewPatch(),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      const name = input.name === undefined ? existing.name : normalizeName(input.name);
+      const description = input.description === undefined ? existing.description : input.description.trim();
+      const steps = input.steps === undefined ? existing.steps : input.steps.trim();
+      this.validateRequired(name, description, steps);
+      const requirements = input.requirements === undefined ? existing.requirements : normalizeAgentSkillRequirements(input.requirements);
+      assertNoSecretLikeText([name, description, steps, ...(input.tags ?? []), ...(input.triggers ?? []), ...requirements.flatMap((requirement) => [requirement.name, requirement.description ?? ''])], 'Routines');
+      const duplicate = store.routines.find((routine) => routine.id !== existing.id && routine.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) throw new Error(`Routine already exists ${duplicate.id}`);
+      const updated: AgentRoutineRecord = {
+        ...existing,
+        name,
+        description,
+        steps,
+        triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
+        tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
+        requirements,
+        provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
+        ...freshReviewPatch(),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public setEnabled(idOrName: string, enabled: boolean): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    const updated: AgentRoutineRecord = { ...existing, enabled, updatedAt: nowIso() };
-    this.writeStore({
-      ...store,
-      routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      const updated: AgentRoutineRecord = { ...existing, enabled, updatedAt: nowIso() };
+      this.writeStore({
+        ...store,
+        routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public markStarted(idOrName: string): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    const timestamp = nowIso();
-    const updated: AgentRoutineRecord = {
-      ...existing,
-      lastStartedAt: timestamp,
-      startCount: existing.startCount + 1,
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      const timestamp = nowIso();
+      const updated: AgentRoutineRecord = {
+        ...existing,
+        lastStartedAt: timestamp,
+        startCount: existing.startCount + 1,
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public markReviewed(idOrName: string): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    const updated: AgentRoutineRecord = {
-      ...existing,
-      ...reviewedReviewPatch(),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      const updated: AgentRoutineRecord = {
+        ...existing,
+        ...reviewedReviewPatch(),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public markStale(idOrName: string, reason: string): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    const updated: AgentRoutineRecord = {
-      ...existing,
-      ...staleReviewPatch(reason),
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      const updated: AgentRoutineRecord = {
+        ...existing,
+        ...staleReviewPatch(reason),
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        routines: store.routines.map((routine) => routine.id === existing.id ? updated : routine),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public deleteRoutine(idOrName: string): AgentRoutineRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrName);
-    if (!existing) throw new Error(`Unknown routine ${idOrName}`);
-    this.writeStore({
-      ...store,
-      routines: store.routines.filter((routine) => routine.id !== existing.id),
+    return runLockedStoreUpdate(this.storePath, this.effects, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrName);
+      if (!existing) throw new Error(`Unknown routine ${idOrName}`);
+      this.writeStore({
+        ...store,
+        routines: store.routines.filter((routine) => routine.id !== existing.id),
+      });
+      return existing;
     });
-    return existing;
   }
 
   private validateRequired(name: string, description: string, steps: string): void {
@@ -381,10 +397,10 @@ export class AgentRoutineRegistry {
     return store.routines.find((routine) => routine.id.toLowerCase() === lookup || routine.name.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(): RoutineStoreFile {
+  private readStore(forWrite = false): RoutineStoreFile {
     if (!existsSync(this.storePath)) return { version: STORE_VERSION, routines: [] };
     try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'));
+      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
     } catch (error) {
       throw new Error(`Could not read Agent routine store ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -402,12 +418,15 @@ export function evaluateAgentRoutineReadiness(
   return evaluateAgentSkillReadiness(routine, options);
 }
 
-export function buildEnabledRoutinesPrompt(shellPaths: ShellPathService): string | null {
-  const enabledRecords = AgentRoutineRegistry.fromShellPaths(shellPaths).snapshot().enabledRoutines;
+/** How many reviewed, ready routines one prompt carries; the receipt counts against the same number. */
+export const ENABLED_ROUTINES_PROMPT_LIMIT = 8;
+
+export function buildEnabledRoutinesPrompt(shellPaths: ShellPathService, snapshot?: AgentRoutineSnapshot): string | null {
+  const enabledRecords = (snapshot ?? AgentRoutineRegistry.fromShellPaths(shellPaths).snapshot()).enabledRoutines;
   const enabled = enabledRecords.filter((routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready);
   const suppressed = enabledRecords
     .filter((routine) => !enabled.some((activeRoutine) => activeRoutine.id === routine.id))
-    .slice(0, 8)
+    .slice(0, ENABLED_ROUTINES_PROMPT_LIMIT)
     .map((routine) => {
       const readiness = evaluateAgentRoutineReadiness(routine);
       const review = routine.reviewState === 'reviewed' ? '' : `review=${formatAgentRecordReviewState(routine.reviewState)}`;
@@ -419,7 +438,7 @@ export function buildEnabledRoutinesPrompt(shellPaths: ShellPathService): string
     '## Enabled GoodVibes Agent Routines',
     'Use only reviewed, setup-ready local reusable routines inside the same serial assistant conversation when they fit the user request. Do not start hidden background jobs because a routine matches.',
     '',
-    ...enabled.slice(0, 8).flatMap((routine) => [
+    ...enabled.slice(0, ENABLED_ROUTINES_PROMPT_LIMIT).flatMap((routine) => [
       `### ${routine.name}`,
       `Description: ${routine.description}`,
       `Review: ${formatAgentRecordReviewState(routine.reviewState)}`,

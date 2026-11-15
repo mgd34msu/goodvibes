@@ -32,11 +32,16 @@ function runInMode(mode: unknown, run: () => unknown, assertCurrent?: () => void
   });
 }
 
+// Reaches the model as a tool error, so it names the cause and the next step.
+const EXECUTION_MODE_ENDED = 'Execution mode is no longer current. Host error: the permission scope for this call ended '
+  + 'before the tool finished (for example the turn or mode changed). Not caused by your arguments or paths; '
+  + 'retry once unchanged, and if it repeats, report the tool as unavailable.';
+
 const READ_DECISION_MIN_MS = 50;
 const READ_DECISION_MAX_MS = 250;
 function readExecutionMode(forReadDecision: boolean): GatePresetName | undefined {
   const scope = executionMode.getStore();
-  if (scope && !scope.active) throw new Error('Execution mode is no longer current');
+  if (scope && !scope.active) throw new Error(EXECUTION_MODE_ENDED);
   if (scope?.assertCurrent && !(forReadDecision && performance.now() < scope.readDecisionsVerifiedUntil)) {
     if (scope.checking) throw new Error('Execution mode owner reentered its currentness check');
     scope.checking = true;

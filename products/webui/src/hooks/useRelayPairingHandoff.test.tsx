@@ -6,7 +6,7 @@ import { IdentityBoundary } from '../components/auth/IdentityBoundary';
 import { useUrlState } from './useUrlState';
 import { resetRelayPairingCaptureForTest, useRelayPairingHandoff } from './useRelayPairingHandoff';
 import {
-  encodeRelayPairingString, getStoredRelayPairing, RELAY_PAIRING_STORAGE_KEY,
+  encodeRelayPairingString, getStoredRelayPairing, RELAY_PAIRING_STORAGE_KEY, storeRelayPairing,
   type RelayPairingPayload,
 } from '../lib/relay-pairing';
 import { getClientLifetime, subscribeClientLifetime, WEBUI_TOKEN_STORE_KEY } from '../lib/client-lifetime';
@@ -18,9 +18,12 @@ const payload: RelayPairingPayload = {
 const code = encodeRelayPairingString(payload);
 const cleanups: (() => void)[] = [];
 
+let latest: ReturnType<typeof useRelayPairingHandoff> | null = null;
+
 function Probe() {
   const url = useUrlState();
   const relay = useRelayPairingHandoff();
+  latest = relay;
   return <output data-status={relay.status} data-paired={relay.pairing === null ? 'no' : 'yes'} data-error={relay.error === null ? 'absent' : 'present'}>{url.view}</output>;
 }
 
@@ -33,7 +36,7 @@ function render(strict = false) {
   return { container, refresh };
 }
 
-async function untilStatus(container: HTMLElement, status: 'stored' | 'error') {
+async function untilStatus(container: HTMLElement, status: 'pending' | 'stored' | 'error' | 'idle') {
   const deadline = Date.now() + 2000;
   while (container.querySelector('output')?.getAttribute('data-status') !== status) {
     if (Date.now() > deadline) throw new Error('Relay handoff render did not reach ' + status);
@@ -44,6 +47,7 @@ async function untilStatus(container: HTMLElement, status: 'stored' | 'error') {
 
 beforeEach(() => {
   resetRelayPairingCaptureForTest();
+  latest = null;
   window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
   window.localStorage.removeItem(WEBUI_TOKEN_STORE_KEY);
   window.history.replaceState(null, '', '/');
@@ -57,11 +61,15 @@ afterEach(() => {
 
 describe('relay handoff alongside the actual URL hook', () => {
   for (const strict of [false, true]) {
-    test(`bare-origin relay is captured before router normalization and stored once (StrictMode=${String(strict)})`, async () => {
+    test(`bare-origin relay is captured before router normalization and stored once, only on confirm (StrictMode=${String(strict)})`, async () => {
       window.history.replaceState(null, '', '/#relay=' + encodeURIComponent(code));
       let identityChanges = 0;
       cleanups.push(subscribeClientLifetime(() => { identityChanges++; }));
       const { container, refresh } = render(strict);
+      await untilStatus(container, 'pending');
+      expect(getStoredRelayPairing()).toBeNull();
+      expect(identityChanges).toBe(0);
+      flushSync(() => latest?.confirm());
       expect(getStoredRelayPairing()).toEqual(payload);
       expect(identityChanges).toBe(1);
       await untilStatus(container, 'stored');
@@ -79,13 +87,14 @@ describe('relay handoff alongside the actual URL hook', () => {
     });
   }
 
-  test('explicit app query and unrelated fragment remain owned by their original readers', () => {
+  test('explicit app query and unrelated fragment remain owned by their original readers', async () => {
     window.history.replaceState(null, '', '/?view=personal&tab=calendar#fleet-node=n1&relay=' + encodeURIComponent(code));
     const { container } = render();
+    await untilStatus(container, 'pending');
     expect(container.querySelector('output')?.textContent).toBe('personal');
     expect(window.location.search).toBe('?view=personal&tab=calendar');
     expect(window.location.hash).toBe('#fleet-node=n1');
-    expect(getStoredRelayPairing()).toEqual(payload);
+    expect(getStoredRelayPairing()).toBeNull();
     expect(window.localStorage.getItem(WEBUI_TOKEN_STORE_KEY)).toBeNull();
   });
 
@@ -122,6 +131,9 @@ test('identity-driven remount consumes a handoff only once', async () => {
   flushSync(() => root.render(<IdentityBoundary><Probe /></IdentityBoundary>));
   await new Promise<void>(resolve => setImmediate(resolve));
   flushSync(() => {});
+  expect(changes).toBe(0);
+  expect(getStoredRelayPairing()).toBeNull();
+  flushSync(() => latest?.confirm());
   expect(changes).toBe(1);
   expect(getStoredRelayPairing()).toEqual(payload);
 });
@@ -129,6 +141,8 @@ test('identity-driven remount consumes a handoff only once', async () => {
 test('a remount after the pairing was stored reports stored with that pairing and stores nothing again', async () => {
   window.history.replaceState(null, '', '/#relay=' + encodeURIComponent(code));
   const first = render();
+  await untilStatus(first.container, 'pending');
+  flushSync(() => latest?.confirm());
   await untilStatus(first.container, 'stored');
   window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
   const second = render();
@@ -145,4 +159,19 @@ test('a remount after a malformed code reports the same error', async () => {
   await untilStatus(first.container, 'error');
   const second = render();
   expect(second.container.querySelector('output')?.getAttribute('data-status')).toBe('error');
+});
+
+test('a link carrying a different pairing never replaces the stored one until confirmed, and dismissing keeps it', async () => {
+  const existing: RelayPairingPayload = { ...payload, rid: 'existing-rid', daemonPublicKey: 'existing-daemon-public-key' };
+  storeRelayPairing(existing);
+  window.history.replaceState(null, '', '/#relay=' + encodeURIComponent(code));
+  const { container } = render();
+  await untilStatus(container, 'pending');
+  expect(getStoredRelayPairing()).toEqual(existing);
+  expect(latest?.pairing).toEqual(payload);
+  flushSync(() => latest?.dismiss());
+  await untilStatus(container, 'idle');
+  expect(getStoredRelayPairing()).toEqual(existing);
+  flushSync(() => latest?.confirm());
+  expect(getStoredRelayPairing()).toEqual(existing);
 });

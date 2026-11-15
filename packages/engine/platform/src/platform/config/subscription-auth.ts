@@ -103,6 +103,14 @@ export async function resolveFreshOpenAIAccessToken(
   return outcome;
 }
 
+/** True when the stored record still holds the credentials a refresh started from. */
+function sameCredentials(
+  stored: NonNullable<ReturnType<SubscriptionManager['get']>>,
+  started: NonNullable<ReturnType<SubscriptionManager['get']>>,
+): boolean {
+  return stored.accessToken === started.accessToken && stored.refreshToken === started.refreshToken;
+}
+
 function runSharedOpenAIRefresh(
   manager: Pick<SubscriptionManager, 'get' | 'saveSubscription'>,
   existing: NonNullable<ReturnType<SubscriptionManager['get']>>,
@@ -117,6 +125,16 @@ function runSharedOpenAIRefresh(
       // Anything else (transport, 5xx, malformed 200) leaves the session's
       // state unknown.
       if (error instanceof OAuthTokenExchangeError && error.status >= 400 && error.status < 500) {
+        // The refusal answers the refresh token THIS attempt presented. When
+        // another process rotated or re-signed-in meanwhile, the stored record
+        // is newer and healthy; stamping it dead would sign the user out.
+        const stored = manager.get('openai');
+        if (!stored) return { kind: 'session-dead' };
+        if (!sameCredentials(stored, existing)) {
+          return stored.revokedAt === undefined
+            ? { kind: 'refreshed', accessToken: stored.accessToken }
+            : { kind: 'session-dead' };
+        }
         try {
           manager.saveSubscription({ ...existing, revokedAt: Date.now(), updatedAt: Date.now() });
         } catch (saveError) {
@@ -129,6 +147,15 @@ function runSharedOpenAIRefresh(
       return { kind: 'unavailable', error };
     }
     try {
+      // Same guard on success: a sign-in another surface completed while this
+      // exchange ran is newer than the answer, and must not be overwritten.
+      const stored = manager.get('openai');
+      if (!stored) return { kind: 'session-dead' };
+      if (!sameCredentials(stored, existing)) {
+        return stored.revokedAt === undefined
+          ? { kind: 'refreshed', accessToken: stored.accessToken }
+          : { kind: 'session-dead' };
+      }
       const { revokedAt: _cleared, ...rest } = existing;
       manager.saveSubscription({
         ...rest,

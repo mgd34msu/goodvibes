@@ -26,6 +26,8 @@ export interface CapabilityBootCheckInput {
   readonly workingDirectory: string;
   /** Answers whether a config key holds a value. Never returns the value. */
   readonly configValuePresent: (key: string) => boolean;
+  /** Answers whether a secret-store entry holds a value. Never returns the value. */
+  readonly secretPresent?: (key: string) => boolean;
   /** Live MCP posture, when this session has an MCP client. */
   readonly mcpServers?: ProbeContext['mcpServers'];
   readonly mcpToolNames?: Iterable<string>;
@@ -46,6 +48,7 @@ export function buildProbeContext(input: CapabilityBootCheckInput): ProbeContext
     mcpToolNames: new Set(input.mcpToolNames ?? []),
     servedOperatorMethodIds: new Set(input.servedOperatorMethodIds ?? []),
     configValuePresent: input.configValuePresent,
+    ...(input.secretPresent ? { secretPresent: input.secretPresent } : {}),
   };
 }
 

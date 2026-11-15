@@ -159,15 +159,27 @@ describe('store-selectors contract', () => {
       expect(preview).toBeUndefined();
     });
 
-    test('selectIsTurnActive returns false from initial state (turn is idle)', () => {
-      const active = selectIsTurnActive(state);
-      // Initial turn state is 'idle', should not be active
-      expect(typeof active).toBe('boolean');
+    test('selectIsTurnActive is false from the initial idle state', () => {
+      expect(state.conversation.turnState).toBe('idle');
+      expect(selectIsTurnActive(state)).toBe(false);
     });
 
-    test('selectIsSessionReady returns boolean', () => {
-      const ready = selectIsSessionReady(state);
-      expect(typeof ready).toBe('boolean');
+    test.each(['preflight', 'streaming', 'tool_dispatch', 'post_hooks'] as const)('selectIsTurnActive is true while the turn is %s', (turnState) => {
+      expect(selectIsTurnActive({ ...state, conversation: { ...state.conversation, turnState } })).toBe(true);
+    });
+
+    test.each(['idle', 'completed', 'failed', 'cancelled'] as const)('selectIsTurnActive is false once the turn is %s', (turnState) => {
+      expect(selectIsTurnActive({ ...state, conversation: { ...state.conversation, turnState } })).toBe(false);
+    });
+
+    test('selectIsSessionReady is false until the session is active and recovered', () => {
+      expect(selectIsSessionReady(state)).toBe(false);
+      const active = { ...state, session: { ...state.session, status: 'active' as const } };
+      expect(selectIsSessionReady(active)).toBe(false);
+      const ready = { ...active, session: { ...active.session, recoveryState: 'ready' as const } };
+      expect(selectIsSessionReady(ready)).toBe(true);
+      const suspended = { ...ready, session: { ...ready.session, status: 'suspended' as const } };
+      expect(selectIsSessionReady(suspended)).toBe(false);
     });
 
     test('selectSystemHealth returns composite system health with domains record', () => {

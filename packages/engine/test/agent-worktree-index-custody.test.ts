@@ -1,4 +1,4 @@
-/** Real Git/source replacement regressions, authored UNRUN during coding. */
+/** Real Git/source replacement regressions. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';

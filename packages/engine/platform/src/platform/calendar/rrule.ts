@@ -58,9 +58,17 @@ function parseRRule(rule: string): RRuleParts {
  * Classify a raw RRULE into an honest RecurrenceInfo. Called by the parser at read
  * time so the event carries its expansion verdict before any window is known.
  */
-export function describeRecurrence(rule: string): RecurrenceInfo {
+export function describeRecurrence(rule: string, siblingParts: readonly string[] = []): RecurrenceInfo {
   const { map } = parseRRule(rule);
   const freq = (map.get('FREQ') ?? '').toUpperCase();
+
+  // EXDATE, RDATE and RECURRENCE-ID overrides change which occurrences exist.
+  // Expanding the bare RRULE would show a cancelled occurrence or a moved one
+  // twice, so a series that carries any of them is not expanded.
+  const sibling = siblingParts[0];
+  if (sibling !== undefined) {
+    return { rule, expansion: 'unsupported', unsupportedReason: `${sibling} is not applied by this build, so the series is not expanded` };
+  }
 
   if (!KNOWN_FREQ.has(freq)) {
     return { rule, expansion: 'unsupported', unsupportedReason: `RRULE FREQ '${freq || '(missing)'}' is not expanded by this build` };
@@ -194,7 +202,12 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
   };
 
   if (freq === 'WEEKLY' && byDay) {
-    let cursor = seedMs;
+    // Skip whole weeks straight to the window: every 7-day block from the seed
+    // holds each weekday exactly once, so the series position of the first
+    // candidate is known without walking there.
+    const weeksBefore = Math.max(0, Math.floor((fromMs - seedMs) / (7 * DAY_MS)));
+    let cursor = seedMs + weeksBefore * 7 * DAY_MS;
+    emitted = weeksBefore * byDay.size;
     for (let i = 0; i < MAX_OCCURRENCES * 8; i++) {
       if (byDay.has(new Date(cursor).getUTCDay())) {
         if (!emit(cursor)) break;
@@ -202,7 +215,6 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
         break; // no more matches possible past UNTIL / window end
       }
       cursor += DAY_MS;
-      if (cursor - seedMs > DAY_MS * 366 * 10) break; // 10-year hard ceiling
     }
     return out;
   }
@@ -213,7 +225,12 @@ export function expandEvent(event: CalendarEvent, window: DateWindow): EventOccu
   }
 
   const step = freqStepper(freq, interval);
-  let cursor = seedMs;
+  // DAILY/WEEKLY: jump to the first period at or after the window start. The
+  // series position of that period is its index, which COUNT needs.
+  const periodMs = step(0);
+  const periodsBefore = Math.max(0, Math.floor((fromMs - seedMs) / periodMs));
+  let cursor = seedMs + periodsBefore * periodMs;
+  emitted = periodsBefore;
   for (let i = 0; i < MAX_OCCURRENCES; i++) {
     if (!emit(cursor)) break;
     cursor = step(cursor);

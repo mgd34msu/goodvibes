@@ -36,7 +36,18 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-uninstall.XXXXXXXX")
 trap 'rm -rf -- "$work"' 0
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Without a receipt there is no installed version to match, so the default is the current main script.
+# GOODVIBES_VERSION=vX.Y.Z runs that release's script instead.
+ref=main
+# Same repository as REPO in install.sh; a downloaded script cannot read it from there.
+repo=mgd34msu/goodvibes
+if [ -n "${GOODVIBES_VERSION:-}" ]; then
+  case "$GOODVIBES_VERSION" in
+    v[0-9]*.[0-9]*.[0-9]*) ref=$GOODVIBES_VERSION ;;
+    *) echo "GOODVIBES_VERSION must look like v3.2.0, not '$GOODVIBES_VERSION'." >&2; exit 1 ;;
+  esac
+fi
 curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
   --connect-timeout 15 --max-time 120 --retry 2 \
-  https://raw.githubusercontent.com/mgd34msu/goodvibes/main/scripts/install.sh -o "$work/install.sh"
+  "https://raw.githubusercontent.com/$repo/$ref/scripts/install.sh" -o "$work/install.sh"
 env GOODVIBES_UNINSTALL=1 sh "$work/install.sh"

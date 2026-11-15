@@ -1,3 +1,5 @@
+import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import type { TriggerManager } from './manager.js';
 import { TriggerMigrationRequiredError, TriggerStoreOwnershipError, TriggerStoreVersionError } from './store.js';
 import { TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind, type TriggerOperatorStatus, type TriggerMigrationResult } from './operator-view.js';
@@ -11,6 +13,8 @@ function translate(error: unknown): never {
   if (error instanceof TriggerStoreVersionError) throw new TriggerOperatorError('future-version');
   if (error instanceof TriggerStoreOwnershipError) throw new TriggerOperatorError('other-process');
   if (error instanceof TriggerMigrationRequiredError) throw new TriggerOperatorError('migration-required');
+  // The wire text stays generic; the real cause is kept for whoever reads the daemon log.
+  logger.warn('Trigger operator request failed on an unexpected error', { error: summarizeError(error) });
   throw new TriggerOperatorError('unavailable');
 }
 /** Inspect the original supervisor without load/acquire/start or recovery effects. */

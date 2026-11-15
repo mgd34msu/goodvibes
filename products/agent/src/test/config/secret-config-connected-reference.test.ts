@@ -11,6 +11,7 @@ import {
 const KEY = 'surfaces.telegram.botToken';
 const REFERENCE = 'goodvibes://secrets/goodvibes/SYNTHETIC_ALREADY_STORED';
 const RAW = '  synthetic raw credential  ';
+const TRIMMED = RAW.trim();
 
 function fixture(policy: unknown = 'secure_required') {
   const localConfig = { get: mock(() => policy), validateDynamic: mock((_key: ConfigKey, _value: unknown) => {}), setDynamic: mock((_key: ConfigKey, _value: unknown) => {}) };
@@ -80,14 +81,14 @@ describe('an existing secret reference is a configuration write', () => {
     expect(secrets.get).not.toHaveBeenCalled();
   });
 
-  test('raw material keeps the credential owner route and whitespace', async () => {
+  test('raw material keeps the credential owner route and is stored trimmed', async () => {
     const { localConfig, secrets, config, credentials } = fixture();
     installAgentDaemonConfigClient(config);
     installAgentDaemonCredentialsClient(credentials);
 
     expect(await persistSecretBackedConfigValue(localConfig, secrets, KEY, RAW))
       .toBe(buildGoodVibesSecretRef(buildGoodVibesSecretKey(KEY)));
-    expect(credentials.set).toHaveBeenCalledWith(KEY, RAW);
+    expect(credentials.set).toHaveBeenCalledWith(KEY, TRIMMED);
     expect(credentials.clear).not.toHaveBeenCalled();
     expect(config.set).not.toHaveBeenCalled();
     expect(localConfig.setDynamic).not.toHaveBeenCalled();
@@ -168,7 +169,7 @@ describe('an existing secret reference is a configuration write', () => {
     const reference = buildGoodVibesSecretRef(buildGoodVibesSecretKey(KEY));
     expect(await persistSecretBackedConfigValue(localConfig, secrets, KEY, RAW, { scope: 'project' })).toBe(reference);
     expect(localConfig.setDynamic).toHaveBeenCalledWith(KEY, reference);
-    expect(secrets.set).toHaveBeenCalledWith(buildGoodVibesSecretKey(KEY), RAW, { scope: 'project', medium: 'plaintext' });
+    expect(secrets.set).toHaveBeenCalledWith(buildGoodVibesSecretKey(KEY), TRIMMED, { scope: 'project', medium: 'plaintext' });
     expect(await persistSecretBackedConfigValue(localConfig, secrets, KEY, '', { scope: 'project' })).toBe('');
     expect(localConfig.setDynamic).toHaveBeenCalledWith(KEY, '');
     expect(secrets.delete).toHaveBeenCalledWith(buildGoodVibesSecretKey(KEY), { scope: 'project' });
@@ -186,6 +187,6 @@ describe('an existing secret reference is a configuration write', () => {
   test('a no-client raw write preserves daemon default scope and secure medium', async () => {
     const { localConfig, secrets } = fixture();
     await persistSecretBackedConfigValue(localConfig, secrets, KEY, RAW);
-    expect(secrets.set).toHaveBeenCalledWith(buildGoodVibesSecretKey(KEY), RAW, { scope: 'daemon', medium: 'secure' });
+    expect(secrets.set).toHaveBeenCalledWith(buildGoodVibesSecretKey(KEY), TRIMMED, { scope: 'daemon', medium: 'secure' });
   });
 });

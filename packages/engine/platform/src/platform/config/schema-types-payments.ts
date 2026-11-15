@@ -50,7 +50,7 @@ export interface PaymentsAddressConfig {
 
 export interface PaymentsConfig {
   enabled: boolean;                 // default: false. Master switch
-  defaultCardId: string;            // default: ''. Which card a purchase uses when it names none
+  defaultCardId: string;            // default: ''. Your preferred card id; a purchase must still name its card
   currency: string;                 // default: 'USD'. ISO-4217 the budgets are denominated in
   cvvHandling: CvvHandling;         // default: 'stored'
   budget: PaymentsBudgetConfig;

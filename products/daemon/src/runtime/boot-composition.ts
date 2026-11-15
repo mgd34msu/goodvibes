@@ -79,7 +79,7 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
     },
     async createNotifier() {
       const notifier = await withServiceReadDrain(runtime.serviceRegistry, (registry) =>
-        Notifier.fromConfig(registry, { featureFlags: runtime.featureFlags, metadataOnly }));
+        Notifier.fromConfig(registry, { featureFlags: runtime.featureFlags, metadataOnly, configManager: runtime.configManager, secretsManager: runtime.secretsManager }));
       return {
         attach() {
           const queues = notifier.getQueueStatus();

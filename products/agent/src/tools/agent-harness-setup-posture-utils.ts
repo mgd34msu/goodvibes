@@ -6,6 +6,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { buildCliServicePosture, type CliServicePosture } from '../cli/service-posture.ts';
 import type { AgentHarnessSetupArgs, SetupLookupSource, SetupPlanStatus, SurfaceRegistryLike, SetupSmokeArtifactStore } from './agent-harness-setup-posture-types.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
+import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -25,17 +27,15 @@ export function readFieldMap(value: unknown): Readonly<Record<string, string>> {
 }
 
 export function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 export function quoteRouteValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-export function operatorMethodRoute(methodId: string, confirmed: boolean): string {
-  return `agent_operator_method methodId:"${quoteRouteValue(methodId)}" input:{}${confirmed ? ' confirm:true explicitUserRequest:"..."' : ''}`;
+export function operatorMethodRoute(methodId: string): string {
+  return `agent_operator_method methodId:"${quoteRouteValue(methodId)}" input:{}`;
 }
 
 export function safeIso(value: number | null | undefined): string | null {
@@ -52,6 +52,21 @@ export function safeFileMode(path: string): string | null {
     return `0${(statSync(path).mode & 0o777).toString(8)}`;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Reads every artifact, not the newest N. The store sorts by creation time and
+ * truncates before any filter runs, so a purpose filter over a fixed page
+ * misses evidence once enough newer artifacts exist. A full page means there
+ * may be more, so the page is widened until one comes back short.
+ */
+export function listEveryArtifact<T>(page: (limit: number) => readonly T[]): readonly T[] {
+  let limit = 100;
+  for (;;) {
+    const rows = page(limit);
+    if (rows.length < limit) return rows;
+    limit *= 4;
   }
 }
 
@@ -80,6 +95,13 @@ export function setupServiceRuntime(context: CommandContext) {
   };
 }
 
+const servicePostureFailures = new WeakMap<CommandContext, string>();
+
+/** Why the last service posture probe for this context failed, if it did. */
+export function servicePostureFailure(context: CommandContext): string | undefined {
+  return servicePostureFailures.get(context);
+}
+
 export async function collectServicePosture(context: CommandContext, ownership?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void }): Promise<CliServicePosture | null> {
   ownership?.assertCurrent();
   try {
@@ -89,9 +111,11 @@ export async function collectServicePosture(context: CommandContext, ownership?:
       ...(ownership ? { signal: ownership.signal, assertCurrent: ownership.assertCurrent } : {}),
     });
     ownership?.assertCurrent();
+    servicePostureFailures.delete(context);
     return posture;
-  } catch {
+  } catch (err) {
     ownership?.assertCurrent();
+    servicePostureFailures.set(context, previewHarnessText(err instanceof Error ? err.message : String(err), 160));
     return null;
   }
 }
@@ -120,6 +144,7 @@ export async function collectSnapshot(context: CommandContext, ownership: { read
         environment: {
           hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
         },
+        secrets: requireSecretsManager(context),
       }),
     },
   }, ownership);

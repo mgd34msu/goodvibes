@@ -156,7 +156,7 @@ export async function handleRemoteSetupCommand(
       ].join('\n'));
       return true;
     }
-    const pathArg = args[2] ?? args[1];
+    const pathArg = args[2];
     if (!pathArg || mode !== 'export') {
       ctx.print('Usage: /remote bootstrap export <path> | /remote bootstrap inspect <path>');
       return true;

@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { createHomeGraphSourceIdentityIndexes, type HomeGraphSourceSelector } from './store-homegraph-source-selector.js';
 import { createHomeGraphNodeIdentityIndexes, HomeGraphIdentityHeldError, type HomeGraphNodeSelector } from './store-homegraph-node-selector.js';
 import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
@@ -34,8 +35,10 @@ import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions }
 import { prepareHomeGraphSnapshotGroupAcknowledgment, resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
 import { knowledgeNodeRestorationGuard, prepareNodeActivationPass, assertPreparedNodeWrites, preparedNodeWrite, preparedNodeWrites, stagePreparedNodeWrites, type NodeMutationDraft, type KnowledgePreparedNodeWrites } from './store-node-activation.js';
 export type { KnowledgePreparedNodeWrites } from './store-node-activation.js';
-import { commitGuardedKnowledgeIssueReplacement } from './store-issue-replacement.js';
+import { commitGuardedKnowledgeIssueReplacement, operatorReviewed } from './store-issue-replacement.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow, commitKnowledgeNodeIssueWrites, type KnowledgeGuardedNodeIssueWrites } from './store-node-issue-writes.js';
+import { SQLitePersistedStateChangedError } from '../state/sqlite-store-persistence.js';
+import { KnowledgeStoreConflictError } from './store-conflict.js';
 import { SQLiteStore, SQLiteObservationRetiredError, captureSQLiteActivationPublication, type PersistedKnowledgeRecordSelector, type ExpectedKnowledgeRecordReadsetInput } from '../state/sqlite-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -68,6 +71,7 @@ import type {
   KnowledgeUsageRecord,
   KnowledgeUsageUpsertInput,
 } from './types.js';
+import { knowledgeJobRunLifecycle } from './types.js';
 import {
   createSchema,
   KNOWLEDGE_SCHEMA_VERSION,
@@ -83,6 +87,7 @@ import {
 import {
   resolveKnowledgeDbPath,
   type KnowledgeStoreConfig,
+  type KnowledgeStoreFamily,
 } from './store-config.js';
 import { prepareKnowledgeIssueUpsert, type KnowledgeIssueOperatorMutation } from './store-lifecycle-authority.js';
 import { prepareKnowledgeSourceRecord, writeKnowledgeSourceRow, prepareKnowledgeExtractionRecord, writeKnowledgeExtractionRow } from './store-evidence-writes.js';
@@ -166,7 +171,28 @@ import {
  * for the daemon's whole life and survives restarts (the incident's ~1,400
  * zero-result self-improvement objects were this class).
  */
-const MAX_RETAINED_JOB_RUNS = 500;
+export const MAX_RETAINED_JOB_RUNS = 500;
+
+/**
+ * Retained usage-record cap. Every `recordUsage` call adds a row and nothing but
+ * deleting the target removed one. The readers that score from usage (packet
+ * counts, consolidation stats) read at most the newest 10,000 rows inside a
+ * 30-day window, so older rows beyond that can never change a result. Pruning
+ * waits for a tenth of slack so the oldest-first sort is not paid on every write.
+ */
+const MAX_RETAINED_USAGE_RECORDS = 10_000;
+const USAGE_RETENTION_SLACK = MAX_RETAINED_USAGE_RECORDS / 10;
+
+/** Identity of the saved image file. Any other process's save replaces the file, so it changes. */
+function savedImageIdentity(path: string): string {
+  try {
+    const info = statSync(path, { bigint: true });
+    return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    throw error;
+  }
+}
 
 function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): void {
   const result: unknown = assertCurrent?.();
@@ -240,6 +266,7 @@ export class KnowledgeStore {
   private closePromise: Promise<void> | undefined;
   private readonly nativeConversationStorage = new Map<string, NativeConversationStorage>();
   private readonly declareNativeConversationFormat: (() => void) | undefined;
+  private readonly declareNativeSettledFormat: (() => void) | undefined;
   private readonly declareNativeExplicitSourceFormat: ((version?: 3 | 4) => void) | undefined;
   private readonly declareHistoricalImportFormat: ((version?: 2 | 3) => void) | undefined;
   private readonly declareNativeExecutionFormat: (() => void) | undefined;
@@ -250,6 +277,9 @@ export class KnowledgeStore {
   private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
+  /** Identity of the saved file as this store last loaded or wrote it; see refreshIfChanged(). */
+  private imageIdentity: string | undefined;
+  private refreshing: Promise<boolean> | null = null;
   private readonly sources = new Map<string, KnowledgeSourceRecord>();
   private readonly nodes = new Map<string, KnowledgeNodeRecord>();
   private readonly edges = new Map<string, KnowledgeEdgeRecord>();
@@ -264,6 +294,15 @@ export class KnowledgeStore {
   private readonly nodeRevisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
   private readonly semanticEnrichmentStates = new Map<string, KnowledgeSemanticEnrichmentStateRecord>();
 
+  /**
+   * The construction every production site uses: the family is required here, so
+   * a site that forgets to declare it fails to compile instead of opening a
+   * store that nothing checks against the family's database file.
+   */
+  static forFamily(config: KnowledgeStoreConfig & { readonly family: KnowledgeStoreFamily }): KnowledgeStore {
+    return new KnowledgeStore(config);
+  }
+
   constructor(config: KnowledgeStoreConfig) {
     this.dbPath = resolveKnowledgeDbPath(config);
     if (config.nodeAutoAcceptConfidence !== undefined && (!Number.isFinite(config.nodeAutoAcceptConfidence) || config.nodeAutoAcceptConfidence < 0 || config.nodeAutoAcceptConfidence > 100)) {
@@ -276,6 +315,7 @@ export class KnowledgeStore {
     const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
     const beforeInitialRead = config.beforeInitialRead?.bind(config);
     this.declareNativeConversationFormat = declareNativeData ? () => declareNativeData('native-conversation-captures-v2') : undefined;
+    this.declareNativeSettledFormat = declareNativeData ? () => declareNativeData('native-conversation-settled-v1') : undefined;
     this.declareNativeExplicitSourceFormat = declareNativeData ? version => declareNativeData(version === 4 ? 'native-explicit-source-revisions-v4' : 'native-explicit-sources-v3') : undefined;
     this.declareHistoricalImportFormat = declareNativeData ? version => declareNativeData(version === 3 ? 'native-historical-import-revisions-v3' : 'native-historical-import-manifests-v2') : undefined;
     this.declareNativeExecutionFormat = declareNativeData ? () => declareNativeData('native-execution-bindings-v2') : undefined;
@@ -322,7 +362,14 @@ export class KnowledgeStore {
 
   async init(): Promise<void> {
     if (this.closed) throw new Error('KnowledgeStore is closed');
-    if (this.ready) return;
+    if (this.ready) {
+      // A publication whose outcome could not be confirmed fences the SQL
+      // cache. The published image is the truth, so adopt it and carry on;
+      // while a batch still holds unsaved rows the reload declines and the
+      // ordinary write refusal names the fence.
+      if (!this.sqlite.isReady) await this.sqlite.reloadFromDisk(() => this.refreshSnapshot());
+      return;
+    }
     if (this.initPromise) return this.initPromise;
     this.initPromise = this.initialize();
     try {
@@ -352,7 +399,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeConversationStorage.get(projectId);
     if (!storage) {
-      storage = createNativeConversationStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeConversationFormat);
+      storage = createNativeConversationStorage(this.sqlite, projectId, () => this.refreshSnapshot(), this.declareNativeConversationFormat, this.declareNativeSettledFormat);
       this.nativeConversationStorage.set(projectId, storage);
     }
     return storage;
@@ -382,6 +429,10 @@ export class KnowledgeStore {
       await artifactCleanup;
       this.sqlite.close();
       this.ready = false;
+      // Work that passed init() before the close and touches SQL afterwards
+      // would otherwise report the cache as "not initialized"; say what
+      // actually happened. getDb is the cache's only door to the database.
+      Object.defineProperty(this.sqlite, 'getDb', { configurable: true, value: () => { throw new Error('KnowledgeStore is closed'); } });
     })();
     return this.closePromise;
   }
@@ -469,6 +520,27 @@ export class KnowledgeStore {
     return cleanupKnowledgeArtifact(this, observation);
   }
 
+  /**
+   * Reads are served from maps loaded at start or at the last reload, so a
+   * record another process saved since then (the daemon next to a terminal) would
+   * stay invisible. This adopts the saved image when the file is no longer the one
+   * this store holds and no batch or staged publication has unsaved rows. It
+   * resolves true when it reloaded. Call it at the start of a read the person asked
+   * for, never from inside a multi-step operation: a reload retires what that
+   * operation already observed. Writes deliberately do not call it: a write built on
+   * an older read must still be refused as a conflict, not applied on top.
+   */
+  refreshIfChanged(): Promise<boolean> {
+    if (this.refreshing) return this.refreshing;
+    if (!this.ready || this.closed || this.imageIdentity === undefined || savedImageIdentity(this.dbPath) === this.imageIdentity) return Promise.resolve(false);
+    const reload: Promise<boolean> = this.sqlite.reloadFromDisk(() => this.refreshSnapshot()).catch((error: unknown) => {
+      logger.warn('[knowledge-store] could not adopt the changed knowledge file', { path: this.dbPath, error: summarizeError(error) });
+      return false;
+    }).finally(() => { if (this.refreshing === reload) this.refreshing = null; });
+    this.refreshing = reload;
+    return reload;
+  }
+
   status(): KnowledgeStatus {
     return getKnowledgeStoreStatus(this.asReadView());
   }
@@ -481,7 +553,46 @@ export class KnowledgeStore {
     return total;
   }
 
-  async batch<T>(operation: () => Promise<T>): Promise<T> { await this.init(); return this.sqlite.batch(operation); }
+  async batch<T>(operation: () => Promise<T>): Promise<T> {
+    await this.init();
+    return this.keepingImageIdentity(() => this.persisting(() => this.sqlite.batch(operation)));
+  }
+
+  /** Our own save changes the file; adopt its identity unless another process had already changed it first. */
+  private async keepingImageIdentity<T>(write: () => Promise<T>): Promise<T> {
+    const current = this.imageIdentity !== undefined && savedImageIdentity(this.dbPath) === this.imageIdentity;
+    const result = await write();
+    if (current && this.imageIdentity !== undefined && !this.closed) this.imageIdentity = savedImageIdentity(this.dbPath);
+    return result;
+  }
+
+  /** Every ordinary (unguarded) save goes through here; see persisting(). */
+  private async save(): Promise<void> {
+    await this.keepingImageIdentity(() => this.persisting(() => this.sqlite.save()));
+  }
+
+  /**
+   * An ordinary write mutates SQL and the maps, then saves. If another owner
+   * published first the save is refused; without this, the unsaved rows would
+   * stay in memory and every later save would be refused until restart. Adopt
+   * the winner's image (reloadFromDisk refuses while a batch or a prepared
+   * publication still holds pending rows) and report a typed, retryable conflict.
+   */
+  private async persisting<T>(write: () => Promise<T>): Promise<T> {
+    try {
+      return await write();
+    } catch (error) {
+      if (!(error instanceof SQLitePersistedStateChangedError)) throw error;
+      let reloaded: boolean;
+      try {
+        reloaded = await this.sqlite.reloadFromDisk(() => this.refreshSnapshot());
+      } catch (reloadError) {
+        logger.warn('[knowledge-store] could not reload after another process saved first', { path: this.dbPath, error: summarizeError(reloadError) });
+        throw error;
+      }
+      throw new KnowledgeStoreConflictError(reloaded, { cause: error });
+    }
+  }
   listSources(limit = 100): KnowledgeSourceRecord[] {
     return listKnowledgeSources(this.asReadView(), limit);
   }
@@ -1061,14 +1172,14 @@ export class KnowledgeStore {
     assertKnowledgeWriteCurrent(assertCurrent);
     writeKnowledgeSourceRow(this.sqlite, record);
     this.sources.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
   async deleteSource(id: string): Promise<boolean> {
     await this.init();
     const deleted = deleteKnowledgeSourceRecord(this.asRecordDeleteView(), id);
-    if (deleted) await this.sqlite.save();
+    if (deleted) await this.save();
     return deleted;
   }
 
@@ -1082,7 +1193,7 @@ export class KnowledgeStore {
     await this.init();
     writeKnowledgeSourceRow(this.sqlite, record);
     this.sources.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
   }
 
   /** Read-only preflight; upsertNode independently rechecks at the final write. */
@@ -1202,7 +1313,7 @@ export class KnowledgeStore {
       }
       retainKnowledgeNodeObservation(existing, record, observationEvidence);
       staged.commit();
-      if (staged.cacheChanged) await this.sqlite.save();
+      if (staged.cacheChanged) await this.save();
       nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
       return record;
     }
@@ -1230,7 +1341,7 @@ export class KnowledgeStore {
     retainKnowledgeNodeObservation(existing, record, observationEvidence);
     this.nodes.set(record.id, record);
     staged.commit();
-    await this.sqlite.save();
+    await this.save();
     nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
     return record;
   }
@@ -1288,7 +1399,7 @@ export class KnowledgeStore {
   async deleteNode(id: string): Promise<boolean> {
     await this.init();
     const deleted = deleteKnowledgeNodeRecord(this.asRecordDeleteView(), id);
-    if (deleted) await this.sqlite.save();
+    if (deleted) await this.save();
     return deleted;
   }
 
@@ -1326,16 +1437,16 @@ export class KnowledgeStore {
     retainKnowledgeNodeObservation(existing, guarded);
     this.nodes.set(guarded.id, guarded);
     staged.commit();
-    await this.sqlite.save();
+    await this.save();
   }
 
   /** Merge one node into another, re-pointing cross-reference edges. (Invariant 7.) */
   async mergeNodes(loserId: string, winnerId: string): Promise<{ merged: boolean; repointedEdges: number }> {
     await this.init();
-    return mergeKnowledgeNodes(this, loserId, winnerId, {
+    return this.persisting(() => mergeKnowledgeNodes(this, loserId, winnerId, {
       sqlite: this.sqlite, nodes: this.nodes, edges: this.edges,
       nodeRevisions: this.nodeRevisions, nodeActivationScope: this.nodeActivationScope, beforeNodeWrite: this.beforeSemanticNodeWrite,
-    });
+    }));
   }
 
   getSemanticEnrichmentState(sourceId: string): KnowledgeSemanticEnrichmentStateRecord | null {
@@ -1367,7 +1478,7 @@ export class KnowledgeStore {
     await this.init();
     if (input.metadata?.semanticSourceVersion === 2) assertKnowledgeWriteCurrent(this.declareSemanticSourceFormat);
     const record = upsertKnowledgeSemanticEnrichmentState(this.sqlite, this.semanticEnrichmentStates, input);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
@@ -1379,7 +1490,7 @@ export class KnowledgeStore {
     assertKnowledgeWriteCurrent(assertCurrent);
     writeKnowledgeEdgeRow(this.sqlite, record);
     this.edges.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
@@ -1388,7 +1499,7 @@ export class KnowledgeStore {
     if (!this.edges.has(id)) return false;
     this.sqlite.run('DELETE FROM knowledge_edges WHERE id = ?', [id]);
     this.edges.delete(id);
-    await this.sqlite.save();
+    await this.save();
     return true;
   }
 
@@ -1410,8 +1521,11 @@ export class KnowledgeStore {
       record.createdAt,
       record.updatedAt,
     ]);
+    // The unique endpoint-tuple index makes SQL replace the other row; mirror that in memory.
+    const displaced = findKnowledgeEdge(this.edges, record);
+    if (displaced && displaced.id !== record.id) this.edges.delete(displaced.id);
     this.edges.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
   }
 
   async replaceIssues(inputs: readonly KnowledgeIssueUpsertInput[], namespace?: string): Promise<KnowledgeIssueRecord[]> {
@@ -1426,12 +1540,12 @@ export class KnowledgeStore {
     if (namespace) {
       for (const issue of [...this.issues.values()]) {
         if (issue.metadata.namespace !== namespace) continue;
-        if (activeIds.has(issue.id) || issue.status === 'resolved') continue;
+        if (activeIds.has(issue.id) || issue.status === 'resolved' || operatorReviewed(issue)) continue;
         this.sqlite.run('DELETE FROM knowledge_issues WHERE id = ?', [issue.id]);
         this.issues.delete(issue.id);
       }
     }
-    await this.sqlite.save();
+    await this.save();
     return created;
   }
 
@@ -1439,7 +1553,7 @@ export class KnowledgeStore {
   async replaceIssuesGuarded(inputs: readonly KnowledgeIssueUpsertInput[], namespace: string, beforeWrite: () => void, legacyHomeGraphIssues: readonly KnowledgeIssueRecord[] = []): Promise<KnowledgeIssueRecord[]> {
     await this.init();
     const records = commitGuardedKnowledgeIssueReplacement({ sqlite: this.sqlite, issues: this.issues, sources: this.sources, nodes: this.nodes, beforeIssueWrite: this.beforeIssueWrite }, inputs, namespace, beforeWrite, legacyHomeGraphIssues);
-    await this.sqlite.save();
+    await this.save();
     return records;
   }
 
@@ -1450,7 +1564,7 @@ export class KnowledgeStore {
     this.beforeIssueWrite(record);
     writeKnowledgeIssueRow(this.sqlite, record);
     this.issues.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
@@ -1479,7 +1593,7 @@ export class KnowledgeStore {
       nodes, issues.filter((issue) => !issue.preserve).map((issue) => issue.record));
     nodes.forEach(({ existing, record, observationEvidence }) => { retainKnowledgeNodeObservation(existing, record, observationEvidence); });
     staged!.commit();
-    await this.sqlite.save();
+    await this.save();
   }
 
   async replaceIssueRecord(record: KnowledgeIssueRecord): Promise<void> {
@@ -1505,7 +1619,7 @@ export class KnowledgeStore {
       record.updatedAt,
     ]);
     this.issues.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
   }
 
   async upsertExtraction(input: KnowledgeExtractionUpsertInput, assertCurrent?: () => void): Promise<KnowledgeExtractionRecord> {
@@ -1518,14 +1632,25 @@ export class KnowledgeStore {
     const record = prepareKnowledgeExtractionRecord(input, existing, this.sources.get(input.sourceId));
     assertKnowledgeWriteCurrent(assertCurrent);
     writeKnowledgeExtractionRow(this.sqlite, record);
+    // The unique source_id index makes SQL replace the other row for this source; mirror that in memory.
+    const displaced = this.getExtractionBySourceId(record.sourceId);
+    if (displaced && displaced.id !== record.id) this.extractions.delete(displaced.id);
     this.extractions.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
   async upsertJobRun(input: KnowledgeJobRunUpsertInput): Promise<KnowledgeJobRunRecord> {
     await this.init();
     const existing = input.id ? this.jobRuns.get(input.id) : null;
+    if (existing && input.status !== existing.status) {
+      // A late or duplicate writer must not move a settled run back to queued/running.
+      const move = knowledgeJobRunLifecycle.check(existing.status, input.status);
+      if (!move.ok) {
+        logger.warn('[knowledge-store] job run left as is', { runId: existing.id, reason: move.reason });
+        return existing;
+      }
+    }
     const now = nowMs();
     const _error = stableText(input.error);
     const record: KnowledgeJobRunRecord = {
@@ -1563,13 +1688,13 @@ export class KnowledgeStore {
       record.error ?? null,
       JSON.stringify(record.result),
       JSON.stringify(record.metadata),
-      existing ? now : now,
+      record.createdAt,
       now,
     ]);
     this.jobRuns.set(record.id, record);
     // Retention on write: keep the run history bounded in memory AND on disk.
     this.pruneJobRuns(MAX_RETAINED_JOB_RUNS);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
@@ -1597,7 +1722,7 @@ export class KnowledgeStore {
 
   async upsertRefinementTask(input: KnowledgeRefinementTaskUpsertInput): Promise<KnowledgeRefinementTaskRecord> {
     await this.init();
-    return upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${opaqueUuid()}`);
+    return this.persisting(() => upsertKnowledgeRefinementTask(this.sqlite, this.refinementTasks, input, () => `kref-${opaqueUuid()}`));
   }
 
   async upsertUsageRecord(input: KnowledgeUsageUpsertInput, assertCurrent?: () => void): Promise<KnowledgeUsageRecord> {
@@ -1632,8 +1757,23 @@ export class KnowledgeStore {
       record.createdAt,
     ]);
     this.usageRecords.set(record.id, record);
-    await this.sqlite.save();
+    if (this.usageRecords.size > MAX_RETAINED_USAGE_RECORDS + USAGE_RETENTION_SLACK) this.pruneUsageRecords(MAX_RETAINED_USAGE_RECORDS);
+    await this.save();
     return record;
+  }
+
+  /** Drop the oldest usage records beyond `keep`, from the in-memory mirror and the sqlite table. */
+  pruneUsageRecords(keep: number): number {
+    const cap = Math.max(0, Math.trunc(keep));
+    if (this.usageRecords.size <= cap) return 0;
+    const oldest = [...this.usageRecords.values()]
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(0, this.usageRecords.size - cap);
+    for (const record of oldest) {
+      this.sqlite.run('DELETE FROM knowledge_usage_records WHERE id = ?', [record.id]);
+      this.usageRecords.delete(record.id);
+    }
+    return oldest.length;
   }
 
   async upsertConsolidationCandidate(
@@ -1693,7 +1833,7 @@ export class KnowledgeStore {
       record.updatedAt,
     ]);
     this.consolidationCandidates.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
@@ -1736,18 +1876,18 @@ export class KnowledgeStore {
       record.updatedAt,
     ]);
     this.consolidationReports.set(record.id, record);
-    await this.sqlite.save();
+    await this.save();
     return record;
   }
 
   async upsertSchedule(input: KnowledgeScheduleUpsertInput): Promise<KnowledgeScheduleRecord> {
     await this.init();
-    return upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${opaqueUuid()}`);
+    return this.keepingImageIdentity(() => this.persisting(() => upsertKnowledgeSchedule(this.sqlite, this.schedules, input, () => `ksched-${opaqueUuid()}`)));
   }
 
   async deleteSchedule(id: string): Promise<boolean> {
     await this.init();
-    return deleteKnowledgeSchedule(this.sqlite, this.schedules, id);
+    return this.keepingImageIdentity(() => this.persisting(() => deleteKnowledgeSchedule(this.sqlite, this.schedules, id)));
   }
 
   async planKnowledgeSpaceDelete(spaceId: string): Promise<KnowledgeSpaceDeleteResult> {
@@ -1759,7 +1899,7 @@ export class KnowledgeStore {
     await this.init();
     if (input.dryRun) return this.planKnowledgeSpaceDelete(spaceId);
     const deleted = deleteKnowledgeSpaceRows(this.sqlite, this.knowledgeSpaceRowStores(), spaceId);
-    await this.sqlite.save();
+    await this.save();
     return deleted;
   }
 
@@ -1854,7 +1994,10 @@ export class KnowledgeStore {
       // Retention is an initialization mutation, never a side effect of adopting
       // another writer's current image during a guarded source action. Publish
       // it through the same baseline check before admitting caller mutations.
-      if (this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) > 0) await this.sqlite.save();
+      if (this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) > 0) {
+        await this.sqlite.save();
+        this.imageIdentity = savedImageIdentity(this.dbPath);
+      }
       this.ready = true;
     } catch (error) {
       // No caller mutation can pass init yet. A failed initialization must not
@@ -1866,6 +2009,7 @@ export class KnowledgeStore {
 
   private refreshSnapshot(): void {
     const snapshot = loadKnowledgeStoreSnapshot(this.sqlite);
+    this.imageIdentity = savedImageIdentity(this.dbPath);
     this.sources.clear();
     for (const record of snapshot.sources) this.sources.set(record.id, record);
     this.nodes.clear();

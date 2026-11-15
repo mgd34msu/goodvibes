@@ -14,11 +14,9 @@ describe('markdown dedupe (α3)', () => {
     const text = '# Hello\n\nSome **bold** text and `inline code`.\n\n- item one\n- item two';
     const direct = markdownModule.renderMarkdown(text, WIDTH);
     const { lines } = markdownModule.renderMarkdownTracked(text, WIDTH);
-    expect(direct.length).toBe(lines.length);
-    // Cell-level equality on first few lines.
-    for (let i = 0; i < Math.min(direct.length, lines.length); i++) {
-      expect(direct[i].length).toBe(lines[i].length);
-    }
+    // Every cell, including its colour and attributes, is the same.
+    expect(direct).toEqual(lines);
+    expect(direct.length).toBeGreaterThan(3);
   });
 
   it('renderMarkdownTracked returns both lines and codeBlocks', () => {

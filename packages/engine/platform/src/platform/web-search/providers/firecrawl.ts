@@ -1,8 +1,9 @@
-import type { WebSearchProvider, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
+import type { WebSearchProvider, WebSearchProviderCall, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
 import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  resolveBaseUrl,
   resultFromRecord,
   withInlineBearer,
   type SearchProviderContext,
@@ -44,10 +45,10 @@ export function createFirecrawlSearchProvider(context: SearchProviderContext): W
         defaultBaseUrl: FIRECRAWL_DEFAULT_BASE_URL,
       }, { env, serviceRegistry });
     },
-    async search(request: WebSearchRequest): Promise<WebSearchProviderResponse> {
+    async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
       const evidenceRequested = request.includeEvidence || request.verbosity === 'evidence' || request.verbosity === 'full';
-      const baseUrl = (serviceRegistry.get(FIRECRAWL_SERVICE_NAME)?.baseUrl ?? FIRECRAWL_DEFAULT_BASE_URL).replace(/\/+$/, '');
+      const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, FIRECRAWL_SERVICE_NAME, FIRECRAWL_DEFAULT_BASE_URL)!;
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/v1/search`,
         method: 'POST',
@@ -60,7 +61,7 @@ export function createFirecrawlSearchProvider(context: SearchProviderContext): W
         },
         service: serviceRegistry.get(FIRECRAWL_SERVICE_NAME) ? FIRECRAWL_SERVICE_NAME : undefined,
         auth: serviceRegistry.get(FIRECRAWL_SERVICE_NAME) ? undefined : withInlineBearer(env, FIRECRAWL_ENV_KEYS),
-        fetcher: context.fetcher,
+        fetcher: context.fetcher ?? call?.fetcher,
       });
       const data = Array.isArray(payload.data)
         ? payload.data

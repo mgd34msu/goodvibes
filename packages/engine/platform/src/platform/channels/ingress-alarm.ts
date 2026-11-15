@@ -73,6 +73,13 @@ export interface ChannelIngressAlarmDeps {
  */
 export class ChannelIngressAlarm {
   private readonly states = new Map<ChannelSurface, ChannelIngressFailureState>();
+  /**
+   * When the owner was last told a surface is failing, kept past the end of a
+   * run. One broken chat among working ones ends a run on every success, and
+   * without this each new run notified at once: a "heads up" and a
+   * "processing again" per message.
+   */
+  private readonly lastNotifiedAt = new Map<ChannelSurface, number>();
 
   constructor(private readonly deps: ChannelIngressAlarmDeps) {}
 
@@ -116,12 +123,14 @@ export class ChannelIngressAlarm {
       failedSinceStart: state.count,
       runStartedAt: state.since,
     });
-    const quietUntil = state.notifiedAt === null ? null : state.notifiedAt + this.windowMs();
+    const lastNotified = state.notifiedAt ?? this.lastNotifiedAt.get(surface) ?? null;
+    const quietUntil = lastNotified === null ? null : lastNotified + this.windowMs();
     if (quietUntil !== null && at < quietUntil) {
       this.states.set(surface, state);
       return false;
     }
     this.states.set(surface, { ...state, notifiedAt: at });
+    this.lastNotifiedAt.set(surface, at);
     this.send(
       surface,
       state.count === 1

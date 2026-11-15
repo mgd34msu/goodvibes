@@ -132,20 +132,50 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
   if (options.requestPermission) {
     const handler = options.requestPermission;
     const handled = new Set<string>();
+    const deny = (approvalId: string, reason: string): Promise<unknown> =>
+      approvals.resolveApproval(approvalId, { approved: false, reason, actor: 'embed', actorSurface: 'embed' })
+        .catch((error: unknown) => {
+          logger.warn('createEmbeddedSession: could not record a denial for an approval', {
+            approvalId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     unsubscribe = approvals.subscribe((approval) => {
       if (approval.status !== 'pending' || handled.has(approval.id)) return;
       handled.add(approval.id);
+      // An ask that needs the owner's own decision can only be approved through the
+      // host's private owner route, never by an embedder callback. Say so and deny
+      // instead of prompting for an answer that could not be honoured.
+      if (approval.requiresOwnerDecision) {
+        logger.warn('createEmbeddedSession: denied an approval that requires the owner decision; an embedded permission callback cannot approve it', {
+          approvalId: approval.id,
+          tool: approval.request.tool,
+        });
+        void deny(approval.id, 'This approval needs the owner decision and cannot be approved from an embedded client.')
+          .finally(() => handled.delete(approval.id));
+        return;
+      }
       void handler(approval.request)
-        .then((decision) =>
-          approvals.resolveApproval(approval.id, {
-            approved: decision.approved,
-            actor: 'embed',
-            actorSurface: 'embed',
-            ...(decision.remember !== undefined ? { remember: decision.remember } : {}),
-            ...(decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
-          }),
-        )
-        .catch(() => approvals.resolveApproval(approval.id, { approved: false, actor: 'embed', actorSurface: 'embed' }));
+        .then(async (decision) => {
+          try {
+            await approvals.resolveApproval(approval.id, {
+              approved: decision.approved,
+              actor: 'embed',
+              actorSurface: 'embed',
+              ...(decision.remember !== undefined ? { remember: decision.remember } : {}),
+              ...(decision.modifiedArgs !== undefined ? { modifiedArgs: decision.modifiedArgs } : {}),
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn('createEmbeddedSession: the embedder\'s decision was refused; denying the approval', { approvalId: approval.id, error: message });
+            await deny(approval.id, `The embedder's decision could not be applied: ${message}`);
+          }
+        }, async (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.warn('createEmbeddedSession: the permission callback failed; denying the approval', { approvalId: approval.id, error: message });
+          await deny(approval.id, 'The embedder\'s permission callback failed.');
+        })
+        .finally(() => handled.delete(approval.id));
     });
   }
 
@@ -172,8 +202,16 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
       // through the daemon's contracts operator surface in the daemon's
       // working directory (this workspace), and its owner agent is bound to the
       // session as the agent working on it.
-      const started = await server.contracts.start({ ask: body, sessionId: submission.session.id });
-      const bound = await sessions.bindAgent(submission.session.id, started.ownerAgentId);
+      let started: Awaited<ReturnType<typeof server.contracts.start>>;
+      try {
+        started = await server.contracts.start({ ask: body, sessionId: submission.session.id });
+      } catch (error) {
+        // The input was recorded before the contract was refused. Fail it so no
+        // queued input is left that nothing will run and a retry does not double up.
+        await sessions.failInput(submission.session.id, submission.input.id, error instanceof Error ? error.message : String(error)).catch(() => null);
+        throw error;
+      }
+      const bound = await sessions.bindAgent(submission.session.id, started.ownerAgentId, submission.input.id);
       return { ...submission, session: bound ?? submission.session, activeAgentId: started.ownerAgentId };
     },
     cancelActive: (agentIds) => {

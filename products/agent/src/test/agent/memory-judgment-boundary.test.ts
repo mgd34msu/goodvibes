@@ -93,7 +93,8 @@ test.each([
   const input: Record<string, unknown> = { ...args }; if (input.action === undefined) delete input.action;
   const pending = registry.execute('protected-malformed', name, input);
   await expect(pending).rejects.toBeInstanceOf(ToolInputProjectionError);
-  await expect(pending).rejects.toMatchObject({ problem: 'held' });
+  // The caller's arguments are at fault, so the refusal says 'invalid' (fix the arguments), not 'held'.
+  await expect(pending).rejects.toMatchObject({ problem: 'invalid' });
   expect(fake.requests).toHaveLength(0);
   expect(existsSync(accountFile)).toBe(false); expect(memoryCount()).toBe(0);
 })));
@@ -123,16 +124,25 @@ test('bootstrap abort during account judgment settles promptly and prevents late
   let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
   let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
   let asks = 0;
+  let blockedAskDone!: () => void; const blockedAskSettled = new Promise<void>((resolve) => { blockedAskDone = resolve; });
   installJudgmentPort(withDecisionLog({ ...fake.port, async ask(request) {
-    if (request.context?.battery === 'engine.security.content-derivation') { asks++; entered(); await blocked; }
+    if (request.context?.battery === 'engine.security.content-derivation') {
+      asks++; entered(); await blocked;
+      try { return await fake.port.ask(request); } finally { blockedAskDone(); }
+    }
     return fake.port.ask(request);
   } }, log));
   const controller = new AbortController();
   const work = runAccount('cancelled-account', controller.signal);
   await Promise.race([started, work.then(() => { throw new Error('Account derivation did not start'); })]);
   const before = asks; controller.abort(new Error(SECRET));
-  const early = await Promise.race([work, new Promise<null>((resolve) => setTimeout(() => resolve(null), 100))]);
-  release(); const result = await work; await new Promise((resolve) => setTimeout(resolve, 20));
+  // Settling while the judgment is still blocked is the claim; the timer only turns a hang into a failure.
+  let hang!: ReturnType<typeof setTimeout>;
+  const early = await Promise.race([work, new Promise<null>((resolve) => { hang = setTimeout(() => resolve(null), 10_000); })]);
+  clearTimeout(hang);
+  release(); const result = await work;
+  // Wait for the released judgment to finish, then one turn of the event loop, so a late write would have landed.
+  await blockedAskSettled; await new Promise<void>((resolve) => setImmediate(resolve));
   expect(early).not.toBeNull(); expect(result.success).toBe(false); expect(JSON.stringify(result)).not.toContain(SECRET);
   expect(asks).toBe(before); expect(existsSync(accountFile)).toBe(false);
 })));

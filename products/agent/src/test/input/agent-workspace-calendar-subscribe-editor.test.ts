@@ -22,6 +22,7 @@ import {
 } from '../../input/agent-workspace-calendar-subscribe-editor.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { waitUntil } from '../helpers/wait-until.ts';
 
 const ICS = 'BEGIN:VCALENDAR\r\nX-WR-CALNAME:My Feed\r\nBEGIN:VEVENT\r\nUID:e1\r\nSUMMARY:Ev\r\nDTSTART:20260706T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR';
 const SECRET_URL = 'https://calendar.google.com/calendar/ical/topsecret123/basic.ics';
@@ -59,6 +60,11 @@ function fetcherOf(...responses: FeedFetchResult[]): FeedFetcher {
   return async () => responses[Math.min(i++, responses.length - 1)]!;
 }
 
+/** Wait until the editor message has been read (or protected), not for a fixed number of turns. */
+function editorMessageSettled(ws: AgentWorkspace): Promise<void> {
+  return waitUntil(() => !['empty', 'pending'].includes(ws.editorMessageState.status), 'the editor message to settle');
+}
+
 describe('createCalendarSubscribeWizardEditor', () => {
   test('is a secrets-aware wizard with a masked URL field and Google/Outlook guidance', () => {
     const editor = createCalendarSubscribeWizardEditor();
@@ -88,10 +94,10 @@ describe('submitAgentWorkspaceCalendarSubscribeWizardEditor', () => {
     try {
       ws.open({ ...CONTEXT, executeCommand: async () => true, print() {}, renderRequest() {} } as unknown as CommandContext, () => {});
       ws.localEditor = editor;
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      await editorMessageSettled(ws);
       const initialRequests = fake.requests.length;
       await submitAgentWorkspaceCalendarSubscribeWizardEditor(ws, editor, CONTEXT, (id) => editor.fields.find((field) => field.id === id)?.value ?? '', build);
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      await editorMessageSettled(ws);
       expect(fetched).toBe(url);
       expect(ws.localEditor?.message).toContain(url);
       expect(ws.editorMessageState.status).toBe('protected');
@@ -105,7 +111,7 @@ describe('submitAgentWorkspaceCalendarSubscribeWizardEditor', () => {
       const failed = ws.localEditor!;
       ws.close(); ws.reopen();
       ws.localEditor = { ...failed, message: `Previous feed failure: ${url}` };
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      await editorMessageSettled(ws);
       expect(ws.editorMessageState.status).toBe('protected');
       expect(fake.requests).toHaveLength(initialRequests);
     } finally { ws.close(); installJudgmentPort(previous); }
@@ -123,10 +129,10 @@ describe('submitAgentWorkspaceCalendarSubscribeWizardEditor', () => {
     try {
       ws.open({ ...CONTEXT, executeCommand: async () => true, print() {}, renderRequest() {} } as unknown as CommandContext, () => {});
       ws.localEditor = editor;
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      await editorMessageSettled(ws);
       expect(ws.editorMessageState.status).toBe('read');
       await submitAgentWorkspaceCalendarSubscribeWizardEditor(ws, editor, CONTEXT, (id) => editor.fields.find((field) => field.id === id)?.value ?? '', build);
-      for (let i = 0; i < 12; i++) await Promise.resolve();
+      await editorMessageSettled(ws);
       expect(ws.localEditor?.message).toBe('A feed URL is required.');
       expect(ws.editorMessageState.status).toBe('read');
       expect(fake.requests).toHaveLength(2);

@@ -52,10 +52,11 @@ export function urlHostForConfiguredHost(host: unknown): string {
   return dialHost.includes(':') && !dialHost.startsWith('[') ? `[${dialHost}]` : dialHost;
 }
 
-/** The connected host's port, defaulting when config carries no finite number. */
+/** The connected host's port, defaulting when config carries no usable TCP port (null, blank, non-integer or outside 1..65535). */
 export function connectedHostPort(port: unknown, fallback = DEFAULT_CONNECTED_HOST_PORT): number {
+  if (port === null || (typeof port === 'string' && port.trim() === '')) return fallback;
   const value = typeof port === 'number' ? port : Number(port);
-  return Number.isFinite(value) ? value : fallback;
+  return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : fallback;
 }
 
 /**

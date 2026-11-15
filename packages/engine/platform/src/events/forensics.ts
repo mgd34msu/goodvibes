@@ -21,13 +21,6 @@ export type ForensicsEvent =
       taskId?: string | undefined;
       /** Turn ID if this is a turn failure. */
       turnId?: string | undefined;
-    }
-  /** A report was exported (to stdout or file). */
-  | {
-      type: 'FORENSICS_REPORT_EXPORTED';
-      reportId: string;
-      destination: 'stdout' | 'file';
-      path?: string | undefined;
     };
 
 /** All forensics event type literals as a union. */

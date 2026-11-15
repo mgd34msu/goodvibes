@@ -9,6 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AgentNoteRegistry } from '../../agent/note-registry.ts';
+import { AgentResearchRunRegistry } from '../../agent/research-run-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { readJsonObject, writeJsonObject } from '../../runtime/onboarding/apply-file-helpers.ts';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -30,7 +31,7 @@ async function runWriters(scriptPath: string, args: readonly (readonly string[])
 }
 
 describe('agent stores under concurrent processes', () => {
-  test('two processes writing one routine store leave it parseable and complete', async () => {
+  test('two processes writing one routine store keep every routine either wrote', async () => {
     const root = makeProjectTempDir('gv-store-concurrent-routines');
     try {
       const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
@@ -64,17 +65,51 @@ describe('agent stores under concurrent processes', () => {
         expect(result.exitCode).toBe(0);
       }
 
-      // The store still parses, which a spliced file would not.
+      // The store still parses, which a spliced file would not, and the
+      // read-modify-write cycles were serialized: no create was lost.
       const routines = AgentRoutineRegistry.fromShellPaths(paths).list();
-      expect(routines.length).toBeGreaterThan(0);
-      // Cross-process read-modify-write is still last-writer-wins, so the two
-      // runs' routines need not both survive; a truncated or half-written
-      // record would show up as a parse failure above or a malformed name here.
+      const expectedNames = ['alpha', 'beta'].flatMap((prefix) => Array.from({ length: 30 }, (_, i) => `${prefix} ${i}`));
+      expect(routines.map((routine) => routine.name).sort()).toEqual(expectedNames.sort());
       for (const routine of routines) {
-        expect(routine.name).toMatch(/^(alpha|beta) \d+$/);
         expect(routine.description.endsWith('description.')).toBe(true);
       }
       expect(leftoverStoreTempFiles(storePath)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('two processes writing one research run store keep every run either wrote', async () => {
+    const root = makeProjectTempDir('gv-store-concurrent-runs');
+    try {
+      const storePath = join(root, 'runs.json');
+      const script = join(root, 'run-writer.ts');
+      writeFileSync(
+        script,
+        [
+          `import { AgentResearchRunRegistry } from ${JSON.stringify(join(SRC_ROOT, 'agent', 'research-run-registry.ts'))};`,
+          'const [storePath, prefix, count] = process.argv.slice(2);',
+          'const registry = new AgentResearchRunRegistry(storePath!);',
+          'for (let i = 0; i < Number(count); i += 1) {',
+          '  const run = registry.create({ title: `${prefix} ${i}`, question: `Question ${prefix} ${i}` });',
+          '  registry.start(run.id);',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      const results = await runWriters(script, [
+        [storePath, 'alpha', '20'],
+        [storePath, 'beta', '20'],
+      ]);
+      for (const result of results) {
+        expect(result.stderr).toBe('');
+        expect(result.exitCode).toBe(0);
+      }
+      const runs = new AgentResearchRunRegistry(storePath).list();
+      const expectedTitles = ['alpha', 'beta'].flatMap((prefix) => Array.from({ length: 20 }, (_, i) => `${prefix} ${i}`));
+      expect(runs.map((run) => run.title).sort()).toEqual(expectedTitles.sort());
+      expect(runs.every((run) => run.status === 'running')).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -195,28 +230,41 @@ describe('agent stores under concurrent processes', () => {
       const settingsPath = join(root, 'settings.json');
       writeJsonObject(settingsPath, { owner: 'seed', filler: 'seed'.repeat(20_000) });
 
+      const doneFile = join(root, 'writes-done');
       const script = join(root, 'reader.ts');
+      // The reader keeps reading until the test says its last write is done, so
+      // reads cannot all finish before the first write begins.
       writeFileSync(
         script,
         [
-          "import { readFileSync } from 'node:fs';",
-          'const [path, count] = process.argv.slice(2);',
-          'for (let i = 0; i < Number(count); i += 1) {',
-          '  const text = readFileSync(path!, "utf-8");',
-          '  JSON.parse(text);',
-          '}',
+          "import { existsSync, readFileSync } from 'node:fs';",
+          'const [path, doneFile] = process.argv.slice(2);',
+          'let reads = 0;',
+          'do {',
+          '  JSON.parse(readFileSync(path!, "utf-8"));',
+          '  if (reads++ === 0) process.stdout.write("reading\\n");',
+          '} while (!existsSync(doneFile!));',
+          'process.stdout.write(`reads ${reads}\\n`);',
           '',
         ].join('\n'),
         'utf-8',
       );
 
-      const reader = Bun.spawn(['bun', 'run', script, settingsPath, '3000'], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-      for (let i = 0; i < 200; i += 1) {
-        writeJsonObject(settingsPath, { owner: `w${i}`, filler: 'x'.repeat(20_000) });
+      const reader = Bun.spawn(['bun', 'run', script, settingsPath, doneFile], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+      try {
+        const stdout = reader.stdout.getReader();
+        expect(new TextDecoder().decode((await stdout.read()).value)).toContain('reading');
+        for (let i = 0; i < 200; i += 1) {
+          writeJsonObject(settingsPath, { owner: `w${i}`, filler: 'x'.repeat(20_000) });
+        }
+        writeFileSync(doneFile, '', 'utf-8');
+        const [stderr, exitCode] = await Promise.all([new Response(reader.stderr).text(), reader.exited]);
+        expect(stderr).toBe('');
+        expect(exitCode).toBe(0);
+      } finally {
+        reader.kill();
+        await reader.exited;
       }
-      const [stderr, exitCode] = await Promise.all([new Response(reader.stderr).text(), reader.exited]);
-      expect(stderr).toBe('');
-      expect(exitCode).toBe(0);
       expect(readFileSync(settingsPath, 'utf-8').trimEnd().endsWith('}')).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });

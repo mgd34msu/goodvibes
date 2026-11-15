@@ -36,13 +36,14 @@ function readOptionalString(value: unknown): string | null {
 function addOptionalArg(args: string[], flag: string, value: unknown): void {
   const text = readOptionalString(value);
   if (!text) return;
-  args.push(flag, text);
+  // The inline form keeps free text that begins with dashes from being read as the next option.
+  args.push(`${flag}=${text}`);
 }
 
 function addOptionalNumber(args: string[], flag: string, value: unknown): void {
   if (value === undefined || value === null || value === '') return;
   if (typeof value === 'number') {
-    args.push(flag, String(value));
+    args.push(`${flag}=${value}`);
     return;
   }
   addOptionalArg(args, flag, value);
@@ -52,12 +53,12 @@ function buildScheduleEditArgs(rawArgs: AgentScheduleEditToolArgs): readonly str
   const scheduleId = readOptionalString(rawArgs.scheduleId) ?? readOptionalString(rawArgs.jobId);
   if (!scheduleId) throw new Error('scheduleId is required.');
 
-  const args = [scheduleId];
+  const args = [`--schedule-id=${scheduleId}`];
   const scheduleKind = scheduleEditKindFromValue(rawArgs.scheduleKind);
   const scheduleValue = readOptionalString(rawArgs.scheduleValue);
   if (scheduleKind && !scheduleValue) throw new Error('scheduleValue is required when scheduleKind is set.');
   if (!scheduleKind && scheduleValue) throw new Error('scheduleKind is required when scheduleValue is set.');
-  if (scheduleKind && scheduleValue) args.push(`--${scheduleKind}`, scheduleValue);
+  if (scheduleKind && scheduleValue) args.push(`--${scheduleKind}=${scheduleValue}`);
 
   addOptionalArg(args, '--timezone', rawArgs.timezone);
   addOptionalNumber(args, '--stagger-ms', rawArgs.staggerMs);
@@ -137,17 +138,24 @@ export function createAgentScheduleEditTool(
       sideEffects: ['network', 'state'],
     },
     execute: async (rawArgs, options) => {
+      // True once the request has gone to the connected host: a later throw cannot say it was not applied.
+      let invoked = false;
       try {
         const effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
         const parsed = parseScheduleEditArgs(buildScheduleEditArgs(rawArgs), { requireExplicitUserRequest: false });
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildScheduleEditPreview(parsed);
         effect.assertCurrent();
+        invoked = true;
         const result = await effect.invoke('automation.jobs.update', preview.payload);
         effect.assertCurrent();
         return formatScheduleOperatorResult(result, 'Updated GoodVibes schedule');
       } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+        const message = error instanceof Error ? error.message : String(error);
+        if (invoked) {
+          return { success: false, error: `outcome_unknown: the schedule edit request was sent to the connected host and then failed (${message}). It may have been applied; read the schedule list before repeating it.` };
+        }
+        return { success: false, error: message };
       }
     },
   };

@@ -30,6 +30,8 @@ import { makeProcessOutputReadingFixture } from '../helpers/process-output-readi
 import type { ThrobberState } from '../../renderer/throbber.ts';
 
 const THEME = process.env['GOODVIBES_GOLDEN_THEME'] ?? 'goodvibes';
+/** The theme this evaluation of the file rendered under; the neon wrapper checks it to prove the file ran afresh. */
+export const goldenTheme = THEME;
 setActiveThemeName(THEME);
 setActiveThemeMode('dark');
 const DIR = new URL(THEME === 'goodvibes' ? './golden-frames/' : `./golden-frames-${THEME}/`, import.meta.url).pathname;

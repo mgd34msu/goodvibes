@@ -39,6 +39,8 @@ export function emitAgentRunning(
     contractId?: string | undefined;
     contractRole?: 'owner' | 'unit' | 'planner' | undefined;
     contractUnitId?: string | undefined;
+    /** Set only when the agent manager wakes a failed or completed run. */
+    wake?: true | undefined;
   }
 ): void {
   bus.emit('agents', createEventEnvelope('AGENT_RUNNING', { type: 'AGENT_RUNNING', ...data }, ctx));

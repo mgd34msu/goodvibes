@@ -1,77 +1,107 @@
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { HookDispatcher, type HookEvent } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { TriggerManager } from '@goodvibes-jev/engine/platform/platform/tools';
-import { getTestTriggerManager, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
+import { killTriggerActions } from '@goodvibes-jev/engine/platform/platform/workflow';
+
+type Spawned = { readonly command: readonly string[]; readonly triggerId: string | undefined };
+
+let spawned: Spawned[];
+let onSpawn: (() => void) | null;
+let spawnSpy: ReturnType<typeof spyOn<typeof Bun, 'spawn'>>;
 
 beforeEach(() => {
-  resetTestRuntimeServices();
+  spawned = [];
+  onSpawn = null;
+  spawnSpy = spyOn(Bun, 'spawn').mockImplementation(((command: readonly string[], options: { env: Record<string, string | undefined> }) => {
+    spawned.push({ command, triggerId: options.env['GV_TRIGGER_ID'] });
+    queueMicrotask(() => onSpawn?.());
+    return { pid: 1000 + spawned.length, exited: Promise.resolve(0), kill() {} };
+  }) as unknown as typeof Bun.spawn);
 });
 
+afterEach(() => {
+  killTriggerActions();
+  spawnSpy.mockRestore();
+});
+
+const toolEvent = (specific: string): HookEvent => ({
+  path: `Post:tool:${specific}`,
+  phase: 'Post' as const,
+  category: 'tool' as const,
+  specific,
+  sessionId: 'trigger-wire-test',
+  timestamp: 0,
+  payload: {},
+});
+
+/** Resolves once a trigger action has been started. */
+function nextSpawn(): Promise<void> {
+  return new Promise<void>((resolve) => { onSpawn = resolve; });
+}
+
 describe('HookDispatcher trigger wiring', () => {
-  test('setTriggerManager accepts and stores a trigger manager', async () => {
+  test('a fired hook event starts the matching trigger action', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = (await getTestTriggerManager());
-    // Should not throw
+    const tm = new TriggerManager();
+    const matching = tm.add({ event: 'Post:tool:*', action: 'echo trigger-fired' });
+    dispatcher.setTriggerManager(tm);
+
+    const started = nextSpawn();
+    const result = await dispatcher.fire(toolEvent('read'));
+    await started;
+
+    expect(result.ok).toBe(true);
+    expect(spawned.map((s) => s.triggerId)).toEqual([matching.id]);
+  });
+
+  test('disabled triggers and triggers for other events do not fire', async () => {
+    const dispatcher = new HookDispatcher();
+    const tm = new TriggerManager();
+    const disabled = tm.add({ event: 'Post:tool:*', action: 'echo disabled' });
+    tm.disable(disabled.id);
+    tm.add({ event: 'Pre:tool:*', action: 'echo other-phase' });
+    // Triggers are evaluated in order, so once this one has started the two
+    // above have already been skipped.
+    const enabled = tm.add({ event: 'Post:tool:*', action: 'echo enabled' });
+    dispatcher.setTriggerManager(tm);
+
+    const started = nextSpawn();
+    await dispatcher.fire(toolEvent('read'));
+    await started;
+
+    expect(spawned.map((s) => s.triggerId)).toEqual([enabled.id]);
+  });
+
+  test('a detached trigger manager is not consulted', async () => {
+    const dispatcher = new HookDispatcher();
+    const tm = new TriggerManager();
+    tm.add({ event: 'Post:tool:*', action: 'echo should-not-run' });
     dispatcher.setTriggerManager(tm);
     dispatcher.setTriggerManager(null);
+
+    await dispatcher.fire(toolEvent('read'));
+    // A second dispatcher with a manager supplies the positive gate: its spawn
+    // proves the first fire had every chance to start its own action.
+    const gate = new HookDispatcher();
+    const gateTriggers = new TriggerManager();
+    const gated = gateTriggers.add({ event: 'Post:tool:*', action: 'echo gate' });
+    gate.setTriggerManager(gateTriggers);
+    const started = nextSpawn();
+    await gate.fire(toolEvent('read'));
+    await started;
+
+    expect(spawned.map((s) => s.triggerId)).toEqual([gated.id]);
   });
 
-  test('fire() with triggerManager fires matching triggers (no hooks registered)', async () => {
+  test('the hook result is unaffected by a failing trigger action', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = (await getTestTriggerManager());
-    tm.add({ event: 'Post:tool:*', action: 'echo trigger-fired' });
-    dispatcher.setTriggerManager(tm);
-
-    // Firing event with matching trigger pattern
-    const result = await dispatcher.fire({
-      path: 'Post:tool:read',
-      phase: 'Post',
-      category: 'tool',
-      specific: 'read',
-      sessionId: '',
-      timestamp: Date.now(),
-      payload: {},
-    });
-    // Hook result is ok (no hooks registered, just triggers)
-    expect(result.ok).toBe(true);
-  });
-
-  test('fire() with triggerManager does not fire disabled triggers', async () => {
-    const dispatcher = new HookDispatcher();
-    const tm = (await getTestTriggerManager());
-    const trigger = tm.add({ event: 'Post:tool:*', action: 'echo disabled' });
-    tm.disable(trigger.id);
-    dispatcher.setTriggerManager(tm);
-
-    // Should complete without throwing
-    const result = await dispatcher.fire({
-      path: 'Post:tool:read',
-      phase: 'Post',
-      category: 'tool',
-      specific: 'read',
-      sessionId: 'trigger-wire-test',
-      timestamp: Date.now(),
-      payload: {},
-    });
-    expect(result.ok).toBe(true);
-  });
-
-  test('fire() result is unaffected by triggers (triggers are fire-and-forget)', async () => {
-    const dispatcher = new HookDispatcher();
-    const tm = (await getTestTriggerManager());
+    const tm = new TriggerManager();
     tm.add({ event: 'Post:tool:*', action: 'echo side-effect' });
     dispatcher.setTriggerManager(tm);
+    spawnSpy.mockImplementation((() => { throw new Error('spawn refused'); }) as unknown as typeof Bun.spawn);
 
-    const result = await dispatcher.fire({
-      path: 'Post:tool:write',
-      phase: 'Post',
-      category: 'tool',
-      specific: 'write',
-      sessionId: 'trigger-wire-test',
-      timestamp: Date.now(),
-      payload: {},
-    });
-    // Trigger fires async; hook result is still clean
+    const result = await dispatcher.fire(toolEvent('write'));
+
     expect(result.ok).toBe(true);
     expect(result.decision).toBeUndefined();
   });

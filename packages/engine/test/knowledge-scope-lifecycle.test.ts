@@ -17,14 +17,15 @@ import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
 import { validateKnowledgeEdgeChanges } from '../platform/src/platform/knowledge/store-edge-generations.js';
 
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
+function track(store: KnowledgeStore): KnowledgeStore { stores.push(store); return store; }
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-scope-lifecycle-')); roots.push(root);
   const dbPath = join(root, 'knowledge.sqlite');
-  const store = new KnowledgeStore({ dbPath }); await store.init();
+  const store = track(new KnowledgeStore({ dbPath })); await store.init();
   const source = await store.upsertSource({ id: 'scope-source', connectorId: 'synthetic', sourceType: 'document',
     title: 'Home Assistant navigation design', description: 'An authored application design guide.', status: 'indexed',
     metadata: { knowledgeSpaceId: 'default', privateMetadata: 'NEVER_TRANSMIT_PRIVATE_METADATA' } });
@@ -159,7 +160,7 @@ describe('canonical knowledge scope lifecycle', () => {
     const { store, source, dbPath } = await fixture();
     installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     const selection = await prepareKnowledgeScopeSelection(store);
-    const writer = new KnowledgeStore({ dbPath }); await writer.init();
+    const writer = track(new KnowledgeStore({ dbPath })); await writer.init();
     await writer.upsertSource({ ...source, title: 'Externally replaced source content' });
     expect(selection.assertCurrent).toThrow('Knowledge scope selection held: stale');
     await expect(prepareKnowledgeScopeSelection(store)).rejects.toMatchObject({ reason: 'stale' });
@@ -174,7 +175,7 @@ describe('canonical knowledge scope lifecycle', () => {
         excerpt: 'An authored application guide explains navigation.', metadata: { knowledgeSpaceId: 'default' } });
       const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
       await prepareKnowledgeScopeSelection(store);
-      writer = new KnowledgeStore({ dbPath: item.dbPath }); await writer.init();
+      writer = track(new KnowledgeStore({ dbPath: item.dbPath })); await writer.init();
       if (kind === 'source') await writer.upsertSource({ ...item.source, title: 'Externally replaced original content' });
       else await writer.upsertExtraction({ ...extraction, excerpt: 'Externally replaced original explanation.' });
       const requests = fake.requests.length;
@@ -312,7 +313,7 @@ describe('canonical knowledge scope lifecycle', () => {
       relation: 'describes', weight: 0.8, metadata: { knowledgeSpaceId: 'default' } });
     installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     const graph = await buildKnowledgeSemanticGraphIndex(store, 'default');
-    const writer = mode === 'persisted' ? new KnowledgeStore({ dbPath }) : store;
+    const writer = mode === 'persisted' ? track(new KnowledgeStore({ dbPath })) : store;
     await writer.init();
     await writer.replaceEdgeRecord({ ...edge, relation: 'contradicts', weight: 0.1 });
     expect(graph.assertCurrent).toThrow('Knowledge scope selection held: stale');
@@ -325,7 +326,7 @@ describe('canonical knowledge scope lifecycle', () => {
     const node = await upsertObservedKnowledgeNode(store, input, 'catalog-structure', input, () => input);
     installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     const graph = await buildKnowledgeSemanticGraphIndex(store, 'default');
-    const writer = mode === 'persisted' ? new KnowledgeStore({ dbPath }) : store;
+    const writer = mode === 'persisted' ? track(new KnowledgeStore({ dbPath })) : store;
     await writer.init();
     await writer.upsertEdge({ fromKind: 'source', fromId: source.id, toKind: 'node', toId: node.id,
       relation: 'contradicts', weight: 0.1, metadata: { knowledgeSpaceId: 'default' } });
@@ -362,7 +363,7 @@ describe('canonical knowledge scope lifecycle', () => {
     installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
     const selection = await prepareKnowledgeScopeSelection(store);
     const assertEdgesCurrent = selection.retainEdges([primary], { incidentTo: [{ kind: 'source', id: source.id }] });
-    const writer = new KnowledgeStore({ dbPath }); await writer.init();
+    const writer = track(new KnowledgeStore({ dbPath })); await writer.init();
     await writer.replaceEdgeRecord({ ...unrelated, relation: 'contradicts' });
     selection.assertCurrent(); assertEdgesCurrent();
     if (mode === 'replacement') await writer.replaceEdgeRecord({ ...primary, relation: 'contradicts', weight: 0.1 });
@@ -432,7 +433,7 @@ describe('canonical knowledge scope lifecycle', () => {
     const assertEdgesCurrent = selection.retainEdges(selection.edges, window);
     assertEdgesCurrent(); expect(selection.edges).toEqual([]);
     expect(JSON.stringify(fake.requests)).not.toContain('original-missing');
-    const writer = mode === 'persisted' ? new KnowledgeStore({ dbPath }) : store; await writer.init();
+    const writer = mode === 'persisted' ? track(new KnowledgeStore({ dbPath })) : store; await writer.init();
     await writer.upsertEdge({ fromKind: 'source', fromId: source.id, toKind: 'node', toId: 'new-missing', relation: 'documents',
       metadata: { privateBody: '4111111111111111' } });
     expect(assertEdgesCurrent).toThrow('Knowledge scope selection held: stale');
@@ -450,7 +451,7 @@ describe('canonical knowledge scope lifecycle', () => {
       legacy.run('DROP TRIGGER knowledge_edge_change_update'); legacy.run('DROP TABLE knowledge_edge_changes');
       legacy.run('PRAGMA user_version=9'); await legacy.save();
     } finally { legacy.close(); }
-    const migrated = new KnowledgeStore({ dbPath });
+    const migrated = track(new KnowledgeStore({ dbPath }));
     try {
       await migrated.init();
       expect(migrated.getSource(source.id)).toEqual(source);

@@ -1,21 +1,14 @@
 import { RuntimeEventBus, type ToolEvent } from '../platform/src/platform/runtime/events/index.ts';
-import { decideAutonomousTool as publicSelector } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { decideAutonomousTool } from '../platform/src/platform/permissions/autonomous.ts';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { withDecisionLog, SqliteDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
 import { PermissionManager, type GateOptions, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
-import type { PolicyRule } from '../platform/src/platform/runtime/permissions/types.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
-import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
-import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
 import { InspectTool } from '../platform/src/platform/tools/inspect/index.ts';
-import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
-import { judgmentInputProblem } from '../platform/src/platform/gate/judgment-input.ts';
 import { EXEC_TOOL_SCHEMA } from '../platform/src/platform/tools/exec/schema.ts';
 
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -41,13 +34,13 @@ beforeEach(() => {
 afterEach(() => { installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings(); });
 
 const args = () => ({ commands: [{ cmd: 'git commit -m autonomous-fixture' }] });
-function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null = null, policyEnabled = false, mode: 'safe-owner' | 'safe-jev' | 'yolo' = 'safe-owner') {
+function fixture(gate: GateOptions = {}, mode: 'safe-owner' | 'safe-jev' | 'yolo' = 'safe-owner') {
   let directory = '/synthetic/autonomous-gate';
   const config: PermissionConfigReader = { getAutonomousSnapshot: () => ({ permissions: { mode, tools: {} }, autoApprove: false, directory }), isAutoApproveEnabled: () => false, getWorkingDirectory: () => directory,
     getSnapshot: () => ({ permissions: { mode, tools: {} } }) } as PermissionConfigReader;
   const state = new PolicyRuntimeState();
   // No human handler installed. This is the original failing-before acceptance path.
-  const manager = new PermissionManager(undefined, config, state, null, { isEnabled: () => policyEnabled }, store, gate);
+  const manager = new PermissionManager(undefined, config, state, null, { isEnabled: () => false }, null, gate);
   const registry = new ToolRegistry(); const executed: Record<string, unknown>[] = [];
   registry.register({ definition: { name: 'exec', description: 'Intercepted tool; never executes a shell', parameters: EXEC_TOOL_SCHEMA },
     execute: async input => { executed.push(input); return { success: true, output: 'intercepted' }; } });
@@ -58,7 +51,7 @@ function fixture(gate: GateOptions = {}, store: UserPermissionRuleStore | null =
 const run = (deps: ToolExecutionDeps, input = args(), id = 'call-1') => executeToolCalls(deps, 'turn-1', [{ id, name: 'exec', arguments: input }]);
 
 test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s retains one compact replay source across batches and new deps objects', async mode => {
-  const f = fixture({}, null, false, mode);
+  const f = fixture({}, mode);
   const prepare = spyOn(f.manager, 'autonomousPreparation');
   try {
     expect((await run(f.deps))[0]?.success).toBe(true);
@@ -73,7 +66,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s retains one compact r
 });
 
 test.each(['session', 'turn', 'call'] as const)('changing only the %s protocol reference admits a distinct invocation', async component => {
-  const f = fixture({}, null, false, 'yolo');
+  const f = fixture({}, 'yolo');
   expect((await run(f.deps))[0]?.success).toBe(true);
   const deps = { ...f.deps, sessionId: component === 'session' ? 'another-session' : f.deps.sessionId };
   const result = await executeToolCalls(deps, component === 'turn' ? 'another-turn' : 'turn-1', [
@@ -84,19 +77,19 @@ test.each(['session', 'turn', 'call'] as const)('changing only the %s protocol r
 });
 
 test('nested tuple identity has no delimiter collisions and different managers retain independent claims', async () => {
-  const f = fixture({}, null, false, 'yolo');
+  const f = fixture({}, 'yolo');
   for (const [sessionId, turn] of [['session:part', 'turn'], ['session', 'part:turn']] as const) {
     expect((await executeToolCalls({ ...f.deps, sessionId }, turn, [{ id: 'same-call', name: 'exec', arguments: args() }]))[0]?.success).toBe(true);
   }
   expect(f.executed).toHaveLength(2);
-  const other = fixture({}, null, false, 'yolo');
+  const other = fixture({}, 'yolo');
   expect((await run(f.deps))[0]?.success).toBe(true);
   expect((await run(other.deps))[0]?.success).toBe(true);
   expect(other.executed).toHaveLength(1);
 });
 
 test('concurrent replay while an admitted effect is running cannot execute again', async () => {
-  const f = fixture({}, null, false, 'yolo');
+  const f = fixture({}, 'yolo');
   let entered!: () => void, release!: () => void;
   const active = new Promise<void>(resolve => { entered = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -115,7 +108,7 @@ test('concurrent replay while an admitted effect is running cannot execute again
 });
 
 test('cancelling a claimed execution does not widen retry authority through a new turn signal', async () => {
-  const f = fixture({}, null, false, 'yolo');
+  const f = fixture({}, 'yolo');
   const controller = new AbortController();
   let executions = 0;
   f.registry.register({ definition: { name: 'cancel_after_effect', description: 'Cancellation fixture', parameters: { type: 'object' } },
@@ -134,7 +127,7 @@ test.each(['safe-owner', 'safe-jev'] as const)('%s halts the tool batch after de
     fetch: async () => { attempts++; return new Response('', { status: 503 }); },
   });
   installJudgmentPort(withDecisionLog(transport, log));
-  const { deps, executed } = fixture({}, null, false, mode);
+  const { deps, executed } = fixture({}, mode);
   await expect(executeToolCalls(deps, 'outage-turn', [
     { id: 'first', name: 'exec', arguments: args() }, { id: 'second', name: 'exec', arguments: args() },
   ])).rejects.toMatchObject({ kind: 'unavailable' });
@@ -144,7 +137,7 @@ test.each(['safe-owner', 'safe-jev'] as const)('%s halts the tool batch after de
 
 test.each(['act', 'reject', 'defer_0'])('YOLO ignores Jev %s and runs the exact valid tool call', async selected => {
   choice = selected; confidence = 0.1;
-  const { deps, executed } = fixture({}, null, false, 'yolo');
+  const { deps, executed } = fixture({}, 'yolo');
   const [result] = await run(deps);
   expect(result?.success).toBe(true);
   expect(result?.autonomousDecision).toBeUndefined();
@@ -156,7 +149,7 @@ test.each(['act', 'reject', 'defer_0'])('YOLO ignores Jev %s and runs the exact 
 test('directory reads, search, edits, shell, settings and nested tools run without a Jev permission service', async () => {
   let judgments = 0;
   installJudgmentPort({ model: DEFAULT_MODEL, async ask() { judgments++; throw new Error('Jev unavailable'); } });
-  const { deps, manager, registry } = fixture({}, null, false, 'yolo');
+  const { deps, manager, registry } = fixture({}, 'yolo');
   deps.autonomousSource = () => ({ goal: 'give this project a code review', criteria: [] });
   const tools = ['repo_map', 'read', 'find', 'inspect', 'analyze', 'write', 'edit', 'goodvibes_settings', 'mcp'];
   const executed: string[] = [];

@@ -156,16 +156,19 @@ type ModelCatalogRegistry = Pick<ProviderRegistry, 'listModels' | 'getContextWin
 
 export class RegistryBackedCatalog implements ModelCatalog {
   private entriesCache: CatalogModelEntry[] | null = null;
-  private entriesCacheVersion = -1;
+  private entriesCacheSource: readonly unknown[] | null = null;
 
   constructor(private readonly registry: ModelCatalogRegistry) {}
 
   private getEntries(): CatalogModelEntry[] {
     const models = this.registry.listModels();
-    if (this.entriesCache !== null && models.length === this.entriesCacheVersion) {
+    // The registry hands out a new array whenever its models, tiers or learned
+    // limits change, so the array itself is the cache key (a count would miss a
+    // refresh that swaps models one for one).
+    if (this.entriesCache !== null && models === this.entriesCacheSource) {
       return this.entriesCache;
     }
-    this.entriesCacheVersion = models.length;
+    this.entriesCacheSource = models;
     this.entriesCache = models.map((model): CatalogModelEntry => ({
       id: model.id,
       displayName: model.displayName,

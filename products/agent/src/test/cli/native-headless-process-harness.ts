@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 import type { NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeIntakeJournalRecord } from '../../runtime/native-conversation-intake-journal.ts';
-import { isolatedEnv, lastUserText, makeHome, closeE2EFixture, startStubModel, type E2EHome, type ModelRequest, type ModelReply } from '../e2e/harness.ts';
+import { assertBinaryFresh, builtAgentBinary, isolatedEnv, lastUserText, newestBuildSourceMtimeMs, makeHome, closeE2EFixture, startStubModel, type E2EHome, type ModelRequest, type ModelReply } from '../e2e/harness.ts';
 import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { startE2ENativeHost } from '../e2e/native-host-fixture.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -93,14 +93,31 @@ export function readEnvelope(output: HeadlessOutput): NativeEnvelope {
 
 /** Override only the artifact, never replace main.ts with a test-only entrypoint. */
 function command(product: HeadlessProduct): string[] {
-  const binary = process.env[`GOODVIBES_HEADLESS_${product.toUpperCase()}_BINARY`];
+  const binary = process.env[`GOODVIBES_TEST_HEADLESS_${product.toUpperCase()}_BINARY`];
   if (binary) {
     const path = resolve(binary);
     if (!existsSync(path)) throw new Error(`Requested ${product} headless binary does not exist: ${path}`);
     return [path];
   }
-  if (process.env.GOODVIBES_HEADLESS_REQUIRE_BINARIES === '1') throw new Error(`Compiled proof requires GOODVIBES_HEADLESS_${product.toUpperCase()}_BINARY`);
-  return [process.execPath, join(productsRoot, product, 'src/main.ts')];
+  if (process.env.GOODVIBES_TEST_HEADLESS_REQUIRE_BINARIES === '1') throw new Error(`Compiled proof requires GOODVIBES_TEST_HEADLESS_${product.toUpperCase()}_BINARY`);
+  const built = product === 'agent' ? currentAgentBinary() : undefined;
+  return built ? [built] : [process.execPath, join(productsRoot, product, 'src/main.ts')];
+}
+
+let builtChecked: string | undefined;
+/** Each source run transpiles the whole product graph (about two seconds per process); the built
+ * artifact starts in milliseconds. A stale artifact is refused like the end-to-end harness refuses
+ * it, so a source change is never proven against old code; no artifact means a source run. CI
+ * builds the artifact from the commit under test, so it is not compared against file times. */
+function currentAgentBinary(): string | undefined {
+  const binary = builtAgentBinary();
+  if (binary === undefined) return undefined;
+  if (builtChecked !== binary && !process.env['CI']) {
+    try { assertBinaryFresh(binary, newestBuildSourceMtimeMs()); }
+    catch (error) { throw new Error(String(error instanceof Error ? error.message : error).replace('GOODVIBES_E2E_BINARY', 'GOODVIBES_TEST_HEADLESS_AGENT_BINARY')); }
+    builtChecked = binary;
+  }
+  return binary;
 }
 
 export interface HeadlessFixtureOptions {

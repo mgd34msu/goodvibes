@@ -5,7 +5,7 @@ import '@goodvibes-jev/engine/platform/platform/permissions';
 import '../renderer/theme.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { HunkSelectionState } from './hunk-selection.ts';
-import { rememberScopeKey, renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
+import { rememberScope, renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
 export { buildPendingPermissionExtras } from './hunk-selection.ts';
 export { permissionButtons, type PermissionButton, type PermissionButtonId, type PermissionCardState } from './prompt-card.ts';
 
@@ -52,12 +52,10 @@ export interface PendingPromptView {
  */
 export class PermissionPromptUI extends PermissionPromptFacts {
   /**
-   * The exact session-scoped permission rule "Allow for session" remembers.
-   * Mirrors the platform PermissionManager's approval key (`<tool>:<path>`,
-   * `<tool>:<command>`, else the bare `<tool>`).
+   * What "Allow for session" remembers, in the platform's own words.
    */
-  static rememberScopeKey(request: PermissionPromptRequest): string {
-    return rememberScopeKey(request);
+  static rememberScope(request: PermissionPromptRequest): string {
+    return rememberScope(request);
   }
 
   /**

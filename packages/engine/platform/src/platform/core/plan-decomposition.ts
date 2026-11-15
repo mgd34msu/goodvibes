@@ -154,6 +154,12 @@ export interface DecomposeGoalRequest {
   constraints?: DecomposeGoalConstraints | undefined;
   /** Optional free-form user context handed to the planning agent. */
   userContext?: string | undefined;
+  /** Aborting stops the planning agent; the run then resolves as a cancelled fallback. */
+  signal?: AbortSignal | undefined;
+  /** The model the planning agent runs on, when the caller picked one. */
+  route?: DecompositionRoute | undefined;
+  /** Called right after the planning agent spawns, so ownership can be persisted while it runs. */
+  onStarted?: ((agentId: string) => void | Promise<void>) | undefined;
 }
 
 export interface DecompositionServiceConfig {
@@ -222,6 +228,10 @@ function extractJsonObject(text: string): string | null {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isDependencyRef(value: unknown): value is string | number {
+  return isNonEmptyString(value) || (typeof value === 'number' && Number.isFinite(value));
 }
 
 /**
@@ -293,6 +303,18 @@ export function parseDecomposition(text: string): ParsedDecomposition {
     }
   });
 
+  const rawDependencies = obj.dependencies;
+  if (rawDependencies !== undefined && !Array.isArray(rawDependencies)) {
+    errors.push('"dependencies" must be an array of {"from", "to"} objects.');
+  } else if (Array.isArray(rawDependencies)) {
+    rawDependencies.forEach((edge: unknown, i) => {
+      const e = typeof edge === 'object' && edge !== null ? edge as Record<string, unknown> : null;
+      if (!e || !isDependencyRef(e.from) || !isDependencyRef(e.to)) {
+        errors.push(`dependencies[${i}] must be an object with "from" and "to", each a non-empty title or an ordinal number.`);
+      }
+    });
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -307,7 +329,13 @@ export function parseDecomposition(text: string): ParsedDecomposition {
     ...(Array.isArray(obj.dependencies) ? { dependencies: (obj.dependencies as Array<{ from: string | number; to: string | number }>) } : {}),
   };
 
-  return { ok: true, raw: toRawDecomposition(output), ...(notes.length > 0 ? { notes } : {}), errors: [] };
+  let raw: RawDecomposition;
+  try {
+    raw = toRawDecomposition(output);
+  } catch (err) {
+    return { ok: false, errors: [`Output could not be converted into a plan: ${(err as Error).message}`] };
+  }
+  return { ok: true, raw, ...(notes.length > 0 ? { notes } : {}), errors: [] };
 }
 
 const DEFAULT_PHASE_TITLE = 'Execute';
@@ -458,11 +486,13 @@ function buildUserPrompt(request: DecomposeGoalRequest, repairErrors?: string[])
  * Control flow:
  *  1. `config.mode === 'heuristic'` → the configured heuristic path (no agent).
  *  2. The planner's decompose gate declines → honest single-item (no agent).
- *  3. No runner available → heuristic fallback (reason: no runtime).
+ *  3. No runner available → held (reason: no runtime).
  *  4. Agent path: run → parse → strict-validate → (assemble; issues===0 ?
  *     accept : ONE repair attempt) → accept-or-fallback. Spawn error,
  *     cancellation (kill / wall-timeout / token ceiling), or still-invalid
- *     output after repair all fall back to the heuristic path with a reason.
+ *     output after repair report a 'fallback' outcome with a reason. When the
+ *     gate said to decompose, that run is held: a JudgmentHeldError is thrown
+ *     rather than a single-item plan being substituted.
  */
 export async function decomposeGoal(
   request: DecomposeGoalRequest,
@@ -518,6 +548,9 @@ export async function decomposeGoal(
       userPrompt: buildUserPrompt(request, repairErrors),
       bounds: config.bounds,
       attempt,
+      ...(request.route === undefined ? {} : { route: request.route }),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+      ...(request.onStarted === undefined ? {} : { onStarted: request.onStarted }),
     });
     lastUsage = result.usage ?? lastUsage;
     totalElapsedMs += result.elapsedMs;

@@ -2,16 +2,11 @@ import type { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { autoRegisterProviders } from '../providers/auto-register.js';
-import { scan, loadPersistedProviders, persistProviders, removePersistedProviders, scanMcpServers } from '../discovery/index.js';
+import { scan, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { ShellPathService } from './shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
 import { splitModelRegistryKey } from '../providers/registry-helpers.js';
-
-const FALLBACK_MODEL = {
-  model: 'openrouter:openrouter/free',
-  provider: 'openrouter',
-} as const;
 
 export interface RuntimeSelectionState {
   model: string;
@@ -32,12 +27,31 @@ export interface BackgroundProviderDiscoveryOptions {
   systemMessageRouter: HostSystemMessageSink;
   shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>;
   surfaceRoot: string;
+  /**
+   * Register servers found on other machines of the network as providers. Off by default: any host that
+   * answers on a well-known port would otherwise become a provider that prompts can be sent to.
+   * Servers on this computer are always registered.
+   */
+  registerNetworkServers?: boolean | undefined;
+  /** The network scan; replaceable so a host or a test supplies its own. */
+  scan?: typeof scan | undefined;
 }
 
 export interface BackgroundRuntimeTaskHandle {
   readonly stopped: boolean;
-  stop(): void;
+  /** A handle that owns external resources returns the promise of their release; await it at shutdown. */
+  stop(): void | Promise<void>;
 }
+
+/** Whether a discovered server runs on this computer. */
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost' || normalized === '::1' || /^127(\.\d{1,3}){3}$/.test(normalized);
+}
+
+const serverKey = (server: { readonly host: string; readonly port: number }): string => `${server.host}:${server.port}`;
+const describeModels = (server: { readonly models: readonly unknown[] }): string =>
+  `${server.models.length} model${server.models.length !== 1 ? 's' : ''}`;
 
 /**
  * Starts one asynchronous provider discovery pass and returns a handle that
@@ -50,6 +64,8 @@ export function startBackgroundProviderDiscovery(
   options: BackgroundProviderDiscoveryOptions,
 ): BackgroundRuntimeTaskHandle {
   const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter, shellPaths, surfaceRoot } = options;
+  const runScan = options.scan ?? scan;
+  const trusted = (server: { readonly host: string }): boolean => options.registerNetworkServers === true || isLoopbackHost(server.host);
   autoRegisterProviders(providerRegistry);
   let stopped = false;
   const handle: BackgroundRuntimeTaskHandle = {
@@ -62,18 +78,21 @@ export function startBackgroundProviderDiscovery(
   };
 
   const persisted = loadPersistedProviders({ ...shellPaths, surfaceRoot });
+  const registrable = persisted.filter(trusted);
   if (persisted.length > 0) {
     try {
-      providerRegistry.registerDiscoveredProviders(persisted);
-      restoreRuntimeModel(
-        providerRegistry,
-        configManager.get('provider.model') as string,
-        runtime,
-      );
-      for (const server of persisted) {
-        systemMessageRouter.low(
-          `[Local] ${server.name} at ${server.host}:${server.port} (${server.models.length} model${server.models.length !== 1 ? 's' : ''}), from last session`,
+      if (registrable.length > 0) {
+        providerRegistry.registerDiscoveredProviders(registrable);
+        restoreRuntimeModel(
+          providerRegistry,
+          configManager.get('provider.model') as string,
+          runtime,
         );
+      }
+      for (const server of persisted) {
+        systemMessageRouter.low(trusted(server)
+          ? `[Local] ${server.name} at ${server.host}:${server.port} (${describeModels(server)}), from last session`
+          : `[Local] ${server.name} at ${server.host}:${server.port} is on the network, not on this computer, so it was not registered`);
       }
       requestRender();
     } catch (err) {
@@ -83,17 +102,18 @@ export function startBackgroundProviderDiscovery(
     }
   }
 
-  scan().then((result) => {
+  runScan().then((result) => {
     if (stopped) return;
-    const currentModel = configManager.get('provider.model') as string;
-    const foundKeys = new Set(result.servers.map((server) => `${server.host}:${server.port}`));
-    const persistedKeys = new Set(persisted.map((server) => `${server.host}:${server.port}`));
-    const newServers = result.servers.filter((server) => !persistedKeys.has(`${server.host}:${server.port}`));
-    const removedServers = persisted.filter((server) => !foundKeys.has(`${server.host}:${server.port}`));
+    const local = result.servers.filter(trusted);
+    const network = result.servers.filter((server) => !trusted(server));
+    const foundKeys = new Set(result.servers.map(serverKey));
+    const persistedKeys = new Set(persisted.map(serverKey));
+    const newServers = local.filter((server) => !persistedKeys.has(serverKey(server)));
+    const missedServers = registrable.filter((server) => !foundKeys.has(serverKey(server)));
 
-    if (result.servers.length > 0) {
+    if (local.length > 0) {
       try {
-        providerRegistry.registerDiscoveredProviders(result.servers);
+        providerRegistry.registerDiscoveredProviders(local);
         restoreRuntimeModel(
           providerRegistry,
           configManager.get('provider.model') as string,
@@ -108,41 +128,36 @@ export function startBackgroundProviderDiscovery(
 
     for (const server of newServers) {
       systemMessageRouter.low(
-        `[Scan] Found ${server.name} at ${server.host}:${server.port} (${server.models.length} model${server.models.length !== 1 ? 's' : ''})`,
+        `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)})`,
+      );
+    }
+    // A network host is never registered or remembered on its own say-so.
+    for (const server of network) {
+      systemMessageRouter.low(
+        `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)}) on the network; it was not registered. Register it only if you trust that machine.`,
       );
     }
 
-    if (result.servers.length > 0 && removedServers.length > 0) {
-      removePersistedProviders({ ...shellPaths, surfaceRoot }, removedServers);
-      for (const server of removedServers) {
-        systemMessageRouter.low(
-          `[Scan] ${server.name} at ${server.host}:${server.port} is no longer reachable, removed`,
-        );
-        const currentModelBareId = splitModelRegistryKey(currentModel).resolvedModelId;
-        const wasActive = server.models.includes(currentModelBareId);
-        if (wasActive) {
-          configManager.set('provider.model', FALLBACK_MODEL.model);
-          try {
-            providerRegistry.setCurrentModel(FALLBACK_MODEL.model);
-            runtime.model = FALLBACK_MODEL.model;
-            runtime.provider = FALLBACK_MODEL.provider;
-          } catch (err) {
-            logger.warn('[bootstrap] Model switch after server removal failed', {
-              error: summarizeError(err),
-            });
-          }
+    // One scan that misses a server is not proof it is gone (it may still be starting), so nothing is
+    // removed, switched or rewritten here; the cache drops a server that stays unseen for its age limit.
+    if (local.length > 0 && missedServers.length > 0) {
+      let currentModelBareId: string | undefined;
+      try { currentModelBareId = splitModelRegistryKey(configManager.get('provider.model') as string).resolvedModelId; } catch { /* An unqualified saved model names no server. */ }
+      for (const server of missedServers) {
+        systemMessageRouter.low(`[Scan] ${server.name} at ${server.host}:${server.port} did not answer this scan; it is kept`);
+        if (currentModelBareId !== undefined && server.models.includes(currentModelBareId)) {
           systemMessageRouter.high(
-            `[Scan] Active model was on ${server.name}, switched to ${FALLBACK_MODEL.model}`,
+            `[Scan] The active model is on ${server.name}, which did not answer this scan. Nothing was switched and your saved model is unchanged; pick another model if requests fail.`,
           );
         }
       }
     }
 
-    if (result.servers.length > 0) {
-      persistProviders({ ...shellPaths, surfaceRoot }, result.servers);
+    if (local.length > 0) {
+      persistProviders({ ...shellPaths, surfaceRoot }, local);
     }
 
-    if (newServers.length > 0 || removedServers.length > 0) {
+    if (newServers.length > 0 || missedServers.length > 0 || network.length > 0) {
       requestRender();
     }
   }).catch((error: unknown) => {
@@ -180,6 +195,11 @@ export function scheduleBackgroundMcpDiscovery(options: BackgroundMcpDiscoveryOp
         clearTimeout(scanTimer);
         scanTimer = null;
       }
+      // The connect started below keeps running after the flag flips, and a terminal surface has no other
+      // owner of the registry's stdio children and HTTP sessions.
+      return mcpRegistry.disconnectAll().catch((err: unknown) => {
+        logger.warn('MCP disconnect at shutdown failed', { error: summarizeError(err) });
+      });
     },
   };
 

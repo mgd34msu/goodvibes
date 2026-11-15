@@ -18,6 +18,7 @@ import { withAnswerVerificationBudget } from '../platform/src/platform/knowledge
 import { KnowledgeAnswerQualityHeldError } from '../platform/src/platform/knowledge/semantic/answer-verification/types.js';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import type { KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/types.js';
+import { settleAll } from './_helpers/event-loop-turns.ts';
 let previous: JudgmentPort | undefined;
 const roots: string[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
@@ -171,18 +172,19 @@ describe('end-to-end answer quality barrier', () => {
   });
   test('the 100 ms whole-operation budget forbids late answer-quality requests and issues', async () => {
     const { store, input } = await fixture(); const fake = readings(); const started = Promise.withResolvers<void>(), release = Promise.withResolvers<string>();
-    const pending = answerKnowledgeQuery({ store, llm: llm(async () => { started.resolve(); return release.promise; }) }, { ...input, timeoutMs: 100 });
+    const generations: Promise<unknown>[] = [];
+    const pending = answerKnowledgeQuery({ store, llm: llm((): Promise<string> => { started.resolve(); const generation = release.promise; generations.push(generation); return generation; }) }, { ...input, timeoutMs: 100 });
     const observed = pending.then(() => undefined, () => undefined);
     await Promise.race([started.promise, observed]);
     try { await held(pending, 'budget'); }
     finally { release.resolve('Four HDMI ports.'); }
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await settleAll(() => generations);
     expect(fake.requests.some((request) => 'fidelity' in request.questions)).toBe(false); expect(store.listIssues()).toEqual([]);
   });
   test('the canonical 100 ms budget retires an admitted generator that ignores its signal', async () => {
     const fake = readings(); const started = Promise.withResolvers<void>(), release = Promise.withResolvers<string>();
-    let providerSignal: AbortSignal | undefined; let continuations = 0;
-    const pending = withAnswerVerificationBudget(async (signal, deadlineAt) => {
+    let providerSignal: AbortSignal | undefined; let continuations = 0; const operations: Promise<unknown>[] = [];
+    const pending = withAnswerVerificationBudget((signal, deadlineAt) => { const operation = (async () => {
       const generated = await synthesizeAnswer(llm(async (request) => {
         providerSignal = request.signal;
         started.resolve(); return release.promise;
@@ -191,25 +193,27 @@ describe('end-to-end answer quality barrier', () => {
       continuations++;
       if (signal.aborted) throw new KnowledgeAnswerQualityHeldError('aborted');
       return generated;
-    }, 100);
+    })(); operations.push(operation); return operation; }, 100);
     const observed = pending.then(() => undefined, () => undefined);
     const enteredGeneration = await Promise.race([started.promise.then(() => true), observed.then(() => false)]);
     try { expect(enteredGeneration).toBe(true); await held(pending, 'budget'); }
     finally { release.resolve('Four HDMI ports.'); }
     expect(providerSignal?.aborted).toBe(true);
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    await settleAll(() => operations);
     expect(continuations).toBe(1); expect(fake.requests).toEqual([]);
   });
   test('ignored-signal retrieval stops subsequent requests after the total deadline', async () => {
     const { store, input } = await fixture(); const fake = readings(); const release = Promise.withResolvers<void>(); let requests = 0;
-    installJudgmentPort({ ...fake.port, async ask(request) { requests++; await release.promise; return fake.port.ask(request); } });
+    const asks: Promise<unknown>[] = [];
+    installJudgmentPort({ ...fake.port, ask(request) { requests++; const ask = (async () => { await release.promise; return fake.port.ask(request); })(); asks.push(ask); return ask; } });
     await held(answerKnowledgeQuery({ store }, { ...input, timeoutMs: 20 }), 'budget'); const atDeadline = requests; release.resolve();
-    await new Promise<void>((resolve) => setTimeout(resolve, 10)); expect(requests).toBe(atDeadline); expect(store.listIssues()).toEqual([]);
+    await settleAll(() => asks); expect(requests).toBe(atDeadline); expect(store.listIssues()).toEqual([]);
   });
   test('explicit abort stops generation and forbids later judgments or writes', async () => {
     const { store, input } = await fixture(); const fake = readings(); const controller = new AbortController(); const release = Promise.withResolvers<string>(), started = Promise.withResolvers<void>();
-    const pending = answerKnowledgeQuery({ store, llm: llm(async () => { started.resolve(); return release.promise; }) }, { ...input, signal: controller.signal });
-    await started.promise; controller.abort(); await held(pending, 'aborted'); release.resolve('Four HDMI ports.'); await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    const generations: Promise<unknown>[] = [];
+    const pending = answerKnowledgeQuery({ store, llm: llm((): Promise<string> => { started.resolve(); const generation = release.promise; generations.push(generation); return generation; }) }, { ...input, signal: controller.signal });
+    await started.promise; controller.abort(); await held(pending, 'aborted'); release.resolve('Four HDMI ports.'); await settleAll(() => generations);
     expect(fake.requests.some((request) => 'fidelity' in request.questions)).toBe(false); expect(store.listIssues()).toEqual([]);
   });
 });

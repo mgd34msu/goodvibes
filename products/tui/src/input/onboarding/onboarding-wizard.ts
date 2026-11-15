@@ -643,6 +643,15 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
   }
 
   public markApplied(): void {
+    // The secrets are stored now; keep none of them in memory or in captureSnapshot().
+    // Dropping the entry (not blanking it) makes the field read as untouched again.
+    for (const step of this.steps) {
+      for (const field of step.fields) {
+        if (field.kind !== 'masked') continue;
+        this.textState.delete(field.id);
+        this.baselineTextState.delete(field.id);
+      }
+    }
     this.baselineToggleState.clear();
     for (const [key, value] of this.toggleState) this.baselineToggleState.set(key, value);
     this.baselineRadioState.clear();

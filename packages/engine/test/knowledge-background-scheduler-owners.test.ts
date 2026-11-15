@@ -9,13 +9,13 @@ function result(candidateGaps = 1): KnowledgeSemanticSelfImproveResult {
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
-function fixture(options: { run?: (input: KnowledgeSemanticSelfImproveInput) => Promise<KnowledgeSemanticSelfImproveResult>; paused?: () => boolean } = {}) {
+function fixture(options: { run?: (input: KnowledgeSemanticSelfImproveInput) => Promise<KnowledgeSemanticSelfImproveResult>; paused?: () => boolean; admit?: () => { allowed: boolean; reason?: string } } = {}) {
   let now = 0;
   const timers: { callback: () => void; at: number; signal: AbortSignal | undefined }[] = [];
   const runs: KnowledgeSemanticSelfImproveInput[] = [];
   const scheduler = new BackgroundSelfImproveScheduler({
     run(input) { runs.push(input); return options.run?.(input) ?? Promise.resolve(result()); },
-    enabled: () => true, isPaused: options.paused,
+    enabled: () => true, isPaused: options.paused, admit: options.admit,
     minDelayMs: () => 5_000, backoffMs: () => 3_600_000, now: () => now,
     schedule(callback, delayMs, signal) { timers.push({ callback, at: now + delayMs, signal }); },
   });
@@ -162,4 +162,26 @@ test('a run callback that disposes synchronously is already registered in that d
   expect(disposing).toBeDefined(); expect(f.runs[0]!.signal?.aborted).toBe(true);
   let drained = false; void disposing!.then(() => { drained = true; }); await flush(); expect(drained).toBe(false);
   pending.resolve(result()); await disposing; expect(drained).toBe(true);
+});
+
+test('gap ids from a run the governor refused ride along with the next trigger for that scope', async () => {
+  let allowed = false;
+  const f = fixture({ admit: () => ({ allowed, reason: 'critical memory pressure' }) });
+  f.scheduler.queue({ knowledgeSpaceId: 'scope', gapIds: ['refused-gap'], reason: 'answer' }); await f.advance(5_000);
+  expect(f.runs).toHaveLength(0);
+  allowed = true;
+  f.scheduler.queue({ knowledgeSpaceId: 'scope', gapIds: ['later-gap'], reason: 'answer' }); await f.advance(5_000);
+  expect(f.runs).toHaveLength(1);
+  expect([...(f.runs[0]!.gapIds ?? [])].sort()).toEqual(['later-gap', 'refused-gap']);
+  await f.scheduler.dispose();
+});
+
+test('a failed run backs off its scope instead of re-running on every trigger', async () => {
+  const f = fixture({ run: async () => { throw new Error('provider unavailable'); } });
+  f.scheduler.queue({ knowledgeSpaceId: 'failing', reason: 'reindex' }); await f.advance(5_000);
+  f.scheduler.queue({ knowledgeSpaceId: 'failing', reason: 'reindex' }); await f.advance(5_000);
+  expect(f.runs).toHaveLength(1);
+  f.scheduler.queue({ knowledgeSpaceId: 'failing', reason: 'reindex', gapIds: ['new-evidence'] }); await f.advance(5_000);
+  expect(f.runs).toHaveLength(2);
+  await f.scheduler.dispose();
 });

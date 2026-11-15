@@ -70,3 +70,20 @@ test('cancel does not turn a fired on-exit trigger into cancelled', async () => 
   expect(manager.cancel('x')?.state).toBe('fired');
   expect(manager.reset('x')).toBeNull();
 });
+
+test('a non-finite number anywhere in a definition is refused and leaves the manager usable', async () => {
+  const f = streamFixture();
+  const bad = JSON.parse('{"id":"cond","label":"C","spec":{"kind":"condition","probe":{"kind":"platform-tool","tool":"t","args":{}},"rule":{"kind":"threshold","operator":">","operand":1e999},"intervalMs":1000},"action":{"kind":"agent-turn"}}') as unknown;
+  await expect(f.manager.create(bad)).rejects.toThrow(/finite number/);
+  expect((await f.manager.create(streamDef)).definition.id).toBe('stream');
+});
+
+test('a non-finite createdAt or extra top-level field is refused and leaves the manager usable', async () => {
+  const f = streamFixture();
+  const stream = JSON.stringify(streamDef).slice(0, -1);
+  const badCreatedAt = JSON.parse(`${stream},"createdAt":1e999}`) as unknown;
+  await expect(f.manager.create(badCreatedAt)).rejects.toThrow(/definition\.createdAt.*finite number/);
+  const badExtra = JSON.parse(`${stream},"foo":1e999}`) as unknown;
+  await expect(f.manager.create(badExtra)).rejects.toThrow(/definition\.foo.*finite number/);
+  expect((await f.manager.create(streamDef)).definition.id).toBe('stream');
+});

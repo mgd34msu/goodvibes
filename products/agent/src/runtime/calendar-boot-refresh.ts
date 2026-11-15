@@ -29,7 +29,6 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   CalendarSubscriptionRegistry,
-  createHttpFeedFetcher,
   type RefreshOutcome,
   type SubscriptionSecretStore,
 } from '../agent/calendar-subscription-registry.ts';
@@ -78,15 +77,16 @@ export function formatCalendarBootRefreshLine(outcomes: readonly RefreshOutcome[
 /**
  * Kick off the non-blocking boot refresh. Returns a promise that settles when
  * the background pass finishes (bootstrap ignores it; tests await it). Never
- * throws to the caller; failures are logged at debug and reported per-feed in
- * the aggregate line.
+ * throws to the caller; a feed that fails is reported per-feed in the aggregate
+ * line, and a failure of the pass itself is reported as one `[Calendar] refresh
+ * failed` line.
  */
 export function scheduleCalendarSubscriptionBootRefresh(options: CalendarBootRefreshOptions): Promise<void> {
   const run = async (): Promise<void> => {
     try {
       const registry = options.buildRegistry
         ? options.buildRegistry()
-        : CalendarSubscriptionRegistry.create(options.shellPaths, options.secretsManager, createHttpFeedFetcher());
+        : CalendarSubscriptionRegistry.create(options.shellPaths, options.secretsManager);
       if (!registry.hasAny()) return; // nothing subscribed -> no network, no line
 
       // force:false, only feeds due per their own bounded interval are fetched;
@@ -99,6 +99,10 @@ export function scheduleCalendarSubscriptionBootRefresh(options: CalendarBootRef
       }
     } catch (error) {
       logger.debug('Calendar subscription boot refresh failed', { error: summarizeError(error) });
+      // The per-feed line above only exists when the refresh itself returned; a throw
+      // would otherwise leave the calendar silently stale.
+      options.systemMessageRouter.low(`[Calendar] refresh failed: ${summarizeError(error)}. Subscribed calendars keep their last saved events; run /calendar refresh to retry.`);
+      options.requestRender();
     }
   };
   return run();

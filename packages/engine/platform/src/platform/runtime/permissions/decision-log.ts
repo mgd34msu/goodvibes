@@ -65,8 +65,9 @@ export class DecisionLog {
   private readonly maxEntries: number;
 
   constructor(maxEntries: number = DEFAULT_MAX_ENTRIES) {
-    this.maxEntries = maxEntries;
-    this.buffer = new Array(maxEntries);
+    // A size of 0 (or a non-number) would make the ring index `% 0` NaN.
+    this.maxEntries = Number.isFinite(maxEntries) ? Math.max(1, Math.floor(maxEntries)) : DEFAULT_MAX_ENTRIES;
+    this.buffer = new Array(this.maxEntries);
   }
 
   /**

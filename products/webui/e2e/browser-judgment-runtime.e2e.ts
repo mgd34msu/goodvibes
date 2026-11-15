@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { nextFrames, openNavigation } from './support/app';
 import { installBrowserJudgmentRuntimeDaemon } from './support/browser-judgment-runtime-fixture';
 import { installMockDaemon } from './support/mock-daemon';
+import { E2E_OPERATOR_TOKEN } from './support/seed';
 
 async function openPalette(page: Page) {
   await expect(page.locator('.app-shell')).toBeVisible();
@@ -47,7 +48,7 @@ test('runtime-issued unknown-method reading lets the real App finish its confirm
   expect(daemon.judgments[0]).toMatchObject({ battery: 'webui.errors.daemon-refusal', input: daemon.capture.errorSettled.requestBody.input });
   const deletion = daemon.requests.findIndex(request => request.method === 'DELETE');
   await expect.poll(() => daemon.requests.slice(deletion + 1).some(request => request.method === 'GET' && request.path === '/api/companion/chat/sessions')).toBe(true);
-  expect(daemon.requests.filter(request => request.method !== 'GET').every(request => request.authorization === 'Bearer e2e-operator-token')).toBe(true);
+  expect(daemon.requests.filter(request => request.method !== 'GET').every(request => request.authorization === `Bearer ${E2E_OPERATOR_TOKEN}`)).toBe(true);
 });
 
 for (const refusal of ['held', 'missing-reference'] as const) {

@@ -76,7 +76,7 @@ test('an existing version-zero database with real source content retains every h
   expect(opened.calls.migrations).toEqual(Array.from({ length: KNOWLEDGE_SCHEMA_VERSION }, (_, index) => index + 1));
   expect(opened.store.getSource('original-v0')?.title).toBe('Original version-zero content');
   expect(backing(opened.store).exec('PRAGMA user_version')[0]?.values).toEqual([[KNOWLEDGE_SCHEMA_VERSION]]);
-  const directory = storeSnapshotDir(file), snapshots = readdirSync(directory).filter(name => name.includes('pre-migration-v0-to-v17'));
+  const directory = storeSnapshotDir(file), snapshots = readdirSync(directory).filter(name => name.includes(`pre-migration-v0-to-v${KNOWLEDGE_SCHEMA_VERSION}`));
   expect(snapshots).toHaveLength(1);
   expect(readFileSync(join(directory, snapshots[0] ?? 'missing'))).toEqual(bytes);
 });

@@ -1,4 +1,3 @@
-/** Failure receipt migration regression source; executed only during qualification. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -6,12 +5,14 @@ import { dirname } from 'node:path';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
-import { triageSource } from './_helpers/triage-source.ts';
+import { triageSource, useTriageSourceCleanup } from './_helpers/triage-source.ts';
 import { runInboxTriage, readTriageMetadataBatch } from '../platform/src/platform/intake/triage/pipeline.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
 import type { TriageEvidence, TriageFailureReceipt, TriageReceipt } from '../platform/src/platform/intake/triage/types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+
+useTriageSourceCleanup();
 
 const item = (id = 'message-one') => ({ id, surface: 'synthetic', subject: 'Synthetic routine message', unread: true });
 const answered = () => fakePort(name => noulAnswer(name.endsWith('urgency') ? .99 : .01));

@@ -236,18 +236,16 @@ describe('WS call path retained-context caps', () => {
     expect(helper.wsCallStats().inFlight).toBe(0);
   });
 
-  test('a stalled WS consumer queues events on disk and drains them without dropping', async () => {
-    let sent = 0;
-    let buffered = 0;
+  function makeStalledConsumerHelper(emit: { send: (event: string, payload: unknown) => void }, count: number, stall: () => void) {
     const gateway = {
       openWebSocketClient: (_opts: unknown, send: (event: string, payload: unknown) => void) => {
-        // Fire 1000 events at a consumer whose buffered amount reports stalled.
-        buffered = 8 * 1024 * 1024; // above the 4MB ceiling
-        for (let i = 0; i < 1000; i++) send('ops', { i });
+        emit.send = send;
+        stall();
+        for (let i = 0; i < count; i++) send('ops', { i });
         return { clientId: 'c1', domains: [] };
       },
     };
-    const helper = new DaemonControlPlaneHelper({
+    return new DaemonControlPlaneHelper({
       authToken: () => 't',
       userAuth: {} as never,
       agentManager: {} as never,
@@ -260,16 +258,52 @@ describe('WS call path retained-context caps', () => {
       parseJsonBody: async () => ({}),
       requireAuthenticatedSession: () => null,
     });
+  }
+  const socketData = { channel: 'control-plane', authToken: 't', principalId: 'shared-token', principalKind: 'token', admin: true, scopes: ['*'], domains: [], clientKind: 'web', authenticated: true } as never;
+
+  test('a stalled WS consumer queues events on disk and drains them without dropping', async () => {
+    let sent = 0;
+    let buffered = 0;
+    let allSent!: () => void;
+    const delivered = new Promise<void>((resolve) => { allSent = resolve; });
+    const helper = makeStalledConsumerHelper({ send: () => {} }, 1000, () => {
+      buffered = 8 * 1024 * 1024; // above the 4MB ceiling
+    });
     helper.handleControlPlaneWebSocketOpen({
-      data: { channel: 'control-plane', authToken: 't', principalId: 'shared-token', principalKind: 'token', admin: true, scopes: ['*'], domains: [], clientKind: 'web', authenticated: true } as never,
-      send: () => { sent += 1; },
+      data: socketData,
+      send: () => { sent += 1; if (sent === 1000) allSent(); },
       getBufferedAmount: () => buffered,
     });
     expect(sent).toBe(0);
     expect(helper.wsCallStats().eventsDropped).toBe(0);
     buffered = 0;
-    for (let attempt = 0; sent < 1000 && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    await delivered;
     expect(sent).toBe(1000);
+    expect(helper.wsCallStats().eventsDropped).toBe(0);
+  });
+
+  test('events that cannot be delivered to a consumer whose socket refuses them are counted as dropped', async () => {
+    let buffered = 0;
+    let closed!: () => void;
+    const socketClosed = new Promise<void>((resolve) => { closed = resolve; });
+    const emit: { send: (event: string, payload: unknown) => void } = { send: () => {} };
+    const helper = makeStalledConsumerHelper(emit, 10, () => {
+      buffered = 8 * 1024 * 1024;
+    });
+    helper.handleControlPlaneWebSocketOpen({
+      data: socketData,
+      // Bun answers 0 when it dropped the message.
+      send: () => 0,
+      getBufferedAmount: () => buffered,
+      close: () => closed(),
+    } as never);
+    expect(helper.wsCallStats().eventsDropped).toBe(0);
+    buffered = 0;
+    await socketClosed;
+    // The one being sent when delivery failed, plus the nine still queued.
+    expect(helper.wsCallStats().eventsDropped).toBe(10);
+    emit.send('ops', { later: true });
+    expect(helper.wsCallStats().eventsDropped).toBe(11);
   });
 });
 

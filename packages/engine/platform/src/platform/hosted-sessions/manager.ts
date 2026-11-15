@@ -54,7 +54,7 @@ import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } f
 
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventEnvelope } from '../runtime/events/index.js';
+import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventEnvelope, TurnEvent } from '../runtime/events/index.js';
 import type { SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
 import { resolveHostedModelDefinition } from './model-route.js';
 import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime } from './session-runtime.js';
@@ -70,8 +70,8 @@ import {
   clampAttachmentLease,
 } from './attachments.js';
 export type { HostedSessionSpine } from './spine-intake.js';
-import { HostedSessionArgumentError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
-export { HostedSessionArgumentError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
+import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
+export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionUnavailableError } from './errors.js';
 import type {
   CreateHostedSessionInput,
   HostedDetachPolicy,
@@ -95,6 +95,11 @@ export interface HostedSessionEventPublisher {
    * second renewal signal for an attachment lease, see ./attachments.ts.
    */
   listClients?(): readonly { readonly id: string }[];
+  /**
+   * Whether this client's control-plane connection is open right now. Preferred
+   * over `listClients`, which also lists clients that disconnected recently.
+   */
+  isClientConnected?(clientId: string): boolean;
 }
 
 /** The live settings this engine reads. Read on every use, never cached. */
@@ -128,6 +133,8 @@ export interface HostedSessionManagerOptions {
   readonly liveTurns?: HostedLiveTurnRegistry | undefined;
   /** The shared session broker, so hosted sessions appear in `sessions.list`. */
   readonly spine?: HostedSessionSpine | undefined;
+  /** The daemon's bearer token, read live, handed to each session's tools for the Cloudflare status. */
+  readonly cloudflareAuthToken?: (() => string | null) | undefined;
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
   /**
@@ -147,6 +154,13 @@ export interface HostedSessionManagerOptions {
 export interface HostedSessionAttachment {
   readonly session: HostedSessionRecord;
   readonly history: readonly HostedSessionHistoryMessage[];
+  /**
+   * The daemon clock (ms) when `history` was read, present only while no turn
+   * is running. Every frame the daemon replays to a new event stream that is
+   * stamped at or before this is already in `history`; a running turn's frames
+   * may not be, so none is promised then and a client keeps every replayed frame.
+   */
+  readonly historyAsOf?: number | undefined;
 }
 
 interface LiveSession {
@@ -162,6 +176,15 @@ interface LiveSession {
   composition: Promise<void> | null;
   parking: Promise<void> | null;
   termination: Promise<HostedSessionRecord> | null;
+  /** The final transcript is on disk and no longer held in memory; nothing may persist this session again. */
+  released?: true;
+}
+
+/** A composition failure that may pass (registry not ready, floor busy): the session stays restored and the caller can retry. */
+class RecoverableComposeError extends Error {
+  constructor(readonly original: unknown) {
+    super(summarizeError(original));
+  }
 }
 
 const RESTART_NOTICE = 'This session was interrupted by a daemon restart. The turn that was running did not finish.';
@@ -239,6 +262,8 @@ export class HostedSessionManager {
         // Persist the reconciliation so the next restart does not repeat it.
         await this.persist(restored.record);
       }
+      const restoredLive = this.sessions.get(restored.record.id);
+      if (restoredLive && restored.record.status === 'terminated') this.releaseTranscript(restoredLive);
       this.publish(restored.terminated ? 'hosted-session-terminated' : 'hosted-session-restored', restored.record, {
         detail: restored.detail,
       });
@@ -356,6 +381,8 @@ export class HostedSessionManager {
   contractRunners(): HostedContractRunners {
     return {
       runners: () => this.floors.floors().map((floor) => floor.contractRunner),
+      knows: (sessionId) => this.sessions.has(sessionId),
+      ownedByOthers: (sessionId, principalId) => this.sessions.get(sessionId)?.attached.ownedByOthers(principalId) === true,
       forSession: async (sessionId) => {
         const live = this.sessions.get(sessionId);
         if (!live || live.record.status === 'terminated') return null;
@@ -431,7 +458,9 @@ export class HostedSessionManager {
         ...(model === undefined ? {} : { model }),
         ...(input.originSurface ? { originSurface: input.originSurface } : {}),
         contracts: this.sessionContracts(sessionId),
+        isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
+        ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
       });
       const record: HostedSessionRecord = {
         id: sessionId,
@@ -457,7 +486,7 @@ export class HostedSessionManager {
         attached: new HostedSessionAttachments(),
         initialization: null, composition: null, parking: null, termination: null,
       };
-      if (input.clientId) live.attached.renew(input.clientId, at, this.attachmentLeaseMs());
+      if (input.clientId) live.attached.renew(input.clientId, at, this.attachmentLeaseMs(), input.principalId);
       this.sessions.set(sessionId, live);
     } catch (error) {
       lease.release();
@@ -502,8 +531,14 @@ export class HostedSessionManager {
     this.assertSessionUsable(live);
     if (input.initialPrompt && input.initialPrompt.trim().length > 0) {
       // Not awaited: create returns the record, and the turn's progress is on
-      // the event stream. A failure is recorded on the session, never dropped.
-      void this.deliver(sessionId, input.initialPrompt).catch(() => undefined);
+      // the event stream. A failure before the loop reports its own turn error
+      // (the loop could not be composed, the engine was disposed) is logged and
+      // published here, so the first prompt is never lost without a trace.
+      void this.deliver(sessionId, input.initialPrompt).catch((error: unknown) => {
+        const detail = `the first prompt was not delivered: ${summarizeError(error)}`;
+        logger.warn('[hosted-sessions] the initial prompt of a new session was not delivered', { sessionId, error: summarizeError(error) });
+        this.publish('hosted-session-turn-ended', live.record, { detail });
+      });
     }
     this.assertSessionUsable(live);
     return live.record;
@@ -526,22 +561,25 @@ export class HostedSessionManager {
   async attach(
     sessionId: string,
     clientId: string,
-    options?: { readonly leaseMs?: number | undefined },
+    options?: { readonly leaseMs?: number | undefined; readonly principalId?: string | undefined },
   ): Promise<HostedSessionAttachment> {
     const live = this.requireLive(sessionId);
     await this.ensureComposed(live);
     this.assertSessionUsable(live);
+    if (live.attached.ownedByAnother(clientId, options?.principalId)) throw new HostedSessionClientOwnerError(sessionId, clientId);
     // Attaching again is how a client renews: the call was always idempotent,
     // and this is the same "polling renews the lease" shape the rewind host
     // registration uses. See ./attachments.ts.
-    live.attached.renew(clientId, this.now(), clampAttachmentLease(options?.leaseMs, this.attachmentLeaseMs()));
+    live.attached.renew(clientId, this.now(), clampAttachmentLease(options?.leaseMs, this.attachmentLeaseMs()), options?.principalId);
     live.record = {
       ...live.record,
       attachedClients: live.attached.clientIds(),
       updatedAt: this.now(),
     };
     this.publish('hosted-session-attached', live.record, { clientId });
-    return { session: live.record, history: this.history(live) };
+    const history = this.history(live);
+    if (live.runtime?.isRunning()) return { session: live.record, history };
+    return { session: live.record, history, historyAsOf: this.now() };
   }
 
   /**
@@ -550,10 +588,19 @@ export class HostedSessionManager {
    * Returns the record as it stands afterwards, terminated when the policy
    * said kill, idle and reattachable when it said survive.
    */
-  async detach(sessionId: string, clientId: string): Promise<HostedSessionRecord> {
+  async detach(sessionId: string, clientId: string, principalId?: string): Promise<HostedSessionRecord> {
     const live = this.requireKnown(sessionId);
+    if (live.attached.ownedByAnother(clientId, principalId)) throw new HostedSessionClientOwnerError(sessionId, clientId);
     if (live.termination) return await this.terminate(live, 'detached', 'the last client detached');
-    live.attached.delete(clientId);
+    // A client that was never attached changes nothing: naming an id is not
+    // the same as being the last attached client leaving.
+    if (!live.attached.delete(clientId)) return live.record;
+    return await this.afterDetach(live, clientId);
+  }
+
+  /** The record's side of a detach whose lease entry has already been removed. */
+  private async afterDetach(live: LiveSession, clientId: string): Promise<HostedSessionRecord> {
+    if (live.termination) return await this.terminate(live, 'detached', 'the last client detached');
     live.record = { ...live.record, attachedClients: live.attached.clientIds(), updatedAt: this.now() };
     this.publish('hosted-session-detached', live.record, { clientId });
     if (live.attached.size > 0 || live.record.status === 'terminated') {
@@ -584,10 +631,13 @@ export class HostedSessionManager {
    * drive it without waiting on a timer.
    */
   async reapAttachments(): Promise<void> {
+    await this.retireTerminated();
     const publisher = this.publisher;
-    const connected = publisher?.listClients
-      ? (clientId: string): boolean => publisher.listClients!().some((client) => client.id === clientId)
-      : undefined;
+    const connected = publisher?.isClientConnected
+      ? (clientId: string): boolean => publisher.isClientConnected!(clientId)
+      : publisher?.listClients
+        ? (clientId: string): boolean => publisher.listClients!().some((client) => client.id === clientId)
+        : undefined;
     for (const live of [...this.sessions.values()]) {
       if (live.record.status === 'terminated') continue;
       for (const clientId of live.attached.expire(this.now(), this.attachmentLeaseMs(), connected)) {
@@ -595,9 +645,35 @@ export class HostedSessionManager {
           sessionId: live.record.id,
           clientId,
         });
-        await this.detach(live.record.id, clientId).catch(() => undefined);
+        await this.afterDetach(live, clientId).catch(() => undefined);
       }
     }
+  }
+
+  /**
+   * Forget terminated sessions that have outlived `hostedSessions.terminatedRetentionMs`:
+   * the store removes the file, and the engine drops the record and what it
+   * kept for the session. A retired id is then simply not found.
+   */
+  private async retireTerminated(): Promise<void> {
+    const candidates = [...this.sessions.values()].filter((live) => live.released === true && live.record.status === 'terminated');
+    if (candidates.length === 0) return;
+    const retired = await this.options.store.sweep(candidates.map((live) => live.record), this.now());
+    for (const sessionId of retired) {
+      this.sessions.delete(sessionId);
+      this.nativeCheckpoints.delete(sessionId);
+      this.nativeCheckpointWrites.delete(sessionId);
+      this.spine.forget(sessionId);
+    }
+    if (retired.length > 0) logger.info('[hosted-sessions] retired terminated sessions past their retention', { count: retired.length });
+  }
+
+  /** A terminated session's transcript is on disk; stop holding it, and stop anything rewriting the file. */
+  private releaseTranscript(live: LiveSession): void {
+    live.restoredConversation = null;
+    live.released = true;
+    this.nativeCheckpoints.delete(live.record.id);
+    this.nativeCheckpointWrites.delete(live.record.id);
   }
 
   /** End a hosted session on request. */
@@ -653,8 +729,8 @@ export class HostedSessionManager {
     }
   }
 
-  /** Native owner cancellation interrupts only its exact hosted session. */
-  cancelNative(sessionId: string, permit: NativeConversationTurnPermit): void { this.sessions.get(sessionId)?.runtime?.cancelNative(permit); }
+  /** Native owner cancellation interrupts only its exact hosted session. True only when that turn was still running and was aborted. */
+  cancelNative(sessionId: string, permit: NativeConversationTurnPermit): boolean { return this.sessions.get(sessionId)?.runtime?.cancelNative(permit) ?? false; }
 
   /** The conversation as a client renders it. Empty for a session with no loop yet. */
   /** Only completed, durably stored turn checkpoints may become admission context. */
@@ -805,6 +881,7 @@ export class HostedSessionManager {
       await composition;
     } catch (error) {
       // Composition has settled before failure cleanup joins termination.
+      if (error instanceof RecoverableComposeError) throw error.original;
       if (!this.disposed && live.record.status !== 'terminated') {
         await this.terminate(live, 'restart-unresumable', `its loop could not be rebuilt: ${summarizeError(error)}`);
       }
@@ -818,7 +895,12 @@ export class HostedSessionManager {
   private async composeSession(live: LiveSession): Promise<void> {
     this.assertSessionUsable(live);
     const workspaceRoot = live.record.workspaceRoot;
-    const lease = await this.floors.acquire(workspaceRoot);
+    let lease: HostedWorkspaceFloorLease;
+    try {
+      lease = await this.floors.acquire(workspaceRoot);
+    } catch (error) {
+      throw new RecoverableComposeError(error);
+    }
     try {
       this.assertSessionUsable(live);
       // Another restored caller may have finished while this lease was pending.
@@ -827,9 +909,15 @@ export class HostedSessionManager {
         lease.release();
         return;
       }
-      const model = live.record.modelId
-        ? resolveHostedModelDefinition(lease.floor.services.providerRegistry, live.record.modelId)
-        : undefined;
+      let model: ReturnType<typeof resolveHostedModelDefinition> | undefined;
+      try {
+        model = live.record.modelId
+          ? resolveHostedModelDefinition(lease.floor.services.providerRegistry, live.record.modelId)
+          : undefined;
+      } catch (error) {
+        // The provider registry may simply not be ready yet.
+        throw new RecoverableComposeError(error);
+      }
       const runtime = createHostedSessionRuntime({
         sessionId: live.record.id, workspaceRoot, floor: lease.floor,
         systemPrompt: this.options.systemPrompt({ sessionId: live.record.id, workspaceRoot }),
@@ -838,7 +926,9 @@ export class HostedSessionManager {
         ...(live.record.originSurface ? { originSurface: live.record.originSurface } : {}),
         contracts: this.sessionContracts(live.record.id),
         ...(live.record.permissionMode ? { permissionMode: live.record.permissionMode } : {}),
+        isSessionResumable: token => this.isSessionHeld(token),
         permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
+        ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
       });
       live.runtime = runtime;
       live.lease = lease;
@@ -886,16 +976,25 @@ export class HostedSessionManager {
    * empty transcript over a real one, a session that came back from a restart
    * with nothing in it, which is the silent loss this engine exists to avoid.
    */
-  private teardownRuntime(live: LiveSession): void {
-    if (live.runtime) {
-      live.restoredConversation = live.runtime.conversation.toJSON();
-      live.runtime.cancel();
-      this.options.liveTurns?.unbindSession(live.record.id, live.runtime.liveTurnControls);
-      live.runtime.dispose();
+  private teardownRuntime(live: LiveSession): unknown {
+    // Every step runs even when an earlier one throws, so the floor lease is
+    // always released and the record can still be persisted. The first
+    // failure is returned for the caller to report.
+    let firstError: unknown;
+    const step = (action: () => void): void => {
+      try { action(); } catch (error) { firstError ??= error; }
+    };
+    const runtime = live.runtime;
+    if (runtime) {
+      step(() => { live.restoredConversation = runtime.conversation.toJSON(); });
+      step(() => runtime.cancel());
+      step(() => this.options.liveTurns?.unbindSession(live.record.id, runtime.liveTurnControls));
+      step(() => runtime.dispose());
       live.runtime = null;
     }
-    live.lease?.release();
+    step(() => live.lease?.release());
     live.lease = null;
+    return firstError;
   }
 
   private terminate(
@@ -925,11 +1024,20 @@ export class HostedSessionManager {
       hostedLifecycleCallbacks.run(live, async () => {
         await Promise.allSettled([live.initialization, live.composition, live.parking]);
         await this.spine.drainRegistrations(live.record.id);
-        this.teardownRuntime(live);
+        const teardownError = this.teardownRuntime(live);
+        if (teardownError !== undefined) {
+          logger.warn('[hosted-sessions] taking a session apart reported an error; it is terminated regardless', {
+            sessionId: live.record.id,
+            error: summarizeError(teardownError),
+          });
+        }
         live.attached.clear();
         await this.persist(live.record);
+        this.releaseTranscript(live);
         await this.spine.close(live.record.id);
-        this.publish('hosted-session-terminated', live.record, { detail });
+        this.publish('hosted-session-terminated', live.record, {
+          detail: teardownError === undefined ? detail : `${detail}; its loop reported an error while stopping: ${summarizeError(teardownError)}`,
+        });
         return live.record;
       }),
     ));
@@ -958,10 +1066,27 @@ export class HostedSessionManager {
         this.publisher?.retainRuntimeEvent?.(domain, envelope);
       }));
     }
-    const mark = (sessionId: string | undefined, status: 'running' | 'idle', event: HostedSessionLifecycleEvent, detail: string): void => {
+    // Turn ids each session has submitted and not yet ended. A turn whose only
+    // terminal event is PREFLIGHT_FAIL ends the session's run only when that
+    // id was submitted; a rejected duplicate submission reports its own fresh
+    // id while the real turn keeps running.
+    const openTurns = new Map<string, Set<string>>();
+    const opened = (sessionId: string): Set<string> => {
+      let turns = openTurns.get(sessionId);
+      if (!turns) { turns = new Set(); openTurns.set(sessionId, turns); }
+      return turns;
+    };
+    const mark = (sessionId: string | undefined, status: 'running' | 'idle', event: HostedSessionLifecycleEvent, detail: string, turnId?: string): void => {
       if (!sessionId) return;
       const live = this.sessions.get(sessionId);
-      if (!live || live.record.status === 'terminated') return;
+      if (!live || live.record.status === 'terminated') { openTurns.delete(sessionId); return; }
+      if (status === 'running' && turnId !== undefined) opened(sessionId).add(turnId);
+      else if (status === 'idle' && turnId !== undefined) {
+        const turns = opened(sessionId);
+        turns.delete(turnId);
+        if (turns.size > 0) return;
+        openTurns.delete(sessionId);
+      } else if (status === 'idle') openTurns.delete(sessionId);
       // A turn ends only once: an end event for a session that is not running
       // (a second end event for one turn, a stray cancel) counts nothing and
       // publishes nothing. A start on a running session is a re-assertion.
@@ -979,10 +1104,14 @@ export class HostedSessionManager {
       if (status === 'idle') void this.persist(live.record).catch(() => undefined);
     };
     this.busUnsubscribers.push(
-      bus.on('TURN_SUBMITTED', (envelope) => mark(envelope.sessionId, 'running', 'hosted-session-turn-started', 'a turn was submitted')),
+      bus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', (envelope) => mark(envelope.sessionId, 'running', 'hosted-session-turn-started', 'a turn was submitted', envelope.payload.turnId)),
       bus.on('TURN_COMPLETED', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'completed')),
       bus.on('TURN_ERROR', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'errored')),
       bus.on('TURN_CANCEL', (envelope) => mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'cancelled')),
+      bus.on<Extract<TurnEvent, { type: 'PREFLIGHT_FAIL' }>>('PREFLIGHT_FAIL', (envelope) => {
+        if (!envelope.sessionId || !openTurns.get(envelope.sessionId)?.has(envelope.payload.turnId)) return;
+        mark(envelope.sessionId, 'idle', 'hosted-session-turn-ended', 'preflight failed', envelope.payload.turnId);
+      }),
     );
   }
 
@@ -1012,6 +1141,7 @@ export class HostedSessionManager {
 
   private async persist(record: HostedSessionRecord): Promise<void> {
     const live = this.sessions.get(record.id);
+    if (live?.released) return;
     const conversation = live?.runtime ? live.runtime.conversation.toJSON() : live?.restoredConversation ?? null;
     try {
       await this.options.store.save(record, conversation);
@@ -1053,6 +1183,11 @@ export class HostedSessionManager {
   private assertSessionUsable(live: LiveSession): void {
     this.assertUsable();
     this.requireLive(live.record.id);
+  }
+
+  /** A session's keyed tool state stays while the session is live or its record is still stored. */
+  private isSessionHeld(sessionToken: string): boolean {
+    return this.sessions.has(sessionToken) || this.options.store.has(sessionToken);
   }
 
   private assertUsable(): void {
@@ -1154,7 +1289,10 @@ export class HostedSessionManager {
     // immediately, then waits for this admitted write before its final record.
     const parking = Promise.resolve().then(() => hostedLifecycleCallbacks.run(live, async () => {
       if (live.termination) return;
-      this.teardownRuntime(live);
+      const teardownError = this.teardownRuntime(live);
+      if (teardownError !== undefined) {
+        logger.warn('[hosted-sessions] taking a session apart for shutdown reported an error', { sessionId: live.record.id, error: summarizeError(teardownError) });
+      }
       live.attached.clear();
       live.record = {
         ...live.record,

@@ -287,23 +287,31 @@ test('raw member initializer preserves captured bytes and runs neither smudge no
 });
 
 
+/** A signal whose abort check is the capture's own checkpoint, so a test can change the source at a fixed point inside capture instead of racing a timer. */
+function signalWithCheckpoint(checkpoint: (call: number) => void): AbortSignal {
+  const signal = new AbortController().signal;
+  let calls = 0;
+  signal.throwIfAborted = () => { checkpoint(++calls); };
+  return signal;
+}
+
 test('an observed racing source writer holds admission rather than silently selecting another generation', async () => {
   const root = repo(); let writes = 0;
-  const timer = setInterval(() => { writeFileSync(join(root, 'tracked.ts'), `racing value ${++writes}\n`); }, 1);
-  try { await expect(captureContractInput(root)).rejects.toThrow(/changed|replaced/); }
-  finally { clearInterval(timer); }
+  // Every checkpoint after the first rewrites the file, including the ones inside its read.
+  const signal = signalWithCheckpoint((call) => { if (call > 1) writeFileSync(join(root, 'tracked.ts'), `racing value ${++writes}\n`); });
+  await expect(captureContractInput(root, { signal })).rejects.toThrow(/changed|replaced/);
   expect(writes).toBeGreaterThan(0);
 });
 
 test('an index replaced during capture holds even if the logical staged entries are identical', async () => {
   const root = repo(); const contents = readFileSync(join(root, '.git/index')); let swaps = 0;
-  const timer = setInterval(() => {
+  const signal = signalWithCheckpoint((call) => {
+    if (call < 2) return;
     writeFileSync(join(root, '.git/index-swap'), contents);
     renameSync(join(root, '.git/index-swap'), join(root, '.git/index'));
     swaps++;
-  }, 1);
-  try { await expect(captureContractInput(root)).rejects.toMatchObject({ change: 'index' }); }
-  finally { clearInterval(timer); }
+  });
+  await expect(captureContractInput(root, { signal })).rejects.toMatchObject({ change: 'index' });
   expect(swaps).toBeGreaterThan(0); expect(readFileSync(join(root, '.git/index'))).toEqual(contents);
 });
 
@@ -360,8 +368,8 @@ test('generated snapshot paths preserve allowed repository maps through the unch
 
 test('large repositories retain exact files through snapshot, planner and member materialization', async () => {
   const root = repo();
-  // Exceeds both former limits (32 MiB per file and 256 MiB per repository).
-  const bytes = 257 * 1024 * 1024;
+  // Exceeds the former 32 MiB per-file limit; kept small because the file is copied into the frozen view and the member worktree.
+  const bytes = 33 * 1024 * 1024;
   const fd = openSync(join(root, 'large.bin'), 'w');
   try { ftruncateSync(fd, bytes); } finally { closeSync(fd); }
   const snapshot = await captureContractInput(root);

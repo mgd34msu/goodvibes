@@ -22,16 +22,17 @@ import { nativeContractPort, type NativeContractServices } from './native-decisi
 import { assignedReviewPaths, reviewProjectPath } from './review-inventory.js';
 import { reviewedFileFromObservation } from './review-file-observations.js';
 import type { Contract } from './types.js';
-import { hashState, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
+import { hashState, type EntryType, type JudgmentPort, type YesNoReading } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { saysYesAtAct } from './batteries/request-shape.js';
 import { criterionVerdict, UNIT_JUDGES } from './batteries/unit-judge.js';
 import { midRunNudgeItems, qualityVerdict, unitQuality, type QualityVerdict } from './batteries/unit-quality.js';
 import { unmetSeverity } from './batteries/unmet-severity.js';
+import { unmetGap, UNMET_GAP_SENTENCES } from './batteries/unmet-gap.js';
 import { responseFinding } from '../core/batteries/response-finding.js';
 import type { ContractAcceptanceStakes, ContractConfig } from './config.js';
 import { judgeState, qualityState, type UnitEvidence } from './evidence.js';
-import { failedGates, refreshGateResults, unverifiedGates } from './gates.js';
+import { failedGates, refreshGateResults, unverifiedGateAdvice, unverifiedGates } from './gates.js';
 import { buildNudge, checkNumberOf, type NudgeFindings } from './nudge.js';
 import {
   consecutiveUnsettledChecks,
@@ -62,6 +63,7 @@ export const CHECK_SITES = {
   judge: 'contract.check.unit-judge',
   quality: 'contract.check.unit-quality',
   severity: 'contract.check.unmet-severity',
+  gap: 'contract.check.unmet-gap',
 } as const;
 
 /** The settings a check reads. */
@@ -224,6 +226,53 @@ function chooseResult(
 }
 
 /** The criteria a nudge names, for the given kinds. */
+/** The most criteria one nudge explains; the rest are listed without a reason so a long list cannot make a check slow. */
+const MAX_RATIONALES = 6;
+
+/**
+ * Reads, for each criterion the nudge lists as unmet or not shown, what kind of
+ * evidence is missing, and returns it as one sentence. A reading that cannot be
+ * made leaves its criterion without a reason: the nudge is complete without it,
+ * so only a cancel stops the check here. At most four readings run at once.
+ */
+async function readNudgeRationales(input: {
+  readonly port: JudgmentPort;
+  readonly goal: string;
+  readonly criteria: readonly { readonly id: string; readonly text: string }[];
+  readonly output: EntryType;
+  readonly evidence: EntryType;
+  readonly signal: AbortSignal | undefined;
+}): Promise<{ readonly rationales: ReadonlyMap<string, string>; readonly decisionIds: readonly string[] }> {
+  const rationales = new Map<string, string>();
+  const decisionIds: string[] = [];
+  const queue = input.criteria.slice(0, MAX_RATIONALES);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const criterion = queue[next++];
+      if (criterion === undefined) return;
+      try {
+        input.signal?.throwIfAborted();
+        const run = await unmetGap.run(input.port, { goal: input.goal, criterion: criterion.text, output: input.output, evidence: input.evidence },
+          { site: CHECK_SITES.gap, ...(input.signal === undefined ? {} : { signal: input.signal }) });
+        input.signal?.throwIfAborted();
+        const reading = run.readings.gap;
+        if (run.result.decisionId !== undefined) decisionIds.push(run.result.decisionId);
+        if (reading.outcome === 'act') {
+          rationales.set(criterion.id, UNMET_GAP_SENTENCES[reading.choice as keyof typeof UNMET_GAP_SENTENCES]);
+          run.recordAction(`reason ${reading.choice} recorded for ${criterion.id}`);
+        } else run.recordAction('reason not settled; the nudge lists the criterion without one');
+      } catch (error) {
+        if (input.signal?.aborted === true) throw error;
+        // The nudge is complete without its reasons.
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, () => worker()));
+  input.signal?.throwIfAborted();
+  return { rationales, decisionIds };
+}
+
 function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string[] {
   const regressed = new Set(findings.regressions.map((regression) => regression.criterionId));
   return [...findings.verdicts].flatMap(([id, verdict]) => {
@@ -347,7 +396,16 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
   const check: UnitCheck = { ...baseCheck, result };
 
   let nudge: CheckNudge | undefined;
+  let rationales: ReadonlyMap<string, string> = new Map();
   if (chosen.nudgeKinds.length > 0) {
+    // Why each listed criterion still reads unmet or not shown, so the worker knows what to show.
+    const explainIds = new Set(nudgedCriteria(findings, chosen.nudgeKinds));
+    const explained = judged.filter((criterion) => explainIds.has(criterion.id));
+    if (explained.length > 0) {
+      const read = await readNudgeRationales({ port: checkedPort(CHECK_SITES.gap), goal: unit.goal, criteria: explained, output: state['output'] as EntryType, evidence: state['evidence'] as EntryType, signal: input.signal });
+      rationales = read.rationales;
+      decisionIds.push(...read.decisionIds);
+    }
     const nudgeFindings: NudgeFindings = {
       checkNumber: checkNumberOf(checkId),
       kinds: chosen.nudgeKinds,
@@ -357,11 +415,12 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
       qualityProblems: chosen.nudgeQuality,
       qualityUnshown,
       failedGates: failing,
+      ...(rationales.size === 0 ? {} : { rationales }),
       ...(evidence.claims === undefined ? {} : { claims: { missingPaths: evidence.claims.missingPaths, noChanges: evidence.claims.missingPaths.length === 0 && claimsDidFail } }),
     };
     nudge = { text: buildNudge(unit, nudgeFindings), kinds: chosen.nudgeKinds, criterionIds: nudgedCriteria(findings, chosen.nudgeKinds) };
     if (unverified.length) nudge = { ...nudge, text: nudge.text + '\n\nRequired checks still need current execution evidence:\n'
-      + unverified.map(gate => `- ${gate.gate}: ${gate.reason ?? 'unverified check completion'}`).join('\n') };
+      + unverified.map(gate => `- ${gate.gate}: ${unverifiedGateAdvice(gate)}`).join('\n') };
     const host = evidence.orchestration;
     const requirements = host && typeof host === 'object' && !Array.isArray(host) ? host['requirements'] : undefined;
     const comparisons = requirements && typeof requirements === 'object' && !Array.isArray(requirements)
@@ -426,7 +485,8 @@ export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutc
 
   const readings = new Map(judged.map((criterion, index): [string, CriterionReading] => {
     const reading = judgment.criteria[index]!;
-    return [criterion.id, { checkId, at: input.now, probabilityUnmet: reading.probability, verdict: verdicts.get(criterion.id)!, outcome: reading.outcome, decisionId: judgment.decisionId }];
+    return [criterion.id, { checkId, at: input.now, probabilityUnmet: reading.probability, verdict: verdicts.get(criterion.id)!, outcome: reading.outcome, decisionId: judgment.decisionId,
+      ...(rationales.has(criterion.id) ? { rationale: rationales.get(criterion.id)! } : {}) }];
   }));
   const action = `check ${checkId}: ${result}`;
   judgment.recordAction(action);

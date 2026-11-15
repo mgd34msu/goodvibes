@@ -31,8 +31,8 @@ export type ConnectorTransportEvent =
  * - `connecting`    , the initial connection attempt is in flight.
  * - `connected`     , the connection is open and delivering events.
  * - `reconnecting`  , the connection dropped and a retry is scheduled or in flight.
- * - `disconnected`  , the connection was closed deliberately by the caller.
- * - `failed`        , the maximum reconnect attempts were exhausted; the connection is permanently closed.
+ * - `disconnected`  , the connection was closed by the caller or by a clean server close, or it dropped with reconnect switched off.
+ * - `failed`        , the connection will not recover without a new connect: the maximum reconnect attempts were exhausted, the daemon refused the credential, or no auth token or socket could be had.
  */
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';
 
@@ -61,7 +61,7 @@ export interface BackpressureInfo {
 }
 
 /**
- * How an SSE connection decides which turn's frames it is rendering.
+ * How a runtime-event connection (SSE or WebSocket) decides which turn's frames it is rendering.
  *
  * - `'session-current'` (default), each session's frames belong to the turn
  *   that session was last seen to START; a terminal frame for any other turn,
@@ -85,12 +85,13 @@ export interface RuntimeEventConnectorOptions {
   /** Called when the connection state changes. Subscribe to drive connection-state UI badges. */
   readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
   /**
-   * Called when the outbound queue saturates or a single message is too large to queue.
+   * @deprecated Never called. The WebSocket connector's outbound queue keeps every message
+   * while the socket is down or unauthenticated and has no count or byte limit, so there is
+   * nothing to report; a caller that sends during a long outage should bound what it sends.
+   * The option and {@link BackpressureInfo} remain for compatibility.
    *
-   * **Throttling:** callbacks are emitted on the 1st overflow and every 10th overflow
-   * thereafter to avoid flooding callers during sustained disconnections. `droppedCount`
-   * in {@link BackpressureInfo} is always the cumulative total, use it as the source of
-   * truth for exact drop counts; do not count callback invocations.
+   * Intended semantics, should a limit ever be introduced: callbacks on the 1st overflow and
+   * every 10th thereafter, with `droppedCount` the cumulative total.
    */
   readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined;
   /**
@@ -109,7 +110,7 @@ export interface RuntimeEventConnectorOptions {
    * Primarily for tests and local harnesses that need to inject outbound frames.
    */
   readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined;
-  /** SSE only. Defaults to `'session-current'`; see {@link RuntimeEventTurnScope}. */
+  /** SSE and WebSocket. Defaults to `'session-current'`; see {@link RuntimeEventTurnScope}. */
   readonly turnScope?: RuntimeEventTurnScope | undefined;
 }
 

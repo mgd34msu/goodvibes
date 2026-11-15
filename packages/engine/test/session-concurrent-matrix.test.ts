@@ -38,7 +38,7 @@ async function listSessions(url: string): Promise<WireSession[]> {
 
 async function register(
   url: string,
-  input: { sessionId: string; kind: string; project: string; surfaceId: string; lastSeenAt: number },
+  input: { sessionId: string; kind: string; project: string; surfaceId: string },
 ): Promise<Response> {
   return fetch(`${url}/api/sessions/register`, {
     method: 'POST',
@@ -47,7 +47,7 @@ async function register(
       sessionId: input.sessionId,
       kind: input.kind,
       project: input.project,
-      participant: { surfaceKind: input.kind, surfaceId: input.surfaceId, lastSeenAt: input.lastSeenAt },
+      participant: { surfaceKind: input.kind, surfaceId: input.surfaceId },
     }),
   });
 }
@@ -79,9 +79,8 @@ describe('N concurrent sessions across surfaces on one daemon', () => {
     daemon = await bootDaemon({ homeDirectory: home, workingDir: work, daemonHomeDir, port: 0, host: '127.0.0.1', token: TOKEN });
 
     // --- All four register and coexist in sessions.list ---
-    const base = 1_000_000;
     for (const s of MATRIX) {
-      const res = await register(daemon.url, { ...s, lastSeenAt: base });
+      const res = await register(daemon.url, s);
       expect(res.status).toBe(200);
     }
     let sessions = await listSessions(daemon.url);
@@ -95,10 +94,13 @@ describe('N concurrent sessions across surfaces on one daemon', () => {
 
     // --- Heartbeats are INDEPENDENT: beat only tui-proj-alpha; nobody else moves ---
     const before = new Map(sessions.map((r) => [r.id, r.participants[0]?.lastSeenAt ?? 0]));
-    await register(daemon.url, { ...MATRIX[0], lastSeenAt: base + 50_000 });
+    // The daemon stamps lastSeenAt itself, so compare against a clock read taken before the beat.
+    const beat = Date.now();
+    expect((await register(daemon.url, MATRIX[0])).status).toBe(200);
     sessions = await listSessions(daemon.url);
     const afterAlpha = sessions.find((r) => r.id === 'tui-proj-alpha')!.participants[0]?.lastSeenAt ?? 0;
-    expect(afterAlpha).toBeGreaterThan(before.get('tui-proj-alpha')!);
+    expect(afterAlpha).toBeGreaterThanOrEqual(beat);
+    expect(afterAlpha).toBeGreaterThanOrEqual(before.get('tui-proj-alpha')!);
     for (const id of ['tui-proj-beta', 'agent-worker-1', 'webui-client-1']) {
       const now = sessions.find((r) => r.id === id)!.participants[0]?.lastSeenAt ?? 0;
       expect(now, `${id} lastSeenAt must be untouched by alpha's heartbeat`).toBe(before.get(id)!);

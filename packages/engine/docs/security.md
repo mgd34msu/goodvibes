@@ -229,9 +229,9 @@ is what it guards.
 | `permissions.simulation` | Shadow dual-evaluation that records permission divergences without blocking |
 | `permissions.divergenceDashboard` | The divergence aggregation that gates enforce-mode transitions |
 | `policy.registryEnabled` | The policy bundle promote/rollback registry |
-| `policy.requireSignedBundles` | HMAC validation of policy bundles in managed mode |
-| `runtime.toolBudget.enforced` | Hard wall-clock, token, and cost limits on tool execution |
-| `permissions.commandParser` | Per-segment AST parsing of shell commands before execution (class gating and the catastrophic list; obfuscation is the gate's reading) |
+| `policy.requireSignedBundles` | HMAC validation of policy bundles; unsigned, altered or key-less loads are refused (key in `GOODVIBES_POLICY_SIGNING_KEY`) |
+| `runtime.toolBudget.enforced` | A tool call that finishes over its wall-clock, token, or cost limit is reported as failed |
+| `permissions.commandParser` | Per-segment AST parsing of shell commands before execution (it refuses a command that parses to no segment; what a command would destroy, and obfuscation, are the gate's reading) |
 | `security.tokenAudit.enabled` | Advisory auditing of token scopes and rotation |
 | `tools.contractVerification` | Registration-time verification that keeps malformed tools out of the registry |
 
@@ -273,7 +273,7 @@ The remote fetch proxy has explicit SSRF protection via `resolvePrivateHostFetch
 
 If either check fails, the request is rejected with HTTP 403. Do not enable `allowPrivateHosts` unless your deployment specifically requires internal URL resolution.
 
-The `fetch` tool sanitizes responses by default (`fetch.sanitizeMode`, default `safe-text`). It classifies initial hosts and every redirect target before reading the response, blocks private/link-local/cloud-metadata targets absolutely (by the host as written and, before every hop, by every A and AAAA answer the host resolves to; the request is then sent to the checked address with the written name kept for the Host header, TLS SNI and the certificate check, so a second lookup cannot rebind it, and a name that does not resolve is refused), gates localhost dev servers behind a one-tap per-project approval (`fetch.allowLocalhost`), applies unknown-host safe-text sanitization, and stops reading once `max_content_length` is reached. Setting `fetch.sanitizeMode` to `none` skips content sanitization only. Host blocking is unaffected.
+The `fetch` tool sanitizes responses by default (`fetch.sanitizeMode`, default `safe-text`). It classifies initial hosts and every redirect target before reading the response, blocks private/link-local/cloud-metadata targets absolutely (by the host as written and, before every hop, by every A and AAAA answer the host resolves to; the request is then sent to the checked address with the written name kept for the Host header, TLS SNI and the certificate check, so a second lookup cannot rebind it, and a name that does not resolve is refused), gates localhost dev servers behind a one-tap approval saved in your own settings (`fetch.allowLocalhost`; a project file cannot turn it on), applies unknown-host safe-text sanitization, and stops reading once `max_content_length` is reached (5 MB when a call sets none). Only `http` and `https` URLs are fetched, including every redirect target; a `file:` or other scheme is refused before anything is sent. Addresses in the carrier-grade NAT range (`100.64.0.0/10`, where some clouds place their metadata service), `198.18.0.0/15`, `192.0.0.0/24` and `fec0::/10`, and IPv6 addresses that carry an IPv4 address (NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, IPv4-mapped) by the address they carry, are refused like the other internal ranges. Which hosts are trusted comes from `fetch.trustedHosts`; a call's own `trusted_hosts` is ignored. A request that is not `GET`, `HEAD` or `OPTIONS` is retried on another address of a host only after a refused connection. Setting `fetch.sanitizeMode` to `none` skips content sanitization only. Host blocking is unaffected.
 
 ---
 
@@ -328,7 +328,7 @@ The boundary runs on Jev's reading of the call (step 3 below asks every question
 
 | Check | What it decides | Disposition and why | Reason code |
 |---|---|---|---|
-| Catastrophic command | Whether a shell command would destroy the machine or the user's data wholesale. | **Jev** (`engine.gate.boundary`, `catastrophic`). It is a judgment about what a command does; the old frozen list only knew the spellings someone wrote down (`find / -delete` and `rm -rf ~/*` walked past it). A yes refuses outright; an uncertain reading makes the call critical stakes, so every preset asks. The exec tool repeats the gate's verdict at run time, and refuses an uncertain one when no gate read it. | `boundary_catastrophic` |
+| Catastrophic command | Whether a shell command would destroy the machine or the user's data wholesale. | **Jev** (`engine.gate.boundary`, `catastrophic`). It is a judgment about what a command does; the old frozen list only knew the spellings someone wrote down (`find / -delete` and `rm -rf ~/*` walked past it). A yes refuses outright; an uncertain reading makes the call critical stakes, so every preset asks. The gate reads it before the call runs; the exec tool does not read it a second time, so a run path with no gate in front of it is not covered by this check. | `boundary_catastrophic` |
 | Surface authority | Whether the surface the turn's instruction came from can direct work. | **Code** (the owner's per-surface declarations, `gate/surface-authority.ts`). What it depends on is who can write to the surface in this deployment (who holds the bot token, who can mail the address), which no text in the call shows; the owner declared it, and an undeclared surface is input-only. Whether the call is consequential is Jev's reading (`mutates`, `outward`). | `boundary_surface_authority` |
 | Card details | Whether an outward call carries a person's payment card details. | **Jev** (`engine.gate.boundary`, `cardDetails`). A checksum cannot tell a card from an order number and misses a card written in words or split across fields. A yes refuses; an uncertain reading is refused unless the owner approves the exact call. | `boundary_card_details` |
 | Outward-effect taint | Whether what an outward call sends derives from untrusted text read this turn. | **Jev over a recorded fact.** That the turn read untrusted text is the untrusted-content ledger's record (what happened). Whether the call's content derives from it is `engine.security.content-derivation`, read for each string field of the call against each recent source (security/content-taint.ts findContentTaint, the same reading the email, calendar and channel send paths use: reply-aware, with a boilerplate question), replacing the shared-word and shared-character overlap counts. One battery asks this question for the whole engine. When the ledger kept no text there is nothing to read, and the owner is asked. | `boundary_outward_effect` |
@@ -342,10 +342,11 @@ After the boundary, decisions the owner made explicitly stand as given:
 
 1. **`behavior.autoApprove`** (`config_policy` / `config_allow`): the owner's opt-out of the presets and prompts. It never bypasses the boundary.
 2. **Policy as code**, when the `permissions-policy-engine` feature is on: user and managed policy rules (`managed_policy`). Matching a rule the owner wrote carries out the owner's decision. The evaluator's mode layer is not consulted, and it has no safety layer: its old destructive-prefix, dangerous-pattern, path-traversal and SQL lists decided what a call does by spelling, and those questions are the gate's readings now. Rules that filter on a call's classification get it from the gate's reading (escalation by risk family, then network, destructive, write or read), not from lists of tool names. The policy linter reads whether each path or host pattern in a rule is broad (`engine.gate.policy-breadth`), replacing two four-spelling lists; `/policy lint` and `/policy preflight` show the findings, and a broad pattern in an allow rule blocks preflight.
-3. **The custom preset's per-tool settings** (`permissions.tools.*`): `allow`, `deny`, or `prompt` (always ask).
-4. **Remembered approvals**: the session cache (`session_override`) and durable rules (`user_rule`). A remembered allow does not carry a change into the plan preset.
+3. **Per-tool restrictions** (`permissions.tools.*`): `deny` blocks a tool in every mode except `yolo`. `allow` and `prompt` are read only in Classic operation, when the decision model is not in use.
+4. **Remembered approvals**: the session cache (`session_override`) and durable rules (`user_rule`). A remembered allow does not carry a change into the plan preset, and never lifts an administrator's deny (a managed deny rule outranks every user or remembered allow). A durable rule remembered from a prompt is saved with the project it was made in and applies only there; rules saved before this, or written by hand, have no project and keep applying everywhere. A session answer belongs to the session that gave it: another hosted session is asked again. A remembered command-class or prefix allow covers only a simple command: one with `;`, `&&`, `||`, `|`, `&`, a newline, a substitution, a redirection or a subshell is covered only when every part matches on its own and none of it is a substitution or redirection. An exact allow also needs the same environment, working directory, detachment and file operations it was approved with. If a choice to remember cannot be saved, the answer still applies to that call and the result says it was not saved and why.
+5. **Hook changes**: adding, enabling, disabling or removing a hook through `state mode=hooks` is never decided by a category, a preset or a remembered rule. The owner is asked every time (a surface must not offer to remember it), and the prompt states the hook type, the events it fires on, the command, script or URL, that an http hook sends tool arguments and results to its URL, the header names (not values) and whether `allowInternal` is on. Plan mode refuses it; only the mode that skips every prompt allows it unasked.
 
-A call to a built-in read-only tool (read, find, analyze, inspect, state, registry and the other `read`-category tools except `fetch`) is asked one question, whether it touches secret or credential material (`secrets`); a no runs it with no further reading, a yes gives it the full reading, where it is at least high stakes. There is no shipped list of credential paths: a list decided every unlisted path by omission. Search, list and map tools ask the same question, through `PermissionManager.readAccess`, for each file whose content they are about to surface.
+A call to a built-in read-only tool (read, find, analyze, inspect, state, registry and the other `read`-category tools except `fetch`) is asked one question, whether it touches secret or credential material (`secrets`); a no runs it with no further reading, a yes gives it the full reading, where it is at least high stakes. There is no shipped list of credential paths: a list decided every unlisted path by omission. Search, list and map tools do not ask that question per file: through `PermissionManager.readAccess` they withhold the content of a file only when the owner denied reads (`permissions.tools.read` deny, a policy rule or a remembered deny), and show its path flagged as access-restricted. A secret in a file nobody denied is not withheld from a search or map result.
 
 ### 3. The stakes reading
 
@@ -370,15 +371,16 @@ The stakes become the analysis `riskLevel`; the family, the facts, the side effe
 
 ### 4. Presets over the stakes table
 
-The `permissions.mode` setting keeps its values, so existing settings files, the Shift+Tab cycle and the mode pill keep working; each value selects a preset (`platform/gate/presets.ts`):
+`permissions.mode` takes four values, each selecting a preset (`platform/gate/presets.ts`). Older settings files still load: `prompt`, `normal`, `accept-edits` and `custom` become `safe-owner`, `auto` becomes `safe-jev`, and `allow-all` becomes `yolo`; `behavior.autoApprove` is a deprecated alias for `yolo`.
 
-| Setting value | Preset | low | medium | high | critical | Notes |
-|---|---|---|---|---|---|---|
-| `prompt` (default) | normal | allow | ask | ask | ask | |
-| `accept-edits` | accept-edits | allow | ask | ask | ask | file, notebook and configuration edits run through high |
-| `plan` | plan | allow | ask | ask | ask | any call Jev reads as a change or outward is refused (`plan_mode`) |
-| `allow-all` | auto | allow | allow | allow | ask | |
-| `custom` | custom | allow | ask | ask | ask | per-tool settings decide first |
+| Setting value | low | medium | high | critical | Notes |
+|---|---|---|---|---|---|
+| `safe-owner` (default) | allow | allow | allow | ask | dangerous actions wait for the owner |
+| `safe-jev` | allow | allow | allow | ask | Jev stands in for the owner |
+| `yolo` | allow | allow | allow | allow | no general safety denial or prompt; host containment, secret storage and payment rules still apply |
+| `plan` | allow | allow | allow | ask | any call Jev reads as a change or outward is refused (`plan_mode`) |
+
+The mode cycle (Shift+Tab) is `safe-owner`, `safe-jev`, `yolo`; `plan` is outside it. Per-tool `permissions.tools.*` settings are separate from the mode: an explicit `deny` blocks that tool in the safe modes.
 
 An allow reports `stakes_preset` / `preset_allow`, a plan refusal `runtime_mode` / `plan_mode`, and an ask goes to the owner's approval prompt (`user_prompt`), where the answer can be remembered at the tier the owner picks. `PRESET_CHANGED` on the `gate` domain announces a preset change.
 
@@ -386,7 +388,7 @@ Background agents follow the same gate. The escape hatch `permissions.background
 
 ### Sandbox escalations
 
-What host access a sandboxed command needs (the network, host privileges) is Jev's reading, `engine.gate.sandbox-needs`, replacing the shell classifier's fixed binary and subcommand sets and the package-install table. The network is opened inside the sandbox only for a command read as needing it whose base command the owner's egress allowlist names (matching the owner's list carries out the owner's setting). A sandboxed command that needs host access asks the owner through the same approval broker. With `sandbox.judgment` set to annotate or auto-approve, the `engine.gate.sandbox-advisory` battery reads whether the command shows a risk the owner should see; the reading annotates the ask, and only in the opt-in auto-approve mode does a confident looks-safe reading approve it. It never denies and never touches the catastrophic list.
+What host access a sandboxed command needs (the network, host privileges) is Jev's reading, `engine.gate.sandbox-needs`, replacing the shell classifier's fixed binary and subcommand sets and the package-install table. The exec tool opens the network inside the sandbox only for a command that Jev reads as needing it and whose every command the owner's egress allowlist names; a listed command that needs no network, or a `*` allowlist, does not get it, and when Jev's reading is unavailable the network stays closed. Approving an ask never opens the network for an unlisted command: the ask names the unlisted commands, and the owner adds them to `sandbox.egressAllowlist`. A sandboxed command that needs host access asks the owner through the same approval broker; when the owner already approved the same command on the approval card with its escalations named, the exec tool does not ask again for it. Host privilege is never granted inside the boundary: approving a command that wants it only lets it run without root. With `sandbox.judgment` set to annotate or auto-approve, the `engine.gate.sandbox-advisory` battery reads whether the command shows a risk the owner should see; the reading annotates the ask, and only in the opt-in auto-approve mode does a confident looks-safe reading approve it. It never denies and never touches the catastrophic list.
 
 ### MCP tool calls
 
@@ -394,16 +396,14 @@ What host access a sandboxed command needs (the network, host privileges) is Jev
 
 `checkDetailed()` returns a `PermissionCheckResult` with `approved`, `persisted`, `sourceLayer`, `reasonCode`, the `analysis`, and when present the `boundary` checks, the `reading`, the `preset` decision and a `detail` explaining a refusal.
 
-For headless automation, `permissions.mode: allow-all` (the auto preset) runs everything below critical stakes; `behavior.autoApprove: true` removes the prompts entirely but keeps the boundary. For per-tool control:
+For headless automation, `permissions.mode: safe-jev` lets Jev decide in the owner's place and still refuses genuinely harmful actions. `permissions.mode: yolo` (and its deprecated alias `behavior.autoApprove: true`) removes the general safety denials and prompts, so use it only where the surroundings contain the work. To forbid a tool outright:
 
 ```yaml
 permissions:
-  mode: custom
+  mode: safe-owner
   tools:
-    read: allow
-    find: allow
-    exec: prompt
-    write: prompt
+    exec: deny
+    write: deny
 ```
 
 ---

@@ -313,8 +313,8 @@ describe('first-call protected error normalization', () => {
     expect(failure).toMatchObject({ billing: true });
     const normalized = await readNormalizedError(error,
       { site: 'test.protected-assignment', failure });
-    expect(normalized.message).toBe(error.message);
-    expect(normalized.summary).toBe(error.message);
+    expect(normalized.message).not.toContain(secret);
+    expect(normalized.summary).not.toContain(secret);
     expect(normalized.category).toBe('bad_request');
     expect(normalized.statusCode).toBe(400);
     expect(requests.map((request) => request.state)).toEqual([

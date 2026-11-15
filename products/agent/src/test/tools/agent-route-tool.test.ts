@@ -1,13 +1,23 @@
 import { describe, expect, test } from 'bun:test';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandRegistry } from '../../input/command-registry.ts';
 import { createAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { createAgentRouteTool, registerAgentRouteTool } from '../../tools/agent-route-tool.ts';
+import { taskRoutePort } from '../helpers/task-route-readings.ts';
 import { useRouteAdapterFixture, fakeContext, route, preferredId, taskRouteSources } from '../helpers/route-adapter-fixture.ts';
 
 useRouteAdapterFixture();
 
 describe("Personal Ops and route adapter contracts", () => {
+  test('an unrecognised action is refused instead of planning a route for the query', async () => {
+    const tool = createAgentRouteTool(fakeContext());
+    const result = await tool.execute({ action: 'zzz', query: 'fix the failing tests' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown route action');
+  });
+
   test('returns usage without making a routing guess when no task is supplied', async () => {
     const tool = createAgentRouteTool(fakeContext());
     const result = await tool.execute({});
@@ -136,6 +146,35 @@ describe("Personal Ops and route adapter contracts", () => {
     if (!result.success) throw new Error(result.error);
     const body = JSON.parse(result.output!) as Record<string, unknown>;
     expect(preferredId(body)).toBe('local-model-cookbook-route');
+  });
+
+
+  test('sends the reader the caller request, the route candidates and the named-target candidates', async () => {
+    const query = 'set up Slack notifications';
+    const { port, requests } = taskRoutePort({
+      [query]: { pick: 'channels', choices: { channelTask: 'setup' }, named: { channelTarget: 'slack' } },
+    });
+    const previous = installJudgmentPort(port);
+    try {
+      const body = await route(query);
+      expect(preferredId(body)).toBe('channel-setup-route');
+    } finally {
+      installJudgmentPort(previous);
+    }
+
+    const states = requests.map((request) => request.state as unknown as {
+      readonly context?: { readonly request?: string; readonly kind?: string };
+      readonly request?: string;
+      readonly query?: string;
+      readonly candidates?: readonly { readonly id: string }[];
+    });
+    expect(states.length).toBeGreaterThan(0);
+    for (const state of states) expect(state.context?.request ?? state.request ?? state.query).toBe(query);
+    const routeCandidates = states.find((state) => state.candidates && state.context?.kind === undefined)?.candidates ?? [];
+    expect(routeCandidates.length).toBeGreaterThan(1);
+    expect(routeCandidates.map(({ id }) => id)).toContain('channels');
+    const namedCandidateIds = states.filter((state) => state.context?.kind !== undefined).flatMap((state) => state.candidates?.map(({ id }) => id) ?? []);
+    expect(namedCandidateIds).toContain('slack');
   });
 
 

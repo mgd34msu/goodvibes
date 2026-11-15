@@ -23,13 +23,13 @@
  * with the host explicitly granted. The boundary still applies wherever it is
  * available, the difference is only what happens in its absence.
  *
- * The owner's terminal is off limits in BOTH. It is not a sandbox question and
- * a boundary is not what would have stopped it: nothing this platform runs
- * types into a tmux session it did not create.
+ * The owner's terminal has no command check of its own in either posture. It is
+ * covered by the boundary (a contained command cannot reach the owner's tmux
+ * server) and by the owner's normal tool permissions; `workstream` reaches it
+ * only as far as the host it was explicitly granted.
  */
 
 import type { ExecContainmentRequirement } from '../tools/exec/containment.js';
-import type { OwnerTerminalGuard } from '../tools/exec/owner-terminal-guard.js';
 
 /** See the module header. */
 export type HostedSessionExecPosture = 'conversational' | 'workstream';
@@ -53,9 +53,6 @@ export const WORKSTREAM_CONTAINMENT: ExecContainmentRequirement = {
   posture: 'host-allowed',
   reason: 'this hosted workstream was composed with the host explicitly granted',
 };
-
-/** The owner's terminal is untouchable in every hosted posture. */
-export const HOSTED_OWNER_TERMINAL_GUARD: OwnerTerminalGuard = { posture: 'enforced' };
 
 /**
  * The containment requirement for a posture. `conversational` for anything

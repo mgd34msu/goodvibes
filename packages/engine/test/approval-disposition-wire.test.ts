@@ -16,6 +16,7 @@ async function fixture(action: 'approve' | 'deny') {
   const raised = await broker.raiseApproval({ request: REQUEST });
   const context = {
     approvalBroker: broker, parseOptionalJsonBody: (request: Request) => request.json(),
+    requireAdmin: () => null,
     requireAuthenticatedSession: () => ({ username: 'fixture-owner', roles: ['admin'] }),
     recordApiResponse: (_request: Request, _path: string, response: Response) => response,
   } as unknown as DaemonSystemRouteContext;

@@ -97,7 +97,9 @@ export function normalizeBaseUrl(baseUrl: string): string {
   // public-http deployment.
   const privateNetwork = isPrivateNetworkHost(parsed.hostname);
   const runtimeProcess = (globalThis as { readonly process?: { readonly env?: Record<string, string | undefined> } }).process;
-  const allowInsecure = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT === 'true';
+  // Same switch grammar as the platform envFlag (1/true on, anything else off); kept inline because this package imports no platform code.
+  const insecureSwitch = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT?.trim().toLowerCase();
+  const allowInsecure = insecureSwitch === '1' || insecureSwitch === 'true';
   if ((protocol === 'http:' || protocol === 'ws:') && !privateNetwork && !allowInsecure) {
     throw new ConfigurationError('Refusing insecure PUBLIC GoodVibes transport baseUrl.', {
       code: 'ENGINE_TRANSPORT_INSECURE_BASE_URL',
@@ -115,7 +117,10 @@ export function buildUrl(baseUrl: string, path: string): string {
   }
   let resolved: string;
   try {
-    resolved = new URL(path, `${normalized}/`).toString();
+    // Join onto the base path rather than resolving against the origin, so a daemon
+    // served under a prefix (https://host/goodvibes) keeps it. Leading slashes are
+    // dropped so '/api/x' and '//other-host/x' both stay inside the base.
+    resolved = new URL(path.replace(/^\/+/, ''), `${normalized}/`).toString();
   } catch (cause) {
     throw new ConfigurationError(`Invalid transport path: ${path}`, { code: 'ENGINE_TRANSPORT_PATH_INVALID', cause });
   }

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { BinaryTarget } from '../config.js';
+import { CAPTURED_BUN_RUNTIME_VERSION, type BinaryTarget } from '../config.js';
 import { resolveOwnedPackageManifest } from './binary-dependency-resolution.js';
 import { BUN_1_3_14_LICENSE_NOTICE } from './bun-runtime-notices.js';
 import { realExec, type Exec } from './effects.js';
@@ -78,7 +78,7 @@ export interface ProvideCapturedBunRuntimeOptions {
 export function provideCapturedBunRuntime(options: ProvideCapturedBunRuntimeOptions): void {
   const { target } = options;
   if (!target.capturedBunRuntime) return;
-  if (target.capturedBunRuntime !== '1.3.14' || !Object.hasOwn(DISTRIBUTIONS, target.key) || target.bunTarget !== `bun-${target.key}`) {
+  if (target.capturedBunRuntime !== CAPTURED_BUN_RUNTIME_VERSION || !Object.hasOwn(DISTRIBUTIONS, target.key) || target.bunTarget !== `bun-${target.key}`) {
     throw new Error(`Captured Bun runtime is unsupported for ${target.key}/${target.bunTarget}`);
   }
   if (options.artifacts.length === 0 || options.artifacts.some(name => !name || basename(name) !== name || name === '.' || name === '..')) throw new Error('Bun sidecars require compiled artifact filenames');

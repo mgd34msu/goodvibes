@@ -1,5 +1,4 @@
-/** Actual TUI updates use complete release fixtures; preflight-only cases keep inert originals.
- * Regression source intentionally UNRUN during the coding-first pass. */
+/** Actual TUI updates use complete release fixtures; preflight-only cases keep inert originals. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,6 +50,19 @@ test('the actual TUI apply and rollback paths include Agent, daemon, native comp
     expect(bytes).toEqual(readFileSync(path));
   }
   expect(readFileSync(join(f.webui, 'original.txt'), 'utf8')).toBe('Retained original directory');
+});
+
+test('the swap is already marked begun when the first live program is replaced', async () => {
+  const f = fixture();
+  const live = new Set(f.programs.map(program => join(f.root, program.name)));
+  const begunAtLiveRename: boolean[] = [];
+  const io: UpdateFileIo = { ...realUpdateFileIo, rename(from, to) {
+    if (live.has(to)) begunAtLiveRename.push(f.progress.begun);
+    realUpdateFileIo.rename(from, to);
+  } };
+  await applyUpdate({ ...f.options, io });
+  expect(begunAtLiveRename.length).toBeGreaterThan(0);
+  expect(begunAtLiveRename.every(Boolean)).toBe(true);
 });
 
 test('an already-current TUI can repair peers left at the previous suite version', async () => {
@@ -131,7 +143,22 @@ describe('detectDaemonServiceManaged', () => {
   test('reports managed with the real restart command when systemctl reports the unit active on Linux', () => {
     const info = detectDaemonServiceManaged('linux', { get: () => undefined }, activeRunner);
     expect(info.managed).toBe(true);
-    expect(info.restartCommand).toBe('systemctl --user restart goodvibes.service');
+    expect(info.restartCommand).toBe('systemctl --user restart goodvibes-jev.service');
+  });
+
+  test('checks the installer unit when the service name is still at its default', () => {
+    const asked: string[] = [];
+    const config = {
+      get: () => 'goodvibes',
+      describeConfigKeySource: () => ({ tier: 'default', effectiveOrigin: 'default' }),
+    };
+    const info = detectDaemonServiceManaged('linux', config, (_command, args) => {
+      asked.push(args.join(' '));
+      return args.includes('goodvibes-jev.service') ? { status: 0, stdout: 'active\n' } : { status: 3, stdout: 'inactive\n' };
+    });
+    expect(asked).toEqual(['--user is-active goodvibes-jev.service']);
+    expect(info.managed).toBe(true);
+    expect(info.restartCommand).toBe('systemctl --user restart goodvibes-jev.service');
   });
 
   test('reports not managed when the unit is not active', () => {

@@ -83,6 +83,8 @@ export class BrowserHostClient {
   readonly #hosts = new Map<ChildProcessWithoutNullStreams, HostLifetime>();
   #starting: Promise<void> | null = null;
   #closing: Promise<void> | null = null;
+  #gone = false;
+  readonly #goneListeners = new Set<() => void>();
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly pending = new Map<number, PendingCall>();
   private nextId = 1;
@@ -103,6 +105,35 @@ export class BrowserHostClient {
     const clear = (): void => { if (this.#starting === starting) this.#starting = null; };
     void starting.then(clear, clear);
     return starting;
+  }
+
+  /**
+   * True once the browser this helper was attached to is unreachable: the
+   * helper process exited, or it reported that the browser disconnected. Never
+   * true again to false, a restarted helper is not attached to anything.
+   */
+  get gone(): boolean {
+    return this.#gone;
+  }
+
+  /** Called once, when the helper or its browser goes away. Fires at once if it already has. */
+  onGone(listener: () => void): () => void {
+    if (this.#gone) {
+      queueMicrotask(listener);
+      return () => undefined;
+    }
+    this.#goneListeners.add(listener);
+    return () => { this.#goneListeners.delete(listener); };
+  }
+
+  private noteGone(): void {
+    if (this.#gone) return;
+    this.#gone = true;
+    const listeners = [...this.#goneListeners];
+    this.#goneListeners.clear();
+    for (const listener of listeners) {
+      try { listener(); } catch { /* One observer failing must not hide the loss from the rest. */ }
+    }
   }
 
   private closedError(): BrowserHostError {
@@ -211,6 +242,7 @@ export class BrowserHostClient {
       host.exited = true;
       host.startup?.finish(false);
       this.settleRetiredHost(child);
+      this.noteGone();
     };
     const error = (): void => { this.terminateHost(child); };
     const close = (): void => {
@@ -278,6 +310,10 @@ export class BrowserHostClient {
     try {
       message = JSON.parse(line) as typeof message;
     } catch {
+      return;
+    }
+    if (message && typeof message === 'object' && (message as { event?: unknown }).event === 'disconnected') {
+      this.noteGone();
       return;
     }
     if (!message || typeof message !== 'object' || typeof message.id !== 'number') return;
@@ -383,6 +419,7 @@ function remoteLocator(
   frameChain: readonly string[],
   selector: string,
   index?: number,
+  afterAction?: () => Promise<void>,
 ): Record<string, unknown> {
   const call = async (method: string, args: Record<string, unknown> = {}): Promise<unknown> => {
     const { signal, ...nativeArgs } = args;
@@ -396,24 +433,31 @@ function remoteLocator(
     }, { signal });
     return response.value;
   };
+  // An action can navigate or add frames; the page's cached address and frame
+  // list are re-read afterwards so the next read does not describe the old page.
+  const acting = async (method: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+    const value = await call(method, args);
+    await afterAction?.();
+    return value;
+  };
   const locator: Record<string, unknown> = {
     count: async () => await call('count') as number,
-    first: () => remoteLocator(client, pageId, frameChain, selector, 0),
-    nth: (position: number) => remoteLocator(client, pageId, frameChain, selector, position),
+    first: () => remoteLocator(client, pageId, frameChain, selector, 0, afterAction),
+    nth: (position: number) => remoteLocator(client, pageId, frameChain, selector, position, afterAction),
     evaluate: async (fn: unknown, arg?: unknown) => call('describe', { source: sourceOf(fn), arg }),
     click: async (options?: Record<string, unknown>) => {
-      await call('click', options ?? {});
+      await acting('click', options ?? {});
     },
     fill: async (text: string, options?: Record<string, unknown>) => {
-      await call('fill', { text, ...options });
+      await acting('fill', { text, ...options });
     },
     pressSequentially: async (text: string, options?: Record<string, unknown>) => {
-      await call('typeSequentially', { text, ...options });
+      await acting('typeSequentially', { text, ...options });
     },
     press: async (key: string, options?: Record<string, unknown>) => {
-      await call('press', { key, ...options });
+      await acting('press', { key, ...options });
     },
-    selectOption: async (values: readonly string[], options?: Record<string, unknown>) => await call('selectOption', { values, ...options }) as string[],
+    selectOption: async (values: readonly string[], options?: Record<string, unknown>) => await acting('selectOption', { values, ...options }) as string[],
     scrollIntoViewIfNeeded: async (options?: Record<string, unknown>) => {
       await call('scrollIntoView', options ?? {});
     },
@@ -421,10 +465,10 @@ function remoteLocator(
   return locator;
 }
 
-function remoteFrameLocator(client: BrowserHostClient, pageId: string, chain: readonly string[]): Record<string, unknown> {
+function remoteFrameLocator(client: BrowserHostClient, pageId: string, chain: readonly string[], afterAction?: () => Promise<void>): Record<string, unknown> {
   return {
-    locator: (selector: string) => remoteLocator(client, pageId, chain, selector),
-    frameLocator: (selector: string) => remoteFrameLocator(client, pageId, [...chain, selector]),
+    locator: (selector: string) => remoteLocator(client, pageId, chain, selector, undefined, afterAction),
+    frameLocator: (selector: string) => remoteFrameLocator(client, pageId, [...chain, selector], afterAction),
   };
 }
 
@@ -436,6 +480,17 @@ function remoteFrameLocator(client: BrowserHostClient, pageId: string, chain: re
  * already made when it listed them.
  */
 const remotePageConnections = new WeakMap<Page, () => Promise<unknown>>();
+const remotePageCloseListeners = new WeakMap<Page, Set<() => void>>();
+const remoteContextRefreshers = new WeakMap<BrowserContext, () => Promise<void>>();
+
+/**
+ * Re-reads which tabs the host holds, opening and closing remote pages to
+ * match. A host-backed page cannot push open/close events, so a session calls
+ * this when it lists tabs. Null for a context that is not host-backed.
+ */
+export function refreshRemotePages(context: BrowserContext): Promise<void> | null {
+  return remoteContextRefreshers.get(context)?.() ?? null;
+}
 
 /** Only the actual remote Page factory supplies its host/page association. */
 export function readRemotePageConnection(page: Page): Promise<unknown> | null {
@@ -465,6 +520,7 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
   });
 
   let frames: RemoteFrameDescriptor[] = [{ chain: [], url: initialUrl, main: true }];
+  const closeListeners = new Set<() => void>();
   const refreshFrames = async (options?: { readonly complete?: boolean }): Promise<void> => {
     if (options?.complete !== true) {
       const response = await client.call<{ frames: RemoteFrameDescriptor[] }>('frames', { pageId });
@@ -490,10 +546,20 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     frames = currentFrames;
     url = response.url;
   };
+  // The action already happened; failing to re-read the page afterwards must
+  // not turn it into an error, the next read of the page says what is there.
+  const refreshAfterAction = async (): Promise<void> => {
+    try {
+      url = await pageCall('url') as string;
+      await refreshFrames();
+    } catch { /* The cached address stays until the next successful read. */ }
+  };
   const page: Record<string, unknown> = {
     url: () => url,
     title: async () => await pageCall('title') as string,
-    on: () => undefined,
+    on: (event: string, listener: () => void) => {
+      if (event === 'close') closeListeners.add(listener);
+    },
     close: async () => {
       await client.call('closePage', { pageId });
     },
@@ -515,6 +581,7 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     },
     waitForLoadState: async (state?: string, options?: Record<string, unknown>) => {
       await pageCall('waitForLoadState', { state, ...options });
+      await refreshAfterAction();
     },
     waitForURL: async (target: string, options?: Record<string, unknown>) => {
       url = await pageCall('waitForURL', { url: target, ...options }) as string;
@@ -545,14 +612,15 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
       const response = await client.call<{ value: unknown }>('evaluate', { pageId, frameChain: [], source: sourceOf(fn), arg });
       return response.value;
     },
-    locator: (selector: string) => remoteLocator(client, pageId, [], selector),
-    frameLocator: (selector: string) => remoteFrameLocator(client, pageId, [selector]),
+    locator: (selector: string) => remoteLocator(client, pageId, [], selector, undefined, refreshAfterAction),
+    frameLocator: (selector: string) => remoteFrameLocator(client, pageId, [selector], refreshAfterAction),
     mainFrame: () => frameFor(frames.find((frame) => frame.main) ?? { chain: [], url, main: true }),
     frames: () => frames.map(frameFor),
     refreshFrames,
   };
   const remote = page as unknown as Page;
   remotePageConnections.set(remote, () => client.call('pageConnection', { pageId }));
+  remotePageCloseListeners.set(remote, closeListeners);
   return remote;
 }
 
@@ -563,14 +631,22 @@ export interface RemoteContextHandle {
 
 /** A BrowserContext as the engine uses one, backed by the host. */
 export function remoteContext(client: BrowserHostClient, initialPages: readonly { pageId: string; url: string }[]): BrowserContext {
-  const pages = initialPages.map((entry) => remotePage(client, entry.pageId, entry.url));
+  const pages = new Map<string, Page>(initialPages.map((entry): [string, Page] => [entry.pageId, remotePage(client, entry.pageId, entry.url)]));
+  const pageListeners = new Set<(page: Page) => void>();
   const context: Record<string, unknown> = {
-    pages: () => pages,
-    on: () => undefined,
+    pages: () => [...pages.values()],
+    // The host cannot push page events, but it can say the browser is gone,
+    // which is the one a session that must stop being the default needs.
+    // Tabs opened or closed outside this process arrive through refreshRemotePages.
+    on: (event: string, listener: (page: Page) => void) => {
+      if (event === 'close') client.onGone(listener as () => void);
+      if (event === 'page') pageListeners.add(listener);
+    },
+    isClosed: () => client.gone,
     newPage: async () => {
       const created = await client.call<{ pageId: string }>('newPage');
       const page = remotePage(client, created.pageId, 'about:blank');
-      pages.push(page);
+      pages.set(created.pageId, page);
       return page;
     },
     // Releasing the transport, never closing someone else's browser.
@@ -579,5 +655,21 @@ export function remoteContext(client: BrowserHostClient, initialPages: readonly 
       finally { await client.close(); }
     },
   };
-  return context as unknown as BrowserContext;
+  const remote = context as unknown as BrowserContext;
+  remoteContextRefreshers.set(remote, async () => {
+    const listed = await client.call<{ pages: { pageId: string; url: string }[] }>('pages');
+    const live = new Set(listed.pages.map((entry) => entry.pageId));
+    for (const [pageId, page] of [...pages]) {
+      if (live.has(pageId)) continue;
+      pages.delete(pageId);
+      for (const listener of [...(remotePageCloseListeners.get(page) ?? [])]) listener();
+    }
+    for (const entry of listed.pages) {
+      if (pages.has(entry.pageId)) continue;
+      const page = remotePage(client, entry.pageId, entry.url);
+      pages.set(entry.pageId, page);
+      for (const listener of [...pageListeners]) listener(page);
+    }
+  });
+  return remote;
 }

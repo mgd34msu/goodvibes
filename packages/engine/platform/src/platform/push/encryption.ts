@@ -44,9 +44,34 @@ export interface EncryptedPushPayload {
  */
 const RECORD_SIZE = 4096;
 
+/** The aes128gcm header: salt(16) | record size(4) | key id length(1) | sender public key(65). */
+const HEADER_BYTES = 16 + 4 + 1 + 65;
+/** The record's last-record delimiter (1) plus the GCM tag (16). */
+const RECORD_OVERHEAD_BYTES = 17;
+
+/**
+ * The most plaintext one push can carry. Push services accept request bodies of
+ * up to 4096 bytes in total (RFC 8291 section 4), header included, which leaves
+ * 3993 bytes of plaintext; the 4096-byte record size alone would let a body
+ * through that the service then refuses with a 413.
+ */
+export const PUSH_MAX_PLAINTEXT_BYTES = RECORD_SIZE - HEADER_BYTES - RECORD_OVERHEAD_BYTES;
+
 const KEY_INFO_PREFIX = Buffer.from('WebPush: info\0', 'utf8');
 const CEK_INFO = Buffer.from('Content-Encoding: aes128gcm\0', 'utf8');
 const NONCE_INFO = Buffer.from('Content-Encoding: nonce\0', 'utf8');
+
+/**
+ * The message is too large for one push. A property of the message, not of the
+ * subscription it was addressed to, so delivery never counts it as an endpoint
+ * failure.
+ */
+export class PushPayloadTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Push payload too large for a single aes128gcm record (max ${maxBytes} bytes)`);
+    this.name = 'PushPayloadTooLargeError';
+  }
+}
 
 /** HKDF (RFC 5869) specialized to a single output block (length <= 32). */
 function hkdf(salt: Buffer, ikm: Buffer, info: Buffer, length: number): Buffer {
@@ -79,8 +104,8 @@ export function encryptPushPayload(
   if (authProblem) throw new Error(authProblem);
   // The fixed record cannot carry this payload, regardless of its encryption
   // keys. Refuse before generating an ephemeral key or deriving unused keys.
-  if (plaintext.length + 17 > RECORD_SIZE) {
-    throw new Error(`Push payload too large for a single aes128gcm record (max ${RECORD_SIZE - 17} bytes)`);
+  if (plaintext.length > PUSH_MAX_PLAINTEXT_BYTES) {
+    throw new PushPayloadTooLargeError(PUSH_MAX_PLAINTEXT_BYTES);
   }
   const receiverPublic = base64UrlToBuffer(keys.p256dh);
   const authSecret = base64UrlToBuffer(keys.auth);

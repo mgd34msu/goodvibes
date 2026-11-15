@@ -1,4 +1,3 @@
-/** Structured shadow cleanup regressions, authored and UNRUN during coding first. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -81,7 +80,7 @@ test('npm removal names the actual captured global prefix and never evaluates fo
   expect(readFileSync(log, 'utf8').split('\0')).toEqual(['--prefix', prefix, 'rm', '-g', '--ignore-scripts', '@pellux/goodvibes-tui', '']);
 });
 test('bounded probe refuses oversized output and nonzero-exit banners', () => {
-  const oversized = binary(join(home, 'oversized'), 'perl -e \'print "x" x 65537\''), failed = binary(join(home, 'failed'), 'printf "goodvibes 2.0.25\\n"; exit 7');
+  const oversized = binary(join(home, 'oversized'), 'head -c 65537 /dev/zero | tr \'\\0\' x'), failed = binary(join(home, 'failed'), 'printf "goodvibes 2.0.25\\n"; exit 7');
   const result = shell('if shadow_manager_output "$LARGE"; then exit 9; fi; test -z "$(shadow_version_of "$FAILED" goodvibes)"', { LARGE: oversized, FAILED: failed });
   expect(result.status, result.stderr).toBe(0); expect(result.stdout).toBe('');
 });

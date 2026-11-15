@@ -34,22 +34,40 @@ const ADMIN_PRINCIPAL: AuthenticatedPrincipal = {
   scopes: ['read:telemetry'],
 };
 
+interface IngestSink {
+  ingestLogs: (p: Record<string, unknown>) => void;
+  ingestTraces: (p: Record<string, unknown>) => void;
+  ingestMetrics: (p: Record<string, unknown>) => void;
+}
+
+const NOOP_SINK: IngestSink = { ingestLogs: () => {}, ingestTraces: () => {}, ingestMetrics: () => {} };
+
 function makeHandlers(opts: {
   authenticated?: boolean;
-  ingestSink?: {
-    ingestLogs: (p: Record<string, unknown>) => void;
-    ingestTraces: (p: Record<string, unknown>) => void;
-    ingestMetrics: (p: Record<string, unknown>) => void;
-  } | null;
+  principal?: AuthenticatedPrincipal;
+  ingestSink?: IngestSink | null;
 }) {
   return createDaemonTelemetryRouteHandlers({
     telemetryApi: null,
     resolveAuthenticatedPrincipal: () =>
-      opts.authenticated !== false ? ADMIN_PRINCIPAL : null,
-    // ingestSink is required (TelemetryIngestSink | null). Default null when
-    // the test does not exercise sink forwarding.
-    ingestSink: opts.ingestSink ?? null,
+      opts.authenticated !== false ? (opts.principal ?? ADMIN_PRINCIPAL) : null,
+    // `null` means no sink is wired; the default is a sink that accepts and drops.
+    ingestSink: opts.ingestSink === undefined ? NOOP_SINK : opts.ingestSink,
   });
+}
+
+function scopedPrincipal(scopes: readonly string[]): AuthenticatedPrincipal {
+  return { principalId: 'scoped-user', principalKind: 'user', admin: false, scopes: [...scopes] };
+}
+
+function countingSink() {
+  const calls = { logs: 0, traces: 0, metrics: 0 };
+  const sink: IngestSink = {
+    ingestLogs: () => { calls.logs++; },
+    ingestTraces: () => { calls.traces++; },
+    ingestMetrics: () => { calls.metrics++; },
+  };
+  return { calls, sink };
 }
 
 function jsonRequest(url: string, body: unknown): Request {
@@ -331,11 +349,104 @@ describe('OTLP POST ingest: sink forwarding', () => {
     expect(received[0]).toMatchObject({ resourceLogs: [{ scopeLogs: [] }] });
   });
 
-  test('null ingestSink is handled gracefully (no throw)', async () => {
+  test('a missing ingestSink answers 503 TELEMETRY_UNAVAILABLE instead of acknowledging dropped data', async () => {
     const h = makeHandlers({ authenticated: true, ingestSink: null });
-    const req = jsonRequest('http://localhost/api/v1/telemetry/otlp/v1/logs', { resourceLogs: [] });
-    const res = await h.postTelemetryOtlpLogs(req);
+    for (const [post, path, body] of [
+      [h.postTelemetryOtlpLogs, 'logs', { resourceLogs: [] }],
+      [h.postTelemetryOtlpTraces, 'traces', { resourceSpans: [] }],
+      [h.postTelemetryOtlpMetrics, 'metrics', { resourceMetrics: [] }],
+    ] as const) {
+      const res = await post(jsonRequest(`http://localhost/api/v1/telemetry/otlp/v1/${path}`, body));
+      expect(res.status).toBe(503);
+      expect((await res.json() as Record<string, unknown>)['code']).toBe('TELEMETRY_UNAVAILABLE');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Authorization and size gates (non-admin principals)
+// ---------------------------------------------------------------------------
+
+describe('OTLP POST ingest: scope and size gates', () => {
+  const logsUrl = 'http://localhost/api/v1/telemetry/otlp/v1/logs';
+
+  test('a read-only telemetry principal gets 403 MISSING_SCOPE and nothing reaches the sink', async () => {
+    const { calls, sink } = countingSink();
+    const h = makeHandlers({ principal: scopedPrincipal(['read:telemetry']), ingestSink: sink });
+    const requests: Array<[(req: Request) => Response | Promise<Response>, string, unknown]> = [
+      [h.postTelemetryOtlpLogs, 'logs', { resourceLogs: [] }],
+      [h.postTelemetryOtlpTraces, 'traces', { resourceSpans: [] }],
+      [h.postTelemetryOtlpMetrics, 'metrics', { resourceMetrics: [] }],
+    ];
+    for (const [post, path, body] of requests) {
+      const res = await post(jsonRequest(`http://localhost/api/v1/telemetry/otlp/v1/${path}`, body));
+      expect(res.status).toBe(403);
+      expect((await res.json() as Record<string, unknown>)['code']).toBe('MISSING_SCOPE');
+    }
+    expect(calls).toEqual({ logs: 0, traces: 0, metrics: 0 });
+  });
+
+  test.each([['ingest:telemetry'], ['write:telemetry']])('a non-admin principal holding %s may ingest', async (scope) => {
+    const { calls, sink } = countingSink();
+    const h = makeHandlers({ principal: scopedPrincipal([scope]), ingestSink: sink });
+    const res = await h.postTelemetryOtlpLogs(jsonRequest(logsUrl, { resourceLogs: [] }));
     expect(res.status).toBe(200);
+    expect(calls.logs).toBe(1);
+  });
+
+  test('a body one byte over 4 MiB is 413 and is not ingested', async () => {
+    const { calls, sink } = countingSink();
+    const h = makeHandlers({ ingestSink: sink });
+    const limit = 4 * 1024 * 1024;
+    const res = await h.postTelemetryOtlpLogs(new Request(logsUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new Uint8Array(limit + 1),
+    }));
+    expect(res.status).toBe(413);
+    expect((await res.json() as Record<string, unknown>)['code']).toBe('PAYLOAD_TOO_LARGE');
+    expect(calls.logs).toBe(0);
+  });
+
+  test('a declared Content-Length over 4 MiB is refused before the body is read', async () => {
+    const { calls, sink } = countingSink();
+    const h = makeHandlers({ ingestSink: sink });
+    let bodyRead = false;
+    const req = new Request(logsUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': String(4 * 1024 * 1024 + 1) },
+      body: '{}',
+    });
+    const original = req.arrayBuffer.bind(req);
+    Object.defineProperty(req, 'arrayBuffer', { value: () => { bodyRead = true; return original(); } });
+    const res = await h.postTelemetryOtlpLogs(req);
+    expect(res.status).toBe(413);
+    expect(bodyRead).toBe(false);
+    expect(calls.logs).toBe(0);
+  });
+
+  test('a body of exactly 4 MiB is not rejected for size', async () => {
+    const { sink } = countingSink();
+    const h = makeHandlers({ ingestSink: sink });
+    const res = await h.postTelemetryOtlpLogs(new Request(logsUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new Uint8Array(4 * 1024 * 1024),
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json() as Record<string, unknown>)['code']).toBe('INVALID_PAYLOAD');
+  });
+
+  test('a protobuf body that does not decode is 400 INVALID_PAYLOAD and is not ingested', async () => {
+    const { calls, sink } = countingSink();
+    const h = makeHandlers({ ingestSink: sink });
+    // Field 1, length-delimited, declares 255 bytes and supplies none.
+    const res = await h.postTelemetryOtlpLogs(protobufRequest(logsUrl, new Uint8Array([0x0a, 0xff, 0x01])));
+    expect(res.status).toBe(400);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body['code']).toBe('INVALID_PAYLOAD');
+    expect(String(body['error'])).toContain('protobuf');
+    expect(calls.logs).toBe(0);
   });
 });
 

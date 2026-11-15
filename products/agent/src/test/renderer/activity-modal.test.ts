@@ -30,6 +30,14 @@ describe('activity modal fleet rows', () => {
     expect(agentRow).not.toContain('Turn 12');
   });
 
+  test('a capped daemon fleet says the agents listed are only part of it', () => {
+    const rows = layerText(renderActivityModal({
+      view: { now: { busy: false, agents: [], processes: 0, daemonPartial: { shown: 20, total: 55 } }, needsYou: [], comingUp: [], recent: [] },
+      query: '', selectedIndex: 0,
+    }, 100, 30));
+    expect(rows.some((line) => line.includes('daemon fleet is partial: 20 of 55'))).toBe(true);
+  });
+
   test('falls back to the progress line when no headline exists', () => {
     const rows = render([{ label: 'researcher', progress: 'gathering sources' }]);
     const agentRow = rows.find((line) => line.includes('researcher'));

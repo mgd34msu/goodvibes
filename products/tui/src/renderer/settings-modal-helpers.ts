@@ -63,7 +63,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
     'Post-edit diagnostics: whether the shell runs language diagnostics on a file after the model edits or writes it, surfacing new problems inline.',
   mcp: SHARED_CATEGORY_INFO['mcp'],
   sandbox:
-    'Isolation strategy for REPL, MCP, Windows, and QEMU-backed execution. Use these settings to separate risky tools from the host shell.',
+    'Isolation strategy for REPL, MCP, and Windows execution. Use these settings to separate risky tools from the host shell.',
   surfaces:
     'External app surfaces such as Slack, Discord, ntfy, Home Assistant, Telegram, webhooks, chat bridges, and messaging providers.',
   device:
@@ -72,7 +72,6 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
     'What a message arriving from one of those channels does. By default it gets a conversational answer, and work is proposed and waits for your agreement rather than starting on its own; you can instead confirm every run, or restore the old behavior where a message starts work immediately. Also how long a pending proposal stays answerable and how many can wait at once. This governs messages from channels only; what you type here always runs, and schedules and triggers were authorized when created.',
   cloudflare:
     'Optional Cloudflare control plane, batch queue, Worker, Tunnel, Access, DNS, KV, Durable Objects, Secrets Store, and R2 settings.',
-  release: 'Release-channel preference.',
   power:
     'Host sleep ownership. Keep-awake holds the host awake (the always-visible "sleep disabled" chip is the safety mechanism; no timer, no AC-only option); automatic inhibition keeps the host awake while real work runs, with an honest hard cap on that work hold.',
   memory:
@@ -150,7 +149,6 @@ export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], strin
   device: 'Paired Devices',
   conversationGate: SHARED_CATEGORY_LABELS['conversationGate'],
   cloudflare: SHARED_CATEGORY_LABELS['cloudflare'],
-  release: 'Release',
   power: 'Power',
   memory: 'Memory',
   email: SHARED_CATEGORY_LABELS['email'],
@@ -172,10 +170,10 @@ export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], strin
   profile: 'Owner Profile',
 };
 
-const SETTING_LABELS: Partial<Record<string, string>> = {
+export const SETTING_LABELS: Partial<Record<string, string>> = {
   'ui.systemMessages': SHARED_SETTING_LABELS['ui.systemMessages'],
   'ui.operationalMessages': SHARED_SETTING_LABELS['ui.operationalMessages'],
-  'ui.wrfcMessages': 'WRFC Message Target',
+  'ui.contractMessages': 'Contract Message Target',
   'ui.voiceEnabled': 'Always Speak',
   'behavior.autoCompactThreshold': SHARED_SETTING_LABELS['behavior.autoCompactThreshold'],
   'behavior.staleContextWarnings': SHARED_SETTING_LABELS['behavior.staleContextWarnings'],
@@ -192,10 +190,6 @@ const SETTING_LABELS: Partial<Record<string, string>> = {
   'permissions.backgroundAgents': 'Background Agents',
   'diagnostics.postEdit': 'Post-Edit Diagnostics',
   'sandbox.vmBackend': 'Sandbox Backend',
-  'sandbox.qemuBinary': 'QEMU Binary',
-  'sandbox.qemuImagePath': 'QEMU Image',
-  'sandbox.qemuExecWrapper': 'QEMU Wrapper',
-  'sandbox.replJavaScriptCommand': 'REPL JS Command',
   'tools.llmProvider': SHARED_SETTING_LABELS['tools.llmProvider'],
   'tools.llmModel': SHARED_SETTING_LABELS['tools.llmModel'],
   'tools.autoHeal': SHARED_SETTING_LABELS['tools.autoHeal'],

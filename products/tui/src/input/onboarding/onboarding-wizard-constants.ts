@@ -114,6 +114,7 @@ export const INBOUND_EXTERNAL_SURFACE_IDS = new Set<string>([
   'signal',
   'slack',
   'telegram',
+  'telephony',
   'webhook',
   'whatsapp',
 ]);
@@ -132,6 +133,7 @@ export const REQUIRED_EXTERNAL_SETUP_FIELD_IDS = new Set<string>([
   'external-services.homeassistant.webhook-secret',
   'external-services.google-chat.webhook-url',
   'external-services.google-chat.verification-token',
+  'external-services.telephony.webhook-secret',
   'external-services.signal.bridge-url',
   'external-services.signal.account',
   'external-services.signal.token',
@@ -158,4 +160,5 @@ export const NETWORK_HOST_FIELD_IDS = new Set<string>([
   'network.service-ip',
   'network.browser-ip',
   'network.webhook-ip',
+  'network.adopt-daemon-host',
 ]);

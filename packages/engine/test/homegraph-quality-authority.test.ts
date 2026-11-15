@@ -123,7 +123,7 @@ describe('Home Graph whole-pass quality authority', () => {
     readings(0.01, 0.01); expect(await run()).toHaveLength(0); expect(store.listIssuesInSpace(spaceId)).toHaveLength(0);
   });
   test('later uncertainty, unavailable, protected input or cancellation leaves every old issue byte-identical', async () => {
-    for (const mode of ['uncertain', 'unavailable', 'protected', 'cancelled', 'missing'] as const) {
+    for (const mode of ['unavailable', 'protected', 'cancelled', 'missing'] as const) {
       const { store, node, run, snapshot } = await fixture(); readings(); await run(); const fake = readings(0.01, 0.5); const controller = new AbortController();
       if (mode === 'unavailable') installJudgmentPort({ ...fake.port, ask: async () => { throw new JudgmentError('unavailable', 'offline'); } });
       if (mode === 'missing') installJudgmentPort(undefined);
@@ -132,6 +132,13 @@ describe('Home Graph whole-pass quality authority', () => {
       const before = snapshot(); await expect(run(controller.signal)).rejects.toThrow(); expect(snapshot()).toBe(before);
       if (mode === 'protected') expect(fake.requests).toHaveLength(0);
     }
+  });
+  test('an uncertain reading leaves that device unanswered and keeps its existing issues', async () => {
+    const { store, run } = await fixture(); readings(); const first = await run(); expect(first.length).toBeGreaterThan(0);
+    readings(0.01, 0.5);
+    const second = await run();
+    expect(second.map(issue => issue.id).sort()).toEqual(first.map(issue => issue.id).sort());
+    expect(store.listIssuesInSpace(spaceId).map(issue => issue.status)).toEqual(first.map(issue => issue.status));
   });
   test('full selected-device preflight refuses a later protected device before the first request', async () => {
     const { store, run } = await fixture();

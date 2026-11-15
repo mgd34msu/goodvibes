@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PermissionExecutionOptions, PermissionPromptRequest } from '../platform/src/platform/permissions/index.js';
+import { JsonFileStore } from '../platform/src/platform/state/index.js';
 import {
   WorkspaceTrustManager,
   detectPriorWorkspaceState,
@@ -282,8 +283,8 @@ describe('trustGatedAsk', () => {
       expect(promptCalls).toBe(1);
     });
 
-    it('coalesces concurrent requests into ONE trust prompt, not one per request', async () => {
-      const { manager } = makeUndecidedManager();
+    it('coalesces concurrent requests into ONE trust prompt and ONE saved decision, not one per request', async () => {
+      const { manager, setLevelCalls } = makeUndecidedManager();
       const ask = async () => ({ approved: true });
       let promptCalls = 0;
       let resolvePrompt!: (level: 'trusted' | 'restricted') => void;
@@ -301,6 +302,89 @@ describe('trustGatedAsk', () => {
       expect(firstResult).toEqual({ approved: true });
       expect(secondResult).toEqual({ approved: true });
       expect(promptCalls).toBe(1);
+      expect(setLevelCalls).toEqual(['trusted']);
     });
+  });
+});
+
+describe('WorkspaceTrustManager.setLevel persistence failure', () => {
+  it('withdraws trust that could not be saved, and keeps a restriction that could not be saved', async () => {
+    const manager = new WorkspaceTrustManager({ shellPaths: makePaths(workspace), surfaceRoot: SURFACE_ROOT });
+    await manager.load();
+    // A directory where the decision file goes makes every save fail.
+    mkdirSync(join(workspace, '.goodvibes', SURFACE_ROOT, 'trust.json'), { recursive: true });
+    await expect(manager.setLevel('trusted')).rejects.toThrow();
+    expect(manager.isTrusted()).toBe(false);
+    await expect(manager.setLevel('restricted')).rejects.toThrow();
+    expect(manager.getLevel()).toBe('restricted');
+  });
+});
+
+describe('trust that is still being saved', () => {
+  function heldSave() {
+    let release!: () => void;
+    let fail!: (error: Error) => void;
+    const held = new Promise<void>((resolve, reject) => { release = resolve; fail = reject; });
+    held.catch(() => {});
+    const save = spyOn(JsonFileStore.prototype, 'save').mockImplementation(() => held);
+    return { release, fail, save };
+  }
+
+  it('is not trusted until the save finishes, and stays untrusted when the save fails', async () => {
+    const { fail, save } = heldSave();
+    try {
+      const manager = new WorkspaceTrustManager({ shellPaths: makePaths(workspace), surfaceRoot: SURFACE_ROOT });
+      await manager.load();
+      const saving = manager.setLevel('trusted');
+      expect(manager.isCategoryAllowed('write')).toBe(false);
+      expect(manager.isTrusted()).toBe(false);
+
+      let askedWhileSaving = false;
+      const gated = trustGatedAsk(manager, async () => { askedWhileSaving = true; return { approved: true }; }, async () => 'trusted');
+      const concurrent = gated({ category: 'write' } as never);
+      fail(new Error('disk full'));
+      await expect(saving).rejects.toThrow('disk full');
+      expect(await concurrent).toEqual({ approved: false });
+      expect(askedWhileSaving).toBe(false);
+      expect(manager.isCategoryAllowed('write')).toBe(false);
+    } finally { save.mockRestore(); }
+  });
+
+  it('is trusted once the save finishes', async () => {
+    const { release, save } = heldSave();
+    try {
+      const manager = new WorkspaceTrustManager({ shellPaths: makePaths(workspace), surfaceRoot: SURFACE_ROOT });
+      await manager.load();
+      const saving = manager.setLevel('trusted');
+      expect(manager.isCategoryAllowed('write')).toBe(false);
+      release();
+      await saving;
+      expect(manager.isCategoryAllowed('write')).toBe(true);
+      expect(manager.isTrusted()).toBe(true);
+    } finally { save.mockRestore(); }
+  });
+
+  it('concurrent gated requests share one prompt and one save, and none runs when that save fails', async () => {
+    const { fail, save } = heldSave();
+    try {
+      const manager = new WorkspaceTrustManager({ shellPaths: makePaths(workspace), surfaceRoot: SURFACE_ROOT });
+      await manager.load();
+      let asked = 0;
+      let prompts = 0;
+      const gated = trustGatedAsk(manager, async () => { asked += 1; return { approved: true }; }, async () => { prompts += 1; return 'trusted'; });
+      const first = gated({ category: 'write' } as never);
+      const second = gated({ category: 'execute' } as never);
+      while (save.mock.calls.length === 0) await Promise.resolve();
+      const outcomes = Promise.allSettled([first, second]);
+      fail(new Error('disk full'));
+      for (const outcome of await outcomes) {
+        expect(outcome.status).toBe('rejected');
+        if (outcome.status === 'rejected') expect((outcome.reason as Error).message).toBe('disk full');
+      }
+      expect(prompts).toBe(1);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(asked).toBe(0);
+      expect(manager.isDecided()).toBe(false);
+    } finally { save.mockRestore(); }
   });
 });

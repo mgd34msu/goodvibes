@@ -31,6 +31,7 @@ export async function handleKnowledgeReadCommand(
   switch (sub) {
     case 'status': {
       const status = await ports.status();
+      ports.assertCurrent();
       print(
         [
           presentation.statusTitle,
@@ -151,6 +152,7 @@ export async function handleKnowledgeReadCommand(
     }
     case 'lint': {
       const issues = await ports.lint();
+      ports.assertCurrent();
       if (issues.length === 0) {
         print('[knowledge] No lint issues.');
         return true;
@@ -181,7 +183,8 @@ export async function handleKnowledgeReadCommand(
     case 'candidates': {
       const [limitArg] = positionalArgs(rest);
       const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-      const candidates = ports.candidates(limit);
+      const candidates = await ports.candidates(limit);
+      ports.assertCurrent();
       if (candidates.length === 0) {
         print('[knowledge] No consolidation candidates.');
         return true;
@@ -196,7 +199,8 @@ export async function handleKnowledgeReadCommand(
     case 'reports': {
       const [limitArg] = positionalArgs(rest);
       const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
-      const reports = ports.reports(limit);
+      const reports = await ports.reports(limit);
+      ports.assertCurrent();
       if (reports.length === 0) {
         print('[knowledge] No consolidation reports.');
         return true;
@@ -209,7 +213,8 @@ export async function handleKnowledgeReadCommand(
       break;
     }
     case 'schedules': {
-      const schedules = ports.schedules(20);
+      const schedules = await ports.schedules(20);
+      ports.assertCurrent();
       if (schedules.length === 0) {
         print('[knowledge] No knowledge schedules.');
         return true;
@@ -229,6 +234,7 @@ export async function handleKnowledgeReadCommand(
         return true;
       }
       const prompt = await ports.packet(query, scopeValues);
+      ports.assertCurrent();
       print(prompt ?? '[knowledge] No structured knowledge matched that task.');
       break;
     }

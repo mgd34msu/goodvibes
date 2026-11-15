@@ -11,7 +11,7 @@ import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
-import { dispatchNativeConversationTurn } from './runtime/native-conversation-ingress.ts';
+import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
 import './renderer/compositor.ts';
@@ -32,10 +32,11 @@ import '@goodvibes-jev/engine/platform/platform/acp';
 import { PermissionPromptUI, buildPendingPermissionExtras } from './permissions/prompt.ts';
 import {
   handleBrokerApprovalChange,
+  sweepBrokerApprovals,
+  createApprovalCardQueue,
+  settledAskDecision,
   buildFixSessionAffordance,
-  buildFixSessionErrorNotice,
   handleFixSessionAttachKey,
-  refreshFixSessionsFromApprovals,
 } from './permissions/broker-approval-card.ts';
 import './input/command-registry.ts';
 
@@ -81,6 +82,7 @@ import {
 } from './shell/retry-affordance.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
+import { runNativeTurnDispatch } from './core/native-turn-dispatch.ts';
 import { resolveFoldedBookmarkLine } from './core/bookmark-navigation.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
@@ -89,9 +91,9 @@ import { applyConfiguredHitlMode, applyTerminalRuntimeConfigDefaults } from '@go
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
 import { allowTerminalWrite, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { installProcessLifecycle } from './runtime/process-lifecycle.ts';
-import { createRenderScheduler } from '@goodvibes-jev/engine/terminal-shell';
+import { createRenderScheduler, installTerminalExitGuards } from '@goodvibes-jev/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
-import { summarizeRunningAgents } from './renderer/process-summary.ts';
+import { contractIsWorking, summarizeRunningAgents } from './renderer/process-summary.ts';
 import { footerFleetCost } from './views/fleet-read-model.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './core/stream-event-wiring.ts';
@@ -99,13 +101,14 @@ import { createStreamMetrics, type StreamMetrics } from './core/stream-metrics.t
 import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
-import { applyComposerCapture, applyAtModelDirective } from './input/composer-capture.ts';
+import { applyComposerCapture, applyAtModelDirective, shouldSendAfterCapture } from './input/composer-capture.ts';
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
 import { wireInteractionSeams, createMemoryProvenanceUi } from './runtime/interaction-seams.ts';
 import { createPowerChipSource } from './core/power-chip-source.ts';
-import { fetchDaemonPowerState, installKeepAwakeRemoteForward } from './runtime/power-keepawake-remote.ts';
+import { keepAwakeHolding } from './core/power-status.ts';
+import { fetchDaemonPowerState, installKeepAwakeRemoteForward, resendKeepAwakeOnReconnect } from './runtime/power-keepawake-remote.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
 import { createTerminalNotifier } from './core/terminal-notifier.ts';
 import { createDeferredRender } from './renderer/deferred-render.ts';
@@ -260,27 +263,36 @@ async function main() {
       fixSessionAttachArmed = fixSessionId;
     },
   });
-  // A failed fix-session spawn stamps an error instead of a dead id: render it honestly, no jump armed.
-  const onFixSessionError = buildFixSessionErrorNotice((message) => {
-    systemMessageRouter.high(message);
-    render();
-  });
   commandContext.armFixSessionAttach = onFixSessionStarted;
-  approvalBroker.subscribe((approval) =>
-    handleBrokerApprovalChange({
-      approval,
-      broker: approvalBroker,
-      render,
-      onFixSessionStarted,
-      onFixSessionError,
-      getPending: () => pendingPermission,
-      setPending: (next) => {
-        if (next) hostPairing?.cancelForTakeover();
-        pendingPermission = next;
-      },
-    }),
-  );
-  refreshFixSessionsFromApprovals(() => approvalBroker.listApprovals(), onFixSessionStarted, onFixSessionError); // catch pre-subscription stamps
+  type LocalCard = { readonly request: Parameters<typeof buildPendingPermissionExtras>[0]; readonly resolve: Parameters<typeof buildPendingPermissionExtras>[1]; readonly queuedAt: number };
+  const localCards = createApprovalCardQueue<LocalCard>({
+    getPending: () => pendingPermission,
+    callIdOf: (card) => card.request.callId,
+    show: ({ request, resolve, queuedAt }) => {
+      // An ask that waited behind another card may have been settled meanwhile, on another surface, with an amended or per-hunk answer.
+      const settled = settledAskDecision(approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER), request.callId, queuedAt);
+      if (settled) { resolve(settled); return false; }
+      hostPairing?.cancelForTakeover();
+      pendingPermission = { ...request, ...buildPendingPermissionExtras(request, resolve, approvalBroker) };
+      render();
+      return true;
+    },
+  });
+  const brokerCardParams = {
+    broker: approvalBroker,
+    render,
+    notify: (message: string) => { systemMessageRouter.high(message); render(); },
+    getPending: () => pendingPermission,
+    setPending: (next: PendingPermissionState | null) => {
+      if (next) hostPairing?.cancelForTakeover();
+      pendingPermission = next;
+      if (next === null) localCards.next();
+    },
+  };
+  approvalBroker.subscribe((approval) => {
+    handleBrokerApprovalChange({ ...brokerCardParams, approval });
+    queueMicrotask(() => sweepBrokerApprovals({ ...brokerCardParams, listApprovals: () => approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER) }));
+  });
 
   // Where the main transcript is scrolled to; each frame's overlay-aware clamp (conversation-layout) is fed back so a scroll clamps against exactly what is displayed (shell/transcript-scroll.ts).
   const transcript = new TranscriptScroll();
@@ -342,35 +354,40 @@ async function main() {
   const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId);
   unsubs.push(sessionContractViews.dispose);
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
-  unsubs.push(
-    ...wireWorkTree({
-      conversation,
-      events: uiServices.events,
-      agentManager,
-      listContracts: sessionContractViews.read,
-      onContractsChanged: (listener) => ctx.services.contractRunner.on(listener),
-      fleetNodes,
-      pendingCallId: () => pendingPermission?.callId,
-      turnActive: () => orchestrator.isThinking,
-      sessionsDir: ctx.services.surface.sessionsDir,
-      sessionId: () => runtime.sessionId,
-      requestRender: () => render(),
-    }).unsubs,
-  );
+  const workTreeWiring = wireWorkTree({
+    conversation,
+    events: uiServices.events,
+    agentManager,
+    listContracts: sessionContractViews.read,
+    onContractsChanged: (listener) => ctx.services.contractRunner.on(listener),
+    fleetNodes,
+    pendingCallId: () => pendingPermission?.callId,
+    turnActive: () => orchestrator.isThinking,
+    sessionsDir: ctx.services.surface.sessionsDir,
+    sessionId: () => runtime.sessionId,
+    requestRender: () => render(),
+  });
+  unsubs.push(...workTreeWiring.unsubs);
   let recoveryInterval: ReturnType<typeof setInterval> | null = null;
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // The optional "used N memories" provenance chip (default OFF), see interaction-seams.ts.
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
   // Topology-aware keep-awake: the chip renders the DAEMON's state in adopted-external mode (power-chip-source.ts) and every toggle is forwarded to that daemon (power-keepawake-remote.ts) so keep-awake survives the TUI closing in BOTH topologies.
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
+  const keepAwakeRemoteDeps = {
+    configManager,
+    homeDirectory,
+    isExternalDaemon,
+    notify: (line: string) => { systemMessageRouter.high(line); render(); },
+  };
   const powerChipSource = createPowerChipSource({
     powerManager: ctx.services.powerManager,
     render: () => render(),
     isExternalDaemon,
     onPowerEvent: (cb) => uiServices.events.ops.on('OPS_POWER_STATE_CHANGED', cb as never),
-    fetchDaemonPowerState: () => fetchDaemonPowerState({ configManager, homeDirectory, isExternalDaemon }),
+    fetchDaemonPowerState: resendKeepAwakeOnReconnect(keepAwakeRemoteDeps, () => fetchDaemonPowerState(keepAwakeRemoteDeps)),
   });
-  unsubs.push(powerChipSource.stop, installKeepAwakeRemoteForward({ configManager, homeDirectory, isExternalDaemon }));
+  unsubs.push(powerChipSource.stop, installKeepAwakeRemoteForward(keepAwakeRemoteDeps));
   const lifecycle = installProcessLifecycle({
     stdin,
     stdout,
@@ -459,22 +476,30 @@ async function main() {
   ): Promise<void> => {
     if (!isNativeConversationTurnReady(state)) return;
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
-    if (spokenOutput) spokenTurns.submitNextTurn(state.result.text);
     // Provider failover retains the exact same source identity and opaque permit.
     retryCtx = { count: conversation.getMessageCount(), text: state.result.text, opts: inputOptions };
     streamResult.clearFailoverVisited();
-    try {
-      await refreshMemoryRecallSnapshot(ctx.services);
-      if (!current()) return;
-      submissionStatus = null;
-      render();
-      await dispatchNativeConversationTurn(state, orchestrator, inputOptions);
-    } catch (error) {
-      if (!current()) return;
-      submissionStatus = `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake-status before retrying.`;
-      systemMessageRouter.high(submissionStatus);
-      render();
-    }
+    await runNativeTurnDispatch({
+      armSpeech: () => (spokenOutput ? spokenTurns.armNextTurn(state.result.text) : null),
+      prepare: () => refreshMemoryRecallSnapshot(ctx.services),
+      current,
+      begin: () => {
+        submissionStatus = null;
+        render();
+      },
+      start: () => dispatchNativeConversationTurn(state, orchestrator, inputOptions),
+      failed: async (error) => {
+        // A turn that provably never started gives its claim back so /work intake-retry can run it.
+        submissionStatus =
+          await describeFailedNativeDispatch(
+            state,
+            error,
+            `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake-status before retrying.`,
+          );
+        systemMessageRouter.high(submissionStatus);
+        render();
+      },
+    });
   };
   commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
@@ -485,6 +510,10 @@ async function main() {
     planningReading.cancel();
     hostPairing?.cancelForTakeover();
     input.clearModalStack();
+    // Acting here after another surface took the session over is what moves the conversation back for rewinds.
+    if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
+      systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
+    }
     transcript.toBottom(); // Re-lock on any user input
     conversation.dismissSplash(); // owner rule: any submission retires the splash for the run
     let processedText = applyAtModelDirective(text, {
@@ -494,17 +523,18 @@ async function main() {
       notify: (m) => systemMessageRouter.high(m),
     });
     // Composer capture markers: `!#` pins + sends; `#` saves a note without sending.
-    processedText = applyComposerCapture(processedText, {
+    const capture = applyComposerCapture(processedText, {
       sessionMemoryStore: ctx.services.sessionMemoryStore,
       notify: (message) => systemMessageRouter.high(message),
-    }).text;
-    if (processedText || content) {
+    });
+    processedText = capture.text;
+    if (shouldSendAfterCapture(capture, Boolean(content))) {
       // A fresh prompt supersedes provider recovery for the previous submission.
       streamResult.clearFailoverVisited();
       const epoch = ++inputEpoch;
       submissionStatus = null;
       const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : undefined;
-      if (options.spokenOutput) spokenTurns.submitNextTurn(processedText);
+      const spokenArm = options.spokenOutput ? spokenTurns.armNextTurn(processedText) : null;
       retryCtx = { count: conversation.getMessageCount(), text: processedText, content, opts: inputOptions };
       // Chat accepts the user's message directly. Native admission belongs to
       // explicit work submission, never to deciding whether a model may see it.
@@ -513,6 +543,9 @@ async function main() {
       void orchestrator
         .handleUserInput(processedText, content, inputOptions)
         .catch((error) => {
+          // A prompt that failed before its turn was submitted leaves its arm
+          // behind; withdrawn by identity, so a newer prompt's arm stays.
+          spokenArm?.disarm();
           if (epoch === inputEpoch) submissionStatus = `Prompt failed: ${summarizeError(error)}`;
         })
         .finally(render);
@@ -582,6 +615,13 @@ async function main() {
     toggleMemoryProvenance: () => memoryProvenanceUi.toggle(),
   });
   commandContext.isGenerating = () => orchestrator.isBusy;
+  commandContext.restoreDraft = (text) => {
+    if (input.prompt.length > 0 || text.length === 0) return;
+    input.prompt = text;
+    input.cursorPos = text.length;
+    input.syncFeedContextMutableFields();
+    render();
+  };
   commandContext.jumpToBookmark = jumpToBookmark;
   commandContext.scrollToLine = scrollToLine;
   commandContext.clearScreen = () => {
@@ -595,15 +635,7 @@ async function main() {
   };
   commandContext.beginConcealedInput = (req) => input.beginConcealedInput(req);
   permissionPromptRef.requestPermission = wrapRequestPermissionWithAlert(
-    (request) =>
-      new Promise((resolve) => {
-        hostPairing?.cancelForTakeover();
-        pendingPermission = {
-          ...request,
-          ...buildPendingPermissionExtras(request, resolve, approvalBroker),
-        };
-        render();
-      }),
+    (request) => new Promise((resolve) => { localCards.offer({ request, resolve, queuedAt: Date.now() }); }),
     {
       focusTracker: ctx.services.focusTracker,
       configGet: (k: string) => readTuiConfigValue(configManager, k),
@@ -816,7 +848,7 @@ async function main() {
       busy:
         orchestrator.isBusy ||
         hookDispatcher.activeInvocationCount > 0 ||
-        sessionContracts.some((contract) => !['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contract.status)) ||
+        sessionContracts.some((contract) => contractIsWorking(contract.status)) ||
         currentFleet.some(
           (node) =>
             node.kind === 'agent' &&
@@ -936,7 +968,7 @@ async function main() {
       runningAgentCount,
       runningProcessCount,
       // Always-visible "sleep disabled" chip, topology-aware: the DAEMON's state in adopted-external mode, the in-process manager otherwise (power-chip-source.ts).
-      powerKeepAwake: powerChipSource.get().keepAwake,
+      powerKeepAwake: keepAwakeHolding(powerChipSource.get()),
       // Composer must not read as focused while the process indicator owns keyboard focus.
       promptFocused: !input.indicatorFocused && !conversation.workTree.focused && viewFrame?.footer.disabledReason === undefined,
       workTreeFocused: conversation.workTree.focused && !viewFrame,
@@ -970,6 +1002,7 @@ async function main() {
     // Flush pending renders after updating the width provider and splash posture
     // so the transcript and splash rebuild against the current shell layout.
     if (!viewFrame) {
+      workTreeWiring.syncSession(); // a recovered or resumed session's folds come back with it
       conversation.workTree.tickLive(); // animate only the visible transcript
       conversation.getDisplayBlocks();
     }
@@ -1142,6 +1175,7 @@ async function main() {
       webSurfaceUrl: configManager.get('web.enabled') ? resolveWebSurfaceUrl(configManager) : undefined,
       autoApprove: isEffectiveDangerMode(configManager),
       keepAwake: powerChipSource.get().keepAwake,
+      keepAwakeRefused: !keepAwakeHolding(powerChipSource.get()) && powerChipSource.get().keepAwake,
       microphone: voice && voiceCaptureRowVisible(voice) ? voiceCaptureDescription(voice) : null,
       runningAgents: agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending').length,
       runningProcesses: processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length,
@@ -1260,18 +1294,21 @@ async function main() {
   // Activate one-key retry affordance when a user-visible error surfaces.
   wireRetryAffordanceOnError(streamResult.onErrorSurfaced, retryAffordance, () => retryCtx !== null, render);
 
-  // Register terminal-restoring crash/termination handlers BEFORE entering raw mode so a throw
-  // during setup or the initial render still restores the terminal; 'exit' is the final safety net.
-  process.on('uncaughtException', uncaughtExceptionHandler);
-  process.on('SIGTERM', terminationSignalHandler);
-  process.on('SIGHUP', terminationSignalHandler);
-  process.on('exit', exitListener);
-
-  // --- Terminal setup ---
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.setEncoding('utf8');
-  lifecycle.enterTerminal();
+  // Crash/termination handlers register BEFORE raw mode so a throw during setup or the initial
+  // render still restores the terminal; 'exit' is the final safety net.
+  installTerminalExitGuards(lifecycle, { onExit: exitListener }).startTerminalSession({
+    registerFaults: () => {
+      process.on('uncaughtException', uncaughtExceptionHandler);
+      process.on('SIGTERM', terminationSignalHandler);
+      process.on('SIGHUP', terminationSignalHandler);
+    },
+    enableRawMode: () => stdin.setRawMode(true),
+    prepareInput: () => {
+      stdin.resume();
+      stdin.setEncoding('utf8');
+    },
+    enter: () => lifecycle.enterTerminal(),
+  });
   // forced dark/light applies before first paint; auto (TTY only) repaints once if the OSC 11 probe says light. probePalette adds OSC 10 + OSC 4;0..15
   // and retries until the terminal answers (terminal-palette-reader.ts); the `system` theme re-themes when it arrives. filterInput strips replies from stdin.
   registerThemeRefresh(() => conversation.clearLineCache()); // theme/mode change: cached transcript lines re-render in the new colours
@@ -1311,6 +1348,8 @@ async function main() {
       runtime,
       conversation,
       writeLastSessionPointer,
+      sessionSpine: ctx._sessionSpine,
+      project: workingDir,
       receipt: (line) => systemMessageRouter.userReceipt(line),
       typeahead: typeaheadHooks,
     },
@@ -1329,6 +1368,7 @@ async function main() {
       abortTurn: () => orchestrator.abort(),
     });
     pendingPermission = blocking.pendingPermission;
+    localCards.next();
     if (blocking.handled) {
       return;
     }
@@ -1393,6 +1433,8 @@ async function main() {
       conversation,
       commandContext,
       writeLastSessionPointer,
+      sessionSpine: ctx._sessionSpine,
+      project: workingDir,
       receipt: (line) => systemMessageRouter.userReceipt(line),
       render,
       typeahead: typeaheadHooks,

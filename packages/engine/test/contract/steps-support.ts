@@ -26,7 +26,9 @@ export function contractOf(h: Harness, contractId: string): ContractView {
 }
 
 export function git(cwd: string, ...args: string[]): string {
-  return spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf-8' }).stdout;
+  const result = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf-8' });
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed with status ${result.status ?? 'none'}: ${result.stderr}`);
+  return result.stdout;
 }
 
 /** The judge a question belongs to, from the evidence it reads. */

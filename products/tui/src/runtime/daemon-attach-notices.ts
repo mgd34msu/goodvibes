@@ -90,6 +90,9 @@ export interface ExternalDaemonAttachRead {
   readonly statusPayload: unknown;
 }
 
+// Ids per acknowledge request; the daemon accepts at most 200 per call.
+const RECEIPT_ACK_BATCH = 100;
+
 /**
  * One `/status` read of a separately-hosted (external/systemd) daemon, carrying
  * the three things attaching to it decides on: its undelivered receipts, the
@@ -98,9 +101,11 @@ export interface ExternalDaemonAttachRead {
  * The default deployment adopts such a daemon with no in-process handle
  * (daemonServer is null), so the embedded in-process fold sees nothing; this
  * hits the daemon's own endpoint instead, GET <baseUrl>/status with the shared
- * bearer, plus `?receipts=consume` when the caller is going to render them. The
- * daemon marks the served receipts delivered as it responds (its own
- * exactly-once store), so a second attach with nothing new returns no notices.
+ * bearer, plus `?receipts=peek` when the caller is going to render them, then
+ * `?receipts=ack` for the ids it parsed. The daemon marks only acknowledged
+ * receipts delivered, so a lost response is offered again and a second attach
+ * with nothing new returns no notices. A daemon that predates peek is read
+ * with `?receipts=consume`.
  * Any transport, auth, or parse failure reads as unanswered rather than
  * throwing into the attach path.
  */
@@ -116,16 +121,35 @@ export async function readExternalDaemonAttach(
   try {
     const headers = new Headers();
     if (deps.authToken.trim()) headers.set('Authorization', `Bearer ${deps.authToken.trim()}`);
-    const url = `${deps.baseUrl.replace(/\/+$/, '')}/status${deps.consumeReceipts ? '?receipts=consume' : ''}`;
-    const response = await fetchImpl(url, { headers, signal: controller.signal });
+    const statusUrl = `${deps.baseUrl.replace(/\/+$/, '')}/status`;
+    const response = await fetchImpl(deps.consumeReceipts ? `${statusUrl}?receipts=peek` : statusUrl, { headers, signal: controller.signal });
     if (!response.ok) return unanswered;
-    const body = (await response.json()) as { receipts?: unknown } | null;
+    let body = (await response.json()) as { receipts?: unknown } | null;
+    if (deps.consumeReceipts && !Array.isArray(body?.receipts)) {
+      // A daemon that predates peek ignores it and sends no receipts key; its
+      // only delivery is the one-read consume.
+      const legacy = await fetchImpl(`${statusUrl}?receipts=consume`, { headers, signal: controller.signal });
+      if (legacy.ok) body = (await legacy.json()) as { receipts?: unknown } | null;
+    }
     const receipts = Array.isArray(body?.receipts) ? body.receipts : [];
     const notices: string[] = [];
     for (const entry of receipts) {
       if (entry && typeof (entry as { text?: unknown }).text === 'string') {
         const text = (entry as { text: string }).text;
         if (text.trim().length > 0) notices.push(text);
+      }
+    }
+    // Acknowledge only what was parsed, so a response lost in transit leaves
+    // the receipts with the daemon for the next attach.
+    const ids = receipts
+      .map((entry) => (entry as { id?: unknown } | null)?.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    for (let index = 0; deps.consumeReceipts && index < ids.length; index += RECEIPT_ACK_BATCH) {
+      const batch = ids.slice(index, index + RECEIPT_ACK_BATCH).map(encodeURIComponent).join(',');
+      try {
+        await fetchImpl(`${statusUrl}?receipts=ack&ids=${batch}`, { headers, signal: controller.signal });
+      } catch {
+        break;
       }
     }
     return {

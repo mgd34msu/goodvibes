@@ -177,7 +177,7 @@ test('an old private reference cannot establish preservation of a different curr
     output: `The original public reference ${reference} has no exact preserved private snapshot` });
 });
 
-// UNRUN: this is the actual private archive writer/read path, not only the ID regex.
+// This is the actual private archive writer/read path, not only the ID regex.
 test('full opaque contract IDs preserve native private receipt archives', () => {
   const f = fixture(newContractId()); preserveDeclaredReadReceipts(f.contract);
   expect(existsSync(f.path)).toBe(true); expect(lstatSync(f.path).mode & 0o777).toBe(0o600);

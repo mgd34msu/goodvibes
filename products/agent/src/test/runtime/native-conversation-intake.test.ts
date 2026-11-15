@@ -2,11 +2,20 @@ import type { NativeHostedTurnSnapshot } from '@goodvibes-jev/engine/platform/pl
 import type { NativeHostedTurnClient } from '../../runtime/native-hosted-turn.ts';
 import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionSnapshot } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { NativeConversationIntakeControls, type NativeConversationIntakeSelection } from '../../runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput } from '../../runtime/native-conversation-input.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import type { NativeIntakeJournalBinding, NativeIntakeJournalRecord, NativeIntakeExecutionIntent, NativeIntakeJournalOptions } from '../../runtime/native-conversation-intake-journal.ts';
 import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult, NativeConversationIntakeSourceRef, OperatorNativeConversationIntakeClient, NativeConversationTurnPermit } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
+
+function projectWith(...entries: string[]): string {
+  const root = mkdtempSync(join(tmpdir(), 'intake-ref-'));
+  for (const entry of entries) entry.endsWith('/') ? mkdirSync(join(root, entry)) : writeFileSync(join(root, entry), 'x');
+  return root;
+}
 
 const original = { text: '  Explain the answer\r\n界 e\u0301 😀  ', unsupportedSources: [] };
 function fixture() {
@@ -87,10 +96,16 @@ function fixture() {
 }
 
 test('captures exact original text before trim, references and image expansion', () => {
-  const source = captureNativeConversationInput('  Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]\r\n ');
+  const source = captureNativeConversationInput('  Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]\r\n ', undefined, projectWith('folder/'));
   expect(source.text.startsWith('  ')).toBe(true); expect(source.text.endsWith('\r\n ')).toBe(true);
   expect(source.unsupportedSources.map(ref => ref.kind)).toEqual(['context', 'image', 'file', 'context']);
   expect(Object.isFrozen(source)).toBe(true);
+});
+test('prose @ tokens are not context sources; existing paths and URLs are', () => {
+  const root = projectWith('src/', 'notes.md');
+  const text = 'ping @alice about @Override and @model:fast then @src, @notes.md and @https://example.com/x. also @missing.ts';
+  expect(captureNativeConversationInput(text, undefined, root).unsupportedSources.map(ref => ref.label)).toEqual(['@src,', '@notes.md', '@https://example.com/x.']);
+  expect(captureNativeConversationInput('ping @alice about the bug', undefined, root).unsupportedSources).toEqual([]);
 });
 test('persists and confirms exact identity before capture; claims settled turn without execution', async () => {
   const f = fixture(); const result = await f.controls.submit(original);
@@ -144,7 +159,7 @@ test('unavailable and unsupported sources never have a legacy fallback', async (
   let dispatched = 0; const notices: string[] = [];
   await routeNativeConversationInput({ intake: undefined, source: original, notify: line => notices.push(line), dispatch: async () => { dispatched++; } });
   expect(dispatched).toBe(0); expect(notices.join(' ')).toContain('No ordinary turn');
-  const f = fixture(); f.setOutcome('blocked'); await routeNativeConversationInput({ intake: f.controls, source: captureNativeConversationInput('Use @file'), notify: () => {}, dispatch: async () => { dispatched++; } });
+  const f = fixture(); f.setOutcome('blocked'); await routeNativeConversationInput({ intake: f.controls, source: captureNativeConversationInput('Use @file', undefined, projectWith('file')), notify: () => {}, dispatch: async () => { dispatched++; } });
   expect(dispatched).toBe(0); expect(f.captures[0]?.unsupportedSources).toEqual([{ kind: 'context', label: '@file' }]);
 });
 test('host change while capture is pending discards stale result and claim', async () => {

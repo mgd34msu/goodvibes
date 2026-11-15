@@ -7,7 +7,7 @@
  * callbacks while sharing the same transport option shape.
  *
  * All methods are optional. Observer callback errors are reported through
- * `onObserverError` when supplied and never propagate into transport control flow.
+ * `onObserverError` when supplied (otherwise warned once on the console) and never propagate into transport control flow.
  */
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { transportErrorFromUnknown } from './errors.js';
@@ -54,9 +54,23 @@ export interface TransportObserver {
   onTransportActivity?(activity: TransportActivityInfo): void;
 }
 
+let warnedObserverFailure = false;
+
+/** Without an `onObserverError` reporter a broken observer would be invisible, so say so once. */
+function warnObserverFailureOnce(error: unknown): void {
+  if (warnedObserverFailure) return;
+  warnedObserverFailure = true;
+  try {
+    globalThis.console?.warn?.('[platform:observer] observer callback failed (further failures are not repeated; implement onObserverError to receive each one)', error);
+  } catch {
+    // Logging must not become another way for observer isolation to break transport flow.
+  }
+}
+
 /**
  * Safely invoke an observer method. Observer errors are reported through
- * `onObserverError` when available and never disrupt transport control flow.
+ * `onObserverError` when available, otherwise warned once on the console, and
+ * never disrupt transport control flow.
  *
  * @param fn - Zero-argument thunk wrapping the observer call.
  * @param onObserverError - Optional observer failure reporter.
@@ -65,7 +79,10 @@ export function invokeTransportObserver(fn: () => void, onObserverError?: ((err:
   try {
     fn();
   } catch (error) {
-    if (!onObserverError) return;
+    if (!onObserverError) {
+      warnObserverFailureOnce(error);
+      return;
+    }
     try {
       const observerError = error instanceof Error
         ? new GoodVibesError(`Transport observer callback failed: ${error.message}`, {

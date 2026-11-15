@@ -1,12 +1,13 @@
 import { quoteRouteValue, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
 import type { SetupHandoffCard, SetupPlanItem, SetupRepairCard } from './agent-harness-setup-posture-types.ts';
+import { connectedHostAuthNeedsVerificationOnly } from './agent-harness-setup-connected-host.ts';
 
 export function setupHandoff(options: SetupHandoffCard): SetupHandoffCard {
   return options;
 }
 
 export function confirmedWorkspaceActionRoute(actionId: string, explicitUserRequest: string): string {
-  return `agent_harness mode:"run_workspace_action" actionId:"${quoteRouteValue(actionId)}" confirm:true explicitUserRequest:"${quoteRouteValue(explicitUserRequest)}"`;
+  return `agent_harness mode:"run_workspace_action" actionId:"${quoteRouteValue(actionId)}" explicitUserRequest:"${quoteRouteValue(explicitUserRequest)}"`;
 }
 
 export function inspectWorkspaceActionRoute(actionId: string): string {
@@ -14,7 +15,7 @@ export function inspectWorkspaceActionRoute(actionId: string): string {
 }
 
 export function openSurfaceRoute(surfaceId: string, explicitUserRequest: string): string {
-  return `agent_harness mode:"open_ui_surface" surfaceId:"${quoteRouteValue(surfaceId)}" confirm:true explicitUserRequest:"${quoteRouteValue(explicitUserRequest)}"`;
+  return `agent_harness mode:"open_ui_surface" surfaceId:"${quoteRouteValue(surfaceId)}" explicitUserRequest:"${quoteRouteValue(explicitUserRequest)}"`;
 }
 
 export function handoffFromRepairCard(card: SetupRepairCard): SetupHandoffCard | null {
@@ -86,8 +87,10 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
       return connectedHostReadinessHandoffs(item);
     case 'connected-host-auth': {
       const authPosture = item.authPosture;
-      const tokenUsable = authPosture?.operatorToken.usable === true;
-      if (!tokenUsable && authPosture?.operatorToken.path === 'Agent host-bound pairing store') return [setupHandoff({
+      // Native intake already carries the authority when it is ready and no compatibility bootstrap credential lingers.
+      const tokenReadable = authPosture?.operatorToken.usable === true;
+      const tokenUsable = authPosture ? connectedHostAuthNeedsVerificationOnly(authPosture) : false;
+      if (!tokenReadable && authPosture?.operatorToken.path === 'Agent host-bound pairing store') return [setupHandoff({
         id: 'inspect-agent-pairing', label: 'Inspect Agent pairing', kind: 'diagnostic', effect: 'read-only',
         userRoute: '/setup pair', modelRoute: 'agent_harness mode:"run_command" command:"/setup pair"',
         nextStep: 'Review the prior host-bound attempt or unsafe store before any credential action.',
@@ -347,7 +350,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           kind: 'ui-surface',
           effect: 'visible-navigation',
           userRoute: item.userRoute,
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"channels" confirm:true explicitUserRequest:"Open the Channels workspace for communication setup."',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"channels" explicitUserRequest:"Open the Channels workspace for communication setup."',
           nextStep: 'Use visible channel setup only for surfaces where the assistant should be reachable.',
           safety: 'Visible UI navigation; channel pairing and delivery remain explicit.',
           requiresConfirmation: true,
@@ -414,7 +417,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           kind: 'ui-surface',
           effect: 'visible-navigation',
           userRoute: 'Agent Workspace -> Automation',
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"automation" confirm:true explicitUserRequest:"Open Automation workspace for schedule and background work setup."',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"automation" explicitUserRequest:"Open Automation workspace for schedule and background work setup."',
           nextStep: 'Create reminders or promote routines only through confirmed visible forms.',
           safety: 'Visible UI navigation; schedule and run mutations remain confirmed.',
           requiresConfirmation: true,
@@ -438,7 +441,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           kind: 'ui-surface',
           effect: 'visible-navigation',
           userRoute: item.userRoute,
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"tools" confirm:true explicitUserRequest:"Open Tools and MCP setup for browser or desktop control."',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"tools" explicitUserRequest:"Open Tools and MCP setup for browser or desktop control."',
           nextStep: 'Configure and review only trusted browser or desktop connectors.',
           safety: 'Visible UI navigation; connector writes stay in confirmed setup forms.',
           requiresConfirmation: true,

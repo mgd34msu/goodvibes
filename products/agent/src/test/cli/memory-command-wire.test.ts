@@ -126,13 +126,8 @@ describe('memory CLI: daemon up routes over the wire', () => {
           // retires it and restores its own predecessor. A newer owner wins.
           owned.restoreJudgment?.();
         } finally {
-          try {
-            await owned.services?.close();
-          } finally {
-            // The facade initializes the borrowed graph's canonical store;
-            // graph.close drains pollers but does not close that store.
-            owned.services?.memoryStore.close();
-          }
+          // Closing the graph also closes its canonical memory store.
+          await owned.services?.close();
         }
       }
     });
@@ -281,6 +276,35 @@ describe('memory CLI: daemon up routes over the wire', () => {
     const localRegistry = new MemoryRegistry(localStore);
     try {
       expect(localRegistry.getAll()).toHaveLength(0);
+    } finally {
+      localStore.close();
+    }
+  });
+
+  test('a daemon that is reachable but fails the write surfaces an error and never writes the local file', async () => {
+    // The daemon answers the status probe, so the CLI commits to the wire; its
+    // write then fails. Falling back to the local file here would split memory
+    // between two stores, so the failure has to reach the owner instead.
+    const add = spyOn(daemonServices.memoryRegistry, 'add').mockImplementation(async () => { throw new Error('daemon store refused the write'); });
+    let result: { readonly exitCode: number; readonly output: string };
+    let refusedWrites = 0;
+    try {
+      result = await runCli(['memory', 'add', 'fact', 'write that the daemon refuses', '--scope', 'project', '--json'], workingDir, homeDir);
+      refusedWrites = add.mock.calls.length;
+    } finally {
+      add.mockRestore();
+    }
+    expect(refusedWrites).toBe(1);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).not.toContain('"ok":true');
+    expect(daemonServices.memoryRegistry.getAll()).toHaveLength(0);
+
+    const localDbPath = resolveCanonicalMemoryDbPath(homeDir);
+    const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager: new ConfigManager({ workingDir, homeDir, surfaceRoot: 'agent' }) });
+    const localStore = new MemoryStore(localDbPath, { embeddingRegistry });
+    await localStore.init();
+    try {
+      expect(new MemoryRegistry(localStore).getAll()).toHaveLength(0);
     } finally {
       localStore.close();
     }

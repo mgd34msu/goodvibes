@@ -26,9 +26,10 @@ test('pending taint abort drains late provider completion without queued asks or
     const work = findContentTaint({ a: 'First field', b: 'Second field', c: 'Third', d: 'Fourth', e: 'Fifth' }, sources, { signal: controller.signal });
     const outcome = work.catch((error: unknown) => error);
     await started; const before = asks; controller.abort(new Error('private abort reason'));
-    const early = await Promise.race([outcome, new Promise<null>((resolve) => setTimeout(() => resolve(null), 100))]);
-    release(); const result = await outcome; await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(early).not.toBeNull(); expect(result).toMatchObject({ kind: 'aborted' });
+    // The abort must settle the work while the provider call is still gated; awaiting without release() hangs if it does not.
+    const result = await outcome;
+    release(); await new Promise((resolve) => setImmediate(resolve)); await new Promise((resolve) => setImmediate(resolve));
+    expect(result).toMatchObject({ kind: 'aborted' });
     expect(String(result)).not.toContain('private abort reason'); expect(asks).toBe(before); expect(records).toBe(0);
   } finally { release(); installJudgmentPort(previous); }
 });

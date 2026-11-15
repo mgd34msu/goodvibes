@@ -51,10 +51,13 @@ async function makeHandler(): Promise<InputHandler> {
   );
 }
 
-/** The queue's drain runs on a microtask (see selection-modal-queue.ts); let it settle. */
+/**
+ * The queue's drain runs on a microtask (see selection-modal-queue.ts). A turn
+ * of the event loop runs every pending microtask, however many awaits the
+ * implementation chains, so this does not depend on that count.
+ */
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise<void>((resolve) => { setImmediate(resolve); });
 }
 
 describe('InputHandler.openSelection: queueing overlapping calls', () => {

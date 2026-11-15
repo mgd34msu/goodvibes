@@ -20,6 +20,8 @@ import type { ServerSentEventHandlers } from '@goodvibes-jev/engine/transport-ht
 
 let capturedHandlers: ServerSentEventHandlers | null = null;
 const openCalls: string[] = [];
+const closers: Array<ReturnType<typeof mock>> = [];
+const cleanups: Array<() => void> = [];
 
 mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
@@ -30,7 +32,9 @@ mock.module('../lib/goodvibes', () => ({
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);
         capturedHandlers = handlers;
-        return Promise.resolve(() => {});
+        const close = mock(() => {});
+        closers.push(close);
+        return Promise.resolve(close);
       },
     },
   },
@@ -70,15 +74,28 @@ function renderHook(initialEnabled = true): HookHandle {
 
   doRender(initialEnabled);
 
+  // Registered for afterEach so a failed assertion cannot leave the root mounted.
+  let mounted = true;
+  const unmount = () => {
+    if (!mounted) return;
+    mounted = false;
+    flushSync(() => root.unmount());
+    if (container.parentNode) container.parentNode.removeChild(container);
+  };
+  cleanups.push(unmount);
+
   return {
     invalidate,
     getError: () => latestError,
     rerender: (enabled: boolean) => doRender(enabled),
-    unmount: () => {
-      flushSync(() => root.unmount());
-      if (container.parentNode) container.parentNode.removeChild(container);
-    },
+    unmount,
   };
+}
+
+/** The hook stores the closer from the open() promise one microtask later. */
+async function settleOpen(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function invalidatedKeys(invalidate: ReturnType<typeof mock>): unknown[] {
@@ -86,39 +103,38 @@ function invalidatedKeys(invalidate: ReturnType<typeof mock>): unknown[] {
 }
 
 afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+  closers.length = 0;
   capturedHandlers = null;
   openCalls.length = 0;
 });
 
 describe('useRealtimeInvalidation', () => {
   test('opens EXACTLY ONE multiplexed control-plane stream, not one per domain', () => {
-    const { unmount } = renderHook();
+    renderHook();
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
     // Every invalidated domain rides the single stream.
     for (const domain of ['tasks', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'contracts']) {
       expect(openCalls[0]).toContain(domain);
     }
-    unmount();
   });
 
   test('a contracts frame invalidates the scoped list and detail prefix', async () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('contracts', { type: 'CONTRACT_PASSED', contractId: 'a' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(invalidatedKeys(invalidate)).toEqual([['contracts']]);
-    unmount();
   });
 
   test('a `tasks` domain frame invalidates the tasks query', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('tasks', { payload: { type: 'TASK_UPDATED' } });
     expect(invalidatedKeys(invalidate)).toEqual([['tasks']]);
-    unmount();
   });
 
   test('a `permissions` frame invalidates approvals, the sessions prefix, AND durable rules; `providers` also refreshes session context usage', async () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('gate', {});
     capturedHandlers?.onEvent?.('providers', {});
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -128,62 +144,54 @@ describe('useRealtimeInvalidation', () => {
     // prefixed with 'sessions' (queries.ts), see useRealtimeInvalidation.ts's
     // DOMAIN_INVALIDATIONS comment.
     expect(invalidatedKeys(invalidate)).toEqual([['approvals'], ['sessions'], ['permissions', 'rules'], ['providers'], ['sessions']]);
-    unmount();
   });
 
   test('a `knowledge` frame invalidates every knowledge query through its prefix', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('knowledge', {});
     expect(invalidatedKeys(invalidate)).toEqual([
       ['knowledge'],
     ]);
-    unmount();
   });
 
   test('a `control-plane` frame invalidates the control snapshot', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('control-plane', {});
     expect(invalidatedKeys(invalidate)).toEqual([['control', 'snapshot']]);
-    unmount();
   });
 
   test('a `fleet` frame (a FLEET_NODE_* delta) invalidates the live snapshot AND the archive', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('fleet', { payload: { type: 'FLEET_NODE_BLOCKED_ON_USER', nodeId: 'agent-7' } });
     expect(invalidatedKeys(invalidate)).toEqual([['fleet'], ['fleet', 'archived']]);
-    unmount();
   });
 
   test('an `ops` frame (OPS_POWER_STATE_CHANGED) invalidates the power AND memory-diagnostics queries', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('ops', { payload: { type: 'OPS_POWER_STATE_CHANGED', inhibited: true, keepAwake: true, workReasons: [] } });
     expect(invalidatedKeys(invalidate)).toEqual([['power', 'status'], ['ops', 'memory']]);
-    unmount();
   });
 
   test('an `ops` frame (OPS_MEMORY_PRESSURE) invalidates the SAME two queries, one domain, no separate event feed', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('ops', { payload: { type: 'OPS_MEMORY_PRESSURE', tier: 'high', previousTier: 'elevated', rssMb: 900, heapMb: 400, budgetMb: 1024, usedPct: 88 } });
     expect(invalidatedKeys(invalidate)).toEqual([['power', 'status'], ['ops', 'memory']]);
-    unmount();
   });
 
   test('an unknown domain frame is ignored (no invalidation)', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('session', {});
     capturedHandlers?.onEvent?.('heartbeat', {});
     expect(invalidate).not.toHaveBeenCalled();
-    unmount();
   });
 
   // ---- Finding 1 (HIGH): auth-gated open, re-open on login, no raw JSON in the banner.
 
   test('does NOT open the stream when disabled (signed-out: enabled=false)', () => {
-    const { unmount } = renderHook(false);
+    renderHook(false);
     // Pre-auth the app mounts signed-out; opening the stream with no token just 401s.
     // Gating on auth means no open happens at all until authenticated.
     expect(openCalls.length).toBe(0);
-    unmount();
   });
 
   test('re-opens the stream when enabled flips false → true (sign-in transition)', () => {
@@ -194,7 +202,24 @@ describe('useRealtimeInvalidation', () => {
     handle.rerender(true);
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
+  });
+
+  test('unmount closes the opened stream exactly once, so the shared socket budget is released', async () => {
+    const handle = renderHook(true);
+    await settleOpen();
+    expect(closers.length).toBe(1);
+    expect(closers[0]?.mock.calls.length).toBe(0);
     handle.unmount();
+    expect(closers[0]?.mock.calls.length).toBe(1);
+  });
+
+  test('flipping enabled to false (sign-out) closes the stream and does not reopen it', async () => {
+    const handle = renderHook(true);
+    await settleOpen();
+    handle.rerender(false);
+    expect(closers.length).toBe(1);
+    expect(closers[0]?.mock.calls.length).toBe(1);
+    expect(openCalls.length).toBe(1);
   });
 
   test('a transport error body (raw 401 JSON) NEVER reaches the returned banner string', () => {
@@ -211,7 +236,6 @@ describe('useRealtimeInvalidation', () => {
     expect(banner).not.toBeNull();
     expect(banner).not.toContain('AUTH_REQUIRED');
     expect(banner).not.toContain('{');
-    handle.unmount();
   });
 });
 

@@ -9,7 +9,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorText } from './_helpers/authored-error-readings.ts';
 import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redaction.ts';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import {
   CodeIndexReindexScheduler,
   extractReindexPaths,
@@ -73,6 +73,16 @@ describe('scheduler: edit→reindex fires, debounced and coalesced', () => {
     expect(s.lastActivity()).toMatchObject({ path: '/repo/src/a.ts', status: 'indexed', mode: 'symbols' });
   });
 
+  test('a relative path resolves against the working directory as it is now, not as it was at boot', async () => {
+    const { target, calls } = makeTarget();
+    let root = '/repo';
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: () => root, debounceMs: 1 });
+    root = '/elsewhere';
+    s.onToolExecuted('write', { files: [{ path: 'src/a.ts', content: 'x' }] }, true);
+    await s.flush();
+    expect(calls).toEqual(['/elsewhere/src/a.ts']);
+  });
+
   test('repeated edits to the SAME path within the window coalesce into one reindex', async () => {
     const { target, calls } = makeTarget();
     const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 50 });
@@ -94,6 +104,54 @@ describe('scheduler: edit→reindex fires, debounced and coalesced', () => {
   });
 });
 
+describe('scheduler: the debounce window and dispose, on a fake clock', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('nothing is reindexed before debounceMs, then exactly one reindex runs', async () => {
+    const { target, calls } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 300 });
+    s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
+    jest.advanceTimersByTime(299);
+    expect(calls).toEqual([]);
+    expect(s.pendingCount()).toBe(1);
+    jest.advanceTimersByTime(1);
+    expect(s.pendingCount()).toBe(0);
+    await s.flush();
+    expect(calls).toEqual(['/repo/a.ts']);
+  });
+
+  test('edits to one path further apart than debounceMs produce two reindexes, closer ones one', async () => {
+    const { target, calls } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 300 });
+    s.schedule('/repo/a.ts');
+    jest.advanceTimersByTime(200);
+    s.schedule('/repo/a.ts'); // inside the window: restarts it
+    jest.advanceTimersByTime(200);
+    expect(calls).toEqual([]);
+    jest.advanceTimersByTime(100);
+    await s.flush();
+    expect(calls).toEqual(['/repo/a.ts']);
+    s.schedule('/repo/a.ts'); // after the window closed: a new reindex
+    jest.advanceTimersByTime(300);
+    await s.flush();
+    expect(calls).toEqual(['/repo/a.ts', '/repo/a.ts']);
+  });
+
+  test('dispose cancels every pending debounce so nothing is reindexed afterwards', async () => {
+    const { target, calls } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 300 });
+    s.schedule('/repo/a.ts');
+    s.schedule('/repo/b.ts');
+    expect(s.pendingCount()).toBe(2);
+    s.dispose();
+    expect(s.pendingCount()).toBe(0);
+    jest.advanceTimersByTime(10_000);
+    await s.flush();
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('scheduler: no-op gates', () => {
   test('failed tool call schedules nothing', async () => {
     const { target, calls } = makeTarget();
@@ -110,7 +168,39 @@ describe('scheduler: no-op gates', () => {
     s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
     await s.flush();
     expect(calls).toEqual([]);
-    expect(s.lastActivity()).toBeNull();
+    expect(s.lastActivity()?.status).toBe('skipped');
+    expect(s.lastActivity()?.reason).toContain('queued');
+    s.dispose();
+  });
+
+  test('an edit made while reindexing is paused is indexed once it resumes', async () => {
+    let enabled = false;
+    const { target, calls } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 1, isEnabled: () => enabled });
+    s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
+    await s.flush();
+    expect(s.deferredCount()).toBe(1);
+    s.retryDeferred();
+    expect(calls).toEqual([]);
+    enabled = true;
+    s.retryDeferred();
+    await s.flush();
+    expect(calls).toEqual(['/repo/a.ts']);
+    expect(s.deferredCount()).toBe(0);
+    s.dispose();
+  });
+
+  test('a deferred edit older than ten minutes is dropped rather than held forever', async () => {
+    let clock = 0;
+    const { target, calls } = makeTarget();
+    const s = new CodeIndexReindexScheduler({ target, workingDirectory: ROOT, debounceMs: 1, isEnabled: () => false, now: () => clock });
+    s.onToolExecuted('write', { files: [{ path: 'a.ts', content: 'x' }] }, true);
+    await s.flush();
+    clock = 11 * 60 * 1000;
+    s.retryDeferred();
+    expect(s.deferredCount()).toBe(0);
+    expect(calls).toEqual([]);
+    s.dispose();
   });
 
   test('index never built (indexedChunks 0) => reindex no-ops', async () => {

@@ -29,6 +29,13 @@ const BATCH_JOB_STATUSES = new Set<DaemonBatchJob['status']>(daemonBatchJobLifec
  */
 export const MAX_BATCH_SUBMIT_ATTEMPTS = 5;
 
+/** Largest request, in serialized bytes, a batch job may carry from any source. */
+export const MAX_BATCH_REQUEST_BYTES = 4 * 1024 * 1024;
+
+/** Finished jobs are kept this long, and at most this many, then dropped from the store. */
+export const BATCH_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const BATCH_TERMINAL_RETENTION_COUNT = 1000;
+
 function now(): number {
   return Date.now();
 }
@@ -94,6 +101,10 @@ function validateBatchStoreData(snapshot: DaemonBatchStoreData | null): DaemonBa
 export class DaemonBatchManager {
   private readonly store: PersistentStore<DaemonBatchStoreData>;
   private data: DaemonBatchStoreData | null = null;
+  /** The in-flight first load, so concurrent first callers share one store object. */
+  private loading: Promise<DaemonBatchStoreData> | null = null;
+  /** A pass changed a job row that is not yet on disk. */
+  private dirty = false;
   private interval: ReturnType<typeof setInterval> | null = null;
   private ticking: Promise<DaemonBatchTickResult> | null = null;
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
@@ -178,6 +189,13 @@ export class DaemonBatchManager {
     const providerInstance = this.getBatchProvider(model, provider);
     this.requireProviderBatchSupport(providerInstance, provider);
     const payloadBytes = estimateJsonBytes(input);
+    if (payloadBytes > MAX_BATCH_REQUEST_BYTES) {
+      throw new DaemonBatchError(
+        `Batch request is ${payloadBytes} bytes, above the ${MAX_BATCH_REQUEST_BYTES} byte limit. Split it into smaller jobs.`,
+        'BATCH_REQUEST_TOO_LARGE',
+        413,
+      );
+    }
     if (input.source?.kind === 'cloudflare-queue') {
       const maxPayload = this.getNumberConfig('batch.maxQueuePayloadBytes', 16 * 1024);
       if (payloadBytes > maxPayload) {
@@ -190,6 +208,12 @@ export class DaemonBatchManager {
     }
 
     const loaded = await this.load();
+    // A queue redelivers a message whose first attempt may have committed before the reply was lost: the same queue message is the same job.
+    const queueMessageId = input.source?.kind === 'cloudflare-queue' ? input.source.id : undefined;
+    if (queueMessageId) {
+      const existing = Object.values(loaded.jobs).find((job) => job.source?.kind === 'cloudflare-queue' && job.source.id === queueMessageId);
+      if (existing) return existing;
+    }
     const timestamp = now();
     const job: DaemonBatchJob = {
       id: `batch-job-${crypto.randomUUID()}`,
@@ -250,7 +274,14 @@ export class DaemonBatchManager {
   }
 
   async tick(options: { readonly forceSubmit?: boolean } = {}): Promise<DaemonBatchTickResult> {
-    if (this.ticking) return this.ticking;
+    if (this.ticking) {
+      const running = this.ticking;
+      if (options.forceSubmit !== true) return running;
+      // The running pass took its queue before this request existed and does
+      // not force; wait for it, then run one that does.
+      await running.catch(() => undefined);
+      return this.tick(options);
+    }
     this.ticking = this.runTick(options).finally(() => {
       this.ticking = null;
     });
@@ -270,10 +301,11 @@ export class DaemonBatchManager {
     try {
       await this.submitQueuedJobs(loaded, result, options.forceSubmit === true);
       await this.pollProviderBatches(loaded, result);
+      this.pruneFinishedJobs(loaded);
     } finally {
-      // A provider batch created earlier in this tick is written down even
-      // when a later failure cannot be read, so it is never submitted twice.
-      await this.persist();
+      // Each provider batch is written down as soon as it is created; this
+      // covers the rest of the pass, and only when a row changed.
+      if (this.dirty) await this.persist();
     }
     return result;
   }
@@ -315,6 +347,7 @@ export class DaemonBatchManager {
     const jobs = snapshot.filter((job) => data.jobs[job.id]?.status === 'queued');
     const first = jobs[0];
     if (!first) return;
+    let createdBatch = false;
     try {
       const provider = this.getBatchProvider(first.model, first.provider);
       this.requireProviderBatchSupport(provider, first.provider);
@@ -364,8 +397,11 @@ export class DaemonBatchManager {
             : {}),
         };
       }
+      createdBatch = true;
+      this.dirty = true;
       result.submittedProviderBatches += 1;
-      result.submittedJobs += written;
+      if (created.status === 'failed') result.failedJobs += written;
+      else result.submittedJobs += written;
       if (superseded.length > 0) {
         // cancelJob has no provider-side cancel (per-job cancel is queued-only), so the
         // provider batch keeps these requests; their results are ignored (terminal jobs
@@ -379,9 +415,24 @@ export class DaemonBatchManager {
     } catch (error: unknown) {
       // Whether another submission could succeed: the error's structure
       // first, then Jev's reading of its wording (a provider's 429 is also
-      // read for a spent account). A failure that cannot be read propagates
-      // and fails the tick, leaving these jobs as they were.
-      const transience = await readFailureTransience(error, 'batch.submit', { fromProvider: true });
+      // read for a spent account). A failure that cannot be read leaves these
+      // jobs as they were.
+      let transience: Awaited<ReturnType<typeof readFailureTransience>>;
+      try {
+        transience = await readFailureTransience(error, 'batch.submit', { fromProvider: true });
+      } catch (readError: unknown) {
+        // Unreadable: leave this slice queued for the next tick and carry on,
+        // so already-submitted batches are still polled.
+        logger.warn('Provider batch submission failed and the failure could not be read; jobs stay queued', {
+          provider: first.provider,
+          model: first.model,
+          jobs: jobs.length,
+          error: summarizeError(error),
+          readError: summarizeError(readError),
+        });
+        return;
+      }
+      this.dirty = true;
       const timestamp = now();
       for (const snap of jobs) {
         // Same re-read as the success path: a job cancelled mid-submission stays cancelled.
@@ -410,6 +461,9 @@ export class DaemonBatchManager {
         detail: transience.detail,
       });
     }
+    // The provider call is paid and not idempotent: the id that records it
+    // must be on disk before the next one is made, not only at the end of the tick.
+    if (createdBatch) await this.persist();
   }
 
   private async pollProviderBatches(
@@ -433,6 +487,7 @@ export class DaemonBatchManager {
         const polled = await provider.batch?.retrieveBatch(first.providerBatchId);
         if (!polled) continue;
         result.polledProviderBatches += 1;
+        this.dirty = true;
         const timestamp = now();
         for (const job of jobs) {
           data.jobs[job.id] = {
@@ -446,6 +501,7 @@ export class DaemonBatchManager {
           const providerResults = await provider.batch?.getResults(first.providerBatchId);
           if (!providerResults) continue;
           this.applyProviderResults(data, providerResults, result);
+          if (polled.status === 'completed') this.failJobsWithoutResult(data, jobs, providerResults, result);
         } else if (polled.status === 'failed' || polled.status === 'cancelled' || polled.status === 'expired') {
           for (const job of jobs) {
             const status = polled.status === 'cancelled' ? 'cancelled' : polled.status === 'expired' ? 'expired' : 'failed';
@@ -463,8 +519,19 @@ export class DaemonBatchManager {
         // Whether this provider batch is lost or only this poll failed. A
         // batch still running at the provider (already paid for) is kept for
         // the next tick's poll unless the failure cannot clear. A failure
-        // that cannot be read propagates and fails the tick.
-        const transience = await readFailureTransience(error, 'batch.poll', { fromProvider: true });
+        // that cannot be read is kept for the next tick like a retryable one.
+        let transience: Awaited<ReturnType<typeof readFailureTransience>>;
+        try {
+          transience = await readFailureTransience(error, 'batch.poll', { fromProvider: true });
+        } catch (readError: unknown) {
+          logger.warn('Provider batch poll failed and the failure could not be read; the batch is polled again next tick', {
+            provider: first.provider,
+            providerBatchId: first.providerBatchId,
+            error: summarizeError(error),
+            readError: summarizeError(readError),
+          });
+          continue;
+        }
         logger.warn('Provider batch poll failed', {
           provider: first.provider,
           providerBatchId: first.providerBatchId,
@@ -473,6 +540,7 @@ export class DaemonBatchManager {
           detail: transience.detail,
         });
         if (transience.failureClass === 'retryable') continue;
+        this.dirty = true;
         const timestamp = now();
         for (const job of jobs) {
           data.jobs[job.id] = {
@@ -486,6 +554,43 @@ export class DaemonBatchManager {
         }
       }
     }
+  }
+
+  /** A completed provider batch that returned nothing for a job leaves that job failed, not polled forever. */
+  private failJobsWithoutResult(
+    data: DaemonBatchStoreData,
+    batchJobs: readonly DaemonBatchJob[],
+    providerResults: readonly ProviderBatchResult[],
+    tickResult: DaemonBatchTickResult,
+  ): void {
+    const answered = new Set(providerResults.map((entry) => entry.customId));
+    const timestamp = now();
+    for (const snap of batchJobs) {
+      const job = data.jobs[snap.id];
+      if (!job || TERMINAL_JOB_STATUSES.has(job.status) || answered.has(job.id)) continue;
+      data.jobs[job.id] = {
+        ...job,
+        status: 'failed',
+        updatedAt: timestamp,
+        completedAt: timestamp,
+        error: { message: 'The provider completed the batch but returned no result for this job.' },
+      };
+      tickResult.failedJobs += 1;
+    }
+  }
+
+  /** Drops finished jobs past the retention age, then the oldest beyond the retention count. */
+  private pruneFinishedJobs(data: DaemonBatchStoreData): void {
+    const cutoff = now() - BATCH_TERMINAL_RETENTION_MS;
+    const finished = Object.values(data.jobs)
+      .filter((job) => TERMINAL_JOB_STATUSES.has(job.status))
+      .sort((a, b) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt));
+    finished.forEach((job, index) => {
+      if (index >= BATCH_TERMINAL_RETENTION_COUNT || (job.completedAt ?? job.updatedAt) < cutoff) {
+        delete data.jobs[job.id];
+        this.dirty = true;
+      }
+    });
   }
 
   private applyProviderResults(
@@ -540,8 +645,15 @@ export class DaemonBatchManager {
 
   private async load(): Promise<DaemonBatchStoreData> {
     if (this.data) return this.data;
-    this.data = validateBatchStoreData(await this.store.load());
-    return this.data;
+    // Memoise the load itself: two first callers must end up holding one object.
+    // A failed load is forgotten so a repaired store can be loaded again.
+    this.loading ??= this.store.load().then((snapshot) => {
+      this.data = validateBatchStoreData(snapshot);
+      return this.data;
+    }).finally(() => {
+      this.loading = null;
+    });
+    return this.loading;
   }
 
   /**
@@ -565,6 +677,7 @@ export class DaemonBatchManager {
   private async persist(): Promise<void> {
     const data = this.data;
     if (!data) return;
+    this.dirty = false;
     await this.writes.run(() => this.store.persist(data));
   }
 

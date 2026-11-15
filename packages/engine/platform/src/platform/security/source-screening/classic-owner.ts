@@ -41,7 +41,7 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
   let closed = false;
   type Handle = ProtectedSource | ProtectedResearchReference;
   type Receipt = SourceScreeningReceipt | ResearchReferenceScreeningReceipt;
-  interface Entry { readonly source: ScreeningSource; readonly reference?: CapturedResearchReference; released: boolean; }
+  interface Entry { readonly source: ScreeningSource; readonly reference?: CapturedResearchReference; released: boolean; receipt?: Receipt; }
   const sources = new Map<Handle, Entry>();
   const receipts = new Map<Receipt, { readonly entry: Entry; readonly parts: readonly string[] }>();
   const current = (entry?: Entry, operation?: ResearchReferenceOperation) => {
@@ -66,10 +66,15 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
     try {
       operation = captureScreeningOperation(raw);
       current(entry, operation);
+      // One receipt per source, as the semantic owner keeps: screening is a pure
+      // function of the captured parts, and a caller that screens the same
+      // handle again must not grow the table of receipts held for it.
+      if (entry.receipt) return { status: 'settled', receipt: entry.receipt as SourceScreeningReceipt };
       const parts = classicScreeningParts(entry.source, entry.reference);
       current(entry, operation);
       const receipt = Object.freeze({ provenance: 'classic' }) as SourceScreeningReceipt;
       receipts.set(receipt, { entry, parts });
+      entry.receipt = receipt;
       return { status: 'settled', receipt };
     } catch (error) {
       return { status: 'held', reason: signal.aborted || operation?.signal?.aborted ? 'cancelled'

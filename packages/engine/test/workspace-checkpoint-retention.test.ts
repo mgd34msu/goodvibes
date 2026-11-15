@@ -1,21 +1,35 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.js';
+import { createCheckpointsListHandler, type CheckpointsGatewayManager } from '../platform/src/platform/control-plane/routes/checkpoints.js';
+import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.js';
 import { CHECKPOINT_REF_PREFIX } from '../platform/src/platform/workspace/checkpoint/side-git.js';
 
 function runGit(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd });
+  // Ignore the developer's own git configuration (commit signing, hooks, templates).
+  const result = Bun.spawnSync(['git', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], {
+    cwd,
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  });
   if (result.exitCode !== 0) {
     throw new Error(Buffer.from(result.stderr).toString('utf8'));
   }
   return Buffer.from(result.stdout).toString('utf8');
 }
 
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 function tempWorkspace(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(root);
+  return root;
 }
 
 /** Sum of `git count-objects -v`'s loose (`size`) and packed (`size-pack`) fields, in bytes (git reports both in KiB). */
@@ -28,6 +42,47 @@ function objectStoreBytes(root: string, gitDir: string): number {
   }
   return totalKib * 1024;
 }
+
+describe('WorkspaceCheckpointManager automatic retention failures', () => {
+  test('a failing automatic sweep is reported by retentionFailure() and cleared once a sweep succeeds', async () => {
+    const root = tempWorkspace('wcp-retention-fail-');
+    const manager = new WorkspaceCheckpointManager({
+      workspaceRoot: root,
+      retention: { standard: { maxAgeMs: 24 * 60 * 60 * 1000, maxCount: 1, maxSizeBytes: 200 * 1024 * 1024 } },
+    });
+    await manager.init();
+    expect(manager.retentionFailure()).toBeNull();
+
+    const realGc = manager.gc.bind(manager);
+    manager.gc = async () => { throw new Error('side repository is locked'); };
+    for (let i = 0; i < 2; i++) {
+      writeFileSync(join(root, 'f.txt'), `content ${i}`);
+      await manager.create({ kind: 'turn', label: `turn ${i}`, retentionClass: 'standard' });
+    }
+    // The sweep is fire-and-forget: let its rejection handler run.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(manager.retentionFailure()?.error).toContain('side repository is locked');
+
+    manager.gc = realGc;
+    await manager.gc();
+    expect(manager.retentionFailure()).toBeNull();
+  });
+});
+
+describe('checkpoints.list retention failure', () => {
+  const stub = (failure: { error: string; at: number } | null): CheckpointsGatewayManager => ({
+    list: async () => [],
+    retentionFailure: () => failure,
+  } as unknown as CheckpointsGatewayManager);
+  const invocation = { query: {}, body: {} } as unknown as GatewayMethodInvocation;
+
+  test('the list result carries the failing sweep, and omits the field when healthy', async () => {
+    const failing = await createCheckpointsListHandler(stub({ error: 'disk full', at: 5 }))(invocation);
+    expect(failing).toEqual({ checkpoints: [], retentionFailure: { error: 'disk full', at: 5 } });
+    const healthy = await createCheckpointsListHandler(stub(null))(invocation);
+    expect(healthy).toEqual({ checkpoints: [] });
+  });
+});
 
 describe('WorkspaceCheckpointManager retention/gc', () => {
   test('gc() prunes oldest standard checkpoints past maxCount, deletes their refs, and the pruned commits become genuinely unreachable (real byte reclaim, not just a dangling ref)', async () => {

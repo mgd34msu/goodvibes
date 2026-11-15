@@ -1,8 +1,9 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
+  disposeTerminalFeatureFlags,
   createTerminalEventState,
   initializeTerminalMemory,
   attachTerminalCompanionInput,
@@ -17,17 +18,18 @@ import {
 import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
 import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
-import { registerSessionConversation } from './conversation-rewind-port.ts';
+import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
-import { installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
+import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createRuntimeNotifier } from './bootstrap-notifier.ts';
+import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { readAgentHostSetting } from '../config/host-settings.ts';
 
 import { Compositor } from '../renderer/compositor.ts';
@@ -54,9 +56,12 @@ import { importVibeFilesIntoMemoryOnce } from '../agent/vibe-file.ts';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { getTerminalSize } from '../shell/terminal-size.ts';
 import { installPermissionManagerSafetyGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
-import { composeAgentToolRegistry } from './agent-tool-registry.ts';
+import { composeAgentToolRegistry, decorateAgentWorkerRegistry } from './agent-tool-registry.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
+import { installAgentOrchestratorDependencies } from './agent-orchestrator-deps.ts';
+import { moveLiveSession, type LiveSessionBindingDeps } from './live-session-binding.ts';
+import { createStartupNotices, type StartupNotices } from './startup-notices.ts';
 
 export interface BootstrapCoreState {
   readonly userSessionId: string;
@@ -86,13 +91,14 @@ export interface BootstrapCoreState {
    * orchestrator.handleUserInput() instead of only appending the user message.
    */
   readonly orchestratorHandleUserInputRef: { value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null };
+  /** Delivers boot-time faults held until the message router exists. */
+  readonly startupNotices: StartupNotices;
   readonly requestRender: () => void;
   readonly setRenderRequest: (fn: () => void) => void;
   readonly runtimeSessionIdRef: { value: string };
 }
 
 import {
-  approvalMetadataForRequest,
   companionMessageToOrchestratorInputOptions,
   registerWebhookNotifier,
 } from './bootstrap-core-helpers.ts';
@@ -101,7 +107,6 @@ import {
 // split; the definitions moved, the public surface did not.
 export type { CompanionMessagePayload } from './bootstrap-core-helpers.ts';
 export {
-  approvalMetadataForRequest,
   companionMessageToOrchestratorInputOptions,
   registerWebhookNotifier,
 } from './bootstrap-core-helpers.ts';
@@ -113,6 +118,31 @@ export function composeAgentPermissionManager(services: Pick<RuntimeServices, 'p
   return manager;
 }
 
+/**
+ * The runtime state object of an Agent process. Its `sessionId` is not a plain
+ * field: everything keyed to the live session id (the ref the checkpoint,
+ * task-ref and anchor seams read, the hosted-session set, the rewind registry
+ * and host, and the daemon spine) follows an assignment.
+ */
+export function composeAgentRuntimeState(
+  configManager: BootstrapOptions['configManager'],
+  binding: LiveSessionBindingDeps<ConversationManager>,
+): MutableRuntimeState {
+  return {
+    ...initialTerminalRuntimeFields(
+      configManager,
+      getProviderIdFromModel,
+      () => loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
+    ),
+    get sessionId() {
+      return binding.ref.value;
+    },
+    set sessionId(value: string) {
+      moveLiveSession(binding, value);
+    },
+  };
+}
+
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,
   options: BootstrapOptions,
@@ -121,7 +151,7 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
-  await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-agent.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(configManager, workingDir, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { activate: true });
 
   // Gate states derive from domain settings keys (behavior.*, sandbox.*, ...);
   // the featureFlags config category no longer exists. The live bridge keeps
@@ -166,7 +196,8 @@ export async function initializeBootstrapCore(
   installAgentDaemonCredentialsClient(services.daemonCredentialsClient);
   installAgentDaemonConfigClient(services.daemonConfigClient);
   const providerRegistry = services.providerRegistry;
-  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => services.keybindingsManager.loadFromDisk());
+  let keybindingNotices: readonly string[] = [];
+  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); });
   seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
     id: 'client:goodvibes-agent',
     kind: 'service',
@@ -211,10 +242,10 @@ export async function initializeBootstrapCore(
   const selection = new SelectionManager();
 
   // The main conversation's tool registry: the platform tools, the Agent's own
-  // tools, then its policy, platform-boundary and execution-safety wrappers, in
+  // tools, then its policy and execution-safety wrappers, in
   // that order (agent-tool-registry.ts). One function, so the exec
   // refusal-and-kill test drives exactly the chain a live turn uses.
-  const { toolRegistry, fileCache, projectIndex } = composeAgentToolRegistry({
+  const { toolRegistry, fileCache, projectIndex, dispose: disposeToolRegistry } = composeAgentToolRegistry({
     services,
     configManager,
     homeDirectory,
@@ -223,22 +254,42 @@ export async function initializeBootstrapCore(
     getLastUserMessage: () => conversation.getLastUserMessage(),
     researchReportSourceOwner: services.researchReportSourceOwner,
   });
-  // Captured so the permissionManager-bearing follow-up call below (issued once
-  // permissionManager exists, further down this function) can replay every
-  // field, AgentOrchestrator.setDependencies() fully replaces its stored
-  // toolDeps rather than merging, so a partial second call would silently drop
-  // everything set here.
-  const agentOrchestratorToolDeps = {
-    ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
-    contractHooks: services.contractRunner.hooks(),
-    secretsManager: services.secretsManager,
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    knowledgeService: services.agentKnowledgeService,
-  };
-  services.agentOrchestrator.setDependencies(agentOrchestratorToolDeps);
+  // The permission gate is the graph's. services.permissionManager rides the
+  // client raiser: the ask is posted to the daemon AND prompted here, and the
+  // first real answer wins. The background-agent attribution that feeds the
+  // fleet plane's `state: 'awaiting-approval'` is carried by the shared free
+  // function the manager is built through, not by a local copy of that
+  // mapping. Built before the orchestrator is handed its dependencies: the
+  // platform's gateBackgroundToolCall() approves every call when the context has
+  // no manager, so a spawned agent must never exist without one.
+  const permissionManager = composeAgentPermissionManager(services);
+  installAgentOrchestratorDependencies(
+    services.agentOrchestrator,
+    {
+      ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
+      contractHooks: services.contractRunner.hooks(),
+      secretsManager: services.secretsManager,
+      cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
+      surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+      knowledgeService: services.agentKnowledgeService,
+      // The same daemon routing and restrictions the main registry has: a worker
+      // must not write a daemon-owned key into the local file, or fetch, mutate
+      // channels or MCP, and so on past what the main conversation may.
+      configRouting: buildAgentConfigRouting({ homeDir: homeDirectory }),
+      decorateRegistry: decorateAgentWorkerRegistry,
+      // The worker registry gets the admitted read and settings wrappers from
+      // decorateAgentWorkerRegistry; they refuse any call whose tool was built
+      // without the matching admission policy's input projector.
+      readAdmissionPolicy: 'agent-main-conversation',
+      settingsAdmissionPolicy: 'agent-main-conversation',
+    },
+    permissionManager,
+  );
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
   bootstrapUnsubs.push(stopRuntimeBindings);
+  bootstrapUnsubs.push(disposeToolRegistry);
+  bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));
   // D5 fix: stop the heartbeat watcher on shutdown so the setInterval is cleared.
   // Registered here (after declaration) rather than inside the watcher block above.
 
@@ -282,9 +333,20 @@ export async function initializeBootstrapCore(
   // `requestPermission` onto this same object, so nothing about how a prompt is
   // installed changed, only where the object is declared.
   const permissionPromptRef = services.permissionPromptRef as { requestPermission: PermissionRequestHandler };
-  void approvalBroker.start();
-  void sharedSessionBroker.start();
   const systemMessageRouterRef: { value: SystemMessageRouter | null } = { value: null };
+  const startupNotices = createStartupNotices(() => systemMessageRouterRef.value);
+  // A keybindings file that was skipped or overridden would otherwise leave a shortcut silently doing nothing.
+  for (const notice of keybindingNotices) startupNotices.report(`[Startup] ${notice}`);
+  // A rejected load must be seen: later approval operations rethrow the same
+  // error with no hint of the cause, and a discarded promise reaches only the log.
+  startupNotices.guard(
+    `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.json')}; approval requests will fail until the file is repaired or removed`,
+    () => approvalBroker.start(),
+  );
+  startupNotices.guard(
+    `Saved sessions could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'sessions.json')}`,
+    () => sharedSessionBroker.start(),
+  );
   const conversationFollowUpRef: { value: ((item: ConversationFollowUpItem) => void) | null } = { value: null };
   const { unsubs: runtimeUnsubs, agentStatusIntervalRef } = registerAgentRuntimeEvents({
     runtimeBus,
@@ -313,17 +375,18 @@ export async function initializeBootstrapCore(
   const orchestratorHandleUserInputRef: {
     value: ((text: string, options?: OrchestratorUserInputOptions) => void) | null;
   } = { value: null };
-  runtimeUnsubs.push(attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender));
+  runtimeUnsubs.push(attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender, undefined, {
+    activeSessionId: () => runtimeSessionIdRef.value,
+    notice: (text) => startupNotices.report(text),
+  }));
 
   providerRegistry.startWatching(runtimeBus);
 
   const webhookUrls = (configManager.getCategory('notifications') as { webhookUrls?: string[] }).webhookUrls ?? [];
+  // Always attach the shared notifier (see registerWebhookNotifier), so a URL
+  // added mid-session still receives automatic failure notifications.
+  registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs);
   if (webhookUrls.length > 0) {
-    // Reuse the services.webhookNotifier instance (constructed no-arg in services.ts).
-    // Configure it with the resolved URL list via setUrls(), attach it to the runtime
-    // bus so it receives SESSION_NOTIFICATION events, and register detach() in
-    // runtimeUnsubs so the bus subscription is cleaned up on shutdown.
-    registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs);
     domainDispatch.syncIntegration(
       {
         id: 'webhooks',
@@ -339,7 +402,7 @@ export async function initializeBootstrapCore(
     );
   }
 
-  const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key));
+  const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key), configManager, services.secretsManager);
   runtimeUnsubs.push(
     syncTerminalNotifierQueues(notifier, domainDispatch, () => {
       notifier.attachToRuntimeBus(runtimeBus);
@@ -349,33 +412,26 @@ export async function initializeBootstrapCore(
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
-  // The permission gate is the graph's. services.permissionManager rides the
-  // client raiser: the ask is posted to the daemon AND prompted here, and the
-  // first real answer wins. The background-agent attribution that feeds the
-  // fleet plane's `state: 'awaiting-approval'` is carried by the shared free
-  // function the manager is built through, not by a local copy of that
-  // mapping.
-  const permissionManager = composeAgentPermissionManager(services);
-  // Wire permissionManager into the SAME AgentOrchestrator instance that runs
-  // spawned/background agent tool calls (services.agentOrchestrator, set up
-  // above with agentOrchestratorToolDeps before permissionManager existed).
-  // Without this, the platform's gateBackgroundToolCall() sees no permissionManager
-  // on context and leaves every background tool call ungated, spawned agents
-  // would run with no permission check at all, regardless of permissions.mode
-  // or permissions.backgroundAgents. Replays the full toolDeps object because
-  // setDependencies() replaces rather than merges.
-  services.agentOrchestrator.setDependencies({ ...agentOrchestratorToolDeps, permissionManager });
-  await hookWorkbench.loadAndApplyManagedHooks();
+  // A bad hooks file must not stop the product from starting; it runs without file hooks until fixed.
+  try {
+    await hookWorkbench.loadAndApplyManagedHooks();
+  } catch (err) {
+    logger.warn('agent hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
+  }
 
-  const runtime: MutableRuntimeState = {
-    ...initialTerminalRuntimeFields(
-      configManager,
-      getProviderIdFromModel,
-      () => loadBootstrapSystemPrompt(configManager) || getConfiguredSystemPrompt(configManager) || '',
-    ),
-    sessionId: userSessionId,
-  };
-  runtimeSessionIdRef.value = runtime.sessionId;
+  // A resume or fork assigns `runtime.sessionId` (terminal-shell session-resume
+  // and session-workflow-commands); see composeAgentRuntimeState.
+  const runtime = composeAgentRuntimeState(configManager, {
+    ref: runtimeSessionIdRef,
+    hostedSessions: services.hostedSessions,
+    conversation,
+    registerConversation: registerSessionConversation,
+    unregisterConversation: unregisterSessionConversation,
+    rewindHost: services.conversationRewindHost,
+    spine: services.sessionSpineClient,
+    project: workingDir,
+  });
+  runtimeSessionIdRef.value = userSessionId;
   // Register this process's live conversation so the composed daemon's
   // rewind.plan/apply verbs can serve conversation scope for this session
   // (see conversation-rewind-port.ts and services.ts's conversationRewindPort
@@ -480,6 +536,7 @@ export async function initializeBootstrapCore(
     agentStatusIntervalRef,
     permissionPromptRef,
     systemMessageRouterRef,
+    startupNotices,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,
     requestRender,

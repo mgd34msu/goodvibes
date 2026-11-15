@@ -45,8 +45,12 @@ export interface SessionViewControls {
     pageRows(): number;
     /** Follow the newest output again (End). */
     follow(): void;
-    /** Agent view: send text to the agent as a steer. True when it was accepted. */
-    steer(text: string): boolean;
+    /**
+     * Agent view: send text to the agent as a steer. True when it was accepted.
+     * `onFailure` runs if an accepted owner reply is later refused or fails, so
+     * the caller can hand the typed text back.
+     */
+    steer(text: string, onFailure?: () => void): boolean;
     /** Process view keys. */
     readonly searchEditing: boolean;
     startSearch(): void;
@@ -103,7 +107,15 @@ export function handleSessionViewToken(state: SessionViewRouteState, token: Inpu
             const text = state.prompt.trim();
             if (!text)
                 return true; // an empty Enter in an agent view sends nothing (and never opens main's block actions)
-            if (c.steer(state.expandPastes?.(text) ?? text)) {
+            const restoreDraft = (): void => {
+                // Only into an empty composer: newer typing is not overwritten.
+                if (state.prompt !== '')
+                    return;
+                state.prompt = text;
+                state.cursorPos = text.length;
+                state.requestRender();
+            };
+            if (c.steer(state.expandPastes?.(text) ?? text, restoreDraft)) {
                 state.saveUndoState();
                 state.prompt = '';
                 state.cursorPos = 0;

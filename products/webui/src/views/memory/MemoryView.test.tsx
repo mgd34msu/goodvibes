@@ -242,6 +242,21 @@ describe('MemoryView: record detail', () => {
     unmount();
   });
 
+  test('a failed review save on one record is not shown while another record is open', async () => {
+    updateReviewImpl = () => Promise.reject(new Error('save refused'));
+    listResult = searchResult({ records: [memoryRecord({ id: 'r1', summary: 'First one' }), memoryRecord({ id: 'r2', summary: 'Second one' })] });
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('Second one'));
+    const rows = () => [...el.querySelectorAll('button.gv-row__main')];
+    click(rows()[0]);
+    await waitFor(() => Boolean(el.querySelector('[aria-label="Memory record"]')));
+    click([...el.querySelectorAll('button')].find((b) => b.textContent === 'Save review'));
+    await waitFor(() => (el.textContent ?? '').includes('save refused'));
+    click(rows()[1]);
+    await waitFor(() => !(el.textContent ?? '').includes('save refused'));
+    unmount();
+  });
+
 });
 
 describe('MemoryView: personas (VIBE.md read surface)', () => {

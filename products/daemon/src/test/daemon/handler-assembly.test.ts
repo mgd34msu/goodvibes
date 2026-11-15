@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import { join } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerDraftMethods, registerRoutingMethods } from '@goodvibes-jev/engine/platform/platform/channels';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
-import { registerRemoteSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ATTACHED_PAYMENTS_METHOD_IDS, PaymentReplyInboxClosedError } from '@goodvibes-jev/engine/platform/platform/payments';
 import { registerDaemonHandlers, type DaemonHandlerSurfaceProviders } from '../../daemon/handlers/index.js';
 import type { HandlerContext, OwnedHandlerSurface } from '../../daemon/handlers/context.js';
@@ -19,7 +19,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-/** All five providers compose their actual implementations in owned files. */
+/** All four providers compose their actual implementations in owned files. */
 function fixture() {
   const root = makeOwnedTempDir('daemon-handlers');
   const workingDirectory = join(root, 'workspace');
@@ -40,7 +40,6 @@ function fixture() {
   const acquired: string[] = [];
   const closed: string[] = [];
   let payments: PaymentsServices | undefined;
-  let remote: ReturnType<typeof registerRemoteSurface> | undefined;
   let polls = 0;
   function own<T extends OwnedHandlerSurface>(label: string, surface: T): T {
     acquired.push(label);
@@ -72,12 +71,8 @@ function fixture() {
       });
       return own('payments', payments);
     },
-    registerRemote: (received) => {
-      remote = registerRemoteSurface(received);
-      return own('remote', remote);
-    },
   };
-  return { ctx, providers, acquired, closed, get payments() { return payments; }, get remote() { return remote; }, get polls() { return polls; } };
+  return { ctx, providers, acquired, closed, get payments() { return payments; }, get polls() { return polls; } };
 }
 
 const methodIds = ['channels.routing.list', 'channels.inbox.list', 'channels.drafts.list', ...ATTACHED_PAYMENTS_METHOD_IDS];
@@ -85,22 +80,29 @@ function invoke(ctx: HandlerContext, id: string, body: unknown = {}) {
   return ctx.catalog.invoke(id, { body, context: {} });
 }
 
+test('the daemon does not open the remote peer registry at boot', async () => {
+  const f = fixture();
+  const graph = await registerDaemonHandlers(f.ctx, f.providers);
+  try {
+    expect(Object.keys(graph).sort()).toEqual(['close', 'paymentReplies', 'routing', 'unregister']);
+    const files = readdirSync(dirname(f.ctx.workingDirectory), { recursive: true }).map(String);
+    expect(files.filter((name) => name.includes('peer-registry'))).toEqual([]);
+  } finally { await graph.close(); }
+});
+
 test('all real handler surfaces are ready, share their actual handles, and close in reverse order', async () => {
   const f = fixture();
   const graph = await registerDaemonHandlers(f.ctx, f.providers);
   try {
-    expect(f.acquired).toEqual(['routing', 'inbox', 'drafts', 'payments', 'remote']);
+    expect(f.acquired).toEqual(['routing', 'inbox', 'drafts', 'payments']);
     expect(graph.paymentReplies).toBe(f.payments!.paymentReplies);
-    expect(graph.remoteSurface.service).toBe(f.remote!.service);
-    expect(graph.remoteDispatch).toBe(f.remote!.dispatch);
     expect(f.polls).toBe(1);
     expect(await invoke(f.ctx, 'channels.routing.list')).toMatchObject({ routes: [] });
     expect(await invoke(f.ctx, 'channels.inbox.list')).toMatchObject({ items: [{ id: 'fixture-item' }], total: 1 });
     expect(await invoke(f.ctx, 'channels.drafts.list')).toMatchObject({ drafts: [] });
     expect(await invoke(f.ctx, 'payments.cards.list')).toMatchObject({ cards: [] });
-    expect(await graph.remoteSurface.service.listPeers()).toEqual([]);
   } finally { await graph.close(); }
-  expect(f.closed).toEqual(['remote', 'payments', 'drafts', 'inbox', 'routing']);
+  expect(f.closed).toEqual(['payments', 'drafts', 'inbox', 'routing']);
   for (const id of methodIds) expect(f.ctx.catalog.hasHandler(id)).toBe(false);
   expect(graph.close()).toBe(graph.close());
 });
@@ -123,10 +125,10 @@ test('pending readiness does not return a half-ready graph or construct later pr
 });
 
 test('failed last readiness drains every real surface and retry reuses the same catalog', async () => {
-  const f = fixture(); const failure = new Error('fixture remote readiness failed');
-  const original = f.providers.registerRemote;
+  const f = fixture(); const failure = new Error('fixture payments readiness failed');
+  const original = f.providers.registerPayments;
   let pendingReply: Promise<unknown> | undefined;
-  const providers = { ...f.providers, async registerRemote(ctx: HandlerContext) {
+  const providers = { ...f.providers, async registerPayments(ctx: HandlerContext) {
     const surface = await original(ctx);
     pendingReply = f.payments!.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
     void pendingReply.catch(() => {});
@@ -134,7 +136,7 @@ test('failed last readiness drains every real surface and retry reuses the same 
   } };
   await expect(registerDaemonHandlers(f.ctx, providers)).rejects.toBe(failure);
   await expect(pendingReply!).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
-  expect(f.closed).toEqual(['remote', 'payments', 'drafts', 'inbox', 'routing']);
+  expect(f.closed).toEqual(['payments', 'drafts', 'inbox', 'routing']);
   for (const id of methodIds) expect(f.ctx.catalog.hasHandler(id)).toBe(false);
   const replacement = await registerDaemonHandlers(f.ctx, f.providers);
   try {
@@ -163,18 +165,18 @@ test('routing initialization failure releases routing before any dependent is co
 
 test('rollback cleanup failure preserves startup failure and still releases older owners', async () => {
   const f = fixture(); const startup = new Error('fixture startup failed'); const cleanup = new Error('fixture cleanup failed');
-  const original = f.providers.registerRemote;
+  const original = f.providers.registerPayments;
   let failure: unknown;
   try {
-    await registerDaemonHandlers(f.ctx, { ...f.providers, async registerRemote(ctx: HandlerContext) {
+    await registerDaemonHandlers(f.ctx, { ...f.providers, async registerPayments(ctx: HandlerContext) {
       const surface = await original(ctx);
       return { ...surface, ready: Promise.resolve(surface.ready).then(() => { throw startup; }), async close() { await surface.close(); throw cleanup; } };
     } });
   } catch (error) { failure = error; }
   expect(failure).toBeInstanceOf(AggregateError);
   expect((failure as AggregateError).errors[0]).toBe(startup);
-  expect((failure as AggregateError).errors[1]).toMatchObject({ failures: [{ label: 'remote', error: cleanup }] });
-  expect(f.closed).toEqual(['remote', 'payments', 'drafts', 'inbox', 'routing']);
+  expect((failure as AggregateError).errors[1]).toMatchObject({ failures: [{ label: 'payments', error: cleanup }] });
+  expect(f.closed).toEqual(['payments', 'drafts', 'inbox', 'routing']);
 });
 
 test('legacy unregister starts the same awaited reverse cleanup and rejects owned reply windows', async () => {
@@ -184,5 +186,5 @@ test('legacy unregister starts the same awaited reverse cleanup and rejects owne
   graph.unregister();
   const closing = graph.close(); expect(graph.close()).toBe(closing);
   await closing; await expect(waiting).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
-  expect(f.closed).toEqual(['remote', 'payments', 'drafts', 'inbox', 'routing']);
+  expect(f.closed).toEqual(['payments', 'drafts', 'inbox', 'routing']);
 });

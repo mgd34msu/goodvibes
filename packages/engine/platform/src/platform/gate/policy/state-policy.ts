@@ -2,12 +2,30 @@
  * The state tool's declared read-only surface: which of its modes and actions
  * only read. Code, because the state tool defines its own modes (tools/state),
  * and whether a mode writes is a fact of that definition, not a reading of a
- * call. The Agent's main-conversation guard refuses the rest
- * (tool-policy-guard.ts), and the permission manager gives a state call that
+ * call. The Agent product's main-conversation guard refuses the rest,
+ * and the permission manager gives a state call that
  * writes (a value, a memory, a hook registration, a mode change, a record)
  * the gate's full reading instead of the known-read-only shortcut.
  */
-import type { StateToolArgs } from './tool-policy-guard-types.js';
+export type StateToolArgs = {
+  readonly mode?: unknown;
+  readonly memoryAction?: unknown;
+  readonly hookAction?: unknown;
+  readonly modeAction?: unknown;
+  readonly analyticsAction?: unknown;
+  readonly values?: unknown;
+  readonly clearKeys?: unknown;
+  readonly memoryValue?: unknown;
+  readonly hookDefinition?: unknown;
+  readonly modeName?: unknown;
+  readonly analyticsTool?: unknown;
+  readonly analyticsArgs?: unknown;
+  readonly analyticsResult?: unknown;
+  readonly analyticsDuration?: unknown;
+  readonly analyticsTokens?: unknown;
+  readonly analyticsFormat?: unknown;
+  readonly [key: string]: unknown;
+};
 
 export const READ_ONLY_STATE_TOOL_MODES = ['get', 'list', 'budget', 'context', 'memory', 'telemetry', 'hooks', 'mode', 'analytics'] as const;
 export const READ_ONLY_STATE_MEMORY_ACTIONS = ['list', 'get'] as const;

@@ -665,10 +665,11 @@ export function isBroadWorkspaceRoot(shellPaths: StoreShellPaths, root: string):
 
 /**
  * Resolve a first-start registration prompt's answer against the shared
- * store: fire-and-forget (the caller is a keypress handler, not an async
- * context) but never a silent failure, a write error is logged, not lost.
+ * store. A keypress handler has no async context and ignores the returned
+ * promise, but a write error is never a silent failure: it is logged, not
+ * lost. The promise settles once the answer is persisted (it never rejects).
  */
-export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, root: string, accepted: boolean): void {
+export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, root: string, accepted: boolean): Promise<void> {
   // Accepting the first-start prompt is an EXPLICIT owner opt-in, so it goes
   // through registerWorkspaceForCheckpoints (registers AND stamps eligibility),
   // not a plain store.add, which would register without making the workspace
@@ -676,7 +677,7 @@ export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, r
   const outcome = accepted
     ? registerWorkspaceForCheckpoints(shellPaths, root)
     : createWorkspaceRegistrationStore(shellPaths).decline(root);
-  void outcome.catch((error: unknown) => {
+  return outcome.then(() => undefined, (error: unknown) => {
     logger.error('Failed to persist workspace registration prompt answer', { root, accepted, error: summarizeError(error) });
   });
 }

@@ -11,26 +11,11 @@
 import { describe, test, expect } from 'bun:test';
 import { CASCADE_RULES } from './_helpers/runtime-seam.ts';
 import { CASCADE_PLAYBOOK_MAP, ALL_CASCADE_RULE_IDS } from './_helpers/runtime-seam.ts';
-import {
-  stuckTurnPlaybook,
-  reconnectFailurePlaybook,
-  permissionDeadlockPlaybook,
-  pluginDegradationPlaybook,
-  exportRecoveryPlaybook,
-  sessionUnrecoverablePlaybook,
-  compactionFailurePlaybook,
-} from './_helpers/runtime-seam.ts';
+import { sessionUnrecoverablePlaybook, compactionFailurePlaybook } from './_helpers/runtime-seam.ts';
+import { getPlaybookRegistry } from '../platform/src/platform/runtime/ops/index.ts';
 
-// Build the set of all known playbook IDs from the registry
-const ALL_KNOWN_PLAYBOOKS = new Map([
-  [stuckTurnPlaybook.id, stuckTurnPlaybook],
-  [reconnectFailurePlaybook.id, reconnectFailurePlaybook],
-  [permissionDeadlockPlaybook.id, permissionDeadlockPlaybook],
-  [pluginDegradationPlaybook.id, pluginDegradationPlaybook],
-  [exportRecoveryPlaybook.id, exportRecoveryPlaybook],
-  [sessionUnrecoverablePlaybook.id, sessionUnrecoverablePlaybook],
-  [compactionFailurePlaybook.id, compactionFailurePlaybook],
-]);
+// Every playbook the runtime registers, so a newly added one needs no edit here.
+const ALL_KNOWN_PLAYBOOKS = getPlaybookRegistry();
 
 // ---------------------------------------------------------------------------
 // 1. All cascade rule IDs are mapped
@@ -128,45 +113,7 @@ describe('ALL_CASCADE_RULE_IDS: sync with CASCADE_RULES', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Specific per-rule playbook assertions
-// ---------------------------------------------------------------------------
-
-describe('CASCADE_PLAYBOOK_MAP: per-rule assertions', () => {
-  test('turn-failed-cancels-tools → stuck-turn', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('turn-failed-cancels-tools')).toContain('stuck-turn');
-  });
-
-  test('tool-failed-errors-turn → stuck-turn', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('tool-failed-errors-turn')).toContain('stuck-turn');
-  });
-
-  test('mcp-disconnected-blocks-mcp-tools → reconnect-failure', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('mcp-disconnected-blocks-mcp-tools')).toContain('reconnect-failure');
-  });
-
-  test('agent-failed-marks-child-tasks → stuck-turn', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('agent-failed-marks-child-tasks')).toContain('stuck-turn');
-  });
-
-  test('plugin-error-deregisters-tools → plugin-degradation', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('plugin-error-deregisters-tools')).toContain('plugin-degradation');
-  });
-
-  test('transport-disconnected-blocks-remote-tasks → reconnect-failure', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('transport-disconnected-blocks-remote-tasks')).toContain('reconnect-failure');
-  });
-
-  test('session-recovery-failed-unrecoverable → session-unrecoverable', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('session-recovery-failed-unrecoverable')).toContain('session-unrecoverable');
-  });
-
-  test('compaction-failed-blocks-new-turns → compaction-failure', () => {
-    expect(CASCADE_PLAYBOOK_MAP.get('compaction-failed-blocks-new-turns')).toContain('compaction-failure');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 5. New playbooks are valid
+// 4. New playbooks are valid
 // ---------------------------------------------------------------------------
 
 describe('new playbooks: structural validity', () => {

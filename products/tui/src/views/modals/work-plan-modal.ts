@@ -5,6 +5,7 @@ import type {
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
 import type { WorkPlan, WorkPlanItem, WorkPlanItemStatus, WorkPlanLinkTargets } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { runModalCommand } from './modal-surface-helpers.ts';
 import { contractNodeId } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 
 // ---------------------------------------------------------------------------
@@ -128,34 +129,32 @@ class WorkPlanModalSurface implements ConfigModalSurface {
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     if (id === 'refresh') { this.refresh(); ctx.setStatus('Reloaded work plan.'); return; }
-    if (id === 'clearCompleted') { void ctx.executeCommand?.('work-plan', ['clear-done']); ctx.setStatus('Dispatched /work-plan clear-done.'); return; }
-    if (id === 'add') { void ctx.executeCommand?.('work-plan', ['add']); ctx.setStatus('Type the rest on the command line: /work-plan add <title>.'); return; }
+    const reload = (): void => this.refresh();
+    if (id === 'clearCompleted') { runModalCommand(ctx, 'work-plan', ['clear-done'], '/work-plan clear-done', { afterSettle: reload }); return; }
+    if (id === 'add') { runModalCommand(ctx, 'work-plan', ['add'], '/work-plan add', { pending: 'Type the rest on the command line: /work-plan add <title>.', done: 'Type the rest on the command line: /work-plan add <title>.', afterSettle: reload }); return; }
     const item = ctx.row ? this.itemFrom(ctx.row.id) : undefined;
     if (!item) return;
-    if (id === 'cycleStatus') { void ctx.executeCommand?.('work-plan', ['cycle', item.id]); ctx.setStatus(`Dispatched /work-plan cycle ${item.id}.`); return; }
-    if (id === 'remove') { void ctx.executeCommand?.('work-plan', ['remove', item.id]); ctx.setStatus(`Dispatched /work-plan remove ${item.id}.`); return; }
+    if (id === 'cycleStatus') { runModalCommand(ctx, 'work-plan', ['cycle', item.id], `/work-plan cycle ${item.id}`, { afterSettle: reload }); return; }
+    if (id === 'remove') { runModalCommand(ctx, 'work-plan', ['remove', item.id], `/work-plan remove ${item.id}`, { afterSettle: reload }); return; }
     if (id === 'jumpAgent') {
       const agentId = item.linked?.agentId;
       if (!agentId) return;
       // 'agent' matches the platform's ProcessKind for a live agent node, which
       // AgentsModal.reveal matches on id and kind.
-      void ctx.executeCommand?.('agents', ['--target', `${agentId}:agent`]);
-      ctx.setStatus(`Opened Agents on agent ${agentId}.`);
+      runModalCommand(ctx, 'agents', ['--target', `${agentId}:agent`], `/agents --target ${agentId}:agent`, { pending: `Opening Agents on agent ${agentId}.`, done: `Opened Agents on agent ${agentId}.` });
       return;
     }
     if (id === 'jumpContract') {
       const contractId = item.linked?.contractId;
       if (!contractId) return;
-      void ctx.executeCommand?.('agents', ['--target', `${contractNodeId(contractId)}:contract`]);
-      ctx.setStatus(`Opened Agents on contract ${contractId}.`);
+      runModalCommand(ctx, 'agents', ['--target', `${contractNodeId(contractId)}:contract`], `/agents --target ${contractNodeId(contractId)}:contract`, { pending: `Opening Agents on contract ${contractId}.`, done: `Opened Agents on contract ${contractId}.` });
       return;
     }
     const status: WorkPlanItemStatus | null =
       id === 'setPending' ? 'pending' : id === 'setInProgress' ? 'in_progress' : id === 'setBlocked' ? 'blocked'
       : id === 'setDone' ? 'done' : id === 'setFailed' ? 'failed' : id === 'setCancelled' ? 'cancelled' : null;
     if (!status) return;
-    void ctx.executeCommand?.('work-plan', [STATUS_COMMAND[status], item.id]);
-    ctx.setStatus(`Dispatched /work-plan ${STATUS_COMMAND[status]} ${item.id}.`);
+    runModalCommand(ctx, 'work-plan', [STATUS_COMMAND[status], item.id], `/work-plan ${STATUS_COMMAND[status]} ${item.id}`, { afterSettle: reload });
   }
 }
 

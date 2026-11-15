@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { CommandContext } from '../input/command-registry.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
 
 export interface AgentHarnessSudoPosture {
   readonly capability: 'sudo';
@@ -37,10 +38,11 @@ function homeDirectory(context?: CommandContext): string | null {
 export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudoPosture {
   const sudoPasswordPresent = Boolean(process.env.SUDO_PASSWORD);
   const home = homeDirectory(context);
-  const envFilePath = home ? join(home, '.goodvibes', '.env') : null;
+  const envFilePath = home ? homeRelativePath(join(home, '.goodvibes', '.env'), home) : null;
   const setupRoute = 'setup action:"item" setupItemId:"sudo-execution-posture"';
   const foregroundRoute = 'execution action:"route" id:"local-shell-command"';
   const processCapabilitiesRoute = 'process action:"capabilities"';
+  const stdinWriteAvailable = typeof context?.workspace.processManager?.writeInput === 'function';
   return {
     capability: 'sudo',
     status: 'foreground-or-user-supervised-only',
@@ -85,7 +87,9 @@ export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudo
       {
         id: 'stdin-password-write',
         route: 'process action:"write" data:"..."',
-        reason: 'Blocked until ProcessManager exposes a safe stdin/credential-prompt contract.',
+        reason: stdinWriteAvailable
+          ? 'Not enforced by the platform: process write can send stdin to a tracked process under recorded effect admission, and Agent does not inspect the data. Policy only: never send a password to a running sudo prompt; use visible foreground sudo instead.'
+          : 'Blocked: this runtime has no ProcessManager stdin write.',
       },
       {
         id: 'raw-password-display',
@@ -94,7 +98,7 @@ export function sudoExecutionPosture(context?: CommandContext): AgentHarnessSudo
       },
     ],
     missingContracts: [
-      'platform ProcessManager stdin write',
+      ...(stdinWriteAvailable ? [] : ['platform ProcessManager stdin write']),
       'platform ProcessManager PTY session',
       'daemon credential-prompt mediation',
       'model-visible credential-use receipt without secret value disclosure',

@@ -37,6 +37,8 @@ export interface IngestionNoticeSink {
    * skipped setting reaches a surface rather than dead-ending in a log file.
    */
   receipt(id: string, text: string): void;
+  /** Withdraws announce-once receipts the predicate selects, so a setting fixed and then broken again is announced again. */
+  forgetReceipts?(selects: (id: string) => boolean): void;
   /** Keeps unknown keys until a judgment port can read them; see {@link UnknownSettingFormsQueue}. */
   unknown(file: string, keys: readonly UnknownSettingKey[]): void;
 }
@@ -53,16 +55,38 @@ export function ingestManagerSettings(
   migrate?: ((raw: Record<string, unknown>) => Record<string, unknown>) | undefined,
   knownHostKeys?: ReadonlySet<string>,
 ): Record<string, unknown> {
-  const result = ingestSettingsFile(parsed, file, { diagnosticMode: sink.diagnosticMode, ...(migrate ? { migrate } : {}), onNotice: (entry) => { noticeTo(sink, entry); } });
+  const noticedKeys = new Set<string>();
+  const result = ingestSettingsFile(parsed, file, { diagnosticMode: sink.diagnosticMode, ...(migrate ? { migrate } : {}), onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); } });
   const unknownKeys = knownHostKeys ? result.unknownKeys.filter((entry) => !knownHostKeys.has(entry.key)) : result.unknownKeys;
+  for (const entry of unknownKeys) noticedKeys.add(entry.key);
+  forgetFixedKeyReceipts(sink, file, noticedKeys);
   if (unknownKeys.length > 0) sink.unknown(file, unknownKeys);
   return result.config;
+}
+
+/**
+ * The receipt store announces each id once. A key that no longer draws a notice
+ * in this file has been fixed, so its receipts are withdrawn: breaking it again
+ * is a new problem the operator must hear about, while a file that stays bad
+ * keeps its receipts and is not announced again.
+ */
+function forgetFixedKeyReceipts(sink: IngestionNoticeSink, file: string, stillNoticed: ReadonlySet<string>): void {
+  if (!sink.forgetReceipts) return;
+  const prefix = `settings-ingestion:${file}:`;
+  try {
+    sink.forgetReceipts((id) => id.startsWith(prefix) && ![...stillNoticed].some((key) => id.startsWith(`${prefix}${key}:`)));
+  } catch {
+    // Same rule as noticeTo: a receipt store that cannot be written never fails a load.
+  }
 }
 
 function noticeTo(sink: IngestionNoticeSink, entry: SettingsIngestionNotice): void {
   sink.record(entry);
   try {
-    sink.receipt(`settings-ingestion:${entry.key}:${entry.action}`, describeIngestionNotice(entry));
+    // Keyed by file and reason as well as key and action: the store is
+    // announce-once, so a bare key id would hide the same key going bad in a
+    // second file (project, other tier) or for a different reason.
+    sink.receipt(`settings-ingestion:${entry.file}:${entry.key}:${entry.action}:${entry.reason}`, describeIngestionNotice(entry));
   } catch {
     // A receipt store that cannot be written must never escalate a skipped
     // setting into a failed construction. It was already said on stderr and
@@ -85,8 +109,15 @@ export class UnknownSettingFormsQueue {
   private pending: PendingUnknownKeys[] = [];
   private started = false;
 
+  /** Pending entries kept before start(); a composition that never starts drops the oldest. */
+  static readonly MAX_PENDING = 64;
+
   keep(file: string, keys: readonly UnknownSettingKey[], sink: IngestionNoticeSink): void {
+    // A watcher reload re-reports the same file each time it is edited; only the
+    // latest reading of a file is worth keeping while nothing is draining.
+    this.pending = this.pending.filter((entry) => entry.file !== file);
     this.pending.push({ file, keys });
+    if (this.pending.length > UnknownSettingFormsQueue.MAX_PENDING) this.pending.shift();
     if (this.started) void this.drain(sink);
   }
 

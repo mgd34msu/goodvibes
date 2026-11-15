@@ -87,7 +87,7 @@ test('real protected Slack and email share a canonical projection and refuse cro
   const controls = new Map<string, InboxPollingControl>();
   const disposers: Array<() => void> = [], sockets: ProtectedMailSocket[] = [];
   const release = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
-  let armedSocket = -1, slackScope = '', emailScope = '';
+  let armedSocket = -1, slackScope = '', emailScope = '', proofClock = 0;
   const surface = await createMultiOwnerDaemonInboxFactory([
     createSlackDaemonInboxSourceFactory({ account: slackAccount, screening: screening('slack', slackAuthority) }, {
       async createOwner(ctx, options) {
@@ -98,7 +98,7 @@ test('real protected Slack and email share a canonical projection and refuse cro
       },
     }),
     createEmailDaemonInboxSourceFactory({ account: emailAccount, screening: screening('email', emailAuthority) }, {
-      createOwner(options) { const owner = createEmailInboxOwner(options); emailScope = owner.scopeId; return owner; },
+      createOwner(options) { const owner = createEmailInboxOwner({ ...options, now: () => proofClock }); emailScope = owner.scopeId; return owner; },
     }),
   ])(context, { async initialize() {}, async close() {}, unregister() {}, resolveProfileId: () => null }, {
     gatePolling(id, control) { controls.set(id, control); },
@@ -147,8 +147,10 @@ test('real protected Slack and email share a canonical projection and refuse cro
       const bytes = readFileSync(path).toString('utf8');
       for (const raw of [sensitive, sender, emailAccount.username, 'xoxb-synthetic-combined', 'synthetic-combined-mail-secret']) expect(bytes).not.toContain(raw);
     }
-    // The first mail socket acquires the read proof; the second revalidates it
-    // after projection. No owner/proof method is stubbed to create this race.
+    // A read right after a list reuses its proof, so move the owner's clock past the reuse window: the
+    // first mail socket then acquires the read proof and the second revalidates it after projection.
+    // No owner/proof method is stubbed to create this race.
+    proofClock += 60_000;
     armedSocket = sockets.length + 1;
     const pending = invoke();
     let published: InboxListOutput | undefined;

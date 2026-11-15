@@ -3,7 +3,7 @@ import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 /** Trusted runtime declarations are separate from model arguments and project dependencies. */
 import { accessSync, constants, existsSync, lstatSync, realpathSync } from 'node:fs';
-import { access, chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { assertContractInputAuthority, contractInputAuthorityRoot, registerContractInputReadAssertion, registerContractInputCleanup, withContractInputReadBatch } from '../../contract/input-authority.js';
 import type { CapturedExecAuthority } from './captured-exec.js';
@@ -25,14 +25,16 @@ const within = (root: string, path: string): boolean => {
   const rel = relative(root, path);
   return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
 };
-async function executable(name: string, path: string): Promise<string> {
+/** The first executable `name` on the trusted PATH (absolute entries only). */
+function findExecutable(name: string, path: string): string {
   for (const directory of path.split(sep === '/' ? ':' : ';')) {
     if (!isAbsolute(directory)) continue;
     const candidate = join(directory, name);
-    try { await access(candidate, constants.X_OK); return candidate; } catch { /* Next trusted PATH entry. */ }
+    try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* Next trusted PATH entry. */ }
   }
   throw new Error(`Captured validators require an installed ${name} executable on the trusted runtime PATH.`);
 }
+const executable = async (name: string, path: string): Promise<string> => findExecutable(name, path);
 
 /** Captured commands and validators can defer runtime bytes until execution.
  * PATH resolution and executable identities are pinned synchronously at construction.
@@ -48,14 +50,7 @@ export function createCapturedExecNodeRuntimeAdmission(
   let initialError: unknown;
   let identities: readonly { source: string; canonical: string; identity: string }[] = [];
   try {
-    const find = (name: string): string => {
-      for (const directory of trustedPath.split(sep === '/' ? ':' : ';')) {
-        if (!isAbsolute(directory)) continue;
-        const candidate = join(directory, name);
-        try { accessSync(candidate, constants.X_OK); return candidate; } catch { /* Next trusted entry. */ }
-      }
-      throw new Error(`Captured validators require an installed ${name} executable on the trusted runtime PATH.`);
-    };
+    const find = (name: string): string => findExecutable(name, trustedPath);
     pinned = Object.freeze(declaration ? { ...declaration } : {
       nodeExecutable: find('node'), npmExecutable: find('npm'), npxExecutable: find('npx'),
     });
@@ -76,12 +71,15 @@ export function createCapturedExecNodeRuntimeAdmission(
     admission ??= (async () => {
       if (initialError) throw initialError;
       if (!pinned) throw new Error('Node runtime declaration is unavailable');
-      const combined = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
-      combined?.throwIfAborted();
+      // The admission is shared by every command of this owner, so it runs under
+      // the owner's lifetime only. One caller's cancel stops that caller's wait
+      // (executePolicyCheck below), never the copy the next command reuses.
+      const lifetime = binding.signal;
+      lifetime?.throwIfAborted();
       checkPinned();
-      const token = await admitCapturedExecNodeRuntime({ ...binding, signal: combined }, pinned);
+      const token = await admitCapturedExecNodeRuntime({ ...binding, signal: lifetime }, pinned);
       checkPinned();
-      combined?.throwIfAborted();
+      lifetime?.throwIfAborted();
       return token;
     })();
     return executePolicyCheck(() => admission!, signal);

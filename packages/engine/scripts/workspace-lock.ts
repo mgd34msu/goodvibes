@@ -12,37 +12,72 @@ import { fileURLToPath } from 'node:url';
  * taken over.
  */
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const LOCK_DIR = resolve(ENGINE_ROOT, '.tmp/build.lock');
-const PID_FILE = resolve(LOCK_DIR, 'pid');
+const DEFAULT_LOCK_DIR = resolve(ENGINE_ROOT, '.tmp/build.lock');
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
-function isStale(): boolean {
+function isStale(lockDir: string): boolean {
   try {
-    const pid = Number(readFileSync(PID_FILE, 'utf8'));
+    const pid = Number(readFileSync(resolve(lockDir, 'pid'), 'utf8'));
     return Number.isInteger(pid) && pid > 0 && !alive(pid);
   } catch {
-    try { return Date.now() - statSync(LOCK_DIR).mtimeMs > 5_000; } catch { return true; }
+    try { return Date.now() - statSync(lockDir).mtimeMs > 5_000; } catch { return true; }
   }
 }
 
-export async function withWorkspaceLock<T>(label: string, fn: () => T | Promise<T>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
-  mkdirSync(dirname(LOCK_DIR), { recursive: true });
+/**
+ * Remove a stale lock. Several waiters can judge the same dead lock stale at
+ * once, and removing "the lock" by name would let a slower one delete the live
+ * lock a faster one has just created. Takeover is therefore serialized by its
+ * own mutex directory, and staleness is judged again inside it: while the stale
+ * directory exists nobody can create a new lock, so the judgment and the
+ * removal cannot straddle one.
+ */
+function takeOverStale(lockDir: string): boolean {
+  const mutex = `${lockDir}.takeover`;
+  try { mkdirSync(mutex); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    // A takeover that died half-way must not block every later one.
+    try { if (Date.now() - statSync(mutex).mtimeMs > 10_000) rmSync(mutex, { recursive: true, force: true }); } catch { /* released meanwhile */ }
+    return false;
+  }
+  try {
+    if (isStale(lockDir)) rmSync(lockDir, { recursive: true, force: true });
+  } finally {
+    rmSync(mutex, { recursive: true, force: true });
+  }
+  return true;
+}
+
+/** Remove the lock only while it still names this process, never one a takeover handed to another. */
+function release(lockDir: string): void {
+  try {
+    if (readFileSync(resolve(lockDir, 'pid'), 'utf8') !== String(process.pid)) return;
+  } catch { return; }
+  rmSync(lockDir, { recursive: true, force: true });
+}
+
+export async function withWorkspaceLock<T>(label: string, fn: () => T | Promise<T>, timeoutMs = DEFAULT_TIMEOUT_MS, lockDir = DEFAULT_LOCK_DIR): Promise<T> {
+  mkdirSync(dirname(lockDir), { recursive: true });
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      mkdirSync(LOCK_DIR);
-      writeFileSync(PID_FILE, String(process.pid));
+      mkdirSync(lockDir);
+      writeFileSync(resolve(lockDir, 'pid'), String(process.pid));
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (isStale()) { rmSync(LOCK_DIR, { recursive: true, force: true }); continue; }
-      if (Date.now() > deadline) throw new Error(`Timed out waiting for the build lock before "${label}" (${LOCK_DIR})`);
+      if (isStale(lockDir)) {
+        // Another waiter is taking it over: let it finish rather than spin.
+        if (!takeOverStale(lockDir)) await new Promise((done) => setTimeout(done, 50));
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for the build lock before "${label}" (${lockDir})`);
       await new Promise((done) => setTimeout(done, 200));
     }
   }
-  try { return await fn(); } finally { rmSync(LOCK_DIR, { recursive: true, force: true }); }
+  try { return await fn(); } finally { release(lockDir); }
 }

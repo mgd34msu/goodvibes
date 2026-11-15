@@ -24,13 +24,12 @@ configurable capability, never unreachable machinery.
   OpenTelemetry pair rides `telemetry.otelMode`
   (`off`/`in-process`/`remote-export`).
 - Restart-gated features (the permissions engine and simulation, unified task
-  tracking, plugin/MCP lifecycles, the OTel foundation, policy signing) accept
+  tracking, plugin/MCP lifecycles, the OTel foundation, policy signing, the
+  overflow spill backend) accept
   live settings changes but honestly report pending-restart instead of faking a
   live apply.
-- An emergency kill switch survives as internal plumbing
-  (`FeatureFlagManager.kill`): killed capabilities stay off until explicitly
-  un-killed, regardless of settings. It is an operator escape hatch, not a
-  configuration surface.
+- There is no separate kill switch: to switch a capability off, change its
+  settings key.
 
 ## Migration from the legacy featureFlags config
 
@@ -50,17 +49,17 @@ same way. No user action is needed.
 | Permissions simulation | `permissions.simulation` | `true` | on | yes | Shadow dual-evaluator divergence recording; never blocks execution. |
 | Divergence dashboard + enforce gate | `permissions.divergenceDashboard` | `true` | on | no | Tunes via `permissions.divergenceThreshold`, `permissions.maxDivergenceRecords`. |
 | Shell command parsing | `permissions.commandParser` | `ast` | `ast` (on) | no | Per-segment verdicts with automatic fallback to `flat`; catastrophic block identical in both modes. |
-| Policy signing | `policy.requireSignedBundles` | `true` | off | yes | HMAC validation of policy bundles in managed mode. |
+| Policy signing | `policy.requireSignedBundles` | `true` | off | yes | HMAC validation of policy bundles; with it on, a bundle without a valid signature, or any bundle when `GOODVIBES_POLICY_SIGNING_KEY` is unset, is refused. |
 | Policy bundle registry | `policy.registryEnabled` | `true` | off | no | Promote/rollback registry + `/policy` commands; tunes via `policy.bundleSource`, `policy.bundlePath`. |
 | Notification verbosity modes | `behavior.hitlMode` | `quiet`/`balanced`/`operator` | `balanced` (on) | no | `off` keeps the baseline delivery policy and rejects mode changes. |
 | Tool-result reconciliation | `behavior.toolResultReconciliation` | `reconcile` | `reconcile` (on) | no | `warn-only` logs dangling tool calls without synthetic results. |
 | Session compaction | `behavior.compactionStrategy` | `structured`/`distiller` | `structured` (on) | no | `off` runs sessions uncompacted; threshold via `behavior.autoCompactThreshold`. |
 | Distiller compaction strategy | `behavior.compactionStrategy` | `distiller` | off (structured) | no | Fresh-context continuation brief; falls back to structured below the quality floor. |
 | Unified runtime tasks | `runtime.unifiedTasks` | `true` | on | yes | Unified RuntimeTask tracking across subsystems, including the `/tasks` command and operator interventions (cancel/pause/resume/retry). |
-| Plugin lifecycle | `runtime.pluginLifecycle` | `true` | off | yes | Structured init/teardown with health integration. |
-| MCP lifecycle | `runtime.mcpLifecycle` | `true` | off | yes | Structured connect/disconnect with health integration. |
+| Plugin lifecycle | `runtime.pluginLifecycle` | `true` | off | yes | Structured init/teardown with health integration. Not available yet: no product starts it, so the setting changes nothing and plugins load through the standard plugin manager. |
+| MCP lifecycle | `runtime.mcpLifecycle` | `true` | off | yes | Structured connect/disconnect with health integration. Not available yet: no product starts it, so the setting changes nothing and MCP servers connect through the standard MCP registry. |
 | Tool budget enforcement | `runtime.toolBudget.enforced` | `true` | off | no | Hard wall-clock/token/cost limits via `runtime.toolBudget.maxMs`/`maxTokens`/`maxCostUsd`. |
-| Overflow spill backend | `tools.overflowSpillBackend` | `ledger`/`diagnostics` | `file` | no | The backend selection is always honored; `file` is the stock behavior. |
+| Overflow spill backend | `tools.overflowSpillBackend` | `ledger`/`diagnostics` | `file` | yes | The backend is chosen when the runtime starts; `file` is the stock behavior. |
 | Tool contract verification | `tools.contractVerification` | `true` | on | no | Registration-time contract checks; invalid tools fail closed. |
 | Output schema fingerprints | `tools.outputSchemaFingerprints` | `true` | off | no | `_meta` fingerprints on find/analyze/inspect results. |
 | OpenTelemetry foundation | `telemetry.otelMode` | `in-process`/`remote-export` | `off` | yes (from off) | platform init, span creation, in-process export. |
@@ -96,7 +95,7 @@ same way. No user action is needed.
 | Paired phone capabilities | `device.capabilities.mode` | `ask-every-time`/`honor-grants` | `honor-grants` (on) | no | A paired phone as a tool (camera, screen, location, clipboard, device commands) over the peer transport. Every capture asks first; "always allow" writes one revocable per-capability grant with TTL and count caps. Tunes via `device.*`. |
 | Wake-word detection | `voice.wake.enabled` | `true` | off | no | On-device `hey goodvibes` wake detection; see [Wake-word model](./wake-word-model.md). |
 
-The `prompt` value for `permissions.tools.<name>` triggers a user-approval prompt before each call to that tool. See [Tool safety](./tool-safety.md) and [Security](./security.md#permission-system) for how permission decisions are evaluated.
+`permissions.tools.<name>` set to `deny` blocks that tool in every mode except `yolo`. The values `allow` and `prompt` are read only in Classic operation (when the decision model is not in use); otherwise the mode and the stakes reading decide whether a call asks. See [Tool safety](./tool-safety.md) and [Security](./security.md#the-gate) for how permission decisions are evaluated.
 
 ## Recommended host profiles
 
@@ -110,20 +109,11 @@ Hardened browsing / adversarial web content:
 ```json
 {
   "fetch": { "sanitizeMode": "strict" },
-  "permissions": {
-    "mode": "custom",
-    "tools": {
-      "fetch": "prompt",
-      "exec": "prompt",
-      "write": "prompt",
-      "edit": "prompt",
-      "agent": "prompt",
-      "workflow": "prompt",
-      "mcp": "prompt"
-    }
-  }
+  "permissions": { "mode": "safe-owner" }
 }
 ```
+
+`safe-owner` asks only for dangerous actions. To forbid a tool outright, set `permissions.tools.<tool>` to `deny`.
 
 Minimal local-only host (no serving, no automation):
 
@@ -143,7 +133,7 @@ Headless automation with hard budgets:
 {
   "runtime": { "toolBudget": { "enforced": true, "maxMs": 600000, "maxCostUsd": 5 } },
   "tools": { "outputSchemaFingerprints": true },
-  "permissions": { "mode": "custom" }
+  "permissions": { "mode": "safe-jev" }
 }
 ```
 

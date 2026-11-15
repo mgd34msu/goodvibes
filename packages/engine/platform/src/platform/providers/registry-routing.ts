@@ -44,5 +44,7 @@ export function findAlternativeModel(
   const group = groups.find((canonical) => canonical.backends.some((backend) => backend.registryKey === current.registryKey));
   const groupModel = group ? registry.find((model) => model.provider === 'synthetic' && model.id === group.id) : undefined;
   if (groupModel) return groupModel;
+  // An unlabelled tier is not a tier: matching undefined against undefined would offer any unrelated model as an equivalent.
+  if (current.tier === undefined) return null;
   return registry.find((model) => model.registryKey !== current.registryKey && model.provider !== current.provider && model.tier === current.tier && model.selectable) ?? null;
 }

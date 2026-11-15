@@ -123,6 +123,8 @@ export interface CrossSessionGraphReapSummary {
   readonly refsMalformed: number;
   /** Edges dropped because one or both endpoints were reaped. */
   readonly edgesDangling: number;
+  /** Edge records dropped during parsing because their persisted shape did not validate. */
+  readonly edgesMalformed: number;
   /** Handoffs dropped because their session or task ref no longer exists. */
   readonly handoffsOrphaned: number;
   /** Handoffs retired after firing (acknowledged) or after ageing out unacknowledged. */
@@ -142,6 +144,7 @@ export const EMPTY_REAP_SUMMARY: CrossSessionGraphReapSummary = {
   refsOverCap: 0,
   refsMalformed: 0,
   edgesDangling: 0,
+  edgesMalformed: 0,
   handoffsOrphaned: 0,
   handoffsRetired: 0,
   handoffsOverCap: 0,
@@ -215,6 +218,7 @@ function validateHandoff(value: unknown): TaskHandoffRecord | null {
   if (typeof candidate['acknowledged'] !== 'boolean') return null;
   const reason = candidate['reason'];
   const acknowledgedAt = candidate['acknowledgedAt'];
+  const previousStatus = candidate['previousStatus'];
   return {
     handoffId: candidate['handoffId'],
     taskRef,
@@ -224,6 +228,7 @@ function validateHandoff(value: unknown): TaskHandoffRecord | null {
     acknowledged: candidate['acknowledged'],
     ...(typeof reason === 'string' ? { reason } : {}),
     ...(isFiniteNumber(acknowledgedAt) ? { acknowledgedAt } : {}),
+    ...(typeof previousStatus === 'string' && TASK_LIFECYCLE_STATES.has(previousStatus) ? { previousStatus: previousStatus as TaskLifecycleState } : {}),
   };
 }
 
@@ -233,6 +238,7 @@ type GraphFileVerdict =
       readonly kind: 'ok';
       readonly snapshot: SessionTaskGraphSnapshot;
       readonly refsMalformed: number;
+      readonly edgesMalformed: number;
       readonly handoffsMalformed: number;
     }
   | { readonly kind: 'corrupt'; readonly detail: string }
@@ -301,11 +307,14 @@ export function parseGraphFile(text: string): GraphFileVerdict {
   }
 
   const edges: TaskDependencyEdge[] = [];
+  let edgesMalformed = 0;
   for (const value of rawEdges) {
     const edge = validateEdge(value);
-    // A malformed edge is folded into the dangling-edge count by the reap pass
-    // below (it is dropped for the same reason: it references nothing usable).
-    if (edge) edges.push(edge);
+    if (!edge) {
+      edgesMalformed += 1;
+      continue;
+    }
+    edges.push(edge);
   }
 
   const handoffs: TaskHandoffRecord[] = [];
@@ -329,6 +338,7 @@ export function parseGraphFile(text: string): GraphFileVerdict {
       handoffs,
     },
     refsMalformed,
+    edgesMalformed,
     handoffsMalformed,
   };
 }
@@ -471,6 +481,7 @@ export function reapGraphSnapshot(
       refsOverCap,
       refsMalformed: 0,
       edgesDangling,
+      edgesMalformed: 0,
       handoffsOrphaned,
       handoffsRetired,
       handoffsOverCap,

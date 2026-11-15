@@ -12,6 +12,7 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { trackDisposables } from '../helpers/disposables.ts';
+import { waitFor } from '../helpers/wait-for.ts';
 
 /**
  * A composed runtime graph starts a dozen pollers while it builds, the fleet
@@ -103,7 +104,10 @@ describe('runtime knowledge store isolation', () => {
         includeLinkedObjects: true,
         timeoutMs: 30_000,
       });
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // The readings the ask triggers settle in the background; wait for the two
+      // asserted below rather than a guessed interval.
+      await waitFor(() => ['readable', 'excerptUseful'].every(
+        question => readings.requests.some(request => Object.hasOwn(request.questions, question))));
 
       expect(sync.ok).toBe(true);
       expect(ask.ok).toBe(true);

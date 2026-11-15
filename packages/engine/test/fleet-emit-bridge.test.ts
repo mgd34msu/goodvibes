@@ -7,10 +7,10 @@
  * seed-silence on the first snapshot, started/state-changed/finished, and the
  * blocked-on-user / unblocked pair around an attention transition.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
-import { attachFleetEmitBridge } from '../platform/src/platform/runtime/fleet/index.js';
-import type { FleetSnapshot, ProcessNode, ProcessState, ProcessAttentionReason } from '../platform/src/platform/runtime/fleet/index.js';
+import { attachFleetEmitBridge, withFleetArchive } from '../platform/src/platform/runtime/fleet/index.js';
+import type { FleetSnapshot, ProcessNode, ProcessRegistry, ProcessState, ProcessAttentionReason } from '../platform/src/platform/runtime/fleet/index.js';
 import type { FleetEvent } from '../platform/src/platform/runtime/events/index.js';
 
 function node(id: string, state: ProcessState, extra: Partial<ProcessNode> = {}): ProcessNode {
@@ -151,6 +151,77 @@ describe('fleet emit-bridge', () => {
     expect(types).toEqual(['FLEET_NODE_STATE_CHANGED', 'FLEET_NODE_UNBLOCKED']);
     const unblocked = events.find((e) => e.type === 'FLEET_NODE_UNBLOCKED');
     expect(unblocked).toMatchObject({ nodeId: 'a', state: 'executing-tool' });
+  });
+
+  test('archiving and unarchiving a finished node emits nothing when the bridge watches the unfiltered registry', async () => {
+    const bus = new RuntimeEventBus();
+    const { events } = collectFleetEvents(bus);
+    let nodes: readonly ProcessNode[] = [node('a', 'done'), node('live', 'thinking')];
+    const listeners = new Set<(s: FleetSnapshot) => void>();
+    const base: ProcessRegistry = {
+      query: () => ({ capturedAt: 1, nodes }),
+      getNode: (id) => nodes.find((n) => n.id === id) ?? null,
+      subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+      interrupt: () => false,
+      resume: () => false,
+      kill: () => [],
+      steer: () => ({ queued: false, reason: 'fake' }),
+      dispose: () => {},
+    };
+    const archived = withFleetArchive(base);
+    // The composition roots attach through `unfiltered`, so this is the registry they hand the bridge.
+    expect(archived.unfiltered).toBe(base);
+    attachFleetEmitBridge({ registry: archived.unfiltered, bus, traceId: () => 't' });
+    const tick = (): void => { for (const l of listeners) l(base.query()); };
+
+    tick(); // seed
+    expect(archived.archive('a').archived).toBe(true);
+    tick();
+    expect(archived.unarchive('a')).toBe(1);
+    tick();
+    await flush();
+    expect(events).toHaveLength(0);
+
+    // Real transitions are still reported.
+    nodes = [node('a', 'done'), node('live', 'done')];
+    tick();
+    await flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'FLEET_NODE_FINISHED', nodeId: 'live', previousState: 'thinking' });
+  });
+
+  test('a node that leaves the snapshot and returns is reported as newly started, never as finished', async () => {
+    const bus = new RuntimeEventBus();
+    const reg = fakeRegistry();
+    const { events } = collectFleetEvents(bus);
+    attachFleetEmitBridge({ registry: reg, bus, traceId: () => 't' });
+
+    reg.push([node('a', 'thinking'), node('b', 'thinking')]); // seed
+    reg.push([node('b', 'thinking')]); // a disappears: no event claimed from absence
+    await flush();
+    expect(events).toHaveLength(0);
+    reg.push([node('a', 'thinking'), node('b', 'thinking')]);
+    await flush();
+    expect(events.map((e) => e.type)).toEqual(['FLEET_NODE_STARTED']);
+  });
+
+  test('an emit failure is contained: the snapshot callback does not throw and later snapshots still emit', async () => {
+    const bus = new RuntimeEventBus();
+    const reg = fakeRegistry();
+    const { events } = collectFleetEvents(bus);
+    attachFleetEmitBridge({ registry: reg, bus, traceId: () => 't' });
+    reg.push([node('a', 'thinking')]); // seed
+
+    const emit = spyOn(bus, 'emit').mockImplementationOnce(() => { throw new Error('bus down'); });
+    expect(() => reg.push([node('a', 'executing-tool')])).not.toThrow();
+    expect(emit).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(events).toHaveLength(0);
+
+    reg.push([node('a', 'executing-tool')]);
+    await flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'FLEET_NODE_STATE_CHANGED', nodeId: 'a', previousState: 'thinking' });
   });
 
   test('unsubscribe detaches the registry subscription', () => {

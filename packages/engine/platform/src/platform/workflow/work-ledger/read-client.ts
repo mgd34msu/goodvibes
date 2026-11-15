@@ -20,8 +20,11 @@ export interface WorkLedgerReadClient {
   readonly projectId: string;
   readSnapshot(): Promise<WorkLedgerReadSnapshot>;
   history(afterSequence: number): Promise<readonly WorkLedgerReadEvent[]>;
-  /** Subscribe before reading; notifications may coalesce. Catch up through history. */
-  subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void): () => void;
+  /**
+   * Subscribe before reading; notifications may coalesce. Catch up through history.
+   * onUnavailable is called with the reason when the ledger cannot be read, so the listener will receive no changes until it can.
+   */
+  subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void): () => void;
   /** Revoke only this consumer. The host still owns service/store shutdown. */
   dispose(): void;
 }
@@ -79,11 +82,11 @@ export function createLocalWorkLedgerReadBinding(options: LocalWorkLedgerReadBin
       requireOpen();
       return events.map(event => projectWorkLedgerReadEvent(event, allowLegacyProvenance === true));
     },
-    subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void) {
+    subscribe(listener: (snapshot: WorkLedgerReadSnapshot) => void, onUnavailable?: (reason: string) => void) {
       requireOpen();
       return service.subscribe(actor, snapshot => {
         if (!disposed) return listener(readOnly(snapshot));
-      });
+      }, onUnavailable ? reason => { if (!disposed) onUnavailable(reason); } : undefined);
     },
     dispose() {
       if (disposed) return;

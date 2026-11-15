@@ -197,3 +197,83 @@ describe('router-e2e session: failure paths', () => {
     expect(capturedInput as unknown as string).toBe('input-99');
   });
 });
+
+// ---------------------------------------------------------------------------
+// describe: every remaining route reaches its handler with the exact arguments
+// ---------------------------------------------------------------------------
+
+describe('router-e2e session: handler arguments per route', () => {
+  type Call = { handler: string; args: unknown[]; req: Request | null };
+
+  function recordingHandlers(calls: Call[]): DaemonApiRouteHandlers {
+    const names = [
+      'getSharedSession', 'deleteSharedSession', 'closeSharedSession', 'reopenSharedSession',
+      'detachSharedSession', 'getSharedSessionMessages', 'postSharedSessionMessage',
+      'getSharedSessionInputs', 'postSharedSessionSteer', 'postSharedSessionFollowUp',
+      'cancelSharedSessionInput', 'deliverSharedSessionInput', 'getSharedSessionEvents',
+      'registerSharedSession', 'createSharedSession',
+    ];
+    const out: Record<string, unknown> = {};
+    for (const name of names) {
+      out[name] = (...all: unknown[]) => {
+        const req = all.find((a): a is Request => a instanceof Request) ?? null;
+        calls.push({ handler: name, args: all.filter((a) => !(a instanceof Request) && !(a instanceof URL)), req });
+        return Response.json({ ok: true });
+      };
+    }
+    return out as unknown as DaemonApiRouteHandlers;
+  }
+
+  const base = 'http://localhost/api/sessions';
+  const cases: Array<{ method: string; path: string; handler: string; args: unknown[] }> = [
+    { method: 'GET', path: `${base}/s-1`, handler: 'getSharedSession', args: ['s-1'] },
+    { method: 'DELETE', path: `${base}/s-1`, handler: 'deleteSharedSession', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/close`, handler: 'closeSharedSession', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/reopen`, handler: 'reopenSharedSession', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/detach`, handler: 'detachSharedSession', args: ['s-1'] },
+    { method: 'GET', path: `${base}/s-1/messages`, handler: 'getSharedSessionMessages', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/messages`, handler: 'postSharedSessionMessage', args: ['s-1'] },
+    { method: 'GET', path: `${base}/s-1/inputs`, handler: 'getSharedSessionInputs', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/steer`, handler: 'postSharedSessionSteer', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/follow-up`, handler: 'postSharedSessionFollowUp', args: ['s-1'] },
+    { method: 'POST', path: `${base}/s-1/inputs/in-2/cancel`, handler: 'cancelSharedSessionInput', args: ['s-1', 'in-2'] },
+    { method: 'POST', path: `${base}/s-1/inputs/in-2/deliver`, handler: 'deliverSharedSessionInput', args: ['s-1', 'in-2'] },
+    { method: 'GET', path: `${base}/s-1/events`, handler: 'getSharedSessionEvents', args: ['s-1'] },
+    { method: 'POST', path: `${base}/register`, handler: 'registerSharedSession', args: [] },
+    { method: 'POST', path: base, handler: 'createSharedSession', args: [] },
+  ];
+
+  for (const c of cases) {
+    test(`${c.method} ${c.path.replace('http://localhost', '')} calls ${c.handler}(${c.args.join(', ')})`, async () => {
+      const calls: Call[] = [];
+      const req = makeRequest(c.method, c.path);
+      const res = await dispatchSessionRoutes(req, recordingHandlers(calls));
+      expect(res?.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.handler).toBe(c.handler);
+      expect(calls[0]!.args).toEqual(c.args);
+    });
+  }
+
+  test('the close, steer and cancel routes hand the original request to the handler', async () => {
+    for (const path of [`${base}/s-1/close`, `${base}/s-1/steer`, `${base}/s-1/inputs/in-2/cancel`]) {
+      const calls: Call[] = [];
+      const req = makeRequest('POST', path);
+      await dispatchSessionRoutes(req, recordingHandlers(calls));
+      expect(calls[0]!.req).toBe(req);
+    }
+  });
+
+  test('a percent-encoded session id is decoded before it reaches the handler', async () => {
+    const calls: Call[] = [];
+    await dispatchSessionRoutes(makeRequest('POST', `${base}/a%2Fb%20c/steer`), recordingHandlers(calls));
+    expect(calls[0]!.args).toEqual(['a/b c']);
+  });
+
+  test('a method that does not match the route is not dispatched', async () => {
+    const calls: Call[] = [];
+    const res = await dispatchSessionRoutes(makeRequest('GET', `${base}/s-1/steer`), recordingHandlers(calls));
+    expect(res).toBeNull();
+    expect(calls).toEqual([]);
+  });
+});

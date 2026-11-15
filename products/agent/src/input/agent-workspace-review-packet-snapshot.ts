@@ -5,20 +5,30 @@ import type { AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketTime
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 import { buildReviewPacketPresetLineage, compactTimelineText, isDocumentExportArtifact, isModelCompareArtifact, isModelCompareExportArtifact, isModelCompareJudgmentArtifact, isModelCompareRouteDecisionArtifact, isReviewerHandoffArchiveArtifact, isReviewerHandoffArtifact, isReviewPacketPresetArtifact, isoToEpoch, reviewPacketPresetFreshness, uniqueStrings } from './agent-workspace-review-packet-utils.ts';
 
-export function readDocumentDrafts(context: CommandContext): readonly AgentDocumentRecord[] {
+export function readDocumentDrafts(context: CommandContext, failures?: Map<string, string>): readonly AgentDocumentRecord[] {
   try {
     const shellPaths = context.workspace?.shellPaths;
     if (!shellPaths) return [];
     return AgentDocumentRegistry.fromShellPaths(shellPaths).list();
-  } catch {
+  } catch (error) {
+    failures?.set('documents', error instanceof Error ? error.message : String(error));
     return [];
   }
 }
+
+/** What the artifact list could not show: a truncated window, and a way to look single ids up outside it. */
+export interface ReviewPacketArtifactListInfo {
+  readonly truncated?: boolean;
+  readonly resolveArtifact?: (artifactId: string) => ArtifactDescriptor | null;
+}
+
+const TRUNCATED_NOTE = 'Unverified: the artifact list shows only the newest artifacts, so older reviewer evidence was not checked.';
 
 export function buildReviewPacketTimeline(
   documents: readonly AgentDocumentRecord[],
   artifacts: readonly ArtifactDescriptor[],
   artifactListAvailable: boolean,
+  listInfo: ReviewPacketArtifactListInfo = {},
 ): AgentWorkspaceReviewPacketTimeline {
   const events: AgentWorkspaceReviewPacketTimelineEvent[] = [];
   for (const document of documents) {
@@ -70,7 +80,7 @@ export function buildReviewPacketTimeline(
         label: `Attached artifact: ${attachment.label}`,
         detail: `${document.title}: ${attachment.artifactId}${attachment.note ? ` - ${compactTimelineText(attachment.note, 64)}` : ''}`,
         status: 'complete',
-        route: `agent_artifacts show artifactId:"${attachment.artifactId}"`,
+        route: `agent_artifacts mode:"show" artifactId:"${attachment.artifactId}"`,
         sourceId: attachment.artifactId,
       });
     }
@@ -88,7 +98,7 @@ export function buildReviewPacketTimeline(
         label: `Document export: ${documentId}`,
         detail: `version ${versionId}; artifact ${artifact.id}`,
         status: 'complete',
-        route: `agent_artifacts show artifactId:"${artifact.id}"`,
+        route: `agent_artifacts mode:"show" artifactId:"${artifact.id}"`,
         sourceId: artifact.id,
       });
       continue;
@@ -143,7 +153,7 @@ export function buildReviewPacketTimeline(
         label: `Route decision: ${decisionId}`,
         detail: `${comparisonId}; ${decision}; judgment ${judgmentArtifactId}; selected ${selectedModel}`,
         status: 'complete',
-        route: `agent_artifacts show artifactId:"${artifact.id}"`,
+        route: `agent_artifacts mode:"show" artifactId:"${artifact.id}"`,
         sourceId: artifact.id,
       });
       continue;
@@ -151,7 +161,7 @@ export function buildReviewPacketTimeline(
     if (isReviewPacketPresetArtifact(artifact)) {
       const name = readArtifactMetadataString(metadata, 'name') || artifact.filename || artifact.id;
       const summary = readArtifactMetadataString(metadata, 'summary') || 'review packet preset';
-      const freshness = reviewPacketPresetFreshness(artifact, artifacts);
+      const freshness = reviewPacketPresetFreshness(artifact, artifacts, listInfo.resolveArtifact);
       const sourceArtifactId = readArtifactMetadataString(metadata, 'revealedJudgmentArtifactId')
         || readArtifactMetadataString(metadata, 'judgmentArtifactId')
         || readArtifactMetadataString(metadata, 'comparisonArtifactId')
@@ -181,7 +191,7 @@ export function buildReviewPacketTimeline(
         label: `Compare report: ${comparisonId}`,
         detail: `${sourceKind} report artifact ${artifact.id}`,
         status: 'complete',
-        route: `agent_artifacts show artifactId:"${artifact.id}"`,
+        route: `agent_artifacts mode:"show" artifactId:"${artifact.id}"`,
         sourceId: artifact.id,
       });
       continue;
@@ -216,7 +226,7 @@ export function buildReviewPacketTimeline(
         label: `Handoff archive: ${archiveId}`,
         detail: `${comparisonId}; ${artifactCount ?? '?'} artifact(s) packaged`,
         status: 'complete',
-        route: `agent_artifacts show artifactId:"${artifact.id}"`,
+        route: `agent_artifacts mode:"show" artifactId:"${artifact.id}"`,
         sourceId: artifact.id,
       });
     }
@@ -233,9 +243,11 @@ export function buildReviewPacketTimeline(
       ? 'Artifact listing is unavailable; timeline shows document-local events only.'
       : attention
         ? `${attention.label}: ${attention.detail}`
-        : ordered.length > 0
-          ? 'Review packet timeline is clear; export, handoff, archive, or route decisions can use the visible readiness checks.'
-          : 'Create or attach a document, source artifact, comparison, judgment, handoff, or archive to start a review packet timeline.',
+        : listInfo.truncated
+          ? `Review packet timeline shows the newest artifacts only. ${TRUNCATED_NOTE}`
+          : ordered.length > 0
+            ? 'Review packet timeline is clear; export, handoff, archive, or route decisions can use the visible readiness checks.'
+            : 'Create or attach a document, source artifact, comparison, judgment, handoff, or archive to start a review packet timeline.',
     items: ordered.slice(0, 8),
   };
 }
@@ -249,28 +261,40 @@ export function buildReviewPacketDefaults(
     .sort((left, right) => isoToEpoch(right.updatedAt) - isoToEpoch(left.updatedAt) || left.id.localeCompare(right.id))[0] ?? null;
   const latestDocumentExport = artifacts.filter(isDocumentExportArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
   const latestComparison = artifacts.filter(isModelCompareArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
-  const latestJudgment = artifacts.filter(isModelCompareJudgmentArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
-  const latestRevealedJudgment = artifacts
-    .filter((artifact) => (
-      isModelCompareJudgmentArtifact(artifact)
-      && artifact.metadata.revealIncludedInJudgment === true
-      && readArtifactMetadataString(artifact.metadata, 'winnerModel').length > 0
-    ))
-    .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
-  const latestHandoff = artifacts.filter(isReviewerHandoffArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
-  const latestHandoffArchive = artifacts.filter(isReviewerHandoffArchiveArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
+  // Every later step of the packet is taken from the newest comparison's own chain.
+  // Picking the newest of each kind separately mixes artifacts of unrelated comparisons.
+  const comparisonId = readArtifactMetadataString(latestComparison?.metadata ?? {}, 'comparisonId');
+  const inComparison = (artifact: ArtifactDescriptor): boolean => (
+    comparisonId.length === 0 || readArtifactMetadataString(artifact.metadata, 'comparisonId') === comparisonId
+  );
+  const newest = (matches: (artifact: ArtifactDescriptor) => boolean): ArtifactDescriptor | null => (
+    artifacts.filter((artifact) => matches(artifact) && inComparison(artifact)).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null
+  );
+  const latestJudgment = newest(isModelCompareJudgmentArtifact);
+  const latestRevealedJudgment = newest((artifact) => (
+    isModelCompareJudgmentArtifact(artifact)
+    && artifact.metadata.revealIncludedInJudgment === true
+    && readArtifactMetadataString(artifact.metadata, 'winnerModel').length > 0
+  ));
+  const latestHandoff = newest(isReviewerHandoffArtifact);
+  const latestHandoffArchive = newest(isReviewerHandoffArchiveArtifact);
   const latestPreset = artifacts.filter(isReviewPacketPresetArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
   const presetMetadata = latestPreset?.metadata ?? {};
-  const latestRevealedJudgmentComparisonId = readArtifactMetadataString(latestRevealedJudgment?.metadata ?? {}, 'comparisonId');
-  const latestRouteDecision = artifacts
-    .filter(isModelCompareRouteDecisionArtifact)
-    .filter((artifact) => {
-      if (!latestRevealedJudgment) return true;
-      const judgmentArtifactId = readArtifactMetadataString(artifact.metadata, 'judgmentArtifactId');
-      const comparisonId = readArtifactMetadataString(artifact.metadata, 'comparisonId');
-      return judgmentArtifactId === latestRevealedJudgment.id || (latestRevealedJudgmentComparisonId.length > 0 && comparisonId === latestRevealedJudgmentComparisonId);
-    })
-    .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
+  // A route decision only means something against the revealed judgment it names.
+  const revealedComparisonId = readArtifactMetadataString(latestRevealedJudgment?.metadata ?? {}, 'comparisonId');
+  const latestRouteDecision = latestRevealedJudgment
+    ? artifacts
+      .filter((artifact) => isModelCompareRouteDecisionArtifact(artifact) && (
+        readArtifactMetadataString(artifact.metadata, 'judgmentArtifactId') === latestRevealedJudgment.id
+        || (revealedComparisonId.length > 0 && readArtifactMetadataString(artifact.metadata, 'comparisonId') === revealedComparisonId)
+      ))
+      .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null
+    : null;
+  // The saved preset fills gaps only when it belongs to the same comparison; otherwise its
+  // judgment, handoff and route would be attached to a comparison they never covered.
+  const presetComparisonArtifactId = readArtifactMetadataString(presetMetadata, 'comparisonArtifactId');
+  const presetFitsComparison = !latestComparison || presetComparisonArtifactId === latestComparison.id;
+  const chainPreset = (key: string): string => (presetFitsComparison ? readArtifactMetadataString(presetMetadata, key) : '');
   const liveRelatedArtifactIds = uniqueStrings([
     latestDocumentExport?.id,
     latestDocument?.lastArtifactId,
@@ -284,14 +308,14 @@ export function buildReviewPacketDefaults(
   const documentTitle = (latestDocument?.title ?? readArtifactMetadataString(presetMetadata, 'documentTitle')) || null;
   const documentExportArtifactId = (latestDocumentExport?.id ?? readArtifactMetadataString(presetMetadata, 'documentExportArtifactId')) || null;
   const comparisonArtifactId = (latestComparison?.id ?? readArtifactMetadataString(presetMetadata, 'comparisonArtifactId')) || null;
-  const judgmentArtifactId = (latestJudgment?.id ?? readArtifactMetadataString(presetMetadata, 'judgmentArtifactId')) || null;
-  const revealedJudgmentArtifactId = (latestRevealedJudgment?.id ?? readArtifactMetadataString(presetMetadata, 'revealedJudgmentArtifactId')) || null;
-  const routeDecisionArtifactId = (latestRouteDecision?.id ?? readArtifactMetadataString(presetMetadata, 'routeDecisionArtifactId')) || null;
+  const judgmentArtifactId = (latestJudgment?.id ?? chainPreset('judgmentArtifactId')) || null;
+  const revealedJudgmentArtifactId = (latestRevealedJudgment?.id ?? chainPreset('revealedJudgmentArtifactId')) || null;
+  const routeDecisionArtifactId = (latestRouteDecision?.id ?? chainPreset('routeDecisionArtifactId')) || null;
   const routeDecision = latestRouteDecision
     ? readArtifactMetadataString(latestRouteDecision.metadata, 'decision') || null
-    : readArtifactMetadataString(presetMetadata, 'routeDecision') || null;
-  const handoffArtifactId = (latestHandoff?.id ?? readArtifactMetadataString(presetMetadata, 'handoffArtifactId')) || null;
-  const handoffArchiveArtifactId = (latestHandoffArchive?.id ?? readArtifactMetadataString(presetMetadata, 'handoffArchiveArtifactId')) || null;
+    : chainPreset('routeDecision') || null;
+  const handoffArtifactId = (latestHandoff?.id ?? chainPreset('handoffArtifactId')) || null;
+  const handoffArchiveArtifactId = (latestHandoffArchive?.id ?? chainPreset('handoffArchiveArtifactId')) || null;
   const sourceArtifactId = revealedJudgmentArtifactId ?? judgmentArtifactId ?? comparisonArtifactId ?? null;
   const reviewPacketPresetName = readArtifactMetadataString(presetMetadata, 'name') || null;
   const reviewPacketPresetLineage = buildReviewPacketPresetLineage(latestPreset);
@@ -352,6 +376,7 @@ export function buildReviewPacketWizard(
   documents: readonly AgentDocumentRecord[],
   artifactListAvailable: boolean,
   defaults: AgentWorkspaceReviewPacketDefaults,
+  listInfo: ReviewPacketArtifactListInfo = {},
 ): AgentWorkspaceReviewPacketWizard {
   const latestDocument = [...documents]
     .filter((document) => document.status !== 'archived')
@@ -410,7 +435,7 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-export-draft"',
     actionId: 'document-export-draft',
     backtrackRoute: defaults.documentExportArtifactId
-      ? `agent_artifacts show artifactId:"${defaults.documentExportArtifactId}"`
+      ? `agent_artifacts mode:"show" artifactId:"${defaults.documentExportArtifactId}"`
       : null,
   }));
   steps.push(buildReviewPacketWizardStep({
@@ -451,7 +476,7 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-export-compare"',
     actionId: 'document-export-compare',
     backtrackRoute: defaults.handoffArtifactId
-      ? `agent_artifacts show artifactId:"${defaults.handoffArtifactId}"`
+      ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArtifactId}"`
       : null,
   }));
   steps.push(buildReviewPacketWizardStep({
@@ -473,7 +498,7 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-apply-compare"',
     actionId: 'document-apply-compare',
     backtrackRoute: defaults.routeDecisionArtifactId
-      ? `agent_artifacts show artifactId:"${defaults.routeDecisionArtifactId}"`
+      ? `agent_artifacts mode:"show" artifactId:"${defaults.routeDecisionArtifactId}"`
       : null,
   }));
   steps.push(buildReviewPacketWizardStep({
@@ -491,7 +516,7 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-export-compare"',
     actionId: 'document-export-compare',
     backtrackRoute: defaults.handoffArchiveArtifactId
-      ? `agent_artifacts show artifactId:"${defaults.handoffArchiveArtifactId}"`
+      ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArchiveArtifactId}"`
       : null,
   }));
   const completedSteps = steps.filter((step) => step.status === 'done').length;
@@ -510,9 +535,9 @@ export function buildReviewPacketWizard(
     totalSteps: steps.length,
     currentStepId: current?.id ?? null,
     currentStepLabel: current?.label ?? null,
-    next: current
+    next: `${listInfo.truncated ? `${TRUNCATED_NOTE} ` : ''}${current
       ? `${current.label}: ${current.detail}`
-      : 'Review packet wizard is complete; inspect the final archive and saved packet evidence.',
+      : 'Review packet wizard is complete; inspect the final archive and saved packet evidence.'}`,
     finalReview: finalArchiveReview,
     presetLineage,
     steps,
@@ -523,6 +548,7 @@ export function reviewerReadinessBadge(
   documents: readonly AgentDocumentRecord[],
   artifacts: readonly ArtifactDescriptor[],
   artifactListAvailable: boolean,
+  listInfo: ReviewPacketArtifactListInfo = {},
 ): AgentWorkspaceReviewerReadinessBadge {
   const reviewDocuments = documents.filter((document) => document.status !== 'archived');
   const openComments = reviewDocuments.reduce((total, document) => total + document.comments.filter((comment) => comment.status === 'open').length, 0);
@@ -564,6 +590,7 @@ export function reviewerReadinessBadge(
     + hiddenJudgments.length
     + revealedJudgmentsWaitingOnRouteDecision.length
     + handoffsMissingRelatedArtifacts;
+  const unverified = listInfo.truncated === true && artifactListAvailable;
   const next = !artifactListAvailable
     ? 'Artifact listing is unavailable; run Review readiness preflight before export, archive, or route update.'
     : openComments + proposedSuggestions > 0
@@ -576,10 +603,13 @@ export function reviewerReadinessBadge(
             ? 'Apply the revealed winner or explicitly leave routing unchanged before archiving.'
             : handoffsMissingRelatedArtifacts > 0
               ? 'Recreate reviewer handoffs with related evidence before ZIP archive.'
-              : 'Reviewer readiness preflight is clear for export, handoff archive, or route update.';
+              : unverified
+                ? TRUNCATED_NOTE
+                : 'Reviewer readiness preflight is clear for export, handoff archive, or route update.';
   return {
-    status: !artifactListAvailable ? 'needs-setup' : issueCount > 0 ? 'attention' : 'ready',
-    summary: `${issueCount} issue(s): ${openComments} comment(s), ${proposedSuggestions} suggestion(s), ${missingSourceArtifacts} source/evidence gap(s), ${unrevealedComparisons.length + hiddenJudgments.length} hidden comparison item(s), ${revealedJudgmentsWaitingOnRouteDecision.length} route decision(s), ${handoffsMissingRelatedArtifacts} handoff evidence gap(s).`,
+    // A truncated list cannot prove the packet is ready, only that the visible part has no issues.
+    status: !artifactListAvailable ? 'needs-setup' : issueCount > 0 || unverified ? 'attention' : 'ready',
+    summary: `${issueCount} issue(s): ${openComments} comment(s), ${proposedSuggestions} suggestion(s), ${missingSourceArtifacts} source/evidence gap(s), ${unrevealedComparisons.length + hiddenJudgments.length} hidden comparison item(s), ${revealedJudgmentsWaitingOnRouteDecision.length} route decision(s), ${handoffsMissingRelatedArtifacts} handoff evidence gap(s).${unverified ? ' Older artifacts were not checked.' : ''}`,
     next,
     issueCount,
     openComments,

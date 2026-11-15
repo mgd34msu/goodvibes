@@ -22,7 +22,7 @@ import {
   type StepUpVerifyFailure,
   type StoredStepUpCredential,
 } from './step-up-webauthn.js';
-import type { StepUpAssertionVerifier } from './step-up-policy.js';
+import type { StepUpAssertionVerifier, StepUpRequestContext } from './step-up-policy.js';
 
 /** User-verification requirement for the ceremony. Default `required`. */
 export type UserVerificationRequirement = 'required' | 'preferred' | 'discouraged';
@@ -32,6 +32,26 @@ const DEFAULT_CHALLENGE_TTL_MS = 120_000;
 const MIN_CHALLENGE_TTL_MS = 5_000;
 const MAX_CHALLENGE_TTL_MS = 300_000;
 const CHALLENGE_BYTES = 32;
+/** Challenges that may be live at once; a minted challenge holds memory until it expires. */
+export const MAX_LIVE_STEP_UP_CHALLENGES = 256;
+/** Challenges one caller may keep live, so a single caller cannot fill the whole store and lock out the others. */
+export const MAX_LIVE_STEP_UP_CHALLENGES_PER_PRINCIPAL = 16;
+
+/** The challenge store is full of unexpired challenges; minting another is refused until one is used or expires. */
+export class StepUpChallengeLimitError extends Error {
+  constructor(limit: number = MAX_LIVE_STEP_UP_CHALLENGES) {
+    super(`Too many step-up challenges are waiting (limit ${limit}); use one or wait for one to expire, then mint again`);
+    this.name = 'StepUpChallengeLimitError';
+  }
+}
+
+/** A credential registration the caller got wrong; anything else thrown while registering is an internal failure. */
+export class StepUpValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StepUpValidationError';
+  }
+}
 
 interface StepUpState {
   rpId: string;
@@ -74,12 +94,22 @@ export interface StepUpCredentialSummary {
   readonly signCount: number;
 }
 
-/** Input to mint a challenge, bound to the session/rendezvous it is for. */
+/**
+ * Input to mint a challenge. Every binding given (session, rendezvous, method,
+ * path) must match the request the assertion is later presented for; a
+ * challenge minted without any binding is accepted for any request.
+ */
 export interface MintStepUpChallengeInput {
   readonly rendezvousId?: string;
   readonly sessionId?: string;
+  /** HTTP method the assertion may be used for. */
+  readonly method?: string;
+  /** Request path the assertion may be used for. */
+  readonly path?: string;
   /** Freshness window in ms (clamped 5s–300s). Default 120s. */
   readonly ttlMs?: number;
+  /** Who is minting; each principal has its own live-challenge cap. Callers without one share a single cap. */
+  readonly principalId?: string;
 }
 
 /** A minted challenge a surface passes to `navigator.credentials.get`. */
@@ -95,12 +125,15 @@ interface LiveChallenge {
   readonly challenge: string;
   readonly rendezvousId?: string;
   readonly sessionId?: string;
+  readonly method?: string;
+  readonly path?: string;
+  readonly principalId: string;
   readonly expiresAt: number;
   consumed: boolean;
 }
 
 /** Refusal reasons the verifier surfaces beyond the crypto failures. */
-export type StepUpChallengeFailure = 'no-credential' | 'unknown-challenge' | 'challenge-expired' | 'challenge-consumed';
+export type StepUpChallengeFailure = 'no-credential' | 'unknown-challenge' | 'challenge-expired' | 'challenge-consumed' | 'challenge-unbound';
 
 function normalizeOrigins(origin: string | readonly string[]): string[] {
   const list = Array.isArray(origin) ? origin : [origin];
@@ -117,6 +150,14 @@ export class StepUpService {
   private readonly randomChallenge: () => Uint8Array<ArrayBuffer>;
   private readonly logger: StepUpServiceOptions['logger'];
   private readonly challenges = new Map<string, LiveChallenge>();
+  /**
+   * Every read-modify-write of the stored state, and every verification (which
+   * reads a credential and writes its advanced counter back), runs one at a
+   * time. Without it a registration made while an assertion is being checked
+   * is overwritten by that check's older copy, and two checks of one assertion
+   * both pass.
+   */
+  private stateQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options: StepUpServiceOptions) {
     this.secrets = options.secrets;
@@ -146,28 +187,76 @@ export class StepUpService {
     await this.secrets.set(STEP_UP_STATE_KEY, JSON.stringify(state));
   }
 
+  private serialized<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.stateQueue.then(operation, operation);
+    // A failed operation must not wedge the ones queued behind it.
+    this.stateQueue = next.catch(() => undefined);
+    return next;
+  }
+
+  /** The registered credentials, without key material. */
+  async listCredentials(): Promise<StepUpCredentialSummary[]> {
+    const state = await this.serialized(() => this.loadState());
+    return state.credentials.map((c) => ({
+      credentialId: c.credentialId,
+      ...(c.label ? { label: c.label } : {}),
+      createdAt: c.createdAt,
+      signCount: c.signCount,
+    }));
+  }
+
+  /**
+   * Remove a credential so it can no longer authorise anything (a lost device).
+   * False when no such credential is registered. Challenges stay valid for the
+   * credentials that remain.
+   */
+  removeCredential(credentialId: string): Promise<boolean> {
+    return this.serialized(async () => {
+      const state = await this.loadState();
+      const remaining = state.credentials.filter((c) => c.credentialId !== credentialId);
+      if (remaining.length === state.credentials.length) return false;
+      state.credentials = remaining;
+      await this.saveState(state);
+      return true;
+    });
+  }
+
   /**
    * Register (or replace) a credential and establish the deployment policy. The
    * COSE public key must parse as an EC2 P-256 key or the registration is
    * refused, a broken key would only fail closed silently later.
    */
-  async registerCredential(input: RegisterStepUpCredentialInput): Promise<StepUpCredentialSummary> {
+  registerCredential(input: RegisterStepUpCredentialInput): Promise<StepUpCredentialSummary> {
+    return this.serialized(() => this.registerCredentialNow(input));
+  }
+
+  private async registerCredentialNow(input: RegisterStepUpCredentialInput): Promise<StepUpCredentialSummary> {
     const rpId = input.rpId.trim();
-    if (!rpId) throw new Error('rpId is required');
+    if (!rpId) throw new StepUpValidationError('rpId is required');
     const origins = normalizeOrigins(input.origin);
-    if (origins.length === 0) throw new Error('at least one origin is required');
-    if (!input.credentialId || !input.publicKeyCose) throw new Error('credentialId and publicKeyCose are required');
+    if (origins.length === 0) throw new StepUpValidationError('at least one origin is required');
+    if (!input.credentialId || !input.publicKeyCose) throw new StepUpValidationError('credentialId and publicKeyCose are required');
     let cose: Uint8Array<ArrayBuffer>;
     try {
       cose = fromBase64Url(input.publicKeyCose);
     } catch {
-      throw new Error('publicKeyCose must be base64url');
+      throw new StepUpValidationError('publicKeyCose must be base64url');
     }
-    if (!coseP256ToRawPoint(cose)) throw new Error('publicKeyCose is not a valid EC2 P-256 COSE key');
+    if (!coseP256ToRawPoint(cose)) throw new StepUpValidationError('publicKeyCose is not a valid EC2 P-256 COSE key');
 
     const state = await this.loadState();
+    // One relying party and origin policy covers every credential, so a
+    // registration for a different relying party would silently make the
+    // existing credentials fail verification. Refuse it, and say how to proceed.
+    const others = state.credentials.filter((c) => c.credentialId !== input.credentialId);
+    if (others.length > 0 && state.rpId !== rpId) {
+      throw new StepUpValidationError(
+        `Credentials are already registered for relying party "${state.rpId}"; registering "${rpId}" would invalidate them. Remove the existing credentials first.`,
+      );
+    }
     state.rpId = rpId;
-    state.origins = origins;
+    // The same relying party may be reached from several origins: keep the ones already allowed.
+    state.origins = others.length > 0 ? [...new Set([...state.origins, ...origins])] : origins;
     state.userVerification = input.userVerification ?? state.userVerification ?? 'required';
     const credential: StoredStepUpCredential = {
       credentialId: input.credentialId,
@@ -189,6 +278,11 @@ export class StepUpService {
   /** Mint a short-lived, single-use challenge bound to the session/rendezvous. */
   mintChallenge(input: MintStepUpChallengeInput = {}): MintedStepUpChallenge {
     this.pruneExpired();
+    const principalId = input.principalId ?? '';
+    let owned = 0;
+    for (const entry of this.challenges.values()) if (entry.principalId === principalId) owned++;
+    if (owned >= MAX_LIVE_STEP_UP_CHALLENGES_PER_PRINCIPAL) throw new StepUpChallengeLimitError(MAX_LIVE_STEP_UP_CHALLENGES_PER_PRINCIPAL);
+    if (this.challenges.size >= MAX_LIVE_STEP_UP_CHALLENGES) throw new StepUpChallengeLimitError();
     const ttl = Math.min(MAX_CHALLENGE_TTL_MS, Math.max(MIN_CHALLENGE_TTL_MS, input.ttlMs ?? DEFAULT_CHALLENGE_TTL_MS));
     const challenge = toBase64Url(this.randomChallenge());
     const id = toBase64Url(randomBytes(16));
@@ -198,6 +292,9 @@ export class StepUpService {
       challenge,
       ...(input.rendezvousId ? { rendezvousId: input.rendezvousId } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.method ? { method: input.method.toUpperCase() } : {}),
+      ...(input.path ? { path: input.path } : {}),
+      principalId,
       expiresAt,
       consumed: false,
     });
@@ -219,8 +316,8 @@ export class StepUpService {
    * signature counter. Every other path returns false (fail closed).
    */
   createVerifier(): StepUpAssertionVerifier {
-    return async (assertion: string): Promise<boolean> => {
-      const result = await this.verify(assertion);
+    return async (assertion: string, context: StepUpRequestContext): Promise<boolean> => {
+      const result = await this.verify(assertion, context);
       if (!result.ok) {
         this.logger?.warn('step-up: assertion refused', { reason: result.reason });
       }
@@ -228,8 +325,23 @@ export class StepUpService {
     };
   }
 
-  /** Verify an envelope, returning a specific outcome (used by the verifier and tests). */
-  async verify(assertion: string): Promise<{ ok: true } | { ok: false; reason: StepUpVerifyFailure | StepUpChallengeFailure | 'malformed-envelope' }> {
+  /**
+   * Verify an envelope, returning a specific outcome (used by the verifier and
+   * tests). A challenge minted for a particular session, rendezvous, method or
+   * path is accepted only when `context` is that request; without a `context`
+   * only an unbound challenge can pass.
+   */
+  verify(
+    assertion: string,
+    context?: StepUpRequestContext,
+  ): Promise<{ ok: true } | { ok: false; reason: StepUpVerifyFailure | StepUpChallengeFailure | 'malformed-envelope' }> {
+    return this.serialized(() => this.verifyNow(assertion, context));
+  }
+
+  private async verifyNow(
+    assertion: string,
+    context: StepUpRequestContext | undefined,
+  ): Promise<{ ok: true } | { ok: false; reason: StepUpVerifyFailure | StepUpChallengeFailure | 'malformed-envelope' }> {
     const envelope = parseAssertionHeader(assertion);
     if (!envelope) return { ok: false, reason: 'malformed-envelope' };
     const state = await this.loadState();
@@ -248,6 +360,7 @@ export class StepUpService {
       this.challenges.delete(signedChallenge);
       return { ok: false, reason: 'challenge-expired' };
     }
+    if (!matchesBinding(live, context)) return { ok: false, reason: 'challenge-unbound' };
 
     const verifyResult = await verifyStepUpAssertion({
       envelope,
@@ -267,6 +380,15 @@ export class StepUpService {
     await this.saveState(state);
     return { ok: true };
   }
+}
+
+/** Whether the request is the one the challenge was minted for (every binding it carries must match). */
+function matchesBinding(live: LiveChallenge, context: StepUpRequestContext | undefined): boolean {
+  if (live.sessionId !== undefined && context?.sessionId !== live.sessionId) return false;
+  if (live.rendezvousId !== undefined && context?.rendezvousId !== live.rendezvousId) return false;
+  if (live.method !== undefined && context?.method.toUpperCase() !== live.method) return false;
+  if (live.path !== undefined && context?.path !== live.path) return false;
+  return true;
 }
 
 /** Decode the `x-goodvibes-stepup-assertion` header value into an envelope. */

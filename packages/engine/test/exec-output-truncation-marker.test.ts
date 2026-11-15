@@ -11,8 +11,8 @@
  * These tests pin the marker: every drop carries an explicit count, at every
  * verbosity, for stdout and stderr both.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
@@ -27,6 +27,11 @@ import { useToolReadings } from './_helpers/tool-readings.ts';
 // forwarded with EXEC_GATE_TABLE, the gate's questions, in one fake port.
 useToolReadings([], EXEC_GATE_TABLE);
 
+const tempRoots: string[] = [];
+afterAll(() => {
+  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 interface Output {
   stdout?: string;
   stderr?: string;
@@ -38,6 +43,7 @@ interface Output {
 /** Runs `cmd` through the real exec tool at `verbosity` and parses the result. */
 async function runAt(cmd: string, verbosity: string): Promise<Output> {
   const root = mkdtempSync(join(tmpdir(), 'gv-exec-marker-'));
+  tempRoots.push(root);
   const tool = createExecTool(new ProcessManager(), {
     overflowHandler: new OverflowHandler({ baseDir: root }),
   });

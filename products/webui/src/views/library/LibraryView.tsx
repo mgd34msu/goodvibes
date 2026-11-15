@@ -18,7 +18,7 @@ import type { LibraryTab } from '../../lib/router';
 import { KnowledgeView } from '../KnowledgeView';
 import { AddMemoryDialog } from '../memory/AddMemoryDialog';
 import { MemoryView } from '../memory/MemoryView';
-import { useDebouncedValue, useReviewCount } from './library-data';
+import { useDebouncedValue, useReviewTally } from './library-data';
 import { ReviewTab } from './ReviewTab';
 import '../../styles/components/library.css';
 
@@ -36,7 +36,7 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
   const [forced, setForced] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [memoryServed, setMemoryServed] = useState(true);
-  const reviewCount = useReviewCount();
+  const review = useReviewTally();
 
   useEffect(() => setForced(null), [text]);
   const query = forced ?? settled;
@@ -101,7 +101,7 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
               value={current}
               options={LIBRARY.tabs.map((t) => ({
                 value: t.tab as LibraryTab,
-                label: t.tab === 'review' && reviewCount > 0 ? `${t.label} · ${reviewCount}` : t.label,
+                label: t.tab === 'review' && review.count > 0 ? `${t.label} · ${review.count}${review.capped ? '+' : ''}` : t.label,
               }))}
               onChange={onTabChange}
             />

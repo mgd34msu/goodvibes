@@ -5,7 +5,7 @@ import operatorContract from '@goodvibes-jev/engine/contracts/operator-contract.
 import { FOLLOWUP_CAPTURES } from './session-followup-fixture';
 
 describe('real follow-up HTTP capture provenance', () => {
-  test('bare capacity 429 does not prove that the input was rejected', () => {
+  test('a capacity 429 fails its own input, and a later spawn claims only its own', () => {
     const capture = JSON.parse(readFileSync(new URL('./fixtures/session-followup/capacity.json', import.meta.url), 'utf8'));
     const post = JSON.parse(capture.post.body);
     const queued = JSON.parse(capture.queued.body);
@@ -15,14 +15,15 @@ describe('real follow-up HTTP capture provenance', () => {
     expect(post.input).toBeUndefined();
     expect(firstJsonSchemaFailure(schema!, queued)).toBeUndefined();
     expect(queued.inputs).toHaveLength(1);
-    expect(queued.inputs[0]).toMatchObject({ sessionId: 's-capacity', intent: 'follow-up', state: 'queued' });
+    expect(queued.inputs[0]).toMatchObject({ sessionId: 's-capacity', intent: 'follow-up', state: 'failed' });
+    expect(queued.inputs[0].error).toContain('capacity');
     const second = JSON.parse(capture.second.body);
     const afterSpawn = JSON.parse(capture.afterSpawn.body) as { inputs: { id: string; state: string }[] };
     expect(capture.second.status).toBe(202);
     expect(second.input.state).toBe('spawned');
     expect(firstJsonSchemaFailure(schema!, afterSpawn)).toBeUndefined();
-    expect(afterSpawn.inputs.find(input => input.id === second.input.id)?.state).toBe('queued');
-    expect(afterSpawn.inputs.find(input => input.id === queued.inputs[0].id)?.state).toBe('spawned');
+    expect(afterSpawn.inputs.find(input => input.id === second.input.id)?.state).toBe('spawned');
+    expect(afterSpawn.inputs.find(input => input.id === queued.inputs[0].id)?.state).toBe('failed');
   });
   for (const capture of Object.values(FOLLOWUP_CAPTURES)) {
     test(`registered TUI follow-up: queued-for-surface through ${capture.outcome}`, () => {

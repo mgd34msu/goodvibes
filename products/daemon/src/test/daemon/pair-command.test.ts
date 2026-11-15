@@ -240,7 +240,7 @@ describe('pair writes nothing (local form)', () => {
 describe('pair --host <other machine> (remote form): confirmation gate', () => {
   test('without -y nothing is called, and the plan states the mint-vs-reprint distinction', async () => {
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: false },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: false },
       socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(0);
@@ -253,7 +253,7 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
 
   test('the --json dry run is one JSON document with confirmed: false', async () => {
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: true, yes: false },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: false },
       socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(0);
@@ -266,7 +266,7 @@ describe('pair --host <other machine> (remote form): confirmation gate', () => {
   test('-y proceeds to call pairing.handoff.create', async () => {
     const { factory, methodIds, bodies } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(0);
@@ -282,7 +282,7 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   test('a deep-link-bearing mint renders through the SAME banner the local form uses', async () => {
     const { factory } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(0);
@@ -308,7 +308,7 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   test('--json carries the minted secret and the rebuilt deep link', async () => {
     const { factory } = fakeSocketFactory({ ok: true, body: MINTED_WITH_ORIGIN });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
       socketFactory: factory,
     }));
     const parsed = JSON.parse(result.lines[0] as string) as {
@@ -325,7 +325,7 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   test('a mint with no configured web origin degrades honestly: token and fragment, no QR', async () => {
     const { factory } = fakeSocketFactory({ ok: true, body: MINTED_NO_ORIGIN });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(0);
@@ -340,7 +340,7 @@ describe('pair --host <other machine> -y (remote form): mint and render', () => 
   test('the fragment-only --json shape carries the token but no deepLink', async () => {
     const { factory } = fakeSocketFactory({ ok: true, body: MINTED_NO_ORIGIN });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: true, yes: true },
       socketFactory: factory,
     }));
     const parsed = JSON.parse(result.lines[0] as string) as {
@@ -358,7 +358,7 @@ describe('pair --host <other machine> -y: each refusal is named, never a stack t
       throw new Error('ECONNREFUSED');
     };
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(1);
@@ -386,7 +386,7 @@ describe('pair --host <other machine> -y: each refusal is named, never a stack t
       return socket;
     };
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(1);
@@ -394,9 +394,9 @@ describe('pair --host <other machine> -y: each refusal is named, never a stack t
   });
 
   test('a daemon too old to serve the verb is refused by name, not a stack trace', async () => {
-    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: {} });
+    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: pairing.handoff.create', code: 'METHOD_NOT_FOUND' } });
     const result = await runPairCommand(baseInput({
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: factory,
     }));
     expect(result.exitCode).toBe(1);
@@ -408,7 +408,7 @@ describe('pair --host <other machine> -y: each refusal is named, never a stack t
   test('no operator token for the target machine refuses before any call is made', async () => {
     const result = await runPairCommand(baseInput({
       readToken: () => undefined,
-      flags: { host: '10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: undefined, json: false, yes: true },
       socketFactory: neverCalledFactory(),
     }));
     expect(result.exitCode).toBe(1);

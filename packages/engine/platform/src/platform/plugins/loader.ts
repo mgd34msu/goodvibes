@@ -14,6 +14,7 @@ import type { MediaProviderRegistry } from '../media/index.js';
 import type { WebSearchProviderRegistry } from '../web-search/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { PluginInFlightTracker } from './in-flight.js';
+import { PLUGIN_NAME_PATTERN } from '../runtime/plugins/manifest.js';
 
 export interface PluginPathOptions {
   readonly cwd: string;
@@ -129,6 +130,12 @@ function scanPluginDirectory(rootDir: string): DiscoveredPlugin[] {
         logger.warn(`[plugins] ${entry}: manifest.json 'name' and 'version' must be strings`);
         continue;
       }
+      // The name becomes part of tool names, command names and gateway ids, so
+      // spaces and dots would produce invalid or colliding identifiers.
+      if (!PLUGIN_NAME_PATTERN.test(manifest.name)) {
+        logger.warn(`[plugins] ${entry}: manifest.json 'name' must be lowercase letters, digits and hyphens, starting with a letter or digit (got '${manifest.name}')`);
+        continue;
+      }
       if (manifest.main !== undefined) {
         if (typeof manifest.main !== 'string') {
           logger.warn(`[plugins] ${entry}: manifest.json 'main' must be a string`);
@@ -147,6 +154,11 @@ function scanPluginDirectory(rootDir: string): DiscoveredPlugin[] {
   }
 
   return results;
+}
+
+/** Every valid plugin in every search directory, including copies a same-named earlier one shadows. */
+export function discoverAllPlugins(options: PluginPathOptions): DiscoveredPlugin[] {
+  return getPluginDirectories(options).flatMap((dir) => scanPluginDirectory(dir));
 }
 
 export function discoverPlugins(options: PluginPathOptions): DiscoveredPlugin[] {

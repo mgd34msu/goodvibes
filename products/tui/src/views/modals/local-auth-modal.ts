@@ -2,7 +2,7 @@ import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, Confi
 import type { LocalAuthInspectionQuery } from '@/runtime/index.ts';
 import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { postureLine, kv } from './modal-surface-helpers.ts';
+import { postureLine, kv, runModalCommand } from './modal-surface-helpers.ts';
 
 /** Mutation surface the surface needs to gate p/d/b on, a subset of UserAuthManager,
  *  mirroring the retired local-auth view's own `hasLocalAuthMutations` guard. */
@@ -110,13 +110,11 @@ class LocalAuthModalSurface implements ConfigModalSurface {
       case 'delete': {
         const username = usernameOf(ctx.row);
         if (!username) return;
-        void ctx.executeCommand?.('local-auth', ['delete-user', username]);
-        ctx.setStatus(`Deleting ${username}…`);
+        runModalCommand(ctx, 'local-auth', ['delete-user', username], `/local-auth delete-user ${username}`, { pending: `Deleting ${username}…` });
         break;
       }
       case 'clear-bootstrap':
-        void ctx.executeCommand?.('local-auth', ['clear-bootstrap-file']);
-        ctx.setStatus('Clearing bootstrap credential file…');
+        runModalCommand(ctx, 'local-auth', ['clear-bootstrap-file'], '/local-auth clear-bootstrap-file', { pending: 'Clearing bootstrap credential file…' });
         break;
       default:
         return;

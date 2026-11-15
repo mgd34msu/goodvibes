@@ -203,6 +203,29 @@ describe('SignedOutGate camera scan flow', () => {
   });
 });
 
+describe('SignedOutGate relay pairing', () => {
+  test('a pasted relay code is stored only after the operator confirms it', async () => {
+    const { encodeRelayPairingString, getStoredRelayPairing, RELAY_PAIRING_STORAGE_KEY } = await import('../../lib/relay-pairing');
+    window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
+    const payload = { protocol: 1 as const, relayUrl: 'wss://relay.example.test', rid: 'synthetic-rid', daemonPublicKey: 'synthetic-daemon-public-key' };
+    const { el, unmount } = render();
+    flushSync(() => { buttonLabelled(el, 'Connecting from outside the LAN?').click(); });
+    const input = el.querySelector('input[placeholder="gvrelay1.…"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, encodeRelayPairingString(payload));
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    flushSync(() => {});
+    const form = input.closest('form') as HTMLFormElement;
+    flushSync(() => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    expect(el.textContent).toContain('relay.example.test');
+    expect(getStoredRelayPairing()).toBeNull();
+    flushSync(() => { buttonLabelled(el, 'Confirm pairing').click(); });
+    expect(getStoredRelayPairing()?.rid).toBe('synthetic-rid');
+    window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
+    unmount();
+  });
+});
+
 describe('SignedOutGate token flow', () => {
   test('submitting a token calls setExplicitAuthToken with the trimmed value', async () => {
     const { el, unmount } = render();
@@ -236,6 +259,25 @@ describe('SignedOutGate token flow', () => {
     const alert = el.querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
     unmount();
+  });
+});
+
+
+describe('SignedOutGate: a failure does not outlive its gate', () => {
+  test('a sign-out gate mounted after an earlier failed attempt opens without the failure banner', async () => {
+    tokenShouldReject = true;
+    const first = render();
+    const input = first.el.querySelector('input[type="password"]') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(input, 'bad-token');
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    flushSync(() => {});
+    flushSync(() => { (first.el.querySelector('form') as HTMLFormElement).dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    await until(() => first.el.querySelector('[role="alert"]') !== null);
+    first.unmount();
+
+    const second = render();
+    expect(second.el.querySelector('[role="alert"]')).toBeNull();
+    second.unmount();
   });
 });
 

@@ -16,8 +16,11 @@ export interface AgentWorkspaceChannelStatus {
   readonly delivery: 'disabled' | 'blocked' | 'explicit-target' | 'default-ready';
   readonly risk: AgentWorkspaceChannelRisk;
   readonly riskLabel: string;
-  readonly setupState: 'disabled' | 'needs-config' | 'needs-target' | 'ready';
+  /** 'unknown' means the configuration could not be read, which is not the same as the channel being off. */
+  readonly setupState: 'disabled' | 'needs-config' | 'needs-target' | 'ready' | 'unknown';
   readonly nextStep: string;
+  /** Present only when setupState is 'unknown': why the configuration could not be read. */
+  readonly readError?: string;
 }
 
 export type AgentWorkspaceChannelSetupGuideStatus = 'ready' | 'attention' | 'setup-needed';
@@ -225,31 +228,47 @@ function configValue(context: CommandContext, key: string): unknown {
   return configManager?.get(key);
 }
 
+// A throwing config read is not caught here: buildAgentWorkspaceChannels reports it as an
+// 'unknown' status, because defaulting to false would show a working channel as switched off.
 function readConfigBoolean(context: CommandContext, key: string, fallback: boolean): boolean {
-  try {
-    const value = configValue(context, key);
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (normalized === 'true') return true;
-      if (normalized === 'false') return false;
-    }
-    return fallback;
-  } catch {
-    return fallback;
+  const value = configValue(context, key);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
   }
+  return fallback;
 }
 
 function hasConfigValue(context: CommandContext, key: string): boolean {
-  try {
-    const value = configValue(context, key);
-    if (typeof value === 'string') return value.trim().length > 0;
-    if (typeof value === 'number') return Number.isFinite(value);
-    if (typeof value === 'boolean') return value;
-    return value !== null && value !== undefined;
-  } catch {
-    return false;
-  }
+  const value = configValue(context, key);
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return value;
+  return value !== null && value !== undefined;
+}
+
+function unreadableChannelStatus(spec: AgentWorkspaceChannelSpec, error: unknown): AgentWorkspaceChannelStatus {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    id: spec.id,
+    label: spec.label,
+    enabled: false,
+    ready: false,
+    requiredKeys: uniqueStrings([...spec.requiredKeys, ...(spec.requiredKeyGroups ?? []).flat()]),
+    missingRequiredKeys: [],
+    missingConfigCount: 0,
+    defaultTargetKeys: spec.defaultTargetKeys,
+    configuredDefaultTargetKeys: [],
+    defaultTarget: spec.defaultTargetKeys.length === 0 ? 'not-required' : 'missing',
+    delivery: 'blocked',
+    risk: spec.risk,
+    riskLabel: spec.riskLabel,
+    setupState: 'unknown',
+    nextStep: `The ${spec.label} configuration could not be read (${reason}). Fix the configuration store, then check again; this does not mean the channel is disabled.`,
+    readError: reason,
+  };
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {
@@ -323,7 +342,13 @@ function buildChannelStatus(context: CommandContext, spec: AgentWorkspaceChannel
 }
 
 export function buildAgentWorkspaceChannels(context: CommandContext): readonly AgentWorkspaceChannelStatus[] {
-  return AGENT_WORKSPACE_CHANNEL_SPECS.map((spec) => buildChannelStatus(context, spec));
+  return AGENT_WORKSPACE_CHANNEL_SPECS.map((spec) => {
+    try {
+      return buildChannelStatus(context, spec);
+    } catch (error) {
+      return unreadableChannelStatus(spec, error);
+    }
+  });
 }
 
 function channelGuideModelRoute(channelId?: string): string {
@@ -468,7 +493,7 @@ function buildGuideSteps(channel: AgentWorkspaceChannelStatus | null): readonly 
       'Send explicit test',
       'Send one test message only after the user asks for that exact target and confirms the send.',
       `/channels send --channel ${channelId}:route:Label --message "Test from GoodVibes Agent" --yes`,
-      'agent_channel_send confirm:true explicitUserRequest:"..."',
+      'agent_channel_send explicitUserRequest:"..."',
       'confirmed',
     ),
   ];
@@ -486,7 +511,7 @@ export function buildAgentWorkspaceChannelSetupGuide(
   const current = requested ?? currentGuideChannel(channels);
   const enabledChannels = channels.filter((channel) => channel.enabled).length;
   const readyChannels = channels.filter((channel) => channel.ready).length;
-  const attentionChannels = channels.filter((channel) => channel.enabled && channel.setupState !== 'ready').length;
+  const attentionChannels = channels.filter((channel) => channel.setupState === 'unknown' || (channel.enabled && channel.setupState !== 'ready')).length;
   const configuredTargets = channels.filter((channel) => channel.defaultTarget === 'configured').length;
   const status: AgentWorkspaceChannelSetupGuideStatus = attentionChannels > 0
     ? 'attention'

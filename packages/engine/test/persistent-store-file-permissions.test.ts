@@ -1,4 +1,4 @@
-/** Descriptor permission regression source; not executed during coding phase. */
+/** Descriptor permission regression. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';

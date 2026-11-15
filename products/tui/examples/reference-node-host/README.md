@@ -38,6 +38,8 @@ heartbeat-and-work-pull pass and prints its summary.
 
 For a first pairing run, the daemon must approve the pair request before verification succeeds. If you supply an `operatorToken` in your config, the reference client can approve its own request through the operator endpoint for local testing.
 
+The `requestedId` is fixed per host, so pairing again (lost state, revoked token) names the peer the daemon already holds, and the daemon refuses to approve it with `REMOTE_PAIR_REPLACES_PEER` unless the approval carries `confirmReplace: true`. The client retries once with `confirmReplace: true` after that refusal; set `confirmReplace` to `false` in the config to leave such approvals to an operator.
+
 ## State
 
 The client persists token and pairing state to the configured `statePath`. The sample config stores it under:

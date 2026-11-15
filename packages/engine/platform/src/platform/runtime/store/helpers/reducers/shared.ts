@@ -11,6 +11,31 @@ export function computeActiveIds<T extends { id: string; status: string }>(map: 
   return [...map.values()].filter((v) => !isTerminalLifecycleState(v.status)).map((v) => v.id);
 }
 
+/** Ended records kept per registry; past this the oldest ended ones are dropped, live ones never. */
+export const MAX_RETAINED_ENDED_RECORDS = 1000;
+
+/**
+ * Drops the oldest ended records from `records` while it holds more than `max`,
+ * and returns what it dropped so a caller can keep its running totals. Without a
+ * bound every event copies and re-sorts an ever-growing map.
+ */
+export function evictOldestEnded<T extends { id: string }>(
+  records: Map<string, T>,
+  isEnded: (record: T) => boolean,
+  endedOrder: (record: T) => number,
+  max: number = MAX_RETAINED_ENDED_RECORDS,
+): T[] {
+  if (records.size <= max) return [];
+  const ended = [...records.values()].filter(isEnded).sort((a, b) => endedOrder(a) - endedOrder(b));
+  const dropped: T[] = [];
+  for (const record of ended) {
+    if (records.size <= max) break;
+    records.delete(record.id);
+    dropped.push(record);
+  }
+  return dropped;
+}
+
 export function uniq<T>(items: T[]): T[] {
   return [...new Set(items)];
 }

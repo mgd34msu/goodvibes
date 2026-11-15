@@ -121,7 +121,7 @@ const ALL_OFF: OwnerProfilePolicy = {
   discloseClosedTierReads: () => false,
 };
 
-const ctx = { context: { admin: true } } as const;
+const ctx = { context: { admin: true }, isAuthorized: () => true } as const;
 
 describe('profile.* verbs: catalog surface', () => {
   test('all nine are cataloged with handlers and the documented scopes', async () => {
@@ -409,10 +409,43 @@ describe('profile.* write verbs: the gates, at the verb layer', () => {
     },
   );
 
+  test.each(['bot', 'remote-peer', 'service'] as const)('a %s principal cannot claim owner-direct authority and nothing is written', async (principalKind) => {
+    const { catalog, path } = await harness();
+    const before = readFileSync(path);
+    await expect(catalog.invoke('profile.set', {
+      context: { admin: true, principalId: 'p-1', principalKind },
+      isAuthorized: () => true,
+      body: { fieldId: 'identity.goesBy', value: 'Ave', surface: 'tui', said: 'call me Ave', authority: 'owner-direct' },
+    })).rejects.toThrow(/cannot claim owner-direct authority/);
+    expect(readFileSync(path).equals(before)).toBe(true);
+  });
+
+  test('a service principal cannot forget a field by claiming owner-direct authority', async () => {
+    const { catalog, path } = await harness();
+    const before = readFileSync(path);
+    await expect(catalog.invoke('profile.forget', {
+      context: { admin: true, principalId: 's-1', principalKind: 'service' },
+      isAuthorized: () => true,
+      body: { fieldId: 'commerce.shippingAddress', authority: 'owner-direct' },
+    })).rejects.toThrow(/cannot claim owner-direct authority/);
+    expect(readFileSync(path).equals(before)).toBe(true);
+  });
+
+  test('a user principal may state owner-direct authority', async () => {
+    const { catalog } = await harness();
+    const result = await catalog.invoke('profile.set', {
+      context: { admin: true, principalId: 'u-1', principalKind: 'user' },
+      isAuthorized: () => true,
+      body: { fieldId: 'identity.goesBy', value: 'Ave', surface: 'tui', said: 'call me Ave', authority: 'owner-direct' },
+    }) as ProfileWriteResult;
+    expect(result.ok).toBe(true);
+  });
+
   test('an absent explicitUserRequest claim proceeds: silence is not a refusal', async () => {
     const { catalog } = await harness();
     const result = await catalog.invoke('profile.set', {
       context: { admin: true },
+      isAuthorized: () => true,
       body: {
         fieldId: 'identity.goesBy',
         value: 'Ave',

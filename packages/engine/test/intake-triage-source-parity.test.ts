@@ -2,11 +2,13 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { triageSource } from './_helpers/triage-source.ts';
+import { triageSource, useTriageSourceCleanup } from './_helpers/triage-source.ts';
 import { labelToTag } from '../platform/src/platform/intake/triage/evidence.js';
 import { scoreInboxTriage } from '../platform/src/platform/intake/triage/scorer.js';
 import { enrichItemsWithTriage, readTriageMetadataBatch, runInboxTriage } from '../platform/src/platform/intake/triage/pipeline.js';
 import type { TriageInput, TriageStoredRecord, TriageStore } from '../platform/src/platform/intake/triage/types.js';
+
+useTriageSourceCleanup();
 
 const item = (id = 'original-fixture'): TriageInput => ({ id, surface: 'synthetic', subject: 'Synthetic message', snippet: 'Offline fixture only.' });
 const recorded = (spam = .01, urgency = .01) => fakePort(name => noulAnswer(name.endsWith('spam') ? spam : urgency));

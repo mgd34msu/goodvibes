@@ -76,21 +76,33 @@ test('native account and DM settings cannot create screening authority', async (
   expect(f.listeners.size).toBe(0); expect(f.polling).toBe(0);
 });
 
+// Only empty values get past the settings validator; the registry still has to refuse them.
 for (const [userId, channels] of [
-  ['', '100000000000000002'], ['01', '100000000000000002'], ['18446744073709551616', '100000000000000002'],
-  ['100000000000000001', ''], ['100000000000000001', '100000000000000002,100000000000000002'],
-  ['100000000000000001', '0'], ['100000000000000001', '18446744073709551616'],
-  ['100000000000000001', Array.from({ length: 201 }, (_, i) => String(i + 1)).join(',')],
+  ['', '100000000000000002'], ['100000000000000001', ''],
 ] as const) {
-  test(`native registry refuses inadmissible identity/membership ${userId}/${channels.slice(0, 45)} before provider acquisition`, async () => {
+  test(`native registry refuses inadmissible identity/membership ${userId}/${channels} before provider acquisition`, async () => {
     const f = fixture(); f.configManager.set('surfaces.discord.enabled', true);
-    f.configManager.set('surfaces.discord.inboxBotUserId', userId!);
-    f.configManager.set('surfaces.discord.inboxChannelIds', channels!);
+    f.configManager.set('surfaces.discord.inboxBotUserId', userId);
+    f.configManager.set('surfaces.discord.inboxChannelIds', channels);
     let owners = 0;
     await expect(initialReady(createProductionDaemonInboxFactory({}, { discord: { async createOwner() {
       owners++; throw new Error('Invalid registry must not acquire a provider');
     } } }, syntheticScreening)(f.ctx, routing, f.controls))).rejects.toThrow('Discord inbox');
     expect(owners).toBe(0); expect(f.listeners.size).toBe(0); expect(f.polling).toBe(0);
+  });
+}
+
+// A malformed id or membership list is refused when it is written, so it never reaches the inbox owner.
+for (const [key, value] of [
+  ['surfaces.discord.inboxBotUserId', '01'], ['surfaces.discord.inboxBotUserId', '18446744073709551616'],
+  ['surfaces.discord.inboxChannelIds', '100000000000000002,100000000000000002'],
+  ['surfaces.discord.inboxChannelIds', '0'], ['surfaces.discord.inboxChannelIds', '18446744073709551616'],
+  ['surfaces.discord.inboxChannelIds', Array.from({ length: 201 }, (_, i) => String(i + 1)).join(',')],
+] as const) {
+  test(`settings refuse ${key} ${value.slice(0, 45)} and keep the inbox unconfigured`, async () => {
+    const f = fixture();
+    expect(() => f.configManager.set(key, value)).toThrow(`Invalid value for ${key}`);
+    expect(f.configManager.get(key)).toBe('');
   });
 }
 

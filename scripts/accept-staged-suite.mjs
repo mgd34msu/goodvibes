@@ -8,11 +8,10 @@ import { createReadStream, lstatSync, readFileSync, readdirSync, realpathSync, w
 import { createServer } from 'node:http';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acceptPublishedSuite, readPublishedReaders } from './accept-published-suite.mjs';
+import { acceptPublishedSuite, readPublishedReaders, repository } from './accept-published-suite.mjs';
 
 const flatName = /^[A-Za-z0-9_.-]+$/;
 const checksumName = 'SHA256SUMS.txt';
-const repository = 'mgd34msu/goodvibes';
 const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 const revision = stat => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.uid, stat.mode].join(':');
 
@@ -100,7 +99,6 @@ export async function startStagedReleaseFeed(admitted, tag) {
 export async function acceptStagedSuite({ directory, ...input }) {
   let feed, admitted;
   const delivery = {
-    rollbackSourceRoot: process.env.CANDIDATE_SOURCE_ROOT,
     installerSource: undefined,
     installerSourcePath: undefined,
     async admit({ tag, source, target, root, signal }) {
@@ -121,7 +119,7 @@ export async function acceptStagedSuite({ directory, ...input }) {
       const base = `https://github.com/${repository}/releases/download/${tag}/`;
       const wrapper = `#!/bin/sh\nGOODVIBES_INSTALL_SH_LIB=1\n. ${shellQuote(immutable)}\nfetch() {\n  case "$1" in ${shellQuote(base)}*) staged_name=\${1#${shellQuote(base)}} ;; *) fail 'Unadmitted staged release URL' ;; esac\n  case "$staged_name" in ''|*[!A-Za-z0-9_.-]*) fail 'Invalid staged release asset' ;; esac\n  [ ! -f "$2" ] || return 0\n  cp ${shellQuote(admitted.root)}/"$staged_name" "$2"\n}\nmain "$@"\n`;
       writeFileSync(installer, wrapper, { flag: 'wx', mode: 0o600 });
-      if (input.scenario === 'upgrade-v3.1.1' || input.scenario === 'upgrade-previous') feed = await startStagedReleaseFeed(admitted, tag);
+      if (input.scenario === 'upgrade-previous') feed = await startStagedReleaseFeed(admitted, tag);
       return { readers, installer, published: { url: `git:${source}:scripts/install.sh`, bytes } };
     },
     assertCurrent() {

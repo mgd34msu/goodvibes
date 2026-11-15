@@ -233,7 +233,7 @@ describe('owned cluster registration withdrawal', () => {
     await coordinator.stop();
   });
 
-  test('legacy failed stop keeps its log-and-RESIGN behavior', async () => {
+  test('a legacy consumer that fails to stop is logged and its surface is not announced as released', async () => {
     const { coordinator, events, errors, advance } = rig();
     const unregister = coordinator.register(gate('legacy-failure', events, { stop: async () => {
       events.push('legacy:stop-rejected'); throw new Error('legacy stop failed');
@@ -241,13 +241,13 @@ describe('owned cluster registration withdrawal', () => {
     await coordinator.start(); await advance(1_100); events.length = 0;
     expect(unregister()).toBeUndefined(); await flush();
     expect(events).toContain('legacy:stop-rejected');
-    expect(events.indexOf('send:RESIGN')).toBeGreaterThan(events.indexOf('legacy:stop-rejected'));
+    expect(events).not.toContain('send:RESIGN');
     expect(errors).toContain('cluster: an inbound consumer did not stop cleanly');
     expect(coordinator.holdsSurface(surface)).toBe(false);
     await coordinator.stop();
   });
 
-  test('successful repeated cleanup releases all owned retirement records', async () => {
+  test('successful repeated cleanup leaves the surface free to register again', async () => {
     const { coordinator, events } = rig(false);
     await coordinator.start();
     for (let iteration = 0; iteration < 3; iteration++) {
@@ -259,13 +259,9 @@ describe('owned cluster registration withdrawal', () => {
       await pending;
       expect(withdraw()).toBe(pending);
       expect(events.filter(event => event === `${id}:stop`)).toHaveLength(1);
-      // Verify successful retirement releases retained gate references, not just
-      // the public registration fence. These are deliberately internal checks.
-      const records = coordinator as unknown as {
-        ownedGateDrains: Map<unknown, unknown>; ownedWithdrawals: Map<unknown, unknown>;
-      };
-      expect(records.ownedGateDrains.size).toBe(0);
-      expect(records.ownedWithdrawals.size).toBe(0);
+      // A retained retirement record would fence this surface: the next round
+      // registers the same surface again, and registerOwned refuses while an
+      // earlier withdrawal is still recorded.
     }
     await coordinator.stop();
   });

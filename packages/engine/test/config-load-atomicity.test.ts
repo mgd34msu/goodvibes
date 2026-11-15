@@ -85,12 +85,12 @@ describe('complete layered configuration reloads', () => {
 
   test('a successful reload preserves the existing default/global/project/shared/daemon precedence', () => {
     const manager = fixture();
-    write(manager.getConfigPath(), { judgment: { endpoint: 'http://127.0.0.1:9400' }, tts: { voice: 'synthetic-global' }, surfaces: { email: { host: 'global.example.test' } } });
-    write(manager.getProjectConfigPath()!, { judgment: { endpoint: 'http://127.0.0.1:9401' }, tts: { voice: 'synthetic-project' }, surfaces: { email: { host: 'project.example.test' } } });
+    write(manager.getConfigPath(), { provider: { model: 'synthetic:global' }, tts: { voice: 'synthetic-global' }, surfaces: { email: { host: 'global.example.test' } } });
+    write(manager.getProjectConfigPath()!, { provider: { model: 'synthetic:project' }, tts: { voice: 'synthetic-project' }, surfaces: { email: { host: 'project.example.test' } } });
     write(manager.getSharedTierPath()!, { tts: { voice: 'synthetic-shared' } });
     write(manager.getDaemonTierPath()!, { surfaces: { email: { host: 'daemon.example.test' } } });
     manager.load();
-    expect(manager.get('judgment.endpoint')).toBe('http://127.0.0.1:9401');
+    expect(manager.get('provider.model')).toBe('synthetic:project');
     expect(manager.get('tts.voice')).toBe('synthetic-shared');
     expect(manager.get('surfaces.email.host')).toBe('daemon.example.test');
   });

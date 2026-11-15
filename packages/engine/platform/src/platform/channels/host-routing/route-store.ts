@@ -223,6 +223,9 @@ export class RouteStore {
   }
 
   private requireInit(): void {
+    if (this.closed) {
+      throw new HandlerError('RouteStore has been closed', 'ROUTING_STORE_UNINITIALIZED', 500);
+    }
     if (!this.initialized) {
       throw new HandlerError('RouteStore not initialized', 'ROUTING_STORE_UNINITIALIZED', 500);
     }
@@ -248,7 +251,9 @@ export class RouteStore {
       params.push(filter.profileId);
     }
     if (filter.surfaceKind !== undefined && filter.surfaceKind !== '') {
-      clauses.push('surfaceKind = ?');
+      // An 'any' assignment applies to every surface, so it is part of each
+      // surface's list, the way the agent lists it.
+      clauses.push("(surfaceKind = ? OR surfaceKind = 'any')");
       params.push(filter.surfaceKind);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -307,55 +312,22 @@ export class RouteStore {
       : null;
     const now = new Date().toISOString();
 
-    if (assertCurrent) {
-      const result = await this.store.persistTransaction(transaction => {
-        const existing = transaction.get<RouteRow>('SELECT * FROM routes WHERE channelId = ?', [channelId]);
-        const assignmentId = existing?.assignmentId ?? randomUUID();
-        if (existing) transaction.run('UPDATE routes SET profileId = ?, label = ?, surfaceKind = ?, routeId = ?, updatedAt = ? WHERE assignmentId = ?',
-          [profileId, label, surfaceKind, routeId ?? null, now, assignmentId]);
-        else transaction.run('INSERT INTO routes (assignmentId, channelId, surfaceKind, routeId, profileId, label, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [assignmentId, channelId, surfaceKind, routeId ?? null, profileId, label, now, now]);
-        const row = transaction.get<RouteRow>('SELECT * FROM routes WHERE assignmentId = ?', [assignmentId]);
-        if (!row) throw new HandlerError('Failed to read admitted route', 'ROUTING_WRITE_FAILED', 500);
-        return { route: rowToRoute(row), created: existing === null };
-      }, assertCurrent, withPublication);
-      this.markMutation(result.route);
-      return result;
-    }
-
-    const existing = this.findByChannelId(channelId);
-    if (existing) {
-      this.store.run(
-        `UPDATE routes
-         SET profileId = ?, label = ?, surfaceKind = ?, routeId = ?, updatedAt = ?
-         WHERE assignmentId = ?`,
-        [profileId, label, surfaceKind, routeId ?? null, now, existing.assignmentId],
-      );
-      // Capture this mutation's receipt before yielding. A later assignment or
-      // deletion must not rewrite what this operation reports to its caller.
-      const route = this.findById(existing.assignmentId);
-      if (!route) {
-        throw new HandlerError('Failed to read back updated route', 'ROUTING_WRITE_FAILED', 500);
-      }
-      await this.store.save();
-      this.markMutation(route);
-      return { route, created: false };
-    }
-
-    const assignmentId = randomUUID();
-    this.store.run(
-      `INSERT INTO routes
-        (assignmentId, channelId, surfaceKind, routeId, profileId, label, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [assignmentId, channelId, surfaceKind, routeId ?? null, profileId, label, now, now],
-    );
-    const route = this.findById(assignmentId);
-    if (!route) {
-      throw new HandlerError('Failed to read back inserted route', 'ROUTING_WRITE_FAILED', 500);
-    }
-    await this.store.save();
-    this.markMutation(route);
-    return { route, created: true };
+    // Staged on a private copy and published only once it is on disk, for every
+    // caller: a write that fails to save leaves the live table, which the
+    // resolver reads, exactly as it was.
+    const result = await this.store.persistTransaction(transaction => {
+      const existing = transaction.get<RouteRow>('SELECT * FROM routes WHERE channelId = ?', [channelId]);
+      const assignmentId = existing?.assignmentId ?? randomUUID();
+      if (existing) transaction.run('UPDATE routes SET profileId = ?, label = ?, surfaceKind = ?, routeId = ?, updatedAt = ? WHERE assignmentId = ?',
+        [profileId, label, surfaceKind, routeId ?? null, now, assignmentId]);
+      else transaction.run('INSERT INTO routes (assignmentId, channelId, surfaceKind, routeId, profileId, label, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [assignmentId, channelId, surfaceKind, routeId ?? null, profileId, label, now, now]);
+      const row = transaction.get<RouteRow>('SELECT * FROM routes WHERE assignmentId = ?', [assignmentId]);
+      if (!row) throw new HandlerError('Failed to read admitted route', 'ROUTING_WRITE_FAILED', 500);
+      return { route: rowToRoute(row), created: existing === null };
+    }, assertCurrent ?? (() => {}), withPublication);
+    this.markMutation(result.route);
+    return result;
   }
 
   private markMutation(route: RoutingChannelRoute): void {
@@ -370,7 +342,7 @@ export class RouteStore {
     const current = () => kind === 'channel' ? this.findByChannelId(id) : this.findById(id);
     const target = current(), before = JSON.stringify(target);
     const storage = retainMutationStorage(this.store.dbPath, this.workingDirectory);
-    const ownerCurrent = captureMutationDescriptors(this, ['store', 'findByChannelId', 'findById', 'upsertRoute', 'deleteRoute']);
+    const ownerCurrent = captureMutationDescriptors(this, ['store', 'findByChannelId', 'findById', 'writeRoute', 'deleteRoute']);
     const storeCurrent = captureMutationDescriptors(this.store, ['get', 'run', 'persistTransaction']);
     return { target, assertCurrent: () => {
       this.requireInit(); ownerCurrent(); storeCurrent(); storage();
@@ -397,8 +369,7 @@ export class RouteStore {
     }
     const existing = this.findById(id);
     if (!existing) return false;
-    if (assertCurrent) await this.store.persistTransaction(transaction => transaction.run('DELETE FROM routes WHERE assignmentId = ?', [id]), assertCurrent, withPublication);
-    else { this.store.run('DELETE FROM routes WHERE assignmentId = ?', [id]); await this.store.save(); }
+    await this.store.persistTransaction(transaction => transaction.run('DELETE FROM routes WHERE assignmentId = ?', [id]), assertCurrent ?? (() => {}), withPublication);
     this.markMutation(existing);
     return true;
   }

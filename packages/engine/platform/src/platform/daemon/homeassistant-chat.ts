@@ -72,6 +72,8 @@ export interface HomeAssistantChatPostResult extends HomeAssistantChatResolution
   readonly error?: string | undefined;
   /** Set only by the local reply deadline, never inferred from failure prose. */
   readonly timedOut?: true | undefined;
+  /** Set when the turn was stopped by a cancel (the turn's own `turn.cancelled` event), never inferred from failure prose. */
+  readonly cancelled?: true | undefined;
 }
 
 export interface HomeAssistantChatRuntime {
@@ -93,9 +95,12 @@ export async function postHomeAssistantChatMessage(
     /** In-process tap for the turn's incremental events, forwarded to the chat
      * manager so a caller (the SSE route) can stream deltas while awaiting the reply. */
     readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
+    /** Called once the conversation's chat session is known, before the message is posted. */
+    readonly onResolved?: ((resolution: HomeAssistantChatResolution) => void) | undefined;
   } = {},
 ): Promise<HomeAssistantChatPostResult> {
   const resolution = await resolveHomeAssistantChatSession(runtime, input);
+  options.onResolved?.(resolution);
   const clientId = options.clientId ?? `homeassistant:${input.surfaceId}:${input.conversationId}`;
   // No `ownerDirect` on either post below, deliberately. A Home Assistant
   // surface is a room: anyone within earshot of the speaker can address it, and
@@ -104,14 +109,23 @@ export async function postHomeAssistantChatMessage(
   // to, the window stays open and outward effects stay judged on derivation.
   // Wiring this honestly would need speaker identification, not a flag.
   if (options.wait === false) {
-    const messageId = await runtime.chatManager.postMessage(resolution.session.id, formatHomeAssistantUserMessage(input), clientId);
+    const messageId = await runtime.chatManager.postMessage(resolution.session.id, formatHomeAssistantUserMessage(input), clientId, {
+      ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
+    });
     return { ...resolution, messageId };
   }
+  let cancelled = false;
   const reply = await runtime.chatManager.postMessageAndWaitForReply(
     resolution.session.id,
     formatHomeAssistantUserMessage(input),
     clientId,
-    { timeoutMs: options.timeoutMs, ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}) },
+    {
+      timeoutMs: options.timeoutMs,
+      onTurnEvent: (event) => {
+        if (event.type === 'turn.cancelled') cancelled = true;
+        options.onTurnEvent?.(event);
+      },
+    },
   );
   return {
     ...resolution,
@@ -120,10 +134,43 @@ export async function postHomeAssistantChatMessage(
     ...(reply.response ? { response: reply.response } : {}),
     ...(reply.error ? { error: reply.error } : {}),
     ...(reply.timedOut ? { timedOut: true as const } : {}),
+    ...(cancelled ? { cancelled: true as const } : {}),
   };
 }
 
-export async function resolveHomeAssistantChatSession(
+const resolutionTails = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `run` after every earlier call with the same key has settled. Resolving a
+ * conversation's chat session reads the binding, awaits (grounding is a model
+ * call), then creates a session and writes the binding back; two overlapping
+ * calls would both see no session and leave the first turn in an orphan.
+ */
+function serializeResolution<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const previous = resolutionTails.get(key) ?? Promise.resolve();
+  const result = previous.then(run);
+  const tail = result.then(() => undefined, () => undefined);
+  resolutionTails.set(key, tail);
+  void tail.then(() => { if (resolutionTails.get(key) === tail) resolutionTails.delete(key); });
+  return result;
+}
+
+const HOME_ASSISTANT_SYSTEM_PROMPT_OPENING = 'You are GoodVibes responding inside Home Assistant.';
+
+/** True for a chat session this module created for a Home Assistant conversation; the opening line of its stored system prompt marks it, so it survives a daemon restart. */
+export function isHomeAssistantChatSession(session: Pick<CompanionChatSession, 'systemPrompt'>): boolean {
+  return session.systemPrompt?.startsWith(HOME_ASSISTANT_SYSTEM_PROMPT_OPENING) === true;
+}
+
+export function resolveHomeAssistantChatSession(
+  runtime: HomeAssistantChatRuntime,
+  input: HomeAssistantChatInput,
+): Promise<HomeAssistantChatResolution> {
+  const key = [HOME_ASSISTANT_SURFACE, input.surfaceId, input.threadId ?? '', input.conversationId].join('\u0000');
+  return serializeResolution(key, () => resolveHomeAssistantChatSessionNow(runtime, input));
+}
+
+async function resolveHomeAssistantChatSessionNow(
   runtime: HomeAssistantChatRuntime,
   input: HomeAssistantChatInput,
 ): Promise<HomeAssistantChatResolution> {
@@ -187,7 +234,8 @@ export async function resolveHomeAssistantChatSession(
   });
 
   return {
-    binding,
+    // The binding as it now stands, so a caller reading its metadata sees this session.
+    binding: { ...binding, metadata: { ...binding.metadata, homeAssistantChatSessionId: session.id } },
     session,
     newSession: shouldCreate,
     sessionExpired: expired,
@@ -215,7 +263,7 @@ export function buildHomeAssistantSystemPrompt(input: HomeAssistantChatInput, gr
     input.displayName ? `Home Assistant display name: ${input.displayName}` : '',
   ].filter(Boolean);
   return [
-    'You are GoodVibes responding inside Home Assistant.',
+    HOME_ASSISTANT_SYSTEM_PROMPT_OPENING,
     'Answer as a normal assistant. Do not emit JSON summaries, contract status summaries, agent reports, changelogs, or engineering-stage output.',
     'Use Home Assistant tools whenever the user asks about devices, entities, rooms, services, automations, templates, or current home state.',
     HOME_STATE_PROVENANCE_CONTRACT,

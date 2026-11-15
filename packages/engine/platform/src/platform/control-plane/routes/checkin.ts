@@ -11,7 +11,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import type { CheckinService } from '../../checkin/index.js';
 
-export type CheckinGatewayService = Pick<CheckinService, 'getConfig' | 'setConfig' | 'listReceipts' | 'evaluate'>;
+export type CheckinGatewayService = Pick<CheckinService, 'getConfig' | 'setConfig' | 'listReceipts' | 'evaluate' | 'scheduleStatus'>;
 
 function createConfigGetHandler(service: CheckinGatewayService): GatewayMethodHandler {
   return () => ({ config: service.getConfig() });
@@ -28,14 +28,18 @@ function createConfigSetHandler(service: CheckinGatewayService): GatewayMethodHa
     if (params.enabled !== undefined && typeof params.enabled !== 'boolean') {
       throw new GatewayVerbError('enabled must be a boolean', 'INVALID_ARGUMENT', 400, 'enabled');
     }
-    return { config: await service.setConfig(patch) };
+    const config = await service.setConfig(patch);
+    // The config is stored either way; `schedule` says whether the scheduler really holds the job.
+    return { config, schedule: service.scheduleStatus() };
   };
 }
 
 function createReceiptsListHandler(service: CheckinGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const limit = typeof params.limit === 'number' && Number.isFinite(params.limit) ? params.limit : undefined;
+    // On the GET binding the limit arrives as query text, so a numeric string is read as the number it names.
+    const rawLimit = typeof params.limit === 'string' && params.limit.trim() !== '' ? Number(params.limit) : params.limit;
+    const limit = typeof rawLimit === 'number' && Number.isFinite(rawLimit) ? rawLimit : undefined;
     return { receipts: await service.listReceipts(limit) };
   };
 }
@@ -52,6 +56,7 @@ function createRunHandler(service: CheckinGatewayService): GatewayMethodHandler 
       outcome: outcome.outcome,
       summary: outcome.summary,
       ...(outcome.deliveryId ? { deliveryId: outcome.deliveryId } : {}),
+      ...(outcome.error ? { error: outcome.error } : {}),
     };
   };
 }

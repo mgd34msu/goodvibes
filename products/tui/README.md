@@ -17,8 +17,10 @@ window reference; changing the connection requires reopening it. Escape closes
 the local view. An answer already sent may still complete on the host.
 
 This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments card` configures card material through masked input;
-`/payments status` shows local card configuration.
+`write:payments`. `/payments card` asks for the card through masked input and
+sends it to the selected daemon in one `payments.cards.create` request;
+`/payments status` lists the cards the daemon holds (label, kind, brand, last four
+digits, expiry; never the number, CVV or name).
 
 ## Native work controls (local Jev implementation)
 
@@ -107,7 +109,10 @@ revision once. Before sending, the app durably publishes the exact source, IDs a
 revision in its private `native-work-submission.json` journal under its product
 state directory. The journal binds each request to the exact daemon endpoint,
 canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has at most 16 bindings and 2 MiB; corrupt, oversized,
+no bearer token. The journal has at most 16 bindings and 2 MiB. A binding is
+released once its submission has a validated receipt; one whose outcome is not yet
+known is never evicted, so when 16 are retained a new binding is refused with a
+message naming the cap until `submission-status` settles one. Corrupt, oversized,
 symlink-backed or unconfirmable state fails closed without a submission.
 
 After a restart, use `submission-status` or `submission-retry` to recover the
@@ -160,16 +165,17 @@ The first time you open a directory, GoodVibes asks how much it is allowed to do
 
 <img src="docs/assets/permission-prompt.png" alt="An execution approval prompt. A header reads EXECUTE, Shell Execution Approval, one more waiting. Fields list the requesting session, the tool exec, the full command mkdir -p build, the working directory, a Risk line reading HIGH write in red, the surface and radius, a summary, the decision class, the effects: process execution, filesystem mutation, possible network access, a reviewer checklist, and the raw tool arguments. Below, four numbered remember options scope an approval to this exact command, to every mkdir command, to every exec call in this project, or to the rest of the session in memory only. The action line reads: Y Allow once, 1-4 Allow and remember, N Deny, or type a reason to deny." width="900">
 
-After that, the default permission mode is `prompt`: writes, edits, shell commands, network fetches, agent spawns, and MCP calls each stop and ask. The prompt shows what will run, in which directory, its assessed risk, and what it can affect. You can allow it once, deny it (optionally typing a reason the model sees), or remember the decision at whichever scope fits: this exact command, this command shape, this tool for the whole project, or just for the rest of the session.
+After that, the default execution mode is `safe-owner`: ordinary work runs without asking, and dangerous actions stop and ask. The prompt shows what will run, in which directory, its assessed risk, and what it can affect. You can allow it once, deny it (optionally typing a reason the model sees), or remember the decision at whichever scope fits: this exact command, this command shape, this tool for the whole project, or just for the rest of the session.
 
-Four other modes are available when prompting is not what you want:
+Other modes are available when that is not what you want:
 
-- `accept-edits` auto-approves file writes and edits while exec and the other risky classes still ask
+- `safe-jev` lets Jev decide in the owner's place, refusing genuinely harmful actions
+- `yolo` runs authorized actions without general safety decisions (host containment, secret storage and payment rules still apply)
 - `plan` allows read-only tools and refuses every mutating or exec call
-- `allow-all` approves everything
-- `custom` takes per-tool `allow` / `prompt` / `deny` overrides
 
-`Shift+Tab` cycles the four session postures: normal (the `prompt` mode), accept-edits, plan, and auto (the `allow-all` mode). `/plan` toggles plan mode directly.
+An explicit `permissions.tools.<name>` set to `deny` blocks that tool in the safe modes. Older values still load: `prompt`, `accept-edits` and `custom` as `safe-owner`, `auto` as `safe-jev`, `allow-all` as `yolo`.
+
+`Shift+Tab` cycles `safe-owner`, `safe-jev` and `yolo`. `/plan` toggles plan mode directly.
 
 ### Models and providers
 
@@ -254,10 +260,10 @@ Edit them live with `/settings` or the fullscreen `/config` workspace rather tha
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `permissions.mode` | `prompt` | `prompt`, `accept-edits`, `plan`, `allow-all`, or `custom` (per-tool overrides) |
+| `permissions.mode` | `safe-owner` | `safe-owner`, `safe-jev`, `yolo`, or `plan` |
 | `provider.model` | `openrouter:openrouter/free` | Active model for main chat |
 | `provider.reasoningEffort` | `medium` | Reasoning depth on models that support it |
-| `display.theme` | `vaporwave` | Color theme |
+| `display.theme` | `goodvibes` | Color theme |
 | `display.stream` | `true` | Stream responses token by token |
 | `display.lineNumbers` | `off` | Line numbers: `off`, `code`, or `all` |
 | `display.showThinking` | `false` | Show model thinking traces |
@@ -282,7 +288,7 @@ Everything lives in plain files, split between the per-user `~/.goodvibes/tui/` 
 | `.goodvibes/tui/automation-*.json` | Scheduled jobs and the rest of the automation store |
 | `.goodvibes/agents/*.md` | Agent archetypes |
 | `.goodvibes/mcp.json` | MCP server definitions |
-| `.goodvibes/hooks.json` | Hooks and hook chains |
+| `hooks.json` (project root) | Hooks and hook chains |
 | `.goodvibes/` (rest) | Sessions, artifacts, and other project runtime state in the working directory |
 
 ---
@@ -320,7 +326,7 @@ Run these commands from `products/tui` after preparing the monorepo:
 
 The compiled binary is the TUI entrypoint. With `daemon.enabled` on (the default) it adopts a running standalone GoodVibes daemon over loopback, and when a daemon is installed as a service but stopped, it starts that service once and waits for it to come online. It never embeds or constructs a daemon of its own. The control plane, HTTP listener (`danger.httpListener`), and web surface are all hosted by the daemon; the TUI configures them and reports their bindings.
 
-Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. To run one file, pass it to the runner from the repository root: `bun packages/engine/scripts/test.ts --cwd ../../products/tui src/test/<file>.test.ts`. Test working directories are created under `.test-tmp/run-*`, which Git ignores. `bun run architecture:check` checks import cycles and layer boundaries (`scripts/check-architecture.ts`), and the release gates hold the performance budgets (`scripts/perf-baseline.json`).
+Tests live under `src/test/`, mirroring the source tree; byte-exact golden renderer frames are part of that suite. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. To run one file, pass it to the runner from the repository root: `bun packages/engine/scripts/test.ts --cwd ../../products/tui src/test/<file>.test.ts`. Test working directories are created under `.test-tmp/run-*`, which Git ignores. `bun run architecture:check` checks import cycles and layer boundaries (`scripts/check-architecture.ts`).
 
 Some decisions worth knowing before you read the source:
 

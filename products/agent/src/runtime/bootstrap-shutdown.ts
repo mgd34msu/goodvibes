@@ -36,7 +36,6 @@ export interface RuntimeShutdownDependencies {
   readonly runtimeUnsubs: (() => void)[];
   readonly forensicsCollector: { dispose(): void };
   readonly executionLedger: { dispose(): void };
-  readonly disposeSessionWriteLedger: () => void | Promise<void>;
   /**
    * `RuntimeServices.dispose()`, stops every poller the composed graph started.
    * Runs LAST, after shutdownRuntime: the final flushes below still need the
@@ -73,6 +72,9 @@ export function createRuntimeShutdown(
       const timer = deps.takeMemorySpineTimer();
       if (timer !== null) clearInterval(timer);
     });
+    // The agent-status tick renders and posts through the router; it must stop
+    // with the other timers, not after the awaits below.
+    await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
 
     // Take subscriptions out of the live arrays before invoking callbacks. One
     // broken unsubscribe must neither retain itself nor strand its siblings.
@@ -80,11 +82,9 @@ export function createRuntimeShutdown(
     await drainShutdownRegistry(deps.runtimeUnsubs, attempt);
     await attempt(() => deps.forensicsCollector.dispose());
     await attempt(() => deps.executionLedger.dispose());
-    await attempt(() => deps.disposeSessionWriteLedger());
     await attempt(() => shutdownAgentBrowserSessions());
     await attempt(() => deps.deferredStartup.drain(100));
     await attempt(() => deps.agentExternalServices.stop());
-    await attempt(() => clearIntervalSlot(deps.agentStatusIntervalRef));
     let title = '';
     await attempt(() => {
       title = deps.conversationTitle();

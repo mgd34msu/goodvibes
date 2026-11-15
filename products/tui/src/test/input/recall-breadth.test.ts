@@ -136,12 +136,12 @@ describe('recall command breadth', () => {
     expect(printed.join('\n')).toContain('sim ');
 
     printed.length = 0;
-    recallCommand.handler(['vector', 'status'], context);
+    await recallCommand.handler(['vector', 'status'], context);
     expect(printed.join('\n')).toContain('backend: sqlite-vec');
     expect(printed.join('\n')).toContain('indexed records: 2');
 
     printed.length = 0;
-    recallCommand.handler(['vector', 'rebuild'], context);
+    await recallCommand.handler(['vector', 'rebuild'], context);
     expect(printed.join('\n')).toContain('rebuild complete');
   });
 
@@ -186,7 +186,7 @@ describe('recall command breadth', () => {
     expect(readFileSync(handoffPath, 'utf-8')).toContain('"scope": "team"');
 
     printed.length = 0;
-    recallCommand.handler(['handoff-inspect', handoffPath], context);
+    await recallCommand.handler(['handoff-inspect', handoffPath], context);
     expect(printed.some((line) => line.includes('Memory Handoff Review'))).toBe(true);
 
     const importDir = makeProjectTempDir('gv-recall-handoff-import');

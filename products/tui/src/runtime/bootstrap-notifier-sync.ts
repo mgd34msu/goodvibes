@@ -1,4 +1,5 @@
 import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import {
   readNotificationsMetadataOnly,
@@ -32,9 +33,14 @@ export function syncNotifierQueueIntegrations(notifier: Notifier, runtimeBus: Ru
 export function createRuntimeNotifier(
   serviceRegistry: Parameters<typeof Notifier.fromConfig>[0],
   configGet: (key: string) => unknown,
+  configManager?: Pick<ConfigManager, 'get'>,
+  secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
 ): Promise<Notifier> {
   return Notifier.fromConfig(serviceRegistry, {
     metadataOnly: () => readNotificationsMetadataOnly(configGet),
+    // Supplies the stored bot tokens and the integrations.delivery.* settings.
+    configManager: configManager ?? null,
+    secretsManager: secretsManager ?? null,
   });
 }
 

@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import {
   createInboundMailIntake,
   createInboundNoticeHealth,
+  describeNoticeRefusal,
   describeInboundMailHealth,
   InboundExpectationRegistry,
   InboundMailHousekeeper,
@@ -95,6 +96,7 @@ function intakeWith(options: {
   readonly noticeHealth: InboundNoticeHealth;
   readonly route: NoticeRouteResolution;
   readonly delivery?: SurfaceNoticeDelivery;
+  readonly noticeMode?: () => 'all' | 'expected-only' | 'none';
 }) {
   const expectationStore = new PersistedExpectationStore(
     join(options.dir, 'expectations.json'), { now: () => NOW },
@@ -113,7 +115,7 @@ function intakeWith(options: {
         return options.delivery ?? { delivered: true };
       },
     },
-    noticeMode: () => 'all',
+    noticeMode: options.noticeMode ?? (() => 'all'),
     now: () => NOW,
     noticeHealth: options.noticeHealth,
   });
@@ -171,6 +173,31 @@ describe('a structural refusal is surfaced, not merely recorded', () => {
     expect(health.get()?.fix).toContain('Turn delivery on');
   });
 
+  test('a notice route that keeps failing is reported while the message waits, and clears when one gets through', async () => {
+    const dir = scratch();
+    const health = createInboundNoticeHealth({ log: () => undefined });
+    const failing = intakeWith({
+      dir,
+      noticeHealth: health,
+      route: { kind: 'bound', binding: { surfaceKind: 'telegram' } },
+      delivery: { delivered: false, reason: 'delivery-failed', error: 'socket hang up' },
+    });
+
+    // Still thrown, so the cursor stays below the message and it is retried;
+    // the difference is that the wait is no longer invisible.
+    await expect(failing.intake(mail(205))).rejects.toThrow();
+    expect(health.get()?.reason).toBe('delivery-failed');
+    expect(describeNoticeRefusal(health.get()!)).toContain('retried');
+
+    const working = intakeWith({
+      dir,
+      noticeHealth: health,
+      route: { kind: 'bound', binding: { surfaceKind: 'telegram' } },
+    });
+    await working.intake(mail(205));
+    expect(health.get()).toBeNull();
+  });
+
   test('a notice that gets through clears the condition and re-arms the report', async () => {
     const dir = scratch();
     const logs: { message: string }[] = [];
@@ -193,6 +220,16 @@ describe('a structural refusal is surfaced, not merely recorded', () => {
     // the first report standing in for every later one.
     await refusing.intake(mail(207));
     expect(health.get()?.unannounced).toBe(1);
+  });
+
+  test('a message arriving with notices switched off drops the latch instead of leaving it', async () => {
+    const dir = scratch();
+    const health = createInboundNoticeHealth({ log: () => undefined });
+    await intakeWith({ dir, noticeHealth: health, route: NO_ROUTE }).intake(mail(205));
+    expect(health.get()).not.toBeNull();
+
+    await intakeWith({ dir, noticeHealth: health, route: NO_ROUTE, noticeMode: () => 'none' }).intake(mail(206));
+    expect(health.get()).toBeNull();
   });
 });
 
@@ -359,6 +396,31 @@ const NO_GOOGLE_ACCOUNT = async () => ({
   fix: '',
 });
 
+type CapturedSink = Parameters<InboundMailSourceFactory['create']>[0]['sink'];
+
+/**
+ * A source factory that keeps the sink the supervisor hands a started source,
+ * so a test delivers a message through the composed handler wiring without
+ * reaching into a private field.
+ */
+function capturingSources() {
+  let sink: CapturedSink | undefined;
+  const factory: InboundMailSourceFactory = {
+    create: async (input) => { sink = input.sink; return new QuietSource(); },
+  };
+  async function deliver(supervisor: InboundMailSupervisor | null, message: ImapInboundMessage): Promise<void> {
+    if (supervisor === null) throw new Error('nothing was composed');
+    await supervisor.start();
+    try {
+      if (sink === undefined) throw new Error('the supervisor never created a source');
+      await sink.deliver(message);
+    } finally {
+      await supervisor.stop();
+    }
+  }
+  return { factory, deliver };
+}
+
 function composeWith(dir: string, routeBindings: Record<string, unknown>) {
   const values: Record<string, unknown> = {
     'surfaces.email.inbound.enabled': true,
@@ -369,6 +431,7 @@ function composeWith(dir: string, routeBindings: Record<string, unknown>) {
     'surfaces.email.inbound.notice.mode': 'all',
   };
   const deliveries: (string | undefined)[] = [];
+  const sources = capturingSources();
   const supervisor = composeInboundMail({
     configManager: { get: (key: string) => values[key] } as never,
     secretsManager: { get: async () => null } as never,
@@ -380,8 +443,9 @@ function composeWith(dir: string, routeBindings: Record<string, unknown>) {
       return { delivered: true } as never;
     },
     gmailReader: NO_GOOGLE_ACCOUNT,
+    sources: sources.factory,
   });
-  return { supervisor, deliveries };
+  return { supervisor, deliveries, deliver: (message: ImapInboundMessage) => sources.deliver(supervisor, message) };
 }
 
 /** A stored binding that `listBindings()` would return when the gate is on. */
@@ -410,9 +474,7 @@ describe('route binding switched off is reported as itself, not as "nothing conf
     // Drive one message through the composed intake by way of the supervisor's
     // own handler seam: the composition is what wires the notice health, so
     // this is the boot wiring being exercised rather than a rebuilt graph.
-    await (composed.supervisor as unknown as {
-      deps: { handle: (message: ImapInboundMessage) => Promise<void> };
-    }).deps.handle(mail(205));
+    await composed.deliver(mail(205));
 
     const after = await composed.supervisor!.describeStatus();
     expect(after.noticeDelivery.state).toBe('refused');
@@ -429,9 +491,7 @@ describe('route binding switched off is reported as itself, not as "nothing conf
       listBindings: () => [],
       getBinding: () => undefined,
     });
-    await (composed.supervisor as unknown as {
-      deps: { handle: (message: ImapInboundMessage) => Promise<void> };
-    }).deps.handle(mail(205));
+    await composed.deliver(mail(205));
 
     const after = await composed.supervisor!.describeStatus();
     if (after.noticeDelivery.state !== 'refused') throw new Error('expected a refusal');
@@ -446,9 +506,7 @@ describe('route binding switched off is reported as itself, not as "nothing conf
       listBindings: () => [STORED_BINDING],
       getBinding: () => undefined,
     });
-    await (composed.supervisor as unknown as {
-      deps: { handle: (message: ImapInboundMessage) => Promise<void> };
-    }).deps.handle(mail(205));
+    await composed.deliver(mail(205));
 
     expect(composed.deliveries).toEqual(['route-abc123']);
     expect((await composed.supervisor!.describeStatus()).noticeDelivery.state).toBe('ok');
@@ -464,6 +522,7 @@ describe('route binding switched off is reported as itself, not as "nothing conf
       'surfaces.email.inbound.notice.route': 'route-typo',
       'surfaces.email.inbound.notice.mode': 'all',
     };
+    const sources = capturingSources();
     const supervisor = composeInboundMail({
       configManager: { get: (key: string) => values[key] } as never,
       secretsManager: { get: async () => null } as never,
@@ -476,10 +535,9 @@ describe('route binding switched off is reported as itself, not as "nothing conf
       gatewayMethods: { get: () => undefined, register: () => undefined } as never,
       deliverStructuredNotice: async () => ({ delivered: true } as never),
       gmailReader: NO_GOOGLE_ACCOUNT,
+      sources: sources.factory,
     });
-    await (supervisor as unknown as {
-      deps: { handle: (message: ImapInboundMessage) => Promise<void> };
-    }).deps.handle(mail(205));
+    await sources.deliver(supervisor, mail(205));
 
     const after = await supervisor!.describeStatus();
     if (after.noticeDelivery.state !== 'refused') throw new Error('expected a refusal');

@@ -300,22 +300,28 @@ describe('the tick never rejects into its own interval', () => {
     expect(submitted).toEqual(['answer me']);
   });
 
-  test('a throwing getInputsSince() is absorbed too', async () => {
+  test('a throwing getInputsSince() is absorbed too, and the next tick recovers', async () => {
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'input-1', body: 'answer me' }]]]));
+    let broken = true;
+    const submitted: string[] = [];
     const intake = new HostedSessionSpineIntake({
-      spine: {
-        register: async () => ({}),
-        closeSession: async () => ({}),
-        getInputsSince: () => { throw new Error('the bucket is being compacted'); },
-        markInputDelivered: async () => ({}),
-      },
+      spine: { ...spine, getInputsSince: (...args) => {
+        if (broken) throw new Error('the bucket is being compacted');
+        return spine.getInputsSince(...args);
+      } },
       liveSessions: () => [record()],
       now: () => 1,
-      deliver: async () => undefined,
+      deliver: async (_sessionId, text) => { submitted.push(text); },
     });
 
     await intake.tick();
     await intake.drainDeliveries();
-    expect(true).toBe(true);
+    expect(submitted).toEqual([]);
+
+    broken = false;
+    await intake.tick();
+    await intake.drainDeliveries();
+    expect(submitted).toEqual(['answer me']);
   });
 });
 
@@ -407,7 +413,7 @@ describe('hosted delivery transience uses the actual failure', () => {
     await f.intake.tick(); await f.intake.drainDeliveries();
     expect(f.spine.log.failed).toHaveLength(1); expect(port.requests).toHaveLength(0);
   });
-  for (const action of ['stop', 'fence'] as const) test(`${action} during reading cannot enqueue retry, fail or alert`, async () => {
+  for (const action of ['stop', 'fence'] as const) test(`${action} during reading cannot enqueue retry or act on the reading`, async () => {
     const base = failureReadingsPort([]).port;
     let enter!: () => void, release!: () => void;
     const entered = new Promise<void>(resolve => { enter = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
@@ -415,7 +421,9 @@ describe('hosted delivery transience uses the actual failure', () => {
     await f.intake.tick(); await entered;
     if (action === 'stop') f.intake.stop(); else f.intake.fence('hosted-1');
     release(); await f.intake.drainDeliveries(); await f.intake.tick(); await f.intake.drainDeliveries();
-    expect(f.deliveries).toHaveLength(1); expect(f.spine.log.failed).toEqual([]); expect(f.alerts).toEqual([]);
+    expect(f.deliveries).toHaveLength(1); expect(f.alerts).toEqual([]);
+    // A terminated session's input is failed for that reason, never left collected.
+    expect(f.spine.log.failed).toEqual(action === 'stop' ? [] : [{ inputId: 'input-1', error: expect.stringContaining('session ended before this message was delivered') }]);
   });
   test('a failed semantic read cannot resend the input before eligibility is known', async () => {
     const base = failureReadingsPort([['same wording', { category: 'authorization' }]]).port;
@@ -498,5 +506,58 @@ for (const action of ['stop', 'fence'] as const) test(`rejected async guard that
       throw new Error('synthetic async authority rejection');
     } }, deliver: async () => { throw Object.assign(new Error('synthetic denied'), { status: 403 }); } });
   await intake.tick(); await intake.drainDeliveries(); await Promise.resolve();
-  expect(port.requests).toHaveLength(0); expect(spine.log.failed).toEqual([]);
+  expect(port.requests).toHaveLength(0);
+  expect(spine.log.failed).toEqual(action === 'stop' ? [] : [{ inputId: 'one', error: expect.stringContaining('session ended before this message was delivered') }]);
+});
+
+describe('inputs that can no longer be delivered are never left collected and silent', () => {
+  test('an input whose failure cannot be classified is failed and told to the owner after the ceiling', async () => {
+    const base = failureReadingsPort([]).port;
+    let reads = 0, deliveries = 0;
+    const alerts: string[] = [];
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'one', body: 'body' }]]]));
+    const intake = new HostedSessionSpineIntake({ spine, liveSessions: () => [record()], now: () => 1,
+      failureReading: { port: { ...base, ask() { reads++; throw new Error('reader unavailable'); } } },
+      deliver: async () => { deliveries++; throw new Error('delivery failed'); }, alertOwner: text => { alerts.push(text); } });
+    try {
+      for (let tick = 0; tick < 6; tick++) { await intake.tick(); await intake.drainDeliveries(); }
+      expect(deliveries).toBe(1);
+      expect(spine.log.failed).toEqual([{ inputId: 'one', error: expect.stringContaining('could not be classified after 3 attempts') }]);
+      expect(spine.log.consumed).toEqual([]);
+      expect(alerts).toHaveLength(1);
+      const settledReads = reads;
+      await intake.tick(); await intake.drainDeliveries();
+      expect(reads).toBe(settledReads);
+    } finally { intake.stop(); }
+  });
+
+  test('an input collected after its session was fenced is failed with that reason', async () => {
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'late', body: 'body' }]]]));
+    let deliveries = 0;
+    const intake = new HostedSessionSpineIntake({ spine, liveSessions: () => [record()], now: () => 1,
+      deliver: async () => { deliveries++; } });
+    const mark = spine.markInputDelivered;
+    spine.markInputDelivered = async (...args) => { const result = await mark(...args); intake.fence('hosted-1'); return result; };
+    try {
+      await intake.tick(); await intake.drainDeliveries(); await Promise.resolve();
+      expect(deliveries).toBe(0);
+      expect(spine.log.failed).toEqual([{ inputId: 'late', error: expect.stringContaining('session ended before this message was delivered') }]);
+    } finally { intake.stop(); }
+  });
+
+  test('a queued input whose session is terminated before it runs is failed, not consumed', async () => {
+    const spine = buildSpine(new Map([['hosted-1', [{ id: 'queued', body: 'body' }]]]));
+    let reject!: (error: Error) => void;
+    const intake = new HostedSessionSpineIntake({ spine, liveSessions: () => [record()], now: () => 1,
+      deliver: () => new Promise<void>((_resolve, fail) => { reject = fail; }) });
+    try {
+      await intake.tick();
+      await Promise.resolve();
+      intake.fence('hosted-1');
+      reject(new Error('The session closed before this queued message was delivered'));
+      await intake.drainDeliveries(); await Promise.resolve();
+      expect(spine.log.consumed).toEqual([]);
+      expect(spine.log.failed).toEqual([{ inputId: 'queued', error: expect.stringContaining('session ended before this message was delivered') }]);
+    } finally { intake.stop(); }
+  });
 });

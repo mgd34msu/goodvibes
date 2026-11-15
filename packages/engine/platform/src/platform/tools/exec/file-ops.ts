@@ -1,7 +1,7 @@
-import { copyFileSync, renameSync, unlinkSync, rmSync, cpSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, isAbsolute, join, relative, dirname } from 'node:path';
+import { copyFileSync, realpathSync, renameSync, unlinkSync, rmSync, cpSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, join, relative, dirname, basename, extname, sep } from 'node:path';
 import { logger } from '../../utils/logger.js';
-import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { resolveAndValidatePath, resolveWritablePath } from '../../utils/path-safety.js';
 import type { ExecFileOp } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
 
@@ -19,11 +19,21 @@ function appendFileOpWarning(result: FileOpResult, warning: string): void {
   result.warnings = [...(result.warnings ?? []), warning];
 }
 
-function resolveFileOpPath(p: string, op: 'copy' | 'move' | 'delete', projectRoot: string): string {
-  if (op === 'delete' || !isAbsolute(p)) {
-    return resolveAndValidatePath(p, projectRoot);
-  }
-  return resolve(p);
+function resolveFileOpPath(p: string, projectRoot: string): string {
+  // Absolute paths are held to the root as well: these operations run on the
+  // host, outside any boundary, so the root is the only limit there is.
+  return resolveWritablePath(p, projectRoot);
+}
+
+/** The root itself and the repository metadata are never deleted by a file operation. */
+function assertDeletable(src: string, projectRoot: string): void {
+  // Paths are built on the canonical root, so compare against it: a symlinked root would otherwise never match.
+  // The parent is resolved too, so a link inside the project that aliases the root or a directory above .git cannot skip the check; the final name is left alone so deleting a link only removes the link.
+  let parent = dirname(src);
+  try { parent = realpathSync(parent); } catch { /* a missing parent has nothing to alias; the operation itself reports it */ }
+  const rel = relative(realpathSync(resolve(projectRoot)), join(parent, basename(src)));
+  if (rel === '') throw new Error(`file_ops delete: refusing to delete the project root '${projectRoot}'. Name the files or directories inside it.`);
+  if (rel === '.git' || rel.startsWith(`.git${sep}`)) throw new Error(`file_ops delete: refusing to delete inside '.git' ('${rel}').`);
 }
 
 function collectPaths(p: string, acc: string[] = [], warnings: string[] = []): string[] {
@@ -43,14 +53,35 @@ function collectPaths(p: string, acc: string[] = [], warnings: string[] = []): s
   return acc;
 }
 
-function computeRelativeImportPath(fromFile: string, toFile: string): string {
-  const TS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-  const toDir = dirname(toFile);
-  let rel = relative(dirname(fromFile), toDir);
-  if (rel === '' || !rel.startsWith('.')) rel = './' + (rel || '');
-  const ext = toFile.slice(toFile.lastIndexOf('.'));
-  const base = toFile.slice(toDir.length + 1, TS_EXTS.has(ext) ? toFile.lastIndexOf('.') : undefined);
-  return rel.endsWith('/') ? rel + base : rel + '/' + base;
+const TS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
+const SPECIFIER_RE = /(\b(?:from|import|require)\s*\(?\s*)(['"])(\.\.?(?:\/[^'"\n]*)?)\2/g;
+
+const withoutExt = (path: string): string => (TS_EXTS.has(extname(path)) ? path.slice(0, -extname(path).length) : path);
+
+/** A relative specifier for `target` as seen from `fromDir`, always starting with ./ or ../. */
+function relativeSpecifier(fromDir: string, target: string): string {
+  const rel = relative(fromDir, target).split(sep).join('/');
+  if (rel === '') return '.';
+  return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+/**
+ * The specifier an importer should use after `oldSrc` moved to `newDst`, or null
+ * when `specifier` (resolved from `importerDir`) does not name `oldSrc`. The
+ * spelling the importer used is kept: an explicit extension (./x.js, the NodeNext
+ * convention), no extension, or a directory index.
+ */
+function rewrittenSpecifier(specifier: string, importerDir: string, oldSrc: string, newDst: string): string | null {
+  const target = resolve(importerDir, specifier);
+  const oldBare = withoutExt(oldSrc);
+  if (target === oldSrc || withoutExt(target) === oldBare) {
+    const ext = TS_EXTS.has(extname(specifier)) ? extname(specifier) : '';
+    return relativeSpecifier(importerDir, withoutExt(newDst)) + ext;
+  }
+  if (target === dirname(oldSrc) && basename(oldBare) === 'index') {
+    return relativeSpecifier(importerDir, basename(withoutExt(newDst)) === 'index' ? dirname(newDst) : withoutExt(newDst));
+  }
+  return null;
 }
 
 async function updateImportsAfterMove(
@@ -58,7 +89,6 @@ async function updateImportsAfterMove(
   newDst: string,
   projectRoot: string,
 ): Promise<{ updated: string[]; warnings: string[] }> {
-  const TS_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
   const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', '.next', '.nuxt', '.cache', '__pycache__']);
   const allFiles: string[] = [];
   const warnings: string[] = [];
@@ -81,8 +111,7 @@ async function updateImportsAfterMove(
       try {
         const st = statSync(full);
         if (st.isDirectory()) { walkDir(full); continue; }
-        const ext = full.slice(full.lastIndexOf('.'));
-        if (TS_EXTS.has(ext)) allFiles.push(full);
+        if (TS_EXTS.has(extname(full))) allFiles.push(full);
       } catch (error) {
         warnings.push(`Import update could not stat '${full}': ${summarizeError(error)}`);
         logger.warn('file move import update: failed to stat path', {
@@ -93,10 +122,10 @@ async function updateImportsAfterMove(
     }
   }
   walkDir(projectRoot);
+  if (!allFiles.includes(newDst) && TS_EXTS.has(extname(newDst))) allFiles.push(newDst);
 
   const updated: string[] = [];
   for (const file of allFiles) {
-    if (file === newDst) continue;
     let content: string;
     try {
       content = readFileSync(file, 'utf-8');
@@ -109,17 +138,14 @@ async function updateImportsAfterMove(
       continue;
     }
 
-    const oldSpecifier = computeRelativeImportPath(file, oldSrc);
-    const newSpecifier = computeRelativeImportPath(file, newDst);
-    if (oldSpecifier === newSpecifier) continue;
-
-    const escaped = oldSpecifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const importRe = new RegExp(`(from\\s+['"])${escaped}(['"])`, 'g');
-    const requireRe = new RegExp(`(require\\(['"])${escaped}(['"]\\))`, 'g');
-
-    const newContent = content
-      .replace(importRe, `$1${newSpecifier}$2`)
-      .replace(requireRe, `$1${newSpecifier}$2`);
+    const isMovedFile = file === newDst;
+    const newContent = content.replace(SPECIFIER_RE, (match, lead: string, quote: string, specifier: string) => {
+      // The moved file's own relative imports were written for its old directory.
+      const next = isMovedFile
+        ? (dirname(oldSrc) === dirname(newDst) ? null : relativeSpecifier(dirname(newDst), resolve(dirname(oldSrc), specifier)))
+        : rewrittenSpecifier(specifier, dirname(file), oldSrc, newDst);
+      return next === null || next === specifier ? match : `${lead}${quote}${next}${quote}`;
+    });
 
     if (newContent !== content) {
       try {
@@ -135,11 +161,16 @@ async function updateImportsAfterMove(
     }
   }
 
+  if (updated.length === 0 && warnings.length === 0 && TS_EXTS.has(extname(oldSrc))) {
+    warnings.push(`update_imports changed nothing after moving '${oldSrc}': no importer or relative import of the moved file needed a new path. If imports are written another way (aliases, non-relative paths), update them yourself.`);
+  }
   return { updated, warnings };
 }
 
 export function executeFileOp(op: ExecFileOp, projectRoot: string): FileOpResult {
-  const src = resolveFileOpPath(op.source, op.op, projectRoot);
+  // The root itself is named as such before the journal check, which would otherwise refuse '.' with a message about something else.
+  if (op.op === 'delete') assertDeletable(resolveAndValidatePath(op.source, projectRoot), projectRoot);
+  const src = resolveFileOpPath(op.source, projectRoot);
   const result: FileOpResult = { op: op.op, source: src };
 
   if (op.op === 'delete') {
@@ -163,7 +194,7 @@ export function executeFileOp(op: ExecFileOp, projectRoot: string): FileOpResult
   if (!op.destination) {
     throw new Error(`file_ops ${op.op} requires destination`);
   }
-  const dst = resolveFileOpPath(op.destination, op.op, projectRoot);
+  const dst = resolveFileOpPath(op.destination, projectRoot);
   result.destination = dst;
 
   if (!op.overwrite && existsSync(dst)) {
@@ -208,7 +239,7 @@ export async function executeFileOperations(
     beforeImportUpdates: () => Promise<void>;
   },
   assertCurrent?: () => void,
-): Promise<{ fileOpResults: FileOpResult[]; fileOpError?: string; fileOpWarnings?: string[] }> {
+): Promise<{ fileOpResults: FileOpResult[]; fileOpError?: string; fileOpFailedIndex?: number | undefined; fileOpWarnings?: string[] }> {
   const fileOpResults: FileOpResult[] = [];
   const pendingImportUpdates: Array<{ src: string; dst: string }> = [];
   const fileOpWarnings: string[] = [];
@@ -217,7 +248,9 @@ export async function executeFileOperations(
     return { fileOpResults };
   }
 
-  for (const op of fileOps) {
+  let fileOpError: string | undefined;
+  let fileOpFailedIndex: number | undefined;
+  for (const [index, op] of fileOps.entries()) {
     // Boundary failures propagate to the owner of the disposable view. They
     // must not be downgraded into ordinary operation errors or import warnings.
     if (access) await access.beforeOperation(op);
@@ -230,12 +263,11 @@ export async function executeFileOperations(
         pendingImportUpdates.push({ src: opResult.source, dst: opResult.destination });
       }
     } catch (err) {
-      const msg = summarizeError(err);
-      return {
-        fileOpResults,
-        fileOpError: `file_ops failed: ${msg}`,
-        ...(fileOpWarnings.length > 0 ? { fileOpWarnings } : {}),
-      };
+      // Earlier operations stay applied; their import updates still run below so
+      // the tree is not left half-moved with importers pointing at nothing.
+      fileOpError = `file_ops failed: ${summarizeError(err)}`;
+      fileOpFailedIndex = index;
+      break;
     }
   }
 
@@ -268,6 +300,7 @@ export async function executeFileOperations(
 
   return {
     fileOpResults,
+    ...(fileOpError !== undefined ? { fileOpError, fileOpFailedIndex } : {}),
     ...(fileOpWarnings.length > 0 ? { fileOpWarnings } : {}),
   };
 }

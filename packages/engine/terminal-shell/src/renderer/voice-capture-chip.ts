@@ -41,7 +41,8 @@ const VOICE_CAPTURE_DESCRIPTIONS: Record<VoiceCaptureIndicatorState['kind'], str
 /** The full wording for /status: state, device and any detail (a restart delay, a latch reason). */
 export function voiceCaptureDescription(state: VoiceCaptureIndicatorState, separator: ':' | ',' = ':'): string {
   const description = VOICE_CAPTURE_DESCRIPTIONS[state.kind];
-  const parts = [state.kind === 'wake-capturing' || state.kind === 'wake-restarting' ? description.replace(':', separator) : description];
+  // Every kind with a colon in its wording follows the caller's separator.
+  const parts = [description.replace(':', separator)];
   if (state.deviceLabel !== null) parts.push(state.deviceLabel);
   if (state.detail !== undefined && state.detail.length > 0) parts.push(state.detail);
   return parts.join(' · ');

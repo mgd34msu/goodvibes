@@ -151,7 +151,7 @@ export function wrapRequestPermissionWithApprovalAlert(
   deps: ApprovalAlertDeps,
 ): PermissionRequestHandler {
   const notify = deps.notify ?? notifyCompletion;
-  return (request: PermissionPromptRequest) => {
+  return (request: PermissionPromptRequest, options) => {
     if (deps.focusTracker.shouldAlertWhenUnfocused()) {
       try {
         const notice = describeApprovalAlert(request, deps);
@@ -160,6 +160,6 @@ export function wrapRequestPermissionWithApprovalAlert(
         logger.debug('approval-alert: desktop notify error', { error: summarizeError(err) });
       }
     }
-    return original(request);
+    return original(request, options);
   };
 }

@@ -89,7 +89,6 @@ export function buildDaemonGatewayCatalog(
     sessionBroker: view.sessionBroker,
     secretsManager: services.secretsManager,
     approvalBroker: services.approvalBroker,
-    requestApproval: (input) => services.approvalBroker.requestApproval(input),
     watcherRegistry: services.watcherRegistry,
     userPermissionRuleStore: view.userPermissionRuleStore,
     runtimeBus: services.runtimeBus,

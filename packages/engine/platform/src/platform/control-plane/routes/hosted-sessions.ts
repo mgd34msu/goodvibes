@@ -18,6 +18,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import {
   HostedSessionArgumentError,
+  HostedSessionClientOwnerError,
   HostedSessionLimitError,
   HostedSessionNotFoundError,
   HostedSessionUnavailableError,
@@ -39,9 +40,9 @@ export interface HostedSessionVerbService {
   attach(
     sessionId: string,
     clientId: string,
-    options?: { readonly leaseMs?: number | undefined },
+    options?: { readonly leaseMs?: number | undefined; readonly principalId?: string | undefined },
   ): Promise<HostedSessionAttachment>;
-  detach(sessionId: string, clientId: string): Promise<HostedSessionRecord>;
+  detach(sessionId: string, clientId: string, principalId?: string): Promise<HostedSessionRecord>;
   kill(sessionId: string): Promise<HostedSessionRecord>;
   list(options?: { readonly includeTerminated?: boolean | undefined }): readonly HostedSessionRecord[];
 }
@@ -103,6 +104,9 @@ export function toGatewayVerbError(error: unknown): never {
     // perfectly real.
     throw new GatewayVerbError(error.message, 'HOSTED_SESSION_UNAVAILABLE', 409);
   }
+  if (error instanceof HostedSessionClientOwnerError) {
+    throw new GatewayVerbError(error.message, 'HOSTED_CLIENT_FORBIDDEN', 403, 'clientId');
+  }
   if (error instanceof HostedSessionLimitError) {
     throw new GatewayVerbError(error.message, 'HOSTED_SESSION_LIMIT_REACHED', 429);
   }
@@ -112,6 +116,8 @@ export function toGatewayVerbError(error: unknown): never {
   throw error;
 }
 
+const HOSTED_ORIGIN_SURFACES: readonly string[] = ['agent', 'tui', 'webui'];
+
 export function createHostedSessionCreateHandler(service: HostedSessionVerbService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -120,6 +126,7 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
     const modelId = optionalString(params, 'modelId');
     const initialPrompt = optionalString(params, 'initialPrompt');
     const clientId = optionalString(params, 'clientId');
+    const principalId = invocation.context.principalId;
     // The surface the caller is creating this session FOR. It travels with the
     // create call because the host cannot infer it: every client reaches the
     // daemon the same way, so a session created by the agent and a session
@@ -127,6 +134,17 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
     // session took the HOST's identity and resolved the wrong surface's
     // client-owned settings for its whole life.
     const originSurface = optionalString(params, 'originSurface');
+    // It selects a settings directory the session will read and write for its
+    // whole life, so only a surface that exists may be named: an invented or
+    // path-shaped value would create a settings tree no surface owns.
+    if (originSurface !== undefined && !HOSTED_ORIGIN_SURFACES.includes(originSurface)) {
+      throw new GatewayVerbError(
+        `Unknown originSurface "${originSurface}". Use one of: ${HOSTED_ORIGIN_SURFACES.join(', ')}, or omit it to use the host's own surface.`,
+        'INVALID_ARGUMENT',
+        400,
+        'originSurface',
+      );
+    }
     try {
       const session = await service.create({
         workspaceRoot: requireString(params, 'workspaceRoot'),
@@ -135,6 +153,7 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
         ...(initialPrompt === undefined ? {} : { initialPrompt }),
         ...(detachPolicy === undefined ? {} : { detachPolicy }),
         ...(clientId === undefined ? {} : { clientId }),
+        ...(clientId === undefined || principalId === undefined ? {} : { principalId }),
         ...(originSurface === undefined ? {} : { originSurface }),
       });
       return { session };
@@ -148,11 +167,12 @@ export function createHostedSessionAttachHandler(service: HostedSessionVerbServi
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const leaseMs = optionalPositiveNumber(params, 'leaseMs');
+    const principalId = invocation.context.principalId;
     try {
       return await service.attach(
         requireString(params, 'sessionId'),
         requireString(params, 'clientId'),
-        ...(leaseMs === undefined ? [] : [{ leaseMs }]),
+        { ...(leaseMs === undefined ? {} : { leaseMs }), ...(principalId === undefined ? {} : { principalId }) },
       );
     } catch (error) {
       return toGatewayVerbError(error);
@@ -164,7 +184,7 @@ export function createHostedSessionDetachHandler(service: HostedSessionVerbServi
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     try {
-      return { session: await service.detach(requireString(params, 'sessionId'), requireString(params, 'clientId')) };
+      return { session: await service.detach(requireString(params, 'sessionId'), requireString(params, 'clientId'), invocation.context.principalId) };
     } catch (error) {
       return toGatewayVerbError(error);
     }

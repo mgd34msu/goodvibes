@@ -5,8 +5,8 @@
  * HTTP 413 for requests exceeding 1 MiB, and passes requests at or below 1 MiB.
  */
 
-import { describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
@@ -24,9 +24,7 @@ const disposables = trackDisposables();
 const MAX_JSON_BYTES = 1 * 1024 * 1024; // 1 MiB
 
 function tempDir(suffix: string): string {
-  const d = join(tmpdir(), `gv-http-body-${suffix}-${Date.now()}`);
-  mkdirSync(d, { recursive: true });
-  return d;
+  return mkdtempSync(join(tmpdir(), `gv-http-body-${suffix}-`));
 }
 
 function makeHttpListener(dir: string): HttpListener {
@@ -125,10 +123,18 @@ describe('HttpListener parseJsonBody body-size cap', () => {
 
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
 
+const routerDirs: string[] = [];
+afterEach(() => {
+  for (const dir of routerDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function makeRouter(): DaemonHttpRouter {
+  const routerDir = tempDir('router');
+  routerDirs.push(routerDir);
+  const configManager = new ConfigManager({ configDir: routerDir });
   const ctx = new Proxy({} as ConstructorParameters<typeof DaemonHttpRouter>[0], {
     get: (_target, key) => {
-      if (key === 'configManager') return new ConfigManager({ configDir: tempDir('router') });
+      if (key === 'configManager') return configManager;
       if (key === 'telemetryApi') return null;
       return undefined;
     },
@@ -196,5 +202,27 @@ describe('DaemonHttpRouter parseJsonBody body-size cap', () => {
     const result = await router.parseJsonBody(req);
     expect(result).not.toBeInstanceOf(Response);
     expect((result as Record<string, unknown>).hello).toBe('world');
+  });
+});
+
+describe('HttpListener request metrics', () => {
+  test('a redirect and a client error are counted under their own status class, not as 2xx', async () => {
+    const { httpRequestsTotal, resetMetrics } = await import('../platform/src/platform/runtime/metrics.ts');
+    resetMetrics();
+    const dir = tempDir('metrics');
+    try {
+      const listener = makeHttpListener(dir);
+      const answers = [304, 404, 200];
+      (listener as unknown as { _handleRequestInner: () => Promise<Response> })._handleRequestInner =
+        async () => new Response(null, { status: answers.shift() ?? 200 });
+      const handle = (listener as unknown as { handleRequest: (req: Request, peerIp?: string) => Promise<Response> }).handleRequest.bind(listener);
+      for (let index = 0; index < 3; index += 1) await handle(new Request('http://localhost/api/x'), '127.0.0.1');
+      expect(httpRequestsTotal.total({ status_class: '3xx' })).toBe(1);
+      expect(httpRequestsTotal.total({ status_class: '4xx' })).toBe(1);
+      expect(httpRequestsTotal.total({ status_class: '2xx' })).toBe(1);
+    } finally {
+      resetMetrics();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

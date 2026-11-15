@@ -76,8 +76,9 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
   readonly review: (enabled: boolean) => string[];
   readonly toggled: (enabled: boolean) => string;
   readonly notes: readonly string[];
-  readonly inspectMissingFile: boolean;
-  readonly reportReadFailure: boolean;
+  /** Not consulted: a missing or unreadable bundle is always reported, never thrown. Products may drop these. */
+  readonly inspectMissingFile?: boolean | undefined;
+  readonly reportReadFailure?: boolean | undefined;
 }): TerminalSlashCommand<Context> {
   return {
     name: 'voice',
@@ -136,7 +137,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
               ctx.print('Voice bundle exported to ' + target);
               return;
             }
-            if (policy.inspectMissingFile && !existsSync(target)) {
+            if (!existsSync(target)) {
               ctx.print('File not found: ' + target);
               return;
             }
@@ -144,8 +145,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
               const value: unknown = JSON.parse(readFileSync(target, 'utf-8'));
               ctx.print(inspectVoiceBundle(value as VoiceBundle));
             } catch (error) {
-              if (!policy.reportReadFailure) throw error;
-              ctx.print('could not read voice bundle');
+              ctx.print('could not read voice bundle: ' + (error instanceof Error ? error.message : String(error)));
             }
             return;
           }

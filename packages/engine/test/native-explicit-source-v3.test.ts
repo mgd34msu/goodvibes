@@ -1,6 +1,4 @@
-/** Regression source UNRUN during the coding-first pass. No providers or executors. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { afterEach, expect, test } from 'bun:test';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -135,18 +133,16 @@ test('the actual operator client accepts fresh source4 and still rejects malform
 });
 
 
-test('fresh explicit source issuance and repeated lookup never hash the complete original request', async () => {
+test('fresh explicit source issuance and repeated lookup issue an opaque v4 source, never a digest of the complete original request', async () => {
   const f = await fixture(), original = JSON.stringify({ version: 3, inputId: f.input.inputId, goal: f.input.goal, criteria: f.input.criteria });
-  const updates = spyOn(crypto.Hash.prototype, 'update');
-  try {
-    const first = await f.host.submit(f.input, f.authority);
-    const replay = await f.host.submit(f.input, f.authority);
-    const found = await f.host.get({ requestId: f.input.requestId }, f.authority);
-    expect(first.receipt.source.version).toBe(4);
-    expect(replay.receipt).toEqual(first.receipt);
-    expect(found).toEqual({ kind: 'found', receipt: first.receipt });
-    expect(updates.mock.calls.filter(([value]) => value === original)).toHaveLength(0);
-  } finally { updates.mockRestore(); }
+  const derivable = createHash('sha256').update(original).digest('hex');
+  const first = await f.host.submit(f.input, f.authority);
+  const replay = await f.host.submit(f.input, f.authority);
+  const found = await f.host.get({ requestId: f.input.requestId }, f.authority);
+  expect(first.receipt.source.version).toBe(4);
+  expect(first.receipt.source.sourceRevision).not.toBe(derivable);
+  expect(replay.receipt).toEqual(first.receipt);
+  expect(found).toEqual({ kind: 'found', receipt: first.receipt });
 });
 
 test('actual saved v3 source receipts remain byte-for-byte readable and replay without issuing a v4 replacement', async () => {

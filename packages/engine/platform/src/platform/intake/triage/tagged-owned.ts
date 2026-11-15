@@ -69,6 +69,7 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
             after = { id: last.id, receivedAt: last.receivedAt };
           }
         };
+        const sourceId = randomUUID();
         try {
           baseCurrent(); readCurrent();
           const row = find(); if (!row || row.provider !== provider) throw new Error('Owned triage item unavailable');
@@ -97,7 +98,6 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
             return { callId: '', success: true };
           } });
           const call = await registry.prepareCall(randomUUID(), name, args, { signal, assertCurrent, port: options.port });
-          const sourceId = randomUUID();
           const preparation = options.permissionManager.autonomousPreparation(sourceId, sourceOf, signal, () => options.port);
           const admission = await options.permissionManager.admitAutonomous(sourceId, name, call.args, { sourceOf, signal, schemaRevision: call.schemaRevision, preparationDecisionIds: [...mutation.judgmentDecisionIds, ...call.judgmentDecisionIds], preparedCall: { registry, call }, assertPrepared: assertCurrent, decoratePort: () => options.port });
           assertCurrent();
@@ -121,7 +121,7 @@ export function createOwnedInboxTagging(input: OwnedInboxTaggingOptions): OwnedI
           const executed = await registry.executePrepared(call, admission, { signal });
           if (!executed.success) throw new Error('Triage provider mutation failed');
           await validate(); assertCurrent();
-        } finally { release(); }
+        } finally { release(); options.permissionManager.retireAutonomousSource(sourceId); }
       }).finally(unsubscribe);
       active.add(work); void work.then(() => active.delete(work), () => active.delete(work)); return work;
     },

@@ -15,6 +15,23 @@ export interface CommandResult {
   stderr: string;
   timedOut: boolean;
 }
+/** Bytes kept per stream; a verification probe never needs more than a compact excerpt. */
+const MAX_CAPTURED_STREAM_BYTES = 8 * 1024 * 1024;
+
+function capturingSink(): { readonly push: (chunk: Buffer) => void; readonly text: () => string } {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  return {
+    push(chunk) {
+      if (size >= MAX_CAPTURED_STREAM_BYTES) return;
+      const kept = chunk.length > MAX_CAPTURED_STREAM_BYTES - size ? chunk.subarray(0, MAX_CAPTURED_STREAM_BYTES - size) : chunk;
+      chunks.push(kept);
+      size += kept.length;
+    },
+    text: () => Buffer.concat(chunks).toString('utf8'),
+  };
+}
+
 export function createVerificationPrimitives(policy: {
   readonly compact: (text: string, maxLength?: number | undefined) => string;
   readonly error: (error: unknown) => string;
@@ -40,18 +57,43 @@ export function createVerificationPrimitives(policy: {
         env: settings.env ?? { ...process.env, NO_COLOR: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
+      const stdout = capturingSink();
+      const stderr = capturingSink();
       let timedOut = false;
-      const timeout = setTimeout(() => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      // A grandchild that inherited the pipes can keep them open after the child is gone, so
+      // 'close' may never fire. Whatever path ends the probe, resolve once with what was captured.
+      const settle = (exitCode: number | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        if (graceTimer) clearTimeout(graceTimer);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolveCommand({
+          exitCode,
+          stdout: stdout.text(),
+          stderr: stderr.text(),
+          timedOut,
+        });
+      };
+      timeout = setTimeout(() => {
         timedOut = true;
         child.kill('SIGTERM');
-        setTimeout(() => child.kill('SIGKILL'), 1000).unref();
+        graceTimer = setTimeout(() => {
+          child.kill('SIGKILL');
+          settle(child.exitCode);
+        }, 1000);
       }, settings.timeoutMs ?? 15000);
       child.stdout?.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
       child.stderr?.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
       child.on('error', (error) => {
-        clearTimeout(timeout);
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        if (graceTimer) clearTimeout(graceTimer);
         resolveCommand({
           exitCode: -1,
           stdout: '',
@@ -59,15 +101,15 @@ export function createVerificationPrimitives(policy: {
           timedOut,
         });
       });
+      // 'close' fires after the stdio streams end; 'exit' can fire while output is still unread,
+      // so after 'exit' the streams get a short grace to drain before the probe resolves anyway.
       child.on('exit', (exitCode) => {
-        clearTimeout(timeout);
-        resolveCommand({
-          exitCode,
-          stdout: Buffer.concat(stdout).toString('utf8'),
-          stderr: Buffer.concat(stderr).toString('utf8'),
-          timedOut,
-        });
+        if (settled) return;
+        if (timeout) clearTimeout(timeout);
+        if (graceTimer) clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => settle(exitCode), 1000);
       });
+      child.on('close', (exitCode) => settle(exitCode));
     });
   }
   function commandCheck(
@@ -249,14 +291,17 @@ export function writeVerificationReportFiles<Report>(report: Report, outputDir: 
   writeFileSync(join(outputDir, 'live-verification.md'), markdown(report), 'utf8');
 }
 
-/** Read-only verifier discovery. Product-specific environment precedence is supplied explicitly. */
+/**
+ * Read-only verifier discovery. Product-specific environment precedence is supplied explicitly;
+ * `tokenPath` overrides the default `<home>/daemon/operator-tokens.json`.
+ */
 export function readVerificationHostToken(
   homeDir: string,
   envKeys: readonly string[],
   readJson: (path: string) => unknown,
+  tokenPath: string = join(homeDir, 'daemon', 'operator-tokens.json'),
 ): string | undefined {
   for (const key of envKeys) if (process.env[key]) return process.env[key];
-  const tokenPath = join(homeDir, 'daemon', 'operator-tokens.json');
   if (!existsSync(tokenPath)) return undefined;
   try {
     const data = readJson(tokenPath);
@@ -266,18 +311,19 @@ export function readVerificationHostToken(
   }
   return undefined;
 }
+/** `settingsPath` is the calling product's own settings file; it defaults to the terminal product's. */
 export function resolveVerificationHostUrl(
   homeDir: string,
   explicit: string | undefined,
   envKeys: readonly string[],
   readJson: (path: string) => unknown,
+  settingsPath: string = join(homeDir, 'tui', 'settings.json'),
 ): string {
   if (explicit) return explicit.replace(/\/+$/, '');
   for (const key of envKeys) {
     const value = process.env[key];
     if (value) return value.replace(/\/+$/, '');
   }
-  const settingsPath = join(homeDir, 'tui', 'settings.json');
   let port = 3421;
   if (existsSync(settingsPath)) {
     try {

@@ -168,6 +168,14 @@ export class WorktreeIdentityRegistry {
       return { value: row, rows: [...registry.rows, row] };
     });
   }
+  /** Drop the row of a resource that no longer exists. Absent rows are a no-op (nothing is written). */
+  release(key: WorktreeIdentityKey): Promise<void> {
+    key = keySnapshot(key);
+    return this.change(registry => {
+      if (!registry.rows.some(row => sameKey(row, key))) return { value: undefined };
+      return { value: undefined, rows: registry.rows.filter(row => !sameKey(row, key)) };
+    });
+  }
   async acquired(key: WorktreeIdentityKey, instance: IsolatedWorktree, initialized: boolean): Promise<StoredWorktreeIdentity> {
     key = keySnapshot(key);
     const proof = readIsolatedWorktreeCreation(instance);

@@ -10,7 +10,6 @@
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetCredentialEnvReadings } from '../../platform/src/platform/tools/exec/credential-env.ts';
 import { forgetGateReadings, type GateReadingTable } from './gate-readings.ts';
 import { compactionQualityPort } from './compaction-quality.ts';
 import { coreReadingsPort } from './core-readings.ts';
@@ -50,14 +49,13 @@ export function installHostedSessionReadings(options: {
       if (battery === 'engine.core.completion-applicability') return applicability.port.ask(request);
       if (battery === 'engine.core.turn-shape' || battery === 'engine.core.execution-strategy') return core.port.ask(request);
       if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation', 'engine.agents.brief-fidelity'].includes(battery ?? '')) return completion.port.ask(request);
-      if (['engine.compaction.retention', 'engine.compaction.fidelity', 'engine.compaction.collapse-keep'].includes(battery ?? '')) return compaction.port.ask(request);
+      if (['engine.compaction.retention', 'engine.compaction.fidelity'].includes(battery ?? '')) return compaction.port.ask(request);
       if (battery === 'contract.request-route') return intake.port.ask(request);
       if (battery?.startsWith('engine.gate.') || battery?.startsWith('engine.tools.')) return tools.port.ask(request);
       throw new Error(`hosted session fixture: unexpected decision ${battery ?? '(unnamed)'}`);
     },
   };
   forgetGateReadings();
-  forgetCredentialEnvReadings();
   const previous = installJudgmentPort(withDecisionLog(port, log));
   return {
     requests,
@@ -66,7 +64,6 @@ export function installHostedSessionReadings(options: {
       installJudgmentPort(previous);
       log[Symbol.dispose]();
       forgetGateReadings();
-      forgetCredentialEnvReadings();
     },
   };
 }

@@ -4,8 +4,10 @@ import type { RuntimeServices } from './services.js';
 import { ConfigurationError } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import net from 'node:net';
+import { randomBytes } from 'node:crypto';
+import { DAEMON_CHALLENGE_HEADER, DAEMON_PROOF_HEADER, isValidDaemonIdentityProof } from '../daemon/identity-proof.js';
 import os from 'node:os';
-import { closeSync, mkdirSync, openSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { summarizeError } from '../utils/error-display.js';
@@ -331,18 +333,43 @@ async function probeGoodVibesDaemonIdentity(
   port: number,
   token?: string,
 ): Promise<DaemonIdentityProbeResult> {
-  const { signal, dispose } = createTimeoutController(DAEMON_IDENTITY_PROBE_TIMEOUT_MS);
+  const url = `${formatBaseUrl(host, port)}/status`;
+  const bearer = token?.trim();
+  // Each request has its own timeout, kept until the body is read.
+  const disposers: Array<() => void> = [];
+  const challenge = randomBytes(16).toString('hex');
+  const request = (withToken: boolean): Promise<Response> => {
+    const { signal, dispose } = createTimeoutController(DAEMON_IDENTITY_PROBE_TIMEOUT_MS);
+    disposers.push(dispose);
+    const headers: Record<string, string> = { [DAEMON_CHALLENGE_HEADER]: challenge };
+    if (withToken && bearer) headers.Authorization = `Bearer ${bearer}`;
+    return fetch(url, { headers, signal });
+  };
   try {
-    const headers = new Headers();
-    if (token?.trim()) headers.set('Authorization', `Bearer ${token.trim()}`);
-    const response = await fetch(`${formatBaseUrl(host, port)}/status`, {
-      headers,
-      signal,
-    });
+    // Whatever answers the port has not shown it is the daemon yet, so the token is not sent to it first.
+    let response = await request(false);
+    if ((response.status === 401 || response.status === 403) && bearer) {
+      // Only a process that holds the token can answer the challenge; anything else on the port never receives it.
+      const proof = response.headers.get(DAEMON_PROOF_HEADER);
+      if (!proof) {
+        // A daemon started before proofs existed keeps running across a host upgrade; it cannot be told apart from a stranger, so the token stays unsent.
+        return {
+          kind: 'unauthorized',
+          reason: `The configured token was not sent: whatever answers ${host}:${port} refused the request without an identity proof, which a GoodVibes daemon started by an older version does not give. If that is the daemon, stop it so this host can start a current one`,
+        };
+      }
+      if (!isValidDaemonIdentityProof(bearer, challenge, proof)) {
+        return {
+          kind: 'unauthorized',
+          reason: `The configured token was not sent: whatever answers ${host}:${port} did not prove it is the GoodVibes daemon that holds it`,
+        };
+      }
+      response = await request(true);
+    }
     if (response.status === 401 || response.status === 403) {
       return {
         kind: 'unauthorized',
-        reason: token?.trim()
+        reason: bearer
           ? 'GoodVibes daemon identity probe was rejected by the configured token'
           : 'GoodVibes daemon identity probe needs an auth token',
       };
@@ -373,8 +400,38 @@ async function probeGoodVibesDaemonIdentity(
   } catch (error) {
     return { kind: 'unknown', reason: summarizeError(error) };
   } finally {
-    dispose();
+    for (const dispose of disposers) dispose();
   }
+}
+
+const SPAWN_LOCK_FILE = 'spawn.lock';
+/** A lock older than this is from a host that died without releasing it. */
+const SPAWN_LOCK_STALE_MS = 60_000;
+
+function processIsAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/** Takes the exclusive right to start the daemon, or returns null when another live host holds it. */
+function tryTakeSpawnLock(lockPath: string): (() => void) | null {
+  mkdirSync(join(lockPath, '..'), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try { writeSync(fd, String(process.pid)); } finally { closeSync(fd); }
+      return () => { try { unlinkSync(lockPath); } catch { /* already gone */ } };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      let stale = false;
+      try {
+        const holder = Number.parseInt(readFileSync(lockPath, 'utf-8'), 10);
+        stale = !Number.isInteger(holder) || !processIsAlive(holder) || Date.now() - statSync(lockPath).mtimeMs > SPAWN_LOCK_STALE_MS;
+      } catch { stale = true; }
+      if (!stale) return null;
+      try { unlinkSync(lockPath); } catch { /* another host removed it first */ }
+    }
+  }
+  return null;
 }
 
 async function startWithTimeout(
@@ -451,6 +508,8 @@ export async function startHostServices(
   const probeHttpListenerPortInUse = factories.probeHttpListenerPortInUse ?? ((host: string, port: number) => isTcpPortInUse(host, port));
   const localDaemonVersion = factories.localDaemonVersion ?? VERSION;
   const versionCompatible = factories.isDaemonVersionCompatible ?? isDaemonVersionCompatible;
+  // Every setting is checked before any daemon is adopted or spawned: a bad value must not leave a started daemon behind.
+  const httpListenerEnabled = readBooleanSetting(config, 'danger.httpListener');
 
   // A daemon whose identity probe says `goodvibes` has only proven it IS a
   // GoodVibes daemon, not that it speaks a wire version this surface can adopt.
@@ -483,6 +542,13 @@ export async function startHostServices(
     });
   };
 
+  const daemonHomeDir = factories.daemonHomeDir ?? os.homedir();
+  const runtimeDir = factories.daemonRuntimeDir ?? join(daemonHomeDir, '.goodvibes', 'daemon');
+  const hostSleep = factories.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  }));
+
   // Layer 2: spawn the daemon as a DETACHED standalone process (default), then
   // poll (bounded) for it to bind and pass the identity probe. On success adopt
   // it as 'external' with a one-time install-service hint. Returns an honest
@@ -501,8 +567,6 @@ export async function startHostServices(
 
     const command = (factories.daemonLaunchCommand ?? process.env.GOODVIBES_DAEMON_BINARY ?? 'goodvibes-daemon').trim()
       || 'goodvibes-daemon';
-    const daemonHomeDir = factories.daemonHomeDir ?? os.homedir();
-    const runtimeDir = factories.daemonRuntimeDir ?? join(daemonHomeDir, '.goodvibes', 'daemon');
     const logFilePath = join(runtimeDir, 'detached-daemon.log');
     // --daemon-home points to runtimeDir, which holds the daemon state and identity files.
     const args = [
@@ -559,10 +623,7 @@ export async function startHostServices(
 
     const timeoutMs = factories.detachedSpawnProbeTimeoutMs ?? 5000;
     const intervalMs = factories.detachedSpawnProbeIntervalMs ?? 150;
-    const sleep = factories.sleep ?? ((ms: number) => new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ms);
-      timer.unref?.();
-    }));
+    const sleep = hostSleep;
     const deadline = Date.now() + timeoutMs;
     let lastReason = 'Detached daemon did not become reachable before timeout';
     // Probe at least once, then poll until the deadline.
@@ -607,80 +668,117 @@ export async function startHostServices(
     // port + identity, then map the pure ruling onto this surface's I/O. The
     // version band-check is inside the policy, applied before any adopt, the
     // agent's stub used to skip it; the adopt-only stance is now `factories.adoptOnly`.
-    const portInUse = await probeDaemonPortInUse(daemonHost, daemonPort);
-    const identity = portInUse
-      ? await probeDaemonIdentity(daemonHost, daemonPort, factories.sharedDaemonToken)
-      : null;
-    const decision = decideDaemonAdoption({
-      enabled: true,
-      portInUse,
-      identity,
-      localVersion: localDaemonVersion,
-      versionCompatible,
-      adoptOnly: factories.adoptOnly === true,
-    });
-
-    switch (decision.action) {
-      case 'adopt':
-      case 'incompatible': {
-        daemonStatus = resolveVerifiedDaemonStatus(decision.identity!, 'Existing GoodVibes daemon verified on configured host/port');
-        if (daemonStatus.mode === 'external') {
-          logger.info('Existing GoodVibes daemon detected; continuing without a local daemon in this host instance', {
-            host: daemonHost,
-            port: daemonPort,
-            version: decision.identity?.version,
-          });
+    const decide = async () => {
+      const portInUse = await probeDaemonPortInUse(daemonHost, daemonPort);
+      const identity = portInUse
+        ? await probeDaemonIdentity(daemonHost, daemonPort, factories.sharedDaemonToken)
+        : null;
+      return decideDaemonAdoption({
+        enabled: true,
+        portInUse,
+        identity,
+        localVersion: localDaemonVersion,
+        versionCompatible,
+        adoptOnly: factories.adoptOnly === true,
+      });
+    };
+    let decision = await decide();
+    // Two hosts started together both see a free port. Starting is exclusive: whoever holds the lock
+    // spawns, the other waits for it and then re-reads the port, which by then has a daemon on it.
+    let releaseSpawnLock: (() => void) | null = null;
+    let lockHeldElsewhere = false;
+    if (decision.action === 'spawn') {
+      const lockPath = join(runtimeDir, SPAWN_LOCK_FILE);
+      const intervalMs = factories.detachedSpawnProbeIntervalMs ?? 150;
+      const deadline = Date.now() + (factories.detachedSpawnProbeTimeoutMs ?? 5000) + 2000;
+      let lockUsable = true;
+      try {
+        for (;;) {
+          releaseSpawnLock = tryTakeSpawnLock(lockPath);
+          if (releaseSpawnLock || Date.now() >= deadline) break;
+          await hostSleep(intervalMs);
         }
-        break;
+      } catch (error) {
+        // An unwritable runtime directory must not stop the daemon from starting; it only loses the exclusion.
+        lockUsable = false;
+        logger.warn('Could not take the daemon start lock; starting without it', { error: summarizeError(error) });
       }
-      case 'blocked': {
-        daemonStatus = createServiceStatus('blocked', daemonHost, daemonPort, {
-          authenticated: decision.identity?.kind !== 'unauthorized' ? undefined : false,
-          reason: decision.identity?.reason ?? 'Configured daemon port is occupied by an unverified process',
-        });
-        logger.warn(
-          'Daemon server port already in use by an unverified process; continuing without a local daemon in this host instance',
-          { host: daemonHost, port: daemonPort, reason: decision.identity?.reason },
-        );
-        break;
-      }
-      case 'adopt-only-idle': {
-        daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, { reason: decision.reason });
-        logger.info('adopt-only policy: no daemon reachable on the configured host/port; running without a local daemon', {
-          host: daemonHost,
-          port: daemonPort,
-        });
-        break;
-      }
-      case 'spawn': {
-        const detached = await attemptDetachedDaemonSpawn();
-        if ('status' in detached) {
-          daemonStatus = detached.status;
-          daemonStartHint = detached.hint;
-          logger.info('Spawned detached GoodVibes daemon for this session', {
-            host: daemonHost,
-            port: daemonPort,
-            version: detached.status.version,
-          });
-        } else {
-          // No in-process fallback exists to fall back to: this host cannot
-          // construct a daemon. Report the spawn failure as-is and run local-only.
-          daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, {
-            reason: `Detached daemon spawn did not become reachable: ${detached.reason}`,
+      lockHeldElsewhere = lockUsable && releaseSpawnLock === null;
+      decision = await decide();
+    }
+
+    try {
+      switch (decision.action) {
+        case 'adopt':
+        case 'incompatible': {
+          daemonStatus = resolveVerifiedDaemonStatus(decision.identity!, 'Existing GoodVibes daemon verified on configured host/port');
+          if (daemonStatus.mode === 'external') {
+            logger.info('Existing GoodVibes daemon detected; continuing without a local daemon in this host instance', {
+              host: daemonHost,
+              port: daemonPort,
+              version: decision.identity?.version,
+            });
+          }
+          break;
+        }
+        case 'blocked': {
+          daemonStatus = createServiceStatus('blocked', daemonHost, daemonPort, {
+            authenticated: decision.identity?.kind !== 'unauthorized' ? undefined : false,
+            reason: decision.identity?.reason ?? 'Configured daemon port is occupied by an unverified process',
           });
           logger.warn(
-            'Detached daemon spawn did not become reachable; running without a daemon in this host instance',
-            { host: daemonHost, port: daemonPort, reason: detached.reason },
+            'Daemon server port already in use by an unverified process; continuing without a local daemon in this host instance',
+            { host: daemonHost, port: daemonPort, reason: decision.identity?.reason },
           );
+          break;
         }
-        break;
+        case 'adopt-only-idle': {
+          daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, { reason: decision.reason });
+          logger.info('adopt-only policy: no daemon reachable on the configured host/port; running without a local daemon', {
+            host: daemonHost,
+            port: daemonPort,
+          });
+          break;
+        }
+        case 'spawn': {
+          if (lockHeldElsewhere) {
+            daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, {
+              reason: 'Another host is still starting the daemon; this host did not start a second one',
+            });
+            logger.warn('Another host holds the daemon start lock; not starting a second daemon', { host: daemonHost, port: daemonPort });
+            break;
+          }
+          const detached = await attemptDetachedDaemonSpawn();
+          if ('status' in detached) {
+            daemonStatus = detached.status;
+            daemonStartHint = detached.hint;
+            logger.info('Spawned detached GoodVibes daemon for this session', {
+              host: daemonHost,
+              port: daemonPort,
+              version: detached.status.version,
+            });
+          } else {
+            // No in-process fallback exists to fall back to: this host cannot
+            // construct a daemon. Report the spawn failure as-is and run local-only.
+            daemonStatus = createServiceStatus('unavailable', daemonHost, daemonPort, {
+              reason: `Detached daemon spawn did not become reachable: ${detached.reason}`,
+            });
+            logger.warn(
+              'Detached daemon spawn did not become reachable; running without a daemon in this host instance',
+              { host: daemonHost, port: daemonPort, reason: detached.reason },
+            );
+          }
+          break;
+        }
+        case 'disabled':
+          break;
       }
-      case 'disabled':
-        break;
+    } finally {
+      releaseSpawnLock?.();
     }
   }
 
-  if (readBooleanSetting(config, 'danger.httpListener')) {
+  if (httpListenerEnabled) {
     if (await probeHttpListenerPortInUse(httpListenerHost, httpListenerPort)) {
       httpListenerStatus = createServiceStatus('blocked', httpListenerHost, httpListenerPort, {
         reason: 'Configured HTTP listener port is already in use',

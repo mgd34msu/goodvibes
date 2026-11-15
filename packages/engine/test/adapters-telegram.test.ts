@@ -41,6 +41,7 @@ function makeTelegramContext(overrides: Partial<Record<string, unknown>> = {}) {
             mode: 'spawn',
             task: { prompt: 'triage build' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },

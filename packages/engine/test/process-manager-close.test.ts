@@ -3,6 +3,11 @@ import * as credentialEnv from '../platform/src/platform/tools/exec/credential-e
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 import { waitFor } from './_helpers/test-timeout.js';
+import { tmpdir } from 'node:os';
+/** Portable stand-ins for sleep and true: the test runtime is always present, /bin/sleep is not. */
+const sleepArgs = (seconds: number): string[] => ['--no-env-file', '-e', `setTimeout(() => {}, ${seconds * 1000});`];
+const quietArgs: string[] = ['--no-env-file', '-e', ''];
+
 
 useToolReadings([['', { credential: true }]]);
 function alive(pid: number): boolean {
@@ -11,21 +16,21 @@ function alive(pid: number): boolean {
 
 test('close shares completion, reaps owned children, and refuses both spawn entrypoints', async () => {
   const manager = new ProcessManager();
-  const child = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { sigterm_grace_ms: 20 });
+  const child = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { sigterm_grace_ms: 20 });
   try {
     const closing = manager.close();
     expect(manager.close()).toBe(closing);
     await closing;
     expect(alive(child.pid!)).toBe(false);
     expect(manager.getStatus(child.process_id!)?.done).toBe(true);
-    await expect(manager.spawn('echo unexpected', '/tmp', undefined)).rejects.toThrow('ProcessManager is closed');
-    await expect(manager.spawnArgv('/bin/echo', ['unexpected'], '/tmp', undefined)).rejects.toThrow('ProcessManager is closed');
+    await expect(manager.spawn('echo unexpected', tmpdir(), undefined)).rejects.toThrow('ProcessManager is closed');
+    await expect(manager.spawnArgv(process.execPath, quietArgs, tmpdir(), undefined)).rejects.toThrow('ProcessManager is closed');
   } finally { await manager.close(); }
 });
 
 test.each([0, 20])('close reaps a previously stopped child that ignores SIGTERM with %dms grace', async (grace) => {
   const manager = new ProcessManager();
-  const child = await manager.spawnArgv(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000);'], '/tmp', undefined,
+  const child = await manager.spawnArgv(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000);'], tmpdir(), undefined,
     { timeout_ms: 12_000, sigterm_grace_ms: grace });
   const id = child.process_id!;
   try {
@@ -45,10 +50,10 @@ test.each([0, 20])('close reaps a previously stopped child that ignores SIGTERM 
 
 test('close preserves opted-out lifetimes and never stops a different manager child', async () => {
   const manager = new ProcessManager(); const other = new ProcessManager();
-  const legacy = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { kill_on_timeout: false, sigterm_grace_ms: 20 });
-  const explicit = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { kill_on_close: false, sigterm_grace_ms: 20 });
-  const owned = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { sigterm_grace_ms: 20 });
-  const unrelated = await other.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { sigterm_grace_ms: 20 });
+  const legacy = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { kill_on_timeout: false, sigterm_grace_ms: 20 });
+  const explicit = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { kill_on_close: false, sigterm_grace_ms: 20 });
+  const owned = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { sigterm_grace_ms: 20 });
+  const unrelated = await other.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { sigterm_grace_ms: 20 });
   try {
     await manager.close();
     expect(alive(owned.pid!)).toBe(false);
@@ -62,7 +67,7 @@ test('close preserves opted-out lifetimes and never stops a different manager ch
 
 test('explicit close ownership can override timeout lifetime opt-out', async () => {
   const manager = new ProcessManager();
-  const child = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined,
+  const child = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined,
     { kill_on_timeout: false, kill_on_close: true, sigterm_grace_ms: 20 });
   try {
     await manager.close();
@@ -75,11 +80,11 @@ test('close terminates existing children while draining credential resolution wi
   let enter!: () => void; const entered = new Promise<void>((resolve) => { enter = resolve; });
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   const manager = new ProcessManager();
-  const existing = await manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined, { sigterm_grace_ms: 10 });
+  const existing = await manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined, { sigterm_grace_ms: 10 });
   const scrub = spyOn(credentialEnv, 'scrubCredentialEnv').mockImplementation(async () => {
     enter(); await gate; return { env: {}, withheld: [] };
   });
-  const launching = manager.spawnArgv('/bin/sleep', ['10'], '/tmp', undefined);
+  const launching = manager.spawnArgv(process.execPath, sleepArgs(10), tmpdir(), undefined);
   const outcome = launching.then(() => undefined, (error: unknown) => error);
   try {
     await entered;
@@ -98,7 +103,7 @@ for (const field of ['timeout_ms', 'sigterm_grace_ms'] as const) {
     const manager = new ProcessManager();
     const spawn = spyOn(Bun, 'spawn').mockImplementation(() => { throw new Error('unexpected fixture spawn'); });
     try {
-      await expect(manager.spawnArgv('/bin/echo', ['fixture'], '/tmp', undefined, { [field]: value })).rejects.toThrow(`${field} must be a finite number`);
+      await expect(manager.spawnArgv(process.execPath, quietArgs, tmpdir(), undefined, { [field]: value })).rejects.toThrow(`${field} must be a finite number`);
       expect(spawn).not.toHaveBeenCalled();
     } finally { spawn.mockRestore(); await manager.close(); }
   });

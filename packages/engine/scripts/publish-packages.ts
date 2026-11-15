@@ -1,11 +1,13 @@
 import {
   type AuthEnv,
   assertChangelogSection,
+  assertStagesAtRootVersion,
   cleanupAuthEnv,
   cleanupStage,
   createAuthEnv,
   getAuthToken,
   getPublishRegistryOverride,
+  getRootVersion,
   readPackage,
   run,
   stagePackages,
@@ -68,6 +70,14 @@ if (!DRY_RUN && !getAuthToken(REGISTRY)) {
 })();
 
 const { tempRoot, publicStages } = await stagePackages();
+// Judgment is published before the engine that depends on it, so a version
+// mismatch must stop the run before the first publish, not after both.
+try {
+  assertStagesAtRootVersion(publicStages, getRootVersion());
+} catch (error) {
+  cleanupStage(tempRoot);
+  throw error;
+}
 
 // Create a single shared auth env for real publish calls so that the temp
 // npmrc directory can be reliably cleaned up in the finally block. Dry-runs

@@ -1,11 +1,13 @@
 import { isDeepStrictEqual } from 'node:util';
 import { opaqueUuid, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
+import { NativeExecutionMoveRefused, executionIntentMoveText, executionRecordMoveText } from './store-native-refusal.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
 import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementStorageKey, captureNativeSettlementPublication, nativeSettlementPublicationCommitment, type NativeWorkSettlementReceipt, type NativeWorkSettlementPublication } from '../workflow/work-ledger/native-settlement-types.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
 import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
+import type { WorkLedgerState } from '../workflow/work-ledger/types.js';
 import { NativeWorkExecutionError, nativeExecutionOriginalFor, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
 type Lookup = DurableContractKey | { readonly attemptId: string };
@@ -68,10 +70,14 @@ export function createNativeWorkSettlementTargetIndex(db: Pick<SqlDatabase, 'run
 }
 export function validateNativeWorkSettlementTable(db: SqlReader): void {
   validateColumns(db, 'native_work_execution_settlements', knowledgeSchemaColumns.settlement);
+  // One validation pass reads one database image, so each project's ledger is parsed and
+  // replayed once rather than once per settlement. Each settlement still indexes the full
+  // history by its own sequences.
+  const ledgers = new Map<string, WorkLedgerState>();
   for (const row of db.exec('SELECT project_id, key_hash, format_version, state_json FROM native_work_execution_settlements')[0]?.values ?? []) {
     const receipt = nativeWorkSettlementSchema.parse(JSON.parse(String(row[3])));
     if (row[0] !== receipt.projectId || row[1] !== nativeSettlementStorageKey(receipt) || row[2] !== receipt.version) throw new NativeWorkExecutionError('invalid');
-    const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId }, nativeExecutionOriginalFor(validationOriginal, receipt.projectId, receipt.target.attemptId));
+    const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId }, nativeExecutionOriginalFor(validationOriginal, receipt.projectId, receipt.target.attemptId), undefined, ledgers);
     if (!current.settlement || !isDeepStrictEqual(current.settlement, receipt)) throw new NativeWorkExecutionError('invalid');
   }
 }
@@ -120,10 +126,14 @@ function sameFacts(a: NativeWorkExecutionIntent | NativeWorkExecutionRecord, b: 
   return a.version === b.version && isDeepStrictEqual(a.owner, b.owner) && a.projectId === b.projectId && sameDurableRequest(a.request, b.request)
     && Object.keys(a.target).every(key => a.target[key as keyof typeof a.target] === b.target[key as keyof typeof b.target]) && sameScopes(a.authorityScopes, b.authorityScopes);
 }
-function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource): NativeWorkExecutionTransaction {
-  const ledgerRow = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
-  const ledger = ledgerRow ? readWorkLedgerState(JSON.parse(String(ledgerRow[2])), projectId) : createEmptyWorkLedgerState(projectId);
-  if (ledgerRow && (ledgerRow[0] !== ledger.version || ledgerRow[1] !== ledger.revision)) throw new NativeWorkExecutionError('invalid');
+function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeExecutionOriginal, candidate?: SettlementSource, ledgers?: Map<string, WorkLedgerState>): NativeWorkExecutionTransaction {
+  let ledger = ledgers?.get(projectId);
+  if (!ledger) {
+    const ledgerRow = db.exec('SELECT format_version, revision, state_json FROM work_ledgers WHERE project_id = ?', [projectId])[0]?.values[0];
+    ledger = ledgerRow ? readWorkLedgerState(JSON.parse(String(ledgerRow[2])), projectId) : createEmptyWorkLedgerState(projectId);
+    if (ledgerRow && (ledgerRow[0] !== ledger.version || ledgerRow[1] !== ledger.revision)) throw new NativeWorkExecutionError('invalid');
+    ledgers?.set(projectId, ledger);
+  }
   const record = readRecord(db, projectId, key, original);
   const rows = db.exec('SELECT format_version, state_json FROM native_work_execution_intents WHERE project_id = ? AND attempt_id = ?', [projectId, key.attemptId])[0]?.values ?? [];
   if (rows.length > 1) throw new NativeWorkExecutionError('invalid');
@@ -196,6 +206,15 @@ function assertCurrentTarget(current: NativeWorkExecutionTransaction, intent: Na
       || work.source.sessionId !== intent.request.input.sessionId))) throw new NativeWorkExecutionError('stale');
 }
 function validateIntentTransition(current: NativeWorkExecutionTransaction, next: NativeWorkExecutionIntent): void {
+  try { checkIntentTransition(current, next); }
+  catch (error) {
+    if (error instanceof NativeWorkExecutionError && error.code === 'conflict' && error.constructor === NativeWorkExecutionError) {
+      throw new NativeExecutionMoveRefused('conflict', executionIntentMoveText(current.intent?.state ?? null, next.state, !!current.intent && !sameFacts(current.intent, next)));
+    }
+    throw error;
+  }
+}
+function checkIntentTransition(current: NativeWorkExecutionTransaction, next: NativeWorkExecutionIntent): void {
   const previous = current.intent;
   if (!previous) {
     if (next.generation !== 1 || !['admitting', 'cancelled'].includes(next.state) || current.record) throw new NativeWorkExecutionError('conflict');
@@ -242,7 +261,9 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
       if (nextIntent?.state === 'associated' && current.intent?.state === 'admitting') assertCurrentTarget(current, nextIntent);
       const resultingIntent = nextIntent ?? current.intent;
       const resultingRecord = next ?? current.record;
-      if (next && current.record && (!sameFacts(current.record, next) || (current.record.state === 'cancelled' && next.state !== 'cancelled'))) throw new NativeWorkExecutionError('conflict');
+      // A claimed launch is never re-armed: `prepared` is launchable, so moving back could launch twice.
+      if (next && current.record && (!sameFacts(current.record, next) || (current.record.state === 'cancelled' && next.state !== 'cancelled')
+        || (current.record.state === 'launch-claimed' && next.state === 'prepared'))) throw new NativeExecutionMoveRefused('conflict', executionRecordMoveText(current.record.state, next.state, !sameFacts(current.record, next)));
       if (next && !current.record && (!nextIntent || nextIntent.state !== 'associated' || current.intent?.state !== 'admitting')) throw new NativeWorkExecutionError(current.intent?.state === 'associated' ? 'recovery-required' : 'conflict');
       if (resultingIntent && resultingRecord && (!sameFacts(resultingIntent, resultingRecord) || !['associated', 'cancelled'].includes(resultingIntent.state)
         || (resultingIntent.state === 'cancelled' && resultingRecord.state !== 'cancelled'))) throw new NativeWorkExecutionError('conflict');

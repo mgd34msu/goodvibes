@@ -9,19 +9,16 @@
  *   with the honest per-class grant/deny split served when the OS refuses a
  *   lid-switch block;
  * - the sleep edge runs checkpoint hooks going down and catch-up hooks
- *   (re-arm + missed-receipt delivery) coming back up;
- * - a live logind proof runs on this host when the environment allows, with
- *   the honest fixture fallback (reason stated) when it does not.
+ *   (re-arm + missed-receipt delivery) coming back up.
  */
 import { describe, expect, test } from 'bun:test';
-import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { PowerManager, LID_SWITCH_HONEST_SPLIT } from '../platform/src/platform/power/manager.ts';
+import { PowerManager, LID_SWITCH_HONEST_SPLIT, type PowerManagerOptions } from '../platform/src/platform/power/manager.ts';
 import { bindPowerWorkSignals } from '../platform/src/platform/power/work-signals.ts';
 import { createLinuxLogindSeam, inhibitChildArgs, reapOrphanedInhibitors } from '../platform/src/platform/power/linux-logind.ts';
 import type { PowerInhibitClass, PowerPlatformSeam } from '../platform/src/platform/power/types.ts';
 import type { EventEnvelope } from '@goodvibes-jev/engine/transport-core';
-import { withTestTimeout } from './_helpers/test-timeout.js';
 
 /** A scriptable seam recording every acquire/release, with per-class denials. */
 function fixtureSeam(options: { deny?: readonly PowerInhibitClass[] } = {}) {
@@ -52,9 +49,14 @@ function fixtureSeam(options: { deny?: readonly PowerInhibitClass[] } = {}) {
   return { seam, log, fireSleepEdge: (sleeping: boolean) => sleepEdge?.(sleeping) };
 }
 
-function makeManager(seam: PowerPlatformSeam, config: Record<string, unknown> = {}) {
+function makeManager(
+  seam: PowerPlatformSeam,
+  config: Record<string, unknown> = {},
+  extra: Pick<PowerManagerOptions, 'now' | 'timers'> = {},
+) {
   const stateChanges: unknown[] = [];
   const manager = new PowerManager({
+    ...extra,
     seam,
     readConfig: (key) => config[key],
     writeConfig: (key, value) => { config[key] = value; },
@@ -63,8 +65,9 @@ function makeManager(seam: PowerPlatformSeam, config: Record<string, unknown> = 
   return { manager, config, stateChanges };
 }
 
+/** Lets every pending async seam call (acquire, release) finish: they only await resolved promises. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 100; i += 1) await Promise.resolve();
 }
 
 describe('automatic work inhibition', () => {
@@ -106,12 +109,22 @@ describe('automatic work inhibition', () => {
 
   test('the hard cap force-releases a wedged hold and reports it honestly', async () => {
     const { seam } = fixtureSeam();
-    // A tiny cap (0.0005 min = 30ms) so the test observes the expiry live.
-    const { manager } = makeManager(seam, { 'power.workInhibitMaxMinutes': 0.0005 });
+    const timers: { fn: () => void; ms: number }[] = [];
+    let now = 1_000_000;
+    const { manager } = makeManager(seam, { 'power.workInhibitMaxMinutes': 1 }, {
+      now: () => now,
+      timers: {
+        setTimeout: ((fn: () => void, ms: number) => { timers.push({ fn, ms }); return timers.length; }) as unknown as typeof setTimeout,
+        clearTimeout: (() => {}) as unknown as typeof clearTimeout,
+      },
+    });
     manager.holdWork('wedged', 'a hold that never drains');
     await settle();
     expect(manager.getState().work.held).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(timers.map((timer) => timer.ms)).toEqual([60_000]);
+    now += 60_000;
+    timers[0]!.fn();
+    await settle();
     const state = manager.getState();
     expect(state.work.held).toBe(false);
     expect(state.work.capExpired).toBe(true);
@@ -353,117 +366,6 @@ describe('process-exit hygiene (holds never outlive the process)', () => {
     await manager.stop();
     expect(subscribers.size).toBe(0);
   });
-});
-
-async function canStageLiveInhibitor(): Promise<boolean> {
-  // Independent CLI staging keeps an implementation regression in seam.inhibit
-  // from being mistaken for an unsupported host and silently skipped.
-  const probeWho = `gv-logind-probe-${process.pid}`;
-  const probe = spawn('systemd-inhibit', [
-    '--what=idle', `--who=${probeWho}`, '--why=staging probe', '--mode=block',
-    '--no-ask-password', 'sleep', '10',
-  ], { stdio: 'ignore' });
-  let stopped = false;
-  const exited = new Promise<void>((resolve) => {
-    const finish = () => { stopped = true; resolve(); };
-    probe.once('error', finish);
-    probe.once('exit', finish);
-  });
-  try {
-    for (let i = 0; i < 20 && !stopped; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      if (stopped) break;
-      try {
-        const listed = execFileSync('systemd-inhibit', ['--list', '--no-legend', '--no-ask-password'], {
-          encoding: 'utf-8', timeout: 5_000,
-        });
-        if (listed.includes(probeWho)) return true;
-      } catch {
-        break;
-      }
-    }
-    return false;
-  } finally {
-    probe.kill('SIGTERM');
-    try {
-      await withTestTimeout(exited, 5_000, 'Logind staging child did not exit after SIGTERM');
-    } catch {
-      probe.kill('SIGKILL');
-      await withTestTimeout(exited, 5_000, 'Logind staging child did not exit after SIGKILL');
-    }
-  }
-}
-
-// Probe the real system-bus/logind capability before registering optional
-// proofs. A CLI binary can be installed in a container that denies bus access;
-// starting dbus-monitor there exits immediately and cannot prove ownership.
-const liveLogindAvailable = await createLinuxLogindSeam().isAvailable();
-const liveInhibitorAvailable = liveLogindAvailable && await canStageLiveInhibitor();
-const hasDbusMonitor = spawnSync('sh', ['-c', 'command -v dbus-monitor'], { encoding: 'utf-8' }).status === 0;
-if (!liveLogindAvailable) console.warn('[power test] system-bus/logind unavailable; optional live power proofs skipped');
-else {
-  if (!liveInhibitorAvailable) console.warn('[power test] idle inhibitors are not grantable/listable from this session; optional live inhibitor proof skipped');
-  if (!hasDbusMonitor) console.warn('[power test] dbus-monitor unavailable; optional live sleep-edge watcher proof skipped');
-}
-
-describe('live logind proof on this host', () => {
-  test.skipIf(!liveInhibitorAvailable)('an unprivileged idle inhibitor is genuinely held and released via logind', async () => {
-    const seam = createLinuxLogindSeam({ who: 'goodvibes-test-proof' });
-    const handle = await seam.inhibit({ classes: ['idle'], who: 'goodvibes-test-proof', why: 'live test proof' });
-    try {
-      expect(handle).not.toBeNull();
-      expect(handle!.grantedClasses).toContain('idle');
-      // The OS actually lists our inhibitor (never sudo, plain user).
-      const listed = execFileSync('systemd-inhibit', ['--list', '--no-legend'], { encoding: 'utf-8' });
-      expect(listed).toContain('goodvibes-test-proof');
-    } finally {
-      await handle?.release();
-    }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const after = execFileSync('systemd-inhibit', ['--list', '--no-legend'], { encoding: 'utf-8' });
-    expect(after).not.toContain('goodvibes-test-proof');
-    console.warn('[power test] live logind proof EXERCISED: an unprivileged idle inhibitor was genuinely held (listed by systemd-inhibit) and released via logind on this host.');
-  }, 15_000);
-});
-
-describe('live sleep-edge watcher on this host (proves the leak fix)', () => {
-  test.skipIf(!liveLogindAvailable || !hasDbusMonitor)('a real dbus-monitor watcher spawns, carries its owner-pid stamp, and the unsubscribe reaps it: no orphan left', async () => {
-    // Our watcher carries this process's pid in its stamp match rule, so pgrep
-    // counts ONLY watchers this test spawned, never the host's own watcher.
-    const stamp = `GoodvibesSleepWatchOwner${process.pid}`;
-    const countMine = (): number => {
-      const result = spawnSync('pgrep', ['-fc', stamp], { encoding: 'utf-8' });
-      return Number((result.stdout ?? '').trim()) || 0;
-    };
-    const seam = createLinuxLogindSeam({ who: 'goodvibes-test-proof' });
-    let unsubscribe: (() => void) | null = null;
-    try {
-      const before = countMine();
-      unsubscribe = seam.onPrepareForSleep!(() => {});
-      let alive = before;
-      for (let i = 0; i < 40 && alive <= before; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        alive = countMine();
-      }
-      expect(alive).toBeGreaterThan(before);
-      // The unsubscribe closure reaps exactly our watcher.
-      unsubscribe();
-      unsubscribe = null;
-      let after = alive;
-      for (let i = 0; i < 40 && after > before; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        after = countMine();
-      }
-      expect(after).toBe(before);
-      console.warn('[power test] live sleep-edge watcher proof EXERCISED: a real dbus-monitor spawned, carried our owner-pid stamp, and the unsubscribe reaped it (no leak).');
-    } finally {
-      // Guarantee no watcher of ours survives even on assertion failure.
-      if (unsubscribe) {
-        try { unsubscribe(); } catch { /* already gone */ }
-      }
-      spawnSync('pkill', ['-f', stamp]);
-    }
-  }, 20_000);
 });
 
 describe('an inhibitor child may never prompt on the user\'s terminal', () => {

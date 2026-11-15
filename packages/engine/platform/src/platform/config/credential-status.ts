@@ -13,7 +13,7 @@
  * Enumeration is never a `process.env` dump. It covers STORED keys, plus the
  * env-backed keys whose names are KNOWN credential names, the provider env
  * vars this platform itself publishes in BUILTIN_PROVIDER_ENV_KEYS. Every other
- * environment variable stays invisible, so `PATH`, `AWS_PROFILE` and the rest
+ * environment variable stays invisible, so `PATH`, `AWS_REGION` and the rest
  * of the shell can still never be enumerated over the wire.
  *
  * That intersection is what dropping every env record was reaching for, and it

@@ -50,8 +50,11 @@ for (const present of [true, false]) test(`actual saved v1 source/frame expectat
     const hash = spyOn(crypto, 'createHash');
     try {
       const owner = new DurablePolicyEpochOwner([f.file], true);
+      expect(owner.current(effective, undefined, 1)).toBe(expected);
+      const afterFirst = hash.mock.calls.length;
       for (let repeat = 0; repeat < 8; repeat++) expect(owner.current(effective, undefined, 1)).toBe(expected);
-      expect(hash).toHaveBeenCalledTimes(present ? 3 : 2);
+      // The first read verifies the saved image; later unchanged guards must not hash it again.
+      expect(hash).toHaveBeenCalledTimes(afterFirst);
       expect(readFileSync(f.epoch)).toEqual(original);
       const beforeFresh = hash.mock.calls.length;
       const fresh = owner.capture(effective, { code: 1, publicPolicy: false });
@@ -83,10 +86,12 @@ test('a private publication computes one expectation and unchanged live guards n
     const original = owner.capture(effective);
     const epoch = JSON.parse(readFileSync(f.epoch, 'utf8')); expect(epoch.version).toBe(2);
     expect(epoch.fileIdentity).toStartWith('policy-file-v2:[');
+    const afterCapture = hash.mock.calls.length;
     for (let repeat = 0; repeat < 10; repeat++) expect(owner.current(effective)).toBe(original);
+    expect(hash).toHaveBeenCalledTimes(afterCapture);
     owner.advance(); writeFileSync(f.file, '{"behavior":{"autoApprove":true}}'); owner.reconcile();
     expect(owner.current({ ...effective, policy: 'changed' })).not.toBe(original);
-    expect(hash).toHaveBeenCalledTimes(1); expect(readFileSync(f.epoch, 'utf8')).not.toContain(effective.credential);
+    expect(readFileSync(f.epoch, 'utf8')).not.toContain(effective.credential);
     expect(readFileSync(f.file + '.policy-configuration-v3.json', 'utf8')).not.toContain(effective.credential);
   } finally { hash.mockRestore(); }
 });

@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import * as nativeOs from 'node:os';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -16,6 +17,7 @@ import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { certifiedDeviceLiveRecords, deviceLiveReadModelSnapshot } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessPairingArgs {
   readonly pairingRouteId?: unknown;
@@ -36,7 +38,7 @@ interface PairingRoute {
   readonly id: string;
   readonly label: string;
   readonly detail: string;
-  readonly effect: 'read-only' | 'visible-navigation' | 'external-network' | 'confirmation-gated-secret-display' | 'confirmed-local-auth-provisioning';
+  readonly effect: 'read-only' | 'visible-navigation' | 'owner-terminal-only' | 'confirmed-local-auth-provisioning';
   readonly command?: string;
   readonly harnessRoute?: string;
   readonly capabilityIds?: readonly string[];
@@ -79,9 +81,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readConfigBoolean(context: CommandContext, key: string, fallback: boolean): boolean {
@@ -96,6 +96,22 @@ function readConfigBoolean(context: CommandContext, key: string, fallback: boole
     return fallback;
   } catch {
     return fallback;
+  }
+}
+
+/** The setting, or null when reading it failed: a failed read is not the same as the setting being off. */
+export function readConfigBooleanOrNull(context: CommandContext, key: string): boolean | null {
+  try {
+    const value = (context.platform.configManager as { get(settingKey: string): unknown }).get(key);
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+    return false;
+  } catch {
+    return null;
   }
 }
 
@@ -141,7 +157,9 @@ export function capturePairingAdvertisement(config: RuntimeEndpointConfigReader,
 
 function urlHostForBindHost(host: string, networkAddress: string): string {
   if (host === '0.0.0.0' || host === '::') return networkAddress;
-  return host || '127.0.0.1';
+  const bound = host || '127.0.0.1';
+  // An IPv6 literal needs brackets to be a URL host.
+  return bound.includes(':') && !bound.startsWith('[') ? `[${bound}]` : bound;
 }
 
 function lookupFromArgs(args: AgentHarnessPairingArgs): { readonly source: PairingLookupSource; readonly input: string } | null {
@@ -158,20 +176,16 @@ function pairingRoutes(): readonly PairingRoute[] {
     {
       id: 'qr-pairing',
       label: 'QR pairing',
-      detail: 'Visible companion pairing route that prints QR setup details in the Agent TUI without printing the raw token.',
-      effect: 'external-network',
+      detail: 'Owner-terminal route: the user types /pair in the live Agent terminal to print the QR setup details. The QR payload carries the connected-host operator token, so a model invocation of /pair is refused.',
+      effect: 'owner-terminal-only',
       command: '/pair',
-      harnessRoute: 'agent_harness mode:"run_command" command:"/pair" confirm:true explicitUserRequest:"..."',
-      requiresConfirmation: true,
     },
     {
       id: 'manual-token-display',
       label: 'Manual token display',
-      detail: 'Explicitly confirmed fallback route that prints the raw companion token only when the user asks for manual setup.',
-      effect: 'confirmation-gated-secret-display',
+      detail: 'Owner-terminal fallback: the user types /pair --show-token --yes in the live Agent terminal to print the raw companion token for manual setup. A model invocation is refused.',
+      effect: 'owner-terminal-only',
       command: '/pair --show-token --yes',
-      harnessRoute: 'agent_harness mode:"run_command" command:"/pair --show-token --yes" confirm:true explicitUserRequest:"..."',
-      requiresConfirmation: true,
     },
     {
       id: 'pairing-ui',
@@ -279,8 +293,8 @@ function describeRoute(route: PairingRoute, options: {
     ...(options.includeParameters ? {
       policy: {
         effect: route.effect,
-        values: 'Pairing posture returns endpoint binding and token presence only; raw companion tokens and QR payloads are never returned by this read-only mode.',
-        mutation: 'Pairing display, manual token display, companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
+        values: 'Pairing posture returns the endpoint binding with its advertised address, and token presence only; raw companion tokens, QR payloads and the absolute token file path are never returned by this read-only mode.',
+        mutation: 'Pairing display and manual token display are owner-terminal flows that a model cannot run. Companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
       },
       modelAccess: {
         inspectPairing: 'agent_harness mode:"pairing_posture"',
@@ -297,10 +311,14 @@ function describeRoute(route: PairingRoute, options: {
 }
 
 function pairingRouteModelRoute(route: PairingRoute): string {
-  if (route.command === '/pair') return 'agent_harness mode:"run_command" command:"/pair"';
-  if (route.command === '/pair --show-token --yes') return 'agent_harness mode:"run_command" command:"/pair --show-token --yes"';
+  if (route.effect === 'owner-terminal-only') return `none for a model; ask the user to type ${route.command ?? '/pair'}`;
   if (route.id === 'pairing-ui') return 'agent_harness mode:"workspace_action" target:"pair"';
   return previewHarnessText(route.harnessRoute ?? 'agent_harness mode:"pairing_route"');
+}
+
+function homeRelativeLabel(home: string, absolute: string): string {
+  const inside = relative(home, absolute);
+  return inside === '' || inside.startsWith('..') ? '<outside the home directory>' : `<home>/${inside.split('\\').join('/')}`;
 }
 
 function pairingState(context: CommandContext, networkAddress: string): Record<string, unknown> {
@@ -313,7 +331,8 @@ function pairingState(context: CommandContext, networkAddress: string): Record<s
     surface: GOODVIBES_AGENT_PAIRING_SURFACE,
     endpoint: {
       endpointId: 'controlPlane',
-      enabled: readConfigBoolean(context, 'controlPlane.enabled', false),
+      // null when the setting could not be read, which is not the same as disabled.
+      enabled: readConfigBooleanOrNull(context, 'controlPlane.enabled'),
       bindHost: binding.host,
       advertisedHost: host,
       port: binding.port,
@@ -321,7 +340,8 @@ function pairingState(context: CommandContext, networkAddress: string): Record<s
     },
     token: {
       present: Boolean(tokenRecord.token),
-      path: tokenRecord.path,
+      // Never the absolute path: it names the user's home directory.
+      path: homeRelativeLabel(shellPaths.homeDirectory, tokenRecord.path),
       rawValueReturned: false,
     },
     companionPayloadReturned: false,
@@ -334,8 +354,13 @@ function tokenPresent(state: Record<string, unknown>): boolean {
 }
 
 function endpointEnabled(state: Record<string, unknown>): boolean {
-  const endpoint = state.endpoint as { readonly enabled?: boolean } | undefined;
+  const endpoint = state.endpoint as { readonly enabled?: boolean | null } | undefined;
   return endpoint?.enabled === true;
+}
+
+function endpointEnabledUnknown(state: Record<string, unknown>): boolean {
+  const endpoint = state.endpoint as { readonly enabled?: boolean | null } | undefined;
+  return endpoint?.enabled === null;
 }
 
 function deviceStatusRank(status: DeviceCapabilityStatus): number {
@@ -369,11 +394,11 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
   const state = pairingState(context, networkAddress);
   const hasToken = tokenPresent(state);
   const controlPlaneReady = endpointEnabled(state) && hasToken;
-  const webEnabled = readConfigBoolean(context, 'web.enabled', false);
+  const webEnabled = readConfigBooleanOrNull(context, 'web.enabled');
   const webBinding = resolveRuntimeEndpointBinding(requirePlatform(context).configManager, 'web');
   const webHost = urlHostForBindHost(webBinding.host, networkAddress);
   const webUrl = `http://${webHost}:${webBinding.port}`;
-  const voiceEnabled = readConfigBoolean(context, 'ui.voiceEnabled', false);
+  const voiceEnabled = readConfigBooleanOrNull(context, 'ui.voiceEnabled');
   const voiceReadiness = buildAgentWorkspaceVoiceMediaReadiness({
     context,
     voiceProviders: context.platform.voiceProviderRegistry?.list() ?? [],
@@ -390,7 +415,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
   const sensorReady = sensorRecords.length > 0;
   const ttsStatus: DeviceCapabilityStatus = voiceReadiness.selectedTtsProviderStatus === 'ready' && voiceReadiness.ttsVoiceConfigured
     ? 'ready'
-    : voiceReadiness.selectedTtsProviderStatus === 'ready' || voiceReadiness.selectedTtsProviderStatus === 'registered'
+    : voiceReadiness.selectedTtsProviderStatus === 'ready' || voiceReadiness.selectedTtsProviderStatus === 'ready-agent-env' || voiceReadiness.selectedTtsProviderStatus === 'registered'
       ? 'attention'
       : 'setup-needed';
   const notificationStatus: DeviceCapabilityStatus = readyChannels.length > 0 || notificationWebhookCount > 0
@@ -406,10 +431,10 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       status: hasToken ? 'ready' : 'setup-needed',
       userOutcome: 'Pair a phone or companion surface without exposing the raw operator token in chat.',
       summary: hasToken
-        ? 'A connected-host operator token is present; QR and manual setup still require visible confirmed routes.'
+        ? 'A connected-host operator token is present; QR and manual setup are owner-terminal flows the user starts with /pair.'
         : 'No connected-host operator token is present, so companion pairing needs local token provisioning first.',
       nextStep: hasToken
-        ? 'Use /pair or inspect the QR/manual routes when the user asks to pair a companion.'
+        ? 'Ask the user to type /pair in the live Agent terminal when they want to pair a companion.'
         : 'Provision connected-host auth, then return to QR pairing.',
       capabilities: ['QR pairing', 'manual setup fallback', 'token-safe handoff'],
       modelRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
@@ -422,16 +447,18 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         tokenPresent: hasToken,
         rawTokenReturned: false,
       },
-      policy: 'Pairing display and raw-token fallback are visible, confirmation-gated user flows.',
+      policy: 'Pairing display and the raw-token fallback are owner-terminal flows; a model invocation of /pair is refused.',
     },
     {
       id: 'mobile-command-routing',
       label: 'Mobile command routing',
       domain: 'companion',
-      status: controlPlaneReady ? 'ready' : endpointEnabled(state) ? 'attention' : 'setup-needed',
+      status: controlPlaneReady ? 'ready' : endpointEnabled(state) || endpointEnabledUnknown(state) ? 'attention' : 'setup-needed',
       userOutcome: 'Send commands from a companion surface into the same visible Agent control plane.',
       summary: controlPlaneReady
         ? 'Control-plane routing and operator auth are both configured.'
+        : endpointEnabledUnknown(state)
+          ? 'The control-plane setting could not be read, so mobile command routing cannot be assessed.'
         : endpointEnabled(state)
           ? 'The control plane is enabled, but companion auth is not ready.'
           : 'The control plane is disabled, so mobile command routing is not reachable yet.',
@@ -445,7 +472,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         'setup action:"item" setupItemId:"connected-host-auth"',
       ],
       evidence: {
-        controlPlaneEnabled: endpointEnabled(state),
+        controlPlaneEnabled: endpointEnabledUnknown(state) ? null : endpointEnabled(state),
         tokenPresent: hasToken,
       },
       policy: 'Companion-originated tasks, approvals, sends, and provider/model changes remain explicit visible routes.',
@@ -454,16 +481,18 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       id: 'browser-cockpit-pwa',
       label: 'Browser cockpit/PWA',
       domain: 'browser',
-      status: webEnabled ? 'ready' : 'setup-needed',
+      status: webEnabled ? 'ready' : webEnabled === null ? 'attention' : 'setup-needed',
       userOutcome: 'Use the connected-host browser cockpit from desktop or mobile without returning to the terminal.',
       summary: webEnabled
         ? `The connected-host web endpoint is enabled at ${webUrl}.`
-        : 'The connected-host web endpoint is disabled, so the browser cockpit/PWA cannot open yet.',
+        : webEnabled === null
+          ? 'The web.enabled setting could not be read, so the browser cockpit/PWA state is unknown.'
+          : 'The connected-host web endpoint is disabled, so the browser cockpit/PWA cannot open yet.',
       nextStep: webEnabled
         ? 'Open the connected browser cockpit when the user confirms a browser handoff.'
         : 'Inspect the web service endpoint and enable the host web surface only when the user wants browser access.',
       capabilities: ['responsive browser workspace', 'PWA route', 'mobile-friendly cockpit'],
-      modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"connected-browser-cockpit" confirm:true explicitUserRequest:"..."',
+      modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"connected-browser-cockpit" explicitUserRequest:"..."',
       setupRoutes: [
         'agent_harness mode:"ui_surface" surfaceId:"connected-browser-cockpit"',
         'host action:"service" endpointId:"web"',
@@ -478,11 +507,11 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       id: 'voice-controls',
       label: 'Voice controls',
       domain: 'voice',
-      status: voiceEnabled && voiceReadiness.readyVoiceProviderCount > 0 ? 'ready' : voiceEnabled ? 'attention' : 'setup-needed',
+      status: voiceEnabled && voiceReadiness.readyVoiceProviderCount > 0 ? 'ready' : voiceEnabled || voiceEnabled === null ? 'attention' : 'setup-needed',
       userOutcome: 'Talk to the assistant through an intentionally enabled voice surface.',
       summary: voiceEnabled
         ? `${voiceReadiness.readyVoiceProviderCount}/${voiceReadiness.voiceProviders.length} voice provider(s) are ready.`
-        : 'The voice surface is disabled.',
+        : voiceEnabled === null ? 'The ui.voiceEnabled setting could not be read, so the voice surface state is unknown.' : 'The voice surface is disabled.',
       nextStep: voiceEnabled
         ? 'Review media posture for provider or voice setup blockers before claiming hands-free use.'
         : 'Enable voice only after the user asks for spoken or push-to-talk interaction.',
@@ -512,8 +541,8 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       capabilities: ['TTS provider selection', 'voice picker', 'spoken reply route'],
       modelRoute: 'agent_harness mode:"media_posture" query:"tts" includeParameters:true',
       setupRoutes: [
-        'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" confirm:true explicitUserRequest:"..."',
-        'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" confirm:true explicitUserRequest:"..."',
+        'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"..."',
+        'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"..."',
       ],
       evidence: {
         selectedTtsProviderStatus: voiceReadiness.selectedTtsProviderStatus,

@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
+import { tmpdir } from 'node:os';
 import { waitFor } from './_helpers/test-timeout.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
@@ -19,7 +20,7 @@ useToolReadings();
 describe('ProcessManager.spawn: kill_on_timeout', () => {
   test('a killable process is terminated when its timeout expires', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('sleep 10', '/tmp', undefined, {
+    const result = await pm.spawn('sleep 10', tmpdir(), undefined, {
       timeout_ms: 50,
       sigterm_grace_ms: 30,
       kill_on_timeout: true,
@@ -37,7 +38,7 @@ describe('ProcessManager.spawn: kill_on_timeout', () => {
 
   test('kill_on_timeout:false leaves the process running past its deadline', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('sleep 10', '/tmp', undefined, {
+    const result = await pm.spawn('sleep 10', tmpdir(), undefined, {
       timeout_ms: 50,
       sigterm_grace_ms: 30,
       kill_on_timeout: false,
@@ -58,7 +59,7 @@ describe('ProcessManager.spawn: kill_on_timeout', () => {
 
   test('the default is unchanged: a timeout still kills', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('sleep 10', '/tmp', undefined, {
+    const result = await pm.spawn('sleep 10', tmpdir(), undefined, {
       timeout_ms: 50,
       sigterm_grace_ms: 30,
     });
@@ -70,7 +71,7 @@ describe('ProcessManager.spawn: kill_on_timeout', () => {
 
   test('a process that finishes in time is never marked timed out', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('echo ok', '/tmp', undefined, {
+    const result = await pm.spawn('echo ok', tmpdir(), undefined, {
       timeout_ms: 5_000,
       kill_on_timeout: false,
     });
@@ -85,7 +86,7 @@ describe('ProcessManager.spawn: kill_on_timeout', () => {
 
   test('a spared process can still be stopped explicitly', async () => {
     const pm = new ProcessManager();
-    const result = await pm.spawn('sleep 10', '/tmp', undefined, {
+    const result = await pm.spawn('sleep 10', tmpdir(), undefined, {
       timeout_ms: 50,
       kill_on_timeout: false,
     });

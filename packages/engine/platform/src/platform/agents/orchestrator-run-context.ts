@@ -19,6 +19,8 @@ import type { ContractAgentHooks } from '../contract/agent-hooks.js';
 type EmitterContext = import('../runtime/emitters/index.js').EmitterContext;
 
 export interface AgentOrchestratorRunContext {
+  /** Where the context_accounting tool finds the source of the worker whose call it is serving. */
+  readonly contextAccountingHolder?: import('../tools/context-accounting/index.js').ContextAccountingHolder | undefined;
   /** Read only the child agents referenced by this run when checking its final synthesis. */
   readonly agentManager?: Pick<import('../tools/agent/manager.js').AgentManager, 'list' | 'getConversationSnapshot'> | undefined;
   readonly autonomousPort?: import('../tools/agent/contract-binding.js').ContractActionPort | undefined;
@@ -72,8 +74,10 @@ export interface AgentOrchestratorRunContext {
    * every tool call runs with `opts` undefined, unchanged from before.
    */
   readonly getCancellationSignal?: ((agentId: string) => AbortSignal | undefined) | undefined;
+  /** Pause between provider retries; a test seam, defaults to a real timer. Must reject when the signal aborts. */
+  readonly waitForRetry?: ((delayMs: number, signal: AbortSignal | undefined) => Promise<void>) | undefined;
   readonly processManager?: ProcessManager | undefined;
-  readonly messageBus: Pick<AgentMessageBus, 'getMessages'>;
+  readonly messageBus: Pick<AgentMessageBus, 'getMessages'> & Partial<Pick<AgentMessageBus, 'markDelivered'>>;
   readonly knowledgeService?: Pick<KnowledgeService, 'preparePromptPacket'> | undefined;
   readonly memoryRegistry?: Pick<import('../state/index.js').MemoryRegistry, 'getAll' | 'semanticCandidates' | 'vectorStats'> | undefined;
   /**

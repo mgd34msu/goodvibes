@@ -25,6 +25,7 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { ClientBuildGuard } from './client/build-floors.ts';
 import type { FleetUnionReadModel } from './client/fleet-union.ts';
+import type { RuntimeHealthAggregator } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import type { ApprovalRaiser, ClientRuntimeServicesOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { ConfigManager, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
@@ -70,7 +71,7 @@ import type { KeybindingsManager } from '../input/keybindings.ts';
 import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
-import type { WorkspaceTrustManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { WorkspaceTrustManager, WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface RuntimeServicesOptions {
   readonly runtimeBus: RuntimeEventBus;
@@ -231,6 +232,8 @@ export interface RuntimeServices {
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
   readonly componentHealthMonitor: ComponentHealthMonitor;
+  /** Per-domain runtime health, kept current from the runtime event bus. */
+  readonly healthAggregator: RuntimeHealthAggregator;
   readonly worktreeRegistry: WorktreeRegistry;
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   readonly webhookNotifier: WebhookNotifier;
@@ -302,6 +305,10 @@ export interface RuntimeServices {
   readonly workspaceCheckpointManager: WorkspaceCheckpointManager;
   /** Per-workspace trust gate, restricts write/execute/delegate tools until the workspace is trusted. */
   readonly workspaceTrustManager: WorkspaceTrustManager;
+  /** The late-bound trust question the terminal UI patches in once it exists. */
+  readonly trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel> };
+  /** Asks the trust question through `trustPromptRef`; concurrent callers share one prompt. */
+  readonly requestTrustDecision: () => Promise<WorkspaceTrustLevel>;
   readonly integrationHelpers: IntegrationHelperService;
   /** Re-root path-bound stores (MemoryStore, ProjectIndex) to a new working directory, called by WorkspaceSwapManager after verification; stores needing a process restart just warn-log and keep serving the old path until the daemon restarts with the new --working-dir. */
   rerootStores(newWorkingDir: string): Promise<void>;

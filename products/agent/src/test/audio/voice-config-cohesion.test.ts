@@ -7,21 +7,14 @@
  * the web UI) reads, rather than a private Agent-only voice-config schema
  * that could silently drift out of shape.
  *
- * This suite locks that in three ways:
- *  1. The tts.* keys the Agent's audio pipeline actually reads (tts.provider,
- *     tts.voice, and tts.speed inside the platform-owned SpokenTurnController that
- *     spoken-turn-wiring.ts constructs, plus tts.llmProvider/tts.llmModel in
- *     spoken-turn-model-routing.ts and tts.provider/tts.voice in
- *     tts-settings-actions.ts) exist in the platform's shared CONFIG_SCHEMA with
- *     the shared defaults, not a schema the Agent invented for itself.
- *  2. A real ConfigManager, constructed the exact way the Agent's entrypoint
- *     constructs it (surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, a fresh temp
- *     home directory, no local overrides on disk), resolves tts.* to those
- *     same shared defaults out of the box.
- *  3. The source files that read/write tts.* import ConfigManager's type
- *     from the shared platform package, not a local reimplementation, so a
- *     future change can't quietly introduce an Agent-local voice-config
- *     silo without this test's import-scan catching it.
+ * This suite locks that in two ways:
+ *  1. The tts.* keys the Agent's audio pipeline reads (tts.provider, tts.voice,
+ *     tts.llmProvider, tts.llmModel) exist in the platform's shared
+ *     CONFIG_SCHEMA, and a real ConfigManager built the way the Agent's
+ *     entrypoint builds it (a fresh temp home, no overrides on disk) resolves
+ *     each to the schema default, not a schema the Agent invented for itself.
+ *  2. A value set on one surface reaches another through the shared tier file,
+ *     and a write from the Agent lands in that file, not an Agent-local silo.
  *
  * See docs/voice-and-live-tts.md ("Platform Voice-Config Cohesion") for the
  * accompanying rulings: local (non-daemon) synthesis stays local so the
@@ -37,12 +30,28 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { extractOnnxRuntimeAssets } from '../../audio/wake-inference.ts';
 import { createVoiceSttGateway, describeTranscriptionFailure } from '../../core/voice-stt-gateway.ts';
 import { GoodVibesError } from '@goodvibes-jev/engine/platform';
+
+describe('Voice config cohesion: the Agent reads the platform schema', () => {
+  for (const key of ['tts.provider', 'tts.voice', 'tts.llmProvider', 'tts.llmModel'] as const) {
+    test(`${key} is declared in the shared schema and a fresh Agent ConfigManager resolves its default`, () => {
+      const declaration = CONFIG_SCHEMA.find((setting) => setting.key === key);
+      expect(declaration, `${key} must be declared by the platform`).toBeDefined();
+      const homeDir = makeProjectTempDir('goodvibes-agent-voice-defaults');
+      try {
+        const agentConfigManager = new ConfigManager({ homeDir, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT });
+        expect<unknown>(agentConfigManager.get(key)).toEqual(declaration?.default);
+      } finally {
+        rmSync(homeDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
 
 describe('Voice config cohesion: cross-surface proof (2026-07-06 shared config tier)', () => {
   // Mike's label is "one voice across terminal, desktop, and agent." Schema

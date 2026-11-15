@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import type { AutomationRouteBinding } from '../../automation/routes.js';
 import { HOME_ASSISTANT_SURFACE } from '../../channels/builtin/homeassistant.js';
 import type { RouteBindingManager } from '../../channels/index.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
 import type { CompanionChatTurnEvent } from '../../companion/companion-chat-types.js';
 import type { ConfigManager } from '../../config/manager.js';
+import { serviceFailureStatus } from './error-response.js';
 import {
+  isHomeAssistantChatSession,
   postHomeAssistantChatMessage,
   readHomeAssistantRemoteSessionTtlMs,
   type HomeAssistantChatInput,
@@ -26,6 +30,12 @@ interface HomeAssistantMessageIndex {
   readonly routeId: string;
   readonly conversationId: string;
   readonly createdAt: number;
+  /** The chat manager's id for the posted user message; the key to the reply in the session transcript. */
+  readonly chatMessageId?: string | undefined;
+  /** The turn that answers it, once the chat manager has started it; a cancel by messageId targets only this turn. */
+  readonly turnId?: string | undefined;
+  /** How an earlier attempt ended when it ended badly, so a retry with the same messageId reports it instead of posting again. */
+  readonly failure?: { readonly status: 'failed' | 'cancelled'; readonly error: string } | undefined;
 }
 
 interface HomeAssistantSubmitResult {
@@ -42,6 +52,10 @@ interface HomeAssistantSubmitResult {
   readonly assistant?: HomeAssistantAssistantResult | undefined;
   readonly timeoutMs?: number | undefined;
   readonly error?: string | undefined;
+  /** The chat manager's id for the posted message; read the outcome from the companion chat API with it, notably after `wait: false`. */
+  readonly chatMessageId?: string | undefined;
+  /** True when this messageId was already submitted: nothing was posted again and the result describes the earlier turn. */
+  readonly duplicate?: true | undefined;
 }
 
 interface HomeAssistantAssistantResult {
@@ -56,19 +70,40 @@ interface HomeAssistantRouteContext {
   readonly routeBindings: Pick<RouteBindingManager, 'start' | 'upsertBinding' | 'patchBinding'>;
   readonly chatManager: CompanionChatManager;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
+  /** Null when the caller holds the scope (the admin token holds every scope), else the 403 naming it. */
+  readonly requireScope: (req: Request, scope: string) => Response | null;
+  /** Null for an admin caller, else the refusal. */
+  readonly requireAdmin: (req: Request) => Response | null;
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
   /** Optional home-graph reader so a turn can ground itself in its pre-registered space. */
   readonly homeGraph?: HomeGraphGroundingReader | undefined;
 }
 
 interface ParsedHomeAssistantInput extends HomeAssistantChatInput {
-  readonly publishEvent: boolean;
+  /** True when the caller chose the messageId (a generated one cannot repeat). */
+  readonly clientMessageId: boolean;
   readonly wait: boolean;
   readonly waitTimeoutMs: number;
 }
 
+/**
+ * The paths the Home Assistant conversation routes serve.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const HOME_ASSISTANT_CONVERSATION_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/homeassistant' },
+  { method: 'GET', path: '/api/homeassistant/health' },
+  { method: 'POST', path: '/api/homeassistant/conversation' },
+  { method: 'POST', path: '/api/homeassistant/conversation/stream' },
+  { method: 'POST', path: '/api/homeassistant/conversation/cancel' },
+];
+
 export class HomeAssistantConversationRoutes {
   private readonly messageIndex = new Map<string, HomeAssistantMessageIndex>();
+  private readonly inflight = new Map<string, Promise<HomeAssistantSubmitResult>>();
+  /** The HTTP status a rejected submit answers with, kept off the wire body. */
+  private readonly rejectionStatus = new WeakMap<HomeAssistantSubmitResult, number>();
 
   constructor(private readonly context: HomeAssistantRouteContext) {}
 
@@ -77,28 +112,51 @@ export class HomeAssistantConversationRoutes {
     if (!url.pathname.startsWith('/api/homeassistant')) return null;
 
     if ((url.pathname === '/api/homeassistant' || url.pathname === '/api/homeassistant/health') && req.method === 'GET') {
+      const denied = this.context.requireScope(req, 'read:sessions');
+      if (denied) return denied;
       return Response.json(this.describeHealth());
     }
 
     if (url.pathname === '/api/homeassistant/conversation' && req.method === 'POST') {
+      const denied = this.gateConversation(req);
+      if (denied) return denied;
       const body = await this.context.parseJsonBody(req);
       if (body instanceof Response) return body;
+      const refused = this.gateRoutingOverride(req, body);
+      if (refused) return refused;
       return this.respondToSubmit(await this.submitConversation(body));
     }
 
     if (url.pathname === '/api/homeassistant/conversation/stream' && req.method === 'POST') {
+      const denied = this.gateConversation(req);
+      if (denied) return denied;
       const body = await this.context.parseJsonBody(req);
       if (body instanceof Response) return body;
+      const refused = this.gateRoutingOverride(req, body);
+      if (refused) return refused;
       return this.streamConversation(body);
     }
 
     if (url.pathname === '/api/homeassistant/conversation/cancel' && req.method === 'POST') {
+      const denied = this.gateConversation(req);
+      if (denied) return denied;
       const body = await this.context.parseJsonBody(req);
       if (body instanceof Response) return body;
       return await this.cancelConversation(body);
     }
 
     return null;
+  }
+
+  /** Posting, streaming and cancelling a turn write to a chat session: they need the same scope as the companion chat routes. */
+  private gateConversation(req: Request): Response | null {
+    return this.context.requireScope(req, 'write:sessions');
+  }
+
+  /** A caller-chosen provider or model spends the operator's quota on a route the operator did not pick: admin only. */
+  private gateRoutingOverride(req: Request, body: JsonRecord): Response | null {
+    const chosen = readString(body.providerId ?? body.provider) !== undefined || readString(body.modelId ?? body.model) !== undefined;
+    return chosen ? this.context.requireAdmin(req) : null;
   }
 
   private describeHealth(): JsonRecord {
@@ -131,6 +189,7 @@ export class HomeAssistantConversationRoutes {
   private async submitConversation(
     body: JsonRecord,
     onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined,
+    onSessionResolved?: ((sessionId: string) => void) | undefined,
   ): Promise<HomeAssistantSubmitResult> {
     if (!Boolean(this.context.configManager.get('surfaces.homeassistant.enabled'))) {
       return {
@@ -165,6 +224,80 @@ export class HomeAssistantConversationRoutes {
       };
     }
 
+    // A turn always offers the full tool registry; accepting a list that narrows nothing would let a caller assume a read-only turn.
+    if (input.tools?.length) {
+      return {
+        ok: false,
+        acknowledged: true,
+        messageId: input.messageId,
+        conversationId: input.conversationId,
+        sessionId: '',
+        routeId: '',
+        mode: 'rejected',
+        newSession: false,
+        sessionExpired: false,
+        status: 'rejected',
+        error: 'A tools list is not supported on a Home Assistant conversation: every turn offers the full tool registry. Remove "tools" and resubmit.',
+      };
+    }
+
+    if (!input.clientMessageId) return this.postTurn(input, onTurnEvent, onSessionResolved);
+    const key = [input.surfaceId, input.conversationId, input.messageId].join('\u0000');
+    // A retry of a submit that is still waiting shares its outcome; a retry of one that already
+    // returned (a 202 timeout, say) is answered from the transcript. Neither posts the utterance again.
+    const running = this.inflight.get(key);
+    if (running) return this.markDuplicate(await running);
+    const known = this.messageIndex.get(input.messageId);
+    // An entry with no chat message id is only the provisional one made before posting: that attempt never posted, so this one may.
+    if (known?.chatMessageId && known.conversationId === input.conversationId) return this.describeKnownMessage(input, known);
+    const turn = this.postTurn(input, onTurnEvent, onSessionResolved);
+    const settle = (): void => { this.inflight.delete(key); };
+    this.inflight.set(key, turn);
+    turn.then(settle, settle);
+    return turn;
+  }
+
+  private markDuplicate(result: HomeAssistantSubmitResult): HomeAssistantSubmitResult {
+    const copy = { ...result, duplicate: true as const };
+    const status = this.rejectionStatus.get(result);
+    if (status !== undefined) this.rejectionStatus.set(copy, status);
+    return copy;
+  }
+
+  /** What an earlier submit with this messageId came to, read from the transcript; nothing is posted. */
+  private describeKnownMessage(input: ParsedHomeAssistantInput, known: HomeAssistantMessageIndex): HomeAssistantSubmitResult {
+    const base = {
+      acknowledged: true as const,
+      messageId: input.messageId,
+      conversationId: input.conversationId,
+      sessionId: known.sessionId,
+      routeId: known.routeId,
+      mode: 'remote-chat' as const,
+      newSession: false,
+      sessionExpired: false,
+      duplicate: true as const,
+      ...(known.chatMessageId ? { chatMessageId: known.chatMessageId } : {}),
+    };
+    if (known.failure) return { ...base, ok: false, status: known.failure.status, error: known.failure.error };
+    const chat = this.context.chatManager;
+    if (!chat.getSession(known.sessionId)) {
+      return { ...base, ok: false, status: 'failed', error: 'The chat session for this message no longer exists.' };
+    }
+    const transcript = known.chatMessageId ? chat.getMessages(known.sessionId) : [];
+    const reply = transcript.find((message) => message.role === 'assistant' && message.inReplyTo === known.chatMessageId);
+    if (reply?.deliveryState === 'cancelled') return { ...base, ok: false, status: 'cancelled', error: 'Turn cancelled' };
+    if (reply) return { ...base, ok: true, status: 'completed', assistant: buildAssistantResult(reply.content) };
+    if (transcript.find((message) => message.id === known.chatMessageId)?.deliveryState === 'unanswered') {
+      return { ...base, ok: false, status: 'failed', error: 'The message was never answered.' };
+    }
+    return { ...base, ok: true, status: 'running' };
+  }
+
+  private async postTurn(
+    input: ParsedHomeAssistantInput,
+    onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined,
+    onSessionResolved?: ((sessionId: string) => void) | undefined,
+  ): Promise<HomeAssistantSubmitResult> {
     let posted: HomeAssistantChatPostResult;
     try {
       posted = await postHomeAssistantChatMessage(
@@ -180,11 +313,23 @@ export class HomeAssistantConversationRoutes {
           wait: input.wait,
           timeoutMs: input.waitTimeoutMs,
           clientId: `homeassistant:${input.surfaceId}:${input.conversationId}`,
-          ...(onTurnEvent ? { onTurnEvent } : {}),
+          onTurnEvent: (event) => {
+            if (event.type === 'turn.started') this.rememberTurn(input.messageId, event.turnId);
+            onTurnEvent?.(event);
+          },
+          // Indexed as soon as the session is known, so a cancel by messageId works while the turn runs.
+          onResolved: (resolution) => {
+            this.indexMessage(input, { ...resolution, messageId: '' });
+            onSessionResolved?.(resolution.session.id);
+          },
         },
       );
     } catch (error) {
-      return {
+      // The error's own status stays (a rate limit is 429, a closed session 409); an error that
+      // names none is a server fault, not a mistake in the request.
+      if (!this.messageIndex.get(input.messageId)?.chatMessageId) this.messageIndex.delete(input.messageId);
+      const httpStatus = serviceFailureStatus(error, 500);
+      const result: HomeAssistantSubmitResult = {
         ok: false,
         acknowledged: true,
         messageId: input.messageId,
@@ -194,9 +339,11 @@ export class HomeAssistantConversationRoutes {
         mode: 'rejected',
         newSession: false,
         sessionExpired: false,
-        status: 'rejected',
+        status: httpStatus >= 500 ? 'failed' : 'rejected',
         error: error instanceof Error ? error.message : String(error),
       };
+      this.rejectionStatus.set(result, httpStatus);
+      return result;
     }
 
     this.indexMessage(input, posted);
@@ -210,6 +357,7 @@ export class HomeAssistantConversationRoutes {
       mode: 'remote-chat' as const,
       newSession: posted.newSession,
       sessionExpired: posted.sessionExpired,
+      chatMessageId: posted.messageId,
     };
 
     if (!input.wait) {
@@ -220,7 +368,7 @@ export class HomeAssistantConversationRoutes {
       return {
         ...base,
         ok: false,
-        status: timedOut ? 'timeout' : 'failed',
+        status: timedOut ? 'timeout' : posted.cancelled ? 'cancelled' : 'failed',
         ...(timedOut ? { timeoutMs: input.waitTimeoutMs } : {}),
         error: posted.error,
       };
@@ -234,9 +382,9 @@ export class HomeAssistantConversationRoutes {
 
   private respondToSubmit(result: HomeAssistantSubmitResult): Response {
     if (result.error === 'Home Assistant surface is disabled.') return Response.json(result, { status: 503 });
-    if (result.status === 'rejected') return Response.json(result, { status: result.ok ? 202 : 400 });
+    if (result.status === 'rejected') return Response.json(result, { status: result.ok ? 202 : this.rejectionStatus.get(result) ?? 400 });
     if (result.status === 'timeout') return Response.json(result, { status: 202 });
-    if (result.status === 'failed') return Response.json(result, { status: 500 });
+    if (result.status === 'failed') return Response.json(result, { status: this.rejectionStatus.get(result) ?? 500 });
     if (result.status === 'cancelled') return Response.json(result, { status: 409 });
     return Response.json(result, { status: result.status === 'completed' ? 200 : 202 });
   }
@@ -245,12 +393,35 @@ export class HomeAssistantConversationRoutes {
     const encoder = new TextEncoder();
     const conversationId = readString(body.conversationId ?? body.conversation_id);
     const messageId = readString(body.messageId ?? body.message_id);
+    let closed = false;
+    let resolvedSessionId: string | undefined;
+    let startedTurnId: string | undefined;
+    // Only this stream's own turn: its message may be queued behind another utterance's turn, which a
+    // bare session cancel would stop instead. A client that leaves before its turn starts has it
+    // cancelled the moment it does.
+    const cancelOwnTurn = (): void => {
+      const sessionId = resolvedSessionId;
+      const turnId = startedTurnId;
+      if (!closed || !sessionId || !turnId) return;
+      void this.context.chatManager.cancelTurn(sessionId, { turnId }).catch((error: unknown) => {
+        const code = (error as { code?: string }).code;
+        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') logger.warn('[homeassistant] could not cancel the turn of a closed stream', { sessionId, error: summarizeError(error) });
+      });
+    };
     const stream = new ReadableStream<Uint8Array>({
       start: async (controller) => {
-        let closed = false;
         const send = (event: string, data: unknown): void => {
           if (closed) return;
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          try {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            closed = true;
+          }
+        };
+        const close = (): void => {
+          if (closed) return;
+          closed = true;
+          try { controller.close(); } catch { /* the client already went away */ }
         };
         // Bridge the platform's per-turn streaming events into incremental SSE
         // `delta` frames as the model produces text. The terminal `final`/`error`
@@ -258,6 +429,10 @@ export class HomeAssistantConversationRoutes {
         // `delta` events still see exactly one terminal frame.
         let accumulated = '';
         const onTurnEvent = (event: CompanionChatTurnEvent): void => {
+          if (event.type === 'turn.started') {
+            startedTurnId = event.turnId;
+            cancelOwnTurn();
+          }
           if (event.type === 'turn.delta' && event.delta) {
             accumulated += event.delta;
             send('delta', {
@@ -271,17 +446,21 @@ export class HomeAssistantConversationRoutes {
           }
         };
         try {
-          const result = await this.submitConversation({ ...body, wait: true }, onTurnEvent);
+          const result = await this.submitConversation({ ...body, wait: true }, onTurnEvent, (id) => { resolvedSessionId = id; });
+          if (closed) return;
           send(result.status === 'completed' ? 'final' : 'error', result);
-          closed = true;
-          controller.close();
+          close();
         } catch (error) {
           send('error', { ok: false, error: error instanceof Error ? error.message : String(error) });
-          closed = true;
-          controller.close();
+          close();
         }
       },
-      cancel: () => undefined,
+      // The client went away: stop the turn that is answering nobody, so it stops spending
+      // tokens and the session is free for the next utterance.
+      cancel: () => {
+        closed = true;
+        cancelOwnTurn();
+      },
     });
     return new Response(stream, {
       headers: {
@@ -308,14 +487,30 @@ export class HomeAssistantConversationRoutes {
     if (!sessionId) {
       return Response.json({ ok: false, error: 'sessionId or known messageId is required.' }, { status: 400 });
     }
-    if (!this.context.chatManager.getSession(sessionId)) {
+    // Only a chat session this surface created: the route credential must not be able to stop a
+    // TUI, web or other operator's chat by naming its id.
+    const session = this.context.chatManager.getSession(sessionId);
+    if (!session || !isHomeAssistantChatSession(session)) {
       return Response.json({ ok: false, sessionId, error: 'Unknown Home Assistant chat session.' }, { status: 404 });
     }
+    // Named by messageId only: stop that turn, not whatever newer utterance now holds the session.
+    const byMessageOnly = !readString(body.sessionId ?? body.session_id) && indexed !== undefined;
+    if (byMessageOnly && !indexed.turnId) {
+      // Its turn has not started (it is queued behind another), so there is no turn to name; a bare
+      // cancel would stop the utterance that is running instead.
+      return Response.json({
+        ok: false,
+        sessionId,
+        status: 'queued',
+        error: 'That message has not started yet, so it cannot be cancelled by messageId. Cancel again once it starts, or pass sessionId to stop whatever turn is running.',
+      }, { status: 409 });
+    }
+    const guard = byMessageOnly && indexed.turnId ? { turnId: indexed.turnId } : {};
     try {
-      await this.context.chatManager.cancelTurn(sessionId);
+      await this.context.chatManager.cancelTurn(sessionId, guard);
     } catch (error: unknown) {
       const code = (error as { code?: string }).code;
-      if (code !== 'NO_ACTIVE_TURN') {
+      if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') {
         return Response.json(
           { ok: false, sessionId, error: error instanceof Error ? error.message : String(error) },
           { status: 500 },
@@ -359,7 +554,7 @@ export class HomeAssistantConversationRoutes {
       ...(tools.length ? { tools } : {}),
       ...(haContext ? { context: haContext } : {}),
       ...(grounding ? { grounding } : {}),
-      publishEvent: body.publishEvent === true,
+      clientMessageId: readString(body.messageId ?? body.message_id) !== undefined,
       wait: body.wait !== false,
       waitTimeoutMs: clampNumber(body.timeoutMs ?? body.waitTimeoutMs, DEFAULT_WAIT_TIMEOUT_MS, 1_000, MAX_WAIT_TIMEOUT_MS),
       remoteSessionTtlMs: this.readRemoteSessionTtlMs(body),
@@ -385,14 +580,25 @@ export class HomeAssistantConversationRoutes {
     };
   }
 
+  private rememberTurn(messageId: string, turnId: string): void {
+    const entry = this.messageIndex.get(messageId);
+    if (entry) this.messageIndex.set(messageId, { ...entry, turnId });
+  }
+
   private indexMessage(input: ParsedHomeAssistantInput, posted: HomeAssistantChatPostResult): void {
+    const previous = this.messageIndex.get(input.messageId);
     this.messageIndex.set(input.messageId, {
+      ...(previous?.turnId ? { turnId: previous.turnId } : {}),
       messageId: input.messageId,
       ...(posted.assistantMessageId ? { assistantMessageId: posted.assistantMessageId } : {}),
       sessionId: posted.session.id,
       routeId: posted.binding.id,
       conversationId: input.conversationId,
       createdAt: Date.now(),
+      ...(posted.messageId ? { chatMessageId: posted.messageId } : {}),
+      ...(input.wait && posted.error && posted.timedOut !== true
+        ? { failure: { status: posted.cancelled ? 'cancelled' as const : 'failed' as const, error: posted.error } }
+        : {}),
     });
     if (this.messageIndex.size > 500) {
       const oldest = [...this.messageIndex.values()].sort((a, b) => a.createdAt - b.createdAt).slice(0, 100);

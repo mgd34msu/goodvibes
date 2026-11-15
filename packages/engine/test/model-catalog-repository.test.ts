@@ -32,10 +32,13 @@ test('repository model inheritance preserves canonical identity, provider overri
   } finally { installCatalogModelFacts([]); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a broken base-model reference refuses the new snapshot', async () => {
-  await expect(parseModelCatalogRepository(new Map([
-    ['providers/a/provider.toml', 'name="A"'], ['providers/a/models/broken.toml', 'base_model="missing/model"'],
-  ]))).rejects.toThrow('unresolved base_model');
+test('a broken base-model reference skips that model and keeps the rest of the snapshot', async () => {
+  const catalog = await parseModelCatalogRepository(new Map([
+    ['providers/a/provider.toml', 'name="A"'],
+    ['providers/a/models/broken.toml', 'base_model="missing/model"'],
+    ['providers/a/models/fine.toml', 'name="Fine"'],
+  ]));
+  expect(Object.keys(catalog['a']!.models)).toEqual(['fine']);
 });
 
 test('repository types decide untyped live-listing entries without judgment calls', async () => {

@@ -51,7 +51,7 @@ export function summarizeProviderAuth(
 ): { readonly configured: boolean; readonly detail: string } {
   if (base.configured) return base;
   const winner = routes.find((route) => route.usable === true)
-    ?? routes.find((route) => route.configured && route.freshness !== 'unconfigured');
+    ?? routes.find((route) => route.configured && route.freshness !== 'unconfigured' && route.freshness !== 'pending');
   if (winner === undefined) return base;
   return {
     configured: true,
@@ -63,7 +63,9 @@ export async function buildStandardProviderAuthRoutes(
   options: StandardProviderAuthOptions,
   deps: ProviderRuntimeMetadataDeps,
 ): Promise<readonly ProviderAuthRouteDescriptor[]> {
-  const secretKeys = [...new Set([...(options.secretKeys ?? []), ...(options.apiKeyEnvVars ?? [])])];
+  // A provider that names the keys it can read from the store gets only those: its other
+  // environment names (a signing key pair, a region) are not usable from a stored copy.
+  const secretKeys = [...new Set<string>((options.secretKeys?.length ?? 0) > 0 ? options.secretKeys : options.apiKeyEnvVars)];
   const detailedSecrets = await deps.secretsManager.listDetailed();
   const builtinSubscriptions = new Set(listBuiltinSubscriptionProviders().map((entry) => entry.provider));
   const subscriptionProviderId = options.subscriptionProviderId ?? options.providerId;
@@ -73,10 +75,12 @@ export async function buildStandardProviderAuthRoutes(
   // A revocation stamp overrides the timestamp: the authorization server
   // refused this session's grant, so deriving "healthy" from expiresAt would
   // show a green light over a login every send is going to fail.
-  const subscriptionFreshness = pendingSubscription
-    ? 'pending'
-    : subscription
-      ? (subscription.revokedAt !== undefined ? 'expired' : determineFreshness(subscription.expiresAt))
+  // A stored session is judged on its own state even while a new login is
+  // pending; the pending state stands alone only when there is no session.
+  const subscriptionFreshness = subscription
+    ? (subscription.revokedAt !== undefined ? 'expired' : determineFreshness(subscription.expiresAt))
+    : pendingSubscription
+      ? 'pending'
       : 'unconfigured';
   const serviceNames = options.serviceNames && options.serviceNames.length > 0
     ? [...new Set(options.serviceNames)]
@@ -114,7 +118,11 @@ export async function buildStandardProviderAuthRoutes(
       ...(keys.length > 0 ? { secretKeys: keys } : {}),
       repairHints: [
         ...(envVars.length > 0
-          ? [`Set ${envVars.join(' or ')} or store one of those keys in /secrets.`]
+          ? [
+            keys.length > 0 && !envVars.every((envVar) => keys.includes(envVar))
+              ? `Set ${envVars.join(' or ')} in the process environment; only ${keys.join(' or ')} can be stored in /secrets.`
+              : `Set ${envVars.join(' or ')} or store one of those keys in /secrets.`,
+          ]
           : ['Store the provider API key in /secrets or the process environment.']),
       ],
     });
@@ -157,10 +165,13 @@ export async function buildStandardProviderAuthRoutes(
       route: 'subscription-oauth',
       label: 'Subscription OAuth',
       configured: subscription != null || pendingSubscription != null || builtinSubscriptions.has(subscriptionProviderId),
-      usable: subscriptionFreshness !== 'expired' && subscriptionFreshness !== 'unconfigured',
+      // A login that has not completed gives the provider nothing to send with.
+      usable: subscriptionFreshness !== 'expired' && subscriptionFreshness !== 'unconfigured' && subscriptionFreshness !== 'pending',
       freshness: subscriptionFreshness,
       detail: pendingSubscription
-        ? 'Subscription OAuth login is pending completion.'
+        ? subscription
+          ? 'A new subscription OAuth login is pending completion; the stored session stays in use until it completes.'
+          : 'Subscription OAuth login is pending completion.'
         : subscription?.revokedAt !== undefined
           ? 'The provider ended this subscription session; it must be signed in again.'
           : subscription

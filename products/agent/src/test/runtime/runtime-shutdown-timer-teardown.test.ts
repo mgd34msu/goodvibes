@@ -15,8 +15,7 @@
  * the only thing that stops these, and this file is its proof.
  *
  * Measured on this file before the seam existed: composing the graph created 23
- * timers, and the fork's entire teardown (disposeSessionWriteLedger +
- * providerRegistry.stopWatching) left 18 live, 14 of them permanent. After: 0.
+ * timers, and the fork's entire teardown (providerRegistry.stopWatching) left 18 live, 14 of them permanent. After: 0.
  *
  * Two properties are held down here, and they are different:
  *
@@ -67,7 +66,6 @@ const POLLER_OWNERS = [
   'runtime/retention/append-only-registry',
   'state/memory-consolidation-scheduler',
   'knowledge/scheduling',
-  'agents/wrfc-controller',
   'runtime/session-spine/client',
 ] as const;
 
@@ -116,7 +114,10 @@ test('createRuntimeServices() actually starts timers: the measurement is not vac
 });
 
 test('dispose() leaves no poller from the runtime graph still running', () => {
-  const survivors = report.liveAtDispose.filter((entry) => POLLER_OWNERS.some((owner) => entry.includes(owner)));
+  // An interval never drains, so any live one after dispose() is a leaked poller
+  // whichever module armed it; the owner list additionally names self-rescheduling timeouts.
+  const survivors = report.liveAtDispose.filter((entry) => entry.startsWith('interval ')
+    || POLLER_OWNERS.some((owner) => entry.includes(owner)));
   expect(survivors).toEqual([]);
 });
 

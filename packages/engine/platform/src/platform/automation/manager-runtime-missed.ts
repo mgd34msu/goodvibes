@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 
@@ -75,6 +77,8 @@ export function recordAutomationMissedRun(
   context.pruneRunHistory(job.id);
   context.syncRunToRuntime(run, 'automation.missed');
   context.deliverFailureNotice(job, run);
-  void context.saveRuns();
+  void context.saveRuns().catch((error: unknown) => {
+    logger.warn('AutomationManager: missed run could not be saved', { jobId: job.id, runId: run.id, error: summarizeError(error) });
+  });
   return run;
 }

@@ -1,7 +1,7 @@
 /**
  *
- * TaskScheduler pushHistory O(1) per-task Map + debounced save.
- * Verifies history is stable under many runs and correctly capped per task.
+ * TaskScheduler per-task run history: indexed by task, capped per task, and
+ * written through a debounce that coalesces rapid saves.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -49,20 +49,41 @@ describe('TaskScheduler per-task history Map', () => {
     }
   });
 
-  test('history is capped at MAX_HISTORY_PER_TASK (1000) per task', () => {
+  test('history keeps only the newest records of a task, in order, and leaves other tasks alone', () => {
     const { scheduler, cleanup } = makeScheduler();
     try {
       const s = scheduler as unknown as { pushHistory: (rec: TaskRunRecord) => void };
 
-      const MAX = 1000;
-      for (let i = 0; i < MAX + 50; i++) {
+      s.pushHistory({ taskId: 'task-other', startedAt: 99, agentId: 'ag-other', status: 'completed' });
+      for (let i = 0; i < 12; i++) {
         s.pushHistory({ taskId: 'task-cap', startedAt: i, agentId: `ag-${i}`, status: 'completed' });
       }
 
-      const hist = scheduler.getHistory('task-cap');
-      expect(hist.length).toBeLessThanOrEqual(MAX);
-      // Most recent record should be among the last pushed
-      expect(hist[hist.length - 1]!.startedAt).toBe(MAX + 49);
+      // The cap is the scheduler's MAX_HISTORY_PER_TASK (not exported): 12 pushes keep the last 5.
+      expect(scheduler.getHistory('task-cap').map((r) => r.startedAt)).toEqual([7, 8, 9, 10, 11]);
+      expect(scheduler.getHistory('task-other').map((r) => r.startedAt)).toEqual([99]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('rapid saves coalesce into one write that stop() flushes', async () => {
+    const { scheduler, cleanup } = makeScheduler();
+    try {
+      const s = scheduler as unknown as { scheduleSave: () => void; saveTracked: () => void };
+      let writes = 0;
+      s.saveTracked = () => { writes++; };
+
+      s.scheduleSave();
+      s.scheduleSave();
+      s.scheduleSave();
+      expect(writes).toBe(0);
+
+      await scheduler.stop();
+      expect(writes).toBe(1);
+
+      await scheduler.stop();
+      expect(writes).toBe(1);
     } finally {
       cleanup();
     }

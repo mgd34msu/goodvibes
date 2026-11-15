@@ -9,6 +9,7 @@ import type {
   NativeIntakeBrowserBinding,
   NativeIntakeBrowserRecord,
 } from "./native-intake-journal";
+import { exclusiveOperation } from "./exclusive-operation";
 
 export type NativeTurnObservation =
   | { kind: "not-requested" }
@@ -49,6 +50,20 @@ export function createNativeIntakeTurn(options: {
   ): Promise<NativeTurnObservation> {
     // Caller mutation or navigation cannot substitute the saved original.
     const original = structuredClone(record);
+    if (action === "inspect") return perform(action, original, signal);
+    // Status-then-start reads "absent" and then sends: two tabs, or a double click, must
+    // not both act on the same absence.
+    const { endpoint, projectId, principalId, transport } = options.binding;
+    return exclusiveOperation(
+      JSON.stringify(["goodvibes.native-turn", endpoint, projectId, principalId, transport, original.command.inputId]),
+      () => perform(action, original, signal)
+    );
+  }
+  async function perform(
+    action: "inspect" | "request" | "cancel",
+    original: NativeIntakeBrowserRecord,
+    signal?: AbortSignal
+  ): Promise<NativeTurnObservation> {
     current(signal);
     await options.confirm(original);
     current(signal);

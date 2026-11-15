@@ -181,7 +181,8 @@ export class BoundWorkLedgerModel {
         if (projectionEpoch !== this.projectionEpoch) continue;
         const cursor = nextWorkLedgerCursor(events, this.cursor, 'Native ledger history has a sequence gap. Reopen to reload.');
         if (cursor < snapshot.cursor) throw new Error('Native ledger history is behind its snapshot. Reopen to reload.');
-        this.history.push(...this.protect(events));
+        // A loop, not push(...page): a very large page would exceed the engine's argument limit and fail the view.
+        for (const event of this.protect(events)) this.history.push(event);
         this.cursor = cursor;
         if (cursor > snapshot.cursor) {
           snapshot = await this.client.readSnapshot();

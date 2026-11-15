@@ -293,17 +293,30 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
     }
   };
 
+  // Transitions pushed while a list request is out. The list reply was
+  // computed before some of them, so applying it wholesale would roll the
+  // panel back: a just-decided ask would come back pending, or a just-raised
+  // one would vanish until the next reconciliation.
+  let pushedDuringRead: Map<string, SharedApprovalRecord> | null = null;
+
   const refresh = (): Promise<ApprovalsPanelSnapshot> => {
     // Single-flight: the cadence and an on-demand read must not stack two
     // requests whose replies could land out of order and swap the snapshot back.
     if (inFlight) return inFlight;
+    const pushed = new Map<string, SharedApprovalRecord>();
+    pushedDuringRead = pushed;
     inFlight = readHost()
       .then(({ rows, reason }) => {
-        hostRows = rows;
+        let merged = rows;
+        for (const record of pushed.values()) merged = applyApprovalUpdate(merged, record);
+        hostRows = merged;
         hostReason = reason;
         return build(hostRows, hostReason);
       })
-      .finally(() => { inFlight = null; });
+      .finally(() => {
+        if (pushedDuringRead === pushed) pushedDuringRead = null;
+        inFlight = null;
+      });
     return inFlight;
   };
 
@@ -331,6 +344,9 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
 
   const openStream = (): Promise<void> => {
     if (!options.subscribe || subscription !== null || opening !== null || !started) return Promise.resolve();
+    // Set when the stream ends before its open has resolved, so the resolution
+    // does not mark a dead stream as live.
+    let terminated = false;
     opening = options.subscribe({
       onUpdate: (notice) => {
         const record = notice.approval as unknown;
@@ -339,11 +355,13 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         // without a follow-up read: an ask appears the moment it is raised and
         // leaves the moment anyone decides it, on any surface.
         hostRows = applyApprovalUpdate(hostRows, record);
+        pushedDuringRead?.set(record.id, record);
         // A transition arriving IS a successful read of the daemon's record,
         // so a view whose first poll had failed stops claiming it is blind.
         hostReason = null;
       },
       onTerminate: () => {
+        terminated = true;
         subscription = null;
         if (!liveUpdates) return;
         liveUpdates = false;
@@ -359,6 +377,10 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         // the handle would leave this process holding an event stream nothing
         // reads until the process exits.
         if (!started) {
+          opened?.close();
+          return;
+        }
+        if (terminated) {
           opened?.close();
           return;
         }

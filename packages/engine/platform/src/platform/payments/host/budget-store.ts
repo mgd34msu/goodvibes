@@ -317,7 +317,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.assertAvailable();
     this.retryPendingPersist();
     const result = super.release(reservationId);
-    if (result) this.persist();
+    if (result) this.persistOrPend();
     return result;
   }
 
@@ -325,7 +325,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.assertAvailable();
     this.retryPendingPersist();
     const result = super.sweep(nowMs);
-    if (result.length > 0) this.persist();
+    if (result.length > 0) this.persistOrPend();
     return result;
   }
 
@@ -334,7 +334,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     this.retryPendingPersist();
     const before = super.state().spend.length;
     super.prune(nowMs, this.retainPendingSpend);
-    if (super.state().spend.length !== before) this.persist();
+    if (super.state().spend.length !== before) this.persistOrPend();
   }
 
   /** Retries a write a prior mutation could not make land, before this one's own. Silent: a still-down disk just stays pending. */
@@ -367,6 +367,21 @@ export class DurableBudgetLedger extends BudgetLedger {
   /** Every mutation but commit: a write failure here throws, unchanged from before this class had a retry path. */
   private persist(): void {
     this.writeToDisk();
+  }
+
+  /**
+   * For the mutations that have no rollback (release, sweep, prune): memory has
+   * already changed, so a failed write must stay owed. Without the pending flag
+   * a retry of the same call sees nothing left to do and never writes, and a
+   * restart would load the old hold back from disk.
+   */
+  private persistOrPend(): void {
+    try {
+      this.writeToDisk();
+    } catch (error) {
+      this.persistPending = true;
+      throw error;
+    }
   }
 
   private writeToDisk(assertCurrent?: () => void): void {

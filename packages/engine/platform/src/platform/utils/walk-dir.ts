@@ -19,6 +19,25 @@ export const WALK_SKIP_DIRS = new Set([
   '__pycache__',
 ]);
 
+/**
+ * True when the path is the product's own worktree directory (`.goodvibes/.worktrees`), or lies
+ * inside it. Decided by path, never by the bare name: a project directory that happens to be called
+ * `.worktrees` elsewhere is ordinary content.
+ */
+export function isInsideProductWorktrees(path: string): boolean {
+  const parts = resolve(path).split(sep);
+  for (let index = 1; index < parts.length; index++) {
+    if (parts[index] === '.worktrees' && parts[index - 1] === '.goodvibes') return true;
+  }
+  return false;
+}
+
+/** The product worktree directory itself, not something inside it. */
+function isProductWorktreesDirectory(path: string): boolean {
+  const parts = resolve(path).split(sep);
+  return parts.length >= 2 && parts[parts.length - 1] === '.worktrees' && parts[parts.length - 2] === '.goodvibes';
+}
+
 /** @deprecated Optional legacy byte budget. Traversal no longer silently excludes large files. */
 export const WALK_MAX_FILE_SIZE = 1024 * 1024;
 
@@ -38,6 +57,14 @@ export interface WalkDirOptions extends CallOptions {
   readonly shouldContinue?: () => boolean;
   /** Checked outside filesystem-error catches, before opening each path. */
   readonly assertPath?: (path: string) => void;
+  /**
+   * Descend into the product's `.goodvibes/.worktrees` directory, which holds full copies of the
+   * project for other agents and contracts and would swamp results with duplicates. Skipped by
+   * default unless the walk root is already inside it.
+   */
+  readonly includeProductWorktrees?: boolean;
+  /** Called when the product worktree directory was skipped, with its path and how many entries it holds. */
+  readonly onSkippedProductWorktrees?: (path: string, entryCount: number | undefined) => void;
 }
 
 class WalkStopped extends Error {}
@@ -231,6 +258,14 @@ export class DirectoryWalk {
         const fullPath = join(dir, entry.name);
         options.assertPath?.(fullPath);
         if (directoryNames.has(entry.name)) {
+          if (isProductWorktreesDirectory(fullPath) && !options.includeProductWorktrees && !isInsideProductWorktrees(root)
+            && options.selectDirectory?.(fullPath) !== true) {
+            let entryCount: number | undefined;
+            try { entryCount = (await readdir(fullPath)).length; } catch { entryCount = undefined; }
+            await checkCurrent();
+            options.onSkippedProductWorktrees?.(fullPath, entryCount);
+            continue;
+          }
           const identity = relative(root, fullPath).split(sep).join('/');
           if (!skipped.get(identity) || options.selectDirectory?.(fullPath) === true) yield* visit(fullPath, descendants);
         } else if (fileNames.has(entry.name)) {

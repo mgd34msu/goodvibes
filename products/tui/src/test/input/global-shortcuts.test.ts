@@ -1,6 +1,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleGlobalShortcutToken, type GlobalShortcutRouteState } from '../../input/handler-shortcuts.ts';
 import { KillRing } from '../../input/kill-ring.ts';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 function key(logicalName: string, mods: { ctrl?: boolean; shift?: boolean; meta?: boolean } = {}) {
   return { type: 'key' as const, name: '', logicalName, ctrl: mods.ctrl ?? false, shift: mods.shift ?? false, meta: mods.meta ?? false };
@@ -124,6 +128,31 @@ describe('Shift+Tab cycles the session permission mode', () => {
     const { state, store } = stateWithConfig('plan');
     expect(handleGlobalShortcutToken(state, key('tab', { shift: true }), 24)).toBe(true);
     expect(store['permissions.mode']).toBe('safe-owner');
+  });
+});
+
+describe('Shift+Tab when the project settings file holds the mode', () => {
+  test('the refusal is printed and the mode is unchanged, instead of throwing out of the input handler', () => {
+    const root = mkdtempSync(join(tmpdir(), 'shortcut-project-mode-'));
+    try {
+      const config = new ConfigManager({ configDir: join(root, 'config'), workingDir: join(root, 'project'), surfaceRoot: 'tui' });
+      const projectPath = config.getProjectConfigPath()!;
+      mkdirSync(dirname(projectPath), { recursive: true });
+      writeFileSync(projectPath, JSON.stringify({ permissions: { mode: 'safe-owner' } }));
+      config.load();
+      const prints: string[] = [];
+      const state = buildState({
+        commandContext: {
+          print: (t: string) => { prints.push(t); },
+          platform: { configManager: config },
+        } as unknown as NonNullable<GlobalShortcutRouteState['commandContext']>,
+      });
+      expect(handleGlobalShortcutToken(state, key('tab', { shift: true }), 24)).toBe(true);
+      expect(config.get('permissions.mode')).toBe('safe-owner');
+      expect(prints.at(-1)).toContain('project settings file');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

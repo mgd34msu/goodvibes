@@ -115,9 +115,6 @@ function makeCtx(
   return { ctx, printed };
 }
 
-describe('codebase-runtime command registration', () => {
-});
-
 describe('/codebase: store-absent guard', () => {
   test('prints an honest "not available" message when ctx.session.codeIndexStore is missing', async () => {
     const { store, configManager } = await makeRealStore();
@@ -203,6 +200,7 @@ describe('/codebase status', () => {
 
   test('last-reindex activity is surfaced honestly (none, then indexed)', async () => {
     const { store, configManager } = await makeRealStore();
+    configManager.set(CODE_INDEX_ENABLED_CONFIG_KEY as ConfigKey, true as never);
     const registry = new CommandRegistry();
     registerCodebaseRuntimeCommands(registry);
 
@@ -417,6 +415,57 @@ describe('/codebase: unknown subcommand', () => {
     await registry.get('codebase')!.handler(['bogus'], ctx);
     expect(printed[0]).toMatch(/Usage:/);
 
+    store.close();
+  });
+});
+
+describe('/codebase failures and switches are named', () => {
+  test('status prints the last build error and file failures instead of a clean build', async () => {
+    const { store, configManager } = await makeRealStore();
+    const registry = new CommandRegistry();
+    registerCodebaseRuntimeCommands(registry);
+    const real = store.stats();
+    const lastBuild = { filesScanned: 2, filesIndexed: 0, filesUnchanged: 0, chunksIndexed: 0, chunksUnchanged: 0, filesRemoved: 0,
+      skip: { tooLarge: 0, overFileCap: 0, overTotalBytes: 0, binary: 0, ignoredByGitignore: 0, readErrors: 0, chunkedByWindow: 0 },
+      startedAt: 1, completedAt: 2, durationMs: 1, filesFailed: 2, firstFailure: 'embedding provider unreachable' };
+    spyOn(store, 'stats').mockReturnValue({ ...real, lastBuild, lastBuildError: 'build finished with 2 file(s) not indexed' });
+    const { ctx, printed } = makeCtx(store, configManager);
+    await registry.get('codebase')!.handler(['status'], ctx);
+    const output = printed.join('\n');
+    expect(output).toContain('build failures: 2 file(s) not indexed; first error: embedding provider unreachable');
+    expect(output).toContain('last build error: build finished with 2 file(s) not indexed');
+    store.close();
+  });
+
+  test('a search that could not embed its query says so instead of "No matching chunks found."', async () => {
+    const { store, configManager } = await makeRealStore();
+    await store.buildFull();
+    const registry = new CommandRegistry();
+    registerCodebaseRuntimeCommands(registry);
+    spyOn(store, 'search').mockResolvedValue([]);
+    spyOn(store, 'stats').mockReturnValue({ ...store.stats(), lastSearchError: 'query embedding failed: provider down' });
+    const { ctx, printed } = makeCtx(store, configManager);
+    await registry.get('codebase')!.handler(['search', 'greet'], ctx);
+    expect(printed.at(-1)).toBe('Search failed: query embedding failed: provider down');
+    store.close();
+  });
+
+  test('with storage.codeIndexEnabled off, status says edits do not update the index; a skipped reindex shows its reason', async () => {
+    const { store, configManager } = await makeRealStore();
+    const registry = new CommandRegistry();
+    registerCodebaseRuntimeCommands(registry);
+    const off = makeCtx(store, configManager);
+    await registry.get('codebase')!.handler(['status'], off.ctx);
+    expect(off.printed.join('\n')).toContain('edits do not update the index');
+
+    configManager.set(CODE_INDEX_ENABLED_CONFIG_KEY as ConfigKey, true as never);
+    const on = makeCtx(store, configManager, {
+      reindexActivity: { path: '/repo/a.ts', at: Date.now(), status: 'skipped', reason: 'reindexing is off or paused' },
+    });
+    await registry.get('codebase')!.handler(['status'], on.ctx);
+    const output = on.printed.join('\n');
+    expect(output).toContain('skipped (reindexing is off or paused)');
+    expect(output).not.toContain('edits do not update the index');
     store.close();
   });
 });

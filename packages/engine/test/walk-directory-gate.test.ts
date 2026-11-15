@@ -32,10 +32,13 @@ test('directory discovery and files over 1 MiB require no Jev availability or se
 
 test('analysis no longer silently stops after 500 source files', async () => {
   const path = root(); for (let i = 0; i < 505; i++) put(path, `src/${i}.ts`);
-  let ticks = 0;
-  const timer = setInterval(() => { ticks++; }, 0);
+  // The walk must hand the event loop back while it works: a check-phase callback
+  // that re-arms itself only runs if the walk awaits real I/O between directories.
+  let ticks = 0; let walking = true;
+  const tick = () => { ticks++; if (walking) setImmediate(tick); };
+  setImmediate(tick);
   try { expect(await collectTextFiles(path)).toHaveLength(505); }
-  finally { clearInterval(timer); }
+  finally { walking = false; }
   expect(ticks).toBeGreaterThan(0);
   expect(await collectTextFiles(path, 12)).toHaveLength(12);
 });

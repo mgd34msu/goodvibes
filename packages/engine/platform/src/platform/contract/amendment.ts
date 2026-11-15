@@ -208,6 +208,8 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
   const servable = servableCriteria(run, escalation);
   const servableIds = new Set(servable.map((criterion) => criterion.id));
   let problems: string[] = [];
+  // With no repair limit a planner that keeps returning the same rejected answer would loop forever.
+  const seenProblems = new Set<string>();
   for (let attempt = 0; config.planRepairLimit === 0 || attempt <= config.planRepairLimit; attempt += 1) {
     run.abort.signal.throwIfAborted();
     if (authority) await assertContractInputAuthority(authority, workingDirectory, run.abort.signal);
@@ -228,7 +230,12 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
     if (result.status !== 'completed') return { kind: 'problems', problems: [`the planner did not finish (${result.status}${result.detail === undefined ? '' : `: ${result.detail}`})`] };
     const parsed = parseAmendment(result.output, target, servableIds);
     problems = parsed.problems;
-    if (parsed.amendment === undefined) continue;
+    if (parsed.amendment === undefined) {
+      const key = JSON.stringify(problems.slice().sort());
+      if (config.planRepairLimit === 0 && seenProblems.has(key)) return { kind: 'problems', problems };
+      seenProblems.add(key);
+      continue;
+    }
     const allIds = new Set([...contract.criteria, ...contract.groups.flatMap((group) => group.criteria), ...contract.units.flatMap((unit) => unit.criteria)].map((criterion) => criterion.id));
     const prefix = escalation.scope === 'deliverable' ? '' : `${escalation.targetId}.`;
     const { criteria, notes } = amendedCriteria(target, parsed.amendment, prefix, allIds);

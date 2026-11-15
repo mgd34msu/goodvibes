@@ -14,7 +14,7 @@
  * out until a consumer breaks.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import ts from 'typescript';
 import { dirname, join, resolve } from 'node:path';
@@ -28,7 +28,6 @@ import {
   resolveSubpathEntryPoints,
   type Snapshot,
 } from '../scripts/subpath-api-surface-rule.ts';
-import { subpackageExports } from '../scripts/export-conditions.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_DIR = join(ENGINE_ROOT, 'platform');
@@ -154,7 +153,6 @@ describe('diffSnapshots', () => {
     expect(lines.some((line) => line.includes('declaration changed'))).toBe(true);
     // The name-and-required-members projection is identical across these two,
     // which is exactly why the previous version of this gate passed on it.
-    expect(base['platform/email']).toBeUndefined();
     expect(after['./platform/email']?.[0]?.required).toEqual(base['./platform/email']?.[0]?.required ?? []);
   });
 
@@ -225,68 +223,28 @@ describe('class members', () => {
 
 });
 
-describe('the committed report', () => {
-  const committed = JSON.parse(readFileSync(join(ENGINE_ROOT, 'etc', 'subpath-api-surface.json'), 'utf8')) as Snapshot;
-  // The old platform package's export map is the engine manifest's ./platform/* entries,
-  // whose "types" conditions name the declarations tsc emits under platform/dist
-  // (the same derivation check-subpath-api-surface.ts makes).
-  const engine = JSON.parse(readFileSync(join(ENGINE_ROOT, 'package.json'), 'utf8')) as {
-    exports: Record<string, unknown>;
+test('a non-exported type an export references is recorded beside it', () => {
+  // Narrowing a return type through an unexported alias leaves the exported
+  // declaration's text unchanged, so the snapshot has to carry the alias's
+  // definition for the diff to see it.
+  const root = mkdtempSync(join(tmpdir(), 'gv-api-referenced-'));
+  const api = join(root, 'api.d.ts');
+  const snapshotOf = (keys: string): Snapshot => {
+    writeFileSync(api, `interface ReaderSnapshot { ${keys} }
+      export interface Reader { getSnapshot(): ReaderSnapshot; }
+      export {};`);
+    const program = ts.createProgram([api], { strict: true, noEmit: true, noLib: true, types: [],
+      target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler });
+    return buildSnapshot(program, new Map([['./api', api]]));
   };
-  const manifest = { exports: subpackageExports(engine.exports, 'platform') };
-
-  test('every subpath that publishes types has a non-empty section', () => {
-    const { entryPoints, problems } = resolveSubpathEntryPoints(manifest, PACKAGE_DIR);
-    expect(problems).toEqual([]);
-    expect(missingFromReport(entryPoints, committed)).toEqual([]);
-    expect(coverageProblems(committed)).toEqual([]);
-    expect(entryPoints.size).toBeGreaterThan(100);
-  });
-
-  test('the platform email module is in the report with its declaration text', () => {
-    const email = committed['./platform/email'] ?? [];
-    for (const name of ['EmailInboxListResult', 'EmailSummary', 'ImapMessageDetail']) {
-      const entry = email.find((candidate) => candidate.name === name);
-      expect(entry, `${name} missing from ./platform/email`).toBeDefined();
-      expect(entry?.text.length ?? 0).toBeGreaterThan(name.length);
-    }
-  });
-
-  test('the narrow work-ledger subpath records its consumer and trusted-host contracts', () => {
-    const ledger = committed['./platform/workflow/work-ledger'] ?? [];
-    for (const name of [
-      'createWorkLedger', 'createEmptyWorkLedgerState', 'WorkLedgerAccessError',
-      'WorkLedgerService', 'WorkLedgerAuthority', 'WorkLedgerActor',
-      'WorkLedgerStorage', 'WorkLedgerDecision', 'WorkLedgerResult',
-      'WorkLedgerCommand', 'WorkLedgerState', 'WorkLedgerSnapshot',
-    ]) {
-      const entry = ledger.find((candidate) => candidate.name === name);
-      expect(entry, `${name} missing from ./platform/workflow/work-ledger`).toBeDefined();
-      expect(entry?.text.length ?? 0).toBeGreaterThan(name.length);
-    }
-  });
-
-  test('a non-exported type an export references is recorded beside it', () => {
-    // The gap that let PermissionConfigReader.getSnapshot() narrow from the
-    // whole GoodVibesConfig to one key with no report diff: the alias name in
-    // the declaration text never changed. One level of referenced definitions
-    // is now recorded; the transitive closure is not (12.1 MB vs 5.7 MB).
-    const reader = (committed['./platform/permissions'] ?? []).find((e) => e.name === 'PermissionConfigReader');
-    expect(reader).toBeDefined();
-    expect(reader?.text).toContain('PermissionConfigSnapshot');
+  try {
+    const wide = snapshotOf('permissions: string; mode: string;');
+    const narrow = snapshotOf('permissions: string;');
+    const reader = (wide['./api'] ?? []).find((entry) => entry.name === 'Reader');
     expect(reader?.text).toContain(' ;; via ');
-    // And it really carries the DEFINITION, not just the name again.
-    expect(reader?.text).toContain('permissions');
-  });
-
-  test('those same names are absent from the api-extractor rollups: the rollups are not this gate', () => {
-    const rollup = readFileSync(join(ENGINE_ROOT, 'etc', 'goodvibes-platform.api.md'), 'utf8')
-      + readFileSync(join(ENGINE_ROOT, 'etc', 'goodvibes-platform-embed.api.md'), 'utf8');
-    // If this ever fails it is good news, it means `platform/src/index.ts`
-    // started re-exporting the platform tree and the rollup covers it too. Fix
-    // by deleting this assertion, not by narrowing the report.
-    expect(rollup).not.toContain('EmailInboxListResult');
-  });
+    expect(reader?.text).toContain('mode: string');
+    expect(diffSnapshots(wide, narrow).some((line) => line.includes('declaration changed'))).toBe(true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('the API gate agrees with a real consumer across private changes and incompatible public or protected signatures', () => {

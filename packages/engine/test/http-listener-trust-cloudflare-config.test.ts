@@ -23,7 +23,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { runtimeConfigDefaults, runtimePrimaryConfigSettings } from '../platform/src/platform/config/schema-domain-runtime.ts';
-import { isCloudflareIp } from '../platform/src/platform/daemon/http-listener.ts';
+import { HttpListener, isCloudflareIp } from '../platform/src/platform/daemon/http-listener.ts';
+import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
+import { trackDisposables } from './_helpers/disposables.ts';
+import { stopListenerTimers } from './_helpers/listener-teardown.ts';
+
+const disposables = trackDisposables();
 
 function configManager(values: Record<string, unknown> = {}): { manager: ConfigManager; dispose: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'trust-cloudflare-'));
@@ -81,17 +86,21 @@ describe('the config key exists and mirrors trustProxy', () => {
 });
 
 describe('the listener resolves it the way it resolves trustProxy', () => {
-  /**
-   * The constructor line under test is
-   * `config.trustCloudflare ?? Boolean(configManager.get('httpListener.trustCloudflare'))`,
-   * the same shape as trustProxy's. Read here rather than by booting a
-   * listener: constructing one binds two rate limiters and their eviction
-   * sweeps, and the property this pins is the resolution, not the socket.
-   */
+  // Built for real, never started: the private flag is what the request path
+  // consults, so reading it checks the constructor's resolution itself.
   function resolve(explicit: boolean | undefined, configured: boolean): boolean {
     const { manager, dispose } = configManager({ 'httpListener.trustCloudflare': configured });
     try {
-      return explicit ?? Boolean(manager.get('httpListener.trustCloudflare'));
+      const listener = disposables.add(new HttpListener({
+        port: 0,
+        userAuth: new UserAuthManager({
+          bootstrapFilePath: join(tmpdir(), 'unused-auth-users.json'),
+          bootstrapCredentialPath: join(tmpdir(), 'unused-auth-bootstrap.txt'),
+        }),
+        configManager: manager,
+        ...(explicit === undefined ? {} : { trustCloudflare: explicit }),
+      }), stopListenerTimers);
+      return (listener as unknown as { trustCloudflare: boolean }).trustCloudflare;
     } finally {
       dispose();
     }

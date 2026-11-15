@@ -1,7 +1,7 @@
 import type { ChatStopReason, StreamDelta } from './interface.js';
 import type { AnthropicContentBlock } from './tool-formats.js';
 import { mapAnthropicStopReason } from './stop-reason-maps.js';
-import { fromAnthropicContent, parseToolCallArguments } from './tool-formats.js';
+import { fromAnthropicContent, toolCallArgumentFields } from './tool-formats.js';
 import { logger } from '../utils/logger.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
 import { ProviderError } from '../types/errors.js';
@@ -215,23 +215,32 @@ export function assembleAnthropicContentBlocks(
   fallbackBlocks?: AnthropicContentBlock[],
 ): ReturnType<typeof fromAnthropicContent> {
   const contentBlocks: AnthropicContentBlock[] = [];
+  const argumentErrors = new Map<string, string>();
   if (responseText) {
     contentBlocks.push({ type: 'text', text: responseText } as AnthropicContentBlock);
   }
   for (const [, block] of [...toolBlocks.entries()].sort(([a], [b]) => a - b)) {
-    const parsedInput = parseToolCallArguments(block.args, {
+    const fields = toolCallArgumentFields(block.args, {
       provider: providerName,
       toolName: block.name,
       callId: block.id,
     });
-    if (parsedInput === undefined) continue;
+    if (fields.argumentError !== undefined) argumentErrors.set(block.id, fields.argumentError);
     contentBlocks.push({
       type: 'tool_use',
       id: block.id,
       name: block.name,
-      input: parsedInput,
+      input: fields.arguments,
     } as AnthropicContentBlock);
   }
   const target = contentBlocks.length > 0 ? contentBlocks : (fallbackBlocks ?? []);
-  return fromAnthropicContent(target);
+  const assembled = fromAnthropicContent(target);
+  if (argumentErrors.size === 0) return assembled;
+  return {
+    ...assembled,
+    toolCalls: assembled.toolCalls.map((call) => {
+      const argumentError = argumentErrors.get(call.id);
+      return argumentError === undefined ? call : { ...call, argumentError };
+    }),
+  };
 }

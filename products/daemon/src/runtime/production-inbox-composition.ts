@@ -5,7 +5,7 @@ import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxOptions, type
 import { createEmailDaemonInboxSourceFactory, type EmailDaemonInboxOptions, type EmailDaemonInboxSourceFactories } from './email-inbox-composition.js';
 import { createConfiguredDiscordDaemonInboxSourceFactory, createDiscordDaemonInboxSourceFactory, type DiscordDaemonInboxOptions, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
-import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { createConfiguredHostedInboxSourceFactory, createReacquiringDaemonInboxSourceFactory } from './configured-inbox-accounts.js';
 
 /** Original254699bf inbox/index.ts registers precisely these three providers. */
@@ -120,7 +120,7 @@ export function createProductionDaemonInboxFactory(options: ProductionDaemonInbo
     const absent = unconfiguredSource(provider);
     return createReacquiringDaemonInboxSourceFactory(provider, (context, routing, controls) => {
       const reader: { get(key: string): unknown } = context.configManager;
-      const enabled = provider === 'email' ? createSurfaceEmailInboxConfigReader(key => reader.get(key))('email.enabled') === true
+      const enabled = provider === 'email' ? createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager))('email.enabled') === true
         : reader.get(`surfaces.${provider}.enabled`) === true;
       const native = nativeSources[provider];
       return (enabled && controls.acquireHostedScreening ? native : absent)(context, routing, controls);

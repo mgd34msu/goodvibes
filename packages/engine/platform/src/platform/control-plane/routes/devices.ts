@@ -229,7 +229,12 @@ export function createDevicesGrantsListHandler(service: DevicesGatewayService): 
     const nodeId = typeof params.nodeId === 'string' ? params.nodeId.trim() : '';
     const limit = typeof params.limit === 'number' && params.limit > 0 ? Math.floor(params.limit) : 100;
     const grants = await service.grants.list();
-    const audit = await service.grants.listAudit(limit);
+    // The store keeps the newest records; with a node filter, read the whole
+    // trail first so the limit applies to that node's records, not to the
+    // newest few of every node.
+    const audit = (await service.grants.listAudit(nodeId ? Number.MAX_SAFE_INTEGER : limit))
+      .filter((entry) => !nodeId || entry.nodeId === nodeId)
+      .slice(-limit);
     return {
       grants: grants
         .filter((grant) => !nodeId || grant.nodeId === nodeId)
@@ -268,11 +273,23 @@ export function createDevicesGrantsRevokeHandler(service: DevicesGatewayService)
     const nodeId = typeof params.nodeId === 'string' ? params.nodeId.trim() : '';
     const capabilityId = typeof params.capabilityId === 'string' ? params.capabilityId.trim() : '';
     const note = typeof params.note === 'string' ? params.note.trim() : '';
+    // A narrowing filter that names nothing real must not be dropped: dropping
+    // it would widen the revoke to every grant of the device, or revoke nothing
+    // while reporting success.
+    const capability = capabilityId && isDeviceCapabilityId(capabilityId) ? capabilityId : undefined;
+    if (capabilityId && !capability) {
+      throw new GatewayVerbError(
+        `Unknown capabilityId "${capabilityId}". Nothing was revoked. Read devices.nodes.list for the capability ids, or omit capabilityId to revoke by grantId or nodeId.`,
+        'INVALID_ARGUMENT',
+        400,
+        'capabilityId',
+      );
+    }
     const removals = await service.grants.revoke({
       ...(grantId ? { grantId } : {}),
       ...(nodeId ? { nodeId } : {}),
-      ...(capabilityId && isDeviceCapabilityId(capabilityId) ? { capabilityId } : {}),
-      actor: 'operator',
+      ...(capability ? { capabilityId: capability } : {}),
+      actor: invocation.context.principalId ?? 'operator',
       ...(note ? { note } : {}),
     });
     return {

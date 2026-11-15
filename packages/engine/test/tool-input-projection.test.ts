@@ -5,7 +5,7 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolInputProjectionResult } from '../platform/src/platform/tools/input-projection.ts';
+import { ToolInputProjectionError, describeToolInputProjectionProblem, describeUnexpectedToolError, type ToolInputProjector, type ToolInputProjectionResult } from '../platform/src/platform/tools/input-projection.ts';
 import type { Tool, ToolExecuteOptions } from '../platform/src/platform/types/tools.ts';
 
 function deferred<T>() {
@@ -534,4 +534,14 @@ test('Classic preparation never borrows a supplied semantic port recorder and ex
     await expect(registry.executePrepared(prepared, () => {})).rejects.toThrow();
     expect(bodies).toHaveLength(1); expect(metadataReads).toBe(0); expect(asks).toBe(0);
   });
+});
+
+test('a projection refusal carries its fixed detail into the model-facing text, and without one reads as before', () => {
+  const detailed = new ToolInputProjectionError('invalid', 'The path must be inside the workspace.');
+  expect(detailed.message).toContain('The path must be inside the workspace.');
+  expect(describeToolInputProjectionProblem(detailed.problem, detailed.detail)).toMatch(/check them against the tool schema.*The path must be inside the workspace\.$/);
+  expect(describeUnexpectedToolError(detailed, String)).toContain('The path must be inside the workspace.');
+  const plain = new ToolInputProjectionError('invalid');
+  expect(plain.detail).toBeUndefined();
+  expect(describeToolInputProjectionProblem('invalid')).toBe(describeToolInputProjectionProblem(plain.problem, plain.detail));
 });

@@ -15,7 +15,7 @@
  * should pin them.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
@@ -104,6 +104,7 @@ interface Harness {
  */
 function makeHarness(options: { readonly deliverReplyThrows: boolean }): Harness {
   const dir = mkdtempSync(join(tmpdir(), 'gv-surface-reply-'));
+  disposables.defer(() => { rmSync(dir, { recursive: true, force: true }); });
   const storePath = join(dir, 'sessions.json');
   const binding = telegramBinding();
   const routeBindings = routeBindingsStub([binding]);
@@ -134,7 +135,7 @@ function makeHarness(options: { readonly deliverReplyThrows: boolean }): Harness
     messageSender: { send: () => false },
   } as unknown as ConstructorParameters<typeof SharedSessionBroker>[0]));
 
-  const pipeline = new ChannelReplyPipeline({ channelPlugins, routeBindings });
+  const pipeline = new ChannelReplyPipeline({ channelPlugins, routeBindings, waitBeforeRetry: async () => {} });
   const helper = new DaemonSurfaceDeliveryHelper({
     pendingSurfaceReplies,
     channelReplyPipeline: pipeline,
@@ -358,7 +359,7 @@ describe('surface replies land in the deliveries ledger', () => {
 
       const mine = harness.ledger.filter((entry) => entry.agentId === 'agent-led-bad');
       expect(mine.map((entry) => entry.phase)).toEqual(['queued', 'failed']);
-      expect(mine[1]?.error).toBe('telegram 429: too many requests');
+      expect(mine[1]?.error).toBe('telegram 429: too many requests (the answer is kept in session session-led-bad)');
       expect(mine[1]?.sessionId).toBe('session-led-bad');
       expect(mine[1]?.surfaceKind).toBe('telegram');
     } finally {

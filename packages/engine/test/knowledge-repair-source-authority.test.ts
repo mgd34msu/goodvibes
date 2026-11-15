@@ -21,9 +21,9 @@ import { createRepairSourceAuthorityReader, KnowledgeRepairSourceAuthorityHeldEr
   type RepairSourceAuthorityInput, type RepairSourceAuthority, type RepairSourceAuthorityHoldReason } from '../platform/src/platform/knowledge/semantic/repair-source-authority/reader.js';
 
 let previous: JudgmentPort | undefined;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const input = (reference = 'source-1'): RepairSourceAuthorityInput => ({ reference, query: 'What are AC-7 specifications?',
   subjects: [{ title: 'AC-7', kind: 'ha_device', aliases: ['Acme AC-7'], identity: { manufacturer: 'Acme', model: 'AC-7' } }],
   source: { sourceType: 'manual', title: 'Official AC-7 support specifications', summary: 'Product documentation',
@@ -177,7 +177,7 @@ describe('repair source authority canonical reader', () => {
 const spaceId = 'authority-space', statement = 'AC-7 has four HDMI inputs.', category = 'Input and output ports';
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'repair-authority-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const observed = { id: 'device', kind: 'ha_device' as const, slug: 'ac-seven', title: 'AC-7', status: 'active' as const,
     metadata: { knowledgeSpaceId: spaceId, manufacturer: 'Acme', model: 'AC-7' } };
   const subject = await upsertObservedKnowledgeNode(store, observed, 'home-assistant-snapshot', observed, () => observed);

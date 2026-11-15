@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,56 +7,114 @@ const ENGINE_ROOT = resolve(__dirname, '..');
 // npm scripts live in the repo root package.json.
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 
-function run(command: string, args: readonly string[], label?: string): void {
-  if (label) console.log(`[validate] ${label} ...`);
-  execFileSync(command, args, {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-  });
+interface Step {
+  readonly label: string;
+  readonly command: string;
+  readonly args: readonly string[];
 }
 
-// Editorial checks remain opt-in (`docs:check`, `changelog:check`).
-// Required validation exercises code, contracts, types and installable artifacts.
-run('bun', ['run', 'error:check'], 'error:check');
-run('bun', ['run', 'products:check'], 'products:check');
-// Check credential classification in CI as well as the local pre-commit hook.
-// This source-only scan has no build dependency. It once ran only in the hook,
-// so a push that bypassed the hook reached CI with an unclassified credential
-// write and every one of the ten CI jobs stayed green.
-run('bun', ['run', 'credential-scope:check'], 'credential-scope:check');
-// Every answer of every registered judgment decision has a fixture, and
-// engine source asks Jev only through registered decisions. Source and
-// fixtures only, no model call and no build.
-run('bun', ['run', 'judgment:lint'], 'judgment:lint');
-run('bun', ['run', 'version:check'], 'version:check');
-run('bun', ['run', 'internal-id:check'], 'internal-id:check');
-run('bun', ['run', 'architecture:check'], 'architecture:check');
-run('bun', ['run', 'platform-console:check'], 'platform-console:check');
-run('bun', ['run', 'build'], 'build');
-// typecheck runs the composite solution (which now includes test/ and
-// scripts/ via tsconfig.tests.json) AND the standalone type-test project,
-// judging each by its output as well as its exit code. It supersedes the
-// bare types:check that used to run here.
-run('bun', ['run', 'typecheck'], 'typecheck');
-run('bun', ['run', 'api:check'], 'api:check');
-// Beside api:check rather than inside it, because they ask opposite questions.
-// api:check iterates FROM the exports map and compares what each DECLARED
-// subpath exposes, so a module the map omits is never examined. This asks
-// whether every module with a public face is reachable from a published package
-// at all, the check that would have caught platform/owner-profile shipping
-// unreachable while every other gate stayed green.
-run('bun', ['run', 'exports:check'], 'exports:check');
-// examples typecheck also runs locally so `bun run validate` catches type
-// errors without a separate CI step.
-run('bun', ['run', '--cwd', 'packages/engine/examples', 'typecheck'], 'examples:typecheck');
-run('bun', ['packages/engine/scripts/browser-compat-check.ts'], 'browser-compat:check');
-run('bun', ['packages/engine/scripts/package-metadata-check.ts'], 'package-metadata:check');
-run('bun', ['run', 'any:check'], 'any:check');
-// Test execution is owned by the CI platform-matrix (bun) and product-tests jobs; removing it
-// from validate eliminates the duplicate test run that used to execute on
-// every push. Local callers can still run `bun run test` explicitly.
-run('bun', ['run', 'pack:check'], 'pack:check');
-run('bun', ['run', 'publint:check'], 'publint:check');
-run('bun', ['run', 'install:smoke'], 'install:smoke');
-run('bun', ['run', 'contracts:check'], 'contracts:check');
-run('bun', ['run', 'bundle:check'], 'bundle:check');
+const script = (name: string): Step => ({ label: name, command: 'bun', args: ['run', name] });
+
+// Editorial checks remain opt-in (`docs-completeness-check`, `changelog:check`).
+// Required validation exercises code, contracts, types, the reference documents
+// generated from the contract, and installable artifacts.
+const STEPS: readonly Step[] = [
+  script('error:check'),
+  script('products:check'),
+  // Check credential classification in CI as well as the local pre-commit hook.
+  // This source-only scan has no build dependency. It once ran only in the hook,
+  // so a push that bypassed the hook reached CI with an unclassified credential
+  // write and CI stayed green.
+  script('credential-scope:check'),
+  // Every answer of every registered judgment decision has a fixture, and
+  // engine source asks Jev only through registered decisions. Source and
+  // fixtures only, no model call and no build.
+  script('judgment:lint'),
+  script('version:check'),
+  // Source-only: fails when a flag's graduation state blocks a release. It once ran
+  // only by hand through release:verify, so CI never judged it.
+  script('flags:graduation'),
+  script('internal-id:check'),
+  script('architecture:check'),
+  script('platform-console:check'),
+  script('build'),
+  // typecheck runs the composite solution (which now includes test/ and
+  // scripts/ via tsconfig.tests.json) AND the standalone type-test project,
+  // judging each by its output as well as its exit code. It supersedes the
+  // bare types:check that used to run here.
+  script('typecheck'),
+  script('api:check'),
+  // Beside api:check rather than inside it, because they ask opposite questions.
+  // api:check iterates FROM the exports map and compares what each DECLARED
+  // subpath exposes, so a module the map omits is never examined. This asks
+  // whether every module with a public face is reachable from a published package
+  // at all, the check that would have caught platform/owner-profile shipping
+  // unreachable while every other gate stayed green.
+  script('exports:check'),
+  // examples typecheck also runs locally so `bun run validate` catches type
+  // errors without a separate CI step.
+  { label: 'examples:typecheck', command: 'bun', args: ['run', '--cwd', 'packages/engine/examples', 'typecheck'] },
+  { label: 'browser-compat:check', command: 'bun', args: ['packages/engine/scripts/browser-compat-check.ts'] },
+  { label: 'package-metadata:check', command: 'bun', args: ['packages/engine/scripts/package-metadata-check.ts'] },
+  script('any:check'),
+  // Test execution is owned by the CI platform-matrix (bun) and product-tests jobs; removing it
+  // from validate eliminates the duplicate test run that used to execute on
+  // every push. Local callers can still run `bun run test` explicitly.
+  script('pack:check'),
+  script('publint:check'),
+  script('install:smoke'),
+  script('contracts:check'),
+  // docs/reference-*.md are generated from the contract artifacts, so a contract
+  // change leaves them stale until `bun run docs:generate`. Reads artifacts only; no build.
+  { label: 'docs-generated:check', command: 'bun', args: ['packages/engine/scripts/generate-api-docs.ts', '--check'] },
+  script('bundle:check'),
+];
+
+const USAGE = `Usage: bun run validate [--from <step>] [--only <step>]\nSteps: ${STEPS.map((step) => step.label).join(', ')}`;
+
+/** Steps to run: all, everything from `--from`, or exactly `--only`. */
+function selectSteps(argv: readonly string[]): readonly Step[] {
+  let from: string | undefined;
+  let only: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    const [name, inline] = arg.startsWith('--') && arg.includes('=') ? [arg.slice(0, arg.indexOf('=')), arg.slice(arg.indexOf('=') + 1)] : [arg, undefined];
+    if (name === '--help' || name === '-h') {
+      console.log(USAGE);
+      process.exit(0);
+    }
+    if (name !== '--from' && name !== '--only') throw new Error(`Unknown argument ${arg}.`);
+    const value = inline ?? argv[++i];
+    if (!value) throw new Error(`${name} requires a step name.`);
+    if (!STEPS.some((step) => step.label === value)) throw new Error(`Unknown step "${value}".`);
+    if (name === '--from') from = value;
+    else only = value;
+  }
+  if (from !== undefined && only !== undefined) throw new Error('Use --from or --only, not both.');
+  if (only !== undefined) return STEPS.filter((step) => step.label === only);
+  return from === undefined ? STEPS : STEPS.slice(STEPS.findIndex((step) => step.label === from));
+}
+
+let steps: readonly Step[];
+try {
+  steps = selectSteps(process.argv.slice(2));
+} catch (error) {
+  console.error(`[validate] ${error instanceof Error ? error.message : String(error)}\n${USAGE}`);
+  process.exit(2);
+}
+
+for (const [index, step] of steps.entries()) {
+  console.log(`[validate] ${step.label} ...`);
+  const result = spawnSync(step.command, step.args, { cwd: REPO_ROOT, stdio: 'inherit' });
+  if (result.status === 0) continue;
+  const reason = result.error ? result.error.message : result.signal ? `signal ${result.signal}` : `exit ${result.status}`;
+  console.error([
+    '',
+    `[validate] FAILED at step ${index + 1}/${steps.length}: ${step.label} (${reason})`,
+    `[validate]   command:      ${[step.command, ...step.args].join(' ')}`,
+    `[validate]   re-run it:    bun run validate --only ${step.label}`,
+    `[validate]   resume here:  bun run validate --from ${step.label}`,
+  ].join('\n'));
+  process.exit(result.status && result.status > 0 ? result.status : 1);
+}
+console.log(`[validate] ${steps.length} step(s) passed.`);

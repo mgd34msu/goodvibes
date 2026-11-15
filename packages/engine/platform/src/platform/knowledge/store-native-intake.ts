@@ -10,6 +10,7 @@ import {
   type NativeConversationCapture, type NativeConversationKey, type NativeConversationMutation, type NativeConversationStorage,
 } from '../workflow/work-ledger/native-intake-types.js';
 import { createKnowledgeWorkLedgerStorage, readKnowledgeWorkLedger } from './store-work-ledger.js';
+import { NativeConversationMoveRefused, intakeMoveText } from './store-native-refusal.js';
 
 type SqlReader = Pick<SqlDatabase, 'exec'>;
 export function createNativeConversationCaptureTable(db: Pick<SqlDatabase, 'run'>): void {
@@ -24,8 +25,10 @@ export function validateNativeConversationCaptureTable(db: SqlReader): void {
   const indexes = db.exec('PRAGMA index_list(native_conversation_captures)')[0]?.values ?? [];
   if (!indexes.some(index => index[2] === 1 && index[4] === 0
     && isDeepStrictEqual(db.exec(`PRAGMA index_info('${String(index[1]).replaceAll("'", "''")}')`)[0]?.values.map(row => row[2]), conversationRequestColumns))) throw new NativeConversationStorageError('invalid');
+  // One pass reads one image: parse each project's ledger once, not once per capture.
+  const ledgers = new Map<string, WorkLedgerState>();
   for (const row of db.exec('SELECT project_id, principal_id, input_id, request_id, format_version, state_json FROM native_conversation_captures')[0]?.values ?? []) {
-    const capture = parseRow(row); validateAssociation(db, capture);
+    const capture = parseRow(row); validateAssociation(db, capture, ledgers);
   }
   for (const row of db.exec('SELECT project_id, state_json FROM work_ledgers')[0]?.values ?? []) {
     const raw = JSON.parse(String(row[1])) as Partial<WorkLedgerState>;
@@ -33,7 +36,7 @@ export function validateNativeConversationCaptureTable(db: SqlReader): void {
     const ledger = readWorkLedgerState(raw, String(row[0]));
     for (const event of ledger.history) {
       if (event.type !== 'submit_native' || event.work.source?.version !== 2) continue;
-      const capture = read(db, ledger.projectId, { principalId: event.actorId, inputId: event.work.source.inputId });
+      const capture = read(db, ledger.projectId, { principalId: event.actorId, inputId: event.work.source.inputId }, undefined, ledgers);
       if (!capture?.association || capture.association.ledgerRevision !== event.sequence) throw new NativeConversationStorageError('invalid');
     }
   }
@@ -65,10 +68,10 @@ function keySnapshot(key: NativeConversationKey): NativeConversationKey {
     || typeof key.inputId !== 'string' || !key.inputId || key.inputId.length > 200) throw new NativeConversationStorageError('invalid');
   return { principalId: key.principalId, inputId: key.inputId };
 }
-function read(db: SqlReader, projectId: string, key: NativeConversationKey, original?: NativeConversationCapture): NativeConversationCapture | null {
+function read(db: SqlReader, projectId: string, key: NativeConversationKey, original?: NativeConversationCapture, ledgers?: Map<string, WorkLedgerState>): NativeConversationCapture | null {
   const row = db.exec('SELECT project_id, principal_id, input_id, request_id, format_version, state_json FROM native_conversation_captures WHERE project_id = ? AND principal_id = ? AND input_id = ?', [projectId, key.principalId, key.inputId])[0]?.values[0];
   if (!row) return null;
-  const capture = parseRow(row, original); validateAssociation(db, capture); return capture;
+  const capture = parseRow(row, original); validateAssociation(db, capture, ledgers); return capture;
 }
 function assertPublication(capture: NativeConversationCapture, event: WorkLedgerSubmission): void {
   const source = event.work.source, final = capture.decisions.at(-1);
@@ -85,9 +88,10 @@ function assertPublication(capture: NativeConversationCapture, event: WorkLedger
     || !event.attemptId || event.attempts.length !== 1 || event.attempts[0]?.id !== event.attemptId
     || event.attempts[0]?.ownerId !== capture.principalId || event.attempts[0]?.state !== 'active') throw new NativeConversationStorageError('invalid');
 }
-function validateAssociation(db: SqlReader, capture: NativeConversationCapture): void {
+function validateAssociation(db: SqlReader, capture: NativeConversationCapture, ledgers?: Map<string, WorkLedgerState>): void {
   if (!capture.association) return;
-  const ledger = readKnowledgeWorkLedger(db, capture.projectId);
+  let ledger = ledgers?.get(capture.projectId);
+  if (!ledger) { ledger = readKnowledgeWorkLedger(db, capture.projectId); ledgers?.set(capture.projectId, ledger); }
   const event = ledger.history[capture.association.ledgerRevision - 1];
   if (!event || event.type !== 'submit_native' || event.work.source?.version !== 2 || !event.attemptId
     || event.workId !== capture.association.workId || event.attemptId !== capture.association.attemptId
@@ -96,10 +100,19 @@ function validateAssociation(db: SqlReader, capture: NativeConversationCapture):
 }
 function immutable(capture: NativeConversationCapture): unknown {
   const { generation: _generation, state: _state, stage: _stage, route: _route, reason: _reason,
-    proposalsSpent: _spent, proposal: _proposal, decisions: _decisions, association: _association, classic: _classic, ...facts } = capture;
+    proposalsSpent: _spent, proposal: _proposal, decisions: _decisions, association: _association, classic: _classic, settled: _settled, ...facts } = capture;
   return facts;
 }
 function validateTransition(current: NativeConversationCapture | null, next: NativeConversationCapture, publication = false): void {
+  try { checkTransition(current, next, publication); }
+  catch (error) {
+    if (error instanceof NativeConversationStorageError && error.code === 'conflict' && error.constructor === NativeConversationStorageError) {
+      throw new NativeConversationMoveRefused('conflict', intakeMoveText(current?.state ?? null, next.state));
+    }
+    throw error;
+  }
+}
+function checkTransition(current: NativeConversationCapture | null, next: NativeConversationCapture, publication = false): void {
   if (!current) {
     if (next.classic || next.generation !== 1 || !['captured', 'cancelled'].includes(next.state) || next.proposalsSpent !== 0 || next.proposal || next.decisions.length || next.association) throw new NativeConversationStorageError('conflict');
     return;
@@ -115,7 +128,9 @@ function validateTransition(current: NativeConversationCapture | null, next: Nat
   if (['blocked', 'refused'].includes(current.state) && next.state !== 'cancelled' && !isDeepStrictEqual(current, next)) throw new NativeConversationStorageError('conflict');
   if (current.state !== 'cancelled' && next.state === 'cancelled' && (next.generation !== current.generation + 1
     || !isDeepStrictEqual({ ...current, generation: next.generation, state: 'cancelled', stage: null }, next))) throw new NativeConversationStorageError('conflict');
-  if ((current.state === 'associated' || current.state === 'turn') && !isDeepStrictEqual(current, next)) throw new NativeConversationStorageError('conflict');
+  // The one move out of a finished-looking state: a dispatched turn is marked settled, same generation, nothing else changed.
+  const settlesTurn = current.state === 'turn' && !current.settled && next.settled === true && isDeepStrictEqual({ ...current, settled: true }, next);
+  if ((current.state === 'associated' || current.state === 'turn') && !isDeepStrictEqual(current, next) && !settlesTurn) throw new NativeConversationStorageError('conflict');
   if (next.generation !== current.generation && (next.generation !== current.generation + 1
     || (next.state !== 'cancelled' && (next.state !== 'processing' || !['captured', 'processing'].includes(current.state))))) throw new NativeConversationStorageError('conflict');
   if (next.state === 'captured' && current.state !== 'captured') throw new NativeConversationStorageError('conflict');
@@ -128,13 +143,17 @@ function validateTransition(current: NativeConversationCapture | null, next: Nat
   if (!isDeepStrictEqual(current.association, next.association) && !(publication && !current.association && next.state === 'associated')) throw new NativeConversationStorageError('conflict');
   if (next.state === 'associated' && current.state !== 'associated' && (!publication || current.state !== 'processing')) throw new NativeConversationStorageError('conflict');
 }
-function write(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, key: NativeConversationKey, current: NativeConversationCapture | null, next: NativeConversationCapture, publication = false, beforeWrite?: () => void): void {
+function write(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, key: NativeConversationKey, current: NativeConversationCapture | null, next: NativeConversationCapture, publication = false, beforeWrite?: () => void, beforeSettledWrite?: () => void): void {
   if (next.projectId !== projectId || next.principalId !== key.principalId || next.inputId !== key.inputId) throw new NativeConversationStorageError('invalid');
   validateTransition(current, next, publication);
   const duplicate = db.exec('SELECT input_id FROM native_conversation_captures WHERE project_id = ? AND principal_id = ? AND request_id = ?', [projectId, key.principalId, next.requestId])[0]?.values[0];
   if (duplicate && duplicate[0] !== key.inputId) throw new NativeConversationStorageError('conflict');
   if (next.version === 2) {
     const result: unknown = beforeWrite?.();
+    if (result !== undefined) { drainOwned(result); throw new NativeConversationStorageError('invalid'); }
+  }
+  if (next.settled === true) {
+    const result: unknown = beforeSettledWrite?.();
     if (result !== undefined) { drainOwned(result); throw new NativeConversationStorageError('invalid'); }
   }
   db.run('INSERT INTO native_conversation_captures(project_id, principal_id, input_id, request_id, format_version, state_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project_id, principal_id, input_id) DO UPDATE SET format_version=excluded.format_version, state_json=excluded.state_json', [projectId, key.principalId, key.inputId, next.requestId, next.version, JSON.stringify(next)]);
@@ -145,7 +164,8 @@ function synchronous(value: unknown): void {
     throw new NativeConversationStorageError('invalid');
   }
 }
-export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, beforeWrite?: () => void): NativeConversationStorage {
+/** `beforeWrite` declares the capture format; `beforeSettledWrite` declares the extra reader requirement of a settled capture. */
+export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, beforeWrite?: () => void, beforeSettledWrite?: () => void): NativeConversationStorage {
   createEmptyWorkLedgerState(projectId);
   let closed = false, closing: Promise<void> | undefined;
   const pending = new Set<Promise<unknown>>();
@@ -160,7 +180,7 @@ export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: 
         const current = read(db, projectId, lookup, original), result = decide(current); synchronous(result);
         if (!result || !Object.hasOwn(result, 'next')) throw new NativeConversationStorageError('invalid');
         const next = result.next === null ? null : parseNativeConversationCapture(result.next, current ?? original);
-        if (next) write(db, projectId, lookup, current, next, false, beforeWrite);
+        if (next) write(db, projectId, lookup, current, next, false, beforeWrite, beforeSettledWrite);
         return { changed: next !== null && !isDeepStrictEqual(next, current), value: result.value };
       }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeConversationStorageError('unavailable'); return result.value; }));
     },
@@ -187,12 +207,12 @@ export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: 
             || !isDeepStrictEqual(next.association, { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence })) throw new NativeConversationStorageError('invalid');
           assertPublication(next, event as WorkLedgerSubmission);
           synchronous(assertCurrent(current));
-          write(db, projectId, lookup, current, next, true, beforeWrite);
+          write(db, projectId, lookup, current, next, true, beforeWrite, beforeSettledWrite);
         },
       });
       publishers.add(publisher);
       return { read: () => { assertOpen(); return publisher.read(); }, transaction: decide => { assertOpen(); return publisher.transaction(decide); },
-        subscribe: listener => { assertOpen(); return publisher.subscribe(listener); }, close: () => publisher.close().then(() => { publishers.delete(publisher); }) };
+        subscribe: (listener, onUnavailable) => { assertOpen(); return publisher.subscribe(listener, onUnavailable); }, close: () => publisher.close().then(() => { publishers.delete(publisher); }) };
     },
     close() { closed = true; return closing ??= Promise.allSettled([...pending, ...[...publishers].map(publisher => publisher.close())]).then(() => {}); },
   };

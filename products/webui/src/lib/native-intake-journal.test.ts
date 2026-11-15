@@ -434,10 +434,8 @@ describe("native intake immutable browser source journal", () => {
     expect(storage.state.values()).toEqual(originals);
   });
 
-  test("never treats corrupt or over-limit persisted data as an empty journal", async () => {
+  test("never treats over-limit persisted data as an empty journal", async () => {
     for (const existing of [
-      [{ ...record(), command: { ...record().command, text: "" } }],
-      [{ ...record(), token: "unexpected" }],
       Array.from({ length: NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS + 1 }, (_, index) =>
         record(String(index))
       ),
@@ -516,7 +514,9 @@ for (const continuation of [
     });
     expect(storage.state.opens).toBe(0);
     storage.state.seed([original]);
-    await expect(storage.journal().list(binding)).rejects.toMatchObject({ code: "corrupt" });
+    // Skipped and counted, never read as a usable original.
+    expect(await storage.journal().list(binding)).toEqual([]);
+    expect(await storage.journal().unreadable()).toBe(1);
   });
 
 test("source journal rejects continuation accessors and hidden fields without evaluating them", async () => {

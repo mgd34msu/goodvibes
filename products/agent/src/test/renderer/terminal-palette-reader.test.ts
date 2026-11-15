@@ -13,12 +13,13 @@
  *     retries (timer, focus-in, resize, input) and accepts late replies.
  */
 
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { installBackgroundThemeProbe, OSC11_QUERY } from '../../renderer/terminal-bg-probe.ts';
 import { PALETTE_QUERIES, sweepPaletteReplies } from '../../renderer/terminal-palette-probe.ts';
 import { TerminalPaletteReader } from '../../renderer/terminal-palette-reader.ts';
 import { getTerminalPalette, resetTerminalPaletteForTests, type TerminalPalette } from '../../renderer/terminal-palette.ts';
 import { activeTokens, getActiveThemeMode as activeThemeMode, getActiveThemeName, refreshForTerminalPalette, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
+import { withTimers } from '../helpers/fake-timers.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 
 const readers: TerminalPaletteReader[] = [];
@@ -28,6 +29,7 @@ afterEach(() => {
   setActiveThemeMode('dark');
   setActiveThemeName('goodvibes');
   resetTerminalPaletteForTests();
+  jest.useRealTimers();
 });
 
 const ST = '\x1b\\';
@@ -41,38 +43,10 @@ function tmuxReplies(background = 'rgb:1a1a/1b1b/2626'): string {
   return s;
 }
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Own only the synchronous fixture's timers; never yield with globals replaced. */
-function withTimers(run: (advance: (ms: number) => void, pending: () => number) => void): void {
-  let now = 0;
-  const timers = new Map<ReturnType<typeof setTimeout>, { at: number; run: () => void }>();
-  const setTimer = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
-    const handle = { unref() {} } as unknown as ReturnType<typeof setTimeout>;
-    timers.set(handle, { at: now + delay, run: () => callback(...args) });
-    return handle;
-  }) as typeof setTimeout);
-  const clearTimer = spyOn(globalThis, 'clearTimeout').mockImplementation((handle) => {
-    timers.delete(handle as ReturnType<typeof setTimeout>);
-  });
-  try {
-    run((ms) => {
-      const target = now + ms;
-      for (;;) {
-        const next = [...timers].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
-        if (!next) break;
-        const [handle, timer] = next;
-        now = timer.at;
-        timers.delete(handle);
-        timer.run();
-      }
-      now = target;
-    }, () => timers.size);
-  } finally {
-    timers.clear();
-    clearTimer.mockRestore();
-    setTimer.mockRestore();
-  }
+/** Switch this test to a manual clock; the returned function moves it and fires every timer due by then. */
+function manualClock(): (ms: number) => void {
+  jest.useFakeTimers();
+  return (ms) => { jest.advanceTimersByTime(ms); };
 }
 
 function config(values: Record<string, unknown>): Pick<ConfigManager, 'get'> {
@@ -111,11 +85,12 @@ function install(values: Record<string, unknown>, retry: { retryDelayMs?: number
 
 describe('system theme under tmux with no client attached at startup', () => {
   test('the startup round is dropped; the focus-in tmux sends on attach asks again and the palette re-themes', async () => {
+    const elapse = manualClock();
     const h = install({ 'display.themeMode': 'dark' });
     expect(getActiveThemeName()).toBe('system');
     expect(h.writes).toEqual([BATCH]);
     const fallback = activeTokens().primary;
-    await wait(40); // round 1 closes with nothing (tmux dropped the query)
+    elapse(40); // round 1 closes with nothing (tmux dropped the query)
     expect(getTerminalPalette()?.background).toBeUndefined();
     expect(activeTokens().primary).toBe(fallback); // still the goodvibes stand-in
 
@@ -130,8 +105,9 @@ describe('system theme under tmux with no client attached at startup', () => {
   });
 
   test('a resize (attach from a differently sized client) also asks again', async () => {
+    const elapse = manualClock();
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     h.resize();
     expect(h.writes).toEqual([BATCH, BATCH]);
   });
@@ -181,8 +157,9 @@ describe('system theme under tmux with no client attached at startup', () => {
   });
 
   test('auto mode: a light background that arrives after the background probe timed out still settles light', async () => {
+    const elapse = manualClock();
     const h = install({ 'display.themeMode': 'auto' });
-    await wait(40);
+    elapse(40);
     expect(activeThemeMode()).toBe('dark');
     h.filter('\x1b[I');
     h.filter(tmuxReplies('rgb:f0f0/f0f0/f0f0'));
@@ -192,8 +169,9 @@ describe('system theme under tmux with no client attached at startup', () => {
 
 describe('late replies', () => {
   test('a reply slower than the window (ssh) is removed from input and re-themes when it lands', async () => {
+    const elapse = manualClock();
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     const repaintsBefore = h.repaints;
     expect(h.filter(`ab${tmuxReplies()}cd`)).toBe('abcd');
     expect(getTerminalPalette()?.foreground).toBe('#a9b1d6');
@@ -208,24 +186,26 @@ describe('late replies', () => {
 
 describe('keys held at a round close', () => {
   test('an Esc pressed inside a retry window is handed on, not dropped', async () => {
+    const elapse = manualClock();
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     h.filter('a'); // input starts retry round 2
     expect(h.writes).toHaveLength(2);
     expect(h.filter('\x1b')).toBe(''); // held: could be the start of a reply
-    await wait(40);
+    elapse(40);
     expect(h.forwarded).toEqual(['\x1b']);
   });
 });
 
 describe('TerminalPaletteReader', () => {
   test('publishes the empty startup result once, then the first palette with colours', async () => {
+    const elapse = manualClock();
     const published: TerminalPalette[] = [];
     let writes = 0;
     const reader = new TerminalPaletteReader({ writeBatch: () => { writes += 1; }, onPalette: (p) => published.push(p), timeoutMs: 5, retryDelayMs: 60_000, minRoundSpacingMs: 0 });
     readers.push(reader);
     reader.start();
-    await wait(25);
+    elapse(25);
     expect(published).toHaveLength(1);
     expect(published[0]!.background).toBeUndefined();
     expect(reader.retry()).toBe(true);

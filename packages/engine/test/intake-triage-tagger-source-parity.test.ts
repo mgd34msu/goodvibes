@@ -36,17 +36,6 @@ function fixture(provider: TriageTaggerOptions['provider'], options: {
   return { tagger, credentials, calls, stores };
 }
 
-test('original credential helper resolves both keys, supports setup writes, and fences ABA', async () => {
-  const f = triageCredentials({ key: 'first' });
-  expect(await f.credentials.resolveRef('key')).toBe('first');
-  expect(await f.credentials.resolveConfigSecret('missing')).toBeNull();
-  expect(await f.has('key')).toBe(true); expect(await f.has('missing')).toBe(false);
-  const before = f.capture('key');
-  await f.put('key', 'second'); await f.put('key', 'first');
-  expect(await f.credentials.resolveConfigSecret('key')).toBe('first');
-  expect(() => before.assertCurrent()).toThrow('changed');
-});
-
 test('email facade applies exact normalized keyword, resolved password and one concrete UID', async () => {
   const f = fixture('email');
   await f.tagger.applyTags('email:account:0000000007:0000000042', ['GoodVibes/Spam'], guard());

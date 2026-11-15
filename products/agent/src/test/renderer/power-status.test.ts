@@ -4,6 +4,7 @@ import { describePowerStatus } from '../../renderer/power-status.ts';
 function state(overrides: {
   keepAwakeEnabled?: boolean;
   keepAwakeNote?: string | null;
+  keepAwakeHeld?: boolean;
   workHeld?: boolean;
   workReasons?: readonly string[];
 }) {
@@ -21,7 +22,7 @@ function state(overrides: {
     keepAwake: {
       enabled: overrides.keepAwakeEnabled ?? false,
       note: overrides.keepAwakeNote ?? null,
-      held: overrides.keepAwakeEnabled ?? false,
+      held: overrides.keepAwakeHeld ?? overrides.keepAwakeEnabled ?? false,
       grantedClasses: [],
       deniedClasses: [],
     },
@@ -41,6 +42,11 @@ describe('describePowerStatus', () => {
     const note = 'idle sleep blocked; lid-close suspend is controlled by your OS here';
     expect(describePowerStatus(state({ keepAwakeEnabled: true, keepAwakeNote: note })))
       .toBe(`sleep disabled, ${note}`);
+  });
+
+  it('does not claim sleep is disabled when the OS refused the keep-awake inhibitor', () => {
+    expect(describePowerStatus(state({ keepAwakeEnabled: true, keepAwakeHeld: false })))
+      .toBe('keep-awake refused by the OS: this host can still sleep');
   });
 
   it('shows the real work-hold reasons while automatic inhibition holds', () => {

@@ -8,6 +8,7 @@
  */
 
 import { ownerMessageForFailure } from './imap-open.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import type { EmailCapabilityFailureNotice } from './imap-open.js';
 // Type-only, so this is erased at build time and no runtime cycle exists
 // between the two halves of what used to be one file.
@@ -108,21 +109,71 @@ export function smtpPasswordRefFor(config: EmailConfig): string {
   return config.smtpPasswordRef.length > 0 ? config.smtpPasswordRef : config.passwordRef;
 }
 
+/**
+ * The only secret reference form the resolver below can read: a key in this
+ * process's own secret store. Other `goodvibes://secrets/...` forms (env, file)
+ * name stores the manager does not look up by reference here, so they are
+ * refused up front instead of failing later as a missing secret.
+ */
+const GOODVIBES_SECRET_PREFIX = 'goodvibes://secrets/goodvibes/';
+
+/**
+ * A mail secret reference may only name a key that is about mail: `EMAIL`,
+ * `MAIL`, `IMAP` or `SMTP` as an underscore-delimited word of the key. The
+ * password is sent as the LOGIN password to whatever host `email.imapHost`
+ * names, so a reference to an unrelated secret (a provider API key) would hand
+ * that secret to any host a config points at.
+ */
+const MAIL_KEY_WORD = /(^|_)(EMAIL|MAIL|IMAP|SMTP)(_|$)/i;
+
+function isMailSecretKey(key: string): boolean {
+  return MAIL_KEY_WORD.test(key);
+}
+
+function notMailKeyMessage(setting: string, key: string): string {
+  return `${setting} names '${key}', which is not a mail credential: the key must contain EMAIL, MAIL, IMAP or SMTP as a word (for example GOODVIBES_EMAIL_PASSWORD), so an unrelated secret is never sent to a mail server.`;
+}
+
+/** A secret ref problem as a one-line message, or null when the ref can be resolved. */
+function secretRefProblem(setting: string, ref: string): string | null {
+  if (!ref.startsWith('goodvibes://secrets/')) {
+    return `${setting} must be a goodvibes secret reference (goodvibes://secrets/...)`;
+  }
+  if (!ref.startsWith(GOODVIBES_SECRET_PREFIX) || ref.length === GOODVIBES_SECRET_PREFIX.length) {
+    return `${setting} must name a key in the goodvibes secret store (${GOODVIBES_SECRET_PREFIX}<key>); other secret reference types are not resolved for email`;
+  }
+  let key: string;
+  try { key = decodeURIComponent(ref.slice(GOODVIBES_SECRET_PREFIX.length)); }
+  catch { return `${setting} is not a valid secret reference: the key after ${GOODVIBES_SECRET_PREFIX} has a malformed % escape`; }
+  if (!isMailSecretKey(key)) return notMailKeyMessage(setting, key);
+  return null;
+}
+
+function isLoopbackMailHost(host: string): boolean {
+  return isLoopbackHost(host);
+}
+
 function validateConfiguration(config: EmailConfig, submission: boolean): string[] {
   const errors: string[] = [];
   if (!config.imapHost) errors.push('email.imapHost is required');
+  if (config.imapHost && config.imapSecurity === 'plaintext' && !isLoopbackMailHost(config.imapHost)) {
+    // The mailbox password is sent as typed; off this machine that is a password on the wire.
+    errors.push('email.imapSecurity is plaintext, which is only allowed for a loopback host (localhost, 127.x, ::1); use tls for a remote mail server');
+  }
   if (submission && !config.smtpHost) errors.push('email.smtpHost is required');
   if (!config.username) errors.push('email.username is required');
   if (!config.passwordRef) {
     errors.push('email.passwordRef is required (must be a secret reference, not a raw password)');
-  } else if (!config.passwordRef.startsWith('goodvibes://secrets/')) {
-    errors.push('email.passwordRef must be a goodvibes secret reference (goodvibes://secrets/...)');
+  } else {
+    const problem = secretRefProblem('email.passwordRef', config.passwordRef);
+    if (problem) errors.push(problem);
   }
   // Optional: an empty value means "same password as IMAP", which is the common
   // case. A non-empty one is held to the same rule as passwordRef, a raw
   // password here would be a raw password in a settings file.
-  if (submission && config.smtpPasswordRef.length > 0 && !config.smtpPasswordRef.startsWith('goodvibes://secrets/')) {
-    errors.push('email.smtpPasswordRef must be a goodvibes secret reference (goodvibes://secrets/...)');
+  if (submission && config.smtpPasswordRef.length > 0) {
+    const problem = secretRefProblem('email.smtpPasswordRef', config.smtpPasswordRef);
+    if (problem) errors.push(problem);
   }
   if (submission && !config.fromAddress) errors.push('email.fromAddress is required');
   return errors;
@@ -141,22 +192,6 @@ export function validateEmailInboxConfig(config: EmailConfig): string[] {
 // ---------------------------------------------------------------------------
 // Secret resolution
 // ---------------------------------------------------------------------------
-
-/**
- * Extract the storage key from a goodvibes://secrets/goodvibes/<key> ref.
- * For other secret ref types (env, file, bitwarden, etc.) we cannot resolve
- * them directly, the user should configure via the standard secret manager
- * path. We return the raw ref string for those cases so the SecretsManager
- * can attempt its own resolution chain.
- */
-function extractSecretKey(passwordRef: string): string {
-  const prefix = 'goodvibes://secrets/goodvibes/';
-  if (passwordRef.startsWith(prefix)) {
-    return decodeURIComponent(passwordRef.slice(prefix.length));
-  }
-  // Return the full ref for the SecretsManager to resolve
-  return passwordRef;
-}
 
 /**
  * A mail password that is not where this process reads secrets.
@@ -198,7 +233,17 @@ export async function resolveEmailPassword(
   passwordRef: string,
   secretsManager: { readonly get: (key: string) => Promise<string | null> },
 ): Promise<string> {
-  const key = extractSecretKey(passwordRef);
+  // The store is asked for a KEY; it never parses references, so a reference of
+  // any other form could only ever be reported as a missing secret.
+  if (!passwordRef.startsWith(GOODVIBES_SECRET_PREFIX) || passwordRef.length === GOODVIBES_SECRET_PREFIX.length) {
+    throw new EmailCredentialUnavailableError(
+      `email.passwordRef must be ${GOODVIBES_SECRET_PREFIX}<key>; other secret reference types are not resolved for email.`,
+    );
+  }
+  let key: string;
+  try { key = decodeURIComponent(passwordRef.slice(GOODVIBES_SECRET_PREFIX.length)); }
+  catch { throw new EmailCredentialUnavailableError('email.passwordRef has a malformed % escape in its key.'); }
+  if (!isMailSecretKey(key)) throw new EmailCredentialUnavailableError(notMailKeyMessage('email.passwordRef', key));
   const value = await secretsManager.get(key);
   if (!value) {
     throw new EmailCredentialUnavailableError(

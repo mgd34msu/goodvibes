@@ -79,7 +79,7 @@ export function reviewInventoryPlannerView(inventory: ReviewInventory, _budget?:
     totalFiles: inventory.paths.length,
     directories: [...directories.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
       .map(([directory, files]) => ({ directory, files: files.sort() })),
-    meaning: 'Complete exact inventory. Each directory lists its direct filenames; "." is the project root. Join each other directory and filename with "/" to reconstruct every original path. No files are omitted. Assign scope with exact paths, directories or globs; the host checks coverage against the original inventory.',
+    meaning: 'Complete exact inventory. Each directory lists its direct filenames; "." is the project root. Join each other directory and filename with "/" to reconstruct every original path. No files are omitted. Assign scope with exact paths, directories or globs; the host checks coverage against the original inventory. A scope of "." assigns only the root directory\'s direct files; "**" assigns the whole project.',
   };
 }
 
@@ -88,9 +88,58 @@ export function reviewProjectPath(root: string, path: string): string | undefine
   return normalized && normalized !== '..' && !normalized.startsWith('../') ? normalized : undefined;
 }
 
+/**
+ * The inventory paths a unit's scope names. A pattern is an exact path, a
+ * directory (everything under it) or a glob. "." names the project root's
+ * direct files, as in the planner catalog; "**" names the whole project.
+ */
 export function assignedReviewPaths(inventory: ReviewInventory, patterns: readonly string[]): string[] {
   const matches = patterns.map(pattern => ({ path: pattern.replace(/\/$/, ''), match: buildGlobMatcher(pattern) }));
-  return inventory.paths.filter(path => matches.some(pattern => pattern.path === '.' || path === pattern.path || path.startsWith(pattern.path + '/') || pattern.match(path)));
+  return inventory.paths.filter(path => matches.some(pattern => pattern.path === '.' ? !path.includes('/')
+    : path === pattern.path || path.startsWith(pattern.path + '/') || pattern.match(path)));
+}
+
+/** Most directory rows a path summary shows. */
+const SUMMARY_DIRECTORY_LIMIT = 40;
+
+/**
+ * File counts per directory, for a model-facing view of a path list without
+ * the list itself. Directories are shortened to the deepest common depth at
+ * which at most {@link SUMMARY_DIRECTORY_LIMIT} rows remain; "." is the root.
+ */
+export function directoryFileCounts(paths: readonly string[]): { readonly directory: string; readonly files: number }[] {
+  const directories = paths.map(path => { const separator = path.lastIndexOf('/'); return separator === -1 ? [] : path.slice(0, separator).split('/'); });
+  const deepest = directories.reduce((most, parts) => Math.max(most, parts.length), 0);
+  const countAt = (depth: number) => {
+    const counts = new Map<string, number>();
+    for (const parts of directories) {
+      const key = parts.length === 0 ? '.' : parts.slice(0, depth).join('/');
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  let chosen = countAt(1);
+  for (let depth = 2; depth <= deepest; depth++) {
+    const next = countAt(depth);
+    if (next.size > SUMMARY_DIRECTORY_LIMIT) break;
+    chosen = next;
+  }
+  const rows = [...chosen.entries()].map(([directory, files]) => ({ directory, files }))
+    .sort((left, right) => right.files - left.files || (left.directory < right.directory ? -1 : 1));
+  if (rows.length <= SUMMARY_DIRECTORY_LIMIT) return rows.sort((left, right) => left.directory < right.directory ? -1 : 1);
+  const shown = rows.slice(0, SUMMARY_DIRECTORY_LIMIT - 1);
+  const rest = rows.slice(SUMMARY_DIRECTORY_LIMIT - 1);
+  return [...shown.sort((left, right) => left.directory < right.directory ? -1 : 1),
+    { directory: `(${rest.length} other directories)`, files: rest.reduce((sum, row) => sum + row.files, 0) }];
+}
+
+/** Lists this short are sent as exact paths; longer ones as counts per directory. */
+export const BRIEF_PATH_LIST_LIMIT = 50;
+
+/** A path list as a brief carries it: exact when short, otherwise a count with per-directory counts. */
+export function briefPathList(paths: readonly string[]): JsonValue {
+  return paths.length <= BRIEF_PATH_LIST_LIMIT ? [...paths]
+    : { count: paths.length, directories: directoryFileCounts(paths) };
 }
 
 /** Reads and native accepted assessments are separate facts. A prior check

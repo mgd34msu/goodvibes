@@ -23,13 +23,19 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
     name: 'cloudflare',
     aliases: ['cf'],
     description: 'Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes',
-    usage: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]',
+    usage: '[status|setup|requirements|create-token|discover|validate|provision|verify|disable --yes] [flags]',
     async handler(args, ctx) {
       const subcommand = (args[0] ?? 'status').toLowerCase();
       const parsed = parseCloudflareArgs(args.slice(1));
       if (subcommand === 'setup' || subcommand === 'onboarding') {
         ctx.openOnboardingWizard?.({ mode: 'edit', reset: true });
         ctx.print('Opening onboarding wizard. Select the Cloudflare batch capability to configure Cloudflare.');
+        return;
+      }
+
+      const valueless = valuelessValueFlags(parsed);
+      if (valueless.length > 0) {
+        ctx.print(`Cloudflare ${subcommand}: ${valueless.join(', ')} ${valueless.length === 1 ? 'needs' : 'need'} a value, so nothing was sent. Example: ${valueless[0]} <value>`);
         return;
       }
 
@@ -183,7 +189,8 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           });
           ctx.print([
             'Cloudflare Provisioning',
-            `  ok: ${result.ok ? 'yes' : 'no'}`,
+            `  ok: ${!result.ok ? 'no' : result.warnings?.length ? `partial (${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'})` : 'yes'}`,
+            ...(result.warnings ?? []).map((warning) => `  warning: ${warning}`),
             ...(result.worker ? [`  worker: ${result.worker.name}${result.worker.baseUrl ? ` at ${result.worker.baseUrl}` : ''}`] : []),
             ...(result.queues ? [`  queues: ${result.queues.queueName}; DLQ ${result.queues.deadLetterQueueName}`] : []),
             ...(result.tunnel ? [`  tunnel: ${result.tunnel.name} (${result.tunnel.id})${result.tunnel.hostname ? ` ${result.tunnel.hostname}` : ''}`] : []),
@@ -213,6 +220,14 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
         }
 
         if (subcommand === 'disable') {
+          if (!hasFlag(parsed, 'yes')) {
+            ctx.print([
+              'Cloudflare disable turns the integration off and persists that in config.',
+              `  by default it also disables the Worker cron${hasFlag(parsed, 'keep-cron') ? ' (not with --keep-cron, which you gave)' : ' (add --keep-cron to leave it running)'}${hasFlag(parsed, 'disable-worker-subdomain') ? ' and the workers.dev subdomain (--disable-worker-subdomain)' : ''}.`,
+              'Nothing was changed. Re-run with --yes to confirm.',
+            ].join('\n'));
+            return;
+          }
           const result = await client.disable({
             ...cloudflareAuthInput(parsed),
             ...optionalString('workerName', getFlag(parsed, 'worker-name')),
@@ -228,12 +243,71 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           return;
         }
 
-        ctx.print('Usage: /cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]');
+        ctx.print('Usage: /cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable --yes] [flags]');
       } catch (error) {
         ctx.print(`Cloudflare ${subcommand} failed: ${formatCloudflareError(error)}`);
       }
     },
   });
+}
+
+/**
+ * Flags that carry a value. Given with no value (`--token-env` at the end of the line),
+ * they would read as empty and silently fall back to a stored credential, so they are refused.
+ */
+const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  'access-app-id',
+  'access-service-token-id',
+  'access-service-token-ref',
+  'account',
+  'account-id',
+  'batch-mode',
+  'bootstrap-env',
+  'bootstrap-token',
+  'component',
+  'daemon-hostname',
+  'daemon-url',
+  'dead-letter-queue',
+  'dlq',
+  'do-namespace-id',
+  'do-namespace-name',
+  'durable-object-namespace-id',
+  'durable-object-namespace-name',
+  'kv-namespace-id',
+  'kv-namespace-name',
+  'no-component',
+  'operator-token',
+  'operator-token-ref',
+  'queue',
+  'queue-name',
+  'r2-bucket-name',
+  'secrets-store-id',
+  'secrets-store-name',
+  'token',
+  'token-env',
+  'token-ref',
+  'tunnel-id',
+  'tunnel-name',
+  'tunnel-service-url',
+  'tunnel-token-ref',
+  'worker-client-token',
+  'worker-client-token-ref',
+  'worker-cron',
+  'worker-hostname',
+  'worker-name',
+  'worker-subdomain',
+  'worker-token',
+  'worker-token-ref',
+  'worker-url',
+  'zone',
+  'zone-id',
+  'zone-name',
+]);
+
+function valuelessValueFlags(args: ParsedCloudflareArgs): string[] {
+  return [...args.flags]
+    .filter(([key, values]) => VALUE_FLAGS.has(key) && values[values.length - 1] === 'true')
+    .map(([key]) => `--${key}`);
 }
 
 function createCloudflareClient(ctx: CommandContext): CloudflareDaemonClient {

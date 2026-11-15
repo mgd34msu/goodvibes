@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,9 +77,13 @@ const set = () => ({ fieldId: 'identity.name', value: 'Synthetic corrected owner
 const occasion = () => ({ title: 'Synthetic anniversary', date: '10-20', kind: 'remember-only', surface: 'agent', said: '', authority: 'autonomous', admission: 'autonomous' });
 
 async function prepareDueNudge(f: ReturnType<typeof fixture>): Promise<void> {
+  // One fixed instant for the confirm and the later sweep, so an occasion dated
+  // today cannot roll over to tomorrow between them.
+  const today = new Date(), noon = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 12);
+  const clock = spyOn(Date, 'now').mockReturnValue(noon); cleanup.push(() => clock.mockRestore());
   f.config.set('daemon.timezone', 'UTC'); f.config.set('occasions.activeHours', '00:00-00:00');
   f.config.set('occasions.nudgeChannel', 'ntfy:synthetic-native-destination');
-  const result = await f.call('occasions.confirm', { ...occasion(), date: new Date().toISOString().slice(5, 10) });
+  const result = await f.call('occasions.confirm', { ...occasion(), date: new Date(noon).toISOString().slice(5, 10) });
   expect(result.body).toMatchObject({ ok: true });
 }
 

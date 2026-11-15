@@ -79,17 +79,19 @@ describe('a permission ask leaves this surface and the first real answer wins', 
     const decision = await raise({ request: ask() });
     expect(decision.approved).toBe(true);
     // The write-back is fired without being awaited (the user has already been
-    // served), so let the microtask that carries it run.
-    await new Promise((resolve) => { setTimeout(resolve, 10); });
+    // served), so let the microtasks that carry it run. The verbs are in-memory
+    // async functions, so no timer is involved.
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
 
     const ids = rec.calls.map(([methodId]) => methodId);
     expect(ids[0]).toBe('approvals.raise');
     expect(ids).toContain('approvals.approve');
     const wrote = rec.calls.find(([methodId]) => methodId === 'approvals.approve')?.[1] as Record<string, unknown>;
-    // The actor is the surface's own name, not a hard-coded one: the daemon's
-    // record is what every other surface reads to see WHERE this was answered.
-    expect(wrote['actor']).toBe('testsurface');
-    expect(wrote['actorSurface']).toBe('testsurface');
+    // The daemon takes identity from the authenticated session and ignores any
+    // claimed actor, so the surface's own name travels in the audit note.
+    expect(wrote['note']).toContain('testsurface');
+    expect(wrote).not.toHaveProperty('actor');
+    expect(wrote).not.toHaveProperty('actorSurface');
     expect(wrote['remember']).toBe(true);
   });
 
@@ -170,6 +172,15 @@ describe('a daemon-owned config key is written where the daemon reads it', () =>
     // looks like it worked and changes nothing.
     await expect(config.set('surfaces.telegram.botToken', 'x')).rejects.toThrow('no control-plane base URL');
     expect(rec.calls).toEqual([]);
+  });
+
+  test('a reset removes the daemon-owned value over config.reset and rejects with no daemon', async () => {
+    const rec = recorder(() => ({}));
+    await createDaemonConfigClient(rec.verbs).reset!('watchers.enabled');
+    expect(rec.calls).toEqual([['config.reset', { key: 'watchers.enabled' }]]);
+    const offline = recorder(() => ({}), { unavailable: 'no control-plane base URL is configured' });
+    await expect(createDaemonConfigClient(offline.verbs).reset!('watchers.enabled')).rejects.toThrow('no control-plane base URL');
+    expect(offline.calls).toEqual([]);
   });
 
   test('a read the daemon cannot answer is undefined, not a thrown turn', async () => {

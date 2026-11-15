@@ -29,15 +29,22 @@
  * re-implementation of it.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { afterEach, describe, test, expect } from 'bun:test';
 import { wireStreamEventMetrics, createStreamMetrics as createMetricsFromWiring } from '../../core/stream-event-wiring.ts';
 import type { WireStreamEventMetricsOptions } from '../../core/stream-event-wiring.ts';
 import { createStreamMetrics, type StreamMetrics } from '../../core/stream-metrics.ts';
 import { UIFactory } from '../../renderer/ui-factory.ts';
+import { THINKING_STALL_FREEZE_MS } from '@goodvibes-jev/engine/terminal-shell/ui-factory';
 import { resolveThrobberActivity } from '../../renderer/throbber.ts';
 
-// Mirrors ui-factory.ts's private THINKING_STALL_FREEZE_MS constant.
-const THINKING_STALL_FREEZE_MS = 2_500;
+// STREAM_START arms the stall watchdog's real 30s timer; every wiring made here is torn down after its test.
+const wirings: Array<ReturnType<typeof wireStreamEventMetrics>> = [];
+afterEach(() => { for (const wiring of wirings.splice(0)) for (const unsub of wiring.unsubs) unsub(); });
+const trackWiring = (options: WireStreamEventMetricsOptions) => {
+  const wiring = wireStreamEventMetrics(options);
+  wirings.push(wiring);
+  return wiring;
+};
 
 // --- Minimal real-shaped event bus: any event name, emit-able, unsubscribable ---
 
@@ -167,7 +174,7 @@ describe('stall indicator vs. tool execution (integration path)', () => {
     const turns = makeBus();
     const tools = makeBus();
     const metrics = createStreamMetrics();
-    wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+    trackWiring(makeOptions(turns, tools, metrics));
 
     let mockNow = 1_000_000;
     const origDateNow = Date.now;
@@ -209,7 +216,7 @@ describe('stall indicator vs. tool execution (integration path)', () => {
       const turns = makeBus();
       const tools = makeBus();
       const metrics = createStreamMetrics();
-      wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+      trackWiring(makeOptions(turns, tools, metrics));
 
       let mockNow = 5_000_000;
       const origDateNow = Date.now;
@@ -236,7 +243,7 @@ describe('stall indicator vs. tool execution (integration path)', () => {
     const turns = makeBus();
     const tools = makeBus();
     const metrics = createStreamMetrics();
-    wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+    trackWiring(makeOptions(turns, tools, metrics));
 
     let mockNow = 2_000_000;
     const origDateNow = Date.now;
@@ -260,7 +267,7 @@ describe('stall indicator vs. tool execution (integration path)', () => {
     const turns = makeBus();
     const tools = makeBus();
     const metrics = createStreamMetrics();
-    wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+    trackWiring(makeOptions(turns, tools, metrics));
 
     let mockNow = 3_000_000;
     const origDateNow = Date.now;
@@ -286,7 +293,7 @@ describe('the running call\'s arguments, for the throbber', () => {
     const turns = makeBus();
     const tools = makeBus();
     const metrics = createStreamMetrics();
-    wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+    trackWiring(makeOptions(turns, tools, metrics));
     tools.emit('TOOL_RECEIVED', { callId: 'c1', tool: 'exec', args: { command: 'bun test' } });
     tools.emit('TOOL_RECEIVED', { callId: 'c2', tool: 'read', args: { path: 'src/a.ts' } });
     tools.emit('TOOL_EXECUTING', { callId: 'c1', tool: 'exec', startedAt: 1 });
@@ -300,7 +307,7 @@ describe('the running call\'s arguments, for the throbber', () => {
     const turns = makeBus();
     const tools = makeBus();
     const metrics = createStreamMetrics();
-    wireStreamEventMetrics(makeOptions(turns, tools, metrics));
+    trackWiring(makeOptions(turns, tools, metrics));
     for (let i = 0; i < 200; i++) tools.emit('TOOL_RECEIVED', { callId: `c${i}`, tool: 'read', args: { path: `f${i}` } });
     expect(metrics.toolArgsByCallId.size).toBe(64);
     expect(metrics.toolArgsByCallId.has('c199')).toBe(true);

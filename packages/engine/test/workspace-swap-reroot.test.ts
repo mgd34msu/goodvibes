@@ -83,7 +83,7 @@ describe('WorkspaceSwapManager: rerootStores is called on swap', () => {
     expect(existsSync(join(workspace2, '.goodvibes', 'logs'))).toBe(true);
   });
 
-  test('rerootStores throw causes swap to fail with INVALID_PATH', async () => {
+  test('rerootStores throw causes swap to fail with REROOT_FAILED', async () => {
     const mgr = new WorkspaceSwapManager(workspace1, {
       runtimeBus: null,
       daemonHomeDir: daemonHome,
@@ -96,7 +96,7 @@ describe('WorkspaceSwapManager: rerootStores is called on swap', () => {
     const result = await mgr.requestSwap(workspace2);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.code).toBe('INVALID_PATH');
+      expect(result.code).toBe('REROOT_FAILED');
     }
     // Working dir must NOT have changed after failure
     expect(mgr.getCurrentWorkingDir()).toBe(workspace1);
@@ -171,73 +171,112 @@ describe('WorkspaceSwapManager: real MemoryStore disk isolation', () => {
       embeddingRegistry: makeEmbeddingRegistry(),
       enableVectorIndex: false,
     });
-    await memoryStore.init();
+    let ws1Verify: MemoryStore | undefined;
+    try {
+      await memoryStore.init();
 
-    // Write a record to workspace1
-    await memoryStore.add({
-      cls: 'fact',
-      summary: 'workspace1-record',
-      tags: ['ws1'],
-    });
-    // Flush to disk
-    await memoryStore.save();
+      // Write a record to workspace1
+      await memoryStore.add({
+        cls: 'fact',
+        summary: 'workspace1-record',
+        tags: ['ws1'],
+      });
+      // Flush to disk
+      await memoryStore.save();
 
-    // workspace1 db file must exist on disk
-    expect(existsSync(ws1DbPath)).toBe(true);
+      // workspace1 db file must exist on disk
+      expect(existsSync(ws1DbPath)).toBe(true);
 
-    // Snapshot workspace1 records before swap
-    const ws1RecordsBefore = await memoryStore.search();
-    expect(ws1RecordsBefore.length).toBe(1);
-    expect(ws1RecordsBefore[0]!.summary).toBe('workspace1-record');
+      // Snapshot workspace1 records before swap
+      const ws1RecordsBefore = await memoryStore.search();
+      expect(ws1RecordsBefore.length).toBe(1);
+      expect(ws1RecordsBefore[0]!.summary).toBe('workspace1-record');
 
-    // Build swap manager that reroots the real MemoryStore
-    const mgr = new WorkspaceSwapManager(workspace1, {
-      runtimeBus: null,
-      daemonHomeDir: daemonHome,
-      getBusySessionCount: () => 0,
-      rerootStores: async (newWorkingDir) => {
-        const newDbPath = join(newWorkingDir, '.goodvibes', 'memory.sqlite');
-        await memoryStore.reroot(newDbPath);
-      },
-    });
+      // Build swap manager that reroots the real MemoryStore
+      const mgr = new WorkspaceSwapManager(workspace1, {
+        runtimeBus: null,
+        daemonHomeDir: daemonHome,
+        getBusySessionCount: () => 0,
+        rerootStores: async (newWorkingDir) => {
+          const newDbPath = join(newWorkingDir, '.goodvibes', 'memory.sqlite');
+          await memoryStore.reroot(newDbPath);
+        },
+      });
 
-    // Perform the swap
-    const result = await mgr.requestSwap(workspace2);
-    expect(result.ok).toBe(true);
+      // Perform the swap
+      const result = await mgr.requestSwap(workspace2);
+      expect(result.ok).toBe(true);
 
-    // After swap: memoryStore is now backed by workspace2's SQLite
-    // Write a new record, this must go to workspace2, NOT workspace1
-    await memoryStore.add({
-      cls: 'fact',
-      summary: 'workspace2-record',
-      tags: ['ws2'],
-    });
-    await memoryStore.save();
+      // After swap: memoryStore is now backed by workspace2's SQLite
+      // Write a new record, this must go to workspace2, NOT workspace1
+      await memoryStore.add({
+        cls: 'fact',
+        summary: 'workspace2-record',
+        tags: ['ws2'],
+      });
+      await memoryStore.save();
 
-    // workspace2 db file must exist on disk
-    expect(existsSync(ws2DbPath)).toBe(true);
+      // workspace2 db file must exist on disk
+      expect(existsSync(ws2DbPath)).toBe(true);
 
-    // workspace2 store has exactly the post-swap record
-    const ws2Records = await memoryStore.search();
-    expect(ws2Records.length).toBe(1);
-    expect(ws2Records[0]!.summary).toBe('workspace2-record');
+      // workspace2 store has exactly the post-swap record
+      const ws2Records = await memoryStore.search();
+      expect(ws2Records.length).toBe(1);
+      expect(ws2Records[0]!.summary).toBe('workspace2-record');
 
-    // workspace1 disk isolation: read the ws1 store directly from its file
-    // to confirm the post-swap write did NOT land there
-    const ws1Verify = new MemoryStore(ws1DbPath, {
-      embeddingRegistry: makeEmbeddingRegistry(),
-      enableVectorIndex: false,
-    });
-    await ws1Verify.init();
-    const ws1RecordsAfter = await ws1Verify.search();
-    // workspace1 must still have exactly the pre-swap record (no post-swap write)
-    expect(ws1RecordsAfter.length).toBe(1);
-    expect(ws1RecordsAfter[0]!.summary).toBe('workspace1-record');
-    ws1Verify.close();
+      // workspace1 disk isolation: read the ws1 store directly from its file
+      // to confirm the post-swap write did NOT land there
+      ws1Verify = new MemoryStore(ws1DbPath, {
+        embeddingRegistry: makeEmbeddingRegistry(),
+        enableVectorIndex: false,
+      });
+      await ws1Verify.init();
+      const ws1RecordsAfter = await ws1Verify.search();
+      // workspace1 must still have exactly the pre-swap record (no post-swap write)
+      expect(ws1RecordsAfter.length).toBe(1);
+      expect(ws1RecordsAfter[0]!.summary).toBe('workspace1-record');
 
-    memoryStore.close();
-    rmSync(daemonHome, { recursive: true, force: true });
-    rmSync(workspace1, { recursive: true, force: true });
-    rmSync(workspace2, { recursive: true, force: true });
+    } finally {
+      ws1Verify?.close();
+      memoryStore.close();
+      cleanup(daemonHome, workspace1, workspace2);
+    }
+  });
+});
+
+describe('WorkspaceSwapManager: what a completed swap tells the caller', () => {
+  test('reports the subsystems that keep the old root and whether the path was saved', async () => {
+    const workspace1 = tempDir('out1');
+    const workspace2 = tempDir('out2');
+    const daemonHome = tempDir('outd');
+    try {
+      const mgr = new WorkspaceSwapManager(workspace1, {
+        runtimeBus: null,
+        daemonHomeDir: daemonHome,
+        getBusySessionCount: () => 0,
+        rerootStores: async () => ({ requiresRestart: ['sessionManager', 'artifactStore'] }),
+      });
+      const result = await mgr.requestSwap(workspace2);
+      expect(result).toMatchObject({ ok: true, persisted: true, requiresRestart: ['sessionManager', 'artifactStore'] });
+    } finally { cleanup(workspace1, workspace2, daemonHome); }
+  });
+
+  test('says persisted is false when the daemon settings file cannot be written', async () => {
+    const workspace1 = tempDir('pers1');
+    const workspace2 = tempDir('pers2');
+    const daemonHomeParent = tempDir('persd');
+    const daemonHome = join(daemonHomeParent, 'not-a-directory');
+    // A file where the daemon home should be makes the settings write fail.
+    await Bun.write(daemonHome, 'x');
+    try {
+      const mgr = new WorkspaceSwapManager(workspace1, {
+        runtimeBus: null,
+        daemonHomeDir: daemonHome,
+        getBusySessionCount: () => 0,
+        rerootStores: async () => undefined,
+      });
+      const result = await mgr.requestSwap(workspace2);
+      expect(result).toMatchObject({ ok: true, persisted: false, requiresRestart: [] });
+    } finally { cleanup(workspace1, workspace2, daemonHomeParent); }
   });
 });

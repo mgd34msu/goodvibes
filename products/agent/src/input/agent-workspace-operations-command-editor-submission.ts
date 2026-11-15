@@ -32,42 +32,6 @@ export function isAgentWorkspaceOperationsCommandSubmissionKind(kind: AgentWorks
 }
 
 const OPERATIONS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceOperationsCommandEditorKind, AgentWorkspaceCommandSubmissionHandler>> = {
-  'plan-seed': (_editor, readField) => {
-    const command = `/plan ${quoteSlashCommandArg(readField('goal'))}`;
-    return dispatchCommandEditorSubmission(
-      command,
-      'Opening planning goal seeding',
-      'The workspace handed a concrete planning goal to the shell-owned command router without creating coding-role Agent jobs.',
-      'safe',
-    );
-  },
-  'plan-approve': (editor, readField) => {
-    if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Planning approval not confirmed. Type yes, then press Enter.');
-    return dispatchCommandEditorSubmission(
-      '/plan approve --yes',
-      'Opening planning approval',
-      'The workspace handed confirmed planning approval to the shell-owned command router.',
-      'safe',
-    );
-  },
-  'plan-override': (editor, readField) => {
-    if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Planning strategy override not confirmed. Type yes, then press Enter.');
-    return dispatchCommandEditorSubmission(
-      `/plan override ${quoteSlashCommandArg(readField('strategy'))} --yes`,
-      'Opening planning strategy override',
-      'The workspace handed a confirmed planning strategy override to the shell-owned command router.',
-      'safe',
-    );
-  },
-  'plan-clear': (editor, readField) => {
-    if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Planning clear not confirmed. Type yes, then press Enter.');
-    return dispatchCommandEditorSubmission(
-      '/plan clear --yes',
-      'Opening planning clear',
-      'The workspace handed confirmed planning-state clearing to the shell-owned command router.',
-      'safe',
-    );
-  },
   'approval-approve': (editor, readField) => approvalAction(editor, readField),
   'approval-deny': (editor, readField) => approvalAction(editor, readField),
   'approval-cancel': (editor, readField) => approvalAction(editor, readField),
@@ -79,7 +43,10 @@ const OPERATIONS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceOper
   'schedule-run': (editor, readField) => automationAction(editor, readField),
   'schedule-edit': (editor, readField) => {
     if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Schedule edit not confirmed. Type yes, then press Enter.');
-    const scheduleKind = readField('scheduleKind').trim();
+    const scheduleKind = readField('scheduleKind').trim().toLowerCase();
+    if (scheduleKind && scheduleKind !== 'at' && scheduleKind !== 'every' && scheduleKind !== 'cron') {
+      return unconfirmed(editor, `Schedule type "${scheduleKind}" is not recognised. Use at, every or cron. Nothing was run.`);
+    }
     const scheduleValue = readField('scheduleValue').trim();
     if ((scheduleKind && !scheduleValue) || (!scheduleKind && scheduleValue)) {
       return unconfirmed(editor, 'Schedule type and schedule value must be set together.');
@@ -121,9 +88,8 @@ const OPERATIONS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceOper
   },
   'routine-receipt': (editor, readField) => receiptInspection(editor, readField),
   'schedule-receipt': (editor, readField) => receiptInspection(editor, readField),
-  'health-repair': (editor, readField) => planApprovalHealthShow(editor, readField),
-  'approval-review': (editor, readField) => planApprovalHealthShow(editor, readField),
-  'plan-show': (editor, readField) => planApprovalHealthShow(editor, readField),
+  'health-repair': (editor, readField) => approvalHealthShow(editor, readField),
+  'approval-review': (editor, readField) => approvalHealthShow(editor, readField),
 };
 
 function approvalAction(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
@@ -174,23 +140,18 @@ function receiptInspection(editor: AgentWorkspaceLocalEditor, readField: AgentWo
   );
 }
 
-function planApprovalHealthShow(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
-  const plan = editor.kind === 'plan-show';
+function approvalHealthShow(editor: AgentWorkspaceLocalEditor, readField: AgentWorkspaceFieldReader): AgentWorkspaceCommandEditorSubmission {
   const approval = editor.kind === 'approval-review';
-  const command = plan
-    ? `/plan show ${quoteSlashCommandArg(readField('planId'))}`
-    : approval
-      ? `/approval review ${quoteSlashCommandArg(readField('kind'))}`
-      : `/health repair ${quoteSlashCommandArg(readField('domain'))}`;
-  const title = plan ? 'Opening saved plan' : approval ? 'Opening approval review' : 'Opening health repair guidance';
+  const command = approval
+    ? `/approval review ${quoteSlashCommandArg(readField('kind'))}`
+    : `/health repair ${quoteSlashCommandArg(readField('domain'))}`;
+  const title = approval ? 'Opening approval review' : 'Opening health repair guidance';
   return dispatchCommandEditorSubmission(
     command,
     title,
-    plan
-      ? 'The workspace handed read-only saved-plan inspection to the shell-owned command router.'
-      : approval
-        ? 'The workspace handed read-only approval class review to the shell-owned command router.'
-        : 'The workspace handed read-only health repair guidance to the shell-owned command router.',
+    approval
+      ? 'The workspace handed read-only approval class review to the shell-owned command router.'
+      : 'The workspace handed read-only health repair guidance to the shell-owned command router.',
     'read-only',
   );
 }

@@ -1,5 +1,5 @@
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
-export { buildSyntheticChainEntries } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
+export { buildSyntheticChainEntries, formatSyntheticChainText } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 import type { RuntimeServices } from '../runtime/services.ts';
 import 'node:fs';
 import 'node:path';
@@ -83,6 +83,10 @@ export {
  * @internal exported for unit testing
  */
 
+// This command runs in its own short-lived process. The running host (daemon or TUI) re-reads the user file at its next sign-in or session check, so a deleted user or changed password reaches its accounts, and ends that user's sessions, without a restart. Other sessions live in the host's memory and are never reachable from here.
+const HOST_RESTART_NOTE = 'A running host picks this up at its next sign-in or session check (within a few seconds) and ends that user\'s sessions then; no restart is needed.';
+const SESSIONS_NOT_REACHABLE = 'Sessions are held in memory by the running host and this command cannot reach them. Restart the host to end all of its sessions.';
+
 async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
   return await withRuntimeServices(runtime, (services) => {
     const [sub = 'status', ...rawRest] = runtime.cli.commandArgs;
@@ -99,7 +103,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
     if (sub === 'delete-user' || sub === 'remove-user') {
       const username = rest[0];
       if (!username) return 'Usage: goodvibes auth delete-user <username>';
-      return services.localUserAuthManager.deleteUser(username) ? `Auth user deleted: ${username}` : `No auth user found: ${username}`;
+      return services.localUserAuthManager.deleteUser(username) ? `Auth user deleted: ${username}\n${HOST_RESTART_NOTE}` : `No auth user found: ${username}`;
     }
     if (sub === 'rotate-password' || sub === 'passwd') {
       const username = rest[0];
@@ -107,18 +111,18 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
       const password = readPassword(rawRest);
       if (!password) return 'Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]';
       services.localUserAuthManager.rotatePassword(username, password);
-      return `Auth password rotated: ${username}`;
+      return `Auth password rotated: ${username}\n${HOST_RESTART_NOTE}`;
     }
     if (sub === 'revoke-session') {
       const token = rest[0];
       if (!token) return 'Usage: goodvibes auth revoke-session <session-id-or-token>';
-      return services.localUserAuthManager.revokeSession(token) ? 'Auth session revoked.' : 'No auth session found.';
+      return services.localUserAuthManager.revokeSession(token) ? 'Auth session revoked.' : `No auth session found in this process. ${SESSIONS_NOT_REACHABLE}`;
     }
     if (sub === 'revoke-sessions') {
       const username = rest[0];
       if (!username) return 'Usage: goodvibes auth revoke-sessions <username>';
       const count = services.localUserAuthManager.revokeSessionsForUser(username);
-      return `Auth sessions revoked for ${username}: ${count}`;
+      return count > 0 ? `Auth sessions revoked for ${username}: ${count}` : `No auth sessions revoked for ${username} in this process. ${SESSIONS_NOT_REACHABLE}`;
     }
     if (sub === 'clear-bootstrap') {
       return services.localUserAuthManager.clearBootstrapCredentialFile()
@@ -149,7 +153,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
       return formatJsonOrText(runtime.cli)(
         snapshot.sessions,
         [
-          `GoodVibes auth sessions (${snapshot.sessions.length})`,
+          `GoodVibes auth sessions in this process (${snapshot.sessions.length}); a running host's sessions are not listed`,
           ...snapshot.sessions.map(
             (session) =>
               `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`,
@@ -164,13 +168,13 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<string> {
         `  permission mode: ${String(value.permissionMode)}`,
         `  users: ${value.users.length}`,
         ...value.users.map((user) => `    ${user.username} (${user.roles.join(', ') || 'no roles'})`),
-        `  sessions: ${value.sessions}`,
+        `  sessions in this process: ${value.sessions} (a running host's sessions are not listed)`,
         `  user store: ${paths.userStorePresent ? 'present' : 'missing'} (${paths.userStorePath})`,
         `  bootstrap credential: ${paths.bootstrapCredentialPresent ? 'present' : 'missing'} (${paths.bootstrapCredentialPath})`,
         `  operator tokens: ${paths.operatorTokenPresent ? 'present' : 'missing'} (${paths.operatorTokenPath})`,
       ].join('\n'),
     );
-  });
+  }, { modelData: 'skip' });
 }
 
 export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Promise<CliCommandResult> {

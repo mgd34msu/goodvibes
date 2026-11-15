@@ -81,11 +81,14 @@ test.skipIf(!supportedHost)('an interrupted replacement never leaves a new binar
   const root = fixture();
   const stale = join(root, 'dist', 'app.bun');
   writeFileSync(stale, elf(native.key === 'linux-arm64' ? 183 : 62), { mode: 0o755 });
-  writeFileSync(`${stale}.json`, JSON.stringify({ version: '1.3.14', sha256: createHash('sha256').update(readFileSync(stale)).digest('hex') }));
+  const staleHash = createHash('sha256').update(readFileSync(stale)).digest('hex');
+  writeFileSync(`${stale}.json`, JSON.stringify({ version: '1.3.14', sha256: staleHash }));
   // A non-empty directory where the notice belongs makes the notice rename fail after the binary was replaced.
   mkdirSync(`${stale}.LICENSE.md`); writeFileSync(join(`${stale}.LICENSE.md`, 'blocker'), 'x');
-  expect(() => provideCapturedBunRuntime({ root, outDir: 'dist', target: native, artifacts: ['app'] })).toThrow();
+  expect(() => provideCapturedBunRuntime({ root, outDir: 'dist', target: native, artifacts: ['app'] })).toThrow(/LICENSE\.md/);
   const binaryHash = createHash('sha256').update(readFileSync(stale)).digest('hex');
+  // The failure came after the swap, so the binary is the new one; the old hash must be gone or describe it.
+  expect(binaryHash).not.toBe(staleHash);
   if (existsSync(`${stale}.json`)) expect(JSON.parse(readFileSync(`${stale}.json`, 'utf8')).sha256).toBe(binaryHash);
 });
 

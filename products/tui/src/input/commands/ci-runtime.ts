@@ -115,8 +115,15 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
 
       if (sub === 'watch') {
         const target = args[1] ? parseCiTarget(args[1]) : null;
-        const deliveryChannel = args[2];
-        const triggerFixSession = args.includes('--fix-session');
+        const watchOptions = args.slice(2);
+        const unknownFlags = watchOptions.filter((value) => value.startsWith('--') && value !== '--fix-session');
+        if (unknownFlags.length > 0) {
+          ctx.print(`Unknown option(s): ${unknownFlags.join(', ')}. Usage: /ci watch <repo-or-pr> <deliveryChannel> [--fix-session]`);
+          return;
+        }
+        // The channel is the first word that is not a flag, so `--fix-session` before it is never read as the channel.
+        const deliveryChannel = watchOptions.find((value) => !value.startsWith('--'));
+        const triggerFixSession = watchOptions.includes('--fix-session');
         if (!target || !deliveryChannel) {
           ctx.print('Usage: /ci watch <repo-or-pr> <deliveryChannel> [--fix-session]  (deliveryChannel: "surfaceKind" or "surfaceKind:address")');
           return;
@@ -159,7 +166,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
             ctx.print(lines.join('\n'));
             // Route the spawned session through the shared one-key jump affordance
             // instead of printing the id for the user to retype, same attach flow
-            // as the accepted fix-this card.
+            // as every other fix-session start.
             if (result.fixSessionId) ctx.armFixSessionAttach?.(result.fixSessionId);
           } catch (error) {
             ctx.print(`[ci watches run] ${describeOperatorRpcError(error)}`);

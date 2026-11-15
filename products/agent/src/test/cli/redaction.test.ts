@@ -16,7 +16,9 @@ beforeEach(() => {
   previous = installJudgmentPort(fakePort((name, question, state) => {
     if (name !== 'credential') return cliRedactionAnswer(name, question, state);
     const key = (state as { key: string }).key;
-    return noulAnswer(credentialPaths.has(key) ? 0.99 : safePaths.has(key) ? 0.01 : 0.5);
+    // An unsettled answer for the credential paths: the redactor must withhold them on
+    // its own rules (a declared key, or no confident "no"), not because the port says so.
+    return noulAnswer(safePaths.has(key) ? 0.01 : 0.5);
   }).port);
 });
 afterEach(() => { installJudgmentPort(previous); });
@@ -91,6 +93,16 @@ describe('shouldRedactValue (via redactConfig)', () => {
 
 describe('declared credential fields use the shared redactor', () => {
   const CARD_FIELDS = ['payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName'];
+
+  it('a declared key is redacted without the judgment port being asked', async () => {
+    installJudgmentPort(fakePort((name, question, state) => {
+      if (name === 'credential') throw new Error('The declared-key rule must not consult the port.');
+      return cliRedactionAnswer(name, question, state);
+    }).port);
+    for (const path of ['calendar.google.icsUrl', 'surfaces.googleChat.webhookUrl', 'cluster.secret']) {
+      expect(await isSensitiveConfigPath(path)).toBe(true);
+    }
+  });
 
   it('the four card fields are still redacted after the merge', async () => {
     for (const path of CARD_FIELDS) {

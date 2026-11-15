@@ -4,6 +4,7 @@ import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-
 import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
+import { PaymentOperationStoreError } from './operation-store.js';
 interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined }
 
 function scope(scopes: readonly string[], required: string): boolean { return scopes.includes('*') || scopes.includes(required); }
@@ -26,7 +27,7 @@ function forbidden(): HandlerError {
   return new HandlerError('Answering a purchase requires current paired owner access with admin and write:payments. Pair this client and refresh the purchase.', 'FORBIDDEN', 403);
 }
 
-export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, operations: Pick<CheckoutOperations, 'status'>): TypedHandler<unknown, unknown> {
+export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, operations: Pick<CheckoutOperations, 'statusReport'>): TypedHandler<unknown, unknown> {
   return async ({ body, query, context }) => {
     context.signal?.throwIfAborted();
     if (!context.principalId || !scope(context.scopes, 'read:payments') || !authorizedFor(context, 'read:payments')) {
@@ -37,8 +38,16 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, oper
     const purchaseId = selected === undefined ? undefined : field(selected, 'purchaseId');
     const replies = deps.replies;
     if (!replies) throw unavailable();
-    try { return { windows: replies.inspect(purchaseId), operations: operations.status(purchaseId) }; }
-    catch { throw new HandlerError('Purchase status is unavailable. Inspect the original payment evidence before taking further action.', 'FAILED_PRECONDITION', 409); }
+    try {
+      const { operations: rows, unreadable } = operations.statusReport(purchaseId);
+      // Present only when something could not be read, so a reader that knows
+      // nothing of the field still decodes every healthy response.
+      return { windows: replies.inspect(purchaseId), operations: rows, ...(unreadable.length ? { unreadable } : {}) };
+    }
+    catch (error) {
+      throw new HandlerError(error instanceof PaymentOperationStoreError ? error.message
+        : 'Purchase status is unavailable. Inspect the original payment evidence before taking further action.', 'FAILED_PRECONDITION', 409);
+    }
   };
 }
 
@@ -87,6 +96,12 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
       });
     } catch (error) {
       if (error instanceof HandlerError) throw error;
+      // Operation refusals name the purchase's actual state and what is still possible.
+      if (error instanceof PaymentOperationStoreError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof PaymentReplyWindowError && error.kind === 'stale') {
+        throw new HandlerError('That purchase window has closed or was replaced, so this answer was not used. Read payments.purchase.status for the '
+          + 'current window; to stop the purchase before it is submitted, use payments.purchase.cancel with its operationId.', 'FAILED_PRECONDITION', 409);
+      }
       if (error instanceof PaymentReplyWindowError || error instanceof PaymentReplyInboxClosedError) {
         throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       }

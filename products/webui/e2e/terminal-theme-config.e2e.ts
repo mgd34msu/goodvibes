@@ -105,26 +105,18 @@ for (const [index, appearance] of THEMES.entries()) {
   });
 }
 
-test('real theme validation rejects Advanced garbage, and a refused enum save keeps its current selection', async ({ page }) => {
+test('a refused enum save keeps its current selection', async ({ page }) => {
   const { host } = await installTerminalThemeDaemon(page, 'vaporwave');
   try {
     const dialog = await general(page);
     const field = terminalTheme(dialog);
     const select = field.getByRole('combobox', { name: 'display.theme', exact: true });
-    const advanced = dialog.locator('.settings-advanced');
-    await advanced.getByPlaceholder('settings.path').fill('display.theme');
-    await advanced.getByPlaceholder('JSON or text').fill('"not-a-theme"');
-    await advanced.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(advanced.getByRole('alert')).toContainText('display.theme');
-    await expect(select).toHaveText('vaporwave');
-    expect(host.requests.filter(request => request.method === 'POST').map(request => request.status)).toEqual([400]);
-    expect(host.manager.get('display.theme')).toBe('vaporwave');
     host.setWriteAccess(false);
     await pick(page, select, 'dracula');
     await expect(field.getByRole('alert')).toBeVisible();
     await expect(select).toHaveText('vaporwave');
     await expect(field.getByRole('status')).toHaveCount(0);
-    expect(host.requests.filter(request => request.method === 'POST').map(request => request.status)).toEqual([400, 403]);
+    expect(host.requests.filter(request => request.method === 'POST').map(request => request.status)).toEqual([403]);
     host.reload();
     expect(host.manager.get('display.theme')).toBe('vaporwave');
     await expectNoHorizontalScroll(page);

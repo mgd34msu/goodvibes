@@ -40,8 +40,8 @@ describe('surface command authority', () => {
     expect(surfaceCarriesCommandAuthority('webhook')).toBe(false);
   });
 
-  test('the terminal, the CLI, Telegram and ntfy carry command authority', () => {
-    for (const surface of ['terminal', 'cli', 'tui', 'telegram', 'ntfy']) {
+  test('the terminal, the CLI and Telegram carry command authority', () => {
+    for (const surface of ['terminal', 'cli', 'tui', 'telegram']) {
       expect(surfaceAuthority(surface)).toBe('command');
       expect(surfaceCarriesCommandAuthority(surface)).toBe(true);
     }
@@ -55,8 +55,14 @@ describe('surface command authority', () => {
     }
   });
 
-  test('the declared command surfaces are exactly the five the owner named', () => {
-    expect(listCommandAuthoritySurfaces()).toEqual(['cli', 'ntfy', 'telegram', 'terminal', 'tui']);
+  test('ntfy messages have no sender identity, so they are input-only and cannot direct the agent', () => {
+    expect(surfaceAuthority('ntfy')).toBe('input-only');
+    expect(effectPermittedForProvenance('exec', { surfaceId: 'ntfy' }).allowed).toBe(false);
+    expect(effectPermittedForProvenance('read', { surfaceId: 'ntfy' }).allowed).toBe(true);
+  });
+
+  test('the declared command surfaces are exactly the four that only the owner can write to', () => {
+    expect(listCommandAuthoritySurfaces()).toEqual(['cli', 'telegram', 'terminal', 'tui']);
   });
 
   test('every declared surface answers with one of the two authority values', () => {
@@ -86,7 +92,7 @@ describe('confirmation authority', () => {
     expect(decision.allowed).toBe(false);
     if (decision.allowed) throw new Error('email must never be allowed to confirm');
     expect(decision.problem).toContain('input-only');
-    expect(decision.confirmOn).toEqual(['cli', 'ntfy', 'telegram', 'terminal', 'tui']);
+    expect(decision.confirmOn).toEqual(['cli', 'telegram', 'terminal', 'tui']);
     expect(decision.fix).toContain('terminal');
     expect(decision.fix).toContain('telegram');
   });
@@ -135,13 +141,5 @@ describe('effect gate', () => {
       const decision = effectPermittedForProvenance(effect, { surfaceId: 'inbound-form' });
       expect(decision.allowed).toBe(false);
     }
-  });
-
-  test('the gate cannot be reached without stating where the request came from', () => {
-    // Structural, checked at the type level: effectPermittedForProvenance takes
-    // provenance as a required second parameter and has no third. There is no
-    // override argument to pass, so a caller cannot assert trust, it can only
-    // name a surface, whose authority the declaration table already fixed.
-    expect(effectPermittedForProvenance.length).toBe(2);
   });
 });

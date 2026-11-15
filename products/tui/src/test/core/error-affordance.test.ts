@@ -12,11 +12,9 @@ afterEach(() => { restoreUserErrorReading(); });
  *   - onErrorSurfaced fires when TURN_ERROR is surfaced immediately (no optimizer)
  *   - onErrorSurfaced fires after chain exhaustion
  *   - onErrorSurfaced does NOT fire on successful automatic failover
- *   - 'r' key re-submits exactly once with no duplicate user message (message-count)
- *   - 'm' key triggers openModelPicker
- *   - any other key dismisses affordance without retry
- *   - affordance only activates while retryCtx is armed
- *   - affordance is inactive during normal composing (no TURN_ERROR fired)
+ *
+ * The key handling ('r' retry, 'm' model picker, other keys dismiss, armed-state
+ * gating) is covered in test/shell/retry-affordance.test.ts.
  */
 
 import { describe, test, expect, mock } from 'bun:test';
@@ -204,7 +202,3 @@ describe('wireStreamEventMetrics: onErrorSurfaced', () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Tests: retry affordance state machine simulation
-// ---------------------------------------------------------------------------

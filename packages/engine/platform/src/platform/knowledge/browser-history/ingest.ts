@@ -35,6 +35,8 @@ import type {
 export interface BrowserKnowledgeIngestOptions extends BrowserKnowledgeFilter {
   readonly sessionId?: string | undefined;
   readonly connectorId?: string | undefined;
+  /** Request-level provenance recorded on every source this run writes; the browser observations the run derives itself win on a clash. */
+  readonly metadata?: Record<string, unknown> | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
@@ -192,9 +194,10 @@ async function aggregateBrowserEntries(entries: readonly BrowserKnowledgeEntry[]
 async function captureAggregate(
   context: KnowledgeIngestContext,
   aggregate: BrowserKnowledgeAggregate,
-  options: Pick<BrowserKnowledgeIngestOptions, 'connectorId' | 'sessionId'>,
+  options: Pick<BrowserKnowledgeIngestOptions, 'connectorId' | 'sessionId' | 'metadata'>,
   onSourceStored: (source: KnowledgeSourceRecord) => void,
   uris: KnowledgeUriCanonicalizer,
+  sourceId: string,
 ): Promise<{ source: KnowledgeSourceRecord; extraction: KnowledgeExtractionRecord }> {
   uris.assertCurrent();
   const existing = context.store.getSourceByCanonicalUri(aggregate.canonicalUri);
@@ -202,7 +205,7 @@ async function captureAggregate(
   const connectorId = existing?.connectorId ?? options.connectorId ?? 'browser-local';
   const summary = describeAggregate(aggregate);
   const source = await context.store.upsertSource({
-    ...(existing ? { id: existing.id } : {}),
+    id: existing?.id ?? sourceId,
     connectorId,
     sourceType,
     title: existing?.title ?? titleForAggregate(aggregate),
@@ -221,6 +224,7 @@ async function captureAggregate(
     sessionId: options.sessionId ?? existing?.sessionId,
     metadata: {
       ...(existing?.metadata ?? {}),
+      ...(options.metadata ?? {}),
       ...metadataForAggregate(aggregate),
     },
   }, uris.assertCurrent);
@@ -228,14 +232,30 @@ async function captureAggregate(
   onSourceStored(source);
   uris.assertCurrent();
 
+  // The browser-history extraction text carries the visit count and last-recorded time, so it is
+  // rewritten when those change rather than frozen at the first import. An extraction from any other
+  // extractor (a fetched page, say) is richer than this summary and is never replaced by it.
   const existingExtraction = context.store.getExtractionBySourceId(source.id);
-  const extraction = existingExtraction ?? await context.store.upsertExtraction({
-    sourceId: source.id,
-    ...extractionForAggregate(aggregate, source),
-  }, uris.assertCurrent);
+  const nextExtraction = extractionForAggregate(aggregate, source);
+  const extraction = existingExtraction && (existingExtraction.extractorId !== 'browser-history'
+    || (existingExtraction.summary === nextExtraction.summary && existingExtraction.title === nextExtraction.title))
+    ? existingExtraction
+    : await context.store.upsertExtraction({
+      ...(existingExtraction ? { id: existingExtraction.id } : {}),
+      sourceId: source.id,
+      ...nextExtraction,
+    }, uris.assertCurrent);
   uris.assertCurrent();
 
+  // One write per profile and kind: a URL visited many times would otherwise
+  // rewrite the same node and edge once per visit. Entries are newest first,
+  // so the first one kept is the latest observation the edge should record.
+  const observed = new Map<string, BrowserKnowledgeEntry>();
   for (const entry of aggregate.entries) {
+    const key = JSON.stringify([entry.browser, entry.profilePath, entry.profileName, entry.sourceKind]);
+    if (!observed.has(key)) observed.set(key, entry);
+  }
+  for (const entry of observed.values()) {
     const browserInput = prepareObservedKnowledgeNodeInput(context.store, {
       kind: 'source_group',
       slug: slugify(`browser-${entry.browser}-${entry.profileName}`),
@@ -297,9 +317,14 @@ export async function collectBrowserKnowledge(
   }
 
   entries.sort((a, b) => (timestampForEntry(b) ?? 0) - (timestampForEntry(a) ?? 0));
+  // Recency is not comparable across kinds: bookmarks are old by nature, so a
+  // shared cut would drop them first. Each kind keeps its own newest `limit`.
+  const limit = filter.limit ?? entries.length;
+  const history = entries.filter((entry) => entry.sourceKind === 'history').slice(0, limit);
+  const bookmarks = entries.filter((entry) => entry.sourceKind === 'bookmark').slice(0, limit);
   return {
     profiles,
-    entries: entries.slice(0, filter.limit ?? entries.length),
+    entries: [...history, ...bookmarks],
     errors,
   };
 }
@@ -328,14 +353,17 @@ export async function ingestBrowserKnowledge(
     uris.assertCurrent(); retainedOptions.assertCurrent(); retainedEntries.assertCurrent();
     let sourceId: string | undefined;
     let captureCompleted = false;
+    // One id names the operation in STARTED, COMPLETED and FAILED, so a
+    // subscriber can correlate them; a new source is created under it.
+    const operationId = context.store.getSourceByCanonicalUri(aggregate.canonicalUri)?.id ?? `source-${crypto.randomUUID()}`;
     try {
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestStarted(bus, ctx, {
-        sourceId: aggregate.canonicalUri,
+        sourceId: operationId,
         connectorId: options.connectorId ?? 'browser-local',
         sourceType: sourceTypeForAggregate(aggregate),
         uri: aggregate.canonicalUri,
       }), options.sessionId);
-      const { source, extraction } = await captureAggregate(context, aggregate, options, (stored) => { sourceId = stored.id; }, uris);
+      const { source, extraction } = await captureAggregate(context, aggregate, options, (stored) => { sourceId = stored.id; }, uris, operationId);
       captureCompleted = true;
       capturedSources.push(source);
       await compileKnowledgeSource(context, source, extraction, { signal: options.signal, assertCurrent: uris.assertCurrent });
@@ -371,7 +399,7 @@ export async function ingestBrowserKnowledge(
       outcomes.push({ canonicalUri: aggregate.canonicalUri, ...(sourceId ? { sourceId } : {}), capture, compilation, error: message });
       errors.push(`${aggregate.canonicalUri}: ${message}`);
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestFailed(bus, ctx, {
-        sourceId: sourceId ?? aggregate.canonicalUri,
+        sourceId: sourceId ?? operationId,
         error: message,
       }), options.sessionId);
     }

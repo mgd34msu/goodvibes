@@ -235,6 +235,17 @@ describe('knowledge consolidation reading', () => {
     expect(h.store.getConsolidationCandidate(settled.id)).toEqual(settled);
   });
 
+  test('rejecting an accepted candidate is refused and leaves the promotion and its memory in place', async () => {
+    const h = await harness(); await h.source(); readings(); const [candidate] = await refresh(h.context);
+    const accepted = await decide(h.context, candidate!.id, 'accept', { decidedBy: 'owner' });
+    const memoryId = accepted.metadata.acceptedMemoryId as string;
+    const refused = await decide(h.context, candidate!.id, 'reject', { decidedBy: 'owner' }).then(() => null, (error: unknown) => error as Error);
+    expect(refused?.message).toContain('is accepted, which is final');
+    expect(refused?.message).toContain(memoryId);
+    expect(h.store.getConsolidationCandidate(candidate!.id)).toEqual(accepted);
+    expect(h.memory.retrieve()).toHaveLength(1);
+  });
+
   test('terminal operator decisions survive refresh without another model call', async () => {
     const h = await harness(); await h.source(); const fake = readings(); const [candidate] = await refresh(h.context);
     const rejected = await decide(h.context, candidate!.id, 'reject', { decidedBy: 'owner', memoryClass: 'fact' });

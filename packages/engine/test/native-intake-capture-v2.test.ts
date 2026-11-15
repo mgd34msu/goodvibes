@@ -1,6 +1,4 @@
-/** Source-only regression additions; execution is deferred until coding completes. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { afterEach, expect, test } from 'bun:test';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -119,28 +117,29 @@ test('proposal commitment survives save while action/catalog/site labels change 
   expect(nativeIntakeDecisionSite(changed)).not.toBe(nativeIntakeDecisionSite(reading));
 });
 
-test('fresh native labels and repeated original-source checks do not recompute descriptive SHA bindings', () => {
-  const hash = spyOn(crypto, 'createHash');
-  const calls = () => hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
-  try {
-    const original = fresh(); expect(calls()).toBe(1); // Actual saved source commitment.
-    const restored = parseNativeConversationCapture(structuredClone(original)); expect(calls()).toBe(2); // First saved adoption verifies it.
-    let retained = restored;
-    for (let step = 0; step < 8; step++) {
-      retained = parseNativeConversationCapture(structuredClone(retained), retained);
-      nativeConversationDecisionBinding(retained, 'routing'); nativeConversationDecisionBinding(retained, 'ordinary-turn');
-      nativeIntakeContinuationCatalog(retained); nativeIntakeDecisionSite(retained);
-    }
-    expect(calls()).toBe(2);
-    const withProposal = parseNativeConversationCapture({ ...retained, generation: 2, state: 'processing', stage: 'checking', route: 'contract', proposalsSpent: 1,
-      proposal: { sourceRevision: retained.sourceRevision, spans: [{ partId: 'input', start: 0, end: retained.text.length }] } }, retained);
-    nativeConversationDecisionBinding(withProposal, 'publish-work'); expect(calls()).toBe(3); // Actual saved exact-range commitment.
-    for (let step = 0; step < 8; step++) {
-      nativeConversationDecisionBinding(withProposal, 'routing'); nativeConversationDecisionBinding(withProposal, 'ordinary-turn');
-      nativeConversationProposalRevision(withProposal.proposal!); nativeIntakeContinuationCatalog(withProposal); nativeIntakeDecisionSite(withProposal);
-    }
-    expect(calls()).toBe(3);
-  } finally { hash.mockRestore(); }
+test('fresh native labels and repeated original-source checks keep their bindings stable across saved copies', () => {
+  const original = fresh();
+  const restored = parseNativeConversationCapture(structuredClone(original));
+  const routing = nativeConversationDecisionBinding(restored, 'routing'), ordinary = nativeConversationDecisionBinding(restored, 'ordinary-turn');
+  const catalog = nativeIntakeContinuationCatalog(restored), site = nativeIntakeDecisionSite(restored);
+  let retained = restored;
+  for (let step = 0; step < 8; step++) {
+    retained = parseNativeConversationCapture(structuredClone(retained), retained);
+    expect(nativeConversationDecisionBinding(retained, 'routing')).toBe(routing);
+    expect(nativeConversationDecisionBinding(retained, 'ordinary-turn')).toBe(ordinary);
+    expect(nativeIntakeContinuationCatalog(retained)).toEqual(catalog);
+    expect(nativeIntakeDecisionSite(retained)).toBe(site);
+  }
+  const withProposal = parseNativeConversationCapture({ ...retained, generation: 2, state: 'processing', stage: 'checking', route: 'contract', proposalsSpent: 1,
+    proposal: { sourceRevision: retained.sourceRevision, spans: [{ partId: 'input', start: 0, end: retained.text.length }] } }, retained);
+  const proposalRouting = nativeConversationDecisionBinding(withProposal, 'routing'), publish = nativeConversationDecisionBinding(withProposal, 'publish-work'), revision = nativeConversationProposalRevision(withProposal.proposal!);
+  for (let step = 0; step < 8; step++) {
+    expect(nativeConversationDecisionBinding(withProposal, 'routing')).toBe(proposalRouting);
+    expect(nativeConversationDecisionBinding(withProposal, 'publish-work')).toBe(publish);
+    expect(nativeConversationProposalRevision(withProposal.proposal!)).toBe(revision);
+  }
+  const widened = parseNativeConversationCapture({ ...withProposal, proposal: { ...withProposal.proposal!, spans: [{ partId: 'input', start: 0, end: Math.max(0, retained.text.length - 1) }] } }, retained);
+  expect(nativeConversationProposalRevision(widened.proposal!)).not.toBe(revision);
 });
 
 test('v2 continuation snapshot provenance stays private while contract and public projections preserve its explicit format', () => {

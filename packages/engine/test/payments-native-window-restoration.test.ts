@@ -79,7 +79,9 @@ async function fixture(needsBoot = false, acknowledgedMessageId = '62') {
 test('native recovery waits for both real host phases before restoring the original page', async () => {
   const f = await fixture(true); const waiting = f.restore(f.request, f.owner); let settled = false;
   void waiting.then(() => { settled = true; }, () => { settled = true; });
-  completeGatewayScopePolicyBootstrap(f.catalog); await Promise.resolve();
+  completeGatewayScopePolicyBootstrap(f.catalog);
+  // A macrotask turn drains every microtask continuation, so a restore that proceeded on the first phase alone would have settled.
+  await new Promise<void>(resolve => setImmediate(resolve));
   expect(settled).toBe(false); expect(f.restored()).toBe(0);
   completeGatewayScopePolicyBootstrap(f.catalog, 'boot');
   const restored = await waiting;

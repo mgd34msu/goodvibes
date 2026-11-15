@@ -40,6 +40,10 @@ function inferKind(profile: SandboxProfile): SandboxSessionKind {
 
 export class SandboxSessionRegistry {
   private readonly sessions = new Map<string, SandboxSession>();
+  /** How many starters hold each shared session; it stops only when the last one lets go. */
+  private readonly sharedHolders = new Map<string, number>();
+  /** Shared starts still probing their backend; a second starter joins this one instead of creating a duplicate. */
+  private readonly sharedStarting = new Map<SandboxProfile['id'], Promise<SandboxSession>>();
   private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
@@ -69,15 +73,42 @@ export class SandboxSessionRegistry {
       throw new Error(`Unknown sandbox profile: ${profileId}`);
     }
     if (inferShared(profile)) {
-      const existing = [...this.sessions.values()].find((session) => session.profileId === profileId && session.state === 'running');
-      if (existing) return existing;
+      // A shared session whose last command exited non-zero is still the shared
+      // session (its backend verified at start); only a failed startup probe or
+      // a stop makes it unusable. Without this, one failing command would make
+      // the next start create a duplicate. A session whose startup probe failed
+      // is never handed out, whatever its state became after a later command.
+      const existing = [...this.sessions.values()].find((session) => session.profileId === profileId
+        && session.startupStatus === 'verified'
+        && (session.state === 'running' || session.state === 'failed'));
+      if (existing) {
+        this.sharedHolders.set(existing.id, (this.sharedHolders.get(existing.id) ?? 1) + 1);
+        return existing;
+      }
+      const starting = this.sharedStarting.get(profileId);
+      if (starting) {
+        const joined = await starting;
+        this.sharedHolders.set(joined.id, (this.sharedHolders.get(joined.id) ?? 1) + 1);
+        return joined;
+      }
+      const pending = this.startNew(profile, label, configManager);
+      this.sharedStarting.set(profileId, pending);
+      try {
+        return await pending;
+      } finally {
+        this.sharedStarting.delete(profileId);
+      }
     }
+    return this.startNew(profile, label, configManager);
+  }
+
+  private async startNew(profile: SandboxProfile, label: string | undefined, configManager: ConfigManagerLike): Promise<SandboxSession> {
     const config = getSandboxConfigSnapshot(configManager);
     const launchPlan = buildSandboxLaunchPlan(profile, label?.trim() || profile.label, this.workspaceRoot);
     let state: SandboxSession['state'] = 'running';
     let startupStatus: SandboxSession['startupStatus'] = 'verified';
     let startupDetail = launchPlan.summary;
-    const startupProbe = executeSandboxCommand(launchPlan, 'bash', ['-lc', 'printf sandbox-ready'], {
+    const startupProbe = await executeSandboxCommand(launchPlan, 'bash', ['-lc', 'printf sandbox-ready'], {
       timeoutMs: 2000,
     });
     if (startupProbe.status !== 0 || !startupProbe.stdout.includes('sandbox-ready')) {
@@ -101,13 +132,25 @@ export class SandboxSessionRegistry {
       notes: profile.notes,
     });
     this.sessions.set(session.id, session);
+    if (session.shared) this.sharedHolders.set(session.id, 1);
     return session;
   }
 
+  /**
+   * Stops a session. A shared session that several starters hold (for example
+   * two MCP servers using one profile) is released by one of them and keeps
+   * running until the last holder stops it.
+   */
   public stop(sessionId: string): SandboxSession | null {
     const existing = this.sessions.get(sessionId);
     if (!existing) return null;
     if (existing.state === 'stopped') return existing;
+    const holders = this.sharedHolders.get(sessionId) ?? 1;
+    if (holders > 1) {
+      this.sharedHolders.set(sessionId, holders - 1);
+      return existing;
+    }
+    this.sharedHolders.delete(sessionId);
     return this.updateSession(sessionId, (session) => ({
       ...session,
       state: 'stopped',
@@ -118,7 +161,7 @@ export class SandboxSessionRegistry {
     return this.sessions.get(sessionId) ?? null;
   }
 
-  public execute(
+  public async execute(
     sessionId: string,
     command: string,
     args: readonly string[],
@@ -129,7 +172,7 @@ export class SandboxSessionRegistry {
       readonly timeoutMs?: number | undefined;
       readonly input?: string | undefined;
     } = {},
-  ): SandboxCommandResult {
+  ): Promise<SandboxCommandResult> {
     const session = this.get(sessionId);
     if (!session) {
       throw new Error(`Unknown sandbox session: ${sessionId}`);
@@ -144,10 +187,12 @@ export class SandboxSessionRegistry {
     }
 
     const resolvedPlan = resolveSandboxCommandPlan(command, args);
-    const result = executeSandboxCommand(session.launchPlan, command, args, options);
+    const result = await executeSandboxCommand(session.launchPlan, command, args, options);
     const stdoutPreview = (result.stdout || '').trim().slice(0, 200);
     const stderrPreview = (result.stderr || '').trim().slice(0, 200);
-    const exitState: SandboxSession['state'] = result.status === 0 ? 'running' : 'failed';
+    // A backend that never passed its startup probe stays failed: one command that
+    // happens to exit 0 does not verify it, and its startupDetail still explains why.
+    const exitState: SandboxSession['state'] = result.status === 0 && session.startupStatus !== 'failed' ? 'running' : 'failed';
 
     this.updateSession(sessionId, (current) => ({
       ...current,
@@ -180,6 +225,12 @@ export class SandboxSessionRegistry {
   }
 
   public inspectArtifact(targetPath: string): SandboxSessionArtifact {
-    return JSON.parse(readFileSync(targetPath, 'utf-8')) as SandboxSessionArtifact;
+    const parsed: unknown = JSON.parse(readFileSync(targetPath, 'utf-8'));
+    const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : null;
+    const session = record && typeof record.session === 'object' && record.session !== null ? record.session as Record<string, unknown> : null;
+    if (!record || record.version !== 1 || !session || typeof session.id !== 'string' || typeof record.reviewText !== 'string') {
+      throw new Error(`${targetPath} is not a sandbox session artifact (expected version 1 with a session and review text).`);
+    }
+    return parsed as SandboxSessionArtifact;
   }
 }

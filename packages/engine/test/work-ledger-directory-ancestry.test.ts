@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import type { WorkLedgerAncestryInput } from './helpers/work-ledger-ancestry.js';
@@ -23,6 +23,19 @@ for (const depth of [0, 1, 2]) for (const lateCloseFailure of [false, true]) {
     expect(run.status, run.stderr).toBe(0);
     const output = JSON.parse(run.stdout.trim().split('\n').at(-1)!);
     expect(output.attempts).toEqual(['failed', 'failed', 'accepted']);
+    // Both early attempts failed for the injected durability fault, not for some other reason.
+    expect(output.errors).toEqual(['Injected ancestor durability failure', 'Injected ancestor durability failure']);
+    // The accepted attempt re-synced every ancestor from the database directory up to and
+    // including the directory whose sync had failed.
+    const events = output.events as { operation: string; path?: string }[];
+    const accepted = new Set(events.slice(events.findIndex(event => event.operation === 'attempt-2')).map(event => event.path));
+    const chain: string[] = [];
+    for (let directory = realpathSync(dirname(dbPath)); ; directory = dirname(directory)) {
+      chain.push(directory);
+      if (directory === failDirectory) break;
+    }
+    expect(chain.length).toBeGreaterThanOrEqual(3);
+    for (const directory of chain) expect(accepted.has(directory), `${directory} was not synced on the accepted attempt`).toBe(true);
     expect(output.uncertainReplay).toMatchObject({ kind: 'indeterminate', requestId: 'durable' });
     expect(output.replay).toMatchObject({ kind: 'accepted', replayed: true });
     expect(output.historyLength).toBe(1);

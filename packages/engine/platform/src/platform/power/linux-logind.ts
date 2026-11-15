@@ -17,12 +17,11 @@ import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { watchSleepEdge } from './sleep-edge-watch.js';
 import type { PowerInhibitClass, PowerInhibitHandle, PowerPlatformSeam } from './types.js';
 import {
   defaultSleepWatchSpawner,
-  onStdoutLines,
   pidIsAlive,
-  trackSleepWatcher,
   type OrphanReaperDeps,
   type SleepWatchSpawner,
 } from './child-hygiene.js';
@@ -145,13 +144,19 @@ export function inhibitChildArgs(cls: PowerInhibitClass, who: string, why: strin
   return [`--what=${cls}`, `--who=${who}`, `--why=${why}`, '--mode=block', '--no-ask-password', 'sleep', 'infinity'];
 }
 
-function spawnInhibitChild(cls: PowerInhibitClass, who: string, why: string): Promise<ChildProcess | null> {
+function defaultInhibitorSpawner(command: string, args: readonly string[]): ChildProcess {
+  return spawn(command, [...args], { stdio: 'ignore', detached: false });
+}
+
+function spawnInhibitChild(
+  spawnInhibitor: SleepWatchSpawner,
+  cls: PowerInhibitClass,
+  who: string,
+  why: string,
+  probeMs: number,
+): Promise<ChildProcess | null> {
   return new Promise((resolve) => {
-    const child = spawn(
-      'systemd-inhibit',
-      inhibitChildArgs(cls, who, why),
-      { stdio: 'ignore', detached: false },
-    );
+    const child = spawnInhibitor('systemd-inhibit', inhibitChildArgs(cls, who, why));
     let settled = false;
     const settle = (value: ChildProcess | null): void => {
       if (settled) return;
@@ -165,14 +170,23 @@ function spawnInhibitChild(cls: PowerInhibitClass, who: string, why: string): Pr
     setTimeout(() => {
       if (child.exitCode === null && child.pid) settle(child);
       else settle(null);
-    }, START_PROBE_MS).unref?.();
+    }, probeMs).unref?.();
   });
 }
 
 export function createLinuxLogindSeam(
-  options: { readonly who?: string | undefined; readonly spawnMonitor?: SleepWatchSpawner | undefined } = {},
+  options: {
+    readonly who?: string | undefined;
+    readonly spawnMonitor?: SleepWatchSpawner | undefined;
+    /** Spawner for the systemd-inhibit children. Default: the real tool. */
+    readonly spawnInhibitor?: SleepWatchSpawner | undefined;
+    /** Start probe for an inhibit child. Default 300 ms. */
+    readonly startProbeMs?: number | undefined;
+  } = {},
 ): PowerPlatformSeam {
   const who = options.who ?? 'goodvibes';
+  const spawnInhibitor = options.spawnInhibitor ?? defaultInhibitorSpawner;
+  const probeMs = options.startProbeMs ?? START_PROBE_MS;
   const spawnMonitor = options.spawnMonitor ?? defaultSleepWatchSpawner;
   return {
     platform: 'linux-logind',
@@ -194,8 +208,11 @@ export function createLinuxLogindSeam(
       const denied: PowerInhibitClass[] = [];
       for (const cls of input.classes) {
         // Stamped with the owning pid so a crashed owner's children are
-        // recoverable by the reaper (nothing else will ever release them).
-        const child = await spawnInhibitChild(cls, stampWho(who, process.pid), input.why);
+        // recoverable by the reaper (nothing else will ever release them). The
+        // caller's own label stays in `--who` only when it extends the seam's,
+        // which is what the reaper matches on.
+        const label = input.who.startsWith(who) ? input.who : who;
+        const child = await spawnInhibitChild(spawnInhibitor, cls, stampWho(label, process.pid), input.why, probeMs);
         if (child) {
           children.push({ cls, child });
           granted.push(cls);
@@ -205,52 +222,75 @@ export function createLinuxLogindSeam(
       }
       if (granted.length === 0) return null;
       let released = false;
+      let lost = false;
+      const lostCallbacks: Array<() => void> = [];
+      const killAll = (): void => {
+        for (const { cls, child } of children) {
+          try {
+            child.kill('SIGTERM');
+          } catch (error) {
+            logger.warn('[power] inhibitor release failed', { cls, error: summarizeError(error) });
+          }
+        }
+      };
+      // A child that dies after the start probe ends that class's hold. The
+      // handle is then no longer what it claims, so the rest is given back and
+      // the owner is told, to re-acquire from a clean slate.
+      const markLost = (cls: PowerInhibitClass): void => {
+        if (released || lost) return;
+        lost = true;
+        logger.warn('[power] an inhibitor child exited on its own; the hold is lost', { cls });
+        killAll();
+        for (const callback of lostCallbacks.splice(0)) callback();
+      };
+      for (const { cls, child } of children) {
+        // A child that ended while a later class was still being probed has already emitted 'exit'.
+        if (child.exitCode != null || child.signalCode != null) markLost(cls);
+        else child.once('exit', () => markLost(cls));
+      }
       return {
         grantedClasses: granted,
         deniedClasses: denied,
         release: async () => {
           if (released) return;
           released = true;
-          for (const { cls, child } of children) {
-            try {
-              child.kill('SIGTERM');
-            } catch (error) {
-              logger.warn('[power] inhibitor release failed', { cls, error: summarizeError(error) });
-            }
-          }
+          killAll();
+        },
+        onLost: (callback) => {
+          if (lost) callback();
+          else lostCallbacks.push(callback);
         },
       };
     },
     onPrepareForSleep(callback): () => void {
-      const monitor = spawnMonitor('dbus-monitor', [
-        '--system',
-        "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
-        // Inert stamp rule carrying our pid so a leaked watcher is reapable.
-        sleepWatchOwnerMatchRule(process.pid),
-      ]);
-      // Registered before any output is read so the watcher can never outlive
-      // us (see child-hygiene.ts).
-      const stop = trackSleepWatcher(monitor, (error) => {
-        logger.warn('[power] dbus-monitor unavailable; sleep-edge signal disabled', { error: summarizeError(error) });
+      return watchSleepEdge({
+        label: 'dbus-monitor',
+        spawnWatcher: () => spawnMonitor('dbus-monitor', [
+          '--system',
+          "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
+          // Inert stamp rule carrying our pid so a leaked watcher is reapable.
+          sleepWatchOwnerMatchRule(process.pid),
+        ]),
+        createLineHandler: () => {
+          let sawSignalHeader = false;
+          return (line) => {
+            if (line.includes('member=PrepareForSleep')) {
+              sawSignalHeader = true;
+              return;
+            }
+            if (!sawSignalHeader) return;
+            const match = line.match(/boolean (true|false)/);
+            if (match) {
+              sawSignalHeader = false;
+              try {
+                callback(match[1] === 'true');
+              } catch (error) {
+                logger.warn('[power] PrepareForSleep callback failed', { error: summarizeError(error) });
+              }
+            }
+          };
+        },
       });
-      let sawSignalHeader = false;
-      onStdoutLines(monitor, (line) => {
-        if (line.includes('member=PrepareForSleep')) {
-          sawSignalHeader = true;
-          return;
-        }
-        if (!sawSignalHeader) return;
-        const match = line.match(/boolean (true|false)/);
-        if (match) {
-          sawSignalHeader = false;
-          try {
-            callback(match[1] === 'true');
-          } catch (error) {
-            logger.warn('[power] PrepareForSleep callback failed', { error: summarizeError(error) });
-          }
-        }
-      });
-      return stop;
     },
   };
 }

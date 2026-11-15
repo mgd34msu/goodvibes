@@ -29,19 +29,29 @@
 import { applyRecoverySnapshot, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RecoveryPromptDeps, RecoveryTypeaheadHooks } from './recovery-prompt.ts';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
+import { readSavedBranches } from '../core/session-resume-core.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 
 export interface RecoveryOfferWiringInput {
   readonly surface: SessionSurface;
-  readonly sessionManager: Pick<SessionManager, 'save'>;
+  readonly sessionManager: Pick<SessionManager, 'save'> & Partial<Pick<SessionManager, 'load'>>;
   readonly runtime: { sessionId: string; model: string; provider: string };
   readonly conversation: ConversationManager;
   readonly commandContext: Pick<CommandContext, 'openSelection'> & {
     readonly session?: { readonly hydrateSessionUsage?: (() => void) | undefined } | undefined;
   };
   readonly writeLastSessionPointer: (sessionId: string) => void;
+  /**
+   * The daemon session spine, when one is wired. Moving to the recovered
+   * session closes the boot session and registers the recovered one, the same
+   * hand-over `/session resume` performs, so the daemon's live list names the
+   * session this surface is actually running.
+   */
+  readonly sessionSpine?: Pick<SessionSpineClient, 'reopen'> & Partial<Pick<SessionSpineClient, 'close'>>;
+  readonly project?: string;
   readonly receipt: (line: string) => void;
   readonly render: () => void;
   /** Holds typeahead out of the offer modal (see RecoveryPromptDeps.typeahead). */
@@ -58,6 +68,17 @@ export function buildRecoveryOfferWiring(input: RecoveryOfferWiringInput): Recov
     render: input.render,
     ...(input.typeahead ? { typeahead: input.typeahead } : {}),
     applySnapshot: ({ sessionId }) => {
+      // Saving over a session replaces the whole file, so side branches made with
+      // /branch are carried across: the live conversation's, or else the saved ones.
+      const carriedBranches = (): SessionBranches | undefined => {
+        const live = input.conversation.branchState?.();
+        if (live && (Object.keys(live.branches).length > 0 || live.currentBranch !== 'main')) return live;
+        try {
+          return input.sessionManager.load?.(sessionId).branches;
+        } catch {
+          return undefined;
+        }
+      };
       const persist = (messages: ConversationMessageSnapshot[]): void => {
         input.sessionManager.save(sessionId, messages as never[], {
           title: input.conversation.title || '',
@@ -68,7 +89,7 @@ export function buildRecoveryOfferWiring(input: RecoveryOfferWiringInput): Recov
           // modal. Expiring it out from under them on a later retention sweep
           // would undo the exact thing they just asked for.
           saveSource: 'user',
-        });
+        }, undefined, undefined, carriedBranches());
       };
       // The user picked "Resume it" in the offer modal, that answer, and
       // nothing else, is what unlocks the restore.
@@ -90,7 +111,27 @@ export function buildRecoveryOfferWiring(input: RecoveryOfferWiringInput): Recov
       // conversation back under an id the user never asked for. Both the
       // persist above and the one below name the session explicitly, so
       // neither depends on this assignment having happened first.
+      const previousSessionId = input.runtime.sessionId;
       input.runtime.sessionId = sessionId;
+      // The spine keys a session by project, so a surface with no project has nothing to register under.
+      if (input.sessionSpine && input.project !== undefined) {
+        if (previousSessionId !== sessionId) input.sessionSpine.close?.(previousSessionId);
+        input.sessionSpine.reopen({
+          sessionId,
+          project: input.project,
+          title: input.conversation.title || 'Recovered session',
+        });
+      }
+      // The restore reset the live conversation, which dropped the side branches;
+      // without them back in memory the next turn's autosave rewrites the session without them.
+      const branches = carriedBranches();
+      if (branches) input.conversation.fromJSON({
+      messages: input.conversation.getMessageSnapshot(),
+      title: input.conversation.title,
+      titleSource: input.conversation.getTitleSource(),
+      branches: readSavedBranches(sessionId, branches),
+      currentBranch: branches.currentBranch,
+    });
       // Unconditional, and the reason is the whole point of this feature: a
       // crash-recovery snapshot is NOT a session-store entry. The snapshot
       // file has just been retired by the read that loaded it, so until this

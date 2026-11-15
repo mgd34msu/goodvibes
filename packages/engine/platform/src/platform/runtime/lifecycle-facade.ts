@@ -67,21 +67,32 @@ function isCompactionState(state: string): state is CompactionLifecycleState {
   return compactionLifecycle.isState(state);
 }
 
-export function canTransition(from: McpServerState, to: McpServerState): boolean;
-export function canTransition(from: PluginLifecycleState, to: PluginLifecycleState): boolean;
-export function canTransition(from: TaskLifecycleState, to: TaskLifecycleState): boolean;
-export function canTransition(from: CompactionLifecycleState, to: CompactionLifecycleState): boolean;
-export function canTransition(from: RuntimeLifecycleState, to: RuntimeLifecycleState): boolean {
-  if (isPluginState(from) && isPluginState(to)) return canPluginTransition(from, to);
-  if (isMcpState(from) && isMcpState(to)) return canMcpTransition(from, to);
-  if (isCompactionState(from) && isCompactionState(to)) return canCompactionTransition(from, to);
-  if (isTaskState(from) && isTaskState(to)) return canTaskTransition(from, to);
+/**
+ * Which machine a state belongs to. State names overlap between machines
+ * (`failed` is both a task and a compaction state, `degraded` both a plugin and
+ * an MCP state), so a name alone is ambiguous; without this the first machine in
+ * the facade's fixed order that knows the name answers.
+ */
+export type RuntimeLifecycleMachine = 'task' | 'plugin' | 'mcp' | 'compaction';
+
+const wants = (machine: RuntimeLifecycleMachine | undefined, own: RuntimeLifecycleMachine): boolean =>
+  machine === undefined || machine === own;
+
+export function canTransition(from: McpServerState, to: McpServerState, machine?: 'mcp'): boolean;
+export function canTransition(from: PluginLifecycleState, to: PluginLifecycleState, machine?: 'plugin'): boolean;
+export function canTransition(from: TaskLifecycleState, to: TaskLifecycleState, machine?: 'task'): boolean;
+export function canTransition(from: CompactionLifecycleState, to: CompactionLifecycleState, machine?: 'compaction'): boolean;
+export function canTransition(from: RuntimeLifecycleState, to: RuntimeLifecycleState, machine?: RuntimeLifecycleMachine): boolean {
+  if (wants(machine, 'plugin') && isPluginState(from) && isPluginState(to)) return canPluginTransition(from, to);
+  if (wants(machine, 'mcp') && isMcpState(from) && isMcpState(to)) return canMcpTransition(from, to);
+  if (wants(machine, 'compaction') && isCompactionState(from) && isCompactionState(to)) return canCompactionTransition(from, to);
+  if (wants(machine, 'task') && isTaskState(from) && isTaskState(to)) return canTaskTransition(from, to);
   return false;
 }
 
-export function applyTransition(from: RuntimeLifecycleState, to: RuntimeLifecycleState): RuntimeTransitionResult {
-  if (isPluginState(from) && isPluginState(to)) return applyPluginTransition(from, to);
-  if (isMcpState(from) && isMcpState(to)) {
+export function applyTransition(from: RuntimeLifecycleState, to: RuntimeLifecycleState, machine?: RuntimeLifecycleMachine): RuntimeTransitionResult {
+  if (wants(machine, 'plugin') && isPluginState(from) && isPluginState(to)) return applyPluginTransition(from, to);
+  if (wants(machine, 'mcp') && isMcpState(from) && isMcpState(to)) {
     const result = applyMcpTransition(from, to);
     if (result.success) {
       return {
@@ -96,8 +107,8 @@ export function applyTransition(from: RuntimeLifecycleState, to: RuntimeLifecycl
       ok: false,
     };
   }
-  if (isCompactionState(from) && isCompactionState(to)) return applyCompactionTransition(from, to);
-  if (isTaskState(from) && isTaskState(to)) {
+  if (wants(machine, 'compaction') && isCompactionState(from) && isCompactionState(to)) return applyCompactionTransition(from, to);
+  if (wants(machine, 'task') && isTaskState(from) && isTaskState(to)) {
     if (canTaskTransition(from, to)) return { ok: true, from, to };
     return {
       ok: false,
@@ -106,26 +117,27 @@ export function applyTransition(from: RuntimeLifecycleState, to: RuntimeLifecycl
   }
   return {
     ok: false,
-    reason: `No runtime lifecycle state machine accepts transition ${String(from)} -> ${String(to)}`,
+    reason: `No runtime lifecycle state machine${machine ? ` '${machine}'` : ''} accepts transition ${String(from)} -> ${String(to)}`,
   };
 }
 
-export function reachableFrom(from: McpServerState): ReadonlySet<McpServerState>;
-export function reachableFrom(from: CompactionLifecycleState): ReadonlySet<CompactionLifecycleState>;
-export function reachableFrom(from: TaskLifecycleState): ReadonlySet<TaskLifecycleState>;
-export function reachableFrom(from: RuntimeLifecycleState): ReadonlySet<RuntimeLifecycleState> {
-  if (isMcpState(from)) return reachableFromMcpState(from);
-  if (isCompactionState(from)) return reachableFromCompactionState(from);
-  if (isTaskState(from)) return new Set(getValidTaskTransitions(from));
-  if (isPluginState(from)) {
+export function reachableFrom(from: McpServerState, machine?: 'mcp'): ReadonlySet<McpServerState>;
+export function reachableFrom(from: CompactionLifecycleState, machine?: 'compaction'): ReadonlySet<CompactionLifecycleState>;
+export function reachableFrom(from: TaskLifecycleState, machine?: 'task'): ReadonlySet<TaskLifecycleState>;
+export function reachableFrom(from: PluginLifecycleState, machine: 'plugin'): ReadonlySet<PluginLifecycleState>;
+export function reachableFrom(from: RuntimeLifecycleState, machine?: RuntimeLifecycleMachine): ReadonlySet<RuntimeLifecycleState> {
+  if (wants(machine, 'mcp') && isMcpState(from)) return reachableFromMcpState(from);
+  if (wants(machine, 'compaction') && isCompactionState(from)) return reachableFromCompactionState(from);
+  if (wants(machine, 'task') && isTaskState(from)) return new Set(getValidTaskTransitions(from));
+  if (wants(machine, 'plugin') && isPluginState(from)) {
     return new Set(pluginLifecycle.next(from));
   }
   return new Set();
 }
 
-export function isOperational(state: PluginLifecycleState | McpServerState): boolean {
-  if (isPluginState(state)) return isOperationalPluginState(state);
-  if (isMcpState(state)) return isOperationalMcpState(state);
+export function isOperational(state: PluginLifecycleState | McpServerState, machine?: 'plugin' | 'mcp'): boolean {
+  if (wants(machine, 'plugin') && isPluginState(state)) return isOperationalPluginState(state);
+  if (wants(machine, 'mcp') && isMcpState(state)) return isOperationalMcpState(state);
   return false;
 }
 
@@ -135,10 +147,11 @@ export function isReloadable(state: PluginLifecycleState): boolean {
 
 export function isTerminal(
   state: TaskLifecycleState | PluginLifecycleState | McpServerState | CompactionLifecycleState,
+  machine?: RuntimeLifecycleMachine,
 ): boolean {
-  if (isPluginState(state)) return isTerminalPluginState(state);
-  if (isMcpState(state)) return isTerminalMcpState(state);
-  if (isCompactionState(state)) return isTerminalCompactionState(state);
-  if (isTaskState(state)) return isTerminalStatus(state);
+  if (wants(machine, 'plugin') && isPluginState(state)) return isTerminalPluginState(state);
+  if (wants(machine, 'mcp') && isMcpState(state)) return isTerminalMcpState(state);
+  if (wants(machine, 'compaction') && isCompactionState(state)) return isTerminalCompactionState(state);
+  if (wants(machine, 'task') && isTaskState(state)) return isTerminalStatus(state);
   return false;
 }

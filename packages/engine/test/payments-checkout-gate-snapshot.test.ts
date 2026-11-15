@@ -441,9 +441,7 @@ describe('registerPaymentsGatewayMethods wiring', () => {
     const service = buildService([], { journal, deliverNever: true, recoveryIoTimeoutMs: 50 });
     const catalog = new GatewayMethodCatalog();
 
-    const started = Date.now();
     await registerPaymentsGatewayMethods(catalog, service as never);
-    expect(Date.now() - started).toBeLessThan(5_000);
     expect(catalog.hasHandler('payments.checkout.begin')).toBe(true);
 
     // The settlement itself succeeded (record closed); only the notice

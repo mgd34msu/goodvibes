@@ -1,8 +1,9 @@
 import { beginOpenAICodexLogin, exchangeOpenAICodexCode, getSubscriptionProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import type { OAuthProviderConfig, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
+import { readAuthorizationInput } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import { openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
-import { isAffirmative } from './agent-workspace-editors.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 
@@ -22,6 +23,37 @@ export interface AgentWorkspaceSubscriptionEditorHost {
 
 export type AgentWorkspaceSubscriptionFieldReader = (id: string) => string;
 
+// Login start and finish are single-use against the provider: a second Enter while one is running
+// would spend the one-time code twice, and the loser would report a failure for a login that worked.
+const loginStepsInFlight = new WeakSet<AgentWorkspaceSubscriptionEditorHost>();
+
+function claimLoginStep(host: AgentWorkspaceSubscriptionEditorHost, what: string): boolean {
+  if (loginStepsInFlight.has(host)) {
+    host.status = `A subscription login step is already running; wait for it to finish before ${what} again.`;
+    return false;
+  }
+  loginStepsInFlight.add(host);
+  return true;
+}
+
+/** The submitted form is still the open one, so its result may close or reopen it. */
+function isFormStillOpen(host: AgentWorkspaceSubscriptionEditorHost, editor: AgentWorkspaceLocalEditor): boolean {
+  return host.localEditor?.kind === editor.kind;
+}
+
+function reportLoginFailure(
+  host: AgentWorkspaceSubscriptionEditorHost,
+  editor: AgentWorkspaceLocalEditor,
+  title: string,
+  error: unknown,
+): void {
+  const detail = error instanceof Error ? error.message : String(error);
+  // Keep what the user has typed since submitting; leave another editor they opened alone.
+  if (host.localEditor && isFormStillOpen(host, editor)) host.localEditor = { ...host.localEditor, message: detail };
+  host.status = detail;
+  host.lastActionResult = { kind: 'error', title, detail, safety: 'safe' };
+}
+
 export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
   host: AgentWorkspaceSubscriptionEditorHost,
   editor: AgentWorkspaceLocalEditor,
@@ -33,6 +65,7 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
     host.status = 'Subscription login start not confirmed.';
     return;
   }
+  if (!claimLoginStep(host, 'starting')) return;
   try {
     const provider = readField('provider') || 'openai';
     const openBrowser = isAffirmative(readField('openBrowser'));
@@ -60,7 +93,7 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
     }
 
     const browserOpened = openBrowser ? await openExternalUrl(authorizationUrl) : false;
-    host.localEditor = null;
+    if (isFormStillOpen(host, editor)) host.localEditor = null;
     host.runtimeSnapshot = context ? buildAgentWorkspaceRuntimeSnapshot(context) : host.runtimeSnapshot;
     host.status = `Subscription login started for ${provider}.`;
     host.lastActionResult = {
@@ -76,10 +109,9 @@ export async function submitAgentWorkspaceSubscriptionLoginStartEditor(
     };
     host.clampSelection();
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    host.localEditor = { ...editor, message: detail };
-    host.status = detail;
-    host.lastActionResult = { kind: 'error', title: 'Subscription login start failed', detail, safety: 'safe' };
+    reportLoginFailure(host, editor, 'Subscription login start failed', error);
+  } finally {
+    loginStepsInFlight.delete(host);
   }
 }
 
@@ -94,11 +126,15 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
     host.status = 'Subscription login finish not confirmed.';
     return;
   }
+  if (!claimLoginStep(host, 'finishing')) return;
+  let saved: ProviderSubscription | null = null;
   try {
     const provider = readField('provider') || 'openai';
     const codeInput = readField('code');
-    const code = extractAuthorizationCode(codeInput) ?? codeInput;
     const { manager, services } = subscriptionServices(context);
+    const authorization = readAuthorizationInput(codeInput, manager.getPending(provider)?.state);
+    if (!authorization.ok) throw new Error(authorization.reason);
+    const code = authorization.code;
     const resolved = getSubscriptionProviderConfig(provider, services.get(provider));
     if (!resolved) {
       throw new Error(`OAuth is not configured for ${provider}. Start with a configured or built-in subscription provider.`);
@@ -130,8 +166,8 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
       })()
       : manager.completeOAuthLogin(provider, resolveManualLoginConfig(resolved.oauth), code);
 
-    const saved = await record;
-    host.localEditor = null;
+    saved = await record;
+    if (isFormStillOpen(host, editor)) host.localEditor = null;
     host.runtimeSnapshot = context ? buildAgentWorkspaceRuntimeSnapshot(context) : host.runtimeSnapshot;
     host.status = `Subscription session saved for ${provider}.`;
     host.lastActionResult = {
@@ -146,12 +182,19 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
       safety: 'safe',
     };
     host.clampSelection();
-    host.onSubscriptionLoginSuccess?.();
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    host.localEditor = { ...editor, message: detail };
-    host.status = detail;
-    host.lastActionResult = { kind: 'error', title: 'Subscription login finish failed', detail, safety: 'safe' };
+    reportLoginFailure(host, editor, 'Subscription login finish failed', error);
+  } finally {
+    loginStepsInFlight.delete(host);
+  }
+  // The session is saved by now. A failing follow-up must not turn that into a "login failed" report.
+  if (saved) {
+    try {
+      host.onSubscriptionLoginSuccess?.();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      host.status = `Subscription session saved, but the follow-up step failed: ${detail}`;
+    }
   }
 }
 
@@ -195,17 +238,6 @@ function subscriptionServices(context: CommandContext | null) {
   const services = context?.platform.serviceRegistry;
   if (!manager || !services) throw new Error('Subscription services are unavailable in this runtime.');
   return { manager, services };
-}
-
-function extractAuthorizationCode(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    return url.searchParams.get('code');
-  } catch {
-    return null;
-  }
 }
 
 function resolveManualLoginConfig(config: OAuthProviderConfig): OAuthProviderConfig {

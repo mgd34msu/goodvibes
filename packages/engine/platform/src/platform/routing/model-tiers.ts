@@ -5,16 +5,17 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
  * readings composed in code, remembered per model (and on disk when a path is
  * given) so a model is read once until its facts change.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { JsonValue, YesNoReading } from '@goodvibes-jev/judgment';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { modelTier } from './batteries/model.js';
 import { TIER_READ_CONCURRENCY } from './policy.js';
-import type { RouteTier } from './tiers.js';
+import { ROUTE_TIERS, type RouteTier } from './tiers.js';
 
 /** What routing knows about one model: published facts only. */
 export interface ModelFacts {
@@ -73,7 +74,17 @@ interface StoredTier extends TierRecord {
 
 interface TierFile {
   readonly version: 1;
+  /** The judgment model that produced the entries; they are kept only while it is still the decision model. */
+  readonly model?: string | undefined;
   readonly entries: Record<string, StoredTier>;
+}
+
+function isStoredTier(value: unknown): value is StoredTier {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry['fingerprint'] === 'string'
+    && typeof entry['frontier'] === 'number' && typeof entry['small'] === 'number'
+    && (entry['tier'] === undefined || (ROUTE_TIERS as readonly unknown[]).includes(entry['tier']));
 }
 
 /** The facts a tier depends on and the battery version that read them; a change to either means a new reading. */
@@ -91,11 +102,17 @@ export class ModelTierStore {
   readonly #entries = new Map<string, StoredTier>();
   #ownerPort: import('@goodvibes-jev/judgment').JudgmentPort | undefined;
   #ownerModel: string | undefined;
+  /** The model recorded in the loaded file; consumed by the first call, which adopts the entries only when it matches. */
+  #loadedModel: string | undefined;
   #currentPort() {
     const port = judgmentPort('routing.model-tier');
     if (port !== this.#ownerPort || port.model !== this.#ownerModel) {
+      const adoptLoaded = this.#ownerPort === undefined && this.#loadedModel !== undefined && this.#loadedModel === port.model;
+      this.#loadedModel = undefined;
       // A persisted alias cannot prove which model release produced its answers.
-      this.#entries.clear(); this.#inFlight.clear(); this.#ownerPort = port; this.#ownerModel = port.model;
+      if (!adoptLoaded) this.#entries.clear();
+      this.#inFlight.clear();
+      this.#ownerPort = port; this.#ownerModel = port.model;
     }
     return port;
   }
@@ -177,7 +194,8 @@ export class ModelTierStore {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<TierFile>;
       if (parsed.version !== 1 || typeof parsed.entries !== 'object' || parsed.entries === null) return;
-      for (const [key, entry] of Object.entries(parsed.entries)) this.#entries.set(key, entry);
+      for (const [key, entry] of Object.entries(parsed.entries)) if (isStoredTier(entry)) this.#entries.set(key, entry);
+      if (typeof parsed.model === 'string') this.#loadedModel = parsed.model;
     } catch (error) {
       const message = summarizeError(error);
       if (!message.includes('ENOENT') && !message.includes('no such file')) logger.warn('[routing] Ignoring unreadable model tier file', { path, error: message });
@@ -188,10 +206,8 @@ export class ModelTierStore {
     if (!this.#path) return;
     try {
       mkdirSync(dirname(this.#path), { recursive: true });
-      const file: TierFile = { version: 1, entries: Object.fromEntries(this.#entries) };
-      const tmp = `${this.#path}.tmp`;
-      writeFileSync(tmp, JSON.stringify(file), 'utf-8');
-      renameSync(tmp, this.#path);
+      const file: TierFile = { version: 1, model: this.#ownerModel, entries: Object.fromEntries(this.#entries) };
+      writeJsonFileAtomic(this.#path, file, { indent: null, trailingNewline: false });
     } catch (error) {
       logger.warn('[routing] Model tier file write failed', { path: this.#path, error: summarizeError(error) });
     }

@@ -24,6 +24,7 @@ import { createApprovalDerivedHandlers } from '../runtime/permissions/permission
 import type { SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
 import type { ModelDefinition } from '../providers/registry.js';
 import { withHostedSessionModel } from './model-route.js';
+import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
@@ -31,7 +32,6 @@ import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import {
   containmentFor,
   resolveHostedExecPosture,
-  HOSTED_OWNER_TERMINAL_GUARD,
   type HostedSessionExecPosture,
 } from './exec-posture.js';
 
@@ -70,6 +70,11 @@ export interface HostedSessionRuntimeOptions {
   readonly workspaceRoot: string;
   readonly floor: HostedWorkspaceFloor;
   readonly permissionMode?: GatePresetName | undefined;
+  /**
+   * Whether the host still holds the session behind a keyed tool-state file
+   * (by file-name token). Omitted, those files are never reclaimed.
+   */
+  readonly isSessionResumable?: ((sessionToken: string) => boolean) | undefined;
   readonly permissionModeChanged?: ((mode: GatePresetName) => Promise<void>) | undefined;
   /**
    * The base system prompt for this session's turns. The orchestrator appends
@@ -96,6 +101,8 @@ export interface HostedSessionRuntimeOptions {
    * the session for itself.
    */
   readonly originSurface?: string | undefined;
+  /** The daemon's bearer token, read live; the context tool's Cloudflare status counts it as the Worker operator token. */
+  readonly cloudflareAuthToken?: (() => string | null) | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -138,9 +145,10 @@ export interface HostedSessionRuntime {
   /** True while a turn is in flight. */
   isRunning(): boolean;
   /**
-   * Submit a user message. Resolves when the turn this call started has ended;
-   * a message submitted while a turn is running is QUEUED by the orchestrator
-   * and this resolves immediately, which is the same contract a terminal has.
+   * Submit a user message. Resolves when this message's own turn has ended,
+   * including a message queued behind a running turn. Rejects when the session
+   * is shut down before the message is delivered, so the caller never records
+   * an unanswered message as consumed.
    */
   submit(text: string, correlationId?: string): Promise<void>;
   /** Dedicated native delivery; refuses queue acceptance and requires actual completion. */
@@ -189,7 +197,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     announcementStore,
   });
 
-  registerAllTools(toolRegistry, {
+  const registeredTools = registerAllTools(toolRegistry, {
     // Shared per WORKSPACE, deliberately: two sessions editing one tree must
     // agree about the file they both just wrote (see workspace-floor.ts).
     fileCache: services.fileCache,
@@ -206,6 +214,10 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     // Per SESSION: without it every task-tool ref lands in the unowned legacy
     // namespace and owner-existence reaping cannot run.
     resolveSessionId: () => sessionId,
+    ...(options.isSessionResumable ? { isSessionResumable: options.isSessionResumable } : {}),
+    // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
+    hookDispatcher: services.hookDispatcher,
+    hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
     contractRunner: options.floor.contractRunner,
     projectRoot: options.workspaceRoot,
     sandboxSessionRegistry: services.sandboxSessionRegistry,
@@ -223,6 +235,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       ...(clientOwnedStore ? { clientOwnedStore } : {}),
     },
     archetypeLoader: services.archetypeLoader,
+    ...(options.cloudflareAuthToken ? { cloudflareAuthToken: options.cloudflareAuthToken } : {}),
     configManager: services.configManager,
     providerRegistry,
     toolLLM: services.toolLLM,
@@ -233,7 +246,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     contextAccountingHolder,
     // A file the read tool would gate must not leak its content through a
     // search, the same filter a terminal composition installs.
-    readAccessFilter: async (path: string) => (await services.permissionManager.readAccess(path)) === 'allow',
+    readAccessFilter: async (path: string) => (await services.permissionManager.readAccess(path, sessionId)) === 'allow',
     sandboxEscalationHandler: approvalHandlers.sandboxEscalationHandler,
     execPromptAnswerHandler: approvalHandlers.execPromptAnswerHandler,
     localhostFetchApproval: approvalHandlers.localhostFetchApproval,
@@ -244,7 +257,6 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       options.floor.execPosture,
       { sessionId, workspaceRoot: options.workspaceRoot },
     )),
-    ownerTerminalGuard: HOSTED_OWNER_TERMINAL_GUARD,
   });
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
@@ -340,12 +352,13 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     },
     isRunning: () => orchestrator.isTurnInFlight,
     submit: async (text: string, correlationId?: string): Promise<void> => {
-      if (disposed) return;
+      if (disposed) throw new HostedSessionUnavailableError(sessionId, 'its loop was shut down before this message was delivered');
       // `ownerDirect` is deliberately unset. It attests that the transport
       // authenticated the OWNER himself, and a verb call carrying an operator
       // token cannot honestly claim that, leaving it unset keeps the
       // untrusted-content window open, which is the safe direction.
       await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
+        awaitQueuedTurn: true,
         origin: {
           source: 'hosted-session',
           surface: 'service',
@@ -383,6 +396,10 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
           error: summarizeError(error),
         });
       }
+      // The session's key-value state is saved when its tools shut down; a session that ends here would otherwise lose it.
+      void registeredTools.dispose().catch((error: unknown) => {
+        logger.debug('[hosted-sessions] tool state disposal raised', { sessionId, error: summarizeError(error) });
+      });
     },
   };
   return runtime;

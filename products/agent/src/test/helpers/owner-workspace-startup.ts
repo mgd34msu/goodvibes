@@ -3,6 +3,9 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';
 
+/** The composer's echo of the one unsent character the e2e files type to prove stdin is live. */
+export const COMPOSER_ECHO = '┃  x';
+
 interface Home { readonly home: string; readonly workspace: string }
 export function observeOwnedWorkspaceDecline(home: Home) {
   const path = join(home.home, '.goodvibes/shared/workspace-registrations.json');
@@ -27,5 +30,5 @@ export function observeOwnedWorkspaceDecline(home: Home) {
 export function ownerWorkspaceStartupReadiness(screen: string, home: Home) {
   const registration = observeOwnedWorkspaceDecline(home);
   const canEcho = registration.ownedDecline && !screen.includes(WORKSPACE_REGISTRATION_QUESTION);
-  return { registration, canEcho, ready: canEcho && screen.includes('┃  x') };
+  return { registration, canEcho, ready: canEcho && screen.includes(COMPOSER_ECHO) };
 }

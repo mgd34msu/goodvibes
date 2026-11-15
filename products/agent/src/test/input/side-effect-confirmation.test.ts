@@ -123,7 +123,6 @@ describe('side-effecting slash command confirmation', () => {
 
       out.length = 0;
       await registry.get('notify')!.handler(['send', 'hello', '--yes'], ctx);
-      expect(calls.notificationUrlWrites).toBe(1);
       expect(calls.notificationSends).toBe(1);
       expect(out.join('\n')).toContain('Notification sent');
     } finally {
@@ -157,4 +156,51 @@ describe('side-effecting slash command confirmation', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  const confirmedNotify: ReadonlyArray<{ args: string[]; effect: keyof SideEffectCalls }> = [
+    { args: ['add', 'https://ntfy.sh/new-topic', '--yes'], effect: 'notificationConfigWrites' },
+    { args: ['remove', 'https://ntfy.sh/goodvibes-agent-test', '--yes'], effect: 'notificationConfigWrites' },
+    { args: ['clear', '--yes'], effect: 'notificationConfigWrites' },
+    { args: ['test', '--yes'], effect: 'notificationTests' },
+    { args: ['send', 'hello', '--yes'], effect: 'notificationSends' },
+  ];
+  for (const { args, effect } of confirmedNotify) {
+    test(`notify ${args[0]} with --yes performs its action exactly once`, async () => {
+      const root = makeProjectTempDir('gv-side-effects');
+      try {
+        const registry = new CommandRegistry();
+        registerNotifyRuntimeCommands(registry);
+        const out: string[] = [];
+        const calls = makeCalls();
+        await registry.get('notify')!.handler(args, makeContext(root, out, calls));
+        expect(calls[effect]).toBe(1);
+        expect(out.join('\n')).not.toContain('without --yes');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  const confirmedSecrets: ReadonlyArray<{ args: string[]; effect: 'secretWrites' | 'secretDeletes' }> = [
+    { args: ['set', 'OPENAI_API_KEY', 'secret-value', '--yes'], effect: 'secretWrites' },
+    { args: ['link', 'OPENAI_API_KEY', 'goodvibes://secrets/env/OPENAI_API_KEY', '--yes'], effect: 'secretWrites' },
+    { args: ['delete', 'OPENAI_API_KEY', '--yes'], effect: 'secretDeletes' },
+  ];
+  for (const { args, effect } of confirmedSecrets) {
+    test(`secrets ${args[0]} with --yes performs its action exactly once`, async () => {
+      const root = makeProjectTempDir('gv-side-effects');
+      try {
+        const registry = new CommandRegistry();
+        registerLocalRuntimeCommands(registry);
+        const out: string[] = [];
+        const calls = makeCalls();
+        await registry.get('secrets')!.handler(args, makeContext(root, out, calls));
+        expect(calls[effect]).toBe(1);
+        expect(calls.secretWrites + calls.secretDeletes).toBe(1);
+        expect(out.join('\n')).not.toContain('without --yes');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
 });

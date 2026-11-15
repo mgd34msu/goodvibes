@@ -149,14 +149,18 @@ describe('loadFromDisk()', () => {
     const path = makeConfigPath();
     writeFileSync(path, '{ invalid json !!', 'utf-8');
     const km = new KeybindingsManager({ configPath: path });
-    km.loadFromDisk();
+    const notices = km.loadFromDisk();
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(path);
+    expect(notices[0]).toContain('defaults are in use');
   });
 
-  it('rejects unknown actions with a debug log (no throw, no binding change)', () => {
+  it('reports an unknown action by name and leaves the bindings unchanged', () => {
     const configPath = writeConfig({ 'totally-unknown-action': { key: 'x', ctrl: true } });
     const km = new KeybindingsManager({ configPath });
-    expect(() => km.loadFromDisk()).not.toThrow();
+    const notices = km.loadFromDisk();
+    expect(notices).toEqual(['keybindings: unknown action "totally-unknown-action" ignored']);
     // The real actions must still be intact
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
   });
@@ -164,17 +168,25 @@ describe('loadFromDisk()', () => {
   it('rejects invalid combos missing the key field', () => {
     const configPath = writeConfig({ search: { ctrl: true } }); // no key
     const km = new KeybindingsManager({ configPath });
-    km.loadFromDisk();
+    const notices = km.loadFromDisk();
     // search must fall back to default Ctrl+F
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
+    expect(notices).toEqual(['keybindings: invalid key combination for "search" ignored; the default stays']);
   });
 
   it('rejects invalid combos that are non-objects', () => {
     const configPath = writeConfig({ search: 'invalid-string-combo' });
     const km = new KeybindingsManager({ configPath });
-    km.loadFromDisk();
+    const notices = km.loadFromDisk();
     // search must fall back to default Ctrl+F
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('"search"');
+  });
+
+  it('returns no notices for a valid override file or a missing file', () => {
+    expect(new KeybindingsManager({ configPath: writeConfig({ search: { key: 'g', ctrl: true } }) }).loadFromDisk()).toEqual([]);
+    expect(new KeybindingsManager({ configPath: join(tmpDir, 'absent.json') }).loadFromDisk()).toEqual([]);
   });
 });
 

@@ -4,7 +4,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
 import { repairFailureCause } from './self-improvement-failure-battery.js';
-import { KnowledgeRepairBudgetError } from './self-improvement-budget.js';
+import { KnowledgeRepairBudgetError, timerBudgetMs } from './self-improvement-budget.js';
 import { isOwnedSupportBudgetExpiry } from './support-budget.js';
 
 const SITE = 'knowledge.self-improvement.failure-cause';
@@ -92,7 +92,7 @@ export function captureRepairFailureReader(options: { readonly signal?: AbortSig
       return unresolved('unconfigured');
     }
     if (!current()) return unresolved('stale');
-    const remaining = deadlineAt - Date.now();
+    const remaining = timerBudgetMs(deadlineAt - Date.now());
     if (remaining <= 0) return unresolved('reading-budget-unavailable');
     const controller = new AbortController();
     let rejectStopped: (error: Error) => void = () => {};

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,8 @@ import { AgentManager, ToolRegistry } from '../platform/src/platform/tools/index
 
 const roots: string[] = [];
 const disposers: (() => void)[] = [];
-const previous = installJudgmentPort(undefined);
+let previous: ReturnType<typeof installJudgmentPort>;
+beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { for (const dispose of disposers.splice(0)) dispose(); installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture() {

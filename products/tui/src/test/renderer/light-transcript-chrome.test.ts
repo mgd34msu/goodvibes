@@ -33,14 +33,19 @@ import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { renderSystemMessage } from '../../renderer/system-message.ts';
 import { renderThinkingBlock } from '../../renderer/thinking.ts';
 import { UIFactory } from '../../renderer/ui-factory.ts';
-import { setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
+import { activeThemeMode, getActiveThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
 // These fixtures pin the historical palette's per-mode values, so the suite
 // runs under goodvibes-neon (the pre-2026-09 look); textFaint is the documented
 // #475569 -> #4e5c6f contrast nudge.
+const previousName = getActiveThemeName();
+const previousMode = activeThemeMode();
 beforeAll(() => setActiveThemeName('goodvibes-neon'));
-afterAll(() => setActiveThemeName('goodvibes'));
+afterAll(() => {
+  setActiveThemeName(previousName);
+  setActiveThemeMode(previousMode);
+});
 afterEach(() => setActiveThemeMode('dark'));
 
 const W = 100;

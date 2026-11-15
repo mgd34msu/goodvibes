@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -7,9 +10,19 @@ import { CommandRegistry, type CommandContext } from '../../input/command-regist
 import { registerBuiltinCommands } from '../../input/commands.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
+/** Writes a policy bundle file holding `ruleCount` allow rules and returns its absolute path. */
+function bundleFile(bundleId: string, ruleCount = 0): string {
+  const rules = Array.from({ length: ruleCount }, (_, index) => ({
+    type: 'prefix', id: `${bundleId}-rule-${index}`, description: `Rule ${index}`, origin: 'user', effect: 'allow', toolPattern: '*', commandPrefixes: [],
+  }));
+  const path = join(mkdtempSync(join(tmpdir(), 'gv-policy-bundle-')), `${bundleId}.json`);
+  writeFileSync(path, JSON.stringify({ bundleId, issuedAt: '2026-01-01T00:00:00.000Z', payload: { version: 1, rules } }));
+  return path;
+}
+
 function fixture(state = new PolicyRuntimeState(), policyRegistry?: PolicyRegistry) {
   const root = makeProjectTempDir('gv-policy-engine-owner');
-  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root });
+  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root, homeDir: root });
   const out: string[] = [];
   const commands = new CommandRegistry();
   registerBuiltinCommands(commands);
@@ -54,7 +67,7 @@ describe('registered /policy engine owner', () => {
       const f = fixture();
       for (const threshold of [0.2, 0]) {
         f.configManager.set('permissions.divergenceThreshold', threshold);
-        await f.run(['load', `threshold-${threshold}`]);
+        await f.run(['load', bundleFile(`threshold-${threshold}`)]);
         await f.run(['simulate', 'silent']);
         expect(f.state.getDashboard()?.checkEnforceGate().threshold).toBe(threshold);
         expect(f.state.getRegistry().getCandidate()?.gateResult?.threshold).toBe(threshold);
@@ -66,7 +79,7 @@ describe('registered /policy engine owner', () => {
     await withReadings(async () => {
       for (const [argument, mode] of [[undefined, 'warn-on-divergence'], ['silent', 'simulation-only'], ['enforce', 'enforce'], ['unknown', 'warn-on-divergence']] as const) {
         const f = fixture();
-        await f.run(['load', 'ordinary']);
+        await f.run(['load', bundleFile('ordinary')]);
         await f.run(argument ? ['sim', argument] : ['simulate']);
         expect(f.state.getDashboard()?.checkEnforceGate().threshold).toBe(0.05);
         expect(f.state.getSnapshot().lastSimulationSummary?.mode).toBe(mode);
@@ -104,13 +117,14 @@ describe('registered /policy engine owner', () => {
     await withReadings(async () => {
       const f = fixture();
       await f.run(['simulate']); expect(f.out.join('\n')).toContain('No candidate bundle loaded');
-      await f.run(['load', 'first', '-2']); expect(f.state.getRegistry().getCandidate()?.rules).toHaveLength(0);
+      await f.run(['load', bundleFile('first')]); expect(f.state.getRegistry().getCandidate()?.rules).toHaveLength(0);
       await f.run(['promote']); expect(f.out.join('\n')).toContain('Promotion blocked:');
-      await f.run(['simulate']); await f.run(['simulate']); expect(f.out.join('\n')).toContain('Cannot start simulation:');
+      await f.run(['simulate']); await f.run(['simulate']);
+      expect(f.out.join('\n').match(/Simulation started in/g)).toHaveLength(2);
       await f.run(['trend']); expect(f.out.join('\n')).toContain('Recorded a divergence trend sample');
       await f.run(['promote', '--force']); expect(f.state.getRegistry().getCurrent()?.bundle.bundleId).toBe('first');
       expect(f.out.join('\n')).toContain('WARNING: --force bypasses the divergence gate');
-      await f.run(['load', 'second', '1']); await f.run(['lint']); expect(f.out.join('\n')).toContain('[candidate] ERROR second-rule-0');
+      await f.run(['load', bundleFile('second', 1)]); await f.run(['lint']); expect(f.out.join('\n')).toContain('[candidate] ERROR second-rule-0');
       await f.run(['diff']); expect(f.out.join('\n')).toContain('Diff: first → second (1 change)');
       await f.run(['st']); expect(f.out.join('\n')).toContain('Candidate: second');
       await f.run(['sim']); await f.run(['promote', '--force']); await f.run(['rb']);
@@ -120,7 +134,7 @@ describe('registered /policy engine owner', () => {
   });
   test('preserves the product-held registry override', async () => {
     const override = new PolicyRegistry(); const f = fixture(new PolicyRuntimeState(), override);
-    await f.run(['load', 'override']); expect(override.getCandidate()?.bundle.bundleId).toBe('override');
+    await f.run(['load', bundleFile('override')]); expect(override.getCandidate()?.bundle.bundleId).toBe('override');
     expect(f.state.getRegistry().getCandidate()).toBeNull();
   });
   test('preflight reads live config and mapped MCP security without asking the user', async () => {
@@ -143,7 +157,7 @@ describe('registered /policy engine owner', () => {
     });
   }
   test('clearing a dashboard cancels application of a delayed simulation without resurrecting it', async () => {
-    const f = fixture(); await f.run(['load', 'pending']); const delayed = delayedReadings();
+    const f = fixture(); await f.run(['load', bundleFile('pending')]); const delayed = delayedReadings();
     try {
       const running = f.run(['simulate']); await delayed.entered;
       expect(f.state.getSnapshot().lastSimulationSummary).toBeNull(); f.state.setDashboard(null);

@@ -21,6 +21,20 @@ export interface McpWorkspaceControls {
   setQuery(query: string): void;
   adjustFormEnum(direction: 1 | -1): void;
 }
+// The workspace stays in delete-confirm until the removal returns, so a repeated
+// y or Enter would start a second removal on the same config file.
+const deletesInFlight = new WeakSet<McpWorkspaceControls>();
+function confirmDeleteOnce(workspace: McpWorkspaceControls): void {
+  if (deletesInFlight.has(workspace)) return;
+  deletesInFlight.add(workspace);
+  void (async () => {
+    try {
+      await workspace.confirmDelete();
+    } finally {
+      deletesInFlight.delete(workspace);
+    }
+  })();
+}
 export function handleMcpWorkspaceToken(
   workspace: McpWorkspaceControls,
   token: InputToken,
@@ -48,7 +62,7 @@ export function handleMcpWorkspaceToken(
     if (workspace.mode === 'form') {
       workspace.appendFormText(token.value);
     } else if (workspace.mode === 'delete-confirm') {
-      if (token.value.toLowerCase() === 'y') void workspace.confirmDelete();
+      if (token.value.toLowerCase() === 'y') confirmDeleteOnce(workspace);
       else if (token.value.toLowerCase() === 'n') workspace.cancelForm();
     } else if (workspace.mode === 'reload-confirm') {
       if (token.value.toLowerCase() === 'y') {
@@ -81,7 +95,10 @@ export function handleMcpWorkspaceToken(
   else if (token.logicalName === 'down') workspace.moveSelection(token.shift ? 5 : 1);
   else if (token.logicalName === 'pageup') workspace.moveSelection(-10);
   else if (token.logicalName === 'pagedown') workspace.moveSelection(10);
-  else if (token.logicalName === 'enter') void workspace.activateSelected();
+  else if (token.logicalName === 'enter') {
+    if (workspace.mode === 'delete-confirm') confirmDeleteOnce(workspace);
+    else void workspace.activateSelected();
+  }
   else if (token.logicalName === 'backspace') {
     if (workspace.mode === 'form') workspace.backspaceFormText();
     else if (workspace.mode === 'browse' && workspace.query.length > 0) workspace.setQuery(workspace.query.slice(0, -1));

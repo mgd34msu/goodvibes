@@ -28,7 +28,7 @@ export interface ResumeSessionOptions {
   readonly sharedSessionBroker: Pick<SharedSessionBroker, 'reopenSession'>;
   /** Fire-and-forget daemon-spine mirror. Reopen (not register) is the
    * ONLY resume-time verb, see the platform session-spine client.ts header doc. */
-  readonly sessionSpine: Pick<SessionSpineClient, 'reopen'>;
+  readonly sessionSpine: Pick<SessionSpineClient, 'reopen'> & Partial<Pick<SessionSpineClient, 'close'>>;
   readonly project: string;
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly hookDispatcher: HookDispatcher;
@@ -84,20 +84,10 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
       // parse; the tiny duplicate read keeps this announcement's meaning
       // unchanged rather than repurposing it to a post-replay count).
       const { messages: rawMessages } = options.sessionManager.load(sessionId);
-      options.cancelPendingRecovery?.();
-      emitSessionResumed(
-        options.runtimeBus,
-        {
-          sessionId: options.runtime.sessionId,
-          traceId: `${options.runtime.sessionId}:session-resume:${sessionId}`,
-          source: 'bootstrap',
-        },
-        {
-          sessionId,
-          turnCount: rawMessages.length,
-        },
-      );
-
+      // The session this process was running leaves the daemon's live list once a
+      // resume replaces it; left open it would keep being kept alive until the
+      // daemon's reaper retired it.
+      const previousSessionId = options.runtime.sessionId;
       const outcome = await resumeSessionCore(sessionId, {
         sessionManager: options.sessionManager,
         conversation: options.conversation,
@@ -106,11 +96,30 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         selectModel: options.selectModel,
         hydrateSessionUsage: options.hydrateSessionUsage,
         canResume: () => !options.isGenerating?.(),
+        // After the last refusal check and before the session is replaced: a
+        // revoked offer must land while it still belongs to the old session, and
+        // a refused resume must leave it standing.
+        beforeRestore: () => options.cancelPendingRecovery?.(),
       });
       const { meta } = outcome;
+      // Announced only once the resume happened: a refused one must not tell
+      // telemetry a session resumed.
+      emitSessionResumed(
+        options.runtimeBus,
+        {
+          sessionId: previousSessionId,
+          traceId: `${previousSessionId}:session-resume:${sessionId}`,
+          source: 'bootstrap',
+        },
+        {
+          sessionId,
+          turnCount: rawMessages.length,
+        },
+      );
 
       publishResumedSession(options, sessionId, meta, {
         reopen: () => {
+          if (previousSessionId !== sessionId) options.sessionSpine.close?.(previousSessionId);
           options.sessionSpine.reopen({ sessionId, project: options.project, title: options.conversation.title || meta.title });
         },
         reentry: (summary) => {
@@ -123,8 +132,9 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         hookError: 'Hook bridge fire error',
       });
     } catch (error) {
-      logger.debug('resumeSession failed', { error: summarizeError(error) });
-      options.conversation.log('Failed to resume session.', { fg: activeTokens().error });
+      const reason = summarizeError(error);
+      logger.debug('resumeSession failed', { error: reason });
+      options.conversation.log(`Failed to resume session: ${reason}`, { fg: activeTokens().error });
     }
     options.requestRender();
   };

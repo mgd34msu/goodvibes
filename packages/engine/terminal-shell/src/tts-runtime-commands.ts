@@ -2,7 +2,8 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { TerminalCommandRegistry } from './command-registry.js';
 interface TtsContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'save'>; readonly voiceService?: unknown };
-  readonly stopSpokenOutput?: (() => void) | undefined;
+  /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
+  readonly stopSpokenOutput?: (() => boolean | void) | undefined;
   readonly submitSpokenInput?: ((prompt: string) => void) | undefined;
   print(message: string): void;
   renderRequest(): void;
@@ -21,8 +22,11 @@ export function createTtsRuntimeCommands<Context extends TtsContext>(policy: {
       handler(args, context) {
         const first = (args[0] ?? '').toLowerCase();
         if (first === 'stop' || first === 'cancel') {
-          context.stopSpokenOutput?.();
-          context.print('Live TTS playback stopped.');
+          if (!context.stopSpokenOutput) {
+            context.print('Live TTS is not available in this runtime.');
+            return;
+          }
+          context.print(context.stopSpokenOutput() === false ? 'Nothing is playing.' : 'Live TTS playback stopped.');
           return;
         }
         if (policy.alwaysSpeakControls && (first === 'on' || first === 'off')) {

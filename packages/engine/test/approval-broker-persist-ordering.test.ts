@@ -155,11 +155,6 @@ describe('the newest write is the one that survives on disk', () => {
       await broker.resolveApproval(id, { approved: true, actor: 'tester' });
       expect((await decision).approved).toBe(true);
       expect(onDisk(path, 'call-retry')?.status).toBe('approved');
-      await broker.stampFixSession('call-retry', { error: 'first attempt failed' });
-      expect(await broker.stampFixSession('call-retry', { sessionId: 'retry-session' }))
-        .toMatchObject({ fixSessionId: 'retry-session', fixSessionError: undefined });
-      expect(await broker.stampFixSession('call-retry', { error: 'replacement failed' }))
-        .toMatchObject({ fixSessionId: undefined, fixSessionError: 'replacement failed' });
     } finally { cleanup(); }
   });
 

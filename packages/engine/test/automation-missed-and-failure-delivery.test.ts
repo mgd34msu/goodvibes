@@ -156,16 +156,17 @@ describe('failure-notice target resolution', () => {
       delivery: { mode: 'surface', targets: [target('normal')], fallbackTargets: [], includeSummary: false, includeTranscript: false, includeLinks: false },
     });
     const seen: AutomationDeliveryTarget[][] = [];
+    const delivering = Promise.withResolvers<void>();
     const fakeManager = {
       deliverText: async (_j: AutomationJob, _r: AutomationRun, _b: string, targets: readonly AutomationDeliveryTarget[]) => {
         seen.push([...targets]);
+        delivering.resolve();
         return targets.map((t) => ({ id: 'd', runId: 'run-1', jobId: 'job-1', target: t, status: 'sent' as const }));
       },
     } as unknown as AutomationDeliveryManager;
     let gaps = 0;
     maybeDeliverAutomationFailureNotice(fakeManager, job, makeRun(), () => { gaps += 1; });
-    await Promise.resolve();
-    await Promise.resolve();
+    await delivering.promise;
     expect(gaps).toBe(0);
     expect(seen[0]?.map((t) => t.routeId)).toEqual(['normal']);
   });

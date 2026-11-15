@@ -124,6 +124,32 @@ async function withNullOnNotFound<T>(run: () => Promise<T>): Promise<T | null> {
   }
 }
 
+/** The most records a by-id lookup will scan before it says it cannot tell. */
+const BY_ID_SCAN_CEILING = 12_800;
+
+/**
+ * The operator contract has no by-id read for these records, only a list capped by `limit`.
+ * Widen the list until the record appears or the list comes back shorter than asked (so
+ * everything was seen). `null` therefore means "not there", never "beyond the first page";
+ * a list still full at the ceiling is an error rather than a false "not found".
+ */
+async function findInWidenedList<T>(
+  list: (limit: number) => Promise<readonly T[]>,
+  matches: (entry: T) => boolean,
+  firstLimit: number,
+  what: string,
+): Promise<T | null> {
+  for (let limit = firstLimit; ; limit *= 2) {
+    const entries = await list(limit);
+    const found = entries.find(matches);
+    if (found !== undefined) return found;
+    if (entries.length < limit) return null;
+    if (limit * 2 > BY_ID_SCAN_CEILING) {
+      throw new Error(`${what} was not among the ${entries.length} newest records, and the daemon offers no by-id lookup to search further.`);
+    }
+  }
+}
+
 function asContractInput(input: object | undefined): Record<string, unknown> | undefined {
   return input as Record<string, unknown> | undefined;
 }
@@ -140,7 +166,7 @@ function createOperatorClient(
   return {
     sessions: {
       current: async (): Promise<UiSessionSnapshot> =>
-        await requestJsonRaw(fetchImpl, buildTransportUrl(paths.controlPlaneUrl, '/api/session'), createJsonRequestInit(token)),
+        await requestJsonRaw(fetchImpl, buildTransportUrl(paths.baseUrl, '/api/session'), createJsonRequestInit(token)),
       list: async (limit = 100): Promise<readonly SharedSessionRecord[]> =>
         (await operatorApi.sessions.list({ limit })).sessions.map((entry) => normalizeSharedSessionRecord(entry as Record<string, unknown>)),
       get: async (sessionId): Promise<SharedSessionRecord | null> => {
@@ -212,6 +238,7 @@ function createOperatorClient(
           sessionId,
           inputId,
           ...(options?.consumed === true ? { consumed: true } : {}),
+          ...(options?.claim === true ? { claim: true } : {}),
           // The agent this surface is running for the input, and (once its turn
           // ends) what it produced. Both are what let a message that arrived
           // over a channel and was dispatched HERE get its answer back there.
@@ -227,8 +254,9 @@ function createOperatorClient(
         const { tasks } = await operatorApi.tasks.list();
         return { tasks: assertRuntimeTaskArray(tasks, 'tasks.list') };
       },
+      // tasks.list takes no input, so the page size is applied here rather than sent.
       list: async (limit = 100): Promise<readonly RuntimeTask[]> =>
-        assertRuntimeTaskArray((await operatorApi.tasks.list({ limit })).tasks, 'tasks.list'),
+        assertRuntimeTaskArray((await operatorApi.tasks.list()).tasks, 'tasks.list').slice(0, limit),
       get: async (taskId): Promise<RuntimeTask | null> => {
         const response = await withNullOnNotFound(() => operatorApi.tasks.get(taskId));
         if (response?.task == null) return null;
@@ -244,11 +272,12 @@ function createOperatorClient(
         await operatorApi.invoke<HttpTaskRetryResponse>('tasks.retry', { taskId }),
     },
     approvals: {
+      // The daemon returns the newest 50 records and takes no page size, so a larger limit cannot widen the result.
       list: async (limit = 100): Promise<readonly SharedApprovalRecord[]> =>
-        assertSharedApprovalArray((await operatorApi.approvals.list({ limit })).approvals, 'approvals.list'),
+        assertSharedApprovalArray((await operatorApi.approvals.list({})).approvals, 'approvals.list').slice(0, limit),
       get: async (approvalId): Promise<SharedApprovalRecord | null> => {
-        const approvals = await operatorApi.approvals.list({ limit: 200 });
-        return (assertSharedApprovalArray(approvals.approvals, 'approvals.list').find((entry) => entry.id === approvalId) ?? null);
+        const records = assertSharedApprovalArray((await operatorApi.approvals.list({ approvalId })).approvals, 'approvals.list');
+        return records.find((entry) => entry.id === approvalId) ?? null;
       },
       claim: async (approvalId, actor, actorSurface = 'transport', note): Promise<SharedApprovalRecord | null> => {
         const response = await withNullOnNotFound(() => operatorApi.invoke<{ approval?: SharedApprovalRecord | null }>(
@@ -352,6 +381,7 @@ function createOperatorClient(
 
 function createPeerClient(
   transport: HttpJsonTransport,
+  retryOptions: Pick<HttpTransportOptions, 'retry' | 'onRetryScheduled' | 'onRetryExecuted'> = {},
 ): HttpTransportPeerClient {
   const operatorApi = createOperatorRemoteClient(transport, getOperatorContract());
   const peerApi = createPeerRemoteClient(transport, getPeerContract());
@@ -361,6 +391,10 @@ function createPeerClient(
       baseUrl: transport.baseUrl,
       authToken: tokenValue,
       fetchImpl: transport.fetchImpl,
+      // Peer calls made with a per-call token retry like any other; they count too.
+      ...(retryOptions.retry ? { retry: retryOptions.retry } : {}),
+      ...(retryOptions.onRetryScheduled ? { onRetryScheduled: retryOptions.onRetryScheduled } : {}),
+      ...(retryOptions.onRetryExecuted ? { onRetryExecuted: retryOptions.onRetryExecuted } : {}),
     }), getPeerContract());
   }
 
@@ -382,10 +416,10 @@ function createPeerClient(
         (await operatorApi.invoke<{ requests: readonly DistributedRuntimePairRequest[] }>('remote.pair.requests.list', { limit })).requests ?? [],
       request: async (input): Promise<HttpRemotePairResponse> =>
         await peerApi.invoke<HttpRemotePairResponse>('pair.request', asContractInput(input)),
-      approve: async (requestId, actor, note): Promise<HttpRemotePairApprovalResponse | null> =>
+      approve: async (requestId, actor, note, confirmReplace): Promise<HttpRemotePairApprovalResponse | null> =>
         await withNullOnNotFound(() => operatorApi.invoke<HttpRemotePairApprovalResponse>(
           'remote.pair.requests.approve',
-          { requestId, actor, ...(note ? { note } : {}) },
+          { requestId, actor, ...(note ? { note } : {}), ...(confirmReplace ? { confirmReplace: true } : {}) },
         )),
       reject: async (requestId, actor, note): Promise<DistributedRuntimePairRequest | null> => {
         const response = await withNullOnNotFound(() => operatorApi.invoke<{ request?: DistributedRuntimePairRequest | null }>(
@@ -406,10 +440,13 @@ function createPeerClient(
           ...(kind ? { kind } : {}),
           limit,
         })).peers ?? [],
-      get: async (peerId): Promise<DistributedPeerRecord | null> => {
-        const response = await operatorApi.invoke<{ peers: readonly DistributedPeerRecord[] }>('remote.peers.list', { limit: 500 });
-        return (response.peers ?? []).find((peer) => peer.id === peerId) ?? null;
-      },
+      get: async (peerId): Promise<DistributedPeerRecord | null> =>
+        await findInWidenedList(
+          async (limit) => (await operatorApi.invoke<{ peers: readonly DistributedPeerRecord[] }>('remote.peers.list', { limit })).peers ?? [],
+          (peer) => peer.id === peerId,
+          500,
+          `Peer '${peerId}'`,
+        ),
       getSnapshot: async (peerId): Promise<HttpPeerRecordSnapshot | null> => {
         const [snapshot, contract, peers] = await Promise.all([
           readRemoteSnapshot(),
@@ -520,12 +557,15 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
     baseUrl: options.baseUrl,
     authToken: options.authToken,
     fetchImpl: options.fetchImpl,
+    ...(options.retry ? { retry: options.retry } : {}),
+    ...(options.onRetryScheduled ? { onRetryScheduled: options.onRetryScheduled } : {}),
+    ...(options.onRetryExecuted ? { onRetryExecuted: options.onRetryExecuted } : {}),
   });
   const fetchImpl = httpClient.fetchImpl;
   const paths = httpClient.paths;
   const events = createRemoteUiRuntimeEvents(createEventSourceConnector(httpClient.baseUrl, options.authToken, fetchImpl));
   const operator = createOperatorClient(httpClient, events);
-  const peer = createPeerClient(httpClient);
+  const peer = createPeerClient(httpClient, options);
   const transport = createClientTransport('http', operator, peer);
 
   return Object.freeze({

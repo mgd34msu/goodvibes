@@ -74,7 +74,14 @@ export const CHECKIN_CONFIG_SET_INPUT_SCHEMA = objectSchema({
   deliveryChannel: STRING_SCHEMA,
   quietHours: STRING_SCHEMA,
 }, []);
-export const CHECKIN_CONFIG_SET_OUTPUT_SCHEMA = entityOutputSchema('config', CHECKIN_CONFIG_SCHEMA);
+const CHECKIN_SCHEDULE_SCHEMA = objectSchema({
+  state: { type: 'string', enum: ['scheduled', 'not-needed', 'failed'] },
+  reason: STRING_SCHEMA,
+}, ['state']);
+export const CHECKIN_CONFIG_SET_OUTPUT_SCHEMA = objectSchema({
+  config: CHECKIN_CONFIG_SCHEMA,
+  schedule: CHECKIN_SCHEDULE_SCHEMA,
+}, ['config'], { additionalProperties: false });
 
 export const CHECKIN_RECEIPTS_LIST_INPUT_SCHEMA = objectSchema({ limit: NUMBER_SCHEMA }, []);
 export const CHECKIN_RECEIPTS_LIST_OUTPUT_SCHEMA = listOutputSchema('receipts', CHECKIN_RECEIPT_SCHEMA);
@@ -84,6 +91,7 @@ export const CHECKIN_RUN_OUTPUT_SCHEMA = objectSchema({
   outcome: CHECKIN_RUN_OUTCOME_SCHEMA,
   summary: STRING_SCHEMA,
   deliveryId: STRING_SCHEMA,
+  error: STRING_SCHEMA,
 }, ['outcome', 'summary']);
 
 export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -100,7 +108,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'checkin.config.set',
     title: 'Update Check-in Config',
-    description: 'Update the proactive check-in configuration. Absent fields are left unchanged. Enabling syncs the kind:checkin automation job onto the scheduler; disabling stops it.',
+    description: 'Update the proactive check-in configuration. Absent fields are left unchanged. Enabling syncs the kind:checkin automation job onto the scheduler; disabling stops it. The answer carries `schedule` (scheduled, not-needed, or failed with the reason), because the config is stored even when the scheduler could not install the job.',
     category: 'checkin',
     scopes: ['write:checkin'],
     access: 'admin',

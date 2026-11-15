@@ -94,8 +94,10 @@ export interface RuntimeTask {
   // ── Result ───────────────────────────────────────────────────────────────
   /** Exit code for exec tasks. */
   exitCode?: number | undefined;
-  /** Error message if status === 'failed'. */
+  /** Error message if status === 'failed'; a blocked task carries its blocked reason here until it starts again. */
   error?: string | undefined;
+  /** Latest progress message reported for the task, kept apart from `description`. */
+  progress?: string | undefined;
   /** Optional structured result payload. */
   result?: unknown | undefined;
 

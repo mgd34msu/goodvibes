@@ -83,18 +83,18 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           action: {
             type: 'string',
             enum: [...ACCOUNT_ACTIONS],
-            description: 'What to do. Record an account as you create it.',
+            description: 'What to do. Record an account as you create it: record requires serviceDomain, serviceUrl, aliasAddress, purpose and credentialSecretKey.',
           },
           serviceDomain: { type: 'string', description: 'Service domain, for alias and record.' },
           serviceUrl: { type: 'string', description: 'The http(s) signup page, for record.' },
           aliasAddress: { type: 'string', description: 'The per-signup alias address used, for record.' },
-          purpose: { type: 'string', description: 'What the account is for, for record.' },
+          purpose: { type: 'string', description: 'What the account is for; required for record, optional for alias.' },
           credentialSecretKey: {
             type: 'string',
             description: 'Secret-store key NAME. Never the credential itself.',
           },
           id: { type: 'string', description: 'Account record id, for forget.' },
-          maxAgeDays: { type: 'number', description: 'For sweep: drop records older than this.' },
+          maxAgeDays: { type: 'number', description: 'For sweep: drop records older than this many days. Must be greater than 0.' },
         },
         required: ['action'],
       },
@@ -131,7 +131,7 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           return ok([
             `Use ${alias.address} as the email address for this signup.`,
             `It delivers to ${alias.baseAddress}, and it is what a verification mail for ${alias.serviceDomain} will be matched on.`,
-            `Watching for its verification mail until ${expectation.expiresAt}; read it with google action:"mail.verification".`,
+            `Watching for its verification mail until ${expectation.expiresAt}; read it with google action:"mail.verification" (get the message id from google action:"mail.list" first).`,
             'Record the account with accounts action:"record" once it exists.',
           ].join('\n'));
         }
@@ -140,7 +140,13 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           assertAgentAccountsRead(options, rawArgs, execution);
           const snapshot = registry.snapshot();
           assertAgentAccountsRead(options, rawArgs, execution);
+          if (snapshot.unreadable !== undefined) {
+            return failure(`The account register at ${snapshot.path} could not be read (${snapshot.unreadable}), so the list is unknown rather than empty. The file was not changed; repair or restore it before relying on this list.`);
+          }
           if (snapshot.accounts.length === 0) {
+            if (snapshot.droppedOnRead > 0) {
+              return failure(`${snapshot.droppedOnRead} record(s) could not be read from ${snapshot.path}, so the list is unknown rather than empty. The file was not changed; repair or restore it before relying on this list.`);
+            }
             return ok(`No accounts have been recorded. The register lives at ${snapshot.path}.`);
           }
           const dropped = snapshot.droppedOnRead > 0
@@ -236,19 +242,27 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
         };
         const sweepWrite = {
           assertCurrent() { write.assertCurrent(); assertKnown(); },
-          didWrite(stage: 'parent' | 'temporary' | 'store', content: string) { write.didWrite(stage, content); assertKnown(); },
+          didWrite(stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) { write.didWrite(stage, content); assertKnown(); },
         };
         sweepWrite.assertCurrent();
-        const maxAgeDays = typeof rawArgs.maxAgeDays === 'number' ? rawArgs.maxAgeDays : undefined;
+        // Zero or a negative age puts the cutoff at or after now, which would
+        // reap every record, so only a positive finite number is an age.
+        if (rawArgs.maxAgeDays !== undefined && !(typeof rawArgs.maxAgeDays === 'number' && Number.isFinite(rawArgs.maxAgeDays) && rawArgs.maxAgeDays > 0)) {
+          return failure('accounts action:"sweep" needs maxAgeDays to be a number greater than 0 (records older than that many days are dropped). No record was removed.');
+        }
+        const maxAgeDays = rawArgs.maxAgeDays;
         const result = registry.sweep({
           ...(capturedKnown === undefined ? {} : { knownSecretKeys: capturedKnown }),
           ...(maxAgeDays === undefined ? {} : { maxAgeDays }),
         }, sweepWrite);
         sweepWrite.assertCurrent();
+        const credentialCheck = capturedKnown === undefined
+          ? ' Credential presence could not be checked (the secret store is not connected), so only the age rule was applied.'
+          : '';
         return ok(
           result.removed.length === 0
-            ? `Nothing to reap; ${result.remaining} record(s) remain.`
-            : `Reaped ${result.removed.length} record(s) whose credential was gone or which aged out: ${result.removed.map((entry) => entry.id).join(', ')}. ${result.remaining} remain.`,
+            ? `Nothing to reap; ${result.remaining} record(s) remain.${credentialCheck}`
+            : `Reaped ${result.removed.length} record(s) whose credential was gone or which aged out: ${result.removed.map((entry) => entry.id).join(', ')}. ${result.remaining} remain.${credentialCheck}`,
         );
       } catch (error) {
         if (execution?.signal?.aborted) return cancelled();

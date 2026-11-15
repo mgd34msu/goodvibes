@@ -11,6 +11,7 @@ import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../pe
  */
 import { snapshotJudgmentInput } from './judgment-input.js';
 import { executePolicyCheck } from './execute-policy-check.js';
+import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { fanOut, type JsonValue, type Stakes, type YesNoReading, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { riskFamily, type GateRiskFamily } from './batteries/risk-family.js';
@@ -246,14 +247,9 @@ export async function readSideEffectKind(toolName: string, args: Record<string, 
   return { kind: run.readings.kind.choice, confident: run.readings.kind.outcome === 'act' };
 }
 
-/** The shell commands a call's arguments carry: a `commands` list of `{ cmd }`, or `command` / `cmd`. */
+/** The shell commands a call's arguments carry, read the way the exec tool reads them (`cmd_base64` included). */
 export function shellCommandsIn(args: Record<string, unknown>): string[] {
-  const listed = Array.isArray(args['commands'])
-    ? (args['commands'] as unknown[]).flatMap((entry) => (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>)['cmd'] === 'string' ? [(entry as Record<string, unknown>)['cmd'] as string] : []))
-    : [];
-  if (listed.length > 0) return listed;
-  for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') return [args[key] as string];
-  return [];
+  return execShellCommands(args);
 }
 
 /**

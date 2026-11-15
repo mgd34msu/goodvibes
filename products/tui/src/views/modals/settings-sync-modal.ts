@@ -1,7 +1,7 @@
 import type { ConfigModalAction, ConfigModalActionContext, ConfigModalRow, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { toneStyle, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
+import { toneStyle, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 
 type Snapshot = ReturnType<typeof getSettingsControlPlaneSnapshot>;
 
@@ -111,8 +111,7 @@ class SettingsSyncModalSurface implements ConfigModalSurface {
       case 'resolve-synced': {
         if (!this.resolvePrompt) break;
         const choice = id === 'resolve-local' ? 'local' : 'synced';
-        void ctx.executeCommand?.('settings-sync', ['resolve', this.resolvePrompt, choice]);
-        ctx.setStatus(`Resolving ${this.resolvePrompt} → ${choice}…`);
+        runModalCommand(ctx, 'settings-sync', ['resolve', this.resolvePrompt, choice], `/settings-sync resolve ${this.resolvePrompt} ${choice}`, { pending: `Resolving ${this.resolvePrompt} → ${choice}…` });
         this.resolvePrompt = null;
         break;
       }
@@ -121,8 +120,7 @@ class SettingsSyncModalSurface implements ConfigModalSurface {
         ctx.setStatus('');
         break;
       case 'managed-review':
-        void ctx.executeCommand?.('managed', ['review']);
-        ctx.setStatus('Opening managed review…');
+        runModalCommand(ctx, 'managed', ['review'], '/managed review', { pending: 'Opening managed review…', done: 'Opened managed review.' });
         break;
     }
     this.requestRender();

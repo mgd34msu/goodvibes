@@ -15,7 +15,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 
 import { markEventsDelivered, selectUndeliveredEvents } from './reply-delta.js';
-import { buildRenderedText, normalizeChannelRenderEventFromRuntime } from './reply-render.js';
+import { buildRenderedFinalParts, buildRenderedText, normalizeChannelRenderEventFromRuntime } from './reply-render.js';
 import { DEFAULT_POLICY } from './reply-policy.js';
 import type { ChannelRenderAudience } from './render-audience.js';
 
@@ -53,7 +53,8 @@ export interface TrackedChannelReply {
   readonly createdAt: number;
   readonly sessionId?: string | undefined;
   readonly routeId?: string | undefined;
-  readonly [key: string]: unknown;
+  readonly parentAgentId?: string | undefined;
+  readonly rootAgentId?: string | undefined;
 }
 
 /**
@@ -95,10 +96,24 @@ interface ReplyPipelineDeps {
   readonly onUndelivered?: UndeliveredChannelReplyReporter | undefined;
   /** Records a reply that reached its conversation in the delivery ledger. */
   readonly onDelivered?: DeliveredChannelReplyReporter | undefined;
+  /**
+   * How long a progress or final delivery waits for the status-substance
+   * reading before it renders the notice unread. Defaults to 5 seconds.
+   */
+  readonly statusReadingTimeoutMs?: number | undefined;
+  /** Reads whether notices say anything specific; defaults to the judged battery. */
+  readonly prepareStatusContent?: ((contents: readonly string[], signal: AbortSignal) => Promise<void>) | undefined;
+  /** Pause between attempts at a final reply; defaults to a timer. */
+  readonly waitBeforeRetry?: ((ms: number) => Promise<void>) | undefined;
 }
 
+const DEFAULT_STATUS_READING_TIMEOUT_MS = 5_000;
+/** Pauses before the second and third attempt at a final reply a channel refused with an error. */
+const FINAL_RETRY_BACKOFF_MS = [1_000, 4_000] as const;
+
 interface ReplyBufferState {
-  readonly pending: TrackedChannelReply;
+  /** Replaced in place (never re-inserted as a copy) so an in-flight delivery's marks stay on this object. */
+  pending: TrackedChannelReply;
   readonly events: ChannelRenderEvent[];
   /**
    * Ids of events already published to the surface, the delta watermark.
@@ -153,6 +168,9 @@ export class ChannelReplyPipeline {
   private readonly unsubscribers: Array<() => void> = [];
   private undeliveredReporter: UndeliveredChannelReplyReporter | null;
   private deliveredReporter: DeliveredChannelReplyReporter | null;
+  private readonly statusReadingTimeoutMs: number;
+  private readonly prepareStatusContent: (contents: readonly string[], signal: AbortSignal) => Promise<void>;
+  private readonly waitBeforeRetry: (ms: number) => Promise<void>;
 
   constructor(deps: ReplyPipelineDeps) {
     this.channelPlugins = deps.channelPlugins;
@@ -160,6 +178,9 @@ export class ChannelReplyPipeline {
     this.now = deps.now ?? (() => Date.now());
     this.undeliveredReporter = deps.onUndelivered ?? null;
     this.deliveredReporter = deps.onDelivered ?? null;
+    this.statusReadingTimeoutMs = deps.statusReadingTimeoutMs ?? DEFAULT_STATUS_READING_TIMEOUT_MS;
+    this.prepareStatusContent = deps.prepareStatusContent ?? ((contents, signal) => prepareChannelStatusContent(contents, { signal }));
+    this.waitBeforeRetry = deps.waitBeforeRetry ?? ((ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
     this.attachRuntimeBus(deps.runtimeBus ?? null);
   }
 
@@ -315,7 +336,7 @@ export class ChannelReplyPipeline {
     // what it SAID is the final's to deliver.
     const freshEvents = selectUndeliveredEvents(state, state.events.filter((event) => event.phase !== 'final'));
     if (freshEvents.length === 0 && explicit.trim().length === 0) return null;
-    await prepareChannelStatusContent([explicit, ...freshEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? '')]).catch(() => { /* Unsettled notices remain visible. */ });
+    await this.readStatusNotices([explicit, ...freshEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? '')]);
     const text = buildRenderedText(explicit, freshEvents, policy, 'progress');
     if (!text) return null;
     // Identical content is never republished, forced or not. `force` exists to
@@ -384,8 +405,9 @@ export class ChannelReplyPipeline {
     // (agents/conversational-reply-recovery.ts).
     const candidateEvents = finalEvents.length > 0 ? finalEvents : state.events;
     const renderEvents = selectUndeliveredEvents(state, candidateEvents);
-    await prepareChannelStatusContent(renderEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? '')).catch(() => { /* Unsettled notices remain visible. */ });
-    const text = buildRenderedText(explicitText, renderEvents, policy, 'final');
+    await this.readStatusNotices(renderEvents.filter(event => event.kind === 'status' && event.audience === 'owner').map(event => event.text ?? ''));
+    const parts = buildRenderedFinalParts(explicitText, renderEvents, policy);
+    const text = parts.join('\n\n');
     // Nothing to say, so say nothing, but close the run out.
     //
     // Two ways here: a run that finished with no output at all, and a body that
@@ -420,13 +442,16 @@ export class ChannelReplyPipeline {
       // Renderers classify an outcome from it (an `error` event is what marks a
       // notification failed), and that verdict must not flip just because the
       // error line was already delivered by a progress tick.
-      result = await this.dispatch(
-        state,
-        policy,
-        'final',
-        text,
-        finalEvents.length > 0 ? finalEvents : state.events.slice(-policy.maxEventsPerUpdate),
-      );
+      //
+      // A long answer is delivered as several messages in order (the per-agent
+      // chain keeps them from interleaving); the first one the surface did not
+      // accept is the result, so a partial delivery is never reported as whole.
+      const dispatchEvents = finalEvents.length > 0 ? finalEvents : state.events.slice(-policy.maxEventsPerUpdate);
+      for (const part of parts) {
+        const partResult = await this.dispatchFinalWithRetry(state, policy, part, dispatchEvents);
+        if (result === null || result.delivered) result = partResult;
+        if (!partResult?.delivered) break;
+      }
     } catch (error) {
       deliveryError = error;
       logger.error('Agent reply could not be delivered to the surface it came from', {
@@ -543,7 +568,7 @@ export class ChannelReplyPipeline {
     envelope: RuntimeEventEnvelope<ContractEvent['type'], ContractEvent>,
   ): Promise<void> {
     if (envelope.payload.type === 'CONTRACT_CREATED') {
-      const matched = this.findPendingForAsk(envelope.payload.ask, envelope.payload.ownerAgentId);
+      const matched = this.findPendingForAsk(envelope.payload.ask, envelope.payload.ownerAgentId, envelope.sessionId);
       if (matched) {
         this.associateContract(matched.pending.agentId, envelope.payload.contractId);
       }
@@ -600,40 +625,104 @@ export class ChannelReplyPipeline {
   /**
    * The pending reply a new contract belongs to: the one tracking its owner
    * agent when there is one, else the one whose task is the contract's ask.
+   *
+   * The ask is short text ("status") that two conversations can share, so the
+   * match is used only when every pending reply that fits belongs to one
+   * conversation, and never across sessions: progress for one chat must not be
+   * delivered into another.
    */
-  private findPendingForAsk(ask: string, ownerAgentId: string): ReplyBufferState | null {
+  private findPendingForAsk(ask: string, ownerAgentId: string, sessionId?: string): ReplyBufferState | null {
     const owned = this.buffers.get(ownerAgentId);
     if (owned && typeof owned.pending.contractId !== 'string') return owned;
     const normalizedTask = ask.trim();
     if (!normalizedTask) return null;
-    let fallback: ReplyBufferState | null = null;
+    const byAgentTask: ReplyBufferState[] = [];
+    const byTask: ReplyBufferState[] = [];
     for (const state of this.buffers.values()) {
       if (typeof state.pending.contractId === 'string') continue;
+      if (sessionId && state.pending.sessionId && state.pending.sessionId !== sessionId) continue;
       const agentTask = typeof state.pending.agentTask === 'string' ? state.pending.agentTask.trim() : '';
-      const pendingTask = state.pending.task.trim();
-      if (agentTask === normalizedTask) return state;
-      if (!fallback && pendingTask === normalizedTask) {
-        fallback = state;
-      }
+      if (agentTask === normalizedTask) byAgentTask.push(state);
+      else if (state.pending.task.trim() === normalizedTask) byTask.push(state);
     }
-    return fallback;
+    const candidates = byAgentTask.length > 0 ? byAgentTask : byTask;
+    // Several workstreams started from one conversation pair up in order, but an
+    // ask shared by different conversations cannot be told apart, so it is not
+    // attached to any of them.
+    const conversations = new Set(candidates.map((state) => `${state.pending.sessionId ?? ''}|${state.pending.routeId ?? ''}`));
+    if (conversations.size > 1) {
+      logger.warn('Contract ask matches pending replies in several conversations; not attaching its progress to any', { candidates: candidates.length });
+      return null;
+    }
+    return candidates[0] ?? null;
   }
 
   private associateContract(agentId: string, contractId: string): void {
     const state = this.buffers.get(agentId);
     if (!state) return;
     this.contracts.set(contractId, agentId);
-    this.buffers.set(agentId, {
-      ...state,
-      pending: {
-        ...state.pending,
-        contractId,
-      },
+    // In place: a delivery already in flight holds this object and writes its
+    // pacing and identical-body marks to it, so a replacement copy would lose them.
+    state.pending = { ...state.pending, contractId };
+  }
+
+  /**
+   * Read how substantive the notices are, but never let the model decide whether
+   * the reply goes out: this runs inside the per-agent chain, so a hung reading
+   * would hold every later delivery for that agent, the final answer included.
+   * Past the budget (or on any failure) the notices render unread.
+   */
+  private async readStatusNotices(contents: readonly string[]): Promise<void> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<void>((resolve) => {
+      timer = setTimeout(() => { controller.abort(); resolve(); }, this.statusReadingTimeoutMs);
     });
+    try {
+      await Promise.race([this.prepareStatusContent(contents, controller.signal).catch(() => { /* Unsettled notices remain visible. */ }), expired]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async resolvePolicy(surface: ChannelSurface): Promise<ChannelRenderPolicy> {
-    return await this.channelPlugins.getRenderPolicy(surface) ?? DEFAULT_POLICY[surface];
+    // A plugin's policy is third-party code. If it throws, the reply still has to
+    // be delivered and untracked, so the surface's default policy stands in.
+    try {
+      return await this.channelPlugins.getRenderPolicy(surface) ?? DEFAULT_POLICY[surface];
+    } catch (error) {
+      logger.warn('Channel render policy could not be read; using the surface default', { surface, reason: summarizeError(error) });
+      return DEFAULT_POLICY[surface];
+    }
+  }
+
+  /**
+   * A channel that throws (a rate limit, a dropped connection) usually accepts
+   * the same message a moment later. Only the part that failed is retried, so a
+   * long answer never repeats parts the reader already has; after the last
+   * attempt the error reaches the caller, which reports the reply undelivered.
+   */
+  private async dispatchFinalWithRetry(
+    state: ReplyBufferState,
+    policy: ChannelRenderPolicy,
+    text: string,
+    events: readonly ChannelRenderEvent[],
+  ): Promise<ChannelRenderResult | null> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.dispatch(state, policy, 'final', text, events);
+      } catch (error) {
+        const backoff = FINAL_RETRY_BACKOFF_MS[attempt];
+        if (backoff === undefined) throw error;
+        logger.warn('Agent reply delivery failed; retrying', {
+          surface: state.pending.surfaceKind,
+          agentId: state.pending.agentId,
+          attempt: attempt + 1,
+          reason: summarizeError(error),
+        });
+        await this.waitBeforeRetry(backoff);
+      }
+    }
   }
 
   private async dispatch(
@@ -652,7 +741,8 @@ export class ChannelReplyPipeline {
       title: state.pending.task,
       text,
       events,
-      pending: state.pending,
+      // Renderers read provider-specific fields by name, so they get a plain copy of the record.
+      pending: { ...state.pending },
       metadata: {
         policy,
       },
@@ -682,11 +772,22 @@ export class ChannelReplyPipeline {
       }
     }
     if (result?.responseId && state.pending.routeId) {
-      await this.routeBindings.captureReplyTarget(
-        state.pending.routeId,
-        result.responseId,
-        typeof result.threadId === 'string' && result.threadId.length > 0 ? result.threadId : undefined,
-      );
+      // The channel already accepted this message. A failure to remember its
+      // reply target must not reach the final-delivery retry, which would send it again.
+      try {
+        await this.routeBindings.captureReplyTarget(
+          state.pending.routeId,
+          result.responseId,
+          typeof result.threadId === 'string' && result.threadId.length > 0 ? result.threadId : undefined,
+        );
+      } catch (error) {
+        logger.warn('Reply was delivered but its reply target could not be recorded', {
+          surface: state.pending.surfaceKind,
+          agentId: state.pending.agentId,
+          bindingId: state.pending.routeId,
+          reason: summarizeError(error),
+        });
+      }
     }
     return result;
   }

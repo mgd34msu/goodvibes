@@ -1,7 +1,8 @@
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { describe, test, expect } from 'bun:test';
-import { createAgentTool, AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { createAgentTool, AgentManager, ToolRegistry, createTaskTool, createTeamTool, createWorklistTool, createPacketTool, createQueryTool } from '@goodvibes-jev/engine/platform/platform/tools';
+import { CrossSessionTaskRegistry } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { Tool, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import { AgentMessageBus } from '@goodvibes-jev/engine/platform/platform/agents';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -37,7 +38,6 @@ import {
   AGENT_READ_ONLY_WORKLIST_TOOL_MODES,
   AGENT_REMOTE_MUTATION_DENIAL_MESSAGE,
   AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE,
-  AGENT_SETTINGS_CONFIRMATION_PROPERTY,
   AGENT_STATE_MUTATION_DENIAL_MESSAGE,
   installAgentToolPolicyGuard,
   normalizeAgentToolInvocationForAgentPolicy,
@@ -123,6 +123,20 @@ function makeNoopTool(name: string): Tool {
     },
     execute: async () => ({ success: true, output: `${name} executed` }),
   };
+}
+
+
+/** After the guard installs, each named tool says which modes it allows; the schema itself (enum, properties) is untouched so YOLO still validates. */
+function expectModesDescribed(registry: ToolRegistry, original: readonly ToolDefinition[], described: Readonly<Record<string, readonly string[]>>): void {
+  const current = registry.getToolDefinitions();
+  for (const before of original) {
+    const after = current.find((definition) => definition.name === before.name)!;
+    const modes = described[before.name];
+    if (!modes) { expect(after).toEqual(before); continue; }
+    const expected = structuredClone(before) as unknown as { parameters: { properties: { mode: { description?: string } } } };
+    expected.parameters.properties.mode.description = `Operation. Available here: ${modes.join(', ')}.`;
+    expect(after).toEqual(expected as unknown as ToolDefinition);
+  }
 }
 
 function makeModeTool(name: string, modes: readonly string[]): Tool {
@@ -487,29 +501,16 @@ function makeFindTool(): Tool {
   };
 }
 
-function makeDurableModeTool(name: string, modes: readonly string[], extraProperties: readonly string[]): Tool {
-  const properties: Record<string, unknown> = {
-    mode: { type: 'string', enum: [...modes] },
-    view: { type: 'string' },
-    taskId: { type: 'string' },
-    teamId: { type: 'string' },
-    worklistId: { type: 'string' },
-    packetId: { type: 'string' },
-    queryId: { type: 'string' },
-  };
-  for (const key of extraProperties) properties[key] = { type: 'string' };
-  return {
-    definition: {
-      name,
-      description: `${name} durable workflow test tool`,
-      parameters: {
-        type: 'object',
-        properties,
-      },
-      sideEffects: ['workflow', 'state'],
-    },
-    execute: async () => ({ success: true, output: `${name} executed` }),
-  };
+/** The real tool's definition (the schema the model is shown) with an execute that only records that it ran. */
+function withStubExecute(tool: Tool): Tool {
+  return { definition: tool.definition, execute: async () => ({ success: true, output: `${tool.definition.name} executed` }) };
+}
+
+function modeEnumOf(definition: ToolDefinition): readonly string[] {
+  const properties = definition.parameters.properties as Record<string, { enum?: readonly string[] }> | undefined;
+  const modes = properties?.mode?.enum;
+  if (!modes) throw new Error(`${definition.name} has no mode enum`);
+  return modes;
 }
 
 function getRecordProperty(record: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
@@ -669,7 +670,7 @@ describe('spawn mode', () => {
 
     const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+    expectModesDescribed(registry, originalDefinitions, { remote: AGENT_READ_ONLY_REMOTE_TOOL_MODES });
 
     for (const mode of AGENT_READ_ONLY_REMOTE_TOOL_MODES) {
       const result = await registry.execute(`call-remote-${mode}`, 'remote', { mode });
@@ -680,7 +681,8 @@ describe('spawn mode', () => {
     for (const mode of blockedModes) {
       const result = await registry.execute(`call-remote-blocked-${mode}`, 'remote', { mode });
       expect(result.success).toBe(false);
-      expect(result.error).toBe(AGENT_REMOTE_MUTATION_DENIAL_MESSAGE);
+      expect(result.error).toStartWith(AGENT_REMOTE_MUTATION_DENIAL_MESSAGE);
+      expect(result.error).toContain(`mode "${mode}" is not available here; available: ${AGENT_READ_ONLY_REMOTE_TOOL_MODES.join(', ')}.`);
     }
   });
 
@@ -704,7 +706,7 @@ describe('spawn mode', () => {
 
     const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+    expectModesDescribed(registry, originalDefinitions, { channel: AGENT_READ_ONLY_CHANNEL_TOOL_MODES });
 
     for (const mode of AGENT_READ_ONLY_CHANNEL_TOOL_MODES) {
       const result = await registry.execute(`call-channel-${mode}`, 'channel', { mode });
@@ -715,7 +717,8 @@ describe('spawn mode', () => {
     for (const mode of blockedModes) {
       const result = await registry.execute(`call-channel-blocked-${mode}`, 'channel', { mode });
       expect(result.success).toBe(false);
-      expect(result.error).toBe(AGENT_CHANNEL_ACTION_DENIAL_MESSAGE);
+      expect(result.error).toStartWith(AGENT_CHANNEL_ACTION_DENIAL_MESSAGE);
+      expect(result.error).toContain(`available: ${AGENT_READ_ONLY_CHANNEL_TOOL_MODES.join(', ')}.`);
     }
 
     const createTarget = await registry.execute('call-channel-create-target', 'channel', {
@@ -744,7 +747,7 @@ describe('spawn mode', () => {
 
     const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+    expectModesDescribed(registry, originalDefinitions, { mcp: AGENT_READ_ONLY_MCP_TOOL_MODES });
 
     for (const mode of AGENT_READ_ONLY_MCP_TOOL_MODES) {
       const result = await registry.execute(`call-mcp-${mode}`, 'mcp', { mode });
@@ -755,7 +758,8 @@ describe('spawn mode', () => {
     for (const mode of blockedModes) {
       const result = await registry.execute(`call-mcp-blocked-${mode}`, 'mcp', { mode });
       expect(result.success).toBe(false);
-      expect(result.error).toBe(AGENT_MCP_SECURITY_MUTATION_DENIAL_MESSAGE);
+      expect(result.error).toStartWith(AGENT_MCP_SECURITY_MUTATION_DENIAL_MESSAGE);
+      expect(result.error).toContain(`mode "${mode}" is not available here; available: `);
     }
   });
 
@@ -826,7 +830,7 @@ describe('spawn mode', () => {
 
     const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+    expectModesDescribed(registry, originalDefinitions, { state: AGENT_READ_ONLY_STATE_TOOL_MODES });
 
     const readOnlyInputs: ReadonlyArray<Record<string, unknown>> = [
       { mode: 'get', keys: ['runtime.workingDir'] },
@@ -889,7 +893,7 @@ describe('spawn mode', () => {
     expect(properties.key).toBeDefined();
     expect(properties.value).toBeDefined();
     expect(properties.confirm).toBeDefined();
-    expect(properties[AGENT_SETTINGS_CONFIRMATION_PROPERTY]).toBeDefined();
+    expect(properties.explicitUserRequest).toBeUndefined();
 
     const f = (await settingsGuardRuntime());
     try {
@@ -928,12 +932,14 @@ describe('spawn mode', () => {
     } finally { second.close(); }
   });
 
-  test('Agent runtime guard preserves configured settings denial despite caller request text', async () => {
+  test('Agent runtime guard preserves configured settings denial and refuses unadvertised request text', async () => {
     const f = (await settingsGuardRuntime());
     try {
       const before = f.config.get('behavior.autoApprove');
-      const args = { mode: 'set', key: 'behavior.autoApprove', value: !before, confirm: true,
-        [AGENT_SETTINGS_CONFIRMATION_PROPERTY]: 'turn on auto approve for me' };
+      const args = { mode: 'set', key: 'behavior.autoApprove', value: !before, confirm: true };
+      const withText = await f.run({ ...args, explicitUserRequest: 'turn on auto approve for me' }).catch((error: unknown) => error);
+      expect(String(withText instanceof Error ? withText.message : withText)).toContain('$.explicitUserRequest');
+      expect(f.config.get('behavior.autoApprove')).toBe(before);
       f.config.set('permissions.mode', 'plan');
       const denied = await f.run(args);
       expect(denied.success).toBe(false); expect(denied.autonomousDecision).toBeUndefined();
@@ -943,7 +949,7 @@ describe('spawn mode', () => {
       const allowed = await f.run(args);
       // Changing auto-approval retires the admission after the recorded write.
       expect(allowed.success).toBe(false); expect(allowed.autonomousDecision).toBeUndefined();
-      expect(allowed.error).toBe('Settings invocation retired after its recorded effects; no remaining work was dispatched.');
+      expect(allowed.error).toStartWith('The change WAS applied and saved. Do not repeat it.');
       expect(JSON.parse(allowed.output ?? '{}').status).toBe('committed');
       expect(f.config.get('behavior.autoApprove')).toBe(!before); expect(f.prompts()).toBe(0);
     } finally { f.close(); }
@@ -1039,14 +1045,15 @@ describe('spawn mode', () => {
 
     const originalDefinitions = structuredClone(registry.getToolDefinitions());
     installAgentToolPolicyGuard(registry);
-    expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+    expectModesDescribed(registry, originalDefinitions, { control: AGENT_READ_ONLY_CONTROL_TOOL_MODES });
 
     const commands = await registry.execute('call-control-commands', 'control', { mode: 'commands' });
     expect(commands.success).toBe(true);
 
     const mutation = await registry.execute('call-control-mutation', 'control', { mode: 'restart-daemon' });
     expect(mutation.success).toBe(false);
-    expect(mutation.error).toBe(AGENT_CONTROL_MUTATION_DENIAL_MESSAGE);
+    expect(mutation.error).toStartWith(AGENT_CONTROL_MUTATION_DENIAL_MESSAGE);
+    expect(mutation.error).toContain('mode "restart-daemon" is not available here; available: ');
   });
 
   test('Agent runtime guard preserves shared analysis modes and provider options', async () => {
@@ -1104,6 +1111,7 @@ describe('spawn mode', () => {
     });
     expect(arbitraryPreview.success).toBe(false);
     expect(arbitraryPreview.error).toBe(AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE);
+    expect(arbitraryPreview.error).toContain('approved through the Agent approval flow is not limited');
   });
 
   test('Agent runtime guard preserves shared search options', async () => {
@@ -1117,7 +1125,7 @@ describe('spawn mode', () => {
       { queries: [{ id: 'symlink', mode: 'files', patterns: ['**/*'], follow_symlinks: true }] },
       { queries: [{ id: 'ignored', mode: 'files', patterns: ['**/*'], respect_gitignore: false }] },
       { queries: [{ id: 'preview', mode: 'files', patterns: ['**/*'] }], output: { format: 'with_preview' } },
-      { queries: [{ id: 'full', mode: 'symbols', query: 'Agent' }], output: { format: 'full' } },
+      { queries: [{ id: 'full', mode: 'symbols', pattern: 'Agent' }], output: { format: 'full' } },
       { queries: [{ id: 'parallel', mode: 'content', pattern: 'Agent' }], parallel: true },
     ]) {
       const result = await registry.execute('shared-find', 'find', args);
@@ -1148,96 +1156,133 @@ describe('spawn mode', () => {
   test('Agent runtime guard preserves durable catalogs and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
     const guarded = (await makeAgentHarness());
-    registry.register(guarded.agentTool);
-    registry.register(makeDurableModeTool('task', ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs'], [
-      'title',
-      'label',
-      'status',
-      'dependsOnSessionId',
-      'dependsOnTaskId',
-      'reason',
-      'toSessionId',
-    ]));
-    registry.register(makeDurableModeTool('team', ['create', 'list', 'show', 'add-member', 'remove-member', 'set-lanes', 'delete'], [
-      'name',
-      'summary',
-      'memberId',
-      'role',
-      'lanes',
-    ]));
-    registry.register(makeDurableModeTool('worklist', ['create', 'list', 'show', 'add-item', 'complete-item', 'reopen-item', 'remove-item'], [
-      'title',
-      'itemId',
-      'text',
-      'owner',
-      'priority',
-    ]));
-    registry.register(makeDurableModeTool('packet', ['create', 'list', 'show', 'revise', 'publish'], [
-      'title',
-      'summary',
-      'goals',
-      'constraints',
-      'risks',
-      'audience',
-    ]));
-    registry.register(makeDurableModeTool('query', ['ask', 'list', 'show', 'answer', 'close'], [
-      'prompt',
-      'askedBy',
-      'target',
-      'answer',
-      'resolution',
-    ]));
+    const storeRoot = makeProjectTempDir('gv-durable-catalogs');
+    const taskGraph = new CrossSessionTaskRegistry(join(storeRoot, 'task-graph.json'), { sweepIntervalMs: 0 });
+    try {
+      registry.register(guarded.agentTool);
+      // The real definitions, so a mode or property the engine adds shows up here.
+      for (const tool of [
+        createTaskTool(taskGraph),
+        createTeamTool({ workingDirectory: storeRoot }),
+        createWorklistTool({ workingDirectory: storeRoot }),
+        createPacketTool(storeRoot),
+        createQueryTool(storeRoot),
+      ]) registry.register(withStubExecute(tool));
 
-    const originalDefinitions = structuredClone(registry.getToolDefinitions());
-    installAgentToolPolicyGuard(registry);
+      const originalDefinitions = structuredClone(registry.getToolDefinitions());
+      installAgentToolPolicyGuard(registry);
 
-    const expectations = [
-      {
-        name: 'task',
-        allowedModes: AGENT_READ_ONLY_TASK_TOOL_MODES,
-        blockedModes: ['create', 'status', 'depend', 'cancel', 'handoff'] as const,
-        removed: ['title', 'label', 'status', 'dependsOnSessionId', 'dependsOnTaskId', 'reason', 'toSessionId'] as const,
-      },
-      {
-        name: 'team',
-        allowedModes: AGENT_READ_ONLY_TEAM_TOOL_MODES,
-        blockedModes: ['create', 'add-member', 'remove-member', 'set-lanes', 'delete'] as const,
-        removed: ['name', 'summary', 'memberId', 'role', 'lanes'] as const,
-      },
-      {
-        name: 'worklist',
-        allowedModes: AGENT_READ_ONLY_WORKLIST_TOOL_MODES,
-        blockedModes: ['create', 'add-item', 'complete-item', 'reopen-item', 'remove-item'] as const,
-        removed: ['title', 'itemId', 'text', 'owner', 'priority'] as const,
-      },
-      {
-        name: 'packet',
-        allowedModes: AGENT_READ_ONLY_PACKET_TOOL_MODES,
-        blockedModes: ['create', 'revise', 'publish'] as const,
-        removed: ['title', 'summary', 'goals', 'constraints', 'risks', 'audience'] as const,
-      },
-      {
-        name: 'query',
-        allowedModes: AGENT_READ_ONLY_QUERY_TOOL_MODES,
-        blockedModes: ['ask', 'answer', 'close'] as const,
-        removed: ['prompt', 'askedBy', 'target', 'answer', 'resolution'] as const,
-      },
-    ] as const;
+      const expectations = [
+        { name: 'task', allowedModes: AGENT_READ_ONLY_TASK_TOOL_MODES },
+        { name: 'team', allowedModes: AGENT_READ_ONLY_TEAM_TOOL_MODES },
+        { name: 'worklist', allowedModes: AGENT_READ_ONLY_WORKLIST_TOOL_MODES },
+        { name: 'packet', allowedModes: AGENT_READ_ONLY_PACKET_TOOL_MODES },
+        { name: 'query', allowedModes: AGENT_READ_ONLY_QUERY_TOOL_MODES },
+      ] as const;
 
-    for (const expectation of expectations) {
-      expect(registry.getToolDefinitions()).toEqual(originalDefinitions);
+      expectModesDescribed(registry, originalDefinitions, Object.fromEntries(expectations.map((expectation) => [expectation.name, expectation.allowedModes])));
+      for (const expectation of expectations) {
+        const definition = originalDefinitions.find((candidate) => candidate.name === expectation.name)!;
+        const engineModes = modeEnumOf(definition);
+        // Every mode the guard allows exists in the engine's schema, and every other engine mode is refused.
+        for (const mode of expectation.allowedModes) expect(engineModes, `${expectation.name} allows unknown mode ${mode}`).toContain(mode);
+        const blockedModes = engineModes.filter((mode) => !(expectation.allowedModes as readonly string[]).includes(mode));
+        expect(blockedModes.length, `${expectation.name} refuses no mode`).toBeGreaterThan(0);
 
-      for (const mode of expectation.allowedModes) {
-        const result = await registry.execute(`call-${expectation.name}-${mode}`, expectation.name, { mode });
-        expect(result.success).toBe(true);
+        for (const mode of expectation.allowedModes) {
+          const result = await registry.execute(`call-${expectation.name}-${mode}`, expectation.name, { mode });
+          expect(result.success).toBe(true);
+        }
+
+        for (const mode of blockedModes) {
+          const result = await registry.execute(`call-${expectation.name}-blocked-${mode}`, expectation.name, { mode });
+          expect(result.success, `${expectation.name} ${mode}`).toBe(false);
+          expect(result.error).toStartWith(AGENT_DURABLE_WORKFLOW_MUTATION_DENIAL_MESSAGE);
+          expect(result.error).toContain(`mode "${mode}" is not available here; available: ${expectation.allowedModes.join(', ')}.`);
+        }
       }
-
-      for (const mode of expectation.blockedModes) {
-        const result = await registry.execute(`call-${expectation.name}-blocked-${mode}`, expectation.name, { mode });
-        expect(result.success).toBe(false);
-        expect(result.error).toBe(AGENT_DURABLE_WORKFLOW_MUTATION_DENIAL_MESSAGE);
-      }
+      // The task mode that acts on behalf of the destination session of a handoff is one of the refused ones.
+      expect(modeEnumOf(originalDefinitions.find((candidate) => candidate.name === 'task')!)).toContain('acknowledge');
+      const acknowledge = await registry.execute('call-task-acknowledge', 'task', { mode: 'acknowledge', handoffId: 'h1' });
+      expect(acknowledge.success).toBe(false);
+      expect(acknowledge.error).toStartWith(AGENT_DURABLE_WORKFLOW_MUTATION_DENIAL_MESSAGE);
+    } finally {
+      taskGraph.dispose();
     }
   });
 });
 
+describe('guarded agent tool lifecycle through the public tool', () => {
+  /** A guarded agent tool over the real manager and message bus, whose agents stay running until cancelled. */
+  async function lifecycleHarness() {
+    const guarded = await makeAgentHarness({ guarded: true });
+    guarded.manager.setExecutor({ runAgent: async (record) => {
+      record.status = 'running';
+      const signal = guarded.manager.getCancellationSignal(record.id);
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+    } });
+    const run = async (args: Record<string, unknown>) => {
+      const result = await guarded.agentTool.execute(args);
+      if (!result.success || !result.output) throw new Error(result.error ?? 'agent tool produced no output');
+      return JSON.parse(result.output) as Record<string, unknown>;
+    };
+    const spawn = (task: string, extra: Record<string, unknown> = {}) => run({ mode: 'spawn', task, outsideContract: true, ...extra });
+    return { ...guarded, run, spawn };
+  }
+
+  test('spawn and get report the task, template and running state from the manager record', async () => {
+    const { run, spawn, manager } = await lifecycleHarness();
+    const started = await spawn('Inspect package metadata', { template: 'researcher' });
+    const record = await run({ mode: 'get', agentId: started.agentId });
+    expect(record).toMatchObject({ id: started.agentId, task: 'Inspect package metadata', template: 'researcher', status: 'running' });
+    expect(manager.getStatus(started.agentId as string)?.task).toBe('Inspect package metadata');
+    manager.cancel(started.agentId as string);
+  });
+
+  test('list reads the manager records and filters by cohort', async () => {
+    const { run, spawn, manager } = await lifecycleHarness();
+    const first = await spawn('Inspect A', { cohort: 'alpha' });
+    const second = await spawn('Inspect B', { cohort: 'beta' });
+    expect((await run({ mode: 'list' })).count).toBe(2);
+    const filtered = await run({ mode: 'list', cohort: 'alpha' });
+    expect(filtered.count).toBe(1);
+    expect(filtered.agents).toMatchObject([{ id: first.agentId, task: 'Inspect A', cohort: 'alpha' }]);
+    manager.cancel(first.agentId as string);
+    manager.cancel(second.agentId as string);
+  });
+
+  test('message reaches the real message bus and shows through get', async () => {
+    const { run, spawn, manager, messageBus } = await lifecycleHarness();
+    const started = await spawn('Wait for a question');
+    const reply = await run({ mode: 'message', agentId: started.agentId, message: 'Inspect the second fixture', kind: 'directive' });
+    expect(reply).toMatchObject({ sent: true, content: 'Inspect the second fixture', kind: 'directive' });
+    expect(messageBus.getMessages(started.agentId as string)).toMatchObject([{ from: 'orchestrator', content: 'Inspect the second fixture' }]);
+    manager.cancel(started.agentId as string);
+  });
+
+  test('cancel aborts the running agent, and status and wait report the cancellation', async () => {
+    const { run, spawn, manager } = await lifecycleHarness();
+    const started = await spawn('Wait for a synthetic result');
+    const signal = manager.getCancellationSignal(started.agentId as string)!;
+    expect(signal.aborted).toBe(false);
+    expect(await run({ mode: 'cancel', agentId: started.agentId })).toMatchObject({ status: 'cancelled' });
+    expect(signal.aborted).toBe(true);
+    expect(await run({ mode: 'status', agentId: started.agentId })).toMatchObject({ status: 'cancelled' });
+    expect(await run({ mode: 'wait', agentId: started.agentId })).toMatchObject({ status: 'cancelled', timedOut: false });
+  });
+
+  test('invalid requests fail without creating agents', async () => {
+    const { agentTool, manager } = await lifecycleHarness();
+    for (const request of [
+      { mode: 'spawn', task: ' ', outsideContract: true }, { mode: 'get', agentId: 'unknown' },
+      { mode: 'cancel', agentId: 'unknown' }, { mode: 'message', agentId: 'unknown', message: 'hello' },
+      { mode: 'invalid' },
+    ]) {
+      expect((await agentTool.execute(request)).success, JSON.stringify(request)).toBe(false);
+    }
+    expect(manager.list()).toEqual([]);
+  });
+});

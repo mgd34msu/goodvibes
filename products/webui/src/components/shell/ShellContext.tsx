@@ -169,12 +169,17 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   const [peek, setPeekState] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Persisted from an effect, not the state updater, which must stay pure
+  // (StrictMode runs updaters twice). The first run holds what was just read.
+  const persistedRef = useRef(stored);
+  useEffect(() => {
+    if (persistedRef.current === stored) return;
+    persistedRef.current = stored;
+    writeStoredSidebar(stored);
+  }, [stored]);
+
   const update = useCallback((patch: Partial<StoredSidebar>) => {
-    setStored((prev) => {
-      const next = { ...prev, ...patch };
-      writeStoredSidebar(next);
-      return next;
-    });
+    setStored((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const rightPanelOpen = panels.size > 0;
@@ -238,11 +243,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       setPeekState((open) => !open);
       return;
     }
-    setStored((prev) => {
-      const next = { ...prev, collapsed: !prev.collapsed };
-      writeStoredSidebar(next);
-      return next;
-    });
+    setStored((prev) => ({ ...prev, collapsed: !prev.collapsed }));
     setPeekState(false);
   }, []);
 

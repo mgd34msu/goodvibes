@@ -14,7 +14,7 @@
  * over to the restored binary instead of repeating the same failure a fourth
  * time.
  *
- * Two things it deliberately does NOT do:
+ * Things it deliberately does NOT do:
  *   - it never rolls back twice in a row. A rollback EXCHANGES the live file
  *     with its kept previous, so a second automatic rollback would roll
  *     FORWARD onto the same bad build; the marker's `autoRollbackAt` stamp
@@ -22,6 +22,14 @@
  *   - it never claims a rollback it could not perform. With no kept previous
  *     copy on disk there is nothing to restore, and the boot continues (loudly
  *     logged) rather than pretending it recovered.
+ *   - it never blames a build that has already fully started on this host.
+ *     Failed starts of such a build are environmental (a port in use, a bad
+ *     bind host); the marker's `lastStartedVersion` keeps them from swapping
+ *     the binary and marking a healthy release rejected.
+ *   - it never "rolls back" onto a kept copy that is the rejected release or
+ *     is not older than the running build. After one rollback the failing
+ *     build IS the kept copy, so a later crash loop of the restored build
+ *     would otherwise roll forward onto it.
  *
  * Pure decision logic here; the marker I/O lives in lifecycle-marker.ts and
  * the rename mechanics in runtime/self-update.ts, so all three are testable

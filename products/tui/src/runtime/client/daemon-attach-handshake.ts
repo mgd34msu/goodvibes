@@ -42,9 +42,10 @@ export interface DaemonAttachHandshakeDeps {
   /** The daemon this terminal is currently pointed at. Re-read on every attach. */
   readonly readDaemonStatus: () => HostServiceStatus;
   /**
-   * Record a refusal on the status every reader already consults, so the footer
+   * Write a verdict onto the status every reader already consults, so the footer
    * and `/status` report "a daemon is there and this build will not adopt it"
-   * rather than claiming a working mirror.
+   * rather than claiming a working mirror. It is also called with the original
+   * status when a daemon that was refused comes back new enough.
    */
   readonly recordRefusal: (status: HostServiceStatus) => void;
   /** Bring the session and memory spines up against this daemon (or take them down). */
@@ -55,11 +56,32 @@ export interface DaemonAttachHandshakeDeps {
   readonly daemonFloor?: string | undefined;
   /** Injectable `/status` read for tests. */
   readonly read?: typeof readExternalDaemonAttach | undefined;
+  /**
+   * Runs `run` once after `delayMs` and returns a cancel function; injectable
+   * for tests. The default is an unref'd timer.
+   */
+  readonly schedule?: ((run: () => void, delayMs: number) => () => void) | undefined;
+}
+
+/**
+ * While a daemon is refused nothing else tells this terminal it was updated:
+ * adopting an `incompatible` status takes the session spine down, and with it
+ * the liveness probe that would report the flip. So the handshake re-reads a
+ * refused daemon itself, a bounded number of times; after that only the restart
+ * verb or the next boot attaches again.
+ */
+const REPROBE_INTERVAL_MS = 60_000;
+const REPROBE_MAX_ATTEMPTS = 60;
+
+function defaultSchedule(run: () => void, delayMs: number): () => void {
+  const timer = setTimeout(run, delayMs);
+  timer.unref?.();
+  return () => clearTimeout(timer);
 }
 
 export interface DaemonAttachHandshake {
   /** Run the handshake against the current daemon status, then adopt or refuse. */
-  attach(daemonToken: string): Promise<void>;
+  attach(daemonToken: string, fromReprobe?: boolean): Promise<void>;
   /** Feed the adopted daemon's liveness flips; a flip to online re-handshakes. */
   onLivenessTransition(online: boolean): void;
 }
@@ -67,19 +89,58 @@ export interface DaemonAttachHandshake {
 export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): DaemonAttachHandshake {
   const daemonBuildFloor = new DaemonBuildFloor(deps.daemonFloor);
   const read = deps.read ?? readExternalDaemonAttach;
+  const schedule = deps.schedule ?? defaultSchedule;
+  let cancelReprobe: (() => void) | null = null;
+  let reprobeAttempts = 0;
   let lastDaemonToken: string | null = null;
+  // The status this module replaced with an `incompatible` one, kept so the next
+  // handshake probes the real address again. Without it the refusal would be
+  // permanent: the status it left behind is no longer `external`, so a daemon
+  // that updated and came back would never be read again.
+  let refusal: { readonly before: HostServiceStatus; readonly marked: HostServiceStatus } | null = null;
   // The forward floor's one line. The guard latches in the services graph,
   // where the continuation runner reads it; this is the surface that tells the
   // owner, and a verdict reached before now is held and delivered here.
   deps.clientBuildGuard.onRestartRequired((verdict) => deps.notify(verdict.message));
 
+  const armReprobe = (): void => {
+    cancelReprobe?.();
+    cancelReprobe = null;
+    if (refusal === null || lastDaemonToken === null || reprobeAttempts >= REPROBE_MAX_ATTEMPTS) return;
+    reprobeAttempts += 1;
+    cancelReprobe = schedule(() => {
+      cancelReprobe = null;
+      if (lastDaemonToken !== null) handshake.attach(lastDaemonToken, true).catch(() => undefined);
+    }, REPROBE_INTERVAL_MS);
+  };
+
   const handshake: DaemonAttachHandshake = {
     onLivenessTransition(online) {
       if (online && lastDaemonToken !== null) void handshake.attach(lastDaemonToken);
     },
-    async attach(daemonToken) {
+    async attach(daemonToken, fromReprobe = false) {
+      if (!fromReprobe) reprobeAttempts = 0;
+      try {
+        await attachOnce(daemonToken);
+      } finally {
+        armReprobe();
+      }
+    },
+  };
+
+  async function attachOnce(daemonToken: string): Promise<void> {
+    {
       lastDaemonToken = daemonToken;
-      const daemonStatus = deps.readDaemonStatus();
+      let daemonStatus = deps.readDaemonStatus();
+      const previous = refusal;
+      const reprobing = previous !== null
+        && daemonStatus.mode === 'incompatible'
+        && daemonStatus.baseUrl === previous.marked.baseUrl
+        && daemonStatus.reason === previous.marked.reason
+        ? previous
+        : null;
+      if (reprobing) daemonStatus = reprobing.before;
+      else refusal = null;
       if (daemonStatus.mode !== 'external' || !daemonStatus.baseUrl) {
         deps.adopt(daemonStatus, daemonToken);
         return;
@@ -94,22 +155,29 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
       // Refusing on a failed read would turn one dropped request into a lost
       // mirror.
       if (!answer.answered) {
-        deps.adopt(daemonStatus, daemonToken);
+        // A daemon already refused stays refused until a read says otherwise.
+        deps.adopt(reprobing ? reprobing.marked : daemonStatus, daemonToken);
         return;
       }
       const verdict = daemonBuildFloor.evaluate(answer.statusPayload, daemonStatus.baseUrl);
       const notice = daemonBuildFloor.noticeFor(verdict);
       if (notice) deps.notify(notice);
+      // The read consumed these receipts at the daemon, so this is the only
+      // place they can still be shown. They render before recording or adopting
+      // so a throw there cannot lose them.
+      for (const receipt of answer.notices) deps.notify(receipt);
       if (verdict.status === 'daemon-update-required') {
         const refused: HostServiceStatus = { ...daemonStatus, mode: 'incompatible', reason: verdict.message };
+        refusal = { before: daemonStatus, marked: refused };
         deps.recordRefusal(refused);
         deps.adopt(refused, daemonToken);
         return;
       }
+      refusal = null;
+      if (reprobing) deps.recordRefusal(daemonStatus);
       deps.clientBuildGuard.observeFloor(answer.clientFloor);
       deps.adopt(daemonStatus, daemonToken);
-      for (const receipt of answer.notices) deps.notify(receipt);
-    },
-  };
+    }
+  }
   return handshake;
 }

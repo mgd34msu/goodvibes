@@ -35,7 +35,7 @@ function makeMockProvider(reply = 'ok'): CompanionLLMProvider {
 type PublishedEvent = {
   event: string;
   payload: unknown;
-  filter?: { clientId?: string; [k: string]: unknown };
+  filter?: { clientId?: string; clientIdPrefix?: string; [k: string]: unknown };
 };
 
 function makeTrackingPublisher(): CompanionChatEventPublisher & { events: PublishedEvent[] } {
@@ -178,19 +178,44 @@ describe('no leak into global control-plane feed', () => {
     await manager.postMessage(session.id, 'Test message');
     await settleEvents();
 
-    // Every event must carry a non-empty clientId filter.
-    // Events without a clientId would broadcast to ALL connected SSE clients
+    // Every event must carry a non-empty client filter.
+    // Events without one would broadcast to ALL connected SSE clients
     // (including the TUI), which violates isolation.
+    expect(publisher.events.length).toBeGreaterThan(0);
     for (const e of publisher.events) {
-      expect(typeof e.filter?.clientId).toBe('string');
-      expect(e.filter!.clientId).not.toBe('');
+      expect(e.filter?.clientIdPrefix).toBe(`companion-chat:${session.id}:`);
     }
   });
 
-  test('events published without a subscriber still carry clientId (no global broadcast)', async () => {
-    // Edge case: postMessage called before registerSubscriber.
-    // Events should NOT be broadcast globally; they are just lost (acceptable in v1).
-    // The guarantee is that publishEvent is NEVER called without a filter.
+  test('two readers of one chat both stay addressed, whichever registered last or closed', async () => {
+    const publisher = makeTrackingPublisher();
+    const manager = disposables.add(
+      new CompanionChatManager({
+        provider: makeMockProvider('shared'),
+        eventPublisher: publisher,
+        gcIntervalMs: 999_999,
+      }),
+    );
+    const session = manager.createSession();
+    const first = `companion-chat:${session.id}:first`;
+    const second = `companion-chat:${session.id}:second`;
+    manager.registerSubscriber(session.id, first);
+    manager.registerSubscriber(session.id, second);
+
+    await manager.postMessage(session.id, 'Both readers');
+    await settleEvents();
+
+    expect(publisher.events.length).toBeGreaterThan(0);
+    for (const e of publisher.events) {
+      expect(e.filter?.clientId).toBeUndefined();
+      const prefix = e.filter?.clientIdPrefix;
+      expect(typeof prefix).toBe('string');
+      expect(first.startsWith(prefix as string)).toBe(true);
+      expect(second.startsWith(prefix as string)).toBe(true);
+    }
+  });
+
+  test('events published without a subscriber carry a session-scoped clientId (no global broadcast)', async () => {
     const publisher = makeTrackingPublisher();
     const manager = disposables.add(
       new CompanionChatManager({
@@ -205,15 +230,9 @@ describe('no leak into global control-plane feed', () => {
     await manager.postMessage(session.id, 'No subscriber');
     await settleEvents();
 
-    // When no subscriber is registered, subscriberClientId is null.
-    // The manager should publish with undefined filter, those events are
-    // effectively dropped by the gateway since no client matches.
-    // Crucially: they must NOT be published with a non-companion clientId.
+    expect(publisher.events.length).toBeGreaterThan(0);
     for (const e of publisher.events) {
-      if (e.filter?.clientId !== undefined) {
-        // If a clientId filter was applied, it must be a companion-chat scoped one
-        expect(e.filter.clientId).toContain('companion');
-      }
+      expect(e.filter?.clientIdPrefix).toBe(`companion-chat:${session.id}:`);
     }
   });
 });

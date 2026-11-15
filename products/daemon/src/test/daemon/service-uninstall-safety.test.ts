@@ -75,10 +75,13 @@ test('a confirmed active-to-stopped transition removes only the managed definiti
   const neighbor = join(dirname(unit), 'unrelated.service');
   writeFileSync(neighbor, 'unrelated definition\n');
   let active = true;
+  const disabled: string[][] = [];
   const runner: ManagedServiceActionRunner = (_command, args) => {
     if (args.includes('is-active')) return active
       ? { status: 0, stdout: 'active\n' } : { status: 3, stdout: 'inactive\n' };
     if (args.includes('stop')) { active = false; return { status: 0 }; }
+    if (args.includes('disable')) { disabled.push([...args]); return { status: 0 }; }
+    if (args.includes('daemon-reload')) return { status: 0 };
     throw new Error('unexpected fixture action');
   };
   const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
@@ -87,6 +90,7 @@ test('a confirmed active-to-stopped transition removes only the managed definiti
   expect(result.status.running).toBe(false);
   expect(result.status.installed).toBe(false);
   expect(existsSync(unit)).toBe(false);
+  expect(disabled).toEqual([['--user', 'disable', '--now', 'owned-service.service']]);
   expect(readFileSync(neighbor, 'utf8')).toBe('unrelated definition\n');
   expect(result.lines.join('\n')).toContain('removed the systemd service');
 });
@@ -98,6 +102,7 @@ test('a returned active state after removal reports incomplete without another s
     if (args.includes('is-active')) return existsSync(unit)
       ? { status: 3, stdout: 'inactive\n' } : { status: 0, stdout: 'active\n' };
     if (args.includes('stop')) { stops += 1; return { status: 0 }; }
+    if (args.includes('disable') || args.includes('daemon-reload')) return { status: 0 };
     throw new Error('unexpected fixture action');
   };
   const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
@@ -117,7 +122,7 @@ for (const thrown of [new Error('fixture final query failed'), undefined]) {
         if (!existsSync(unit)) throw thrown;
         return { status: 3, stdout: 'inactive\n' };
       }
-      if (args.includes('stop')) return { status: 0 };
+      if (args.includes('stop') || args.includes('disable') || args.includes('daemon-reload')) return { status: 0 };
       throw new Error('unexpected fixture action');
     };
     const result = await runDaemonServiceCli({ ...input, actionRunner: runner });

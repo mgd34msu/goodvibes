@@ -3,17 +3,17 @@
  */
 import { frameFromLayer } from '../helpers/surface-frame.ts';
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
 import { lineToString, linesToText } from '../setup.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const W = 120;
-const sessionManager = new SessionManager(join(tmpdir(), 'gv-renderer-session-picker'), { surface: makeTestSurface(join(tmpdir(), 'gv-renderer-session-picker')) });
+const sessionsDir = makeProjectTempDir('gv-renderer-session-picker');
+const sessionManager = new SessionManager(sessionsDir, { surface: makeTestSurface(sessionsDir) });
 
 function makeModal(overrides: Partial<SessionPickerModal> = {}): SessionPickerModal {
   const modal = new SessionPickerModal(sessionManager);
@@ -102,7 +102,8 @@ describe('renderSessionPickerModal', () => {
   test('message count shown in list', () => {
     const lines = frameFromLayer(renderSessionPickerModal(makeModal(), W), W, 24);
     const texts = linesToText(lines).join('\n');
-    // Session has 5 messages
-    expect(texts).toContain('5');
+    // Each row carries its own session's count.
+    expect(texts).toMatch(/Alpha\s+alpha-session\s+5 msgs/);
+    expect(texts).toMatch(/Beta\s+beta-session\s+12 msgs/);
   });
 });

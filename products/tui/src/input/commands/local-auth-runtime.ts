@@ -2,6 +2,9 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireLocalUserAuthManager } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
+// An omitted roles argument must not grant the highest role; admin is always spelled out.
+const DEFAULT_NEW_USER_ROLES: readonly string[] = ['user'];
+
 function formatRoles(roles: readonly string[]): string {
   return roles.length > 0 ? roles.join(', ') : '(none)';
 }
@@ -20,7 +23,7 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
     const username = args[1];
     const password = args[2];
     if (!username) {
-      ctx.print('Usage: /auth local add-user <username> <password> [roles]\nTip: invoke without a password to type it in the masked prompt: /auth local add-user <username>');
+      ctx.print('Usage: /local-auth add-user <username> <password> [roles] (roles default to "user"; pass admin explicitly)\nTip: invoke without a password to type it in the masked prompt: /local-auth add-user <username>');
       return;
     }
     if (!password) {
@@ -28,13 +31,13 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
       if (ctx.openLocalAuthMaskedEntry) {
         ctx.openLocalAuthMaskedEntry('add-user', username);
       } else {
-        ctx.print('Masked entry unavailable in this context. Use: /auth local add-user <username> <password>');
+        ctx.print('Masked entry unavailable in this context. Use: /local-auth add-user <username> <password>');
       }
       return;
     }
-    // Password supplied as argv: warn that the history entry has been scrubbed.
-    ctx.print('Warning: passwords passed as command arguments are scrubbed from history, but may appear in shell scrollback. The masked entry is preferred: /auth local add-user <username>');
-    const roles = args[3]?.split(',').map((value) => value.trim()).filter(Boolean) ?? ['admin'];
+    // Password supplied as argv: it is echoed in the transcript, so say so.
+    ctx.print('Warning: a password passed as a command argument stays visible in the transcript and shell scrollback. The masked entry is preferred: /local-auth add-user <username>');
+    const roles = args[3]?.split(',').map((value) => value.trim()).filter(Boolean) ?? DEFAULT_NEW_USER_ROLES;
     try {
       const added = auth.addUser(username, password, roles);
       ctx.print(`Added local auth user ${added.username} (${formatRoles(added.roles)}).`);
@@ -47,7 +50,7 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
   if (sub === 'delete-user') {
     const username = args[1];
     if (!username) {
-      ctx.print('Usage: /auth local delete-user <username>');
+      ctx.print('Usage: /local-auth delete-user <username>');
       return;
     }
     try {
@@ -63,7 +66,7 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
     const username = args[1];
     const password = args[2];
     if (!username) {
-      ctx.print('Usage: /auth local rotate-password <username> <password>\nTip: invoke without a password to type it in the masked prompt: /auth local rotate-password <username>');
+      ctx.print('Usage: /local-auth rotate-password <username> <password>\nTip: invoke without a password to type it in the masked prompt: /local-auth rotate-password <username>');
       return;
     }
     if (!password) {
@@ -71,12 +74,12 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
       if (ctx.openLocalAuthMaskedEntry) {
         ctx.openLocalAuthMaskedEntry('rotate-password', username);
       } else {
-        ctx.print('Masked entry unavailable in this context. Use: /auth local rotate-password <username> <password>');
+        ctx.print('Masked entry unavailable in this context. Use: /local-auth rotate-password <username> <password>');
       }
       return;
     }
-    // Password supplied as argv: warn that the history entry has been scrubbed.
-    ctx.print('Warning: passwords passed as command arguments are scrubbed from history, but may appear in shell scrollback. The masked entry is preferred: /auth local rotate-password <username>');
+    // Password supplied as argv: it is echoed in the transcript, so say so.
+    ctx.print('Warning: a password passed as a command argument stays visible in the transcript and shell scrollback. The masked entry is preferred: /local-auth rotate-password <username>');
     try {
       auth.rotatePassword(username, password);
       ctx.print(`Rotated password for ${username}. Existing sessions were revoked.`);
@@ -89,7 +92,7 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
   if (sub === 'revoke-session') {
     const token = args[1];
     if (!token) {
-      ctx.print('Usage: /auth local revoke-session <session-id-or-token>');
+      ctx.print('Usage: /local-auth revoke-session <session-id-or-token>');
       return;
     }
     ctx.print(auth.revokeSession(token) ? 'Revoked the selected session.' : 'Unknown session id or token.');
@@ -121,7 +124,7 @@ export function registerLocalAuthRuntimeCommands(registry: CommandRegistry): voi
     name: 'local-auth',
     aliases: ['auth-local'],
     description: 'Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials',
-    usage: '[review|panel|add-user <username> <password> [roles]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]',
+    usage: '[review|panel|add-user <username> <password> [roles, default user]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]',
     handler(args, ctx) {
       handleLocalAuthCommand(args, ctx);
     },

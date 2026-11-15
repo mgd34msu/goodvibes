@@ -1,36 +1,17 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { createActionIntent, type ActionIntent } from './createActionIntent';
 import { isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
+import { serializeError } from '../lib/errors';
+import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 
 type Phase = 'idle' | 'confirming' | 'pending' | 'acknowledged' | 'not-cancelled' | 'unknown';
 interface Snapshot { phase: Phase; refreshing: boolean; needsRefresh: boolean }
-interface Intent {
-  snapshot: Snapshot;
-  listeners: Set<() => void>;
-  abort?: AbortController;
-}
-// Closing/reopening a detail must not create a second flight or discard an
-// ambiguous outcome. Neither keys nor values contain credentials. Weak lifetime
-// keys retire these local intent receipts when the account lifetime is gone.
-const clients = new WeakMap<QueryClient, WeakMap<ClientLifetime, Map<string, Intent>>>();
-function intentFor(client: QueryClient, lifetime: ClientLifetime, id: string): Intent {
-  let scopes = clients.get(client);
-  if (!scopes) { scopes = new WeakMap(); clients.set(client, scopes); }
-  let intents = scopes.get(lifetime);
-  if (!intents) { intents = new Map(); scopes.set(lifetime, intents); }
-  let intent = intents.get(id);
-  if (!intent) {
-    intent = { snapshot: { phase: 'idle', refreshing: false, needsRefresh: false }, listeners: new Set() };
-    intents.set(id, intent);
-  }
-  return intent;
-}
-function update(intent: Intent, value: Partial<Snapshot>) {
-  intent.snapshot = { ...intent.snapshot, ...value };
-  for (const listener of intent.listeners) listener();
-}
+const intents = createActionIntent<Snapshot>(() => ({ phase: 'idle', refreshing: false, needsRefresh: false }));
+type Intent = ActionIntent<Snapshot>;
+const { intentFor, update } = intents;
 
 function setAbort(intent: Intent, abort: AbortController | undefined) { intent.abort = abort; }
 
@@ -40,14 +21,24 @@ export const CONTRACT_CANCEL_NOTICE = {
   unknown: 'Cancellation outcome is unknown. Refresh contract and process details before deciding whether to cancel again. The request will not be retried automatically.',
 } as const;
 
+// The daemon refuses a retained record it is not running with a definite 409:
+// nothing was cancelled, which is not the unknown outcome of a lost response.
+function isNotRunning(error: unknown): boolean {
+  const value = serializeError(error);
+  const transport = asRecord(value.transport);
+  const body = asRecord(value.body ?? transport.body);
+  return (value.status ?? transport.status) === 409 && body.code === 'CONTRACT_NOT_RUNNING';
+}
+
+// Neither the cancellation nor the refresh that follows it may hold the button
+// disabled forever: a daemon that never answers yields "refresh needed".
+const RESPONSE_DEADLINE_MS = 30_000;
+
 export function useContractCancellation(lifetime: ClientLifetime, id: string) {
   const client = useQueryClient();
   const intent = useMemo(() => intentFor(client, lifetime, id), [client, lifetime, id]);
   const owner = useRef<Intent | undefined>(undefined);
-  const store = useMemo(() => ({
-    subscribe: (listener: () => void) => { intent.listeners.add(listener); return () => { intent.listeners.delete(listener); }; },
-    read: () => intent.snapshot,
-  }), [intent]);
+  const store = useMemo(() => intents.store(intent), [intent]);
   const state = useSyncExternalStore(store.subscribe, store.read, store.read);
   const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
   const owned = () => owner.current === intent && current();
@@ -75,6 +66,7 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
       void client.cancelQueries(contracts);
       void client.cancelQueries(fleet);
     });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       // Supersede pre-mutation snapshots, including initial reads without data.
       await Promise.all([client.cancelQueries(contracts), client.cancelQueries(fleet)]);
@@ -90,9 +82,18 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
       if (!current()) return;
       // Refetch each exact key separately. Prefix refetches internally reject
       // early if one child fails while another still holds old-account data.
-      await Promise.allSettled(reads.map(query => client.refetchQueries(
+      const refetched = Promise.allSettled(reads.map(query => client.refetchQueries(
         { queryKey: query.queryKey, exact: true, type: 'active' }, { throwOnError: true },
-      )));
+      ))).then(() => true);
+      const timedOut = new Promise<false>((resolve) => { deadline = setTimeout(() => resolve(false), RESPONSE_DEADLINE_MS); });
+      if (!(await Promise.race([refetched, timedOut]))) {
+        // Stop waiting on reads that never answered; the gate stays closed
+        // until a manual refresh completes.
+        void client.cancelQueries(contracts);
+        void client.cancelQueries(fleet);
+        if (current()) update(intent, { needsRefresh: true });
+        return;
+      }
       if (!current()) return;
       const activeContracts = client.getQueryCache().findAll({ ...contracts, type: 'active' });
       const detail = client.getQueryCache().find({ queryKey: queryKeys.contractDetail(lifetime.revision, id), exact: true });
@@ -108,6 +109,7 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
     } catch {
       if (current()) update(intent, { needsRefresh: true });
     } finally {
+      clearTimeout(deadline);
       unsubscribe();
       if (current()) update(intent, { refreshing: false });
     }
@@ -134,14 +136,15 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
     });
     // A missing response cannot leave this user intent pending forever. Timeout
     // is an unknown outcome, never permission to retry this mutation.
-    const timer = setTimeout(() => abort.abort(), 30_000);
+    const timer = setTimeout(() => abort.abort(), RESPONSE_DEADLINE_MS);
     try {
       const result = await Promise.race([platformClient.operator.contracts.cancel(id, abort.signal), interrupted]);
       abort.signal.throwIfAborted();
       if (!owned()) return;
       update(intent, { phase: result.cancelled ? 'acknowledged' : 'not-cancelled' });
-    } catch {
-      if (current()) update(intent, { phase: 'unknown', needsRefresh: true });
+    } catch (error) {
+      if (!abort.signal.aborted && owned() && isNotRunning(error)) update(intent, { phase: 'not-cancelled' });
+      else if (current()) update(intent, { phase: 'unknown', needsRefresh: true });
     } finally {
       clearTimeout(timer);
       abort.signal.removeEventListener('abort', onAbort);

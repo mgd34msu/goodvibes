@@ -30,8 +30,8 @@ function fixedDeps(records: readonly MemoryRecord[] = RECORDS): MemoryModalDeps 
   return { memoryRegistry: { honestSearch: async () => searchResult(records), reviewQueue: async () => records } };
 }
 
-/** Flush the microtask queue so an async onOpen refresh (honestSearch) has resolved. */
-const flushMicrotasks = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+/** Yield one macrotask: every pending promise continuation, however many awaits deep, has run before it resumes. */
+const flushMicrotasks = (): Promise<void> => new Promise((resolve) => { setImmediate(resolve); });
 
 /** Open a surface backed by an async `honestSearch` and wait for the initial refresh to land. */
 async function openAsync(surface: ConfigModalSurface): Promise<ConfigModalView> {

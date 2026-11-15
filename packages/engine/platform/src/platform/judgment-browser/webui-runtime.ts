@@ -14,13 +14,13 @@ import type { BrowserJudgmentAuthorization, BrowserJudgmentRoute } from './types
 import { createWebuiCatalogProviderAdapter, createWebuiCardMaterialKeyAdapter, createWebuiConfigKeyAdapter, createWebuiCodeLanguageAdapter, createWebuiCredentialProviderAdapter, createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, webuiMailReplySubjectAdapter } from './batteries/webui-adapters.js';
 import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from './batteries/webui-command-catalog.js';
 import { readStructuredDaemonRefusal, snapshotWebuiCommandRank, snapshotWebuiDaemonRefusal, snapshotWebuiMailSubject, snapshotWebuiCredentialNames, snapshotWebuiCode, snapshotWebuiConfigKeys } from './batteries/webui-readers.js';
-import type { ResolvedCommandCandidate } from './batteries/webui-types.js';
+import { WEBUI_READER_LIMITS, type ResolvedCommandCandidate } from './batteries/webui-types.js';
 import { granted, requireSynchronousAssertion } from './guards.js';
 
 const PALETTE = 'webui.palette.command-rank';
 const ERRORS = 'webui.errors.daemon-refusal';
 const MAIL = 'webui.mail.reply-subject';
-export type WebuiJudgmentSourceKind = 'palette-query' | 'chat-title' | 'daemon-error' | 'mail-subject' | 'browser-platform' | 'credential-names' | 'chat-code' | 'config-key-names' | 'chat-speech' | 'provider-catalog-ids';
+export type WebuiJudgmentSourceKind = 'palette-query' | 'chat-title' | 'daemon-error' | 'mail-subject' | 'credential-names' | 'chat-code' | 'config-key-names' | 'chat-speech' | 'provider-catalog-ids';
 
 /** Source/purpose permission is owned by the host, separately from read scopes. */
 export interface WebuiBrowserJudgmentOptions {
@@ -49,6 +49,21 @@ export interface WebuiBrowserJudgmentOptions {
 const held = (): never => { throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'); };
 function canRead(principal: AuthenticatedPrincipal, scopes: readonly string[]): boolean {
   return principal.admin === true || missingScopes(principal.scopes, scopes).length === 0;
+}
+
+/**
+ * The ranking reader refuses a title that is blank or longer than its limit, and one such title would
+ * hold the whole palette ranking. The daemon stores whatever title a client sent, so the title is made
+ * readable here the way the WebUI shows it: blank becomes "Untitled chat", and a long title is clipped.
+ */
+function paletteChatTitle(title: string): string {
+  if (!title.trim()) return 'Untitled chat';
+  if (title.length <= WEBUI_READER_LIMITS.titleChars) return title;
+  const clipped = title.slice(0, WEBUI_READER_LIMITS.titleChars);
+  // Never end on half of a surrogate pair.
+  const safe = /[\ud800-\udbff]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
+  // Leading blanks can fill the whole clip; a blank title would hold the ranking.
+  return safe.trim() ? safe : 'Untitled chat';
 }
 
 /**
@@ -103,7 +118,7 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
           const session = sessions!.getSession(candidate.sessionId);
           if (!session || session.id !== candidate.sessionId) return held();
           revisions.push({ id: session.id, title: session.title, createdAt: session.createdAt, updatedAt: session.updatedAt, identity: new WeakRef(session) });
-          candidates.push({ title: session.title, group: 'chats' });
+          candidates.push({ title: paletteChatTitle(session.title), group: 'chats' });
         }
       }
       const assertCurrent = () => {

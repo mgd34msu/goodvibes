@@ -12,7 +12,7 @@ import { answerKnowledgeQuery } from '../platform/src/platform/knowledge/semanti
 import { prepareAnswerGapUniverse } from '../platform/src/platform/knowledge/semantic/answer-gaps.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.js';
-import { ANSWER_GAP_LIMITS, prepareAnswerGapReadings, type AnswerGapInput } from '../platform/src/platform/knowledge/semantic/answer-gap-plan/reader.js';
+import { prepareAnswerGapReadings, type AnswerGapInput } from '../platform/src/platform/knowledge/semantic/answer-gap-plan/reader.js';
 const roots: string[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });

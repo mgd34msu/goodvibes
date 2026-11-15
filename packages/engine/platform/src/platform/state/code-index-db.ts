@@ -18,7 +18,7 @@
  */
 
 import type { Database } from 'bun:sqlite';
-import { MEMORY_VECTOR_DIMS } from './memory-vector-store.js';
+import { MEMORY_VECTOR_DIMS } from './embedding-dims.js';
 import type { CodeChunk } from './code-index-chunking.js';
 
 export type ChunkRow = {
@@ -47,7 +47,8 @@ export const CHUNK_ROW_COLUMNS =
   'rowid, chunk_id, path, lang, symbol, kind, start_line, end_line, mtime, file_revision';
 
 /** Target `PRAGMA user_version` for the code index store. */
-export const CODE_INDEX_SCHEMA_VERSION = 3;
+/** Bump with MEMORY_VECTOR_DIMS (embedding-dims.ts): the vector table's width is fixed when it is created. */
+export const CODE_INDEX_SCHEMA_VERSION = 4;
 
 export function createCodeIndexSchema(db: Database): void {
   db.run(`
@@ -82,6 +83,9 @@ export function createCodeIndexSchema(db: Database): void {
 /** Retire reconstructible old cache rows rather than adopting their digests.
  * Only vector/chunk cache data and its provider provenance are discarded. */
 export function migrateCodeIndexSchema(db: Database): void {
+  // The vector table is dropped, not emptied: an index made at another embedding width keeps that
+  // width for as long as the table exists.
+  db.run('DROP TABLE IF EXISTS code_vectors');
   createCodeIndexSchema(db);
   const columns = db.query<{ name: string }, []>('PRAGMA table_info(code_chunks)').all();
   if (columns.some(column => column.name === 'content_hash')) db.run('ALTER TABLE code_chunks DROP COLUMN content_hash');
@@ -135,6 +139,26 @@ export function writeChunk(db: Database, chunk: CodeChunk, embedding: Float32Arr
     embedding,
     chunk.chunkId,
   );
+}
+
+/**
+ * Replace every chunk of one file in a single transaction: either the old chunks
+ * stay, or the new ones land complete (never a partial file carrying the new
+ * revision). `stampProvider` records the embedding provider in the same
+ * transaction, for the first write into an index that has never been stamped.
+ * The caller computes every embedding first; nothing here awaits.
+ */
+export function replaceFileChunks(
+  db: Database,
+  relPath: string,
+  entries: readonly { readonly chunk: CodeChunk; readonly embedding: Float32Array }[],
+  options: { readonly stampProvider?: string | undefined } = {},
+): void {
+  db.transaction(() => {
+    deleteChunksForPath(db, relPath);
+    for (const entry of entries) writeChunk(db, entry.chunk, entry.embedding);
+    if (options.stampProvider !== undefined) setCodeIndexMeta(db, EMBEDDING_PROVIDER_META_KEY, options.stampProvider);
+  })();
 }
 
 export function deleteChunksForPath(db: Database, relPath: string): void {

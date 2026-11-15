@@ -27,6 +27,11 @@ describe('validatePublicWebhookUrl', () => {
       'https://[fe80::1]/callback',
       'https://169.254.169.254/latest',
       'https://224.0.0.1/callback',
+      'https://100.100.100.200/x',
+      'https://198.18.0.1/x',
+      'https://192.0.0.1/x',
+      'https://[64:ff9b::7f00:1]/x',
+      'https://[2002:7f00:1::1]/x',
     ];
 
     for (const url of unsafeUrls) {
@@ -41,6 +46,8 @@ const DNS: Readonly<Record<string, readonly string[]>> = {
   'metadata.google.internal': ['169.254.169.254'],
   'hooks.internal.example': ['10.0.0.8'],
   'mixed.example': ['203.0.113.30', '127.0.0.1'],
+  'tailnet.example': ['100.100.100.200'],
+  'nat64.example': ['64:ff9b::7f00:1'],
   'hooks.example': ['203.0.113.31'],
 };
 const resolveHost: HostResolver = async (host) => {
@@ -67,6 +74,9 @@ describe('postToPublicWebhook', () => {
     await expect(postToPublicWebhook('https://metadata.google.internal/computeMetadata/v1', { method: 'POST' }, { resolveHost })).rejects.toThrow(/169\.254\.169\.254, a metadata address/);
     await expect(postToPublicWebhook('https://hooks.internal.example/h', { method: 'POST' }, { resolveHost })).rejects.toThrow(/10\.0\.0\.8, a private address/);
     await expect(postToPublicWebhook('https://mixed.example/h', { method: 'POST' }, { resolveHost })).rejects.toThrow(/127\.0\.0\.1, a loopback address/);
+    await expect(postToPublicWebhook('https://tailnet.example/h', { method: 'POST' }, { resolveHost })).rejects.toThrow(/100\.100\.100\.200/);
+    await expect(postToPublicWebhook('https://nat64.example/h', { method: 'POST' }, { resolveHost })).rejects.toThrow(/64:ff9b::7f00:1/);
+    await expect(postToPublicWebhook('https://100.100.100.200/x', { method: 'POST' }, { resolveHost })).rejects.toThrow(/not allowed/);
     expect(sent).toEqual([]);
   });
 

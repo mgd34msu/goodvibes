@@ -8,7 +8,13 @@
  * running locally SAYS so, naming the reason.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { AutomationRouteStore } from '@goodvibes-jev/engine/platform/platform/automation';
+import { RouteBindingManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import {
   createRemoteConversationRouter,
   hostedSessionEventStreamUrl,
@@ -47,6 +53,7 @@ function harness(input: {
   readonly connection?: ConnectedHostResolution;
   readonly routeTurns?: boolean;
   readonly workspaceRoot?: string;
+  readonly conversation?: HostedFrameConversation;
 }): { router: ReturnType<typeof createRemoteConversationRouter>; calls: Call[] } {
   const calls: Call[] = [];
   const router = createRemoteConversationRouter({
@@ -65,7 +72,7 @@ function harness(input: {
       )) as never,
     },
     resolveConnection: () => input.connection ?? LIVE_HOST,
-    conversation: inertConversation(),
+    conversation: input.conversation ?? inertConversation(),
     requestRender: () => {},
     workspaceRoot: input.workspaceRoot ?? '/home/someone/project',
     clientId: 'goodvibes-agent:test',
@@ -114,7 +121,9 @@ describe('routing a conversation turn to the connected daemon', () => {
     // The daemon restarted, or the session was killed. Recoverable: the person
     // should not have to notice, and their message must not be dropped.
     let steers = 0;
+    const notices: string[] = [];
     const { router, calls } = harness({
+      conversation: { ...inertConversation(), addSystemMessage: (text: string) => { notices.push(text); } },
       invoke: (methodId, _payload, call) => {
         if (methodId === 'sessions.hosted.create') return { session: { id: `${HOSTED_ID}-${call}` } };
         steers += 1;
@@ -134,6 +143,78 @@ describe('routing a conversation turn to the connected daemon', () => {
     ]);
     // The message is carried into the freshly opened session, not dropped.
     expect(calls[4]?.input.body).toBe('second');
+    // The person is told the model starts without the earlier conversation.
+    expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
+  });
+
+  describe('against the daemon broker\'s own refusals', () => {
+    const cleanups: Array<() => void | Promise<void>> = [];
+    afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+
+    async function realBroker() {
+      const dir = mkdtempSync(join(tmpdir(), 'remote-conversation-broker-'));
+      const broker = new SharedSessionBroker({
+        storePath: join(dir, 'broker.json'),
+        routeBindings: new RouteBindingManager({ store: new AutomationRouteStore(join(dir, 'routes.json')) }),
+        agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false },
+      });
+      cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+      cleanups.push(async () => { await broker.stop(); });
+      return broker;
+    }
+
+    // The first message's steer lands on a stand-in; the second reaches the real
+    // broker with the id this surface remembers, and the broker's own error is
+    // what the daemon route turns into the response status.
+    async function secondSteerRefusedBy(broker: SharedSessionBroker, rememberedId: string) {
+      let steers = 0;
+      const created: string[] = [];
+      const notices: string[] = [];
+      const { router, calls } = harness({
+        conversation: { ...inertConversation(), addSystemMessage: (text: string) => { notices.push(text); } },
+        invoke: async (methodId, payload) => {
+          if (methodId === 'sessions.hosted.create') {
+            const id = created.length === 0 ? rememberedId : `${HOSTED_ID}-fresh`;
+            created.push(id);
+            return { session: { id } };
+          }
+          steers += 1;
+          if (steers !== 2) return {};
+          const input = payload as { sessionId: string; body: string };
+          try {
+            await broker.steerMessage({ sessionId: input.sessionId, body: input.body, surfaceKind: 'service', surfaceId: 'agent-test' });
+            return {};
+          } catch (error) {
+            const status = (error as { status?: unknown }).status;
+            if (typeof status !== 'number') throw error;
+            throw new ConnectedHostVerbError(String((error as Error).message), status);
+          }
+        },
+      });
+      await router.submit('first');
+      const second = await router.submit('second');
+      return { second, calls, created, notices };
+    }
+
+    test('a session the broker has closed is replaced, with the lost context said out loud', async () => {
+      const broker = await realBroker();
+      const closed = await broker.createSession({ id: 'closed-hosted-session' });
+      await broker.closeSession(closed.id);
+      const { second, created, notices } = await secondSteerRefusedBy(broker, closed.id);
+      expect(second).toMatchObject({ routed: true, action: 'recreated' });
+      expect(created).toEqual([closed.id, `${HOSTED_ID}-fresh`]);
+      expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
+    });
+
+    test('a session id the broker does not hold is replaced, not answered with a silent empty session', async () => {
+      const broker = await realBroker();
+      const { second, created, notices } = await secondSteerRefusedBy(broker, 'never-created-session');
+      expect(second).toMatchObject({ routed: true, action: 'recreated' });
+      expect(created).toEqual(['never-created-session', `${HOSTED_ID}-fresh`]);
+      expect(notices.filter(text => text.includes('no memory of what came before'))).toHaveLength(1);
+      // The broker did not mint a session for the stale id on the way.
+      expect(broker.getSession('never-created-session')).toBeNull();
+    });
   });
 
   test('a refusal that is NOT a stale session does not open a second one', async () => {
@@ -262,6 +343,11 @@ describe('the hosted session event stream address', () => {
   test('is the per-session events route on the connected host', () => {
     expect(hostedSessionEventStreamUrl('http://127.0.0.1:3421', 'hosted-abc'))
       .toBe('http://127.0.0.1:3421/api/sessions/hosted-abc/events');
+  });
+
+  test('keeps a base path prefix', () => {
+    expect(hostedSessionEventStreamUrl('https://host.example/goodvibes', 'hosted-abc'))
+      .toBe('https://host.example/goodvibes/api/sessions/hosted-abc/events');
   });
 
   test('escapes a session id rather than letting it shape the path', () => {

@@ -23,7 +23,7 @@
 |           Helper           3      showThinking                                   false             |
 |           Tools            9      showReasoningSummary                           false             |
 |           TTS              6      showTokenSpeed                                 false             |
-|                    45 more ↓                                                                       |
+|                    44 more ↓                                                                       |
 |                                                                                                    |
 |            ↑↓  category    →  settings    tab  pane                             1 more ↓           |
 |                                                                                                    |

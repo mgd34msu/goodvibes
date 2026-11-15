@@ -53,7 +53,7 @@ describe('COMPLETION_COMMANDS data integrity', () => {
       service: ['status', 'check', 'install', 'start', 'stop', 'restart', 'uninstall'],
       models: ['current', 'use', 'pin', 'recent'],
       providers: ['list', 'current', 'inspect', 'use'],
-      auth: ['status', 'users', 'sessions', 'add-user', 'clear-bootstrap'],
+      auth: ['status', 'users', 'sessions', 'add-user', 'delete-user', 'rotate-password', 'revoke-session', 'revoke-sessions', 'clear-bootstrap'],
       subscription: ['list', 'providers', 'inspect', 'login', 'logout'],
       secrets: ['list', 'providers', 'test', 'set', 'link', 'delete'],
       sessions: ['list', 'show', 'export', 'resume'],
@@ -78,7 +78,7 @@ describe('COMPLETION_COMMANDS data integrity', () => {
   test('all core commands are present', () => {
     const names = new Set(COMPLETION_COMMANDS.map((c) => c.name));
     const required = [
-      'tui', 'run', 'serve', 'web', 'service', 'status', 'doctor',
+      'tui', 'run', 'web', 'service', 'status', 'doctor',
       'onboarding', 'models', 'providers', 'auth', 'subscription', 'secrets',
       'sessions', 'tasks', 'pair', 'surfaces', 'listener', 'control-plane',
       'support-bundle', 'remote', 'completion', 'help', 'version',

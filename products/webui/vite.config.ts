@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs';
 import react from '@vitejs/plugin-react';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readWebBindingFromDaemon, type GoodVibesWebBinding } from './scripts/daemon-binding';
@@ -55,15 +55,41 @@ interface GoodVibesTuiSettings {
   web?: GoodVibesListenerSettings;
 }
 
-function readTuiSettings(): GoodVibesTuiSettings {
-  const settingsPath = process.env.GOODVIBES_TUI_SETTINGS_PATH
-    ?? join(process.env.GOODVIBES_DAEMON_HOME ?? homedir(), '.goodvibes', 'tui', 'settings.json');
+function readSettingsFile(settingsPath: string): GoodVibesTuiSettings {
   if (!existsSync(settingsPath)) return {};
   try {
     return JSON.parse(readFileSync(settingsPath, 'utf8')) as GoodVibesTuiSettings;
   } catch {
     return {};
   }
+}
+
+/**
+ * The same tree rules the runtime uses (platform/config/goodvibes-home.ts),
+ * restated here because this file runs under Node before the engine is built:
+ * `GOODVIBES_HOME` is the tree root (`<root>/.goodvibes`), `GOODVIBES_DAEMON_HOME`
+ * is the daemon's own directory, default `<tree>/daemon`.
+ */
+function goodVibesTreeDirectory(): string {
+  const override = process.env.GOODVIBES_HOME?.trim();
+  const root = override ? (isAbsolute(override) ? override : resolve(process.cwd(), override)) : (process.env.HOME?.trim() || homedir());
+  return join(root, '.goodvibes');
+}
+
+function goodVibesDaemonDirectory(): string {
+  const override = process.env.GOODVIBES_DAEMON_HOME?.trim();
+  if (!override) return join(goodVibesTreeDirectory(), 'daemon');
+  return isAbsolute(override) ? override : resolve(process.cwd(), override);
+}
+
+/** The deprecated terminal settings file: its `web.*` and `controlPlane.*` predate the daemon owning them. */
+function readTuiSettings(): GoodVibesTuiSettings {
+  return readSettingsFile(process.env.GOODVIBES_TUI_SETTINGS_PATH ?? join(goodVibesTreeDirectory(), 'tui', 'settings.json'));
+}
+
+/** The daemon owns `controlPlane.*`; its own settings file wins over the deprecated terminal one. */
+function readControlPlaneSettings(tuiSettings: GoodVibesTuiSettings): GoodVibesListenerSettings | undefined {
+  return readSettingsFile(join(goodVibesDaemonDirectory(), 'settings.json')).controlPlane ?? tuiSettings.controlPlane;
 }
 
 function readWebBindingFromCli(): GoodVibesWebBinding {
@@ -141,11 +167,14 @@ if (discoverBinding && !daemonWebBinding) {
   );
 }
 const cliWebBinding = daemonWebBinding ?? (discoverBinding ? readWebBindingFromCli() : {});
-const tuiSettings = !discoverBinding || cliWebBinding.host || cliWebBinding.port ? {} : readTuiSettings();
+// The binding names only the web listener, so the control-plane port (the proxy
+// target) is read from settings whether or not a binding was found.
+const tuiSettings = discoverBinding ? readTuiSettings() : {};
 const webHost = cliWebBinding.host ?? listenerHost(tuiSettings.web, '127.0.0.1');
 const webPort = cliWebBinding.port ?? tuiSettings.web?.port ?? 3423;
-const controlPlaneHost = listenerHost(tuiSettings.controlPlane, '127.0.0.1');
-const controlPlanePort = tuiSettings.controlPlane?.port ?? 3421;
+const controlPlaneSettings = discoverBinding ? readControlPlaneSettings(tuiSettings) : undefined;
+const controlPlaneHost = listenerHost(controlPlaneSettings, '127.0.0.1');
+const controlPlanePort = controlPlaneSettings?.port ?? 3421;
 const daemonTarget = process.env.GOODVIBES_DAEMON_BASE_URL
   ?? process.env.VITE_GOODVIBES_BACKEND_URL
   ?? `http://${localhostTarget(controlPlaneHost)}:${controlPlanePort}`;

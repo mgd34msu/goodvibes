@@ -129,7 +129,9 @@ export function readClientCredentialsFromJson(rawText: string): GoogleClientInta
       clientId,
       clientSecret,
       authUri: readString(inner.auth_uri) ?? DEFAULT_AUTH_URI,
-      tokenUri: readString(inner.token_uri) ?? DEFAULT_TOKEN_URI,
+      // Never taken from the file: a pasted JSON must not choose where the
+      // client secret is sent.
+      tokenUri: DEFAULT_TOKEN_URI,
     },
   };
 }

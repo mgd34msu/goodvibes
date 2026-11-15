@@ -68,6 +68,7 @@ export function ModelPricesModal({ open, onClose, initialModelKey }: ModelPrices
         <ModelPricesEditor
           value={readConfigPath(config.data, 'pricing.modelPrices').value}
           onCommit={commit}
+          readLatest={async () => readConfigPath(await platformClient.operator.config.get(), 'pricing.modelPrices').value}
           {...(initialModelKey ? { initialModelKey } : {})}
         />
       )}

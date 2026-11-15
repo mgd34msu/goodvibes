@@ -14,9 +14,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const SCRIPT = resolve(import.meta.dir, '..', 'scripts', 'check-credential-scope.ts');
 
@@ -26,7 +26,7 @@ interface GateResult {
 }
 
 async function runGate(source: string): Promise<GateResult> {
-  const root = mkdtempSync(join(tmpdir(), 'gv-credgate-'));
+  const root = makeProjectTempDir('gv-credgate');
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'fixture.ts'), source, 'utf-8');
 
@@ -112,6 +112,38 @@ export async function store(name: string): Promise<void> {
 `);
     expect(result.ok).toBe(false);
     expect(result.output).toContain('computed secret key');
+  });
+
+  test('a key minted inline into a local const and passed by name fails', async () => {
+    const result = await runGate(`
+declare const secrets: { set(key: string, value: string): Promise<void> };
+export async function store(name: string): Promise<void> {
+  const key = \`MY_NEW_\${name}\`;
+  await secrets.set(key, 'value');
+}
+`);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('MY_NEW_');
+  });
+
+  test('an inline-minted local key under a declared prefix family passes', async () => {
+    const result = await runGate(`
+declare const secrets: { set(key: string, value: string): Promise<void> };
+export async function store(id: string): Promise<void> {
+  const key = \`GOODVIBES_PAYMENTS_CARD_\${id}_number\`;
+  await secrets.set(key, 'value');
+}
+`);
+    expect(result.ok).toBe(true);
+  });
+
+  test('a wrapper parameter that shares a name with another const stays a passthrough', async () => {
+    const result = await runGate(`
+declare const secrets: { set(key: string, value: string): Promise<void> };
+export const wrapped = (key: string) => secrets.set(key, 'value');
+export function unrelated(name: string): string { const key = \`LOCAL_\${name}\`; return key; }
+`);
+    expect(result.ok).toBe(true);
   });
 
   test('a key minted under a declared prefix family is classified', async () => {

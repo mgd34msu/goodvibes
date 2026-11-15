@@ -5,17 +5,32 @@ export interface HelpGroup {
     readonly right: string;
   }>;
 }
-export function filterGroups(groups: readonly HelpGroup[], query: string): HelpGroup[] {
+/**
+ * Filter titled groups by a query: a group whose title matches keeps all its
+ * items, otherwise only the items that match; groups left empty are dropped
+ * (also for an empty query, so no title is drawn over nothing).
+ */
+export function filterTitledGroups<G extends { readonly title: string }, I>(
+  groups: readonly G[],
+  query: string,
+  itemsOf: (group: G) => readonly I[],
+  withItems: (group: G, items: readonly I[]) => G,
+  matches: (item: I, lowerQuery: string) => boolean,
+): G[] {
   const q = query.trim().toLowerCase();
-  if (!q) return [...groups];
   return groups
-    .map((g) => ({
-      title: g.title,
-      entries: g.title.toLowerCase().includes(q)
-        ? g.entries
-        : g.entries.filter((e) => e.label.toLowerCase().includes(q) || e.right.toLowerCase().includes(q)),
-    }))
-    .filter((g) => g.entries.length > 0);
+    .map((g) => (q === '' || g.title.toLowerCase().includes(q) ? g : withItems(g, itemsOf(g).filter((item) => matches(item, q)))))
+    .filter((g) => itemsOf(g).length > 0);
+}
+
+export function filterGroups(groups: readonly HelpGroup[], query: string): HelpGroup[] {
+  return filterTitledGroups(
+    groups,
+    query,
+    (g) => g.entries,
+    (g, entries) => ({ title: g.title, entries: [...entries] }),
+    (e, q) => e.label.toLowerCase().includes(q) || e.right.toLowerCase().includes(q),
+  );
 }
 
 /** Treat plugin metadata as untrusted: one throwing getter cannot break help navigation. */

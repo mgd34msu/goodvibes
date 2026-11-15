@@ -1,7 +1,8 @@
 /** Genuine installed formatter/linter candidates under admitted Node/dependency inputs. */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { noteSkippedContainment } from './_helpers/exec-containment-proof.ts';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '../errors/src/index.js';
@@ -16,8 +17,10 @@ import { createCapturedAutoHealBackend, healToolFile } from '../platform/src/pla
 import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
 import type { HealResult } from '../platform/src/platform/tools/shared/auto-heal.js';
 import { toolReadingsPort } from './_helpers/tool-readings.js';
+import { declaredToolVersion, findInstalledToolEntry } from './_helpers/installed-package.js';
 
 const supported = (await probeCapturedExecAvailability()).available;
+noteSkippedContainment('captured-auto-heal-real-tools.test.ts', supported);
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !supported)
   throw new Error('required genuine captured formatter/linter containment backend is unavailable');
 
@@ -81,9 +84,8 @@ for (const stage of ['formatter', 'linter'] as const) {
       const modules = join(owner, 'node_modules'); mkdirSync(modules);
       const store = realpathSync(join(import.meta.dir, '../../../node_modules/.bun'));
       const name = stage === 'formatter' ? 'prettier' : 'eslint';
-      const version = stage === 'formatter' ? '3.8.4' : '10.5.0';
-      const entry = readdirSync(store).find((candidate) => candidate === `${name}@${version}` || candidate.startsWith(`${name}@${version}+`));
-      expect(entry, `installed ${name}@${version} is required for genuine qualification`).toBeDefined();
+      const entry = findInstalledToolEntry(store, name);
+      expect(entry, `installed ${name}@${declaredToolVersion(name)} is required for genuine qualification`).toBeDefined();
       copyPackage(join(store, entry!, 'node_modules', name), modules);
       mkdirSync(join(modules, '.bin'));
       symlinkSync(stage === 'formatter' ? '../prettier/bin/prettier.cjs' : '../eslint/bin/eslint.js', join(modules, '.bin', name));

@@ -40,6 +40,12 @@ export function createAgentSessionInputsClient(verbs: DaemonVerbCaller): Session
       return { inputs: readInputs(payload) };
     },
 
+    // One caller is granted an input; the rest are refused (409), which the
+    // dispatcher reads as "another surface holds it".
+    async claimInput(sessionId, inputId) {
+      return await verbs.invoke<unknown>('sessions.inputs.deliver', { sessionId, inputId, claim: true });
+    },
+
     async deliverInput(sessionId, inputId, options) {
       return await verbs.invoke<unknown>('sessions.inputs.deliver', {
         sessionId,

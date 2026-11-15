@@ -150,8 +150,8 @@ test('caller cancellation interrupts a noncooperating catalog without retaining 
   const entered = deferred<void>(), release = deferred<readonly Record<string, unknown>[]>(), controller = new AbortController();
   const pending = planTaskRoute({ query: 'check daemon health' }, { workspaceMatches() { entered.resolve(); return release.promise; } }, { sourceOwner: protectedSource.owner, signal: controller.signal });
   await entered.promise; controller.abort();
-  const outcome = await Promise.race([pending.then(() => 'published', () => 'held'), new Promise<string>(resolve => setTimeout(() => resolve('timeout'), 250))]);
-  expect(outcome).toBe('held'); release.resolve([{ id: 'late' }]); await expect(pending).rejects.toThrow();
+  // The catalog is still held: cancellation must settle the plan on its own, or this await hangs.
+  await expect(pending).rejects.toThrow(); release.resolve([{ id: 'late' }]);
 });
 
 test('retained publication authority survives source cleanup and rejects subsequent inputs and provider changes', async () => {
@@ -234,9 +234,9 @@ test('caller cancellation interrupts noncooperating route and slot providers', a
   const protectedSource = source(), fixture = gatedPort(), controller = new AbortController(); installJudgmentPort(fixture.port);
   const pending = planTaskRoute({ query: 'check daemon health' }, {}, { sourceOwner: protectedSource.owner, signal: controller.signal }); await fixture.entered.promise;
   controller.abort();
-  const outcome = await Promise.race([pending.then(() => 'published', () => 'held'), new Promise<string>(resolve => setTimeout(() => resolve('timeout'), 250))]);
-  expect(outcome).toBe('held'); fixture.release.resolve(); await expect(pending).rejects.toThrow();
-  await new Promise<void>(resolve => setTimeout(resolve, 0)); expect(fixture.logs).toHaveLength(0);
+  // The provider is still held: cancellation must settle the plan on its own, or this await hangs.
+  await expect(pending).rejects.toThrow(); fixture.release.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(fixture.logs).toHaveLength(0);
 });
 
 test('tool invocation signal replacement is fenced by identity', async () => {

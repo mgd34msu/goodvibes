@@ -20,11 +20,12 @@ import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/pl
  *   - lifecycle.ts: save/shutdown helpers
  */
 import { join } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/core';
 import { AcpManager } from '@goodvibes-jev/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
-import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { CONTROL_PLANE_FEATURE_FLAG, resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -49,7 +50,9 @@ import {
   createDeferredStartupCoordinator,
 } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { deriveSpineFooterStatus } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { transportRetryHooks } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
+import { bindControlCommands } from './control-surfaces.ts';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
 import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -72,9 +75,9 @@ import {
 import { createDaemonAttachHandshake } from './client/daemon-attach-handshake.ts';
 import { createPendingServiceStatus, hostServiceIsActive, hostServiceIsBlocked } from './client/host-service-status.ts';
 import { relayReadAccessors } from './relay-reachability-bridge.ts';
-import '../mcp/runtime-reload.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
+import { createSerialSteps } from './serial-steps.ts';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[4]>;
 
@@ -120,6 +123,8 @@ export type BootstrapContext = RuntimeContext & {
   loadLastConversation: () => { messages: Array<Record<string, unknown>> } | null;
   /** Write the last-session pointer file (used after session resume). */
   _writeLastSessionPointer: (sessionId: string) => void;
+  /** The daemon session spine, for session switches made outside the hook bridge (crash-recovery accept). */
+  _sessionSpine: SessionSpineClient;
   /** Retrieve pinned model IDs for the model picker. */
   _getPinned: () => Promise<string[]>;
   /** Retrieve configured provider IDs for the model picker. */
@@ -204,7 +209,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const { automationManager, hookDispatcher, pluginManager } = services;
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
   // A saved custom-provider model must never crash boot, see provider-fallback.ts.
-  await ensureBootModelResolvable(providerRegistry, configManager);
+  const bootModelSubstitution = await ensureBootModelResolvable(providerRegistry, configManager);
 
   // ── Phase 6: Orchestrator + AcpManager ───────────────────────────────────
 
@@ -272,6 +277,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       sessionLineageTracker: services.sessionLineageTracker,
       runtimeBus,
       sessionId: runtime.sessionId,
+      currentSessionId: () => runtime.sessionId,
     },
     services.contextAccountingHolder,
     bootstrapUnsubs,
@@ -285,6 +291,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     hookDispatcher: services.hookDispatcher,
   });
   const acpTaskAdapter = new AcpTaskAdapter(store);
+  bootstrapUnsubs.push(acpTaskAdapter.attachRuntimeBus(runtimeBus));
   const ACP_TASK_SYNC_INTERVAL_MS = 1_000;
   const acpTaskSyncInterval = setInterval(() => {
     acpTaskAdapter.sync(acpManager);
@@ -294,8 +301,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags); // featureFlags required: without it runtime.unifiedTasks configured nothing (permissive fallback); platform default matches shipped behaviour, so this is a no-op for existing installs.
   // Operator interventions ride the control-plane gateway capability
   // (controlPlane.gateway, on by default; the old never-registered gate id shipped this dead).
-  const opsControlPlane = services.featureFlags.isEnabled('control-plane-gateway')
-    ? new OpsControlPlane(opsTaskManager, runtimeBus, store, userSessionId)
+  const opsControlPlane = services.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)
+    ? new OpsControlPlane(opsTaskManager, runtimeBus, store, userSessionId, services.agentManager)
     : undefined;
 
   // One surface-bound pointer writer, shared by the resume seam below and the
@@ -333,14 +340,21 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   });
   const systemMessageRouter = shell.systemMessageRouter;
   systemMessageRouterRef.value = systemMessageRouter;
+  if (bootModelSubstitution) {
+    systemMessageRouter.high(
+      `[Startup] Configured model '${bootModelSubstitution.configured}' is unavailable; using '${bootModelSubstitution.replacement}' this session. Your saved model is unchanged.`,
+    );
+  }
   // Recovery can await a planner or executor. Let the shell render while it
   // runs, and stop/drain recovery before shutdown releases its dependencies.
   const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
   bootstrapUnsubs.unshift(async () => {
     services.contractRunner.dispose();
     await contractRecovery;
+    await services.contractRunner.flushWorkPlan?.();
   });
   const commandRegistry = shell.commandRegistry;
+  bindControlCommands(services, commandRegistry);
   const commandContext = shell.commandContext;
   // Recovery loads persisted history before continuing its work. Announce
   // that history without waiting for the resumed work to finish.
@@ -375,6 +389,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     sessionUnionCache: sessionUnionCache as unknown as Parameters<typeof createSpineAdoptionSync>[0]['sessionUnionCache'],
     legacyStorePath: services.shellPaths.resolveProjectPath('tui', 'control-plane', 'sessions.json'),
     workingDirectory: services.workingDirectory,
+    retryHooks: transportRetryHooks(runtimeBus, { sessionId: userSessionId, traceId: `${userSessionId}:daemon-http`, source: 'bootstrap' }, 'http'),
     // Both ride adoption. A message submitted into a session this surface hosts
     // must reach the loop here, because the loop is here; and a rewind driven
     // from the web app or another terminal is answerable only by the process
@@ -421,9 +436,14 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // reader in this repository resolves it that way.
   const createExternalServiceFactories = (token: string): ExternalServiceFactories => ({
     sharedDaemonToken: token,
-    daemonRuntimeDir: join(services.homeDirectory, '.goodvibes', 'daemon'),
+    daemonRuntimeDir: resolveGoodVibesDaemonHome(services.homeDirectory),
     adoptOnly: true,
   });
+
+  // Replacing the external-services handle is one step at a time and always
+  // releases the handle it replaces: an adopted handle still owns probes and
+  // listeners, and two swaps interleaving would leave one of them orphaned.
+  const swapExternalServices = createSerialSteps();
 
   // The one bounded recovery step: a daemon that is INSTALLED on this machine
   // and simply stopped gets started once and waited for, rather than becoming
@@ -441,17 +461,24 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       });
       if (outcome.action === 'started' || outcome.action === 'came-online') {
         const companionTokenRecord = resolveDaemonCompanionToken(
-          join(services.homeDirectory, '.goodvibes', 'daemon'),
+          resolveGoodVibesDaemonHome(services.homeDirectory),
           GOODVIBES_TUI_SURFACE_ROOT,
         );
-        externalServicesPromise = startExternalServices(
-          configManager,
-          runtimeBus,
-          hookDispatcher,
-          services,
-          createExternalServiceFactories(companionTokenRecord.token),
-        );
-        externalServices = await externalServicesPromise;
+        await swapExternalServices(async () => {
+          try {
+            await externalServices.stop();
+          } catch (error) {
+            logger.debug('Releasing the previous external services failed', { error: summarizeError(error) });
+          }
+          externalServicesPromise = startExternalServices(
+            configManager,
+            runtimeBus,
+            hookDispatcher,
+            services,
+            createExternalServiceFactories(companionTokenRecord.token),
+          );
+          externalServices = await externalServicesPromise;
+        });
         await daemonHandshake.attach(companionTokenRecord.token);
       }
       const notice = describeDaemonAutostart(
@@ -477,7 +504,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     // relay-reachability-bridge.ts.
     ...relayReadAccessors,
     inspect: inspectExternalServices,
-    restart: async () => {
+    restart: () => swapExternalServices(async () => {
       if (externalServicesPromise) {
         try {
           externalServices = await externalServicesPromise;
@@ -486,7 +513,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         }
       }
       await externalServices.stop();
-      const daemonHomeDir = join(services.homeDirectory, '.goodvibes', 'daemon');
+      const daemonHomeDir = resolveGoodVibesDaemonHome(services.homeDirectory);
       const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);
       externalServicesPromise = startExternalServices(
         configManager,
@@ -500,7 +527,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       await daemonHandshake.attach(companionTokenRecord.token);
       requestRender();
       return inspectExternalServices();
-    },
+    }),
   };
   // Attaching to a daemon settles both build floors and its undelivered
   // receipts off one /status read, see client/daemon-attach-handshake.ts.
@@ -537,7 +564,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // Register the persistent companion-pairing token as the daemon's shared
       // bearer, so tokens scanned from the /qrcode modal's QR actually
       // authenticate against the daemon this surface adopts.
-      const daemonHomeDir = join(services.homeDirectory, '.goodvibes', 'daemon');
+      const daemonHomeDir = resolveGoodVibesDaemonHome(services.homeDirectory);
       const companionTokenRecord = resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT);
       // Fix (TUI 0.19.20): remove stale pre-0.21.28 workspace-scoped operator
       // token files so only the canonical <daemonHomeDir>/operator-tokens.json survives.
@@ -663,6 +690,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     trustPromptRef,
     loadLastConversation: () => loadLastConversation({ surface: services.surface }),
     _writeLastSessionPointer: writeSessionPointer,
+    _sessionSpine: sessionSpine,
     _getPinned: () => services.favoritesStore.getPinned(),
     _getConfiguredProviderIds: () => services.providerRegistry.getConfiguredProviderIds(),
     commandRegistry,

@@ -1,13 +1,13 @@
 /**
- * /provider command handler.
+ * /provider-opt command handler.
  *
  * Implements the Provider Optimizer commands:
  *
- *   /provider optimizer on|off  , Enable or disable the provider optimizer
- *   /provider route auto|manual , Set optimizer routing mode
- *   /provider explain-route     , Print current route explanation
- *   /provider pin <provider:model>, Pin routing to a specific provider/model
- *   /provider fallback test     , Simulate the fallback chain
+ *   /provider-opt optimizer on|off  , Enable or disable the provider optimizer
+ *   /provider-opt route auto|manual , Set optimizer routing mode
+ *   /provider-opt explain-route     , Print current route explanation
+ *   /provider-opt pin <provider:model>, Pin routing to a specific provider/model
+ *   /provider-opt fallback test     , Simulate the fallback chain
  *
  * When the optimizer is disabled, commands report its status and
  * explain-route still works (reads current model capabilities).
@@ -71,7 +71,7 @@ function fmtExplanation(expl: RouteExplanation, context: CommandContext): void {
 }
 
 // ---------------------------------------------------------------------------
-// /provider optimizer on|off
+// /provider-opt optimizer on|off
 // ---------------------------------------------------------------------------
 
 function handleOptimizerToggle(
@@ -83,7 +83,7 @@ function handleOptimizerToggle(
   const sub = args[0];
 
   if (sub !== 'on' && sub !== 'off') {
-    context.print('[provider] Usage: /provider optimizer on|off');
+    context.print('[provider] Usage: /provider-opt optimizer on|off');
     context.print(`  Current state: optimizer is ${optimizer.enabled ? 'enabled' : 'disabled'}`);
     context.print('  "on"  — activates intelligent failover and auto-routing');
     context.print('  "off" — disables optimizer; provider selection is manual only');
@@ -106,7 +106,7 @@ function handleOptimizerToggle(
     context.print('  Intelligent failover is now active: on a request error the optimizer');
     context.print('  will attempt the next viable provider and surface a transcript notice');
     context.print('  naming the from→to transition and reason before retrying.');
-    context.print('  Use "/provider route auto" to enable fully automatic routing.');
+    context.print('  Use "/provider-opt route auto" to enable fully automatic routing.');
   } else if (!enable && wasEnabled) {
     context.print('[provider] Optimizer disabled.');
     context.print('  Provider selection returns to manual-only mode. No automatic failover.');
@@ -117,7 +117,7 @@ function handleOptimizerToggle(
 }
 
 // ---------------------------------------------------------------------------
-// /provider route auto|manual
+// /provider-opt route auto|manual
 // ---------------------------------------------------------------------------
 
 function handleRoute(
@@ -129,7 +129,7 @@ function handleRoute(
   const sub = args[0];
 
   if (sub !== 'auto' && sub !== 'manual') {
-    context.print('[provider] Usage: /provider route auto|manual');
+    context.print('[provider] Usage: /provider-opt route auto|manual');
     context.print(`  Current mode: ${optimizer.mode} (optimizer ${optimizer.enabled ? 'on' : 'off'})`);
     return;
   }
@@ -138,11 +138,18 @@ function handleRoute(
     context.print(
       '[provider] Optimizer is off: routing mode recorded but failover will not fire until optimizer is enabled.',
     );
-    context.print('  Enable with: /provider optimizer on');
+    context.print('  Enable with: /provider-opt optimizer on');
   }
 
   optimizer.setMode(sub);
   context.print(`[provider] Routing mode → ${sub}`);
+  // While the optimizer is off, writing "auto"/"manual" would switch it on at
+  // the next start, so the mode is persisted only when it is already active.
+  if (optimizer.enabled) {
+    context.platform.configManager.setDynamic('provider.optimizerMode', sub);
+  } else {
+    context.print('  This mode is not saved until the optimizer is on; it is lost on restart.');
+  }
 
   if (sub === 'auto') {
     context.print(
@@ -156,7 +163,7 @@ function handleRoute(
 }
 
 // ---------------------------------------------------------------------------
-// /provider explain-route
+// /provider-opt explain-route
 // ---------------------------------------------------------------------------
 
 async function handleExplainRoute(
@@ -208,7 +215,7 @@ async function handleExplainRoute(
 }
 
 // ---------------------------------------------------------------------------
-// /provider pin <provider:model>
+// /provider-opt pin <provider:model>
 // ---------------------------------------------------------------------------
 
 async function handlePin(
@@ -225,10 +232,10 @@ async function handlePin(
       context.print(
         `[provider] Currently pinned to: ${optimizer.pinnedTarget.providerId}/${optimizer.pinnedTarget.modelId}`,
       );
-      context.print('  Use "/provider pin <provider:model>" to change, or "/provider route manual" to unpin.');
+      context.print('  Use "/provider-opt pin <provider:model>" to change, or "/provider-opt route manual" to unpin.');
     } else {
-      context.print('[provider] No pin active. Usage: /provider pin <provider:model>');
-      context.print('  Example: /provider pin anthropic:claude-opus-4-5');
+      context.print('[provider] No pin active. Usage: /provider-opt pin <provider:model>');
+      context.print('  Example: /provider-opt pin anthropic:claude-opus-4-5');
     }
     return;
   }
@@ -237,7 +244,7 @@ async function handlePin(
   const colonIdx = target.indexOf(':');
   if (colonIdx === -1) {
     context.print(`[provider] Invalid format "${target}". Expected: <provider>:<model>`);
-    context.print('  Example: /provider pin anthropic:claude-opus-4-5');
+    context.print('  Example: /provider-opt pin anthropic:claude-opus-4-5');
     return;
   }
 
@@ -273,17 +280,19 @@ async function handlePin(
   // Enable optimizer if it's off
   if (!optimizer.enabled) {
     optimizer.setEnabled(true);
-    context.print('⚠ Optimizer was disabled: enabling it for pin to take effect.');
+    context.print('⚠ Optimizer was disabled: enabling it for pin to take effect (saved: stays on after restart).');
   }
 
   optimizer.pin(match.providerId, match.modelId);
-  context.print(`[provider] Pinned → ${match.providerId}/${match.modelId}`);
+  context.platform.configManager.setDynamic('provider.optimizerPinnedModel', `${match.providerId}:${match.modelId}`);
+  context.platform.configManager.setDynamic('provider.optimizerMode', 'pinned');
+  context.print(`[provider] Pinned → ${match.providerId}/${match.modelId} (saved: survives restart)`);
   context.print('  All routed requests will target this provider/model.');
-  context.print('  Unpin with: /provider route manual');
+  context.print('  Unpin with: /provider-opt route manual');
 }
 
 // ---------------------------------------------------------------------------
-// /provider fallback test
+// /provider-opt fallback test
 // ---------------------------------------------------------------------------
 
 function handleFallbackTest(
@@ -295,7 +304,7 @@ function handleFallbackTest(
   const sub = args[0];
 
   if (sub !== 'test') {
-    context.print('[provider] Usage: /provider fallback test');
+    context.print('[provider] Usage: /provider-opt fallback test');
     return;
   }
 
@@ -360,7 +369,7 @@ function handleFallbackTest(
 // ---------------------------------------------------------------------------
 
 /**
- * providerCommand, The `/provider` slash command.
+ * providerCommand, The `/provider-opt` slash command.
  *
  * Routes to subcommand handlers based on args[0].
  */
@@ -399,7 +408,7 @@ export const providerCommand: SlashCommand = {
         const optimizer = requireProviderOptimizer(context);
         if (!optimizer) return;
         const lines = [
-          'Usage: /provider <subcommand>',
+          'Usage: /provider-opt <subcommand>',
           '  optimizer on|off               — Enable or disable the provider optimizer',
           '  route auto|manual              — Set optimizer routing mode',
           '  explain-route                  — Show current route explanation',

@@ -7,23 +7,28 @@ import type {
   KnowledgeRefinementTaskState,
 } from '../types.js';
 import { readString } from './utils.js';
+import { ACTIVE_REFINEMENT_STATES, STALE_ACTIVE_TASK_MS } from '../types.js';
 
-const STALE_ACTIVE_TASK_MS = 10 * 60 * 1000;
-const ACTIVE_REFINEMENT_STATES = new Set<KnowledgeRefinementTaskState>([
-  'queued',
-  'searching',
-  'evaluating',
-  'extracting',
-  'applying',
-]);
+/** Task metadata kind and gap `repairStatus` of work blocked for want of a repairer. */
+export const NO_REPAIRER_BLOCK = 'no_repairer';
+export const NO_REPAIRER_REASON = 'No semantic gap repairer is configured.';
 
-export async function recoverStaleActiveTasks(store: KnowledgeStore, spaceId: string): Promise<void> {
-  const now = Date.now();
+function isNoRepairerBlock(task: KnowledgeRefinementTaskRecord): boolean {
+  // Older tasks carry only the wording, so it still matches.
+  return task.metadata.blockedKind === NO_REPAIRER_BLOCK || task.blockedReason === NO_REPAIRER_REASON;
+}
+
+export async function recoverStaleActiveTasks(store: KnowledgeStore, spaceId: string,
+  inFlight: (task: KnowledgeRefinementTaskRecord) => boolean = () => false, now: number = Date.now()): Promise<void> {
   const staleTasks = store.listRefinementTasks(10_000, { spaceId })
     .filter((task) => ACTIVE_REFINEMENT_STATES.has(task.state))
-    .filter((task) => now - task.updatedAt >= STALE_ACTIVE_TASK_MS);
+    .filter((task) => now - task.updatedAt >= STALE_ACTIVE_TASK_MS)
+    .filter((task) => !inFlight(task));
   await store.batch(async () => {
-    for (const task of staleTasks) {
+    for (const listed of staleTasks) {
+      // The list is a snapshot: an owner that wrote the task since is not stale.
+      const task = store.getRefinementTask(listed.id);
+      if (!task || !ACTIVE_REFINEMENT_STATES.has(task.state) || now - task.updatedAt < STALE_ACTIVE_TASK_MS || inFlight(task)) continue;
       await upsertRecoveredTask(
         store,
         task,
@@ -38,12 +43,14 @@ export async function recoverStaleActiveTasks(store: KnowledgeStore, spaceId: st
 export async function recoverNoRepairerTasks(store: KnowledgeStore, spaceId: string): Promise<void> {
   const tasks = store.listRefinementTasks(10_000, { spaceId })
     .filter((task) => task.state === 'blocked')
-    .filter((task) => /no semantic gap repairer is configured/i.test(task.blockedReason ?? ''));
-  for (const task of tasks) {
+    .filter(isNoRepairerBlock);
+  for (const listed of tasks) {
     await store.batch(async () => {
+      const task = store.getRefinementTask(listed.id);
+      if (!task || task.state !== 'blocked' || !isNoRepairerBlock(task)) return;
       if (task.gapId) {
         const gap = store.getNode(task.gapId);
-        if (gap && getKnowledgeSpaceId(gap) === spaceId && readString(gap.metadata.repairStatus) === 'no_repairer') {
+        if (gap && getKnowledgeSpaceId(gap) === spaceId && readString(gap.metadata.repairStatus) === NO_REPAIRER_BLOCK) {
           await upsertObservedKnowledgeNode(store, {
             id: gap.id,
             kind: gap.kind,
@@ -69,8 +76,8 @@ export async function recoverNoRepairerTasks(store: KnowledgeStore, spaceId: str
         task,
         'detected',
         'Semantic gap repairer is now configured; task can be retried.',
-        { recoveredFrom: 'no_repairer' },
-        { repairStatus: 'open', recoveredFrom: 'no_repairer', recoveredAt: Date.now() },
+        { recoveredFrom: NO_REPAIRER_BLOCK },
+        { repairStatus: 'open', recoveredFrom: NO_REPAIRER_BLOCK, recoveredAt: Date.now(), blockedKind: null },
       );
     });
   }

@@ -11,6 +11,7 @@ import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts
 import { createChannelDraftReferenceCapture } from './agent-channel-draft-reference.ts';
 import { createSetupSmokeReferenceCapture } from './agent-setup-smoke-reference.ts';
 import { captureAgentWorkspaceTuiSettingsImportPreview } from '../input/agent-workspace-settings.ts';
+import { RetainedGuards } from './agent-harness-retained-guards.ts';
 
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
 
@@ -21,7 +22,7 @@ const PERSONAL_OPS_MODES = new Set(['personal_ops_briefing', 'personal_ops', 'pe
 const PROTECTED_COMMS_EFFECT_MODES = new Set(['channel_draft_save', 'channel_draft_send', 'channel_routing_assign', 'channel_routing_remove']);
 const projectionGuards = new WeakMap<object, () => void>();
 const forwardedGuards = new WeakMap<object, { readonly options: ToolExecuteOptions | undefined; readonly assertCurrent: () => void; readonly assertInvocation: () => boolean; readonly assertEffect: (effect: ToolExecutionEffect) => boolean }>();
-const publicationGuards = new WeakMap<object, Set<() => void>>();
+const publicationGuards = new WeakMap<object, RetainedGuards>();
 interface SettingsPreviewBinding {
   readonly context: CommandContext;
   readonly registry: ToolRegistry;
@@ -39,15 +40,15 @@ export function capturedHarnessSettingsImportPreview(args: Record<string, unknow
   harnessCatalogExecutionGuard(args, options)(); binding.capture.assertCurrent();
   return binding.capture;
 }
-function retainedGuards(args: object): Set<() => void> {
+function retainedGuards(args: object): RetainedGuards {
   let guards = publicationGuards.get(args);
-  if (!guards) { guards = new Set(); publicationGuards.set(args, guards); }
+  if (!guards) { guards = new RetainedGuards(); publicationGuards.set(args, guards); }
   return guards;
 }
 /** Register only already-acquired backend guards; never acquire a backend here. */
 export function retainHarnessCatalogCurrent(args: object): (guard: () => void, key?: string) => void {
   const guards = retainedGuards(args);
-  return (guard, _key) => { guards.add(guard); };
+  return (guard, key) => { guards.add(guard, key); };
 }
 
 /** Only read data routing descriptors, before screening the complete original. */
@@ -259,7 +260,7 @@ export function protectHarnessCatalogTool(tool: Tool, registry: ToolRegistry, se
     const routing = catalogRoutingInput(input);
     const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(input);
     const assertOptions = previewInspection && options ? captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']) : () => {};
-    if (!forwardedGuards.has(input) && !projectionGuards.has(input)) { publicationGuards.set(input, new Set()); }
+    if (!forwardedGuards.has(input) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
     const guard = harnessCatalogExecutionGuard(input, options);
     const registration = registeredTool(registry, tool.definition.name);
     const assertContext = catalogContextGuard(registry, context, tool.definition.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting'

@@ -53,6 +53,14 @@ describe('workstream commands use the public contract operator', () => {
     await f.run(['reply', 'contract-1', 'question-1', 'Keep', 'the', 'repair']);
     expect(f.actions).toEqual([['reply', 'contract-1', 'question-1', 'Keep the repair']]);
   });
+  test('an answer to a failed-turn question is reported as retrying or cancelled, not as an amendment', async () => {
+    const asked = { id: 'question-1', at: 1, scope: 'unit' as const, targetId: 'u1', reason: 'owner-decision-needed' as const, question: 'Retry or cancel?', unmetCriterionIds: [], failurePause: true as const };
+    for (const [action, word] of [['amended', 'retrying'], ['stopped', 'cancelled']] as const) {
+      const f = fixture([contractFixture({ status: 'awaiting-owner', escalations: [asked] })], { reply: async (_id, escalationId) => ({ escalationId, reading: 'amend', outcome: 'act', action }) });
+      await f.run(['reply', 'contract-1', 'question-1', 'retry']);
+      expect(f.output[0]).toBe(`Owner reply: ${word}.`);
+    }
+  });
   test('legacy draft approval cannot silently start a contract', async () => {
     const f = fixture([]);
     await f.run(['create', 'change', 'files']);

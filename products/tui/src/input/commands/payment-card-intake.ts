@@ -1,43 +1,25 @@
-import { cardFieldConfigured } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
-import { createPaymentCardCommands } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
-import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
+import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardCommands, renderCardList, describeCard, describeCardFailure, CARD_ENTRY_FIELDS } from '@goodvibes-jev/engine/terminal-shell/card-field-prompts';
 /**
  * /payments card, capture a payment card through the composer's concealed
- * input mode, following the same guided-chain pattern as /channel pair
- * (channel-pairing.ts) and the SAME concealed-input mechanism as
- * provider-key-intake.ts (see concealed-input.ts).
+ * input mode and store it on the selected paired daemon with one
+ * `payments.cards.create` request.
  *
- * Card number, expiry, CVV, and cardholder name are secret-tier (see
- * config/secret-config.ts's SECRET_CONFIG_KEYS): each is entered through one
- * masked concealed-input prompt in turn and stored via
- * persistSecretBackedConfigValue, the same secret-manager + config-reference
- * path every other secret-backed setting in this app uses. The plaintext
- * never reaches the transcript, input history, or a log line, only a
- * redacted confirmation is printed after each field.
+ * The daemon is what completes a purchase, and it only spends from a card in
+ * its own card store (the ids `payments.cards.list` returns). So this command
+ * does not keep card material in this machine's config or secret store: it
+ * asks for the label, kind, number, expiry (month and year), CVV and cardholder
+ * name through masked prompts, holds the answers in memory only until the last
+ * one, sends them in one request, and prints only the metadata the daemon
+ * returns (label, kind, brand, last four digits, expiry). Esc before the last
+ * answer discards everything. A refusal or failure prints fixed text, never the
+ * request or the daemon's own message, which could quote what was typed.
+ * `/payments status` lists the cards the daemon holds from `payments.cards.list`.
  *
- * Billing and shipping address are ordinary (non-secret) config fields, now
- * real structured CONFIG_SCHEMA entries (payments.billingAddress.{name,
- * line1, line2, city, region, postalCode, country} and the shippingAddress
- * equivalents), this command points the user at the Payments settings
- * category (or /config payments) to set them, the same way /channel pair
- * directs non-secret credential fields, rather than routing plain text
- * through the concealed (masked) input path where it does not belong.
- *
- * Stored with `scope: 'daemon'`: the daemon, not just this interactive
- * client, is what completes an autonomous purchase, so the credential must
- * land in the daemon-scoped secret tier the daemon actually reads.
- *
- * The config-reference half (the `goodvibes://secrets/...` marker
- * persistSecretBackedConfigValue writes alongside the secret) goes through
- * `ctx.platform.configManager` directly, the same real ConfigManager every
- * other command in this app uses, not a TUI-local store. See
- * payments-config.ts's header comment for why these particular keys
- * (`payments.cardNumber`, etc., flat sub-keys under the platform's real
- * `payments` section) are ConfigManager-safe even though the platform's
- * CONFIG_SCHEMA has no scalar entry for them yet: `payments.` is a
- * daemon-owned config prefix, so the reference lands in the daemon's own
- * settings file and is visible to the daemon, the webui and the agent,
- * not just this TUI session.
+ * Billing and shipping address are ordinary (non-secret) config fields, real
+ * structured CONFIG_SCHEMA entries (payments.billingAddress.* and
+ * payments.shippingAddress.*); this command points the user at the Payments
+ * settings category (or /config payments) for them rather than routing plain
+ * text through the concealed (masked) input path where it does not belong.
  *
  * ── Card details are entered only at a local terminal or the webui ────────
  *
@@ -61,8 +43,8 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engi
  */
 
 import type { CommandContext } from '../command-registry.ts';
-import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 import { openPendingPaymentWindows } from './payments-pending.ts';
+import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
 import '@goodvibes-jev/engine/platform/platform/payments';
 import '../payments-config.ts';
@@ -76,15 +58,15 @@ import '../payments-config.ts';
  */
 export const CARD_ENTRY_SURFACE = 'tui';
 
-/** Order matters only for the guided prompt sequence, not for storage. */
+const cardHost = createPaymentCardHost<CommandContext>(ownerOperatorConnectionPolicy);
 
-function renderCardStatus(ctx: CommandContext): string[] {
-  const lines = ['Payment card on file:'];
-  for (const field of CARD_SECRET_FIELDS) {
-    lines.push(`  ${field.label.padEnd(20)} ${cardFieldConfigured(ctx.platform.configManager, field) ? 'set' : 'not set'}`);
+async function renderCardStatus(ctx: CommandContext): Promise<string[]> {
+  let lines: string[];
+  try {
+    lines = renderCardList(await cardHost.list(ctx));
+  } catch (error: unknown) {
+    lines = ['Payment cards on the selected daemon could not be read:', `  ${describeCardFailure(error)}`];
   }
-  lines.push('');
-  lines.push('Run /payments card to enter or replace the card (masked input, chained prompts).');
   lines.push('Run /payments pending to review and answer purchase approval/veto windows on the selected paired host.');
   lines.push(
     'Billing/shipping address, budgets, windows and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.',
@@ -92,38 +74,25 @@ function renderCardStatus(ctx: CommandContext): string[] {
   return lines;
 }
 
-/** Chain a masked prompt for each card secret field, storing each through the daemon-scoped secret tier. */
+/** Card fields in prompt order, exported for tests that need to drive the chain field-by-field. */
+export { CARD_ENTRY_FIELDS };
 
-/**
- * Start the card-entry flow, gated on the platform's own entry-surface allowlist
- * rather than an assumption baked into this command. `surface` defaults to
- * this command's real, fixed identity (CARD_ENTRY_SURFACE), exposed as a
- * parameter only so tests can drive the refusal path without needing this
- * app to actually be reachable from a remote channel.
- */
-
-/** Entry point for `/payments [card|status]`, exported directly so tests can drive it without the registry. */
-
-/** Card secret fields in prompt order, exported for tests that need to drive the chain field-by-field. */
-export { CARD_SECRET_FIELDS };
-
-const promptCardFields = createCardFieldPrompter<CommandContext>(
-  (ctx, field, value) =>
-    persistSecretBackedConfigValue(ctx.platform.configManager, ctx.platform.secretsManager, field.key, value, { scope: 'daemon' }),
+const promptCardFields = createCardEntryPrompter<CommandContext>(
+  (ctx, card) => cardHost.create(ctx, card),
   {
-    completed:
-      '\nCard stored. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.',
-    prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to store, Esc to stop.`,
+    prompt: (field) => `[payments] Enter ${field.label} (e.g. ${field.placeholder}): masked; Enter to continue, Esc to stop.`,
+    stored: (card) => `\n[payments] Card stored on the selected daemon: ${describeCard(card)}. Billing/shipping address and the rest of the payment capability are ordinary config values; set them via /config payments or the Settings > Payments category.`,
   },
 );
 
 export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands } = createPaymentCardCommands<CommandContext>({
   surface: CARD_ENTRY_SURFACE,
-  announcement: `Entering ${CARD_SECRET_FIELDS.length} card field(s): masked; Esc to stop at any point.`,
+  announcement: `Entering ${CARD_ENTRY_FIELDS.length} card field(s): masked; Esc to stop at any point. The card is sent to the selected daemon after the last one.`,
   promptFields: promptCardFields,
   status: renderCardStatus,
   pending: openPendingPaymentWindows,
+  remove: (ctx, id) => cardHost.remove(ctx, id),
   description: 'Payment card setup and pending purchase approval/veto windows',
-  usage: '/payments [card|status|pending]',
+  usage: '/payments [card [remove <id>]|status|pending]',
   argsHint: '[card|status|pending]',
 });

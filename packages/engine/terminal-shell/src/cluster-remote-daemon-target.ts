@@ -26,7 +26,10 @@
  * The defaults are the whole point. A homelab box is headless: the operator
  * has SSHed into it and wants `cluster status` to work with no flags at all.
  * Flags exist for the other case, driving a machine in the next room from a
- * laptop, and for scripting.
+ * laptop, and for scripting. A machine that is not this one is named with its
+ * scheme (`--host https://10.0.0.7`): the operator token travels in every
+ * request, and whether that machine speaks TLS is not something this machine's
+ * own settings can say.
  *
  * What this module deliberately does NOT do: hold any knowledge of what the
  * verbs mean. It resolves a target, makes a request, and returns the parsed
@@ -93,7 +96,9 @@ export function extractOperatorToken(contents: string | undefined): string | und
  */
 export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): RemoteTargetResolution {
   const binding = readControlPlaneBinding((key) => input.configManager.get(key as never));
-  const host = input.flags.host?.trim() || binding.host;
+  const typedHost = input.flags.host?.trim() ?? '';
+  const scheme = /^(https?):\/\//i.exec(typedHost)?.[1]?.toLowerCase();
+  const host = (scheme ? typedHost.replace(/^https?:\/\//i, '').replace(/\/+$/, '') : typedHost) || binding.host;
   const port = input.flags.port ?? binding.port;
   if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
     return {
@@ -104,6 +109,14 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
   }
 
   const isLocal = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '0.0.0.0';
+  if (typedHost && !isLocal && !scheme) {
+    // Inferring the remote's scheme from local config could send the operator token in cleartext across the network.
+    return {
+      ok: false,
+      error: `'${typedHost}' is another machine, and its connection type was not stated`,
+      fix: `say how to reach it: --host https://${typedHost} (encrypted), or --host http://${typedHost} to send the operator token unencrypted over the network`,
+    };
+  }
   const explicitToken = input.flags.token?.trim();
   const token = explicitToken
     || extractOperatorToken((input.readToken ?? readOperatorTokenFile)(input.daemonHomeDir));
@@ -117,7 +130,7 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
     };
   }
 
-  return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode), token, isLocal } };
+  return { ok: true, target: { baseUrl: buildBaseUrl(host, port, binding.tlsMode, scheme), token, isLocal } };
 }
 
 /**
@@ -129,11 +142,11 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
  * 127.0.0.1 and discards the host it was given. For a client that is precisely
  * wrong, and it silently turned `--host 10.0.0.7` into a call to this machine.
  *
- * Here the host the operator typed is the host, full stop. Only the scheme
- * comes from configuration.
+ * Here the host the operator typed is the host, full stop. The scheme is the
+ * one typed with it, or, for this machine's own daemon, the configured one.
  */
-function buildBaseUrl(host: string, port: number, tlsMode: string | undefined): string {
-  const scheme = tlsMode && tlsMode !== 'off' && tlsMode !== 'none' ? 'https' : 'http';
+function buildBaseUrl(host: string, port: number, tlsMode: string | undefined, stated: string | undefined): string {
+  const scheme = stated ?? (tlsMode && tlsMode !== 'off' && tlsMode !== 'none' ? 'https' : 'http');
   // An IPv6 literal has to be bracketed or the port reads as part of the address.
   const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
   return `${scheme}://${authority}:${port}`;
@@ -147,6 +160,8 @@ function buildBaseUrl(host: string, port: number, tlsMode: string | undefined): 
  * implementing, and requiring them would push every test into an `any`.
  */
 export type DaemonFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+const DAEMON_VERB_TIMEOUT_MS = 20_000;
 
 /** What a verb call came back with. */
 export type DaemonVerbOutcome<T> =
@@ -164,28 +179,46 @@ export type DaemonVerbOutcome<T> =
 export async function callDaemonVerb<T>(
   target: RemoteDaemonTarget,
   path: string,
-  init: { method: 'GET' | 'POST'; body?: unknown } = { method: 'GET' },
+  init: { method: 'GET' | 'POST'; body?: unknown; timeoutMs?: number; signal?: AbortSignal } = { method: 'GET' },
   fetchImpl: DaemonFetch = fetch,
 ): Promise<DaemonVerbOutcome<T>> {
   const where = target.isLocal ? 'the daemon on this machine' : `the daemon at ${target.baseUrl}`;
+  // A peer that accepts the connection and never answers must not hang the command; the race also covers a fetch that ignores its signal.
+  const timeoutMs = init.timeoutMs ?? DAEMON_VERB_TIMEOUT_MS;
+  const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  // A send that fails part-way may still have been applied; only a read is safe to repeat blindly.
+  const mayHaveApplied = init.method === 'POST'
+    ? ' This change may or may not have been applied: run `cluster status` before repeating it.'
+    : '';
   let response: Response;
   try {
-    response = await fetchImpl(`${target.baseUrl}${path}`, {
-      method: init.method,
-      headers: {
-        Authorization: `Bearer ${target.token}`,
-        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      },
-      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const onAbort = (): void => reject(new Error(`no answer within ${Math.round(timeoutMs / 1000)}s`));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
     });
+    response = await Promise.race([
+      fetchImpl(`${target.baseUrl}${path}`, {
+        method: init.method,
+        headers: {
+          Authorization: `Bearer ${target.token}`,
+          ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
+        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        signal,
+      }),
+      aborted,
+    ]);
   } catch (error) {
     return {
       ok: false,
       error: `could not reach ${where}`,
-      fix: target.isLocal
+      fix: (target.isLocal
         ? 'check the daemon is running: goodvibes-daemon service-status'
         : `check that machine is switched on and reachable, and that its daemon is listening on ${target.baseUrl} `
-          + `(${error instanceof Error ? error.message : 'no further detail'})`,
+          + `(${error instanceof Error ? error.message : 'no further detail'})`)
+        + (target.isLocal ? ` (${error instanceof Error ? error.message : 'no further detail'})` : '')
+        + mayHaveApplied,
     };
   }
 
@@ -202,7 +235,7 @@ export async function callDaemonVerb<T>(
     return {
       ok: false,
       error: `${where} does not know this command`,
-      fix: 'that daemon is running an older build, update it, then try again',
+      fix: `either that daemon is running an older build (update it, then try again), or ${target.baseUrl} is not a goodvibes daemon at all`,
     };
   }
 
@@ -212,8 +245,11 @@ export async function callDaemonVerb<T>(
   } catch {
     return {
       ok: false,
-      error: `${where} sent a reply this build could not read`,
-      fix: 'check that both machines are running the same version',
+      error: `${where} sent a reply this build could not read (HTTP ${response.status})`,
+      fix: (response.status >= 500
+        ? 'the daemon reported an internal failure; check its log'
+        : 'check that both machines are running the same version')
+        + mayHaveApplied,
     };
   }
   const body = payload as { ok?: unknown; data?: unknown; error?: unknown; fix?: unknown };

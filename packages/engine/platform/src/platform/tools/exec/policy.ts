@@ -2,11 +2,12 @@
  * policy.ts, the per-composition postures every command in an exec call is
  * judged against, and the refusals they produce.
  *
- * Four things a composition may state about its exec tool: the boundary wiring
- * (sandbox.ts), the PTY wiring (interactive.ts), whether the boundary is
- * REQUIRED (containment.ts), and whether the owner's terminal is off limits
- * (owner-terminal-guard.ts). They travel together as one object rather than
- * four positional parameters, so the chain from `executeResolvedCommands` down
+ * Three things a composition may state about its exec tool: the boundary wiring
+ * (sandbox.ts), the PTY wiring (interactive.ts) and whether the boundary is
+ * REQUIRED (containment.ts). The owner's terminal is covered by that boundary and
+ * by the owner's tool permissions, not by a command check. They travel together
+ * as one object rather than
+ * three positional parameters, so the chain from `executeResolvedCommands` down
  * to `runCommand` threads one argument and a future posture is added here
  * rather than in five signatures.
  *
@@ -15,10 +16,11 @@
  * carrying three refusal texts inline.
  */
 
+import { realpathSync } from 'node:fs';
+import { relative, resolve, sep } from 'node:path';
 import type { CapturedExecAuthority } from './captured-exec.js';
 import type { ExecCommandResult } from './schema.js';
 import { decideExecContainment, type ExecContainmentRequirement } from './containment.js';
-import { decideOwnerTerminalAccess, type OwnerTerminalGuard } from './owner-terminal-guard.js';
 import type { ExecSandboxPlan, ExecSandboxRuntime } from './sandbox.js';
 import type { ExecInteractionRuntime } from './interactive.js';
 
@@ -26,13 +28,20 @@ import type { ExecInteractionRuntime } from './interactive.js';
 export interface ExecRunPolicy {
   /** Exact invocation proof, sampled at final effects, never model input. */
   readonly assertCurrent?: (() => void) | undefined;
+  /** Called as command output arrives, so a long command that is printing is not mistaken for a silent one. */
+  readonly onProgress?: (() => void) | undefined;
   /** Restriction-only guard retained alongside a captured background owner. */
   readonly assertWorkspaceCurrent?: (() => void) | undefined;
   readonly capturedInput?: CapturedExecAuthority | undefined;
   readonly sandbox: ExecSandboxRuntime | null;
   readonly interaction: ExecInteractionRuntime | null;
   readonly containment: ExecContainmentRequirement | null;
-  readonly ownerTerminal: OwnerTerminalGuard | null;
+  /**
+   * The session's project root. A sandboxed command's writable workspace is the
+   * command's working directory, so a working_dir outside this root would hand
+   * the boundary the rest of the host; it is refused instead. Absent: no check.
+   */
+  readonly workspaceRoot?: string | undefined;
 }
 
 /** A command that will not run, shaped like every other refusal this tool returns. */
@@ -55,11 +64,32 @@ export function containmentRefusal(
   return refusedResult(cmdStr, decision.refusal ?? 'Command refused: the exec boundary is required here.');
 }
 
-/** The owner-terminal verdict for one command, or null when it may run. */
-export async function ownerTerminalRefusal(policy: ExecRunPolicy, cmdStr: string, signal?: AbortSignal): Promise<ExecCommandResult | null> {
-  const decision = await decideOwnerTerminalAccess(cmdStr, policy.ownerTerminal, signal);
-  if (decision.allowed) return null;
-  return refusedResult(cmdStr, decision.refusal ?? "Command refused: the owner's terminal is untouchable.");
+const realOrResolved = (path: string): string => {
+  try { return realpathSync(path); } catch { return resolve(path); }
+};
+
+/**
+ * Refuses a sandboxed command whose working_dir lies outside the session's
+ * project root, or null when it may run. The boundary binds the working
+ * directory read-write, last, over the read-only system and the masked $HOME,
+ * so `working_dir: "/"` would turn the boundary into the whole host.
+ */
+export function sandboxWorkspaceRefusal(
+  policy: ExecRunPolicy,
+  cmdStr: string,
+  plan: ExecSandboxPlan | null,
+  workingDirectory: string,
+): ExecCommandResult | null {
+  if (!plan?.sandboxed || !policy.workspaceRoot) return null;
+  const root = realOrResolved(policy.workspaceRoot);
+  const rel = relative(root, realOrResolved(workingDirectory));
+  if (rel === '' || (!rel.startsWith('..') && !rel.split(sep).includes('..') && !rel.startsWith(sep))) return null;
+  return refusedResult(
+    cmdStr,
+    `Command refused: working_dir '${workingDirectory}' is outside this session's project root '${policy.workspaceRoot}', `
+    + 'and a sandboxed command can write wherever its working directory is. '
+    + 'Use a working_dir inside the project root.',
+  );
 }
 
 /**

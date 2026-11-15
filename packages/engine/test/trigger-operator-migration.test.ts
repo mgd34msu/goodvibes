@@ -1,4 +1,3 @@
-/** UNRUN: operator routing and keyboard ownership over actual native managers. */
 import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

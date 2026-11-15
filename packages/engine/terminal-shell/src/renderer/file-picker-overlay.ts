@@ -59,11 +59,13 @@ export function renderFilePickerOverlay(
       { text: `@${picker.query}`, fg: t.text, bold: true },
       { text: '▏', fg: t.brand },
     ],
-    right: count || undefined,
+    // The header stays visible while the list scrolls, so a partial walk is flagged here.
+    right: picker.truncated ? `${count ? `${count} ` : ''}(list truncated)` : count || undefined,
   };
   const rows: KitRow[] = [];
   if (picker.results.length === 0) {
-    rows.push({ label: picker.loadError ?? (picker.query ? 'No matching files' : 'Loading files…'), muted: true });
+    const empty = picker.loadError ?? (picker.query ? 'No matching files' : 'Loading files…');
+    rows.push({ label: picker.truncated && !picker.loadError ? `${empty} (more files exist than were listed)` : empty, muted: true });
   } else {
     picker.results.forEach((file, index) => {
       const selected = index === picker.selectedIndex;

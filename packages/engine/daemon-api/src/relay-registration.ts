@@ -50,6 +50,20 @@ export function isRelayTunneledRequest(req: Request): boolean {
   return req.headers.get(RELAY_VIA_HEADER) === '1';
 }
 
+/**
+ * Build the tunneled request headers with the relay marker owned by the
+ * daemon: any marker the remote client sent is dropped first, because a
+ * duplicate header would combine into "<value>, 1" and defeat the check.
+ */
+function markRelayTunneledHeaders(clientHeaders: ReadonlyArray<readonly [string, string]>): Array<[string, string]> {
+  const kept: Array<[string, string]> = [];
+  for (const [name, value] of clientHeaders) {
+    if (name.toLowerCase() !== RELAY_VIA_HEADER) kept.push([name, value]);
+  }
+  kept.push([RELAY_VIA_HEADER, '1']);
+  return kept;
+}
+
 /** Lifecycle status of the daemon's relay registration. */
 export type RelayRegistrationStatus = 'idle' | 'connecting' | 'registered' | 'reconnecting' | 'stopped';
 
@@ -161,6 +175,8 @@ const DEFAULT_MAX_PIPES = 512;
 const DEFAULT_MAX_IN_FLIGHT_REQUESTS = 1024;
 /** Ceiling on one tunneled response body; larger (or endless) bodies are refused with 502. */
 const MAX_TUNNEL_RESPONSE_BYTES = 32 * 1024 * 1024;
+/** Ceiling on the error body that accompanies a refused stream. */
+const MAX_STREAM_REFUSAL_BYTES = 64 * 1024;
 const MAX_QUEUED_FRAME_BYTES = 64 * 1024 * 1024;
 interface FrameQueue { tail: Promise<void>; count: number; bytes: number; }
 interface OwnedRequest { readonly abort: AbortController; cancelled: boolean; }
@@ -548,7 +564,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     const abort = new AbortController();
     const request = new Request(new URL(header.path, options.localBaseUrl), {
       method: header.method,
-      headers: [...header.headers.map(([k, v]) => [k, v] as [string, string]), [RELAY_VIA_HEADER, '1']],
+      headers: markRelayTunneledHeaders(header.headers),
       ...(body.length > 0 ? { body } : {}),
       signal: abort.signal,
     });
@@ -649,7 +665,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
     try {
       const request = new Request(new URL(header.path, options.localBaseUrl), {
         method: header.method,
-        headers: [...header.headers.map(([k, v]) => [k, v] as [string, string]), [RELAY_VIA_HEADER, '1']],
+        headers: markRelayTunneledHeaders(header.headers),
         signal: abort.signal,
       });
       if (!isCurrent()) return;
@@ -665,6 +681,26 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
         // Cancellation settles native pending reads without waiting for an
         // arbitrary underlying source's cancellation promise to settle.
         if (body) void body.cancel().catch(() => {});
+        return;
+      }
+      if (response && !response.ok) {
+        // The client already holds a 200 event stream, so a refusal (401, 403,
+        // 404, ...) travels as a response frame carrying the stream's id; the
+        // client fails its reader with that status instead of reading the error
+        // body as event data. A client that predates the frame ignores it and
+        // sees the stream end.
+        const refusal = await readTunnelBodyBounded(response, MAX_STREAM_REFUSAL_BYTES, abort.signal).catch(() => null);
+        if (!isCurrent()) return;
+        const refusalHeaders: Array<[string, string]> = [];
+        response.headers.forEach((value, key) => refusalHeaders.push([key, value]));
+        await sendFrame(
+          encodeTunnelFrame(
+            { id: header.id, kind: 'response', status: response.status, headers: refusalHeaders },
+            refusal?.ok ? refusal.bytes : new Uint8Array(0),
+          ),
+          channel, pipeIdBytes, ws, isCurrent,
+        );
+        await pump.close('source-ended');
         return;
       }
       if (!body) {

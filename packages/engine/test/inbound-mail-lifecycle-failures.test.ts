@@ -50,6 +50,7 @@ import {
   openMailboxSocket,
   type FakeMessage,
 } from './_helpers/fake-imap-mailbox.ts';
+import { imapMailboxConnectionPort } from '../platform/src/platform/email/inbound/index.ts';
 import {
   FakeClock,
   RecordingObserver,
@@ -58,9 +59,7 @@ import {
   fixedRandom,
   flush,
   makeCursorStore,
-  nudgeUntil,
   waitFor,
-  watcherConnectionPort,
 } from './_helpers/inbound-watcher-harness.ts';
 
 const ACCOUNT = 'primary';
@@ -182,7 +181,7 @@ class ThrowingSource implements InboundMailSource {
   async run(): Promise<void> {
     this.calls.push('run');
     await Promise.resolve();
-    throw new Error('ENOSPC: no space left on device, write');
+    throw new Error('ENOSPC: no space left on device, write /home/user/.goodvibes/daemon/inbound.json');
   }
 
   async stop(): Promise<void> {
@@ -217,6 +216,7 @@ interface SupervisorRig {
   readonly cursors: MailboxCursorStore;
   readonly records: InboundMailStore;
   readonly housekeeper: InboundMailHousekeeper;
+  readonly expectations: InboundExpectationRegistry;
 }
 
 function buildSupervisorRig(options: {
@@ -254,7 +254,7 @@ function buildSupervisorRig(options: {
     handle: async () => undefined,
     ...(options.observer === undefined ? {} : { observer: options.observer }),
   });
-  return { supervisor, cursors, records, housekeeper };
+  return { supervisor, cursors, records, housekeeper, expectations };
 }
 
 describe('a cursor-store write that fails does not end inbound mail in silence', () => {
@@ -323,7 +323,7 @@ describe('a cursor-store write that fails does not end inbound mail in silence',
         create: async (input) => {
           sources.push(new ImapMailSource({
             settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX }),
-            connections: watcherConnectionPort({
+            connections: imapMailboxConnectionPort({
               connect: () => openMailboxSocket(mailbox.port),
               username: 'watched@example.test',
               password: 'an-app-password',
@@ -353,18 +353,7 @@ describe('a cursor-store write that fails does not end inbound mail in silence',
       );
       await clock.waitForSleepers(1, 'the IDLE re-issue timer');
       mailbox.deliver('mail that cannot be recorded');
-      await nudgeUntil(
-        mailbox,
-        () => refusing.advanceAttempts >= 1,
-        'the first refused cursor write',
-        // The cursor write is REFUSED here, so the cursor never advances and a
-        // duplicate wake would re-deliver UID 102, which `sink.uids` asserts
-        // exactly. A long interval keeps this a recovery from a lost edge.
-        // `clock.waitForSleepers` above proves the re-issue timer is armed,
-        // but that timer is armed one line BEFORE the untagged waiter, so it
-        // does not close the window on its own.
-        { intervalMs: 500 },
-      );
+      await waitFor(() => refusing.advanceAttempts >= 1, 'the first refused cursor write');
       expect(sink.uids).toEqual([102]);
 
       // 1. It is caught and disclosed without publishing private failure text.
@@ -423,13 +412,51 @@ describe('a run loop that dies is observed, never swallowed', () => {
     const terminal = rig.supervisor.terminalFailure;
     expect(terminal).not.toBeNull();
     if (terminal === null) throw new Error('Expected the original mail run-loop terminal failure');
-    expect(rig.supervisor.status.reason).toBe(`ENOSPC: no space left on device, write ${terminal.fix}`);
-    expect(rig.supervisor.status.reason).toContain('ENOSPC');
-    expect(terminal).toMatchObject({ reason: 'watcher-stopped-unexpectedly', detail: 'ENOSPC: no space left on device, write' });
+    expect(rig.supervisor.status.reason).toBe(`The mail source stopped after an error; failure details withheld. ${terminal.fix}`);
+    // The raw failure text (it can carry a local path) is not published.
+    expect(rig.supervisor.status.reason).not.toContain('ENOSPC');
+    expect(terminal).toMatchObject({ reason: 'watcher-stopped-unexpectedly', detail: 'The mail source stopped after an error; failure details withheld.' });
+    expect(rig.supervisor.status.reason).not.toContain('/home/user');
+    expect(terminal.detail).not.toContain('/home/user');
     expect(observer.terminals.length).toBe(1);
     expect(observer.terminals[0]).toEqual(terminal);
     expect(rig.supervisor.health().state).toBe('degraded');
 
+    await rig.supervisor.stop();
+  });
+});
+
+describe('start and rehydration failures do not publish raw error text', () => {
+  const RAW = "ENOENT: no such file or directory, open '/home/user/.goodvibes/mail/cursors.json'";
+  const quiet = (text: string): boolean => !text.includes('/home/user') && !text.includes('ENOENT');
+
+  test('a source factory that throws leaves the path out of status, terminal failure and the owner notice', async () => {
+    const observer = new RecordingObserver();
+    const rig = buildSupervisorRig({
+      sources: { create: async () => { throw new Error(RAW); } },
+      observer,
+    });
+    await rig.supervisor.start();
+    const terminal = rig.supervisor.terminalFailure;
+    if (terminal === null) throw new Error('Expected a terminal failure for a start that threw');
+    expect(rig.supervisor.status.running).toBe(false);
+    expect(quiet(rig.supervisor.status.reason ?? '')).toBe(true);
+    expect(quiet(terminal.detail)).toBe(true);
+    expect(terminal.detail).toContain('Inbound mail could not start');
+    expect(observer.terminals.length).toBe(1);
+    expect(quiet(JSON.stringify(observer.terminals[0]))).toBe(true);
+    await rig.supervisor.stop();
+  });
+
+  test('a sweep or hydrate that throws is reported as degraded without the raw text', async () => {
+    const rig = buildSupervisorRig({ sources: { create: async () => new ThrowingSource() } });
+    rig.housekeeper.runRecoverySweep = async () => { throw new Error(RAW); };
+    rig.expectations.hydrate = async () => { throw new Error(RAW); };
+    await rig.supervisor.start();
+    const reason = rig.supervisor.status.reason ?? '';
+    expect(reason).toContain('recovery sweep');
+    expect(reason).toContain('Open expectations could not be restored');
+    expect(quiet(reason)).toBe(true);
     await rig.supervisor.stop();
   });
 });
@@ -655,6 +682,36 @@ describe('a terminal failure is announced to the owner, once per transition', ()
       await waitFor(() => sent.length >= 1, 'the owner notice for a terminal failure', 10_000);
       const spans = (sent[0] as StructuredNotice).fields.flatMap((field) => field.value);
       expect(spans.some((span) => span.text.includes('credentials-missing'))).toBe(true);
+    } finally {
+      await supervisor?.stop();
+    }
+  }, 20_000);
+
+  test('composeInboundMail names the listed accounts it does not watch in the status reason', async () => {
+    const values: Record<string, unknown> = {
+      'surfaces.email.inbound.enabled': true,
+      'surfaces.email.inbound.accounts': JSON.stringify([ACCOUNT, 'second', ACCOUNT, 'third']),
+      'surfaces.email.inbound.source': 'imap',
+      'surfaces.email.imap.host': 'imap.example.test',
+      'surfaces.email.user': 'watched@example.test',
+      'surfaces.email.imap.mailbox': MAILBOX,
+    };
+    const supervisor = composeInboundMail({
+      configManager: { get: (key: string) => values[key] } as never,
+      secretsManager: { get: async () => null } as never,
+      shellPaths: { resolveUserPath: (_scope: string, name: string) => join(dir, name) } as never,
+      routeBindings: { isRouteBindingEnabled: () => true, listBindings: () => [], getBinding: () => undefined } as never,
+      gatewayMethods: { get: () => undefined, register: () => undefined } as never,
+      deliverStructuredNotice: async () => ({ delivered: true }) as never,
+      gmailReader: async () => ({ kind: 'unavailable', detail: 'No Google account is connected on this machine.', fix: '' }),
+    });
+    expect(supervisor).not.toBeNull();
+    try {
+      await supervisor?.start();
+      const reason = (await supervisor!.describeStatus()).reason;
+      expect(reason).toContain('Only primary is watched');
+      expect(reason).toContain('second, third');
+      expect(reason).not.toContain('primary, ');
     } finally {
       await supervisor?.stop();
     }

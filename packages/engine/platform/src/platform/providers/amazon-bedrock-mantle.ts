@@ -4,7 +4,7 @@
 // an absent optional package produces.
 import { loadBedrockLibrary } from './optional-bedrock.js';
 import { AnthropicMessagesProvider } from './anthropic-messages-provider.js';
-import { fetchBedrockModelIds } from './amazon-bedrock.js';
+import { fetchBedrockModelIds, hasAwsCredentials, resolveBedrockBearerToken } from './amazon-bedrock.js';
 import type { ProviderModelSource } from './interface.js';
 import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
 
@@ -35,20 +35,17 @@ export const BEDROCK_MANTLE_DATED_STATIC_MODELS: readonly string[] = [
 ];
 export const BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
 
-function hasMantleCredentials(): boolean {
-  return Boolean(
-    process.env['AWS_BEARER_TOKEN_BEDROCK']
-    || (process.env['AWS_ACCESS_KEY_ID'] && process.env['AWS_SECRET_ACCESS_KEY'])
-    || process.env['AWS_PROFILE'],
-  );
-}
-
 export class AmazonBedrockMantleProvider extends AnthropicMessagesProvider {
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   private readonly modelsCachePath: string | undefined;
+  private readonly bearerToken: string | undefined;
 
-  constructor(modelsCachePath?: string) {
-    const configured = hasMantleCredentials();
+  /**
+   * @param options.bearerToken A bearer token the registry resolved (environment
+   * first, then the secrets store); without one the environment is read per call.
+   */
+  constructor(modelsCachePath?: string, options: { readonly bearerToken?: string | undefined } = {}) {
+    const bearerToken = options.bearerToken;
     super({
       name: 'amazon-bedrock-mantle',
       label: 'Amazon Bedrock Mantle',
@@ -57,7 +54,7 @@ export class AmazonBedrockMantleProvider extends AnthropicMessagesProvider {
       createClient: async () => {
         const { AnthropicBedrockMantle } = await loadBedrockLibrary();
         return new AnthropicBedrockMantle({
-          apiKey: process.env['AWS_BEARER_TOKEN_BEDROCK'],
+          apiKey: resolveBedrockBearerToken(bearerToken),
           awsAccessKey: process.env['AWS_ACCESS_KEY_ID'] ?? null,
           awsSecretAccessKey: process.env['AWS_SECRET_ACCESS_KEY'] ?? null,
           awsSessionToken: process.env['AWS_SESSION_TOKEN'] ?? null,
@@ -65,26 +62,31 @@ export class AmazonBedrockMantleProvider extends AnthropicMessagesProvider {
           awsRegion: process.env['AWS_REGION'] ?? process.env['AWS_DEFAULT_REGION'] ?? 'us-east-1',
         });
       },
-      auth: {
-        mode: configured ? 'api-key' : 'anonymous',
-        configured,
-        detail: configured
-          ? 'Bedrock Mantle auth is available through bearer token or AWS credential resolution.'
-          : 'Configure AWS_BEARER_TOKEN_BEDROCK or AWS credentials/profile for Bedrock Mantle.',
-        envVars: ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_REGION'],
-        secretKeys: ['AWS_BEARER_TOKEN_BEDROCK'],
-        allowAnonymous: true,
-        anonymousConfigured: Boolean(process.env['AWS_PROFILE']),
-        anonymousDetail: 'Bedrock Mantle can also use the AWS credential provider chain.',
+      // Read per call: credentials set or removed after boot change the answer.
+      auth: () => {
+        const configured = hasAwsCredentials(bearerToken);
+        return {
+          mode: configured ? 'api-key' : 'anonymous',
+          configured,
+          detail: configured
+            ? 'Bedrock Mantle auth is available through bearer token or AWS credential resolution.'
+            : 'Configure AWS_BEARER_TOKEN_BEDROCK or AWS credentials/profile for Bedrock Mantle.',
+          envVars: ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_REGION'],
+          secretKeys: ['AWS_BEARER_TOKEN_BEDROCK'],
+          allowAnonymous: true,
+          anonymousConfigured: Boolean(process.env['AWS_PROFILE']),
+          anonymousDetail: 'Bedrock Mantle can also use the AWS credential provider chain.',
+        };
       },
       streamProtocol: 'anthropic-sdk-stream',
       notes: ['Bedrock Mantle uses the Anthropic Bedrock Mantle SDK path.'],
     });
     this.modelsCachePath = modelsCachePath;
+    this.bearerToken = bearerToken;
   }
 
   isConfigured(): boolean {
-    return hasMantleCredentials();
+    return hasAwsCredentials(this.bearerToken);
   }
 
   /**
@@ -103,7 +105,7 @@ export class AmazonBedrockMantleProvider extends AnthropicMessagesProvider {
       datedStaticModels: BEDROCK_MANTLE_DATED_STATIC_MODELS,
       datedStaticAsOf: BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF,
       isConfigured: this.isConfigured(),
-      fetchLive: () => fetchBedrockModelIds(),
+      fetchLive: () => fetchBedrockModelIds({ bearerToken: this.bearerToken }),
       force,
     });
     this.models.length = 0;

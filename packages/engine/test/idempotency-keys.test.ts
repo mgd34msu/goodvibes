@@ -2,7 +2,10 @@
  * Idempotency key + per-method retry policy tests.
  *
  * Covers:
- * 1. Idempotency-Key header present on POST/PUT/PATCH/DELETE
+ * 1. Idempotency-Key header present on POST/PUT/PATCH/DELETE when the call is
+ *    marked idempotent or has a per-method retry policy, and ABSENT on a
+ *    mutation that is neither (a key on a call the platform never retries could
+ *    let a proxy retry be deduplicated)
  * 2. Idempotency-Key NOT present on GET/HEAD
  * 3. Header value is a valid UUID v4
  * 4. A fresh key is generated per request (no reuse)
@@ -100,7 +103,7 @@ describe('generateIdempotencyKey()', () => {
 
 describe('Idempotency-Key header: mutating methods', () => {
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-    test(`${method} request sends Idempotency-Key header`, async () => {
+    test(`${method} request marked idempotent sends Idempotency-Key header`, async () => {
       const { fetch, requests } = createCapturingFetch(() =>
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
@@ -117,6 +120,40 @@ describe('Idempotency-Key header: mutating methods', () => {
       expect(UUID_V4_RE.test(key!)).toBe(true);
     });
   }
+});
+
+describe('Idempotency-Key header: mutations not marked idempotent', () => {
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    test(`${method} without idempotent and without a methodId policy sends no Idempotency-Key`, async () => {
+      const { fetch, requests } = createCapturingFetch(() =>
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+      const transport = createHttpJsonTransport({ baseUrl: 'https://api.example.com', fetch });
+      await transport.requestJson('/v1/resource', {
+        method,
+        body: method !== 'DELETE' ? { data: 1 } : undefined,
+      });
+      expect(requests.length).toBe(1);
+      expect(requests[0]!.headers['idempotency-key']).toBeUndefined();
+    });
+  }
+
+  test('a POST whose methodId has a perMethodPolicy sends a key, one without does not', async () => {
+    const { fetch, requests } = createCapturingFetch(() =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const transport = createHttpJsonTransport({
+      baseUrl: 'https://api.example.com',
+      fetch,
+      retry: { maxAttempts: 1, perMethodPolicy: { 'sessions.create': { maxAttempts: 3 } } },
+    });
+    await transport.requestJson('/v1/a', { method: 'POST', body: {}, methodId: 'sessions.create' });
+    await transport.requestJson('/v1/b', { method: 'POST', body: {}, methodId: 'sessions.other' });
+    const withPolicy = requests[0]!.headers['idempotency-key'];
+    expect(typeof withPolicy).toBe('string');
+    expect(UUID_V4_RE.test(withPolicy!)).toBe(true);
+    expect(requests[1]!.headers['idempotency-key']).toBeUndefined();
+  });
 });
 
 describe('Idempotency-Key header: idempotent-by-nature methods', () => {
@@ -221,28 +258,7 @@ describe('Retry policy: idempotent GET requests', () => {
 // ---------------------------------------------------------------------------
 
 describe('perMethodPolicy override', () => {
-  test('POST with perMethodPolicy configured IS retried on 5xx', async () => {
-    let callCount = 0;
-    const { fetch } = createCapturingFetch(() => {
-      callCount += 1;
-      if (callCount < 2) {
-        return new Response(JSON.stringify({ error: 'retry me' }), { status: 500 });
-      }
-      return new Response(JSON.stringify({ created: true }), { status: 200 });
-    });
-    const transport = createHttpJsonTransport({
-      baseUrl: 'https://api.example.com',
-      fetch,
-      retry: {
-        maxAttempts: 3,
-        baseDelayMs: 0,
-        retryOnStatuses: [500],
-        retryOnMethods: ['GET', 'POST'],
-        perMethodPolicy: {
-          'sessions.create': { maxAttempts: 3 },
-        },
-      },
-    });
+  test('applyPerMethodPolicy overrides the base policy only for the named methodId', async () => {
     const { applyPerMethodPolicy, normalizeHttpRetryPolicy } = await import('../transport-http/src/retry.js');
     const base = normalizeHttpRetryPolicy({
       maxAttempts: 1,

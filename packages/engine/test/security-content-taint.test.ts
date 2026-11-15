@@ -45,7 +45,7 @@ describe('what the code does with the derivation reading', () => {
     expect(asked()).toEqual(['derives', 'boilerplate_only']);
   });
 
-  test('a confident no clears the field', async () => {
+  test('a not-derived reading clears the field', async () => {
     const findings = await findContentTaint({ body: 'Weekly summary: 142 orders.' }, [source(INJECTION)]);
     expect(findings).toHaveLength(0);
   });

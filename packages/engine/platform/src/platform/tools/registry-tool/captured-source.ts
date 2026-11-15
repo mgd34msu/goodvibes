@@ -46,8 +46,11 @@ export async function admitCapturedRegistryContext(
 ): Promise<CapturedRegistryContext> {
   binding = Object.freeze({ authority: binding.authority, root: resolve(binding.root), readAccessFilter: binding.readAccessFilter, signal: binding.signal });
   // Capture all caller-owned inputs before the first callback/await.
-  const homeDirectory = roots.homeDirectory === undefined ? undefined : resolve(roots.homeDirectory);
-  const workingDirectory = contractInputAuthoritySourceRoot(binding.authority);
+  // Owner roots are resolved through symlinks once, here: every admitted path is compared with its own real path,
+  // so a root reached through a symlinked ancestor (for example /home -> /var/home) would otherwise withhold everything below it.
+  const realRoot = (path: string): string => { try { return realpathSync(resolve(path)); } catch { return resolve(path); } };
+  const homeDirectory = roots.homeDirectory === undefined ? undefined : realRoot(roots.homeDirectory);
+  const workingDirectory = realRoot(contractInputAuthoritySourceRoot(binding.authority));
   const filter = binding.readAccessFilter;
   if (!filter) throw new Error('registry input requires original-owner read authorization');
   const owners = [...new Set([workingDirectory, ...(homeDirectory === undefined ? [] : [homeDirectory])])];

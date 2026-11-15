@@ -169,4 +169,28 @@ describe('LlamaCppProvider', () => {
     expect(response.content).toBe('Final answer');
     expect(fallbackCalls).toBe(0);
   });
+  for (const [finishReason, expected] of [['content_filter', 'content_filter'], ['eos_token', 'unknown']] as const) {
+    test(`reports a ${finishReason} finish as ${expected}, not as a completed answer`, async () => {
+      const provider = new LlamaCppProvider({
+        name: 'llama.cpp',
+        baseURL: 'http://127.0.0.1:8080/v1',
+        apiKey: '',
+        defaultModel: 'qwen',
+        models: ['qwen'],
+        nativeFetch: async () => Response.json({
+          choices: [{ finish_reason: finishReason, message: { content: 'cut' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+      });
+      const response = await provider.chat({
+        messages: [
+          { role: 'user', content: 'Analyze the repo' },
+          { role: 'assistant', content: '', toolCalls: [{ id: 'call-1', name: 'analyze', arguments: {} }] },
+          { role: 'tool', callId: 'call-1', content: '{}' },
+        ],
+        model: 'qwen',
+      });
+      expect(response.stopReason).toBe(expected);
+    });
+  }
 });

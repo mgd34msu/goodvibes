@@ -10,6 +10,24 @@ import type { TransportEvent } from '../../runtime/index.js';
 import { startGatewayFixture } from '../helpers/gateway-route-fixture.js';
 
 const fixtures: DaemonFixture[] = [];
+
+/**
+ * Candidate ports come from a band below the operating system's ephemeral range
+ * (outbound connections and `port: 0` binds in parallel test processes draw from
+ * that range), so a port released here is not handed to another process before
+ * the daemon rebinds it. A port already taken in the band is skipped.
+ */
+function serveOnReservedPort(label: string): ReturnType<typeof Bun.serve> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 10_000);
+    try {
+      return Bun.serve({ port, hostname: '127.0.0.1', fetch: () => new Response(label) });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+    }
+  }
+  throw new Error('No port in the reserved 20000-29999 band was free');
+}
 const restores: (() => void)[] = [];
 afterEach(async () => {
   try { for (const f of fixtures.splice(0).reverse()) await f.stop(); }
@@ -110,7 +128,7 @@ test('concurrent binding mutations use the latest actual configuration after nat
   restores.push(() => observingHooks.mockRestore());
   const listener = capture.current(); capture.restore();
   const oldPort = f.daemon.boundPort;
-  const available = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('owned port acquisition') });
+  const available = serveOnReservedPort('owned port acquisition');
   const latestPort = available.port;
   await available.stop(true);
   if (latestPort === undefined) throw new Error('The owned candidate port was absent');
@@ -199,7 +217,7 @@ test('stop reentered from native binding construction closes the unpublished soc
 
 test.each(['synchronous', 'queued'] as const)('%s config mutation during native listener construction cannot publish a stale binding', async timing => {
   const { f } = await fixture();
-  const available = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('owned candidate') });
+  const available = serveOnReservedPort('owned candidate');
   const latestPort = available.port; await available.stop(true);
   if (latestPort === undefined) throw new Error('The actual latest port was absent');
   const publishedPorts: number[] = [];
@@ -236,7 +254,7 @@ test('initial native listener construction A to B to A selects the latest owned 
   const candidates: ReturnType<typeof Bun.serve>[] = [];
   try {
     for (let i = 0; i < 2; i++) {
-      const available = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('owned initial candidate') });
+      const available = serveOnReservedPort('owned initial candidate');
       candidates.push(available);
       if (available.port === undefined) throw new Error('The native candidate port was absent');
       ports.push(available.port);
@@ -273,7 +291,7 @@ test('initial native listener construction A to B to A selects the latest owned 
 }, 60_000);
 
 test('native startup manager await retains the latest binding before connection publication', async () => {
-  const available = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('owned startup candidate') });
+  const available = serveOnReservedPort('owned startup candidate');
   const latestPort = available.port;
   if (latestPort === undefined) throw new Error('The owned startup port was absent');
   const capture = captureNativeListener();

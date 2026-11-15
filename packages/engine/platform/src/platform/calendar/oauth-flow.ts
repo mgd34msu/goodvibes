@@ -282,19 +282,33 @@ export type Sleep = (ms: number) => Promise<void>;
  * or the request is denied. Honors authorization_pending (keep polling) and slow_down
  * (widen the interval) per RFC 8628.
  */
+/** Consecutive dropped polls or server errors that end a device login. */
+const MAX_CONSECUTIVE_POLL_FAILURES = 5;
+
 export async function pollDeviceCodeFlow(
   config: ResolvedClientConfig,
   fetchImpl: HttpFetch,
   start: DeviceCodeFlowStart,
   clock: () => number,
   sleep: Sleep,
+  signal?: AbortSignal,
 ): Promise<StoredTokenSet> {
   let intervalMs = start.intervalMs;
+  // A dropped connection or a server error is one missed poll, not a refusal:
+  // the user may still be approving. Only a run of them ends the login.
+  let transientFailures = 0;
+  const transient = (error: OAuthFlowError): void => {
+    if (++transientFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw error;
+  };
   for (;;) {
+    // A cancelled connect attempt stops polling instead of running to the
+    // code's expiry (up to 15 minutes).
+    signal?.throwIfAborted();
     if (clock() >= start.expiresAt) {
       throw new OAuthFlowError('device-code-expired', 'The device code expired before it was approved.');
     }
     await sleep(intervalMs);
+    signal?.throwIfAborted();
     const payload: Record<string, string> = {
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       client_id: config.clientId,
@@ -308,13 +322,21 @@ export async function pollDeviceCodeFlow(
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: formBody(payload),
+        ...(signal ? { signal } : {}),
       });
     } catch (error) {
-      throw new OAuthFlowError('network-error', `Polling the token endpoint failed: ${describe(error)}`);
+      signal?.throwIfAborted();
+      transient(new OAuthFlowError('network-error', `Polling the token endpoint failed ${transientFailures + 1} times in a row: ${describe(error)}`));
+      continue;
     }
     if (res.ok) return parseTokenResponse(await res.json(), clock());
     const body = (await res.json().catch(() => ({}))) as { error?: unknown };
     const err = typeof body.error === 'string' ? body.error : `http_${res.status}`;
+    if (res.status >= 500 || err === 'server_error' || err === 'temporarily_unavailable') {
+      transient(new OAuthFlowError('token-request-rejected', `The token endpoint failed (${err}) ${transientFailures + 1} times in a row.`, res.status));
+      continue;
+    }
+    transientFailures = 0;
     if (err === 'authorization_pending') continue;
     if (err === 'slow_down') {
       intervalMs += 5000;

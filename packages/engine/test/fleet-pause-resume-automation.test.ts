@@ -55,9 +55,18 @@ function makeAutomationJob(overrides: Partial<AutomationJob> & { id: string }): 
   });
 }
 
-/** Flush the microtask queue so a fire-and-forget async control op has a chance to settle. */
-async function flushMicrotasks(rounds = 8): Promise<void> {
-  for (let i = 0; i < rounds; i++) await Promise.resolve();
+/**
+ * Records the promise a fake automation manager hands back, so a test can wait
+ * for exactly the fire-and-forget work the registry started. The registry
+ * attaches its own handler to the same promise before the test awaits it, so
+ * its handler has run by the time the wait returns.
+ */
+function pendingOps(): { track<T>(promise: Promise<T>): Promise<T>; settled(): Promise<void> } {
+  const pending: Array<Promise<unknown>> = [];
+  return {
+    track(promise) { pending.push(promise); return promise; },
+    async settled() { await Promise.allSettled(pending); },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,14 +215,15 @@ describe('fleet registry: automation jobs in the fleet tree', () => {
 
   test('kill() dispatches removeJob() fire-and-forget: returns the node id synchronously, next query reflects removal once settled', async () => {
     const jobs = new Map<string, ManagedAutomationJob>([['job-1', makeAutomationJob({ id: 'job-1' })]]);
+    const ops = pendingOps();
     const registry = createProcessRegistry(makeDeps({
       automationManager: {
         listJobs: () => [...jobs.values()],
         setEnabled: async () => null,
-        removeJob: async (jobId: string) => {
+        removeJob: (jobId: string) => ops.track((async () => {
           jobs.delete(jobId);
           return true;
-        },
+        })()),
       },
     }));
 
@@ -221,9 +231,7 @@ describe('fleet registry: automation jobs in the fleet tree', () => {
     expect(registry.getNode(nodeId)).not.toBeNull();
     const affected = registry.kill(nodeId);
     expect(affected).toEqual([nodeId]); // dispatched, reported synchronously
-    // Not yet settled: still present or already gone depending on microtask
-    // timing is irrelevant, what matters is it settles by next tick.
-    await flushMicrotasks();
+    await ops.settled();
     expect(registry.getNode(nodeId)).toBeNull();
     registry.dispose();
   });
@@ -231,14 +239,15 @@ describe('fleet registry: automation jobs in the fleet tree', () => {
   test('interrupt() and resume() dispatch setEnabled(false/true) fire-and-forget; next query reflects the toggle', async () => {
     let job = makeAutomationJob({ id: 'job-2', enabled: true });
     const setEnabledCalls: Array<{ jobId: string; enabled: boolean }> = [];
+    const ops = pendingOps();
     const registry = createProcessRegistry(makeDeps({
       automationManager: {
         listJobs: () => [job],
-        setEnabled: async (jobId: string, enabled: boolean) => {
+        setEnabled: (jobId: string, enabled: boolean) => ops.track((async () => {
           setEnabledCalls.push({ jobId, enabled });
           job = ownedAutomationJob({ ...job, enabled });
           return job;
-        },
+        })()),
         removeJob: async () => true,
       },
     }));
@@ -246,12 +255,12 @@ describe('fleet registry: automation jobs in the fleet tree', () => {
     const nodeId = automationJobNodeId('job-2');
     expect(registry.getNode(nodeId)!.state).toBe('idle');
     expect(registry.interrupt(nodeId)).toBe(true);
-    await flushMicrotasks();
+    await ops.settled();
     expect(registry.getNode(nodeId)!.state).toBe('paused');
     expect(registry.getNode(nodeId)!.capabilities.resumable).toBe(true);
 
     expect(registry.resume(nodeId)).toBe(true);
-    await flushMicrotasks();
+    await ops.settled();
     expect(registry.getNode(nodeId)!.state).toBe('idle');
 
     expect(setEnabledCalls).toEqual([
@@ -263,18 +272,19 @@ describe('fleet registry: automation jobs in the fleet tree', () => {
 
   test('a rejected async control call is logged, never silently lost, and never thrown synchronously', async () => {
     const job = makeAutomationJob({ id: 'job-3', enabled: true });
+    const ops = pendingOps();
     const registry = createProcessRegistry(makeDeps({
       automationManager: {
         listJobs: () => [job],
-        setEnabled: async () => { throw new Error('automation backend unavailable'); },
-        removeJob: async () => { throw new Error('automation backend unavailable'); },
+        setEnabled: () => ops.track((async () => { throw new Error('automation backend unavailable'); })()),
+        removeJob: () => ops.track((async () => { throw new Error('automation backend unavailable'); })()),
       },
     }));
     const warnSpy = spyOn(logger, 'warn') as Mock<typeof logger.warn>;
     const nodeId = automationJobNodeId('job-3');
 
     expect(() => registry.interrupt(nodeId)).not.toThrow();
-    await flushMicrotasks();
+    await ops.settled();
     expect(warnSpy).toHaveBeenCalled();
     const loggedAutomationFailure = warnSpy.mock.calls.some((call) =>
       typeof call[0] === 'string' && call[0].includes('automation job') && call[0].includes('failed'));

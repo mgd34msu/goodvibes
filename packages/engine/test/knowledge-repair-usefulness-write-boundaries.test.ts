@@ -21,9 +21,9 @@ const smart = 'Smart TV platform and integrations';
 const useful = 'AC-7 supports webOS and an ATSC tuner.';
 const furniture = 'Place AC-7 on a stable platform with supporting furniture.';
 let previous: JudgmentPort | undefined;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function readings(probability = 0.99) {
   const fake = fakePort((name, question, state) => {
     if (name === 'fullProfileRequired') return noulAnswer(0.01); // The authored gap asks only about webOS.
@@ -40,7 +40,7 @@ function readings(probability = 0.99) {
 }
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-repair-usefulness-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const raw = { id: 'subject', kind: 'ha_device' as const, slug: 'ac-seven', title: 'AC-7', status: 'active' as const, metadata: { knowledgeSpaceId: spaceId, model: 'AC-7' } };
   const subject = await upsertObservedKnowledgeNode(store, raw, 'home-assistant-snapshot', raw, () => raw);
   const source = await store.upsertSource({ id: 'source', connectorId: 'synthetic', sourceType: 'manual', title: 'AC-7 manual', status: 'indexed', metadata: { knowledgeSpaceId: spaceId, privateState: 'UNRELATED_METADATA' } });

@@ -201,6 +201,12 @@ export interface EvalGateResult {
    * regression-checked this run, it becomes the baseline for next time.
    */
   unbaselined: UnbaselinedScenario[];
+  /**
+   * Scenario ids the baseline holds for this suite that the fresh run did not
+   * produce (renamed, deleted or filtered out). Their regression check did not
+   * happen, so the standing gate reports them rather than passing silently.
+   */
+  missingFromRun: string[];
 }
 
 export interface RegressionEntry {

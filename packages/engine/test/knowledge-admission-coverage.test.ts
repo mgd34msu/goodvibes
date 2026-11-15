@@ -15,7 +15,9 @@ import { trackDisposables } from './_helpers/disposables.ts';
 import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
 import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
 import { enrichAndImproveHomeGraphSource } from '../platform/src/platform/knowledge/home-graph/sync-self-improvement.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 /**
  * A KnowledgeService kicks off initializeSchedules() fire-and-forget in its

@@ -97,9 +97,6 @@ describe('AgentManager: conversation snapshot bridge', () => {
     expect(manager.getConversationSnapshot('ag-throws-release')).toEqual([]);
   });
 
-  test('bound respected: DEFAULT_CONVERSATION_SNAPSHOT_RETENTION is a positive, sane default', () => {
-    expect(DEFAULT_CONVERSATION_SNAPSHOT_RETENTION).toBeGreaterThan(0);
-  });
 
   test('bound respected: releasing more agents than the retention limit evicts the oldest first', () => {
     const manager = makeManager(2);

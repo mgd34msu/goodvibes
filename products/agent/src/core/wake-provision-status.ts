@@ -3,8 +3,8 @@ import { createWakeProvisionPresentation } from '@goodvibes-jev/engine/terminal-
 // wake-provision-status.ts, the surface-facing projection of wake-word
 // provisioning and of the `voice.wake.*` rows that are or are not in force.
 //
-// The wake artifacts are checksum-pinned and provisioned ONLY by an explicit act
-// (/voice wake setup). This module is the read-only projection those surfaces
+// The wake artifacts are checksum-pinned and provisioned by /voice wake setup, or
+// fetched automatically when wake detection is turned on for this surface. This module is the read-only projection those surfaces
 // render from: per-artifact present / verified / corrupt / bytes taken straight
 // from the platform's wakeProvisionStatus, which verifies by CONTENT rather than by
 // existence, a truncated or wrong-asset file reports corrupt instead of present,

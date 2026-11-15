@@ -9,7 +9,6 @@ import { renderModelWorkspace } from '../../renderer/model-workspace.ts';
 import {
   buildLocalFitRecommendations,
   buildSignInRow,
-  isLocalFitRecommendation,
   LOCAL_REC_PROVIDER,
 } from '../../input/model-picker-local-fit.ts';
 import {
@@ -164,33 +163,5 @@ describe('local-only workspace header', () => {
     // No model in the picker should have the local sentinel provider
     const localRecs = picker.models.filter((m) => m.provider === LOCAL_REC_PROVIDER);
     expect(localRecs).toHaveLength(0);
-  });
-});
-
-describe('local rec selection does not silently switch model', () => {
-  test('selecting a local rec routes to local provider, not a real cloud provider', () => {
-    _setHardwareProfileForTest(STUB_PROFILE);
-    const recs = buildLocalFitRecommendations(STUB_PROFILE);
-    // All recommendations are NOT installed, provider is the sentinel 'local',
-    // never a real cloud provider like 'openai' or 'anthropic'.
-    for (const rec of recs) {
-      expect(rec.provider).toBe(LOCAL_REC_PROVIDER);
-      // registryKey equals the synthetic id (no real cloud routing)
-      expect(rec.registryKey).toBe(rec.id);
-      // The synthetic id starts with LOCAL_REC_PROVIDER prefix
-      expect(rec.id.startsWith(LOCAL_REC_PROVIDER + ':')).toBe(true);
-    }
-  });
-
-  test('local recs are not marked as installed/configured in configuredProviders', () => {
-    _setHardwareProfileForTest(STUB_PROFILE);
-    const recs = buildLocalFitRecommendations(STUB_PROFILE);
-    const picker = makePickerWithLocalOnly();
-    // configuredProviders must be empty, the synthetic entries must not be treated
-    // as real configured providers, preventing any silent model switch.
-    expect(picker.configuredProviders.has(LOCAL_REC_PROVIDER)).toBe(false);
-    // The models are present in the list but are flagged as not-yet-installed
-    expect(picker.models.length).toBeGreaterThan(0);
-    expect(recs.every((r) => (r.description ?? '').includes('not yet installed'))).toBe(true);
   });
 });

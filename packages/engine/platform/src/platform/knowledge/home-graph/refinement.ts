@@ -1,7 +1,8 @@
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
-import type { KnowledgeRefinementTaskRecord } from '../types.js';
+import { knowledgeRefinementTaskLifecycle, type KnowledgeRefinementTaskRecord } from '../types.js';
 import { resolveReadableHomeGraphSpace } from './space-selection.js';
 import {
   runHomeGraphIssueTriage,
@@ -72,14 +73,19 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   await input.store.init();
   signal?.throwIfAborted();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
+  if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+    throw new GoodVibesError(`Refinement limit must be a whole number of at least 1 (got ${String(input.limit)}); omit it to refine every candidate.`, {
+      category: 'bad_request', source: 'runtime', operation: 'homegraph.refinement', recoverable: true,
+    });
+  }
 
   const triageRequested = input.triage !== undefined && input.triage !== false;
   const triage = triageRequested
     ? await runHomeGraphIssueTriage({
         store: input.store,
         ...(input.semanticService ? { semanticService: input.semanticService } : {}),
-        ...(input.installationId ? { installationId: input.installationId } : {}),
-        ...(input.knowledgeSpaceId ? { knowledgeSpaceId: input.knowledgeSpaceId } : {}),
+        // Resolved once above so triage and gap refinement act on one space.
+        knowledgeSpaceId: spaceId,
         signal,
         options: typeof input.triage === 'object' ? input.triage : {},
       })
@@ -87,6 +93,10 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
   signal?.throwIfAborted();
 
   if (input.skipGapRefinement === true) {
+    // A triage-only run that was held did nothing; do not report it as done.
+    if (triage?.reason?.startsWith('triage-held-') || triage?.reason === 'triage-judgment-not-configured') {
+      return { ok: false, spaceId, error: `Triage did not run: ${triage.reason}.`, triage };
+    }
     return { ok: true, spaceId, ...(triage ? { triage } : {}) };
   }
 
@@ -115,6 +125,10 @@ export async function cancelHomeGraphRefinementTask(input: HomeGraphSpaceInput &
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
   const task = input.store.getRefinementTask(input.taskId);
   if (!task || task.spaceId !== spaceId) return { ok: false, spaceId, error: 'Unknown Home Graph refinement task.' };
+  if (task.state === 'cancelled') return { ok: true, spaceId, task };
+  const move = knowledgeRefinementTaskLifecycle.check(task.state, 'cancelled');
+  // A closed or suppressed task is already decided; the store would keep it unchanged, so say so.
+  if (!move.ok) return { ok: false, spaceId, error: `${move.reason}. Nothing was changed.`, task };
   const cancelled = await input.store.upsertRefinementTask({
     id: task.id,
     spaceId: task.spaceId,

@@ -38,6 +38,8 @@ export interface ScriptableStatusline {
   current(): string | null;
   /** Request a refresh now (coalesced against any in-flight run). */
   refresh(): void;
+  /** Resolves once no run is in flight and none is queued behind it. */
+  settled(): Promise<void>;
   /** Turn-boundary unsubscribe handles. */
   readonly unsubs: ReadonlyArray<() => void>;
 }
@@ -84,6 +86,7 @@ export function createScriptableStatusline(options: ScriptableStatuslineOptions)
   let value: string | null = null;
   let inFlight = false;
   let pending = false;
+  const idleWaiters: Array<() => void> = [];
 
   const setValue = (next: string | null): void => {
     if (next === value) return;
@@ -112,6 +115,8 @@ export function createScriptableStatusline(options: ScriptableStatuslineOptions)
       if (pending) {
         pending = false;
         void run();
+      } else {
+        for (const resolve of idleWaiters.splice(0)) resolve();
       }
     }
   };
@@ -136,6 +141,7 @@ export function createScriptableStatusline(options: ScriptableStatuslineOptions)
   return {
     current: () => value,
     refresh,
+    settled: () => (inFlight ? new Promise<void>((resolve) => { idleWaiters.push(resolve); }) : Promise.resolve()),
     unsubs,
   };
 }

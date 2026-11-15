@@ -152,6 +152,12 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options, current);
       let action = readExplicitAction(args);
       if (!action && !readString(args.action) && !readString(args.mode)) {
+        // A bare id names either a release item or an evidence artifact and there
+        // is nothing to choose between them. Answering with the readiness list
+        // would read as the answer for that id.
+        if (readString(args.id)) {
+          return error('audit got id without action, and an id alone cannot say whether it is a release readiness item or an evidence artifact. Re-send with action:"item" (or itemId) for a readiness item, or action:"artifact" (or artifactId) for an evidence artifact.');
+        }
         const query = readString(args.query) || readString(args.target);
         if (!query) action = 'readiness';
         else {

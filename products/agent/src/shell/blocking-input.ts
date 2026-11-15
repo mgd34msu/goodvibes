@@ -2,6 +2,7 @@ import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shel
 import type { ConversationManager } from '../core/conversation';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { SessionSnapshot } from '@/runtime/index.ts';
+import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { readConversationMessageSnapshots } from '../core/conversation-message-snapshot.ts';
 import type { DaemonRepairPrompt } from './daemon-repair-prompt.ts';
@@ -26,7 +27,16 @@ export type BlockingInputHandlerOptions = {
   conversation: ConversationManager;
   systemMessageRouter: SystemMessageRouter;
   render: () => void;
-  /** The prompted "yes, resume it" primitive (platform consumeRecovery): loads the recovery snapshot and retires its file in one operation, only once the load actually succeeds. The caller keys this to the offered snapshot's sessionId. */
+  /**
+   * The prompted "yes, resume it" answer (shell/recovery-apply.ts): restores the
+   * offered snapshot's session through the platform's apply step, which keeps the
+   * snapshot file until the conversation accepted it, replays the journal tail,
+   * persists the restored session and moves the runtime onto it. Preferred over
+   * {@link consumeRecovery}, which deletes the file before the conversation has
+   * accepted it and replays nothing.
+   */
+  applyRecovery?: ((sessionId: string) => ApplyRecoverySnapshotResult) | undefined;
+  /** The older "yes, resume it" primitive (platform consumeRecovery): loads the recovery snapshot and retires its file. Used only when {@link applyRecovery} is not supplied. The caller keys this to the offered snapshot's sessionId. */
   consumeRecovery: () => SessionSnapshot | null;
   /** The prompted "no, and remove it" primitive (platform removeRecoveryPoint): clears the recovery snapshot without loading it. The caller keys this to the offered snapshot's sessionId. */
   removeRecoveryPoint: () => void;
@@ -51,6 +61,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     conversation,
     systemMessageRouter,
     render,
+    applyRecovery,
     consumeRecovery,
     removeRecoveryPoint,
   } = options;
@@ -61,7 +72,8 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       handleSimplePermissionInput(data, {
         escapeDenies: true,
         abortOnDeny: true,
-        resolve: (approved, remember) => req.resolve(approved, remember),
+        // "For session" is not offered for an ask the owner is asked again; the key allows once.
+        resolve: (approved, remember) => req.resolve(approved, req.rememberEffect === 'owner-asked-again' ? false : remember),
         abort: abortTurn,
         render,
       })
@@ -74,13 +86,37 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
 
   if (recoveryPending) {
     if (data === '\x12') {
+      if (applyRecovery) {
+        const result = applyRecovery(recoveryPending);
+        if (result.applied) {
+          const replayed = result.journalReplay.replayed;
+          systemMessageRouter.high(
+            `[Recovery] Session restored (${result.messageCount} messages${replayed > 0 ? `, including ${replayed} recorded after the last snapshot` : ''}).`,
+          );
+          if (result.journalReplay.failed !== undefined) {
+            systemMessageRouter.high(`[Recovery] Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`);
+          }
+        } else if (result.refusal === 'apply-failed') {
+          systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.');
+        } else if (result.refusal === 'unusable-snapshot') {
+          systemMessageRouter.high('[Recovery] The saved session was damaged and held no conversation, so it was discarded. Nothing was changed in this session.');
+        } else {
+          systemMessageRouter.high('[Recovery] Failed to restore saved data. The saved copy, if any, was left on disk.');
+        }
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending: null };
+      }
       // consumeRecovery only retires the snapshot file once the load actually
       // succeeds, a bad read leaves it on disk instead of silently
       // destroying data that was never actually recovered.
       const recovery = consumeRecovery();
       if (recovery) {
-        conversation.fromJSON({ messages: readConversationMessageSnapshots(recovery.messages) });
-        systemMessageRouter.high('[Recovery] Session restored.');
+        try {
+          conversation.fromJSON({ messages: readConversationMessageSnapshots(recovery.messages) });
+          systemMessageRouter.high('[Recovery] Session restored.');
+        } catch {
+          systemMessageRouter.high('[Recovery] The saved session could not be applied, and the saved copy has already been consumed.');
+        }
       } else {
         systemMessageRouter.high('[Recovery] Failed to restore saved data.');
       }

@@ -7,6 +7,7 @@ import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harne
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from './agent-harness-remote-publisher-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { certificationRecords, firstAcross, publishedModelRoute, redactReadModelText, safeNullablePreview, safePreview, stringList } from './agent-harness-read-helpers.ts';
 
 export interface RemoteCaptureOutcomeRecord {
   readonly operationProvenance?: 'classic';
@@ -20,7 +21,6 @@ export interface RemoteCaptureOutcomeRecord {
   readonly captureId: string | null;
   readonly exportId: string | null;
   readonly artifactId: string | null;
-  readonly sourcePath: string;
   readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly redaction: string;
   readonly startedAt: string | null;
@@ -40,7 +40,6 @@ export interface RemoteWorkspaceEvidenceRecord {
   readonly label: string | null;
   readonly worktreeRef: string | null;
   readonly branch: string | null;
-  readonly sourcePath: string;
   readonly source: 'daemon-read-model' | 'platform-read-model';
   readonly redaction: string;
   readonly modelRoute: string;
@@ -53,6 +52,10 @@ export interface RemoteReadModelSnapshot {
   readonly outcomes: readonly RemoteCaptureOutcomeRecord[];
   readonly workspaces: readonly RemoteWorkspaceEvidenceRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
+  /** Records a source published that are not in outcomes/workspaces: no runner id to attach them to, or repeats of a listed record. */
+  readonly dropped?: { readonly withoutRunner: number; readonly duplicates: number };
+  /** Read-model methods that threw while being read ("<path>.<method>()"); their records are missing from this snapshot. */
+  readonly sourceErrors?: readonly string[];
 }
 
 export interface RemoteRuntimeRecordCertification {
@@ -144,18 +147,6 @@ function readMetadata(record: Record<string, unknown>): Record<string, unknown> 
   return readObject(record.metadata);
 }
 
-function certificationRecords(record: Record<string, unknown>): readonly Record<string, unknown>[] {
-  return [
-    record,
-    readMetadata(record),
-    readObject(record.schema),
-    readObject(record.contract),
-    readObject(record.publication),
-    readObject(record.receipt),
-    readObject(record.certification),
-  ];
-}
-
 function nestedString(record: Record<string, unknown>, key: string): string {
   return readString(record[key])
     || readString(readMetadata(record)[key])
@@ -163,37 +154,6 @@ function nestedString(record: Record<string, unknown>, key: string): string {
     || readString(readObject(record.evidence)[key])
     || readString(readObject(record.workspace)[key]);
 }
-
-function firstAcross(records: readonly Record<string, unknown>[], keys: readonly string[]): string {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = readString(record[key]);
-      if (value) return value;
-    }
-  }
-  return '';
-}
-
-function stringArray(value: unknown): readonly string[] {
-  if (Array.isArray(value)) return [...new Set(value.map((entry) => readString(entry)).filter(Boolean))].slice(0, 10);
-  const text = readString(value);
-  return text ? text.split(',').map((entry) => entry.trim()).filter(Boolean).slice(0, 10) : [];
-}
-
-function redactText(value: string): string {
-  return value
-    .replace(/\b(bearer)\s+[a-z0-9._~+/=-]+/gi, '$1 <redacted>')
-    .replace(/\b(token|secret|password|api[_-]?key|authorization)\s*[:=]\s*[^,\s;/]+/gi, '$1=<redacted>');
-}
-
-function safePreview(value: string, limit: number): string {
-  return previewHarnessText(redactText(value), limit);
-}
-
-function safeNullablePreview(value: string, limit: number): string | null {
-  return value ? safePreview(value, limit) : null;
-}
-
 
 function remoteCertification(input: {
   readonly record: Record<string, unknown>;
@@ -215,7 +175,7 @@ function remoteCertification(input: {
   const receiptId = firstAcross(records, ['receiptId', 'operationReceiptId', 'captureReceiptId', 'exportReceiptId', 'closeoutReceiptId', 'workspaceReceiptId']);
   const cursor = firstAcross(records, ['cursor', 'freshnessCursor', 'sequence', 'checkpoint']);
   const provenance = [...new Set([
-    ...stringArray(input.record.provenance),
+    ...stringList(input.record.provenance, 10),
     input.sourcePath ? `source ${input.sourcePath}` : '',
     firstAcross(records, ['methodId']) ? `method ${firstAcross(records, ['methodId'])}` : '',
     firstAcross(records, ['sourceTool']) ? `sourceTool ${firstAcross(records, ['sourceTool'])}` : '',
@@ -253,7 +213,7 @@ function pathReferenceLayout(value: string): string {
 }
 
 function safePathRef(value: string): string | null {
-  const redacted = redactText(value);
+  const redacted = redactReadModelText(value);
   return redacted ? safePreview(pathReferenceLayout(redacted), 120) : null;
 }
 
@@ -266,12 +226,14 @@ function timestampString(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? String(numeric) : date.toISOString();
 }
 
-function callMethod(source: Record<string, unknown>, method: string): unknown {
+function callMethod(source: Record<string, unknown>, method: string, failures?: string[], path = ''): unknown {
   const fn = source[method];
   if (typeof fn !== 'function') return undefined;
   try {
     return (fn as () => unknown).call(source);
   } catch {
+    // Only the method's name is kept: a message could differ between two reads of the same source.
+    failures?.push(`${path}.${method}()`);
     return undefined;
   }
 }
@@ -283,15 +245,16 @@ function collectFromSource(
   wrapperKeys: readonly string[],
   methods: readonly string[],
   visited = new WeakSet<object>(),
+  failures?: string[],
 ): readonly CollectedRecord[] {
   if (!source) return [];
   if (Array.isArray(source)) {
     return source
-      .flatMap((entry, index) => collectFromSource(entry, `${path}[${index}]`, kind, wrapperKeys, methods, visited));
+      .flatMap((entry, index) => collectFromSource(entry, `${path}[${index}]`, kind, wrapperKeys, methods, visited, failures));
   }
   if (source instanceof Map) {
     return Array.from(source.entries())
-      .flatMap(([key, value]) => collectFromSource(value, `${path}.${String(key)}`, kind, wrapperKeys, methods, visited));
+      .flatMap(([key, value]) => collectFromSource(value, `${path}.${String(key)}`, kind, wrapperKeys, methods, visited, failures));
   }
   if (typeof source !== 'object') return [];
   if (visited.has(source)) return [];
@@ -299,16 +262,16 @@ function collectFromSource(
 
   const record = source as Record<string, unknown>;
   const fromSnapshots = SNAPSHOT_METHODS.flatMap((method) => {
-    const snapshot = callMethod(record, method);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited);
+    const snapshot = callMethod(record, method, failures, path);
+    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited, failures);
   });
   const fromMethods = methods.flatMap((method) => {
-    const snapshot = callMethod(record, method);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited);
+    const snapshot = callMethod(record, method, failures, path);
+    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited, failures);
   });
   const fromWrappers = wrapperKeys.flatMap((key) => {
     if (!(key in record)) return [];
-    return collectFromSource(record[key], `${path}.${key}`, kind, wrapperKeys, methods, visited);
+    return collectFromSource(record[key], `${path}.${key}`, kind, wrapperKeys, methods, visited, failures);
   });
   if (fromSnapshots.length > 0 || fromMethods.length > 0 || fromWrappers.length > 0) {
     return [...fromSnapshots, ...fromMethods, ...fromWrappers];
@@ -324,11 +287,17 @@ function runnerId(record: Record<string, unknown>): string {
     || nestedString(record, 'runner');
 }
 
-function routeForRunner(record: Record<string, unknown>, runner: string): string {
-  return nestedString(record, 'modelRoute')
-    || nestedString(record, 'inspectRoute')
-    || nestedString(record, 'reviewRoute')
-    || (runner ? `agent_harness mode:"agent_orchestration_agent" agentId:"${runner}" includeParameters:true` : 'agent_harness mode:"agent_orchestration" includeParameters:true');
+/** The first route the record published that is a well-formed call to an Agent tool; '' when it published none. */
+function publishedRoute(record: Record<string, unknown>): string {
+  for (const key of ['modelRoute', 'inspectRoute', 'reviewRoute']) {
+    const route = publishedModelRoute(nestedString(record, key));
+    if (route) return route;
+  }
+  return '';
+}
+
+function fallbackRunnerRoute(runner: string): string {
+  return runner ? `agent_harness mode:"agent_orchestration_agent" agentId:${JSON.stringify(runner)} includeParameters:true` : 'agent_harness mode:"agent_orchestration" includeParameters:true';
 }
 
 function outcomeText(record: Record<string, unknown>): string {
@@ -339,21 +308,21 @@ function outcomeText(record: Record<string, unknown>): string {
 
 }
 
+/** '' when the record published no status. */
 function outcomeStatus(record: Record<string, unknown>): string {
   return nestedString(record, 'status')
     || nestedString(record, 'outcome')
     || nestedString(record, 'result')
-    || nestedString(record, 'state')
-    || 'unknown';
+    || nestedString(record, 'state');
 }
 
-function outcomeId(record: Record<string, unknown>, runner: string, kind: string, index: number): string {
+/** '' when the record published no id of its own; the display id then falls back to a position-based one. */
+function publishedOutcomeId(record: Record<string, unknown>): string {
   return nestedString(record, 'id')
     || nestedString(record, 'outcomeId')
     || nestedString(record, 'captureId')
     || nestedString(record, 'exportId')
-    || nestedString(record, 'artifactId')
-    || `remote-outcome:${runner || 'unknown'}:${kind}:${index}`;
+    || nestedString(record, 'artifactId');
 }
 
 type RemoteOutcomeKind = Awaited<ReturnType<typeof readRemotePublisherOutcomeKind>>;
@@ -391,7 +360,7 @@ function captureRemotePublisherMeanings(value: unknown): RemotePublisherMeanings
 }
 
 function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: PublisherSemantics): RemoteCaptureOutcomeRecord | null {
-  const runner = runnerId(entry.record);
+  const runner = safePreview(runnerId(entry.record), 120);
   if (!runner) return null;
   const kind = meaning?.kind ?? (isClassicOperation() ? 'unassessed' : 'other');
   const schemaStatus = meaning?.schemaStatus ?? (isClassicOperation() ? 'unassessed' : 'legacy');
@@ -400,12 +369,16 @@ function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: Publi
     || nestedString(entry.record, 'description')
     || nestedString(entry.record, 'logTail')
     || nestedString(entry.record, 'message');
-  const id = outcomeId(entry.record, runner, kind, index);
-  const status = outcomeStatus(entry.record);
-  const captureId = nestedString(entry.record, 'captureId') || null;
-  const exportId = nestedString(entry.record, 'exportId') || null;
-  const artifactId = nestedString(entry.record, 'artifactId') || nestedString(entry.record, 'sourceArtifactId') || null;
-  const modelRoute = routeForRunner(entry.record, runner);
+  // Whether the record itself published an id, status and route is read before any fallback is filled in.
+  const publishedId = publishedOutcomeId(entry.record);
+  const publishedStatus = outcomeStatus(entry.record);
+  const published = publishedRoute(entry.record);
+  const id = safePreview(publishedId || `remote-outcome:${runner}:${kind}:${index}`, 160);
+  const status = safePreview(publishedStatus || 'unknown', 80);
+  const captureId = safeNullablePreview(nestedString(entry.record, 'captureId'), 160);
+  const exportId = safeNullablePreview(nestedString(entry.record, 'exportId'), 160);
+  const artifactId = safeNullablePreview(nestedString(entry.record, 'artifactId') || nestedString(entry.record, 'sourceArtifactId'), 160);
+  const modelRoute = published || fallbackRunnerRoute(runner);
   return {
     ...(kind === 'unassessed' || schemaStatus === 'unassessed' ? { operationProvenance: 'classic' as const,
       semanticAssessment: kind === 'unassessed' && schemaStatus === 'unassessed' ? 'not-evaluated' as const : 'partial' as const } : {}),
@@ -418,9 +391,8 @@ function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: Publi
     captureId,
     exportId,
     artifactId,
-    sourcePath: entry.path,
     source: entry.kind,
-    redaction: nestedString(entry.record, 'redaction') || nestedString(entry.record, 'redactionPolicy') || 'bounded-redacted-read-model',
+    redaction: safePreview(nestedString(entry.record, 'redaction') || nestedString(entry.record, 'redactionPolicy') || 'bounded-redacted-read-model', 120),
     startedAt: timestampString(entry.record.startedAt ?? readMetadata(entry.record).startedAt),
     completedAt: timestampString(entry.record.completedAt ?? entry.record.finishedAt ?? readMetadata(entry.record).completedAt),
     modelRoute,
@@ -429,11 +401,11 @@ function normalizeOutcome(entry: CollectedRecord, index: number, meaning?: Publi
       sourcePath: entry.path,
       recordKind: 'remote outcome',
       schemaStatus,
-      durableId: id,
+      durableId: publishedId,
       runnerId: runner,
-      modelRoute,
+      modelRoute: published,
       hasOutcomeEvidence: Boolean(captureId || exportId || artifactId || kind === 'closeout'),
-      status,
+      status: publishedStatus,
     }),
   };
 }
@@ -444,11 +416,11 @@ function workspaceId(record: Record<string, unknown>): string {
     || nestedString(record, 'id');
 }
 
+/** '' when the record published no status. */
 function workspaceStatus(record: Record<string, unknown>): string {
   return nestedString(record, 'status')
     || nestedString(record, 'state')
-    || nestedString(record, 'outcome')
-    || 'unknown';
+    || nestedString(record, 'outcome');
 }
 
 const WORKSPACE_PATH_KEYS: readonly string[] = ['worktreePath', 'workspacePath', 'path', 'root', 'directory'];
@@ -478,14 +450,17 @@ function normalizeWorkspaceOwned(entry: CollectedRecord, index: number, schemaSt
   readonly record: RemoteWorkspaceEvidenceRecord;
   readonly path: ReturnType<typeof selectedWorkspacePath>;
 } | null {
-  const runner = runnerId(entry.record);
+  const runner = safePreview(runnerId(entry.record), 120);
   if (!runner) return null;
-  const id = workspaceId(entry.record) || `remote-workspace:${runner}:${index}`;
+  const publishedId = workspaceId(entry.record);
+  const id = safePreview(publishedId || `remote-workspace:${runner}:${index}`, 160);
   const selectedPath = selectedWorkspacePath(entry.record);
   const path = selectedPath?.value ?? '';
-  const status = workspaceStatus(entry.record);
-  const modelRoute = routeForRunner(entry.record, runner);
-  const workspace = workspaceId(entry.record) || null;
+  const publishedStatus = workspaceStatus(entry.record);
+  const status = safePreview(publishedStatus || 'unknown', 80);
+  const published = publishedRoute(entry.record);
+  const modelRoute = published || fallbackRunnerRoute(runner);
+  const workspace = safeNullablePreview(publishedId, 160);
   const worktreeRef = safePathRef(path);
   const branch = safeNullablePreview(nestedString(entry.record, 'branch') || nestedString(entry.record, 'ref') || nestedString(entry.record, 'baseRef'), 100);
   return { record: {
@@ -494,27 +469,26 @@ function normalizeWorkspaceOwned(entry: CollectedRecord, index: number, schemaSt
     runnerId: runner,
     status,
     workspaceId: workspace,
-    isolationKind: nestedString(entry.record, 'isolationKind')
+    isolationKind: safePreview(nestedString(entry.record, 'isolationKind')
       || nestedString(entry.record, 'workspaceKind')
       || nestedString(entry.record, 'kind')
-      || 'workspace',
+      || 'workspace', 80),
     label: safeNullablePreview(nestedString(entry.record, 'label') || nestedString(entry.record, 'name') || nestedString(entry.record, 'summary'), 120),
     worktreeRef,
     branch,
-    sourcePath: entry.path,
     source: entry.kind,
-    redaction: nestedString(entry.record, 'redaction') || nestedString(entry.record, 'redactionPolicy') || 'path-bounded-read-model',
+    redaction: safePreview(nestedString(entry.record, 'redaction') || nestedString(entry.record, 'redactionPolicy') || 'path-bounded-read-model', 120),
     modelRoute,
     certification: remoteCertification({
       record: entry.record,
       sourcePath: entry.path,
       recordKind: 'remote workspace',
       schemaStatus,
-      durableId: id,
+      durableId: publishedId,
       runnerId: runner,
-      modelRoute,
+      modelRoute: published,
       hasWorkspaceEvidence: Boolean(workspace || worktreeRef || branch),
-      status,
+      status: publishedStatus,
     }),
   }, path: selectedPath };
 }
@@ -598,11 +572,13 @@ interface NativeWorkspaceDisplayCapture {
 }
 
 function acquireRemoteEntries(context: CommandContext) {
+  const sourceErrors: string[] = [];
   return {
     outcomeEntries: outcomeSources(context).flatMap((candidate) =>
-      collectFromSource(candidate.source, candidate.path, candidate.kind, OUTCOME_WRAPPER_KEYS, OUTCOME_METHODS)),
+      collectFromSource(candidate.source, candidate.path, candidate.kind, OUTCOME_WRAPPER_KEYS, OUTCOME_METHODS, undefined, sourceErrors)),
     workspaceEntries: workspaceSources(context).flatMap((candidate) =>
-      collectFromSource(candidate.source, candidate.path, candidate.kind, WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS)),
+      collectFromSource(candidate.source, candidate.path, candidate.kind, WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS, undefined, sourceErrors)),
+    sourceErrors,
   };
 }
 
@@ -618,9 +594,10 @@ function freezeNativeDisplay(value: unknown): void {
 
 function normalizeRemoteEntries(entries: RemoteEntries, captures?: NativeWorkspaceDisplayCapture[],
   meanings?: RemotePublisherMeanings): RemoteReadModelSnapshot {
-  const { outcomeEntries, workspaceEntries } = entries;
-  const outcomes = dedupeById(outcomeEntries.map((entry, index) => normalizeOutcome(entry, index, meanings?.outcomes[index]))
-    .filter((entry): entry is RemoteCaptureOutcomeRecord => entry !== null));
+  const { outcomeEntries, workspaceEntries, sourceErrors } = entries;
+  const normalizedOutcomes = outcomeEntries.map((entry, index) => normalizeOutcome(entry, index, meanings?.outcomes[index]))
+    .filter((entry): entry is RemoteCaptureOutcomeRecord => entry !== null);
+  const outcomes = dedupeById(normalizedOutcomes);
   const workspaces = workspaceEntries.map((entry, index) => {
     const native = normalizeWorkspaceOwned(entry, index, meanings?.workspaces[index]);
     if (captures && native) freezeNativeDisplay(native.record);
@@ -632,11 +609,18 @@ function normalizeRemoteEntries(entries: RemoteEntries, captures?: NativeWorkspa
     || workspaces.some(record => record?.certification.schemaStatus === 'unassessed');
   const assessed = outcomes.some(record => record.kind !== 'unassessed' || record.certification.schemaStatus !== 'unassessed')
     || workspaces.some(record => record !== null && record.certification.schemaStatus !== 'unassessed');
+  const normalizedWorkspaces = workspaces.filter((entry): entry is RemoteWorkspaceEvidenceRecord => entry !== null);
+  const dedupedWorkspaces = dedupeById(normalizedWorkspaces);
   const snapshot = {
     ...(unassessed || isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: assessed ? 'partial' as const : 'not-evaluated' as const } : {}),
     outcomes,
-    workspaces: dedupeById(workspaces.filter((entry): entry is RemoteWorkspaceEvidenceRecord => entry !== null)),
+    workspaces: dedupedWorkspaces,
     sourceCounts: { ...sourceCounts(outcomeEntries), ...sourceCounts(workspaceEntries) },
+    dropped: {
+      withoutRunner: outcomeEntries.length - normalizedOutcomes.length + workspaceEntries.length - normalizedWorkspaces.length,
+      duplicates: normalizedOutcomes.length - outcomes.length + normalizedWorkspaces.length - dedupedWorkspaces.length,
+    },
+    ...(sourceErrors.length > 0 ? { sourceErrors: [...sourceErrors] } : {}),
   };
   if (captures) freezeNativeDisplay(snapshot);
   return snapshot;
@@ -768,7 +752,7 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
         assertCurrent(); const projected = projectRecordText(captured); assertCurrent();
         return projected;
       };
-      const header = complete({ recordKind, sourcePath: entry.path, source: entry.kind,
+      const header = complete({ recordKind, source: entry.kind,
         selectedStatusText: firstAcross(certificationRecords(entry.record), ['schemaStatus', 'receiptSchemaStatus', 'certificationStatus']),
         ...(recordKind === 'remote outcome' ? { selectedOutcomeText: outcomeText(entry.record) } : {}),
       });

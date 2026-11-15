@@ -13,10 +13,10 @@
  * Every failure, unsupported browser, no authenticator, user cancel, register/verify error, is
  * rendered plainly with a specific message; nothing is faked or silently swallowed.
  */
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useToast } from '../../lib/toast';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, type StepUpCredentialSummary } from '../../lib/goodvibes';
 import {
   clearRegisteredCredential,
   describeStepUpError,
@@ -37,18 +37,54 @@ export function StepUpSettings() {
   const availability = stepUpAvailability();
   const [registered, setRegistered] = useState<RegisteredCredentialRecord | null>(() => getRegisteredCredential());
   const [label, setLabel] = useState('');
-  const [busy, setBusy] = useState<'register' | 'verify' | null>(null);
+  const [busy, setBusy] = useState<'register' | 'verify' | 'remove' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // null until the daemon answers; a failed read leaves it null and says so.
+  const [daemonCredentials, setDaemonCredentials] = useState<readonly StepUpCredentialSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  const refreshCredentials = useCallback(async () => {
+    try {
+      const result = await platformClient.operator.stepup.listCredentials();
+      setDaemonCredentials(result.credentials);
+      setListError(null);
+    } catch (listFailure) {
+      setListError(`The daemon's registered passkeys could not be read. ${describeStepUpError(listFailure)}`);
+    }
+  }, []);
+
+  useEffect(() => { void refreshCredentials(); }, [refreshCredentials]);
+
+  const handleRemove = async (credentialId: string) => {
+    setBusy('remove');
+    setError(null);
+    try {
+      await platformClient.operator.stepup.removeCredential(credentialId);
+      if (registered?.credentialId === credentialId) {
+        clearRegisteredCredential();
+        setRegistered(null);
+      }
+      toast({ title: 'Passkey removed', description: 'The daemon no longer accepts it for relay actions.', tone: 'success' });
+    } catch (removeError) {
+      setError(describeStepUpError(removeError));
+    } finally {
+      setBusy(null);
+      await refreshCredentials();
+    }
+  };
 
   const handleRegister = async () => {
     setBusy('register');
     setError(null);
+    // The authenticator keeps the passkey whether or not the daemon records it.
+    let passkeyCreated = false;
     try {
       const ceremony = await registerPasskey({
         userName: typeof window === 'undefined' ? 'operator' : window.location.host,
         userDisplayName: 'GoodVibes operator',
         label: label.trim() || undefined,
       });
+      passkeyCreated = true;
       const result = await platformClient.operator.stepup.registerCredential({
         rpId: ceremony.rpId,
         origin: ceremony.origin,
@@ -65,10 +101,15 @@ export function StepUpSettings() {
       };
       setRegisteredCredential(record); // persist to this device
       setRegistered(record);
+      void refreshCredentials();
       setLabel('');
       toast({ title: 'Passkey registered', description: 'This device can now confirm relay actions.', tone: 'success' });
     } catch (registerError) {
-      setError(describeStepUpError(registerError));
+      setError(
+        passkeyCreated
+          ? `${describeStepUpError(registerError)} A passkey was already created on this device, but the daemon did not record it, so it cannot confirm anything. Delete it in this device's passkey settings, then register again.`
+          : describeStepUpError(registerError),
+      );
     } finally {
       setBusy(null);
     }
@@ -82,7 +123,7 @@ export function StepUpSettings() {
       await runAssertion({ challenge: challenge.challenge, credentialId: registered?.credentialId });
       toast({
         title: 'Passkey verified',
-        description: 'Your passkey produced a valid assertion. The daemon verifies it on every real relay action.',
+        description: 'Your passkey produced a valid assertion on this device. This does not check the daemon\'s record; the daemon verifies it on every real relay action.',
         tone: 'success',
       });
     } catch (verifyError) {
@@ -95,7 +136,7 @@ export function StepUpSettings() {
   const handleForget = () => {
     clearRegisteredCredential();
     setRegistered(null);
-    toast({ title: 'Passkey forgotten on this device', description: 'The daemon still holds any registered credential.' });
+    toast({ title: 'Passkey forgotten on this device', description: 'The daemon still holds the credential; remove it from the list below to stop it confirming relay actions.' });
   };
 
   return (
@@ -142,6 +183,32 @@ export function StepUpSettings() {
             )}
           </div>
         </>
+      )}
+
+      {daemonCredentials && (
+        <div className="stepup-credentials">
+          <p>{daemonCredentials.length === 0 ? 'The daemon has no registered passkeys.' : 'Passkeys registered on the daemon:'}</p>
+          <ul>
+            {daemonCredentials.map((credential) => (
+              <li key={credential.credentialId}>
+                <span>{credential.label ?? credential.credentialId.slice(0, 12)}</span>
+                <Button
+                  variant="ghost"
+                  icon={<Trash2 aria-hidden="true" />}
+                  onClick={() => void handleRemove(credential.credentialId)}
+                  disabled={busy !== null}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {listError && (
+        <div className="banner warning" role="status">
+          {listError}
+        </div>
       )}
 
       {error && (

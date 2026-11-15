@@ -365,6 +365,36 @@ describe('companion-followup-persistence: kind=message persists before emitting'
     expect(callOrder).toEqual(['append', 'event']);
   });
 
+  test('a rejected append publishes no follow-up event and stores nothing', async () => {
+    const ctx = makeContext({ sessions, appendCalls, followupEvents, persistedMessages });
+    (ctx as unknown as Record<string, unknown>).sessionBroker = {
+      ...(ctx as unknown as Record<string, unknown>).sessionBroker as object,
+      appendCompanionMessage: async () => { throw new Error('session log unavailable'); },
+    };
+    const handlers = createDaemonRuntimeSessionRouteHandlers(ctx);
+    const req = makeRequest('POST', `http://localhost/api/sessions/${sessionId}/messages`, {
+      body: 'never stored',
+      kind: 'message',
+    });
+
+    await expect(handlers.postSharedSessionMessage(sessionId, req)).rejects.toThrow('session log unavailable');
+    expect(followupEvents).toHaveLength(0);
+    expect(persistedMessages.get(sessionId) ?? []).toHaveLength(0);
+  });
+
+  test('a throwing follow-up publisher after a successful append leaves the message stored and the request failed', async () => {
+    const ctx = makeContext({ sessions, appendCalls, followupEvents, persistedMessages });
+    (ctx as unknown as Record<string, unknown>).publishConversationFollowup = () => { throw new Error('publisher down'); };
+    const handlers = createDaemonRuntimeSessionRouteHandlers(ctx);
+    const req = makeRequest('POST', `http://localhost/api/sessions/${sessionId}/messages`, {
+      body: 'stored but not started',
+      kind: 'message',
+    });
+
+    await expect(handlers.postSharedSessionMessage(sessionId, req)).rejects.toThrow('publisher down');
+    expect(persistedMessages.get(sessionId)).toHaveLength(1);
+  });
+
   test('appendCompanionMessage and event use the same messageId (consistency)', async () => {
     // kind='message' now routes through submitMessage() instead of returning
     // a standalone {messageId, routedTo} response. Verify that the messageId

@@ -164,7 +164,8 @@ export default defineConfig({
       command: `bun run generated:check && bunx vite build --outDir ${E2E_DIST} --emptyOutDir && bunx vite preview --outDir ${E2E_DIST} --host 127.0.0.1 --port ${String(WEB_PORT)} --strictPort`,
       url: BASE_URL,
       timeout: 120_000,
-      reuseExistingServer: !process.env.CI,
+      // Never adopt a leftover preview: it would serve an older build than the one this run is meant to test.
+      reuseExistingServer: false,
       stdout: 'pipe',
       stderr: 'pipe',
       env: PREVIEW_ENV,

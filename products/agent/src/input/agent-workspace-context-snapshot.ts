@@ -77,7 +77,7 @@ export function buildResearchVisualReportContract(sourceSnapshot: {
       ? 'Save a sourced visual report packet now, then archive or promote the same reviewed artifact.'
       : 'Review at least one source before saving a report or visual packet.',
     route: sourceReady
-      ? 'research action:"report" title:"..." question:"..." sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."'
+      ? 'research action:"report" title:"..." question:"..." sources:[...] visualReport:true requireCitationCoverage:true'
       : 'research action:"sources" includeParameters:true',
     details: [
       'at-a-glance',

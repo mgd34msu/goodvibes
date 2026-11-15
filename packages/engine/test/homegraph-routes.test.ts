@@ -30,15 +30,17 @@ useHomeGraphFixtures();
 describe('Home Graph daemon routes', () => {
   test('coalesces overlapping Home Graph reindex requests', async () => {
     const { service } = createHomeGraphService();
-    (service as unknown as { activeReindex: Promise<unknown> | null }).activeReindex = new Promise(() => {});
 
-    const reindex = await service.reindex({ installationId: 'house-1' });
+    const [first, second] = await Promise.all([
+      service.reindex({ installationId: 'house-1' }),
+      service.reindex({ installationId: 'house-1' }),
+    ]);
 
-    expect(reindex.coalesced).toBe(true);
-    expect(reindex.truncated).toBe(true);
-    expect(reindex.budgetExhausted).toBe(true);
-    expect(reindex.scanned).toBe(0);
-    (service as unknown as { activeReindex: Promise<unknown> | null }).activeReindex = null;
+    expect(first.coalesced).toBeUndefined();
+    expect(second.coalesced).toBe(true);
+    expect(second.truncated).toBe(true);
+    expect(second.budgetExhausted).toBe(true);
+    expect(second.scanned).toBe(0);
   });
 
   test('reset cancels pending Home Graph sync self-improvement for the scoped space', async () => {

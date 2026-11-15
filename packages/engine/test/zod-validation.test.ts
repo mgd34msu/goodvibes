@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod/v4';
-import { ContractError } from '../errors/dist/index.js';
+import { ContractError } from '../errors/src/index.ts';
 import {
   ControlAuthLoginResponseSchema,
   ControlAuthCurrentResponseSchema,
   AccountsSnapshotResponseSchema,
   ControlStatusResponseSchema,
   SerializedEventEnvelopeSchema,
-} from '../contracts/dist/index.js';
-import { invokeContractRoute, createHttpTransport } from '../transport-http/dist/index.js';
+} from '../contracts/src/index.ts';
+import { invokeContractRoute, createHttpTransport } from '../transport-http/src/index.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers, create a transport that returns a fixed JSON body

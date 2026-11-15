@@ -195,7 +195,8 @@ describe('the host runtime event bridge', () => {
         { key: `contract:${CTR}:failed`, summary: '"Add a parser" could not be finished: unit u1 spent its turn budget' },
         { key: `contract:${CTR}:cancelled`, summary: '"Add a parser" was cancelled: stopped by the owner' },
       ]);
-      expect(h.store.getState().contracts.contracts.get(CTR)?.status).toBe('cancelled');
+      // passed, failed and cancelled arrive in turn for one contract: the first outcome stands.
+      expect(h.store.getState().contracts.contracts.get(CTR)?.status).toBe('passed');
       expect(h.contractDispatches()).toBe(ALL_CONTRACT_EVENTS.length);
     } finally {
       h.stop();

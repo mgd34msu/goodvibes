@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { OllamaProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ProviderError } from '@goodvibes-jev/engine/platform/platform/types';
+import { llmRequestsTotal } from '../platform/src/platform/runtime/metrics.js';
 
 function ndjson(lines: Record<string, unknown>[]): string {
   return lines.map((line) => JSON.stringify(line)).join('\n');
@@ -131,6 +132,30 @@ describe('OllamaProvider', () => {
 
     expect(response.content).toBe('compat fallback');
     expect(fallbackCalls).toHaveLength(1);
+  });
+
+  test('a native 404 handover to the compat provider is not recorded as a success by the native wrapper', async () => {
+    const provider = new OllamaProvider({
+      name: 'OllamaHandover',
+      baseURL: 'http://127.0.0.1:11434/v1',
+      apiKey: '',
+      defaultModel: 'qwen3',
+      models: ['qwen3'],
+      compatProvider: {
+        name: 'fallback',
+        models: ['qwen3'],
+        chat: async () => ({ content: 'compat fallback', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' }),
+      },
+      nativeFetch: async () => {
+        throw new ProviderError('Ollama native chat error 404: not found', 404);
+      },
+    });
+    const success = llmRequestsTotal.total({ provider: 'OllamaHandover', status: 'success' });
+    const failure = llmRequestsTotal.total({ provider: 'OllamaHandover', status: 'error' });
+    const response = await provider.chat({ messages: [{ role: 'user', content: 'Hi' }], model: 'qwen3' });
+    expect(response.content).toBe('compat fallback');
+    expect(llmRequestsTotal.total({ provider: 'OllamaHandover', status: 'success' })).toBe(success);
+    expect(llmRequestsTotal.total({ provider: 'OllamaHandover', status: 'error' })).toBe(failure);
   });
 
   test('uses compat fallback when the transcript includes tool result messages', async () => {

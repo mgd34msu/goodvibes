@@ -176,6 +176,11 @@ export interface WakeListenerOptions {
    */
   readonly firstFrameTimeoutMs?: number | undefined;
   /**
+   * How long a stream that HAS delivered audio may then go silent before it is
+   * treated as failed and restarted, ms.
+   */
+  readonly frameGapTimeoutMs?: number | undefined;
+  /**
    * Where a capture-end receipt goes. One entry per completed capture, carrying
    * the numbers the endpointing actually decided from.
    *

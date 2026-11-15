@@ -2,6 +2,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createHookApi, HookWorkbench, listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { getTestHookDispatcher } from '../helpers/runtime-services.ts';
@@ -59,5 +60,24 @@ describe('HookApi', () => {
     const removed = await api.workbench.remove('guard-edit');
     expect(removed).toBe(true);
     expect(api.workbench.listManagedHooks()).toHaveLength(0);
+  });
+
+  test('a verb refuses a world-writable hooks file before it saves, so a retry cannot duplicate the change', async () => {
+    const api = createHookApi({
+      dispatcher: {
+        listHooks: () => dispatcher.listHooks(),
+        listChains: () => dispatcher.getChains(),
+      },
+      workbench: hookWorkbench,
+      listContracts: () => listHookPointContracts(),
+    });
+    const file = join(tempDir, 'hooks.json');
+    const original = `${JSON.stringify({ hooks: {} }, null, 2)}\n`;
+    writeFileSync(file, original);
+    chmodSync(file, 0o666);
+
+    await expect(api.workbench.scaffoldHook('guard-edit', 'Pre:tool:*', 'command')).rejects.toThrow('writable by every user');
+    await expect(api.workbench.scaffoldHook('guard-edit', 'Pre:tool:*', 'command')).rejects.toThrow('writable by every user');
+    expect(readFileSync(file, 'utf-8')).toBe(original);
   });
 });

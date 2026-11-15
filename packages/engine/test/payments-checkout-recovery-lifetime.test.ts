@@ -55,13 +55,13 @@ test('reporting a lookup timeout does not retire actual I/O or allow another swe
     purchases: { async record() {}, async has() { lookups++; entered.release(); await gate.pending; return true; } } });
   await f.journal.put(record());
   const pending = f.recovery.recoverInterruptedCheckouts(); await entered.pending;
-  expect((await pending).settlements[0]).toMatchObject({ action: 'failed', notified: false });
+  expect((await pending).settlements[0]).toMatchObject({ action: 'failed', notified: true });
   await expect(f.recovery.recoverInterruptedCheckouts()).rejects.toBeInstanceOf(CheckoutOwnershipError);
   const closing = f.recovery.close(); expect(f.recovery.close()).toBe(closing);
   let drained = false; void closing.then(() => { drained = true; });
   await Promise.resolve(); await Promise.resolve(); expect(drained).toBe(false);
   gate.release(); await closing;
-  expect(lookups).toBe(1); expect(f.notices).toEqual([]);
+  expect(lookups).toBe(1); expect(f.notices).toHaveLength(1);
   expect((await f.journal.list())[0]?.phase).toBe('submit-pending');
   await expect(f.recovery.recoverInterruptedCheckouts()).rejects.toBeInstanceOf(CheckoutOwnershipError);
 });
@@ -119,5 +119,33 @@ test('a timeout keeps the real cross-process recovery lease until ignored I/O ha
   const closing = f.recovery.close(); gate.release(); await closing;
   const released = operations.retainRecovery('interrupted'); expect(released).not.toBeNull(); released?.release();
   expect((await f.journal.list())[0]?.phase).toBe('submit-pending');
+  expect(f.notices).toHaveLength(1);
+});
+
+test('a record that cannot be settled reports its cause and tells the owner once', async () => {
+  const f = fixture({ purchases: { async record() {}, async has() { return true; } } });
+  await f.journal.put(record());
+  const remove = f.journal.remove.bind(f.journal);
+  f.journal.remove = async () => { throw new TypeError('disk full'); };
+  const first = (await f.recovery.recoverInterruptedCheckouts()).settlements[0];
+  expect(first).toMatchObject({ action: 'failed', reason: 'TypeError', notified: true, notice: 'delivered' });
+  expect(first?.message).toContain('TypeError');
+  expect(f.notices).toHaveLength(1);
+  expect((await f.journal.list())[0]?.recoveryNotifiedAtMs).toBeDefined();
+  const second = (await f.recovery.recoverInterruptedCheckouts()).settlements[0];
+  expect(second).toMatchObject({ action: 'failed', notice: 'already-notified', notified: false });
+  expect(f.notices).toHaveLength(1);
+  f.journal.remove = remove;
+});
+
+test('a record rewritten since the sweep read it is neither announced nor stamped from the stale copy', async () => {
+  let rewrite: (() => void) | undefined;
+  const f = fixture({ retainInterrupted: () => { rewrite?.(); return { assertCurrent() {}, release() {} }; } });
+  await f.journal.put(record());
+  const moved = { ...record(), phase: 'submitted' as const, updatedAtMs: 9 };
+  rewrite = () => { void f.journal.put(moved); };
+  const result = (await f.recovery.recoverInterruptedCheckouts()).settlements[0];
+  expect(result).toMatchObject({ action: 'failed', notified: false, notice: 'failed' });
   expect(f.notices).toEqual([]);
+  expect(await f.journal.list()).toEqual([moved]);
 });

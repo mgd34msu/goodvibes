@@ -11,7 +11,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeProjectTempDir } from './helpers/project-temp';
@@ -20,6 +20,7 @@ import {
   isTypeScriptPath,
   listProjectFiles,
   listRepoTypeScriptFiles,
+  TYPECHECK_PROJECTS,
 } from './typecheck-coverage';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,6 +80,18 @@ describe('isTypeScriptPath', () => {
 });
 
 describe('against the real repo', () => {
+  test('the project list this gate walks is the list the typecheck script compiles', () => {
+    const scripts = (JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> }).scripts;
+    const compiled: string[] = [];
+    for (const [, name] of (scripts.typecheck ?? '').matchAll(/bun run (typecheck:\w+)/g)) {
+      if (name === 'typecheck:coverage') continue;
+      const command = scripts[name ?? ''] ?? '';
+      const dir = /\btsc\b.*?(?:-p|--project)\s+(\S+)/.exec(command)?.[1];
+      compiled.push(dir ? `${dir.replace(/\/$/, '')}/tsconfig.json` : 'tsconfig.json');
+    }
+    expect(compiled.sort()).toEqual([...TYPECHECK_PROJECTS].sort());
+  });
+
   test('hook repository selectors cannot turn product coverage into a monorepo scan', () => {
     const repo = makeProjectTempDir('webui-types-hook-');
     try {

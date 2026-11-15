@@ -170,16 +170,20 @@ describe('facade route knowledge is generated, not hand-maintained', () => {
   const MODELS_METHOD_IDS = ['models.list', 'models.current.get', 'models.current.set'];
 
   test('every table route matches the generated WEBUI_METHOD_ROUTES artifact EXACTLY (no hand-written row shadows or diverges from a generated one)', () => {
+    let compared = 0;
     for (const [methodId, generated] of Object.entries(WEBUI_METHOD_ROUTES)) {
       const resolved = webuiRouteFor(methodId);
       // undefined ⇒ the method is browser-platform-covered and resolves natively (falls through);
       // present ⇒ it must equal the generated route byte-for-byte.
       if (resolved === undefined) continue;
+      compared += 1;
       expect(resolved, `${methodId}: table route diverges from the generated artifact`).toEqual({
         method: generated.method,
         path: generated.path,
       });
     }
+    // Guards against passing vacuously if every route ever resolved natively.
+    expect(compared).toBeGreaterThanOrEqual(10);
   });
 
   test('models.list/current.get/current.set now arrive DERIVED from the generated artifact (the 2.0.0 contract gap closed, no more hand-written row)', () => {
@@ -890,10 +894,10 @@ describe('requestJson records the daemon-announced client-build floor off every 
     expect(getObservedClientCompatibilityFloor()).toBe('1.14.0');
   });
 
-  test('a response with no floor header leaves the store at undefined', async () => {
+  test('a later response with no floor header keeps the floor already observed', async () => {
     stubFetch({ sessionId: 'sess-1', deleted: true });
     await platformClient.operator.sessions.delete('sess-1');
-    expect(getObservedClientCompatibilityFloor()).toBeUndefined();
+    expect(getObservedClientCompatibilityFloor()).toBe('1.14.0');
   });
 });
 

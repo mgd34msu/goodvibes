@@ -1,4 +1,4 @@
-import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { keepAwakeCondition, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 
 /**
  * The composer power chip (see shell-surface.ts): it renders on the
@@ -13,6 +13,8 @@ import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
  */
 export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'>): string | null {
   if (state.keepAwake.enabled) {
+    // On but not holding: the OS refused the inhibitor, so saying "sleep disabled" would be false.
+    if (keepAwakeCondition(state.keepAwake) === 'refused') return 'keep-awake refused by the OS: this host can still sleep';
     const base = 'sleep disabled';
     return state.keepAwake.note ? `${base}, ${state.keepAwake.note}` : `${base} (keep-awake)`;
   }

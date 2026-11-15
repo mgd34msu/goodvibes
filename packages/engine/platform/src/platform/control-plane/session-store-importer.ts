@@ -33,10 +33,10 @@ import { summarizeError } from '../utils/error-display.js';
 
 /**
  * How many message bodies to retain PER SESSION when re-persisting the merged
- * store. This is a per-session cap, not a global one: every session keeps its
- * most-recent 2 000 bodies independently, and a session that is truncated is
- * stamped with an honest `retainedMessageCount` (see createSessionBrokerSnapshot).
- * Migration therefore never silently drops whole sessions' transcripts.
+ * store. Migration keeps every body (no cap): a per-session cap would drop old
+ * messages from a transcript, and the snapshot would then stamp an honest
+ * `retainedMessageCount` (see createSessionBrokerSnapshot). Migration therefore
+ * never silently drops any session's transcript.
  */
 const MAX_PERSISTED_MESSAGES_PER_SESSION = Infinity;
 
@@ -57,7 +57,7 @@ export interface ImportLegacySessionsResult {
   readonly imported: number;
   /** Sources that did not exist on disk (skipped, not an error). */
   readonly missingSources: readonly string[];
-  /** Files that failed to parse and were skipped. */
+  /** Files that failed to parse and were skipped (set aside or left in place, never deleted). */
   readonly skippedFiles: readonly string[];
 }
 
@@ -65,6 +65,19 @@ interface MergeState {
   readonly sessions: Map<string, SharedSessionRecord>;
   readonly messages: Map<string, SharedSessionMessage>;
   readonly inputs: Map<string, SharedSessionInputRecord>;
+}
+
+/** Raised when the home store exists but cannot be read, so it is never overwritten. */
+export class HomeSessionStoreUnreadableError extends Error {
+  constructor(readonly storePath: string, cause: unknown) {
+    super(
+      `The home session store ${storePath} could not be read (${summarizeError(cause)}). `
+      + 'It was left untouched and no legacy session was folded into it. '
+      + 'Repair or move that file aside, then start again.',
+      { cause },
+    );
+    this.name = 'HomeSessionStoreUnreadableError';
+  }
 }
 
 /**
@@ -109,13 +122,18 @@ export function discoverLegacySessionSources(input: {
  * Starts from the existing home store, merges each source keyed by session id
  * (newer updatedAt wins; messages/inputs union-deduped by id), and re-persists
  * atomically. A second run over the same sources produces the same store.
+ *
+ * @throws HomeSessionStoreUnreadableError when the home store exists but cannot
+ *         be read. Nothing is written then: persisting the legacy-only merge
+ *         would replace the unreadable file, and callers that retire a source
+ *         after a successful fold must see that the fold did not happen.
  */
 export async function importLegacySessionStores(input: {
   readonly homeStorePath: string;
   readonly sources: readonly LegacySessionSource[];
 }): Promise<ImportLegacySessionsResult> {
   const homeStore = new PersistentStore<SharedSessionStoreSnapshot>(input.homeStorePath);
-  const existing = loadSessionBrokerState(await safeLoad(homeStore));
+  const existing = loadSessionBrokerState(await loadHomeSnapshot(homeStore, input.homeStorePath));
   const state: MergeState = {
     sessions: new Map(existing.sessions),
     messages: new Map(),
@@ -149,16 +167,18 @@ export async function importLegacySessionStores(input: {
   };
 }
 
-async function safeLoad(
+async function loadHomeSnapshot(
   store: PersistentStore<SharedSessionStoreSnapshot>,
+  storePath: string,
 ): Promise<SharedSessionStoreSnapshot | null> {
   try {
     return await store.load();
   } catch (error) {
-    logger.warn('[session-import] home store failed to load; starting empty', {
+    logger.warn('[session-import] home store failed to load; leaving it untouched', {
+      path: storePath,
       error: summarizeError(error),
     });
-    return null;
+    throw new HomeSessionStoreUnreadableError(storePath, error);
   }
 }
 
@@ -205,9 +225,9 @@ async function mergeCompanionDir(
     for (const message of converted) if (!state.messages.has(message.id)) state.messages.set(message.id, message);
     upsertSession(state, companionSessionToShared(meta, converted, source.project ?? 'unknown'));
   }
-  // CompanionChatPersistence.loadAll already logs+skips corrupt files internally;
-  // there is no per-file signal to surface here beyond its own warnings.
-  void skippedFiles;
+  // loadAll sets aside or skips files it cannot use; name them so the result
+  // does not under-report.
+  for (const rejected of persistence.rejectedOnLoad()) skippedFiles.push(join(source.path, rejected.file));
 }
 
 function upsertSession(state: MergeState, incoming: SharedSessionRecord): void {
@@ -291,6 +311,12 @@ function buildSnapshot(state: MergeState): SharedSessionStoreSnapshot {
   }
   for (const inputRecord of state.inputs.values()) {
     inputs.set(inputRecord.sessionId, [...(inputs.get(inputRecord.sessionId) ?? []), inputRecord]);
+  }
+  // The winning record's own count can be lower than the bodies unioned from
+  // other sources; the count must never claim fewer messages than are stored.
+  for (const [id, record] of sessions) {
+    const stored = messages.get(id)?.length ?? 0;
+    if (stored > record.messageCount) sessions.set(id, { ...record, messageCount: stored });
   }
   return createSessionBrokerSnapshot({ sessions, messages, inputs }, MAX_PERSISTED_MESSAGES_PER_SESSION);
 }

@@ -22,9 +22,10 @@ import type { OwnerReplyAction, OwnerReplyReading } from '../../events/contract.
 import { ownerPick } from './batteries/owner-pick.js';
 import { ownerReply } from './batteries/owner-reply.js';
 import { readForbidsWriting, REQUEST_SHAPE_SITE, saysNoAtAct, saysYesAtAct } from './batteries/request-shape.js';
-import { acceptAttempt } from './best-of-n.js';
+import { acceptAttempt, assertAttemptTakeable } from './best-of-n.js';
 import { emptyJudgmentUsage, meteredPort, type DecidedCheck } from './check.js';
 import { amendTarget } from './amendment.js';
+import { AttemptError } from '../orchestration/attempts.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { latestSeverity, QUALITY_EVIDENCE_SENTENCES } from './nudge.js';
 import { lastFencedBlock } from './plan-schema.js';
@@ -88,7 +89,64 @@ export const AMENDMENT_FAILED_LINE = (problems: string): string => `That change 
 /** Lines the runner adds under a question it asks again; they are dropped before another is added. */
 const ADDED_LINE_PREFIXES = [ASK_AGAIN_LINE, APPROVAL_REFUSED_LINE, 'Say which attempt to take', 'The plan cannot run as it stands', 'That change could not be applied'];
 
+/**
+ * The failure pause: what a native session contract asks when its turn keeps
+ * failing. Native contracts have no owner approval of the work, and this is not
+ * one: the only answers are to run the turn again or to stop the contract, no
+ * criterion changes, and no reading of the reply is involved.
+ */
+export const FAILURE_PAUSE_ANSWERS = ['retry', 'cancel'] as const;
+export type FailurePauseAnswer = (typeof FAILURE_PAUSE_ANSWERS)[number];
+
+export interface FailurePauseInput {
+  /** What failed, in the owner's terms (the turn's error). */
+  readonly what: string;
+  /** How many times the turn was tried before the pause. */
+  readonly attempts: number;
+}
+
+/** The answer a reply names: exactly retry or cancel, ignoring case, spacing and a closing full stop. */
+export function readFailurePauseAnswer(text: string): FailurePauseAnswer | undefined {
+  const word = text.trim().replace(/[.!]+$/, '').toLowerCase();
+  return FAILURE_PAUSE_ANSWERS.find((answer) => answer === word);
+}
+
+/** The failure-pause question, built in code. */
+export function buildFailurePauseQuestion(contract: Contract, unit: Pick<ContractUnit, 'title'>, input: FailurePauseInput): string {
+  const what = titleOf(input.what).slice(0, 400);
+  return [
+    `Contract ${contract.id} is paused: its work on unit "${titleOf(unit.title)}" failed after ${input.attempts} attempt${input.attempts === 1 ? '' : 's'}.`,
+    `What failed: ${what}`,
+    'The work done so far is kept in the project tree. Nothing was approved and no criterion changed.',
+    'Reply "retry" to run the turn again with a fresh set of attempts, or "cancel" to stop the contract. No other answer is accepted.',
+  ].join('\n');
+}
+
 export type { OwnerReplyAction };
+
+/**
+ * Why a reply was turned away before anything changed: the caller asked for
+ * something the contract cannot take now, not the platform failing. The
+ * messages are unchanged for callers that match on them.
+ */
+export type OwnerReplyRefusal =
+  /** No such escalation, or it was already answered. */
+  | 'not-open'
+  /** Another reply to the same question is being read. */
+  | 'already-reading'
+  /** The contract ended while the reply was being read. */
+  | 'ended'
+  /** The answer is not one this question accepts. */
+  | 'not-an-answer'
+  /** Contracts of this kind do not read replies of this form. */
+  | 'unsupported';
+
+export class OwnerReplyRefusedError extends Error {
+  constructor(message: string, readonly refusal: OwnerReplyRefusal) {
+    super(message);
+    this.name = 'OwnerReplyRefusedError';
+  }
+}
 
 export interface OwnerReplyOutcome {
   readonly escalationId: string;
@@ -214,6 +272,13 @@ export interface Escalations {
   attemptsUndecided(run: ContractRun, unitId: string, selection: AttemptSelectionRecord): Promise<void>;
   reply(run: ContractRun, escalationId: string, text: string): Promise<OwnerReplyOutcome>;
   /**
+   * A native session contract's turn keeps failing: it pauses (awaiting-owner,
+   * its work kept) and asks the owner to retry or cancel. Opens no approval:
+   * `raise` still refuses every source-bound contract. Asking again while a
+   * failure pause is open returns the open one.
+   */
+  pauseForOwnerRetry(run: ContractRun, input: FailurePauseInput): Escalation;
+  /**
    * An operator picked a unit's attempt through `fleet.attempts.pick`: the
    * unit's open `attempts-undecided` escalation closes, and the attempt is
    * taken as the owner's pick would be. The caller has checked that the
@@ -241,6 +306,13 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       unmetCriterionIds: [...input.unmetCriterionIds],
       ...(input.decisionIds.length === 0 ? {} : { decisionIds: [...input.decisionIds] }),
     };
+    // The contract moves first: a refused contract move must not leave a unit
+    // or group waiting on an owner who was never asked.
+    if (contract.status !== 'awaiting-owner') {
+      const before = contract.status;
+      run.moveContract('awaiting-owner');
+      contract.statusBeforeOwner = before;
+    }
     if (input.scope === 'unit') {
       const unit = run.unit(input.targetId);
       if (unit !== undefined) {
@@ -250,10 +322,6 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     } else if (input.scope === 'group') {
       const group = run.group(input.targetId);
       if (group !== undefined) run.moveGroup(group, 'awaiting-owner');
-    }
-    if (contract.status !== 'awaiting-owner') {
-      contract.statusBeforeOwner = contract.status;
-      run.moveContract('awaiting-owner');
     }
     contract.escalations.push(escalation);
     run.decide('escalated', input.targetId, `${input.reason}: asked the owner`, input.decisionIds);
@@ -268,6 +336,58 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       unmetCriterionIds: escalation.unmetCriterionIds,
     });
     context.ownerProgress(run);
+    return escalation;
+  }
+
+  function pauseForOwnerRetry(run: ContractRun, input: FailurePauseInput): Escalation {
+    const { contract } = run;
+    if (contract.nativeSource === undefined || contract.sessionMode !== true) {
+      throw new Error(`contract ${run.id} does not run in a native session, so it has no turn to retry; only a native session contract can pause for a retry`);
+    }
+    if (run.terminal) throw new Error(`contract ${run.id} has ended (${contract.status}); there is nothing to pause`);
+    const asked = open(run).find((escalation) => escalation.failurePause === true);
+    if (asked !== undefined) return asked;
+    const unit = contract.units.find((candidate) => candidate.status === 'running' || candidate.status === 'nudged');
+    if (unit === undefined) throw new Error(`contract ${run.id} is ${contract.status} and has no unit waiting on its session turn, so there is no failed turn to pause`);
+    const before = contract.status;
+    // The contract moves first: a refused contract move must not leave a unit waiting on an owner who was never asked.
+    if (before !== 'awaiting-owner') {
+      run.moveContract('awaiting-owner');
+      contract.statusBeforeOwner = before;
+    }
+    try {
+      run.releaseHold(unit);
+      run.moveUnit(unit, 'awaiting-owner');
+    } catch (error) {
+      if (before !== 'awaiting-owner') { run.moveContract(before); contract.statusBeforeOwner = undefined; }
+      throw error;
+    }
+    const question = buildFailurePauseQuestion(contract, unit, input);
+    const escalation: Escalation = {
+      id: `${contract.id}.e${contract.escalations.length + 1}`,
+      at: run.env.now(),
+      scope: 'unit',
+      targetId: unit.id,
+      reason: 'owner-decision-needed',
+      question,
+      unmetCriterionIds: [],
+      failurePause: true,
+    };
+    contract.escalations.push(escalation);
+    run.decide('escalated', unit.id, `turn failed after ${input.attempts} attempt${input.attempts === 1 ? '' : 's'}: paused and asked the owner to retry or cancel`);
+    run.emit({
+      type: 'CONTRACT_ESCALATED',
+      contractId: contract.id,
+      escalationId: escalation.id,
+      scope: escalation.scope,
+      targetId: escalation.targetId,
+      reason: escalation.reason,
+      question,
+      unmetCriterionIds: escalation.unmetCriterionIds,
+    });
+    context.ownerProgress(run);
+    // A restart must find the question still open.
+    context.checkpoint?.(run);
     return escalation;
   }
 
@@ -403,6 +523,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const selection = run.unit(escalation.targetId)?.attemptSelection;
     if (selection === undefined) return { action: 'refused' };
     if (attemptId === undefined) return { action: 'refused', next: askAgain(run, escalation, NAME_AN_ATTEMPT_LINE(selection.candidateIds)) };
+    assertAttemptTakeable(run, escalation.targetId, attemptId);
     resume(run);
     await acceptAttempt(run, escalation.targetId, attemptId, how, decisionId === undefined ? [] : [decisionId]);
     return { action };
@@ -471,10 +592,57 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function reply(run: ContractRun, escalationId: string, text: string): Promise<OwnerReplyOutcome> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
-    if (run.contract.nativeSource !== undefined) throw new Error('Native contracts do not read owner approval replies');
     const escalation = run.contract.escalations.find((candidate) => candidate.id === escalationId);
-    if (escalation === undefined || escalation.resolvedAt !== undefined) throw new Error(`contract ${run.id} has no open escalation ${escalationId}`);
+    // A failure pause is answered by code, not read, so it needs no decision model.
+    if (escalation?.failurePause !== true) {
+      requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+      if (run.contract.nativeSource !== undefined) throw new OwnerReplyRefusedError('Native contracts do not read owner approval replies', 'unsupported');
+    }
+    if (escalation === undefined || escalation.resolvedAt !== undefined) throw new OwnerReplyRefusedError(`contract ${run.id} has no open escalation ${escalationId}`, 'not-open');
+    // Claimed before the first await: a second reply to the same question
+    // (two quick messages, two surfaces) must not be read and acted on too.
+    if (run.replying.has(escalationId)) throw new OwnerReplyRefusedError(`a reply to ${escalationId} is already being read; wait for its result`, 'already-reading');
+    run.replying.add(escalationId);
+    try {
+      return escalation.failurePause === true ? replyToFailurePause(run, escalation, text) : await replyClaimed(run, escalation, text);
+    } finally {
+      run.replying.delete(escalationId);
+    }
+  }
+
+  /** Retry runs the turn again; cancel stops the contract. Any other answer leaves the question open. */
+  function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
+    if (run.contract.nativeSource === undefined || run.contract.sessionMode !== true) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
+    const answer = readFailurePauseAnswer(text);
+    if (answer === undefined) {
+      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the turn again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
+    }
+    const { contract } = run;
+    const reading: OwnerReplyReading = answer === 'cancel' ? 'reject' : 'amend';
+    const action: OwnerReplyAction = answer === 'cancel' ? 'stopped' : 'amended';
+    if (answer === 'retry') {
+      // The contract moves first; a refused move leaves the question open.
+      const unit = run.unit(escalation.targetId);
+      if (contract.status === 'awaiting-owner') run.moveContract(contract.statusBeforeOwner ?? 'running');
+      contract.statusBeforeOwner = undefined;
+      // A nudge that was waiting for the next turn is still queued: the unit goes back to waiting on it, not to a plain run.
+      if (unit !== undefined && unit.status === 'awaiting-owner') run.moveUnit(unit, (run.runtime(unit).session?.queued.length ?? 0) > 0 ? 'nudged' : 'running');
+    }
+    escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
+    escalation.resolvedAt = run.env.now();
+    run.decide('owner-replied', escalation.targetId, `${escalation.id}: ${answer}, ${answer === 'retry' ? 'the turn runs again' : 'the contract is stopped'}`);
+    run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+    if (answer === 'cancel') {
+      contract.failureKind = 'owner-rejected';
+      run.control.cancel('stopped by the owner after its turn kept failing');
+    } else {
+      context.ownerProgress(run);
+      context.checkpoint?.(run);
+    }
+    return { escalationId: escalation.id, reading, outcome: 'act', action };
+  }
+
+  async function replyClaimed(run: ContractRun, escalation: Escalation, text: string): Promise<OwnerReplyOutcome> {
     const usage = emptyJudgmentUsage();
     let read: Awaited<ReturnType<typeof ownerReply.read>>;
     try {
@@ -485,13 +653,23 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
         { site: OWNER_REPLY_SITE, signal: run.abort.signal },
       );
     } catch (error) {
+      // Nothing was decided and the question is still open: the owner can reply again.
       if (!run.terminal && !isAbortError(error, run.abort.signal)) {
-        const failure = failureFromError(error);
-        run.control.fail(failure.kind, `the owner's reply to ${escalation.id} could not be read: ${failure.reason}`);
+        throw new Error(`the reply to ${escalation.id} could not be read (${failureFromError(error).reason}); the question is still open, so reply again`, { cause: error });
       }
       throw error;
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
+    }
+    // The read awaited: another surface (an operator pick) may have answered
+    // this question while it ran, and may not be stamped over. Ending the
+    // contract aborts the read itself, so the terminal check is a guard against
+    // a reader that returned regardless of the abort.
+    if (run.terminal) {
+      throw new OwnerReplyRefusedError(`contract ${run.id} ended while the reply to ${escalation.id} was being read; nothing was applied`, 'ended');
+    }
+    if (escalation.resolvedAt !== undefined) {
+      throw new OwnerReplyRefusedError(`${escalation.id} was answered while the reply was being read; nothing was applied`, 'not-open');
     }
     const { choice, outcome } = read.reading;
     const reading = choice as OwnerReplyReading;
@@ -541,6 +719,13 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   async function operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void> {
     requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native attempts require a fresh Jev decision');
+    // A reply to this question that is being read would find the unit already taken and fail the contract.
+    const beingRead = open(run).find((escalation) => escalation.reason === 'attempts-undecided' && escalation.targetId === unitId && run.replying.has(escalation.id));
+    if (beingRead !== undefined) {
+      throw new AttemptError(`a reply to ${beingRead.id}, the question about unit ${unitId}'s attempts, is being read; wait for its result, then pick if the question is still open`);
+    }
+    // A refused pick leaves the owner's question open.
+    assertAttemptTakeable(run, unitId, attemptId);
     for (const escalation of open(run)) {
       if (escalation.reason === 'attempts-undecided' && escalation.targetId === unitId) escalation.resolvedAt = run.env.now();
     }
@@ -548,7 +733,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     await acceptAttempt(run, unitId, attemptId, 'picked by the operator (fleet.attempts.pick)');
   }
 
-  return { raise, unitAwaitsOwner, attemptsUndecided, reply, operatorPick };
+  return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, reply, operatorPick };
 }
 
 /** Criteria of a target that read unmet, and those that read unshown, by id. */

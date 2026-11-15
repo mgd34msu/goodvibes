@@ -136,9 +136,10 @@ test('mode owner survives queued message acceptance and expires when its session
   try {
     const first = host.manager.deliver(record.id, 'First turn');
     await Promise.race([entered, first.then(() => { throw new Error("Hosted turn ended before provider entered"); })]);
-    await host.manager.deliver(record.id, 'Queued turn');
+    // Delivery to a busy session settles when the queued turn itself ends.
+    const queued = host.manager.deliver(record.id, 'Queued turn');
     release();
-    await first;
+    await first; await queued;
     expect(modes).toEqual(['yolo', 'yolo']);
     expect(owner!.getMode()).toBe('yolo');
     await host.manager.kill(record.id);

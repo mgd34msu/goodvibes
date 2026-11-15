@@ -1,64 +1,7 @@
-import { renderCompletion as render } from '@goodvibes-jev/engine/terminal-shell/shell-completion';
-const COMMANDS = [
-  'tui',
-  'run',
-  'exec',
-  'serve',
-  'web',
-  'service',
-  'onboarding',
-  'setup',
-  'doctor',
-  'status',
-  'models',
-  'providers',
-  'auth',
-  'subscription',
-  'secrets',
-  'sessions',
-  'tasks',
-  'pair',
-  'qrcode',
-  'surfaces',
-  'listener',
-  'control-plane',
-  'support-bundle',
-  'remote',
-  'bridge',
-  'completion',
-  'version',
-  'help',
-] as const;
+import { generateCompletion } from './completions/generate.ts';
 
-const OPTIONS = [
-  '--help',
-  '--version',
-  '--model',
-  '--provider',
-  '--cd',
-  '--working-dir',
-  '--daemon-home',
-  '--config',
-  '--enable',
-  '--disable',
-  '--prompt',
-  '--print',
-  '--output',
-  '--output-format',
-  '--json',
-  '--no-alt-screen',
-  '--no-worries-just-vibes',
-  '--port',
-  '--hostname',
-  '--open',
-  '--resume',
-  '--session',
-  '--continue',
-  '--fork',
-  '--password',
-  '--password-stdin',
-  '--role',
-  '--manual',
-] as const;
-
-export const renderCompletion = (shell: string | undefined, binary = 'goodvibes') => render(shell, binary, { commands: COMMANDS, options: OPTIONS });
+/** An unknown or missing shell gets the bash script, as before. */
+export const renderCompletion = (shell: string | undefined, binary = 'goodvibes') => {
+  const normalized = (shell ?? 'bash').toLowerCase();
+  return generateCompletion(normalized === 'zsh' || normalized === 'fish' ? normalized : 'bash', binary);
+};

@@ -5,7 +5,9 @@ import { judgmentProcessSignal } from './process-owner.ts';
  * endpoint, then the two compositions that are not decisions of their own
  * (fan-out and the verify-then-escalate cascade) run on real examples. Every
  * call lands in a decision log. Exits non-zero on any decision below its
- * floor, any wrong composition result, or any call the log lacks.
+ * floor, any wrong composition result, or any call the log lacks (a call
+ * made through the port that has no entry in the log, or an answered call
+ * whose readings were not recorded).
  *
  *   bun run proof
  */
@@ -22,6 +24,7 @@ import {
   score,
   splitCompound,
   judgmentConfigFromEnv,
+  type JudgmentPort,
   SqliteDecisionLog,
   verifyThenEscalate,
   withDecisionLog,
@@ -31,7 +34,15 @@ import { judge, multipleActions, registry, ticketTriage, ticketUrgency } from '.
 const config = judgmentConfigFromEnv(process.env);
 const logPath = join(tmpdir(), `judgment-proof-${Date.now()}.sqlite`);
 using log = new SqliteDecisionLog(logPath);
-const port = withDecisionLog(createSystemOnePort({ ...config, signal: judgmentProcessSignal() }), log);
+const logged = withDecisionLog(createSystemOnePort({ ...config, signal: judgmentProcessSignal() }), log);
+// Every ask the proof makes goes through here, so the number issued can be set against the log.
+let issued = 0;
+const port: JudgmentPort = {
+  get model() { return logged.model; },
+  ...(logged.health ? { health: () => logged.health!() } : {}),
+  ...(logged.recorder ? { recorder: logged.recorder } : {}),
+  ask: (request) => { issued++; return logged.ask(request); },
+};
 
 const report = await calibrate(port, registry.list(), { endpoint: { kind: config.endpoint.kind, baseURL: config.endpoint.baseURL } });
 console.log(formatReport(report));
@@ -87,6 +98,8 @@ if (!featuresOk) failed++;
 
 const entries = log.query({ limit: 100_000 });
 const unlogged = entries.filter((entry) => entry.status === 'answered' && readingsOf(entry) === undefined);
-console.log(`\ndecision log: ${entries.length} entries at ${logPath}; ${unlogged.length} without readings`);
-if (unlogged.length > 0) failed++;
-process.exit(failed === 0 ? 0 : 1);
+const missing = Math.max(0, issued - entries.length);
+console.log(`\ndecision log: ${entries.length} entries at ${logPath}; ${issued} calls issued, ${missing} not in the log, ${unlogged.length} without readings`);
+if (unlogged.length > 0 || missing > 0) failed++;
+// Leave through the exit code so the module finishes and `using log` closes the database.
+process.exitCode = failed === 0 ? 0 : 1;

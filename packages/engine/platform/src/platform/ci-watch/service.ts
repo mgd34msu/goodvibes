@@ -10,12 +10,13 @@ import { PASSING_CONCLUSIONS } from './types.js';
  * subscription mechanism. A standing watch, when checked, fires a channel
  * notification on transition to a terminal verdict; on a RED verdict it
  * production composition obtains recorded Jev admission from the original
- * source owner. Historical low-level starter/offer callbacks remain explicit
- * compatibility APIs; the daemon and platform do not compose them. A watch whose
+ * source owner. The low-level starter callback remains an explicit
+ * compatibility API; the daemon and platform do not compose it. A watch whose
  * terminal verdict has been delivered retires itself, checks come from the
  * daemon poller (ci-watch/poller.ts) or the manual ci.watches.run verb.
  */
 import { randomUUID } from 'node:crypto';
+import { isGitHubRepoName, isGitRefName } from './git-names.js';
 import { deriveCiReport, failingJobNames, renderCiReportLines } from './report.js';
 import type { CiWatchStore } from './subscriptions.js';
 import {
@@ -25,7 +26,6 @@ import {
   type CiStatusSource,
   type CiWatchSubscription,
   type FixSessionBrief,
-  type FixSessionOffer,
   type FixSessionStartOutcome,
   type FixSessionStarter,
 } from './types.js';
@@ -51,19 +51,6 @@ export interface CiWatchServiceDeps {
   readonly notifier?: CiNotifier | undefined;
   /** Starts the opt-in fix-session; absent → the trigger is recorded but not started. */
   readonly fixSessionStarter?: FixSessionStarter | undefined;
-  /**
-   * The "fix this?" offer for red runs on watches WITHOUT the auto-start
-   * opt-in: acceptance starts the fix-session with the same brief. Absent →
-   * red runs on non-opted-in watches only notify (today's behavior).
-   */
-  readonly fixSessionOffer?: FixSessionOffer | undefined;
-  /**
-   * Stamps the started fix-session's id onto the accepted offer's RESOLVED
-   * approval record (broker seam) and publishes the update, so the surface
-   * that accepted gets a live in-process handle. Absent → the id is still
-   * delivered via the channel notification only.
-   */
-  readonly stampFixSession?: ((offerCallId: string, outcome: FixSessionStartOutcome) => Promise<unknown>) | undefined;
   readonly now?: (() => number) | undefined;
 }
 
@@ -84,8 +71,6 @@ export interface CiWatchCheckResult {
   readonly fixSessionId?: string | undefined;
   /** The honest failure when the auto-start fix-session did not produce an attachable session. */
   readonly fixSessionError?: string | undefined;
-  /** A "fix this?" offer was raised through the approval machinery (its acceptance runs async). */
-  readonly fixSessionOffered?: boolean | undefined;
   /** The watch was retired: its terminal verdict was delivered, so its job is done. */
   readonly retired?: boolean | undefined;
 }
@@ -96,6 +81,16 @@ function normalizeStartOutcome(result: FixSessionStartOutcome | string | undefin
   return typeof result === 'string' ? { sessionId: result } : result;
 }
 
+/** Refuse a repo or ref that could never be polled, so it is not stored as a watch that fails on every pass. */
+function requireValidTarget(repo: string, ref: string | undefined): void {
+  if (!isGitHubRepoName(repo)) {
+    throw new CiWatchError(`repo "${repo}" is not a GitHub owner/name (for example "acme/widgets")`, 'INVALID_ARGUMENT');
+  }
+  if (ref !== undefined && !isGitRefName(ref)) {
+    throw new CiWatchError(`ref "${ref}" is not a valid git ref name`, 'INVALID_ARGUMENT');
+  }
+}
+
 export class CiWatchService {
   private subscriptions: CiWatchSubscription[] | null = null;
   private loading: Promise<CiWatchSubscription[]> | undefined;
@@ -103,6 +98,16 @@ export class CiWatchService {
   private readonly lifetimes = new Map<string, AbortController>();
   private readonly checking = new Map<string, Promise<CiWatchCheckResult>>();
   private readonly repairClaims = new Set<string>();
+  // Watches whose terminal verdict is being delivered. They are still stored until the
+  // delivery finishes but will not be watched again, so listWatches hides them and a
+  // push to the same branch in that window mints a fresh watch instead of being deduped.
+  private readonly retiring = new Set<string>();
+  /**
+   * Verdicts whose notification went out but whose recorded state has not been
+   * saved yet. A failed save (or a failed owner revoke on a passed run) makes
+   * the next poll start over; without this it would notify again every time.
+   */
+  private readonly notifiedVerdicts = new Map<string, CiReport['overall']>();
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
@@ -134,7 +139,15 @@ export class CiWatchService {
   }
 
   private async all(): Promise<CiWatchSubscription[]> {
-    if (this.subscriptions === null) this.subscriptions = await (this.loading ??= this.deps.store.load().then(rows => rows.map(row => Object.freeze({ ...row }))));
+    if (this.subscriptions !== null) return this.subscriptions;
+    const loading = this.loading ??= this.deps.store.load().then(rows => rows.map(row => Object.freeze({ ...row })));
+    try {
+      this.subscriptions ??= await loading;
+    } catch (error) {
+      // A failed read (a locked or briefly unreadable file) must not be cached: the next call reads again.
+      if (this.loading === loading) this.loading = undefined;
+      throw error;
+    }
     return this.subscriptions;
   }
 
@@ -142,12 +155,13 @@ export class CiWatchService {
   async status(input: { repo: string; ref?: string; prNumber?: number }): Promise<CiReport> {
     const repo = input.repo?.trim();
     if (!repo) throw new CiWatchError('repo is required (owner/name)', 'INVALID_ARGUMENT');
+    requireValidTarget(repo, input.ref);
     const jobs = await this.deps.source.fetchJobs({ repo, ref: input.ref, prNumber: input.prNumber });
     return deriveCiReport({ repo, ref: input.ref, prNumber: input.prNumber, jobs, now: this.now() });
   }
 
   async listWatches(): Promise<CiWatchSubscription[]> {
-    return [...(await this.all())];
+    return (await this.all()).filter((watch) => !this.retiring.has(watch.id));
   }
 
   async createWatch(input: CreateCiWatchInput, operation: ExternalOperationSource | undefined = currentExternalOperationSource()): Promise<CiWatchSubscription> {
@@ -157,6 +171,7 @@ export class CiWatchService {
     if (input.ref === undefined && input.prNumber === undefined) {
       throw new CiWatchError('a ref or prNumber is required', 'INVALID_ARGUMENT');
     }
+    requireValidTarget(repo, input.ref);
     const channel = input.deliveryChannel?.trim();
     if (!channel) throw new CiWatchError('deliveryChannel is required', 'INVALID_ARGUMENT');
     const now = this.now();
@@ -178,7 +193,16 @@ export class CiWatchService {
     this.lifetimes.set(subscription.id, new AbortController());
     if (owner) this.owners.set(subscription.id, owner);
     subs.push(subscription);
-    await this.save(subs);
+    try {
+      await this.save(subs);
+    } catch (error) {
+      // The caller is told the watch was not created, so it must not keep
+      // polling, and a retry must not leave a second copy beside it.
+      const index = subs.indexOf(subscription);
+      if (index !== -1) subs.splice(index, 1);
+      this.lifetimes.delete(subscription.id); this.owners.delete(subscription.id);
+      throw error;
+    }
     return subscription;
   }
 
@@ -186,12 +210,20 @@ export class CiWatchService {
     const subs = await this.all();
     const index = subs.findIndex((s) => s.id === id);
     if (index === -1) return false;
-    this.lifetimes.get(id)?.abort();
-    const owner = nativeCiWatchOwner(this.owners.get(id));
-    if (owner) await owner.revoke();
-    else if (subs[index]!.continuationId && this.deps.revokeOwner) await this.deps.revokeOwner(subs[index]!);
-    else await nativeCiWatchOwner(await this.deps.recoverOwner?.(subs[index]!))?.revoke();
-    this.lifetimes.delete(id); this.owners.delete(id);
+    const lifetime = this.lifetimes.get(id);
+    lifetime?.abort();
+    try {
+      const owner = nativeCiWatchOwner(this.owners.get(id));
+      if (owner) await owner.revoke();
+      else if (subs[index]!.continuationId && this.deps.revokeOwner) await this.deps.revokeOwner(subs[index]!);
+      else await nativeCiWatchOwner(await this.deps.recoverOwner?.(subs[index]!))?.revoke();
+    } catch (error) {
+      // The watch is still listed, so it must keep working: drop the aborted
+      // lifetime (the next check makes a fresh one) and let the caller retry the delete.
+      if (lifetime && this.lifetimes.get(id) === lifetime) this.lifetimes.delete(id);
+      throw error;
+    }
+    this.lifetimes.delete(id); this.owners.delete(id); this.notifiedVerdicts.delete(id);
     subs.splice(index, 1);
     await this.save(subs);
     return true;
@@ -206,7 +238,7 @@ export class CiWatchService {
   checkWatch(id: string): Promise<CiWatchCheckResult> {
     const prior = this.checking.get(id); if (prior) return prior;
     const pending = this.checkOwnedWatch(id); this.checking.set(id, pending);
-    void pending.finally(() => { if (this.checking.get(id) === pending) this.checking.delete(id); }).catch(() => {});
+    void pending.finally(() => { this.retiring.delete(id); if (this.checking.get(id) === pending) this.checking.delete(id); }).catch(() => {});
     return pending;
   }
   private async checkOwnedWatch(id: string): Promise<CiWatchCheckResult> {
@@ -227,15 +259,18 @@ export class CiWatchService {
     let fixSessionTriggered = false;
     let fixSessionId: string | undefined;
     let fixSessionError: string | undefined;
-    let fixSessionOffered = false;
 
+    if (terminal && changed && this.deps.notifier && !(subscription.continuationId && report.overall === 'failed')) this.retiring.add(id);
     if (terminal && (changed || (report.overall === 'failed' && subscription.continuationId))) {
       if (changed && this.deps.notifier) {
-        notificationId = await this.deps.notifier(
-          subscription.deliveryChannel,
-          `CI ${report.overall}, ${report.repo}`,
-          renderCiReportLines(report),
-        );
+        if (this.notifiedVerdicts.get(id) !== report.overall) {
+          notificationId = await this.deps.notifier(
+            subscription.deliveryChannel,
+            `CI ${report.overall}, ${report.repo}`,
+            renderCiReportLines(report),
+          );
+          this.notifiedVerdicts.set(id, report.overall);
+        }
         notified = true;
       }
       assertCurrent();
@@ -258,7 +293,9 @@ export class CiWatchService {
                 // Retry may reconcile partial publication or a lost response, never mint a second lifetime.
                 if (nativeCiWatchOwner(operation)) return;
                 if (this.repairClaims.has(failureKey)) throw new Error('CI failure repair is already claimed');
-                if (this.repairClaims.size >= 10_000) throw new Error('CI repair claim capacity reached');
+                // The oldest claim makes room: a repair that old has long finished, and
+                // refusing every new one for the life of the process is the worse failure.
+                if (this.repairClaims.size >= 10_000) this.repairClaims.delete(this.repairClaims.values().next().value!);
                 this.repairClaims.add(failureKey);
               },
             }));
@@ -271,52 +308,23 @@ export class CiWatchService {
           // notification so a surface can open/attach it.
           fixSessionTriggered = true;
           if (this.deps.fixSessionStarter) {
-            const started = normalizeStartOutcome(await this.deps.fixSessionStarter(await this.composeFixBrief(subscription, report)));
-            if ('sessionId' in started) {
-              fixSessionId = started.sessionId;
-              await this.notifyFixSessionStarted(subscription, report, started.sessionId);
-            } else {
-              // The honest failure rides the verb result, never a dead id.
-              fixSessionError = started.error;
-              logger.warn('[ci-watch] auto-start fix-session failed', { repo: subscription.repo, error: started.error });
-            }
-          }
-        } else if (this.deps.fixSessionOffer && this.deps.fixSessionStarter) {
-          // "Fix this?", an actionable offer through the approval/attention
-          // machinery. Fire-and-forget: a human decision must never block the
-          // poll loop or the manual verb; acceptance starts the seeded session,
-          // and the started id is delivered via the channel notification (the
-          // verb result has already returned by then).
-          fixSessionOffered = true;
-          const brief = await this.composeFixBrief(subscription, report);
-          const offer = this.deps.fixSessionOffer;
-          const starter = this.deps.fixSessionStarter;
-          void (async () => {
+            // A throw here must not skip recording the verdict below: the
+            // notification already went out, and an unsaved verdict re-notifies on every poll.
             try {
-              const outcome = await offer(brief);
-              const accepted = typeof outcome === 'boolean' ? outcome : outcome.accepted;
-              const offerCallId = typeof outcome === 'boolean' ? undefined : outcome.offerCallId;
-              if (!accepted) return;
-              const started = normalizeStartOutcome(await starter(brief));
-              // The accepting surface is attached NOW: stamp the outcome onto
-              // the resolved approval record (published live through the
-              // broker) so it has an in-process handle to open the session,
-              // or the honest failure, never a dead id. The channel
-              // notification below stays for paired channels.
-              if (offerCallId && this.deps.stampFixSession) {
-                await this.deps.stampFixSession(offerCallId, started);
-              }
+              const started = normalizeStartOutcome(await this.deps.fixSessionStarter(await this.composeFixBrief(subscription, report)));
               if ('sessionId' in started) {
+                fixSessionId = started.sessionId;
                 await this.notifyFixSessionStarted(subscription, report, started.sessionId);
               } else {
-                logger.warn('[ci-watch] accepted fix-session failed to start', { repo: subscription.repo, error: started.error });
+                // The honest failure rides the verb result, never a dead id.
+                fixSessionError = started.error;
+                logger.warn('[ci-watch] auto-start fix-session failed', { repo: subscription.repo, error: started.error });
               }
             } catch (error) {
-              logger.warn('[ci-watch] fix-session offer did not complete', {
-                repo: subscription.repo, error: summarizeError(error),
-              });
+              fixSessionError = summarizeError(error);
+              logger.warn('[ci-watch] auto-start fix-session failed', { repo: subscription.repo, error: fixSessionError });
             }
-          })();
+          }
         }
       }
     }
@@ -330,6 +338,7 @@ export class CiWatchService {
     const currentIndex = subs.indexOf(subscription);
     if (currentIndex !== -1) {
       if (retired) {
+        this.retiring.add(id);
         if (report.overall === 'passed') {
           const owner = nativeCiWatchOwner(this.owners.get(id));
           if (owner) await owner.revoke();
@@ -339,6 +348,8 @@ export class CiWatchService {
         subs.splice(currentIndex, 1); this.owners.delete(id); this.lifetimes.delete(id); }
       else subs[currentIndex] = Object.freeze({ ...subscription, lastOverall: report.overall, updatedAt: this.now() });
       await this.save(subs);
+      // The verdict is on record now, so the next poll sees it as delivered.
+      this.notifiedVerdicts.delete(id);
     }
 
     return {
@@ -348,7 +359,6 @@ export class CiWatchService {
       fixSessionTriggered,
       ...(fixSessionId ? { fixSessionId } : {}),
       ...(fixSessionError ? { fixSessionError } : {}),
-      ...(fixSessionOffered ? { fixSessionOffered } : {}),
       ...(retired ? { retired } : {}),
     };
   }

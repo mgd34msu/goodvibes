@@ -273,6 +273,16 @@ export async function classifyMerchant(
   }
 
   if (ownerAdded) {
+    // The owner's override settles who the merchant is, not what can be bought
+    // there: a listing whose price is not fixed has no total to show before
+    // paying, whoever the seller is. Only the sale format is applied here; the
+    // reputation thresholds stay the owner's to waive.
+    if (merchant.listing !== undefined) {
+      const format = evaluateMarketplaceListing(merchant.listing, policy.listingThresholds ?? DEFAULT_MARKETPLACE_LISTING_THRESHOLDS);
+      if (format.outcome === 'refuse') {
+        return { isMajor: false, refused: true, registrable, basis: 'owner-override', reason: format.reason };
+      }
+    }
     return {
       isMajor: true,
       registrable,

@@ -25,6 +25,10 @@ import { getKnowledgeSpaceId } from '../spaces.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
 import type { HomeGraphAskResult } from './types.js';
 
+// Passport pages are regenerated inside the ask request, each with model
+// readings; the cap keeps latency bounded when an answer links many devices.
+// Fact-subject links are still written for every linked device.
+const MAX_ASK_PAGE_REFRESHES = 3;
 const MAX_ASK_REFRESH_DEVICES = Infinity;
 const MAX_ASK_PAGE_SOURCES_TO_CONSIDER = Infinity;
 const MAX_ASK_PAGE_SOURCES_TO_LINK = Infinity;
@@ -78,7 +82,7 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
     recovery.assertCurrent();
   }
   let refreshed = 0;
-  for (const device of devices) {
+  for (const device of devices.slice(0, MAX_ASK_PAGE_REFRESHES)) {
     selectedDevices.assertCurrent();
     const deviceId = readHomeAssistantMetadataString(device, 'objectId', 'deviceId') ?? device.id;
     try {
@@ -108,7 +112,7 @@ export async function refreshDevicePagesForHomeGraphAsk(input: {
       recovery.assertCurrent();
     }
   }
-  recovery.assertCurrent();
+  recovery.assertUnchanged();
   return { requested: devices.length > 0, refreshed };
 }
 

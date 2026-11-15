@@ -10,7 +10,7 @@ import { plannerOutput } from './plan-support.js';
 import { MET, amendmentOutput, answers, finishes, fixPlan, fixedOutputsMeet, judgeOf, keepsFailing, replyAnswers, routeAnswer, stepPlanner, terminal } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => { harness?.dispose(); harness = undefined; });
+afterEach(async () => { const finished = harness; harness = undefined; await finished?.dispose(); });
 
 for (const mode of ['normal', 'stale', 'stale-check', 'cancel'] as const) {
   test(`planned-fix sees produced work in a frozen descendant view (${mode})`, async () => {

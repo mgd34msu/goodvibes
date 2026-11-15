@@ -119,6 +119,37 @@ export function renderDevicePassportPage(input: {
   ].filter(Boolean).join('\n');
 }
 
+const PACKET_SECTIONS = ['devices', 'rooms', 'maintenance', 'troubleshooting', 'network', 'sources', 'issues'] as const;
+type PacketSection = typeof PACKET_SECTIONS[number];
+
+/**
+ * What each sharing profile may ever show. Anything not listed is withheld,
+ * and `includeFields` can only narrow a profile, never widen it. The default
+ * profile keeps the full packet.
+ */
+const PACKET_PROFILE_SECTIONS: Readonly<Record<string, readonly PacketSection[]>> = {
+  default: PACKET_SECTIONS,
+  guest: ['devices', 'rooms'],
+  'pet-sitter': ['devices', 'rooms', 'maintenance'],
+  emergency: ['devices', 'rooms', 'troubleshooting'],
+  contractor: ['devices', 'rooms', 'maintenance', 'troubleshooting'],
+  'network-admin': ['devices', 'network', 'troubleshooting'],
+};
+
+function packetFieldNames(label: string, fields: readonly string[] | undefined): Set<PacketSection> {
+  const names = new Set<PacketSection>();
+  for (const field of fields ?? []) {
+    const name = field.trim().toLowerCase() as PacketSection;
+    if (!PACKET_SECTIONS.includes(name)) {
+      throw new GoodVibesError(`Unknown packet field "${field}" in ${label}; use ${PACKET_SECTIONS.join(', ')}.`, {
+        category: 'bad_request', source: 'runtime', operation: 'homegraph.packet', recoverable: true,
+      });
+    }
+    names.add(name);
+  }
+  return names;
+}
+
 export function renderPacketPage(state: HomeGraphRenderState, options: {
   readonly packetKind?: string | undefined;
   readonly sharingProfile?: string | undefined;
@@ -126,21 +157,30 @@ export function renderPacketPage(state: HomeGraphRenderState, options: {
   readonly excludeFields?: readonly string[] | undefined;
 } = {}): string {
   const profile = options.sharingProfile ?? 'default';
-  const title = options.packetKind ? titleCase(options.packetKind) : state.title;
-  const excluded = new Set((options.excludeFields ?? []).map((field) => field.toLowerCase()));
+  const profileSections = Object.hasOwn(PACKET_PROFILE_SECTIONS, profile) ? PACKET_PROFILE_SECTIONS[profile] : undefined;
+  if (!profileSections) {
+    throw new GoodVibesError(`Unknown sharing profile "${profile}"; use ${Object.keys(PACKET_PROFILE_SECTIONS).join(', ')}.`, {
+      category: 'bad_request', source: 'runtime', operation: 'homegraph.packet', recoverable: true,
+    });
+  }
+  const title = state.title;
+  const included = packetFieldNames('includeFields', options.includeFields);
+  const excluded = packetFieldNames('excludeFields', options.excludeFields);
+  const shows = (section: PacketSection): boolean => profileSections.includes(section)
+    && (included.size === 0 || included.has(section)) && !excluded.has(section);
   return [
     `# ${title}`,
     '',
     `Sharing profile: \`${profile}\``,
     `Knowledge space: \`${state.spaceId}\``,
     '',
-    excluded.has('devices') ? '' : renderNodeList('Devices', state.nodes.filter((node) => node.kind === 'ha_device')),
-    excluded.has('rooms') ? '' : renderNodeList('Rooms', state.nodes.filter((node) => node.kind === 'ha_area' || node.kind === 'ha_room')),
-    excluded.has('maintenance') ? '' : renderNodeList('Maintenance', state.nodes.filter((node) => node.kind === 'ha_maintenance_item')),
-    excluded.has('troubleshooting') ? '' : renderNodeList('Troubleshooting', state.nodes.filter((node) => node.kind === 'ha_troubleshooting_case')),
-    excluded.has('network') ? '' : renderNodeList('Network', state.nodes.filter((node) => node.kind === 'ha_network_node')),
-    excluded.has('sources') ? '' : renderSourceList('Sources', state.sources.filter((source) => !isGeneratedPageSource(source))),
-    excluded.has('issues') ? '' : renderIssueList('Open Issues', state.issues.filter((issue) => issue.status === 'open')),
+    shows('devices') ? renderNodeList('Devices', state.nodes.filter((node) => node.kind === 'ha_device')) : '',
+    shows('rooms') ? renderNodeList('Rooms', state.nodes.filter((node) => node.kind === 'ha_area' || node.kind === 'ha_room')) : '',
+    shows('maintenance') ? renderNodeList('Maintenance', state.nodes.filter((node) => node.kind === 'ha_maintenance_item')) : '',
+    shows('troubleshooting') ? renderNodeList('Troubleshooting', state.nodes.filter((node) => node.kind === 'ha_troubleshooting_case')) : '',
+    shows('network') ? renderNodeList('Network', state.nodes.filter((node) => node.kind === 'ha_network_node')) : '',
+    shows('sources') ? renderSourceList('Sources', state.sources.filter((source) => !isGeneratedPageSource(source))) : '',
+    shows('issues') ? renderIssueList('Open Issues', state.issues.filter((issue) => issue.status === 'open')) : '',
   ].filter(Boolean).join('\n');
 }
 

@@ -24,9 +24,18 @@ interface NoticeDelivery {
   /** Related narration joins this same queue/deadline; it never runs after delivery. */
   readonly prepare?: (signal: AbortSignal) => Promise<void>;
 }
+/** Deadline timers; tests substitute their own so the deadline needs no real waiting. */
+export interface ErrorNoticeTimers {
+  setTimeout(callback: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+const realTimers: ErrorNoticeTimers = {
+  setTimeout: (callback, ms) => { const timer = setTimeout(callback, ms); timer.unref?.(); return timer; },
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 interface PendingNotice {
   delivery: NoticeDelivery | undefined;
-  timer: ReturnType<typeof setTimeout> | undefined;
+  timer: unknown;
   ready: boolean;
   errorReady: boolean;
   preparationReady: boolean;
@@ -42,7 +51,7 @@ interface PendingNotice {
  * `null` explicitly means unavailable interpretation; there is no classifier
  * fallback and no fabricated generic reading.
  */
-export function createErrorNoticeOwner(timeoutMs = ERROR_NOTICE_TIMEOUT_MS) {
+export function createErrorNoticeOwner(timeoutMs = ERROR_NOTICE_TIMEOUT_MS, timers: ErrorNoticeTimers = realTimers) {
   const pending: PendingNotice[] = [];
   let closed = false;
   const safely = (work: () => void): void => {
@@ -51,7 +60,7 @@ export function createErrorNoticeOwner(timeoutMs = ERROR_NOTICE_TIMEOUT_MS) {
     }
   };
   const release = (item: PendingNotice): NoticeDelivery | undefined => {
-    if (item.timer !== undefined) clearTimeout(item.timer);
+    if (item.timer !== undefined) timers.clearTimeout(item.timer);
     item.controller.abort();
     const delivery = item.delivery;
     item.delivery = undefined;
@@ -87,7 +96,7 @@ export function createErrorNoticeOwner(timeoutMs = ERROR_NOTICE_TIMEOUT_MS) {
         if (!item.delivery || item.ready) return;
         if (!item.errorReady || !item.preparationReady) return;
         item.ready = true;
-        if (item.timer !== undefined) clearTimeout(item.timer);
+        if (item.timer !== undefined) timers.clearTimeout(item.timer);
         flush();
       };
       const settleError = (reading: UserFacingError | null): void => {
@@ -98,12 +107,11 @@ export function createErrorNoticeOwner(timeoutMs = ERROR_NOTICE_TIMEOUT_MS) {
         if (!item.delivery || item.ready) return;
         item.preparationReady = true; update();
       };
-      item.timer = setTimeout(() => {
+      item.timer = timers.setTimeout(() => {
         if (!item.delivery || item.ready) return;
         // Preserve an error already read successfully if only setup facts stalled.
         item.controller.abort(); item.ready = true; flush();
       }, timeoutMs);
-      item.timer.unref?.();
       void readUserFacingError(error, site).then(settleError, () => settleError(null));
       if (delivery.prepare) void Promise.resolve().then(() => {
         if (!item.controller.signal.aborted) return item.delivery?.prepare?.(item.controller.signal);

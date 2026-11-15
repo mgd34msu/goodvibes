@@ -1,7 +1,7 @@
 <!-- GENERATED FILE: DO NOT EDIT BY HAND.
      Regenerate with `bun run docs:commands`.
      Source of truth: the slash-command registry (src/input/commands.ts).
-     `bun run release:prepare` rewrites it at each version bump. -->
+     Only that command rewrites it; rerun it after changing a command. -->
 
 # Command Reference
 
@@ -136,7 +136,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/cloudflare` | `/cf` | `[status\|setup\|requirements\|create-token\|discover\|validate\|provision\|verify\|disable] [flags]` | Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes |
+| `/cloudflare` | `/cf` | `[status\|setup\|requirements\|create-token\|discover\|validate\|provision\|verify\|disable --yes] [flags]` | Inspect and manage optional Cloudflare batch/control-plane integration through daemon routes |
 
 ## Cluster
 
@@ -222,7 +222,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/git` | `/g` | `[status\|log\|diff]` | Git repository commands: status, log, diff |
+| `/git` | `/g` | `[status\|log\|diff\|init]` | Git repository commands: status, log, diff, init |
 
 ## Guidance
 
@@ -242,7 +242,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/hooks` | None | `[contracts [filter] \| reload \| scaffold <name> <match> <type> \| chain <name> <event1,event2,...> \| remove <name> \| enable <name> \| disable <name> \| simulate <eventPath> \| inspect <path> \| import <path> [merge\|replace] \| export [path]]` | Inspect, author, simulate, and reload managed hook workflows |
+| `/hooks` | None | `[contracts [filter] \| reload \| scaffold <name> <match> <type> \| chain <name> <event1,event2,...> \| remove <name> \| enable <name> \| disable <name> \| simulate <eventPath> \| inspect <path> \| import <path> [merge\|replace [--yes]] \| export [path]]` | Inspect, author, simulate, and reload managed hook workflows |
 
 ## Image
 
@@ -254,7 +254,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/incident` | None | `[open \| latest \| show <id\|latest> \| export <id\|latest> <path> \| capture <id\|latest>]` | Open, export, and capture incident review bundles |
+| `/incident` | None | `[open \| latest \| show <id\|latest> \| export <id\|latest> <path> [--overwrite] \| capture <id\|latest>]` | Open, export, and capture incident review bundles |
 
 ## Intelligence
 
@@ -272,7 +272,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/local-auth` | `/auth-local` | `[review\|panel\|add-user <username> <password> [roles]\|delete-user <username>\|rotate-password <username> <password>\|revoke-session <session-id-or-token>\|clear-bootstrap-file]` | Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials |
+| `/local-auth` | `/auth-local` | `[review\|panel\|add-user <username> <password> [roles, default user]\|delete-user <username>\|rotate-password <username> <password>\|revoke-session <session-id-or-token>\|clear-bootstrap-file]` | Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials |
 
 ## Local Providers
 
@@ -299,7 +299,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/setup` | `/startup` | `[review\|doctor\|services\|hooks\|remote\|sandbox\|onboarding\|support-bundle <dir>\|export <path>\|transfer <export\|inspect\|import> <path>\|link <surface> [target]\|open-link <uri>]` | Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up |
+| `/setup` | `/startup` | `[review\|doctor\|services\|hooks\|remote\|sandbox\|onboarding\|support-bundle <dir> [--overwrite]\|export <path> [--overwrite]\|transfer <export [--overwrite]\|inspect\|import [--yes]> <path>\|link <surface> [target]\|open-link <uri>]` | Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up |
 
 ## Mail & Calendar
 
@@ -312,7 +312,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/managed` | None | `[review\|staged\|rollback-history\|export <profile> <path>\|inspect <path>\|stage <path>\|apply <path> [key ...]\|apply-staged [key ...]\|rollback <token>\|lock <key> <source> <reason...>\|unlock <key>]` | Export, inspect, and apply managed settings bundles |
+| `/managed` | None | `[review\|staged\|rollback-history\|export <profile> <path>\|inspect <path>\|stage <path>\|apply <path> [key ...] [--yes]\|apply-staged [key ...]\|rollback <token>\|lock <key> <source> <reason...>\|unlock <key>]` | Export, inspect, and apply managed settings bundles |
 
 ## Marketplace
 
@@ -354,7 +354,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/context` | `/ctx` | `[window [<size>\|clear]]` | Inspect context usage, or set/clear a custom context window for the current model |
-| `/forensics` | `/foren` | `[latest \| show <id> \| export <id>]` | Failure Forensics: view, inspect, and export auto-classified failure reports |
+| `/forensics` | `/foren` | `[latest \| show <id> \| export <id> [path] [--overwrite]]` | Failure Forensics: view, inspect, and export auto-classified failure reports |
 | `/mode` | `/hitl` | `[quiet\|balanced\|operator\|show\|set-domain <domain> <verbosity>]` | Manage HITL UX notification mode (quiet/balanced/operator) |
 | `/next-error` | `/ne` | None | Jump to the next error message in the conversation |
 | `/ops` | None | `view \| task <cancel\|pause\|resume\|retry> <id> [note] \| agent cancel <id> [note]` | Operator Control Plane: view audit log, cancel/pause/resume/retry tasks and agents |
@@ -374,7 +374,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/payments` | None | `/payments [card\|status\|pending]` | Payment card setup and pending purchase approval/veto windows |
+| `/payments` | None | `/payments [card [remove <id>]\|status\|pending]` | Payment card setup and pending purchase approval/veto windows |
 
 ## Permissions
 
@@ -399,9 +399,9 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/auth` | None | `[review\|show <provider>\|repair <provider>\|bundle export <path>\|bundle inspect <path>\|login <daemon\|listener> <baseUrl> <username> <password> [secretKey]\|local <review\|panel\|add-user\|delete-user\|rotate-password\|revoke-session\|clear-bootstrap-file>]` | Review auth posture and exchange session login tokens with local services |
+| `/auth` | None | `[review\|show <provider>\|repair <provider>\|bundle export <path>\|bundle inspect <path>\|login <daemon\|listener> <baseUrl> <username> [password] [secretKey]\|local <review\|panel\|add-user\|delete-user\|rotate-password\|revoke-session\|clear-bootstrap-file>]` | Review auth posture and exchange session login tokens with local services |
 | `/install` | None | `[review\|bundle export <path>\|bundle inspect <path>]` | Review install posture and export portable install bundles |
-| `/login` | None | `[provider <name> start\|finish <code>\|service <daemon\|listener> <baseUrl> <username> <password> [secretKey]]` | Front-door login flow for provider subscriptions and local service sessions |
+| `/login` | None | `[provider <name> start\|finish <code>\|service <daemon\|listener> <baseUrl> <username> [password] [secretKey]]` | Front-door login flow for provider subscriptions and local service sessions |
 | `/logout` | None | `provider <name>` | Front-door logout flow for provider subscription sessions and supported overrides |
 | `/update` | `/upgrade` | `[check\|apply\|rollback\|review\|bundle export <path>\|bundle inspect <path>]` | Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version |
 
@@ -429,7 +429,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/principals` | None | `[list\|get <id>\|create <name> <kind> [channel:value...]\|update <id> [--name x] [--kind x] [--identities c:v,c:v]\|delete <id>\|resolve <channel> <value>]` | Identity mappings: named principals and their channel identities |
+| `/principals` | None | `[list\|get <id>\|create <name> <kind> [channel:value...]\|update <id> [--name x] [--kind x] [--identities c:v,c:v\|none]\|delete <id>\|resolve <channel> <value>]` | Identity mappings: named principals and their channel identities |
 
 ## Product
 
@@ -443,7 +443,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/profile-sync` | `/profilesync` | `[list\|export <path>\|inspect <path>\|import <path> [prefix]]` | Export, import, and inspect profile sync bundles |
+| `/profile-sync` | `/profilesync` | `[list\|export <path>\|inspect <path>\|import <path> [prefix] [--overwrite]]` | Export, import, and inspect profile sync bundles |
 
 ## Provider Accounts
 
@@ -492,7 +492,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/devices` | `/device` | `[list\|rename <id> <name>\|revoke <id>\|migrate-shared [name]\|revoke-shared]` | Manage paired-device tokens (list, rename, revoke, migrate-shared) |
+| `/devices` | `/device` | `[list\|rename <id> <name>\|revoke <id>\|migrate-shared [name]\|revoke-shared --yes]` | Manage paired-device tokens (list, rename, revoke, migrate-shared) |
 | `/host` | None | None | Inspect or explicitly pair this TUI with its selected host in the owner terminal |
 
 ## Services
@@ -520,7 +520,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/hosted` | None | `[new\|list\|attach\|say\|later\|cancel\|detach\|kill] [args]` | Daemon-hosted sessions: start, join, steer and leave a conversation whose loop runs in the daemon |
+| `/hosted` | None | `[new\|list\|attach\|say\|later\|cancel\|detach\|kill <id> --yes] [args]` | Daemon-hosted sessions: start, join, steer and leave a conversation whose loop runs in the daemon |
 | `/replay` | `/rep` | `[load [runId] \| step [n] \| seek <rev> \| diff \| export <path>]` | Deterministic replay: load, step, seek, diff, and export recorded runs |
 | `/resume` | None | `[session-id-or-name]` | Resume a previous session, pick from a list or pass an id/name |
 | `/session` | `/sess` | `<subcommand> [args]` | Session lifecycle and orchestration: list, resume, fork, save, export, link-task, handoff, graph, cancel |
@@ -572,7 +572,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/subscription` | `/subs` | `[review\|list\|providers\|inspect <provider>\|login <provider> start [--no-browser] [--manual]\|finish <code-or-url>\|logout <provider>\|bundle export <path>\|bundle inspect <path>]` | Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers |
+| `/subscription` | `/subs` | `[review\|list\|providers\|inspect <provider>\|login <provider> start [--no-browser] [--manual]\|finish <code-or-url>\|logout <provider>\|bundle export <path> --yes\|bundle inspect <path>]` | Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers |
 
 ## Tasks
 
@@ -608,7 +608,7 @@ GoodVibes ships **162** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/work-plan` | `/wp`, `/todo`, `/workplan` | `[panel\|list\|show\|export\|add <title> [--owner name] [--source label] [--notes text]\|edit <id> [<new title>] [--owner name] [--notes text]\|done <id>\|start <id>\|block <id>\|fail <id>\|cancel <id>\|pending <id>\|remove <id>\|clear-done]` | Track a persistent workspace-scoped work plan |
+| `/work-plan` | `/wp`, `/todo`, `/workplan` | `[panel\|list\|show\|export\|add <title> [--owner name] [--source label] [--notes text]\|edit <id> [<new title>] [--owner name] [--source label] [--notes text]\|cycle <id>\|done <id>\|start <id>\|block <id>\|fail <id>\|cancel <id>\|pending <id>\|remove <id>\|clear-done]` | Track a persistent workspace-scoped work plan |
 
 ## Workstreams
 

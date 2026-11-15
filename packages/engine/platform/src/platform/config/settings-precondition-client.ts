@@ -7,6 +7,7 @@ import { deriveControlPlaneBaseUrl } from './control-plane-base-url.js';
 import { detachedDaemonProcessAlive, detachedDaemonRuntimePath, type DetachedDaemonRuntimeHint } from '../runtime/detached-daemon-runtime.js';
 import type { ConfigWriteRoute, DaemonConfigEndpoint, DaemonConfigRouterDeps } from './daemon-config-route.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
+import { SettingsRefusalError, refusalReasonOf, refusalText } from './settings-refusal.js';
 import type { SettingsPreconditionFacts, SettingsPreconditionReceipt, SettingsPreconditionRequest } from '@goodvibes-jev/engine/daemon-api';
 
 export type { SettingsPreconditionRequest, SettingsPreconditionReceipt };
@@ -29,6 +30,18 @@ interface Entry {
 }
 const entries = new WeakMap<RemoteSettingsPrecondition, Entry>();
 function unavailable(): Error { return new Error('Settings owner precondition unavailable; fresh capture and admission required.'); }
+const PAIRING_STORE_FAULTED_TEXT = 'Settings change refused: the daemon\'s pairing token store is faulted, so paired and shared-token settings authority is held. Nothing was applied. Retrying will not help until the store is readable again; a failed revoke, rename or grant write holds until the daemon restarts.';
+/** A capture refusal that names a cause the caller can act on; anything else stays the generic refusal. */
+async function captureRefusal(response: Response): Promise<Error> {
+  if (response.redirected || response.status !== 409) return unavailable();
+  try {
+    const body: unknown = await response.json();
+    if (!record(body)) return unavailable();
+    if (body.code === 'PAIRING_STORE_FAULTED') return new SettingsRefusalError('pairing-store-faulted', PAIRING_STORE_FAULTED_TEXT);
+    const reason = refusalReasonOf(body);
+    return reason ? new SettingsRefusalError(reason, refusalText('Settings change', reason)) : unavailable();
+  } catch { return unavailable(); }
+}
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function exact(value: Record<string, unknown>, fields: readonly string[]): boolean {
   const keys = Object.keys(value); return keys.length === fields.length && keys.every(key => fields.includes(key));
@@ -141,24 +154,25 @@ function validFacts(value: unknown, request: SettingsPreconditionRequest): value
   if (!record(value) || !exact(value, ['operation', 'key', 'value', 'destinations', 'incarnation', ...(compound ? ['credentialClear', 'credential'] : [])])
     || value.operation !== request.operation || value.key !== request.key || !Number.isSafeInteger(value.incarnation) || Number(value.incarnation) < 0
     || !Array.isArray(value.destinations) || value.destinations.length === 0 || value.destinations.length > 16) return false;
-  let configOffset = 0;
+  // Configuration is published first, the credential last (so a failure between
+  // them leaves an orphan credential, never configuration pointing at a deleted one).
+  let configCount = value.destinations.length;
   if (compound) {
     const credential = value.credential;
     const scope = configKeyScope(request.key) === 'daemon' ? 'daemon' : 'user';
     if (value.credentialClear !== true || !record(credential) || !exact(credential, ['key', 'scope', 'destinations'])
       || credential.key !== daemonSecretKeyFor(request.key) || credential.scope !== scope
       || !Array.isArray(credential.destinations) || credential.destinations.length >= value.destinations.length) return false;
-    configOffset = credential.destinations.length;
+    configCount = value.destinations.length - credential.destinations.length;
     if (!credential.destinations.every((destination, index) => record(destination) && exact(destination, ['path', 'operation', 'tier'])
       && typeof destination.path === 'string' && destination.path.length > 0 && destination.operation === 'remove' && destination.tier === scope
-      && record((value.destinations as unknown[])[index])
-      && ['path', 'operation', 'tier'].every(field => destination[field] === ((value.destinations as Record<string, unknown>[])[index]!)[field]))) return false;
+      && record((value.destinations as unknown[])[configCount + index])
+      && ['path', 'operation', 'tier'].every(field => destination[field] === ((value.destinations as Record<string, unknown>[])[configCount + index]!)[field]))) return false;
   }
   return value.destinations.every((destination, index) => record(destination) && exact(destination, ['path', 'operation', 'tier'])
     && typeof destination.path === 'string' && destination.path.length > 0
-    && destination.operation === (index < configOffset ? 'remove' : 'set')
-    && (index < configOffset ? destination.tier === (value.credential as Record<string, unknown>).scope
-      : ['global', 'project', 'daemon', 'shared'].includes(String(destination.tier))));
+    && (index < configCount ? destination.operation === 'set' && ['global', 'project', 'daemon', 'shared'].includes(String(destination.tier))
+      : destination.operation === 'remove' && destination.tier === (value.credential as Record<string, unknown>).scope));
 }
 export async function captureRemoteSettingsPrecondition(
   endpoint: DaemonConfigEndpoint,
@@ -181,7 +195,7 @@ export async function captureRemoteSettingsPrecondition(
   try {
     const response = await fetchImpl(url, { method: 'POST', headers: authHeaders, redirect: 'error',
       body: JSON.stringify({ settingsPrecondition: { version: 1, action: 'capture', ...capturedRequest } }), signal: AbortSignal.timeout(timeoutMs) });
-    if (!response.ok || response.redirected) throw unavailable();
+    if (!response.ok || response.redirected) throw await captureRefusal(response);
     const payload: unknown = await response.json();
     if (!record(payload) || !exact(payload, ['settingsPrecondition']) || !record(payload.settingsPrecondition)) throw unavailable();
     const arm = payload.settingsPrecondition;
@@ -197,7 +211,7 @@ export async function captureRemoteSettingsPrecondition(
     const handle = Object.freeze({}) as RemoteSettingsPrecondition;
     entries.set(handle, { facts, reference: arm.reference, url, headers: authHeaders, fetchImpl, timeoutMs, localExpiresAt, ...(deps.assertCurrent ? { assertCurrent: deps.assertCurrent } : {}), spent: false });
     return handle;
-  } catch { throw unavailable(); }
+  } catch (error) { throw error instanceof SettingsRefusalError ? error : unavailable(); }
 }
 export function inspectRemoteSettingsPrecondition(handle: RemoteSettingsPrecondition): RemoteSettingsPreconditionFacts {
   const entry = entries.get(handle); if (!entry) throw unavailable(); return entry.facts;
@@ -222,6 +236,18 @@ function validReceipt(value: unknown, facts: RemoteSettingsPreconditionFacts): v
     && value.uncertainPath === paths[value.completedPaths.length];
   return value.completedPaths.length === 0 && (value.uncertainPath === undefined || value.uncertainPath === paths[0]);
 }
+/** The daemon's precondition refusals all precede any effect; only they mean "nothing was applied". */
+const REFUSAL_CODES: readonly string[] = ['SETTINGS_PRECONDITION_STALE', 'SETTINGS_PRECONDITION_UNAVAILABLE', 'SETTINGS_PRECONDITION_INVALID', 'PAIRING_STORE_FAULTED'];
+/** Not null when the daemon refused before any effect; `reason` is set when it said why. */
+async function refusedBeforeEffect(response: Response): Promise<{ readonly reason?: ReturnType<typeof refusalReasonOf> } | null> {
+  if (response.redirected || (response.status !== 409 && response.status !== 400)) return null;
+  try {
+    const body: unknown = await response.json();
+    if (!record(body) || !exact(body, Object.hasOwn(body, 'reason') ? ['error', 'code', 'reason'] : ['error', 'code']) || !REFUSAL_CODES.includes(String(body.code))) return null;
+    const reason = refusalReasonOf(body);
+    return reason ? { reason } : {};
+  } catch { return null; }
+}
 export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrecondition): Promise<SettingsPreconditionReceipt> {
   assertRemoteSettingsPrecondition(handle);
   const entry = entries.get(handle)!;
@@ -232,7 +258,10 @@ export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrec
   try {
     const response = await entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error',
       body: JSON.stringify({ settingsPrecondition: { version: 1, action: 'apply', reference: entry.reference } }), signal: AbortSignal.timeout(entry.timeoutMs) });
-    if (!response.ok || response.redirected) return unknown;
+    if (!response.ok || response.redirected) {
+      const refused = await refusedBeforeEffect(response);
+      return refused ? Object.freeze({ ...unknown, refused: true as const, ...(refused.reason ? { refusalReason: refused.reason } : {}) }) : unknown;
+    }
     const payload: unknown = await response.json();
     if (!record(payload) || !exact(payload, ['settingsPrecondition']) || !record(payload.settingsPrecondition)) return unknown;
     const arm = payload.settingsPrecondition;

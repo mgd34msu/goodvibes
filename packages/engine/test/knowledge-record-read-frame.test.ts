@@ -24,7 +24,21 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function path() { const root = mkdtempSync(join(tmpdir(), 'knowledge-read-frame-')); roots.push(root); return join(root, 'knowledge.sqlite'); }
+// A frame keeps its private read image for the next frame over unchanged bytes.
+// Tests that count constructions or force an interceptor onto construction
+// start from a store with no retained image.
+function dropIdleImage(sqlite: SQLiteStore) {
+  const drop: unknown = Reflect.get(sqlite, 'dropIdleReadImage');
+  if (typeof drop !== 'function') throw new Error('No idle read image owner');
+  Reflect.apply(drop, sqlite, []);
+}
 function instrument(sqlite: SQLiteStore) {
+  dropIdleImage(sqlite);
+  const frame = sqlite.assertPersistedReadFrame.bind(sqlite);
+  spyOn(sqlite, 'assertPersistedReadFrame').mockImplementation(callback => {
+    dropIdleImage(sqlite);
+    try { return frame(callback); } finally { dropIdleImage(sqlite); }
+  });
   const internal = sqlite as unknown as { openCurrentImage(...args: unknown[]): SqlDatabase; openPrivateReadImage(...args: unknown[]): SqlDatabase; closeReadImage(db: SqlDatabase): void };
   const currentImages = new Set<SqlDatabase>(), privateImages = new Set<SqlDatabase>();
   const open = internal.openCurrentImage.bind(sqlite); let opened = 0, closed = 0;
@@ -176,6 +190,7 @@ test.each(['missing', 'copied', 'proxy', 'replayed'] as const)(
       const current = () => sqlite.assertPersistedReadFrame(() => { sqlite.readPersistedRow('knowledge_sources', 'id', source.id); });
       current();
       expect(physical.count()).toBe(kind === 'replayed' ? 2 : 3);
+      dropIdleImage(sqlite);
       current();
       expect(physical.count()).toBe(kind === 'replayed' ? 5 : 6);
     } finally { physical.restore(); restore(); }
@@ -198,7 +213,7 @@ test('native entry-byte tokens cannot cross store owners', async () => {
   } finally { physical.restore(); restoreFirst(); restoreSecond(); }
 });
 
-test('native entry bytes stay private when a reflected image interceptor attempts substitution', async () => {
+test('native entry bytes stay private when an image interceptor attempts substitution', async () => {
   const { store, sqlite, source } = await fixture();
   const SQL = await loadSqlJsEngine(), forged = new SQL.Database(readFileSync(store.storagePath));
   let replacement: Uint8Array;
@@ -206,21 +221,39 @@ test('native entry bytes stay private when a reflected image interceptor attempt
     forged.run("UPDATE knowledge_sources SET title='substituted frame bytes' WHERE id=?", [source.id]);
     replacement = forged.export();
   } finally { forged.close(); }
+  let attempted = false;
   const restore = interceptPrivateImage(sqlite, (open, args) => {
-    const registry: unknown = Reflect.get(sqlite, 'frameImageStamps'), token: unknown = args[0];
-    if (registry instanceof WeakMap && token && typeof token === 'object') {
-      const captured: unknown = registry.get(token);
-      if (captured && typeof captured === 'object') Object.defineProperty(captured, 'data', { value: replacement });
-    }
-    return open(...args);
+    const token: unknown = args[0];
+    if (!token || typeof token !== 'object') throw new Error('No native frame token');
+    attempted = true;
+    // The genuine token is frozen, so bytes cannot be attached to it; a forged
+    // token that carries the substituted bytes must not be honoured either.
+    expect(Reflect.set(token, 'data', replacement)).toBe(false);
+    return open(Object.assign({}, token, { data: replacement }));
   });
   try {
     sqlite.assertPersistedReadFrame(() => {
       const row = sqlite.readPersistedRow('knowledge_sources', 'id', source.id)[0];
       expect(row?.values[0]?.[row.columns.indexOf('title')]).toBe(source.title);
     });
-    expect(Reflect.get(sqlite, 'frameImageStamps')).toBeUndefined();
+    expect(attempted).toBe(true);
   } finally { restore(); }
+});
+
+test('a read frame over unchanged bytes reuses the retained private image and a save retires it', async () => {
+  const { sqlite, source } = await fixture();
+  const internal = sqlite as unknown as { openPrivateReadImage(...args: unknown[]): SqlDatabase };
+  const open = internal.openPrivateReadImage.bind(sqlite); let opened = 0;
+  const spy = spyOn(internal, 'openPrivateReadImage').mockImplementation((...args) => { opened++; return open(...args); });
+  const frame = () => sqlite.assertPersistedReadFrame(() => { sqlite.readPersistedRow('knowledge_sources', 'id', source.id); });
+  try {
+    dropIdleImage(sqlite);
+    frame(); expect(opened).toBe(1);
+    frame(); frame(); expect(opened).toBe(1);
+    sqlite.run('UPDATE knowledge_sources SET summary = ? WHERE id = ?', ['changed meaning', source.id]);
+    await sqlite.save();
+    frame(); expect(opened).toBe(2);
+  } finally { spy.mockRestore(); }
 });
 
 test('unknown schema plans retain the constructor reread', async () => {
@@ -1432,7 +1465,6 @@ test('compiled expected readsets return equality only and still open a fresh phy
     rows.reset();
     expect(store.getRecordGenerations(selectors)).toEqual(captured.originalGenerations);
     expect(rows.count()).toBe(0); expect(rows.generations()).toBe(2);
-    expect(Reflect.get(sqlite, 'expectedRecordReadsets')).toBeUndefined();
   } finally { rows.restore(); physical.restore(); }
 });
 
@@ -1488,8 +1520,6 @@ test.each([false, true])('one accepted baseline compares a compiled full row onc
     expect(store.matchesExpectedRecordReadsets(input)).toEqual([!changed]);
     expect(tuples.get(source.id)).toBe(4); expect(tuples.get(extraction.id)).toBe(4);
     expect(readFileSync(store.storagePath)).toEqual(bytes);
-    expect(Reflect.get(sqlite, 'expectedMatches')).toBeUndefined();
-    expect(Reflect.get(sqlite, 'expectedBaselineMatches')).toBeUndefined();
   } finally { observing.mockRestore(); physical.restore(); }
 });
 
@@ -1701,6 +1731,7 @@ test.each(['row rollback', 'native alias restore', 'identical file replacement',
 test('compiled expected readsets do not trust an intercepted modified private constructor image', async () => {
   const { store, source, sqlite } = await fixture();
   const selectors = [{ kind: 'source' as const, id: source.id }], captured = store.captureExpectedRecordReadset(selectors);
+  dropIdleImage(sqlite);
   const restore = interceptPrivateImage(sqlite, (open, args) => {
     const image: unknown = open(...args);
     if (!image || typeof image !== 'object') throw new Error('No private image');

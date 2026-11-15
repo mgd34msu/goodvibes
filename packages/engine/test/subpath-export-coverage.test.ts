@@ -24,34 +24,18 @@
  * Some platform modules are genuinely daemon-internal, and publishing them would
  * widen the public API surface, and its compatibility obligations, by
  * accident. So the rule is: every `src/platform/<name>/index.ts` is either in the
- * exports map or named below as a deliberate decision. Adding a module and
+ * exports map or named in `INTENTIONALLY_INTERNAL` (scripts/engine-package-lists.ts),
+ * the one list the `exports:check` gate reads too. Adding a module and
  * forgetting both is what fails.
  */
 import { describe, test, expect } from 'bun:test';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { INTENTIONALLY_INTERNAL } from '../scripts/engine-package-lists.ts';
+import { platformExportsMap } from './_helpers/platform-exports.js';
 
 const PACKAGE_DIR = join(import.meta.dir, '..', 'platform');
 const PLATFORM_DIR = join(PACKAGE_DIR, 'src', 'platform');
-
-/**
- * Platform modules deliberately NOT published.
- *
- * Each is daemon-internal: it has an `index.ts` for internal composition and no
- * consumer imports it. Verified at the time of writing by grepping the TUI,
- * webui and agent worktrees, all five had zero import sites.
- *
- * Adding a name here is a decision to keep a module private. Removing one, or
- * adding its subpath to the manifest, publishes it and takes on its
- * compatibility obligations.
- */
-const INTERNAL_PLATFORM_MODULES: readonly string[] = [
-  'channel-profiles',
-  'channel-sync',
-  'checkin',
-  'principals',
-  'push',
-];
 
 function platformModulesWithIndex(): string[] {
   return readdirSync(PLATFORM_DIR, { withFileTypes: true })
@@ -62,26 +46,12 @@ function platformModulesWithIndex(): string[] {
 }
 
 const ENGINE_DIR = join(import.meta.dir, '..');
-
-/**
- * The platform's subpaths, keyed as the old platform package declared them (./platform/x):
- * they are the engine manifest's ./platform/* exports.
- */
-function exportsMap(): Record<string, unknown> {
-  const manifest = JSON.parse(readFileSync(join(ENGINE_DIR, 'package.json'), 'utf8')) as {
-    exports?: Record<string, unknown>;
-  };
-  return Object.fromEntries(
-    Object.entries(manifest.exports ?? {})
-      .filter(([key]) => key.startsWith('./platform/'))
-      .map(([key, value]) => [`.${key.slice('./platform'.length)}`, value]),
-  );
-}
+const exportsMap = platformExportsMap;
 
 describe('every public platform module has a subpath export', () => {
   test('no module is silently unreachable', () => {
     const exported = new Set(Object.keys(exportsMap()));
-    const internal = new Set(INTERNAL_PLATFORM_MODULES);
+    const internal = new Set(Object.keys(INTENTIONALLY_INTERNAL));
     const unreachable = platformModulesWithIndex()
       .filter((name) => !exported.has(`./platform/${name}`) && !internal.has(name));
 
@@ -89,7 +59,7 @@ describe('every public platform module has a subpath export', () => {
       unreachable,
       `these platform modules have an index.ts but no "./platform/<name>" entry in `
       + `the engine package.json's ./platform exports, so consumers cannot import them: ${unreachable.join(', ')}. `
-      + 'Add the subpath, or add the module to INTERNAL_PLATFORM_MODULES if it is deliberately private.',
+      + 'Add the subpath, or add the module to INTENTIONALLY_INTERNAL in scripts/engine-package-lists.ts if it is deliberately private.',
     ).toEqual([]);
   });
 
@@ -98,7 +68,7 @@ describe('every public platform module has a subpath export', () => {
     // decision nobody made.
     const present = new Set(platformModulesWithIndex());
     const exported = new Set(Object.keys(exportsMap()));
-    const stale = INTERNAL_PLATFORM_MODULES.filter(
+    const stale = Object.keys(INTENTIONALLY_INTERNAL).filter(
       (name) => !present.has(name) || exported.has(`./platform/${name}`),
     );
     expect(stale, `no longer internal or no longer present: ${stale.join(', ')}`).toEqual([]);

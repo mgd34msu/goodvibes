@@ -44,18 +44,28 @@ export function JudgmentFallbackEditor({
     },
     onCommit
   );
+  // Any edit through the row controls supersedes an earlier "stored value invalid" notice.
+  const change = (text: string) => {
+    setParseError("");
+    draft.change(text);
+  };
   let rows: readonly JudgmentFallbackSettings[] = [];
+  // False while the Advanced JSON is mid-edit: the row controls would rebuild the
+  // draft from an empty list and throw the operator's text away.
+  let textUsable = true;
   try {
     const parsed: unknown = JSON.parse(draft.text);
     if (Array.isArray(parsed))
       rows = parsed.filter(
         (row) => row !== null && typeof row === "object" && !Array.isArray(row)
       ) as JudgmentFallbackSettings[];
+    else textUsable = false;
   } catch {
-    /* Advanced JSON remains editable until valid. */
+    // An empty buffer (a concealed stored value) is a clean slate, not a half-typed edit.
+    textUsable = draft.text.trim() === "";
   }
   const update = (index: number, patch: Partial<JudgmentFallbackSettings>) =>
-    draft.change(JSON.stringify(rows.map((row, i) => (i === index ? { ...row, ...patch } : row))));
+    change(JSON.stringify(rows.map((row, i) => (i === index ? { ...row, ...patch } : row))));
   const reorder = (index: number, step: number) => {
     const next = [...rows],
       target = next[index],
@@ -63,7 +73,7 @@ export function JudgmentFallbackEditor({
     if (!target || !other) return;
     next[index] = other;
     next[index + step] = target;
-    draft.change(JSON.stringify(next));
+    change(JSON.stringify(next));
   };
   return (
     <div>
@@ -153,7 +163,7 @@ export function JudgmentFallbackEditor({
           </Button>
           <Button
             size="sm"
-            onClick={() => draft.change(JSON.stringify(rows.filter((_, i) => i !== index)))}
+            onClick={() => change(JSON.stringify(rows.filter((_, i) => i !== index)))}
           >
             Remove fallback {index + 1}
           </Button>
@@ -168,9 +178,9 @@ export function JudgmentFallbackEditor({
       </datalist>
       <Button
         size="sm"
-        disabled={draft.saving}
+        disabled={draft.saving || !textUsable}
         onClick={() =>
-          draft.change(
+          change(
             JSON.stringify([
               ...rows,
               { endpoint: "", model: "jev-latest", keySource: "none", keyName: "" },
@@ -187,8 +197,7 @@ export function JudgmentFallbackEditor({
           value={draft.text}
           disabled={draft.saving}
           onChange={(event) => {
-            setParseError("");
-            draft.change(event.target.value);
+            change(event.target.value);
           }}
         />
       </details>
@@ -196,7 +205,7 @@ export function JudgmentFallbackEditor({
         size="sm"
         disabled={draft.saving || (!draft.dirty && !malformed) || draft.conflicted}
         onClick={() => {
-          if (malformed && !draft.dirty) setParseError("Not valid JSON.");
+          if (malformed && !draft.dirty) setParseError("The stored fallback settings are invalid or concealed. Add a fallback or enter valid JSON, then save.");
           else void draft.submit();
         }}
       >

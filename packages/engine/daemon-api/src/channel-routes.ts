@@ -27,25 +27,66 @@ async function readOptionalChannelBody(
   return channelBodySchemas.optional.parse(body);
 }
 
+const POLICY_BOOLEAN_FIELDS = [
+  'enabled',
+  'requireMention',
+  'allowDirectMessages',
+  'allowGroupMessages',
+  'allowThreadMessages',
+  'allowTextCommandsWithoutMention',
+] as const;
+const POLICY_MODE_FIELDS = ['dmPolicy', 'groupPolicy'] as const;
+const POLICY_LIST_FIELDS = ['allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands'] as const;
+
+function invalidPolicyField(field: string, expected: string): Response {
+  return jsonErrorResponse(
+    { error: `Channel policy field ${field} must be ${expected}; nothing was changed.`, code: 'INVALID_ARGUMENT' },
+    { status: 400 },
+  );
+}
+
+/**
+ * Read the fields of a policy patch, refusing a value of the wrong type instead
+ * of coercing it: `"false"` is a non-empty string, so coercing it turned a
+ * request to switch direct messages off into one that switched them on, and a
+ * misspelled `dmPolicy` was dropped while the route answered 200.
+ */
+function readPolicyFields(source: JsonRecord, label: string, keys: {
+  readonly booleans: readonly string[];
+  readonly modes: readonly string[];
+  readonly lists: readonly string[];
+}): Record<string, unknown> | Response {
+  const fields: Record<string, unknown> = {};
+  const name = (key: string) => (label ? `${label}.${key}` : key);
+  for (const key of keys.booleans) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') return invalidPolicyField(name(key), 'true or false');
+    fields[key] = value;
+  }
+  for (const key of keys.modes) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (value !== 'allow' && value !== 'deny' && value !== 'inherit') return invalidPolicyField(name(key), 'one of allow, deny or inherit');
+    fields[key] = value;
+  }
+  for (const key of keys.lists) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return invalidPolicyField(name(key), 'an array of strings');
+    fields[key] = value;
+  }
+  return fields;
+}
+
 // Shared by patchChannelPolicy and postChannelPolicy. Excludes `metadata` so
 // each caller can place it after its own extra fields (postChannelPolicy
 // inserts `groupPolicies` between the fields below and `metadata`).
-function buildChannelPolicyPatchFields(body: JsonRecord): Record<string, unknown> {
-  return {
-    ...(body.enabled !== undefined ? { enabled: Boolean(body.enabled) } : {}),
-    ...(body.requireMention !== undefined ? { requireMention: Boolean(body.requireMention) } : {}),
-    ...(body.allowDirectMessages !== undefined ? { allowDirectMessages: Boolean(body.allowDirectMessages) } : {}),
-    ...(body.allowGroupMessages !== undefined ? { allowGroupMessages: Boolean(body.allowGroupMessages) } : {}),
-    ...(body.allowThreadMessages !== undefined ? { allowThreadMessages: Boolean(body.allowThreadMessages) } : {}),
-    ...(body.dmPolicy === 'allow' || body.dmPolicy === 'deny' || body.dmPolicy === 'inherit' ? { dmPolicy: body.dmPolicy } : {}),
-    ...(body.groupPolicy === 'allow' || body.groupPolicy === 'deny' || body.groupPolicy === 'inherit' ? { groupPolicy: body.groupPolicy } : {}),
-    ...(body.allowTextCommandsWithoutMention !== undefined ? { allowTextCommandsWithoutMention: Boolean(body.allowTextCommandsWithoutMention) } : {}),
-    ...(Array.isArray(body.allowlistUserIds) ? { allowlistUserIds: body.allowlistUserIds.filter((value): value is string => typeof value === 'string') } : {}),
-    ...(Array.isArray(body.allowlistChannelIds) ? { allowlistChannelIds: body.allowlistChannelIds.filter((value): value is string => typeof value === 'string') } : {}),
-    ...(Array.isArray(body.allowlistGroupIds) ? { allowlistGroupIds: body.allowlistGroupIds.filter((value): value is string => typeof value === 'string') } : {}),
-    ...(Array.isArray(body.allowedCommands) ? { allowedCommands: body.allowedCommands.filter((value): value is string => typeof value === 'string') } : {}),
-  };
+function buildChannelPolicyPatchFields(body: JsonRecord): Record<string, unknown> | Response {
+  return readPolicyFields(body, '', { booleans: POLICY_BOOLEAN_FIELDS, modes: POLICY_MODE_FIELDS, lists: POLICY_LIST_FIELDS });
 }
+
+const GROUP_POLICY_BOOLEAN_FIELDS = ['requireMention', 'allowGroupMessages', 'allowThreadMessages', 'allowTextCommandsWithoutMention'] as const;
 
 export function createDaemonChannelRouteHandlers(
   context: DaemonChannelRouteContext,
@@ -221,6 +262,12 @@ export function createDaemonChannelRouteHandlers(
       if (!actionId) {
         return jsonErrorResponse({ error: 'actionId is required.' }, { status: 400 });
       }
+      // A target the caller named that does not resolve is not "authorized with
+      // no target": the check would otherwise answer for a different question
+      // than the one asked.
+      if (typeof body.target === 'string' && body.target.trim() && !target) {
+        return jsonErrorResponse({ error: `Unable to resolve channel target ${body.target.trim()}; the authorization check was not run.`, code: 'CHANNEL_TARGET_NOT_FOUND' }, { status: 404 });
+      }
       const result = await context.channelPlugins.authorizeActorAction(
         surface as ChannelSurface,
         {
@@ -283,8 +330,10 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
+      const fields = buildChannelPolicyPatchFields(body);
+      if (fields instanceof Response) return fields;
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
-        ...buildChannelPolicyPatchFields(body),
+        ...fields,
         ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
       });
       return Response.json(updated);
@@ -294,33 +343,35 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
-        ...buildChannelPolicyPatchFields(body),
-        ...(Array.isArray(body.groupPolicies) ? {
-          groupPolicies: body.groupPolicies
-            .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null)
-            .map((value) => ({
+      const fields = buildChannelPolicyPatchFields(body);
+      if (fields instanceof Response) return fields;
+      let groupPolicies: Record<string, unknown>[] | undefined;
+      if (Array.isArray(body.groupPolicies)) {
+        groupPolicies = [];
+        for (const [index, value] of body.groupPolicies.entries()) {
+          if (typeof value !== 'object' || value === null) continue;
+          const checked = readPolicyFields(value as JsonRecord, `groupPolicies[${index}]`, { booleans: GROUP_POLICY_BOOLEAN_FIELDS, modes: [], lists: POLICY_LIST_FIELDS });
+          if (checked instanceof Response) return checked;
+          groupPolicies.push({
               // use the full UUID to avoid birthday-paradox collisions at scale.
               id: typeof value.id === 'string' ? value.id : `group-policy-${randomUUID()}`,
               ...(typeof value.label === 'string' ? { label: value.label } : {}),
               ...(typeof value.groupId === 'string' ? { groupId: value.groupId } : {}),
               ...(typeof value.channelId === 'string' ? { channelId: value.channelId } : {}),
               ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),
-              ...(value.requireMention !== undefined ? { requireMention: Boolean(value.requireMention) } : {}),
-              ...(value.allowGroupMessages !== undefined ? { allowGroupMessages: Boolean(value.allowGroupMessages) } : {}),
-              ...(value.allowThreadMessages !== undefined ? { allowThreadMessages: Boolean(value.allowThreadMessages) } : {}),
-              ...(value.allowTextCommandsWithoutMention !== undefined ? { allowTextCommandsWithoutMention: Boolean(value.allowTextCommandsWithoutMention) } : {}),
-              ...(Array.isArray(value.allowlistUserIds) ? { allowlistUserIds: value.allowlistUserIds.filter((entry): entry is string => typeof entry === 'string') } : {}),
-              ...(Array.isArray(value.allowlistChannelIds) ? { allowlistChannelIds: value.allowlistChannelIds.filter((entry): entry is string => typeof entry === 'string') } : {}),
-              ...(Array.isArray(value.allowlistGroupIds) ? { allowlistGroupIds: value.allowlistGroupIds.filter((entry): entry is string => typeof entry === 'string') } : {}),
-              ...(Array.isArray(value.allowedCommands) ? { allowedCommands: value.allowedCommands.filter((entry): entry is string => typeof entry === 'string') } : {}),
+              ...checked,
               ...(typeof value.metadata === 'object' && value.metadata !== null ? { metadata: value.metadata as Record<string, unknown> } : {}),
-            })),
-        } : {}),
+          });
+        }
+      }
+      const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
+        ...fields,
+        ...(groupPolicies ? { groupPolicies } : {}),
         ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
       });
       return Response.json(updated);
     },
+
     getChannelPolicyAudit: (limit) => Response.json({ audit: context.channelPolicy.listAudit(limit) }),
     // Channels AND inbound mail, on one surface.
     //

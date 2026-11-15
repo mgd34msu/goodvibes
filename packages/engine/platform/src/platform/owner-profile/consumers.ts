@@ -286,14 +286,17 @@ const EMPTY_REDACTION_VALUES: ProfileRedactionValues = { guarded: [], absolute: 
  * the load generation, no counter to add to the store and no way for the cache
  * to survive a reload it should not.
  */
-function memoizedRedactionValues(source: ConsumerProfileSource): () => ProfileRedactionValues {
+export function memoizedRedactionValues(source: ConsumerProfileSource): () => ProfileRedactionValues {
   let cachedFor: unknown = null;
   let cached: ProfileRedactionValues = EMPTY_REDACTION_VALUES;
   return (): ProfileRedactionValues => {
-    const generation: unknown = source.status();
+    const generation = source.status();
     if (generation !== cachedFor) {
       cachedFor = generation;
-      cached = closedTierRedactionValues(source);
+      // An unreadable file (a partial save, a brief permission error) is not the owner removing their
+      // values: keep masking the last set that was read. A file that reads as empty, or a profile turned
+      // off, still clears it.
+      if (generation.kind !== 'unavailable') cached = closedTierRedactionValues(source);
     }
     return cached;
   };
@@ -313,6 +316,9 @@ export interface OwnerProfileConsumerHost {
   readonly injectOpenTierEnabled: FallbackEnabledPredicate;
 }
 
+/** The install whose process-wide registrations are live, or null. */
+let currentInstallation: object | null = null;
+
 /**
  * Plug a loaded profile into every consumer seam, and return the undo.
  *
@@ -331,6 +337,10 @@ export function installOwnerProfileConsumers(
   source: ConsumerProfileSource,
   host: OwnerProfileConsumerHost,
 ): () => void {
+  // The signup address and the open-tier block are process-wide registrations; a disposer must clear only
+  // what its own install registered, never a later install's.
+  const installation = Object.freeze({});
+  currentInstallation = installation;
   host.attachProfileFallback(createConsumerFallbackReader(source, host.consumerFallbackEnabled));
   const uninstallRedaction = registerProfileRedactionValues(
     memoizedRedactionValues(source),
@@ -349,6 +359,8 @@ export function installOwnerProfileConsumers(
   return (): void => {
     host.attachProfileFallback(null);
     uninstallRedaction();
+    if (currentInstallation !== installation) return;
+    currentInstallation = null;
     registerSignupBaseAddressFallback(null);
     registerOpenTierContextBlock(null);
   };

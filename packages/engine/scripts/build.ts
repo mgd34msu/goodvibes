@@ -27,6 +27,7 @@ import { readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { AMBIENT_DECLARATIONS } from './engine-package-lists.ts';
 import { withWorkspaceLock } from './workspace-lock.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -140,18 +141,12 @@ function pruneOrphanedDistFiles(emitted: ReadonlySet<string>): void {
 /** What `tsc` emits, and therefore the only thing the orphan sweep may delete. */
 const TSC_OUTPUT_SUFFIXES = ['.js', '.mjs', '.cjs', '.d.ts', '.d.mts', '.d.cts', '.js.map', '.d.ts.map'];
 
-/**
- * Hand-written declarations `prepare:engine` places in dist. Kept in step with
- * AMBIENT_DECLARATIONS in scripts/prepare-engine-package.ts.
- */
-const PREPARED_DECLARATION_PATHS = new Set<string>([
-  'platform/dist/platform/types/sql-js.d.ts',
-]);
+/** Hand-written declarations `prepare:engine` places in dist, named by their dist path. */
+const PREPARED_DECLARATION_PATHS = new Set<string>(AMBIENT_DECLARATIONS.map((asset) => `platform/dist/${asset}`));
 
 let buildStartedAt = 0;
 
 await withWorkspaceLock('build', () => {
-  run('bun', ['run', 'sync:version']);
   buildStartedAt = Date.now();
   const emitted = buildAndListEmitted();
   pruneOrphanedDistFiles(emitted);

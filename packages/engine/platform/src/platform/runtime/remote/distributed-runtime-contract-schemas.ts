@@ -223,6 +223,7 @@ export const REMOTE_PAIR_REQUEST_ACTION_INPUT_SCHEMA = objectSchema({
   note: STRING_SCHEMA,
   label: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
+  confirmReplace: BOOLEAN_SCHEMA,
 }, ['requestId'], { additionalProperties: true });
 
 export const REMOTE_PAIR_APPROVAL_OUTPUT_SCHEMA = objectSchema({

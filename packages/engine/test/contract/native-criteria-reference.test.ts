@@ -144,8 +144,7 @@ test('inconsistent durable criteria binding cannot normalize a matching source I
 });
 
 
-// UNRUN: exercises the actual native decision and its repeated currentness
-// guards; no helper-only count or synthetic replacement decision.
+// Exercises the actual native decision and its repeated currentness guards.
 test('ordinary criteria references never invoke the earlier work-ID hash recipe', async () => {
   const value = contract({ criteriaId: 'owner-saved-requirements' });
   const hash = spyOn(admissionModule, 'criteriaSetIdForWork');
@@ -170,7 +169,7 @@ test('an actual earlier criteria spelling is verified once per original admissio
   } finally { hash.mockRestore(); }
 });
 
-// UNRUN: a prototype callback cannot manufacture the old privacy-reference
+// A prototype callback cannot manufacture the old privacy-reference
 // cache for a criteria digest that does not belong to its actual saved work.
 test('late WeakMap overrides cannot launder an unverified historical criteria reference', async () => {
   await recorded(async (fake) => {

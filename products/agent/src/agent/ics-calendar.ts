@@ -3,10 +3,10 @@
  *
  * RRULE boundary: only FREQ=DAILY, FREQ=WEEKLY, and FREQ=MONTHLY are expanded.
  * COUNT and UNTIL (DATE and DATE-TIME forms) are honoured. INTERVAL, BYDAY,
- * BYMONTHDAY, EXDATE, and all other recurrence keywords are NOT processed,
- * occurrences that would require them are silently omitted. Callers should
- * treat the `rrule` field as informational for any rule that includes those
- * keywords. Expansion is capped at 90 days from the reference date passed to
+ * BYMONTHDAY, EXDATE, and all other recurrence keywords are NOT processed:
+ * a rule that uses the BY* keywords yields only its single base occurrence, and
+ * EXDATE is ignored. Callers should treat the `rrule` field as informational
+ * for any rule that includes those keywords. Expansion is capped at 90 days from the reference date passed to
  * `expandRecurringEvent`.
  *
  * Timezone handling:
@@ -22,6 +22,7 @@
  *     strict readers may reject it. This is a documented limitation.
  */
 
+import { createHash } from 'node:crypto';
 import { wallClockToUtcMs, utcMsToWallClock } from './ics-timezone.ts';
 
 // ──────────────────────────────────────────────────────────────────
@@ -77,18 +78,31 @@ function unfoldLines(content: string): string {
   return content.replace(/\r?\n[ \t]/g, '');
 }
 
+/**
+ * The identity of an event that carries no UID. It is what import compares to
+ * decide "already imported", so it must tell apart two events that merely start
+ * together: start, end, title and place all go into it.
+ */
+function fallbackUid(parts: { summary: string; location: string | undefined; dtstart: string; dtend: string | undefined }): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([parts.dtstart, parts.dtend ?? '', parts.summary, parts.location ?? '']))
+    .digest('hex')
+    .slice(0, 16);
+  return `no-uid-${digest}`;
+}
+
 /** Split content into logical lines after unfolding. */
 function logicalLines(content: string): string[] {
   return unfoldLines(content).split(/\r?\n/);
 }
 
-/** Unescape RFC 5545 text-value escapes: \\n → newline, \\\\ → \\, \\; → ;, \\, → , */
+/**
+ * Unescape RFC 5545 text-value escapes: \\n → newline, \\\\ → \\, \\; → ;, \\, → ,
+ * One left-to-right pass, so an escaped backslash followed by a literal "n" is
+ * a backslash and an "n", not a newline.
+ */
 function unescapeText(value: string): string {
-  return value
-    .replace(/\\n/gi, '\n')
-    .replace(/\\;/g, ';')
-    .replace(/\\,/g, ',')
-    .replace(/\\\\/g, '\\');
+  return value.replace(/\\([nN;,\\])/g, (_match, char: string) => (char === 'n' || char === 'N' ? '\n' : char));
 }
 
 /** Escape text for iCalendar output. */
@@ -248,7 +262,7 @@ export function parseIcs(content: string): IcsEvent[] {
       if (component === 'VEVENT') {
         if (dtstart && summary) {
           events.push({
-            uid: uid || dtstart,
+            uid: uid || fallbackUid({ summary, location, dtstart, dtend }),
             summary,
             description,
             location,
@@ -332,11 +346,14 @@ function parseRrule(rrule: string): Map<string, string> {
   return map;
 }
 
-/** Add `n` months to UTC-based year/month/day components (returns new ms). */
+/** Add `n` months to UTC-based year/month/day components, clamping the day to the target month's end (Jan 31 + 1 month is Feb 28/29). */
 function addMonthsToMs(utcMs: number, n: number): number {
   const d = new Date(utcMs);
-  const target = d.getUTCMonth() + n;
-  d.setUTCMonth(target);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
   return d.getTime();
 }
 
@@ -454,10 +471,13 @@ export function expandRecurringEvent(event: IcsEvent, referenceDate: Date, horiz
   const results: IcsEvent[] = [];
   let cursorMs = startMs;
   let count = 0;
+  // COUNT bounds the whole series from DTSTART, not only the part after the
+  // reference date, so a series that already ended yields nothing.
+  let seriesIndex = 0;
   let totalIterations = 0;
   const MAX_TOTAL_ITERATIONS = 100_000;
 
-  while (count < maxCount) {
+  while (seriesIndex < maxCount) {
     // MIN-4: hard backstop on total loop iterations (independent of cursor monotonicity)
     if (totalIterations++ >= MAX_TOTAL_ITERATIONS) break;
     // Enforce UNTIL boundary
@@ -482,15 +502,20 @@ export function expandRecurringEvent(event: IcsEvent, referenceDate: Date, horiz
       count++;
     }
 
-    // Advance cursor in the event's timezone (DST-correct stepping)
-    if (event.tzid && !event.allDay) {
+    seriesIndex++;
+    // Advance cursor in the event's timezone (DST-correct stepping). Months are
+    // always counted from DTSTART: stepping from a clamped Feb 28 would drift
+    // every later occurrence to the 28th.
+    if (freq === 'MONTHLY') {
+      cursorMs = event.tzid && !event.allDay
+        ? advanceTzMs(startMs, event.tzid, freq, interval * seriesIndex)
+        : addMonthsToMs(startMs, interval * seriesIndex);
+    } else if (event.tzid && !event.allDay) {
       cursorMs = advanceTzMs(cursorMs, event.tzid, freq, interval);
     } else if (freq === 'DAILY') {
       cursorMs += interval * 86_400_000;
     } else if (freq === 'WEEKLY') {
       cursorMs += interval * 7 * 86_400_000;
-    } else {
-      cursorMs = addMonthsToMs(cursorMs, interval);
     }
 
     // Safety: bail after 10000 iterations regardless

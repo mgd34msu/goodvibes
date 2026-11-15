@@ -96,6 +96,7 @@ import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
 import { McpRegistry } from '../mcp/registry.js';
 import { createMcpAutonomousElicitationHandler } from '../mcp/elicitation-autonomous.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
+import { createConfiguredFetchDeps } from '../tools/fetch/index.js';
 import { PermissionManager } from '../permissions/manager.js';
 import { bindPermissionModeChangeEvent } from '../permissions/mode-change-emitter.js';
 import type { ProviderCapabilityRegistry } from '../providers/capabilities.js';
@@ -114,7 +115,8 @@ import { createAsyncDisposalScope } from './disposal.js';
 import { createDomainDispatch, type DomainDispatch, type RuntimeStore } from './store/index.js';
 import type { RuntimeEventBus } from './events/index.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
-import { resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
+import { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
+import { releaseComposedTelemetry } from './telemetry/index.js';
 import { createProviderStack } from './provider-stack.js';
 import type { ProviderModelDiscoveryMode, ProviderRegistryFactory } from './provider-stack.js';
 import { createAgentGraph } from './agent-graph.js';
@@ -402,6 +404,19 @@ export interface ClientRuntimeServicesOptions {
    * never refuses itself.
    */
   readonly homeSingleWriter?: 'claim' | 'off' | undefined;
+  /**
+   * The durable permission-rule store of the host process that owns the rule
+   * file. Default: this composition builds and initialises its own store.
+   * A borrowed store is neither initialised nor closed here: its owner does both.
+   */
+  readonly userPermissionRuleStore?: UserPermissionRuleAccess | undefined;
+  /**
+   * The exec posture every worker this graph spawns runs under. A hosted
+   * composition passes the same posture it gives its session's own exec tool,
+   * otherwise a delegated worker would run on the host while its parent could
+   * not. Default: not stated, the terminal behaviour.
+   */
+  readonly execContainment?: import('../tools/exec/containment.js').ExecContainmentRequirement | undefined;
 }
 
 /**
@@ -414,9 +429,24 @@ export interface ClientRuntimeServicesOptions {
  * for the two graphs to drift on it.
  */
 export function createClientRuntimeServices(options: ClientRuntimeServicesOptions): ClientRuntimeServices {
+  const disposalScope = createAsyncDisposalScope('ClientRuntimeServices');
+  try {
+    return composeClientRuntimeServices(options, disposalScope);
+  } catch (error) {
+    // A composition that throws part-way never hands back a `dispose`, so what
+    // it already took (the home claim, the judgment log, file watchers) is
+    // released here instead of staying held for the life of a long-running host.
+    try { disposalScope.dispose(); } catch { /* the composition's own error is the one to report */ }
+    throw error;
+  }
+}
+
+function composeClientRuntimeServices(
+  options: ClientRuntimeServicesOptions,
+  disposalScope: ReturnType<typeof createAsyncDisposalScope>,
+): ClientRuntimeServices {
   // An embedding without a workspace policy has no separate trust constraint.
   const workspaceTrust = options.workspaceTrust ?? null;
-  const disposalScope = createAsyncDisposalScope('ClientRuntimeServices');
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'ClientRuntimeServicesOptions surfaceRoot');
@@ -437,6 +467,9 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   }
 
   const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: options.featureFlags });
+  disposalScope.registry.add('feature flag settings bridge', () => disposeRuntimeFeatureFlags(featureFlags));
+  // Registered first so it closes last: the tracer sends the spans its exporters still hold after every other teardown has ended its own.
+  disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
   const runtimeDispatch = createDomainDispatch(options.runtimeStore);
 
   const secretsManager = createRuntimeSecretsManager({
@@ -498,10 +531,13 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
   const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
 
   const workflow = createWorkflowServices();
-  hookDispatcher.setTriggerManager(workflow.triggerManager);
+  disposalScope.registry.add('trigger dispatch', hookDispatcher.setTriggerManager(workflow.triggerManager, featureFlags));
 
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
-  const userPermissionRuleStore = createUserPermissionRuleStore(configManager);
+  // A host that already owns the rule file lends its store, so one instance is
+  // the only writer of that file; a floor with a store of its own would persist
+  // its own snapshot over the host's and bring back a rule the operator deleted.
+  const userPermissionRuleStore = options.userPermissionRuleStore ?? createUserPermissionRuleStore(configManager);
   const permissionManager = createBrokeredPermissionManager({
     workspaceTrust,
     requestApproval: options.requestApproval,
@@ -525,7 +561,9 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
 
   const artifactStore = new ArtifactStore({ configManager });
   const webSearchProviders = new WebSearchProviderRegistry({ env: process.env, serviceRegistry });
-  const webSearchService = new WebSearchService(webSearchProviders, { serviceRegistry, featureFlags });
+  const webSearchService = new WebSearchService(webSearchProviders, createConfiguredFetchDeps({
+    serviceRegistry, featureFlags, configManager, localhostFetchApproval: approvalHandlers.localhostFetchApproval,
+  }));
 
   const sandboxSessionRegistry = new SandboxSessionRegistry(workingDirectory);
   const mcpRegistry = new McpRegistry({ hookDispatcher, sandboxSessions: sandboxSessionRegistry });
@@ -550,7 +588,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
 
   const processManager = new ProcessManager();
   const modeManager = new ModeManager({ featureFlags });
-  const fileUndoManager = new FileUndoManager();
+  const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
   const overflowHandler = new OverflowHandler({
     baseDir: workingDirectory,
     featureFlags,
@@ -582,6 +620,7 @@ export function createClientRuntimeServices(options: ClientRuntimeServicesOption
     execPromptAnswerHandler: approvalHandlers.execPromptAnswerHandler,
     localhostFetchApproval: approvalHandlers.localhostFetchApproval,
     onSandboxedRun: approvalHandlers.onSandboxedRun,
+    execContainment: options.execContainment,
     permissionManager,
     contextAccountingHolder,
     fileCache,

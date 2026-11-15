@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { readTarGzEntries } from '@goodvibes-jev/engine/platform/platform/browser';
 import { UpdateTransactionError } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { daemonCiPayloads, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
+import { daemonCiPayloads, daemonCiPayloadSpecs, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, type DaemonInstallOwner } from './install-native.ts';
 
 export const DAEMON_CI_REPOSITORY = 'mgd34msu/goodvibes';
@@ -54,13 +54,14 @@ function artifactIdentity(gh: RunGitHub, base: string, owner: DaemonInstallOwner
 
 /** Admit all archive paths/types/modes before writing; never extract arbitrary archive paths. */
 export function stageDaemonCiArchive(archive: Uint8Array, root: string, target: DaemonNativeTarget = 'linux-x64'): string {
-  const members = [...daemonCiPayloads(target), 'ci-artifact.json'].map(path => `products/daemon/native/${path}`);
+  const specs = [...daemonCiPayloadSpecs(target), { relativePath: 'ci-artifact.json', executable: false }];
+  const members = specs.map(spec => `products/daemon/native/${spec.relativePath}`);
   if (archive.length > 256 * 1024 * 1024) throw new Error('CI archive exceeds the compressed size limit');
   const entries = [...readTarGzEntries(archive, { strict: true, maxOutputLength: 512 * 1024 * 1024 })];
   if (entries.length !== members.length || new Set(entries.map(entry => entry.path)).size !== members.length) throw new Error('Expected the exact daemon native archive cohort');
   for (const entry of entries) {
     const index = members.indexOf(entry.path);
-    if (index < 0 || entry.kind !== 'file' || entry.mode !== (index < 2 ? 0o755 : 0o644)) throw new Error('Unexpected archive path, type or mode');
+    if (index < 0 || entry.kind !== 'file' || entry.mode !== (specs[index]!.executable ? 0o755 : 0o644)) throw new Error('Unexpected archive path, type or mode');
   }
   mkdirSync(root, { mode: 0o700 });
   for (const entry of entries) {

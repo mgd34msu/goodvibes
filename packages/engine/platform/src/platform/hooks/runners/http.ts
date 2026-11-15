@@ -4,7 +4,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { classifyHostTrustTier, extractHostname, emitSsrfDeny } from '../../tools/fetch/trust-tiers.js';
 import { instrumentedFetch, fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
-import { createHookExecution, type HookExecutionOptions } from '../execution.js';
+import { createHookExecution, hookTimeoutSeconds, type HookExecutionOptions } from '../execution.js';
 
 /**
  * HTTP hook runner.
@@ -31,8 +31,9 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     }
   }
 
-  const timeoutMs = (hook.timeout ?? 0) * 1000;
-  const execution = options === undefined ? undefined : createHookExecution(options, hook.timeout ?? 0, 'http');
+  const timeoutSeconds = hookTimeoutSeconds(hook, 'http');
+  const timeoutMs = timeoutSeconds * 1000;
+  const execution = options === undefined ? undefined : createHookExecution(options, timeoutSeconds, 'http');
 
   try {
     execution?.signal.throwIfAborted();
@@ -43,6 +44,8 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
         ...hook.headers,
       },
       body: JSON.stringify(event),
+      // A redirect is never followed: the target was checked, its destination would not be.
+      redirect: 'manual',
     };
     const response = execution
       ? await instrumentedFetch(url, { ...init, signal: execution.signal })
@@ -54,6 +57,9 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     const ownedText = execution ? await bodyText : undefined;
     execution?.signal.throwIfAborted();
 
+    if (response.status >= 300 && response.status < 400) {
+      return { ok: false, error: `http hook received a ${response.status} redirect, which is not followed; set the hook url to the final address` };
+    }
     if (!response.ok) {
       return {
         ok: false,

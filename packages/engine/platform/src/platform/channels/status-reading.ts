@@ -19,7 +19,7 @@ export function peekChannelStatusContent(content: string): boolean | undefined {
   if (isClassicOperation()) return undefined;
   try { const port = judgmentPort(channelStatusContent.name); return caches.get(port)?.get(JSON.stringify([port.model, content])); } catch { return undefined; }
 }
-export async function prepareChannelStatusContent(contents: readonly string[]): Promise<void> {
+export async function prepareChannelStatusContent(contents: readonly string[], options: { readonly signal?: AbortSignal } = {}): Promise<void> {
   assertJudgmentInput(contents);
   if (contents.some(content => content.length > 160_000)) throw new JudgmentInputError('unsupported-input');
   return decisionOrClassic(async () => {
@@ -28,7 +28,7 @@ export async function prepareChannelStatusContent(contents: readonly string[]): 
     const current = () => { if (judgmentPort(channelStatusContent.name) !== port || port.model !== model) throw new Error('Status judgment configuration changed.'); };
     await mapLimit([...new Set(contents)].filter(Boolean), 4, async content => {
       const key = JSON.stringify([model, content]); if (cache.has(key)) return;
-      const run = await channelStatusContent.run(port, { content }, { site: channelStatusContent.name, beforeAttempt: current });
+      const run = await channelStatusContent.run(port, { content }, { site: channelStatusContent.name, beforeAttempt: current, ...(options.signal ? { signal: options.signal } : {}) });
       current();
       if (run.readings.substantive.outcome === 'act') {
         if (cache.size >= 512) cache.delete(cache.keys().next().value!);

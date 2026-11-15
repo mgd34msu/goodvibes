@@ -85,8 +85,14 @@ describe('checkin gateway verb group (live on the composed daemon, not a 501 fac
     expect(config.enabled).toBe(false);
   });
 
+  test('enabling check-ins without a delivery channel is refused and changes nothing', async () => {
+    await expect(invoke('checkin.config.set', { enabled: true, quietHours: '' })).rejects.toThrow('deliveryChannel is required');
+    const { config } = await invoke<{ config: { enabled: boolean } }>('checkin.config.get');
+    expect(config.enabled).toBe(false);
+  });
+
   test('an enabled check-in run produces a receipt', async () => {
-    await invoke('checkin.config.set', { enabled: true, quietHours: '' });
+    await invoke('checkin.config.set', { enabled: true, deliveryChannel: 'slack:C123', quietHours: '' });
 
     const runResult = await invoke<{ outcome: string; summary: string }>('checkin.run');
     expect(runResult.outcome).toBe('quiet');
@@ -104,7 +110,7 @@ describe('checkin gateway verb group (live on the composed daemon, not a 501 fac
   });
 
   test('quiet hours suppress delivery but still record a receipt (ran-quiet)', async () => {
-    await invoke('checkin.config.set', { enabled: true, quietHours: quietHoursCoveringNow() });
+    await invoke('checkin.config.set', { enabled: true, deliveryChannel: 'slack:C123', quietHours: quietHoursCoveringNow() });
 
     const runResult = await invoke<{ outcome: string }>('checkin.run');
     // checkin.run collapses the receipt's granular outcome to 'skipped' on the wire.

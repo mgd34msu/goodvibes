@@ -29,6 +29,7 @@ import {
 } from './group-crypto.js';
 import {
   findTombstone,
+  fitStateToBytes,
   isCurrentMember,
   readGroupStateDocument,
   type GroupStateDocument,
@@ -173,6 +174,11 @@ export interface AdmissionRequest {
  *     its identity file. The re-admission writes an add ABOVE the tombstone and
  *     clears it, so the partition property in rule 3's first paragraph is
  *     untouched: a stale add still loses, because a stale add is not a join.
+ *
+ *     What makes this safe is that a removal REPLACES the join key (see
+ *     `ClusterGroupRuntime.rotate`). The removed machine holds only the old
+ *     one, which no member accepts any more, so it cannot use this path on its
+ *     own; the operator has to hand it the new key.
  *
  *  Do not merge cases 1 and 2 into "any valid proof admits". That single change
  *  would turn every retired disk in the house into a permanent group
@@ -397,15 +403,30 @@ export function peekIdentityClassMessage(raw: string): ClusterEnvelope | null {
 
 // ── sealing ─────────────────────────────────────────────────────────────────
 
-/** Seal a grant so only the holder of `recipientAgreementKey`'s private half reads it. */
+/**
+ * The most JSON the roster inside a grant may take. A sealed grant is base64 of
+ * the whole grant (about 1.37 times its size) next to up to sixteen keys and
+ * the signing key, inside one datagram of at most 32768 bytes.
+ */
+export const GRANT_STATE_MAX_BYTES = 16_000;
+
+/**
+ * Seal a grant so only the holder of `recipientAgreementKey`'s private half reads it.
+ *
+ * A roster with many removal records can be larger than a datagram holds, and
+ * a grant that does not fit admits nobody. The oldest removal records are left
+ * out of what is sealed; the joiner learns them again from the group's roster
+ * gossip, and every member that admits anyone still holds them.
+ */
 export function sealGrant(
   grant: AdmissionGrant,
   recipientAgreementKey: string,
   path: 'join' | 'rejoin',
 ): WrappedKeyEnvelope {
+  const fitted = { ...grant, state: fitStateToBytes(grant.state, GRANT_STATE_MAX_BYTES).state };
   return sealForMember(
     recipientAgreementKey,
-    JSON.stringify(grant),
+    JSON.stringify(fitted),
     path === 'join' ? SEAL_CONTEXT_JOIN : SEAL_CONTEXT_REJOIN,
   );
 }

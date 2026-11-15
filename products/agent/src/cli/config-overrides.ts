@@ -93,7 +93,7 @@ export function applyRuntimeUrlOverride(
 }
 
 /**
- * Apply --enable-feature/--disable-feature as RUNTIME-ONLY writes to the
+ * Apply --enable/--disable as RUNTIME-ONLY writes to the
  * feature's domain settings key (the dissolved feature model has no separate
  * enablement namespace). Nothing is persisted: the write lands on the
  * in-memory config just like --config overrides, and the settings-derived
@@ -110,8 +110,8 @@ export function applyRuntimeFeatureOverrides(
 ): readonly string[] {
   const errors: string[] = [];
   const requests = [
-    ...options.enableFeatures.map((featureId) => ({ featureId, desired: 'enabled' as const, flag: '--enable-feature' })),
-    ...options.disableFeatures.map((featureId) => ({ featureId, desired: 'disabled' as const, flag: '--disable-feature' })),
+    ...options.enableFeatures.map((featureId) => ({ featureId, desired: 'enabled' as const, flag: '--enable' })),
+    ...options.disableFeatures.map((featureId) => ({ featureId, desired: 'disabled' as const, flag: '--disable' })),
   ];
   for (const request of requests) {
     try {

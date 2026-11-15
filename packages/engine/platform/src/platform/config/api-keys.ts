@@ -10,6 +10,30 @@
  */
 
 import { SecretsManager } from './secrets.js';
+import { getBuiltinProviderEnvVars } from './provider-credential-catalog.js';
+
+/**
+ * Providers whose credential is a plain API key. The environment variable names
+ * come from the provider credential catalog, so a name added there is read here
+ * and in the daemon's credential status without a second edit. Providers the
+ * catalog lists for other credential kinds (cloud IAM, project ids) are left out
+ * on purpose: an access-key id is not an API key.
+ */
+const API_KEY_PROVIDERS: readonly string[] = [
+  'openai', 'anthropic', 'gemini', 'inceptionlabs', 'openrouter', 'aihubmix', 'groq', 'cerebras', 'mistral',
+  'ollama-cloud', 'huggingface', 'nvidia', 'llm7', 'deepseek', 'fireworks', 'github-copilot', 'microsoft-foundry',
+  'minimax', 'moonshot', 'qianfan', 'qwen', 'sglang', 'stepfun', 'together', 'venice', 'volcengine', 'xai',
+  'xiaomi', 'zai', 'cloudflare-ai-gateway', 'vercel-ai-gateway', 'litellm', 'copilot-proxy',
+];
+
+/**
+ * The Bedrock providers take one stored credential, the bearer token. The
+ * access key id and secret are only useful as a pair read from the environment
+ * (the provider picks request signing from both), and a profile name is not a
+ * key, so none of those is returned here as an "API key".
+ */
+const BEDROCK_PROVIDERS: readonly string[] = ['amazon-bedrock', 'amazon-bedrock-mantle'];
+const BEDROCK_BEARER_TOKEN_ENV = 'AWS_BEARER_TOKEN_BEDROCK';
 
 /**
  * Returns all provider API keys that are currently set in the environment.
@@ -17,54 +41,18 @@ import { SecretsManager } from './secrets.js';
  */
 export function getConfiguredApiKeys(): Record<string, string> {
   const keys: Record<string, string> = {};
-  const mapping: Record<string, string> = {
-    openai: 'OPENAI_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-    gemini: 'GEMINI_API_KEY',
-    inceptionlabs: 'INCEPTION_API_KEY',
-    openrouter: 'OPENROUTER_API_KEY',
-    aihubmix: 'AIHUBMIX_API_KEY',
-    groq: 'GROQ_API_KEY',
-    cerebras: 'CEREBRAS_API_KEY',
-    mistral: 'MISTRAL_API_KEY',
-    'ollama-cloud': 'OLLAMA_CLOUD_API_KEY',
-    // Note: also checked as OLLAMA_API_KEY below
-    huggingface: 'HF_API_KEY',
-    nvidia: 'NVIDIA_API_KEY',
-    llm7: 'LLM7_API_KEY',
-    deepseek: 'DEEPSEEK_API_KEY',
-    fireworks: 'FIREWORKS_API_KEY',
-    'github-copilot': 'COPILOT_GITHUB_TOKEN',
-    'microsoft-foundry': 'AZURE_OPENAI_API_KEY',
-    minimax: 'MINIMAX_API_KEY',
-    moonshot: 'MOONSHOT_API_KEY',
-    qianfan: 'QIANFAN_API_KEY',
-    qwen: 'QWEN_API_KEY',
-    sglang: 'SGLANG_API_KEY',
-    stepfun: 'STEPFUN_API_KEY',
-    together: 'TOGETHER_API_KEY',
-    venice: 'VENICE_API_KEY',
-    volcengine: 'VOLCANO_ENGINE_API_KEY',
-    xai: 'XAI_API_KEY',
-    xiaomi: 'XIAOMI_API_KEY',
-    zai: 'ZAI_API_KEY',
-    'cloudflare-ai-gateway': 'CLOUDFLARE_AI_GATEWAY_API_KEY',
-    'vercel-ai-gateway': 'AI_GATEWAY_API_KEY',
-    litellm: 'LITELLM_API_KEY',
-    'copilot-proxy': 'COPILOT_PROXY_API_KEY',
-  };
-  for (const [prov, envVar] of Object.entries(mapping)) {
-    let value = process.env[envVar];
-    // Alternate env var names.
-    if (!value && prov === 'gemini') value = process.env['GOOGLE_API_KEY'] ?? process.env['GOOGLE_GEMINI_API_KEY'];
-    if (!value && prov === 'openai') value = process.env['OPENAI_KEY'];
-    if (!value && prov === 'anthropic') value = process.env['CLAUDE_API_KEY'];
-    if (!value && prov === 'ollama-cloud') value = process.env['OLLAMA_API_KEY'];
-    if (!value && prov === 'huggingface') value = process.env['HUGGINGFACE_API_KEY'] ?? process.env['HF_TOKEN'];
-    if (!value && prov === 'github-copilot') value = process.env['GH_TOKEN'] ?? process.env['GITHUB_TOKEN'];
-    if (!value && prov === 'qwen') value = process.env['DASHSCOPE_API_KEY'] ?? process.env['MODELSTUDIO_API_KEY'];
-    if (!value && prov === 'zai') value = process.env['Z_AI_API_KEY'];
-    if (value) keys[prov]! = value;
+  for (const prov of API_KEY_PROVIDERS) {
+    for (const envVar of getBuiltinProviderEnvVars(prov)) {
+      const value = process.env[envVar];
+      if (value) {
+        keys[prov] = value;
+        break;
+      }
+    }
+  }
+  const bearer = process.env[BEDROCK_BEARER_TOKEN_ENV];
+  if (bearer) {
+    for (const prov of BEDROCK_PROVIDERS) keys[prov] = bearer;
   }
   return keys;
 }
@@ -82,41 +70,7 @@ export function getConfiguredApiKeys(): Record<string, string> {
 export async function resolveApiKeys(
   secrets: Pick<SecretsManager, 'get'>,
 ): Promise<Record<string, string>> {
-  const mapping: Array<{ prov: string; envVars: string[] }> = [
-    { prov: 'openai',       envVars: ['OPENAI_API_KEY', 'OPENAI_KEY'] },
-    { prov: 'anthropic',    envVars: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'] },
-    { prov: 'gemini',       envVars: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_API_KEY'] },
-    { prov: 'inceptionlabs', envVars: ['INCEPTION_API_KEY'] },
-    { prov: 'openrouter',    envVars: ['OPENROUTER_API_KEY'] },
-    { prov: 'aihubmix',     envVars: ['AIHUBMIX_API_KEY'] },
-    { prov: 'groq',          envVars: ['GROQ_API_KEY'] },
-    { prov: 'cerebras',      envVars: ['CEREBRAS_API_KEY'] },
-    { prov: 'mistral',       envVars: ['MISTRAL_API_KEY'] },
-    { prov: 'ollama-cloud',  envVars: ['OLLAMA_CLOUD_API_KEY', 'OLLAMA_API_KEY'] },
-    { prov: 'huggingface',   envVars: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'] },
-    { prov: 'nvidia',        envVars: ['NVIDIA_API_KEY'] },
-    { prov: 'llm7',          envVars: ['LLM7_API_KEY'] },
-    { prov: 'deepseek',      envVars: ['DEEPSEEK_API_KEY'] },
-    { prov: 'fireworks',     envVars: ['FIREWORKS_API_KEY'] },
-    { prov: 'github-copilot', envVars: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'] },
-    { prov: 'microsoft-foundry', envVars: ['AZURE_OPENAI_API_KEY'] },
-    { prov: 'minimax',       envVars: ['MINIMAX_API_KEY'] },
-    { prov: 'moonshot',      envVars: ['MOONSHOT_API_KEY'] },
-    { prov: 'qianfan',       envVars: ['QIANFAN_API_KEY'] },
-    { prov: 'qwen',          envVars: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'MODELSTUDIO_API_KEY'] },
-    { prov: 'sglang',        envVars: ['SGLANG_API_KEY'] },
-    { prov: 'stepfun',       envVars: ['STEPFUN_API_KEY'] },
-    { prov: 'together',      envVars: ['TOGETHER_API_KEY'] },
-    { prov: 'venice',        envVars: ['VENICE_API_KEY'] },
-    { prov: 'volcengine',    envVars: ['VOLCANO_ENGINE_API_KEY'] },
-    { prov: 'xai',           envVars: ['XAI_API_KEY'] },
-    { prov: 'xiaomi',        envVars: ['XIAOMI_API_KEY'] },
-    { prov: 'zai',           envVars: ['ZAI_API_KEY', 'Z_AI_API_KEY'] },
-    { prov: 'cloudflare-ai-gateway', envVars: ['CLOUDFLARE_AI_GATEWAY_API_KEY'] },
-    { prov: 'vercel-ai-gateway', envVars: ['AI_GATEWAY_API_KEY'] },
-    { prov: 'litellm',       envVars: ['LITELLM_API_KEY'] },
-    { prov: 'copilot-proxy', envVars: ['COPILOT_PROXY_API_KEY'] },
-  ];
+  const mapping = API_KEY_PROVIDERS.map((prov) => ({ prov, envVars: getBuiltinProviderEnvVars(prov) }));
 
   const result: Record<string, string> = {};
 
@@ -144,6 +98,12 @@ export async function resolveApiKeys(
     if (value !== null) {
       result[prov] = value;
     }
+  }
+
+  // The bearer token is stored under its own name, env first like every key above.
+  const bearer = process.env[BEDROCK_BEARER_TOKEN_ENV] || await secrets.get(BEDROCK_BEARER_TOKEN_ENV);
+  if (bearer) {
+    for (const prov of BEDROCK_PROVIDERS) result[prov] = bearer;
   }
 
   return result;

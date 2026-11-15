@@ -364,7 +364,14 @@ describe('compiled TUI host pairing terminal', () => {
         const authCalls = f.authCalls();
         for (const flags of [[], ['--bootstrap-shared', '--apply']]) {
           const restart = f.launch(f.command(flags));
-          expect(await restart.exit()).toBe(1);
+          if (flags.length === 0) {
+            expect(await restart.exit()).toBe(1);
+          } else {
+            // The owner may forget the unresolved attempt; declining leaves it in place.
+            await waitFor('forget prompt', () => /forget this unresolved attempt/.test(restart.output()), 10_000, 20);
+            restart.write('\r');
+            expect(await restart.exit()).toBe(2);
+          }
           expect(restart.output()).toContain('TUI host pairing: unknown');
           expect(restart.output()).not.toMatch(PROMPT);
           f.assertPrivateOutput(restart.output());

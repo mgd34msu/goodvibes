@@ -7,7 +7,7 @@
 import type { ContractEvent, ContractShapeReading } from '../../events/contract.js';
 import type { OwnerReplyOutcome } from './escalation.js';
 import { describeIntake } from './intake-route.js';
-import { isTerminalContractStatus, type ContractView, type CriterionView } from './types.js';
+import { isTerminalContractStatus, type ContractView, type CriterionView, type Escalation } from './types.js';
 
 /** One line of free text: whitespace runs collapsed, cut at `max` characters. */
 export function oneLine(text: string, max = 120): string {
@@ -102,8 +102,8 @@ export function finalJsonLine(contractId: string, contract: ContractView | null,
 }
 
 /** How an owner's reply was read, as the conversation says it. */
-export function describeReply(contractId: string, outcome: OwnerReplyOutcome): string {
-  return describeIntake({ kind: 'replied', contractId, outcome });
+export function describeReply(contractId: string, outcome: OwnerReplyOutcome, escalation?: Pick<Escalation, 'failurePause'>): string {
+  return describeIntake({ kind: 'replied', contractId, outcome, ...(escalation?.failurePause === true ? { failurePause: true as const } : {}) });
 }
 
 function criterionLine(criterion: CriterionView, indent: string): string {

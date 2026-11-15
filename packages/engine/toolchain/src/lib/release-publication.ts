@@ -81,8 +81,10 @@ export function createReleaseStage(outDir: string, prefix: string) {
       assertCurrent();
       linkSync(source, selected); // EEXIST is a refusal, including symlinks.
       const after = fstatSync(fd, { bigint: true });
-      if (!sameTransferSource(before, after) || after.nlink !== 2n) throw new Error('Release stage member changed during publication.');
+      // The final name now exists. Record it before any check can refuse, so the
+      // compensation below removes exactly this link and a retry is not blocked.
       linked = stamp(after);
+      if (!sameTransferSource(before, after) || after.nlink !== 2n) throw new Error('Release stage member changed during publication.');
       if (stamp(lstatSync(source, { bigint: true })) !== linked
         || stamp(lstatSync(selected, { bigint: true })) !== linked) throw new Error('Release stage member changed during publication.');
       assertCurrent(); unlinkSync(source);

@@ -109,12 +109,18 @@ export function renderPacket(items: readonly KnowledgePacketItem[], packet: Pick
   return lines.join('\n');
 }
 
-/** The same rendered fields supply packet token accounting. */
+/**
+ * The same rendered fields supply packet token accounting. Source text is
+ * untrusted, so every line break inside an item continues behind a quote
+ * marker: nothing in it can start a line that reads as a packet header or as
+ * another item.
+ */
 export function renderKnowledgePacketItem(item: KnowledgePacketItem): string {
   const related = item.related.length > 0 ? ` | related: ${item.related.join(', ')}` : '';
   const uri = item.uri ? ` | ${item.uri}` : '';
   const evidence = item.evidence.length > 0 ? ` | evidence: ${item.evidence.join(' ; ')}` : '';
-  return `- [${item.id}] (${item.kind}) ${item.title}${uri}, ${item.summary ?? 'no summary'}, ${item.reason}${related}${evidence}`;
+  return `- [${item.id}] (${item.kind}) ${item.title}${uri}, ${item.summary ?? 'no summary'}, ${item.reason}${related}${evidence}`
+    .replace(/\r\n|[\n\r\u2028\u2029\u0085\v\f]/g, '\n  > ');
 }
 
 export function inferSourceTypeFromArtifact(artifact: ArtifactDescriptor): KnowledgeSourceType {

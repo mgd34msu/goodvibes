@@ -37,13 +37,14 @@ function deferred() {
 }
 
 async function settle(): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, 0));
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
 }
 
 function buildManager(options: {
   readonly policy?: HostedDetachPolicy;
   readonly spine?: HostedSessionSpine;
   readonly closeNativeTurns?: () => Promise<void>;
+  readonly now?: () => number;
   readonly onFloor?: (floor: HostedWorkspaceFloor) => HostedWorkspaceFloor | Promise<HostedWorkspaceFloor>;
 } = {}) {
   const store = new HostedSessionStore(join(root, 'sessions'), {
@@ -73,6 +74,7 @@ function buildManager(options: {
     settings: { detachPolicy: () => options.policy ?? 'kill', maxSessions: () => 8 },
     runtimeBus, liveTurns, intakeIntervalMs: 60_000, systemPrompt: () => 'owned explicit kill fixture',
     ...(options.spine ? { spine: options.spine } : {}),
+    ...(options.now ? { now: options.now } : {}),
     ...(options.closeNativeTurns ? { closeNativeTurns: options.closeNativeTurns } : {}),
   });
   manager.setEventPublisher({ publishEvent: (_event, payload) => { events.push(payload as HostedSessionUpdatePayload); } });
@@ -308,7 +310,9 @@ test('kill drains a held heartbeat registration and fences stale tick registrati
   let registrations = 0;
   let closes = 0;
   const registered = new Set<string>();
-  const { manager, store, events } = buildManager({ spine: {
+  // An unchanged session is registered again once per heartbeat interval, so the clock moves before the tick.
+  let clock = Date.now();
+  const { manager, store, events } = buildManager({ now: () => clock, spine: {
     register: async ({ sessionId }) => {
       registrations += 1;
       if (registrations === 2) { entered.resolve(); await release.promise; }
@@ -320,6 +324,7 @@ test('kill drains a held heartbeat registration and fences stale tick registrati
   await manager.init();
   const record = await manager.create({ workspaceRoot: workspace });
   const intake = (manager as unknown as { spine: HostedSessionSpineIntake }).spine;
+  clock += 31_000;
   const tick = intake.tick();
   let killing: Promise<unknown> | undefined;
   try {
@@ -438,7 +443,8 @@ for (const policy of ['kill', 'survive'] as const) {
     const requested = deferred();
     const release = deferred();
     let registrations = 0;
-    const { manager, store, cleanup, events } = buildManager({ policy, spine: {
+    let clock = Date.now();
+    const { manager, store, cleanup, events } = buildManager({ policy, now: () => clock, spine: {
       register: async () => {
         registrations += 1;
         if (registrations === 2) {
@@ -452,6 +458,7 @@ for (const policy of ['kill', 'survive'] as const) {
     await manager.init();
     const record = await manager.create({ workspaceRoot: workspace });
     const intake = (manager as unknown as { spine: HostedSessionSpineIntake }).spine;
+    clock += 31_000;
     const ticking = intake.tick();
     let closing: Promise<void> | undefined;
     try {

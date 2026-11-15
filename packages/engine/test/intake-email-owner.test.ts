@@ -9,7 +9,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
-async function fixture(options: { gate?: Promise<void>; sockets?: SnapshotSocket[]; redaction?: boolean } = {}) {
+async function fixture(options: { gate?: Promise<void>; sockets?: SnapshotSocket[]; redaction?: boolean; now?: () => number } = {}) {
   const sourceParts: string[][] = [];
   const reached = deferred<void>();
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
@@ -33,7 +33,7 @@ async function fixture(options: { gate?: Promise<void>; sockets?: SnapshotSocket
   const authority = new AbortController();
   const account = { host: 'fixture.invalid', port: 993, username: 'synthetic@example.invalid', mailbox: 'INBOX', security: 'tls' as const };
   const identity = await acquireAccountInboxIdentity({ workingDirectory: makeProjectTempDir('email-owner-identity'), assertCurrent() {} }, { provider: 'email', account });
-  const ownerOptions = { identity, account,
+  const ownerOptions = { identity, account, ...(options.now ? { now: options.now } : {}),
     service: f.service, getCheckpoint: () => checkpoint, assertCurrent() { if (!allowed) throw new Error('Scope changed'); },
     screening: { authority: { ownerId: 'fixture-local-services', revision: '1', retention: 'ephemeral-no-log', signal: authority.signal, assertCurrent() { if (!sourceAllowed) throw new Error('Source changed'); } },
       proposal: { endpoint: `http://127.0.0.1:${server.port}`, model: 'fixture-proposer' },
@@ -457,4 +457,69 @@ test('a suspended lease acquisition cannot adopt authority restored after a deco
   await f.owner.verifyEligibility();
   held.release();
   await expect(pending).rejects.toThrow();
+});
+
+test('an observer sees each screened message with its item id, and its failure does not fail the poll', async () => {
+  const f = await fixture({ redaction: true });
+  await f.seed();
+  const seen: { id: string; subject: string; body: string }[] = [];
+  const observed = createEmailInboxOwner({ ...f.ownerOptions, onMail: mail => {
+    seen.push({ id: mail.id, subject: mail.subject, body: mail.body });
+    throw new Error('observer failed');
+  } });
+  cleanups.push(() => observed.close());
+  const poll = await observed.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
+  expect(poll.state).toBe('ready');
+  expect(seen.map(mail => mail.id)).toEqual(poll.items.map(item => item.id));
+  expect(seen[0]!.body).toContain('[redacted]');
+});
+
+const SIGNED_STRUCTURE = '(("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "8BIT" 5 1)("APPLICATION" "PGP-SIGNATURE" NIL NIL NIL "7BIT" 10) "SIGNED" ("PROTOCOL" "application/pgp-signature"))';
+class SignedSocket extends SnapshotSocket {
+  constructor(options: ConstructorParameters<typeof SnapshotSocket>[0], private readonly signed: readonly number[]) { super(options); }
+  override async answer(command: string): Promise<void> {
+    const uid = Number(/UID FETCH (\d+)/.exec(command)?.[1]);
+    if (this.signed.includes(uid) && command.includes('BODYSTRUCTURE')) {
+      this.feed(`* 1 FETCH (UID ${uid} BODYSTRUCTURE ${SIGNED_STRUCTURE})\r\n${command.split(' ')[0]} OK complete\r\n`);
+      return;
+    }
+    await super.answer(command);
+  }
+}
+
+test('an unsupported message is committed as suppressed beside the published one and reported in the poll result', async () => {
+  const f = await fixture({ sockets: [new SnapshotSocket(), new SignedSocket({}, [42])] }); await f.seed();
+  const poll = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
+  expect(poll.items).toHaveLength(1);
+  expect(poll.checkpointAdvance?.coveredUids).toEqual([42, 43]);
+  expect(poll.checkpointAdvance?.terminal.map((entry) => `${entry.uid}:${entry.disposition}`)).toEqual(['42:suppressed', '43:published']);
+  expect(poll.checkpointAdvance?.next.lastTerminalUid).toBe(43);
+  expect(poll.skippedMessages).toEqual([{ uid: 42, reason: 'bodystructure-incomplete-or-unsupported' }]);
+  expect(poll.pendingMessages).toBe(0);
+});
+
+test('a page made only of unsupported messages still moves the checkpoint past them', async () => {
+  const f = await fixture({ sockets: [new SnapshotSocket(), new SignedSocket({}, [42, 43])] }); await f.seed();
+  const poll = await f.owner.adapter.poll({ limit: 2, checkpoint: f.checkpoint()! });
+  expect(poll).toMatchObject({ state: 'empty', items: [], pendingMessages: 0 });
+  expect(poll.checkpointAdvance?.coveredUids).toEqual([42, 43]);
+  expect(poll.checkpointAdvance?.terminal.every((entry) => entry.disposition === 'suppressed')).toBe(true);
+  expect(poll.checkpointAdvance?.next.lastTerminalUid).toBe(43);
+});
+
+test('simultaneous reads share one IMAP login, a read right after a proof reuses it, and the lease closing check logs in again', async () => {
+  let clock = 1_000;
+  const f = await fixture({ now: () => clock });
+  await f.seed();
+  const base = f.connections();
+  await Promise.all([f.owner.assertReadCurrent(), f.owner.assertReadCurrent(), f.owner.assertReadCurrent()]);
+  expect(f.connections()).toBe(base + 1);
+  clock += 1_000;
+  const validate = await f.owner.acquireReadLease();
+  expect(f.connections()).toBe(base + 1);
+  await validate();
+  expect(f.connections()).toBe(base + 2);
+  clock += 60_000;
+  await f.owner.assertReadCurrent();
+  expect(f.connections()).toBe(base + 3);
 });

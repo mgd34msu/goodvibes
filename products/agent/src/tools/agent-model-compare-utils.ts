@@ -1,3 +1,5 @@
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -34,6 +36,24 @@ export function readComparisonTag(value: unknown): string {
     .replace(/\s+/g, ' ')
     .slice(0, 120)
     .trim();
+}
+
+/** Fisher-Yates over a copy; `random` is injectable so a test can fix the order. */
+export function shuffled<T>(items: readonly T[], random: () => number = Math.random): readonly T[] {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.min(index, Math.floor(random() * (index + 1)));
+    [result[index], result[other]] = [result[other]!, result[index]!];
+  }
+  return result;
+}
+
+/**
+ * Every artifact descriptor, newest first. The store only offers "newest N", so
+ * a fixed window would report older judgments and comparisons as absent.
+ */
+export function listAllArtifacts(store: { readonly list?: (limit?: number) => ArtifactDescriptor[] } | undefined): ArtifactDescriptor[] {
+  return store?.list?.(Number.MAX_SAFE_INTEGER) ?? [];
 }
 
 export function clamp(value: number, min: number, max: number): number {

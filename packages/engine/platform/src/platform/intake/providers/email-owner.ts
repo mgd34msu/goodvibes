@@ -8,7 +8,7 @@ import { createProtectedSourceOwner } from '../../security/source-screening/owne
 import type { ProtectedSourceOwnerOptions, ProtectedSource } from '../../security/source-screening/types.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
-import { POLL_CADENCE_MS, type RouteResolver, type ImapUidCheckpoint, type InboundChannelItem, type InboundProviderAdapter, type ProviderPollOptions, type ProviderPollResult } from '../provider-adapter.js';
+import { POLL_CADENCE_MS, type RouteResolver, type ImapUidCheckpoint, type ImapUidTerminalDisposition, type InboundChannelItem, type InboundProviderAdapter, type ProviderPollOptions, type ProviderPollResult } from '../provider-adapter.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
 
 export interface EmailInboxAccount {
@@ -25,11 +25,29 @@ export interface EmailInboxOwnerOptions {
   readonly service: EmailService;
   readonly screening: ProtectedSourceOwnerOptions;
   readonly assertCurrent: () => void;
+  /** Clock for the read-proof reuse window; defaults to `Date.now`. */
+  readonly now?: () => number;
   /** Read-only view of the actual durable inbox checkpoint, supplied by its registrar. */
   readonly getCheckpoint: () => ImapUidCheckpoint | null;
   /** Optional metadata-only routing capability captured by the owned poll. */
   readonly resolveRouteId?: RouteResolver;
+  /**
+   * Called once per message after it passed source screening, with the screened
+   * subject and body. It runs before the poll's checkpoint is committed, so a poll
+   * that is retried can offer the same message again; observers must tolerate that.
+   * It never delays or fails the poll.
+   */
+  readonly onMail?: (mail: OwnerMailObservation) => void;
   readonly signal?: AbortSignal;
+}
+/** One screened message on the owner's mailbox. `senderAddress` is the raw From value. */
+export interface OwnerMailObservation {
+  /** The inbox item id; the same message keeps the same id across polls. */
+  readonly id: string;
+  readonly senderAddress: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly receivedAtMs: number;
 }
 /** Preserve the original asynchronous callable contract while adding a final fence. */
 export interface EmailInboxReadLease extends OwnedInboxReadLease {
@@ -80,6 +98,9 @@ function unavailable(configured?: boolean): ProviderPollResult {
 }
 
 /** No credentials or provider calls happen during construction. */
+/** How long a completed read proof may start another read. */
+const READ_PROOF_REUSE_MS = 5_000;
+
 export function createEmailInboxOwner(options: EmailInboxOwnerOptions): VerifiedEmailInboxOwner {
   const account = captureAccount(options.account);
   const service = options.service;
@@ -88,6 +109,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
   const assertAuthority = authority.assertCurrent;
   const getCheckpoint = options.getCheckpoint;
   const resolveRouteId = options.resolveRouteId;
+  const onMail = options.onMail;
   const { scopeId, triageFileName: triageStoreFileName } = resolveAccountInboxIdentity(options.identity, { provider: 'email', account });
   const lifetime = new AbortController();
   const signal = AbortSignal.any([lifetime.signal, options.screening.authority.signal, ...(options.signal ? [options.signal] : [])]);
@@ -200,11 +222,16 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
               current(); observation.assertCurrent();
               if (operationSignal.aborted || epoch !== identityEpoch) return unavailable(true);
             }
-            items.push({ id: `email:${scopeId}:${String(observation.uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`,
+            const itemId = `email:${scopeId}:${String(observation.uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`;
+            items.push({ id: itemId,
               provider: 'email', kind: 'dm' as const, fromDigest,
               ...(routeId === undefined ? {} : { routeId }),
               subjectPreview: prefix(projected[3]!, 200), bodyPreview: prefix(projected[4]!, 500),
               receivedAt: Date.now(), unread: message.unread });
+            if (onMail) {
+              try { onMail({ id: itemId, senderAddress: source.detail.from, subject: projected[3]!, body: projected[4]!, receivedAtMs: Date.now() }); }
+              catch { /* An observer's failure cannot poison the poll or expose the source. */ }
+            }
           } finally {
             operationSignal.removeEventListener('abort', abort); observation.signal.removeEventListener('abort', abort);
             await retire(); screeningObservation = undefined;
@@ -212,11 +239,24 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
         }
         current(); observation.assertCurrent(); if (operationSignal.aborted || epoch !== identityEpoch) return unavailable(true);
         commitObservation = observation; commitEpoch = identityEpoch;
-        const finalUid = result.coveredUids.at(-1) ?? result.checkpoint.lastTerminalUid;
-        return { items, state: items.length > 0 ? 'ready' : 'empty', configured: true, pendingMessages: result.pending - result.messages.length,
+        // Messages whose content cannot be proven complete get a terminal
+        // 'suppressed' disposition so the checkpoint moves past them instead of
+        // re-reading them (and holding back every later message) on each poll.
+        const skipped = result.unsupported ?? [];
+        const terminal: ImapUidTerminalDisposition[] = [
+          ...result.coveredUids.map((uid, index) => ({ uid, disposition: 'published' as const, itemId: items[index]!.id })),
+          ...skipped.map((entry) => ({ uid: entry.uid, disposition: 'suppressed' as const })),
+        ].sort((a, b) => a.uid - b.uid);
+        const coveredUids = terminal.map((entry) => entry.uid);
+        const finalUid = coveredUids.at(-1) ?? result.checkpoint.lastTerminalUid;
+        // The reader already left page-passed stepped-over messages out of `pending`.
+        const lastReadable = result.coveredUids.at(-1);
+        const trailing = skipped.filter((entry) => lastReadable === undefined || entry.uid > lastReadable).length;
+        return { items, state: items.length > 0 ? 'ready' : 'empty', configured: true,
+          pendingMessages: result.pending - result.messages.length - trailing,
+          ...(skipped.length > 0 ? { skippedMessages: skipped.map((entry) => ({ uid: entry.uid, reason: entry.reason })) } : {}),
           checkpointAdvance: { kind: 'imap-uid', transition: 'advance', previous: result.checkpoint,
-            next: { ...result.checkpoint, lastTerminalUid: finalUid }, coveredUids: result.coveredUids,
-            terminal: result.coveredUids.map((uid, index) => ({ uid, disposition: 'published' as const, itemId: items[index]!.id })) } };
+            next: { ...result.checkpoint, lastTerminalUid: finalUid }, coveredUids, terminal } };
       }).catch((error: unknown) => {
         failedRead(error);
         return unavailable(error instanceof EmailCredentialUnavailableError ? false : undefined);
@@ -239,11 +279,39 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       return observation;
     } catch (error) { failedRead(error); throw error; }
   });
-  const verifyRead = async (): Promise<EmailMailboxObservation> => {
+  const verifyReadOnce = async (): Promise<EmailMailboxObservation> => {
     const observation = await verifyAccount();
     const checkpoint = getCheckpoint();
     if (!checkpoint || checkpoint.uidValidity !== observation.uidValidity) throw new Error('Email inbox generation has not been committed');
     return observation;
+  };
+  // Each read proof is an IMAP login and select. Readers that arrive while one is in flight share it, so a
+  // refreshing client cannot multiply logins into provider lockout. Eligibility proofs never join it.
+  let reading: Promise<EmailMailboxObservation> | undefined;
+  const now = options.now ?? Date.now;
+  // A proof that finished moments ago also covers the next read that starts (a refresh right after a list), so
+  // back-to-back lists cost one login each instead of two. A lease's closing validation never reuses it.
+  let proven: { observation: EmailMailboxObservation; at: number; authority: number; identity: number } | undefined;
+  const verifyRead = (fresh = true): Promise<EmailMailboxObservation> => {
+    if (!fresh && proven && now() - proven.at >= 0 && now() - proven.at < READ_PROOF_REUSE_MS
+      && proven.authority === authorityEpoch && proven.identity === identityEpoch
+      // A mailbox reset commits a new generation; a proof of the old one must not refuse reads of the new one.
+      && getCheckpoint()?.uidValidity === proven.observation.uidValidity) {
+      const reused = proven.observation;
+      return (async () => {
+        current(); reused.assertCurrent();
+        const checkpoint = getCheckpoint();
+        if (!checkpoint || checkpoint.uidValidity !== reused.uidValidity) throw new Error('Email inbox generation has not been committed');
+        return reused;
+      })();
+    }
+    if (reading) return reading;
+    const authority = authorityEpoch, identity = identityEpoch;
+    const shared = verifyReadOnce();
+    reading = shared;
+    const clear = (): void => { if (reading === shared) reading = undefined; };
+    void shared.then(observation => { proven = { observation, at: now(), authority, identity }; clear(); }, clear);
+    return shared;
   };
   return {
     account, scopeId, triageStoreFileName, adapter,
@@ -273,10 +341,10 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
       eligibility.assertCurrent();
       return eligibility;
     },
-    async assertReadCurrent() { await verifyRead(); },
+    async assertReadCurrent() { await verifyRead(false); },
     async acquireReadLease() {
       const authorityAtAcquisition = authorityEpoch;
-      const original = await verifyRead();
+      const original = await verifyRead(false);
       const identityAtAcquisition = identityEpoch;
       const assertCurrent = (): void => {
         current(); original.assertCurrent();

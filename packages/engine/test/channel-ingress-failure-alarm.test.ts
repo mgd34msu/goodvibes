@@ -97,6 +97,24 @@ describe('a skipped inbound message alarms once, not once per message', () => {
     expect(sent).toHaveLength(2);
   });
 
+  test('failures interleaved with successes inside the window do not storm the owner', () => {
+    const { alarm, sent, advance } = makeAlarm();
+    for (const outcome of ['fail', 'ok', 'fail', 'ok', 'fail'] as const) {
+      advance(1000);
+      if (outcome === 'fail') alarm.recordFailure('telegram', 'one chat is broken');
+      else alarm.recordSuccess('telegram');
+    }
+    // One "heads up" and one "processing again"; the later runs stay quiet.
+    expect(sent).toHaveLength(2);
+    // The surface still reads as failing while the latest run lasts.
+    expect(alarm.failure('telegram')?.count).toBe(1);
+    // Once the window has passed, a new failure is news again.
+    alarm.recordSuccess('telegram');
+    advance(31 * 60 * 1000);
+    alarm.recordFailure('telegram', 'one chat is broken');
+    expect(sent).toHaveLength(3);
+  });
+
   test('a run that was never notified recovers silently', () => {
     const { alarm, sent } = makeAlarm(0);
     // windowMs 0 means every failure notifies, so build the un-notified case
@@ -127,6 +145,7 @@ describe('a skipped inbound message alarms once, not once per message', () => {
 describe('a running poll loop that cannot process is degraded, not healthy', () => {
   test('polling + running + a processing failure reports degraded', () => {
     const observation = observeTelegramRuntime({
+      kind: 'receiving',
       mode: 'polling',
       reason: 'long-polling every 30s',
       running: true,
@@ -143,6 +162,7 @@ describe('a running poll loop that cannot process is degraded, not healthy', () 
 
   test('the same loop with nothing failing still reports healthy', () => {
     const observation = observeTelegramRuntime({
+      kind: 'receiving',
       mode: 'polling',
       reason: 'long-polling every 30s',
       running: true,
@@ -158,6 +178,7 @@ describe('a running poll loop that cannot process is degraded, not healthy', () 
 
   test('an armed webhook that cannot process is degraded too', () => {
     const observation = observeTelegramRuntime({
+      kind: 'receiving',
       mode: 'webhook',
       reason: 'a webhook is registered',
       running: false,

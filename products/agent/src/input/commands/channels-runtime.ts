@@ -159,7 +159,7 @@ function filterChannels(
   filter: ChannelFilter,
 ): readonly AgentWorkspaceChannelStatus[] {
   if (filter === 'ready') return channels.filter((channel) => channel.ready);
-  if (filter === 'attention') return channels.filter((channel) => channel.enabled && channel.setupState !== 'ready');
+  if (filter === 'attention') return channels.filter((channel) => (channel.enabled || channel.setupState === 'unknown') && channel.setupState !== 'ready');
   return channels;
 }
 

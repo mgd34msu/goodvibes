@@ -76,6 +76,12 @@ const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
   },
   action: handleApprovalOperatorAction,
 });
+// A second `setup --yes` while one is running would start another download and
+// another progress poller over the same install. Keyed on the voice service so
+// separate runtimes stay independent.
+const voiceInstallsInFlight = new WeakSet<object>();
+const wakeProvisionsInFlight = new WeakSet<object>();
+
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
     'Review voice posture, manage the managed local-voice runtime and the wake-word models, and package portable voice interaction metadata',
@@ -112,9 +118,15 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         requireYesFlag(ctx, 'download the pinned wake-word classifier and speech-embedding front end (~3.7 MB)', '/voice wake setup --yes');
         return;
       }
+      if (wakeProvisionsInFlight.has(voiceSetup)) {
+        ctx.print('Wake-Word Setup\n  already running; its receipt prints here when it finishes. Check /voice wake status.');
+        return;
+      }
+      wakeProvisionsInFlight.add(voiceSetup);
       ctx.print(WAKE_SETUP_ANNOUNCEMENT);
       void voiceSetup
         .wakeProvision()
+        .finally(() => { wakeProvisionsInFlight.delete(voiceSetup); })
         .then((result) => {
           ctx.print(['Wake-Word Setup, receipt', ...wakeProvisionReceiptLines(result)].join('\n'));
         })
@@ -158,6 +170,11 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         return;
       }
       const voiceSetup = requireVoiceSetup(ctx);
+      if (voiceInstallsInFlight.has(voiceSetup)) {
+        ctx.print('A managed local-voice install is already running; its receipt prints here when it finishes. Check /voice status for progress.');
+        return;
+      }
+      voiceInstallsInFlight.add(voiceSetup);
       ctx.print('Installing managed local-voice runtime...');
       // Poll voice.local.status while the install call is in flight and
       // render live per-component progress from its installInProgress
@@ -212,6 +229,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         })
         .finally(() => {
           installSettled = true;
+          voiceInstallsInFlight.delete(voiceSetup);
         });
       return;
     }
@@ -224,7 +242,9 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     '  next /voice status',
     '  next /voice setup --yes',
   ],
-  toggled: (next) => `Voice interaction ${next ? 'enabled' : 'disabled'} for this runtime.`,
+  toggled: (next) => next
+    ? 'Always-speak mode enabled. Every submitted turn will be played through live TTS.'
+    : 'Always-speak mode disabled. Use /tts <prompt> to speak individual turns.',
   notes: ['Voice is optional and local-first.', 'Operator review remains the primary review path for risky actions.'],
   inspectMissingFile: true,
   reportReadFailure: true,

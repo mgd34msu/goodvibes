@@ -99,7 +99,6 @@ test('native work receipts compare exact detached values without invoking suppli
   expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);
 });
 
-// Regression source UNRUN during the coding-first pass.
 test('saved contract observation hashes no unreviewed answer and compares a shared reviewed answer only once', () => {
   const viewed = contract({ answer: 'Complete observed answer. '.repeat(20_000) });
   const hashes = spyOn(Bun.CryptoHasher, 'hash');

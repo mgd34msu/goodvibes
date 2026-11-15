@@ -140,6 +140,10 @@ export interface WorkPlanHousekeeping {
   readonly preservedUnverifiedQuarantines?: number | undefined;
   /** Readonly inspection found damage; no reset or quarantine was performed. */
   readonly recoveryRequired?: boolean | undefined;
+  /** Saved items this build could not read (no title, or `items` was not a list) and therefore dropped; the original file was preserved at `quarantinePath`. */
+  readonly droppedItems?: number | undefined;
+  /** Saved items whose status this build does not know; they were set to pending and the original file was preserved at `quarantinePath`. */
+  readonly coercedItems?: number | undefined;
 }
 
 export interface WorkPlan {
@@ -257,6 +261,18 @@ function normalizeItem(value: unknown, fallbackCreatedAt: number): WorkPlanItem 
   };
 }
 
+/** How many saved items `normalizeItem` would drop or change, so a lossy read is disclosed instead of silent. */
+function countLossyItems(value: unknown): { dropped: number; coerced: number } {
+  if (value === undefined) return { dropped: 0, coerced: 0 };
+  if (!Array.isArray(value)) return { dropped: 1, coerced: 0 };
+  let dropped = 0, coerced = 0;
+  for (const item of value) {
+    if (!isObject(item) || !readString(item.title)) dropped += 1;
+    else if (!isWorkPlanStatus(item.status)) coerced += 1;
+  }
+  return { dropped, coerced };
+}
+
 function formatStatus(status: WorkPlanItemStatus): string {
   return status.replace(/_/g, ' ');
 }
@@ -291,6 +307,8 @@ function normalizeHousekeeping(value: unknown): WorkPlanHousekeeping | undefined
     ...(quarantinesRemoved !== undefined ? { quarantinesRemoved } : {}),
     ...(typeof value.preservedUnverifiedQuarantines === 'number' ? { preservedUnverifiedQuarantines: value.preservedUnverifiedQuarantines } : {}),
     ...(value.recoveryRequired === true ? { recoveryRequired: true } : {}),
+    ...(typeof value.droppedItems === 'number' ? { droppedItems: value.droppedItems } : {}),
+    ...(typeof value.coercedItems === 'number' ? { coercedItems: value.coercedItems } : {}),
   };
 }
 
@@ -318,6 +336,10 @@ function formatHousekeeping(record: WorkPlanHousekeeping): string {
     parts.push(record.quarantinePath
       ? `the previous plan file could not be read and was preserved at ${record.quarantinePath}`
       : 'the previous plan file was empty or unreadable and was reset');
+  }
+  if (record.droppedItems || record.coercedItems) {
+    const where = record.quarantinePath ? `the original file was preserved at ${record.quarantinePath}` : 'readonly inspection left the file unchanged';
+    parts.push(`${record.droppedItems ?? 0} item(s) this version could not read were dropped and ${record.coercedItems ?? 0} item(s) with an unknown status were set to pending; ${where}`);
   }
   if (record.expiredItems > 0) parts.push(`${record.expiredItems} completed item(s) aged out`);
   if (record.cappedItems > 0) parts.push(`${record.cappedItems} completed item(s) over the retention cap removed`);
@@ -487,7 +509,9 @@ export class WorkPlanStore {
     const plan = this.readPlan();
     const markdown = this.toMarkdown(plan);
     const path = this.filePath.replace(/\.json$/, '.md');
-    atomicWriteFileSync(path, `${markdown}\n`, { mkdirp: true });
+    // Same retained-location checks as the plan write: a replaced work-plan
+    // directory must not receive the export.
+    atomicWriteFileSync(path, `${markdown}\n`, { mkdirp: true, assertCurrent: () => { this.locationCurrent(); this.planReadCurrent(); } });
     return { path, markdown };
   }
 
@@ -587,6 +611,19 @@ export class WorkPlanStore {
         },
       };
     }
+    const lossy = countLossyItems(parsed.items);
+    // A file this version reads only partly (an unknown status, an item shape
+    // it does not know) is not rewritten in place: the original is preserved
+    // first, as for an unreadable file, so a newer build's items are not lost.
+    const lossyRecovery: WorkPlanHousekeeping | null = lossy.dropped + lossy.coerced === 0 ? null : (() => {
+      const kept = readOnly ? undefined : this.quarantineUnreadableFile(heldSource, effects, {
+        reason: 'saved work plan has items this version cannot read in full',
+        recovery: 'The plan continues with the items this version understands; the original bytes remain at the reported recovery path.',
+      });
+      return { at: nowMs(), expiredItems: 0, cappedItems: 0, droppedItems: lossy.dropped, coercedItems: lossy.coerced,
+        ...(readOnly ? { recoveryRequired: true } : {}),
+        ...(kept ? { quarantinePath: kept.path, quarantinesRemoved: kept.reaped, preservedUnverifiedQuarantines: kept.unknown } : {}) };
+    })();
     const time = nowMs();
     const createdAt = typeof parsed.createdAt === 'number' ? parsed.createdAt : time;
     const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : createdAt;
@@ -609,7 +646,7 @@ export class WorkPlanStore {
         updatedAt,
         ...(housekeeping ? { housekeeping } : {}),
       },
-      recovery: null,
+      recovery: lossyRecovery,
     };
     } finally { heldSource.close(); }
   }
@@ -653,6 +690,8 @@ export class WorkPlanStore {
       cappedItems: capped.size,
       ...(recovery?.resetFromUnreadableFile ? { resetFromUnreadableFile: true } : {}),
       ...(recovery?.quarantinePath ? { quarantinePath: recovery.quarantinePath } : {}),
+      ...(recovery?.droppedItems ? { droppedItems: recovery.droppedItems } : {}),
+      ...(recovery?.coercedItems ? { coercedItems: recovery.coercedItems } : {}),
       ...(quarantinesRemoved > 0 ? { quarantinesRemoved } : {}),
       ...(sweep.unknown > 0 ? { preservedUnverifiedQuarantines: sweep.unknown } : {}),
     };
@@ -684,11 +723,11 @@ export class WorkPlanStore {
    * The shared original-source reader publishes an exclusive archive and an
    * owned receipt; a failed preservation propagates before any reset.
    */
-  private quarantineUnreadableFile(source: QuarantineSource, effects?: WorkPlanEffectOptions): { path: string; reaped: number; unknown: number } {
+  private quarantineUnreadableFile(source: QuarantineSource, effects?: WorkPlanEffectOptions, why?: { reason: string; recovery: string }): { path: string; reaped: number; unknown: number } {
     let published = false;
     const current = () => { effects?.assertCurrent?.(); this.locationCurrent(); if (!published) source.assertCurrent(); };
-    const outcome = quarantineCorruptFile(this.filePath, { source, label: 'workflow/work-plan', reason: 'saved work plan is not a usable JSON document',
-      recovery: 'The local plan is rebuilt empty; the original bytes remain at the reported recovery path.',
+    const outcome = quarantineCorruptFile(this.filePath, { source, label: 'workflow/work-plan', reason: why?.reason ?? 'saved work plan is not a usable JSON document',
+      recovery: why?.recovery ?? 'The local plan is rebuilt empty; the original bytes remain at the reported recovery path.',
       maxFiles: WORK_PLAN_QUARANTINE_CAP, maximumAgeMs: WORK_PLAN_QUARANTINE_TTL_MS,
       assertCurrent: current, onEffect: flag => { if (flag) published = true; effects?.onEffect?.(flag); },
     });

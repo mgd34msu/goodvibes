@@ -135,11 +135,15 @@ function fillCard(container: HTMLElement): void {
 async function submitCard(container: HTMLElement): Promise<void> {
   const button = container.querySelector('[data-testid="payment-card-submit"]') as HTMLButtonElement;
   expect(button).not.toBeNull();
+  const createsBefore = calls.filter((c) => c.method === 'POST').length;
   button.click();
-  // Let the create promise, the state reset and the cache invalidation settle.
-  for (let i = 0; i < 20; i += 1) {
+  // Wait on the outcome, not on a guessed latency: the create request has gone out, the
+  // component has left its saving state (the button is enabled again) and the cache
+  // invalidation's refetch has finished.
+  for (let i = 0; i < 400; i += 1) {
+    const created = calls.filter((c) => c.method === 'POST').length > createsBefore;
+    if (created && !button.disabled && queryClient.isFetching() === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 5));
-    if (!button.disabled) break;
   }
   flushSync(() => {});
 }

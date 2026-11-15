@@ -5,9 +5,9 @@
  * validation for the trusted tier, and the PluginTrustStore that manages
  * trust records with persistence support.
  *
- * Trust tiers gate access to high-risk capabilities:
+ * Trust tiers record how far the operator trusts a plugin; capabilities above the tier are withheld from the granted set:
  *   - untrusted, only safe, read-only capabilities allowed
- *   - limited  , moderate capabilities; high-risk capabilities blocked
+ *   - limited  , moderate capabilities; high-risk capabilities are flagged
  *   - trusted  , full capability set; requires signed manifest validation
  */
 
@@ -27,7 +27,7 @@ import { isHighRiskCapability } from './manifest.js';
  *   are accessible. The plugin may not have been reviewed.
  * - `limited`  , Operator-reviewed plugin. Moderate capabilities granted.
  *   High-risk capabilities (shell.exec, filesystem.write, network.outbound)
- *   remain blocked without explicit trust escalation.
+ *   are flagged until the operator raises trust.
  * - `trusted`  , Fully trusted plugin. Requires a valid signed manifest.
  *   All declared capabilities may be granted (subject to runtime policy).
  */
@@ -153,7 +153,7 @@ export function filterCapabilitiesByTrust(
     } else if (tier === 'limited') {
       if (isHighRiskCapability(cap)) {
         blocked.push(cap);
-        reasons[cap] = `Capability '${cap}' requires trust tier 'trusted' (current: limited)`;
+        reasons[cap] = `Capability '${cap}' is above trust tier 'limited'; it is withheld from the granted set (trusted tier expected)`;
       } else {
         permitted.push(cap);
       }
@@ -163,7 +163,7 @@ export function filterCapabilitiesByTrust(
         permitted.push(cap);
       } else {
         blocked.push(cap);
-        reasons[cap] = `Capability '${cap}' requires trust tier 'limited' or higher (current: untrusted)`;
+        reasons[cap] = `Capability '${cap}' is above trust tier 'untrusted'; it is withheld from the granted set (limited tier or higher expected)`;
       }
     }
   }

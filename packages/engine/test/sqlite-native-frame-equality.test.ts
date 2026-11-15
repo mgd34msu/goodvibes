@@ -13,6 +13,12 @@ import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createSemanticWriteGuard } from '../platform/src/platform/knowledge/semantic/primary-source-plan.js';
 import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
 
+// This suite reaches into sql.js internals: the minified property names ('mb', 'gb',
+// 'Ob', 'Ab', 'Tb', 'qb', 'Ya') belong to the build pinned in packages/engine/package.json
+// (sql.js 1.14.2). It also patches process-global intrinsics, always restored in a
+// `finally`, so it must not share a process with other tests. After a sql.js upgrade a
+// setup failure here ("No actual native ...") means those names moved, not that the
+// store regressed: re-derive them from the new build.
 type NativeDatabase = InstanceType<Awaited<ReturnType<typeof loadSqlJsEngine>>['Database']>;
 const roots: string[] = [], databases: SQLiteStoreType[] = [], knowledgeStores: KnowledgeStore[] = [];
 const observers: Array<{ mockRestore(): void }> = [];

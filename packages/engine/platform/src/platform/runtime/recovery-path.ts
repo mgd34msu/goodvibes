@@ -13,6 +13,11 @@ export const RECOVERY_HEADER_LIMIT = 1024 * 1024;
 const OWNER_PATH_LIMIT = 128;
 const LEGACY_DIRECTORY_LIMIT = 32;
 
+/** The file was replaced or modified while it was being read. Reading it again can succeed; it says nothing about whose file it is. */
+export class RecoverySourceChangedError extends Error {
+  constructor() { super('Recovery source changed'); this.name = 'RecoverySourceChangedError'; }
+}
+
 function regularIdentity(stat: BigIntStats): string {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new Error('Recovery source is not a regular original file');
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs, stat.birthtimeNs].join(':');
@@ -25,7 +30,7 @@ export function readRecoveryHeaderObservation(path: string): { readonly header: 
   const original = regularIdentity(stat);
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    if (regularIdentity(fstatSync(fd, { bigint: true })) !== original) throw new Error('Recovery source changed');
+    if (regularIdentity(fstatSync(fd, { bigint: true })) !== original) throw new RecoverySourceChangedError();
     const chunks: Buffer[] = [];
     let length = 0;
     while (length <= RECOVERY_HEADER_LIMIT) {
@@ -39,7 +44,7 @@ export function readRecoveryHeaderObservation(path: string): { readonly header: 
     }
     if (length > RECOVERY_HEADER_LIMIT) throw new Error('Recovery header exceeds its supported limit');
     if (regularIdentity(fstatSync(fd, { bigint: true })) !== original
-      || regularIdentity(lstatSync(path, { bigint: true })) !== original) throw new Error('Recovery source changed');
+      || regularIdentity(lstatSync(path, { bigint: true })) !== original) throw new RecoverySourceChangedError();
     let parsed: unknown;
     try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, length))); }
     catch { throw new Error('Invalid recovery header'); }
@@ -58,21 +63,36 @@ export function safeRecoverySessionSegment(id: string): string | undefined {
   return id.length <= 220 && /^[A-Za-z0-9._-]+$/.test(id) ? id : undefined;
 }
 
-function belongsTo(path: string, id: string): boolean {
-  try { const header = readRecoveryHeader(path); return header['type'] === 'meta' && header['sessionId'] === id; }
-  catch { return false; }
+const BELONGS_ATTEMPTS = 3;
+
+/**
+ * Whether the file's header names this session. A read that raced a replacement is retried; if it
+ * keeps racing the error is thrown, because "could not tell" must not be answered "not mine": the
+ * caller would then allocate a second recovery file for a session that already has one.
+ */
+function belongsTo(path: string, id: string, readHeader: (path: string) => Record<string, unknown> = readRecoveryHeader): boolean {
+  for (let attempt = 1; ; attempt++) {
+    try { const header = readHeader(path); return header['type'] === 'meta' && header['sessionId'] === id; }
+    catch (error) {
+      if (!(error instanceof RecoverySourceChangedError)) return false;
+      if (attempt >= BELONGS_ATTEMPTS) throw error;
+    }
+  }
 }
 
 /** Existing files, including previously SHA-suffixed names, are selected by
  * their actual original header. Never recompute an old filename commitment. */
-function existingRecoveryPath(directory: string, id: string): string | undefined {
+function existingRecoveryPath(directory: string, id: string, readHeader?: (path: string) => Record<string, unknown>): string | undefined {
   let names: string[];
   try { names = readdirSync(directory); } catch { return undefined; }
   const matches: Array<{ path: string; at: bigint }> = [];
   for (const name of names) {
     if (!name.startsWith('recovery-') || !name.endsWith('.jsonl')) continue;
     const path = join(directory, name);
-    if (!belongsTo(path, id)) continue;
+    // A file that keeps changing under the scan is skipped; the canonical file is checked first and is never skipped.
+    let mine: boolean;
+    try { mine = belongsTo(path, id, readHeader); } catch { continue; }
+    if (!mine) continue;
     try { matches.push({ path, at: lstatSync(path, { bigint: true }).mtimeNs }); } catch { /* Retired snapshot. */ }
   }
   matches.sort((a, b) => a.at === b.at ? a.path.localeCompare(b.path) : a.at > b.at ? -1 : 1);
@@ -91,7 +111,12 @@ function directoryVersion(path: string): string | undefined {
   catch { return undefined; }
 }
 
-export function createRecoveryPathResolver(directory: string, nativeDataWriter?: NativeDataWriteOwner): (id: string) => string {
+export function createRecoveryPathResolver(
+  directory: string,
+  nativeDataWriter?: NativeDataWriteOwner,
+  /** How a recovery file's first line is read; replaced only where a test needs to make a read race. */
+  readHeader?: (path: string) => Record<string, unknown>,
+): (id: string) => string {
   const paths = new Map<string, string>();
   const versions = new Map<string, string | undefined>();
   const remember = (id: string, path: string) => {
@@ -104,10 +129,10 @@ export function createRecoveryPathResolver(directory: string, nativeDataWriter?:
   const resolve = (id: string): string => {
     const safe = safeRecoverySessionSegment(id);
     const canonical = safe === undefined ? undefined : join(directory, `recovery-${safe}.jsonl`);
-    if (canonical !== undefined && belongsTo(canonical, id)) return canonical;
+    if (canonical !== undefined && belongsTo(canonical, id, readHeader)) return canonical;
     const cached = paths.get(id);
-    if (cached !== undefined && versions.get(id) === directoryVersion(directory) && belongsTo(cached, id)) return cached;
-    const existing = existingRecoveryPath(directory, id);
+    if (cached !== undefined && versions.get(id) === directoryVersion(directory) && belongsTo(cached, id, readHeader)) return cached;
+    const existing = existingRecoveryPath(directory, id, readHeader);
     if (existing !== undefined) return remember(id, existing);
     // Even a safe caller ID must not overwrite an unrelated opaque filename.
     if (canonical !== undefined) {

@@ -287,6 +287,33 @@ describe('CLI status and doctor output', () => {
     expect(text).not.toContain('default knowledge');
   });
 
+  test('doctor says the Agent routes were not checked when the host refused its status request', () => {
+    const externalRuntime = makeExternalRuntime({
+      statusCode: 503,
+      compatible: false,
+      agentKnowledge: {
+        route: '/api/goodvibes-agent/knowledge/status',
+        ready: false,
+        kind: 'connected_host_unavailable',
+        statusCode: 503,
+        probed: false,
+      },
+      error: 'HTTP 503',
+    });
+    const findings = buildCliDoctorFindings({ ...makeOptions(), externalRuntime });
+    const incompatible = findings.find((finding) => finding.id === 'external-runtime-incompatible');
+
+    expect(incompatible?.cause).toContain('were not checked');
+    expect(incompatible?.cause).toContain('HTTP 503');
+    expect(incompatible?.cause).not.toContain('unavailable or incompatible');
+    expect(findings.map((finding) => finding.id)).not.toContain('agent-knowledge-route-not-ready');
+
+    const text = renderCliStatus({ ...makeOptions(), externalRuntime, doctor: true });
+    expect(text).toContain('Agent Knowledge: not checked');
+    expect(text).toContain('isolated Agent Knowledge route: not checked');
+    expect(text).not.toContain('not ready (');
+  });
+
   test('network endpoint config does not report Agent-owned network auth posture', () => {
     const findings = buildCliDoctorFindings({
       ...makeOptions({

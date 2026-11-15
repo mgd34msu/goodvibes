@@ -33,6 +33,12 @@ function patchScheduleValue(preview: ScheduleEditPreview): string {
   return scheduleValue(preview.payload.schedule);
 }
 
+/** The value the schedule tool parses for this schedule kind: the raw cron expression, interval or timestamp. */
+function routeScheduleValue(schedule: Record<string, unknown>): string {
+  if (schedule.kind === 'cron') return readString(schedule, 'expression') ?? '';
+  return scheduleValue(schedule);
+}
+
 function scheduleEditConfirmationRoute(preview: ScheduleEditPreview): string {
   const args = [
     'schedule action:"edit"',
@@ -43,7 +49,12 @@ function scheduleEditConfirmationRoute(preview: ScheduleEditPreview): string {
     const schedule = preview.payload.schedule;
     if (isRecord(schedule) && typeof schedule.kind === 'string') {
       args.push(`scheduleKind:${scheduleRouteArg(schedule.kind)}`);
-      args.push(`scheduleValue:${scheduleRouteArg(scheduleValue(schedule))}`);
+      // The tool takes the bare expression, and timezone and stagger as their own
+      // arguments; the preview's display string ("0 9 * * * [UTC]") is not a value.
+      args.push(`scheduleValue:${scheduleRouteArg(routeScheduleValue(schedule))}`);
+      const timezone = readString(schedule, 'timezone');
+      if (schedule.kind === 'cron' && timezone) args.push(`timezone:${scheduleRouteArg(timezone)}`);
+      if (schedule.kind === 'cron' && typeof schedule.staggerMs === 'number') args.push(`staggerMs:${schedule.staggerMs}`);
     }
   }
   if (preview.payload.prompt) args.push('prompt:"..."');

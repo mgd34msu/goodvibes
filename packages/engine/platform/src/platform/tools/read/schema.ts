@@ -41,9 +41,13 @@ export const READ_TOOL_SCHEMA = {
             type: 'boolean',
             description: 'Bypass cache and re-read the file from disk.',
           },
+          force_text: {
+            type: 'boolean',
+            description: 'Read a file as UTF-8 text even though it contains a NUL byte (otherwise it is skipped as binary).',
+          },
           pages: {
             type: 'string',
-            description: 'Page range for PDF files (e.g. \'1-5\', \'3\', \'10-20\'). Max 20 pages per request.',
+            description: 'Accepted for PDF files but not applied: PDF text is returned for the whole document and labelled approximate, because page boundaries are not available.',
           },
           image_mode: {
             type: 'string',
@@ -89,7 +93,9 @@ export const READ_TOOL_SCHEMA = {
         max_tokens: {
           type: 'integer',
           minimum: 1,
-          description: 'Hard token cap across the entire response.',
+          description: 'Token cap across the entire response; use this to bound a read. Files clipped by it are'
+            + ' listed in summary.truncated with next_start_line to continue from (extract=lines with range).'
+            + ' Default: 25000 unless token_budget is set.',
         },
       },
     },
@@ -97,8 +103,9 @@ export const READ_TOOL_SCHEMA = {
       type: 'integer',
       minimum: 1,
       description:
-        'Token budget for paginated reads. When set, results are binned into'
-        + ' pages that fit within the budget.',
+        'Splits a large multi-file batch into pages of whole files that fit the budget; fetch later pages with'
+        + ' page=N (pagination.pending_files lists the rest). Use only for batches too large for one response;'
+        + ' to cap one response use output.max_tokens. When omitted, the owner\'s tools.defaultTokenBudget setting applies if it is above 0.',
     },
     page: {
       type: 'integer',
@@ -134,7 +141,9 @@ export interface ReadFileInput {
   extract?: ExtractMode | undefined;
   range?: { start: number; end: number };
   force?: boolean | undefined;
-  /** Page range for PDF files (e.g. '1-5', '3', '10-20'). Max 20 pages. */
+  /** Decode as UTF-8 text even when a NUL byte marks the file as binary. */
+  force_text?: boolean | undefined;
+  /** Accepted for PDF files but not applied; the whole document's text is returned and labelled approximate. */
   pages?: string | undefined;
   image_mode?: ImageMode | undefined;
 }

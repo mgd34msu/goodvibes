@@ -82,3 +82,17 @@ test('input batch cleanup joins every release before reporting any failure', asy
     expect(drained).toBe(true);
   } finally { blocked.resolve(); await cleanup.catch(() => {}); }
 });
+
+test('a call the provider could not read keeps its reason through the batch, for known and unknown tools', async () => {
+  const registry = new ToolRegistry();
+  registry.register({ definition: { name: 'known', description: 'Synthetic known tool', parameters: { type: 'object' } }, async execute() { return { success: true }; } });
+  const reason = 'the arguments are not valid JSON';
+  const batch = await projectToolInputBatch(registry, [
+    { id: 'a', name: 'known', arguments: {}, argumentError: reason },
+    { id: 'b', name: 'missing', arguments: {}, argumentError: reason },
+    { id: 'c', name: 'known', arguments: {} },
+  ]);
+  try {
+    expect(batch.calls.map(call => call.argumentError)).toEqual([reason, reason, undefined]);
+  } finally { await batch.release(); }
+});

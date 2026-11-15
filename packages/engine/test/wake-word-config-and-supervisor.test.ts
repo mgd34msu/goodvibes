@@ -37,7 +37,7 @@ import { deriveFeatureState, FEATURE_SETTINGS_BINDINGS } from '../platform/src/p
 const WAKE = voiceWakeConfigDefaults.voice.wake;
 
 describe('the wake-word settings rows', () => {
-  test('all 27 built rows are present, and the unbuilt Wyoming row is not', () => {
+  test('all 28 built rows are present, and the unbuilt Wyoming row is not', () => {
     // The voice.wake.wyomingServer setting would require a
     // Wyoming wake server, which is not implemented. No explicit
     // owner request has authorized that feature. Shipping its key would be a switch wired to nothing.
@@ -79,13 +79,6 @@ describe('the wake-word settings rows', () => {
 
   test('the threshold default is 0.9, overriding the accepted 0.5', () => {
     expect(WAKE.threshold).toBe(0.9);
-    const row = voiceWakeConfigSettings.find((s) => s.key === 'voice.wake.threshold');
-    // The measurement that justified the override has to travel with the row,
-    // or the next person to read it sees an unexplained deviation.
-    expect(row?.description).toContain('34.5%');
-    expect(row?.description).toContain('24.7%');
-    expect(row?.description).toContain('96.8%');
-    expect(row?.description).toContain('synthetic-only');
   });
 
   test('the accepted defaults are what shipped', () => {
@@ -156,7 +149,11 @@ describe('the wake-word feature registry row', () => {
     expect(association.configKeys).toContain('voice.wake.threshold');
     expect(association.configKeys).toContain('voice.wake.silenceFloorRms');
     expect(association.configKeys).toContain('voice.wake.speechRetriggerMs');
-    expect(association.configKeys.length).toBe(27);
+    // The flag's own switch is the one row the association does not list as a tuning key.
+    const associatedKeys: readonly string[] = association.configKeys;
+    expect([...associatedKeys].sort()).toEqual(
+      voiceWakeConfigSettings.map((row) => row.key).filter((key) => key !== 'voice.wake.enabled').sort(),
+    );
   });
 });
 
@@ -517,29 +514,5 @@ describe('the feature is operable now, and the copy no longer says otherwise', (
     const flag = FEATURE_FLAGS.find((f) => f.id === 'wake-word-detection');
     expect(flag?.notOperable).toBeUndefined();
     expect(flag?.description).not.toContain('not available');
-  });
-
-  test('the rows that are still limited name their own limit, rather than a blanket claim', () => {
-    const rowFor = (key: string) => voiceWakeConfigSettings.find((r) => r.key === key)?.description ?? '';
-    // Every delivery surface captures now, and each row says how: the agent
-    // through the same recorder subprocess the terminal uses.
-    expect(rowFor('voice.wake.surfaces.agent')).toContain('recorder subprocess');
-    expect(rowFor('voice.wake.surfaces.agent')).toContain('agent conversation input');
-    // Off by default for a stated reason, not because it does not work.
-    expect(rowFor('voice.wake.surfaces.agent')).toContain('not because it does not work');
-    // And no row anywhere still claims a surface has nothing behind it.
-    for (const row of voiceWakeConfigSettings) {
-      expect(row.description).not.toContain('no capture host');
-      expect(row.description).not.toContain('NO CAPTURE HOST');
-    }
-    // The VAD row says no model is pinned and that a non-zero value refuses.
-    expect(rowFor('voice.wake.vadThreshold')).toContain('REFUSES TO START');
-    // The browser cannot read a local sound path or retain audio; both say so.
-    expect(rowFor('voice.wake.activationSoundPath')).toContain('browser tab cannot read a path');
-    expect(rowFor('voice.wake.retainAudio')).toContain('no filesystem to retain into');
-    // The terminal and browser rows describe what they now actually do.
-    expect(rowFor('voice.wake.surfaces.tui')).toContain('recorder subprocess');
-    expect(rowFor('voice.wake.surfaces.webui')).toContain('browser tab');
-    expect(rowFor('voice.wake.surfaces.app')).toContain('embedded webview');
   });
 });

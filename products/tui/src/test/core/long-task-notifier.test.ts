@@ -1,4 +1,4 @@
-import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
+import { useTestWebhookNotifications, makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
 /**
  * Tests for src/core/long-task-notifier.ts
  *
@@ -19,6 +19,8 @@ import {
   NOTIFY_AFTER_SECONDS_OFF,
 } from '../../core/long-task-notifier.ts';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+
+useTestWebhookNotifications();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,13 +179,6 @@ describe('maybeNotifyLongTask: content privacy pin', () => {
 });
 
 // ---------------------------------------------------------------------------
-// maybeNotifyLongTask, platform-absent fallback
-// ---------------------------------------------------------------------------
-
-describe('maybeNotifyLongTask: platform-absent fallback', () => {
-});
-
-// ---------------------------------------------------------------------------
 // maybeNotifyLongTask, delivery via webhookNotifier
 // ---------------------------------------------------------------------------
 
@@ -228,8 +223,12 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
     expect(notifier.sendNotification).not.toHaveBeenCalled();
   });
 
-  test('does NOT throw when webhookNotifier.sendNotification() rejects', async () => {
-    const notifier = makeFakeNotifier(['https://example.com/failed-notification'], { failure: new Error('synthetic transport failure') });
+  test('a rejected sendNotification() is handled by the caller, not left to surface as an unhandled rejection', async () => {
+    // A thenable stands in for the rejecting promise so the test can see whether the
+    // caller attached a rejection handler, and whether running it is harmless.
+    let rejectionHandler: ((error: unknown) => unknown) | undefined;
+    const pendingSend = { catch(handler: (error: unknown) => unknown) { rejectionHandler = handler; return pendingSend; } };
+    const notifier = { getUrls: () => ['https://example.com/failed-notification'], sendNotification: mock(() => pendingSend) };
     expect(() =>
       maybeNotifyLongTask({
         elapsedMs: 120_000,
@@ -240,6 +239,9 @@ describe('maybeNotifyLongTask: webhook delivery', () => {
         webhookNotifier: notifier as unknown as import('@goodvibes-jev/engine/platform/platform/integrations').WebhookNotifier,
       })
     ).not.toThrow();
+    expect(notifier.sendNotification).toHaveBeenCalledTimes(1);
+    expect(rejectionHandler).toBeFunction();
+    expect(() => rejectionHandler!(new Error('synthetic transport failure'))).not.toThrow();
   });
 
   test('skips webhook delivery entirely when webhookNotifier is null', async () => {

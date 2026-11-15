@@ -64,7 +64,7 @@ import {
   MemoryEmbeddingProviderRegistry,
   normalizeMemoryEmbeddingVector,
 } from './memory-embeddings.js';
-import { MEMORY_VECTOR_DIMS } from './memory-vector-store.js';
+import { MEMORY_VECTOR_DIMS } from './embedding-dims.js';
 import { CodeIntelligence } from '../intelligence/facade.js';
 import {
   chunkFileContent,
@@ -87,7 +87,7 @@ import {
   listIndexedPaths,
   rowToChunk,
   setCodeIndexMeta,
-  writeChunk,
+  replaceFileChunks,
   type ChunkRow,
   type VectorRow,
 } from './code-index-db.js';
@@ -100,7 +100,7 @@ import {
   type FindDiagnostics,
 } from '../tools/find/shared.js';
 import { openVersionedBunSqliteStore } from './store-versioning.js';
-import { readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
+import { CodeSourceChangedError, readCodeIndexFile, type CodeFileObservation } from './code-file-observation.js';
 import { rankLiveCodeInjection } from './code-injection-live.js';
 import type { CodeInjectionAuthorityOptions } from './code-injection-ranking.js';
 import { rankLexicalChunks } from './code-index-lexical.js';
@@ -136,6 +136,11 @@ const DEFAULT_MAX_FILES = Infinity;
 const DEFAULT_MAX_FILE_BYTES = Infinity;
 const DEFAULT_MAX_TOTAL_BYTES = Infinity;
 const BUILD_ABORTED_BY_REROOT = 'build aborted by reroot';
+const BUILD_ABORTED_BY_CLOSE = 'build aborted by close';
+/** Consecutive failures (provider down, bad key, full disk) after which a build stops instead of failing every remaining file. */
+const MAX_CONSECUTIVE_INDEX_FAILURES = 5;
+/** How long a second process holding the database may block a statement before it fails. */
+const SQLITE_BUSY_TIMEOUT_MS = 5000;
 function distanceToSimilarity(distance: number): number {
   if (!Number.isFinite(distance)) return 0;
   return Math.max(0, Math.min(1, 1 - distance / 2));
@@ -174,6 +179,10 @@ export class CodeIndexStore {
   private buildStartedAtMs: number | null = null;
   private buildPromise: Promise<CodeIndexBuildStats> | null = null;
   private lastBuild: CodeIndexBuildStats | null = null;
+  /** Why the latest build did not run or did not finish; cleared when a build completes. */
+  private lastBuildError: string | undefined;
+  /** Paths reindexed by reindexFile() while a full build runs; exempt from that build's sweep. */
+  private readonly touchedDuringBuild = new Set<string>();
   private progress: CodeIndexBuildProgress | null = null;
   private readonly intelligence: CodeIntelligence;
   private intelligenceReadyPromise: Promise<void> | null = null;
@@ -184,6 +193,9 @@ export class CodeIndexStore {
    * write wrong-rooted chunks into a database opened for a different root.
    */
   private epoch = 0;
+  /** What bumped the epoch last, so an aborted build names the operation that happened. */
+  private epochBumpedBy: 'reroot' | 'close' = 'close';
+  private lastSearchError: string | undefined;
   private authorizedRunUsed = false;
   private authorizedIndex: AuthorizedCodeIndex | null = null;
 
@@ -219,12 +231,22 @@ export class CodeIndexStore {
   }
 
   private async open(): Promise<void> {
+    // A failure from an earlier open (or an earlier root) no longer describes this one.
+    this.error = undefined;
+    this.platformLimitReason = undefined;
     try {
       if (this.dbPath !== ':memory:') {
         mkdirSync(dirname(this.dbPath), { recursive: true });
       }
       this.db = new (bunSqliteDatabase())(this.dbPath);
-      await loadSqliteVecExtension(this.db);
+      const opened = this.db;
+      // Two windows on one workspace share this file; wait for the other writer instead of failing mid-file.
+      opened.run(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+      await loadSqliteVecExtension(opened);
+      // close() while the extension was loading already closed this handle and
+      // cleared it; carrying on would mark a closed store available and then
+      // fail in versioning with an error that has nothing to do with the cause.
+      if (this.db !== opened) return;
       this.available = true;
       // Schema versioning: pre-migration snapshot, auto-restore on failure,
       // and a downgrade guard (an older binary refuses a newer schema).
@@ -258,9 +280,16 @@ export class CodeIndexStore {
     this.authorizedIndex = null;
     if (!this.db) return;
     this.epoch++;
+    this.epochBumpedBy = 'close';
     this.db.close();
     this.db = null;
     this.available = false;
+    // The epoch bump retires an in-flight build, whose own cleanup then skips
+    // these; without the reset a later init() would read as building forever.
+    this.buildPromise = null;
+    this.building = false;
+    this.buildStartedAtMs = null;
+    this.progress = null;
   }
 
   /**
@@ -277,10 +306,13 @@ export class CodeIndexStore {
     if (this.opening) await this.opening;
     this.epoch++;
     this.close();
+    this.epochBumpedBy = 'reroot';
     this.buildPromise = null;
     this.building = false;
     this.buildStartedAtMs = null;
     this.lastBuild = null;
+    this.lastBuildError = undefined;
+    this.lastSearchError = undefined;
     this.progress = null;
     this.rootDir = newRootDir;
     this.dbPath = newDbPath;
@@ -348,12 +380,16 @@ export class CodeIndexStore {
       building: this.building,
       lastBuild: this.lastBuild,
       ...(this.error ? { error: this.error } : {}),
+      ...(this.lastBuildError ? { lastBuildError: this.lastBuildError } : {}),
+      ...(this.lastSearchError ? { lastSearchError: this.lastSearchError } : {}),
     };
   }
 
 
   async search(query: string, opts: { limit?: number } = {}): Promise<CodeContextResult[]> {
     if (this.authorizedRunUsed) throw new Error('Live-tree operations are disabled on an authorized code index');
+    // Each search reports its own outcome; a failure from an earlier query must not outlive a search that did not embed.
+    this.lastSearchError = undefined;
     if (!this.db || !this.available) return [];
     const trimmed = query.trim();
     if (!trimmed) return [];
@@ -375,7 +411,10 @@ export class CodeIndexStore {
         usage: 'query',
       });
       embedding = normalizeMemoryEmbeddingVector(result.vector, MEMORY_VECTOR_DIMS);
+      this.lastSearchError = undefined;
     } catch (err) {
+      // An empty answer here means "could not search", not "nothing matches"; stats() says which.
+      this.lastSearchError = `query embedding failed: ${summarizeError(err)}`;
       logger.warn('Code index query embedding failed', { error: summarizeError(err) });
       return [];
     }
@@ -491,14 +530,20 @@ export class CodeIndexStore {
   async buildFull(): Promise<CodeIndexBuildStats> {
     if (this.authorizedRunUsed) throw new Error('Live-tree operations are disabled on an authorized code index');
     if (!this.db || !this.available) {
-      return this.lastBuild ?? emptyBuildStats();
+      this.lastBuildError = `build not started: the code index is not open${this.error ? ` (${this.error})` : this.platformLimitReason ? ` (${this.platformLimitReason})` : ''}`;
+      // Not the previous build's stats: that would read as a build that ran just now.
+      return { ...emptyBuildStats(), abortReason: this.lastBuildError };
     }
     if (!this.buildPromise) {
       const buildEpoch = this.epoch;
       this.building = true;
       this.buildStartedAtMs = Date.now();
       this.progress = { scanned: 0, total: 0 };
-      this.buildPromise = this.runBuild(buildEpoch).finally(() => {
+      this.lastBuildError = undefined;
+      this.buildPromise = this.runBuild(buildEpoch).catch((error: unknown) => {
+        if (this.epoch === buildEpoch) this.lastBuildError = `build failed: ${summarizeError(error)}`;
+        throw error;
+      }).finally(() => {
         // A reroot() already reset these for the NEW lifecycle; a stale
         // build's cleanup must not clobber state belonging to a newer epoch.
         if (this.epoch === buildEpoch) {
@@ -521,6 +566,9 @@ export class CodeIndexStore {
     const callEpoch = this.epoch;
     const rel = relative(this.rootDir, absPath);
     if (rel.startsWith('..')) return { indexed: false, mode: 'empty' };
+    // A running full build's sweep works from the file list it scanned at its
+    // start; a file written here after that scan must not be swept as gone.
+    if (this.building) this.touchedDuringBuild.add(rel);
 
     const diagnostics = createFindDiagnostics();
     const assertCurrent = (): void => {
@@ -562,9 +610,18 @@ export class CodeIndexStore {
     }
 
     const maxFileBytes = this.options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-    if (stat.size > maxFileBytes) return { indexed: false, mode: 'empty' };
-    if (await isBinary(absPath, diagnostics)) return { indexed: false, mode: 'empty' };
-    if (this.epoch !== callEpoch) return { indexed: false, mode: 'empty' };
+    // A file that is now too large or binary no longer has code to index; its old chunks
+    // describe content it no longer has, which is what a full build would also drop.
+    if (stat.size > maxFileBytes) {
+      deleteChunksForPath(this.db, rel);
+      return { indexed: false, mode: 'empty' };
+    }
+    const binary = await isBinary(absPath, diagnostics);
+    if (this.epoch !== callEpoch || !this.db) return { indexed: false, mode: 'empty' };
+    if (binary) {
+      deleteChunksForPath(this.db, rel);
+      return { indexed: false, mode: 'empty' };
+    }
 
     const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, maxFileBytes);
     if (source === null) return { indexed: false, mode: 'empty' };
@@ -584,6 +641,11 @@ export class CodeIndexStore {
     const maxTotalBytes = this.options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
 
     const skip = emptySkipReport();
+    this.touchedDuringBuild.clear();
+    let changedDuringBuild = 0;
+    let failedFiles = 0;
+    let consecutiveFailures = 0;
+    let firstFailure: string | undefined;
 
     // Provider-space honesty: if the stored vectors were embedded under a
     // different provider than the current default, the unchanged-file
@@ -591,7 +653,10 @@ export class CodeIndexStore {
     // re-embed so a completed build always leaves a single-provider index.
     const currentProviderId = this.embeddingRegistry.getDefaultProviderId();
     const storedProviderId = this.db ? getCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY) : null;
-    const forceReembed = storedProviderId !== null && storedProviderId !== currentProviderId;
+    // An index holding chunks but no stamp is one whose first build never finished: its
+    // vectors cannot be vouched for either, so it is re-embedded and then stamped.
+    const unstampedWithChunks = storedProviderId === null && this.db !== null && countIndexedChunks(this.db) > 0;
+    const forceReembed = unstampedWithChunks || (storedProviderId !== null && storedProviderId !== currentProviderId);
 
     const walk = new DirectoryWalk(this.rootDir);
     const assertCurrent = (): void => {
@@ -604,10 +669,10 @@ export class CodeIndexStore {
       assertCurrent();
       scanned = await collectGlobFiles(this.rootDir, ['**/*'], false, false, diagnostics, walk, { beforeAttempt: assertCurrent });
     } catch (error) {
-      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, 0, skip);
+      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, 0, skip, this.abortReason());
       throw error;
     }
-    if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, scanned.size, skip);
+    if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, scanned.size, skip, this.abortReason());
     // Deterministic order so identical trees always chunk identically (chunking determinism test).
     const candidateFiles = Array.from(scanned).sort();
 
@@ -628,6 +693,8 @@ export class CodeIndexStore {
 
       if (acceptedCount >= maxFiles) {
         skip.overFileCap++;
+        // Left out by a budget, not gone: its existing chunks are not a deletion.
+        keepPaths.add(rel);
         continue;
       }
 
@@ -644,19 +711,22 @@ export class CodeIndexStore {
       }
       if (totalBytes + stat.size > maxTotalBytes) {
         skip.overTotalBytes++;
+        keepPaths.add(rel);
         continue;
       }
       const binary = await isBinary(absPath, diagnostics);
-      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip);
+      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
       if (binary) {
         skip.binary++;
         continue;
       }
 
       const source = await readCodeIndexFile(this.rootDir, absPath, diagnostics, Math.min(maxFileBytes, maxTotalBytes - totalBytes));
-      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip);
+      if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
       if (source === null) {
         skip.readErrors++;
+        // An unreadable file still exists; keep what the index has until it reads again.
+        keepPaths.add(rel);
         continue;
       }
 
@@ -664,8 +734,35 @@ export class CodeIndexStore {
       totalBytes += source.size;
       keepPaths.add(rel);
 
-      const outcome = await this.indexFileContent(rel, absPath, source, buildEpoch, forceReembed);
-      if (outcome === null) return abortedBuildStats(startedAt, candidateFiles.length, skip);
+      let outcome: { indexed: boolean; mode: CodeChunkMode; chunkCount: number } | null;
+      try {
+        outcome = await this.indexFileContent(rel, absPath, source, buildEpoch, forceReembed);
+      } catch (error) {
+        if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
+        if (error instanceof CodeSourceChangedError) {
+          // The file changed (or vanished) while it was being embedded. Its old
+          // chunks stay (it is still in keepPaths) and the next edit reindexes
+          // it; one busy file must not abandon the rest of the build.
+          logger.debug('Code index build skipped a file that changed while indexing', { path: rel, error: summarizeError(error) });
+          skip.readErrors++;
+          changedDuringBuild++;
+          continue;
+        }
+        // Anything else (embedding provider, storage) is a fault, not a busy file. It is
+        // counted on its own and keeps the provider stamp from certifying the index; a run
+        // of them means the cause is not this file, so the build stops and says why.
+        const message = summarizeError(error);
+        failedFiles++;
+        consecutiveFailures++;
+        firstFailure ??= message;
+        logger.warn('Code index build could not index a file', { path: rel, error: message });
+        if (consecutiveFailures >= MAX_CONSECUTIVE_INDEX_FAILURES) {
+          throw new Error(`stopped after ${consecutiveFailures} files in a row could not be indexed; last error: ${message}`, { cause: error });
+        }
+        continue;
+      }
+      consecutiveFailures = 0;
+      if (outcome === null) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
       if (outcome.mode === 'window') skip.chunkedByWindow++;
       if (outcome.mode === 'unchanged') {
         filesUnchanged++;
@@ -678,20 +775,20 @@ export class CodeIndexStore {
       this.progress = { scanned: acceptedCount, total: candidateFiles.length };
       if (acceptedCount % 20 === 0) {
         await yieldToEventLoop();
-        if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip);
+        if (this.epoch !== buildEpoch) return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
       }
     }
 
     // Final staleness check before the destructive sweep: a stale build's
     // keepPaths describes the OLD tree and must never delete the new one's rows.
     if (this.epoch !== buildEpoch || !this.db) {
-      return abortedBuildStats(startedAt, candidateFiles.length, skip);
+      return abortedBuildStats(startedAt, candidateFiles.length, skip, this.abortReason());
     }
 
     // Sweep: a file that no longer exists (deleted, renamed, or newly gitignored) loses its chunks.
     let filesRemoved = 0;
     for (const path of listIndexedPaths(this.db)) {
-      if (!keepPaths.has(path)) {
+      if (!keepPaths.has(path) && !this.touchedDuringBuild.has(path)) {
         deleteChunksForPath(this.db, path);
         filesRemoved++;
       }
@@ -700,7 +797,11 @@ export class CodeIndexStore {
     // Stamp provenance only on a COMPLETED build, every chunk that survives
     // to this point is either freshly embedded under currentProviderId or was
     // verified same-provider by the forceReembed logic above.
-    setCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY, currentProviderId);
+    // A file skipped mid-re-embed still holds vectors from the old provider,
+    // so the stamp is withheld and the mismatch keeps asking for a rebuild.
+    // A file that failed for a reason other than changing also still holds old-space vectors.
+    if (!(forceReembed && changedDuringBuild > 0) && failedFiles === 0) setCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY, currentProviderId);
+    this.touchedDuringBuild.clear();
 
     const completedAt = Date.now();
     const stats: CodeIndexBuildStats = {
@@ -714,8 +815,12 @@ export class CodeIndexStore {
       startedAt,
       completedAt,
       durationMs: completedAt - startedAt,
+      ...(failedFiles > 0 ? { filesFailed: failedFiles, firstFailure } : {}),
     };
     this.lastBuild = stats;
+    if (failedFiles > 0) {
+      this.lastBuildError = `build finished with ${failedFiles} file(s) not indexed; first error: ${firstFailure}`;
+    }
     return stats;
   }
 
@@ -804,11 +909,19 @@ export class CodeIndexStore {
     // whole file lands atomically with respect to reroot()/close().
     if (this.epoch !== callEpoch || this.db !== db) return null;
     source.assertCurrent();
-    deleteChunksForPath(this.db, relPath);
-    for (let i = 0; i < drafts.length; i++) {
-      writeChunk(this.db, drafts[i]!.chunk, embeddings[i]!);
-    }
+    // One transaction: a failure or a kill here leaves the file's old chunks, never a
+    // partial set already carrying the new revision (which a later build would skip as unchanged).
+    // The first write into an index that was never stamped records its provider, so a build
+    // cut short still knows which vector space it wrote.
+    const stampProvider = getCodeIndexMeta(this.db, EMBEDDING_PROVIDER_META_KEY) === null && countIndexedChunks(this.db) === 0
+      ? this.embeddingRegistry.getDefaultProviderId()
+      : undefined;
+    replaceFileChunks(this.db, relPath, drafts.map((draft, i) => ({ chunk: draft.chunk, embedding: embeddings[i]! })), { stampProvider });
     return { indexed: drafts.length > 0 || mode === 'empty', mode, chunkCount: drafts.length };
+  }
+
+  private abortReason(): string {
+    return this.epochBumpedBy === 'close' ? BUILD_ABORTED_BY_CLOSE : BUILD_ABORTED_BY_REROOT;
   }
 
   private async ensureIntelligenceReady(): Promise<void> {
@@ -830,9 +943,9 @@ export class CodeIndexStore {
   }
 }
 
-function abortedBuildStats(startedAt: number, filesScanned: number, skip: MutableSkipReport): CodeIndexBuildStats {
+function abortedBuildStats(startedAt: number, filesScanned: number, skip: MutableSkipReport, reason: string): CodeIndexBuildStats {
   const completedAt = Date.now();
-  logger.warn('Code index build aborted by reroot', { filesScanned });
+  logger.warn(`Code index ${reason}`, { filesScanned });
   return {
     filesScanned,
     filesIndexed: 0,
@@ -844,7 +957,7 @@ function abortedBuildStats(startedAt: number, filesScanned: number, skip: Mutabl
     startedAt,
     completedAt,
     durationMs: completedAt - startedAt,
-    abortReason: BUILD_ABORTED_BY_REROOT,
+    abortReason: reason,
   };
 }
 

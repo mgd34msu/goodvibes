@@ -51,6 +51,10 @@ interface Waiter {
   readonly receptionReady: Promise<void>;
   readonly abort: AbortController;
   readings: number;
+  /** Readings whose transport timestamp proves the reply was sent before the deadline. */
+  provableReadings: number;
+  /** Expiry arrived while only such readings were in flight and left the window open for them. */
+  deferred: boolean;
   source: PaymentReplySourceGuard | undefined;
   receiptSources: readonly { readonly window: PaymentReplyReceiveSpan; readonly source: PaymentReplySourceGuard }[];
   coverage?: Promise<() => void>;
@@ -249,6 +253,14 @@ export class PaymentReplyInbox implements PaymentReplySource {
       publishReception();
       return true;
     };
+    // A reading still in flight at the deadline leaves the window unsettled,
+    // unless every such reading is of a reply the transport itself dated before
+    // the deadline: that reply is the owner's answer, not silence, and it is
+    // read to its end.
+    const deferToReadings = (): boolean => {
+      if (waiter.provableReadings === 0 || waiter.provableReadings !== waiter.readings) return false;
+      waiter.deferred = true; return true;
+    };
     const armTimer = (): void => {
       if (timer !== undefined) clearTimeout(timer);
       const deadlineMs = waiter.deadlineMs;
@@ -266,7 +278,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
       purchaseId, kind, channels, notice, deadlineMs: undefined, armedChannels: undefined, receptionReady,
       windowId: `payment-window:${this.#incarnation}:${++this.#windowSequence}`,
       abort: new AbortController(),
-      readings: 0,
+      readings: 0, provableReadings: 0, deferred: false,
       source: undefined,
       receiptSources: [],
       expire: () => {
@@ -300,7 +312,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
               if (!this.current(waiter)) return;
               const now = this.currentTime();
               if (now === undefined || now < deadlineMs) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
-              if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
+              if (waiter.readings > 0) { if (!deferToReadings()) waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
               const current = () => {
                 if (!this.current(waiter) || waiter.source !== source) throw new Error();
                 for (const receipt of receipts) {
@@ -329,7 +341,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
           }
           return;
         }
-        if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
+        if (waiter.readings > 0) { if (!deferToReadings()) waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
         waiter.settle(null);
       },
       settle: (answer) => {
@@ -512,7 +524,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
   }
 
   private async readOffer(waiter: Waiter, channel: CommandAuthorityChannel, text: string, receivedAtMs: number | undefined, context?: PaymentReplyCorrelation): Promise<PaymentReplyOffer> {
-    let recorded = false;
+    let recorded = false, provable = false;
     try {
       this.expireWindows();
       if (!this.current(waiter)) return { consumed: false, reason: 'no-window' };
@@ -551,6 +563,9 @@ export class PaymentReplyInbox implements PaymentReplySource {
       const providerTime = context?.sentAtMs;
       const validProviderTime = providerTime !== undefined && Number.isSafeInteger(providerTime) && providerTime >= 0;
       const providerOnTime = waiter.requireDeliveryReceipt && validProviderTime && providerTime + 1000 <= selectedDeadline;
+      // Only a reply the transport dated before the deadline may finish being
+      // read after it; local arrival time alone never extends a window.
+      if (providerOnTime) { provable = true; waiter.provableReadings++; }
       if (receivedAtMs >= selectedDeadline && !providerOnTime) {
         // A queued reply with missing time or a timestamp bucket overlapping
         // expiry might be an on-time objection. It cannot authorize spending
@@ -567,7 +582,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
       if (!this.current(waiter)) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       const answeredAt = this.currentTime();
       if (answeredAt === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return { consumed: false, reason: 'no-window' }; }
-      if (answeredAt >= waiter.deadlineMs) {
+      if (answeredAt >= waiter.deadlineMs && !provable) {
         waiter.expire();
         if (!this.current(waiter) || waiter.coverage === undefined) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       }
@@ -585,7 +600,12 @@ export class PaymentReplyInbox implements PaymentReplySource {
         || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError
         ? error : new PaymentReplyWindowError(error instanceof PaymentReplyHistoryError ? 'history-unavailable' : 'reading-failed'));
       throw error;
-    } finally { waiter.readings--; }
+    } finally {
+      waiter.readings--; if (provable) waiter.provableReadings--;
+      // The window outlived its deadline for this reading alone, and it did not
+      // produce an answer: that is neither approval nor silence.
+      if (waiter.deferred && waiter.readings === 0 && this.current(waiter)) waiter.cancel(new PaymentReplyWindowError('unsettled-reply'));
+    }
   }
 
   private current(waiter: Waiter): boolean { return this.#waiting.get(waiter.purchaseId) === waiter; }

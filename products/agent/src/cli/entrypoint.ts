@@ -1,3 +1,4 @@
+import { startupNoticeWriter } from './notice-stream.ts';
 import {
   parseNativeShellCli,
   shellMetadataResult,
@@ -12,8 +13,10 @@ import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.
 import { canonicalizePairingHost, readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
+import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
+import { connectedHostOperatorTokenPath } from '../runtime/connected-host-auth.ts';
 import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
 import { ensureDaemonConfigMigrated } from '../config/ensure-daemon-config-migrated.ts';
@@ -39,6 +42,7 @@ import {
   renderGoodVibesVersion,
   renderOnboardingCliStatus,
 } from './index.ts';
+import { resolveDoctorExitCode } from './doctor-exit.ts';
 import { buildCliServicePosture } from './service-posture.ts';
 import { inspectCliExternalRuntime } from './external-runtime.ts';
 import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
@@ -90,9 +94,10 @@ export async function prepareShellCliRuntime(
   binary = 'goodvibes-agent',
 ): Promise<PreparedShellCliRuntime> {
   const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
+  const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
-  if (cli.errors.length > 0) {
-    writeFatalLine(cli.errors.join('\n'));
+  if (errors.length > 0) {
+    writeFatalLine(errors.join('\n'));
     writeFatalLine('');
     writeFatalLine(renderGoodVibesHelp(binary));
     process.exit(2);
@@ -125,8 +130,10 @@ export async function prepareShellCliRuntime(
   // device grants, retention) have one home: the daemon's own store. Move them
   // there BEFORE the config manager loads, so this process never resolves a
   // daemon-owned key from a stale surface copy. Idempotent; announces once.
+  // A one-time notice must not sit ahead of machine-readable stdout.
+  const writeNotice = startupNoticeWriter(cli, { out: console.log, err: console.error });
   const daemonConfigNotice = ensureDaemonConfigMigrated(bootstrapHomeDirectory);
-  if (daemonConfigNotice) (cli.command === 'run' ? console.error : console.log)(`[goodvibes] ${daemonConfigNotice}`);
+  if (daemonConfigNotice) writeNotice(`[goodvibes] ${daemonConfigNotice}`);
   // A `daemon.enabled: false` left over from when the key meant "do not embed a
   // daemon in this process" now means "do not look for a daemon at all", which
   // is how a machine ends up unable to reach the platform with no way to say
@@ -137,7 +144,7 @@ export async function prepareShellCliRuntime(
     homeDir: bootstrapHomeDirectory,
     workingDir: bootstrapWorkingDir,
   });
-  if (daemonEnabledNotice) (cli.command === 'run' ? console.error : console.log)(`[goodvibes] ${daemonEnabledNotice}`);
+  if (daemonEnabledNotice) writeNotice(`[goodvibes] ${daemonEnabledNotice}`);
   const configManager = new AgentConfigManager({
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,
@@ -181,6 +188,7 @@ export async function prepareShellCliRuntime(
       await runNativeHeadlessCommand(
         { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
         native.mode,
+        native.run,
       ),
     );
   }
@@ -212,7 +220,7 @@ export async function prepareShellCliRuntime(
     });
     const userStorePath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-users.json');
     const bootstrapCredentialPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'auth-bootstrap.txt');
-    const operatorTokenPath = join(bootstrapHomeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
+    const operatorTokenPath = connectedHostOperatorTokenPath(bootstrapHomeDirectory);
     const onboardingMarkers = readOnboardingCheckMarkers(shellPaths);
     const service = await buildCliServicePosture({
       configManager,
@@ -269,7 +277,7 @@ export async function prepareShellCliRuntime(
     };
     const snapshot = buildCliStatusSnapshot(statusOptions);
     writeExitingStdoutLine(renderCliStatus(statusOptions));
-    process.exit(cli.command === 'doctor' && snapshot.findings.length > 0 ? 1 : 0);
+    process.exit(cli.command === 'doctor' ? resolveDoctorExitCode(snapshot.findings, cli.commandArgs.includes('--strict')) : 0);
   }
 
   const cliCommandResult = await handleGoodVibesCliCommand({

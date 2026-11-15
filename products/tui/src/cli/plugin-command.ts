@@ -107,6 +107,17 @@ function handlePluginInit(runtime: CliCommandRuntime): CliCommandOutput {
   if (!name) {
     return { output: 'Usage: goodvibes plugin init <name> [directory]', exitCode: 2 };
   }
+  // The same rule the loader applies, checked before anything is written so a
+  // scaffold is never created that the loader would then ignore.
+  const nameProblem = validateManifestV2({ name, version: '0.1.0', description: '' });
+  if (nameProblem) {
+    return {
+      output: json
+        ? JSON.stringify({ ok: false, reason: nameProblem }, null, 2)
+        : `Cannot create the plugin: ${nameProblem}.`,
+      exitCode: 2,
+    };
+  }
   const dirArg = runtime.cli.commandArgs[2];
   const targetDir = dirArg
     ? resolve(dirArg)

@@ -12,29 +12,49 @@
  * close-and-reopen, and a terminal frame for a turn this connection is not
  * rendering never reaches a subscriber.
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { createEventSourceConnector } from '../transport-realtime/src/event-source-connector.ts';
 import { createRemoteRuntimeEvents } from '../transport-realtime/src/runtime-events.ts';
 
-function sseResponse(chunks: readonly string[]): Response {
+/**
+ * Serves SSE responses and reports when the connector has consumed every frame
+ * of them. The stream is pull-driven: a pull after the last frame means the
+ * reader came back for more, so the frames before it were already handled.
+ * That replaces sleeping for "long enough" with the condition itself.
+ */
+function sseRecorder(options: { readonly closes?: boolean } = {}): {
+  respond: (chunks: readonly string[]) => Response;
+  consumed: () => Promise<void>;
+} {
   const encoder = new TextEncoder();
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-      controller.close();
+  const drains: Promise<void>[] = [];
+  return {
+    respond(chunks) {
+      let next = 0;
+      let markDrained: () => void = () => {};
+      drains.push(new Promise<void>((resolve) => { markDrained = resolve; }));
+      return new Response(new ReadableStream({
+        pull(controller) {
+          if (next < chunks.length) {
+            controller.enqueue(encoder.encode(chunks[next]!));
+            next += 1;
+            return;
+          }
+          if (options.closes === true) controller.close();
+          markDrained();
+        },
+      }, { highWaterMark: 0 }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    async consumed() {
+      await Promise.all(drains);
+      // One macrotask turn so envelopes dispatched from the last frame have run.
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+    },
+  };
 }
 
-/** A stream that stays open, so the connector does not treat close as a drop. */
-function openSseResponse(chunks: readonly string[]): Response {
-  const encoder = new TextEncoder();
-  return new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-    },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-}
+let sse = sseRecorder();
+beforeEach(() => { sse = sseRecorder(); });
 
 function fetchStub(factory: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): typeof fetch {
   return factory as unknown as typeof fetch;
@@ -47,8 +67,6 @@ function turnFrame(id: string, type: string, turnId: string, sessionId = 's1'): 
     payload: { type, turnId },
   })}\n\n`;
 }
-
-const settle = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 20)); };
 
 /** The connector's cleanup is typed `void | (() => void)`; a real connection always returns one. */
 function closer(cleanup: void | (() => void)): () => void {
@@ -64,20 +82,20 @@ describe('the connector resumes across stream lifetimes, not just across reconne
       null,
       fetchStub(async (_input, init) => {
         presented.push(new Headers(init?.headers).get('last-event-id'));
-        return openSseResponse([turnFrame('evt-1', 'TURN_COMPLETED', 'turn-1')]);
+        return sse.respond([turnFrame('evt-1', 'TURN_COMPLETED', 'turn-1')]);
       }),
       { reconnect: { enabled: false } },
     );
 
     // Turn one: a fresh connection, nothing to resume from.
     const closeFirst = closer(await connector('turn', () => {}));
-    await settle();
+    await sse.consumed();
     closeFirst();
 
     // Turn two: the client opens a NEW stream. Under the defect this presented
     // null again and was handed turn one's tail.
     const closeSecond = closer(await connector('turn', () => {}));
-    await settle();
+    await sse.consumed();
     closeSecond();
 
     expect(presented).toEqual([null, 'evt-1']);
@@ -91,7 +109,7 @@ describe('the connector resumes across stream lifetimes, not just across reconne
       fetchStub(async (input, init) => {
         const url = String(input);
         presented.push({ url, id: new Headers(init?.headers).get('last-event-id') });
-        return openSseResponse([
+        return sse.respond([
           url.includes('domains=turn')
             ? turnFrame('turn-evt-1', 'STREAM_DELTA', 'turn-1')
             : `id: tools-evt-1\nevent: tools\ndata: ${JSON.stringify({ type: 'TOOL_RECEIVED', payload: {} })}\n\n`,
@@ -100,11 +118,15 @@ describe('the connector resumes across stream lifetimes, not just across reconne
       { reconnect: { enabled: false } },
     );
 
-    closer(await connector('turn', () => {}))();
-    closer(await connector('tools', () => {}))();
-    await settle();
-    closer(await connector('turn', () => {}))();
-    await settle();
+    const closeTurn = closer(await connector('turn', () => {}));
+    await sse.consumed();
+    closeTurn();
+    const closeTools = closer(await connector('tools', () => {}));
+    await sse.consumed();
+    closeTools();
+    const closeTurnAgain = closer(await connector('turn', () => {}));
+    await sse.consumed();
+    closeTurnAgain();
 
     expect(presented.map((entry) => entry.id)).toEqual([null, null, 'turn-evt-1']);
     expect(presented[2]!.url).toContain('domains=turn');
@@ -116,7 +138,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
-      fetchStub(async () => openSseResponse([
+      fetchStub(async () => sse.respond([
         // The new turn starts.
         turnFrame('evt-10', 'TURN_SUBMITTED', 'turn-2'),
         // A replay the resume did not prevent: the previous turn's tail.
@@ -137,7 +159,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const unsubDelta = events.turn.onEnvelope('STREAM_DELTA', (envelope) => {
       deltas.push((envelope.payload as { turnId: string }).turnId);
     });
-    await settle();
+    await sse.consumed();
     unsubCompleted();
     unsubDelta();
 
@@ -150,7 +172,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
-      fetchStub(async () => openSseResponse([
+      fetchStub(async () => sse.respond([
         turnFrame('evt-10', 'TURN_SUBMITTED', 'turn-2'),
         turnFrame('evt-3', 'TURN_COMPLETED', 'turn-1'),
         turnFrame('evt-12', 'TURN_COMPLETED', 'turn-2'),
@@ -163,7 +185,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const unsub = events.turn.onEnvelope('TURN_COMPLETED', (envelope) => {
       completed.push((envelope.payload as { turnId: string }).turnId);
     });
-    await settle();
+    await sse.consumed();
     unsub();
 
     expect(completed).toEqual(['turn-1', 'turn-2']);
@@ -173,7 +195,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
-      fetchStub(async () => openSseResponse([
+      fetchStub(async () => sse.respond([
         turnFrame('evt-1', 'TURN_COMPLETED', 'someone-elses'),
         turnFrame('evt-2', 'TURN_COMPLETED', 'mine'),
       ])),
@@ -185,7 +207,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const unsub = events.turn.onEnvelope('TURN_COMPLETED', (envelope) => {
       completed.push((envelope.payload as { turnId: string }).turnId);
     });
-    await settle();
+    await sse.consumed();
     unsub();
 
     expect(completed).toEqual(['mine']);
@@ -195,7 +217,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
-      fetchStub(async () => openSseResponse([
+      fetchStub(async () => sse.respond([
         turnFrame('evt-1', 'TURN_SUBMITTED', 'turn-2'),
         `id: evt-2\nevent: agents\ndata: ${JSON.stringify({ type: 'AGENT_COMPLETED', payload: { id: 'a1' } })}\n\n`,
       ])),
@@ -205,7 +227,7 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
     const events = createRemoteRuntimeEvents(connector);
     const agents: unknown[] = [];
     const unsub = events.agents.onEnvelope('AGENT_COMPLETED', (envelope) => { agents.push(envelope.payload); });
-    await settle();
+    await sse.consumed();
     unsub();
 
     expect(agents).toEqual([{ id: 'a1' }]);
@@ -215,20 +237,21 @@ describe('a replayed terminal frame never reaches the connector\'s subscribers',
 describe('a stream that closes without an id leaves the position alone', () => {
   test('a stream with no ids at all still presents nothing on the next open', async () => {
     const presented: Array<string | null> = [];
+    const closing = sseRecorder({ closes: true });
     const connector = createEventSourceConnector(
       'http://127.0.0.1:3210',
       null,
       fetchStub(async (_input, init) => {
         presented.push(new Headers(init?.headers).get('last-event-id'));
-        return sseResponse(['event: ready\ndata: {}\n\n']);
+        return closing.respond(['event: ready\ndata: {}\n\n']);
       }),
       { reconnect: { enabled: false } },
     );
 
     closer(await connector('turn', () => {}))();
-    await settle();
+    await closing.consumed();
     closer(await connector('turn', () => {}))();
-    await settle();
+    await closing.consumed();
 
     expect(presented).toEqual([null, null]);
   });

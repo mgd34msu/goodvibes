@@ -13,7 +13,9 @@ import type {
 } from './types.js';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
+import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+import { createHash } from 'node:crypto';
 
 /** The lifetime is checked only after payload preparation, without an intervening await. */
 export function deliveryFetch(
@@ -40,8 +42,12 @@ export function titleFromBody(body: string): string {
   return firstLine.slice(0, 80);
 }
 
-export function success(responseId?: string): ChannelDeliveryResult {
-  return responseId === undefined ? {} : { responseId };
+/** `truncated` says the text sent was shortened to fit the surface; it is absent when everything went out. */
+export function success(responseId?: string, options: { readonly truncated?: boolean | undefined } = {}): ChannelDeliveryResult {
+  return {
+    ...(responseId === undefined ? {} : { responseId }),
+    ...(options.truncated ? { truncated: true } : {}),
+  };
 }
 
 function buildArtifactContentPath(artifactId: string): string {
@@ -72,20 +78,94 @@ export async function resolveAttachments(
   return attachments;
 }
 
+function attachmentSummaryBlock(attachments: readonly ArtifactAttachment[]): string {
+  const lines = attachments.map((attachment) => {
+    const name = attachment.filename ?? attachment.label ?? attachment.artifactId;
+    const detail = `${name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`;
+    // Only a link the reader can open is worth printing. The daemon-relative
+    // path means nothing in a chat, so without a reachable base URL the line
+    // says where the file is instead.
+    return attachment.contentUrl
+      ? `- ${detail}: ${attachment.contentUrl}`
+      : `- ${detail}: not uploaded to this channel, the file is on the GoodVibes host`;
+  });
+  return `Attachments:\n${lines.join('\n')}`;
+}
+
 export function appendAttachmentSummary(body: string, attachments: readonly ArtifactAttachment[]): string {
   if (attachments.length === 0) return body;
-  const lines = attachments.map((attachment) => {
-    const target = attachment.contentUrl ?? attachment.contentPath;
-    const name = attachment.filename ?? attachment.label ?? attachment.artifactId;
-    return `- ${name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes): ${target}`;
-  });
-  return `${body.trimEnd()}\n\nAttachments:\n${lines.join('\n')}`;
+  return `${body.trimEnd()}\n\n${attachmentSummaryBlock(attachments)}`;
 }
 
 export function trimForSurface(body: string, maxChars: number): string {
   const normalized = body.replace(/\r\n/g, '\n').trim();
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+/**
+ * The text to send to a surface with a length limit. When it does not fit, the
+ * body is cut, the cut says how much was left out, and the attachment lines
+ * survive: they are the part of the message that cannot be recovered from the
+ * body. `truncated` lets the caller report a shortened delivery as such.
+ */
+export function fitForSurface(
+  body: string,
+  attachments: readonly ArtifactAttachment[],
+  maxChars: number,
+): { readonly text: string; readonly truncated: boolean } {
+  const full = trimForSurface(appendAttachmentSummary(body, attachments), Number.MAX_SAFE_INTEGER);
+  if (full.length <= maxChars) return { text: full, truncated: false };
+  const normalizedBody = body.replace(/\r\n/g, '\n').trim();
+  const summary = attachments.length > 0 ? `\n\n${attachmentSummaryBlock(attachments)}` : '';
+  const marker = (omitted: number): string => `\n[Message shortened: ${omitted} characters were not sent]`;
+  const reserved = summary.length + marker(normalizedBody.length).length;
+  if (reserved >= maxChars) return { text: trimForSurface(full, maxChars), truncated: true };
+  const room = maxChars - reserved;
+  const kept = normalizedBody.slice(0, room).trimEnd();
+  return { text: `${kept}${marker(normalizedBody.length - kept.length)}${summary}`, truncated: true };
+}
+
+/**
+ * The bridge URL a delivery posts to, and sends its bearer token to. It comes
+ * from configuration. A target address that is an https URL is honoured only
+ * when it is on the configured bridge's origin, because the address can be
+ * built from a conversation id that an inbound request supplied.
+ */
+export function resolveBridgeUrl(options: {
+  readonly label: string;
+  readonly address: string | undefined;
+  readonly configured: ReadonlyArray<string | undefined>;
+}): string | undefined {
+  const configured = firstNonEmpty(...options.configured);
+  const address = options.address?.trim();
+  if (!address?.startsWith('https://')) return configured;
+  if (configured && sameOrigin(address, configured)) return address;
+  throw new Error(
+    `${options.label} target address ${describeOrigin(address)} is not the configured ${options.label} bridge`
+    + `${configured ? ` (${describeOrigin(configured)})` : ''}; set the bridge URL in the surface settings instead of passing it in the target`,
+  );
+}
+
+/**
+ * An explicit webhook URL on a target must be an https URL on a public host.
+ * Chat webhooks carry the agent's output to whoever owns the host, so a value
+ * that is not a usable public webhook is refused rather than posted to.
+ */
+export function assertPublicWebhookAddress(label: string, address: string): string {
+  const validation = validatePublicWebhookUrl(address);
+  if (!validation.ok) {
+    throw new Error(`${label} requires an explicit HTTPS webhook target on a public host (${validation.error}); configure the webhook in the surface settings or pass a channel id`);
+  }
+  return address;
+}
+
+function sameOrigin(left: string, right: string): boolean {
+  try { return new URL(left).origin === new URL(right).origin; } catch { return false; }
+}
+
+function describeOrigin(value: string): string {
+  try { return new URL(value).origin; } catch { return 'that URL'; }
 }
 
 export function firstNonEmpty(...values: Array<string | undefined | null>): string | undefined {
@@ -131,7 +211,8 @@ export async function resolveDeliveryCredential(
   return firstNonEmpty(options.environmentValue);
 }
 
-const msTeamsTokenCache = new Map<string, { readonly token: string; readonly expiresAt: number }>();
+/** `credential` fingerprints the password the token was issued for, so a rotated or removed password is not served from the old token. */
+const msTeamsTokenCache = new Map<string, { readonly token: string; readonly expiresAt: number; readonly credential: string }>();
 
 export async function resolveMSTeamsAccessToken(
   configManager: ConfigManager,
@@ -157,8 +238,9 @@ export async function resolveMSTeamsAccessToken(
   if (!appId) throw new Error('Missing Microsoft Teams app id');
   if (!appPassword) throw new Error('Missing Microsoft Teams app password');
   const cacheKey = `${tenantId}:${appId}`;
+  const credential = createHash('sha256').update(appPassword).digest('hex');
   const cached = msTeamsTokenCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now() + 60_000) {
+  if (cached && cached.credential === credential && cached.expiresAt > Date.now() + 60_000) {
     return cached.token;
   }
   const body = new URLSearchParams({
@@ -183,6 +265,7 @@ export async function resolveMSTeamsAccessToken(
   if (!token) throw new Error('Microsoft Teams token request did not return an access token');
   msTeamsTokenCache.set(cacheKey, {
     token,
+    credential,
     expiresAt: Date.now() + Math.max(60, Number.isFinite(expiresIn) ? expiresIn : 300) * 1_000,
   });
   return token;
@@ -254,4 +337,15 @@ export async function postBridgePayload(
   });
   const result = await requireOkResponse(options.label, response);
   return extractResponseId(result) ?? bridgeUrl;
+}
+
+/**
+ * The same logical send always carries the same id, so a retry after an
+ * ambiguous failure is recognised by the provider instead of sent twice. The
+ * content is part of the id because one run can legitimately send several
+ * different messages to the same chat.
+ */
+export function stableSendId(runId: string, destination: string, text: string): string {
+  const digest = createHash('sha256').update(runId).update('\0').update(destination).update('\0').update(text).digest('hex');
+  return `gv-${digest.slice(0, 32)}`;
 }

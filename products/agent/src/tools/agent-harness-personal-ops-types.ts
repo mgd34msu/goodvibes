@@ -146,7 +146,6 @@ export interface PersonalOpsRoutePacket {
 export interface PersonalOpsRecordFreshness {
   readonly status:
     | 'fresh-provider-route-ready'
-    | 'fresh-provider-record-current'
     | 'saved-review-refreshable'
     | 'connector-attention'
     | 'provider-contract-missing'

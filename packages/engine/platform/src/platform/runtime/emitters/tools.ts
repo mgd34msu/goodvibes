@@ -82,22 +82,30 @@ export function toToolResultSummary(
     return {
       ...(result.autonomousDecision ? { autonomousDecision: structuredClone(result.autonomousDecision) } : {}),
       kind: 'error',
-      byteSize: errStr.length,
+      byteSize: Buffer.byteLength(errStr, 'utf8'),
       preview: errStr.slice(0, 100),
     };
   }
   const output = result.output ?? '';
-  let kind: string;
-  let preview: string | undefined;
+  return {
+    kind: looksLikeJsonContainer(output) ? 'json' : 'text',
+    byteSize: Buffer.byteLength(output, 'utf8'),
+    preview: output.slice(0, 100),
+    ...(result.autonomousDecision ? { autonomousDecision: structuredClone(result.autonomousDecision) } : {}),
+  };
+}
+
+/** True for output that is a JSON object or array; scalars such as `123` or `true` stay text, and text is not parsed at all. */
+function looksLikeJsonContainer(output: string): boolean {
+  const trimmed = output.trim();
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[') return false;
   try {
-    JSON.parse(output);
-    kind = 'json';
-    preview = output.slice(0, 100);
+    JSON.parse(trimmed);
+    return true;
   } catch {
-    kind = 'text';
-    preview = output.slice(0, 100);
+    return false;
   }
-  return { kind, byteSize: output.length, preview, ...(result.autonomousDecision ? { autonomousDecision: structuredClone(result.autonomousDecision) } : {}) };
 }
 
 /** Emit TOOL_SUCCEEDED when a tool call completes successfully. */

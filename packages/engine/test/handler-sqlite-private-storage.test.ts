@@ -41,7 +41,7 @@ test('an aliased managed ancestor cannot create an operator directory outside th
 
 test('closing during asynchronous initialization cannot publish a late live database', async () => {
   const database = store(makeProjectTempDir('handler-sqlite-init-close')); const initializing = database.init(); database.close();
-  await expect(initializing).rejects.toThrow('closed'); expect(() => database.get('SELECT 1')).toThrow('not initialized');
+  await expect(initializing).rejects.toThrow('closed'); expect(() => database.get('SELECT 1')).toThrow('closed');
   await expect(database.init()).rejects.toThrow('closed');
 });
 

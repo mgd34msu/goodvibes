@@ -74,14 +74,17 @@ describe('timestamp inbox atomic persistence', () => {
   });
 
   test('rebasing preserves other-provider writes and their queued flush', async () => {
+    const probe = (await open()).store; let checks = 0;
+    await probe.commitTimestampPoll('slack', [row()], () => { checks += 1; });
     const { store, dir } = await open(); let fences = 0; let flush: Promise<void> | undefined;
     await store.commitTimestampPoll('slack', [row()], () => {
-      if (++fences === 2) {
+      if (++fences === checks) {
         store.upsertItems([{ ...row('discord:new', 300), provider: 'discord' }]);
         store.advanceCursor('discord', 300); flush = store.flush();
       }
     });
-    await flush; expect(fences).toBe(4);
+    // The foreign mutation at the final check forces exactly one re-stage, so every check runs twice.
+    await flush; expect(fences).toBe(checks * 2);
     await store.close(); const { store: recovered } = await open(dir);
     expect(recovered.countItems()).toBe(2);
     expect(recovered.getCursor('slack')).toBe(200); expect(recovered.getCursor('discord')).toBe(300);

@@ -80,7 +80,7 @@ export const builtinGatewayRewindMethodDescriptors: readonly GatewayMethodDescri
     description:
       'Which sessions have a surface offering their live conversation right now, how each surface names itself, and when its lease runs out. This is what makes "conversation rewind is unavailable for that session" checkable rather than something a person has to take on trust.',
     category: 'rewind',
-    scopes: ['read:sessions'],
+    scopes: ['write:sessions'],
     transport: ['ws'],
     inputSchema: REWIND_CONVERSATION_HOSTS_LIST_INPUT_SCHEMA,
     outputSchema: REWIND_CONVERSATION_HOSTS_LIST_OUTPUT_SCHEMA,
@@ -91,7 +91,7 @@ export const builtinGatewayRewindMethodDescriptors: readonly GatewayMethodDescri
     description:
       'Collect the conversation questions waiting for this host, how many messages a rewind to an anchor would drop, or a request to actually drop them, and renew its lease, because a surface that is polling is a surface that is alive. With nothing waiting, pass waitMs to hold the call open until something arrives; an empty result is a normal answer, not an error. Answer each request with rewind.conversation.requests.answer before its expiresAt, or the caller waiting on it is told, honestly, that this surface did not answer in time.',
     category: 'rewind',
-    scopes: ['read:sessions'],
+    scopes: ['write:sessions'],
     transport: ['ws'],
     inputSchema: REWIND_CONVERSATION_REQUESTS_TAKE_INPUT_SCHEMA,
     outputSchema: REWIND_CONVERSATION_REQUESTS_TAKE_OUTPUT_SCHEMA,

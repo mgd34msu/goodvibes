@@ -17,15 +17,12 @@ export interface SkillDraftPayload extends AgentSkillCreateInput {
 export interface ProposeSkillDraftsInput {
   /** Full ranked candidate list from buildLearningCandidates. */
   readonly candidates: readonly LearningCandidate[];
-  /** Lower-cased name set of skills already in the registry (dedup guard). */
+  /** Names of skills already in the registry (dedup guard). Compared by slug, so "My Skill" blocks "my-skill". */
   readonly existingSkillNames: ReadonlySet<string>;
-  /** Lower-cased name set of skills proposed in earlier passes (dedup guard). */
+  /** Names of skills proposed in earlier passes (dedup guard), compared by slug. */
   readonly previouslyProposedNames: ReadonlySet<string>;
   readonly previouslyProposedCandidateIds?: ReadonlySet<string>;
 }
-
-/** Maximum draft proposals emitted per pass. */
-const MAX_PROPOSALS = Number.POSITIVE_INFINITY;
 
 
 
@@ -124,19 +121,23 @@ function buildTags(candidate: LearningCandidate): readonly string[] {
 
 /**
  * Pure function: given the current learning candidates and name registries, select
- * up to MAX_PROPOSALS skill-worthy candidates and return their draft payloads.
+ * the skill-worthy candidates and return their draft payloads.
  *
  * Hard rules:
  * - Only 'proposal-ready' or 'ready-to-promote' candidates with proposalTarget === 'skill'
- * - Max 3 proposals per pass
  * - Dedupe against existingSkillNames, previouslyProposedNames, and names proposed this pass
  *   (all comparisons use the kebab slug of the name, case-insensitive)
  * - Skip any candidate whose text fields contain secret-like content
  * - Skip any candidate whose derived name or description is empty
- * - All drafts are created with enabled: false (draft only; registry enforces reviewState 'fresh')
+ * - Every payload carries enabled: false (draft only; registry enforces reviewState 'fresh')
  */
 export function proposeSkillDrafts(input: ProposeSkillDraftsInput): readonly SkillDraftPayload[] {
   const { candidates, existingSkillNames, previouslyProposedNames } = input;
+
+  // Names arrive in whatever form the registry stores them ("My Skill"); a
+  // proposal is a slug, so both sides are compared as slugs.
+  const existingSlugs = new Set([...existingSkillNames].map(slugify));
+  const previousSlugs = new Set([...previouslyProposedNames].map(slugify));
 
   const proposals: SkillDraftPayload[] = [];
   // Within-pass dedup: track slugified names already proposed in this call.
@@ -160,7 +161,6 @@ export function proposeSkillDrafts(input: ProposeSkillDraftsInput): readonly Ski
     });
 
   for (const candidate of eligible) {
-    if (proposals.length >= MAX_PROPOSALS) break;
     if (input.previouslyProposedCandidateIds?.has(candidate.id)) continue;
 
     const description = extractDescription(candidate);
@@ -176,8 +176,8 @@ export function proposeSkillDrafts(input: ProposeSkillDraftsInput): readonly Ski
 
     // Dedup against existing, previously proposed, and within-pass proposed.
     if (
-      existingSkillNames.has(nameLower) ||
-      previouslyProposedNames.has(nameLower) ||
+      existingSlugs.has(nameLower) ||
+      previousSlugs.has(nameLower) ||
       proposedThisPass.has(nameLower)
     ) continue;
 
@@ -202,7 +202,7 @@ export function proposeSkillDrafts(input: ProposeSkillDraftsInput): readonly Ski
       procedure,
       triggers: triggers.length > 0 ? triggers : undefined,
       tags: tags.length > 0 ? tags : undefined,
-      enabled: true,
+      enabled: false,
       source: 'agent',
       provenance: learningPromotionReference(candidate.id),
     });

@@ -379,6 +379,34 @@ describe('gmail source: capability sufficiency', () => {
     controller.abort();
     await loop;
   });
+
+  test('recheckNow re-asks about a refused grant now, and leaves a working one alone', async () => {
+    const scopes: string[] = [METADATA_SCOPE];
+    const refused = await build({ scopes, seedHistoryId: '100' });
+    await refused.source.start(new AbortController().signal);
+    const stopRefused = new AbortController();
+    const refusedLoop = refused.source.run(stopRefused.signal);
+    await refused.clock.waitForSleepers(1, 'the capability re-check wait');
+    scopes.push(READONLY_SCOPE);
+    refused.source.recheckNow();
+    await waitFor(() => refused.pages.length > 0, 'the re-probe after the grant was widened');
+    stopRefused.abort();
+    await refusedLoop;
+
+    // A config write asks every source to recheck; a working Gmail source must
+    // not spend a Google call on each one.
+    const working = await build({ seedHistoryId: '100' });
+    await working.source.start(new AbortController().signal);
+    const asked = working.pages.length;
+    const stopWorking = new AbortController();
+    const workingLoop = working.source.run(stopWorking.signal);
+    await working.clock.waitForSleepers(1, 'the poll wait');
+    working.source.recheckNow();
+    await flush();
+    expect(working.pages.length).toBe(asked);
+    stopWorking.abort();
+    await workingLoop;
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -568,6 +596,33 @@ describe('gmail source: a delta that could not be fully read', () => {
     expect(cursor?.historyId).toBe('100');
   });
 
+  test('a grant that can no longer be exchanged for a token is refused and announced once, with no status to go on', async () => {
+    const harness = await build({
+      seedHistoryId: '100',
+      page: {
+        ok: false,
+        status: null,
+        reason: 'grant-invalid',
+        transport: 'token-refresh',
+        problem: 'The Google grant was revoked.',
+        fix: 'Reconnect Google.',
+      },
+    });
+
+    // `status: null` is what a revoked grant looks like once the cached access
+    // token has expired. Read as "not yet" it would poll for ever and say nothing.
+    const verdict = await harness.source.start(new AbortController().signal);
+    expect(verdict.state).toBe('insufficient');
+    expect(verdict.reason).toBe('credentials-rejected');
+    expect(verdict.fix).toBe('Reconnect Google.');
+    expect(harness.terminals).toHaveLength(1);
+    expect(harness.terminals[0]?.fix).toBe('Reconnect Google.');
+
+    // The same refusal on the next pass is not announced again.
+    await harness.source.start(new AbortController().signal);
+    expect(harness.terminals).toHaveLength(1);
+  });
+
   test('a message deleted between history.list and getMessage IS stepped over', async () => {
     // The counterpart, and the reason this cannot be fixed by refusing every
     // failure: a 404 really does mean the message is not there, and holding
@@ -609,6 +664,47 @@ describe('gmail source: a delta that could not be fully read', () => {
     expect(cursor?.historyId).toBe('100');
     const note = harness.notes.find((entry) => entry.kind === 'fetch-unreadable');
     expect(note?.detail).toContain('1 message(s) in the same delta were delivered');
+  });
+
+  test('a message Google keeps refusing as malformed is given up on after five passes, and named', async () => {
+    const harness = await build({
+      seedHistoryId: '100',
+      page: historyPage('200', ['bad']),
+      messages: [gmailMessage('bad', 'x')],
+      messageFailures: { bad: { ok: false, status: 400, problem: 'Invalid id value', fix: '' } },
+    });
+
+    for (let pass = 1; pass <= 4; pass += 1) {
+      await harness.source.start(new AbortController().signal);
+      expect((await harness.store.getGmail(ACCOUNT, LABEL))?.historyId).toBe('100');
+    }
+    const verdict = await harness.source.start(new AbortController().signal);
+
+    expect((await harness.store.getGmail(ACCOUNT, LABEL))?.historyId).toBe('200');
+    expect(verdict.state).toBe('healthy');
+    const gaveUp = harness.notes.filter((entry) => entry.kind === 'fetch-unreadable'
+      && entry.detail.includes('treated as gone'));
+    expect(gaveUp).toHaveLength(1);
+    expect(gaveUp[0]?.detail).toContain('bad');
+    expect(gaveUp[0]?.detail).toContain('HTTP 400');
+  });
+
+  test('a transient status never counts toward giving up, however many passes', async () => {
+    const harness = await build({
+      seedHistoryId: '100',
+      page: historyPage('200', ['m1']),
+      messages: [gmailMessage('m1', 'x')],
+      messageFailures: {
+        m1: { ok: false, status: 503, problem: 'Backend error', fix: '' },
+      },
+    });
+
+    for (let pass = 1; pass <= 8; pass += 1) {
+      await harness.source.start(new AbortController().signal);
+    }
+
+    expect((await harness.store.getGmail(ACCOUNT, LABEL))?.historyId).toBe('100');
+    expect(harness.notes.some((entry) => entry.detail.includes('treated as gone'))).toBe(false);
   });
 });
 
@@ -663,11 +759,17 @@ describe('gmail source: adaptive interval', () => {
     // because the predicate is asked each time rather than sampled at start.
     harness.state.expectationOpen = false;
     await harness.clock.advance(5_000);
-    await waitFor(() => harness.clock.nextDueIn === 60_000, 'the idle poll wait');
+    await waitFor(() => harness.pages.length >= 1, 'the poll at the 5 s mark');
     expect(harness.source.latency).toEqual({ kind: 'poll', worstCaseMs: 60_000 });
 
-    // A poll actually happened at the 5 s mark.
-    expect(harness.pages.length).toBeGreaterThanOrEqual(1);
+    // The idle wait is slept in short slices so an expectation opening mid-wait
+    // is noticed, but no request is made until the whole 60 s has passed.
+    const pollsAfterFirst = harness.pages.length;
+    await harness.clock.advance(55_000);
+    await flush();
+    expect(harness.pages.length).toBe(pollsAfterFirst);
+    await harness.clock.advance(5_000);
+    await waitFor(() => harness.pages.length > pollsAfterFirst, 'the poll one idle interval after the first');
 
     controller.abort();
     await loop;
@@ -759,7 +861,9 @@ describe('inbound sources cannot register an expectation', () => {
    *
    * Matching on the specifier itself rather than on line prefixes covers
    * multi-line static imports, single-line ones, side-effect imports,
-   * `export … from`, and dynamic `import('…')` in one rule.
+   * `export … from`, and dynamic `import('…')` in one rule. It still only sees
+   * the three forbidden module names: an import through a re-exporting module
+   * is not caught here.
    */
   function moduleSpecifiers(text: string): string[] {
     const found: string[] = [];

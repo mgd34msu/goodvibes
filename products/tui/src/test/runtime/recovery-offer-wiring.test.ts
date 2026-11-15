@@ -11,7 +11,7 @@
  * parses it rather than trusting a spy.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { readLastSessionPointer, writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
@@ -41,7 +41,11 @@ function answerWith(...ids: Array<string | null>): SelectionOpener {
   };
 }
 
-function setup(sessionId: string, messages: Array<Record<string, unknown>>) {
+function setup(
+  sessionId: string,
+  messages: Array<Record<string, unknown>>,
+  spineCalls?: string[],
+) {
   writeRecoveryFile(
     // ConversationTitleSource is 'system' | 'user', 'system' is the
     // not-user-set value this snapshot represents (there never was an 'auto').
@@ -68,6 +72,15 @@ function setup(sessionId: string, messages: Array<Record<string, unknown>>) {
     } as never,
     // The real bound closure, exactly as bootstrap.ts builds it.
     writeLastSessionPointer: bindWriteLastSessionPointerToSurface(surface),
+    ...(spineCalls
+      ? {
+          sessionSpine: {
+            close: (id: string) => { spineCalls.push(`close:${id}`); },
+            reopen: (input: { sessionId: string }) => { spineCalls.push(`reopen:${input.sessionId}`); },
+          } as never,
+          project: tmpDir,
+        }
+      : {}),
     receipt: (line) => receipts.push(line),
     render: () => {},
   });
@@ -123,6 +136,25 @@ describe('accepting the offer restores the real conversation', () => {
     expect(listed).toContain('crashed-4');
   });
 
+  test('recovering over a saved session keeps the side branches that session was saved with', async () => {
+    const { deps, conversation } = setup('crashed-branches', [{ role: 'user', content: 'recovered' }]);
+    const store = new SessionManager(tmpDir, { surface });
+    const { filePath } = store.save('crashed-branches', [{ role: 'user', content: 'old' }] as never[], { title: 't', model: 'm', provider: 'p', timestamp: 1 }, undefined, undefined, {
+      branches: { alt: [{ role: 'user', content: 'branch work' }] },
+      currentBranch: 'main',
+    });
+    // The save predates the crash, so the snapshot is the newer copy and is offered.
+    utimesSync(filePath, 1, 1);
+
+    await offerRecoverySnapshot(withOperator(deps, answerWith('resume')));
+
+    const reloaded = new SessionManager(tmpDir, { surface }).load('crashed-branches');
+    expect(reloaded.messages).toEqual([{ role: 'user', content: 'recovered' }]);
+    expect(reloaded.branches?.branches.alt).toEqual([{ role: 'user', content: 'branch work' }]);
+    // The next turn's autosave serialises the live conversation, so the branches must be there too.
+    expect(conversation.branchState().branches.alt).toEqual([{ role: 'user', content: 'branch work' }]);
+  });
+
   test('the session store entry is stamped as a user save; the operator asked for this recovery', async () => {
     const { deps } = setup('crashed-5', [{ role: 'user', content: 'hi' }]);
 
@@ -130,6 +162,22 @@ describe('accepting the offer restores the real conversation', () => {
 
     const meta = new SessionManager(tmpDir, { surface }).getMeta('crashed-5');
     expect(meta?.saveSource).toBe('user');
+  });
+
+  test('the boot session leaves the session spine and the recovered one is registered', async () => {
+    const spineCalls: string[] = [];
+    const { deps } = setup('crashed-spine', [{ role: 'user', content: 'hi' }], spineCalls);
+
+    await offerRecoverySnapshot(withOperator(deps, answerWith('resume')));
+    expect(spineCalls).toEqual(['close:fresh-boot-session', 'reopen:crashed-spine']);
+  });
+
+  test('declining leaves the session spine untouched', async () => {
+    const spineCalls: string[] = [];
+    const { deps } = setup('crashed-spine-2', [{ role: 'user', content: 'hi' }], spineCalls);
+
+    await offerRecoverySnapshot(withOperator(deps, answerWith('not-now', 'keep')));
+    expect(spineCalls).toEqual([]);
   });
 
   test('the footer token counters are rehydrated from the restored history', async () => {

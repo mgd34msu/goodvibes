@@ -51,6 +51,8 @@ export interface AgentFleetUnion {
   nodes(): readonly ProcessNode[];
   /** True once the daemon has answered at least one poll. */
   hasDaemonRows(): boolean;
+  /** Set when the daemon capped its answer: `shown` of `total` daemon rows are in `nodes`. */
+  partial(): { readonly shown: number; readonly total: number } | null;
   /** Re-read the daemon's rows now. Never throws. */
   refresh(): Promise<void>;
   /** Stop the refresh timer. Idempotent. */
@@ -74,6 +76,10 @@ export function createAgentFleetUnion(options: AgentFleetUnionOptions): AgentFle
       return poller.mergedRows(local)?.nodes ?? local;
     },
     hasDaemonRows: () => poller.rows() !== null,
+    partial: () => {
+      const rows = poller.rows();
+      return rows?.truncated && rows.totalCount !== undefined ? { shown: rows.nodes.length, total: rows.totalCount } : null;
+    },
     refresh: () => poller.refresh(),
     stop: () => {
       poller.stop();

@@ -66,6 +66,38 @@ test('a run cancelled while its start path fails is not overwritten as failed', 
   expect(jobs.get(j.id)!.failureCount).toBe(0);
 });
 
+test('a session target that cannot be resolved records a failed run, fails the job and follows up', async () => {
+  const j = job();
+  (j.execution as { target: unknown }).target = { kind: 'session', sessionId: 'gone', createIfMissing: false };
+  const jobs = new Map([[j.id, j]]);
+  const runs = new Map<string, AutomationRun>();
+  const failed: Array<{ status: string; error: string | undefined; retryable: boolean }> = [];
+  const followUps: string[] = [];
+  let spawned = 0;
+  const context = {
+    jobs, runs, configManager: { get: () => undefined },
+    routeBindings: { start: async () => {}, getBinding: () => undefined },
+    sessionBroker: { start: async () => {}, getSession: () => undefined },
+    spawnTask: () => { spawned += 1; return 'agent-1'; },
+    saveJobs: async () => {}, saveRuns: async () => {}, pruneRunHistory: () => {}, onRunRecorded: () => {},
+    syncExecutionRoute: async () => {},
+    syncRunToRuntime: () => {}, syncJobToRuntime: () => {}, emitRunQueued: () => {}, emitRunStarted: () => {},
+    emitRunCompleted: () => {},
+    emitRunFailed: (_j: AutomationJob, r: AutomationRun, _m: string, retryable: boolean) => failed.push({ status: r.status, error: r.error, retryable }),
+    applyFailureToJob: (x: AutomationJob) => ({ ...x, failureCount: x.failureCount + 1 }),
+    followUpStartFailure: (_j: AutomationJob, r: AutomationRun) => followUps.push(r.id),
+  } as unknown as AutomationManagerExecutionContext;
+  await expect(executeAutomationJob(context, j, 'scheduled', true)).rejects.toThrow('Automation session target not found: gone');
+  const [run] = [...runs.values()];
+  expect(run!.status).toBe('failed');
+  expect(run!.target).toEqual({ kind: 'session', sessionId: 'gone', createIfMissing: false });
+  expect(failed).toHaveLength(1);
+  expect(failed[0]!.error).toContain('not found: gone');
+  expect(jobs.get(j.id)!.failureCount).toBe(1);
+  expect(followUps).toEqual([run!.id]);
+  expect(spawned).toBe(0);
+});
+
 test('run lifecycle: terminal states are final; running settles to any terminal', () => {
   for (const s of ['completed', 'failed', 'cancelled', 'missed'] as const) expect(automationRunLifecycle.isTerminal(s)).toBe(true);
   expect(automationRunLifecycle.next('running')).toEqual(['completed', 'failed', 'cancelled']);

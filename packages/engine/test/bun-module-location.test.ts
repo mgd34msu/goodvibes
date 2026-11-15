@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { expect, test } from 'bun:test';
 import { isCompiledBunModuleUrl } from '../platform/src/platform/utils/bun-module.js';
 

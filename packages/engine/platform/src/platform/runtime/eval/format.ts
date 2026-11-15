@@ -74,16 +74,25 @@ export function formatGateResult(gate: EvalGateResult): string {
       );
     }
     lines.push(HR);
-  } else if (gate.baseline && gate.floorFailures.length === 0) {
+  } else if (!gate.baseline) {
+    lines.push('No baseline to compare against: nothing was saved. Create one with `bun run eval:baseline`.');
+    lines.push(HR);
+  } else if (gate.baseline.suites[gate.suite] === undefined) {
+    lines.push(`The baseline holds no scores for suite "${gate.suite}", so no regression check was made.`);
+    lines.push(HR);
+  } else if (gate.floorFailures.length === 0) {
     lines.push('No regressions detected.');
     lines.push(HR);
-  } else if (!gate.baseline) {
-    lines.push('No baseline to compare against, this run will be saved as the new baseline.');
+  }
+
+  if (gate.missingFromRun.length > 0) {
+    lines.push('Baseline scenarios missing from this run (not regression-checked):');
+    for (const id of gate.missingFromRun) lines.push(`  ${id}`);
     lines.push(HR);
   }
 
   if (gate.unbaselined.length > 0) {
-    lines.push('Unbaselined scenarios (floor-checked, will seed the next baseline):');
+    lines.push('Unbaselined scenarios (floor-checked only; add them with `bun run eval:baseline` to regression-check them):');
     for (const u of gate.unbaselined) {
       lines.push(
         `  ${u.scenarioName.slice(0, 44).padEnd(44)} ` +

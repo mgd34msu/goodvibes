@@ -19,9 +19,12 @@
 //      reported explicitly via `priced: false` so consumers can render an
 //      honest "unpriced" state instead of a silent $0.
 //
-// Money is computed in exactly one place: a wired resolver's answer goes
-// through computeUsageCostUsd, which applies the source's explicit cache rates
-// rather than billing cache traffic at the full input rate.
+// Money is computed in exactly one place: every price, wired resolver or not,
+// goes through computeUsageCostUsd, which applies the source's explicit cache
+// rates (or the provider's published cache ratios) rather than billing cache
+// traffic at the full input rate. The provider is the one the model id names
+// (`provider:model`), so the session total agrees with the per-request costs
+// the turn loop sums.
 // ---------------------------------------------------------------------------
 
 import { cacheRatiosFromCatalog, computeUsageCostUsd, setProviderCacheRatios, type ResolvedModelPricing } from './model-pricing.js';
@@ -101,10 +104,10 @@ export function setPricingSource(source: (() => readonly CatalogModel[]) | null)
 // surface immediately; the catalog/static chain below remains the fallback for
 // resolver-unknown models and for surfaces (tests, headless) that never wire a
 // registry.
-let modelPricingResolver: ((modelId: string) => ResolvedModelPricing) | null = null;
+let modelPricingResolver: ((modelId: string, providerId?: string) => ResolvedModelPricing) | null = null;
 
 /** Wire (or clear, with null) the registry's resolveModelPricing as the primary pricing source. */
-export function setModelPricingResolver(resolver: ((modelId: string) => ResolvedModelPricing) | null): void {
+export function setModelPricingResolver(resolver: ((modelId: string, providerId?: string) => ResolvedModelPricing) | null): void {
   modelPricingResolver = resolver;
 }
 
@@ -116,10 +119,10 @@ export function setModelPricingResolver(resolver: ((modelId: string) => Resolved
  */
 export function wireCostPricing(registry: {
   getRawCatalogModels(): readonly CatalogModel[];
-  resolveModelPricing(modelRef: string): ResolvedModelPricing;
+  resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing;
 }): void {
   setPricingSource(() => registry.getRawCatalogModels());
-  setModelPricingResolver((modelId) => registry.resolveModelPricing(modelId));
+  setModelPricingResolver((modelId, providerId) => registry.resolveModelPricing(modelId, providerId));
   let ratiosFrom: readonly CatalogModel[] | undefined;
   let ratios: ReturnType<typeof cacheRatiosFromCatalog> = () => undefined;
   setProviderCacheRatios((provider) => {
@@ -175,9 +178,15 @@ interface PricingQuote {
   readonly resolved?: Extract<ResolvedModelPricing, { status: 'priced' }>;
 }
 
+/** The provider a provider-qualified model id (`provider:model`) names, when it names one. */
+function providerOfModelId(modelId: string): string | undefined {
+  const separator = modelId.indexOf(':');
+  return separator > 0 ? modelId.slice(0, separator) : undefined;
+}
+
 /** Resolve once so an amount and its provenance always describe the same quote. */
-function resolvePricingQuote(modelId: string): PricingQuote {
-  const resolved = modelPricingResolver?.(modelId);
+function resolvePricingQuote(modelId: string, providerId?: string): PricingQuote {
+  const resolved = modelPricingResolver?.(modelId, providerId);
   if (resolved?.status === 'priced') {
     return {
       metadata: {
@@ -214,18 +223,29 @@ export interface SessionCostResult {
   readonly asOf?: string;
 }
 
-/** Price usage and record its source from one quote, including explicit cache rates. */
+/**
+ * Price usage and record its source from one quote, including cache rates.
+ * `providerId` is the provider the usage was billed by; absent, the one a
+ * provider-qualified model id names is used.
+ */
 export function resolveSessionCost(
   inputTokens: number,
   outputTokens: number,
   cacheRead: number,
   cacheWrite: number,
   modelId: string,
+  providerId?: string,
 ): SessionCostResult {
-  const { metadata, resolved } = resolvePricingQuote(modelId);
-  const cost = resolved
-    ? computeUsageCostUsd(resolved, { inputTokens, outputTokens, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite }) ?? 0
-    : ((inputTokens + cacheRead + cacheWrite) * metadata.pricing.input + outputTokens * metadata.pricing.output) / 1_000_000;
+  const { metadata, resolved } = resolvePricingQuote(modelId, providerId);
+  const billedBy = providerId ?? providerOfModelId(modelId);
+  // A price from the catalog or the built-in table carries no cache rates of
+  // its own; it is priced by the same function with the provider's ratios.
+  const priced: Extract<ResolvedModelPricing, { status: 'priced' }> = resolved ?? {
+    status: 'priced',
+    source: 'catalog',
+    rates: { inputPerMTok: metadata.pricing.input, outputPerMTok: metadata.pricing.output },
+  };
+  const cost = computeUsageCostUsd(priced, { inputTokens, outputTokens, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite }, billedBy) ?? 0;
   return {
     cost,
     priced: metadata.priced,
@@ -291,8 +311,9 @@ export function calcSessionCost(
   cacheRead: number,
   cacheWrite: number,
   modelId: string,
+  providerId?: string,
 ): number {
-  return resolveSessionCost(inputTokens, outputTokens, cacheRead, cacheWrite, modelId).cost;
+  return resolveSessionCost(inputTokens, outputTokens, cacheRead, cacheWrite, modelId, providerId).cost;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -115,8 +115,8 @@ class KeybindingsModalSurface implements ConfigModalSurface {
       // selects the first process whose current step is that tool, or says
       // nothing is running it right now.
       const toolName = ctx.row?.id.startsWith('tool:') ? ctx.row.id.slice('tool:'.length) : null;
-      void ctx.executeCommand?.('agents', toolName ? ['--target', `${toolName}:tool`] : []);
-      ctx.setStatus(toolName ? `Opened Agents on ${toolName}.` : 'Opened Agents.');
+      const opened = toolName ? `Opened Agents on ${toolName}.` : 'Opened Agents.';
+      runModalCommand(ctx, 'agents', toolName ? ['--target', `${toolName}:tool`] : [], toolName ? `/agents --target ${toolName}:tool` : '/agents', { pending: opened, done: opened });
       return;
     }
     if (ctx.tabId === 'models') {
@@ -124,8 +124,7 @@ class KeybindingsModalSurface implements ConfigModalSurface {
       if (!key) return;
       const model = this.sortedModels().find((m) => m.registryKey === key);
       if (!model || !model.selectable) { ctx.setStatus('This model is not selectable.'); return; }
-      void ctx.executeCommand?.('model', [model.registryKey]);
-      ctx.setStatus(`Dispatched /model ${model.registryKey}.`);
+      runModalCommand(ctx, 'model', [model.registryKey], `/model ${model.registryKey}`);
     }
   }
 }

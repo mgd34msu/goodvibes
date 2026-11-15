@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { SECRET_CONFIG_KEYS } from '../../config/secret-config.ts';
 import { REDACTED_VALUE, isSensitiveConfigPath, redactConfig, redactText, redactSerializedSecrets } from '@goodvibes-jev/engine/terminal-shell';
 import { registerAccountIdentityRedaction } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -101,7 +102,9 @@ beforeEach(() => {
   previous = installJudgmentPort(fakePort((name, question, state) => {
     if (name !== 'credential') return cliRedactionAnswer(name, question, state);
     const key = (state as { key: string }).key;
-    return noulAnswer(credentialPaths.has(key) ? 0.99 : safePaths.has(key) ? 0.01 : 0.5);
+    // Credential paths get an unsettled answer, never a "yes": the redactor has to withhold
+    // them by its own declaration or by failing closed, not because the port agrees.
+    return noulAnswer(safePaths.has(key) ? 0.01 : 0.5);
   }).port);
 });
 afterEach(() => { installJudgmentPort(previous); });
@@ -198,7 +201,14 @@ describe('support-bundle redaction covers credentials named by full key', () => 
   });
 
   test('every path this product routes through the secret manager is sensitive without restating it', async () => {
-    const { SECRET_CONFIG_KEYS } = await import('../../config/secret-config.ts');
+    installJudgmentPort(fakePort((name, question, state) => {
+      if (name !== 'credential') return cliRedactionAnswer(name, question, state);
+      // A key the platform schema declares is answered by the declaration alone; the
+      // undeclared ones (the payment card fields) are withheld because the reading is unsettled.
+      const key = (state as { key: string }).key;
+      if (CONFIG_SCHEMA.some(setting => setting.key === key)) throw new Error(`The declared key ${key} must not need the judgment port.`);
+      return noulAnswer(0.5);
+    }).port);
     for (const key of SECRET_CONFIG_KEYS) {
       expect(await isSensitiveConfigPath(key as unknown as string)).toBe(true);
     }

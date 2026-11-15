@@ -53,6 +53,7 @@ runs:
         GOODVIBES_VERSION: ${{ inputs.version }}
         GOODVIBES_REQUESTED_INSTALL_DIR: ${{ inputs.install-dir }}
         GOODVIBES_AGENT: ${{ inputs.install-agent }}
+        ACTION_PATH: ${{ github.action_path }}
         # CI installs binaries only — never register a persistent user service.
         GOODVIBES_DAEMON_SERVICE: '0'
       run: |
@@ -64,14 +65,18 @@ runs:
         fi
         mkdir -p "$INSTALL_DIR"
         export GOODVIBES_INSTALL_DIR="$INSTALL_DIR"
-        # Use the public monorepo release installer. It selects one release
-        # from mgd34msu/goodvibes for all enabled products and verifies the
-        # compiled programs, runtime companions and WebUI against that release's
-        # SHA256SUMS.txt. No checkout build or system Bun is required.
-        curl -fsSL --proto '=https' --retry 3 \
-          -o "$RUNNER_TEMP/goodvibes-install.sh" \
-          https://goodvibes.sh/install.sh
-        sh "$RUNNER_TEMP/goodvibes-install.sh"
+        # Run the release installer from the same checkout as this action, so
+        # the script is exactly the one at the ref the workflow pinned, not
+        # whatever a mutable URL serves today. It selects one release for all
+        # enabled products and verifies the compiled programs, runtime
+        # companions and WebUI against that release's SHA256SUMS.txt. No
+        # checkout build or system Bun is required.
+        INSTALLER="$ACTION_PATH/../../scripts/install.sh"
+        if [ ! -f "$INSTALLER" ]; then
+          echo "GoodVibes installer not found at $INSTALLER; use this action from the repository checkout at a pinned ref." >&2
+          exit 1
+        fi
+        sh "$INSTALLER"
         # Put the install dir on PATH for later steps in the job.
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
         VERSION_STRING="$("$INSTALL_DIR/goodvibes" --version)"

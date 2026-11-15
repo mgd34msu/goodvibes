@@ -75,8 +75,19 @@ contract units and planning decisions never appear as unrelated work.
 | `sourceMessageId` | The message the task originated from |
 
 The platform validates the work-plan status vocabulary
-(`ProjectWorkPlanTaskStatus`), and status transitions go through the dedicated
-status route rather than free-form patches.
+(`ProjectWorkPlanTaskStatus`). A task is a checklist item: any status may move to
+any other status, including out of `done`, `failed` and `cancelled`, because the
+contract plan sync reopens a task when later checks fail. The dedicated status
+route and a task patch that sets `status` follow the same rule and emit the same
+status-changed event. A status change without a `reason` clears the previous
+`statusReason` and sets or clears `completedAt` for the new status.
+
+Tasks derived from a planning state (`source` of `planning`) follow the planning
+state only where it changed: publishing the same state again does not undo a
+status, order, owner, notes or priority an operator set on the work-plan task. A
+planning task that disappears from the state is tagged `planning-removed` rather
+than deleted, and a task an operator deletes or clears from the work plan is not
+brought back by a later publication.
 
 | Status | What it means |
 | --- | --- |
@@ -210,24 +221,34 @@ while preserving conversational control.
 ## Readiness evaluation
 
 `ProjectPlanningService.evaluate()` and
-`POST /api/projects/planning/evaluate` are pure evaluators. They do not persist
-state unless the caller separately upserts state.
+`POST /api/projects/planning/evaluate` do not persist state unless the caller
+separately upserts state. They can call the configured judgment model.
 
 The evaluator checks for:
 
 - missing goal
 - missing scope or constraints
 - unresolved questions
-- ambiguous language such as `better`, `improve`, or `agent channel`
+- an unclear goal, read by the judgment model from the whole state (there is no
+  word list). In Classic mode no model reading is made, so this check is skipped
+  and the result says so
 - missing task decomposition
-- missing dependency graph for multi-task plans
+- missing dependency graph for multi-task plans (an advisory gap; dependencies
+  listed on the tasks count)
 - missing verification gates
 - missing user approval before execution
 
 The output contains:
 
-- `readiness`
-- `gaps`
+- `readiness`: `needs-user-input` while any gap is blocking, otherwise
+  `executable`. An advisory gap is reported in `gaps` but does not change
+  readiness
+- `gaps`, including a blocking `readiness-unavailable` gap when the model
+  reading is unavailable or inconclusive
+- `readinessAssessment`: what the readiness rests on (`semantic-and-native`, or
+  `native-structure-and-owner-approval` when the model reading was skipped)
+- `operationProvenance` (`classic`) and `semanticAssessment` (`not-evaluated`)
+  when the model reading was skipped
 - `nextQuestion` when a gap has a concrete question
 - the normalized state with the evaluated readiness
 
@@ -321,12 +342,10 @@ durable tasks.
 | `projectPlanning.workPlan.task.create` | Create a durable work-plan task |
 | `projectPlanning.workPlan.task.get` | Fetch one task by id |
 | `projectPlanning.workPlan.task.update` | Patch a task |
-| `projectPlanning.workPlan.task.status` | Validate and apply a status transition |
+| `projectPlanning.workPlan.task.status` | Set a task's status and optional reason |
 | `projectPlanning.workPlan.task.delete` | Delete a task |
 | `projectPlanning.workPlan.tasks.reorder` | Replace the work plan's task ordering |
 | `projectPlanning.workPlan.clearCompleted` | Remove completed tasks, clearing `done` only by default |
-- `projectPlanning.workPlan.tasks.reorder`
-- `projectPlanning.workPlan.clearCompleted`
 
 ## TUI integration shape
 

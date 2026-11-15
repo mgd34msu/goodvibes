@@ -352,7 +352,8 @@ export interface WakeBootProvisioningOptions {
 export function startWakeBootProvisioning(options: WakeBootProvisioningOptions): WakeBootProvisioning {
   const sweeper = startWakeRecoverySweeper({
     managedRoot: options.managedRoot,
-    ...(options.liveSessionIds !== undefined ? { liveSessionIds: options.liveSessionIds() } : {}),
+    // The function itself, read at each sweep: a snapshot taken here would call every later session an orphan.
+    ...(options.liveSessionIds !== undefined ? { liveSessionIds: options.liveSessionIds } : {}),
     ...(options.sweepIntervalMs !== undefined ? { intervalMs: options.sweepIntervalMs } : { intervalMs: WAKE_SWEEP_INTERVAL_MS }),
   });
   const setTimeoutImpl = options.setTimeoutImpl ?? ((handler, ms) => setTimeout(handler, ms));

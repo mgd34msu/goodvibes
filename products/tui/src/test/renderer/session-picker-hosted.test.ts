@@ -14,6 +14,7 @@ import { rmSync, existsSync } from 'node:fs';
 import { SessionPickerModal, type SessionPickerHostedRoster } from '../../input/session-picker-modal.ts';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { waitFor } from '../helpers/wait-for.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import type { HostedRosterSnapshot } from '../../runtime/client/hosted-roster.ts';
@@ -137,8 +138,7 @@ describe('session picker: daemon-hosted sessions', () => {
     expect(refreshed).toBe(1);
     // The modal opens on the LAST answer; the refresh lands behind it.
     expect(modal.hostedRoster.sessions).toHaveLength(0);
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitFor(() => landed === 1);
     expect(modal.hostedRoster.sessions).toHaveLength(1);
     expect(landed).toBe(1);
   });

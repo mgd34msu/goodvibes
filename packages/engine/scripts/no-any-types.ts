@@ -33,7 +33,8 @@ import { resolve, relative, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, '..');
+// ANY_CHECK_ROOT lets a test point the gate at a fixture tree.
+const REPO_ROOT = process.env['ANY_CHECK_ROOT'] ?? resolve(__dirname, '..');
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -137,14 +138,19 @@ function walkSourceFiles(dir: string): string[] {
 
 // ─── Scan roots ─────────────────────────────────────────────────────────────
 
-const SCAN_ROOTS = [
-  // The old packages/* are the engine's top-level package directories.
-  ...['contracts', 'daemon-api', 'errors', 'operator-client', 'peer-client', 'platform', 'terminal-shell',
-    'toolchain', 'transport-core', 'transport-http', 'transport-realtime'].map((pkg) => resolve(REPO_ROOT, pkg)),
-  resolve(REPO_ROOT, 'scripts'),
-  resolve(REPO_ROOT, 'test'),
-  resolve(REPO_ROOT, 'tests'),
-];
+/**
+ * Every top-level directory of the engine, so a new package directory or
+ * sample folder is inside the gate without anyone editing a list. The skipped
+ * names are build output and dependencies, never source.
+ */
+function scanRoots(): string[] {
+  return readdirSync(REPO_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && !SKIP_DIRS.has(entry.name))
+    .map((entry) => resolve(REPO_ROOT, entry.name))
+    .sort();
+}
+
+const SCAN_ROOTS = scanRoots();
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 

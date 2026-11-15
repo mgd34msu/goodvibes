@@ -52,7 +52,7 @@ export function buildPaymentsCardNumberEntry(configManager: PaymentsConfigReader
   return buildStringFieldEntry(
     configManager,
     PAYMENTS_CARD_NUMBER_CONFIG_KEY,
-    'Payment card number. Stored through the secret manager at daemon scope; entering it here or via /payments card never shows the typed characters in plaintext.',
+    'Payment card number. Stored through the secret manager at daemon scope; entering it here never shows the typed characters in plaintext. Purchases use only cards added with /payments card (or the webui), which this setting does not feed.',
   );
 }
 

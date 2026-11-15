@@ -53,6 +53,25 @@ function error(message: string): { readonly success: false; readonly error: stri
   return { success: false, error: message };
 }
 
+const NOT_DONE_STATUSES = new Set(['unavailable', 'unsupported', 'blocked', 'not_found']);
+
+/**
+ * A launch, stop or wait that did nothing is a failure, not a success with a
+ * status to decode. The full body stays in `output`; `error` says why.
+ */
+function processOutcome(result: Record<string, unknown>): { readonly success: boolean; readonly output: string; readonly error?: string } {
+  const status = typeof result.status === 'string' ? result.status : '';
+  if (!NOT_DONE_STATUSES.has(status)) return output(result);
+  const id = typeof result.processId === 'string' ? result.processId : '';
+  const reason = typeof result.reason === 'string' ? result.reason
+    : status === 'not_found' ? `No tracked process matched ${id ? `"${id}"` : 'that id'}. Use process action:"list" to see the tracked ids.`
+    : typeof result.policy === 'string' ? result.policy : status;
+  return { success: false, output: JSON.stringify(result, null, 2), error: `Process ${status.replace('_', ' ')}; nothing was done. ${reason}` };
+}
+
+const PROCESS_ACTION_WORDS = ['list', 'poll', 'status', 'wait', 'log', 'output', 'kill', 'stop', 'cancel', 'write', 'start', 'capabilities', 'doctor', 'parity'] as const;
+const PROCESS_ACTION_ALIASES = new Set<string>([...PROCESS_ACTION_WORDS, 'spawn', 'run']);
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -82,11 +101,11 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
           command: { type: 'string', description: 'Shell command to start via the shared ProcessManager.' },
           background: { type: 'boolean', description: 'Must be true. Foreground shell uses exec.' },
           cwd: { type: 'string', description: 'Workspace-relative or absolute working directory.' },
-          timeoutMs: { type: 'number', description: 'How long to allow before the timeout contract applies. Whether it terminates the process depends on processClass and killOnTimeout.' },
+          timeoutMs: { type: 'number', description: 'How long to allow before the timeout contract applies; 0 or omitted means no deadline, at most 2147483647. Whether it terminates the process depends on processClass and killOnTimeout.' },
           processClass: {
             type: 'string',
             enum: ['command', 'long_lived'],
-            description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. Read from the complete command by Jev when omitted; an unsettled reading prevents launch.',
+            description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. When omitted, Jev reads the complete command and an unsettled reading prevents launch; when Jev is not reading commands (Classic operation) an omitted class is command, so a timeout kills it and only an explicit long_lived or killOnTimeout:false spares it.',
           },
           killOnTimeout: { type: 'boolean', description: 'Overrides processClass: true terminates this process when timeoutMs expires, false leaves it running. Set true deliberately before a timeout may destroy something the user is using.' },
           pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the platform publishes a typed PTY contract.' },
@@ -106,7 +125,7 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
       if (!readBoolean(input.background)) {
         return error('terminal is the tracked-background adapter. Use exec for bounded foreground shell commands, or call terminal with background:true. Launch requires current recorded effect admission.');
       }
-      return output(await runBackgroundProcessAction(commandContext, {
+      return processOutcome(await runBackgroundProcessAction(commandContext, {
         ...input,
         processAction: 'start',
       }, processClassificationOptions(commandContext, registry, options?.signal, () => { assertCurrentToolExecution(args, options); }), args, options));
@@ -134,8 +153,8 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
           session_id: { type: 'string', description: 'Process session id alias.' },
           command: { type: 'string', description: 'Shell command for action:start.' },
           cwd: { type: 'string', description: 'Working directory for action:start.' },
-          timeoutMs: { type: 'number', description: 'Wait or background timeout in milliseconds.' },
-          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Explicit lifetime class for action:start; otherwise Jev reads the complete command.' },
+          timeoutMs: { type: 'number', description: 'Milliseconds. For wait: default 30000, 0 returns the current status without waiting, more than 600000 is capped (wait again to keep watching). For start: 0 or omitted means no deadline. At most 2147483647.' },
+          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Explicit lifetime class for action:start; otherwise Jev reads the complete command, or in Classic operation (Jev not reading commands) an omitted class is command and a timeout kills it.' },
           killOnTimeout: { type: 'boolean', description: 'Explicit timeout termination override for action:start.' },
           pty: { type: 'boolean', description: 'Request PTY mode; reports unsupported until a typed contract exists.' },
           data: { type: 'string', description: 'Input data for action:write to a running tracked native stdin pipe.' },
@@ -156,6 +175,7 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
     execute: async (args: Record<string, unknown>, options) => {
       const input = args as AgentProcessToolArgs;
       const action = readProcessAction(input);
+      if (!PROCESS_ACTION_ALIASES.has(action)) return error(`Unknown process action "${action}". Use one of: ${PROCESS_ACTION_WORDS.join(', ')}.`);
       const assertCurrent = harnessCatalogExecutionGuard(args, options);
       const reading = { ...processClassificationOptions(commandContext, registry, options?.signal, assertCurrent), retainCurrent: retainHarnessCatalogCurrent(args) };
 
@@ -171,7 +191,7 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
         return error(resolved.usage);
       }
 
-      return output(await runBackgroundProcessAction(commandContext, {
+      return processOutcome(await runBackgroundProcessAction(commandContext, {
         ...input,
         processAction: action,
       }, reading, args, options));

@@ -43,9 +43,13 @@ import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import { resolveRef } from './browser-snapshot.js';
 import type { BrowserElementRef, BrowserSnapshot, CardFieldGuard } from './browser-types.js';
 
+/** What the value is. Absent for a caller that types a secret which is not card material. */
+export type SecretFillKind = 'number' | 'cvv' | 'expiry' | 'cardholder';
+
 export interface SecretFillItem {
   readonly ref: string;
   readonly value: string;
+  readonly kind?: SecretFillKind | undefined;
 }
 
 export interface BatchSecretFillRequest {
@@ -100,13 +104,14 @@ export async function fillSecretsIntoPage(request: BatchSecretFillRequest): Prom
   // typed yet at this point regardless of which ref in the batch failed to
   // resolve, so `filled` is empty either way; the difference a throw would
   // have made is only that the caller could no longer name WHICH ref it was.
-  const resolved: { readonly ref: string; readonly value: string; readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void }[] = [];
+  const resolved: { readonly ref: string; readonly value: string; readonly kind: SecretFillKind | undefined; readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void }[] = [];
   for (const fill of fills) {
     try {
       const identity = await resolveRef(request.page, request.snapshot, fill.ref, work, request.assertSnapshotCurrent, () => {
         throw new Error('Secret targets require exact mechanical identity; semantic retargeting is not allowed.');
       });
-      resolved.push({ ref: fill.ref, value: fill.value, ...identity });
+      if (!cardMaterialMayGoInto(fill.kind, identity.element)) return { ok: false, filled: [], failedRef: fill.ref };
+      resolved.push({ ref: fill.ref, value: fill.value, kind: fill.kind, ...identity });
     } catch (error) {
       void error;
       return { ok: false, filled: [], failedRef: fill.ref };
@@ -118,6 +123,7 @@ export async function fillSecretsIntoPage(request: BatchSecretFillRequest): Prom
     try {
       await item.revalidate(); item.assertCurrent();
       if (!request.guard?.hasLiveMaterial(request.snapshot!.sessionId, request.snapshot!.pageId)) throw new Error('Secret redaction is no longer active.');
+      if (!await sameOriginAsPage(item, request.snapshot!.url, request.timeoutMs, work)) throw new Error('Card field is not in the merchant document.');
       await typeOrRefuse(item.locator, item.value, request.timeoutMs, item.element, work);
     } catch (error) {
       void error;
@@ -126,6 +132,40 @@ export async function fillSecretsIntoPage(request: BatchSecretFillRequest): Prom
     filled.push(item.ref);
   }
   return { ok: true, filled, failedRef: null };
+}
+
+/**
+ * A card number, CVV or expiry goes only into a control the snapshot marked as
+ * a payment field and that takes typed text. A page can label an arbitrary
+ * input (a hidden search box, a comment field) with a card-like name, and the
+ * value would then be typed somewhere the redactor does not know to guard.
+ */
+function cardMaterialMayGoInto(kind: SecretFillKind | undefined, element: BrowserElementRef): boolean {
+  if (kind === undefined || kind === 'cardholder') return true;
+  if (element.cardField !== true) return false;
+  if (element.tag !== 'input' && element.tag !== 'textarea') return false;
+  return element.role === 'textbox' || element.role === 'searchbox';
+}
+
+/**
+ * Card material never goes into a document from another origin than the page
+ * the owner approved, even when it is framed inside it. The element's own
+ * document is asked, so an iframe from a payment-form vendor or an ad is
+ * refused rather than trusted because it sits inside the merchant's page.
+ */
+export async function sameOriginAsPage(
+  item: { readonly kind: SecretFillKind | undefined; readonly locator: Pick<Locator, 'evaluate'>; readonly element: Pick<BrowserElementRef, 'frameChain'> },
+  pageUrl: string,
+  timeout: number,
+  work: Pick<BrowserControlIdentityWork, 'action'>,
+): Promise<boolean> {
+  if (item.kind === undefined || item.kind === 'cardholder' || item.element.frameChain.length === 0) return true;
+  try {
+    const origin = await work.action(signal => item.locator.evaluate(node => node.ownerDocument.location.origin, undefined, { timeout, signal }));
+    return origin === new URL(pageUrl).origin;
+  } catch {
+    return false;
+  }
 }
 
 async function typeOrRefuse(

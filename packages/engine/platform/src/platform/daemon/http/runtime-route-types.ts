@@ -137,7 +137,7 @@ export interface DaemonRuntimeRouteContext extends Omit<
       activeAgentId?: string | null | undefined;
       userMessage?: unknown | undefined;
     }>;
-    bindAgent(sessionId: string, agentId: string): Promise<unknown>;
+    bindAgent(sessionId: string, agentId: string, inputId?: string): Promise<unknown>;
     createSession(input: {
       id?: string | undefined;
       title?: string | undefined;
@@ -177,13 +177,15 @@ export interface DaemonRuntimeRouteContext extends Omit<
     getMessages(sessionId: string, limit: number, offset?: number): unknown[];
     getInputs(sessionId: string, limit: number): unknown[];
     getInputsSince(sessionId: string, options: { state?: string | undefined; since?: number | undefined; limit?: number | undefined }): unknown[];
-    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined }): Promise<unknown | null>;
+    markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
     closeSession(sessionId: string): Promise<{ id: string } | null>;
     reopenSession(sessionId: string): Promise<{ id: string } | null>;
     detachParticipant(sessionId: string, surfaceId: string): Promise<{ id: string; status: string } | null>;
     /** Hard-remove a session record + its messages/inputs (see CHANGELOG 1.0.0). Distinct from close. */
     deleteSession(sessionId: string): Promise<'deleted' | 'not-found' | 'active'>;
     cancelInput(sessionId: string, inputId: string): Promise<unknown | null>;
+    /** Mark a queued/delivered input failed with the reason; hosts without it fall back to cancelInput. */
+    failInput?(sessionId: string, inputId: string, error: string): Promise<unknown | null>;
     completeAgent(sessionId: string, agentId: string, message: string, meta: { status: string; routeId?: string }): Promise<void>;
     appendCompanionMessage(sessionId: string, input: {
       readonly messageId: string;
@@ -205,6 +207,7 @@ export interface DaemonRuntimeRouteContext extends Omit<
     listRuns(): AutomationRunLike[];
     getRun(runId: string): AutomationRunLike | null | undefined;
     triggerHeartbeat(input: { source: string }): Promise<unknown>;
+    listHeartbeatWakes?(): readonly unknown[];
     cancelRun(runId: string, reason: string): Promise<unknown | null>;
     retryRun(runId: string): Promise<unknown>;
     createJob(input: CreateAutomationJobInput): Promise<AutomationJobLike>;

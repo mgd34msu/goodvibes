@@ -2,7 +2,6 @@ import * as fs from 'node:fs';
 import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.ts';
 import { realLifecycleMarkerIo, recordDaemonStartAttempt } from '../platform/src/platform/daemon/lifecycle-marker.ts';
 import { WorkPlanStore } from '../platform/src/platform/workflow/work-plan-store.ts';
-/** UNRUN: original filesystem readers, exclusive recovery and persisted bounds. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

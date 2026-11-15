@@ -1,4 +1,6 @@
 import { createConfigWorkspaceCommand } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
+// The same text reader `--config key=value` and the daemon's `config set` use, so one line stores one value everywhere.
+import { parseConfigValueText } from '@goodvibes-jev/engine/terminal-shell';
 import { TUI_NOTIFICATIONS_METADATA_ONLY_KEY } from '../../config/host-settings.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
@@ -52,14 +54,6 @@ async function handleSecretConfigSet(ctx: CommandContext, key: ConfigKey, value:
   }
 }
 
-/** Coerce CLI text to the JSON-ish scalar the config schema expects. */
-function coerceConfigValue(raw: string): unknown {
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  if (raw !== '' && Number.isFinite(Number(raw))) return Number(raw);
-  return raw;
-}
-
 const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
   description: 'Open the fullscreen configuration workspace, or set a key directly',
   usage: '[category|key] | set <key> <value>',
@@ -84,7 +78,7 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
     }
     try {
       if (key === TUI_NOTIFICATIONS_METADATA_ONLY_KEY) {
-        const parsed = coerceConfigValue(value);
+        const parsed = parseConfigValueText(value);
         if (typeof parsed !== 'boolean') throw new Error('Host setting requires a literal boolean.');
         const handle = ctx.platform.configManager.getHostBooleanSetting(key);
         // Refuse an unavailable policy view before a legacy writer can
@@ -95,7 +89,7 @@ const configWorkspaceCommand = createConfigWorkspaceCommand<CommandContext>({
         return;
       }
       const before = ctx.platform.configManager.get(key as ConfigKey);
-      ctx.platform.configManager.setDynamic(key as ConfigKey, coerceConfigValue(value));
+      ctx.platform.configManager.setDynamic(key as ConfigKey, parseConfigValueText(value));
       const after = ctx.platform.configManager.get(key as ConfigKey);
       ctx.print(`Set ${key}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
       // Forced theme modes apply immediately (matches the settings-modal

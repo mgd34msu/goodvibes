@@ -7,6 +7,7 @@ import {
 import { NotificationFeed } from '../../views/notifications-feed.ts';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 import { SAMPLES } from '../helpers/contract-event-samples.ts';
+import { busDrained } from '../helpers/bus-drained.ts';
 
 const fakeConfig = { get: configGetStub() };
 const context = { sessionId: 'fixture-session', source: 'notification-dispatch-test' };
@@ -31,7 +32,7 @@ describe('notification dispatch: canonical runtime facts', () => {
         // Isolate occurrences from optional batch collapsing, using its public API.
         dispatcher.router.setBatchWindowMs(1);
         bus.emit('contracts', createEventEnvelope(event.type, event, context));
-        await Promise.resolve();
+        await busDrained(bus);
       }
       expect(feed.list().map((entry) => entry.title)).toEqual(['Workstream cancelled', 'Workstream passed']);
       expect(feed.list().every((entry) => entry.domain === 'contracts' && entry.subject === 'agents')).toBe(true);
@@ -48,7 +49,7 @@ describe('notification dispatch: canonical runtime facts', () => {
       bus.emit('agents', createEventEnvelope('AGENT_PROGRESS', { type: 'AGENT_PROGRESS', agentId: 'agent-1', progress: 'Synthetic progress' }, context));
       bus.emit('contracts', createEventEnvelope('CONTRACT_GATE_RESULT', SAMPLES.CONTRACT_GATE_RESULT, context));
       bus.emit('contracts', createEventEnvelope('CONTRACT_STATUS_CHANGED', SAMPLES.CONTRACT_STATUS_CHANGED, context));
-      await Promise.resolve();
+      await busDrained(bus);
       expect(feed.list()).toEqual([]);
       expect(NOTIFICATION_BRIDGE_DOMAINS).toContain('contracts');
       expect(NOTIFICATION_BRIDGE_DOMAINS).not.toContain('workflows');
@@ -72,7 +73,7 @@ describe('notification dispatch: canonical runtime facts', () => {
         bus.emit('contracts', createEventEnvelope('CONTRACT_COMMITTED', {
           ...SAMPLES.CONTRACT_COMMITTED, status, note: 'Failed cancelled committed: synthetic prose with no semantic authority',
         }, context));
-        await Promise.resolve();
+        await busDrained(bus);
         expect(dispatched).toMatchObject([{ title, level, body: 'Failed cancelled committed: synthetic prose with no semantic authority' }]);
       } finally { stop(); }
     });

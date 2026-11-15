@@ -8,7 +8,7 @@
  * the sessions it originates.
  *
  * Distinct from the pre-existing channels.routing.* table (which maps a channel
- * to a named ProfileManager profile id): these bind CONCRETE origination
+ * to a named profile id; the surface that owns the profile resolves it, and the daemon only logs an id it does not hold): these bind CONCRETE origination
  * defaults, including the permission mode ProfileData deliberately excludes.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';

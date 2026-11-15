@@ -37,6 +37,8 @@ export interface GeneratedKnowledgePageEntry<TNode extends GeneratedKnowledgePag
     readonly metadata: Record<string, unknown>;
   };
   readonly markdown?: string | undefined;
+  /** Set when markdown was requested for a page that has a stored artifact but its text could not be read, so an absent `markdown` is not mistaken for an empty page. */
+  readonly markdownError?: string | undefined;
   readonly target?: TNode | undefined;
   readonly subject?: TNode | undefined;
   readonly neighbors?: readonly GeneratedKnowledgePageGraphNeighbor<TNode>[] | undefined;
@@ -95,9 +97,11 @@ export async function listGeneratedKnowledgePages<TNode extends GeneratedKnowled
     GENERATED_PAGE_MARKDOWN_READ_CONCURRENCY,
     async (source) => {
       const artifact = typeof source.artifactId === 'string' ? input.artifactStore.get(source.artifactId) : undefined;
-      const markdown = input.includeMarkdown && artifact
-        ? await readMarkdown(input.artifactStore, artifact.id)
+      const read = input.includeMarkdown && typeof source.artifactId === 'string'
+        ? artifact ? await readMarkdown(input.artifactStore, artifact.id) : { error: 'The page artifact is no longer stored.' }
         : undefined;
+      const markdown = read && 'text' in read ? read.text : undefined;
+      const markdownError = read && 'error' in read ? read.error : undefined;
       const target = graph.targetBySourceId.get(source.id);
       const subject = target ? resolveSubject(target, graph) : undefined;
       return {
@@ -112,6 +116,7 @@ export async function listGeneratedKnowledgePages<TNode extends GeneratedKnowled
           },
         } : {}),
         ...(markdown ? { markdown } : {}),
+        ...(markdownError ? { markdownError } : {}),
         ...(target ? { target: projectNode(target) } : {}),
         ...(subject ? { subject: projectNode(subject) } : {}),
         ...(subject ? { neighbors: pageNeighbors(subject, graph, isSubject, projectNode) } : {}),
@@ -334,16 +339,14 @@ function generatedPagePriority(source: KnowledgeSourceRecord, graph: GeneratedKn
   return score;
 }
 
-async function readMarkdown(artifactStore: ArtifactStore, artifactId: string): Promise<string | undefined> {
+async function readMarkdown(artifactStore: ArtifactStore, artifactId: string): Promise<{ readonly text: string } | { readonly error: string }> {
   try {
     const { buffer } = await artifactStore.readContent(artifactId);
-    return buffer.toString('utf-8');
+    return { text: buffer.toString('utf-8') };
   } catch (error) {
-    logger.warn('Generated knowledge page markdown read failed', {
-      artifactId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn('Generated knowledge page markdown read failed', { artifactId, error: message });
+    return { error: `The page markdown could not be read: ${message}` };
   }
 }
 

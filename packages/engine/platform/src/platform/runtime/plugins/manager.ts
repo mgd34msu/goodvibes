@@ -25,6 +25,7 @@ import {
   type PluginLifecycleRecord,
   type PluginManifestV2,
   type PluginTransition,
+  type PluginUnloadResult,
   MAX_TRANSITION_HISTORY,
 } from './types.js';
 import { applyTransition, isOperational } from './lifecycle.js';
@@ -43,6 +44,9 @@ import {
   emitPluginUnloading,
 } from '../emitters/plugins.js';
 
+/** A lifecycle record as the manager itself keeps it: every field is its to change. */
+type MutableLifecycleRecord = { -readonly [K in keyof PluginLifecycleRecord]: PluginLifecycleRecord[K] };
+
 /** Source label for emitted events. */
 const EVENT_SOURCE = 'plugin-lifecycle-manager';
 
@@ -51,19 +55,23 @@ const EVENT_SOURCE = 'plugin-lifecycle-manager';
  * transitions and emits typed PluginEvents at each state change.
  */
 export class PluginLifecycleManager {
-  private readonly records = new Map<string, PluginLifecycleRecord>();
+  private readonly records = new Map<string, MutableLifecycleRecord>();
+  /** The manifest each plugin was last registered or loaded with, so capabilities can be re-resolved when its trust tier changes. */
+  private readonly manifests = new Map<string, PluginManifestV2>();
   private readonly sessionId: string;
   private readonly capabilityPolicy: (name: string, cap: PluginCapability) => boolean;
   private readonly trustTierResolver: (pluginName: string) => PluginTrustTier;
   private readonly runtimeBus: RuntimeEventBusContract;
 
   /** Trust store, manages tier records for all plugins. */
-  readonly trustStore: PluginTrustStore = new PluginTrustStore();
+  readonly trustStore: PluginTrustStore;
   /** Quarantine engine, tracks and applies quarantine constraints. */
-  readonly quarantine: PluginQuarantineEngine = new PluginQuarantineEngine();
+  readonly quarantine: PluginQuarantineEngine;
 
   constructor(options: PluginLifecycleManagerOptions = {}) {
     this.sessionId = options.sessionId ?? '';
+    this.trustStore = options.trustStore ?? new PluginTrustStore();
+    this.quarantine = options.quarantine ?? new PluginQuarantineEngine();
     this.capabilityPolicy = options.capabilityPolicy ?? (() => true);
     this.trustTierResolver = options.trustTierResolver ?? ((name) => this.trustStore.getTier(name));
     // No ConfigManager reaches here, so the fallback bus takes its listener cap
@@ -102,6 +110,13 @@ export class PluginLifecycleManager {
     return result;
   }
 
+  /** Resolves what a manifest is granted at a trust tier, with any quarantine on the plugin applied on top. */
+  private resolveCapabilities(name: string, manifest: PluginManifestV2, tier: PluginTrustTier) {
+    const capabilities = resolveCapabilityManifest(name, manifest, this.capabilityPolicy, tier);
+    this.quarantine.applyToNewManifest(name, capabilities);
+    return capabilities;
+  }
+
   // ── Lifecycle operations ──────────────────────────────────────────────────
 
   /**
@@ -116,9 +131,10 @@ export class PluginLifecycleManager {
     }
 
     const tier = this.trustTierResolver(name);
-    const capabilities = resolveCapabilityManifest(name, manifest, this.capabilityPolicy, tier);
+    const capabilities = this.resolveCapabilities(name, manifest, tier);
+    this.manifests.set(name, manifest);
 
-    const record: PluginLifecycleRecord = {
+    const record: MutableLifecycleRecord = {
       name,
       version: manifest.version,
       state: 'discovered',
@@ -167,6 +183,15 @@ export class PluginLifecycleManager {
       logger.warn(`[plugin-lifecycle] ${name}: cannot start load, ${toLoadingResult.reason}`);
       return false;
     }
+
+    // The manifest on disk may have changed since discovery, and the trust tier or quarantine may have
+    // too: what the plugin is granted is decided again for every load.
+    const tier = this.trustTierResolver(name);
+    this.manifests.set(name, manifest);
+    record.version = manifest.version;
+    record.trustTier = tier;
+    record.capabilities = this.resolveCapabilities(name, manifest, tier);
+    record.quarantined = this.quarantine.isQuarantined(name);
 
     this.emit({ type: 'PLUGIN_LOADING', pluginId: name, path: pluginDir });
 
@@ -232,22 +257,23 @@ export class PluginLifecycleManager {
 
   /**
    * Unload a plugin. Transitions active/loaded/degraded → unloading → disabled.
+   * The result says whether the plugin ended up disabled, and why not when it did not.
    */
   async unloadPlugin(
     name: string,
     reason?: string,
     loaderDeps?: { getLoadedPlugin?: (name: string) => LoadedPlugin | undefined },
-  ): Promise<void> {
+  ): Promise<PluginUnloadResult> {
     const record = this.records.get(name);
     if (!record) {
       logger.debug(`[plugin-lifecycle] ${name}: unload requested but not tracked`);
-      return;
+      return { unloaded: false, reason: `Plugin '${name}' is not tracked by the lifecycle manager.` };
     }
 
     const toUnloadingResult = this.transition(name, 'unloading', reason);
     if (!toUnloadingResult.ok) {
       logger.warn(`[plugin-lifecycle] ${name}: cannot unload, ${toUnloadingResult.reason}`);
-      return;
+      return { unloaded: false, reason: `Plugin '${name}' was left in state '${record.state}': ${toUnloadingResult.reason}` };
     }
 
     this.emit({ type: 'PLUGIN_UNLOADING', pluginId: name, reason });
@@ -256,11 +282,13 @@ export class PluginLifecycleManager {
     const loadedPlugin = loaderDeps?.getLoadedPlugin?.(name);
     // A throwing cleanup must not strand the record in `unloading` (its only exit
     // is `disabled`): record the error, then still come to rest.
+    let cleanupError: string | undefined;
     if (loadedPlugin) {
       try {
         await unloadPlugin(loadedPlugin);
       } catch (err) {
         const errorMsg = summarizeError(err);
+        cleanupError = errorMsg;
         this.updateRecord(name, { lastError: errorMsg, errorAt: Date.now() });
         this.emit({ type: 'PLUGIN_ERROR', pluginId: name, error: errorMsg, fatal: false });
         logger.error(`[plugin-lifecycle] ${name}: unload threw, ${errorMsg}`);
@@ -270,7 +298,7 @@ export class PluginLifecycleManager {
     const toDisabled = this.transition(name, 'disabled', reason);
     if (!toDisabled.ok) {
       logger.warn(`[plugin-lifecycle] ${name}: disable refused, ${toDisabled.reason}`);
-      return;
+      return { unloaded: false, reason: `Plugin '${name}' is stuck in state '${record.state}': ${toDisabled.reason}` };
     }
     this.emit({
       type: 'PLUGIN_DISABLED',
@@ -279,6 +307,7 @@ export class PluginLifecycleManager {
     });
 
     logger.info(`[plugin-lifecycle] ${name}: disabled${reason ? ` (${reason})` : ''}`);
+    return { unloaded: true, ...(cleanupError !== undefined ? { cleanupError } : {}) };
   }
 
   // ── Trust & Quarantine operations ────────────────────────────────────────
@@ -286,14 +315,17 @@ export class PluginLifecycleManager {
   /**
    * setTrustTier, Assign a trust tier to a plugin and re-sync the record.
    *
-   * If the plugin has an active lifecycle record, the trust tier in the record
-   * is updated immediately. Capability re-resolution requires a reload.
+   * If the plugin has a lifecycle record, its trust tier and its granted
+   * capabilities are re-resolved immediately, so a downgrade takes high-risk
+   * grants away at once and an upgrade grants them without a reload.
    */
   setTrustTier(name: string, tier: PluginTrustTier, note?: string): void {
     this.trustStore.setTier(name, tier, { note });
     const record = this.records.get(name);
     if (record) {
       record.trustTier = tier;
+      const manifest = this.manifests.get(name);
+      if (manifest) record.capabilities = this.resolveCapabilities(name, manifest, tier);
     }
     logger.info(`[plugin-lifecycle] ${name}: trust tier set to '${tier}'${note ? `, ${note}` : ''}`);
   }
@@ -367,6 +399,45 @@ export class PluginLifecycleManager {
       logger.info(`[plugin-lifecycle] ${name}: quarantine lifted, reload to restore capabilities`);
     }
     return lifted;
+  }
+
+  /** Mark a plugin as being hot-reloaded (or not). Used by the hot-reload protocol. */
+  setReloading(name: string, reloading: boolean): void {
+    this.updateRecord(name, { reloading });
+  }
+
+  /**
+   * A hot reload put a new instance in place: a plugin recorded as `error` (a failed earlier reload)
+   * or `degraded` goes back to `active`, so the status shows the plugin that is running. A quarantined
+   * plugin stays degraded until the quarantine is lifted.
+   */
+  recordReloaded(name: string): void {
+    const record = this.records.get(name);
+    if (!record) return;
+    const wasError = record.state === 'error';
+    const path: PluginLifecycleState[] = record.state === 'error' ? ['loading', 'loaded', 'active']
+      : record.state === 'degraded' && !record.quarantined ? ['active']
+        : [];
+    for (const to of path) {
+      const result = this.transition(name, to, 'hot-reload succeeded');
+      if (!result.ok) {
+        logger.warn(`[plugin-lifecycle] ${name}: could not return to ${to} after reload, ${result.reason}`);
+        return;
+      }
+    }
+    if (path.length === 0) return;
+    record.activatedAt = Date.now();
+    // The runtime store follows events, so without these a working plugin keeps showing the error or
+    // degraded state that the failed reload or health check announced.
+    if (wasError) {
+      this.emit({
+        type: 'PLUGIN_LOADED',
+        pluginId: name,
+        version: this.manifests.get(name)?.version ?? 'unknown',
+        capabilities: record.capabilities.granted as string[],
+      });
+    }
+    this.emit({ type: 'PLUGIN_ACTIVE', pluginId: name });
   }
 
   /** Mark a plugin as degraded (partial functionality) while keeping it operational. */

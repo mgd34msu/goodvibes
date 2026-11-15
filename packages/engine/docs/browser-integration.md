@@ -33,6 +33,12 @@ const platformClient = createBrowserKnowledgePlatform({
 await platformClient.knowledge.status();
 ```
 
+The sections below (Auth, Realtime, Error handling, Observability) describe the
+full `@goodvibes-jev/engine/platform/browser` entrypoint. A scoped platform
+exposes `operator.invoke(methodId, input)` instead of the typed
+`operator.control.*` helpers, and `realtime.viaSse()` only: it has no
+`realtime.viaWebSocket()`. The error classes work the same on every entrypoint.
+
 ## Auth
 
 Preferred browser auth modes:
@@ -41,13 +47,22 @@ Preferred browser auth modes:
 
 The HTTP transport always uses `credentials: 'include'`, so same-origin cookie-backed sessions work without additional wiring.
 
-If you are using bearer tokens in the browser, pair the platform with `createBrowserTokenStore()` or your own `tokenStore` implementation.
+If you are using bearer tokens in the browser, pair the platform with `createBrowserTokenStore()` or your own `tokenStore` implementation. `createBrowserTokenStore` is not exported from the browser entrypoints; import it from `@goodvibes-jev/engine/platform/auth` (or the package root, `@goodvibes-jev/engine/platform`).
+
+```ts
+import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
+import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+
+const platformClient = createBrowserGoodVibesPlatform({
+  tokenStore: createBrowserTokenStore(),
+});
+```
 
 ## Realtime
 
 For browser UIs:
-- use `platformClient.realtime.viaSse()` for operator dashboards and status views
-- use `platformClient.realtime.viaWebSocket()` when you need a persistent duplex connection model
+- use `platformClient.realtime.viaSse()` for operator dashboards and status views (every browser entrypoint)
+- use `platformClient.realtime.viaWebSocket()` when you need a persistent duplex connection model (full `platform/browser` entrypoint only; the scoped entrypoints do not have it)
 
 The browser entrypoint also enables conservative defaults for:
 - HTTP retry on safe/idempotent requests
@@ -55,6 +70,8 @@ The browser entrypoint also enables conservative defaults for:
 - WebSocket reconnect
 
 ## Example
+
+Works on every browser entrypoint, scoped or full:
 
 ```ts
 const events = platformClient.realtime.viaSse();
@@ -71,13 +88,12 @@ If the web UI is hosted with the daemon:
 - use SSE for live operator dashboards
 
 If the app is cross-origin:
-- use bearer tokens
+- use bearer tokens with SSE (`realtime.viaSse()`); a browser WebSocket cannot send an `Authorization` header, so `realtime.viaWebSocket()` connects only when the upgrade carries the operator session cookie (same-origin, or an allowlisted CORS origin whose cookie the browser sends)
 - validate CORS explicitly
-- prefer WebSocket if the deployment path is hostile to SSE
 
 ## Error handling
 
-All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy.
+All platform errors extend `GoodVibesError`. See [Error Kinds](./error-kinds.md) for the full taxonomy. The snippet calls `operator.control.snapshot()`, which exists on the full `platform/browser` entrypoint; on a scoped entrypoint use `operator.invoke('control.snapshot', {})`.
 
 ```ts
 import { GoodVibesError } from '@goodvibes-jev/engine/platform/errors';

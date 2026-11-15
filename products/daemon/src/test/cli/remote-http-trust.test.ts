@@ -1,12 +1,14 @@
 /** Owned HTTPS/WSS proof through emitted command callers. */
 import { expect, test } from 'bun:test';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GlobalNetworkTransportInstaller } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
+import { assertEmittedBuildCurrent } from '../helpers/emitted-build.js';
+import { loopbackCertificate } from '../helpers/loopback-certificate.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
@@ -18,11 +20,8 @@ type TrustMode = 'custom' | 'bundled+custom' | 'bundled';
 type Result = { code: number | null; stdout: string; stderr: string };
 
 function certificate(root: string, name: string) {
-  const cert = join(root, `${name}-cert.pem`); const key = join(root, `${name}-key.pem`);
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
-    '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'],
-  { stdio: 'ignore', timeout: 10_000 });
-  return { cert: readFileSync(cert, 'utf8'), key: readFileSync(key, 'utf8') };
+  const { cert, key } = loopbackCertificate(root, name);
+  return { cert, key };
 }
 
 function httpsFixture() {
@@ -107,6 +106,7 @@ function configuration(f: ReturnType<typeof httpsFixture>, name: string, mode: T
 }
 
 async function cli(c: ReturnType<typeof configuration>, command: 'status' | 'update' | 'sessions' | 'cluster'): Promise<Result> {
+  assertEmittedBuildCurrent();
   const child = spawn(process.execPath, ['--preload', guard, entrypoint, ...c.args(command)], {
     cwd: c.cwd, env: command === 'cluster' ? { ...c.env, GOODVIBES_DAEMON_HOME: c.daemon } : c.env, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -133,6 +133,7 @@ async function cli(c: ReturnType<typeof configuration>, command: 'status' | 'upd
 }
 
 async function programmatic(c: ReturnType<typeof configuration>, command: 'status' | 'update' | 'sessions' | 'cluster'): Promise<Result> {
+  assertEmittedBuildCurrent();
   const { runDaemonCli } = await import(emittedRun) as typeof import('../../cli/run.js');
   const stdout: string[] = []; const stderr: string[] = [];
   const code = await runDaemonCli(c.args(command), { env: c.env, cwd: c.cwd,

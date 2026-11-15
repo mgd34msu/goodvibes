@@ -33,7 +33,8 @@ function memoryRecord(): MemoryRecord {
 function fakeMemory(records: readonly MemoryRecord[]): MemoryApi {
   return {
     getAll: () => records,
-    reviewQueue: () => records.filter((record) => record.reviewState !== 'reviewed'),
+    // The real queue ranks every retrieved record, reviewed ones included, and is capped.
+    reviewQueue: async () => records.slice(0, 100),
   } as unknown as MemoryApi;
 }
 
@@ -43,7 +44,7 @@ function workPlanStore(items: readonly WorkPlanItem[]): WorkPlanStore {
   } as unknown as WorkPlanStore;
 }
 
-function makeContext(printed: string[] = []): CommandContext {
+function makeContext(printed: string[] = [], memory: readonly MemoryRecord[] = [memoryRecord()]): CommandContext {
   const root = makeProjectTempDir('goodvibes-agent-brief');
   const shellPaths = createShellPathService({ workingDirectory: root, homeDirectory: root });
   const configValues = new Map<string, unknown>([
@@ -131,7 +132,7 @@ function makeContext(printed: string[] = []): CommandContext {
     extensions: {},
     clients: {
       agentKnowledgeApi: {
-        memory: fakeMemory([memoryRecord()]),
+        memory: fakeMemory(memory),
       },
     },
   } as unknown as CommandContext;
@@ -165,6 +166,17 @@ describe('/brief command', () => {
     expect(output).toContain('Use Agent Workspace -> Work & Approvals -> Delegate a build task only for explicit build');
     expect(output).not.toContain('default knowledge');
     expect(output).not.toContain('daemon');
+  });
+
+  test('the review queue count is the size of the canonical queue, reviewed records included', async () => {
+    const reviewed: MemoryRecord = { ...memoryRecord(), id: 'mem-reviewed', reviewState: 'reviewed' };
+    const records = [memoryRecord(), reviewed];
+    const context = makeContext([], records);
+    const queue = await fakeMemory(records).reviewQueue();
+
+    expect(queue).toHaveLength(2);
+    const output = formatAgentOperatorBriefing(context);
+    expect(output).toContain(`local memory: 2 records; prompt-active 2; review queue ${queue.length}`);
   });
 
   test('formats briefing directly for workspace and smoke callers', () => {

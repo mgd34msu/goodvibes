@@ -31,13 +31,14 @@ import type { ThrobberState } from '../../renderer/throbber.ts';
 import { auditFrame } from '../helpers/frame-audit.ts';
 import { assertGoldenIn, encodeGolden } from '../helpers/golden-snapshot.ts';
 import { singleLaneScene } from '../helpers/work-tree-scenes.ts';
+import { STACK_MODES, STACK_WIDTHS, stackGoldenName, type StackMode } from '../helpers/golden-stack-names.ts';
 
 setActiveThemeName('goodvibes');
 setActiveThemeMode('dark');
 const DIR = new URL('./golden-frames/', import.meta.url).pathname;
 const HEIGHT = 30;
 
-type Mode = 'rest' | 'thinking' | 'tool' | 'tree' | 'scrolled' | 'scrolled-tool';
+type Mode = StackMode;
 
 const THINKING: ThrobberState = { spinner: '⠋', frame: 0, activity: { kind: 'model', phrase: 'Thinking...', elapsedMs: 12_000 } };
 const TOOL: ThrobberState = {
@@ -103,9 +104,9 @@ const text = (line: Line | undefined): string => (line ?? []).map((c) => c.char 
 const isBlank = (line: Line | undefined): boolean => (line ?? []).every((c) => (c.char === ' ' || c.char === '') && c.bg === '');
 
 describe('golden-frames : the stack under the transcript', () => {
-  for (const width of [80, 120, 160]) {
-    for (const mode of ['rest', 'thinking', 'tool', 'tree', 'scrolled', 'scrolled-tool'] as const) {
-      const name = `stack-${mode}-${width}`;
+  for (const width of STACK_WIDTHS) {
+    for (const mode of STACK_MODES) {
+      const name = stackGoldenName(mode, width);
       test(name, async () => {
         screen(width, mode);
         await settleSyntaxHighlighting();

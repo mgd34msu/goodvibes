@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createDeferredStartupCoordinator, writeRecoveryFile } from '@/runtime/index.ts';
-import { createBootstrapShutdown, type BootstrapShutdownDeps } from '../../runtime/bootstrap-shutdown.ts';
+import { createBootstrapShutdown, ShutdownReleaseError, type BootstrapShutdownDeps } from '../../runtime/bootstrap-shutdown.ts';
 import { installProcessLifecycle, type ProcessLifecycleDeps } from '../../runtime/process-lifecycle.ts';
 import type { BootstrapContext } from '../../runtime/bootstrap.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -20,11 +20,32 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+/**
+ * What a shutdown whose save succeeded but whose release failed rejects with:
+ * a ShutdownReleaseError carrying every release failure in invocation order.
+ * The shell reads that type to tell "saved, a resource leaked" from "not saved".
+ */
+async function releaseFailures(shutdown: Promise<void>): Promise<readonly unknown[]> {
+  const error = await shutdown.then(() => undefined, (thrown: unknown) => thrown);
+  expect(error).toBeInstanceOf(ShutdownReleaseError);
+  return (error as ShutdownReleaseError).errors;
+}
+
 function fixture(options: { fail?: string; failures?: Map<string, Error>; hold?: { phase: string; promise: Promise<void> } } = {}) {
   const order: string[] = [];
   const failure = new Error(`${options.fail} failed`);
+  // A phase that has run resolves its arrival, so a test that asserts about a
+  // held shutdown waits for the held work to have started, not for a guessed delay.
+  const arrivals = new Map<string, ReturnType<typeof deferred>>();
+  const arrived = (name: string): Promise<void> => {
+    let arrival = arrivals.get(name);
+    if (!arrival) { arrival = deferred(); arrivals.set(name, arrival); }
+    return arrival.promise;
+  };
   const step = (name: string) => (): unknown => {
     order.push(name);
+    void arrived(name);
+    arrivals.get(name)!.resolve();
     if (name === options.fail) throw failure;
     if (options.failures?.has(name)) throw options.failures.get(name);
     if (name === options.hold?.phase) return options.hold.promise;
@@ -66,7 +87,7 @@ function fixture(options: { fail?: string; failures?: Map<string, Error>; hold?:
     expect(loaded.messages).toEqual(data.messages);
     expect(loaded.meta).toMatchObject({ model: runtime.model, provider: runtime.provider, timestamp: data.timestamp });
   };
-  return { deps, shutdown, home, surface, runtime, durableFile, assertSaved, failure, order };
+  return { deps, shutdown, home, surface, runtime, durableFile, assertSaved, failure, order, arrived };
 }
 
 function exitComposition(h: ReturnType<typeof fixture>, hardTimeout = 1_000) {
@@ -83,7 +104,6 @@ function exitComposition(h: ReturnType<typeof fixture>, hardTimeout = 1_000) {
   const recoveryFile = h.surface.recoveryFile(h.runtime.sessionId);
   writeRecoveryFile(data, h.runtime.sessionId, 'Recoverable test', { surface: h.surface });
   expect(existsSync(recoveryFile)).toBe(true);
-  const recoveryBefore = readFileSync(recoveryFile, 'utf8');
   const ctx = {
     runtime: h.runtime,
     services: { surface: h.surface },
@@ -108,7 +128,12 @@ function exitComposition(h: ReturnType<typeof fixture>, hardTimeout = 1_000) {
     saveNoticeAfterMs: 10_000,
     shutdownHardTimeoutMs: hardTimeout,
   } as unknown as ProcessLifecycleDeps);
-  const assertRecoveryKept = () => expect(readFileSync(recoveryFile, 'utf8')).toBe(recoveryBefore);
+  // Exit refreshes the snapshot from the live conversation before anything else,
+  // so a kept snapshot is one that still holds that conversation.
+  const assertRecoveryKept = () => {
+    expect(existsSync(recoveryFile)).toBe(true);
+    expect(readFileSync(recoveryFile, 'utf8')).toContain('"id":"kept-message"');
+  };
   return { handlers, exitSpy, diagnostics, output, recoveryFile, assertRecoveryKept };
 }
 
@@ -118,7 +143,7 @@ describe('bootstrap shutdown preserves durable persistence after owner failures'
   for (const fail of ownedPhases) {
     test(`${fail} failure remains visible after the real session file is saved`, async () => {
       const h = fixture({ fail });
-      await expect(h.shutdown(data)).rejects.toBe(h.failure);
+      expect(await releaseFailures(h.shutdown(data))).toEqual([h.failure]);
       h.assertSaved();
       expect(h.order).toContain('bootstrap second');
       expect(h.order).toContain('runtime second');
@@ -141,25 +166,26 @@ describe('bootstrap shutdown preserves durable persistence after owner failures'
       Reflect.apply(clear, globalThis, [value]);
     });
     restores.push(() => clearSpy.mockRestore());
-    await expect(h.shutdown(data)).rejects.toBe(failure);
+    expect(await releaseFailures(h.shutdown(data))).toEqual([failure]);
     h.assertSaved();
     expect(h.deps.agentStatusIntervalRef.value).toBe(null);
   });
 
-  test('all owner failures reach the actual shell exit diagnostics with durable bytes and recovery intact', async () => {
+  test('all owner failures reach the actual shell exit diagnostics, and a confirmed save retires its recovery snapshot', async () => {
     const failures = new Map(ownedPhases.map((phase) => [phase, new Error(`${phase} failed`)]));
     const h = fixture({ failures });
     const exit = exitComposition(h);
     await exit.handlers.exitApp();
     h.assertSaved();
-    exit.assertRecoveryKept();
+    // The session is durable, so the crash-recovery copy is no longer needed even
+    // though releasing the owners failed; the failures are still reported.
+    expect(existsSync(exit.recoveryFile)).toBe(false);
     expect(exit.exitSpy).toHaveBeenCalledTimes(1);
-    const originalFailure = await h.shutdown(data).catch((error: unknown) => error);
-    expect(originalFailure).toBeInstanceOf(AggregateError);
-    expect((originalFailure as AggregateError).errors).toEqual([...failures.values()]);
-    for (const [index, failure] of [...failures.values()].entries()) expect((originalFailure as AggregateError).errors[index]).toBe(failure);
+    const errors = await releaseFailures(h.shutdown(data));
+    expect(errors).toEqual([...failures.values()]);
+    for (const [index, failure] of [...failures.values()].entries()) expect(errors[index]).toBe(failure);
     expect(exit.diagnostics).toEqual(ownedPhases.map(phase => ({
-      phase: 'ctx.shutdown error during process cleanup (non-fatal)',
+      phase: 'resource release error during process cleanup (non-fatal)',
       error: `${phase} failed`,
     })));
   });
@@ -201,7 +227,7 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
       const first = exit.handlers.exitApp();
       const second = exit.handlers.exitApp();
       expect(exit.handlers.isTerminalRestored()).toBe(true);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await h.arrived(phase);
       expect(h.order).toContain(phase);
       expect(existsSync(h.durableFile)).toBe(false);
       expect(exit.exitSpy).not.toHaveBeenCalled();
@@ -216,12 +242,13 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
     const hold = deferred();
     const h = fixture({ fail: 'hosted detach', hold: { phase: 'startup drain', promise: hold.promise } });
     const result = h.shutdown(data).then(() => undefined, (error: unknown) => error);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await Promise.all([h.arrived('hosted detach'), h.arrived('startup drain')]);
     expect(h.order).toContain('startup drain');
     expect(h.order).not.toContain('external settlement');
     expect(existsSync(h.durableFile)).toBe(false);
     hold.resolve();
-    expect(await result).toBe(h.failure);
+    expect((await result as ShutdownReleaseError).errors).toEqual([h.failure]);
+    expect(await result).toBeInstanceOf(ShutdownReleaseError);
     h.assertSaved();
   });
 
@@ -230,10 +257,13 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
     const held = deferred();
     const first = new Error('first: hosted');
     const second = new Error('second: startup');
-    const deps = { ...h.deps, leaveHostedSession: () => held.promise, deferredStartup: { drain: async () => { throw second; } } };
+    const drainRan = deferred();
+    const deps = { ...h.deps, leaveHostedSession: () => held.promise, deferredStartup: { drain: async () => { drainRan.resolve(); throw second; } } };
     const shutdown = createBootstrapShutdown(deps);
     const result = shutdown(data).then(() => undefined, (error: unknown) => error);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The later-invoked drain has already failed when the earlier one does, so
+    // the order asserted below is the invocation order, not the settling order.
+    await drainRan.promise;
     held.reject(first);
     const failure = await result as AggregateError;
     expect(failure).toBeInstanceOf(AggregateError);
@@ -247,7 +277,7 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
     h.deps.bootstrapUnsubs.unshift(() => { reentrant = h.shutdown(data); });
     const first = h.shutdown(data);
     expect(h.shutdown(data)).toBe(first);
-    await expect(first).rejects.toBe(h.failure);
+    expect(await releaseFailures(first)).toEqual([h.failure]);
     expect(reentrant).toBe(first);
     expect(h.shutdown(data)).toBe(first);
     h.assertSaved();
@@ -257,7 +287,9 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
   test('a direct self-returning callback is reported and does not strand the durable save', async () => {
     const h = fixture();
     h.deps.bootstrapUnsubs.unshift(() => h.shutdown(data));
-    await expect(h.shutdown(data)).rejects.toThrow('cannot await its own shutdown');
+    const errors = await releaseFailures(h.shutdown(data));
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toContain('cannot await its own shutdown');
     h.assertSaved();
   });
 
@@ -279,18 +311,22 @@ describe('bootstrap shutdown owns ordered asynchronous cleanup', () => {
     const deferredStartup = createDeferredStartupCoordinator((run) => { scheduled.push(run); });
     let current = { stop: async () => { h.order.push('placeholder stop'); } };
     let startup: Promise<typeof current> | null = null;
+    const startupAdmitted = deferred();
+    const settling = deferred();
     const started = deferredStartup.schedule({ label: 'external test', run: async () => {
       startup = admitted.promise.then(() => ({ stop: async () => { h.order.push('admitted handle stop'); } }));
+      startupAdmitted.resolve();
       current = await startup;
     } });
     scheduled[0]!();
-    await Promise.resolve();
+    await startupAdmitted.promise;
     const shutdown = createBootstrapShutdown({ ...h.deps, deferredStartup,
-      settleExternalServices: async () => { if (startup) current = await startup; },
+      settleExternalServices: async () => { settling.resolve(); if (startup) current = await startup; },
       stopExternalServices: () => current.stop(),
     });
     const pending = shutdown(data);
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    // Settlement is waiting on the admitted startup, which is what is asserted about.
+    await settling.promise;
     expect(existsSync(h.durableFile)).toBe(false);
     expect(h.order).not.toContain('placeholder stop');
     admitted.resolve();

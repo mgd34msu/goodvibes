@@ -118,11 +118,9 @@ export class GitStatusProvider {
       };
       this.lastFetch = Date.now();
     } catch {
-      // Never throw, return fallback
-      if (this.lastFetch === 0) {
-        this.cache = { ...FALLBACK };
-        this.lastFetch = Date.now();
-      }
+      // Never throw. A failure after an earlier success (the repo was removed, git broke) must not leave the old branch and dirty marker standing as current; and the failure is throttled like a success.
+      this.cache = { ...FALLBACK };
+      this.lastFetch = Date.now();
     } finally {
       this.fetching = false;
     }

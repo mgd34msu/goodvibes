@@ -23,7 +23,7 @@ import {
   deepEqual,
   refreshEntryValues,
 } from '../../input/settings-modal-data.ts';
-import { getNumericAdjustmentMeta } from '../../input/settings-modal-behavior.ts';
+import { adjustedSettingValue } from '../../input/settings-modal-behavior.ts';
 import type { BuiltinSettingEntry, SettingEntry, SettingsCategory } from '../../input/settings-modal-types.ts';
 
 const TTS_SPEED = 'tts.speed' as ConfigKey;
@@ -86,9 +86,11 @@ describe('tts.speed comes from the config schema', () => {
   });
 
   test('the arrow-key adjustment steps within the range the schema accepts', () => {
-    expect(getNumericAdjustmentMeta(ttsSpeedRow().setting)).toEqual({
-      step: 0.1, min: 0.25, max: 4, precision: 1,
-    });
+    const { setting } = ttsSpeedRow();
+    expect(adjustedSettingValue(setting, 1, 'right', 1)).toEqual({ value: 1.1 });
+    expect(adjustedSettingValue(setting, 3.9, 'right', 1)).toEqual({ value: 4 });
+    expect(adjustedSettingValue(setting, 4, 'right', 1)).toBeUndefined();
+    expect(adjustedSettingValue(setting, 0.25, 'left', 1)).toBeUndefined();
   });
 
   test('it sits in the tts group beside the other tts.* keys and the always-speak toggle', () => {

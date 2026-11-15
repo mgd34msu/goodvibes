@@ -121,7 +121,8 @@ describe('built-in channel plugin contract', () => {
 
     for (const surface of WEBHOOK_BACKED_SURFACES) {
       const plugin = registry.getBySurface(surface);
-      expect(plugin?.webhookPath).toEqual(expect.any(String));
+      // The generic webhook surface is the one path that is not named after its surface.
+      expect(plugin?.webhookPath).toBe(surface === 'webhook' ? '/webhook/generic' : `/webhook/${surface}`);
       expect(registry.getByPath(plugin!.webhookPath!)).toBe(plugin);
     }
   });

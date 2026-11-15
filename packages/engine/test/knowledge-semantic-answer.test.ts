@@ -40,8 +40,11 @@ import {
   WeakFeatureAnswerLlm,
   createStores,
   waitFor,
+  useStoreCleanup,
 } from './_helpers/knowledge-semantic-fixtures.js';
 import { trackDisposables } from './_helpers/disposables.ts';
+
+useStoreCleanup();
 
 /**
  * HomeGraphService.syncSnapshot() starts a self-improvement pump
@@ -757,13 +760,13 @@ describe('semantic knowledge/wiki enrichment: answer quality', () => {
     const page = await service.refreshDevicePassport({ installationId: 'house', deviceId: 'tv' });
 
     expect(repaired.answer.text).toContain('NanoCell 4K');
-    expect(repairSource).not.toBeUndefined(); // presence-only: repairSource returned
-    expect(tvNode).not.toBeUndefined(); // presence-only: tvNode found
+    if (!repairSource) throw new Error('The repaired answer did not return the repair source');
+    if (!tvNode) throw new Error('The television node was not created');
     expect(store.listEdges().some((edge) => (
       edge.fromKind === 'source'
-      && edge.fromId === repairSource?.id
+      && edge.fromId === repairSource.id
       && edge.toKind === 'node'
-      && edge.toId === tvNode?.id
+      && edge.toId === tvNode.id
       && edge.relation === 'source_for'
     ))).toBe(true);
     expect(page.markdown).toContain('LG 86NANO90UNA product specifications');

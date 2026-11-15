@@ -39,6 +39,9 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { HostedSessionFrame } from './hosted-frame-render.ts';
 
+/** The stop reasons `emitTurnError` accepts, read from its own signature. */
+type EmittableTurnErrorStopReason = Parameters<typeof emitTurnError>[2]['stopReason'];
+
 /** The turn-domain stop reasons emitTurnError accepts, mirrored here for the fallback below. */
 const TURN_ERROR_STOP_REASONS = [
   'preflight_failed',
@@ -48,8 +51,15 @@ const TURN_ERROR_STOP_REASONS = [
   'hook_denied',
   'tool_loop_circuit_breaker',
   'unexpected_error',
-] as const;
+] as const satisfies readonly EmittableTurnErrorStopReason[];
 type TurnErrorStopReason = (typeof TURN_ERROR_STOP_REASONS)[number];
+
+// A reason the emitter accepts but this list lacks would be rewritten to
+// 'unexpected_error' below. This line stops compiling when the two drift apart.
+const turnErrorStopReasonsAreComplete: [Exclude<EmittableTurnErrorStopReason, TurnErrorStopReason>] extends [never]
+  ? true
+  : never = true;
+void turnErrorStopReasonsAreComplete;
 
 function isTurnErrorStopReason(value: string | undefined): value is TurnErrorStopReason {
   return value !== undefined && (TURN_ERROR_STOP_REASONS as readonly string[]).includes(value);

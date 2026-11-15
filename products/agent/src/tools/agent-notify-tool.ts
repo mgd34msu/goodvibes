@@ -52,6 +52,7 @@ function preview(message: string, targetCount: number): string {
     `  message ${message}`,
     `  configured targets: ${targetCount}`,
     '  policy external notification delivery requires current recorded effect admission',
+    '  not evaluated: this preview does not run the content or untrusted-source checks, so the send can still be refused',
   ].join('\n');
 }
 
@@ -137,16 +138,18 @@ export function createAgentNotifyTool(
         const outward = await evaluateOutwardEffect({ request: { toolName: 'agent_notify', action: 'notification.send', description: 'sending the configured notification' },
           ledger, content: { message }, taintOptions: { signal: executionOptions?.signal } });
         assertCurrent();
-        if (!outward.allowed) return failure(outward.reason ?? 'Notification content was refused.');
+        if (!outward.allowed) return failure([outward.reason ?? 'Notification content was refused.', outward.fix].filter(Boolean).join(' '));
         const card = await screenOutboundForCardMaterial({ surface: 'webhook', message }, { signal: executionOptions?.signal, assertCurrent });
         assertCurrent(); if (card) throw new CardMaterialRefusedError(card);
         notifier.setUrls([...urls]);
         assertCurrent();
         const result = await notifier.send(message, { signal: executionOptions?.signal, assertCurrent });
         try { assertCurrent(); } catch {
-          return failure(`Notification delivery settled with ${result.delivered} delivered and ${result.failed} failed before its owner changed. No delivery was retried.`);
+          return failure(`Notification delivery settled with ${result.delivered} delivered and ${result.failed} failed before its owner changed. No delivery was retried; do not resend the whole message, because delivered targets would receive it again.`);
         }
-        if (result.failed > 0 || result.delivered === 0) return failure(formatSendResult(result));
+        if (result.delivered === 0) return failure(formatSendResult(result));
+        // Some targets already have the message, so this is not a failure to retry whole.
+        if (result.failed > 0) return output(`${formatSendResult(result)}\nDo not resend the whole message: the targets marked ok already received it.`);
         return output(formatSendResult(result));
       } catch (error) {
         return failure(error instanceof Error ? error.message : String(error));

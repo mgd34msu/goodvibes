@@ -167,10 +167,4 @@ There is no separate auth-specific timeout; callers should pass an `AbortSignal`
 
 ## Outbound producer queue (`@goodvibes-jev/engine/platform/transport-realtime`, `runtime-events.ts`)
 
-| Field | Value | Notes |
-|-------|-------|-------|
-| `MAX_OUTBOUND_QUEUE` | 1 024 | Max buffered outbound messages while socket is not open |
-| `MAX_OUTBOUND_MESSAGE_BYTES` | 1 MiB | Per-message cap; an outbound message larger than this is rejected rather than queued |
-| `MAX_OUTBOUND_QUEUE_BYTES` | 16 MiB | Total queued-payload cap; the oldest messages are dropped once buffered bytes exceed this |
-| `MAX_INBOUND_FRAME_BYTES` | 1 MiB | Largest accepted inbound runtime-event frame; oversized frames are rejected |
-| Drop policy | Oldest dropped first | `droppedOutboundCount` incremented on each drop; `onError` is called |
+The WebSocket connector's outbound queue has no size limit. Messages sent while the socket is connecting, reconnecting or still authenticating are held in order and flushed when the socket is ready; none is dropped or rejected, and `onBackpressure` is accepted but never called. An application that can send during a long disconnect should bound what it sends. Inbound runtime-event frames arrive in chunks of at most 64 KiB; a reassembled message is capped at 64M characters (a longer one is refused and the partial message dropped), and sending a message over that cap throws.

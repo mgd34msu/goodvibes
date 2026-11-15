@@ -48,12 +48,18 @@ test('Agent apply and rollback delegate the selected program, raw native compani
 for (const missing of ['browser-driver.tar.gz', 'sqlite-vec-linux-x64.so', 'goodvibes-agent-linux-x64.bun', 'goodvibes-agent-linux-x64.reader-ci-artifact.json']) {
   test(`a release missing ${missing} refuses a partial Agent update`, async () => {
     const f = fixture(); f.release.assets.delete(missing);
-    await expect(applyUpdate(f.options)).rejects.toThrow(); originals(f);
+    await expect(applyUpdate(f.options)).rejects.toThrow(`Suite release is missing ${missing}`);
+    // The refusal comes from the manifest check, before any payload is downloaded.
+    expect(f.requests.map(url => url.split('/').at(-1))).toEqual(['latest', 'SHA256SUMS.txt']);
+    originals(f);
   });
 }
 test('a verified archive missing a required driver entry refuses before replacing the binary', async () => {
   const f = fixture(); f.release.assets.set('browser-driver.tar.gz', fixtureTarGz({ 'playwright-core/package.json': '{}', 'playwright-core/index.js': 'incomplete' }));
-  await expect(applyUpdate(f.options)).rejects.toThrow(); originals(f);
+  await expect(applyUpdate(f.options)).rejects.toThrow('Native archive is missing a required file');
+  // The program binary is never fetched once the driver archive is refused.
+  expect(f.requests.map(url => url.split('/').at(-1))).not.toContain('goodvibes-agent-linux-x64.bun');
+  originals(f);
 });
 test('a changed configured bundle path during latest-release lookup is never adopted after the await', async () => {
   // Configuration changes reject immediately after HEAD, before any installed

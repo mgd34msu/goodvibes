@@ -114,7 +114,8 @@ for (const mode of ['atomic', 'none', 'partial'] as const) {
         expect(result.warnings?.join('\n')).toContain('rewrite failed');
         expect(fs.readFileSync(join(f.root, repair.path), 'utf8')).toBe(broken);
         expect(fs.readFileSync(join(f.root, later.path), 'utf8')).toBe(later.content);
-        expect(f.undo.undoDepth()).toBe(4); expect(f.undo.redoDepth()).toBe(0);
+        // The first and repaired files held bytes /undo cannot restore, so only the prior entry and the later text write are recorded.
+        expect(f.undo.undoDepth()).toBe(2); expect(f.undo.redoDepth()).toBe(0);
       }
     } finally { rename.mockRestore(); which.mockRestore(); }
   });
@@ -131,7 +132,8 @@ for (const mode of ['none', 'partial'] as const) {
       expect(fs.readFileSync(join(f.root, first.path), 'utf8')).toBe(first.content);
       expect(fs.readFileSync(join(f.root, repair.path), 'utf8')).toBe(broken);
       expect(fs.readFileSync(join(f.root, later.path), 'utf8')).toBe('later original\n');
-      expect(f.undo.undoDepth()).toBe(2); expect(f.undo.redoDepth()).toBe(0);
+      // Both written files replaced non-UTF-8 bytes /undo cannot restore, so only the prior entry remains and its redo entry is untouched.
+      expect(f.undo.undoDepth()).toBe(1); expect(f.undo.redoDepth()).toBe(1);
       expect(f.calls).toEqual(['heal']);
     } finally { installJudgmentPort(previous); which.mockRestore(); }
   });

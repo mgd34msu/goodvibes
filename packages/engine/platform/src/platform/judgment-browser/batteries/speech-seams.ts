@@ -94,9 +94,10 @@ export function createSpeechSeamsAdapter(resolve: BrowserJudgmentBattery<'webui.
     project({ state, run }) {
       const readings = Object.fromEntries(state.candidates.map((_, i) => [`seam_${i}`, run.readings[`seam_${i}`]!]));
       if (Object.values(readings).some(r => !r)) throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');
-      if (Object.values(readings).some(r => r.outcome !== 'act')) { run.recordAction('unsettled'); return { status: 'held', reason: 'uncertain', readings }; }
-      run.recordAction('ready');
+      if (Object.values(readings).some(r => r.outcome !== 'act')) { return { status: 'held', reason: 'uncertain', readings }; }
       return { status: 'settled', readings, value: { endOffsets: state.candidates.filter((_, i) => readings[`seam_${i}`]!.verdict === 'yes'), nextCursor: state.nextCursor } };
     },
+    // Recorded only once the response is delivered, so a refused result leaves no action behind.
+    record({ run }, projection) { run.recordAction(projection.status === 'settled' ? 'ready' : 'unsettled'); },
   };
 }

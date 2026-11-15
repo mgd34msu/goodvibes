@@ -23,6 +23,9 @@ export const verificationArtifact = defineSelector({
   ],
 });
 
+const MAX_CANDIDATES = 64;
+const NEAR_VERIFICATION_WORDING = /(code|otp|pin|passcode|token|verif|confirm|bestätig|c[oó]digo|vérif|confirme)\W{0,40}$/i;
+
 export interface VerificationReadingOptions extends JudgmentReadingOptions { readonly sourceOwner?: ProtectedSourceOwner | undefined; }
 
 /** Domain admission stays local. The reader sees opaque references, never verification tokens or URLs. */
@@ -31,7 +34,11 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
     const source = retainStrictJudgmentJson({ email, expectation });
     const captured = source.snapshot;
     const mechanical = extractVerification(captured.email, captured.expectation);
-    const empty = (): VerificationExtraction => ({ ...mechanical, artifact: { kind: 'none', reason: 'The verification artifact could not be established from current message evidence.' } });
+    // A plain-http link refusal is not final: the picker may still find a code the strict extractor did not.
+    // When it finds none, that refusal is the answer, since it says why the link was not followed.
+    const insecureLink = mechanical.artifact.kind === 'refused' && mechanical.artifact.reason === 'insecure-link';
+    const empty = (reason = 'The verification artifact could not be established from current message evidence.'): VerificationExtraction =>
+      insecureLink ? mechanical : ({ ...mechanical, artifact: { kind: 'none', reason } });
     const signal = options.signal, assertCurrent = options.assertCurrent, sourceOwner = options.sourceOwner;
     const callerCurrent = () => {
       source.assertCurrent(); signal?.throwIfAborted();
@@ -40,7 +47,7 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
       if (checked !== undefined) { drainOwned(checked); throw new Error('Verification ownership must be synchronous.'); }
     };
     callerCurrent();
-    if (mechanical.artifact.kind === 'refused') return mechanical;
+    if (mechanical.artifact.kind === 'refused' && !insecureLink) return mechanical;
     const candidates: { id: string; content: { kind: 'code' | 'link'; host?: string }; value: VerificationArtifact }[] = [];
     const refs = new Map<string, string>();
     const offer = (literal: string, value: VerificationArtifact) => {
@@ -49,6 +56,9 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
       candidates.push({ id, value, content: value.kind === 'link' ? { kind: 'link', host: value.linkHost } : { kind: 'code' } });
       refs.set(literal, id); return id;
     };
+    // Beyond MAX_CANDIDATES a long marketing mail drowns the real code, so the
+    // second pass offers only tokens that sit next to verification wording.
+    let nearWordingOnly = false;
     const project = (text: string) => text.replace(/https?:\/\/[^\s<>"'`\])]+/gi, raw => {
       const cleaned = raw.replace(/[.,;:!?)\]}>'"]+$/, '');
       try {
@@ -58,14 +68,22 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
         if (!allowed || url.username || url.password || url.protocol !== 'https:') return '[unavailable link]';
         return `[${offer(cleaned, { kind: 'link', url: url.toString(), linkHost: host })}]`;
       } catch { return '[unavailable link]'; }
-    }).replace(/\b[A-Za-z0-9]{4,10}\b/g, value => {
+    }).replace(/\b[A-Za-z0-9]{4,10}\b/g, (value, offset: number, whole: string) => {
       // Candidate discovery is grammar only. Surrounding prose decides its role.
       if (!/\d/.test(value) && !/^[A-Z]{4,10}$/.test(value)) return value;
+      if (nearWordingOnly && !NEAR_VERIFICATION_WORDING.test(whole.slice(Math.max(0, offset - 80), offset))) return value;
       return `[${offer(value, { kind: 'code', code: value })}]`;
     });
-    const state = { kind: captured.expectation.kind, serviceDomain: captured.expectation.serviceDomain,
-      subject: project(captured.email.subject), body: project(captured.email.body) };
-    if (!candidates.length || candidates.length > 64 || !options.sourceOwner) return empty();
+    const buildState = () => ({ kind: captured.expectation.kind, serviceDomain: captured.expectation.serviceDomain,
+      subject: project(captured.email.subject), body: project(captured.email.body) });
+    let state = buildState();
+    if (candidates.length > MAX_CANDIDATES) {
+      candidates.length = 0; refs.clear(); nearWordingOnly = true;
+      state = buildState();
+    }
+    if (!options.sourceOwner) return empty('The message could not be read: no source-screening owner was supplied for it.');
+    if (candidates.length > MAX_CANDIDATES) return empty(`The message holds more than ${MAX_CANDIDATES} possible codes, even counting only those beside verification wording, so none was chosen.`);
+    if (!candidates.length) return empty('The message holds no code, and no link on the service domain, to choose from.');
     // Screen complete token-free context for any other private material before its ordinary Jev request.
     const protection = options.sourceOwner;
     const methods = { capture: protection.capture, screen: protection.screen, project: protection.project, release: protection.release };

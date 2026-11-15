@@ -40,9 +40,6 @@ a smoke/network probe. Readiness/recipe-fit rubrics and the synchronous
 startup cookbook are separate and unchanged.
 
 Known limitation: generated opaque identifiers can incidentally contain a
-PAN-shaped digit run. This includes existing background `bg_*` timestamps and
-SQLite decision-log UUIDv7 provenance reused by cookbook readiness. The global
-privacy floor still refuses these inputs. This slice does not change either
-identifier producer or exempt provenance from screening. Tests use deterministic
-noncolliding IDs for affirmative fixtures and retain a real-log refusal control
-for a generated UUIDv7 collision; that fixture stabilization is not a product fix.
+PAN-shaped digit run. This includes background `bg_*` timestamps and the
+decision-log UUIDv7 provenance reused by cookbook readiness. The global privacy
+floor refuses such inputs and provenance is not exempt from screening.

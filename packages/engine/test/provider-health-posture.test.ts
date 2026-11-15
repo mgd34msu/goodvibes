@@ -5,6 +5,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/provider-health';
 import type { ProviderRuntimeSnapshot } from '../platform/src/platform/providers/runtime-snapshot.ts';
 import type { ProviderAuthRouteDescriptor } from '../platform/src/platform/providers/interface.ts';
+import { fileURLToPath } from 'node:url';
 import { bundleBrowserEntrypoint } from './_helpers/browser-bundle.ts';
 
 function inputs(): ProviderHealthDomainInputs {
@@ -131,14 +132,16 @@ describe('canonical provider descriptor posture', () => {
 });
 
 test('public consumer bundles for browsers and its emitted functions execute without Node services', async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { writeFileSync, rmSync } = await import('node:fs');
   const { join } = await import('node:path');
-  const root = join(import.meta.dir, '.test-tmp');
-  mkdirSync(root, { recursive: true });
-  const dir = mkdtempSync(join(root, 'provider-health-browser-'));
+  const { makeProjectTempDir } = await import('./_helpers/project-temp.ts');
+  const dir = makeProjectTempDir('provider-health-browser');
   try {
     const entry = join(dir, 'consumer.ts');
-    writeFileSync(entry, `import { buildAccountPosture, buildProviderHealthDomainSummaries } from '@goodvibes-jev/engine/platform/platform/runtime/provider-health';\nglobalThis.__providerHealthProbe = { buildAccountPosture, buildProviderHealthDomainSummaries };`);
+    // The scratch directory sits outside the workspace, so the entry names the
+    // public subpath's resolved file rather than the package specifier.
+    const publicEntry = fileURLToPath(import.meta.resolve('@goodvibes-jev/engine/platform/platform/runtime/provider-health'));
+    writeFileSync(entry, `import { buildAccountPosture, buildProviderHealthDomainSummaries } from ${JSON.stringify(publicEntry)};\nglobalThis.__providerHealthProbe = { buildAccountPosture, buildProviderHealthDomainSummaries };`);
     const code = await bundleBrowserEntrypoint(entry, { conditions: ['bun'] });
     expect(code).not.toMatch(/(?:from|require\()\s*['"](?:node:|bun:)/);
     const consumer: { __providerHealthProbe?: { buildAccountPosture: typeof buildAccountPosture; buildProviderHealthDomainSummaries: typeof buildProviderHealthDomainSummaries } } = {};

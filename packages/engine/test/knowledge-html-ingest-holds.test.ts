@@ -17,13 +17,15 @@ let root: string;
 let previous: JudgmentPort | undefined;
 let service: HomeGraphService | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); root = mkdtempSync(join(tmpdir(), 'html-ingest-hold-')); });
-afterEach(() => { service?.dispose(); service = undefined; installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); });
+const stores: KnowledgeStore[] = [];
+afterEach(async () => { service?.dispose(); service = undefined; installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); rmSync(root, { recursive: true, force: true }); });
 
 for (const route of ['regular', 'homegraph'] as const) {
   describe(`${route} HTML ingestion`, () => {
     for (const mode of ['uncertain', 'missing', 'unavailable'] as const) {
       test(`holds ${mode} readings without replacing prior source or extraction`, async () => {
         const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+        stores.push(store);
         const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
         const context = { store, artifactStore, connectorRegistry: new KnowledgeConnectorRegistry(), emitIfReady: () => {}, syncReviewedMemory: async () => {}, lint: async () => [], listConnectors: () => [] };
         await store.init();

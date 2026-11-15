@@ -274,7 +274,8 @@ describe('daemon Agent knowledge route wiring', () => {
     const runtime = await injectedRuntime();
     const original = runtime.agentKnowledgeService;
     omitAgentKnowledge(runtime);
-    const daemon = await DaemonServer.create({ runtimeServices: runtime });
+    // This daemon's stop is made to fail below, so teardown after a failed assertion tolerates that failure.
+    const daemon = disposables.add(await DaemonServer.create({ runtimeServices: runtime }), server => server.stop().catch(() => undefined));
     const supplemental = facadeAgentKnowledge(daemon), resources = knowledgeResources(supplemental);
     await supplemental.whenReady();
     const dispose = supplemental.dispose.bind(supplemental);

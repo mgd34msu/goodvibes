@@ -7,8 +7,8 @@
  * "Waiting for your approval" thinking-fragment label owns the surface instead. A genuine provider
  * silence with no approval pending still fires the hint unchanged.
  *
- * Uses the watchdog's real setTimeout with a tiny threshold (via the stallThresholdMs test seam)
- * rather than fake timers, matching stream-stall-watchdog.test.ts's approach.
+ * Drives the watchdog through its timer seam (stallTimers) with a manual clock, so the tests
+ * never wait on real time.
  */
 import { describe, test, expect } from 'bun:test';
 import type { WireStreamEventMetricsOptions, StreamMetrics } from '../../core/stream-event-wiring.ts';
@@ -55,10 +55,23 @@ function makeMetrics(): StreamMetrics {
   };
 }
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** Timers that fire only when the test advances them. */
+function makeManualTimers() {
+  const pending = new Map<number, () => void>();
+  let nextId = 1;
+  return {
+    timers: {
+      setTimeout(callback: () => void) { const id = nextId++; pending.set(id, callback); return id; },
+      clearTimeout(handle: unknown) { pending.delete(handle as number); },
+    },
+    /** Elapse every armed timer. */
+    fireAll() { for (const [id, callback] of [...pending]) { pending.delete(id); callback(); } },
+  };
+}
 
 function setup(isApprovalPending?: () => boolean) {
   const low: string[] = [];
+  const clock = makeManualTimers();
   const turns = makeTurnBus();
   const opts = {
     events: {
@@ -79,25 +92,26 @@ function setup(isApprovalPending?: () => boolean) {
     render: () => {},
     metrics: makeMetrics(),
     stallThresholdMs: 20,
+    stallTimers: clock.timers,
     ...(isApprovalPending ? { isApprovalPending } : {}),
   } as WireStreamEventMetricsOptions;
   const result = wireStreamEventMetrics(opts);
-  return { low, turns, dispose: () => { for (const u of result.unsubs) u(); } };
+  return { low, turns, clock, dispose: () => { for (const u of result.unsubs) u(); } };
 }
 
 describe('stall watchdog respects a pending approval', () => {
-  test('suppresses the provider-blaming stall hint while an approval is pending', async () => {
-    const { low, turns, dispose } = setup(() => true);
+  test('suppresses the provider-blaming stall hint while an approval is pending', () => {
+    const { low, turns, clock, dispose } = setup(() => true);
     turns.emit('STREAM_START'); // arm the watchdog
-    await wait(60);
+    clock.fireAll();
     expect(low.join('\n')).not.toContain('Still waiting on');
     dispose();
   });
 
-  test('still fires the hint for a genuine provider silence with no approval pending', async () => {
-    const { low, turns, dispose } = setup(() => false);
+  test('still fires the hint for a genuine provider silence with no approval pending', () => {
+    const { low, turns, clock, dispose } = setup(() => false);
     turns.emit('STREAM_START');
-    await wait(60);
+    clock.fireAll();
     expect(low.join('\n')).toContain('Still waiting on openai-subscriber');
     dispose();
   });

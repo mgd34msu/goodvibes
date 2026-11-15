@@ -1,4 +1,3 @@
-/** Source regressions; execution is deferred until coding is complete. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { clipReadContent, observeReadContent, returnedReadRows, validatedReadContent } from '../platform/src/platform/tools/read/observation.js';

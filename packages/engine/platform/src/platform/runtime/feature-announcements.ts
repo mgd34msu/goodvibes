@@ -16,6 +16,7 @@
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { resolveWebBinding } from '../daemon/host-resolver.js';
 import { join } from 'node:path';
+import { withSyncFileLock } from '../config/sync-file-lock.js';
 import { logger } from '../utils/logger.js';
 import type { ConfigManager } from '../config/manager.js';
 
@@ -109,15 +110,19 @@ export class FeatureAnnouncementStore {
    * only the log.
    */
   record(id: string, text?: string): boolean {
-    const state = this.read();
-    if (id in state.announced) return false;
-    const at = Date.now();
-    state.announced[id] = at;
-    if (typeof text === 'string' && text.length > 0) {
-      state.pending.push({ id, text, at });
-    }
-    this.persist(state, id);
-    return true;
+    // The daemon and the terminal products share this file; the lock makes the
+    // read-check-write one step across processes so only one of them announces.
+    return withSyncFileLock(this.path, () => {
+      const state = this.read();
+      if (id in state.announced) return false;
+      const at = Date.now();
+      state.announced[id] = at;
+      if (typeof text === 'string' && text.length > 0) {
+        state.pending.push({ id, text, at });
+      }
+      this.persist(state, id);
+      return true;
+    });
   }
 
   /**
@@ -126,11 +131,47 @@ export class FeatureAnnouncementStore {
    * /status receipts read), mirroring the daemon receipt contract.
    */
   drainPending(): PendingFeatureAnnouncement[] {
-    const state = this.read();
-    if (state.pending.length === 0) return [];
-    const pending = state.pending;
-    this.persist({ announced: state.announced, pending: [] }, 'drain');
-    return pending;
+    // Under the same lock as record, so an announcement recorded meanwhile is
+    // not overwritten by this write of a stale copy of the file.
+    return withSyncFileLock(this.path, () => {
+      const state = this.read();
+      if (state.pending.length === 0) return [];
+      const pending = state.pending;
+      this.persist({ announced: state.announced, pending: [] }, 'drain');
+      return pending;
+    });
+  }
+
+  /** The fired-but-undelivered announcements, left in place until {@link acknowledge} names them. */
+  peekPending(): PendingFeatureAnnouncement[] {
+    return withSyncFileLock(this.path, () => this.read().pending);
+  }
+
+  /**
+   * Forgets every announced id the predicate selects (and any of them still
+   * pending), so a condition that went away and comes back is announced again.
+   * Reads without the lock first so a store with nothing to forget is not rewritten.
+   */
+  forgetMatching(selects: (id: string) => boolean): void {
+    if (!Object.keys(this.read().announced).some(selects)) return;
+    withSyncFileLock(this.path, () => {
+      const state = this.read();
+      const announced: Record<string, number> = {};
+      for (const [id, at] of Object.entries(state.announced)) if (!selects(id)) announced[id] = at;
+      const pending = state.pending.filter((entry) => !selects(entry.id));
+      if (Object.keys(announced).length === Object.keys(state.announced).length && pending.length === state.pending.length) return;
+      this.persist({ announced, pending }, 'forget');
+    });
+  }
+
+  /** Removes the named announcements from the pending queue; ids not pending are ignored. */
+  acknowledge(ids: ReadonlySet<string>): void {
+    withSyncFileLock(this.path, () => {
+      const state = this.read();
+      const remaining = state.pending.filter((entry) => !ids.has(entry.id));
+      if (remaining.length === state.pending.length) return;
+      this.persist({ announced: state.announced, pending: remaining }, 'acknowledge');
+    });
   }
 }
 
@@ -148,7 +189,10 @@ export function resolveWebSurfaceUrl(configManager: Pick<ConfigManager, 'get'>):
   // Anchored to the web binding resolver so the announced URL always carries a
   // validated port and the mode-resolved host (never a raw 0/NaN/typo value).
   const binding = resolveWebBinding({ hostMode: configManager.get('web.hostMode'), host: configManager.get('web.host'), port: configManager.get('web.port') });
-  return `http://${binding.host}:${binding.port}`;
+  // A wildcard bind address is where the server listens, not an address a
+  // browser can open; this machine reaches it as localhost.
+  const host = binding.host === '0.0.0.0' || binding.host === '::' ? 'localhost' : binding.host;
+  return `http://${host}:${binding.port}`;
 }
 
 export const WEB_SURFACE_ANNOUNCEMENT_ID = 'web-surface-url';
@@ -187,6 +231,8 @@ export function collectStartupAnnouncements(deps: {
       suffix = `, web.hostMode value ${JSON.stringify(String(rawHostMode))} is unrecognized; applied the safe local default, so this serves this machine only`;
     } else if (binding.effectiveMode === 'local') {
       suffix = ', serving this machine only until web.hostMode is widened';
+    } else if ((binding.host === '0.0.0.0' || binding.host === '::') && deps.configManager.get('web.publicBaseUrl').trim().length === 0) {
+      suffix = ', listening on every network interface: other devices use this machine\'s address, or set web.publicBaseUrl to announce a fixed URL';
     }
     const text = `Web surface ready: ${url}${suffix}`;
     // Recording WITH text also enqueues the line for surface delivery.

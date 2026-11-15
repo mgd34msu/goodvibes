@@ -43,87 +43,56 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe('red → offer → accept → seeded fix session', () => {
-  function makeService(input: {
-    jobs: () => CiJob[];
-    offers: FixSessionBrief[];
-    answer: () => Promise<boolean>;
-    briefs: FixSessionBrief[];
-  }): CiWatchService {
+describe('red verdict → seeded fix session', () => {
+  function makeService(input: { jobs: () => CiJob[]; briefs: FixSessionBrief[] }): CiWatchService {
     return new CiWatchService({
       source: fakeSource(input.jobs),
       store: new CiWatchStore(':memory:'),
       notifier: async () => 'note-1',
-      fixSessionOffer: async (brief) => { input.offers.push(brief); return input.answer(); },
       fixSessionStarter: async (brief) => { input.briefs.push(brief); return 'fix-session-1'; },
     });
   }
 
-  test('acceptance starts the fix session seeded with the failing jobs\' logs', async () => {
-    const offers: FixSessionBrief[] = [];
+  test('the auto-start opt-in seeds the fix session with the failing jobs\' logs', async () => {
     const briefs: FixSessionBrief[] = [];
-    const answer = deferred<boolean>();
-    const service = makeService({ jobs: () => [job('build', 'failure'), job('test', 'failure')], offers, answer: () => answer.promise, briefs });
-    const watch = await service.createWatch({ repo: 'o/r', prNumber: 7, deliveryChannel: 'slack:C1' });
+    const service = makeService({ jobs: () => [job('build', 'failure'), job('test', 'failure')], briefs });
+    const watch = await service.createWatch({ repo: 'o/r', prNumber: 7, deliveryChannel: 'slack:C1', triggerFixSession: true });
 
     const result = await service.checkWatch(watch.id);
 
-    // The offer was raised and did NOT block the check (fire-and-forget).
-    expect(result.fixSessionOffered).toBe(true);
-    expect(result.fixSessionTriggered).toBe(false);
-    await flush();
-    expect(offers).toHaveLength(1);
-    expect(offers[0]!).toMatchObject({ repo: 'o/r', prNumber: 7, failingJobs: ['build', 'test'] });
-    expect(briefs).toHaveLength(0); // not started until accepted
-
-    // Accept, the SAME brief (failing jobs + logs) seeds the session.
-    answer.resolve(true);
-    await flush();
+    expect(result.fixSessionTriggered).toBe(true);
+    expect(result.fixSessionId).toBe('fix-session-1');
     expect(briefs).toHaveLength(1);
+    expect(briefs[0]!).toMatchObject({ repo: 'o/r', prNumber: 7, failingJobs: ['build', 'test'] });
     expect(briefs[0]!.logs).toBe('seeded logs for build,test');
-    expect(briefs[0]!.failingJobs).toEqual(['build', 'test']);
   });
 
-  test('declining the offer starts nothing', async () => {
-    const offers: FixSessionBrief[] = [];
+  test('a red verdict on a watch without the opt-in notifies and starts nothing', async () => {
     const briefs: FixSessionBrief[] = [];
-    const service = makeService({ jobs: () => [job('build', 'failure')], offers, answer: async () => false, briefs });
+    const service = makeService({ jobs: () => [job('build', 'failure')], briefs });
     const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack' });
 
-    await service.checkWatch(watch.id);
+    const result = await service.checkWatch(watch.id);
     await flush();
 
-    expect(offers).toHaveLength(1);
+    expect(result.notified).toBe(true);
+    expect(result.fixSessionTriggered).toBe(false);
+    expect(result.fixSessionId).toBeUndefined();
     expect(briefs).toHaveLength(0);
   });
 
-  test('a green verdict raises no offer and retires the watch once delivered', async () => {
-    const offers: FixSessionBrief[] = [];
+  test('a green verdict starts nothing and retires the watch once delivered', async () => {
     const briefs: FixSessionBrief[] = [];
-    const service = makeService({ jobs: () => [job('build', 'success')], offers, answer: async () => true, briefs });
-    const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack' });
+    const service = makeService({ jobs: () => [job('build', 'success')], briefs });
+    const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack', triggerFixSession: true });
 
     const result = await service.checkWatch(watch.id);
     await flush();
 
     expect(result.report.overall).toBe('passed');
     expect(result.retired).toBe(true);
-    expect(offers).toHaveLength(0);
+    expect(briefs).toHaveLength(0);
     expect(await service.listWatches()).toHaveLength(0);
-  });
-
-  test('the auto-start opt-in (triggerFixSession) still bypasses the offer', async () => {
-    const offers: FixSessionBrief[] = [];
-    const briefs: FixSessionBrief[] = [];
-    const service = makeService({ jobs: () => [job('build', 'failure')], offers, answer: async () => true, briefs });
-    const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack', triggerFixSession: true });
-
-    const result = await service.checkWatch(watch.id);
-
-    expect(result.fixSessionTriggered).toBe(true);
-    expect(result.fixSessionId).toBe('fix-session-1');
-    expect(result.fixSessionOffered).toBeUndefined();
-    expect(offers).toHaveLength(0);
   });
 });
 
@@ -168,23 +137,20 @@ describe('daemon polling over the watcher registry', () => {
     expect(registered[0]!.intervalMs).toBe(MIN_CI_POLL_INTERVAL_MS);
   });
 
-  test('a full poll pass drives red → offer → accept → seeded session, then the watch is gone', async () => {
-    const offers: FixSessionBrief[] = [];
+  test('a full poll pass drives red → seeded session, then the watch is gone', async () => {
     const briefs: FixSessionBrief[] = [];
     const service = new CiWatchService({
       source: fakeSource(() => [job('build', 'failure')]),
       store: new CiWatchStore(':memory:'),
       notifier: async () => 'n1',
-      fixSessionOffer: async (brief) => { offers.push(brief); return true; },
       fixSessionStarter: async (brief) => { briefs.push(brief); return 'fix-1'; },
     });
-    await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack' });
+    await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack', triggerFixSession: true });
 
     const summary = await runCiWatchPollPass(service);
     await flush();
 
     expect(summary).toBe('checked 1/1 watch(es), 1 retired');
-    expect(offers).toHaveLength(1);
     expect(briefs).toHaveLength(1);
     expect(briefs[0]!.logs).toContain('seeded logs for build');
     // Terminal verdict delivered → the watch retired; the next pass is empty.

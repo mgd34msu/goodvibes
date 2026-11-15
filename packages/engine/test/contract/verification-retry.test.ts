@@ -6,7 +6,7 @@ import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from '
 import { contractOf, finishes, judgeOf, terminal } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => { harness?.dispose(); harness = undefined; });
+afterEach(async () => { const finished = harness; harness = undefined; await finished?.dispose(); });
 
 const exhaustedFailures = [
   { name: 'context limit', reason: 'The judgment request exceeds the endpoint token limit.', error: () => new JudgmentContextLimitError() },

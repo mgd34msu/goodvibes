@@ -1,3 +1,4 @@
+import { readBodyWithHostEvidence } from '../../platform/src/platform/tools/read/observation.js';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ async function read(output: Record<string, unknown>) {
   const result = await new ReadTool(index).execute(args);
   expect(result.success).toBe(true);
   const turn = { turn: 1, assistantText: '', toolCalls: [{ name: 'read', arguments: args }], results: [{ callId: 'actual-read', ...result }] };
-  return { turn, body: JSON.parse(result.output!) };
+  return { turn, body: readBodyWithHostEvidence(result) as { files: [Record<string, unknown> & { readObservation?: Record<string, unknown>; content: string }] } };
 }
 
 test('actual unnumbered source returns retain their real offsets and literal number-shaped source', async () => {
@@ -63,7 +64,7 @@ test('SVG line extraction returns bounded source receipts while ordinary SVG rea
   const args = { files: [{ path: 'mark.svg', extract: 'lines', range: { start: 2, end: 3 } }], output: { include_line_numbers: false } };
   const result = await tool.execute(args);
   expect(result.success).toBe(true);
-  const file = JSON.parse(result.output!).files[0];
+  const file = (readBodyWithHostEvidence(result) as { files: Record<string, unknown>[] }).files[0]!;
   expect(file.image).toBeUndefined();
   expect(file.content).toBe('<title>Mark</title>\n<path d="M0 0h1v1z"/>');
   expect(file.readObservation).toMatchObject({ startLine: 2, completeLines: 2, truncated: false });

@@ -65,13 +65,19 @@ export interface LocalTaskSource {
 }
 
 export interface TasksClient {
-  /** Local rows union the daemon's, deduped by id with local winning. */
+  /** Local rows union the daemon's, deduped by id with local winning, at most `limit` rows (local first). */
   list(limit?: number): Promise<TasksUnionResult>;
-  /** One task, local first, then the daemon. Null when neither has it. */
+  /** One task, local first, then the daemon. Null when neither has it, or when the daemon could not answer (see `lookup`). */
   get(taskId: string): Promise<UnionTask | null>;
-  /** Cancel a daemon-owned task over `tasks.cancel`. */
+  /**
+   * Like `get`, and says why a missing task is missing: `daemonUnavailable` is
+   * set when the daemon could not be asked or failed to answer, so "no such
+   * task" and "could not look" stay different answers.
+   */
+  lookup(taskId: string): Promise<{ readonly found: UnionTask | null; readonly daemonUnavailable: string | null }>;
+  /** Cancel a daemon-owned task over `tasks.cancel`. Rejects for a task only this surface runs. */
   cancel(taskId: string): Promise<void>;
-  /** Re-queue a daemon-owned task over `tasks.retry`. */
+  /** Re-queue a daemon-owned task over `tasks.retry`. Rejects for a task only this surface runs. */
   retry(taskId: string): Promise<void>;
 }
 
@@ -97,12 +103,32 @@ export function createTasksClient(deps: {
   readonly local: LocalTaskSource;
   readonly verbs: DaemonVerbCaller;
 }): TasksClient {
-  const requireDaemon = (taskId: string, action: string): void => {
+  const requireDaemonTask = async (taskId: string): Promise<void> => {
     const probe = deps.verbs.probe();
     if (!probe.available) {
       throw new Error(`${taskId} is not a task this surface owns, and ${probe.reason}`);
     }
-    void action;
+    if (!deps.local.get(taskId)) return;
+    // A task this surface runs is only the daemon's to cancel when the daemon
+    // also carries it; otherwise the verb would act on nothing.
+    let known = false;
+    try { known = readTask(await deps.verbs.invoke('tasks.get', { taskId })) !== null; } catch { /* treated as unknown */ }
+    if (!known) throw new Error(`${taskId} is a task this surface runs itself and the daemon does not carry it; cancel and retry here reach only the daemon's tasks.`);
+  };
+
+  const lookup = async (taskId: string): Promise<{ found: UnionTask | null; daemonUnavailable: string | null }> => {
+    const localTask = deps.local.get(taskId);
+    if (localTask) return { found: { task: localTask, origin: 'local' }, daemonUnavailable: null };
+    const probe = deps.verbs.probe();
+    if (!probe.available) return { found: null, daemonUnavailable: probe.reason };
+    try {
+      const task = readTask(await deps.verbs.invoke('tasks.get', { taskId }));
+      return { found: task ? { task, origin: 'daemon' } : null, daemonUnavailable: null };
+    } catch (error) {
+      const reason = summarizeError(error);
+      logger.debug('[tasks] the daemon could not answer for this task', { taskId, error: reason });
+      return { found: null, daemonUnavailable: reason };
+    }
   };
 
   return {
@@ -116,10 +142,11 @@ export function createTasksClient(deps: {
       try {
         const daemonTasks = readTasks(await deps.verbs.invoke('tasks.list', {}));
         return {
+          // The daemon's list has no limit input, so the cap is applied to the union.
           tasks: [
             ...local,
             ...daemonTasks.filter((task) => !owned.has(task.id)).map((task) => ({ task, origin: 'daemon' as const })),
-          ],
+          ].slice(0, Math.max(1, limit)),
           daemonUnavailable: null,
         };
       } catch (error) {
@@ -129,27 +156,16 @@ export function createTasksClient(deps: {
       }
     },
 
-    get: async (taskId) => {
-      const localTask = deps.local.get(taskId);
-      if (localTask) return { task: localTask, origin: 'local' };
-      const probe = deps.verbs.probe();
-      if (!probe.available) return null;
-      try {
-        const task = readTask(await deps.verbs.invoke('tasks.get', { taskId }));
-        return task ? { task, origin: 'daemon' } : null;
-      } catch (error) {
-        logger.debug('[tasks] the daemon could not answer for this task', { taskId, error: summarizeError(error) });
-        return null;
-      }
-    },
+    get: async (taskId) => (await lookup(taskId)).found,
+    lookup,
 
     cancel: async (taskId) => {
-      requireDaemon(taskId, 'cancel');
+      await requireDaemonTask(taskId);
       await deps.verbs.invoke('tasks.cancel', { taskId });
     },
 
     retry: async (taskId) => {
-      requireDaemon(taskId, 'retry');
+      await requireDaemonTask(taskId);
       await deps.verbs.invoke('tasks.retry', { taskId });
     },
   };

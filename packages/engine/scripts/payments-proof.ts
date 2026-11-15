@@ -127,12 +127,21 @@ async function runScenario(merchant: FixtureMerchant, scenario: Scenario): Promi
       async deliver(request: never): Promise<string | undefined> {
         sent.push((request as unknown as { content: string }).content);
         if (scenario.reply !== null) {
-          // The owner reads the notice on Telegram and answers a moment later.
+          // The owner reads the notice on Telegram and answers once the purchase has
+          // armed its reply window, which happens after the delivery report is durable.
+          // A fixed delay would race that write on a slow host and read as a payment
+          // regression, so poll for the window instead.
           const reply = scenario.reply;
-          setTimeout(() => {
+          const answer = (): void => {
             void tryResolvePaymentReplyFromChannel({ surface: 'telegram', userId: OWNER, text: reply }, OWNER_DECISION, inbox)
               .then((offer) => { replyOutcome = offer.consumed ? `read as ${offer.answer}` : `not an answer (${offer.reason})`; });
-          }, 50);
+          };
+          const giveUpAt = Date.now() + 10_000;
+          const whenArmed = (): void => {
+            if (inbox.inspect().length > 0 || Date.now() > giveUpAt) answer();
+            else setTimeout(whenArmed, 10);
+          };
+          setTimeout(whenArmed, 0);
         }
         return 'telegram-1';
       },

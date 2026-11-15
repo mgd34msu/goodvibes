@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
-import { acceptPublishedSuite, consumeAcceptanceMetadataFetch, acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, runHistoricalUpgradeSteps, runInstallerMigrationSteps, assertHistoricalRollbackRefusal, type InstallerMigrationSteps, type HistoricalUpgradeSteps, type AcceptanceSteps, type NativeServiceRetirementObservation, type AcceptanceFetch } from './accept-published-suite.mjs';
+import { acceptPublishedSuite, consumeAcceptanceMetadataFetch, acceptanceFailureRecord, markAcceptanceCheckpoint, readPublicAcceptanceDelivery, finishAcceptance, waitForAcceptanceReadiness, waitForNativeServiceRetirement, assertHostedContext, readPublishedReaders, runAcceptanceSteps, runOwnedCommand, type AcceptanceSteps, type NativeServiceRetirementObservation, type AcceptanceFetch } from './accept-published-suite.mjs';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -232,12 +232,6 @@ test('foreign account admission failure never installs or uninstalls', async () 
   host.admit = async () => { throw original; };
   await expect(runAcceptanceSteps(host)).rejects.toBe(original); expect(events).toEqual([]);
 });
-test('an unpublished native lifecycle proof runs before opt-out and retains owned cleanup when it fails', async () => {
-  const events: string[] = [], host = steps(events), original = new Error('Replacement native runtime did not become healthy');
-  host.verifyNativeLifecycle = async () => { events.push('update-rollback'); throw original; };
-  await expect(runAcceptanceSteps(host)).rejects.toBe(original);
-  expect(events).toEqual(['admit', 'install', 'installed', 'defaults', 'update-rollback', 'uninstall', 'preserved']);
-});
 test('failed install awaits original cleanup before surfacing the original refusal', async () => {
   const events: string[] = [], host = steps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const original = new Error('Original install failed');
@@ -253,21 +247,6 @@ test('failed install and failed native cleanup both remain failures', async () =
   const host = steps([]), original = new Error('Original publication failed'), cleanup = new Error('Original service did not drain');
   host.install = async () => { throw original; }; host.uninstall = async () => { throw cleanup; };
   await expect(runAcceptanceSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
-});
-
-test('failure-only diagnostics run before original uninstall and their failure cannot skip owned cleanup', async () => {
-  const events: string[] = [], host = steps(events), primary = new Error('Original install failed'), diagnostic = new Error('Owned diagnostics failed');
-  host.install = async () => { events.push('install-failed'); throw primary; };
-  host.diagnoseFailure = async () => { events.push('diagnose-failed'); throw diagnostic; };
-  await expect(runAcceptanceSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [primary, diagnostic] });
-  expect(events).toEqual(['admit', 'install-failed', 'diagnose-failed', 'uninstall', 'preserved']);
-});
-
-test('successful native acceptance never runs its optional failure diagnostic hook', async () => {
-  const events: string[] = [], host = steps(events);
-  host.diagnoseFailure = async () => { throw new Error('Successful acceptance must not diagnose failure'); };
-  await runAcceptanceSteps(host);
-  expect(events.at(-2)).toBe('uninstall'); expect(events.at(-1)).toBe('preserved');
 });
 
 test('a successful command followed by a failed assertion reports the proof and safe error code without private output', async () => {
@@ -667,176 +646,4 @@ test('public producer proof reads only real program sidecars, never archive-only
     await expect(readPublishedReaders({ target, tag: 'v3.1.2', source: 'a'.repeat(40), assets }, load)).rejects.toThrow('cohort is missing');
     await expect(readPublishedReaders({ target, tag: 'v3.1.2', source: 'b'.repeat(40), assets: new Set([...assets, `goodvibes-agent-${suffix}.reader-ci-artifact.json`]) }, load)).rejects.toThrow();
   }
-});
-
-test('release publication is last while explicitly requested public acceptance retains its native matrix', () => {
-  const object = (value: unknown): Record<string, unknown> => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected workflow mapping.');
-    return value as Record<string, unknown>;
-  };
-  const workflow = (name: string) => object(Bun.YAML.parse(readFileSync(resolve(import.meta.dir, '../.github/workflows', name), 'utf8')));
-  const release = object(workflow('release.yml').jobs), suite = object(workflow('suite-release-assets.yml').jobs);
-  const reusable = './.github/workflows/reusable-published-install-acceptance.yml';
-  const staged = object(release['staged-install-acceptance']), publisher = object(release['github-release']);
-  const existing = object(suite['published-install-acceptance']);
-  expect(staged.uses).toBe('./.github/workflows/reusable-staged-install-acceptance.yml');
-  expect(existing.uses).toBe(reusable); expect(existing.needs).toEqual(['collect', 'previous-release']);
-  expect(release['published-install-acceptance']).toBeUndefined();
-  expect(publisher.needs).toContain('staged-install-acceptance');
-  expect(String(publisher.if)).toContain("needs.staged-install-acceptance.result == 'success'");
-  for (const job of Object.values(release).map(object)) {
-    expect(Array.isArray(job.needs) ? job.needs : [job.needs]).not.toContain('github-release');
-  }
-  expect(existing.if).toBe("inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'");
-  expect(object(existing.with).source).toBe('${{ needs.collect.outputs.source }}');
-  expect(object(existing.with)['previous-tag']).toBe('${{ needs.previous-release.outputs.tag }}');
-  expect(object(existing.with)['previous-source']).toBe('${{ needs.previous-release.outputs.source }}');
-  expect(object(staged.with)['previous-tag']).toBe('${{ needs.verify-tag-version.outputs.previous-tag }}');
-  expect(object(staged.with)['previous-source']).toBe('${{ needs.verify-tag-version.outputs.previous-source }}');
-  expect(object(object(suite.collect).outputs).source).toBe('${{ steps.admit.outputs.source }}');
-  for (const caller of [staged, existing]) expect(object(caller.with)['tooling-sha']).toBe('${{ github.sha }}');
-  const definition = workflow('reusable-published-install-acceptance.yml');
-  for (const trigger of ['workflow_call', 'workflow_dispatch']) {
-    const inputs = object(object(object(definition.on)[trigger]).inputs);
-    expect(Object.keys(inputs).sort()).toEqual(['previous-source', 'previous-tag', 'source', 'tag', 'tooling-sha']);
-    for (const name of ['source', 'tag', 'tooling-sha']) {
-      const input = object(inputs[name]);
-      expect(input).toMatchObject({ required: true, type: 'string' });
-      expect(input.default).toBeUndefined();
-    }
-    for (const name of ['previous-source', 'previous-tag']) expect(object(inputs[name])).toMatchObject({ required: false, type: 'string', default: '' });
-  }
-  const native = object(object(definition.jobs)['native-install']);
-  const include = object(object(native.strategy).matrix).include;
-  expect(include).toEqual([
-    { target: 'linux-x64', runner: 'ubuntu-24.04' }, { target: 'linux-arm64', runner: 'ubuntu-22.04-arm' },
-    { target: 'darwin-x64', runner: 'macos-15-intel' }, { target: 'darwin-arm64', runner: 'macos-15' },
-  ]);
-  expect(native['runs-on']).toBe('${{ matrix.runner }}');
-  const steps = native.steps; if (!Array.isArray(steps)) throw new Error('Expected native steps.');
-  expect(steps.map(object).find(step => String(step.uses).startsWith('actions/checkout@'))?.with)
-    .toEqual({ ref: '${{ inputs.tooling-sha }}' });
-  const install = steps.map(object).find(step => step.name === 'Download, install, serve and uninstall the published suite');
-  expect(install?.env).toEqual({
-    GOODVIBES_ACCEPTANCE_METADATA_TOKEN: '${{ secrets.GITHUB_TOKEN }}',
-    RELEASE_TAG: '${{ inputs.tag }}', RELEASE_SOURCE: '${{ inputs.source }}', RELEASE_TARGET: '${{ matrix.target }}',
-  });
-  expect(install?.run)
-    .toBe('node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"');
-});
-
-
-
-function historicalSteps(events: string[]): HistoricalUpgradeSteps {
-  const record = (name: string) => async () => { events.push(name); };
-  return { admit: record('admit'), installPrevious: record('install-old-service-off'), verifyPrevious: record('original-old-versions-defaults'),
-    seedPreviousData: record('original-data'), startPreviousService: record('start-old-service'), awaitAutomaticUpgrade: record('actual-auto-transition'),
-    verifyUpgradedData: record('upgraded-data'), verifyRollbackRefusal: record('real-api-refusal'), uninstall: record('cleanup'), verifyPreserved: record('preserved') };
-}
-
-function installerMigrationSteps(events: string[]): InstallerMigrationSteps {
-  const record = (name: string) => async () => { events.push(name); };
-  return { admit: record('admit'), installPrevious: record('install-old-service-off'), verifyPrevious: record('original-old-versions-defaults'),
-    seedPreviousData: record('original-data-settings'), disablePreviousUpdates: record('old-updater-opt-out'),
-    startPreviousService: record('start-old-service'), verifyPreviousService: record('old-service-status-webui'),
-    installCurrent: record('current-public-installer'), verifyCurrent: record('current-public-cohort-service-webui'),
-    verifyMigratedData: record('saved-data-settings-opt-out'), restartAndVerifyMigrated: record('restart-cohort-data-settings-opt-out'),
-    uninstall: record('cleanup'), verifyPreserved: record('preserved') };
-}
-
-test('public installer migration first proves the opted-out old service and then the current cohort without claiming automatic upgrade or rollback', async () => {
-  const events: string[] = [], host = installerMigrationSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const proof = host.verifyPreviousService;
-  host.verifyPreviousService = async () => { entered.resolve(); await release.promise; await proof(); };
-  Object.assign(host, { awaitAutomaticUpgrade: async () => { throw new Error('Migration must not wait for an automatic transition'); },
-    verifyRollbackRefusal: async () => { throw new Error('Migration must not invoke rollback'); } });
-  const running = runInstallerMigrationSteps(host);
-  try {
-    await entered.promise;
-    expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data-settings', 'old-updater-opt-out', 'start-old-service']);
-    release.resolve(); await running;
-    expect(events.slice(6)).toEqual(['old-service-status-webui', 'current-public-installer', 'current-public-cohort-service-webui',
-      'saved-data-settings-opt-out', 'restart-cohort-data-settings-opt-out', 'cleanup', 'preserved']);
-  } finally { release.resolve(); await Promise.allSettled([running]); }
-});
-
-test('a failed old-service proof cannot invoke the current installer but still retires original ownership', async () => {
-  const events: string[] = [], host = installerMigrationSteps(events), original = new Error('Old service did not answer');
-  host.verifyPreviousService = async () => { throw original; };
-  await expect(runInstallerMigrationSteps(host)).rejects.toBe(original);
-  expect(events).not.toContain('current-public-installer'); expect(events.slice(-2)).toEqual(['cleanup', 'preserved']);
-});
-
-test('failed public installer migration waits for cleanup and retains both original and cleanup errors', async () => {
-  const events: string[] = [], host = installerMigrationSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const original = new Error('Public installer refused old cohort'), cleanup = new Error('Original service did not drain');
-  host.installCurrent = async () => { events.push('public-installer-failed'); throw original; };
-  host.uninstall = async () => { entered.resolve(); await release.promise; events.push('cleanup-failed'); throw cleanup; };
-  const running = runInstallerMigrationSteps(host); let settled = false;
-  void running.then(() => { settled = true; }, () => { settled = true; });
-  try {
-    await entered.promise; expect(settled).toBe(false); release.resolve();
-    await expect(running).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
-    expect(events).not.toContain('current-public-cohort-service-webui'); expect(events.at(-1)).toBe('cleanup-failed');
-  } finally { release.resolve(); await Promise.allSettled([running]); }
-});
-
-test('installer migration refuses foreign admission before any old install or cleanup', async () => {
-  const events: string[] = [], host = installerMigrationSteps(events), original = new Error('Existing installation belongs to another owner');
-  host.admit = async () => { throw original; };
-  await expect(runInstallerMigrationSteps(host)).rejects.toBe(original); expect(events).toEqual([]);
-});
-
-test('historical Linux delivery waits for actual old automatic transition before rollback and cleanup', async () => {
-  const events: string[] = [], host = historicalSteps(events), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  host.awaitAutomaticUpgrade = async () => { events.push('observing-old-owner'); entered.resolve(); await release.promise; events.push('current-suite-observed'); };
-  const running = runHistoricalUpgradeSteps(host);
-  try {
-    await entered.promise;
-    expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data', 'start-old-service', 'observing-old-owner']);
-    release.resolve(); await running;
-    expect(events.slice(-5)).toEqual(['current-suite-observed', 'upgraded-data', 'real-api-refusal', 'cleanup', 'preserved']);
-  } finally { release.resolve(); await Promise.allSettled([running]); }
-});
-
-test('historical automatic-upgrade failure cannot be repaired by a current install and drains cleanup', async () => {
-  const events: string[] = [], host = historicalSteps(events), original = new Error('Old automatic updater did not deliver'), cleanup = new Error('Original service did not drain');
-  host.awaitAutomaticUpgrade = async () => { events.push('failed-auto-transition'); throw original; };
-  host.uninstall = async () => { events.push('failed-cleanup'); throw cleanup; };
-  await expect(runHistoricalUpgradeSteps(host)).rejects.toMatchObject({ name: 'AggregateError', errors: [original, cleanup] });
-  expect(events).toEqual(['admit', 'install-old-service-off', 'original-old-versions-defaults', 'original-data', 'start-old-service', 'failed-auto-transition', 'failed-cleanup']);
-});
-
-test('historical rollback accepts only the actual admission refusal and checks original file/tree observations', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'published-rollback-refusal-')); roots.push(root);
-  const events: string[] = [];
-  class Refusal extends Error {
-    readonly receipt = { operation: 'rollback', phase: 'admission', committed: false, recoveryRequired: false };
-    constructor() { super('Native cohort refused', { cause: new Error('Previous native cohort is incomplete; refusing partial rollback') }); }
-  }
-  const plan = { files: [{ path: join(root, 'program') }], directories: [{ path: join(root, 'webui') }], assertCurrent() { events.push('plan-current'); } };
-  const verifier = {
-    resolveSuiteUpdatePlan: () => plan,
-    captureUpdateFileIo: (io: object) => io, realUpdateFileIo: {},
-    retainNativeUpdateSources: (_paths: readonly string[], _io: object) => () => { events.push('files-current'); },
-    retainNativeUpdateTree: (_path: string) => ({ assertCurrent() { events.push('tree-current'); } }),
-    rollbackSuiteUpdate(_options: { assertCurrent(): void; beforeCommit(): void }) { events.push('actual-rollback'); throw new Refusal(); },
-    UpdateTransactionError: Refusal,
-  };
-  const input = { bin: root, version: '3.1.2', webuiDirectory: join(root, 'webui') };
-  await assertHistoricalRollbackRefusal(input, verifier);
-  expect(events.indexOf('actual-rollback')).toBeGreaterThan(events.indexOf('files-current'));
-  expect(events.slice(-4)).toEqual(['files-current', 'tree-current', 'tree-current', 'files-current']);
-  for (const wrong of [new Error('Verifier dependency missing'), new Error('Invalid invocation'), Object.assign(new Refusal(), { receipt: { operation: 'rollback', phase: 'admission', committed: false, recoveryRequired: true } })]) {
-    verifier.rollbackSuiteUpdate = () => { throw wrong; };
-    await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow();
-  }
-  verifier.rollbackSuiteUpdate = options => { options.beforeCommit(); throw new Refusal(); };
-  await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow('must refuse before admission');
-  verifier.rollbackSuiteUpdate = () => { throw new Refusal(); };
-  verifier.retainNativeUpdateSources = () => {
-    let checks = 0;
-    return () => { if (++checks > 1) throw new Error('Original installed file changed'); };
-  };
-  await expect(assertHistoricalRollbackRefusal(input, verifier)).rejects.toThrow('Original installed file changed');
 });

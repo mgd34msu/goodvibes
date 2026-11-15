@@ -102,6 +102,7 @@ export interface PolicyLoaderOptions {
    *
    * Required when `managed` is true; optional otherwise. When absent,
    * signature verification is skipped and status is set to `'skipped'`.
+   * A bundle whose signature is present but does not verify is rejected in every mode.
    */
   signingKey?: Buffer | string | undefined;
 
@@ -175,12 +176,21 @@ export function loadPolicyBundle(
   } = options;
   const signingEnabled = isFeatureGateEnabled(options.featureFlags, 'policy-signing');
 
-  const baseProv: BundleProvenance = {
-    policyBundleId: bundle.bundleId,
-    signatureStatus: 'skipped',
+  const shapeError = describeBundleShapeError(bundle);
+  const provenanceFor = (signatureStatus: SignatureStatus): BundleProvenance => ({
+    policyBundleId: typeof bundle?.bundleId === 'string' ? bundle.bundleId : '',
+    signatureStatus,
     provenanceSource,
-    issuedAt: bundle.issuedAt,
-    issuer: bundle.issuer,
+    issuedAt: bundle?.issuedAt,
+    issuer: bundle?.issuer,
+  });
+  if (shapeError !== undefined) {
+    return { ok: false, provenance: provenanceFor('skipped'), error: `Not a policy bundle: ${shapeError}` };
+  }
+
+  const reject = (signatureStatus: SignatureStatus, msg: string): PolicyLoadResult => {
+    if (throwOnRejection) throw new PolicySignatureError(bundle.bundleId, signatureStatus, msg);
+    return { ok: false, provenance: provenanceFor(signatureStatus), error: msg };
   };
 
   // ── Signature validation ────────────────────────────────────────────────────
@@ -199,38 +209,54 @@ export function loadPolicyBundle(
     signatureStatus = result.status;
   }
 
-  const provenance: BundleProvenance = { ...baseProv, signatureStatus };
+  // A signature that is present and does not verify is never loadable: the bundle was altered or
+  // signed with another key, whatever mode the host runs in.
+  if (signatureStatus === 'invalid') {
+    return reject(signatureStatus,
+      `Policy bundle "${bundle.bundleId}" was rejected: its signature does not verify against the configured signing key.`);
+  }
 
   // ── Managed-mode enforcement ────────────────────────────────────────────────
   if (managed && signingEnabled) {
     const rejected =
-      signatureStatus === 'invalid'
-      || signatureStatus === 'missing'
+      signatureStatus === 'missing'
       || signatureStatus === 'unsigned'
       || signatureStatus === 'skipped'; // managed mode requires a key + valid sig
 
     if (rejected) {
-      const msg =
+      return reject(signatureStatus,
         `Managed-mode policy rejection: bundle "${bundle.bundleId}" ` +
         `has signatureStatus="${signatureStatus}". ` +
-        `Only bundles with a valid HMAC-SHA256 signature are accepted in managed mode.`;
-
-      if (throwOnRejection) {
-        throw new PolicySignatureError(bundle.bundleId, signatureStatus, msg);
-      }
-
-      return { ok: false, provenance, error: msg };
+        `Only bundles with a valid HMAC-SHA256 signature are accepted in managed mode` +
+        (signingKey ? '.' : ', and no signing key is configured (set GOODVIBES_POLICY_SIGNING_KEY to a hex key of at least 16 bytes).'));
     }
   }
 
-  // ── Payload extraction ───────────────────────────────────────────────────────
-  const payload = bundle.payload;
-
   return {
     ok: true,
-    rules: payload.rules,
-    provenance,
+    rules: bundle.payload.rules,
+    provenance: provenanceFor(signatureStatus),
   };
+}
+
+const RULE_TYPES: ReadonlySet<string> = new Set(['prefix', 'arg-shape', 'path-scope', 'network-scope', 'mode-constraint']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** What is wrong with a parsed bundle's shape, or undefined when the loader can read it. Parsed JSON can be anything. */
+function describeBundleShapeError(bundle: unknown): string | undefined {
+  if (!isRecord(bundle)) return 'expected an object with bundleId and payload.';
+  if (typeof bundle['bundleId'] !== 'string' || bundle['bundleId'].length === 0) return 'bundleId must be a non-empty string.';
+  const payload = bundle['payload'];
+  if (!isRecord(payload) || !Array.isArray(payload['rules'])) return 'payload.rules must be an array.';
+  for (const [index, rule] of (payload['rules'] as unknown[]).entries()) {
+    if (!isRecord(rule) || typeof rule['id'] !== 'string') return `rule ${index + 1} needs a string id.`;
+    if (typeof rule['type'] !== 'string' || !RULE_TYPES.has(rule['type'])) return `rule ${index + 1} has an unknown type.`;
+    if (rule['effect'] !== 'allow' && rule['effect'] !== 'deny') return `rule ${index + 1} effect must be "allow" or "deny".`;
+  }
+  return undefined;
 }
 
 /**

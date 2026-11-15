@@ -15,12 +15,13 @@ import { HostedSessionManager } from '../platform/src/platform/hosted-sessions/m
 import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.ts';
 import type { HostedWorkspaceFloor } from '../platform/src/platform/hosted-sessions/workspace-floor.ts';
 import type { HostedSessionUpdatePayload } from '../platform/src/platform/hosted-sessions/types.ts';
-import { emitTurnCancel, emitTurnCompleted, emitTurnError, emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.ts';
+import { emitPreflightFail, emitTurnCancel, emitTurnCompleted, emitTurnError, emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.ts';
 
 let root: string;
 let workspace: string;
 let published: HostedSessionUpdatePayload[];
 let disposals: (() => void)[];
+let managers: HostedSessionManager[];
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'hosted-marks-'));
@@ -28,8 +29,10 @@ beforeEach(() => {
   mkdirSync(workspace, { recursive: true });
   published = [];
   disposals = [];
+  managers = [];
 });
-afterEach(() => {
+afterEach(async () => {
+  for (const manager of managers.splice(0)) { try { await manager.dispose(); } catch { /* already disposed */ } }
   for (const dispose of disposals.splice(0)) { try { dispose(); } catch { /* already disposed */ } }
   rmSync(root, { recursive: true, force: true });
 });
@@ -53,12 +56,16 @@ async function build() {
   });
   manager.setEventPublisher({ publishEvent: (_event, payload) => { published.push(payload as HostedSessionUpdatePayload); } });
   await manager.init();
+  managers.push(manager);
   const session = await manager.create({ workspaceRoot: workspace, clientId: 'terminal-1' });
   const ctx = { sessionId: session.id, traceId: 't', source: 'test' } as const;
   return { manager, runtimeBus, session, ctx };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+/** Lets the bus's microtask dispatch and the handlers it starts run; no wall-clock wait. */
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+}
 
 test('end events on an idle session are ignored; a real turn counts once even if two end events arrive', async () => {
   const { manager, runtimeBus, session, ctx } = await build();
@@ -80,4 +87,31 @@ test('end events on an idle session are ignored; a real turn counts once even if
   expect(manager.get(session.id)!.turnCount).toBe(1);
   expect(manager.get(session.id)!.status).toBe('idle');
   expect(ended()).toBe(1);
+});
+
+test('a turn whose only terminal event is a preflight failure ends the run', async () => {
+  const { manager, runtimeBus, session, ctx } = await build();
+  emitTurnSubmitted(runtimeBus, ctx, { turnId: 'real', prompt: 'go' });
+  await settle();
+  expect(manager.get(session.id)!.status).toBe('running');
+  emitPreflightFail(runtimeBus, ctx, { turnId: 'real', reason: 'context window preflight failed', stopReason: 'context_overflow' });
+  await settle();
+  expect(manager.get(session.id)!.status).toBe('idle');
+  expect(manager.get(session.id)!.turnCount).toBe(1);
+  expect(published.filter((p) => p.event === 'hosted-session-turn-ended').at(-1)?.detail).toBe('preflight failed');
+});
+
+test('a preflight failure for another turn id does not end the running turn', async () => {
+  const { manager, runtimeBus, session, ctx } = await build();
+  emitTurnSubmitted(runtimeBus, ctx, { turnId: 'real', prompt: 'go' });
+  emitPreflightFail(runtimeBus, ctx, { turnId: 'foreign', reason: 'x', stopReason: 'preflight_failed' });
+  // A rejected duplicate submission announces and fails its own fresh id.
+  emitTurnSubmitted(runtimeBus, ctx, { turnId: 'duplicate', prompt: 'go' });
+  emitPreflightFail(runtimeBus, ctx, { turnId: 'duplicate', reason: 'duplicate', stopReason: 'preflight_failed' });
+  await settle();
+  expect(manager.get(session.id)!.status).toBe('running');
+  emitTurnCompleted(runtimeBus, ctx, { turnId: 'real', response: '', stopReason: 'completed' });
+  await settle();
+  expect(manager.get(session.id)!.status).toBe('idle');
+  expect(manager.get(session.id)!.turnCount).toBe(1);
 });

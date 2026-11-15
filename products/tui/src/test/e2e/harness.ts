@@ -14,7 +14,7 @@
  * OpenAI-compatible server in this test process (startStubModel).
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -34,7 +34,37 @@ const ARTIFACT_BY_PLATFORM: Record<string, string> = {
   'darwin-arm64': 'goodvibes-macos-arm64',
 };
 
-/** The compiled binary under test. Fails loudly when it has not been built. */
+/** The newest modification time (ms) of any file under `roots`, skipping directories named in `skip`. 0 when there is none. */
+export function newestSourceMtimeMs(roots: readonly string[], skip: ReadonlySet<string> = new Set()): number {
+  let newest = 0;
+  const visit = (path: string): void => {
+    let entries;
+    try { entries = readdirSync(path, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) { if (!skip.has(entry.name)) visit(child); }
+      else if (entry.isFile()) newest = Math.max(newest, statSync(child).mtimeMs);
+    }
+  };
+  for (const root of roots) visit(root);
+  return newest;
+}
+
+/** Throws when `binary` is older than the newest source it was built from. */
+export function assertBinaryFresh(binary: string, newestSourceMs: number): void {
+  const builtAt = statSync(binary).mtimeMs;
+  if (builtAt < newestSourceMs) {
+    throw new Error(`E2E: ${binary} was built ${new Date(builtAt).toISOString()}, before the newest source change ${new Date(newestSourceMs).toISOString()}. Run \`bun run build:linux-x64\` again, or set GOODVIBES_E2E_BINARY.`);
+  }
+}
+
+let sourceChecked = false;
+/**
+ * The compiled binary under test. Fails loudly when it has not been built, or
+ * (for the default dist/ path, outside CI) when sources changed after it was
+ * built. An explicit GOODVIBES_E2E_BINARY is trusted: CI builds it from the
+ * same commit.
+ */
 export function resolveBinary(): string {
   const fromEnv = process.env['GOODVIBES_E2E_BINARY'];
   const candidate = fromEnv
@@ -42,6 +72,12 @@ export function resolveBinary(): string {
     : join(REPO_ROOT, 'dist', ARTIFACT_BY_PLATFORM[`${process.platform}-${process.arch}`] ?? 'goodvibes-linux-x64');
   if (!existsSync(candidate)) {
     throw new Error(`E2E: no built binary at ${candidate}. Run \`bun run build:linux-x64\` first, or set GOODVIBES_E2E_BINARY.`);
+  }
+  if (!fromEnv && !process.env['CI'] && !sourceChecked) {
+    const engine = join(REPO_ROOT, '..', '..', 'packages', 'engine');
+    const newest = newestSourceMtimeMs([join(REPO_ROOT, 'src'), join(engine, 'platform', 'src'), join(engine, 'terminal-shell', 'src'), ...['errors', 'operator-client', 'transport-core', 'transport-http', 'transport-realtime', 'daemon-api', 'contracts'].map((name) => join(engine, name, 'src')), join(engine, '..', 'judgment', 'src')], new Set(['test', 'node_modules']));
+    assertBinaryFresh(candidate, newest);
+    sourceChecked = true;
   }
   return candidate;
 }

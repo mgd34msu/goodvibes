@@ -15,8 +15,8 @@
  * patch installed forever.
  *
  * `installFullScreenTerminalOutputGuard` is the full-screen-renderer wrapper: it adds
- * a rate limit (at most once per 5s) over the raw intercept stream, so a burst
- * of captured writes produces one on-screen notice rather than a line per
+ * a rate limit (at most one notice per 5s) over the raw intercept stream, so a
+ * burst of captured writes produces one on-screen notice rather than a line per
  * write. It exposes two independent, optional ways for a caller to learn about
  * captures:
  *   - `onCapture`: the cumulative count of writes captured this session, for
@@ -275,16 +275,17 @@ export function installFullScreenTerminalOutputGuard(options: FullScreenTerminal
     ...(options.active !== undefined ? { active: options.active } : {}),
     onIntercept: (event) => {
       // Each intercept is already logged (logger.warn in record()). This
-      // wrapper only maintains the two counters below and, rate-limited,
-      // refreshes whichever of the caller's callbacks is present, no
-      // repeated transcript lines per write.
+      // wrapper only maintains the two counters below. The cumulative total is
+      // reported on every capture (it is a cheap counter, and a burst must not
+      // leave a stale total behind); only the transcript notice is rate-limited,
+      // so there are no repeated transcript lines per write.
       totalInterceptedWrites++;
       sinceLastNotifyCount++;
+      options.onCapture?.(totalInterceptedWrites);
+
       const now = Date.now();
       if (now - lastNoticeAt < 5_000) return;
       lastNoticeAt = now;
-
-      options.onCapture?.(totalInterceptedWrites);
 
       if (options.notify) {
         const count = sinceLastNotifyCount;

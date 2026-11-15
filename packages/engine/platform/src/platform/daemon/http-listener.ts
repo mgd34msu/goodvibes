@@ -19,8 +19,10 @@ import { extractForwardedClientIp, resolveInboundTlsContext, type ResolvedInboun
 import { summarizeError } from '../utils/error-display.js';
 import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
-import { createHostModeRestartWatcher } from './host-mode-watcher.js';
+import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { RateLimiter } from './http/rate-limiter.js';
+import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { emitAuthFailed, emitAuthSucceeded } from '../runtime/emitters/security.js';
 import { readTextBodyWithinLimit } from '../utils/request-body.js';
 
 // ---------------------------------------------------------------------------
@@ -199,6 +201,8 @@ interface HttpListenerConfig {
   /** Pre-configured UserAuthManager owned by the runtime service graph. */
   userAuth: UserAuthManager;
   pairingTokens?: PairingTokenAuthenticator | undefined;
+  /** When present, authentication outcomes are published on its `security` domain. */
+  runtimeBus?: RuntimeEventBus | undefined;
 }
 
 interface HttpDangerConfig {
@@ -221,6 +225,14 @@ function readCorsAllowedOrigins(configManager: ConfigManager): string[] {
 // ---------------------------------------------------------------------------
 // HttpListener
 // ---------------------------------------------------------------------------
+
+const WEBHOOK_HOOK_PHASES: ReadonlySet<string> = new Set(['Pre', 'Post', 'Fail', 'Change', 'Lifecycle']);
+
+/** Loopback addresses keep the listener reachable only from this machine. */
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === 'localhost' || normalized === '::1' || /^127(\.\d{1,3}){3}$/.test(normalized);
+}
 
 /**
  * HttpListener, webhook listener, disabled by default.
@@ -254,13 +266,37 @@ export class HttpListener {
   private tlsState: ResolvedInboundTlsContext | null = null;
   /** Unsubscribe from httpListener config key watchers; cleared on stop(). */
   private _configWatchUnsub: (() => void) | null = null;
-  /** True while a config-driven restart is in progress, prevents re-entrancy. */
-  private _restarting = false;
-  /** Awaitable promise for the active restart cycle; null when idle. */
-  private _restartingPromise: Promise<void> | null = null;
-  /** True if a config change arrived while _restarting was set; triggers a second cycle. */
-  private _restartDirty = false;
-  private _restartAdmissionClosed = false;
+  /**
+   * The config-driven restart cycle. Its "down" state is a restart that
+   * stopped the listener and could not start it again: the watcher keeps
+   * treating the listener as restartable, so correcting the setting brings it
+   * back instead of every later change being ignored.
+   */
+  private readonly restartCycle = new RestartController({
+    isRunning: () => this.server !== null,
+    run: async () => {
+      try {
+        logger.info('HttpListener: httpListener binding changed, restarting HTTP listener…');
+        await this.stop();
+        if (this.restartCycle.closed) return;
+        // Re-resolve host/port from updated config
+        const newBinding = resolveHostBinding(
+          (this.configManager.get('httpListener.hostMode') as 'local' | 'network' | 'custom' | undefined) ?? 'local',
+          String(this.configManager.get('httpListener.host') ?? '127.0.0.1'),
+          Number(this.configManager.get('httpListener.port') ?? 3422),
+          'httpListener',
+        );
+        this.host = newBinding.host;
+        this.port = newBinding.port;
+        await this.start();
+      } finally {
+        this.restartCycle.setDown(this.server === null && !this.restartCycle.closed);
+      }
+    },
+    onError: (err) => logger.error('HttpListener: restart after config change failed; the listener is down until its binding is corrected', {
+      error: summarizeError(err),
+    }),
+  });
   /**
    * True once stop() has released this listener; cleared by a successful bind.
    *
@@ -290,18 +326,17 @@ export class HttpListener {
     this.allowedOrigins = config.allowedOrigins ?? readCorsAllowedOrigins(this.configManager);
     this.enforceCors = config.enforceCors ?? (this.configManager.get('controlPlane.cors.enabled') === true);
 
-    // When enforceCors is true, refuse to construct with hostMode=network + empty allowedOrigins.
+    // When enforceCors is true, refuse to construct on a network-reachable bind with empty allowedOrigins.
     // Off by default, home and single-user local deployments don't need CORS enforcement.
     // Enterprise / multi-user / internet-exposed deployments set enforceCors: true to gate against CSRF.
-    if (this.enforceCors) {
-      const effectiveHostMode = (this.configManager.get('httpListener.hostMode') as string | undefined) ?? 'local';
-      if (effectiveHostMode === 'network' && this.allowedOrigins.length === 0) {
-        throw new Error(
-          'SECURITY_UNSAFE_ORIGIN_CONFIG: hostMode=network with enforceCors=true requires non-empty allowedOrigins. '
-          + 'Set config.httpListener.allowedOrigins to a list of trusted origins '
-          + "(e.g. ['https://companion.example.com']), or leave enforceCors unset for permissive mode.",
-        );
-      }
+    // Decided from the address actually bound, not the raw setting: 'Network', ' network ' and
+    // custom with 0.0.0.0 all bind beyond loopback and must get the same refusal.
+    if (this.enforceCors && this.allowedOrigins.length === 0 && !isLoopbackHost(this.host)) {
+      throw new Error(
+        `SECURITY_UNSAFE_ORIGIN_CONFIG: binding ${this.host} (hostMode=${resolvedHttpBinding.effectiveMode}) with enforceCors=true requires non-empty allowedOrigins. `
+        + 'Set config.httpListener.allowedOrigins to a list of trusted origins '
+        + "(e.g. ['https://companion.example.com']), or leave enforceCors unset for permissive mode.",
+      );
     }
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.userAuth = config.userAuth;
@@ -356,6 +391,12 @@ export class HttpListener {
     }
     const self = this;
     this.tlsState = resolveInboundTlsContext(this.configManager, 'httpListener');
+    // stop() halted the rate limiters' eviction sweeps; a listener coming back
+    // after a restart needs them again, or their maps only shrink at the LRU cap.
+    if (this.tornDown) {
+      this.rateLimiter = new RateLimiter(this.config.rateLimit ?? 60);
+      this.loginRateLimiter = new RateLimiter(this.config.loginRateLimit ?? 5);
+    }
     // A listener that is up again is a listener that can be torn down again.
     this.tornDown = false;
     this.server = this.serveFactory({
@@ -367,6 +408,7 @@ export class HttpListener {
       },
     });
 
+    this.restartCycle.setDown(false);
     this._attachHttpListenerConfigWatcher();
     logger.info('HttpListener started', {
       port: this.port,
@@ -383,8 +425,7 @@ export class HttpListener {
    * call this synchronously before draining consumers, then await and stop.
    */
   fenceRestartAdmission(): void {
-    this._restartAdmissionClosed = true;
-    this._restartDirty = false;
+    this.restartCycle.fence();
     this._configWatchUnsub?.();
     this._configWatchUnsub = null;
   }
@@ -394,25 +435,32 @@ export class HttpListener {
    */
   async waitForRestart(): Promise<void> {
     // Loop to handle dirty-flag chained restarts: each cycle may spawn another.
-    while (this._restartingPromise) await this._restartingPromise;
+    // A settled promise that is still published must end the wait, never spin.
+    while (this.restartCycle.pending) {
+      const cycle = this.restartCycle.pending;
+      await cycle;
+      if (this.restartCycle.pending === cycle) break;
+    }
   }
 
   /**
    * Stop the listener.
    */
   async stop(): Promise<void> {
-    if (this.tornDown) return;
-    this.tornDown = true;
-    const boundServer = this.server;
-
     // Tear down config watcher only on intentional stop, not mid-restart.
-    // During a restart cycle (_restarting=true) the watcher must stay active so
+    // During a restart cycle the watcher must stay active so
     // config changes that arrive between stop() and the subsequent start() can be
-    // captured by the dirty flag.
-    if (!this._restarting) {
+    // captured by the dirty flag. Done before the torn-down check: a restart
+    // that failed to start again left this listener torn down with its watcher
+    // still subscribed.
+    if (!this.restartCycle.restarting) {
+      this.restartCycle.reset();
       this._configWatchUnsub?.();
       this._configWatchUnsub = null;
     }
+    if (this.tornDown) return;
+    this.tornDown = true;
+    const boundServer = this.server;
 
     // Stop rate limiter sweep intervals before tearing down. Unconditional:
     // these are constructor-owned, so they are exactly what a never-bound
@@ -434,60 +482,17 @@ export class HttpListener {
    * Called once from start() after the server is up. Clears itself on stop().
    */
   private _attachHttpListenerConfigWatcher(): void {
-    if (this._restartAdmissionClosed) return;
+    if (this.restartCycle.closed) return;
     if (this._configWatchUnsub) return; // idempotent
 
-    const restart = (): void => {
-      if (this._restartAdmissionClosed) return;
-      if (this._restarting) {
-        // A change arrived mid-restart, queue a second cycle via dirty flag.
-        // Check _restarting BEFORE isRunning: stop() runs synchronously inside the
-        // restart IIFE, so isRunning may be false even while a restart is in progress.
-        this._restartDirty = true;
-        return;
-      }
-      if (!this.isRunning) return;
-      this._restarting = true;
-      this._restartingPromise = (async () => {
-        try {
-          logger.info('HttpListener: httpListener binding changed, restarting HTTP listener…');
-          await this.stop();
-          if (this._restartAdmissionClosed) return;
-          // Re-resolve host/port from updated config
-          const newBinding = resolveHostBinding(
-            (this.configManager.get('httpListener.hostMode') as 'local' | 'network' | 'custom' | undefined) ?? 'local',
-            String(this.configManager.get('httpListener.host') ?? '127.0.0.1'),
-            Number(this.configManager.get('httpListener.port') ?? 3422),
-            'httpListener',
-          );
-          this.host = newBinding.host;
-          this.port = newBinding.port;
-          await this.start();
-        } catch (err) {
-          logger.error('HttpListener: restart after config change failed', { error: summarizeError(err) });
-        } finally {
-          this._restarting = false;
-          // If a config change arrived while we were restarting, kick off a second
-          // cycle BEFORE nulling _restartingPromise so waitForRestart() chains correctly.
-          if (this._restartDirty && !this._restartAdmissionClosed) {
-            this._restartDirty = false;
-            restart(); // sets this._restartingPromise to the new cycle
-          } else {
-            this._restartingPromise = null;
-          }
-        }
-      })();
-    };
-
-    // getIsRunning must also return true while a restart cycle is in progress
-    // (_restarting=true) so that config changes arriving mid-restart reach the
-    // dirty-flag path inside `restart`. When the server is intentionally stopped
-    // (not mid-restart) isRunning and _restarting are both false.
+    // The controller counts a change as live while the listener is bound,
+    // mid-restart (so it is queued rather than lost) and after a restart that
+    // left nothing bound; never after an intentional stop.
     const watcher = createHostModeRestartWatcher({
       configManager: this.configManager,
       keys: ['httpListener.hostMode', 'httpListener.host', 'httpListener.port'],
-      onRestart: restart,
-      getIsRunning: () => this.isRunning || this._restarting,
+      onRestart: () => this.restartCycle.request(),
+      getIsRunning: () => this.restartCycle.active,
     });
     this._configWatchUnsub = () => watcher.unsubscribe();
   }
@@ -509,6 +514,13 @@ export class HttpListener {
       userAuth: this.userAuth,
       pairingTokens: this.config.pairingTokens,
     }) !== null;
+  }
+
+  /** Never carries the attempted username or any credential: the listener's own log omits them too. */
+  private emitAuthFailed(requestId: string, clientIp: string, reason: 'invalid_credentials' | 'rate_limited' | 'unknown'): void {
+    if (!this.config.runtimeBus) return;
+    emitAuthFailed(this.config.runtimeBus, { sessionId: 'system', traceId: `auth:${requestId}`, source: 'http-listener' },
+      { usernameAttempted: '', clientIp, reason });
   }
 
   private async parseJsonBody(req: Request): Promise<Record<string, unknown> | Response> {
@@ -563,7 +575,8 @@ export class HttpListener {
         latencyMs,
         clientIp,
       });
-      const statusClass = status >= 500 ? '5xx' : status >= 400 ? '4xx' : '2xx';
+      // The status's own class: a 304 is not a 2xx, and a 101 upgrade is not an answer to count as one.
+      const statusClass = `${Math.floor(status / 100)}xx`;
       const pathPattern = url.pathname.replace(/\/[0-9a-f-]{8,}(?=\/|$)/gi, '/:id');
       httpRequestsTotal.add(1, { method: req.method, status_class: statusClass });
       httpRequestDurationMs.record(latencyMs, { method: req.method, path_pattern: pathPattern, status_class: statusClass });
@@ -614,6 +627,7 @@ export class HttpListener {
 
     // Auth check
     if (!this.checkAuth(req)) {
+      this.emitAuthFailed(requestId, clientIp, 'unknown');
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -649,6 +663,7 @@ export class HttpListener {
         // Never log usernameAttempted to avoid associating accounts with IPs in logs
       });
       authFailureTotal.add(1);
+      this.emitAuthFailed(requestId, clientIp, lockedUntilMs ? 'rate_limited' : 'invalid_credentials');
       if (lockedUntilMs) {
         const retryAfterSeconds = Math.ceil((lockedUntilMs - Date.now()) / 1_000);
         return Response.json(
@@ -670,6 +685,10 @@ export class HttpListener {
       clientIp,
       method: 'password',
     });
+    if (this.config.runtimeBus) {
+      emitAuthSucceeded(this.config.runtimeBus, { sessionId: 'system', traceId: `auth:${requestId}`, source: 'http-listener' },
+        { username: user.username, sessionId: session.id, clientIp, method: 'password' });
+    }
 
     // Auto-retire the bootstrap credential file ONLY after the first
     // NON-bootstrap login. The bootstrap credential is a one-time convenience
@@ -708,6 +727,12 @@ export class HttpListener {
     // Construct a HookEvent from the incoming payload
     const eventType = typeof body.event === 'string' ? body.event : 'webhook';
     const phase = typeof body.phase === 'string' ? body.phase : 'Post';
+    if (!WEBHOOK_HOOK_PHASES.has(phase)) {
+      return Response.json(
+        { error: `Unknown hook phase '${phase}'; expected one of ${[...WEBHOOK_HOOK_PHASES].join(', ')}` },
+        { status: 400 },
+      );
+    }
 
     const hookEvent: HookEvent = {
       path: `${phase}:webhook:${eventType}` as unknown as import('../hooks/types.js').HookEventPath,

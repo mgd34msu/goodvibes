@@ -33,27 +33,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { INTENTIONALLY_INTERNAL } from './engine-package-lists.ts';
 import { SOURCE_CONDITION } from './export-conditions.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGE_JSON = join(ROOT, 'package.json');
 const PLATFORM_DIR = join(ROOT, 'platform/src/platform');
-
-/**
- * Modules with an `index.ts` that are deliberately NOT part of the published
- * surface, each with the reason it is unreachable by design.
- *
- * A module belongs here when consumers reach its behaviour through the control
- * plane rather than by importing it, the daemon owns the instance, and handing
- * out the class would invite a second one.
- */
-const INTENTIONALLY_INTERNAL: Readonly<Record<string, string>> = {
-  'channel-profiles': 'daemon-owned registry; consumers reach it through the channel-profiles.* verbs',
-  'channel-sync': 'daemon-owned routing table and draft mirror; consumers reach it through the channels.routing.* and channels.drafts.* verbs',
-  checkin: 'daemon-owned scheduler; consumers configure it through checkin.* config keys and verbs',
-  principals: 'daemon-owned registry; consumers reach it through the principals.* verbs',
-  push: 'daemon-owned subscription store; consumers reach it through the push.* verbs',
-};
 
 function declaredPlatformSubpaths(): ReadonlySet<string> {
   const manifest = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8')) as { exports: Record<string, unknown> };
@@ -156,8 +141,8 @@ function main(): void {
       '',
       '    "./platform/platform/<name>": "./platform/src/platform/<name>/index.ts"',
       '',
-      'or, if it is genuinely internal, name it in INTENTIONALLY_INTERNAL in this',
-      'script with the reason consumers do not need it.',
+      'or, if it is genuinely internal, name it in INTENTIONALLY_INTERNAL in',
+      'scripts/engine-package-lists.ts with the reason consumers do not need it.',
     );
   }
 

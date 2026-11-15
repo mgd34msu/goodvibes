@@ -1,20 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import {
   parseNpmPackJson,
   releaseNotesTextIssues,
-  verifyPackageCliInstall,
   verifyPackageFacingText,
-  verifyReleaseMetadata,
   verifyReleaseStamps,
 } from '../../cli/package-verification.ts';
-import {
-  releaseBlockingGitStatusLines,
-  releaseEvidenceHygieneIssues,
-  releaseEvidenceInputPaths,
-} from '../../../scripts/release.ts';
 
 function withFixture(run: (dir: string) => void): void {
   const dir = makeProjectTempDir('goodvibes-agent-package-verification');
@@ -25,31 +18,6 @@ function withFixture(run: (dir: string) => void): void {
   }
 }
 
-const PUBLISHABLE_FILES = [
-  'bin', 'dist/package', 'src', 'LICENSE', 'tsconfig.json', 'README.md', 'CHANGELOG.md', 'docs/*.md',
-  'release/release-notes.md', 'release/performance-snapshot.json', 'release/release-readiness.json',
-  'release/live-verification/live-verification.json', 'release/live-verification/live-verification.md',
-  '!src/test', '!src/**/*.test.ts', '!src/**/__tests__', '!src/cli/package-verification.ts', '!src/verification',
-];
-
-/** A package root that passes verifyReleaseMetadata, for one field at a time to be broken. */
-function writePublishablePackage(dir: string, overrides: Record<string, unknown> = {}): void {
-  mkdirSync(join(dir, 'bin'), { recursive: true });
-  writeFileSync(join(dir, 'bin', 'goodvibes-agent.ts'), "#!/usr/bin/env bun\nawait import('../dist/package/main.js');\n");
-  chmodSync(join(dir, 'bin', 'goodvibes-agent.ts'), 0o755);
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({
-    name: '@goodvibes-jev/agent',
-    version: '2.1.0',
-    private: false,
-    type: 'module',
-    main: 'dist/package/main.js',
-    bin: { 'goodvibes-agent': 'bin/goodvibes-agent.ts' },
-    publishConfig: { access: 'public' },
-    files: PUBLISHABLE_FILES,
-    ...overrides,
-  }));
-}
-
 const STAMPED_NOTES = [
   '- Added: themes.',
   '- Fixed: indented read bodies.',
@@ -57,177 +25,6 @@ const STAMPED_NOTES = [
   'GoodVibes Agent 2.1.0 - 2026-09-30',
   '',
 ].join('\n');
-
-describe('package CLI install verification', () => {
-  const legacyPackPaths = [
-    'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'src/main.ts',
-    'dist/package/main.js', 'bin/goodvibes-agent.ts', 'tsconfig.json',
-    'release/release-notes.md', 'release/performance-snapshot.json', 'release/release-readiness.json',
-    'release/live-verification/live-verification.json', 'release/live-verification/live-verification.md',
-  ];
-
-  function packOutput(files: readonly string[]): string {
-    return JSON.stringify([{ entryCount: files.length, unpackedSize: 42, files: files.map((path) => ({ path })) }]);
-  }
-
-  test('a synthetic legacy package retains the runnable bin and safe tarball contract', () => {
-    withFixture((dir) => {
-      writePublishablePackage(dir);
-      const calls: Array<{ command: string; root: string }> = [];
-      const report = verifyPackageCliInstall(dir, (command, root) => {
-        calls.push({ command, root });
-        return command === 'npm pack --json --dry-run' ? packOutput(legacyPackPaths) : '';
-      });
-      expect(calls).toEqual([
-        { command: 'bun run build:package-runtime', root: dir },
-        { command: 'npm pack --json --dry-run', root: dir },
-      ]);
-      expect(report.packageName).toBe('@goodvibes-jev/agent');
-      expect(report.issues).toEqual([]);
-      expect(report.bins).toEqual([
-        expect.objectContaining({ command: 'goodvibes-agent', exists: true, executable: true, usesBunShebang: true, hasSourceEntrypoint: true }),
-      ]);
-      expect(report.tarball.requiredPathsPresent).toEqual(legacyPackPaths);
-      expect(report.tarball.forbiddenPaths).toEqual([]);
-      expect(report.tarball.entryCount).toBe(legacyPackPaths.length);
-      expect(report.tarball.unpackedSize).toBe(42);
-    });
-  });
-
-  test('every required legacy tarball path is enforced, including shipped docs', () => {
-    withFixture((dir) => {
-      writePublishablePackage(dir);
-      mkdirSync(join(dir, 'docs'));
-      writeFileSync(join(dir, 'docs/getting-started.md'), '# Getting started\n');
-      const paths = [...legacyPackPaths, 'docs/getting-started.md'];
-      for (const missing of paths) {
-        const report = verifyPackageCliInstall(dir, () => packOutput(paths.filter((path) => path !== missing)));
-        expect(report.issues).toEqual([`registry tarball missing required path: ${missing}`]);
-        expect(report.tarball.requiredPathsPresent).not.toContain(missing);
-      }
-    });
-  });
-
-  test('forbidden legacy tarball source, docs, tests and private runtime paths remain rejected', () => {
-    withFixture((dir) => {
-      writePublishablePackage(dir);
-      const forbidden = [
-        '.github/workflows/release.yml', 'src/test/unit.ts', 'src/.test/cache',
-        'src/verification/report.ts', 'src/daemon/server.ts', '.goodvibes/state.json', 'vendor/private.js',
-        'src/feature.test.ts', 'src/__tests__/unit.ts', 'src/cli/package-verification.ts',
-        'src/input/commands/quit-shared.ts', 'src/cli/service-command.ts', 'src/cli/surface-command.ts',
-        'src/tools/wrfc-agent-guard.ts', 'src/renderer/agent-detail-modal.ts',
-        'src/renderer/git-status.ts', 'src/renderer/process-summary.ts',
-        'docs/cloudflare-batch.md', 'docs/homeassistant-surface.md', 'docs/wrfc/plan.md', 'docs/competitive-parity-plan.md',
-      ];
-      const report = verifyPackageCliInstall(dir, () => packOutput([...legacyPackPaths, ...forbidden]));
-      expect(report.tarball.forbiddenPaths).toEqual(forbidden);
-      expect(report.issues).toEqual(forbidden.map((path) => `registry tarball includes forbidden path: ${path}`));
-    });
-  });
-
-  test('the actual private Agent workspace refuses install verification without executing commands', () => {
-    const root = resolve(import.meta.dir, '../../..');
-    const before = readFileSync(join(root, 'package.json'), 'utf8');
-    const calls: string[] = [];
-    expect(() => verifyPackageCliInstall(root, (command) => {
-      calls.push(command);
-      throw new Error('must not execute');
-    })).toThrow('refuses a private/workspace package');
-    expect(calls).toEqual([]);
-    expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(before);
-  });
-
-  test.each([
-    { private: true },
-    { private: false, dependencies: { '@goodvibes-jev/engine': 'workspace:*' } },
-    { private: false, devDependencies: { '@goodvibes-jev/engine': 'workspace:*' } },
-    { private: false, optionalDependencies: { '@goodvibes-jev/engine': 'workspace:*' } },
-    { private: false, peerDependencies: { '@goodvibes-jev/engine': 'workspace:*' } },
-  ])('private/workspace install refusal holds with build artifacts present: %j', (fields) => {
-    withFixture((dir) => {
-      writePublishablePackage(dir, fields);
-      mkdirSync(join(dir, 'dist/package'), { recursive: true });
-      writeFileSync(join(dir, 'dist/package/main.js'), 'export {};\n');
-      const before = readFileSync(join(dir, 'package.json'), 'utf8');
-      const beforeFiles = readdirSync(dir, { recursive: true }).sort();
-      const calls: string[] = [];
-      expect(() => verifyPackageCliInstall(dir, (command) => {
-        calls.push(command);
-        throw new Error('must not execute');
-      })).toThrow('refuses a private/workspace package');
-      expect(calls).toEqual([]);
-      expect(readdirSync(dir, { recursive: true }).sort()).toEqual(beforeFiles);
-      expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(before);
-      expect(readFileSync(join(dir, 'dist/package/main.js'), 'utf8')).toBe('export {};\n');
-    });
-  });
-
-  test('a publishable package.json passes, and each publish-critical field is reported when broken', () => {
-    withFixture((dir) => {
-      writePublishablePackage(dir);
-      expect(verifyReleaseMetadata(dir)).toEqual([]);
-
-      writePublishablePackage(dir, { private: true, version: '2.1', files: PUBLISHABLE_FILES.filter((entry) => entry !== '!src/test') });
-      expect(verifyReleaseMetadata(dir)).toEqual([
-        'package.json private must be false for the public Agent package.',
-        'package.json files must exclude !src/test.',
-        'package.json version must be an exact semver like 1.2.3: 2.1.',
-      ]);
-    });
-  });
-
-  test('a bin that is not executable is reported', () => {
-    withFixture((dir) => {
-      writePublishablePackage(dir);
-      chmodSync(join(dir, 'bin', 'goodvibes-agent.ts'), 0o644);
-      expect(verifyReleaseMetadata(dir)).toEqual(['bin target is not executable: goodvibes-agent -> bin/goodvibes-agent.ts']);
-    });
-  });
-
-  test('release preflight allows only declared release evidence changes before a real release', () => {
-    const allowedEvidenceStatus = [
-      '?? release/release-notes.md',
-      ' M release/performance-snapshot.json',
-      'A  release/live-verification/live-verification.json',
-    ].join('\n');
-    const mixedStatus = [
-      allowedEvidenceStatus,
-      ' M src/main.ts',
-      ' M README.md',
-      '?? scratch.txt',
-      ' D release/release-readiness.json',
-    ].join('\n');
-
-    expect(releaseEvidenceInputPaths()).toContain('release/release-readiness.json');
-    expect(releaseBlockingGitStatusLines(allowedEvidenceStatus)).toEqual([]);
-    expect(releaseBlockingGitStatusLines(mixedStatus)).toEqual([
-      ' M src/main.ts',
-      ' M README.md',
-      '?? scratch.txt',
-      ' D release/release-readiness.json',
-    ]);
-  });
-
-  test('release evidence hygiene checks untracked release files before commit', () => {
-    const dir = makeProjectTempDir('goodvibes-agent-release-evidence');
-    try {
-      mkdirSync(join(dir, 'release'), { recursive: true });
-      writeFileSync(join(dir, 'release', 'ok.md'), '- release note\n');
-      writeFileSync(join(dir, 'release', 'bad.md'), '- release note  \nnext line');
-
-      expect(releaseEvidenceHygieneIssues(dir, ['release/ok.md'])).toEqual([]);
-      expect(releaseEvidenceHygieneIssues(dir, ['release/bad.md', 'release/missing.md'])).toEqual([
-        'release/bad.md: missing final newline.',
-        'release/bad.md:1: trailing whitespace.',
-        'release/missing.md: required release evidence file is missing.',
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-});
 
 describe('version stamps agree after the bump', () => {
   function writeStamps(dir: string, versions: { pkg: string; changelog: string; versionTs: string; notes: string }): void {
@@ -283,6 +80,20 @@ describe('package-facing text preserves public engine references and legacy excl
         'package-facing text README.md:5 references non-Agent GoodVibes package: @goodvibes-jev/goodvibes-legacy-platform',
         'package-facing text README.md:6 contains non-Bun Agent install/run instruction.',
       ]);
+    });
+  });
+});
+
+describe('package-facing text covers every shipped docs page', () => {
+  test('a docs page the package ships is scanned even when no list names it', () => {
+    withFixture((dir) => {
+      writeFileSync(join(dir, 'README.md'), '# GoodVibes Agent\n');
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n');
+      mkdirSync(join(dir, 'docs'));
+      writeFileSync(join(dir, 'docs', 'headless-run.md'), `Use ${['/api/', 'knowledge'].join('')}/ask for questions.\n`);
+      const report = verifyPackageFacingText(dir);
+      expect(report.checkedPaths).toContain('docs/headless-run.md');
+      expect(report.failures.some((failure) => failure.includes('docs/headless-run.md') && failure.includes('forbidden'))).toBe(true);
     });
   });
 });

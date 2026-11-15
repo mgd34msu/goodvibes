@@ -94,9 +94,15 @@ describe('readPermissionCategory: the side-effect kind, mapped to a category', (
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     let seenSignal: AbortSignal | undefined;
-    const fixture = fakePort((_name, question) => choiceAnswer(question, 'read', 0.99));
-    installJudgmentPort({ model: fixture.port.model, async ask(request) {
-      seenSignal = request.signal; enter(); await pending; return fixture.port.ask(request);
+    // The first ask is answered late with a different category than any later ask,
+    // so a late answer that was cached or published would surface in the fresh call.
+    const late = fakePort((_name, question) => choiceAnswer(question, 'write', 0.99));
+    const fresh = fakePort((_name, question) => choiceAnswer(question, 'read', 0.99));
+    let asks = 0;
+    installJudgmentPort({ model: fresh.port.model, async ask(request) {
+      asks += 1;
+      if (asks > 1) return fresh.port.ask(request);
+      seenSignal = request.signal; enter(); await pending; return late.port.ask(request);
     } });
     const outcome = readPermissionCategory('read', {}, undefined, controller.signal).catch((error: unknown) => error);
     await entered;
@@ -105,8 +111,8 @@ describe('readPermissionCategory: the side-effect kind, mapped to a category', (
     expect(await outcome).toMatchObject({ name: 'JudgmentError', kind: 'aborted' });
     expect(JSON.stringify(await outcome)).not.toContain('private caller reason');
     release();
-    await Bun.sleep(0);
-    expect(await outcome).toMatchObject({ kind: 'aborted' });
+    expect(await readPermissionCategory('read', {})).toEqual({ category: 'read', confident: true });
+    expect(asks).toBe(2);
   });
 
   test('the reading is asked at the tool-permission-safety site, one question per call', async () => {

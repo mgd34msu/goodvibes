@@ -23,10 +23,13 @@
  * to DO something, `devices.capability.request`, `devices.artifacts.list` and
  * `devices.artifacts.read`.
  *
- * Reads degrade to an empty list with the honest reason attached; a revoke, a
- * sweep or a capability request against no reachable daemon REJECTS, because
- * reporting a revocation or a capture that did not happen is worse than
- * reporting the failure.
+ * Reads against no reachable daemon degrade to an empty list (the reason is in
+ * `describeAvailability`). Reads against a daemon that IS reachable but fails to
+ * answer (an expired token, a 5xx, a malformed body) REJECT with the verb and
+ * the cause, because an empty list there would read as "no phone is paired" or
+ * "no grants". A revoke, a sweep or a capability request against no reachable
+ * daemon also REJECTS, because reporting a revocation or a capture that did not
+ * happen is worse than reporting the failure.
  *
  * ── What a capability request is NOT ──────────────────────────────────────
  *
@@ -97,9 +100,9 @@ export interface DeviceCapabilityOutcomeWire extends Record<string, unknown> {
 }
 
 export interface DevicesClient {
-  /** Paired device nodes. Empty (with a logged reason) when the daemon cannot answer. */
+  /** Paired device nodes. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
   listNodes(): Promise<readonly DeviceNodeSummary[]>;
-  /** Live capability grants. Empty (with a logged reason) when the daemon cannot answer. */
+  /** Live capability grants. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
   listGrants(): Promise<readonly DeviceGrantSummary[]>;
   /** Revoke a grant. Rejects when no daemon is reachable, never reports a revoke that did not happen. */
   revokeGrant(grantId: string): Promise<void>;
@@ -117,7 +120,7 @@ export interface DevicesClient {
     readonly sessionId?: string | undefined;
     readonly timeoutMs?: number | undefined;
   }): Promise<DeviceCapabilityOutcomeWire>;
-  /** Retained captures, newest first. Empty (with a logged reason) when unreachable. */
+  /** Retained captures, newest first. Empty when no daemon is reachable; rejects when a reachable daemon fails to answer. */
   listArtifacts(options?: { readonly nodeId?: string; readonly limit?: number }): Promise<{
     readonly artifacts: readonly DeviceArtifactSummary[];
     readonly retained: number;
@@ -152,8 +155,14 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
       return readArray<T>(await verbs.invoke(methodId, {}), key);
     } catch (error) {
       logger.debug(`[devices] ${methodId} did not answer`, { error: summarizeError(error) });
-      return [];
+      return failRead(methodId, error);
     }
+  };
+
+  /** No daemon reachable is an honest empty read; a reachable daemon that failed is an error to report. */
+  const failRead = <T,>(methodId: string, error: unknown, empty: readonly T[] = []): readonly T[] => {
+    if (!verbs.probe().available) return empty;
+    throw new Error(`${methodId} failed on the reachable daemon: ${summarizeError(error)}`);
   };
 
   return {
@@ -200,6 +209,7 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
         };
       } catch (error) {
         logger.debug('[devices] the retained captures could not be listed', { error: summarizeError(error) });
+        failRead('devices.artifacts.list', error);
         return { artifacts: [], retained: 0, retentionHours: 0 };
       }
     },

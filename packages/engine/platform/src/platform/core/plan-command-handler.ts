@@ -57,7 +57,7 @@ export function handlePlanCommand(
 ): PlanCommandResult {
   switch (subcommand.toLowerCase()) {
     case 'mode': {
-      const value = args[0]!;
+      const value = args[0]?.toLowerCase() ?? '';
       if (!value) {
         const current = deps.adaptivePlanner.getMode();
         return {
@@ -85,7 +85,7 @@ export function handlePlanCommand(
     }
 
     case 'override': {
-      const strategy = args[0]!;
+      const strategy = args[0]?.toLowerCase() ?? '';
       if (!strategy) {
         return {
           ok: false,

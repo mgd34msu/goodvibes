@@ -16,7 +16,7 @@
 // body) works over the relay unchanged. Overflow on the daemon's bounded send
 // buffer surfaces as a visible `relay-overflow` SSE event (never a silent gap).
 
-import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { GoodVibesError, createHttpStatusError } from '@goodvibes-jev/engine/errors';
 import { createUuidV4, type FetchLike } from '@goodvibes-jev/engine/transport-core';
 import {
   RelaySecureChannel,
@@ -28,6 +28,7 @@ import {
   encodeUtf8,
   finishInitiatorHandshake,
   fromBase64Url,
+  RELAY_PROTOCOL_VERSION,
   startInitiatorHandshake,
   type RelayInitiatorState,
   type RelayPairingPayload,
@@ -75,13 +76,40 @@ interface PendingRequest {
 }
 
 interface PendingStream {
+  readonly path: string;
   readonly controller: ReadableStreamDefaultController<Uint8Array>;
   readonly detachAbort: () => void;
   closed: boolean;
 }
 
+/** Why the daemon ended a tunneled stream, for the reasons that mean it never delivered (or stopped delivering) events. */
+const STREAM_CLOSE_FAILURES: Readonly<Record<string, string>> = {
+  'stream-limit': 'the daemon already has the maximum number of event streams open on this connection',
+  'no-stream': 'the daemon had no event stream to open for this request',
+  'source-error': 'the daemon\'s event source failed',
+};
+
+function streamCloseFailure(reason: string | undefined): GoodVibesError | undefined {
+  const explanation = reason === undefined ? undefined : STREAM_CLOSE_FAILURES[reason];
+  if (explanation === undefined) return undefined;
+  return new GoodVibesError(`The relay event stream was closed by the daemon (${reason}): ${explanation}.`, {
+    category: 'service',
+    source: 'transport',
+    recoverable: true,
+  });
+}
+
 function resolvePairing(pairing: RelayPairingPayload | string): RelayPairingPayload {
-  return typeof pairing === 'string' ? decodeRelayPairingString(pairing) : pairing;
+  if (typeof pairing === 'string') return decodeRelayPairingString(pairing);
+  if (pairing.protocol !== RELAY_PROTOCOL_VERSION) {
+    throw new GoodVibesError(`This pairing is for relay protocol ${String(pairing.protocol)}; this build speaks protocol ${RELAY_PROTOCOL_VERSION}.`, {
+      category: 'config',
+      source: 'transport',
+      recoverable: false,
+      hint: 'Pair again from a daemon running the same release line.',
+    });
+  }
+  return pairing;
 }
 
 function defaultWebSocket(url: string): RelayWebSocketLike {
@@ -226,7 +254,19 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     const header = framed.header;
     if (header.kind === 'response') {
       const waiting = pending.get(header.id);
-      if (!waiting) return;
+      if (!waiting) {
+        // A daemon that refuses a tunneled event stream (rejected token, unknown route)
+        // answers with this frame under the stream's id. The 200 the client already
+        // returned was a placeholder, so fail the stream with the daemon's real status.
+        const refused = streams.get(header.id);
+        if (refused) {
+          const text = new TextDecoder().decode(framed.body);
+          let body: unknown = text;
+          try { body = JSON.parse(text); } catch { /* keep the text */ }
+          closeStream(header.id, { error: createHttpStatusError(header.status, refused.path, 'GET', body) });
+        }
+        return;
+      }
       waiting.resolve(new Response(framed.body.length > 0 ? framed.body : null, {
         status: header.status,
         headers: header.headers.map(([k, v]) => [k, v] as [string, string]),
@@ -250,7 +290,9 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       return;
     }
     if (header.kind === 'stream-close') {
-      closeStream(header.id);
+      // A refusal or source failure must not read as a clean end of stream.
+      const failure = streamCloseFailure(header.reason);
+      closeStream(header.id, failure ? { error: failure } : undefined);
       return;
     }
   }
@@ -290,7 +332,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       ws.binaryType = 'arraybuffer';
       socket = ws;
       ws.addEventListener('open', () => {
-        ws.send(encodeControlFrame({ t: 'connect', role: 'client', protocol: 1, rid: pairing.rid }));
+        ws.send(encodeControlFrame({ t: 'connect', role: 'client', protocol: RELAY_PROTOCOL_VERSION, rid: pairing.rid }));
       });
       ws.addEventListener('message', (event) => {
         if (socket !== ws) return;
@@ -332,7 +374,12 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
         done(new GoodVibesError('Relay WebSocket error.', { category: 'network', source: 'transport', recoverable: true }));
       });
     });
-    return connectPromise;
+    const attempt = connectPromise;
+    // A failure that settles inside the executor (a socket that cannot be constructed)
+    // runs teardown before this assignment, which would leave the rejected promise
+    // cached for every later connect().
+    attempt.catch(() => { if (connectPromise === attempt) connectPromise = null; });
+    return attempt;
   }
 
   async function openStream(
@@ -358,7 +405,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     const abort = (): void => { void cancel({ error: signal.reason }); };
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        owner = { controller, closed: false, detachAbort: () => signal.removeEventListener('abort', abort) };
+        owner = { path, controller, closed: false, detachAbort: () => signal.removeEventListener('abort', abort) };
         streams.set(id, owner);
       },
       cancel: () => cancel(),

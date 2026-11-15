@@ -10,6 +10,7 @@ import {
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeTransitionRequest,
 } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { installMockDaemon } from './mock-daemon';
+import { installRecordedIds } from './recorded-ids';
 
 export type NativeIntakeCaptureName = 'work' | 'turn' | 'blocked' | 'refused' | 'cancelled' | 'recovery';
 export type NativeIntakeOperation = 'capture' | 'get' | 'admit' | 'resume' | 'cancel';
@@ -96,15 +97,7 @@ export async function installNativeIntakeDaemon(page: Page, name: NativeIntakeCa
   let authBody = capture.auth.body;
   const reply = (route: Route, wire: WireResponse) => route.fulfill({ status: wire.status, contentType: 'application/json', body: wire.body });
   if (options.seedIds !== false) {
-    await page.addInitScript(({ requestId, inputId }) => {
-      // Work mounts its hosted attachment hook even with no selected session.
-      // Give unrelated per-browser identities their own values before ID seeding.
-      localStorage.setItem('goodvibes.webui.hosted.clientId', 'native-proof-hosted-client');
-      localStorage.setItem('goodvibes.webui.push.deviceId', 'native-proof-push-device');
-      const original = crypto.randomUUID?.bind(crypto);
-      const ids = [requestId, inputId];
-      Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: () => ids.shift() ?? original?.() ?? 'unused-fixture-uuid' });
-    }, capture.input);
+    await page.addInitScript(installRecordedIds, { ids: [capture.input.requestId, capture.input.inputId] });
   }
   await page.route('**/api/control-plane/auth', route => route.fulfill({ status: capture.auth.status, contentType: 'application/json', body: authBody }));
   await page.route('**/api/work-ledger/project', route => reply(route, capture.project));

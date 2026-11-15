@@ -7,23 +7,23 @@
     "unsupportedSources": []
   },
   "identity": {
-    "projectId": "workspace-be6980390c",
+    "projectId": "project-enjpadcj-gado-eban-llod-nihecbfdcfoo",
     "inputId": "native-hosted-http-input",
-    "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+    "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
   },
   "auth": {
     "methodId": "control.auth.current",
     "method": "GET",
     "path": "/api/control-plane/auth",
     "status": 200,
-    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-ee7a57b7-4a65-4f8e-a4eb-6c09e5792c7d\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
+    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-417ea727-023c-4be2-b9a7-9d8bb9ccdb73\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:batch\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:cloudflare\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:batch\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:cloudflare\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
   },
   "project": {
     "methodId": "workLedger.project",
     "method": "GET",
     "path": "/api/work-ledger/project",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-be6980390c\"}"
+    "body": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\"}"
   },
   "capture": {
     "methodId": "workLedger.intake.capture",
@@ -36,7 +36,7 @@
       "text": "  Explain café é 🌻\nKeep this original text.\nKeep this original text.  ",
       "unsupportedSources": []
     },
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"6fd6f1bec6d71d0883ba609d165facb611c6bf4cbb5a3a2b3cf7ee5d72a3fcd0\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"sessionId\":\"native-work:workspace-be6980390c\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"jngoinll-golp-epgd-kled-fbgmaocijbgb\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"sessionId\":\"native-work:project-enjpadcj-gado-eban-llod-nihecbfdcfoo\"}}"
   },
   "admit": {
     "methodId": "workLedger.intake.admit",
@@ -45,9 +45,9 @@
     "status": 200,
     "requestBody": {
       "inputId": "native-hosted-http-input",
-      "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+      "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
     },
-    "body": "{\"kind\":\"turn\",\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"6fd6f1bec6d71d0883ba609d165facb611c6bf4cbb5a3a2b3cf7ee5d72a3fcd0\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"sessionId\":\"native-work:workspace-be6980390c\"},\"route\":\"converse\",\"text\":\"  Explain café é 🌻\\nKeep this original text.\\nKeep this original text.  \"}"
+    "body": "{\"kind\":\"turn\",\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"jngoinll-golp-epgd-kled-fbgmaocijbgb\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"sessionId\":\"native-work:project-enjpadcj-gado-eban-llod-nihecbfdcfoo\"},\"route\":\"converse\",\"text\":\"  Explain café é 🌻\\nKeep this original text.\\nKeep this original text.  \"}"
   },
   "get": {
     "methodId": "workLedger.intake.get",
@@ -57,18 +57,18 @@
     "requestBody": {
       "inputId": "native-hosted-http-input"
     },
-    "body": "{\"kind\":\"turn\",\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"6fd6f1bec6d71d0883ba609d165facb611c6bf4cbb5a3a2b3cf7ee5d72a3fcd0\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"sessionId\":\"native-work:workspace-be6980390c\"},\"route\":\"converse\",\"text\":\"  Explain café é 🌻\\nKeep this original text.\\nKeep this original text.  \"}"
+    "body": "{\"kind\":\"turn\",\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"native-hosted-http-input\",\"sourceId\":\"jngoinll-golp-epgd-kled-fbgmaocijbgb\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"sessionId\":\"native-work:project-enjpadcj-gado-eban-llod-nihecbfdcfoo\"},\"route\":\"converse\",\"text\":\"  Explain café é 🌻\\nKeep this original text.\\nKeep this original text.  \"}"
   },
   "absent": {
     "methodId": "workLedger.turn.status",
     "method": "POST",
     "path": "/api/work-ledger/turn/status",
     "requestBody": {
-      "projectId": "workspace-be6980390c",
+      "projectId": "project-enjpadcj-gado-eban-llod-nihecbfdcfoo",
       "inputId": "native-hosted-http-input",
-      "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+      "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
     },
-    "requestJson": "{\"projectId\":\"workspace-be6980390c\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\"}",
+    "requestJson": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\"}",
     "status": 200,
     "body": "{\"kind\":\"not-found\"}"
   },
@@ -77,44 +77,45 @@
     "method": "POST",
     "path": "/api/work-ledger/turn/start",
     "requestBody": {
-      "projectId": "workspace-be6980390c",
+      "projectId": "project-enjpadcj-gado-eban-llod-nihecbfdcfoo",
       "inputId": "native-hosted-http-input",
-      "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+      "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
     },
-    "requestJson": "{\"projectId\":\"workspace-be6980390c\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\"}",
+    "requestJson": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\"}",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"state\":\"running\",\"sessionId\":\"hosted-561b06cd-ea87-470b-8748-e3a6a94796ec\",\"brokerInputId\":\"sin-5a25edce\",\"correlationId\":\"session-input:sin-5a25edce\"}"
+    "body": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"state\":\"running\",\"sessionId\":\"hosted-a5cc8d29-3479-4f98-b2c5-4f4772396e97\",\"brokerInputId\":\"sin-4b5ccd88\",\"correlationId\":\"session-input:sin-4b5ccd88\"}"
   },
   "status": {
     "methodId": "workLedger.turn.status",
     "method": "POST",
     "path": "/api/work-ledger/turn/status",
     "requestBody": {
-      "projectId": "workspace-be6980390c",
+      "projectId": "project-enjpadcj-gado-eban-llod-nihecbfdcfoo",
       "inputId": "native-hosted-http-input",
-      "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+      "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
     },
-    "requestJson": "{\"projectId\":\"workspace-be6980390c\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\"}",
+    "requestJson": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\"}",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"state\":\"completed\",\"sessionId\":\"hosted-561b06cd-ea87-470b-8748-e3a6a94796ec\",\"brokerInputId\":\"sin-5a25edce\",\"correlationId\":\"session-input:sin-5a25edce\"}"
+    "body": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"state\":\"completed\",\"sessionId\":\"hosted-a5cc8d29-3479-4f98-b2c5-4f4772396e97\",\"brokerInputId\":\"sin-4b5ccd88\",\"correlationId\":\"session-input:sin-4b5ccd88\"}"
   },
   "duplicate": {
     "methodId": "workLedger.turn.start",
     "method": "POST",
     "path": "/api/work-ledger/turn/start",
     "requestBody": {
-      "projectId": "workspace-be6980390c",
+      "projectId": "project-enjpadcj-gado-eban-llod-nihecbfdcfoo",
       "inputId": "native-hosted-http-input",
-      "sourceRevision": "5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682"
+      "sourceRevision": "4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498"
     },
-    "requestJson": "{\"projectId\":\"workspace-be6980390c\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\"}",
+    "requestJson": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\"}",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-be6980390c\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"5a6413675d9bc12be57b72c03ed0b296973cfa598a7313fc946f37d6af15b682\",\"state\":\"completed\",\"sessionId\":\"hosted-561b06cd-ea87-470b-8748-e3a6a94796ec\",\"brokerInputId\":\"sin-5a25edce\",\"correlationId\":\"session-input:sin-5a25edce\"}"
+    "body": "{\"projectId\":\"project-enjpadcj-gado-eban-llod-nihecbfdcfoo\",\"requestId\":\"native-hosted-http-request\",\"inputId\":\"native-hosted-http-input\",\"sourceRevision\":\"4c8daf3c1a597946e24c684c30b9458bd530f09f35f38c00f87a600442be6498\",\"state\":\"completed\",\"sessionId\":\"hosted-a5cc8d29-3479-4f98-b2c5-4f4772396e97\",\"brokerInputId\":\"sin-4b5ccd88\",\"correlationId\":\"session-input:sin-4b5ccd88\"}"
   },
   "attachment": {
     "session": {
-      "id": "hosted-561b06cd-ea87-470b-8748-e3a6a94796ec",
-      "workspaceRoot": "/tmp/goodvibes-platform-testrun-6-1d365368/native-intake-http-HcAIph/workspace",
+      "id": "hosted-a5cc8d29-3479-4f98-b2c5-4f4772396e97",
+      "nativeConversation": true,
+      "workspaceRoot": "/tmp/goodvibes-testrun-jQCpjJ/native-intake-http-GpKffQ/workspace",
       "title": "Native conversation",
       "status": "idle",
       "detachPolicy": "survive",
@@ -122,14 +123,15 @@
       "attachedClients": [
         "owned-native-reader"
       ],
-      "createdAt": 1791279820044,
-      "updatedAt": 1791279820210,
+      "createdAt": 1794643654704,
+      "updatedAt": 1794643655009,
       "turnCount": 1,
       "messageCount": 2,
       "restoredFromDisk": false,
       "originSurface": "webui",
       "contractIds": [],
-      "lastTurnAt": 1791279820166
+      "permissionMode": "safe-owner",
+      "lastTurnAt": 1794643654880
     },
     "history": [
       {
@@ -140,6 +142,7 @@
         "role": "assistant",
         "content": "Owned native hosted answer."
       }
-    ]
+    ],
+    "historyAsOf": 1794643655100
   }
 }

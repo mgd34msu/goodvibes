@@ -6,7 +6,12 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { entityAlias } from './batteries/entity-alias.js';
 
 // Transport/work budgets, never semantic acceptance or word-frequency thresholds.
-export const MAX_ENTITY_ALIAS_REQUESTS = Number.POSITIVE_INFINITY;
+/**
+ * One reading per entity and candidate word, run in sequence. The ceiling stops a source with many
+ * entities and a long section list from spending hundreds of calls: it is split evenly across the
+ * entities and each entity reads only its earliest distinct words. Classic mode makes no reading.
+ */
+export const MAX_ENTITY_ALIAS_REQUESTS = 1024;
 export const MAX_ENTITY_ALIAS_CANDIDATES = Number.POSITIVE_INFINITY;
 export const MAX_ENTITY_ALIAS_EVIDENCE_CHARS = Number.POSITIVE_INFINITY;
 export const MAX_ENTITY_ALIAS_NAME_CHARS = Number.POSITIVE_INFINITY;
@@ -49,7 +54,7 @@ export async function readKnowledgeEntityAliases(
   if (entities.length === 0) return [];
   assertJudgmentInput({ entities, evidence: input });
   const identities = entities.map(({ kind, title }) => ({ kind, title }));
-  if (identities.length > MAX_ENTITY_ALIAS_REQUESTS || identities.some((entity) => entity.title.length > MAX_ENTITY_ALIAS_NAME_CHARS)) {
+  if (identities.some((entity) => entity.title.length > MAX_ENTITY_ALIAS_NAME_CHARS)) {
     throw new KnowledgeEntityAliasHoldError();
   }
   const complete = [input.title, input.summary, input.extractionSummary, ...input.sections].join('\n');
@@ -58,16 +63,22 @@ export async function readKnowledgeEntityAliases(
   const evidence = complete.slice(0, MAX_ENTITY_ALIAS_EVIDENCE_CHARS);
   const candidateLimit = Number.POSITIVE_INFINITY;
   const candidates: string[] = [];
+  const seenWords = new Set<string>();
   for (const match of complete.matchAll(/[\p{L}\p{N}\p{M}]+(?:[-_.'’][\p{L}\p{N}\p{M}]+)*/gu)) {
     if (match.index + match[0].length > evidence.length) break;
     const word = match[0];
-    if (word.length > MAX_ENTITY_ALIAS_WORD_CHARS || candidates.includes(word)) continue;
+    if (word.length > MAX_ENTITY_ALIAS_WORD_CHARS || seenWords.has(word)) continue;
+    seenWords.add(word);
     candidates.push(word);
     if (candidates.length === candidateLimit) break;
   }
   const aliases: string[][] = identities.map(() => []);
+  // Each entity reads at most its share of the call budget (the earliest distinct words), so a long source
+  // with several entities still ingests; later words are simply not considered as aliases.
+  const perEntity = Math.floor(MAX_ENTITY_ALIAS_REQUESTS / identities.length);
   const requests = identities.flatMap((entity, index) => candidates
     .filter((candidate) => candidate !== entity.title) // The exact identifier is already the node title.
+    .slice(0, perEntity)
     .map((candidate) => ({ index, state: { entity, candidate, evidence } })));
   // Check every complete prospective request before any request, including joined text.
   for (const request of requests) assertJudgmentInput(request.state);

@@ -4,7 +4,7 @@
  * adoption of an unsupervised daemon, and the update receipt. Time,
  * network, filesystem, activity, service actions, and exit all mocked.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -524,13 +524,55 @@ describe('repeated update-check failures reach the owner', () => {
     } finally { rmSync(h.scratch, { recursive: true, force: true }); }
   });
 
+  test('an unreachable release host stays quiet for a day, then the owner is told once', async () => {
+    const start = new Date(2026, 6, 12, 14, 30).getTime();
+    let clock = start;
+    const h = makeHarness({ idle: () => true, fetchOverride: unreachableFetch, clock: () => clock });
+    try {
+      for (let hour = 0; hour < 24; hour++) {
+        clock = start + hour * 60 * 60 * 1000;
+        await h.updater.tick();
+        expect(h.alerts).toEqual([]);
+      }
+      clock = start + 24 * 60 * 60 * 1000;
+      await h.updater.tick();
+      expect(h.alerts).toHaveLength(1);
+      expect(h.alerts[0]).toContain('25 times in a row');
+      expect(h.alerts[0]).toContain('getaddrinfo ENOTFOUND github.com');
+      // Still failing inside the quiet window: no second message.
+      clock += 60 * 60 * 1000;
+      await h.updater.tick();
+      expect(h.alerts).toHaveLength(1);
+    } finally { rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+
+  test('a good check in between restarts the unbroken failing time', async () => {
+    const start = new Date(2026, 6, 12, 14, 30).getTime();
+    let clock = start;
+    let reachable = false;
+    const working = releaseFetch({ latestTag: 'v1.0.0' }).fetchImpl;
+    const h = makeHarness({ idle: () => true, clock: () => clock, fetchOverride: async (url) => (reachable ? working(url) : unreachableFetch(url)) });
+    try {
+      await h.updater.tick();
+      clock = start + 20 * 60 * 60 * 1000;
+      reachable = true;
+      await h.updater.tick();
+      reachable = false;
+      clock = start + 30 * 60 * 60 * 1000;
+      await h.updater.tick();
+      clock = start + 40 * 60 * 60 * 1000;
+      await h.updater.tick();
+      expect(h.alerts).toEqual([]);
+    } finally { rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+
   test('persistent failure alerts on the first check, regardless of the deprecated threshold', async () => {
     const h = makeHarness({ idle: () => true, fetchOverride: persistentFetch, alertAfterFailedChecks: 100 });
     try {
       await h.updater.tick();
       expect(h.updater.failedCheckCount).toBe(1);
       expect(h.alerts).toHaveLength(1);
-      expect(h.alerts[0]).toContain('1 times in a row');
+      expect(h.alerts[0]).toContain('1 time in a row');
       expect(h.alerts[0]).toContain('repository access revoked');
     } finally { rmSync(h.scratch, { recursive: true, force: true }); }
   });
@@ -683,6 +725,23 @@ describe('update failure reading lifecycle', () => {
     try {
       await h.updater.tick(); expect(calls).toBe(1); expect(h.alerts).toEqual([]); expect(h.updater.failedCheckCount).toBe(1);
       expect(h.timers).toHaveLength(1);
+    } finally { rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+  test('a failure reading that is never available still reports a day of failed checks', async () => {
+    const start = new Date(2026, 6, 12, 14, 30).getTime();
+    let clock = start;
+    const fake = failureReadingsPort([]).port;
+    await installUpdaterPort({ model: fake.model, ask: async () => { throw new Error('synthetic terminal reading error'); } });
+    const h = makeHarness({ idle: () => true, fetchOverride: persistentFetch, clock: () => clock });
+    try {
+      await h.updater.tick();
+      clock = start + 23 * 60 * 60 * 1000;
+      await h.updater.tick();
+      expect(h.alerts).toEqual([]);
+      clock = start + 24 * 60 * 60 * 1000;
+      await h.updater.tick();
+      expect(h.alerts).toHaveLength(1);
+      expect(h.alerts[0]).toContain('repository access revoked');
     } finally { rmSync(h.scratch, { recursive: true, force: true }); }
   });
   test('protected error wording and plain-object causes never reach judgment or owner notices', async () => {
@@ -1082,8 +1141,24 @@ describe('post-swap service handover', () => {
           return release.fetchImpl(url, init);
         },
       });
+      // Deadline timers are the only timers of 40ms or less this updater creates.
+      const deadlines: unknown[] = [];
+      const cleared = new Set<unknown>();
+      const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+      const watchSet = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
+        const handle = realSetTimeout(callback, ms);
+        if (ms !== undefined && ms > 0 && ms <= 40) deadlines.push(handle);
+        return handle;
+      }) as unknown as typeof setTimeout);
+      const watchClear = spyOn(globalThis, 'clearTimeout').mockImplementation(((handle?: Parameters<typeof clearTimeout>[0]) => {
+        cleared.add(handle);
+        realClearTimeout(handle);
+      }) as unknown as typeof clearTimeout);
       try {
         await h.updater.tick();
+        watchSet.mockRestore(); watchClear.mockRestore();
+        expect(deadlines.length).toBeGreaterThan(0);
+        for (const handle of deadlines) expect(cleared.has(handle)).toBe(true);
         expect(signals.size).toBe(fails ? 1 : 2);
         // Scope disposal aborts once to release any unconsumed response body.
         // A later lifecycle stop or old deadline must not change that outcome.
@@ -1093,12 +1168,11 @@ describe('post-swap service handover', () => {
           expect(observed.reason).toBe(signal.reason);
         }
         h.updater.stop();
-        await new Promise(resolve => setTimeout(resolve, 60));
         for (const [signal, observed] of signals) {
           expect(observed.events).toBe(1);
           expect(observed.reason).toBe(signal.reason);
         }
-      } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+      } finally { watchSet.mockRestore(); watchClear.mockRestore(); h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
     });
   }
 
@@ -1553,6 +1627,21 @@ describe('PeriodicUpdateLoop cadence', () => {
     const h = loopHarness({ outcome: () => 'deferred', checkIntervalMs: 60 * 60 * 1000, busyRetryMs: 45_000 });
     await h.loop.tick();
     expect(h.timers[h.timers.length - 1]!.ms).toBe(45_000);
+  });
+
+  test('tick says whether it ran a check, found one in flight, or found the loop stopped', async () => {
+    let release!: () => void;
+    const loop = new PeriodicUpdateLoop({
+      runCheck: () => new Promise<'settled'>((resolve) => { release = () => resolve('settled'); }),
+      setTimer: () => 0 as unknown as ReturnType<typeof setTimeout>,
+      clearTimer: () => {},
+    });
+    const first = loop.tick();
+    expect(await loop.tick()).toBe('already-in-flight');
+    release();
+    expect(await first).toBe('ran');
+    loop.stop();
+    expect(await loop.tick()).toBe('stopped');
   });
 
   test('a check that throws is reported and keeps the steady cadence', async () => {

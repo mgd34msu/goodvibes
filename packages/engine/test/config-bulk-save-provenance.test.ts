@@ -74,7 +74,7 @@ test.each(['load', 'set', 'category', 'bulk'] as const)('project stripping revea
   if (origin === 'load') { write(f.global, { display: { showTokenSpeed: true } }); f.config.load(); }
   if (origin === 'set') f.config.set('display.showTokenSpeed', true);
   if (origin === 'category') f.config.mergeCategory('display', { showTokenSpeed: true });
-  if (origin === 'bulk') { f.config.setProjectValue('display.showTokenSpeed', true); f.config.save(); }
+  if (origin === 'bulk') { f.config.set('display.showTokenSpeed', true); f.config.save(); }
   f.config.setProjectValue('display.showTokenSpeed', false);
   f.config.setRuntimeOverride('provider.model', 'synthetic:invocation');
   f.config.saveProject();

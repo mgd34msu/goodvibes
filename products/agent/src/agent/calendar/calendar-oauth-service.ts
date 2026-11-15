@@ -197,7 +197,9 @@ export class CalendarOAuthService {
     provider: CalendarProviderId,
     hooks: { openUrl?: (url: string) => void } = {},
   ): Promise<ConnectResult> {
-    const config = await this.resolveConfig(provider);
+    const resolved = await this.resolveConfigOrFailure(provider);
+    if ('failure' in resolved) return resolved.failure;
+    const config = resolved.config;
     const guard = this.guardConfigured(config);
     if (guard) return guard;
     let begun;
@@ -206,7 +208,9 @@ export class CalendarOAuthService {
     } catch (error) {
       return { ok: false, stage: 'authorize', error: `Could not start the sign-in flow: ${describe(error)}` };
     }
-    hooks.openUrl?.(begun.start.authorizationUrl);
+    // Best-effort: a browser that will not open must not abandon the listener
+    // (or the sign-in, if the URL is shown some other way).
+    try { hooks.openUrl?.(begun.start.authorizationUrl); } catch { /* the waiter below still times out and closes */ }
     let code: string;
     try {
       code = (await begun.waiter.waitForCode()).code;
@@ -233,7 +237,9 @@ export class CalendarOAuthService {
     provider: CalendarProviderId,
     hooks: { onDeviceCode?: (start: DeviceCodeFlowStart) => void } = {},
   ): Promise<ConnectResult> {
-    const config = await this.resolveConfig(provider);
+    const resolved = await this.resolveConfigOrFailure(provider);
+    if ('failure' in resolved) return resolved.failure;
+    const config = resolved.config;
     const guard = this.guardConfigured(config);
     if (guard) return guard;
     let start: DeviceCodeFlowStart;
@@ -259,7 +265,9 @@ export class CalendarOAuthService {
     provider: CalendarProviderId,
     hooks: { openUrl?: (url: string) => void; onDeviceCode?: (start: DeviceCodeFlowStart) => void } = {},
   ): Promise<ConnectResult> {
-    const config = await this.resolveConfig(provider);
+    const resolved = await this.resolveConfigOrFailure(provider);
+    if ('failure' in resolved) return resolved.failure;
+    const config = resolved.config;
     const guard = this.guardConfigured(config);
     if (guard) return guard;
     let begun: Awaited<ReturnType<typeof this.connector.beginConnectAuthCode>>;
@@ -312,17 +320,44 @@ export class CalendarOAuthService {
 
   /** Merged, source-labeled events across every connected provider in a window. */
   async listEvents(window: EventWindow, options: CalendarRequestOptions = {}): Promise<MergedCalendarEvent[]> {
+    return (await this.listEventsDetailed(window, options)).events;
+  }
+
+  /**
+   * {@link listEvents} that also says which providers could not be read, so one
+   * broken provider neither hides the others' events nor goes unmentioned.
+   */
+  async listEventsDetailed(window: EventWindow, options: CalendarRequestOptions = {}): Promise<{
+    readonly events: MergedCalendarEvent[];
+    readonly failures: readonly { readonly provider: CalendarProviderId; readonly error: string }[];
+  }> {
     const accounts = await this.connector.listAccounts();
-    const out: MergedCalendarEvent[] = [];
+    const events: MergedCalendarEvent[] = [];
+    const failures: { provider: CalendarProviderId; error: string }[] = [];
     for (const account of accounts) {
-      const config = await this.resolveConfig(account.provider);
-      const events = await this.connector.listEvents(config, window, options);
-      out.push(...events);
+      try {
+        const config = await this.resolveConfig(account.provider);
+        events.push(...await this.connector.listEvents(config, window, options));
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        failures.push({ provider: account.provider, error: describe(error) });
+      }
     }
-    return out;
+    return { events, failures };
   }
 
   // --- internals ------------------------------------------------------------
+
+  /** The client config, or the staged config failure the connect methods promise instead of a thrown error. */
+  private async resolveConfigOrFailure(provider: CalendarProviderId): Promise<
+    { readonly config: ResolvedClientConfig } | { readonly failure: ConnectResult }
+  > {
+    try {
+      return { config: await this.resolveConfig(provider) };
+    } catch (error) {
+      return { failure: { ok: false, stage: 'config', error: `The ${provider} calendar sign-in settings could not be read: ${describe(error)}` } };
+    }
+  }
 
   private guardConfigured(config: ResolvedClientConfig): ConnectResult | null {
     if (config.isConfigured) return null;
@@ -358,7 +393,9 @@ export class CalendarOAuthService {
     if (!ref) return undefined;
     const prefix = 'goodvibes://secrets/goodvibes/';
     if (!ref.startsWith(prefix)) return ref; // a literal value (unusual, but honored)
-    const secretKey = decodeURIComponent(ref.slice(prefix.length));
+    let secretKey: string;
+    try { secretKey = decodeURIComponent(ref.slice(prefix.length)); }
+    catch { throw new Error(`${configKey} holds a malformed secret reference (a bad % sequence)`); }
     const value = await this.secrets.get(secretKey);
     return value ?? undefined;
   }

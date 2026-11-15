@@ -87,16 +87,23 @@ test('an exact admitted fetch reuses its initial decision, while a redirected pr
 });
 
 test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s exact fetch admission preserves explicit blocked hosts on initial and redirect hops', async mode => {
-  let hits = 0;
-  const blocked = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { hits++; return new Response('unexpected'); } }); servers.push(blocked);
-  const redirect = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(null, { status: 302,
-    headers: { location: `http://blocked.example.invalid:${blocked.port}/` } }) }); servers.push(redirect);
-  for (const url of [`http://blocked.example.invalid:${blocked.port}/`, `http://localhost:${redirect.port}/`]) {
+  let blockedHits = 0, redirectHits = 0;
+  const blocked = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { blockedHits++; return new Response('unexpected'); } }); servers.push(blocked);
+  const redirect = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => { redirectHits++; return new Response(null, { status: 302,
+    headers: { location: `http://blocked.example.invalid:${blocked.port}/` } }); } }); servers.push(redirect);
+  const cases = [
+    { url: `http://blocked.example.invalid:${blocked.port}/`, expectedRedirectHits: 0 },
+    { url: `http://start.example.invalid:${redirect.port}/`, expectedRedirectHits: 1 },
+  ];
+  for (const { url, expectedRedirectHits } of cases) {
+    redirectHits = 0;
     const f = fixture(mode);
-    f.registry.register(createFetchTool({ defaultBlockedHosts: ['blocked.example.invalid'] }));
+    f.registry.register(createFetchTool({ defaultBlockedHosts: ['blocked.example.invalid'], resolveHost: async () => [{ address: '127.0.0.1', family: 4 }] }));
     const [result] = await f.run('fetch', { urls: [{ url }], extract: 'raw', sanitize_mode: 'none' });
-    expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { succeeded: 0, failed: 1 } });
-    expect(hits).toBe(0);
+    expect(JSON.parse(result?.output ?? '{}')).toMatchObject({ summary: { succeeded: 0, failed: 1 }, results: [{ error: expect.stringContaining('blocked.example.invalid') }] });
+    // The initial hop reaches the redirect server only when the first URL is not itself blocked; the blocked host is never contacted.
+    expect(redirectHits).toBe(expectedRedirectHits);
+    expect(blockedHits).toBe(0);
     expect(f.prompts()).toBe(0);
   }
 });

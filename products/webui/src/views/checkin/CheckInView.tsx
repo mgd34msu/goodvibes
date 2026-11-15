@@ -168,6 +168,7 @@ function ReceiptRow({ receipt }: { receipt: CheckinReceipt }) {
 export function CheckInSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [runResult, setRunResult] = useState<CheckinRunResult | null>(null);
 
@@ -195,18 +196,31 @@ export function CheckInSettings() {
     },
   });
 
+  // A manual run delivers through the configured channel for real, so it asks first,
+  // the same as saving the settings that allow proactive contact.
+  async function askRun(): Promise<void> {
+    const channel = config.data?.config.deliveryChannel;
+    const ok = await confirm.ask({
+      title: 'Run a check-in now?',
+      description: `This sends a real check-in through ${channel || 'the configured channel'} right away.`,
+      confirmLabel: 'Send check-in',
+    });
+    if (ok) run.mutate();
+  }
+
   const configUnavailable = config.isError && isMethodUnavailableError(config.error);
   const receiptsUnavailable = receipts.isError && isMethodUnavailableError(receipts.error);
   const list = receipts.data?.receipts ?? [];
 
   return (
     <div className="checkin-view">
+      {confirm.element}
       <div className="checkin-sections">
         <DetailSection
           title="Settings"
           actions={
             <>
-              <Button size="sm" onClick={() => run.mutate()} disabled={run.isPending}>
+              <Button size="sm" onClick={() => void askRun()} disabled={run.isPending}>
                 {run.isPending ? 'Running…' : 'Run check-in now'}
               </Button>
               {config.isSuccess && !editing && (

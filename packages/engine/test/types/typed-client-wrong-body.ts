@@ -19,30 +19,17 @@
  * file fails to compile. A green `bun run types:check` is a positive statement
  * that each of these bodies is genuinely rejected, not that nothing exploded.
  *
- * ── A hole this file deliberately does NOT paper over ──────────────────────
+ * ── What `operator.invoke` itself rejects ─────────────────────────────────
  *
- * These assertions are on `OperatorMethodInput<'…'>`. They are NOT written as
- * `operator.invoke('…', badBody)` calls, and that is a finding, not a
- * shortcut. `OperatorRemoteClient.invoke` is overloaded, and the fallback is
- *
- *   invoke<T = unknown>(methodId: string, input?: Record<string, unknown>, …)
- *
- * `Record<string, unknown>` accepts any object, so a KNOWN method id with a
- * WRONG body fails the typed overload and then silently matches the loose one.
- * Measured against this build by writing these same cases as `operator.invoke`
- * calls: every one of them compiled without complaint, including
- * `invoke('power.keepAwake.set', { enabled: 'yes' })` where the schema declares
- * a boolean. The type system reports success on precisely the case it exists to
- * catch, which is why the assertions below go to the contract type directly.
- *
- * Constraining that overload is a platform decision recorded for the owner, not
- * one to make from inside a sweep, so this file does not change it and does not
- * assert the current permissiveness either, asserting it would lock the hole
- * in. It checks the layer it can honestly check. The day the overload is
- * constrained, rewriting these as real `operator.invoke` calls is a mechanical
- * edit and the coverage becomes end-to-end.
+ * `OperatorRemoteClient.invoke` has a typed overload and an untyped fallback for
+ * method ids the contract does not know. The fallback's id parameter is `never`
+ * for a known id, so a known method id with a wrong body is refused at the call
+ * (the section on real `invoke` calls below). Most cases still assert on
+ * `OperatorMethodInput<'…'>`, which isolates the contract type from the
+ * overload resolution around it.
  */
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import type { OperatorRemoteClient } from '@goodvibes-jev/engine/platform/operator';
 import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
 
 // ── Plain required fields ───────────────────────────────────────────────────
@@ -55,6 +42,20 @@ const wrongEnabledType: OperatorMethodInput<'power.keepAwake.set'> = { enabled: 
 
 // @ts-expect-error surfaceId is required alongside sessionId
 const missingSurfaceId: OperatorMethodInput<'sessions.detach'> = { sessionId: 'session-1' };
+
+// ── Real `invoke` calls ─────────────────────────────────────────────────────
+
+declare const operator: OperatorRemoteClient;
+
+// @ts-expect-error enabled is a boolean, so a known method id with a string body is refused by invoke itself
+void operator.invoke('power.keepAwake.set', { enabled: 'yes' });
+
+// @ts-expect-error enabled is required
+void operator.invoke('power.keepAwake.set', {});
+
+// A well-formed body for the same id, and an id the contract does not know, both still compile.
+void operator.invoke('power.keepAwake.set', { enabled: true });
+void operator.invoke('vendor.extension.unknown', { anything: 1 });
 
 // NOT asserted here, and the reason is the sharpest limit on this whole gate:
 // `email.inbox.read` DOES declare `required: ['uid']` in its catalog schema,

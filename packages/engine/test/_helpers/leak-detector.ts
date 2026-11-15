@@ -22,7 +22,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { afterEach, afterAll } from 'bun:test';
+import { afterAll } from 'bun:test';
 
 interface LiveTimer {
   readonly id: number;
@@ -30,7 +30,6 @@ interface LiveTimer {
   readonly delayMs: number;
   readonly stack: string;
   readonly origin: string;
-  readonly createdDuring: string;
   fired: number;
 }
 
@@ -38,7 +37,6 @@ interface LeakRecord {
   readonly kind: string;
   readonly delayMs: number;
   readonly origin: string;
-  readonly createdDuring: string;
   readonly fired: number;
   readonly refd: boolean;
   readonly site: string;
@@ -102,11 +100,7 @@ const live = new Map<number, LiveTimer>();
 /** Cleared handles that fired anyway, kept only for the summary counters. */
 let totalCreated = 0;
 let totalCleared = 0;
-let currentTest = '<startup>';
 let seq = 0;
-
-/** Per-test attribution: handles alive at the end of the test that made them. */
-const perTestLeaks = new Map<string, number>();
 
 function install(): void {
   const g = globalThis as unknown as Record<string, unknown>;
@@ -130,7 +124,6 @@ function install(): void {
       delayMs,
       stack,
       origin: parseOrigin(stack),
-      createdDuring: currentTest,
       fired: 0,
     };
     live.set(id, rec);
@@ -234,7 +227,6 @@ function snapshot(): readonly LeakRecord[] {
     kind: rec.kind,
     delayMs: rec.delayMs,
     origin: rec.origin,
-    createdDuring: rec.createdDuring,
     fired: rec.fired,
     refd: isRefd(idHandles?.get(rec.id)),
     site: parseSite(rec.stack),
@@ -244,18 +236,6 @@ function snapshot(): readonly LeakRecord[] {
 
 if (ENABLED) {
   install();
-
-  afterEach(() => {
-    // Runs AFTER the file's own afterEach hooks (verified ordering under Bun
-    // 1.3.14), so anything still live here survived the test's own cleanup.
-    for (const rec of live.values()) {
-      if (rec.createdDuring === currentTest && rec.kind === 'interval') {
-        perTestLeaks.set(currentTest, (perTestLeaks.get(currentTest) ?? 0) + 1);
-        break;
-      }
-    }
-    currentTest = '<between-tests>';
-  });
 
   afterAll(() => {
     const leaks = snapshot();
@@ -356,9 +336,6 @@ if (ENABLED) {
 export const leakDetector = {
   enabled: ENABLED,
   snapshot,
-  setCurrentTest(name: string): void {
-    currentTest = name;
-  },
   counts(): { created: number; cleared: number; live: number } {
     return { created: totalCreated, cleared: totalCleared, live: live.size };
   },

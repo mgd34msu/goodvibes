@@ -18,48 +18,75 @@ async function makeInput(contentWidth = 40): Promise<InputHandler> {
   return ih;
 }
 
-/** Simulate typing/pasting text at cursor */
-function insertText(ih: InputHandler, text: string) {
-  ih.prompt = ih.prompt.slice(0, ih.cursorPos) + text + ih.prompt.slice(ih.cursorPos);
-  ih.cursorPos += text.length;
-  ih.ensureInputCursorVisible();
+/** Bracketed paste through the real handler at the current cursor. */
+function pasteText(ih: InputHandler, text: string) {
+  const before = ih.prompt;
+  const pos = ih.cursorPos;
+  ih.feed(`\x1b[200~${text}\x1b[201~`);
+  expect(ih.prompt).toBe(before.slice(0, pos) + text + before.slice(pos));
+  expect(ih.cursorPos).toBe(pos + text.length);
 }
 
-/** Simulate backspace */
+/** Typed characters through the real handler at the current cursor. */
+function typeText(ih: InputHandler, text: string) {
+  const before = ih.prompt;
+  const pos = ih.cursorPos;
+  ih.feed(text);
+  expect(ih.prompt).toBe(before.slice(0, pos) + text + before.slice(pos));
+  expect(ih.cursorPos).toBe(pos + text.length);
+}
+
+/** Real backspace: removes exactly the character before the cursor. */
 function backspace(ih: InputHandler) {
-  if (ih.cursorPos > 0) {
-    ih.prompt = ih.prompt.slice(0, ih.cursorPos - 1) + ih.prompt.slice(ih.cursorPos);
-    ih.cursorPos--;
-  }
+  const before = ih.prompt;
+  const pos = ih.cursorPos;
+  ih.feed('\x7f');
+  expect(ih.prompt).toBe(pos > 0 ? before.slice(0, pos - 1) + before.slice(pos) : before);
+  expect(ih.cursorPos).toBe(Math.max(0, pos - 1));
 }
 
-/** Simulate delete */
+/** Real forward delete: removes exactly the character under the cursor. */
 function del(ih: InputHandler) {
-  if (ih.cursorPos < ih.prompt.length) {
-    ih.prompt = ih.prompt.slice(0, ih.cursorPos) + ih.prompt.slice(ih.cursorPos + 1);
-  }
+  const before = ih.prompt;
+  const pos = ih.cursorPos;
+  ih.feed('\x1b[3~');
+  expect(ih.prompt).toBe(pos < before.length ? before.slice(0, pos) + before.slice(pos + 1) : before);
+  expect(ih.cursorPos).toBe(pos);
 }
 
-/** Verify cursor visual matches actual character */
+/** Move the cursor up one wrapped line, keeping its column where the line is long enough. */
+function moveUpOneWrappedLine(ih: InputHandler, cw: number) {
+  const info = ih.getWrappedPromptInfo(cw);
+  const target = info.cursorWrappedLine - 1;
+  expect(target).toBeGreaterThanOrEqual(0);
+  const col = Math.min(info.cursorCol, info.segments[target].length);
+  ih.cursorPos = info.segments[target].rawStart + col;
+}
+
+/** Verify the wrapped cursor position points at the character the cursor is really on. */
 function verifyCursor(ih: InputHandler, cw: number, label: string) {
   const info = ih.getWrappedPromptInfo(cw);
   const seg = info.segments[info.cursorWrappedLine];
+  expect(seg).toBeDefined();
   const visualChar = info.wrappedLines[info.cursorWrappedLine]?.[info.cursorCol];
   const actualChar = ih.prompt[ih.cursorPos];
 
-  // At end of prompt, both should be undefined
+  // At the end of the prompt the cursor is on the last wrapped line, past its text.
   if (ih.cursorPos >= ih.prompt.length) {
-    expect(info.cursorCol).toBeLessThanOrEqual(seg?.length ?? 0);
+    expect(info.cursorWrappedLine).toBe(info.segments.length - 1);
+    expect(info.cursorCol).toBe(seg.length);
     return;
   }
 
-  // At end of segment (col === length), cursor is past visible text, that's valid
-  if (info.cursorCol === seg?.length) return;
+  // On a newline the cursor is drawn at column 0 of the line that follows it
+  // (or of the empty line it ends).
+  if (actualChar === '\n') {
+    expect(info.cursorCol).toBe(0);
+    expect([ih.cursorPos, ih.cursorPos + 1]).toContain(seg.rawStart);
+    return;
+  }
 
-  // When cursor is on a \n or consumed space, visual shows the next line's char, that's correct
-  if (actualChar === '\n' || actualChar === undefined) return;
-
-  // Otherwise visual and actual must match
+  // Everywhere else the visual cell under the cursor is the character it is on.
   if (visualChar !== actualChar) {
     throw new Error(`${label}: DESYNC visual=${JSON.stringify(visualChar)} actual=${JSON.stringify(actualChar)} pos=${ih.cursorPos} line=${info.cursorWrappedLine} col=${info.cursorCol}`);
   }
@@ -71,17 +98,10 @@ describe('Paste + Navigate + Delete/Backspace', () => {
   test('multiline paste with newlines, navigate up, backspace at each position', async () => {
     const ih = (await makeInput(CW));
     const paste = 'Line one of paste\nLine two of paste\nLine three of paste\nLine four';
-    insertText(ih, paste);
+    pasteText(ih, paste);
 
     // Navigate up 2 lines
-    for (let i = 0; i < 2; i++) {
-      const info = ih.getWrappedPromptInfo(CW);
-      const target = info.cursorWrappedLine - 1;
-      if (target >= 0) {
-        const col = Math.min(info.cursorCol, info.segments[target].length);
-        ih.cursorPos = info.segments[target].rawStart + col;
-      }
-    }
+    for (let i = 0; i < 2; i++) moveUpOneWrappedLine(ih, CW);
 
     // Backspace 10 times, verify cursor consistency each time
     for (let i = 0; i < 10; i++) {
@@ -94,7 +114,7 @@ describe('Paste + Navigate + Delete/Backspace', () => {
   test('paste exceeding content width, navigate left through wrap, backspace', async () => {
     const ih = (await makeInput(30));
     const paste = 'This is a long line that will definitely wrap around the content area multiple times';
-    insertText(ih, paste);
+    pasteText(ih, paste);
 
     // Navigate left 20 chars (through wrap boundaries)
     for (let i = 0; i < 20; i++) {
@@ -115,7 +135,7 @@ describe('Paste + Navigate + Delete/Backspace', () => {
   test('paste multiline with lines exceeding width, navigate and delete', async () => {
     const ih = (await makeInput(25));
     const paste = 'Short\nThis line is longer than twenty five characters wide\nAnother short\nYet another long line that exceeds the width';
-    insertText(ih, paste);
+    pasteText(ih, paste);
 
     // Navigate to middle of the long wrapped line
     ih.cursorPos = 35;
@@ -125,21 +145,12 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     for (let i = 0; i < 5; i++) {
       const beforeLen = ih.prompt.length;
       del(ih);
-      if (ih.cursorPos < ih.prompt.length + 1) {
-        expect(ih.prompt.length).toBe(beforeLen - 1);
-      }
+      expect(ih.prompt.length).toBe(beforeLen - 1);
       verifyCursor(ih, 25, `del-${i}`);
     }
 
     // Navigate up 2 lines and backspace
-    for (let i = 0; i < 2; i++) {
-      const info = ih.getWrappedPromptInfo(25);
-      const target = info.cursorWrappedLine - 1;
-      if (target >= 0) {
-        const col = Math.min(info.cursorCol, info.segments[target].length);
-        ih.cursorPos = info.segments[target].rawStart + col;
-      }
-    }
+    for (let i = 0; i < 2; i++) moveUpOneWrappedLine(ih, 25);
 
     verifyCursor(ih, 25, 'after-up-nav');
     backspace(ih);
@@ -150,11 +161,11 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     const ih = (await makeInput(CW));
 
     // First paste
-    insertText(ih, 'First paste line one\nFirst paste line two');
+    pasteText(ih, 'First paste line one\nFirst paste line two');
     // Second paste
-    insertText(ih, '\nSecond paste starts here\nAnd continues');
+    pasteText(ih, '\nSecond paste starts here\nAnd continues');
     // Third paste
-    insertText(ih, '\nThird paste\nWith multiple\nLines inside');
+    pasteText(ih, '\nThird paste\nWith multiple\nLines inside');
 
     // Navigate to various positions and verify
     for (let pos = 0; pos <= ih.prompt.length; pos += 7) {
@@ -178,7 +189,7 @@ describe('Paste + Navigate + Delete/Backspace', () => {
 
   test('backspace at newline joins lines', async () => {
     const ih = (await makeInput(CW));
-    insertText(ih, 'line one\nline two');
+    pasteText(ih, 'line one\nline two');
 
     // Navigate to start of "line two" (position 9)
     ih.cursorPos = 9;
@@ -195,13 +206,13 @@ describe('Paste + Navigate + Delete/Backspace', () => {
   test('backspace at marker start removes entire marker', async () => {
     const ih = (await makeInput(CW));
     // Type some text before the marker
-    insertText(ih, 'before ');
+    pasteText(ih, 'before ');
     // Register a multi-line paste with >8 lines (creates a TEXT marker)
     const marker = ih.registerPaste('line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9');
     // Insert the marker text into the prompt at cursor
     ih.prompt = ih.prompt.slice(0, ih.cursorPos) + marker + ih.prompt.slice(ih.cursorPos);
     ih.cursorPos += marker.length;
-    insertText(ih, ' after');
+    pasteText(ih, ' after');
 
     const promptWithMarker = ih.prompt;
     const markerStart = promptWithMarker.indexOf('[TEXT:');
@@ -227,12 +238,12 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     const ih = (await makeInput(35));
 
     // Paste, navigate, type, delete, navigate, backspace
-    insertText(ih, 'Hello world this is a test of the editing system');
+    pasteText(ih, 'Hello world this is a test of the editing system');
     ih.cursorPos = 20; // middle
     verifyCursor(ih, 35, 'mid');
 
     // Type some text at cursor
-    insertText(ih, ' INSERTED ');
+    typeText(ih, ' INSERTED ');
     verifyCursor(ih, 35, 'after-insert');
 
     // Delete forward

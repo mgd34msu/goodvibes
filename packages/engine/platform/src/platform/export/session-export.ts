@@ -241,7 +241,7 @@ export async function exportToHTML(
       if (images.length > 0) {
         html += `<div class="attachments">`;
         for (const img of images) {
-          html += `<img src="data:${escapeHtml(img.mediaType)};base64,${img.data}" alt="attachment" class="attachment-image" />`;
+          html += renderAttachmentImage(img);
         }
         html += `</div>`;
       }
@@ -371,6 +371,14 @@ ${usageSection}
 // ── HTML helpers ──────────────────────────────────────────────────────────────
 
 /** Escape characters that are special in HTML. */
+/** An image part comes from the session, which remote sources can write to: only a real base64 image becomes a data URL. */
+function renderAttachmentImage(img: { data: string; mediaType: string }): string {
+  if (!/^image\/[A-Za-z0-9.+-]+$/.test(img.mediaType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(img.data)) {
+    return '<span class="attachment-omitted">[attachment omitted: not valid image data]</span>';
+  }
+  return `<img src="data:${img.mediaType};base64,${img.data}" alt="attachment" class="attachment-image" />`;
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g,  '&amp;')
@@ -629,8 +637,12 @@ em { color: #a5d6ff; font-style: italic; }
  * defaultExportPath - Build the default output path for a share export.
  *
  * Format: ~/goodvibes-exports/session-<timestamp>.<ext>
+ *
+ * The timestamp carries milliseconds, so two exports made within the same
+ * second land in different files instead of the second silently replacing
+ * the first.
  */
 export function defaultExportPath(format: 'html' | 'json' | 'md', homeDirectory: string): string {
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
   return join(homeDirectory, 'goodvibes-exports', `session-${ts}.${format}`);
 }

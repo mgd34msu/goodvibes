@@ -15,7 +15,7 @@ export const STATE_TOOL_SCHEMA = {
         + ' telemetry returns session telemetry summary;'
         + ' hooks manages registered hooks (list/enable/disable/add/remove);'
         + ' mode manages output verbosity mode (get/set/list);'
-        + ' analytics manages TelemetryDB (record/query/summary/export/dashboard/sync).',
+        + ' analytics reads TelemetryDB (query/summary/export/dashboard/sync).',
     },
     keys: {
       type: 'array',
@@ -34,7 +34,7 @@ export const STATE_TOOL_SCHEMA = {
     view: {
       type: 'string',
       enum: ['summary', 'full'],
-      description: '(modes: list, memory, hooks, mode, analytics) Output detail level. Default: summary for inventory/reporting surfaces.',
+      description: '(modes: list, memory, hooks, mode, analytics) Output detail level. Default: summary, except mode=mode modeAction=list and mode=memory memoryAction=get, which default to full.',
     },
     clearKeys: {
       type: 'array',
@@ -43,12 +43,12 @@ export const STATE_TOOL_SCHEMA = {
     },
     memoryAction: {
       type: 'string',
-      enum: ['get', 'set', 'list'],
-      description: '(mode: memory) Sub-action: get reads a key, set writes a key, list shows all keys.',
+      enum: ['get', 'set', 'list', 'delete'],
+      description: '(mode: memory) Sub-action: get reads a key, set writes a key, list shows all keys, delete removes a key and its retrieval record.',
     },
     memoryKey: {
       type: 'string',
-      description: '(mode: memory, action: get/set) The memory file key (filename without .json extension).',
+      description: '(mode: memory, action: get/set/delete) The memory file key (filename without .json extension).',
     },
     memoryValue: {
       type: 'string',
@@ -65,10 +65,10 @@ export const STATE_TOOL_SCHEMA = {
     },
     hookDefinition: {
       type: 'object',
-      description: '(mode: hooks, action: add) Hook definition object with eventPattern and hook fields.',
+      description: '(mode: hooks, action: add) Hook definition object with eventPattern and hook fields. name is required and must be unused; the hook for its type (command, url or path) is required. The hook lasts for this session only.',
       properties: {
         eventPattern: { type: 'string', description: 'Event path pattern (e.g. Pre:tool:*)' },
-        name: { type: 'string', description: 'Unique name for the hook.' },
+        name: { type: 'string', description: 'Required. Unique name for the hook; enable, disable and remove address it by this name.' },
         type: { type: 'string', enum: ['command', 'http', 'ts'], description: 'Hook type.' },
         match: { type: 'string', description: 'Event path to match.' },
         command: { type: 'string', description: '(type: command) Shell command to run.' },
@@ -89,30 +89,8 @@ export const STATE_TOOL_SCHEMA = {
     },
     analyticsAction: {
       type: 'string',
-      enum: ['record', 'query', 'summary', 'export', 'dashboard', 'sync'],
-      description: '(mode: analytics) Sub-action: record a tool call; query by filter; summary aggregation; export as JSON/CSV; dashboard top-level view; sync/persist to disk.',
-    },
-    analyticsTool: {
-      type: 'string',
-      description: '(mode: analytics, action: record/query) Tool name to record or filter by.',
-    },
-    analyticsArgs: {
-      type: 'object',
-      additionalProperties: true,
-      description: '(mode: analytics, action: record) Tool args to record.',
-    },
-    analyticsResult: {
-      type: 'object',
-      additionalProperties: true,
-      description: '(mode: analytics, action: record) Tool result to record.',
-    },
-    analyticsDuration: {
-      type: 'number',
-      description: '(mode: analytics, action: record) Duration in milliseconds.',
-    },
-    analyticsTokens: {
-      type: 'number',
-      description: '(mode: analytics, action: record) Token count.',
+      enum: ['query', 'summary', 'export', 'dashboard', 'sync'],
+      description: '(mode: analytics) Sub-action: query recorded calls by filter; summary aggregation; export as JSON/CSV; dashboard top-level view; sync/persist to disk.',
     },
     analyticsFilter: {
       type: 'object',
@@ -144,7 +122,7 @@ export type StateMode =
   | 'analytics';
 
 /** Memory sub-action. */
-export type MemoryAction = 'get' | 'set' | 'list';
+export type MemoryAction = 'get' | 'set' | 'list' | 'delete';
 
 /** Hooks sub-action. */
 export type HookAction = 'list' | 'enable' | 'disable' | 'add' | 'remove';
@@ -153,7 +131,7 @@ export type HookAction = 'list' | 'enable' | 'disable' | 'add' | 'remove';
 export type ModeAction = 'get' | 'set' | 'list';
 
 /** Analytics sub-action. */
-export type AnalyticsAction = 'record' | 'query' | 'summary' | 'export' | 'dashboard' | 'sync';
+export type AnalyticsAction = 'query' | 'summary' | 'export' | 'dashboard' | 'sync';
 
 /** Full input shape for the state tool. */
 export interface StateInput {
@@ -198,11 +176,6 @@ export interface StateInput {
 
   // mode: analytics
   analyticsAction?: AnalyticsAction | undefined;
-  analyticsTool?: string | undefined;
-  analyticsArgs?: Record<string, unknown> | undefined;
-  analyticsResult?: Record<string, unknown> | undefined;
-  analyticsDuration?: number | undefined;
-  analyticsTokens?: number | undefined;
   analyticsFilter?: Record<string, unknown> | undefined;
   analyticsFormat?: 'json' | 'csv' | undefined;
 }

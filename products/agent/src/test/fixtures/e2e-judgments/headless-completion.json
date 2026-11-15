@@ -18,6 +18,7 @@
       "find",
       "repo_map",
       "context_accounting",
+      "contract_self_check",
       "exec",
       "analyze",
       "inspect",

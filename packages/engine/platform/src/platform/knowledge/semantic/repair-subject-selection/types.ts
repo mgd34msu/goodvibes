@@ -1,3 +1,4 @@
+import { REPAIR_READER_DEFAULT_TIMEOUT_MS } from '../self-improvement-budget.js';
 export interface RepairSubjectSelectionInput {
   readonly reference: string;
   readonly query: string;
@@ -25,5 +26,5 @@ export class KnowledgeRepairSubjectSelectionHeldError extends Error {
 }
 export const REPAIR_SUBJECT_SELECTION_LIMITS = Object.freeze({
   inputs: Number.POSITIVE_INFINITY, characters: Number.POSITIVE_INFINITY, requests: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY,
-  concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647,
+  concurrency: 4, defaultTimeoutMs: REPAIR_READER_DEFAULT_TIMEOUT_MS, timeoutMs: 2_147_483_647,
 });

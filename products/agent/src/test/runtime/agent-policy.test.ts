@@ -102,6 +102,7 @@ describe('Agent user-first autonomy policy', () => {
     services.hostedSessions.adopt(sessionId);
 
     const delivered: Array<{ sessionId: string; inputId: string; consumed: boolean | undefined; agentId: string | undefined }> = [];
+    const firstDelivery = Promise.withResolvers<void>();
     let served = false;
     services.sessionBroker.activate({
       async listInputs(id) {
@@ -123,15 +124,14 @@ describe('Agent user-first autonomy policy', () => {
       },
       async deliverInput(id, inputId, options) {
         delivered.push({ sessionId: id, inputId, consumed: options?.consumed, agentId: options?.agentId });
+        firstDelivery.resolve();
         return {};
       },
     });
 
     // The composed dispatch polls on its own interval, so this waits for the
-    // OUTCOME rather than sleeping a fixed span past it, a bounded wait that
-    // fails with a real assertion instead of timing out.
-    const deadline = Date.now() + 8_000;
-    while (delivered.length === 0 && Date.now() < deadline) await Bun.sleep(50);
+    // OUTCOME (the first acknowledgement) rather than sleeping past it.
+    await firstDelivery.promise;
 
     const spawned = services.agentManager.list().find((record) => record.task.includes('Build the thing'));
     expect(spawned).toBeTruthy();

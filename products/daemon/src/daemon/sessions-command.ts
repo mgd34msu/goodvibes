@@ -44,7 +44,7 @@ export interface HostedSessionRecord {
   readonly updatedAt?: number;
   readonly turnCount?: number;
   readonly restoredFromDisk?: boolean;
-  readonly endedReason?: string;
+  readonly terminatedReason?: string;
 }
 
 interface HostedListPayload {
@@ -109,7 +109,7 @@ function renderSession(session: HostedSessionRecord, now: number): string[] {
   if (session.effectiveDetachPolicy) facts.push(`on last detach: ${session.effectiveDetachPolicy}`);
   if (session.updatedAt !== undefined) facts.push(describeAge(session.updatedAt, now));
   if (session.restoredFromDisk === true) facts.push('restored from disk');
-  if (session.endedReason) facts.push(`ended: ${session.endedReason}`);
+  if (session.terminatedReason) facts.push(`ended: ${session.terminatedReason}`);
   if (facts.length > 0) lines.push(`    ${facts.join('  ·  ')}`);
   return lines;
 }

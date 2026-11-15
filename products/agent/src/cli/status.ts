@@ -173,6 +173,11 @@ function readApprovalPosture(config: Pick<ConfigManager, 'get'>): ApprovalPostur
   return readApprovalPostureFromConfig(config);
 }
 
+/** A finding id from its own text, so the same finding keeps its id whatever else is reported before it. */
+function findingSlug(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/g, '');
+}
+
 export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliDoctorFinding[] {
   const config = options.configManager;
   const permissionMode = config.get('permissions.mode');
@@ -200,7 +205,10 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         area: 'runtime',
         severity: 'warning',
         summary: 'Connected GoodVibes host compatibility does not satisfy Agent readiness.',
-        cause: 'Connected host is reachable, but at least one public Agent route is unavailable or incompatible.',
+        cause:
+          options.externalRuntime.agentKnowledge.probed === false
+            ? `Connected host is reachable, but the Agent routes were not checked${options.externalRuntime.operatorToken.present ? ` because the host refused its status request${options.externalRuntime.statusCode === null ? '' : ` (HTTP ${options.externalRuntime.statusCode})`}` : ' because no operator token is present'}.`
+            : 'Connected host is reachable, but at least one public Agent route is unavailable or incompatible.',
         impact: 'Agent-only routes, especially isolated Agent Knowledge, may be unavailable.',
         action: 'Update the owning GoodVibes host so its public Agent routes are compatible.',
       });
@@ -221,6 +229,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     if (
       options.externalRuntime.reachable &&
       options.externalRuntime.operatorToken.present &&
+      options.externalRuntime.agentKnowledge.probed !== false &&
       !options.externalRuntime.agentKnowledge.ready
     ) {
       findings.push({
@@ -243,7 +252,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     for (const advisory of options.service.advisories) {
       if (findings.some((finding) => finding.summary === advisory)) continue;
       findings.push({
-        id: `runtime-posture-${findings.length}`,
+        id: `runtime-posture-${findingSlug(advisory)}`,
         area: 'runtime',
         severity: 'risk',
         summary: advisory,
@@ -255,7 +264,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
     for (const issue of options.service.issues) {
       if (findings.some((finding) => finding.summary === issue)) continue;
       findings.push({
-        id: `runtime-connection-${findings.length}`,
+        id: `runtime-connection-${findingSlug(issue)}`,
         area: 'runtime',
         severity: 'warning',
         summary: issue,
@@ -401,7 +410,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
           `  reachable: ${yesNo(externalRuntime.reachable)}${externalRuntime.statusCode === null ? '' : ` (HTTP ${externalRuntime.statusCode})`}`,
           `  compatible: ${yesNo(externalRuntime.compatible)}`,
           `  access token: ${externalRuntime.operatorToken.present ? 'present' : 'missing'} (${externalRuntime.operatorToken.path})`,
-          `  Agent Knowledge: ${externalRuntime.agentKnowledge.ready ? 'ready' : `not ready (${formatAgentKnowledgeFailureKind(externalRuntime.agentKnowledge.kind)})`}`,
+          `  Agent Knowledge: ${externalRuntime.agentKnowledge.probed === false ? 'not checked' : externalRuntime.agentKnowledge.ready ? 'ready' : `not ready (${formatAgentKnowledgeFailureKind(externalRuntime.agentKnowledge.kind)})`}`,
           ...(externalRuntime.error ? [`  error: ${externalRuntime.error}`] : []),
         ]
       : ['  live check unavailable']),
@@ -441,10 +450,10 @@ export function renderCliStatus(options: CliStatusOptions): string {
     lines.push(
       '',
       'Readiness Checks:',
-      '  companion chat route',
-      '  isolated Agent Knowledge route',
-      '  approvals and automation status routes',
-      '  explicit build delegation route',
+      `  isolated Agent Knowledge route: ${!externalRuntime || externalRuntime.agentKnowledge.probed === false ? 'not checked' : externalRuntime.agentKnowledge.ready ? 'ready' : 'not ready'}`,
+      '  companion chat route: not checked',
+      '  approvals and automation status routes: not checked',
+      '  explicit build delegation route: not checked',
     );
     lines.push('', 'Warnings');
     if (findings.length === 0) {

@@ -25,6 +25,7 @@ import { resolveViewName, type ViewTarget } from '../input/views.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { getSharedHostedSessionFeed } from '../views/hosted-session-feed.ts';
 import { revertReviewHunk } from '../input/commands/review-runtime.ts';
+import { sayToHosted } from '../input/commands/hosted-runtime.ts';
 
 export interface WireViewOpenersOptions {
   readonly commandContext: CommandContext;
@@ -62,7 +63,8 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       spawn: views.fleet.spawn,
       configManager: views.configManager,
       hosted: getSharedHostedSessionFeed(),
-      steerHosted: (text) => { void commandContext.executeCommand?.('hosted', ['say', ...text.split(/\s+/)]); },
+      // The outcome goes back to the modal so it never claims a send that did not happen.
+      steerHosted: (text) => sayToHosted(commandContext, text),
       sessionCost: () => {
         const cost = views.usage.sessionCost();
         return cost.priced ? cost.usd : null;

@@ -1,6 +1,7 @@
 import type { DaemonMediaRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse, summarizeErrorForRecord } from './error-response.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
   createRouteBodySchema,
@@ -54,9 +55,15 @@ export function createDaemonMediaRouteHandlers(
     postVoiceRealtimeSession: async (request) => handleVoiceRealtimeSession(context, request),
     getWebSearchProviders: async () => Response.json({ providers: await context.webSearchService.getStatus().then((status) => status.providers) }),
     postWebSearch: async (request) => handleWebSearch(context, request),
-    getArtifacts: () => Response.json({ artifacts: context.artifactStore.list() }),
+    getArtifacts: (request) => {
+      const admin = context.requireAdmin(request);
+      if (admin) return admin;
+      return Response.json({ artifacts: context.artifactStore.list() });
+    },
     postArtifact: async (request) => handleArtifactCreate(context, request),
-    getArtifact: (artifactId) => {
+    getArtifact: (artifactId, request) => {
+      const admin = context.requireAdmin(request);
+      if (admin) return admin;
       const artifact = context.artifactStore.get(artifactId);
       return artifact
         ? Response.json({ artifact })
@@ -214,7 +221,7 @@ async function handleVoiceTts(context: DaemonMediaRouteContext, req: Request): P
         { status: 409 },
       );
     }
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -235,7 +242,7 @@ async function handleVoiceTtsStream(context: DaemonMediaRouteContext, req: Reque
         { status: 409 },
       );
     }
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -300,7 +307,7 @@ async function handleVoiceStt(context: DaemonMediaRouteContext, req: Request): P
         { status: 409 },
       );
     }
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -329,7 +336,7 @@ async function handleVoiceRealtimeSession(context: DaemonMediaRouteContext, req:
         { status: 409 },
       );
     }
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -340,24 +347,33 @@ async function handleMediaAnalyze(context: DaemonMediaRouteContext, req: Request
   if (body instanceof Response) return body;
   const provider = context.mediaProviders.findProvider('understand', typeof body.providerId === 'string' ? body.providerId : undefined);
   if (!provider?.analyze) return jsonErrorResponse({ error: 'No media analysis provider is registered' }, { status: 404 });
-  const artifact = typeof body.artifact === 'object' && body.artifact !== null
-    ? body.artifact as MediaArtifact
-    : typeof body.artifactId === 'string' && body.artifactId.trim().length > 0
-      ? {
-          artifactId: body.artifactId.trim(),
-          mimeType: 'application/octet-stream',
-          metadata: {},
-        } satisfies MediaArtifact
-      : null;
+  let artifact: MediaArtifact | null = null;
+  if (typeof body.artifact === 'object' && body.artifact !== null) {
+    artifact = body.artifact as MediaArtifact;
+  } else if (typeof body.artifactId === 'string' && body.artifactId.trim().length > 0) {
+    const artifactId = body.artifactId.trim();
+    // A provider may branch on the type, so it gets the stored record's own, not a generic one.
+    const record = context.artifactStore.get(artifactId) as { readonly mimeType?: unknown } | null;
+    if (!record) return jsonErrorResponse({ error: `Unknown artifact: ${artifactId}` }, { status: 404 });
+    artifact = {
+      artifactId,
+      mimeType: typeof record.mimeType === 'string' && record.mimeType ? record.mimeType : 'application/octet-stream',
+      metadata: {},
+    };
+  }
   if (!artifact) {
     return jsonErrorResponse({ error: 'Missing media artifact' }, { status: 400 });
   }
-  return Response.json(await provider.analyze({
-    artifact,
-    prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
-    modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
-    metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
-  }));
+  try {
+    return Response.json(await provider.analyze({
+      artifact,
+      prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
+      modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+      metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
+    }));
+  } catch (error) {
+    return readServiceErrorResponse(error);
+  }
 }
 
 async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
@@ -377,6 +393,10 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
     requireElevatedAccess: (request) => context.requireAdmin(request),
   });
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
+  // The store refuses these with plain errors that carry no status; they are the caller's to fix, so say so here.
+  if (typeof body.dataBase64 !== 'string' && typeof body.text !== 'string' && typeof body.path !== 'string' && typeof body.uri !== 'string') {
+    return jsonErrorResponse({ error: 'Artifact input requires dataBase64, text, path, or uri.', code: 'INVALID_REQUEST' }, { status: 400 });
+  }
   try {
     const artifact = await context.artifactStore.create({
       ...(typeof body.kind === 'string' ? { kind: body.kind as ArtifactKind } : {}),
@@ -392,28 +412,45 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
     });
     return Response.json({ artifact }, { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
+/**
+ * Media types a browser may show inline. Everything else is served as an
+ * opaque download: an uploaded or fetched page (html, svg, xml, script) would
+ * otherwise run on the daemon's origin with the operator's session.
+ */
+const INLINE_SAFE_MEDIA_TYPE = /^(?:image\/(?:png|jpe?g|gif|webp|avif|bmp)|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+|text\/plain|application\/json)$/;
+
 async function handleArtifactContent(context: DaemonMediaRouteContext, artifactId: string, req: Request): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  // Only an unknown id is "not found"; a failure reading a known artifact is a server fault.
+  if (!context.artifactStore.get(artifactId)) return jsonErrorResponse({ error: `Unknown artifact: ${artifactId}` }, { status: 404 });
   try {
     const { record, buffer } = await context.artifactStore.readContent(artifactId);
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    const storedType = record.mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+    const inlineSafe = INLINE_SAFE_MEDIA_TYPE.test(storedType);
     const headers = new Headers({
-      'Content-Type': record.mimeType,
+      'Content-Type': inlineSafe ? record.mimeType : 'application/octet-stream',
       'Content-Length': String(bytes.byteLength),
       'Cache-Control': 'private, max-age=60',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
     });
-    const download = new URL(req.url).searchParams.get('download');
-    if (record.filename && download !== '0') {
+    const inlineRequested = new URL(req.url).searchParams.get('download') === '0' && inlineSafe;
+    if (!inlineRequested) {
       // Strip non-ASCII bytes so the ASCII filename parameter stays valid.
-      const asciiFallback = record.filename.replace(/[^\x20-\x7E]/g, '_').replace(/[\r\n"]/g, '_');
-      headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(record.filename)}`);
+      const asciiFallback = (record.filename ?? 'artifact').replace(/[^\x20-\x7E]/g, '_').replace(/[\r\n"]/g, '_');
+      headers.set('Content-Disposition', record.filename
+        ? `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(record.filename)}`
+        : 'attachment');
     }
     return new Response(bytes as BodyInit, { status: 200, headers });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 404 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -427,7 +464,7 @@ async function handleWebSearch(context: DaemonMediaRouteContext, req: Request): 
   try {
     return Response.json(await context.webSearchService.search(input));
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -443,13 +480,17 @@ async function handleMediaTransform(context: DaemonMediaRouteContext, req: Reque
   }
   const operation = typeof body.operation === 'string' ? body.operation : '';
   if (!operation) return jsonErrorResponse({ error: 'Missing media transform operation' }, { status: 400 });
-  return Response.json(await provider.transform({
-    artifact: body.artifact as MediaArtifact,
-    operation,
-    outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
-    options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
-    metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
-  }));
+  try {
+    return Response.json(await provider.transform({
+      artifact: body.artifact as MediaArtifact,
+      operation,
+      outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
+      options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
+      metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
+    }));
+  } catch (error) {
+    return readServiceErrorResponse(error);
+  }
 }
 
 async function handleMediaGenerate(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
@@ -461,13 +502,36 @@ async function handleMediaGenerate(context: DaemonMediaRouteContext, req: Reques
   if (!provider?.generate) return jsonErrorResponse({ error: 'No media generation provider is registered' }, { status: 404 });
   const prompt = typeof body.prompt === 'string' ? body.prompt : '';
   if (!prompt.trim()) return jsonErrorResponse({ error: 'Missing media generation prompt' }, { status: 400 });
-  return Response.json(await provider.generate({
-    prompt,
-    outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
-    modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
-    options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
-    metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
-  }));
+  try {
+    return Response.json(await provider.generate({
+      prompt,
+      outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
+      modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
+      options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
+      metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
+    }));
+  } catch (error) {
+    return readServiceErrorResponse(error);
+  }
+}
+
+// The multimodal service refuses a stale, forged or cancelled analysis with errors that carry no
+// status; those stay a 400 here, while an error that does carry a status (a provider's 503, the
+// authorization refusal below) keeps its own.
+const WRITEBACK_NOT_CURRENT_CODE = 'MULTIMODAL_WRITEBACK_AUTHORIZATION_NOT_CURRENT';
+
+/** Refuses a write-back whose caller lost admin access while the analysis ran. */
+function assertWritebackCurrent(context: DaemonMediaRouteContext, req: Request): () => void {
+  return () => {
+    if (!context.requireAdmin(req)) return;
+    throw new GoodVibesError('Multimodal write-back authorization is no longer current.', {
+      category: 'authorization',
+      source: 'permission',
+      status: 401,
+      code: WRITEBACK_NOT_CURRENT_CODE,
+      recoverable: false,
+    });
+  };
 }
 
 async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
@@ -487,12 +551,22 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
     },
   );
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
+  if (typeof body.artifactId === 'string' && body.artifactId.trim() && !context.artifactStore.get(body.artifactId)) {
+    return jsonErrorResponse({ error: `Unknown artifact: ${body.artifactId}` }, { status: 404 });
+  }
+  // The private-host flags come from the gate above and nowhere else; a caller-supplied
+  // `fetchMode` or `allowPrivateHosts` on the artifact would otherwise reach the artifact
+  // store and skip the config policy.
+  const artifactFields = requestedArtifact
+    ? Object.fromEntries(Object.entries(requestedArtifact).filter(([key]) => key !== 'fetchMode' && key !== 'allowPrivateHosts'))
+    : null;
+  let analysis: MultimodalAnalysisResult;
   try {
-    const analysis = await context.multimodalService.analyze({
+    analysis = await context.multimodalService.analyze({
       ...(typeof body.artifactId === 'string' ? { artifactId: body.artifactId } : {}),
-      ...(requestedArtifact ? {
+      ...(artifactFields ? {
         artifact: {
-          ...requestedArtifact,
+          ...artifactFields,
           ...(privateHostFetchOptions ?? {}),
         },
       } : {}),
@@ -504,34 +578,52 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
       ...(typeof body.detail === 'string' ? { detail: body.detail as MultimodalDetail } : {}),
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
     }, { signal: req.signal });
-    const includePacket = body.includePacket === true;
-    const writeback = body.writeback === true || (typeof body.writeback === 'object' && body.writeback !== null);
-    const writebackBody = typeof body.writeback === 'object' && body.writeback !== null
-      ? body.writeback as Record<string, unknown>
-      : null;
-    const packet = includePacket
-      ? context.multimodalService.buildPacket(
-          analysis,
-          typeof body.detail === 'string' ? body.detail as MultimodalDetail : 'standard',
-        )
-      : undefined;
-    const writebackResult = writeback
-      ? await context.multimodalService.writeBackAnalysis(analysis, {
-          ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
-          ...(typeof writebackBody?.title === 'string' ? { title: writebackBody.title } : {}),
-          ...(Array.isArray(writebackBody?.tags) ? { tags: writebackBody.tags.filter((entry): entry is string => typeof entry === 'string') } : {}),
-          ...(typeof writebackBody?.folderPath === 'string' ? { folderPath: writebackBody.folderPath } : {}),
-          ...(typeof writebackBody?.metadata === 'object' && writebackBody.metadata !== null ? { metadata: writebackBody.metadata as Record<string, unknown> } : {}),
-        }, { signal: req.signal, assertCurrent: () => { if (context.requireAdmin(req)) throw new Error('Multimodal write-back authorization is no longer current.'); } })
-      : undefined;
-    return Response.json({
-      analysis,
-      ...(packet ? { packet } : {}),
-      ...(writebackResult ? { writeback: writebackResult } : {}),
-    }, { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error, { fallbackStatus: 400 });
   }
+  const includePacket = body.includePacket === true;
+  const writeback = body.writeback === true || (typeof body.writeback === 'object' && body.writeback !== null);
+  const writebackBody = typeof body.writeback === 'object' && body.writeback !== null
+    ? body.writeback as Record<string, unknown>
+    : null;
+  let packet: unknown;
+  if (includePacket) {
+    try {
+      packet = context.multimodalService.buildPacket(
+        analysis,
+        typeof body.detail === 'string' ? body.detail as MultimodalDetail : 'standard',
+      );
+    } catch (error) {
+      return readServiceErrorResponse(error, { fallbackStatus: 400 });
+    }
+  }
+  let writebackResult: unknown;
+  let writebackFailure: string | undefined;
+  if (writeback) {
+    try {
+      writebackResult = await context.multimodalService.writeBackAnalysis(analysis, {
+        ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
+        ...(typeof writebackBody?.title === 'string' ? { title: writebackBody.title } : {}),
+        ...(Array.isArray(writebackBody?.tags) ? { tags: writebackBody.tags.filter((entry): entry is string => typeof entry === 'string') } : {}),
+        ...(typeof writebackBody?.folderPath === 'string' ? { folderPath: writebackBody.folderPath } : {}),
+        ...(typeof writebackBody?.metadata === 'object' && writebackBody.metadata !== null ? { metadata: writebackBody.metadata as Record<string, unknown> } : {}),
+      }, { signal: req.signal, assertCurrent: assertWritebackCurrent(context, req) });
+    } catch (error) {
+      // A caller whose access was withdrawn gets the refusal and no analysis. Any other
+      // write-back failure leaves a finished, billed analysis: return it, say the
+      // write-back did not complete, and use 207 so a client cannot read 201 as "stored".
+      if ((error as { readonly code?: unknown } | null)?.code === WRITEBACK_NOT_CURRENT_CODE || req.signal.aborted) {
+        return readServiceErrorResponse(error, { fallbackStatus: 400 });
+      }
+      writebackFailure = summarizeErrorForRecord(error);
+    }
+  }
+  return Response.json({
+    analysis,
+    ...(packet ? { packet } : {}),
+    ...(writebackResult ? { writeback: writebackResult } : {}),
+    ...(writebackFailure !== undefined ? { writebackError: writebackFailure } : {}),
+  }, { status: writebackFailure !== undefined ? 207 : 201 });
 }
 
 async function handleMultimodalPacket(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
@@ -567,10 +659,10 @@ async function handleMultimodalWriteback(context: DaemonMediaRouteContext, req: 
         ...(typeof body.folderPath === 'string' ? { folderPath: body.folderPath } : {}),
         ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
       },
-      { signal: req.signal, assertCurrent: () => { if (context.requireAdmin(req)) throw new Error('Multimodal write-back authorization is no longer current.'); } },
+      { signal: req.signal, assertCurrent: assertWritebackCurrent(context, req) },
     );
     return Response.json({ writeback }, { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error, { fallbackStatus: 400 });
   }
 }

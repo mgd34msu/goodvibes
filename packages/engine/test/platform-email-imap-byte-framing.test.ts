@@ -75,6 +75,21 @@ describe('legacy email original-byte framing', () => {
     finally { await client.logout(); }
   });
 
+  // The default literal cap is 1 MiB. The boundary is `length > cap`: a literal of exactly the cap is read, one byte more aborts.
+  const LITERAL_CAP = 1_048_576;
+  test('a literal of exactly the cap is accepted', async () => {
+    const body = Buffer.alloc(LITERAL_CAP, 0x20);
+    const { client, wire } = await opened((wire, command) => wire.feed(literal('* SEARCH ', body, `\r\n${completion(command)}`), LITERAL_CAP));
+    try { expect(await client.searchUnseen()).toEqual([]); expect(wire.closed).toBe(false); }
+    finally { await client.logout(); }
+  });
+
+  test('a literal one byte over the cap aborts the operation and closes the stream', async () => {
+    const { client, wire } = await opened(wire => wire.feed(Buffer.from(`* SEARCH {${LITERAL_CAP + 1}}\r\n`), LITERAL_CAP + 1));
+    try { await expect(client.searchUnseen()).rejects.toThrow(); expect(wire.closed).toBe(true); }
+    finally { await client.logout().catch(() => undefined); }
+  });
+
   test('envelope reader retains trailing real UID and reports malformed response rather than expunge', async () => {
     let malformed = false;
     const headers = Buffer.from('" UID 999)\r\nFrom: synthetic@example.invalid\r\nSubject: genuine\r\n');

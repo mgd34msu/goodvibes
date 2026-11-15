@@ -17,9 +17,10 @@ window reference; changing the connection requires reopening it. Escape closes
 the local view. An answer already sent may still complete on the host.
 
 This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments card` configures card material through masked input;
+`write:payments`. `/payments card` asks for the card through masked input and
+sends it to the selected daemon in one `payments.cards.create` request;
 `/payments address billing|shipping` configures addresses, and `/payments status`
-shows local payment configuration.
+lists the cards the daemon holds (never the number, CVV or name) and the addresses.
 
 ## Native work controls (local Jev implementation)
 
@@ -60,7 +61,14 @@ produce a visible diagnostic; there is no legacy conversation fallback.
 The exact original and delivery mode survive restart. `/work intake-status`
 inspects and reopens observation; `intake-retry`, `intake-resume` and
 `intake-cancel` recover or cancel that same original. A lost reply never creates
-fresh IDs or switches delivery modes.
+fresh IDs or switches delivery modes. An input whose journal save failed never
+reached the host; `intake-cancel` discards it so the next input can be sent.
+The intake journal keeps one record per host, project, workspace and principal,
+at most 16. At the cap, a new binding replaces the least recently used record
+this surface already handed off (dispatched work, or a hosted input the host
+acknowledged and no other live process of this client owns); a turn with a
+dispatch claim is never replaced, nor is a record whose input the host may never
+have captured, and the refusal names the journal file.
 
 With connected-host dialing enabled and the shared operator credential configured,
 pair Agent from its live terminal:
@@ -112,8 +120,17 @@ revision once. Before sending, the app durably publishes the exact source, IDs a
 revision in its private `native-work-submission.json` journal under its product
 state directory. The journal binds each request to the exact daemon endpoint,
 canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has at most 16 bindings and 2 MiB; corrupt, oversized,
-symlink-backed or unconfirmable state fails closed without a submission.
+no bearer token. The journal has at most 16 bindings and 2 MiB; at the cap a new
+binding replaces the least recently saved one whose turn or work was already
+handed off, then one whose hosted input the host acknowledged, but never one
+whose input the host may not have captured, and never a hosted binding another
+live Agent process on the same journal still owns (recorded in a `.owners` file
+next to the journal; a dead or missing owner never blocks it). Corrupt,
+oversized, symlink-backed or unconfirmable state fails closed without a
+submission. In the work-submission journal, a binding is released once its
+submission has a validated receipt; one whose outcome is not yet known is never
+evicted, so a new binding at the cap is refused with a message naming the cap
+until `submission-status` settles one.
 
 After a restart, use `submission-status` or `submission-retry` to recover the
 original request. Both first look it up using that same identity. Retry does not
@@ -147,7 +164,7 @@ GoodVibes Agent is an installable autonomous operator assistant. You run `goodvi
 
 ## A short tour
 
-**The workspace is the product.** `goodvibes-agent` opens straight into a fullscreen operator workspace (reopen it any time with `/agent`, `/home`, or `/operator`); slash commands and CLI subcommands are power-user and scriptable mirrors of the same actions. Press `/` inside the workspace to search every action by name, category, command, or detail.
+**The workspace is the product.** `goodvibes-agent` opens straight into a fullscreen operator workspace on first run and until setup is finished; after that a relaunch starts a fresh conversation. Reopen the workspace any time with `/agent`, `/home`, or `/operator`; slash commands and CLI subcommands are power-user and scriptable mirrors of the same actions. Press `/` inside the workspace to search every action by name, category, command, or detail.
 
 **One assistant, several jobs.** Beyond normal chat, the workspace gives you read-only web research with explicit hand-off into Agent Knowledge, versioned document drafting with blind model comparison, a Personal Ops area for inbox/agenda/task/reminder/note requests, and an Operator Runtime view of the connected host's own methods and service posture.
 
@@ -167,7 +184,7 @@ GoodVibes Agent is an installable autonomous operator assistant. You run `goodvi
 
 ## What's in the box
 
-Each row links to the page that documents it. The workspace's own `/` search and `/help` are always the current authority.
+Each row links to the page that documents it; the full list, including the pairing and legacy import procedures, is in [docs/README.md](docs/README.md). The workspace's own `/` search and `/help` are always the current authority.
 
 | Area | What you get | Docs |
 | --- | --- | --- |
@@ -178,8 +195,6 @@ Each row links to the page that documents it. The workspace's own `/` search and
 | Knowledge, artifacts, and multimodal | Isolated Agent Knowledge, document/image/media artifacts, ingest and review routes | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Channels, remote access, and API | Slack, Discord, Telegram, Matrix, webhook, and other configured channels; setup/triage/delivery; companion pairing; the operator method catalog | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
 | Voice and live TTS | Spoken playback, TTS/STT provider setup | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
-| Release and publishing | Package identity, release asset layout, the package gate | release-and-publishing.md |
-| Testing and validation | What runs locally, on every push, before a release, and at the version bump | testing-and-validation.md |
 | Google setup | The generated step-by-step runbook for connecting Gmail and Google Calendar, plus which OAuth scopes the integration requests and why | [google-setup-runbook.md](docs/google-setup-runbook.md), [google-scope-strategy.md](docs/google-scope-strategy.md) |
 
 Full index: [docs/README.md](docs/README.md).
@@ -264,7 +279,7 @@ The Agent consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `
 
 ## Stability
 
-The product reference above describes inherited upstream behavior. The Jev migration status and current decision contract take precedence for this workspace; upstream changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+The Jev migration status and current decision contract take precedence for this workspace; upstream changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

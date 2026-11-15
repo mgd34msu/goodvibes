@@ -1,4 +1,5 @@
 import { captureTranscriptSource, readTranscriptIndex, transcriptReadingCanceled, TRANSCRIPT_UNAVAILABLE } from './transcript-reading.js';
+import { describeUnknownTranscriptKind, readTranscriptKind } from './transcript-kinds.js';
 import type { ComposerStateInput, ComposerState } from './composer-state.js';
 import type { TranscriptEventKind } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-jev/engine/platform/platform/core';
@@ -20,30 +21,6 @@ export function createConversationRuntimeCommand<Context extends ConversationRun
   hidden = false,
 ) {
 
-
-function parseTranscriptKind(raw: string | undefined): TranscriptEventKind | 'all' {
-  const normalized = (raw ?? 'all').toLowerCase().replace(/-/g, '_');
-  const allowed = new Set<TranscriptEventKind | 'all'>([
-    'all',
-    'user_input',
-    'assistant_output',
-    'tool_call',
-    'tool_result',
-    'approval_request',
-    'approval_resolution',
-    'task_transition',
-    'remote_status',
-    'policy_warning',
-    'artifact_preview',
-    'contract_state',
-    'session_restore',
-    'diagnostic_notice',
-    'system_notice',
-  ]);
-  return allowed.has(normalized as TranscriptEventKind | 'all')
-    ? (normalized as TranscriptEventKind | 'all')
-    : 'all';
-}
 
 async function buildTranscriptLines(
   ctx: Context,
@@ -169,8 +146,9 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
         }
         if (sub === 'find' || sub === 'search') {
           const trailing = args.length > 2 ? args[args.length - 1] : undefined;
-          const parsedTrailingKind = parseTranscriptKind(trailing);
-          const hasExplicitKind = Boolean(trailing) && parsedTrailingKind !== 'all';
+          // A trailing word that names no kind is part of the query, not a filter.
+          const parsedTrailingKind = readTranscriptKind(trailing);
+          const hasExplicitKind = Boolean(trailing) && parsedTrailingKind !== undefined && parsedTrailingKind !== 'all';
           const kind = hasExplicitKind ? parsedTrailingKind : 'all';
           const queryParts = args.slice(1, hasExplicitKind ? -1 : undefined);
           const query = queryParts.join(' ').trim();
@@ -182,7 +160,11 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
           return;
         }
         if (sub === 'next' || sub === 'prev') {
-          const kind = parseTranscriptKind(args[1]);
+          const kind = readTranscriptKind(args[1]);
+          if (kind === undefined) {
+            ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
+            return;
+          }
           const currentLine = ctx.getScrollTop?.() ?? 0;
           const targetLine = sub === 'next'
             ? await source.conversation.nextTranscriptEventLine(currentLine, kind, { assertCurrent: source.assertCurrent, lifetime: source.lifetime })
@@ -197,7 +179,11 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
           return;
         }
         if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-          const kind = parseTranscriptKind(args[1]);
+          const kind = readTranscriptKind(args[1]);
+          if (kind === undefined) {
+            ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
+            return;
+          }
           const lines = await buildTranscriptLines(ctx, kind, sub, source); source.assertPublishable(); ctx.print(lines.join('\n'));
           return;
         }

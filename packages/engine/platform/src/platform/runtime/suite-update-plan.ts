@@ -24,6 +24,14 @@ export interface SuiteDirectorySelection {
   readonly archiveRoot: string;
   readonly requiredFiles: readonly string[];
 }
+/** The configured WebUI folder is not one this suite manages, so a suite update refuses rather than guess. */
+export class SeparatelyManagedWebuiError extends Error {
+  constructor(readonly webuiDirectory: string) {
+    super(`The configured WebUI (${webuiDirectory}, from controlPlane.webui.bundleDir or web.staticAssetsDir) is separately managed and is not updated with the suite. Update its deployment explicitly, or clear that setting, then update the suite again.`);
+    this.name = 'SeparatelyManagedWebuiError';
+  }
+}
+
 export interface SuiteUpdatePlan {
   readonly version: string;
   readonly root: string;
@@ -97,7 +105,7 @@ export function resolveSuiteUpdatePlan(options: {
   if (options.webuiDirectory?.trim()) {
     const path = resolve(options.webuiDirectory), webuiRoot = join(root, 'webui'), child = relative(webuiRoot, path);
     if (!isAbsolute(options.webuiDirectory) || !child || child.startsWith('..') || isAbsolute(child) || child.includes('/') || child.includes('\\')) {
-      throw new Error('The configured WebUI is separately managed; update its deployment explicitly before updating this suite');
+      throw new SeparatelyManagedWebuiError(options.webuiDirectory.trim());
     }
     directories.push({ kind: 'webui', path, assetName: `goodvibes-webui-bundle-${version}.tar.gz`, archiveRoot: 'goodvibes-webui', requiredFiles: ['index.html'] });
   }

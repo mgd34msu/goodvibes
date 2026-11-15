@@ -25,6 +25,16 @@ export function skipExecContainment(required: boolean, host: Host): boolean {
     || !host.sandbox.bwrapPath || !host.sandbox.networkIsolationGuaranteed);
 }
 
+/**
+ * The required CI lane must fail, not skip, when a live capability a file's tests depend on is missing.
+ * Without it a host lacking the capability turns every real-sandbox test into a silent skip.
+ */
+export function requireLiveHost(capability: string, available: boolean): void {
+  if (!available && execContainmentRequired(process.env[EXEC_CONTAINMENT_REQUIRED_ENV])) {
+    throw new Error(`Required exec containment: ${capability} is unavailable`);
+  }
+}
+
 export function createExecContainmentProof(required: boolean, host: Host) {
   const completed = new Set<Fixture>();
   const assertHost = (): void => {
@@ -52,4 +62,9 @@ export function createExecContainmentProof(required: boolean, host: Host) {
       if (missing.length > 0) throw new Error(`Required exec containment fixtures did not complete: ${missing.join(', ')}`);
     },
   };
+}
+
+/** An optional local run without the containment backend skips its isolation proofs; say so instead of reporting a quiet green. */
+export function noteSkippedContainment(file: string, available: boolean): void {
+  if (!available) console.warn(`${file}: captured exec containment is unavailable here, so its isolation proofs are skipped (CI requires them with ${EXEC_CONTAINMENT_REQUIRED_ENV}=1)`);
 }

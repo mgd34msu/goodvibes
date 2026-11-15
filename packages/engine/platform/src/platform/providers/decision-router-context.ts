@@ -68,7 +68,39 @@ export function rememberRoutingTask(prompt: string): string {
   return preview(prompt, 1000).text;
 }
 
-/** Exact selected file headers only; hunk contents stay in answering context. */
+/**
+ * Exact selected file headers only; hunk contents stay in answering context.
+ * Hunk bodies are skipped by their line counts, so a removed `-- note` line
+ * (shown as `--- note`) is never read as a header, and `/dev/null` is not a file.
+ */
 export function selectedRoutingFiles(unifiedDiff: string | undefined): readonly string[] {
-  return unifiedDiff?.split('\n').filter(line => line.startsWith('--- ') || line.startsWith('+++ ')).map(line => line.slice(4)) ?? [];
+  if (!unifiedDiff) return [];
+  const lines = unifiedDiff.split('\n');
+  const files: string[] = [];
+  let oldLeft = 0;
+  let newLeft = 0;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith('+')) newLeft--;
+      else if (line.startsWith('-')) oldLeft--;
+      else if (!line.startsWith('\\')) { oldLeft--; newLeft--; }
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+      newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      continue;
+    }
+    if (line.startsWith('--- ') && (lines[index + 1] ?? '').startsWith('+++ ')) {
+      for (const header of [line, lines[index + 1]!]) {
+        // A header may carry a tab and a timestamp after the path.
+        const name = header.slice(4).split('\t')[0]!;
+        if (name !== '/dev/null') files.push(name);
+      }
+      index++;
+    }
+  }
+  return files;
 }

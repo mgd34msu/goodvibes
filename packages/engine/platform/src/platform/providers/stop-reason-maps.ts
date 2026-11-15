@@ -83,7 +83,11 @@ export function mapLlamaCppStopReason(
 ): ChatStopReason {
   if (hasToolCalls || finishReason === 'tool_calls') return 'tool_call';
   if (finishReason === 'length') return 'max_tokens';
-  return 'completed';
+  if (finishReason === 'content_filter') return 'content_filter';
+  // An absent reason, or the plain 'stop', is a natural end; a value this table
+  // does not know is reported as unknown rather than as a clean completion.
+  if (finishReason === undefined || finishReason === null || finishReason === '' || finishReason === 'stop') return 'completed';
+  return 'unknown';
 }
 
 /**
@@ -119,16 +123,34 @@ export async function readOllamaStopReason(
 }
 
 /**
- * Maps OpenAI Codex (responses API) status values to the canonical ChatStopReason vocab.
+ * Maps a Responses API status to the canonical ChatStopReason vocab. Codex and
+ * LM Studio speak the same status values. `incompleteReason` is the response's
+ * `incomplete_details.reason` when it carries one: `max_output_tokens` is a
+ * truncation, `content_filter` a filtered answer; an incomplete response that
+ * names no reason keeps the truncation reading.
  */
+function mapResponsesStopReason(
+  status: string | undefined,
+  hasToolCalls: boolean,
+  incompleteReason?: string | undefined,
+): ChatStopReason {
+  if (hasToolCalls && status === 'completed') return 'tool_call';
+  if (status === 'incomplete') {
+    if (incompleteReason === 'content_filter') return 'content_filter';
+    if (incompleteReason === undefined || incompleteReason === 'max_output_tokens' || incompleteReason === 'max_tokens') return 'max_tokens';
+    return 'unknown';
+  }
+  if (status === 'failed' || status === 'cancelled') return 'error';
+  return 'completed';
+}
+
+/** Maps OpenAI Codex (responses API) status values to the canonical ChatStopReason vocab. */
 export function mapCodexStopReason(
   status: string | undefined,
   hasToolCalls: boolean,
+  incompleteReason?: string | undefined,
 ): ChatStopReason {
-  if (hasToolCalls && status === 'completed') return 'tool_call';
-  if (status === 'incomplete') return 'max_tokens';
-  if (status === 'failed' || status === 'cancelled') return 'error';
-  return 'completed';
+  return mapResponsesStopReason(status, hasToolCalls, incompleteReason);
 }
 
 /**
@@ -138,9 +160,7 @@ export function mapCodexStopReason(
 export function mapLmStudioStopReason(
   status: string | undefined,
   hasToolCalls: boolean,
+  incompleteReason?: string | undefined,
 ): ChatStopReason {
-  if (hasToolCalls && status === 'completed') return 'tool_call';
-  if (status === 'incomplete') return 'max_tokens';
-  if (status === 'failed' || status === 'cancelled') return 'error';
-  return 'completed';
+  return mapResponsesStopReason(status, hasToolCalls, incompleteReason);
 }

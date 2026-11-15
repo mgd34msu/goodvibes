@@ -26,6 +26,11 @@ on:
         description: Full commit containing the acceptance tooling to run.
         required: true
         type: string
+      recheck:
+        description: Re-verify an already published release, which need not be the latest one.
+        required: false
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       tag:
@@ -49,6 +54,11 @@ on:
         description: Immutable caller commit containing the current acceptance entrypoint.
         required: true
         type: string
+      recheck:
+        description: Re-verify an already published release, which need not be the latest one.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -91,6 +101,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
+          GOODVIBES_ACCEPTANCE_MODE: ${{ inputs.recheck && 'recheck' || 'release' }}
         run: node scripts/accept-published-suite.mjs "$RELEASE_TAG" "$RELEASE_SOURCE" "$RELEASE_TARGET"
       - name: Preserve bounded native acceptance result
         if: always()
@@ -104,7 +115,8 @@ jobs:
   previous-release-upgrade:
     # Four original hosted accounts exercise the real previous published suite.
     # A release with no earlier version tag has nothing to upgrade from.
-    if: inputs.previous-tag != '' && inputs.previous-source != ''
+    # Either input alone still runs the job so its identity check refuses a partial pair; only both empty (a first release) skips.
+    if: inputs.previous-tag != '' || inputs.previous-source != ''
     strategy:
       fail-fast: false
       matrix:
@@ -144,8 +156,8 @@ jobs:
           [[ "$TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PREVIOUS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
-          [[ "$PREVIOUS_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$PREVIOUS_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$PREVIOUS_TAG" != "$RELEASE_TAG"
           test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
           test "$(git -C candidate-source rev-parse HEAD)" = "$SOURCE_SHA"
@@ -166,6 +178,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SOURCE: ${{ inputs.source }}
           RELEASE_TARGET: ${{ matrix.target }}
+          GOODVIBES_ACCEPTANCE_MODE: ${{ inputs.recheck && 'recheck' || 'release' }}
           PREVIOUS_TAG: ${{ inputs.previous-tag }}
           PREVIOUS_SOURCE: ${{ inputs.previous-source }}
           CANDIDATE_SOURCE_ROOT: ${{ github.workspace }}/candidate-source

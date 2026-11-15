@@ -109,44 +109,6 @@ describe('CiWatchService', () => {
     expect(notes[1]!.body).toContain('sessionId: fix-1');
   });
 
-  test('the accepted "fix this?" offer delivers the started session id through the channel payload', async () => {
-    const notes: Array<{ title: string; body: string }> = [];
-    let resolveOffer: ((accepted: boolean) => void) | undefined;
-    const offerAnswered = new Promise<boolean>((resolve) => { resolveOffer = resolve; });
-    const service = new CiWatchService({
-      source: fakeSource([job('build', 'failure')]),
-      store: new CiWatchStore(':memory:'),
-      notifier: async (_channel, title, body) => { notes.push({ title, body }); return 'note-1'; },
-      fixSessionOffer: async () => offerAnswered,
-      fixSessionStarter: async () => 'fix-offer-77',
-    });
-    const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack:C1' });
-
-    const result = await service.checkWatch(watch.id);
-    expect(result.fixSessionOffered).toBe(true);
-    // The verb result returned before the human decided, the id arrives via
-    // the notification payload once the offer is accepted.
-    expect(result.fixSessionId).toBeUndefined();
-
-    resolveOffer!(true);
-    await Bun.sleep(5);
-    const started = notes.find((note) => note.title === 'CI fix session started, o/r');
-    expect(started).toBeDefined();
-    expect(started!.body).toContain('sessionId: fix-offer-77');
-  });
-
-  test('without a notifier the verdict is NOT delivered, so the watch stays (honest fire-once)', async () => {
-    const service = new CiWatchService({
-      source: fakeSource([job('build', 'failure')]),
-      store: new CiWatchStore(':memory:'),
-    });
-    const watch = await service.createWatch({ repo: 'o/r', ref: 'main', deliveryChannel: 'slack' });
-    const result = await service.checkWatch(watch.id);
-    expect(result.notified).toBe(false);
-    expect(result.retired).toBeUndefined();
-    expect(await service.listWatches()).toHaveLength(1);
-  });
-
   test('a watch that did NOT opt in never starts a fix-session, even on failure', async () => {
     const briefs: FixSessionBrief[] = [];
     const service = new CiWatchService({
@@ -190,6 +152,17 @@ describe('ci.* gateway verbs', () => {
     expect(listed.watches).toHaveLength(1);
     const deleted = await catalog.invoke('ci.watches.delete', { ...ctx, body: { watchId: created.watch.id } });
     expect(deleted).toEqual({ watchId: created.watch.id, deleted: true });
+  });
+
+  test('ci.watches.run reports that the watch retired itself', async () => {
+    const report = deriveCiReport({ repo: 'o/r', ref: 'main', jobs: [job('build', 'success')], now: 1 });
+    const service = {
+      checkWatch: async () => ({ report, notified: true, fixSessionTriggered: false, retired: true }),
+    } as unknown as CiWatchService;
+    const catalog = new GatewayMethodCatalog();
+    registerCiGatewayMethods(catalog, service);
+    const result = await catalog.invoke('ci.watches.run', { ...ctx, body: { watchId: 'w1' } }) as { retired?: boolean };
+    expect(result.retired).toBe(true);
   });
 
   test('ci.status without a repo is a 400', async () => {

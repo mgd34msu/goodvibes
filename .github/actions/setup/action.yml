@@ -19,7 +19,7 @@ runs:
       working-directory: ${{ github.workspace }}
       run: bun install --frozen-lockfile
     - name: Save Bun install cache
-      if: always() && steps.bun-cache-restore.outputs.cache-hit != 'true'
+      if: steps.bun-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: ~/.bun/install/cache

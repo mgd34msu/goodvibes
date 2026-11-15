@@ -363,6 +363,9 @@ export function projectAgentToolDependencies<
       readonly featureFlags: unknown;
       readonly overflowHandler: unknown;
       readonly memoryRegistry: unknown;
+      /** The memory spine under the name the product gives it; `active` is true while memory goes over the wire. */
+      readonly memorySpineClient?: { readonly active: boolean } | undefined;
+      readonly memorySpine?: { readonly active: boolean } | undefined;
       readonly sandboxSessionRegistry: unknown;
       readonly workflow: unknown;
       readonly contextAccountingHolder: unknown;
@@ -400,6 +403,7 @@ export function projectAgentToolDependencies<
     featureFlags: input.services.featureFlags,
     overflowHandler: input.services.overflowHandler,
     memoryRegistry: input.services.memoryRegistry,
+    memoryRoutedOverWire: () => (input.services.memorySpineClient ?? input.services.memorySpine)?.active === true,
     sandboxSessionRegistry: input.services.sandboxSessionRegistry,
     workflowServices: input.services.workflow,
     contextAccountingHolder: input.services.contextAccountingHolder,
@@ -431,6 +435,7 @@ export function projectAgentToolDependencies<
     featureFlags: Input['services']['featureFlags'];
     overflowHandler: Input['services']['overflowHandler'];
     memoryRegistry: Input['services']['memoryRegistry'];
+    memoryRoutedOverWire: () => boolean;
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     workflowServices: Input['services']['workflow'];
     contextAccountingHolder: Input['services']['contextAccountingHolder'];

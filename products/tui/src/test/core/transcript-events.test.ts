@@ -1,5 +1,5 @@
 import { TranscriptReadingLifetime } from '@goodvibes-jev/engine/platform/platform/core';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort, JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation';
@@ -145,6 +145,7 @@ for (const direction of ['next', 'prev']) test(`${direction} navigation rejects 
     }
   }
   const options = { lifetime: new Lifetime() };
-  await expect(direction === 'next' ? manager.nextTranscriptEventLine(0, 'all', options) : manager.prevTranscriptEventLine(0, 'all', options)).rejects.toBeDefined();
-  expect(checks).toBe(3);
+  await expect(direction === 'next' ? manager.nextTranscriptEventLine(0, 'all', options) : manager.prevTranscriptEventLine(0, 'all', options)).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
+  // The retirement is injected on the third check; a refactor may add checks but not remove it.
+  expect(checks).toBeGreaterThanOrEqual(3);
 });

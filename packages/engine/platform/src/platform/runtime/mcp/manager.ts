@@ -1,8 +1,8 @@
 /**
  * McpLifecycleManager, drives the MCP server state machine.
  *
- * Gated by the `mcp-lifecycle` capability gate (runtime.mcpLifecycle). When the gate is off
- * callers should use the standard MCP registry path instead.
+ * No GoodVibes product composes this manager (the `mcp-lifecycle` gate is marked not operable);
+ * MCP servers connect through the standard MCP registry.
  *
  * Responsibilities:
  *   - Track per-server McpServerEntry state
@@ -309,8 +309,20 @@ export class McpLifecycleManager {
   private async _startServer(config: McpServerConfig): Promise<void> {
     const { name } = config;
 
-    if (this.servers.has(name)) {
-      logger.info('McpLifecycleManager: server already registered', { name });
+    const existing = this.servers.get(name);
+    if (existing) {
+      // A stopped or retry-exhausted server is `disconnected`, and the table lets
+      // it move to `connecting`: starting it again is how an operator restarts it.
+      // Any other state means it is already running or about to run.
+      if (existing.state !== 'disconnected' && existing.state !== 'auth_required') {
+        logger.info('McpLifecycleManager: server already registered', { name, state: existing.state });
+        return;
+      }
+      existing.config = config;
+      existing.reconnectAttempts = 0;
+      existing.reconnectPending = false;
+      delete existing.lastError;
+      await this._connect(name);
       return;
     }
 
@@ -335,7 +347,11 @@ export class McpLifecycleManager {
       errorCount: 0,
     };
     this.servers.set(name, entry);
-    this._emit({ type: 'MCP_CONFIGURED', serverId: name, transport: 'stdio' });
+    this._emit({
+      type: 'MCP_CONFIGURED',
+      serverId: name,
+      transport: config.url ? 'http' : 'stdio',
+    });
 
     // Begin connection attempt
     await this._connect(name);
@@ -430,6 +446,9 @@ export class McpLifecycleManager {
       this.clients.delete(serverName);
     }
 
+    // Stopping a server that is already disconnected has nothing to change: it
+    // must not log a refused move or overwrite the reason it was stopped before.
+    if (entry.state === 'disconnected') return;
     entry.disconnectedAt = Date.now();
     entry.lastError = reason;
     if (this._setState(entry, 'disconnected')) {

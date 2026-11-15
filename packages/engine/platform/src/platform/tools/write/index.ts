@@ -3,11 +3,11 @@ import { captureFileEffectRevision } from '../shared/file-effect-revision.js';
 import type { CapturedWriteRevision } from '../shared/captured-write-revision.js';
 import { assertCapturedToolWriteRevision, captureCapturedToolWriteRevision, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, hasCapturedToolInvocation, prepareCapturedToolBackup } from '../shared/captured-input-tools.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
-import { chmodSync, lstatSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, unlinkSync } from 'node:fs';
-import { dirname, extname, join, relative } from 'node:path';
+import { chmodSync, lstatSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmdirSync, statSync, writeFileSync, copyFileSync, unlinkSync } from 'node:fs';
+import { dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
-import { WRITE_SCHEMA, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
+import { WRITE_SCHEMA, WRITE_TEXT_ENCODINGS, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
 import { runValidators, formatValidatorFailure, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
@@ -19,8 +19,10 @@ import { isNotebookFile } from '../../utils/notebook.js';
 import { logger } from '../../utils/logger.js';
 import type { SessionChangeTracker } from '../../sessions/change-tracker.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { resolveWritablePath } from '../../utils/path-safety.js';
+import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
 import { collectPostEditDiagnostics, type DiagnosticsProvider } from '../shared/post-edit-diagnostics.js';
+import { ToolInputProjectionError } from '../input-projection.js';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -42,6 +44,21 @@ interface FileWriteResult {
   would_write?: boolean | undefined;
   /** decoded content, used internally to avoid double resolveContent call */
   _content?: string | undefined;
+  /** The exact bytes written when the payload is not valid UTF-8 text; `_content` is then unset. */
+  _bytes?: Buffer | undefined;
+}
+
+/** The topmost directory a write had to create, so a rolled-back new file can take its empty parents with it. */
+const createdDirectories = new WeakMap<FileWriteResult, string>();
+
+/** Remove the directories a rolled-back write created, innermost first; anything not empty stays. */
+function removeCreatedDirectories(written: FileWriteResult): void {
+  const top = createdDirectories.get(written);
+  if (top === undefined) return;
+  for (let directory = dirname(written.resolved_path); directory === top || directory.startsWith(`${top}${sep}`); directory = dirname(directory)) {
+    try { rmdirSync(directory); } catch { return; }
+    if (directory === top) return;
+  }
 }
 
 interface WriteOutput {
@@ -67,15 +84,21 @@ function appendWarning(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** What a file entry writes: text, or exact bytes when a base64 payload is not valid UTF-8 text. */
+type ResolvedContent = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'bytes'; readonly bytes: Buffer };
+
 /**
- * Decode content from either the raw string or base64 field.
- * Returns the decoded string content.
+ * Decode content from either the raw string or base64 field. A base64 payload
+ * that round-trips as UTF-8 is text; anything else is kept as bytes, because
+ * decoding it as text would replace the invalid sequences and corrupt the file.
  */
-function resolveContent(fileInput: WriteFileInput): string {
+function resolveContent(fileInput: WriteFileInput): ResolvedContent {
   if (fileInput.content_base64 !== undefined) {
-    return Buffer.from(fileInput.content_base64, 'base64').toString('utf-8');
+    const bytes = Buffer.from(fileInput.content_base64, 'base64');
+    const text = bytes.toString('utf-8');
+    return Buffer.from(text, 'utf-8').equals(bytes) ? { kind: 'text', text } : { kind: 'bytes', bytes };
   }
-  return fileInput.content ?? '';
+  return { kind: 'text', text: fileInput.content ?? '' };
 }
 
 /**
@@ -147,11 +170,28 @@ function validateNotebookContent(
   return { valid: true, notebook: nb };
 }
 
+const MAX_LINK_HOPS = 40;
+
+/** The path a write to `path` really lands on: each symbolic link is followed to what it points at. */
+function followLinks(path: string): string {
+  let current = path;
+  for (let hops = 0; hops < MAX_LINK_HOPS; hops += 1) {
+    let isLink = false;
+    try { isLink = lstatSync(current).isSymbolicLink(); } catch { return current; }
+    if (!isLink) return current;
+    current = resolvePath(dirname(current), readlinkSync(current));
+  }
+  throw new Error(`Too many levels of symbolic links at '${path}'`);
+}
+
 /**
  * Atomically write content to a file.
  * Writes to a temp file first, then renames to the target path.
  */
-function atomicWrite(targetPath: string, content: string | Buffer, encoding: BufferEncoding = 'utf-8'): void {
+function atomicWrite(requestedPath: string, content: string | Buffer, encoding: BufferEncoding = 'utf-8'): void {
+  // A symbolic link is written through: replacing the link itself with a regular file
+  // would drop the link and give the new file the link's 0777 mode.
+  const targetPath = followLinks(requestedPath);
   const rand = randomBytes(4).toString('hex');
   const tmpPath = `${targetPath}.tmp.${rand}`;
   try {
@@ -160,6 +200,7 @@ function atomicWrite(targetPath: string, content: string | Buffer, encoding: Buf
     writeFileSync(tmpPath, content, { encoding, flag: 'wx', mode: 0o600 });
     chmodSync(tmpPath, mode);
     renameSync(tmpPath, targetPath);
+    noteProjectFilesChanged();
   } catch (err) {
     // Clean up temp file if rename failed
     try {
@@ -193,20 +234,33 @@ function processSingleWrite(
   // Resolve and validate path
   let resolvedPath: string;
   try {
-    resolvedPath = resolveAndValidatePath(fileInput.path, projectRoot);
+    resolvedPath = resolveWritablePath(fileInput.path, projectRoot);
   } catch (err) {
     return { ok: false, error: `Path error for '${fileInput.path}': ${summarizeError(err)}` };
   }
 
   const mode: WriteMode = fileInput.mode ?? 'fail_if_exists';
 
+  // content is text and content_base64 is bytes; sending neither would truncate the file and sending both is ambiguous.
+  if (fileInput.content === undefined && fileInput.content_base64 === undefined) {
+    return { ok: false, error: `No content for '${fileInput.path}': provide content (text, an empty string is allowed) or content_base64. Nothing was written.` };
+  }
+  if (fileInput.content !== undefined && fileInput.content_base64 !== undefined) {
+    return { ok: false, error: `Both content and content_base64 were given for '${fileInput.path}': provide exactly one. Nothing was written.` };
+  }
+
   // Validate encoding
-  const VALID_ENCODINGS = new Set(['utf-8', 'utf8', 'ascii', 'latin1', 'base64', 'hex', 'binary']);
-  if (fileInput.encoding && !VALID_ENCODINGS.has(fileInput.encoding)) {
+  const textEncodings: readonly string[] = WRITE_TEXT_ENCODINGS;
+  if (fileInput.encoding && !textEncodings.includes(fileInput.encoding)) {
     return {
       ok: false,
-      error: `Invalid encoding: '${fileInput.encoding}'. Valid: ${[...VALID_ENCODINGS].join(', ')}`,
+      error: fileInput.encoding === 'hex' || fileInput.encoding === 'base64'
+        ? `Encoding '${fileInput.encoding}' cannot be used with content: content is text. Send bytes as content_base64. Nothing was written.`
+        : `Invalid encoding: '${fileInput.encoding}'. Valid: ${textEncodings.join(', ')}`,
     };
+  }
+  if (fileInput.content_base64 !== undefined && fileInput.encoding && fileInput.encoding !== 'utf-8' && fileInput.encoding !== 'utf8') {
+    return { ok: false, error: `encoding '${fileInput.encoding}' does not apply to content_base64, which is written as the decoded bytes; omit it.` };
   }
   const encoding: BufferEncoding = (fileInput.encoding as BufferEncoding) ?? 'utf-8';
 
@@ -221,7 +275,13 @@ function processSingleWrite(
     }
   }
 
-  let content = resolveContent(fileInput);
+  const resolvedContent = resolveContent(fileInput);
+  let content = resolvedContent.kind === 'text' ? resolvedContent.text : '';
+  // A narrow text encoding re-encodes each character; one it cannot hold would be written as something else.
+  if (resolvedContent.kind === 'text' && fileInput.content !== undefined && encoding !== 'utf-8' && encoding !== 'utf8'
+    && Buffer.from(content, encoding).toString(encoding) !== content) {
+    return { ok: false, error: `The text for '${fileInput.path}' has characters that encoding '${encoding}' cannot hold; use utf-8. Nothing was written.` };
+  }
 
   // Notebook validation and normalization
   if (isNotebookFile(resolvedPath)) {
@@ -237,7 +297,7 @@ function processSingleWrite(
     content = JSON.stringify(validation.notebook, null, 1) + '\n';
   }
 
-  const byteSize = Buffer.byteLength(content, encoding);
+  const byteSize = resolvedContent.kind === 'bytes' ? resolvedContent.bytes.length : Buffer.byteLength(content, encoding);
 
   const alreadyExists = existsSync(resolvedPath);
 
@@ -253,7 +313,7 @@ function processSingleWrite(
     resolved_path: resolvedPath,
     bytes_written: byteSize,
     mode_applied: mode,
-    _content: content,
+    ...(resolvedContent.kind === 'bytes' ? { _bytes: resolvedContent.bytes } : { _content: content }),
   };
 
   if (dryRun) {
@@ -288,7 +348,8 @@ function processSingleWrite(
   // Auto-create parent directories
   try {
     assertCurrent();
-    mkdirSync(dirname(resolvedPath), { recursive: true });
+    const created = mkdirSync(dirname(resolvedPath), { recursive: true });
+    if (created !== undefined) createdDirectories.set(result, created);
   } catch (err) {
     return {
       ok: false,
@@ -299,7 +360,7 @@ function processSingleWrite(
   // Atomic write
   try {
     assertCurrent();
-    atomicWrite(resolvedPath, content, encoding);
+    atomicWrite(resolvedPath, resolvedContent.kind === 'bytes' ? resolvedContent.bytes : content, encoding);
   } catch (err) {
     return {
       ok: false,
@@ -313,6 +374,24 @@ function processSingleWrite(
 // ---------------------------------------------------------------------------
 // Format output
 // ---------------------------------------------------------------------------
+
+/**
+ * Adds the files a non-atomic batch already wrote to an error that ends the
+ * batch early. The error object itself keeps its identity and class, since
+ * callers classify terminal failures by them; abort reasons and frozen errors
+ * are left untouched.
+ */
+function annotateWrittenFiles(error: unknown, results: FileWriteResult[], transactionMode: string): void {
+  if (transactionMode === 'atomic' || !(error instanceof Error) || error instanceof DOMException) return;
+  if (error instanceof ToolInputProjectionError) return;
+  const written = results.filter((result) => !result.would_write).map((result) => result.path);
+  if (written.length === 0) return;
+  try {
+    error.message += `. Files already written by this call before it stopped: ${written.join(', ')}`;
+  } catch {
+    // Frozen errors keep their original message.
+  }
+}
 
 function formatOutput(
   results: FileWriteResult[],
@@ -335,7 +414,7 @@ function formatOutput(
   }
 
   if (verbosity === 'minimal') {
-    base.files = results.map(({ _content: _, ...r }) => ({
+    base.files = results.map(({ _content: _, _bytes: __, ...r }) => ({
       path: r.path,
       resolved_path: r.resolved_path,
       bytes_written: r.bytes_written,
@@ -349,7 +428,7 @@ function formatOutput(
   }
 
   // standard and verbose both include full results (strip internal _content field)
-  base.files = results.map(({ _content: _, ...r }) => r);
+  base.files = results.map(({ _content: _, _bytes: __, ...r }) => r);
   return base;
 }
 
@@ -436,14 +515,21 @@ export function createWriteTool(options?: {
             assertCapturedToolMutationCurrent(written.resolved_path);
             const snapshot = snapshots.get(written.resolved_path);
             if (snapshot === null || snapshot === undefined) {
-              // File was new - delete it
+              // File was new - delete it, and the bookkeeping that named it.
               unlinkSync(written.resolved_path);
+              options?.fileCache?.invalidate(written.resolved_path);
+              options?.projectIndex?.removeFile(written.resolved_path);
+              removeCreatedDirectories(written);
             } else {
               // File existed before - restore original
               atomicWrite(written.resolved_path, snapshot);
               const mode = snapshotModes.get(written.resolved_path);
               if (mode !== undefined) chmodSync(written.resolved_path, mode);
               options?.fileCache?.update(written.resolved_path, snapshot.toString());
+              // The original is back in place; this call's own backup copy of it is redundant.
+              if (!captured && written.backup_path && existsSync(written.backup_path)) {
+                try { unlinkSync(written.backup_path); } catch { /* a leftover backup is harmless */ }
+              }
             }
             rolledBack.push(written.path);
           } catch (rollbackErr) {
@@ -474,7 +560,7 @@ export function createWriteTool(options?: {
         for (const fileInput of input.files) {
           if (!fileInput.path || typeof fileInput.path !== 'string')
             return { success: false, error: "Atomic transaction has an invalid file path" };
-          const path = resolveAndValidatePath(fileInput.path, projectRoot);
+          const path = resolveWritablePath(fileInput.path, projectRoot);
           await assertCapturedToolReadAccess(path);
           if (options.capturedReadAccess && !await options.capturedReadAccess(path))
             throw new Error('Captured write path is access-restricted');
@@ -485,7 +571,7 @@ export function createWriteTool(options?: {
           willExist.add(path);
           if (!snapshots.has(path)) {
             snapshots.set(path, existsSync(path) ? readFileSync(path) : null);
-            if (existsSync(path)) snapshotModes.set(path, lstatSync(path).mode & 0o777);
+            if (existsSync(path)) snapshotModes.set(path, statSync(path).mode & 0o777);
           }
           if (fileInput.mode === 'backup') backups.set(fileInput, await prepareCapturedToolBackup(path, dryRun));
         }
@@ -494,15 +580,18 @@ export function createWriteTool(options?: {
         assertCapturedToolMutationCurrent();
         for (const [path, before] of snapshots) {
           assertCapturedToolMutationCurrent(path);
-          if (before === null ? existsSync(path) : !existsSync(path) || !Buffer.from(before).equals(readFileSync(path)) || (snapshotModes.has(path) && (lstatSync(path).mode & 0o777) !== snapshotModes.get(path)))
+          if (before === null ? existsSync(path) : !existsSync(path) || !Buffer.from(before).equals(readFileSync(path)) || (snapshotModes.has(path) && (statSync(path).mode & 0o777) !== snapshotModes.get(path)))
             throw new Error('Captured atomic write conflicts with changed input');
           if (before !== null) initialRevisions.set(path, captureCapturedToolWriteRevision(path, Buffer.from(before)));
         }
       }
 
-      for (const fileInput of input.files) {
+      // A throw part-way through a non-atomic batch leaves earlier files on
+      // disk; the error then names them so a retry does not redo blind.
+      try {
+      for (const [fileIndex, fileInput] of input.files.entries()) {
         if (!fileInput || !fileInput.path || typeof fileInput.path !== 'string') {
-          const error = "Invalid file entry: missing or invalid 'path' field.";
+          const error = `files[${fileIndex}]: invalid file entry: missing or invalid 'path' field.`;
           if (transactionMode === 'atomic') return await rollbackAtomic(String(fileInput?.path ?? '<invalid>'), error);
           errors.push(error);
           continue;
@@ -510,12 +599,12 @@ export function createWriteTool(options?: {
 
         if (!capturedAtomic && (captured || options.capturedReadAccess)) {
           try {
-            const path = resolveAndValidatePath(fileInput.path, projectRoot);
+            const path = resolveWritablePath(fileInput.path, projectRoot);
             await assertCapturedToolReadAccess(path);
             if (options.capturedReadAccess && !await options.capturedReadAccess(path)) {
               const error = 'Captured write path is access-restricted';
               if (transactionMode === 'atomic') return await rollbackAtomic(fileInput.path, error);
-              errors.push(error);
+              errors.push(`${fileInput.path}: ${error}`);
               continue;
             }
             if (captured && fileInput.mode === 'backup') backups.set(fileInput, await prepareCapturedToolBackup(path, dryRun));
@@ -528,7 +617,7 @@ export function createWriteTool(options?: {
         try {
           assertCurrent();
           if (captured) {
-            const path = resolveAndValidatePath(fileInput.path, projectRoot);
+            const path = resolveWritablePath(fileInput.path, projectRoot);
             if (capturedAtomic) {
               await assertCapturedToolReadAccess(path);
               const revision = revisions.get(path) ?? initialRevisions.get(path);
@@ -543,10 +632,12 @@ export function createWriteTool(options?: {
         let beforeContent: string | null = null;
         let beforeBytes: Buffer | null = null;
         let existedBeforeWrite = false;
+        // Undo compares the file read as UTF-8; a latin1/ascii/binary write would never match, so it gets no undo entry.
+        let undoable = !fileInput.encoding || fileInput.encoding === 'utf-8' || fileInput.encoding === 'utf8';
         if (!preparationError && !dryRun && fileInput.path) {
           let resolvedForUndo: string | undefined;
           try {
-            resolvedForUndo = resolveAndValidatePath(fileInput.path, projectRoot);
+            resolvedForUndo = resolveWritablePath(fileInput.path, projectRoot);
           } catch (err) {
             logger.warn('write tool: failed to resolve path for before-write snapshot', {
               path: fileInput.path,
@@ -559,6 +650,8 @@ export function createWriteTool(options?: {
             try {
               beforeBytes = readFileSync(resolvedForUndo);
               beforeContent = beforeBytes.toString('utf-8');
+              // Undo restores text; a file that is not valid UTF-8 would come back altered, so it gets no undo entry.
+              if (!Buffer.from(beforeContent, 'utf-8').equals(beforeBytes)) { undoable = false; beforeContent = null; }
               if (authenticated && transactionMode === 'atomic') captureFileEffectRevision(resolvedForUndo, beforeBytes)();
             } catch (err) {
               const warning = `Failed to read existing content before writing '${fileInput.path}': ${summarizeError(err)}`;
@@ -574,7 +667,7 @@ export function createWriteTool(options?: {
           if (transactionMode === 'atomic' && resolvedForUndo && !snapshots.has(resolvedForUndo)) {
             try {
               snapshots.set(resolvedForUndo, existedBeforeWrite ? beforeBytes : null);
-              if (existedBeforeWrite) snapshotModes.set(resolvedForUndo, lstatSync(resolvedForUndo).mode & 0o777);
+              if (existedBeforeWrite) snapshotModes.set(resolvedForUndo, statSync(resolvedForUndo).mode & 0o777);
             } catch (err) {
               return await rollbackAtomic(fileInput.path, `Atomic transaction cannot safely snapshot '${fileInput.path}': ${summarizeError(err)}`);
             }
@@ -583,10 +676,10 @@ export function createWriteTool(options?: {
 
         const outcome = preparationError
           ? { ok: false as const, error: preparationError }
-          : processSingleWrite(fileInput, projectRoot, dryRun, backups.get(fileInput), capturedAtomic ? revisions.get(resolveAndValidatePath(fileInput.path, projectRoot)) : undefined, assertCurrent);
+          : processSingleWrite(fileInput, projectRoot, dryRun, backups.get(fileInput), capturedAtomic ? revisions.get(resolveWritablePath(fileInput.path, projectRoot)) : undefined, assertCurrent);
 
         if (!outcome.ok) {
-          errors.push(outcome.error);
+          errors.push(outcome.error.includes(fileInput.path) ? outcome.error : `${fileInput.path}: ${outcome.error}`);
           logger.warn('write tool: file write failed', { path: fileInput.path, error: outcome.error });
 
           // Atomic transaction: rollback all successfully written files
@@ -596,19 +689,20 @@ export function createWriteTool(options?: {
         }
 
         results.push(outcome.result);
-        if (authenticated && !dryRun) ownedRevisions.set(outcome.result.resolved_path, captureFileEffectRevision(outcome.result.resolved_path,
-          Buffer.from(outcome.result._content ?? '', (fileInput.encoding as BufferEncoding) ?? 'utf-8')));
+        // The bytes this write put on disk: exact for a binary payload, the encoded text otherwise.
+        const writtenBytes = () => outcome.result._bytes ?? Buffer.from(outcome.result._content ?? '', (fileInput.encoding as BufferEncoding) ?? 'utf-8');
+        if (authenticated && !dryRun) ownedRevisions.set(outcome.result.resolved_path, captureFileEffectRevision(outcome.result.resolved_path, writtenBytes()));
         if (captured && !dryRun && (capturedAtomic || options.fileUndoManager)) {
-          revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path,
-            Buffer.from(outcome.result._content ?? '', (fileInput.encoding as BufferEncoding) ?? 'utf-8')));
+          revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path, writtenBytes()));
         }
 
         // State integration, only for real writes, not dry runs
         if (!dryRun) {
           let content = outcome.result._content ?? '';
           const retainedPath = outcome.result.resolved_path;
+          const writeResult = outcome.result;
           async function recordRetainedCapturedWrite(): Promise<void> {
-            if (!captured || !options?.fileUndoManager) return;
+            if (!captured || !options?.fileUndoManager || !undoable || writeResult._bytes) return;
             // A failed repair can leave its initial write intact. History must
             // only describe bytes still owned under live read/mutation authority.
             try {
@@ -621,6 +715,96 @@ export function createWriteTool(options?: {
               options.fileUndoManager.snapshot({ path: retainedPath, beforeContent, afterContent: content, tool: 'write' });
             } catch (historyError) {
               logger.warn('write tool: failed repair undo snapshot withheld', { path: retainedPath, error: summarizeError(historyError) });
+            }
+          }
+
+          let recorded = false;
+          // File cache, project index, undo and change tracking for this file;
+          // also run when a later step throws, so history covers every write.
+          function recordWriteState(): void {
+            if (recorded || !outcome.ok) return;
+            recorded = true;
+            const byteSize = outcome.result._bytes?.length ?? Buffer.byteLength(content, 'utf-8');
+            const tokenEstimate = Math.ceil(byteSize / 4);
+            const binaryPayload = outcome.result._bytes !== undefined;
+
+            if (options?.fileCache && !binaryPayload) {
+              try {
+                options.fileCache.update(outcome.result.resolved_path, content, { tool: 'write' });
+              } catch (err) {
+                appendWarning(
+                  warnings,
+                  `File cache update failed for '${outcome.result.path}': ${summarizeError(err)}`,
+                  outcome.result,
+                );
+                logger.warn('write tool: fileCache.update failed', {
+                  path: outcome.result.resolved_path,
+                  error: summarizeError(err),
+                });
+              }
+            }
+
+            if (options?.projectIndex && !binaryPayload) {
+              try {
+                options.projectIndex.upsertFile(outcome.result.resolved_path, tokenEstimate);
+              } catch (err) {
+                appendWarning(
+                  warnings,
+                  `Project index update failed for '${outcome.result.path}': ${summarizeError(err)}`,
+                  outcome.result,
+                );
+                logger.warn('write tool: projectIndex.upsertFile failed', {
+                  path: outcome.result.resolved_path,
+                  error: summarizeError(err),
+                });
+              }
+            }
+
+            // Snapshot for /undo file support
+            if (options?.fileUndoManager && (!undoable || binaryPayload)) {
+              appendWarning(
+                warnings,
+                `Undo history was not recorded for '${outcome.result.path}': binary content cannot be restored byte for byte by /undo.`,
+                outcome.result,
+              );
+            } else if (options?.fileUndoManager) {
+              try {
+                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const };
+                if (transactionMode === 'atomic') pendingUndo.push(snapshot);
+                else options.fileUndoManager.snapshot(snapshot);
+              } catch (err) {
+                appendWarning(
+                  warnings,
+                  `Undo snapshot failed for '${outcome.result.path}': ${summarizeError(err)}`,
+                  outcome.result,
+                );
+                logger.warn('write tool: fileUndoManager.snapshot failed', {
+                  path: outcome.result.resolved_path,
+                  error: summarizeError(err),
+                });
+              }
+            }
+
+            logger.debug('write tool: wrote file', {
+              path: outcome.result.resolved_path,
+              bytes: byteSize,
+              mode: outcome.result.mode_applied,
+            });
+            // Track for /diff session change view
+            if (options?.changeTracker) {
+              try {
+                options.changeTracker.recordChange(outcome.result.resolved_path);
+              } catch (err) {
+                appendWarning(
+                  warnings,
+                  `Change tracker update failed for '${outcome.result.path}': ${summarizeError(err)}`,
+                  outcome.result,
+                );
+                logger.warn('write tool: changeTracker.recordChange failed', {
+                  path: outcome.result.resolved_path,
+                  error: summarizeError(err),
+                });
+              }
             }
           }
 
@@ -637,7 +821,7 @@ export function createWriteTool(options?: {
               );
             }
           }
-          if (autoHealEnabled) {
+          if (autoHealEnabled && outcome.result._bytes === undefined) {
             const ext = extname(outcome.result.resolved_path).toLowerCase();
             const isJsTs = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'].includes(ext);
             if (isJsTs) {
@@ -667,7 +851,8 @@ export function createWriteTool(options?: {
                       try { error.message += `. Atomic rollback incomplete: ${failure.warnings.join('; ')}`; }
                       catch { /* Frozen errors must retain their original identity and classification. */ }
                     }
-                  } else await recordRetainedCapturedWrite();
+                  } else if (captured) await recordRetainedCapturedWrite();
+                  else recordWriteState();
                   // Ordinary terminal judgment failures still propagate after rollback.
                   throw error;
                 }
@@ -725,83 +910,13 @@ export function createWriteTool(options?: {
             }
           }
 
-          if (capturedAtomic) revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path, Buffer.from(content, (fileInput.encoding as BufferEncoding) ?? 'utf-8')));
-          const byteSize = Buffer.byteLength(content, 'utf-8');
-          const tokenEstimate = Math.ceil(byteSize / 4);
-
-          if (options?.fileCache) {
-            try {
-              options.fileCache.update(outcome.result.resolved_path, content, { tool: 'write' });
-            } catch (err) {
-              appendWarning(
-                warnings,
-                `File cache update failed for '${outcome.result.path}': ${summarizeError(err)}`,
-                outcome.result,
-              );
-              logger.warn('write tool: fileCache.update failed', {
-                path: outcome.result.resolved_path,
-                error: summarizeError(err),
-              });
-            }
-          }
-
-          if (options?.projectIndex) {
-            try {
-              options.projectIndex.upsertFile(outcome.result.resolved_path, tokenEstimate);
-            } catch (err) {
-              appendWarning(
-                warnings,
-                `Project index update failed for '${outcome.result.path}': ${summarizeError(err)}`,
-                outcome.result,
-              );
-              logger.warn('write tool: projectIndex.upsertFile failed', {
-                path: outcome.result.resolved_path,
-                error: summarizeError(err),
-              });
-            }
-          }
-
-          // Snapshot for /undo file support
-          if (options?.fileUndoManager) {
-            try {
-              const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const };
-              if (transactionMode === 'atomic') pendingUndo.push(snapshot);
-              else options.fileUndoManager.snapshot(snapshot);
-            } catch (err) {
-              appendWarning(
-                warnings,
-                `Undo snapshot failed for '${outcome.result.path}': ${summarizeError(err)}`,
-                outcome.result,
-              );
-              logger.warn('write tool: fileUndoManager.snapshot failed', {
-                path: outcome.result.resolved_path,
-                error: summarizeError(err),
-              });
-            }
-          }
-
-          logger.debug('write tool: wrote file', {
-            path: outcome.result.resolved_path,
-            bytes: byteSize,
-            mode: outcome.result.mode_applied,
-          });
-          // Track for /diff session change view
-          if (options?.changeTracker) {
-            try {
-              options.changeTracker.recordChange(outcome.result.resolved_path);
-            } catch (err) {
-              appendWarning(
-                warnings,
-                `Change tracker update failed for '${outcome.result.path}': ${summarizeError(err)}`,
-                outcome.result,
-              );
-              logger.warn('write tool: changeTracker.recordChange failed', {
-                path: outcome.result.resolved_path,
-                error: summarizeError(err),
-              });
-            }
-          }
+          if (capturedAtomic) revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path, outcome.result._bytes ?? Buffer.from(content, (fileInput.encoding as BufferEncoding) ?? 'utf-8')));
+          recordWriteState();
         }
+      }
+      } catch (error) {
+        annotateWrittenFiles(error, results, transactionMode);
+        throw error;
       }
 
       if (errors.length > 0 && results.length === 0) {
@@ -823,6 +938,9 @@ export function createWriteTool(options?: {
       const finalOutput: Record<string, unknown> = { ...output };
       if (errors.length > 0) {
         finalOutput.errors = errors;
+        // count_only carries no file list; on a partial failure the model
+        // still needs to know which files landed.
+        if (!finalOutput.files) finalOutput.written_paths = results.map((result) => result.path);
       }
 
       // Post-write validation, run after all files are written, even if partial errors occurred
@@ -830,7 +948,7 @@ export function createWriteTool(options?: {
         const validatorNames = input.validate.after as ValidatorName[];
         logger.debug('write tool: running post-write validators', { validators: validatorNames });
         try {
-          const failures = await runValidators(validatorNames, projectRoot, options.validatorRunner, assertCurrent);
+          const failures = await runValidators(validatorNames, projectRoot, options.validatorRunner, assertCurrent, executeOptions?.signal);
           if (failures.length > 0) {
             finalOutput.validation_failures = failures.map((f) => ({
               validator: f.validator,
@@ -846,7 +964,7 @@ export function createWriteTool(options?: {
             });
             appendWarning(
               warnings,
-              `Post-write validation failed for validator(s): ${failures.map((f) => f.validator).join(', ')}`,
+              `Post-write validation failed for validator(s): ${failures.map((f) => f.validator).join(', ')}. The ${results.length} written file(s) were kept on disk, not rolled back; fix them or restore them yourself.`,
             );
           } else {
             finalOutput.validation_passed = true;
@@ -881,6 +999,9 @@ export function createWriteTool(options?: {
       return {
         success: errors.length === 0,
         output: JSON.stringify(finalOutput),
+        ...(errors.length > 0
+          ? { error: `${errors.length} of ${input.files.length} file(s) failed; ${results.length} written. First failure: ${errors[0]}` }
+          : {}),
         ...(warnings.length > 0 ? { warnings } : {}),
       };
     },

@@ -7,7 +7,7 @@ import { buildAgentModelCompareAnalyticsToolArgs, buildAgentModelCompareApplyToo
 import { captureAgentResearchReportToolArgs } from '../input/agent-workspace-research-report-editor.ts';
 import { buildAgentResearchRunToolArgs } from '../input/agent-workspace-research-run-editor.ts';
 import { buildAgentResearchSourceToolArgs } from '../input/agent-workspace-research-source-editor.ts';
-import { isAffirmative, splitList } from '../input/agent-workspace-editors.ts';
+import { isAffirmative, isEnabledValue, splitList } from '../input/agent-workspace-editors.ts';
 import { createAgentWorkspaceLearnedBehavior } from '../input/agent-workspace-learned-behavior.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceLocalEditor } from '../input/agent-workspace-types.ts';
 import { describeDocumentOpsLane } from './agent-harness-document-ops.ts';
@@ -22,7 +22,7 @@ import { personaStorePath } from '../agent/persona-registry.ts';
 import { skillStorePath } from '../agent/skill-registry.ts';
 import { routineStorePath } from '../agent/routine-registry.ts';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
-import { error, output, readFieldMap, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
+import { error, nestedToolOutput, output, readFieldMap, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 
 function fieldReader(editor: AgentWorkspaceLocalEditor, fields: Readonly<Record<string, string>>): (fieldId: string) => string {
   return (fieldId: string) => fields[fieldId] ?? editor.fields.find((field) => field.id === fieldId)?.value ?? '';
@@ -64,6 +64,13 @@ export async function runWorkspaceEditorAction(
     });
   }
 
+  // Recorded admission is the authority to run, but a form answer of "no" is the person
+  // saying not to, so it is honoured; an absent or blank answer defers to admission.
+  const answered = fields.confirm?.trim();
+  if (answered && !isAffirmative(answered)) {
+    return error(`Workspace action ${action.id} was not run and nothing was changed: fields.confirm is "${answered.slice(0, 20)}". Pass fields.confirm:"yes" or omit it to run the action under the current recorded effect admission.`);
+  }
+
   if (editor.kind === 'learned-behavior') {
     const confirmationError = requireConfirmedAction(args, options, 'Workspace learned-behavior capture');
     if (confirmationError) return error(confirmationError);
@@ -84,7 +91,7 @@ export async function runWorkspaceEditorAction(
       notes: readField('notes'),
       tags: splitList(readField('tags')),
       triggers: splitList(readField('triggers')),
-      enable: isAffirmative(readField('enable')),
+      enable: isEnabledValue(readField('enable')),
     }, assertCurrent);
     return output({
       status: 'created',
@@ -99,10 +106,13 @@ export async function runWorkspaceEditorAction(
     const readField = fieldReader(editor, fields);
     const name = readField('name');
     const template = readField('template');
-    const parts = ['/agent-profile', 'create', name];
-    if (template.trim() && template.trim().toLowerCase() !== 'none') parts.push('--template', template);
-    parts.push('--yes');
-    return runTranslatedWorkspaceCommand(deps, args, parts.map((part, index) => index < 2 || part.startsWith('--') ? part : JSON.stringify(part)).join(' '), options);
+    const useTemplate = template.trim() !== '' && template.trim().toLowerCase() !== 'none';
+    // A value that starts with `--` would be read as a flag, so the profile
+    // created would differ from the one the person reviewed.
+    const flagLike = [['name', name], ...(useTemplate ? [['template', template]] : [])].find(([, value]) => value!.trim().startsWith('--'));
+    if (flagLike) return error(`Profile ${flagLike[0]} "${flagLike[1]}" starts with "--" and would be read as a command flag. Choose a ${flagLike[0]} that does not start with "--".`);
+    const command = ['/agent-profile', 'create', JSON.stringify(name), ...(useTemplate ? ['--template', JSON.stringify(template)] : []), '--yes'].join(' ');
+    return runTranslatedWorkspaceCommand(deps, args, command, options);
   }
 
   if (editor.kind === 'artifact-browser') {
@@ -113,8 +123,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(artifactsToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_artifacts',
       output: result.output ?? null,
@@ -131,8 +140,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_artifacts',
       output: result.output ?? null,
@@ -154,8 +162,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_artifacts',
       output: result.output ?? null,
@@ -178,8 +185,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(artifactToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_artifacts',
       output: result.output ?? null,
@@ -201,8 +207,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(ingestToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_knowledge_ingest',
       output: result.output ?? null,
@@ -224,8 +229,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(researchToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_research_report',
       output: result.output ?? null,
@@ -247,8 +251,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(runToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_research_runs',
       output: result.output ?? null,
@@ -270,8 +273,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(sourceToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_research_sources',
       output: result.output ?? null,
@@ -311,8 +313,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(documentToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_documents',
       output: result.output ?? null,
@@ -372,8 +373,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(presetArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_review_packet_presets',
       output: result.output ?? null,
@@ -394,8 +394,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(presetArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_review_packet_presets',
       output: result.output ?? null,
@@ -416,8 +415,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(shareArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_review_packet_share',
       output: result.output ?? null,
@@ -439,8 +437,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(compareToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -457,8 +454,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(reviewToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -475,8 +471,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(handoffDiffArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -498,8 +493,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(judgmentToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -521,8 +515,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(applyToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -544,8 +537,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(routeDecisionToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -567,8 +559,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(exportToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,
@@ -585,8 +576,7 @@ export async function runWorkspaceEditorAction(
       modelEditorToolArgs(analyticsToolArgs, args.explicitUserRequest),
       options,
     );
-    return output({
-      status: result.success ? 'executed_model_tool' : 'model_tool_failed',
+    return nestedToolOutput(result, {
       action: action.id,
       tool: 'agent_model_compare',
       output: result.output ?? null,

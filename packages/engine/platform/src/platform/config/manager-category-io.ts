@@ -11,6 +11,9 @@
 import { readRawSettingsFile } from './settings-io.js';
 import { isDaemonOwnedConfigKey } from './config-ownership.js';
 import { persistDaemonKey, removeDaemonKey } from './daemon-config-tier.js';
+import { readDotPath } from './shared-config-tier.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 export interface CategoryIoDeps {
   readonly configPath: string;
@@ -22,7 +25,10 @@ export interface CategoryIoDeps {
 /**
  * Shallow-merge `patch` into the on-disk representation of `categoryName`.
  * Daemon-owned leaves are routed to the daemon store instead of the surface
- * file. Returns nothing; the caller has already updated the live config.
+ * file. Returns nothing; `live` is the caller's staged copy, published only if
+ * this returns. The patch spans two files, so a failure on the surface write
+ * puts the daemon keys already written back: a settings change either lands in
+ * both or in neither.
  */
 export function persistCategoryPatch(
   categoryName: string,
@@ -37,20 +43,39 @@ export function persistCategoryPatch(
     raw[categoryName] = rawCategory;
   }
   const rawCat = rawCategory as Record<string, unknown>;
-  // Only the patched keys reach disk, the category's defaults are never frozen in.
-  for (const key of Object.keys(patch)) {
-    if (patch[key] === undefined) continue;
-    live[key] = patch[key];
-    const dotted = `${categoryName}.${key}`;
-    if (deps.daemonTierPath && isDaemonOwnedConfigKey(dotted)) {
-      persistDaemonKey(deps.daemonTierPath, dotted, patch[key]);
-      deps.markDaemonKey(dotted, true);
-      continue;
+  const daemonWrites: { dotted: string; previous: { present: boolean; value: unknown } }[] = [];
+  const undoDaemonWrites = (): void => {
+    if (!deps.daemonTierPath) return;
+    for (const { dotted, previous } of daemonWrites.reverse()) {
+      try {
+        if (previous.present) persistDaemonKey(deps.daemonTierPath, dotted, previous.value);
+        else removeDaemonKey(deps.daemonTierPath, dotted);
+      } catch (error) {
+        logger.warn(`Could not restore daemon setting ${dotted} after a failed category write: ${summarizeError(error)}`);
+      }
     }
-    rawCat[key] = patch[key];
+  };
+  try {
+    // Only the patched keys reach disk, the category's defaults are never frozen in.
+    for (const key of Object.keys(patch)) {
+      if (patch[key] === undefined) continue;
+      live[key] = patch[key];
+      const dotted = `${categoryName}.${key}`;
+      if (deps.daemonTierPath && isDaemonOwnedConfigKey(dotted)) {
+        const previous = readDotPath(readRawSettingsFile(deps.daemonTierPath), dotted);
+        persistDaemonKey(deps.daemonTierPath, dotted, patch[key]);
+        daemonWrites.push({ dotted, previous: { present: previous.present, value: previous.value } });
+        deps.markDaemonKey(dotted, true);
+        continue;
+      }
+      rawCat[key] = patch[key];
+    }
+    if (Object.keys(rawCat).length === 0) delete raw[categoryName];
+    deps.writeRawGlobal(raw);
+  } catch (error) {
+    undoDaemonWrites();
+    throw error;
   }
-  if (Object.keys(rawCat).length === 0) delete raw[categoryName];
-  deps.writeRawGlobal(raw);
 }
 
 /** Remove one key from a category's on-disk representation (or the daemon store). */

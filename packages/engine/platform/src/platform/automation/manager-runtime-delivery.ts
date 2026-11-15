@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger.js';
 import type { AutomationDeliveryManager } from './delivery-manager.js';
 import type { AutomationDeliveryTarget } from './delivery.js';
+import { calculateRetryDelay } from './failures.js';
 import type { AutomationJob } from './jobs.js';
 import type { AutomationRun } from './runs.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -102,7 +103,10 @@ export function scheduleAutomationFailureFollowUp(
     return;
   }
 
-  const maxAttempts = Math.max(1, job.execution.maxAttempts ?? 1);
+  // The failure policy's retry policy rules; an explicit per-job
+  // execution.maxAttempts (older jobs) overrides its attempt count.
+  const retryPolicy = job.failure.retryPolicy;
+  const maxAttempts = Math.max(1, job.execution.maxAttempts ?? retryPolicy.maxAttempts);
   if (job.failure.action !== 'retry' || run.attempt >= maxAttempts || !retryAllowed) {
     return;
   }
@@ -114,7 +118,10 @@ export function scheduleAutomationFailureFollowUp(
   const timer = setTimeout(() => {
     context.retryTimers.delete(retryKey);
     const latestJob = context.jobs.get(job.id);
-    if (!latestJob?.enabled) return;
+    // A one-shot job is disabled once its only occurrence has fired, which
+    // must not cancel the retry of that occurrence; an operator or the
+    // failure threshold pausing it does.
+    if (!latestJob || (!latestJob.enabled && latestJob.pausedReason !== 'one-shot-complete')) return;
     if (context.activeRunCount() >= context.maxConcurrentRuns()) {
       scheduleAutomationFailureFollowUp(context, latestJob, run, retryAllowed, false);
       return;
@@ -127,7 +134,7 @@ export function scheduleAutomationFailureFollowUp(
         error: summarizeError(error),
       });
     });
-  }, Math.max(1_000, job.failure.cooldownMs));
+  }, Math.max(1_000, calculateRetryDelay(retryPolicy.delayMs, run.attempt, retryPolicy.strategy, retryPolicy.maxDelayMs, retryPolicy.jitterMs)));
   timer.unref?.();
   context.retryTimers.set(retryKey, timer);
 }
@@ -191,6 +198,16 @@ export function resolveAutomationFailureNoticeTargets(job: AutomationJob): {
       ? [{ kind: 'surface', routeId: job.delivery.replyToRouteId }]
       : [];
   return { primary, fallback: [...job.delivery.fallbackTargets] };
+}
+
+/**
+ * True when the failure notice for `job` goes to the job's own delivery
+ * targets (no explicit failure route), so the notice is the only terminal
+ * message a failed or cancelled run needs: sending the ordinary run message
+ * as well would put two messages about one failure in front of the same people.
+ */
+export function failureNoticeCoversRunDelivery(job: AutomationJob): boolean {
+  return !job.failure.notifyRouteId && !job.failure.deadLetterRouteId;
 }
 
 function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): string {

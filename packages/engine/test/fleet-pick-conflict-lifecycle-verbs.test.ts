@@ -203,14 +203,6 @@ describe('worktrees.discard: discard performs its meaning', () => {
       // Receipt names what happened in plain language.
       expect(receipt.detail).toContain('preserved');
 
-      // The verb serves the same receipt.
-      const catalog = new GatewayMethodCatalog();
-      registerWorktreeSetupGatewayMethods(catalog, {
-        registry,
-        sourceRoot: root,
-        resolveConfig: () => ({ commands: [], carryOverGlobs: [] }),
-      });
-      expect(catalog.hasHandler('worktrees.discard')).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -230,6 +222,60 @@ describe('worktrees.discard: discard performs its meaning', () => {
       expect(receipt.preservedCommit).toBeUndefined();
       expect(existsSync(wtPath)).toBe(false);
       expect(runGit(root, ['branch', '--list', 'wt/x2'])).toContain('wt/x2');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  function seedRepo(prefix: string): string {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    runGit(root, ['init']);
+    runGit(root, ['-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '--allow-empty', '-m', 'seed']);
+    return root;
+  }
+
+  test('the main checkout is refused before git touches it: no commit, file stays unstaged', async () => {
+    const root = seedRepo('discard-main-');
+    try {
+      writeFileSync(join(root, 'dirty.txt'), 'owner work\n');
+      const before = runGit(root, ['rev-list', '--count', 'HEAD']);
+      const receipt = await new WorktreeRegistry(root).discard(root);
+      expect(receipt.ok).toBe(false);
+      expect(receipt.detail).toContain('Nothing was committed or removed');
+      expect(runGit(root, ['rev-list', '--count', 'HEAD'])).toBe(before);
+      expect(runGit(root, ['status', '--porcelain'])).toContain('?? dirty.txt');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test('worktrees.discard through the catalog serves the receipt, and refuses the main checkout with a 404', async () => {
+    const root = seedRepo('discard-verb-');
+    try {
+      const wtPath = join(root, '.goodvibes', '.worktrees', 'agent-v1');
+      mkdirSync(join(root, '.goodvibes', '.worktrees'), { recursive: true });
+      runGit(root, ['worktree', 'add', '-b', 'wt/v1', wtPath]);
+      writeFileSync(join(wtPath, 'wip.txt'), 'unsaved work\n');
+      writeFileSync(join(root, 'dirty.txt'), 'owner work\n');
+      const before = runGit(root, ['rev-list', '--count', 'HEAD']);
+      const registry = new WorktreeRegistry(root);
+      const catalog = new GatewayMethodCatalog();
+      registerWorktreeSetupGatewayMethods(catalog, {
+        registry,
+        sourceRoot: root,
+        resolveConfig: () => ({ commands: [], carryOverGlobs: [] }),
+      });
+
+      await expect(catalog.invoke('worktrees.discard', { ...ctx, body: { path: root } })).rejects.toThrow(/not a linked worktree/);
+      await expect(catalog.invoke('worktrees.discard', { ...ctx, body: {} })).rejects.toThrow(/Missing required field: path/);
+      expect(runGit(root, ['rev-list', '--count', 'HEAD'])).toBe(before);
+      expect(runGit(root, ['status', '--porcelain'])).toContain('?? dirty.txt');
+
+      const receipt = await catalog.invoke('worktrees.discard', { ...ctx, body: { path: wtPath } }) as { ok: boolean; branch?: string; preservedCommit?: string };
+      expect(receipt.ok).toBe(true);
+      expect(receipt.branch).toBe('wt/v1');
+      expect(receipt.preservedCommit).toBeDefined();
+      expect(existsSync(wtPath)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

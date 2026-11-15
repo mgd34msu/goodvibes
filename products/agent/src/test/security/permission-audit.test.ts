@@ -80,7 +80,7 @@ describe('PermissionPromptUI: renders correctly per category', () => {
     expect(layer.lines.length).toBeGreaterThan(0);
   });
 
-  test('createPromptLayer for execute includes EXECUTE label', () => {
+  test('createPromptLayer for execute shows the execute category in the title row', () => {
     const request = {
       callId: 'test-call-2',
       tool: 'exec',
@@ -89,10 +89,10 @@ describe('PermissionPromptUI: renders correctly per category', () => {
       analysis: analyzePermissionRequest('exec', { command: 'npm run build' }, 'execute'),
       resolve: (_approved: boolean) => {},
     };
-    expect(promptText(WIDTH, request)).toContain('execute');
+    expect(promptText(WIDTH, request)).toMatch(/△ [^\n]*\s{2}execute[ ]*$/m);
   });
 
-  test('createPromptLayer for delegate includes DELEGATE label', () => {
+  test('createPromptLayer for delegate shows the delegate category in the title row', () => {
     const request = {
       callId: 'test-call-3',
       tool: 'agent',
@@ -101,11 +101,12 @@ describe('PermissionPromptUI: renders correctly per category', () => {
       analysis: analyzePermissionRequest('agent', { task: 'do something' }, 'delegate'),
       resolve: (_approved: boolean) => {},
     };
-    expect(promptText(WIDTH, request)).toContain('delegate');
+    expect(promptText(WIDTH, request)).toMatch(/△ [^\n]*\s{2}delegate[ ]*$/m);
   });
 
   test('createPromptLayer includes tool name in output', () => {
-    const toolName = 'write';
+    // A name that is not the category word, so only the Tool row can supply it.
+    const toolName = 'save_notes';
     const request = {
       callId: 'test-call-4',
       tool: toolName,
@@ -114,7 +115,7 @@ describe('PermissionPromptUI: renders correctly per category', () => {
       analysis: analyzePermissionRequest(toolName, { path: 'out.ts' }, 'write'),
       resolve: (_approved: boolean) => {},
     };
-    expect(promptText(WIDTH, request)).toContain(toolName);
+    expect(promptText(WIDTH, request)).toContain(fact('Tool', toolName));
   });
 
   test('createPromptLayer includes choices [Y] Allow once in output', () => {

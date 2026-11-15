@@ -76,10 +76,11 @@ function readStatus(value: unknown): AgentResearchRunStatus | undefined {
   return typeof value === 'string' && STATUS_VALUES.includes(value as AgentResearchRunStatus) ? value as AgentResearchRunStatus : undefined;
 }
 
+const MUTABLE_STATUS_VALUES: readonly AgentResearchRunStatus[] = ['planned', 'running', 'paused', 'blocked'];
+
 function readMutableStatus(value: unknown): AgentResearchRunStatus | undefined {
   const status = readStatus(value);
-  if (status === 'planned' || status === 'running' || status === 'paused' || status === 'blocked') return status;
-  return undefined;
+  return status && MUTABLE_STATUS_VALUES.includes(status) ? status : undefined;
 }
 
 function readPhase(value: unknown): AgentResearchRunPhase | undefined {
@@ -181,7 +182,7 @@ function runNextRouteLines(run: AgentResearchRunRecord): readonly string[] {
   } else if (run.status === 'running') {
     lines.push(
       `  search research action:"search" runId:${routeString(run.id)} maxResults:5`,
-      `  sources research action:"sources" query:${routeString(run.question)} includeReportLines:true`,
+      `  sources research action:"sources" query:${routeString(run.question)}`,
       `  checkpoint research action:"checkpoint" id:${routeString(run.id)} phase:"reading" progress:${Math.max(run.progress, 25)} note:"Captured and reviewed source candidates." sourceIds:["..."]`,
       `  bundle research action:"bundle" query:${routeString(run.question)} includeReportLines:true`,
       `  report research action:"report" question:${routeString(run.question)} sources:[...] visualReport:true requireCitationCoverage:true`,
@@ -207,7 +208,7 @@ function runNextRouteLines(run: AgentResearchRunRecord): readonly string[] {
     );
   } else {
     lines.push(
-      `  list research action:"runs" status:${routeString(run.status)}`,
+      `  list agent_research_runs mode:"list" status:${routeString(run.status)}`,
       `  followup research action:"create_run" question:${routeString(run.question)} plan:["Follow up on the stopped research run."]`,
     );
   }
@@ -382,6 +383,13 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
           assertWrite();
           const phase = readPhase(args.phase);
           const status = readMutableStatus(args.status);
+          // A value that was sent but not applied must not come back as "Checkpointed".
+          if (readString(args.status) && !status) {
+            return failure(`status '${readString(args.status)}' cannot be set by a checkpoint. Use one of: ${MUTABLE_STATUS_VALUES.join(', ')}. To finish a run use mode:"complete", "fail" or "cancel". Nothing was changed.`);
+          }
+          if (readString(args.phase) && !phase) {
+            return failure(`phase '${readString(args.phase)}' is not a research phase. Use one of: ${PHASE_VALUES.join(', ')}. Nothing was changed.`);
+          }
           const progress = readProgress(args.progress);
           const note = readString(args.note);
           return output(formatMutationResult('Checkpointed Agent research run', registry.checkpoint(requireId(args), {

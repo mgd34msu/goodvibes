@@ -1,4 +1,3 @@
-/** Configured model/fallback regression source; not executed during the coding pass. */
 import { expect, test } from 'bun:test';
 import { createSystemOnePort, DECISION_MODEL_PROFILES, observeJudgmentModel, reuseObservedJudgmentResult,
   SqliteDecisionLog, withDecisionLog, type JudgmentConfig, type JudgmentEndpoint, type Questions } from '@goodvibes-jev/judgment';

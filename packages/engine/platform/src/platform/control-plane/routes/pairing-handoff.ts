@@ -45,7 +45,7 @@ export interface PairingHandoffDeps {
   /** The push service, VAPID key for the notifications offer + subscription registration. */
   readonly push: Pick<PushGatewayService, 'getPublicKey' | 'subscribe'>;
   /** WebAuthn step-up; present ⇒ the passkey offer is available. */
-  readonly stepUp?: StepUpGatewayService | undefined;
+  readonly stepUp?: Pick<StepUpGatewayService, 'registerCredential'> | undefined;
   /** Whether the rendezvous relay is available ⇒ the relay offer is available. */
   readonly relayAvailable: () => boolean;
   /** The configured web-app origin the QR points at; absent ⇒ only a fragment is returned. */
@@ -91,6 +91,14 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     const available = availableOffers(deps);
     const offers = requestedOffers(params.offers).filter((kind) => available.has(kind));
 
+    // Resolved before minting: a token whose secret is never returned would still count toward the paired-node cap.
+    const offerDetails = await Promise.all(offers.map(async (kind) => {
+      if (kind === 'notifications') {
+        return { kind, available: true, vapidPublicKey: await deps.push.getPublicKey() };
+      }
+      return { kind, available: true };
+    }));
+
     // The QR path is where a phone actually pairs, so this is where
     // `device.nodes.maxPaired` has to hold. The refusal names the setting and
     // the live count (see PairingLimitReachedError), 409, because the request
@@ -105,13 +113,6 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
         throw error;
       }
     })();
-    const offerDetails = await Promise.all(offers.map(async (kind) => {
-      if (kind === 'notifications') {
-        return { kind, available: true, vapidPublicKey: await deps.push.getPublicKey() };
-      }
-      return { kind, available: true };
-    }));
-
     const fragment = buildPairingHandoffFragment({ token: minted.token, offers });
     const webOrigin = deps.webOrigin?.();
     const deepLink = webOrigin ? buildPairingHandoffLink({ webOrigin, token: minted.token, offers }) : undefined;
@@ -218,13 +219,14 @@ function createHandoffCompleteHandler(deps: PairingHandoffDeps): GatewayMethodHa
           results.push({ kind, status: 'completed' });
         } else if (kind === 'relay') {
           // Relay acceptance is an acknowledgement: the surface is cleared to
-          // connect through the rendezvous relay with its pairing token.
-          results.push({ kind, status: 'completed' });
+          // connect through the rendezvous relay with its pairing token. The
+          // detail says so, because "completed" alone reads as something armed.
+          results.push({ kind, status: 'completed', detail: 'Acknowledged: nothing was set up on the daemon; this surface may connect through the relay with its pairing token.' });
         } else {
           results.push({ kind, status: 'unavailable', detail: `${kind} cannot be completed here` });
         }
       } catch (error) {
-        if (error instanceof GatewayVerbError) throw error;
+        // A refused offer (bad key material, missing field) is that offer's own failed result: earlier offers already took effect and must still be reported.
         results.push({ kind, status: 'failed', detail: error instanceof Error ? error.message : String(error) });
       }
     }

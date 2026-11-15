@@ -58,11 +58,11 @@ export const PERMISSIONS_COMMAND = {
 } as const;
 
 /** One remembered-rule row: what it does, and how/when it was remembered. */
-function describeRuleRow(record: Pick<StoredUserPermissionRule, 'rule' | 'tier' | 'tool' | 'createdAt'>): { label: string; detail: string } {
+function describeRuleRow(record: Pick<StoredUserPermissionRule, 'rule' | 'tier' | 'tool' | 'createdAt'> & { readonly project?: string | undefined }): { label: string; detail: string } {
   const what = record.rule.description ?? record.rule.id;
   return {
     label: `${record.tool}: ${what}`,
-    detail: `${record.rule.effect} · remembered ${record.tier} · ${new Date(record.createdAt).toLocaleString()}`,
+    detail: `${record.rule.effect} · remembered ${record.tier} · ${record.project === undefined ? 'every project' : `in ${record.project}`} · ${new Date(record.createdAt).toLocaleString()}`,
   };
 }
 

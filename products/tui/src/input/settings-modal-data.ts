@@ -1,5 +1,5 @@
 export {buildMcpEntries} from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
-import { readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
+import { isValidConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
 /**
  * settings-modal-data, pure data-assembly helpers for SettingsModal.
  *
@@ -48,6 +48,14 @@ import {
   isPaymentsSyntheticConfigKey,
   refreshPaymentsSyntheticEntry,
 } from './payments-config.ts';
+
+/** Display order of the `ui` category; every key must be a real config key. */
+export const UI_SETTING_PRIORITY: Readonly<Partial<Record<ConfigKey, number>>> = {
+  'ui.systemMessages': 0,
+  'ui.operationalMessages': 1,
+  'ui.contractMessages': 2,
+  'ui.voiceEnabled': 3,
+};
 
 // ---------------------------------------------------------------------------
 // deepEqual, structural equality for isDefault comparisons
@@ -226,13 +234,9 @@ export function buildSettingGroups(
 
   const uiEntries = groups.get('ui');
   if (uiEntries) {
-    const uiPriority: Record<string, number> = {
-      'ui.systemMessages': 0,
-      'ui.operationalMessages': 1,
-      'ui.wrfcMessages': 2,
-      'ui.voiceEnabled': 3,
-    };
-    uiEntries.sort((a, b) => (uiPriority[a.setting.key] ?? 99) - (uiPriority[b.setting.key] ?? 99));
+    // A TUI-local row has a key outside the platform schema and sorts after the listed ones.
+    const priorityOf = (key: string): number => (isValidConfigKey(key) ? UI_SETTING_PRIORITY[key] : undefined) ?? 99;
+    uiEntries.sort((a, b) => priorityOf(a.setting.key) - priorityOf(b.setting.key));
   }
 
   // Cross-list ui.voiceEnabled into the 'tts' category so that /config tts
@@ -569,7 +573,7 @@ export function buildCodeIndexEnabledSyntheticEntry(configManager: Pick<ConfigMa
   return buildBooleanSyntheticEntry(
     configManager,
     CODE_INDEX_ENABLED_CONFIG_KEY,
-    'Auto-build the repo source-tree code index on startup (bounded file/size scan; see /codebase status for bounds). Off by default: /codebase build indexes on demand.',
+    'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; see /codebase status. Off by default: /codebase build indexes once, on demand, and the index is NOT kept current after edits.',
     false,
   );
 }
@@ -664,6 +668,24 @@ export function updateEntryForKey(
   }
 }
 
+/**
+ * TUI-local rows are absent from the platform schema, so the generic read
+ * would return undefined for them; they must go through the same reader that
+ * built them at open (including their own default for the boolean toggles).
+ */
+function rebuildTuiLocalSyntheticEntry(entry: BuiltinSettingEntry, configManager: ConfigManager): SettingEntry | null {
+  const key: string = entry.setting.key;
+  if (key === NOTIFY_AFTER_SECONDS_SYNTHETIC_SETTING.key) return buildNotifyAfterSecondsSyntheticEntry(configManager);
+  if (key === BUDGET_ALERT_USD_SYNTHETIC_SETTING.key) return buildBudgetAlertUsdSyntheticEntry(configManager);
+  const isLocalBoolean = NOTIFY_ALERT_SYNTHETIC_SETTINGS.some((spec) => spec.key === key)
+    || TERMINAL_NOTIFY_SYNTHETIC_SETTINGS.some((spec) => spec.key === key)
+    || key === CODE_INDEX_ENABLED_CONFIG_KEY;
+  if (isLocalBoolean && typeof entry.setting.default === 'boolean') {
+    return buildBooleanSyntheticEntry(configManager, key, entry.setting.description, entry.setting.default);
+  }
+  return null;
+}
+
 /** Synthetic rows retain their declared reader during refresh and policy recovery. */
 function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: ConfigManager): void {
   const key: string = entry.setting.key;
@@ -699,6 +721,12 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
   }
   if (isPaymentsSyntheticConfigKey(key)) {
     refreshPaymentsSyntheticEntry(entry, configManager);
+    return;
+  }
+  const refreshedLocal = rebuildTuiLocalSyntheticEntry(entry, configManager);
+  if (refreshedLocal) {
+    entry.currentValue = refreshedLocal.currentValue;
+    entry.isDefault = refreshedLocal.isDefault;
     return;
   }
   const display = readConfigSettingForDisplay(() => configManager.get(entry.setting.key));

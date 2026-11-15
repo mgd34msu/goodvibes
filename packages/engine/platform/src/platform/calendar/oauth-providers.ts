@@ -135,7 +135,7 @@ export const PROVIDER_SETUP_STEPS: Readonly<Record<CalendarProviderId, readonly 
     'APIs & Services -> OAuth consent screen -> configure (External is fine for personal use); add your Google account under Test users while the app is unverified.',
     'APIs & Services -> Credentials -> Create Credentials -> OAuth client ID -> Application type "Desktop app".',
     'Copy the generated Client ID. A Desktop-app client needs NO client secret with PKCE; leave the secret field blank unless you deliberately use a Web-app client.',
-    'Set it: `goodvibes config set calendar.google.clientId <CLIENT_ID>`. If you registered a Web-app (confidential) client instead, store its secret and put the reference in calendar.google.clientSecretRef.',
+    'Set it with `goodvibes-daemon config set calendar.google.clientId <CLIENT_ID>`, or `/config set calendar.google.clientId <CLIENT_ID>` inside the terminal app. If you registered a Web-app (confidential) client instead, store its secret and put the reference in calendar.google.clientSecretRef.',
   ],
   microsoft: [
     'Open the Azure portal (portal.azure.com) -> Microsoft Entra ID -> App registrations -> New registration.',
@@ -143,6 +143,6 @@ export const PROVIDER_SETUP_STEPS: Readonly<Record<CalendarProviderId, readonly 
     'Under "Redirect URI" add a "Mobile and desktop applications" platform and the entry http://localhost (the loopback flow supplies its own 127.0.0.1 port).',
     'Registration -> Authentication -> enable "Allow public client flows" = Yes (this is the public-client / device-code property; no client secret is needed).',
     'Registration -> API permissions -> Add a permission -> Microsoft Graph -> Delegated -> add Calendars.ReadWrite and offline_access.',
-    'Copy the "Application (client) ID" and set it: `goodvibes config set calendar.microsoft.clientId <CLIENT_ID>`. A confidential registration additionally needs its secret stored and referenced in calendar.microsoft.clientSecretRef.',
+    'Copy the "Application (client) ID" and set it with `goodvibes-daemon config set calendar.microsoft.clientId <CLIENT_ID>`, or `/config set calendar.microsoft.clientId <CLIENT_ID>` inside the terminal app. A confidential registration additionally needs its secret stored and referenced in calendar.microsoft.clientSecretRef.',
   ],
 };

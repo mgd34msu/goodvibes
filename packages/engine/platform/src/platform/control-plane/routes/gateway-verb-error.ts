@@ -90,10 +90,16 @@ export interface GatewayVerbRefusal {
  * fault.
  *
  * The shape is deliberately narrow: an integer HTTP error status and a
- * non-empty machine code. Both together are a statement that the thrower meant
- * this to be a wire refusal; a plain `Error` carries neither and still collapses
- * to 500.
+ * machine code in the platform's own spelling (upper snake case, like
+ * `REQUIRE_CONFIRM`). Both together are a statement that the thrower meant this
+ * to be a wire refusal; a plain `Error` carries neither and still collapses to
+ * 500. An upstream HTTP or provider error also carries a status and a code, but
+ * spells it `invalid_api_key` or `card_declined`; forwarding that would turn a
+ * provider's 401 into this daemon's own authentication failure and echo the
+ * provider's text to the caller, so it stays a 500.
  */
+const WIRE_REFUSAL_CODE = /^[A-Z][A-Z0-9_]*$/;
+
 export function readGatewayVerbRefusal(error: unknown): GatewayVerbRefusal | null {
   if (isGatewayVerbError(error)) {
     return { status: error.status, code: error.code, message: error.message, field: error.field };
@@ -103,7 +109,7 @@ export function readGatewayVerbRefusal(error: unknown): GatewayVerbRefusal | nul
   if (typeof candidate.status !== 'number' || !Number.isInteger(candidate.status)) return null;
   if (candidate.status < 400 || candidate.status > 599) return null;
   const code = typeof candidate.code === 'string' ? candidate.code.trim() : '';
-  if (!code) return null;
+  if (!WIRE_REFUSAL_CODE.test(code)) return null;
   const message = typeof candidate.message === 'string' && candidate.message.trim()
     ? candidate.message.trim()
     : `The handler refused this call: ${code}`;
@@ -113,4 +119,20 @@ export function readGatewayVerbRefusal(error: unknown): GatewayVerbRefusal | nul
     message,
     field: typeof candidate.field === 'string' && candidate.field.trim() ? candidate.field.trim() : undefined,
   };
+}
+
+/**
+ * Rethrow the refusal a handler raised AFTER its effect was already committed,
+ * saying so. A bare "forbidden" there reads as "nothing happened", and a caller
+ * that retries on that reading repeats work that is already done. Anything that
+ * is not a refusal passes through unchanged.
+ */
+export function withholdCommittedResult(error: unknown, committed: string): never {
+  if (!(error instanceof GatewayVerbError)) throw error;
+  throw new GatewayVerbError(
+    `${committed} Access changed before the reply could be returned, so the result is withheld. Read the current state before retrying; do not repeat the request blindly. ${error.message}`,
+    error.code,
+    error.status,
+    error.field,
+  );
 }

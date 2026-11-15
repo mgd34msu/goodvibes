@@ -1,6 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import {
+  atomicWriteFileSync,
   createOAuthLocalListener,
   beginOpenAICodexLogin,
   exchangeOpenAICodexCode,
@@ -14,7 +14,7 @@ import { inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/run
 import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalCommandRegistry } from './command-registry.js';
-import { extractAuthorizationCode } from './settings-subscriptions.js';
+import { readAuthorizationInput } from './settings-subscriptions.js';
 import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
 export interface SubscriptionCommandContext extends CommandConfirmationContext {
   readonly openModal?: ((name: string) => void) | undefined;
@@ -32,7 +32,8 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
     readonly eagerPaths: boolean;
     readonly openModalOnEmpty: boolean;
     readonly manualOnly: boolean;
-    readonly bundleWarning: boolean;
+    /** No longer read: the export warning is always printed. */
+    readonly bundleWarning?: boolean | undefined;
     readonly catchErrors: boolean;
     readonly surfaceRoot: string;
     readonly formatSource: (source: string) => string;
@@ -64,8 +65,23 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       ),
     ].join('\n');
   }
+  function readSubscriptionBundle(value: unknown): SubscriptionBundle | null {
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value as Partial<Record<keyof SubscriptionBundle, unknown>>;
+    if (candidate.version !== 1 || typeof candidate.exportedAt !== 'number' || !Number.isFinite(candidate.exportedAt)) return null;
+    if (Number.isNaN(new Date(candidate.exportedAt).getTime())) return null;
+    const list = candidate.subscriptions;
+    if (!Array.isArray(list)) return null;
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') return null;
+      const record = entry as { provider?: unknown; authMode?: unknown };
+      if (typeof record.provider !== 'string' || typeof record.authMode !== 'string') return null;
+    }
+    return { version: 1, exportedAt: candidate.exportedAt, subscriptions: list as readonly ProviderSubscription[] };
+  }
   function inspectBundle(path: string): string {
-    const bundle = JSON.parse(readFileSync(path, 'utf-8')) as SubscriptionBundle;
+    const bundle = readSubscriptionBundle(JSON.parse(readFileSync(path, 'utf-8')) as unknown);
+    if (!bundle) return `${path} is not a subscription bundle (expected version 1 with exportedAt and a subscriptions list).`;
     return [
       'Subscription Bundle Review',
       `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
@@ -90,10 +106,12 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       aliases: ['subs'],
       description: 'Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers',
       usage:
-        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path>|bundle inspect <path>]',
+        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>]',
       ...(policy.hidden ? { hidden: true } : {}),
       async handler(args, ctx) {
-        const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+        // Export writes live sign-in tokens, so it needs an explicit --yes even where other mutations do not.
+        const explicit = stripYesFlag(args);
+        const parsed = policy.confirmMutations ? explicit : { rest: args, yes: true };
         args = [...parsed.rest];
         const print = (message: string) => ctx.print(policy.present(message));
         const shellPaths = policy.eagerPaths ? requireShellPaths(ctx) : undefined;
@@ -221,42 +239,127 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
                 createdAt: Date.now(),
               });
               let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
+              let listenerNote: string | undefined;
               if (!useManualMode) {
-                try {
-                  listener = await createOAuthLocalListener({
-                    expectedState: started.state,
-                    host: '127.0.0.1',
-                    port: 1455,
-                    path: '/auth/callback',
-                  }).catch(() => null); // best-effort: listener creation is optional; null triggers manual flow
-                } catch {
-                  listener = null;
+                listener = await createOAuthLocalListener({
+                  expectedState: started.state,
+                  host: '127.0.0.1',
+                  port: 1455,
+                  path: '/auth/callback',
+                }).catch((error: unknown) => {
+                  // Optional: without it the user finishes by pasting the code, but the reason is shown.
+                  listenerNote = `automatic completion unavailable (${summarizeError(error)})`;
+                  return null;
+                });
+              }
+              try {
+                const browserOpened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
+                if (listener && browserOpened) {
+                  try {
+                    const callback = await listener.waitForCode();
+                    const token = await exchangeOpenAICodexCode(callback.code, started.verifier);
+                    const now = Date.now();
+                    const record = manager.saveSubscription({
+                      provider,
+                      accessToken: token.accessToken,
+                      refreshToken: token.refreshToken,
+                      tokenType: token.tokenType,
+                      expiresAt: token.expiresAt,
+                      ...(token.scopes ? { scopes: token.scopes } : {}),
+                      authMode: 'oauth',
+                      overrideAmbientApiKeys: false,
+                      createdAt: manager.get(provider)?.createdAt ?? now,
+                      updatedAt: now,
+                    });
+                    print(
+                      [
+                        `Subscription OAuth Start: ${provider}`,
+                        `  source: ${policy.formatSource(resolved.source)}`,
+                        `  state: ${started.state}`,
+                        `  redirectUri: ${started.redirectUri}`,
+                        `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
+                        '  authorizationUrl:',
+                        `  ${started.authorizationUrl}`,
+                        `Subscription OAuth Complete: ${provider}`,
+                        `  tokenType: ${record.tokenType}`,
+                        `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
+                        describePrecedence(record),
+                      ].join('\n'),
+                    );
+                    return;
+                  } catch (error) {
+                    listener.close();
+                    print(
+                      [
+                        `Subscription OAuth Start: ${provider}`,
+                        `  source: ${policy.formatSource(resolved.source)}`,
+                        `  state: ${started.state}`,
+                        `  redirectUri: ${started.redirectUri}`,
+                        `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
+                        `  next: /subscription login ${provider} finish <code-or-url>`,
+                        `  listener: ${summarizeError(error)}`,
+                        '  authorizationUrl:',
+                        `  ${started.authorizationUrl}`,
+                      ].join('\n'),
+                    );
+                    return;
+                  }
                 }
+                listener?.close();
+                print(
+                  [
+                    `Subscription OAuth Start: ${provider}`,
+                    `  source: ${policy.formatSource(resolved.source)}`,
+                    `  state: ${started.state}`,
+                    `  redirectUri: ${started.redirectUri}`,
+                    `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
+                    `  next: /subscription login ${provider} finish <code-or-url>`,
+                    ...(listenerNote ? [`  listener: ${listenerNote}`] : []),
+                    '  authorizationUrl:',
+                    `  ${started.authorizationUrl}`,
+                  ].join('\n'),
+                );
+                return;
+              } finally {
+                listener?.close();
+              }
+            }
+            const useLocalCallback = Boolean(resolved.oauth.localCallback) && !useManualMode;
+            let activeConfig = resolveLoginConfig(resolved.oauth, useLocalCallback);
+            let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
+            let listenerNote: string | undefined;
+            if (useLocalCallback && resolved.oauth.localCallback) {
+              listener = await createOAuthLocalListener({
+                expectedState: '',
+                host: resolved.oauth.localCallback.host,
+                port: resolved.oauth.localCallback.port,
+                path: resolved.oauth.localCallback.path,
+              }).catch((error: unknown) => {
+                // Optional: without it the user finishes by pasting the code, but the reason is shown.
+                listenerNote = `automatic completion unavailable (${summarizeError(error)})`;
+                return null;
+              });
+            }
+            try {
+              if (listener) {
+                activeConfig = { ...activeConfig, redirectUri: listener.redirectUri };
+              }
+              const started = await manager.beginOAuthLogin(provider, activeConfig);
+              if (listener) {
+                listener.setExpectedState(started.pending.state);
               }
               const browserOpened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
-              if (listener && browserOpened) {
+              const shouldAutoComplete = Boolean(listener) && (resolved.oauth.localCallback?.autoComplete ?? true) && browserOpened;
+              if (shouldAutoComplete && listener) {
                 try {
                   const callback = await listener.waitForCode();
-                  const token = await exchangeOpenAICodexCode(callback.code, started.verifier);
-                  const now = Date.now();
-                  const record = manager.saveSubscription({
-                    provider,
-                    accessToken: token.accessToken,
-                    refreshToken: token.refreshToken,
-                    tokenType: token.tokenType,
-                    expiresAt: token.expiresAt,
-                    ...(token.scopes ? { scopes: token.scopes } : {}),
-                    authMode: 'oauth',
-                    overrideAmbientApiKeys: false,
-                    createdAt: manager.get(provider)?.createdAt ?? now,
-                    updatedAt: now,
-                  });
+                  const record = await manager.completeOAuthLogin(provider, activeConfig, callback.code);
                   print(
                     [
                       `Subscription OAuth Start: ${provider}`,
                       `  source: ${policy.formatSource(resolved.source)}`,
-                      `  state: ${started.state}`,
-                      `  redirectUri: ${started.redirectUri}`,
+                      `  state: ${started.pending.state}`,
+                      `  redirectUri: ${activeConfig.redirectUri}`,
                       `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
                       '  authorizationUrl:',
                       `  ${started.authorizationUrl}`,
@@ -273,8 +376,8 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
                     [
                       `Subscription OAuth Start: ${provider}`,
                       `  source: ${policy.formatSource(resolved.source)}`,
-                      `  state: ${started.state}`,
-                      `  redirectUri: ${started.redirectUri}`,
+                      `  state: ${started.pending.state}`,
+                      `  redirectUri: ${activeConfig.redirectUri}`,
                       `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
                       `  next: /subscription login ${provider} finish <code-or-url>`,
                       `  listener: ${summarizeError(error)}`,
@@ -290,88 +393,19 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
                 [
                   `Subscription OAuth Start: ${provider}`,
                   `  source: ${policy.formatSource(resolved.source)}`,
-                  `  state: ${started.state}`,
-                  `  redirectUri: ${started.redirectUri}`,
+                  `  state: ${started.pending.state}`,
+                  `  redirectUri: ${activeConfig.redirectUri}`,
                   `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
                   `  next: /subscription login ${provider} finish <code-or-url>`,
+                  ...(listenerNote ? [`  listener: ${listenerNote}`] : []),
                   '  authorizationUrl:',
                   `  ${started.authorizationUrl}`,
                 ].join('\n'),
               );
               return;
+            } finally {
+              listener?.close();
             }
-            const useLocalCallback = Boolean(resolved.oauth.localCallback) && !useManualMode;
-            let activeConfig = resolveLoginConfig(resolved.oauth, useLocalCallback);
-            let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
-            if (useLocalCallback && resolved.oauth.localCallback) {
-              listener = await createOAuthLocalListener({
-                expectedState: '',
-                host: resolved.oauth.localCallback.host,
-                port: resolved.oauth.localCallback.port,
-                path: resolved.oauth.localCallback.path,
-              }).catch(() => null); // best-effort: local callback listener is optional; null falls back to manual redirect
-            }
-            if (listener) {
-              activeConfig = { ...activeConfig, redirectUri: listener.redirectUri };
-            }
-            const started = await manager.beginOAuthLogin(provider, activeConfig);
-            if (listener) {
-              listener.setExpectedState(started.pending.state);
-            }
-            const browserOpened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
-            const shouldAutoComplete = Boolean(listener) && (resolved.oauth.localCallback?.autoComplete ?? true) && browserOpened;
-            if (shouldAutoComplete && listener) {
-              try {
-                const callback = await listener.waitForCode();
-                const record = await manager.completeOAuthLogin(provider, activeConfig, callback.code);
-                print(
-                  [
-                    `Subscription OAuth Start: ${provider}`,
-                    `  source: ${policy.formatSource(resolved.source)}`,
-                    `  state: ${started.pending.state}`,
-                    `  redirectUri: ${activeConfig.redirectUri}`,
-                    `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                    '  authorizationUrl:',
-                    `  ${started.authorizationUrl}`,
-                    `Subscription OAuth Complete: ${provider}`,
-                    `  tokenType: ${record.tokenType}`,
-                    `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
-                    describePrecedence(record),
-                  ].join('\n'),
-                );
-                return;
-              } catch (error) {
-                listener.close();
-                print(
-                  [
-                    `Subscription OAuth Start: ${provider}`,
-                    `  source: ${policy.formatSource(resolved.source)}`,
-                    `  state: ${started.pending.state}`,
-                    `  redirectUri: ${activeConfig.redirectUri}`,
-                    `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                    `  next: /subscription login ${provider} finish <code-or-url>`,
-                    `  listener: ${summarizeError(error)}`,
-                    '  authorizationUrl:',
-                    `  ${started.authorizationUrl}`,
-                  ].join('\n'),
-                );
-                return;
-              }
-            }
-            listener?.close();
-            print(
-              [
-                `Subscription OAuth Start: ${provider}`,
-                `  source: ${policy.formatSource(resolved.source)}`,
-                `  state: ${started.pending.state}`,
-                `  redirectUri: ${activeConfig.redirectUri}`,
-                `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                `  next: /subscription login ${provider} finish <code-or-url>`,
-                '  authorizationUrl:',
-                `  ${started.authorizationUrl}`,
-              ].join('\n'),
-            );
-            return;
           }
           if (mode === 'finish') {
             const codeInput = args[3];
@@ -379,9 +413,15 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               print(`Usage: /subscription login ${provider} finish <code-or-url>`);
               return;
             }
-            const code = extractAuthorizationCode(codeInput) ?? codeInput;
+            const pendingLogin = manager.getPending(provider);
+            const authorization = readAuthorizationInput(codeInput, pendingLogin?.state);
+            if (!authorization.ok) {
+              print(authorization.reason);
+              return;
+            }
+            const code = authorization.code;
             if (provider === 'openai' && resolved.source === 'builtin') {
-              const pending = manager.getPending(provider);
+              const pending = pendingLogin;
               if (!pending) {
                 print(`No pending OAuth login for ${provider}. Start with /subscription login ${provider} start.`);
                 return;
@@ -458,15 +498,16 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           return;
         }
         if (sub === 'bundle') {
-          const mode = args[1]?.toLowerCase();
-          const pathArg = args[2];
+          const bundleArgs = explicit.rest;
+          const mode = bundleArgs[1]?.toLowerCase();
+          const pathArg = bundleArgs[2];
           if (!mode || !pathArg) {
             print('Usage: /subscription bundle <export|inspect> <path>');
             return;
           }
           const targetPath = (shellPaths ?? requireShellPaths(ctx)).resolveWorkspacePath(pathArg);
           if (mode === 'export') {
-            if (!parsed.yes) {
+            if (!explicit.yes) {
               requireYesFlag(ctx, `export subscription bundle to ${pathArg}`, '/subscription bundle export <path> --yes');
               return;
             }
@@ -475,10 +516,10 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               exportedAt: Date.now(),
               subscriptions: manager.list(),
             };
-            mkdirSync(dirname(targetPath), { recursive: true });
-            writeFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
+            // Owner-only (0600): the file holds access and refresh tokens.
+            atomicWriteFileSync(targetPath, `${JSON.stringify(bundle, null, 2)}\n`, { mkdirp: true });
             print(`Subscription bundle exported to ${targetPath}`);
-            if (policy.bundleWarning) print('This file contains active sign-in tokens. Keep it private and delete it after use.');
+            print('This file contains active sign-in tokens. Keep it private and delete it after use.');
             return;
           }
           if (mode === 'inspect') {
@@ -494,7 +535,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           return;
         }
         print(
-          'Usage: /subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path>|bundle inspect <path>]',
+          'Usage: /subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>]',
         );
       },
     });

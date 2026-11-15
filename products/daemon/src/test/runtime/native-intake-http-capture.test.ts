@@ -1,6 +1,7 @@
 /** Real route captures for browser replay. Only proposer/Jev readings are synthetic. */
 import { operationJudgmentRequests } from '../helpers/field-name-privacy-requests.js';
 import { expect, spyOn, test } from 'bun:test';
+import { expectMatchesCommittedFixture } from '../helpers/webui-fixture-parity.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
@@ -25,10 +26,14 @@ function parse(wire: NativeIntakeHttpWire) {
 }
 function result(wire: NativeIntakeHttpWire) { return nativeConversationIntakeLookupResultSchema.parse(parse(wire)); }
 function exportCapture(name: string, capture: Record<string, unknown>) {
+  const recorded = { source: 'owned-synthetic-provider; real authenticated DaemonServer HTTP', name, ...capture };
   const directory = process.env.GOODVIBES_TEST_NATIVE_INTAKE_FIXTURE_DIR;
-  if (!directory) return;
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, `${name}.json`), `${JSON.stringify({ source: 'owned-synthetic-provider; real authenticated DaemonServer HTTP', name, ...capture }, null, 2)}\n`);
+  if (directory) {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, `${name}.json`), `${JSON.stringify(recorded, null, 2)}\n`);
+  }
+  // The browser replays the committed files, so a stale one must fail here.
+  expectMatchesCommittedFixture(recorded, new URL(`../../../../webui/e2e/support/fixtures/native-intake/${name}.json`, import.meta.url));
 }
 async function begin(f: Awaited<ReturnType<typeof createNativeIntakeHttpFixture>>, input: NativeConversationIntakeCaptureRequest) {
   const auth = await f.wire('control.auth.current'), project = await f.wire('workLedger.project');

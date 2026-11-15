@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
+import { noteSkippedContainment } from './_helpers/exec-containment-proof.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { provideCapturedBunRuntime } from '../toolchain/src/lib/captured-bun-runtime.js';
+import { CAPTURED_BUN_RUNTIME_VERSION } from '../toolchain/src/config.js';
 import { realExec } from '../toolchain/src/lib/effects.js';
 import { probeCapturedExecAvailability } from '../platform/src/platform/tools/exec/captured-exec.js';
 import type { runDirectExecContract } from './fixtures/captured-direct-exec-compiled-entry.js';
@@ -11,6 +13,7 @@ import type { runDirectExecContract } from './fixtures/captured-direct-exec-comp
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
   throw new Error('required compiled direct exec containment backend is unavailable');
+noteSkippedContainment('captured-direct-exec-compiled.test.ts', availability.available);
 
 test.skipIf(!availability.available)('restored compiled contract executes Bun build/test first and reads generated members with its packaged runtime', () => {
   const dir = mkdtempSync(join(tmpdir(), 'captured-direct-exec-compiled-'));
@@ -21,7 +24,7 @@ test.skipIf(!availability.available)('restored compiled contract executes Bun bu
     { cwd: join(import.meta.dir, '..'), encoding: 'utf8', timeout: 120_000 });
     expect(built.status, built.stderr).toBe(0);
     provideCapturedBunRuntime({ root: dir, outDir: '.', artifacts: ['compiled-product'], target: {
-      key: `linux-${process.arch}`, bunTarget: `bun-linux-${process.arch}`, appArtifact: 'compiled-product', capturedBunRuntime: '1.3.14',
+      key: `linux-${process.arch}`, bunTarget: `bun-linux-${process.arch}`, appArtifact: 'compiled-product', capturedBunRuntime: CAPTURED_BUN_RUNTIME_VERSION,
     }, exec(command, args, options) {
       // This test exercises the existing build/runtime artifact, never a
       // downloaded replacement or an alternate interpreter startup mode.
@@ -37,7 +40,7 @@ test.skipIf(!availability.available)('restored compiled contract executes Bun bu
     expect(unpacked.status, unpacked.stderr).toBe(0);
     const restoredBinary = join(restored, 'compiled-product');
     expect(existsSync(restoredBinary + '.bun.LICENSE.md')).toBe(true);
-    expect(JSON.parse(readFileSync(restoredBinary + '.bun.json', 'utf8'))).toMatchObject({ version: '1.3.14', target: `linux-${process.arch}` });
+    expect(JSON.parse(readFileSync(restoredBinary + '.bun.json', 'utf8'))).toMatchObject({ version: CAPTURED_BUN_RUNTIME_VERSION, target: `linux-${process.arch}` });
     const run = spawnSync(restoredBinary, [], {
       cwd: restored, encoding: 'utf8', timeout: 90_000,
       env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, CAPTURED_DIRECT_EXEC_PARENT: 'PRESERVED_NONCREDENTIAL', CAPTURE_DIRECT_EXEC_TOKEN: 'SYNTHETIC_WITHHELD_CREDENTIAL' },

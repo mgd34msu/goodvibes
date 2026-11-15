@@ -112,7 +112,7 @@ test('host Classic admission is added only at the terminal processing transition
   const other = await open();
   const initial = capture();
   await other.storage.transaction(key, () => ({ next: initial, value: undefined }));
-  await expect(other.storage.transaction(key, () => ({ next: { ...initial, state: 'turn', route: 'converse', classic }, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
+  await expect(other.storage.transaction(key, () => ({ next: { ...initial, state: 'turn', route: 'converse', classic }, value: undefined }))).rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('legal moves') });
   const fresh = await open();
   await expect(fresh.storage.transaction(key, () => ({ next: { ...initial, state: 'cancelled', classic }, value: undefined }))).rejects.toMatchObject({ code: 'conflict' });
 });

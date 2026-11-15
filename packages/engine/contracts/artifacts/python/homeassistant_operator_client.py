@@ -5,15 +5,15 @@ emitted from the operator contract by scripts/generate-homeassistant-client.ts.
 Covers only the REST subset HA consumes; the webhook, conversation stream,
 and surface health probe are not operator methods and stay hand-written.
 
-Contract product version: 3.2.0
-Consumed operator methods: 33
+Contract product version: 3.3.0
+Consumed operator methods: 37
 """
 from __future__ import annotations
 
 from typing import Any, Literal, Mapping, NamedTuple, NotRequired, TypedDict
 
 #: Daemon contract version these types were generated against (the version pin).
-CONTRACT_VERSION: str = "3.2.0"
+CONTRACT_VERSION: str = "3.3.0"
 
 
 class OperatorRoute(NamedTuple):
@@ -30,6 +30,10 @@ CONSUMED_METHOD_IDS: frozenset[str] = frozenset({
     "channels.tools.invoke",
     "channels.tools.surface.list",
     "control.status",
+    "homeassistant.conversation.cancel",
+    "homeassistant.conversation.health",
+    "homeassistant.conversation.stream",
+    "homeassistant.conversation.submit",
     "homeassistant.homeGraph.askHomeGraph",
     "homeassistant.homeGraph.browse",
     "homeassistant.homeGraph.export",
@@ -67,6 +71,10 @@ OPERATOR_ROUTES: dict[str, OperatorRoute] = {
     "channels.tools.invoke": OperatorRoute("POST", "/api/channels/tools/{surface}/{toolId}"),
     "channels.tools.surface.list": OperatorRoute("GET", "/api/channels/tools/{surface}"),
     "control.status": OperatorRoute("GET", "/status"),
+    "homeassistant.conversation.cancel": OperatorRoute("POST", "/api/homeassistant/conversation/cancel"),
+    "homeassistant.conversation.health": OperatorRoute("GET", "/api/homeassistant/health"),
+    "homeassistant.conversation.stream": OperatorRoute("POST", "/api/homeassistant/conversation/stream"),
+    "homeassistant.conversation.submit": OperatorRoute("POST", "/api/homeassistant/conversation"),
     "homeassistant.homeGraph.askHomeGraph": OperatorRoute("POST", "/api/homeassistant/home-graph/ask"),
     "homeassistant.homeGraph.browse": OperatorRoute("GET", "/api/homeassistant/home-graph/browse"),
     "homeassistant.homeGraph.export": OperatorRoute("POST", "/api/homeassistant/home-graph/export"),
@@ -100,6 +108,8 @@ OPERATOR_ROUTES: dict[str, OperatorRoute] = {
 
 # channels.actions.invoke
 class ChannelsActionsInvokeInput(TypedDict, total=True):
+    surface: str
+    actionId: str
     accountId: NotRequired[str]
     metadata: NotRequired[Mapping[str, Any]]
 
@@ -117,6 +127,8 @@ class ChannelsAgentToolsSurfaceListOutput(TypedDict, total=True):
 
 # channels.tools.invoke
 class ChannelsToolsInvokeInput(TypedDict, total=True):
+    surface: str
+    toolId: str
     accountId: NotRequired[str]
     metadata: NotRequired[Mapping[str, Any]]
 
@@ -134,14 +146,63 @@ class ChannelsToolsSurfaceListOutput(TypedDict, total=True):
 
 # control.status
 class ControlStatusInput(TypedDict, total=True):
-    receipts: NotRequired[Literal["consume"]]
+    receipts: NotRequired[Literal["consume", "peek", "ack"]]
+    ids: NotRequired[str]
 
 class ControlStatusOutput(TypedDict, total=True):
     status: str
     version: str
     buildVersion: str
     platformVersion: str
+    cluster: NotRequired[str | float | bool | None | Mapping[str, Any] | list[Any]]
     receipts: NotRequired[list[Mapping[str, Any]]]
+
+# homeassistant.conversation.cancel
+class HomeassistantConversationCancelInput(TypedDict, total=True):
+    sessionId: NotRequired[str]
+    messageId: NotRequired[str]
+
+class HomeassistantConversationCancelOutput(TypedDict, total=True):
+    ok: bool
+    sessionId: NotRequired[str]
+    status: NotRequired[str]
+
+# homeassistant.conversation.health
+HomeassistantConversationHealthInput = Mapping[str, Any]
+
+HomeassistantConversationHealthOutput = Mapping[str, Any]
+
+# homeassistant.conversation.stream
+class HomeassistantConversationStreamInput(TypedDict, total=True):
+    message: str
+    conversationId: NotRequired[str]
+    messageId: NotRequired[str]
+    threadId: NotRequired[str]
+    surfaceId: NotRequired[str]
+    providerId: NotRequired[str]
+    modelId: NotRequired[str]
+
+HomeassistantConversationStreamOutput = Mapping[str, Any]
+
+# homeassistant.conversation.submit
+class HomeassistantConversationSubmitInput(TypedDict, total=True):
+    message: str
+    conversationId: NotRequired[str]
+    messageId: NotRequired[str]
+    threadId: NotRequired[str]
+    surfaceId: NotRequired[str]
+    providerId: NotRequired[str]
+    modelId: NotRequired[str]
+    wait: NotRequired[bool]
+    timeoutMs: NotRequired[float]
+
+class HomeassistantConversationSubmitOutput(TypedDict, total=True):
+    ok: bool
+    status: str
+    messageId: NotRequired[str]
+    conversationId: NotRequired[str]
+    sessionId: NotRequired[str]
+    error: NotRequired[str]
 
 # homeassistant.homeGraph.askHomeGraph
 class HomeassistantHomeGraphAskHomeGraphInput(TypedDict, total=True):

@@ -93,8 +93,10 @@ describe('/hosted', () => {
   test('no flag means "follow the setting", which is not the same as --kill', () => {
     expect(readDetachOverride(['write', 'a', 'test'])).toEqual({ policy: undefined, rest: ['write', 'a', 'test'] });
     expect(readDetachOverride(['--survive', 'write', 'a', 'test'])).toEqual({ policy: 'survive', rest: ['write', 'a', 'test'] });
-    expect(readDetachOverride(['write', '--kill'])).toEqual({ policy: 'kill', rest: ['write'] });
-    // Last flag wins, and the prompt is never eaten by the parse.
-    expect(readDetachOverride(['--survive', 'x', '--kill'])).toEqual({ policy: 'kill', rest: ['x'] });
+    // Only leading flags are flags: a word in the prompt that looks like one is prompt text.
+    expect(readDetachOverride(['write', '--kill'])).toEqual({ policy: undefined, rest: ['write', '--kill'] });
+    expect(readDetachOverride(['explain', '--kill', 'x'])).toEqual({ policy: undefined, rest: ['explain', '--kill', 'x'] });
+    // Last leading flag wins, and the prompt is never eaten by the parse.
+    expect(readDetachOverride(['--survive', '--kill', 'x', '--survive'])).toEqual({ policy: 'kill', rest: ['x', '--survive'] });
   });
 });

@@ -8,6 +8,7 @@
  * second node type resolves through the same path with no special case.
  */
 import { describe, expect, test, beforeEach, afterEach, setSystemTime } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -800,6 +801,8 @@ describe('device posture runtime', () => {
     const callbacks: Array<() => void> = [];
     const spawned: Array<ReturnType<typeof setInterval>> = [];
     globalThis.setInterval = ((handler: () => void, timeout?: number) => {
+      // Lock refresh timers are not the sweep cadence; leave them real.
+      if (timeout !== undefined && timeout < MINUTE_MS) return realSetInterval(handler, timeout);
       delays.push(timeout ?? 0);
       callbacks.push(handler);
       const timer = realSetInterval(() => undefined, HOUR_MS);
@@ -815,9 +818,7 @@ describe('device posture runtime', () => {
       configManager.set('device.capture.sweepIntervalMinutes', 5);
       // The running timer re-reads the cadence after its own sweep.
       callbacks[callbacks.length - 1]?.();
-      for (let attempt = 0; attempt < 200 && delays.length < 2; attempt += 1) {
-        await new Promise((resolveTick) => { setTimeout(resolveTick, 5); });
-      }
+      await waitFor(() => delays.length >= 2);
       expect(delays[delays.length - 1]).toBe(5 * MINUTE_MS);
       expect(h.runtime.housekeeper.getArmedIntervalMs()).toBe(5 * MINUTE_MS);
       h.runtime.stopHousekeeping();
@@ -875,8 +876,8 @@ describe('device capability verbs', () => {
     const expected: Readonly<Record<string, string>> = {
       'devices.nodes.list': 'read:remote',
       'devices.capability.request': 'write:remote',
-      'devices.artifacts.list': 'read:remote',
-      'devices.artifacts.read': 'read:remote',
+      'devices.artifacts.list': 'write:remote',
+      'devices.artifacts.read': 'write:remote',
       'devices.grants.list': 'read:remote',
       'devices.grants.revoke': 'write:config',
       'devices.housekeeping.run': 'write:config',

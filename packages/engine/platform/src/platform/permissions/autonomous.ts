@@ -1,7 +1,7 @@
 import { array } from 'zod/v4';
 import { nativeSelectedDiffEvidence } from '../workflow/work-ledger/native-diff-evidence.js';
 import { captureNativeSelectedDiffContext, type NativeSelectedDiffContext } from '../workflow/work-ledger/native-diff-context.js';
-import { nativeConversationContinuationMessageSchema, NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES, NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
+import { nativeConversationContinuationMessageSchema, type NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 /** Recorded Jev tool outcomes. No human callback or transport retry lives here. */
 import {
@@ -65,8 +65,8 @@ function captureSourceFrame(value: unknown, currentness: boolean) {
   }
   let conversationContext: AutonomousToolSource['conversationContext'];
   if (Object.hasOwn(captured, 'conversationContext')) {
-    const context = array(nativeConversationContinuationMessageSchema).max(NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES).safeParse('conversationContext' in captured ? captured.conversationContext : undefined);
-    if (!context.success || new TextEncoder().encode(JSON.stringify(context.data)).byteLength > NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES) throw new JudgmentError('invalid-request', 'autonomous conversation evidence must be complete bounded host data');
+    const context = array(nativeConversationContinuationMessageSchema).safeParse('conversationContext' in captured ? captured.conversationContext : undefined);
+    if (!context.success) throw new JudgmentError('invalid-request', 'autonomous conversation evidence must be complete host data');
     conversationContext = Object.freeze(context.data.map(message => Object.freeze(message)));
   }
   const source = Object.freeze({ goal, criteria: Object.freeze(criteria),

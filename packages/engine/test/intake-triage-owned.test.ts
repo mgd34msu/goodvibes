@@ -15,6 +15,7 @@ import type { InboundChannelItem } from '../platform/src/platform/intake/provide
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 import { acquireOwnedTriageIdentity } from '../platform/src/platform/intake/providers/account-identity.js';
 import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const row = (id = 'one'): InboundChannelItem => ({ id: `fixture:${id}`, provider: 'fixture', kind: 'dm',
@@ -170,7 +171,7 @@ test('canonical commit rechecks synchronous account proof at publication and clo
     const f = await setup(); const scoring = f.owned.runInboxTriage(); void scoring.catch(() => {}); await entered.promise;
     let closed = false; const closing = action === 'close' ? f.owned.close().then(() => { closed = true; }) : undefined;
     if (action === 'account') f.revoke();
-    await new Promise(resolve => setTimeout(resolve, 5)); expect(closed).toBe(false);
+    await eventLoopTurns(); expect(closed).toBe(false);
     release.resolve(); await expect(scoring).rejects.toThrow(); await closing; expect(f.path()).toEqual([]); held.mockRestore();
   }
 });
@@ -185,7 +186,7 @@ test('enrichment remains inside account/privacy leases and close waits for its r
     const reading = f.read(); void reading.catch(() => {}); await entered.promise;
     let closed = false; const closing = action === 'close' ? f.owned.close().then(() => { closed = true; }) : undefined;
     if (action === 'account') f.revoke(); else if (action === 'semantic') f.authority.abort();
-    await new Promise(resolve => setTimeout(resolve, 5)); expect(closed).toBe(false);
+    await eventLoopTurns(); expect(closed).toBe(false);
     release.resolve(); await expect(reading).rejects.toThrow(); await closing; held.mockRestore();
   }
 });
@@ -205,7 +206,7 @@ test('close drains an uncooperative judgment and queued scoring cannot ask or wr
   const second = f.owned.runInboxTriage(); void second.catch(() => {});
   let closed = false; const closing = f.owned.close(); expect(f.owned.close()).toBe(closing);
   void closing.then(() => { closed = true; });
-  await new Promise(resolve => setTimeout(resolve, 5)); expect(closed).toBe(false);
+  await eventLoopTurns(); expect(closed).toBe(false);
   release.resolve(); await expect(first).rejects.toThrow(); await expect(second).rejects.toThrow(); await closing;
   expect(asks).toBe(1); expect(f.path()).toEqual([]);
   const next = await setup({ directory: f.directory }); expect((await next.read()).total).toBe(1);

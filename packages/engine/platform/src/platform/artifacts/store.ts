@@ -2,7 +2,7 @@ import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../wo
 import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
 import { createHash } from 'node:crypto';
 import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
-import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
+import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
 import { finished } from 'node:stream/promises';
@@ -77,7 +77,7 @@ function assertWithinArtifactRoot(rootDir: string, targetPath: string, label: st
   const target = resolve(targetPath);
   const rel = relative(root, target);
   if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) return target;
-  throw new Error(`${label} is outside the artifact storage root.`);
+  throw Object.assign(new Error(`${label} is outside the artifact storage root.`), { status: 400 });
 }
 
 function normalizeMimeType(value: string | undefined, fallbackFilename?: string): string {
@@ -93,8 +93,12 @@ function sanitizeRetentionMs(
   defaultRetentionMs: number,
   maxRetentionMs: number,
 ): number | undefined {
+  // An explicit 0 keeps the artifact until it is removed. Any other value that
+  // is not a positive number asks for nothing usable and gets the default, so
+  // a negative value cannot step around the retention cap.
   if (requested === 0) return undefined;
-  const candidate = Number.isFinite(requested) ? Number(requested) : defaultRetentionMs;
+  const candidate = requested !== undefined && Number.isFinite(requested) && requested > 0 ? requested : defaultRetentionMs;
+  // Only a configured default of 0 means keep forever.
   if (candidate <= 0) return undefined;
   return Math.min(candidate, maxRetentionMs);
 }
@@ -151,7 +155,7 @@ function resolveArtifactIntent(input: ArtifactCreateInput): {
       : 'inline-data';
   const acquisitionMode = input.acquisitionMode ?? derivedAcquisitionMode;
   if (acquisitionMode !== 'unknown' && acquisitionMode !== derivedAcquisitionMode) {
-    throw new Error(`Artifact acquisitionMode "${acquisitionMode}" does not match the provided artifact input.`);
+    throw Object.assign(new Error(`Artifact acquisitionMode "${acquisitionMode}" does not match the provided artifact input.`), { status: 400 });
   }
 
   const derivedFetchMode: ArtifactFetchMode = derivedAcquisitionMode === 'remote-fetch'
@@ -161,10 +165,10 @@ function resolveArtifactIntent(input: ArtifactCreateInput): {
 
   if (acquisitionMode === 'remote-fetch') {
     if (!REMOTE_FETCH_MODES.has(fetchMode)) {
-      throw new Error('Remote artifact fetches require fetchMode "public-only" or "allow-private-hosts".');
+      throw Object.assign(new Error('Remote artifact fetches require fetchMode "public-only" or "allow-private-hosts".'), { status: 400 });
     }
   } else if (fetchMode !== 'not-applicable' && fetchMode !== 'unknown') {
-    throw new Error('Non-remote artifact inputs require fetchMode "not-applicable" or "unknown".');
+    throw Object.assign(new Error('Non-remote artifact inputs require fetchMode "not-applicable" or "unknown".'), { status: 400 });
   }
 
   const allowPrivateHosts = fetchMode === 'allow-private-hosts'
@@ -349,6 +353,20 @@ export async function acquireArtifactPublication(observation: ArtifactOriginalOb
     await new Promise<void>(resolveWait => { const timer = setTimeout(resolveWait, 25); timer.unref?.(); });
   }
 }
+/** How long a content spool without metadata must sit idle before it counts as crash residue. */
+const ORPHAN_ARTIFACT_CONTENT_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a leaf exists, without following a link. Only "no such file" counts as absent. */
+function leafPresent(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export class ArtifactStore {
   #cleanupIterator: Iterator<ArtifactRecord> | undefined;
   readonly #originalOwner: { readonly slots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly records: Map<string, ArtifactRecord>; readonly files: Map<string, { readonly content: string; readonly metadata: string }>; readonly storage: ArtifactStorageOwner; readonly storageSlots: readonly { readonly key: string; readonly descriptor: PropertyDescriptor }[]; readonly entries: WeakMap<ArtifactRecord, { readonly content: string; readonly metadata: string }> };
@@ -768,7 +786,10 @@ export class ArtifactStore {
         const metadataStamp = this.storageOwner.importedStamp(metadataPath);
         const parsed = freezeArtifactRecord(normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord));
         this.storageOwner.assertImported(metadataPath, metadataStamp);
-        if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) continue;
+        if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) {
+          if (parsed?.id && !existsSync(join(this.rootDir, `${entry.slice(0, -5)}.data`))) this.#reclaimOrphanMetadata(entry);
+          continue;
+        }
         if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
           || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
         if (parsed.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(parsed.sha256)) throw new Error('Saved artifact checksum format is invalid');
@@ -788,11 +809,53 @@ export class ArtifactStore {
         });
       }
     }
+    this.#reclaimOrphanContent();
+  }
+
+  /**
+   * Remove a metadata file whose content file is gone, once it has sat idle for
+   * a day (a write in progress in another process sharing this root has content
+   * first, so a pair this old is broken for good). Such a file otherwise stays
+   * on disk forever, since load skips it.
+   */
+  #reclaimOrphanMetadata(entry: string, now = Date.now()): void {
+    if (!/^artifact-[A-Za-z0-9-]+\.json$/.test(entry)) return;
+    const path = join(this.rootDir, entry);
+    try {
+      const info = lstatSync(path);
+      if (!info.isFile() || info.nlink !== 1 || now - info.mtimeMs < ORPHAN_ARTIFACT_CONTENT_AGE_MS) return;
+      unlinkSync(path);
+      logger.info('[artifacts] removed metadata whose content is missing', { path });
+    } catch (error) {
+      logger.warn('[artifacts] could not remove metadata whose content is missing', { path, error: summarizeError(error) });
+    }
+  }
+
+  /**
+   * Remove content spools a crashed write left without metadata. A spool is
+   * only touched once it has been idle for a day, so a write still streaming
+   * in another process sharing this root is never cut short.
+   */
+  #reclaimOrphanContent(now = Date.now()): void {
+    for (const entry of readdirSync(this.rootDir)) {
+      if (!/^artifact-[A-Za-z0-9-]+\.data$/.test(entry) || existsSync(join(this.rootDir, `${entry.slice(0, -5)}.json`))) continue;
+      const path = join(this.rootDir, entry);
+      try {
+        const info = lstatSync(path);
+        if (!info.isFile() || info.nlink !== 1 || now - info.mtimeMs < ORPHAN_ARTIFACT_CONTENT_AGE_MS) continue;
+        unlinkSync(path);
+        logger.info('[artifacts] removed content left by an interrupted write', { path });
+      } catch (error) {
+        logger.warn('[artifacts] could not remove content left by an interrupted write', { path, error: summarizeError(error) });
+      }
+    }
   }
 
   private pruneExpired(now = Date.now()): void {
     for (const record of this.records.values()) {
-      if (typeof record.expiresAt === 'number' && record.expiresAt <= now) {
+      // Another process sharing this root may have removed the files; a record
+      // with no content behind it is dropped rather than listed forever.
+      if ((typeof record.expiresAt === 'number' && record.expiresAt <= now) || !existsSync(record.contentPath)) {
         this.#removeRecordFiles(record);
       }
     }
@@ -802,12 +865,15 @@ export class ArtifactStore {
     const owner = this.#originalOwner, files = nativeApply(nativeMapGet, owner.files, [record.id]) as { readonly content: string; readonly metadata: string } | undefined;
     try {
       if (!files) throw new Error('Artifact original file ownership is unavailable');
-      this.storageOwner.assertImported(record.contentPath, files.content);
-      this.storageOwner.assertImported(record.metadataPath, files.metadata);
       const contentPath = assertWithinArtifactRoot(this.rootDir, record.contentPath, 'Artifact content deletion path');
       const metadataPath = assertWithinArtifactRoot(this.rootDir, record.metadataPath, 'Artifact metadata deletion path');
-      this.storageOwner.assertImported(contentPath, files.content); unlinkSync(contentPath);
-      this.storageOwner.assertImported(metadataPath, files.metadata); unlinkSync(metadataPath);
+      // A file already gone (removed by another process) needs no unlink; one
+      // still present must be the exact file this store imported.
+      const contentPresent = leafPresent(contentPath), metadataPresent = leafPresent(metadataPath);
+      if (contentPresent) this.storageOwner.assertImported(record.contentPath, files.content);
+      if (metadataPresent) this.storageOwner.assertImported(record.metadataPath, files.metadata);
+      if (contentPresent) { this.storageOwner.assertImported(contentPath, files.content); unlinkSync(contentPath); }
+      if (metadataPresent) { this.storageOwner.assertImported(metadataPath, files.metadata); unlinkSync(metadataPath); }
       nativeApply(nativeMapDelete, owner.records, [record.id]); nativeApply(nativeMapDelete, owner.files, [record.id]); nativeApply(nativeMapDelete, this.savedChecksumPins, [record.id]); return true;
     } catch (error) {
       logger.warn('[artifacts] failed to prune expired artifact files', {
@@ -854,9 +920,14 @@ export class ArtifactStore {
         const bunType = Bun.file(normalizedPath).type;
         mimeType = bunType && bunType.trim().length > 0 ? bunType : guessMimeType(filename);
       }
-      const fileStat = await stat(normalizedPath);
+      const fileStat = await stat(normalizedPath).catch((error: unknown) => {
+        const code = (error as { readonly code?: unknown } | null)?.code;
+        // A path the caller named that is missing or not a file is theirs to fix; any other stat failure is the host's.
+        if (code === 'ENOENT' || code === 'ENOTDIR') throw Object.assign(new Error(`Artifact path not found: ${normalizedPath}`), { status: 400 });
+        throw error;
+      });
       if (fileStat.size > this.maxBytes) {
-        throw new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`);
+        throw Object.assign(new Error(`Artifact exceeds the ${this.maxBytes}-byte limit.`), { status: 400 });
       }
       return {
         stream: createReadStream(normalizedPath),
@@ -869,7 +940,7 @@ export class ArtifactStore {
     if (typeof input.uri === 'string' && input.uri.trim().length > 0) {
       return this.resolveRemoteInput(input.uri.trim(), input.mimeType, input.filename, intent.fetchMode, intent.allowPrivateHosts, signal);
     }
-    throw new Error('Artifact input requires dataBase64, text, path, or uri');
+    throw Object.assign(new Error('Artifact input requires dataBase64, text, path, or uri'), { status: 400 });
   }
 
   private async resolveRemoteInput(
@@ -880,15 +951,17 @@ export class ArtifactStore {
     allowPrivateHosts = false,
     signal?: AbortSignal,
   ): Promise<ResolvedArtifactInput> {
-    const parsed = new URL(uri);
+    const parsed = URL.canParse(uri)
+      ? new URL(uri)
+      : (() => { throw Object.assign(new Error(`Artifact URI is not a valid URL: ${uri}`), { status: 400 }); })();
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Unsupported artifact URI scheme: ${parsed.protocol}`);
+      throw Object.assign(new Error(`Unsupported artifact URI scheme: ${parsed.protocol}`), { status: 400 });
     }
 
     let current = parsed.toString();
     for (let redirectCount = 0; redirectCount < 5; redirectCount += 1) {
       if (allowPrivateHosts && !this.allowPrivateHostFetches) {
-        throw new Error('Private-host remote artifact fetches are disabled by config.');
+        throw Object.assign(new Error('Private-host remote artifact fetches are disabled by config.'), { status: 400 });
       }
       this.assertRemoteHostAllowed(current, fetchMode);
       const response = await instrumentedFetch(current, {
@@ -953,7 +1026,7 @@ export class ArtifactStore {
   private assertRemoteHostAllowed(uri: string, fetchMode: ArtifactFetchMode): void {
     const hostname = extractHostname(uri);
     if (!hostname) {
-      throw new Error(`Could not resolve artifact URI host: ${uri}`);
+      throw Object.assign(new Error(`Could not resolve artifact URI host: ${uri}`), { status: 400 });
     }
     const result = classifyHostTrustTier(hostname, {
       trustedHosts: [...this.trustedHosts],
@@ -961,12 +1034,12 @@ export class ArtifactStore {
     });
     const allowPrivateHosts = fetchMode === 'allow-private-hosts';
     if (result.tier === 'blocked' && (!allowPrivateHosts || !result.isSsrf)) {
-      throw new Error(`Artifact URI blocked by SSRF policy: ${result.reason}`);
+      throw Object.assign(new Error(`Artifact URI blocked by SSRF policy: ${result.reason}`), { status: 400 });
     }
     // A loopback host is not a public host: 'public-only' refuses it, and
     // only 'allow-private-hosts' lets the store reach this machine.
     if (result.tier === 'localhost' && !allowPrivateHosts) {
-      throw new Error(`Artifact URI blocked by SSRF policy: ${result.reason}`);
+      throw Object.assign(new Error(`Artifact URI blocked by SSRF policy: ${result.reason}`), { status: 400 });
     }
   }
 }

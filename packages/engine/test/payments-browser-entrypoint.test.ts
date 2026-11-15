@@ -10,8 +10,12 @@ const ENGINE_ROOT = resolve(import.meta.dir, '..');
 const PUBLIC_ENTRY = '@goodvibes-jev/engine/platform/platform/payments/browser';
 const BUNDLE_CEILING_MS = 30_000;
 
-/** Bundle an installed-package consumer without aliases, externals or host shims. */
-async function bundleConsumer(source: boolean): Promise<typeof browserPolicy> {
+/**
+ * Bundle an installed-package consumer without aliases, externals or host shims.
+ * Resolved through the `bun` condition (the sources), never the built `dist`
+ * the `import` condition names, so the result does not depend on a build.
+ */
+async function bundleConsumer(): Promise<typeof browserPolicy> {
   const dir = mkdtempSync(join(tmpdir(), 'gv-payments-browser-'));
   try {
     const scope = join(dir, 'node_modules', '@goodvibes-jev');
@@ -23,7 +27,7 @@ async function bundleConsumer(source: boolean): Promise<typeof browserPolicy> {
     const output = join(dir, 'consumer.js');
     const child = Bun.spawn([
       process.execPath, 'build', entry, '--target=browser', '--format=iife',
-      `--outfile=${output}`, ...(source ? ['--conditions=bun'] : []),
+      `--outfile=${output}`, '--conditions=bun',
     ], { cwd: dir, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
     const stdout = new Response(child.stdout).text().catch(() => '');
     const stderr = new Response(child.stderr).text().catch(() => '');
@@ -45,31 +49,29 @@ async function bundleConsumer(source: boolean): Promise<typeof browserPolicy> {
   }
 }
 
-for (const source of [true, false]) {
-  describe(`payment browser policy through the ${source ? 'Bun source' : 'published import'} condition`, () => {
-    test('bundles the four UI helpers and fails closed for remote or unknown surfaces', async () => {
-      const policy = await bundleConsumer(source);
-      expect(Object.keys(policy)).toEqual(expect.arrayContaining([
-        'CVV_PROMPT_TRADEOFF_WARNING', 'describeCardEntryRefusal',
-        'mayEnterCardDetails', 'mayOfferCardEntryFlow',
-      ]));
-      for (const surface of ['tui', 'agent-terminal', 'webui', ' WEBUI ']) {
-        expect(policy.mayEnterCardDetails(surface)).toBe(true);
-        expect(policy.mayOfferCardEntryFlow(surface)).toBe(true);
-      }
-      for (const surface of ['telegram', 'slack', 'email', 'unknown', '', 'webui.evil']) {
-        expect(policy.mayEnterCardDetails(surface)).toBe(false);
-        expect(policy.mayOfferCardEntryFlow(surface)).toBe(false);
-      }
-      expect(policy.CVV_PROMPT_TRADEOFF_WARNING).toBe(browserPolicy.CVV_PROMPT_TRADEOFF_WARNING);
-      expect(policy.CVV_PROMPT_TRADEOFF_WARNING.length).toBeGreaterThan(0);
-      expect(policy.describeCardEntryRefusal('slack')).toBe(browserPolicy.describeCardEntryRefusal('slack'));
-      // An unknown surface identifier is never reflected back into the refusal.
-      expect(policy.describeCardEntryRefusal('untrusted-4242424242424242'))
-        .toBe(policy.describeCardEntryRefusal('unknown'));
-    }, 40_000);
-  });
-}
+describe('payment browser policy through the Bun source condition', () => {
+  test('bundles the four UI helpers and fails closed for remote or unknown surfaces', async () => {
+    const policy = await bundleConsumer();
+    expect(Object.keys(policy)).toEqual(expect.arrayContaining([
+      'CVV_PROMPT_TRADEOFF_WARNING', 'describeCardEntryRefusal',
+      'mayEnterCardDetails', 'mayOfferCardEntryFlow',
+    ]));
+    for (const surface of ['tui', 'agent-terminal', 'webui', ' WEBUI ']) {
+      expect(policy.mayEnterCardDetails(surface)).toBe(true);
+      expect(policy.mayOfferCardEntryFlow(surface)).toBe(true);
+    }
+    for (const surface of ['telegram', 'slack', 'email', 'unknown', '', 'webui.evil']) {
+      expect(policy.mayEnterCardDetails(surface)).toBe(false);
+      expect(policy.mayOfferCardEntryFlow(surface)).toBe(false);
+    }
+    expect(policy.CVV_PROMPT_TRADEOFF_WARNING).toBe(browserPolicy.CVV_PROMPT_TRADEOFF_WARNING);
+    expect(policy.CVV_PROMPT_TRADEOFF_WARNING.length).toBeGreaterThan(0);
+    expect(policy.describeCardEntryRefusal('slack')).toBe(browserPolicy.describeCardEntryRefusal('slack'));
+    // An unknown surface identifier is never reflected back into the refusal.
+    expect(policy.describeCardEntryRefusal('untrusted-4242424242424242'))
+      .toBe(policy.describeCardEntryRefusal('unknown'));
+  }, 40_000);
+});
 
 test('the existing host entry keeps the same policy functions and warning', async () => {
   const host = await import('../platform/src/platform/payments/index.js');

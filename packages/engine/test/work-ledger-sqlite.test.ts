@@ -93,7 +93,7 @@ test('postcommit refresh failure cannot erase accepted result and fences ordinar
   const file = path(); const sqlite = new SQLiteStore(file, { coordinated: true });
   const schema = (db: { run(sql: string): void }) => db.run('CREATE TABLE IF NOT EXISTS proof (value TEXT)');
   await sqlite.init(schema);
-  expect(await sqlite.transactPersisted(db => { db.run("INSERT INTO proof VALUES ('durable')"); return { changed: true, value: 'accepted' }; }, () => { throw new Error('refresh'); })).toEqual({ kind: 'completed', value: 'accepted' });
+  expect(await sqlite.transactPersisted(db => { db.run("INSERT INTO proof VALUES ('durable')"); return { changed: true, value: 'accepted' }; }, () => { throw new Error('refresh'); })).toEqual({ kind: 'completed', value: 'accepted', fenced: true });
   expect(() => sqlite.run("DELETE FROM proof")).toThrow('fenced');
   expect(sqlite.readPersisted(db => db.exec('SELECT value FROM proof')[0]?.values)).toEqual([['durable']]);
   expect(await sqlite.transactPersisted(db => ({ changed: false, value: db.exec('SELECT value FROM proof')[0]?.values }), () => {})).toEqual({ kind: 'completed', value: [['durable']] });
@@ -263,11 +263,34 @@ test('actual ledger directory-sync ambiguity returns indeterminate then exact re
   } finally { sync.mockRestore(); }
 });
 
-test('documented boundary: a fresh owner has no manifest to distinguish deleted whole DB from first creation', async () => {
+test('a database deleted while the daemon was down is refused, not opened as an empty ledger', async () => {
   const file = path(); const first = await open(file); await first.service.execute(command, first.actor); await first.store.close();
   unlinkSync(file);
   const fresh = await open(file);
+  await expect(fresh.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
+  await expect(fresh.service.readSnapshot(fresh.actor)).rejects.toThrow();
+  // Writing is refused too: nothing is created on top of the missing history.
+  expect(await fresh.service.execute({ ...command, requestId: 'again' }, fresh.actor)).toMatchObject({ kind: 'indeterminate' });
+  await expect(fresh.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
+  // The refusal names the way forward: removing the marker accepts the empty ledger.
+  unlinkSync(`${file}.work-ledger-revisions.json`);
   expect(await fresh.service.readSnapshot(fresh.actor)).toMatchObject({ revision: 0, works: [] });
-  // An established-open policy needs independent durable identity outside this
-  // missing file. This test records the boundary, not a deletion-protection claim.
+});
+
+test('a database restored from an older copy is refused for every project whose history it lost', async () => {
+  const file = path(); const first = await open(file);
+  await first.service.execute(command, first.actor);
+  const backup = readFileSync(file);
+  expect(await first.service.execute({ ...command, requestId: 'second', expectedRevision: 1 }, first.actor)).toMatchObject({ kind: 'accepted' });
+  const other = await open(file, 'other');
+  expect(await other.service.execute(command, other.actor)).toMatchObject({ kind: 'accepted' });
+  await first.store.close(); await other.store.close();
+  writeFileSync(file, backup);
+  const restored = await open(file);
+  await expect(restored.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
+  const otherAfter = await open(file, 'other');
+  await expect(otherAfter.storage.read()).rejects.toThrow('deleted, replaced by an older copy');
+  // A project that never had history in either copy is not affected.
+  const untouched = await open(file, 'never-used');
+  expect(await untouched.storage.read()).toMatchObject({ revision: 0 });
 });

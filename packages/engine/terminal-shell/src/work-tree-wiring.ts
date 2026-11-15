@@ -43,6 +43,8 @@ export interface WorkTreeWiringDeps {
     /** Repaint (a ◈ summary of an opened edit landed). */
     readonly requestRender: () => void;
 }
+/** Most finished-agent transcripts kept; a dropped one is simply read again. */
+const MAX_SNAPSHOTS = 200;
 /** A finished agent's transcript never changes: read it once. */
 interface SnapshotMemo {
     readonly stamp: string;
@@ -64,17 +66,45 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
     unsubs.push(events.tools.on('TOOL_FAILED', (ev) => timings.callSettled(ev.callId, ev.durationMs, Date.now())));
     unsubs.push(events.tools.on('TOOL_CANCELLED', (ev) => timings.callSettled(ev.callId, undefined, Date.now())));
     // Everything the session sidecar keeps: fold decisions and failed/cancelled turn endings.
-    const persistView = (): void => saveWorkTreeFolds(deps.sessionsDir, deps.sessionId(), conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
-    unsubs.push(events.turns.on('TURN_SUBMITTED', () => {
+    // A session id can move without a resume (crash recovery sets it directly). The
+    // first save under a new id first reads that session's sidecar, so the live
+    // state of the previous session never overwrites it. Live keys win: a toggle
+    // made this instant is not undone.
+    let syncedSession: string | undefined;
+    const reconcileSession = (): void => {
+        const current = deps.sessionId();
+        if (current === syncedSession)
+            return;
+        syncedSession = current;
+        const liveFolds = new Set(conversation.workTree.foldState().map(([key]) => key));
+        conversation.workTree.restoreFoldState(loadWorkTreeFolds(deps.sessionsDir, current).filter(([key]) => !liveFolds.has(key)));
+        const liveTurns = new Set(conversation.workTree.turnOutcomes().map((record) => record.index));
+        conversation.workTree.restoreTurnOutcomes(loadWorkTreeTurnOutcomes(deps.sessionsDir, current).filter((record) => !liveTurns.has(record.index)));
+    };
+    const persistView = (): void => {
+        reconcileSession();
+        saveWorkTreeFolds(deps.sessionsDir, deps.sessionId(), conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
+    };
+    // A duplicate submission is announced as a new turn and then refused. It never
+    // appends a message, so it shares the running turn's message index; its ids are
+    // remembered so the refusal cannot close that running turn.
+    const rejectedDuplicateTurnIds = new Set<string>();
+    unsubs.push(events.turns.on('TURN_SUBMITTED', (ev) => {
         const snapshot = conversation.getMessageSnapshot();
         for (let i = snapshot.length - 1; i >= 0; i--) {
             if (snapshot[i]!.role === 'user') {
-                timings.turnStarted(i, Date.now(), userMessageFingerprint(snapshot[i]));
+                if (timings.isTurnOpen(i))
+                    rejectedDuplicateTurnIds.add(ev.turnId);
+                else
+                    timings.turnStarted(i, Date.now(), userMessageFingerprint(snapshot[i]));
                 break;
             }
         }
     }));
-    const endTurn = (outcome: TurnOutcome): void => {
+    const endTurn = (outcome: TurnOutcome, turnId: string): void => {
+        if (rejectedDuplicateTurnIds.delete(turnId))
+            return;
+        reconcileSession();
         const ended = timings.turnEnded(Date.now(), outcome);
         // The header drops "working" and states a failure on the next build.
         conversation.workTree.invalidate();
@@ -83,13 +113,13 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
         if (conversation.workTree.recordTurnOutcome({ index: ended.index, fingerprint: ended.timing.fingerprint, outcome }))
             persistView();
     };
-    unsubs.push(events.turns.on('TURN_COMPLETED', (ev) => endTurn(ev.stopReason === 'empty_response' ? 'failed' : 'completed')));
-    unsubs.push(events.turns.on('TURN_ERROR', () => endTurn('failed')));
-    unsubs.push(events.turns.on('TURN_CANCEL', () => endTurn('cancelled')));
-    unsubs.push(events.turns.on('PREFLIGHT_FAIL', () => endTurn('failed')));
-    // A new or resumed transcript: turn timings are keyed by message index and belong to the old one.
-    unsubs.push(conversation.workTree.onReset(() => timings.clear()));
+    unsubs.push(events.turns.on('TURN_COMPLETED', (ev) => endTurn(ev.stopReason === 'empty_response' ? 'failed' : 'completed', ev.turnId)));
+    unsubs.push(events.turns.on('TURN_ERROR', (ev) => endTurn('failed', ev.turnId)));
+    unsubs.push(events.turns.on('TURN_CANCEL', (ev) => endTurn('cancelled', ev.turnId)));
+    unsubs.push(events.turns.on('PREFLIGHT_FAIL', (ev) => endTurn('failed', ev.turnId)));
     const snapshots = new Map<string, SnapshotMemo>();
+    // A new or resumed transcript: turn timings are keyed by message index and belong to the old one.
+    unsubs.push(conversation.workTree.onReset(() => { timings.clear(); snapshots.clear(); rejectedDuplicateTurnIds.clear(); }));
     const messagesOf = (record: AgentRecord): readonly ConversationMessageSnapshot[] => {
         const finished = record.status !== 'running' && record.status !== 'pending';
         const stamp = `${record.status}:${record.completedAt ?? ''}:${record.toolCallCount}`;
@@ -97,8 +127,17 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
         if (finished && memo && memo.stamp === stamp)
             return memo.messages;
         const messages = deps.agentManager.getConversationSnapshot(record.id);
-        if (finished)
+        if (finished) {
+            snapshots.delete(record.id);
             snapshots.set(record.id, { stamp, messages });
+            // Oldest first out: a long session keeps the most recent finished agents.
+            while (snapshots.size > MAX_SNAPSHOTS) {
+                const oldest = snapshots.keys().next();
+                if (oldest.done)
+                    break;
+                snapshots.delete(oldest.value);
+            }
+        }
         return messages;
     };
     const costOf = (agentId: string): number | undefined => {
@@ -149,11 +188,11 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
     });
     // Fold decisions persist per session, beside the session file.
     conversation.workTree.onFoldChange(persistView);
+    unsubs.push(() => conversation.workTree.onFoldChange(null));
     sweepOrphanWorkTreeFolds(deps.sessionsDir);
     unsubs.push(onSemanticSummaryReady(() => { conversation.workTree.invalidate(); deps.requestRender(); }));
     unsubs.push(onSyntaxHighlightReady(() => { conversation.workTree.invalidate(); deps.requestRender(); }));
     // Products may resume sessions through multiple routes; restore folds once per new session.
-    let syncedSession: string | undefined;
     const syncSession = (): void => {
         const current = deps.sessionId();
         if (current === syncedSession)

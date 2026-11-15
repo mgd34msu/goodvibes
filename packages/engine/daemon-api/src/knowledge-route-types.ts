@@ -83,8 +83,8 @@ export interface KnowledgeServiceLike {
   importBookmarksFromFile(input: Record<string, unknown>): Promise<unknown>;
   importUrlsFromFile(input: Record<string, unknown>): Promise<unknown>;
   ingestConnectorInput(input: Record<string, unknown>): Promise<unknown>;
-  searchScoped(input: Record<string, unknown>): Promise<readonly unknown[]>;
-  ask(input: Record<string, unknown>): Promise<unknown>;
+  searchScoped(input: Record<string, unknown>, options?: KnowledgeScopeReadOptions): Promise<readonly unknown[]>;
+  ask(input: Record<string, unknown>, options?: KnowledgeScopeReadOptions): Promise<unknown>;
   buildPacket(
     task: string,
     writeScope: readonly string[],
@@ -94,6 +94,8 @@ export interface KnowledgeServiceLike {
       budgetLimit?: number;
       knowledgeSpaceId?: string;
       includeAllSpaces?: boolean;
+      signal?: AbortSignal;
+      assertCurrent?: () => void;
     },
   ): Promise<unknown> | unknown;
   decideConsolidationCandidate(
@@ -120,7 +122,7 @@ export interface KnowledgeServiceLike {
     limit?: number;
     knowledgeSpaceId?: string;
     includeAllSpaces?: boolean;
-  }): Promise<unknown>;
+  }, options?: KnowledgeScopeReadOptions): Promise<unknown>;
   materializeProjection(input: {
     kind: KnowledgeProjectionTargetKind;
     id?: string | undefined;

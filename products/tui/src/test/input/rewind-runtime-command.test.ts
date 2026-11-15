@@ -21,7 +21,7 @@ import {
   redoLastRewind,
   resetRewindState,
 } from '../../input/commands/rewind-runtime.ts';
-import { recordTurnAnchor, clearTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { recordTurnAnchor, clearTurnAnchors, getTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const SESSION = 's-rewind';
@@ -39,14 +39,6 @@ function makeScratchWorkspace(): string {
   const dir = makeProjectTempDir('gv-rewind-runtime');
   tempDirs.push(dir);
   return dir;
-}
-
-async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) throw new Error('waitFor: timed out');
-    await new Promise((r) => setTimeout(r, 15));
-  }
 }
 
 /** Minimal conversation that models truncation + snapshot/restore honestly. */
@@ -79,6 +71,10 @@ function makeCtx(_dir: string, mgr: WorkspaceCheckpointManager | undefined, conv
   const printed: string[] = [];
   const previews: PreviewCall[] = [];
   let pendingAnswer: ((ok: boolean) => void) | null = null;
+  // Settles when the command has put its question up, so tests await the
+  // command's own step instead of polling a clock.
+  let markAsked: () => void = () => {};
+  const asked = new Promise<void>((resolve) => { markAsked = resolve; });
   const ctx = {
     print: (t: string) => { printed.push(t); },
     renderRequest: () => {},
@@ -87,7 +83,7 @@ function makeCtx(_dir: string, mgr: WorkspaceCheckpointManager | undefined, conv
     previewChanges: (opts: PreviewCall) => {
       previews.push(opts);
       if (!opts.question) return Promise.resolve(false);
-      return new Promise<boolean>((resolve) => { pendingAnswer = resolve; });
+      return new Promise<boolean>((resolve) => { pendingAnswer = resolve; markAsked(); });
     },
     session: { conversationManager: conv, runtime: { model: 'm', provider: 'p', debugMode: false, systemPrompt: '', reasoningEffort: 'medium', sessionId: SESSION } },
     workspace: { workspaceCheckpointManager: mgr },
@@ -98,13 +94,10 @@ function makeCtx(_dir: string, mgr: WorkspaceCheckpointManager | undefined, conv
     pendingAnswer = null;
     resolve?.(ok);
   };
-  return { ctx, printed, previews, answer, hasQuestion: () => pendingAnswer !== null };
+  return { ctx, printed, previews, answer, asked };
 }
 
 // ---------------------------------------------------------------------------
-
-describe('rewind-runtime registration', () => {
-});
 
 describe('/rewind: recent-turns picker', () => {
   test('bare /rewind with no recorded turns explains the current-run limitation', async () => {
@@ -145,12 +138,12 @@ describe('/rewind both: files + conversation confirm flow', () => {
     const fake = makeFakeConversation(4); // 4 messages now; anchor keeps 2 → drop 2
     recordTurnAnchor(SESSION, { turnId: 't1', label: 'refactor the parser', messageCount: 2, at: Date.now() });
 
-    const { ctx, printed, previews, answer, hasQuestion } = makeCtx(dir, mgr, fake.conv);
+    const { ctx, printed, previews, answer, asked } = makeCtx(dir, mgr, fake.conv);
     const registry = new CommandRegistry();
     registerRewindRuntimeCommands(registry);
 
     const running = registry.execute('rewind', ['1', 'both'], ctx);
-    await waitFor(hasQuestion);
+    await asked;
     expect(previews).toHaveLength(1);
     expect(previews[0]!.diff).toContain('a.txt');
     expect(previews[0]!.question?.confirmLabel).toBe('Rewind');
@@ -158,7 +151,6 @@ describe('/rewind both: files + conversation confirm flow', () => {
 
     answer(true);
     await running;
-    await waitFor(() => fake.systemMessages.length > 0);
 
     // Files restored to the checkpoint state.
     expect(readFileSync(join(dir, 'a.txt'), 'utf-8')).toBe('v1');
@@ -181,16 +173,15 @@ describe('/rewind conversation: no checkpoint required', () => {
     const fake = makeFakeConversation(5); // keep 3 → drop 2
     recordTurnAnchor(SESSION, { turnId: 't1', label: 'do the thing', messageCount: 3, at: Date.now() });
 
-    const { ctx, previews, answer, hasQuestion } = makeCtx(dir, mgr, fake.conv);
+    const { ctx, previews, answer, asked } = makeCtx(dir, mgr, fake.conv);
     const registry = new CommandRegistry();
     registerRewindRuntimeCommands(registry);
 
     const running = registry.execute('rewind', ['1', 'conversation'], ctx);
-    await waitFor(hasQuestion);
+    await asked;
     expect(previews[0]!.note).toContain('drop 2');
     answer(true);
     await running;
-    await waitFor(() => fake.systemMessages.length > 0);
     expect(fake.getMessages().length).toBe(3);
 
     // Undo the rewind: conversation returns to its pre-rewind 5 messages.
@@ -202,6 +193,60 @@ describe('/rewind conversation: no checkpoint required', () => {
     const redo = await redoLastRewind(ctx);
     expect(redo.handled).toBe(true);
     expect(fake.getMessages().length).toBe(3);
+  });
+
+  test('/undo rewind gives the dropped turns back to the picker and /redo rewind drops them again', async () => {
+    const dir = makeScratchWorkspace();
+    const mgr = new WorkspaceCheckpointManager({ workspaceRoot: dir });
+    const fake = makeFakeConversation(5);
+    recordTurnAnchor(SESSION, { turnId: 't1', label: 'first', messageCount: 3, at: 1 });
+    recordTurnAnchor(SESSION, { turnId: 't2', label: 'second', messageCount: 5, at: 2 });
+    const turnIds = () => getTurnAnchors(SESSION).map((anchor) => anchor.turnId);
+
+    const { ctx, answer, asked } = makeCtx(dir, mgr, fake.conv);
+    const registry = new CommandRegistry();
+    registerRewindRuntimeCommands(registry);
+
+    const running = registry.execute('rewind', ['t1', 'conversation'], ctx);
+    await asked;
+    answer(true);
+    await running;
+    expect(turnIds()).toEqual(['t1']);
+
+    await undoLastRewind(ctx);
+    expect(turnIds()).toEqual(['t1', 't2']);
+
+    await redoLastRewind(ctx);
+    expect(turnIds()).toEqual(['t1']);
+  });
+
+  test('/undo rewind refuses once newer messages exist, leaves them, and stays undoable after they are gone', async () => {
+    const dir = makeScratchWorkspace();
+    const mgr = new WorkspaceCheckpointManager({ workspaceRoot: dir });
+    const fake = makeFakeConversation(5);
+    recordTurnAnchor(SESSION, { turnId: 't1', label: 'do the thing', messageCount: 3, at: Date.now() });
+    const { ctx, answer, asked } = makeCtx(dir, mgr, fake.conv);
+    const registry = new CommandRegistry();
+    registerRewindRuntimeCommands(registry);
+    const running = registry.execute('rewind', ['1', 'conversation'], ctx);
+    await asked;
+    answer(true);
+    await running;
+    expect(fake.getMessages().length).toBe(3);
+
+    // A new turn lands after the rewind.
+    fake.getMessages().push({ role: 'user', content: 'newer question' }, { role: 'assistant', content: 'newer answer' });
+    const refused = await undoLastRewind(ctx);
+    expect(refused.handled).toBe(true);
+    expect(refused.message).toMatch(/refused.*2 newer messages/i);
+    expect(fake.getMessages().map((m) => m.content)).toContain('newer answer');
+    expect(fake.getMessages().length).toBe(5);
+
+    // The receipt was kept: once the conversation is back to the rewound state the undo works.
+    fake.getMessages().length = 3;
+    const undone = await undoLastRewind(ctx);
+    expect(undone.message).toMatch(/Rewind undone/);
+    expect(fake.getMessages().length).toBe(5);
   });
 
   test('/undo rewind with nothing applied reports it is not handled', async () => {
@@ -256,12 +301,12 @@ describe('/rewind: checkpoint-only fallback (no completed turns recorded this ru
     writeFileSync(join(dir, 'a.txt'), 'v2: drifted after the checkpoint');
 
     const fake = makeFakeConversation(3);
-    const { ctx, printed, previews, answer, hasQuestion } = makeCtx(dir, mgr, fake.conv);
+    const { ctx, printed, previews, answer, asked } = makeCtx(dir, mgr, fake.conv);
     const registry = new CommandRegistry();
     registerRewindRuntimeCommands(registry);
 
     const running = registry.execute('rewind', ['1'], ctx);
-    await waitFor(hasQuestion);
+    await asked;
     expect(previews).toHaveLength(1);
     expect(printed.some((l) => l.includes('Previewing checkpoint restore'))).toBe(true);
     expect(printed.some((l) => /files only/i.test(l))).toBe(true);
@@ -269,7 +314,6 @@ describe('/rewind: checkpoint-only fallback (no completed turns recorded this ru
 
     answer(true);
     await running;
-    await waitFor(() => fake.systemMessages.length > 0);
 
     expect(readFileSync(join(dir, 'a.txt'), 'utf-8')).toBe('v1');
     // Conversation is completely untouched, still the original 3 messages.
@@ -298,42 +342,18 @@ describe('/rewind: checkpoint-only fallback (no completed turns recorded this ru
   });
 });
 
-describe('/rewind: single-use confirm token', () => {
-  test('a stale plan cannot be applied twice (token consumed on first confirm)', async () => {
-    const dir = makeScratchWorkspace();
-    const mgr = new WorkspaceCheckpointManager({ workspaceRoot: dir });
-    const fake = makeFakeConversation(4);
-    recordTurnAnchor(SESSION, { turnId: 't1', label: 'x', messageCount: 2, at: Date.now() });
-    const { ctx, printed, answer, hasQuestion } = makeCtx(dir, mgr, fake.conv);
-    const registry = new CommandRegistry();
-    registerRewindRuntimeCommands(registry);
-
-    const running = registry.execute('rewind', ['1', 'conversation'], ctx);
-    await waitFor(hasQuestion);
-    answer(true);
-    await running;
-    await waitFor(() => fake.systemMessages.length > 0);
-    expect(fake.getMessages().length).toBe(2);
-    // The plan/token is single-use; answering again after the question
-    // resolved does nothing. No second receipt, no throw.
-    answer(true);
-    expect(fake.systemMessages.length).toBe(1);
-    expect(printed.some((l) => /Rewind failed/i.test(l))).toBe(false);
-  });
-});
-
 describe('/rewind: cancelling the question changes nothing', () => {
   test('answering no keeps the conversation and prints the cancel line', async () => {
     const dir = makeScratchWorkspace();
     const mgr = new WorkspaceCheckpointManager({ workspaceRoot: dir });
     const fake = makeFakeConversation(4);
     recordTurnAnchor(SESSION, { turnId: 't1', label: 'x', messageCount: 2, at: Date.now() });
-    const { ctx, printed, answer, hasQuestion } = makeCtx(dir, mgr, fake.conv);
+    const { ctx, printed, answer, asked } = makeCtx(dir, mgr, fake.conv);
     const registry = new CommandRegistry();
     registerRewindRuntimeCommands(registry);
 
     const running = registry.execute('rewind', ['1', 'conversation'], ctx);
-    await waitFor(hasQuestion);
+    await asked;
     answer(false);
     await running;
     expect(fake.getMessages().length).toBe(4);

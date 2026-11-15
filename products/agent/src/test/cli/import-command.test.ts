@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MemoryEmbeddingProviderRegistry, MemoryStore, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
 import { ConfigManager } from '../../config/index.ts';
 import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
 import { scanOpenClawWorkspace } from '../../cli/openclaw-import.ts';
@@ -65,14 +66,15 @@ describe('goodvibes-agent import openclaw', () => {
     expect(dailyBrief?.requiresEnv).toEqual(['OPENCLAW_TOKEN']);
     expect(dailyBrief?.requiresCommand).toEqual(['gh']);
 
-    // Permissions: read, write, exec (Bash), find (search); teleport unmapped.
-    expect(plan.permissions.categories).toEqual(['exec', 'find', 'read', 'write']);
+    // Permissions: read, write, find (search). `Bash(git status)` is scoped to one command and is not mapped to the whole exec category; teleport is unmapped.
+    expect(plan.permissions.categories).toEqual(['find', 'read', 'write']);
 
     // Skip reasons are explicit, never guessed.
     const reasons = plan.skipped.map((s) => s.reason);
     expect(reasons.some((r) => r.includes('not a recognized instruction file'))).toBe(true);
     expect(reasons.some((r) => r.includes('unknown memory class'))).toBe(true);
     expect(reasons.some((r) => r.includes('no SKILL.md'))).toBe(true);
+    expect(reasons.some((r) => r.includes('Bash(git status)') && r.includes('scoped allow not representable'))).toBe(true);
     expect(reasons.some((r) => r.includes('teleport') && r.includes('known Agent tool category'))).toBe(true);
   });
 
@@ -84,7 +86,8 @@ describe('goodvibes-agent import openclaw', () => {
     expect(result.output).toContain('personas: 2');
     expect(result.output).toContain('memory records: 3');
     expect(result.output).toContain('skills: 2');
-    expect(result.output).toContain('allow: exec, find, read, write');
+    expect(result.output).toContain('allow: find, read, write');
+    expect(result.output).toContain('warning: write would be allowed');
     expect(result.output).toContain('Re-run with --apply');
 
     // Nothing was written to the registries.
@@ -113,7 +116,8 @@ describe('goodvibes-agent import openclaw', () => {
     expect(text).toContain('personas created 2');
     expect(text).toContain('memory records created 3');
     expect(text).toContain('skills created 2');
-    expect(text).toContain('permission categories allowed 4');
+    expect(text).toContain('permission categories recorded 3');
+    expect(text).toContain('execution mode safe-owner');
 
     const resolveUserPath = (...parts: string[]) => join(home, '.goodvibes', ...parts);
     const personas = AgentPersonaRegistry.fromShellPaths({ resolveUserPath }).list();
@@ -124,8 +128,41 @@ describe('goodvibes-agent import openclaw', () => {
     expect(skills.map((s) => s.name).sort()).toEqual(['Daily Brief', 'Ops Sweep']);
 
     expect(configManager.get('permissions.mode')).toBe('safe-owner');
-    expect(String(configManager.get('permissions.tools.exec' as never))).toBe('allow');
+    expect(String(configManager.get('permissions.tools.exec' as never))).not.toBe('allow');
     expect(String(configManager.get('permissions.tools.read' as never))).toBe('allow');
+  });
+
+  test('applying the same workspace twice does not duplicate memories and reports the repeat as partial', async () => {
+    const home = freshHome();
+    const first = await runCli(['import', 'openclaw', FIXTURE, '--apply'], home);
+    expect(first.exitCode).toBe(0);
+    expect(first.output).toContain('memory records created 3');
+
+    const second = await runCli(['import', 'openclaw', FIXTURE, '--apply'], home);
+    expect(second.output).toContain('memory records created 0 (skipped 3)');
+    expect(second.output).toContain('already imported');
+    expect(second.output).toContain('result partial');
+    expect(second.exitCode).toBe(1);
+
+    const configManager = new ConfigManager({ workingDir: home, homeDir: home, surfaceRoot: 'agent' });
+    const store = new MemoryStore(resolveCanonicalMemoryDbPath(home), { embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }) });
+    await store.init();
+    try {
+      expect(store.retrieve({}).filter((record) => record.provenance.some((link) => link.ref.startsWith('openclaw-import:')))).toHaveLength(3);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('a scoped or tool-list file never becomes a blanket allow', () => {
+    const workspace = freshHome();
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(workspace, 'allowed-tools.json'), JSON.stringify(['Bash(git status)', 'WebFetch(domain:example.com)']));
+    writeFileSync(join(workspace, 'tools.json'), JSON.stringify({ tools: ['bash', 'write', 'fetch'] }));
+    const plan = scanOpenClawWorkspace(workspace);
+    expect(plan.permissions.categories).toEqual([]);
+    const reasons = plan.skipped.map((entry) => entry.reason);
+    expect(reasons.filter((reason) => reason.includes('scoped allow not representable'))).toHaveLength(2);
   });
 
   test('missing default workspace reports plainly', async () => {

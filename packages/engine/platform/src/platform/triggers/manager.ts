@@ -40,7 +40,7 @@ import {
   sweepTriggers,
   type TriggerRetentionPolicy,
 } from './store.js';
-import { applyFailure, applySuccess, checkReset, isDue, resetBreaker, triggerLifecycle, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
+import { applyFailure, applySuccess, checkReset, holdsAgainstCheckResult, isDue, resetBreaker, triggerLifecycle, resolveSupervisionPolicy, type SupervisionPolicy } from './supervision.js';
 import { activateStreamTrigger, drainStreamTrigger, startStreamTrigger, type StreamOwner, type StreamRuntime } from './manager-streams.js';
 import type {
   ConditionTriggerSpec, OnExitTriggerSpec, StreamTriggerSpec, TriggerActionGrant, TriggerDefinition,
@@ -50,6 +50,9 @@ import { validateDefinition } from './validation.js';
 import { retentionFrom, TriggerDisabledError, type TriggerManagerConfig, type TriggerManagerOptions } from './manager-types.js';
 
 export * from './manager-types.js';
+
+/** The rule state a condition firing replaced, kept so a failed action can give it back. */
+interface RuleRollback { readonly restore: TriggerRecord['ruleState']; readonly applied: TriggerRecord['ruleState'] }
 
 export class TriggerManager {
   private readonly options: TriggerManagerOptions;
@@ -140,7 +143,7 @@ export class TriggerManager {
     });
 
     this.records.clear();
-    for (const record of swept.triggers) this.records.set(record.definition.id, record);
+    for (const record of swept.triggers) this.records.set(record.definition.id, this.reviveStreamAfterRestart(record, now));
     this.grants.clear();
     for (const grant of snapshot?.grants ?? []) this.grants.set(grant.id, grant);
     this.eventLog = [...swept.eventLog];
@@ -150,6 +153,13 @@ export class TriggerManager {
     this.lastRecovery = swept.report;
     this.reconcileOnExitAfterRestart(now);
     return swept.report;
+  }
+
+  /** A stream saved as running has no child after a restart; it is made due so the next tick starts it instead of looking healthy while dead. */
+  private reviveStreamAfterRestart(record: TriggerRecord, now: number): TriggerRecord {
+    if (record.definition.spec.kind !== 'stream' || record.state !== 'running' || this.streams.has(record.definition.id)) return record;
+    return { ...record, state: 'idle', nextCheckAt: now, updatedAt: now,
+      runs: [...record.runs, { at: now, outcome: 'skipped', detail: 'daemon restarted while the stream was running; it will be started again' }] };
   }
 
   private observeOrThrow(error: unknown, allowed: boolean): TriggerRecoveryReport {
@@ -202,8 +212,8 @@ export class TriggerManager {
   start(): TriggerRecoveryReport {
     this.work.start();
     const report = this.load(true);
-    if (this.observing) return report;
-    this.startSweep();
+    // An observer runs no sweeps or checks, but its tick keeps retrying the lease so it takes over when the owner exits.
+    if (!this.observing) this.startSweep();
     if (!this.supervisionTimer) {
       const interval = Math.max(250, this.config.supervisionTickMs ?? 1_000);
       this.supervisionTimer = setInterval(() => {
@@ -218,6 +228,14 @@ export class TriggerManager {
   async supervisionTick(): Promise<void> {
     if (!this.config.enabled) return;
     try {
+      if (this.observing) {
+        if (this.migrationRequired) return;
+        // load(true) re-observes and sets `observing` again when the owner still holds the lease.
+        this.observing = false;
+        this.load(true);
+        if (this.observing) return;
+        this.startSweep();
+      }
       await this.pollProcesses();
       await this.tick();
     } catch (error) {
@@ -353,6 +371,16 @@ export class TriggerManager {
       if (ownedStream?.streamId) { this.options.streamHost?.stop(ownedStream.streamId); ownedStream.streamId = null; }
       if (ownedStream?.timer) clearInterval(ownedStream.timer);
       if (ownedStream && this.streams.get(definition.id) === ownedStream) this.streams.delete(definition.id);
+      // The caller is told this create failed, so the reserved record must not
+      // stay behind: a stream would be started by a later tick, an on-exit
+      // trigger would sit idle forever, and the same id could not be retried.
+      const stored = this.records.get(definition.id);
+      if (stored === admitted || stored === record) {
+        this.records.delete(definition.id);
+        if (!(error instanceof TriggerStoreError) && this.persistenceFailure === null && !this.work.stopped) {
+          try { this.persist(); } catch (persistError) { logger.warn('Trigger create could not remove its reserved record', { triggerId: definition.id, error: summarizeError(persistError) }); }
+        }
+      }
       throw error;
     }
 
@@ -475,7 +503,8 @@ export class TriggerManager {
     this.load();
     const record = this.records.get(id);
     if (!record || record.definition.spec.kind !== 'condition') return null;
-    if (this.inFlight.has(id)) return record;
+    // A cancelled or finished trigger does not run, and an open breaker closes only by an operator reset.
+    if (this.inFlight.has(id) || holdsAgainstCheckResult(record)) return record;
     this.inFlight.add(id);
     const spec = record.definition.spec;
     const startedAt = this.now();
@@ -488,7 +517,14 @@ export class TriggerManager {
       if (this.persistenceFailure !== null || error instanceof TriggerStoreError) throw error;
       // Whether a retry can clear this failure is read from the error itself;
       // a failure read as permanent parks the trigger at once.
-      const transience = await readFailureTransience(error, 'triggers.condition-check');
+      let transience: FailureTransience;
+      try { transience = await readFailureTransience(error, 'triggers.condition-check'); }
+      catch (readingError) {
+        // No reading could be made (decision models unavailable under a strict policy). The
+        // failure still has to spend a strike and back off, or the check is due again at once.
+        logger.warn('Trigger failure could not be read; treating it as retryable', { triggerId: id, error: summarizeError(readingError) });
+        transience = { failureClass: 'retryable', basis: 'no-wording', detail: 'no reading of the failure could be made' };
+      }
       return this.applyCheckFailure(id, summarizeError(error), startedAt, spec, transience);
     } finally {
       this.inFlight.delete(id);
@@ -503,6 +539,8 @@ export class TriggerManager {
   ): TriggerRecord | null {
     const record = this.records.get(id);
     if (!record) return null;
+    // Cancelled, finished or parked while the probe was in flight: the late result changes nothing.
+    if (holdsAgainstCheckResult(record)) return record;
     const now = this.now();
     const observation = toObservation(value, now);
     const observations = [...record.observations, observation].slice(-this.retention.observationRingSize);
@@ -538,7 +576,7 @@ export class TriggerManager {
     this.appendEvent({ at: now, triggerId: id, kind: 'condition', event: 'observed', fingerprint: decision.fingerprint });
 
     if (decision.fire) {
-      void this.fireAction(id, decision.reason, decision.fingerprint, 'condition').catch((error: unknown) => {
+      void this.fireAction(id, decision.reason, decision.fingerprint, 'condition', undefined, { restore: record.ruleState, applied: decision.ruleState }).catch((error: unknown) => {
         logger.warn('Trigger action failed', { triggerId: id, error: summarizeError(error) });
       });
       this.assertAvailable();
@@ -555,6 +593,7 @@ export class TriggerManager {
   ): TriggerRecord | null {
     const record = this.records.get(id);
     if (!record) return null;
+    if (holdsAgainstCheckResult(record)) return record;
     const now = this.now();
     const outcome = applyFailure(record, this.policy, now, transience);
     const run: TriggerRunRecord = {
@@ -592,8 +631,8 @@ export class TriggerManager {
 
   // ─── Firing ─────────────────────────────────────────────────────────────────
 
-  private fireAction(id: string, reason: string, fingerprint: string, kind: 'condition' | 'stream', promptOverride?: string): Promise<void> {
-    return this.work.own(() => this.fireActionOwned(id, reason, fingerprint, kind, promptOverride));
+  private fireAction(id: string, reason: string, fingerprint: string, kind: 'condition' | 'stream', promptOverride?: string, rollback?: RuleRollback): Promise<void> {
+    return this.work.own(() => this.fireActionOwned(id, reason, fingerprint, kind, promptOverride, rollback));
   }
 
   private async fireActionOwned(
@@ -602,6 +641,7 @@ export class TriggerManager {
     fingerprint: string,
     kind: 'condition' | 'stream',
     promptOverride?: string,
+    rollback?: RuleRollback,
   ): Promise<void> {
     this.requireEnabled('fire a trigger');
     this.assertAvailable();
@@ -620,6 +660,10 @@ export class TriggerManager {
           ...failed,
           runs: [...failed.runs, { at: now, outcome: 'failed', detail: `action failed: ${summarizeError(error)}` }],
           lastError: summarizeError(error),
+          // The edge or dedup mark this firing consumed is given back, so the next check
+          // that still sees the condition tries the action again instead of reporting
+          // "already consumed" for ever. Skipped when a later check already moved the state on.
+          ...(rollback && failed.ruleState === rollback.applied ? { ruleState: rollback.restore } : {}),
           updatedAt: now,
         });
         this.persist();

@@ -1,5 +1,4 @@
 import * as crypto from 'node:crypto';
-/** Source regressions: authored during coding; execution is deferred. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

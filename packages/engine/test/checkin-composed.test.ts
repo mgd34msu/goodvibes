@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { registerComposedCheckinGatewayMethods } from '../platform/src/platform/control-plane/routes/checkin-composition.js';
 import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.js';
+import { logger } from '../platform/src/platform/utils/logger.js';
 import { createDisposalScope } from '../platform/src/platform/runtime/disposal.js';
 import type { GatewayVerbGroupDeps } from '../platform/src/platform/control-plane/routes/register-gateway-verb-groups.js';
 import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
@@ -17,7 +18,7 @@ let root: string;
 let log: SqliteDecisionLog;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'checkin-composed-')); previous = installJudgmentPort(undefined); log = new SqliteDecisionLog(':memory:'); });
 afterEach(() => { installJudgmentPort(previous); log[Symbol.dispose](); rmSync(root, { recursive: true, force: true }); });
-function compose(contact = 0.99, content?: () => Promise<{ content: string }>) {
+function compose(contact = 0.99, content?: () => Promise<{ content: string }>, attachCheckinEvaluator: () => void = () => {}) {
   const fake = fakePort((name, question) => name === 'contact' ? noulAnswer(contact) : choiceAnswer(question, 'supports', 0.99));
   installJudgmentPort(withDecisionLog(fake.port, log));
   const configManager = new ConfigManager({ configDir: root });
@@ -26,7 +27,7 @@ function compose(contact = 0.99, content?: () => Promise<{ content: string }>) {
     canHandle: () => true, async deliver(request) { request.assertCurrent?.(); request.signal?.throwIfAborted(); sent.push(request.body); return { responseId: 'synthetic-send' }; } }] });
   const providerRegistry = { getCurrentModel: () => ({ id: 'synthetic', registryKey: 'synthetic', provider: 'synthetic' }),
     getForModel: () => ({ chat: content ?? (async () => ({ content: 'The release needs your deployment-window choice.' })) }) } as unknown as ProviderRegistry;
-  const automationManager = { listJobs: () => [], listRuns: () => [], attachCheckinEvaluator: () => {},
+  const automationManager = { listJobs: () => [], listRuns: () => [], attachCheckinEvaluator,
     createJob: async () => ({ id: 'synthetic-job' }), updateJob: async () => {}, setEnabled: async () => {}, runNow: async () => {} } as unknown as NonNullable<GatewayVerbGroupDeps['automationManager']>;
   const scope = createDisposalScope('synthetic-checkin');
   const catalog = new GatewayMethodCatalog();
@@ -92,4 +93,16 @@ test('merged prepared-setting mutation invalidates a pending check-in before the
     held.resolve({ content: 'The release needs your deployment-window choice.' });
     expect(await work).toMatchObject({ outcome: 'skipped' }); expect(h.sent).toEqual([]);
   } finally { h.scope.dispose(); }
+});
+
+test('a schedule that cannot be attached is logged as a warning and does not fail construction', async () => {
+  const warn = spyOn(logger, 'warn').mockImplementation(() => {});
+  let h: ReturnType<typeof compose> | undefined;
+  try {
+    h = compose(0.99, undefined, () => { throw new Error('automation bus closed'); });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const call = warn.mock.calls.find(([message]) => String(message).includes('the schedule could not be attached'));
+    expect(call).toBeDefined();
+    expect(JSON.stringify(call?.[1])).toContain('automation bus closed');
+  } finally { h?.scope.dispose(); warn.mockRestore(); }
 });

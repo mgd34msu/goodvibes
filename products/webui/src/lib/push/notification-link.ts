@@ -32,8 +32,9 @@ export interface NotificationData {
  * service worker cannot itself approve/deny, it holds no operator token, and
  * the current daemon exposes no single-purpose action-token endpoint (see
  * docs/push-approval-actions.md). So the authenticated app completes the action
- * on open (ApprovalsTasksView consumes the fragment), which works against the
- * daemon today. Tapping the notification BODY (no action) just opens the list.
+ * on open (useApprovalActions consumes the fragment, after the router rewrites
+ * the legacy `?view=approvals-tasks` form to the Work view and keeps the
+ * fragment), which works against the daemon today. Tapping the notification BODY (no action) just opens the list.
  */
 export function linkForNotification(data: NotificationData | undefined | null, action?: string): string {
   if (

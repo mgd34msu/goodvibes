@@ -35,6 +35,20 @@ const TUI_IMPORTABLE_SETTING_PREFIXES = [
   'automation.',
 ] as const;
 
+/**
+ * A project settings file travels with a cloned repository, so it is not trusted to change what
+ * the Agent may do, whether it asks before acting, or where it sends data. These import from the user's own settings only.
+ */
+const PROJECT_SCOPE_BLOCKED_PREFIXES = [
+  'permissions.',
+  'behavior.hitlMode',
+  'provider.',
+  'tools.',
+  'surfaces.',
+  'automation.',
+  'helper.',
+] as const;
+
 type SettingActionEffect =
   | {
     readonly kind: 'result';
@@ -174,6 +188,10 @@ function readNestedSettingValue(record: Record<string, unknown>, key: string): u
     cursor = cursor[part];
   }
   return cursor;
+}
+
+function projectScopeBlocksSetting(key: string): boolean {
+  return PROJECT_SCOPE_BLOCKED_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function canImportTuiSetting(key: string): boolean {
@@ -570,6 +588,7 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
     },
   ];
   const values = new Map<string, { readonly value: unknown; readonly source: string }>();
+  const blocked = new Map<string, { readonly value: unknown; readonly source: string }>();
   const parseErrors: string[] = [];
   const sources: TuiSettingsImportSource[] = [];
   for (const source of sourceInputs) {
@@ -590,6 +609,10 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
         if (!canImportTuiSetting(setting.key)) continue;
         const value = readNestedSettingValue(record, setting.key);
         if (value === undefined) continue;
+        if (source.scope === 'project' && projectScopeBlocksSetting(setting.key)) {
+          blocked.set(setting.key, { value, source: source.id });
+          continue;
+        }
         importableSettings += 1;
         values.set(setting.key, { value, source: source.id });
       }
@@ -602,9 +625,28 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
   }
 
   const settings: TuiSettingImportPlanEntry[] = [];
+  const skippedEntry = (key: string, entry: { readonly value: unknown; readonly source: string }, reason: string): TuiSettingImportPlanEntry => {
+    // A key outside the Agent schema has no typed config key to read, so its current value is not shown.
+    const known = agentWorkspaceSettingSchema(context, key);
+    const current = known === null ? undefined
+      : known.kind === 'host' ? readAgentSettingValue(configManager, known)
+        : postalConfigKey(known.key) ? configManager.getStored(known.key) : configManager.get(known.key);
+    return {
+      key,
+      source: entry.source,
+      value: entry.value,
+      status: 'skipped',
+      current: redactImportValue(key, current),
+      incoming: redactImportValue(key, entry.value),
+      reason,
+    };
+  };
   for (const [key, entry] of values) {
     const setting = agentWorkspaceSettingSchema(context, key);
-    if (!setting || setting.kind === 'host') continue;
+    if (!setting || setting.kind === 'host') {
+      settings.push(skippedEntry(key, entry, 'Not an Agent-owned setting, so it is not imported.'));
+      continue;
+    }
     const current = postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key);
     const status: TuiImportStatus = valuesMatch(current, entry.value) ? 'unchanged' : 'would_import';
     settings.push({
@@ -615,6 +657,11 @@ function buildTuiSettingsImportPlan(context: CommandContext | null): TuiSettings
       current: redactImportValue(setting.key, current),
       incoming: redactImportValue(setting.key, entry.value),
     });
+  }
+  for (const [key, entry] of blocked) {
+    // A user-level value for the same key still imports; only the project's own value is refused.
+    if (values.has(key)) continue;
+    settings.push(skippedEntry(key, entry, 'Project settings files cannot change approval, permission, provider, tool, surface, automation or helper settings. Set it in your user settings instead.'));
   }
   const subscriptions = planTuiSubscriptions(context, parseErrors);
   return { sources, settings, subscriptions, parseErrors };
@@ -646,6 +693,7 @@ export function captureAgentWorkspaceTuiSettingsImport(context: CommandContext):
     const record = records[index]; if (!record) continue;
     for (const setting of config.getSchema()) {
       if (!canImportTuiSetting(setting.key)) continue;
+      if (index === 1 && projectScopeBlocksSetting(setting.key)) continue;
       const value = readNestedSettingValue(record, setting.key);
       if (value !== undefined) settings.set(setting.key, { key: setting.key, value, source: index === 0 ? 'user-settings' : 'project-settings' });
     }
@@ -766,7 +814,8 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
     if (observation.raw === null) return { status: 'missing' };
     let record: unknown;
     try { record = captureStrictJudgmentJson(JSON.parse(observation.raw)); }
-    catch { return { status: 'invalid', content: observation.raw }; }
+    // A broken file may still hold credentials the projection could not locate, so only its size is shown.
+    catch { return { status: 'invalid', length: observation.raw.length }; }
     const privatePaths = new Set<string>();
     if (index < 2) {
       for (const setting of builtin) if (canImportTuiSetting(setting.key) && isSecretBearingConfigKey(setting.key)) privatePaths.add(JSON.stringify(setting.key.split('.')));
@@ -849,6 +898,10 @@ export async function importAgentWorkspaceTuiSettings(context: CommandContext | 
   const unchanged: string[] = [];
   const skipped: string[] = [];
   for (const entry of values) {
+    if (entry.status === 'skipped') {
+      skipped.push(`${entry.key}: ${entry.reason ?? 'not imported'}`);
+      continue;
+    }
     const setting = agentWorkspaceSettingSchema(context, entry.key);
     if (!setting || setting.kind === 'host') continue;
     if (entry.status === 'unchanged' || valuesMatch(postalConfigKey(setting.key) ? configManager.getStored(setting.key) : configManager.get(setting.key), entry.value)) {

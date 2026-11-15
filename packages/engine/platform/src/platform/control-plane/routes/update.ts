@@ -9,12 +9,12 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import type { DaemonUpdateStatus } from '../../daemon/update-status.js';
+import type { DaemonUpdateCheckStatus, DaemonUpdateStatus } from '../../daemon/update-status.js';
 
 /** The lifecycle surface these verbs need, declared rather than imported whole. */
 export interface DaemonUpdateStatusService {
   updateStatus(): DaemonUpdateStatus;
-  checkForUpdatesNow(): Promise<DaemonUpdateStatus>;
+  checkForUpdatesNow(): Promise<DaemonUpdateCheckStatus>;
 }
 
 export function createUpdateStatusHandler(service: DaemonUpdateStatusService): GatewayMethodHandler {

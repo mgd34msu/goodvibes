@@ -11,11 +11,12 @@ import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { launchNativeIntegrationHost } from '../../helpers/native-integration-host.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
 
-async function waitFor(predicate: () => boolean, label: string, milliseconds: number): Promise<void> {
-  const deadline = Date.now() + milliseconds;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
-    await Bun.sleep(10);
+// Condition-based and bounded by turns, not a clock: a never-true predicate throws with its label so the callers' finally blocks stop the host and close the modal instead of spinning past the test timeout.
+const WAIT_TURNS = 5_000_000;
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let turn = 0; !predicate(); turn++) {
+    if (turn >= WAIT_TURNS) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise<void>(resolve => setImmediate(resolve));
   }
 }
 
@@ -48,11 +49,11 @@ test('actual native conflict and autonomous fix-passed reach the TUI as separate
       .map(line => line.map(cell => cell.char).join('')).join('\n');
     const inspect = async () => {
       tab('work'); key('down'); expect(modal.fireAction('i', { print() {} })).toBe(true);
-      await waitFor(() => text().includes(`Item ${item.itemId}`), 'real status reaches Native Work modal', 10_000);
+      await waitFor(() => text().includes(`Item ${item.itemId}`), 'real status reaches Native Work modal');
       tab('integration');
     };
     modal.open(surface);
-    await waitFor(() => surface.buildView().tabs[0]!.rows.some(row => row.selectable === true), 'authenticated native ledger in modal', 10_000);
+    await waitFor(() => surface.buildView().tabs[0]!.rows.some(row => row.selectable === true), 'authenticated native ledger in modal');
     frame(); await inspect();
     expect(rows().length).toBeGreaterThan(11);
     const preserved = [`Contract ${contractId}`, `Unit ${conflicted.unitId} · group ${conflicted.groupId}`, `Item ${item.itemId} · workstream ${item.workstreamId}`,
@@ -110,11 +111,11 @@ for (const afterRepair of [false, true]) test(`an actual legacy runner keeps nat
     const frame = () => frameFromLayer(renderConfigModal(modal, 180, 45), 180, 45).map(line => line.map(cell => cell.char).join('')).join('\n');
     const inspect = async () => {
       tab('work'); key('down'); expect(modal.fireAction('i', { print() {} })).toBe(true);
-      await waitFor(() => integration().header?.some(line => line.includes('unsupported-runner')) === true, 'unsupported capability through real modal status', 10_000);
+      await waitFor(() => integration().header?.some(line => line.includes('unsupported-runner')) === true, 'unsupported capability through real modal status');
       tab('integration');
     };
     modal.open(surface);
-    await waitFor(() => surface.buildView().tabs[0]!.rows.some(row => row.selectable === true), 'legacy runner authenticated native ledger', 10_000);
+    await waitFor(() => surface.buildView().tabs[0]!.rows.some(row => row.selectable === true), 'legacy runner authenticated native ledger');
     frame(); await inspect();
     expect(frame()).toContain('Integration unavailable: unsupported-runner');
     expect(integration().rows).toHaveLength(1);
@@ -143,7 +144,7 @@ for (const afterRepair of [false, true]) test(`an actual legacy runner keeps nat
     expect(surface.actions?.map(action => action.id)).toEqual(['start', 'status', 'cancel', 'resume']);
     expect(surface.actions?.every(action => action.enabledFor?.(modal.getSelectedRow(), 'work') === true)).toBe(true);
     expect(modal.fireAction('c', { print() {} })).toBe(true);
-    await waitFor(() => work().includes('· cancelled · recovery cancelled'), 'explicit native cancellation through existing Work control', 10_000);
+    await waitFor(() => work().includes('· cancelled · recovery cancelled'), 'explicit native cancellation through existing Work control');
     const cancelled = await client.status(ready.identity, { signal: AbortSignal.timeout(10_000) });
     expect(cancelled).toMatchObject({ kind: 'execution', attemptId: ready.identity.attemptId, state: 'cancelled', recovery: 'cancelled' });
     expect(await host.inspect()).toEqual({ remergeCalls: 0, escalations: 0, mutationCount: 2 });

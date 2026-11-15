@@ -1,3 +1,5 @@
+import { CONNECTED_HOST_LIFECYCLE_STATEMENT } from './agent-harness-connected-host-capabilities.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 import type { CommandExecutionPolicy } from './agent-harness-metadata.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string {
@@ -39,7 +41,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
     return {
       effect: 'unknown',
       confirmation,
-      boundary: 'Blocked package CLI token. Agent can launch its own TUI and use public connected-host routes, but it does not manage connected-host lifecycle, listeners, servers, route relays, remotes, web surfaces, or webhook listeners.',
+      boundary: `Blocked package CLI token. Agent can launch its own TUI and use public connected-host routes. ${CONNECTED_HOST_LIFECYCLE_STATEMENT} Servers, route relays, remotes, web surfaces, and webhook listeners are not managed from this CLI mirror.`,
     };
   }
   if (root === 'tui' || root === 'onboarding' || root === 'help' || root === 'version' || root === 'completion') {
@@ -101,9 +103,9 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       // ci.*/principals.*/channels.profiles.*, pointing the model there would
       // dead-end in "unknown action". The generic operator-method tool routes
       // these directly (read-only methods run without confirmation; writes
-      // require confirm + explicitUserRequest).
+      // need a recorded effect admission).
       preferredModelTool: 'agent_operator_method (methodId "ci.status", "ci.watches.*", "principals.*", "channels.profiles.*")',
-      boundary: 'CI status/watches, principal identity mappings, and per-channel profile defaults live on the connected host. Reads run through agent_operator_method without confirmation; writes require confirm + explicitUserRequest there, and mutating CLI subcommands require --yes.',
+      boundary: `CI status/watches, principal identity mappings, and per-channel profile defaults live on the connected host. Reads run through agent_operator_method without confirmation; writes need a recorded effect admission there (${EFFECT_ADMISSION_SENTENCE}), and mutating CLI subcommands require --yes.`,
     };
   }
   if (root === 'knowledge' || root === 'ask' || root === 'search') {

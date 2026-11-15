@@ -118,6 +118,17 @@ function allowedExportSpecifiers(fs: FsReader, enginePackage: string): Set<strin
   return allow;
 }
 
+/** `pkg@3.3.1` must not match a lockfile entry for `pkg@3.3.10` or `pkg@3.3.1-rc.1`. */
+function lockfileNamesVersion(text: string, spec: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(spec, from);
+    if (at === -1) return false;
+    if (!/[\w.+-]/.test(text.charAt(at + spec.length))) return true;
+    from = at + 1;
+  }
+}
+
 /**
  * Run every engine-pin gate and return one result per gate. Pure over the injected
  * FsReader, no process exit, no console. The bin maps results to exit codes.
@@ -147,14 +158,15 @@ export function runEnginePinGate(fs: FsReader, partial: Partial<EnginePinConfig>
   });
 
   if (pinWorkspace) {
-    // A workspace dependency has no version to match: the gate is that the
-    // installed package is the workspace link and the lockfile records it so.
+    // A workspace dependency has no version to match. The reader cannot follow
+    // links, so this gate states only that the package is installed and the
+    // lockfile records the workspace entry.
     const installedPath = `node_modules/${config.enginePackage}/package.json`;
     results.push({
       id: 'installed-matches-pin',
       ok: fs.exists(installedPath),
       detail: fs.exists(installedPath)
-        ? `${config.enginePackage} is installed from the workspace`
+        ? `${config.enginePackage} is installed (a link to the workspace is not verified here)`
         : `${config.enginePackage} is not installed (run install)`,
     });
     const lockResolves = fs.exists(config.lockfile) && fs.readText(config.lockfile).includes(`${config.enginePackage}@workspace:`);
@@ -181,7 +193,7 @@ export function runEnginePinGate(fs: FsReader, partial: Partial<EnginePinConfig>
     });
 
     const lockPresent = fs.exists(config.lockfile);
-    const lockResolves = lockPresent && fs.readText(config.lockfile).includes(`${config.enginePackage}@${pin}`);
+    const lockResolves = lockPresent && lockfileNamesVersion(fs.readText(config.lockfile), `${config.enginePackage}@${pin}`);
     results.push({
       id: 'lockfile-resolves-pin',
       ok: lockResolves,

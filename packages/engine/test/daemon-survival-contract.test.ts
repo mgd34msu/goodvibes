@@ -25,7 +25,7 @@ import {
   type LifecycleMarkerIo,
 } from '../platform/src/platform/daemon/lifecycle-marker.js';
 import { DaemonReceiptStore, formatReceiptTime } from '../platform/src/platform/daemon/receipts.js';
-import { createDaemonControlRouteHandlers } from '../daemon-api/dist/index.js';
+import { createDaemonControlRouteHandlers } from '../daemon-api/src/control-routes.js';
 
 const definition: ManagedServiceDefinition = {
   name: 'goodvibes',
@@ -208,14 +208,16 @@ describe('clean-shutdown marker + crash receipt', () => {
 
   test('start after an orderly shutdown is not a crash; start after a running marker is', () => {
     const { io } = markerIo();
-    recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 1000, pid: 42 });
-    recordDaemonCleanShutdown('/state/daemon-lifecycle.json', { io, now: () => 2000 });
-    const cleanRestart = recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 3000 });
+    // The fake pid must not be read against this machine's real process table.
+    const processIdentity = { isAlive: () => false, startTime: () => null };
+    recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 1000, pid: 42, processIdentity });
+    recordDaemonCleanShutdown('/state/daemon-lifecycle.json', { io, now: () => 2000, processIdentity });
+    const cleanRestart = recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 3000, processIdentity });
     expect(cleanRestart.crashed).toBe(false);
     expect(cleanRestart.previous?.state).toBe('clean-shutdown');
 
     // This run "dies" here: no clean-shutdown stamp. The next start sees it.
-    const afterCrash = recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 4000 });
+    const afterCrash = recordDaemonStart('/state/daemon-lifecycle.json', { io, now: () => 4000, processIdentity });
     expect(afterCrash.crashed).toBe(true);
     expect(afterCrash.previous?.state).toBe('running');
   });
@@ -256,6 +258,8 @@ function statusHandlersOverStore(store: DaemonReceiptStore) {
     requireAdmin: () => null,
     requireAuthenticatedSession: () => ({ username: 'tester', roles: ['admin'] }),
     collectReceipts: () => store.consumeUndelivered().map(({ id, text, at }) => ({ id, text, at })),
+    peekReceipts: () => store.peekUndelivered().map(({ id, text, at }) => ({ id, text, at })),
+    acknowledgeReceipts: (ids) => store.markDelivered(new Set(ids)),
   });
 }
 
@@ -302,12 +306,35 @@ describe('/status receipt consumption is explicit (receipts=consume)', () => {
         await handlers.getStatus(new Request('http://127.0.0.1/status'));
       }
       // An unrelated query value is not consumption either.
-      await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=peek'));
+      await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=nonsense'));
 
       const consume = await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=consume'));
       const body = await consume.json() as { receipts: readonly { text: string }[] };
       expect(body.receipts).toHaveLength(1);
       expect(body.receipts[0]!.text).toBe('restarted after a crash at 03:20');
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('/status receipts survive a lost response (receipts=peek then receipts=ack)', () => {
+  test('a peeked receipt is offered again until a reader acknowledges its id', async () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'daemon-receipts-route-'));
+    try {
+      const store = new DaemonReceiptStore(join(scratch, 'daemon-receipts.json'));
+      const recorded = store.record('updated from 1.0.0 to 1.1.0 at 09:05');
+      const handlers = statusHandlersOverStore(store);
+
+      const peekOnce = await (await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=peek'))).json() as { receipts: readonly { id: string }[] };
+      // The reader never saw that response, so it asks again and still gets the receipt.
+      const peekTwice = await (await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=peek'))).json() as { receipts: readonly { id: string }[] };
+      expect(peekOnce.receipts.map((r) => r.id)).toEqual([recorded.id]);
+      expect(peekTwice.receipts.map((r) => r.id)).toEqual([recorded.id]);
+
+      await handlers.getStatus(new Request(`http://127.0.0.1/status?receipts=ack&ids=${recorded.id}`));
+      const afterAck = await (await handlers.getStatus(new Request('http://127.0.0.1/status?receipts=peek'))).json() as { receipts: readonly unknown[] };
+      expect(afterAck.receipts).toEqual([]);
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }

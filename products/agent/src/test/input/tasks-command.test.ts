@@ -179,11 +179,17 @@ describe('tasks command', () => {
     // ...and the missing daemon half is stated rather than swallowed.
     expect(listed).toContain("the daemon's tasks are not included");
 
-    // A daemon-side id the local registry does not know reads as unknown here
-    // rather than as an error, and `show` names where a task runs.
+    // An id the local registry does not know is not called unknown while the
+    // daemon could not be asked: the reply names why and says to retry, and
+    // `show` names where a known task runs.
     out.length = 0;
     await tasksCommand!.handler(['show', 'task-that-lives-on-the-daemon'], ctx);
-    expect(out.join('\n')).toContain('Unknown task task-that-lives-on-the-daemon');
+    const missing = out.join('\n');
+    expect(missing).not.toContain('Unknown task');
+    expect(missing).toContain('Task task-that-lives-on-the-daemon is not on this terminal');
+    expect(missing).toContain('the daemon could not be asked: no config manager is wired here');
+    expect(missing).not.toContain('..');
+    expect(missing).toContain('Try again when it is reachable.');
 
     out.length = 0;
     await tasksCommand!.handler(['show', task.id], ctx);

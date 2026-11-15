@@ -122,6 +122,11 @@ export interface ReconnectEngineCallbacks {
   onConnected(token: HandshakeToken, epoch: number): void;
   /** Called when state sync is in progress after connect. */
   onSyncing?(): void;
+  /**
+   * Called when the sync that `onSyncing` announced has finished. `ok` is false
+   * when the replay request failed, so messages may be missing.
+   */
+  onSynced?(ok: boolean, error?: string): void;
   /** Called when a reconnect attempt is scheduled. */
   onReconnecting?(attempt: number, maxAttempts: number, delayMs: number): void;
   /** Called when the transport is disconnected (willRetry indicates intent). */
@@ -151,6 +156,10 @@ export class ReconnectEngine {
   private _attempts = 0;
   private _disposed = false;
   private _pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Wakes a reconnect loop parked in its back-off sleep, so dispose ends it at once. */
+  private _wakeSleep: (() => void) | null = null;
+  /** The reconnect loop in flight, so a second caller joins it instead of starting another. */
+  private _reconnecting: Promise<boolean> | null = null;
   /** Negotiated protocol from the last successful handshake. */
   private _negotiatedProtocol: NegotiatedProtocol | undefined;
 
@@ -214,11 +223,20 @@ export class ReconnectEngine {
    * Perform the initial connect attempt.
    *
    * @param authToken - Bearer token from the AuthProvider.
-   * @returns True on success, false on terminal failure.
+   * @returns True when connected. False when not: use `connectOutcome` to tell a
+   * failure that can clear (call `reconnect`) from a terminal one.
    */
   async connect(authToken: string): Promise<boolean> {
-    if (this._disposed) return false;
-    return (await this._attemptConnect(authToken, false)) === 'connected';
+    return (await this.connectOutcome(authToken)) === 'connected';
+  }
+
+  /**
+   * Perform the initial connect attempt and say how it ended: `connected`,
+   * `retry` (failed, and `reconnect` may succeed) or `terminal` (do not retry).
+   */
+  async connectOutcome(authToken: string): Promise<'connected' | 'retry' | 'terminal'> {
+    if (this._disposed) return 'terminal';
+    return this._attemptConnect(authToken, false);
   }
 
   /**
@@ -230,8 +248,20 @@ export class ReconnectEngine {
    * @param getAuthToken - Called before each attempt to get a fresh token.
    * @returns True if eventually connected, false on terminal failure.
    */
-  async reconnect(getAuthToken: () => Promise<string>): Promise<boolean> {
-    if (this._disposed) return false;
+  reconnect(getAuthToken: () => Promise<string>): Promise<boolean> {
+    if (this._disposed) return Promise.resolve(false);
+    // The attempt counter and the back-off timer belong to one loop; a second
+    // caller (a close handler and a user action) shares the loop already running.
+    if (this._reconnecting) return this._reconnecting;
+    const loop = this._runReconnect(getAuthToken).finally(() => { this._reconnecting = null; });
+    this._reconnecting = loop;
+    return loop;
+  }
+
+  private async _runReconnect(getAuthToken: () => Promise<string>): Promise<boolean> {
+    // A previous loop that ran out of attempts leaves the count at the limit;
+    // a fresh call is a fresh series, not an immediate failure.
+    if (this._attempts >= this._policy.maxAttempts) this._attempts = 0;
 
     while (this._attempts < this._policy.maxAttempts) {
       if (this._disposed) return false;
@@ -254,7 +284,19 @@ export class ReconnectEngine {
       await this._sleep(delayMs);
       if (this._disposed) return false;
 
-      const authToken = await getAuthToken();
+      let authToken: string;
+      try {
+        authToken = await getAuthToken();
+      } catch (error) {
+        // No token for this attempt is a failed attempt, not an exit that
+        // leaves the caller's state at "reconnecting" with nothing running.
+        if (this._disposed) return false;
+        const message = `ReconnectEngine: could not obtain an auth token: ${summarizeError(error)}`;
+        logger.warn(message, { attempt: this._attempts });
+        this.callbacks?.onDisconnected?.(message, true);
+        continue;
+      }
+      if (this._disposed) return false;
       const attempt = await this._attemptConnect(authToken, true);
       if (attempt === 'connected') {
         this._attempts = 0;
@@ -265,6 +307,7 @@ export class ReconnectEngine {
       if (attempt === 'terminal') return false;
     }
 
+    if (this._disposed) return false;
     const error = `ReconnectEngine: max reconnect attempts (${this._policy.maxAttempts}) exceeded`;
     logger.error(error);
     this.callbacks?.onTerminalFailure(error);
@@ -278,6 +321,9 @@ export class ReconnectEngine {
       clearTimeout(this._pendingTimer);
       this._pendingTimer = null;
     }
+    const wake = this._wakeSleep;
+    this._wakeSleep = null;
+    wake?.();
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
@@ -288,11 +334,17 @@ export class ReconnectEngine {
     this.callbacks?.onInitializing?.(this._attempts);
     this.callbacks?.onAuthenticating?.();
 
-    const outcome = await this.adapter.connect(
-      this.identity,
-      this._lastAckedOffset,
-      authToken,
-    );
+    let outcome: ConnectOutcome;
+    try {
+      outcome = await this.adapter.connect(this.identity, this._lastAckedOffset, authToken);
+    } catch (error) {
+      // A rejecting adapter (a refused or dropped socket) is a failed attempt
+      // the loop can retry, not an exception that leaves the state at "authenticating".
+      outcome = { success: false, category: 'network', error: summarizeError(error), retryable: true };
+    }
+    // Disposed while connecting: whoever disposed owns what happens next, so
+    // no callback may report a connection or failure for this engine.
+    if (this._disposed) return 'terminal';
 
     if (!outcome.success) {
       // Version unsupported is always terminal, never retry
@@ -307,6 +359,7 @@ export class ReconnectEngine {
       }
 
       const retryable = await this._retryable(outcome);
+      if (this._disposed) return 'terminal';
       logger.warn('ReconnectEngine: connect attempt failed', {
         error: outcome.error,
         category: outcome.category,
@@ -338,16 +391,19 @@ export class ReconnectEngine {
     // Trigger replay if enabled and the server offers messages to replay
     if (this._replay.enabled && replayFromOffset > 0) {
       this.callbacks?.onSyncing?.();
+      let replayError: string | undefined;
       try {
         await this.adapter.requestReplay(
           replayFromOffset,
           this._replay.maxReplayCount,
         );
       } catch (err) {
+        replayError = summarizeError(err);
         logger.warn('ReconnectEngine: replay request failed (degraded mode)', {
-          err: summarizeError(err),
+          err: replayError,
         });
       }
+      if (!this._disposed) this.callbacks?.onSynced?.(replayError === undefined, replayError);
     }
 
     logger.debug('ReconnectEngine: connected successfully', {
@@ -376,8 +432,10 @@ export class ReconnectEngine {
 
   private _sleep(ms: number): Promise<void> {
     return new Promise<void>((resolve) => {
+      this._wakeSleep = resolve;
       this._pendingTimer = setTimeout(() => {
         this._pendingTimer = null;
+        this._wakeSleep = null;
         resolve();
       }, ms);
       this._pendingTimer.unref?.();

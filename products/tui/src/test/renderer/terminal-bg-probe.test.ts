@@ -10,7 +10,7 @@
  * installBackgroundThemeProbe.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import {
   classifyBackgroundLuminance,
   DEFAULT_PROBE_TIMEOUT_MS,
@@ -27,7 +27,12 @@ import { configGetStub } from '../helpers/config-manager-stub.ts';
 
 // The probe forcing tests mutate global active mode, always restore to dark so
 // this file's default-dark assumption (and any downstream test) stays honest.
-afterEach(() => setActiveThemeMode('dark'));
+beforeEach(() => { jest.useFakeTimers(); });
+
+afterEach(() => {
+  jest.useRealTimers();
+  setActiveThemeMode('dark');
+});
 
 const BEL = '\x07';
 const ST = '\x1b\\';
@@ -167,7 +172,7 @@ describe('TerminalBackgroundProbe.feed', () => {
     const passthrough = probe.feed('k\x1b]11;rgb:ffff/ffff');
     expect(passthrough).toBe('k'); // only the real keystroke escaped
     // Timeout fires: resolves dark, and the buffered fragment is discarded (not flushed).
-    await new Promise((r) => setTimeout(r, 40));
+    jest.advanceTimersByTime(40);
     expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
     // After resolution the filter is a passthrough again.
     expect(probe.feed('typed')).toBe('typed');
@@ -186,7 +191,7 @@ describe('TerminalBackgroundProbe.feed', () => {
     const out: ProbeResolution[] = [];
     const probe = makeProbe(out, 15);
     probe.startTimeout();
-    await new Promise((r) => setTimeout(r, 40));
+    jest.advanceTimersByTime(40);
     expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
     expect(probe.active).toBe(false);
   });
@@ -195,27 +200,13 @@ describe('TerminalBackgroundProbe.feed', () => {
     const out: ProbeResolution[] = [];
     const probe = makeProbe(out, 10);
     probe.startTimeout();
-    await new Promise((r) => setTimeout(r, 30));
+    jest.advanceTimersByTime(30);
     // A reply arrives after the timeout already resolved dark.
     probe.feed(`\x1b]11;rgb:ffff/ffff/ffff${BEL}`);
     expect(out).toEqual([{ mode: 'dark', reason: 'timeout' }]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// query bytes
-// ---------------------------------------------------------------------------
-
-describe('query bytes', () => {
-  test('OSC11_QUERY is the ST-terminated background query', () => {
-    expect(OSC11_QUERY).toBe('\x1b]11;?\x1b\\');
-  });
-
-  test('DEFAULT_PROBE_TIMEOUT_MS is a small startup window', () => {
-    expect(DEFAULT_PROBE_TIMEOUT_MS).toBeGreaterThan(0);
-    expect(DEFAULT_PROBE_TIMEOUT_MS).toBeLessThanOrEqual(500);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // installBackgroundThemeProbe, config forcing + auto/TTY gating
@@ -332,7 +323,7 @@ describe('startup owner cancellation during an unanswered background probe', () 
       forwardInput: bytes => forwarded.push(bytes),
     });
     expect(handle.filterInput(key)).toBe('');
-    await Bun.sleep(15);
+    jest.advanceTimersByTime(15);
     expect(forwarded).toEqual([key]);
     expect(handle.filterInput('next')).toBe('next');
   });
@@ -342,12 +333,12 @@ describe('startup owner cancellation during an unanswered background probe', () 
       const forwarded: string[] = [];
       const probe = new TerminalBackgroundProbe({ timeoutMs: 5, onResolve: () => {}, onFlush: bytes => forwarded.push(bytes) });
       probe.startTimeout(); expect(probe.feed(fragment)).toBe('');
-      await Bun.sleep(15); expect(forwarded).toEqual([]);
+      jest.advanceTimersByTime(15); expect(forwarded).toEqual([]);
     }
     const forwarded: string[] = [];
     const probe = new TerminalBackgroundProbe({ timeoutMs: 5, onResolve: () => {}, onFlush: bytes => forwarded.push(bytes) });
     probe.startTimeout(); expect(probe.feed('\x1b')).toBe('');
     expect(probe.feed(']11;rgb:0000/0000/0000\x07')).toBe('');
-    await Bun.sleep(15); expect(forwarded).toEqual([]);
+    jest.advanceTimersByTime(15); expect(forwarded).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ import { startDaemonFixture, type DaemonFixture } from '../../testing/daemon-fix
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
 import type { RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { until } from '../helpers/wait.js';
 
 const URL = 'https://example.com/boot-notification';
 const PRIVATE = 'synthetic-private-boot-content';
@@ -34,13 +35,6 @@ function observe(promise: Promise<unknown>) {
   let settled = false;
   void promise.then(() => { settled = true; }, () => { settled = true; });
   return () => settled;
-}
-async function until(predicate: () => boolean, label: string) {
-  const end = Date.now() + 4000;
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error(label);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 }
 function mockFetch(implementation: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>) {
   keep(spyOn(webhookHttp, 'postToPublicWebhook').mockImplementation((url, init) => implementation(url, init)));
@@ -258,6 +252,28 @@ test('zero-URL boot attaches the shared webhook and both real owners read live f
       if (value === false) expect(body).toContain(PRIVATE);
       else expect(body).not.toContain(PRIVATE);
     }
+  }
+});
+
+test('boot reads a stored Slack bot token reference through the runtime secrets manager', async () => {
+  const saved = { token: process.env.SLACK_BOT_TOKEN, hook: process.env.SLACK_WEBHOOK_URL };
+  delete process.env.SLACK_BOT_TOKEN; delete process.env.SLACK_WEBHOOK_URL;
+  try {
+    const requested: string[] = [];
+    const fx = await fixture((runtime) => {
+      // The fixture's blank service credential would win over a config token; report none.
+      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(null));
+      const get = runtime.configManager.get.bind(runtime.configManager);
+      keep(spyOn(runtime.configManager, 'get').mockImplementation(((key: string) => key === 'surfaces.slack.botToken'
+        ? 'goodvibes://secrets/goodvibes/SLACK_BOT_TOKEN' : get(key as never)) as never));
+      keep(spyOn(runtime.secretsManager, 'get').mockImplementation(async (key: string) => { requested.push(key); return key === 'SLACK_BOT_TOKEN' ? 'xoxb-stored' : null; }));
+    });
+    expect((await fx.services.bootTasks!.start()).state).toBe('ready');
+    expect(requested).toContain('SLACK_BOT_TOKEN');
+    expect(notifiers[0]!.getQueueStatus().map((queue) => queue.channel)).toEqual(['slack']);
+  } finally {
+    if (saved.token !== undefined) process.env.SLACK_BOT_TOKEN = saved.token;
+    if (saved.hook !== undefined) process.env.SLACK_WEBHOOK_URL = saved.hook;
   }
 });
 

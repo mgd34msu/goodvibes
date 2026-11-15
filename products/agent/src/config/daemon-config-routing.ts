@@ -48,7 +48,7 @@ import {
 import type { DaemonConfigClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 export {
   configKeyScope,
@@ -283,6 +283,15 @@ export async function routeConfigWrite(
   const routed = agentDaemonConfigClientInstalled() ? await routeDaemonOwnedConfigWrite(key, value) : null;
   if (routed === 'daemon') {
     logger.debug('[config] routed write over config.set', { key });
+    // The write is already applied; a failed read-back must not turn it into a reported failure.
+    let readBack: unknown;
+    let readBackFailed = false;
+    try {
+      readBack = await agentDaemonConfigClient()?.get(key);
+    } catch (error) {
+      readBackFailed = true;
+      logger.warn('[config] daemon applied config.set but the read-back failed', { key, error: summarizeError(error) });
+    }
     return {
       key,
       scope: 'daemon',
@@ -293,8 +302,10 @@ export async function routeConfigWrite(
       // reporting what we asked for would describe a value nobody holds. An
       // unreadable value falls back to what was sent, which is the closest
       // honest answer available.
-      value: await agentDaemonConfigClient()?.get(key) ?? value,
-      reason: 'applied by the connected host over config.set',
+      value: readBack ?? value,
+      reason: readBackFailed
+        ? 'applied by the connected host over config.set; the value shown is the one sent because reading it back failed'
+        : 'applied by the connected host over config.set',
     };
   }
   const outcome = await applyConfigWrite(key, value, configManager, buildAgentConfigRouting(options));

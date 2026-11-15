@@ -144,6 +144,31 @@ describe('shell/blocking-input', () => {
     expect(rendered).toBe(1);
   });
 
+  test('says so when the journal behind a restored session could not be replayed', () => {
+    const { conversation } = makeConversation();
+    const { router, messages } = makeRouter();
+
+    handleBlockingShellInput({
+      data: '\x12',
+      pendingPermission: null,
+      recoveryPending: 'recovery-session-1',
+      daemonRepairPrompt: null,
+      abortTurn: () => {},
+      conversation: conversation as never,
+      systemMessageRouter: router as never,
+      render: () => {},
+      applyRecovery: () => ({
+        applied: true, retired: true, messageCount: 4,
+        journalReplay: { replayed: 0, hadCorruptTail: false, failed: 'journal is locked' },
+      }),
+      consumeRecovery: () => null,
+      removeRecoveryPoint: () => {},
+    });
+
+    expect(messages.join('\n')).toContain('Session restored (4 messages)');
+    expect(messages.join('\n')).toContain('Recovery of the journal failed (journal is locked); it was kept and will be retried on the next resume.');
+  });
+
   test('passes normal typing through while dismissing recovery', () => {
     const { conversation, restored } = makeConversation();
     const { router, messages } = makeRouter();

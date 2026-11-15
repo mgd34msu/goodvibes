@@ -126,6 +126,9 @@ export async function readMemorySchemaCertified(source: unknown, options: Catalo
   }, () => null);
 }
 
+/** More candidate spans than this are masked as a whole, without one decision per span. */
+export const MAX_MEMORY_CREDENTIAL_SPANS = 100;
+
 /** The complete source stays protected. Classic never uses a semantic exemption to disclose a candidate credential. */
 export async function readMemoryPublicText(source: string, options: CatalogRankingOptions): Promise<string> {
   return withConfiguredDecisionModelPolicy(() => withModelReadingSource({ text: source }, retainMemoryReadingOptions(options), async (captured, current) => {
@@ -136,6 +139,9 @@ export async function readMemoryPublicText(source: string, options: CatalogRanki
       for (const candidate of candidates) { output += captured.text.slice(offset, candidate.start) + candidate.marker; offset = candidate.end; }
       return output + captured.text.slice(offset);
     };
+    // A text made of thousands of key-shaped tokens would cost one sequential model call
+    // per span. Past the cap nothing is judged and every candidate is masked.
+    if (candidates.length > MAX_MEMORY_CREDENTIAL_SPANS) return mask();
     return decisionOrClassic(async () => {
       const site = atRestCredential.name;
       const authority = captureMemoryAuthority(atRestCredential, current);

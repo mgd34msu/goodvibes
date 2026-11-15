@@ -239,7 +239,7 @@ export interface OnboardingApplyDependencies {
   readonly secrets?: Pick<SecretsManager, 'delete' | 'get' | 'inspect' | 'set'>;
   readonly auth?: Pick<
     UserAuthManager,
-    'addUser' | 'clearBootstrapCredentialFile' | 'createSession' | 'deleteUser' | 'getUser' | 'inspect' | 'revokeSession' | 'rotatePassword'
+    'addUser' | 'clearBootstrapCredentialFile' | 'createSession' | 'deleteUser' | 'getUser' | 'inspect' | 'restoreState' | 'revokeSession' | 'rotatePassword' | 'snapshotState'
   >;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope;

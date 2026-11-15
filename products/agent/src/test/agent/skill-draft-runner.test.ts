@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { AgentNoteRegistry } from '../../agent/note-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
 import { runSkillDraftProposer, readSkillDraftLedger } from '../../agent/skill-draft-runner.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fakePort, scoreAnswer, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import type { SkillDraftRunResult } from '../../agent/skill-draft-runner.ts';
@@ -58,16 +59,6 @@ function makeContextWithPaths(paths: ReturnType<typeof createShellPathService>):
 // ---------------------------------------------------------------------------
 
 describe('runSkillDraftProposer: ledger round-trip', () => {
-  test('ledger file is created as a sibling of skills.json', async () => {
-    const { registry, paths } = tempRegistry();
-    await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
-    // Empty pass, no new entries written, so ledger should not exist yet
-    // (writeLedger only writes when newEntries.length > 0)
-    // The ledger path must be in the same directory as skills.json
-    const skillsPath = registry.snapshot().path;
-    expect(ledgerSiblingPath(registry)).toBe(skillsPath.replace(/skills\.json$/, 'skill-draft-ledger.json'));
-  });
-
   test('readSkillDraftLedger returns empty array when no ledger exists', () => {
     const { registry } = tempRegistry();
     const entries = readSkillDraftLedger(registry);
@@ -168,23 +159,6 @@ describe('runSkillDraftProposer: malformed ledger', () => {
 // ---------------------------------------------------------------------------
 
 describe('runSkillDraftProposer: created skill shape', () => {
-  test('skill created via registry has enabled:false and reviewState:fresh', () => {
-    // Directly test registry.create() contract (runner delegates to it)
-    const { registry } = tempRegistry();
-    const skill = registry.create({
-      name: 'auto-draft-skill',
-      description: 'A skill created by the proposer',
-      procedure: 'Do stuff',
-      enabled: false,
-      source: 'agent',
-      provenance: 'auto-proposed-skill-draft',
-    });
-    expect(skill.enabled).toBe(false);
-    expect(skill.reviewState).toBe('fresh');
-    expect(skill.source).toBe('agent');
-    expect(skill.provenance).toBe('auto-proposed-skill-draft');
-  });
-
   test('a reviewed note actually produces a disabled native skill with its complete procedure', async () => {
     const { registry, paths } = tempRegistry();
     const notes = AgentNoteRegistry.fromShellPaths(paths);
@@ -202,6 +176,49 @@ describe('runSkillDraftProposer: created skill shape', () => {
   });
 });
 
+describe('runSkillDraftProposer: a pass that fails after creating a skill', () => {
+  function reviewedNoteSkillPort(): void {
+    const readings = fakePort((name, question) => question.type === 'score' ? scoreAnswer(question, name === 'link' ? 0 : 3, 0.9999)
+      : question.type === 'choice' ? choiceAnswer(question, name === 'target' ? 'skill' : 'none', 0.9999) : noulAnswer(0.9999));
+    installJudgmentPort(readings.port);
+  }
+
+  test('the created skill is still recorded in the ledger', async () => {
+    const { registry, paths } = tempRegistry();
+    const notes = AgentNoteRegistry.fromShellPaths(paths);
+    const note = notes.create({ title: 'Restore verification', body: 'First restore the backup in isolation, then verify all rows before switching traffic.' });
+    notes.markReviewed(note.id);
+    reviewedNoteSkillPort();
+    // The caller's currentness check starts failing the moment the skill exists.
+    const options = {
+      sourceOwner: ordinaryResearchOwner(),
+      assertCurrent: () => { if (registry.list().length > 0) throw new ToolInputProjectionError('stale'); },
+    };
+
+    await expect(runSkillDraftProposer(makeContextWithPaths(paths), registry, options)).rejects.toThrow();
+
+    const created = registry.list();
+    expect(created).toHaveLength(1);
+    expect(readSkillDraftLedger(registry).map((entry) => entry.skillId)).toEqual([created[0]!.id]);
+  });
+
+  test('an unreadable ledger is kept beside the new one instead of being replaced', async () => {
+    const { registry, paths } = tempRegistry();
+    const notes = AgentNoteRegistry.fromShellPaths(paths);
+    const note = notes.create({ title: 'Restore verification', body: 'First restore the backup in isolation, then verify all rows before switching traffic.' });
+    notes.markReviewed(note.id);
+    reviewedNoteSkillPort();
+    const ledgerPath = ledgerSiblingPath(registry);
+    mkdirSync(dirname(ledgerPath), { recursive: true });
+    writeFileSync(ledgerPath, 'this is not json}', 'utf-8');
+
+    const result = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
+
+    expect(result.proposed).toBe(1);
+    expect(readFileSync(`${ledgerPath}.corrupt`, 'utf-8')).toBe('this is not json}');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Skipped count
 // ---------------------------------------------------------------------------
@@ -216,57 +233,63 @@ describe('runSkillDraftProposer: result shape', () => {
     expect(result.entries).toHaveLength(0);
   });
 
-  test('skipped count equals eligibleCount - persisted count (not proposals count)', async () => {
-    // We verify this indirectly: for an empty pass eligible=0, so skipped=0.
-    // The formula is eligibleCount - newEntries.length, not eligibleCount - drafts.length.
+  test('a pass skips candidates already in the ledger or colliding with an existing skill, and a repeat pass proposes nothing', async () => {
+    const bodies = {
+      a: 'Rotate the signing keys by issuing the new key first, then retiring the old key after every client refreshed.',
+      b: 'Drain the queue before a deploy by pausing producers, waiting for consumers to idle, then releasing the lock.',
+      c: 'Triage inbound invoices by matching the purchase order first, then routing mismatches to the finance owner.',
+      d: 'Archive stale branches by listing merged branches older than ninety days, then deleting them after a final check.',
+    };
+    const skillPort = () => {
+      const readings = fakePort((name, question) => question.type === 'score' ? scoreAnswer(question, name === 'link' ? 0 : 3, 0.9999)
+        : question.type === 'choice' ? choiceAnswer(question, name === 'target' ? 'skill' : 'none', 0.9999) : noulAnswer(0.9999));
+      installJudgmentPort(readings.port);
+    };
+    const addNote = (paths: ReturnType<typeof createShellPathService>, title: string, body: string): void => {
+      const notes = AgentNoteRegistry.fromShellPaths(paths);
+      notes.markReviewed(notes.create({ title, body }).id);
+    };
+    skillPort();
+
+    // Learn the name the proposer derives for note d, in a throwaway workspace.
+    const probe = tempRegistry();
+    addNote(probe.paths, 'Archive branches', bodies.d);
+    const probed = await runSkillDraftProposer(makeContextWithPaths(probe.paths), probe.registry, readingOptions());
+    expect(probed.proposed).toBe(1);
+    const collidingName = probed.entries[0]!.name;
+
     const { registry, paths } = tempRegistry();
-    const result: SkillDraftRunResult = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
-    // skipped must never be negative
-    expect(result.skipped).toBeGreaterThanOrEqual(0);
-    // proposed + skipped <= eligible (eligible=0 for empty context)
-    expect(result.proposed + result.skipped).toBeGreaterThanOrEqual(0);
-  });
+    addNote(paths, 'Rotate keys', bodies.a);
+    addNote(paths, 'Drain queue', bodies.b);
+    const first = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
+    expect(first.proposed).toBe(2);
+    expect(first.skipped).toBe(0);
+    expect(readSkillDraftLedger(registry)).toHaveLength(2);
 
-  test('skipped = eligibleCount - newEntries.length when eligible > 0 and name is pre-existing', async () => {
-    // Seed the registry with a skill whose name will match what the proposer would generate.
-    // Then add a pre-existing ledger entry for that name so the proposer skips it.
-    // eligible = 0 from empty context means skipped = 0, so we verify the formula
-    // distinguishes itself from eligibleCount - drafts.length by injecting a ledger dedup.
-    const { registry } = tempRegistry();
-    // Manually insert a ledger entry that pre-deduplicates any future proposal
-    // by pre-existing name. Since temp context yields 0 eligible, we verify
-    // skipped is exactly eligible - proposed (i.e. 0 - 0 = 0, not some other value).
-    const { registry: reg2, paths: paths2 } = tempRegistry();
-    // Pre-populate the registry with a skill name so it becomes dedup-eligible.
-    reg2.create({
-      name: 'pre-existing-skill',
-      description: 'Already exists',
-      procedure: 'N/A',
-      enabled: false,
-      source: 'agent',
-      provenance: 'auto-proposed-skill-draft',
-    });
-    const result = await runSkillDraftProposer(makeContextWithPaths(paths2), reg2, readingOptions());
-    // With 0 eligible candidates from context, skipped must equal eligibleCount - proposed = 0 - 0 = 0
-    // This verifies the formula is eligibleCount - newEntries.length, not eligibleCount - drafts.length
-    expect(result.skipped).toBe(result.proposed + result.skipped - result.proposed);
-    expect(result.skipped).toBe(0);
-    expect(result.proposed + result.skipped).toBe(0);
-    void registry; // suppress unused warning
-  });
-});
+    addNote(paths, 'Triage invoices', bodies.c);
+    addNote(paths, 'Archive branches', bodies.d);
+    registry.create({ name: collidingName, description: 'Already here', procedure: 'Do it by hand.', enabled: false, source: 'user', provenance: 'manual' });
+    const skillCountBefore = registry.list().length;
 
-// ---------------------------------------------------------------------------
-// Ledger sibling path
-// ---------------------------------------------------------------------------
+    const second = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
+    // a and b are already proposed and no longer eligible; d is eligible but collides with an existing skill, so only c is new.
+    expect(second.proposed).toBe(1);
+    expect(second.skipped).toBe(1);
+    expect(second.skillIds).toHaveLength(1);
+    expect(registry.list()).toHaveLength(skillCountBefore + 1);
+    const ledgerIds = readSkillDraftLedger(registry).map(entry => entry.skillId);
+    expect(ledgerIds).toHaveLength(3);
+    expect(ledgerIds).toContain(second.skillIds[0]!);
 
-describe('runSkillDraftProposer: ledger path', () => {
-  test('ledger path is always a sibling of skills.json', () => {
-    const { registry } = tempRegistry();
-    const skillsPath = registry.snapshot().path;
-    const expectedLedgerPath = skillsPath.replace(/skills\.json$/, 'skill-draft-ledger.json');
-    expect(ledgerSiblingPath(registry)).toBe(expectedLedgerPath);
-    // Confirm they share the same directory
-    expect(ledgerSiblingPath(registry)).toContain(join(skillsPath, '..').replace(/\/\.\./, ''));
+    // Remove the skill created for c: its name no longer collides, so only the ledger can stop c from being proposed again.
+    registry.deleteSkill(second.skillIds[0]!);
+    expect(registry.list()).toHaveLength(skillCountBefore);
+
+    const third = await runSkillDraftProposer(makeContextWithPaths(paths), registry, readingOptions());
+    expect(third.proposed).toBe(0);
+    expect(third.skipped).toBe(2);
+    expect(third.skillIds).toEqual([]);
+    expect(registry.list()).toHaveLength(skillCountBefore);
+    expect(readSkillDraftLedger(registry)).toHaveLength(3);
   });
 });

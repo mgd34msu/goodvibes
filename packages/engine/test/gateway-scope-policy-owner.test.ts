@@ -191,7 +191,6 @@ test('ordinary catalog behavior needs no durable configuration and granted-scope
   expect(catalog.unregister('synthetic.write')).toBe(true);
 });
 
-// Regression source: execution is deferred until the coding phase is complete.
 test('rejected asynchronous scope preconditions are drained without changing the registered catalog', async () => {
   const catalog = new GatewayMethodCatalog({ includeBuiltins: false });
   catalog.register(method(), handler);

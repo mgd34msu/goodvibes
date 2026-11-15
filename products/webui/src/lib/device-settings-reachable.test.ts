@@ -10,10 +10,12 @@
  * description rather than a restatement of its own name.
  */
 import { describe, expect, test } from 'bun:test';
-import { buildSettingsModel } from './settings-model';
+import { buildSettingsModel, groupLabelForNamespace } from './settings-model';
 import { CONFIG_SCHEMA_ENTRIES } from './generated/config-schema';
 
 const DEVICE_KEYS = CONFIG_SCHEMA_ENTRIES.filter((entry) => entry.key.startsWith('device.')).map((entry) => entry.key);
+
+const MIN_DESCRIPTION_LENGTH = 40;
 
 describe('paired-phone settings reachability', () => {
   test('every device key is routed into the settings workspace', () => {
@@ -30,4 +32,17 @@ describe('paired-phone settings reachability', () => {
     expect(DEVICE_KEYS.filter((key) => !routed.has(key))).toEqual([]);
   });
 
+  test('the device group carries a human label, not the raw namespace', () => {
+    expect(groupLabelForNamespace('device')).toBe('Paired Phone Capabilities');
+    const group = buildSettingsModel({}).find((entry) => entry.id === 'device');
+    expect(group?.label).toBe('Paired Phone Capabilities');
+  });
+
+  test('every device key ships a written purpose, not a restatement of its name', () => {
+    expect(DEVICE_KEYS.length).toBeGreaterThan(0);
+    const terse = CONFIG_SCHEMA_ENTRIES
+      .filter((entry) => DEVICE_KEYS.includes(entry.key) && entry.description.trim().length < MIN_DESCRIPTION_LENGTH)
+      .map((entry) => entry.key);
+    expect(terse).toEqual([]);
+  });
 });

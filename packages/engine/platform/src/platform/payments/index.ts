@@ -242,6 +242,8 @@ export {
   senderRegistrableDomain,
 } from './order-correlation.js';
 export type { InboundMailFacts, CorrelationResult, ConfirmationFacts } from './order-correlation.js';
+export { reportOrderConfirmation, mailboxAddress } from './confirmation-report.js';
+export type { ConfirmationReportOutcome } from './confirmation-report.js';
 
 export {
   readPaymentsServiceConfig,
@@ -259,7 +261,7 @@ export { createJevMerchantJudge, judgeMerchant } from './merchant-judge-model.js
 export { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from './reply-inbox.js';
 export type { CheckoutWindowCheckpoint, CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 export type { PaymentReplyOffer, PaymentReplyCorrelation, PaymentWindowView, PaymentWindowAnswer } from './reply-inbox.js';
-export type { PaymentPurchaseStatus } from './window-view.js';
+export type { PaymentPurchaseStatus, PaymentUnreadableOperation } from './window-view.js';
 
 export { registry as paymentsJudgmentRegistry } from './judgment-registry.js';
 

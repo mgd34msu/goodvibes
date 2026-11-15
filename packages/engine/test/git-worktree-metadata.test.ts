@@ -63,9 +63,12 @@ test.each(['same root', 'symlink alias', 'linked worktree'])('sibling services n
   const first = top.worktreeAdd(join(root, 'top'), 'top');
   await entered.promise;
   const second = bottom.worktreeAdd(join(root, 'bottom'), 'bottom');
-  // Let the contender finish its repository-key read and yield one event-loop
-  // turn so its queued promise callbacks can run while top is still paused.
-  await Promise.race([commonDirRead.promise, second.catch(() => undefined)]);
+  // The contender's repository-key read is its only I/O before it queues on the
+  // lane; everything after that read resolves is promise callbacks. Waiting for
+  // that read, then one event-loop turn, therefore drains every step the contender
+  // could take toward starting its worktree call while top is still paused.
+  const reachedLane = await Promise.race([commonDirRead.promise.then(() => true), second.then(() => false, () => false)]);
+  expect(reachedLane).toBe(true);
   await new Promise<void>(resolve => setImmediate(resolve));
   const startedWhilePartial = bottomStarted;
   finish.resolve();

@@ -91,7 +91,7 @@ test('reconcile-on-open heals a drifted push record when the app opens already-s
     window.localStorage.setItem(key, 'device-e2e-reconcile');
   }, 'goodvibes.webui.push.deviceId');
   await mockPushApis(page, 'granted', { preSubscribed: true, endpoint: 'https://push.example.test/rotated-endpoint' });
-  await installMockDaemon(page, {
+  const daemon = await installMockDaemon(page, {
     pushSeed: [
       {
         id: 'push_e2e_seed',
@@ -112,6 +112,15 @@ test('reconcile-on-open heals a drifted push record when the app opens already-s
   // reconcile-on-open should fire without the operator touching any control.
   await page.goto('/?view=chat');
   await expect.poll(() => invokeCalls).toContain('push.subscriptions.reconcile');
+  // The stored record was healed in place: same id, the browser's rotated endpoint and its keys.
+  await expect.poll(() => daemon.pushRecords()).toEqual([
+    {
+      id: 'push_e2e_seed',
+      deviceId,
+      endpoint: 'https://push.example.test/rotated-endpoint',
+      keys: { p256dh: 'fake-p256dh-key', auth: 'fake-auth-key' },
+    },
+  ]);
 });
 
 test('blocked notifications disable the turn-on control', async ({ page }) => {

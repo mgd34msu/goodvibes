@@ -1,4 +1,4 @@
-/** Actual runtime/store operation regressions, authored and UNRUN. */
+/** Actual runtime/store operation regressions. */
 import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

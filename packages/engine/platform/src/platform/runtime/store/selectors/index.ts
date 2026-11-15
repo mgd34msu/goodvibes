@@ -245,7 +245,8 @@ export function selectDomainHealth(
     }
     case 'acp': {
       const ts = state.acp.managerTransportState;
-      if (ts === 'connected') return 'healthy';
+      // A live subagent connection settles in `syncing` once its prompt is sent.
+      if (ts === 'connected' || ts === 'syncing') return 'healthy';
       if (ts === 'degraded' || ts === 'reconnecting') return 'degraded';
       if (ts === 'terminal_failure') return 'critical';
       return 'unknown';

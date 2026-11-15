@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { FilePickerModal } from '../../input/file-picker.ts';
+import { expandPrompt } from '../../input/handler-content-actions.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
@@ -67,5 +69,22 @@ describe('FilePickerModal: inject mode', () => {
     picker.selectedIndex = 5;
     picker.open(0, true);
     expect(picker.selectedIndex).toBe(0);
+  });
+});
+
+describe('expandPrompt: context references', () => {
+  test('does not expand an @file named inside pasted text the user only sees as a marker', () => {
+    writeFileSync(join(tmpDir, 'secret.txt'), 'SECRET-FILE-CONTENT');
+    const pasted = `${Array.from({ length: 8 }, (_, i) => `line ${i}`).join('\n')}\nsee @secret.txt please`;
+    const result = expandPrompt(new Map([['p1', pasted]]), new Map(), '[TEXT: p1, 9 lines]', tmpDir);
+    expect(result).toBe(pasted);
+    expect(String(result)).not.toContain('SECRET-FILE-CONTENT');
+  });
+
+  test('still expands a typed @file next to a paste marker', () => {
+    writeFileSync(join(tmpDir, 'typed.txt'), 'TYPED-CONTENT');
+    const result = expandPrompt(new Map([['p1', 'pasted body']]), new Map(), '[TEXT: p1, 9 lines] @typed.txt', tmpDir);
+    expect(String(result)).toContain('TYPED-CONTENT');
+    expect(String(result)).toContain('pasted body');
   });
 });

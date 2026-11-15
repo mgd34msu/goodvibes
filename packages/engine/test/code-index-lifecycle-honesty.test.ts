@@ -45,7 +45,16 @@ function makeRoot(prefix: string): string {
   return root;
 }
 
+const stores: CodeIndexStore[] = [];
+/** Every store a test opens is closed in afterEach, so a failed assertion cannot leak a handle. */
+function openStore(...args: ConstructorParameters<typeof CodeIndexStore>): CodeIndexStore {
+  const store = new CodeIndexStore(...args);
+  stores.push(store);
+  return store;
+}
+
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   while (roots.length > 0) {
     const root = roots.pop()!;
     rmSync(root, { recursive: true, force: true });
@@ -106,7 +115,7 @@ describe('CodeIndexStore: reroot()-during-build race (epoch abort)', () => {
     const registry = makeRegistry(rootA);
     registry.register(gatedProvider, { makeDefault: true });
 
-    const store = new CodeIndexStore(rootA, ':memory:', registry);
+    const store = openStore(rootA, ':memory:', registry);
     await store.init();
 
     const buildPromise = store.buildFull();
@@ -142,7 +151,7 @@ describe('CodeIndexStore: embedding-provider mismatch honesty', () => {
     const { provider: providerX } = makeProvider('prov-x');
     registry.register(providerX, { makeDefault: true });
 
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
     await store.buildFull();
 
@@ -194,7 +203,7 @@ describe('CodeIndexStore: chunk accounting honesty', () => {
     const { provider } = makeProvider('count-prov');
     registry.register(provider, { makeDefault: true });
 
-    const store = new CodeIndexStore(root, ':memory:', registry);
+    const store = openStore(root, ':memory:', registry);
     await store.init();
 
     const first = await store.buildFull();
@@ -222,7 +231,7 @@ test('reroot during ignore discovery aborts before indexing or stale result publ
   const registry = makeRegistry(rootA);
   const { provider, calls } = makeProvider('directory-gated');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(rootA, ':memory:', registry);
+  const store = openStore(rootA, ':memory:', registry);
   await store.init();
   let release!: () => void;
   let started!: () => void;
@@ -254,7 +263,7 @@ test('automatic reindex skips hidden ancestors while explicit single-file indexi
   writeFileSync(generated, 'export const generated = 1;');
   const registry = makeRegistry(root); const { provider } = makeProvider('directory-selection');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const store = openStore(root, ':memory:', registry); await store.init();
   try {
     expect((await store.buildFull()).filesIndexed).toBe(1);
     expect(await store.reindexFile(generated, { automatic: true })).toEqual({ indexed: false, mode: 'empty' });
@@ -274,7 +283,7 @@ test('automatic reindex rechecks its target after asynchronous ignore discovery'
   writeFileSync(join(outside, 'a.ts'), 'export const outside = 1;');
   const registry = makeRegistry(root); const { provider, calls } = makeProvider('directory-race');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const store = openStore(root, ':memory:', registry); await store.init();
   const started = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
   const original = findFiles.findNestedGitignoreFiles;
   const discovery = spyOn(findFiles, 'findNestedGitignoreFiles').mockImplementation(async (...args) => {
@@ -299,7 +308,7 @@ test('empty code files need neither a persisted revision nor parser or embedding
   const registry = makeRegistry(root);
   const { provider, calls } = makeProvider('empty-code');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry);
+  const store = openStore(root, ':memory:', registry);
   await store.init();
   const hashes = spyOn(crypto, 'createHash');
   const parser = spyOn(CodeIntelligence.prototype, 'initialize');
@@ -320,7 +329,7 @@ test('changing indexed code to whitespace removes its old chunks without hashing
   const registry = makeRegistry(root);
   const { provider, calls } = makeProvider('empty-cleanup');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry);
+  const store = openStore(root, ':memory:', registry);
   await store.init();
   try {
     expect((await store.reindexFile(path)).indexed).toBe(true);
@@ -349,7 +358,7 @@ test('an old empty file read cannot delete same-path chunks after reroot', async
   const registry = makeRegistry(rootA);
   const { provider } = makeProvider('empty-reroot');
   registry.register(provider, { makeDefault: true });
-  const store = new CodeIndexStore(rootA, ':memory:', registry);
+  const store = openStore(rootA, ':memory:', registry);
   await store.init();
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
@@ -406,11 +415,11 @@ for (const forced of [false, true]) for (const ending of ['close', 'reroot'] as 
     registry.register(provider, { makeDefault: true });
     const dbPath = join(makeRoot('gv-code-index-ready-db-'), 'index.sqlite');
     if (forced) {
-      const initial = new CodeIndexStore(rootA, dbPath, registry); await initial.init();
+      const initial = openStore(rootA, dbPath, registry); await initial.init();
       try { expect((await initial.buildFull()).filesIndexed).toBe(1); } finally { initial.close(); }
       registry.register(makeProvider('readiness-replacement').provider, { makeDefault: true });
     }
-    const store = new CodeIndexStore(rootA, dbPath, registry); await store.init();
+    const store = openStore(rootA, dbPath, registry); await store.init();
     const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
     const initialize = CodeIntelligence.prototype.initialize;
     const parser = spyOn(CodeIntelligence.prototype, 'initialize').mockImplementation(async function (this: CodeIntelligence) {
@@ -424,7 +433,7 @@ for (const forced of [false, true]) for (const ending of ['close', 'reroot'] as 
       expect(hashes.count()).toBe(0);
       if (ending === 'close') store.close(); else await store.reroot(rootB, ':memory:');
       release.resolve();
-      expect((await building).abortReason).toBe('build aborted by reroot');
+      expect((await building).abortReason).toBe(ending === 'close' ? 'build aborted by close' : 'build aborted by reroot');
       expect(hashes.count()).toBe(0);
       expect(store.stats().indexedChunks).toBe(0);
       expect(store.stats().lastBuild).toBeNull();
@@ -439,7 +448,7 @@ test('valid cold and current cached code reuse exact file observations without S
   const root = makeRoot('gv-code-index-ready-valid-'), path = join(root, 'original.ts');
   const content = 'export const readyOriginal = 1;\n'; writeFileSync(path, content);
   const registry = makeRegistry(root); registry.register(makeProvider('readiness-valid').provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const store = openStore(root, ':memory:', registry); await store.init();
   const hashes = observeOriginalCodeRevision(content);
   try {
     expect((await store.reindexFile(path)).indexed).toBe(true); expect(hashes.count()).toBe(0);
@@ -455,7 +464,7 @@ for (const phase of ['parser', 'embedding'] as const) test(`source retirement du
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   const registry = makeRegistry(root);
   registry.register(makeProvider('native-source-await', phase === 'embedding' ? async () => { entered.resolve(); await release.promise; } : undefined).provider, { makeDefault: true });
-  const store = new CodeIndexStore(root, ':memory:', registry); await store.init();
+  const store = openStore(root, ':memory:', registry); await store.init();
   const initialize = CodeIntelligence.prototype.initialize;
   const parser = phase === 'parser' ? spyOn(CodeIntelligence.prototype, 'initialize').mockImplementation(async function (this: CodeIntelligence) {
     entered.resolve(); await release.promise; await initialize.call(this);

@@ -6,7 +6,8 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import type { ProcessNode, ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import { createProcessRegistry, type ProcessNode, type ProcessState } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ManagedAutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
 import {
   buildFleetRows,
   buildFleetSnapshot,
@@ -330,10 +331,13 @@ describe('buildFleetSnapshot: honest cost/token aggregates', () => {
 
 describe('fleetStateGlyph / fleetStateTone / isTerminalProcessState / isRunningProcessState', () => {
   test('every ProcessState maps to a distinct, non-empty glyph', () => {
-    const states: ProcessState[] = [
-      'thinking', 'executing-tool', 'awaiting-approval', 'streaming', 'stalled',
-      'retrying', 'done', 'failed', 'killed', 'interrupted', 'idle', 'queued',
-    ];
+    // A Record keyed by ProcessState: adding a state to the union fails the
+    // typecheck here until the new state is listed and so given a glyph.
+    const every: Record<ProcessState, true> = {
+      thinking: true, 'executing-tool': true, 'awaiting-approval': true, streaming: true, stalled: true,
+      retrying: true, done: true, failed: true, killed: true, interrupted: true, idle: true, queued: true, paused: true,
+    };
+    const states = Object.keys(every) as ProcessState[];
     const glyphs = states.map(fleetStateGlyph);
     expect(glyphs.every((g) => g.length > 0)).toBe(true);
     expect(new Set(glyphs).size).toBe(states.length);
@@ -604,28 +608,55 @@ describe('createStaticFleetReadModel', () => {
 // d4: /schedule AutomationManager jobs surface in the fleet tree as
 // 'schedule'-kind nodes with the automation-manager source marker. The platform's
 // adaptAutomationJob (platform/runtime/fleet/adapters/automation.ts) produces
-// the ProcessNode; this mirrors its exact documented output (a job created via
+// the ProcessNode; the node is built by the real registry (a job created via
 // /schedule IS a schedule from the user's viewpoint) and proves the TUI
 // read-model surfaces it correctly, kind 'schedule', 'sched' tag, disabled ->
 // 'paused' + resumable, and the raw.source marker that distinguishes it from a
 // workflow-tool ScheduleEntry sharing the same kind.
 // ---------------------------------------------------------------------------
 
-/** Mirror of the platform adaptAutomationJob output (not cleanly re-exported from the fleet index, so replicated here from its verified source shape). */
+const JOB_TIME = 1_750_000_000_000;
+
+/** The node the platform's own registry builds for an automation job, so this stays in step with the real adapter. */
 function adaptedAutomationJobNode(job: { id: string; name: string; prompt: string; enabled: boolean }): ProcessNode {
-  return {
-    id: `automation-job:${job.id}`,
-    kind: 'schedule',
-    parentId: undefined,
-    label: job.name,
-    task: job.prompt,
-    state: (job.enabled ? 'idle' : 'paused') as ProcessState,
-    elapsedMs: 0,
-    costUsd: null,
-    costState: 'unpriced',
-    capabilities: { interruptible: false, killable: true, pausable: job.enabled, resumable: !job.enabled, steerable: false },
-    raw: { source: 'automation-manager', job },
-  } as ProcessNode;
+  const managed: ManagedAutomationJob = {
+    id: job.id,
+    labels: [],
+    createdAt: JOB_TIME,
+    updatedAt: JOB_TIME,
+    mutationRevision: 'rev-1',
+    name: job.name,
+    status: job.enabled ? 'enabled' : 'paused',
+    enabled: job.enabled,
+    schedule: { kind: 'every', intervalMs: 3_600_000 },
+    execution: { target: { kind: 'isolated' }, prompt: job.prompt },
+    delivery: { mode: 'none', targets: [], fallbackTargets: [], includeSummary: false, includeTranscript: false, includeLinks: false },
+    failure: { action: 'retry', maxConsecutiveFailures: 3, cooldownMs: 60_000, retryPolicy: { maxAttempts: 3, delayMs: 1_000, strategy: 'fixed' } },
+    source: { id: 'src-1', kind: 'manual', label: 'test', enabled: true, createdAt: JOB_TIME, updatedAt: JOB_TIME, metadata: {} },
+    runCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    deleteAfterRun: false,
+  };
+  const registry = createProcessRegistry({
+    agentManager: { list: () => [], cancel: () => false },
+    contractRunner: { list: () => [], cancel: () => false },
+    processManager: { list: () => [], stop: () => false, getStatus: () => undefined },
+    watcherRegistry: { list: () => [], stopWatcher: () => null },
+    workflow: {
+      workflowManager: { list: () => [], cancel: () => false },
+      triggerManager: { list: () => [], remove: () => false, disable: () => false, enable: () => false },
+      scheduleManager: { list: () => [], remove: () => false, disable: () => false, enable: () => false },
+    },
+    automationManager: { listJobs: () => [managed], setEnabled: async () => null, removeJob: async () => false },
+  });
+  try {
+    const node = registry.getNode(`automation-job:${job.id}`);
+    if (!node) throw new Error(`The registry did not surface automation job ${job.id}`);
+    return node;
+  } finally {
+    registry.dispose();
+  }
 }
 
 describe('automation-sourced schedule node (d4)', () => {

@@ -142,7 +142,7 @@ describe('SessionInboundInputPoller: collect, inject, ack', () => {
     pollerB.dispose();
   });
 
-  test('an onSteer that throws still acks delivery and does not wedge the loop', async () => {
+  test('an onSteer that throws is not acked, is retried, and does not wedge the loop', async () => {
     const { client, delivered } = makeStub({
       's1': [
         { id: 'in-1', sessionId: 's1', intent: 'steer', state: 'queued', body: 'boom', createdAt: 100, surfaceId: 'surface:webui' },
@@ -150,15 +150,63 @@ describe('SessionInboundInputPoller: collect, inject, ack', () => {
       ],
     });
     const received: InboundSteer[] = [];
+    let failing = true;
     const poller = new SessionInboundInputPoller({
       sessionId: () => 's1',
-      onSteer: (s) => { received.push(s); if (s.body === 'boom') throw new Error('inject failed'); },
+      onSteer: (s) => { received.push(s); if (s.body === 'boom' && failing) throw new Error('inject failed'); },
       log: SILENT,
     });
     poller.activate(client);
-    const count = await poller.pollOnce();
-    expect(count).toBe(2); // both acked despite the throw on the first
-    expect(received.map((s) => s.body)).toEqual(['boom', 'next']);
+    expect(await poller.pollOnce()).toBe(1); // only 'next' acked
+    expect(delivered.map((d) => d.inputId)).toEqual(['in-2']);
+    failing = false;
+    expect(await poller.pollOnce()).toBe(1); // 'boom' retried and acked now
+    expect(delivered.map((d) => d.inputId)).toEqual(['in-2', 'in-1']);
+    expect(received.map((s) => s.body)).toEqual(['boom', 'next', 'boom']);
+    poller.dispose();
+  });
+
+  test('a failed ack is retried on the next poll without injecting the steer again', async () => {
+    const { client, delivered } = makeStub({
+      's1': [
+        { id: 'in-1', sessionId: 's1', intent: 'steer', state: 'queued', body: 'steer me', createdAt: 100, surfaceId: 'surface:webui' },
+      ],
+    });
+    let rejectOnce = true;
+    const flaky: SpineInboundInputsClient = {
+      listInputs: client.listInputs,
+      deliverInput: async (sessionId, inputId, options) => {
+        if (rejectOnce) { rejectOnce = false; throw new Error('daemon blip'); }
+        return client.deliverInput(sessionId, inputId, options);
+      },
+    };
+    const received: InboundSteer[] = [];
+    const poller = new SessionInboundInputPoller({ sessionId: () => 's1', onSteer: (s) => { received.push(s); }, log: SILENT });
+    poller.activate(flaky);
+    expect(await poller.pollOnce()).toBe(0);
+    expect(await poller.pollOnce()).toBe(1);
+    expect(delivered.map((d) => d.inputId)).toEqual(['in-1']);
+    expect(received).toHaveLength(1);
+    poller.dispose();
+  });
+
+  test('a failed input sharing a millisecond with an acked one is listed again', async () => {
+    const { client, delivered } = makeStub({
+      's1': [
+        { id: 'in-1', sessionId: 's1', intent: 'steer', state: 'queued', body: 'ok', createdAt: 100, surfaceId: 'surface:webui' },
+        { id: 'in-2', sessionId: 's1', intent: 'steer', state: 'queued', body: 'boom', createdAt: 100, surfaceId: 'surface:webui' },
+      ],
+    });
+    let failing = true;
+    const poller = new SessionInboundInputPoller({
+      sessionId: () => 's1',
+      onSteer: (s) => { if (s.body === 'boom' && failing) throw new Error('inject failed'); },
+      log: SILENT,
+    });
+    poller.activate(client);
+    expect(await poller.pollOnce()).toBe(1);
+    failing = false;
+    expect(await poller.pollOnce()).toBe(1);
     expect(delivered.map((d) => d.inputId)).toEqual(['in-1', 'in-2']);
     poller.dispose();
   });

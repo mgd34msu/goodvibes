@@ -1,3 +1,4 @@
+import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createSelfUpdateCommand, retainSuiteUpdateConfiguration, formatSuiteUpdateReport } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import {
@@ -28,13 +29,13 @@ import { VERSION } from '../../version.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
-import { resolveConfiguredServiceName } from '../../runtime/legacy-daemon-migration.ts';
+import { resolveCliServiceName, type CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 
-const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
+const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
 
 function releaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
+  return daemonReleaseDownloadBaseUrl(tag);
 }
 
 /**
@@ -113,10 +114,10 @@ const defaultRunCommand: RunCommand = (command, args) => {
  */
 export function detectDaemonServiceManaged(
   platform: NodeJS.Platform,
-  configManager: { get(key: string): unknown },
+  configManager: CliServiceNameSource,
   runCommand: RunCommand = defaultRunCommand,
 ): DaemonServiceRestartInfo {
-  const unitName = resolveConfiguredServiceName(configManager);
+  const unitName = resolveCliServiceName(configManager);
   if (platform !== 'linux') {
     return { managed: false, unitName, restartCommand: '' };
   }
@@ -138,7 +139,7 @@ export interface ApplyUpdateOptions {
   readonly arch: string;
   readonly currentVersion: string;
   readonly print: (line: string) => void;
-  readonly configManager: { get(key: string): unknown };
+  readonly configManager: CliServiceNameSource;
   readonly runCommand?: RunCommand;
   /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe swaps in memory. */
   readonly io?: UpdateFileIo;
@@ -159,7 +160,12 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
   options = {
     ...options,
     io: captureUpdateFileIo(options.io ?? realUpdateFileIo),
-    configManager: { get: options.configManager.get.bind(options.configManager) },
+    configManager: {
+      get: options.configManager.get.bind(options.configManager),
+      ...(options.configManager.describeConfigKeySource
+        ? { describeConfigKeySource: options.configManager.describeConfigKeySource.bind(options.configManager) }
+        : {}),
+    },
   };
   const signal = options.signal,
     progress = options.progress;
@@ -188,6 +194,8 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
       version: latestTag, io: options.io ?? realUpdateFileIo,
       webuiDirectory: configuration.webuiDirectory, assertCurrent: configuration.assertCurrent,
       ...(signal ? { signal } : {}),
+      // Runs just before the live swap, so an abort after this point is reported late instead of racing the swap.
+      beforeCommit: () => { if (progress) progress.begun = true; },
     });
     if (progress) { progress.begun = true; progress.committed = true; }
     const service = detectDaemonServiceManaged(options.platform, options.configManager, options.runCommand);
@@ -207,7 +215,7 @@ export interface RollbackUpdateOptions {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
   readonly print: (line: string) => void;
-  readonly configManager: { get(key: string): unknown };
+  readonly configManager: CliServiceNameSource;
   readonly runCommand?: RunCommand;
   /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe renames in memory. */
   readonly io?: UpdateFileIo;
@@ -234,6 +242,26 @@ interface UpdateBundle {
   readonly notes: readonly string[];
 }
 
+/** Parse an update bundle file, refusing anything that is not one rather than printing "undefined" fields. */
+function parseUpdateBundle(text: string): UpdateBundle {
+  const value: unknown = JSON.parse(text);
+  const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined;
+  const isStrings = (candidate: unknown): candidate is readonly string[] =>
+    Array.isArray(candidate) && candidate.every((entry) => typeof entry === 'string');
+  if (
+    !record
+    || record.version !== 1
+    || typeof record.appVersion !== 'string'
+    || typeof record.installKind !== 'string'
+    || typeof record.sandboxProfile !== 'string'
+    || !isStrings(record.subscriptionProviders)
+    || !isStrings(record.notes)
+  ) {
+    throw new Error('the file is not an update bundle made by /update bundle export');
+  }
+  return record as unknown as UpdateBundle;
+}
+
 function inspectUpdateBundle(bundle: UpdateBundle): string {
   return [
     'Update Bundle Review',
@@ -243,6 +271,57 @@ function inspectUpdateBundle(bundle: UpdateBundle): string {
     `  sandboxProfile: ${bundle.sandboxProfile}`,
     `  notes: ${bundle.notes.length}`,
   ].join('\n');
+}
+
+/** `/update bundle export|inspect <path>`; always handled, so unknown modes get usage. */
+export function handleUpdateBundleSubcommand(args: readonly string[], ctx: CommandContext): true {
+  const shellPaths = requireShellPaths(ctx);
+  const mode = args[1];
+  const pathArg = args[2];
+  if (mode !== 'export' && mode !== 'inspect') {
+    ctx.print('Usage: /update bundle export <path> | /update bundle inspect <path>');
+    return true;
+  }
+  if (!pathArg) {
+    ctx.print(`Usage: /update bundle ${mode} <path>`);
+    return true;
+  }
+  const targetPath = shellPaths.resolveWorkspacePath(pathArg);
+  if (mode === 'export') {
+    const subscriptions = requireSubscriptionManager(ctx);
+    const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
+    const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
+    const sandboxProfile = [
+      `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
+      `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
+      `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
+    ].join('/');
+    const bundle: UpdateBundle = {
+      version: 1,
+      exportedAt: Date.now(),
+      appVersion: VERSION,
+      installKind: detectInstallKind(process.execPath),
+      subscriptionProviders: [...new Set([...builtinProviders, ...activeSubscriptions])],
+      sandboxProfile,
+      notes: [
+        'installKind reflects how THIS running process was launched, detected from process.execPath.',
+        'OAuth-backed provider subscriptions survive updates and continue to apply to supported provider surfaces.',
+      ],
+    };
+    mkdirSync(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+    ctx.print(`Update bundle exported to ${targetPath}`);
+    return true;
+  }
+  if (mode === 'inspect') {
+    try {
+      ctx.print(inspectUpdateBundle(parseUpdateBundle(readFileSync(targetPath, 'utf-8'))));
+    } catch (error) {
+      ctx.print(`Cannot inspect ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return true;
+  }
+  return true;
 }
 
 export function registerUpdateCommand(registry: CommandRegistry): void {
@@ -288,47 +367,7 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
       );
       return true;
     }
-    if (sub === 'bundle') {
-      const shellPaths = requireShellPaths(ctx);
-      const mode = args[1];
-      const pathArg = args[2];
-      if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-        ctx.print(`Usage: /update bundle ${mode} <path>`);
-        return true;
-      }
-      const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
-      if (mode === 'export') {
-        const subscriptions = requireSubscriptionManager(ctx);
-        const builtinProviders = listBuiltinSubscriptionProviders().map((entry) => entry.provider);
-        const activeSubscriptions = subscriptions.list().map((entry) => entry.provider);
-        const sandboxProfile = [
-          `${ctx.platform.configManager.get('sandbox.replIsolation')}`,
-          `${ctx.platform.configManager.get('sandbox.mcpIsolation')}`,
-          `${ctx.platform.configManager.get('sandbox.vmBackend')}`,
-        ].join('/');
-        const bundle: UpdateBundle = {
-          version: 1,
-          exportedAt: Date.now(),
-          appVersion: VERSION,
-          installKind: detectInstallKind(process.execPath),
-          subscriptionProviders: [...new Set([...builtinProviders, ...activeSubscriptions])],
-          sandboxProfile,
-          notes: [
-            'installKind reflects how THIS running process was launched, detected from process.execPath.',
-            'OAuth-backed provider subscriptions survive updates and continue to apply to supported provider surfaces.',
-          ],
-        };
-        mkdirSync(dirname(targetPath), { recursive: true });
-        writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-        ctx.print(`Update bundle exported to ${targetPath}`);
-        return true;
-      }
-      if (mode === 'inspect') {
-        const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as UpdateBundle;
-        ctx.print(inspectUpdateBundle(bundle));
-        return true;
-      }
-    }
+    if (sub === 'bundle') return handleUpdateBundleSubcommand(args, ctx);
     return false;
   },
 });

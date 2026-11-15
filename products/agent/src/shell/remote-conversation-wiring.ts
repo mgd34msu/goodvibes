@@ -32,6 +32,8 @@ export interface RemoteConversationWiringOptions {
    * already uses for the lines it must not bury.
    */
   readonly notify: (message: string) => void;
+  /** Hand refused, unsent text back to the composer so a refusal never costs the person their typing. */
+  readonly restoreDraft?: ((text: string) => void) | undefined;
 }
 
 export interface RemoteConversationWiring {
@@ -56,20 +58,59 @@ export interface RemoteConversationWiring {
    * a daemon-hosted turn never fills in.
    */
   hostedToolPreview(): string | undefined;
+  /**
+   * Leave the hosted session this surface is attached to, so the daemon applies
+   * its detach policy when the last client goes. Bounded; never throws.
+   * Resolves 'none' when nothing was attached.
+   */
+  detachHostedSession(): Promise<'none' | 'detached' | 'failed'>;
+  /** The local conversation was cleared or replaced: the next message opens a new hosted session. */
+  resetHostedSession(): void;
   dispose(): void;
 }
 
 export interface NativeRemoteConversationWiring extends RemoteConversationWiring {
   /** Native admission always precedes delivery; null only when local routing was chosen. */
-  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined): Promise<RoutedTurnHandle | null>;
+  /** `onNotSent` runs when the message is refused before anything was submitted, so the caller can give back what it took for it. */
+  routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | null>;
   /** Explicit recovery observes the exact saved original without submitting it again. */
   observeNative(state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle>;
+  /** The same intake, reporting explicit recovery results (/work intake-*) back to this owner. */
+  observeIntake(intake: NativeConversationIntakeActions): NativeConversationIntakeActions;
 }
+
+/** Why a mode change is refused while a native input's hosted owner is still unconfirmed. */
+const UNCONFIRMED_NATIVE_OWNER_MODE_REASON = 'The native input sent from this surface is not yet confirmed by its host, so its '
+  + 'execution mode has no confirmed owner. Nothing was changed here or on the host. Inspect it with /work intake-status; '
+  + 'once the host reports it settled, or after /work intake-cancel, change the mode again.';
 
 /** A turn the daemon accepted, and the way to wait for how it ended. */
 export interface RoutedTurnHandle {
   readonly hostedSessionId: string | null;
   readonly completion: Promise<HostedTurnCompletion>;
+}
+
+/** A daemon that accepts the connection and never answers must not hold a socket per completed turn. */
+const NATIVE_MIRROR_ATTACH_TIMEOUT_MS = 15_000;
+
+/**
+ * The native mirror's attach call. The caller owns the deadline through
+ * `signal`, which also covers reading the reply body.
+ */
+export async function postNativeMirrorAttach(
+  connection: { readonly baseUrl: string; readonly token: string },
+  body: { readonly sessionId: string; readonly clientId: string },
+  signal: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ readonly ok: false } | { readonly ok: true; readonly reply: unknown }> {
+  const response = await fetchImpl(`${connection.baseUrl}/api/control-plane/methods/sessions.hosted.attach/invoke`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+    signal,
+  });
+  if (!response.ok) return { ok: false };
+  return { ok: true, reply: await response.json() };
 }
 
 export function installRemoteConversationRouting(
@@ -82,6 +123,9 @@ export function installRemoteConversationRouting(
   type PendingNativeAdmission = { readonly intake: NativeConversationIntakeActions; readonly sequence: number; request?: { readonly requestId: string; readonly inputId: string } };
   let nativePending: PendingNativeAdmission | undefined;
   let nativeOwnerUnconfirmed = false;
+  // The observed native turn's claim on the shared indicator. Stop can hand that
+  // claim forward to its own sequence when it leaves the observation running.
+  let observedIndicator: { sequence: number } | undefined;
   const nativeMirrored = new Set<string>();
   // The waiting state a hosted turn shows is the orchestrator's own, driven on
   // the orchestrator's own cadence, see hosted-turn-activity.ts. Nothing in
@@ -108,13 +152,9 @@ export function installRemoteConversationRouting(
       // its asynchronous attachment is in flight.
       verbs: connection ? { async invoke<T>(method: string): Promise<T> {
         if (!current() || method !== 'sessions.hosted.attach') throw new Error('Native mirror selection changed');
-        const response = await fetch(`${connection.baseUrl}/api/control-plane/methods/sessions.hosted.attach/invoke`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: { sessionId: hostedSessionId, clientId } }),
-        });
-        if (!current() || !response.ok) throw new Error('Native mirror attachment was not confirmed');
-        const reply = await response.json() as HostedAttachReply;
+        const attached = await postNativeMirrorAttach(connection, { sessionId: hostedSessionId, clientId }, AbortSignal.timeout(NATIVE_MIRROR_ATTACH_TIMEOUT_MS));
+        if (!current() || !attached.ok) throw new Error('Native mirror attachment was not confirmed');
+        const reply = attached.reply as HostedAttachReply;
         if (!current() || reply.session.id !== hostedSessionId) throw new Error('Native mirror identity changed');
         return reply as T;
       } } : ctx.services.daemonVerbs,
@@ -203,7 +243,9 @@ export function installRemoteConversationRouting(
       && (nativePending !== undefined || nativeOwnerUnconfirmed || router.hostedSessionId() !== null),
     executionMode: () => router.executionMode(),
     refreshExecutionMode: () => router.refreshExecutionMode(),
-    setExecutionMode: mode => router.setExecutionMode(mode),
+    setExecutionMode: mode => (router.hostedSessionId() === null && (nativePending !== undefined || nativeOwnerUnconfirmed)
+      ? Promise.reject(new Error(UNCONFIRMED_NATIVE_OWNER_MODE_REASON))
+      : router.setExecutionMode(mode)),
   });
 
   const detachedHandle = (): RoutedTurnHandle => ({
@@ -212,9 +254,16 @@ export function installRemoteConversationRouting(
       error: 'This surface stopped observing the submission; its remote outcome is unconfirmed.', stopReason: 'observer_detached' }),
   });
 
+  /** Clear the unconfirmed-owner latch only on a result that proves no hosted turn of this input can still run. */
+  const settleOwnerLatch = (state: NativeConversationIntakeState | undefined): void => {
+    if (!state) return;
+    const hosted = state.hostedTurn && !('kind' in state.hostedTurn) ? state.hostedTurn : undefined;
+    if ((state.result && state.result.kind !== 'turn')
+      || ((state.status === 'invalid' || state.status === 'unavailable') && !state.request)
+      || hosted?.state === 'completed' || hosted?.state === 'cancelled') nativeOwnerUnconfirmed = false;
+  };
   const report = (state: NativeConversationIntakeState | undefined): void => {
-    if (state?.result && state.result.kind !== 'turn') nativeOwnerUnconfirmed = false;
-    if ((state?.status === 'invalid' || state?.status === 'unavailable') && !state.request) nativeOwnerUnconfirmed = false;
+    settleOwnerLatch(state);
     for (const line of nativeConversationIntakeLines(state)) options.notify(line);
     options.render();
   };
@@ -251,9 +300,13 @@ export function installRemoteConversationRouting(
       return detachedHandle();
     }
     nativeOwnerUnconfirmed = false;
+    const indicator = { sequence };
+    observedIndicator = indicator;
     const finish = (): void => {
-      if (!current()) return;
-      if (sequence === routeSequence) activity.end();
+      // The indicator ends with the turn even when the selection changed under
+      // it; only the transcript mirror needs the selection to still hold.
+      if (indicator.sequence === routeSequence) activity.end();
+      if (observedIndicator === indicator) observedIndicator = undefined;
       if (current()) void mirrorHostedSession(outcome.hostedSessionId, current, connection);
     };
     void outcome.completion.then(finish, finish);
@@ -262,15 +315,19 @@ export function installRemoteConversationRouting(
 
   return {
     observeNative,
-    routeNativeOrExplain: async (source, intake) => {
+    routeNativeOrExplain: async (source, intake, onNotSent) => {
       if (disposed) return detachedHandle();
       if (ctx.services.configManager.get('hostedSessions.routeConversationTurns') === false) return null;
       if (nativePending) {
-        options.notify('A native input is already pending. No second submission was created.');
+        options.notify('A native input is already pending. No second submission was created; your text is back in the composer.');
+        options.restoreDraft?.(source.text);
+        onNotSent?.();
         return detachedHandle();
       }
       if (!intake) {
-        options.notify('Native conversation intake is unavailable. No legacy turn was started.');
+        options.notify('Native conversation intake is unavailable. No legacy turn was started; your text is back in the composer.');
+        options.restoreDraft?.(source.text);
+        onNotSent?.();
         return detachedHandle();
       }
       const sequence = ++routeSequence;
@@ -290,6 +347,13 @@ export function installRemoteConversationRouting(
         report(state);
         if (disposed || sequence !== routeSequence) return detachedHandle();
         if (state?.hostedTurn) return await observeNative(state, intake);
+        // A refusal by the intake itself created no request, so the message was
+        // not sent: give back the draft and what was taken for it. 'unknown'
+        // may have been delivered and stays with the intake status.
+        if (!state || state.status === 'pending' || state.status === 'unavailable' || state.status === 'invalid') {
+          options.restoreDraft?.(source.text);
+          onNotSent?.();
+        }
         activity.end();
         return detachedHandle();
       } catch {
@@ -354,13 +418,32 @@ export function installRemoteConversationRouting(
     // merely because the hosted observer has already reached its terminal.
     cancelHostedTurn: () => {
       const pending = nativePending;
-      const intake = pending?.intake;
-      if (intake) {
+      if (pending) {
+        const { intake } = pending;
         const sequence = ++routeSequence;
         nativePending = undefined;
-        const cancellation = pending?.request ? intake.cancel(pending.request) : intake.stop ? intake.stop() : (intake.close(), Promise.resolve(undefined));
+        const observed = observedIndicator;
+        if (!pending.request && observed && intake.stop) {
+          // The admission in flight has saved nothing yet; Stop is meant for the
+          // turn already running. Stop the admission without closing the intake,
+          // whose selection fence that turn's observation still relies on, then
+          // cancel the running turn through its own observer.
+          void intake.stop().catch(() => undefined);
+          if (router.cancelTurn()) {
+            observed.sequence = sequence;
+            return true;
+          }
+        }
+        const stoppedBeforeSave = !pending.request;
+        const cancellation = pending.request ? intake.cancel(pending.request) : intake.stop ? intake.stop() : (intake.close(), Promise.resolve(undefined));
         void cancellation.then(async state => {
           if (disposed || sequence !== routeSequence) return;
+          if (!state && stoppedBeforeSave) {
+            activity.end();
+            options.notify('[Stop] Admission of this input was stopped and no turn was started for it. /work intake-status shows whether it was saved.');
+            options.render();
+            return;
+          }
           report(state);
           if (disposed || sequence !== routeSequence) return;
           if (state?.hostedTurn) await observeNative(state, intake);
@@ -368,9 +451,31 @@ export function installRemoteConversationRouting(
         }, () => { if (!disposed) { activity.end(); options.notify('Native cancellation is unconfirmed. Inspect /work intake-status.'); options.render(); } });
         return true;
       }
-      return router.cancelTurn() || activity.isActive();
+      if (router.cancelTurn()) return true;
+      // The indicator outlived any turn the router can still cancel (its
+      // observation ended or was detached): Stop clears it instead of doing nothing.
+      if (activity.isActive()) {
+        activity.end();
+        options.render();
+        return true;
+      }
+      return false;
     },
     hostedToolPreview: () => activity.toolPreview(),
+    detachHostedSession: () => router.detach(),
+    resetHostedSession: () => router.reset(),
+    observeIntake: (intake) => {
+      const settle = (state: NativeConversationIntakeState | undefined): NativeConversationIntakeState | undefined => { settleOwnerLatch(state); return state; };
+      return {
+        submit: (source, submitOptions) => intake.submit(source, submitOptions),
+        status: () => intake.status().then(settle),
+        retry: () => intake.retry().then(settle),
+        resume: () => intake.resume().then(settle),
+        cancel: (expected) => intake.cancel(expected).then(settle),
+        ...(intake.stop ? { stop: () => intake.stop!().then(settle) } : {}),
+        close: () => intake.close(),
+      };
+    },
     dispose: () => {
       disposed = true;
       routeSequence += 1;
@@ -384,9 +489,11 @@ export function installRemoteConversationRouting(
 
 /** Stop belongs to the hosted owner while it is admitting or observing a turn. */
 export function cancelConversationGeneration(
-  local: { readonly isThinking: boolean; abort(): void },
+  local: { readonly isThinking: boolean; readonly isTurnInFlight?: boolean | undefined; abort(): void },
   remote: Pick<RemoteConversationWiring, 'cancelHostedTurn'>,
 ): void {
   if (remote.cancelHostedTurn()) return;
-  if (local.isThinking) local.abort();
+  // A local turn occupies the orchestrator from admission to finalization,
+  // including the stretch before it starts thinking.
+  if (local.isThinking || local.isTurnInFlight === true) local.abort();
 }

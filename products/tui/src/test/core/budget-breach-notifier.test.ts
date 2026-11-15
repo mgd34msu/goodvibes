@@ -1,4 +1,4 @@
-import { makeTestWebhookNotifier } from '../helpers/notification-transport.ts';
+import { useTestWebhookNotifications, makeTestWebhookNotifier } from '../helpers/notification-transport.ts';
 /**
  * Tests for src/core/budget-breach-notifier.ts
  *
@@ -15,6 +15,8 @@ import { describe, test, expect, mock, afterEach } from 'bun:test';
 import { createBudgetBreachNotifier } from '../../core/budget-breach-notifier.ts';
 import { setPricingSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+
+useTestWebhookNotifications();
 
 // A model with a known, real price so calcSessionCost produces a real breach.
 const PRICED_MODEL = 'claude-sonnet-4-6'; // present in cost-utils.ts STATIC_FALLBACK_PRICING
@@ -140,10 +142,48 @@ describe('budget-breach-notifier', () => {
       sessionId: 'sess-abc-123',
     });
     const usage = { input: 10_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
-    // check() itself still returns true (a breach occurred and the latch
-    // fires), the gate lives inside fireBudgetBreachAlert's delivery path.
-    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(true);
+    // Nothing was delivered, so check() says so and the crossing stays armed.
+    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(false);
     expect(notifier.sendNotification).not.toHaveBeenCalled();
+  });
+
+  test('a crossing seen while focused still alerts on a later turn once the terminal is unfocused', () => {
+    const tracker = new FocusTracker();
+    tracker.setFocused(true);
+    const notifier = makeSpyNotifier();
+    const checker = createBudgetBreachNotifier({
+      focusTracker: tracker,
+      configGet: makeConfigGet({}),
+      webhookNotifier: notifier,
+      sessionId: 'sess-abc-123',
+    });
+    const usage = { input: 10_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
+    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(false);
+    tracker.setFocused(false);
+    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(true);
+    expect(notifier.sendNotification).toHaveBeenCalledTimes(1);
+    // Delivered once: no repeat while still over budget.
+    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(false);
+    expect(notifier.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  test('the alert carries the session id current at alert time, not the one the notifier was built with', () => {
+    const tracker = new FocusTracker();
+    tracker.setFocused(false);
+    const notifier = makeSpyNotifier();
+    let sessionId = 'sess-before-resume';
+    const checker = createBudgetBreachNotifier({
+      focusTracker: tracker,
+      configGet: makeConfigGet({}),
+      webhookNotifier: notifier,
+      sessionId,
+      getSessionId: () => sessionId,
+    });
+    sessionId = 'sess-after-resume';
+    const usage = { input: 10_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
+    expect(checker.check(usage, PRICED_MODEL, 1)).toBe(true);
+    const sent = (notifier.sendNotification as unknown as { mock: { calls: Array<[{ facts: { sessionId: string } }]> } }).mock.calls;
+    expect(sent[0]![0].facts.sessionId).toBe('sess-after-resume');
   });
 
 });

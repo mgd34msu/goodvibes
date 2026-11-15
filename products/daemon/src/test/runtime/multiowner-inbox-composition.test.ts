@@ -16,6 +16,7 @@ import type { HandlerContext } from '../../daemon/handlers/context.js';
 import { createMultiOwnerDaemonInboxFactory, type DaemonInboxSourceFactory } from '../../runtime/multiowner-inbox-composition.js';
 import type { DaemonInboxFactory } from '../../runtime/daemon-handler-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { settleTurns } from '../helpers/turns.js';
 
 const logger = { info() {}, warn() {}, error() {} };
 function context(): HandlerContext {
@@ -180,7 +181,7 @@ test('shutdown drains an admitted read holding multiple real source leases and r
     const read = invoke(ctx); void read.catch(() => {});
     await entered.promise;
     const closing = surface.close().then(() => { closed = true; });
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await settleTurns();
     expect(closed).toBe(false); expect(ctx.catalog.hasHandler('channels.inbox.list')).toBe(false);
     release.resolve(); await expect(read).rejects.toThrow(); await closing; expect(closed).toBe(true);
   } finally { release.resolve(); await surface.close(); }

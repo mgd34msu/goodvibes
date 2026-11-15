@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -98,17 +98,40 @@ export interface HistoryRedactionRule {
 }
 /**
  * Built-in redaction rules that apply regardless of caller-supplied rules.
- * Scrubs passwords from local-auth commands before they reach disk.
+ * Scrubs passwords and tokens typed into secret-taking commands before they
+ * reach disk or the in-memory list.
  */
+const LOCAL_AUTH = String.raw`\/(?:auth\s+local|auth-local|local-auth)`;
 const BUILTIN_REDACTION_RULES: readonly HistoryRedactionRule[] = [
     {
         // /auth local add-user <user> <password> [roles]
-        pattern: /(\/auth\s+local\s+add-user\s+\S+)\s+(\S+)/i,
+        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+add-user\s+\S+)\s+(\S+)`, 'i'),
         replacement: '$1 <redacted>',
     },
     {
         // /auth local rotate-password <user> <password>
-        pattern: /(\/auth\s+local\s+rotate-password\s+\S+)\s+(\S+)/i,
+        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+rotate-password\s+\S+)\s+(\S+)`, 'i'),
+        replacement: '$1 <redacted>',
+    },
+    {
+        // /auth local revoke-session <session-id-or-token>
+        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+revoke-session)\s+\S+`, 'i'),
+        replacement: '$1 <redacted>',
+    },
+    {
+        // /login service <daemon|listener> <baseUrl> <username> <password> [secretKey]
+        pattern: /(\/login\s+service\s+\S+\s+\S+\s+\S+)\s+\S+/i,
+        replacement: '$1 <redacted>',
+    },
+    {
+        // /auth login <daemon|listener> <baseUrl> <username> <password> [secretKey]
+        pattern: /(\/auth\s+login\s+\S+\s+\S+\s+\S+)\s+\S+/i,
+        replacement: '$1 <redacted>',
+    },
+    {
+        // --token, --bootstrap-token, --operator-token, --worker-client-token, --worker-token (space or = form).
+        // The -ref and -env flags name a stored secret and stay readable.
+        pattern: /(--(?:bootstrap-|operator-|worker-client-|worker-)?token)(?:\s+|=)\S+/gi,
         replacement: '$1 <redacted>',
     },
 ];
@@ -146,6 +169,8 @@ export class InputHistory {
     private historyPath: string;
     private persist: boolean;
     private redactionRules: readonly HistoryRedactionRule[];
+    /** Display texts this process last read from or wrote to the file; anything else on disk came from another process. */
+    private persistedTexts = new Set<string>();
     constructor(options: InputHistoryOptions) {
         this.persist = options.persist ?? true;
         this.historyPath = resolveHistoryPath(options);
@@ -258,13 +283,60 @@ export class InputHistory {
     }
     /**
      * Save history to disk.
+     *
+     * Only the typed text is written. The recall text is the fully expanded
+     * prompt (injected file bodies, pasted blocks), which can carry secrets and
+     * is unbounded, so it lives in memory for this session only. Entries another
+     * terminal added since this process last read the file are merged in rather
+     * than overwritten.
      */
     save(): void {
         try {
-            atomicWriteFileSync(this.historyPath, JSON.stringify(this.entries), { mkdirp: true });
+            this.mergeFromDisk();
+            atomicWriteFileSync(this.historyPath, JSON.stringify(this.entries.map((entry) => this.getDisplayText(entry))), { mkdirp: true });
+            this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
         }
         catch (err) {
             logger.debug('InputHistory save failed (non-fatal)', { error: summarizeError(err) });
+        }
+    }
+    private mergeFromDisk(): void {
+        if (!existsSync(this.historyPath))
+            return;
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(readFileSync(this.historyPath, 'utf-8'));
+        }
+        catch {
+            // An unreadable file is replaced by this save; keep the old bytes for the user.
+            this.keepUnreadableCopy();
+            return;
+        }
+        if (!Array.isArray(parsed))
+            return;
+        const known = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
+        const foreign: StoredInputHistoryEntry[] = [];
+        for (const raw of parsed as unknown[]) {
+            const entry = this.normalizeStoredEntry(raw);
+            if (!entry)
+                continue;
+            const redacted = this.redactEntry(entry);
+            const text = this.getDisplayText(redacted);
+            if (known.has(text) || this.persistedTexts.has(text))
+                continue;
+            known.add(text);
+            foreign.push(redacted);
+        }
+        if (foreign.length > 0) {
+            this.entries = [...foreign, ...this.entries].slice(0, this.maxEntries);
+        }
+    }
+    private keepUnreadableCopy(): void {
+        try {
+            copyFileSync(this.historyPath, `${this.historyPath}.bad`);
+        }
+        catch (err) {
+            logger.debug('InputHistory could not keep a copy of the unreadable file', { error: summarizeError(err) });
         }
     }
     /**
@@ -285,11 +357,13 @@ export class InputHistory {
                         .filter((entry): entry is StoredInputHistoryEntry => entry !== null)
                         .map((entry) => this.redactEntry(entry))
                         .slice(0, this.maxEntries);
+                    this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
                 }
             }
         }
         catch (err) {
             logger.debug('InputHistory load failed (non-fatal, using empty history)', { error: summarizeError(err) });
+            this.keepUnreadableCopy();
             this.entries = [];
         }
     }
@@ -340,12 +414,7 @@ export class InputHistory {
         const text = this.launderLineBreaks(record.text).trim();
         if (!text)
             return null;
-        const recallText = typeof record.recallText === 'string'
-            ? this.launderLineBreaks(record.recallText).trim()
-            : '';
-        if (recallText && recallText !== text) {
-            return { text, recallText };
-        }
+        // Older files stored the expanded prompt as recallText; it is never read back.
         return text;
     }
 }

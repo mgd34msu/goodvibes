@@ -99,7 +99,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     family: 'inbound.telegram.*',
     reason: 'DaemonServer composes the owned delegated Telegram intake host and registers its commands in facade-delegated-telegram.ts.',
     methodIds: ['inbound.telegram.cancel', 'inbound.telegram.configure', 'inbound.telegram.decide', 'inbound.telegram.list',
-      'inbound.telegram.read', 'inbound.telegram.revoke', 'inbound.telegram.status'],
+      'inbound.telegram.read', 'inbound.telegram.release', 'inbound.telegram.revoke', 'inbound.telegram.status'],
   },
   {
     family: 'relay.*',
@@ -333,7 +333,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
   {
     family: 'stepup.*',
     reason: 'Registered because stepUpService is threaded in service-graph.ts (the relay step-up ceremony).',
-    methodIds: ['stepup.challenge.mint', 'stepup.credentials.register'],
+    methodIds: ['stepup.challenge.mint', 'stepup.credentials.list', 'stepup.credentials.register', 'stepup.credentials.remove'],
   },
   {
     family: 'tailscale.get / tailscale.serve.run',
@@ -405,9 +405,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
       + '(composeDaemonBrowser/onBrowserCheckout/BrowserCheckoutSeam), because context.explicitUserRequest, '
       + "the signal this daemon's owner-approval ruling needs, only reaches a handler attached this way; see "
       + 'register.ts\'s header and gateway-payments-verbs.test.ts, which exercises the ruling over real routes. '
-      + 'checkout.approve is the one PRODUCT-authored descriptor in the family (register.ts\'s '
-      + 'CHECKOUT_APPROVE_DESCRIPTOR): the id is this daemon\'s own, ws-only with no REST binding since the '
-      + 'gateway REST table is the daemon-api\'s, and it mints the persisted single-use approval record '
+      + 'checkout.approve is ws-only with no REST binding and mints the persisted single-use approval record '
       + 'checkout.begin spends (daemon/handlers/payments/approval-store.ts).',
     methodIds: [
       'payments.budget.status',

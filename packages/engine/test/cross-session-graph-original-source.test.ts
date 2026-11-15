@@ -1,4 +1,4 @@
-/** UNRUN actual persisted graph owner/version/publication regressions. */
+/** Persisted graph owner/version/publication regressions. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as nativeFs from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -12,16 +12,15 @@ const roots: string[] = [], owners: CrossSessionTaskRegistry[] = [];
 afterEach(() => { for (const owner of owners.splice(0)) { try { owner.dispose(); } catch { /* Retired owners still detach their listeners/timers. */ } } for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
 function fixture() { const root = makeProjectTempDir('session-graph-original'); roots.push(root); return { root, path: join(root, 'graph.json') }; }
 function owner(path: string, now?: () => number) { const registry = new CrossSessionTaskRegistry(path, { sweepIntervalMs: 0, now }); owners.push(registry); return registry; }
-test('a failed native publication is visible and retires further mutations rather than acknowledging an unsaved graph', () => {
+test('a failed native publication is visible, keeps the original bytes, and a later flush publishes the unsaved graph', () => {
   const f = fixture(), registry = owner(f.path); registry.linkTask(ref()); registry.flush();
   const original = readFileSync(f.path, 'utf8'); registry.linkTask(ref('pending'));
   const failure = spyOn(nativeFs, 'fsyncSync').mockImplementation(() => { throw new Error('fixture disk failure'); });
-  try { expect(() => registry.flush()).toThrow(CrossSessionGraphUnavailableError); }
+  try { expect(() => registry.flush()).toThrow('fixture disk failure'); }
   finally { failure.mockRestore(); }
   expect(readFileSync(f.path, 'utf8')).toBe(original);
-  expect(() => registry.linkTask(ref('after-failure'))).toThrow(CrossSessionGraphUnavailableError);
-  expect(() => registry.flush()).toThrow(CrossSessionGraphUnavailableError);
-  expect(readFileSync(f.path, 'utf8')).toBe(original);
+  registry.linkTask(ref('after-failure')); registry.flush();
+  expect(Object.keys(JSON.parse(readFileSync(f.path, 'utf8')).refs).sort()).toEqual(['fixture-session:after-failure', 'fixture-session:one', 'fixture-session:pending']);
 });
 function ref(taskId = 'one'): CrossSessionTaskRef { return { sessionId: 'fixture-session', taskId, title: taskId, status: 'running', createdAt: Date.now(), updatedAt: Date.now() }; }
 const future = () => JSON.stringify({ version: GRAPH_SCHEMA_VERSION + 1, future: { opaque: 'preserve' }, refs: {}, edges: [], handoffs: [] });
@@ -49,10 +48,15 @@ test('future replacement refuses every mutation before changing the in-memory gr
   expect(registry._exitHandler).toBeNull(); expect(readFileSync(f.path, 'utf8')).toBe(bytes);
 });
 
-test('pending debounce cannot publish stale graph bytes over a newly selected future file', async () => {
-  const f = fixture(), registry = owner(f.path); registry.linkTask(ref());
+test('pending debounce cannot publish stale graph bytes over a newly selected future file', () => {
+  const f = fixture(), registry = owner(f.path);
+  // Capture the debounce callback instead of waiting for it, so it fires exactly once, after the future file is selected.
+  const armed: Array<() => void> = [];
+  const capture = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void) => { armed.push(callback); return { unref() {} }; }) as unknown as typeof setTimeout);
+  try { registry.linkTask(ref()); } finally { capture.mockRestore(); }
+  expect(armed).toHaveLength(1);
   const bytes = future(); writeFileSync(f.path, bytes);
-  await new Promise(resolve => setTimeout(resolve, 150));
+  armed[0]!();
   expect(readFileSync(f.path, 'utf8')).toBe(bytes); expect(existsSync(`${f.path}.unrecognized`)).toBe(false);
 });
 

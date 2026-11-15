@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
@@ -100,8 +100,12 @@ describe('CLI service posture', () => {
     try {
       const work = buildCliServicePosture({ configManager: config, workingDirectory: projectRoot, homeDirectory: homeRoot },
         { manager: { status: () => createManagedStatus({ platform: 'manual', logPath }) } });
-      await entered.promise; rmSync(logPath); writeFileSync(logPath, 'changed daemon ready'); release.resolve();
-      await expect(work).rejects.toThrow('Service log changed');
+      // The replacement exists beside the original before it takes its name, so it cannot reuse the original's inode.
+      const replacement = join(root, 'service.log.rotated');
+      await entered.promise; writeFileSync(replacement, 'changed daemon ready'); renameSync(replacement, logPath); release.resolve();
+      const posture = await work;
+      expect(posture.log.readError).toBe('Service log changed while it was read.');
+      expect(posture.log.tail).toBeUndefined();
     } finally { release.resolve(); installJudgmentPort(previous); }
   });
 
@@ -243,14 +247,16 @@ describe('CLI service posture', () => {
         homeDirectory: homeRoot,
       });
       const installed = manager.install();
+      // The status text hides environment values; the unit file on disk is what systemd reads.
+      const unit = readFileSync(installed.path, 'utf-8');
 
-      expect(installed.contents).toContain(`WorkingDirectory=${join(homeRoot, '.goodvibes', 'daemon')}`);
+      expect(unit).toContain(`WorkingDirectory=${join(homeRoot, '.goodvibes', 'daemon')}`);
       // The tree root and the daemon's own home are separate variables now: the
       // root stays the login home, and GOODVIBES_DAEMON_HOME names the daemon
       // state directory it used to be wrongly pointed away from.
-      expect(installed.contents).toContain(`Environment=GOODVIBES_HOME=${homeRoot}`);
-      expect(installed.contents).toContain(`Environment=GOODVIBES_DAEMON_HOME=${join(homeRoot, '.goodvibes', 'daemon')}`);
-      expect(installed.contents).not.toContain(`Environment=GOODVIBES_DAEMON_HOME=${homeRoot}\n`);
+      expect(unit).toContain(`Environment=GOODVIBES_HOME=${homeRoot}`);
+      expect(unit).toContain(`Environment=GOODVIBES_DAEMON_HOME=${join(homeRoot, '.goodvibes', 'daemon')}`);
+      expect(unit).not.toContain(`Environment=GOODVIBES_DAEMON_HOME=${homeRoot}\n`);
     } finally {
       if (savedHome === undefined) {
         delete process.env.HOME;
@@ -270,6 +276,8 @@ describe('CLI service posture', () => {
       workingDir: projectRoot,
       homeDir: homeRoot,
     });
+    // The default 'auto' resolves to systemd on Linux and would query this machine's real user manager.
+    config.setDynamic('service.platform', 'manual');
 
     const posture = await buildCliServicePosture({
       configManager: config,
@@ -303,6 +311,8 @@ describe('CLI service posture', () => {
       workingDir: projectRoot,
       homeDir: homeRoot,
     });
+    // The default 'auto' resolves to systemd on Linux and would query this machine's real user manager.
+    config.setDynamic('service.platform', 'manual');
 
     const posture = await buildCliServicePosture({
       configManager: config,

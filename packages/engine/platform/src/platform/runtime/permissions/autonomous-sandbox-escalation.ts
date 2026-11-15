@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { admitExternalRequest } from '../../permissions/external-request.js';
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
+import { logAdmissionFailure } from './admission-failure.js';
 import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 import type { SandboxEscalationExecution, SandboxEscalationPermit, SandboxEscalationRequest } from '../../tools/exec/sandbox.js';
 
@@ -38,6 +39,6 @@ export async function admitSandboxEscalation(host: AutonomousToolPromptHost, inp
     transferred = true;
     return Object.freeze({ signal, assertCurrent, claim() { assertCurrent(); owned.claim(); },
       close() { if (!closed) { closed = true; owned.close(); unsubscribe(); } } });
-  } catch { return false; }
+  } catch (error) { logAdmissionFailure('sandbox escalation', error); return false; }
   finally { if (!transferred) { admission?.close(); unsubscribe(); } }
 }

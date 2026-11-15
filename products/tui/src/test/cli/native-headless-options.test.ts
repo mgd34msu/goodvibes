@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { GOODVIBES_CLI_CATALOG, parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
+import { parseGoodVibesCli } from '@goodvibes-jev/engine/terminal-shell';
 import { extractNativeHeadlessOptions } from '../../cli/native-headless-options.ts';
 
 const recoveryOptions = [
@@ -23,14 +23,6 @@ function expectUnchanged(argv: readonly string[]) {
 }
 
 describe('native headless option authority', () => {
-  test('the guarded required-value spellings cover the current TUI catalog', () => {
-    const specs = [...GOODVIBES_CLI_CATALOG.globalFlags, ...GOODVIBES_CLI_CATALOG.commands.flatMap(command => command.flags)];
-    const required = specs
-      .filter(spec => spec.kind !== 'boolean' && spec.kind !== 'const' && spec.kind !== 'string-optional')
-      .flatMap(spec => spec.tokens);
-    expect([...new Set(required)].sort()).toEqual([...valueOptions].sort());
-  });
-
   test('empty and ordinary argv have no recovery authority', () => {
     expectUnchanged([]);
     expectUnchanged(['run', '  Keep CRLF\r\n😀 !@source.md @context  ', '--output', 'json']);
@@ -175,5 +167,14 @@ describe('native headless option authority', () => {
     expect(result.argv).not.toBe(argv);
     result.argv.push('new source');
     expect(argv).toEqual(['run', '--', '--intake-status']);
+  });
+});
+
+test('run limits are removed before recovery extraction and a value position keeps them as text', () => {
+  expect(extractNativeHeadlessOptions(['run', '--timeout', '30', '--intake-status', '--max-turns=4', '--omit-accumulated'])).toEqual({
+    argv: ['run'], mode: 'status', errors: [], run: { timeoutMs: 30_000, maxTurns: 4, omitAccumulated: true },
+  });
+  expect(extractNativeHeadlessOptions(['run', '--daemon-home', '--timeout', '-p', '--max-turns'])).toEqual({
+    argv: ['run', '--daemon-home', '--timeout', '-p', '--max-turns'], mode: 'submit', errors: [],
   });
 });

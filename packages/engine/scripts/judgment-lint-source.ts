@@ -414,6 +414,31 @@ export function sourceFindings(path: string, text: string, registered: ReadonlyS
     return true;
   }
 
+  /** True when the literal spreads the one parameter of the `ask` method that `at` sits inside: a decorating port forwarding a request that already came through a registered decision. */
+  function spreadsIncomingRequest(literal: ts.ObjectLiteralExpression, at: ts.Node): boolean {
+    if (dynamicBindings) return false;
+    let method: ts.Node | undefined = at.parent;
+    while (method && !(ts.isMethodDeclaration(method) && method.name.getText(file) === 'ask')) method = method.parent;
+    if (!method || !ts.isMethodDeclaration(method) || method.parameters.length !== 1 || !ts.isIdentifier(method.parameters[0]!.name)) return false;
+    const incoming = symbolOf(method.parameters[0]!.name);
+    return incoming !== undefined && literal.properties.some((property) => ts.isSpreadAssignment(property)
+      && ts.isIdentifier(unwrap(property.expression)) && symbolOf(unwrap(property.expression) as ts.Identifier) === incoming);
+  }
+
+  /** True when `expression` names a local const whose object literal carries a `questions` property. */
+  function isBuiltRequestWithQuestions(expression: ts.Expression): boolean {
+    const identifier = unwrap(expression);
+    if (!ts.isIdentifier(identifier)) return false;
+    const declaration = declarationOf(identifier);
+    const initializer = declaration !== undefined && ts.isVariableDeclaration(declaration) ? constInitializer(declaration) : undefined;
+    const literal = initializer === undefined ? undefined : unwrap(initializer);
+    // A spread of anything but the incoming request of the enclosing `ask` method does not exempt it: an
+    // identifier argument never satisfies the strict-forward proof, so it is judged like `port.ask({ ...base, questions })`.
+    return literal !== undefined && ts.isObjectLiteralExpression(literal)
+      && !spreadsIncomingRequest(literal, expression)
+      && literal.properties.some((property) => named(property) === 'questions');
+  }
+
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const [first] = node.arguments;
@@ -422,9 +447,11 @@ export function sourceFindings(path: string, text: string, registered: ReadonlyS
       if (name !== undefined && (DEFINER.test(name) || name === 'decisionHeader') && first !== undefined) {
         checkDecision(node, first, name);
       }
+      // A request built in a local const first is judged by the same rule as one written inline.
+      const builtRequest = first !== undefined && isBuiltRequestWithQuestions(first);
       if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'ask' && first !== undefined
-        && ts.isObjectLiteralExpression(first) && first.properties.some((property) => named(property) === 'questions')
-        && !strictRequestForward(node, first)) {
+        && (builtRequest || ts.isObjectLiteralExpression(first) && first.properties.some((property) => named(property) === 'questions'))
+        && !(ts.isObjectLiteralExpression(first) && strictRequestForward(node, first))) {
         report(node, 'asks Jev with a request built inline, outside a registered decision');
       }
       if (name === 'askAs' && !insideDefiner(node) && !insideCustomDecision(node)) {

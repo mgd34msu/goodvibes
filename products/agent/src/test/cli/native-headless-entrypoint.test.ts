@@ -1,7 +1,9 @@
 /**
  * Real Agent native intake and TUI direct conversation entrypoints.
- * Defaults to source. Set both GOODVIBES_HEADLESS_{AGENT,TUI}_BINARY and
- * GOODVIBES_HEADLESS_REQUIRE_BINARIES=1 to run the identical proof on artifacts.
+ * Runs the built Agent artifact (`bun run build:binary`) when one exists and is current, else
+ * the source entrypoint. Set GOODVIBES_TEST_HEADLESS_AGENT_BINARY and
+ * GOODVIBES_TEST_HEADLESS_REQUIRE_BINARIES=1 to require a specific compiled artifact. The
+ * GOODVIBES_TEST_ prefix is what the test runner passes through to the tests.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
@@ -12,6 +14,9 @@ afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await 
 async function fixture(product: HeadlessProduct, reply = HEADLESS_REPLY) {
   const value = await makeHeadlessFixture(product, reply); cleanups.push(() => value.close()); return value;
 }
+// Each loop starts several real processes, each allowed 30 s by the harness, so the test
+// ceiling must sit above the sum or a slow host fails the test while the children are fine.
+const LOOP_TIMEOUT_MS = 180_000;
 const json = ['--output-format', 'json'];
 const literal = '  Keep CRLF\r\n😀 !@source.md @context [IMAGE: attached]  ';
 
@@ -26,7 +31,7 @@ for (const product of ['agent'] as const) describe(`${product} real native headl
       expect(capture.text).toBe(literal);
       expect(Object.keys(capture).sort()).toEqual(['inputId', 'requestId', 'text', 'unsupportedSources']);
       expect(capture.unsupportedSources).toEqual([
-        { kind: 'image', label: '[IMAGE: attached]' }, { kind: 'file', label: '!@source.md' }, { kind: 'context', label: '@context' },
+        { kind: 'image', label: '[IMAGE: attached]' }, { kind: 'file', label: '!@source.md' },
       ]);
       expect(f.journal().records.at(-1)?.command).toEqual(capture);
       expect(f.model.requests).toHaveLength(0);
@@ -45,7 +50,7 @@ for (const product of ['agent'] as const) describe(`${product} real native headl
     expect(f.home.judgments.allRequests).toHaveLength(f.home.judgments.acceptedDiagnostics.length + f.home.judgments.rejected.length);
     expect(JSON.stringify(f.home.judgments.allRequests)).not.toContain(JSON.stringify(literal).slice(1, -1));
     expect(JSON.stringify(f.home.judgments.allRequests)).not.toContain(f.pairedToken);
-  }, 30000);
+  }, LOOP_TIMEOUT_MS);
 
   test('all recovery-looking tokens after literal -- remain source text', async () => {
     const f = await fixture(product);
@@ -59,7 +64,7 @@ for (const product of ['agent'] as const) describe(`${product} real native headl
     expect(f.captures()).toHaveLength(4);
     expect(f.home.judgments.accepted).toHaveLength(0);
     expect(f.model.requests).toHaveLength(0);
-  }, 30000);
+  }, LOOP_TIMEOUT_MS);
 
   test('malformed or conflicting recovery controls exit before daemon/source IO', async () => {
     const f = await fixture(product);

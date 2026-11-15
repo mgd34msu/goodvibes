@@ -31,9 +31,10 @@ import {
 } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 function use(h: Harness): Harness {

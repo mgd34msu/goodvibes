@@ -4,7 +4,7 @@
  *
  * Handles:
  *  - Single- and double-quoted strings (preserves inner whitespace)
- *  - Shell operators: &&, ||, ;, |, >, >>, <, 2>
+ *  - Shell operators: &&, ||, ;, |, >, >>, <, 2>, and an unquoted newline (read as `;`)
  *  - Variable expansions: $VAR, ${VAR}
  *  - Subshell expressions: $(...) and `...`
  *  - Flags (tokens starting with -)
@@ -12,11 +12,12 @@
  *
  * Safety contracts:
  *  - Inputs exceeding MAX_INPUT_LENGTH are truncated before processing
- *  - Tokenization halts once MAX_TOKEN_COUNT tokens are produced
+ *  - Tokenization halts once MAX_TOKEN_COUNT tokens are produced (tokenizeBounded reports it)
  *  - Both guards ensure bounded runtime regardless of pathological input
  */
 
 import type { CommandToken } from './types.js';
+import { isEnvAssignmentToken } from './canonicalizer.js';
 
 /**
  * Maximum number of characters accepted from a raw command string.
@@ -67,6 +68,43 @@ function skipHeredocBody(input: string, from: number, delimiter: string): number
   return len;
 }
 
+/**
+ * Returns the offset just past the `)` that closes the `$(` at `from`, or the end of input when
+ * it is never closed. Quotes and nested `$(` / `(` are honoured so a `)` inside them does not end it.
+ */
+function skipDollarParen(input: string, from: number): number {
+  const len = input.length;
+  let depth = 0;
+  let j = from + 1; // at the '('
+  let quote = '';
+  for (; j < len; j++) {
+    const c = input[j]!;
+    if (quote !== '') {
+      if (c === '\\' && quote === '"') j++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '\\') { j++; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) return j + 1;
+    }
+  }
+  return len;
+}
+
+/**
+ * Whether the `&` at `at` runs the command before it in the background (so a new command follows),
+ * rather than being part of `&&`, `>&`, `<&`, `&>` or `2>&1`.
+ */
+function isBackgroundAmpersand(input: string, at: number): boolean {
+  if (input[at] !== '&' || input[at + 1] === '&' || input[at + 1] === '>') return false;
+  const before = input[at - 1];
+  return before !== '&' && before !== '>' && before !== '<';
+}
+
 /** Shell redirect operator prefixes (single-char). */
 const REDIRECT_CHARS = new Set(['>', '<']);
 
@@ -89,6 +127,8 @@ function classifyTokenType(
   }
   if (raw.startsWith('$(') || raw.startsWith('`')) return 'subshell';
   if (raw.startsWith('-')) return 'flag';
+  // `A=1 git fetch`: the assignment is not the command, the next word is.
+  if (isFirst && isEnvAssignmentToken(raw)) return 'argument';
   if (raw.includes('/') || raw.startsWith('~')) return 'path';
   if (isFirst) return 'command';
   return 'argument';
@@ -104,10 +144,42 @@ function splitRaw(input: string, maxTokens: number): Array<{ value: string; posi
   const results: Array<{ value: string; position: number }> = [];
   let i = 0;
   const len = input.length;
+  // Heredoc delimiters read on the current line; their bodies start at the next newline.
+  const pendingHeredocs: string[] = [];
 
   while (i < len) {
+    // The body of a heredoc starts after the line that names it: the rest of that line is ordinary
+    // shell (`<<EOF | curl x`), and the body is data up to its terminator line.
+    if (input[i] === '\n' && pendingHeredocs.length > 0) {
+      let pos = i;
+      for (const delimiter of pendingHeredocs.splice(0)) {
+        pos = skipHeredocBody(input, pos, delimiter);
+        if (pos < len && input[pos - 1] === '\n') pos -= 1; // leave the terminator's newline for the next body or the separator
+      }
+      if (pos < len) {
+        const last = results[results.length - 1]?.value;
+        if (last !== undefined && last !== '&&' && last !== '||' && last !== '|' && last !== ';') {
+          results.push({ value: ';', position: i });
+          if (results.length >= maxTokens) return results;
+        }
+      }
+      i = Math.max(pos, i + 1);
+      continue;
+    }
+    // An unquoted newline ends a command like `;` does, unless the command
+    // is still open (after `&&`, `||`, `|` or `;` the shell reads on) or there
+    // is nothing before it. A trailing separator is dropped by the parser.
+    if (input[i] === '\n') {
+      const last = results[results.length - 1]?.value;
+      if (last !== undefined && last !== '&&' && last !== '||' && last !== '|' && last !== ';') {
+        results.push({ value: ';', position: i });
+        if (results.length >= maxTokens) return results;
+      }
+      i++;
+      continue;
+    }
     // Skip whitespace
-    if (input[i] === ' ' || input[i] === '\t' || input[i] === '\n') {
+    if (input[i] === ' ' || input[i] === '\t') {
       i++;
       continue;
     }
@@ -172,7 +244,16 @@ function splitRaw(input: string, maxTokens: number): Array<{ value: string; posi
         if (results.length >= maxTokens) return results;
       }
 
-      i = delimiter.length > 0 ? skipHeredocBody(input, j, delimiter) : j;
+      if (delimiter.length > 0) pendingHeredocs.push(delimiter);
+      i = j;
+      continue;
+    }
+
+    // `cmd & other` starts another command, like `;`.
+    if (isBackgroundAmpersand(input, i)) {
+      results.push({ value: ';', position: start });
+      i++;
+      if (results.length >= maxTokens) return results;
       continue;
     }
 
@@ -221,7 +302,10 @@ function splitRaw(input: string, maxTokens: number): Array<{ value: string; posi
     while (j < len) {
       const c = input[j]!;
       if (c === ' ' || c === '\t' || c === '\n') break;
+      // `$( ... )` is one word however much whitespace it holds.
+      if (c === '$' && input[j + 1] === '(') { j = skipDollarParen(input, j); continue; }
       if (c === ';' || c === '|' || c === '<' || c === '>') break;
+      if (j > i && isBackgroundAmpersand(input, j)) break;
       if ((input[j] === '&' || input[j] === '|') && j + 1 < len && (input.slice(j, j + 2) === '&&' || input.slice(j, j + 2) === '||')) break;
       // Backslash escape: consume the next character as a literal
       if (c === '\\' && j + 1 < len) { j += 2; continue; }
@@ -242,11 +326,17 @@ function splitRaw(input: string, maxTokens: number): Array<{ value: string; posi
  * @returns Ordered array of CommandToken objects.
  */
 export function tokenize(command: string): CommandToken[] {
+  return tokenizeBounded(command).tokens;
+}
+
+/** The tokens of a command, and whether the input was cut at the size or token limit (so the tokens do not cover all of it). */
+export function tokenizeBounded(command: string): { readonly tokens: CommandToken[]; readonly truncated: boolean } {
   // Hard-truncate inputs that exceed the maximum length limit.
   // This emergency truncation bounds runtime independently of all
   // other logic, if the string is too long, we cut it before any parsing.
   const safe = command.length > MAX_INPUT_LENGTH ? command.slice(0, MAX_INPUT_LENGTH) : command;
   const raw = splitRaw(safe, MAX_TOKEN_COUNT);
+  const truncated = command.length > MAX_INPUT_LENGTH || raw.length >= MAX_TOKEN_COUNT;
   const tokens: CommandToken[] = [];
   let seenCommand = false;
 
@@ -259,12 +349,13 @@ export function tokenize(command: string): CommandToken[] {
     // After an operator, the next non-operator token is a new command
     if (type === 'operator' || type === 'pipe') {
       seenCommand = false;
-    } else if (type === 'command') {
+    } else if (type === 'command' || (isFirst && type === 'path')) {
+      // A path in command position (`/usr/bin/curl x`) is the command; what follows is its arguments.
       seenCommand = true;
     }
 
     tokens.push({ value, type, position });
   }
 
-  return tokens;
+  return { tokens, truncated };
 }

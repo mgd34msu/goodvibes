@@ -15,6 +15,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
+import { parseNumberEditBuffer } from './settings-modal-behavior.ts';
 import { buildMcpEntries } from './settings-modal-data.ts';
 import { isWorktreeSetupListConfigKey, parseWorktreeSetupListInput } from './worktree-setup-config.ts';
 import { isSandboxExecListConfigKey, parseSandboxExecListInput } from './sandbox-exec-config.ts';
@@ -40,7 +41,9 @@ export interface CommitEditContext {
   readonly mcpAllowAllConfirmationTarget: string | null;
   getSelectedMcp(): McpEntry | null;
   getSelected(): SettingEntry | null;
-  setValue(key: ConfigKey, value: unknown): void;
+  setValue(key: ConfigKey, value: unknown): boolean | void;
+  /** Tells the owner why an edit was rejected; without it the typed value just disappears. */
+  rejectEdit?(message: string): void;
   /** Captured owner: completion must never target a subsequently reopened modal. */
   setSecretConfigValue?(key: ConfigKey, value: unknown): void | Promise<void>;
   trackSecretWrite?(write: Promise<boolean>): void;
@@ -64,6 +67,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
     if (ctx.mcpAllowAllConfirmationTarget) {
       const expected = `ALLOW ALL ${ctx.mcpAllowAllConfirmationTarget}`;
       if (ctx.editBuffer.trim() !== expected) {
+        ctx.rejectEdit?.(`Type exactly "${expected}" to allow all; the trust mode was not changed.`);
         return false;
       }
       ctx.mcpRegistry.setServerTrustMode(entry.name, 'allow-all');
@@ -77,6 +81,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
     const nextMode = ctx.editBuffer.trim() as McpEntry['trustMode'];
     const validModes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
     if (!validModes.includes(nextMode)) {
+      ctx.rejectEdit?.(`"${ctx.editBuffer.trim()}" is not a trust mode. Allowed: ${validModes.join(', ')}. The mode was not changed.`);
       ctx.setEditingMode(false);
       ctx.setEditBuffer('');
       ctx.setMcpAllowAllConfirmationTarget(null);
@@ -103,8 +108,9 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
   let parsed: unknown = ctx.editBuffer;
 
   if (setting.type === 'number') {
-    parsed = Number(ctx.editBuffer);
-    if (isNaN(parsed as number)) {
+    parsed = parseNumberEditBuffer(ctx.editBuffer);
+    if (parsed === null) {
+      ctx.rejectEdit?.(`"${ctx.editBuffer}" is not a number; ${setting.key} was not changed.`);
       ctx.setEditingMode(false);
       ctx.setEditBuffer('');
       return false;
@@ -117,6 +123,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
     try {
       parsed = JSON.parse(ctx.editBuffer);
     } catch {
+      ctx.rejectEdit?.(`That is not valid JSON; ${setting.key} was not changed.`);
       ctx.setEditingMode(false);
       ctx.setEditBuffer('');
       return false;
@@ -124,6 +131,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
   }
 
   if (setting.validate && !setting.validate(parsed)) {
+    ctx.rejectEdit?.(`"${ctx.editBuffer}" is not accepted for ${setting.key}${setting.validationHint ? ` (${setting.validationHint})` : ''}; it was not changed.`);
     ctx.setEditingMode(false);
     ctx.setEditBuffer('');
     return false;
@@ -149,7 +157,12 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
       configManager: ctx.configManager,
       secretsManager: ctx.secretsManager,
       daemonCredentials: ctx.daemonCredentials ?? null,
-      setConfigValue: (key, value) => ctx.setSecretConfigValue ? ctx.setSecretConfigValue(key, value) : ctx.setValue(key, value),
+      setConfigValue: (key, value) => {
+        if (ctx.setSecretConfigValue) return ctx.setSecretConfigValue(key, value);
+        // A refused write must reach the secret-write rollback instead of reading as saved.
+        if (ctx.setValue(key, value) === false) throw new Error(`${key} was not changed.`);
+        return undefined;
+      },
       ...(ctx.reportError ? { onError: ctx.reportError } : {}),
     });
     ctx.trackSecretWrite?.(write);

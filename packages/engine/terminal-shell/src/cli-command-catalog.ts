@@ -20,6 +20,7 @@
  * output, interpreted by that subcommand's own handler, not by anything
  * declared here.
  */
+import { AUTO_REGISTER_CATALOG, BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CliCatalog, CommandFlagSpec, CommandSpec, EngineParseResult } from './cli-catalog-types.js';
 import type { GoodVibesCliCommand, GoodVibesCliFlags, GoodVibesCliOutputFormat } from './cli-types.js';
 
@@ -55,16 +56,39 @@ function createDefaultFlags(): GoodVibesCliFlags {
 }
 
 /**
- * `provider:model` names the provider inside the model id; that is the
- * platform's own model reference grammar. A slash is not: model ids such as
- * `meta-llama/Llama-3.1-8B` carry a slash inside the model name, so a
- * slash-form id is left for the model registry to resolve where the
- * front-end loads it. An explicit `--provider` always wins; the engine only
- * calls this when none was given.
+ * Providers that run on the operator's machine and so do not appear in the
+ * credential catalog, which only lists providers that take a key.
  */
-function inferProviderFromModel(model: string): string | undefined {
-  if (model.includes(':')) return model.split(':')[0];
-  return undefined;
+const LOCAL_PROVIDER_IDS: ReadonlySet<string> = new Set(['ollama', 'lmstudio', 'lm-studio', 'llamacpp', 'llama-cpp', 'litellm', 'vllm', 'copilot-proxy']);
+
+/** Registered providers that are neither in the credential catalog nor local: the subscription login. */
+const SUBSCRIPTION_PROVIDER_IDS: readonly string[] = ['openai-subscriber'];
+
+function isKnownProviderId(prefix: string): boolean {
+  return (
+    Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, prefix) ||
+    LOCAL_PROVIDER_IDS.has(prefix) ||
+    SUBSCRIPTION_PROVIDER_IDS.includes(prefix) ||
+    AUTO_REGISTER_CATALOG.some((entry) => entry.id === prefix)
+  );
+}
+
+/**
+ * `provider:model` names the provider inside the model id; that is the
+ * platform's own model reference grammar. But model ids carry colons of their
+ * own (Ollama `llama3:8b`, OpenRouter `:free`), so the text before a colon
+ * names a provider only when it is one the platform knows. Otherwise the whole
+ * value is the model id and the configured provider stays. A provider defined
+ * only in the operator's own config is named with `--provider`. A slash is not
+ * a separator either: `meta-llama/Llama-3.1-8B` carries one inside the model
+ * name. An explicit `--provider` always wins; callers use this only when none
+ * was given.
+ */
+export function inferProviderFromModel(model: string): string | undefined {
+  const separator = model.indexOf(':');
+  if (separator <= 0) return undefined;
+  const prefix = model.slice(0, separator);
+  return isKnownProviderId(prefix) ? prefix : undefined;
 }
 
 const OUTPUT_FORMAT_VALUES: readonly GoodVibesCliOutputFormat[] = ['text', 'json', 'stream-json'];
@@ -110,6 +134,10 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
     kind: 'boolean',
     summary: "doctor: advisory findings also fail (exit 1), for CI. Ignored by every other command.",
   },
+  { tokens: ['--timeout'], field: 'timeout', kind: 'string', valueName: 'duration', summary: 'run: stop after this long (90, 90s, 5m, 1h); exits 124.' },
+  { tokens: ['--max-turns'], field: 'maxTurns', kind: 'string', valueName: 'n', summary: 'run: stop once the model has answered this many times and still asks for tools; exits 1.' },
+  { tokens: ['--omit-accumulated'], field: 'omitAccumulated', kind: 'boolean', summary: 'run: with stream-json, leave `accumulated` out of STREAM_DELTA frames.' },
+  { tokens: ['--answer-permissions'], field: 'answerPermissions', kind: 'boolean', summary: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for the owner prompts the run raises.' },
   { tokens: ['--provider'], field: 'provider', kind: 'string', valueName: 'id', summary: 'Run with this provider.' },
   {
     tokens: ['--model', '-m'],
@@ -255,8 +283,8 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>
  * Non-interactive implies yes; a model key backfills an unset provider;
  * `--print`/`--prompt` with no explicit command word implies `run`; leftover
  * positionals become the prompt for a `run` (or `--print`) invocation with
- * none set otherwise; and only one of --continue/--resume/--fork may be
- * used. These are this vocabulary's own domain rules, the engine enforces
+ * none set otherwise; only one of --continue/--resume/--fork may be used;
+ * and --session / --fork are refused where they would be ignored. These are this vocabulary's own domain rules, the engine enforces
  * none of them, and a catalog with no such rules (there is nothing the
  * daemon's own vocabulary needs this hook for today) simply omits it.
  */
@@ -292,6 +320,15 @@ function postProcess(
     errors.push(
       `Conflicting session lifecycle flags: ${sessionLifecycleFlags.join(' and ')}. Use only one of --continue, --resume, or --fork.`,
     );
+  }
+
+  // `--session` is read only by `run`; the interactive shell never attaches to it,
+  // and `run` never forks, so refuse each where it would be silently ignored.
+  if (command !== 'run' && flags.session !== undefined) {
+    errors.push('--session is only supported with run; use --resume to reopen a session in the interactive shell.');
+  }
+  if (command === 'run' && flags.fork !== undefined) {
+    errors.push('--fork is not supported with run; use --resume <id> or --session <id> to continue a session headlessly.');
   }
 
   return { ...result, command, flags, errors };

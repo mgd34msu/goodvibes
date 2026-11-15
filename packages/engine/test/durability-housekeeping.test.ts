@@ -6,11 +6,12 @@
  * indistinguishable from data loss, and an always-on "reclaimed 0" line would
  * train readers to ignore the line that actually matters.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../platform/src/platform/utils/index.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 import { TEST_SURFACE_ROOT, makeTestSurface } from './_helpers/session-surface.ts';
 import type { SessionSurface } from '../platform/src/platform/runtime/session-surface.ts';
 import { QUARANTINE_RETENTION_MS, UNRECOGNIZED_SUFFIX } from '../platform/src/platform/config/read-versioned.ts';
@@ -233,30 +234,46 @@ describe('runDurabilityHousekeeping', () => {
 describe('startDurabilityHousekeeping', () => {
   test('sweeps once immediately, keeps sweeping on the timer, and stops when disposed', async () => {
     const first = putOrphanJournal('crashed-first');
+    // Calls through to the real timers; the spies only record which timer was
+    // created and which was cleared, so "stopped" is observed, not waited for.
+    const setSpy = spyOn(globalThis, 'setInterval');
+    const clearSpy = spyOn(globalThis, 'clearInterval');
 
-    const stop = startDurabilityHousekeeping({ surface }, { intervalMs: 15 });
     try {
-      // The startup sweep already ran, synchronously.
-      expect(existsSync(first)).toBe(false);
+      const stop = startDurabilityHousekeeping({ surface }, { intervalMs: 15 });
+      const timer = setSpy.mock.results[0]?.value;
+      try {
+        // The startup sweep already ran, synchronously.
+        expect(existsSync(first)).toBe(false);
 
-      // Residue that appears AFTER boot is reclaimed by the repeating sweep,
-      // the point of scheduling it at all.
-      const second = putOrphanJournal('crashed-second');
-      await Bun.sleep(120);
-      expect(existsSync(second)).toBe(false);
+        // Residue that appears AFTER boot is reclaimed by the repeating sweep,
+        // the point of scheduling it at all.
+        const second = putOrphanJournal('crashed-second');
+        await waitFor(() => !existsSync(second));
 
-      stop();
-
-      const third = putOrphanJournal('crashed-third');
-      await Bun.sleep(120);
-      expect(existsSync(third)).toBe(true);
+        expect(clearSpy.mock.calls.some(([cleared]) => cleared === timer)).toBe(false);
+        stop();
+        expect(clearSpy.mock.calls.filter(([cleared]) => cleared === timer)).toHaveLength(1);
+      } finally {
+        stop();
+      }
     } finally {
-      stop();
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
     }
   });
 
   test('the disposer is safe to call more than once', () => {
-    const stop = startDurabilityHousekeeping({ surface }, { intervalMs: 60_000 });
-    expect(() => { stop(); stop(); }).not.toThrow();
+    const clearSpy = spyOn(globalThis, 'clearInterval');
+    const setSpy = spyOn(globalThis, 'setInterval');
+    try {
+      const stop = startDurabilityHousekeeping({ surface }, { intervalMs: 60_000 });
+      const timer = setSpy.mock.results[0]?.value;
+      expect(() => { stop(); stop(); }).not.toThrow();
+      expect(clearSpy.mock.calls.filter(([cleared]) => cleared === timer)).toHaveLength(1);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 });

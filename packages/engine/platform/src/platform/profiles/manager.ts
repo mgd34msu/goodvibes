@@ -45,10 +45,17 @@ export class ProfileManager {
 
   /**
    * save - Persist a profile under the given name.
-   * Overwrites an existing profile with the same name.
+   * Overwrites an existing profile with the same name. The profile is stored
+   * under `sanitizeName(name)`, so names that differ only in case, spacing or
+   * punctuation ("Work Laptop", "work-laptop") are one profile.
    */
   public save(name: string, data: ProfileData): string {
     if (!name || !name.trim()) throw new Error('Profile name cannot be empty');
+    // A name with nothing sanitizeName keeps would otherwise be stored as the
+    // fallback name and silently overwrite whatever profile already has it.
+    if (!/[a-z0-9]/i.test(name)) {
+      throw new Error(`Profile name "${name}" has no letters or digits, so it cannot be stored; use a name with at least one.`);
+    }
     mkdirSync(this.profilesDir, { recursive: true });
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.profilesDir, `${sanitizedName}.json`);
@@ -105,6 +112,12 @@ export class ProfileManager {
     const profiles: ProfileInfo[] = [];
     for (const file of files) {
       const name = file.replace(/\.json$/, '');
+      // load() and delete() address a profile by its sanitized name, so a file
+      // under any other name could be listed but never opened or removed.
+      if (this.sanitizeName(name) !== name) {
+        logger.warn('ProfileManager: ignoring a profile file whose name is not a stored profile name', { file });
+        continue;
+      }
       const filePath = join(this.profilesDir, file);
       let timestamp = 0;
       try {
@@ -131,7 +144,8 @@ export class ProfileManager {
   }
 
   /**
-   * delete - Remove a profile by name. Returns true if deleted, false if not found.
+   * delete - Remove a profile by name. Returns true if deleted, false if there
+   * is no such profile; throws when the file exists but cannot be removed.
    */
   public delete(name: string): boolean {
     if (!name || !name.trim()) return false;
@@ -143,7 +157,7 @@ export class ProfileManager {
       return true;
     } catch (err) {
       logger.warn('ProfileManager: failed to delete profile', { filePath, error: summarizeError(err) });
-      return false;
+      throw new Error(`Failed to delete profile "${name}": ${summarizeError(err)}`);
     }
   }
 

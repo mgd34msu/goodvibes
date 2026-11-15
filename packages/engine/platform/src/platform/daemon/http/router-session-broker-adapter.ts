@@ -24,8 +24,8 @@ export function buildRouterSessionBrokerAdapter(
     followUpMessage: (input) => sessionBroker.followUpMessage(
       input as Parameters<SharedSessionBroker['followUpMessage']>[0],
     ) as never,
-    bindAgent: async (sessionId, agentId) => {
-      await sessionBroker.bindAgent(sessionId, agentId);
+    bindAgent: async (sessionId, agentId, inputId) => {
+      await sessionBroker.bindAgent(sessionId, agentId, inputId);
     },
     createSession: (input) => sessionBroker.createSession(
       input as Parameters<SharedSessionBroker['createSession']>[0],
@@ -44,6 +44,7 @@ export function buildRouterSessionBrokerAdapter(
     detachParticipant: (sessionId, surfaceId) => sessionBroker.detachParticipant(sessionId, surfaceId) as never,
     deleteSession: (sessionId) => sessionBroker.deleteSession(sessionId),
     cancelInput: (sessionId, inputId) => sessionBroker.cancelInput(sessionId, inputId),
+    failInput: (sessionId, inputId, error) => sessionBroker.failInput(sessionId, inputId, error),
     completeAgent: async (sessionId, agentId, message, meta) => {
       await sessionBroker.completeAgent(sessionId, agentId, message, meta);
     },

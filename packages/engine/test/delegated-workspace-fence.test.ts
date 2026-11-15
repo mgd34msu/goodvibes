@@ -112,7 +112,7 @@ test('real workspace swap retires approved originals synchronously before reroot
     // revoke is synchronous: this cannot pass by yielding to the bus callback.
     expect(() => host.revoke(configured.configurationId as string, f.authority)).toThrow('fresh workspace construction');
   });
-  expect(await f.manager.requestSwap(f.replacementRoot)).toEqual({ ok: true, previous: f.initialRoot, current: f.replacementRoot });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: true, previous: f.initialRoot, current: f.replacementRoot });
   expect(noticeDelivered).toBe(true);
   await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
   await expect(host.list(f.authority)).rejects.toThrow('fresh workspace construction');
@@ -168,11 +168,16 @@ test('same-root stop/start supports fresh approval and reinstalls workspace inva
 test('failed reroot cannot revive a host even though the manager retains its original root', async () => {
   const f = await fixture(); const host = f.construct();
   const configured = await host.configure(configuration, f.authority); const pending = await f.approve(host);
+  // Recorded inside the reroot and asserted after it: the reroot is expected to
+  // fail, so an assertion thrown inside it would be swallowed as that failure.
+  let revokeDuringReroot: unknown = null;
   f.onReroot(() => {
-    expect(() => host.revoke(configured.configurationId as string, f.authority)).toThrow('fresh workspace construction');
+    try { host.revoke(configured.configurationId as string, f.authority); } catch (error) { revokeDuringReroot = error; }
     throw new Error('Synthetic reroot failure');
   });
-  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false, code: 'INVALID_PATH' });
+  expect(await f.manager.requestSwap(f.replacementRoot)).toMatchObject({ ok: false, code: 'REROOT_FAILED' });
+  expect(revokeDuringReroot).toBeInstanceOf(Error);
+  expect((revokeDuringReroot as Error).message).toContain('fresh workspace construction');
   expect(f.manager.getCurrentWorkingDir()).toBe(f.initialRoot);
   host.startLifecycle();
   await expect(host.status(pending.ref, f.authority, true)).rejects.toThrow('fresh workspace construction');
@@ -260,7 +265,6 @@ test('the async workspace notice remains a defensive fence for transitions outsi
 });
 
 
-// Regression source intentionally unrun during the coding-first pass.
 test('real delegated composition publishes a reader requirement before its first explicit-owner receipt', async () => {
   const f = await fixture(); const host = f.construct();
   await host.configure(configuration, f.authority);

@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, rmdirSync } from 'node:fs';
-import { rename } from 'node:fs/promises';
+import { rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -171,20 +171,25 @@ export class FavoritesStore {
     mkdirSync(this.dir, { recursive: true });
     const path = this.getPath();
     const tmp = `${path}.tmp.${randomUUID()}`;
-    await Bun.write(tmp, JSON.stringify(data, null, 2));
-    await rename(tmp, path);
+    try {
+      await Bun.write(tmp, JSON.stringify(data, null, 2));
+      await rename(tmp, path);
+    } catch (error) {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      throw error;
+    }
     this.cache = data;
   }
 
   async pinModel(registryKey: string): Promise<void> {
-    const data = await this.getData();
+    const data = await this.getFreshData();
     if (data.pinned.some((entry) => entry.registryKey === registryKey)) return;
     data.pinned.push({ registryKey, pinnedAt: new Date().toISOString() });
     await this.save(data);
   }
 
   async unpinModel(registryKey: string): Promise<void> {
-    const data = await this.getData();
+    const data = await this.getFreshData();
     data.pinned = data.pinned.filter((entry) => entry.registryKey !== registryKey);
     await this.save(data);
   }
@@ -221,7 +226,7 @@ export class FavoritesStore {
     const store = ownership ? new PersistentStore<Record<string, unknown>>(path) : undefined;
     const snapshot = store ? await store.load() : undefined;
     current();
-    const data = store ? snapshot === null ? emptyData() : parseFavoritesData(snapshot).data : await this.getData();
+    const data = store ? snapshot === null ? emptyData() : parseFavoritesData(snapshot).data : await this.getFreshData();
     current();
     const now = new Date().toISOString();
     const existing = data.history.find((entry) => entry.registryKey === registryKey);
@@ -279,6 +284,20 @@ export class FavoritesStore {
       .sort((a, b) => b.lastUsed.localeCompare(a.lastUsed))
       .slice(0, n)
       .map((entry) => entry.registryKey);
+  }
+
+  /**
+   * A private copy of what is on disk now, for a read-modify-write: another
+   * process (TUI, daemon, agent on the same home) may have changed the file
+   * since this store cached it, and writing back the cache would drop that.
+   * The cache is replaced only by a successful save.
+   */
+  private async getFreshData(): Promise<FavoritesData> {
+    const loaded = await this.load();
+    return {
+      pinned: loaded.pinned.map((entry) => ({ ...entry })),
+      history: loaded.history.map((entry) => ({ ...entry })),
+    };
   }
 
   private async getData(): Promise<FavoritesData> {

@@ -91,6 +91,7 @@ test('real verifier failure suppresses output and cleans only its owned temporar
   await recordDaemonCiArtifact(f.source, actualOwner);
   const sentinel = join(f.root, 'daemon-private-consumer-preexisting'); mkdirSync(sentinel);
   const result = spawnSync(process.execPath, [join(import.meta.dir, '../../../scripts/package-native.ts'), '--artifact-root', f.source, '--output', output, '--source-commit', commit, '--head-commit', commit], { encoding: 'utf8', env: { ...process.env, TMPDIR: f.root }, timeout: 30_000 });
+  expect(result.signal).toBeNull(); expect(result.stderr).toContain('Native reader version differs from the selected source product');
   expect(result.status).toBe(1); expect(existsSync(output)).toBe(false);
   expect(result.stdout).not.toContain('Verified private offline cohort');
   expect(readdirSync(f.root).filter(name => name.startsWith('daemon-private-') || name.startsWith('goodvibes-daemon-native-'))).toEqual(['daemon-private-consumer-preexisting']);

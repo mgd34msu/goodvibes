@@ -346,12 +346,6 @@
   gap: 8px;
 }
 
-.settings-advanced__form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .settings-pre {
   max-height: 280px;
   margin: 0;

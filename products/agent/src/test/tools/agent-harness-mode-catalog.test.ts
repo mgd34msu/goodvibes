@@ -1,15 +1,24 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
-import { AGENT_HARNESS_MODES } from '../../tools/agent-harness-tool-schema.ts';
+import { CommandRegistry } from '../../input/command-registry.ts';
+import { compactHarnessModeGuide } from '../../tools/agent-harness-tool.ts';
+import { resolveHarnessCommandDetail } from '../../tools/agent-harness-command-catalog.ts';
+import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from '../../tools/agent-harness-tool-schema.ts';
 import {
   describeHarnessMode,
   HARNESS_MODE_DESCRIPTORS,
+  installedModeDescriptors,
   listHarnessModes,
+  requiredParametersFor,
 } from '../../tools/agent-harness-mode-catalog.ts';
 
-// Explicit synthetic readings exercise metadata presentation, not live semantic accuracy.
+// The fake reader below picks modes from this table, so these tests pin how the catalog presents a selected mode
+// (summary length, parameters, route), not whether a phrase finds it.
 const modeReadings: Readonly<Record<string, readonly string[]>> = {
   'run slash command': ['run_command'],
   'args explicitUserRequest': ['run_command'],
@@ -57,6 +66,48 @@ afterEach(() => { installJudgmentPort(previous); });
 afterAll(cleanupResearchScreeningFixtures);
 
 describe('agent_harness mode catalog', () => {
+  test('the summary mode guide and count leave out the release audit modes of an installation that ships no readiness inventory', () => {
+    const releaseModes = ['release_evidence', 'release_evidence_artifact', 'release_readiness', 'release_readiness_item'];
+    const installed = mkdtempSync(join(tmpdir(), 'mode-guide-installed-'));
+    try {
+      const descriptors = installedModeDescriptors(installed);
+      expect(descriptors.length).toBe(HARNESS_MODE_DESCRIPTORS.length - releaseModes.length);
+      const guide = compactHarnessModeGuide(descriptors) as Record<string, readonly string[]>;
+      const advertised = [...guide.discover!, ...guide.inspect!, ...guide.effects!, ...guide.aliases!];
+      for (const id of releaseModes) expect(advertised).not.toContain(id);
+      expect(advertised).toContain('modes');
+      expect([...compactHarnessModeGuide(HARNESS_MODE_DESCRIPTORS).discover as readonly string[]]).toContain('release_readiness');
+    } finally {
+      rmSync(installed, { recursive: true, force: true });
+    }
+  });
+
+  test('omits the release audit modes from an installation that ships no readiness inventory', async () => {
+    const releaseModes = ['release_evidence', 'release_evidence_artifact', 'release_readiness', 'release_readiness_item'];
+    const installed = mkdtempSync(join(tmpdir(), 'mode-catalog-installed-'));
+    const checkout = mkdtempSync(join(tmpdir(), 'mode-catalog-checkout-'));
+    try {
+      mkdirSync(join(installed, 'release'));
+      writeFileSync(join(installed, 'release', 'release-notes.md'), '# notes\n');
+      mkdirSync(join(checkout, 'release'));
+      writeFileSync(join(checkout, 'release', 'release-readiness.json'), '{}');
+
+      const listed = await listHarnessModes({}, rankingOptions(), installed) as { readonly modes: readonly { readonly id: string }[]; readonly total?: number };
+      const ids = listed.modes.map((mode) => mode.id);
+      for (const id of releaseModes) expect(ids).not.toContain(id);
+      expect(ids).toContain('run_command');
+      const detail = await describeHarnessMode({ target: 'release_readiness' }, rankingOptions(), installed);
+      expect(detail.status).not.toBe('found');
+
+      const full = await listHarnessModes({}, rankingOptions(), checkout) as { readonly modes: readonly { readonly id: string }[] };
+      for (const id of releaseModes) expect(full.modes.map((mode) => mode.id)).toContain(id);
+      expect((await describeHarnessMode({ target: 'release_readiness' }, rankingOptions(), checkout)).status).toBe('found');
+    } finally {
+      rmSync(installed, { recursive: true, force: true });
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
   test('stays in sync with the schema without advertising caller-authored effect grants', () => {
     const schemaModes = [...AGENT_HARNESS_MODES].sort();
     const catalogModes = HARNESS_MODE_DESCRIPTORS.map((descriptor) => descriptor.id).sort();
@@ -76,7 +127,7 @@ describe('agent_harness mode catalog', () => {
     expect(unsafeEffects).toEqual([]);
   });
 
-  test('supports compact discovery by task phrase with opt-in parameter detail', async () => {
+  test('presents the selected mode compactly and adds parameters only on request', async () => {
     const compact = await listHarnessModes({ query: 'run slash command' }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly route?: string }[];
     };
@@ -110,7 +161,7 @@ describe('agent_harness mode catalog', () => {
     expect(detail.candidates[0]?.judgment).toMatchObject({ reading: { verdict: 'yes', outcome: 'confirm' } });
   });
 
-  test('finds route decision by user-task wording', async () => {
+  test('presents route decision when the reader selects it', async () => {
     const routes = await listHarnessModes({ query: 'which tool should this user task use one assistant route', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly summary: string }[];
     };
@@ -119,7 +170,7 @@ describe('agent_harness mode catalog', () => {
     expect(routes.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds connected-host daemon aliases by GoodVibes daemon wording', async () => {
+  test('presents connected-host daemon aliases when the reader selects it', async () => {
     const daemon = await listHarnessModes({ query: 'goodvibes-daemon', limit: 5 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -129,7 +180,7 @@ describe('agent_harness mode catalog', () => {
     expect(daemon.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds background process controls by process, PTY, and sudo wording', async () => {
+  test('presents background process controls when the reader selects it', async () => {
     const processModes = await listHarnessModes({ query: 'background process', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -158,7 +209,6 @@ describe('agent_harness mode catalog', () => {
       'processAction',
       'action',
       'sessionId',
-      'session_id',
       'processSessionId',
       'data',
     ]));
@@ -171,7 +221,7 @@ describe('agent_harness mode catalog', () => {
     expect(browserPlan.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds Personal Ops by natural user task wording', async () => {
+  test('presents Personal Ops when the reader selects it', async () => {
     const personalOps = await listHarnessModes({ query: 'email calendar tasks reminders', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -194,7 +244,7 @@ describe('agent_harness mode catalog', () => {
     expect(trigger.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds Research briefing by next-action wording', async () => {
+  test('presents Research briefing when the reader selects it', async () => {
     const research = await listHarnessModes({ query: 'deep research next actions source review report queue', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -208,7 +258,7 @@ describe('agent_harness mode catalog', () => {
     expect(queue.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds memory posture by recall and external memory provider wording', async () => {
+  test('presents memory posture when the reader selects it', async () => {
     const memory = await listHarnessModes({ query: 'memory recall Honcho Mem0 Supermemory', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -229,7 +279,7 @@ describe('agent_harness mode catalog', () => {
     expect(refinement.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds setup posture by first-run always-on wording', async () => {
+  test('presents setup posture when the reader selects it', async () => {
     const setup = await listHarnessModes({ query: 'first-run always-on setup', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -260,7 +310,7 @@ describe('agent_harness mode catalog', () => {
     expect(auth.modes[0]?.parameters).toEqual(expect.not.arrayContaining(['confirm', 'explicitUserRequest']));
   });
 
-  test('finds admitted local model smoke by local server wording', async () => {
+  test('presents admitted local model smoke when the reader selects it', async () => {
     const smoke = await listHarnessModes({ query: 'check local servers ollama models', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly admission?: string; readonly parameters?: readonly string[]; readonly summary: string }[];
     };
@@ -270,7 +320,7 @@ describe('agent_harness mode catalog', () => {
     expect(smoke.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds project context files by AGENTS, Hermes, Claude, and Cursor wording', async () => {
+  test('presents project context files when the reader selects it', async () => {
     const context = await listHarnessModes({ query: 'AGENTS.md .hermes.md CLAUDE.md cursor rules', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -280,7 +330,7 @@ describe('agent_harness mode catalog', () => {
     expect(context.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds prompt context by selected memory, receipt outcome, and token budget wording', async () => {
+  test('presents prompt context when the reader selects it', async () => {
     const context = await listHarnessModes({ query: 'prompt context selected memory token budget receipt outcome filters', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly summary: string }[];
     };
@@ -289,7 +339,7 @@ describe('agent_harness mode catalog', () => {
     expect(context.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds channel delivery receipts by outcome wording', async () => {
+  test('presents channel delivery receipts when the reader selects it', async () => {
     const deliveries = await listHarnessModes({ query: 'channel delivery receipts sent outcomes', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -298,7 +348,7 @@ describe('agent_harness mode catalog', () => {
     expect(deliveries.modes.filter((mode) => mode.summary.length > 72)).toEqual([]);
   });
 
-  test('finds channel triage by inbox, error, and retry wording', async () => {
+  test('presents channel triage when the reader selects it', async () => {
     const triage = await listHarnessModes({ query: 'channel inbox pending messages errors delivery retries', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly summary: string }[];
     };
@@ -308,7 +358,7 @@ describe('agent_harness mode catalog', () => {
     expect(triage.modes.filter((mode) => mode.summary.length > 96)).toEqual([]);
   });
 
-  test('finds browser cockpit and PWA surface wording', async () => {
+  test('presents the browser cockpit and PWA surface when the reader selects it', async () => {
     const web = await listHarnessModes({ query: 'web dashboard pwa browser cockpit', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly admission?: string; readonly summary: string }[];
     };
@@ -320,7 +370,7 @@ describe('agent_harness mode catalog', () => {
     expect(web.modes.filter((mode) => mode.summary.length > 96)).toEqual([]);
   });
 
-  test('finds companion device capability wording', async () => {
+  test('presents companion device capabilities when the reader selects them', async () => {
     const device = await listHarnessModes({ query: 'phone camera location device commands', includeParameters: true, limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly parameters?: readonly string[]; readonly summary: string }[];
     };
@@ -336,7 +386,7 @@ describe('agent_harness mode catalog', () => {
     expect(voice.modes.map((mode) => mode.id)).toContain('media_posture');
   });
 
-  test('finds visible Agent orchestration by subagent and batch-spawn wording', async () => {
+  test('presents visible Agent orchestration when the reader selects it', async () => {
     const orchestration = await listHarnessModes({ query: 'subagent batch-spawn multi-agent cancellable agents', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -351,7 +401,7 @@ describe('agent_harness mode catalog', () => {
     expect(dispatch.modes.map((mode) => mode.id)).toContain('agent_orchestration');
   });
 
-  test('finds Document Ops by uploads, artifacts, and blind compare wording', async () => {
+  test('presents Document Ops when the reader selects it', async () => {
     const documentOps = await listHarnessModes({ query: 'document upload artifact blind model compare', limit: 10 }, rankingOptions()) as {
       readonly modes: readonly { readonly id: string; readonly summary: string }[];
     };
@@ -383,5 +433,30 @@ describe('agent_harness mode catalog', () => {
     expect(await describeHarnessMode({ query: 'definitely-not-a-mode' }, rankingOptions())).toMatchObject({
       status: 'missing_lookup',
     });
+  });
+
+  test('each mode states the parameters a first call must carry, all of them advertised', async () => {
+    const listing = await listHarnessModes({ limit: 500 }, rankingOptions()) as { readonly modes: readonly { readonly id: string; readonly requires?: readonly string[] }[] };
+    const requires = new Map(listing.modes.map((mode) => [mode.id, mode.requires]));
+    expect(requires.get('set_keybinding')).toEqual(['actionId|key|target|query', 'combo|combos|fields|value']);
+    expect(requires.get('channel_routing_assign')).toEqual(['surfaceKind', 'profileId']);
+    expect(requires.get('channel')).toEqual(['channelId|target|query']);
+    expect(requires.get('channels')).toBeUndefined();
+    expect(requires.get('cli_command')).toBeUndefined();
+    const advertised = new Set(Object.keys(AGENT_HARNESS_PARAMETER_PROPERTIES));
+    for (const descriptor of HARNESS_MODE_DESCRIPTORS) {
+      for (const group of requiredParametersFor(descriptor)) {
+        for (const name of group.split('|')) expect([descriptor.id, name, advertised.has(name)]).toEqual([descriptor.id, name, true]);
+      }
+    }
+  });
+
+  test('a command name with an args array resolves the same whether it arrives as command or as the retired commandName', async () => {
+    const commands = new CommandRegistry();
+    commands.register({ name: 'work-import', description: 'import work', handler: () => {} });
+    for (const args of [{ command: 'work-import', args: ['preview'] }, { commandName: 'work-import', args: ['preview'] }, { command: '/work-import preview' }]) {
+      const resolved = await resolveHarnessCommandDetail(commands, args, rankingOptions());
+      expect(resolved).toMatchObject({ status: 'found', lookup: { parsedName: 'work-import', parsedArgs: ['preview'] } });
+    }
   });
 });

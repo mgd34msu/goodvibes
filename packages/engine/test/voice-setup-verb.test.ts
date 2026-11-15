@@ -28,6 +28,7 @@ import {
   type VoiceSetupGatewayService,
 } from '../platform/src/platform/control-plane/routes/voice-setup.ts';
 import { createWakeSetupService, WAKE_MODEL_CHUNK_MAX_BYTES } from '../platform/src/platform/runtime/wake-setup.ts';
+import { firstJsonSchemaFailure } from '../transport-http/src/client-plumbing.ts';
 import { createDaemonApiRouteProbe, reconcileHttpDescriptor } from '../platform/src/platform/control-plane/method-catalog-route-reconcile.ts';
 
 const stubStatus = { platform: 'linux-x64', state: 'not-provisioned', tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '/m/piper', modelPath: '/m/voice.onnx' }, stt: { engine: 'whisper-cpp', supported: false, reason: 'no prebuilt' }, offerBytes: 89666641 };
@@ -83,8 +84,10 @@ describe('voice.local provisioning verbs are wired', () => {
   });
 });
 
-describe('install single-flight + admission', () => {
-  test('concurrent install calls collapse into ONE run; callers share the result; next call starts fresh', async () => {
+// The generic utility the install path is built on; the service's own install single-flight and
+// admission refusal are covered in voice-setup-progress.test.ts.
+describe('singleFlight utility', () => {
+  test('concurrent calls collapse into ONE run; callers share the result; next call starts fresh', async () => {
     const { singleFlight } = await import('../platform/src/platform/utils/single-flight.ts');
     let runs = 0;
     const gates: Array<(v: string) => void> = [];
@@ -391,6 +394,31 @@ describe('native managed wake source lifetime', () => {
       expect(() => captureVoiceWakeReadSource({ ...service })).toThrow();
       Object.defineProperty(service, 'wakeStatus', { get() { getters++; return () => ({ vadReady: true }); } });
       expect(current).toThrow(); expect(getters).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('the install receipt validates against the published schema', () => {
+  test('a receipt that replaced another install\'s key reports it in configured.superseded', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'voice-install-schema-'));
+    try {
+      const service = createVoiceSetupService({
+        managedVoiceRoot: root,
+        getConfig: (key) => (key === 'voice.local.ttsBinary' ? '/opt/other-install/piper' : ''),
+        setConfig() {},
+        resetLocalEngineFailureState() {},
+        admitExpensiveWork: () => ({ allowed: true }),
+        provision: async () => ({
+          platform: 'linux-x64',
+          tts: { engine: 'piper', state: 'provisioned', binaryPath: join(root, 'piper', 'piper'), modelPath: join(root, 'voice.onnx') },
+          stt: { engine: 'whisper-cpp', state: 'unsupported-platform', reason: 'no prebuilt' },
+          components: [],
+        }),
+      });
+      const receipt = await service.install();
+      expect(receipt.configured.superseded.map((entry) => entry.key)).toEqual(['voice.local.ttsBinary']);
+      const schema = new GatewayMethodCatalog().get('voice.local.install')!.outputSchema!;
+      expect(firstJsonSchemaFailure(schema, JSON.parse(JSON.stringify(receipt)))).toBeUndefined();
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

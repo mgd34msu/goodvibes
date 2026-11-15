@@ -23,7 +23,8 @@
  *    let the daemon's own 401 propagate), so it is reproduced here as a guard
  *    that runs before every delegated call.
  *  - A bounded per-call timeout via an AbortController-wrapped `fetchImpl`,
- *    matching this surface's prior default (2s), the platform transport accepts
+ *    matching this surface's prior default (2s) for ordinary verbs and a longer
+ *    one for the verbs whose cost grows with the store, the platform transport accepts
  *    an injectable `fetchImpl` for exactly this kind of consumer policy.
  */
 
@@ -32,10 +33,18 @@ import type { MemoryTransport, MemoryOperationOptions } from '@goodvibes-jev/eng
 import type { SessionRegistrationConnection } from './session-spine-rest-transport.ts';
 
 const DEFAULT_MEMORY_WIRE_TIMEOUT_MS = 2_000;
+/** For verbs whose cost grows with the store: a whole bundle, a diagnostic sweep, a semantic search. */
+const DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS = 60_000;
+const LONG_RUNNING_VERBS: ReadonlySet<string> = new Set([
+  'exportBundle', 'importBundle', 'doctor', 'vectorStats', 'searchSemantic',
+]);
 
 export interface MemorySpineRestTransportOptions {
   readonly resolveConnection: () => SessionRegistrationConnection;
+  /** Bound for ordinary verbs (add, get, list, link, ...). Default 2s. */
   readonly timeoutMs?: number;
+  /** Bound for bundle, doctor, vector-stats and semantic-search verbs. Default 60s. */
+  readonly longTimeoutMs?: number;
 }
 
 /** Wraps global fetch with a per-call AbortController timeout. */
@@ -69,7 +78,8 @@ function requireToken(connection: SessionRegistrationConnection): void {
  */
 export function createMemorySpineRestTransport(options: MemorySpineRestTransportOptions): MemoryTransport {
   const timeoutMs = options.timeoutMs ?? DEFAULT_MEMORY_WIRE_TIMEOUT_MS;
-  const fetchImpl = createTimeoutFetch(timeoutMs);
+  const shortFetch = createTimeoutFetch(timeoutMs);
+  const longFetch = createTimeoutFetch(options.longTimeoutMs ?? DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS);
   const optionsResolver = options.resolveConnection;
   const captureOperationScope = () => {
     const connection = optionsResolver();
@@ -98,7 +108,8 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
       requireToken(connection);
       assertMemoryOperationCurrent(operation);
       const transport = createPlatformMemorySpineRestTransport({
-        baseUrl: connection.baseUrl, authToken: connection.token, fetchImpl,
+        baseUrl: connection.baseUrl, authToken: connection.token,
+        fetchImpl: LONG_RUNNING_VERBS.has(verb) ? longFetch : shortFetch,
       });
       const result = invoke(transport, operation);
       if (!result) throw memoryVerbUnavailableError(verb);

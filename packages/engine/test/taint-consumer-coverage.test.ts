@@ -88,7 +88,8 @@ describe('shared taint coverage consumers', () => {
     ingest(ledger, 'Complete current source');
     expect(ledger.captureTaintEvidence('turn')).toMatchObject({ complete: true, missing: false, truncated: false, evicted: false });
     expect(ledger.captureTaintEvidence('since-last-boundary')).toMatchObject({ complete: false, evicted: true });
-    expect(ledger.captureTaintEvidence('retained')).toMatchObject({ complete: false, evicted: true });
+    // The retained window is everything still kept: the cap evicting older sources is not missing evidence for it.
+    expect(ledger.captureTaintEvidence('retained')).toMatchObject({ complete: true, evicted: false });
     ledger.startTurn();
     expect(ledger.captureTaintEvidence('since-last-boundary')).toMatchObject({ complete: true, evicted: false });
   });
@@ -104,12 +105,17 @@ describe('shared taint coverage consumers', () => {
     expect(ledger.captureTaintEvidence('retained')).toMatchObject({ complete: false, missing: true });
   });
 
-  test('standalone profile refuses incomplete retained history without making historical semantic calls', async () => {
-    const ledger = new UntrustedContentLedger();
-    for (let i = 0; i < 1_001; i++) ingest(ledger, `Complete historical source ${i}`);
-    ledger.startTurn();
-    ledger.startTurn();
-    expect((await write(ledger)).allowed).toBe(false);
+  test('standalone profile is not refused by retention eviction alone, but is refused by a retained source with no text, without historical semantic calls', async () => {
+    const evictedOnly = new UntrustedContentLedger();
+    for (let i = 0; i < 1_001; i++) ingest(evictedOnly, `Complete historical source ${i}`);
+    evictedOnly.startTurn();
+    evictedOnly.startTurn();
+    expect((await write(evictedOnly)).allowed).toBe(true);
+    const missingText = new UntrustedContentLedger();
+    ingest(missingText);
+    missingText.startTurn();
+    missingText.startTurn();
+    expect((await write(missingText)).allowed).toBe(false);
     expect(readings.requests).toHaveLength(0);
   });
 

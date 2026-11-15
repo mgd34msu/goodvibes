@@ -38,6 +38,8 @@ export interface RewindRestoreResult {
   readonly safetyCheckpointId: string | null;
   readonly restoredFiles: readonly string[];
   readonly removedFiles: readonly string[];
+  /** Paths the restore could not apply; present only when something failed. */
+  readonly failedPaths?: readonly { readonly path: string; readonly reason: string }[];
 }
 
 /** A checkpoint diff, as rewind's dry-run preview needs it. */

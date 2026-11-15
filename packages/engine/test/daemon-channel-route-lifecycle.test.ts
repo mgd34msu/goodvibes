@@ -20,13 +20,14 @@ async function fixture() {
 function holdFirstSave() {
   const written = deferred<void>();
   const release = deferred<void>();
-  const original = HandlerSqliteStore.prototype.save;
+  const original = HandlerSqliteStore.prototype.persistTransaction;
   let calls = 0;
-  const save = spyOn(HandlerSqliteStore.prototype, 'save').mockImplementation(async function(this: HandlerSqliteStore) {
+  const save = spyOn(HandlerSqliteStore.prototype, 'persistTransaction').mockImplementation(async function(this: HandlerSqliteStore, ...args: Parameters<HandlerSqliteStore['persistTransaction']>) {
     const number = ++calls;
-    await original.call(this);
+    const result = await original.apply(this, args);
     if (number === 1) { written.resolve(); await release.promise; }
-  });
+    return result;
+  } as HandlerSqliteStore['persistTransaction']);
   cleanups.push(() => save.mockRestore());
   return { written: written.promise, release: () => release.resolve() };
 }

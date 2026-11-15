@@ -59,10 +59,54 @@ function stripPathPrefix(raw: string): string {
   return DIFF_PATH_PREFIX.test(raw) ? raw.slice(2) : raw;
 }
 
+const C_ESCAPES: Readonly<Record<string, number>> = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '"': 34, '\\': 92 };
+
+/** Decodes git's C-quoted path ("a/\303\251"), where non-ASCII bytes are octal escapes. */
+function unquoteCPath(quoted: string): string {
+  const body = quoted.slice(1, -1);
+  const bytes: number[] = [];
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]!;
+    if (char !== '\\') { bytes.push(...Buffer.from(char, 'utf-8')); continue; }
+    const octal = /^[0-7]{1,3}/.exec(body.slice(index + 1));
+    if (octal) { bytes.push(parseInt(octal[0], 8)); index += octal[0].length; continue; }
+    const escaped = body[index + 1];
+    if (escaped !== undefined && C_ESCAPES[escaped] !== undefined) { bytes.push(C_ESCAPES[escaped]!); index += 1; continue; }
+    bytes.push(92);
+  }
+  return Buffer.from(bytes).toString('utf-8');
+}
+
+/** One path as git writes it, plain or C-quoted, without its a/ b/ prefix. */
+function readGitPath(raw: string): string {
+  const text = raw.trim();
+  return stripPathPrefix(text.length >= 2 && text.startsWith('"') && text.endsWith('"') ? unquoteCPath(text) : text);
+}
+
 function parsePath(line: string, prefix: string): string | null {
   const raw = line.slice(prefix.length).trim();
   if (raw === '/dev/null') return null;
-  return stripPathPrefix(raw);
+  return readGitPath(raw);
+}
+
+/** The old and new path on a `diff --git` line, which git does not delimit when a path holds a space. */
+function parseDiffGitPaths(rest: string): [string, string] | null {
+  if (rest.startsWith('"')) {
+    let end = 1;
+    while (end < rest.length && (rest[end] !== '"' || rest[end - 1] === '\\')) end += 1;
+    const first = rest.slice(0, end + 1);
+    const second = rest.slice(end + 1).trim();
+    return second ? [readGitPath(first), readGitPath(second)] : null;
+  }
+  const quotedSecond = rest.indexOf(' "');
+  if (quotedSecond > 0) return [readGitPath(rest.slice(0, quotedSecond)), readGitPath(rest.slice(quotedSecond + 1))];
+  // Unrenamed paths appear twice with one space between: split at the middle when both halves agree.
+  const middle = (rest.length - 1) / 2;
+  if (Number.isInteger(middle) && rest[middle] === ' ' && readGitPath(rest.slice(0, middle)) === readGitPath(rest.slice(middle + 1))) {
+    return [readGitPath(rest.slice(0, middle)), readGitPath(rest.slice(middle + 1))];
+  }
+  const split = rest.indexOf(' ');
+  return split > 0 ? [readGitPath(rest.slice(0, split)), readGitPath(rest.slice(split + 1))] : null;
 }
 
 /**
@@ -83,6 +127,8 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
     newPath: string | null;
     binary: boolean;
     renamed: boolean;
+    added: boolean;
+    deleted: boolean;
     hunks: Array<{ header: string; oldStart: number; oldLines: number; newStart: number; newLines: number; lines: StructuredDiffLine[] }>;
   }
   let current: Building | null = null;
@@ -93,9 +139,9 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
     const deletions = current.hunks.reduce((sum, hunk) => sum + hunk.lines.filter((l) => l.kind === 'del').length, 0);
     const status: StructuredDiffFile['status'] = current.binary
       ? 'binary'
-      : current.oldPath === null
+      : current.added || current.oldPath === null
         ? 'added'
-        : current.newPath === null
+        : current.deleted || current.newPath === null
           ? 'deleted'
           : current.renamed
             ? 'renamed'
@@ -118,18 +164,15 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
       finalize();
       inHunk = false;
       // Fallback paths from the diff --git line itself (kept when ---/+++ follow).
-      current = { headerLines: [line], oldPath: null, newPath: null, binary: false, renamed: false, hunks: [] };
-      const paths = line.slice('diff --git '.length).split(' ');
-      if (paths.length >= 2) {
-        current.oldPath = stripPathPrefix(paths[0]!);
-        current.newPath = stripPathPrefix(paths[1]!);
-      }
+      current = { headerLines: [line], oldPath: null, newPath: null, binary: false, renamed: false, added: false, deleted: false, hunks: [] };
+      const paths = parseDiffGitPaths(line.slice('diff --git '.length));
+      if (paths) [current.oldPath, current.newPath] = paths;
       continue;
     }
     if (!current) {
       // Tolerate diffs that start directly with ---/+++ (no diff --git line).
       if (line.startsWith('--- ')) {
-        current = { headerLines: [], oldPath: null, newPath: null, binary: false, renamed: false, hunks: [] };
+        current = { headerLines: [], oldPath: null, newPath: null, binary: false, renamed: false, added: false, deleted: false, hunks: [] };
         inHunk = false;
       } else {
         continue;
@@ -162,7 +205,11 @@ export function parseUnifiedDiff(raw: string): StructuredDiff {
     if (line.startsWith('--- ')) current.oldPath = parsePath(line, '--- ');
     else if (line.startsWith('+++ ')) current.newPath = parsePath(line, '+++ ');
     else if (line.startsWith('Binary files ')) current.binary = true;
-    else if (line.startsWith('rename from ') || line.startsWith('rename to ')) current.renamed = true;
+    // An empty file added or deleted has no ---/+++ lines, so its mode line is the only signal.
+    else if (line.startsWith('new file mode ')) { current.added = true; current.oldPath = null; }
+    else if (line.startsWith('deleted file mode ')) { current.deleted = true; current.newPath = null; }
+    else if (line.startsWith('rename from ')) { current.renamed = true; current.oldPath = readGitPath(line.slice('rename from '.length)); }
+    else if (line.startsWith('rename to ')) { current.renamed = true; current.newPath = readGitPath(line.slice('rename to '.length)); }
   }
   finalize();
 

@@ -4,14 +4,15 @@ import { currentExternalOperationSource } from '../../permissions/external-opera
 import { assertProjectionCurrent, captureProjectionStructure, projectionFunction, projectionProperty } from '../input-projection.js';
 import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from './sandbox-runtimes.js';
 import { startCapturedBackground } from './captured-exec-background.js';
-import { capturedExecUnsupportedOptions, runCapturedCommand, type CapturedExecAuthority } from './captured-exec.js';
+import { capturedExecUnsupportedOptions, MAX_CAPTURE_CHARS, UNTIL_PATTERN_WINDOW_CHARS, runCapturedCommand, type CapturedExecAuthority } from './captured-exec.js';
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, isAbsolute } from 'node:path';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Tool } from '../../types/tools.js';
 import { logger } from '../../utils/logger.js';
 import { EXEC_TOOL_SCHEMA } from './schema.js';
 import { DEFAULT_MAX_CHARS, OverflowHandler } from '../shared/overflow.js';
-import type { ExecInput, ExecCommandInput, ExecCommandResult, ExecVerbosity } from './schema.js';
+import { execCommandText, type ExecInput, type ExecCommandInput, type ExecCommandResult, type ExecVerbosity } from './schema.js';
 import { ProcessManager } from '../shared/process-manager.js';
 import { guardExecCommand, formatDenialResponse } from './ast-guard.js';
 import { executeFileOperations } from './file-ops.js';
@@ -35,14 +36,14 @@ import {
 import {
   shouldRunInteractive,
   runInteractiveCommand,
+  terminalRequiredNote,
   type ExecInteractionRuntime,
 } from './interactive.js';
 import type { ExecContainmentRequirement } from './containment.js';
-import type { OwnerTerminalGuard } from './owner-terminal-guard.js';
 import {
   backgroundContainmentRefusal,
   containmentRefusal,
-  ownerTerminalRefusal,
+  sandboxWorkspaceRefusal,
   type ExecRunPolicy,
 } from './policy.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -55,12 +56,15 @@ const PROGRESS_AUTO_THRESHOLD_MS = 30_000;
 const OVERFLOW_SUBDIR = ['.goodvibes', '.overflow'] as const;
 const MAX_PARALLEL_EXEC_COMMANDS = 3;
 
-function decodeCmd(cmdInput: ExecCommandInput): string {
-  if (cmdInput.cmd_base64) {
-    return Buffer.from(cmdInput.cmd_base64, 'base64').toString('utf-8');
-  }
-  if (cmdInput.cmd) return cmdInput.cmd;
-  throw new Error('Each command must have either cmd or cmd_base64');
+const decodeCmd = execCommandText;
+
+interface CaptureSink { text: string; dropped: boolean }
+
+function appendCapped(sink: CaptureSink, chunk: string): void {
+  const room = MAX_CAPTURE_CHARS - sink.text.length;
+  if (room <= 0) { sink.dropped = true; return; }
+  if (chunk.length > room) { sink.text += chunk.slice(0, room); sink.dropped = true; return; }
+  sink.text += chunk;
 }
 
 /**
@@ -130,16 +134,22 @@ function resolveCwd(cwd: string | undefined, workingDirectory: string): string {
 
 
 
-function computeRetryDelay(
+/**
+ * The wait before retry number `attempt + 1`. `fixed` is always `delayMs`;
+ * `exponential` is a random delay in [0, min(delayMs * 2^attempt, maxDelayMs)].
+ * `random` is the source of the jitter, injectable so the bounds can be tested.
+ */
+export function computeRetryDelay(
   attempt: number,
   delayMs: number,
   backoff: 'fixed' | 'exponential',
   maxDelayMs: number = 30_000,
+  random: (min: number, max: number) => number = randomInt,
 ): number {
   if (backoff === 'fixed') return delayMs;
   // Full jitter: random in [0, min(base * 2^attempt, maxDelay)], avoids thundering herd
   const cap = Math.min(delayMs * Math.pow(2, attempt), maxDelayMs);
-  return randomInt(0, Math.max(1, Math.floor(cap) + 1));
+  return random(0, Math.max(1, Math.floor(cap) + 1));
 }
 
 function buildCleanEnv(): Record<string, string> {
@@ -207,6 +217,50 @@ async function drainAfterStop(io: Promise<unknown>, graceMs: number): Promise<vo
   if (timer) clearTimeout(timer);
 }
 
+/**
+ * A foreground command leads its own process group, so a timeout or cancel
+ * reaches what its shell started (a `cmd &`, a build's workers), not only the
+ * shell. PTY runs are spawned elsewhere and keep their controlling terminal.
+ */
+const FOREGROUND_OWNS_GROUP = process.platform !== 'win32';
+
+function spawnForeground(argv: string[], options: Parameters<typeof Bun.spawn>[1]): ReturnType<typeof Bun.spawn> {
+  return Bun.spawn(argv, { ...options, detached: FOREGROUND_OWNS_GROUP } as Parameters<typeof Bun.spawn>[1]);
+}
+
+function signalForeground(proc: ReturnType<typeof Bun.spawn>, signal: NodeJS.Signals): void {
+  if (FOREGROUND_OWNS_GROUP && Number.isSafeInteger(proc.pid) && proc.pid > 1) {
+    try { process.kill(-proc.pid, signal); return; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+    }
+  }
+  proc.kill(signal);
+}
+
+async function stopForeground(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+  signalForeground(proc, 'SIGTERM');
+  await sleep(200);
+  signalForeground(proc, 'SIGKILL');
+}
+
+/** Reads a child stream into `sink` as it arrives, so a stopped run keeps what it printed. */
+async function readStreamInto(stream: ReadableStream<Uint8Array>, sink: CaptureSink, onProgress?: () => void): Promise<void> {
+  const decoder = new TextDecoder();
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      appendCapped(sink, decoder.decode(value, { stream: true }));
+      onProgress?.();
+    }
+    appendCapped(sink, decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function getProgressDirectory(workingDirectory: string): string {
   return join(workingDirectory, ...OVERFLOW_SUBDIR);
 }
@@ -215,25 +269,32 @@ function getProgressFilePath(workingDirectory: string, id: string): string {
   return join(getProgressDirectory(workingDirectory), `${id}-progress.txt`);
 }
 
-function initProgressFile(cmdStr: string, workingDirectory: string): { path: string; append: (line: string) => void } {
+/**
+ * Creates the progress file. A directory that cannot be written costs the
+ * caller the progress file, never the command: `path` is then undefined.
+ */
+function initProgressFile(cmdStr: string, workingDirectory: string): { path: string | undefined; append: (line: string) => void; discard: () => void } {
   const progressDirectory = getProgressDirectory(workingDirectory);
-  try {
-    mkdirSync(progressDirectory, { recursive: true });
-  } catch (err) {
-    logger.warn('initProgressFile: mkdirSync failed', { error: summarizeError(err) });
-  }
   const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const filePath = getProgressFilePath(workingDirectory, id);
-  writeFileSync(filePath, `# Progress: ${cmdStr}\n# Started: ${new Date().toISOString()}\n`);
+  try {
+    mkdirSync(progressDirectory, { recursive: true });
+    writeFileSync(filePath, `# Progress: ${cmdStr}\n# Started: ${new Date().toISOString()}\n`);
+  } catch (err) {
+    logger.warn('initProgressFile: could not create the progress file; running without one', { error: summarizeError(err) });
+    return { path: undefined, append: () => {}, discard: () => {} };
+  }
   return {
     path: filePath,
     append: (chunk: string) => {
       try { appendFileSync(filePath, chunk); } catch (err) { logger.warn('initProgressFile: appendFileSync failed', { path: filePath, error: summarizeError(err) }); }
     },
+    discard: () => {
+      try { rmSync(filePath, { force: true }); } catch (err) { logger.warn('initProgressFile: could not remove the progress file', { path: filePath, error: summarizeError(err) }); }
+    },
   };
 }
 
-import { copyFileSync, renameSync, unlinkSync, rmSync, cpSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { summarizeError } from '../../utils/error-display.js';
 
 async function spawnBackground(
@@ -248,8 +309,8 @@ async function spawnBackground(
   return processManager.spawn(cmd, cwd, env, { credentialEnvScrub: scrub, beforeSpawn, ...(signal === undefined ? {} : { signal }) });
 }
 
-function handleBgSpecialCommand(processManager: ProcessManager, cmd: string): ExecCommandResult | null {
-  return processManager.handleCommand(cmd);
+function handleBgSpecialCommand(processManager: ProcessManager, cmd: string): Promise<ExecCommandResult | null> {
+  return processManager.handleCommandAsync(cmd);
 }
 
 async function runCommand(
@@ -277,6 +338,8 @@ async function runCommand(
   if (!policy.capturedInput) {
     const uncontained = containmentRefusal(policy, cmdStr, plan);
     if (uncontained) return attachSandboxMeta(uncontained, plan);
+    const outside = sandboxWorkspaceRefusal(policy, cmdStr, plan, workingDirectory);
+    if (outside) return attachSandboxMeta(outside, plan);
   }
   const escalation = await brokerSandboxEscalation(policy.sandbox, plan, cmdStr, cwd, { signal, assertCurrent });
   if (escalation && 'deniedEscalations' in escalation) return attachSandboxMeta({
@@ -333,9 +396,8 @@ async function runAdmittedCommand(
     return withheld.length > 0 ? { ...result, withheld_env: withheld } : result;
   }
   const interaction = policy.interaction;
-  // The frozen catastrophic block ran in executeResolvedCommand, ahead of every
-  // path including the detached one. It is NOT repeated here: one call site for
-  // an unconditional block is the point, and a second would let the two drift.
+  // The catastrophic reading is the permission gate's, made before this runtime
+  // runs; the exec tool does not read it again.
   const cwd = resolveCwd(cmdInput.cwd, workingDirectory);
   const timeoutMs = cmdInput.timeout_ms ?? globalTimeout;
   const sandboxArgv = sandboxPlan?.sandboxed ? sandboxPlan.argvPrefix : [];
@@ -349,7 +411,8 @@ async function runAdmittedCommand(
     mergedEnv.PATH = `${SANDBOX_RUNTIME_BIN}:${mergedEnv.PATH ?? '/usr/bin:/bin'}`;
   const withheldEnv = scrubbed.withheld.filter((name) => !(cmdInput.env && name in cmdInput.env));
   const attachWithheld = (result: ExecCommandResult): ExecCommandResult => {
-    const withMeta = attachSandboxMeta(result, sandboxPlan);
+    const tty = !result.pty && !result.success && !result.tty_note ? terminalRequiredNote(result.stderr) : undefined;
+    const withMeta = attachSandboxMeta(tty ? { ...result, tty_note: tty } : result, sandboxPlan);
     return withheldEnv.length > 0 ? { ...withMeta, withheld_env: withheldEnv } : withMeta;
   };
   const startTime = Date.now();
@@ -372,11 +435,14 @@ async function runAdmittedCommand(
 
   const useProgress = cmdInput.progress === true || (cmdInput.progress !== false && (timeoutMs === 0 || timeoutMs > PROGRESS_AUTO_THRESHOLD_MS));
   if (useProgress) {
-    return attachWithheld(await runCommandWithProgress(processManager, overflowHandler, cmdStr, cmdInput, workingDirectory, cwd, mergedEnv, timeoutMs, startTime, sandboxArgv, signal, beforeSpawn));
+    // An automatic progress file only serves a caller polling a long run; a
+    // command that finishes on its own leaves nothing behind in the workspace.
+    // One the caller asked for with `progress: true` is kept.
+    return attachWithheld(await runCommandWithProgress(processManager, overflowHandler, cmdStr, cmdInput, workingDirectory, cwd, mergedEnv, timeoutMs, startTime, sandboxArgv, signal, beforeSpawn, policy.onProgress, cmdInput.progress !== true));
   }
 
   beforeSpawn?.();
-  const proc = Bun.spawn([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
   let timedOut = false;
   let cancelled = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -386,9 +452,7 @@ async function runAdmittedCommand(
   if (timeoutMs > 0) killTimer = setTimeout(async () => {
     timedOut = true;
     try {
-      proc.kill('SIGTERM');
-      await sleep(200);
-      proc.kill('SIGKILL');
+      await stopForeground(proc);
     } catch (err: unknown) {
       // The process may have already exited before kill.
       logger.debug('[ExecRuntime] kill on timeout failed (process may have exited)', { error: String(err) });
@@ -402,9 +466,7 @@ async function runAdmittedCommand(
     cancelled = true;
     void (async () => {
       try {
-        proc.kill('SIGTERM');
-        await sleep(200);
-        proc.kill('SIGKILL');
+        await stopForeground(proc);
       } catch (err: unknown) {
         logger.debug('[ExecRuntime] kill on cancellation failed (process may have exited)', { error: String(err) });
       }
@@ -418,9 +480,11 @@ async function runAdmittedCommand(
 
   try {
     type ProcResult = [string, string, number];
+    const stdoutSink: CaptureSink = { text: '', dropped: false };
+    const stderrSink: CaptureSink = { text: '', dropped: false };
     const procPromise = Promise.all([
-      new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
-      new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
+      readStreamInto(proc.stdout as ReadableStream<Uint8Array>, stdoutSink, policy.onProgress).then(() => stdoutSink.text),
+      readStreamInto(proc.stderr as ReadableStream<Uint8Array>, stderrSink, policy.onProgress).then(() => stderrSink.text),
       proc.exited,
     ]) as Promise<ProcResult>;
 
@@ -436,9 +500,15 @@ async function runAdmittedCommand(
       // Bounded drain: the child is already killed; never block past a short
       // grace window on streams an orphaned grandchild may keep open.
       await drainAfterStop(procPromise, POST_STOP_DRAIN_GRACE_MS);
-      return attachWithheld(timedOut
+      // What the command printed before it was stopped is kept; it is often
+      // the only clue to why it ran long.
+      const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
+      const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+      const stopped = timedOut
         ? buildTimedOutResult(cmdStr, cwd, Date.now() - startTime)
-        : buildCancelledResult(cmdStr, cwd, Date.now() - startTime));
+        : buildCancelledResult(cmdStr, cwd, Date.now() - startTime);
+      return attachWithheld({ ...stopped, stdout: partialOut.text, stderr: partialErr.text,
+        ...((partialOut.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((partialErr.truncated || stderrSink.dropped) && { stderr_truncated: true }) });
     }
 
     const [stdoutRaw, stderrRaw, exitCode] = procResult!;
@@ -454,8 +524,8 @@ async function runAdmittedCommand(
       duration_ms: duration,
       cwd,
       env: cmdInput.env,
-      ...(stdoutResult.truncated && { stdout_truncated: true }),
-      ...(stderrResult.truncated && { stderr_truncated: true }),
+      ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
+      ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }),
     };
     return attachWithheld(applyExpectations(result, cmdInput.expect, exitCode));
   } catch (err) {
@@ -478,10 +548,13 @@ async function runCommandWithProgress(
   sandboxArgv: string[],
   signal?: AbortSignal,
   beforeSpawn?: () => void,
+  onProgress?: () => void,
+  discardWhenDone = false,
 ): Promise<ExecCommandResult> {
   const progressFile = initProgressFile(cmdStr, workingDirectory);
+  const withProgressFile = (path: string | undefined): { progress_file?: string } => (path ? { progress_file: path } : {});
   beforeSpawn?.();
-  const proc = Bun.spawn([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
   let timedOut = false;
   let cancelled = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -491,9 +564,7 @@ async function runCommandWithProgress(
   if (timeoutMs > 0) killTimer = setTimeout(async () => {
     timedOut = true;
     try {
-      proc.kill('SIGTERM');
-      await sleep(200);
-      proc.kill('SIGKILL');
+      await stopForeground(proc);
     } catch (err: unknown) {
       logger.debug('[ExecRuntime] kill on streamed timeout failed (process may have exited)', { error: String(err) });
     }
@@ -507,9 +578,7 @@ async function runCommandWithProgress(
     cancelled = true;
     void (async () => {
       try {
-        proc.kill('SIGTERM');
-        await sleep(200);
-        proc.kill('SIGKILL');
+        await stopForeground(proc);
       } catch (err: unknown) {
         logger.debug('[ExecRuntime] kill on cancellation failed (process may have exited)', { error: String(err) });
       }
@@ -522,8 +591,8 @@ async function runCommandWithProgress(
     else signal.addEventListener('abort', onAbort, { once: true });
   }
 
-  let stdoutBuf = '';
-  let stderrBuf = '';
+  const stdoutSink: CaptureSink = { text: '', dropped: false };
+  const stderrSink: CaptureSink = { text: '', dropped: false };
   const warnings: string[] = [];
   const readStdout = async (): Promise<void> => {
     const decoder = new TextDecoder();
@@ -533,8 +602,9 @@ async function runCommandWithProgress(
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        stdoutBuf += chunk;
+        appendCapped(stdoutSink, chunk);
         progressFile.append(chunk);
+        onProgress?.();
       }
     } catch (err: unknown) {
       const warning = `stdout stream read failed: ${summarizeError(err)}`;
@@ -552,7 +622,8 @@ async function runCommandWithProgress(
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        stderrBuf += chunk;
+        appendCapped(stderrSink, chunk);
+        onProgress?.();
       }
     } catch (err: unknown) {
       const warning = `stderr stream read failed: ${summarizeError(err)}`;
@@ -573,9 +644,19 @@ async function runCommandWithProgress(
     // grace window on streams an orphaned grandchild may keep open. stdoutBuf/
     // stderrBuf already hold whatever the background readers captured so far.
     await drainAfterStop(ioPromise, POST_STOP_DRAIN_GRACE_MS);
-    return timedOut
-      ? { ...buildTimedOutResult(cmdStr, cwd, Date.now() - startTime, progressFile.path), stdout: stdoutBuf, stderr: stderrBuf }
-      : { ...buildCancelledResult(cmdStr, cwd, Date.now() - startTime), stdout: stdoutBuf, stderr: stderrBuf, progress_file: progressFile.path };
+    // The same overflow cut a finished run gets: a stopped noisy command is the
+    // case where the output is largest.
+    const partialOut = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
+    const partialErr = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+    return {
+      ...(timedOut
+        ? buildTimedOutResult(cmdStr, cwd, Date.now() - startTime, progressFile.path)
+        : { ...buildCancelledResult(cmdStr, cwd, Date.now() - startTime), ...withProgressFile(progressFile.path) }),
+      stdout: partialOut.text,
+      stderr: partialErr.text,
+      ...((partialOut.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
+      ...((partialErr.truncated || stderrSink.dropped) && { stderr_truncated: true }),
+    };
   }
 
   const ioResult = await ioPromise.catch((error) => {
@@ -587,10 +668,11 @@ async function runCommandWithProgress(
     return [undefined, undefined, undefined] as [void, void, number | undefined];
   });
   const actualExitCode = (ioResult[2] as number | undefined) ?? await proc.exited;
-  const stdoutResult = await truncate(overflowHandler, stdoutBuf, 'stdout', cmdStr);
-  const stderrResult = await truncate(overflowHandler, stderrBuf, 'stderr', cmdStr);
+  const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
+  const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
   const duration = Date.now() - startTime;
   progressFile.append(`# Completed: exit=${actualExitCode} duration=${duration}ms\n`);
+  if (discardWhenDone) progressFile.discard();
 
   const result: ExecCommandResult = {
     cmd: cmdStr,
@@ -601,10 +683,10 @@ async function runCommandWithProgress(
     duration_ms: duration,
     cwd,
     env: cmdInput.env,
-    progress_file: progressFile.path,
+    ...(discardWhenDone ? {} : withProgressFile(progressFile.path)),
     ...(warnings.length > 0 && { warnings }),
-    ...(stdoutResult.truncated && { stdout_truncated: true }),
-    ...(stderrResult.truncated && { stderr_truncated: true }),
+    ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
+    ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }),
   };
   return applyExpectations(result, cmdInput.expect, actualExitCode);
 }
@@ -633,20 +715,25 @@ async function runUntil(
   };
   let proc: ReturnType<typeof Bun.spawn> | undefined;
   const readers = new Set<ReadableStreamDefaultReader<Uint8Array>>();
-  const stop = () => {
-    try { proc?.kill('SIGKILL'); } catch { /* Already exited. */ }
+  // A stop reaches the command's whole group; the closing cleanup after a
+  // natural exit leaves anything the command deliberately left running.
+  const stop = (afterExit = false) => {
+    try { if (proc && (!afterExit || proc.exitCode === null)) signalForeground(proc, 'SIGKILL'); } catch { /* Already exited. */ }
     for (const reader of readers) void reader.cancel().catch(() => {});
   };
   const commandTimer = timeoutMs > 0 ? setTimeout(() => deadline.abort(), Math.max(0, timeoutMs - (Date.now() - startTime))) : undefined;
   let untilTimer: ReturnType<typeof setTimeout> | undefined;
-  active.addEventListener('abort', stop, { once: true });
+  const onStop = () => stop();
+  active.addEventListener('abort', onStop, { once: true });
   let streams: Promise<void[]> | undefined;
+  const stdoutSink: CaptureSink = { text: '', dropped: false };
+  const stderrSink: CaptureSink = { text: '', dropped: false };
+  let matched = false;
   try {
     current();
     await using pattern = await createSafeRegex(until.pattern, '', { operation: 'exec until pattern', signal: active, assertCurrent: current });
     current(); beforeSpawn?.();
-    proc = Bun.spawn([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
-    let stdoutBuf = '', stderrBuf = '', matched = false;
+    proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
     const untilTimeout = until.timeout_ms ?? timeoutMs;
     if (untilTimeout > 0) untilTimer = setTimeout(() => { if (!matched) deadline.abort(); }, untilTimeout);
     const readStream = async (stream: ReadableStream<Uint8Array>, isStderr: boolean): Promise<void> => {
@@ -659,8 +746,8 @@ async function runUntil(
           current();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-          if (isStderr) stderrBuf += chunk; else stdoutBuf += chunk;
-          if (!matched && await pattern.test(stdoutBuf + stderrBuf)) {
+          appendCapped(isStderr ? stderrSink : stdoutSink, chunk);
+          if (!matched && await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))) {
             current(); matched = true; clearTimeout(untilTimer);
             if (until.kill_after) stop();
           }
@@ -674,15 +761,26 @@ async function runUntil(
     ]);
     const [, exitCode] = await Promise.all([streams, proc.exited]);
     current(); pattern.assertCurrent();
-    const stdoutResult = await truncate(overflowHandler, stdoutBuf, 'stdout', cmdStr);
-    const stderrResult = await truncate(overflowHandler, stderrBuf, 'stderr', cmdStr);
+    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
+    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
     current(); pattern.assertCurrent();
     return { cmd: cmdStr, exit_code: exitCode, stdout: stdoutResult.text, stderr: stderrResult.text,
       success: matched, duration_ms: Date.now() - startTime, cwd,
-      ...(stdoutResult.truncated && { stdout_truncated: true }), ...(stderrResult.truncated && { stderr_truncated: true }) };
+      ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }) };
+  } catch (error) {
+    // The wait ran out (until.timeout_ms or the command's timeout): that is a
+    // result with what was printed, not a failure of the call. A cancel by the
+    // caller's own signal keeps propagating.
+    if (!deadline.signal.aborted || signal?.aborted) throw error;
+    stop();
+    const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout', cmdStr);
+    const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr', cmdStr);
+    return { ...buildTimedOutResult(cmdStr, cwd, Date.now() - startTime),
+      stdout: stdoutResult.text, stderr: stderrResult.text,
+      ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }) };
   } finally {
     clearTimeout(commandTimer); clearTimeout(untilTimer);
-    active.removeEventListener('abort', stop); stop();
+    active.removeEventListener('abort', onStop); stop(true);
     await streams?.catch(() => {});
     await proc?.exited.catch(() => {});
   }
@@ -820,11 +918,11 @@ async function executeResolvedCommand(
   // (the boundary) and 581 with $HOME readable in the background (the host).
   // The boundary never failed, this path never entered it.
   //
-  // The catastrophic block had the same hole: the exec docs call it
-  // unconditional, and on the detached path it did not run at all. Running the
-  // guard here makes that sentence true. The guard repeats the gate's
-  // catastrophic reading (ast-guard.ts); every other risk was decided by the
-  // gate's stakes reading and preset before this runtime runs.
+  // The shell-structure guard had the same hole: on the detached path it did
+  // not run at all. It only refuses a command that parses to no runnable
+  // segment (ast-guard.ts); the catastrophic reading and every other risk were
+  // decided by the permission gate before this runtime runs, and are not read
+  // again here.
   signal?.throwIfAborted();
   const guardResult = await guardExecCommand(cmdStr, featureFlags, signal);
   if (!guardResult.allowed) {
@@ -840,9 +938,6 @@ async function executeResolvedCommand(
     };
   }
 
-  const terminalRefusal = await ownerTerminalRefusal(policy, cmdStr, signal);
-  signal?.throwIfAborted();
-  if (terminalRefusal) return terminalRefusal;
   policy.assertCurrent?.();
   // A captured command never reaches the host ProcessManager's special commands.
   if (policy.capturedInput) {
@@ -852,7 +947,7 @@ async function executeResolvedCommand(
       ? runCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal)
       : runWithRetry(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal);
   }
-  const bgSpecial = handleBgSpecialCommand(processManager, cmdStr);
+  const bgSpecial = await handleBgSpecialCommand(processManager, cmdStr);
   if (bgSpecial) return bgSpecial;
   if (cmdInput.background) {
     // Background processes intentionally outlive this tool call, cancelling
@@ -862,8 +957,7 @@ async function executeResolvedCommand(
     // They are also NOT
     // sandboxed, a bwrap boundary is --die-with-parent, so wrapping one would
     // kill the very process the caller asked to detach. That exemption is real
-    // and stays; what does NOT stay is it being silent. The frozen catastrophic
-    // block and the owner-terminal guard both ran above, and a composition that
+    // and stays; what does NOT stay is it being silent. A composition that
     // requires containment has no contained background path at all, so it is
     // refused here rather than handed the exemption (see policy.ts).
     const uncontainable = backgroundContainmentRefusal(policy, cmdStr);
@@ -886,24 +980,36 @@ async function executeResolvedCommands(
   policy: ExecRunPolicy,
   signal?: AbortSignal,
 ): Promise<ExecCommandResult[]> {
+  const skipped = (cmdStr: string): ExecCommandResult => ({ cmd: cmdStr, exit_code: null, stdout: '', stderr: '', success: false, skipped: true });
+  // A cancel settles the command it interrupts as cancelled and leaves every
+  // finished command's result in place; nothing already done is dropped.
+  const runOne = async (cmdStr: string, cmdInput: ExecCommandInput): Promise<ExecCommandResult> => {
+    if (signal?.aborted) return skipped(cmdStr);
+    const startedAt = Date.now();
+    try {
+      return await executeResolvedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal);
+    } catch (error) {
+      if (!signal?.aborted) throw error;
+      return buildCancelledResult(cmdStr, undefined, Date.now() - startedAt);
+    }
+  };
   if (parallel) {
     return mapWithConcurrency(
       resolvedCmds,
       MAX_PARALLEL_EXEC_COMMANDS,
-      ({ cmdStr, cmdInput }) =>
-        executeResolvedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal),
+      ({ cmdStr, cmdInput }) => runOne(cmdStr, cmdInput),
     );
   }
 
   const results: ExecCommandResult[] = [];
   let stopped = false;
   for (const { cmdStr, cmdInput } of resolvedCmds) {
-    if (stopped) {
-      results.push({ cmd: cmdStr, exit_code: null, stdout: '', stderr: '', success: false, skipped: true });
+    if (stopped || signal?.aborted) {
+      results.push(skipped(cmdStr));
       continue;
     }
 
-    const result = await executeResolvedCommand(processManager, overflowHandler, featureFlags, cmdStr, cmdInput, workingDirectory, globalTimeout, scrub, policy, signal);
+    const result = await runOne(cmdStr, cmdInput);
     results.push(result);
     if (failFast && !result.success) {
       stopped = true;
@@ -964,12 +1070,6 @@ export function createExecTool(
      * turn passes `required`, so an absent boundary refuses instead.
      */
     readonly containment?: ExecContainmentRequirement | null | undefined;
-    /**
-     * Whether commands that drive an existing tmux session the platform did not
-     * create are refused (owner-terminal-guard.ts). Omitted ⇒ `off`, so every
-     * existing caller is unchanged.
-     */
-    readonly ownerTerminal?: OwnerTerminalGuard | null | undefined;
   } = {},
 ): Tool {
   if (!options.overflowHandler) {
@@ -983,7 +1083,7 @@ export function createExecTool(
     sandbox: options.sandbox ?? null,
     interaction: options.interaction ?? null,
     containment: options.containment ?? null,
-    ownerTerminal: options.ownerTerminal ?? null,
+    workspaceRoot: options.defaultWorkingDirectory?.trim() || undefined,
   };
 
   const tool: Tool = {
@@ -1020,7 +1120,8 @@ export function createExecTool(
           } else assertCurrentExecInvocation(args, opts);
         };
         assertCurrent();
-        const executionPolicy = { ...policy, assertCurrent,
+        const onProgress = opts === undefined ? undefined : projectionFunction<() => void>(projectionProperty(opts, 'onProgress'));
+        const executionPolicy = { ...policy, assertCurrent, ...(onProgress ? { onProgress } : {}),
           assertWorkspaceCurrent: rawYolo ? undefined : captureCurrentExecWorkspaceConstraint(args, opts) };
         if (!Array.isArray(args['commands']) || (args['commands'] as unknown[]).length === 0) {
           return { success: false, error: 'commands must be a non-empty array' };
@@ -1040,6 +1141,19 @@ export function createExecTool(
         const failFast = input.fail_fast === true || input.stop_on_error === true;
         const projectRoot = resolve(workingDirectory);
 
+        // Decoded first: an entry that cannot be read must stop the call before any file operation changes the tree.
+        const resolvedCmds: Array<{ cmdStr: string; cmdInput: ExecCommandInput }> = [];
+        for (const cmdInput of input.commands) {
+          let cmdStr: string;
+          try {
+            cmdStr = decodeCmd(cmdInput);
+          } catch (err) {
+            const msg = summarizeError(err);
+            return { success: false, error: msg };
+          }
+          resolvedCmds.push({ cmdStr, cmdInput });
+        }
+
         let fileOperations: Awaited<ReturnType<typeof executeFileOperations>>;
         if (policy.capturedInput && input.file_ops?.length) {
           let capturedOperations: Awaited<ReturnType<typeof executeFileOperations>> | undefined;
@@ -1051,27 +1165,27 @@ export function createExecTool(
           if (applied.denied || applied.cancelled || applied.timed_out || !capturedOperations)
             return { success: false, error: applied.stderr || 'Captured file operations did not complete.' };
           fileOperations = capturedOperations;
-        } else fileOperations = await executeFileOperations(input.file_ops, projectRoot, undefined, assertCurrent);
-        const { fileOpResults, fileOpError, fileOpWarnings } = fileOperations;
+        } else {
+          // These operations run on the host with plain file calls, outside the
+          // boundary, so a session that requires the boundary cannot have them.
+          if (input.file_ops?.length && policy.containment?.posture === 'required') {
+            return { success: false, error: 'file_ops refused: they run on the host, outside the exec boundary, and this session requires containment '
+              + `(${policy.containment.reason}). Nothing was changed. Run the equivalent commands (cp, mv, rm) in the boundary instead.` };
+          }
+          fileOperations = await executeFileOperations(input.file_ops, projectRoot, undefined, assertCurrent);
+        }
+        const { fileOpResults, fileOpError, fileOpFailedIndex, fileOpWarnings } = fileOperations;
         signal?.throwIfAborted();
         if (fileOpError) {
+          const total = input.file_ops?.length ?? 0;
+          const applied = fileOpResults.length;
           return {
             success: false,
-            error: fileOpError,
+            error: `${fileOpError} (${applied} of ${total} file_ops applied before it; no commands were run${applied > 0 ? '; the applied operations are listed in output and were not undone' : ''})`,
+            // The operations that already happened, so a retry does not repeat them.
+            output: JSON.stringify({ file_ops: fileOpResults, failed_op_index: fileOpFailedIndex, commands_run: false }),
             ...(fileOpWarnings && fileOpWarnings.length > 0 ? { warnings: fileOpWarnings } : {}),
           };
-        }
-
-        const resolvedCmds: Array<{ cmdStr: string; cmdInput: ExecCommandInput }> = [];
-        for (const cmdInput of input.commands) {
-          let cmdStr: string;
-          try {
-            cmdStr = decodeCmd(cmdInput);
-          } catch (err) {
-            const msg = summarizeError(err);
-            return { success: false, error: msg };
-          }
-          resolvedCmds.push({ cmdStr, cmdInput });
         }
 
         const results = await executeResolvedCommands(
@@ -1102,6 +1216,12 @@ export function createExecTool(
             + failed.map((r) => `'${r.cmd}'${r.skipped ? ' (skipped)' : ` exit ${r.exit_code}${r.timed_out ? ' (timed out)' : r.cancelled ? ' (cancelled)' : ''}`}`).join('; ')
           : undefined;
 
+        if (signal?.aborted) {
+          // Same cancellation markers as before, now with the batch's results.
+          responseData.cancelled = true;
+          return { success: false, cancelled: true, output: JSON.stringify(responseData), error: 'cancelled by user',
+            ...(fileOpWarnings && fileOpWarnings.length > 0 ? { warnings: fileOpWarnings } : {}) };
+        }
         return {
           success: allSuccess,
           output: JSON.stringify(responseData),

@@ -14,6 +14,7 @@
 
 import type { AgentManager, AgentRecord } from '../../tools/agent/manager.js';
 import type { ContractRunner } from '../../contract/runner.js';
+import { qualifyId } from '../../contract/fleet-controls.js';
 import type { ContractView } from '../../contract/types.js';
 import type { ProcessManager } from '../../tools/shared/process-manager.js';
 import type { WatcherRegistry } from '../../watchers/registry.js';
@@ -33,6 +34,7 @@ import type {
   FleetQueryFilter,
   FleetSnapshot,
   ProcessKillOptions,
+  ProcessControlFailure,
   ProcessNode,
   ProcessRegistry,
   ProcessUsage,
@@ -55,7 +57,7 @@ import { adaptWatcher } from './adapters/watcher.js';
 import { adaptWatcherTrigger, isWatcherTriggerRaw } from './adapters/watcher-trigger.js';
 import type { TriggerManager as WatcherTriggerManager } from '../../triggers/manager.js';
 import { adaptBackgroundProcess } from './adapters/background-process.js';
-import { adaptAutomationJob, isAutomationJobRaw } from './adapters/automation.js';
+import { adaptAutomationJob, automationJobNodeId, isAutomationJobRaw } from './adapters/automation.js';
 import type { CodeIndexProcessSource } from './adapters/code-index.js';
 import { adaptCodeIndex } from './adapters/code-index.js';
 import { adaptHostedAcpAgent, killHostedAcpNode, steerHostedAcpNode } from './adapters/acp-host.js';
@@ -96,7 +98,8 @@ export interface ProcessRegistryDeps {
    * The contract runner: its views become contract, contract-group and
    * contract-unit nodes, and a contract kill cancels through it.
    */
-  readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'>;
+  /** `fleetControls` is read for merge conflicts; a runner without it shows none. */
+  readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined };
   readonly processManager: Pick<ProcessManager, 'list' | 'stop' | 'getStatus'>;
   readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'>;
   readonly workflow: {
@@ -204,9 +207,27 @@ function snapshotSignature(nodes: readonly ProcessNode[]): string {
       String(node.costUsd ?? ''),
       node.costState,
       node.sessionRef?.sessionId ?? '',
+      node.controlFailure ? `${node.controlFailure.op}@${node.controlFailure.at}` : '',
     );
   }
   return parts.join('\u0000');
+}
+
+/**
+ * Attention detail for each work item that failed to merge, keyed by its
+ * qualified id (`<contractId>:<unitId>`, the id the conflicts verbs use; a
+ * unit and its engine item share one local id): the first conflicting file,
+ * else the item title.
+ */
+function conflictedUnitDetails(controls: ReturnType<ContractRunner['fleetControls']> | undefined): ReadonlyMap<string, { readonly detail: string }> {
+  const out = new Map<string, { readonly detail: string }>();
+  if (controls === undefined) return out;
+  for (const workstream of controls.listWorkstreams()) {
+    for (const item of workstream.items) {
+      if (item.mergeState === 'conflict') out.set(item.id, { detail: item.conflictFiles?.[0] ?? item.title });
+    }
+  }
+  return out;
 }
 
 /** Create the live process registry over the already-composed managers. */
@@ -223,6 +244,8 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   // transitions only (see headlines.ts, the anti-feed contract lives there).
   const headlines = new HeadlineTable();
   const busUnsubscribers: Array<() => void> = [];
+  // Asynchronous control requests that failed after their verb already answered.
+  const controlFailures = new Map<string, ProcessControlFailure>();
   let disposed = false;
 
   function recordActivity(agentId: string, entry: Omit<AgentActivityEntry, 'at'>): void {
@@ -247,6 +270,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
             recordActivity(event.agentId, {
               state: 'executing-tool',
               activity: { kind: 'tool', text: event.tool, toolName: event.tool, at: now() },
+              toolInFlight: true,
             });
             break;
           case 'AGENT_STREAM_DELTA':
@@ -257,6 +281,8 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
             recordActivity(event.agentId, {
               state: 'executing-tool',
               activity: { kind: 'phase', text: event.progress, at: now() },
+              // A tool's own progress reports do not end the call; the next other event does.
+              ...(prior?.toolInFlight ? { toolInFlight: true } : {}),
             });
             break;
           case 'AGENT_COMPLETED':
@@ -374,6 +400,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     const agentNodesOf = (agentIds: readonly string[]): ProcessNode[] => [...new Set(agentIds)]
       .map((agentId) => agentNodeById.get(agentId))
       .filter((node): node is ProcessNode => node !== undefined);
+    const mergeConflicts = conflictedUnitDetails(deps.contractRunner.fleetControls?.());
     for (const contract of contracts) {
       const units = allContractUnits(contract);
       // Members exclude the owner: it runs no model, and its usage is filled
@@ -396,6 +423,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
           activeAgent: unit.activeAgentId !== undefined ? agentNodeById.get(unit.activeAgentId) : undefined,
           memberNodes: agentNodesOf(unit.agentIds),
           messageBusPresent: deps.messageBus !== undefined,
+          mergeConflict: mergeConflicts.get(qualifyId(contract.id, unit.id)),
           now: capturedAt,
         }));
       }
@@ -448,10 +476,15 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       liveIds.add(node.id);
       const headline = headlines.derive(node, capturedAt);
       const stall = deriveStallTell(node, capturedAt, stallTellMs);
-      if (!headline && !stall) return node;
-      return { ...node, ...(headline ? { headline } : {}), ...(stall ? { stall } : {}) };
+      const controlFailure = controlFailures.get(node.id);
+      if (!headline && !stall && !controlFailure) return node;
+      return { ...node, ...(headline ? { headline } : {}), ...(stall ? { stall } : {}), ...(controlFailure ? { controlFailure } : {}) };
     });
+    for (const id of controlFailures.keys()) if (!liveIds.has(id)) controlFailures.delete(id);
     headlines.prune(liveIds);
+    // An agent the manager no longer lists can never be queried again, so its
+    // liveness entry would only accumulate.
+    for (const agentId of activity.keys()) if (!agentIds.has(agentId)) activity.delete(agentId);
     return { capturedAt, nodes: finalNodes };
   }
 
@@ -557,17 +590,19 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   }
 
   /**
-   * Fire-and-forget an AutomationManager async control call: the
-   * registry's own kill/interrupt/resume verbs are
-   * synchronous, but AutomationManager.removeJob/setEnabled are Promises,
-   * dispatch without awaiting rather than making every registry verb async,
-   * but never let a rejection vanish silently. The next tick's assemble()
-   * reflects the real outcome once the promise settles (mirrors the
-   * existing TUI automation-control-panel's swallow-and-tick behavior).
+   * Dispatch an AutomationManager async control call. The registry's own
+   * kill/interrupt/resume verbs are synchronous, so they answer "requested"
+   * before the call settles. A rejection is logged and recorded against the
+   * node (`controlFailure`), where the next tick publishes it, so a job that
+   * was not actually stopped or paused is never left looking as if it was.
    */
   function dispatchAutomationOp(op: 'kill' | 'pause' | 'resume', jobId: string, promise: Promise<unknown>): void {
+    const nodeId = automationJobNodeId(jobId);
+    controlFailures.delete(nodeId);
     promise.catch((error) => {
-      logger.warn(`[fleet] automation job ${op} failed`, { jobId, error: summarizeError(error) });
+      const message = summarizeError(error);
+      logger.warn(`[fleet] automation job ${op} failed`, { jobId, error: message });
+      if (!disposed) controlFailures.set(nodeId, { op, message, at: now() });
     });
   }
 
@@ -818,6 +853,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     busUnsubscribers.length = 0;
     listeners.clear();
     activity.clear();
+    controlFailures.clear();
   }
 
   return { query, getNode, subscribe, interrupt, kill, resume, steer, dispose };

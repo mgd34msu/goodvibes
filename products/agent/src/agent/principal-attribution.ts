@@ -56,6 +56,9 @@ export function formatPrincipalLabel(principal: ResolvedPrincipalSummary): strin
   return `${principal.name} (${principal.id})`;
 }
 
+/** How long a display-only principal lookup waits for the connected host. */
+const PRINCIPAL_RESOLVE_TIMEOUT_MS = 5_000;
+
 /**
  * Resolve a channel identity ({channel, value}) to its named principal for
  * honest inbound-attribution display.
@@ -69,6 +72,7 @@ export async function resolveChannelPrincipalAttribution(
   connection: PrincipalAttributionConnection,
   channel: string,
   value: string,
+  options: { readonly signal?: AbortSignal; readonly fetch?: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response> } = {},
 ): Promise<ResolvedPrincipalAttribution> {
   if (!channel.trim() || !value.trim()) return UNKNOWN_ATTRIBUTION;
   if (!connection.token) {
@@ -81,6 +85,12 @@ export async function resolveChannelPrincipalAttribution(
       // A single attempt is enough for a display-only lookup, this must not
       // stall triage/inbox rendering behind retry backoff.
       retry: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+      // One attempt still waits as long as the host takes to answer; a hung host
+      // would stall rendering, so the lookup gives up and shows "unknown".
+      fetch: (input, init) => {
+        const signal = options.signal ?? AbortSignal.timeout(PRINCIPAL_RESOLVE_TIMEOUT_MS);
+        return (options.fetch ?? globalThis.fetch)(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+      },
     });
     const payload: PrincipalsResolveInput = { channel, value };
     // No `as OperatorMethodOutput<'principals.resolve'>` here: the platform's typed

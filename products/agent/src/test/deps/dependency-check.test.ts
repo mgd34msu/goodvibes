@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { DRIVER_VERSION, loadDriverModule, resolveDriver } from '@goodvibes-jev/engine/platform/platform/browser';
 
 async function expectImportable(specifier: string): Promise<void> {
-  expect(await import(specifier)).toEqual(expect.any(Object));
+  // A module that resolves but exports nothing is a broken install, not a loaded one.
+  expect(Object.keys(await import(specifier)), specifier).not.toHaveLength(0);
 }
 
 describe('dependency surface', () => {

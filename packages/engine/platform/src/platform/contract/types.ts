@@ -228,6 +228,8 @@ export interface CriterionReading {
   readonly decisionId: string | undefined;
   /** The `contract.unmet-severity` reading behind `severity` (recorded even when it did not settle, so the severity stayed unknown). */
   readonly severityDecisionId?: string | undefined;
+  /** One sentence on what evidence was missing when the criterion read unmet or not shown, shown to the worker in the nudge. */
+  readonly rationale?: string | undefined;
 }
 
 /** Role in the original requested result, separate from execution status. */
@@ -419,6 +421,12 @@ export interface Escalation {
   readonly unmetCriterionIds: readonly string[];
   /** The decision-log ids of the readings behind the question (what the owner is asked to settle). */
   readonly decisionIds?: readonly string[] | undefined;
+  /**
+   * Set only on the question a native session contract asks when its turn keeps
+   * failing: the one answer pair is retry or cancel. It is never an approval,
+   * and no reading of a reply is involved.
+   */
+  readonly failurePause?: true | undefined;
   resolvedAt?: number | undefined;
   reply?: {
     readonly text: string;
@@ -589,12 +597,12 @@ export const GROUP_TRANSITIONS: Readonly<Record<GroupStatus, readonly GroupStatu
 export const UNIT_TRANSITIONS: Readonly<Record<UnitStatus, readonly UnitStatus[]>> = {
   pending: ['blocked', 'running', 'failed', 'cancelled'],
   blocked: ['pending', 'running', 'failed', 'cancelled'],
-  running: ['checking', 'held', 'pending', 'failed', 'cancelled'],
+  running: ['checking', 'held', 'pending', 'awaiting-owner', 'failed', 'cancelled'],
   checking: ['running', 'held', 'nudged', 'passed', 'held-merge', 'fixing', 'awaiting-owner', 'pending', 'failed', 'cancelled'],
   held: ['nudged', 'passed', 'held-merge', 'fixing', 'awaiting-owner', 'pending', 'failed', 'cancelled'],
-  nudged: ['running', 'checking', 'held', 'pending', 'failed', 'cancelled'],
+  nudged: ['running', 'checking', 'held', 'pending', 'awaiting-owner', 'failed', 'cancelled'],
   fixing: ['checking', 'awaiting-owner', 'failed', 'cancelled'],
-  'awaiting-owner': ['checking', 'passed', 'held-merge', 'fixing', 'pending', 'failed', 'cancelled'],
+  'awaiting-owner': ['running', 'nudged', 'checking', 'passed', 'held-merge', 'fixing', 'pending', 'failed', 'cancelled'],
   'held-merge': ['passed', 'fixing', 'awaiting-owner', 'failed', 'cancelled'],
   passed: [],
   failed: [],

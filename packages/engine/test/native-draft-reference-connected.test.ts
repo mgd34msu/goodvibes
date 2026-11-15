@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Questions } from '@goodvibes-jev/judgment';
@@ -176,6 +176,7 @@ for (const preField of [false, true]) test(`actual registered Agent admission pu
   writeFileSync(inputPath, JSON.stringify({ root: clientRoot, port: f.port, seed: f.seed, token: f.paired.token }), { mode: 0o600 });
   const agentRoot = new URL('../../../products/agent/', import.meta.url).pathname;
   const helperPath = join(agentRoot, 'src/test/helpers/native-draft-peer-client.ts');
+  if (!existsSync(helperPath)) throw new Error(`Agent draft peer client is missing at ${helperPath}; this test drives the Agent product's real draft tool and must follow it if it moves.`);
   const env = { ...process.env };
   delete env.GOODVIBES_CONNECTED_HOST_TOKEN; delete env.GOODVIBES_DAEMON_TOKEN;
   const child = Bun.spawn([process.execPath, '--no-env-file', helperPath, inputPath], {
@@ -190,13 +191,16 @@ for (const preField of [false, true]) test(`actual registered Agent admission pu
   expect(receipt).toMatchObject({ result: { success: true, output: expect.stringContaining(offeredReference) },
     localWireReference: f.reference,
     localStatus: 'sent', delivery: [ORIGINAL_BODY], autonomousReadings: expect.any(Number) });
-  expect(f.drafts.get(LEGACY_ID)?.status).toBe('queued'); expect(f.drafts.get(f.reference)).toBeNull();
-  expect(f.responses).toEqual([{ method: 'POST', status: 200, nativeStatus: 'queued' }]);
+  // The daemon's copy learns the delivery outcome with a second save under the canonical label, for both a stored label and an adopted one.
+  expect(f.drafts.get(LEGACY_ID)?.status).toBe('sent'); expect(f.drafts.get(f.reference)).toBeNull();
+  expect(f.drafts.get(LEGACY_ID)?.sentResponseId).toBe('registered-native-peer-receipt');
+  expect(f.responses).toEqual([{ method: 'POST', status: 200, nativeStatus: 'queued' }, { method: 'POST', status: 200, nativeStatus: 'sent' }]);
   const persisted = new DraftSyncStore({ workingDirectory: f.directory, cipher: f.cipher });
   try {
-    await persisted.init(); expect(persisted.get(LEGACY_ID)?.status).toBe('queued'); expect(persisted.get(LEGACY_ID)?.wireReference).toBe(f.reference); expect(persisted.get(f.reference)).toBeNull();
+    await persisted.init(); expect(persisted.get(LEGACY_ID)?.status).toBe('sent'); expect(persisted.get(LEGACY_ID)?.wireReference).toBe(f.reference); expect(persisted.get(f.reference)).toBeNull();
   } finally { await persisted.close(); }
-  expect(f.wire).toHaveLength(1); expect(JSON.parse(f.wire[0]!)).toMatchObject({ id: offeredReference, admission: 'autonomous', message: ORIGINAL_BODY, status: 'queued' });
+  expect(f.wire).toHaveLength(2); expect(JSON.parse(f.wire[0]!)).toMatchObject({ id: offeredReference, admission: 'autonomous', message: ORIGINAL_BODY, status: 'queued' });
+  expect(JSON.parse(f.wire[1]!)).toMatchObject({ id: f.reference, admission: 'autonomous', message: ORIGINAL_BODY, status: 'sent' });
   expect(f.wire.join('')).not.toContain(LEGACY_ID); expect(JSON.stringify(requests)).not.toContain(LEGACY_ID);
   expect(stdout).not.toContain(LEGACY_ID); expect(stdout).not.toContain(f.paired.token);
   expect(JSON.stringify(requests)).not.toContain(f.paired.token);

@@ -98,9 +98,23 @@ mock.module('../lib/goodvibes', () => ({
   },
 }));
 
+// ChatView registers a sink for confirmed wake transcripts; the test calls it directly.
+let wakeSink: ((text: string, options: { autoSubmit: boolean }) => void) | null = null;
+const realUseWake = await import('../lib/voice/useWake');
+mock.module('../lib/voice/useWake', () => ({
+  ...realUseWake,
+  useWakeTranscriptSink: (sink: (text: string, options: { autoSubmit: boolean }) => void) => { wakeSink = sink; },
+}));
+
 const { ChatView } = await import('./ChatView');
 const { PeekProvider } = await import('../components/peek/PeekPanel');
-const { ToastProvider } = await import('../lib/toast');
+const { ToastProvider, useToastContext } = await import('../lib/toast');
+
+let capturedToasts: { title: string; description?: string }[] = [];
+function ToastProbe(): null {
+  capturedToasts = useToastContext().toasts;
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -144,6 +158,7 @@ function renderChatView(props: ChatViewProps): void {
         React.createElement(
           ToastProvider,
           null,
+          React.createElement(ToastProbe),
           React.createElement(PeekProvider, null, React.createElement(ChatView, selectedProps)),
         ),
       ),
@@ -210,6 +225,7 @@ afterEach(async () => {
         && streamDisconnects.every((disconnect) => disconnect.mock.calls.length === 1));
     } finally {
       client.clear();
+      try { localStorage.removeItem('goodvibes.webui.token'); } catch { /* storage unavailable */ }
       deferredRejections.clear();
       fixtureSettlements.clear();
       streamRetirements.clear();
@@ -384,7 +400,7 @@ test('regeneration stays active over cached historical assistant messages', asyn
   expect(regenerate).not.toBeNull();
   flushSync(() => regenerate.click());
   await waitFor(() => stopButton() !== null);
-  await new Promise(resolve => setTimeout(resolve, 20)); flushSync(() => {});
+  for (let turn = 0; turn < 5; turn++) { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(() => {}); }
   expect(stopButton()).not.toBeNull();
 });
 
@@ -403,7 +419,7 @@ test('a live running turn is not completed by an old assistant message when no s
     call.options.onEvent('companion-chat.turn.started', { sessionId: 'session-a', type: 'turn.started' });
   });
   await waitFor(() => stopButton() !== null);
-  await new Promise(resolve => setTimeout(resolve, 20)); flushSync(() => {});
+  for (let turn = 0; turn < 5; turn++) { await new Promise(resolve => setTimeout(resolve, 0)); flushSync(() => {}); }
   expect(stopButton()).not.toBeNull();
 });
 
@@ -521,5 +537,96 @@ describe('ChatView: acknowledged session-local routing', () => {
     flushSync(() => streamCalls.find(value => value.sessionId === SESSION_A.id)?.options.onEvent('companion-chat.turn.started', { sessionId: SESSION_A.id, type: 'turn.started', turnId: 'owned-turn' }));
     await waitFor(() => container.querySelector<HTMLButtonElement>('.composer-model-btn')?.disabled === true);
     expect(routeUpdates).toEqual([]); expect(defaultModelWrites).toEqual([]);
+  });
+});
+
+describe('ChatView: slash commands', () => {
+  test('/new starts a new chat and is never sent to the model as a message', async () => {
+    const changes: string[] = [];
+    const drafts: boolean[] = [];
+    renderChatView({
+      ...baseProps(SESSION_A.id),
+      onActiveSessionChange: (id) => { changes.push(id); },
+      onDraftSessionRequestedChange: (requested) => { drafts.push(requested); },
+    });
+    submitChat('/new');
+    await waitFor(() => changes.length > 0);
+    expect(changes).toEqual(['']);
+    expect(drafts).toEqual([true]);
+    expect(messageCalls).toEqual([]);
+    expect(createCalls).toEqual([]);
+  });
+
+  test('an unknown slash word is ordinary text and is sent', async () => {
+    renderChatView(baseProps(SESSION_A.id));
+    submitChat('/clear');
+    await waitFor(() => messageCalls.length === 1);
+  });
+});
+
+describe('ChatView: a confirmed wake transcript while a send is in flight', () => {
+  test('lands in the draft instead of being dropped', async () => {
+    const response = deferredResult();
+    createMessageImpl = () => response.promise;
+    renderChatView(baseProps(SESSION_A.id));
+    submitChat('first question');
+    await waitFor(() => messageCalls.length === 1);
+
+    flushSync(() => wakeSink?.('and also this', { autoSubmit: true }));
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message GoodVibes"]');
+    expect(textarea?.value).toBe('and also this');
+    expect(messageCalls.length).toBe(1);
+    response.resolve({ messageId: 'msg-1' });
+    await waitFor(() => client.isMutating() === 0);
+  });
+});
+
+describe('ChatView: copying a message', () => {
+  const history = [{ id: 'question-1', role: 'user', content: 'question', createdAt: 1 }, { id: 'reply-1', role: 'assistant', content: 'old answer', createdAt: 2 }];
+  const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
+  afterEach(() => {
+    capturedToasts = [];
+    if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
+  function setClipboard(value: unknown): void {
+    Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+  }
+
+  async function renderWithHistory(): Promise<HTMLButtonElement> {
+    client.setQueryDefaults(['companion-chat', 'session-a', 'messages'], { staleTime: Infinity });
+    client.setQueryData(['companion-chat', 'session-a', 'messages'], { messages: history });
+    renderChatView(baseProps('session-a'));
+    await waitFor(() => container.querySelector('button[aria-label="Copy message"]') !== null);
+    const buttons = container.querySelectorAll<HTMLButtonElement>('button[aria-label="Copy message"]');
+    return buttons[buttons.length - 1]!;
+  }
+
+  test('a rejected clipboard write toasts the failure and never shows Copied', async () => {
+    setClipboard({ writeText: () => Promise.reject(new Error('denied')) });
+    const copy = await renderWithHistory();
+    const before = copy.innerHTML;
+    flushSync(() => copy.click());
+    await waitFor(() => capturedToasts.some((t) => t.description === 'Could not write to clipboard'));
+    expect(copy.innerHTML).toBe(before);
+  });
+
+  test('a missing clipboard toasts that the clipboard is unavailable', async () => {
+    setClipboard(undefined);
+    const copy = await renderWithHistory();
+    flushSync(() => copy.click());
+    await waitFor(() => capturedToasts.some((t) => t.description === 'Clipboard API unavailable'));
+  });
+
+  test('a successful write copies the message text and raises no failure toast', async () => {
+    const written: string[] = [];
+    setClipboard({ writeText: (text: string) => { written.push(text); return Promise.resolve(); } });
+    const copy = await renderWithHistory();
+    flushSync(() => copy.click());
+    await waitFor(() => written.length === 1);
+    expect(written[0]).toContain('old answer');
+    expect(capturedToasts.some((t) => t.title === 'Copy failed')).toBe(false);
   });
 });

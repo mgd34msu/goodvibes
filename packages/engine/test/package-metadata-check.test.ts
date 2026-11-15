@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 const ENGINE_ROOT = resolve(import.meta.dir, '..');
 const SCRIPTS = [
   'package-metadata-check.ts', 'docs-completeness-check.ts',
-  'export-conditions.ts', 'release-shared.ts', 'workspace-lock.ts',
+  'export-conditions.ts', 'release-shared.ts', 'workspace-lock.ts', 'reexported-names.ts',
 ];
 
 let root: string;

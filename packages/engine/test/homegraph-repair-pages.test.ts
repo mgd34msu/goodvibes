@@ -415,7 +415,7 @@ describe('Home Graph repair and generated pages', () => {
       });
     }
 
-    service.dispose();
+    await service.dispose();
     // Seed pre-gate rows through the owning connection after its real schema
     // migrations. Opening this current image as an old generic SQLite store
     // correctly refuses a downgrade, and pinning a new version would drift

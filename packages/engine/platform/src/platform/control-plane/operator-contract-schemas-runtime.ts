@@ -15,9 +15,27 @@ import {
   recordSchema,
 } from './operator-contract-schemas-shared.js';
 import { REASONING_EFFORT_SEVERITY } from '../providers/reasoning-effort.js';
+import type { SharedSessionKind } from './session-types.js';
+import type { TaskKind, TaskLifecycleState } from '../runtime/store/domains/tasks.js';
 
-const TASK_KIND_SCHEMA = enumSchema(['exec', 'agent', 'acp', 'scheduler', 'daemon', 'mcp', 'plugin', 'integration']);
-const TASK_STATUS_SCHEMA = enumSchema(['queued', 'running', 'blocked', 'completed', 'failed', 'cancelled']);
+/**
+ * The wire enums below are written out as lists, so a union member added
+ * without a matching entry would make `sessions.register` and the task schemas
+ * reject a value the platform itself produces. Each list must name every
+ * member of its union and nothing else, checked here at compile time.
+ */
+type ExactMembers<Union extends string, List extends Union> =
+  [Exclude<Union, List>] extends [never] ? List : never;
+const SESSION_KINDS = ['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted'] as const;
+const TASK_KINDS = ['exec', 'agent', 'acp', 'scheduler', 'daemon', 'mcp', 'plugin', 'integration'] as const;
+const TASK_STATUSES = ['queued', 'running', 'blocked', 'completed', 'failed', 'cancelled'] as const;
+const sessionKindsAreComplete: ExactMembers<SharedSessionKind, (typeof SESSION_KINDS)[number]> = SESSION_KINDS[0];
+const taskKindsAreComplete: ExactMembers<TaskKind, (typeof TASK_KINDS)[number]> = TASK_KINDS[0];
+const taskStatusesAreComplete: ExactMembers<TaskLifecycleState, (typeof TASK_STATUSES)[number]> = TASK_STATUSES[0];
+void [sessionKindsAreComplete, taskKindsAreComplete, taskStatusesAreComplete];
+
+const TASK_KIND_SCHEMA = enumSchema(TASK_KINDS);
+const TASK_STATUS_SCHEMA = enumSchema(TASK_STATUSES);
 const PROVIDER_AUTH_MODE_SCHEMA = enumSchema(['api-key', 'oauth', 'anonymous', 'none']);
 const PROVIDER_AUTH_ROUTE_SCHEMA = enumSchema(['api-key', 'subscription', 'service-oauth', 'unconfigured']);
 const PROVIDER_AUTH_FRESHNESS_SCHEMA = enumSchema(['healthy', 'expiring', 'expired', 'pending', 'unconfigured']);
@@ -27,7 +45,7 @@ const INBOUND_SERVER_SURFACE_SCHEMA = enumSchema(['controlPlane', 'httpListener'
 const INBOUND_TLS_MODE_SCHEMA = enumSchema(['off', 'proxy', 'direct']);
 const OUTBOUND_TRUST_MODE_SCHEMA = enumSchema(['bundled', 'bundled+custom', 'custom']);
 const OUTBOUND_CA_STRATEGY_SCHEMA = enumSchema(['bun-default', 'bundled+custom', 'custom']);
-const SHARED_SESSION_KIND_SCHEMA = enumSchema(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
+const SHARED_SESSION_KIND_SCHEMA = enumSchema(SESSION_KINDS);
 /**
  * READ-path kind schema: an OPEN enum. The known kinds are the same set as
  * {@link SHARED_SESSION_KIND_SCHEMA}, but response/output validation must accept
@@ -163,8 +181,10 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   createdAt: NUMBER_SCHEMA,
   // Delivery honesty marker: 'cancelled' = an assistant partial whose turn
   // was stopped mid-generation; 'queued' = a user message whose turn has not
-  // started yet. Absent = normally delivered.
-  deliveryState: enumSchema(['cancelled', 'queued']),
+  // started yet; 'unanswered' = a queued user message whose turn can never
+  // run because the chat closed, the service shut down or the daemon
+  // restarted. Absent = normally delivered.
+  deliveryState: enumSchema(['cancelled', 'queued', 'unanswered']),
   // On assistant messages: the user message this reply answers (the
   // transcript is append-ordered, so pairing needs an explicit link).
   inReplyTo: STRING_SCHEMA,
@@ -347,18 +367,9 @@ export const TASK_SNAPSHOT_SCHEMA = objectSchema({
     failed: NUMBER_SCHEMA,
     cancelled: NUMBER_SCHEMA,
   }, ['created', 'completed', 'failed', 'cancelled']),
-  tasks: arraySchema(objectSchema({
-    id: STRING_SCHEMA,
-    kind: TASK_KIND_SCHEMA,
-    title: STRING_SCHEMA,
-    status: TASK_STATUS_SCHEMA,
-    owner: STRING_SCHEMA,
-    parentTaskId: STRING_SCHEMA,
-    queuedAt: NUMBER_SCHEMA,
-    startedAt: NUMBER_SCHEMA,
-    endedAt: NUMBER_SCHEMA,
-    error: STRING_SCHEMA,
-  }, ['id', 'kind', 'title', 'status', 'owner', 'queuedAt'])),
+  // The snapshot rows are the runtime task fields a client rebuilds a task from
+  // (cancellable, childTaskIds and description included), so they share its schema.
+  tasks: arraySchema(RUNTIME_TASK_SCHEMA),
 }, ['queued', 'running', 'blocked', 'totals', 'tasks']);
 
 export const TASK_CREATE_INPUT_SCHEMA = objectSchema({

@@ -37,6 +37,12 @@ dispatched to the API and never served as a file, so an SPA fallback can never s
 a liveness probe or an admin read with the HTML shell. The bundle is public; the
 app still token-authenticates every API call.
 
+When `controlPlane.webui.bundleDir` is empty, the daemon serves `web.staticAssetsDir`
+instead (default `dist/web`, resolved against the daemon's working directory). Setting
+only `controlPlane.webui.serve` therefore publishes whatever sits at `dist/web` under
+that directory without authentication, and a daemon started from another directory
+answers 404 for the shell. Set `bundleDir` explicitly to the bundle you mean to serve.
+
 For cross-machine reach, front the single daemon origin with `tailscale serve` over
 HTTPS: bundle + API arrive same-origin on the Tailscale hostname with zero CORS. This
 is the supported remote path.
@@ -113,6 +119,13 @@ row, for example `gpt-5.5`. When a runtime provider is an alias for a catalog
 provider, the daemon also accepts the provider-qualified registry key as
 `model`, such as `openai:gpt-5.5`, as long as `provider` remains the selected
 runtime provider row id.
+
+To stop a running reply, call `platformClient.chat.turns.cancel(sessionId)`; any
+partial reply is kept and marked as cancelled. To interrupt a running reply with
+a new message, call `platformClient.chat.messages.steer(sessionId, { body })`.
+Retrying and editing a message are daemon routes (`messages/retry`,
+`messages/edit`) listed in `companion-message-routing.md`; the browser client
+does not wrap them.
 
 Use `platformClient.chat.sessions.list()` for the chat sidebar and
 `platformClient.chat.sessions.update(sessionId, { provider, model })` when a user changes

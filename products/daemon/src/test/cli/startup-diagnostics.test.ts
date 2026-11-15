@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { execFileSync } from 'node:child_process';
 import { get as httpsGet } from 'node:https';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
@@ -23,6 +22,7 @@ import * as hosts from '../../runtime/daemon-host.js';
 import * as maintenance from '../../cli/startup-maintenance.js';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { availableLoopbackPorts } from '../helpers/companion-cli-fixture.js';
+import { loopbackCertificate } from '../helpers/loopback-certificate.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 class ProcessFixture extends EventEmitter {
@@ -128,9 +128,7 @@ test('TLS configuration changed during held boot cannot replace the observed lis
 test('direct TLS startup pairing serves and authenticates at its HTTPS origin with fixture-only CA trust', async () => {
   const f = await fixture(undefined, { createServer(config) { return new DaemonServer({ ...config, port: 0 }); } });
   enablePairing(f);
-  const cert = join(f.root, 'loopback-cert.pem'); const key = join(f.root, 'loopback-key.pem');
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
-    '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore', timeout: 10_000 });
+  const { certPath: cert, keyPath: key } = loopbackCertificate(f.root, 'loopback');
   applyRuntimeConfigValue(f.configuration.config, 'controlPlane.tls.mode', 'direct');
   applyRuntimeConfigValue(f.configuration.config, 'controlPlane.tls.certFile', cert);
   applyRuntimeConfigValue(f.configuration.config, 'controlPlane.tls.keyFile', key);

@@ -34,6 +34,7 @@ import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledg
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { flushAsync, waitUntil } from '../helpers/wait-until.ts';
 
 /** The workspace modal's text (a kit layer), or plain lines' text. */
 function linesText(source: SurfaceLayer | readonly Line[]): string {
@@ -179,9 +180,7 @@ function vectorStats() {
 }
 
 const ALLOWED_ONBOARDING_READONLY_GUIDANCE = new Set([
-  'account-route-readiness',
   'account-local-server-health',
-  'account-local-benchmark-evidence',
   'context-vibe-status',
   'context-project-files',
   'context-project-file',
@@ -411,6 +410,29 @@ describe('AgentWorkspace', () => {
 
     expect(dismissed).toBe(true);
     expect(workspace.active).toBe(false);
+  });
+
+  test('direct command actions dispatch the exact command written for them', () => {
+    const expected: ReadonlyArray<readonly [string, string]> = [
+      ['work-activity', '/activity'],
+      ['ci-watches-list', '/ci watches list'],
+      ['principals-list', '/principals list'],
+      ['channel-profiles-list', '/channel-profiles list'],
+      ['owner-profile-settings', '/settings'],
+    ];
+    for (const [actionId, command] of expected) {
+      const dispatched: string[] = [];
+      const workspace = new AgentWorkspace();
+      workspace.open(commandContext(), (dispatchedCommand) => { dispatched.push(dispatchedCommand); });
+      const categoryIndex = workspace.categories.findIndex((category) => category.actions.some((action) => action.id === actionId));
+      expect(categoryIndex, `${actionId} is in a visible category`).toBeGreaterThanOrEqual(0);
+      workspace.selectedCategoryIndex = categoryIndex;
+      workspace.selectedActionIndex = workspace.actions.findIndex((action) => action.id === actionId);
+      expect(workspace.selectedActionIndex, `${actionId} is a visible action`).toBeGreaterThanOrEqual(0);
+      workspace.focusActions();
+      workspace.activateSelected();
+      expect(dispatched, actionId).toEqual([command]);
+    }
   });
 
   // DELETED: 'dispatches command actions through the shell-owned callback', action 'model' removed.
@@ -702,7 +724,7 @@ describe('AgentWorkspace', () => {
     // owns the key rather than applied inline, it needs a tick to settle. The
     // agent-owned settings above are still observable synchronously.
     workspace.activateSelected();
-    await Promise.resolve();
+    await waitUntil(() => savedDaemonSetting(shellPaths, 'surfaces.ntfy.enabled') === true, 'the daemon-owned setting to be written');
     expect(configManager.get('surfaces.ntfy.enabled')).toBe(true);
     // And it does NOT land in the agent's own settings file. That store is not
     // the one the daemon reads, which is why setting a channel here used to
@@ -728,22 +750,19 @@ describe('AgentWorkspace', () => {
       workspace.selectedActionIndex = workspace.actions.findIndex((entry) => entry.id === 'display-theme-mode');
 
       workspace.activateSelected(); // auto -> dark, applied now through the shared apply hook
-      await Promise.resolve();
-      await Promise.resolve();
+      await waitUntil(() => getActiveThemeMode() === 'dark', 'dark mode to be applied');
       expect(configManager.get(THEME_MODE_CONFIG_KEY as ConfigKey)).toBe('dark');
       expect(getActiveThemeMode()).toBe('dark');
       expect(workspace.status).toContain('applied now');
 
       workspace.activateSelected(); // dark -> light
-      await Promise.resolve();
-      await Promise.resolve();
+      await waitUntil(() => getActiveThemeMode() === 'light', 'light mode to be applied');
       expect(configManager.get(THEME_MODE_CONFIG_KEY as ConfigKey)).toBe('light');
       expect(getActiveThemeMode()).toBe('light');
       expect(workspace.status).toContain('applied now');
 
       workspace.activateSelected(); // light -> auto (wraps); only takes effect at next launch
-      await Promise.resolve();
-      await Promise.resolve();
+      await waitUntil(() => configManager.get(THEME_MODE_CONFIG_KEY as ConfigKey) === 'auto' && workspace.status.includes('next startup'), 'the stored mode to become auto');
       expect(configManager.get(THEME_MODE_CONFIG_KEY as ConfigKey)).toBe('auto');
       expect(getActiveThemeMode()).toBe('light'); // unchanged now, auto only re-probes at startup
       expect(workspace.status).toContain('next startup');
@@ -767,9 +786,10 @@ describe('AgentWorkspace', () => {
       const start = names.indexOf(normalizeThemeName(configManager.get('display.theme')));
       const visited: string[] = [];
       for (let step = 0; step < names.length; step++) {
+        const previous = String(configManager.get('display.theme' as ConfigKey));
         workspace.activateSelected();
-        // The write goes through setHarnessSetting (async): let it settle.
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        // The write goes through setHarnessSetting (async): wait for the stored theme to change.
+        await waitUntil(() => String(configManager.get('display.theme' as ConfigKey)) !== previous && getActiveThemeName() === String(configManager.get('display.theme' as ConfigKey)), 'the next theme to be applied');
         const stored = String(configManager.get('display.theme' as ConfigKey));
         visited.push(stored);
         expect(getActiveThemeName()).toBe(stored);
@@ -830,7 +850,7 @@ describe('AgentWorkspace', () => {
     workspace.selectedCategoryIndex = workspace.categories.findIndex((category) => category.id === 'setup');
     workspace.selectedActionIndex = workspace.actions.findIndex((action) => action.id === 'import-goodvibes-tui-settings');
     workspace.activateSelected();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitUntil(() => subscriptionManager.get('openai') !== undefined, 'the TUI subscription to be imported');
 
     expect(subscriptionManager.get('agent-only')?.accessToken).toBe('agent-token');
     expect(subscriptionManager.get('openai')).toEqual(expect.objectContaining({
@@ -1731,16 +1751,16 @@ describe('AgentWorkspace', () => {
     feedText(workspace, 'no');
     feedKey(workspace, 'enter');
     clearEditorField(workspace);
-    feedText(workspace, 'yes');
-    feedKey(workspace, 'enter');
     feedText(workspace, 'no');
     feedKey(workspace, 'enter');
     expect(workspace.localEditor?.message).toContain('not confirmed');
+    // A submit that is still running ignores another Enter; let it settle first.
+    await flushAsync();
     feedKey(workspace, 'backspace');
     feedKey(workspace, 'backspace');
     feedText(workspace, 'yes');
     feedKey(workspace, 'enter');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitUntil(() => workspace.lastActionResult?.title === 'Subscription login started', 'the login to start');
     expect(dispatched).toEqual([]);
     expect(calls).toEqual(['begin:test-oauth:urn:ietf:wg:oauth:2.0:oob']);
     expect(workspace.lastActionResult?.title).toBe('Subscription login started');
@@ -1757,11 +1777,12 @@ describe('AgentWorkspace', () => {
     feedText(workspace, 'no');
     feedKey(workspace, 'enter');
     expect(workspace.localEditor?.message).toContain('not confirmed');
+    await flushAsync();
     feedKey(workspace, 'backspace');
     feedKey(workspace, 'backspace');
     feedText(workspace, 'yes');
     feedKey(workspace, 'enter');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitUntil(() => calls.length === 2, 'the login to finish');
     expect(dispatched).toEqual([]);
     expect(calls).toEqual([
       'begin:test-oauth:urn:ietf:wg:oauth:2.0:oob',
@@ -1935,7 +1956,7 @@ describe('AgentWorkspace', () => {
     feedKey(workspace, 'enter');
 
     expect(dispatched).toEqual([
-      '/mcp add filesystem bunx -y @modelcontextprotocol/server-filesystem . --scope project --role filesystem --trust constrained --env FS_TOKEN=goodvibes://secrets/mcp/FS_TOKEN --path /home/buzzkill/Projects --host docs.example.test --yes',
+      '/mcp add filesystem bunx --scope project --role filesystem --trust constrained --env FS_TOKEN=goodvibes://secrets/mcp/FS_TOKEN --path /home/buzzkill/Projects --host docs.example.test --yes -- -y @modelcontextprotocol/server-filesystem .',
     ]);
     expect(workspace.localEditor).toBeNull();
     expect(workspace.lastActionResult?.title).toBe('Opening MCP server add/update');
@@ -2264,8 +2285,7 @@ describe('AgentWorkspace', () => {
     feedText(workspace, 'preference');
     feedKey(workspace, 'enter');
     feedKey(workspace, 'enter');
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitUntil(() => workspace.lastActionResult?.title === 'Created memory', 'the memory record to be created');
 
     expect(records[0]?.summary).toBe('Prefers concise briefings');
     expect(records[0]?.confidence).toBe(80);
@@ -2439,7 +2459,7 @@ describe('AgentWorkspace', () => {
     feedKey(workspace, 'enter');
     feedKey(workspace, 'enter');
     feedKey(workspace, 'enter');
-    await Promise.resolve();
+    await waitUntil(() => workspace.localEditor?.message?.includes('cannot store secret-looking values') === true, 'the secret-looking value to be refused');
 
     expect(records).toHaveLength(0);
     expect(workspace.localEditor?.message).toContain('cannot store secret-looking values');
@@ -4205,8 +4225,8 @@ describe('AgentWorkspace', () => {
     // Inline does NOT close the workspace, active must remain true
     expect(workspace.active).toBe(true);
 
-    // The print interceptor is active during executeCommand; wait for the microtask to settle
-    await Promise.resolve();
+    // The print capture is active during executeCommand; let the command and its result settle
+    await new Promise((resolve) => setImmediate(resolve));
 
     // lastActionResult must be populated with dispatched kind
     expect(workspace.lastActionResult).toBeDefined();
@@ -4399,7 +4419,7 @@ describe('AgentWorkspace', () => {
     clearEditorField(workspace);
     feedText(workspace, 'yes'); // confirm
     feedKey(workspace, 'enter');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitUntil(() => workspace.lastActionResult?.title === 'Subscription login started', 'the login to start');
     expect(workspace.lastActionResult?.title).toBe('Subscription login started');
 
     // Run subscription-login-finish.
@@ -4415,7 +4435,7 @@ describe('AgentWorkspace', () => {
     clearEditorField(workspace);
     feedText(workspace, 'yes'); // confirm
     feedKey(workspace, 'enter');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitUntil(() => workspace.lastActionResult?.title === 'Subscription session saved', 'the login to finish');
 
     // (a) Result confirms success.
     expect(workspace.lastActionResult?.title).toBe('Subscription session saved');

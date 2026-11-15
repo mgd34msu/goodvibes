@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -36,7 +37,9 @@ export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathServ
       : domain === 'memory' ? memoryStore.dbPath : undefined;
     if (path === undefined) throw new ToolInputProjectionError('held');
     const physicalRoot = captureAgentExportPath(home, home);
-    let physical = path === null ? undefined : captureAgentExportPath(home, path);
+    // The memory database is replaced atomically by its own commit, so its file identity changes with every
+    // write; the directory chain above it stays pinned, and `before` still guards the file's content.
+    let physical = path === null ? undefined : captureAgentExportPath(home, domain === 'memory' ? dirname(path) : path);
     let before = path === null ? null : fileRevision(path);
     const assertOwner = () => {
       if (shellPaths.homeDirectory !== home || shellPaths.resolveUserPath !== resolveUserPath
@@ -57,7 +60,7 @@ export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathServ
     const assertCurrent = () => { if (released) throw new ToolInputProjectionError('stale'); request.assertCurrent(); assertTarget(); };
     contexts.set(context, { assertBeforeWrite: assertTarget, assertLocation, acceptOwnEffect() {
       assertOwner();
-      if (path !== null) { physical = captureAgentExportPath(home, path); before = fileRevision(path); }
+      if (path !== null) { physical = captureAgentExportPath(home, domain === 'memory' ? dirname(path) : path); before = fileRevision(path); }
     } });
     return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
       ...(typeof action === 'string' && readActions.has(action) ? { resultPublication: 'read-only' } : {}),

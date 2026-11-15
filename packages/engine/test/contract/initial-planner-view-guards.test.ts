@@ -33,11 +33,8 @@ for (const stage of ['map', 'planner'] as const) {
       const { contract } = (await startContract(h));
       await waitFor(() => terminal(h, contract.id), 'stale planner held', 15_000);
       const done = h.store.get(contract.id)!;
-      console.log(JSON.stringify({
-        stage, status: done.status, planners,
-        members: h.agentsOf('u1').length, commit: done.commit?.status,
-      }));
       expect(done.status).toBe('failed');
+      expect(done.error).toContain('contract input view changed: README.md');
       expect(h.agentsOf('u1')).toHaveLength(0);
       if (stage === 'map') expect(planners).toBe(0);
     } finally {
@@ -93,7 +90,10 @@ for (const stage of ['route', 'judgment', 'receipt', 'cancel-map', 'cancel-judgm
       const { contract } = (await startContract(h));
       await waitFor(() => terminal(h, contract.id), 'guarded planning terminal', 15_000);
       expect(mutation).toBe(true);
-      expect(h.store.get(contract.id)!.status).toBe(stage.startsWith('cancel') ? 'cancelled' : 'failed');
+      const ended = h.store.get(contract.id)!;
+      expect(ended.status).toBe(stage.startsWith('cancel') ? 'cancelled' : 'failed');
+      expect(ended.error).toContain({ route: 'contract input view changed: README.md', judgment: 'contract input view changed: README.md',
+        receipt: 'contract input receipt changed after admission', 'cancel-map': 'cancel during map', 'cancel-judgment': 'cancel during plan judgment' }[stage]);
       expect(h.agentsOf('u1')).toHaveLength(0);
       if (stage === 'route' || stage === 'cancel-map') expect(planners).toBe(0);
     } finally { h.dispose(); }

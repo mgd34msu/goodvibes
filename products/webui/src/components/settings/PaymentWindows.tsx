@@ -24,8 +24,11 @@ export function PaymentWindows() {
     refetchInterval: 2000, retry: false, gcTime: 0 });
   useEffect(() => () => active.current?.abort(), []);
   useEffect(() => subscribeClientLifetime(() => {
+    // An aborted answer may already have been applied; say so rather than going silent.
+    const interrupted = active.current !== null;
     active.current?.abort(); active.current = null;
-    setPending(null); setMessage(''); setFinding(null); setInspected(false);
+    setPending(null); setFinding(null); setInspected(false);
+    setMessage(interrupted ? 'The connection changed while a request was being sent, so whether the daemon applied it is unknown. Refresh the purchase status before answering again, and do not place another order.' : '');
   }), []);
 
   const answer = async (window: PaymentWindowView, action: 'approve' | 'deny' | 'cancel') => {
@@ -80,7 +83,7 @@ export function PaymentWindows() {
       setMessage(paymentOperationDescription(result)); setFinding(null); setInspected(false);
     } catch (error) {
       if (controller.signal.aborted) return;
-      setMessage(`${formatError(error)} Refresh status and repeat only the finding already saved. Do not place another order.`);
+      setMessage(`${formatError(error)} Do not place another order.`);
     } finally {
       if (active.current === controller) active.current = null;
       if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: ['payments'] }); }
@@ -104,6 +107,10 @@ export function PaymentWindows() {
         {window.kind === 'approval' ? 'Deny purchase' : 'Cancel purchase'}
       </Button>
     </section>)}
+    {windows.data && windows.data.unreadable.length > 0 && <section aria-label="Unreadable purchase records">
+      <h4>Purchases that could not be read</h4>
+      {windows.data.unreadable.map(row => <p key={row.purchaseId} role="alert">{row.purchaseId}: {row.reason}</p>)}
+    </section>}
     {windows.data?.operations.map(operation => <section key={operation.operationId} aria-label={`Checkout operation ${operation.purchaseId}`}>
       <h4>Checkout {operation.purchaseId}</h4>
       <p>Status: {operation.state}{operation.phase ? ` · ${operation.phase}` : ''}</p>

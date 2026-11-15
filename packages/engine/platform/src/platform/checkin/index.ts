@@ -7,7 +7,7 @@
  * default; every run leaves a visible receipt. Rides the existing automation
  * scheduler as a kind:'checkin' job.
  */
-export { CheckinService, type CheckinServiceDeps, type SetCheckinConfigInput } from './service.js';
+export { CheckinConfigError, CheckinService, type CheckinScheduleStatus, type CheckinServiceDeps, type SetCheckinConfigInput } from './service.js';
 export { CheckinReceiptStore } from './receipts.js';
 export { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
 export { isQuietHours, parseQuietHours } from './quiet-hours.js';

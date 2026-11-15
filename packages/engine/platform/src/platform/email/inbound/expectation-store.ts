@@ -38,6 +38,7 @@
  *      its own read paths, but nothing calls those paths on a schedule).
  */
 import { PersistentStore, type PersistentStoreCorruption } from '../../state/persistent-store.js';
+import { loadStoreForWrite } from './store-read.js';
 import { withInboundStoreWriteLock } from './store-write-lock.js';
 import {
   MAX_OPEN_EXPECTATIONS,
@@ -95,6 +96,8 @@ export class PersistedExpectationStore {
   private readonly policy: PersistedExpectationPolicy;
   private readonly now: () => Date;
   private writeChain: Promise<void> = Promise.resolve();
+  /** Expired rows a sweep removed that nobody has been told about yet, see `takeExpired`. */
+  private readonly expiredUnreported: VerificationExpectation[] = [];
   /** The last unreadable-file event, latched so status can name it. */
   private corruption: PersistentStoreCorruption | null = null;
 
@@ -113,12 +116,14 @@ export class PersistedExpectationStore {
     return this.corruption;
   }
 
-  private async readWithDrops(now: Date): Promise<{
+  private async readWithDrops(now: Date, forWrite = false): Promise<{
     expectations: VerificationExpectation[];
     malformed: number;
     corrupt: PersistentStoreCorruption | null;
   }> {
-    const { data: raw, corruption } = await this.store.loadOrDiscard();
+    const { data: raw, corruption } = forWrite
+      ? await loadStoreForWrite(this.store)
+      : await this.store.loadOrDiscard();
     if (corruption !== null) this.corruption = corruption;
     if (!raw || typeof raw !== 'object') return { expectations: [], malformed: 0, corrupt: corruption };
     const rawExpectations = Array.isArray(raw.expectations) ? raw.expectations : [];
@@ -141,7 +146,7 @@ export class PersistedExpectationStore {
     // across processes. Both, because neither alone is "one writer at a time"
     //, see store-write-lock.ts for why a second daemon is reachable here.
     const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
-      const { expectations, malformed, corrupt } = await this.readWithDrops(now);
+      const { expectations, malformed, corrupt } = await this.readWithDrops(now, true);
       const { next, result } = await fn(expectations, malformed, now, corrupt);
       await this.store.persist({ version: 1, expectations: next });
       return result;
@@ -205,6 +210,33 @@ export class PersistedExpectationStore {
    * book from it. Idempotent and safe concurrently.
    */
   async sweep(trigger: HousekeepingTrigger = 'manual'): Promise<ExpectationSweepReport> {
+    const reaped: VerificationExpectation[] = [];
+    const report = await this.sweepFile(reaped);
+    for (const expectation of reaped) {
+      if (this.expiredUnreported.some((held) => held.id === expectation.id)) continue;
+      this.expiredUnreported.push(expectation);
+    }
+    // Bounded by the same cap as the file: the oldest are forgotten first.
+    const excess = this.expiredUnreported.length - this.policy.maxOpenExpectations;
+    if (excess > 0) this.expiredUnreported.splice(0, excess);
+    return report;
+  }
+
+  /**
+   * The expectations a sweep removed because their window had elapsed, handed
+   * over once and forgotten.
+   *
+   * A sweep that runs before anything is hydrated (the boot recovery sweep, on
+   * a daemon that was down past a window) reaps these rows from the file, and
+   * the report only carries their ids. This is how the registry still learns
+   * who was waiting, so it can say the window elapsed instead of leaving the
+   * workstream with silence.
+   */
+  takeExpired(): VerificationExpectation[] {
+    return this.expiredUnreported.splice(0);
+  }
+
+  private async sweepFile(reaped: VerificationExpectation[]): Promise<ExpectationSweepReport> {
     return this.mutate(async (expectations, malformed, now, corrupt) => {
       const removed: ExpectationDiscard[] = [];
       if (corrupt !== null) {
@@ -232,6 +264,7 @@ export class PersistedExpectationStore {
       for (const expectation of expectations) {
         if (Date.parse(expectation.expiresAt) <= now.getTime()) {
           removed.push({ id: expectation.id, recipientAddress: expectation.recipientAddress, reason: 'expired', removedAt: now.getTime() });
+          reaped.push(expectation);
           continue;
         }
         unexpired.push(expectation);

@@ -30,6 +30,7 @@ const EXPECTED_COMMANDS = [
   'status',
   'pair',
   'sessions',
+  'mcp',
   'config',
   'update',
   'send',

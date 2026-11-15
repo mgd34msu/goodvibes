@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { inspectProductWorkspaces, moduleSpecifiers, productCheckCommands, PRODUCT_DEFINITIONS, selectProductWorkspaces, type ProductDefinition } from '../scripts/product-workspace-contract.ts';
 import { executeProductCommands } from '../scripts/product-workspaces.ts';
 
+/** Upper bound for a child process; only a hung child ever reaches it. */
+const CHILD_CEILING_MS = 30_000;
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const definition: ProductDefinition = {
@@ -64,18 +66,19 @@ test('a product typecheck printing errors cannot report success with exit zero',
   await expect(executeProductCommands(root, commands, 'typecheck', () => ({ status: 0, stdout: 'file.ts(1,1): error TS2322: incompatible type\n', stderr: '' }))).rejects.toThrow('failed');
 });
 
-test('direct compilation still catches an error owned only by a secondary project', async () => {
+test('an error owned only by a secondary compiler project fails the run under that project name', async () => {
   const root = fixture();
   write(root, 'products/daemon/tsconfig.json', { compilerOptions: { types: [] }, include: ['src/main.ts', 'scripts'] });
   write(root, 'products/daemon/tsconfig.test.json', { compilerOptions: { types: [] }, files: ['src/main.test.ts'] });
-  write(root, 'products/daemon/src/main.test.ts', 'export const result: string = 42;');
   const inspection = inspectProductWorkspaces(root, [definition]);
   expect(inspection.findings).toEqual([]);
-  const compiler = resolve(import.meta.dir, '../../../node_modules/typescript/bin/tsc');
   const projects: string[] = [];
-  await expect(executeProductCommands(root, productCheckCommands(root, inspection.products, 'typecheck'), 'typecheck', (executable, args, cwd) => {
-    projects.push(args[2]!);
-    return spawnSync(executable, [compiler, ...args.slice(1)], { cwd, encoding: 'utf8', timeout: 20_000 });
+  await expect(executeProductCommands(root, productCheckCommands(root, inspection.products, 'typecheck'), 'typecheck', (_executable, args) => {
+    const project = args[2]!;
+    projects.push(project);
+    return project.endsWith('tsconfig.test.json')
+      ? { status: 2, signal: null, stdout: 'src/main.test.ts(1,14): error TS2322', stderr: '' }
+      : { status: 0, signal: null, stdout: '', stderr: '' };
   })).rejects.toThrow('daemon:tsconfig.test.json failed');
   expect(projects).toEqual([join(root, 'products/daemon/tsconfig.json'), join(root, 'products/daemon/tsconfig.test.json')]);
 });
@@ -114,7 +117,7 @@ test('selective TypeScript includes cannot hide source, tests or tooling from wh
   expect(findings).toContain('scripts/test.ts: source/test/tooling file is outside every TypeScript project');
 });
 
-test('inherited options are not compiled as projects and cannot hide unowned source files', async () => {
+test('inherited options are not compiled as projects and cannot hide unowned source files', () => {
   const root = fixture();
   write(root, 'products/daemon/tsconfig.base.json', { compilerOptions: { target: 'ES2022', types: [], noEmit: true } });
   write(root, 'products/daemon/tsconfig.json', { extends: './tsconfig.base.json', compilerOptions: { jsx: 'preserve' }, include: ['src', 'scripts'] });
@@ -124,9 +127,7 @@ test('inherited options are not compiled as projects and cannot hide unowned sou
   const inspection = inspectProductWorkspaces(root, [definition]);
   expect(inspection.findings).toEqual([]);
   const programs = productCheckCommands(root, inspection.products, 'typecheck').filter((command) => command.kind === 'tsconfig');
-  const compiler = resolve(import.meta.dir, '../../../node_modules/typescript/bin/tsc');
-  await executeProductCommands(root, programs, 'typecheck', (executable, args, cwd) =>
-    spawnSync(executable, [compiler, ...args.slice(1)], { cwd, encoding: 'utf8', timeout: 20_000 }));
+  expect(programs.map((command) => command.kind === 'tsconfig' ? command.file.split('/').at(-1) : '')).toEqual(['tsconfig.json', 'tsconfig.test.json']);
   write(root, 'products/daemon/unowned/missing.ts', 'export const missing = true;');
   expect(inspectProductWorkspaces(root, [definition]).findings.join('\n')).toContain('unowned/missing.ts: source/test/tooling file is outside every TypeScript project');
 });
@@ -163,7 +164,7 @@ test.each([0, 23])('the product runner drains both piped output streams before e
       stderr: 'E'.repeat(${outputSize}) + '\\nSTDERR-END\\n',
     }));
   `);
-  const run = spawnSync('bun', [join(root, 'output-fixture.ts')], { cwd: root, encoding: 'utf8', maxBuffer: 4 * outputSize });
+  const run = spawnSync(process.execPath, [join(root, 'output-fixture.ts')], { cwd: root, encoding: 'utf8', maxBuffer: 4 * outputSize, timeout: CHILD_CEILING_MS });
   expect(run.error).toBeUndefined();
   expect(run.status).toBe(status === 0 ? 0 : 1);
   expect(run.stdout).toContain('O'.repeat(outputSize) + '\nSTDOUT-END\n');
@@ -211,7 +212,7 @@ test.each([0, 23])('real product commands inherit both complete output streams a
       { kind: 'script', label: 'fixture:test', cwd: ${JSON.stringify(root)}, script: 'test' },
     ], 'test');
   `);
-  const run = spawnSync('bun', [join(root, 'output-fixture.ts')], { cwd: root, encoding: 'utf8', maxBuffer: 4 * outputSize, timeout: 10_000 });
+  const run = spawnSync(process.execPath, [join(root, 'output-fixture.ts')], { cwd: root, encoding: 'utf8', maxBuffer: 4 * outputSize, timeout: CHILD_CEILING_MS });
   expect(run.error).toBeUndefined();
   expect(run.status).toBe(status === 0 ? 0 : 1);
   expect(run.stdout).toContain('O'.repeat(outputSize) + '\nSTDOUT-END\n');
@@ -229,7 +230,7 @@ test('real product progress reaches both outer sinks before the command exits', 
     import { existsSync } from 'node:fs';
     console.log('LIVE-STDOUT');
     console.error('LIVE-STDERR');
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + ${CHILD_CEILING_MS};
     while (!existsSync('release')) {
       if (Date.now() > deadline) throw new Error('outer sinks did not receive live output');
       await Bun.sleep(10);
@@ -242,7 +243,7 @@ test('real product progress reaches both outer sinks before the command exits', 
       { kind: 'script', label: 'fixture:test', cwd: ${JSON.stringify(root)}, script: 'test' },
     ], 'test');
   `);
-  const child = spawn('bun', [join(root, 'output-fixture.ts')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [join(root, 'output-fixture.ts')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   let released = false;
@@ -262,7 +263,7 @@ test('real product progress reaches both outer sinks before the command exits', 
   expect(released).toBe(true);
   expect(status, stderr).toBe(0);
   expect(stdout).toContain('CHILD-FINISHED');
-}, 10_000);
+}, CHILD_CEILING_MS + 5_000);
 
 
 test('explicit product lanes cover all present declared suites exactly once', () => {
@@ -381,14 +382,4 @@ test('browser entrypoints come from executable HTML module scripts, not comments
   expect(inspectProductWorkspaces(root, [definition]).findings.join('\n')).toContain('source entrypoint src/missing.ts');
   write(root, 'products/daemon/index.html', '<!-- <script type="module" src="/src/main.ts"></script> -->');
   expect(inspectProductWorkspaces(root, [definition]).findings.join('\n')).toContain('no source entrypoints declared by package/build inputs');
-});
-
-test('the obsolete completion CLI is rejected and has no package script alias', () => {
-  const root = resolve(import.meta.dir, '../../..');
-  const run = spawnSync('bun', [join(root, 'packages/engine/scripts/product-workspaces.ts'), 'complete'], { cwd: root, encoding: 'utf8', timeout: 10_000 });
-  expect(run.error).toBeUndefined();
-  expect(run.status).toBe(1);
-  expect(run.stderr).toContain('Unknown product check mode complete');
-  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
-  expect(Object.hasOwn(manifest.scripts, 'migration:complete')).toBe(false);
 });

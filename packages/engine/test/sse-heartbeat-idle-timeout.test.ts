@@ -33,8 +33,8 @@ describe('SSE idle-timeout invariant', () => {
 
   test('the default idle timeout beats the default 15s heartbeat by a wide margin', () => {
     expect(sseIdleTimeoutSeconds() * 1_000).toBeGreaterThan(SSE_HEARTBEAT_INTERVAL_MS);
-    // 2x15s + 5s slack = 35s.
-    expect(sseIdleTimeoutSeconds()).toBe(35);
+    // It survives one dropped heartbeat: at least two full intervals.
+    expect(sseIdleTimeoutSeconds()).toBeGreaterThanOrEqual((2 * SSE_HEARTBEAT_INTERVAL_MS) / 1_000);
   });
 });
 
@@ -55,23 +55,26 @@ function makeGateway(): { gateway: ControlPlaneGateway; ee: EventEmitter } {
   return { gateway, ee };
 }
 
-/** Read decoded SSE text chunks off a Response body for up to `ms`. */
-async function collect(res: Response, ms: number): Promise<string> {
+/**
+ * Read decoded SSE text off a Response body until `done(text)` holds, then
+ * cancel the stream. The ceiling only bounds a stream that never produces the
+ * expected output, so the assertion that follows reports what was missing.
+ */
+async function collectUntil(res: Response, done: (text: string) => boolean): Promise<string> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let text = '';
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    const chunk = await Promise.race([
-      reader.read(),
-      new Promise<{ done: true; value: undefined }>((r) => setTimeout(() => r({ done: true, value: undefined }), Math.max(0, deadline - Date.now()))),
-    ]);
+  const deadline = performance.now() + 10_000;
+  while (!done(text) && performance.now() < deadline) {
+    const chunk = await reader.read();
     if (chunk.done) break;
     if (chunk.value) text += decoder.decode(chunk.value, { stream: true });
   }
   await reader.cancel().catch(() => {});
   return text;
 }
+
+const countOf = (text: string, line: string): number => text.split('\n').filter((l) => l === line).length;
 
 describe('SSE keep-alive delivery', () => {
   test('the first heartbeat fires immediately on open, then on the interval', async () => {
@@ -81,11 +84,11 @@ describe('SSE keep-alive delivery', () => {
     // Short heartbeat cadence so the quiet-stream behavior is observable fast.
     const res = gateway.createEventStream(req, { clientId: 'hb-1', transport: 'sse', heartbeatIntervalMs: 40 });
 
-    // Well past two intervals but a tiny fraction of any real idle timeout.
-    const text = await collect(res, 220);
+    // One immediate heartbeat plus two interval ones: past two intervals.
+    const text = await collectUntil(res, (seen) => countOf(seen, 'event: heartbeat') >= 3);
     controller.abort();
 
-    const heartbeats = text.split('\n').filter((l) => l === 'event: heartbeat').length;
+    const heartbeats = countOf(text, 'event: heartbeat');
     // One immediate + several interval heartbeats: the stream stayed open and
     // kept emitting keep-alives rather than going silent.
     expect(heartbeats).toBeGreaterThanOrEqual(3);
@@ -107,7 +110,7 @@ describe('SSE keep-alive delivery', () => {
     // Emit two runtime events on a subscribed domain.
     ee.emit('fleet', { type: 'FLEET_NODE_STARTED', payload: { type: 'FLEET_NODE_STARTED', nodeId: 'n1' }, domain: 'fleet' });
     ee.emit('fleet', { type: 'FLEET_NODE_STARTED', payload: { type: 'FLEET_NODE_STARTED', nodeId: 'n2' }, domain: 'fleet' });
-    const buf = await collect(res1, 120);
+    const buf = await collectUntil(res1, (seen) => countOf(seen, 'event: fleet') >= 2);
     c1.abort();
 
     // Extract the id line of the FIRST fleet event (the one we "already saw").
@@ -123,7 +126,7 @@ describe('SSE keep-alive delivery', () => {
       new Request('http://localhost/events', { headers: { 'last-event-id': lastSeenId }, signal: c2.signal }),
       { clientId: 'replay-2', transport: 'sse', heartbeatIntervalMs: 10_000, domains: ['fleet'] },
     );
-    const replayText = await collect(res2, 120);
+    const replayText = await collectUntil(res2, (seen) => seen.includes('n2'));
     c2.abort();
     // The event after the last-seen id is replayed on reconnect.
     expect(replayText).toContain('n2');

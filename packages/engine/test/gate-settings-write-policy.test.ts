@@ -1,24 +1,10 @@
-/** Agent settings execute without a redundant Jev permission question. */
+/** The Agent settings tool's mechanical checks and the schema its admitted wrapper leaves. */
 import { describe, expect, test } from 'bun:test';
-import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import type { Tool } from '../platform/src/platform/types/tools.ts';
-import { useGateReadings } from './_helpers/gate-readings.ts';
 import {
-  AGENT_SETTINGS_CONFIRMATION_PROPERTY,
-  AGENT_SETTINGS_TOOL_DESCRIPTION,
-  validateSettingsToolInvocationForAgentPolicy,
-  wrapSettingsToolForAgentPolicy,
+  validateAgentSettingsMechanics,
+  wrapSettingsToolForAdmittedAgentPolicy,
 } from '../platform/src/platform/gate/policy/settings-write-policy.ts';
-import { explainAgentToolPolicyInvocation } from '../platform/src/platform/gate/policy/tool-policy-guard.ts';
-
-useGateReadings([
-  ['turn on auto approve', { hazard: 'approval-gate', requested: true }],
-  ['"behavior.autoApprove"', { hazard: 'approval-gate' }],
-  ['"permissions.', { hazard: 'approval-gate' }],
-  ['"sandbox.', { hazard: 'exec-containment' }],
-  ['"controlPlane.', { hazard: 'host-exposure' }],
-  ['"fetch.trustedHosts"', { hazard: 'host-exposure' }],
-]);
 
 interface SettingsCall {
   readonly key: unknown;
@@ -54,78 +40,86 @@ function makeSettingsTool(calls: SettingsCall[]): Tool {
 function guardedSettingsTool(): { tool: Tool; calls: SettingsCall[] } {
   const calls: SettingsCall[] = [];
   const tool = makeSettingsTool(calls);
-  wrapSettingsToolForAgentPolicy(tool);
+  wrapSettingsToolForAdmittedAgentPolicy(tool);
   return { tool, calls };
 }
 
-describe('the Agent can set ordinary settings', () => {
-  test('a stated Telegram bot username reaches the underlying tool', async () => {
-    const { tool, calls } = guardedSettingsTool();
-    const result = await tool.execute({
-      mode: 'set',
-      key: 'surfaces.telegram.botUsername',
-      value: 'goodvibes_agent_bot',
-      confirm: true,
-    });
-
-    expect(result.success).toBe(true);
-    expect(calls).toEqual([{ key: 'surfaces.telegram.botUsername', value: 'goodvibes_agent_bot' }]);
-  });
-
-  test('ordinary keys Jev reads as no hazard are not gated', async () => {
-    for (const key of [
-      'surfaces.telegram.botUsername',
-      'surfaces.telegram.defaultChatId',
-      'surfaces.telegram.enabled',
-      'surfaces.slack.enabled',
-      'provider.model',
-      'display.theme',
-      'tts.voice',
-      'watchers.triggers.enabled',
-      'device.grants.expiryDays',
-    ]) {
-      expect(await validateSettingsToolInvocationForAgentPolicy({ mode: 'set', key, value: 'x' })).toBeNull();
-    }
-  });
-
-  test('the guard leaves the tool usable instead of emptying its schema', () => {
+describe('the admitted settings wrapper', () => {
+  test('leaves the tool usable instead of emptying its schema', () => {
     const { tool } = guardedSettingsTool();
     const properties = tool.definition.parameters.properties as Record<string, unknown>;
-
-    // The previous guard replaced the whole parameter object with `{}`, which
-    // left the model unable to see that a settings write was even possible.
     expect(properties.mode).toBeDefined();
     expect(properties.key).toBeDefined();
     expect(properties.value).toBeDefined();
-    expect(properties.confirm).toBeDefined();
-    expect(properties[AGENT_SETTINGS_CONFIRMATION_PROPERTY]).toBeDefined();
+    // Nothing reads request text, so the schema must not invite the model to supply it.
+    expect(properties.explicitUserRequest).toBeUndefined();
     expect(tool.definition.sideEffects).toEqual(['state']);
-    expect(tool.definition.description).toBe(AGENT_SETTINGS_TOOL_DESCRIPTION);
     expect(tool.definition.description).not.toContain('Blocked');
   });
-});
 
-describe('settings use tool permissions without a second Jev approval', () => {
-  test('settings changes reach the tool without fabricated explicitUserRequest text', async () => {
-    for (const key of ['behavior.autoApprove', 'sandbox.enabled', 'controlPlane.hostMode']) {
-      const { tool, calls } = guardedSettingsTool();
-      expect((await tool.execute({ mode: 'set', key, value: true, confirm: true })).success).toBe(true);
-      expect(calls).toEqual([{ key, value: true }]);
-      expect((await explainAgentToolPolicyInvocation('goodvibes_settings', { mode: 'set', key, value: true })).status).toBe('allowed');
+  test('a write that is not a settings set or reset, or names no registered key, never reaches the tool', async () => {
+    const { tool, calls } = guardedSettingsTool();
+    for (const args of [{ mode: 'list' }, { mode: 'set', key: '   ', value: 'x' }, { mode: 'set', key: 'no.such.key', value: 'x' }]) {
+      expect((await tool.execute(args)).success).toBe(false);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test('ordinary registered keys pass the mechanics check', () => {
+    for (const key of ['surfaces.telegram.botUsername', 'surfaces.telegram.defaultChatId', 'provider.model', 'display.theme']) {
+      expect(validateAgentSettingsMechanics({ mode: 'set', key, value: 'x' })).toBeNull();
     }
   });
-  test('the registry executes settings under the same policy', async () => {
-    const registry = new ToolRegistry(); const calls: SettingsCall[] = [];
-    const tool = makeSettingsTool(calls); wrapSettingsToolForAgentPolicy(tool); registry.register(tool);
-    expect((await registry.execute('set', 'goodvibes_settings', { mode: 'set', key: 'sandbox.enabled', value: false, confirm: true })).success).toBe(true);
-    expect(calls).toEqual([{ key: 'sandbox.enabled', value: false }]);
-  });
 });
 
-describe('what is never asked about', () => {
-  test('unkeyed calls are never gated and never read', async () => {
-    expect(await validateSettingsToolInvocationForAgentPolicy({ mode: 'reset' })).toBeNull();
-    expect(await validateSettingsToolInvocationForAgentPolicy({})).toBeNull();
-    expect(await validateSettingsToolInvocationForAgentPolicy({ mode: 'set', key: '   ' })).toBeNull();
+describe('writes no permission can authorize', () => {
+  const ownRef = 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN';
+
+  test('the settings tool refuses a payments write, set or reset, and never reaches the underlying tool', async () => {
+    const { tool, calls } = guardedSettingsTool();
+    for (const mode of ['set', 'reset']) {
+      const result = await tool.execute({ mode, key: 'payments.majorRetailersAdditional', value: 'evil-shop.com', confirm: true });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('only the owner changes them');
+      expect(result.error).toContain('Nothing was changed');
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test('the mechanics check refuses every payments key and leaves other keys alone', () => {
+    for (const key of ['payments.budget.dailyItem', 'payments.windows.vetoMinutes', 'payments.defaultCardId', 'payments.shippingAddress.line1']) {
+      expect(validateAgentSettingsMechanics({ mode: 'set', key, value: '1' })).toContain('payments.*');
+    }
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'provider.model', value: 'x' })).toBeNull();
+  });
+
+  test('a credential destination is refused, so a stored token cannot be redirected to another host', async () => {
+    const { tool, calls } = guardedSettingsTool();
+    for (const key of ['surfaces.ntfy.baseUrl', 'surfaces.calendar.caldavUrl', 'surfaces.signal.bridgeUrl', 'surfaces.matrix.homeserverUrl']) {
+      const result = await tool.execute({ mode: 'set', key, value: 'https://attacker.example', confirm: true });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('only the owner changes it');
+    }
+    expect(calls).toEqual([]);
+    expect(validateAgentSettingsMechanics({ mode: 'reset', key: 'surfaces.ntfy.baseUrl' })).toBeNull();
+  });
+
+  test('a credential key may point only at its own stored secret', () => {
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value: ownRef })).toBeNull();
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value: '' })).toBeNull();
+    for (const value of [
+      'goodvibes://secrets/goodvibes/ANTHROPIC_API_KEY',
+      'goodvibes://secrets/other/GOODVIBES_SURFACES_NTFY_TOKEN',
+      'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN/extra',
+    ]) {
+      const denial = validateAgentSettingsMechanics({ mode: 'set', key: 'surfaces.ntfy.token', value });
+      expect(denial).toContain(ownRef);
+      expect(denial).toContain('Nothing was changed');
+    }
+  });
+
+  test('the mail password references keep pointing at the daemon mailbox password', () => {
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'email.passwordRef', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_EMAIL_PASSWORD' })).toBeNull();
+    expect(validateAgentSettingsMechanics({ mode: 'set', key: 'email.passwordRef', value: 'goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_NTFY_TOKEN' })).toContain('may only point at its own stored secret');
   });
 });

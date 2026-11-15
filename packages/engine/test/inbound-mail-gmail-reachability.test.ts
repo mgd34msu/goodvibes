@@ -47,7 +47,7 @@
  * credential and the delivered message is the shipped code.
  */
 
-import { afterEach, expect, test, describe } from 'bun:test';
+import { afterEach, expect, setSystemTime, test, describe } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -85,6 +85,7 @@ const GMAIL_METADATA = 'https://www.googleapis.com/auth/gmail.metadata';
 const tmpRoots: string[] = [];
 const sweepers: { stopSweeping(): void }[] = [];
 afterEach(() => {
+  setSystemTime();
   for (const registry of sweepers.splice(0)) registry.stopSweeping();
   for (const root of tmpRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -126,6 +127,7 @@ function googleFetch(options: {
   readonly log: FetchLog;
   readonly historyIdOnProfile?: string;
   readonly profileStatus?: number;
+  readonly profileMessage?: string;
   readonly historyRecords?: unknown[];
 }): { fetch: (url: string, init: RequestInit) => Promise<Response> } {
   const scope = options.scope;
@@ -140,7 +142,7 @@ function googleFetch(options: {
       }
       if (url.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/profile')) {
         if (options.profileStatus !== undefined && options.profileStatus !== 200) {
-          return json({ error: { message: 'Request had insufficient authentication scopes.' } }, options.profileStatus);
+          return json({ error: { message: options.profileMessage ?? 'Request had insufficient authentication scopes.' } }, options.profileStatus);
         }
         return json({
           emailAddress: WATCHED_ADDRESS,
@@ -211,6 +213,7 @@ function composeOrNull(input: {
   readonly scope?: string;
   readonly home?: string;
   readonly profileStatus?: number;
+  readonly profileMessage?: string;
   readonly historyRecords?: unknown[];
   /** Empties the encrypted store, which is what an unconnected machine looks like. */
   readonly noStoredCredential?: boolean;
@@ -301,6 +304,7 @@ function composeOrNull(input: {
         scope,
         log,
         ...(input.profileStatus === undefined ? {} : { profileStatus: input.profileStatus }),
+        ...(input.profileMessage === undefined ? {} : { profileMessage: input.profileMessage }),
         ...(input.historyRecords === undefined ? {} : { historyRecords: input.historyRecords }),
       }),
     }),
@@ -436,6 +440,21 @@ describe('the Gmail inbound path is reachable from the daemon composition', () =
     await rig.supervisor.stop();
   });
 
+  test('the supervisor hears the Gmail source, so a refusal is its own and recovery can reach status', async () => {
+    const rig = compose({ scope: GMAIL_METADATA });
+    // The first pass only establishes the position; the second reads a delta
+    // and meets the refusal.
+    await rig.supervisor.start();
+    const status = await rig.supervisor.start();
+
+    expect(status.running).toBe(false);
+    // Routed through the supervisor's observer, not around it: the terminal
+    // failure is the supervisor's record too, which is what lets a later
+    // healthy verdict from the same held source turn status back to running.
+    expect(rig.supervisor.terminalFailure?.reason).toBe('gmail-metadata-only');
+    await rig.supervisor.stop();
+  });
+
   /**
    * BOTH settings, and both because one of them alone proves nothing.
    *
@@ -495,23 +514,49 @@ describe('the Gmail inbound path is reachable from the daemon composition', () =
     await rig.supervisor.stop();
   });
 
-  test('a qualified Google permission refusal is reported instead of a quiet IMAP fallback', async () => {
+  /**
+   * A judgment port that reads the error text it is shown, so the verdict follows
+   * the wording and a fixed answer cannot stand in for the classification.
+   */
+  async function startUnderPermissionReading(profileMessage: string): Promise<{
+    status: Awaited<ReturnType<InboundMailSupervisor['start']>>;
+    requests: ReadonlyArray<{ readonly state: unknown }>;
+  }> {
     const prior = installJudgmentPort(undefined);
-    const failure = fakePort(name => noulAnswer(name === 'missingScopes' ? .99 : .01));
+    const failure = fakePort((name, _question, state) => {
+      const message = (state as { error?: { message?: string } }).error?.message ?? '';
+      return noulAnswer(name === 'missingScopes' && message.includes('insufficient authentication scopes') ? .99 : .01);
+    });
     installJudgmentPort({ ...failure.port, ask(request) {
       if (request.context?.battery === 'google.api-failure') return failure.port.ask(request);
       return prior ? prior.ask(request) : Promise.reject(new Error('No judgment fixture for this request'));
     } });
-    const rig = compose({ profileStatus: 403 });
+    let supervisor: InboundMailSupervisor | undefined;
     try {
+      const rig = compose({ profileStatus: 403, profileMessage });
+      supervisor = rig.supervisor;
       const status = await rig.supervisor.start();
-      expect(status.mode).toBe('inactive');
-      expect(status.reason).toContain('credential lacks the required OAuth permissions');
-      expect(failure.requests).toHaveLength(1);
-      expect(failure.requests[0]!.state).toEqual({ error: { message: 'Request had insufficient authentication scopes.' } });
-      // No IMAP connection is configured; keep the actual Google cause.
-      expect(status.reason).not.toContain('surfaces.email.imap.host');
-    } finally { await rig.supervisor.stop(); installJudgmentPort(prior); }
+      return { status, requests: failure.requests };
+    } finally {
+      await supervisor?.stop();
+      installJudgmentPort(prior);
+    }
+  }
+
+  test('a qualified Google permission refusal is reported instead of a quiet IMAP fallback', async () => {
+    const { status, requests } = await startUnderPermissionReading('Request had insufficient authentication scopes.');
+    expect(status.mode).toBe('inactive');
+    expect(status.reason).toContain('credential lacks the required OAuth permissions');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.state).toEqual({ error: { message: 'Request had insufficient authentication scopes.' } });
+    // No IMAP connection is configured; keep the actual Google cause.
+    expect(status.reason).not.toContain('surfaces.email.imap.host');
+  });
+
+  test('a 403 whose wording is not a scope refusal is not reported as missing permissions', async () => {
+    const { status } = await startUnderPermissionReading('Rate limit exceeded for this project.');
+    expect(status.mode).toBe('inactive');
+    expect(status.reason).not.toContain('credential lacks the required OAuth permissions');
   });
 });
 
@@ -572,14 +617,14 @@ describe('the running Gmail source probes for expectations without reaping them'
           serviceDomain: 'service.test',
           recipientAddress: WATCHED_ADDRESS,
           purpose: 'signup verification',
-          // The book's own minimum, so the window genuinely elapses in real
-          // time, this registry runs on the real clock.
+          // The book's own minimum; this registry runs on the system clock.
           windowMs: MIN_VERIFICATION_WINDOW_MS,
         });
         // The predicate sees it: the source is on the fast cadence.
         expect(internals.source.latency.worstCaseMs).toBe(5_000);
 
-        await new Promise((resolve) => { setTimeout(resolve, 1_400); });
+        // The window elapses on the registry's clock, which is moved rather than waited for.
+        setSystemTime(new Date(Date.now() + 1_400));
 
         // Six probes, the half-minute of five-second polls that used to sit
         // between an expiry and the sweep that was supposed to report it. Each
@@ -605,7 +650,6 @@ describe('the running Gmail source probes for expectations without reaping them'
         delete patched['warn'];
       }
     },
-    20_000,
   );
 });
 

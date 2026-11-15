@@ -67,7 +67,7 @@ export function telegramBotCommandReply(
 
   if (command === 'stop') {
     return [
-      'Stopping.',
+      'Nothing was stopped: /stop does not cancel running work.',
       '',
       'To stop a task that is already running, send "cancel <id>", the id comes back when the task starts.',
       'To stop me reaching this chat entirely, disable the Telegram surface in your GoodVibes settings (surfaces.telegram.enabled=false); I cannot remove my own access from here.',

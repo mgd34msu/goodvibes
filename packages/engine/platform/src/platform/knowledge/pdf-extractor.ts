@@ -74,6 +74,18 @@ async function uniqueStrings(values: Iterable<string>, limit: number, owner: Kno
   return result;
 }
 
+/**
+ * An untrusted PDF can carry any number of hex strings; each distinct one is a
+ * model judgment. Judge a bounded number of distinct strings, and bound how
+ * many raw candidates reach the readability pass.
+ */
+const MAX_RAW_PDF_HEX_STRINGS = 256;
+const MAX_RAW_PDF_TEXT_CANDIDATES = 2048;
+
+interface RawPdfHexBudget {
+  readonly seen: Set<string>;
+}
+
 interface PdfJsExtractionAttempt {
   readonly result?: KnowledgeExtractionResult | undefined;
   readonly warning?: string | undefined;
@@ -173,6 +185,7 @@ function unknownRecord(value: unknown): Record<string, unknown> {
 async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly string[], owner: KnowledgeExtractionOwner): Promise<KnowledgeExtractionResult | undefined> {
   const body = buffer.toString('latin1');
   const texts: string[] = [];
+  const hexBudget: RawPdfHexBudget = { seen: new Set() };
   const diagnostics: RawPdfExtractionDiagnostics = { failedFlateDecodeStreams: 0 };
   const streamRe = /(<<[\s\S]{0,4096}?>>)\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let match: RegExpExecArray | null;
@@ -180,8 +193,10 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
     const dictionary = match[1]! ?? '';
     const rawChunk = match[2]! ?? '';
     const chunk = decodePdfStreamChunk(dictionary, rawChunk, diagnostics);
-    texts.push(...await extractPdfTextStrings(chunk, owner));
+    texts.push(...await extractPdfTextStrings(chunk, owner, hexBudget));
+    if (texts.length >= MAX_RAW_PDF_TEXT_CANDIDATES) break;
   }
+  texts.length = Math.min(texts.length, MAX_RAW_PDF_TEXT_CANDIDATES);
   assertJudgmentInput(texts);
   const readable = await uniqueStrings(texts, 512, owner);
   const combined = readable.slice(0, 64).join('\n');
@@ -233,10 +248,10 @@ function decodePdfStreamChunk(
   }
 }
 
-async function extractPdfTextStrings(chunk: string, owner: KnowledgeExtractionOwner): Promise<string[]> {
+async function extractPdfTextStrings(chunk: string, owner: KnowledgeExtractionOwner, hexBudget: RawPdfHexBudget): Promise<string[]> {
   return [
     ...extractLiteralStrings(chunk),
-    ...await extractHexStrings(chunk, owner),
+    ...await extractHexStrings(chunk, owner, hexBudget),
   ];
 }
 
@@ -317,11 +332,15 @@ function decodePdfEscape(char: string, following: string): { readonly value: str
   }
 }
 
-async function extractHexStrings(chunk: string, owner: KnowledgeExtractionOwner): Promise<string[]> {
+async function extractHexStrings(chunk: string, owner: KnowledgeExtractionOwner, hexBudget: RawPdfHexBudget): Promise<string[]> {
   const values: string[] = [];
   const hexRe = /(?<!<)<([0-9A-Fa-f\s]*)>(?!>)/g;
   let match: RegExpExecArray | null;
   while ((match = hexRe.exec(chunk)) !== null) {
+    const key = (match[1] ?? '').replace(/\s+/g, '').toLowerCase();
+    if (hexBudget.seen.has(key)) continue;
+    if (hexBudget.seen.size >= MAX_RAW_PDF_HEX_STRINGS) break;
+    hexBudget.seen.add(key);
     const text = await decodeHexPdfString(match[1] ?? '', owner);
     if (text) values.push(text);
   }

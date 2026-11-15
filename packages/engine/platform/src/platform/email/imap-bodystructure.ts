@@ -346,10 +346,28 @@ function decodeQuotedPrintable(raw: string): Buffer {
   return Buffer.from(bytes);
 }
 
-/** Charsets we can turn back into text without pulling in an encoding table. */
+/**
+ * A decoder for a charset beyond the built-in ones, when this runtime has a
+ * table for it (shift_jis, gbk, euc-kr, big5, ...), else null. Anything the
+ * runtime lists as `replacement` is refused: it decodes to a placeholder, not
+ * to the text that was sent.
+ */
+export function legacyCharsetDecoder(charset: string, fatal = false): TextDecoder | null {
+  if (!/^[a-z0-9][a-z0-9_.:-]{0,31}$/i.test(charset)) return null;
+  try {
+    const decoder = new TextDecoder(charset, { fatal, ignoreBOM: true });
+    return decoder.encoding === 'replacement' ? null : decoder;
+  } catch { return null; }
+}
+
+/** Charsets we can turn back into text, falling back to UTF-8 only for an unstated charset. */
 function decodeCharset(buffer: Buffer, charset: string): string {
   if (/^(iso-?8859-1|latin-?1|windows-1252|cp1252)$/.test(charset)) {
     return buffer.toString('latin1');
+  }
+  if (charset && !/^(utf-?8|us-ascii|ascii)$/.test(charset)) {
+    const decoder = legacyCharsetDecoder(charset);
+    if (decoder) return decoder.decode(buffer);
   }
   return buffer.toString('utf8');
 }

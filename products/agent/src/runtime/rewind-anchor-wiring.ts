@@ -26,7 +26,12 @@ import type { SessionSurface } from '@/runtime/index.ts';
 export interface RewindAnchorConversationView {
   getLastUserMessage(): string | null | undefined;
   getMessageCount(): number;
+  /** When present, said once per session if a rewind point could not be saved. */
+  addSystemMessage?(message: string): void;
 }
+
+/** Sessions already told that a rewind point could not be saved, so one failure streak says it once. */
+const sessionsToldOfAnchorFailure = new Set<string>();
 
 /**
  * Record a completed turn's anchor and mirror it to the session's sidecar.
@@ -47,9 +52,30 @@ export function recordCompletedTurnAnchor(input: {
       messageCount: input.conversation.getMessageCount(),
       at: Date.now(),
     });
-    persistTurnAnchors(input.sessionId, input.surface);
+    // persistTurnAnchors logs its own cause; false means the sidecar was not written.
+    if (!persistTurnAnchors(input.sessionId, input.surface)) {
+      tellOnceThatAnchorWasNotSaved(input, 'the session sidecar could not be written', '/rewind will not offer this turn after the session is resumed');
+    }
   } catch (error) {
-    logger.debug('rewind turn-anchor recording failed', { error: summarizeError(error) });
+    logger.warn('rewind turn-anchor recording failed', { sessionId: input.sessionId, error: summarizeError(error) });
+    tellOnceThatAnchorWasNotSaved(input, summarizeError(error), '/rewind will not offer this turn');
+  }
+}
+
+function tellOnceThatAnchorWasNotSaved(
+  input: { readonly sessionId: string; readonly conversation: RewindAnchorConversationView },
+  cause: string,
+  consequence: string,
+): void {
+  if (sessionsToldOfAnchorFailure.has(input.sessionId)) return;
+  sessionsToldOfAnchorFailure.add(input.sessionId);
+  try {
+    input.conversation.addSystemMessage?.(
+      `A rewind point for this turn could not be saved (${cause}). `
+      + `${consequence}; later turns are still recorded.`,
+    );
+  } catch {
+    // The notice is a courtesy; the warning already carries the cause.
   }
 }
 

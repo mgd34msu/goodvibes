@@ -33,6 +33,7 @@ import { assignChannelToProfile } from '../../agent/channel-profile-routing.ts';
 import { harnessCatalogInvocationAuthority } from '../../tools/agent-harness-catalog-ingress.ts';
 import { connectedHostOperatorTokenPath } from '../../runtime/connected-host-auth.ts';
 import { EXPLICIT_USER_REQUEST_HEADER } from '../../agent/daemon-operator-client.ts';
+import { expectHeld, expectNotSucceeded } from '../helpers/expect-held.ts';
 
 const fetchOwner: { fetch: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch> } = globalThis;
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
@@ -118,8 +119,8 @@ test('recorded admission launches, stops, and sends without JSON confirmation', 
 
 test.each(['plan', 'custom'] as const)('recorded synthetic read does not bypass %s mutation floors', async mode => {
   const process = processScene(), send = sendScene(); const deny = mode === 'custom' ? { write: 'deny' as const } : {};
-  expect((await recordedEffectFixture(createAgentTerminalTool(process.context), mode, deny, process.root).run(terminalArgs).catch(() => ({ success: false }))).success).toBe(false);
-  expect((await recordedEffectFixture(createAgentProcessTool(process.context), mode, deny, process.root).run({ action: 'write', processId: 'fixture-process', data: 'fixture' }).catch(() => ({ success: false }))).success).toBe(false);
+  await expectNotSucceeded(recordedEffectFixture(createAgentTerminalTool(process.context), mode, deny, process.root).run(terminalArgs));
+  await expectNotSucceeded(recordedEffectFixture(createAgentProcessTool(process.context), mode, deny, process.root).run({ action: 'write', processId: 'fixture-process', data: 'fixture' }));
   const result = await recordedEffectFixture(createAgentChannelSendTool(send.router), mode, deny).run({ ...sendArgs, confirm: true, explicitUserRequest: 'Caller assertion' });
   expect(result.success).toBe(false); expect(process.launches()).toBe(0); expect(process.writes()).toBe(0); expect(send.requests).toHaveLength(0);
 });
@@ -133,7 +134,7 @@ test('stdin final owner boundary rejects cancellation, revocation, and process r
       else if (change === 'revoke') fixture.setMode('plan');
       else process.replaceEntry();
     });
-    await expect(fixture.run({ action: 'write', processId: 'fixture-process', data: 'fixture' }, controller.signal)).rejects.toThrow();
+    await expectHeld(fixture.run({ action: 'write', processId: 'fixture-process', data: 'fixture' }, controller.signal));
     expect(process.writes()).toBe(0);
   }
 });
@@ -141,7 +142,7 @@ test('stdin final owner boundary rejects cancellation, revocation, and process r
 test('launch physical cwd rejects a symlink escape', async () => {
   const process = processScene(); const outside = mkdtempSync(join(tmpdir(), 'agent-process-outside-')); roots.push(outside);
   symlinkSync(outside, join(process.root, 'escape'));
-  await expect(recordedEffectFixture(createAgentTerminalTool(process.context), 'prompt', {}, process.root).run({ ...terminalArgs, cwd: 'escape' })).rejects.toThrow();
+  await expectHeld(recordedEffectFixture(createAgentTerminalTool(process.context), 'prompt', {}, process.root).run({ ...terminalArgs, cwd: 'escape' }));
   expect(process.launches()).toBe(0);
 });
 
@@ -154,7 +155,7 @@ test('launch final owner boundary sees cancellation, revocation, and cwd replace
       else if (change === 'revoke') fixture.setMode('plan');
       else { const replacement = join(process.root, 'changed'); mkdirSync(replacement); process.workspace.shellPaths = createShellPathService({ workingDirectory: replacement, homeDirectory: process.root }); }
     });
-    await expect(fixture.run(terminalArgs, controller.signal)).rejects.toThrow(); expect(process.launches()).toBe(0);
+    await expectHeld(fixture.run(terminalArgs, controller.signal)); expect(process.launches()).toBe(0);
   }
 });
 
@@ -175,7 +176,9 @@ test('preview and process wait stay read-only without confirmation or effect pro
   const send = sendScene(), process = processScene();
   const preview = await createAgentChannelSendTool(send.router).execute({ ...sendArgs, preview: true });
   expect(preview).toMatchObject({ success: true }); expect(preview.output).toContain('delivery preview');
-  expect(await createAgentProcessTool(process.context).execute({ action: 'wait', processId: 'missing' })).toMatchObject({ success: true });
+  // An unknown id is a failed wait (nothing to wait on), but it is answered without a hold: waiting needs no effect proof.
+  const waited = await createAgentProcessTool(process.context).execute({ action: 'wait', processId: 'missing' });
+  expect(waited).toMatchObject({ success: false }); expect(waited.error).toContain('No tracked process matched "missing"');
   expect(process.launches()).toBe(0); expect(send.requests).toHaveLength(0);
 });
 
@@ -199,7 +202,7 @@ function commandScene(mode: 'prompt' | 'plan' = 'prompt', translated = false) {
 
 test('slash dispatch refuses caller flags and preserves exact original facade admission', async () => {
   const raw = commandScene();
-  await expect(raw.tool.execute({ commandName: 'synthetic-effect', confirm: true, explicitUserRequest: 'Caller assertion' })).rejects.toThrow();
+  await expectHeld(raw.tool.execute({ commandName: 'synthetic-effect', confirm: true, explicitUserRequest: 'Caller assertion' }));
   expect(raw.effects()).toBe(0);
   const admitted = commandScene('prompt', true); admitted.withNested();
   expect(await admitted.fixture.run({ actionId: 'synthetic-route' })).toMatchObject({ success: true });
@@ -213,7 +216,7 @@ test('slash dispatch refuses plan effects and changed handler after authority sa
     const command = changed.commands.get('synthetic-effect');
     if (command) command.handler = () => { throw new Error('Changed handler must never run'); };
   }));
-  await expect(changed.fixture.run({ commandName: 'synthetic-effect' })).rejects.toThrow(); expect(changed.effects()).toBe(0);
+  await expectHeld(changed.fixture.run({ commandName: 'synthetic-effect' })); expect(changed.effects()).toBe(0);
 });
 
 function workspaceScene(mode: 'prompt' | 'plan' = 'prompt') {
@@ -240,7 +243,7 @@ test('onboarding refuses read-only mode and physical user-store escape', async (
   expect(existsSync(getOnboardingCompletionMarkerPath(planned.process.workspace.shellPaths))).toBe(false);
   const escaped = workspaceScene(); const outside = mkdtempSync(join(tmpdir(), 'agent-onboarding-outside-')); roots.push(outside);
   symlinkSync(outside, join(escaped.process.root, '.goodvibes'));
-  await expect(escaped.fixture.run({ actionId: 'onboarding-apply-close' })).rejects.toThrow();
+  await expectHeld(escaped.fixture.run({ actionId: 'onboarding-apply-close' }));
   expect(existsSync(join(outside, 'agent', 'onboarding-complete.json'))).toBe(false);
 });
 
@@ -269,6 +272,26 @@ test('learned-behavior creation does not require a human editor confirmation fie
       { id: 'learned-behavior', kind: 'editor', editorKind: 'learned-behavior', label: 'Fixture', detail: 'Fixture', safety: 'safe' }, editor, args, options); } };
   const fixture = recordedEffectFixture(tool, 'prompt', {}, process.root);
   expect(await fixture.run({})).toMatchObject({ success: true }); expect(existsSync(skillStorePath(process.workspace.shellPaths))).toBe(true);
+});
+
+test('a learned behavior created with a blank Enable now field is enabled', async () => {
+  const process = processScene();
+  const editor: AgentWorkspaceLocalEditor = { kind: 'learned-behavior', mode: 'create', title: 'Fixture', selectedFieldIndex: 0, message: '', fields: [
+    { id: 'target', label: 'Target', value: 'skill', required: true, multiline: false, hint: '' },
+    { id: 'name', label: 'Name', value: 'Fixture skill', required: true, multiline: false, hint: '' },
+    { id: 'description', label: 'Description', value: 'Fixture skill description', required: true, multiline: false, hint: '' },
+    { id: 'notes', label: 'Notes', value: 'Fixture procedure', required: true, multiline: false, hint: '' },
+    { id: 'enable', label: 'Enable now', value: '', required: false, multiline: false, hint: 'Blank means yes.' },
+  ] };
+  const tool: Tool = { definition: { name: 'workspace-editor-enable-fixture', description: 'Isolated learned behavior creation.', parameters: {} },
+    execute(args, options) { return runWorkspaceEditorAction({ commandRegistry: new CommandRegistry(), commandContext: process.context, toolRegistry: fixture.registry },
+      { id: 'learned-behavior', kind: 'editor', editorKind: 'learned-behavior', label: 'Fixture', detail: 'Fixture', safety: 'safe' }, editor, args, options); } };
+  const fixture = recordedEffectFixture(tool, 'prompt', {}, process.root);
+  expect(await fixture.run({})).toMatchObject({ success: true });
+  const stored = JSON.parse(readFileSync(skillStorePath(process.workspace.shellPaths), 'utf8')) as { skills?: { enabled?: boolean }[] } | { enabled?: boolean }[];
+  const skills = Array.isArray(stored) ? stored : stored.skills ?? [];
+  expect(skills).toHaveLength(1);
+  expect(skills[0]?.enabled).toBe(true);
 });
 
 test.each(['absent', 'provided'] as const)('workspace model child preserves %s audit provenance without inventing confirmation', async provenance => {
@@ -324,7 +347,7 @@ test('draft and routing writes use original admission and cannot be forged with 
   expect(route.success).toBe(true);
   expect(listChannelProfileRoutes(process.workspace.shellPaths).routes).toHaveLength(1);
   const remove: Tool = { definition: { name: 'route-remove-fixture', description: 'Isolated route removal.', parameters: {} },
-    async execute(args, options) { const result = channelRoutingRemoveHandoff(process.context, args, options); return { success: typeof result !== 'string', output: JSON.stringify(result) }; } };
+    async execute(args, options) { const result = await channelRoutingRemoveHandoff(process.context, args, options); return { success: typeof result !== 'string', output: JSON.stringify(result) }; } };
   expect(await recordedEffectFixture(remove, 'prompt', {}, process.root).run({ draftRoute: JSON.parse(route.output!).route.id })).toMatchObject({ success: true });
   expect(listChannelProfileRoutes(process.workspace.shellPaths).routes).toHaveLength(0);
   expect(await recordedEffectFixture(save, 'plan', {}, process.root).run(args)).toMatchObject({ success: false, error: 'plan_mode' });
@@ -421,7 +444,7 @@ test('generated routing references remain removable when the creation timestamp 
     const route = await assignChannelToProfile(process.workspace.shellPaths, { surfaceKind: 'slack', profileId: 'fixture-profile' });
     const tool: Tool = { definition: { name: 'generated-route-remove-fixture', description: 'Isolated routing reference removal.', parameters: {} },
       async execute(args, options) {
-        const result = channelRoutingRemoveHandoff(process.context, args, options);
+        const result = await channelRoutingRemoveHandoff(process.context, args, options);
         return { success: typeof result !== 'string', output: JSON.stringify(result) };
       } };
     expect(await recordedEffectFixture(tool, 'prompt', {}, process.root).run({ draftRoute: route.route.id })).toMatchObject({ success: true });

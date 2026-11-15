@@ -16,7 +16,7 @@ import type { SystemMessageRouter } from '../../core/system-message-router.ts';
 import type { RuntimeServices } from '../../runtime/services.ts';
 import type { UiRuntimeServices } from '../../runtime/ui-services.ts';
 
-// ── Layer 1: the pure decision engine ──────────────────────────────────────
+// ── Fixtures ───────────────────────────────────────────────────────────────
 
 function snapshotOf(overrides: Partial<DaemonServiceSnapshot> = {}): DaemonServiceSnapshot {
   return {
@@ -61,8 +61,6 @@ function scriptedProbe(sequence: readonly ('online' | 'offline')[]): () => Promi
 }
 
 const NO_SLEEP = async (): Promise<void> => {};
-
-// ── Layer 3: the bootstrap wiring ───────────────────────────────────────────
 
 function statusOf(mode: HostServiceStatus['mode'], reason?: string): HostServiceStatus {
   return {
@@ -167,6 +165,23 @@ describe('wireAgentExternalServices (boot wiring)', () => {
     expect(fixture.router.lows).toHaveLength(1);
     expect(fixture.router.lows[0]).toContain('Connected host was installed but stopped; started it');
     expect(fixture.router.highs).toEqual([]);
+  });
+
+  test('probe-fail + start accepted but the daemon never answers: no adoption, and the guidance names the timeout', async () => {
+    const control = spyControl({ snapshots: [snapshotOf()] });
+    const fixture = wireFixture({
+      discoverySequence: [statusOf('unavailable')],
+      control,
+      probeSequence: ['offline'],
+    });
+    await fixture.controller.whenDiscovered();
+    expect(control.startCalls).toEqual(['goodvibes-daemon']);
+    // No re-probe adoption, and no "started it" receipt for a daemon that never came up.
+    expect(fixture.discoveryCalls()).toBe(1);
+    expect(fixture.controller.getStatus().daemonStatus.mode).toBe('unavailable');
+    expect(fixture.router.lows).toEqual([]);
+    expect(fixture.router.highs).toHaveLength(1);
+    expect(fixture.router.highs[0]).toContain('the daemon did not answer within 400ms');
   });
 
   test('probe-fail + not installed: guidance path unchanged (no start, no re-probe, no receipt)', async () => {

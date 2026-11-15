@@ -489,6 +489,58 @@ describe('historyListDelta: pagination', () => {
     expect(historyCalls.length).toBe(2);
     expect(historyCalls[1]!.url).toContain('pageToken=page-2-token');
   });
+
+  test('a message id repeated across history records and pages is fetched and returned once', async () => {
+    const page1 = historyPage({
+      historyId: '160',
+      addedMessageIds: [
+        { id: 'msg-a', threadId: 't-a' },
+        { id: 'msg-a', threadId: 't-a' },
+      ],
+      nextPageToken: 'page-2-token',
+    });
+    const page2 = historyPage({ historyId: '162', addedMessageIds: [{ id: 'msg-a', threadId: 't-a' }] });
+    const msgA = gmailMessagePayload({
+      id: 'msg-a',
+      threadId: 't-a',
+      to: 'owner@example.com',
+      deliveredTo: ['owner@example.com'],
+      from: 'a@example.com',
+      subject: 'A',
+      bodyText: 'body a',
+    });
+    const { port, calls } = fakeFetchPort({
+      history: [jsonResponse(200, page1), jsonResponse(200, page2)],
+      messages: { 'msg-a': jsonResponse(200, msgA) },
+    });
+    const client = new GoogleApiClient(tokenManagerWithScopes(['https://www.googleapis.com/auth/gmail.modify']), port);
+
+    const result = await client.historyListDelta({ startHistoryId: '100' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.value.messages.map((m) => m.id)).toEqual(['msg-a']);
+    expect(calls.filter((c) => c.url.includes('/messages/msg-a'))).toHaveLength(1);
+  });
+
+  test('a failure on a later page fails the whole sweep: no partial delta and no new high-water mark', async () => {
+    const page1 = historyPage({
+      historyId: '160',
+      addedMessageIds: [{ id: 'msg-a', threadId: 't-a' }],
+      nextPageToken: 'page-2-token',
+    });
+    const { port } = fakeFetchPort({
+      history: [jsonResponse(200, page1), jsonResponse(500, { error: { message: 'Internal error' } })],
+    });
+    const client = new GoogleApiClient(tokenManagerWithScopes(['https://www.googleapis.com/auth/gmail.modify']), port);
+
+    const result = await client.historyListDelta({ startHistoryId: '100' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable: asserted false above');
+    expect('value' in result).toBe(false);
+    expect(result.status).toBe(500);
+  });
 });
 
 // ---------------------------------------------------------------------------

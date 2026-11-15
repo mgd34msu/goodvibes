@@ -17,25 +17,26 @@
  * subpath, whose barrel also carries the gateway/session-broker/route-dispatch server
  * implementation (dispatchDaemonApiRoutes, SharedSessionBroker, ControlPlaneGateway, …),
  * not something this browser bundle should import. No browser-safe subpath exposes it at
- * the installed 2.0.0 pin (re-verified at this pin: `./platform/control-plane` is still
+ * the installed platform (re-verified at this pin: `./platform/control-plane` is still
  * the only export surfacing it, and its barrel still carries the full server
  * implementation). This module is a small, independently-tested copy of the same three
  * functions' documented semantics, kept here until a future platform release exposes them
  * through a seam this app can import directly (a `// SWAP:` seam, same pattern
  * contract-bridge-types.ts uses for a bridge type ahead of its generated counterpart).
- * Re-diffed field-by-field against the 2.0.0 platform's
- * dist/platform/control-plane/client-compatibility.js at this re-pin: compareBuildVersions
+ * Re-diffed field-by-field against the platform's
+ * platform/control-plane/client-compatibility.ts at this re-pin: compareBuildVersions
  * and evaluateClientCompatibility are byte-identical in logic (the browser copy's
  * messages say "reload the page" / "Reload from the current install" where the platform's
  * process-oriented copy says "restart it", a deliberate, permanent surface-appropriate
  * wording divergence, not drift to fix).
  *
- * ALSO NOTE: at the installed 2.0.0 pin the daemon's own HTTP router still never actually
- * writes this header onto a response, it only threads the constant name partway into an
- * internal context object with no consumer that calls it. So this module has nothing real
- * to read against a live 2.0.0 daemon today; it is exercised here by unit test with a
- * fabricated header, ready for the header the day a daemon actually sends it.
+ * ALSO NOTE: the daemon writes this header on its authenticated `/status` response (the
+ * control routes in daemon-api), so a signed-in client observes the floor from the status
+ * reads the app already makes. Other responses do not carry it, and a daemon older than
+ * that change sends none, which leaves the verdict unset rather than "ok".
  */
+
+import { subscribeClientLifetime } from './client-lifetime';
 
 /** Response header carrying the daemon's minimum acceptable client build. */
 export const CLIENT_COMPATIBILITY_FLOOR_HEADER = 'X-Goodvibes-Client-Floor';
@@ -132,8 +133,8 @@ export function readClientCompatibilityFloor(headers: { get(name: string): strin
 // ---------------------------------------------------------------------------
 //
 // goodvibes.ts's requestJson/requestStream is the one HTTP helper every operator
-// call passes through; it records whatever floor (or absence of one) the MOST
-// RECENT response carried here, so any part of the app can read the daemon's
+// call passes through; it records the floor the most recent response that
+// carried one announced here, so any part of the app can read the daemon's
 // current stance without threading a value through every call site, the same
 // external-store shape lib/relay-connection.ts's active-route tracking already
 // uses (subscribe/get, driven with React's useSyncExternalStore).
@@ -141,12 +142,25 @@ export function readClientCompatibilityFloor(headers: { get(name: string): strin
 let observedFloor: string | undefined;
 const listeners = new Set<(floor: string | undefined) => void>();
 
-/** Record the floor the most recent daemon response carried (or none). */
+/**
+ * Record a floor a daemon response carried. The daemon announces it only on some
+ * responses (the authenticated status one), so a response without the header says
+ * nothing and must not clear a floor already seen; the store resets when the client
+ * lifetime changes (another account, another relay), which is when a remembered floor
+ * could belong to a different daemon.
+ */
 export function recordObservedClientCompatibilityFloor(floor: string | undefined): void {
+  if (floor === undefined || floor === observedFloor) return;
+  setObservedFloor(floor);
+}
+
+function setObservedFloor(floor: string | undefined): void {
   if (floor === observedFloor) return;
   observedFloor = floor;
   for (const listener of listeners) listener(floor);
 }
+
+subscribeClientLifetime(() => setObservedFloor(undefined));
 
 /** The floor the most recent daemon response carried, or undefined if none has. */
 export function getObservedClientCompatibilityFloor(): string | undefined {

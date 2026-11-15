@@ -345,6 +345,8 @@ export interface ContractUnitAdaptOptions {
   readonly memberNodes: readonly ProcessNode[];
   /** True when the registry has a message bus to deliver a steer. */
   readonly messageBusPresent: boolean;
+  /** Set when the unit's work item failed to merge: the first conflicting file, or the unit title when none was recorded. */
+  readonly mergeConflict?: { readonly detail: string } | undefined;
   readonly now: number;
 }
 
@@ -358,7 +360,15 @@ export function adaptContractUnit(unit: ContractUnitView, contract: ContractView
   const state = unitState(unit, activeAgent);
   const terminal = TERMINAL_STATES.has(state);
   const { startedAt, completedAt } = memberTimes(opts.memberNodes, terminal);
-  const attention = openEscalationFor(contract, ['unit'], unit.attemptOf ?? unit.id);
+  const escalation = openEscalationFor(contract, ['unit'], unit.attemptOf ?? unit.id);
+  // An attempt's pick is one decision over the siblings: the flag rides the plan unit only.
+  const pick = unit.attemptOf === undefined ? escalation : undefined;
+  // A merge conflict belongs to this unit's own item, so an attempt carries it too. A pending owner decision
+  // comes first: the conflict stays reachable from the conflicts list until that is answered.
+  const conflict: ProcessAttention | undefined = opts.mergeConflict !== undefined
+    ? { reason: 'conflict', detail: opts.mergeConflict.detail }
+    : undefined;
+  const attention = pick ?? conflict;
   const check = deriveCheckSummary(unit, unit.nudges.length);
   const planUnit = unit.attemptOf !== undefined ? contract.units.find((candidate) => candidate.id === unit.attemptOf) : undefined;
   const attempts = planUnit?.attemptUnits ?? [];
@@ -386,8 +396,7 @@ export function adaptContractUnit(unit: ContractUnitView, contract: ContractView
       resumable: false,
       steerable: activeAgent !== undefined && opts.messageBusPresent,
     },
-    // An attempt's pick is one decision over the siblings: the flag rides the plan unit only.
-    ...(attention && unit.attemptOf === undefined ? { needsAttention: attention } : {}),
+    ...(attention ? { needsAttention: attention } : {}),
     sessionRef: { sessionId: contract.sessionId, ...(activeAgent !== undefined ? { agentId: activeAgent.id } : {}) },
     ...(check ? { check } : {}),
     ...(planUnit !== undefined
@@ -398,7 +407,7 @@ export function adaptContractUnit(unit: ContractUnitView, contract: ContractView
             total: attempts.length,
             held: unit.status === 'held-merge',
             // The attention above is read against the plan unit, so it is the group's pick.
-            ready: attention?.reason === 'pick',
+            ready: escalation?.reason === 'pick',
           },
         }
       : {}),

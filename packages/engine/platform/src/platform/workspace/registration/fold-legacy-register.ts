@@ -90,6 +90,20 @@ function mergeKeyed<T extends { readonly root: string }>(
 }
 
 /**
+ * Legacy roots with no trace in a migrated (version 2) register as a registration or a decline. A root that
+ * was removed since (a tombstone) is not accounted for: the legacy copy might be a later re-registration,
+ * so it is left for the operator rather than retired.
+ */
+function unaccountedRoots(legacy: PersistedRegistry, destination: PersistedRegistry): string[] {
+  const known = new Set<string>();
+  const collect = (rows: unknown): void => {
+    if (Array.isArray(rows)) for (const row of rows) if (row && typeof (row as { root?: unknown }).root === 'string') known.add((row as { root: string }).root);
+  };
+  collect(destination.workspaces); collect(destination.declines);
+  return [...legacy.workspaces, ...legacy.declines].map((row) => row.root).filter((root) => !known.has(root));
+}
+
+/**
  * Fold `legacyPath` into `sharedPath`. Both may be absent; an absent legacy
  * file is a no-op, and an absent destination is created from the legacy rows.
  * The legacy file is NOT removed here, retiring it is the sweep's job, and it
@@ -113,7 +127,16 @@ export async function foldLegacyWorkspaceRegister(input: {
     // A legacy union has no authority history. Never erase native incarnations,
     // overwrite tombstones, or silently stamp the imported rows as new grants.
     if (rawDestination !== null && rawDestination.version !== 1) {
-      throw new Error('Legacy workspace fold refuses a migrated native scope registry.');
+      // Once any registration wrote the migrated register, the daemon's copy of
+      // the rows is already in it. Retiring the legacy file is safe exactly
+      // when every legacy root is accounted for there; a root that is not is
+      // refused by name so it is never silently dropped.
+      const missing = unaccountedRoots(legacy, rawDestination);
+      if (missing.length > 0) {
+        throw new Error(`Legacy workspace fold refuses a migrated native scope registry that lacks ${missing.length} legacy root(s): ${missing.join(', ')}. Register them with \`goodvibes register\`, then the legacy file is retired on the next start.`);
+      }
+      const rows = (rawDestination.workspaces?.length ?? 0) + (rawDestination.declines?.length ?? 0);
+      return { added: 0, updated: 0, total: rows };
     }
     const destination = readRows(rawDestination);
 

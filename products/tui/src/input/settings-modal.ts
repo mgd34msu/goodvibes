@@ -602,6 +602,9 @@ export class SettingsModal extends TerminalSettingsModalState<
       getSelectedMcp: () => this.getSelectedMcp(),
       getSelected: () => this.getSelected(),
       setValue: (key, value) => this._setValue(key, value),
+      rejectEdit: (message) => {
+        this.lastSettingEffectMessage = message;
+      },
       setEditingMode: (v) => {
         this.editingMode = v;
       },
@@ -653,7 +656,8 @@ export class SettingsModal extends TerminalSettingsModalState<
           .then((ok) => {
             if (session === this.secretWriteSession) {
               if (ok) {
-                this.lastSettingEffectMessage = effectMessage ?? 'Credential saved.';
+                // A cleared credential whose stored value could not be removed still completes; keep that warning.
+                this.lastSettingEffectMessage = secretWriteError ?? effectMessage ?? 'Credential saved.';
                 if (configManager) refreshEntryValues(this.groups, configManager);
               } else this.lastSettingEffectMessage = secretWriteError ?? 'Saving that credential failed.';
               this.requestRender?.();
@@ -705,7 +709,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       selected: this.getSelected(),
       secretsManager: this.secretsManager,
       resetSecrets: this._createSecretResetter(),
-      setValue: (key, value) => this._setValue(key, value),
+      setValue: (key, value) => this._setValue(key, value, true),
       setHostValue: (key, value) => this._setHostValue(key, value),
     });
   }
@@ -744,7 +748,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (this.pendingSecretWrite && (this.resetCategoryConfirm || this.resetAllConfirm) && (key === 'enter' || key === 'y'))
       return 'absorbed';
     if (this.resetCategoryConfirm || this.resetAllConfirm) this._refreshPolicyAvailability();
-    return _handleResetConfirmKey({
+    const outcome = _handleResetConfirmKey({
       key,
       resetCategoryConfirm: this.resetCategoryConfirm,
       resetAllConfirm: this.resetAllConfirm,
@@ -752,7 +756,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       currentItems: () => this._currentItems(),
       groups: this.groups,
       resetSecrets: this._createSecretResetter(),
-      setValue: (k, value) => this._setValue(k, value),
+      setValue: (k, value) => this._setValue(k, value, true),
       setHostValue: (key, value) => this._setHostValue(key, value),
       setResetCategoryConfirm: (v) => {
         this.resetCategoryConfirm = v;
@@ -761,6 +765,12 @@ export class SettingsModal extends TerminalSettingsModalState<
         this.resetAllConfirm = v;
       },
     });
+    if (typeof outcome === 'object' && outcome.failedKeys && outcome.failedKeys.length > 0) {
+      const failed = outcome.failedKeys;
+      const detail = this.lastSettingEffectMessage ? ` Last error: ${this.lastSettingEffectMessage}` : '';
+      this.lastSettingEffectMessage = `Reset ${outcome.entries.length} setting(s); ${failed.length} could not be reset and keep their value: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ', ...' : ''}.${detail}`;
+    }
+    return outcome;
   }
 
   /** Handle a keystroke in edit mode: regular chars appended, Backspace removes last char. */
@@ -800,8 +810,8 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (this.configManager) refreshSettingsPolicyAvailability(this.groups, this.configManager);
   }
 
-  private _setHostValue(key: string, value: boolean): void {
-    if (!this.configManager) return;
+  private _setHostValue(key: string, value: boolean): boolean {
+    if (!this.configManager) return false;
     const result = applyHostSettingValue({
       key,
       value,
@@ -810,11 +820,13 @@ export class SettingsModal extends TerminalSettingsModalState<
       onSettingApplied: this.onSettingApplied,
     });
     this.lastSettingEffectMessage = result.effectMessage;
+    return result.failed !== true;
   }
 
-  private _setValue(key: ConfigKey, value: unknown): void {
-    if (!this.configManager) return;
+  private _setValue(key: ConfigKey, value: unknown, reset = false): boolean {
+    if (!this.configManager) return false;
 
+    const groups = this.groups;
     const callback: SettingAppliedCallback | null = this.onSettingApplied ? (change) => this.onSettingApplied!(change) : null;
 
     const result = applySettingValue({
@@ -827,7 +839,13 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (this.configManager) refreshEntryValues(this.groups, this.configManager);
       },
       daemonConfig: this.daemonConfig,
-      ...(this.reportError ? { onAsyncError: this.reportError } : {}),
+      onAsyncError: (message) => {
+        // A late daemon refusal is about this open modal's rows only.
+        if (this.groups !== groups) return;
+        this.lastSettingEffectMessage = message;
+        this.reportError?.(message);
+      },
+      ...(reset ? { reset: true } : {}),
     });
 
     // Feature-unit headers write plain domain keys; the platform settings bridge
@@ -851,6 +869,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (key === PAYMENTS_CVV_HANDLING_CONFIG_KEY && value === 'prompt') {
       this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
     }
+    return result.failed !== true;
   }
 
   /** Refresh live/persisted/pending state for every feature header bound to `key`. */

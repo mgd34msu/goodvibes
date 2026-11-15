@@ -105,7 +105,8 @@ describe('the Agent uses canonical contract lifecycle consumers', () => {
         '"Name the Agent contract task" could not be finished: fixture failure detail',
         '"Name the Agent contract task" was cancelled: fixture cancellation detail',
       ]);
-      expect(h.store.getState().contracts.contracts.get(events[0]!.contractId!)?.status).toBe('cancelled');
+      // The walk passes, fails and cancels one contract: the first outcome stands.
+      expect(h.store.getState().contracts.contracts.get(events[0]!.contractId!)?.status).toBe('passed');
       expect(h.dispatch).toHaveBeenCalledTimes(events.length);
       expect(h.intervalCount).toBe(1);
       expect(h.renderCount()).toBe(events.length);

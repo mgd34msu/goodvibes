@@ -21,10 +21,12 @@ import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input
 import type { KnowledgeSemanticGapRepairRequest } from '../platform/src/platform/knowledge/semantic/types.js';
 import type { WebSearchResponse, WebSearchResult } from '../platform/src/platform/web-search/types.js';
 import type { KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
 import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
 import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/service.js';
 import { isKnowledgeSourceQualityFailure } from '../platform/src/platform/knowledge/source-quality.js';
+
+useStoreCleanup();
 
 /** Fake only the fetch result; retain the actual original artifact/lock. */
 function stubUrlFetch(route: 'knowledge-service'|'homegraph-service', store: ArtifactStore, artifact: ArtifactDescriptor, fetched?: () => void) {

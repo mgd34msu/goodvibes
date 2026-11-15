@@ -107,7 +107,7 @@ export function emitCompanionTokenRotated(
 
 /** Emit COMPANION_TOKEN_REVOKED when a companion token is revoked. */
 export function emitCompanionTokenRevoked(
-  bus: RuntimeEventBus,
+  bus: Pick<RuntimeEventBus, 'emit'>,
   ctx: EmitterContext,
   data: { clientIp: string; reason?: string },
 ): void {

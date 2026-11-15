@@ -15,6 +15,7 @@ type KnowledgeRefinementRunBody = {
   readonly gapIds?: string[] | undefined;
   readonly sourceIds?: string[] | undefined;
   readonly limit?: number | undefined;
+  readonly maxRunMs?: number | undefined;
   readonly force?: boolean | undefined;
 };
 
@@ -61,6 +62,8 @@ const knowledgeRefinementBodySchemas = createRouteBodySchemaRegistry({
       ...(gapIds ? { gapIds } : {}),
       ...(sourceIds ? { sourceIds } : {}),
       ...(Object.hasOwn(body, 'limit') ? { limit: readBoundedBodyInteger(body.limit, 1, 500) } : {}),
+      // The foreground budget the caller asked for, at least 1 ms and at most an hour; without it the run has no time bound.
+      ...(Object.hasOwn(body, 'maxRunMs') ? { maxRunMs: readBoundedBodyInteger(body.maxRunMs, 60_000, 3_600_000) } : {}),
       ...(typeof body.force === 'boolean' ? { force: body.force } : {}),
     };
   }),
@@ -83,7 +86,15 @@ async function handleKnowledgeCancelRefinementTask(
 ): Promise<Response> {
   const admin = context.requireAdmin(request);
   if (admin) return admin;
-  const task = await context.knowledgeService.cancelRefinementTask(taskId);
+  let task: unknown;
+  try { task = await context.knowledgeService.cancelRefinementTask(taskId); }
+  catch (error) {
+    // Refusing to cancel a decided task is a precondition failure, not a server fault.
+    if (error instanceof Error && (error as { code?: unknown }).code === 'KNOWLEDGE_REFINEMENT_TASK_REFUSED') {
+      return jsonErrorResponse({ error: error.message, code: 'KNOWLEDGE_REFINEMENT_TASK_REFUSED' }, { status: 409 });
+    }
+    throw error;
+  }
   return task
     ? Response.json({ task })
     : jsonErrorResponse({ error: 'Unknown knowledge refinement task' }, { status: 404 });

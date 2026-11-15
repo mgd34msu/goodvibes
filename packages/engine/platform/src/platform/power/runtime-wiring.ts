@@ -10,11 +10,13 @@
  */
 import { platform as osPlatform } from 'node:os';
 import { PowerManager, type PowerSleepEdgeHooks } from './manager.js';
-import { bindPowerWorkSignals, type PowerWorkSignalBus } from './work-signals.js';
+import type { PowerWorkSignalBus } from './work-signals.js';
 import { createLinuxLogindSeam } from './linux-logind.js';
 import { createDarwinCaffeinateSeam } from './darwin-caffeinate.js';
 import { createUnavailablePowerSeam, type PowerPlatformSeam } from './types.js';
 import { emitOpsPowerStateChanged } from '../runtime/emitters/ops.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 
 export interface RuntimePowerWiringInput {
@@ -36,10 +38,13 @@ export interface RuntimePowerWiringInput {
  * spawns the systemd-inhibit inhibitor children and the read-only sleep-edge
  * dbus-monitor watcher), macOS caffeinate (which spawns the caffeinate
  * inhibitor child and the read-only sleep-edge `log stream` watcher), or the
- * honest unavailable seam elsewhere. Spawning a real sleep-edge watcher is a
- * host-level side effect, so only the standalone daemon opts into it, the
- * generic runtime-services factory defaults to the unavailable seam (no spawn)
- * for test determinism, exactly like the observe-external-agents host scan.
+ * honest unavailable seam elsewhere. Spawning a real sleep-edge watcher
+ * is a host-level side effect, so the runtime-services factories pass the
+ * non-spawning unavailable seam unless their caller sets `powerSeam` (test
+ * determinism); the standalone daemon and both terminal products set it. A
+ * surface and a daemon on one host therefore each run a PowerManager over the
+ * same `power.keepAwake` key; the surface forwards its toggle to an adopted
+ * daemon (see keep-awake-remote.ts) so the daemon's hold outlives the surface.
  */
 export function createHostPowerSeam(platform: NodeJS.Platform = osPlatform()): PowerPlatformSeam {
   if (platform === 'linux') return createLinuxLogindSeam();
@@ -55,6 +60,8 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
     readConfig: input.readConfig,
     writeConfig: input.writeConfig,
     subscribeConfig: input.subscribeConfig,
+    // Bound for the manager's life so stop() also stops work events reaching it.
+    ...(input.runtimeBus ? { workSignalBus: input.runtimeBus as unknown as PowerWorkSignalBus } : {}),
     onStateChanged: input.runtimeBus
       ? (state) => {
         emitOpsPowerStateChanged(input.runtimeBus!, { sessionId: 'system', traceId: `power:${Date.now()}`, source: 'power-manager' }, {
@@ -66,9 +73,6 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
       }
       : undefined,
   });
-  if (input.runtimeBus) {
-    bindPowerWorkSignals(input.runtimeBus as unknown as PowerWorkSignalBus, manager);
-  }
   const hooks: PowerSleepEdgeHooks = {
     onSleep: input.sleepCheckpoint,
     onWake: input.wakeCatchUp
@@ -78,6 +82,8 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
       : undefined,
   };
   if (hooks.onSleep || hooks.onWake) manager.onSleepEdge(hooks);
-  void manager.start();
+  manager.start().catch((error: unknown) => {
+    logger.warn('[power] start failed; sleep ownership is not active', { error: summarizeError(error) });
+  });
   return manager;
 }

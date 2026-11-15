@@ -1,4 +1,5 @@
 import type { DaemonGatewayRestRouteHandlers } from './context.js';
+import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURIComponent } from './operator.js';
 
 /**
  * gateway-rest-routes.ts
@@ -71,6 +72,7 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('POST', '/api/inbound/telegram/read', 'inbound.telegram.read'),
   route('POST', '/api/inbound/telegram/cancel', 'inbound.telegram.cancel'),
   route('POST', '/api/inbound/telegram/revoke', 'inbound.telegram.revoke'),
+  route('POST', '/api/inbound/telegram/release', 'inbound.telegram.release'),
   route('GET', '/api/work-ledger/project', 'workLedger.project'),
   route('POST', '/api/work-ledger/submissions', 'workLedger.submit'),
   route('POST', '/api/work-ledger/submissions/get', 'workLedger.submission.get'),
@@ -193,6 +195,8 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   // stepup.*, relay WebAuthn step-up ceremony (register a credential, mint a
   // challenge). Both handler-backed gateway verbs with an advertised REST path.
   route('POST', '/api/stepup/credentials', 'stepup.credentials.register'),
+  route('GET', '/api/stepup/credentials', 'stepup.credentials.list'),
+  route('DELETE', '/api/stepup/credentials/{credentialId}', 'stepup.credentials.remove'),
   route('POST', '/api/stepup/challenge', 'stepup.challenge.mint'),
   // memory.projections.*, the live read-only projection of standing memory
   // records (project/team scope) to their markdown form. Handler-backed gateway
@@ -359,9 +363,14 @@ export async function dispatchGatewayRestRoutes(
     if (!match) continue;
     if (typeof handlers.invokeGatewayRestVerb !== 'function') return null;
     const params: Record<string, string> = {};
-    entry.paramNames.forEach((name, index) => {
-      params[name] = decodeURIComponent(match[index + 1]!);
-    });
+    try {
+      entry.paramNames.forEach((name, index) => {
+        params[name] = safeDecodeURIComponent(match[index + 1]!);
+      });
+    } catch (error) {
+      if (error instanceof InvalidPathEncodingError) return invalidPathEncodingResponse();
+      throw error;
+    }
     return handlers.invokeGatewayRestVerb({ methodId: entry.methodId, req, params });
   }
   return null;

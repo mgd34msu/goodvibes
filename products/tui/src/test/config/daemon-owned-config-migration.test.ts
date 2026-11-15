@@ -19,6 +19,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager, daemonConfigPath } from '@goodvibes-jev/engine/platform/platform/config';
+import { TuiConfigManager } from '../../config/host-settings.ts';
 import { runDaemonConfigMigration } from '../../config/run-daemon-config-migration.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -92,10 +93,14 @@ describe('runDaemonConfigMigration', () => {
     expect(second!.markerPath).toBe(first!.markerPath);
     expect(second!.marker.moved.map((entry) => entry.key).sort()).toEqual(movedKeys);
 
-    // A third call after re-writing the (now-empty) surface file's daemon
-    // keys is still a no-op, the marker, not file contents, is authoritative.
+    // A third call after a daemon-owned key reappears in the surface file is still a
+    // no-op: the marker, not file contents, is authoritative. The reappeared value is
+    // neither moved nor allowed to overwrite what the daemon store already holds.
+    writeTuiSettings(h, { surfaces: { telegram: { botToken: 'rewritten-token' } }, display: { theme: NON_DEFAULT_THEME } });
     const third = runDaemonConfigMigration(h);
     expect(third!.migrated).toBe(false);
+    expect(JSON.parse(readFileSync(tuiSettingsPath(h), 'utf-8')).surfaces?.telegram?.botToken).toBe('rewritten-token');
+    expect(JSON.parse(readFileSync(storePath, 'utf-8')).surfaces?.telegram?.botToken).toBe('test-bot-token-12345');
   });
 
   test('a ConfigManager rooted at "tui" resolves migrated daemon-owned keys from the daemon tier', () => {
@@ -119,6 +124,35 @@ describe('runDaemonConfigMigration', () => {
     const tokenSource = cm.describeConfigKeySource('surfaces.telegram.botToken');
     expect(tokenSource.tier).toBe('daemon');
     expect(tokenSource.daemonOwned).toBe(true);
+  });
+
+  test('a custom daemon home receives the moved keys, and the default path is left unwritten', () => {
+    const h = home();
+    const custom = join(home(), 'custom-daemon');
+    writeTuiSettings(h, { surfaces: { telegram: { enabled: true, botToken: 'custom-home-token' } } });
+    const result = runDaemonConfigMigration(h, { GOODVIBES_DAEMON_HOME: custom });
+    expect(result!.migrated).toBe(true);
+    const moved = JSON.parse(readFileSync(join(custom, 'settings.json'), 'utf8'));
+    expect(moved.surfaces.telegram.botToken).toBe('custom-home-token');
+    expect(existsSync(daemonConfigPath(h))).toBe(false);
+    expect(JSON.parse(readFileSync(tuiSettingsPath(h), 'utf8')).surfaces?.telegram?.botToken).toBeUndefined();
+  });
+
+  test('the TUI config manager reads and writes daemon-owned keys under the custom daemon home', () => {
+    const h = home();
+    const custom = join(home(), 'custom-daemon');
+    const previous = process.env['GOODVIBES_DAEMON_HOME'];
+    process.env['GOODVIBES_DAEMON_HOME'] = custom;
+    try {
+      writeTuiSettings(h, { surfaces: { telegram: { enabled: true, botToken: 'custom-home-token' } } });
+      runDaemonConfigMigration(h);
+      const cm = new TuiConfigManager({ homeDir: h, workingDir: h, surfaceRoot: 'tui' });
+      expect(cm.getDaemonTierPath()).toBe(join(custom, 'settings.json'));
+      expect(cm.get('surfaces.telegram.botToken')).toBe('custom-home-token');
+    } finally {
+      if (previous === undefined) delete process.env['GOODVIBES_DAEMON_HOME'];
+      else process.env['GOODVIBES_DAEMON_HOME'] = previous;
+    }
   });
 
   test('a client-owned key (display.theme) still resolves from the surface file, untouched by migration', () => {

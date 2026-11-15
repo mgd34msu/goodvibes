@@ -68,10 +68,36 @@ export interface RecorderCaptureOptions {
   readonly speexAvailable?: boolean | undefined;
   readonly sampleRate?: number | undefined;
   readonly warn?: AudioCaptureWarn | undefined;
+  /** Bound on reading why a recorder exited, ms; past it the exit is reported as unreadable. */
+  readonly failureReadingTimeoutMs?: number | undefined;
+  /** How long a stopped recorder may take to exit before SIGKILL, ms. Default 750. */
+  readonly termGraceMs?: number | undefined;
+  /** How long to wait for the process to be reaped after SIGKILL, ms. Default 750. */
+  readonly killGraceMs?: number | undefined;
 }
 
 /** How long a stopped recorder is given to exit before it is killed harder. */
 const RECORDER_TERM_GRACE_MS = 750;
+
+/** How long to wait for the process to be reaped after SIGKILL before reporting it may still hold the device. */
+const RECORDER_KILL_GRACE_MS = 750;
+
+/**
+ * How long the reading of a recorder's exit may take. Until it answers, the
+ * stream's consumer is not told the recorder exited at all, so a reading that
+ * never answers would leave the consumer listening to a dead stream forever.
+ */
+const FAILURE_READING_TIMEOUT_MS = 20_000;
+
+/** Settle with `late` once `ms` pass; the unfinished work is left to settle unobserved. */
+function withinDeadline<T>(work: Promise<T>, ms: number, late: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(late), ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Keep complete diagnostic evidence, not a display prefix. Recorders also write
@@ -193,7 +219,7 @@ function startRecorderStream(
       : signal ? `exited on signal ${signal}` : 'exited on its own';
     const complete = async (): Promise<void> => {
       let cause: Awaited<ReturnType<typeof readRecorderFailure>> = stderrOverflow ? 'unavailable' : stderrText.length === 0 ? 'none'
-        : await readRecorderFailure(evidence, owner);
+        : await withinDeadline(readRecorderFailure(evidence, owner), options.failureReadingTimeoutMs ?? FAILURE_READING_TIMEOUT_MS, 'unavailable' as const);
       if (stopped || stopRequested || lifetime.signal.aborted) return;
       // The async return is another ownership boundary: the installation may
       // retire after the reader's final check but before this continuation.
@@ -239,14 +265,26 @@ function startRecorderStream(
     if (stopped || processClosed) { finish('requested'); return; }
     // Wait for the process to actually go, but never for its pending judgment.
     await new Promise<void>((resolve) => {
-      const done = (): void => { clearTimeout(timer); resolve(); };
+      let termTimer: ReturnType<typeof setTimeout> | undefined;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const done = (): void => { clearTimeout(termTimer); clearTimeout(killTimer); resolve(); };
       exited.push(done);
-      const timer = setTimeout(() => {
+      termTimer = setTimeout(() => {
         try { if (!stopped && !processClosed) child.kill('SIGKILL'); }
         catch { /* A host kill failure must not leave stop waiting forever. */ }
-        finally { resolve(); }
-      }, RECORDER_TERM_GRACE_MS);
-      (timer as unknown as { unref?: () => void }).unref?.();
+        // SIGKILL is not proof of exit: a recorder in uninterruptible device
+        // I/O outlives it. Give the reaping a bounded moment, then say so
+        // instead of reporting the device released.
+        killTimer = setTimeout(() => {
+          options.warn?.('capture recorder did not exit after SIGKILL; it may still hold the audio device', {
+            command: resolved.command,
+            backend: resolved.backend,
+          });
+          resolve();
+        }, options.killGraceMs ?? RECORDER_KILL_GRACE_MS);
+        (killTimer as unknown as { unref?: () => void }).unref?.();
+      }, options.termGraceMs ?? RECORDER_TERM_GRACE_MS);
+      (termTimer as unknown as { unref?: () => void }).unref?.();
     });
     finish('requested');
   };

@@ -4,27 +4,53 @@
  * Closes coverage gap: platform/git
  */
 
-import { describe, expect, test } from 'bun:test';
-import { resolve } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { GitService, conflictPathsFromMergeOutput } from '../platform/src/platform/git/service.js';
 
-const CWD = resolve(import.meta.dir, '..');
+// The repo is built here rather than read from the checkout the tests happen to run in,
+// so the result does not depend on how the source was obtained.
+let scratch = '';
+let repo = '';
+let plain = '';
+let previousCeiling: string | undefined;
+
+beforeAll(() => {
+  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'gv-git-smoke-')));
+  repo = join(scratch, 'repo');
+  plain = join(scratch, 'plain');
+  mkdirSync(repo);
+  mkdirSync(plain);
+  const init = Bun.spawnSync(['git', '-C', repo, 'init', '-q']);
+  if (init.exitCode !== 0) throw new Error('git init failed for the fixture repository');
+  // Stops discovery at the scratch directory, so the plain directory is never
+  // inside whatever repository holds the temp directory.
+  previousCeiling = process.env.GIT_CEILING_DIRECTORIES;
+  process.env.GIT_CEILING_DIRECTORIES = scratch;
+});
+
+afterAll(() => {
+  if (previousCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+  else process.env.GIT_CEILING_DIRECTORIES = previousCeiling;
+  rmSync(scratch, { recursive: true, force: true });
+});
 
 describe('platform/git: behavior smoke', () => {
-  test('GitService.isGitRepo returns true for the platform repo', async () => {
-    const result = await GitService.isGitRepo(CWD);
-    expect(result).toBe(true);
+  test('GitService.isGitRepo is true inside a repository and false outside one', () => {
+    expect(GitService.isGitRepo(repo)).toBe(true);
+    expect(GitService.isGitRepo(plain)).toBe(false);
   });
 
-  test('new GitService(CWD).getCwd() returns the working directory', () => {
-    const svc = new GitService(CWD);
-    expect(svc.getCwd()).toBe(CWD);
+  test('new GitService(cwd).getCwd() returns the working directory', () => {
+    const svc = new GitService(repo);
+    expect(svc.getCwd()).toBe(repo);
   });
 
-  test('GitService.getRepoRoot returns a non-empty string for the platform repo', async () => {
-    const root = await GitService.getRepoRoot(CWD);
-    expect(typeof root).toBe('string');
-    expect((root as string).length).toBeGreaterThan(0);
+  test('GitService.getRepoRoot returns the repository top, and null outside one', () => {
+    expect(GitService.getRepoRoot(repo)).toBe(repo);
+    expect(GitService.getRepoRoot(plain)).toBeNull();
   });
 });
 

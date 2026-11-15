@@ -4,7 +4,7 @@
  * `registered` before the deadline, fails the attempt and goes through the
  * normal reconnect backoff.
  */
-import { expect, test } from 'bun:test';
+import { afterEach, expect, jest, test } from 'bun:test';
 import {
   createRelayDaemonRegistration,
   type RelayClientWebSocket,
@@ -38,40 +38,49 @@ async function harness(extra: { registrationTimeoutMs?: number } = {}) {
   });
   return { reg, sockets, statuses };
 }
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// The registration deadline and the reconnect backoff are real timers inside
+// the registration; fake timers make every elapsed-time claim exact.
+afterEach(() => { jest.useRealTimers(); });
 
 test('an error frame during registration fails the attempt and reconnects with backoff', async () => {
   const { reg, sockets, statuses } = await harness({ registrationTimeoutMs: 10_000 });
+  jest.useFakeTimers();
   reg.start();
   sockets[0]!.emit('open');
   sockets[0]!.emit('message', { data: JSON.stringify({ t: 'error', code: 'rid-conflict', message: 'taken' }) });
-  await wait(60);
   expect(sockets[0]!.closed).toBe(true);
   expect(statuses).toContain('reconnecting');
-  expect(sockets.length).toBeGreaterThan(1);
+  expect(sockets).toHaveLength(1); // the retry waits out its backoff (5 ms) rather than reconnecting at once
+  jest.advanceTimersByTime(5);
+  expect(sockets).toHaveLength(2);
   reg.stop();
 });
 
 test('no registered frame before the deadline fails the attempt and reconnects', async () => {
   const { reg, sockets, statuses } = await harness({ registrationTimeoutMs: 20 });
+  jest.useFakeTimers();
   reg.start();
   sockets[0]!.emit('open');
-  await wait(100);
+  jest.advanceTimersByTime(19);
+  expect(sockets[0]!.closed).toBe(false);
+  jest.advanceTimersByTime(1);
   expect(sockets[0]!.closed).toBe(true);
   expect(statuses).toContain('reconnecting');
-  expect(sockets.length).toBeGreaterThan(1);
+  jest.advanceTimersByTime(5);
+  expect(sockets).toHaveLength(2);
   reg.stop();
 });
 
 test('a registered socket is not torn down by the deadline, and an error frame after registration only logs', async () => {
   const { reg, sockets } = await harness({ registrationTimeoutMs: 20 });
+  jest.useFakeTimers();
   reg.start();
   sockets[0]!.emit('open');
   sockets[0]!.emit('message', { data: JSON.stringify({ t: 'registered', rid: 'rid-deadline' }) });
-  await wait(80);
+  jest.advanceTimersByTime(80); // well past the 20 ms deadline
   expect(reg.status).toBe('registered');
   sockets[0]!.emit('message', { data: JSON.stringify({ t: 'error', code: 'rid-conflict', message: 'late' }) });
-  await wait(30);
+  jest.advanceTimersByTime(30);
   expect(reg.status).toBe('registered');
   expect(sockets[0]!.closed).toBe(false);
   expect(sockets).toHaveLength(1);

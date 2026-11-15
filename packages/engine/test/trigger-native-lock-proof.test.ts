@@ -1,4 +1,3 @@
-/** Original synchronous claim proof, authored and UNRUN. */
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

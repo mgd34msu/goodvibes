@@ -29,6 +29,11 @@ export interface ExportMetadata {
   title?: string | undefined;
 }
 
+/** Names from remote tool servers are shown as text inside the HTML this format allows, never as markup. */
+function escapeMarkupText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /**
  * exportToMarkdown - Convert a conversation to a clean Markdown string.
  *
@@ -135,7 +140,7 @@ export function exportToMarkdown(
             argsStr = String(tc.arguments);
           }
           lines.push('<details>');
-          lines.push(`<summary>Tool call: <code>${tc.name}</code></summary>`);
+          lines.push(`<summary>Tool call: <code>${escapeMarkupText(tc.name)}</code></summary>`);
           lines.push('');
           lines.push('```json');
           lines.push(argsStr);
@@ -164,7 +169,7 @@ export function exportToMarkdown(
 
       if (isLong) {
         lines.push('<details>');
-        lines.push(`<summary>${toolLabel}</summary>`);
+        lines.push(`<summary>${escapeMarkupText(toolLabel)}</summary>`);
         lines.push('');
         lines.push('```');
         lines.push(content.slice(0, 4000) + (content.length > 4000 ? '\n...(truncated)' : ''));

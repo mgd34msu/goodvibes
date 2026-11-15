@@ -13,15 +13,12 @@
  *
  * The predicate now lives in the dependency-free leaf
  * `tools/agent/predicates.ts`. These tests assert (a) the predicate behaves
- * correctly and (b) the orchestrator turn-loop modules never re-import it from
- * `compaction-sections`, which would re-create the cycle.
+ * correctly, (b) the turn-loop modules load without touching an uninitialised
+ * binding, and (c) the circuit breaker they share still trips after the
+ * configured number of all-failed turns.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { isActiveAgent } from '../platform/src/platform/tools/agent/predicates.ts';
-
-const CORE = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'core');
 
 describe('isActiveAgent (tools/agent/predicates leaf)', () => {
   test('is true only for running and pending agents', () => {
@@ -33,29 +30,37 @@ describe('isActiveAgent (tools/agent/predicates leaf)', () => {
   });
 });
 
-describe('orchestrator turn-loop circular-import guard (0.34.2 regression)', () => {
-  // These modules participate in the orchestrator turn-loop import graph.
-  // Importing isActiveAgent from compaction-sections re-creates the cycle that
-  // disabled the tool-loop circuit breaker. They must import it from the
-  // dependency-free leaf `tools/agent/predicates` instead.
-  const guarded = [
-    'orchestrator-context-runtime.ts',
-    'orchestrator-tool-runtime.ts',
-    'context-compaction.ts',
-  ];
+describe('orchestrator turn-loop modules (0.34.2 regression)', () => {
+  const turnLoopModules = [
+    '../platform/src/platform/core/orchestrator-context-runtime.ts',
+    '../platform/src/platform/core/orchestrator-tool-runtime.ts',
+    '../platform/src/platform/core/context-compaction.ts',
+    '../platform/src/platform/core/orchestrator-turn-loop.ts',
+  ] as const;
 
-  for (const file of guarded) {
-    test(`${file} does not import isActiveAgent from compaction-sections`, () => {
-      const src = readFileSync(join(CORE, file), 'utf8');
-      // `[^}]*` spans multi-line import groups (newlines are not `}`).
-      const cyclicImport =
-        /import\s*\{[^}]*\bisActiveAgent\b[^}]*\}\s*from\s*['"]\.\/compaction-sections\.js['"]/.test(src);
-      expect(cyclicImport).toBe(false);
-    });
-  }
+  test('every turn-loop module loads, whatever order its neighbours load in', async () => {
+    // A re-created import cycle surfaces as a ReferenceError (a binding read
+    // before its module initialised) while a module is evaluated.
+    for (const specifier of turnLoopModules) {
+      await expect(import(specifier)).resolves.toBeDefined();
+    }
+  });
 
-  test('compaction-sections.ts no longer defines isActiveAgent', () => {
-    const src = readFileSync(join(CORE, 'compaction-sections.ts'), 'utf8');
-    expect(/export\s+function\s+isActiveAgent\b/.test(src)).toBe(false);
+  test('the circuit breaker thresholds are initialised and the breaker trips on all-failed turns', async () => {
+    await Promise.all(turnLoopModules.map((specifier) => import(specifier)));
+    const { ConsecutiveErrorBreaker, CONSECUTIVE_ERROR_WARN, CONSECUTIVE_ERROR_BREAK } =
+      await import('../platform/src/platform/core/circuit-breaker.ts');
+    expect(typeof CONSECUTIVE_ERROR_WARN).toBe('number');
+    expect(typeof CONSECUTIVE_ERROR_BREAK).toBe('number');
+    const breaker = new ConsecutiveErrorBreaker();
+    const outcomes = Array.from({ length: CONSECUTIVE_ERROR_BREAK }, () => breaker.recordAllFailed());
+    expect(outcomes[CONSECUTIVE_ERROR_WARN - 2]).toBe('ok');
+    expect(outcomes[CONSECUTIVE_ERROR_WARN - 1]).toBe('warn');
+    expect(outcomes[CONSECUTIVE_ERROR_BREAK - 1]).toBe('break');
+  });
+
+  test('compaction-sections no longer exports the predicate the turn loop needs', async () => {
+    const sections = await import('../platform/src/platform/core/compaction-sections.ts') as Record<string, unknown>;
+    expect(sections['isActiveAgent']).toBeUndefined();
   });
 });

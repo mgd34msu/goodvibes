@@ -43,7 +43,7 @@ export function emitDeliveryStarted(
 export function emitDeliverySucceeded(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: { deliveryId: string; jobId: string; runId: string; surfaceKind: RouteSurfaceKind; targetId: string; completedAt: number; durationMs: number; statusCode: number },
+  data: { deliveryId: string; jobId: string; runId: string; surfaceKind: RouteSurfaceKind; targetId: string; completedAt: number; durationMs: number; statusCode?: number },
 ): void {
   bus.emit('deliveries', deliveryEvent('DELIVERY_SUCCEEDED', data, ctx));
 }

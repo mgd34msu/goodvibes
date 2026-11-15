@@ -16,19 +16,42 @@ import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../channe
 import { PaymentReplyWindowError, type PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { parseCommandAuthorityChannel } from '../payments/types.js';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { TelegramSourceAccountReader, TelegramSourceAccountHandle } from '../channels/telegram/source-account.js';
 import type { PaymentReplyCorrelation } from '../payments/reply-inbox.js';
 
+/** How long the Telegram identity check may take before the purchase window stops waiting on it. */
+const ACCOUNT_VERIFY_TIMEOUT_MS = 15_000;
+
+/**
+ * Bound a Telegram lookup by the caller's signal and a deadline. The lookup is a
+ * plain network call that cannot be cancelled from here, and the purchase
+ * window's teardown waits for this check to settle, so an unreachable Telegram
+ * must not hold the window (or daemon shutdown) open.
+ */
+function settleOrGiveUp<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  const stop = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(ACCOUNT_VERIFY_TIMEOUT_MS)]);
+  return new Promise<T>((resolve, reject) => {
+    const giveUp = () => reject(new PaymentReplyWindowError('source-unavailable'));
+    if (stop.aborted) { giveUp(); return; }
+    stop.addEventListener('abort', giveUp, { once: true });
+    work.then(
+      (value) => { stop.removeEventListener('abort', giveUp); resolve(value); },
+      (error: unknown) => { stop.removeEventListener('abort', giveUp); reject(error); },
+    );
+  });
+}
+
 function accountVerifier(reader: TelegramSourceAccountReader | undefined,
-  acquire: (() => Promise<TelegramSourceAccountHandle | null>) | undefined, current: () => void) {
+  acquire: (() => Promise<TelegramSourceAccountHandle | null>) | undefined, current: () => void, signal?: AbortSignal) {
   const read = reader?.read.bind(reader), assert = reader?.assertCurrent.bind(reader);
   return async () => {
     current();
     if (!read || !assert || !acquire) throw new PaymentReplyWindowError('source-unavailable');
-    const handle = await acquire(); current();
+    const handle = await settleOrGiveUp(acquire(), signal); current();
     if (!handle) throw new PaymentReplyWindowError('source-unavailable');
-    const account = await read(handle); current();
+    const account = await settleOrGiveUp(Promise.resolve(read(handle)), signal); current();
     if (!account) throw new PaymentReplyWindowError('source-unavailable');
     const assertCurrent = () => {
       try {
@@ -50,7 +73,12 @@ export async function tryResolvePaymentReplyFromChannel(
   decision: ChannelPolicyDecision,
   inbox: PaymentReplyInbox | undefined,
   telegramAccounts?: TelegramSourceAccountReader,
-  options: { readonly assertCurrent?: (() => void) | undefined; readonly signal?: AbortSignal | undefined } = {},
+  options: {
+    readonly assertCurrent?: (() => void) | undefined;
+    readonly signal?: AbortSignal | undefined;
+    /** Answers the owner on the channel the message came from. */
+    readonly replyToOwner?: ((text: string) => Promise<unknown>) | undefined;
+  } = {},
 ): Promise<PaymentReplyOffer> {
   if (inbox === undefined || inbox.pending === 0 || !input.userId || !input.text) return { consumed: false, reason: 'no-window' };
   const owners = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
@@ -69,13 +97,23 @@ export async function tryResolvePaymentReplyFromChannel(
     messageId: typeof messageId === 'string' ? messageId : undefined,
     replyToMessageId: typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
     assertCurrent: current,
-    ...(channel === 'telegram' ? { verifyAccount: accountVerifier(telegramAccounts, input.acquireTelegramAccount?.bind(input), current) } : {}),
+    ...(channel === 'telegram' ? { verifyAccount: accountVerifier(telegramAccounts, input.acquireTelegramAccount?.bind(input), current, signal) } : {}),
   });
   const offer = await inbox.offer(channel, input.text, correlation, { archiveOnly: isClassicOperation() });
   if (offer.consumed) {
     logger.info('Purchase window answered from a channel reply', { surface: input.surface, answer: offer.answer });
   } else if (offer.reason === 'several-windows') {
     logger.info('Channel reply not read as a purchase answer: several purchase windows wait on this channel', { surface: input.surface });
+    // The message is not consumed, so without a word back the owner sees silence
+    // and cannot tell their answer was set aside; every window stays open.
+    try {
+      const delivery = await options.replyToOwner?.('More than one purchase is waiting; reply to the specific notice so I know which one you mean.');
+      if (typeof delivery === 'object' && delivery !== null && 'delivered' in delivery && delivery.delivered === false) {
+        logger.warn('The owner was not told which purchase reply is needed', { surface: input.surface, reason: 'reason' in delivery ? String(delivery.reason) : 'unknown' });
+      }
+    } catch (error) {
+      logger.warn('Could not tell the owner which purchase reply is needed', { surface: input.surface, error: summarizeError(error) });
+    }
   }
   return offer;
 }

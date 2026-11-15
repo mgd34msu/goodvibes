@@ -36,6 +36,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 describe('power.keepAwake local live-apply (config-subscription path)', () => {
   let root = '';
   const runtimes: RuntimeServices[] = [];
+  let powerSubscribed: Promise<void> = Promise.resolve();
 
   afterEach(async () => {
     const shutdowns = runtimes.splice(0).flatMap(runtime => [
@@ -57,6 +58,18 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     mkdirSync(homeDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
+    // The PowerManager registers its live-apply subscription through
+    // wireRuntimePower's subscribeConfig, which hands the config manager a
+    // one-argument callback; the services' own keep-awake forwarder takes two.
+    let subscribed = () => {};
+    powerSubscribed = new Promise<void>(done => { subscribed = done; });
+    const subscribe: unknown = configManager.subscribe;
+    if (typeof subscribe !== 'function') throw new Error('ConfigManager.subscribe must be a function');
+    Reflect.set(configManager, 'subscribe', (...args: unknown[]) => {
+      const callback = args[1];
+      if (args[0] === 'power.keepAwake' && typeof callback === 'function' && callback.length === 1) subscribed();
+      return Reflect.apply(subscribe, configManager, args);
+    });
     const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
@@ -75,14 +88,10 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     try {
       expect(services.powerManager.getState().keepAwake.enabled).toBe(false);
 
-      // wireRuntimePower's manager.start() (async: it reaps orphan inhibitors
-      // over the real platform seam, THEN registers the config subscription)
-      // is fire-and-forget from services.ts, exactly as the platform composition
-      // root does it. Give start() room to finish registering before driving
-      // the toggle, so the test exercises the live-subscription path itself
-      // rather than racing it, a config write issued before registration
-      // completes cannot be seen by a subscription that does not exist yet.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // wireRuntimePower's manager.start() is fire-and-forget from services.ts
+      // and registers the config subscription asynchronously; a config write
+      // issued before that registration is never seen, so wait for it.
+      await powerSubscribed;
 
       async function waitForKeepAwake(expected: boolean): Promise<boolean> {
         const deadline = Date.now() + 2000;

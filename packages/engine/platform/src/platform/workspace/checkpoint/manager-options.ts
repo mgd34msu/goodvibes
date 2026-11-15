@@ -106,6 +106,8 @@ export interface WorkspaceCheckpointManagerOptions {
    * with its own schedule).
    */
   readonly autoRetention?: boolean | undefined;
+  /** How long an operation waits for another process's checkpoint lock before failing. Default 15s. */
+  readonly lockTimeoutMs?: number | undefined;
   /** Home-directory override (broad-root detection). Defaults to `os.homedir()`. */
   readonly homeDir?: string | undefined;
   /** Daemon state-directory override (broad-root detection). Defaults to `<homeDir>/.goodvibes`. */

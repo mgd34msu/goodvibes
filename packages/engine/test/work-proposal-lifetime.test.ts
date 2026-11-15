@@ -93,16 +93,19 @@ for (const exit of ['stop', 'failed-start'] as const) test(`${exit} drains admit
   await prepareConfiguredProjectContext(configManager, root, undefined, { activate: true });
   const directory = configManager.getControlPlaneConfigDir();
   let bindAttempts = 0;
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  // Every proposal write waits for the store's initial load, so holding that load
+  // (started when the daemon is built) keeps the admitted writes in flight.
+  const storePath = join(directory, 'work-proposals.json');
+  const realRead = fs.readFile;
+  let captured = false;
+  const readSpy = spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+    if (String(args[0]) === storePath && !captured) { captured = true; entered.resolve(); await release.promise; }
+    return realRead(...args);
+  }) as typeof fs.readFile);
   const daemon = new DaemonServer({ configManager, workingDir: root, homeDirectory: root, daemonHomeDir: join(root, 'daemon'), port: 0, host: '127.0.0.1', serveFactory: () => { bindAttempts++; throw new Error('synthetic restart bind'); } });
   daemon.enable({ daemon: true }, 'synthetic-restart-token');
   const store = (daemon as unknown as { workProposals: WorkProposalStore }).workProposals;
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const realMkdir = fs.mkdir;
-  let captured = false;
-  const mkdirSpy = spyOn(fs, 'mkdir').mockImplementation((async (...args: Parameters<typeof fs.mkdir>) => {
-    if (String(args[0]) === directory && !captured) { captured = true; entered.resolve(); await release.promise; }
-    return realMkdir(...args);
-  }) as typeof fs.mkdir);
   let stopping: Promise<void> | undefined;
   let restarting: Promise<void> | undefined;
   try {
@@ -127,7 +130,7 @@ for (const exit of ['stop', 'failed-start'] as const) test(`${exit} drains admit
     release.resolve(); await stopping; await repeated; await restarting; await store.flush();
     const recreatedAfterStop = stoppedBeforeDrain && existsSync(directory);
     expect({ stoppedBeforeDrain, recreatedAfterStop }).toEqual({ stoppedBeforeDrain: false, recreatedAfterStop: false });
-  } finally { release.resolve(); await stopping; await restarting; await daemon.stop(); await store.flush(); mkdirSpy.mockRestore(); }
+  } finally { release.resolve(); await stopping; await restarting; await daemon.stop(); await store.flush(); readSpy.mockRestore(); }
 }, 60_000);
 
 

@@ -2,13 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { runChannelPairing } from '../../input/commands/channel-pairing.ts';
-
-const PAIRABLE_SURFACES = [
-  'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram',
-  'google-chat', 'signal', 'whatsapp', 'telephony', 'imessage', 'msteams',
-  'bluebubbles', 'mattermost', 'matrix',
-] as const;
+import { PAIRABLE_SURFACES, runChannelPairing } from '../../input/commands/channel-pairing.ts';
 
 function makeCtx() {
   const store = new Map<string, unknown>();
@@ -28,13 +22,15 @@ function makeCtx() {
 }
 
 describe('/channel pair', () => {
-  it('lists adapters from the platform setup schema (not a hand-maintained list)', async () => {
+  it('lists every pairable surface with the label from the platform setup schema', async () => {
     const { ctx, text } = makeCtx();
     await runChannelPairing([], ctx);
     expect(text()).toContain('Channel adapters');
-    // Every pairable surface id appears.
+    expect(PAIRABLE_SURFACES.length).toBeGreaterThan(0);
     for (const surface of PAIRABLE_SURFACES) {
-      expect(text()).toContain(surface);
+      const row = text().split('\n').find(line => line.trimStart().startsWith(`${surface} `));
+      expect(row).toBeDefined();
+      expect(row).toContain(getBuiltinSetupSchema(surface).label);
     }
   });
 
@@ -72,5 +68,65 @@ describe('/channel pair', () => {
     await runChannelPairing(['slack', 'verify'], ctx);
     expect(text()).not.toContain('[fail]');
     expect(text()).toContain('All declared credentials resolve');
+  });
+
+  describe('secret entry chain', () => {
+    type Concealed = { label: string; onSubmit: (value: string) => void };
+
+    /** A surface context whose concealed prompts are answered from `answers` in order. */
+    function makeChainCtx(storeSecrets: boolean) {
+      const base = makeCtx();
+      const prompts: Concealed[] = [];
+      const secretsManager = storeSecrets ? { set: async () => {} } : undefined;
+      const ctx = {
+        ...(base.ctx as unknown as Record<string, unknown>),
+        platform: { configManager: base.ctx.platform.configManager, secretsManager },
+        beginConcealedInput: (options: Concealed) => { prompts.push(options); },
+      } as unknown as CommandContext;
+      return { ...base, ctx, prompts };
+    }
+
+    async function drain(done: () => boolean): Promise<void> {
+      for (let i = 0; i < 200 && !done(); i++) await Promise.resolve();
+    }
+
+    async function answerAll(prompts: Concealed[], answer: (index: number) => string, finished: () => boolean): Promise<void> {
+      let answered = 0;
+      while (!finished()) {
+        await drain(() => prompts.length > answered || finished());
+        if (finished() || prompts.length <= answered) break;
+        prompts[answered]!.onSubmit(answer(answered));
+        answered++;
+      }
+    }
+
+    it('enables the surface only when every missing secret was stored', async () => {
+      const { ctx, store, text, prompts } = makeChainCtx(true);
+      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
+      await runChannelPairing(['slack'], ctx);
+      await answerAll(prompts, () => 'a-secret-value', () => text().includes('credentials stored'));
+      expect(store.get(enabledKey)).toBe(true);
+      expect(text()).toContain('and the surface is enabled');
+    });
+
+    it('does not enable the surface or say stored when a secret was left empty', async () => {
+      const { ctx, store, text, prompts } = makeChainCtx(true);
+      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
+      await runChannelPairing(['slack'], ctx);
+      await answerAll(prompts, (index) => (index === 0 ? '' : 'a-secret-value'), () => text().includes('was NOT enabled'));
+      expect(store.get(enabledKey)).not.toBe(true);
+      expect(text()).toContain('was NOT enabled: still missing');
+      expect(text()).not.toContain('credentials stored');
+    });
+
+    it('does not enable the surface when every store fails', async () => {
+      const { ctx, store, text, prompts } = makeChainCtx(false);
+      const enabledKey = getBuiltinSetupSchema('slack').fields.find((f) => f.id === 'enabled')?.configKey as string;
+      await runChannelPairing(['slack'], ctx);
+      await answerAll(prompts, () => 'a-secret-value', () => text().includes('was NOT enabled'));
+      expect(text()).toContain('Failed to store');
+      expect(store.get(enabledKey)).not.toBe(true);
+      expect(text()).not.toContain('credentials stored');
+    });
   });
 });

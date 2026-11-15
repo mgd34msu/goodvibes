@@ -176,7 +176,7 @@ describe('cache-vs-cold equivalence', () => {
     assertCacheMatchesCold(cm);
   });
 
-  test('collapse / expand toggle invalidates only the toggled block', () => {
+  test('collapse / expand toggle changes the frame and still matches a cold rebuild', () => {
     const cm = new ConversationManager(() => 100);
     cm.addUserMessage('run the tool');
     cm.addToolResults([{ callId: 'tool-1', success: true, output: LONG_TOOL_OUTPUT }]);
@@ -186,8 +186,11 @@ describe('cache-vs-cold equivalence', () => {
     const toolBlock = cm.getBlockRegistry().find((b) => b.type === 'tool');
     expect(toolBlock).toBeDefined();
 
+    const collapsed = serializeLines(cm.getDisplayBlocks());
+
     // Toggle it expanded.
     cm.toggleCollapseAtLine(toolBlock!.startLine);
+    expect(serializeLines(cm.getDisplayBlocks())).not.toBe(collapsed);
     assertCacheMatchesCold(cm);
 
     // Toggle it collapsed again.
@@ -436,11 +439,25 @@ describe('cache-vs-cold equivalence', () => {
   });
 
   test('config change (line numbers) invalidates cached messages', () => {
-    // Two managers with different config produce different output; the cache key
-    // includes config so a manager cannot serve a stale pre-config-change frame.
+    // The cache key includes the line-number setting, so flipping it between two
+    // builds must change the rendered frame instead of serving the stale one.
+    let lineNumbers: 'off' | 'all' = 'off';
     const cm = new ConversationManager(() => 100);
+    cm.setConfigManager({
+      get: (key: string) => (key === 'display.lineNumbers' ? lineNumbers : undefined),
+    } as unknown as Parameters<typeof cm.setConfigManager>[0]);
     cm.addAssistantMessage(`some content\n\n${CODE_FENCE}`);
-    cm.getDisplayBlocks();
+    const plain = serializeLines(cm.getDisplayBlocks());
     assertCacheMatchesCold(cm);
+
+    lineNumbers = 'all';
+    cm.setWidthProvider(() => 100); // marks the history dirty; the width itself is unchanged
+    const numbered = serializeLines(cm.getDisplayBlocks());
+    expect(numbered).not.toBe(plain);
+    assertCacheMatchesCold(cm);
+
+    lineNumbers = 'off';
+    cm.setWidthProvider(() => 100);
+    expect(serializeLines(cm.getDisplayBlocks())).toBe(plain);
   });
 });

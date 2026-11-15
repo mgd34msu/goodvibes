@@ -21,7 +21,6 @@ export interface AgentReminderScheduleToolArgs {
   readonly deliveryChannel?: unknown;
   readonly deliveryRoute?: unknown;
   readonly deliveryWebhook?: unknown;
-  readonly deliveryLink?: unknown;
   readonly disabled?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
@@ -49,7 +48,8 @@ function readBoolean(value: unknown): boolean {
 function addOptionalArg(args: string[], flag: string, value: unknown): void {
   const text = readOptionalString(value);
   if (!text) return;
-  args.push(flag, text);
+  // The inline form keeps free text that begins with dashes from being read as the next option.
+  args.push(`${flag}=${text}`);
 }
 
 function scheduleFlag(kind: ReminderScheduleKind): string {
@@ -66,10 +66,8 @@ function buildReminderScheduleArgs(rawArgs: AgentReminderScheduleToolArgs): read
   if (!scheduleValue) throw new Error('scheduleValue is required.');
 
   const args = [
-    scheduleFlag(rawArgs.scheduleKind),
-    scheduleValue,
-    '--message',
-    message,
+    `${scheduleFlag(rawArgs.scheduleKind)}=${scheduleValue}`,
+    `--message=${message}`,
   ];
   addOptionalArg(args, '--timezone', rawArgs.timezone);
   addOptionalArg(args, '--name', rawArgs.name);
@@ -78,7 +76,6 @@ function buildReminderScheduleArgs(rawArgs: AgentReminderScheduleToolArgs): read
   addOptionalArg(args, '--delivery-channel', rawArgs.deliveryChannel);
   addOptionalArg(args, '--delivery-route', rawArgs.deliveryRoute);
   addOptionalArg(args, '--delivery-webhook', rawArgs.deliveryWebhook);
-  addOptionalArg(args, '--delivery-link', rawArgs.deliveryLink);
   if (readBoolean(rawArgs.disabled)) args.push('--disabled');
 
   return args;
@@ -111,7 +108,7 @@ export function createAgentReminderScheduleTool(
           },
           timezone: {
             type: 'string',
-            description: 'Optional IANA timezone for cron/at schedules.',
+            description: 'Optional IANA timezone for cron schedules only.',
           },
           name: {
             type: 'string',
@@ -137,10 +134,6 @@ export function createAgentReminderScheduleTool(
             type: 'string',
             description: 'Optional http(s) webhook target.',
           },
-          deliveryLink: {
-            type: 'string',
-            description: 'Optional link delivery target.',
-          },
           disabled: {
             type: 'boolean',
             description: 'Create the schedule disabled.',
@@ -151,7 +144,7 @@ export function createAgentReminderScheduleTool(
           },
           explicitUserRequest: {
             type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
+            description: 'Optional request provenance, recorded in the schedule prompt; does not grant effect authority.',
           },
         },
         required: ['message', 'scheduleKind', 'scheduleValue'],
@@ -160,17 +153,29 @@ export function createAgentReminderScheduleTool(
       sideEffects: ['network', 'state'],
     },
     execute: async (rawArgs, options) => {
+      // True once the request has gone to the connected host: a later throw cannot say it was not applied.
+      let invoked = false;
       try {
         const effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
         const parsed = parseReminderScheduleArgs(buildReminderScheduleArgs(rawArgs));
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildReminderSchedulePreview(parsed);
+        // Recorded in the prompt as the autonomy schedule does, so the created schedule shows what the owner asked for.
+        const provenance = readOptionalString(rawArgs.explicitUserRequest);
+        const payload = provenance
+          ? { ...preview.payload, prompt: `Request provenance:\n${provenance}\n\n${preview.payload.prompt}` }
+          : preview.payload;
         effect.assertCurrent();
-        const result = await effect.invoke('automation.schedules.create', preview.payload);
+        invoked = true;
+        const result = await effect.invoke('automation.schedules.create', payload);
         effect.assertCurrent();
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');
       } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+        const message = error instanceof Error ? error.message : String(error);
+        if (invoked) {
+          return { success: false, error: `outcome_unknown: the schedule request was sent to the connected host and then failed (${message}). It may have been applied; read the schedule list before repeating it.` };
+        }
+        return { success: false, error: message };
       }
     },
   };

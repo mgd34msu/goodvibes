@@ -27,7 +27,7 @@
  * quietly fell back to 5 s / 60 s fails rather than passing on a coincidence.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.ts';
 import { createInboundMailSourceFactory } from '../platform/src/platform/email/inbound/source-factory.ts';
 import type { GmailSourceBuilder } from '../platform/src/platform/email/inbound/source-factory.ts';
@@ -37,10 +37,11 @@ type CapturedGmailInput = Parameters<GmailSourceBuilder>[0];
 import { resolveWatcherSettings } from '../platform/src/platform/email/inbound/ports.ts';
 import type { InboundMailSource } from '../platform/src/platform/email/inbound/source.ts';
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+/** The coalescing window in `watchInboundMailConfig`. */
+const COALESCE_MS = 250;
 
-/** The coalescing window in `watchInboundMailConfig`, plus room for the timer. */
-const AFTER_COALESCE_MS = 400;
+/** Runs the recheck timer on a fake clock, so no assertion races a real timer. */
+const pastCoalesceWindow = (): void => { jest.advanceTimersByTime(COALESCE_MS); };
 
 /**
  * A config manager with a real subscription table.
@@ -96,6 +97,9 @@ function runtimeWith(
 }
 
 describe('an inbound-mail setting edit reaches the running source', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
   test('changing the IMAP host re-probes without a restart', async () => {
     const config = fakeConfig({ 'surfaces.email.inbound.enabled': true });
     const { calls, supervisor } = fakeSupervisor();
@@ -106,7 +110,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     expect(calls.recheckNow).toBe(0);
 
     config.change('surfaces.email.imap.host');
-    await sleep(AFTER_COALESCE_MS);
+    pastCoalesceWindow();
 
     expect(calls.recheckNow).toBe(1);
     // The distinction the whole fix rests on: a corrected password or host is a
@@ -137,7 +141,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     for (const key of watched) {
       const before = calls.recheckNow;
       config.change(key);
-      await sleep(AFTER_COALESCE_MS);
+      pastCoalesceWindow();
       expect(calls.recheckNow).toBe(before + 1);
     }
   });
@@ -159,7 +163,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
       expect(config.subscriberCount(key)).toBe(0);
       config.change(key);
     }
-    await sleep(AFTER_COALESCE_MS);
+    pastCoalesceWindow();
     expect(calls.recheckNow).toBe(0);
   });
 
@@ -173,7 +177,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     config.change('surfaces.email.user');
     config.change('surfaces.email.username');
     config.change('surfaces.email.imapHost');
-    await sleep(AFTER_COALESCE_MS);
+    pastCoalesceWindow();
 
     expect(calls.recheckNow).toBe(1);
   });
@@ -188,7 +192,7 @@ describe('an inbound-mail setting edit reaches the running source', () => {
     expect(config.subscriberCount('surfaces.email.imap.host')).toBe(0);
 
     config.change('surfaces.email.imap.host');
-    await sleep(AFTER_COALESCE_MS);
+    pastCoalesceWindow();
     expect(calls.recheckNow).toBe(0);
   });
 });

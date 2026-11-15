@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import type { TurnPhase } from '../platform/src/platform/core/turn-phase.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { logger } from '../platform/src/platform/utils/logger.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { RouteBindingManager } from '../platform/src/platform/channels/index.ts';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
-import { createNativeHostedTurnHost, NATIVE_HOSTED_TURN_SCOPES, type NativeHostedTurnHost } from '../platform/src/platform/hosted-sessions/native-turn-host.ts';
-import { NativeHostedTurnJournal, type NativeHostedTurnIdentity, type NativeHostedTurnJournalIO } from '../platform/src/platform/hosted-sessions/native-turn-journal.ts';
+import { createNativeHostedTurnHost, NativeHostedTurnError, NATIVE_HOSTED_TURN_SCOPES, NATIVE_HOST_IDENTITY, type NativeHostedTurnHost } from '../platform/src/platform/hosted-sessions/native-turn-host.ts';
+import { NativeHostedTurnJournal, NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS, type NativeHostedTurnIdentity, type NativeHostedTurnJournalIO } from '../platform/src/platform/hosted-sessions/native-turn-journal.ts';
 import type { NativeHostedTurnLookup, NativeHostedTurnSnapshot } from '../platform/src/platform/hosted-sessions/native-turn-wire.ts';
 import { HostedSessionManager } from '../platform/src/platform/hosted-sessions/manager.ts';
 import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.ts';
@@ -57,6 +59,7 @@ async function fixture(options: {
   beforeDeliver?: (permit: NativeConversationTurnPermit) => Promise<void>;
   afterDeliver?: (permit: NativeConversationTurnPermit) => Promise<void>;
   chat?: (request: ChatRequest) => Promise<ChatResponse>;
+  settle?: (input: { inputId: string; sourceRevision: string }) => Promise<void>;
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'hosted-native-host-'));
   const workspace = join(root, 'workspace'); mkdirSync(workspace);
@@ -121,6 +124,7 @@ async function fixture(options: {
     intake: {
       get: async ({ inputId }: { inputId: string }) => { counts.gets++; await getHooks.shift()?.(); return readSource(inputId); },
       admit: async ({ inputId }: { inputId: string }) => { counts.admits++; await admitHooks.shift()?.(); return readSource(inputId); },
+      ...(options.settle ? { settle: options.settle } : {}),
     },
     manager: {
       get: (sessionId: string) => manager.get(sessionId),
@@ -138,7 +142,7 @@ async function fixture(options: {
         await options.afterDeliver?.(permit);
       },
       kill: (sessionId: string) => manager.kill(sessionId),
-      cancelNative: (sessionId: string, permit: NativeConversationTurnPermit) => { counts.cancellations++; manager.cancelNative(sessionId, permit); },
+      cancelNative: (sessionId: string, permit: NativeConversationTurnPermit) => { counts.cancellations++; return manager.cancelNative(sessionId, permit); },
     },
   };
   const hosts: NativeHostedTurnHost[] = [createNativeHostedTurnHost(deps)];
@@ -522,21 +526,21 @@ for (const operation of ['start', 'startAgent'] as const) describe(`native hoste
   });
 
   test('runtime refuses compaction and thinking queues rather than treating an enqueue as completion', async () => {
-    for (const busy of ['isCompacting', 'isThinking', 'turnInFlight'] as const) {
+    for (const busy of ['compacting', 'thinking', 'settling'] as const) {
       const reached = deferred(), gate = deferred();
       const f = await fixture({ beforeDeliver: async () => { reached.resolve(); await gate.promise; } });
       const started = snapshot(await f.host[operation](f.request, f.authority, f.access));
       await reached.promise;
       const runtime = f.runtime(started.sessionId!);
-      const internals = runtime.orchestrator as unknown as Record<typeof busy, boolean>;
-      internals[busy] = true;
+      const internals = runtime.orchestrator as unknown as { phase: TurnPhase };
+      internals.phase = busy;
       try {
         gate.resolve();
         expect((await f.settled()).state).toBe('recovery-required');
         expect(runtime.orchestrator.messageQueue).toHaveLength(0);
         expect(f.requests).toHaveLength(0);
         expect(f.broker.getInputsSince(started.sessionId!)[0]!.state).not.toBe('completed');
-      } finally { internals[busy] = false; gate.resolve(); }
+      } finally { internals.phase = 'idle'; gate.resolve(); }
     }
   });
 });
@@ -579,9 +583,11 @@ describe('native hosted strict persistence and recovery fences', () => {
         writeJsonFileAtomic(path, value, options);
       } } });
       await expect(f.host.start(f.request, f.authority, f.access)).rejects.toBeInstanceOf(AtomicWriteDurabilityError);
-      expect(snapshot(await f.status()).state).toBe('recovery-required');
-      expect(snapshot(await f.host.start(f.request, f.authority, f.access)).state).toBe('recovery-required');
-      expect(snapshot(await f.newHost().start(f.request, f.authority, f.access)).state).toBe('recovery-required');
+      // Nothing was dispatched and the reservation settled failed, so the claim
+      // is retired rather than left to block its session as an unowned recovery.
+      expect(snapshot(await f.status()).state).toBe('cancelled');
+      expect(snapshot(await f.host.start(f.request, f.authority, f.access)).state).toBe('cancelled');
+      expect(snapshot(await f.newHost().start(f.request, f.authority, f.access)).state).toBe('cancelled');
       expect(f.counts).toMatchObject({ creates: 1, admits: 1, deliveries: 0 });
       expect(f.requests).toHaveLength(0);
       expect(f.manager.list()).toHaveLength(0);
@@ -749,8 +755,9 @@ describe('native cancellation owns only its actual turn lifetime', () => {
     const permit = await permitReady.promise;
     await nativeEntered.promise;
     const runtime = f.runtime(started.sessionId!);
+    // A queued submit settles when its own turn ends, so it is awaited last.
+    const queued = runtime.submit(ordinaryText);
     try {
-      await runtime.submit(ordinaryText);
       expect(runtime.orchestrator.messageQueue).toHaveLength(1);
       nativeGate.resolve();
       const ordinary = await ordinaryEntered.promise;
@@ -765,6 +772,7 @@ describe('native cancellation owns only its actual turn lifetime', () => {
       expect(runtime.isRunning()).toBe(true);
       expect(f.requests).toHaveLength(2);
     } finally { nativeGate.resolve(); ordinaryGate.resolve(); }
+    await queued;
     await eventually(() => runtime.isRunning(), running => !running);
     expect(f.manager.historyOf(started.sessionId!).filter(message => message.role === 'user').map(message => message.content)).toEqual([exactText, ordinaryText]);
   });
@@ -782,8 +790,8 @@ describe('native cancellation owns only its actual turn lifetime', () => {
     await nativeEntered.promise;
     const runtime = f.runtime(started.sessionId!);
     let cancellationReturned = false;
+    const queued = runtime.submit(ordinaryText);
     try {
-      await runtime.submit(ordinaryText);
       const cancelled = f.host.cancel(f.request, f.authority, f.access).then(value => { cancellationReturned = true; return value; });
       await eventually(() => f.counts.cancellations, count => count > 0);
       expect(snapshot(await f.status()).state).toBe('cancelling');
@@ -796,6 +804,7 @@ describe('native cancellation owns only its actual turn lifetime', () => {
       expect(runtime.isRunning()).toBe(true);
       expect(f.broker.getInputsSince(started.sessionId!)[0]!.state).not.toBe('completed');
     } finally { nativeGate.resolve(); ordinaryGate.resolve(); }
+    await queued;
     await eventually(() => runtime.isRunning(), running => !running);
     expect(f.requests).toHaveLength(2);
   });
@@ -845,40 +854,22 @@ test('broker settlement rejects nonterminal runtime state values without changin
   expect(f.requests).toHaveLength(1);
 });
 
-test('visible cancelled broker memory cannot certify cancellation while strict terminal persistence keeps failing', async () => {
-  const returned = deferred<NativeConversationTurnPermit>(), gate = deferred();
-  const f = await fixture({ afterDeliver: async permit => { returned.resolve(permit); await gate.promise; } });
-  const started = snapshot(await f.host.start(f.request, f.authority, f.access));
-  await returned.promise;
-  expect(f.runtime(started.sessionId!).isRunning()).toBe(false);
-  const store = (f.broker as unknown as { store: NonNullable<ConstructorParameters<typeof SharedSessionBroker>[0]['store']> }).store;
-  const persist = store.persist.bind(store);
-  const failure = new Error('Owned synthetic cancelled broker fsync failure');
-  let attempts = 0;
-  store.persist = async (data, options) => {
-    if (options?.durable && data.inputs.some(input => input.id === started.brokerInputId && input.state === 'cancelled')) {
-      attempts++;
-      throw failure;
-    }
-    return persist(data, options);
-  };
-  try {
-    const cancellation = f.host.cancel(f.request, f.authority, f.access).then(value => ({ value }), error => ({ error }));
-    await eventually(() => f.counts.cancellations, count => count > 0);
-    expect(snapshot(await f.status()).state).toBe('cancelling');
-    gate.resolve();
-    expect(await cancellation).toEqual({ error: failure });
-    expect(attempts).toBeGreaterThanOrEqual(2);
-    expect(f.broker.getInputsSince(started.sessionId!)[0]!.state).toBe('cancelled');
-    expect(JSON.parse(readFileSync(f.brokerPath, 'utf8')).inputs.find((input: { id: string }) => input.id === started.brokerInputId).state).toBe('delivered');
-    expect((await f.journal.read(f.identity))?.state).toBe('dispatching');
-    expect(snapshot(await f.status()).state).toBe('recovery-required');
-    expect(snapshot(await f.host.start(f.request, f.authority, f.access)).state).toBe('recovery-required');
-    expect(snapshot(await f.host.cancel(f.request, f.authority, f.access)).state).toBe('recovery-required');
-    expect((await f.journal.read(f.identity))?.state).toBe('dispatching');
+for (const how of ['cancel', 'close'] as const) {
+  test(`a ${how} that lands after the turn finished and was saved records the completion, not a cancellation`, async () => {
+    const returned = deferred<NativeConversationTurnPermit>(), gate = deferred();
+    const f = await fixture({ afterDeliver: async permit => { returned.resolve(permit); await gate.promise; } });
+    const started = snapshot(await f.host.start(f.request, f.authority, f.access));
+    await returned.promise;
+    expect(f.runtime(started.sessionId!).isRunning()).toBe(false);
+    const stopping = how === 'cancel' ? f.host.cancel(f.request, f.authority, f.access) : f.host.close();
+    try { await eventually(() => f.counts.cancellations, count => count > 0); } finally { gate.resolve(); }
+    const outcome = await stopping;
+    expect(f.broker.getInputsSince(started.sessionId!)[0]!.state).toBe('completed');
+    expect((await f.journal.read(f.identity))?.state).toBe('completed');
+    if (how === 'cancel') expect(snapshot(outcome as Awaited<ReturnType<typeof f.host.cancel>>).state).toBe('completed');
     expect(f.requests).toHaveLength(1);
-  } finally { store.persist = persist; gate.resolve(); }
-});
+  });
+}
 
 
 describe('native-owned session continuations', () => {
@@ -1084,7 +1075,8 @@ describe('native-owned session continuations', () => {
     const initial = snapshot(await f.host.start(f.request, f.authority, f.access));
     await nativeEntered.promise;
     const runtime = f.runtime(initial.sessionId!);
-    await runtime.submit('ordinary-one');
+    const queued: Promise<void>[] = [];
+    const queuedOne = runtime.submit('ordinary-one');
     releaseNative.resolve();
     await firstOrdinaryEntered.promise;
     await f.settled();
@@ -1092,14 +1084,16 @@ describe('native-owned session continuations', () => {
       const first = await f.host.continuation.capture(initial.sessionId!, 'owned-principal');
       expect(first.messages).toContainEqual({ role: 'assistant', content: 'Checkpoint answer 1' });
       expect(first.messages.some(message => message.content === 'ordinary-one')).toBe(false);
-      await runtime.submit('ordinary-two');
+      const queuedTwo = runtime.submit('ordinary-two');
       releaseFirstOrdinary.resolve();
       await secondOrdinaryEntered.promise;
       const second = await f.host.continuation.capture(initial.sessionId!, 'owned-principal');
       expect(second.messages).toContainEqual({ role: 'user', content: 'ordinary-one' });
       expect(second.messages).toContainEqual({ role: 'assistant', content: 'Checkpoint answer 2' });
       expect(second.messages.some(message => message.content === 'ordinary-two')).toBe(false);
+      queued.push(queuedTwo);
     } finally { releaseNative.resolve(); releaseFirstOrdinary.resolve(); releaseSecondOrdinary.resolve(); }
+    await Promise.all([queuedOne, ...queued]);
     await eventually(() => runtime.isRunning(), value => value === false);
   });
   test('busy capture retains its exact completed checkpoint while a newer completion publishes', async () => {
@@ -1126,8 +1120,7 @@ describe('native-owned session continuations', () => {
     });
     const first = runtime.submit('ordinary-one');
     await enteredOne.promise;
-    await runtime.submit('ordinary-two');
-    await runtime.submit('ordinary-three');
+    const queuedTwo = runtime.submit('ordinary-two'), queuedThree = runtime.submit('ordinary-three');
     releaseOne.resolve();
     try {
       await completedWrite.promise;
@@ -1146,7 +1139,7 @@ describe('native-owned session continuations', () => {
       const latest = await f.manager.captureNativeContinuation(initial.sessionId!);
       expect(latest.messages).toContainEqual({ role: 'assistant', content: 'Overlap answer 3' });
     } finally { releaseOne.resolve(); releaseTwo.resolve(); releaseThree.resolve(); releaseWrite.resolve(); saving.mockRestore(); }
-    await first;
+    await Promise.all([first, queuedTwo, queuedThree]);
   });
   test('refuses replaced prefix without killing existing session and keeps status readable', async () => {
     const f = await fixture();
@@ -1159,7 +1152,7 @@ describe('native-owned session continuations', () => {
     await expect(f.host.start(next.request, f.authority, f.access)).rejects.toThrow();
     expect(f.manager.get(initial.sessionId!)?.status).not.toBe('terminated');
     expect(f.counts.deliveries).toBe(1);
-    expect(await f.host.status(next.request, f.authority, f.access)).toMatchObject({ state: 'recovery-required' });
+    expect(await f.host.status(next.request, f.authority, f.access)).toMatchObject({ state: 'cancelled' });
     expect(await f.host.cancel(next.request, f.authority, f.access)).toMatchObject({ state: 'cancelled' });
   });
   test('an unclaimed continuation can be tombstoned without cancelling another host running turn', async () => {
@@ -1193,6 +1186,65 @@ describe('native-owned session continuations', () => {
     release.resolve();
     await eventually(() => f.host.status(next.request, f.authority, f.access), value => !('kind' in value) && value.state === 'completed');
   });
+
+  test('a failed turn can be cancelled by its own host and the session takes the next turn', async () => {
+    let failing = true;
+    const f = await fixture({ chat: async () => { if (failing) { failing = false; throw new Error('Owned synthetic provider failure'); } return answer(); } });
+    const initial = snapshot(await f.host.start(f.request, f.authority, f.access));
+    expect((await f.settled()).state).toBe('recovery-required');
+    await expect(f.host.continuation.capture(initial.sessionId!, 'owned-principal')).rejects.toMatchObject({ code: 'recovery-required' });
+    expect(snapshot(await f.host.cancel(f.request, f.authority, f.access)).state).toBe('cancelled');
+    const next = await continuation(f, initial.sessionId!, 'after-failure');
+    expect(await f.host.start(next.request, f.authority, f.access)).toMatchObject({ sessionId: initial.sessionId });
+    await eventually(() => f.host.status(next.request, f.authority, f.access), value => !('kind' in value) && value.state === 'completed');
+  });
+
+  test('a continuation whose preparation fails before dispatch does not block its session', async () => {
+    const f = await fixture();
+    const initial = snapshot(await f.host.start(f.request, f.authority, f.access));
+    await f.settled();
+    const failed = await continuation(f, initial.sessionId!, 'prepare-failure');
+    f.admitHooks.push(() => { throw new Error('Owned synthetic admission failure'); });
+    await expect(f.host.start(failed.request, f.authority, f.access)).rejects.toThrow('Owned synthetic admission failure');
+    expect(await f.host.status(failed.request, f.authority, f.access)).toMatchObject({ state: 'cancelled' });
+    const next = await continuation(f, initial.sessionId!, 'after-prepare-failure');
+    expect(await f.host.start(next.request, f.authority, f.access)).toMatchObject({ sessionId: initial.sessionId });
+    await eventually(() => f.host.status(next.request, f.authority, f.access), value => !('kind' in value) && value.state === 'completed');
+  });
+
+  test('a transient preparation failure keeps the input unsettled and names the way out', async () => {
+    const f = await fixture();
+    f.admitHooks.push(() => { throw new NativeHostedTurnError('unavailable'); });
+    await expect(f.host.start(f.request, f.authority, f.access)).rejects.toThrow('input was not cancelled');
+    expect(snapshot(await f.host.status(f.request, f.authority, f.access)).state).toBe('recovery-required');
+    expect((await f.journal.read(f.identity))?.state).toBe('recovery-required');
+    expect(snapshot(await f.host.cancel(f.request, f.authority, f.access)).state).toBe('cancelled');
+  });
+
+  test('a permanent preparation refusal cancels the input and says it cannot be started again', async () => {
+    const f = await fixture();
+    f.admitHooks.push(() => { throw new NativeHostedTurnError('invalid'); });
+    await expect(f.host.start(f.request, f.authority, f.access)).rejects.toThrow('cannot be started again');
+    expect(snapshot(await f.host.status(f.request, f.authority, f.access)).state).toBe('cancelled');
+  });
+
+  test('a restarted host cancels a dispatch whose owner process exited, never one whose owner is alive', async () => {
+    // Above the highest pid a kernel hands out, so no live process can ever hold it (a reaped child's pid could be reused).
+    const exited = 2 ** 22 + 1;
+    const host = NATIVE_HOST_IDENTITY;
+    for (const [owner, expected] of [[{ pid: exited, instance: 'exited-daemon', host }, 'cancelled'], [{ pid: process.ppid, instance: 'live-daemon', host }, 'recovery-required'],
+      // Another machine or pid namespace shares the journal: its pid cannot be checked here, so the claim is kept.
+      [{ pid: exited, instance: 'foreign-daemon', host: 'another-machine|pid:[1]' }, 'recovery-required'],
+      [{ pid: exited, instance: 'unrecorded-host-daemon' }, 'recovery-required']] as const) {
+      const f = await fixture();
+      await f.journal.claim(f.identity, [], 'webui', owner);
+      await f.journal.transition(f.identity, 'preparing', { state: 'dispatching', sessionId: 'hosted-previous', brokerInputId: 'sin-previous', correlationId: 'session-input:sin-previous' });
+      const restarted = f.newHost();
+      expect(snapshot(await restarted.cancel(f.request, f.authority, f.access)).state).toBe(expected);
+      expect((await f.journal.read(f.identity))?.state).toBe(expected === 'cancelled' ? 'cancelled' : 'dispatching');
+      expect(f.counts).toMatchObject({ creates: 0, deliveries: 0 });
+    }
+  });
 });
 
 
@@ -1216,4 +1268,56 @@ test('actual native provider attempts revalidate the retained owner after runtim
   f.setAuthority(owner);
   expect((await f.settled()).state).toBe('recovery-required');
   expect(transportCalls).toBe(0);
+});
+
+describe('native hosted journal compaction', () => {
+  const stale = (f: Awaited<ReturnType<typeof fixture>>, inputId: string, state: 'cancelled' | 'preparing'): object => ({
+    identity: { ...f.identity, requestId: `request-${inputId}`, inputId, sourceId: `source-${inputId}` },
+    state, sessionId: null, brokerInputId: null, correlationId: null,
+  });
+  const journalInputs = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
+    JSON.parse(readFileSync(f.journalPath, 'utf8')).records.map((record: { identity: { inputId: string } }) => record.identity.inputId);
+
+  test('at the cap only records terminal here and finished on intake are dropped, then the new claim succeeds', async () => {
+    const settled: string[] = [];
+    const f = await fixture({ settle: async ({ inputId }) => { settled.push(inputId); if (inputId === 'old-unfinished') throw new Error('intake unreadable'); } });
+    const records = Array.from({ length: NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS - 3 }, (_unused, index) => stale(f, `old-${index}`, 'cancelled'));
+    records.push(stale(f, 'old-unfinished', 'cancelled'), stale(f, 'old-held', 'cancelled'), stale(f, 'old-live', 'preparing'));
+    writeFileSync(f.journalPath, JSON.stringify({ version: 1, records }));
+    writeFileSync(`${f.journalPath}.owners`, JSON.stringify({ version: 1, owners: {
+      [JSON.stringify([f.identity.projectId, f.identity.principalId, 'old-held'])]: { pid: process.ppid, instance: 'another-process' } } }));
+    const started = snapshot(await f.host.start(f.request, f.authority, f.access));
+    expect(started.state).toBe('running');
+    expect(journalInputs(f).sort()).toEqual([f.request.inputId, 'old-held', 'old-live', 'old-unfinished'].sort());
+    expect(settled).not.toContain('old-live');
+  });
+
+  test('a journal full of live records refuses the claim with the way out and starts nothing', async () => {
+    const f = await fixture({ settle: async () => { throw new Error('must not be asked'); } });
+    writeFileSync(f.journalPath, JSON.stringify({ version: 1, records: Array.from({ length: NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS }, (_unused, index) => stale(f, `old-${index}`, 'preparing')) }));
+    await expect(f.host.start(f.request, f.authority, f.access)).rejects.toThrow(/journal-limit.*Cancel the stale native turns/su);
+    expect(f.counts).toMatchObject({ creates: 0, deliveries: 0 });
+  });
+
+  test('a refused settle is logged once with its reason and leaves the journal record', async () => {
+    const warns: unknown[][] = [];
+    const warn = spyOn(logger, 'warn').mockImplementation((...args: unknown[]) => { warns.push(args); });
+    try {
+      const f = await fixture({ settle: async () => { throw new Error('reader cohort refused'); } });
+      snapshot(await f.host.start(f.request, f.authority, f.access));
+      await f.settled();
+      await eventually(() => warns.length, count => count > 0);
+      await f.host.cancel(f.request, f.authority, f.access);
+      const refusals = warns.filter(args => JSON.stringify(args).includes('reader cohort refused'));
+      expect(refusals).toHaveLength(1);
+      expect((await f.journal.read(f.identity))?.state).toBe('completed');
+    } finally { warn.mockRestore(); }
+  });
+
+  test('a turn is marked finished on intake only after its journal record is terminal', async () => {
+    const seen = deferred<string>();
+    const f = await fixture({ settle: async () => { seen.resolve(JSON.parse(readFileSync(f.journalPath, 'utf8')).records[0].state); } });
+    snapshot(await f.host.start(f.request, f.authority, f.access));
+    expect(await seen.promise).toBe('completed');
+  });
 });

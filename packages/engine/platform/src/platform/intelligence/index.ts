@@ -24,6 +24,7 @@ export { detectLanguage, getGrammarPackage, getSupportedLanguages } from './tree
 
 // Import graph
 export { ImportGraph } from './import-graph.js';
+export { noteProjectFilesChanged, currentProjectFilesEpoch } from './project-files-epoch.js';
 export type { DependentsMap, ImportsMap } from './import-graph.js';
 export {
   extractRelativeSpecifiersForTest,

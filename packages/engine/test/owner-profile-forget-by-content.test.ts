@@ -82,7 +82,7 @@ async function harness(text: string = FIXTURE): Promise<Harness> {
   return { catalog, store, path };
 }
 
-const ctx = { context: { admin: true } } as const;
+const ctx = { context: { admin: true }, isAuthorized: () => true } as const;
 const OWNER = { authority: 'owner-direct' } as const;
 
 /** The line index `profile.read` reports for a line, as a caller would see it. */
@@ -125,6 +125,22 @@ describe('§9.2: the concurrent-edit hazard a positional delete cannot survive',
     // His inserted line survived, a positional delete would have eaten it.
     expect(after).toContain('- Keeps a spare key with the neighbour');
     expect(after).toContain('- Allergic to shellfish');
+  });
+
+  test('a line he just added by hand is found even before the store has re-read the file', async () => {
+    const { store, path } = await harness();
+    expect(store.read().sections.find((entry) => entry.heading === 'Notes')?.prose.map((line) => line.text.trim()))
+      .not.toContain('- Keeps a spare key with the neighbour');
+
+    // The store has not re-read the file: only the commit's own check can see this line.
+    writeFileSync(path, FIXTURE.replace('- Prefers aisle seats\n', '- Prefers aisle seats\n- Keeps a spare key with the neighbour\n'), 'utf-8');
+
+    const result = await store.forget({ ...OWNER, section: 'Notes', text: '- Keeps a spare key with the neighbour' });
+
+    expect(result.ok).toBe(true);
+    const after = readFileSync(path, 'utf-8');
+    expect(after).not.toContain('spare key');
+    expect(after).toContain('- Prefers aisle seats');
   });
 
   test('text that no longer exists removes nothing and says so', async () => {

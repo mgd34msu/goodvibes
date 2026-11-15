@@ -15,11 +15,12 @@ export function ensureBuiltinMediaProviders(
   artifactStore: Pick<ArtifactStore, 'readContent'>,
   providerRegistry: Pick<ProviderRegistry, 'describeRuntime' | 'getCurrentModel' | 'getForModel' | 'listModels'>,
 ): void {
+  // First, so an unscoped lookup lands on the provider that accepts any multimodal model, not a vendor-scoped one.
+  registry.register(createBuiltinImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   registry.register(createOpenAIImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   registry.register(createGeminiImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   registry.register(createAnthropicImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   registry.register(createLocalImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
-  registry.register(createBuiltinImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   for (const provider of builtinGenerationProviders()) {
     registry.register(provider, { replace: true });
   }

@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // operator-rpc.test.ts, getOperatorRpc honest-unavailable path + error rendering
 //
-// Only the "daemon disabled" branch is exercised against a real ConfigManager
-// (default daemon.enabled is false, so no daemon/network mock is needed to
-// reach it). The happy path (daemon.enabled=true, live HTTP round-trip) is
+// Both branches resolve against a real ConfigManager (daemon.enabled is set
+// explicitly, so no daemon/network mock is needed). The live HTTP round-trip is
 // exercised indirectly by the per-command tests via their own usage/guard
 // branches, standing up a real daemon here would duplicate daemon/server
 // tests rather than test this module's own logic.
@@ -27,7 +26,7 @@ function makeConfigManager(): ConfigManager {
   tempDirs.push(workingDir);
   const configDir = join(workingDir, '.goodvibes', 'tui');
   mkdirSync(configDir, { recursive: true });
-  return new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir });
+  return new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir, homeDir: workingDir });
 }
 
 function makeCtx(configManager: ConfigManager, homeDirectory?: string): CommandContext {
@@ -52,6 +51,7 @@ describe('getOperatorRpc', () => {
     const configManager = makeConfigManager();
     const homeDirectory = makeProjectTempDir('gv-operator-rpc-home');
     tempDirs.push(homeDirectory);
+    configManager.setDynamic('daemon.enabled', true);
     const result = getOperatorRpc(makeCtx(configManager, homeDirectory));
     expect(result.available).toBe(true);
     if (result.available) {

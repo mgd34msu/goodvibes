@@ -3,12 +3,17 @@
  *
  * Tests for GET /api/runtime/scheduler scheduler capacity endpoint.
  *
- * - Empty state: correct zero-state shape with slotsTotal from config default
- * - With running + queued runs: counters reflect live state
- * - HTTP route wiring: dispatchDaemonOperatorApiRoutes returns documented shape
+ * - Route handler and dispatcher: pass the automation manager's report through unchanged
+ *   (the report is a stub here, so these tests only pin the wiring and shape)
+ * - Real counters: the capacity computation and the manager's configured slot total
  */
 
 import { describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
+import { computeSchedulerCapacity } from '../platform/src/platform/automation/scheduler-capacity.js';
+import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
+import { automationMutationFixture } from './_helpers/automation-mutation-fixture.ts';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/runtime-automation-routes.js';
 import { dispatchOperatorRoutes } from '../daemon-api/src/operator.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
@@ -116,19 +121,6 @@ describe('GET /api/runtime/scheduler: empty state', () => {
     expect(body['slotsInUse']).toBe(0);
     expect(body['queueDepth']).toBe(0);
   });
-
-  test('slotsTotal reflects automation.maxConcurrentRuns config default (4)', async () => {
-    const ctx = makeContext({
-      slotsTotal: 4,
-      slotsInUse: 0,
-      queueDepth: 0,
-      oldestQueuedAgeMs: null,
-    });
-    const handlers = createDaemonRuntimeAutomationRouteHandlers(ctx);
-    const res = await handlers.getSchedulerCapacity(new Request('http://localhost/api/runtime/scheduler'));
-    const body = await res.json() as Record<string, unknown>;
-    expect(body['slotsTotal']).toBe(4);
-  });
 });
 
 describe('GET /api/runtime/scheduler: live state', () => {
@@ -235,5 +227,53 @@ describe('GET /api/runtime/scheduler: HTTP route wiring', () => {
     const res = await dispatchOperatorRoutes(req, handlers);
     expect(res).not.toBeNull();
     expect(res!.status).toBe(403);
+  });
+});
+
+describe('scheduler capacity counters (real computation)', () => {
+  function run(id: string, status: AutomationRun['status'], queuedAt: number): AutomationRun {
+    return {
+      id,
+      labels: [],
+      createdAt: queuedAt,
+      updatedAt: queuedAt,
+      jobId: 'job-1',
+      status,
+      triggeredBy: { id: 'source-1', kind: 'manual', label: 'test', enabled: true, createdAt: 1, updatedAt: 1, metadata: {} },
+      target: { kind: 'background' },
+      execution: { target: { kind: 'background' } },
+      queuedAt,
+      forceRun: false,
+      dueRun: false,
+      attempt: 1,
+      deliveryIds: [],
+    };
+  }
+
+  test('counts running runs as slots in use and queued runs as depth, aging from the oldest queued run', () => {
+    const report = computeSchedulerCapacity(4, [
+      run('a', 'running', 100),
+      run('b', 'queued', 4_000),
+      run('c', 'queued', 2_500),
+      run('d', 'completed', 10),
+    ], 10_000);
+    expect(report).toEqual({ slotsTotal: 4, slotsInUse: 1, queueDepth: 2, oldestQueuedAgeMs: 7_500 });
+  });
+
+  test('an empty queue has no oldest age', () => {
+    expect(computeSchedulerCapacity(4, [run('a', 'running', 100)], 10_000).oldestQueuedAgeMs).toBeNull();
+  });
+
+  test('the manager reports the default of four slots, follows automation.maxConcurrentRuns, and counts a started run', async () => {
+    const dir = makeProjectTempDir('scheduler-capacity-manager');
+    const f = automationMutationFixture(dir);
+    try {
+      expect(f.manager.getSchedulerCapacity()).toMatchObject({ slotsTotal: 4, slotsInUse: 0, queueDepth: 0, oldestQueuedAgeMs: null });
+      f.config.set('automation.maxConcurrentRuns', 2);
+      const job = await f.create();
+      await f.manager.start();
+      await f.manager.runNow(job.id);
+      expect(f.manager.getSchedulerCapacity()).toMatchObject({ slotsTotal: 2, slotsInUse: 1 });
+    } finally { await f.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

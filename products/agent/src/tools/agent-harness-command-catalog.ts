@@ -4,6 +4,7 @@ import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessCommandCatalogArgs {
   readonly query?: unknown;
@@ -32,9 +33,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readStringArray(value: unknown): readonly string[] {
@@ -99,7 +98,7 @@ async function matchingCommands(commandRegistry: CommandRegistry, query: string,
 
 function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup): Record<string, unknown> {
   const policy = describeCommandPolicy(command.name);
-  const modelRoute = previewText(policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`);
+  const modelRoute = policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`;
   return {
     name: command.name,
     slash: `/${command.name}`,
@@ -136,7 +135,7 @@ function describeCommandCandidate(command: CatalogCommand): Record<string, unkno
     aliases: command.aliases ?? [],
     summary: previewText(command.description),
     effect: policy.effect,
-    modelRoute: previewText(policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`),
+    modelRoute: policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`,
     ...(command.argsHint ? { argsHint: command.argsHint } : {}),
   };
 }
@@ -145,7 +144,9 @@ function commandDetailLookupFromArgs(args: AgentHarnessCommandCatalogArgs): Omit
   const rawCommand = readString(args.command);
   if (rawCommand) {
     const parsed = parseSlashCommand(rawCommand);
-    return { source: 'command', input: rawCommand, parsedName: parsed.name, parsedArgs: parsed.args };
+    // A bare name plus an `args` array is the old `commandName` shape; keep it working.
+    const explicitArgs = readStringArray(args.args);
+    return { source: 'command', input: rawCommand, parsedName: parsed.name, parsedArgs: parsed.args.length === 0 && explicitArgs.length > 0 ? explicitArgs : parsed.args };
   }
   const rawCommandName = readString(args.commandName);
   if (rawCommandName) {

@@ -23,7 +23,12 @@ import { ConfigManager } from '../platform/src/platform/config/manager.js';
  */
 
 const roots: string[] = [];
-afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
+const stores: MemoryStore[] = [];
+afterEach(() => {
+  // Close before the directory goes: the sqlite file must not be open while it is removed.
+  for (const store of stores.splice(0)) store.close();
+  for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
+});
 
 function tempDir(): string {
   const root = mkdtempSync(join(tmpdir(), 'gv-mfp-'));
@@ -76,9 +81,9 @@ describe('projectMemoryToFiles / readProjectedMemoryFiles', () => {
       now: 1000,
       git: {
         resolveToplevel: () => null,
-        init: () => calls.push('init'),
-        add: () => calls.push('add'),
-        commit: () => calls.push('commit'),
+        init: () => { calls.push('init'); },
+        add: () => { calls.push('add'); },
+        commit: () => { calls.push('commit'); },
       },
     });
     expect(calls).toEqual(['init', 'add', 'commit']);
@@ -91,9 +96,9 @@ describe('projectMemoryToFiles / readProjectedMemoryFiles', () => {
       now: 1000,
       git: {
         resolveToplevel: (queried) => queried,
-        init: () => calls.push('init'),
-        add: () => calls.push('add'),
-        commit: () => calls.push('commit'),
+        init: () => { calls.push('init'); },
+        add: () => { calls.push('add'); },
+        commit: () => { calls.push('commit'); },
       },
     });
     expect(calls).toEqual(['add', 'commit']);
@@ -107,9 +112,9 @@ describe('projectMemoryToFiles / readProjectedMemoryFiles', () => {
       git: {
         // git resolves upward to an enclosing checkout that is NOT ours.
         resolveToplevel: () => '/home/user/some-foreign-checkout',
-        init: (initDir) => calls.push(`init:${initDir}`),
-        add: (addDir) => calls.push(`add:${addDir}`),
-        commit: (commitDir) => calls.push(`commit:${commitDir}`),
+        init: (initDir) => { calls.push(`init:${initDir}`); },
+        add: (addDir) => { calls.push(`add:${addDir}`); },
+        commit: (commitDir) => { calls.push(`commit:${commitDir}`); },
       },
     });
     // The seam is redirected to a repository initialized AT the projection dir.
@@ -118,6 +123,15 @@ describe('projectMemoryToFiles / readProjectedMemoryFiles', () => {
 });
 
 describe('diff + gated apply (round-trip)', () => {
+  test('an unedited file with no manifest entry is refreshed when the store confidence changed', () => {
+    const dir = join(tempDir(), 'memory');
+    projectMemoryToFiles([record()], dir, { now: 1000 });
+    rmSync(join(dir, '.projection-manifest.json'), { force: true });
+    const report = projectMemoryToFiles([record({ confidence: 40 })], dir, { now: 1000 });
+    expect(report.kept).toBeUndefined();
+    expect(readFileSync(join(dir, 'mem_a.md'), 'utf-8')).toContain('40');
+  });
+
   test('editing a file yields an update proposal; nothing changes until confirmed', () => {
     const records = [record()];
     const files = [{ id: 'mem_a', path: '/x/mem_a.md', scope: 'project' as const, cls: 'decision' as const, summary: 'use bun everywhere', detail: 'bun is the runtime', tags: ['tooling'] }];
@@ -127,8 +141,8 @@ describe('diff + gated apply (round-trip)', () => {
     expect(proposals[0]!.changedFields).toContain('summary');
   });
 
-  test('a removed file yields a delete proposal', () => {
-    const proposals = diffProjectionToProposals([record()], []);
+  test('a removed file yields a delete proposal when the record was projected', () => {
+    const proposals = diffProjectionToProposals([record()], [], { projectedIds: new Set(['mem_a']) });
     expect(proposals.length).toBe(1);
     expect(proposals[0]!.kind).toBe('delete');
   });
@@ -145,6 +159,7 @@ describe('diff + gated apply (round-trip)', () => {
       embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
       enableVectorIndex: false,
     });
+    stores.push(store);
     await store.init();
     const registry = new MemoryRegistry(store);
     const added = await registry.add({ cls: 'decision', summary: 'original', detail: 'd', tags: ['t'], scope: 'project' });

@@ -27,7 +27,7 @@ export type {
   CompoundVerdict,
 } from './verdict.js';
 
-export { tokenize } from './tokenizer.js';
+export { tokenize, tokenizeBounded } from './tokenizer.js';
 export { segment } from './segmenter.js';
 export { canonicalize } from './canonicalizer.js';
 export { readCommandNeeds, type CommandNeeds } from './classifier.js';
@@ -35,7 +35,7 @@ export { collectCommandNodes, describeNode } from './ast.js';
 export { parseAST, parseCommandAST } from './parser.js';
 export { evaluateSegmentNode, evaluateCommandAST, buildDenialExplanation, asSingleLine } from './verdict.js';
 
-import { tokenize } from './tokenizer.js';
+import { tokenizeBounded } from './tokenizer.js';
 import { segment } from './segmenter.js';
 import type { NormalizedCommand } from './types.js';
 import { parseCommandAST } from './parser.js';
@@ -49,6 +49,6 @@ export function normalizeCommandWithVerdicts(command: string): CompoundVerdict {
 
 /** The flat segments of a shell command. */
 export function normalizeCommand(command: string): NormalizedCommand {
-  const trimmed = command.trim();
-  return { original: command, segments: segment(tokenize(trimmed)) };
+  const { tokens, truncated } = tokenizeBounded(command.trim());
+  return { original: command, segments: segment(tokens), ...(truncated ? { truncated } : {}) };
 }

@@ -1,4 +1,3 @@
-/** Native filesystem regression source. Execution is deferred until coding finishes. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
@@ -47,24 +46,26 @@ test('stage first, commit reversibly, preserve unknown previous/incoming and rep
 
 test('a failed final rename compensates both original live and old previous without deleting either', () => {
   const f = fixture(); fs.mkdirSync(f.previous); fs.writeFileSync(join(f.previous, 'index.html'), 'older');
-  const handle = prepareNativeUpdateDirectory(f.target, next(), options), rename = fs.renameSync;
+  const handle = prepareNativeUpdateDirectory(f.target, next(), options), rename = fs.renameSync; let injected = false;
   const failure = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-    if (String(from).endsWith('/incoming') && String(to) === f.target) throw new Error('Synthetic final rename failure');
+    if (String(from).endsWith('/incoming') && String(to) === f.target) { injected = true; throw new Error('Synthetic final rename failure'); }
     return rename(from, to);
   });
   try { expect(() => handle.commit()).toThrow(NativeDirectoryUpdateError); }
   finally { failure.mockRestore(); }
+  expect(injected).toBe(true);
   expect(handle.recoveryRequired).toBe(false); expect(content(f.target)).toBe('old'); expect(content(f.previous)).toBe('older');
   handle.dispose(); expect(fs.existsSync(f.claim)).toBe(false);
 });
 
 test('blocked compensation keeps its actual claim until original paths can be restored', () => {
-  const f = fixture(), handle = prepareNativeUpdateDirectory(f.target, next(), options), rename = fs.renameSync;
+  const f = fixture(), handle = prepareNativeUpdateDirectory(f.target, next(), options), rename = fs.renameSync; let injected = false;
   const failure = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-    if (String(to) === f.target) throw new Error('Synthetic commit and compensation failure'); return rename(from, to);
+    if (String(to) === f.target) { injected = true; throw new Error('Synthetic commit and compensation failure'); } return rename(from, to);
   });
   try { expect(() => handle.commit()).toThrow(); expect(handle.recoveryRequired).toBe(true); expect(() => handle.dispose()).toThrow(); }
   finally { failure.mockRestore(); }
+  expect(injected).toBe(true);
   expect(fs.existsSync(f.claim)).toBe(true); expect(content(f.previous)).toBe('old');
   handle.restore(); handle.dispose(); expect(content(f.target)).toBe('old'); expect(fs.existsSync(f.claim)).toBe(false);
 });
@@ -163,4 +164,19 @@ test('unknown staged children are preserved and never silently included in the s
     foreign = join(destination, 'unknown.txt'); fs.writeFileSync(foreign, 'keep');
   } })).toThrow();
   expect(foreign).toBeDefined(); expect(fs.readFileSync(foreign!, 'utf8')).toBe('keep'); expect(content(f.target)).toBe('old');
+});
+
+test('successive updates keep one backup generation: the marked release before it is removed, not accumulated', () => {
+  const f = fixture(); fs.writeFileSync(join(f.target, NATIVE_UPDATE_DIRECTORY_RELEASE_FILE), JSON.stringify({ schema: 1, version: '3.1.2' }) + '\n');
+  const update = (version: string) => {
+    const handle = prepareNativeUpdateDirectory(f.target, next(), { ...options, sourceVersion: version });
+    handle.commit(); return handle.finish();
+  };
+  expect(update('3.1.3').preservedPaths).toEqual([]);
+  expect(update('3.1.4').preservedPaths).toEqual([]);
+  const third = update('3.1.5');
+  expect(third.preservedPaths).toEqual([]);
+  expect(fs.readdirSync(f.root).sort()).toEqual(['webui', 'webui.previous']);
+  expect(JSON.parse(fs.readFileSync(join(f.previous, NATIVE_UPDATE_DIRECTORY_RELEASE_FILE), 'utf8')).version).toBe('3.1.4');
+  expect(JSON.parse(fs.readFileSync(join(f.target, NATIVE_UPDATE_DIRECTORY_RELEASE_FILE), 'utf8')).version).toBe('3.1.5');
 });

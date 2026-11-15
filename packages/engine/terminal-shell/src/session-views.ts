@@ -62,7 +62,8 @@ export interface SessionViewsDeps {
     readonly now?: (() => number) | undefined;
     /** Process output poll interval (ms); 0 disables the timer (tests poll by hand). */
     readonly pollMs?: number | undefined;
-    readonly copy?: ((text: string) => void) | undefined;
+    /** Returns false when the text could not be sent; no return value counts as sent. */
+    readonly copy?: ((text: string) => boolean | void) | undefined;
 }
 /** What the frame draws while a view is open. */
 export interface SessionViewFrame {
@@ -233,6 +234,17 @@ export class SessionViews implements SessionViewControls {
         for (const id of this.endedSeen)
             if (!known.has(id))
                 this.endedSeen.delete(id);
+        // Scroll positions are per view: drop those of agents and processes that are gone.
+        for (const map of [this.scrollBy, this.maxScrollBy])
+            for (const key of map.keys()) {
+                const [kind, ...rest] = key.split(':');
+                const id = rest.join(':');
+                if ((kind === 'process' && !known.has(id)) || (kind === 'agent' && !this.deps.agentManager.getStatus(id)))
+                    map.delete(key);
+            }
+        for (let i = this.steers.length - 1; i >= 0; i--)
+            if (!this.deps.agentManager.getStatus(this.steers[i]!.agentId))
+                this.steers.splice(i, 1);
         return ended;
     }
     /** Read new process output; true when anything arrived. */
@@ -353,7 +365,8 @@ export class SessionViews implements SessionViewControls {
             this.say(stopped.length > 0 ? `Stopped ${name}${stopped.length > 1 ? ` and ${stopped.length - 1} agent${stopped.length === 2 ? '' : 's'} it started` : ''}.` : `${name} could not be stopped.`, stopped.length > 0 ? 'info' : 'error');
         }
         else {
-            this.say(this.deps.processManager.stop(target.id) ? `Stopped ${name}.` : `${name} could not be stopped.`, 'info');
+            const stoppedProcess = this.deps.processManager.stop(target.id);
+            this.say(stoppedProcess ? `Stopped ${name}.` : `${name} could not be stopped.`, stoppedProcess ? 'info' : 'error');
         }
     }
     scroll(rows: number): void {
@@ -373,14 +386,14 @@ export class SessionViews implements SessionViewControls {
     }
     pageRows(): number { return Math.max(1, this.lastPage - 2); }
     follow(): void { this.scrollBy.set(this.scrollKey(), 0); }
-    steer(text: string): boolean {
+    steer(text: string, onFailure?: () => void): boolean {
         const target = this.focus.current;
         if (target.kind !== 'agent')
             return false;
         const name = this.focus.nameOf(target);
         const contract = this.contractOf(target.id);
         if (contract)
-            return this.replyToOwner(contract, text);
+            return this.replyToOwner(contract, text, onFailure);
         const result = this.deps.steer(target.id, text);
         if (!result.queued) {
             this.say(`${name} did not take the message: ${result.reason ?? 'refused'}.`, 'error');
@@ -403,7 +416,7 @@ export class SessionViews implements SessionViewControls {
         }
         return sources.contract ? sources.contract(agentId) : sources.agent?.(agentId)?.contract;
     }
-    private replyToOwner(contract: ContractView, text: string): boolean {
+    private replyToOwner(contract: ContractView, text: string, onFailure?: () => void): boolean {
         const escalation = contract.escalations.filter((entry) => entry.resolvedAt === undefined).at(-1);
         const runner = this.deps.contractRunner;
         if (!runner || !escalation) {
@@ -418,9 +431,16 @@ export class SessionViews implements SessionViewControls {
         this.say('Reading your reply to the owner question.', 'info');
         void runner.reply(contract.id, escalation.id, text).then((result) => {
             const messages = { approved: 'Owner reply accepted; the contract can continue.', amended: 'Owner reply changed the contract.', stopped: 'The contract stopped.', 'asked-again': 'The contract needs clarification; check the new owner question.', refused: 'The contract could not accept that reply; check the owner question.' };
-            this.say(messages[result.action], result.action === 'refused' ? 'error' : 'info');
+            // A failed-turn question is answered retry or cancel; "changed the contract" would be untrue.
+            const text = escalation.failurePause === true && (result.action === 'amended' || result.action === 'stopped')
+                ? (result.action === 'amended' ? 'Retrying the failed turn.' : 'The contract is cancelled.')
+                : messages[result.action];
+            this.say(text, result.action === 'refused' ? 'error' : 'info');
+            if (result.action === 'refused')
+                onFailure?.();
         }, (error: unknown) => {
             this.say(`Owner reply failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+            onFailure?.();
         }).finally(() => { this.pendingOwnerReplies.delete(contract.id); this.deps.requestRender(); });
         return true;
     }
@@ -456,9 +476,14 @@ export class SessionViews implements SessionViewControls {
         const target = this.focus.current;
         if (target.kind !== 'process')
             return;
-        const text = this.log.lines(target.id).map((l) => l.text).join('\n');
-        (this.deps.copy ?? copyToClipboard)(text);
-        this.say(`Copied ${this.log.lines(target.id).length} lines of output.`, 'info');
+        const lines = this.log.lines(target.id);
+        if (lines.length === 0 || lines.every((l) => l.text === '')) {
+            this.say('Nothing to copy: this process has not printed any output.', 'info');
+            return;
+        }
+        const sent = (this.deps.copy ?? copyToClipboard)(lines.map((l) => l.text).join('\n'));
+        // OSC 52 has no acknowledgement: the terminal either honours it or drops it silently.
+        this.say(sent === false ? 'The output could not be sent to the terminal clipboard.' : `Sent ${lines.length} lines of output to the terminal clipboard (needs OSC 52 support).`, sent === false ? 'error' : 'info');
     }
     restart(): void {
         this.say('Restart is not available: the process manager does not keep what it needs to start this process again.', 'info');
@@ -688,7 +713,7 @@ export class SessionViews implements SessionViewControls {
             const rows = this.rows(id, width);
             const key = this.scrollKey();
             const inner = SessionViews.innerRows(height);
-            const max = processMaxScroll(rows.length, inner);
+            const max = processMaxScroll(rows.length, inner, this.log.dropped(id));
             const scroll = Math.min(this.scrollBy.get(key) ?? 0, max);
             this.scrollBy.set(key, scroll);
             this.maxScrollBy.set(key, max);

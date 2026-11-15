@@ -20,7 +20,7 @@ const source: NativeContractSource = {
   criteria: ['Preserve parser behavior'],
 };
 
-test('review: exhausted decision targets halt a native contract without retrying forever', async () => {
+test('exhausted decision targets halt a native contract without retrying forever', async () => {
   using log = new SqliteDecisionLog(':memory:');
   let attempts = 0;
   let failureInput: unknown;

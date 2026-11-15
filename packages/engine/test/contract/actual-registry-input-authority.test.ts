@@ -145,7 +145,7 @@ for (const scenario of ['allowed', 'revoke-cached'] as const) {
         expect(result.status, result.error).toBe('passed');
         expect(memberCalls).toBe(8);
         expect(memberRequests[5]?.text).toContain('"mode":"recommend"'.replaceAll('"', '\\"'));
-        expect(memberRequests[6]?.text).toContain('File not found:');
+        expect(memberRequests[6]?.text).toContain('can only read files inside .goodvibes/skills or .goodvibes/agents');
       }
     } finally {
       if (id) runner.cancel(id, 'fixture cleanup');

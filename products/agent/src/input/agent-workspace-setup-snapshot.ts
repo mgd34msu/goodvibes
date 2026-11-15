@@ -77,7 +77,7 @@ export function buildSetupSmokeHistory(artifacts: readonly ArtifactDescriptor[],
     latestEvidenceAt: artifactCreatedAtIso(latest),
     resultCounts,
     blockedCheckFrequency: setupSmokeBlockedCheckFrequency(setupSmokeArtifacts),
-    inspectLatestRoute: `agent_artifacts show artifactId:"${latest.id}" includeContent:false`,
+    inspectLatestRoute: `agent_artifacts mode:"show" artifactId:"${latest.id}" includeContent:false`,
     rerunRoute: DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE,
     saveRoute: DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE,
   };

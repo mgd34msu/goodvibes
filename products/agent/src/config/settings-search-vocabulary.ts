@@ -72,7 +72,7 @@ export const SETTING_DOMAIN_VOCABULARY: Readonly<Record<string, SettingDomainVoc
     aliases: ['theme', 'dark mode', 'light mode', 'appearance', 'colours', 'colors', 'look'],
   },
   update: {
-    aliases: ['update', 'upgrade', 'new version', 'auto update', 'release channel'],
+    aliases: ['update', 'upgrade', 'new version', 'auto update'],
   },
 };
 

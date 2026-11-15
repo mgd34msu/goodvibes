@@ -14,84 +14,14 @@ import { ExportQueue } from './queue.js';
 import { logger } from '../../../utils/logger.js';
 import { instrumentedFetch } from '../../../utils/fetch-with-timeout.js';
 import { summarizeError } from '../../../utils/error-display.js';
+import { buildOtlpTraceDocumentFromSpans } from '../api-helpers.js';
 
-/**
- * Serialises a ReadableSpan[] into OTLP/HTTP JSON format (simplified).
- *
- * This produces a minimal protobuf-JSON compatible payload understood by
- * OTLP receivers (e.g. OpenTelemetry Collector, Tempo, Jaeger v2).
- */
+/** The same OTLP/JSON document the telemetry API serves, so both paths agree on kinds, parents and attributes. */
 function serialiseSpans(spans: ReadableSpan[]): string {
-  if (spans.length === 0) return JSON.stringify({ resourceSpans: [] });
-  const resourceSpans = [
-    {
-      resource: {
-        attributes: [
-          { key: 'service.name', value: { stringValue: 'goodvibes-platform' } },
-        ],
-      },
-      scopeSpans: [
-        {
-          scope: { name: spans[0]?.instrumentationScope ?? 'goodvibes-platform' },
-          spans: spans.map((s) => ({
-            traceId: s.spanContext.traceId,
-            spanId: s.spanContext.spanId,
-            parentSpanId: s.parentSpanId ?? '',
-            name: s.name,
-            kind: s.kind,
-            startTimeUnixNano: String(s.startTimeMs * 1_000_000),
-            endTimeUnixNano: String(s.endTimeMs * 1_000_000),
-            attributes: Object.entries(s.attributes).map(([key, value]) => ({
-              key,
-              value: attributeValue(value),
-            })),
-            events: s.events.map((e) => ({
-              name: e.name,
-              timeUnixNano: String(e.timestamp * 1_000_000),
-              attributes: Object.entries(e.attributes ?? {}).map(([k, v]) => ({
-                key: k,
-                value: attributeValue(v),
-              })),
-            })),
-            status: { code: s.status.code, message: s.status.message ?? '' },
-          })),
-        },
-      ],
-    },
-  ];
-  return JSON.stringify({ resourceSpans });
+  return JSON.stringify(buildOtlpTraceDocumentFromSpans(spans));
 }
 
-/** Maps an AttributeValue to an OTLP AnyValue object. */
-function attributeValue(
-  v: string | number | boolean | string[] | number[] | boolean[],
-): Record<string, unknown> {
-  if (typeof v === 'string') return { stringValue: v };
-  if (typeof v === 'number') return { doubleValue: v };
-  if (typeof v === 'boolean') return { boolValue: v };
-  if (Array.isArray(v)) {
-    if (v.length === 0) return { arrayValue: { values: [] } };
-    const first = v[0]!;
-    if (typeof first === 'string')
-      return {
-        arrayValue: {
-          values: (v as string[]).map((s) => ({ stringValue: s })),
-        },
-      };
-    if (typeof first === 'number')
-      return {
-        arrayValue: {
-          values: (v as number[]).map((n) => ({ doubleValue: n })),
-        },
-      };
-    return {
-      arrayValue: {
-        values: (v as boolean[]).map((b) => ({ boolValue: b })),
-      },
-    };
-  }
-  return { stringValue: String(v) };
-}
+const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 
 /**
  * Non-blocking OTLP/HTTP span exporter.
@@ -118,12 +48,14 @@ export class OtlpExporter implements SpanExporter {
   };
   private readonly _queue: ExportQueue;
   private readonly _pending: ReadableSpan[] = [];
+  private _flushTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(config: OtlpConfig) {
     this._config = {
       endpoint: config.endpoint,
       batchSize: config.batchSize ?? DEFAULT_OTLP_CONFIG.batchSize,
       timeoutMs: config.timeoutMs ?? DEFAULT_OTLP_CONFIG.timeoutMs,
+      flushIntervalMs: config.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
       headers: config.headers ?? {},
     };
 
@@ -148,8 +80,9 @@ export class OtlpExporter implements SpanExporter {
    * Accept completed spans.
    *
    * Spans are accumulated into the pending buffer. When the buffer
-   * reaches `batchSize`, a batch is enqueued for async export.
-   * Remaining spans are flushed on `flush()` or `shutdown()`.
+   * reaches `batchSize`, a batch is enqueued for async export. A smaller
+   * remainder is enqueued after `flushIntervalMs`, or on `flush()` or
+   * `shutdown()`.
    *
    * Never throws.
    */
@@ -160,6 +93,7 @@ export class OtlpExporter implements SpanExporter {
         const batch = this._pending.splice(0, this._config.batchSize);
         this._queue.enqueue(batch);
       }
+      this._scheduleFlush();
     } catch (err) {
       // use structured logger, not console
       logger.error('[OtlpExporter] export() failed', { error: summarizeError(err) });
@@ -172,10 +106,7 @@ export class OtlpExporter implements SpanExporter {
    */
   async flush(): Promise<void> {
     try {
-      if (this._pending.length > 0) {
-        const batch = this._pending.splice(0);
-        this._queue.enqueue(batch);
-      }
+      this._enqueuePending();
       await this._queue.drain();
     } catch (err) {
       // use structured logger, not console
@@ -190,15 +121,37 @@ export class OtlpExporter implements SpanExporter {
    */
   async shutdown(): Promise<void> {
     try {
-      if (this._pending.length > 0) {
-        const batch = this._pending.splice(0);
-        this._queue.enqueue(batch);
-      }
+      this._enqueuePending();
       await this._queue.shutdown();
     } catch (err) {
       // use structured logger, not console
       logger.error('[OtlpExporter] shutdown() failed', { error: summarizeError(err) });
     }
+  }
+
+  /** Hand every pending span to the queue and stop the pending timer. */
+  private _enqueuePending(): void {
+    if (this._flushTimer !== undefined) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = undefined;
+    }
+    if (this._pending.length > 0) {
+      this._queue.enqueue(this._pending.splice(0));
+    }
+  }
+
+  private _scheduleFlush(): void {
+    if (this._pending.length === 0 || this._flushTimer !== undefined) return;
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = undefined;
+      try {
+        this._enqueuePending();
+      } catch (err) {
+        logger.error('[OtlpExporter] timed flush failed', { error: summarizeError(err) });
+      }
+    }, this._config.flushIntervalMs);
+    // Waiting spans must not keep an otherwise finished process alive.
+    this._flushTimer.unref?.();
   }
 
   // ── Private HTTP transport ────────────────────────────────────────────────

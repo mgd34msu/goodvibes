@@ -183,6 +183,9 @@ describe('browser provisioning semantic decisions', () => {
     const pending = ensureBrowserBinary(io, { port, signal: controller.signal });
     await started; controller.abort();
     await expect(pending).rejects.toThrow();
-    release(); await Promise.resolve(); expect(commands).toHaveLength(1);
+    release();
+    // Let the released reading settle and any continuation run before checking the installer never started.
+    for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+    expect(commands).toHaveLength(1);
   });
 });

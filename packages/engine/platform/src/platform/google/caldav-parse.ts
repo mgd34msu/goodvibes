@@ -100,14 +100,19 @@ function extractChildLocalNames(xml: string): string[] {
   return names;
 }
 
+/** One out-of-range numeric entity must not throw away the whole response. */
+function codePointOrReplacement(codePoint: number): string {
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\uFFFD';
+}
+
 function decodeXmlEntities(value: string): string {
   return value
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_match, digits: string) => String.fromCodePoint(parseInt(digits, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, digits: string) => codePointOrReplacement(parseInt(digits, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) => codePointOrReplacement(parseInt(hex, 16)))
     .replace(/&amp;/g, '&');
 }
 
@@ -206,6 +211,8 @@ export interface CalDavEventRecord {
   /** DTSTART's TZID parameter, when present (not applicable to UTC/all-day values). */
   readonly tzid?: string;
   readonly rrule?: string;
+  /** Raw RECURRENCE-ID value: set on an override of one occurrence of a recurring event. */
+  readonly recurrenceId?: string;
 }
 
 /**
@@ -287,6 +294,7 @@ function buildEventRecord(fields: ReadonlyMap<string, IcsField>): CalDavEventRec
   const dtendField = fields.get('DTEND');
   const locationField = fields.get('LOCATION');
   const rruleField = fields.get('RRULE');
+  const recurrenceIdField = fields.get('RECURRENCE-ID');
 
   const dtstart = dtstartField?.value ?? '';
   const allDay = dtstartField?.params['VALUE'] === 'DATE' || /^\d{8}$/.test(dtstart);
@@ -302,6 +310,7 @@ function buildEventRecord(fields: ReadonlyMap<string, IcsField>): CalDavEventRec
     ...(location !== undefined ? { location } : {}),
     ...(tzid !== undefined ? { tzid } : {}),
     ...(rruleField !== undefined ? { rrule: rruleField.value } : {}),
+    ...(recurrenceIdField !== undefined ? { recurrenceId: recurrenceIdField.value } : {}),
   };
 }
 
@@ -318,11 +327,15 @@ export function parseCalendarDataEvents(calendarData: string): CalDavEventRecord
     const lines = unfolded.split(/\r\n|\r|\n/);
     const events: CalDavEventRecord[] = [];
     let current: Map<string, IcsField> | null = null;
+    // Lines inside a component nested in the VEVENT (a VALARM) carry their own
+    // SUMMARY and DESCRIPTION, which must not replace the event's.
+    let nestedDepth = 0;
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
       if (/^BEGIN:VEVENT$/i.test(line)) {
         current = new Map();
+        nestedDepth = 0;
         continue;
       }
       if (/^END:VEVENT$/i.test(line)) {
@@ -334,6 +347,15 @@ export function parseCalendarDataEvents(calendarData: string): CalDavEventRecord
         continue;
       }
       if (!current || line.length === 0) continue;
+      if (/^BEGIN:/i.test(line)) {
+        nestedDepth += 1;
+        continue;
+      }
+      if (/^END:/i.test(line)) {
+        nestedDepth = Math.max(0, nestedDepth - 1);
+        continue;
+      }
+      if (nestedDepth > 0) continue;
       const parsed = parseIcsLine(line);
       if (!parsed) continue;
       current.set(parsed.name, parsed.field);

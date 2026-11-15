@@ -3,7 +3,7 @@ import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/pr
 export type PickerMode = 'model' | 'provider' | 'effort' | 'contextCap' | 'embeddingProvider';
 /**
  * Which config keys the model picker writes to on commit.
- * 'main'       -> provider.provider + provider.model (default)
+ * 'main'       -> provider.model (default; the model key carries its provider)
  * 'helper'     -> helper.globalProvider + helper.globalModel (+ helper.enabled: true)
  * 'tool'       -> tools.llmProvider + tools.llmModel (+ tools.llmEnabled: true)
  * 'tts'        -> tts.llmProvider + tts.llmModel

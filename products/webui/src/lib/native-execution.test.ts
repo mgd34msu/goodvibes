@@ -121,6 +121,7 @@ function harness() {
         if (confirmFailure || JSON.stringify(record) !== JSON.stringify(saved))
           throw new Error("Journal unconfirmed");
       },
+      async remove() {},
     },
     async confirm(record) {
       calls.push("original.confirm");

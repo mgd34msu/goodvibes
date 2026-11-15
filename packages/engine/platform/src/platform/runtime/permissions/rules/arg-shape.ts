@@ -36,21 +36,17 @@ function toolMatchesArgPattern(
 /**
  * matchArgValue, Tests a single argument value against an expected matcher.
  *
- * - If `expected` is a string starting with `/`, it is treated as a regex
- *   pattern (the trailing `/` and flags are parsed out if present).
- * - Otherwise, strict equality is used.
+ * - If `expected` is written `/pattern/` or `/pattern/flags`, it is a regex.
+ * - Otherwise (including a literal path such as `/etc/passwd`), strict equality is used.
  *
  * @param actual  , The actual argument value.
  * @param expected, The expected matcher value from the rule.
  */
 function matchArgValue(actual: unknown, expected: unknown): boolean {
-  if (typeof expected === 'string' && expected.startsWith('/')) {
-    // Regex pattern: /pattern/ or /pattern/flags
-    const lastSlash = expected.lastIndexOf('/');
-    const flags = lastSlash > 0 ? expected.slice(lastSlash + 1) : '';
-    const source = expected.slice(1, lastSlash > 0 ? lastSlash : undefined);
+  const regex = typeof expected === 'string' ? parseRegexMatcher(expected) : null;
+  if (regex !== null) {
     try {
-      const re = compileSafeRegExp(source, flags, { operation: 'permission arg-shape', maxPatternChars: 256 });
+      const re = compileSafeRegExp(regex.source, regex.flags, { operation: 'permission arg-shape', maxPatternChars: 256 });
       return safeRegExpTest(re, String(actual), { operation: 'permission arg-shape', maxInputChars: 4_096 });
     } catch {
       // Invalid regex, treat as literal string match
@@ -58,6 +54,19 @@ function matchArgValue(actual: unknown, expected: unknown): boolean {
     }
   }
   return actual === expected;
+}
+
+/**
+ * A matcher is a regex only when it reads `/source/flags` with a closing slash and flags from the
+ * set JavaScript knows. An absolute path such as `/etc/passwd` is a literal: its tail after the
+ * last slash is not a flag set.
+ */
+function parseRegexMatcher(expected: string): { source: string; flags: string } | null {
+  const lastSlash = expected.lastIndexOf('/');
+  if (!expected.startsWith('/') || lastSlash < 2) return null;
+  const flags = expected.slice(lastSlash + 1);
+  if (!/^[dgimsuvy]*$/.test(flags) || new Set(flags).size !== flags.length) return null;
+  return { source: expected.slice(1, lastSlash), flags };
 }
 
 /**
@@ -154,10 +163,11 @@ export async function evaluateArgShapeRuleAsync(
   const matches = new Map<unknown, boolean>();
   if (toolMatchesArgPattern(toolName, capturedRule.toolPattern)) {
     for (const [key, expected] of Object.entries(capturedRule.argMatchers)) {
-      if (typeof expected !== 'string' || !expected.startsWith('/')) continue;
-      const slash = expected.lastIndexOf('/');
-      const flags = slash > 0 ? expected.slice(slash + 1) : '';
-      const source = expected.slice(1, slash > 0 ? slash : undefined);
+      const regex = typeof expected === 'string' ? parseRegexMatcher(expected) : null;
+      if (regex === null) continue;
+      const { source, flags } = regex;
+      // Same fallback as the synchronous path: a matcher that is not a valid expression is a literal.
+      try { void new RegExp(source, flags); } catch { continue; }
       const actual = String(capturedArgs[key]);
       current();
       await using pattern = await createSafeRegex(source, flags, { operation: 'permission arg-shape', maxPatternChars: 256, maxInputChars: 4_096, ...options, assertCurrent: current });

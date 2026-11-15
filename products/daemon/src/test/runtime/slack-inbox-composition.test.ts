@@ -18,11 +18,8 @@ import type { DaemonInboxFactory } from '../../runtime/daemon-handler-compositio
 import { createDaemonHost, type DaemonHost } from '../../runtime/daemon-host.js';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
 import { createRuntimeServices } from '../../runtime/services.js';
+import { createSlackDaemonInboxFactory } from '../../runtime/slack-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
-
-// The normal daemon test command builds this entry first. Keep the fixture's
-// platform collaborators public while exercising the factory consumers actually load.
-const { createSlackDaemonInboxFactory } = await import(new URL('../../../dist/cli/index.js', import.meta.url).href) as typeof import('../../cli/index.js');
 
 let hosts: DaemonHost[];
 let cleanups: Array<() => void | Promise<void>>;

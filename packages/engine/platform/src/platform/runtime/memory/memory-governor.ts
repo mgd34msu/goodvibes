@@ -234,7 +234,7 @@ export interface MemoryGovernorSnapshot {
   readonly budgetMb: number;
   readonly rssMb: number;
   readonly heapUsedMb: number;
-  readonly heapTotalMb?: number | undefined;
+  readonly heapTotalMb?: number;
   readonly usedPct: number;
   readonly refusingExpensiveWork: boolean;
   readonly caches: readonly CacheFootprint[];
@@ -242,7 +242,10 @@ export interface MemoryGovernorSnapshot {
   readonly tripwire: {
     readonly armed: boolean;
     readonly sustainedSec: number;
+    /** The growth rate observed over the last sample window. */
     readonly rateMbPerSec: number;
+    /** The configured growth rate a sustained leak must exceed to fire the tripwire. */
+    readonly thresholdMbPerSec?: number;
   };
   readonly thresholds: {
     readonly elevatedPct: number;
@@ -271,6 +274,13 @@ function defaultGc(): void {
   else if (typeof globalThis.gc === 'function') (globalThis.gc as () => void)();
 }
 
+/**
+ * While the daemon stays at `high` or `critical`, caches are flushed again this
+ * often. Trimming only on a tier change would leave a daemon parked at
+ * `critical` refusing work while everything refilled since the one flush.
+ */
+export const PRESSURE_RETRIM_INTERVAL_MS = 30_000;
+
 export class MemoryGovernor {
   private readonly caches: CacheRegistry;
   private readonly pauses: PauseController;
@@ -295,6 +305,8 @@ export class MemoryGovernor {
 
   private tier: MemoryTier = 'normal';
   private refusing = false;
+  /** When caches were last flushed for pressure; gates the periodic re-trim at high and above. */
+  private lastPressureTrimAt = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private exited = false;
 
@@ -331,6 +343,7 @@ export class MemoryGovernor {
     }
     this.caches = deps.caches;
     this.pauses = deps.pauses;
+    this.pauses.setPressureProbe(() => (TIER_RANK[this.tier] >= TIER_RANK.high ? `memory-pressure:${this.tier}` : undefined));
     this.sampler = deps.sampler ?? defaultSampler;
     this.now = deps.now ?? Date.now;
     this.gc = deps.gc ?? defaultGc;
@@ -398,7 +411,7 @@ export class MemoryGovernor {
       return {
         allowed: false,
         tier: this.tier,
-        reason: `Daemon is under critical memory pressure (RSS >= ${this.budgetMb}MB budget); ${label} refused. Retry once pressure clears.`,
+        reason: `Daemon is under critical memory pressure (RSS >= ${round1((this.criticalBytes / (this.budgetMb * MB)) * 100)}% of the ${this.budgetMb}MB budget = ${Math.round(this.criticalBytes / MB)}MB); ${label} refused. Retry once pressure clears.`,
       };
     }
     return { allowed: true, tier: this.tier };
@@ -422,6 +435,7 @@ export class MemoryGovernor {
         armed: this.tripwireArmed,
         sustainedSec: this.tripwireOverSince !== null ? round1((this.now() - this.tripwireOverSince) / 1000) : 0,
         rateMbPerSec: round1(this.lastRateMbPerSec),
+        thresholdMbPerSec: round1(this.tripwireRateBytesPerSec / MB),
       },
       thresholds: {
         elevatedPct: round1((this.elevatedBytes / (this.budgetMb * MB)) * 100),
@@ -442,6 +456,10 @@ export class MemoryGovernor {
       this.tier = nextTier;
       this.recordTierTransition(nextTier);
       this.applyTier(nextTier, previousTier, sample);
+    } else if (TIER_RANK[this.tier] >= TIER_RANK.high && this.now() - this.lastPressureTrimAt >= PRESSURE_RETRIM_INTERVAL_MS) {
+      this.caches.trimAll('flush');
+      this.gc();
+      this.lastPressureTrimAt = this.now();
     }
     this.checkTripwire(sample);
     this.checkHardLimit(sample);
@@ -501,6 +519,7 @@ export class MemoryGovernor {
       // High/critical: full flush + pause deferrable jobs, and arm the tripwire
       // against the post-flush baseline.
       this.caches.trimAll('flush');
+      this.lastPressureTrimAt = this.now();
       this.pauses.pauseAll(`memory-pressure:${tier}`);
       this.armTripwire(sample);
     } else {
@@ -566,9 +585,15 @@ export class MemoryGovernor {
     const sustainedSec = trigger === 'hard-limit'
       ? (this.hardLimitOverSince !== null ? (this.now() - this.hardLimitOverSince) / 1000 : this.tripwireSustainMs / 1000)
       : (this.tripwireOverSince !== null ? (this.now() - this.tripwireOverSince) / 1000 : this.tripwireSustainMs / 1000);
-    const topCaches = [...this.caches.footprints()]
-      .sort((a, b) => (b.estimatedBytes ?? b.entries) - (a.estimatedBytes ?? a.entries))
-      .slice(0, 5);
+    // From here on nothing may stop the exit below: the latch is already
+    // set and the sampler stopped, so a throw would leave a leaking process
+    // running with no governor. Diagnostics are best effort.
+    let topCaches: MemoryTripwireReceipt['topCaches'] = [];
+    try {
+      topCaches = [...this.caches.footprints()]
+        .sort((a, b) => (b.estimatedBytes ?? b.entries) - (a.estimatedBytes ?? a.entries))
+        .slice(0, 5);
+    } catch { /* a cache's footprint callback failed; the receipt omits caches */ }
     const note = trigger === 'hard-limit'
       ? `RSS held at/above the hard limit (${this.hardLimitPct}% of the ${Math.round(this.effectiveCeilingMb)}MB effective kill ceiling = ${Math.round(this.hardLimitBytes / MB)}MB), the kernel/cgroup OOM killer was imminent and the growth was too slow for the rate tripwire to see. Exiting so a supervisor restarts clean.`
       : 'RSS kept growing after a full cache flush, a genuine leak. Exiting so a supervisor restarts clean.';
@@ -585,18 +610,24 @@ export class MemoryGovernor {
       tierHistory: [...this.tierHistory],
       note,
     };
-    logger.error(`[memory] ${trigger} fired, shutting down for a clean restart`, {
-      trigger,
-      rssMb: receipt.rssMb,
-      rateMbPerSec: receipt.rateMbPerSec,
-      sustainedSec: receipt.sustainedSec,
-      topCaches: topCaches.map((c) => ({ id: c.id, entries: c.entries, bytes: c.estimatedBytes })),
-    });
-    this.emitPressure('critical', this.tier, sample, {
-      rateMbPerSec: receipt.rateMbPerSec,
-      sustainedSec: receipt.sustainedSec,
-      action: 'exit',
-    });
+    try {
+      logger.error(`[memory] ${trigger} fired, shutting down for a clean restart`, {
+        trigger,
+        rssMb: receipt.rssMb,
+        rateMbPerSec: receipt.rateMbPerSec,
+        sustainedSec: receipt.sustainedSec,
+        topCaches: topCaches.map((c) => ({ id: c.id, entries: c.entries, bytes: c.estimatedBytes })),
+      });
+    } catch { /* logging must not block the exit */ }
+    try {
+      this.emitPressure('critical', this.tier, sample, {
+        rateMbPerSec: receipt.rateMbPerSec,
+        sustainedSec: receipt.sustainedSec,
+        action: 'exit',
+      });
+    } catch (error) {
+      try { logger.warn('[memory] tripwire ops event failed', { error: String(error) }); } catch { /* best effort */ }
+    }
     try {
       this.writeReceipt?.(receipt);
     } catch (error) {

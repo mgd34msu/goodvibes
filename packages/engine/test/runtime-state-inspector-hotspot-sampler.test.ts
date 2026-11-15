@@ -92,14 +92,12 @@ describe('SelectorHotspotSampler: latency percentiles', () => {
     expect(hs.maxMs).toBe(100);
   });
 
-  test('returns zeroes for a key with no samples in window', () => {
+  test('a reset sampler has no hotspot for a key it had recorded', () => {
     const s = new SelectorHotspotSampler();
     s.record('sel', 5);
-    // Manually evict by mocking time would require fake timers;
-    // instead test with empty buffer via reset
+    expect(s.getHotspot('sel')).toBeDefined();
     s.reset();
-    const hs = s.getHotspot('sel');
-    expect(hs).toBeUndefined();
+    expect(s.getHotspot('sel')).toBeUndefined();
   });
 
   test('single sample: all percentiles equal the sample value', () => {

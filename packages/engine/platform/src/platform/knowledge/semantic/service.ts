@@ -4,7 +4,8 @@ import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeObjectProfilePolicy } from '../extensions.js';
 import { logger } from '../../utils/logger.js';
-import { scheduleBackground, sleep, yieldEvery, yieldToEventLoop } from '../cooperative.js';
+import { scheduleBackground, yieldEvery, yieldToEventLoop } from '../cooperative.js';
+import { MAX_TIMER_MS } from './self-improvement-budget.js';
 import { getKnowledgeSpaceId, isHomeAssistantKnowledgeSpace, normalizeKnowledgeSpaceId } from '../spaces.js';
 import { answerKnowledgeQuery } from './answer.js';
 import { refreshAnswerCandidateWindowAfterRepair } from './answer-candidate-window.js';
@@ -22,7 +23,7 @@ import type {
 import { readRecord, readString, readStringArray } from './utils.js';
 import { uniqueStrings } from './utils.js';
 import { semanticSourceIsCurrent } from './source-revisions.js';
-import { runKnowledgeSemanticSelfImprovement } from './self-improvement.js';
+import { isSelfImproveHold, runKnowledgeSemanticSelfImprovement } from './self-improvement.js';
 import {
   BackgroundSelfImproveScheduler,
   DEFAULT_SELF_IMPROVE_MIN_DELAY_MS,
@@ -77,6 +78,7 @@ const SELF_IMPROVE_SPACE_PAGE_SIZE = 500;
 
 export class KnowledgeSemanticService {
   private readonly activeGapRepairs = new Set<string>();
+  private readonly gapRepairWaiters = new Set<() => void>();
   private readonly activeSelfImprovementRuns = new Map<AbortSignal | undefined, Map<string, Promise<KnowledgeSemanticSelfImproveResult>>>();
 
   constructor(
@@ -449,7 +451,6 @@ export class KnowledgeSemanticService {
       if (admission && !admission.allowed) {
         return {
           ...emptySelfImproveResult(),
-          budgetExhausted: true,
           truncated: true,
           errors: [{ gapId: input.knowledgeSpaceId ?? 'global', error: admission.reason ?? 'refused: daemon is under critical memory pressure' }],
         };
@@ -467,22 +468,30 @@ export class KnowledgeSemanticService {
         // stops at the next space boundary instead of allocating through the
         // whole store while the daemon sheds memory.
         if (this.backgroundStopRequested(runOptions)) {
-          return { ...combined, truncated: true, budgetExhausted: true };
+          return { ...combined, truncated: true };
         }
-        const result = await runKnowledgeSemanticSelfImprovement({
-          store: this.store,
-          gapRepairer: this.options.gapRepairer,
-          activeGapRepairs: this.activeGapRepairs,
-          objectProfiles: this.options.objectProfiles,
-          enrichSource: (sourceId, options) => {
-            const source = this.store.getSource(sourceId);
-            return source ? enrichKnowledgeSource({ store: this.store, llm: this.options.llm }, source, options) : Promise.resolve(null);
-          },
-          // Pause stop is consulted INSIDE the run too (per-gap boundary),
-          // not only between spaces here.
-          shouldStop: () => this.backgroundStopRequested(runOptions),
-        }, { ...input, knowledgeSpaceId: spaceId });
-        combined = mergeSelfImproveResults(combined, result);
+        try {
+          const result = await runKnowledgeSemanticSelfImprovement({
+            store: this.store,
+            gapRepairer: this.options.gapRepairer,
+            currentGapRepairer: () => this.options.gapRepairer,
+            activeGapRepairs: this.activeGapRepairs,
+            repairSettled: () => this.notifyGapRepairSettled(),
+            objectProfiles: this.options.objectProfiles,
+            enrichSource: (sourceId, options) => {
+              const source = this.store.getSource(sourceId);
+              return source ? enrichKnowledgeSource({ store: this.store, llm: this.options.llm }, source, options) : Promise.resolve(null);
+            },
+            // Pause stop is consulted INSIDE the run too (per-gap boundary),
+            // not only between spaces here.
+            shouldStop: () => this.backgroundStopRequested(runOptions),
+          }, { ...input, knowledgeSpaceId: spaceId });
+          combined = mergeSelfImproveResults(combined, result);
+        } catch (error) {
+          // One space held by a model reading must not stop every later space.
+          if (input.signal?.aborted || !isSelfImproveHold(error)) throw error;
+          combined = { ...combined, truncated: true, errors: [...combined.errors, { gapId: spaceId, error: error instanceof Error ? error.message : String(error) }] };
+        }
       }
       return combined;
     }
@@ -493,7 +502,9 @@ export class KnowledgeSemanticService {
     return runKnowledgeSemanticSelfImprovement({
       store: this.store,
       gapRepairer: this.options.gapRepairer,
+      currentGapRepairer: () => this.options.gapRepairer,
       activeGapRepairs: this.activeGapRepairs,
+      repairSettled: () => this.notifyGapRepairSettled(),
       objectProfiles: this.options.objectProfiles,
       enrichSource: (sourceId, options) => {
         const source = this.store.getSource(sourceId);
@@ -571,15 +582,30 @@ export class KnowledgeSemanticService {
   ): Promise<boolean> {
     if (gapIds.length === 0 || maxWaitMs <= 0) return false;
     const keys = gapIds.map((gapId) => `${spaceId}:${gapId}`);
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < maxWaitMs) {
+    const deadlineAt = Number.isFinite(maxWaitMs) ? Date.now() + maxWaitMs : Infinity;
+    for (;;) {
       assertAnswerVerificationActive(signal);
-      const active = keys.some((key) => this.activeGapRepairs.has(key));
-      if (!active) return true;
-      await yieldToEventLoop();
-      await sleep(100);
+      if (!keys.some((key) => this.activeGapRepairs.has(key))) return true;
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) return false;
+      // Wake when a repair settles or the caller cancels, not on a poll tick.
+      await new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const wake = (): void => {
+          clearTimeout(timer);
+          this.gapRepairWaiters.delete(wake);
+          signal?.removeEventListener('abort', wake);
+          resolve();
+        };
+        if (Number.isFinite(remainingMs)) { timer = setTimeout(wake, Math.min(remainingMs, MAX_TIMER_MS)); timer.unref?.(); }
+        this.gapRepairWaiters.add(wake);
+        signal?.addEventListener('abort', wake, { once: true });
+      });
     }
-    return false;
+  }
+
+  private notifyGapRepairSettled(): void {
+    for (const wake of [...this.gapRepairWaiters]) wake();
   }
 }
 
@@ -702,6 +728,7 @@ function answerRefinementFromRepair(
   const acceptedSourceIds = repair.acceptedSourceIds ?? [];
   const promotedFactCount = repair.promotedFactCount ?? 0;
   const reason = repair.errors[0]?.error
+    ?? (repair.coalesced ? 'Another repair run for this scope was already active, so this one did not run.' : undefined)
     ?? (repair.budgetExhausted ? 'Repair did not finish within the current run budget.' : undefined);
   return {
     status,
@@ -725,7 +752,6 @@ function activeSelfImproveResult(input: KnowledgeSemanticSelfImproveInput): Know
     effectiveLimit: 0,
     coalesced: true,
     truncated: true,
-    budgetExhausted: true,
   };
 }
 

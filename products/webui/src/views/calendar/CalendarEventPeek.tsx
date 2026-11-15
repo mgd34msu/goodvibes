@@ -11,6 +11,7 @@ import { formatError } from '../../lib/errors';
 import { Button } from '../../components/ui';
 import { EmptyState, Facts, DetailSection, SkeletonRows } from '../../components/data-view/DataView';
 import { AlertCircle } from 'lucide-react';
+import { isAllDayEvent } from './calendar-time';
 
 export type CalendarEventDetailData = Awaited<ReturnType<typeof platformClient.operator.calendar.events.get>>;
 
@@ -26,6 +27,14 @@ function formatRange(start: string, end: string): string {
   const from = new Date(start);
   const to = new Date(end);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return `${start} to ${end}`;
+  if (isAllDayEvent(start, end)) {
+    // The end of an all-day event is the day after its last day.
+    const dayOpts = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' } as const;
+    const last = new Date(to.getTime() - 86_400_000);
+    return last.getTime() > from.getTime()
+      ? `${from.toLocaleDateString(undefined, dayOpts)} to ${last.toLocaleDateString(undefined, dayOpts)} (all day)`
+      : `${from.toLocaleDateString(undefined, dayOpts)} (all day)`;
+  }
   const day = { weekday: 'short', month: 'short', day: 'numeric' } as const;
   const time = { hour: 'numeric', minute: '2-digit' } as const;
   const sameDay = from.toDateString() === to.toDateString();

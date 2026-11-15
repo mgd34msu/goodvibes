@@ -1,4 +1,4 @@
-/** UNRUN: overload refuses before deferred callback creation, entered work drains. */
+/** Overload refuses before deferred callback creation, entered work drains. */
 import { expect, test } from 'bun:test';
 import { ClusterIngressWork } from '../platform/src/platform/cluster/ingress-work.ts';
 function logger() { const warnings: string[] = []; return { warnings, debug() {}, info() {}, warn(message: string) { warnings.push(message); }, error() {} }; }

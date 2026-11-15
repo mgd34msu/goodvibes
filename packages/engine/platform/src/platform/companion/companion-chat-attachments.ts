@@ -122,14 +122,23 @@ export async function buildProviderUserContent(
   const textSections: string[] = [content.trim() ? content : 'Please review the attached file(s).'];
   const imageParts: ContentPart[] = [];
 
+  // Attachments whose content the model will not see. The summary below still
+  // lists them as attached, so without this the model and the user would both
+  // assume it read them.
+  const unseen: string[] = [];
+
   for (const attachment of attachments) {
-    if (!artifactStore) continue;
+    const name = attachment.label ?? attachment.filename ?? attachment.artifactId;
+    if (!artifactStore) {
+      unseen.push(`${name} (no artifact store is available to read it)`);
+      continue;
+    }
     try {
       if (isInlineTextAttachment(attachment)) {
         const { buffer } = await artifactStore.readContent(attachment.artifactId);
         const text = toNodeBuffer(buffer).toString('utf-8');
         textSections.push(
-          `\n\n--- Attachment: ${attachment.label ?? attachment.filename ?? attachment.artifactId} ---\n${text}`,
+          `\n\n--- Attachment: ${name} ---\n${text}`,
         );
         continue;
       }
@@ -140,8 +149,11 @@ export async function buildProviderUserContent(
           mediaType: attachment.mimeType,
           data: toNodeBuffer(buffer).toString('base64'),
         });
+        continue;
       }
+      unseen.push(`${name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes: only small text files and images up to ${MAX_INLINE_IMAGE_ATTACHMENT_BYTES / (1024 * 1024)} MB are read in)`);
     } catch (error) {
+      unseen.push(`${name} (it could not be read)`);
       logger.warn('[companion-chat] failed to inline attachment for provider prompt', {
         artifactId: attachment.artifactId,
         error: summarizeError(error),
@@ -150,6 +162,9 @@ export async function buildProviderUserContent(
   }
 
   textSections.push(formatAttachmentSummary(attachments));
+  if (unseen.length > 0) {
+    textSections.push(`\n\nNot included: ${unseen.join('; ')}. You have not seen the content of ${unseen.length === 1 ? 'that attachment' : 'those attachments'}; tell the user so instead of guessing.`);
+  }
   if (imageParts.length === 0) return textSections.join('');
   return [{ type: 'text', text: textSections.join('') }, ...imageParts];
 }

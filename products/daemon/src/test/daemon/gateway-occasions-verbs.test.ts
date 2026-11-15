@@ -95,6 +95,8 @@ describe('occasions gateway verb family is live on the vendored runtime', () => 
     const result = (await services().gatewayMethods.invoke('occasions.list', {
       methodId: 'occasions.list',
       body: {},
+      context: {},
+      isAuthorized: () => true,
     } as never)) as { occasions: unknown[]; unparsed: unknown[]; conflicts: unknown[]; timezone: string };
     expect(Array.isArray(result.occasions)).toBe(true);
     expect(result.occasions).toHaveLength(0);
@@ -105,6 +107,8 @@ describe('occasions gateway verb family is live on the vendored runtime', () => 
     const result = (await services().gatewayMethods.invoke('occasions.plans.list', {
       methodId: 'occasions.plans.list',
       body: {},
+      context: {},
+      isAuthorized: () => true,
     } as never)) as { plans: unknown[]; awayNow: unknown };
     expect(Array.isArray(result.plans)).toBe(true);
     expect(result.plans).toHaveLength(0);
@@ -115,6 +119,8 @@ describe('occasions gateway verb family is live on the vendored runtime', () => 
     const result = (await services().gatewayMethods.invoke('occasions.pending', {
       methodId: 'occasions.pending',
       body: {},
+      context: {},
+      isAuthorized: () => true,
     } as never)) as { nudge: unknown; conflicts: unknown[]; interviews: unknown[] };
     expect(result.nudge).toBeNull();
     expect(Array.isArray(result.conflicts)).toBe(true);
@@ -125,6 +131,8 @@ describe('occasions gateway verb family is live on the vendored runtime', () => 
     const result = (await services().gatewayMethods.invoke('occasions.state', {
       methodId: 'occasions.state',
       body: {},
+      context: {},
+      isAuthorized: () => true,
     } as never)) as Record<string, unknown>;
     expect(result).toBeTruthy();
   });
@@ -136,6 +144,8 @@ describe('occasions gateway verb family is live on the vendored runtime', () => 
     const result = (await services().gatewayMethods.invoke('occasions.sweep', {
       methodId: 'occasions.sweep',
       body: {},
+      context: {},
+      isAuthorized: () => true,
     } as never)) as { ranAt: number; hold: string; nudge: unknown; delivered: boolean };
     expect(typeof result.ranAt).toBe('number');
     expect(result.nudge).toBeNull();

@@ -6,7 +6,12 @@ import { buildSetupReviewSnapshot } from '../../input/commands/local-setup-revie
 import { createShellPathService } from '../../runtime/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-function makeSetupReviewContext(root: string): CommandContext {
+function makeSetupReviewContext(root: string, gaps: {
+  readonly models?: readonly unknown[];
+  readonly services?: Record<string, unknown>;
+  readonly plugins?: readonly unknown[];
+  readonly mcpServers?: readonly unknown[];
+} = {}): CommandContext {
   const shellPaths = createShellPathService({
     workingDirectory: join(root, 'workspace'),
     homeDirectory: join(root, 'home'),
@@ -16,7 +21,7 @@ function makeSetupReviewContext(root: string): CommandContext {
     workspace: { shellPaths },
     platform: {
       serviceRegistry: {
-        getAll: () => ({}),
+        getAll: () => gaps.services ?? {},
         inspect: async () => null,
       },
       subscriptionManager: {
@@ -26,15 +31,15 @@ function makeSetupReviewContext(root: string): CommandContext {
       readModels: {
         security: {
           getSnapshot: () => ({
-            plugins: [],
-            mcpServers: [],
+            plugins: gaps.plugins ?? [],
+            mcpServers: gaps.mcpServers ?? [],
           }),
         },
       },
     },
     clients: {
       providerApi: {
-        listModels: async () => [
+        listModels: async () => gaps.models ?? [
           { id: 'model', provider: 'provider', registryKey: 'provider:model' },
         ],
       },
@@ -64,6 +69,27 @@ describe('local setup review', () => {
       expect(snapshot.remoteRunnerCount).toBe(0);
       expect(snapshot.managedHookCount).toBe(0);
       expect(snapshot.managedHookChainCount).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('still reports genuine gaps: no models, a service without credentials, a quarantined plugin and an elevated MCP server', async () => {
+    const root = makeProjectTempDir('goodvibes-agent-setup-review-gaps');
+    try {
+      const snapshot = await buildSetupReviewSnapshot(makeSetupReviewContext(root, {
+        models: [],
+        services: { calendar: { authType: 'api-key' } },
+        plugins: [{ quarantined: true }],
+        mcpServers: [{ schemaFreshness: 'fresh', trustMode: 'allow-all' }],
+      }));
+      const byArea = new Map(snapshot.issues.map((issue) => [issue.area, issue]));
+
+      expect(byArea.get('providers')).toMatchObject({ severity: 'fail', message: 'no models available' });
+      expect(byArea.get('host')).toMatchObject({ severity: 'warn', message: '1 host integration configuration issue(s)' });
+      expect(snapshot.hostIntegrationIssues).toEqual(['calendar: missing primary credential']);
+      expect(byArea.get('plugins')).toMatchObject({ severity: 'warn', message: '1 plugin(s) quarantined' });
+      expect(byArea.get('mcp')).toMatchObject({ severity: 'warn', message: '0 quarantined, 1 elevated' });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

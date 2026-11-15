@@ -14,6 +14,7 @@ import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-m
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
 import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
+import { waitFor } from './_helpers/test-timeout.js';
 
 const readings = useApprovalReadings();
 import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.js';
@@ -151,7 +152,9 @@ describe('unknown sender at the adapter level (slack)', () => {
       response_url: '',
     }, context);
 
-    expect(response.status).toBe(403);
+    // Slack renders a slash-command reply only when it arrives with 200.
+    expect(response.status).toBe(200);
+    expect((await response.json() as { response_type?: string }).response_type).toBe('ephemeral');
     expect(bindings.length).toBe(0);
     expect(submitted.length).toBe(0);
   });
@@ -183,7 +186,7 @@ describe('owner channel reply resolves a pending permission ask', () => {
       request: makeAskRequest('call-approve-1'),
       routeId: 'route-1',
     });
-    await Bun.sleep(5);
+    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
 
     const ingress = await helper.authorizeSurfaceIngress({
       surface: 'slack',
@@ -212,7 +215,7 @@ describe('owner channel reply resolves a pending permission ask', () => {
       request: makeAskRequest('call-deny-1'),
       routeId: 'route-1',
     });
-    await Bun.sleep(5);
+    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
 
     const ingress = await helper.authorizeSurfaceIngress({
       surface: 'slack',
@@ -247,7 +250,7 @@ describe('owner channel reply resolves a pending permission ask', () => {
       request: makeAskRequest('call-approve-steer-1'),
       routeId: 'route-1',
     });
-    await Bun.sleep(5);
+    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
 
     const ingress = await helper.authorizeSurfaceIngress({
       surface: 'slack',
@@ -272,7 +275,7 @@ describe('owner channel reply resolves a pending permission ask', () => {
     const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
 
     void broker.requestApproval({ request: makeAskRequest('call-guard-1'), routeId: 'route-1' });
-    await Bun.sleep(5);
+    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
 
     const ingress = await helper.authorizeSurfaceIngress({
       surface: 'slack',
@@ -292,7 +295,7 @@ describe('owner channel reply resolves a pending permission ask', () => {
     const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
 
     void broker.requestApproval({ request: makeAskRequest('call-flow-1'), routeId: 'route-1' });
-    await Bun.sleep(5);
+    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
 
     const ingress = await helper.authorizeSurfaceIngress({
       surface: 'slack',

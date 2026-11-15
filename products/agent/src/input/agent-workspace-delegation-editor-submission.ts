@@ -1,5 +1,6 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -17,10 +18,6 @@ export type AgentWorkspaceDelegationEditorSubmission =
     readonly actionResult: AgentWorkspaceActionResult;
   };
 
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
-
 export function isAgentWorkspaceDelegationEditorKind(kind: string): kind is 'delegate-task' {
   return kind === 'delegate-task';
 }
@@ -37,7 +34,7 @@ export function buildAgentWorkspaceDelegationEditorSubmission(
     };
   }
   const parts = ['/delegate'];
-  if (isAffirmative(readField('review')) || isAffirmative(readField('wrfc'))) parts.push('--review');
+  if (isAffirmative(readField('review'))) parts.push('--review');
   const reason = readField('reason').trim();
   const success = readField('success').trim();
   const workspace = readField('workspace').trim();

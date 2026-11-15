@@ -2,6 +2,7 @@ import { withBackgroundPrivilegeCheck } from './agent-harness-background-privile
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { realpathSync } from 'node:fs';
+import { relative } from 'node:path';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { redactSensitiveDataAsync, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
@@ -15,13 +16,14 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeParity } from './agent-harness-interactive-runtime-records.ts';
-import { DEFAULT_BACKGROUND_TIMEOUT_MS, clampTimeout, processAgeMs, processStatus } from './agent-harness-process-timeout-policy.ts';
+import { DEFAULT_BACKGROUND_TIMEOUT_MS, clampTimeout, clampWaitTimeout, processAgeMs, processStatus } from './agent-harness-process-timeout-policy.ts';
 import type {
   AgentHarnessBackgroundProcessArgs,
   BackgroundProcessLookupSource,
   BackgroundProcessResolution,
   ProcessCapabilityStatus,
 } from './agent-harness-background-processes-types.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 export type {
   AgentHarnessBackgroundProcessArgs,
   BackgroundProcessResolution,
@@ -45,7 +47,7 @@ function readNumber(value: unknown, fallback: number): number {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  return Math.max(1, Math.min(500, readNumber(value, fallback)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function fieldMap(value: unknown): Readonly<Record<string, string>> {
@@ -112,7 +114,7 @@ function matchingOperatorMethodRoutes(tokens: readonly string[]): readonly Recor
       methodId: method.id,
       label: method.title ?? method.description ?? method.id,
       category: method.category ?? 'uncategorized',
-      effect: method.scopes?.every((scope) => scope.startsWith('read:')) ? 'read-only-network' : method.access === 'admin' ? 'confirmed-admin-connected-host-state' : 'confirmed-connected-host-state',
+      effect: method.scopes?.every((scope) => scope.startsWith('read:')) ? 'read-only-network' : method.access === 'admin' ? 'admitted-admin-connected-host-state' : 'admitted-connected-host-state',
       route: `${method.http?.method?.toUpperCase() ?? 'GET'} ${method.http?.path ?? '/'}`,
       modelRoute: `agent_operator_method methodId:"${method.id}"`,
     }))
@@ -286,14 +288,17 @@ function processCatalogEntry(entry: BackgroundProcess) {
 }
 
 function retainProcessSources(context: CommandContext, manager: ProcessManager, entries: readonly ReturnType<typeof processCatalogEntry>[], options: CatalogRankingOptions, exactId?: string) {
-  const revision = JSON.stringify(entries);
+  // A process finishing while a reading is in flight is the answer changing, not the source being
+  // replaced, so only the identity of each tracked process is held fixed.
+  const identity = (rows: readonly ReturnType<typeof processCatalogEntry>[]) => JSON.stringify(rows.map((row) => [row.id, row.pid, row.cmd, row.startedAt]));
+  const revision = identity(entries);
   const list = manager.list, getStatus = manager.getStatus, getOutput = manager.getOutput;
   const assertSourcesCurrent = () => {
     options.signal?.throwIfAborted();
     if (managerFrom(context) !== manager || manager.list !== list || manager.getStatus !== getStatus || manager.getOutput !== getOutput) throw new ToolInputProjectionError('stale');
     const exact = exactId === undefined ? undefined : manager.getStatus(exactId);
     const current = exactId === undefined ? trackedProcesses(manager) : exact ? [exact] : [];
-    if (JSON.stringify(captureCatalogData(current.map(processCatalogEntry))) !== revision) throw new ToolInputProjectionError('stale');
+    if (identity(captureCatalogData(current.map(processCatalogEntry))) !== revision) throw new ToolInputProjectionError('stale');
   };
   options.retainCurrent?.(assertSourcesCurrent, exactId === undefined ? 'agent.harness.background-processes.sources' : `agent.harness.background-processes.source:${exactId}`);
   return assertSourcesCurrent;
@@ -365,8 +370,11 @@ function processToolParity(context: CommandContext | undefined, interactive: Int
       status: writeStatus,
       userOutcome: writeStatus === 'supported'
         ? 'Write to a running tracked native stdin pipe under current recorded effect admission.'
-        : 'Input requires the local guarded ProcessManager writeInput contract.',
-      modelRoute: 'process action:"write" processId:"..." data:"..."',
+        : writeStatus === 'contract-discovered'
+          ? 'A published interactive session record advertises its own write route; process action:"write" is unavailable because the local ProcessManager writeInput contract is missing.'
+          : 'Input requires the local guarded ProcessManager writeInput contract.',
+      // process action:"write" runs the local writeInput; offering it without that contract is a route that fails.
+      ...(writeStatus === 'supported' ? { modelRoute: 'process action:"write" processId:"..." data:"..."' } : {}),
     },
     {
       capability: 'pty',
@@ -421,7 +429,8 @@ async function capabilities(context?: CommandContext, options: CatalogRankingOpt
     },
     stdinWrite: {
       status: stdinWrite.status === 'contract-discovered' ? 'supported' : 'unavailable',
-      modelRoute: 'process action:"write" processId:"..." data:"..."',
+      // process action:"write" runs the local writeInput; offering it without that contract is a route that fails.
+      ...(stdinWrite.status === 'contract-discovered' ? { modelRoute: 'process action:"write" processId:"..." data:"..."' } : {}),
       guidance: stdinWrite.status === 'contract-discovered'
         ? 'Tracked launches open a native stdin pipe. Writes require current recorded admission and retain the exact process until the platform write and flush finish.'
         : 'The local guarded ProcessManager writeInput contract is unavailable.',
@@ -586,13 +595,21 @@ function readCwd(context: CommandContext, args: AgentHarnessBackgroundProcessArg
   return realpathSync(resolveAndValidatePath(raw || '.', shellPaths.workingDirectory));
 }
 
+/** The model gets the directory relative to the workspace, not an absolute path under the user's home. */
+function workspaceRelativeLabel(context: CommandContext, cwd: string | undefined): string {
+  const root = context.workspace.shellPaths?.workingDirectory;
+  if (!cwd || !root) return '.';
+  const label = relative(realpathSync(root), cwd);
+  return label === '' ? '.' : label.startsWith('..') ? '(outside the workspace)' : label;
+}
+
 async function waitForProcess(manager: ProcessManager, processId: string, timeoutMs: number, options: CatalogRankingOptions): Promise<BackgroundProcess | undefined> {
   const started = Date.now();
   for (;;) {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const entry = manager.getStatus(processId);
     if (!entry || entry.done) return entry;
-    if (timeoutMs > 0 && Date.now() - started >= timeoutMs) return entry;
+    if (Date.now() - started >= timeoutMs) return entry;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -695,7 +712,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
         session_id: result.process_id,
         pid: result.pid,
         command: await redactSensitiveDataAsync(command, launchOptions),
-        cwd,
+        cwd: workspaceRelativeLabel(context, cwd),
         timeoutMs,
         routes: {
           inspect: result.process_id ? routeFor(result.process_id, 'background_process') : null,
@@ -736,7 +753,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     const waiting = { ...supplied, assertCurrent: () => { current.assertCurrent?.(); supplied.assertCurrent?.(); } };
     const processId = readProcessId(args);
     if (!processId) throw new Error('Background process wait requires processId.');
-    const timeoutMs = clampTimeout(args.timeoutMs ?? readField(args, 'timeoutMs'), DEFAULT_WAIT_TIMEOUT_MS);
+    const { timeoutMs, capped } = clampWaitTimeout(args.timeoutMs ?? readField(args, 'timeoutMs'), DEFAULT_WAIT_TIMEOUT_MS);
     const entry = await waitForProcess(manager, processId, timeoutMs, waiting);
     waiting.assertCurrent();
     return {
@@ -747,7 +764,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       session_id: processId,
       timeoutMs,
       ...(entry ? { process: await describeProcessEntry(context, manager, entry, { ...waiting, includeParameters: true }) } : {}),
-      policy: 'Wait observes the tracked process and does not send input or signals.',
+      policy: `Wait observes the tracked process and does not send input or signals. timeoutMs 0 returns the current status without waiting${capped ? `; the requested wait was capped at ${timeoutMs}ms, wait again to keep watching` : ''}.`,
     };
   }
 

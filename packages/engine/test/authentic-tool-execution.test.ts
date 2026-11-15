@@ -249,10 +249,11 @@ test('failed rule initialization keeps legacy fallback but never reports authori
   await expect(first).resolves.toBeUndefined();
   expect(owner.store.init()).toBe(first);
   await expect(owner.store.init()).resolves.toBeUndefined();
-  await expect(owner.store.awaitReady()).rejects.toBe(failure);
-  await expect(owner.store.awaitReady()).rejects.toBe(failure);
+  // Readiness retries the load each time and names the file while it still fails.
+  await expect(owner.store.awaitReady()).rejects.toMatchObject({ cause: failure });
+  await expect(owner.store.awaitReady()).rejects.toThrow('Permission rules file :memory: could not be read');
   expect(owner.store.rules()).toEqual([]); expect(owner.store.getPublicationRevision()).toBe(0);
-  expect(owner.loads()).toBe(1);
+  expect(owner.loads()).toBe(3);
 });
 
 test('direct admission waits for rule readiness before reading authority or deciding', async () => {
@@ -298,15 +299,15 @@ test('owner initialization failure stops direct admission readings and body', as
   const { admit, manager } = fixture(async () => { bodies++; return { success: true }; }, undefined, undefined, owner.store);
   const pending = admit(); await owner.started.promise;
   const failure = new Error('synthetic owner unavailable'); owner.finish.reject(failure);
-  await expect(pending).rejects.toBe(failure);
-  await expect(manager.prepareAutonomousOwner()).rejects.toBe(failure);
+  await expect(pending).rejects.toMatchObject({ cause: failure });
+  await expect(manager.prepareAutonomousOwner()).rejects.toMatchObject({ cause: failure });
   for (const entry of log.query()) {
     if (typeof entry.context.site !== 'string') throw new Error('Diagnostic reading must retain its authored site');
     expect(['engine.redaction.field-kind', 'engine.redaction.credential']).toContain(entry.context.site);
     if (entry.status === 'answered') expect(entry.notes.some(note => note.kind === 'action')).toBe(false);
   }
   expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
-  expect(bodies).toBe(0); expect(owner.loads()).toBe(1);
+  expect(bodies).toBe(0); expect(owner.loads()).toBe(3);
 });
 
 function legacyAdmission(claim: () => void = () => {}): AutonomousPermissionAdmission {

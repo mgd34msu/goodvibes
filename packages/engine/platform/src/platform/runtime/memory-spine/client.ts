@@ -36,7 +36,10 @@
  * exclusively to the transport; (2) a documented single-writer contract for the
  * embedded case, the daemon host and an offline surface are each the sole process
  * for their own file. `mode()` reports the current posture so a surface can surface
- * it rather than guess.
+ * it rather than guess. Because that contract can still be broken (a surface that
+ * detaches after the daemon wrote, the memory CLI beside a daemon), the store itself
+ * refuses to save over a file another process saved since it loaded it, and
+ * `deactivate()` reloads the local store before any local operation runs.
  *
  * HONEST FAILURE. Unlike the fire-and-forget session mirror, memory reads/writes
  * return data, so this client is request/response. In client mode a transport
@@ -154,6 +157,11 @@ export interface MemoryExtendedAccess {
 export interface MemoryAccess extends MemoryCoreAccess, MemoryExtendedAccess {
   /** Optional backend-incarnation restriction for a prepared operation. */
   captureOperationScope?(): () => void;
+  /**
+   * Optional: reload a local file-backed store that another process (the
+   * daemon) wrote while this surface was its client. Called on deactivate.
+   */
+  reloadIfChanged?(): Promise<void>;
 }
 
 /**
@@ -188,6 +196,8 @@ export interface LocalMemoryStore {
   importBundle(bundle: MemoryBundle, operation?: MemoryOperationOptions): Promise<MemoryImportResult> | MemoryImportResult;
   vectorStats(operation?: MemoryOperationOptions): MemoryVectorStats;
   doctor(operation?: MemoryOperationOptions): Promise<MemoryDoctorReport> | MemoryDoctorReport;
+  /** Reload when another process saved the store's file since it was loaded (MemoryRegistry implements it). */
+  reloadIfChanged?(): Promise<void>;
 }
 
 /** Wrap a local embedded store (e.g. a MemoryRegistry) as a full MemoryAccess. */
@@ -224,6 +234,7 @@ export function createLocalMemoryAccess(store: LocalMemoryStore): MemoryAccess {
     importBundle: (bundle, operation) => run(operation, owned => store.importBundle(bundle, owned)),
     vectorStats: (operation) => run(operation, owned => store.vectorStats(owned)),
     doctor: (operation) => run(operation, owned => store.doctor(owned)),
+    ...(store.reloadIfChanged ? { reloadIfChanged: () => store.reloadIfChanged!() } : {}),
   };
 }
 
@@ -265,6 +276,10 @@ export class MemorySpineClient implements MemoryAccess {
 
   /** Last recall snapshot captured by refreshRecallSnapshot(); null until first refresh. */
   private snapshot: MemoryRecallSnapshot | null = null;
+  private refreshOrder = 0;
+  private appliedRefreshOrder = 0;
+  /** The local reload started by deactivate(); local operations wait for it. */
+  private localReload: Promise<void> | null = null;
 
   constructor(options: MemorySpineClientOptions) {
     this.local = options.local;
@@ -294,12 +309,32 @@ export class MemorySpineClient implements MemoryAccess {
     this.log.info('memory spine activated, routing memory through the adopted external daemon (single writer)', {});
   }
 
-  /** Release the daemon (mode lost / daemon stopped): return to owned-local access. */
+  /**
+   * Release the daemon (mode lost / daemon stopped): return to owned-local access.
+   * The daemon wrote the shared memory file while this surface was its client,
+   * so the local image loaded at boot is stale: reload it before any local
+   * operation reads it or writes it back over the daemon's records.
+   */
   deactivate(reason: string): void {
     if (this.transport === null) return;
     this.operationEpoch++;
     this.transport = null;
     this.log.info('memory spine deactivated, reverting to owned-local memory access', { reason });
+    const reload = this.local.reloadIfChanged?.();
+    if (!reload) return;
+    const pending: Promise<void> = reload
+      .catch((error: unknown) => {
+        // The store itself still refuses to write over a file it did not load.
+        logger.warn('memory spine: reloading the local memory store after detach failed', { error: error instanceof Error ? error.message : String(error) });
+      })
+      .finally(() => { if (this.localReload === pending) this.localReload = null; });
+    this.localReload = pending;
+  }
+
+  /** Runs `start` once a pending local reload has finished, when the operation will route locally. */
+  private afterLocalReload<T>(start: () => Promise<T>): Promise<T> {
+    const pending = this.transport === null ? this.localReload : null;
+    return pending ? pending.then(start) : start();
   }
 
   /** Bind one prepared caller to its original route, including adoption ABA. */
@@ -329,78 +364,108 @@ export class MemorySpineClient implements MemoryAccess {
   }
 
   add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
-    const operation = this.operation(options), route = this.route();
-    return awaitMemoryOperation(() => route.add(opts, operation), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options), route = this.route();
+      return awaitMemoryOperation(() => route.add(opts, operation), operation);
+    });
   }
 
   honestSearch(filter: MemorySearchFilter, options?: HonestMemorySearchOptions, lifecycle?: MemoryOperationOptions): Promise<HonestMemorySearchResult> {
-    const operation = this.operation(lifecycle), route = this.route();
-    return awaitMemoryOperation(() => route.honestSearch(filter, options, operation), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(lifecycle), route = this.route();
+      return awaitMemoryOperation(() => route.honestSearch(filter, options, operation), operation);
+    });
   }
 
   get(id: string, options?: MemoryOperationOptions): Promise<MemoryRecord | null> {
-    const operation = this.operation(options), route = this.route();
-    return awaitMemoryOperation(() => route.get(id, operation), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options), route = this.route();
+      return awaitMemoryOperation(() => route.get(id, operation), operation);
+    });
   }
 
   updateReview(id: string, patch: MemoryReviewPatch, options?: MemoryOperationOptions): Promise<MemoryRecord | null> {
-    const operation = this.operation(options), route = this.route();
-    return awaitMemoryOperation(() => route.updateReview(id, patch, operation), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options), route = this.route();
+      return awaitMemoryOperation(() => route.updateReview(id, patch, operation), operation);
+    });
   }
 
   delete(id: string, options?: MemoryOperationOptions): Promise<boolean> {
-    const operation = this.operation(options), route = this.route();
-    return awaitMemoryOperation(() => route.delete(id, operation), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options), route = this.route();
+      return awaitMemoryOperation(() => route.delete(id, operation), operation);
+    });
   }
 
   list(filter?: MemorySearchFilter, options?: MemoryOperationOptions): Promise<readonly MemoryRecord[]> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('list', a => a.list(filter, operation), t => t.list?.(filter, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('list', a => a.list(filter, operation), t => t.list?.(filter, operation)), operation);
+    });
   }
 
   searchSemantic(filter?: MemorySearchFilter, options?: MemoryOperationOptions): Promise<readonly MemorySemanticSearchResult[]> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('searchSemantic', a => a.searchSemantic(filter, operation), t => t.searchSemantic?.(filter, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('searchSemantic', a => a.searchSemantic(filter, operation), t => t.searchSemantic?.(filter, operation)), operation);
+    });
   }
 
   update(id: string, patch: MemoryUpdatePatch, options?: MemoryOperationOptions): Promise<MemoryRecord | null> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('update', a => a.update(id, patch, operation), t => t.update?.(id, patch, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('update', a => a.update(id, patch, operation), t => t.update?.(id, patch, operation)), operation);
+    });
   }
 
   link(fromId: string, toId: string, relation: string, options?: MemoryOperationOptions): Promise<MemoryLink | null> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('link', a => a.link(fromId, toId, relation, operation), t => t.link?.(fromId, toId, relation, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('link', a => a.link(fromId, toId, relation, operation), t => t.link?.(fromId, toId, relation, operation)), operation);
+    });
   }
 
   linksFor(id: string, options?: MemoryOperationOptions): Promise<readonly MemoryLink[]> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('linksFor', a => a.linksFor(id, operation), t => t.linksFor?.(id, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('linksFor', a => a.linksFor(id, operation), t => t.linksFor?.(id, operation)), operation);
+    });
   }
 
   reviewQueue(limit?: number, scope?: MemoryScope, options?: MemoryOperationOptions): Promise<readonly MemoryRecord[]> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('reviewQueue', a => a.reviewQueue(limit, scope, operation), t => t.reviewQueue?.(limit, scope, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('reviewQueue', a => a.reviewQueue(limit, scope, operation), t => t.reviewQueue?.(limit, scope, operation)), operation);
+    });
   }
 
   exportBundle(filter?: MemorySearchFilter, options?: MemoryOperationOptions): Promise<MemoryBundle> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('exportBundle', a => a.exportBundle(filter, operation), t => t.exportBundle?.(filter, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('exportBundle', a => a.exportBundle(filter, operation), t => t.exportBundle?.(filter, operation)), operation);
+    });
   }
 
   importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('importBundle', a => a.importBundle(bundle, operation), t => t.importBundle?.(bundle, operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('importBundle', a => a.importBundle(bundle, operation), t => t.importBundle?.(bundle, operation)), operation);
+    });
   }
 
   vectorStats(options?: MemoryOperationOptions): Promise<MemoryVectorStats> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('vectorStats', a => a.vectorStats(operation), t => t.vectorStats?.(operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('vectorStats', a => a.vectorStats(operation), t => t.vectorStats?.(operation)), operation);
+    });
   }
 
   doctor(options?: MemoryOperationOptions): Promise<MemoryDoctorReport> {
-    const operation = this.operation(options);
-    return awaitMemoryOperation(() => this.routeExtended('doctor', a => a.doctor(operation), t => t.doctor?.(operation)), operation);
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('doctor', a => a.doctor(operation), t => t.doctor?.(operation)), operation);
+    });
   }
 
   // ── The sync-recall seam ──────────────────────────────────────────────────────
@@ -417,11 +482,20 @@ export class MemorySpineClient implements MemoryAccess {
     options: MemoryRecallRefreshOptions = {},
   ): Promise<MemoryRecallSnapshot> {
     const recall = options.recall ?? true;
+    if (this.transport === null && this.localReload) await this.localReload;
     const operation = this.operation(), mode = this.mode(), route = this.route();
+    // The snapshot describes memory as it was when the search began, and the
+    // newest search to START wins: a slow earlier one that finishes last must not
+    // replace what a later one already stored.
+    const startedAt = Date.now(), order = ++this.refreshOrder;
     const result = await awaitMemoryOperation(() => route.honestSearch(filter, { recall }, operation), operation);
     assertMemoryOperationCurrent(operation);
-    this.snapshot = buildRecallSnapshot(result, mode, Date.now(), this.staleAfterMs);
-    return this.snapshot;
+    const captured = buildRecallSnapshot(result, mode, startedAt, this.staleAfterMs);
+    if (order > this.appliedRefreshOrder) {
+      this.appliedRefreshOrder = order;
+      this.snapshot = captured;
+    }
+    return captured;
   }
 
   /**

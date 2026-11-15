@@ -143,8 +143,9 @@ test('an aborted HTTP planning request cannot publish a late semantic result', a
   }), { signal: controller.signal });
   const pending = routes.handle(request);
   await started; controller.abort(); release();
-  // The existing admin POST path propagates async service rejections.
-  await expect(pending).rejects.toThrow();
+  // A service failure on the admin POST path is answered as an error response, never left as a rejection.
+  const response = await pending;
+  expect(response?.ok).toBe(false);
   const status = await routes.handle(new Request('http://daemon.local/api/projects/planning/status?projectId=alpha'));
   expect(await status!.json()).toMatchObject({ counts: { states: 0, workPlans: 0 } });
 });

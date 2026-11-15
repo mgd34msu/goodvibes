@@ -26,9 +26,9 @@ import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/met
 import { createOperatorClient } from '../platform/src/platform/runtime/operator-client.js';
 import type { OperatorClientServices } from '../platform/src/platform/runtime/foundation-services.js';
 import { createOperatorRemoteClient } from '../operator-client/src/client-core.js';
-import { createHttpTransport } from '../transport-http/dist/index.js';
-import { getOperatorContract } from '../contracts/dist/index.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+import { createHttpTransport } from '../transport-http/src/index.js';
+import { getOperatorContract } from '../contracts/src/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 
 /**
  * Bun's `typeof fetch` carries a `preconnect` namespace member alongside the

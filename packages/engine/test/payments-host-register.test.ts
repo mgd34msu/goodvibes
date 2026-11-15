@@ -40,6 +40,7 @@ import {
   type CheckoutComposition,
 } from '../platform/src/platform/payments/host/register.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { turnsUntil } from './_helpers/turns-until.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 // The begin flow's link validation asks the judgment port about the checkout url's host; a fake port answers the plain cases these tests use.
@@ -209,13 +210,11 @@ async function refusalOf(id: string, invocation: Record<string, unknown>): Promi
 }
 
 async function operationWhere(id: string, matches: (value: PaymentOperationView) => boolean): Promise<PaymentOperationView> {
-  const deadline = Date.now() + 2000;
-  for (;;) {
-    const value = operations.get(id);
-    if (value && matches(value)) return value;
-    if (Date.now() >= deadline) throw new Error('The detached payment fixture did not reach its expected operation state');
-    await new Promise(resolve => setTimeout(resolve, 1));
-  }
+  await turnsUntil(() => { const value = operations.get(id); return value != null && matches(value); },
+    'detached payment fixture reaching its expected operation state');
+  const value = operations.get(id);
+  if (!value) throw new Error('The detached payment fixture lost its operation');
+  return value;
 }
 
 async function refusedAfterAcceptance(result: Record<string, unknown>): Promise<PaymentOperationView> {
@@ -768,11 +767,17 @@ describe('payments.budget.status', () => {
 });
 
 describe('payments.cards.*', () => {
-  test('the list reports the configured default card id', async () => {
-    settings.set('payments.defaultCardId', 'card-preferred');
+  test('the list reports the configured default card id when that card exists', async () => {
+    const created = await invoke('payments.cards.create', {
+      body: {
+        label: 'one', kind: 'virtual', number: '4111111111111111',
+        expiryMonth: 7, expiryYear: 2029, cvv: '907', cardholderName: 'A Person',
+      },
+    });
+    const id = String((created['card'] as Record<string, unknown>)['id']);
+    settings.set('payments.defaultCardId', id);
     const result = await invoke('payments.cards.list');
-    expect(result['cards']).toEqual([]);
-    expect(result['defaultCardId']).toBe('card-preferred');
+    expect(result['defaultCardId']).toBe(id);
   });
 
   test('a created card is projected through an allowlist, with nothing else on it', async () => {
@@ -816,15 +821,16 @@ describe('payments.cards.*', () => {
     expect(refusal.message).not.toContain('907');
   });
 
-  test('a non-integer issuer cap is stored as null rather than coerced', async () => {
-    const created = await invoke('payments.cards.create', {
+  test('a non-integer issuer cap is refused rather than stored as no cap', async () => {
+    const refusal = await refusalOf('payments.cards.create', {
       body: {
         label: 'one', kind: 'real', number: '4111111111111111',
         expiryMonth: 7, expiryYear: 2029, cvv: '907', cardholderName: 'A Person',
         issuerCapMinorUnits: 'lots',
       },
     });
-    expect((created['card'] as Record<string, unknown>)['issuerCapMinorUnits']).toBeNull();
+    expect(refusal.status).toBe(400);
+    expect(refusal.message).toContain('issuerCapMinorUnits');
   });
 
   test('delete reads the id from the REST path parameter, not only from a body', async () => {
@@ -897,7 +903,9 @@ describe('a store failure never hands a caller the store internals', () => {
 
   test('cards.delete replaces it too', async () => {
     await overFailingSecrets();
-    const refusal = await refusalOf('payments.cards.delete', { body: { id: 'card-anything' } });
+    // An id of the shape the store generates is swept even with no row, which is
+    // what reaches the failing secret store.
+    const refusal = await refusalOf('payments.cards.delete', { body: { id: 'card-0123456789ab' } });
     expect(refusal.status).toBe(500);
     expect(refusal.message).not.toContain('secrets.enc');
     expect(refusal.message).toBe('Deleting the card failed.');

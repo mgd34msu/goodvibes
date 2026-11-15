@@ -3,7 +3,7 @@ import { AgentCalendarRegistry } from '../../agent/calendar-registry.ts';
 import { parseIcs } from '../../agent/ics-calendar.ts';
 import { parseIcs as parseIcsHonest } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
+import { parseAgentLocalLibraryArgs, resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import {
   CALENDAR_SUBSCRIPTION_VERBS,
@@ -156,39 +156,47 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
         ctx.print('Usage: /calendar import <path-to-ics> [--yes]');
         return;
       }
-      if (!existsSync(filePath)) {
-        ctx.print(`File not found: ${filePath}`);
+      const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
+      if (sourcePath === null) return;
+      if (!existsSync(sourcePath)) {
+        ctx.print(`File not found: ${sourcePath}`);
         return;
       }
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readFileSync(sourcePath, 'utf-8');
+      // The platform reader says what the local store cannot use: entries it
+      // could not parse, and recurring events whose RRULE this build does not
+      // fully expand (imported as a single seed, never silently dropped or
+      // mis-expanded). The preview and the receipt both report from it so they
+      // cannot disagree on what an event is.
+      const honest = parseIcsHonest(content);
+      const unsupportedRecurring = honest.events.filter((e) => e.recurrence?.expansion === 'unsupported');
+      const readerNotes = [
+        honest.skipped.length > 0 ? `Could not parse ${honest.skipped.length} entr${honest.skipped.length === 1 ? 'y' : 'ies'}: ${honest.skipped[0]?.message ?? ''}` : '',
+        unsupportedRecurring.length > 0
+          ? `${unsupportedRecurring.length} recurring event${unsupportedRecurring.length === 1 ? '' : 's'} imported as a single date only (recurrence not fully expanded): ${unsupportedRecurring.slice(0, 3).map((e) => e.summary).join(', ')}${unsupportedRecurring.length > 3 ? ', ...' : ''}`
+          : '',
+      ];
       if (!parsed.yes) {
         const preview = parseIcs(content);
         ctx.print([
           'Calendar import preview',
-          `  file ${filePath}`,
+          `  file ${sourcePath}`,
           `  events found ${preview.length}`,
           ...preview.slice(0, 5).map((e) => `  - ${e.summary} (${e.dtstart})`),
           preview.length > 5 ? `  ... and ${preview.length - 5} more` : '',
+          ...readerNotes.map((note) => (note ? `  ${note}` : '')),
           '  rerun with --yes to import',
         ].filter(Boolean).join('\n'));
         return;
       }
       const { imported, skipped, secretSkipped } = registry.importIcs(content);
-      // Honest recurrence/skip report from the platform reader: events the local store
-      // could not use, and recurring events whose RRULE this build does not fully
-      // expand (imported as a single seed, never silently dropped or mis-expanded).
-      const honest = parseIcsHonest(content);
-      const unsupportedRecurring = honest.events.filter((e) => e.recurrence?.expansion === 'unsupported');
       ctx.print([
-        `Imported ${imported.length} event${imported.length === 1 ? '' : 's'} from ${filePath}`,
+        `Imported ${imported.length} event${imported.length === 1 ? '' : 's'} from ${sourcePath}`,
         ...imported.slice(0, 10).map((e) => `  ${e.id}  ${e.start}  ${e.title}`),
         imported.length > 10 ? `  ... and ${imported.length - 10} more` : '',
         skipped > 0 ? `Skipped ${skipped} event${skipped === 1 ? '' : 's'} that already exist.` : '',
         secretSkipped > 0 ? `Skipped ${secretSkipped} event${secretSkipped === 1 ? '' : 's'} for safety.` : '',
-        honest.skipped.length > 0 ? `Could not parse ${honest.skipped.length} entr${honest.skipped.length === 1 ? 'y' : 'ies'}: ${honest.skipped[0]?.message ?? ''}` : '',
-        unsupportedRecurring.length > 0
-          ? `${unsupportedRecurring.length} recurring event${unsupportedRecurring.length === 1 ? '' : 's'} imported as a single date only (recurrence not fully expanded): ${unsupportedRecurring.slice(0, 3).map((e) => e.summary).join(', ')}${unsupportedRecurring.length > 3 ? ', ...' : ''}`
-          : '',
+        ...readerNotes,
       ].filter(Boolean).join('\n'));
       return;
     }
@@ -207,11 +215,13 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
         ].join('\n'));
         return;
       }
-      const ics = registry.exportIcs(undefined, dest);
-      if (!dest) {
+      const destPath = dest ? resolveCommandFilePath(ctx, dest, 'write') : undefined;
+      if (destPath === null) return;
+      const ics = registry.exportIcs(undefined, destPath);
+      if (!destPath) {
         ctx.print(ics);
       } else {
-        ctx.print(`Exported calendar to ${dest}`);
+        ctx.print(`Exported calendar to ${destPath}`);
       }
       return;
     }
@@ -293,6 +303,9 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
   }
 }
 
+/** Verbs that fetch a feed, store a credential or change the connected accounts; a model-run command may not start them. */
+const OWNER_ONLY_CALENDAR_VERBS: ReadonlySet<string> = new Set(['subscribe', 'unsubscribe', 'refresh', 'connect', 'disconnect']);
+
 export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'calendar',
@@ -301,6 +314,13 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     usage: '[list|upcoming [--days N]|connect <google|outlook> [--device]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
     handler: async (args: readonly string[], ctx: CommandContext) => {
       const sub = (args[0] ?? 'list').toLowerCase();
+      if (ctx.invokedByModel === true && OWNER_ONLY_CALENDAR_VERBS.has(sub)) {
+        ctx.print(
+          `Refused: /calendar ${sub} reaches outside this machine or changes which calendars are connected, so it only counts when you type it yourself `
+          + '(in the terminal: /calendar ' + sub + '). Nothing was changed. The model can read with /calendar list, upcoming, subscriptions and accounts.',
+        );
+        return;
+      }
       if (CALENDAR_SUBSCRIPTION_VERBS.has(sub)) {
         await runCalendarSubscriptionCommand(sub, args.slice(1), ctx);
         return;

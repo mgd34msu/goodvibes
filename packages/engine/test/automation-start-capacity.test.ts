@@ -29,10 +29,11 @@ test('asynchronous startup reserves the configured slot and transfers it to the 
     f.config.set('automation.maxConcurrentRuns', 1);
     const a = await f.create('a'), b = await f.create('b');
     await f.manager.start();
-    const start = spyOn(f.broker, 'start').mockImplementation(() => blocked);
+    const entered = Promise.withResolvers<void>();
+    const start = spyOn(f.broker, 'start').mockImplementation(() => { entered.resolve(); return blocked; });
     try {
       const first = f.manager.runNow(a.id);
-      await Promise.resolve(); await Promise.resolve();
+      await entered.promise;
       expect(f.manager.getSchedulerCapacity().slotsInUse).toBe(1);
       await expect(f.manager.runNow(b.id)).rejects.toThrow('concurrency limit');
       release();

@@ -36,7 +36,7 @@ export type VerificationArtifact =
   | { readonly kind: 'none'; readonly reason: string }
   | {
       readonly kind: 'refused';
-      readonly reason: 'link-host-mismatch';
+      readonly reason: 'link-host-mismatch' | 'insecure-link';
       readonly linkHost: string;
       readonly expectedDomain: string;
       readonly message: string;
@@ -91,6 +91,7 @@ export function hostMatchesServiceDomain(host: string, serviceDomain: string): b
 interface CandidateLink {
   readonly url: string;
   readonly host: string;
+  readonly secure: boolean;
 }
 
 function collectLinks(body: string): readonly CandidateLink[] {
@@ -110,7 +111,7 @@ function collectLinks(body: string): readonly CandidateLink[] {
     // its hostname is evil.com, which is what gets validated.
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
     if (!parsed.hostname) continue;
-    links.push({ url: parsed.toString(), host: normalizeDomain(parsed.hostname) });
+    links.push({ url: parsed.toString(), host: normalizeDomain(parsed.hostname), secure: parsed.protocol === 'https:' });
   }
   return links;
 }
@@ -167,12 +168,34 @@ export function extractVerification(
   // is still that service. A login address is one the owner already gave out,
   // so the weaker correlation is compensated by demanding the EXACT domain the
   // agent is authenticating against, no parent, no sibling subdomain.
-  const matching = expectation.kind === 'login'
-    ? links.find((link) => normalizeDomain(link.host) === normalizeDomain(expectation.serviceDomain))
-    : links.find((link) => hostMatchesServiceDomain(link.host, expectation.serviceDomain));
+  const onServiceDomain = (link: CandidateLink): boolean => expectation.kind === 'login'
+    ? normalizeDomain(link.host) === normalizeDomain(expectation.serviceDomain)
+    : hostMatchesServiceDomain(link.host, expectation.serviceDomain);
+  const matching = links.find((link) => link.secure && onServiceDomain(link));
 
   if (matching) {
     return { artifact: { kind: 'link', url: matching.url, linkHost: matching.host }, untrustedBody };
+  }
+
+  // A plain-http link to the right host would send the token in the clear. A
+  // footer or unsubscribe link of that kind must not hide a code the message
+  // also carries, so only a message with no code is refused for it.
+  const insecure = links.find(onServiceDomain);
+  const codeBesideInsecureLink = insecure ? extractCode(email.body) : null;
+  if (insecure && codeBesideInsecureLink) {
+    return { artifact: { kind: 'code', code: codeBesideInsecureLink }, untrustedBody };
+  }
+  if (insecure) {
+    return {
+      artifact: {
+        kind: 'refused',
+        reason: 'insecure-link',
+        linkHost: insecure.host,
+        expectedDomain: expectation.serviceDomain,
+        message: `Refused to follow a verification link: it uses plain http at "${insecure.host}", which would send the token unencrypted. Open the service's own site by hand.`,
+      },
+      untrustedBody,
+    };
   }
 
   const firstLink = links[0];

@@ -7,7 +7,6 @@ export type WebuiReadResult<T> =
   | { readonly status: 'held'; readonly reason: 'private-input' | 'unsafe-input' | 'unsupported-input' | 'budget' }
   | { readonly status: 'unavailable'; readonly reason: 'unconfigured' | 'offline' | 'timeout' | 'aborted' | 'stale' | 'invalid-response' | 'internal' };
 
-export interface WebuiReaderOptions { readonly signal?: AbortSignal }
 
 export const WEBUI_READER_LIMITS = Object.freeze({
   errorBytes: 4096, statusChars: 256, queryChars: 256,

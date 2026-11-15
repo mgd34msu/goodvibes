@@ -1,4 +1,4 @@
-/** UNRUN: actual reset/writeback consumers retain original files and the complete
+/** Actual reset/writeback consumers retain original files and the complete
  * native knowledge reference ensemble rather than trusting cached descriptors. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';

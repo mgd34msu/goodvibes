@@ -35,6 +35,7 @@ import {
   validateInboundMailRecord,
 } from './record-validation.js';
 import { withInboundStoreWriteLock } from './store-write-lock.js';
+import { loadStoreForWrite } from './store-read.js';
 import {
   MAX_BODY_EXCERPT_CHARS,
   type HousekeepingTrigger,
@@ -348,12 +349,15 @@ export class InboundMailStore {
     return this.corruption;
   }
 
-  private async readWithDrops(): Promise<{
+  private async readWithDrops(forWrite = false): Promise<{
     records: InboundMailRecord[];
     malformed: number;
     corrupt: PersistentStoreCorruption | null;
   }> {
-    const { data: raw, corruption } = await this.store.loadOrDiscard();
+    // A write must not replace a file it only failed to read; see store-read.ts.
+    const { data: raw, corruption } = forWrite
+      ? await loadStoreForWrite(this.store)
+      : await this.store.loadOrDiscard();
     if (corruption !== null) this.corruption = corruption;
     if (!raw || typeof raw !== 'object') return { records: [], malformed: 0, corrupt: corruption };
     const rawRecords = Array.isArray(raw.records) ? raw.records : [];
@@ -372,7 +376,7 @@ export class InboundMailStore {
     // across processes. Both, because neither alone is "one writer at a time"
     //, see store-write-lock.ts for why a second daemon is reachable here.
     const run = this.writeChain.then(async () => withInboundStoreWriteLock(this.store.lockPath, async () => {
-      const { records, malformed, corrupt } = await this.readWithDrops();
+      const { records, malformed, corrupt } = await this.readWithDrops(true);
       const { next, result } = await fn(records, malformed, corrupt);
       await this.store.persist({ version: 1, records: next });
       return result;

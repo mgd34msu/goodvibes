@@ -1,7 +1,8 @@
 /**
  * store-write-ordering.test.ts
  *
- * One defect, twelve stores.
+ * One defect, four stores. The rest of the stores that share it are pinned in
+ * store-write-ordering-registries.test.ts and store-write-ordering-extras.test.ts.
  *
  * `PersistentStore.persist` replaces a file atomically, so no reader ever sees
  * a torn write, but it says nothing about ORDER. A caller that serialises its
@@ -12,8 +13,8 @@
  * payment approval read back as pending after a restart.
  *
  * Every test here forces the same interleaving with the same harness, a real
- * store with a delay knob, so the overlap happens deterministically on an idle
- * machine, and asserts the REAL consequence of the defect rather than a
+ * store whose next write is parked on a gate the test releases, so the overlap
+ * is the same on an idle machine and a loaded one, and asserts the REAL consequence of the defect rather than a
  * general statement about ordering: a revoked permission rule that comes back,
  * a cancelled batch job that reads back queued, a deleted CI watch that keeps
  * notifying. Each one fails if its store's write queue is removed.
@@ -31,6 +32,7 @@ import {
   makeControllableStore,
   readOnDisk,
   replaceInternalStore,
+  settleCompetingWrite,
   type ControllableStore,
 } from './_helpers/controllable-store.js';
 
@@ -42,26 +44,6 @@ import type { ProviderRegistry } from '../platform/src/platform/providers/regist
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
 import type { RouteBindingManager } from '../platform/src/platform/channels/index.js';
 import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
-import { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.js';
-import { AutomationRunStore } from '../platform/src/platform/automation/store/runs.js';
-import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.js';
-import type { AutomationJob } from '../platform/src/platform/automation/jobs.js';
-import type { AutomationRun } from '../platform/src/platform/automation/runs.js';
-import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.js';
-import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/index.js';
-import { TaskScheduler } from '../platform/src/platform/scheduler/scheduler.js';
-import { CiWatchService, CiWatchStore } from '../platform/src/platform/ci-watch/index.js';
-import type { CiJob, CiStatusSource } from '../platform/src/platform/ci-watch/index.js';
-import { PrincipalRegistry } from '../platform/src/platform/principals/registry.js';
-import { PrincipalStore } from '../platform/src/platform/principals/store.js';
-import { ChannelProfileRegistry } from '../platform/src/platform/channel-profiles/registry.js';
-import { ChannelProfileStore } from '../platform/src/platform/channel-profiles/store.js';
-import { DistributedRuntimeManager } from '../platform/src/platform/runtime/remote/distributed-runtime-manager.js';
-import { CheckinReceiptStore } from '../platform/src/platform/checkin/receipts.js';
-import type { CheckinReceipt } from '../platform/src/platform/checkin/types.js';
-import { KVState } from '../platform/src/platform/state/kv-state.js';
-import { JsonFileStore } from '../platform/src/platform/state/json-file-store.js';
-import { InboundMailHousekeeper } from '../platform/src/platform/email/inbound/housekeeping.js';
 
 /** A temp directory that the caller is responsible for removing. */
 function tempDir(prefix: string): string {
@@ -104,11 +86,13 @@ describe('UserPermissionRuleStore: a revoked rule does not come back', () => {
       // The remembered decision's write is the slow one, it is the one the
       // revocation must follow. Even if the caller knows the rule id before
       // the add commits, its queued delete must see the completed addition.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const adding = rules.add(alwaysAllowRule('rule-always-allow-git-push'));
       await waitFor(() => store.started >= 1);
-      const removed = await rules.delete('rule-always-allow-git-push');
-      expect(removed).toBe(true);
+      const removing = rules.delete('rule-always-allow-git-push');
+      await settleCompetingWrite(store, 1);
+      release();
+      expect(await removing).toBe(true);
       await adding;
       await waitFor(() => store.finished >= 2);
 
@@ -191,24 +175,37 @@ describe('DaemonBatchManager: a cancelled job does not read back queued', () => 
       });
       replaceInternalStore(manager, 'store', store);
 
+      // A batch already at the provider: the pass polls it, which changes a
+      // row, so the pass writes at its end. A pass with nothing to change
+      // writes nothing and has no write to race.
+      await manager.createJob({
+        provider: 'openai',
+        model: 'gpt-test',
+        request: { messages: [{ role: 'user', content: 'already submitted' }] },
+        flush: true,
+      });
       const job = await manager.createJob({
         provider: 'openai',
         model: 'gpt-test',
         request: { messages: [{ role: 'user', content: 'summarise the day' }] },
       });
       expect(job.status).toBe('queued');
+      const writesBefore = store.started;
 
       // A tick's write is the slow one. The tick begins with provider I/O and
       // writes at the end of the pass, so its write is routinely in flight when
       // an operator acts.
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const ticking = manager.tick();
-      await waitFor(() => store.started >= 2);
+      await waitFor(() => store.started >= writesBefore + 1);
 
-      const cancelled = await manager.cancelJob(job.id);
+      const cancelling = manager.cancelJob(job.id);
+      await settleCompetingWrite(store, writesBefore + 1);
+      release();
+      const cancelled = await cancelling;
       expect(cancelled.status).toBe('cancelled');
       await ticking;
-      await waitFor(() => store.finished >= 3);
+      await waitFor(() => store.finished >= writesBefore + 2);
 
       // What the next daemon start reads. 'queued' here is a job the next tick
       // submits to the provider, a paid request the operator called off.
@@ -280,11 +277,14 @@ describe('SharedSessionBroker: a cancelled input does not read back queued', () 
       // The sweep's write is the slow one, and it is fired without being
       // awaited, exactly as the 60-second timer fires it.
       const before = store.started;
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       broker.trimRetained('floor');
       await waitFor(() => store.started > before);
 
-      const cancelled = await broker.cancelInput('sess-order', queued?.id as string);
+      const cancelling = broker.cancelInput('sess-order', queued?.id as string);
+      await settleCompetingWrite(store, before + 1);
+      release();
+      const cancelled = await cancelling;
       expect(cancelled?.state).toBe('cancelled');
       await waitFor(() => store.finished >= store.started);
 
@@ -325,11 +325,14 @@ describe('ChannelPolicyManager: a disabled surface stays disabled', () => {
         text: 'status?',
       } as never);
 
-      store.delayNextMs = 250;
+      const release = store.holdNext();
       const before = store.started;
       await waitFor(() => store.started > before, { timeoutMs: 10_000 });
 
-      await manager.upsertPolicy('telegram' as never, { enabled: false });
+      const disabling = manager.upsertPolicy('telegram' as never, { enabled: false });
+      await settleCompetingWrite(store, before + 1);
+      release();
+      await disabling;
       await waitFor(() => store.finished >= store.started);
 
       // What a restart reads. `enabled: true` here is a surface its owner

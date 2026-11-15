@@ -2,7 +2,7 @@
 import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
-import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
+import { createDaemonProviderDiscovery, onlyLoopbackServers, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
 import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
@@ -29,6 +29,12 @@ export interface DaemonHostOptions {
   readonly hasOverriddenHome?: boolean;
   /** Explicit opt-in; an absent binding constructs no secondary listener. */
   readonly httpListener?: DaemonHostBinding;
+  /**
+   * Supplied by the owner of the process: an update, rollback or promotion
+   * stopped this runtime and its handover then could not complete, so the
+   * process must end with a failure status rather than idle without a listener.
+   */
+  readonly onIncompleteHandover?: () => void;
 }
 
 export type DaemonHostServer = Pick<DaemonServer, 'enable' | 'start' | 'completeHostStartup' | 'stop' | 'fenceRestartAdmission' | 'waitForRestart' | 'isRunning' | 'boundHost' | 'boundPort' | 'boundScheme'>;
@@ -52,13 +58,14 @@ export interface DaemonHostSnapshot {
 /**
  * Every host state and the states it may move to. `failed` is entered as soon as a start fails,
  * so a failed host never reads `starting`; close() then drains it (`closing`) and settles it as
- * `failed` when the start failed or the cleanup did, `closed` otherwise.
+ * `failed` when the start failed or the cleanup did, `closed` otherwise. A serving host moves to
+ * `handover` when an update or promotion stops its runtime for a managed replacement.
  */
 export const daemonHostLifecycle = defineLifecycle<DaemonHostState>('daemon host', {
   idle: ['starting', 'closing'],
   starting: ['ready', 'degraded', 'handover', 'failed', 'closing'],
-  ready: ['closing'],
-  degraded: ['closing'],
+  ready: ['handover', 'closing'],
+  degraded: ['handover', 'closing'],
   handover: ['closing'],
   failed: ['closing'],
   closing: ['closed', 'failed'],
@@ -206,7 +213,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       // discoveries cannot take their names. Host work owns this admission wait.
       await runtime.providerRegistry.ready();
       fence();
-      const discovered = loadPersistedProviders({ homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot });
+      const discovered = onlyLoopbackServers(loadPersistedProviders({ homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot }));
       if (discovered.length > 0) runtime.providerRegistry.registerDiscoveredProviders(discovered);
       fence();
 
@@ -223,6 +230,9 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       assertInstallationCurrent();
       let handoverClosing: Promise<void> | undefined;
       const drainForNativeHandover = () => handoverClosing ??= Promise.resolve().then(async () => {
+        // A serving host no longer serves once its runtime is handed over;
+        // its snapshot must not keep saying `ready`. Startup records its own move.
+        if (state === 'ready' || state === 'degraded') moveTo('handover');
         const failures: Error[] = [];
         const drain = async (label: string, action: () => void | Promise<void>) => {
           try { await bounded(label, action); } catch { failures.push(new Error(`Daemon native handover ${label} failed`)); }
@@ -252,6 +262,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         hostedSessions: createHostedSessionOptions(runtime),
         ...(updateArtifact ? { updateArtifact } : {}),
         ...(hasOverriddenHome === undefined ? {} : { hasOverriddenHome }),
+        ...(options.onIncompleteHandover ? { onIncompleteHandover: options.onIncompleteHandover } : {}),
       });
       ownListener('daemon server', daemon);
       fence();
@@ -266,7 +277,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         listener = (factories.createListener ?? ((config) => new HttpListener(config)))({
           host: http.host, port: http.port, configManager: runtime.configManager,
           userAuth: runtime.localUserAuthManager, hookDispatcher: runtime.hookDispatcher,
-          pairingTokens: runtime.pairingTokens,
+          pairingTokens: runtime.pairingTokens, runtimeBus: runtime.runtimeBus,
           serveFactory: createSafeHostServeFactory('Configured HTTP listener', http.serveFactory),
         });
         ownListener('HTTP listener', listener);
@@ -294,8 +305,13 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         if (closed) outcome.cancel();
         await outcome.drain;
         fence();
-        moveTo('handover');
-        return;
+        // A handover whose preparation was refused never stopped the runtime:
+        // this host is still the serving one and finishes its startup.
+        if (outcome.resumed?.() !== true) {
+          moveTo('handover');
+          return;
+        }
+        startupHandover = undefined;
       }
       fence();
       // Listener startup awaits accepted backend owners. Retirement during
@@ -327,8 +343,11 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         if (closed) activated.cancel();
         await activated.drain;
         fence();
-        moveTo('handover');
-        return;
+        if (activated.resumed?.() !== true) {
+          moveTo('handover');
+          return;
+        }
+        startupHandover = undefined;
       }
       fence();
       moveTo(boot.state === 'ready' ? 'ready' : 'degraded');

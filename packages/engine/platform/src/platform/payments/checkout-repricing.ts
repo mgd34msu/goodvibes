@@ -165,8 +165,10 @@ export async function readRepricedCheckout(input: {
     selection.recordAction('retained one distinct mandatory fee from current source');
     if (selectedFees.length >= candidates.length) return null;
   }
+  // The earlier summary was already read as a one-off purchase and the same-purchase check above
+  // refuses a new subscription; the whole observation is far longer than a summary can be.
   const next: RawCheckoutReading = { lines, tax: tax.literal, shippingOptions, fees,
-    statedTotal: total.literal, currency: previous.currency, orderSummaryText: JSON.stringify(current) };
+    statedTotal: total.literal, currency: previous.currency, orderSummaryText: reading.orderSummaryText };
   const extracted = extractCheckout(next, previous.currency); if (!extracted.ok) return null;
   const selected = extracted.checkout.shippingOptions.find(option => option.rawLabel === previous.shippingLabel);
   if (!selected) return null;

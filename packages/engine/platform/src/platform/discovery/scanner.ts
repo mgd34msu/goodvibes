@@ -1,7 +1,7 @@
 import { networkInterfaces } from 'node:os';
 import { readLocalServerIdentity } from '../routing/provider-readings.js';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { discoverContextWindows } from '../providers/context-discovery.js';
 import { WELL_KNOWN_LOCAL_PORTS } from '../providers/well-known-endpoints.js';
@@ -9,7 +9,7 @@ import type { ShellPathService } from '../runtime/shell-paths.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
-import { capturePersistedProviders } from './persisted-cache.js';
+import { capturePersistedProviders, capturePersistedServer } from './persisted-cache.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,40 +69,58 @@ export function loadPersistedProviders(roots: DiscoveryRoots): DiscoveredServer[
   }
 }
 
+/**
+ * How long a provider stays in the cache without being seen again. The LAN scan
+ * probes every host on the local /24, so without an age limit every address ever
+ * answered on every network the machine has visited would be kept forever.
+ */
+const PERSISTED_PROVIDER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Replace the cache file whole, so a crash mid-write cannot leave a torn file. */
+function writeCacheAtomically(persistedPath: string, entries: readonly PersistedServer[]): void {
+  writeFileAtomic(persistedPath, JSON.stringify(entries, null, 2) + '\n', { durable: false });
+}
+
+/**
+ * The entries already on disk that the loader would accept and that have been
+ * seen recently enough to keep. An entry without a timestamp is stamped now so
+ * it ages out like any other.
+ */
+function readLiveEntries(persistedPath: string, now: number): PersistedServer[] | null {
+  const parsed = JSON.parse(readFileSync(persistedPath, 'utf-8')) as unknown;
+  if (!Array.isArray(parsed)) return null;
+  const live: PersistedServer[] = [];
+  for (const item of parsed as unknown[]) {
+    const server = capturePersistedServer(item);
+    if (!server) continue;
+    const seen = (item as Record<string, unknown>).lastSeen;
+    const lastSeen = typeof seen === 'number' && Number.isFinite(seen) ? seen : now;
+    if (now - lastSeen > PERSISTED_PROVIDER_MAX_AGE_MS) continue;
+    live.push({ ...server, lastSeen });
+  }
+  return live;
+}
+
 /** Save discovered providers to disk. Merges with existing entries keyed by host:port. */
 export function persistProviders(roots: DiscoveryRoots, servers: DiscoveredServer[]): void {
   const persistedPath = getPersistedPath(roots);
   try {
     const now = Date.now();
-    // Load existing persisted servers
     let existing: PersistedServer[] = [];
     if (existsSync(persistedPath)) {
       try {
-        const raw = readFileSync(persistedPath, 'utf-8');
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) {
-          existing = (parsed as unknown[]).filter(
-            (item): item is PersistedServer =>
-              typeof item === 'object' && item !== null &&
-              typeof (item as Record<string, unknown>).host === 'string' &&
-              typeof (item as Record<string, unknown>).port === 'number' &&
-              Array.isArray((item as Record<string, unknown>).models)
-          );
-        } else {
-          logger.warn('[Scanner] persistProviders ignored invalid existing discovery cache; overwriting with current scan results');
-        }
+        const live = readLiveEntries(persistedPath, now);
+        if (live === null) logger.warn('[Scanner] persistProviders ignored invalid existing discovery cache; overwriting with current scan results');
+        else existing = live;
       } catch {
-        existing = [];
         logger.warn('[Scanner] persistProviders could not read existing discovery cache; overwriting with current scan results');
       }
     }
-    // Merge: update existing entries, add new ones
     const byKey = new Map(existing.map(s => [`${s.host}:${s.port}`, s]));
     for (const server of servers) {
       byKey.set(`${server.host}:${server.port}`, { ...server, lastSeen: now });
     }
-    mkdirSync(dirname(persistedPath), { recursive: true });
-    writeFileSync(persistedPath, JSON.stringify([...byKey.values()], null, 2) + '\n', 'utf-8');
+    writeCacheAtomically(persistedPath, [...byKey.values()]);
   } catch {
     // Discovery still returns live results, but the cache was not updated.
     logger.warn('[Scanner] persistProviders failed; discovery cache was not updated');
@@ -115,16 +133,13 @@ export function removePersistedProviders(roots: DiscoveryRoots, toRemove: Array<
   const persistedPath = getPersistedPath(roots);
   try {
     if (!existsSync(persistedPath)) return;
-    const raw = readFileSync(persistedPath, 'utf-8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
+    const removeKeys = new Set(toRemove.map(s => `${s.host}:${s.port}`));
+    const live = readLiveEntries(persistedPath, Date.now());
+    if (live === null) {
       logger.warn('[Scanner] removePersistedProviders skipped invalid discovery cache');
       return;
     }
-    const current = parsed as PersistedServer[];
-    const removeKeys = new Set(toRemove.map(s => `${s.host}:${s.port}`));
-    const filtered = current.filter(s => !removeKeys.has(`${s.host}:${s.port}`));
-    writeFileSync(persistedPath, JSON.stringify(filtered, null, 2) + '\n', 'utf-8');
+    writeCacheAtomically(persistedPath, live.filter(s => !removeKeys.has(`${s.host}:${s.port}`)));
   } catch {
     // Discovery cleanup should not block the caller, but stale cache entries remain.
     logger.warn('[Scanner] removePersistedProviders failed; discovery cache was not cleaned up');

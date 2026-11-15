@@ -3,6 +3,7 @@
  * its runtime bus. Extracted from bootstrap-core so the privacy wiring has a
  * test of its own.
  */
+import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
@@ -16,8 +17,13 @@ import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/pl
 export function createRuntimeNotifier(
   serviceRegistry: Parameters<typeof Notifier.fromConfig>[0],
   configGet: (key: string) => unknown,
+  configManager?: Pick<ConfigManager, 'get'>,
+  secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
 ): Promise<Notifier> {
   return Notifier.fromConfig(serviceRegistry, {
     metadataOnly: () => readNotificationsMetadataOnly(configGet),
+    // Supplies the stored bot tokens and the integrations.delivery.* settings.
+    configManager: configManager ?? null,
+    secretsManager: secretsManager ?? null,
   });
 }

@@ -26,6 +26,7 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  */
 import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { ToolEvent } from '../../../events/tools.js';
+import type { TurnEvent } from '../../../events/turn.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import { logger } from '../../utils/logger.js';
 import type { SideEffectKind } from '../batteries/side-effect.js';
@@ -127,15 +128,22 @@ interface ArgRole {
   readonly target: boolean;
 }
 
-/** Roles read so far, by tool and argument name; bounded, the oldest leaves first. */
-const ARG_ROLES = new Map<string, ArgRole>();
+/**
+ * Roles read so far, by tool and argument name; bounded, the oldest leaves first. Kept per
+ * installed judgment port and the model it names: a role one reader decided is never applied
+ * under another, so replacing the port or changing its model (the settings port reads its model
+ * live, with no replacement) starts every argument over.
+ */
+let argRolesByPort = new WeakMap<object, { model: string; roles: Map<string, ArgRole> }>();
 const ARG_ROLES_LIMIT = 1024;
+/** Nesting read or shown; deeper values are withheld, so a hostile depth cannot exhaust the stack. */
+const ARG_DEPTH_LIMIT = 64;
 const ARG_READ_CONCURRENCY = 8;
 const roleKey = (tool: string, argument: string): string => JSON.stringify([tool, argument]);
 
 /** Every captured object key, including beyond the visible preview limits. */
 function argumentNames(value: unknown, depth = 0, names = new Set<string>()): Set<string> {
-  if (!value || typeof value !== 'object') return names;
+  if (!value || typeof value !== 'object' || depth > ARG_DEPTH_LIMIT) return names;
   if (Array.isArray(value)) {
     for (const entry of value) argumentNames(entry, depth + 1, names);
     return names;
@@ -150,8 +158,13 @@ function argumentNames(value: unknown, depth = 0, names = new Set<string>()): Se
 /** Reads the roles of the argument names not read yet for this tool. A JudgmentError propagates. */
 async function readArgRoles(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ReadonlyMap<string, ArgRole>> {
   const names = [...argumentNames(args)];
-  const unread = names.filter((name) => !ARG_ROLES.has(roleKey(tool, name)));
-  const port = unread.length > 0 ? judgmentPort(EXECUTION_LEDGER_SITE) : undefined;
+  if (names.length === 0) return new Map();
+  const port = judgmentPort(EXECUTION_LEDGER_SITE);
+  const model = port.model;
+  let entry = argRolesByPort.get(port);
+  if (!entry || entry.model !== model) { entry = { model, roles: new Map() }; argRolesByPort.set(port, entry); }
+  const known = entry.roles;
+  const unread = names.filter((name) => !known.has(roleKey(tool, name)));
   // mapLimit drains admitted workers before rejecting. Abort at the failing
   // worker so queued names stop and late siblings cannot publish a role.
   const batch = new AbortController();
@@ -159,15 +172,15 @@ async function readArgRoles(tool: string, args: Record<string, unknown>, signal:
   await mapLimit(unread, ARG_READ_CONCURRENCY, async (argument) => {
     try {
       batchSignal.throwIfAborted();
-      const run = await ledgerArg.run(port!, { tool, argument }, { site: EXECUTION_LEDGER_SITE, signal: batchSignal });
+      const run = await ledgerArg.run(port, { tool, argument }, { site: EXECUTION_LEDGER_SITE, signal: batchSignal });
       batchSignal.throwIfAborted();
       const credential = !(run.readings.holds_credential.verdict === 'no' && run.readings.holds_credential.outcome === 'act');
       const target = run.readings.is_target.verdict === 'yes' && run.readings.is_target.outcome === 'act';
       run.recordAction(credential ? 'redact' : target ? 'target' : 'show');
       // Recording can synchronously dispose the owning ledger.
       batchSignal.throwIfAborted();
-      ARG_ROLES.set(roleKey(tool, argument), { credential, target });
-      if (ARG_ROLES.size > ARG_ROLES_LIMIT) ARG_ROLES.delete(ARG_ROLES.keys().next().value!);
+      known.set(roleKey(tool, argument), { credential, target });
+      if (known.size > ARG_ROLES_LIMIT) known.delete(known.keys().next().value!);
     } catch (error) {
       // Abort immediately at the failing worker, before aggregate rejection
       // retires the ledger's pending entry. Non-cooperative late readers hit
@@ -176,12 +189,12 @@ async function readArgRoles(tool: string, args: Record<string, unknown>, signal:
       throw error;
     }
   });
-  return new Map(names.map((name) => [name, ARG_ROLES.get(roleKey(tool, name))!]));
+  return new Map(names.map((name) => [name, known.get(roleKey(tool, name))!]));
 }
 
-/** Forgets the argument roles read so far (tests, and a model change). */
+/** Forgets the argument roles read so far (tests; a replaced judgment port already starts empty). */
 export function forgetLedgerArgRoles(): void {
-  ARG_ROLES.clear();
+  argRolesByPort = new WeakMap();
 }
 
 function truncateText(value: string, max = 220): string {
@@ -220,11 +233,12 @@ function targetPreview(args: Record<string, unknown>, roles: ReadonlyMap<string,
 }
 
 /** Redact the complete captured tree before any value-bearing reading. */
-function readingArgs(value: unknown, roles: ReadonlyMap<string, ArgRole> | null): unknown {
-  if (Array.isArray(value)) return value.map((entry) => readingArgs(entry, roles));
+function readingArgs(value: unknown, roles: ReadonlyMap<string, ArgRole> | null, depth = 0): unknown {
+  if (depth > ARG_DEPTH_LIMIT) return '[truncated]';
+  if (Array.isArray(value)) return value.map((entry) => readingArgs(entry, roles, depth + 1));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-    key, roles?.get(key)?.credential === false ? readingArgs(entry, roles) : '[redacted]',
+    key, roles?.get(key)?.credential === false ? readingArgs(entry, roles, depth + 1) : '[redacted]',
   ]));
 }
 
@@ -290,6 +304,7 @@ export class AgentExecutionLedger {
   private readonly order: string[] = [];
   private readonly subscribers = new Set<() => void>();
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeTurns: () => void;
   /** Enrichment never blocks lifecycle events, cancellation, or disposal. */
   private readonly pending = new Map<string, { done: Promise<void>; cancel: () => void }>();
   private disposed = false;
@@ -300,6 +315,10 @@ export class AgentExecutionLedger {
   ) {
     this.unsubscribe = runtimeBus.onDomain('tools', (envelope) => {
       this.handleToolEvent(envelope.payload as ToolEvent, envelope.ts);
+    });
+    this.unsubscribeTurns = runtimeBus.onDomain('turn', (envelope) => {
+      const event = envelope.payload as TurnEvent;
+      if (event.type === 'TURN_COMPLETED' || event.type === 'TURN_ERROR' || event.type === 'TURN_CANCEL') this.settleTurn(event.turnId, envelope.ts);
     });
   }
 
@@ -334,6 +353,7 @@ export class AgentExecutionLedger {
   public dispose(): void {
     this.disposed = true;
     this.unsubscribe();
+    this.unsubscribeTurns();
     for (const entry of this.pending.values()) entry.cancel();
     this.pending.clear();
     this.subscribers.clear();
@@ -347,7 +367,7 @@ export class AgentExecutionLedger {
 
   private applyLifecycleEvent(event: Extract<ToolEvent, { callId: string }>, timestamp: number): void {
     if (this.disposed) return;
-    const existing = this.records.get(event.callId);
+    const existing = this.recordFor(event.turnId, event.callId);
     if (!existing || existing.status !== 'running') return;
     existing.phase = event.type;
     existing.status = statusForPhase(event.type);
@@ -370,10 +390,10 @@ export class AgentExecutionLedger {
       if (event.result?.autonomousDecision) existing.autonomousDecision = structuredClone(event.result.autonomousDecision);
     }
     if (event.type === 'TOOL_CANCELLED') {
-      const pending = this.pending.get(event.callId);
+      const pending = this.pending.get(existing.id);
       if (pending) {
         pending.cancel();
-        this.pending.delete(event.callId);
+        this.pending.delete(existing.id);
         existing.argsReadingError ??= READING_CANCELLED;
         existing.routeKindError ??= READING_CANCELLED;
       }
@@ -383,6 +403,38 @@ export class AgentExecutionLedger {
     this.notify();
   }
 
+  /**
+   * A call that never reported a result (cancelled while it was being
+   * admitted, for example) cannot stay "running" once its turn has ended.
+   */
+  private settleTurn(turnId: string, timestamp: number): void {
+    if (this.disposed) return;
+    let changed = false;
+    for (const record of this.records.values()) {
+      if (record.turnId !== turnId || record.status !== 'running') continue;
+      const pending = this.pending.get(record.id);
+      if (pending) {
+        pending.cancel();
+        this.pending.delete(record.id);
+        record.argsReadingError ??= READING_CANCELLED;
+        record.routeKindError ??= READING_CANCELLED;
+      }
+      record.status = 'cancelled';
+      record.completedAt = timestamp;
+      record.updatedAt = timestamp;
+      record.cancelReason = 'The turn ended before this call reported a result.';
+      changed = true;
+    }
+    if (changed) this.notify();
+  }
+
+  /** The record of one call: call ids are only unique within a turn. */
+  private recordFor(turnId: string, callId: string): MutableAgentExecutionRecord | undefined {
+    const first = this.records.get(callId);
+    if (first && first.turnId === turnId) return first;
+    return this.records.get(`${turnId}/${callId}`);
+  }
+
   private recordReceived(event: Extract<ToolEvent, { type: 'TOOL_RECEIVED' }>, timestamp: number): void {
     return withConfiguredDecisionModelPolicy(() => this.recordOwnedReceived(event, timestamp));
   }
@@ -390,7 +442,10 @@ export class AgentExecutionLedger {
   private recordOwnedReceived(event: Extract<ToolEvent, { type: 'TOOL_RECEIVED' }>, timestamp: number): void {
     // Capture at delivery, before our first await. The event bus owns the
     // earlier asynchronous dispatch boundary; this is not an emitter snapshot.
-    if (this.records.has(event.callId)) return;
+    if (this.recordFor(event.turnId, event.callId)) return;
+    // A provider may reuse a short call id in a later turn; that is a different call and
+    // its record gets its own key, while a repeat inside one turn is the same call.
+    const recordId = this.records.has(event.callId) ? `${event.turnId}/${event.callId}` : event.callId;
     const startedClassic = isClassicOperation();
     let args: Record<string, unknown> = {};
     let refusal: string | undefined;
@@ -400,7 +455,7 @@ export class AgentExecutionLedger {
     }
     const record: MutableAgentExecutionRecord = {
       ...(startedClassic ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-      id: event.callId, callId: event.callId, turnId: event.turnId,
+      id: recordId, callId: event.callId, turnId: event.turnId,
       tool: refusal ? '[protected tool call]' : event.tool,
       routeKind: 'other', status: 'running', phase: event.type,
       receivedAt: timestamp, updatedAt: timestamp,
@@ -471,7 +526,19 @@ export class AgentExecutionLedger {
         } catch { /* Unknown purpose stays unclassified; lifecycle history remains visible. */ }
       }
     };
-    const done = Promise.race([enrich(), cancelled]).then(() => {
+    const enrichSafely = async (): Promise<void> => {
+      try { await enrich(); }
+      catch {
+        // Never name the error: it can echo argument values. The record keeps its values withheld.
+        logger.warn('AgentExecutionLedger: enrichment failed');
+        if (!active()) return;
+        record.argsReadingError ??= ARG_READING_FAILED;
+        record.routeKindError ??= ROUTE_READING_FAILED;
+        record.argsPreview = '[redacted: values withheld]';
+        this.notify();
+      }
+    };
+    const done = Promise.race([enrichSafely(), cancelled]).then(() => {
       if (this.pending.get(record.id)?.done === done) this.pending.delete(record.id);
     });
     this.pending.set(record.id, { done, cancel: () => { controller.abort(); release(); } });

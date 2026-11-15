@@ -7,8 +7,9 @@
  * `?error=` path). Token exchange is proven against an injected fetch fake,
  * since it talks to Google's real token endpoint in production.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { connect } from 'node:net';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
@@ -18,6 +19,20 @@ import {
   type GoogleFetchPort,
 } from '../platform/src/platform/google/oauth-loopback.ts';
 import { startLoopbackListener } from '../platform/src/platform/google/node.ts';
+
+function connectOutcome(host: string, port: number): Promise<'connected' | 'refused'> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve('connected');
+    });
+    socket.once('error', () => {
+      socket.destroy();
+      resolve('refused');
+    });
+  });
+}
 
 describe('generatePkcePair', () => {
   test('produces a code challenge that is the base64url SHA-256 digest of the verifier', () => {
@@ -96,18 +111,30 @@ describe('startLoopbackListener', () => {
     }
   });
 
-  test('rejects waitForCode and serves an error page when the redirect state does not match', async () => {
+  test('answers a redirect with the wrong state with an error page and keeps waiting for the real one', async () => {
     const listener = startLoopbackListener({ expectedState: 'expected-state' });
     try {
       const waiting = listener.waitForCode(5_000);
       const response = await fetch(`${listener.redirectUri}?code=abc123&state=wrong-state`);
       expect(response.status).toBe(400);
-      const body = await response.text();
-      expect(body).toContain('Could not connect');
-      await expect(waiting).rejects.toThrow(/state/i);
+      expect(await response.text()).toContain('Could not connect');
+      const probe = await fetch(listener.redirectUri);
+      expect(probe.status).toBe(400);
+      const stray = await fetch(`${listener.redirectUri}?error=access_denied`);
+      expect(stray.status).toBe(400);
+      const real = await fetch(`${listener.redirectUri}?state=expected-state&code=the-code`);
+      expect(real.status).toBe(200);
+      expect((await waiting).code).toBe('the-code');
     } finally {
       listener.close();
     }
+  });
+
+  test('closing the listener ends a wait that is still pending', async () => {
+    const listener = startLoopbackListener({ expectedState: 'the-state' });
+    const waiting = listener.waitForCode(60_000);
+    listener.close();
+    await expect(waiting).rejects.toThrow(/closed/i);
   });
 
   test('rejects waitForCode and serves an error page when Google redirects with ?error=access_denied', async () => {
@@ -150,6 +177,18 @@ describe('startLoopbackListener', () => {
     try {
       expect(listener.redirectUri.startsWith('http://127.0.0.1:')).toBe(true);
       expect(listener.redirectUri.endsWith('/')).toBe(true);
+      const port = new URL(listener.redirectUri).port;
+      // A listener bound to all interfaces would still print a 127.0.0.1
+      // redirect URI. Linux routes all of 127.0.0.0/8 to loopback, so
+      // 127.0.0.2 reaches a wildcard bind but not one pinned to 127.0.0.1.
+      // (Other hosts' addresses are off limits to the suite's network guard.)
+      const others = process.platform === 'linux' ? ['127.0.0.2'] : [];
+      // Plain sockets, not fetch: the suite's network guard intercepts fetch
+      // and would reject for its own reasons, hiding a wildcard bind.
+      for (const address of others) {
+        expect(await connectOutcome(address, Number(port))).toBe('refused');
+      }
+      expect(await connectOutcome('127.0.0.1', Number(port))).toBe('connected');
     } finally {
       listener.close();
     }
@@ -295,6 +334,27 @@ describe('refreshAccessToken', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.problem).not.toContain('refresh-token-value');
+  });
+
+  test('a token request that does not answer within its 30 s deadline fails with a message that names the wait', async () => {
+    // The deadline is an AbortSignal.timeout(30 s); drive that signal by hand instead of waiting.
+    const clock = new AbortController();
+    const timeout = spyOn(AbortSignal, 'timeout').mockImplementation(() => clock.signal);
+    try {
+      const fetchPort: GoogleFetchPort = {
+        fetch(_url, init) {
+          return new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+          });
+        },
+      };
+      const pending = refreshAccessToken({ clientId: 'client-id', clientSecret: 'client-secret', refreshToken: 'refresh-token-value' }, fetchPort);
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      clock.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+      const result = await pending;
+      expect(result.ok).toBe(false);
+      if (!result.ok) { expect(result.problem).toContain('30 seconds'); expect(result.problem).not.toContain('refresh-token-value'); }
+    } finally { timeout.mockRestore(); }
   });
 });
 

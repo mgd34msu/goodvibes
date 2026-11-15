@@ -65,9 +65,11 @@
  * supplied. A merchant this has never seen works or nothing does.
  */
 import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } from './cart.js';
+import { logger } from '../utils/logger.js';
+import { OrderSummaryTooLongError } from './batteries/recurring-charge.js';
 import { checkPaymentGates, type GateInput } from './gates.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
-import { captureOwnedJson } from '../gate/judgment-input.js';
+import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
 import { captureMutationDescriptors } from '../utils/file-mutation.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { decidePurchase, type BudgetDraw } from './decide.js';
@@ -113,6 +115,7 @@ import { dayKey } from './day.js';
 import type {
   CommandAuthorityChannel,
   CurrencyCode,
+  ExecutionRefusalCode,
   OwnerSuppliedText,
   RefusalCode,
   ShippingStepDown,
@@ -178,6 +181,14 @@ export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   /** Host-only durable quote/control checkpoint after the journal flush and
    * before arming reception. Never supplied by checkout wire arguments. */
   readonly retainWindowCheckpoint?: ((checkpoint: import('./checkout-window-checkpoint.js').CheckoutWindowCheckpoint) => Promise<void>) | undefined;
+  /**
+   * Host-only. True only while the host is stopping (not the owner cancelling)
+   * and this purchase's window is durably saved exactly as its journal record
+   * reads. The flow then leaves journal, hold and request in place, as a crash
+   * would, so boot recovery resumes or settles the window. It is never consulted
+   * once card material is on the page or a submit may have happened.
+   */
+  readonly keepWindowOnStop?: (() => boolean) | undefined;
   readonly registry: CheckoutRegistry;
   readonly cards: CardMaterialStore;
   /**
@@ -232,23 +243,7 @@ export interface CheckoutControls {
   readonly twoDigitYear?: boolean | undefined;
 }
 
-/**
- * Refusals this layer can produce that the decision layer has no code for.
- *
- * Kept here rather than added to `RefusalCode` because they are execution-layer
- * facts: a listing format we will not buy, and an approval window that closed
- * for a reason that had nothing to do with the budget. Folding them into the
- * budget codes would make `payments.purchases.list` report "over budget" for a
- * purchase that was well within it and simply happened at a merchant the owner had not
- * vouched for.
- */
-export type ExecutionRefusalCode =
-  | 'extraction-failed'
-  /** An auction, a Best Offer, or a format we could not confirm as fixed-price. */
-  | 'listing-not-purchasable'
-  | 'merchant-not-recognised-denied'
-  | 'merchant-not-recognised-expired'
-  | 'merchant-not-recognised-undeliverable';
+export type { ExecutionRefusalCode } from './types.js';
 
 export type CheckoutOutcome =
   | { readonly kind: 'refused'; readonly code: RefusalCode | ExecutionRefusalCode; readonly reason: string }
@@ -263,6 +258,25 @@ export type CheckoutOutcome =
 function refused(code: RefusalCode | ExecutionRefusalCode, reason: string): CheckoutOutcome {
   return { kind: 'refused', code, reason };
 }
+
+/**
+ * Page text a reading will not take, a number shaped like a card number (a
+ * barcode or order number can be one) or a summary too long to read whole, is a
+ * refusal that says what to change, not a failure with no reason. Nothing has
+ * been reserved or typed yet when these readings run.
+ */
+function unreadablePageText(error: unknown): CheckoutOutcome | null {
+  if (error instanceof JudgmentInputError) {
+    return refused('extraction-failed', 'Refused: the checkout text held something that cannot be sent to be read, most often a long number shaped like a card number (a barcode, tracking or order number). Nothing was submitted. Start the purchase again with an order summary that leaves such numbers out.');
+  }
+  if (error instanceof OrderSummaryTooLongError) {
+    return refused('extraction-failed', 'Refused: the order summary is too long to be read whole. Nothing was submitted. Start the purchase again with a shorter order summary.');
+  }
+  return null;
+}
+
+/** Replacement quotes one purchase may adopt, each with its own notice and window. */
+const MAX_REPRICES = 3;
 
 /**
  * Run a purchase.
@@ -295,25 +309,34 @@ export async function runCheckout(
     checkpoint: captureCheckoutWindowCheckpoint(deps.resumeWindow.checkpoint), prepare: deps.resumeWindow.prepare.bind(deps.resumeWindow) });
   if (resumption && (resumption.checkpoint.record.purchaseId !== input.request.purchaseId
     || resumption.checkpoint.record.cardId !== input.request.cardId || resumption.checkpoint.record.item !== input.request.item)) throw new CheckoutOwnershipError();
-  const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false, resumption };
+  const keepWindowOnStop = deps.keepWindowOnStop?.bind(deps);
+  const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false, armed: false, resumption,
+    keepOnStop: () => {
+      if (lifecycle.armed || lifecycle.submitMayHaveHappened || !keepWindowOnStop) return false;
+      try { return keepWindowOnStop() === true; } catch { return false; }
+    } };
   current();
   deps = { ...deps, taintEvidence: deps.taintEvidence === undefined ? retainTaintEvidence(deps.untrusted)
     : captureOwnedJson(deps.taintEvidence) as RetainedTaintEvidence };
   try {
     let currentReading = resumption?.checkpoint.reading ?? input.reading;
-    for (;;) {
+    for (let reprices = 0; ; reprices++) {
       current();
-      const result = await runOwnedCheckout(input.request, currentReading, input.controls,
-        { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
+      // Each reprice sends the owner a new notice and opens a new window. A
+      // page whose price keeps moving must not do that without end.
+      const result = reprices > MAX_REPRICES
+        ? refused('total-changed', 'Refused: the checkout price kept changing while I was asking you about it, so I stopped. Nothing was submitted. Start the purchase again once the page shows a stable total.')
+        : await runOwnedCheckout(input.request, currentReading, input.controls,
+          { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
       if (result.kind !== 'reprice') {
-        if ((result.kind === 'refused' || result.kind === 'cancelled') && lifecycle.release && !lifecycle.submitMayHaveHappened) await lifecycle.release();
+        if ((result.kind === 'refused' || result.kind === 'cancelled') && lifecycle.release && !lifecycle.submitMayHaveHappened && !lifecycle.keepOnStop()) await lifecycle.release();
         return result;
       }
       current();
       currentReading = result.reading;
     }
   } catch (error) {
-    if (lifecycle.release && !lifecycle.submitMayHaveHappened) {
+    if (lifecycle.release && !lifecycle.submitMayHaveHappened && !lifecycle.keepOnStop()) {
       try { await lifecycle.release(); }
       catch { throw new Error('Checkout stopped before submission, but its journal or budget hold could not be released. Inspect this purchase before retrying.'); }
     }
@@ -330,6 +353,10 @@ interface CheckoutExecutionLifetime {
   pageClaim?: CheckoutPageClaim | undefined;
   release?: (() => Promise<void>) | undefined;
   submitMayHaveHappened: boolean;
+  /** Set before the card is armed: from then on a stop must release. */
+  armed: boolean;
+  /** Whether a stop may leave this window for restart recovery instead of releasing it. */
+  keepOnStop: () => boolean;
   resumption?: CheckoutWindowResumption | undefined;
   resumedHold?: ReturnType<typeof retainResumedCheckoutHold> | undefined;
 }
@@ -470,12 +497,16 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const checkout: ExtractedCheckout = extraction.checkout;
 
   // ── 2. The cart holds what the owner asked for and nothing else ─────────
-  const cartCheck = await assertCartMatchesRequest(checkout.lines, request.requestedLines, ownership);
+  let cartCheck: Awaited<ReturnType<typeof assertCartMatchesRequest>>;
+  try { cartCheck = await assertCartMatchesRequest(checkout.lines, request.requestedLines, ownership); }
+  catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
   if (!cartCheck.ok) return refused('cart-mismatch', cartCheck.reason ?? 'Refused: the cart does not match the request.');
 
   // ── 3. A recurring charge is refused outright ───────────────────────────
-  const recurring = await detectRecurringCharge(checkout.orderSummaryText, ownership);
+  let recurring: Awaited<ReturnType<typeof detectRecurringCharge>>;
+  try { recurring = await detectRecurringCharge(checkout.orderSummaryText, ownership); }
+  catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
   if (recurring.recurring) {
     return refused('recurring-charge', recurring.reason ?? 'Refused: this checkout sets up a recurring charge.');
@@ -483,7 +514,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
 
   // ── 4. The decision, on OUR integers ────────────────────────────────────
   // Which offered option is each shipping tier is read (shipping.ts); the ladder is arithmetic.
-  const shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency, ownership);
+  let shippingTiers: Awaited<ReturnType<typeof readShippingTiers>>;
+  try { shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency, ownership); }
+  catch (error) { const unreadable = unreadablePageText(error); if (unreadable) return unreadable; throw error; }
   current();
   const pools = lifecycle.resumedHold ? lifecycle.resumedHold.snapshot(deps.limits, now(), deps.timezone)
     : ledger.snapshot(deps.limits, now(), deps.timezone);
@@ -549,8 +582,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   });
   if (reservation === null) {
     return refused(
-      'item-budget-exceeded-denied',
-      'Refused: another purchase in flight is already holding the budget this one would need.',
+      'budget-held',
+      'Refused: another purchase in flight is already holding the budget this one would need. Nothing was submitted. '
+      + 'Wait for that purchase to finish, then start this one again.',
     );
   }
 
@@ -601,6 +635,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     lifecycle.release = undefined;
   };
   lifecycle.release = release;
+  // An abort-driven exit leaves a durably saved window for restart recovery
+  // instead; every deliberate refusal still releases.
+  const releaseUnlessStopped = async (): Promise<void> => { if (!lifecycle.keepOnStop()) await release(); };
   current();
 
   // ── The address goes on the order, and it is the one the owner stored ───
@@ -621,17 +658,31 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       const check = checkAddress(stored, kind);
       if (!check.ok) {
         await release();
-        return refused(kind === 'shipping' ? 'no-shipping-address' : 'no-card', check.reason ?? 'Refused: the stored address is incomplete.');
+        return refused(kind === 'shipping' ? 'no-shipping-address' : 'no-billing-address', check.reason ?? 'Refused: the stored address is incomplete.');
       }
     }
-  } catch {
-    await release();
+  } catch (error) {
+    // A stop or cancel is settled by the caller, and losing the purchase's owner
+    // is not an address problem; neither sends the owner to the address setting.
+    if (signal?.aborted) throw error;
+    await releaseUnlessStopped();
+    if (error instanceof CheckoutOwnershipError) {
+      return refused('owner-changed', 'Refused: the payment settings, pairing or checkout page changed while the stored address was being checked. '
+        + 'Nothing was submitted. Review them, then start the purchase again.');
+    }
     return refused('no-shipping-address', 'The stored address could not be verified for this purchase. Nothing was submitted.');
   }
   const retainedAddress = captureCheckoutOwnership({ signal, assertCurrent: addresses.assertCurrent?.bind(addresses) });
   lifecycle.originalAddress ??= retainedAddress;
   const addressCurrent = () => { current(); retainedAddress.assertCurrent(); };
   const addressStillCurrent = () => { try { addressCurrent(); return true; } catch { return false; } };
+  // Losing the purchase's owner while sending is not an address problem, and
+  // naming it as one sends the owner to the wrong setting.
+  const noticeRefusal = (error: unknown): CheckoutOutcome => error instanceof CheckoutOwnershipError || !addressStillCurrent()
+    ? refused('owner-changed', 'Refused: the stored address, payment settings, pairing or checkout page changed while the purchase notice was being sent. '
+      + 'Nothing was submitted. Review them, then start the purchase again.')
+    : refused('notice-unavailable', 'Refused: the purchase notice could not be prepared or sent. Nothing was submitted. '
+      + 'Check the payment notification channels, then start the purchase again.');
   const reprice = async (): Promise<CheckoutAttemptOutcome> => {
     // The old answer and its held amount are void before any new reading.
     // This path is reachable only while a submit is known not to have happened.
@@ -661,7 +712,13 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   };
   let shippingAddress;
   try { shippingAddress = addressKinds.includes('shipping') ? await addresses.read('shipping', { signal }) : null; addressCurrent(); }
-  catch { await release(); return refused('no-shipping-address', 'The stored address changed before this purchase could proceed.'); }
+  catch (error) {
+    if (signal?.aborted) throw error;
+    await releaseUnlessStopped();
+    return error instanceof CheckoutOwnershipError
+      ? refused('owner-changed', 'Refused: the payment settings, pairing or checkout page changed before this purchase could proceed. Nothing was submitted. Review them, then start the purchase again.')
+      : refused('no-shipping-address', 'The stored address changed before this purchase could proceed.');
+  }
 
   const metadata = await deps.cards.metadata(request.cardId);
   current();
@@ -728,7 +785,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       expiresInMinutes: deps.approvalMinutes,
       merchantReason: merchantVerdict.reason,
     });
-    if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
+    if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let reception: PaymentNoticeWindow | undefined;
     let restoredDeadline: Promise<number> | undefined;
     let state: ApprovalState;
@@ -744,10 +801,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         addressCurrent();
       }
       catch (error) {
-        await release();
+        await releaseUnlessStopped();
         if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
         if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
-        return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
+        return noticeRefusal(error);
       }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.approvalMinutes);
       addressCurrent();
@@ -764,7 +821,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
           answer = await (reception ? reception.awaitAnswer(deadlineMs)
             : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'approval', notice: message, deadlineMs, signal }));
           addressCurrent();
-        } catch (error) { await release(); throw error; }
+        } catch (error) { await releaseUnlessStopped(); throw error; }
         if (answer === null) {
           state = advanceApproval(state, { kind: 'deadline' });
         } else {
@@ -834,7 +891,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       expiresInMinutes: deps.vetoMinutes,
       merchantReason: merchantVerdict.reason,
     });
-    if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
+    if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let reception: PaymentNoticeWindow | undefined;
     let restoredDeadline: Promise<number> | undefined;
     let state: VetoState;
@@ -850,10 +907,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         addressCurrent();
       }
       catch (error) {
-        await release();
+        await releaseUnlessStopped();
         if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
         if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
-        return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
+        return noticeRefusal(error);
       }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.vetoMinutes);
       addressCurrent();
@@ -870,7 +927,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
           answer = await (reception ? reception.awaitAnswer(deadlineMs)
             : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'veto', notice: message, deadlineMs, signal }));
           addressCurrent();
-        } catch (error) { await release(); throw error; }
+        } catch (error) { await releaseUnlessStopped(); throw error; }
         if (answer === null) {
           state = advanceVeto(state, { kind: 'deadline' });
         } else {
@@ -897,7 +954,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     }
   }
 
-  if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed while awaiting your answer. Nothing was submitted.'); }
+  if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed while awaiting your answer. Nothing was submitted.'); }
 
   // ── 7. Apply the delivery option the ladder chose ───────────────────────
   const chosenIndex = checkout.shippingOptions.findIndex(
@@ -910,8 +967,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       addressCurrent();
       await driver.choose(shippingTarget, shipping.option.rawLabel, { signal, assertCurrent: addressCurrent });
       addressCurrent();
-    } catch {
-      await release();
+    } catch (error) {
+      // A stop or cancel during the selection is settled by the caller, not reported as a page problem.
+      if (signal?.aborted) throw error;
+      await releaseUnlessStopped();
       return refused('total-changed', 'Refused: the delivery option I chose could not be selected on this checkout.');
     }
   }
@@ -928,7 +987,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     });
     addressCurrent();
     if (!addressFill.ok) {
-      await release();
+      await releaseUnlessStopped();
       return refused(
         'no-shipping-address',
         `${addressFill.reason ?? 'The address could not be put on this checkout.'} Nothing was submitted.`,
@@ -936,7 +995,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     }
   }
 
-  if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
+  if (!addressStillCurrent()) { await releaseUnlessStopped(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
   // Shipping selection and address entry can change tax, fees and the cart.
   // The notice approves exactly its earlier parsed quote, never a larger limit.
   const beforeCard = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
@@ -944,6 +1003,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   if (beforeCard !== true) return reprice();
   purchaseEvidence.assertCurrent();
   addressCurrent();
+  lifecycle.armed = true;
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
   addressCurrent();
   let fill: Awaited<ReturnType<typeof fillCard>>;
@@ -963,7 +1023,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   if (!fill.ok) {
     await release();
     return refused(
-      'challenge-abandoned',
+      'card-fill-failed',
       `Refused: the payment form could not be completed (${fill.reason ?? 'the card fields did not accept input'}). `
       + 'Nothing was submitted.',
     );
@@ -1018,7 +1078,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     // Only actual page or owned-browser closure disarms the page; nothing here
     // claims to know that already happened.
     return refused(
-      'challenge-abandoned',
+      'submit-outcome-unknown',
       'The order was submitted but I did not see a response, so I cannot tell whether it went through. '
       + 'Check your order history at this merchant. I will not try again.',
     );
@@ -1093,7 +1153,18 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   };
   await deps.purchases.record(record);
   await registry.advance(request.purchaseId, 'submitted', {}, now());
-  await registry.close(request.purchaseId);
+  // The journal is the only thing that lets a restart settle a hold whose commit did not reach
+  // the budget file. Closing it while that write is still pending would strand the hold.
+  let budgetDurable = true;
+  // Not owner-checked: the charge already happened, so losing the owner now changes nothing about it.
+  try { ledger.flush(); }
+  catch (error) {
+    budgetDurable = false;
+    logger.warn('The budget file could not be written after a recorded purchase; its journal entry is kept so a restart settles the hold', {
+      purchaseId: request.purchaseId, error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (budgetDurable) await registry.close(request.purchaseId);
   lifecycle.release = undefined;
 
   // ── 11. Tell the owner it happened ──────────────────────────────────────
@@ -1109,7 +1180,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   try {
     addressCurrent();
     await notifier.deliver({
-      kind: 'veto',
+      kind: 'notice',
       message: renderPurchaseReport({ facts, merchantOrderId: submission.orderId, verified: submission.verified }),
       signal, assertCurrent: addressCurrent,
     });

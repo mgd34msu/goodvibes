@@ -71,8 +71,24 @@ test('first-turn mode setup failure never steers or falls back to local executio
   try {
     const result = await f.router.submit('hello');
     expect(result).toMatchObject({ routed: false, chosen: true, cancelled: true });
-    expect(f.calls).toEqual(['sessions.hosted.create']);
+    // The session that never got the chosen mode is left, not kept.
+    expect(f.calls).toEqual(['sessions.hosted.create', 'sessions.hosted.detach']);
     expect(f.router.executionMode()).toBeUndefined();
+  } finally { f.router.dispose(); }
+});
+
+test('a session whose mode was never applied is not steered into by the next message', async () => {
+  const f = fixture({ initial: 'yolo', failSet: true });
+  try {
+    await f.router.submit('first');
+    expect(f.router.hostedSessionId()).toBeNull();
+    const second = await f.router.submit('second');
+    expect(second).toMatchObject({ routed: false, chosen: true, cancelled: true });
+    // The mode is applied again on a fresh session; nothing is ever steered
+    // into a session that runs under the daemon's own default.
+    expect(f.calls.filter((call) => call === 'sessions.steer')).toEqual([]);
+    expect(f.calls.filter((call) => call === 'sessions.hosted.create')).toHaveLength(2);
+    expect(f.mutations).toHaveLength(2);
   } finally { f.router.dispose(); }
 });
 
@@ -154,11 +170,11 @@ test('a replayed preset event refreshes the actual owner instead of overwriting 
     await f.router.setExecutionMode('yolo');
     const reads = f.modeReads();
     f.staleModeEvent('safe-owner');
-    const deadline = Date.now() + 3_000;
-    while (f.modeReads() === reads || f.router.executionMode() === undefined) {
-      if (Date.now() > deadline) throw new Error('The preset event did not refresh its session owner');
-      await Bun.sleep(5);
+    // Yield to the event loop until the refresh lands; bounded by turns, not time.
+    for (let turn = 0; (f.modeReads() === reads || f.router.executionMode() === undefined) && turn < 2_000; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
+    expect(f.modeReads()).toBeGreaterThan(reads);
     expect(f.modeReads()).toBeGreaterThan(reads);
     expect(f.router.executionMode()).toBe('yolo');
     expect(f.mode()).toBe('yolo');

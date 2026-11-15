@@ -9,7 +9,7 @@
  * - Strategy selection logic based on trigger and token pressure
  */
 
-import type { CompactionLifecycleState, CompactionStrategy, CompactionTrigger } from './types.js';
+import type { CompactionLifecycleState, CompactionStrategy } from './types.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 // ---------------------------------------------------------------------------
@@ -20,9 +20,8 @@ import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 export const compactionLifecycle = defineLifecycle<CompactionLifecycleState>('compaction', {
   idle:               ['checking_threshold'],
   checking_threshold: ['microcompact', 'collapse', 'autocompact', 'reactive_compact', 'done', 'failed'],
-  // A low-quality result is re-run with an escalated strategy, and an escalated
-  // run that fails reverts to the original one: both are strategy-to-strategy
-  // moves the manager really performs, so they are declared here.
+  // A strategy state may also move to another strategy state; a run the
+  // session reports today goes straight to its commit or to failed.
   microcompact:       ['collapse', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
   collapse:           ['microcompact', 'autocompact', 'reactive_compact', 'boundary_commit', 'failed'],
   autocompact:        ['microcompact', 'collapse', 'reactive_compact', 'boundary_commit', 'failed'],
@@ -96,52 +95,6 @@ export function isCompacting(state: CompactionLifecycleState): boolean {
     state === 'reactive_compact' ||
     state === 'boundary_commit'
   );
-}
-
-// ---------------------------------------------------------------------------
-// Strategy selection
-// ---------------------------------------------------------------------------
-
-/** Parameters for selecting a compaction strategy. */
-export interface StrategySelectionParams {
-  /** What triggered compaction. */
-  trigger: CompactionTrigger;
-  /** Estimated tokens currently in context. */
-  currentTokens: number;
-  /** Model context window size. */
-  contextWindow: number;
-  /** Whether a prompt-too-long error was the immediate cause. */
-  isPromptTooLong?: boolean | undefined;
-}
-
-/**
- * Selects the appropriate compaction strategy based on trigger and token pressure.
- *
- * Selection priority:
- * 1. `reactive`    , any prompt-too-long error (emergency, must shrink now)
- * 2. `microcompact`, token pressure < 50% of context window (light touch)
- * 3. `autocompact` , token pressure 50–85% (standard auto-compaction)
- * 4. `collapse`    , token pressure > 85% or manual trigger (aggressive shrink)
- */
-export function selectStrategy(
-  params: StrategySelectionParams,
-): CompactionStrategy {
-  const { trigger, currentTokens, contextWindow, isPromptTooLong } = params;
-
-  if (isPromptTooLong === true || trigger === 'prompt_too_long') {
-    return 'reactive';
-  }
-
-  const pressure = currentTokens / contextWindow;
-
-  if (pressure < 0.5) {
-    return 'microcompact';
-  }
-  if (pressure < 0.85) {
-    return 'autocompact';
-  }
-  // High pressure or manual trigger, aggressive collapse
-  return 'collapse';
 }
 
 /**

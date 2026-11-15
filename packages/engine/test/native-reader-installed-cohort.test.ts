@@ -1,6 +1,4 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
-import { expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createNativeDataWriteOwner, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../platform/src/platform/runtime/native-reader-compatibility.js';
@@ -44,14 +42,12 @@ test.each(['old-version', 'same-version-missing-format'] as const)('%s peers do 
   expect(() => f.owner.declare('contract-review-observations-v1')).toThrow('cohort'); expect(existsSync(f.file)).toBe(false);
 });
 
-test('actual compatible peer payloads are admitted once and no unchanged publication rehashes them', () => {
-  const f = fixture(); peer(f.root); const hash = spyOn(crypto, 'createHash');
-  try {
-    f.owner.declare('knowledge-schema-v12'); expect(hash).toHaveBeenCalledTimes(1);
-    for (let index = 0; index < 5; index++) f.owner.declare('knowledge-schema-v12');
-    f.owner.declare('configuration-policy-epochs-v2'); expect(hash).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toEqual(['knowledge-schema-v12', 'configuration-policy-epochs-v2']);
-  } finally { hash.mockRestore(); }
+test('actual compatible peer payloads are admitted and repeated unchanged publications record each format once', () => {
+  const f = fixture(); peer(f.root);
+  f.owner.declare('knowledge-schema-v12');
+  for (let index = 0; index < 5; index++) f.owner.declare('knowledge-schema-v12');
+  f.owner.declare('configuration-policy-epochs-v2');
+  expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toEqual(['knowledge-schema-v12', 'configuration-policy-epochs-v2']);
 });
 
 test('an incompatible present daemon is checked even when the current writer is a terminal', () => {

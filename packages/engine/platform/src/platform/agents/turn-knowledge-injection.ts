@@ -164,6 +164,11 @@ export interface TurnInjectionRecord {
   readonly reason?: string | undefined;
 }
 
+/** The ids of a turn's injected project-memory records: code-index chunk ids are not memory records and never reach the memory provenance chip. */
+export function memoryRecordIdsOf(record: Pick<TurnInjectionRecord, 'injectedIds' | 'injectedSources'>): string[] {
+  return record.injectedIds.filter((_id, index) => record.injectedSources[index] === 'memory');
+}
+
 /**
  * Structural registry surface, mirroring knowledge-injection.ts's private
  * `KnowledgeRegistrySource` plus one addition: optional `vectorStats`, the sole signal this
@@ -245,9 +250,30 @@ export function deriveTurnKnowledgeQuery(task: string, conversationTail: readonl
   }
   const trimmedTask = task.trim();
   if (!latestUserContent || latestUserContent === trimmedTask) {
-    return trimmedTask;
+    return knowledgeQueryText(trimmedTask);
   }
-  return `${trimmedTask} ${latestUserContent}`.trim();
+  return `${knowledgeQueryText(trimmedTask)} ${knowledgeQueryText(latestUserContent)}`.trim();
+}
+
+/** Upper bound on each part of a knowledge query. */
+export const KNOWLEDGE_QUERY_MAX_CHARS = 2_048;
+
+/**
+ * The leading paragraphs of a text, up to {@link KNOWLEDGE_QUERY_MAX_CHARS}.
+ * A contract brief opens with its goal, the unit's goal and its criteria, and
+ * can then carry hundreds of kilobytes of inventory and receipts that only
+ * dilute a relevance query.
+ */
+export function knowledgeQueryText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= KNOWLEDGE_QUERY_MAX_CHARS) return trimmed;
+  let query = '';
+  for (const section of trimmed.split(/\n\s*\n/)) {
+    const next = query ? `${query}\n\n${section}` : section;
+    if (next.length > KNOWLEDGE_QUERY_MAX_CHARS) break;
+    query = next;
+  }
+  return query || trimmed.slice(0, KNOWLEDGE_QUERY_MAX_CHARS);
 }
 
 function resolveEmbeddingBackend(registry: TurnKnowledgeRegistrySource): 'available' | 'fallback-lexical' {

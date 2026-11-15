@@ -76,7 +76,7 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     subscribeConfig: (key, cb) => (deps.configManager.subscribe as unknown as (k: string, c: (v: unknown) => void) => () => void)(key, (newValue) => cb(newValue)),
     runtimeBus: deps.runtimeBus,
     sleepCheckpoint: deps.snapshotTick,
-    wakeCatchUp: [() => memoryConsolidationScheduler.tick(), deps.snapshotTick, deps.heartbeat],
+    wakeCatchUp: [() => memoryConsolidationScheduler.runNow(), deps.snapshotTick, deps.heartbeat],
     // Non-spawning default (see powerSeam doc above): without an explicit opt-in
     // the seam is the honest unavailable one, NOT the spawning host seam that
     // wireRuntimePower would otherwise pick for an undefined seam.

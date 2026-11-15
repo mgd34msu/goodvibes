@@ -1,6 +1,9 @@
 /**
- * device-settings-behavior.test.ts, behaviour verification for the twelve
- * `device.*` settings.
+ * device-settings-behavior.test.ts, behaviour verification for the `device.*`
+ * settings that drive the capability service: capture, clipboard, location,
+ * grants, capability mode and the housekeeping sweep. (`device.nodes.maxPaired`
+ * belongs to pairing, not to this service; it is pinned in the engine's
+ * pairing-node-cap.test.ts.)
  *
  * Every test here drives ONE setting to at least two distinct values (the
  * schema default and a clearly different non-default), runs the real consuming
@@ -24,9 +27,6 @@
  * window a `devices.capability.request` will come back with. If one of these
  * keys stops being honoured, the agent's phone tool silently starts doing
  * something else, and this is the suite that catches it.
- *
- * The agent's own end, that it forwards and re-decides nothing, is pinned in
- * agent-phone-tool.test.ts beside it.
  *
  * The config side is a real ConfigManager over a temp home directory, so every
  * value used here is one the shared schema actually accepts (enums from the enum
@@ -300,14 +300,6 @@ function requireArtifact(outcome: DeviceCapabilityOutcome): DeviceCaptureArtifac
   if (!outcome.ok) throw new Error(`expected a capture, got refusal ${outcome.refusal}: ${outcome.detail}`);
   if (!outcome.artifact) throw new Error('expected the capture to be retained as an artifact');
   return outcome.artifact;
-}
-
-async function waitFor(predicate: () => Promise<boolean>, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (await predicate()) return;
-    await new Promise((resolve) => { setTimeout(resolve, 10); });
-  }
-  throw new Error(`timed out waiting for ${what}`);
 }
 
 /**
@@ -690,11 +682,8 @@ describe('device.* settings: behaviour', () => {
       // TTL it reaps the capture without anyone calling sweep() by hand.
       advanceClock(2 * HOUR);
       intervals.fireLast();
-      await waitFor(
-        async () => (await fast.service.housekeeper.listDisclosures())
-          .some((report) => report.trigger === 'periodic'),
-        'the periodic sweep to run and disclose what it removed',
-      );
+      // A sweep requested while one is running joins it, so this resolves with the periodic pass the timer started.
+      await fast.service.housekeeper.sweep('manual');
       const periodic = (await fast.service.housekeeper.listDisclosures())
         .filter((report) => report.trigger === 'periodic');
       expect(periodic[periodic.length - 1]?.artifacts.removed.map((removal) => removal.reason))

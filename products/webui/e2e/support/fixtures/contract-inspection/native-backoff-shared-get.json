@@ -1,11 +1,11 @@
 {
-  "id": "ctr-2fb59864",
-  "schemaVersion": 5,
+  "id": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp",
+  "schemaVersion": 6,
   "sessionId": "session-1",
   "origin": "cli",
   "ask": "Add a CSV parser module and wire it into the convert command.",
-  "ownerAgentId": "agent-e4d497d4",
-  "projectRoot": "/tmp/goodvibes-platform-testrun-2-1ed65473/contract-runner-ApHYl0",
+  "ownerAgentId": "agent-e0912872",
+  "projectRoot": "/tmp/goodvibes-testrun-UYsQt9/contract-runner-j1raQW",
   "isolation": "shared",
   "nativeSource": {
     "sourceId": "native-work",
@@ -39,28 +39,28 @@
   "escalations": [],
   "decisions": [
     {
-      "id": "ctr-2fb59864.d1",
-      "at": 1791199706727,
+      "id": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp.d1",
+      "at": 1794643686389,
       "action": "created",
-      "targetId": "ctr-2fb59864",
+      "targetId": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp",
       "reason": "origin cli; shared isolation",
       "decisionIds": []
     },
     {
-      "id": "ctr-2fb59864.d2",
-      "at": 1791199706732,
+      "id": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp.d2",
+      "at": 1794643686396,
       "action": "shaped",
-      "targetId": "ctr-2fb59864",
+      "targetId": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp",
       "reason": "forbids delegation no (act); parallel agents no (act); forbids writing no (act); attempts no (act)",
       "decisionIds": [
-        "01a10bd2-7e6c-7000-9738-b6c85f4d98b8"
+        "abkbnjbj-hdpl-haaa-inha-amojhgjpkplg"
       ]
     },
     {
-      "id": "ctr-2fb59864.d3",
-      "at": 1791199706733,
+      "id": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp.d3",
+      "at": 1794643686397,
       "action": "spawned",
-      "targetId": "ctr-2fb59864",
+      "targetId": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp",
       "reason": "planner route: test tier",
       "decisionIds": [],
       "route": {
@@ -70,10 +70,10 @@
       }
     },
     {
-      "id": "ctr-2fb59864.d4",
-      "at": 1791199706733,
+      "id": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp.d4",
+      "at": 1794643686400,
       "action": "planned",
-      "targetId": "ctr-2fb59864",
+      "targetId": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp",
       "reason": "the planner wrote a plan",
       "decisionIds": []
     }
@@ -97,8 +97,13 @@
   "plannerAgentIds": [
     "planner-1"
   ],
-  "createdAt": 1791199706727,
+  "createdAt": 1794643686384,
   "shape": {
+    "project_review": {
+      "verdict": "no",
+      "probability": 0.03,
+      "outcome": "act"
+    },
     "forbids_delegation": {
       "verdict": "no",
       "probability": 0.03,
@@ -120,7 +125,7 @@
       "outcome": "act"
     },
     "decisionIds": [
-      "01a10bd2-7e6c-7000-9738-b6c85f4d98b8"
+      "abkbnjbj-hdpl-haaa-inha-amojhgjpkplg"
     ]
   },
   "nativeDecisions": {
@@ -140,24 +145,25 @@
     "schemaVersion": 1,
     "state": "deciding",
     "stage": "plan",
-    "targetId": "ctr-2fb59864"
+    "targetId": "ctr-jkhboifh-macb-egpo-iflb-ojehikbgghlp"
   },
   "nativeWaiting": {
     "schemaVersion": 1,
     "requests": [
       {
-        "logicalRequestId": "73b1aaa3-b911-466f-9240-f61bf88728bd",
+        "logicalRequestId": "ooaabclm-alnf-eome-jbij-ooehikdefnlp",
         "attempt": {
           "attempt": 1,
           "endpointIndex": 0,
           "endpointKind": "local",
-          "requestedModel": "jev-1.13.0",
-          "latencyMs": 1.3685229999998683,
+          "requestedModel": "jev-latest",
+          "dispatched": true,
+          "latencyMs": 1.232719999999972,
           "outcome": "unavailable",
           "status": 503
         },
-        "elapsedMs": 2.70412599999986,
-        "nextDelayMs": 60000
+        "elapsedMs": 1.8514139999997496,
+        "nextDelayMs": 0
       }
     ]
   }

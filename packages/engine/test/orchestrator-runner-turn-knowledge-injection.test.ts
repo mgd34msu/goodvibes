@@ -299,6 +299,8 @@ describe('orchestrator-runner: per-turn passive knowledge injection', () => {
     // Turn 2: the steer's content flows into the derived query and surfaces the record.
     expect(capturedSystemPrompts[1]).toContain('mem_ratelimit');
     expect(capturedSystemPrompts[1]).toContain('Injected Project Knowledge');
+    // What changes per turn comes after what never does, so the start of the prompt is the same bytes every turn.
+    expect(capturedSystemPrompts[1]!.startsWith(capturedSystemPrompts[0]!)).toBe(true);
 
     // Honest per-turn record: stored on AgentRecord.turnInjections AND the session
     // transcript, with a numeric, budget-consistent tokenCost.
@@ -627,16 +629,21 @@ test('ordinary captured runs attach fresh async provider retry admission even wi
   try {
     const record = makeRecord({ id: 'captured-retry-only' });
     let allowed = true; let attempts = 0;
+    let hadBeforeAttempt = false; let revokedAttempt: unknown;
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
-      expect(request.beforeAttempt).toBeDefined();
+      hadBeforeAttempt = request.beforeAttempt !== undefined;
       await request.beforeAttempt!(); attempts++;
       allowed = false;
-      await expect(request.beforeAttempt!()).rejects.toThrow('original policy revoked');
+      try { await request.beforeAttempt!(); } catch (error) { revokedAttempt = error; }
       return { content: 'done', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
     } };
     const base = makeContext({ workingDirectory: root, runtimeBus: new RuntimeEventBus(), messageBus: new AgentMessageBus(), provider });
     await runAgentTask({ ...base, beforeProviderRequest: async () => { await Promise.resolve(); if (!allowed) throw new Error('original policy revoked'); } }, record);
+    expect(record.status).toBe('completed');
+    expect(hadBeforeAttempt).toBe(true);
     expect(attempts).toBe(1);
+    expect(revokedAttempt).toBeInstanceOf(Error);
+    expect((revokedAttempt as Error).message).toBe('original policy revoked');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -736,24 +743,43 @@ test.each(['success', 'retry', 'continuation', 'policy-retry', 'file-continuatio
   try {
     installJudgmentPort(fakePort(name => noulAnswer(['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission', 'implementation_presented', 'verification_claimed', 'criteria_altered', 'ineffective_fix', 'irrelevant_verification', 'weakened_criteria', 'missing_results', 'unresolved_conflict'].includes(name) ? .01 : .99)).port);
     let dispatched = 0;
+    // Facts observed inside chat are recorded and asserted after the run: an
+    // expect() thrown there would fail the run for a reason the status hides.
+    let promptHadCode = false; let hadBeforeAttempt = false; let returnedToolCall = false;
+    let secondAttemptError: unknown;
     const flags = createFeatureFlagManager(); flags.enable('agent-passive-code-injection');
     const provider: LLMProvider = { name: 'fake', models: ['fake-model'], async chat(request) {
       dispatched++;
-      expect(request.systemPrompt).toContain('backoff.ts');
-      expect(request.beforeAttempt).toBeDefined();
+      promptHadCode = (request.systemPrompt ?? '').includes('backoff.ts');
+      hadBeforeAttempt = request.beforeAttempt !== undefined;
       await request.beforeAttempt!();
       if (mode === 'success') return { content: 'done', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
-    if (mode === 'policy-retry') live.deny();
+      if (mode === 'policy-retry') live.deny();
       else if (mode === 'file-continuation') live.mutate();
       else installJudgmentPort(fakePort(() => noulAnswer(0.99)).port);
-      if (mode === 'retry' || mode === 'policy-retry') await request.beforeAttempt!();
+      if (mode === 'retry' || mode === 'policy-retry') {
+        try { await request.beforeAttempt!(); } catch (error) { secondAttemptError = error; throw error; }
+      }
+      returnedToolCall = true;
       return { content: '', toolCalls: [{ id: 'next', name: 'nonexistent_tool', arguments: {} }], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'tool_call' };
     } };
     const record = makeRecord({ id: `code-authority-${mode}` });
     const context = makeContext({ workingDirectory: root, runtimeBus: new RuntimeEventBus(), messageBus: new AgentMessageBus(), provider,
       memoryRegistry: makeCountingMemoryRegistry([]).registry, featureFlagManager: flags });
     await runAgentTask({ ...context, codeIndex: live.store, codeReadAccessFilter: live.readAccessFilter }, record);
-    expect(record.status).toBe(mode === 'success' ? 'completed' : 'failed');
+    // The first request carried the code block and the retry hook, so a failure below is the authority check, not a broken fixture.
+    expect(promptHadCode).toBe(true);
+    expect(hadBeforeAttempt).toBe(true);
     expect(dispatched).toBe(1);
+    expect(record.status).toBe(mode === 'success' ? 'completed' : 'failed');
+    if (mode === 'retry' || mode === 'policy-retry') {
+      // The retired reading is refused at the provider's own retry admission; the response is never produced.
+      expect(secondAttemptError).toBeInstanceOf(Error);
+      expect((secondAttemptError as Error).message).toContain(mode === 'retry' ? 'no longer current' : 'access-restricted');
+      expect(returnedToolCall).toBe(false);
+    } else if (mode !== 'success') {
+      // The first response arrived intact; the run stopped at the turn boundary before a second request.
+      expect(returnedToolCall).toBe(true);
+    }
   } finally { live.dispose(); rmSync(root, { recursive: true, force: true }); }
 });

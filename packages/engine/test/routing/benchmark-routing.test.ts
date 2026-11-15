@@ -181,7 +181,7 @@ test('preparation runs only for eligible models and finishes before facts are re
     benchmarkFor: () => { events.push('facts'); return 0.8; },
   });
   const routing = planner.planRoute({ brief: 'Implement a parser.', purpose: 'planner' });
-  for (let index = 0; index < 20 && events.length === 0; index++) await Promise.resolve();
+  for (let index = 0; index < 1_000 && events.length === 0; index++) await new Promise<void>((resolve) => setImmediate(resolve));
   expect(events).toEqual(['wanted']);
   release();
   await routing;

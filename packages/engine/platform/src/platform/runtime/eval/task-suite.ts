@@ -23,7 +23,7 @@
  * example suite in tests and a real suite + real session in a consumer.
  */
 
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -151,14 +151,31 @@ export const defaultShellVerifier: TaskVerifier = async (ctx) => {
   if (!existsSync(ctx.verifyScript)) {
     return { passed: false, output: `verification script not found: ${ctx.verifyScript}` };
   }
-  const result = spawnSync('bash', [ctx.verifyScript], {
-    cwd: ctx.taskDir,
-    encoding: 'utf-8',
-    timeout: ctx.timeoutMs ?? 60_000,
-    windowsHide: true,
+  const timeoutMs = ctx.timeoutMs ?? 60_000;
+  return await new Promise((resolveVerdict) => {
+    execFile(
+      'bash',
+      [ctx.verifyScript],
+      { cwd: ctx.taskDir, encoding: 'utf-8', timeout: timeoutMs, windowsHide: true },
+      (error, stdout, stderr) => {
+        const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
+        if (!error) {
+          resolveVerdict({ passed: true, output });
+          return;
+        }
+        const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string | null; code?: number | string | null };
+        // A script that ran and exited non-zero is a verification failure; a
+        // script that never ran or was cut off is a harness fault, said as such.
+        let fault = '';
+        if (failure.killed || failure.signal) {
+          fault = `verification script was stopped after ${timeoutMs} ms (${failure.signal ?? 'killed'})`;
+        } else if (typeof failure.code === 'string') {
+          fault = `verification script could not run: ${failure.message}`;
+        }
+        resolveVerdict({ passed: false, output: fault ? [output, fault].filter(Boolean).join('\n') : output });
+      },
+    );
   });
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
-  return { passed: result.status === 0, output };
 };
 
 /**
@@ -194,14 +211,20 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
     let verifierPassed = false;
     let verifierOutput = 'skipped (session did not complete)';
     if (sessionCompleted) {
-      const verdict = await verifier({
-        taskId: task.id,
-        taskDir,
-        verifyScript: join(taskDir, task.verify),
-        timeoutMs: task.timeoutMs,
-      });
-      verifierPassed = verdict.passed;
-      verifierOutput = verdict.output;
+      try {
+        const verdict = await verifier({
+          taskId: task.id,
+          taskDir,
+          verifyScript: join(taskDir, task.verify),
+          timeoutMs: task.timeoutMs,
+        });
+        verifierPassed = verdict.passed;
+        verifierOutput = verdict.output;
+      } catch (err) {
+        // One verifier that throws must not discard every other task's result.
+        verifierPassed = false;
+        verifierOutput = `verifier threw: ${err instanceof Error ? err.message : String(err)}`;
+      }
     }
 
     const passed = sessionCompleted && verifierPassed;
@@ -215,7 +238,7 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
         ? `session did not complete${sessionSummary ? `: ${sessionSummary}` : ''}`
         : verifierPassed
           ? 'session completed and verification passed'
-          : 'session completed but verification failed',
+          : 'session completed but verification failed (see verifierOutput)',
       durationMs: Date.now() - startedAt,
     });
   }

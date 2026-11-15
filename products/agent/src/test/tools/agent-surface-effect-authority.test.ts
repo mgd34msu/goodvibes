@@ -131,7 +131,15 @@ describe('concrete external effects retain recorded authority', () => {
       else if (change === 'credential') item.secrets[GOOGLE_SECRET_KEYS.oauthRefreshToken] = 'replacement-refresh';
       else mode = 'plan';
     });
-    try { await executeAdmitted(item.tool, mail, { signal: controller.signal, currentMode: () => mode }); } catch { /* Refusal may be the canonical stale or cancellation error. */ }
+    // The refusal may be a thrown or a returned error. The refresh must have run first, and the reason must be
+    // the cancellation or the stale-authority check, so a fixture that fails earlier cannot pass this test.
+    let refusal: string | undefined;
+    try {
+      const result = await executeAdmitted(item.tool, mail, { signal: controller.signal, currentMode: () => mode });
+      if (!result.success) refusal = String(result.error);
+    } catch (error) { refusal = error instanceof Error ? error.message : String(error); }
+    expect(item.requests.some(url => url.includes('oauth2'))).toBe(true);
+    expect(refusal).toMatch(change === 'cancel' ? /aborted/ : /projection stale/);
     expect(item.requests.filter(url => url.includes('/messages/send'))).toEqual([]);
   });
 });

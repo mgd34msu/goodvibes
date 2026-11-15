@@ -18,15 +18,32 @@ export { createNativeRequirementProposer } from './native-intake-proposer.js';
 export type { NativeRequirementProposer, NativeRequirementProposalRequest } from './native-intake-proposer.js';
 import { NATIVE_CONVERSATION_MAX_PROPOSALS, NATIVE_CONVERSATION_MAX_DECISIONS, createNativeConversationCapture,
   nativeConversationProposalRevision, parseNativeConversationCapture, type NativeConversationCapture, type NativeConversationKey,
-  nativeConversationDecisionBinding, type NativeConversationStorage } from './native-intake-types.js';
+  nativeConversationDecisionBinding, NATIVE_CONVERSATION_MAX_RECORD_BYTES, type NativeConversationStorage } from './native-intake-types.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema, nativeConversationIntakeWorkReceiptSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest, type NativeConversationIntakeTransitionRequest,
   type NativeConversationIntakeResult, type NativeConversationIntakeLookupResult, type NativeConversationIntakeWorkReceipt } from './native-intake-wire.js';
 
+type NativeConversationIntakeErrorCode = 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'not-found' | 'recovery-required' | 'indeterminate' | 'unavailable' | 'closed';
+const NEXT_STEP: Record<NativeConversationIntakeErrorCode, string> = {
+  invalid: 'The request is malformed; correct it and send it again.',
+  'unsupported-authority': 'Intake needs a native pairing token with read:work-ledger and write:work-ledger; pair with those scopes, then retry.',
+  forbidden: 'This pairing may not use this input; pair with the scopes it needs (a continuation also needs write:sessions), then retry.',
+  stale: 'Either the sourceRevision you sent is out of date (get the input and use its current sourceRevision), or the pairing or workspace registration the input was captured under has changed (restore it, or capture the content again under a new inputId).',
+  conflict: 'A concurrent change won; get the input to read its state, then admit or resume it if it is still processing, or cancel it.',
+  'request-conflict': 'This requestId or inputId already holds different content; replay the identical request, or capture the new content under new ids.',
+  'not-found': 'No such input for this pairing; capture it first.',
+  'recovery-required': 'An earlier attempt stopped mid-decision; resume the input, or cancel it and capture it again.',
+  indeterminate: 'The result of publishing is unknown; get the input to read what was recorded before doing anything else, and do not resubmit blindly.',
+  unavailable: 'A required owner is not available right now; retry shortly.',
+  closed: 'The intake host is closing; retry once it is running again.',
+};
+/** How often a running input re-checks its owners. Each check re-reads the input and the workspace registry (including a durability confirmation), so it is paced in seconds. */
+const OWNER_WATCH_INTERVAL_MS = 1_000;
+const SETTLED_TURN = 'This input\'s turn was already dispatched and has finished, so it can never run again; capture a new input (new inputId) to ask again.';
 export class NativeConversationIntakeError extends Error {
-  constructor(readonly code: 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'not-found' | 'recovery-required' | 'indeterminate' | 'unavailable' | 'closed') {
-    super(`Native conversation intake: ${code}`); this.name = 'NativeConversationIntakeError';
+  constructor(readonly code: NativeConversationIntakeErrorCode, detail?: string) {
+    super(`Native conversation intake: ${code}. ${detail ?? NEXT_STEP[code]}`); this.name = 'NativeConversationIntakeError';
   }
 }
 export interface NativeConversationContinuationOwner {
@@ -45,6 +62,11 @@ export interface NativeConversationIntakeHost {
   admit(input: NativeConversationIntakeTransitionRequest, authority: NativePairedExecutionAuthority, options?: NativeConversationIntakeOptions): Promise<NativeConversationIntakeResult>;
   resume(input: NativeConversationIntakeTransitionRequest, authority: NativePairedExecutionAuthority, options?: NativeConversationIntakeOptions): Promise<NativeConversationIntakeResult>;
   cancel(input: NativeConversationIntakeTransitionRequest, authority: NativePairedExecutionAuthority, options?: NativeConversationIntakeOptions): Promise<NativeConversationIntakeResult>;
+  /**
+   * Host-internal, never on the wire: record that the hosted turn of a `turn` input has ended. After this, admit and
+   * resume refuse the input. Idempotent; refuses any input that is not a turn.
+   */
+  settle(input: NativeConversationIntakeTransitionRequest, authority: NativePairedExecutionAuthority, options?: NativeConversationIntakeOptions): Promise<void>;
   close(): Promise<void>;
 }
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
@@ -69,6 +91,12 @@ export function createNativeConversationIntakeHost(deps: {
   const deliveries = new Map<string, { controller: AbortController; promise: Promise<NativeConversationIntakeResult>; generation?: number }>();
   let closed = false; let closing: Promise<void> | undefined;
   const assertOpen = () => { if (closed) throw new NativeConversationIntakeError('closed'); };
+  /** Name the real limit when a record outgrows the stored-record cap, instead of a generic "malformed request". */
+  const assertRecordFits = (candidate: unknown): void => {
+    const bytes = new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
+    if (bytes > NATIVE_CONVERSATION_MAX_RECORD_BYTES) throw new NativeConversationIntakeError('invalid',
+      `This conversation is too long to keep: the stored input needs ${bytes} bytes and the limit is ${NATIVE_CONVERSATION_MAX_RECORD_BYTES}. Start a new session, or capture a shorter continuation or text.`);
+  };
   const keyOf = (inputId: string, authority: NativePairedExecutionAuthority): NativeConversationKey => ({ principalId: paired(authority).principalId, inputId });
   const keyId = (key: NativeConversationKey) => JSON.stringify({ principalId: key.principalId, inputId: key.inputId });
   function track<T>(operation: () => Promise<T>): Promise<T> {
@@ -148,7 +176,7 @@ export function createNativeConversationIntakeHost(deps: {
       case 'captured': return { kind: 'captured', ...common };
       case 'processing': return { kind: 'processing', ...common, stage: record.stage ?? 'routing', recovery: deliveries.get(keyId(record))?.generation === record.generation ? 'pending' : 'required' };
       case 'turn': if (record.route === 'converse' || record.route === 'answer') return { kind: 'turn', ...common, route: record.route, text: record.text, ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}) }; break;
-      case 'blocked': return { kind: 'blocked', ...common, reason: record.reason === 'unsupported-source' ? 'unsupported-source' : 'missing-context', recovery: 'required' };
+      case 'blocked': return { kind: 'blocked', ...common, reason: record.reason === 'unsupported-source' ? 'unsupported-source' : 'missing-context', recovery: 'required', next: 'cancel-and-resubmit' };
       case 'refused': return { kind: 'refused', ...common, reason: record.reason === 'exhausted' ? 'exhausted' : 'semantic' };
       case 'cancelled': return { kind: 'cancelled', ...common };
       case 'associated': return { kind: 'work', ...common, receipt: await receipt(record) };
@@ -166,6 +194,7 @@ export function createNativeConversationIntakeHost(deps: {
   async function run(key: NativeConversationKey, revision: string, authority: NativePairedExecutionAuthority, options: NativeConversationIntakeOptions,
     controller: AbortController, resuming: boolean, original: NativeConversationCapture): Promise<NativeConversationIntakeResult> {
     let record = load(key, authority, options, revision, original);
+    if (record.settled) throw new NativeConversationIntakeError('conflict', SETTLED_TURN);
     if (terminal(record) || record.state === 'blocked' || record.state === 'refused' || (!resuming && record.state !== 'captured')) return projection(record);
     assertContinuation(record);
     const signal = AbortSignal.any([lifetime.signal, controller.signal, ...(options.signal ? [options.signal] : [])]);
@@ -206,7 +235,7 @@ export function createNativeConversationIntakeHost(deps: {
       signal.throwIfAborted(); const current = load(key, authority, options, revision, record); assertContinuation(current);
       if (current.generation !== generation || current.state !== 'processing') throw new NativeConversationIntakeError('stale');
     };
-    const watch = setInterval(() => { try { assertCurrent(); } catch (error) { controller.abort(error); } }, 50); watch.unref?.();
+    const watch = setInterval(() => { try { assertCurrent(); } catch (error) { controller.abort(error); } }, OWNER_WATCH_INTERVAL_MS); watch.unref?.();
     let terminalUpdate: NativeConversationCapture | undefined;
     const prepareTerminalUpdate = (next: NativeConversationCapture): void => {
       // Preparation is complete. Native publication retains its owner checks;
@@ -222,6 +251,7 @@ export function createNativeConversationIntakeHost(deps: {
       return current;
     };
     async function update(change: Partial<NativeConversationCapture>) {
+      assertRecordFits({ ...record, ...change });
       record = await withOwners(record, authority, options, assertOwners => deps.storage.transaction(record, current => {
         assertOwners(); assertCurrent();
         if (!current || current.generation !== generation) throw new NativeConversationIntakeError('stale');
@@ -257,12 +287,21 @@ export function createNativeConversationIntakeHost(deps: {
         if (routeEvidence.settled && routeEvidence.route === 'contract' && record.unsupportedSources.length === 0) {
           if (record.proposal) requirements = validateNativeRequirementProposal(record.text, record.sourceRevision, record.proposal);
           else if (record.proposalsSpent < NATIVE_CONVERSATION_MAX_PROPOSALS) {
-            await update({ stage: 'extracting', proposalsSpent: record.proposalsSpent + 1 });
+            await update({ stage: 'extracting' });
+            // The attempt is charged only once the provider has answered: an outage
+            // must not use up the budget and end the input as "exhausted". Output
+            // that cannot be read at all (a JSON syntax error) is still an attempt.
+            const attemptNumber = record.proposalsSpent + 1;
             let proposed: unknown;
             try { proposed = await deps.proposer.propose({ text: record.text, sourceRevision: record.sourceRevision,
-              attempt: record.proposalsSpent, previous, ...(record.continuation ? { continuation: record.continuation } : {}), signal, assertCurrent }); }
-            catch (error) { assertCurrent(); throw error; }
+              attempt: attemptNumber, previous, ...(record.continuation ? { continuation: record.continuation } : {}), signal, assertCurrent }); }
+            catch (error) {
+              assertCurrent();
+              if (error instanceof SyntaxError) await update({ proposalsSpent: attemptNumber });
+              throw error;
+            }
             assertCurrent();
+            await update({ proposalsSpent: attemptNumber });
             try { requirements = validateNativeRequirementProposal(record.text, record.sourceRevision, proposed); }
             catch { /* Invalid proposals remain evidence of a failed attempt, never new roots. */ }
             if (requirements?.proposal.spans.length) await update({ proposal: requirements.proposal });
@@ -390,6 +429,7 @@ export function createNativeConversationIntakeHost(deps: {
         const pending = captures.get(captureKey);
         if (pending) {
           const existing = await pending;
+          options.signal?.throwIfAborted();
           inspect(existing, authority, options);
           if (!matches(existing)) throw new NativeConversationIntakeError('request-conflict');
           return projection(existing);
@@ -398,8 +438,8 @@ export function createNativeConversationIntakeHost(deps: {
           if (selection && !deps.continuation) throw new NativeConversationIntakeError('unavailable');
           const continuation = selection ? captureNativeConversationContinuation(await deps.continuation!.capture(selection.sessionId, current.identity.principalId, selection.selectedDiff)) : undefined;
           if (continuation && (continuation.sessionId !== selection?.sessionId || !isDeepStrictEqual(continuation.selectedDiff ? nativeSelectedDiffSelector(continuation.selectedDiff) : undefined, selection?.selectedDiff))) throw new NativeConversationIntakeError('stale');
-          options.signal?.throwIfAborted();
           const source = { ...original, ...(continuation ? { continuation } : {}) };
+          assertRecordFits(source);
           const record = createNativeConversationCapture({ projectId: deps.projectId, principalId: current.identity.principalId,
             ...source,
             sessionId: deps.sessionId, owner: current.facts, generation: 1, state: 'captured', stage: null, route: null, reason: null,
@@ -408,7 +448,7 @@ export function createNativeConversationIntakeHost(deps: {
           // input. Adopt its already-persisted identity only after exact replay
           // matching; the unpublished candidate is not its original-source fence.
           const stored = await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(key, existing => {
-            assertCurrent(); options.signal?.throwIfAborted();
+            assertCurrent();
             if (existing) {
               const capturedExisting = parseNativeConversationCapture(existing);
               inspect(capturedExisting, authority, options);
@@ -422,6 +462,9 @@ export function createNativeConversationIntakeHost(deps: {
         captures.set(captureKey, capture);
         let stored: NativeConversationCapture;
         try { stored = await capture; } finally { if (captures.get(captureKey) === capture) captures.delete(captureKey); }
+        // The shared capture is not tied to any one caller's signal (a second
+        // caller must not inherit the first one's abort); each caller honours its own here.
+        options.signal?.throwIfAborted();
         inspect(stored, authority, options); return projection(stored);
       });
     },
@@ -436,6 +479,20 @@ export function createNativeConversationIntakeHost(deps: {
     },
     admit(input, authority, options = {}) { return deliver(input, authority, options, false); },
     resume(input, authority, options = {}) { return deliver(input, authority, options, true); },
+    settle(input, authority, options = {}) {
+      const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
+      if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
+      return track(async () => {
+        const key = keyOf(parsed.data.inputId, authority); const record = load(key, authority, options, parsed.data.sourceRevision);
+        if (record.state !== 'turn') throw new NativeConversationIntakeError('conflict', `Only a dispatched turn can be settled; this input is ${record.state}.`);
+        await withOwners(record, authority, options, assertCurrent => deps.storage.transaction(record, current => {
+          assertCurrent(); if (!current) throw new NativeConversationIntakeError('not-found'); inspect(current, authority, options);
+          if (current.state !== 'turn' || current.generation !== record.generation) throw new NativeConversationIntakeError('stale');
+          if (current.settled) return { next: null, value: undefined };
+          return { next: parseNativeConversationCapture({ ...current, settled: true }, record), value: undefined };
+        }));
+      });
+    },
     cancel(input, authority, options = {}) {
       const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));

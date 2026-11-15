@@ -23,8 +23,6 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { SelectionModal } from '../../input/selection-modal.ts';
 import { renderSelectionModalOverlay } from '../../renderer/selection-modal-overlay.ts';
 import {
@@ -36,46 +34,15 @@ import {
 } from '../../runtime/recovery-prompt.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
 import type { RecoveryFileInfo } from '@/runtime/index.ts';
-import type { Cell, Line } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
+import { assertGoldenIn } from '../helpers/golden-snapshot.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 
 const GOLDENS_DIR = new URL('./golden-frames/', import.meta.url).pathname;
-const UPDATE = process.env['GOODVIBES_UPDATE_GOLDENS'] === '1';
-
-function snapshotEncode(surface: string, lines: Line[]): string {
-  const height = lines.length;
-  const width = lines[0]?.length ?? 0;
-  const textBlock: string[] = [];
-  const styleBlock: string[] = [];
-  for (let row = 0; row < height; row++) {
-    const line = lines[row]!;
-    textBlock.push(`|${line.map((c) => (c.char === '' ? ' ' : c.char)).join('')}|`);
-    for (let col = 0; col < line.length; col++) {
-      const c = line[col] as Cell;
-      if (c.fg) styleBlock.push(`${row} ${col} fg=${c.fg}`);
-      if (c.bg) styleBlock.push(`${row} ${col} bg=${c.bg}`);
-      if (c.bold) styleBlock.push(`${row} ${col} bold=1`);
-      if (c.dim) styleBlock.push(`${row} ${col} dim=1`);
-      if (c.underline) styleBlock.push(`${row} ${col} underline=1`);
-      if (c.italic) styleBlock.push(`${row} ${col} italic=1`);
-      if (c.strikethrough) styleBlock.push(`${row} ${col} strikethrough=1`);
-    }
-  }
-  return [`# GV_GOLDEN surface=${surface} width=${width} height=${height}`, ...textBlock, '@STYLES', ...styleBlock, ''].join('\n');
-}
 
 function assertGolden(surface: string, lines: Line[]): void {
-  const actual = snapshotEncode(surface, lines);
-  const path = join(GOLDENS_DIR, `${surface}.txt`);
-  if (UPDATE) {
-    mkdirSync(GOLDENS_DIR, { recursive: true });
-    writeFileSync(path, actual, 'utf-8');
-    return;
-  }
-  if (!existsSync(path)) throw new Error(`[${surface}] golden file missing. Run with GOODVIBES_UPDATE_GOLDENS=1 to generate.`);
-  const expected = readFileSync(path, 'utf-8');
-  if (expected !== actual) throw new Error(`[${surface}] golden-frame mismatch. Run with GOODVIBES_UPDATE_GOLDENS=1 to regenerate.`);
+  assertGoldenIn(GOLDENS_DIR, surface, lines);
 }
 
 // A fixed instant, not Date.now(): the rendered age ("3h ago") is a delta

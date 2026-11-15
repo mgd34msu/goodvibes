@@ -4,8 +4,9 @@
  * the result. These are forensic, so the retention window is long (30 days),
  * but "keep forever" is a leak.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { logger } from '../platform/src/platform/utils/logger.ts';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import {
@@ -52,15 +53,18 @@ describe('reapQuarantinedFiles', () => {
   });
 
   test('the count cap bounds a repeating corruption that quarantines on every boot', () => {
-    for (let i = 0; i < 6; i++) putQuarantined(`boot-${i}.json`, i * 60_000 + 1_000);
+    const path = join(dir, 'store.json');
+    for (let i = 0; i < 6; i++) {
+      writeFileSync(path, `corrupt boot ${i}`);
+      readVersioned(path, { currentVersion: 1, onUnknown: 'quarantine' });
+    }
+    expect(readdirSync(dir)).toHaveLength(6);
 
-    const result = reapQuarantinedFiles([dir], { now: () => NOW, maxFilesPerDir: 2 });
+    const result = reapQuarantinedFiles([dir], { maxFilesPerDir: 2 });
 
+    expect(result.scanned).toBe(6);
     expect(result.reaped).toBe(4);
-    expect(readdirSync(dir).sort()).toEqual([
-      `boot-0.json${UNRECOGNIZED_SUFFIX}`,
-      `boot-1.json${UNRECOGNIZED_SUFFIX}`,
-    ]);
+    expect(readdirSync(dir)).toHaveLength(2);
   });
 
   test('files without the quarantine suffix are never touched', () => {
@@ -139,5 +143,28 @@ describe('readVersioned rejects crash residue rather than serving it', () => {
     utimesSync(quarantined, at, at);
     expect(reapQuarantinedFiles([dir], { now: () => NOW }).reaped).toBe(1);
     expect(existsSync(quarantined)).toBe(false);
+  });
+});
+
+describe('readVersioned when the corrupt file cannot be moved aside', () => {
+  test('returns null, leaves the file in place and says so', () => {
+    const path = join(dir, 'stuck.json');
+    writeFileSync(path, 'not json');
+    // Every free name is taken, and the last candidate is a non-empty directory
+    // that a file cannot be renamed onto.
+    const first = `${path}${UNRECOGNIZED_SUFFIX}`;
+    mkdirSync(first);
+    writeFileSync(join(first, 'keep'), 'x');
+    for (let n = 1; n <= 1000; n++) writeFileSync(`${path}.${n}${UNRECOGNIZED_SUFFIX}`, 'earlier');
+
+    const warn = spyOn(logger, 'warn').mockImplementation(() => {});
+    try {
+      expect(readVersioned(path, { currentVersion: 1, onUnknown: 'quarantine' })).toBeNull();
+      expect(readFileSync(path, 'utf-8')).toBe('not json');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('left in place');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

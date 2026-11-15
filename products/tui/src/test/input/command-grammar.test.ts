@@ -66,7 +66,7 @@ function usageTakesArgs(usage: string | null | undefined): boolean {
 // Allowlist: commands exempted from specific rules with documented reasons
 //
 // shape: { name, rule, reason }
-// Rules: 'name-kebab' | 'alias-kebab' | 'usage-empty' | 'args-hint-presence'
+// Rules: 'name-kebab' | 'alias-kebab' | 'usage-empty' | 'args-hint-empty' | 'args-hint-presence'
 //        | 'desc-capital' | 'desc-no-trailing-period'
 // ---------------------------------------------------------------------------
 

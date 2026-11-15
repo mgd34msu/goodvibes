@@ -1,14 +1,27 @@
 import type { SurfaceAdapterContext } from '../types.js';
-import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit, readRecord, readString, policyReplyText, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
+import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage, surfaceInboundDedup } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+/**
+ * Whether the message addresses the bot: the bridge's own `mentioned` flag, else
+ * a direct message, else an `annotations` list that holds a mention of a bot.
+ * A message with no annotation data counts as addressed.
+ */
+function googleChatMentioned(
+  payload: Record<string, unknown>,
+  message: Record<string, unknown> | null,
+  space: Record<string, unknown> | null,
+): boolean {
+  if (typeof payload.mentioned === 'boolean') return payload.mentioned;
+  if (readString(space?.type)?.toUpperCase() === 'DM' || space?.singleUserBotDm === true) return true;
+  const annotations = message?.annotations;
+  if (!Array.isArray(annotations)) return true;
+  return annotations.some((annotation) => {
+    const entry = readRecord(annotation);
+    const user = readRecord(readRecord(entry?.userMention)?.user);
+    return readString(entry?.type) === 'USER_MENTION' && readString(user?.type) === 'BOT';
+  });
 }
 
 export async function handleGoogleChatSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
@@ -56,92 +69,104 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
   if (!spaceName) return Response.json({ text: 'missing space' }, { status: 400 });
   const threadName = readString(thread?.name);
 
-  const policy = await context.authorizeSurfaceIngress({
-    surface: 'google-chat',
-    userId: readString(user?.name),
-    channelId: spaceName,
-    groupId: spaceName,
-    threadId: threadName,
-    workspaceId: readString(payload.hostApp),
-    conversationKind: threadName ? 'thread' : 'channel',
-    text,
-    mentioned: true,
-    metadata: {
-      eventType,
-      spaceDisplayName: readString(space?.displayName),
-      userDisplayName: readString(user?.displayName),
-    },
-  });
-  if (!policy.allowed) {
-    return Response.json({ text: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
-  }
-
-  const binding = await context.routeBindings.upsertBinding({
-    kind: threadName ? 'thread' : 'channel',
-    surfaceKind: 'google-chat',
-    surfaceId: readString(context.configManager.get('surfaces.googleChat.appId')) ?? 'google-chat',
-    externalId: threadName ?? spaceName,
-    channelId: spaceName,
-    threadId: threadName,
-    title: readString(space?.displayName) ?? spaceName,
-    metadata: {
-      eventType,
-      userName: readString(user?.name),
-    },
-  });
-
-  if (!text) {
-    logger.info('handleGoogleChatSurfaceWebhook: message acknowledged without queueing', {
-      reason: 'no-actionable-text',
-      bindingId: binding.id,
-      eventType,
+  const dedupKey = inboundDedupKey('google-chat', spaceName, readString(message?.name));
+  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
+    const policy = await context.authorizeSurfaceIngress({
+      surface: 'google-chat',
+      userId: readString(user?.name),
+      channelId: spaceName,
+      groupId: spaceName,
+      threadId: threadName,
+      workspaceId: readString(payload.hostApp),
+      conversationKind: threadName ? 'thread' : 'channel',
+      text,
+      mentioned: googleChatMentioned(payload, message, space),
+      metadata: {
+        eventType,
+        spaceDisplayName: readString(space?.displayName),
+        userDisplayName: readString(user?.displayName),
+      },
     });
-    return Response.json({
-      text: 'Acknowledged.',
-      acknowledged: true,
-      queued: false,
-      outcome: 'ignored',
-      reason: 'no-actionable-text',
-      bindingId: binding.id,
+    if (!policy.allowed) {
+      // Google posts the 200 body as the reply; a 403 would only show "app not responding".
+      // A 200 would count as delivered, so release the claim: a retry after the policy changes must run.
+      surfaceInboundDedup.release(dedupKey);
+      return Response.json({ text: policyReplyText(policy.reason) });
+    }
+
+    const binding = await context.routeBindings.upsertBinding({
+      kind: threadName ? 'thread' : 'channel',
+      surfaceKind: 'google-chat',
+      surfaceId: readString(context.configManager.get('surfaces.googleChat.appId')) ?? 'google-chat',
+      externalId: threadName ?? spaceName,
+      channelId: spaceName,
+      threadId: threadName,
+      title: readString(space?.displayName) ?? spaceName,
+      metadata: {
+        eventType,
+        userName: readString(user?.name),
+      },
     });
-  }
 
-  const controlCommand = await context.parseSurfaceControlCommand(text, { signal: req.signal });
-  if (controlCommand) {
-    const message = await context.performSurfaceControlCommand(controlCommand);
-    return Response.json({ text: message });
-  }
+    if (!text) {
+      const attachment = hasAttachments(message?.attachment) ? 'attachment' : undefined;
+      const notified = attachment ? await noticeUnsupportedAttachment(context, binding, attachment, space?.type === 'DM' || space?.spaceType === 'DIRECT_MESSAGE') : false;
+      logger.info('handleGoogleChatSurfaceWebhook: message acknowledged without queueing', {
+        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+        bindingId: binding.id,
+        eventType,
+      });
+      return Response.json({
+        text: 'Acknowledged.',
+        acknowledged: true,
+        queued: false,
+        outcome: 'ignored',
+        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+        ...(attachment ? { attachment, notified } : {}),
+        bindingId: binding.id,
+      });
+    }
 
-  const submission = await context.sessionBroker.submitMessage({
-    routeId: binding.id,
-    surfaceKind: 'google-chat',
-    surfaceId: binding.surfaceId,
-    externalId: binding.externalId,
-    threadId: binding.threadId ?? binding.channelId,
-    userId: readString(user?.name),
-    displayName: readString(user?.displayName),
-    title: binding.title ?? 'Google Chat',
-    body: text,
-    metadata: {
-      eventType,
-      spaceName,
-    },
+    const controlCommand = await context.parseSurfaceControlCommand(text, { signal: req.signal });
+    if (controlCommand) {
+      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'google-chat', routeId: binding.id });
+      return Response.json({ text: message });
+    }
+
+    const submission = await context.sessionBroker.submitMessage({
+      routeId: binding.id,
+      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+      surfaceKind: 'google-chat',
+      surfaceId: binding.surfaceId,
+      externalId: binding.externalId,
+      threadId: binding.threadId ?? binding.channelId,
+      userId: readString(user?.name),
+      displayName: readString(user?.displayName),
+      title: binding.title ?? 'Google Chat',
+      body: text,
+      metadata: {
+        eventType,
+        spaceName,
+      },
+    });
+    if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
+      committed();
+      return Response.json({ text: `Continuing session ${submission.session.id}.` });
+    }
+
+    const spawnResult = await context.trySpawnAgent(
+      { mode: 'spawn', task: submission.task! },
+      'handleGoogleChatSurfaceWebhook',
+      submission.session.id,
+    );
+    if (spawnResult instanceof Response) return spawnResult;
+    committed();
+    await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
+    context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
+      agentId: spawnResult.id,
+      task: text,
+      sessionId: submission.session.id,
+    });
+    return Response.json({ text: `Running ${spawnResult.id}` });
   });
-  if (submission.mode === 'continued-live') {
-    return Response.json({ text: `Continuing session ${submission.session.id}.` });
-  }
-
-  const spawnResult = await context.trySpawnAgent(
-    { mode: 'spawn', task: submission.task! },
-    'handleGoogleChatSurfaceWebhook',
-    submission.session.id,
-  );
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
-  context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-    agentId: spawnResult.id,
-    task: text,
-    sessionId: submission.session.id,
-  });
-  return Response.json({ text: `Running ${spawnResult.id}` });
 }

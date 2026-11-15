@@ -35,6 +35,7 @@
  * endpoint records what it received instead of shipping anything.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { withExecutionMode } from '../platform/src/platform/gate/execution-context.ts';
 
 import {
@@ -458,7 +459,7 @@ for (const shape of shapes()) for (const answer of ['approve', 'deny'] as const)
       return { answer, channel: 'tui' };
     };
     const outcome = await runOn(harness, merchant);
-    expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'veto'] : ['veto', 'approval']);
+    expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'notice'] : ['veto', 'approval']);
     if (answer === 'approve') {
       expect(outcome.kind).toBe('purchased'); expect(merchant.submissions).toHaveLength(1);
       expect(harness.recorded[0]?.totalMinorUnits).toBe(merchant.shape === 'alpha' ? 22_649 : 238_690);
@@ -1132,8 +1133,7 @@ describe('one notification, and the merchant decides what silence means', () => 
       await runOn(harness, alpha);
       expect(harness.notices.length).toBe(expectedTotal);
       // Whatever else happened, he was asked or told exactly once beforehand.
-      expect(harness.notices.filter((n) => n.kind === 'approval' || n.kind === 'veto').length)
-        .toBeGreaterThanOrEqual(1);
+      expect(harness.notices.filter((n) => n.kind === 'approval' || n.kind === 'veto').length).toBe(1);
     }
   });
 
@@ -1256,6 +1256,8 @@ describe('when the merchant interrupts or the process dies', () => {
     // The budget stays held: it may well have been spent.
     expect(harness.ledger.state().reservations.length).toBe(1);
     expect(harness.recorded.length).toBe(0);
+    // Exactly one attempt reached the driver: a second call would be a retry of an order that may have been placed.
+    expect(harness.driver.submitAttempts).toBe(1);
   });
 
   test('every phase before the submit is unambiguously "not submitted"', () => {
@@ -1320,12 +1322,16 @@ describe('the flow is merchant-agnostic by construction', () => {
     const { Glob } = await import('bun');
     const glob = new Glob('platform/src/platform/payments/**/*.ts');
     const offenders: string[] = [];
-    for await (const path of glob.scan({ cwd: process.cwd() })) {
-      const source = await Bun.file(path).text();
+    let visited = 0;
+    const engineRoot = join(import.meta.dir, '..');
+    for await (const path of glob.scan({ cwd: engineRoot })) {
+      visited++;
+      const source = await Bun.file(join(engineRoot, path)).text();
       for (const marker of ['bezeichnung', 'kreditkartennummer', 'data-amount', 'querySelector', 'td.price']) {
         if (source.includes(marker)) offenders.push(`${path}: ${marker}`);
       }
     }
+    expect(visited).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 });

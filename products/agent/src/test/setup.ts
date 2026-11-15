@@ -1,10 +1,10 @@
 /**
  * Test infrastructure: mock providers and filesystem utilities.
  */
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import { makeProjectTempDir } from './helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
 // Mock LLM Provider
@@ -76,9 +76,7 @@ export async function setupTestConfigDir(): Promise<{ configDir: string; cleanup
  * Also returns an async cleanup function.
  */
 export async function makeTempDir(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
-  const tmpBase = join(process.cwd(), 'tmp');
-  await mkdir(tmpBase, { recursive: true });
-  const dir = await mkdtemp(join(tmpBase, 'gv-test-'));
+  const dir = makeProjectTempDir('gv-test');
   return {
     dir,
     cleanup: () => rm(dir, { recursive: true, force: true }),

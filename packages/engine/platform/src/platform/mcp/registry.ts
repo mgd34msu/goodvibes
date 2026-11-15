@@ -23,6 +23,7 @@ import {
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   upsertMcpServerConfig,
+  withMcpConfigLock,
 } from './config.js';
 import { McpClient, captureMcpClientToolCatalog } from './client.js';
 import type {
@@ -32,7 +33,7 @@ import type {
   McpProcessSpec,
 } from './client.js';
 import type { McpToolInfo, McpToolSchema } from './client.js';
-import type { McpToolCallOptions } from './client-types.js';
+import type { McpClientPhase, McpToolCallOptions } from './client-types.js';
 import { captureMcpBackendMethods, captureMcpCallRestrictions } from './call-currentness.js';
 import {
   parseElicitationParams,
@@ -83,6 +84,8 @@ export interface McpReloadServerResult {
   readonly name: string;
   readonly action: 'added' | 'changed' | 'removed' | 'unchanged';
   readonly connected: boolean;
+  /** Why a configured server is not connected; absent when it is connected or was removed. */
+  readonly error?: string;
 }
 
 export interface McpReloadResult {
@@ -113,12 +116,17 @@ export function captureMcpSecurityDecisionReadSource(registry: McpRegistry): () 
   return capture();
 }
 
+/** Servers connected at once while applying a configuration. */
+const MCP_CONNECT_CONCURRENCY = 4;
+
 export class McpRegistry {
   readonly #catalogFactoryOwner = Object.freeze({});
   private clients = new Map<string, McpClient>();
   private readonly executionByClient = new WeakMap<McpClient, { assertCurrent: () => void; close: () => void }>();
   private serverConfigs = new Map<string, McpServerConfig>();
   private readonly pendingConnections = new Map<string, PendingMcpConnection>();
+  /** Why a configured server's last connect attempt failed; a failed client is not kept, so this is the only record. */
+  private readonly connectFailures = new Map<string, string>();
   private permissions = new McpPermissionManager();
   private readonly policyLifetimes = new Map<string, AbortController>();
   private policyLifetime(serverName: string): AbortController {
@@ -214,7 +222,7 @@ export class McpRegistry {
     scope: McpConfigScope,
     serverConfig: McpServerConfig,
   ): Promise<{ readonly path: string; readonly reload: McpReloadResult }> {
-    const written = upsertMcpServerConfig(roots, scope, serverConfig);
+    const written = await withMcpConfigLock(roots, scope, () => upsertMcpServerConfig(roots, scope, serverConfig));
     return { path: written.path, reload: await this.reload(roots) };
   }
 
@@ -223,7 +231,7 @@ export class McpRegistry {
     scope: McpConfigScope,
     serverName: string,
   ): Promise<{ readonly path: string; readonly removed: boolean; readonly reload: McpReloadResult }> {
-    const written = removeMcpServerConfig(roots, scope, serverName);
+    const written = await withMcpConfigLock(roots, scope, () => removeMcpServerConfig(roots, scope, serverName));
     return { path: written.path, removed: written.removed, reload: await this.reload(roots) };
   }
 
@@ -252,33 +260,41 @@ export class McpRegistry {
 
     for (const name of previousConfigs.keys()) {
       if (next.has(name)) continue;
+      this.forgetServer(name);
       removed += 1;
       results.push({ name, action: 'removed', connected: false });
     }
 
+    const plan: { readonly name: string; readonly serverConfig: McpServerConfig; readonly action: 'added' | 'changed' | 'unchanged'; readonly connect: boolean }[] = [];
     for (const [name, serverConfig] of next) {
       if (this.serverConfigs.get(name) !== serverConfig) throw new Error('MCP configuration intent changed');
       const previous = previousConfigs.get(name);
       if (previous && sameServerConfig(previous, serverConfig)) {
         unchanged += 1;
-        const client = this.clients.get(name);
-        if (!client?.isConnected) {
-          await this._connectServer(serverConfig);
-        }
-        results.push({ name, action: 'unchanged', connected: this.clients.get(name)?.isConnected ?? false });
+        plan.push({ name, serverConfig, action: 'unchanged', connect: !this.clients.get(name)?.isConnected });
         continue;
       }
-      if (previous) {
-        changed += 1;
-      } else {
-        added += 1;
+      if (previous) changed += 1; else added += 1;
+      plan.push({ name, serverConfig, action: previous ? 'changed' : 'added', connect: true });
+    }
+
+    // A few at a time rather than one after another: a server that never
+    // answers its handshake costs its own bound and no longer every server
+    // configured after it. Reported in configuration order either way.
+    const waiting = plan.filter((entry) => entry.connect);
+    let failure: { readonly error: unknown } | null = null;
+    const connectNext = async (): Promise<void> => {
+      for (let entry = waiting.shift(); entry; entry = waiting.shift()) {
+        try { await this._connectServer(entry.serverConfig); }
+        catch (error) { failure ??= { error }; }
       }
-      await this._connectServer(serverConfig);
-      results.push({
-        name,
-        action: previous ? 'changed' : 'added',
-        connected: this.clients.get(name)?.isConnected ?? false,
-      });
+    };
+    await Promise.all(Array.from({ length: Math.min(MCP_CONNECT_CONCURRENCY, waiting.length) }, connectNext));
+    if (failure) throw (failure as { readonly error: unknown }).error;
+    for (const { name, action } of plan) {
+      const connected = this.clients.get(name)?.isConnected ?? false;
+      const error = connected ? undefined : (this.clients.get(name)?.lastError ?? this.connectFailures.get(name) ?? undefined);
+      results.push({ name, action, connected, ...(error ? { error } : {}) });
     }
 
     return { added, changed, removed, unchanged, servers: results };
@@ -337,6 +353,8 @@ export class McpRegistry {
   /**
    * listAllTools, Return all registered tools (name + description) from all connected servers.
    * Only loads tool names and descriptions, full schemas are NOT fetched here.
+   * A server that fails to list is skipped and logged, so the list can be partial;
+   * `captureToolCatalog` is the all-or-nothing variant for callers that must not act on a partial catalog.
    */
   async listAllTools(): Promise<RegisteredTool[]> {
     const results: RegisteredTool[] = [];
@@ -397,10 +415,12 @@ export class McpRegistry {
     }
     const client = this.clients.get(parsed.serverName);
     if (!client) {
+      // A configured server whose connect failed has no client; say why rather than that it does not exist.
+      if (this.serverConfigs.has(parsed.serverName)) throw new Error(this.notConnectedMessage(parsed.serverName));
       throw new Error(`McpRegistry: no server named '${parsed.serverName}'`);
     }
     if (!client.isConnected) {
-      throw new Error(`McpRegistry: server '${parsed.serverName}' is not connected`);
+      throw new Error(this.notConnectedMessage(parsed.serverName));
     }
     const assertBackend = captureMcpBackendMethods(client, ['getToolSchema', 'captureToolScope', 'captureToolSchemaScope', 'callTool']);
     const sourceIsCurrent = source ? retainAutonomousSource(source.sourceOf()) : undefined;
@@ -422,7 +442,14 @@ export class McpRegistry {
     const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, serverPolicy });
     let assertWorkspaceCurrent: (() => void) | undefined;
     let schemaScope: ReturnType<McpClient['captureToolSchemaScope']> | undefined;
+    // Errors raised by the authority checks (abort, policy or caller change) say nothing about the
+    // server's health, so they must not count toward its failure quarantine. Tagging happens here so
+    // every route to the check, including the operation handed to the client, is covered.
+    const authorityErrors = new WeakSet<object>();
     const assertCurrent = () => {
+      try { checkAuthority(); } catch (error) { if (typeof error === 'object' && error !== null) authorityErrors.add(error); throw error; }
+    };
+    const checkAuthority = () => {
       assertCaller(); assertBackend(); signal.throwIfAborted(); transport.assertCurrent(); source?.assertCurrent(); assertWorkspaceCurrent?.();
       schemaScope?.assertCurrent();
       this.executionByClient.get(client)?.assertCurrent();
@@ -466,7 +493,8 @@ export class McpRegistry {
       if (permission.verdict === 'deny') {
         throw new Error(`MCP call '${qualifiedName}' denied: ${permission.reason}`);
       }
-      if (permission.verdict === 'ask' && (permission.causes?.length !== 1 || permission.causes[0] !== 'risk-policy' || !host || !operation))
+      // Enforcement answers allow or deny; any other answer is not a grant.
+      if (permission.verdict !== 'allow')
         throw new Error(`MCP call '${qualifiedName}' has unresolved permission: ${permission.reason}`);
       // Deterministic server allows constrain policy; they never replace the
       // canonical recorded admission of an actual autonomous caller's source.
@@ -500,9 +528,15 @@ export class McpRegistry {
 
       try {
         assertCurrent();
-        const result = await client.callTool(parsed.toolName, args, operation, { assertCurrent, claim: () => { assertCurrent(); admission?.claim(); } });
-        assertCurrent();
-        this.freshness.markFresh(parsed.serverName);
+        const result = await client.callTool(parsed.toolName, args, operation, { assertCurrent, claim: () => {
+          assertCurrent();
+          // A refused claim (replayed or revoked source) is an admission failure, not a server failure.
+          try { admission?.claim(); } catch (error) { if (typeof error === 'object' && error !== null) authorityErrors.add(error); throw error; }
+        } });
+        // The tool has already run: a policy, configuration or caller change after
+        // dispatch must not turn a completed call into a failure the caller would
+        // retry. A quarantine that landed meanwhile is kept, not cleared as fresh.
+        if (!this.freshness.isQuarantined(parsed.serverName)) this.freshness.markFresh(parsed.serverName);
         // Post:mcp:call hook (fire-and-forget)
         const postEvent: HookEvent = {
           path: 'Post:mcp:call',
@@ -515,7 +549,8 @@ export class McpRegistry {
         dispatcher.fire(postEvent).catch((err: unknown) => { logger.warn('Post:mcp:call hook error', { error: summarizeError(err) }); });
         return result;
       } catch (err) {
-        this.freshness.markFailed(parsed.serverName, summarizeError(err));
+        const authorityFailure = signal.aborted || (typeof err === 'object' && err !== null && authorityErrors.has(err));
+        if (!authorityFailure) this.freshness.markFailed(parsed.serverName, summarizeError(err));
         // Fail:mcp:call hook (fire-and-forget)
         const failEvent: HookEvent = {
           path: 'Fail:mcp:call',
@@ -554,6 +589,15 @@ export class McpRegistry {
     const errors = [...(pending?.cleanupErrors ?? []), ...outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : [])];
     if (errors.length) throw new AggregateError(errors, 'MCP server cleanup failed');
     return !!pending || !!client;
+  }
+
+  /** A removed server leaves nothing behind, so one later added under the same name starts clean. */
+  private forgetServer(name: string): void {
+    if (this.serverConfigs.has(name) || this.clients.has(name) || this.pendingConnections.has(name)) return;
+    this.permissions.removeServer(name);
+    this.freshness.removeServer(name);
+    this.connectFailures.delete(name);
+    this.policyLifetimes.delete(name);
   }
 
   private async disconnectClient(serverName: string, client: McpClient, reason: string): Promise<void> {
@@ -609,6 +653,8 @@ export class McpRegistry {
     transport?: 'stdio' | 'http' | undefined;
     protocolVersion?: string | undefined;
     protocolEra?: 'modern' | 'legacy' | undefined;
+    phase: McpClientPhase;
+    lastError?: string | undefined;
   }> {
     return this.serverNames.map((name) => {
       const client = this.clients.get(name);
@@ -619,8 +665,27 @@ export class McpRegistry {
         transport: negotiated?.transport ?? (this.serverConfigs.get(name)?.url ? 'http' as const : 'stdio' as const),
         protocolVersion: negotiated?.version,
         protocolEra: negotiated?.era,
+        phase: this.serverPhase(name),
+        lastError: client?.lastError ?? this.connectFailures.get(name),
       };
     });
+  }
+
+  private serverPhase(name: string): McpClientPhase {
+    const client = this.clients.get(name);
+    if (client) return client.phase;
+    if (this.pendingConnections.has(name)) return 'starting';
+    return this.connectFailures.has(name) ? 'gave-up' : 'idle';
+  }
+
+  /** A refusal that names the state, why, and what gets the server back. */
+  private notConnectedMessage(name: string): string {
+    const phase = this.serverPhase(name);
+    const why = this.clients.get(name)?.lastError ?? this.connectFailures.get(name);
+    const next = phase === 'restart-wait' || phase === 'starting' || phase === 'negotiating'
+      ? 'it is being restarted; retry in a few seconds'
+      : 'fix the server or its entry in mcp.json, then reload the MCP configuration to reconnect it';
+    return `McpRegistry: server '${name}' is not connected (${phase}${why ? `: ${why}` : ''}); ${next}`;
   }
 
   listServerSecurity(): Array<{
@@ -701,6 +766,11 @@ export class McpRegistry {
     return this.permissions.listRecentDecisions(limit);
   }
 
+  /** Be told whenever a security decision is recorded; read `listRecentSecurityDecisions` again. Returns the unsubscribe. */
+  subscribeSecurityDecisions(listener: () => void): () => void {
+    return this.permissions.subscribeDecisions(listener);
+  }
+
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void {
     this.invalidatePolicyLifetime(serverName);
     this.freshness.markQuarantined(serverName, reason, detail);
@@ -755,6 +825,12 @@ export class McpRegistry {
     const configuration = new AbortController();
     let releaseConfiguration = host?.config.onDidInvalidate(() => configuration.abort()) ?? (() => {});
     const signal = AbortSignal.any([pending.lifetime.signal, configuration.signal, ...(host ? [host.signal] : [])]);
+    // Once connected, a configuration write no longer ends the connection: each
+    // call already carries its own configuration fence. Only disconnect, owner
+    // revocation and workspace changes end it.
+    const closed = new AbortController();
+    const connectionSignal = AbortSignal.any([pending.lifetime.signal, closed.signal, ...(host ? [host.signal] : [])]);
+    let established = false;
     try {
     const assertHostCurrent = (): void => {
       signal.throwIfAborted();
@@ -808,7 +884,7 @@ export class McpRegistry {
       }
     }
     const assertProcessCurrent = () => {
-      signal.throwIfAborted(); assertExecutionCurrent?.();
+      (established ? connectionSignal : signal).throwIfAborted(); assertExecutionCurrent?.();
       if (this.permissionHost !== host || !sameServerConfig(this.serverConfigs.get(name), serverConfig))
         throw new Error('MCP process owner or configuration changed');
     };
@@ -846,10 +922,11 @@ export class McpRegistry {
         allowedHosts: serverConfig.allowedHosts ?? [],
       });
       this.clients.set(name, client);
+      this.connectFailures.delete(name);
+      established = true;
+      releaseConfiguration(); releaseConfiguration = () => {};
       if (host && serverConfig.command) {
-        const unsubscribe = releaseConfiguration;
-        this.executionByClient.set(client, { assertCurrent: assertProcessCurrent, close: () => { configuration.abort(); unsubscribe(); } });
-        releaseConfiguration = () => {};
+        this.executionByClient.set(client, { assertCurrent: assertProcessCurrent, close: () => closed.abort() });
       }
       if (sandboxSessionId) {
         this.sandboxSessionByServer.set(name, sandboxSessionId);
@@ -894,7 +971,10 @@ export class McpRegistry {
         catch (error) { pending.cleanupErrors.push(error); }
         if (this.sandboxSessionByServer.get(name) === sandboxSessionId) this.sandboxSessionByServer.delete(name);
       }
-      this.freshness.markFailed(name, summarizeError(err));
+      if (this.serverConfigs.get(name) === serverConfig) {
+        this.freshness.markFailed(name, summarizeError(err));
+        this.connectFailures.set(name, summarizeError(err));
+      }
       logger.error('McpRegistry: failed to connect server', { name, err: summarizeError(err) });
       if (pending.cleanupErrors.length) throw new AggregateError([err, ...pending.cleanupErrors], 'MCP connection cleanup failed');
       // Don't register the client, it's not usable. A revoked owner is an

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, jest, test } from 'bun:test';
 import { SqliteDecisionLog, createSystemOnePort, withDecisionLog, noul } from '@goodvibes-jev/judgment';
 import {
   captureJudgmentVolumeMonitorSettings,
@@ -120,13 +120,15 @@ test('monitoring settings reject empty/unbounded budgets and timer overflow', ()
     expect(() => captureJudgmentVolumeMonitorSettings(value)).toThrow();
 });
 
-test('the recurring timer runs without manual checks and stops with disposal', async () => {
-  let reads = 0;
-  let observed: (() => void) | undefined;
-  const tick = new Promise<void>(resolve => { observed = resolve; });
-  using monitor = startJudgmentVolumeMonitor({ settings: { ...settings, intervalMs: 1000 }, log: {query: () => {reads++;observed?.();return [];}}, notify: () => {} });
-  await Promise.race([tick, Bun.sleep(2500).then(() => {throw new Error('The recurring monitor did not run.');})]);
-  monitor.dispose(); const before = reads;
-  await Bun.sleep(1100);
-  expect(reads).toBe(before);
-}, 5000);
+test('the recurring timer runs without manual checks and stops with disposal', () => {
+  jest.useFakeTimers();
+  try {
+    let reads = 0;
+    const monitor = startJudgmentVolumeMonitor({ settings: { ...settings, intervalMs: 1000 }, log: { query: () => { reads++; return []; } }, notify: () => {} });
+    jest.advanceTimersByTime(3000);
+    expect(reads).toBe(3);
+    monitor[Symbol.dispose]();
+    jest.advanceTimersByTime(5000);
+    expect(reads).toBe(3);
+  } finally { jest.useRealTimers(); }
+});

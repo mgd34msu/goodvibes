@@ -1,5 +1,5 @@
 import type { DaemonRemoteManagementRouteHandlers } from './context.js';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
+import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -267,9 +267,16 @@ export async function handleRemotePairVerify(
   if (body instanceof Response) return body;
   const input = remoteBodySchemas.pairVerify.parse(body);
   if (input instanceof Response) return input;
-  const verified = await context.distributedRuntime.verifyPairRequest(input.requestId, input.challenge, {
-    metadata: readMetadataWithClientHintForwardedFor(req, input.metadata),
-  });
+  let verified: unknown;
+  try {
+    verified = await context.distributedRuntime.verifyPairRequest(input.requestId, input.challenge, {
+      metadata: readMetadataWithClientHintForwardedFor(req, input.metadata),
+    });
+  } catch (error) {
+    const refused = refusalResponse(error);
+    if (refused) return refused;
+    throw error;
+  }
   return verified
     ? Response.json(verified)
     : jsonErrorResponse({ error: 'Pair request not approved, expired, or invalid' }, { status: 404 });
@@ -328,9 +335,47 @@ export async function handleRemotePeerWorkComplete(
     error: input.error,
     metadata: input.metadata,
   });
-  return work
-    ? Response.json({ work })
-    : jsonErrorResponse({ error: 'Unknown or unclaimed remote work item' }, { status: 404 });
+  if (!work) return jsonErrorResponse({ error: 'Unknown or unclaimed remote work item' }, { status: 404 });
+  // The service hands back the stored record when it refuses a report, so a
+  // record in a different settled state than the one reported is a refusal.
+  const requested = input.status ?? (input.error ? 'failed' : 'completed');
+  const stored = readWorkStatus(work);
+  if (stored !== undefined && stored !== requested) {
+    return withWork(jsonErrorResponse({
+      error: `Remote work ${workId} is ${stored} and cannot become ${requested}; the report was not recorded. Do not report it again.`,
+      code: 'REMOTE_WORK_SETTLED',
+    }, { status: 409 }), work);
+  }
+  return Response.json({ work });
+}
+
+function readWorkStatus(work: unknown): string | undefined {
+  if (typeof work !== 'object' || work === null) return undefined;
+  const status = (work as { readonly status?: unknown }).status;
+  return typeof status === 'string' ? status : undefined;
+}
+
+async function withWork(response: Response, work: unknown): Promise<Response> {
+  const body = await response.json() as Record<string, unknown>;
+  return Response.json({ ...body, work }, { status: response.status });
+}
+
+/**
+ * A move the runtime refused because of a record's state carries its own HTTP
+ * status, a code and a message that names the state and the next step. Answer
+ * with exactly that instead of a generic not-found.
+ */
+function refusalResponse(error: unknown): Response | null {
+  if (!(error instanceof Error)) return null;
+  const { status, code } = error as Error & { readonly status?: unknown; readonly code?: unknown };
+  if (typeof status !== 'number' || status < 400 || status > 499 || typeof code !== 'string') return null;
+  return jsonErrorResponse({ error: error.message, code }, { status });
+}
+
+function isUnknownPeerError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const { status, code } = error as Error & { readonly status?: unknown; readonly code?: unknown };
+  return status === 404 || (typeof code === 'string' && /NOT_FOUND|UNKNOWN_PEER/i.test(code)) || /unknown (distributed )?peer|peer .*not found/i.test(error.message);
 }
 
 // Non-numeric input is omitted from downstream calls so services can apply
@@ -389,21 +434,27 @@ export function estimateJsonByteLengthWithinLimit(
   value: unknown,
   maxBytes: number,
 ): { readonly kind: 'ok'; readonly byteLength: number } | { readonly kind: 'invalid' } {
-  // walk the value with a counting replacer so we never allocate
-  // the full encoded string. The replacer throws a sentinel when the running
-  // byte total exceeds maxBytes, preventing peak allocation before the cap.
-  // switched from `val.length * 6` worst-case to exact
-  // jsonStringByteLength() count, same allocation profile, much tighter near the cap.
+  // Walk the value with a counting replacer so we never allocate the full
+  // encoded string. The replacer throws a sentinel as soon as the running total
+  // passes maxBytes. Strings and keys use their exact encoded length, numbers and
+  // literals their printed length, and each container its brackets; one comma is
+  // charged per child, so a container can be over-counted by at most one byte.
   let byteCount = 0;
+  let isRoot = true;
   const OVER_LIMIT = Symbol('over-limit');
   try {
-    JSON.stringify(value, (_key, val: unknown) => {
-      if (typeof val === 'string') {
-        byteCount += jsonStringByteLength(val);
-      } else {
-        // null/number/boolean/object-open/array-open, add a small fixed cost per node.
-        byteCount += 16;
+    JSON.stringify(value, function (this: unknown, key: string, val: unknown) {
+      if (val === undefined || typeof val === 'function' || typeof val === 'symbol') return val;
+      if (!isRoot) {
+        byteCount += 1; // the comma before this child
+        if (!Array.isArray(this)) byteCount += jsonStringByteLength(key) + 1; // "key":
       }
+      isRoot = false;
+      if (typeof val === 'string') byteCount += jsonStringByteLength(val);
+      else if (typeof val === 'number') byteCount += Number.isFinite(val) ? String(val).length : 4;
+      else if (typeof val === 'boolean') byteCount += val ? 4 : 5;
+      else if (val === null) byteCount += 4;
+      else byteCount += 2; // { } or [ ]
       if (byteCount > maxBytes) {
         // eslint-disable-next-line @typescript-eslint/no-throw-literal
         throw OVER_LIMIT;
@@ -411,7 +462,6 @@ export function estimateJsonByteLengthWithinLimit(
       return val;
     });
     if (value === undefined) return { kind: 'ok', byteLength: 4 }; // undefined → JSON undefined
-    // Result is an exact-count for strings; node-overhead remains a fixed approximation.
     return { kind: 'ok', byteLength: Math.min(byteCount, maxBytes + 1) };
   } catch (err) {
     if (err === OVER_LIMIT) return { kind: 'ok', byteLength: maxBytes + 1 };
@@ -452,12 +502,20 @@ async function handleApproveRemotePairRequest(context: DaemonRemoteRouteContext,
   if (body instanceof Response) return body;
   const input = remoteBodySchemas.operatorNote.parse(body);
   if (input instanceof Response) return input;
-  const approved = await context.distributedRuntime.approvePairRequest(requestId, {
-    actor: operatorActor(context, req),
-    note: input.note,
-    label: input.label,
-    metadata: readRemoteMetadata(body.metadata),
-  });
+  let approved: unknown;
+  try {
+    approved = await context.distributedRuntime.approvePairRequest(requestId, {
+      actor: operatorActor(context, req),
+      note: input.note,
+      label: input.label,
+      metadata: readRemoteMetadata(body.metadata),
+      confirmReplace: body.confirmReplace === true,
+    });
+  } catch (error) {
+    const refused = refusalResponse(error);
+    if (refused) return refused;
+    throw error;
+  }
   return approved
     ? Response.json(approved)
     : jsonErrorResponse({ error: 'Unknown remote pair request' }, { status: 404 });
@@ -557,7 +615,8 @@ async function handleInvokeRemotePeer(context: DaemonRemoteRouteContext, peerId:
     });
     return Response.json(invoked, { status: 202 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 404 });
+    // Only a state refusal or an unknown-peer error is answered as such; any other failure is the daemon's own.
+    return refusalResponse(error) ?? readJsonErrorResponse(error, { status: isUnknownPeerError(error) ? 404 : serviceFailureStatus(error) });
   }
 }
 

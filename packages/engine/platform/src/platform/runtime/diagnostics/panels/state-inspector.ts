@@ -7,11 +7,14 @@
  *
  * All domains are serialized to JSON-safe plain objects at snapshot time.
  * Maps and Sets are converted to arrays; circular references are replaced
- * with a sentinel string.
+ * with a sentinel string. Credential-shaped spans are masked, because domain
+ * state (permission requests, tool arguments) can carry tokens and a snapshot
+ * is shown and exported.
  */
 import type { RuntimeStateSnapshot, DomainStateEntry, DiagnosticPanelIssue } from '../types.js';
 import type { HotspotReport } from '../../inspection/state-inspector/types.js';
 import { serializeSafe } from '../../inspection/state-inspector/serialize.js';
+import { maskCredentials } from '../credential-mask.js';
 import { summarizeError } from '../../../utils/error-display.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -110,7 +113,7 @@ export class StateInspectorPanel {
           domain: domain.name,
           revision: domain.getRevision(),
           lastUpdatedAt: domain.getLastUpdatedAt(),
-          state: serializeSafe(domain.getState()) as Record<string, unknown>,
+          state: maskCredentials(serializeSafe(domain.getState()) as Record<string, unknown>),
         });
       } catch (error) {
         const message = summarizeError(error);

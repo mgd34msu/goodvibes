@@ -87,7 +87,7 @@ Three seams, one policy
 
 | when | who calls it | what happens |
 |---|---|---|
-| curl installer | `install_wake_word_model` in the TUI's `scripts/install.sh`, running the installed `goodvibes-daemon provision-wake-model` | artifacts land before the daemon is started |
+| curl installer | `install_wake_word_model` in the repository's `scripts/install.sh`, running the installed `goodvibes-daemon provision-wake-model` | artifacts land before the daemon is started |
 | `npm`/`bun install` | the TUI's `scripts/postinstall.js` | same policy, in-process |
 | every daemon boot | `startWakeBootProvisioning` | sweeps the tree, then fetches whatever is still missing |
 
@@ -113,7 +113,9 @@ Four rules hold across all three:
    sanctioned acts, each with a receipt; a switch is not one.
 
 `GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD=1` installs without the model, for an
-air-gapped host, a CI image, or a user who does not want the feature. It is
+air-gapped host, a CI image, or a user who does not want the feature. The curl
+installer's own switch is `GOODVIBES_WAKE_MODEL=0`, which skips the provisioning
+step altogether. It is
 reported in the same one-line message, so opting out never looks like a silent
 failure.
 

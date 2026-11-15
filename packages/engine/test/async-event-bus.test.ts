@@ -25,6 +25,8 @@ function makeEnvelope() {
   });
 }
 
+const drainMicrotasks = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 describe('RuntimeEventBus async dispatch via queueMicrotask', () => {
   test('emit returns synchronously before subscriber fires', () => {
     const bus = new RuntimeEventBus();
@@ -74,10 +76,8 @@ describe('RuntimeEventBus async dispatch via queueMicrotask', () => {
     });
 
     bus.emit('session', makeEnvelope());
-    await Promise.resolve();
-    // Give all microtasks a chance (each handler is its own microtask)
-    await Promise.resolve();
-    await Promise.resolve();
+    // Each handler is its own microtask; a macrotask turn runs every queued one, however many there are.
+    await drainMicrotasks();
 
     // Both non-throwing subscribers should have received the event
     expect(received).toContain('second');
@@ -107,10 +107,7 @@ describe('RuntimeEventBus async dispatch via queueMicrotask', () => {
     bus.on<SessionEvent>('SESSION_STARTED', () => order.push(3));
 
     bus.emit('session', makeEnvelope());
-    // Three microtasks to drain
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await drainMicrotasks();
 
     expect(order.sort()).toEqual([1, 2, 3]);
   });

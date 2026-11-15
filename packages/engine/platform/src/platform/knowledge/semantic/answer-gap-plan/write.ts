@@ -4,6 +4,7 @@ import { isTerminalRefinementState } from '../../store-lifecycle-authority.js';
 import { prepareObservedKnowledgeNodeInput } from '../../store-node-observation.js';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeEdgeUpsertInput, KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeRefinementTaskRecord, KnowledgeSourceRecord } from '../../types.js';
+import { ACTIVE_REFINEMENT_STATES } from '../../types.js';
 import { semanticMetadata, readRecord, readString } from '../utils.js';
 import { snapshotNodeInput } from '../../activation/projection.js';
 import { KnowledgeAnswerGapHeldError as Held } from './types.js';
@@ -17,7 +18,7 @@ function reviewedIssue(issue: KnowledgeIssueRecord): boolean {
 }
 // The existing recovery/status lifecycle includes queued work as active, while
 // detected/blocked/failed tasks remain retryable. This never grants repair work.
-const ACTIVE_REPAIR_STATES = new Set<KnowledgeRefinementTaskRecord['state']>(['queued', 'searching', 'evaluating', 'extracting', 'applying']);
+const ACTIVE_REPAIR_STATES = ACTIVE_REFINEMENT_STATES;
 export function isActionableAnswerGap(store: KnowledgeStore, node: KnowledgeNodeRecord): boolean {
   if (closedNode(node) || hasKnowledgeNodeOperatorReview(node)) return false;
   const issues = store.listIssues(Number.MAX_SAFE_INTEGER).filter((issue) => issue.nodeId === node.id);

@@ -7,8 +7,9 @@
  * - `readContracts`: the contract files under the project, read with the
  *   ContractStore without running anything;
  * - `openContractRunner`: claims the project's contract runs for this process
- *   (`<project>/.goodvibes/contract-cli/owner.json`, so a second process does
- *   not resume and run the same contracts from disk), then boots the client
+ *   (`<project>/.goodvibes/contract-cli/owner.json`, so a second contract CLI
+ *   does not resume and run the same contracts from disk; the claim does not
+ *   cover a terminal or daemon composition over the same project), then boots the client
  *   composition, which composes the contract runner, installs the judgment
  *   port (settings plus the decision log, runtime/judgment-services.ts) and
  *   resumes the contracts on disk. It also hosts the conversation sessions a
@@ -49,14 +50,32 @@ export interface ProcessIo extends ContractCliIo {
   close(): void;
 }
 
+/** The exit status of a process ended by Ctrl-C (128 + SIGINT). */
+const SIGINT_EXIT_CODE = 130;
+
+export interface ProcessIoOptions {
+  /** Ends the process when Ctrl-C arrives while nothing is listening for it. Defaults to `process.exit`. */
+  readonly exit?: ((code: number) => void) | undefined;
+}
+
 /** stdout and stderr lines, a line reader over stdin, and SIGINT (from the process, or from the reader while it holds the terminal). */
-export function createProcessIo(): ProcessIo {
+export function createProcessIo(options: ProcessIoOptions = {}): ProcessIo {
+  const exit = options.exit ?? ((code: number) => process.exit(code));
   const lines: string[] = [];
   const waiters: ((line: string | null) => void)[] = [];
   const interruptHandlers = new Set<() => void>();
   let reader: Interface | null = null;
   let ended = false;
   const fireInterrupt = (): void => {
+    // Installing a SIGINT listener removes the default Ctrl-C exit. Before the
+    // run is following (the runner is still opening: model discovery, resume,
+    // claim) or after it let go, nothing is registered; without this the
+    // keypress would be swallowed and only kill would end a stuck start.
+    if (interruptHandlers.size === 0) {
+      reader?.close();
+      exit(SIGINT_EXIT_CODE);
+      return;
+    }
     for (const handler of [...interruptHandlers]) handler();
   };
   process.on('SIGINT', fireInterrupt);

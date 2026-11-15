@@ -3,7 +3,7 @@ import { drainOwned } from '../drain-owned.ts';
 import { assertSynchronousJudgmentGuard } from '../port/attempt-guard.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { captureJudgmentInput } from '../port/input-snapshot.ts';
-import { DECISION_MODELS_UNAVAILABLE_NOTICE } from '../port/availability-notice.ts';
+import { DECISION_MODELS_UNAVAILABLE_NOTICE, rateLimitedNotice } from '../port/availability-notice.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
@@ -138,6 +138,8 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   const status = kind !== 'internal' && statusCode(rawStatus) ? rawStatus : undefined;
   const requestId = kind === 'internal' ? undefined : optional(() => identifier(source?.requestId));
   const lineage = optional(() => projectLineage(source?.lineage));
+  const rawRetryAfter = kind === 'unavailable' ? optional(() => source?.retryAfterMs) : undefined;
+  const retryAfterMs = nonnegative(rawRetryAfter) && rawRetryAfter > 0 ? Math.ceil(rawRetryAfter) : undefined;
   if (kind === 'rejected' && status === 400 && optional(() => source instanceof JudgmentContextLimitError)) {
     return new JudgmentContextLimitError({
       ...(requestId === undefined ? {} : { requestId }), ...(lineage === undefined ? {} : { lineage }),
@@ -146,13 +148,15 @@ function asFailure(error: unknown, overrideKind?: JudgmentErrorKind): JudgmentEr
   // HTTP status is validated metadata, not private upstream exception text.
   // Preserve it in the displayed diagnostic as well as the structured error:
   // a billing refusal must not look like Jev rejected the task itself.
-  const diagnostic = status === undefined ? FAILURE_MESSAGES[kind]
+  const diagnostic = retryAfterMs !== undefined ? rateLimitedNotice(retryAfterMs)
+    : status === undefined ? FAILURE_MESSAGES[kind]
     : `${FAILURE_MESSAGES[kind]} (HTTP ${status}${status === 402 ? ': Payment Required' : ''})`;
   const message = kind === 'rejected' && (status === 401 || status === 403)
     ? `${diagnostic}. ${DECISION_MODELS_UNAVAILABLE_NOTICE}` : diagnostic;
   return new JudgmentError(kind, message, {
     ...(status === undefined ? {} : { status }),
     ...(requestId === undefined ? {} : { requestId }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     ...(lineage === undefined ? {} : { lineage }),
   });
 }
@@ -299,6 +303,10 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         })();
         result = projectResult(questions as unknown as Q, requestedModel, response);
         resultToReturn = resultCapture ? response : result;
+        // The returned object must freeze cleanly. Learn that now, not after an
+        // answered entry is written for a result nobody can receive.
+        try { recordImmutableJudgmentResult({ ...resultToReturn }); }
+        catch { throw invalidResponse(); }
         checkCancellation(signal);
       } catch (error) {
         const failure = asFailure(error, cancellationKind(signal));

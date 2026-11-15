@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { listBundledThemes } from '../platform/src/platform/presentation/index.ts';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 
 const CHILD_CEILING_MS = 30_000;
@@ -32,7 +33,7 @@ test('a browser-target consumer can execute new themes and legacy presentation e
       import { DIFF_TONES, TONE_TOKENS, getBundledTheme, listBundledThemes, resolveTheme, themeToTones } from ${JSON.stringify(presentation)};
       const resolved = resolveTheme(getBundledTheme('goodvibes').json, 'dark');
       const tones = themeToTones(resolved);
-      if (listBundledThemes().length !== 11 || resolved.primary !== '#5ee0e6') throw new Error('Bundled theme lookup failed');
+      if (listBundledThemes().length !== ${listBundledThemes().length} || resolved.primary !== '#5ee0e6') throw new Error('Bundled theme lookup failed');
       if (tones.accent.brand !== resolved.primary || !DIFF_TONES.add || !TONE_TOKENS.fg.primary) throw new Error('Presentation bridge failed');
       console.log('theme browser consumer passed');
     `);
@@ -42,11 +43,10 @@ test('a browser-target consumer can execute new themes and legacy presentation e
     await runOwnedChild([
       process.execPath, 'build', entry, '--target=browser', '--format=esm', `--outfile=${bundle}`,
     ], 'building the theme browser consumer');
-    const javascript = readFileSync(bundle, 'utf-8');
-    // A separate runtime executes the actual browser-target bundle, rather
-    // than Bun's source loader masking a missing or unreachable export.
+    // Running the emitted file, not the source, proves the bundle itself holds
+    // every export; Bun's source loader cannot mask a missing one here.
     const { stdout, stderr } = await runOwnedChild(
-      ['node', '--input-type=module', '--eval', javascript], 'executing the theme browser consumer',
+      [process.execPath, bundle], 'executing the theme browser consumer',
     );
     expect(stderr).toBe('');
     expect(stdout.trim()).toBe('theme browser consumer passed');

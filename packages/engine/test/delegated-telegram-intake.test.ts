@@ -3,6 +3,7 @@ import { dispatchGatewayRestRoutes } from '../daemon-api/src/gateway-rest-routes
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { withTestTimeout } from './_helpers/test-timeout.ts';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -140,6 +141,17 @@ test('same-bot token rotation preserves an already approved original through its
   expect(f.spawned()).toBe(0); expect(f.sent).toEqual([]);
 });
 
+test('inbound.telegram.release is a served admin verb that returns the chat to normal handling', async () => {
+  const f = await fixture();
+  const descriptor = f.catalog.get('inbound.telegram.release');
+  expect(descriptor).toMatchObject({ access: 'admin', http: { method: 'POST', path: '/api/inbound/telegram/release' } });
+  expect(f.catalog.hasHandler('inbound.telegram.release')).toBe(true);
+  const configured = await f.configure() as { configurationId: string };
+  expect(await f.invoke('release', { configurationId: configured.configurationId })).toMatchObject({ outcome: 'released' });
+  await f.ingress();
+  expect(f.spawned()).toBe(1);
+});
+
 test('different provider bot with unchanged configured username holds before any selected text read', async () => {
   const f = await fixture();
   const configured = await f.configure() as { accountIdentity: { id: string; revision: string } };
@@ -196,8 +208,9 @@ test('selected webhook cannot borrow polling proof, while an unselected webhook 
   expect(f.approvals.listApprovals()).toHaveLength(0); expect(f.providerCalls).toEqual(['getMe']);
 });
 
-test('source expiry denies later decisions without reconstructing broker body', async () => {
-  const f = await fixture(); let now = Date.now();
+/** Owns Date.now and the timer functions so retention deadlines move only when the test advances them. */
+function controlledTime(): { advance: (ms: number) => void; restore: () => void } {
+  let now = Date.now();
   const timers = new Map<ReturnType<typeof setTimeout>, { at: number; run: () => void }>();
   const clock = spyOn(Date, 'now').mockImplementation(() => now);
   const setTimer = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, delay = 0, ...args: unknown[]) => {
@@ -206,17 +219,25 @@ test('source expiry denies later decisions without reconstructing broker body', 
     return handle;
   }) as typeof setTimeout);
   const clearTimer = spyOn(globalThis, 'clearTimeout').mockImplementation(handle => { timers.delete(handle as ReturnType<typeof setTimeout>); });
+  return {
+    advance(ms) {
+      const target = now + ms;
+      for (;;) {
+        const next = [...timers].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        const [handle, timer] = next;
+        now = timer.at; timers.delete(handle); timer.run();
+      }
+      now = target;
+    },
+    restore() { clearTimer.mockRestore(); setTimer.mockRestore(); clock.mockRestore(); },
+  };
+}
+
+test('source expiry denies later decisions without reconstructing broker body', async () => {
+  const f = await fixture();
+  const time = controlledTime(); const advance = time.advance;
   const raised = spyOn(f.approvals, 'raiseOwnerApproval');
-  function advance(ms: number): void {
-    const target = now + ms;
-    for (;;) {
-      const next = [...timers].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
-      if (!next) break;
-      const [handle, timer] = next;
-      now = timer.at; timers.delete(handle); timer.run();
-    }
-    now = target;
-  }
   try {
     // Own both the deadline clock and abort timers so admission cannot consume the pending lifetime.
     await f.configure({ pendingRetentionMs: 30 });
@@ -237,7 +258,7 @@ test('source expiry denies later decisions without reconstructing broker body', 
     expect(f.sourceReads()).toBe(1); expect(f.sent).toEqual([]);
     expect(f.broker.getInputs(pending.ref.sessionId)[0]?.body).not.toContain('EXTERNAL ORIGINAL');
   } finally {
-    try { f.host.close(); } finally { raised.mockRestore(); clearTimer.mockRestore(); setTimer.mockRestore(); clock.mockRestore(); }
+    try { f.host.close(); } finally { raised.mockRestore(); time.restore(); }
   }
 });
 
@@ -297,14 +318,16 @@ test('edited Telegram update retires the prior exact original without capturing 
 
 test('remove/recreate of the same natural route cannot inherit pending source authority', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
-  const route = f.hostDeps.routes.listBindings()[0]!; await f.hostDeps.routes.removeBinding(route.id); await Bun.sleep(2);
+  const time = controlledTime(); cleanups.push(time.restore);
+  const route = f.hostDeps.routes.listBindings()[0]!; await f.hostDeps.routes.removeBinding(route.id); time.advance(10);
   await f.hostDeps.routes.upsertBinding({ kind: route.kind, surfaceKind: route.surfaceKind, surfaceId: route.surfaceId, externalId: route.externalId, channelId: route.channelId, threadId: route.threadId });
   await expect(f.decide({ ref: pending.ref, approvalId: pending.approvalId })).rejects.toThrow();
 });
 
 test('approved source expiry makes durable review metadata honest without body reconstruction', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
-  await f.decide({ ref: pending.ref, approvalId: pending.approvalId }, { choices: { ...choices, sourceRetentionMs: 30 } }); await Bun.sleep(45);
+  const time = controlledTime(); cleanups.push(time.restore);
+  await f.decide({ ref: pending.ref, approvalId: pending.approvalId }, { choices: { ...choices, sourceRetentionMs: 30 } }); time.advance(45);
   expect(await f.invoke('read', { ref: pending.ref })).toMatchObject({ source: 'expired-or-lost', recovery: 'new-original-required', record: { execution: 'not-started' } });
 });
 
@@ -388,7 +411,7 @@ test('selected groups preserve require-mention denial without reading source tex
   const context = { ...f.context, authorizeSurfaceIngress: async (input: { mentioned?: boolean }) => ({ allowed: input.mentioned === true, reason: 'mention-required' }) } as unknown as SurfaceAdapterContext;
   const message = { message_id: 451, chat: { id: 42, type: 'supergroup' }, from: { id: 99 }, get text() { reads++; return '/goodvibes @synthetic_bot external'; } };
   const response = await processTelegramUpdate({ update_id: 451, message }, context);
-  expect(response.status).toBe(403); expect(reads).toBe(0); expect(f.spawned()).toBe(0); expect(f.approvals.listApprovals()).toHaveLength(0);
+  expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ outcome: 'ignored', policyReason: 'mention-required' }); expect(reads).toBe(0); expect(f.spawned()).toBe(0); expect(f.approvals.listApprovals()).toHaveLength(0);
 });
 
 test('blocked provider proof is cancellable without holding the real paired-owner lock', async () => {
@@ -399,7 +422,7 @@ test('blocked provider proof is cancellable without holding the real paired-owne
   const operation = catalog.invoke('inbound.telegram.configure', { body: { chatId: '42', accountId: 'synthetic_bot', pendingRetention: 'memory-only-until-deadline', pendingRetentionMs: 1000, configurationLifetimeMs: 10000, onExpiry: 'release-original-and-hold' }, signal: controller.signal,
     context: { admin: true, principalKind: 'token', principalId: f.authority.current()!.principalId, scopes: ['*'] }, isAuthorized: () => true, nativeExecutionAuthority: f.authority });
   await waiting; expect(entered).toBe(true);
-  expect(await Promise.race([f.authority.withCurrent(f.authority.current()!, async check => { check(); return 'available'; }), Bun.sleep(100).then(() => 'blocked')])).toBe('available');
+  expect(await withTestTimeout(f.authority.withCurrent(f.authority.current()!, async check => { check(); return 'available'; }), 10_000, 'the native authority lock stayed held by the blocked provider proof')).toBe('available');
   controller.abort(); await expect(operation).rejects.toThrow();
   expect(await host.selects('42')).toBe(true);
   expect(f.approvals.listApprovals()).toHaveLength(0);
@@ -426,7 +449,6 @@ test('provider proof has a finite deadline even without caller cancellation', as
 }, 10_000);
 
 
-// Regression source intentionally unrun during the coding-first pass.
 test('delegated owner binding is detached from mutable scopes and includes authority revisions', async () => {
   const f = await fixture(); await f.configure(); const pending = await f.ingress();
   f.mutateOwnerScopes();
@@ -544,4 +566,24 @@ test('status response metadata is rejected as a decision request without consumi
   expect(f.spawned()).toBe(0); expect(f.sent).toEqual([]);
   expect(await f.decide(pending)).toMatchObject({ outcome: 'transferred' });
   expect(await f.invoke('read', { ref: pending.ref })).toMatchObject({ original: { text: original } });
+});
+
+test('a chat selected by a held configure is released by chatId, with no configuration id', async () => {
+  const f = await fixture();
+  expect(await f.configure({ accountId: 'someone_else' })).toMatchObject({ outcome: 'held', reason: expect.stringContaining('inbound.telegram.release') });
+  expect(await f.host.selects('42')).toBe(true);
+  expect(await f.invoke('release', { chatId: '42' })).toMatchObject({ outcome: 'released' });
+  expect(await f.host.selects('42')).toBe(false);
+  expect(await f.invoke('release', { chatId: '42' })).toMatchObject({ outcome: 'held', reason: 'chat-not-selected' });
+});
+
+test('after a daemon restart the restored selection is released by chatId', async () => {
+  const f = await fixture(); await f.configure();
+  f.host.close(); const reopened = new DelegatedTelegramIntake(f.hostDeps); cleanups.push(() => reopened.close());
+  expect(await reopened.release('telegram-config-gone', f.authority)).toMatchObject({ outcome: 'held' });
+  expect(await reopened.selects('42')).toBe(true);
+  expect(await reopened.release({ chatId: '42' }, f.authority)).toMatchObject({ outcome: 'released' });
+  expect(await reopened.selects('42')).toBe(false);
+  const again = new DelegatedTelegramIntake(f.hostDeps); cleanups.push(() => again.close());
+  expect(await again.selects('42')).toBe(false);
 });

@@ -141,8 +141,10 @@ describe('boot promotion', () => {
   test('a daemon running from an overridden home does NOT adopt the machine service unit', async () => {
     const h = makePromotionHarness({ hasOverriddenHome: true });
     h.runtime.onStarted();
-    // This is the regression: it used to write its own scratchpad ExecStart
-    // into the machine's unit and hand over.
+    // Promotion is asynchronous: drain it before asserting, or a missing guard
+    // would not have acted yet. This is the regression: it used to write its
+    // own scratchpad ExecStart into the machine's unit and hand over.
+    await h.runtime.drainHandovers();
     expect(h.adopted()).toBe(0);
     expect(h.exits).toEqual([]);
     await h.runtime.onStopping(false);
@@ -226,7 +228,7 @@ test('damaged native boots preserve failures through cleanup and restore a verif
   try {
     expect(h.runtime.onStarting()).toBe(true); await h.runtime.drainHandovers();
     for (const [path, bytes] of Object.entries(native.previous.installation(native.execPath))) expect(native.memory.files.get(path)).toEqual(bytes);
-    expect(h.runtime.updateStatus().armed).toBe(false); expect(h.adopted()).toBe(1); expect(h.commands).toHaveLength(2); expect(h.exits).toEqual([0]);
+    expect(h.runtime.updateStatus().armed).toBe(false); expect(h.adopted()).toBe(1); expect(h.commands).toHaveLength(3); expect(h.exits).toEqual([0]);
     expect(h.runtime.receiptStore().list().some(receipt => receipt.text.includes('rolled back to the previously installed version'))).toBe(true);
   } finally { await h.runtime.onStopping(false); }
 });
@@ -258,7 +260,7 @@ test('native installation admission arms updates and promotes through observed i
     expect(h.runtime.onStarting()).toBe(false); h.runtime.onStarted();
     expect(h.runtime.updateStatus().armed).toBe(true);
     await h.runtime.drainHandovers(); expect(h.adopted()).toBe(1); expect(h.exits).toEqual([0]);
-    expect(h.commands).toEqual([['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', '--no-block', 'enable', '--now', 'goodvibes.service']]);
+    expect(h.commands).toEqual([['systemctl', '--user', 'show-environment'], ['systemctl', '--user', 'daemon-reload'], ['systemctl', '--user', '--no-block', 'enable', '--now', 'goodvibes.service']]);
   } finally { await h.runtime.onStopping(false); }
 });
 
@@ -282,11 +284,14 @@ for (const retirement of ['healthy', 'payload', 'cancel'] as const) test(`${reti
 
 test('changed native payload while boot promotion awaits idle cannot adopt or exit', async () => {
   const native = nativePromotionInstallation(); const artifact = native.admit(); let idle = false;
-  const h = makePromotionHarness({ hasOverriddenHome: false, updateArtifact: artifact, isIdle: () => idle, promotionRetryMs: 1_000 });
+  const idlePolled = Promise.withResolvers<void>();
+  const h = makePromotionHarness({ hasOverriddenHome: false, updateArtifact: artifact, isIdle: () => { if (idle) idlePolled.resolve(); return idle; }, promotionRetryMs: 1 });
   try {
     h.runtime.onStarted(); expect(h.adopted()).toBe(0);
     native.memory.files.set(native.targets[1]!.path, Buffer.from('unowned runtime replacement')); idle = true;
-    await new Promise<void>(resolve => setTimeout(resolve, 1_150)); await h.runtime.drainHandovers();
+    // The retry attempt starts the promotion task synchronously after it sees idle, so once the
+    // idle poll has happened the task exists and draining waits for its real end.
+    await idlePolled.promise; await h.runtime.drainHandovers();
     expect(h.adopted()).toBe(0); expect(h.commands).toEqual([]); expect(h.exits).toEqual([]);
   } finally { await h.runtime.onStopping(false); }
 });
@@ -296,12 +301,12 @@ for (const retire of ['payload', 'cancel'] as const) test(`${retire} retirement 
   const artifact = Object.freeze({ ...retained, assertCurrent() { abort.signal.throwIfAborted(); retained.assertCurrent!(); } });
   let enter!: () => void; let release!: () => void;
   const entered = new Promise<void>(resolve => { enter = resolve; }); const pending = new Promise<void>(resolve => { release = resolve; });
-  const h = makePromotionHarness({ updateArtifact: artifact, serviceCommandRunner: async () => { enter(); await pending; return { status: 'accepted' }; } });
+  const h = makePromotionHarness({ updateArtifact: artifact, serviceCommandRunner: async (argv) => { if (!argv.includes('daemon-reload')) return { status: 'accepted' }; enter(); await pending; return { status: 'accepted' }; } });
   try {
     h.runtime.onStarted(); await entered;
     if (retire === 'payload') native.memory.files.set(native.targets[1]!.path, Buffer.from('unowned runtime replacement')); else abort.abort();
     release(); await h.runtime.drainHandovers();
-    expect(h.adopted()).toBe(1); expect(h.commands).toHaveLength(1); expect(h.exits).toEqual([]);
+    expect(h.adopted()).toBe(1); expect(h.commands).toHaveLength(2); expect(h.exits).toEqual([]);
   } finally { release(); await h.runtime.onStopping(false); }
 });
 
@@ -436,13 +441,13 @@ interface CompiledEntry {
   readonly dir: string;
 }
 
-/** Compile one entry the way the release lane does (see toolchain buildCompileArgs). */
+/** Compile one entry the way the release lane does (see toolchain buildCompileArgs), for the host so the binary can run here. */
 function compileEntry(entry: string, name: string): CompiledEntry {
   const dir = scratchDir(`gv-compiled-${name}-`);
   const binary = join(dir, name);
   const built = spawnSync(
     process.execPath,
-    ['build', join(import.meta.dir, '..', entry), '--compile', '--target=bun-linux-x64', '--outfile', binary],
+    ['build', join(import.meta.dir, '..', entry), '--compile', `--target=bun-${process.platform}-${process.arch}`, '--outfile', binary],
     { cwd: join(import.meta.dir, '..'), encoding: 'utf-8', timeout: COMPILE_TIMEOUT_MS },
   );
   if (built.status !== 0) {

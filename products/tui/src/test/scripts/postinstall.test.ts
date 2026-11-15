@@ -192,7 +192,5 @@ describe('the wake-word model install step in postinstall', () => {
       await expect(postinstall.installWakeWordModel()).resolves.toBeUndefined();
     } finally { console.log = originalLog; }
     expect(messages).toContain('postinstall: source checkout detected; skipping the wake-word model install');
-    // The shared network guard remains active; an attempted provision is a failure.
-
   });
 });

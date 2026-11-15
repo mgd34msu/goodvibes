@@ -503,3 +503,38 @@ describe('a removal decision outlives the process', () => {
     expect(existsSync(surface.recoveryFile('sess-raced'))).toBe(false);
   });
 });
+
+describe('a restore whose journal replay failed', () => {
+  test('a second receipt tells the user the journal failed and will be retried', async () => {
+    writeCrash('sess-journal-failed');
+    const op = scriptedOperator(['resume']);
+    const sink = makeSink();
+    const deps: RecoveryPromptDeps = {
+      ...makeDeps(op.open, sink),
+      applySnapshot: () => ({
+        applied: true, retired: true, messageCount: 2,
+        journalReplay: { replayed: 0, hadCorruptTail: false, failed: 'disk unreadable' },
+      }) as never,
+    };
+
+    expect(await offerRecoverySnapshot(deps)).toBe('resumed');
+    expect(sink.receipts).toHaveLength(2);
+    expect(sink.receipts[1]).toContain('Recovery of the journal failed (disk unreadable)');
+  });
+});
+
+describe('a restore that fails to apply', () => {
+  test('the receipt says the snapshot was left on disk and will be offered again', async () => {
+    writeCrash('sess-apply-failed');
+    const op = scriptedOperator(['resume']);
+    const sink = makeSink();
+    const deps: RecoveryPromptDeps = {
+      ...makeDeps(op.open, sink),
+      applySnapshot: () => ({ applied: false, refusal: 'apply-failed' }) as never,
+    };
+
+    expect(await offerRecoverySnapshot(deps)).toBe('resume-failed');
+    expect(sink.receipts.join('\n')).toContain('left on disk and will be offered again next launch');
+    expect(sink.receipts.join('\n')).not.toContain('retired');
+  });
+});

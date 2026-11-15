@@ -61,8 +61,14 @@ export function registerCostRuntimeCommands(registry: CommandRegistry): void {
       }
 
       if (sub === 'attribution' || sub === 'attr') {
-        const window: CostWindow = args.includes('7d') ? '7d' : '24h';
-        const asJson = args.includes('--json');
+        const options = args.slice(1);
+        const unknownOptions = options.filter((option) => option !== '24h' && option !== '7d' && option !== '--json');
+        if (unknownOptions.length > 0 || (options.includes('24h') && options.includes('7d'))) {
+          ctx.print(`Unknown or conflicting option(s): ${unknownOptions.length > 0 ? unknownOptions.join(', ') : '24h and 7d'}. Usage: /cost attribution [24h|7d] [--json]`);
+          return;
+        }
+        const window: CostWindow = options.includes('7d') ? '7d' : '24h';
+        const asJson = options.includes('--json');
         const rpc = getOperatorRpc(ctx);
         if (!rpc.available) {
           ctx.print(`[cost attribution] ${rpc.reason}`);

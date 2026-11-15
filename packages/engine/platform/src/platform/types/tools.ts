@@ -26,6 +26,11 @@ export interface ToolDefinition {
   supportsProgress?: boolean | undefined;
   /** Whether results may be streamed or delivered incrementally. */
   supportsStreamingOutput?: boolean | undefined;
+  /**
+   * The tool changes who can reach the agent or acts on an outside system. The permission gate
+   * asks the owner before it runs in every mode except allow-all, whatever its category.
+   */
+  dangerous?: boolean | undefined;
 }
 
 /** A tool invocation requested by the LLM. */
@@ -33,6 +38,11 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /**
+   * The provider could not read this call's arguments (the text said why). The call carries empty
+   * arguments and is answered with this error instead of running.
+   */
+  argumentError?: string | undefined;
 }
 
 /**
@@ -53,6 +63,23 @@ export interface ToolDenial {
   readonly scope: string;
   /** Optional user free-text (e.g. why a call was declined) for the model to adapt to. */
   readonly detail?: string | undefined;
+}
+
+/**
+ * Facts a tool reports to the host that the model must not see. Hosts (evidence
+ * collection, receipts) read them here; conversation rendering never includes them.
+ */
+export interface ToolHostEvidence {
+  /**
+   * One entry per file of a `read` result, aligned to that result's `files` array by `index`:
+   * the observation (which lines were actually returned) and the resolved absolute path.
+   */
+  readonly reads?: readonly {
+    readonly index: number;
+    readonly path: string;
+    readonly resolvedPath?: string | undefined;
+    readonly readObservation?: Readonly<Record<string, unknown>> | undefined;
+  }[] | undefined;
 }
 
 /** The outcome of executing a tool. */
@@ -79,6 +106,8 @@ export interface ToolResult {
    * tool produced any before stopping.
    */
   cancelled?: boolean | undefined;
+  /** Host-only facts about this result; never rendered to the model. See {@link ToolHostEvidence}. */
+  hostEvidence?: ToolHostEvidence | undefined;
 }
 
 /**
@@ -98,6 +127,12 @@ export interface ToolExecuteOptions {
   readonly signal?: AbortSignal | undefined;
   /** Registry-issued opaque projection capability; the creating owner must validate identity. */
   readonly inputProjectionContext?: object | undefined;
+  /**
+   * A tool that is still working calls this when it makes progress (output arrived, a step finished), with an
+   * optional short note. Hosts count it as liveness, so a long call that keeps reporting is not mistaken for a
+   * silent one. Additive and optional; a tool that never calls it behaves as before.
+   */
+  readonly onProgress?: ((note?: string) => void) | undefined;
 }
 
 /** A registered tool with its definition and executor. */

@@ -12,6 +12,7 @@
  */
 
 import { expect, test } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.ts';
 import {
   APPROVAL_UPDATE_DOMAIN,
   approvalUpdateStreamUrl,
@@ -69,6 +70,11 @@ test('the stream url narrows to the permissions domain', () => {
   expect(url.searchParams.get('domains')).toBe(APPROVAL_UPDATE_DOMAIN);
 });
 
+test('the stream url keeps a base path prefix', () => {
+  const url = new URL(approvalUpdateStreamUrl('https://host.example/goodvibes'));
+  expect(url.pathname).toBe('/goodvibes/api/control-plane/events');
+});
+
 test('a frame without a usable approval id is not acted on', () => {
   expect(readApprovalUpdateNotice(null)).toBeNull();
   expect(readApprovalUpdateNotice({})).toBeNull();
@@ -92,8 +98,8 @@ test('a decision pushed on the stream resolves the ask', async () => {
   });
 
   const decision = raiser({ request: REQUEST });
-  // Let the raise + subscribe + gap-read settle before pushing.
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  // The raise, the subscription and the gap-read must all have happened before a frame is pushed.
+  await waitFor(() => push !== null && calls.some((call) => call.methodId === 'approvals.list'));
   push!({ approval: { id: 'approval-1', status: 'approved', decision: { remember: true } }, createdAt: 1 });
 
   expect(await decision).toEqual({ approved: true, remember: true });
@@ -169,7 +175,7 @@ test('a local answer still wins and is reported back to the daemon', async () =>
   expect(await raiser({ request: REQUEST })).toEqual({ approved: true, remember: false });
   // The daemon's record has to match what happened here, or every other surface
   // reads a pending ask that was already answered.
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await waitFor(() => calls.some((call) => call.methodId === 'approvals.approve'));
   expect(calls.map((call) => call.methodId)).toContain('approvals.approve');
 });
 

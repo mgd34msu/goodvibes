@@ -78,13 +78,16 @@ export function createMicrosoftProvider(): VoiceProvider {
     id: 'microsoft',
     label: 'Microsoft',
     capabilities: ['tts', 'voice-list'],
+    // Keyless, so it would otherwise be the "configured" default on a host with no
+    // cloud key and no local install, sending the user's text to a service they never chose.
+    explicitSelectionOnly: true,
     status() {
       return buildStatus(
         'microsoft',
         'Microsoft',
         ['tts', 'voice-list'],
         true,
-        'Microsoft Edge speech does not require an API key and remains optional operator convenience.',
+        'Microsoft Edge speech does not require an API key. It is used only when selected by name (tts.provider = microsoft); text is sent to an unofficial Microsoft endpoint.',
       );
     },
     async listVoices() {

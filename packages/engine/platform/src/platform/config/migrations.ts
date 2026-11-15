@@ -530,13 +530,25 @@ export interface PaymentsBudgetKeyMove {
   readonly newValue: number;
 }
 
+/** One old amount key removed without a conversion. */
+export interface PaymentsBudgetKeyDrop {
+  /** The name that was on disk. */
+  readonly from: string;
+  /** What was stored there, for the receipt. */
+  readonly oldValue: unknown;
+  /** Why it was not converted. */
+  readonly reason: 'not-a-valid-amount' | 'new-name-already-set';
+}
+
 /** Outcome of moving the payments budget amounts onto their new names. */
 export interface PaymentsBudgetMigrationResult {
   readonly config: Record<string, unknown>;
-  /** True when at least one old key was present and moved. */
+  /** True when at least one old key was present and removed, moved or not. */
   readonly migrated: boolean;
   /** Every key that moved, in schema order, for the receipt. */
   readonly moves: readonly PaymentsBudgetKeyMove[];
+  /** Every old key removed without moving, so the receipt can say what happened to it. */
+  readonly dropped?: readonly PaymentsBudgetKeyDrop[];
 }
 
 /**
@@ -568,7 +580,9 @@ export const LEGACY_PAYMENTS_BUDGET_KEYS: readonly string[] =
  *
  * A value already sitting under the new name is left alone and the old key is
  * still removed: the new name is the one the reader uses, so a file carrying
- * both must not have the new value overwritten by the old one.
+ * both must not have the new value overwritten by the old one. An old value
+ * that is not a usable amount is removed too; either way the key is reported in
+ * `dropped`, so neither disappears without the receipt saying so.
  *
  * Idempotent; a file with none of the old keys is returned untouched.
  */
@@ -591,13 +605,20 @@ export function migratePaymentsBudgetAmounts(
   const config = structuredClone(parsed);
   const section = (config.payments as Record<string, unknown>).budget as Record<string, unknown>;
   const moves: PaymentsBudgetKeyMove[] = [];
+  const dropped: PaymentsBudgetKeyDrop[] = [];
 
   for (const [from, to] of PAYMENTS_BUDGET_RENAMES) {
     if (!(from in section)) continue;
     const stored = section[from];
     delete section[from];
-    if (typeof stored !== 'number' || !Number.isFinite(stored) || stored < 0) continue;
-    if (to in section) continue;
+    if (typeof stored !== 'number' || !Number.isFinite(stored) || stored < 0) {
+      dropped.push({ from: `payments.budget.${from}`, oldValue: stored, reason: 'not-a-valid-amount' });
+      continue;
+    }
+    if (to in section) {
+      dropped.push({ from: `payments.budget.${from}`, oldValue: stored, reason: 'new-name-already-set' });
+      continue;
+    }
     // Two decimal places, exactly: the stored count was hundredths, and
     // rounding here removes the trailing binary dust a plain divide leaves
     // (1999 / 100 is 19.990000000000002 before this).
@@ -612,7 +633,7 @@ export function migratePaymentsBudgetAmounts(
     });
   }
 
-  return { config, migrated: moves.length > 0, moves };
+  return { config, migrated: moves.length > 0 || dropped.length > 0, moves, dropped };
 }
 
 /** Outcome of dropping the retired occasions final-stretch key. */

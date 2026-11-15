@@ -46,13 +46,15 @@ describe('handleHistorySearchToken: INPUT-1: Enter accepts match', () => {
     expect(hs.active).toBe(false);
   });
 
-  test('Enter with no match writes empty string and closes', () => {
+  test('Enter with no match closes the search and keeps the unsent draft', () => {
     const hs = makeSearch(['npm install'], 'my-draft');
-    // no search call → no matches
-    const state = { historySearch: hs, prompt: 'my-draft', cursorPos: 8, requestRender: () => {} };
+    hs.search('zzz');
+    expect(hs.currentMatch).toBeNull();
+    const state = { historySearch: hs, prompt: '', cursorPos: 0, requestRender: () => {} };
     handleHistorySearchToken(state, makeKey('enter'));
 
-    expect(state.prompt).toBe('');
+    expect(state.prompt).toBe('my-draft');
+    expect(state.cursorPos).toBe('my-draft'.length);
     expect(hs.active).toBe(false);
   });
 });

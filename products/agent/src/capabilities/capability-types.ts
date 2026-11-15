@@ -87,6 +87,12 @@ export type CapabilityProbe =
   /** A configuration key holds a non-empty value. Values are never read out. */
   | { readonly kind: 'config-value-present'; readonly key: string; readonly label: string }
   /**
+   * A secret-store entry holds a non-empty value. The value is never read out.
+   * Unsatisfied when the context has no way to look, so a capability is never
+   * reported ready on a credential nobody could check.
+   */
+  | { readonly kind: 'secret-present'; readonly key: string; readonly label: string }
+  /**
    * Any one of several probes passes. Used where a capability has genuine
    * alternatives, a credential in the agent's own store OR the same account
    * already connected through another tool on this machine. Marking each

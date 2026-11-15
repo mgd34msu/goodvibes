@@ -11,12 +11,43 @@ import { assertRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecon
 
 export type ToolInputProjectionProblem = 'held' | 'capacity' | 'unconfigured' | 'invalid' | 'unavailable' | 'stale' | 'cancelled' | 'released' | 'binding-changed';
 
-/** Value-free refusal: projector failures must never echo the original input. */
+/**
+ * Value-free refusal: projector failures must never echo the original input.
+ * `detail` is an optional fixed sentence naming which argument rule failed; it
+ * is never built from a caller-supplied value.
+ */
 export class ToolInputProjectionError extends Error {
-  constructor(readonly problem: ToolInputProjectionProblem) {
-    super(`Tool input projection ${problem}.`);
+  constructor(readonly problem: ToolInputProjectionProblem, readonly detail?: string) {
+    super(detail ? `Tool input projection ${problem}. ${detail}` : `Tool input projection ${problem}.`);
     this.name = 'ToolInputProjectionError';
   }
+}
+
+const PROJECTION_PROBLEM_TEXT: Readonly<Record<ToolInputProjectionProblem, string>> = {
+  held: 'the host held this call before it took effect (its admission or authority did not hold). Not caused by your arguments; do not retry the same call',
+  capacity: 'the host is at capacity for prepared tool inputs. Nothing was executed; retry once after a moment',
+  unconfigured: 'this tool is not set up in this session. Nothing was executed; do not retry',
+  invalid: 'the arguments could not be prepared for this tool. Nothing was executed; check them against the tool schema and re-issue the call',
+  unavailable: 'a service this call needs is unavailable right now. Nothing was executed; retry once, and if it repeats, report the tool as unavailable',
+  stale: 'the tool or its inputs changed while this call was being prepared or run (for example a file changed or the call was cancelled). Re-read what you need, then re-issue the call',
+  cancelled: 'the call was cancelled. Stop; do not retry unless asked',
+  released: 'this call\'s prepared inputs were already released. Re-issue the call',
+  'binding-changed': 'the tool registration changed while this call was pending. Re-issue the call',
+};
+
+/**
+ * Model-facing description of a projection problem: what happened and the
+ * next step. Value-free like the error itself; never echoes the input.
+ */
+export function describeToolInputProjectionProblem(problem: ToolInputProjectionProblem, detail?: string): string {
+  return `Tool input projection ${problem}: ${PROJECTION_PROBLEM_TEXT[problem]}.${detail ? ` ${detail}` : ''}`;
+}
+
+/** A tool's own catch-all text: projection problems get their cause and next step. */
+export function describeUnexpectedToolError(error: unknown, summarize: (error: unknown) => string): string {
+  return error instanceof ToolInputProjectionError
+    ? describeToolInputProjectionProblem(error.problem, error.detail)
+    : `Unexpected error: ${summarize(error)}`;
 }
 
 export interface ToolInputProjectionRequest {

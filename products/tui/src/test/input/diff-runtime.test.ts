@@ -1,13 +1,14 @@
 // ---------------------------------------------------------------------------
 // diff-runtime.test.ts, regression coverage:
-//   (a) every Bun.spawn() call reachable from /diff captures stderr instead
-//       of letting git's `fatal: ...` write straight to the real tty.
-//   (b) /diff in a non-git directory opens the Changes modal, which
+//   (a) /diff in a non-git directory opens the Changes modal, which
 //       short-circuits with a friendly message (and an init offer) instead of
 //       running git per view and surfacing inconsistent error shapes.
+//   (b) every Bun.spawn() the Changes modal makes captures stderr instead of
+//       letting git's `fatal: ...` write straight to the real tty.
 // ---------------------------------------------------------------------------
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerDiffRuntimeCommands } from '../../input/commands/diff-runtime.ts';
@@ -17,7 +18,7 @@ import { ChangesModal } from '../../input/changes-modal.ts';
 import type { ChangesSource } from '../../input/changes-git.ts';
 import { layerTextBlock } from '../helpers/surface-frame.ts';
 
-// ── (b) /diff in a non-git directory ────────────────────────────────────────
+// ── (a) /diff in a non-git directory ────────────────────────────────────────
 
 function makeCtx(dir: string): { ctx: CommandContext; printed: string[]; opened: Array<ChangesSource | undefined> } {
   const printed: string[] = [];
@@ -39,7 +40,7 @@ function makeCtx(dir: string): { ctx: CommandContext; printed: string[]; opened:
   return { ctx, printed, opened };
 }
 
-describe('(b) /diff in a non-git directory', () => {
+describe('(a) /diff in a non-git directory', () => {
   test('/diff and its subcommands open the Changes modal on the matching view', async () => {
     const dir = makeProjectTempDir('gv-diff-runtime-nogit');
     try {
@@ -70,6 +71,35 @@ describe('(b) /diff in a non-git directory', () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('(b) git child processes capture stderr', () => {
+  test('every spawn made while loading the Changes views pipes stderr', async () => {
+    const dir = makeProjectTempDir('gv-diff-runtime-stderr');
+    // A real repository, so the modal goes on to run git instead of stopping at "not a repository".
+    execFileSync('git', ['init', '-q'], { cwd: dir, timeout: 30_000 });
+    const realSpawn = Bun.spawn;
+    const spawnOptions: unknown[] = [];
+    const spy = spyOn(Bun, 'spawn').mockImplementation(((...args: unknown[]) => {
+      // Bun.spawn(cmd, options) or Bun.spawn({ cmd, ...options })
+      spawnOptions.push(Array.isArray(args[0]) ? args[1] : args[0]);
+      return (realSpawn as (...a: unknown[]) => ReturnType<typeof Bun.spawn>)(...args);
+    }) as typeof Bun.spawn);
+    try {
+      for (const source of ['session', 'working', 'head', 'staged'] as const) {
+        const modal = new ChangesModal({ workingDirectory: dir, getSessionFiles: () => [], requestRender: () => {} });
+        await modal.reload(source);
+      }
+    } finally {
+      spy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect(spawnOptions.length).toBeGreaterThan(0);
+    for (const options of spawnOptions) {
+      const o = options as { stderr?: unknown; stdio?: readonly unknown[] };
+      expect(o.stderr ?? o.stdio?.[2]).toBe('pipe');
     }
   });
 });

@@ -121,6 +121,8 @@ describe('ServiceRegistry - resolveAuth bearer', () => {
 
   beforeEach(() => {
     originalOpenAiKey = process.env['OPENAI_API_KEY'];
+    // The environment tier outranks the secret store; the stored token must be the only source.
+    delete process.env['OPENAI_API_KEY'];
     dir = makeTmpDir();
     encPath = join(dir, 'secrets.enc');
     servicesPath = join(dir, 'services.json');
@@ -144,25 +146,12 @@ describe('ServiceRegistry - resolveAuth bearer', () => {
       openai: { name: 'openai', authType: 'bearer', tokenKey: 'OPENAI_API_KEY' },
     });
 
-    // Override env to use our temp secrets
     const registry = new ServiceRegistry(servicesPath, {
       secretsManager: secrets,
       subscriptionManager,
     });
-    // We need a registry that uses our secrets instance.
-    // Spy approach: use env var override (tier 1 of SecretsManager)
-    const origEnv = process.env['OPENAI_API_KEY'];
-    process.env['OPENAI_API_KEY'] = 'sk-test-token-123';
-    try {
-      const headers = await registry.resolveAuth('openai');
-      expect(headers).toEqual({ Authorization: 'Bearer sk-test-token-123' });
-    } finally {
-      if (origEnv === undefined) {
-        delete process.env['OPENAI_API_KEY'];
-      } else {
-        process.env['OPENAI_API_KEY'] = origEnv;
-      }
-    }
+    const headers = await registry.resolveAuth('openai');
+    expect(headers).toEqual({ Authorization: 'Bearer sk-test-token-123' });
   });
 
   test('returns null when bearer token is not available', async () => {

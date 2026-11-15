@@ -158,6 +158,49 @@ describe('PATCH /api/channels/policies/:surface: admin guard', () => {
     );
     expect(res.status).toBe(403);
   });
+
+  for (const method of ['patchChannelPolicy', 'postChannelPolicy'] as const) {
+    test(`${method} refused by requireAdmin never reaches upsertPolicy and leaves the stored policy unchanged`, async () => {
+      const { policies, service } = makePolicyStore({ enabled: true, requireMention: true });
+      let upserts = 0;
+      const recording: DaemonChannelRouteContext['channelPolicy'] = {
+        ...service,
+        upsertPolicy: async (surface, input) => { upserts += 1; return service.upsertPolicy(surface, input); },
+      };
+      const requireAdmin: DaemonChannelRouteContext['requireAdmin'] = () =>
+        new Response(JSON.stringify({ error: 'Admin required' }), { status: 403 });
+      const handlers = createDaemonChannelRouteHandlers(makeContext(recording, requireAdmin));
+
+      const res = await handlers[method]('slack', makePatchRequest('slack', { enabled: false, requireMention: false }));
+
+      expect(res.status).toBe(403);
+      expect(upserts).toBe(0);
+      expect(policies.get('slack')).toEqual({ enabled: true, requireMention: true });
+    });
+  }
+});
+
+describe('channel policy writes: wrong-typed values', () => {
+  const wrongTyped: Array<[string, unknown]> = [
+    ['enabled', 'false'],
+    ['enabled', 0],
+    ['allowDirectMessages', 'false'],
+    ['requireMention', '0'],
+  ];
+  for (const method of ['patchChannelPolicy', 'postChannelPolicy'] as const) {
+    for (const [field, value] of wrongTyped) {
+      test(`${method} refuses ${field}: ${JSON.stringify(value)} with 400 and changes nothing`, async () => {
+        const { policies, service } = makePolicyStore({ enabled: true, allowDirectMessages: true, requireMention: true });
+        const handlers = createDaemonChannelRouteHandlers(makeContext(service));
+
+        const res = await handlers[method]('slack', makePatchRequest('slack', { [field]: value }));
+
+        expect(res.status).toBe(400);
+        expect(JSON.stringify(await res.json())).toContain(field);
+        expect(policies.get('slack')).toEqual({ enabled: true, allowDirectMessages: true, requireMention: true });
+      });
+    }
+  }
 });
 
 describe('channel optional JSON bodies', () => {
@@ -255,7 +298,7 @@ describe('PATCH /api/channels/policies/:surface: dispatcher integration', () => 
   });
 
   test('PATCH via dispatcher with admin gate: requireAdmin 403 short-circuits before handler', async () => {
-    const { service } = makePolicyStore({ enabled: true });
+    const { policies, service } = makePolicyStore({ enabled: true });
     const requireAdmin: DaemonChannelRouteContext['requireAdmin'] = () =>
       new Response(JSON.stringify({ error: 'forbidden' }), { status: 403 });
     const ctx = makeContext(service, requireAdmin);
@@ -269,5 +312,6 @@ describe('PATCH /api/channels/policies/:surface: dispatcher integration', () => 
     const res = await dispatchOperatorRoutes(req, handlers);
     expect(res).not.toBeNull();
     expect(res!.status).toBe(403);
+    expect(policies.get('slack')).toEqual({ enabled: true });
   });
 });

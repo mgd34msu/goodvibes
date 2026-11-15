@@ -86,6 +86,23 @@ describe('goodvibes plugin init / validate', () => {
     expect(validateResult.output).toContain('demo-plugin');
   });
 
+  test('init refuses a name the loader would ignore, before writing anything, and says the rule', async () => {
+    const result = await handlePluginCommand(makeRuntime(root, ['plugin', 'init', 'My Plugin']));
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain('lowercase letters, digits and hyphens');
+    expect(existsSync(join(root, '.goodvibes', 'plugins', 'My Plugin'))).toBe(false);
+  });
+
+  test('validate names the name rule for a manifest the loader would skip', async () => {
+    const pluginDir = join(root, 'plugins', 'underscored');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'manifest.json'), JSON.stringify({ name: 'my_plugin', version: '1.0.0', description: 'x' }), 'utf-8');
+    const result = await handlePluginCommand(makeRuntime(root, ['plugin', 'validate', pluginDir]));
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("lowercase letters, digits and hyphens");
+    expect(result.output).not.toContain('"main"');
+  });
+
   test('validate fails and names the missing field for a manifest missing name/version', async () => {
     const pluginDir = join(root, 'plugins', 'broken');
     mkdirSync(pluginDir, { recursive: true });

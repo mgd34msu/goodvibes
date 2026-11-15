@@ -12,7 +12,7 @@ import { contextWindowFor, loadModels, listProviderIds, modelBenchmarkCompositeS
 import type { AgentHarnessModelRoutingArgs, LocalModelServerEndpoint, ModelCandidate, ModelProviderHealthSignal, ModelRouteLookupSource, ModelRouteResolution, RouteCandidate } from './agent-harness-model-routing-types.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { rankHarnessCatalog } from './agent-harness-catalog-ranking.ts';
-import { readLimit, readString } from './agent-harness-model-routing-utils.ts';
+import { mapWithConcurrency, readLimit, readString } from './agent-harness-model-routing-utils.ts';
 export type { AgentHarnessModelRoutingArgs } from './agent-harness-model-routing-types.ts';
 export { localModelCookbook } from './agent-harness-local-model-cookbook.ts';
 export { runLocalModelServerSmoke } from './agent-harness-local-model-smoke.ts';
@@ -24,6 +24,9 @@ async function readCurrentModel(context: CommandContext): Promise<unknown> {
     return null;
   }
 }
+
+// Readings in flight at once while describing a model list; see mapWithConcurrency.
+const READINESS_CONCURRENCY = 4;
 
 function attachLocalBenchmarkLatencies(context: CommandContext, models: readonly ModelCandidate[],
   latencies = localBenchmarkRouteLatencyMap(context)): readonly ModelCandidate[] {
@@ -208,9 +211,9 @@ async function describeRoute(route: RouteCandidate, options: { readonly context:
         inspectRouting: 'models action:"status"',
         inspectRoute: 'agent_harness mode:"model_route"',
         settingRead: 'settings action:"get"',
-        settingMutation: 'settings action:"set" confirm:true explicitUserRequest:"..."',
-        openModelPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"model-picker" confirm:true explicitUserRequest:"..."',
-        openProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"provider-picker" confirm:true explicitUserRequest:"..."',
+        settingMutation: 'settings action:"set" explicitUserRequest:"..."',
+        openModelPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"model-picker" explicitUserRequest:"..."',
+        openProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"provider-picker" explicitUserRequest:"..."',
       },
     } : {}),
   };
@@ -279,7 +282,7 @@ async function describeModel(model: ModelCandidate, options: { readonly context:
         selectProviderCommand: `/provider ${model.providerId}`,
         pinCommand: `/pin ${model.registryKey}`,
         unpinCommand: `/unpin ${model.registryKey}`,
-        setMainModel: `settings action:"set" key:"provider.model" value:"${model.registryKey}" confirm:true explicitUserRequest:"..."`,
+        setMainModel: `settings action:"set" key:"provider.model" value:"${model.registryKey}" explicitUserRequest:"..."`,
       },
     } : {}),
   };
@@ -411,12 +414,12 @@ export async function modelRoutingSummary(context: CommandContext, args: AgentHa
     },
     providers: providerIds,
     localCookbook: cookbook,
-    routes: await Promise.all(routeMatches.slice(0, limit).map(async ({ entry, judgment }) => ({
+    routes: await mapWithConcurrency(routeMatches.slice(0, limit), READINESS_CONCURRENCY, async ({ entry, judgment }) => ({
       ...await describeRoute(entry, { context, includeParameters, reading, cookbook }), ...(judgment ? { judgment } : {}),
-    }))),
-    models: await Promise.all(modelMatches.slice(0, limit).map(async ({ entry, judgment }) => ({
+    })),
+    models: await mapWithConcurrency(modelMatches.slice(0, limit), READINESS_CONCURRENCY, async ({ entry, judgment }) => ({
       ...await describe(entry), ...(judgment ? { judgment } : {}),
-    }))),
+    })),
     returned: {
       routes: Math.min(routeMatches.length, limit),
       models: Math.min(modelMatches.length, limit),
@@ -426,12 +429,27 @@ export async function modelRoutingSummary(context: CommandContext, args: AgentHa
       providers: providerIds.length,
       models: models.length,
     },
+    ...(models.some((model) => model.pinned === null) ? { pinnedStatus: 'unknown: the favorites could not be read, so pinned is null for each model' } : {}),
     issues: readProviderApi(context) ? [] : [{
       severity: 'warning',
       message: 'Provider API is unavailable in this runtime; static model route posture is still inspectable.',
     }],
     policy: 'Read-only provider/model routing posture. Route changes, model selection, provider add/remove, refresh, pin, and unpin remain visible picker, settings, workspace, or slash-command flows.',
   };
+}
+
+/**
+ * A registry key names exactly one route. A bare model id can be listed under several
+ * providers, so it is only a match when no registry key matches, and several matches
+ * are reported instead of silently taking the first.
+ */
+function modelMatches(models: readonly ModelCandidate[], matches: (value: string) => boolean): readonly ModelCandidate[] {
+  const byKey = models.filter((model) => matches(model.registryKey));
+  return byKey.length > 0 ? byKey : models.filter((model) => matches(model.modelId));
+}
+
+function ambiguousModels(input: string, candidates: readonly ModelCandidate[]): ModelRouteResolution {
+  return { status: 'ambiguous', input, candidates: candidates.slice(0, 8).map((model) => describeCandidate(model)) };
 }
 
 export async function describeHarnessModelRoute(context: CommandContext, args: AgentHarnessModelRoutingArgs, reading: ModelReadingOptions = {}): Promise<ModelRouteResolution> {
@@ -453,13 +471,17 @@ export async function describeHarnessModelRoute(context: CommandContext, args: A
   const normalized = lookup.input.toLowerCase();
   const exactRoute = routes.find((route) => route.id === lookup.input);
   if (exactRoute) return { status: 'found', route: await describeRoute(exactRoute, { context, includeParameters: true, reading, lookup: { ...lookup, resolvedBy: 'route-id' } }) };
-  const exactModel = models.find((model) => model.registryKey === lookup.input || model.modelId === lookup.input);
+  const exactModels = modelMatches(models, (value) => value === lookup.input);
+  if (exactModels.length > 1) return ambiguousModels(lookup.input, exactModels);
+  const exactModel = exactModels[0];
   if (exactModel) return { status: 'found', route: await describeModel(exactModel, { context, includeParameters: true, reading, lookup: { ...lookup, resolvedBy: 'model-id' } }) };
   const exactEndpoint = endpoints.find((endpoint) => endpoint.id === lookup.input || endpoint.baseUrl === lookup.input || endpoint.modelsUrl === lookup.input);
   if (exactEndpoint) return { status: 'found', route: describeLocalServerEndpointRoute(exactEndpoint, { ...lookup, resolvedBy: 'local-endpoint-id' }) };
   const insensitiveRoute = routes.find((route) => route.id.toLowerCase() === normalized);
   if (insensitiveRoute) return { status: 'found', route: await describeRoute(insensitiveRoute, { context, includeParameters: true, reading, lookup: { ...lookup, resolvedBy: 'case-insensitive-route-id' } }) };
-  const insensitiveModel = models.find((model) => model.registryKey.toLowerCase() === normalized || model.modelId.toLowerCase() === normalized);
+  const insensitiveModels = modelMatches(models, (value) => value.toLowerCase() === normalized);
+  if (insensitiveModels.length > 1) return ambiguousModels(lookup.input, insensitiveModels);
+  const insensitiveModel = insensitiveModels[0];
   if (insensitiveModel) return { status: 'found', route: await describeModel(insensitiveModel, { context, includeParameters: true, reading, lookup: { ...lookup, resolvedBy: 'case-insensitive-model-id' } }) };
   const insensitiveEndpoint = endpoints.find((endpoint) => endpoint.id.toLowerCase() === normalized || endpoint.baseUrl.toLowerCase() === normalized || endpoint.modelsUrl.toLowerCase() === normalized);
   if (insensitiveEndpoint) return { status: 'found', route: describeLocalServerEndpointRoute(insensitiveEndpoint, { ...lookup, resolvedBy: 'case-insensitive-local-endpoint-id' }) };

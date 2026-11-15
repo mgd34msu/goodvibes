@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { forgetFailureReadings, HttpStatusError, installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { forgetFailureReadings, HttpStatusError, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { useFailureReadings } from './_helpers/failure-readings.js';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 import { DaemonBatchManager, MAX_BATCH_SUBMIT_ATTEMPTS } from '../platform/src/platform/batch/manager.js';
@@ -11,8 +9,7 @@ import type { LLMProvider, ProviderBatchChatRequest, ProviderBatchResult } from 
 import type { ProviderRegistry } from '../platform/src/platform/providers/registry.js';
 
 function makeConfigManager(): ConfigManager {
-  const configDir = join(tmpdir(), `gv-batch-test-${Date.now()}-${crypto.randomUUID()}`);
-  mkdirSync(configDir, { recursive: true });
+  const configDir = makeProjectTempDir('gv-batch-test');
   return new ConfigManager({ configDir });
 }
 
@@ -124,6 +121,24 @@ describe('DaemonBatchManager', () => {
     expect(completed?.status).toBe('completed');
     expect(completed?.result?.content).toBe('batched response');
     expect(provider.submitted[0]?.customId).toBe(queued.id);
+  });
+
+  test('a redelivered queue message returns the job it already created', async () => {
+    const configManager = makeConfigManager();
+    configManager.set('batch.mode', 'explicit');
+    const manager = new DaemonBatchManager({ configManager, providerRegistry: makeRegistry(makeProvider()) });
+    const create = (id: string) => manager.createJob({
+      request: { messages: [{ role: 'user', content: 'hi' }] },
+      source: { kind: 'cloudflare-queue', id },
+    });
+
+    const first = await create('queue-msg-1');
+    const redelivered = await create('queue-msg-1');
+    const other = await create('queue-msg-2');
+
+    expect(redelivered.id).toBe(first.id);
+    expect(other.id).not.toBe(first.id);
+    expect(await manager.listJobs()).toHaveLength(2);
   });
 });
 
@@ -240,12 +255,12 @@ describe('provider batch failures: whether another attempt could succeed', () =>
 });
 
 describe('provider batch failure with no judgment port', () => {
-  test('a failure only wording can settle fails the tick and leaves the job as it was', async () => {
+  test('a failure only wording can settle leaves the job as it was, and the tick completes', async () => {
     forgetFailureReadings();
     const previous = installJudgmentPort(undefined);
     try {
       const { manager, job } = await managerWith(makeFailingProvider({ create: () => new Error('something unusual happened') }));
-      await expect(manager.tick({ forceSubmit: true })).rejects.toBeInstanceOf(JudgmentPortMissingError);
+      await expect(manager.tick({ forceSubmit: true })).resolves.toMatchObject({ failedJobs: 0, submittedJobs: 0 });
       const after = await manager.getJob(job.id);
       expect(after?.status).toBe('queued');
       expect(after?.attempts).toBe(0);

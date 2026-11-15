@@ -9,10 +9,12 @@ export class TriggerChildProcesses {
   private readonly watchers = new Set<Promise<void>>();
   private readonly stops = new Map<string, Promise<void>>();
   private draining: Promise<void> | undefined;
+  /** A drain that could not be confirmed leaves children unaccounted for, so no new child is admitted until a retried join succeeds. */
+  private drainFailed = false;
   constructor(private readonly manager: ProcessManager) {}
 
   admit<T>(begin: () => Promise<T>): Promise<T> {
-    if (this.draining) return Promise.reject(new Error('Trigger process host is draining'));
+    if (this.draining || this.drainFailed) return Promise.reject(new Error(this.draining ? 'Trigger process host is draining' : 'Trigger process host drain was not confirmed; call join() again before launching'));
     const { promise, resolve, reject } = Promise.withResolvers<T>();
     this.launches.add(promise);
     const done = () => { this.launches.delete(promise); };
@@ -52,7 +54,8 @@ export class TriggerChildProcesses {
     this.stops.set(id, stopped);
     void stopped.then(() => {
       this.children.delete(id); this.stops.delete(id);
-    }, () => logger.warn('Trigger child termination could not be confirmed'));
+    // The child stays in `children` and the failed stop is forgotten, so a retried join() asks it to stop again.
+    }, () => { this.stops.delete(id); logger.warn('Trigger child termination could not be confirmed'); });
   }
 
   join(): Promise<void> {
@@ -70,8 +73,9 @@ export class TriggerChildProcesses {
       }
       this.children.clear(); this.stops.clear(); this.watchers.clear();
     })();
-    // Successful drain allows a deliberate supervisor restart with the same host.
-    void this.draining.then(() => { this.draining = undefined; }, () => {});
+    // A successful drain allows a deliberate supervisor restart with the same host;
+    // a failed one stays refused but can be retried by calling join() again.
+    void this.draining.then(() => { this.draining = undefined; this.drainFailed = false; }, () => { this.draining = undefined; this.drainFailed = true; });
     return this.draining;
   }
 }

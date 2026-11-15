@@ -42,8 +42,8 @@ const ZERO_WIDTH_SPACE = '\u200b';
  */
 const LINE_BREAK_CODE_POINTS = new RegExp('[\\u0000-\\u001F\\u007F\\u0085\\u2028\\u2029]');
 
-/** Every channel the dispatch maps, plus the fallbacks. */
-const CHANNELS = ['telegram', 'discord', 'slack', 'ntfy', 'matrix', 'unmapped-surface'] as const;
+/** Every channel the dispatch maps, plus an unmapped one that takes the plain-text fallback. */
+const CHANNELS = ['telegram', 'discord', 'slack', 'ntfy', 'html', 'unmapped-surface'] as const;
 
 function noticeWith(untrustedText: string, label = 'Subject'): StructuredNotice {
   return {

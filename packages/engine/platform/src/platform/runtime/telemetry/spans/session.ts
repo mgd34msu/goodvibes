@@ -109,9 +109,10 @@ export function endSessionSpan(span: Span, ctx: SessionSpanEndContext): void {
 
   span.addEvent(`session.${ctx.outcome}`);
 
-  if (ctx.outcome === 'recovery_failed' && ctx.error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error });
-    span.setAttribute('session.error', ctx.error);
+  if (ctx.outcome === 'recovery_failed') {
+    // A failure without a message is still a failure: it must not export as OK.
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error || 'recovery failed' });
+    if (ctx.error) span.setAttribute('session.error', ctx.error);
   } else {
     span.setStatus({ code: SpanStatusCode.OK });
   }

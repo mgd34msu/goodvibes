@@ -286,9 +286,11 @@ describe('BUILTIN_SUITES', () => {
     const runner = new EvalRunner();
     const result = await runner.runSuite('core-performance', scenarios);
     expect(result.results.length).toBe(scenarios.length);
-    // All built-in scenarios should produce scorecards with valid composite scores
+    // Every built-in scenario must pass its dimension floors with a clean-run composite;
+    // a scenario scoring 0 (or failing) must not read as a green suite.
     for (const r of result.results) {
-      expect(r.scorecard.compositeScore).toBeGreaterThanOrEqual(0);
+      expect(r.scorecard.passed, `${r.scorecard.scenarioId} did not pass`).toBe(true);
+      expect(r.scorecard.compositeScore, `${r.scorecard.scenarioId} composite`).toBeGreaterThanOrEqual(80);
       expect(r.scorecard.compositeScore).toBeLessThanOrEqual(100);
     }
   });

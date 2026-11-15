@@ -3,17 +3,17 @@
  * writes, kept beside each store under `snapshots/<db-file-name>/`.
  *
  * Three jobs:
- * - `snapshotStoreFile`, one verified copy (plus -wal/-shm sidecars when
- *   present), used automatically before schema migrations and by the daily
- *   scheduler;
+ * - `snapshotStoreFile`, one copy (plus -wal/-shm sidecars when present),
+ *   checked for a complete SQLite header and size, used automatically before
+ *   schema migrations and by the daily scheduler;
  * - `restoreStoreSnapshot`, ONE command back to a snapshot: parks the
- *   current file at `<path>.pre-restore`, then copies the snapshot into
- *   place (latest snapshot when none is named);
+ *   current file (and its sidecars) under a name no earlier restore used,
+ *   then replaces it with the snapshot (latest when none is named);
  * - `StoreSnapshotScheduler`, a daily snapshot of every registered store
  *   with bounded retention through the existing retention engine
  *   (RetentionPolicy + SnapshotPruner deleting real files).
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, utimesSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
@@ -31,6 +31,7 @@ export type { RetentionClass } from '../runtime/retention/types.js';
 
 export const STORE_SNAPSHOT_DIR = 'snapshots';
 const SNAPSHOT_SUFFIX = '.snapshot';
+const SIDECARS = ['-wal', '-shm'] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function isRealDbPath(dbPath: string): boolean {
@@ -40,6 +41,22 @@ function isRealDbPath(dbPath: string): boolean {
 /** Directory a store's snapshots live in: `<db dir>/snapshots/<db file name>/`. */
 export function storeSnapshotDir(dbPath: string): string {
   return join(dirname(dbPath), STORE_SNAPSHOT_DIR, basename(dbPath));
+}
+
+const SQLITE_HEADER = 'SQLite format 3\0';
+
+/** A copy is kept only when it is as large as its source and still opens with the SQLite header. */
+function assertCopyComplete(source: string, copy: string): void {
+  const expected = statSync(source).size;
+  const copied = statSync(copy);
+  if (copied.size !== expected) throw new Error(`store snapshot copy is incomplete: ${copy} has ${copied.size} of ${expected} bytes`);
+  if (expected < SQLITE_HEADER.length) return;
+  const fd = openSync(copy, 'r');
+  try {
+    const header = Buffer.alloc(SQLITE_HEADER.length);
+    readSync(fd, header, 0, header.length, 0);
+    if (header.toString('latin1') !== SQLITE_HEADER) throw new Error(`store snapshot copy is not a SQLite database: ${copy}`);
+  } finally { closeSync(fd); }
 }
 
 function timestampSlug(at: number): string {
@@ -69,6 +86,8 @@ export function snapshotStoreFile(
     snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
   }
   copyFileSync(dbPath, snapshotPath);
+  try { assertCopyComplete(dbPath, snapshotPath); }
+  catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
   for (const sidecar of ['-wal', '-shm']) {
     if (existsSync(`${dbPath}${sidecar}`)) {
       copyFileSync(`${dbPath}${sidecar}`, `${snapshotPath}${sidecar}`);
@@ -127,7 +146,7 @@ export interface RestoreStoreSnapshotResult {
 /**
  * ONE command back to a snapshot. The store must be closed by the caller.
  * With no snapshot named, the latest one is used; the replaced live file is
- * parked at `<path>.pre-restore` so even a wrong restore loses nothing.
+ * parked at `<path>.pre-restore` (`-1`, `-2`, ... for later restores) so even a wrong restore loses nothing.
  */
 export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): RestoreStoreSnapshotResult {
   if (!isRealDbPath(dbPath)) {
@@ -142,11 +161,32 @@ export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): Res
   }
   let keptCurrentAt: string | null = null;
   if (existsSync(dbPath)) {
+    // Each restore parks what it replaces under its own name, so a second restore cannot overwrite the first parked copy.
     keptCurrentAt = `${dbPath}.pre-restore`;
+    for (let counter = 1; existsSync(keptCurrentAt); counter += 1) keptCurrentAt = `${dbPath}.pre-restore-${counter}`;
     copyFileSync(dbPath, keptCurrentAt);
+    for (const sidecar of SIDECARS) {
+      if (existsSync(`${dbPath}${sidecar}`)) copyFileSync(`${dbPath}${sidecar}`, `${keptCurrentAt}${sidecar}`);
+    }
   }
   mkdirSync(dirname(dbPath), { recursive: true });
-  copyFileSync(source, dbPath);
+  // Write beside the target and rename, so a crash leaves the old file or the whole snapshot, never half of one.
+  const pending = `${dbPath}.restore-${process.pid}.tmp`;
+  try {
+    copyFileSync(source, pending);
+    assertCopyComplete(source, pending);
+    // The live sidecars belong to the file being replaced: left in place they would be replayed onto the snapshot.
+    for (const sidecar of SIDECARS) {
+      if (existsSync(`${dbPath}${sidecar}`)) unlinkSync(`${dbPath}${sidecar}`);
+    }
+    renameSync(pending, dbPath);
+  } catch (error) {
+    try { unlinkSync(pending); } catch { /* the copy may not exist */ }
+    throw error;
+  }
+  for (const sidecar of SIDECARS) {
+    if (existsSync(`${source}${sidecar}`)) copyFileSync(`${source}${sidecar}`, `${dbPath}${sidecar}`);
+  }
   logger.info('store restored from snapshot', { store: basename(dbPath), restoredFrom: source, keptCurrentAt });
   return { restoredFrom: source, keptCurrentAt };
 }
@@ -207,6 +247,8 @@ export async function snapshotStoreFileAsync(
     snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
   }
   await copyFile(dbPath, snapshotPath);
+  try { assertCopyComplete(dbPath, snapshotPath); }
+  catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
   for (const sidecar of ['-wal', '-shm']) {
     if (existsSync(`${dbPath}${sidecar}`)) {
       await copyFile(`${dbPath}${sidecar}`, `${snapshotPath}${sidecar}`);
@@ -250,6 +292,8 @@ export class StoreSnapshotScheduler {
 
   private scheduleNext(): void {
     if (this.stopped) return;
+    // One chain of timers: a second start() or a manual tick() must not leave an earlier timer running beside it.
+    if (this.timer) (this.options.clearTimer ?? clearTimeout)(this.timer);
     const setTimer = this.options.setTimer ?? setTimeout;
     this.timer = setTimer(() => {
       void this.tick();

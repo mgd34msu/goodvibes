@@ -132,7 +132,7 @@ export async function tryResolveApprovalReplyFromChannel(
   const action = `resolve approval ${target.id}: ${reply.reading.choice}`;
   reply.recordAction(action);
   selection?.recordAction(action);
-  await broker.resolveApproval(target.id, {
+  const settled = await broker.resolveApproval(target.id, {
     approved,
     disposition: approved ? 'approved' : reply.reading.choice === 'amend' ? 'amended' : 'denied',
     actor: userId,
@@ -143,6 +143,15 @@ export async function tryResolveApprovalReplyFromChannel(
     note: text.trim(),
     reason: text.trim(),
   });
+  // The ask can be settled elsewhere between the re-check and this call; the broker then
+  // returns that other record, which this reply did not decide.
+  if (!settled || settled.status !== (approved ? 'approved' : 'denied')) {
+    const outcome = `no resolution: approval ${target.id} was already ${settled?.status ?? 'unavailable'}`;
+    reply.recordAction(outcome);
+    selection?.recordAction(outcome);
+    logger.info('Channel reply did not resolve the approval', { surface, userId, approvalId: target.id, status: settled?.status ?? null });
+    return false;
+  }
   logger.info('Pending approval resolved from a channel reply', {
     surface,
     userId,

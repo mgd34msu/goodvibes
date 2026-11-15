@@ -151,22 +151,21 @@ export interface HarnessSettingMutationResult {
   readonly persistedTo?: string | undefined;
   /** A second row that had to move with this one, see config/wake-enablement-companion.ts. */
   readonly alsoSet?: WakeCompanionWrite | undefined;
+  /**
+   * Set when the companion row could not be written after this key was. The
+   * key itself IS changed; repeating the same set repairs the companion.
+   */
+  readonly alsoSetFailed?: string | undefined;
 }
 
 /**
- * The most settings one listing will ever return, and the page size when the
- * caller names none.
- *
- * This was 500 while the visible catalog stood at 493, and 509 once payments.*
- * and daemon.timezone landed. Seven entries was not headroom: a listing that
- * stops at the ceiling drops its tail rows, which reads to whoever asked as
- * "that setting does not exist".
- *
- * 2000 is about four times the present catalog. Recent rounds have added
- * settings in the low tens, so this absorbs many years of growth while still
- * bounding a single response to something a caller can hold. It is a ceiling,
- * not a promise of completeness: {@link countHarnessSettings} reports how many
- * settings actually match, and every caller must say when it returned fewer.
+ * The most settings one listing can return, and the page size when the caller
+ * names none. It is deliberately unbounded: a fixed ceiling (500, then 2000)
+ * kept being overtaken by the catalog, and a listing that stops at a ceiling
+ * drops its tail rows, which reads to whoever asked as "that setting does not
+ * exist". The catalog is a few hundred rows, so one response stays small.
+ * {@link countHarnessSettings} still reports how many settings matched, and
+ * every caller must say when it returned fewer.
  */
 export const MAX_SETTING_LIMIT = Number.MAX_SAFE_INTEGER;
 const DEFAULT_SETTING_LIMIT = MAX_SETTING_LIMIT;
@@ -226,9 +225,9 @@ function settingCandidate(setting: AgentConfigSetting): HarnessSettingCandidate 
     category: setting.key.split('.')[0] ?? '',
     type: setting.type,
     // Every setting is writable through this surface now that the blanket
-    // host-owned lock is gone. Hazardous keys are not read-only, they are
-    // gated at write time by agent-settings-write-policy.ts, which can name the
-    // key and state why, and a routed write reports the store it landed in.
+    // host-owned lock is gone. A write is decided at the settings tool by the
+    // recorded admission for its exact effect, and a routed write reports the
+    // store it landed in.
     writable: true,
     visibleInWorkspace: !isAgentHiddenSettingKey(setting.key),
     modelRoute: settingModelRoute(setting),
@@ -820,7 +819,16 @@ export async function setHarnessSetting(
     ...routing,
   });
   // A row that would otherwise configure nothing takes its companion with it.
-  const companion = await applyWakeEnablementCompanion(configManager, setting.key, coerced, routing);
+  // The main value is already applied here. A companion failure (daemon
+  // unreachable for a daemon-owned companion key) must not turn that into a
+  // reported failure; say what did not move, and a repeat set repairs it.
+  let companion: WakeCompanionWrite | null = null;
+  let companionFailure: string | undefined;
+  try {
+    companion = await applyWakeEnablementCompanion(configManager, setting.key, coerced, routing);
+  } catch (error) {
+    companionFailure = `${setting.key} was set, but its companion row did not change: ${error instanceof Error ? error.message : String(error)} Re-run the same set to retry the companion.`;
+  }
 
   return {
     key: setting.key,
@@ -831,6 +839,7 @@ export async function setHarnessSetting(
     appliedBy: outcome.appliedBy,
     persistedTo: outcome.persistedTo,
     ...(companion ? { alsoSet: companion } : {}),
+    ...(companionFailure ? { alsoSetFailed: companionFailure } : {}),
   };
 }
 
@@ -838,6 +847,7 @@ export async function resetHarnessSetting(
   configManager: ConfigManager,
   secretsManager: Pick<SecretsManager, 'delete'> | null | undefined,
   key: string,
+  routing: AgentConfigRoutingOptions = {},
 ): Promise<HarnessSettingMutationResult> {
   const setting = findSetting(configManager, key);
   if (!setting) throw new Error(`Unknown setting ${key || '<missing>'}.`);
@@ -863,6 +873,25 @@ export async function resetHarnessSetting(
     // user-tier copy would report the setting reset while the live credential
     // stayed exactly where it was, a credential the operator believes is gone.
     await secretsManager?.delete?.(buildGoodVibesSecretKey(setting.key), { scope: defaultSecretBackedScope(setting.key) });
+  }
+  // A daemon-owned key is reset where the daemon reads it, exactly as set
+  // routes it: clearing the agent's local copy would report "reset" while the
+  // daemon kept running on the old value. The schema default is written over
+  // the owner's route, and an unreachable daemon throws rather than succeeding.
+  if (configKeyScope(setting.key) === 'daemon') {
+    const outcome = await routeConfigWrite(configManager, setting.key, setting.default, {
+      homeDir: configManager.getHomeDirectory() ?? undefined,
+      ...routing,
+    });
+    return {
+      key: setting.key,
+      action: 'reset',
+      previous: redactHarnessSettingValue(setting.key, previous),
+      current: redactHarnessSettingValue(setting.key, outcome.value),
+      scope: outcome.scope,
+      appliedBy: outcome.appliedBy,
+      persistedTo: outcome.persistedTo,
+    };
   }
   configManager.reset(setting.key);
   return {

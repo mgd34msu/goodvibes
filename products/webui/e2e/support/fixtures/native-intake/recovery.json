@@ -12,14 +12,14 @@
     "method": "GET",
     "path": "/api/control-plane/auth",
     "status": 200,
-    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-3d19296e-b804-4646-bf5c-254ac66ad1a9\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
+    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-ca440cbf-b987-4f92-aea7-3fe16a29ebff\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:batch\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:cloudflare\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:batch\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:cloudflare\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
   },
   "project": {
     "methodId": "workLedger.project",
     "method": "GET",
     "path": "/api/work-ledger/project",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-23a8709454\"}"
+    "body": "{\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"}"
   },
   "lookupBefore": {
     "methodId": "workLedger.intake.get",
@@ -42,7 +42,7 @@
       "text": "  Add JSON export.\nKeep CSV output unchanged. 🌻\nKeep CSV output unchanged.  ",
       "unsupportedSources": []
     },
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"}}"
   },
   "getCaptured": {
     "methodId": "workLedger.intake.get",
@@ -52,11 +52,11 @@
     "requestBody": {
       "inputId": "webui-native-recovery-input"
     },
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"}}"
   },
   "transition": {
     "inputId": "webui-native-recovery-input",
-    "sourceRevision": "b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c"
+    "sourceRevision": "0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236"
   },
   "admit": {
     "methodId": "workLedger.intake.admit",
@@ -65,9 +65,9 @@
     "status": 503,
     "requestBody": {
       "inputId": "webui-native-recovery-input",
-      "sourceRevision": "b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c"
+      "sourceRevision": "0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236"
     },
-    "body": "{\"error\":\"Native conversation intake is unavailable; retain the original input identity\",\"hint\":\"The provider is temporarily unavailable. Retry shortly or switch providers if the issue persists.\",\"code\":\"NATIVE_INTAKE_UNAVAILABLE\",\"category\":\"service\",\"status\":503}"
+    "body": "{\"error\":\"Native conversation intake failed: Owned synthetic proposer interruption; retain the original input identity\",\"hint\":\"The provider is temporarily unavailable. Retry shortly or switch providers if the issue persists.\",\"code\":\"NATIVE_INTAKE_UNAVAILABLE\",\"category\":\"service\",\"status\":503,\"errorRef\":\"f692b8ba-269a-4f3c-a059-eef2716860a9\"}"
   },
   "get": {
     "methodId": "workLedger.intake.get",
@@ -77,7 +77,7 @@
     "requestBody": {
       "inputId": "webui-native-recovery-input"
     },
-    "body": "{\"kind\":\"processing\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"},\"stage\":\"extracting\",\"recovery\":\"required\"}"
+    "body": "{\"kind\":\"processing\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"},\"stage\":\"extracting\",\"recovery\":\"required\"}"
   },
   "repeatAdmit": {
     "methodId": "workLedger.intake.admit",
@@ -86,9 +86,9 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-recovery-input",
-      "sourceRevision": "b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c"
+      "sourceRevision": "0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236"
     },
-    "body": "{\"kind\":\"processing\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"},\"stage\":\"extracting\",\"recovery\":\"required\"}"
+    "body": "{\"kind\":\"processing\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"},\"stage\":\"extracting\",\"recovery\":\"required\"}"
   },
   "resume": {
     "methodId": "workLedger.intake.resume",
@@ -97,9 +97,9 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-recovery-input",
-      "sourceRevision": "b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c"
+      "sourceRevision": "0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236"
     },
-    "body": "{\"kind\":\"work\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"},\"receipt\":{\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-313a0090-4134-44c5-888a-af17507fbfae\",\"attemptId\":\"attempt-e6af91df-5921-4f79-a067-140a1229d437\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"f9564fb41273c412ba1625e53d5bfc27ef4ddd2e6b0ce19aee322dd3deab86ba\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"101bc960-b683-42b8-8e7c-92ee1f2f0b6a\",\"judgmentDecisionIds\":[\"01a10ecf-a2e3-7000-a963-07215882a7da\",\"01a10ecf-a326-7000-8a24-def432d1e46d\",\"01a10ecf-a32d-7000-b23b-2bcf19192e89\",\"01a10ecf-a33a-7000-b671-feef16d0cbc6\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
+    "body": "{\"kind\":\"work\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"},\"receipt\":{\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-lplkfell-ihah-ecmg-klbm-ndfkoogmffkd\",\"attemptId\":\"attempt-geiejgdm-gddi-ekaa-icco-mecnaenjlecl\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"e7a47b3a09b322ddaa7a05de30880e05188a7599f5d1280a0b77c53a9212b1b6\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"ede84206-507f-4af6-936e-94400064575b\",\"judgmentDecisionIds\":[\"abkbnjbh-mnka-haaa-ifjm-kddddogijjpc\",\"abkbnjbh-mofk-haaa-jffi-bipggjlgkpnl\",\"abkbnjbh-mogl-haaa-jhlj-nligpfoeoolp\",\"abkbnjbh-moih-haaa-lfhc-delkngjamfnp\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
   },
   "afterResume": {
     "methodId": "workLedger.intake.get",
@@ -109,7 +109,7 @@
     "requestBody": {
       "inputId": "webui-native-recovery-input"
     },
-    "body": "{\"kind\":\"work\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"},\"receipt\":{\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-313a0090-4134-44c5-888a-af17507fbfae\",\"attemptId\":\"attempt-e6af91df-5921-4f79-a067-140a1229d437\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"f9564fb41273c412ba1625e53d5bfc27ef4ddd2e6b0ce19aee322dd3deab86ba\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"101bc960-b683-42b8-8e7c-92ee1f2f0b6a\",\"judgmentDecisionIds\":[\"01a10ecf-a2e3-7000-a963-07215882a7da\",\"01a10ecf-a326-7000-8a24-def432d1e46d\",\"01a10ecf-a32d-7000-b23b-2bcf19192e89\",\"01a10ecf-a33a-7000-b671-feef16d0cbc6\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
+    "body": "{\"kind\":\"work\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"},\"receipt\":{\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-lplkfell-ihah-ecmg-klbm-ndfkoogmffkd\",\"attemptId\":\"attempt-geiejgdm-gddi-ekaa-icco-mecnaenjlecl\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"e7a47b3a09b322ddaa7a05de30880e05188a7599f5d1280a0b77c53a9212b1b6\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"ede84206-507f-4af6-936e-94400064575b\",\"judgmentDecisionIds\":[\"abkbnjbh-mnka-haaa-ifjm-kddddogijjpc\",\"abkbnjbh-mofk-haaa-jffi-bipggjlgkpnl\",\"abkbnjbh-mogl-haaa-jhlj-nligpfoeoolp\",\"abkbnjbh-moih-haaa-lfhc-delkngjamfnp\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
   },
   "cancel": {
     "methodId": "workLedger.intake.cancel",
@@ -118,8 +118,8 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-recovery-input",
-      "sourceRevision": "b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c"
+      "sourceRevision": "0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236"
     },
-    "body": "{\"kind\":\"work\",\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\"},\"receipt\":{\"projectId\":\"workspace-23a8709454\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-313a0090-4134-44c5-888a-af17507fbfae\",\"attemptId\":\"attempt-e6af91df-5921-4f79-a067-140a1229d437\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"558cc5bde7e8b7c07fd948237860b03ec62ca97a602953d119edb9d6eb788977\",\"sourceRevision\":\"b37cfcc83335a16163138f421c983fc86b7433d6013758ee423548f321a0590c\",\"sessionId\":\"native-work:workspace-23a8709454\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"f9564fb41273c412ba1625e53d5bfc27ef4ddd2e6b0ce19aee322dd3deab86ba\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"101bc960-b683-42b8-8e7c-92ee1f2f0b6a\",\"judgmentDecisionIds\":[\"01a10ecf-a2e3-7000-a963-07215882a7da\",\"01a10ecf-a326-7000-8a24-def432d1e46d\",\"01a10ecf-a32d-7000-b23b-2bcf19192e89\",\"01a10ecf-a33a-7000-b671-feef16d0cbc6\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
+    "body": "{\"kind\":\"work\",\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-recovery-input\",\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\"},\"receipt\":{\"projectId\":\"project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"requestId\":\"webui-native-recovery-request\",\"inputId\":\"webui-native-recovery-input\",\"ledgerRevision\":1,\"workId\":\"work-lplkfell-ihah-ecmg-klbm-ndfkoogmffkd\",\"attemptId\":\"attempt-geiejgdm-gddi-ekaa-icco-mecnaenjlecl\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"ecpfmehk-gkkj-ecce-iidj-cjcdidlbofip\",\"sourceRevision\":\"0b6601c8bdfcf5d1d7a91c9f2fc202b5282f455c63ad3b6868d9bd70028f3236\",\"sessionId\":\"native-work:project-omgjhgaj-bald-ekhl-lcml-coceoaieilep\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"e7a47b3a09b322ddaa7a05de30880e05188a7599f5d1280a0b77c53a9212b1b6\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":77}],\"admissionDecisionId\":\"ede84206-507f-4af6-936e-94400064575b\",\"judgmentDecisionIds\":[\"abkbnjbh-mnka-haaa-ifjm-kddddogijjpc\",\"abkbnjbh-mofk-haaa-jffi-bipggjlgkpnl\",\"abkbnjbh-mogl-haaa-jhlj-nligpfoeoolp\",\"abkbnjbh-moih-haaa-lfhc-delkngjamfnp\"]},\"goal\":\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \",\"criteria\":[\"  Add JSON export.\\nKeep CSV output unchanged. 🌻\\nKeep CSV output unchanged.  \"]}}"
   }
 }

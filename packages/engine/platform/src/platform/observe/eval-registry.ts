@@ -49,8 +49,9 @@ export class EvalRegistry {
 
   isRunning(): boolean { return this._running; }
   getLastRunAt(): number | null { return this._lastRunAt; }
-  getSuiteResults(): EvalSuiteResult[] { return this._suiteResults; }
-  getGateResults(): EvalGateResult[] { return this._gateResults; }
+  /** A copy, so a caller comparing by reference sees a new array after each change. */
+  getSuiteResults(): EvalSuiteResult[] { return [...this._suiteResults]; }
+  getGateResults(): EvalGateResult[] { return [...this._gateResults]; }
 
   /** Calls `cb` after every change; returns the unsubscribe. */
   subscribe(cb: () => void): () => void {
@@ -59,6 +60,13 @@ export class EvalRegistry {
   }
 
   private _notify(): void {
-    for (const cb of this._subscribers) cb();
+    // The state is already changed, so one failing subscriber must not hide the
+    // change from the rest. Every subscriber is told; the first failure is then
+    // raised to the caller that recorded the change.
+    let failure: { readonly error: unknown } | undefined;
+    for (const cb of [...this._subscribers]) {
+      try { cb(); } catch (error) { failure ??= { error }; }
+    }
+    if (failure !== undefined) throw failure.error;
   }
 }

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { promises as fs, existsSync, lstatSync, realpathSync, renameSync, rmSync } from 'fs';
+import { promises as fs, constants, existsSync, lstatSync, realpathSync, renameSync, rmSync } from 'fs';
+import { logger } from '../utils/logger.js';
 import { basename, dirname, join, resolve } from 'path';
 import { summarizeError } from '../utils/error-display.js';
-import { confirmFileDurable } from '../utils/atomic-json-store.js';
+import { CORRUPT_QUARANTINE_MAX_FILES, confirmFileDurable } from '../utils/atomic-json-store.js';
 import { captureMutationDescriptors, capturePreparedFilePublication, publishFileMutation, type MutationPublication } from '../utils/file-mutation.js';
 
 /**
@@ -61,6 +62,8 @@ export interface PersistentStoreCorruption {
   /** Why it could not be read. Never the file's contents. */
   readonly detail: string;
   readonly detectedAt: number;
+  /** Where a copy of the unreadable bytes was kept, when one could be made. */
+  readonly quarantinedTo?: string | undefined;
 }
 
 /** The result of a read that discards rather than throws. */
@@ -94,6 +97,9 @@ const TEMP_SWEEP_INTERVAL_MS = 60_000;
  * files a process writes, which is a fixed, small set.
  */
 const lastTempSweepAt = new Map<string, number>();
+
+/** The file state last copied aside per store path, so a repeated read of the same corrupt file copies once. */
+const quarantinedSignatures = new Map<string, { readonly signature: string; readonly path: string }>();
 
 /** Retain an owner's already-created private staging directory across native awaits. */
 function captureTemporaryDirectory(directory: string, parent: string): () => void {
@@ -216,9 +222,11 @@ export class PersistentStore<T extends Record<string, unknown>> {
    *
    * For state whose owner already rules that a torn record is discarded and
    * disclosed (docs/decisions/2026-07-27-inbound-email-design.md §9): the same rule applied to the whole
-   * file. The bytes are left on disk untouched, the next `persist()` replaces
-   * them, so this never destroys evidence, it only stops one unreadable byte
-   * from being a permanent hard failure across every reader of every store.
+   * file. The next `persist()` replaces the unreadable file, so before reporting
+   * it a copy is kept at `<file>.corrupt-<time>-<id>` (the newest few, see
+   * CORRUPT_QUARANTINE_MAX_FILES): the evidence survives that write, and one
+   * unreadable byte is not a permanent hard failure across every reader of
+   * every store.
    *
    * A file that parses to something that is not an object is corrupt too: it
    * would otherwise read as an empty store, which is the exact "corrupted state
@@ -231,19 +239,47 @@ export class PersistentStore<T extends Record<string, unknown>> {
     try {
       parsed = JSON.parse(await fs.readFile(this.filePath, 'utf-8'));
     } catch (err) {
-      return { data: null, corruption: this.corruption(summarizeError(err)) };
+      return { data: null, corruption: await this.corruption(summarizeError(err)) };
     }
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {
         data: null,
-        corruption: this.corruption('the file did not contain a JSON object'),
+        corruption: await this.corruption('the file did not contain a JSON object'),
       };
     }
     return { data: parsed as T, corruption: null };
   }
 
-  private corruption(detail: string): PersistentStoreCorruption {
-    return { filePath: this.filePath, detail, detectedAt: Date.now() };
+  private async corruption(detail: string): Promise<PersistentStoreCorruption> {
+    const quarantinedTo = await this.quarantineCorruptCopy();
+    return { filePath: this.filePath, detail, detectedAt: Date.now(), ...(quarantinedTo ? { quarantinedTo } : {}) };
+  }
+
+  /**
+   * Keep a copy of the unreadable file, once per distinct file state (a store
+   * read on every wake must not make a copy per read), and drop the oldest
+   * copies past the bound. Best effort: a failure is logged, never thrown, the
+   * caller still gets its corruption report.
+   */
+  private async quarantineCorruptCopy(): Promise<string | undefined> {
+    try {
+      const stat = await fs.stat(this.filePath);
+      const signature = `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+      const known = quarantinedSignatures.get(this.filePath);
+      if (known?.signature === signature) return known.path;
+      const destination = `${this.filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
+      await fs.copyFile(this.filePath, destination, constants.COPYFILE_EXCL);
+      quarantinedSignatures.set(this.filePath, { signature, path: destination });
+      const prefix = `${basename(this.filePath)}.corrupt-`;
+      const copies = (await fs.readdir(this.dir)).filter((name) => name.startsWith(prefix)).sort();
+      for (const old of copies.slice(0, Math.max(0, copies.length - CORRUPT_QUARANTINE_MAX_FILES))) {
+        await fs.rm(join(this.dir, old), { force: true }).catch(() => undefined);
+      }
+      return destination;
+    } catch (error) {
+      logger.warn('PersistentStore: could not keep a copy of an unreadable file', { filePath: this.filePath, error: summarizeError(error) });
+      return undefined;
+    }
   }
 
   /**

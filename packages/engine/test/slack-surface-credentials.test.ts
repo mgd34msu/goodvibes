@@ -184,7 +184,10 @@ describe('Slack surface credentials', () => {
       static readonly OPEN = 1;
       readyState = 1;
       constructor(readonly url: string) {}
-      addEventListener() {}
+      addEventListener(type: string, listener: () => void) {
+        // The runtime waits for the socket to open before it reports started.
+        if (type === 'open') queueMicrotask(listener);
+      }
       send() {}
       close() {
         this.readyState = 3;

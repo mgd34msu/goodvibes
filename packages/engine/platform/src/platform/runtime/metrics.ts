@@ -14,7 +14,8 @@
 import { RuntimeMeter } from './telemetry/meter.js';
 import { RuntimeTracer } from './telemetry/tracer.js';
 import { toolFormatTelemetry } from './telemetry/tool-format-telemetry.js';
-import type { HistogramSnapshot } from './telemetry/types.js';
+import type { Counter, Gauge, Histogram, HistogramSnapshot, MetricLabels } from './telemetry/types.js';
+import { filterMetricLabels } from './telemetry/api-helpers.js';
 
 /** Singleton RuntimeMeter instance for the platform. */
 export const platformMeter = new RuntimeMeter({ scope: 'goodvibes-platform' });
@@ -59,25 +60,144 @@ export function installPlatformTracer(tracer: RuntimeTracer | null): void {
   activeTracer = tracer ?? DISABLED_TRACER;
 }
 
+
+// ── Label roll-ups ────────────────────────────────────────────────────────────
+//
+// The meter's `value()`/`snapshot()` look up one exact label set, but writers
+// record under richer sets (method + status_class, provider + model + status,
+// ...). The wrappers below keep the exact-label behaviour and add `total(filter)`,
+// which merges every recorded label set that contains the filter, so the
+// operator snapshot reports what was recorded instead of zero.
+
+const rollupResets: Array<() => void> = [];
+
+function rollupKey(labels?: MetricLabels): string {
+  const kept = labels ? (filterMetricLabels(labels) as MetricLabels) : {};
+  return JSON.stringify(Object.entries(kept).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+function containsLabels(recorded: MetricLabels, filter?: MetricLabels): boolean {
+  if (!filter) return true;
+  return Object.entries(filter).every(([k, v]) => recorded[k] === v);
+}
+
+/** A counter that can also be summed across label sets. */
+export interface RolledUpCounter extends Counter {
+  /** Sum of every recorded label set that contains `filter` (all of them when omitted). */
+  total(filter?: MetricLabels): number;
+}
+
+/** A gauge that can also be summed across label sets. */
+export interface RolledUpGauge extends Gauge {
+  /** Sum of the latest value of every label set that contains `filter` (all of them when omitted). */
+  total(filter?: MetricLabels): number;
+}
+
+/** A histogram that can also be merged across label sets. */
+export interface RolledUpHistogram extends Histogram {
+  /** Count/sum/min/max merged over every label set that contains `filter` (all of them when omitted). */
+  merged(filter?: MetricLabels): HistogramSnapshot;
+}
+
+function rolledUpCounter(inner: Counter): RolledUpCounter {
+  const entries = new Map<string, { labels: MetricLabels; value: number }>();
+  rollupResets.push(() => entries.clear());
+  return {
+    add(delta = 1, labels) {
+      inner.add(delta, labels);
+      if (delta < 0) return;
+      const key = rollupKey(labels);
+      const entry = entries.get(key);
+      if (entry) entry.value += delta;
+      else entries.set(key, { labels: labels ? (filterMetricLabels(labels) as MetricLabels) : {}, value: delta });
+    },
+    value: (labels) => inner.value(labels),
+    total(filter) {
+      let sum = 0;
+      for (const entry of entries.values()) if (containsLabels(entry.labels, filter)) sum += entry.value;
+      return sum;
+    },
+  };
+}
+
+function rolledUpGauge(inner: Gauge): RolledUpGauge {
+  const entries = new Map<string, { labels: MetricLabels; value: number }>();
+  rollupResets.push(() => entries.clear());
+  return {
+    set(value, labels) {
+      inner.set(value, labels);
+      entries.set(rollupKey(labels), { labels: labels ? (filterMetricLabels(labels) as MetricLabels) : {}, value });
+    },
+    value: (labels) => inner.value(labels),
+    total(filter) {
+      let sum = 0;
+      for (const entry of entries.values()) if (containsLabels(entry.labels, filter)) sum += entry.value;
+      return sum;
+    },
+  };
+}
+
+function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
+  const entries = new Map<string, { labels: MetricLabels; count: number; sum: number; min: number; max: number }>();
+  rollupResets.push(() => entries.clear());
+  return {
+    record(value, labels) {
+      inner.record(value, labels);
+      const key = rollupKey(labels);
+      const entry = entries.get(key);
+      if (!entry) {
+        entries.set(key, {
+          labels: labels ? (filterMetricLabels(labels) as MetricLabels) : {},
+          count: 1,
+          sum: value,
+          min: value,
+          max: value,
+        });
+        return;
+      }
+      entry.count += 1;
+      entry.sum += value;
+      if (value < entry.min) entry.min = value;
+      if (value > entry.max) entry.max = value;
+    },
+    snapshot: (labels) => inner.snapshot(labels),
+    merged(filter) {
+      let count = 0;
+      let sum = 0;
+      let min = Infinity;
+      let max = -Infinity;
+      for (const entry of entries.values()) {
+        if (!containsLabels(entry.labels, filter)) continue;
+        count += entry.count;
+        sum += entry.sum;
+        if (entry.min < min) min = entry.min;
+        if (entry.max > max) max = entry.max;
+      }
+      if (count === 0) return { count: 0, sum: 0, min: 0, max: 0, mean: 0 };
+      return { count, sum, min, max, mean: sum / count };
+    },
+  };
+}
+
 // ── HTTP metrics ─────────────────────────────────────────────────────────────
 
-/** Counter: total HTTP requests by method and status_class (2xx, 4xx, 5xx). */
-export const httpRequestsTotal = platformMeter.counter('http.requests.total');
+/** Counter: total HTTP requests by method and status_class (1xx to 5xx; the snapshot reports 2xx, 4xx and 5xx). */
+export const httpRequestsTotal = rolledUpCounter(platformMeter.counter('http.requests.total'));
 /** Histogram: HTTP request latency in ms by method, path_pattern, status_class. */
-export const httpRequestDurationMs = platformMeter.histogram('http.request.duration_ms');
+export const httpRequestDurationMs = rolledUpHistogram(platformMeter.histogram('http.request.duration_ms'));
 
 // ── LLM metrics ──────────────────────────────────────────────────────────────
 
 /** Counter: total LLM requests started by provider, model (emitted on entry, before the call). */
 export const llmRequestsStarted = platformMeter.counter('llm.requests.started');
 /** Counter: total LLM requests by provider, model, status (success/error). */
-export const llmRequestsTotal = platformMeter.counter('llm.requests.total');
+export const llmRequestsTotal = rolledUpCounter(platformMeter.counter('llm.requests.total'));
 /** Histogram: LLM request latency in ms by provider, model. */
-export const llmRequestDurationMs = platformMeter.histogram('llm.request.duration_ms');
+export const llmRequestDurationMs = rolledUpHistogram(platformMeter.histogram('llm.request.duration_ms'));
 /** Histogram: LLM input token counts by provider, model. */
-export const llmTokensInput = platformMeter.histogram('llm.tokens.input');
+export const llmTokensInput = rolledUpHistogram(platformMeter.histogram('llm.tokens.input'));
 /** Histogram: LLM output token counts by provider, model. */
-export const llmTokensOutput = platformMeter.histogram('llm.tokens.output');
+export const llmTokensOutput = rolledUpHistogram(platformMeter.histogram('llm.tokens.output'));
 
 // ── Auth metrics ─────────────────────────────────────────────────────────────
 
@@ -91,12 +211,12 @@ export const authFailureTotal = platformMeter.counter('auth.failure.total');
 /** Gauge: currently active sessions. */
 export const sessionsActive = platformMeter.gauge('sessions.active');
 /** Gauge: current SSE subscriber count per stream type. */
-export const sseSubscribers = platformMeter.gauge('sse.subscribers');
+export const sseSubscribers = rolledUpGauge(platformMeter.gauge('sse.subscribers'));
 
 // ── Transport metrics ─────────────────────────────────────────────────────────
 
 /** Counter: total transport retries by transport_type and reason. */
-export const transportRetriesTotal = platformMeter.counter('transport.retries_total');
+export const transportRetriesTotal = rolledUpCounter(platformMeter.counter('transport.retries_total'));
 
 // ── Telemetry buffer metrics ──────────────────────────────────────────────────
 
@@ -106,7 +226,7 @@ export const telemetryBufferFill = platformMeter.gauge('telemetry.buffer.fill');
 // ── Listener error metrics ──────────────────────────────────────────
 
 /** Counter: total listener errors caught during event dispatch. */
-export const listenerErrorsTotal = platformMeter.counter('listener_errors_total');
+export const listenerErrorsTotal = rolledUpCounter(platformMeter.counter('listener_errors_total'));
 
 /**
  * Reset all metric instruments on the singleton platform meter.
@@ -114,6 +234,7 @@ export const listenerErrorsTotal = platformMeter.counter('listener_errors_total'
  */
 export function resetMetrics(): void {
   platformMeter.reset();
+  for (const clear of rollupResets) clear();
   toolFormatTelemetry.reset();
 }
 
@@ -166,13 +287,13 @@ export interface RuntimeMetricsSnapshot {
  */
 export function snapshotMetrics(): RuntimeMetricsSnapshot {
   const httpRequestsSnapshot = {
-    '2xx': httpRequestsTotal.value({ status_class: '2xx' }),
-    '4xx': httpRequestsTotal.value({ status_class: '4xx' }),
-    '5xx': httpRequestsTotal.value({ status_class: '5xx' }),
+    '2xx': httpRequestsTotal.total({ status_class: '2xx' }),
+    '4xx': httpRequestsTotal.total({ status_class: '4xx' }),
+    '5xx': httpRequestsTotal.total({ status_class: '5xx' }),
   };
   const llmRequestsSnapshot = {
-    success: llmRequestsTotal.value({ status: 'success' }),
-    error: llmRequestsTotal.value({ status: 'error' }),
+    success: llmRequestsTotal.total({ status: 'success' }),
+    error: llmRequestsTotal.total({ status: 'error' }),
   };
   return {
     counters: {
@@ -191,21 +312,21 @@ export function snapshotMetrics(): RuntimeMetricsSnapshot {
         failure: { total: authFailureTotal.value() },
       },
       transport: {
-        retries_total: transportRetriesTotal.value(),
+        retries_total: transportRetriesTotal.total(),
       },
       'http.requests.total': httpRequestsSnapshot,
       'llm.requests.total': llmRequestsSnapshot,
       'auth.success.total': authSuccessTotal.value(),
       'auth.failure.total': authFailureTotal.value(),
-      'transport.retries_total': transportRetriesTotal.value(),
-      'listener_errors_total': listenerErrorsTotal.value(),
+      'transport.retries_total': transportRetriesTotal.total(),
+      'listener_errors_total': listenerErrorsTotal.total(),
     },
     gauges: {
       sessions: {
         active: sessionsActive.value(),
       },
       sse: {
-        subscribers: sseSubscribers.value(),
+        subscribers: sseSubscribers.total(),
       },
       telemetry: {
         buffer: {
@@ -213,14 +334,14 @@ export function snapshotMetrics(): RuntimeMetricsSnapshot {
         },
       },
       'sessions.active': sessionsActive.value(),
-      'sse.subscribers': sseSubscribers.value(),
+      'sse.subscribers': sseSubscribers.total(),
       'telemetry.buffer.fill': telemetryBufferFill.value(),
     },
     histograms: {
-      'http.request.duration_ms': httpRequestDurationMs.snapshot(),
-      'llm.request.duration_ms': llmRequestDurationMs.snapshot(),
-      'llm.tokens.input': llmTokensInput.snapshot(),
-      'llm.tokens.output': llmTokensOutput.snapshot(),
+      'http.request.duration_ms': httpRequestDurationMs.merged(),
+      'llm.request.duration_ms': llmRequestDurationMs.merged(),
+      'llm.tokens.input': llmTokensInput.merged(),
+      'llm.tokens.output': llmTokensOutput.merged(),
     },
     // Per-model edit-failure + declared-exec-expectation-miss counts. Measurement
     // only: keyed by model id and failure class so tool-format regressions surface

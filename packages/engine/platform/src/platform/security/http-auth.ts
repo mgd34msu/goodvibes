@@ -52,6 +52,8 @@ export interface PairingTokenAuthenticator {
     | { readonly kind: 'pairing-token'; readonly token: string }): SettingsPairingAuthority | null;
   withSettingsAuthority?<T>(authority: SettingsPairingAuthority,
     operation: (assertCurrent: () => void) => T): T;
+  /** True while settings authority is held by a store read or owner-write fault. */
+  readonly settingsAuthorityFaulted?: boolean;
   /** Optional for legacy authenticators; absence explicitly refuses native execution. */
   authenticateNative?(token: string): AuthenticatedNativePairingToken | null;
   withNativeAuthority?<T>(token: string, expected: AuthenticatedNativePairingToken,

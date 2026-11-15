@@ -28,6 +28,7 @@ import {
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../src/lib/goodvibes';
 import { WEBUI_METHOD_SAMPLES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
 import {
+  E2E_OPERATOR_TOKEN,
   accountsSnapshotResponse,
   CALENDAR_NOT_CONFIGURED_BODY,
   calendarEventDetailResponse,
@@ -41,7 +42,8 @@ import {
   FLEET_EVENT_NODE,
   knowledgeCandidateDecideResponse,
   knowledgeCandidatesResponse,
-  knowledgeMapResponse,
+  knowledgeReadByMethod,
+  knowledgeReadByRoute,
   knowledgePacketResponse,
   memoryRecordWire,
   messagesResponse,
@@ -390,10 +392,8 @@ export interface MockDaemonOptions {
    */
   daemonReceipts?: readonly { id: string; text: string; at: number }[];
   /**
-   * When set, every CI fix-session spawn attempt FAILS with this error: the
-   * approve of a ci:fix-session offer stamps fixSessionError on the approved
-   * record (never a dead id), and ci.watches.run returns fixSessionError on the
-   * verb result, mirroring platform bb4b9c30's honest-failure path. Default unset
+   * When set, every CI fix-session spawn attempt FAILS with this error:
+   * ci.watches.run returns fixSessionError on the verb result. Default unset
    * (spawns succeed and mint a real, servable session).
    */
   ciFixSessionError?: string;
@@ -454,35 +454,6 @@ export interface MockDaemonOptions {
    * proving the honest "does not serve memory diagnostics" state.
    */
   opsMemory?: Partial<ReturnType<typeof opsMemoryResponse>> | 'unavailable';
-  /**
-   * Seed for voice.local.status / voice.local.install (platform 1.9.0-dev's managed
-   * local-voice provisioning). Default: not-provisioned with a real offer size,
-   * the state that renders the size-labeled "Set up local voice" action. install
-   * mutates this state to provisioned and answers the receipt, exactly like the
-   * real one-act flow. `installOutcome: 'download-failed'` forces the install
-   * receipt's TTS engine to the retriable failure instead (state stays
-   * unprovisioned). 'unavailable' answers the 404 of an older daemon build.
-   */
-  voiceLocal?: {
-    status?: Partial<ReturnType<typeof voiceLocalStatusResponse>>;
-    installOutcome?: 'provisioned' | 'download-failed';
-  } | 'unavailable';
-  /**
-   * Seed for the three browser wake-word verbs (voice.wake.status /
-   * voice.wake.provision / voice.wake.model.get). Default: NOT provisioned, so the
-   * default state renders the size-labeled download action and starts no detector.
-   *
-   * `provisioned: true` serves genuinely loadable ONNX fixtures
-   * (support/onnx-fixture.ts) with their real sha256, which is what lets a browser
-   * actually create an inference session over daemon-served bytes. `chunkBytes`
-   * forces a multi-chunk read; `corruptSha` states a pin the bytes do not match, so
-   * the tab's verification failure path is reachable.
-   */
-  voiceWake?: {
-    provisioned?: boolean;
-    chunkBytes?: number;
-    corruptSha?: boolean;
-  } | 'unavailable';
 }
 
 /**
@@ -878,10 +849,6 @@ export interface MockDaemon {
   toolCallCancelRequests: { sessionId: string; callId: string }[];
   /** Every fleet.observed.steer invoke captured, in order. */
   observedSteerRequests: { id: string; text: string }[];
-  /** How many times voice.wake.provision was asked for (it must never be automatic). */
-  wakeProvisionRequests: number;
-  /** Every voice.wake.model.get read captured, in order, proves the chunk loop. */
-  wakeModelReads: { component: 'classifier' | 'embedding' | 'notice'; offset: number }[];
   /**
    * Live reference to the mutable hosted-sessions store (sessions.hosted.*), the
    * SAME array create/attach/detach/kill mutate, not a snapshot, so a test can poll
@@ -893,6 +860,11 @@ export interface MockDaemon {
   requests: RecordedRequest[];
   /** The input of every control-plane invoke of a method id, in order. */
   invocations: (methodId: string) => unknown[];
+  /**
+   * The mock's stored push subscriptions with the private endpoint and keys the wire
+   * list redacts, so a spec can prove a reconcile replaced the stored record.
+   */
+  pushRecords: () => readonly { id: string; deviceId?: string; endpoint: string; keys?: { p256dh: string; auth: string } }[];
 }
 
 const TOKEN_KEY = 'goodvibes.webui.token';
@@ -1011,10 +983,27 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // snapshot to its enriched form so the event-driven refetch surfaces a new node.
   let fleetEventsEmitted = false;
   let fleetEnriched = false;
+  // Each push stream waits for the first read of the data its frame invalidates to be
+  // answered, so the invalidation refetches an idle query: invalidating a query that is
+  // still in flight only marks it stale and never fires a second fetch.
+  const readServed = () => {
+    let open: () => void = () => {};
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return { opened, serve: (reply: Promise<void>) => { void reply.then(open, open); return reply; } };
+  };
+  const fleetReadServed = readServed();
+  const approvalsReadServed = readServed();
+  const hostedReadServed = readServed();
   const requestLog = recordRequests(page);
   const daemon: MockDaemon = {
     requests: requestLog.requests,
     invocations: requestLog.invocations,
+    pushRecords: () => pushSubscriptions.map(({ id, deviceId, endpoint, keys }) => ({
+      id,
+      ...(deviceId ? { deviceId } : {}),
+      endpoint,
+      ...(keys ? { keys } : {}),
+    })),
     steerRequests: [],
     followUpRequests: [],
     detachRequests: [],
@@ -1023,8 +1012,6 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
     keepAwakeSetRequests: [],
     toolCallCancelRequests: [],
     observedSteerRequests: [],
-    wakeProvisionRequests: 0,
-    wakeModelReads: [],
     // Replaced below with a live reference once the hosted-sessions store itself is
     // constructed (that store's default seed is assembled further down this
     // function), this placeholder exists only so every MockDaemon field is present
@@ -1047,31 +1034,6 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   const opsMemoryState = options.opsMemory === 'unavailable'
     ? null
     : { ...opsMemoryResponse(), ...options.opsMemory };
-  // voice.local.status / voice.local.install in-memory state, install flips the
-  // resting state to provisioned exactly like the real one-act flow (unless the
-  // seeded outcome is the retriable download failure, which keeps nothing).
-  // Split the 'unavailable' sentinel off the seed OBJECT once, with an explicit
-  // annotation, instead of carrying a `'unavailable' | {...} | undefined` union
-  // through `in` checks: the union survived those checks, so the spread below was
-  // spreading a possible string.
-  const voiceLocalOption = options.voiceLocal;
-  const voiceLocalUnavailable = voiceLocalOption === 'unavailable';
-  const voiceLocalSeed: { status?: Partial<VoiceLocalStatus>; installOutcome?: 'provisioned' | 'download-failed' } =
-    voiceLocalOption === undefined || voiceLocalOption === 'unavailable' ? {} : voiceLocalOption;
-  const voiceLocalInstallOutcome = voiceLocalSeed.installOutcome ?? 'provisioned';
-  let voiceLocalState: VoiceLocalStatus | null = voiceLocalUnavailable
-    ? null
-    : { ...voiceLocalStatusResponse(), ...voiceLocalSeed.status };
-  // voice.wake.* in-memory state. Null is the older-daemon 404 for all three verbs.
-  // provision() flips `provisioned`, exactly like the real single-flight act.
-  const voiceWakeOption = options.voiceWake;
-  const voiceWakeState: MockWakeState | null = voiceWakeOption === 'unavailable'
-    ? null
-    : {
-      provisioned: voiceWakeOption?.provisioned ?? false,
-      chunkBytes: voiceWakeOption?.chunkBytes ?? WAKE_MODEL_CHUNK_BYTES,
-      corruptSha: voiceWakeOption?.corruptSha ?? false,
-    };
   // sessions.queuedMessages.* in-memory store, keyed by sessionId, a fresh copy
   // per installMockDaemon call, mutated by edit/delete.
   const queuedMessagesBySession: Record<string, { id: string; queuedAt: number; text: string }[]> = {};
@@ -1219,7 +1181,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
     { id: 'chat-2', sessionId: 'chat-2', title: 'Away-from-desk notes', status: 'active' },
   ];
   /**
-   * Spawn a CI fix session, mirroring platform bb4b9c30: success mints a FRESH
+   * Spawn a CI fix session: success mints a FRESH
    * session that the mock's session store actually serves (a REAL attachable
    * id, never a scheduling handle) and returns { sessionId }; a failure (the
    * ciFixSessionError option) returns the honest { error } and creates nothing.
@@ -1337,7 +1299,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
           /* ignore */
         }
       },
-      [TOKEN_KEY, 'e2e-operator-token'] as const,
+      [TOKEN_KEY, E2E_OPERATOR_TOKEN] as const,
     );
   }
 
@@ -1388,12 +1350,22 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // connection-refused health probe, spamming the webServer log with
   // ECONNREFUSED and exercising the app permanently in its daemon-down pulse
   // state. Same answer shape as the invoke-path 'control.status' below.
-  // Matches /status AND /status?receipts=consume (control.status is GET /status;
-  // the receipts input rides the query string). A consume hands over the queued
-  // receipts once and marks them delivered; a plain read is receipt-neutral.
+  // Matches /status AND /status?receipts=... (control.status is GET /status;
+  // the receipts input rides the query string). A peek offers the queued
+  // receipts until an ack names them; a consume hands them over and marks them
+  // delivered; a plain read is receipt-neutral.
   await page.route(/\/status(\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get('receipts') === 'consume') {
+    const receiptsMode = url.searchParams.get('receipts');
+    if (receiptsMode === 'peek') {
+      return json(route, { ok: true, status: 'running', receipts: daemonReceipts });
+    }
+    if (receiptsMode === 'ack') {
+      const acknowledged = (url.searchParams.get('ids') ?? '').split(',');
+      daemonReceipts = daemonReceipts.filter((receipt) => !acknowledged.includes(receipt.id));
+      return json(route, { ok: true, status: 'running' });
+    }
+    if (receiptsMode === 'consume') {
       const delivered = daemonReceipts;
       daemonReceipts = [];
       return json(route, { ok: true, status: 'running', receipts: delivered });
@@ -1432,17 +1404,21 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       const domains = url.searchParams.get('domains') ?? '';
       if (fleetEvents.length > 0 && !fleetEventsEmitted && domains.split(',').includes('fleet')) {
         fleetEventsEmitted = true;
-        // Let the view's initial snapshot fetch settle before the frame lands, so the
-        // invalidation the frame triggers refetches an idle query (invalidating a query
-        // that is still in flight only marks it stale, it will not fire a second
-        // fetch). This mirrors real usage, where fleet events arrive after the first
-        // snapshot, not simultaneously with it.
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Let the view's first snapshot read be answered before the frame lands. This
+        // mirrors real usage, where fleet events arrive after the first snapshot, not
+        // simultaneously with it.
+        await fleetReadServed.opened;
         fleetEnriched = true;
         const body = fleetEvents
           .map((event) => `event: fleet\ndata: ${JSON.stringify({ payload: event })}\n\n`)
           .join('');
-        return route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+        try {
+          return await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+        } catch (error) {
+          // A connection aborted before the frame landed must not burn the one-shot emission.
+          fleetEventsEmitted = false;
+          throw error;
+        }
       }
       // Approval-update subscription emit (the approvals push spec): EVERY
       // request for the EXACT `?domains=gate` stream gets the seeded
@@ -1468,10 +1444,9 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       // (surviving) connection re-sends the same frame, which is idempotent, not
       // a duplicate side effect.
       if (approvalUpdateFrames.length > 0 && domains === 'gate') {
-        // Let the initial approvals.list() fetch settle first, same rationale as
-        // the fleet block above: invalidating a query still in flight only marks
-        // it stale, it does not fire a second fetch.
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Let the initial approvals.list() fetch be answered first, same rationale as
+        // the fleet block above.
+        await approvalsReadServed.opened;
         for (const approval of approvalUpdateFrames) {
           const id = (approval as { id?: unknown }).id;
           if (typeof id === 'string' && !approvals.some((existing) => existing.id === id)) {
@@ -1495,7 +1470,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       // lands squarely inside a test's own navigation rather than settling before
       // the test's assertions run.
       if (hostedStreamFrames.length > 0 && domains === 'session,turn,tools') {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await hostedReadServed.opened;
         const body = hostedStreamFrames
           .map((frame) => `event: ${frame.event}\ndata: ${JSON.stringify(frame.payload)}\n\n`)
           .join('');
@@ -1535,49 +1510,13 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       return json(route, opsMemoryState);
     }
 
-    // ── Managed local voice (voice.local.status / voice.local.install, platform 1.9.0-dev) ──
+    // ── Local voice and browser wake word: the not-provisioned resting state only.
+    //    Specs that provision, install or read wake models install voice-mock.ts. ──
     if (method === 'GET' && path === '/api/voice/local/status') {
-      if (!voiceLocalState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
-      return json(route, voiceLocalState);
+      return json(route, voiceLocalStatusResponse());
     }
-    if (method === 'POST' && path === '/api/voice/local/install') {
-      if (!voiceLocalState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
-      const receipt = voiceLocalInstallResponse(voiceLocalInstallOutcome);
-      if (receipt.provisioned) {
-        // The real one-act flow: a successful install flips the resting status.
-        voiceLocalState = {
-          ...voiceLocalState,
-          state: 'provisioned',
-          tts: { ...voiceLocalState.tts, binaryPresent: true, voicePresent: true },
-          stt: { ...voiceLocalState.stt, state: 'provisioned', binaryPresent: true, modelPresent: true },
-        };
-      }
-      return json(route, receipt);
-    }
-
-    // ── Browser wake word (voice.wake.status / provision / model.get) ─────
-    // model.get is a GET whose input rides the query string, which is what the
-    // webui client actually sends for a GET-routed verb (invokeOperator -> query).
     if (method === 'GET' && path === '/api/voice/wake/status') {
-      if (!voiceWakeState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
-      return json(route, wakeStatusResponse(voiceWakeState.provisioned));
-    }
-    if (method === 'POST' && path === '/api/voice/wake/provision') {
-      if (!voiceWakeState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
-      daemon.wakeProvisionRequests += 1;
-      voiceWakeState.provisioned = true;
-      return json(route, wakeProvisionResponse());
-    }
-    if (method === 'GET' && path === '/api/voice/wake/model') {
-      if (!voiceWakeState) return json(route, { error: 'Unknown gateway method', code: 'METHOD_NOT_FOUND' }, 404);
-      const params = new URL(request.url()).searchParams;
-      const component = params.get('component');
-      if (component !== 'classifier' && component !== 'embedding' && component !== 'notice') {
-        return json(route, { error: 'component must be classifier, embedding or notice' }, 400);
-      }
-      const offset = Number(params.get('offset') ?? '0');
-      daemon.wakeModelReads.push({ component, offset });
-      return json(route, wakeModelChunkResponse(component, Number.isFinite(offset) ? offset : 0, voiceWakeState));
+      return json(route, wakeStatusResponse());
     }
 
     // ── Power (power.status.get / power.keepAwake.set, platform 1.8.0) ─────────
@@ -1987,9 +1926,13 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       return json(route, { receipts: [receipt], pendingProposals: [proposal] });
     }
 
-    // ── Knowledge map / status ─────────────────────────────────────────────
-    if (path.includes('/knowledge') || path.includes('knowledge')) {
-      return json(route, knowledgeMapResponse());
+    // ── Knowledge reads: each answers its own method's shape (seed.ts). A knowledge
+    //    route nothing seeded is a 404, never another method's body. ──────────────
+    if (path.startsWith('/api/knowledge/')) {
+      const read = knowledgeReadByRoute(method, path);
+      return read
+        ? json(route, read.body)
+        : json(route, { error: `The e2e mock daemon has no fixture for ${method} ${path}`, code: 'METHOD_NOT_FOUND' }, 404);
     }
 
     // ── Watchers (WEBUI-FLEET-DEPTH, the one fleet-node kind with a real stop verb) ──
@@ -2004,10 +1947,10 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
     //    tree" AND the standalone Approvals view share this same mutable list). ──
     if (method === 'GET' && path === '/api/approvals') {
       const pending = approvals.filter((a) => a.status === 'pending').length;
-      return json(route, {
+      return approvalsReadServed.serve(json(route, {
         awaitingDecision: pending > 0, mode: 'manual', approvalCount: 0, denialCount: 0,
         cachedChecks: 0, totalChecks: 0, approvals,
-      });
+      }));
     }
     const approvalActionMatch = path.match(/^\/api\/approvals\/([^/]+)\/(approve|deny|claim|cancel)$/);
     if (method === 'POST' && approvalActionMatch) {
@@ -2051,20 +1994,6 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
             // A modifiedArgs answer reaches the run (delivered) when one was sent.
             modifiedArgsDelivered: typeof modifiedArgs?.answer === 'string',
           };
-          // An accepted CI "fix this?" offer spawns a fix session whose REAL,
-          // attachable session id the broker stamps onto the resolved APPROVED
-          // record and publishes live, or, on a failed spawn, the honest
-          // fixSessionError instead of a dead id (platform bb4b9c30). Mirrored here:
-          // the stamped record is what the next approvals read serves; the
-          // spawned session is servable by the session store; denied records
-          // are never stamped.
-          if ((record.request as Record<string, unknown>).tool === 'ci:fix-session') {
-            const args = (record.request as { args?: Record<string, unknown> }).args ?? {};
-            const spawned = spawnCiFixSession(String(args.repo ?? 'unknown/repo'));
-            Object.assign(record, 'sessionId' in spawned
-              ? { fixSessionId: spawned.sessionId }
-              : { fixSessionError: spawned.error });
-          }
           // A durable tier persists a rule and SWEEPS queued pending asks for
           // the same tool (the broker's remembered-decision sweep, simplified
           // to tool identity at mock level).
@@ -2132,7 +2061,12 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         if (index >= 0) permissionRules.splice(index, 1);
         return json(route, { deleted: index >= 0 });
       }
-      if (methodId.includes('knowledge')) return json(route, knowledgeMapResponse());
+      if (methodId.startsWith('knowledge.')) {
+        const read = knowledgeReadByMethod(methodId);
+        return read
+          ? json(route, read.body)
+          : json(route, { error: `The e2e mock daemon has no fixture for ${methodId}`, code: 'METHOD_NOT_FOUND' }, 404);
+      }
       if (methodId === 'sessions.search') return json(route, unionListResponse());
       if (methodId === 'fleet.snapshot') {
         // Once a fleet event has been emitted over the subscription, the snapshot
@@ -2141,12 +2075,12 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
         // baseline, and shows up well before the poll fallback would fire).
         const base = fleetEnriched ? [...FLEET_SNAPSHOT.nodes, FLEET_EVENT_NODE] : FLEET_SNAPSHOT.nodes;
         const nodes = base.filter((node) => !archivedFleetIds.has(node.id)).map(withManualPricing);
-        return json(route, { ...FLEET_SNAPSHOT, nodes, totalCount: nodes.length });
+        return fleetReadServed.serve(json(route, { ...FLEET_SNAPSHOT, nodes, totalCount: nodes.length }));
       }
       if (methodId === 'fleet.list') {
         const base = fleetEnriched ? [...FLEET_SNAPSHOT.nodes, FLEET_EVENT_NODE] : FLEET_SNAPSHOT.nodes;
         const items = base.filter((node) => !archivedFleetIds.has(node.id)).map(withManualPricing);
-        return json(route, { items, hasMore: false, capturedAt: FLEET_SNAPSHOT.capturedAt });
+        return fleetReadServed.serve(json(route, { items, hasMore: false, capturedAt: FLEET_SNAPSHOT.capturedAt }));
       }
       // ── Fleet archive (platform 1.6.x): stateful enough to prove the archive →
       //    browse → restore round trip honestly. Only terminal nodes archive,
@@ -2479,7 +2413,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
           .filter((s) => includeTerminated || s.status !== 'terminated')
           .slice()
           .sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
-        return json(route, { sessions: rows });
+        return hostedReadServed.serve(json(route, { sessions: rows }));
       }
       if (methodId === 'sessions.hosted.create') {
         const body = (route.request().postDataJSON?.() ?? {}) as {

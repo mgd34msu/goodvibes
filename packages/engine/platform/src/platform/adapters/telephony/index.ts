@@ -1,7 +1,8 @@
 import { createHash, createHmac } from 'node:crypto';
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
-import type { SurfaceAdapterContext } from '../types.js';
+import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
+import { logger } from '../../utils/logger.js';
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
@@ -129,7 +130,10 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
     ?? '';
   if (!from) return Response.json({ error: 'Missing telephony sender' }, { status: 400 });
 
-  const messageId = readString(payload.messageId) ?? readString(payload.MessageSid) ?? readString(payload.SmsSid) ?? readString(payload.CallSid);
+  const deliveryId = readString(payload.messageId) ?? readString(payload.MessageSid) ?? readString(payload.SmsSid);
+  // A voice call sends one webhook per spoken turn, all with the same CallSid and
+  // no message id, so the call id is not a per-message key and must not dedupe turns.
+  const messageId = deliveryId ?? readString(payload.CallSid);
   const policy = await context.authorizeSurfaceIngress({
     surface: 'telephony',
     userId: from,
@@ -145,6 +149,11 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
     },
   });
   if (!policy.allowed) {
+    // An ordinary refusal will not change on redelivery, so it is acknowledged rather than failed.
+    if (isOrdinaryIngressRefusal(policy.reason)) {
+      logger.info('handleTelephonySurfaceWebhook: message ignored by channel policy', { reason: policy.reason });
+      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
+    }
     return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
   }
 
@@ -173,6 +182,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
 
   const submission = await context.sessionBroker.submitMessage({
     routeId: binding.id,
+    ...(deliveryId ? { providerMessageId: deliveryId } : {}),
     surfaceKind: 'telephony',
     surfaceId: binding.surfaceId,
     externalId: binding.externalId,
@@ -186,7 +196,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
       to,
     },
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
   }
 
@@ -196,7 +206,7 @@ export async function handleTelephonySurfaceWebhook(req: Request, context: Surfa
     submission.session.id,
   );
   if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
     agentId: spawnResult.id,
     task: text,

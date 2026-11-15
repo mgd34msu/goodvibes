@@ -18,6 +18,9 @@ import type { McpToolDefinition, OperatorMcpToolSet } from './tool-definitions.j
 /** The default MCP protocol version this server advertises when the client sends none. */
 export const DEFAULT_MCP_PROTOCOL_VERSION = '2025-06-18';
 
+/** Handshake-era revisions whose tools/list and tools/call shapes this server implements. */
+const SERVED_PROTOCOL_VERSIONS: ReadonlySet<string> = new Set(['2024-11-05', '2025-03-26', '2025-06-18']);
+
 /** Invokes an operator method by id with a params object, returning its result. */
 export type OperatorMcpInvoker = (
   methodId: string,
@@ -125,7 +128,9 @@ export class OperatorMcpServer {
 
   private initializeResult(params: Record<string, unknown> | undefined): Record<string, unknown> {
     const requestedVersion = params?.protocolVersion;
-    const protocolVersion = typeof requestedVersion === 'string' ? requestedVersion : DEFAULT_MCP_PROTOCOL_VERSION;
+    // Echo only a version this server implements; otherwise answer with its own, as the specification asks.
+    const protocolVersion = typeof requestedVersion === 'string' && SERVED_PROTOCOL_VERSIONS.has(requestedVersion)
+      ? requestedVersion : DEFAULT_MCP_PROTOCOL_VERSION;
     return {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
@@ -221,10 +226,20 @@ export interface McpLineTransport {
  * inbound line is dispatched; a non-null response line is written back.
  */
 export async function serveOperatorMcp(server: OperatorMcpServer, transport: McpLineTransport): Promise<void> {
+  // Lines are dispatched without waiting for the previous one, so a long tools/call
+  // does not hold up `ping`. Responses carry their request ids and may arrive in any order.
+  const inFlight = new Set<Promise<void>>();
+  let failure: { readonly error: unknown } | undefined;
   for await (const line of transport.lines) {
-    const response = await server.handleLine(line);
-    if (response !== null) await transport.write(`${response}\n`);
+    if (failure) break;
+    const task: Promise<void> = server.handleLine(line)
+      .then(async (response) => { if (response !== null) await transport.write(`${response}\n`); })
+      .catch((error: unknown) => { failure ??= { error }; })
+      .finally(() => { inFlight.delete(task); });
+    inFlight.add(task);
   }
+  await Promise.all(inFlight);
+  if (failure) throw failure.error;
 }
 
 /** A Node-style readable stream that yields string or byte chunks. */

@@ -22,6 +22,7 @@ import { EmailService, ensureEmailConfigDefaults, type EmailConnectionTestResult
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { describeSenderClaim } from '../agent/untrusted-content.ts';
 import { requireSecretsManager } from './commands/runtime-services.ts';
+import { agentDaemonConfigClient, openEffectiveConfigView, routeConfigWrite } from '../config/daemon-config-routing.ts';
 import { persistEmailConfigField } from './commands/email-runtime.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceEmailConnectStatus, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
@@ -111,6 +112,9 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     return;
   }
 
+  // Hoisted so a throw (a daemon refusal or secret-store failure) can put the earlier
+  // fields back too, not only a returned validation error.
+  let restorePrevious = (): void => {};
   try {
     const secretsManager = requireSecretsManager(context);
     ensureEmailConfigDefaults(context.platform.configManager);
@@ -120,9 +124,23 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       save: () => void;
     };
 
+    // The email keys are daemon-owned: on a connected host each non-secret value goes to
+    // the host, like the password reference, so the pair never splits across stores.
+    const configManager = context.platform.configManager;
+    const homeDir = configManager.getHomeDirectory();
+    const writeRouted = (key: string, value: unknown) => routeConfigWrite(configManager, key, value, homeDir ? { homeDir } : {});
+
+    // Fields are applied to the in-memory config one at a time and nothing is saved to
+    // disk until all of them pass. A failure part-way puts the earlier ones back, so an
+    // unrelated later save() cannot write a half-updated email config.
+    const previous = [...Object.values(FIELD_TO_EMAIL_KEY), 'passwordRef'].map((emailKey) => [`email.${emailKey}`, cm.get(`email.${emailKey}`)] as const);
+    restorePrevious = (): void => {
+      for (const [key, value] of previous) cm.setDynamic(key, value);
+    };
     for (const [fieldId, emailKey] of Object.entries(FIELD_TO_EMAIL_KEY)) {
-      const result = await persistEmailConfigField(cm, secretsManager, emailKey, readField(fieldId));
+      const result = await persistEmailConfigField(cm, secretsManager, emailKey, readField(fieldId), writeRouted);
       if (!result.ok) {
+        restorePrevious();
         host.localEditor = { ...editor, message: result.error ?? `Could not save ${fieldId}.` };
         host.status = result.error ?? 'Inbox connection settings were invalid.';
         host.lastActionResult = { kind: 'error', title: 'Inbox settings invalid', detail: result.error ?? `Could not save ${fieldId}.`, safety: 'safe' };
@@ -131,29 +149,54 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     }
     const passwordResult = await persistEmailConfigField(cm, secretsManager, 'passwordRef', readField('password'));
     if (!passwordResult.ok) {
+      restorePrevious();
       host.localEditor = { ...editor, message: passwordResult.error ?? 'Could not store the password.' };
       host.status = passwordResult.error ?? 'Inbox password could not be stored.';
       host.lastActionResult = { kind: 'error', title: 'Inbox password invalid', detail: passwordResult.error ?? 'Could not store the password.', safety: 'safe' };
       return;
     }
     cm.save();
+    // Saved: a later throw (the connection test) must not roll memory back below disk.
+    restorePrevious = (): void => {};
 
-    const service = buildTester((key: string) => cm.get(key), secretsManager);
-    const test = await service.testConnection();
-    if (!test.ok) {
+    // On a connected host the mailbox password lives only on the host, so this terminal
+    // cannot resolve it: testing here would always fail "no secret by that name". Save,
+    // enable on the host and say plainly that the check was not run from here.
+    if (agentDaemonConfigClient()?.ownsKey('email.passwordRef')) {
+      await writeRouted('email.enabled', true);
+      cm.save();
       host.localEditor = null;
-      host.status = `Inbox connection failed (${test.stage ?? 'unknown'}).`;
+      host.status = 'Inbox settings saved on the host; connection not verified.';
       host.lastActionResult = {
-        kind: 'error',
-        title: 'Inbox connection failed',
-        detail: `Could not verify the mailbox (${test.stage ?? 'unknown'} stage): ${test.error ?? 'unknown error'}. Settings were saved, fix the value above and reconnect.`,
+        kind: 'refreshed',
+        title: 'Inbox settings saved',
+        detail: `The mailbox settings for ${readField('username')} were saved on the connected host and the inbox was enabled. The IMAP/SMTP connection was not verified: the password is stored on the host, not in this terminal.`,
         safety: 'safe',
       };
       host.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
       return;
     }
 
-    cm.setDynamic('email.enabled', true);
+    const view = await openEffectiveConfigView(configManager, homeDir ? { homeDir } : {});
+    const service = buildTester((key: string) => view.get(key), secretsManager);
+    const test = await service.testConnection();
+    if (!test.ok) {
+      // The form stays open with everything typed, so the wrong value can be corrected
+      // without retyping the rest.
+      const failure = `Could not verify the mailbox (${test.stage ?? 'unknown'} stage): ${test.error ?? 'unknown error'}. Settings were saved; correct the value in this form and press Enter to try again.`;
+      host.localEditor = { ...editor, message: failure };
+      host.status = `Inbox connection failed (${test.stage ?? 'unknown'}).`;
+      host.lastActionResult = {
+        kind: 'error',
+        title: 'Inbox connection failed',
+        detail: failure,
+        safety: 'safe',
+      };
+      host.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+      return;
+    }
+
+    await writeRouted('email.enabled', true);
     cm.save();
     host.localEditor = null;
     host.status = 'Inbox connected.';
@@ -165,6 +208,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     };
     host.runtimeSnapshot = buildAgentWorkspaceRuntimeSnapshot(context);
   } catch (error) {
+    restorePrevious();
     const detail = error instanceof Error ? error.message : String(error);
     host.localEditor = { ...editor, message: detail };
     host.status = detail;

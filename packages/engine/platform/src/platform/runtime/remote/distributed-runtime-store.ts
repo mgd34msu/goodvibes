@@ -24,10 +24,20 @@ import {
   sortWork,
 } from './distributed-runtime-utils.js';
 import { isRecord } from '../../utils/record-coerce.js';
+import { bridgeSettledDistributedWork, type DistributedBridgeName } from './distributed-runtime-bridges.js';
+import { distributedWorkLifecycle, nextDistributedPeerStatus } from './distributed-runtime-lifecycles.js';
 
 const MAX_AUDIT = 500;
 const MAX_WORK_HISTORY = 500;
 const MAX_PAIR_REQUESTS = 250;
+/**
+ * A peer is presented as connected only while it has been heard from within
+ * this window: three missed heartbeats at the contract's recommended 30 s.
+ * Every authenticated peer call (heartbeat, pull, complete) refreshes it.
+ */
+export const DISTRIBUTED_PEER_PRESENCE_WINDOW_MS = 90_000;
+/** Lease expiries a unit of work survives before it expires instead of being offered again. */
+export const MAX_DISTRIBUTED_WORK_REQUEUES = 5;
 const DISTRIBUTED_PEER_KINDS = new Set<DistributedPeerKind>(['node', 'device']);
 const PAIR_REQUEST_STATUSES = new Set<DistributedRuntimePairRequest['status']>([
   'pending',
@@ -174,23 +184,28 @@ function validateDistributedRuntimeSnapshot(snapshot: DistributedRuntimeSnapshot
   ) {
     throwInvalidDistributedRuntimeSnapshot();
   }
-  for (const request of snapshot.pairRequests) {
+  const check = (section: string, records: readonly unknown[], validate: (record: unknown) => void): void => {
+    records.forEach((record, index) => {
+      try { validate(record); } catch { throw new Error(`Distributed runtime store snapshot is invalid at ${section}[${index}].`); }
+    });
+  };
+  check('pairRequests', snapshot.pairRequests, (request) => {
     validateDistributedRuntimePairRequest(request);
     requireDistributedRuntimeRecord(normalizePairRequest(request));
-  }
-  for (const peer of snapshot.peers) {
+  });
+  check('peers', snapshot.peers, (peer) => {
     validateDistributedRuntimePeer(peer);
     validateDistributedRuntimePeerTokens(peer);
     requireDistributedRuntimeRecord(normalizePeer(peer));
-  }
-  for (const item of snapshot.work) {
+  });
+  check('work', snapshot.work, (item) => {
     validateDistributedRuntimeWork(item);
     requireDistributedRuntimeRecord(normalizeWork(item));
-  }
-  for (const record of snapshot.audit) {
+  });
+  check('audit', snapshot.audit, (record) => {
     validateDistributedRuntimeAudit(record);
     requireDistributedRuntimeRecord(normalizeAudit(record));
-  }
+  });
   return snapshot;
 }
 
@@ -212,11 +227,32 @@ export function attachDistributedRuntime(
   if (input.approvalBridge) state.approvalBridge = input.approvalBridge;
   if (input.automationBridge) state.automationBridge = input.automationBridge;
   if (input.eventPublisher) state.eventPublisher = input.eventPublisher;
+  if (state.loaded) retryPendingDistributedBridgesInBackground(state);
 }
+
+// A second caller that arrives while the first load is awaiting the store
+// joins it; starting again would clear the maps the first load is filling.
+const starting = new WeakMap<DistributedRuntimeManagerState, Promise<void>>();
 
 export async function startDistributedRuntime(state: DistributedRuntimeManagerState): Promise<void> {
   if (state.loaded) return;
-  const snapshot = validateDistributedRuntimeSnapshot(await state.store.load());
+  const inFlight = starting.get(state);
+  if (inFlight) return inFlight;
+  const load = loadDistributedRuntime(state).finally(() => { starting.delete(state); });
+  starting.set(state, load);
+  return load;
+}
+
+async function loadDistributedRuntime(state: DistributedRuntimeManagerState): Promise<void> {
+  const loaded = await state.store.load();
+  let snapshot: DistributedRuntimeSnapshotStore | null;
+  try {
+    snapshot = validateDistributedRuntimeSnapshot(loaded);
+  } catch (error) {
+    // The store keeps its path private; its lock path is the path plus a suffix.
+    const file = state.store.lockPath?.replace(/\.lock$/, '');
+    throw new Error(`${summarizeError(error)}${file ? ` Remove or repair ${file} to start the remote runtime again.` : ''}`);
+  }
   state.pairRequests.clear();
   state.peers.clear();
   state.work.clear();
@@ -239,6 +275,7 @@ export async function startDistributedRuntime(state: DistributedRuntimeManagerSt
   }
   state.loaded = true;
   await pruneAndPersistDistributedRuntime(state);
+  retryPendingDistributedBridgesInBackground(state);
 }
 
 export function listDistributedRuntimePairRequests(
@@ -254,10 +291,23 @@ export function listDistributedRuntimePeers(
   kind?: DistributedPeerKind,
   limit = 200,
 ): DistributedPeerRecord[] {
+  const now = Date.now();
   return sortPeers(state.peers.values())
     .filter((peer) => !kind || peer.kind === kind)
     .slice(0, Math.max(1, limit))
-    .map(sanitizePeer);
+    .map((peer) => presentPeer(sanitizePeer(peer), now));
+}
+
+/**
+ * `connected` is stored when a peer calls in and nothing stores its absence,
+ * so a peer that silently went away would read as connected forever. Read it
+ * against the last contact instead. Only the presented record changes; the
+ * stored status, and every authority check made on it, stay as they are.
+ */
+function presentPeer(peer: DistributedPeerRecord, now: number): DistributedPeerRecord {
+  if (peer.status !== 'connected') return peer;
+  if (peer.lastSeenAt !== undefined && now - peer.lastSeenAt <= DISTRIBUTED_PEER_PRESENCE_WINDOW_MS) return peer;
+  return { ...peer, status: 'disconnected' };
 }
 
 export function listDistributedRuntimeWork(
@@ -331,23 +381,58 @@ export function expireDistributedPairRequests(state: DistributedRuntimeManagerSt
   }
 }
 
+function readRequeueCount(item: DistributedPendingWork): number {
+  const value = item.metadata['leaseRequeues'];
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Time-driven moves on the work queue: a claim whose lease ran out goes back
+ * to the queue, and work that has outlived its `timeoutMs` (counted from when
+ * it was queued) or lost its lease too many times expires. Expiry settles the
+ * work like any other final state: waiters wake and the bridges hear of it.
+ */
 export function requeueDistributedExpiredClaims(state: DistributedRuntimeManagerState, now = Date.now()): void {
   let changed = false;
+  const expired: DistributedPendingWork[] = [];
   for (const [workId, item] of state.work.entries()) {
-    if (item.status !== 'claimed') continue;
-    if (!item.leaseExpiresAt || item.leaseExpiresAt > now) continue;
-    state.work.set(workId, {
-      ...item,
-      status: 'queued',
-      claimTokenId: undefined,
-      claimedAt: undefined,
-      leaseExpiresAt: undefined,
-      updatedAt: now,
-      metadata: {
-        ...item.metadata,
-        lastLeaseExpiryAt: now,
-      },
-    });
+    if (item.status !== 'queued' && item.status !== 'claimed') continue;
+    const deadlinePassed = item.timeoutMs !== undefined && item.timeoutMs > 0 && item.createdAt + item.timeoutMs <= now;
+    const leaseLapsed = item.status === 'claimed' && item.leaseExpiresAt !== undefined && item.leaseExpiresAt <= now;
+    if (!deadlinePassed && !leaseLapsed) continue;
+    const requeues = readRequeueCount(item) + (leaseLapsed ? 1 : 0);
+    if (deadlinePassed || requeues > MAX_DISTRIBUTED_WORK_REQUEUES) {
+      if (!distributedWorkLifecycle.can(item.status, 'expired')) continue;
+      const settled: DistributedPendingWork = {
+        ...item,
+        status: 'expired',
+        error: deadlinePassed
+          ? `Remote work was not completed within its ${item.timeoutMs}ms timeout.`
+          : `Remote work lost its lease ${requeues} times without being completed; it was not offered again.`,
+        completedAt: now,
+        updatedAt: now,
+        leaseExpiresAt: undefined,
+        metadata: { ...item.metadata, leaseRequeues: requeues },
+      };
+      state.work.set(workId, settled);
+      state.workAdmissions.get(workId)?.detach();
+      state.workAdmissions.delete(workId);
+      expired.push(settled);
+    } else {
+      state.work.set(workId, {
+        ...item,
+        status: 'queued',
+        claimTokenId: undefined,
+        claimedAt: undefined,
+        leaseExpiresAt: undefined,
+        updatedAt: now,
+        metadata: {
+          ...item.metadata,
+          lastLeaseExpiryAt: now,
+          leaseRequeues: requeues,
+        },
+      });
+    }
     recordDistributedRuntimeAudit(state, {
       id: `drt-audit-${workId}-${now}`,
       action: 'work-expired',
@@ -359,10 +444,12 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
       metadata: {},
     });
     const peer = state.peers.get(item.peerId);
-    if (peer) {
+    // A lapsed lease counts as the peer going away (a heartbeat renews the
+    // leases of a peer that is still working), but never un-revokes it.
+    if (leaseLapsed && peer) {
       state.peers.set(peer.id, {
         ...peer,
-        status: 'disconnected',
+        status: nextDistributedPeerStatus(peer.status, 'disconnected'),
         lastSeenAt: now,
         lastDisconnectedAt: now,
       });
@@ -372,6 +459,78 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
   if (changed) {
     persistDistributedRuntimeAsync(state, 'expired work requeue');
   }
+  for (const work of expired) settleExpiredWork(state, work);
+}
+
+function settleExpiredWork(state: DistributedRuntimeManagerState, work: DistributedPendingWork): void {
+  const peer = state.peers.get(work.peerId);
+  publishDistributedRuntimeEvent(state, 'remote-work-settled', { peer: peer ? sanitizePeer(peer) : null, work });
+  resolveDistributedRuntimeWaiters(state, work);
+  if (peer) void bridgeSettledAndRemember(state, sanitizePeer(peer), work);
+}
+
+const BRIDGE_PENDING = 'bridgePending';
+const BRIDGE_NAMES: ReadonlyArray<DistributedBridgeName> = ['session', 'approval', 'automation'];
+
+function readBridgePending(work: DistributedPendingWork): DistributedBridgeName[] {
+  const value = work.metadata[BRIDGE_PENDING];
+  return Array.isArray(value) ? BRIDGE_NAMES.filter((name) => value.includes(name)) : [];
+}
+
+/**
+ * Tell the bridges that work settled. A bridge that could not deliver is recorded on the stored
+ * work (`metadata.bridgePending`) so the next start delivers it again, instead of the session,
+ * approval or automation run staying unaware of a result the work record already holds.
+ * A retry (`only`) also keeps a bridge that is still not attached.
+ */
+export async function bridgeSettledAndRemember(
+  state: DistributedRuntimeManagerState,
+  peer: DistributedPeerRecord,
+  work: DistributedPendingWork,
+  only?: ReadonlyArray<DistributedBridgeName>,
+): Promise<void> {
+  const report = await bridgeSettledDistributedWork(state, peer, work, only);
+  const stored = state.work.get(work.id);
+  if (!stored) return;
+  const pending = BRIDGE_NAMES.filter((name) => report.failed.includes(name) || report.absent.includes(name));
+  const before = readBridgePending(stored);
+  if (pending.length === before.length && pending.every((name, index) => name === before[index])) return;
+  const { [BRIDGE_PENDING]: _previous, ...rest } = stored.metadata;
+  state.work.set(work.id, { ...stored, metadata: pending.length > 0 ? { ...rest, [BRIDGE_PENDING]: pending } : rest });
+  try {
+    await persistDistributedRuntime(state);
+  } catch (error) {
+    logger.warn('Distributed runtime bridge retry marker was not saved', { workId: work.id, error: summarizeError(error) });
+  }
+}
+
+const retrying = new WeakSet<DistributedRuntimeManagerState>();
+
+/** Deliver again the settled work whose bridges failed (or were not attached) the last time. */
+export async function retryPendingDistributedBridges(state: DistributedRuntimeManagerState): Promise<void> {
+  if (!state.loaded || retrying.has(state)) return;
+  retrying.add(state);
+  try {
+    for (const work of [...state.work.values()]) {
+      if (work.status === 'queued' || work.status === 'claimed') continue;
+      const pending = readBridgePending(work);
+      if (pending.length === 0) continue;
+      const peer = state.peers.get(work.peerId);
+      const bridgePeer = sanitizePeer(peer ?? {
+        id: work.peerId, kind: work.peerKind, label: work.peerId, requestedId: work.peerId,
+        capabilities: [], commands: [], permissions: undefined, status: 'idle', pairedAt: work.createdAt, tokens: [], metadata: {},
+      });
+      await bridgeSettledAndRemember(state, bridgePeer, work, pending);
+    }
+  } finally {
+    retrying.delete(state);
+  }
+}
+
+function retryPendingDistributedBridgesInBackground(state: DistributedRuntimeManagerState): void {
+  void retryPendingDistributedBridges(state).catch((error: unknown) => {
+    logger.warn('Distributed runtime bridge retry failed', { error: summarizeError(error) });
+  });
 }
 
 function persistDistributedRuntimeAsync(state: DistributedRuntimeManagerState, reason: string): void {
@@ -429,7 +588,12 @@ export function removeDistributedRuntimeWaiter(
 export async function pruneAndPersistDistributedRuntime(state: DistributedRuntimeManagerState): Promise<void> {
   expireDistributedPairRequests(state);
   requeueDistributedExpiredClaims(state);
-  const pairRequests = sortPairRequests(state.pairRequests.values());
+  // Settled requests go first, then pending ones; an approved request is what a
+  // device is about to verify, so a flood of new requests must not displace it.
+  const pairRequestRank = (status: DistributedRuntimePairRequest['status']): number =>
+    status === 'approved' ? 2 : status === 'pending' ? 1 : 0;
+  const pairRequests = sortPairRequests(state.pairRequests.values())
+    .sort((a, b) => pairRequestRank(b.status) - pairRequestRank(a.status));
   for (const request of pairRequests.slice(MAX_PAIR_REQUESTS)) {
     state.pairRequests.delete(request.id);
   }

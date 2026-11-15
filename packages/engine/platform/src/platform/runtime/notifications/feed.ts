@@ -25,6 +25,8 @@
  */
 import type { Notification, RoutingDecision } from './types.js';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 export interface NotificationFeedEntry {
     /** Raw notice is visible while semantic severity remains unclassified. */
     readonly severityPending?: boolean | undefined;
@@ -175,7 +177,7 @@ export class NotificationFeed {
     record(notification: Notification, decision: RoutingDecision, eventKey?: string | undefined): void {
         if (decision.target !== 'panel_only')
             return;
-        if (eventKey && this.foldEvent(eventKey, { level: notification.level, body: notification.body, fromNotice: false, restored: false }))
+        if (eventKey && this.foldEvent(eventKey, { level: notification.level, body: notification.body, timestamp: notification.timestamp, fromNotice: false, restored: false }))
             return;
         const collapsing = COLLAPSING_REASON_CODES.has(decision.reasonCode) && Boolean(decision.batchKey);
         const key = collapsing ? this.groupKey(decision.batchKey!)
@@ -229,8 +231,10 @@ export class NotificationFeed {
      * restored from a saved session, which also counts as already seen.
      */
     recordNotice(input: NoticeInput): NotificationFeedEntry {
-        if (input.eventKey && input.level !== undefined) {
-            const folded = this.foldEvent(input.eventKey, { level: input.level, body: input.body, fromNotice: true, restored: input.restored === true });
+        if (input.eventKey) {
+            // A notice whose severity is still pending folds too: it is the same
+            // event, and a second row would orphan the first.
+            const folded = this.foldEvent(input.eventKey, { level: input.level, body: input.body, timestamp: input.timestamp, fromNotice: true, restored: input.restored === true });
             if (folded)
                 return folded;
         }
@@ -267,8 +271,9 @@ export class NotificationFeed {
      * the entry, or undefined when the event has no entry yet.
      */
     private foldEvent(eventKey: string, arrival: {
-        readonly level: Notification['level'];
+        readonly level: Notification['level'] | undefined;
         readonly body: string | undefined;
+        readonly timestamp: number;
         readonly fromNotice: boolean;
         readonly restored: boolean;
     }): NotificationFeedEntry | undefined {
@@ -294,11 +299,18 @@ export class NotificationFeed {
                 current.set(eventKey, body);
             this.groupDetails.set(key, current);
         }
+        const level = arrival.level !== undefined && (existing.level === undefined || LEVEL_RANK[arrival.level] > LEVEL_RANK[existing.level])
+            ? arrival.level : existing.level;
+        const body = key.startsWith('group:') ? this.groupBody(key, this.groupTitles.get(key))
+            : arrival.fromNotice ? (noticeBody ?? existing.body) : (existing.body ?? arrival.body);
+        // An update that raises the severity or adds detail is news even on an
+        // entry the user already looked at, so it counts as updated now.
+        const changed = level !== existing.level || body !== existing.body;
         const merged: NotificationFeedEntry = {
             ...existing,
-            level: (existing.level === undefined || LEVEL_RANK[arrival.level] > LEVEL_RANK[existing.level]) ? arrival.level : existing.level,
-            body: key.startsWith('group:') ? this.groupBody(key, this.groupTitles.get(key))
-                : arrival.fromNotice ? (noticeBody ?? existing.body) : (existing.body ?? arrival.body),
+            level,
+            body,
+            ...(changed && !rowRestored ? { timestamp: Math.max(existing.timestamp, arrival.timestamp) } : {}),
             restored: rowRestored,
             ...(eventRestored ? { toast: 'never' as const }
                 : arrival.fromNotice && !eventRestored ? { toast: 'always' as const } : {}),
@@ -367,6 +379,7 @@ export class NotificationFeed {
         this.activeGroups.clear();
         this.groupDetails.clear();
         this.order = [];
+        this.seenThrough = 0;
         this.emitChange();
     }
     /** Remove one entry (a collapsed group goes as a whole). Returns whether it existed. */
@@ -416,8 +429,15 @@ export class NotificationFeed {
         return () => this.listeners.delete(listener);
     }
     private emitChange(): void {
-        for (const listener of this.listeners)
-            listener();
+        // Listeners run after the state has changed: one that throws must not stop
+        // the others or surface as a failure of the record call that triggered it.
+        for (const listener of [...this.listeners]) {
+            try {
+                listener();
+            } catch (error) {
+                logger.warn('Notification feed listener threw', { error: summarizeError(error) });
+            }
+        }
     }
 }
 /** A product/runtime owns its feed instance; storage and folding mechanics stay shared. */

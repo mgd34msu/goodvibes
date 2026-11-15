@@ -1,5 +1,5 @@
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 // The execution ledger hoisted from goodvibes-agent src/runtime/execution-ledger.ts.
 // Its route kind is Jev's side-effect kind reading (the agent's tool-name
@@ -19,7 +19,7 @@ import {
   type EmitterContext,
 } from '../platform/src/platform/runtime/emitters/index.ts';
 import { AgentExecutionLedger, EXECUTION_LEDGER_SITE } from '../platform/src/platform/gate/policy/execution-ledger.ts';
-import { useGateReadings } from './_helpers/gate-readings.ts';
+import { gateReadingsPort, useGateReadings } from './_helpers/gate-readings.ts';
 
 // Argument roles (engine.gate.ledger-arg) are asked with state { tool, argument },
 // so their entries come first; the route-kind entries match the tool name.
@@ -138,6 +138,89 @@ describe('AgentExecutionLedger', () => {
     expect(record?.routeKind).toBe('other');
     expect(record?.routeKindError).toContain('judgment unavailable');
     expect(record?.argsReadingError).toContain('values withheld');
+  });
+
+  test('a call id reused in a later turn is a separate call and keeps its own lifecycle', async () => {
+    const bus = new RuntimeEventBus();
+    const ledger = new AgentExecutionLedger(bus);
+    emitToolReceived(bus, CTX, { callId: 'call_0', turnId: 'turn-1', tool: 'read', args: {} });
+    emitToolSucceeded(bus, CTX, { callId: 'call_0', turnId: 'turn-1', tool: 'read', durationMs: 1 });
+    emitToolReceived(bus, CTX, { callId: 'call_0', turnId: 'turn-2', tool: 'exec', args: {} });
+    emitToolFailed(bus, CTX, { callId: 'call_0', turnId: 'turn-2', tool: 'exec', error: 'exit 2', durationMs: 2 });
+    emitToolReceived(bus, CTX, { callId: 'call_0', turnId: 'turn-2', tool: 'exec', args: {} });
+    await settle(ledger);
+
+    const records = ledger.getSnapshot().records;
+    expect(records).toHaveLength(2);
+    expect(new Set(records.map((record) => record.id)).size).toBe(2);
+    const first = records.find((record) => record.turnId === 'turn-1');
+    const second = records.find((record) => record.turnId === 'turn-2');
+    expect([first?.status, first?.tool]).toEqual(['succeeded', 'read']);
+    expect([second?.status, second?.tool, second?.error]).toEqual(['failed', 'exec', 'exit 2']);
+  });
+
+  test('the value-bearing reading sees a bounded depth of a deeply nested argument', async () => {
+    const bus = new RuntimeEventBus();
+    const ledger = new AgentExecutionLedger(bus);
+    let nested: unknown = 'deep-leaf-value';
+    for (let level = 0; level < 200; level += 1) nested = [nested];
+    received(bus, 'deep', 'sleep', { payload: nested, seconds: 3 });
+    await settle(ledger);
+
+    const [record] = ledger.getSnapshot().records;
+    expect(record?.argsReadingError).toBeUndefined();
+    expect(record?.routeKindError).toBeUndefined();
+    const routeRequests = readings.requests.filter((request) => JSON.stringify(request.state).includes('"arguments"'));
+    expect(routeRequests).toHaveLength(1);
+    const sent = JSON.stringify(routeRequests[0]?.state);
+    expect(sent).toContain('[truncated]');
+    expect(sent).not.toContain('deep-leaf-value');
+  });
+
+  test('argument roles read under one judgment port are not applied under its replacement', async () => {
+    const bus = new RuntimeEventBus();
+    const ledger = new AgentExecutionLedger(bus);
+    received(bus, 'a', 'sleep', { note: 'visible-value' });
+    await settle(ledger);
+    expect(ledger.getSnapshot().records[0]?.argsPreview).toContain('visible-value');
+
+    const replacement = gateReadingsPort([['"argument":"note"', { holds_credential: true }]]);
+    const previous = installJudgmentPort(replacement.port);
+    try {
+      received(bus, 'b', 'sleep', { note: 'visible-value' });
+      await settle(ledger);
+    } finally {
+      installJudgmentPort(previous);
+    }
+    const second = ledger.getSnapshot().records.find((record) => record.callId === 'b');
+    expect(second?.argsPreview).not.toContain('visible-value');
+    expect(second?.argsKeys).toEqual([]);
+  });
+
+  test('argument roles read under one model are not applied after the same port changes its model', async () => {
+    // The settings port stays installed and reads its model live, so a model change replaces nothing.
+    let inner!: JudgmentPort;
+    let model = 'model-a';
+    const live: JudgmentPort = { get model() { return model; }, ask: (request) => inner.ask(request) };
+    const original = installJudgmentPort(live);
+    if (original === undefined) throw new Error('the suite installs a judgment port before this test runs');
+    inner = original;
+    const bus = new RuntimeEventBus();
+    const ledger = new AgentExecutionLedger(bus);
+    try {
+      received(bus, 'a', 'sleep', { note: 'visible-value' });
+      await settle(ledger);
+      expect(ledger.getSnapshot().records[0]?.argsPreview).toContain('visible-value');
+
+      inner = gateReadingsPort([['"argument":"note"', { holds_credential: true }]]).port;
+      model = 'model-b';
+      received(bus, 'b', 'sleep', { note: 'visible-value' });
+      await settle(ledger);
+    } finally {
+      installJudgmentPort(original);
+    }
+    const second = ledger.getSnapshot().records.find((record) => record.callId === 'b');
+    expect(second?.argsPreview).not.toContain('visible-value');
   });
 
   test('subscribers hear each change; dispose stops the ledger', async () => {

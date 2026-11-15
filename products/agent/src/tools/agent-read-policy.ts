@@ -4,7 +4,6 @@ export {
   AGENT_MAX_READ_FILES,
   AGENT_MAX_READ_IMAGE_SIZE_BYTES,
   AGENT_READ_POLICY_DENIAL_MESSAGE,
-  isBlockedReadPath,
   validateReadToolInvocationForAgentPolicy,
   validateAgentReadMechanics,
   wrapReadToolForAdmittedAgentPolicy as wrapReadToolForAgentPolicy,

@@ -1,3 +1,4 @@
+import type { ExecutionRefusalCode, RefusalCode } from './types.js';
 /** Public operation metadata. No credential, card, page reading or execution
  * capability is part of this view. A stored status never authorizes a submit. */
 export const PAYMENT_OPERATION_STATES = ['accepted', 'running', 'cancelling', 'completed', 'refused', 'cancelled', 'attention', 'interrupted', 'uncertain', 'failed'] as const;
@@ -31,11 +32,16 @@ export function canReconcilePaymentOperation(operation: PaymentOperationView): b
     && (operation.state === 'uncertain' || operation.state === 'attention'
       || (operation.state === 'completed' && operation.outcome === 'submitted-unverified'));
 }
-const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
-  'disabled': 'Payments are disabled or this daemon is not the elected payment host.',
+/** Operation-level refusals the host records itself, beside the checkout's own codes. */
+type OperationRefusalCode = 'recovery-unavailable';
+// Typed by the code unions so a new refusal code is a compile error until it
+// has a sentence here; the generic fallback is only for records from elsewhere.
+const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | OperationRefusalCode, string>> = {
+  'disabled': 'Payments are disabled, or this daemon is part of a cluster and payments run only on a single, unclustered daemon.',
   'recovery-unavailable': 'The original checkout could not be restored. Check its paired owner, payment settings, original browser and reply channel before starting a new checkout.',
-  'no-card': 'No usable payment card is configured. Check the card in payment settings.',
+  'no-card': 'No usable payment card is configured, or payments.cvvHandling is set to prompt and there is no purchase-time prompt to type the code yet. Check the card in payment settings, and set payments.cvvHandling to stored to let purchases go ahead.',
   'no-shipping-address': 'The stored address is incomplete, unavailable or changed. Check payment address settings.',
+  'no-billing-address': 'No complete billing address is stored. Set it in payment address settings, then start the purchase again.',
   'not-owner-request': 'The checkout did not have a direct request from its owner.',
   'derived-from-untrusted-content': 'The purchase instruction repeats untrusted content, or its original source evidence is incomplete. Make a fresh request in your own words.',
   'link-validation-failed': 'The checkout address did not pass the authorized merchant checks.',
@@ -53,14 +59,38 @@ const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   'zero-budget': 'No spending budget is configured.',
   'total-changed': 'The checkout total or delivery selection changed before payment.',
   'challenge-abandoned': 'Merchant verification could not be completed. Check merchant order history before retrying.',
-  'submit-not-attempted': 'The final submission checks refused before a merchant click.',
+  'submit-not-attempted': 'The final submission checks refused before any click reached the merchant. Nothing was submitted. Check the checkout page, then start the purchase again.',
+  'submit-outcome-unknown': 'The order may or may not have been placed. Check your order history at the merchant. The hold is kept and nothing is retried.',
   'cart-mismatch': 'The checkout cart did not match the requested items.',
   'extraction-failed': 'The checkout amounts could not be read unambiguously.',
   'listing-not-purchasable': 'The listing was not confirmed as a supported fixed-price purchase.',
   'merchant-not-recognised-denied': 'The purchase at an unrecognised merchant was denied.',
   'merchant-not-recognised-expired': 'Approval for the unrecognised merchant expired.',
   'merchant-not-recognised-undeliverable': 'Approval for the unrecognised merchant could not be delivered.',
+  'card-fill-failed': 'The card could not be entered on the checkout page. Nothing was submitted. Check the card fields named for this checkout, then start the purchase again.',
+  'owner-changed': 'The stored address, payment settings, pairing or checkout page changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
+  'notice-unavailable': 'The purchase notice could not be prepared or sent. Nothing was submitted. Check the payment notification channels, then start the purchase again.',
+  'budget-held': 'Another purchase in progress is holding the budget this one needs. Nothing was submitted. Wait for that purchase to finish, then start this one again.',
 };
+/** Outcomes recorded with a `failed` state: processing stopped before a final
+ * result and before any submission, for the reason named. */
+const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  'decision-unavailable': 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.',
+  'refused:reply-history-unavailable': 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Inspect payment and channel status before starting another checkout.',
+  'refused:receive-uncovered': 'The purchase stopped because its original reply receive span could not be confirmed. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.',
+  'refused:receive-unrecorded': 'The purchase stopped because its completed reply receive span could not be saved. Inspect payment storage and the original purchase status before starting another checkout.',
+  'reply-source-unavailable': 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.',
+  'decision-disabled': 'Automated checkout requires decision models. Review the selected decision policy and this checkout before starting a new one.',
+  'refused:reply-unsettled': 'A reply arrived before the window closed but was still being read when it closed, so it was neither used nor treated as silence. Nothing was submitted. Start the purchase again if you still want it.',
+  'refused:reply-unreadable': 'A reply to the purchase notice could not be read, so it was neither used nor treated as silence. Nothing was submitted. Check decision model access, then start the purchase again if you still want it.',
+  'refused:clock-unavailable': 'The system clock could not be read while the purchase window was open, so the window could not be timed. Nothing was submitted. Check the host clock, then start the purchase again.',
+  'refused:window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Read payments.purchase.status for any purchase already waiting for an answer, then start this one again.',
+  'refused:page-in-use': 'This browser page already has a checkout that is running or waiting for a merchant check. Nothing was submitted. Finish or reconcile that purchase, or open the checkout in a new tab.',
+  'refused:owner-changed': 'The stored address, payment settings, pairing, browser page or decision settings changed while the purchase was running. Nothing was submitted. Review them, then start the purchase again.',
+};
+function refusalMessage(code: string): string | undefined {
+  return Object.hasOwn(REFUSAL_MESSAGES, code) ? REFUSAL_MESSAGES[code as keyof typeof REFUSAL_MESSAGES] : undefined;
+}
 export function paymentOperationDescription(operation: PaymentOperationView): string {
   if (operation.outcome === 'owner-confirmed-purchased') return 'You confirmed this order in the merchant’s history. Original payment accounting is settled; no new order was submitted.';
   if (operation.outcome === 'owner-confirmed-not-purchased') return 'You confirmed no order was placed. The original unspent hold was released; any already committed spend remains recorded without crediting a budget. No new order was submitted.';
@@ -70,26 +100,19 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
     case 'running': return 'The daemon is processing this checkout. Review any purchase notice before answering.';
     case 'cancelling': return 'Stopping was requested. Wait for final status; this does not undo a merchant submission.';
     case 'completed': return operation.outcome === 'submitted-unverified'
-      ? 'Submission was recorded without merchant confirmation. Check the merchant’s order history.' : 'The purchase outcome is recorded in purchase history.';
-    case 'refused': return REFUSAL_MESSAGES[operation.outcome?.replace(/^refused:/, '') ?? '']
+      ? 'This daemon cannot confirm orders, so the submission was recorded without merchant confirmation. Check the merchant’s order history, then record what you found.' : 'The purchase outcome is recorded in purchase history.';
+    case 'refused': return refusalMessage(operation.outcome?.replace(/^refused:/, '') ?? '')
       ?? 'The checkout was refused. Review the checkout and payment settings before requesting another purchase.';
-    case 'cancelled': return 'The checkout stopped before submission.';
+    case 'cancelled': return 'The checkout was stopped before submission. Nothing was sent to the merchant.';
     case 'attention': return 'The merchant requested verification. Inspect the original payment page; the daemon will not submit again.';
-    case 'interrupted': return 'This operation was interrupted before a final result. Review its payment evidence before starting a fresh checkout.';
+    case 'interrupted': return operation.outcome === 'refused:daemon-stopped'
+      ? 'The daemon stopped before this purchase was submitted. Nothing was sent to the merchant and it will not resume; start the purchase again if you still want it.'
+      : operation.outcome === 'refused:recovery-unavailable'
+        ? REFUSAL_MESSAGES['recovery-unavailable']
+        : 'This operation was interrupted before a final result. Review its payment evidence before starting a fresh checkout.';
     case 'uncertain': return 'Submission or its recording is uncertain. Check purchase history and the merchant before taking further action. The daemon will not retry it.';
-    case 'failed': return operation.outcome === 'decision-unavailable'
-      ? 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.'
-      : operation.outcome === 'refused:reply-history-unavailable'
-        ? 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Inspect payment and channel status before starting another checkout.'
-      : operation.outcome === 'refused:receive-uncovered'
-        ? 'The purchase stopped because its original reply receive span could not be confirmed. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.'
-      : operation.outcome === 'refused:receive-unrecorded'
-        ? 'The purchase stopped because its completed reply receive span could not be saved. Inspect payment storage and the original purchase status before starting another checkout.'
-      : operation.outcome === 'reply-source-unavailable'
-        ? 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.'
-      : operation.outcome === 'decision-disabled'
-        ? 'Automated checkout requires decision models. Review the selected decision policy and this checkout before starting a new one.'
-        : 'Processing stopped without a confirmed final outcome. Inspect the payment evidence before retrying.';
+    case 'failed': return (operation.outcome !== null && Object.hasOwn(FAILURE_MESSAGES, operation.outcome) ? FAILURE_MESSAGES[operation.outcome] : undefined)
+      ?? 'Processing stopped without a confirmed final outcome. Inspect the payment evidence before retrying.';
   }
 }
 

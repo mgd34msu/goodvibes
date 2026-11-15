@@ -35,7 +35,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { readEmailConfig, validateEmailConfig } from '@goodvibes-jev/engine/platform/platform/email';
 import { buildProbeContext } from '../capabilities/capability-boot-check.ts';
 import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
-import { configValueIsPresent, safeMcpServerPosture, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
+import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
 import type { CapabilityIndexReport, ResolvedCapability } from '../capabilities/capability-types.ts';
 import { describeGoogleConnection } from '../input/commands/google-connection-actions.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
@@ -75,6 +75,8 @@ export interface CapabilityStatusInputs {
   readonly googleToolRegistered: boolean;
   /** The `/google status` report, or undefined when the subject does not need it. */
   readonly googleStatus?: string | undefined;
+  /** True when the live Google status was asked for and could not be read, so the answer says so rather than omitting it. */
+  readonly googleStatusUnreadable?: boolean | undefined;
   /** The separate IMAP/SMTP mailbox verdict, or undefined when not asked about mail. */
   readonly mailbox?: MailboxVerdict | undefined;
 }
@@ -119,7 +121,9 @@ export function renderCapabilityStatus(subject: CapabilitySubject, inputs: Capab
     lines.push(...describeCapability(entry));
   }
 
-  if (GOOGLE_BACKED.has(subject)) {
+  // `all` is the broad "what can you do" question, which is where the Gmail and
+  // Calendar route text matters most.
+  if (GOOGLE_BACKED.has(subject) || subject === 'all') {
     lines.push('');
     lines.push(...describeGoogleRoute(inputs));
   }
@@ -166,6 +170,9 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
     lines.push('');
     lines.push('What the connector sees right now:');
     for (const line of inputs.googleStatus.split('\n')) lines.push(`  ${line}`);
+  } else if (inputs.googleStatusUnreadable) {
+    lines.push('');
+    lines.push('The connector\'s live status could not be read just now; run /google status to see it.');
   }
   return lines;
 }
@@ -194,6 +201,8 @@ export interface AgentCapabilityToolOptions {
   readonly toolRegistry: ToolRegistry;
   readonly commandContext: CommandContext;
   readonly configManager: unknown;
+  /** The encrypted secret store the live probes read credential presence from. */
+  readonly secretsManager?: unknown;
 }
 
 export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): Tool {
@@ -205,6 +214,7 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
         homeDirectory: requireShellPaths(options.commandContext).homeDirectory,
         workingDirectory: requireShellPaths(options.commandContext).workingDirectory,
         configValuePresent: (key) => configValueIsPresent(options.configManager, key),
+        secretPresent: (key) => secretValueIsPresent(options.secretsManager, key),
         mcpServers: safeMcpServerPosture(options.commandContext),
         servedOperatorMethodIds: servedOperatorMethodIds(),
       }),
@@ -235,7 +245,7 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
           subject: {
             type: 'string',
             enum: [...CAPABILITY_SUBJECTS],
-            description: 'What the question is about. Defaults to all.',
+            description: 'What the question is about. Defaults to all; an unrecognised value is treated as all.',
           },
         },
         required: [],
@@ -251,11 +261,12 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
       const registered = googleToolRegistered();
 
       let googleStatus: string | undefined;
+      let googleStatusUnreadable = false;
       if (registered && (GOOGLE_BACKED.has(subject) || subject === 'all')) {
         try {
           googleStatus = await describeGoogleConnection(options.commandContext);
         } catch {
-          googleStatus = undefined;
+          googleStatusUnreadable = true;
         }
       }
 
@@ -271,6 +282,7 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
           report,
           googleToolRegistered: registered,
           googleStatus,
+          googleStatusUnreadable,
           mailbox,
         }),
       };

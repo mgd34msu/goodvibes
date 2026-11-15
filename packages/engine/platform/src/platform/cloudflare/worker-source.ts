@@ -6,6 +6,11 @@ function json(body, status = 200) {
   });
 }
 
+function envFlag(value) {
+  const normalized = String(value == null ? '' : value).trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
 function toRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -29,8 +34,8 @@ function resolveDaemonUrl(env) {
   } catch {
     return { error: 'GOODVIBES_DAEMON_URL is not a valid URL', code: 'DAEMON_URL_INVALID', status: 400 };
   }
-  const allowInsecure = String(env.GOODVIBES_ALLOW_INSECURE_DAEMON_URL || '') === 'true';
-  const allowPrivate = String(env.GOODVIBES_ALLOW_PRIVATE_DAEMON_URL || '') === 'true';
+  const allowInsecure = envFlag(env.GOODVIBES_ALLOW_INSECURE_DAEMON_URL);
+  const allowPrivate = envFlag(env.GOODVIBES_ALLOW_PRIVATE_DAEMON_URL);
   if (url.protocol !== 'https:' && !(allowInsecure && (url.protocol === 'http:'))) {
     return { error: 'GOODVIBES_DAEMON_URL must use https unless GOODVIBES_ALLOW_INSECURE_DAEMON_URL=true', code: 'DAEMON_URL_INSECURE', status: 400 };
   }
@@ -46,7 +51,9 @@ function resolveDaemonUrl(env) {
 function isPrivateDaemonHost(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^\\[|\\]$/g, '');
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
+  // The IPv6 unique-local and link-local prefixes only mean something in an IPv6
+  // literal; a DNS name that merely starts with fc or fd is an ordinary host.
+  if (host === '::1' || (host.includes(':') && (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')))) return true;
   const parts = host.split('.').map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
   const [a, b] = parts;
@@ -66,11 +73,27 @@ function toDaemonBatchPath(pathname) {
   return null;
 }
 
+function constantTimeEqual(a, b) {
+  const left = String(a);
+  const right = String(b);
+  let diff = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    diff |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return diff === 0;
+}
+
 function requireWorkerAuth(request, env) {
   const expected = String(env.GOODVIBES_WORKER_TOKEN || '');
-  if (!expected) return null;
+  // No token configured means no way to tell the daemon's callers from anyone
+  // else, and this Worker attaches the daemon's operator credential to what it
+  // proxies, so it refuses instead of running open.
+  if (!expected) {
+    return json({ error: 'GOODVIBES_WORKER_TOKEN is not configured on this Worker; provision it again to set the client token', code: 'WORKER_AUTH_NOT_CONFIGURED' }, 503);
+  }
   const auth = request.headers.get('authorization') || '';
-  if (auth === 'Bearer ' + expected) return null;
+  if (constantTimeEqual(auth, 'Bearer ' + expected)) return null;
   return json({ error: 'Worker authorization required', code: 'WORKER_AUTH_REQUIRED' }, 401);
 }
 
@@ -90,6 +113,11 @@ async function proxyDaemonJson(env, path, init) {
   });
 }
 
+function isRetryableStatus(status) {
+  // 401 and 403 are retried too: an operator who rotates the daemon token fixes them, and acking would lose the job.
+  return status === 408 || status === 429 || status === 401 || status === 403 || status >= 500;
+}
+
 async function handleQueuePayload(payload, env) {
   if (payload.type === 'batch.tick') {
     return proxyDaemonJson(env, '/api/batch/tick', {
@@ -103,7 +131,7 @@ async function handleQueuePayload(payload, env) {
       ...toRecord(payload.body),
       source: {
         kind: 'cloudflare-queue',
-        id: typeof payload.body?.id === 'string' ? payload.body.id : undefined,
+        id: typeof payload.body?.id === 'string' ? payload.body.id : payload.jobId,
       },
     }),
   });
@@ -151,7 +179,7 @@ export default {
     if (!daemonPath) return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
 
     if (url.pathname === '/batch/jobs/enqueue' && request.method === 'POST') {
-      if (String(env.GOODVIBES_QUEUE_JOB_PAYLOADS || '') !== 'true') {
+      if (!envFlag(env.GOODVIBES_QUEUE_JOB_PAYLOADS)) {
         return json({
           error: 'Queueing full batch job payloads is disabled. Post /batch/jobs to proxy directly to the daemon, or enable queueJobPayloads explicitly.',
           code: 'QUEUE_PAYLOADS_DISABLED',
@@ -164,6 +192,7 @@ export default {
       await queue.send({
         type: 'batch.job.create',
         body: toRecord(body),
+        jobId: crypto.randomUUID(),
         enqueuedAt: Date.now(),
       });
       return json({ queued: true }, 202);
@@ -180,8 +209,15 @@ export default {
   async queue(batch, env) {
     for (const message of batch.messages) {
       try {
+        const type = message.body?.type;
+        if (type !== 'batch.tick' && type !== 'batch.job.create') {
+          // A message of an unknown shape can never succeed; redelivering it only loops.
+          message.ack?.();
+          continue;
+        }
         const response = await handleQueuePayload(message.body, env);
-        if (response.ok) {
+        if (response.ok || !isRetryableStatus(response.status)) {
+          // Any other 4xx (a bad body) fails the same way every time.
           message.ack?.();
         } else {
           message.retry?.();
@@ -193,10 +229,12 @@ export default {
   },
 
   async scheduled(_event, env) {
-    await proxyDaemonJson(env, '/api/batch/tick', {
+    const response = await proxyDaemonJson(env, '/api/batch/tick', {
       method: 'POST',
       body: JSON.stringify({ force: false }),
     });
+    // Thrown so a refused tick shows up as a failed cron invocation in Cloudflare.
+    if (!response.ok) throw new Error('Scheduled batch tick was refused by the daemon with status ' + response.status);
   },
 };
 `.trim();

@@ -13,7 +13,13 @@ import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { ConversationManager } from '../../core/conversation.ts';
 import { activeTheme, registerThemeRefresh, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 
+// Theme refreshers cannot be unregistered, so one is registered for the whole file and
+// follows the conversation under test instead of leaking one closure per test.
+let wired: ConversationManager | undefined;
+registerThemeRefresh(() => wired?.clearLineCache());
+
 afterEach(() => {
+  wired = undefined;
   setActiveThemeName('goodvibes');
   setActiveThemeMode('dark');
 });
@@ -21,7 +27,7 @@ afterEach(() => {
 /** A conversation wired the way main.ts wires the real one. */
 function wiredConversation(): ConversationManager {
   const cm = new ConversationManager(() => 80);
-  registerThemeRefresh(() => cm.clearLineCache());
+  wired = cm;
   return cm;
 }
 

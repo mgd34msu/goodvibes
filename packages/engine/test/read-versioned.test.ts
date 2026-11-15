@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
-import { readVersioned } from '../platform/src/platform/config/read-versioned.ts';
+import { readVersioned, setAsideNewerVersionFile } from '../platform/src/platform/config/read-versioned.ts';
 import type { VersionMigration } from '../platform/src/platform/config/read-versioned.ts';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ describe('readVersioned', () => {
 
   // ── unknown / future version quarantine ─────────────────────────────────
 
-  test('quarantines a file with version higher than currentVersion', () => {
+  test('leaves a file with a version higher than currentVersion in place for the newer process', () => {
     const path = makeFilePath(tmpDir);
     writeJson(path, { version: 99, name: 'future' });
 
@@ -114,8 +114,19 @@ describe('readVersioned', () => {
     });
 
     expect(result).toBeNull();
-    expect(existsSync(path)).toBe(false);
-    expect(existsSync(`${path}.unrecognized`)).toBe(true);
+    expect(existsSync(path)).toBe(true);
+    expect(existsSync(`${path}.unrecognized`)).toBe(false);
+  });
+
+  test('a second quarantine keeps the first forensic copy', () => {
+    const path = makeFilePath(tmpDir);
+    writeFileSync(path, '{ not json');
+    expect(readVersioned(path, { currentVersion: 1, onUnknown: 'quarantine' })).toBeNull();
+    writeFileSync(path, '{ also not json');
+    expect(readVersioned(path, { currentVersion: 1, onUnknown: 'quarantine' })).toBeNull();
+
+    expect(readFileSync(`${path}.unrecognized`, 'utf-8')).toBe('{ not json');
+    expect(readFileSync(`${path}.1.unrecognized`, 'utf-8')).toBe('{ also not json');
   });
 
   test('quarantines a file with a non-numeric version field', () => {
@@ -217,5 +228,31 @@ describe('readVersioned', () => {
 
     expect(result).toBeNull();
     expect(existsSync(`${path}.unrecognized`)).toBe(true);
+  });
+});
+
+describe('setAsideNewerVersionFile', () => {
+  let dir: string;
+  beforeEach(() => { dir = makeProjectTempDir('set-aside-newer'); });
+
+  test('a newer-version file is renamed aside with its content, so a writer cannot destroy it', () => {
+    const path = makeFilePath(dir);
+    writeJson(path, { version: 2, keep: 'newer state' });
+
+    expect(setAsideNewerVersionFile(path, 1)).toBe(true);
+
+    expect(existsSync(path)).toBe(false);
+    expect(JSON.parse(readFileSync(`${path}.unrecognized`, 'utf-8'))).toEqual({ version: 2, keep: 'newer state' });
+  });
+
+  test('a current, older, missing or unreadable file is left for the writer', () => {
+    const path = makeFilePath(dir);
+    expect(setAsideNewerVersionFile(path, 1)).toBe(false);
+    writeJson(path, { version: 1 });
+    expect(setAsideNewerVersionFile(path, 1)).toBe(false);
+    writeFileSync(path, '{ not json');
+    expect(setAsideNewerVersionFile(path, 1)).toBe(false);
+    expect(existsSync(path)).toBe(true);
+    expect(existsSync(`${path}.unrecognized`)).toBe(false);
   });
 });

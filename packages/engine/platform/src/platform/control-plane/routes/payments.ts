@@ -1,9 +1,13 @@
 /**
- * routes/payments.ts, the daemon actually serving `payments.*`.
+ * routes/payments.ts, the platform handlers for `payments.*`.
  *
  * The daemon is the process that holds the card and charges it, with every
- * surface closed and across restarts, so these handlers are the only way a
- * surface sees or changes any of it. This module is deliberately thin: it maps
+ * surface closed and across restarts. In the daemon, `payments/host/register.ts`
+ * replaces `cards.create`, `purchases.list`, `checkout.begin` and
+ * `checkout.fillCard` with its own handlers (which add ownership, approval and
+ * admission), so for those four the code here serves only a host that composes
+ * the platform groups without the daemon's payments host. A validation change
+ * to one of them belongs in both places. This module is deliberately thin: it maps
  * the descriptors' declared shapes onto a narrow service slice, performs no
  * I/O, holds no credential, and never touches a card number.
  *
@@ -213,9 +217,19 @@ function readString(value: unknown, field: string): string {
   return value.trim();
 }
 
-function readInteger(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new GatewayVerbError(`${field} must be a whole number.`, 'INVALID_ARGUMENT', 400, field);
+function readInteger(value: unknown, field: string, min?: number, max?: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || (min !== undefined && value < min) || (max !== undefined && value > max)) {
+    const range = min !== undefined && max !== undefined ? ` between ${String(min)} and ${String(max)}` : '';
+    throw new GatewayVerbError(`${field} must be a whole number${range}.`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return value;
+}
+
+/** Absent or null means "no cap"; anything else must be a non-negative whole number, never silently dropped. */
+function readIssuerCap(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new GatewayVerbError('issuerCapMinorUnits must be a non-negative whole number of minor units, or omitted for no cap.', 'INVALID_ARGUMENT', 400, 'issuerCapMinorUnits');
   }
   return value;
 }
@@ -291,11 +305,11 @@ export function createPaymentsCardsCreateHandler(service: PaymentsGatewayService
     const issuerCap = params['issuerCapMinorUnits'];
     const label = readString(params['label'], 'label');
     const number = readString(params['number'], 'number');
-    const expiryMonth = readInteger(params['expiryMonth'], 'expiryMonth');
-    const expiryYear = readInteger(params['expiryYear'], 'expiryYear');
+    const expiryMonth = readInteger(params['expiryMonth'], 'expiryMonth', 1, 12);
+    const expiryYear = readInteger(params['expiryYear'], 'expiryYear', 1000, 9999);
     const cvv = readString(params['cvv'], 'cvv');
     const cardholderName = readString(params['cardholderName'], 'cardholderName');
-    const issuerCapMinorUnits = typeof issuerCap === 'number' ? issuerCap : null;
+    const issuerCapMinorUnits = readIssuerCap(issuerCap);
 
     let card: PaymentCardView;
     try {

@@ -3,7 +3,7 @@ import { useRouteAdapterFixture, route, preferredId } from '../helpers/route-ada
 
 useRouteAdapterFixture();
 
-describe("Provider, channel and policy route adapters", () => {
+describe("Provider, channel and policy plans composed from scripted readings", () => {
 
   test('routes channel setup requests to the setup guide', async () => {
     const body = await route('set up Slack notifications');

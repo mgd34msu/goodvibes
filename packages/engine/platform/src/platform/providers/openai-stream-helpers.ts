@@ -17,19 +17,44 @@ export interface OpenAIChunkUsage {
 }
 
 /**
+ * Some OpenAI-compatible servers omit `index` on tool-call deltas. Keying on
+ * `undefined` would fold every parallel call into one slot and concatenate
+ * their arguments, so without an index a delta with a known id continues that
+ * call, a delta with a new id opens the next slot, and an id-less delta
+ * continues the latest call unless it carries a name the latest call already has.
+ */
+function resolveToolCallSlot(
+  acc: Map<number, OpenAIToolCallSlot>,
+  tc: { index?: number | undefined; id?: string | undefined; function?: { name?: string | undefined } | undefined },
+): number {
+  if (typeof tc.index === 'number') return tc.index;
+  const last = acc.size > 0 ? Math.max(...acc.keys()) : -1;
+  if (!tc.id) {
+    // A name-bearing delta with neither index nor id, arriving after the latest
+    // call already has its name, starts the next call; args-only deltas continue.
+    if (tc.function?.name && last >= 0 && acc.get(last)?.name) return last + 1;
+    return Math.max(last, 0);
+  }
+  for (const [slot, entry] of acc) {
+    if (entry.id === tc.id) return slot;
+  }
+  return last + 1;
+}
+
+/**
  * Update the tool-call accumulator map with one streaming tool_call delta.
  * Fires onDelta if provided.
  */
 export function accumOpenAIToolCall(
   acc: Map<number, OpenAIToolCallSlot>,
   tc: {
-    index: number;
+    index?: number | undefined;
     id?: string | undefined;
     function?: { name?: string | undefined; arguments?: string | undefined } | undefined;
   },
   onDelta: ((delta: StreamDelta) => void) | undefined,
 ): void {
-  const idx = tc.index;
+  const idx = resolveToolCallSlot(acc, tc);
   if (!acc.has(idx)) {
     acc.set(idx, { id: tc.id ?? '', name: tc.function?.name ?? '', args: '' });
   }

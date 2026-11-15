@@ -137,11 +137,22 @@ describe('MCP servers start on first use', () => {
       listAllTools: async (): Promise<unknown[]> => [],
     } as unknown as McpRegistry;
     const lazy = createLazyMcpRegistry(registry, ROOTS);
-    await lazy.registry.listAllTools();
+    await expect(lazy.registry.listAllTools()).rejects.toThrow('MCP connect failed: ');
     expect(lazy.isConnected()).toBe(false);
     // A server installed since the first try must be reachable.
     await lazy.registry.listAllTools();
     expect(attempts).toBe(2);
     expect(lazy.isConnected()).toBe(true);
+  });
+
+  test('a failed connect rejects the gated call with the real reason instead of running it unconnected', async () => {
+    let called = 0;
+    const registry = {
+      connectAll: async (): Promise<void> => { throw new Error('spawn ENOENT'); },
+      callTool: async (): Promise<unknown> => { called += 1; return null; },
+    } as unknown as McpRegistry;
+    const lazy = createLazyMcpRegistry(registry, ROOTS);
+    await expect(lazy.registry.callTool('s__t', {})).rejects.toThrow('spawn ENOENT');
+    expect(called).toBe(0);
   });
 });

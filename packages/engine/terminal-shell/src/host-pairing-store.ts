@@ -39,6 +39,11 @@ export type CompleteHostPairingResult<Reason extends string = string> =
       readonly status: 'paired' | 'conflict';
     }
   | HostPairingUnavailable<Reason>;
+export type ClearHostPairingAttemptResult<Reason extends string = string> =
+  | {
+      readonly status: 'cleared' | 'conflict';
+    }
+  | HostPairingUnavailable<Reason>;
 export interface HostPairingIO {
   readonly writeJsonFileAtomic: typeof writeJsonFileAtomic;
   readonly confirmFileDurable: typeof confirmFileDurable;
@@ -340,7 +345,37 @@ export function createHostPairingStore<const Reason extends string>(policy: {
       return unavailable();
     }
   }
-  /** CAS completion only; no clearing, expiry, rollback, rotation or revocation operation is exposed. */
+  /**
+   * CAS removal of one unresolved attempt, so the host can be paired again.
+   * It removes only an `unknown` record carrying exactly this attempt id and
+   * never a paired one. The caller must know no credential was minted: the
+   * request was never sent, the host answered with a definitive rejection, or
+   * the owner confirmed on the host that nothing was created.
+   */
+  async function clearHostPairingAttempt(
+    homeDirectory: string,
+    baseUrl: string,
+    attemptId: string,
+    overrides: Partial<HostPairingIO> = {},
+  ): Promise<ClearHostPairingAttemptResult<Reason>> {
+    try {
+      const host = canonicalizePairingHost(baseUrl);
+      if (!host || !identifier(attemptId, 256)) return unavailable();
+      const io = resolveIO(overrides);
+      return await locked(homeDirectory, io, (path) => {
+        const file = readFile(path);
+        const index = file?.records.findIndex((record) => record.host === host) ?? -1;
+        const current = file?.records[index]?.pairing;
+        if (!file || !current || current.status !== 'unknown' || current.attemptId !== attemptId) return { status: 'conflict' as const };
+        file.records.splice(index, 1);
+        publish(homeDirectory, path, file, io);
+        return { status: 'cleared' as const };
+      });
+    } catch {
+      return unavailable();
+    }
+  }
+  /** CAS completion only; rotation and revocation are not exposed, and clearing is limited to an unresolved attempt. */
   async function completeHostPairing(
     homeDirectory: string,
     baseUrl: string,
@@ -368,5 +403,5 @@ export function createHostPairingStore<const Reason extends string>(policy: {
       return unavailable();
     }
   }
-  return { canonicalizePairingHost, hostPairingStorePath, readHostPairing, beginHostPairing, completeHostPairing };
+  return { canonicalizePairingHost, hostPairingStorePath, readHostPairing, beginHostPairing, completeHostPairing, clearHostPairingAttempt };
 }

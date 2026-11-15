@@ -33,6 +33,10 @@ import {
   ChannelSyncRegistry,
   ChannelSyncStore,
 } from '../platform/src/platform/channel-sync/index.ts';
+import {
+  registerGatewayVerbGroups,
+  type GatewayVerbGroupDeps,
+} from '../platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts';
 import { readGatewayVerbRefusal } from '../platform/src/platform/control-plane/routes/gateway-verb-error.ts';
 import type { GatewayMethodInvocation } from '../platform/src/platform/control-plane/method-catalog-shared.ts';
 
@@ -57,6 +61,73 @@ function catalogWithHandlers(): GatewayMethodCatalog {
   registerChannelSyncGatewayMethods(catalog, registry);
   return catalog;
 }
+
+const DRAFT = (id: string): Record<string, unknown> => ({ id, status: 'draft', message: `message ${id}` });
+
+/** A real store whose first `load()` waits on a gate the test opens. */
+class GatedLoadStore extends ChannelSyncStore {
+  loads = 0;
+  private open: () => void = () => undefined;
+  private readonly gate = new Promise<void>((resolve) => { this.open = resolve; });
+
+  release(): void { this.open(); }
+
+  override async load(): ReturnType<ChannelSyncStore['load']> {
+    this.loads += 1;
+    await this.gate;
+    return super.load();
+  }
+}
+
+/** A real store whose next `save()` fails, once. */
+class FailingSaveStore extends ChannelSyncStore {
+  failNext = true;
+
+  override async save(tables: Parameters<ChannelSyncStore['save']>[0]): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('ENOSPC: no space left on device');
+    }
+    await super.save(tables);
+  }
+}
+
+describe('concurrent callers and a failing write', () => {
+  test('two drafts saved before the first load finishes are both kept, from one load', async () => {
+    const path = join(root, 'concurrent.json');
+    const store = new GatedLoadStore(path);
+    const concurrent = new ChannelSyncRegistry(store);
+
+    const first = concurrent.saveDraft(DRAFT('a'));
+    const second = concurrent.saveDraft(DRAFT('b'));
+    store.release();
+    await Promise.all([first, second]);
+
+    // Each caller was told its draft was saved; the file must say so too.
+    const reopened = new ChannelSyncRegistry(new ChannelSyncStore(path));
+    expect((await reopened.listDrafts()).drafts.map((draft) => draft.id).sort()).toEqual(['a', 'b']);
+    expect(store.loads).toBe(1);
+  });
+
+  test('a draft whose write failed is not served afterwards and not persisted by the next save', async () => {
+    const path = join(root, 'failing.json');
+    const failing = new ChannelSyncRegistry(new FailingSaveStore(path));
+
+    await expect(failing.saveDraft(DRAFT('lost'))).rejects.toThrow('ENOSPC');
+    expect((await failing.listDrafts()).total).toBe(0);
+
+    await failing.saveDraft(DRAFT('kept'));
+    const reopened = new ChannelSyncRegistry(new ChannelSyncStore(path));
+    expect((await reopened.listDrafts()).drafts.map((draft) => draft.id)).toEqual(['kept']);
+    expect((await failing.listDrafts()).drafts.map((draft) => draft.id)).toEqual(['kept']);
+  });
+
+  test('a route whose write failed is not served afterwards', async () => {
+    const failing = new ChannelSyncRegistry(new FailingSaveStore(join(root, 'failing-route.json')));
+    await expect(failing.assignRoute({ surfaceKind: 'slack', channelId: 'C1', profileId: 'p1' })).rejects.toThrow('ENOSPC');
+    expect((await failing.listRoutes()).total).toBe(0);
+  });
+});
 
 describe('the routing table', () => {
   test('assigning the same channel twice replaces the rule rather than accumulating rows', async () => {
@@ -172,6 +243,22 @@ describe('the verbs are callable, and say so', () => {
       const result = await reconcileHttpDescriptor(catalog.get(id)!, probe, (probed) => catalog.hasHandler(probed));
       expect(result.status, `${id}: ${result.reason}`).toBe('live');
     }
+  });
+
+  test('the platform composition root leaves these verbs to the daemon host, which attaches its own handlers', () => {
+    // The module under test answers from its own channel-sync.json, without the
+    // host's confirmation gate. If the composition root attached it, a process
+    // that composes these groups would serve that store instead of the host's.
+    const composed = new GatewayMethodCatalog();
+    registerGatewayVerbGroups(composed, {
+      secretsManager: { get: async () => null, set: async () => undefined },
+      approvalBroker: { subscribe: () => () => undefined },
+      shellPaths: { resolveUserPath: (...segments: string[]) => join(root, ...segments) },
+      surfaceRoot: 'daemon',
+    } as unknown as GatewayVerbGroupDeps);
+    // Positive control: the composition did attach handlers, just not these.
+    expect(composed.hasHandler('channels.profiles.list')).toBe(true);
+    for (const id of CHANNEL_SYNC_METHOD_IDS) expect(composed.hasHandler(id), id).toBe(false);
   });
 
   test('a handler refusal carries the field it is about', async () => {

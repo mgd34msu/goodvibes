@@ -267,3 +267,20 @@ test('recorded-submit recovery finishes the original durable hold before closing
   const disk: unknown = JSON.parse(readFileSync(join(f.root, 'budget.json'), 'utf8'));
   expect(disk).toMatchObject({ reservations: [], spend: [{ purchaseId: f.view.purchaseId }] });
 });
+
+test('a purchase with a record but neither hold nor spend cannot be saved as bought, and nothing is saved', async () => {
+  const f = await fixture(); await f.purchases.record(receipt(f));
+  f.budget.release(f.view.purchaseId);
+  await expect(f.reconcile('purchased')).rejects.toThrow('Nothing was saved');
+  expect(f.operations.get(f.view.purchaseId)?.outcome).toBeNull();
+  expect(f.operations.recover(f.view.purchaseId)?.reconciliation()).toBeNull();
+});
+
+test('repeating a confirmed finding after its receipt was pruned answers again instead of failing', async () => {
+  const f = await fixture();
+  const first = await f.reconcile('purchased');
+  const later = NOW + 100 * 24 * 60 * 60 * 1000, restarted = f.reopen(undefined, later);
+  restarted.budget.prune(later);
+  expect(restarted.budget.state().reconciliations ?? []).toHaveLength(0);
+  expect(await restarted.reconciliations.reconcile(f.view.purchaseId, f.view.operationId, 'purchased', 'pairing:admin', () => {})).toEqual(first);
+});

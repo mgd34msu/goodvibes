@@ -92,9 +92,21 @@ function makeFakePlayer(): { player: StreamingAudioPlayer; played: string[] } {
   return { player, played };
 }
 
+/** Lets the pipeline's promise chains run to rest; generous so a change in turn count does not matter. */
 async function drain(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Retry backoff timers the test fires by hand, so no test waits in real time. */
+function manualTimers() {
+  const scheduled = new Map<number, { readonly run: () => void; readonly delay: number }>();
+  let next = 1;
+  return {
+    setTimeout: ((run: () => void, delay: number) => { const id = next++; scheduled.set(id, { run, delay }); return id; }) as unknown as typeof setTimeout,
+    clearTimeout: ((id: number) => { scheduled.delete(id); }) as unknown as typeof clearTimeout,
+    pendingDelays: () => [...scheduled.values()].map((timer) => timer.delay),
+    fireAll: () => { const due = [...scheduled.values()]; scheduled.clear(); for (const timer of due) timer.run(); },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +261,7 @@ function semanticFailurePort(category: string, billing = false, errorText?: stri
 }
 
 function failingRuntime(error: unknown) {
+  const timers = manualTimers();
   const requests: VoiceSynthesisRequest[] = [];
   const { player, played } = makeFakePlayer();
   const events = makeFakeEvents();
@@ -262,8 +275,9 @@ function failingRuntime(error: unknown) {
     configManager: { get(key: string) { return key === 'ui.voiceEnabled' ? true : ''; } } as never,
     events: { turns: events.turns } as never,
     notify: (message) => messages.push(message), playerFactory: () => player,
+    setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
   });
-  return { runtime, requests, events, played, messages,
+  return { runtime, requests, events, played, messages, timers,
     speak(id = 'old') {
       events.emit('TURN_SUBMITTED', { type: 'TURN_SUBMITTED', turnId: id, prompt: id });
       events.emit('STREAM_DELTA', { type: 'STREAM_DELTA', turnId: id, content: `${id} answer.`, accumulated: `${id} answer.` });
@@ -287,7 +301,9 @@ describe('actual spoken wiring canonical retry semantics', () => {
     const h = failingRuntime(error);
     try {
       h.speak(); await drain();
-      if (retry) await new Promise((resolve) => setTimeout(resolve, 1100));
+      // A retryable failure waits on exactly one backoff timer; a terminal one schedules none.
+      expect(h.timers.pendingDelays()).toHaveLength(retry ? 1 : 0);
+      h.timers.fireAll();
       await drain();
       expect(fake.requests.map(request => request.context?.battery)).toEqual([...batteries]);
       expect(h.requests).toHaveLength(retry ? 2 : 1);
@@ -338,8 +354,11 @@ describe('actual spoken wiring canonical retry semantics', () => {
     const h = failingRuntime(new Error('The blue lantern is resting.'));
     try {
       h.speak(); await drain(); expect(fake.requests).toHaveLength(1);
+      expect(h.timers.pendingDelays()).toHaveLength(1);
       h.runtime.stop();
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      // Stopping cancels the backoff timer itself, so nothing is left to fire a retry.
+      expect(h.timers.pendingDelays()).toEqual([]);
+      h.timers.fireAll(); await drain();
       expect(h.requests).toHaveLength(1); expect(h.played).toEqual([]);
       expect(h.messages.filter((message) => message.includes('Skipping'))).toEqual([]);
     } finally { h.close(); installJudgmentPort(previous); }

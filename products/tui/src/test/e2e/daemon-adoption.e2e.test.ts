@@ -10,14 +10,15 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { bootDaemon, type BootedDaemon } from '@goodvibes-jev/engine/platform/daemon';
-import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, screenText, startStubModel, waitFor, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, launchTui, makeHome, screenText, startStubModel, waitFor, type E2EHome, type TuiSession } from './harness.ts';
 
 const TOKEN = 'e2e-shared-daemon-token';
 
 const model = startStubModel(() => ({ text: 'unused' }));
 let tui: TuiSession | null = null;
 let daemon: BootedDaemon | null = null;
-afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => daemon?.stop(), () => model.stop()));
+let ownedHome: E2EHome | null = null;
+afterAll(() => closeE2EFixture(ownedHome, () => tui?.stop(), () => daemon?.stop(), () => model.stop()));
 
 interface DaemonSession { readonly kind: string; readonly project: string; readonly surfaceKinds: readonly string[] }
 
@@ -30,6 +31,7 @@ async function daemonSessions(url: string): Promise<DaemonSession[]> {
 describe('daemon adoption', () => {
   test('a running daemon on the configured port is adopted, not replaced', async () => {
     const home = await makeHome(model);
+    ownedHome = home;
     daemon = await bootDaemon({
       homeDirectory: home.home,
       workingDir: home.workspace,

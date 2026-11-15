@@ -146,6 +146,9 @@ export function useChatStream({
   // inert for the rest of this turn. Distinct from the per-effect `cancelled` flag,
   // which handles the CROSS-effect case (session switch / retry / unmount).
   const stoppedRef = useRef(false);
+  // True from a local stop until the next send reopens the stream: the local stop
+  // leaves this connection inert, so the next turn would never be streamed.
+  const stoppedLocallyRef = useRef(false);
   const connectionOwner = useRef<object | null>(null);
   // Bumped by retryStream() to force a fresh connect after the platform's own
   // reconnect loop gives up (it never retries again on its own past onTerminate).
@@ -186,6 +189,7 @@ export function useChatStream({
   // The pre-1.4 behavior, kept as the honest fallback: stops RENDERING only.
   const stopLocally = useCallback(() => {
     stoppedRef.current = true;
+    stoppedLocallyRef.current = true;
     disconnectRef.current?.();
     disconnectRef.current = undefined;
     liveTextRef.current = '';
@@ -236,6 +240,15 @@ export function useChatStream({
   }, []);
 
   useEffect(() => {
+    if (!stoppedLocallyRef.current) return;
+    if (turnState === 'sending' || turnState === 'submitted' || turnState === 'sending while reconnecting') {
+      stoppedLocallyRef.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reopens the stream a local stop closed
+      setRetryNonce((n) => n + 1);
+    }
+  }, [turnState]);
+
+  useEffect(() => {
     if (!activeSessionId) return undefined;
     // Per-effect cancellation flag, the "epoch" of THIS connection instance. Set to
     // true by this effect's own cleanup and nothing else; a superseding effect (a
@@ -253,6 +266,7 @@ export function useChatStream({
     const owner = {};
     connectionOwner.current = owner;
     stoppedRef.current = false;
+    stoppedLocallyRef.current = false;
     disconnectRef.current = undefined;
     setLiveText('');
     liveTextRef.current = '';
@@ -300,7 +314,9 @@ export function useChatStream({
           // Routed through syncedSetTurnState (already an effect dependency) rather
           // than the raw setter so this stays in the same forwarding path as every
           // other turnState write below.
-          syncedSetTurnState((current) => (current === 'reconnecting' ? 'syncing' : current));
+          // 'stopping' too: a turn.cancelled sent while the stream was down is never
+          // replayed, so the refreshed history has to settle it.
+          syncedSetTurnState((current) => (current === 'reconnecting' || current === 'stopping' ? 'syncing' : current));
           setTurnError((current) => (current.startsWith('Reconnecting to the live stream') ? '' : current));
         }
       },
@@ -482,7 +498,9 @@ export function useChatStream({
       onReconnect: ({ attempt, delayMs }) => {
         if (cancelled || stoppedRef.current) return;
         hadDrop = true;
-        syncedSetTurnState('reconnecting');
+        // Not over a pending Stop: the turn is still being stopped, the stream is
+        // only the channel that reports it.
+        syncedSetTurnState((current) => nextTurnStatus(current, 'reconnecting'));
         setTurnError(
           `Reconnecting to the live stream: attempt ${attempt} of ${DEFAULT_SSE_RECONNECT.maxAttempts} `
           + `(next try in ${Math.max(1, Math.round(delayMs / 1000))}s)…`,

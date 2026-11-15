@@ -5,7 +5,7 @@ import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
 import { getOnboardingRuntimeStatePath, getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath } from '../runtime/onboarding/index.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
-import { setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
+import { listEveryArtifact, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogContextPaths, captureCatalogFile } from './agent-harness-stateful-catalog-source.ts';
 
@@ -110,8 +110,8 @@ export function captureSetupReadSource(context: CommandContext): () => void {
   const artifactStore = setupSmokeArtifactStore(context);
   if (artifactStore?.list) {
     const listCurrent = captureCatalogMethods(artifactStore, ['list']), list = artifactStore.list;
-    const records = captureCatalogSnapshot(list.call(artifactStore, 100));
-    retain(() => { listCurrent(); records.assertCurrent(list.call(artifactStore, 100)); listCurrent(); });
+    const records = captureCatalogSnapshot(listEveryArtifact((limit) => list.call(artifactStore, limit)));
+    retain(() => { listCurrent(); records.assertCurrent(listEveryArtifact((limit) => list.call(artifactStore, limit))); listCurrent(); });
   }
   assertCurrent(); return assertCurrent;
 }

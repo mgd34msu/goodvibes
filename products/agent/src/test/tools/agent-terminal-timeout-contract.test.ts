@@ -145,7 +145,11 @@ describe('terminal: deterministic timeout arithmetic and explicit flags', () => 
   test('only boolean and exact string kill overrides win', () => {
     for (const value of [true, 'true']) expect(resolveKillOnTimeout(args({ killOnTimeout: value }), 'long_lived')).toBe(true);
     for (const value of [false, 'false']) expect(resolveKillOnTimeout(args({ killOnTimeout: value }), 'command')).toBe(false);
-    for (const value of ['TRUE', ' false ', 0, 1, '', null]) expect(resolveKillOnTimeout(args({ killOnTimeout: value }), 'command')).toBe(true);
+    for (const value of ['', null, undefined]) expect(resolveKillOnTimeout(args({ killOnTimeout: value }), 'command')).toBe(true);
+    for (const value of ['', null, undefined]) expect(resolveKillOnTimeout(args({ killOnTimeout: value }), 'long_lived')).toBe(false);
+    expect(resolveKillOnTimeout(args({ killOnTimeout: 'TRUE' }), 'long_lived')).toBe(true);
+    expect(resolveKillOnTimeout(args({ killOnTimeout: ' false ' }), 'command')).toBe(false);
+    for (const value of [0, 1, 'yes']) expect(() => resolveKillOnTimeout(args({ killOnTimeout: value }), 'command')).toThrow('killOnTimeout must be true or false');
     expect(resolveKillOnTimeout(args({ fields: { killOnTimeout: 'false' } }), 'command')).toBe(false);
     expect(resolveKillOnTimeout(args({ killOnTimeout: true, fields: { killOnTimeout: 'false' } }), 'command')).toBe(true);
   });
@@ -153,10 +157,13 @@ describe('terminal: deterministic timeout arithmetic and explicit flags', () => 
     expect(clampTimeout(undefined, DEFAULT_BACKGROUND_TIMEOUT_MS)).toBe(0);
     expect(clampTimeout(1, 5000)).toBe(1);
     expect(clampTimeout('120000.9', 5000)).toBe(120000);
-    expect(() => clampTimeout(-1, 5000)).toThrow('runtime timer range');
+    expect(() => clampTimeout(-1, 5000)).toThrow('0 or greater');
     expect(clampTimeout(MAX_BACKGROUND_TIMEOUT_MS, 5000)).toBe(MAX_BACKGROUND_TIMEOUT_MS);
     expect(() => clampTimeout(Number.MAX_SAFE_INTEGER, 5000)).toThrow('runtime timer range');
-    expect(clampTimeout(NaN, 5000)).toBe(5000);
+    expect(clampTimeout(null, 5000)).toBe(5000);
+    expect(clampTimeout('', 5000)).toBe(5000);
+    // A deadline that was asked for but cannot be read is refused rather than replaced by "no deadline".
+    for (const value of ['30s', NaN, {}, [], true]) expect(() => clampTimeout(value, 0)).toThrow('timeoutMs must be a number of milliseconds');
   });
   test('OS exit status, timeout flag, and elapsed time remain mechanical', () => {
     const process = (extra: object) => ({ done: true, exitCode: null, startTime: 100, ...extra }) as BackgroundProcess;

@@ -1,0 +1,140 @@
+{
+  ".": [
+    {
+      "name": "KnownEndpointArgs",
+      "kind": "type",
+      "text": "export type KnownEndpointArgs<TEndpointId extends PeerTypedEndpointId> = MethodArgs<PeerEndpointInput<TEndpointId>, PeerRemoteClientInvokeOptions>; ;; via MethodArgs = export type MethodArgs<TInput, TOptions> = [ TInput ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions]; ;; PeerEndpointInput = export type PeerEndpointInput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointInputMap ? PeerEndpointInputMap[TEndpointId] : { readonly [key: string]: unknown; }; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId;"
+    },
+    {
+      "name": "KnownPathEndpointArgs",
+      "kind": "type",
+      "text": "export type KnownPathEndpointArgs<TEndpointId extends PeerTypedEndpointId, TKeys extends PropertyKey> = MethodArgs<WithoutKeys<PeerEndpointInput<TEndpointId>, TKeys>, PeerRemoteClientInvokeOptions>; ;; via MethodArgs = export type MethodArgs<TInput, TOptions> = [ TInput ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions]; ;; PeerEndpointInput = export type PeerEndpointInput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointInputMap ? PeerEndpointInputMap[TEndpointId] : { readonly [key: string]: unknown; }; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId; ;; PropertyKey = declare type PropertyKey = string | number | symbol; ;; WithoutKeys = export type WithoutKeys<TInput, TKeys extends PropertyKey> = [ TInput ] extends [undefined] ? undefined : TInput extends object ? OmitNamed<TInput, TKeys> : TInput;"
+    },
+    {
+      "name": "PeerApiClient",
+      "kind": "type",
+      "text": "export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointId = export type PeerEndpointId = typeof PEER_ENDPOINT_IDS[number]; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "PeerApiClientBehaviorOptions",
+      "kind": "interface",
+      "text": "export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+    },
+    {
+      "name": "PeerApiClientOptions",
+      "kind": "type",
+      "text": "export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions; ;; via HttpTransportOptions = export type HttpTransportOptions = HttpJsonTransportOptions;"
+    },
+    {
+      "name": "PeerInvokeOptions",
+      "kind": "interface",
+      "text": "export interface PeerInvokeOptions extends PeerRemoteClientInvokeOptions { }"
+    },
+    {
+      "name": "PeerRemoteClient",
+      "kind": "interface",
+      "required": [
+        "contract",
+        "getOperation",
+        "invoke",
+        "listOperations",
+        "operator",
+        "pairing",
+        "peer",
+        "transport",
+        "work"
+      ],
+      "text": "export interface PeerRemoteClient { readonly transport: HttpTransport; readonly contract: PeerContractManifest; listOperations(): readonly PeerEndpointContract[]; getOperation(endpointId: string): PeerEndpointContract; invoke<TEndpointId extends PeerTypedEndpointId>(endpointId: TEndpointId, ...args: KnownEndpointArgs<TEndpointId>): Promise<PeerEndpointOutput<TEndpointId>>; invoke<T = unknown>(endpointId: string, input?: Record<string, unknown>, options?: PeerRemoteClientInvokeOptions): Promise<T>; readonly pairing: { request(...args: KnownEndpointArgs<'pair.request'>): Promise<PeerEndpointOutput<'pair.request'>>; verify(...args: KnownEndpointArgs<'pair.verify'>): Promise<PeerEndpointOutput<'pair.verify'>>; }; readonly peer: { heartbeat(...args: KnownEndpointArgs<'peer.heartbeat'>): Promise<PeerEndpointOutput<'peer.heartbeat'>>; }; readonly work: { pull(...args: KnownEndpointArgs<'work.pull'>): Promise<PeerEndpointOutput<'work.pull'>>; complete(workId: string, ...args: KnownPathEndpointArgs<'work.complete', 'workId'>): Promise<PeerEndpointOutput<'work.complete'>>; }; readonly operator: { snapshot(...args: KnownEndpointArgs<'operator.snapshot'>): Promise<PeerEndpointOutput<'operator.snapshot'>>; }; } ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; PeerContractManifest = export interface PeerContractManifest { readonly schemaVersion: 1; readonly transport: 'http-json'; readonly basePath: '/api/remote'; readonly peerKinds: readonly DistributedPeerKind[]; readonly workTypes: readonly DistributedWorkType[]; readonly scopes: readonly string[]; readonly recommendedHeartbeatMs: number; readonly recommendedWorkPullMs: number; readonly endpoints: readonly PeerEndpointContract[]; readonly workCompletionStatuses: readonly DistributedWorkStatus[]; readonly metadata: Record<string, unknown>; } ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointOutput = export type PeerEndpointOutput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointOutputMap ? PeerEndpointOutputMap[TEndpointId] : unknown; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "PeerRemoteClientInvokeOptions",
+      "kind": "interface",
+      "text": "export interface PeerRemoteClientInvokeOptions extends ContractInvokeOptions { }"
+    },
+    {
+      "name": "PeerRemoteClientOptions",
+      "kind": "interface",
+      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; }"
+    },
+    {
+      "name": "createPeerApiClient",
+      "kind": "function",
+      "text": "export declare function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;"
+    },
+    {
+      "name": "createPeerRemoteClient",
+      "kind": "function",
+      "text": "export declare function createPeerRemoteClient(transport: HttpTransport, contract: PeerContractManifest, clientOptions?: PeerRemoteClientOptions): PeerRemoteClient; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; PeerContractManifest = export interface PeerContractManifest { readonly schemaVersion: 1; readonly transport: 'http-json'; readonly basePath: '/api/remote'; readonly peerKinds: readonly DistributedPeerKind[]; readonly workTypes: readonly DistributedWorkType[]; readonly scopes: readonly string[]; readonly recommendedHeartbeatMs: number; readonly recommendedWorkPullMs: number; readonly endpoints: readonly PeerEndpointContract[]; readonly workCompletionStatuses: readonly DistributedWorkStatus[]; readonly metadata: Record<string, unknown>; }"
+    }
+  ],
+  "./client": [
+    {
+      "name": "PeerApiClient",
+      "kind": "type",
+      "text": "export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & { readonly transport: HttpTransport; getOperation(endpointId: PeerEndpointId): PeerEndpointContract; dispose(): void; asyncDispose(): Promise<void>; [Symbol.dispose](): void; [Symbol.asyncDispose](): Promise<void>; }; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointId = export type PeerEndpointId = typeof PEER_ENDPOINT_IDS[number]; ;; PeerRemoteClient = export interface PeerRemoteClient { readonly transport: HttpTransport; readonly contract: PeerContractManifest; listOperations(): readonly PeerEndpointContract[]; getOperation(endpointId: string): PeerEndpointContract; invoke<TEndpointId extends PeerTypedEndpointId>(endpointId: TEndpointId, ...args: KnownEndpointArgs<TEndpointId>): Promise<PeerEndpointOutput<TEndpointId>>; invoke<T = unknown>(endpointId: string, input?: Record<string, unknown>, options?: PeerRemoteClientInvokeOptions): Promise<T>; readonly pairing: { request(...args: KnownEndpointArgs<'pair.request'>): Promise<PeerEndpointOutput<'pair.request'>>; verify(...args: KnownEndpointArgs<'pair.verify'>): Promise<PeerEndpointOutput<'pair.verify'>>; }; readonly peer: { heartbeat(...args: KnownEndpointArgs<'peer.heartbeat'>): Promise<PeerEndpointOutput<'peer.heartbeat'>>; }; readonly work: { pull(...args: KnownEndpointArgs<'work.pull'>): Promise<PeerEndpointOutput<'work.pull'>>; complete(workId: string, ...args: KnownPathEndpointArgs<'work.complete', 'workId'>): Promise<PeerEndpointOutput<'work.complete'>>; }; readonly operator: { snapshot(...args: KnownEndpointArgs<'operator.snapshot'>): Promise<PeerEndpointOutput<'operator.snapshot'>>; }; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "PeerApiClientBehaviorOptions",
+      "kind": "interface",
+      "text": "export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; } ;; via PeerRemoteClientOptions = export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; }"
+    },
+    {
+      "name": "PeerApiClientOptions",
+      "kind": "type",
+      "text": "export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions; ;; via HttpTransportOptions = export type HttpTransportOptions = HttpJsonTransportOptions;"
+    },
+    {
+      "name": "PeerInvokeOptions",
+      "kind": "interface",
+      "text": "export interface PeerInvokeOptions extends PeerRemoteClientInvokeOptions { }"
+    },
+    {
+      "name": "createPeerApiClient",
+      "kind": "function",
+      "text": "export declare function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;"
+    }
+  ],
+  "./client-core": [
+    {
+      "name": "KnownEndpointArgs",
+      "kind": "type",
+      "text": "export type KnownEndpointArgs<TEndpointId extends PeerTypedEndpointId> = MethodArgs<PeerEndpointInput<TEndpointId>, PeerRemoteClientInvokeOptions>; ;; via MethodArgs = export type MethodArgs<TInput, TOptions> = [ TInput ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions]; ;; PeerEndpointInput = export type PeerEndpointInput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointInputMap ? PeerEndpointInputMap[TEndpointId] : { readonly [key: string]: unknown; }; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId;"
+    },
+    {
+      "name": "KnownPathEndpointArgs",
+      "kind": "type",
+      "text": "export type KnownPathEndpointArgs<TEndpointId extends PeerTypedEndpointId, TKeys extends PropertyKey> = MethodArgs<WithoutKeys<PeerEndpointInput<TEndpointId>, TKeys>, PeerRemoteClientInvokeOptions>; ;; via MethodArgs = export type MethodArgs<TInput, TOptions> = [ TInput ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions]; ;; PeerEndpointInput = export type PeerEndpointInput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointInputMap ? PeerEndpointInputMap[TEndpointId] : { readonly [key: string]: unknown; }; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId; ;; PropertyKey = declare type PropertyKey = string | number | symbol; ;; WithoutKeys = export type WithoutKeys<TInput, TKeys extends PropertyKey> = [ TInput ] extends [undefined] ? undefined : TInput extends object ? OmitNamed<TInput, TKeys> : TInput;"
+    },
+    {
+      "name": "PeerRemoteClient",
+      "kind": "interface",
+      "required": [
+        "contract",
+        "getOperation",
+        "invoke",
+        "listOperations",
+        "operator",
+        "pairing",
+        "peer",
+        "transport",
+        "work"
+      ],
+      "text": "export interface PeerRemoteClient { readonly transport: HttpTransport; readonly contract: PeerContractManifest; listOperations(): readonly PeerEndpointContract[]; getOperation(endpointId: string): PeerEndpointContract; invoke<TEndpointId extends PeerTypedEndpointId>(endpointId: TEndpointId, ...args: KnownEndpointArgs<TEndpointId>): Promise<PeerEndpointOutput<TEndpointId>>; invoke<T = unknown>(endpointId: string, input?: Record<string, unknown>, options?: PeerRemoteClientInvokeOptions): Promise<T>; readonly pairing: { request(...args: KnownEndpointArgs<'pair.request'>): Promise<PeerEndpointOutput<'pair.request'>>; verify(...args: KnownEndpointArgs<'pair.verify'>): Promise<PeerEndpointOutput<'pair.verify'>>; }; readonly peer: { heartbeat(...args: KnownEndpointArgs<'peer.heartbeat'>): Promise<PeerEndpointOutput<'peer.heartbeat'>>; }; readonly work: { pull(...args: KnownEndpointArgs<'work.pull'>): Promise<PeerEndpointOutput<'work.pull'>>; complete(workId: string, ...args: KnownPathEndpointArgs<'work.complete', 'workId'>): Promise<PeerEndpointOutput<'work.complete'>>; }; readonly operator: { snapshot(...args: KnownEndpointArgs<'operator.snapshot'>): Promise<PeerEndpointOutput<'operator.snapshot'>>; }; } ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; PeerContractManifest = export interface PeerContractManifest { readonly schemaVersion: 1; readonly transport: 'http-json'; readonly basePath: '/api/remote'; readonly peerKinds: readonly DistributedPeerKind[]; readonly workTypes: readonly DistributedWorkType[]; readonly scopes: readonly string[]; readonly recommendedHeartbeatMs: number; readonly recommendedWorkPullMs: number; readonly endpoints: readonly PeerEndpointContract[]; readonly workCompletionStatuses: readonly DistributedWorkStatus[]; readonly metadata: Record<string, unknown>; } ;; PeerEndpointContract = export interface PeerEndpointContract { readonly id: string; readonly method: 'GET' | 'POST'; readonly path: string; readonly auth: 'none' | 'bearer-peer-token' | 'bearer-operator-token'; readonly requiredScope?: string | undefined; readonly description: string; readonly inputSchema?: JsonSchema | undefined; readonly outputSchema?: JsonSchema | undefined; readonly idempotent?: boolean | undefined; } ;; PeerEndpointOutput = export type PeerEndpointOutput<TEndpointId extends PeerTypedEndpointId> = TEndpointId extends keyof PeerEndpointOutputMap ? PeerEndpointOutputMap[TEndpointId] : unknown; ;; PeerTypedEndpointId = export type PeerTypedEndpointId = PeerEndpointId; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "PeerRemoteClientInvokeOptions",
+      "kind": "interface",
+      "text": "export interface PeerRemoteClientInvokeOptions extends ContractInvokeOptions { }"
+    },
+    {
+      "name": "PeerRemoteClientOptions",
+      "kind": "interface",
+      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; }"
+    },
+    {
+      "name": "createPeerRemoteClient",
+      "kind": "function",
+      "text": "export declare function createPeerRemoteClient(transport: HttpTransport, contract: PeerContractManifest, clientOptions?: PeerRemoteClientOptions): PeerRemoteClient; ;; via HttpTransport = export type HttpTransport = HttpJsonTransport; ;; PeerContractManifest = export interface PeerContractManifest { readonly schemaVersion: 1; readonly transport: 'http-json'; readonly basePath: '/api/remote'; readonly peerKinds: readonly DistributedPeerKind[]; readonly workTypes: readonly DistributedWorkType[]; readonly scopes: readonly string[]; readonly recommendedHeartbeatMs: number; readonly recommendedWorkPullMs: number; readonly endpoints: readonly PeerEndpointContract[]; readonly workCompletionStatuses: readonly DistributedWorkStatus[]; readonly metadata: Record<string, unknown>; }"
+    }
+  ]
+}

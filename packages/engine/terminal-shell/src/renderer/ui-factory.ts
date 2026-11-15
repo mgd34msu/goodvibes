@@ -6,7 +6,8 @@ import { activeTheme, activeTokens, activeUiTones } from './theme.js';
 import { renderQueuedMessageList, renderMemoryProvenanceChip, type MemoryProvenanceEntry } from './composer-fragments.js';
 import { renderUserMessage } from './user-message.js';
 import { waitingPhrase, type WaitingState } from '@goodvibes-jev/engine/platform/platform/presentation';
-const THINKING_STALL_FREEZE_MS = 2500;
+/** Silence after the last delta, in milliseconds, at which the thinking line starts reporting a stall. */
+export const THINKING_STALL_FREEZE_MS = 2500;
 export interface ThinkingStallInfo {
     /** Ms since the last STREAM_DELTA (or STREAM_START if none yet this turn). */
     readonly msSinceLastDelta: number;

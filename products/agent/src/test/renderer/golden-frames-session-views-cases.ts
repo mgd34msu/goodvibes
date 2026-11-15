@@ -149,6 +149,8 @@ const FRAMES: ReadonlyArray<{
   },
 ];
 
+export const SESSION_VIEW_GOLDEN_NAMES: readonly string[] = FRAMES.map((frame) => frame.name);
+
 export function defineSessionViewGoldens(
   THEME: "goodvibes" | "goodvibes-neon",
 ): void {

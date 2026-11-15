@@ -91,13 +91,12 @@ export class LlamaCppProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
+    // The compat provider retries and records the call itself; wrapping it
+    // again would square the attempts and count the call twice.
+    if (!shouldUseNonStreamingLlamaCpp(params)) return this.compatProvider.chat(params);
     return (await instrumentedLlmCall(
-      () => withRetry(async () => {
-      if (!shouldUseNonStreamingLlamaCpp(params)) {
-        return this.compatProvider.chat(params);
-      }
-      return this.chatViaNonStreamingCompat(params, params.model || this.defaultModel);
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry), { provider: this.name, model: params.model || this.defaultModel })).result;
+      () => withRetry(async () => this.chatViaNonStreamingCompat(params, params.model || this.defaultModel),
+        { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry), { provider: this.name, model: params.model || this.defaultModel })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {

@@ -22,7 +22,6 @@ const snapshot = (text: string) => ({ messages: [{ role: 'user', content: text }
 const files = (directory: string) => fs.readdirSync(directory).filter(name => name.startsWith('recovery-') && name.endsWith('.jsonl'));
 function age(path: string) { const at = new Date(Date.now() - 600_000); fs.utimesSync(path, at, at); }
 
-// Source regressions only. Execution is deliberately deferred until coding completes.
 test('arbitrary private IDs use opaque persisted names; safe paths and restart lookup retain their identities without SHA', () => {
   const f = fixture(), id = 'private/🔒/4111111111111111';
   const hash = spyOn(crypto, 'createHash'), bunHash = spyOn(Bun.CryptoHasher, 'hash');

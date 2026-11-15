@@ -93,15 +93,35 @@ export interface VerifyResult {
  */
 export function canonicalise(value: unknown): string {
   if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? 'null';
   }
   if (Array.isArray(value)) {
-    return '[' + value.map(canonicalise).join(',') + ']';
+    // JSON turns an undefined element into null, so a bundle written to a file and read back signs the same.
+    return '[' + value.map((item) => canonicalise(item === undefined ? null : item)).join(',') + ']';
   }
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  // JSON drops an undefined property, so the signed form must too.
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
   const pairs = keys.map((k) => `${JSON.stringify(k)}:${canonicalise(obj[k])}`);
   return '{' + pairs.join(',') + '}';
+}
+
+/** The shortest HMAC key accepted: 16 bytes (32 hex characters). */
+const MIN_SIGNING_KEY_BYTES = 16;
+
+/**
+ * resolveSigningKey, Turns a hex string or Buffer into HMAC key bytes.
+ * A string that is not whole-byte hex, or a key under 16 bytes, is refused: `Buffer.from(text, 'hex')`
+ * would otherwise turn a passphrase into a short or empty key without a word.
+ */
+export function resolveSigningKey(key: Buffer | string): Buffer {
+  const bytes = typeof key === 'string'
+    ? (/^(?:[0-9a-f]{2})+$/i.test(key) ? Buffer.from(key, 'hex') : null)
+    : key;
+  if (bytes === null || bytes.length < MIN_SIGNING_KEY_BYTES) {
+    throw new Error(`Policy signing key must be hex text of at least ${MIN_SIGNING_KEY_BYTES} bytes (${MIN_SIGNING_KEY_BYTES * 2} hex characters).`);
+  }
+  return bytes;
 }
 
 // ── Signing ───────────────────────────────────────────────────────────────────
@@ -126,7 +146,7 @@ export function signBundle<T>(
   const issuedAt = new Date().toISOString();
   const composite = { bundleId, issuedAt, issuer, payload };
   const canonical = canonicalise(composite);
-  const keyBuf = typeof key === 'string' ? Buffer.from(key, 'hex') : key;
+  const keyBuf = resolveSigningKey(key);
   const signature = createHmac('sha256', keyBuf)
     .update(canonical, 'utf8')
     .digest('hex');
@@ -188,10 +208,10 @@ export function verifyBundle<T>(
     payload: bundle.payload,
   };
   const canonical = canonicalise(composite);
-  const keyBuf = typeof key === 'string' ? Buffer.from(key, 'hex') : key;
 
   let expected: Buffer;
   try {
+    const keyBuf = resolveSigningKey(key);
     expected = createHmac('sha256', keyBuf)
       .update(canonical, 'utf8')
       .digest();

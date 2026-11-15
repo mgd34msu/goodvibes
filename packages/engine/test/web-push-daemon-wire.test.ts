@@ -23,6 +23,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { allowLocalPushEndpoints } from './_helpers/local-push-endpoints.ts';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +51,7 @@ interface CapturedPush {
   readonly body: Buffer;
 }
 const captured: CapturedPush[] = [];
+allowLocalPushEndpoints();
 let sink: ReturnType<typeof Bun.serve>;
 let sinkOrigin: string;
 
@@ -285,11 +287,19 @@ describe('web push: registration refuses what could never receive a push', () =>
     expect(JSON.stringify(json)).toContain('longer than 2048 characters');
   });
 
-  test('none of the refused registrations were stored', async () => {
-    const { json } = await invokeVerb('push.subscriptions.list');
-    const subs = json.subscriptions as Array<{ id: string; endpointOrigin: string }>;
-    // Everything present came from a valid registration; nothing junk landed.
-    expect(subs.every((s) => typeof s.id === 'string' && s.id.length > 0 && typeof s.endpointOrigin === 'string')).toBe(true);
+  test('refused registrations are not stored', async () => {
+    const listIds = async () => {
+      const { json } = await invokeVerb('push.subscriptions.list');
+      return (json.subscriptions as Array<{ id: string }>).map((s) => s.id).sort();
+    };
+    const before = await listIds();
+    const refused = [
+      { endpoint: `${sinkOrigin}/push/never-stored-key`, keys: { p256dh: 'not-base64!!!!', auth } },
+      { endpoint: `${sinkOrigin}/push/never-stored-auth`, keys: { p256dh, auth: 'x' } },
+      { endpoint: `${sinkOrigin}/push/${'x'.repeat(50_000)}`, keys: { p256dh, auth } },
+    ];
+    for (const body of refused) expect((await invokeVerb('push.subscriptions.create', body)).status).toBe(400);
+    expect(await listIds()).toEqual(before);
   });
 });
 
@@ -419,11 +429,11 @@ describe('web push: VAPID private key custody', () => {
     expect(typeof privateD).toBe('string');
     expect((privateD as string).length).toBeGreaterThan(0);
 
-    // The private component must NOT appear anywhere in a config/settings file.
-    const configFiles = collectFiles([home, work]).filter((f) => /settings\.json$|config\.json$/.test(f.path));
-    for (const cfg of configFiles) {
-      expect(cfg.text).not.toContain(privateD as string);
-    }
+    // The private component must appear in NO file under either root in
+    // plaintext (it reaches disk only encrypted, through the SecretsManager).
+    const onDisk = collectFiles([home, work]);
+    expect(onDisk.length).toBeGreaterThan(0);
+    expect(onDisk.filter((f) => f.text.includes(privateD as string)).map((f) => f.path)).toEqual([]);
 
     // And no read verb ever exposed it: re-check the public-key read surface.
     const vapid = await invokeVerb('push.vapid.get');

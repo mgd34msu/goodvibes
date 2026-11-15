@@ -11,6 +11,7 @@ import {
 import type { PermissionCheckResult } from '../../../permissions/types.js';
 import { buildToolDenial, buildDenialErrorMessage } from '../../../permissions/denial.js';
 import { summarizeError } from '../../../utils/error-display.js';
+import { repairRecordArguments } from './execute.js';
 
 /**
  * permission, Phase 3 of the tool execution pipeline.
@@ -19,7 +20,8 @@ import { summarizeError } from '../../../utils/error-display.js';
  * the phase aborts and no further phases are run.
  *
  * The resolved args used here account for any input updates from the
- * prehook phase (stored as `_updatedArgs` on the record).
+ * prehook phase and for auto-repair (both stored as `_updatedArgs` on the
+ * record), so the approval covers the arguments the tool will actually receive.
  */
 /**
  * Build the aborting permission-denied phase result, carrying structured,
@@ -48,24 +50,27 @@ function deniedPhaseResult(
 
 export async function permissionPhase(
   call: ToolCall,
-  _tool: Tool,
+  tool: Tool,
   context: ToolRuntimeContext,
   record: ToolExecutionRecord,
 ): Promise<PhaseResult> {
   const start = performance.now();
 
-  // Use updated args from prehook if present
-  const effectiveArgs = record._updatedArgs ?? call.arguments;
+  // Approve what will run: repair renames argument keys, so asking about the
+  // pre-repair arguments could approve a weaker reading of the same call.
+  const effectiveArgs = await repairRecordArguments(call, tool, record);
 
   const resolvePermissionResult = async (): Promise<PermissionCheckResult> => {
     const manager = context.permissionManager as unknown as {
-      checkDetailed?: ((toolName: string, args: Record<string, unknown>) => Promise<PermissionCheckResult>) | undefined;
+      checkDetailed?: ((toolName: string, args: Record<string, unknown>, attribution?: undefined, options?: { readonly dangerous: true }) => Promise<PermissionCheckResult>) | undefined;
       check?: ((toolName: string, args: Record<string, unknown>) => Promise<boolean>) | undefined;
       getCategory: (toolName: string) => string;
     };
 
     if (typeof manager.checkDetailed === 'function') {
-      return manager.checkDetailed(call.name, effectiveArgs);
+      return tool.definition.dangerous === true
+        ? manager.checkDetailed(call.name, effectiveArgs, undefined, { dangerous: true })
+        : manager.checkDetailed(call.name, effectiveArgs);
     }
 
     if (typeof manager.check === 'function') {

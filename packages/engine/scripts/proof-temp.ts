@@ -3,13 +3,23 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
 
-/** Completed proof logs and explicitly retained failed projects are evidence, not abandoned scratch. */
+/** Failed proof runs and explicitly selected workspaces are evidence, not abandoned scratch. */
 export const PROOF_RETAINED_MARKER = '.keep-proof-output';
 /** Longer than the live proof deadlines, so a healthy concurrent proof stays untouched. */
 export const STALE_PROOF_TMP_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function retainProofOutput(directory: string): void {
   writeFileSync(join(directory, PROOF_RETAINED_MARKER), 'This proof output was kept intentionally. Remove it when it is no longer needed.\n');
+}
+
+/**
+ * A proof run's scratch is evidence only when something went wrong (or the
+ * person chose the directory, which is retained when it is selected). A passing
+ * run on default scratch is left to age out, so repeated runs do not pile up
+ * sqlite logs that the sweep would never reclaim.
+ */
+export function settleProofWorkspace(workspace: string, passed: boolean): void {
+  if (!passed) retainProofOutput(workspace);
 }
 
 function retainManagedAncestor(root: string, workspace: string): void {

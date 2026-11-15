@@ -67,7 +67,9 @@ export function formatReminderScheduleSuccess(result: ReminderScheduleSuccess): 
   const id = readString(record, 'id') ?? '(unknown)';
   const status = readString(record, 'status') ?? (record.enabled === false ? 'paused' : 'enabled');
   return [
-    'Created GoodVibes schedule for Agent reminder',
+    result.alreadyExisted
+      ? 'GoodVibes schedule for Agent reminder already exists; nothing new was created'
+      : 'Created GoodVibes schedule for Agent reminder',
     `  schedule ${id}`,
     `  status ${status}`,
     `  route ${result.kind} ${result.route}`,

@@ -8,9 +8,11 @@
  * lifted here verbatim so every store that shares that defect is pinned by the
  * same technique instead of a third one. The failure it reproduces happened on
  * a 2-vCPU CI runner, where one write was slow because two fsyncs were
- * contending; `delayNextMs` makes a write slow ON PURPOSE, so the same
- * interleaving happens deterministically on an idle machine rather than when a
- * loaded box happens to produce it.
+ * contending; `holdNext()` makes a write slow ON PURPOSE by parking it on a
+ * gate the test releases, so the same interleaving happens deterministically
+ * on an idle machine rather than when a loaded box happens to produce it. A
+ * gate, unlike a timer, cannot elapse early on a loaded host: the write stays
+ * in flight until the test has issued the competing call.
  *
  * Everything below the knob is the real `PersistentStore`, so the atomic rename
  * being raced is the actual one and not a model of it.
@@ -21,8 +23,18 @@ import { join } from 'node:path';
 import { PersistentStore } from '../../platform/src/platform/state/persistent-store.js';
 
 export class ControllableStore<T extends Record<string, unknown>> extends PersistentStore<T> {
-  /** Applied to the next write only, before it reaches the disk. */
+  /** Timer-based slowdown for the next write only. Prefer `holdNext()`. */
   delayNextMs = 0;
+  private gate: Promise<void> | null = null;
+  /**
+   * Park the next write, after its bytes are captured, until the returned
+   * function is called. Consumed by that write.
+   */
+  holdNext(): () => void {
+    let release: () => void = () => {};
+    this.gate = new Promise<void>((resolve) => { release = resolve; });
+    return release;
+  }
   /** The next write rejects instead of writing. Consumed by that write. */
   failNext = false;
   /**
@@ -57,9 +69,12 @@ export class ControllableStore<T extends Record<string, unknown>> extends Persis
     this.failNext = false;
     const delay = this.delayNextMs;
     this.delayNextMs = 0;
+    const gate = this.gate;
+    this.gate = null;
     // Exactly the projection `persist` itself would write, taken now.
     const captured = JSON.parse(JSON.stringify(data)) as T;
     try {
+      if (gate) await gate;
       if (delay > 0) await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
       if (fail) throw new Error('store unavailable');
       await super.persist(captured, options);
@@ -67,6 +82,29 @@ export class ControllableStore<T extends Record<string, unknown>> extends Persis
       this.finished += 1;
     }
   }
+}
+
+/**
+ * Give a competing write the chance to run while a held write is parked.
+ *
+ * With a write queue the competing call waits behind the held write and never
+ * reaches the store, so this runs its bounded number of event-loop turns and
+ * returns. Without one, the competing write starts and finishes inside those
+ * turns, and this returns as soon as it has, so the test then releases the held
+ * write AFTER it, which is the order that puts the stale bytes on disk.
+ * `heldWrites` is how many writes have started, the held one included.
+ */
+export async function settleCompetingWrite(
+  store: { readonly started: number; readonly finished: number },
+  heldWrites: number,
+): Promise<void> {
+  const turn = (): Promise<void> => new Promise<void>((resolve) => { setImmediate(resolve); });
+  const settled = (): boolean => store.started > heldWrites && store.finished >= store.started - 1;
+  for (let i = 0; i < 200 && !settled(); i += 1) await turn();
+  // A competing write that has started but is still mid-fsync must be waited
+  // out: returning early releases the held write first and the stale bytes
+  // land last only by luck. Give up only if none ever started.
+  while (store.started > heldWrites && !settled()) await turn();
 }
 
 export interface ControllableStoreFixture<T extends Record<string, unknown>> {

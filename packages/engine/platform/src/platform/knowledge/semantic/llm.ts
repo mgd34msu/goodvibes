@@ -112,13 +112,14 @@ class SemanticLlmLimiter {
       this.active += 1;
       return;
     }
+    // The releasing task hands its slot over without freeing it, so a run()
+    // started before this continuation resumes cannot slip in as an extra.
     await new Promise<void>((resolve) => this.queue.push(resolve));
-    this.active += 1;
   }
 
   private release(): void {
-    this.active = Math.max(0, this.active - 1);
     const next = this.queue.shift();
     if (next) next();
+    else this.active = Math.max(0, this.active - 1);
   }
 }

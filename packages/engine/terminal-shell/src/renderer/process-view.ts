@@ -122,19 +122,33 @@ function markMatches(line: Line, text: string, query: string, bg: string): void 
   }
 }
 
-/** The largest scrollFromBottom that still shows rows. */
-export function processMaxScroll(rowCount: number, height: number): number {
-  return Math.max(0, rowCount - Math.max(1, height - 3));
+/**
+ * Rows of log the view can show at once. When the log dropped lines off its
+ * front, one row is kept for the "no longer kept" notice, which is drawn
+ * whenever the view reaches the first row.
+ */
+function visibleLogRows(height: number, dropped: number): number {
+  const rows = Math.max(1, height - 3);
+  return dropped > 0 && rows > 1 ? rows - 1 : rows;
+}
+
+/** The largest scrollFromBottom that still shows rows (pass `dropped` so the notice row can be scrolled to). */
+export function processMaxScroll(rowCount: number, height: number, dropped = 0): number {
+  return Math.max(0, rowCount - visibleLogRows(height, dropped));
 }
 
 export function renderProcessView(input: ProcessViewInput): Line[] {
   const t = activeTokens();
   const { width } = input;
-  const logRows = Math.max(1, input.height - 3);
+  const dropped = input.dropped ?? 0;
   const end = width - 3;
-  const scroll = Math.max(0, Math.min(input.scrollFromBottom, processMaxScroll(input.rows.length, input.height)));
+  const scroll = Math.max(0, Math.min(input.scrollFromBottom, processMaxScroll(input.rows.length, input.height, dropped)));
   const last = input.rows.length - scroll;
-  const first = Math.max(0, last - logRows);
+  const fullRows = Math.max(1, input.height - 3);
+  // The notice and the rows must fit together; when they do not (the newest
+  // rows fill the view), the newest rows win and the notice is scrolled to.
+  const showNotice = dropped > 0 && input.rows.length > 0 && last < fullRows;
+  const first = Math.max(0, last - (showNotice ? fullRows - 1 : fullRows));
   const search = input.search ?? null;
 
   const out: Line[] = [blank(width)];
@@ -143,9 +157,9 @@ export function renderProcessView(input: ProcessViewInput): Line[] {
     put(line, TIME_X, end, input.ended ? 'The process printed nothing.' : 'No output yet.', { fg: t.textFaint });
     out.push(line);
   }
-  if (first === 0 && (input.dropped ?? 0) > 0 && input.rows.length > 0) {
+  if (showNotice && first === 0) {
     const line = blank(width);
-    put(line, TIME_X, end, `… ${input.dropped} earlier lines are no longer kept`, { fg: t.textFaint });
+    put(line, TIME_X, end, `… ${dropped} earlier lines are no longer kept`, { fg: t.textFaint });
     out.push(line);
   }
   for (let r = first; r < last; r++) {

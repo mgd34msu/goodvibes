@@ -282,16 +282,25 @@ export async function inspectStacking(content: string, file: string): Promise<St
 
 // ── Client boundary ───────────────────────────────────────────────────────────
 
-/** Server-only readings by module specifier; a module's nature does not change within a process. */
+/**
+ * Definite server-only readings by module specifier (a module's nature does not change within a
+ * process). An uncertain or failed reading is never kept, so it is asked again next time.
+ */
 const serverOnlyReadings = new Map<string, Promise<FindingReading | 'dismissed'>>();
+const SERVER_ONLY_CACHE_MAX = 500;
 
 function readServerOnly(module: string): Promise<FindingReading | 'dismissed'> {
   if (isClassicOperation()) return read('server_only', { module });
   const known = serverOnlyReadings.get(module);
   if (known !== undefined) return known;
   const reading = read('server_only', { module });
+  if (serverOnlyReadings.size >= SERVER_ONLY_CACHE_MAX) {
+    const oldest = serverOnlyReadings.keys().next().value;
+    if (oldest !== undefined) serverOnlyReadings.delete(oldest);
+  }
   serverOnlyReadings.set(module, reading);
-  reading.catch(() => serverOnlyReadings.delete(module));
+  const forget = (): void => { if (serverOnlyReadings.get(module) === reading) serverOnlyReadings.delete(module); };
+  reading.then((verdict) => { if (verdict === 'uncertain') forget(); }, forget);
   return reading;
 }
 

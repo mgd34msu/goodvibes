@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import { join } from 'node:path';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { previewTuiHostPairing } from '../../runtime/tui-host-pairing.ts';
-import { beginTuiHostPairing, readTuiHostPairing, tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';
+import { beginTuiHostPairing, clearTuiHostPairingAttempt, readTuiHostPairing, tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -100,6 +100,27 @@ describe('TUI-owned explicit host pairing', () => {
       expect((await previewTuiHostPairing(f.options)).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
     } finally { f.close(); }
   });
+  test('an unresolved attempt is forgotten only after its fresh owner confirmation, and a paired record is never cleared', async () => {
+    const f = fixture({ migrationResponse: () => new Response(shared, { status: 503 }) });
+    try {
+      expect((await pair(f)).status).toBe('unknown');
+      const preview = await previewTuiHostPairing(f.options);
+      expect(preview.result.status).toBe('unknown');
+      expect(preview.result.confirmation).toMatch(/^CLEAR /);
+      expect((await preview.confirm!('CLEAR nonsense')).status).toBe('cancelled');
+      expect(readTuiHostPairing(f.home, f.host).status).toBe('unknown');
+      expect((await preview.confirm!(preview.result.confirmation!)).status).toBe('cleared');
+      expect((await preview.confirm!(preview.result.confirmation!)).status).toBe('cancelled');
+      expect(readTuiHostPairing(f.home, f.host).status).toBe('missing');
+      expect(f.migrations).toBe(1);
+    } finally { f.close(); }
+    const paired = fixture();
+    try {
+      expect((await pair(paired)).status).toBe('paired');
+      expect((await clearTuiHostPairingAttempt(paired.home, paired.host, 'any-attempt')).status).toBe('conflict');
+      expect(readTuiHostPairing(paired.home, paired.host).status).toBe('paired');
+    } finally { paired.close(); }
+  });
   test('saved credential survives rejected verification and does not remint on restart', async () => {
     const f = fixture({ rejectMinted: true }); try {
       expect((await pair(f)).status).toBe('paired-unverified'); expect(readTuiHostPairing(f.home, f.host).status).toBe('paired');
@@ -120,6 +141,15 @@ describe('TUI-owned explicit host pairing', () => {
       const p = await previewTuiHostPairing(f.options); const controller = new AbortController();
       const result = p.confirm!(p.result.confirmation!, controller.signal); await started; controller.abort();
       expect((await result).status).toBe('unknown'); expect((await previewTuiHostPairing(f.options)).result.status).toBe('unknown'); expect(f.migrations).toBe(1);
+    } finally { f.close(); }
+  });
+  for (const status of [403, 429]) test(`a ${status} answer from the host releases the marker so pairing can be previewed again`, async () => {
+    const f = fixture({ migrationResponse: () => new Response(JSON.stringify({ error: 'refused' }), { status }) });
+    try {
+      const result = await pair(f);
+      expect(result.status).toBe('blocked'); expect(result.message).toContain(`HTTP ${status}`);
+      expect(readTuiHostPairing(f.home, f.host).status).toBe('missing'); expect(resolveNativeHostCredential(f.options).available).toBe(false);
+      expect((await previewTuiHostPairing(f.options)).result.status).toBe('preview'); expect(f.migrations).toBe(1);
     } finally { f.close(); }
   });
   test('abort before confirmation creates no intent', async () => {

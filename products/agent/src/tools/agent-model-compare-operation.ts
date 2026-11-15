@@ -82,6 +82,11 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
     if (!captured || typeof captured !== 'object' || Array.isArray(captured)) throw new Error('Invalid comparison artifact descriptor.');
     return JSON.stringify(Object.fromEntries(Object.entries(captured).filter(([key]) => key !== 'contentPath' && key !== 'metadataPath')));
   };
+  // A list covers the whole store; only comparison artifacts are pinned, so an unrelated artifact expiring mid-call cannot fail the operation.
+  const isComparisonArtifact = (descriptor: ArtifactDescriptor) => {
+    const purpose = descriptor.metadata?.purpose;
+    return typeof purpose === 'string' ? purpose.startsWith('agent-model-compare') : descriptor.filename?.startsWith('blind-model-comparison-') === true;
+  };
   const observeDescriptor = (descriptor: ArtifactDescriptor) => {
     const captured = descriptorBytes(descriptor);
     const prior = observed.get(descriptor.id);
@@ -133,7 +138,7 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
       assertCurrent();
       return result;
     },
-    ...(list ? { list(limit?: number) { assertCurrent(); const result = list.call(store, limit); for (const descriptor of result) observeDescriptor(descriptor); assertCurrent(); return result; } } : {}),
+    ...(list ? { list(limit?: number) { assertCurrent(); const result = list.call(store, limit); for (const descriptor of result) if (isComparisonArtifact(descriptor)) observeDescriptor(descriptor); assertCurrent(); return result; } } : {}),
     ...(get ? { get(id: string) { assertCurrent(); const result = get.call(store, id); if (result) observeDescriptor(result); assertCurrent(); return result; } } : {}),
     ...(readContent ? { async readContent(id: string) {
       assertCurrent();

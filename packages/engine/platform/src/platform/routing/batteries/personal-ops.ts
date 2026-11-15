@@ -1,9 +1,15 @@
 import { defineBattery, defineRerank, defineSelector, oneOf, STAKES_BANDS } from '@goodvibes-jev/judgment/decisions';
 import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
 
-function nativeMethodFixture(id: string) {
+/**
+ * A fixture candidate built from a method of the operator contract. A method
+ * that has been renamed gives a candidate saying so, which the battery's own
+ * lint check then fails on; it never throws, because this module is imported
+ * at startup by everything that registers the batteries.
+ */
+export function nativeMethodFixture(id: string): { id: string; content: Record<string, string> } {
   const method = getOperatorContract().operator.methods.find(method => method.id === id);
-  if (!method) throw new Error(`Missing native lane fixture ${id}`);
+  if (!method) return { id: 'a', content: { name: id, description: 'This operator method is not in the contract; update the fixture to a current method.' } };
   return { id: 'a', content: { name: method.id, description: method.description, evidenceJson: JSON.stringify(method) } };
 }
 

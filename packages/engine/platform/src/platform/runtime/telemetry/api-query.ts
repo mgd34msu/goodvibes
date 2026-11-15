@@ -13,17 +13,40 @@ import {
   sanitizeSpan,
 } from './api-helpers.js';
 
+export function compareTelemetryRecordsNewestFirst(left: TelemetryRecord, right: TelemetryRecord): number {
+  const timestampDelta = right.timestamp - left.timestamp;
+  if (timestampDelta !== 0) return timestampDelta;
+  return extractRecordSequence(right) - extractRecordSequence(left);
+}
+
+/**
+ * Records that happened after `cursor`, oldest first, for an SSE reconnect.
+ * A page cursor pages toward older records; a resume needs the opposite
+ * direction, so it takes the records nearest the cursor, up to `limit`.
+ * The cursor record itself is not repeated, and it need not match the filter.
+ */
+export function listTelemetryRecordsAfterCursor(
+  records: readonly TelemetryRecord[],
+  matches: (record: TelemetryRecord) => boolean,
+  cursor: string,
+  limit: number,
+): readonly TelemetryRecord[] {
+  const newestFirst = [...records].sort(compareTelemetryRecordsNewestFirst);
+  const cursorIndex = resolveTelemetryRecordCursor(newestFirst, cursor);
+  return newestFirst
+    .slice(0, cursorIndex)
+    .filter(matches)
+    .slice(-limit)
+    .reverse();
+}
+
 export function applyTelemetryRecordFilter(
   records: readonly TelemetryRecord[],
   filter: TelemetryFilter,
   view: TelemetryViewMode,
 ): { items: readonly TelemetryRecord[]; pageInfo: TelemetryPageInfo } {
   const filtered = records.filter((record) => telemetryRecordMatches(record, filter));
-  filtered.sort((left, right) => {
-    const timestampDelta = right.timestamp - left.timestamp;
-    if (timestampDelta !== 0) return timestampDelta;
-    return extractRecordSequence(right) - extractRecordSequence(left);
-  });
+  filtered.sort(compareTelemetryRecordsNewestFirst);
   const limit = clampLimit(filter.limit, 100);
   const startIndex = filter.cursor ? resolveTelemetryRecordCursor(filtered, filter.cursor) + 1 : 0;
   const page = filtered.slice(startIndex, startIndex + limit);
@@ -35,7 +58,8 @@ export function applyTelemetryRecordFilter(
       returned: page.length,
       hasMore: Boolean(next),
       ...(filter.cursor ? { cursor: filter.cursor } : {}),
-      ...(next ? { nextCursor: next.id } : {}),
+      // The cursor is the last record returned; the next page starts after it.
+      ...(next ? { nextCursor: page[page.length - 1]!.id } : {}),
     },
   };
 }
@@ -69,7 +93,7 @@ export function applyTelemetrySpanFilter(
       returned: page.length,
       hasMore: Boolean(next),
       ...(filter.cursor ? { cursor: filter.cursor } : {}),
-      ...(next ? { nextCursor: buildSpanCursor(next) } : {}),
+      ...(next ? { nextCursor: buildSpanCursor(page[page.length - 1]!) } : {}),
     },
   };
 }

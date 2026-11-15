@@ -15,7 +15,7 @@ export const WEB_SEARCH_TOOL_SCHEMA = {
       type: 'integer',
       minimum: 1,
       maximum: 25,
-      description: 'Maximum number of ranked results to return. Default 10.',
+      description: 'Maximum number of ranked results to ask for. Default 10. A provider returns at most its own limit: Brave, Firecrawl and Tavily 20, Perplexity 10, the others 25.',
     },
     verbosity: {
       type: 'string',

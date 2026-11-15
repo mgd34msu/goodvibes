@@ -141,23 +141,14 @@ describe('Compositor: viewport composition', () => {
   });
 });
 
-describe('Compositor: R3 buffer reuse (double-buffer, no clone)', () => {
-  test('TerminalBuffer constructor is NOT called on second composite() (buffer is reused)', () => {
-    // We track constructor calls by counting .cells allocations via composite calls.
-    // The core assertion: lastBufferForTest after N composites always returns a non-null
-    // object (proving reuse), and rendering is correct on subsequent frames.
+describe('Compositor: consecutive frames', () => {
+  test('the second composite() frame carries the same content at the same size', () => {
     const { compositor } = makeCompositor();
     compositor.composite(makeBaseRequest());
-    const buf1 = compositor.lastBufferForTest;
     compositor.composite(makeBaseRequest());
-    const buf2 = compositor.lastBufferForTest;
-    // After double-buffer swap, lastBufferForTest returns the second-frame buffer.
-    // Both must be non-null and be TerminalBuffer instances.
-    expect(buf1).toEqual(expect.objectContaining({ width: WIDTH, height: HEIGHT }));
-    expect(buf2).toEqual(expect.objectContaining({ width: WIDTH, height: HEIGHT }));
-    // On the first composite frontBuffer=backBuffer (first allocation), second they differ.
-    // We only verify correctness: cell content on frame 2 is still correct.
-    expect(buf2?.getCell(0, 0)?.char).toBe('H');
+    const buf = compositor.lastBufferForTest;
+    expect(buf).toEqual(expect.objectContaining({ width: WIDTH, height: HEIGHT }));
+    expect(buf?.getCell(0, 0)?.char).toBe('H');
   });
 
   test('resetDiff() clears both buffers so next composite starts fresh', () => {

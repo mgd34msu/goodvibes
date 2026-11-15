@@ -1,7 +1,7 @@
 import type { DaemonRuntimeAutomationRouteHandlers } from './context.js';
 import type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
 import { withAdmin } from './auth-helpers.js';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
+import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 import { hasPaginationParams, paginateItems } from './pagination.js';
 import {
   createRouteBodySchema,
@@ -35,7 +35,7 @@ export function createDaemonRuntimeAutomationRouteHandlers(
     postAutomationJob: async (request) => withAdmin(context, request, () => handlePostSchedule(context, request)),
     getAutomationRuns: (url?: URL) => handleGetAutomationRuns(context, url),
     getAutomationRun: (runId) => handleGetAutomationRun(context, runId),
-    getAutomationHeartbeat: () => Response.json({ pending: [] }),
+    getAutomationHeartbeat: () => Response.json({ pending: context.automationManager.listHeartbeatWakes?.() ?? [] }),
     postAutomationHeartbeat: async (request) => withAdmin(context, request, () => handlePostAutomationHeartbeat(context, request)),
     automationRunAction: async (runId, action, request) => withAdmin(context, request, () => handleAutomationRunAction(context, runId, action, request)),
     patchAutomationJob: async (jobId, request) => withAdmin(context, request, () => handlePatchSchedule(context, jobId, request)),
@@ -145,7 +145,7 @@ async function handlePostSchedule(context: DaemonRuntimeRouteContext, req: Reque
     });
     return Response.json(job, { status: 201 });
   } catch (e: unknown) {
-    return readJsonErrorResponse(e, { status: 400, fallbackMessage: 'Failed to create schedule' });
+    return readServiceErrorResponse(e, { fallbackStatus: 400, fallbackMessage: 'Failed to create schedule' });
   }
 }
 
@@ -163,14 +163,51 @@ async function handlePatchSchedule(context: DaemonRuntimeRouteContext, id: strin
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
   if (body.admission === 'autonomous') return nativeFallbackError();
+  const invalid = validateSchedulePatch(body);
+  if (invalid) return invalid;
   try {
     const updated = await context.automationManager.updateJob(job.id, body as Record<string, unknown>);
     return updated
       ? Response.json(updated)
       : jsonErrorResponse({ error: `Schedule not found: ${id}` }, { status: 404 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to update schedule' });
+    return readServiceErrorResponse(error, { fallbackStatus: 400, fallbackMessage: 'Failed to update schedule' });
   }
+}
+
+const PATCH_BOOLEAN_FIELDS = ['enabled', 'autoApprove', 'allowUnsafeExternalContent', 'lightContext', 'deleteAfterRun'] as const;
+const PATCH_STRING_FIELDS = ['name', 'description', 'prompt', 'template', 'model', 'provider', 'thinking'] as const;
+const PATCH_OBJECT_FIELDS = ['target', 'delivery', 'failure', 'routing'] as const;
+const PATCH_STRING_LIST_FIELDS = ['toolAllowlist', 'fallbackModels'] as const;
+
+/**
+ * A patch field of the wrong type must be refused, not stored: a string "false"
+ * for `enabled` is truthy and would keep a job running that the caller meant to
+ * pause. Absent fields leave the job untouched.
+ */
+function validateSchedulePatch(body: JsonRecord): Response | null {
+  // null means "leave as is" to the manager (`patch.x ?? current`), so it is accepted.
+  const present = (value: unknown): boolean => value !== undefined && value !== null;
+  const refuse = (field: string, expected: string): Response =>
+    jsonErrorResponse({ error: `${field} must be ${expected}. Nothing was changed.`, code: 'INVALID_SCHEDULE_PATCH' }, { status: 400 });
+  for (const field of PATCH_BOOLEAN_FIELDS) {
+    if (present(body[field]) && typeof body[field] !== 'boolean') return refuse(field, 'true or false (a JSON boolean)');
+  }
+  for (const field of PATCH_STRING_FIELDS) {
+    if (present(body[field]) && typeof body[field] !== 'string') return refuse(field, 'a string');
+  }
+  for (const field of PATCH_OBJECT_FIELDS) {
+    const value = body[field];
+    if (present(value) && (typeof value !== 'object' || Array.isArray(value))) return refuse(field, 'an object');
+  }
+  for (const field of PATCH_STRING_LIST_FIELDS) {
+    const value = body[field];
+    if (present(value) && (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string'))) return refuse(field, 'an array of strings');
+  }
+  if (present(body.timeoutMs) && (typeof body.timeoutMs !== 'number' || !Number.isFinite(body.timeoutMs) || body.timeoutMs <= 0)) {
+    return refuse('timeoutMs', 'a finite positive number');
+  }
+  return null;
 }
 
 async function handleDeleteSchedule(context: DaemonRuntimeRouteContext, id: string): Promise<Response> {
@@ -194,7 +231,7 @@ async function handleRunScheduleNow(context: DaemonRuntimeRouteContext, id: stri
     const run = await context.automationManager.runNow(job.id);
     return Response.json({ jobId: job.id, runId: run.id, agentId: run.agentId, status: run.status });
   } catch (e: unknown) {
-    return readJsonErrorResponse(e, { status: 500, fallbackMessage: 'Failed to run schedule' });
+    return readServiceErrorResponse(e, { fallbackMessage: 'Failed to run schedule' });
   }
 }
 
@@ -232,7 +269,7 @@ async function handleAutomationRunAction(
     return context.recordApiResponse(
       req,
       `/api/automation/runs/${runId}/${action}`,
-      await readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to retry automation run' }),
+      await readServiceErrorResponse(error, { fallbackStatus: 400, fallbackMessage: 'Failed to retry automation run' }),
     );
   }
 }
@@ -260,8 +297,9 @@ function findAutomationJob(context: DaemonRuntimeRouteContext, id: string) {
  * `AutomationJobLike` exposes only `{ id: string }` at the platform boundary, there is
  * no stable timestamp field on jobs.  Insertion-point recovery on mid-walk deletion
  * is therefore **not available** for this endpoint; if the cursor item is deleted,
- * the walk restarts from index 0.  If a timestamp is added to `AutomationJobLike`
- * in the future, thread it as `getCreatedAt` here.
+ * the request is refused with a 400 ("Cursor expired") so the client restarts the
+ * listing on purpose rather than re-reading from the start.  If a timestamp is
+ * added to `AutomationJobLike` in the future, thread it as `getCreatedAt` here.
  */
 function handleGetAutomationJobs(context: DaemonRuntimeRouteContext, url: URL | undefined): Response {
   const jobs = context.automationManager.listJobs();
@@ -274,7 +312,7 @@ function handleGetAutomationJobs(context: DaemonRuntimeRouteContext, url: URL | 
   }
   const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), DEFAULT_AUTOMATION_LIST_LIMIT, MAX_AUTOMATION_LIST_LIMIT);
   const rawCursor = url.searchParams.get('cursor');
-  const result = paginateItems(jobs, limit, rawCursor, (j) => j.id);
+  const result = paginateItems(jobs, limit, rawCursor, (j) => j.id, undefined, { onMissingCursor: 'error' });
   if ('error' in result) {
     return jsonErrorResponse({ error: result.error }, { status: 400 });
   }

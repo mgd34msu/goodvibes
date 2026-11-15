@@ -19,7 +19,6 @@ import {
   findMarkerAtPosForHandler,
   getImageAttachmentsForHandler,
   handleBlockCopyForHandler,
-  handleBlockRerunForHandler,
   handleBlockSaveForHandler,
   handleBlockToggleForHandler,
   handleBookmarkForHandler,
@@ -53,6 +52,7 @@ import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { AgentWorkspace } from './agent-workspace.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
+import { capturedOutputReportsFailure, captureCommandPrint } from './workspace-command-output.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {
@@ -60,7 +60,6 @@ import {
   expandPrompt,
   findMarkerAtPos,
   handleBlockCopy,
-  handleBlockRerun,
   handleBlockSave,
   handleBlockToggle,
   handleBookmark,
@@ -125,7 +124,7 @@ export class InputHandler extends TerminalInputHandlerState {
 
   public tokenizer = new InputTokenizer();
 
-  /** Ported from goodvibes-tui, unbracketed-paste-flood guard state, mutated in place. */
+  /** Unbracketed-paste-flood guard state (shared guard in terminal-shell), mutated in place. */
   public burstGuard: PasteBurstGuardState = { timestamps: [], suspended: false, hintShown: false };
   /** Long-lived feed context, reused across every feed() call to avoid per-keystroke allocation. */
   public feedContext!: import('./handler-feed.ts').InputFeedContext;
@@ -286,6 +285,8 @@ export class InputHandler extends TerminalInputHandlerState {
   public setCommandRegistry(registry: CommandRegistry, context: CommandContext): void {
     this.commandRegistry = registry;
     this.commandContext = context;
+    // The root context serves agent_harness run_keybinding and run_command; without this their paste would find no route and report unavailable. A typed command still gets its own composer-bound copy from the command route.
+    context.pasteFromClipboard ??= () => this.handlePaste();
     this.autocomplete = new AutocompleteEngine(registry);
   }
 
@@ -338,9 +339,6 @@ export class InputHandler extends TerminalInputHandlerState {
   }
   public executeBlockAction(actionId: string): void {
     executeBlockActionForHandler(this, actionId);
-  }
-  public handleBlockRerun(): void {
-    handleBlockRerunForHandler(this);
   }
   public handleBlockToggle(): void {
     handleBlockToggleForHandler(this);
@@ -409,7 +407,7 @@ export class InputHandler extends TerminalInputHandlerState {
     this.modalOpened('agentWorkspace');
     this.agentWorkspace.open(
       context,
-      (command, behavior) => this.dispatchAgentWorkspaceCommand(command, context, behavior),
+      (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
       categoryId,
       (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
       onlyGroup as import('./agent-workspace-types.ts').AgentWorkspaceCategoryGroup | undefined,
@@ -432,7 +430,12 @@ export class InputHandler extends TerminalInputHandlerState {
     return true;
   }
 
-  public dispatchAgentWorkspaceCommand(command: string, context: CommandContext, behavior?: 'inline' | 'compose' | 'exit'): void {
+  public dispatchAgentWorkspaceCommand(
+    command: string,
+    context: CommandContext,
+    behavior?: 'inline' | 'compose' | 'exit',
+    displayCommand: string = command,
+  ): void {
     // Default to 'inline' so editor submissions stay inside the workspace modal.
     // Closing the modal mid-flow (the old 'compose' default) traps users in the
     // wrong context and was the primary symptom of the broken onboarding flow.
@@ -449,23 +452,18 @@ export class InputHandler extends TerminalInputHandlerState {
       return;
     }
     if (resolved === 'inline') {
-      const capturedLines: string[] = [];
-      const originalPrint = context.print;
       if (typeof context.executeCommand !== 'function') {
         this.agentWorkspace.lastActionResult = {
           kind: 'error',
-          title: `Command unavailable: ${command}`,
+          title: `Command unavailable: ${displayCommand}`,
           detail: 'No command dispatcher is configured for this runtime.',
-          command,
+          command: displayCommand,
           safety: 'safe',
         };
         this.requestRender();
         return;
       }
-      context.print = (text: string): void => {
-        capturedLines.push(text);
-      };
-      const buildCapturedDetail = (): string => {
+      const buildCapturedDetail = (capturedLines: readonly string[]): string => {
         const MAX_CHARS = 1500;
         const MAX_LINES = 12;
         const lines = capturedLines.slice(-MAX_LINES);
@@ -476,29 +474,37 @@ export class InputHandler extends TerminalInputHandlerState {
         const omitted = capturedLines.length - lines.length;
         return omitted > 0 ? `… (${omitted} line(s) truncated)\n${joined}` : joined || '(no output)';
       };
-      void context
-        .executeCommand(name, [...args])
-        .then(() => {
-          context.print = originalPrint;
-          this.agentWorkspace.lastActionResult = {
-            kind: 'dispatched',
-            title: `Result: ${command}`,
-            detail: buildCapturedDetail(),
-            command,
-            safety: 'safe',
-          };
-          this.requestRender();
-        })
-        .catch((error: unknown) => {
-          context.print = originalPrint;
+      const executeCommand = context.executeCommand;
+      void captureCommandPrint(context, () => executeCommand(name, [...args])).then((outcome) => {
+        if (!outcome.ok) {
           this.agentWorkspace.lastActionResult = {
             kind: 'error',
-            title: `${command} failed`,
-            detail: error instanceof Error ? error.message : String(error),
-            command,
+            title: `${displayCommand} failed`,
+            detail: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+            command: displayCommand,
           };
-          this.requestRender();
-        });
+        } else if (outcome.value === false) {
+          this.agentWorkspace.lastActionResult = {
+            kind: 'error',
+            title: `Unknown command: ${displayCommand}`,
+            detail: 'The command router has no command with that name.',
+            command: displayCommand,
+            safety: 'safe',
+          };
+        } else {
+          // Most handlers report a failure by printing and returning, so the
+          // outcome is read from what they printed.
+          const failed = capturedOutputReportsFailure(outcome.lines);
+          this.agentWorkspace.lastActionResult = {
+            kind: failed ? 'error' : 'dispatched',
+            title: failed ? `${displayCommand} reported a problem` : `Result: ${displayCommand}`,
+            detail: buildCapturedDetail(outcome.lines),
+            command: displayCommand,
+            safety: 'safe',
+          };
+        }
+        this.requestRender();
+      });
       return;
     }
     // compose (default): close workspace then execute
@@ -529,6 +535,13 @@ export class InputHandler extends TerminalInputHandlerState {
     const bufferedRequestRender = renderBuffer.requestRender;
 
     this.requestRender = bufferedRequestRender;
+    // Command handlers run synchronously during token processing (/shortcuts, /help)
+    // and set these overlay flags on the handler itself; writing the feed context's
+    // pre-feed copy back unconditionally would revert them in the same keystroke.
+    const helpOverlayActiveBefore = this.helpOverlayActive;
+    const helpScrollOffsetBefore = this.helpScrollOffset;
+    const shortcutsOverlayActiveBefore = this.shortcutsOverlayActive;
+    const shortcutsScrollOffsetBefore = this.shortcutsScrollOffset;
     try {
       const context = this.feedContext;
       syncFeedContextMutableFields(this, context);
@@ -545,10 +558,10 @@ export class InputHandler extends TerminalInputHandlerState {
       this.inputScrollTop = context.inputScrollTop;
       this.commandMode = context.commandMode;
       this.indicatorFocused = context.indicatorFocused;
-      this.helpOverlayActive = context.helpOverlayActive;
-      this.helpScrollOffset = context.helpScrollOffset;
-      this.shortcutsOverlayActive = context.shortcutsOverlayActive;
-      this.shortcutsScrollOffset = context.shortcutsScrollOffset;
+      if (context.helpOverlayActive !== helpOverlayActiveBefore) this.helpOverlayActive = context.helpOverlayActive;
+      if (context.helpScrollOffset !== helpScrollOffsetBefore) this.helpScrollOffset = context.helpScrollOffset;
+      if (context.shortcutsOverlayActive !== shortcutsOverlayActiveBefore) this.shortcutsOverlayActive = context.shortcutsOverlayActive;
+      if (context.shortcutsScrollOffset !== shortcutsScrollOffsetBefore) this.shortcutsScrollOffset = context.shortcutsScrollOffset;
       this.selectionCallback = context.selectionCallback;
       this.nextPasteId = context.nextPasteId;
       this.nextImageId = context.nextImageId;
@@ -644,7 +657,7 @@ export class InputHandler extends TerminalInputHandlerState {
       this.modalOpened('agentWorkspace');
       this.agentWorkspace.open(
         context,
-        (command, behavior) => this.dispatchAgentWorkspaceCommand(command, context, behavior),
+        (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
         undefined,
         (prompt) => this.dispatchAgentWorkspacePrompt(prompt, context),
       );

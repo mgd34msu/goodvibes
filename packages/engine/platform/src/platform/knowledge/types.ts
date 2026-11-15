@@ -88,15 +88,53 @@ export type KnowledgeRefinementTaskState =
   | 'queued'
   | 'searching'
   | 'evaluating'
+  /** @deprecated Never written; kept so rows and wire payloads from older versions still parse. No reader treats it as reachable. */
   | 'extracting'
   | 'applying'
   | 'verified'
   | 'closed'
   | 'blocked'
   | 'suppressed'
+  /** @deprecated Never written; kept so rows and wire payloads from older versions still parse. No reader treats it as reachable. */
   | 'needs_review'
   | 'cancelled'
   | 'failed';
+
+/** The deprecated `extracting` and `needs_review` are not targets: nothing may move a task into them. */
+const OPEN_REFINEMENT_TARGETS: readonly KnowledgeRefinementTaskState[] = [
+  'detected', 'queued', 'searching', 'evaluating', 'applying', 'verified',
+  'closed', 'blocked', 'suppressed', 'cancelled', 'failed',
+];
+/**
+ * A refinement task is re-detected on every self-improvement run, so any open
+ * state (including retryable `blocked` and `failed`) may move to any state.
+ * `closed`, `suppressed` and `cancelled` are decisions about this task and are
+ * final: the task id is derived from the gap, so a gap whose task is final
+ * is reported as not repaired instead of getting a new task.
+ */
+export const knowledgeRefinementTaskLifecycle = defineLifecycle<KnowledgeRefinementTaskState>('knowledge refinement task', {
+  detected: OPEN_REFINEMENT_TARGETS,
+  queued: OPEN_REFINEMENT_TARGETS,
+  searching: OPEN_REFINEMENT_TARGETS,
+  evaluating: OPEN_REFINEMENT_TARGETS,
+  extracting: OPEN_REFINEMENT_TARGETS,
+  applying: OPEN_REFINEMENT_TARGETS,
+  verified: OPEN_REFINEMENT_TARGETS,
+  blocked: OPEN_REFINEMENT_TARGETS,
+  needs_review: OPEN_REFINEMENT_TARGETS,
+  failed: OPEN_REFINEMENT_TARGETS,
+  closed: [],
+  suppressed: [],
+  cancelled: [],
+});
+/** States in which repair work is queued or under way. */
+export const ACTIVE_REFINEMENT_STATES: ReadonlySet<KnowledgeRefinementTaskState> = new Set<KnowledgeRefinementTaskState>(['queued', 'searching', 'evaluating', 'applying']);
+/**
+ * An active task untouched for this long is treated as abandoned: the next run
+ * settles it, and readiness no longer reports the space as repairing because
+ * of it. A caller that cancels a repair leaves its task active until then.
+ */
+export const STALE_ACTIVE_TASK_MS = 10 * 60 * 1000;
 export type KnowledgeRefinementTaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type KnowledgeRefinementTaskTrigger =
   | 'ingest'
@@ -130,6 +168,17 @@ export type KnowledgeConsolidationCandidateType =
   | 'source-refresh'
   | 'knowledge-gap';
 export type KnowledgeConsolidationStatus = 'open' | 'accepted' | 'rejected' | 'superseded';
+/**
+ * An accepted candidate has already written its memory, so it is final: undoing
+ * a promotion is a memory-review action, not a candidate decision. A rejected
+ * candidate may still be accepted on reconsideration.
+ */
+export const knowledgeConsolidationCandidateLifecycle = defineLifecycle<KnowledgeConsolidationStatus>('knowledge consolidation candidate', {
+  open: ['accepted', 'rejected', 'superseded'],
+  rejected: ['accepted'],
+  accepted: [],
+  superseded: [],
+});
 
 export interface KnowledgeSourceRecord {
   readonly id: string;

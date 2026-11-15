@@ -3,7 +3,7 @@ import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
+import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 
 export type ArtifactUploadFieldMap = Record<string, unknown>;
 
@@ -50,7 +50,9 @@ function artifactUploadError(message: string, options: { readonly status?: numbe
     category: 'bad_request',
     source: 'runtime',
     operation: 'daemon.artifactUpload',
-    status: options.status,
+    // A refused upload is the caller's to fix, so the error carries its own status
+    // and answering it needs no reading of its wording.
+    status: options.status ?? 400,
     code: options.code ?? 'ARTIFACT_UPLOAD_INVALID_REQUEST',
   });
 }
@@ -62,8 +64,12 @@ function artifactSizeError(maxBytes: number): GoodVibesError {
   });
 }
 
+/** How much of an unwanted request body is read off the wire, and for how long, before the reader is cancelled. */
+const MAX_DRAIN_BYTES = 1024 * 1024;
+const MAX_DRAIN_MS = 2000;
+
 /**
- * Reads and discards a request body reader to completion.
+ * Reads and discards the rest of a request body, up to a bound.
  *
  * Bun (and Node) keep-alive connection reuse depends on the previous
  * request's body having been fully read off the wire. `stream.cancel()`
@@ -73,17 +79,34 @@ function artifactSizeError(maxBytes: number): GoodVibesError {
  * connection is actually free (verified directly against a bare
  * `Bun.serve()`, no platform code involved: cancelling left a follow-up request on
  * the same connection stuck for ~12s; fully draining resolved it to ~0ms).
- * Best-effort: a drain failure must not mask the original 413.
+ * So a body that is merely a little over the cap is read to its end. A sender
+ * that keeps going past the bound (an endless chunked body, or a huge declared
+ * length) is not waited for: the reader is cancelled, which closes the
+ * connection, so the 413 or 400 is answered instead of never arriving.
+ * Best-effort: a drain failure must not mask the original error.
  */
-async function drainReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+async function drainReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  limits: { readonly bytes: number; readonly ms: number } = { bytes: MAX_DRAIN_BYTES, ms: MAX_DRAIN_MS },
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), limits.ms); });
+  let drained = 0;
   try {
     for (;;) {
-      const { done } = await reader.read();
-      if (done) break;
+      const next = await Promise.race([reader.read(), deadline]);
+      if (next === 'timeout') break;
+      if (next.done) return;
+      drained += next.value.byteLength;
+      if (drained >= limits.bytes) break;
     }
   } catch {
     // Best-effort.
+    return;
+  } finally {
+    clearTimeout(timer);
   }
+  await reader.cancel().catch(() => undefined);
 }
 
 async function drainUnreadBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
@@ -115,10 +138,16 @@ export async function createArtifactFromUploadRequest(
   req: Request,
 ): Promise<ArtifactUploadResult | Response> {
   const contentType = req.headers.get('content-type') ?? '';
-  if (contentType.toLowerCase().includes('multipart/form-data')) {
-    return createArtifactFromMultipart(artifactStore, req);
+  try {
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+      return await createArtifactFromMultipart(artifactStore, req);
+    }
+    return await createArtifactFromRawBody(artifactStore, req);
+  } catch (error) {
+    // Every refusal below is a thrown error that carries its own status (400, 413);
+    // anything else is the store failing, which is a server fault.
+    return readServiceErrorResponse(error);
   }
-  return createArtifactFromRawBody(artifactStore, req);
 }
 
 function parseUploadField(name: string, value: string): unknown {
@@ -135,8 +164,10 @@ function parseUploadField(name: string, value: string): unknown {
   }
   if (name === 'allowPrivateHosts') return trimmed === 'true' || trimmed === '1' || trimmed === 'yes';
   if (name === 'retentionMs') {
+    if (!trimmed) return undefined;
     const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : undefined;
+    if (!Number.isFinite(parsed)) throw artifactUploadError('retentionMs must be a number of milliseconds.');
+    return parsed;
   }
   return value;
 }
@@ -146,7 +177,7 @@ function parseJsonField(value: string, fieldName: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
-    throw artifactUploadError(`Invalid JSON in multipart field ${fieldName}.`);
+    throw artifactUploadError(`Invalid JSON in upload field ${fieldName}.`);
   }
 }
 
@@ -256,8 +287,7 @@ async function createArtifactFromStreamingMultipart(
     // Content-Length precheck and the mid-read catch) before rethrowing, so
     // the connection is left healthy for reuse regardless of which error
     // this is.
-    const status = error instanceof GoodVibesError && error.status ? error.status : 400;
-    return readJsonErrorResponse(error, { status });
+    return readServiceErrorResponse(error);
   } finally {
     await spooled?.cleanup();
   }
@@ -269,7 +299,15 @@ async function createArtifactFromRawBody(
 ): Promise<ArtifactUploadResult | Response> {
   if (!req.body) return jsonErrorResponse({ error: 'Raw artifact upload requires a request body.' }, { status: 400 });
   const url = new URL(req.url);
-  const fields = readFieldsFromSearchParams(url.searchParams);
+  let fields: ArtifactUploadFieldMap;
+  try {
+    fields = readFieldsFromSearchParams(url.searchParams);
+  } catch (error) {
+    // The multipart path refuses the same mistake; storing the upload without the
+    // metadata the caller sent would report success for a record that lost it.
+    await drainUnreadBody(req.body);
+    return readServiceErrorResponse(error);
+  }
   const contentType = req.headers.get('content-type')?.split(';')[0]?.trim();
   const maxBytes = artifactStore.getMaxBytes?.();
   const sizeBytes = readContentLength(req);
@@ -307,12 +345,8 @@ async function* readFileChunks(path: string): AsyncIterable<Uint8Array> {
 function readFieldsFromSearchParams(params: URLSearchParams): ArtifactUploadFieldMap {
   const fields: ArtifactUploadFieldMap = {};
   for (const [name, value] of params.entries()) {
-    try {
-      const parsed = parseUploadField(name, value);
-      if (parsed !== undefined) fields[name] = parsed;
-    } catch {
-      fields[name] = value;
-    }
+    const parsed = parseUploadField(name, value);
+    if (parsed !== undefined) fields[name] = parsed;
   }
   return fields;
 }

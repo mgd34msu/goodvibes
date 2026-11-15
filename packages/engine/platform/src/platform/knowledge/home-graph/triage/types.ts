@@ -15,7 +15,10 @@ export interface TriageReadingPlan {
   readonly requestedModel: string;
   readonly origin: 'automatic-judgment';
   readonly batteries: readonly { readonly name: string; readonly version: number }[];
+  /** Set when this one issue could not be settled; it stays open for a person and the rest of the pass is unaffected. */
+  readonly heldReason?: IssueHoldReason | undefined;
 }
+export type IssueHoldReason = 'unsettled' | 'unsupported-fact' | 'owner-threshold';
 export type TriageHoldReason = 'unconfigured' | 'unavailable' | 'unsettled' | 'unsupported-fact' | 'owner-threshold' | 'malformed' | 'stale' | 'aborted' | 'budget' | 'operator-reviewed';
 export class HomeGraphTriageHeldError extends Error {
   override readonly name = 'HomeGraphTriageHeldError';

@@ -23,7 +23,7 @@ test('close waits for accepted encryption before releasing its database', async 
     await entered.promise;
     let closed = false;
     const closing = Promise.resolve(store.close()).then(() => { closed = true; });
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(closed).toBe(false);
     release.resolve();
     expect(await observed).toMatchObject({ value: { draft: { id: 'one' } } });

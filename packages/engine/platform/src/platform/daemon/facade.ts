@@ -1,11 +1,13 @@
 import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
 import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
+import { withTurnSurfaceId } from '../security/turn-boundary.js';
 import { runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
 import { summarizeError } from '../utils/error-display.js';
-import { DaemonLifecycleRuntime, createDaemonOwnerAlerter, registerDaemonHeartbeatWatcher, runDaemonSessionStoreBoot } from './facade-lifecycle.js';
+import { DaemonLifecycleRuntime, type NativeHandover, createDaemonOwnerAlerter, registerDaemonHeartbeatWatcher, runDaemonSessionStoreBoot } from './facade-lifecycle.js';
 import { registerUpdateGatewayMethods } from '../control-plane/routes/update.js';
 import { registerRelayGatewayMethods } from '../control-plane/routes/relay.js';
 import { AgentManager } from '../tools/agent/index.js';
@@ -74,8 +76,20 @@ import {
 import type { DaemonConfig, DaemonDangerConfig, PendingSurfaceReply } from './types.js';
 import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
-import { createHostModeRestartWatcher } from './host-mode-watcher.js';
+import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
+import type { ServiceCommandRunner } from './service-handover.js';
+
+/**
+ * The facade's configuration plus what a composing host that owns the whole
+ * process may lend it. `onIncompleteHandover` ends that process with a failure
+ * status once a handover stopped this runtime and then could not complete.
+ */
+export type DaemonServerConfig = DaemonConfig & {
+  readonly onIncompleteHandover?: (() => void) | undefined;
+  /** Runs the service-manager commands of an update, rollback or promotion handover. Tests inject it; the real `systemctl` otherwise. */
+  readonly serviceCommandRunner?: ServiceCommandRunner | undefined;
+};
 
 interface UpgradeCapableServer {
   upgrade(req: Request, options?: { data?: unknown }): boolean;
@@ -131,6 +145,7 @@ export class DaemonServer {
   private readonly nativeHandoverDrain: DaemonConfig['drainForNativeHandover'];
   private readonly deferNativeActivationUntilHostReady: boolean;
   private hostStartupCompleted = false;
+  private hostedSessionsRestored = false;
   private nativeStartupHandover: Exclude<ReturnType<DaemonLifecycleRuntime['activateNativeLifecycle']>, void> | undefined;
   private readonly integrationHelpers: IntegrationHelperService;
   private configManager: ConfigManager;
@@ -191,13 +206,20 @@ export class DaemonServer {
   private approvalBrokerUnsubscribe: (() => void) | null = null;
   /** Unsubscribe from controlPlane config key watchers; cleared on stop(). */
   private _configWatchUnsub: (() => void) | null = null;
-  /** True while a config-driven restart is in progress, prevents re-entrancy. */
-  private _restarting = false;
-  /** Awaitable promise for the active restart cycle; null when idle. */
-  private _restartingPromise: Promise<void> | null = null;
-  /** True if a config change arrived while _restarting was set; triggers a second cycle. */
-  private _restartDirty = false;
-  private _restartAdmissionClosed = false;
+  /**
+   * The config-driven rebind cycle. Its "down" state covers a binding change
+   * that could bind neither the new address nor the previous one: no listener
+   * exists while the daemon is otherwise up, and correcting the setting must
+   * still rebind.
+   */
+  private readonly restartCycle = new RestartController({
+    isRunning: () => this.server !== null,
+    run: () => {
+      logger.info('DaemonServer: controlPlane binding changed, rebinding listener…');
+      return this.rebindControlPlaneListener(this.listenerTransition);
+    },
+    onError: (err) => logger.error('DaemonServer: restart after config change failed', { error: summarizeError(err) }),
+  });
   private stoppingRuntime: Promise<void> | null = null;
   /** Full stop retires pending listener acquisition, including binding ABA. */
   private listenerTransition: object = {};
@@ -210,7 +232,7 @@ export class DaemonServer {
   /** Prepare the actual configured project before creating an owned runtime.
    * Synchronous construction remains available with an already prepared context
    * or a supplied runtimeServices graph. */
-  static async create(config: DaemonConfig = {}): Promise<DaemonServer> {
+  static async create(config: DaemonServerConfig = {}): Promise<DaemonServer> {
     const captured = { ...config };
     await prepareDaemonFacadeRuntime(captured);
     const supplementalOwnership = createAsyncDisposalScope('daemon supplemental knowledge');
@@ -223,13 +245,13 @@ export class DaemonServer {
   }
 
   constructor(
-    private config: DaemonConfig = {},
+    private config: DaemonServerConfig = {},
     supplementalOwnership: AsyncDisposalScope = createAsyncDisposalScope('daemon supplemental knowledge'),
   ) {
     try {
     this.nativeHandoverDrain = config.drainForNativeHandover;
     this.deferNativeActivationUntilHostReady = config.deferNativeActivationUntilHostReady === true;
-    const resolved = resolveDaemonFacadeRuntime(config, supplementalOwnership);
+    const resolved = resolveDaemonFacadeRuntime(config, supplementalOwnership, () => this.authToken);
     this.configManager = resolved.configManager;
     this.runtimeServices = resolved.runtimeServices;
     this.ownsRuntimeServices = resolved.ownsRuntimeServices;
@@ -291,7 +313,7 @@ export class DaemonServer {
       syncFinishedAgentTask: (record) => this.syncFinishedAgentTask(record),
       surfaceDeliveryEnabled: (surface) => this.surfaceDeliveryEnabled(surface),
       signWebhookPayload: (body, secret) => this.signWebhookPayload(body, secret),
-      handleApprovalAction: (approvalId, action, req) => this.handleApprovalAction(approvalId, action, req),
+      handleApprovalAction: (approvalId, action, req, interaction?: { readonly surface: string; readonly userId: string }) => this.handleApprovalAction(approvalId, action, req, interaction),
       tlsState: () => this.tlsState,
       swapManager: this.config.swapManager ?? null,
       // Resolve companion-chat defaults from the live ProviderRegistry (current route, not a startup snapshot).
@@ -327,6 +349,10 @@ export class DaemonServer {
       // may promote.
       ...(this.config.hasOverriddenHome === undefined ? {} : { hasOverriddenHome: this.config.hasOverriddenHome }),
       stopGracefully: () => this.stopRuntime(true), // update/rollback restarts take the normal stop path, so shutdown hooks fire
+      // The composing host that owns the process ends it after a handover
+      // that could not complete once this runtime had stopped.
+      ...(config.onIncompleteHandover ? { onIncompleteHandover: config.onIncompleteHandover } : {}),
+      ...(config.serviceCommandRunner ? { serviceCommandRunner: config.serviceCommandRunner } : {}),
       alertOwner: createDaemonOwnerAlerter(this.routeBindings, this.surfaceDeliveryHelper),
     });
     // A hosted session may be running with nobody attached, so an undeliverable
@@ -342,6 +368,8 @@ export class DaemonServer {
     this.httpRouter.setDaemonStatusProviders({
       // Update/crash receipts, and which node currently reads the inbox.
       collectReceipts: () => this.collectDaemonReceipts(),
+      peekReceipts: () => this.peekDaemonReceipts(),
+      acknowledgeReceipts: (ids) => this.acknowledgeDaemonReceipts(ids),
       collectClusterStatus: () => this.clusterCoordinator.status(),
       // The artifact's own release version, when this host ships one. Reported
       // beside the platform build rather than instead of it.
@@ -455,16 +483,16 @@ export class DaemonServer {
   /**
    * Start the daemon. Refuses to start if not explicitly enabled.
    */
-  async start(): Promise<void | { readonly state: 'handover'; readonly drain: Promise<void>; readonly cancel: () => void }> {
+  async start(): Promise<void | NativeHandover> {
     const stopEpoch = this.externalStopEpoch;
-    await this._restartingPromise;
+    await this.restartCycle.pending;
     await this.stoppingRuntime;
-    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) return;
+    if (this.externalStopEpoch !== stopEpoch || this.restartCycle.closed) return;
     if (this.server === null) this.settingsLifetime = null;
     // Guarantees the daemon refuses to inherit from its host; see
     // facade-boot-guarantees.ts for why each one is owned here and why order matters.
     await runDaemonBootGuarantees(this.configManager, this.runtimeServices);
-    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) return;
+    if (this.externalStopEpoch !== stopEpoch || this.restartCycle.closed) return;
     if (!this.enabled) {
       logger.info('Daemon mode is disabled (daemon.enabled=false). It is on by default.');
       return;
@@ -477,12 +505,13 @@ export class DaemonServer {
       return;
     }
     this.hostStartupCompleted = false;
+    this.nativeStartupHandover = undefined;
     // Crash-loop guard, before anything that can fail: repeated boots that
     // never reached a fully-started daemon restore the kept previous binary
     // and hand over to it (facade-lifecycle.ts).
     const lifecycle = this.lifecycle;
     const nativeHandover = await lifecycle?.onStarting();
-    if (this.externalStopEpoch !== stopEpoch || this._restartAdmissionClosed) {
+    if (this.externalStopEpoch !== stopEpoch || this.restartCycle.closed) {
       lifecycle?.beginStopping(false);
       await lifecycle?.drainHandovers(false);
       return;
@@ -493,6 +522,17 @@ export class DaemonServer {
       void drain.catch(() => {});
       return Object.freeze({ state: 'handover' as const, drain,
         cancel: () => lifecycle.beginStopping(false) });
+    }
+
+    // The most common start failure is a port already in use. Probe it before
+    // any lifecycle owner is attached, so that refusal leaves nothing running.
+    const transition = this.listenerTransition;
+    let previousBinding = this.configuredControlPlaneBinding();
+    let selectedBinding = { host: this.host, port: this.port };
+    let probedIncarnation = this.configManager.getConfigurationIncarnation();
+    // Skip the OS port probe when the host injects a custom serve factory.
+    if (this.serveFactory === Bun.serve) {
+      await requirePortAvailable(this.port, this.host, 'daemon');
     }
 
     this.surfaceActionHelper.startDelegatedTelegram();
@@ -526,14 +566,6 @@ export class DaemonServer {
       runtimeStore: this.runtimeStore,
     });
 
-    const transition = this.listenerTransition;
-    let previousBinding = this.configuredControlPlaneBinding();
-    let selectedBinding = { host: this.host, port: this.port };
-    let probedIncarnation = this.configManager.getConfigurationIncarnation();
-    // Skip the OS port probe when the host injects a custom serve factory.
-    if (this.serveFactory === Bun.serve) {
-      await requirePortAvailable(this.port, this.host, 'daemon');
-    }
     this.transportEventsHelper.emitTransportInitializing();
     try {
       // A stop admitted during asynchronous boot still owns its write drain.
@@ -583,7 +615,12 @@ export class DaemonServer {
       await this.companionChatManager.init();
       this.releaseBrowserJudgmentChats = this.runtimeServices.browserJudgment?.bindChatSessions?.(this.companionChatManager);
       // Restore what survived; the report states what could not come back.
-      if (this.hostedSessions) reportHostedSessionRestore(await this.hostedSessions.init());
+      // Once per manager: a second init (a start retried after a failure) would stack a second set of bus subscriptions and reset live entries.
+      if (this.hostedSessions && !this.hostedSessionsRestored) {
+        const restored = await this.hostedSessions.init();
+        this.hostedSessionsRestored = true;
+        reportHostedSessionRestore(restored);
+      }
       // Init the canonical memory store so the daemon is a live single-writer memory service on accept (memory.records.add would else throw "not initialized" on a cold store).
       await this.runtimeServices.memoryStore.init();
       if (this.replyPoller === null) {
@@ -651,7 +688,7 @@ export class DaemonServer {
         this.replyPoller = null;
       }
       this.workProposals.dispose();
-      this.pendingSurfaceReplies.clear();
+      this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon failed to start before the reply was delivered');
       this.channelHealth.stop();
       this.automationManager.stop();
       // Retain the FIRST stop: the coordinator fences synchronously and later
@@ -666,6 +703,7 @@ export class DaemonServer {
       }
       this.approvalBrokerUnsubscribe?.();
       this.approvalBrokerUnsubscribe = null;
+      this.surfaceActionHelper.closeDelegatedTelegram();
       this.relayReachability?.stop();
       this.relayReachability = null;
       await this.detachControlPlaneListener();
@@ -686,8 +724,10 @@ export class DaemonServer {
   /** The composing host calls this after its additional listeners and boot
    * tasks settle. An immediate promotion owns the same awaitable handover as
    * startup rollback; no caller may continue starting work after that result. */
-  completeHostStartup(): void | { readonly state: 'handover'; readonly drain: Promise<void>; readonly cancel: () => void } {
+  completeHostStartup(): void | NativeHandover {
     if (this.nativeStartupHandover) return this.nativeStartupHandover;
+    // A host that fenced admission is shutting down; arming the updater or a service handover now would race its stop.
+    if (this.restartCycle.closed) return;
     if (this.server === null || this.tornDown || this.stoppingRuntime) {
       throw new Error('Daemon native lifecycle cannot activate before its serving runtime is ready');
     }
@@ -706,12 +746,25 @@ export class DaemonServer {
     return outcome;
   }
 
-  private async bindControlPlaneListener(transition: object, tlsState: ResolvedInboundTlsContext, incarnation: number): Promise<boolean> {
+  /**
+   * Bind the control-plane listener and publish it. With `replacing`, the
+   * listener it supersedes keeps serving until this one is published and is
+   * closed only then; a candidate that cannot be bound or published leaves
+   * that listener and its settings lifetime exactly as they were.
+   */
+  private async bindControlPlaneListener(
+    transition: object, tlsState: ResolvedInboundTlsContext, incarnation: number,
+    replacing?: { readonly server: ReturnType<typeof Bun.serve>; readonly lifetime: object | null },
+  ): Promise<boolean> {
     if (this.listenerTransition !== transition || this.tornDown
       || this.configManager.getConfigurationIncarnation() !== incarnation) return false;
     const self = this;
     const lifetime = {};
     this.settingsLifetime = lifetime;
+    const withdrawLifetime = (): void => {
+      if (this.settingsLifetime !== lifetime) return;
+      this.settingsLifetime = replacing && this.server === replacing.server ? replacing.lifetime : null;
+    };
     try {
       const server = this.serveFactory({
         port: this.port,
@@ -750,15 +803,17 @@ export class DaemonServer {
       // Publication is async: mutations queued by the native factory retire its candidate too.
       if (current()) await Promise.resolve();
       if (!current()) {
-        if (this.settingsLifetime === lifetime) this.settingsLifetime = null;
+        withdrawLifetime();
         await this.closeControlPlaneListener(server);
         return false;
       }
       this.server = server;
+      this.restartCycle.setDown(false);
       this.acceptedTransportBinding = { host: this.boundHost, port: this.boundPort };
+      if (replacing) await this.closeControlPlaneListener(replacing.server);
       return true;
     } catch (error) {
-      if (this.settingsLifetime === lifetime) this.settingsLifetime = null;
+      withdrawLifetime();
       throw error;
     }
   }
@@ -797,27 +852,114 @@ export class DaemonServer {
 
   private async rebindControlPlaneListener(transition: object): Promise<void> {
     const current = (): boolean => this.listenerTransition === transition
-      && !this.tornDown && !this._restartAdmissionClosed;
+      && !this.tornDown && !this.restartCycle.closed;
+    // The address that last served. A new binding that cannot be bound falls
+    // back here, so a typo in a setting never leaves the API unreachable (and
+    // therefore uncorrectable over the wire).
+    const fallback = this.acceptedTransportBinding ?? (this.server !== null ? { host: this.host, port: this.boundPort } : null);
     while (current()) {
-      this._restartDirty = false;
-      await this.detachControlPlaneListener();
-      if (!current()) return;
-      const incarnation = this.configManager.getConfigurationIncarnation();
-      const binding = this.configuredControlPlaneBinding();
-      if (this.serveFactory === Bun.serve) await requirePortAvailable(binding.port, binding.host, 'daemon');
-      if (!current()) return;
-      // Every watched mutation, including same-value/ABA, retires this candidate.
-      if (this._restartDirty || this.configManager.getConfigurationIncarnation() !== incarnation) continue;
-      this.host = binding.host;
-      this.port = binding.port;
-      this.tlsState = resolveInboundTlsContext(this.configManager, 'controlPlane');
-      if (!await this.bindControlPlaneListener(transition, this.tlsState, incarnation)) continue;
+      this.restartCycle.takeDirty();
+      // A different host or port is bound BEFORE the serving listener is
+      // released, so a binding that cannot be used never takes the API down.
+      // The same address (a TLS or mode change) cannot be bound twice, so that
+      // case still releases first and falls back if the new bind fails.
+      const swapFrom = this.server;
+      let incarnation = this.configManager.getConfigurationIncarnation();
+      let binding = this.configuredControlPlaneBinding();
+      // The served port, not the configured one: a listener bound to port 0 serves on an assigned port, and naming that port is the same address.
+      const swap = swapFrom !== null && !(binding.host === this.host && binding.port === this.boundPort);
+      if (swap && swapFrom !== null) {
+        const previous = { host: this.host, port: this.port, tlsState: this.tlsState, lifetime: this.settingsLifetime };
+        try {
+          if (this.serveFactory === Bun.serve) await requirePortAvailable(binding.port, binding.host, 'daemon');
+          if (!current()) return;
+          if (this.restartCycle.dirty || this.configManager.getConfigurationIncarnation() !== incarnation) continue;
+          this.host = binding.host;
+          this.port = binding.port;
+          this.tlsState = resolveInboundTlsContext(this.configManager, 'controlPlane');
+          if (!await this.bindControlPlaneListener(transition, this.tlsState, incarnation, { server: swapFrom, lifetime: previous.lifetime })) {
+            if (this.server === swapFrom) { this.host = previous.host; this.port = previous.port; this.tlsState = previous.tlsState; }
+            continue;
+          }
+        } catch (error) {
+          if (this.server === swapFrom) { this.host = previous.host; this.port = previous.port; this.tlsState = previous.tlsState; }
+          if (!current()) return;
+          // A change that arrived while this candidate failed supersedes it.
+          if (this.restartCycle.dirty) continue;
+          logger.error('DaemonServer: the new control-plane binding could not be bound; still serving on the previous address', {
+            wanted: `${binding.host}:${binding.port}`, serving: `${this.host}:${this.boundPort}`, error: summarizeError(error),
+          });
+          return;
+        }
+      } else {
+        await this.detachControlPlaneListener();
+        if (!current()) return;
+        incarnation = this.configManager.getConfigurationIncarnation();
+        binding = this.configuredControlPlaneBinding();
+        try {
+          if (this.serveFactory === Bun.serve) await requirePortAvailable(binding.port, binding.host, 'daemon');
+          if (!current()) return;
+          // Every watched mutation, including same-value/ABA, retires this candidate.
+          if (this.restartCycle.dirty || this.configManager.getConfigurationIncarnation() !== incarnation) continue;
+          this.host = binding.host;
+          this.port = binding.port;
+          this.tlsState = resolveInboundTlsContext(this.configManager, 'controlPlane');
+          if (!await this.bindControlPlaneListener(transition, this.tlsState, incarnation)) continue;
+        } catch (error) {
+          if (!current()) return;
+          // A change that arrived while this candidate failed supersedes it.
+          if (this.restartCycle.dirty) continue;
+          await this.recoverFromFailedRebind(transition, binding, fallback, error);
+          return;
+        }
+      }
       if (!current()) return;
       if (this.configManager.getConfigurationIncarnation() !== incarnation) continue;
       this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
       this.transportEventsHelper.emitTransportConnected();
-      if (!this._restartDirty) return;
+      if (!this.restartCycle.dirty) return;
     }
+  }
+
+  /**
+   * The configured binding could not be bound. Serve on the previous address
+   * again when possible; otherwise say plainly that the listener is down and
+   * keep the watcher armed so a corrected setting rebinds it.
+   */
+  private async recoverFromFailedRebind(
+    transition: object,
+    attempted: { readonly host: string; readonly port: number },
+    fallback: { readonly host: string; readonly port: number } | null,
+    error: unknown,
+  ): Promise<void> {
+    const reason = summarizeError(error);
+    const wanted = `${attempted.host}:${attempted.port}`;
+    if (fallback !== null) {
+      this.host = fallback.host;
+      this.port = fallback.port;
+      const tlsState = resolveInboundTlsContext(this.configManager, 'controlPlane');
+      this.tlsState = tlsState;
+      try {
+        if (await this.bindControlPlaneListener(transition, tlsState, this.configManager.getConfigurationIncarnation())) {
+          logger.error('DaemonServer: the new control-plane binding could not be bound; still serving on the previous address', {
+            wanted, serving: `${this.host}:${this.boundPort}`, error: reason,
+          });
+          this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+          this.transportEventsHelper.emitTransportConnected();
+          return;
+        }
+      } catch (restoreError) {
+        logger.error('DaemonServer: the previous control-plane address could not be bound again', { error: summarizeError(restoreError) });
+      }
+      if (this.listenerTransition !== transition || this.tornDown || this.restartCycle.closed) return;
+    }
+    this.tlsState = null;
+    this.restartCycle.setDown(true);
+    logger.error('DaemonServer: no control-plane listener is bound after a binding change; correct controlPlane.host/port/hostMode to rebind', {
+      wanted, error: reason,
+    });
+    this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+    this.transportEventsHelper.emitTransportTerminalFailure(`control-plane listener could not bind ${wanted}: ${reason}`);
   }
 
   /**
@@ -826,9 +968,8 @@ export class DaemonServer {
    * synchronously before draining consumers, then await and stop resources.
    */
   fenceRestartAdmission(): void {
-    this._restartAdmissionClosed = true;
+    this.restartCycle.fence();
     this.externalStopEpoch++;
-    this._restartDirty = false;
     this._configWatchUnsub?.();
     this._configWatchUnsub = null;
     this.lifecycle?.beginStopping(false);
@@ -842,9 +983,9 @@ export class DaemonServer {
   async waitForRestart(): Promise<void> {
     // Loop also includes work admitted by a failed/chained restart or rollback.
     let restartFailed = false;
-    while (this._restartingPromise || startupDrains.get(this)?.pending.size) {
+    while (this.restartCycle.pending || startupDrains.get(this)?.pending.size) {
       const pending = [...(startupDrains.get(this)?.pending ?? [])];
-      const restart = this._restartingPromise;
+      const restart = this.restartCycle.pending;
       // Pending startup observations never reject; their fixed failures are
       // retained separately. A restart failure must not bypass their drain.
       if (restart) pending.push(restart.catch(() => { restartFailed = true; }));
@@ -853,7 +994,7 @@ export class DaemonServer {
     const failures: unknown[] = [...(startupDrains.get(this)?.failures ?? [])]
       .map((label) => new Error(`Daemon ${label} startup operation failed`));
     if (restartFailed) failures.push(new Error('Daemon config restart failed'));
-    if (this._restartAdmissionClosed) {
+    if (this.restartCycle.closed) {
       try { await this.lifecycle?.drainHandovers(false); }
       catch (error) { failures.push(error); }
     }
@@ -894,7 +1035,7 @@ export class DaemonServer {
     // abort callbacks can re-enter enable() and mint a new serving lifetime.
     this.settingsLifetime = null;
     this.listenerTransition = {};
-    this._restartDirty = false;
+    this.restartCycle.reset();
     this.workProposals.dispose();
     this.tornDown = true;
     try {
@@ -934,7 +1075,7 @@ export class DaemonServer {
       clearInterval(this.replyPoller);
       this.replyPoller = null;
     }
-    this.pendingSurfaceReplies.clear();
+    this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon stopped before the reply was delivered');
     this.approvalBrokerUnsubscribe?.();
     this.approvalBrokerUnsubscribe = null;
     this.relayReachability?.stop();
@@ -981,7 +1122,7 @@ export class DaemonServer {
     this.tlsState = null;
     this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
     // A daemon that never listened has no disconnect to announce and no "stopped" to claim; everything above was released either way.
-    await close(async () => { await this._restartingPromise; });
+    await close(async () => { await this.restartCycle.pending; });
     const hadListener = this.acceptedTransportBinding !== null || this.server !== null || this.listenerDrain !== null;
     await close(() => this.detachControlPlaneListener());
     if (hadListener) { this.transportEventsHelper.emitTransportDisconnected('Daemon server stopped', false); logger.info('DaemonServer stopped'); }
@@ -996,46 +1137,33 @@ export class DaemonServer {
     return this.lifecycle?.collectReceipts() ?? [];
   }
 
+  /** Undelivered receipts for a `?receipts=peek` read; nothing is marked delivered. */
+  peekDaemonReceipts(): readonly { id: string; text: string; at: number }[] {
+    return this.lifecycle?.peekReceipts() ?? [];
+  }
+
+  /** Marks the receipts a `?receipts=ack` reader says it received as delivered. */
+  acknowledgeDaemonReceipts(ids: readonly string[]): void {
+    this.lifecycle?.acknowledgeReceipts(ids);
+  }
+
   /**
    * Subscribe to controlPlane binding keys and restart the server on change.
    * Called once from start() after the server is up. Clears itself on stop().
    */
   private _attachControlPlaneConfigWatcher(): void {
-    if (this._restartAdmissionClosed) return;
+    if (this.restartCycle.closed) return;
     if (this._configWatchUnsub) return; // idempotent
 
-    const restart = (): void => {
-      if (this._restartAdmissionClosed) return;
-      if (this._restarting) {
-        // Change arrived mid-restart, queue a second cycle (check _restarting
-        // before isRunning: listener detach runs inside the restart IIFE).
-        this._restartDirty = true;
-        return;
-      }
-      if (!this.isRunning) return;
-      this._restarting = true;
-      const transition = this.listenerTransition;
-      this._restartingPromise = (async () => {
-        try {
-          logger.info('DaemonServer: controlPlane binding changed, rebinding listener…');
-          await this.rebindControlPlaneListener(transition);
-        } catch (err) {
-          logger.error('DaemonServer: restart after config change failed', { error: summarizeError(err) });
-        } finally {
-          this._restarting = false;
-          this._restartDirty = false;
-          this._restartingPromise = null;
-        }
-      })();
-    };
-
-    // getIsRunning also returns true mid-restart (_restarting) so changes arriving
-    // then reach the dirty-flag path; both are false on an intentional stop.
+    // The controller counts a change as live while bound, mid-cycle (so it
+    // reaches the queued-change path) and after a rebind that bound nothing (so
+    // a corrected setting can still bring the listener back); never after an
+    // intentional stop.
     const watcher = createHostModeRestartWatcher({
       configManager: this.configManager,
       keys: ['controlPlane.hostMode', 'controlPlane.host', 'controlPlane.port'],
-      onRestart: restart,
-      getIsRunning: () => this.isRunning || this._restarting,
+      onRestart: () => this.restartCycle.request(),
+      getIsRunning: () => this.restartCycle.active,
     });
     this._configWatchUnsub = () => watcher.unsubscribe();
   }
@@ -1142,6 +1270,8 @@ export class DaemonServer {
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
       readonly clientKind?: string | undefined;
+      /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
+      readonly connectionId?: string | undefined;
     };
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
     return await this.controlPlaneHelper.invokeGatewayMethodCall(input);
@@ -1202,11 +1332,16 @@ export class DaemonServer {
     approvalId: string,
     action: 'claim' | 'approve' | 'deny' | 'cancel',
     req: Request,
+    /** Who pressed the button, when it came from a chat surface whose signature the daemon already verified. */
+    interaction?: { readonly surface: string; readonly userId: string } | undefined,
   ): Promise<Response> {
     return handleInteractiveApprovalAction({
       broker: this.approvalBroker,
       parseBody: (request) => this.parseOptionalJsonBody(request),
-      actor: (request) => this.requireAuthenticatedSession(request)?.username ?? (this.authToken ? 'shared-token' : 'operator'),
+      actor: (request) => interaction
+        ? `${interaction.surface}:${interaction.userId}`
+        : this.requireAuthenticatedSession(request)?.username ?? (this.authToken ? 'shared-token' : 'operator'),
+      surface: () => interaction?.surface ?? 'web',
       record: (request, path, response) => this.recordApiResponse(request, path, response),
     }, approvalId, action, req);
   }
@@ -1218,11 +1353,13 @@ export class DaemonServer {
             tools: [...((input as { tools?: readonly string[] }).tools ?? [])],
           }
         : input;
-      const record = withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput));
+      // Work started for a third-party channel message runs under that channel's surface authority; local sessions keep the owner's.
+      const triggerSurface = sessionId === undefined ? undefined : this.sessionBroker.getSession(sessionId)?.surfaceKinds.find(isChannelSurfaceKind);
+      const record = withTurnSurfaceId(triggerSurface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.
       if (this.agentTaskAdapter) {
-        this.agentTaskAdapter.wrapAgent(record.id, record.task, { sessionId: sessionId ?? 'daemon' });
+        this.agentTaskAdapter.wrapAgent(record.id, record.task, { sessionId: sessionId ?? 'daemon' }, record.id);
       }
       return record;
     } catch (err) {

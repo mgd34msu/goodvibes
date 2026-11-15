@@ -26,6 +26,8 @@ import {
 import { mapOpenAIStopReason } from './stop-reason-maps.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
+import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import {
   toOpenAITools,
   toOpenAIMessages,
@@ -34,7 +36,7 @@ import {
 import type { OpenAIToolCall } from './tool-formats.js';
 import { accumOpenAIToolCall, finalizeOpenAIToolCalls, applyOpenAIChunkUsage, resolveOpenAIToolCallsAndFallback } from './openai-stream-helpers.js';
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
-import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { isOpenAiSpentQuota, openAiRetryAfterMs, parseRateLimitHeaders } from './rate-limit-headers.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import { extractOpenAIStreamTextDelta, readStreamDeltaLabels } from './openai-stream-delta.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
@@ -145,7 +147,8 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    const { messages, tools, model, maxTokens, signal, systemPrompt, onDelta, onRetry } = params;
+    const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry } = params;
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     // `reasoning_effort` is a documented top-level parameter of
     // POST /v1/chat/completions (openai@6.46.0 types it as
     // 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'), so the
@@ -165,7 +168,7 @@ export class OpenAIProvider implements LLMProvider {
       ? undefined
       : resolvedEffort.value;
 
-    return withRetry(async () => {
+    return (await instrumentedLlmCall(() => withRetry(async () => {
       let responseText = '';
       let inputTokens = 0;
       let outputTokens = 0;
@@ -174,6 +177,7 @@ export class OpenAIProvider implements LLMProvider {
       let stopReason: ChatStopReason = 'unknown';
       let rawToolCalls: OpenAIToolCall[] = [];
       let rateLimit: ChatResponse['rateLimit'];
+      let streamOpened = false;
 
       const openaiMessages = toOpenAIMessages(messages, systemPrompt);
       const openaiTools = tools && tools.length > 0 ? toOpenAITools(tools) : undefined;
@@ -201,6 +205,7 @@ export class OpenAIProvider implements LLMProvider {
           data: AsyncIterable<import('openai/resources/chat/completions.js').ChatCompletionChunk> & { controller: AbortController };
           response: Response;
         };
+        streamOpened = true;
         const stream = created.data;
         rateLimit = parseRateLimitHeaders(created.response.headers) ?? undefined;
 
@@ -242,8 +247,22 @@ export class OpenAIProvider implements LLMProvider {
         if (err instanceof ProviderAttemptDeniedError) throw err;
         const { hasStatus } = await import('../utils/retry.js');
         const status = hasStatus(err) ? err.status : undefined;
+        const retryAfterMs = openAiRetryAfterMs(err);
         throw toProviderError(err, {
           ...(status !== undefined ? { statusCode: status } : {}),
+          ...(status === 429 && isOpenAiSpentQuota(err) ? { category: 'billing' as const } : {}),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+          provider: this.name,
+          operation: 'chat',
+          phase: streamOpened ? 'stream' : 'request',
+        });
+      }
+
+      // OpenAI always closes a completion with a finish_reason; a stream that
+      // ends without one was cut, and its text is a truncated answer.
+      if (rawStopReason === undefined) {
+        throw new ProviderError('OpenAI stream ended without a finish reason; the answer may be truncated.', {
+          statusCode: 502,
           provider: this.name,
           operation: 'chat',
           phase: 'stream',
@@ -275,7 +294,7 @@ export class OpenAIProvider implements LLMProvider {
         ...withProviderStopReason(rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, onRetry);
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model })).result;
   }
 
   async embed(request: ProviderEmbeddingRequest): Promise<ProviderEmbeddingResult> {
@@ -358,7 +377,6 @@ export class OpenAIProvider implements LLMProvider {
       models: {
         models: this.models,
         embeddingModel: this.embeddingModel,
-        embeddingDimensions: 384,
       },
       usage: {
         streaming: true,

@@ -1,4 +1,4 @@
-/** Actual opaque-quality publication paths must establish a native reader floor. UNRUN. */
+/** Actual opaque-quality publication paths must establish a native reader floor. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

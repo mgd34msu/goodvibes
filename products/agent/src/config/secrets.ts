@@ -3,7 +3,7 @@ import { LiteralSecretsManager, type SecretsManagerOptions as PlatformOptions } 
 export type SecretsManagerOptions = Omit<PlatformOptions, 'surfaceRoot'>;
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.ts';
 export { applyRawSecretLiteralHandling } from '@goodvibes-jev/engine/platform/platform/config';
-// API key values remain local/env-only; daemon status is exposed separately.
+// Keys the connected host owns are written there instead of to this local store: see daemon-credential-routing.ts. Their status is read in credential-status.ts.
 export { deriveCredentialAvailability, fetchDaemonCredentialAvailability } from './credential-status.ts';
 export type { CredentialAvailability, CredentialStatusConnection, CredentialStatusEntry } from './credential-status.ts';
 export class SecretsManager extends LiteralSecretsManager {

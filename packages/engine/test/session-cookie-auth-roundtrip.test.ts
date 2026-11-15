@@ -1,16 +1,17 @@
 /**
  * session-cookie-auth-roundtrip.test.ts
  *
- * Verifies that session-cookie authentication works when a shared operator
- * token is also configured.
+ * Session-cookie authentication when a shared operator token is also
+ * configured (the Android companion client logs in with a cookie while the
+ * daemon has a shared token).
  *
  * Coverage:
- *   1. Unit: authenticateOperatorToken with sharedToken set accepts session tokens
- *   2. Unit: authenticateOperatorToken with sharedToken set rejects unknown tokens
- *   3. Unit: authenticateOperatorToken without sharedToken accepts session tokens
- *   4. HTTP round-trip: POST /login -> cookie -> GET /api/control-plane/auth returns authenticated
- *   5. HTTP round-trip: POST /login -> cookie -> POST /api/companion/chat/sessions returns 201
- *   6. Companion-token round-trip via bearer header: accepted when sharedToken is set
+ *   1. authenticateOperatorToken accepts session tokens with or without a
+ *      shared token, and rejects unknown and revoked ones
+ *   2. Through the real DaemonHttpRouter and DaemonControlPlaneHelper: a login
+ *      cookie authenticates GET /api/control-plane/auth and
+ *      POST /api/companion/chat/sessions; the same requests without the cookie
+ *      are refused
  */
 
 import { describe, expect, test, afterEach } from 'bun:test';
@@ -24,11 +25,8 @@ import {
   buildOperatorSessionCookie,
 } from '../platform/src/platform/security/http-auth.js';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
-import {
-  createDaemonControlRouteHandlers,
-} from '../daemon-api/dist/index.js';
-import { dispatchCompanionChatRoutes } from '../platform/src/platform/companion/companion-chat-routes.js';
-import type { CompanionChatRouteContext } from '../platform/src/platform/companion/companion-chat-route-types.js';
+import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.js';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.js';
 import type { CompanionLLMProvider, CompanionChatEventPublisher, CompanionProviderChunk } from '../platform/src/platform/companion/companion-chat-manager.js';
 import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.js';
 
@@ -73,102 +71,45 @@ function makeCompanionManager(): CompanionChatManager {
   });
 }
 
-function makeCompanionRouteContext(manager: CompanionChatManager): CompanionChatRouteContext {
-  return {
-    chatManager: manager,
-    async parseJsonBody(req) {
-      try { return await req.json(); } catch { return new Response('bad json', { status: 400 }); }
-    },
-    async parseOptionalJsonBody(req) {
-      const text = await req.text();
-      if (!text) return null;
-      try { return JSON.parse(text); } catch { return new Response('bad json', { status: 400 }); }
-    },
-    openSessionEventStream: (_req, sessionId) =>
-      new Response(`data: connected sessionId=${sessionId}\n\n`, {
-        status: 200,
-        headers: { 'content-type': 'text/event-stream' },
-      }),
-  };
+/**
+ * The real router with the real operator-auth helper behind its auth gate, the
+ * way the daemon facade wires it. Only collaborators the exercised routes never
+ * touch are left out.
+ */
+function makeRouter(userAuth: UserAuthManager, sharedToken: string | null, manager: CompanionChatManager): DaemonHttpRouter {
+  const gatewayMethods = { findByHttpBinding: () => null, get: () => null, list: () => [], listEvents: () => [], getAllScopes: () => [] as string[] };
+  const helper = new DaemonControlPlaneHelper({
+    authToken: () => sharedToken,
+    userAuth,
+    gatewayMethods,
+    trustProxyEnabled: () => false,
+  } as unknown as DaemonControlPlaneContext);
+  return new DaemonHttpRouter({
+    configManager: { get: () => undefined },
+    gatewayMethods,
+    controlPlaneGateway: {},
+    userAuth,
+    runtimeStore: null,
+    runtimeDispatch: null,
+    authToken: () => sharedToken,
+    checkAuth: (req: Request) => helper.checkAuth(req),
+    extractAuthToken: (req: Request) => helper.extractAuthToken(req),
+    requireAuthenticatedSession: (req: Request) => helper.requireAuthenticatedSession(req),
+    describeAuthenticatedPrincipal: (token: string) => helper.describeAuthenticatedPrincipal(token),
+    companionChatManager: manager,
+  } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
 }
 
-/**
- * Build a minimal createDaemonControlRouteHandlers context wired to real
- * UserAuthManager and optional sharedToken, matching the production wiring.
- */
-function makeControlRouteHandlers(
-  req: Request,
-  userAuth: UserAuthManager,
-  sharedToken: string | null,
-) {
-  const extractAuthToken = (request: Request): string => {
-    const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
-    if (bearer) return bearer;
-    // Parse session cookie manually (matches extractOperatorAuthToken in http-auth.ts)
-    const cookieHeader = request.headers.get('cookie') ?? '';
-    for (const segment of cookieHeader.split(';')) {
-      const [rawName, ...valueParts] = segment.split('=');
-      const name = rawName?.trim();
-      if (name === OPERATOR_SESSION_COOKIE_NAME) {
-        const raw = valueParts.join('=').trim();
-        try { return decodeURIComponent(raw); } catch { return raw; }
-      }
-    }
-    return '';
-  };
-
-  const resolveAuthenticatedPrincipal = (request: Request) => {
-    const token = extractAuthToken(request);
-    const result = authenticateOperatorToken(token, { sharedToken, userAuth });
-    if (!result) return null;
-    if (result.kind === 'shared-token') {
-      return { principalId: 'shared-token', principalKind: 'token' as const, admin: true, scopes: [] };
-    }
-    // Mirrors ControlPlaneGateway.describeAuthenticatedPrincipal (control-plane.ts):
-    // a pairing token is a distinct token-kind principal, not a user session,
-    // it has no `roles`/`username`, so it must be handled before the fallthrough
-    // that reads those fields off the remaining 'session' branch.
-    if (result.kind === 'pairing-token') {
-      return { principalId: `pairing:${result.tokenId}`, principalKind: 'token' as const, admin: true, scopes: [] };
-    }
-    const admin = result.roles.includes('admin');
-    return { principalId: result.username, principalKind: 'user' as const, admin, scopes: [] };
-  };
-
-  return createDaemonControlRouteHandlers({
-    authToken: sharedToken,
-    version: '0.18.52-test',
-    sessionCookieName: OPERATOR_SESSION_COOKIE_NAME,
-    controlPlaneGateway: {
-      getSnapshot: () => ({ ok: true }),
-      renderWebUi: () => new Response('<html></html>'),
-      listRecentEvents: () => [],
-      listSurfaceMessages: () => [],
-      listClients: () => [],
-      createEventStream: () => new Response('stream', { status: 200 }),
-    },
-    extractAuthToken,
-    resolveAuthenticatedPrincipal,
-    gatewayMethods: {
-      list: () => [],
-      listEvents: () => [],
-      get: () => null,
-    },
-    getOperatorContract: () => ({ version: 1 }),
-    invokeGatewayMethodCall: async () => ({ status: 200, ok: true, body: null }),
-    parseOptionalJsonBody: async (request) => {
-      const text = await request.text();
-      return text.trim() ? JSON.parse(text) as Record<string, unknown> : null;
-    },
-    requireAdmin: () => null,
-    requireAuthenticatedSession: (request) => {
-      const token = extractAuthToken(request);
-      const result = authenticateOperatorToken(token, { sharedToken, userAuth });
-      if (!result || result.kind !== 'session') return null;
-      return { username: result.username, roles: [...result.roles] };
-    },
-    login: () => Response.json({ error: 'not used by this fixture' }, { status: 500 }),
+function loginCookie(userAuth: UserAuthManager): string {
+  const loginAuth = userAuth.authenticate('testuser', 'testpass123');
+  if (!loginAuth.ok) throw new Error('Expected successful auth');
+  const session = userAuth.createSession(loginAuth.user.username);
+  const cookieHeader = buildOperatorSessionCookie(session.token, {
+    req: new Request('http://127.0.0.1/login', { method: 'POST' }),
+    expiresAt: session.expiresAt,
   });
+  // Just the name=value pair, as a client sends it back.
+  return cookieHeader.split(';')[0]!;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,182 +207,96 @@ describe('authenticateOperatorToken session validation when sharedToken is set',
 });
 
 // ---------------------------------------------------------------------------
-// 2. HTTP round-trip: POST /login -> cookie -> GET /api/control-plane/auth
+// 2. Through the router: cookie -> auth gate -> route
 // ---------------------------------------------------------------------------
 
-describe('session-cookie auth HTTP round-trip', () => {
-  test('GET /api/control-plane/auth returns authenticated:true and authMode:session after cookie login: with sharedToken set', async () => {
+const SHARED_TOKEN = 'daemon-operator-shared-token';
+
+describe('session-cookie auth through the daemon router', () => {
+  function setup() {
     const dir = makeTmpDir();
     cleanupDirs.push(dir);
     const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
+    const manager = makeCompanionManager();
+    cleanupManagers.push(manager);
+    return { userAuth, router: makeRouter(userAuth, SHARED_TOKEN, manager) };
+  }
 
-    // Simulate what POST /login does: authenticate + createSession + build cookie
-    const loginAuth = userAuth.authenticate('testuser', 'testpass123');
-    if (!loginAuth.ok) throw new Error('Expected successful auth');
-    const session = userAuth.createSession(loginAuth.user.username);
-    const loginReq = new Request('http://127.0.0.1/login', { method: 'POST' });
-    const cookieHeader = buildOperatorSessionCookie(session.token, {
-      req: loginReq,
-      expiresAt: session.expiresAt,
-    });
-    // Extract just the cookie name=value part
-    const cookieValue = cookieHeader.split(';')[0]!;
+  const authRequest = (headers: Record<string, string>) =>
+    new Request('http://127.0.0.1/api/control-plane/auth', { method: 'GET', headers });
 
-    // Now simulate the Android app sending GET /api/control-plane/auth with that cookie
-    const authReq = new Request('http://127.0.0.1/api/control-plane/auth', {
-      method: 'GET',
-      headers: { Cookie: cookieValue },
-    });
-
-    const handlers = makeControlRouteHandlers(authReq, userAuth, sharedToken);
-    const authRes = await handlers.getCurrentAuth(authReq);
-    expect(authRes.status).toBe(200);
-    const authBody = await authRes.json() as {
-      authenticated: boolean;
-      authMode: string;
-      sessionCookiePresent: boolean;
-      principalId: string | null;
-      principalKind: string | null;
+  test('GET /api/control-plane/auth reports the logged-in user for a session cookie while a shared token is configured', async () => {
+    const { userAuth, router } = setup();
+    const res = await router.handleRequest(authRequest({ Cookie: loginCookie(userAuth) }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      authenticated: boolean; authMode: string; sessionCookiePresent: boolean; principalId: string | null; principalKind: string | null;
     };
-
-    // Before the fix: authenticated=false, authMode='invalid'
-    expect(authBody.authenticated).toBe(true);
-    expect(authBody.authMode).toBe('session');
-    expect(authBody.sessionCookiePresent).toBe(true);
-    expect(authBody.principalId).toBe('testuser');
-    expect(authBody.principalKind).toBe('user');
-  });
-
-  test('GET /api/control-plane/auth returns authMode:anonymous for a request with no credentials', async () => {
-    const dir = makeTmpDir();
-    cleanupDirs.push(dir);
-    const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
-
-    const req = new Request('http://127.0.0.1/api/control-plane/auth', { method: 'GET' });
-    const handlers = makeControlRouteHandlers(req, userAuth, sharedToken);
-    const res = await handlers.getCurrentAuth(req);
-    const body = await res.json() as { authenticated: boolean; authMode: string };
-
-    expect(body.authenticated).toBe(false);
-    expect(body.authMode).toBe('anonymous');
-  });
-
-  test('GET /api/control-plane/auth returns authMode:invalid for an unrecognized token', async () => {
-    const dir = makeTmpDir();
-    cleanupDirs.push(dir);
-    const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
-
-    const req = new Request('http://127.0.0.1/api/control-plane/auth', {
-      method: 'GET',
-      headers: { Authorization: 'Bearer completely-unknown-token' },
-    });
-    const handlers = makeControlRouteHandlers(req, userAuth, sharedToken);
-    const res = await handlers.getCurrentAuth(req);
-    const body = await res.json() as { authenticated: boolean; authMode: string };
-
-    expect(body.authenticated).toBe(false);
-    expect(body.authMode).toBe('invalid');
-  });
-
-  test('GET /api/control-plane/auth returns authMode:shared-token when shared token is presented', async () => {
-    const dir = makeTmpDir();
-    cleanupDirs.push(dir);
-    const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
-
-    const req = new Request('http://127.0.0.1/api/control-plane/auth', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${sharedToken}` },
-    });
-    const handlers = makeControlRouteHandlers(req, userAuth, sharedToken);
-    const res = await handlers.getCurrentAuth(req);
-    const body = await res.json() as { authenticated: boolean; authMode: string };
-
     expect(body.authenticated).toBe(true);
-    expect(body.authMode).toBe('shared-token');
+    expect(body.authMode).toBe('session');
+    expect(body.sessionCookiePresent).toBe(true);
+    expect(body.principalId).toBe('testuser');
+    expect(body.principalKind).toBe('user');
+  });
+
+  test('a percent-encoded cookie value is decoded the way the browser sends it back', async () => {
+    const { userAuth, router } = setup();
+    const [name, value] = loginCookie(userAuth).split('=') as [string, string];
+    const res = await router.handleRequest(authRequest({ Cookie: `other=1; ${name}=${encodeURIComponent(value)}` }));
+    const body = await res.json() as { authenticated: boolean; authMode: string };
+    expect(body.authMode).toBe('session');
+    expect(body.authenticated).toBe(true);
+  });
+
+  test('GET /api/control-plane/auth reports the shared token, and calls an unrecognized bearer or cookie invalid', async () => {
+    const { router } = setup();
+    const shared = await router.handleRequest(authRequest({ Authorization: `Bearer ${SHARED_TOKEN}` }));
+    expect(await shared.json()).toMatchObject({ authenticated: true, authMode: 'shared-token' });
+
+    const bogusBearer = await router.handleRequest(authRequest({ Authorization: 'Bearer completely-unknown-token' }));
+    expect(await bogusBearer.json()).toMatchObject({ authenticated: false, authMode: 'invalid' });
+    const bogusCookie = await router.handleRequest(authRequest({ Cookie: `${OPERATOR_SESSION_COOKIE_NAME}=completely-unknown-token` }));
+    expect(await bogusCookie.json()).toMatchObject({ authenticated: false, authMode: 'invalid', sessionCookiePresent: true });
+  });
+
+  test('a request with no credentials is reported anonymous', async () => {
+    const { router } = setup();
+    const res = await router.handleRequest(authRequest({}));
+    expect(await res.json()).toMatchObject({ authenticated: false, authMode: 'anonymous' });
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Companion-chat session creation requires passing auth check
-// ---------------------------------------------------------------------------
-
 describe('companion-chat session creation via session-cookie auth', () => {
-  test('POST /api/companion/chat/sessions succeeds when cookie auth is valid: with sharedToken set', async () => {
+  const createRequest = (headers: Record<string, string>) =>
+    new Request('http://127.0.0.1/api/companion/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ title: 'android-test-session', provider: 'inception', model: 'mercury-2' }),
+    });
+
+  function setup() {
     const dir = makeTmpDir();
     cleanupDirs.push(dir);
     const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
     const manager = makeCompanionManager();
     cleanupManagers.push(manager);
+    return { userAuth, router: makeRouter(userAuth, SHARED_TOKEN, manager) };
+  }
 
-    // Simulate login
-    const loginAuth2 = userAuth.authenticate('testuser', 'testpass123');
-    if (!loginAuth2.ok) throw new Error('Expected successful auth');
-    const session = userAuth.createSession(loginAuth2.user.username);
-    const loginReq = new Request('http://127.0.0.1/login', { method: 'POST' });
-    const cookieHeader = buildOperatorSessionCookie(session.token, {
-      req: loginReq,
-      expiresAt: session.expiresAt,
-    });
-    const cookieValue = cookieHeader.split(';')[0]!;
-
-    // Simulate what DaemonHttpRouter.checkAuth would do:
-    // The companion route is dispatched AFTER auth passes. Simulate passing by
-    // directly calling dispatchCompanionChatRoutes (companion routes trust the
-    // outer auth gate, as documented in the route file header).
-    // First verify the auth check itself passes with the session cookie:
-    const { authenticateOperatorRequest } = await import('../platform/src/platform/security/http-auth.js');
-    const companionReq = new Request('http://127.0.0.1/api/companion/chat/sessions', {
-      method: 'POST',
-      headers: {
-        Cookie: cookieValue,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title: 'android-test-session', provider: 'inception', model: 'mercury-2' }),
-    });
-
-    const authResult = authenticateOperatorRequest(companionReq, { sharedToken, userAuth });
-    expect(authResult).not.toBeNull();
-    expect(authResult!.kind).toBe('session');
-
-    // Companion route creates the session
-    const ctx = makeCompanionRouteContext(manager);
-    const res = await dispatchCompanionChatRoutes(companionReq, ctx);
-    // The body is consumed; recreate the request for the route
-    const companionReq2 = new Request('http://127.0.0.1/api/companion/chat/sessions', {
-      method: 'POST',
-      headers: {
-        Cookie: cookieValue,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title: 'android-test-session', provider: 'inception', model: 'mercury-2' }),
-    });
-    const res2 = await dispatchCompanionChatRoutes(companionReq2, ctx);
-    expect(res2).not.toBeNull();
-    expect(res2!.status).toBe(201);
-    const body = await res2!.json() as { sessionId: string };
-    expect(typeof body.sessionId).toBe('string');
+  test('POST /api/companion/chat/sessions creates a session for a valid cookie, with a shared token configured', async () => {
+    const { userAuth, router } = setup();
+    const res = await router.handleRequest(createRequest({ Cookie: loginCookie(userAuth) }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as { sessionId: string };
     expect(body.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  test('auth gate rejects unauthenticated companion session creation when sharedToken is set', async () => {
-    const dir = makeTmpDir();
-    cleanupDirs.push(dir);
-    const userAuth = makeUserAuth(dir);
-    const sharedToken = 'daemon-operator-shared-token';
+  test('the same request without the cookie, or with a revoked session cookie, is refused and creates nothing', async () => {
+    const { userAuth, router } = setup();
+    const cookie = loginCookie(userAuth);
+    userAuth.revokeSession(cookie.split('=')[1]!);
 
-    const { authenticateOperatorRequest } = await import('../platform/src/platform/security/http-auth.js');
-    const req = new Request('http://127.0.0.1/api/companion/chat/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-
-    const authResult = authenticateOperatorRequest(req, { sharedToken, userAuth });
-    expect(authResult).toBeNull();
+    expect((await router.handleRequest(createRequest({}))).status).toBe(401);
+    expect((await router.handleRequest(createRequest({ Cookie: cookie }))).status).toBe(401);
   });
 });

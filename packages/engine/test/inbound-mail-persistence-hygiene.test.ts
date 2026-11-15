@@ -592,7 +592,7 @@ describe('two independent writers over one record file lose nothing', () => {
     ].join('\n'), 'utf-8');
 
     const exits = await Promise.all([1_000, 2_000].map((base) =>
-      Bun.spawn(['bun', scriptPath, storePath, String(base)], {
+      Bun.spawn([process.execPath, scriptPath, storePath, String(base)], {
         cwd: join(import.meta.dir, '..'),
         stdout: 'pipe',
         stderr: 'pipe',

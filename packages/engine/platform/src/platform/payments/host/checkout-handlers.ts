@@ -1,3 +1,4 @@
+import { readCheckoutReadingInput } from '../checkout-reading-input.js';
 import { PostalAddressHeldError } from '../../config/postal-address.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { retainCheckoutInvocation, retainDetachedCheckout } from './checkout-invocation.js';
@@ -44,19 +45,19 @@ import type { GateInput } from '../gates.js';
 import type { AddressStore } from '../address.js';
 import { CheckoutRegistry } from '../checkout-registry.js';
 import { CheckoutRecovery } from '../checkout-recovery.js';
-import type { CheckoutJournal } from '../checkout-registry.js';
+import type { CheckoutJournal, InFlightCheckout } from '../checkout-registry.js';
 import type { MerchantJudgePort } from '../merchant-recourse.js';
 import type { PaymentNotifier } from '../payment-ports.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
-import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
+import { readCvvHandling, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import { SHIPPING_TIERS } from '../types.js';
 import type { ShippingTier } from '../types.js';
 import type { UntrustedContentLedger } from '../../security/untrusted-content.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
 import { HandlerError } from './handler-plumbing.js';
 import type { TypedHandler } from './handler-plumbing.js';
-import type { DaemonApprovalStore } from './approval-store.js';
+import { PaymentApprovalStoreError, type DaemonApprovalStore } from './approval-store.js';
 import type { DaemonCardStore } from './card-store.js';
 import type { PaymentsHandlerDeps } from './register.js';
 
@@ -136,6 +137,13 @@ function requireWholeNumber(value: unknown, field: string): number {
   return value;
 }
 
+/** A requested line is at least one of something; the protected request store refuses anything less. */
+function requireQuantity(value: unknown, field: string): number {
+  const quantity = requireWholeNumber(value, field);
+  if (quantity < 1) throw invalid(field, 'must be a whole number of at least 1.');
+  return quantity;
+}
+
 function optionalNonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -179,7 +187,7 @@ function readStringRows(value: unknown, field: string): string[] {
 function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<PaymentsGatewayServiceImpl['beginCheckout']>[0] {
   const requestedLines = readObjectRows(params['requestedLines'], 'requestedLines', true).map((entry, index) => ({
     label: requireString(entry['label'], `requestedLines[${String(index)}].label`),
-    quantity: requireWholeNumber(entry['quantity'], `requestedLines[${String(index)}].quantity`),
+    quantity: requireQuantity(entry['quantity'], `requestedLines[${String(index)}].quantity`),
   }));
   const lines = readObjectRows(params['lines'], 'lines', true).map((entry, index) => ({
     label: requireString(entry['label'], `lines[${String(index)}].label`),
@@ -204,6 +212,24 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
     ref: requireString(entry['ref'], `addressFields[${String(index)}].ref`),
   }));
   const twoDigit = params['twoDigitYear'];
+  // The same bounds the protected request store enforces on the retained copy.
+  // Checked here, before the owner's approval is spent, so a malformed reading
+  // is refused by name and does not leave a failed purchase behind.
+  const reading = {
+    lines,
+    tax: optionalNonEmptyString(params['tax']) ?? null,
+    fees,
+    shippingOptions,
+    statedTotal: optionalNonEmptyString(params['statedTotal']) ?? null,
+    currency: optionalNonEmptyString(params['currency']) ?? null,
+    orderSummaryText: typeof params['orderSummaryText'] === 'string' ? params['orderSummaryText'] : '',
+  };
+  const checkedReading = readCheckoutReadingInput(reading);
+  if (!checkedReading.ok) throw new HandlerError(`${checkedReading.field}: ${checkedReading.reason}`, 'INVALID_ARGUMENT', 400);
+  const requestedMax = params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax');
+  if (requestedMax !== undefined && !/^\d+(?:\.\d{1,3})?$/.test(requestedMax)) {
+    throw invalid('requestedMax', 'must be a plain amount such as 25 or 25.00.');
+  }
   return {
     sessionId: requireString(params['sessionId'], 'sessionId'),
     pageId: requireString(params['pageId'], 'pageId'),
@@ -212,15 +238,7 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
     item: requireString(params['item'], 'item'),
     cardId: requireString(params['cardId'], 'cardId'),
     requestedLines,
-    reading: {
-      lines,
-      tax: optionalNonEmptyString(params['tax']) ?? null,
-      fees,
-      shippingOptions,
-      statedTotal: optionalNonEmptyString(params['statedTotal']) ?? null,
-      currency: optionalNonEmptyString(params['currency']) ?? null,
-      orderSummaryText: typeof params['orderSummaryText'] === 'string' ? params['orderSummaryText'] : '',
-    },
+    reading,
     controls: {
       cardFields,
       addressFields,
@@ -230,7 +248,7 @@ function parseBeginCheckoutInput(params: Record<string, unknown>): Parameters<Pa
       twoDigitYear: typeof twoDigit === 'boolean' ? twoDigit : undefined,
     },
     preferredTier: optionalShippingTier(params['preferredTier']),
-    requestedMax: params['requestedMax'] === undefined ? undefined : requireString(params['requestedMax'], 'requestedMax'),
+    requestedMax,
     // The platform's own route (routes/payments.ts) never reads this field off the
     // wire at all: `PaymentBeginCheckoutInput` has no `merchantDiscovered`
     // property, and `service.beginCheckout` is called with it simply absent,
@@ -384,9 +402,17 @@ export class CheckoutServiceHolder {
     this.retireContinuation = deps.checkout.retireContinuation?.bind(deps.checkout);
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
       (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests, deps.checkout.replies);
-    this.reconciliations = new PurchaseReconciliations({ operations: deps.checkout.operations, journal,
+    // A reconciled purchase's journal record is removed outside the registry;
+    // its page must not stay claimed by that settled purchase until restart.
+    const reconciliationJournal: CheckoutJournal = Object.freeze({ list: () => journal.list(), put: (record: InFlightCheckout) => journal.put(record),
+      remove: async (id: string) => {
+        await journal.remove(id);
+        try { await this.registry.forgetRemoved(id); } catch { /* The page is freed on restart instead. */ }
+      } });
+    this.reconciliations = new PurchaseReconciliations({ operations: deps.checkout.operations, journal: reconciliationJournal,
       purchases: deps.purchases, budget: deps.budget, isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
-    this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
+    this.registry = new CheckoutRegistry({ list: () => journal.list(),
+      remove: async id => { await journal.remove(id); this.operations.released(id); },
       put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
       ledger: deps.budget, purchases: deps.purchases, notifier: deps.checkout.notifier,
@@ -461,10 +487,21 @@ export class CheckoutServiceHolder {
     ], 2, read => read());
     owner.assertCurrent();
     if (typeof usableCard !== 'boolean' || typeof shippingAddress !== 'boolean') throw new CheckoutOwnershipError();
+    const cardWithheldByCvvPrompt = !usableCard && readCvvHandling(this.deps.config) === 'prompt'
+      && input.cardId.length > 0 && (await this.deps.cards.metadata(input.cardId)) !== null;
+    owner.assertCurrent();
     return {
       enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
       hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,
+      ...(cardWithheldByCvvPrompt ? { cardWithheldByCvvPrompt } : {}),
     };
+  }
+
+  /** The daemon types the card itself when its own purchase reaches payment.
+   * A second fill through the verb could race that typing on the same fields. */
+  daemonOwnsPage(sessionId: string, pageId: string): { readonly purchaseId: string; readonly phase: string } | null {
+    const record = this.registry.current(sessionId, pageId);
+    return record !== null && this.operations.isActive(record.purchaseId) ? { purchaseId: record.purchaseId, phase: record.phase } : null;
   }
 
   run<T>(callback: () => Promise<T>): Promise<T> {
@@ -489,6 +526,9 @@ export class CheckoutServiceHolder {
     if (this.closing) return this.closing;
     let resolve!: () => void, reject!: (error: unknown) => void;
     this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    // Before any abort, so a purchase's release points can tell this host stop
+    // from an owner cancel.
+    this.operations.beginStop();
     this.closed = true;
     this.abort.abort(new CheckoutOwnershipError());
     const jobs: Promise<void>[] = [], errors: unknown[] = [];
@@ -617,6 +657,8 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
         content: checkoutApprovalContent({ merchantDomain, item, amount }),
       });
     } catch (error) {
+      // A full store is a plain refusal that names its cap; nothing was recorded.
+      if (error instanceof PaymentApprovalStoreError && error.kind === 'full') throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       // A write error may follow rename. Report uncertainty without claiming
       // that no approval exists or echoing raw filesystem diagnostics.
       void error;
@@ -678,6 +720,12 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
  */
 export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
   return async ({ body, context }) => holder.run(async () => {
+    // Set the moment the owner's approval has been spent, so a failure after it
+    // can say so instead of leaving the caller to find out on the next begin.
+    let approvalSpent = false;
+    const spentNote = (message: string): string => (approvalSpent
+      ? `${message} The owner's approval for this purchase was spent: have the owner approve it again with payments.checkout.approve and begin with a new requestId.`
+      : message);
     try {
       const params = asRecord(body), id = checkoutRequestId(params['requestId']), input = parseBeginCheckoutInput(params);
       const seam = deps.checkout.seam();
@@ -685,16 +733,19 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       const source = retainDetachedCheckout(deps, seam, context);
       const admission = retainCheckoutInvocation(deps, seam, context);
       deps.purchases.assertAvailable();
-      const operation = await holder.admit(id, input, source, admission.assertCurrent, () => consumeCheckoutApproval(deps.checkout.approvals, input));
+      const operation = await holder.admit(id, input, source, admission.assertCurrent, () => {
+        consumeCheckoutApproval(deps.checkout.approvals, input);
+        approvalSpent = true;
+      });
       return { outcome: 'accepted', purchaseId: operation.purchaseId, reason: null, merchantOrderId: null,
         totalMinorUnits: null, currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
     } catch (error) {
       if (error instanceof HandlerError) throw error;
       if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
       if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError || error instanceof BrowserPageConnectionError) {
-        throw new HandlerError(error.message, error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
+        throw new HandlerError(spentNote(error.message), error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
-      throw new HandlerError('This checkout could not be admitted. Read the original purchase status before trying again.', 'INTERNAL_ERROR', 500);
+      throw new HandlerError(spentNote('This checkout could not be admitted. Read the original purchase status before trying again.'), 'INTERNAL_ERROR', 500);
     }
   });
 }
@@ -711,7 +762,18 @@ export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: Check
       throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
     }
 
-    const owner = holder.ownership(retainCheckoutInvocation(deps, seam, context));
+    const refuseDaemonOwned = (owned: { readonly purchaseId: string; readonly phase: string }): HandlerError => new HandlerError(
+      `Refused: purchase ${owned.purchaseId} on this page is at the "${owned.phase}" stage and is being run by the daemon, which types `
+      + 'the card itself when the purchase reaches payment. Do not fill it from here; read payments.purchase.status for its progress.', 'INVALID_ARGUMENT', 400);
+    const owned = holder.daemonOwnsPage(input.sessionId, input.pageId);
+    if (owned !== null) throw refuseDaemonOwned(owned);
+    const invocation = holder.ownership(retainCheckoutInvocation(deps, seam, context));
+    // Held through every await of the fill, not only checked once before it.
+    const owner = { signal: invocation.signal, assertCurrent: () => {
+      invocation.assertCurrent();
+      const current = holder.daemonOwnsPage(input.sessionId, input.pageId);
+      if (current !== null) throw refuseDaemonOwned(current);
+    } };
     const service = holder.serviceFor(seam);
 
     try {

@@ -196,7 +196,7 @@ export class SubscriptionStore {
    * the wizard's validate-before-save step and the derived-name preview.
    */
   async validateByFetch(url: string, requestedName?: string): Promise<ValidationResult> {
-    const res = await this.fetcher({ url });
+    const res = await this.fetchSafely({ url });
     if (res.kind === 'error') {
       return { ok: false, stage: 'fetch', detail: res.status ? `HTTP ${res.status}: ${res.message}` : res.message };
     }
@@ -226,7 +226,7 @@ export class SubscriptionStore {
     // Single unconditional fetch, no separate validate round trip. We fetch once,
     // derive the name from the body, then apply that SAME result into the record.
     const now = this.clock();
-    const res = await this.fetcher({ url: input.url });
+    const res = await this.fetchSafely({ url: input.url });
     if (res.kind === 'error') {
       return { ok: false, stage: 'fetch', detail: res.status ? `HTTP ${res.status}: ${res.message}` : res.message };
     }
@@ -328,12 +328,24 @@ export class SubscriptionStore {
     }
 
     r.lastFetchedAt = now;
-    const res = await this.fetcher({
+    const res = await this.fetchSafely({
       url: r.url,
       ...(r.etag !== undefined ? { etag: r.etag } : {}),
       ...(r.lastModified !== undefined ? { lastModified: r.lastModified } : {}),
     });
     return this.applyFetch(r, res, now);
+  }
+
+  /**
+   * The fetcher type promises a result object, but a throwing one must cost one
+   * subscription its refresh, not every subscription after it in `refreshDue`.
+   */
+  private async fetchSafely(request: Parameters<FeedFetcher>[0]): Promise<FeedFetchResult> {
+    try {
+      return await this.fetcher(request);
+    } catch (error) {
+      return { kind: 'error', message: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /** Apply a fetch result to a record, mutating status/events and returning the honest report. */
@@ -355,6 +367,13 @@ export class SubscriptionStore {
     }
 
     const parsed = parseIcs(res.body);
+    // A 200 that is not a calendar at all (a captive-portal page, an error page,
+    // an empty body) must not replace the events the last good fetch left.
+    if (parsed.events.length === 0 && parsed.skipped.length === 0 && !parsed.calendarName && !/BEGIN:VCALENDAR/i.test(res.body)) {
+      r.lastResult = 'parse-error';
+      r.lastDetail = 'Fetched, but the response is not an iCalendar feed; the previous events were kept.';
+      return { name, outcome: 'parse-error', health: this.healthOf(r, now), ...(r.eventCount !== undefined ? { eventCount: r.eventCount } : {}), detail: r.lastDetail };
+    }
     if (parsed.events.length === 0 && parsed.skipped.length > 0) {
       r.lastResult = 'parse-error';
       r.lastDetail = `Fetched, but every VEVENT was unusable: ${parsed.skipped[0]?.message ?? 'no usable events'}`;
@@ -394,16 +413,21 @@ export class SubscriptionStore {
   }
 
   /** Restore subscription metadata (from `snapshot()`); call `refreshDue()` afterward to load events. */
-  restore(snapshots: readonly SubscriptionSnapshot[]): void {
+  restore(snapshots: readonly SubscriptionSnapshot[], opts: { readonly callerKeepsEvents?: boolean } = {}): void {
     for (const s of snapshots) {
       this.records.set(s.name, {
         name: s.name,
         url: s.url,
         refreshIntervalMs: clampInterval(s.refreshIntervalMs, this.defaultInterval),
-        ...(s.lastFetchedAt !== undefined ? { lastFetchedAt: s.lastFetchedAt } : {}),
+        // No events come back with the metadata, so by default the validators and
+        // the last-fetch time are not restored: a 304 or a "not due yet" skip would
+        // otherwise keep the record empty until the interval passed. A caller that
+        // holds the cached events itself opts in and keeps conditional fetches and
+        // the due check.
+        ...(opts.callerKeepsEvents === true && s.lastFetchedAt !== undefined ? { lastFetchedAt: s.lastFetchedAt } : {}),
+        ...(opts.callerKeepsEvents === true && s.etag !== undefined ? { etag: s.etag } : {}),
+        ...(opts.callerKeepsEvents === true && s.lastModified !== undefined ? { lastModified: s.lastModified } : {}),
         ...(s.lastSucceededAt !== undefined ? { lastSucceededAt: s.lastSucceededAt } : {}),
-        ...(s.etag !== undefined ? { etag: s.etag } : {}),
-        ...(s.lastModified !== undefined ? { lastModified: s.lastModified } : {}),
         lastResult: undefined,
         events: [],
       });

@@ -96,4 +96,33 @@ describe('!@ expansion through expandPrompt', () => {
     writeFileSync(join(tmpDir, 'b.ts'), 'BBB');
     expect(expand('!@a.ts then !@b.ts')).toBe('AAA then BBB');
   });
+
+  test('does not read a file outside the project root', () => {
+    const outside = join(tmpDir, '..', `gv-inject-outside-${Math.random().toString(36).slice(2)}.txt`);
+    writeFileSync(outside, 'OUTSIDE-SECRET');
+    try {
+      const rel = `../${outside.split('/').pop()}`;
+      const project = join(tmpDir, 'project');
+      mkdirSync(project);
+      expect(expandPrompt(new Map(), new Map(), `see !@${rel}`, project)).toBe(`see !@${rel}`);
+      expect(expandPrompt(new Map(), new Map(), `see !@${outside}`, project)).toBe(`see !@${outside}`);
+    } finally {
+      rmSync(outside, { force: true });
+    }
+  });
+
+  test('does not inject a file named inside pasted text the user only sees as a marker', () => {
+    writeFileSync(join(tmpDir, 'secret.txt'), 'SECRET-FILE-CONTENT');
+    const pasted = `${Array.from({ length: 8 }, (_, i) => `line ${i}`).join('\n')}\n!@secret.txt`;
+    const pasteRegistry = new Map([['p1', pasted]]);
+    const result = expandPrompt(pasteRegistry, new Map(), '[TEXT: p1, 9 lines]', tmpDir);
+    expect(result).toBe(pasted);
+    expect(String(result)).not.toContain('SECRET-FILE-CONTENT');
+  });
+
+  test('still injects a typed !@ marker next to a paste marker', () => {
+    writeFileSync(join(tmpDir, 'typed.txt'), 'TYPED');
+    const pasteRegistry = new Map([['p1', 'pasted body']]);
+    expect(expandPrompt(pasteRegistry, new Map(), '[TEXT: p1, 9 lines] !@typed.txt', tmpDir)).toBe('pasted body TYPED');
+  });
 });

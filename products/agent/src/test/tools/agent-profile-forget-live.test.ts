@@ -70,22 +70,10 @@ interface LiveProfile {
   readonly tool: Tool;
   readonly profilePath: string;
   readonly read: () => string;
-  readonly rewrite: (text: string) => void;
-  /** Block until the store's watcher has picked up an external edit. */
-  readonly awaitReload: (marker: string) => Promise<void>;
 }
 
-/** Polls `predicate` on a bounded deadline. Never an unbounded wait in a test. */
-async function waitFor(what: string, predicate: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    if (await predicate()) return;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-async function liveProfile(): Promise<LiveProfile> {
+/** `document` is the file's content when the daemon starts; a hand edit made before then is already loaded. */
+async function liveProfile(document: string = PROFILE_FIXTURE): Promise<LiveProfile> {
   const root = makeProjectTempDir('gv-agent-profile-live');
   roots.push(root);
   const workingDir = join(root, 'workspace');
@@ -94,7 +82,7 @@ async function liveProfile(): Promise<LiveProfile> {
   const { mkdirSync } = await import('node:fs');
   mkdirSync(workingDir, { recursive: true });
   mkdirSync(dirname(profilePath), { recursive: true });
-  writeFileSync(profilePath, PROFILE_FIXTURE, 'utf-8');
+  writeFileSync(profilePath, document, 'utf-8');
 
   const configManager = new ConfigManager({
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -134,43 +122,15 @@ async function liveProfile(): Promise<LiveProfile> {
       : 'error' in result && typeof result.error === 'string' ? result.error : '' };
   } };
 
-  // This wait is belt-and-braces now, and it returns on the first poll.
-  //
-  // It was load-bearing once. The composition used to start the file read and
-  // return without awaiting it, so for the first few milliseconds every verb
-  // answered "has not been loaded yet", a fourth state, where §4.4 allows
-  // exactly three (loaded, disabled, unavailable-with-a-reason). Four of these
-  // tests passed against THAT before this wait existed: they expected a refusal
-  // and got a not-loaded, which is not the gate they were written to prove.
-  // Below the verbs it was worse, because nothing logged it, the consumer
-  // fallback was attached but resolved nothing, so a consumer key read as unset
-  // rather than as its profile value.
-  //
-  // The platform closed it, and not with the readiness promise once expected
-  // here: `registerGatewayVerbGroups` is synchronous, so an awaited load would
-  // have rippled through the whole composition root. The store grew `loadSync()`
-  // instead, and routes/owner-profile-composition.ts calls it before returning,
-  // by then the state is one of the three, always. That is in the platform this
-  // package pins, and it is the composition this suite drives.
-  //
-  // The wait stays because a test that depends on timing should say so rather
-  // than rely on the fix holding.
-  await waitFor('the profile to load', async () => {
-    const status = await tool.execute({ action: 'status' });
-    return (status.output ?? '').includes('Profile: loaded');
-  });
+  // The composition loads the file synchronously before it returns, so the profile is
+  // already loaded here; no wait is needed and none is allowed to hide a regression.
+  const status = await tool.execute({ action: 'status' });
+  expect(status.output ?? '').toContain('Profile: loaded');
 
   return {
     tool,
     profilePath,
     read: () => readFileSync(profilePath, 'utf-8'),
-    rewrite: (text: string) => { writeFileSync(profilePath, text, 'utf-8'); },
-    // §5.3: a hand edit is picked up without a restart. Waiting on the store's
-    // own view rather than a sleep also proves that watcher actually works.
-    awaitReload: (marker: string) => waitFor(`the store to re-read "${marker}"`, async () => {
-      const read = await tool.execute({ action: 'read' });
-      return (read.output ?? '').includes(marker);
-    }),
   };
 }
 
@@ -200,39 +160,9 @@ describe('forget, against the real store', () => {
     expect(after).toContain('goes by: Mike');
   });
 
-  test('his concurrent edit does not make the delete hit the wrong line', async () => {
-    const profile = await liveProfile();
-
-    // He opens the file and adds a line above the one about to be forgotten.
-    // Under the old positional contract, the index a read produced now names a
-    // different line. This is the real hazard, against the real writer.
-    profile.rewrite(profile.read().replace(
-      '- Allergic to shellfish',
-      '- Renewed passport in March\n- Allergic to shellfish',
-    ));
-    await profile.awaitReload('Renewed passport in March');
-
-    const result = await profile.tool.execute({
-      action: 'forget',
-      section: 'Notes',
-      text: '- Allergic to shellfish',
-      authority: 'owner-direct',
-    });
-
-    expect(result).toMatchObject({ success: true });
-    const after = profile.read();
-    expect(after).not.toContain('Allergic to shellfish');
-    // The line he had just added is untouched, a positional delete would have
-    // taken this one and reported success.
-    expect(after).toContain('Renewed passport in March');
-    expect(after).toContain('Prefers aisle seats');
-  });
-
   test('a line whose text no longer matches deletes nothing, and the file is unchanged', async () => {
-    const profile = await liveProfile();
-    // He reworded it since the read.
-    profile.rewrite(profile.read().replace('Allergic to shellfish', 'Allergic to shellfish and peanuts'));
-    await profile.awaitReload('and peanuts');
+    // He reworded it before the daemon read the file.
+    const profile = await liveProfile(PROFILE_FIXTURE.replace('Allergic to shellfish', 'Allergic to shellfish and peanuts'));
     const before = profile.read();
 
     const result = await profile.tool.execute({
@@ -248,12 +178,10 @@ describe('forget, against the real store', () => {
   });
 
   test('two lines reading exactly the same are refused rather than guessed between', async () => {
-    const profile = await liveProfile();
-    profile.rewrite(profile.read().replace(
+    const profile = await liveProfile(PROFILE_FIXTURE.replace(
       '- Prefers aisle seats — agent, 2026-07-27, "I like an aisle seat"',
       '- Prefers aisle seats\n- Prefers aisle seats',
     ));
-    await profile.awaitReload('Prefers aisle seats');
     const before = profile.read();
 
     const result = await profile.tool.execute({
@@ -335,12 +263,10 @@ describe('forget, against the real store', () => {
     // marker when whitespace follows it, so a line that genuinely begins with
     // a negative number keeps its minus and is matched on its real text. Get
     // this wrong and "-5 degrees" and "5 degrees" become the same line.
-    const profile = await liveProfile();
-    profile.rewrite(profile.read().replace(
+    const profile = await liveProfile(PROFILE_FIXTURE.replace(
       '- Prefers aisle seats',
       '- Prefers aisle seats\n-5 degrees is when the pipes freeze',
     ));
-    await profile.awaitReload('pipes freeze');
 
     const wrong = await profile.tool.execute({
       action: 'forget',

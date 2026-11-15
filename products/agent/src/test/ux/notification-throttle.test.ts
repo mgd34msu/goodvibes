@@ -1,304 +1,101 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately per-repo test: the module it exercises is this repo's own and has no counterpart in the sibling product.
 /**
- * UX Anti-Regression: MCP Reconnect Storms with Notification Throttling (v3 §18.5)
+ * UX Anti-Regression: MCP reconnect storms
  *
- * Verifies that rapid MCP reconnect events are correctly represented in state:
- * - Rapid state transitions are tracked monotonically
- * - Reconnect attempt counters increment correctly
- * - Storm batching: after N rapid events only last-wins state is retained
- * - Throttled notification slots: bounded history of reconnect events
- *
- * All tests use pure state manipulation, no real I/O, no event bus.
+ * Drives the real runtime store with MCP bus events, the way the host event
+ * bridge does, and checks what the UI reads: server status, reconnect attempts,
+ * the connected set and the error count.
  */
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { createInitialRuntimeState } from '../../runtime/store/state.ts';
-import type { RuntimeState } from '../../runtime/store/state.ts';
+import { describe, test, expect } from 'bun:test';
+import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import { selectMcp } from '../../runtime/store/selectors/index.ts';
-import type { McpServerRecord, McpServerLifecycleState } from '@/runtime/index.ts';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Fixed timestamp used in test helpers to avoid non-deterministic Date.now() calls. */
-const TEST_TIMESTAMP = 1700000000000;
-
-/**
- * Reconnect event descriptor, represents a single MCP lifecycle transition.
- */
-interface ReconnectEvent {
-  readonly serverName: string;
-  readonly type: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
-  readonly attempt?: number;
+function makeStore() {
+  const store = createRuntimeStore();
+  return { store, dispatch: createDomainDispatch(store) };
 }
 
-/** Build a fresh server record for a given name. */
-function makeServerRecord(name: string): McpServerRecord {
-  return {
-    name,
-    displayName: `Server ${name}`,
-    status: 'disconnected',
-    transport: 'stdio',
-    toolCount: 0,
-    toolNames: [],
-    callCount: 0,
-    errorCount: 0,
-    connectedAt: undefined,
-    lastCallAt: undefined,
-    lastError: undefined,
-    reconnectAttempts: 0,
-    trustMode: 'ask-on-risk',
-    role: 'general',
-    allowedPaths: [],
-    allowedHosts: [],
-    schemaFreshness: 'unknown',
-  };
-}
+describe('ux:mcp-reconnect-storm', () => {
+  test('connecting then connected marks the server connected with its tool count', () => {
+    const { store, dispatch } = makeStore();
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTING', serverId: 'a' });
+    expect(selectMcp(store.getState()).servers.get('a')?.status).toBe('connecting');
 
-/**
- * Apply a single reconnect lifecycle event to the MCP domain state.
- * Returns a new state with the server record updated accordingly.
- */
-function applyMcpEvent(state: RuntimeState, event: ReconnectEvent): RuntimeState {
-  const mcpState = state.mcp;
-  const existing = mcpState.servers.get(event.serverName) ?? makeServerRecord(event.serverName);
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'a', toolCount: 4, resourceCount: 1 });
 
-  let nextStatus: McpServerLifecycleState;
-  let patch: Partial<McpServerRecord> = {};
-
-  switch (event.type) {
-    case 'connecting':
-      nextStatus = 'connecting';
-      break;
-    case 'connected':
-      nextStatus = 'connected';
-      patch = { reconnectAttempts: 0, connectedAt: TEST_TIMESTAMP, lastError: undefined };
-      break;
-    case 'disconnected':
-      nextStatus = 'disconnected';
-      break;
-    case 'reconnecting':
-      nextStatus = 'reconnecting';
-      patch = { reconnectAttempts: event.attempt ?? existing.reconnectAttempts + 1 };
-      break;
-  }
-
-  const updated: McpServerRecord = { ...existing, status: nextStatus, ...patch };
-  const newServers = new Map(mcpState.servers);
-  newServers.set(event.serverName, updated);
-
-  return {
-    ...state,
-    mcp: {
-      ...mcpState,
-      servers: newServers,
-      revision: mcpState.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: `mcp-event:${event.type}`,
-    },
-  };
-}
-
-/**
- * Apply a full storm of disconnect → reconnect → connecting cycles.
- * Returns all intermediate states (for invariant checking).
- */
-function applyReconnectStorm(
-  initialState: RuntimeState,
-  serverName: string,
-  cycleCount: number,
-): RuntimeState[] {
-  const states: RuntimeState[] = [initialState];
-  let current = initialState;
-
-  for (let i = 0; i < cycleCount; i++) {
-    current = applyMcpEvent(current, { serverName, type: 'disconnected' });
-    states.push(current);
-    current = applyMcpEvent(current, { serverName, type: 'reconnecting', attempt: i + 1 });
-    states.push(current);
-    current = applyMcpEvent(current, { serverName, type: 'connecting' });
-    states.push(current);
-  }
-
-  // Final successful connection
-  current = applyMcpEvent(current, { serverName, type: 'connected' });
-  states.push(current);
-
-  return states;
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('ux:notification-throttle: MCP reconnect storms', () => {
-  let state: RuntimeState;
-
-  beforeEach(() => {
-    state = createInitialRuntimeState();
+    const mcp = selectMcp(store.getState());
+    expect(mcp.servers.get('a')?.status).toBe('connected');
+    expect(mcp.servers.get('a')?.toolCount).toBe(4);
+    expect(mcp.connectedServerNames).toEqual(['a']);
+    expect(mcp.availableToolCount).toBe(4);
   });
 
-  describe('single server reconnect lifecycle', () => {
-    test('server transitions connecting → connected correctly', () => {
-      let s = applyMcpEvent(state, { serverName: 'srv-1', type: 'connecting' });
-      expect(selectMcp(s).servers.get('srv-1')?.status).toBe('connecting');
-
-      s = applyMcpEvent(s, { serverName: 'srv-1', type: 'connected' });
-      expect(selectMcp(s).servers.get('srv-1')?.status).toBe('connected');
-    });
-
-    test('reconnect attempt counter increments on each reconnecting event', () => {
-      let s = state;
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        s = applyMcpEvent(s, { serverName: 'srv-1', type: 'reconnecting', attempt });
-        expect(selectMcp(s).servers.get('srv-1')?.reconnectAttempts).toBe(attempt);
-      }
-    });
-
-    test('reconnect attempt counter resets to 0 on successful connection', () => {
-      let s = state;
-      s = applyMcpEvent(s, { serverName: 'srv-1', type: 'reconnecting', attempt: 5 });
-      expect(selectMcp(s).servers.get('srv-1')?.reconnectAttempts).toBe(5);
-
-      s = applyMcpEvent(s, { serverName: 'srv-1', type: 'connected' });
-      expect(selectMcp(s).servers.get('srv-1')?.reconnectAttempts).toBe(0);
-    });
-
-    test('connectedAt timestamp is set on successful connection', () => {
-      const s = applyMcpEvent(state, { serverName: 'srv-1', type: 'connected' });
-      const server = selectMcp(s).servers.get('srv-1');
-      expect(server?.connectedAt).toBe(TEST_TIMESTAMP);
-    });
-
-    test('initial server record has no connectedAt timestamp', () => {
-      const s = applyMcpEvent(state, { serverName: 'srv-1', type: 'disconnected' });
-      const server = selectMcp(s).servers.get('srv-1');
-      expect(server?.connectedAt).toBeUndefined();
-    });
+  test('the reconnect attempt number follows the event, and the status is reconnecting', () => {
+    const { store, dispatch } = makeStore();
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'a', toolCount: 1, resourceCount: 0 });
+    dispatch.dispatchMcpEvent({ type: 'MCP_DISCONNECTED', serverId: 'a', reason: 'pipe closed', willRetry: true });
+    for (const attempt of [1, 2, 3]) {
+      dispatch.dispatchMcpEvent({ type: 'MCP_RECONNECTING', serverId: 'a', attempt, maxAttempts: 5 });
+      expect(selectMcp(store.getState()).servers.get('a')?.reconnectAttempts).toBe(attempt);
+    }
+    expect(selectMcp(store.getState()).servers.get('a')?.status).toBe('reconnecting');
   });
 
-  describe('reconnect storm behavior: rapid cycling', () => {
-    test('10-cycle storm produces monotonically increasing revision', () => {
-      const stormStates = applyReconnectStorm(state, 'srv-storm', 10);
+  test('a disconnected server leaves the connected set and its tools stop counting as available', () => {
+    const { store, dispatch } = makeStore();
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'a', toolCount: 3, resourceCount: 0 });
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'b', toolCount: 2, resourceCount: 0 });
+    expect(selectMcp(store.getState()).availableToolCount).toBe(5);
 
-      for (let i = 1; i < stormStates.length; i++) {
-        expect(selectMcp(stormStates[i]!).revision).toBeGreaterThan(
-          selectMcp(stormStates[i - 1]!).revision,
-        );
-      }
-    });
+    dispatch.dispatchMcpEvent({ type: 'MCP_DISCONNECTED', serverId: 'a', reason: 'pipe closed', willRetry: true });
 
-    test('final state after 10-cycle storm is connected with 0 reconnect attempts', () => {
-      const stormStates = applyReconnectStorm(state, 'srv-storm', 10);
-      const final = stormStates[stormStates.length - 1]!;
-
-      const server = selectMcp(final).servers.get('srv-storm');
-      expect(server?.status).toBe('connected');
-      expect(server?.reconnectAttempts).toBe(0);
-    });
-
-    test('intermediate storm states are all valid lifecycle status values', () => {
-      const validStatuses = new Set<McpServerLifecycleState>([
-        'connecting',
-        'connected',
-        'disconnected',
-        'reconnecting',
-        'configured',
-        'degraded',
-        'auth_required',
-      ]);
-      const stormStates = applyReconnectStorm(state, 'srv-storm', 5);
-
-      for (const s of stormStates) {
-        const server = selectMcp(s).servers.get('srv-storm');
-        if (server) {
-          expect(validStatuses.has(server.status)).toBe(true);
-        }
-      }
-    });
-
-    test('multiple server storms are isolated: no cross-server state leakage', () => {
-      let s = state;
-
-      // Interleave storms for 3 servers
-      for (let i = 0; i < 5; i++) {
-        s = applyMcpEvent(s, { serverName: 'srv-a', type: 'reconnecting', attempt: i + 1 });
-        s = applyMcpEvent(s, { serverName: 'srv-b', type: 'disconnected' });
-        s = applyMcpEvent(s, { serverName: 'srv-c', type: 'connecting' });
-      }
-
-      // Each server has its own independent state
-      expect(selectMcp(s).servers.get('srv-a')?.status).toBe('reconnecting');
-      expect(selectMcp(s).servers.get('srv-b')?.status).toBe('disconnected');
-      expect(selectMcp(s).servers.get('srv-c')?.status).toBe('connecting');
-
-      // No leakage: srv-a reconnect attempts don't affect srv-b
-      expect(selectMcp(s).servers.get('srv-b')?.reconnectAttempts).toBe(0);
-    });
+    const mcp = selectMcp(store.getState());
+    expect(mcp.connectedServerNames).toEqual(['b']);
+    expect(mcp.availableToolCount).toBe(2);
+    expect(mcp.servers.get('a')?.lastError).toBe('pipe closed');
   });
 
-  describe('last-wins state during rapid events', () => {
-    test('rapid same-type events produce idempotent last-wins state', () => {
-      let s = state;
-      // Apply 20 consecutive disconnected events, final state = disconnected
-      for (let i = 0; i < 20; i++) {
-        s = applyMcpEvent(s, { serverName: 'srv-rapid', type: 'disconnected' });
-      }
-      expect(selectMcp(s).servers.get('srv-rapid')?.status).toBe('disconnected');
-    });
+  test('a 10-cycle storm ends on the last event and counts one error per disconnect', () => {
+    const { store, dispatch } = makeStore();
+    let previousRevision = selectMcp(store.getState()).revision;
+    for (let i = 1; i <= 10; i++) {
+      dispatch.dispatchMcpEvent({ type: 'MCP_DISCONNECTED', serverId: 'a', reason: `drop ${i}`, willRetry: true });
+      dispatch.dispatchMcpEvent({ type: 'MCP_RECONNECTING', serverId: 'a', attempt: i, maxAttempts: 10 });
+      dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTING', serverId: 'a' });
+      const revision = selectMcp(store.getState()).revision;
+      expect(revision).toBeGreaterThan(previousRevision);
+      previousRevision = revision;
+    }
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'a', toolCount: 2, resourceCount: 0 });
 
-    test('revision reflects all 20 rapid mutations', () => {
-      const initialRevision = selectMcp(state).revision;
-      let s = state;
-      for (let i = 0; i < 20; i++) {
-        s = applyMcpEvent(s, { serverName: 'srv-rapid', type: 'connecting' });
-      }
-      expect(selectMcp(s).revision).toBe(initialRevision + 20);
-    });
-
-    test('server registry size stays stable under storm: no duplicate entries', () => {
-      let s = applyMcpEvent(state, { serverName: 'srv-1', type: 'connecting' });
-      expect(selectMcp(s).servers.size).toBe(1);
-
-      // Apply storm, server count must not grow beyond 1
-      for (let i = 0; i < 30; i++) {
-        s = applyMcpEvent(s, {
-          serverName: 'srv-1',
-          type: i % 2 === 0 ? 'disconnected' : 'reconnecting',
-          attempt: Math.floor(i / 2) + 1,
-        });
-      }
-      expect(selectMcp(s).servers.size).toBe(1);
-    });
+    const mcp = selectMcp(store.getState());
+    expect(mcp.servers.size).toBe(1);
+    expect(mcp.servers.get('a')?.status).toBe('connected');
+    expect(mcp.servers.get('a')?.lastError).toBeUndefined();
+    expect(mcp.totalErrors).toBe(10);
   });
 
-  describe('multi-server notification isolation', () => {
-    test('10 servers each cycling independently produce consistent state', () => {
-      let s = state;
-      const serverNames = Array.from({ length: 10 }, (_, i) => `srv-${i}`);
+  test('a storm on one server leaves another server untouched', () => {
+    const { store, dispatch } = makeStore();
+    dispatch.dispatchMcpEvent({ type: 'MCP_CONNECTED', serverId: 'steady', toolCount: 6, resourceCount: 0 });
+    const steady = selectMcp(store.getState()).servers.get('steady');
 
-      for (const serverName of serverNames) {
-        s = applyMcpEvent(s, { serverName, type: 'connecting' });
-        s = applyMcpEvent(s, { serverName, type: 'connected' });
-      }
+    for (let i = 1; i <= 10; i++) {
+      dispatch.dispatchMcpEvent({ type: 'MCP_DISCONNECTED', serverId: 'noisy', willRetry: true });
+      dispatch.dispatchMcpEvent({ type: 'MCP_RECONNECTING', serverId: 'noisy', attempt: i, maxAttempts: 10 });
+    }
 
-      expect(selectMcp(s).servers.size).toBe(10);
-      for (const serverName of serverNames) {
-        expect(selectMcp(s).servers.get(serverName)?.status).toBe('connected');
-        expect(selectMcp(s).servers.get(serverName)?.reconnectAttempts).toBe(0);
-      }
-    });
+    const mcp = selectMcp(store.getState());
+    expect(mcp.servers.get('steady')).toEqual(steady!);
+    expect(mcp.connectedServerNames).toEqual(['steady']);
+    expect(mcp.servers.size).toBe(2);
+  });
 
-    test('connectedAt is preserved for connected servers during another server storm', () => {
-      let s = state;
-      s = applyMcpEvent(s, { serverName: 'stable-srv', type: 'connected' });
-      const stableConnectedAt = selectMcp(s).servers.get('stable-srv')?.connectedAt;
-
-      // Storm another server
-      for (let i = 0; i < 10; i++) {
-        s = applyMcpEvent(s, { serverName: 'storm-srv', type: 'reconnecting', attempt: i + 1 });
-      }
-
-      // stable-srv unaffected
-      expect(selectMcp(s).servers.get('stable-srv')?.status).toBe('connected');
-      expect(selectMcp(s).servers.get('stable-srv')?.connectedAt).toBe(stableConnectedAt);
-      expect(selectMcp(s).servers.get('stable-srv')?.connectedAt).toBe(TEST_TIMESTAMP);
-    });
+  test('a server first seen through a reconnect event is registered once, not duplicated', () => {
+    const { store, dispatch } = makeStore();
+    for (let i = 1; i <= 5; i++) {
+      dispatch.dispatchMcpEvent({ type: 'MCP_RECONNECTING', serverId: 'late', attempt: i, maxAttempts: 5 });
+    }
+    expect(selectMcp(store.getState()).servers.size).toBe(1);
   });
 });

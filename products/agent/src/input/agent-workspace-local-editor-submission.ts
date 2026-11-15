@@ -4,9 +4,9 @@ import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { createAgentRuntimeProfile, type AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import { createAgentWorkspaceLearnedBehavior } from './agent-workspace-learned-behavior.ts';
+import { createAgentWorkspaceLearnedBehavior, runFollowUpWrite } from './agent-workspace-learned-behavior.ts';
 import { buildAgentWorkspaceRequirements } from './agent-workspace-requirements.ts';
-import { isAffirmative, splitList } from './agent-workspace-editors.ts';
+import { isEnabledValue, splitList } from './agent-workspace-editors.ts';
 import type { AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind } from './agent-workspace-types.ts';
 
 type LearnedBehaviorTarget = Exclude<AgentWorkspaceLocalEditorKind, 'memory' | 'note' | 'profile'>;
@@ -37,7 +37,7 @@ export function submitAgentWorkspaceLocalRegistryEditor(
       notes: field('notes'),
       tags: splitList(field('tags')),
       triggers: splitList(field('triggers')),
-      enable: isAffirmative(field('enable')),
+      enable: isEnabledValue(field('enable')),
     });
     callbacks.finishLocalEditor(created.kind, created.id, created.name, 'Created');
   } else if (editor.kind === 'profile') {
@@ -106,8 +106,10 @@ function submitPersonaEditor(
       triggers: splitList(field('triggers')),
       provenance: 'Workspace',
     });
-    if (isAffirmative(field('activate'))) registry.setActive(updated.id);
-    else if (wasActive) registry.clearActive();
+    runFollowUpWrite(`Persona "${updated.name}" (the edit)`, 'updating which persona is active', () => {
+      if (isEnabledValue(field('activate'))) registry.setActive(updated.id);
+      else if (wasActive) registry.clearActive();
+    });
     finish('persona', updated.id, updated.name, 'Updated');
     return;
   }
@@ -120,7 +122,7 @@ function submitPersonaEditor(
     source: 'user',
     provenance: 'Workspace',
   });
-  if (isAffirmative(field('activate'))) registry.setActive(created.id);
+  if (isEnabledValue(field('activate'))) runFollowUpWrite(`Persona "${created.name}"`, 'making it active', () => registry.setActive(created.id));
   finish('persona', created.id, created.name, 'Created');
 }
 
@@ -141,7 +143,7 @@ function submitSkillEditor(
       requirements: buildAgentWorkspaceRequirements(field),
       provenance: 'Workspace',
     });
-    registry.setEnabled(updated.id, isAffirmative(field('enabled')));
+    runFollowUpWrite(`Skill "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, isEnabledValue(field('enabled'))));
     finish('skill', updated.id, updated.name, 'Updated');
     return;
   }
@@ -152,7 +154,7 @@ function submitSkillEditor(
     triggers: splitList(field('triggers')),
     tags: splitList(field('tags')),
     requirements: buildAgentWorkspaceRequirements(field),
-    enabled: isAffirmative(field('enabled')),
+    enabled: isEnabledValue(field('enabled')),
     source: 'user',
     provenance: 'Workspace',
   });
@@ -176,7 +178,7 @@ function submitRoutineEditor(
       requirements: buildAgentWorkspaceRequirements(field),
       provenance: 'Workspace',
     });
-    registry.setEnabled(updated.id, isAffirmative(field('enabled')));
+    runFollowUpWrite(`Routine "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, isEnabledValue(field('enabled'))));
     finish('routine', updated.id, updated.name, 'Updated');
     return;
   }
@@ -187,7 +189,7 @@ function submitRoutineEditor(
     triggers: splitList(field('triggers')),
     tags: splitList(field('tags')),
     requirements: buildAgentWorkspaceRequirements(field),
-    enabled: isAffirmative(field('enabled')),
+    enabled: isEnabledValue(field('enabled')),
     source: 'user',
     provenance: 'Workspace',
   });

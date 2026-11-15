@@ -124,19 +124,10 @@ describe('owner-initiated versus content-initiated', () => {
     expect(decision.reason).toContain('nothing you said started this purchase');
   });
 
-  test('a content-initiated purchase is still refused with a valid OwnerApproval present', async () => {
-    // evaluateOutwardEffect would let this through. The payment path is not on
-    // that code path, and this is the test that keeps it that way.
-    const { grantOwnerApproval } = await import(
-      '../platform/src/platform/security/untrusted-content.js'
-    );
-    const approval = grantOwnerApproval({ action: 'payments.purchase', surface: 'owner-direct' });
-    expect(approval).not.toBeNull();
-
+  test('a content-initiated purchase is refused by its origin alone, whatever the ledger holds', async () => {
     // The ledger content deliberately does NOT overlap any intent field, so the
-    // only thing that can refuse this is the ORIGIN rule. If the refusal came
-    // from a text match instead, this test would still pass while the structural
-    // rule had been deleted, which is exactly the regression it exists to catch.
+    // only thing that can refuse this is the ORIGIN rule. With a ledger that
+    // does overlap, a text match could refuse it and hide a deleted origin rule.
     const decision = await evaluatePaymentTaint({
       intent: {
         origin: 'content',

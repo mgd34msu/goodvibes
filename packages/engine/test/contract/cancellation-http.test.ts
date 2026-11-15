@@ -1,6 +1,7 @@
 /** Authenticated REST cancellation is acknowledgement, never a drainage receipt. */
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { exportAndCompareFixture } from '../_helpers/webui-fixture-parity.ts';
 import { join } from 'node:path';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
@@ -19,10 +20,7 @@ function deferred() {
 
 /** Export the exact response bytes, never rewritten synthetic record fields. */
 function exportResponse(label: string, body: string) {
-  const directory = process.env.GOODVIBES_TEST_CONTRACT_CANCELLATION_FIXTURE_DIR;
-  if (!directory) return;
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, `${label}.json`), body);
+  exportAndCompareFixture(process.env.GOODVIBES_TEST_CONTRACT_CANCELLATION_FIXTURE_DIR, `${label}.json`, body, new URL('../../../../products/webui/e2e/support/fixtures/contract-cancellation/', import.meta.url));
 }
 
 type HttpFixture = ReturnType<typeof serveContractCancellation>;
@@ -88,7 +86,7 @@ test('authenticated cancel enforces write:fleet and returns true before real chi
     expect(childCleaned).toBe(false);
     let drained = false;
     const joinRun = h.runner.join(id).then(() => { drained = true; });
-    await Promise.resolve();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     expect(drained).toBe(false);
     const after = await inspect(fixture, id, 'live-after');
     expect(after.status).toBe('cancelled');
@@ -97,6 +95,8 @@ test('authenticated cancel enforces write:fleet and returns true before real chi
     expect(readFileSync(join(h.root, 'partial.ts'), 'utf8')).toBe(PARTIAL);
     expect(await (await cancel(fixture, id, fixture.writer)).json()).toEqual({ cancelled: false });
     expect((await cancel(fixture, 'ctr-ffffffff', fixture.writer)).status).toBe(404);
+    // Still undrained after every request above: cancel is an acknowledgement, not a drainage receipt.
+    expect(drained).toBe(false);
     cleanup.resolve(); await joinRun;
     expect(drained).toBe(true); expect(childCleaned).toBe(true);
   } finally {
@@ -105,7 +105,7 @@ test('authenticated cancel enforces write:fleet and returns true before real chi
   }
 }, 25_000);
 
-test('false can describe an actual retained nonterminal record with no live runner', async () => {
+test('a retained nonterminal record with no live runner is refused as not running, not reported as already ended', async () => {
   const source = makeHarness({ plan: oneUnitPlan(1), scripts: { u1: () => [{ text: 'Waiting for cancellation', stop: { kind: 'hang' } }] } });
   const id = (await startContract(source, { isolation: 'shared' })).contract.id;
   let retained: ReturnType<typeof makeHarness> | undefined;
@@ -123,9 +123,10 @@ test('false can describe an actual retained nonterminal record with no live runn
     const before = await inspect(fixture, id, 'retained-before');
     expect(before.status).toBe('running');
     const response = await cancel(fixture, id, fixture.writer);
-    expect(response.status).toBe(200);
+    // The record is not ended, so `cancelled: false` ("already ended") would be untrue: the refusal names why nothing was stopped.
+    expect(response.status).toBe(409);
     const bytes = await response.text();
-    expect(JSON.parse(bytes)).toEqual({ cancelled: false });
+    expect(JSON.parse(bytes)).toMatchObject({ code: 'CONTRACT_NOT_RUNNING' });
     exportResponse('retained-cancel', bytes);
     const after = await inspect(fixture, id, 'retained-after');
     expect(after).toEqual(before);

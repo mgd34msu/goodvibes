@@ -36,15 +36,16 @@ export function resetSelected({
   secretsManager: SettingsSecretsManager | null;
   /** Starts captured-owner async resets; pending secrets are not reported as completed. */
   resetSecrets?: (entries: ReadonlyArray<{ key: ConfigKey; value: unknown }>) => void;
-  setValue: (key: ConfigKey, value: unknown) => void;
-  setHostValue?: (key: string, value: boolean) => void;
+  /** Returns false when the write was refused; the reset is then not reported. */
+  setValue: (key: ConfigKey, value: unknown) => boolean | void;
+  setHostValue?: (key: string, value: boolean) => boolean | void;
 }): { key: string; value: unknown } | null {
   if (editingMode || !hasConfigManager) return null;
   if (!selected) return null;
   if (selected.kind === 'host') {
     if (!setHostValue) return null;
     // Modal reset is scoped set(default), not the handle's full-owner reset().
-    setHostValue(selected.setting.key, selected.setting.default);
+    if (setHostValue(selected.setting.key, selected.setting.default) === false) return null;
     return { key: selected.setting.key, value: selected.setting.default };
   }
   if (selected.metadataUnavailable) return null;
@@ -53,7 +54,7 @@ export function resetSelected({
     resetSecrets?.([{ key, value: selected.setting.default }]);
     return null;
   }
-  setValue(key, selected.setting.default);
+  if (setValue(key, selected.setting.default) === false) return null;
   return { key, value: selected.setting.default };
 }
 
@@ -100,7 +101,7 @@ export function initiateResetAll({
 // ---------------------------------------------------------------------------
 
 export type ResetConfirmKeyResult =
-  | { result: 'confirmed'; entries: ReadonlyArray<{ key: string; value: unknown }> }
+  | { result: 'confirmed'; entries: ReadonlyArray<{ key: string; value: unknown }>; failedKeys?: ReadonlyArray<string> }
   | 'cancelled'
   | 'absorbed'
   | 'inactive';
@@ -124,9 +125,10 @@ export function handleResetConfirmKey({
   hasConfigManager: boolean;
   currentItems: () => SettingEntry[];
   groups: Map<SettingsCategory, SettingEntry[]>;
-  setValue: (key: ConfigKey, value: unknown) => void;
+  /** Returns false when the write was refused (managed lock, save failure); that key is not reported as reset. */
+  setValue: (key: ConfigKey, value: unknown) => boolean | void;
   resetSecrets?: (entries: ReadonlyArray<{ key: ConfigKey; value: unknown }>) => void;
-  setHostValue?: (key: string, value: boolean) => void;
+  setHostValue?: (key: string, value: boolean) => boolean | void;
   setResetCategoryConfirm: (value: { readonly subject: string } | null) => void;
   setResetAllConfirm: (value: { readonly subject: 'all' } | null) => void;
 }): ResetConfirmKeyResult {
@@ -135,6 +137,14 @@ export function handleResetConfirmKey({
 
   if (key === 'enter' || key === 'y') {
     const entries: Array<{ key: string; value: unknown }> = [];
+    const failedKeys: string[] = [];
+    const resetOne = (item: SettingEntry): void => {
+      const ok = item.kind === 'host'
+        ? setHostValue?.(item.setting.key, item.setting.default)
+        : setValue(item.setting.key, item.setting.default);
+      if (ok === false) failedKeys.push(item.setting.key);
+      else entries.push({ key: item.setting.key, value: item.setting.default });
+    };
     const secretEntries = new Map<ConfigKey, { key: ConfigKey; value: unknown }>();
     if (resetCategoryConfirm) {
       // Reset all settings in the current category to defaults.
@@ -145,9 +155,7 @@ export function handleResetConfirmKey({
           secretEntries.set(item.setting.key, { key: item.setting.key, value: item.setting.default });
           continue;
         }
-        if (item.kind === 'host') setHostValue?.(item.setting.key, item.setting.default);
-        else setValue(item.setting.key, item.setting.default);
-        entries.push({ key: item.setting.key, value: item.setting.default });
+        resetOne(item);
       }
       setResetCategoryConfirm(null);
     } else {
@@ -159,15 +167,13 @@ export function handleResetConfirmKey({
             secretEntries.set(item.setting.key, { key: item.setting.key, value: item.setting.default });
             continue;
           }
-          if (item.kind === 'host') setHostValue?.(item.setting.key, item.setting.default);
-          else setValue(item.setting.key, item.setting.default);
-          entries.push({ key: item.setting.key, value: item.setting.default });
+          resetOne(item);
         }
       }
       setResetAllConfirm(null);
     }
     if (secretEntries.size > 0) resetSecrets?.([...secretEntries.values()]);
-    return { result: 'confirmed', entries };
+    return failedKeys.length > 0 ? { result: 'confirmed', entries, failedKeys } : { result: 'confirmed', entries };
   }
 
   if (key === 'escape' || key === 'n') {

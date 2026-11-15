@@ -29,7 +29,7 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertPermissionActive, awaitPermission } from '../../permissions/cancellation.js';
 import { assertLocalEngineFailureCurrent, ownLocalEngineFailureLifetime, readLocalEngineFailure, structuredLocalEngineFailure,
@@ -73,6 +73,9 @@ const defaultRunner: LocalEngineRunner = (input) =>
       },
     );
     if (input.stdinText !== undefined && child.stdin) {
+      // A binary that exits before reading all of stdin breaks the pipe; the
+      // process-exit callback above already reports that failure.
+      child.stdin.on('error', () => {});
       child.stdin.write(input.stdinText);
       child.stdin.end();
     }
@@ -87,14 +90,20 @@ interface LocalEngineConfig {
 /** Resolve the managed install for a prefix (null when not provisioned / not managed). */
 export type ManagedEngineResolver = (prefix: 'stt' | 'tts') => LocalEngineConfig | null;
 
+/** Neither existsSync nor execFile expands `~`, so a documented `~/...` path would otherwise read as missing. */
+function expandHomePath(value: string): string {
+  if (value === '~') return homedir();
+  return value.startsWith('~/') ? join(homedir(), value.slice(2)) : value;
+}
+
 function readEngine(
   read: LocalVoiceConfigReader,
   prefix: 'stt' | 'tts',
   resolveManaged?: ManagedEngineResolver | undefined,
 ): LocalEngineConfig | null {
   const engine = String(read(`voice.local.${prefix}Engine`) ?? '').trim();
-  const binary = String(read(`voice.local.${prefix}Binary`) ?? '').trim();
-  const modelPath = String(read(`voice.local.${prefix}ModelPath`) ?? '').trim();
+  const binary = expandHomePath(String(read(`voice.local.${prefix}Binary`) ?? '').trim());
+  const modelPath = expandHomePath(String(read(`voice.local.${prefix}ModelPath`) ?? '').trim());
   if (engine && binary && modelPath) return { engine, binary, modelPath };
   // Fall back to the managed install for any unset field (config values that
   // ARE set always win, a user's custom path is never overridden).
@@ -235,117 +244,124 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
     }
   };
 
-  return {
-    id: 'local',
-    label: 'Local engines (free, offline)',
-    capabilities: ['tts', 'tts-stream', 'stt'],
-    billing: 'none',
-    resetEngineFailureState(): void {
-      const previous = [engines.tts, engines.stt];
-      engines.tts = newIncarnation(engines.tts.config, engines.tts.configIncarnation);
-      engines.stt = newIncarnation(engines.stt.config, engines.stt.configIncarnation);
-      for (const incarnation of previous) incarnation.controller.abort();
-    },
-    status(): VoiceProviderStatus {
-      const ttsState = observeEngine('tts');
-      const sttState = observeEngine('stt');
-      const tts = ttsState.config;
-      const stt = sttState.config;
-      const caps: Array<'tts' | 'tts-stream' | 'stt'> = [];
-      if (tts) caps.push('tts', 'tts-stream');
-      if (stt) caps.push('stt');
-      const missing: string[] = [];
-      for (const [label, engine] of [['TTS', tts], ['STT', stt]] as const) {
-        if (engine && (!exists(engine.binary) || !exists(engine.modelPath))) {
-          missing.push(`${label} (${engine.engine}): binary or model missing on disk`);
-        }
+  const transcribeOnce = async (request: VoiceTranscriptionRequest): Promise<VoiceTranscriptionResult> => {
+    const incarnation = observeEngine('stt');
+    const stt = incarnation.config;
+    if (!stt) {
+      throw new Error(
+        'Local speech-to-text is not configured on this host: voice.local.sttEngine, sttBinary and sttModelPath are '
+        + 'not all set, and no managed install was found to fall back on. The managed voice runtime installs whisper '
+        + 'and fills these in.',
+      );
+    }
+    if (!request.audio.dataBase64) {
+      throw new Error('local STT needs inline audio (dataBase64)');
+    }
+    if (incarnation.unavailable) throw new Error(incarnation.unavailable);
+    const dataBase64 = request.audio.dataBase64;
+    const lifetime = beginInvocation('stt', incarnation, [dataBase64, request.prompt ?? ''], request.signal);
+    const scratch = mkdtempSync(join(tmpdir(), 'gv-local-stt-'));
+    const wavPath = join(scratch, 'in.wav');
+    try {
+      writeFileSync(wavPath, Buffer.from(dataBase64, 'base64'));
+      const args = stt.engine === 'whisper-cpp'
+        ? ['-m', stt.modelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
+        : [stt.modelPath, wavPath];
+      const { stdout } = await awaitPermission(() => runner({ binary: stt.binary, args, timeoutMs: RUN_TIMEOUT_MS,
+        signal: lifetime.signal }), lifetime.signal);
+      lifetime.assertCurrent();
+      return {
+        providerId: 'local',
+        text: stdout.trim(),
+        metadata: { engine: stt.engine, modelPath: stt.modelPath, billing: 'none' },
+      };
+    } catch (error) {
+      const failure = await classifyFailure(error, incarnation, 'STT', lifetime);
+      if (failure) throw new Error(failure);
+      throw error;
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  };
+
+return {
+  id: 'local',
+  label: 'Local engines (free, offline)',
+  capabilities: ['tts', 'tts-stream', 'stt'],
+  billing: 'none',
+  resetEngineFailureState(): void {
+    const previous = [engines.tts, engines.stt];
+    engines.tts = newIncarnation(engines.tts.config, engines.tts.configIncarnation);
+    engines.stt = newIncarnation(engines.stt.config, engines.stt.configIncarnation);
+    for (const incarnation of previous) incarnation.controller.abort();
+  },
+  status(): VoiceProviderStatus {
+    const ttsState = observeEngine('tts');
+    const sttState = observeEngine('stt');
+    const tts = ttsState.config;
+    const stt = sttState.config;
+    const caps: Array<'tts' | 'tts-stream' | 'stt'> = [];
+    if (tts) caps.push('tts', 'tts-stream');
+    if (stt) caps.push('stt');
+    const missing: string[] = [];
+    for (const [label, engine] of [['TTS', tts], ['STT', stt]] as const) {
+      if (engine && (!exists(engine.binary) || !exists(engine.modelPath))) {
+        missing.push(`${label} (${engine.engine}): binary or model missing on disk`);
       }
-      // Surface a tripped circuit breaker as the honest engine-unavailable state
-      // (one line, not a per-chunk crash storm), while its config is unchanged.
-      if (tts && ttsState.unavailable) missing.push(ttsState.unavailable);
-      if (stt && sttState.unavailable) missing.push(sttState.unavailable);
-      const configured = caps.length > 0;
-      return {
-        id: 'local',
-        label: 'Local engines (free, offline)',
-        state: !configured ? 'unconfigured' : missing.length > 0 ? 'degraded' : 'healthy',
-        capabilities: caps,
-        configured,
-        detail: !configured
-          ? 'Not configured, local voice needs an installed engine and model, which the managed voice runtime provisions in one act.'
-          : missing.length > 0
-            ? missing.join('; ')
-            : `STT: ${stt?.engine ?? 'off'}; TTS: ${tts?.engine ?? 'off'}, offline, no billing dimension.`,
-        metadata: { billing: 'none', sttEngine: stt?.engine ?? null, ttsEngine: tts?.engine ?? null },
-      };
-    },
-    async synthesize(request: VoiceSynthesisRequest): Promise<VoiceSynthesisResult> {
-      const { wav, engine } = await synthesizeWav(request);
-      return {
-        providerId: 'local',
-        audio: {
-          mimeType: 'audio/wav',
-          format: 'wav',
-          dataBase64: wav.toString('base64'),
-          metadata: { engine: engine.engine, billing: 'none' },
-        },
-        metadata: { engine: engine.engine, modelPath: engine.modelPath, billing: 'none' },
-      };
-    },
-    async synthesizeStream(request: VoiceSynthesisRequest): Promise<VoiceSynthesisStreamResult> {
-      // Local engines emit whole wav files; the stream contract is satisfied
-      // with a single final chunk (the spoken-turn controller already handles
-      // single-chunk streams, same shape a short cloud response produces).
-      const { wav, engine } = await synthesizeWav(request);
-      const chunk = { data: new Uint8Array(wav), sequence: 0, mimeType: 'audio/wav', format: 'wav' as const, final: true };
-      return {
-        providerId: 'local',
+    }
+    // Surface a tripped circuit breaker as the honest engine-unavailable state
+    // (one line, not a per-chunk crash storm), while its config is unchanged.
+    if (tts && ttsState.unavailable) missing.push(ttsState.unavailable);
+    if (stt && sttState.unavailable) missing.push(sttState.unavailable);
+    const configured = caps.length > 0;
+    return {
+      id: 'local',
+      label: 'Local engines (free, offline)',
+      state: !configured ? 'unconfigured' : missing.length > 0 ? 'degraded' : 'healthy',
+      capabilities: caps,
+      configured,
+      detail: !configured
+        ? 'Not configured, local voice needs an installed engine and model, which the managed voice runtime provisions in one act.'
+        : missing.length > 0
+          ? missing.join('; ')
+          : `STT: ${stt?.engine ?? 'off'}; TTS: ${tts?.engine ?? 'off'}, offline, no billing dimension.`,
+      metadata: { billing: 'none', sttEngine: stt?.engine ?? null, ttsEngine: tts?.engine ?? null },
+    };
+  },
+  async synthesize(request: VoiceSynthesisRequest): Promise<VoiceSynthesisResult> {
+    const { wav, engine } = await synthesizeWav(request);
+    return {
+      providerId: 'local',
+      audio: {
         mimeType: 'audio/wav',
         format: 'wav',
-        chunks: (async function* () {
-          yield chunk;
-        })(),
+        dataBase64: wav.toString('base64'),
         metadata: { engine: engine.engine, billing: 'none' },
-      };
-    },
-    async transcribe(request: VoiceTranscriptionRequest): Promise<VoiceTranscriptionResult> {
-      const incarnation = observeEngine('stt');
-      const stt = incarnation.config;
-      if (!stt) {
-        throw new Error(
-          'Local speech-to-text is not configured on this host: voice.local.sttEngine, sttBinary and sttModelPath are '
-          + 'not all set, and no managed install was found to fall back on. The managed voice runtime installs whisper '
-          + 'and fills these in.',
-        );
-      }
-      if (!request.audio.dataBase64) {
-        throw new Error('local STT needs inline audio (dataBase64)');
-      }
-      if (incarnation.unavailable) throw new Error(incarnation.unavailable);
-      const dataBase64 = request.audio.dataBase64;
-      const lifetime = beginInvocation('stt', incarnation, [dataBase64, request.prompt ?? ''], request.signal);
-      const scratch = mkdtempSync(join(tmpdir(), 'gv-local-stt-'));
-      const wavPath = join(scratch, 'in.wav');
-      try {
-        writeFileSync(wavPath, Buffer.from(dataBase64, 'base64'));
-        const args = stt.engine === 'whisper-cpp'
-          ? ['-m', stt.modelPath, '-f', wavPath, '--no-timestamps', '--no-prints']
-          : [stt.modelPath, wavPath];
-        const { stdout } = await awaitPermission(() => runner({ binary: stt.binary, args, timeoutMs: RUN_TIMEOUT_MS,
-          signal: lifetime.signal }), lifetime.signal);
-        lifetime.assertCurrent();
-        return {
-          providerId: 'local',
-          text: stdout.trim(),
-          metadata: { engine: stt.engine, modelPath: stt.modelPath, billing: 'none' },
-        };
-      } catch (error) {
-        const failure = await classifyFailure(error, incarnation, 'STT', lifetime);
-        if (failure) throw new Error(failure);
-        throw error;
-      } finally {
-        rmSync(scratch, { recursive: true, force: true });
-      }
-    },
+      },
+      metadata: { engine: engine.engine, modelPath: engine.modelPath, billing: 'none' },
+    };
+  },
+  async synthesizeStream(request: VoiceSynthesisRequest): Promise<VoiceSynthesisStreamResult> {
+    // Local engines emit whole wav files; the stream contract is satisfied
+    // with a single final chunk (the spoken-turn controller already handles
+    // single-chunk streams, same shape a short cloud response produces).
+    const { wav, engine } = await synthesizeWav(request);
+    const chunk = { data: new Uint8Array(wav), sequence: 0, mimeType: 'audio/wav', format: 'wav' as const, final: true };
+    return {
+      providerId: 'local',
+      mimeType: 'audio/wav',
+      format: 'wav',
+      chunks: (async function* () {
+        yield chunk;
+      })(),
+      metadata: { engine: engine.engine, billing: 'none' },
+    };
+  },
+  async transcribe(request: VoiceTranscriptionRequest): Promise<VoiceTranscriptionResult> {
+    const result = await transcribeOnce(request);
+    // Same contract as every cloud provider: an empty result is a failure, not an empty success.
+    if (!result.text) throw new Error('Local transcription response missing transcript (no speech was recognised)');
+    return result;
+  },
   };
 }

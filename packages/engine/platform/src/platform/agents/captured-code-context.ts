@@ -19,10 +19,35 @@ const fingerprint = (s: BigIntStats): string => `${s.dev}:${s.ino}:${s.mode}:${s
 interface Snapshot { readonly path: string; readonly mtimeMs: number; readonly fingerprint: string; readonly content?: string }
 interface Generation { readonly files: readonly Snapshot[]; readonly directories: ReadonlyMap<string, string>; readonly id: string }
 
+/** Preparation budget. Exceeding a count or byte total makes the code source unavailable; it never aborts the run. */
+const MAX_DISCOVERY_ENTRIES = 1_024;
+const MAX_FILES = 64;
+const MAX_FILE_BYTES = 128 * 1_024;
+const MAX_SOURCE_BYTES = 1_024 * 1_024;
+const MAX_CHUNKS = 128;
+const OPERATION_TIMEOUT_MS = 15_000;
+class CodeContextTooLarge extends Error {}
+const CHUNK_BUDGET_MESSAGE = 'Authorized code index chunk budget exceeded';
+
 // Retain one original text per mutable file for this run only. Immutable receipt
 // files are already compared to their captured input by read authority. These
 // strings are private evidence, never content-derived IDs or global cache keys.
 let generationSequence = 0;
+
+// The authority keeps every assertion registered with it for its whole life and has no way to remove one,
+// and a run adds a context per spawn. One assertion per authority runs whichever contexts are still live.
+const liveAssertions = new WeakMap<ContractInputAuthority, Set<() => Promise<void>>>();
+function registerLiveAssertion(authority: ContractInputAuthority, assertion: () => Promise<void>): () => void {
+  let live = liveAssertions.get(authority);
+  if (!live) {
+    const created = new Set<() => Promise<void>>();
+    live = created;
+    liveAssertions.set(authority, created);
+    registerContractInputReadAssertion(authority, async () => { for (const each of [...created]) await each(); });
+  }
+  live.add(assertion);
+  return () => { live.delete(assertion); };
+}
 export function createCapturedCodeContext(input: {
   readonly authority: ContractInputAuthority;
   readonly root: string;
@@ -92,7 +117,7 @@ export function createCapturedCodeContext(input: {
     for (const file of generation.files) if ((onlyPath === undefined || file.path === onlyPath) && fingerprint(lstatSync(join(root, file.path), { bigint: true })) !== file.fingerprint) throw new Error('captured code generation changed');
     checkProvider();
   });
-  registerContractInputReadAssertion(authority, async () => {
+  const unregisterAssertion = registerLiveAssertion(authority, async () => {
     if (current && operation && !disposed) { const selected = current; await bounded(signal => assertGeneration(selected, signal)); }
   });
   const watch = (generation: Generation, signal: AbortSignal): (() => Promise<void>) => {
@@ -117,7 +142,7 @@ export function createCapturedCodeContext(input: {
     checkSignal();
     if (!operation) throw new Error('captured code operation is unavailable');
     const owner = operation;
-    const signal = input.signal ? AbortSignal.any([input.signal, owner.signal]) : owner.signal;
+    const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, AbortSignal.timeout(OPERATION_TIMEOUT_MS)]);
     return executePolicyCheck(() => work(signal), signal);
   };
   const source: TurnCodeIndexSource = {
@@ -126,7 +151,8 @@ export function createCapturedCodeContext(input: {
       if (disposed) throw new Error('captured code context is closed');
       assertReadingCurrent = undefined; current = undefined; cachedStats = undefined; operation?.abort(); closeIndex();
       const owner = new AbortController(); operation = owner;
-      const signal = input.signal ? AbortSignal.any([input.signal, owner.signal]) : owner.signal;
+      const deadline = AbortSignal.timeout(OPERATION_TIMEOUT_MS);
+      const signal = AbortSignal.any([...(input.signal ? [input.signal] : []), owner.signal, deadline]);
       pinnedProvider = registry?.getDefaultProviderOrNull() ?? null;
       unavailable = undefined;
       if (pinnedProvider && pinnedProvider.id !== HASHED_MEMORY_EMBEDDING_PROVIDER.id && pinnedProvider.capturedInputAdmission !== 'per-attempt') {
@@ -136,6 +162,17 @@ export function createCapturedCodeContext(input: {
         unavailable = 'no semantic embedding provider'; return;
       }
       const files: Snapshot[] = []; const directories = new Map<string, string>();
+      let entries = 0; let sourceBytes = 0;
+      const countEntry = (): void => { if (++entries > MAX_DISCOVERY_ENTRIES) throw new CodeContextTooLarge(`more than ${MAX_DISCOVERY_ENTRIES} entries`); };
+      // True when the file may be read; a file over the per-file size is left out of the index, not a failure.
+      const admitFile = (path: string): boolean => {
+        const size = lstatSync(path, { bigint: true }).size;
+        if (size > BigInt(MAX_FILE_BYTES)) return false;
+        if (files.length >= MAX_FILES) throw new CodeContextTooLarge(`more than ${MAX_FILES} files`);
+        if (sourceBytes + Number(size) > MAX_SOURCE_BYTES) throw new CodeContextTooLarge(`more than ${MAX_SOURCE_BYTES} bytes of source`);
+        sourceBytes += Number(size);
+        return true;
+      };
       let stopWatching: (() => Promise<void>) | undefined;
       let preparedStore: CodeIndexStore | undefined;
       try {
@@ -147,11 +184,13 @@ export function createCapturedCodeContext(input: {
             for (const rel of membership) {
               signal.throwIfAborted();
               if (rel.split('/').some(part => excluded.has(part))) continue;
+              countEntry();
               const path = join(root, rel);
               try { await authorize(path, signal); } catch (error) {
                 if (error instanceof Error && error.message === 'captured input path is access-restricted') continue;
                 throw error;
               }
+              if (!admitFile(path)) continue;
               const read = bytes(path);
               if (read.content.includes('\0')) continue;
               await new Promise<void>(resolve => setImmediate(resolve));
@@ -175,6 +214,7 @@ export function createCapturedCodeContext(input: {
               for (let entry = dir.readSync(); entry; entry = dir.readSync()) {
                 checkSignal(); signal.throwIfAborted();
                 if (excluded.has(entry.name)) continue;
+                countEntry();
                 const path = join(directory, entry.name);
                 try { await authorize(path, signal); } catch (error) {
                   if (error instanceof Error && error.message === 'captured input path is access-restricted') continue;
@@ -182,7 +222,8 @@ export function createCapturedCodeContext(input: {
                 }
                 if (entry.isDirectory()) { queue.push(path); continue; }
                 if (!entry.isFile()) throw new Error('captured code special-file access is unsupported');
-                  const read = bytes(path);
+                if (!admitFile(path)) continue;
+                const read = bytes(path);
                 // Binary filtering consumes only the already-authorized bytes.
                 if (read.content.includes('\0')) continue;
                 files.push({ path: relative(root, path), fingerprint: read.fingerprint, mtimeMs: read.mtimeMs, ...(contractInputAuthorityMutable(authority) ? { content: read.content } : {}) });
@@ -200,7 +241,7 @@ export function createCapturedCodeContext(input: {
         await index.init(); checkProvider(); signal.throwIfAborted();
         if (operation !== owner) throw new Error('captured code operation was replaced');
         if (!index.stats().available) { unavailable = 'code index unavailable'; closeIndex(); return; }
-        await index.prepareAuthorizedSnapshots({ sourceRevision: generation.id, snapshots: files.map(file => ({ path: file.path, mtimeMs: file.mtimeMs, content: '' })), provider: pinnedProvider, signal,
+        await index.prepareAuthorizedSnapshots({ sourceRevision: generation.id, snapshots: files.map(file => ({ path: file.path, mtimeMs: file.mtimeMs, content: '' })), provider: pinnedProvider, signal, maxChunks: MAX_CHUNKS,
           loadSnapshot: async file => {
             await assertGeneration(generation, signal, file.path);
             const captured = files.find(candidate => candidate.path === file.path)!;
@@ -217,6 +258,13 @@ export function createCapturedCodeContext(input: {
       } catch (error) {
         if (operation === owner) { current = undefined; cachedStats = undefined; closeIndex(); }
         else preparedStore?.close();
+        // Over budget is a reason to go without code context, not to fail the run. Caller aborts and
+        // every authority or generation failure still throw.
+        const overBudget = error instanceof CodeContextTooLarge ? error.message
+          : error instanceof Error && error.message === CHUNK_BUDGET_MESSAGE ? `more than ${MAX_CHUNKS} chunks`
+          : deadline.aborted && !input.signal?.aborted && !owner.signal.aborted ? `preparation exceeded ${OPERATION_TIMEOUT_MS / 1_000} seconds`
+          : undefined;
+        if (overBudget !== undefined && operation === owner) { unavailable = `captured code unavailable: too large (${overBudget})`; return; }
         throw error;
       } finally { await stopWatching?.(); }
     },
@@ -272,7 +320,7 @@ export function createCapturedCodeContext(input: {
       await bounded(async signal => { await assertGeneration(selected, signal); await assertReadingCurrent?.(); });
     },
     finishTurn() { assertReadingCurrent = undefined; cachedStats = undefined; current = undefined; const finished = operation; operation = undefined; finished?.abort(); closeIndex(); },
-    dispose() { assertReadingCurrent = undefined; cachedStats = undefined; disposed = true; operation?.abort(); current = undefined; closeIndex(); },
+    dispose() { unregisterAssertion(); assertReadingCurrent = undefined; cachedStats = undefined; disposed = true; operation?.abort(); current = undefined; closeIndex(); },
   };
   return source;
 }

@@ -17,6 +17,7 @@ import {
 } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { installMockDaemon } from "./mock-daemon";
 import type { FleetSnapshotResult } from "../../src/lib/goodvibes";
+import { installRecordedIds } from "./recorded-ids";
 
 export type ContinuationCase =
   | "second"
@@ -265,32 +266,10 @@ export async function installNativeContinuationDaemon(
   let holdStart = options.holdStart === true;
   const reply = (route: Route, wire: Wire) =>
     route.fulfill({ status: wire.status, contentType: "application/json", body: wire.body });
-  await page.addInitScript(
-    (ids: string[]) => {
-      localStorage.setItem("goodvibes.webui.hosted.clientId", "native-continuation-proof-client");
-      localStorage.setItem("goodvibes.webui.push.deviceId", "native-continuation-proof-device");
-      const original = crypto.randomUUID.bind(crypto);
-      // A real hosted attachment now owns its own fresh UUID. Only the
-      // submitted original consumes the two recorded source identities;
-      // navigation, attachment and inspection keep their native random IDs.
-      let submitting = false;
-      document.addEventListener("click", (event) => {
-        const button = event.target instanceof Element ? event.target.closest("button") : null;
-        if (button && !button.disabled && button.textContent?.trim() === "Submit") submitting = true;
-      }, true);
-      Object.defineProperty(crypto, "randomUUID", {
-        configurable: true,
-        value: () => {
-          const index = Number(sessionStorage.getItem("native-continuation-proof-id") ?? 0);
-          if (!submitting || index >= ids.length) return original();
-          sessionStorage.setItem("native-continuation-proof-id", String(index + 1));
-          if (index % 2 === 1) submitting = false;
-          return ids[index];
-        },
-      });
-    },
-    cases.flatMap((name) => [capture[name].input.requestId, capture[name].input.inputId])
-  );
+  await page.addInitScript(installRecordedIds, {
+    ids: cases.flatMap((name) => [capture[name].input.requestId, capture[name].input.inputId]),
+    storageKey: "native-continuation-proof-id",
+  });
   await page.route("**/api/control-plane/auth", (route) => reply(route, capture.auth));
   await page.route("**/api/work-ledger/project", (route) => reply(route, capture.project));
   await page.route("**/api/work-ledger/{intake,turn}/**", async (route) => {

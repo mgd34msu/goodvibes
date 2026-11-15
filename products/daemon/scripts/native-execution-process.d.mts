@@ -1,6 +1,8 @@
 import type { ChildProcess } from 'node:child_process';
 
 export function signalNativeProcessGroup(child: ChildProcess, signal?: NodeJS.Signals): void;
+import type { SpawnOptions } from 'node:child_process';
+export function spawnNativeProcessGroup(command: string, args: readonly string[], options?: Omit<SpawnOptions, 'detached'>): ChildProcess;
 export function assertNativeProcessGroupDrained(child: ChildProcess): void;
 export function boundedNativeProcessClose<T>(stopped: Promise<T>, milliseconds: number, message: string): Promise<T>;
 export function drainNativeProcessGroup(child: ChildProcess, stopped: Promise<unknown>): Promise<void>;

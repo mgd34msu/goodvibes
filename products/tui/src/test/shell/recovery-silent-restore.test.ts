@@ -26,7 +26,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConversationManager } from '../../core/conversation.ts';
 import { announceResumeState } from '../../runtime/resume-notice.ts';
 import { checkRecoveryFile, deleteRecoveryFile, writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
@@ -65,14 +64,9 @@ function writeJournalRecord(sessionId: string): string {
 }
 
 describe('bare launch never restores state', () => {
-  test('a live recovery file + journal on disk are left untouched: no fromJSON, no journal replay, no delete', async () => {
+  test('a live recovery file + journal on disk are left untouched: no journal replay, no delete', async () => {
     writeCrash('sess-A', [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }], 'Interrupted work');
     const journalPath = writeJournalRecord('sess-A');
-    const conversation = new ConversationManager(() => 80);
-
-    // The boot resume notice takes no `conversation` dependency at all (see
-    // ResumeNoticeDeps), there is nothing in the bare-launch path that could
-    // apply this snapshot to a live conversation on its own.
     await announceResumeState({
       surface,
       sessionManager: { load: () => { throw new Error('sess-A was never fully saved'); } },
@@ -82,7 +76,6 @@ describe('bare launch never restores state', () => {
       router: { high: () => {} },
     });
 
-    expect(conversation.getMessageCount()).toBe(0);
     // Journal not replayed/rotated.
     expect(existsSync(journalPath)).toBe(true);
     // Recovery file not consumed/deleted, still the newest live snapshot.

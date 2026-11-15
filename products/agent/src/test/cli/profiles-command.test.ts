@@ -116,6 +116,23 @@ describe('profiles CLI command', () => {
     expect(readAgentRuntimeProfileSelection(home)).toBeNull();
   });
 
+  test('deleting the selected default profile also clears the default selection', async () => {
+    const home = makeProjectTempDir('goodvibes-agent-profiles-delete-default');
+    await runProfilesCli(['profiles', 'create', 'Household', '--yes'], home);
+    await runProfilesCli(['profiles', 'create', 'Travel', '--yes'], home);
+    await runProfilesCli(['profiles', 'use', 'household', '--yes'], home);
+    expect(readAgentRuntimeProfileSelection(home)?.id).toBe('household');
+
+    // A different profile going away leaves the selection alone.
+    expect((await runProfilesCli(['profiles', 'delete', 'travel', '--yes'], home)).result.exitCode).toBe(0);
+    expect(readAgentRuntimeProfileSelection(home)?.id).toBe('household');
+
+    // The selected one going away must not leave the next launch pointed at a profile that no longer exists.
+    const deleted = await runProfilesCli(['profiles', 'delete', 'household', '--yes'], home);
+    expect(deleted.result.exitCode).toBe(0);
+    expect(readAgentRuntimeProfileSelection(home)).toBeNull();
+  });
+
   test('lists starter templates and creates a seeded profile', async () => {
     const home = makeProjectTempDir('goodvibes-agent-profiles-starter');
     const templates = await runProfilesCli(['profiles', 'templates'], home);
@@ -190,6 +207,10 @@ describe('profiles CLI command', () => {
     expect(imported.result.exitCode).toBe(0);
     expect(imported.output).toContain('Agent starter template imported: daily-briefing');
     expect(imported.output).toContain('vibe included');
+
+    const replaced = await runProfilesCli(['profiles', 'templates', 'import', path, '--replace', '--yes'], home);
+    expect(replaced.result.exitCode).toBe(0);
+    expect(replaced.output).toContain('Agent starter template imported: daily-briefing');
 
     const templates = await runProfilesCli(['profiles', 'templates'], home);
     expect(templates.output).toContain('daily-briefing');

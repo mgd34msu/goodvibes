@@ -8,6 +8,9 @@ import re
 import subprocess
 import sys
 import tempfile
+if sys.flags.optimize:
+    # Every integrity check here is an assert; -O or PYTHONOPTIMIZE would silently remove them all.
+    raise SystemExit('Release integrity checks need assertions; run without -O or PYTHONOPTIMIZE.')
 from release_asset_pins import needs_metadata, validate_reader_assets, resume_existing_assets
 from release_asset_sources import RetainedReleaseAsset
 
@@ -16,7 +19,7 @@ repo = os.environ.get('GITHUB_REPOSITORY', 'mgd34msu/goodvibes')
 assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo), 'Invalid release repository'
 checksum_name = sys.argv[3] if len(sys.argv) > 3 else 'SHA256SUMS.txt'
 assert re.fullmatch(r'[A-Za-z0-9_.-]+', checksum_name), 'Checksum asset name must be a flat filename'
-assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
+assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Invalid release tag: only stable vN.N.N tags are published'
 source = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/git/ref/tags/{tag}'], text=True))['object']
 while source['type'] == 'tag':
     source = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/git/tags/{source["sha"]}'], text=True))['object']
@@ -29,19 +32,22 @@ assert len(assets) == len(release['assets'])
 with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temporary, ExitStack() as ownership:
     temporary = Path(temporary)
     checks = {}
+    published_manifest = None
     if checksum_name in assets:
         subprocess.run(['gh', 'release', 'download', tag, '--repo', repo, '--pattern', checksum_name, '--dir', str(temporary)], check=True)
-        for line in (temporary / checksum_name).read_text().splitlines():
+        published_manifest = (temporary / checksum_name).read_text()
+        for line in published_manifest.splitlines():
             match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9_.-]+)', line)
             assert match and match[2] not in checks and match[2] != checksum_name
             checks[match[2]] = match[1]
-    assert set(checks) <= set(assets), 'A previously checksummed immutable asset is missing'
     incoming, retained = {}, {}
     for path in sorted(directory.iterdir()):
         assert path.is_file() and not path.is_symlink() and path.name != checksum_name and re.fullmatch(r'[A-Za-z0-9_.-]+', path.name)
         # Existing checksummed payloads are immutable and win outright. Their
         # unused rebuilt candidates need neither a local pin nor an open FD.
-        if path.name in checks:
+        # A checksummed payload the release no longer holds is the exception:
+        # its candidate is pinned so it can be uploaded again if it has the recorded digest.
+        if path.name in checks and path.name in assets:
             continue
         original = ownership.enter_context(RetainedReleaseAsset(path))
         retained[path.name] = original
@@ -50,8 +56,8 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
     # upload. Arbitrary unchecksummed remote assets cannot join this source.
     resumed = resume_existing_assets(assets, checks, incoming, checksum_name)
     for name, digest in checks.items():
-        assert assets[name]['digest'] == 'sha256:' + digest, name
-    selected_pins = {name: {'sha256': digest, 'size': assets[name]['size']} for name, digest in checks.items()}
+        assert name not in assets or assets[name]['digest'] == 'sha256:' + digest, name
+    selected_pins = {name: {'sha256': digest, 'size': assets[name]['size']} for name, digest in checks.items() if name in assets}
     selected_pins.update({name: pin for name, pin in incoming.items() if name not in assets})
     selected_metadata = {}
     metadata_dir = temporary / 'metadata'
@@ -89,7 +95,25 @@ with tempfile.TemporaryDirectory(prefix='goodvibes-release-completion-') as temp
     assert len(final_assets) == len(final_release['assets']) and set(final_assets) == set(checks) | ({checksum_name} if checksum_name in assets else set()), 'Release changed during completion'
     for name, digest in checks.items():
         assert final_assets[name]['digest'] == 'sha256:' + digest and final_assets[name]['size'] == selected_pins[name]['size'], f'Uploaded bytes differ from admitted pins: {name}'
-    checksum = temporary / checksum_name
-    checksum.write_text(''.join(f'{digest}  {name}\n' for name, digest in sorted(checks.items())))
-    subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(checksum), '--clobber'], check=True)
-    print(json.dumps({'tag': tag, 'added': added, 'resumed': sorted(resumed), 'originalPayloadsPreserved': True, 'checksumEntries': len(checks)}))
+    manifest = ''.join(f'{digest}  {name}\n' for name, digest in sorted(checks.items()))
+    if manifest == published_manifest:
+        # Replacing the manifest deletes it first; with nothing to record the published one stays untouched.
+        replaced = False
+    else:
+        # `--clobber` removes the published manifest before the new one lands, so a failed upload is retried and,
+        # if it keeps failing, the operator is told the exact command and given the manifest to re-create.
+        checksum = temporary / checksum_name
+        checksum.write_text(manifest)
+        for attempt in range(1, 4):
+            try:
+                subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo, str(checksum), '--clobber'], check=True)
+                break
+            except subprocess.CalledProcessError:
+                print(f'Checksum manifest upload failed (attempt {attempt} of 3)', file=sys.stderr)
+        else:
+            raise SystemExit(
+                f'The release {tag} now holds its payloads but no {checksum_name}: every upload attempt failed after the old one was removed.\n'
+                f'Re-create it by saving the lines below as {checksum_name} and running: gh release upload {tag} --repo {repo} {checksum_name} --clobber\n'
+                + manifest)
+        replaced = True
+    print(json.dumps({'tag': tag, 'added': added, 'resumed': sorted(resumed), 'originalPayloadsPreserved': True, 'checksumEntries': len(checks), 'checksumReplaced': replaced}))

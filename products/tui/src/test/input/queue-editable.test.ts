@@ -73,54 +73,54 @@ describe('createQueuedMessageList render (STEP 2b)', () => {
 });
 
 describe('/queue command (STEP 2b)', () => {
-  function run(sub: string[], q: ReturnType<typeof fakeQueue>): string[] {
+  async function run(sub: string[], q: ReturnType<typeof fakeQueue>): Promise<string[]> {
     const registry = new CommandRegistry();
     registerQueueRuntimeCommands(registry);
     const { ctx, printed } = makeCtx(q);
-    void registry.execute('queue', sub, ctx);
+    await registry.execute('queue', sub, ctx);
     return printed;
   }
 
-  test('list shows every still-undelivered message numbered', () => {
+  test('list shows every still-undelivered message numbered', async () => {
     const q = fakeQueue(['first', 'second']);
-    const out = run(['list'], q).join('\n');
+    const out = (await run(['list'], q)).join('\n');
     expect(out).toContain('1. first');
     expect(out).toContain('2. second');
     expect(out).toContain('editable until delivered');
   });
 
-  test('edit <n> replaces the message text via the verb', () => {
+  test('edit <n> replaces the message text via the verb', async () => {
     const q = fakeQueue(['old text']);
-    const out = run(['edit', '1', 'new', 'text'], q).join('\n');
+    const out = (await run(['edit', '1', 'new', 'text'], q)).join('\n');
     expect(out).toContain('Edited queued message #1');
     expect(q.items[0]!.text).toBe('new text');
   });
 
-  test('delete <n> removes the message via the verb', () => {
+  test('delete <n> removes the message via the verb', async () => {
     const q = fakeQueue(['gone', 'stays']);
-    const out = run(['delete', '1'], q).join('\n');
+    const out = (await run(['delete', '1'], q)).join('\n');
     expect(out).toContain('Deleted queued message #1');
     expect(q.list().map((m) => m.text)).toEqual(['stays']);
   });
 
-  test('editing a delivered message is refused (delivered = immutable)', () => {
+  test('editing a delivered message is refused (delivered = immutable)', async () => {
     const q = fakeQueue(['msg']);
     q.delivered.add(q.items[0]!.id); // the turn delivered it
     // Once delivered the list is empty, so #1 is out of range and reported honestly.
-    const out = run(['edit', '1', 'changed'], q).join('\n');
+    const out = (await run(['edit', '1', 'changed'], q)).join('\n');
     expect(out).toMatch(/No queued message|already delivered/);
     expect(q.items[0]!.text).toBe('msg'); // unchanged
   });
 
-  test('an out-of-range index is reported, not silently ignored', () => {
+  test('an out-of-range index is reported, not silently ignored', async () => {
     const q = fakeQueue(['only']);
-    const out = run(['delete', '5'], q).join('\n');
+    const out = (await run(['delete', '5'], q)).join('\n');
     expect(out).toContain('No queued message #5');
   });
 
-  test('an empty queue lists a friendly empty state', () => {
+  test('an empty queue lists a friendly empty state', async () => {
     const q = fakeQueue([]);
-    const out = run([], q).join('\n');
+    const out = (await run([], q)).join('\n');
     expect(out).toContain('No queued messages');
   });
 });

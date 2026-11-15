@@ -36,7 +36,7 @@ type Presence<K extends string> = K extends ConfigKey ? 'present' : 'ABSENT';
 
 /**
  * Every key contributed by a `declare module` block in
- * packages/platform/src/platform/config/schema-domain-*.ts. Adding a domain without
+ * packages/engine/platform/src/platform/config/schema-domain-*.ts. Adding a domain without
  * adding its side-effect import to schema.ts fails here once its key is listed.
  */
 export const clusterPresent: Presence<'cluster'> = 'present';

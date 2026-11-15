@@ -1,3 +1,5 @@
+import { createSingleUseReferenceTable } from './single-use-reference-table.js';
+
 /**
  * A bounded same-serving-owner precondition for the adopted SETTINGS HTTP lane.
  * This is neither a Jev grant nor persisted-file CAS. Existing persistence stays
@@ -26,6 +28,31 @@ export interface SettingsPreconditionReceipt {
   readonly uncertainPath?: string;
   /** Reporting only, required on committed wire receipts. Failure never undoes publication. */
   readonly verifiedInOwningStore?: boolean;
+  /**
+   * Client-side only, never on the wire: set on an `unknown` receipt when the
+   * owner answered with a precondition refusal, which every handler returns
+   * before any effect. Nothing was applied; a fresh capture may try again.
+   */
+  readonly refused?: true;
+  /** Client-side only: why the owner refused (see {@link SettingsRefusalReason}); present only with `refused`. */
+  readonly refusalReason?: SettingsRefusalReason;
+}
+/**
+ * Value-free reason on a refusal that happened before any effect, so a caller can
+ * choose its next step without parsing text:
+ * - `stale`: the capture is out of date (setting, owner or serving lifetime changed, or it expired); recapture.
+ * - `spent`: this reference was already used; capture again, do not resend it.
+ * - `managed`: managed policy locks the setting; stop, only the policy owner can change it.
+ * - `read-only`: the settings owner is read-only here; stop, or use a writable owner.
+ * - `owner-fault`: an owner store (pairing store, configuration lock) is faulted or busy; see the message; retry only for a busy lock.
+ */
+export type SettingsRefusalReason = 'stale' | 'spent' | 'managed' | 'read-only' | 'owner-fault';
+export const SETTINGS_REFUSAL_REASONS: readonly SettingsRefusalReason[] = ['stale', 'spent', 'managed', 'read-only', 'owner-fault'];
+/** The reason an owner error carries (`refusalReason`), or `owner-fault` for a faulted pairing store. */
+export function settingsRefusalReason(error: unknown): SettingsRefusalReason | undefined {
+  if (isPairingStoreFault(error)) return 'owner-fault';
+  const reason = error instanceof Error ? (error as Error & { readonly refusalReason?: unknown }).refusalReason : undefined;
+  return SETTINGS_REFUSAL_REASONS.find(known => known === reason);
 }
 export interface SettingsPreconditionHandler {
   /** Capture before the body await so stop/rebind/token ABA cannot cross it. */
@@ -47,10 +74,6 @@ interface Options<Prepared, Transition, Authority> {
   readonly captureAuthority: (req: Request) => Authority | null;
   readonly withAuthority: <T>(req: Request, authority: Authority, callback: (assertCurrent: () => void) => T) => T;
 }
-// Five minutes permits ordinary recorded admission reads. Bounded in both time
-// and count; capture never starts a timer, and neither arm refreshes a reference.
-const LIFETIME_MS = 5 * 60_000;
-const MAX_REFERENCES = 256;
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -58,20 +81,22 @@ function exact(value: Record<string, unknown>, fields: readonly string[]): boole
   const keys = Object.keys(value);
   return keys.length === fields.length && keys.every(key => fields.includes(key));
 }
-function refusal(status: number, code: string): Response {
+/** The daemon's pairing store is faulted: a retry of the same request will not help until it recovers. */
+export function isPairingStoreFault(error: unknown): boolean {
+  return error instanceof Error && (error as Error & { readonly code?: unknown }).code === 'PAIRING_STORE_FAULTED';
+}
+
+function refusal(status: number, code: string, reason?: SettingsRefusalReason): Response {
   // Never echo body, normalized values, credentials, paths or owner errors.
-  return Response.json({ error: 'Settings owner precondition unavailable', code }, { status });
+  return Response.json({ error: 'Settings owner precondition unavailable', code, ...(reason ? { reason } : {}) }, { status });
 }
 export function createSettingsPreconditionHandler<Prepared, Transition, Authority>(
   options: Options<Prepared, Transition, Authority>,
 ): SettingsPreconditionHandler {
-  const references = new Map<string, { prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
-  let servingLifetime: object | null = null;
+  const references = createSingleUseReferenceTable<{ prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
   const synchronize = (): object | null => {
     const current = options.lifetime();
-    if (current !== servingLifetime) { references.clear(); servingLifetime = current; }
-    const now = Date.now();
-    for (const [reference, entry] of references) if (entry.expiresAt <= now) references.delete(reference);
+    references.synchronize(current);
     return current;
   };
   return {
@@ -87,7 +112,7 @@ export function createSettingsPreconditionHandler<Prepared, Transition, Authorit
         if (!exact(arm, fields) || (Object.hasOwn(arm, 'credentialClear') && arm.credentialClear !== true) || (arm.operation !== 'set' && arm.operation !== 'reset-default')
           || typeof arm.key !== 'string' || !arm.key || arm.key === 'runtime.workingDir') return refusal(400, 'SETTINGS_PRECONDITION_INVALID');
         const lifetime = synchronize();
-        if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE');
+        if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
         try {
           const prepared = options.owner.prepare({ operation: arm.operation, key: arm.key, ...(arm.operation === 'set' ? { value: arm.value } : {}), ...(arm.credentialClear === true ? { credentialClear: true } : {}) });
           const facts = options.owner.inspect(prepared);
@@ -95,22 +120,18 @@ export function createSettingsPreconditionHandler<Prepared, Transition, Authorit
           // Preparation is read-only but may validate. Capture current authority
           // after it, rather than accepting authority observed before callbacks.
           const authority = options.captureAuthority(req);
-          if (authority === null || options.lifetime() !== lifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE');
-          const reference = crypto.randomUUID();
-          const expiresAt = Date.now() + LIFETIME_MS;
-          while (references.size >= MAX_REFERENCES) references.delete(references.keys().next().value!);
-          references.set(reference, { prepared, authority, lifetime, expiresAt });
+          if (authority === null || options.lifetime() !== lifetime) return refusal(409, 'SETTINGS_PRECONDITION_STALE', 'stale');
+          const { reference, expiresAt } = references.issue({ prepared, authority, lifetime });
           return Response.json({ settingsPrecondition: { version: 1, action: 'captured', reference, expiresAt, facts } });
-        } catch { return refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE'); }
+        } catch (error) { return refusal(409, isPairingStoreFault(error) ? 'PAIRING_STORE_FAULTED' : 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
       }
       if (arm.action !== 'apply' || !exact(arm, ['version', 'action', 'reference'])
         || typeof arm.reference !== 'string' || !arm.reference || arm.reference.length > 128) return refusal(400, 'SETTINGS_PRECONDITION_INVALID');
       const lifetime = synchronize();
-      const entry = references.get(arm.reference);
       // One use, including auth/currentness refusal. No same-reference retry.
-      references.delete(arm.reference);
+      const { entry, spent: wasSpent } = references.take(arm.reference);
       if (!entry || lifetime === null || lifetime !== requestLifetime || entry.lifetime !== lifetime || entry.expiresAt <= Date.now()) {
-        return refusal(409, 'SETTINGS_PRECONDITION_STALE');
+        return refusal(409, 'SETTINGS_PRECONDITION_STALE', wasSpent ? 'spent' : 'stale');
       }
       const apply = (): Response => { try {
         const receipt = options.withAuthority(req, entry.authority, (assertCurrent) => {
@@ -128,9 +149,9 @@ export function createSettingsPreconditionHandler<Prepared, Transition, Authorit
         // No post-effect auth assertion can turn a completed mutation into a
         // refusal. Only the physical owner's truthful receipt is acknowledged.
         return Response.json({ settingsPrecondition: { version: 1, action: 'applied', reference: arm.reference, receipt } });
-      } catch { return refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE'); } };
+      } catch (error) { return refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); } };
       return options.owner.withPrepared
-        ? options.owner.withPrepared(entry.prepared, apply).catch(() => refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE'))
+        ? options.owner.withPrepared(entry.prepared, apply).catch((error: unknown) => refusal(409, 'SETTINGS_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)))
         : apply();
     },
   };

@@ -9,6 +9,7 @@ interface Discovery {
   getFilePaths(options: { globPattern: string; rootPath: string; maxItems: number }): Promise<string[]>;
 }
 const require = createRequire(import.meta.url);
+// Pins the installed bash-language-server's file discovery, which the Bash LSP relies on; an upgrade that changes it fails here.
 // Exercise the installed optional dependency used by the actual LSP, not a test copy.
 const { getFilePaths } = require('bash-language-server/out/util/fs.js') as Discovery;
 let root: string;

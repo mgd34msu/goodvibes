@@ -19,12 +19,14 @@ import type { CheckinJudgmentReceipt } from './types.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { AutomationCheckinOutcome } from '../automation/index.js';
 import { randomUUID } from 'node:crypto';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
-import { isQuietHours } from './quiet-hours.js';
+import { validateSchedule } from '../automation/schedules.js';
+import { isQuietHours, parseQuietHours } from './quiet-hours.js';
 import type { CheckinReceiptStore } from './receipts.js';
 import {
   CHECKIN_CONFIG_KEYS,
-  CHECKIN_JOB_ID,
   type CheckinConfig,
   type CheckinDeliverer,
   type CheckinJudge,
@@ -47,6 +49,8 @@ export interface CheckinConfigAccess {
   set(key: string, value: string | boolean): void;
   /** Pre-mutation invalidation fences even disable/re-enable and same-value rewrites. */
   onDidInvalidate?(listener: () => void): () => void;
+  /** Fires after a key changes, including edits made outside this service (settings file, CLI). */
+  subscribe?(key: string, listener: () => void): () => void;
 }
 
 export interface CheckinServiceDeps {
@@ -69,15 +73,43 @@ export interface SetCheckinConfigInput {
   readonly quietHours?: string | undefined;
 }
 
+/**
+ * A refusal of a check-in setting the owner supplied. It carries the wire
+ * status, code and field, so the gateway answers 400 naming the field rather
+ * than storing a value that silently does nothing.
+ */
+export class CheckinConfigError extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_ARGUMENT';
+  constructor(message: string, readonly field: string) {
+    super(message);
+    this.name = 'CheckinConfigError';
+  }
+}
+
+const AUTOMATION_ENABLED_KEY = 'automation.enabled';
+
+/** Whether the scheduler really holds a check-in job matching the config. */
+export interface CheckinScheduleStatus {
+  readonly state: 'scheduled' | 'not-needed' | 'failed';
+  /** Why the job could not be installed or updated, when `state` is `failed`. */
+  readonly reason?: string | undefined;
+}
+
 export class CheckinService {
+  private evaluating = false;
+  private syncChain: Promise<unknown> = Promise.resolve();
+  private schedule: CheckinScheduleStatus = { state: 'not-needed' };
   private readonly activeRuns = new Set<AbortController>();
   private revision = 0;
   private disposed = false;
+  private unsubscribers: Array<() => void> = [];
   constructor(private readonly deps: CheckinServiceDeps) {}
 
   /** The host owns cancellation; retiring the service cannot leave retrying readers behind. */
   dispose(): void {
     this.disposed = true;
+    for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
     this.invalidate();
   }
 
@@ -100,7 +132,38 @@ export class CheckinService {
     };
   }
 
+  /** The outcome of the last attempt to put the config on the scheduler. */
+  scheduleStatus(): CheckinScheduleStatus {
+    return this.schedule;
+  }
+
+  /** Refuse values that would be stored and then do nothing, before anything is written. */
+  private validate(input: SetCheckinConfigInput): void {
+    const cadence = input.cadence?.trim();
+    if (cadence) {
+      try {
+        validateSchedule({ kind: 'cron', expression: cadence });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new CheckinConfigError(`cadence "${cadence}" is not a valid cron expression (${detail}). Example: "0 */4 * * *".`, 'cadence');
+      }
+    }
+    const quietHours = input.quietHours?.trim();
+    if (quietHours && !parseQuietHours(quietHours)) {
+      throw new CheckinConfigError(`quietHours "${quietHours}" is not a valid window. Use 24-hour HH:MM-HH:MM in local time, for example "22:00-08:00", or an empty string for none.`, 'quietHours');
+    }
+    if (input.enabled === true || input.deliveryChannel !== undefined) {
+      const current = this.getConfig();
+      const enabled = input.enabled ?? current.enabled;
+      const channel = (input.deliveryChannel ?? current.deliveryChannel).trim();
+      if (enabled && !channel) {
+        throw new CheckinConfigError('deliveryChannel is required to enable check-ins: name the channel the check-in is delivered to, for example "slack:C123". Nothing was changed.', 'deliveryChannel');
+      }
+    }
+  }
+
   async setConfig(input: SetCheckinConfigInput): Promise<CheckinConfig> {
+    this.validate(input);
     this.invalidate();
     const set = this.deps.config.set.bind(this.deps.config);
     if (input.enabled !== undefined) set(CHECKIN_CONFIG_KEYS.enabled, input.enabled);
@@ -118,28 +181,40 @@ export class CheckinService {
   /** Wire this service as the automation manager's check-in evaluator, then sync the job. */
   async attach(): Promise<void> {
     this.deps.automation?.attachCheckinEvaluator((job) => this.evaluate('scheduled', job.id));
+    // A settings edit made outside setConfig must reach the scheduler too. Syncs are
+    // serialized and idempotent, so the extra sync after a setConfig finds the job and
+    // does not create a second one.
+    if (this.deps.config.subscribe && this.unsubscribers.length === 0 && !this.disposed) {
+      // Enabling the automation subsystem later must install a job that could not be created while it was off.
+      for (const key of [...Object.values(CHECKIN_CONFIG_KEYS), AUTOMATION_ENABLED_KEY]) {
+        this.unsubscribers.push(this.deps.config.subscribe(key, () => { void this.syncScheduledJob(); }));
+      }
+    }
     await this.syncScheduledJob();
   }
 
   /**
    * Keep a single kind:'checkin' automation job in step with the config: create
    * it (enabled) when missing, update its cadence, and toggle enabled to match.
-   * Best-effort, the automation subsystem must be enabled for a job to exist;
-   * when it is off, createJob throws and we leave scheduling for when it is on.
+   * The automation subsystem must be enabled for a job to exist; when it is off
+   * the result is `failed` with the reason, and `attach()` or the next
+   * `setConfig` retries. Calls run one at a time so two syncs cannot both see no
+   * job and create two.
    */
-  async syncScheduledJob(): Promise<void> {
+  syncScheduledJob(): Promise<CheckinScheduleStatus> {
+    const run = this.syncChain.then(() => this.syncOnce());
+    this.syncChain = run;
+    return run;
+  }
+
+  private async syncOnce(): Promise<CheckinScheduleStatus> {
     const automation = this.deps.automation;
-    if (!automation) return;
+    if (!automation) return this.schedule = { state: 'not-needed', reason: 'no scheduler is attached' };
     const config = this.getConfig();
-    let job: { id: string } | undefined;
     try {
-      job = automation.listJobs().find((j) => j.kind === 'checkin');
-    } catch {
-      return;
-    }
-    try {
+      const job = automation.listJobs().find((j) => j.kind === 'checkin');
       if (!job) {
-        if (!config.enabled) return;
+        if (!config.enabled) return this.schedule = { state: 'not-needed' };
         await automation.createJob({
           name: 'Proactive check-in',
           kind: 'checkin',
@@ -148,7 +223,7 @@ export class CheckinService {
           target: { kind: 'isolated', createIfMissing: true },
           enabled: true,
         });
-        return;
+        return this.schedule = { state: 'scheduled' };
       }
       await automation.updateJob(job.id, {
         kind: 'checkin',
@@ -156,9 +231,11 @@ export class CheckinService {
         enabled: config.enabled,
       });
       await automation.setEnabled(job.id, config.enabled);
-    } catch {
-      // Automation disabled or transient failure, the schedule syncs on the
-      // next setConfig/attach once the automation subsystem is enabled.
+      return this.schedule = config.enabled ? { state: 'scheduled' } : { state: 'not-needed' };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn('check-in: the schedule was not installed', { error: summarizeError(error) });
+      return this.schedule = { state: 'failed', reason: `The check-in schedule was not installed: ${reason}` };
     }
   }
 
@@ -168,6 +245,22 @@ export class CheckinService {
    * revision as well as the check-in config; deletion or ownership changes cannot revive it.
    */
   async evaluate(trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
+    // One run at a time: a manual run overlapping a scheduled one would each judge
+    // and deliver, contacting the owner twice about the same state.
+    if (this.evaluating) {
+      return this.record(trigger, this.now(), 'cancelled', 'not assembled', {
+        decisionReason: 'Another check-in run was already in progress, so this one did not run.',
+      });
+    }
+    this.evaluating = true;
+    try {
+      return await this.runEvaluation(trigger, jobId, callerSignal, assertAuthority);
+    } finally {
+      this.evaluating = false;
+    }
+  }
+
+  private runEvaluation(trigger: 'scheduled' | 'manual', jobId?: string, callerSignal?: AbortSignal, assertAuthority?: () => void): Promise<AutomationCheckinOutcome> {
     return withConfiguredDecisionModelPolicy(async () => {
       const ranAt = this.now();
       const controller = new AbortController();
@@ -235,10 +328,13 @@ export class CheckinService {
         });
       } catch (error) {
         // A persistence failure must not erase known acceptance or fabricate an unknown send.
-        if (confirmedDelivery) return { outcome: 'delivered', summary: 'Check-in delivery was confirmed, but its receipt could not be persisted',
-          error: 'Check-in receipt persistence failed',
-          ...(confirmedDelivery.deliveryId ? { deliveryId: confirmedDelivery.deliveryId } : {}),
-        };
+        if (confirmedDelivery) {
+          const unrecorded: AutomationCheckinOutcome = { outcome: 'delivered', summary: 'Check-in delivery was confirmed, but its receipt could not be persisted',
+            error: 'Check-in receipt persistence failed',
+            ...(confirmedDelivery.deliveryId ? { deliveryId: confirmedDelivery.deliveryId } : {}),
+          };
+          return unrecorded;
+        }
         // An interrupted response cannot prove that an already-entered transport did not send.
         if (deliveryEntered) return await this.record(trigger, ranAt, 'error', briefingSummary, {
           error: 'Check-in delivery outcome was not confirmed; delivery may have begun', judgment,
@@ -304,7 +400,7 @@ function toOutcome(outcome: CheckinReceiptOutcome, receipt: CheckinReceipt): Aut
       return { outcome: 'quiet', summary: `quiet: ${receipt.decisionReason ?? 'nothing warranted contact'}` };
     case 'error':
       return { outcome: 'error', summary: 'check-in evaluation failed', ...(receipt.error ? { error: receipt.error } : {}) };
-    case 'cancelled': return { outcome: 'skipped', summary: 'check-in cancelled' };
+    case 'cancelled': return { outcome: 'skipped', summary: receipt.decisionReason ?? 'check-in cancelled' };
     case 'skipped-stale': return { outcome: 'skipped', summary: 'check-in configuration or authority changed' };
     case 'skipped-decision-models-disabled': return { outcome: 'skipped', summary: receipt.decisionReason ?? 'automatic check-ins require decision models' };
     default:

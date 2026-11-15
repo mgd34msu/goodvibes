@@ -54,7 +54,7 @@ function makeRegistryOptions(config: Readonly<Record<string, unknown>> = {}): Re
   };
 }
 
-const TRACKED_ENV_VARS = ['OPENAI_API_KEY', 'OPENAI_KEY', 'GROQ_API_KEY'] as const;
+const TRACKED_ENV_VARS = ['OPENAI_API_KEY', 'OPENAI_KEY', 'GROQ_API_KEY', 'NVIDIA_API_KEY', 'NIM_API_KEY'] as const;
 
 describe('createLaunchTolerantProviderRegistry', () => {
   const savedEnv = new Map<string, string | undefined>();
@@ -101,14 +101,12 @@ describe('createLaunchTolerantProviderRegistry', () => {
     }
 
     const registry = createLaunchTolerantProviderRegistry(makeRegistryOptions());
-    const openai = registry.tryGet('openai') as { apiKey?: unknown; configured?: unknown } | undefined;
+    const openai = registry.tryGet('openai') as { apiKey?: unknown; isConfigured(): boolean } | undefined;
 
     expect(openai).toBeDefined();
     expect(openai?.apiKey).toBe('');
-    // Not every provider class carries a mutable `configured` field (OpenAIProvider
-    // computes it on demand rather than storing it), the reset is conditional on
-    // the field existing at all, so this only asserts it when present.
-    if (openai && 'configured' in openai) expect(openai.configured).toBe(false);
+    // The provider's own check, not a stored field: a placeholder must not make it look configured.
+    expect(openai?.isConfigured()).toBe(false);
   });
 
   test('a provider whose env var IS configured is left alone (real key preserved, no placeholder logic touches it)', () => {
@@ -123,6 +121,20 @@ describe('createLaunchTolerantProviderRegistry', () => {
     const openai = registry.tryGet('openai') as { apiKey?: unknown; configured?: unknown } | undefined;
 
     expect(openai?.apiKey).toBe('real-test-key-value');
+  });
+
+  test('a catalog alias alone (NIM_API_KEY) configures nvidia and is not overwritten by a placeholder', () => {
+    for (const key of TRACKED_ENV_VARS) {
+      stashEnv(key);
+      delete process.env[key];
+    }
+    process.env.NIM_API_KEY = 'real-nim-key';
+
+    const registry = createLaunchTolerantProviderRegistry(makeRegistryOptions());
+    const nvidia = registry.tryGet('nvidia') as { apiKey?: unknown; isConfigured(): boolean } | undefined;
+
+    expect(nvidia?.apiKey).toBe('real-nim-key');
+    expect(nvidia?.isConfigured()).toBe(true);
   });
 
   test('restores the real environment even when construction throws', () => {

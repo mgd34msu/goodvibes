@@ -8,7 +8,7 @@
  * `gatedSurfaces` is an array, so, like contract.gates, it is not a scalar
  * ConfigKey and is read through getCategory('conversationGate').
  */
-import { type ConfigSettingDefinition } from './schema-shared.js';
+import { intRange, type ConfigSettingDefinition } from './schema-shared.js';
 
 export interface ConversationGateSettings {
   mode: 'propose' | 'confirm-all' | 'off';
@@ -59,12 +59,14 @@ export const conversationGateConfigSettings: ConfigSettingDefinition[] = [
     key: 'conversationGate.proposalTtlMs',
     type: 'number',
     default: 30 * 60_000,
-    description: 'How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Clamped to 1 minute - 24 hours.',
+    description: 'How long an unanswered work proposal stays answerable, in milliseconds. After this it expires and a late reply is reported as expired rather than starting stale work. Between 1 minute and 24 hours.',
+    ...intRange(60_000, 86_400_000),
   },
   {
     key: 'conversationGate.maxPendingProposals',
     type: 'number',
     default: 20,
-    description: 'Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Clamped to 1 - 200.',
+    description: 'Maximum work proposals awaiting an answer at once across all channels. The oldest is dropped past this cap. Between 1 and 200.',
+    ...intRange(1, 200),
   },
 ];

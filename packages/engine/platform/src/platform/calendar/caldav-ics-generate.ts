@@ -125,8 +125,40 @@ export function formatICalDate(iso: string): string {
   );
 }
 
-function normaliseAttendeeForOutput(entry: string): { readonly value: string; readonly cn?: string } {
-  const trimmed = entry.trim();
+/** A value this module refuses to write because it would change the shape of the VEVENT. */
+export class ICalValueError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ICalValueError';
+  }
+}
+
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * A property value is written on ONE content line. A CR, LF or other control
+ * character would end that line and let the caller write further properties or
+ * components (an alarm, extra attendees) into the event, so it is refused, not
+ * stripped: a stripped address is a different address.
+ */
+function assertSingleLine(field: string, value: string): string {
+  if (CONTROL_CHARACTERS.test(value)) {
+    throw new ICalValueError(`${field} must not contain line breaks or control characters.`);
+  }
+  return value;
+}
+
+function normaliseAttendeeForOutput(
+  field: string,
+  entry: string,
+): { readonly value: string; readonly cn?: string } {
+  const trimmed = assertSingleLine(field, entry).trim();
+  const address = trimmed.replace(/^mailto:/i, '');
+  // The address is a bare value on the property line: a `;` would start a new
+  // parameter and whitespace, quotes or angle brackets would break the line.
+  if (/@/.test(trimmed) && /[\s;"<>\\]/.test(address)) {
+    throw new ICalValueError(`${field} '${trimmed.slice(0, 40)}' is not a plain email address.`);
+  }
   if (/@/.test(trimmed) && !/^mailto:/i.test(trimmed)) {
     return { value: `mailto:${trimmed}` };
   }
@@ -156,7 +188,7 @@ function formatCNParam(cn: string): string {
 export function eventToVEvent(input: GenerateICalInput): string[] {
   const lines: string[] = [];
   lines.push('BEGIN:VEVENT');
-  lines.push(`UID:${input.uid}`);
+  lines.push(`UID:${assertSingleLine('uid', input.uid)}`);
   lines.push(`DTSTAMP:${formatICalDateTime(input.dtStamp)}`);
   if (input.allDay) {
     lines.push(`DTSTART;VALUE=DATE:${formatICalDate(input.start)}`);
@@ -173,18 +205,21 @@ export function eventToVEvent(input: GenerateICalInput): string[] {
     lines.push(`LOCATION:${escapeText(input.location)}`);
   }
   if (input.status !== undefined && input.status.length > 0) {
+    if (!/^[A-Za-z-]+$/.test(input.status)) {
+      throw new ICalValueError('status must be a plain word such as confirmed, tentative or cancelled.');
+    }
     lines.push(`STATUS:${input.status.toUpperCase()}`);
   }
   if (input.recurrence !== undefined && input.recurrence.length > 0) {
-    lines.push(`RRULE:${input.recurrence}`);
+    lines.push(`RRULE:${assertSingleLine('recurrence', input.recurrence)}`);
   }
   if (input.organizer !== undefined && input.organizer.length > 0) {
-    const org = normaliseAttendeeForOutput(input.organizer);
+    const org = normaliseAttendeeForOutput('organizer', input.organizer);
     lines.push(`ORGANIZER${org.cn ? formatCNParam(org.cn) : ''}:${org.value}`);
   }
   for (const attendee of input.attendees ?? []) {
     if (attendee.trim().length === 0) continue;
-    const norm = normaliseAttendeeForOutput(attendee);
+    const norm = normaliseAttendeeForOutput('attendee', attendee);
     lines.push(`ATTENDEE${norm.cn ? formatCNParam(norm.cn) : ''}:${norm.value}`);
   }
   lines.push('END:VEVENT');

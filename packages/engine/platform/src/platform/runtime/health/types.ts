@@ -171,6 +171,13 @@ export interface CascadeAppliedEvent {
   /** Optional context about the entity that triggered the cascade */
   sourceContext?: Record<string, string> | undefined;
   /**
+   * False when the effect only published a request that the host owning the
+   * operation (an in-flight cancellation signal, the tool registry) has to act
+   * on; nothing was cancelled or deregistered by the health system itself.
+   * Absent on events from older builds.
+   */
+  enforced?: boolean | undefined;
+  /**
    * Wall-clock latency (ms) of the cascade evaluation that produced this event.
    * Populated when the event is created from a TimedCascadeResult.
    */
@@ -191,8 +198,9 @@ export interface CascadeAppliedEvent {
  * Create a CascadeAppliedEvent from a CascadeResult.
  * Call this after applying a cascade effect to produce a trace event.
  */
-export function createCascadeAppliedEvent(result: CascadeResult): CascadeAppliedEvent {
+export function createCascadeAppliedEvent(result: CascadeResult, enforced?: boolean): CascadeAppliedEvent {
   return {
+    ...(enforced !== undefined ? { enforced } : {}),
     type: 'CASCADE_APPLIED',
     ruleId: result.ruleId,
     source: result.source,

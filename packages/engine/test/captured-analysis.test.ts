@@ -58,6 +58,8 @@ async function assertRejectedHistoricalSelection(
     const result = await f.tool.execute({ mode, files: [...files] });
     expect(result.success).toBe(false); expect(result.output).toBeUndefined(); expect(result.error).toContain('unsupported captured comparison');
     expect(JSON.stringify(result)).not.toContain('HISTORY_ONLY_MARKER'); expect(f.prompts).toHaveLength(0);
+    // Control: the spy must see this run's git calls, or every absence check below is vacuous.
+    expect(commands.length, 'the child_process spy saw no git command').toBeGreaterThan(0);
     expect(commands.some(args => args.includes('diff-tree') && args.includes('-p'))).toBe(false);
     expect(commands.some(args => files.some(file => args.includes(file)))).toBe(false);
     if (mode !== 'diff') expect(commands.some(args => args.includes('diff-tree'))).toBe(false);
@@ -104,7 +106,9 @@ for (const control of ['original-denied', 'copy-denied', 'cancelled', 'revoked',
     }) as typeof childProcess.spawnSync);
     try {
       const result = await f.tool.execute({ mode: 'semantic_diff' });
+      expect(result.success).toBe(false); expect(result.error).toBeTruthy();
       expect(JSON.stringify(result)).not.toContain('HISTORY_ONLY_MARKER'); expect(f.prompts).toHaveLength(0);
+      expect(commands.length, 'the child_process spy saw no git command').toBeGreaterThan(0);
       expect(commands.some((args) => args.includes('diff-tree') && (args.includes('-p') || args.includes('--stat')))).toBe(false);
     } finally { tap.mockRestore(); }
   });
@@ -324,3 +328,14 @@ for (const mode of ['diff', 'breaking', 'semantic_diff'] as const) {
     await assertRejectedHistoricalSelection(f, mode, [':(attr:secret)*']);
   });
 }
+test('a cancelled captured diff does not fail later read sweeps of the same authority', async () => {
+  const { assertContractInputReadAccess } = await import('../platform/src/platform/contract/input-authority.js');
+  const f = await fixture();
+  const call = new AbortController();
+  f.setOnRead(() => { call.abort(); });
+  const cancelled = await f.tool.execute({ mode: 'diff' }, { signal: call.signal }).catch((error: unknown) => ({ success: false, error }));
+  expect(cancelled.success).toBe(false);
+  f.setOnRead(undefined);
+  await assertContractInputReadAccess(f.authority, f.filter);
+  expect((await f.tool.execute({ mode: 'diff' })).success).toBe(true);
+});

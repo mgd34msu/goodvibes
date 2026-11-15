@@ -16,7 +16,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { promises as fs, renameSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { capturePreparedFilePublication, publishFileMutation } from '../utils/file-mutation.js';
 import type { ProfileMutationOptions } from './delegation.js';
 import {
@@ -178,19 +178,29 @@ function renderVerifiedLine(
   return renderLine(prefix, value, { ...provenance, said: defused });
 }
 
+/** A machine write whose value cannot be stored whole. Stored cut, an address or a note would read as complete. */
+class ProfileValueTooLongError extends Error {
+  constructor() {
+    super(`That value is longer than the ${MAX_MACHINE_VALUE_CHARS} characters a written profile line may hold, `
+      + 'so nothing was saved. Shorten it, or add the longer text to the profile file by hand.');
+  }
+}
+
 /**
  * Render a line under the machine-write caps.
  *
- * The value is capped first because it is the part with a stated limit; when the
- * whole line is still too long the QUOTE is shortened before the value, since a
- * truncated verbatim is a smaller loss than a truncated shipping address.
+ * The value is never cut: a value over its limit is refused, because a cut
+ * shipping address is worse than none and the owner was told it was saved.
+ * When the whole line is still too long the QUOTE is shortened, since a
+ * truncated verbatim is a smaller loss than a truncated value.
  */
 function renderCappedLine(
   prefix: string,
   rawValue: string,
   provenance: ProfileProvenance | null,
 ): string {
-  const value = sanitizeForLine(rawValue).slice(0, MAX_MACHINE_VALUE_CHARS);
+  const value = sanitizeForLine(rawValue);
+  if (value.length > MAX_MACHINE_VALUE_CHARS) throw new ProfileValueTooLongError();
   if (provenance?.origin === 'autonomous') {
     const line = renderVerifiedLine(prefix, value, provenance);
     if (line.length > MAX_MACHINE_LINE_CHARS) throw new Error('Recorded autonomous source exceeds the profile line limit.');
@@ -206,9 +216,10 @@ function renderCappedLine(
     line = renderVerifiedLine(prefix, value, { ...full, said: said.slice(0, shorter) });
     if (line.length <= MAX_MACHINE_LINE_CHARS) return line;
   }
-  const trimmedValue = value.slice(0, Math.max(0, value.length - (line.length - MAX_MACHINE_LINE_CHARS)));
-  line = renderLine(prefix, trimmedValue, full === null ? null : { ...full, said: '' });
-  return line.length <= MAX_MACHINE_LINE_CHARS ? line : line.slice(0, MAX_MACHINE_LINE_CHARS);
+  // Even with no quote the value and label do not fit.
+  line = renderLine(prefix, value, full === null ? null : { ...full, said: '' });
+  if (line.length > MAX_MACHINE_LINE_CHARS) throw new ProfileValueTooLongError();
+  return line;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +349,9 @@ export function setField(projection: ProfileProjection, input: SetFieldInput): P
     ? findProfileSection(projection, def.section)
     : (sectionContaining(projection, existing.lineIndex) ?? findProfileSection(projection, def.section));
   const label = existing?.label ?? def.label;
-  const line = renderCappedLine(`${label}: `, input.value, input.provenance);
+  let line: string;
+  try { line = renderCappedLine(`${label}: `, input.value, input.provenance); }
+  catch (error) { if (error instanceof ProfileValueTooLongError) return refuse(projection, error.message); throw error; }
   const change: ProfileChange = {
     kind: 'set',
     fieldId: def.id,
@@ -390,7 +403,9 @@ export interface AppendProseInput {
 export function appendProse(projection: ProfileProjection, input: AppendProseInput): ProfileEditResult {
   const heading = input.section.trim();
   if (heading.length === 0) return refuse(projection, 'A prose bullet needs a section.');
-  const line = renderCappedLine('- ', input.text, input.provenance);
+  let line: string;
+  try { line = renderCappedLine('- ', input.text, input.provenance); }
+  catch (error) { if (error instanceof ProfileValueTooLongError) return refuse(projection, error.message); throw error; }
   const section = findProfileSectionByHeading(projection, heading);
   const change: ProfileChange = {
     kind: 'append',
@@ -604,17 +619,26 @@ function placeRestored(
 /** The file operations persistence needs, injected so a test can interrupt one. */
 export interface ProfilePersistIo {
   readonly mkdir: (dir: string) => Promise<void>;
-  readonly writeFile: (path: string, content: string) => Promise<void>;
+  /** `mode` is the permission the new file is created with; an implementation may ignore it. */
+  readonly writeFile: (path: string, content: string, mode?: number) => Promise<void>;
   readonly rename: (from: string, to: string) => Promise<void>;
   readonly remove: (path: string) => Promise<void>;
 }
 
 const NODE_PERSIST_IO: ProfilePersistIo = {
   mkdir: async (dir) => { await fs.mkdir(dir, { recursive: true }); },
-  writeFile: async (path, content) => { await fs.writeFile(path, content, 'utf-8'); },
+  writeFile: async (path, content, mode) => { await fs.writeFile(path, content, mode === undefined ? 'utf-8' : { encoding: 'utf-8', mode }); },
   rename: async (from, to) => { await fs.rename(from, to); },
   remove: async (path) => { await fs.rm(path, { force: true }); },
 };
+
+/** The target changed between reading the profile and publishing the new text, so nothing was renamed. */
+export class ProfileChangedDuringWriteError extends Error {
+  constructor() {
+    super('Your profile changed while this was being written, so nothing was recorded. Try again in a moment.');
+    this.name = 'ProfileChangedDuringWriteError';
+  }
+}
 
 /**
  * Write the document atomically: temp file, then `rename()` over the target.
@@ -622,25 +646,34 @@ const NODE_PERSIST_IO: ProfilePersistIo = {
  * Same shape as `PersistentStore.persist()` with a text join instead of
  * `JSON.stringify`. On POSIX the rename is atomic, so an interrupted write
  * leaves either the old complete file or the new one, never half a profile.
- * The daemon is the single writer, which is what makes this sufficient with no
- * lock.
+ * The owner can edit the file while the daemon runs, so `unchangedSince` is asked right before the
+ * rename, after the temp file is written; when it says the target moved, the write is abandoned
+ * rather than renamed over the owner's edit. This is not a lock: only the instant between that
+ * answer and the rename remains open.
  */
 export async function persistProfileText(
-  path: string,
+  profilePath: string,
   text: string,
   io: ProfilePersistIo = NODE_PERSIST_IO,
   lifetime: Pick<ProfileMutationOptions, 'assertCurrent' | 'onEffect' | 'withPublication'> = {},
+  unchangedSince?: () => boolean,
 ): Promise<void> {
-  const tmpPath = `${path}.tmp.${process.pid}.${randomUUID()}`;
   lifetime.assertCurrent?.();
+  // The profile holds the owner's address and notes. A rename gives the new file the temp file's
+  // permissions, so carry over the owner's own (0600 for a first write), and write through a
+  // symlinked profile to its target rather than replacing the link with a regular file.
+  const { path, mode } = io === NODE_PERSIST_IO ? await resolveProfileTarget(profilePath) : { path: profilePath, mode: PROFILE_FILE_MODE };
+  const tmpPath = `${path}.tmp.${process.pid}.${randomUUID()}`;
   await io.mkdir(dirname(path));
   lifetime.onEffect?.(); lifetime.assertCurrent?.();
+  if (io === NODE_PERSIST_IO) await sweepStaleProfileTemps(path);
   try {
     lifetime.assertCurrent?.();
-    await io.writeFile(tmpPath, text);
+    await io.writeFile(tmpPath, text, mode);
     lifetime.onEffect?.(); lifetime.assertCurrent?.();
     await publishFileMutation(lifetime.withPublication, async assertPublicationCurrent => {
       lifetime.assertCurrent?.(); assertPublicationCurrent();
+      if (unchangedSince !== undefined && !unchangedSince()) throw new ProfileChangedDuringWriteError();
       const assertPublished = lifetime.assertCurrent || lifetime.withPublication ? capturePreparedFilePublication(tmpPath) : undefined;
       if (io === NODE_PERSIST_IO && lifetime.withPublication) renameSync(tmpPath, path);
       else await io.rename(tmpPath, path);
@@ -651,6 +684,34 @@ export async function persistProfileText(
     await io.remove(tmpPath).catch(() => undefined);
     throw error;
   }
+}
+
+const PROFILE_FILE_MODE = 0o600;
+
+/** Where a write really lands (through a symlink) and the permissions the file already has. */
+async function resolveProfileTarget(path: string): Promise<{ path: string; mode: number }> {
+  let target = path;
+  try { target = await fs.realpath(path); } catch { /* not there yet */ }
+  try { return { path: target, mode: (await fs.stat(target)).mode & 0o777 }; }
+  catch { return { path: target, mode: PROFILE_FILE_MODE }; }
+}
+
+/** A write that died between creating its temp file and renaming it leaves a full copy of the profile behind. */
+async function sweepStaleProfileTemps(path: string): Promise<void> {
+  const prefix = `${basename(path)}.tmp.`;
+  let names: string[];
+  try { names = await fs.readdir(dirname(path)); } catch { return; }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const pid = Number(/^(\d+)\./.exec(name.slice(prefix.length))?.[1]);
+    if (!Number.isInteger(pid) || pid === process.pid || processIsAlive(pid)) continue;
+    await fs.rm(join(dirname(path), name), { force: true }).catch(() => undefined);
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
 /** Join a raw line array into the text to persist. */

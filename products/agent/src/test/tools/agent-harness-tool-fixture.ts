@@ -136,6 +136,8 @@ export function makeFixture(options: {
   readonly controlPlaneEnabled?: boolean;
   readonly controlPlanePort?: number;
   readonly artifactStore?: Pick<ArtifactStore, 'create' | 'get' | 'list' | 'readContent'>;
+  /** Package root whose `release/` directory the release audit modes read; defaults to the product checkout. */
+  readonly releaseRoot?: string;
 } = {}): HarnessFixture {
   const { root, paths } = makeShellPaths();
   const commandRegistry = new CommandRegistry();
@@ -464,7 +466,7 @@ export function makeFixture(options: {
   } as unknown as CommandContext;
 
   registerAgentHarnessTool(toolRegistry, commandRegistry, context);
-  const tool = createAgentHarnessTool({ commandRegistry, commandContext: context, toolRegistry });
+  const tool = createAgentHarnessTool({ commandRegistry, commandContext: context, toolRegistry, ...(options.releaseRoot === undefined ? {} : { releaseRoot: options.releaseRoot }) });
   registerAgentTerminalProcessTools(toolRegistry, context);
   let invocation = 0;
   const executeAdmittedCall: HarnessFixture['executeAdmittedCall'] = (id, name, args, options) => {

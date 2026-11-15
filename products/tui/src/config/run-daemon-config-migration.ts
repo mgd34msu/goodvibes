@@ -20,23 +20,27 @@
  */
 import {
   migrateDaemonOwnedConfig,
-  daemonConfigPath,
+  daemonConfigPathForHome,
   daemonConfigMovedPath,
+  resolveGoodVibesDaemonHome,
   type DaemonConfigMigrationResult,
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /**
  * Run the daemon-owned-config migration for `homeDir`, tolerating any
- * failure. Returns the migration result on success, or `null` when the
+ * failure. The store is the one the daemon reads: its home honours
+ * `GOODVIBES_DAEMON_HOME`, so a custom daemon home receives the moved keys
+ * instead of the default path the daemon would never open. Returns the migration result on success, or `null` when the
  * migration itself threw (logged as a warning naming the marker path;
  * startup proceeds either way).
  */
-export function runDaemonConfigMigration(homeDir: string): DaemonConfigMigrationResult | null {
+export function runDaemonConfigMigration(homeDir: string, env: NodeJS.ProcessEnv = process.env): DaemonConfigMigrationResult | null {
+  const daemonStorePath = daemonConfigPathForHome(resolveGoodVibesDaemonHome(homeDir, env));
   try {
-    return migrateDaemonOwnedConfig({ homeDir, primarySurface: 'tui' });
+    return migrateDaemonOwnedConfig({ homeDir, primarySurface: 'tui', daemonStorePath });
   } catch (error) {
-    const markerPath = daemonConfigMovedPath(daemonConfigPath(homeDir));
+    const markerPath = daemonConfigMovedPath(daemonStorePath);
     logger.warn('daemon-owned config migration failed; continuing with existing config state', {
       markerPath,
       error: summarizeError(error),

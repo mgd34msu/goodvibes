@@ -20,23 +20,27 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s publishes a non-mode 
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir: home, configDir });
   config.set('permissions.mode', mode); config.set('display.theme', 'vaporwave');
   const previous = installJudgmentPort(undefined);
-  const runtime = (await createPreparedAgentRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
-    configManager: config, workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'Settings mode fixture' }));
-  using log = new SqliteDecisionLog(':memory:');
-  let prompts = 0;
-  runtime.permissionPromptRef.requestPermission = async () => { prompts++; return { approved: false }; };
-  const fake = fakePort((wireName, question) => {
-    const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
-    if (question.type === 'choice') {
-      const labels = Object.keys(question.criteria);
-      const selected = ['none', 'generic', 'read', 'act'].find(label => labels.includes(label)) ?? labels[0];
-      if (!selected) throw new Error('Fixture requires an offered choice');
-      return choiceAnswer(question, selected, 0.999);
-    }
-    return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
-  });
-  installJudgmentPort(withDecisionLog(fake.port, log));
+  let closeRuntime: (() => Promise<void>) | undefined;
+  // Construction sits inside the try so a failure still restores the judgment
+  // port: a later file in the same process must not inherit this one's.
   try {
+    const runtime = (await createPreparedAgentRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
+      configManager: config, workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'Settings mode fixture' }));
+    closeRuntime = async () => { await runtime.processManager.close(); await runtime.close(); };
+    using log = new SqliteDecisionLog(':memory:');
+    let prompts = 0;
+    runtime.permissionPromptRef.requestPermission = async () => { prompts++; return { approved: false }; };
+    const fake = fakePort((wireName, question) => {
+      const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
+      if (question.type === 'choice') {
+        const labels = Object.keys(question.criteria);
+        const selected = ['none', 'generic', 'read', 'act'].find(label => labels.includes(label)) ?? labels[0];
+        if (!selected) throw new Error('Fixture requires an offered choice');
+        return choiceAnswer(question, selected, 0.999);
+      }
+      return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
+    });
+    installJudgmentPort(withDecisionLog(fake.port, log));
     const registry = composeAgentToolRegistry({ services: runtime, configManager: config, homeDirectory: home,
       resolveSessionId: () => 'mode-settings', getLastUserMessage: () => 'Set the scratch theme to nord' }).toolRegistry;
     const manager = composeAgentPermissionManager(runtime);
@@ -51,6 +55,6 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s publishes a non-mode 
     expect(JSON.parse(readFileSync(config.getConfigPath(), 'utf8'))).toMatchObject({ display: { theme: 'nord' } });
     expect(prompts).toBe(0);
   } finally {
-    await runtime.processManager.close(); await runtime.close(); installJudgmentPort(previous);
+    await closeRuntime?.(); installJudgmentPort(previous);
   }
 });

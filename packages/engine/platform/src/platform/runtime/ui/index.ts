@@ -1,8 +1,7 @@
 /**
  * Runtime UI data surface barrel.
  *
- * Exports enriched data providers and one-shot factory functions for
- * the model picker and provider health surfaces.
+ * Exports the model picker entry types and the provider health status types.
  *
  * These modules produce structured data for renderers, no UI rendering
  * logic lives here.
@@ -14,24 +13,7 @@ export type {
   ProviderHealthContext,
   ModelPickerEntry,
   ModelPickerGroup,
-  ModelPickerData,
 } from './model-picker/index.js';
 export type { ProviderStatus as ModelPickerProviderStatus } from './model-picker/index.js';
-export { ModelPickerDataProvider, createModelPickerData } from './model-picker/index.js';
-export type { ModelPickerDataProviderOptions } from './model-picker/index.js';
 
-export type {
-  HealthTimelinePoint,
-  HealthTimeline,
-  ProviderHealthEntry,
-  FallbackChainNode,
-  FallbackChainData,
-  ProviderHealthData,
-  CompositeHealthStatus,
-} from './provider-health/index.js';
-export type { ProviderStatus } from './provider-health/index.js';
-export {
-  ProviderHealthDataProvider,
-  buildFallbackChainData,
-  createProviderHealthData,
-} from './provider-health/index.js';
+export type { ProviderStatus, CompositeHealthStatus } from './provider-health/index.js';

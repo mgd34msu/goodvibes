@@ -1,4 +1,4 @@
-/** UNRUN: exact operation origin and original queue ownership. */
+/** Exact operation origin and original queue ownership. */
 import { expect, test } from 'bun:test';
 import { GroupConfigChanges } from '../platform/src/platform/cluster/group-config-changes.ts';
 import { listReplicatedConfigPaths, replicatedSecretKeyFor } from '../platform/src/platform/cluster/config-replication-policy.ts';

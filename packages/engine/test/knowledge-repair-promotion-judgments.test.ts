@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
@@ -14,6 +14,8 @@ import { prepareRepairFactScoring, KnowledgeRepairFactScoringHeldError, type Rep
 import { prepareRepairProfileRequirement } from '../platform/src/platform/knowledge/semantic/repair-profile-requirement/reader.js';
 import { repairProfileFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
+
+useStoreCleanup();
 
 const spaceId = 'scored-repair-space', text = 'AC-7 has four HDMI inputs. AC-7 has two USB ports. AC-7 supports Dolby Vision.';
 let previous: JudgmentPort | undefined;

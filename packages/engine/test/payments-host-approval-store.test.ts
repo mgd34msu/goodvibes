@@ -65,16 +65,15 @@ describe('DaemonApprovalStore: persisted, single use, content bound', () => {
     expect(reloaded.pendingCount()).toBe(0);
   });
 
-  test('the store is bounded: overflowing evicts the oldest grant, not the newest', () => {
+  test('the store is bounded: a full store refuses the new grant and keeps the ones already reported', () => {
     const store = new DaemonApprovalStore(filePath);
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < 16; index += 1) {
       store.grant({ action: ACTION, content: { ...CONTENT, item: `item-${String(index)}` } });
     }
-    expect(store.pendingCount()).toBeLessThanOrEqual(16);
-    // The newest is spendable; the oldest was the one evicted.
-    expect(store.take({ action: ACTION, content: { ...CONTENT, item: 'item-19' } }).approval).not.toBeNull();
-    const oldest = store.take({ action: ACTION, content: { ...CONTENT, item: 'item-0' } });
-    expect(oldest.approval).toBeNull();
+    expect(() => store.grant({ action: ACTION, content: { ...CONTENT, item: 'item-16' } })).toThrow(PaymentApprovalStoreError);
+    expect(store.pendingCount()).toBe(16);
+    expect(store.take({ action: ACTION, content: { ...CONTENT, item: 'item-0' } }).approval).not.toBeNull();
+    expect(store.take({ action: ACTION, content: { ...CONTENT, item: 'item-16' } }).approval).toBeNull();
   });
 });
 

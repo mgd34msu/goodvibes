@@ -78,6 +78,12 @@ export class DomainBridge {
       for (const unsub of unsubs) {
         unsub();
       }
+      // With the listeners gone no terminal event can arrive; end what is open
+      // so those spans are exported rather than lost.
+      for (const spans of this._allSpanMaps()) {
+        for (const span of spans.values()) this._safe(() => span.end());
+        spans.clear();
+      }
     };
   }
 
@@ -95,6 +101,13 @@ export class DomainBridge {
     this._safe(() => {
       recordHealthCascadeSpan(this._tracer, event, { traceId });
     });
+  }
+
+  private _allSpanMaps(): SpanMap[] {
+    return [
+      this._pluginSpans, this._mcpSpans, this._transportSpans, this._taskSpans,
+      this._agentSpans, this._permissionSpans, this._sessionSpans, this._compactionSpans,
+    ];
   }
 
   private _safe(action: () => void): void {

@@ -103,6 +103,10 @@ export function createLazyMcpRegistry(
         // call happened may be there by the next one.
         connecting = null;
         logger.warn('MCP connect-on-use failed', { error: summarizeError(error) });
+        // Reject with the real reason: resolving here would let the gated call
+        // run against a registry that never connected, and the model would be
+        // told the server or tool does not exist instead of why.
+        throw new Error(`MCP connect failed: ${summarizeError(error)}. The call was not made; the next MCP call tries to connect again.`);
       });
     await connecting;
   };

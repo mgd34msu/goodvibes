@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { UtteranceAudioArtifact } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import type { WakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { client as platformClient } from '../goodvibes';
 import type { OperatorMethodOutput } from '../goodvibes';
@@ -24,7 +25,7 @@ import {
   type WakeHostState,
   type WakeTranscriptSink,
 } from './wake-host';
-import { transcribeUtterance, useVoiceStatus, useWakeSettings, WAKE_STATUS_QUERY_KEY } from './useVoice';
+import { transcribeArtifact, transcribeUtterance, useVoiceStatus, useWakeSettings, WAKE_STATUS_QUERY_KEY } from './useVoice';
 import type { WakeModelChunk, WakeModelComponent } from './wake-models';
 
 export type WakeStatus = OperatorMethodOutput<'voice.wake.status'>;
@@ -72,6 +73,21 @@ export function useWakeState(): WakeHostState {
 let daemonDepsInstalled = false;
 
 /**
+ * The default speech-to-text provider, kept where the host's (non-React) transcribe
+ * dependency can read it, so a wake's utterance goes to the same provider dictation uses.
+ */
+let wakeSttProviderId: string | undefined;
+
+export function setWakeSttProviderId(providerId: string | undefined): void {
+  wakeSttProviderId = providerId;
+}
+
+/** The host's speech-to-text dependency: the same request dictation sends. */
+export function transcribeWakeArtifact(artifact: UtteranceAudioArtifact): Promise<string> {
+  return transcribeArtifact(artifact, wakeSttProviderId);
+}
+
+/**
  * Install the host's daemon-facing dependencies once per page.
  *
  * `modelVersion` is read from `voice.wake.status` because it is part of the model
@@ -96,18 +112,7 @@ function ensureDaemonDeps(): void {
       },
       warn: wakeHostWarn,
     }),
-    transcribe: async (artifact) => {
-      const result = await platformClient.operator.voice.stt({
-        audio: {
-          mimeType: artifact.mimeType,
-          format: artifact.format,
-          dataBase64: artifact.dataBase64,
-          metadata: { sampleRateHz: artifact.sampleRateHz, durationMs: artifact.durationMs },
-        },
-      });
-      const text = (result as { text?: unknown }).text;
-      return typeof text === 'string' ? text.trim() : '';
-    },
+    transcribe: transcribeWakeArtifact,
   });
 }
 
@@ -127,7 +132,13 @@ function ensureDaemonDeps(): void {
 export function useWakeHost(onTranscript?: WakeTranscriptSink): WakeHostState {
   const { settings } = useWakeSettings();
   const state = useWakeState();
+  const { availability } = useVoiceStatus();
   ensureDaemonDeps();
+
+  const sttProviderId = availability.defaultSttProviderId;
+  useEffect(() => {
+    setWakeSttProviderId(sttProviderId);
+  }, [sttProviderId]);
 
   useEffect(() => {
     void wakeHost.applySettings(settings);

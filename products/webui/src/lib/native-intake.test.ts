@@ -18,10 +18,17 @@ const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   await tokenStore.setToken("synthetic-native-owner");
 });
+// Fake-handler checks are recorded, not thrown: a throw inside the fake would surface as an
+// error from the client under test and be indistinguishable from the refusal being asserted.
+const mismatches: string[] = [];
+function agree(actual: unknown, expected: unknown, what: string): void {
+  if (!Bun.deepEquals(actual, expected)) mismatches.push(what);
+}
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   globalThis.fetch = originalFetch;
   await tokenStore.clearToken();
+  expect(mismatches.splice(0)).toEqual([]);
 });
 const selectedHunk = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
 function diffContext(selector: NativeSelectedDiffSelector, sessionId: string): NativeSelectedDiffContext {
@@ -65,6 +72,14 @@ function harness() {
       if (!rows.some((row) => JSON.stringify(row) === JSON.stringify(record)))
         throw new Error("Journal mismatch");
     },
+    async remove(record) {
+      const index = rows.findIndex((row) => JSON.stringify(row) === JSON.stringify(record));
+      if (index < 0) throw new Error("Journal mismatch");
+      rows.splice(index, 1);
+    },
+    async unreadable() {
+      return 0;
+    },
   };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
@@ -86,11 +101,15 @@ function harness() {
       });
     if (path === "/api/work-ledger/project") return Response.json({ projectId });
     if (path.startsWith("/api/work-ledger/turn/")) {
-      expect(body).toEqual({
-        projectId: "native-project",
-        inputId: command!.inputId,
-        sourceRevision: state!.sourceRef.sourceRevision,
-      });
+      agree(
+        body,
+        {
+          projectId: "native-project",
+          inputId: command!.inputId,
+          sourceRevision: state!.sourceRef.sourceRevision,
+        },
+        `${path} body`
+      );
       if (path.endsWith("/status")) {
         statusHook?.();
         return Response.json(invalidStatus ? { kind: "unknown" } : (turn ?? { kind: "not-found" }));
@@ -122,8 +141,10 @@ function harness() {
     }
     if (path === "/api/work-ledger/intake/capture") {
       command = body as unknown as NativeConversationIntakeCaptureRequest;
-      expect(rows.some((row) => JSON.stringify(row.command) === JSON.stringify(command))).toBe(
-        true
+      agree(
+        rows.some((row) => JSON.stringify(row.command) === JSON.stringify(command)),
+        true,
+        "capture arrived before its original was saved"
       );
       state = {
         kind: "captured",
@@ -351,7 +372,7 @@ test("lost capture acknowledgement survives reopening; lookup is inert and retry
   h.loseCapture();
   await expect(
     session.submit({ text: original, unsupportedSources: [] }, () => undefined)
-  ).rejects.toThrow();
+  ).rejects.toThrow("Lost capture acknowledgement");
   session.dispose();
   const reopened = await h.open();
   const [record] = await reopened.list();
@@ -417,7 +438,11 @@ test("fresh paired owner/project checks fence mutations after the view is opened
     if (change === "scope") h.setScopes(["read:work-ledger"]);
     await expect(
       session.submit({ text: original, unsupportedSources: [] }, () => undefined)
-    ).rejects.toThrow();
+    ).rejects.toThrow(
+      change === "scope"
+        ? "Native requests require an existing paired admin"
+        : "native project or paired owner changed"
+    );
     expect(h.writes()).toHaveLength(0);
     expect(h.rows).toHaveLength(0);
   }
@@ -511,7 +536,13 @@ for (const change of [
     if (change === "read") h.setScopes(["write:work-ledger", "write:sessions"]);
     if (change === "ledger") h.setScopes(["read:work-ledger", "write:sessions"]);
     if (change === "sessions") h.setScopes(["read:work-ledger", "write:work-ledger"]);
-    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow();
+    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow(
+      change === "owner" || change === "project"
+        ? "project or paired owner changed"
+        : change === "sessions"
+          ? "Native conversation delivery requires an existing paired admin"
+          : "Native requests require an existing paired admin"
+    );
     expect(turnCalls(h)).toHaveLength(0);
   });
 
@@ -525,7 +556,13 @@ for (const change of ["owner", "project", "scope", "journal"] as const)
       if (change === "scope") h.setScopes(["read:work-ledger", "write:work-ledger"]);
       if (change === "journal") h.failConfirm();
     });
-    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow();
+    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow(
+      change === "scope"
+        ? "Native conversation delivery requires an existing paired admin"
+        : change === "journal"
+          ? "Original journal unavailable"
+          : "project or paired owner changed"
+    );
     expect(turnCalls(h).map((row) => row.path)).toEqual(["/api/work-ledger/turn/status"]);
   });
 
@@ -533,7 +570,7 @@ test("lost turn response survives reopening and explicit status reconciliation w
   const h = harness();
   const session = await admittedTurn(h);
   h.loseStart();
-  await expect(session.turn.request(h.rows[0]!)).rejects.toThrow();
+  await expect(session.turn.request(h.rows[0]!)).rejects.toThrow("Lost turn acknowledgement");
   session.dispose();
   const reopened = await h.open();
   expect(await reopened.turn.inspect(h.rows[0]!)).toMatchObject({
@@ -550,7 +587,9 @@ test("unavailable original storage and unknown turn status fail closed in the br
     const h = harness();
     const session = await admittedTurn(h);
     h[fault]();
-    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow();
+    await expect(session.turn.request(h.rows[0]!)).rejects.toThrow(
+      fault === "failConfirm" ? "Original journal unavailable" : "invalid_union"
+    );
     expect(turnCalls(h).filter((row) => !row.path.endsWith("/status"))).toHaveLength(0);
   }
 });
@@ -582,7 +621,7 @@ test("native continuation captures only the exact original plus session identity
   h.loseCapture();
   await expect(
     session.submit({ text: original, unsupportedSources: [] }, () => {})
-  ).rejects.toThrow();
+  ).rejects.toThrow("Lost capture acknowledgement");
   expect(h.rows[0]?.command).toEqual({
     requestId: "logical-1",
     inputId: "logical-2",
@@ -632,8 +671,8 @@ test("continuation rejects a changed source session instead of adopting it", asy
   const session = await h.open({ continuationSessionId: "native-session" });
   await session.submit({ text: original, unsupportedSources: [] }, () => {});
   h.driftContinuation();
-  await expect(session.inspect(h.rows[0]!)).rejects.toThrow();
-  await expect(session.turn.request(h.rows[0]!)).rejects.toThrow();
+  await expect(session.inspect(h.rows[0]!)).rejects.toThrow("Native conversation intake: invalid_response");
+  await expect(session.turn.request(h.rows[0]!)).rejects.toThrow("Native conversation intake: invalid_response");
   expect(turnCalls(h)).toHaveLength(0);
 });
 
@@ -671,7 +710,7 @@ test("selected comment lost acknowledgement reopens read-only and an ordinary se
   const selectedDiff: NativeSelectedDiffSelector = { kind: "workspace", baselineId: "checkpoint-base", revision: "d".repeat(64), fileIndex: 0, hunkIndex: 0 };
   const scope = { continuationSessionId: "native-session", selectedDiff };
   const session = await h.open(scope); h.loseCapture();
-  await expect(session.submit({ text: original, unsupportedSources: [] }, () => {})).rejects.toThrow();
+  await expect(session.submit({ text: original, unsupportedSources: [] }, () => {})).rejects.toThrow("Lost capture acknowledgement");
   session.dispose();
   const reopened = await h.open(scope);
   expect(await reopened.list()).toEqual(h.rows);
@@ -697,7 +736,7 @@ test("selected diff scopes are immutable and cannot adopt another hunk or unboun
   expect(await other.list()).toEqual([]);
   await expect(other.inspect(h.rows[0]!)).rejects.toThrow("selected change");
   h.driftDiff();
-  await expect(session.inspect(h.rows[0]!)).rejects.toThrow();
+  await expect(session.inspect(h.rows[0]!)).rejects.toThrow("Native conversation intake: invalid_response");
   expect(h.writes()).toHaveLength(2);
 });
 

@@ -1,5 +1,5 @@
 /** Actual launch/apply/respawn/rollback with a complete synthetic release and
- * real native file/directory transactions. Authored source; execution deferred. */
+ * real native file/directory transactions. */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

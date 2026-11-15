@@ -7,5 +7,12 @@ export class UIFactory extends createUiFactory({ secondaryQueue: true, previewEn
 public static createHeader(width: number, model: string, title?: string, version: string = VERSION): Line[] {
     return renderHeaderLine(width, model, title, version);
   }
-public static computeRenderStallInfo(metrics: { toolActive: boolean; lastDeltaAtMs: number | undefined; nowMs: number }): ThinkingStallInfo | undefined { return this.computeFrameStall(metrics); }
+public static computeRenderStallInfo(metrics: {
+  toolActive: boolean;
+  lastDeltaAtMs: number | undefined;
+  nowMs: number;
+  /** A provider reconnect in progress (STREAM_RETRY); shown as "retrying n/m" instead of a generic stall. */
+  reconnectAttempt?: number | undefined;
+  reconnectMaxAttempts?: number | undefined;
+}): ThinkingStallInfo | undefined { return this.computeFrameStall(metrics); }
 }

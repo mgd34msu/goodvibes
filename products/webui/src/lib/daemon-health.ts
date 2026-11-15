@@ -28,11 +28,11 @@ export type AuthState = 'signed-in' | 'signed-out' | 'unknown';
 export type WorkingState = 'working' | 'blocked' | 'unknown';
 
 /**
- * A stream/subscription cannot work over the relay at all (unary-only tunnel, see
- * lib/relay-connection.ts's header comment), distinct from 'error' (a stream that
- * SHOULD work but currently isn't) and from 'disabled' (never attempted, no verdict
- * either way). Consumers show a specific, honest "not available over relay" copy
- * rather than a generic reconnecting/error state.
+ * The live-updates stream. 'connecting' until the daemon's ready frame (or any event)
+ * arrives, 'active' while it delivers, 'error' from a failure until the reconnect is
+ * ready again, 'disabled' before anything has been attempted. 'relay-unsupported' is kept
+ * for transports that cannot carry streams; the relay tunnel carries them today (see
+ * lib/relay-connection.ts), so the health hook never reports it.
  */
 export type SseState = 'active' | 'connecting' | 'error' | 'disabled' | 'relay-unsupported';
 
@@ -68,9 +68,9 @@ export interface DaemonHealth {
   /**
    * This build vs. the daemon's most recently observed client-build floor
    * (X-Goodvibes-Client-Floor, see lib/client-compatibility.ts). Null until at least
-   * one response has been observed; a daemon that never sends the header (every
-   * currently-shipped one, at this platform pin) leaves this null forever, which is honest,
-   * there is nothing yet to report, not a clean bill of health.
+   * one response carrying the header has been observed (the daemon writes it on its
+   * authenticated /status response); a daemon that never sends it leaves this null, which
+   * is honest, there is nothing to report, not a clean bill of health.
    */
   compatibility: ClientCompatibilityVerdict | null;
 }

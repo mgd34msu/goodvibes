@@ -153,12 +153,14 @@ const corePerformanceScenarios: EvalScenario[] = [
       // placeholder heap samples, not a captured memory trace.
       surfacePerf.heapUsedBytes = 80 * 1024 * 1024;
       surfacePerf.lastMemorySampleAt = t0 - 60_000; // 1 minute ago
-      monitor.evaluate({ surfacePerf, extraMetrics: {} }); // prime the monitor
+      monitor.evaluate({ surfacePerf, extraMetrics: {} }, t0); // prime the monitor
 
       surfacePerf.heapUsedBytes = 80 * 1024 * 1024 + 512 * 1024; // synthetic placeholder: +512 KiB over 1 min
       surfacePerf.lastMemorySampleAt = t0;
 
-      const perfReport = monitor.evaluate({ surfacePerf, extraMetrics: {} });
+      // Evaluated at the synthetic time one minute after the prime, so the
+      // growth rate is a fixed 512 KiB per minute whatever the machine's speed.
+      const perfReport = monitor.evaluate({ surfacePerf, extraMetrics: {} }, t0 + 60_000);
 
       return {
         completed: true,

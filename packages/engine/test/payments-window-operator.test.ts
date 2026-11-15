@@ -125,7 +125,7 @@ test('status is read-scoped, immutable and does not extend a deadline or invent 
   const wait = replies.waitForAnswer({ purchaseId: 'purchase', kind: 'approval', notice: 'Exact owner notice', deadlineMs: 20, channels: ['telegram'] });
   const owner = authority();
   const context = { ...owner.context, admin: false, scopes: ['read:payments'] };
-  const handler = purchaseWindowStatusHandler({ replies }, { status: () => [] });
+  const handler = purchaseWindowStatusHandler({ replies }, { statusReport: () => ({ operations: [], unreadable: [] }) });
   const first = readPaymentWindowStatus(await handler({ body: {}, query: {}, context }));
   expect(first.windows[0]?.deadlineMs).toBe(20);
   expect(Object.isFrozen(first.windows[0])).toBe(true);
@@ -135,6 +135,21 @@ test('status is read-scoped, immutable and does not extend a deadline or invent 
   expect(await wait).toBeNull();
   expect(readings.requests).toHaveLength(0);
   await expect(handler({ body: {}, query: {}, context: { ...context, scopes: [] } })).rejects.toMatchObject({ status: 403 });
+});
+
+test('status lists the readable purchases and names the records it could not read', async () => {
+  const replies = inbox(), owner = authority(), context = { ...owner.context, admin: false, scopes: ['read:payments'] };
+  const readable = { purchaseId: 'readable', operationId: 'operation:readable', state: 'refused' as const, phase: null, createdAtMs: 1, updatedAtMs: 2,
+    outcome: 'refused:no-card', totalMinorUnits: null, currency: null };
+  const unreadable = [{ purchaseId: 'damaged', reason: 'The status record for purchase damaged is unreadable or missing. Inspect its payment evidence.' }];
+  const handler = purchaseWindowStatusHandler({ replies }, { statusReport: () => ({ operations: [readable], unreadable }) });
+  const status = readPaymentWindowStatus(await handler({ body: {}, query: {}, context }));
+  expect(status.operations).toEqual([readable]); expect(status.unreadable).toEqual(unreadable);
+  // A healthy listing carries no extra field, so a reader that predates it still decodes it.
+  const healthy = purchaseWindowStatusHandler({ replies }, { statusReport: () => ({ operations: [readable], unreadable: [] }) });
+  expect(Object.keys(await healthy({ body: {}, query: {}, context }) as object)).toEqual(['windows', 'operations']);
+  expect(readPaymentWindowStatus({ windows: [], operations: [] }).unreadable).toEqual([]);
+  expect(() => readPaymentWindowStatus({ windows: [], operations: [], unreadable: [{ purchaseId: 'damaged' }] })).toThrow('invalid purchase-window response');
 });
 
 test('surface decoders reject mismatched/extra/private fields and invalid deadlines without echoing them', () => {

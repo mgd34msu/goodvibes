@@ -44,7 +44,7 @@ SSE connector (`createEventSourceConnector`) does not fire:
   `'disconnected'` afterwards.
 - `onReconnectAttempt(info)`: `info` is `{ attempt, maxAttempts, delayMs, reason }`.
   The legacy `onReconnect(attempt, delayMs)` is `@deprecated` but still fired.
-- `onOpen()` and `onBackpressure(info)` signal connect and outbound-queue saturation.
+- `onOpen()` signals connect. `onBackpressure(info)` is accepted but never called: the outbound queue is unbounded.
 
 ```ts
 import {

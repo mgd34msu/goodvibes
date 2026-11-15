@@ -17,6 +17,8 @@ import {
   type ToolPreparedSettingsMutation,
 } from './input-projection.js';
 import { captureNativeReferenceProjection } from './native-reference-projection.js';
+import { mcpResultIngest } from './mcp/result-ingest.js';
+import { getProcessUntrustedContentLedger, type UntrustedIngest } from '../security/untrusted-content.js';
 import { type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
@@ -35,6 +37,7 @@ import { repairToolCall } from './auto-repair.js';
 import { ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
 import type { ContractVerificationResult, ContractVerifierOptions } from '../runtime/tools/contract-verifier.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 
 /**
@@ -54,6 +57,9 @@ interface PreparedExecution {
   readonly executor: Tool['execute'];
   readonly definitionRevision: string;
   readonly warnings: readonly string[];
+  /** What the repair changed and which arguments it ignored, told to the model with the result. */
+  readonly repairs: readonly string[];
+  readonly unknownParameters: readonly string[];
   readonly projection: CapturedProjection;
   claimed: boolean;
 }
@@ -79,7 +85,6 @@ interface CapturedProjection {
   readonly definitionRevision: string;
   readonly captureCurrent: (() => void) | undefined;
   readonly preparationGuards: { readonly callbacks: Set<() => void>; revision: number };
-  readonly ownsProjectionSlot: boolean;
   executionStarted: boolean;
   executionCurrent?: (() => void) | undefined;
   preparationSignal?: AbortSignal | undefined;
@@ -130,6 +135,12 @@ interface CurrentToolExecution {
   readonly readOnlyDefinition: boolean;
   /** Set only by {@link relaxCurrentToolReadFences}; see there. */
   readFence?: { validUntil: number } | undefined;
+  /**
+   * Untrusted content that nested calls brought in. Recording it while the
+   * parent runs would change the exposure revision the parent's authority was
+   * captured under, so it is recorded when the parent has finished.
+   */
+  readonly pendingIngests: UntrustedIngest[];
   active: boolean;
   checking: boolean;
 }
@@ -175,6 +186,8 @@ export function relaxCurrentToolReadFences(args: Record<string, unknown>, option
 // and no exported minting operation can construct an authentic body proof.
 const currentToolExecutions = new WeakMap<ToolExecuteOptions, CurrentToolExecution>();
 const settingsResultReceipts = new WeakMap<ToolResult, PreparedConfigMutationReceipt>();
+/** Options of a call made through `executeNested`; its parent records what it ingested. */
+const nestedCallOptions = new WeakSet<ToolExecuteOptions>();
 
 function retainSettingsReceipt(proof: CurrentToolExecution, receipt: PreparedConfigMutationReceipt): void {
   const previous = proof.settingsReceipt;
@@ -183,10 +196,18 @@ function retainSettingsReceipt(proof: CurrentToolExecution, receipt: PreparedCon
     completedPaths: Object.freeze([...previous.completedPaths, ...receipt.completedPaths]) }) : receipt;
 }
 
+/** What the recorded write did, in words: the call reads failed, but its settings change may stand. */
+function settingsReceiptEffect(receipt: PreparedConfigMutationReceipt): string {
+  if (receipt.status === 'committed') return 'The change WAS applied and saved. Do not repeat it. Read the setting to confirm.';
+  if (receipt.status === 'partial') return `The settings change was PARTLY applied: ${receipt.completedPaths.length} file(s) were written, then ${receipt.uncertainPath ?? 'a later file'} failed. Read the setting before changing it again.`;
+  return `It is UNKNOWN whether the settings change was applied${receipt.uncertainPath ? ` (${receipt.uncertainPath} failed while being written)` : ''}. Read the setting before changing it again.`;
+}
+
 function retiredSettingsResult(callId: string, receipt: PreparedConfigMutationReceipt, signal?: AbortSignal): ToolResult {
   const result: ToolResult = { callId, success: false, ...(signal?.aborted ? { cancelled: true } : {}),
-    error: 'Settings invocation retired after its recorded effects; no remaining work was dispatched.',
-    output: JSON.stringify(receipt) };
+    // Lead with the effect: a model that only reads `error` must not retry a change that already landed.
+    error: `${settingsReceiptEffect(receipt)} The call itself was stopped afterwards, so no further work ran.`,
+    output: JSON.stringify({ ...receipt, effect: settingsReceiptEffect(receipt) }) };
   settingsResultReceipts.set(result, receipt);
   return result;
 }
@@ -419,7 +440,6 @@ export class ToolRegistry {
   private registrationRevision = 0;
   private definitionSequence = 0;
   private readonly definitionRevisions = new WeakMap<ProjectionRegistration, { readonly definition: ToolDefinition; readonly revision: string }>();
-  private liveInputProjections = 0;
 
   /** Strict compositions bind their exact authority owner once; raw platform registries remain unbound. */
   constructor(expectedPermissionManager?: PermissionManager) {
@@ -552,7 +572,7 @@ export class ToolRegistry {
       ? previousDefinition.revision : `tool-schema-${(++this.definitionSequence).toString(36)}`;
     this.definitionRevisions.set(registration, { definition, revision: definitionRevision });
     const combined = combineProjectionSignals(signal, registration.signal);
-    const skeleton = { registration, tool: registration.tool, executor, definition, rawDefinition, assertDefinitionCurrent, definitionRevision, captureCurrent, preparationGuards: { callbacks: new Set<() => void>(), revision: 0 }, ownsProjectionSlot: registration.projector !== undefined, executionStarted: false,
+    const skeleton = { registration, tool: registration.tool, executor, definition, rawDefinition, assertDefinitionCurrent, definitionRevision, captureCurrent, preparationGuards: { callbacks: new Set<() => void>(), revision: 0 }, executionStarted: false,
       signal: combined, assertCurrent: undefined, assertRepairedArgs: undefined, release: undefined,
       executionContext: undefined, admissionEvidence: undefined, settingsMutation: undefined, resultPublication: undefined, released: false, claimed: false };
     const provisional: CapturedProjection = { ...skeleton, call: Object.freeze({ callId, name, args: Object.freeze({}),
@@ -567,9 +587,6 @@ export class ToolRegistry {
       if (capturedRecord) this.assertCapturedIdentity(capturedRecord);
     };
     this.assertCaptured(provisional, true);
-    if (skeleton.ownsProjectionSlot) {
-      this.liveInputProjections++;
-    }
     let release: (() => Promise<void>) | undefined;
     try {
       let projected = captured;
@@ -656,8 +673,7 @@ export class ToolRegistry {
       this.projectedArgs.set(call.args, record);
       return call;
     } catch (error) {
-      try { if (release) await this.cleanupProjection(release); }
-      finally { if (skeleton.ownsProjectionSlot) this.liveInputProjections--; }
+      if (release) await this.cleanupProjection(release);
       if (error instanceof ToolInputProjectionError) throw error;
       if (registration.projector) throw new ToolInputProjectionError('unavailable');
       throw error;
@@ -694,8 +710,7 @@ export class ToolRegistry {
     record.released = true;
     // Publish the shared completion before invoking owner cleanup (which may reenter).
     record.releasePromise = Promise.resolve().then(async () => {
-      try { if (record.release) await this.cleanupProjection(record.release); }
-      finally { if (record.ownsProjectionSlot) this.liveInputProjections--; }
+      if (record.release) await this.cleanupProjection(record.release);
     });
     return record.releasePromise;
   }
@@ -828,10 +843,13 @@ export class ToolRegistry {
       const effective = captureProjectionArgs(repair.repaired ? repair.fixed : projection.args, name);
       this.repairProjection(record, effective);
       const schemaArgs = record.nativeSchemaArgs ? record.nativeSchemaArgs(effective) : effective;
-      if (await firstJsonSchemaFailureAsync(record.definition.parameters, schemaArgs, { signal, assertCurrent: () => this.assertPreparationCurrent(record) })) throw new ToolError('Prepared tool arguments do not match the registered schema', name);
+      const schemaFailure = await firstJsonSchemaFailureAsync(record.definition.parameters, schemaArgs, { signal, assertCurrent: () => this.assertPreparationCurrent(record) });
+      // Path and expectation come from the schema, never from the argument values.
+      if (schemaFailure) throw new ToolError(`Prepared tool arguments do not match the registered schema at ${schemaFailure.path || '(root)'}: expected ${schemaFailure.expected}. Nothing was executed; fix that argument and re-issue the call.`, name);
       const call = Object.freeze({ callId, name, args: effective, schemaRevision: record.definitionRevision, judgmentDecisionIds: Object.freeze(ids) });
       this.prepared.set(call, { tool: record.tool, executor: record.executor, definitionRevision: record.definitionRevision,
-        warnings: [...(repair.warnings ?? [])], projection: record, claimed: false });
+        warnings: [...(repair.warnings ?? [])], repairs: repair.repaired ? [...repair.repairs] : [],
+        unknownParameters: [...(repair.unknownParameters ?? [])], projection: record, claimed: false });
       this.assertPrepared(call);
       return call;
     } catch (error) {
@@ -869,6 +887,17 @@ export class ToolRegistry {
     return this.prepared.get(call)!.projection.resultPublication === 'read-only';
   }
 
+  /** Whether the captured registration declares the tool dangerous; the arguments never decide it. */
+  isPreparedDangerous(call: PreparedToolCall): boolean {
+    this.assertPrepared(call);
+    return this.prepared.get(call)!.tool.definition.dangerous === true;
+  }
+
+  /** Whether the registered tool of this name declares itself dangerous. */
+  isDangerous(name: string): boolean {
+    return this.tools.get(name)?.definition.dangerous === true;
+  }
+
   /** Opaque backend binding, never part of the serializable permission evidence. */
   readPreparedSettingsMutation(call: PreparedToolCall): ToolPreparedSettingsMutation | undefined {
     this.assertPrepared(call);
@@ -892,13 +921,16 @@ export class ToolRegistry {
     let proof: CurrentToolExecution | undefined;
     let executionSignal: AbortSignal | undefined;
     let assertReadPublication: (() => void) | undefined;
+    // The tool's own result, once it has run: a cleanup failure after that must not hide an effect that happened.
+    let outcome: ToolResult | undefined;
     try {
       assertProjectionCurrent(callerCurrent);
       const signal = combineProjectionSignals(record.projection.signal, record.projection.preparationSignal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
       executionSignal = signal;
       this.assertPreparationCurrent(record.projection);
       this.assertPrepared(call);
-      const executionOptions = Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(record.projection.executionContext ? { inputProjectionContext: record.projection.executionContext } : {}) });
+      const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
+      const executionOptions = Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.projection.executionContext ? { inputProjectionContext: record.projection.executionContext } : {}) });
       // All callbacks and option capture precede claim. The tail below is synchronous
       // and invokes only metadata/intrinsic checks before the exact executor.
       const guardRevision = record.projection.preparationGuards.revision;
@@ -977,7 +1009,6 @@ export class ToolRegistry {
             assertAutonomousConfigTransition(assertAdmissionCurrent, mutation, transition);
             assertProjectionCurrent(callerCurrent); assertPlanSource();
             this.assertExecuting(call, record); assertProjectionSignal(signal); assertEffect('write');
-            if (mutation.secretDeletion) mutation.secretDeletion.owner.assertCompletedScopedDeletion(mutation.secretDeletion.mutation);
             this.assertExecuting(call, record); assertProjectionSignal(signal);
           };
           final();
@@ -1006,14 +1037,6 @@ export class ToolRegistry {
               completedPaths.push(...receipt.completedPaths); remoteCompleted = true;
               assertCompletedRemoteSettingsImportPrecondition(mutation.remoteImport); assertPlanAuthority();
             }
-            if (mutation.secretDeletion) {
-              const deletion = mutation.secretDeletion;
-              const receipt = await deletion.owner.applyPreparedScopedDeletion(deletion.mutation, assertPlanAuthority);
-              if (receipt.status !== 'committed') return joined(receipt);
-              completedPaths.push(...receipt.completedPaths);
-              deletion.owner.assertCompletedScopedDeletion(deletion.mutation);
-              assertPlanAuthority();
-            }
             if (mutation.secretImport) {
               const imported = mutation.secretImport;
               secretTransition = imported.owner.beginPreparedImport(imported.mutation);
@@ -1030,7 +1053,50 @@ export class ToolRegistry {
               completedPaths.push(...receipt.completedPaths); subscriptionCompleted = true;
               imported.owner.assertCompletedImport(imported.mutation); assertPlanAuthority();
             }
-            return commitConfig ? joined(commitConfig()) : Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths) });
+            if (!mutation.secretDeletion) {
+              return commitConfig ? joined(commitConfig()) : Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths) });
+            }
+            // The credential's store locks are taken first and the configuration is then published and the credential cleared
+            // in one synchronous section, so no file-watcher poll or timer can land between the two steps and make the
+            // second one see its own configuration write as a foreign change. The configuration is still published first:
+            // a failure between the two leaves an orphan credential, never configuration that points at a deleted one.
+            const deletion = mutation.secretDeletion;
+            const assertAfterConfig = () => {
+              assertProjectionCurrent(callerCurrent); assertPlanSource();
+              if (configMutation) mutation.owner.assertCompletedMutation(configMutation);
+              this.assertExecuting(call, record); assertProjectionSignal(signal); assertAdmissionCurrent(); assertEffect('write');
+              assertPlanSource();
+              if (configMutation) mutation.owner.assertCompletedMutation(configMutation);
+              this.assertExecuting(call, record); assertProjectionSignal(signal);
+            };
+            let configResult = undefined as PreparedConfigMutationReceipt | undefined;
+            let step: { readonly receipt: PreparedConfigMutationReceipt; readonly verified: boolean } | undefined;
+            try {
+              step = await deletion.owner.withPreparedScopedDeletion(deletion.mutation, (finish) => {
+                configResult = commitConfig ? joined(commitConfig()) : Object.freeze({ status: 'committed', completedPaths: Object.freeze([...completedPaths]) });
+                if (configResult.status !== 'committed') return undefined;
+                completedPaths.splice(0, completedPaths.length, ...configResult.completedPaths);
+                const receipt = finish(assertAfterConfig);
+                let verified = true;
+                if (receipt.status === 'committed') {
+                  try { deletion.owner.assertCompletedScopedDeletion(deletion.mutation); assertAfterConfig(); } catch { verified = false; }
+                }
+                return { receipt, verified };
+              });
+            } catch (error) {
+              // Before the configuration was published nothing happened: let the plan report that. After it, the
+              // configuration change stands and only the credential step is uncertain.
+              if (configResult === undefined) throw error;
+              return Object.freeze({ status: 'partial' as const, completedPaths: Object.freeze([...completedPaths]) });
+            }
+            if (step === undefined) return configResult!;
+            const deleted = step.receipt;
+            if (!step.verified) return Object.freeze({ status: 'partial' as const, completedPaths: Object.freeze([...completedPaths]) });
+            const combined: PreparedConfigMutationReceipt = Object.freeze({ ...deleted,
+              status: deleted.status === 'committed' ? 'committed' as const : 'partial' as const,
+              completedPaths: Object.freeze([...completedPaths, ...deleted.completedPaths]) });
+            if (proof) proof.settingsReceipt = combined;
+            return combined;
           } catch {
             // Completion/source retirement cannot erase a native receipt for
             // physical effects that already happened. It still retires authority.
@@ -1043,7 +1109,7 @@ export class ToolRegistry {
         const nestedOwner = readAutonomousNestedOwner(assertAdmissionCurrent);
         if (!nestedOwner) throw new ToolInputProjectionError('held');
         const declaredEffects = record.projection.definition.sideEffects;
-        proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, assertEffect,
+        proof = { name: call.name, registry: this, nestedOwner, admissionGuard: assertAdmissionCurrent, args: call.args, active: true, checking: false, pendingIngests: [], assertEffect,
           signal, readOnlyDefinition: Array.isArray(declaredEffects) && declaredEffects.length > 0 && declaredEffects.every(effect => effect === 'read_fs'),
           assertWorkspace: readAutonomousWorkspaceConstraint(assertAdmissionCurrent),
           settingsPresentation: readAutonomousSettingsPresentation(assertAdmissionCurrent),
@@ -1084,6 +1150,8 @@ export class ToolRegistry {
       retireExecution(); retireExecution = undefined;
       const published = { ...result, callId: call.callId,
         ...(record.warnings.length ? { warnings: [...(result.warnings ?? []), ...record.warnings] } : {}) };
+      outcome = published;
+      annotateRepairs(published, record.repairs, record.unknownParameters, executionSignal);
       if (proof?.settingsReceipt) settingsResultReceipts.set(published, proof.settingsReceipt);
       return published;
     } catch (error) {
@@ -1096,7 +1164,30 @@ export class ToolRegistry {
       record.projection.executionCurrent = undefined;
       if (proof) proof.active = false;
       retireExecution?.();
-      try { await this.releaseCapture(record.projection); assertReadPublication?.(); }
+      // Recorded last: the exposure revision is part of autonomous authority, so
+      // recording earlier would make this very call's own authority stale.
+      const recordIngests = (): void => {
+        if (outcome === undefined) return;
+        const own = opts !== undefined && nestedCallOptions.has(opts) ? undefined : mcpResultIngest(call.name, call.args, outcome);
+        for (const ingest of [...(proof?.pendingIngests ?? []), ...(own ? [own] : [])]) getProcessUntrustedContentLedger().record(ingest);
+      };
+      try {
+        try { await this.releaseCapture(record.projection); }
+        catch (error) {
+          // Owner cleanup failing after the body finished does not undo what the body did. Report the result and say so,
+          // instead of a failure that would make the caller repeat a non-idempotent effect.
+          if (outcome === undefined || assertReadPublication !== undefined) throw error;
+          logger.warn('Tool cleanup failed after the tool finished', { tool: call.name, error: summarizeError(error) });
+          // The result still reaches the model, so what it carries is recorded even though cleanup failed.
+          recordIngests();
+          if (proof?.settingsReceipt && (proof.settingsReceipt.status === 'committed' || proof.settingsReceipt.completedPaths.length)) {
+            return retiredSettingsResult(call.callId, proof.settingsReceipt, executionSignal);
+          }
+          return { ...outcome, warnings: [...(outcome.warnings ?? []), 'The tool ran and its result is reported, but cleaning up after it failed. Its effect was applied; do not repeat the call.'] };
+        }
+        assertReadPublication?.();
+        recordIngests();
+      }
       catch (error) {
         if (proof?.settingsReceipt && (proof.settingsReceipt.status === 'committed' || proof.settingsReceipt.completedPaths.length)) {
           return retiredSettingsResult(call.callId, proof.settingsReceipt, executionSignal);
@@ -1174,7 +1265,9 @@ export class ToolRegistry {
         if (!admission.result.approved) return { callId, success: false,
           error: `Nested tool admission ${admission.result.autonomousDecision?.outcome ?? 'held'}: ${admission.result.reasonCode}` };
         bindAutonomousNestedAdmission(parent.admissionGuard, admission);
-        const result = await this.executePrepared(current, admission, { signal, assertCurrent: assertParent });
+        const childOptions: ToolExecuteOptions = { signal, assertCurrent: assertParent };
+        nestedCallOptions.add(childOptions);
+        const result = await this.executePrepared(current, admission, childOptions);
         const receipt = settingsResultReceipts.get(result);
         if (receipt) retainSettingsReceipt(parent, receipt);
         try { assertParent(); }
@@ -1183,6 +1276,8 @@ export class ToolRegistry {
           parent.active = false;
           return retiredSettingsResult(current.callId, parent.settingsReceipt!, signal);
         }
+        const ingest = mcpResultIngest(current.name, current.args, result);
+        if (ingest) parent.pendingIngests.push(ingest);
         return result;
       }
     } finally {
@@ -1190,6 +1285,8 @@ export class ToolRegistry {
         ...[...projections].map(projected => this.releaseProjected(projected)),
         ...(choiceProjection ? [manager.releaseAutonomousChoices(choiceProjection)] : []),
       ]);
+      // Each nested call has its own source id; once it has settled its epoch is not needed.
+      manager.retireAutonomousSource(sourceId);
       const failure = released.find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') throw failure.reason;
     }
@@ -1232,6 +1329,7 @@ export class ToolRegistry {
     let record: CapturedProjection | undefined;
     let retireExecution: (() => void) | undefined;
     let assertReadPublication: (() => void) | undefined;
+    let outcome: ToolResult | undefined;
     try {
       const projected = await this.projectCall(callId, name, args, opts);
       const selected = this.projections.get(projected)!;
@@ -1244,9 +1342,10 @@ export class ToolRegistry {
       assertProjectionSignal(signal);
       const effectiveArgs = captureProjectionArgs(repairResult.repaired ? repairResult.fixed : projected.args, name);
       this.repairProjection(record, effectiveArgs);
+      const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
       const executionOptions = record.registration.projector
-        ? Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(record.executionContext ? { inputProjectionContext: record.executionContext } : {}) })
-        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal });
+        ? Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.executionContext ? { inputProjectionContext: record.executionContext } : {}) })
+        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
       this.assertCaptured(record, false);
       record.claimed = true;
       const capturedRecord = record;
@@ -1276,10 +1375,10 @@ export class ToolRegistry {
       if (repairResult.warnings && repairResult.warnings.length > 0) {
         toolResult.warnings = [...(toolResult.warnings ?? []), ...repairResult.warnings];
       }
-      if (repairResult.repaired && !toolResult.cancelled && !signal?.aborted) {
-        const repairNote = `[Auto-repaired: ${repairResult.repairs.join(', ')}]`;
-        toolResult.output = typeof toolResult.output === 'string' ? `${repairNote}\n${toolResult.output}` : repairNote;
-      }
+      annotateRepairs(toolResult, repairResult.repaired ? repairResult.repairs : [], repairResult.unknownParameters ?? [], signal);
+      const ingest = mcpResultIngest(name, effectiveArgs, toolResult);
+      if (ingest) getProcessUntrustedContentLedger().record(ingest);
+      outcome = toolResult;
       return toolResult;
     } catch (err) {
       if (err instanceof ToolInputProjectionError) {
@@ -1293,7 +1392,18 @@ export class ToolRegistry {
     } finally {
       if (record) record.executionCurrent = undefined;
       retireExecution?.();
-      try { if (record) await this.releaseCapture(record); assertReadPublication?.(); }
+      try {
+        if (record) {
+          try { await this.releaseCapture(record); }
+          catch (error) {
+            // Owner cleanup failing after the body finished does not undo what the body did; a thrown failure would make the caller repeat it.
+            if (outcome === undefined || assertReadPublication !== undefined) throw error;
+            logger.warn('Tool cleanup failed after the tool finished', { tool: name, error: summarizeError(error) });
+            return { ...outcome, warnings: [...(outcome.warnings ?? []), 'The tool ran and its result is reported, but cleaning up after it failed. Its effect was applied; do not repeat the call.'] };
+          }
+        }
+        assertReadPublication?.();
+      }
       finally { assertReadPublication = undefined; }
     }
   }
@@ -1310,17 +1420,17 @@ export class ToolRegistry {
       assertProjectionCurrent(assertCurrent);
       const effectiveArgs = repair.repaired ? repair.fixed : args;
       // The new projection-context field is owner-only, even on a legacy call.
-      const executionOptions = assertCurrent ? Object.freeze({ signal, assertCurrent })
-        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal });
+      const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
+      const executionOptions = assertCurrent ? Object.freeze({ signal, assertCurrent, ...(onProgress ? { onProgress } : {}) })
+        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       const result = await executingContext.run(undefined, () => tool.execute(effectiveArgs, executionOptions));
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       const toolResult = { ...result, callId };
       if (repair.warnings?.length) toolResult.warnings = [...(toolResult.warnings ?? []), ...repair.warnings];
-      if (repair.repaired && !toolResult.cancelled && !signal?.aborted) {
-        const note = `[Auto-repaired: ${repair.repairs.join(', ')}]`;
-        toolResult.output = typeof toolResult.output === 'string' ? `${note}\n${toolResult.output}` : note;
-      }
+      annotateRepairs(toolResult, repair.repaired ? repair.repairs : [], repair.unknownParameters ?? [], signal);
+      const ingest = mcpResultIngest(name, effectiveArgs, toolResult);
+      if (ingest) getProcessUntrustedContentLedger().record(ingest);
       return toolResult;
     } catch (error) {
       throw new ToolError(summarizeError(error), name, error instanceof Error ? { cause: error } : undefined);
@@ -1345,8 +1455,72 @@ export class ToolRegistry {
     return this.tools.has(name);
   }
 
+  /**
+   * The registration options a tool was registered with, so a registry built
+   * from this one (a worker's scoped registry) keeps the tool's input
+   * projector instead of silently dropping it. Undefined for an ordinary tool.
+   */
+  registrationOptionsFor(name: string): ToolRegistrationOptions | undefined {
+    const registration = this.registrations.get(name);
+    if (!registration || registration.projector === undefined) return undefined;
+    return { inputProjection: registration.projector };
+  }
+
   /** Returns all registered tools. */
   list(): Tool[] {
     return Array.from(this.tools.values());
   }
+}
+
+/**
+ * Tells the model what the registry changed in its call (repaired arguments) and
+ * which arguments were ignored, on every execution path. A cancelled or aborted
+ * call carries no note.
+ */
+export function annotateRepairs(
+  result: { output?: string | undefined; cancelled?: boolean | undefined },
+  repairs: readonly string[],
+  unknownParameters: readonly string[],
+  signal?: AbortSignal,
+): void {
+  if (result.cancelled || signal?.aborted) return;
+  if (repairs.length > 0) {
+    const note = `[Auto-repaired: ${repairs.join(', ')}]`;
+    result.output = withRepairNote(result.output, note, repairs);
+  }
+  if (unknownParameters.length > 0) result.output = withParameterWarnings(result.output, unknownParameters);
+}
+
+/** A JSON object result gains a leading `auto_repaired` field so its parsers keep working; other results get a first line. */
+function withRepairNote(output: string | undefined, note: string, repairs: readonly string[]): string {
+  if (typeof output !== 'string') return note;
+  try {
+    const parsed: unknown = JSON.parse(output);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return JSON.stringify({ auto_repaired: [...repairs], ...parsed as Record<string, unknown> });
+    }
+  } catch {
+    // Not JSON: fall through to a text line.
+  }
+  return `${note}\n${output}`;
+}
+
+/**
+ * Tells the model which arguments were ignored. A JSON object result gains a
+ * leading `parameter_warnings` field so parsers of the result keep working;
+ * other results get a first line.
+ */
+function withParameterWarnings(output: string | undefined, warnings: readonly string[]): string {
+  if (typeof output === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(output);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return JSON.stringify({ parameter_warnings: [...warnings], ...parsed as Record<string, unknown> });
+      }
+    } catch {
+      // Not JSON: fall through to a text line.
+    }
+    return `[Ignored parameters: ${warnings.join(' ')}]\n${output}`;
+  }
+  return `[Ignored parameters: ${warnings.join(' ')}]`;
 }

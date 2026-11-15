@@ -6,7 +6,7 @@
 
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ function runText(wf: Workflow, jobName: string): string {
   return (wf.jobs[jobName]!.steps ?? []).map((s) => String(s.run ?? '')).join('\n');
 }
 
-test('release tag resolution accepts only version tags and refuses npm publication from a branch', () => {
+test('release tag resolution accepts only stable version tags and refuses npm publication from a branch', () => {
   const resolveStep = load('release.yml').jobs['verify-tag-version']!.steps!.find((step) => step.id === 'source')!;
   const root = mkdtempSync(join(tmpdir(), 'gv-release-tag-'));
   try {
@@ -35,6 +35,8 @@ test('release tag resolution accepts only version tags and refuses npm publicati
       ['main', 'main', 'false', false],
       ['v3.1.1', 'main', 'true', false],
       ['v3.1.1; exit 0', 'main', 'false', false],
+      ['v3.1.1-rc.1', 'main', 'false', false],
+      ['v3.1.1+build.5', 'main', 'false', false],
     ] as const) {
       const output = join(root, 'output');
       writeFileSync(output, '');
@@ -138,12 +140,16 @@ test('previous release resolution picks the nearest earlier version tag in histo
     git('commit', '-q', '--allow-empty', '-m', 'unreleased');
     const releaseStep = load('release.yml').jobs['verify-tag-version']!.steps!.find((step) => step.id === 'previous')!;
     const suiteStep = load('suite-release-assets.yml').jobs['previous-release']!.steps!.find((step) => step.id === 'previous')!;
+    // The completed tag's own tree may predate the resolver: the suite job runs it from a separate dispatch-ref checkout.
+    const suiteWorkspace = join(root, 'workspace');
+    mkdirSync(suiteWorkspace);
+    symlinkSync(ROOT, join(suiteWorkspace, 'tooling'));
     for (const step of [releaseStep, suiteStep]) {
       for (const [tag, expected] of [['v1.1.0', 'v1.0.0'], ['v1.0.0', ''], ['v1.2.0', 'v1.1.0']] as const) {
         const output = join(root, 'output');
         writeFileSync(output, '');
         const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', String(step.run)], {
-          cwd: root, encoding: 'utf8', env: { ...process.env, RELEASE_TAG: tag, GITHUB_OUTPUT: output },
+          cwd: root, encoding: 'utf8', env: { ...process.env, RELEASE_TAG: tag, GITHUB_OUTPUT: output, GITHUB_WORKSPACE: step === suiteStep ? suiteWorkspace : ROOT },
         });
         expect(result.status, result.stderr).toBe(0);
         // The suite workflow only runs for an existing tag; a not-yet-tagged label has no meaning there.

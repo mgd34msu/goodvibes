@@ -68,12 +68,20 @@ export function createNativeLegacyImportHost(deps: NativeLegacyImportDependencie
   const lifetime = new AbortController();
   let closed = false; let closing: Promise<void> | undefined;
   const deliveries = new Map<string, { commandJson: string; promise: Promise<NativeLegacyImportResult> }>();
+  // A bad command or an authority lost at the call instant reports through the
+  // returned promise, never as a synchronous throw. Joiners of one delivery
+  // still receive the very same promise.
   function run(input: unknown, authority: NativePairedExecutionAuthority, options: { readonly signal?: AbortSignal | undefined; readonly isAuthorized: () => boolean }): Promise<NativeLegacyImportResult> {
+    try { return begin(input, authority, options); } catch (error) {
+      return error instanceof NativeImportPrecommitError ? Promise.resolve(refusal(error.code, error.message)) : Promise.reject(error);
+    }
+  }
+  function begin(input: unknown, authority: NativePairedExecutionAuthority, options: { readonly signal?: AbortSignal | undefined; readonly isAuthorized: () => boolean }): Promise<NativeLegacyImportResult> {
     if (closed) return Promise.resolve(refusal('closed', 'Native import host is closed.'));
+    const expected = paired(authority);
     const command = workLedgerCommandSchema.parse(input);
     if (command.type !== 'import_legacy') throw new JudgmentError('invalid-request', 'Expected an exact legacy import command');
     command.manifest = validateLegacyWorkLedgerManifest(command.manifest);
-    const expected = paired(authority);
     const action = captureLegacyImportAction({ storeId, projectId: deps.projectId, principalKind: expected.kind, principalId: expected.principalId, command });
     const prior = deliveries.get(action.requestKey);
     if (prior) return prior.commandJson === action.commandJson ? prior.promise

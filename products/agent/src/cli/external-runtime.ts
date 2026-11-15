@@ -23,6 +23,8 @@ export interface CliExternalRuntimeSnapshot {
     readonly ready: boolean;
     readonly kind: 'ok' | 'auth_required' | 'connected_host_unavailable' | 'connected_host_incompatible' | 'connected_host_route_unavailable' | 'connected_host_error';
     readonly statusCode: number | null;
+    /** False when the Agent Knowledge route was never requested (host refused `/status`, or no operator token). */
+    readonly probed?: boolean;
   };
   readonly error: string | null;
 }
@@ -79,7 +81,8 @@ export async function inspectCliExternalRuntime(
       return {
         baseUrl,
         statusCode: status.status,
-        reachable: false,
+        // The host answered, so it is reachable; the status code says what it refused.
+        reachable: true,
         compatible: false,
         operatorToken: { present: Boolean(token.token), path: token.path },
         agentKnowledge: {
@@ -87,6 +90,7 @@ export async function inspectCliExternalRuntime(
           ready: false,
           kind: status.status === 401 ? 'auth_required' : 'connected_host_unavailable',
           statusCode: status.status,
+          probed: false,
         },
         error: typeof status.body === 'string' ? status.body : `HTTP ${status.status}`,
       };
@@ -104,6 +108,7 @@ export async function inspectCliExternalRuntime(
           ready: false,
           kind: 'auth_required',
           statusCode: null,
+          probed: false,
         },
         error: null,
       };
@@ -128,6 +133,7 @@ export async function inspectCliExternalRuntime(
               ? 'connected_host_route_unavailable'
               : 'connected_host_error',
         statusCode: knowledge.status,
+        probed: true,
       },
       error: knowledge.ok ? null : typeof knowledge.body === 'string' ? knowledge.body : `HTTP ${knowledge.status}`,
     };

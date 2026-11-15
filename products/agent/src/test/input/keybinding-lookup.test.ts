@@ -97,10 +97,17 @@ describe('KeybindingsManager.lookup()', () => {
     }), 'utf-8');
     try {
       const km = new KeybindingsManager({ configPath });
-      km.loadFromDisk();
-      const result = km.lookup({ logicalName: 'x', ctrl: true });
+      const notices = km.loadFromDisk();
+      const token = { logicalName: 'x', ctrl: true };
       // 'search' is the last writer (DEFAULT_KEYBINDINGS order: search after clear-cancel).
-      expect(result).toBe('search');
+      expect(km.lookup(token)).toBe('search');
+      // matches() reads the same table, so the shadowed action does not also fire for the chord.
+      expect(km.matches('search', token)).toBe(true);
+      expect(km.matches('clear-cancel', token)).toBe(false);
+      // workspace-close defaults to Ctrl+X in the Agent, so it shares the chord too.
+      expect(km.matches('workspace-close', token)).toBe(false);
+      // The user is told which action lost the chord.
+      expect(notices).toEqual(['keybindings: Ctrl+X is bound to clear-cancel and workspace-close and search; only search responds to it']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

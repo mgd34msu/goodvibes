@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveInstalledDaemonUpdateArtifact } from '../../daemon/lifecycle.js';
 import { writeNativeInstallationFixture, writeNativeReaderInstallationFixture } from '../helpers/native-runtime-provenance.js';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer, HttpListener, PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { persistProviders, loadPersistedProviders, type DiscoveredServer } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { HostedSessionManager, HostedSessionStore, HostedWorkspaceFloors, HOSTED_SESSION_WIRE_EVENT, type HostedSessionRecord, type HostedSessionUpdatePayload, type HostedWorkspaceFloor } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
@@ -11,100 +10,21 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { inboxTriage, createOwnedTriagedInboxSource, registerInboxSurface, runInboxTriage, SqliteTriageStore, type TriageReceipt } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import * as contractRuntime from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
-import { createDaemonHost, daemonHostLifecycle, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
-import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
+import { createDaemonHost, daemonHostLifecycle, type DaemonHost } from '../../runtime/daemon-host.js';
 import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, nativeReaderCapabilities, realUpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { useDaemonHostFixture } from '../helpers/daemon-host-fixture.js';
 
-let hosts: DaemonHost[];
-let restores: Array<() => void>;
-let releases: Array<() => void>;
+const { fixture, seedPlugin, keep, gate, onRelease, track, expectCloseFailure } = useDaemonHostFixture();
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-function keep<T extends { mockRestore(): void }>(spy: T): T { restores.push(() => spy.mockRestore()); return spy; }
-function gate() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((yes) => { resolve = yes; });
-  releases.push(resolve);
-  return { promise, resolve };
-}
 function settled(promise: Promise<unknown>) {
   let done = false;
   void promise.then(() => { done = true; }, () => { done = true; });
   return () => done;
-}
-beforeEach(() => {
-  hosts = []; restores = []; releases = [];
-  keep(spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]));
-  keep(spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue());
-});
-afterEach(async () => {
-  for (const release of releases) release();
-  for (const host of hosts) { try { await host.close(); } catch { /* Failure cases assert the bounded result. */ } }
-  for (const restore of restores.reverse()) restore();
-});
-
-function fixture(configure?: (runtime: RuntimeServices) => void, extra: DaemonHostFactories = {},
-  native: Pick<DaemonHostOptions, 'updateArtifact' | 'hasOverriddenHome' | 'httpListener'> = {}) {
-  const root = makeOwnedTempDir('owned-daemon-host');
-  const homeDirectory = join(root, 'home'); const workingDir = join(root, 'workspace');
-  const configDir = join(homeDirectory, '.goodvibes', 'daemon');
-  mkdirSync(configDir, { recursive: true }); mkdirSync(workingDir, { recursive: true });
-  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir, homeDir: homeDirectory });
-  configManager.set('cluster.enabled', false);
-  configManager.set('relay.enabled', false);
-  const featureFlags = createFeatureFlagManager();
-  featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-  let port = 0;
-  const serveFactory = ((options) => {
-    const server = Bun.serve(options); port = server.port!; return server;
-  }) as typeof Bun.serve;
-  const options: DaemonHostOptions = {
-    runtime: { configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), featureFlags,
-      homeDirectory, workingDir, daemonHomeDirectory: configDir,
-      inboxFactory: (context, _routing, inboxOptions) => registerInboxSurface(context, { ...inboxOptions, adapters: new Map() }),
-      localUserAuthManager: new UserAuthManager({ bootstrapFilePath: join(homeDirectory, 'users.json'), bootstrapCredentialPath: join(homeDirectory, 'bootstrap.txt'),
-        users: [{ username: 'admin', passwordHash: UserAuthManager.hashPassword('fixture'), roles: ['admin'] }] }),
-    },
-    daemon: { host: '127.0.0.1', port: 0, token: 'synthetic-host-token', serveFactory },
-    ...native,
-  };
-  const factories: DaemonHostFactories = {
-    providerDiscovery: { scan: async () => ({ servers: [], scannedHosts: 0, scannedPorts: 0, durationMs: 0 }) },
-    async createRuntime(runtimeOptions) {
-      expect(runtimeOptions.createBootOperations).toBe(createDaemonBootOperations);
-      const runtime = await createRuntimeServices(runtimeOptions);
-      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(''));
-      configure?.(runtime); return runtime;
-    }, ...extra,
-  };
-  const host = createDaemonHost(options, factories); hosts.push(host);
-  return { root, homeDirectory, workingDir, options, factories, host, get baseUrl() { return `http://127.0.0.1:${port}`; } };
-}
-
-function seedPlugin(fx: ReturnType<typeof fixture>) {
-  const directory = join(fx.workingDir, '.goodvibes', 'plugins', 'owned-host');
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'manifest.json'), JSON.stringify({ name: 'owned-host', version: '1.0.0', description: 'owned fixture' }));
-  writeFileSync(join(directory, 'index.js'), `
-    let release; const held = new Promise(resolve => { release = resolve; });
-    export function finish() { release('finished'); }
-    export function init(api) {
-      api.registerGatewayMethod({ id: 'held', title: 'Held fixture', description: 'fixture', category: 'plugins', access: 'authenticated', transport: ['internal'], scopes: [], invokable: true }, () => held);
-      api.registerChannelPlugin({ id: 'owned-host', surface: 'webhook', displayName: 'Fixture', capabilities: [], webhookPath: '/webhook/owned-host',
-        async handleInbound() { return new Response('owned configured host', { status: 202 }); } });
-    }
-  `);
-  const preferences = join(fx.homeDirectory, '.goodvibes', 'tui', 'plugins.json');
-  mkdirSync(join(preferences, '..'), { recursive: true });
-  writeFileSync(preferences, JSON.stringify({ enabled: { 'owned-host': true }, config: {}, trust: {}, quarantine: {} }));
-  return { directory, preferences };
 }
 
 test('actual configured host initializes memory, starts real boot, serves persisted plugin and retains preference on close', async () => {
@@ -219,7 +139,7 @@ test('held real notifier acquisition drains its late owner without attachment or
 test('held real plugin call keeps graph dependencies alive until its owner drains', async () => {
   const fx = fixture(); const plugin = seedPlugin(fx);
   await fx.host.start();
-  const module = await import(join(plugin.directory, 'index.js')) as { finish(): void }; releases.push(module.finish);
+  const module = await import(join(plugin.directory, 'index.js')) as { finish(): void }; onRelease(module.finish);
   const runtime = fx.host.services!;
   const call = runtime.gatewayMethods.invoke('plugin.owned-host.held', { methodId: 'plugin.owned-host.held', body: {} } as never);
   await tick();
@@ -288,7 +208,7 @@ test('independent server and listener stop failures still await graph close and 
       keep(spyOn(listener, 'stop').mockImplementation(async () => { calls.push('listener'); await stop(); throw raw; })); return listener;
     },
   });
-  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); hosts.push(host);
+  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); track(host); expectCloseFailure(host);
   await host.start(); const closing = host.close(); const done = settled(closing); await graphEntered.promise;
   expect(calls).toEqual(['listener', 'server', 'graph']); expect(done()).toBe(false);
   graphRelease.resolve(); await expect(closing).rejects.toThrow('Daemon host cleanup failed');
@@ -300,7 +220,7 @@ test('independent server and listener stop failures still await graph close and 
 test('close before start admits no graph and required inbox cannot silently default', async () => {
   const fx = fixture(); await fx.host.close(); expect(fx.host.services).toBeUndefined();
   await expect(fx.host.start()).rejects.toThrow('closed');
-  const host = createDaemonHost({ ...fx.options, runtime: { ...fx.options.runtime, inboxFactory: undefined as never } }, fx.factories); hosts.push(host);
+  const host = createDaemonHost({ ...fx.options, runtime: { ...fx.options.runtime, inboxFactory: undefined as never } }, fx.factories); track(host);
   await expect(host.start()).rejects.toThrow('runtime acquisition failed'); expect(host.services).toBeUndefined();
 });
 
@@ -319,7 +239,7 @@ test('actual server fail-fast startup retains held sibling acquisition until gra
   });
   const starting = fx.host.start(); await entered.promise;
   await expect(starting).rejects.toThrow('server startup failed');
-  const closing = fx.host.close(); const done = settled(closing); await tick();
+  expectCloseFailure(fx.host); const closing = fx.host.close(); const done = settled(closing); await tick();
   expect(graphClosed).toBe(false); expect(done()).toBe(false); expect(siblingFinished).toBe(false);
   expect(stopping).not.toHaveBeenCalled();
   release.resolve(); await expect(closing).rejects.toThrow('Daemon host cleanup failed');
@@ -340,7 +260,7 @@ test('actual server failed-start cluster rollback is owned even when subsequent 
   });
   const starting = fx.host.start(); await entered.promise;
   await expect(starting).rejects.toThrow('server startup failed');
-  const closing = fx.host.close(); const done = settled(closing); await tick();
+  expectCloseFailure(fx.host); const closing = fx.host.close(); const done = settled(closing); await tick();
   expect(graphClosed).toBe(false); expect(done()).toBe(false); expect(consumerStopped).toBe(false);
   expect(stopping).not.toHaveBeenCalled();
   release.resolve(); await expect(closing).rejects.toThrow('Daemon host cleanup failed');
@@ -358,7 +278,7 @@ test('real startup drains remain isolated between concurrent facade instances', 
   });
   const failedStart = failing.host.start(); await entered.promise;
   await expect(failedStart).rejects.toThrow('server startup failed');
-  const failedClose = failing.host.close(); const failedDone = settled(failedClose);
+  expectCloseFailure(failing.host); const failedClose = failing.host.close(); const failedDone = settled(failedClose);
   const healthy = fixture();
   expect((await healthy.host.start()).state).toBe('ready');
   await healthy.host.daemon!.waitForRestart();
@@ -380,7 +300,7 @@ test('synchronous borrowed startup throw retains all admitted children without r
   });
   const starting = fx.host.start(); await entered.promise;
   await expect(starting).rejects.toThrow('server startup failed');
-  const closing = fx.host.close(); const done = settled(closing);
+  expectCloseFailure(fx.host); const closing = fx.host.close(); const done = settled(closing);
   await tick();
   expect(done()).toBe(false); expect(graphClosed).toBe(false); expect(rawTouched).toBe(false);
   release.resolve(); await expect(closing).rejects.toThrow('cleanup failed');
@@ -400,7 +320,7 @@ test('settled first rollback rejection remains visible to the barrier without ra
     }));
   });
   await expect(fx.host.start()).rejects.toThrow('server startup failed');
-  await expect(fx.host.close()).rejects.toThrow('cleanup failed');
+  expectCloseFailure(fx.host); await expect(fx.host.close()).rejects.toThrow('cleanup failed');
   const result = await fx.host.daemon!.waitForRestart().catch((error: unknown) => error) as AggregateError;
   expect(result.errors.map((error: Error) => error.message)).toEqual([
     'Daemon approval broker startup operation failed', 'Daemon cluster rollback startup operation failed',
@@ -411,9 +331,9 @@ test('settled first rollback rejection remains visible to the barrier without ra
 
 test('close immediately fences both real config restart watchers while an admitted plugin call drains', async () => {
   const fx = fixture(); const plugin = seedPlugin(fx);
-  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); hosts.push(host);
+  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); track(host);
   await host.start();
-  const module = await import(join(plugin.directory, 'index.js')) as { finish(): void }; releases.push(module.finish);
+  const module = await import(join(plugin.directory, 'index.js')) as { finish(): void }; onRelease(module.finish);
   const runtime = host.services!;
   const call = runtime.gatewayMethods.invoke('plugin.owned-host.held', { methodId: 'plugin.owned-host.held', body: {} } as never);
   await tick();
@@ -458,12 +378,14 @@ test('close fences the start and dirty cycle of a config restart waiting in nati
   await tick(); expect(done()).toBe(false); expect(close).not.toHaveBeenCalled();
   release.resolve(); await closing;
   expect(start).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledTimes(1);
-  expect(binding).toHaveBeenCalledTimes(1); expect(daemon.isRunning).toBe(false);
+  // The changed address was bound before the old listener was released (that is the pending stop); the queued
+  // change after it never binds a third time.
+  expect(binding).toHaveBeenCalledTimes(2); expect(daemon.isRunning).toBe(false);
 });
 
 test('one borrowed restart fence failure cannot skip the other fence or accepted owner drainage', async () => {
   const fx = fixture();
-  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); hosts.push(host);
+  const host = createDaemonHost({ ...fx.options, httpListener: { host: '127.0.0.1', port: 0 } }, fx.factories); track(host); expectCloseFailure(host);
   await host.start();
   const raw = { get message(): never { throw new Error('untrusted rejection inspected'); } };
   keep(spyOn(host.daemon!, 'fenceRestartAdmission').mockImplementation(() => { throw raw; }));
@@ -515,7 +437,7 @@ test('host preloads only its selected home/surface cache before real server and 
       choices: [{ index: 0, delta: { role: 'assistant', content: 'owned cached route' }, finish_reason: 'stop' }] };
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
   } });
-  releases.push(() => { model.stop(true); });
+  onRelease(() => { model.stop(true); });
   const cached = { ...cachedServer(), port: model.port!, baseURL: `http://127.0.0.1:${model.port}/v1` };
   const floors: HostedWorkspaceFloor[] = [];
   let constructed = false;
@@ -907,7 +829,7 @@ test('held background scan does not block serving; discoveries reach HTTP and ne
   expect(loadPersistedProviders({ homeDirectory: fx.homeDirectory, surfaceRoot: 'daemon' })).toEqual([]);
   await fx.host.close();
   const restart = createDaemonHost(fx.options, { ...fx.factories,
-    providerDiscovery: { scan: async () => scanResult([]) } }); hosts.push(restart);
+    providerDiscovery: { scan: async () => scanResult([]) } }); track(restart);
   await restart.start();
   expect(restart.services!.providerRegistry.listDiscoveredServers()).toEqual([discovered]);
 });
@@ -925,6 +847,14 @@ test.each(['empty', 'failure'] as const)('background %s preserves cached provide
   await fx.host.start(); await attempted.promise; await tick();
   expect(fx.host.services!.providerRegistry.listDiscoveredServers()).toEqual([cachedServer()]);
   expect(readFileSync(path, 'utf8')).toBe(before); expect(writes).toBe(0); expect(touched).toBe(false);
+});
+
+test('a cached server on another machine is not registered at startup', async () => {
+  const fx = fixture(undefined, { providerDiscovery: { scan: async () => scanResult([]) } });
+  const remote = { ...cachedServer('remote-model', 'remote-fixture'), host: '192.168.1.20', baseURL: 'http://192.168.1.20:9/v1' };
+  seedCache(fx.homeDirectory, [cachedServer(), remote]);
+  await fx.host.start(); await tick();
+  expect(fx.host.services!.providerRegistry.listDiscoveredServers()).toEqual([cachedServer()]);
 });
 
 test('background discovery preserves custom provider precedence and selected model', async () => {
@@ -1121,6 +1051,19 @@ for (const finish of ['drain', 'cancel'] as const) test(`host retains and ${fini
   }
 });
 
+test('a promotion handover whose preparation was refused never stopped the runtime, so the host finishes starting', async () => {
+  const fx = fixture(undefined, { createServer(config) {
+    const server = new DaemonServer(config);
+    keep(spyOn(server, 'completeHostStartup').mockImplementation(() => Object.freeze({
+      state: 'handover' as const, drain: Promise.resolve(), cancel() {}, resumed: () => true,
+    })));
+    return server;
+  } });
+  const started = await fx.host.start();
+  expect(started.state).toBe('ready');
+  await fx.host.close();
+});
+
 test('synchronous close during native activation cannot publish ready afterward', async () => {
   let closing: Promise<void> | undefined;
   const fx = fixture(undefined, { createServer(config) {
@@ -1169,7 +1112,7 @@ for (const finish of ['ready', 'failed'] as const) test(`native host ${finish} r
 
 // These inert Linux cohorts exercise systemd adoption; actual launchd handover
 // has its own native macOS acceptance path.
-for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-restart'] as const) (process.platform === 'linux' ? test : test.skip)(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
+for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-restart'] as const) if (process.platform === 'linux') test(`configured native recovery ${ending} owns facade handover before ordinary host cleanup`, async () => {
   const rollbackFailures: unknown[] = [];
   const logError = logger.error.bind(logger);
   keep(spyOn(logger, 'error').mockImplementation((message, details) => {
@@ -1192,11 +1135,14 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
   expect(artifact).toBeDefined(); if (!artifact) throw new Error('Native recovery fixture admission missing');
   const entered = gate(); const release = gate(); let bootStarts = 0; let graphCloses = 0; let installs = 0;
   const failedSecondary = ending === 'failed-secondary' || ending === 'failed-secondary-restart';
-  // Admit an actual supported adoption path. Its install boundary deliberately
-  // refuses only AFTER the owned runtime drain, without invoking systemctl.
+  // Admit an actual supported adoption path. The unit install, manager probe and reload run
+  // BEFORE the runtime stops; the injected runner refuses only the final enable, which runs
+  // AFTER the owned runtime drain, so no real systemctl is ever invoked.
   keep(spyOn(PlatformServiceManager.prototype, 'status').mockReturnValue({ platform: 'systemd', serviceName: 'fixture', path: '',
     installed: false, autostart: false, running: false, commandPreview: '', suggestedCommands: [] }));
-  keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; throw new Error('Synthetic post-drain service installation refusal'); }));
+  keep(spyOn(PlatformServiceManager.prototype, 'install').mockImplementation(() => { installs++; return {} as ReturnType<PlatformServiceManager['install']>; }));
+  const serviceCommandRunner: NonNullable<NonNullable<ConstructorParameters<typeof DaemonServer>[0]>['serviceCommandRunner']> = async (argv) => argv.includes('enable')
+    ? { status: 'failed', detail: 'Synthetic post-drain service installation refusal' } : { status: 'accepted' };
   const fx = fixture((runtime) => {
     // This native fixture owns daemon+driver only. The source-development
     // default static directory is a separate deployment, not its suite WebUI.
@@ -1208,7 +1154,7 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
     keep(spyOn(runtime, 'close').mockImplementation(async () => { graphCloses++; await close(); }));
     const startBoot = runtime.bootTasks!.start;
     keep(spyOn(runtime.bootTasks!, 'start').mockImplementation(() => { bootStarts++; return startBoot(); }));
-  }, {}, { updateArtifact: artifact, hasOverriddenHome: false,
+  }, { createServer: (config) => new DaemonServer({ ...config, serviceCommandRunner }) }, { updateArtifact: artifact, hasOverriddenHome: false,
     ...(failedSecondary ? { httpListener: { host: '127.0.0.1', port: 0, token: 'synthetic-secondary' } } : {}),
   });
   if (ending === 'failed-secondary') {
@@ -1241,6 +1187,7 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
   if (ending === 'drain') { expect(outcome.state).toBe('handover'); expect(graphCloses).toBe(1); }
   if (failedSecondary) {
     expect(graphCloses).toBe(1);
+    expectCloseFailure(fx.host);
     await expect(fx.host.close()).rejects.toBeInstanceOf(AggregateError);
   } else await (closing ?? fx.host.close());
   for (const [index, target] of native.targets.entries()) expect(readFileSync(target.path)).toEqual(readFileSync(previous.targets[index]!.path));
@@ -1254,7 +1201,8 @@ for (const ending of ['drain', 'cancel', 'failed-secondary', 'failed-secondary-r
     expect(receipts).not.toContain('private secondary restart failure');
     expect(receipts).not.toContain('incomplete (unsupported)');
   }
-  expect(installs).toBe(ending === 'drain' ? 1 : 0); expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
+  // The unit is installed before the runtime stops, whatever ends the handover afterwards.
+  expect(installs).toBe(1); expect(bootStarts).toBe(0); expect(graphCloses).toBe(1);
   expect(fx.host.snapshot().state).toBe(failedSecondary ? 'failed' : 'closed');
 });
 

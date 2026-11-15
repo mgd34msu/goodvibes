@@ -10,6 +10,13 @@
  *
  * In managed mode, out-of-policy tokens are blocked from use.
  * In advisory mode, violations are reported but not blocked.
+ *
+ * The auditor only knows the tokens and policies a caller registers with it.
+ * No runtime service registers any today, and every service constructs it with
+ * `managed: false`, so in a running product it audits nothing and blocks
+ * nothing: an empty report means "nothing was registered", not "every
+ * credential passed". Blocking exists only for a caller that registers tokens
+ * and opts into managed mode itself.
  */
 
 import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadMap } from './read-source.js';

@@ -96,5 +96,4 @@ export function loggedReadings(entries: readonly DecisionEntry[]): LoggedReading
   return entries.flatMap(readingsOfEntry);
 }
 
-/** A group key's label for a value the call did not name. */
-export const UNNAMED = '(none)';
+export { UNNAMED } from './unnamed.js';

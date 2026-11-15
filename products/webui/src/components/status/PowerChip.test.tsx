@@ -1,7 +1,8 @@
 /**
  * PowerChip, the always-visible "sleep disabled" chip. Covers both states:
- * absent (no keep-awake hold) and visible (keep-awake held, danger idiom,
- * honest lid-split note verbatim in the tooltip when served).
+ * absent (no keep-awake hold) and visible (keep-awake held, rendered as the
+ * `--power` segment whose danger colours live in status.css, honest lid-split
+ * note verbatim in the tooltip when served).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
@@ -58,7 +59,7 @@ describe('PowerChip', () => {
     expect(el.querySelector('.status-strip__segment--power')).toBeNull();
   });
 
-  test('renders the danger-idiom chip when keepAwake is held', () => {
+  test('renders the labelled power segment (the hook the danger styling targets) when keepAwake is held', () => {
     mockData = {
       platform: 'linux',
       work: { held: false, grantedClasses: [], deniedClasses: [], reasons: [], heldSince: null, capMinutes: 0, capExpiresAt: null, capExpired: false },
@@ -68,6 +69,8 @@ describe('PowerChip', () => {
     cleanup = unmount;
     const chip = el.querySelector('.status-strip__segment--power');
     expect(chip).not.toBeNull();
+    expect(chip?.querySelector('.status-strip__label')?.textContent).toBe('Sleep disabled');
+    expect(chip?.querySelector('.status-strip__icon')).not.toBeNull();
   });
 
   test('the honest lid-split note renders verbatim in the tooltip when served', () => {

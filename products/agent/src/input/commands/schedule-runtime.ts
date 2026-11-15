@@ -11,19 +11,12 @@ import {
   formatReminderScheduleSuccess,
 } from '../../agent/reminder-schedule-format.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
-import {
-  buildRoutineSchedulePreview,
-  promoteRoutineToConnectedSchedule,
-  resolveAgentConnectedHostConnection,
-} from '../../agent/routine-schedule-promotion.ts';
+import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { parseRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-args.ts';
 import {
   formatRoutineScheduleCorrelation,
-  formatRoutineScheduleFailure,
-  formatRoutineSchedulePreview,
   formatRoutineScheduleReceipt,
   formatRoutineScheduleReceipts,
-  formatRoutineScheduleSuccess,
 } from '../../agent/routine-schedule-format.ts';
 import {
   fetchLiveSchedules,
@@ -46,6 +39,7 @@ import {
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { executeConfirmedOperatorAction } from './operator-actions-runtime.ts';
+import { runRoutineSchedulePromotion } from './routines-runtime.ts';
 
 function formatNextRun(nextRunAt?: number): string {
   return nextRunAt ? new Date(nextRunAt).toLocaleString() : 'n/a';
@@ -81,11 +75,14 @@ async function printScheduleList(ctx: CommandContext): Promise<void> {
   const latestByJob = latestRunPerJob(runsSince.runs);
 
   const lines = ['Connected-host schedules', ''];
+  // An empty run list from a host that did not answer is not "nothing failed".
+  if (runsSince.unavailable) lines.push(`  Could not check recent run outcomes (failed or missed runs are not shown): ${runsSince.unavailable}`, '');
   for (const schedule of fetched.schedules) {
     const status = schedule.enabled === false ? '○ paused  ' : '● enabled ';
     const next = formatNextRun(schedule.nextRunAt);
     const last = schedule.lastRunAt ? new Date(schedule.lastRunAt).toLocaleString() : 'never';
-    lines.push(`  ${schedule.id.slice(0, 12)}  ${status} runs ${schedule.runCount ?? 0}  next ${next}  last ${last}`);
+    // The whole id: the host matches schedule ids exactly, so a cut id cannot drive the verbs below.
+    lines.push(`  ${schedule.id}  ${status} runs ${schedule.runCount ?? 0}  next ${next}  last ${last}`);
     const cadence = schedule.scheduleKind
       ? `${schedule.scheduleKind} ${schedule.scheduleValue ?? ''}${schedule.timezone ? ` [${schedule.timezone}]` : ''}`.trim()
       : 'n/a';
@@ -126,15 +123,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
     ctx.print(`Unknown Agent routine ${parsed.routineId ?? ''}`);
     return;
   }
-  const preview = buildRoutineSchedulePreview(routine, parsed);
-  if (!parsed.yes) {
-    ctx.print(formatRoutineSchedulePreview(preview));
-    return;
-  }
-  const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
-  const result = await promoteRoutineToConnectedSchedule(connection, preview);
-  const receipt = RoutineScheduleReceiptStore.fromShellPaths(shellPaths).append(connection, preview, result);
-  ctx.print(result.ok ? `${formatRoutineScheduleSuccess(result)}\n  receipt: ${receipt.id}` : `${formatRoutineScheduleFailure(result)}\n  receipt: ${receipt.id}`);
+  await runRoutineSchedulePromotion(ctx, routine, parsed);
 }
 
 async function createReminder(args: readonly string[], ctx: CommandContext): Promise<void> {

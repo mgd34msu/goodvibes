@@ -1,10 +1,25 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { SelectionAction, SelectionItem } from '../selection-modal.ts';
 import { requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+
+const SERVICE_AUTH_TYPES = new Set(['bearer', 'basic', 'api-key', 'oauth']);
+
+/** Why `parsed` cannot be a services.json: a name-to-service object whose entries each name an auth type and a token key. */
+function servicesImportProblems(parsed: unknown): string[] {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return ['expected an object keyed by service name'];
+  const problems: string[] = [];
+  for (const [name, value] of Object.entries(parsed)) {
+    const service = value as { authType?: unknown; tokenKey?: unknown } | null;
+    if (typeof service !== 'object' || service === null) problems.push(`"${name}" is not an object`);
+    else if (typeof service.authType !== 'string' || !SERVICE_AUTH_TYPES.has(service.authType)) problems.push(`"${name}" has no valid authType`);
+    else if (typeof service.tokenKey !== 'string') problems.push(`"${name}" has no tokenKey`);
+  }
+  return problems;
+}
 
 export function registerServicesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -22,6 +37,11 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
       const svcRegistry = requireServiceRegistry(ctx);
       const all = svcRegistry.getAll();
       const keys = Object.keys(all);
+      const unreadable = svcRegistry.unreadableReason?.() ?? null;
+      if (unreadable && sub !== 'export' && sub !== 'import') {
+        ctx.print(`Service list unusable: ${unreadable}. Fix or remove the file; services cannot be listed or inspected until then.`);
+        return;
+      }
       if (sub === 'inspect') {
         const name = args[1];
         if (!name) {
@@ -160,10 +180,29 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         }
         const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
         try {
-          const parsed = JSON.parse(readFileSync(sourcePath, 'utf-8')) as Record<string, unknown>;
+          const parsed: unknown = JSON.parse(readFileSync(sourcePath, 'utf-8'));
+          const problems = servicesImportProblems(parsed);
+          if (problems.length > 0) {
+            ctx.print(`Services import refused: ${sourcePath} is not a services config (${problems.slice(0, 3).join('; ')}). Nothing was changed.`);
+            return;
+          }
+          const incoming = parsed as Record<string, unknown>;
           const targetPath = shellPaths.resolveProjectPath('tui', 'services.json');
-          atomicWriteFileSync(targetPath, JSON.stringify(parsed, null, 2) + '\n', { mkdirp: true });
-          ctx.print(`Imported services config from ${sourcePath}`);
+          let backup: string | undefined;
+          if (existsSync(targetPath)) {
+            backup = `${targetPath}.bak`;
+            copyFileSync(targetPath, backup);
+          }
+          atomicWriteFileSync(targetPath, JSON.stringify(incoming, null, 2) + '\n', { mkdirp: true });
+          const incomingKeys = Object.keys(incoming);
+          const replaced = incomingKeys.filter((key) => keys.includes(key));
+          const dropped = keys.filter((key) => !incomingKeys.includes(key));
+          ctx.print([
+            `Imported services config from ${sourcePath}: ${incomingKeys.length} service(s); this replaces the whole services file.`,
+            `  replaced: ${replaced.join(', ') || '(none)'}`,
+            `  no longer configured: ${dropped.join(', ') || '(none)'}`,
+            backup ? `  previous file kept at ${backup}` : '  there was no previous file',
+          ].join('\n'));
         } catch (error) {
           ctx.print(`Failed to import services config: ${summarizeError(error)}`);
         }

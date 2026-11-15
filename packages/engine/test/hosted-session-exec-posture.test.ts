@@ -50,7 +50,7 @@ beforeEach(() => {
     modelDiscovery: 'skip',
   });
   readings = installHostedSessionReadings({
-    tools: [['tmux send-keys -t main', { foreignTerminal: true }]],
+    tools: [],
     gate: EXEC_GATE_TABLE,
   });
 });
@@ -100,7 +100,6 @@ test('a hosted session with NO posture stated is contained: an uncontained comma
   expect(outcome.stderr).toContain('requires commands to run inside the exec boundary');
   expect(outcome.stderr).toContain('daemon-hosted conversational turn');
   expect(outcome.stdout).not.toContain('reached-the-host');
-  expect(readings.requests.filter(request => request.context?.battery === 'engine.tools.owner-terminal')).toEqual([]);
   session.dispose();
 });
 
@@ -138,7 +137,6 @@ test('terminal commands follow the explicit containment posture without another 
       expect(outcome.success).toBe(posture === 'workstream');
       if (posture === 'workstream') expect(outcome.stdout).toContain('fixture-tmux:');
       else expect(outcome.stderr).toContain('requires commands to run inside the exec boundary');
-      expect(readings.requests.some(request => request.context?.battery === 'engine.tools.owner-terminal')).toBe(false);
     } finally { session.dispose(); }
   }
 });

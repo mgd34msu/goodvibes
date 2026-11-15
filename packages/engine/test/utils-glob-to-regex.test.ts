@@ -8,18 +8,26 @@ describe('globToRegex', () => {
     expect(re.test('bar.ts')).toBe(false);
   });
 
-  test('* matches filename characters but not slashes', () => {
+  test('a lone * stays inside one path segment', () => {
     const re = globToRegex('*.ts');
     expect(re.test('foo.ts')).toBe(true);
     expect(re.test('bar.ts')).toBe(true);
     expect(re.test('src/foo.ts')).toBe(true); // (^|/) prefix means it matches segment
     expect(re.test('foo.tsx')).toBe(false);
+    // Between literal segments, * never crosses a slash.
+    expect(globToRegex('src/*.ts').test('src/a.ts')).toBe(true);
+    expect(globToRegex('src/*.ts').test('src/a/b.ts')).toBe(false);
+    expect(globToRegex('a*b').test('a/b')).toBe(false);
+    expect(globToRegex('a*b').test('axxb')).toBe(true);
   });
 
-  test('** without slash matches deep paths via .+ wildcard', () => {
-    const re = globToRegex('src/**');
-    // '**' (without preceding slash) expands to .+, matches any chars
-    expect(re.test('src/deep/path/file.ts')).toBe(true);
+  test('**/ is an optional directory prefix: zero or more directories', () => {
+    const re = globToRegex('src/**/x.ts');
+    expect(re.test('src/x.ts')).toBe(true);
+    expect(re.test('src/a/x.ts')).toBe(true);
+    expect(re.test('src/a/b/x.ts')).toBe(true);
+    expect(re.test('src/xx.ts')).toBe(false);
+    expect(re.test('lib/x.ts')).toBe(false);
   });
 
   test('* glob matches files in nested dirs via (^|/) anchor', () => {

@@ -15,6 +15,7 @@ import type { PluginLoaderDeps } from '../../plugins/loader.js';
 import type { LoadedPlugin } from '../../plugins/loader.js';
 import type { PluginHealthCheckResult, PluginManifestV2 } from './types.js';
 import type { PluginLifecycleManager } from './manager.js';
+import { isReloadable } from './lifecycle.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS } from '../../plugins/in-flight.js';
 
@@ -87,6 +88,14 @@ async function defaultHealthCheck(name: string): Promise<PluginHealthCheckResult
   };
 }
 
+let lastCacheBust = 0;
+
+/** Strictly increasing, so two reloads inside one millisecond never share an import URL and reuse the module the first one cached. */
+function nextCacheBust(): number {
+  lastCacheBust = Math.max(Date.now(), lastCacheBust + 1);
+  return lastCacheBust;
+}
+
 /**
  * runHotReload, Execute the safe 6-phase hot-reload protocol for a single
  * plugin.
@@ -122,6 +131,16 @@ export async function runHotReload(
     };
   }
 
+  // A plugin that is disabled, loading or unloading has no running instance to swap: reloading it
+  // would "reload" something that is not there.
+  if (!isReloadable(record.state)) {
+    return failure(
+      'quiesce',
+      `Plugin '${name}' is in state '${record.state}' and cannot be hot-reloaded (reloadable states: active, loaded, degraded, error)`,
+      startTs,
+    );
+  }
+
   const tracker = deps.inFlight;
   if (!tracker) {
     return failure(
@@ -131,11 +150,19 @@ export async function runHotReload(
     );
   }
   const quiesceTimeoutMs = options.quiesceTimeoutMs ?? DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS;
-  const mutableRecord = record as { reloading: boolean };
   /** Accept calls again and clear the reloading flag (every exit path). */
   const endReload = (): void => {
     tracker.resume(name);
-    mutableRecord.reloading = false;
+    lcm.setReloading(name, false);
+  };
+  /**
+   * The old instance is gone and no new one is serving: the record must say so, not keep showing an
+   * active plugin that does not exist.
+   */
+  const failAfterUnload = (phase: 'unload' | 'reload', error: string): HotReloadResult => {
+    endReload();
+    lcm.recordError(name, `Hot-reload failed in the ${phase} phase: ${error}`, true);
+    return failure(phase, error, startTs);
   };
 
   logger.info(`[plugin-hot-reload] ${name}: starting hot-reload`);
@@ -144,7 +171,7 @@ export async function runHotReload(
   // Mark the plugin as reloading, refuse new calls into it (commands, tools,
   // gateway methods and event hooks it registered), and wait for the calls
   // already running to finish, bounded by quiesceTimeoutMs.
-  mutableRecord.reloading = true;
+  lcm.setReloading(name, true);
   const drain = await tracker.quiesce(name, quiesceTimeoutMs);
   if (!drain.drained) {
     endReload();
@@ -171,8 +198,7 @@ export async function runHotReload(
     options.removeLoadedPlugin(name);
     logger.debug(`[plugin-hot-reload] ${name}: phase 3/6 unloaded`);
   } catch (err) {
-    endReload();
-    return failure('unload', summarizeError(err), startTs);
+    return failAfterUnload('unload', summarizeError(err));
   }
 
   // ── Phase 4 + 5: Reload + Re-register ──────────────────────────────────
@@ -180,21 +206,22 @@ export async function runHotReload(
   let reloadedPlugin: import('../../plugins/loader.js').LoadedPlugin | null = null;
   try {
     const { loadPlugin } = await import('../../plugins/loader.js');
-    const cacheBust = Date.now();
+    const cacheBust = nextCacheBust();
     reloadedPlugin = await loadPlugin({ manifest, pluginDir }, deps, cacheBust);
     if (!reloadedPlugin) {
-      endReload();
-      return failure('reload', 'loadPlugin returned null', startTs);
+      return failAfterUnload('reload', 'loadPlugin returned null');
     }
     options.storeLoadedPlugin(name, reloadedPlugin);
     logger.debug(`[plugin-hot-reload] ${name}: phases 4+5/6 reloaded + re-registered`);
   } catch (err) {
-    endReload();
-    return failure('reload', summarizeError(err), startTs);
+    return failAfterUnload('reload', summarizeError(err));
   }
   // The new instance is registered: calls into it are accepted from here on,
   // so the health check can exercise it.
   tracker.resume(name);
+  // A plugin left in `error` by a failed earlier reload (or `degraded`) is running again: record it
+  // before the health check so a failing check can degrade it and a passing one leaves it active.
+  lcm.recordReloaded(name);
 
   // ── Phase 6: Health check ────────────────────────────────────────────────
   let healthResult: PluginHealthCheckResult;

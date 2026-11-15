@@ -39,10 +39,17 @@ const cleanups: (() => void)[] = [];
 beforeEach(async () => {
   await tokenStore.setToken("owned-synthetic-browser-execution-token");
 });
+// Fake-handler checks are recorded, not thrown: a throw inside the fake would surface as an
+// error from the client under test and be indistinguishable from the refusal being asserted.
+const mismatches: string[] = [];
+function agree(actual: unknown, expected: unknown, what: string): void {
+  if (!Bun.deepEquals(actual, expected)) mismatches.push(what);
+}
 afterEach(async () => {
   for (const close of cleanups.splice(0)) close();
   globalThis.fetch = originalFetch;
   await tokenStore.clearToken();
+  expect(mismatches.splice(0)).toEqual([]);
 });
 function harness() {
   let original: NativeIntakeBrowserRecord | null = null;
@@ -64,7 +71,13 @@ function harness() {
       original = structuredClone(record);
     },
     async confirm(record) {
-      expect(record).toEqual(original!);
+      agree(record, original, "original journal confirm");
+    },
+    async remove() {
+      original = null;
+    },
+    async unreadable() {
+      return 0;
     },
   };
   const executionJournal: NativeExecutionBrowserJournal = {
@@ -76,7 +89,10 @@ function harness() {
       target = structuredClone(record);
     },
     async confirm(record) {
-      expect(record).toEqual(target!);
+      agree(record, target, "execution journal confirm");
+    },
+    async remove() {
+      target = null;
     },
   };
   const reply = (wire: Wire) =>
@@ -95,8 +111,8 @@ function harness() {
     if (path === "/api/work-ledger/project")
       return reply({ ...fixture.project, body: projectBody });
     if (path === "/api/work-ledger/intake/capture") {
-      expect(body).toEqual(fixture.input);
-      expect(original?.command).toEqual(fixture.input);
+      agree(body, fixture.input, "capture body");
+      agree(original?.command, fixture.input, "original saved before capture");
       phase = "getCaptured";
       return reply(fixture.capture);
     }
@@ -106,7 +122,7 @@ function harness() {
     }
     if (path === "/api/work-ledger/intake/get") return reply(fixture[phase]);
     if (path.startsWith("/api/work-ledger/execution/")) {
-      expect(body).toEqual(fixture.identity);
+      agree(body, fixture.identity, `${path} body`);
       if (path.endsWith("/status")) {
         if (brokenStatus)
           return new Response(
@@ -116,11 +132,15 @@ function harness() {
         return reply(started ? fixture.status : fixture.notStarted);
       }
       if (path.endsWith("/start")) {
-        expect(target?.target).toEqual({
-          workId: fixture.identity.workId,
-          attemptId: fixture.identity.attemptId,
-          expectedRevision: fixture.identity.expectedRevision,
-        });
+        agree(
+          target?.target,
+          {
+            workId: fixture.identity.workId,
+            attemptId: fixture.identity.attemptId,
+            expectedRevision: fixture.identity.expectedRevision,
+          },
+          "target retained before start"
+        );
         started = true;
         if (loseStart) {
           loseStart = false;
@@ -203,7 +223,13 @@ for (const change of ["fleet", "owner", "project", "shared", "user", "admin"] as
     if (change === "shared") h.auth({ principalId: "shared-token" });
     if (change === "user") h.auth({ principalKind: "user" });
     if (change === "admin") h.auth({ admin: false });
-    await expect(session.execution.request(h.original())).rejects.toThrow();
+    await expect(session.execution.request(h.original())).rejects.toThrow(
+      change === "owner" || change === "project"
+        ? "native project or paired owner changed"
+        : change === "fleet"
+          ? "Native execution requires current paired admin authority"
+          : "Native requests require an existing paired admin"
+    );
     expect(starts(h)).toHaveLength(0);
   });
 
@@ -228,7 +254,9 @@ test("unknown HTTP status and target storage failures never become native start"
     const h = harness();
     const session = await admit(h);
     h[fault]();
-    await expect(session.execution.request(h.original())).rejects.toThrow();
+    await expect(session.execution.request(h.original())).rejects.toThrow(
+      fault === "brokenStatus" ? "Native execution outcome is unknown or unavailable" : "Execution journal unavailable"
+    );
     expect(starts(h)).toHaveLength(0);
   }
 });

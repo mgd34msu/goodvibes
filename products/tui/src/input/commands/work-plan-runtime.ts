@@ -75,7 +75,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
     name: 'work-plan',
     aliases: ['wp', 'todo', 'workplan'],
     description: 'Track a persistent workspace-scoped work plan',
-    usage: '[panel|list|show|export|add <title> [--owner name] [--source label] [--notes text]|edit <id> [<new title>] [--owner name] [--notes text]|done <id>|start <id>|block <id>|fail <id>|cancel <id>|pending <id>|remove <id>|clear-done]',
+    usage: '[panel|list|show|export|add <title> [--owner name] [--source label] [--notes text]|edit <id> [<new title>] [--owner name] [--source label] [--notes text]|cycle <id>|done <id>|start <id>|block <id>|fail <id>|cancel <id>|pending <id>|remove <id>|clear-done]',
     argsHint: '[panel|add|list|done]',
     handler(args, ctx) {
       const store = getStore(ctx);

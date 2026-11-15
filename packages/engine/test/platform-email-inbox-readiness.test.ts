@@ -12,7 +12,7 @@ function fixture(surface: boolean, overrides: Record<string, unknown> = {}) {
     'surfaces.email.imapPort': 993, ...overrides,
   } : {
     'email.enabled': true, 'email.imapHost': 'imap.fixture.invalid', 'email.imapPort': 993,
-    'email.username': 'owner@fixture.invalid', 'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_PASSWORD',
+    'email.username': 'owner@fixture.invalid', 'email.passwordRef': 'goodvibes://secrets/goodvibes/SYNTHETIC_MAIL_PASSWORD',
     ...overrides,
   };
   const owner = new EmailReplySubjectSourceOwner();

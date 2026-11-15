@@ -44,6 +44,8 @@ import type {
 
 /** How many peers are retained for /status before the oldest is dropped. */
 const MAX_TRACKED_PEERS = 64;
+/** How far before its newest accepted datagram a peer's stamp may fall before the datagram is treated as an old capture. */
+const REPLAY_TOLERANCE_MS = 60_000;
 
 export interface ClusterElectionOptions {
   readonly nodeId: string;
@@ -72,6 +74,8 @@ export class ClusterElection {
   private readonly timing: ClusterTiming;
   private readonly ledger: ClusterHoldingsLedger;
   private readonly elections = new Map<string, SurfaceElection>();
+  /** Elections removed from `elections` whose ordered stand-down is still running. */
+  private readonly retirements = new Map<string, Promise<void>>();
   private readonly peers = new Map<string, TrackedPeer>();
   private readonly host: SurfaceElectionHost;
   private readonly wireVersion: string;
@@ -146,6 +150,12 @@ export class ClusterElection {
     this.lastTickMono = this.startMonotonic ?? 0;
     try {
       await this.options.transport.start((raw) => this.receive(raw));
+      if (!this.running) {
+        // stop() ran while the socket was opening and could not close what was
+        // not open yet; close it now rather than leave it bound.
+        await this.options.transport.stop();
+        return;
+      }
       this.armWatchdog();
       this.unsubscribeRegistry = this.options.registry.onChange((surfaceId) => {
         return this.syncSurface(surfaceId);
@@ -177,7 +187,10 @@ export class ClusterElection {
     this.unsubscribeRegistry = null;
     this.cancelWatchdog?.();
     this.cancelWatchdog = null;
-    await Promise.all([...this.elections.values()].map((election) => election.stop(reason)));
+    await Promise.all([
+      ...[...this.elections.values()].map((election) => election.stop(reason)),
+      ...this.retirements.values(),
+    ]);
     this.elections.clear();
     await this.options.transport.stop();
   }
@@ -210,6 +223,7 @@ export class ClusterElection {
     const held = surfaces.filter((surface) => surface.role === 'master');
     return {
       enabled: this.options.settings.enabled,
+      coordination: 'elected',
       role: this.aggregateRole(surfaces),
       nodeId: this.options.nodeId,
       version: this.options.version,
@@ -232,6 +246,9 @@ export class ClusterElection {
   private aggregateRole(surfaces: readonly ClusterSurfaceStatus[]): ClusterRole {
     if (!this.running) return 'stopped';
     if (surfaces.some((surface) => surface.role === 'master')) return 'master';
+    // Ahead of `electing`: a fenced surface will not move on by itself, and
+    // reading it as "between roles" would have an operator wait for nothing.
+    if (surfaces.some((surface) => surface.role === 'fenced')) return 'fenced';
     if (surfaces.length === 0) return 'standby';
     return surfaces.some((surface) => surface.role !== 'standby') ? 'electing' : 'standby';
   }
@@ -270,6 +287,14 @@ export class ClusterElection {
     const registered = this.options.registry.get(surfaceId);
     const existing = this.elections.get(surfaceId);
     if (registered && !existing) {
+      // A surface registered again while its previous election is still
+      // standing down waits for that RESIGN, so one node never runs two
+      // elections, and never two consumers, for the same surface.
+      const retiring = this.retirements.get(surfaceId);
+      if (retiring) {
+        await retiring;
+        return this.syncSurface(surfaceId);
+      }
       const election = new SurfaceElection({
         surfaceId,
         label: registered.label,
@@ -281,17 +306,34 @@ export class ClusterElection {
       await election.start();
       return;
     }
+    if (registered && existing && this.options.registry.hasUnstartedConsumers(surfaceId)) {
+      existing.startAddedConsumers();
+      return;
+    }
     if (!registered && existing) {
       this.elections.delete(surfaceId);
-      await existing.stop('this node can no longer serve the surface');
-      // Only now is the consumer genuinely finished with; the registry kept it
-      // reachable so the stop that precedes the RESIGN had something to stop.
-      this.options.registry.forget(surfaceId);
+      const retirement = existing.stop('this node can no longer serve the surface').then(() => {
+        // Only now is the consumer genuinely finished with; the registry kept
+        // it reachable so the stop that precedes the RESIGN had something to stop.
+        this.options.registry.forget(surfaceId);
+      }).finally(() => {
+        if (this.retirements.get(surfaceId) === retirement) this.retirements.delete(surfaceId);
+      });
+      this.retirements.set(surfaceId, retirement);
+      await retirement;
     }
   }
 
+  /**
+   * Start a held surface's consumers. Rejects only when every one of them
+   * failed, so the election knows it is not reading the surface and retries;
+   * a partial start still reads, and each failure was already logged.
+   */
   private async startConsumer(surfaceId: string, context: ClusterConsumerStartContext): Promise<void> {
-    await this.options.registry.startSurface(surfaceId, context);
+    const { started, failed } = await this.options.registry.startSurface(surfaceId, context);
+    if (started === 0 && failed > 0) {
+      throw new Error(`every consumer for this surface failed to start (${failed})`);
+    }
   }
 
   /**
@@ -312,7 +354,7 @@ export class ClusterElection {
   // ── inbound datagrams ─────────────────────────────────────────────────────
 
   private receive(raw: string): void {
-    const { message, rejected } = decodeMessage(raw, this.options.settings.secret);
+    const { message, rejected } = decodeMessage(raw, this.options.settings.secret, this.options.clock.now());
     if (!message) {
       this.options.logger.debug('cluster: dropped a datagram', { reason: rejected });
       return;
@@ -340,6 +382,12 @@ export class ClusterElection {
     // restarted peer would be discarded as stale.
     const restarted = known !== undefined && message.seq <= known.lastSeq && message.ts > known.lastTs;
     if (known && !restarted && message.seq <= known.lastSeq) return false;
+    // A counter above the peer's current one proves nothing about age: after a
+    // peer restarts, its counter is low and an old captured datagram carries a
+    // higher one. decodeMessage already drops anything far from the local clock;
+    // this catches a capture inside that window by comparing with the newest
+    // stamp from the same peer, whose own clock is consistent with itself.
+    if (known && !restarted && message.ts < known.lastTs - REPLAY_TOLERANCE_MS) return false;
     if (!known && this.peers.size >= MAX_TRACKED_PEERS) {
       const oldest = [...this.peers.values()].sort((a, b) => a.lastSeenAt - b.lastSeenAt)[0];
       if (oldest) this.peers.delete(oldest.nodeId);

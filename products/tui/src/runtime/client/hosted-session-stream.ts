@@ -25,6 +25,7 @@
  * than pretending the conversation ended.
  */
 import { openServerSentEventStream } from '@/runtime/index.ts';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HostedSessionUpdatePayload } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 
@@ -58,6 +59,24 @@ export interface WatchHostedSessionOptions {
   readonly onTerminate?: ((error: unknown) => void) | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
   readonly signal?: AbortSignal | undefined;
+  /**
+   * The newest timestamp (ms, the daemon's clock) already shown from the
+   * attach's backfilled history. The daemon replays its newest buffered frames
+   * to every new stream, so frames of that history arrive a second time; turn
+   * and tools frames stamped at or before this are dropped. Leave it unset when
+   * the history carries no timestamps (a message without one reads as 0).
+   */
+  readonly notBefore?: number | undefined;
+}
+
+/**
+ * The `notBefore` for a stream opened after an attach: the newest time among the
+ * backfilled history, 0 when none of it carries one.
+ */
+export function newestHistoryTime(history: ReadonlyArray<{ readonly at?: number | undefined }>): number {
+  let newest = 0;
+  for (const message of history) if (typeof message.at === 'number' && message.at > newest) newest = message.at;
+  return newest;
 }
 
 /** A live subscription. `close()` is idempotent. */
@@ -72,7 +91,7 @@ export interface HostedSessionSubscription {
  * deal of traffic it would immediately discard.
  */
 export function hostedSessionStreamUrl(baseUrl: string): string {
-  const url = new URL('/api/control-plane/events', baseUrl);
+  const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', HOSTED_SESSION_STREAM_DOMAINS.join(','));
   return url.toString();
 }
@@ -126,6 +145,7 @@ export async function watchHostedSession(
   }
   const deliver = (event: HostedSessionStreamEvent): void => {
     if (event.sessionId !== options.sessionId) return;
+    if (options.notBefore !== undefined && options.notBefore > 0 && event.at <= options.notBefore) return;
     try {
       options.onEvent(event);
     } catch (error) {

@@ -22,14 +22,13 @@ export type { CompactionQualityScore };
  *
  * Transition map:
  *   idle → checking_threshold
- *   checking_threshold → microcompact | collapse | autocompact | reactive_compact | done
- *   microcompact → boundary_commit | failed
- *   collapse → boundary_commit | failed
- *   autocompact → boundary_commit | failed
- *   reactive_compact → boundary_commit | failed
+ *   checking_threshold → microcompact | collapse | autocompact | reactive_compact | done | failed
+ *   each strategy state → boundary_commit | failed, or another strategy state
  *   boundary_commit → done | failed
  *   done → idle
  *   failed → idle
+ *
+ * `compactionLifecycle` in lifecycle.ts is the authoritative table.
  */
 export type CompactionLifecycleState =
   | 'idle'
@@ -139,40 +138,6 @@ export interface BoundaryCommit {
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle result
-// ---------------------------------------------------------------------------
-
-/**
- * Result produced at the end of a complete compaction lifecycle run.
- *
- * Populated after transitioning through boundary_commit → done.
- */
-export interface CompactionLifecycleResult {
-  /** Classic compaction has no independently measured semantic quality score. */
-  provenance?: 'classic';
-  /** Session ID this run was executed for. */
-  sessionId: string;
-  /** Strategy that was selected and executed. */
-  strategy: CompactionStrategy;
-  /** Tokens before compaction. */
-  tokensBefore: number;
-  /** Tokens after compaction. */
-  tokensAfter: number;
-  /** Total wall-clock duration from trigger to done. */
-  durationMs: number;
-  /** Boundary commit produced during this run (null if boundary_commit was skipped). */
-  commit: BoundaryCommit | null;
-  /** Compacted message list. */
-  messages: ProviderMessage[];
-  /** Strategy output warnings. */
-  warnings: string[];
-  /** Quality score for the strategy run (null when scoring was skipped). */
-  qualityScore: CompactionQualityScore | null;
-  /** Strategy switch reason if auto-escalation occurred (null otherwise). */
-  strategySwitchReason: string | null;
-}
-
-// ---------------------------------------------------------------------------
 // Trigger
 // ---------------------------------------------------------------------------
 
@@ -184,40 +149,3 @@ export interface CompactionLifecycleResult {
  * - `prompt_too_long`, reactive trigger from a provider prompt-too-long error
  */
 export type CompactionTrigger = 'auto' | 'manual' | 'prompt_too_long';
-
-// ---------------------------------------------------------------------------
-// Resume repair
-// ---------------------------------------------------------------------------
-
-/**
- * Severity of a repair action applied during session resume.
- */
-export type RepairSeverity = 'info' | 'warn' | 'error';
-
-/** A single repair action applied during session resume. */
-export interface RepairAction {
-  /** Short identifier for this repair type (e.g. `'truncate_overflow'`). */
-  kind: string;
-  /** Human-readable description of what was repaired. */
-  description: string;
-  /** Severity classification. */
-  severity: RepairSeverity;
-  /** Optional metadata about what was changed. */
-  meta?: Record<string, unknown> | undefined;
-}
-
-/** Result of the session resume repair pipeline. */
-export interface ResumeRepairResult {
-  /** Session ID that was repaired. */
-  sessionId: string;
-  /** Whether any repairs were applied. */
-  repaired: boolean;
-  /** List of repair actions applied (empty if no repairs were needed). */
-  actions: RepairAction[];
-  /** Messages after repair (may be unchanged if no repairs were needed). */
-  messages: ProviderMessage[];
-  /** Whether the session is safe to resume after repair. */
-  safeToResume: boolean;
-  /** Human-readable reason if not safe to resume. */
-  failReason?: string | undefined;
-}

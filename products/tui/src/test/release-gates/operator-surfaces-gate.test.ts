@@ -30,7 +30,7 @@ import type { CommandContext } from '../../input/command-registry.ts';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
+import { createHookApiDispatcher, listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 
 type CommandContextOverrides =
   Omit<Partial<CommandContext>, 'session' | 'provider' | 'workspace' | 'platform' | 'ops' | 'extensions'> & {
@@ -153,10 +153,7 @@ describe('operator surfaces gate', () => {
         providerApi: createRuntimeProviderApi(runtimeServices),
         knowledgeApi: createRuntimeKnowledgeApi(runtimeServices),
         hookApi: createRuntimeHookApi({
-          dispatcher: {
-            listHooks: () => runtimeServices.hookDispatcher.listHooks(),
-            listChains: () => runtimeServices.hookWorkbench.listManagedChains(),
-          },
+          dispatcher: createHookApiDispatcher(runtimeServices.hookDispatcher),
           workbench: runtimeServices.hookWorkbench,
           listContracts: () => listHookPointContracts(),
         }),

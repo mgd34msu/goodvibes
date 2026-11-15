@@ -9,6 +9,7 @@
  * never end.
  */
 import type { ConfigManager } from '../config/manager.js';
+import { logger } from '../utils/logger.js';
 import type { QualityGate } from './gates.js';
 
 export type ContractCommitScope = 'off' | 'scoped' | 'all';
@@ -45,7 +46,11 @@ export interface ContractConfig {
   /** Phase capacity per group in worktree mode. */
   readonly maxParallelUnits: number;
   readonly isolation: ContractIsolationSetting;
-  /** Unit-agent silence watchdog; 0 turns it off. */
+  /**
+   * Unit-agent silence watchdog; 0 turns it off. An exec command running within
+   * its own timeout (or streaming without one) keeps its agent alive, so this
+   * catches stalled model calls and stalled reads and searches.
+   */
   readonly heartbeatTimeoutMs: number;
   readonly transportRetryLimit: number;
   readonly transportRetryDelayMs: number;
@@ -76,7 +81,7 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
   maxActiveContracts: 6,
   maxParallelUnits: 64,
   isolation: 'auto',
-  heartbeatTimeoutMs: 0,
+  heartbeatTimeoutMs: 600_000,
   transportRetryLimit: 1,
   transportRetryDelayMs: 5_000,
   nudgeTtlMs: 300_000,
@@ -92,15 +97,23 @@ const COMMIT_SCOPES: readonly string[] = ['off', 'scoped', 'all'];
 const ACCEPTANCE_STAKES: readonly string[] = ['high', 'critical'];
 const ISOLATION_SETTINGS: readonly string[] = ['auto', 'worktree', 'shared'];
 
+const warnedGates = new Set<string>();
+
+/** A reader must not throw: a gate with a wrong-shaped option is left out, and the warning names it once. */
 function isQualityGate(value: unknown): value is QualityGate {
   if (value === null || typeof value !== 'object') return false;
   const gate = value as Record<string, unknown>;
   if (typeof gate['name'] !== 'string' || typeof gate['command'] !== 'string' || typeof gate['enabled'] !== 'boolean') return false;
-  if ((gate['required'] !== undefined && typeof gate['required'] !== 'boolean')
-    || (gate['verification'] !== undefined && gate['verification'] !== 'command' && gate['verification'] !== 'assertions')) {
-    throw new Error('Invalid contract gate completion options.');
+  const badOption = gate['required'] !== undefined && typeof gate['required'] !== 'boolean' ? 'required (a boolean)'
+    : gate['verification'] !== undefined && gate['verification'] !== 'command' && gate['verification'] !== 'assertions' ? 'verification ("command" or "assertions")'
+      : undefined;
+  if (badOption === undefined) return true;
+  const key = `${gate['name']}:${badOption}`;
+  if (!warnedGates.has(key)) {
+    warnedGates.add(key);
+    logger.warn(`contract.gates: the gate "${gate['name']}" is ignored because its ${badOption} option has the wrong value; fix it in the contract.gates setting to run this gate`);
   }
-  return true;
+  return false;
 }
 
 /**

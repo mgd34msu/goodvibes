@@ -42,7 +42,8 @@ import net from 'node:net';
 import 'node:child_process';
 import 'node:os';
 import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
 import { createRuntimeStore } from '../runtime/store/index.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
@@ -97,7 +98,6 @@ export function enableEndpointLanDefault(config: ConfigManager, endpoint: Runtim
   if (endpoint === 'controlPlane') {
     config.setDynamic('controlPlane.hostMode', 'network');
     config.setDynamic('controlPlane.host', '0.0.0.0');
-    config.setDynamic('controlPlane.allowRemote', true);
     return;
   }
   if (endpoint === 'httpListener') {
@@ -114,10 +114,6 @@ export function applyTargetEndpointFlagsOrDefault(runtime: CliCommandRuntime, en
   if (errors.length > 0) return errors.join('\n');
   if (runtime.cli.flags.hostname === undefined) {
     enableEndpointLanDefault(runtime.configManager, endpoint);
-  }
-  if (endpoint === 'controlPlane') {
-    const binding = resolveRuntimeEndpointBinding(runtime.configManager, endpoint);
-    runtime.configManager.setDynamic('controlPlane.allowRemote', binding.hostMode !== 'local');
   }
   return null;
 }
@@ -147,28 +143,33 @@ export async function probeTcp(host: string, port: number, timeoutMs = 750): Pro
 export async function withRuntimeServices<T>(
   runtime: CliCommandRuntime,
   fn: (services: RuntimeServices) => Promise<T> | T,
-  options: { readonly catalog?: ProviderCatalogOptions } = {},
+  options: { readonly modelData?: 'background' | 'skip'; readonly catalog?: ProviderCatalogOptions } = {},
 ): Promise<T> {
   // This helper starts the complete active runtime, including its native work
   // services. Prepare its real project before any synchronous owner freezes an
   // identity; lightweight metadata probes do not use this full-graph helper.
-  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
   // Point the bus listener cap at runtime.eventBus.maxListeners before the
   // first bus exists, so every bus this process builds later uses it.
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => runtime.configManager.get(key)));
   const runtimeBus = new RuntimeEventBus();
   const runtimeStore = createRuntimeStore();
   const services = createRuntimeServices({
+    // One-shot commands consume the stored catalog; a background refresh would
+    // outlive this graph. Interactive startup retains its normal refresh.
+    modelDiscovery: 'skip',
     configManager: runtime.configManager,
     runtimeBus,
     runtimeStore,
     workingDir: runtime.workingDirectory,
     homeDirectory: runtime.homeDirectory,
   });
-  services.providerRegistry.initModelLimits();
-  services.benchmarkStore.initBenchmarks();
-  services.providerRegistry.initCatalog(options.catalog);
   try {
+    if (options.modelData !== 'skip') {
+      services.providerRegistry.initModelLimits();
+      services.benchmarkStore.initBenchmarks();
+      services.providerRegistry.initCatalog(options.catalog);
+    }
     await services.providerRegistry.ready();
     return await fn(services);
   } finally {
@@ -180,14 +181,14 @@ export async function withRuntimeServices<T>(
   }
 }
 
-export function readAuthPaths(runtime: CliCommandRuntime) {
+export function readAuthPaths(runtime: Pick<CliCommandRuntime, 'workingDirectory' | 'homeDirectory'>) {
   const shellPaths = createShellPathService({
     workingDirectory: runtime.workingDirectory,
     homeDirectory: runtime.homeDirectory,
   });
   const userStorePath = shellPaths.resolveUserPath('tui', 'auth-users.json');
   const bootstrapCredentialPath = shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt');
-  const operatorTokenPath = join(runtime.homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
+  const operatorTokenPath = join(resolveGoodVibesDaemonHome(runtime.homeDirectory), 'operator-tokens.json');
   return {
     userStorePath,
     userStorePresent: existsSync(userStorePath),

@@ -89,7 +89,7 @@ export class VoiceProviderRegistry {
       const provider = this.get(providerId);
       return provider?.capabilities.includes(capability) ? provider : null;
     }
-    return [...this.providers.values()].find((provider) => provider.capabilities.includes(capability)) ?? null;
+    return [...this.providers.values()].find((provider) => provider.capabilities.includes(capability) && provider.explicitSelectionOnly !== true) ?? null;
   }
 
   /**
@@ -106,11 +106,14 @@ export class VoiceProviderRegistry {
    * configured does the old first-registered fallback apply, so the resulting
    * error still names one concrete provider instead of "none".
    *
+   * A provider flagged `explicitSelectionOnly` is never a default.
+   *
    * A named providerId keeps exact findProvider semantics.
    */
   async resolveProvider(capability: VoiceProviderCapability, providerId?: string): Promise<VoiceProvider | null> {
     if (providerId) return this.findProvider(capability, providerId);
-    const candidates = [...this.providers.values()].filter((provider) => provider.capabilities.includes(capability));
+    const candidates = [...this.providers.values()]
+      .filter((provider) => provider.capabilities.includes(capability) && provider.explicitSelectionOnly !== true);
     if (candidates.length === 0) return null;
     const configured: VoiceProvider[] = [];
     for (const candidate of candidates) {
@@ -138,7 +141,20 @@ export class VoiceProviderRegistry {
     const statuses: VoiceProviderStatus[] = [];
     for (const provider of this.providers.values()) {
       if (provider.status) {
-        statuses.push(await provider.status());
+        try {
+          statuses.push(await provider.status());
+        } catch (error) {
+          // One provider's failing probe must not hide every other provider's status.
+          statuses.push({
+            id: provider.id,
+            label: provider.label,
+            state: 'degraded',
+            capabilities: [...provider.capabilities],
+            configured: false,
+            detail: `Status check failed: ${error instanceof Error ? error.message : String(error)}`,
+            metadata: {},
+          });
+        }
         continue;
       }
       statuses.push({

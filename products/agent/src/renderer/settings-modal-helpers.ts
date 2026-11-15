@@ -62,7 +62,6 @@ export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], strin
   surfaces: 'Channels',
   conversationGate: SHARED_CATEGORY_LABELS['conversationGate'],
   hostedSessions: 'Daemon-Hosted Conversations',
-  release: 'Update Channel',
   tools: SHARED_CATEGORY_LABELS['tools'],
   flags: 'Feature Controls',
   atRest: 'At-Rest Protection',
@@ -87,7 +86,7 @@ export const CATEGORY_LABELS: Record<(typeof SETTINGS_CATEGORIES)[number], strin
 export const SETTING_LABELS: Partial<Record<string, string>> = {
   'ui.systemMessages': SHARED_SETTING_LABELS['ui.systemMessages'],
   'ui.operationalMessages': SHARED_SETTING_LABELS['ui.operationalMessages'],
-  'ui.voiceEnabled': 'Voice Interaction',
+  'ui.voiceEnabled': 'Always speak replies',
   'behavior.autoCompactThreshold': SHARED_SETTING_LABELS['behavior.autoCompactThreshold'],
   'behavior.staleContextWarnings': SHARED_SETTING_LABELS['behavior.staleContextWarnings'],
   'behavior.returnContextMode': SHARED_SETTING_LABELS['behavior.returnContextMode'],

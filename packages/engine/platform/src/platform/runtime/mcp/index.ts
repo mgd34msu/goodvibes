@@ -1,7 +1,9 @@
 /**
  * src/runtime/mcp, MCP lifecycle barrel.
  *
- * Gated by the `mcp-lifecycle` capability gate (runtime.mcpLifecycle).
+ * For embedders: no GoodVibes product composes this manager, so the `mcp-lifecycle` gate
+ * (runtime.mcpLifecycle) is marked not operable and changes nothing; MCP servers connect through
+ * the standard MCP registry. Call `createMcpLifecycleManager()` yourself to use it.
  *
  * Public API:
  *   - `createMcpLifecycleManager()`, factory function

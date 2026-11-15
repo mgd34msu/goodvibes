@@ -60,6 +60,12 @@ export interface DaemonConfigEndpoint {
    * from configuration and must be probed before it is trusted.
    */
   readonly certain?: boolean | undefined;
+  /**
+   * The runtime record this endpoint was read from, captured when it was
+   * discovered. A later reap judges THIS record, not whatever is on disk by
+   * then, so a daemon that wrote its own record during the probe keeps it.
+   */
+  readonly runtimeRecord?: DetachedDaemonRuntimeHint | undefined;
 }
 
 /** The resolved destination for one config write. */
@@ -268,6 +274,7 @@ function validatedRecordEndpoint(
     token: deps.token,
     source: 'running-daemon record',
     certain: false,
+    runtimeRecord: record,
   };
 }
 
@@ -275,9 +282,11 @@ function validatedRecordEndpoint(
 function reapRecord(record: DetachedDaemonRuntimeHint, deps: DaemonConfigRouterDeps, reason: string): void {
   const dir = deps.daemonHomeDir;
   if (!dir) return;
+  let kept = false;
   const reap = deps.reapRuntimeRecord
     ?? ((target: string, stale: DetachedDaemonRuntimeHint, why: string) => {
-      reapDetachedDaemonRuntime(target, stale, why);
+      // null: the file now holds another daemon's record, which stays.
+      if (reapDetachedDaemonRuntime(target, stale, why) === null) kept = true;
     });
   try {
     reap(dir, record, reason);
@@ -285,6 +294,7 @@ function reapRecord(record: DetachedDaemonRuntimeHint, deps: DaemonConfigRouterD
     // A record that could not be removed is still not trusted by this call;
     // the next one re-checks it. Failing to reap must not fail the read.
   }
+  if (kept) return;
   deps.onRuntimeRecordReaped?.({ baseUrl: recordBaseUrl(record), reason });
 }
 
@@ -295,8 +305,18 @@ function reapRecord(record: DetachedDaemonRuntimeHint, deps: DaemonConfigRouterD
  * process, so liveness says "alive" while no daemon is there. Exported for the
  * read path, which discovers the non-answer rather than this module.
  */
-export function reapUnansweringRuntimeRecord(deps: DaemonConfigRouterDeps, baseUrl: string): void {
+export function reapUnansweringRuntimeRecord(
+  deps: DaemonConfigRouterDeps,
+  baseUrl: string,
+  /** The record that was probed. Pass it: re-reading the file here would judge a newer daemon's record. */
+  probedRecord?: DetachedDaemonRuntimeHint,
+): void {
   if (!deps.daemonHomeDir) return;
+  if (probedRecord) {
+    if (recordBaseUrl(probedRecord) !== baseUrl) return;
+    reapRecord(probedRecord, deps, `nothing answered at ${baseUrl}, so the record no longer describes a reachable daemon`);
+    return;
+  }
   const read = deps.readRuntimeRecord ?? ((dir: string) => readDetachedDaemonRuntime(dir));
   const record = read(deps.daemonHomeDir);
   if (!record || recordBaseUrl(record) !== baseUrl) return;
@@ -346,7 +366,7 @@ export async function resolveLiveConfigWriteRoute(
     }
     if (route.endpoint.source !== 'running-daemon record') break;
     reapedRecord = route.endpoint;
-    reapUnansweringRuntimeRecord(deps, route.endpoint.baseUrl);
+    reapUnansweringRuntimeRecord(deps, route.endpoint.baseUrl, route.endpoint.runtimeRecord);
   }
 
   if (reapedRecord) {
@@ -372,17 +392,37 @@ export async function resolveLiveConfigWriteRoute(
  * Ask the daemon whether it is actually there. Used only for an UNCERTAIN
  * endpoint (one derived from configuration rather than observed): a config
  * value describes where a daemon would listen, not that one does.
+ *
+ * The probe carries NO credential: whatever answers at a derived address may be
+ * an unrelated local program, and the operator token goes only to something that
+ * has identified itself as a daemon. A daemon identifies itself by refusing the
+ * anonymous request with its authentication error; any other status is not an
+ * answer, including a 200, which is what an unrelated catch-all server returns.
  */
 async function daemonAnswers(endpoint: DaemonConfigEndpoint, deps: DaemonConfigRouterDeps): Promise<boolean> {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   try {
     const response = await fetchImpl(`${endpoint.baseUrl.replace(/\/+$/, '')}/config`, {
       method: 'GET',
-      headers: daemonHeaders(endpoint),
+      headers: { 'content-type': 'application/json' },
       signal: AbortSignal.timeout(deps.probeTimeoutMs ?? 2_000),
     });
-    // A 401/403 still proves a daemon is listening, it answered.
-    return response.status < 500;
+    if (response.status !== 401 && response.status !== 403) return false;
+    return refusesWithDaemonAuthError(await response.text().catch(() => ''));
+  } catch {
+    return false;
+  }
+}
+
+/** True when a response body is the daemon's own "authentication required" error. */
+function refusesWithDaemonAuthError(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed === null || typeof parsed !== 'object') return false;
+    const record = parsed as Record<string, unknown>;
+    const nested = record['error'];
+    const codes = [record['code'], nested !== null && typeof nested === 'object' ? (nested as Record<string, unknown>)['code'] : undefined];
+    return codes.includes('AUTH_REQUIRED');
   } catch {
     return false;
   }

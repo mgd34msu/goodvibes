@@ -52,7 +52,8 @@ test.each(['permission', 'revision', 'unknown-message', 'partial-paragraph', 'pr
     if (kind === 'unknown-message') Object.assign(input.input, { messageId: 'unknown' });
     if (kind === 'partial-paragraph') Object.assign(input.input, { end: 10 });
     if (kind === 'protected-outside-paragraph') Object.assign(input.input, { end: content.length });
-    await expect(f.run(input)).rejects.toBeDefined(); expect(f.calls).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
+    const code = { permission: 'JUDGMENT_PERMISSION_HELD', revision: 'JUDGMENT_REFERENCE_HELD', 'unknown-message': 'JUDGMENT_REFERENCE_HELD', 'partial-paragraph': 'JUDGMENT_INPUT_HELD', 'protected-outside-paragraph': 'JUDGMENT_INPUT_HELD', oversized: 'JUDGMENT_INPUT_HELD' }[kind];
+    await expect(f.run(input)).rejects.toMatchObject({ code }); expect(f.calls).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
   } finally { await f.close(); }
 });
 test.each(['message-change', 'message-identity', 'session-change', 'identity', 'unbind', 'abort'] as const)('%s rejects in-flight publication', async kind => {
@@ -61,7 +62,8 @@ test.each(['message-change', 'message-identity', 'session-change', 'identity', '
   try {
     const pending = f.run(request(), abort.signal); await started.promise;
     if (kind === 'message-change') f.mutate(); else if (kind === 'message-identity') f.mutateMessageIdentity(); else if (kind === 'session-change') f.mutateSession(); else if (kind === 'identity') f.changeActor(); else if (kind === 'unbind') f.release(); else abort.abort();
-    finish.resolve(); await expect(pending).rejects.toBeDefined(); expect(f.log.query()).toHaveLength(0);
+    const code = kind === 'identity' ? 'JUDGMENT_AUTH_REQUIRED' : kind === 'abort' ? 'JUDGMENT_ABORTED' : 'JUDGMENT_REFERENCE_HELD';
+    finish.resolve(); await expect(pending).rejects.toMatchObject({ code }); expect(f.log.query()).toHaveLength(0);
   } finally { finish.resolve(); await f.close(); }
 });
 test('uncertain speech evidence exposes no offsets', async () => {

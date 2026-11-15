@@ -57,8 +57,8 @@ export class PerfMonitor {
   private readonly budgets: PerfBudget[];
   /** Maps budget metric name to number of consecutive violations. */
   private readonly streaks: Map<string, number> = new Map();
-  /** Heap snapshot from the previous evaluation, used to compute growth delta. */
-  private _previousHeapUsedBytes: number = 0;
+  /** Heap and time of the previous evaluation; the growth rate is the change between the two samples. */
+  private _previousHeapSample: { readonly heapUsedBytes: number; readonly at: number } | undefined;
 
   constructor(budgets: PerfBudget[] = DEFAULT_BUDGETS) {
     this.budgets = budgets;
@@ -89,16 +89,15 @@ export class PerfMonitor {
       timestamp: now,
     });
 
-    // Memory growth rate: extrapolate bytes/hour from heap delta since last evaluate().
-    // If no prior sample is available, fall back to 0 (can't compute rate).
-    const lastSampleAge =
-      surfacePerf.lastMemorySampleAt !== undefined
-        ? now - surfacePerf.lastMemorySampleAt
-        : 0;
-    const heapDelta = surfacePerf.heapUsedBytes - this._previousHeapUsedBytes;
+    // Memory growth rate: bytes/hour between this evaluate() and the previous one.
+    // The first evaluation has nothing to compare against, so it reports 0.
+    const previous = this._previousHeapSample;
+    const elapsedMs = previous ? now - previous.at : 0;
     const bytesPerHour =
-      lastSampleAge > 0 ? (heapDelta / lastSampleAge) * 3_600_000 : 0;
-    this._previousHeapUsedBytes = surfacePerf.heapUsedBytes;
+      previous && elapsedMs > 0
+        ? ((surfacePerf.heapUsedBytes - previous.heapUsedBytes) / elapsedMs) * 3_600_000
+        : 0;
+    this._previousHeapSample = { heapUsedBytes: surfacePerf.heapUsedBytes, at: now };
     metrics.push({
       name: 'memory.growth.bytes_per_hour',
       value: bytesPerHour,
@@ -125,24 +124,22 @@ export class PerfMonitor {
    * Updates internal violation streak counters.
    *
    * @param snapshot - Runtime state snapshot to evaluate.
+   * @param now - Evaluation time in epoch ms; callers that replay synthetic
+   *   samples pass the time the sample belongs to so the growth rate is
+   *   computed over their interval, not over real elapsed time.
    * @returns A PerfReport summarising metrics and active violations.
    */
-  evaluate(snapshot: PerfSnapshot): PerfReport {
-    const now = Date.now();
+  evaluate(snapshot: PerfSnapshot, now: number = Date.now()): PerfReport {
     const metrics = this.extractMetrics(snapshot, now);
     const violations: BudgetViolation[] = [];
+    const missing: string[] = [];
 
     for (const budget of this.budgets) {
       const metric = metrics.find((m) => m.name === budget.metric);
       if (!metric) {
-        // Metric not found, add a warning entry to make the missing input visible.
-        violations.push({
-          budget,
-          actual: NaN,
-          exceededBy: NaN,
-          consecutiveViolations: 0,
-          warning: `Metric '${budget.metric}' not found in snapshot`,
-        });
+        // An input the caller did not supply is not a measurement over budget:
+        // list it as not measured, and leave it out of the violations and `passed`.
+        missing.push(budget.metric);
         continue;
       }
 
@@ -171,6 +168,7 @@ export class PerfMonitor {
       timestamp: now,
       metrics,
       violations,
+      missing,
       passed: violations.length === 0,
     };
   }

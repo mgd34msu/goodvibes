@@ -59,8 +59,8 @@ describe('occasions settings registration', () => {
     expect(groups).toHaveLength(1);
     // Beside `profile`, because the occasions and plans these settings govern are
     // prose lines in that same document.
-    expect(groups[0]?.label).toBe('Agent Experience');
-    expect(CATEGORY_LABELS.occasions).toBe('Dates and Plans');
+    expect(groups[0]?.categories).toContain('profile');
+    expect(CATEGORY_LABELS.occasions?.trim()).toBeTruthy();
   });
 
   test('every occasions.* key in the live schema lands in the rendered occasions group', () => {

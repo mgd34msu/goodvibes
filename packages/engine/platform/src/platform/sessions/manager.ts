@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readSync, readdirSync, writeFileSync, unlinkSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readSync, readdirSync, statSync, writeFileSync, unlinkSync, renameSync, openSync, fsyncSync, closeSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
 import type { AgentRecord } from '../tools/agent/index.js';
@@ -43,6 +43,23 @@ export interface SessionMeta {
   saveSource?: 'user' | 'auto' | undefined;
 }
 
+/** The conversation's side branches: every branch not currently open, and the name of the one that is. */
+export interface SessionBranches {
+  readonly branches: Readonly<Record<string, readonly object[]>>;
+  readonly currentBranch: string;
+}
+
+function readBranchesLine(record: Record<string, unknown>): SessionBranches | null {
+  const { branches, currentBranch } = record;
+  if (typeof currentBranch !== 'string' || !branches || typeof branches !== 'object' || Array.isArray(branches)) return null;
+  const read: Record<string, object[]> = {};
+  for (const [name, messages] of Object.entries(branches)) {
+    if (!Array.isArray(messages) || messages.some(message => !message || typeof message !== 'object')) return null;
+    read[name] = messages as object[];
+  }
+  return { branches: read, currentBranch };
+}
+
 /**
  * Summary info for listing saved sessions.
  */
@@ -67,6 +84,7 @@ export interface SessionInfo {
  *   Line N: { type: 'message', ...message fields }
  *   then:   { type: 'agent_record', ...AgentRecord } per agent record
  *   then:   { type: 'contract', contract } per contract started in the session (version 2)
+ *   then:   { type: 'branches', branches, currentBranch } when the conversation has side branches
  */
 /**
  * Current schema version written to session files.
@@ -79,6 +97,9 @@ export interface SessionInfo {
  * section 7.1). A file of an earlier version loads with no contracts.
  */
 export const CURRENT_SESSION_SCHEMA_VERSION = 2;
+
+/** A temp file this old cannot belong to a write still in progress. */
+const ORPHAN_TEMP_FILE_AGE_MS = 10 * 60 * 1000;
 
 /** The first session schema version that carries contract lines. */
 const CONTRACT_LINES_SINCE_VERSION = 2;
@@ -138,6 +159,10 @@ export class SessionManager {
 
   /**
    * Remove any `.tmp-*` files left behind by a crashed write.
+   * Several processes share one sessions directory, so a temp file whose
+   * writer is still alive may be mid-write and is left alone; only files from
+   * this process, from a process that no longer exists, or old enough that no
+   * write could still be running are removed.
    * Cleanup errors are logged and startup continues.
    */
   private _cleanupOrphanTempFiles(): void {
@@ -145,7 +170,7 @@ export class SessionManager {
     try {
       const files = readdirSync(this.sessionsDir);
       for (const f of files) {
-        if (f.startsWith('.tmp-')) {
+        if (f.startsWith('.tmp-') && this._isOrphanTempFile(f)) {
           try {
             unlinkSync(join(this.sessionsDir, f));
             logger.debug('SessionManager: removed orphan tmp file', { file: f });
@@ -163,6 +188,23 @@ export class SessionManager {
         dir: this.sessionsDir,
         error: summarizeError(err),
       });
+    }
+  }
+
+  private _isOrphanTempFile(file: string): boolean {
+    const pid = Number(/^\.tmp-(\d+)-/.exec(file)?.[1]);
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return true;
+    try {
+      if (Date.now() - statSync(join(this.sessionsDir, file)).mtimeMs > ORPHAN_TEMP_FILE_AGE_MS) return true;
+    } catch {
+      return false;
+    }
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (err: unknown) {
+      // EPERM means the process exists but belongs to someone else.
+      return (err as NodeJS.ErrnoException).code === 'ESRCH';
     }
   }
 
@@ -204,6 +246,12 @@ export class SessionManager {
    * file is absent, unreadable, or carries no readable stamp.
    */
   private _readExistingSaveSource(filePath: string): 'user' | 'auto' | undefined {
+    const record = this._readExistingMetaRecord(filePath);
+    return record?.saveSource === 'user' || record?.saveSource === 'auto' ? record.saveSource : undefined;
+  }
+
+  /** The meta line (line 0) of an existing session file, or undefined when absent, unreadable or not a meta line. */
+  private _readExistingMetaRecord(filePath: string): { saveSource?: unknown; name?: unknown } | undefined {
     if (!existsSync(filePath)) return undefined;
     let fd: number;
     try {
@@ -212,13 +260,24 @@ export class SessionManager {
       return undefined;
     }
     try {
-      const buf = Buffer.alloc(8192);
-      const bytesRead = readSync(fd, buf, 0, 8192, 0);
-      const firstLine = buf.toString('utf-8', 0, bytesRead).split('\n')[0];
-      if (!firstLine?.trim()) return undefined;
-      const record = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown };
-      if (record.type !== 'meta') return undefined;
-      return record.saveSource === 'user' || record.saveSource === 'auto' ? record.saveSource : undefined;
+      // Read up to the first newline: a long title or return context can push
+      // the meta line past any fixed prefix, and an unparseable prefix would
+      // read as "no stamp" and downgrade a user save.
+      const chunks: Buffer[] = [];
+      let position = 0;
+      for (;;) {
+        const buf = Buffer.alloc(8192);
+        const bytesRead = readSync(fd, buf, 0, buf.length, position);
+        if (bytesRead === 0) break;
+        const newline = buf.subarray(0, bytesRead).indexOf(0x0a);
+        chunks.push(buf.subarray(0, newline === -1 ? bytesRead : newline));
+        if (newline !== -1) break;
+        position += bytesRead;
+      }
+      const firstLine = Buffer.concat(chunks).toString('utf-8');
+      if (!firstLine.trim()) return undefined;
+      const record = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown; name?: unknown };
+      return record.type === 'meta' ? record : undefined;
     } catch {
       return undefined;
     } finally {
@@ -249,17 +308,32 @@ export class SessionManager {
     agentRecords?: AgentRecord[],
     /** The trees of the contracts started in this session, written after the agent records. */
     contracts?: readonly ContractView[],
+    /** Branches made with /branch; without them a resumed session has only its current transcript. */
+    branches?: SessionBranches,
   ): { filePath: string; sanitizedName: string } {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
     mkdirSync(this.sessionsDir, { recursive: true });
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${sanitizedName}.jsonl`);
 
+    // Different names can reduce to one file name ("My Chat" and "my-chat", or any two
+    // names with no ASCII letters). A file that recorded the name it was saved under is
+    // never overwritten by a different name; files from before the name was recorded
+    // cannot be told apart and keep their overwrite behaviour.
+    const existingName = this._readExistingMetaRecord(filePath)?.name;
+    if (typeof existingName === 'string' && existingName !== name) {
+      throw new Error(
+        `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
+        + 'Nothing was saved; choose a name that differs in its letters, digits, "-" or "_".',
+      );
+    }
+
     const lines: string[] = [];
 
     // First line: meta record
     const metaRecord = {
       type: 'meta' as const,
+      name,
       schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
       timestamp: meta.timestamp,
       title: meta.title,
@@ -290,6 +364,10 @@ export class SessionManager {
       lines.push(JSON.stringify({ type: 'contract' as const, contract }));
     }
 
+    if (branches && (Object.keys(branches.branches).length > 0 || branches.currentBranch !== 'main')) {
+      lines.push(JSON.stringify({ type: 'branches' as const, branches: branches.branches, currentBranch: branches.currentBranch }));
+    }
+
     this._atomicWrite(filePath, lines.join('\n') + '\n');
     return { filePath, sanitizedName };
   }
@@ -298,7 +376,7 @@ export class SessionManager {
    * Load a session from JSONL. Returns meta and messages (excluding removed ones).
    * Throws if the file does not exist or cannot be parsed.
    */
-  load(name: string): { meta: SessionMeta; messages: object[]; agentRecords: AgentRecord[]; contracts: Contract[] } {
+  load(name: string): { meta: SessionMeta; messages: object[]; agentRecords: AgentRecord[]; contracts: Contract[]; branches?: SessionBranches } {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
     const filename = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${filename}.jsonl`);
@@ -314,6 +392,7 @@ export class SessionManager {
     const messages: object[] = [];
     const agentRecords: AgentRecord[] = [];
     const contracts: Contract[] = [];
+    let branches: SessionBranches | undefined;
 
     let skipped = 0;
     for (const line of lines) {
@@ -361,11 +440,33 @@ export class SessionManager {
         const contract = readContractLine(record.contract);
         if (contract === null) skipped++;
         else contracts.push(contract);
+      } else if (record.type === 'branches') {
+        const read = readBranchesLine(record);
+        if (read === null) skipped++;
+        else branches = read;
       }
     }
 
     if (skipped > 0) logger.warn('Skipped malformed session log lines', { name, skipped });
-    return { meta, messages, agentRecords, contracts };
+    return { meta, messages, agentRecords, contracts, ...(branches ? { branches } : {}) };
+  }
+
+  /**
+   * A cheap signature of the saved sessions: each file's name, size, modification time and
+   * inode, read from the directory without opening any file. Every save replaces its file, so
+   * any change to a session changes this string; equal strings mean the sessions read the same.
+   */
+  fingerprint(): string {
+    let files: string[];
+    try { files = readdirSync(this.sessionsDir).filter(f => f.endsWith('.jsonl')).sort(); } catch { return ''; }
+    const entries: string[] = [];
+    for (const file of files) {
+      try {
+        const stat = statSync(join(this.sessionsDir, file), { bigint: true });
+        entries.push(`${file}:${stat.size}:${stat.mtimeNs}:${stat.ino}`);
+      } catch { entries.push(`${file}:gone`); }
+    }
+    return entries.join('\n');
   }
 
   /**
@@ -614,6 +715,12 @@ export class SessionManager {
     // Sort by match count descending
     results.sort((a, b) => b.matchCount - a.matchCount);
     return results;
+  }
+
+  /** Whether a saved conversation exists under this name or id (the store file is present). */
+  has(name: string): boolean {
+    if (!name || !name.trim()) return false;
+    return existsSync(join(this.sessionsDir, `${this.sanitizeName(name)}.jsonl`));
   }
 
   /**

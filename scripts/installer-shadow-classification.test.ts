@@ -1,4 +1,3 @@
-/** Real package/path classifier regressions, authored and UNRUN during coding first. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

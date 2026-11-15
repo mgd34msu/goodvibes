@@ -4,9 +4,9 @@ import { join, resolve } from 'node:path';
 // Runtime-specific suites have their own CI lanes. Fixtures and consumer
 // type-test inputs are data, not behavioral test suites. Every other nested
 // directory is discovered automatically, including future engine subsystems.
-const SEPARATE_AREAS = new Set(['workers', 'workers-wrangler', 'hermes', 'fixtures', 'types']);
+const SEPARATE_AREAS = new Set(['workers', 'workers-wrangler', 'fixtures', 'types']);
 const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', 'dist']);
-const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+export const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
 /** All ordinary engine tests, in stable order, relative to the engine root. */
 export function defaultTestArgs(engineRoot: string): readonly string[] {

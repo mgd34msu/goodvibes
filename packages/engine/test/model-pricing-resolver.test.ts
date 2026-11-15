@@ -27,6 +27,7 @@ import {
   type CatalogModel,
 } from '../platform/src/platform/providers/model-catalog.js';
 import { computeUsageCostUsd, computeUsageCostUsdCents } from '../platform/src/platform/providers/model-pricing.js';
+import { buildPricingSeams } from '../platform/src/platform/runtime/cost/pricing-seams.js';
 import { CostAttributionService, type ResolvePricing } from '../platform/src/platform/runtime/cost/attribution.js';
 import { checkBudget, budgetBlindSpot } from '../platform/src/platform/orchestration/budget.js';
 import type { WorkItem, Workstream } from '../platform/src/platform/orchestration/types.js';
@@ -408,10 +409,9 @@ describe('dollar budget on non-frontier actuals', () => {
       const registry = registryWithCatalog(root, [
         makeCatalogModel('llama-3.3-70b', 'groq', { input: 0.59, output: 0.79 }),
       ]);
-      // Price the actuals through the resolver, the same computation
-      // services.ts priceUsage now performs.
-      const priced = computeUsageCostUsd(
-        registry.resolveModelPricing('groq:llama-3.3-70b'),
+      // Price the actuals through the composition root's own priceUsage seam.
+      const priced = buildPricingSeams(registry).priceUsage(
+        'groq:llama-3.3-70b',
         { inputTokens: 10_000_000, outputTokens: 5_000_000 },
       );
       // Hand math: 10M x $0.59/M + 5M x $0.79/M = $5.90 + $3.95 = $9.85.
@@ -457,9 +457,11 @@ describe('emit-site cost stamping', () => {
     const { ToolLLM } = await import('../platform/src/platform/config/tool-llm.ts');
     const bus = new RuntimeEventBus();
     const events: Array<Record<string, unknown>> = [];
+    let delivered!: () => void;
+    const received = new Promise<void>((resolve) => { delivered = resolve; });
     bus.onDomain('turn', (envelope) => {
       const event = envelope.payload as Record<string, unknown> & { type: string };
-      if (event.type === 'LLM_RESPONSE_RECEIVED') events.push(event);
+      if (event.type === 'LLM_RESPONSE_RECEIVED') { events.push(event); delivered(); }
     });
     const provider = {
       name: 'selfhost',
@@ -487,7 +489,7 @@ describe('emit-site cost stamping', () => {
       sessionId: () => 'session-price',
     });
     await toolLLM.chat('plain');
-    await Bun.sleep(1);
+    await received;
     expect(events.length).toBe(1);
     // Hand math: 1M x $0.1/M + 0.5M x $0.2/M = $0.20 = 20 cents.
     expect(events[0]!['costUsdCents']).toBeCloseTo(20, 10);
@@ -499,9 +501,11 @@ describe('emit-site cost stamping', () => {
     const { ToolLLM } = await import('../platform/src/platform/config/tool-llm.ts');
     const bus = new RuntimeEventBus();
     const events: Array<Record<string, unknown>> = [];
+    let delivered!: () => void;
+    const received = new Promise<void>((resolve) => { delivered = resolve; });
     bus.onDomain('turn', (envelope) => {
       const event = envelope.payload as Record<string, unknown> & { type: string };
-      if (event.type === 'LLM_RESPONSE_RECEIVED') events.push(event);
+      if (event.type === 'LLM_RESPONSE_RECEIVED') { events.push(event); delivered(); }
     });
     const provider = {
       name: 'acme',
@@ -525,7 +529,7 @@ describe('emit-site cost stamping', () => {
       sessionId: () => 'session-unpriced',
     });
     await toolLLM.chat('plain');
-    await Bun.sleep(1);
+    await received;
     expect(events.length).toBe(1);
     expect('costUsdCents' in events[0]!).toBe(false);
     expect(events[0]!['costSource']).toBe('unknown');

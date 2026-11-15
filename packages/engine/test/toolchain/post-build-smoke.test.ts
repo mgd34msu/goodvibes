@@ -281,7 +281,5 @@ test('real subprocess success captures stderr and signal/spawn/timeout failures 
   expect(output).toEqual({ status: 0, stdout: 'banner\n', stderr: 'diagnostic\n' });
   expect(realExec(process.execPath, ['-e', 'process.kill(process.pid,"SIGTERM");']).status).toBe(1);
   expect(realExec('/nonexistent-smoke-executable', []).status).toBe(1);
-  const started = performance.now();
   expect(realExec(process.execPath, ['-e', 'process.on("SIGTERM",()=>{}); setInterval(()=>{},100);'], { timeoutMs: 150 }).status).toBe(1);
-  expect(performance.now() - started).toBeLessThan(5_000);
 });

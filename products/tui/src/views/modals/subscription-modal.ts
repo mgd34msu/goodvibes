@@ -3,7 +3,7 @@ import type { ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/
 import type { ProviderSubscription, PendingSubscriptionLogin } from '@goodvibes-jev/engine/platform/platform/config';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatElapsed } from '../../utils/format-elapsed.ts';
-import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
+import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 
 interface Row {
   readonly provider: string;
@@ -153,8 +153,7 @@ class SubscriptionModalSurface implements ConfigModalSurface {
       }
     } else if (status === 'available') {
       this.pendingLogout = null;
-      void ctx.executeCommand?.('subscription', ['login', provider, 'start']);
-      ctx.setStatus(`Starting login for ${provider}…`);
+      runModalCommand(ctx, 'subscription', ['login', provider, 'start'], `/subscription login ${provider} start`, { pending: `Starting login for ${provider}…` });
     } else if (status === 'pending' && row.pending) {
       ctx.setStatus(`Login pending (${formatElapsed(Date.now() - row.pending.createdAt)} ago). Finish with /subscription login ${provider} finish <code>.`);
     } else {

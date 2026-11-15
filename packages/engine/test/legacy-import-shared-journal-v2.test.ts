@@ -1,4 +1,4 @@
-/** Actual SQLite/private filesystem. Regression source UNRUN. */
+/** Actual SQLite/private filesystem. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import * as crypto from 'node:crypto';
@@ -135,7 +135,8 @@ test('a rejected command promise is drained even when its callback retires the o
   try {
     const make = (() => { renameSync(dirname(f.path), dirname(f.path) + '-original'); mkdirSync(dirname(f.path)); writeFileSync(f.path, 'foreign bytes', { mode: 0o600 }); return Promise.reject(new Error('Late rejected command')); }) as unknown as () => typeof f.command;
     expect(() => journal.reserve(f.binding, make)).toThrow();
-    await new Promise<void>(resolve => setTimeout(resolve, 1));
+    // The runtime reports an unhandled rejection after the microtask queue drains, so two turns of the event loop are enough to see one.
+    for (let turn = 0; turn < 2; turn += 1) await new Promise<void>(resolve => setImmediate(resolve));
     expect(rejected).toEqual([]); expect(readFileSync(f.path, 'utf8')).toBe('foreign bytes');
   } finally { journal.close(); process.off('unhandledRejection', listener); }
 });

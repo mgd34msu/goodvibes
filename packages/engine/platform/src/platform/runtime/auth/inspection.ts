@@ -28,10 +28,12 @@ export interface AuthInspectionSnapshot {
   readonly activeSubscriptions: number;
   readonly pendingSubscriptions: number;
   readonly providers: readonly ProviderAuthInspection[];
+  /** Why the services file could not be used; absent when it was read. */
+  readonly servicesUnreadable?: string | undefined;
 }
 
 export interface AuthInspectionDeps {
-  readonly serviceRegistry: Pick<ServiceRegistry, 'get' | 'getAll'>;
+  readonly serviceRegistry: Pick<ServiceRegistry, 'get' | 'getAll'> & Partial<Pick<ServiceRegistry, 'unreadableReason'>>;
   readonly subscriptionManager: Pick<SubscriptionManager, 'get' | 'getPending' | 'list' | 'listPending'>;
   readonly secretsManager: Pick<SecretsManager, 'list'>;
 }
@@ -103,6 +105,7 @@ export async function buildAuthInspectionSnapshot(
 ): Promise<AuthInspectionSnapshot> {
   const secrets = await deps.secretsManager.list();
   const services = deps.serviceRegistry.getAll();
+  const servicesUnreadable = deps.serviceRegistry.unreadableReason?.() ?? null;
   const providerIds = new Set<string>([
     ...Object.values(services)
       .filter((service) => service.authType === 'oauth' && service.oauth)
@@ -121,5 +124,6 @@ export async function buildAuthInspectionSnapshot(
     activeSubscriptions: deps.subscriptionManager.list().length,
     pendingSubscriptions: deps.subscriptionManager.listPending().length,
     providers,
+    ...(servicesUnreadable ? { servicesUnreadable } : {}),
   });
 }

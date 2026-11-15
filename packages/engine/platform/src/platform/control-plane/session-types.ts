@@ -155,6 +155,13 @@ export interface SharedSessionSubmission {
   readonly task?: string | undefined;
   readonly activeAgentId?: string | undefined;
   readonly created: boolean;
+  /**
+   * True when this message was already recorded under the same provider message
+   * id: nothing new was stored and this describes the earlier submission. It
+   * reports `continued-live` so a surface adapter acknowledges it without
+   * starting another agent.
+   */
+  readonly duplicate?: true | undefined;
 }
 
 export interface SubmitSharedSessionMessageInput {
@@ -168,6 +175,15 @@ export interface SubmitSharedSessionMessageInput {
   readonly displayName?: string | undefined;
   readonly title?: string | undefined;
   readonly body: string;
+  /**
+   * The provider's own id for this message. A message redelivered under the
+   * same surface, route and provider id (a provider retry, a restart that lost
+   * the in-memory cache) is recorded once; the repeat is answered with the
+   * earlier submission, flagged `duplicate`, once that submission is being
+   * answered or has been. A repeat of one that failed, was cancelled or is
+   * still waiting to be started is processed again.
+   */
+  readonly providerMessageId?: string | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
 }

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,13 +48,34 @@ describe('SecretsManager key-mismatch guards', () => {
     for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  test('losing the keyfile-creation race adopts the existing key instead of minting a private one', () => {
+  test('losing the keyfile-creation race adopts the winner\'s key instead of minting a private one', () => {
     const dirs = makeScratch();
-    // "Winner" process creates the keyfile first.
-    const winner = loadOrCreateKeyfile(dirs.keyfile);
-    // "Loser" arrives later: must return the winner's key byte-for-byte.
-    const loser = loadOrCreateKeyfile(dirs.keyfile);
-    expect(loser.equals(winner)).toBe(true);
+    const winnerKey = randomBytes(32);
+    // The winner creates the keyfile after the loser saw none and drew its own
+    // (distinct) key, which is the moment the exclusive create must refuse to overwrite.
+    const draw = spyOn(crypto, 'randomBytes');
+    let raced = false;
+    draw.mockImplementation(((size: number) => {
+      if (!raced) {
+        raced = true;
+        mkdirSync(join(dirs.home, '.goodvibes'), { recursive: true });
+        writeFileSync(dirs.keyfile, `${winnerKey.toString('hex')}\n`, { encoding: 'utf-8', mode: 0o600 });
+      }
+      return Buffer.alloc(size, 7);
+    }) as typeof crypto.randomBytes);
+    try {
+      const loser = loadOrCreateKeyfile(dirs.keyfile);
+      expect(raced).toBe(true);
+      expect(loser.equals(winnerKey)).toBe(true);
+      expect(readFileSync(dirs.keyfile, 'utf-8').trim()).toBe(winnerKey.toString('hex'));
+    } finally { draw.mockRestore(); }
+  });
+
+  test('a first start with no keyfile creates one and later loads return the same key', () => {
+    const dirs = makeScratch();
+    const first = loadOrCreateKeyfile(dirs.keyfile);
+    expect(first).toHaveLength(32);
+    expect(loadOrCreateKeyfile(dirs.keyfile).equals(first)).toBe(true);
   });
 
   test('a write is refused when the keyfile changed under a cached key, and the old store survives', async () => {

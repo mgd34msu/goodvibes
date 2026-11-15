@@ -1,4 +1,4 @@
-/** UNRUN: actual ContractStore reads, original source retention and native archives. */
+/** Actual ContractStore reads, original source retention and native archives. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

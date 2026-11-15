@@ -14,10 +14,12 @@
  *     the untyped methods HONESTLY: every method whose engine client IO resolves to
  *     `unknown` carries `x-typed-client-io: false`. They are never omitted.
  *
- * Outputs (both committed, kept in lockstep by this one generator):
- *   - contracts/artifacts/operator-openapi.json  (package-exported,
- *     prepare-engine-package copies the artifacts dir into the engine dist)
- *   - docs/operator-openapi.json                          (docs-fetchable copy)
+ * Outputs:
+ *   - contracts/artifacts/operator-openapi.json  (committed; package-exported,
+ *     prepare-engine-package copies the artifacts dir into the engine dist).
+ *     It is the only tracked copy: docs link to it rather than carrying a
+ *     second byte-identical 6.5 MB file.
+ *   - docs/openapi-contract.md                   (the counts paragraph only)
  *
  * Usage:
  *   bun scripts/generate-openapi-contract.ts          # regenerate
@@ -28,7 +30,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseMapKeys, parseMethodIds, untypedMethodIds } from './foundation-io-coverage-rule.ts';
-import type { OperatorContractManifest, OperatorMethodContract, JsonSchema } from '../contracts/src/types.ts';
+import type { OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
+import { buildParameters, hasDeleteBody, isOpaqueSchema, pathParamNames, replayKey, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -38,7 +41,6 @@ const CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contrac
 const FOUNDATION_TYPES_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/foundation-client-types.ts');
 const METHOD_IDS_PATH = resolve(ENGINE_ROOT, 'contracts/src/generated/operator-method-ids.ts');
 const ARTIFACT_OUT = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-openapi.json');
-const DOCS_OUT = resolve(ENGINE_ROOT, 'docs/operator-openapi.json');
 
 const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
 
@@ -63,41 +65,10 @@ function loadUntypedSet(): Set<string> {
   return new Set(untypedMethodIds(methodIds, inputKeys, outputKeys));
 }
 
-/** True when a schema is absent or a bare object with no declared properties. */
-function isOpaqueSchema(schema: JsonSchema | undefined): boolean {
-  if (!schema) return true;
-  if (Object.keys(schema).length === 0) return true;
-  return schema.type === 'object' && !Object.hasOwn(schema, 'properties');
-}
-
-function pathParamNames(path: string): string[] {
-  return [...path.matchAll(/\{([^/}]+)\}/g)].map((m) => m[1]!);
-}
-
 function securityFor(method: OperatorMethodContract): Record<string, string[]>[] | undefined {
   // 'public' methods opt out of the document-level security requirement.
   if (method.access === 'public') return [];
   return undefined;
-}
-
-function buildParameters(method: OperatorMethodContract): Record<string, unknown>[] {
-  const http = method.http!;
-  const params: Record<string, unknown>[] = [];
-  const pathParams = pathParamNames(http.path);
-  for (const name of pathParams) {
-    params.push({ name, in: 'path', required: true, schema: { type: 'string' } });
-  }
-  // For GET/DELETE, top-level input properties travel as query parameters
-  // (the gateway folds path params into the same invocation-params view).
-  if ((http.method === 'GET' || http.method === 'DELETE') && !isOpaqueSchema(method.inputSchema)) {
-    const properties = (method.inputSchema!.properties ?? {}) as Record<string, JsonSchema>;
-    const required = new Set((method.inputSchema!.required as string[] | undefined) ?? []);
-    for (const [name, schema] of Object.entries(properties)) {
-      if (pathParams.includes(name)) continue;
-      params.push({ name, in: 'query', required: required.has(name), schema });
-    }
-  }
-  return params;
 }
 
 function buildOperation(method: OperatorMethodContract, untyped: Set<string>): OpenApiOperation {
@@ -106,6 +77,8 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
   const opaqueIn = isOpaqueSchema(method.inputSchema);
   const opaqueOut = isOpaqueSchema(method.outputSchema);
   const notes: string[] = [method.description];
+  const replay = replayKey(method.id);
+  if (replay) notes.push(replay.note);
   if (isUntyped) {
     notes.push(
       'NOTE: this method has no typed engine client IO. Request/response resolve to `unknown` in the typed client (see `x-typed-client-io`).',
@@ -117,16 +90,18 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
     description: notes.join('\n\n'),
     tags: [method.category],
     responses: {
-      '200': {
-        description: 'Success',
-        content: {
-          'application/json': {
-            schema: opaqueOut
-              ? { description: 'Schema-less response (no declared output schema).', 'x-schema-coverage': 'schema-less' }
-              : method.outputSchema,
+      '200': SSE_METHODS.has(method.id)
+        ? { ...SSE_RESPONSE }
+        : {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: opaqueOut
+                  ? { description: 'Schema-less response (no declared output schema).', 'x-schema-coverage': 'schema-less' }
+                  : method.outputSchema,
+              },
+            },
           },
-        },
-      },
       default: { $ref: '#/components/responses/Error' },
     },
     'x-typed-client-io': !isUntyped,
@@ -135,25 +110,26 @@ function buildOperation(method: OperatorMethodContract, untyped: Set<string>): O
     ...(method.scopes.length > 0 ? { 'x-scopes': method.scopes } : {}),
     ...(method.dangerous !== undefined ? { 'x-dangerous': method.dangerous } : {}),
     ...(method.idempotent !== undefined ? { 'x-idempotent': method.idempotent } : {}),
+    ...(replay ? { 'x-replay-key': replay.extension } : {}),
   };
   const security = securityFor(method);
   if (security) op.security = security;
   const parameters = buildParameters(method);
   if (parameters.length > 0) op.parameters = parameters;
-  if (http.method === 'POST' || http.method === 'PATCH') {
+  if (http.method === 'POST' || http.method === 'PATCH' || (http.method === 'DELETE' && hasDeleteBody(method))) {
     // The expected-turn route's URL is canonical, and its typed engine removes
     // path keys from the wire body. Keep this new route's REST schema honest
     // without migrating the legacy body contracts of unrelated endpoints.
     const inputProperties = (method.inputSchema?.properties ?? {}) as Record<string, unknown>;
     const requiredInputKeys = Array.isArray(method.inputSchema?.required) ? method.inputSchema.required as readonly string[] : [];
-    const bodySchema = method.id === 'sessions.turns.cancel'
+    const bodySchema = method.id === 'sessions.turns.cancel' || http.method === 'DELETE'
       ? { ...method.inputSchema,
           properties: Object.fromEntries(Object.entries(inputProperties).filter(([key]) => !pathParamNames(http.path).includes(key))),
           required: requiredInputKeys.filter((key) => !pathParamNames(http.path).includes(key)),
         }
       : method.inputSchema;
     op.requestBody = {
-      required: !opaqueIn,
+      required: http.method === 'DELETE' ? requiredInputKeys.some((key) => !pathParamNames(http.path).includes(key)) : !opaqueIn,
       content: {
         'application/json': {
           schema: opaqueIn
@@ -295,6 +271,35 @@ function writeIfChanged(path: string, content: string): boolean {
   return true;
 }
 
+const DOC_COUNTS_PATH = resolve(ENGINE_ROOT, 'docs/openapi-contract.md');
+const DOC_COUNTS_START = '<!-- openapi-counts:start -->';
+const DOC_COUNTS_END = '<!-- openapi-counts:end -->';
+
+/** The counts paragraph of docs/openapi-contract.md, so the prose cannot drift from the document. */
+function countsParagraph(contract: OperatorContractManifest): string {
+  const methods = contract.operator.methods;
+  const rest = methods.filter((m) => m.http).length;
+  const invokeOnly = methods.length - rest;
+  return [
+    `  Methods with a dedicated REST binding appear as path operations (${rest} operations, one per`,
+    `  method's declared HTTP verb and path); methods without one are reachable only through the`,
+    `  generic invoke endpoint (\`POST ${INVOKE_PATH}\`, operation ${rest + 1},`,
+    `  ${invokeOnly} methods) and are listed on it under \`x-invoke-only-methods\`.`,
+    `  \`x-operator-methods\` is a flat index of all ${methods.length} cataloged methods, REST-bound`,
+    `  or invoke-only, each with its category, access level, resolved REST route (or`,
+    `  \`null\` for invoke-only), and schema/typed-IO coverage.`,
+  ].join('\n');
+}
+
+function docWithCounts(current: string, contract: OperatorContractManifest): string {
+  const start = current.indexOf(DOC_COUNTS_START);
+  const end = current.indexOf(DOC_COUNTS_END);
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`[openapi] ${DOC_COUNTS_PATH} is missing the ${DOC_COUNTS_START} ... ${DOC_COUNTS_END} markers`);
+  }
+  return `${current.slice(0, start + DOC_COUNTS_START.length)}\n${countsParagraph(contract)}\n  ${current.slice(end)}`;
+}
+
 const contract = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8')) as OperatorContractManifest;
 const untyped = loadUntypedSet();
 const document = buildDocument(contract, untyped);
@@ -302,7 +307,7 @@ const json = `${JSON.stringify(document, null, 2)}\n`;
 
 let drifted = false;
 drifted = writeIfChanged(ARTIFACT_OUT, json) || drifted;
-drifted = writeIfChanged(DOCS_OUT, json) || drifted;
+drifted = writeIfChanged(DOC_COUNTS_PATH, docWithCounts(readFileSync(DOC_COUNTS_PATH, 'utf8'), contract)) || drifted;
 
 if (CHECK_ONLY && drifted) {
   console.error('[openapi] drift detected, run `bun run openapi:generate`');

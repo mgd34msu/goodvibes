@@ -189,7 +189,8 @@ describe('real bootstrap usage restoration', () => {
     expect(f.sessionChanges).toEqual([target]);
     expect(f.pointers).toEqual([target]);
     expect(f.sessionSpine.keepaliveSessionId).toBe(target);
-    expect(f.sessionSpine.pendingOps).toBe(1);
+    // The daemon is offline here: the previous session's close and the resumed session's register wait for it.
+    expect(f.sessionSpine.pendingOps).toBe(2);
     expect(cancelledRecovery).toBe(1);
     expect(f.conversation.title).toBe('Saved picker');
     expect(f.conversation.getTitleSource()).toBe('user');

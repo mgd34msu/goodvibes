@@ -14,8 +14,16 @@ export interface CompactionEvidenceCase {
   readonly sourceIndex: number;
   readonly battery: typeof conversationSubstance;
 }
-interface Case extends CompactionEvidenceCase { readonly evidence: Set<number> }
-interface Job { readonly caseId: string; readonly sourceIndex: number }
+interface Case extends CompactionEvidenceCase {
+  readonly evidence: Set<number>;
+  /** Source index -> the size of this case's evidence when that source was read as not needed. Evidence only grows, so equal size is the same evidence. */
+  readonly settled: Map<number, number>;
+}
+interface Job { readonly caseId: string; readonly sourceIndex: number; readonly evidenceSize: number }
+/** Whether this case still has to read that source: not already evidence, and not already ruled out against the evidence it has now. */
+function unread(entry: Case, sourceIndex: number): boolean {
+  return !entry.evidence.has(sourceIndex) && entry.settled.get(sourceIndex) !== entry.evidence.size;
+}
 interface Batch {
   readonly state: { readonly conversation: string; readonly chunkSourcePositions: readonly number[]; readonly cases: readonly { readonly id: string; readonly candidateSourcePosition: number; readonly evidenceSourcePositions: readonly number[] }[] };
   readonly questions: Record<string, NoulQuestion>;
@@ -53,9 +61,9 @@ function chunksFor(sources: readonly string[]): number[][] {
 function dependencyBatch(sources: readonly string[], cases: readonly Case[], chunk: readonly number[]): Batch {
   const jobs = new Map<string, Job>(); const questions: Record<string, NoulQuestion> = {};
   for (const entry of cases) for (const sourceIndex of chunk) {
-    if (entry.evidence.has(sourceIndex)) continue;
+    if (!unread(entry, sourceIndex)) continue;
     const key = `dependency_${entry.id}_${sourceIndex}`;
-    jobs.set(key, { caseId: entry.id, sourceIndex });
+    jobs.set(key, { caseId: entry.id, sourceIndex, evidenceSize: entry.evidence.size });
     questions[key] = noul({ instructions: compactionEvidenceDependency.items.selected.question.instructions!,
       evidenceScope: 'Use only this case evidenceSourcePositions plus chunkSourcePositions. Other cases may contribute source text to the transport batch, but that text is outside this case scope unless its source position is listed in this case or the current chunk.',
       caseId: entry.id, targetSourcePosition: sourceIndex + 1 });
@@ -72,7 +80,7 @@ function planDependencies(sources: readonly string[], cases: readonly Case[], ch
     let group: Case[] = [];
     for (let index = 0; index < candidates.length; index++) {
       const entry = candidates[index]!;
-      if (chunk.every(sourceIndex => entry.evidence.has(sourceIndex))) continue;
+      if (chunk.every(sourceIndex => !unread(entry, sourceIndex))) continue;
       const trial = dependencyBatch(sources, [...group, entry], chunk);
       if (fits(trial)) { group.push(entry); continue; }
       if (group.length) { push(dependencyBatch(sources, group, chunk)); group = []; }
@@ -96,7 +104,7 @@ function membershipBatch(sources: readonly string[], cases: readonly Case[]): Ba
     const key = `selected_${entry.id}`;
     questions[key] = noul({ instructions: entry.battery.items.selected.question.instructions!,
       candidateSourcePosition: entry.sourceIndex + 1, caseId: entry.id });
-    jobs.set(key, { caseId: entry.id, sourceIndex: entry.sourceIndex });
+    jobs.set(key, { caseId: entry.id, sourceIndex: entry.sourceIndex, evidenceSize: entry.evidence.size });
   }
   return { state: stateFor(sources, cases), questions, jobs };
 }
@@ -137,7 +145,7 @@ export async function readDependencyQualifiedMembership(
   const controller = new AbortController();
   // The finite set of source messages reaches a fixed point; only the owner cancels.
   const work = new OwnedJudgmentWork({ signal: AbortSignal.any([owner.signal, controller.signal]), assertCurrent: owner.assertCurrent });
-  const cases: Case[] = inputs.map(input => ({ ...input, evidence: new Set([input.sourceIndex, ...partners(input.sourceIndex)]) }));
+  const cases: Case[] = inputs.map(input => ({ ...input, evidence: new Set([input.sourceIndex, ...partners(input.sourceIndex)]), settled: new Map<number, number>() }));
   const byId = new Map(cases.map(entry => [entry.id, entry]));
   let calls = 0;
   const reserve = (count: number) => {
@@ -169,8 +177,12 @@ export async function readDependencyQualifiedMembership(
       work.assertCurrent();
       let added = false;
       for (const { batch, readings } of results) for (const [key, reading] of readings) {
-        if (reading.outcome === 'act' && reading.verdict === 'no') continue;
         const job = batch.jobs.get(key)!; const entry = byId.get(job.caseId)!;
+        if (reading.outcome === 'act' && reading.verdict === 'no') {
+          // Read against exactly this evidence: a later sweep asks again only if the evidence grows.
+          entry.settled.set(job.sourceIndex, job.evidenceSize);
+          continue;
+        }
         for (const index of [job.sourceIndex, ...partners(job.sourceIndex)]) {
           if (!entry.evidence.has(index)) { entry.evidence.add(index); added = true; }
         }

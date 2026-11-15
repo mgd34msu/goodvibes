@@ -53,17 +53,19 @@ export function renderHistorySearchOverlay(
 
   // Highlight the matched region in the match text with dim styling
   if (hasMatch && match) {
-    const labelW = getDisplayWidth(label);
-    const matchStartCol = labelW + match.matchStart;
-    const matchEndCol = matchStartCol + match.matchLength;
-    const highlightWidth = Math.max(0, matchEndCol - matchStartCol);
-    const matchedSlice = truncateToWidth(match.entry.slice(match.matchStart, match.matchStart + match.matchLength), highlightWidth);
-    writeBottomBarText(line, matchStartCol, highlightWidth, matchedSlice, {
-      fg: p.selectedListItemText,
-      bg: p.accent,
-      bold: true,
-      underline: true,
-    });
+    // matchStart and matchLength are string indexes; the bar is drawn in
+    // columns, so wide characters before or inside the match shift it.
+    const matchedText = match.entry.slice(match.matchStart, match.matchStart + match.matchLength);
+    const matchStartCol = getDisplayWidth(label) + getDisplayWidth(match.entry.slice(0, match.matchStart));
+    const highlightWidth = Math.min(getDisplayWidth(matchedText), textW - matchStartCol);
+    if (highlightWidth > 0) {
+      writeBottomBarText(line, matchStartCol, highlightWidth, truncateToWidth(matchedText, highlightWidth), {
+        fg: p.selectedListItemText,
+        bg: p.accent,
+        bold: true,
+        underline: true,
+      });
+    }
   }
 
   return [line];

@@ -11,7 +11,7 @@
  *
  *   /hosted                    what this terminal is attached to, and what
  *                              leaving would do
- *   /hosted new [prompt…]      create one here and attach; `--survive` /
+ *   /hosted new [flags] [prompt…]  create one here and attach; leading `--survive` /
  *                              `--kill` set this session's own detach override
  *   /hosted list [--all]       every hosted session the daemon has
  *   /hosted attach <id|n>      join one and backfill its transcript
@@ -19,7 +19,7 @@
  *   /hosted later <text…>      queue a follow-up (ordinary verb)
  *   /hosted cancel [callId]    cancel one in-flight tool call (ordinary verb)
  *   /hosted detach             leave, the policy the record names then applies
- *   /hosted kill [id]          end it regardless of policy
+ *   /hosted kill [id] --yes    end it regardless of policy (without --yes it only says what it would end)
  *
  * There is no `/hosted steer` beside `say` and no hosted-only cancel: those
  * operations are `sessions.steer`, `sessions.followUp` and
@@ -43,7 +43,7 @@ import {
   type HostedSessionRecord,
   type HostedSessionsClient,
 } from '../../runtime/client/hosted-sessions.ts';
-import { watchHostedSession, type HostedSessionSubscription } from '../../runtime/client/hosted-session-stream.ts';
+import { newestHistoryTime, watchHostedSession, type HostedSessionSubscription } from '../../runtime/client/hosted-session-stream.ts';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { getSharedHostedSessionFeed, type HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { getSharedHostedSessionRoster } from '../../runtime/client/hosted-roster.ts';
@@ -93,7 +93,11 @@ export function renderHostedStatus(feed: HostedSessionFeed): string {
 }
 
 /**
- * Read `--survive` / `--kill` out of the arguments.
+ * Read `--survive` / `--kill` from the front of the arguments.
+ *
+ * Only flags before the first ordinary word count: the rest is the prompt and is
+ * passed on untouched, so a prompt that mentions `--kill` neither changes the
+ * session's lifetime nor loses the word.
  *
  * Absent means "follow the `hostedSessions.detachPolicy` setting", which is a
  * different thing from either value and is what most sessions want: the record
@@ -103,14 +107,15 @@ export function readDetachOverride(args: readonly string[]): {
   readonly policy: HostedDetachPolicy | undefined;
   readonly rest: string[];
 } {
-  const rest: string[] = [];
   let policy: HostedDetachPolicy | undefined;
-  for (const arg of args) {
-    if (arg === '--survive') { policy = 'survive'; continue; }
-    if (arg === '--kill') { policy = 'kill'; continue; }
-    rest.push(arg);
+  let index = 0;
+  for (; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--survive') policy = 'survive';
+    else if (arg === '--kill') policy = 'kill';
+    else break;
   }
-  return { policy, rest };
+  return { policy, rest: args.slice(index) };
 }
 
 interface HostedCommandSeams {
@@ -146,12 +151,34 @@ function resolveSeams(context: CommandContext): HostedCommandSeams | null {
   return { client, baseUrl, authToken };
 }
 
+/**
+ * Steer the attached hosted session and report whether the daemon took it, so a
+ * caller other than the command line (the Agents modal) never claims a send that
+ * did not happen. The text goes through untouched.
+ */
+export async function sayToHosted(
+  context: CommandContext,
+  text: string,
+  seams: Pick<HostedCommandSeams, 'client'> | null = resolveSeams(context),
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+  const attachedId = getSharedHostedSessionFeed().getState().record?.id ?? null;
+  if (!attachedId) return { ok: false, error: 'no hosted session is attached; /hosted attach <id> first.' };
+  if (!seams) return { ok: false, error: 'the daemon is not reachable from this terminal.' };
+  try {
+    await seams.client.steer(attachedId, text);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: describeOperatorRpcError(error) };
+  }
+}
+
 /** Open the live stream for the attached session, and say so in the feed either way. */
 async function openStream(
   seams: HostedCommandSeams,
   sessionId: string,
   feed: HostedSessionFeed,
   signal: AbortSignal,
+  notBefore: number,
 ): Promise<void> {
   // The feed owns the subscription handle: the exit path has to be able to
   // close it too, and it has no way to reach a variable in this module.
@@ -170,6 +197,9 @@ async function openStream(
     sessionId,
     getAuthToken: () => token,
     signal,
+    // The daemon replays its newest buffered frames to a new stream; the ones the
+    // backfill already shows must not be appended a second time.
+    notBefore,
     onEvent: (event) => { if (!signal.aborted) feed.apply(event); },
     onLifecycle: (update) => { if (!signal.aborted) feed.applyLifecycle(update); },
     onTerminate: (error) => {
@@ -192,7 +222,7 @@ async function attachSession(
   context: CommandContext,
 ): Promise<void> {
   const attachment = await replaceHostedAttachment(feed, seams.client, sessionId,
-    (result, signal) => openStream(seams, result.session.id, feed, signal));
+    (result, signal) => openStream(seams, result.session.id, feed, signal, result.historyAsOf ?? newestHistoryTime(result.history)));
   context.print([
     `[hosted] attached to ${hostedSessionLabel(attachment.session)} (${attachment.history.length} message(s) backfilled)`,
     `  ${describeDetachEffect(attachment.session)}`,
@@ -213,7 +243,7 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'hosted',
     description: 'Daemon-hosted sessions: start, join, steer and leave a conversation whose loop runs in the daemon',
-    usage: '[new|list|attach|say|later|cancel|detach|kill] [args]',
+    usage: '[new|list|attach|say|later|cancel|detach|kill <id> --yes] [args]',
     argsHint: '[new|list|attach|say|later|cancel|detach|kill]',
     async handler(args, ctx) {
       const feed = getSharedHostedSessionFeed();
@@ -276,16 +306,21 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             await attachSession(seams, resolveIdArgument(target), feed, ctx);
             return;
           }
-          case 'say':
+          case 'say': {
+            const body = args.slice(1).join(' ').trim();
+            if (!body) { ctx.print('Usage: /hosted say <text>'); return; }
+            const outcome = await sayToHosted(ctx, body, seams);
+            ctx.print(outcome.ok
+              ? '[hosted] sent: its output arrives in the Agents view under Hosted (/agents).'
+              : `[hosted] not sent: ${outcome.error}`);
+            return;
+          }
           case 'later': {
             if (!attachedId) { ctx.print('[hosted] no hosted session is attached; /hosted attach <id> first.'); return; }
             const body = args.slice(1).join(' ').trim();
-            if (!body) { ctx.print(`Usage: /hosted ${sub} <text>`); return; }
-            if (sub === 'say') await seams.client.steer(attachedId, body);
-            else await seams.client.followUp(attachedId, body);
-            ctx.print(sub === 'say'
-              ? '[hosted] sent: its output arrives in the Agents view under Hosted (/agents).'
-              : '[hosted] queued: it runs after the current turn.');
+            if (!body) { ctx.print('Usage: /hosted later <text>'); return; }
+            await seams.client.followUp(attachedId, body);
+            ctx.print('[hosted] queued: it runs after the current turn.');
             return;
           }
           case 'cancel': {
@@ -311,8 +346,14 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           case 'kill': {
-            const target = args[1] ? resolveIdArgument(args[1]) : attachedId;
-            if (!target) { ctx.print('Usage: /hosted kill <id> (or attach one first)'); return; }
+            const killArgs = args.slice(1).filter((word) => word !== '--yes');
+            const target = killArgs[0] ? resolveIdArgument(killArgs[0]) : attachedId;
+            if (!target) { ctx.print('Usage: /hosted kill <id> [--yes] (or attach one first)'); return; }
+            if (!args.includes('--yes')) {
+              // A list number is resolved against the last list printed in this process, which may be stale: show what it means.
+              ctx.print(`[hosted] this ends session ${target} and its running turn, and cannot be undone. Nothing was ended.\n  Run /hosted kill ${killArgs[0] ?? target} --yes to confirm (${killArgs[0] && killArgs[0] !== target ? `${killArgs[0]} currently means ${target}` : 'check the id with /hosted list'}).`);
+              return;
+            }
             const record = await seams.client.kill(target);
             forgetHostedAttachment(feed, target);
             if (target === feed.getState().record?.id) feed.clear();
@@ -320,7 +361,7 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           default:
-            ctx.print('Usage: /hosted [status|new|list|attach|say|later|cancel|detach|kill]');
+            ctx.print('Usage: /hosted [status|new|list|attach|say|later|cancel|detach|kill <id> --yes]');
             return;
         }
       } catch (error) {

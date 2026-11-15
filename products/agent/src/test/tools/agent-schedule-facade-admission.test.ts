@@ -52,7 +52,9 @@ test.each([
   ['resume', 'agent_operator_action'], ['delete', 'agent_operator_action'],
 ] as const)('schedule %s prepares a separately admitted registered %s child without caller flags', async (action, owner) => {
   const f = fixture();
-  const result = await f.run({ action, scheduleId: 'synthetic-schedule', task: 'Synthetic task', successCriteria: 'Synthetic criteria',
+  // Creating takes no schedule id: the facade refuses one instead of ignoring it.
+  const creates = action === 'create' || action === 'reminder';
+  const result = await f.run({ action, ...(creates ? {} : { scheduleId: 'synthetic-schedule' }), task: 'Synthetic task', successCriteria: 'Synthetic criteria',
     message: 'Synthetic reminder', every: '1d' });
   expect(result.success).toBe(true); expect(f.calls).toHaveLength(1); expect(f.calls[0]?.name).toBe(owner);
   expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);

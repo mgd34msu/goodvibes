@@ -1,14 +1,13 @@
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
-import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, RuntimeEventDomain } from './integration-route-types.js';
+import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse } from './error-response.js';
+import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput, RuntimeEventDomain } from './integration-route-types.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
   readBoundedPositiveInteger,
   readOptionalStringField,
-  readStringArrayField,
 } from './route-helpers.js';
 import {
   parseMemoryBundleImportBody,
@@ -52,11 +51,24 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
     const password = readOptionalStringField(body, 'password');
     if (!username) return jsonErrorResponse({ error: 'Missing username' }, { status: 400 });
     if (!password) return jsonErrorResponse({ error: 'Missing password' }, { status: 400 });
-    return {
-      username,
-      password,
-      roles: readStringArrayField(body, 'roles', MAX_LOCAL_AUTH_ROLES) ?? ['admin'],
-    };
+    // Omitting `roles` creates an admin (the long-standing default). A `roles`
+    // that is present but empty or malformed is refused: reading it as "absent"
+    // would hand an admin account to a caller who asked for no roles.
+    let roles: readonly string[] = ['admin'];
+    if (Object.hasOwn(body, 'roles')) {
+      const requested: unknown = body.roles;
+      const entries = Array.isArray(requested) && requested.length <= MAX_LOCAL_AUTH_ROLES && requested.every((entry) => typeof entry === 'string' && entry.trim().length > 0)
+        ? (requested as string[]).map((entry) => entry.trim())
+        : [];
+      if (entries.length === 0) {
+        return jsonErrorResponse({
+          error: `roles must be an array of 1 to ${MAX_LOCAL_AUTH_ROLES} non-empty role names. Omit roles to create an admin user.`,
+          code: 'INVALID_REQUEST',
+        }, { status: 400 });
+      }
+      roles = entries;
+    }
+    return { username, password, roles };
   }),
   localAuthPassword: createRouteBodySchema<LocalAuthPasswordBody>('POST /api/local-auth/users/:username/password', (body) => {
     const password = readOptionalStringField(body, 'password');
@@ -72,6 +84,20 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
     };
   }),
 });
+
+/**
+ * The reviewer on a review is whoever holds the credential, not a name in the
+ * body: the store treats it as provenance, so a claimed name would forge it.
+ */
+function withAuthenticatedReviewer(
+  context: DaemonIntegrationRouteContext,
+  req: Request,
+  fields: MemoryRecordReviewInput,
+): MemoryRecordReviewInput {
+  const { reviewedBy: _claimed, ...rest } = fields;
+  const principal = context.resolveAuthenticatedPrincipal?.(req) ?? null;
+  return principal ? { ...rest, reviewedBy: principal.principalId } : rest;
+}
 
 export function createDaemonIntegrationRouteHandlers(
   context: DaemonIntegrationRouteContext,
@@ -113,10 +139,18 @@ export function createDaemonIntegrationRouteHandlers(
         ? Response.json(usage)
         : jsonErrorResponse({ error: 'Unknown provider' }, { status: 404 });
     },
-    getSettings: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSettingsSnapshot())),
-    getSecuritySettings: () => withHelpers(context.integrationHelpers, (helpers) => Response.json({
-      settings: helpers.getSecuritySettingsReport(),
-    })),
+    getSettings: (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      return withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSettingsSnapshot()));
+    },
+    getSecuritySettings: (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      return withHelpers(context.integrationHelpers, (helpers) => Response.json({
+        settings: helpers.getSecuritySettingsReport(),
+      }));
+    },
     getContinuity: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getContinuitySnapshot())),
     getWorktrees: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getWorktreeSnapshot())),
     getIntelligence: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getIntelligenceSnapshot())),
@@ -124,18 +158,30 @@ export function createDaemonIntegrationRouteHandlers(
     getMemoryConsolidationReceipts: () => {
       // What consolidation DID (retained run receipts) and what it PROPOSED,
       // judgment outcomes a human acts on via the confirmation-gated review
-      // route. Pending = proposals carried by the retained receipts (the
-      // scheduler ring bounds them); the referenced records are already
-      // marked into the review queue by the engine.
+      // route. A proposal stays pending until every record it names has been
+      // reviewed or removed; the receipts themselves are kept by the scheduler
+      // ring, so a decided proposal would otherwise stay listed until its
+      // receipt aged out. The referenced records are already marked into the
+      // review queue by the engine.
       if (!context.memoryConsolidation) {
         return jsonErrorResponse({ error: 'This runtime has no memory-consolidation scheduler.' }, { status: 501 });
       }
       const receipts = context.memoryConsolidation.listReceipts();
-      const pendingProposals = receipts.flatMap((receipt) => {
+      const proposals = receipts.flatMap((receipt) => {
         const proposed = (receipt as { proposed?: unknown }).proposed;
         return Array.isArray(proposed) ? proposed : [];
       });
-      return Response.json({ receipts, pendingProposals });
+      const stillOpen = (proposal: unknown): boolean => {
+        const ids = (proposal as { ids?: unknown } | null)?.ids;
+        if (!Array.isArray(ids) || ids.length === 0) return true;
+        return ids.some((id) => {
+          if (typeof id !== 'string') return true;
+          const record = context.memoryRegistry.get(id) as { reviewState?: unknown } | null;
+          return record !== null && record !== undefined && record.reviewState !== 'reviewed';
+        });
+      };
+      const pendingProposals = proposals.filter(stillOpen);
+      return Response.json({ receipts, pendingProposals, decidedProposalCount: proposals.length - pendingProposals.length });
     },
     getMemoryVectorStats: () => Response.json({ vector: context.memoryRegistry.vectorStats() }),
     getMemoryReviewQueue: async (url) => {
@@ -163,28 +209,34 @@ export function createDaemonIntegrationRouteHandlers(
         context.memoryEmbeddingRegistry.setDefaultProvider(input.providerId);
         return Response.json(await context.memoryRegistry.doctor());
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error);
       }
     },
     // Canonical-store record CRUD/search. The daemon is the single writer; a client
     // surface reaches its store ONLY through these routes and never opens the file.
+    // Writes are admin-only, like the gateway verbs for the same operations: the
+    // daemon gate only proves the caller holds some valid credential.
     postMemoryRecordAdd: async (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const input = parseMemoryRecordAddBody(body);
-      if (input instanceof Response) return input;
+      const parsed = parseMemoryRecordAddBody(body);
+      if (parsed instanceof Response) return parsed;
+      const input = parsed.review ? { ...parsed, review: withAuthenticatedReviewer(context, req, parsed.review) } : parsed;
       try {
         const record = await context.memoryRegistry.add(input);
         return Response.json({ record }, { status: 201 });
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error);
       }
     },
     postMemoryRecordSearch: async (req) => {
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const { filter, recall } = parseMemoryRecordSearchBody(body);
-      return Response.json(await context.memoryRegistry.honestSearch(filter, { recall }));
+      const parsed = parseMemoryRecordSearchBody(body);
+      if (parsed instanceof Response) return parsed;
+      return Response.json(await context.memoryRegistry.honestSearch(parsed.filter, { recall: parsed.recall }));
     },
     getMemoryRecord: (id) => {
       const record = context.memoryRegistry.get(id);
@@ -193,17 +245,32 @@ export function createDaemonIntegrationRouteHandlers(
         : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
     },
     postMemoryRecordReview: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const patch = parseMemoryRecordReviewBody(body);
-      const record = context.memoryRegistry.review(id, patch);
-      return record
-        ? Response.json({ record })
-        : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      const parsed = parseMemoryRecordReviewBody(body);
+      if (parsed instanceof Response) return parsed;
+      const patch = withAuthenticatedReviewer(context, req, parsed);
+      try {
+        const record = context.memoryRegistry.review(id, patch);
+        return record
+          ? Response.json({ record })
+          : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      } catch (error) {
+        return readServiceErrorResponse(error);
+      }
     },
-    deleteMemoryRecord: (id) => {
-      const deleted = context.memoryRegistry.delete(id);
-      return Response.json({ id, deleted });
+    // `{ deleted: false }` for an unknown id is the documented answer (see memory.records.delete).
+    deleteMemoryRecord: (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      try {
+        const deleted = context.memoryRegistry.delete(id);
+        return Response.json({ id, deleted });
+      } catch (error) {
+        return readServiceErrorResponse(error);
+      }
     },
     // Full-detach catalog (1.2.0). Reads serialize a bare array/entity; writes route
     // through the single-writer registry exactly like add/review/delete above.
@@ -211,22 +278,31 @@ export function createDaemonIntegrationRouteHandlers(
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
+      if (filter instanceof Response) return filter;
       return Response.json({ records: await context.memoryRegistry.search(filter) });
     },
     postMemoryRecordSearchSemantic: async (req) => {
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
+      if (filter instanceof Response) return filter;
       return Response.json({ results: await context.memoryRegistry.searchSemantic(filter) });
     },
     postMemoryRecordUpdate: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const patch = parseMemoryRecordUpdateBody(body);
-      const record = context.memoryRegistry.update(id, patch);
-      return record
-        ? Response.json({ record })
-        : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      if (patch instanceof Response) return patch;
+      try {
+        const record = context.memoryRegistry.update(id, patch);
+        return record
+          ? Response.json({ record })
+          : jsonErrorResponse({ error: 'Unknown memory record', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      } catch (error) {
+        return readServiceErrorResponse(error);
+      }
     },
     getMemoryRecordLinks: (id) => {
       if (context.memoryRegistry.get(id) === null) {
@@ -235,24 +311,33 @@ export function createDaemonIntegrationRouteHandlers(
       return Response.json({ links: context.memoryRegistry.linksFor(id) });
     },
     postMemoryRecordLink: async (id, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const input = parseMemoryLinkBody(body);
       if (input instanceof Response) return input;
-      const link = await context.memoryRegistry.link(id, input.toId, input.relation);
-      // link() returns null when either endpoint id is unknown, an honest 404, not a
-      // 200 that pretends a link was made between records that do not both exist.
-      return link
-        ? Response.json({ link }, { status: 201 })
-        : jsonErrorResponse({ error: 'Unknown memory record (link source or target)', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      try {
+        const link = await context.memoryRegistry.link(id, input.toId, input.relation);
+        // link() returns null when either endpoint id is unknown, an honest 404, not a
+        // 200 that pretends a link was made between records that do not both exist.
+        return link
+          ? Response.json({ link }, { status: 201 })
+          : jsonErrorResponse({ error: 'Unknown memory record (link source or target)', code: MEMORY_RECORD_NOT_FOUND_CODE }, { status: 404 });
+      } catch (error) {
+        return readServiceErrorResponse(error);
+      }
     },
     postMemoryRecordExport: async (req) => {
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
+      if (filter instanceof Response) return filter;
       return Response.json({ bundle: context.memoryRegistry.exportBundle(filter) });
     },
     postMemoryRecordImport: async (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const input = parseMemoryBundleImportBody(body);
@@ -260,7 +345,7 @@ export function createDaemonIntegrationRouteHandlers(
       try {
         return Response.json({ result: await context.memoryRegistry.importBundle(input.bundle) });
       } catch (error) {
-        return readJsonErrorResponse(error, { status: 400 });
+        return readServiceErrorResponse(error);
       }
     },
     getLocalAuth: (req) => {
@@ -321,6 +406,8 @@ export function createDaemonIntegrationRouteHandlers(
     },
     getPanels: () => withHelpers(context.integrationHelpers, (helpers) => Response.json({ panels: helpers.listPanels() })),
     postPanelOpen: async (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const input = integrationBodySchemas.panelOpen.parse(body);

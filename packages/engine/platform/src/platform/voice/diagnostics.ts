@@ -20,12 +20,44 @@
  */
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { join } from 'node:path';
+import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 
 /** File name of the voice diagnostics log within a surface's managed voice root. */
 export const VOICE_DIAGNOSTICS_FILE = 'voice-diagnostics.json';
 
+/** Lock file serializing writers of the diagnostics file. */
+const VOICE_DIAGNOSTICS_LOCK_FILE = 'voice-diagnostics.lock';
+
 /** Newest entries kept. Older ones are dropped on the next write. */
 export const VOICE_DIAGNOSTICS_MAX_ENTRIES = 50;
+
+/** Attempts, and the pause between them, to take the cross-process lock around one read-modify-write. */
+const DIAGNOSTICS_LOCK_ATTEMPTS = 20;
+const DIAGNOSTICS_LOCK_PAUSE_MS = 5;
+
+/**
+ * Hold the diagnostics lock for `work`. The daemon and a terminal product both
+ * record into one managed root, and an unlocked read-modify-write lets the
+ * later write drop the other's entry. The wait is bounded and ends unlocked:
+ * recording must never be the reason voice fails, and a lock that stays busy
+ * costs at worst the race it was meant to close.
+ */
+function withDiagnosticsLock(managedRoot: string, work: () => void): void {
+  let release: (() => void) | null = null;
+  try {
+    for (let attempt = 0; attempt < DIAGNOSTICS_LOCK_ATTEMPTS && release === null; attempt++) {
+      release = tryAcquireCrossProcessLock(join(managedRoot, VOICE_DIAGNOSTICS_LOCK_FILE));
+      if (release === null) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, DIAGNOSTICS_LOCK_PAUSE_MS);
+    }
+  } catch {
+    release = null;
+  }
+  try {
+    work();
+  } finally {
+    try { release?.(); } catch { /* A lock that cannot be released is reclaimed once this process is gone. */ }
+  }
+}
 
 /** Entries older than this are dropped on the next write. */
 export const VOICE_DIAGNOSTICS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -119,20 +151,22 @@ export function recordVoiceDiagnostic(
   const maxEntries = options.maxEntries ?? VOICE_DIAGNOSTICS_MAX_ENTRIES;
   const maxAgeMs = options.maxAgeMs ?? VOICE_DIAGNOSTICS_MAX_AGE_MS;
   const cutoff = now() - maxAgeMs;
-  const kept = [...readVoiceDiagnostics(managedRoot), entry]
-    .filter((candidate) => {
-      const at = Date.parse(candidate.at);
-      // An unparseable timestamp is kept rather than reaped: the count cap still
-      // bounds it, and silently dropping the one entry whose clock was odd is
-      // how evidence goes missing.
-      return Number.isNaN(at) || at >= cutoff;
-    })
-    .slice(-maxEntries);
-  try {
-    writeJsonFileAtomic(voiceDiagnosticsPath(managedRoot), { entries: kept });
-  } catch {
-    // Nothing to do and nothing to raise: see the doc comment.
-  }
+  withDiagnosticsLock(managedRoot, () => {
+    const kept = [...readVoiceDiagnostics(managedRoot), entry]
+      .filter((candidate) => {
+        const at = Date.parse(candidate.at);
+        // An unparseable timestamp is kept rather than reaped: the count cap still
+        // bounds it, and silently dropping the one entry whose clock was odd is
+        // how evidence goes missing.
+        return Number.isNaN(at) || at >= cutoff;
+      })
+      .slice(-maxEntries);
+    try {
+      writeJsonFileAtomic(voiceDiagnosticsPath(managedRoot), { entries: kept });
+    } catch {
+      // Nothing to do and nothing to raise: see the doc comment.
+    }
+  });
 }
 
 /** One-line rendering of an entry, for a status surface or a reply. */

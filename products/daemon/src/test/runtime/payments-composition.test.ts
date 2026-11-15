@@ -87,6 +87,20 @@ test('real product payments register on the existing catalog and read live owner
   for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
 });
 
+test('the composition attaches an order-mail observer to the owner mailbox and detaches it on close', async () => {
+  const f = fixture();
+  const attached: unknown[] = [];
+  let detached = 0;
+  await f.services.close();
+  const composition = createPaymentsServices({ ...f.options, ownerMail: { attach(handler) { attached.push(handler); return () => { detached++; }; } } });
+  await composition.ready;
+  expect(attached).toHaveLength(1);
+  expect(typeof attached[0]).toBe('function');
+  expect(detached).toBe(0);
+  await composition.close();
+  expect(detached).toBe(1);
+});
+
 test('closing before registration settles cannot leave handlers or an answerable window behind', async () => {
   const f = fixture();
   const waiting = f.services.paymentReplies.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', channels: ['telegram'], notice: 'fixture', deadlineMs: Date.now() + 60_000 });
@@ -273,10 +287,21 @@ test.each(['cancel-before-boot', 'original-page-unavailable'] as const)(
         await until(() => operations.get(original.purchaseId)?.state === 'refused'); expect(pageReads).toBe(1);
       }
       await replacement.close();
-      expect(replacement.budget.state().reservations).toEqual([]);
-      expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
-      expect(f.pairing.readNativeContinuation(continuation)).toBeNull();
-      expect(existsSync(join(base, 'payments-requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`))).toBe(false);
+      const requestFile = join(base, 'payments-requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`);
+      if (mode === 'cancel-before-boot') {
+        // A stop before the original window was taken back leaves it exactly as
+        // found, for the next boot to resume or settle; nothing is released.
+        expect(replacement.budget.state().reservations.map(row => row.id)).toEqual([original.purchaseId]);
+        expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([window.record]);
+        expect(f.pairing.readNativeContinuation(continuation)).not.toBeNull();
+        expect(existsSync(requestFile)).toBe(true);
+        expect(operations.get(original.purchaseId)).toMatchObject({ state: 'running', phase: 'awaiting-window', outcome: null });
+      } else {
+        expect(replacement.budget.state().reservations).toEqual([]);
+        expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
+        expect(f.pairing.readNativeContinuation(continuation)).toBeNull();
+        expect(existsSync(requestFile)).toBe(false);
+      }
       expect(f.deliveries).toEqual([]);
       const writer = operations.recover(original.purchaseId); if (!writer) throw new Error('Original executor lease did not drain'); writer.release();
     } finally { await replacement.close(); scopes.close(); }
@@ -426,7 +451,9 @@ test('a damaged real ledger keeps interrupted evidence and refuses new checkout 
   try {
     await replacement.ready;
     expect((await new DurableCheckoutJournal(journalPath(f)).list())[0]?.phase).toBe('submit-pending');
-    expect(f.deliveries).toEqual([]);
+    // The evidence cannot be settled, so the owner is told once, in words that name no path or card detail.
+    expect(f.deliveries).toHaveLength(1);
+    expect(f.deliveries[0]).toMatchObject({ target: { kind: 'surface', surfaceKind: 'tui' }, body: expect.stringContaining('requires inspection') });
     await expect(invoke(f.catalog, 'payments.purchases.list')).rejects.toMatchObject({ status: 409 });
     await invoke(f.catalog, 'payments.checkout.approve', { merchantDomain: 'bestbuy.com', item: 'Fixture item', amount: '11.00', confirm: true });
     let failure: unknown;

@@ -7,11 +7,13 @@ import { detectSandboxAvailability, probeSandboxHost } from '../platform/src/pla
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.js';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
+import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
 
 useToolReadings();
 const availability = detectSandboxAvailability(probeSandboxHost());
-if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
-  throw new Error('Required ordinary runtime containment backend is unavailable');
+const nodeAndNpm = Bun.which('node') !== null && Bun.which('npm') !== null;
+requireLiveHost('ordinary runtime containment backend', availability.available);
+requireLiveHost('node and npm', nodeAndNpm);
 
 test.skipIf(!availability.available)('ordinary sandbox runs Bun tests while keeping home, runtime writes and host networking unavailable', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sandbox-js-runtime-'));
@@ -40,7 +42,7 @@ test('real contained Bun execution', () => {
   } finally { await manager.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test.skipIf(!availability.available || !Bun.which('node') || !Bun.which('npm'))('ordinary sandbox supplies the selected native Node and npm without mounting home directories', async () => {
+test.skipIf(!availability.available || !nodeAndNpm)('ordinary sandbox supplies the selected native Node and npm without mounting home directories', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'sandbox-node-runtime-'));
   // The installed product supplies a copied Node binary ahead of the user's
   // package manager. npm must still work without exposing either directory.

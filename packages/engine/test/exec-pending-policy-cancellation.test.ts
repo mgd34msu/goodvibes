@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createExecTool, OverflowHandler, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { AGENT_OWNER_TERMINAL_GUARD } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { isRetryableExecResult } from '../platform/src/platform/tools/exec/runtime.ts';
 const makeProjectTempDir = (prefix: string): string => mkdtempSync(join(tmpdir(), prefix));
 
@@ -14,13 +13,13 @@ let previous: ReturnType<typeof installJudgmentPort>;
 let installed = false;
 afterEach(() => { if (installed) installJudgmentPort(previous); installed = false; });
 
-test('authorized exec does not wait for removed boundary or owner-terminal readings', async () => {
+test('authorized exec does not wait for removed boundary readings', async () => {
   const root = makeProjectTempDir('exec-without-secondary-gate');
   const manager = new ProcessManager();
   const launches = spyOn(manager, 'spawn').mockImplementation(async cmd => ({ cmd, exit_code: 0, stdout: 'fixture', stderr: '', success: true, process_id: 'synthetic-launch' }));
   let requests = 0;
   previous = installJudgmentPort({ model: 'offline-no-reading', ask() { requests++; throw new Error('Unexpected exec approval reading'); } }); installed = true;
-  const tool = createExecTool(manager, { overflowHandler: new OverflowHandler({ baseDir: root }), defaultWorkingDirectory: root, ownerTerminal: AGENT_OWNER_TERMINAL_GUARD });
+  const tool = createExecTool(manager, { overflowHandler: new OverflowHandler({ baseDir: root }), defaultWorkingDirectory: root });
   try {
     const result = await tool.execute({ commands: [{ cmd: 'synthetic-fixture', background: true }] });
     expect(result.success).toBe(true);

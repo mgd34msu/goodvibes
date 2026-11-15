@@ -2,7 +2,7 @@ import { currentExternalOperationSource } from '../../permissions/external-opera
 import type { LocalhostFetchApproval, LocalhostFetchPermit } from '../../runtime/permissions/localhost-fetch-approval.js';
 import { logger } from '../../utils/logger.js';
 import { currentExecutionMode, isInvocationAdmitted, isYoloExecution } from '../../gate/execution-context.js';
-import { captureProjectionStructure } from '../input-projection.js';
+import { captureProjectionStructure, describeUnexpectedToolError } from '../input-projection.js';
 import { hasDifferentFetchInvocation, isAdmittedFetchRequest, runFetchInvocation, runFetchRequest, runFetchSocketHop, withoutFetchInvocation } from './invocation.js';
 import type { Tool, ToolDefinition } from '../../types/tools.js';
 import { FETCH_TOOL_SCHEMA } from './schema.js';
@@ -19,7 +19,7 @@ import {
 } from './trust-tiers.js';
 import { applyExtract, sniffContentType } from './extract.js';
 import { headersForOtherOrigin } from './redirect-headers.js';
-import { pinnedFetch, resolveCheckedAddresses, type HostResolver } from './pinned-request.js';
+import { assertHttpScheme, pinnedFetch, resolveCheckedAddresses, type HostResolver } from './pinned-request.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createTimeoutController, sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
@@ -34,18 +34,20 @@ export interface FetchRuntimeDeps {
    * Default sanitize mode applied when a fetch call omits sanitize_mode.
    * Sourced from config (fetch.sanitizeMode) by platform runtime services; a per-call
    * sanitize_mode still overrides. Absent → the built-in 'safe-text' default.
+   * A function is read on every call, so a changed setting applies to the next fetch.
    */
-  readonly defaultSanitizeMode?: FetchSanitizeMode | undefined;
+  readonly defaultSanitizeMode?: FetchSanitizeMode | (() => FetchSanitizeMode | undefined) | undefined;
   /**
-   * Default trusted hosts (from config fetch.trustedHosts). Merged with, never
-   * replaced by, per-call trusted_hosts.
+   * Trusted hosts (from config fetch.trustedHosts). A call's own trusted_hosts
+   * is not honoured: trust that lifts sanitization comes from configuration,
+   * not from the model asking for it. A function is read on every call.
    */
-  readonly defaultTrustedHosts?: readonly string[] | undefined;
+  readonly defaultTrustedHosts?: readonly string[] | (() => readonly string[] | undefined) | undefined;
   /**
    * Default blocked hosts (from config fetch.blockedHosts). Merged with per-call
-   * blocked_hosts.
+   * blocked_hosts. A function is read on every call.
    */
-  readonly defaultBlockedHosts?: readonly string[] | undefined;
+  readonly defaultBlockedHosts?: readonly string[] | (() => readonly string[] | undefined) | undefined;
   /**
    * Cooperative cancellation: an externally-supplied signal,
    * combined with each request's own per-URL timeout signal via
@@ -84,6 +86,10 @@ const MAX_PARALLEL_FETCHES = 5;
 const MAX_REDIRECTS = 10;
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Response bytes read when a call sets no max_content_length; 0 opts out of the cap. */
+const DEFAULT_MAX_CONTENT_BYTES = 5_000_000;
+const CANCELLED_MESSAGE = 'Cancelled: the call was cancelled before this request finished. Not a timeout; do not retry with a larger timeout_ms.';
+const CANCELLED_NOT_SENT = 'Cancelled: the call was cancelled before this request was sent. Nothing was sent for this entry.';
 
 export class FetchRuntimeService {
   private readonly responseCache = new Map<string, CacheEntry>();
@@ -125,10 +131,13 @@ export class FetchRuntimeService {
 
 
 
-    const sanitizeMode = resolveSanitizeMode(input.sanitize_mode ?? deps.defaultSanitizeMode);
+    const defaultSanitizeMode = typeof deps.defaultSanitizeMode === 'function' ? deps.defaultSanitizeMode() : deps.defaultSanitizeMode;
+    const defaultTrustedHosts = typeof deps.defaultTrustedHosts === 'function' ? deps.defaultTrustedHosts() : deps.defaultTrustedHosts;
+    const defaultBlockedHosts = typeof deps.defaultBlockedHosts === 'function' ? deps.defaultBlockedHosts() : deps.defaultBlockedHosts;
+    const sanitizeMode = resolveSanitizeMode(input.sanitize_mode ?? defaultSanitizeMode);
     const trustTierConfig: TrustTierConfig = {
-      trustedHosts: mergeHostLists(deps.defaultTrustedHosts, input.trusted_hosts),
-      blockedHosts: mergeHostLists(deps.defaultBlockedHosts, input.blocked_hosts),
+      trustedHosts: mergeHostLists(defaultTrustedHosts, undefined),
+      blockedHosts: mergeHostLists(defaultBlockedHosts, input.blocked_hosts),
     };
 
     const fetchOpts: FetchOneOptions = {
@@ -144,23 +153,41 @@ export class FetchRuntimeService {
     const wallStart = performance.now();
     let results: FetchUrlResult[];
 
+    // A malformed URL is that entry's error; it must not discard the results
+    // of requests already sent in the same batch.
+    const runOne = async (urlInput: FetchUrlInput): Promise<FetchUrlResult> => {
+      let url: string;
+      try {
+        url = buildUrl(urlInput.url, urlInput.params);
+        new URL(url);
+      } catch {
+        return { url: urlInput.url, error: `Invalid URL: ${urlInput.url}. Nothing was sent for this entry; pass an absolute http(s) URL.` };
+      }
+      try {
+        assertHttpScheme(url);
+      } catch (error) {
+        return { url: urlInput.url, error: error instanceof Error ? error.message : String(error) };
+      }
+      return runFetchRequest(input, urlInput, url, () => fetchOne(urlInput, fetchOpts, this));
+    };
+
     if (parallel) {
       if (rateLimitMs > 0) {
         logger.debug('fetch tool: rate_limit_ms is ignored in parallel mode; set parallel: false to enforce rate limiting');
       }
-      results = await mapWithConcurrency(
-        input.urls,
-        MAX_PARALLEL_FETCHES,
-        (urlInput) => runFetchRequest(input, urlInput, buildUrl(urlInput.url, urlInput.params), () => fetchOne(urlInput, fetchOpts, this)),
-      );
+      results = await mapWithConcurrency(input.urls, MAX_PARALLEL_FETCHES, runOne);
     } else {
       results = [];
       for (let i = 0; i < input.urls.length; i++) {
-        if (i > 0 && rateLimitMs > 0) {
-          await sleep(rateLimitMs);
-        }
         const urlInput = input.urls[i]!;
-        results.push(await runFetchRequest(input, urlInput, buildUrl(urlInput.url, urlInput.params), () => fetchOne(urlInput, fetchOpts, this)));
+        if (i > 0 && rateLimitMs > 0) {
+          await sleep(rateLimitMs, deps.signal ? { signal: deps.signal } : {});
+        }
+        if (deps.signal?.aborted) {
+          results.push({ url: urlInput.url, error: CANCELLED_NOT_SENT, cancelled: true });
+          continue;
+        }
+        results.push(await runOne(urlInput));
       }
     }
 
@@ -173,13 +200,17 @@ export class FetchRuntimeService {
     const totalMs = Math.round(performance.now() - wallStart);
     const succeeded = results.filter((result) => result.error === undefined).length;
     const failed = results.filter((result) => result.error !== undefined).length;
+    const httpErrors = results.filter((result) => result.error === undefined && (result.status ?? 0) >= 400).length;
 
+    // A call where nothing came back usable (every URL failed, or every response was an HTTP error) failed.
+    const usable = succeeded - httpErrors;
     const output: FetchOutput = {
-      success: true,
+      success: results.length === 0 || usable > 0,
       summary: {
         total: results.length,
         succeeded,
         failed,
+        ...(httpErrors > 0 ? { http_errors: httpErrors } : {}),
         total_ms: totalMs,
       },
     };
@@ -225,7 +256,7 @@ interface PreparedFetchRequest {
   headers: Record<string, string>;
   /** Lower-cased names of the headers the tool set from `auth` or `service`. */
   credentialHeaders: Set<string>;
-  body?: string | FormData | undefined;
+  body?: string | Uint8Array | FormData | undefined;
 }
 
 function applyAuthHeaders(headers: Record<string, string>, auth: FetchAuthInput): void {
@@ -238,6 +269,7 @@ function applyAuthHeaders(headers: Record<string, string>, auth: FetchAuthInput)
     case 'basic': {
       const user = auth.username ?? '';
       const pass = auth.password ?? '';
+      if (user === '' && pass === '') break;
       const encoded = Buffer.from(`${user}:${pass}`).toString('base64');
       headers['Authorization'] = `Basic ${encoded}`;
       break;
@@ -249,6 +281,16 @@ function applyAuthHeaders(headers: Record<string, string>, auth: FetchAuthInput)
       }
       break;
     }
+  }
+}
+
+class CredentialMissingError extends Error {}
+
+function missingAuthField(auth: FetchAuthInput): string {
+  switch (auth.type) {
+    case 'bearer': return 'token';
+    case 'api-key': return 'key';
+    default: return 'username or password';
   }
 }
 
@@ -264,7 +306,7 @@ async function fetchOneRaw(
   urlInput: FetchUrlInput,
   headers: Record<string, string>,
   method: string,
-  body: string | FormData | undefined,
+  body: string | Uint8Array | FormData | undefined,
   effectiveUrl: string,
   trustTierConfig: TrustTierConfig,
   localhostApproved: boolean,
@@ -273,7 +315,7 @@ async function fetchOneRaw(
   resolveHost: HostResolver | undefined,
   deps: FetchRuntimeDeps,
   permits: LocalhostFetchPermit[],
-): Promise<Response> {
+): Promise<FetchedResponse> {
   const { signal: timeoutSignal, dispose } = createTimeoutController(urlInput.timeout_ms ?? DEFAULT_TIMEOUT_MS);
   const signal = externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal;
   try {
@@ -298,11 +340,22 @@ async function fetchOneRaw(
   }
 }
 
+/**
+ * A response with where it came from. The final hop is fetched at its checked
+ * address, so `response.url` names an IP; the hop URL as written is tracked
+ * here instead.
+ */
+interface FetchedResponse {
+  readonly response: Response;
+  readonly finalUrl: string;
+  readonly redirects: number;
+}
+
 async function fetchWithValidatedRedirects(input: {
   url: string;
   method: string;
   headers: Record<string, string>;
-  body: string | FormData | undefined;
+  body: string | Uint8Array | FormData | undefined;
   signal: AbortSignal;
   trustTierConfig: TrustTierConfig;
   localhostApproved: boolean;
@@ -311,7 +364,7 @@ async function fetchWithValidatedRedirects(input: {
   originalRequest: FetchUrlInput;
   credentialHeaders: ReadonlySet<string>;
   resolveHost?: HostResolver | undefined;
-}): Promise<Response> {
+}): Promise<FetchedResponse> {
   let currentUrl = input.url;
   let currentMethod = input.method;
   let currentBody = input.body;
@@ -337,6 +390,7 @@ async function fetchWithValidatedRedirects(input: {
       const request: FetchUrlInput = {
         url: currentUrl, method: currentMethod as FetchUrlInput['method'], headers: { ...currentHeaders },
         ...(typeof currentBody === 'string' ? { body: currentBody } : {}),
+        ...(currentBody instanceof Uint8Array ? { body_base64: Buffer.from(currentBody).toString('base64') } : {}),
         ...(currentBody instanceof FormData ? { body_type: 'multipart' as const,
           body_data: Object.fromEntries([...currentBody.entries()].map(([key, value]) => [key, String(value)])) } : {}),
       };
@@ -365,15 +419,19 @@ async function fetchWithValidatedRedirects(input: {
     } as RequestInit, addresses, 'default', guard);
     guard();
 
-    if (!isRedirectStatus(response.status)) return response;
+    const settled = { response, finalUrl: currentUrl, redirects: redirectCount };
+    if (!isRedirectStatus(response.status)) return settled;
 
     const location = response.headers.get('location');
-    if (!location) return response;
+    if (!location) return settled;
     if (redirectCount === MAX_REDIRECTS) {
       throw new Error(`Too many redirects after ${MAX_REDIRECTS} hops`);
     }
 
     const nextUrl = new URL(location, currentUrl).toString();
+    if (!/^https?:$/.test(new URL(nextUrl).protocol)) {
+      throw new Error(`Redirect blocked: the server redirected to a ${new URL(nextUrl).protocol} URL; only http(s) targets are followed`);
+    }
     const nextHost = extractHostname(nextUrl);
     if (nextHost !== null) {
       const trustResult = classifyHostTrustTier(nextHost, input.trustTierConfig);
@@ -432,8 +490,15 @@ async function prepareFetchRequest(
   const toolHeaders: Record<string, string> = {};
   if (urlInput.auth) {
     applyAuthHeaders(toolHeaders, urlInput.auth);
+    if (Object.keys(toolHeaders).length === 0) {
+      throw new CredentialMissingError(`auth type "${urlInput.auth.type}" has no ${missingAuthField(urlInput.auth)}, so no credential would be sent. Nothing was sent for this entry.`);
+    }
   } else if (urlInput.service) {
-    Object.assign(toolHeaders, await deps.serviceRegistry?.resolveAuth(urlInput.service) ?? {});
+    const resolved = await deps.serviceRegistry?.resolveAuth(urlInput.service);
+    if (!resolved || Object.keys(resolved).length === 0) {
+      throw new CredentialMissingError(`service "${urlInput.service}" has no credential (unknown service, no stored secret, or no service registry). Nothing was sent for this entry; register the service or store its secret.`);
+    }
+    Object.assign(toolHeaders, resolved);
   }
   const headers: Record<string, string> = { ...(urlInput.headers ?? {}), ...toolHeaders };
   const credentialHeaders = new Set(Object.keys(toolHeaders).map((name) => name.toLowerCase()));
@@ -445,7 +510,7 @@ async function prepareFetchRequest(
   }
 
   const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type');
-  let body: string | FormData | undefined;
+  let body: string | Uint8Array | FormData | undefined;
 
   if (urlInput.body_type === 'multipart' && urlInput.body_data) {
     const form = new FormData();
@@ -459,15 +524,18 @@ async function prepareFetchRequest(
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
   } else if (urlInput.body_base64 !== undefined) {
-    body = Buffer.from(urlInput.body_base64, 'base64').toString();
+    // The decoded bytes go out as bytes; decoding them as text would replace
+    // any binary payload with U+FFFD.
+    body = new Uint8Array(Buffer.from(urlInput.body_base64, 'base64'));
     if (!hasContentType) {
       headers['Content-Type'] = urlInput.body_type === 'form'
         ? 'application/x-www-form-urlencoded'
-        : 'application/json';
+        : urlInput.body_type === 'json' ? 'application/json' : 'application/octet-stream';
     }
   } else if (urlInput.body !== undefined) {
     body = urlInput.body;
-    if (!hasContentType) {
+    // A raw body is sent as written, with no Content-Type of the tool's choosing.
+    if (!hasContentType && urlInput.body_type !== 'raw') {
       headers['Content-Type'] = urlInput.body_type === 'form'
         ? 'application/x-www-form-urlencoded'
         : 'application/json';
@@ -503,7 +571,7 @@ async function fetchOne(
   const cacheTtlSeconds = credentialed || currentExternalOperationSource() ? 0 : opts.cacheTtlSeconds;
   const extractMode: FetchExtractMode = urlInput.extract ?? globalExtract;
   const method = urlInput.method ?? 'GET';
-  const effectiveMaxContent = urlInput.max_content_length ?? maxContentLength;
+  const effectiveMaxContent = urlInput.max_content_length ?? maxContentLength ?? DEFAULT_MAX_CONTENT_BYTES;
 
   const effectiveUrl = buildUrl(urlInput.url, urlInput.params);
   // Content sanitization respects the kill switch; host blocking does not.
@@ -538,9 +606,15 @@ async function fetchOne(
       localhostApproved = isYoloExecution() || isAdmittedFetchRequest(effectiveUrl) || (deps.isLocalhostAllowed?.() ?? false);
       if (!localhostApproved && deps.approveLocalhostFetch) {
         try {
-          localhostApproved = await deps.approveLocalhostFetch({ url: effectiveUrl, host: hostname, originalRequest: urlInput }) === true;
+          localhostApproved = await raceSignal(
+            deps.approveLocalhostFetch({ url: effectiveUrl, host: hostname, originalRequest: urlInput }),
+            deps.signal,
+          ) === true;
         } catch {
           localhostApproved = false;
+        }
+        if (deps.signal?.aborted) {
+          return { url: urlInput.url, error: CANCELLED_NOT_SENT, cancelled: true, host_trust_tier: 'localhost' };
         }
       }
       if (!localhostApproved) {
@@ -564,12 +638,20 @@ async function fetchOne(
     }
   }
 
-  const { headers, credentialHeaders, body: requestBody } = await prepareFetchRequest(urlInput, extractMode, deps);
+  let prepared: PreparedFetchRequest;
+  try {
+    prepared = await prepareFetchRequest(urlInput, extractMode, deps);
+  } catch (error) {
+    if (!(error instanceof CredentialMissingError)) throw error;
+    return { url: urlInput.url, error: `Credential missing: ${error.message}`,
+      ...(initialTrustResult?.tier === 'localhost' ? { host_trust_tier: 'localhost' as const } : {}) };
+  }
+  const { headers, credentialHeaders, body: requestBody } = prepared;
   const startTime = performance.now();
   const permits: LocalhostFetchPermit[] = [];
 
   try {
-    let response = await fetchOneRaw(
+    let fetched = await fetchOneRaw(
       urlInput,
       headers,
       method,
@@ -585,14 +667,17 @@ async function fetchOne(
     );
 
     for (const permit of permits) permit.assertCurrent();
+    let response = fetched.response;
     const retryOnAuth = urlInput.retry_on_auth ?? (urlInput.service !== undefined);
     if (response.status === 401 && retryOnAuth && urlInput.service && !(requestBody instanceof FormData)) {
       const refreshedHeaders = await deps.serviceRegistry?.resolveAuth(urlInput.service);
       if (refreshedHeaders) {
+        // The refused response is superseded; release its body before retrying.
+        await response.body?.cancel().catch(() => undefined);
         const retryHeaders = { ...headers };
         Object.assign(retryHeaders, refreshedHeaders);
         const retryCredentialHeaders = new Set([...credentialHeaders, ...Object.keys(refreshedHeaders).map((name) => name.toLowerCase())]);
-        response = await fetchOneRaw(
+        fetched = await fetchOneRaw(
           urlInput,
           retryHeaders,
           method,
@@ -606,6 +691,7 @@ async function fetchOne(
           deps,
           permits,
         );
+        response = fetched.response;
       }
     }
 
@@ -629,8 +715,8 @@ async function fetchOne(
     result.contentType = contentType;
     result.byteSize = byteSize;
     if (truncated) result.truncated = true;
-    result.redirected = response.redirected;
-    result.final_url = response.url !== effectiveUrl ? response.url : undefined;
+    result.redirected = fetched.redirects > 0;
+    result.final_url = fetched.finalUrl !== effectiveUrl ? fetched.finalUrl : undefined;
 
     let effectiveSanitizeMode = sanitizationEnabled ? sanitizeMode : 'none' as const;
     if (sanitizationEnabled && hostname !== null) {
@@ -659,6 +745,7 @@ async function fetchOne(
         modified: sanitized.modified,
       });
       result.content = sanitized.content;
+      if (sanitized.modified) result.sanitized = true;
       result.tokens_used = Math.ceil(sanitized.content.length / 4);
     }
 
@@ -669,8 +756,8 @@ async function fetchOne(
       });
       result.metadata = {
         headers: respHeaders,
-        redirected: response.redirected,
-        finalUrl: response.url,
+        redirected: fetched.redirects > 0,
+        finalUrl: fetched.finalUrl,
       };
     }
 
@@ -678,18 +765,46 @@ async function fetchOne(
     return result;
   } catch (err) {
     const durationMs = Math.round(performance.now() - startTime);
-    const isTimeout = err instanceof Error && err.name === 'AbortError';
-    const message = isTimeout
-      ? `Timeout after ${urlInput.timeout_ms ?? DEFAULT_TIMEOUT_MS}ms`
-      : err instanceof Error
-        ? err.message
-        : summarizeError(err);
+    // The caller's cancel and the per-URL timeout both surface as abort
+    // rejections; which one fired is read from the caller's signal first.
+    const cancelled = deps.signal?.aborted === true;
+    const isTimeout = !cancelled && isTimeoutError(err);
+    const timeoutMs = urlInput.timeout_ms ?? DEFAULT_TIMEOUT_MS;
+    const message = cancelled
+      ? CANCELLED_MESSAGE
+      : isTimeout
+        ? `Timeout after ${timeoutMs}ms: no complete response within timeout_ms. Retry with a larger timeout_ms if the server is known to be slow.`
+        : err instanceof Error
+          ? err.message
+          : summarizeError(err);
     logger.warn('fetch tool: request failed', { url: sanitizeUrlForLog(urlInput.url),
       error: message.replaceAll(urlInput.url, sanitizeUrlForLog(urlInput.url)).replaceAll(effectiveUrl, sanitizeUrlForLog(effectiveUrl)) });
     return { url: urlInput.url, error: message, duration_ms: durationMs,
+      ...(cancelled ? { cancelled: true } : {}),
+      ...(isTimeout ? { timed_out: true } : {}),
       ...(initialTrustResult?.tier === 'localhost' ? { host_trust_tier: 'localhost' as const } : {}) };
   } finally {
     for (const permit of permits) permit.close();
+  }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'TimeoutError';
+}
+
+/** Settles with `promise`, or with undefined as soon as `signal` aborts. */
+async function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T | undefined> {
+  if (!signal) return promise;
+  if (signal.aborted) return undefined;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<undefined>((resolve) => {
+    onAbort = () => resolve(undefined);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -754,7 +869,8 @@ function cacheSuccessfulGet(
   key: string,
   result: FetchUrlResult,
 ): void {
-  if (cacheTtlSeconds > 0 && method === 'GET') {
+  // An error status describes a moment, not the page: replaying it would make a retry a no-op.
+  if (cacheTtlSeconds > 0 && method === 'GET' && (result.status ?? 0) < 400) {
     runtime.cacheSet(key, { data: result, timestamp: Date.now(), ttl: cacheTtlSeconds });
   }
 }
@@ -809,11 +925,17 @@ export function createFetchTool(
         const input = { ...args, urls: args.urls } as unknown as FetchInput;
         const effectiveDeps = opts?.signal ? { ...deps, signal: opts.signal } : deps;
         const output = await runFetchInvocation(args, opts, input, () => runtime.execute(input, effectiveDeps));
+        if (!output.success) {
+          const reasons = [...new Set((output.results ?? []).map(result => result.error ?? (result.status !== undefined ? `HTTP ${result.status}` : undefined))
+            .filter((reason): reason is string => reason !== undefined))];
+          return { success: false, output: JSON.stringify(output),
+            error: `All ${output.summary.total} fetch${output.summary.total === 1 ? '' : 'es'} failed${reasons.length ? `: ${reasons.slice(0, 3).join('; ')}${reasons.length > 3 ? '; ...' : ''}` : ''}. Details are in the per-URL results.` };
+        }
         return { success: true, output: JSON.stringify(output) };
       } catch (err) {
         const message = summarizeError(err);
         logger.error('fetch tool: unexpected error', { error: message });
-        return { success: false, error: `Unexpected error: ${message}` };
+        return { success: false, error: describeUnexpectedToolError(err, summarizeError) };
       }
     },
   };

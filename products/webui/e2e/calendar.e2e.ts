@@ -219,7 +219,7 @@ test('importing .ics content sends exactly the pasted content and closes the dia
   await expect(dialog).toHaveCount(0);
 });
 
-test.describe('phone: a long, unbroken event title never forces the page wider (MOBILE-ADAPT overflow sweep)', () => {
+test.describe('phone: a long, unbroken event title never forces the page wider (overflow sweep)', () => {
   test.beforeEach(async ({ page: _page }, testInfo) => only(testInfo, PHONE));
 
   test('the title ellipsizes instead of stretching the row or a month cell past the viewport', async ({ page }) => {

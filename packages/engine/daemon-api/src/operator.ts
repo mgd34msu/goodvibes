@@ -5,15 +5,17 @@ import { readBoundedPositiveInteger } from './route-helpers.js';
  * Thrown when a URL path segment contains malformed percent-encoded sequences.
  * Caught at the dispatch boundary to return a 400 INVALID_PATH_ENCODING response.
  */
-class InvalidPathEncodingError extends Error {
+export class InvalidPathEncodingError extends Error {
   constructor() { super('INVALID_PATH_ENCODING'); }
 }
 
 /**
  * Decode a URL path segment. Throws InvalidPathEncodingError on malformed
  * percent-encoded sequences (e.g. `%E0%A4`) instead of passing null downstream.
+ * Every route table decodes through this so a malformed escape is a 400 and a
+ * well-formed one (`team%3Aci`) reaches the handler as the id the client sent.
  */
-function safeDecodeURIComponent(segment: string): string {
+export function safeDecodeURIComponent(segment: string): string {
   try {
     return decodeURIComponent(segment);
   } catch {
@@ -21,22 +23,30 @@ function safeDecodeURIComponent(segment: string): string {
   }
 }
 
-const INVALID_ENCODING_RESPONSE = Response.json(
-  { error: 'INVALID_PATH_ENCODING', code: 'INVALID_PATH_ENCODING' },
-  { status: 400 },
-);
+/** A fresh response per use: a `Response` body can be consumed once, so one shared instance cannot answer two requests. */
+export function invalidPathEncodingResponse(): Response {
+  return Response.json(
+    { error: 'INVALID_PATH_ENCODING', code: 'INVALID_PATH_ENCODING' },
+    { status: 400 },
+  );
+}
 
 /**
- * Route-level authentication is enforced inside each handler, not at the
- * dispatcher level. Handler auth requirements by category:
+ * Route-level authorization is enforced inside each handler, not at the
+ * dispatcher level. The daemon gate in front of this dispatcher only proves
+ * the caller is SOME authenticated principal (a local-auth session, a scoped
+ * paired-device token or the shared token); it does not say what that
+ * principal may do. So a handler that is not meant for every principal must
+ * call `requireAdmin` itself:
  *
- * - READ-ONLY routes (status, providers, settings, continuity, intelligence,
- *   worktrees, watchers, approvals, telemetry snapshot), require admin or
- *   authenticated session per handler implementation.
  * - STATE-CHANGING routes (service install/start/stop, route bindings,
- *   automation jobs, knowledge ingest), always `withAdmin(context, req, ...)`.
- * - SCHEDULER routes (getSchedulerCapacity), require admin per handler
- *   implementation.
+ *   automation jobs, knowledge ingest, memory record writes, panel open),
+ *   call `requireAdmin(req)` first.
+ * - Routes that expose configuration or stored content (settings, security
+ *   settings, artifacts) call it too; the status-style snapshots that carry no
+ *   secrets are open to any authenticated principal.
+ * - A new route added to this table is open to every authenticated principal
+ *   until its handler says otherwise.
  *
  * Dispatcher does not short-circuit unauthenticated requests; all auth
  * enforcement lives in the handler factories (system-routes.ts,
@@ -49,7 +59,7 @@ export async function dispatchOperatorRoutes(
   try {
     return await dispatchOperatorRoutesInner(req, handlers);
   } catch (e) {
-    if (e instanceof InvalidPathEncodingError) return INVALID_ENCODING_RESPONSE;
+    if (e instanceof InvalidPathEncodingError) return invalidPathEncodingResponse();
     throw e;
   }
 }
@@ -184,24 +194,24 @@ async function dispatchOperatorRoutesInner(
   }
   if (pathname === '/api/channels/policies' && method === 'GET') return handlers.getChannelPolicies();
   const channelPolicyMatch = pathname.match(/^\/api\/channels\/policies\/([^/]+)$/);
-  if (channelPolicyMatch && method === 'POST') return handlers.postChannelPolicy(channelPolicyMatch[1]!, req);
-  if (channelPolicyMatch && method === 'PATCH') return handlers.patchChannelPolicy(channelPolicyMatch[1]!, req);
+  if (channelPolicyMatch && method === 'POST') return handlers.postChannelPolicy(safeDecodeURIComponent(channelPolicyMatch[1]!), req);
+  if (channelPolicyMatch && method === 'PATCH') return handlers.patchChannelPolicy(safeDecodeURIComponent(channelPolicyMatch[1]!), req);
   if (pathname === '/api/channels/policies/audit' && method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100);
     return handlers.getChannelPolicyAudit(limit);
   }
   if (pathname === '/api/channels/status' && method === 'GET') return handlers.getChannelStatus();
   const channelDirectoryMatch = pathname.match(/^\/api\/channels\/directory\/([^/]+)$/);
-  if (channelDirectoryMatch && method === 'GET') return handlers.getChannelDirectory(channelDirectoryMatch[1]!, url);
+  if (channelDirectoryMatch && method === 'GET') return handlers.getChannelDirectory(safeDecodeURIComponent(channelDirectoryMatch[1]!), url);
   if (pathname === '/api/watchers' && method === 'GET') return handlers.getWatchers();
   if (pathname === '/api/watchers' && method === 'POST') return handlers.postWatcher(req);
   const watcherUpdateMatch = pathname.match(/^\/api\/watchers\/([^/]+)$/);
-  if (watcherUpdateMatch && method === 'PATCH') return handlers.patchWatcher(watcherUpdateMatch[1]!, req);
-  if (watcherUpdateMatch && method === 'DELETE') return handlers.deleteWatcher(watcherUpdateMatch[1]!, req);
+  if (watcherUpdateMatch && method === 'PATCH') return handlers.patchWatcher(safeDecodeURIComponent(watcherUpdateMatch[1]!), req);
+  if (watcherUpdateMatch && method === 'DELETE') return handlers.deleteWatcher(safeDecodeURIComponent(watcherUpdateMatch[1]!), req);
   const watcherActionMatch = pathname.match(/^\/api\/watchers\/([^/]+)\/(start|stop|run)$/);
-  if (watcherActionMatch && method === 'POST') return handlers.watcherAction(watcherActionMatch[1]!, watcherActionMatch[2]! as 'start' | 'stop' | 'run', req);
+  if (watcherActionMatch && method === 'POST') return handlers.watcherAction(safeDecodeURIComponent(watcherActionMatch[1]!), watcherActionMatch[2]! as 'start' | 'stop' | 'run', req);
 
-  if (pathname === '/api/service/status' && method === 'GET') return handlers.getServiceStatus();
+  if (pathname === '/api/service/status' && method === 'GET') return handlers.getServiceStatus(req);
   if (pathname === '/api/service/install' && method === 'POST') return handlers.installService(req);
   if (pathname === '/api/service/start' && method === 'POST') return handlers.startService(req);
   if (pathname === '/api/service/stop' && method === 'POST') return handlers.stopService(req);
@@ -211,13 +221,13 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/routes/bindings' && method === 'GET') return handlers.getRouteBindings(req);
   if (pathname === '/api/routes/bindings' && method === 'POST') return handlers.postRouteBinding(req);
   const routeBindingMatch = pathname.match(/^\/api\/routes\/bindings\/([^/]+)$/);
-  if (routeBindingMatch && method === 'PATCH') return handlers.patchRouteBinding(routeBindingMatch[1]!, req);
-  if (routeBindingMatch && method === 'DELETE') return handlers.deleteRouteBinding(routeBindingMatch[1]!, req);
+  if (routeBindingMatch && method === 'PATCH') return handlers.patchRouteBinding(safeDecodeURIComponent(routeBindingMatch[1]!), req);
+  if (routeBindingMatch && method === 'DELETE') return handlers.deleteRouteBinding(safeDecodeURIComponent(routeBindingMatch[1]!), req);
 
-  if (pathname === '/api/approvals' && method === 'GET') return handlers.getApprovals();
+  if (pathname === '/api/approvals' && method === 'GET') return handlers.getApprovals(url);
   const approvalActionMatch = pathname.match(/^\/api\/approvals\/([^/]+)\/(claim|approve|deny|cancel)$/);
   if (approvalActionMatch && method === 'POST') {
-    return handlers.approvalAction(approvalActionMatch[1]!, approvalActionMatch[2]! as 'claim' | 'approve' | 'deny' | 'cancel', req);
+    return handlers.approvalAction(safeDecodeURIComponent(approvalActionMatch[1]!), approvalActionMatch[2]! as 'claim' | 'approve' | 'deny' | 'cancel', req);
   }
 
   if (pathname === '/api/remote/node-host/contract' && method === 'GET') {
@@ -230,8 +240,8 @@ async function dispatchOperatorRoutesInner(
   if (providerUsageMatch && method === 'GET') return handlers.getProviderUsage(safeDecodeURIComponent(providerUsageMatch[1]!) );
   const providerMatch = pathname.match(/^\/api\/providers\/([^/]+)$/);
   if (providerMatch && method === 'GET') return handlers.getProvider(safeDecodeURIComponent(providerMatch[1]!) );
-  if (pathname === '/api/settings' && method === 'GET') return handlers.getSettings();
-  if (pathname === '/api/security-settings' && method === 'GET') return handlers.getSecuritySettings();
+  if (pathname === '/api/settings' && method === 'GET') return handlers.getSettings(req);
+  if (pathname === '/api/security-settings' && method === 'GET') return handlers.getSecuritySettings(req);
   if (pathname === '/api/continuity' && method === 'GET') return handlers.getContinuity();
   if (pathname === '/api/worktrees' && method === 'GET') return handlers.getWorktrees();
   if (pathname === '/api/intelligence' && method === 'GET') return handlers.getIntelligence();
@@ -260,7 +270,7 @@ async function dispatchOperatorRoutesInner(
   if (memoryRecordLinksMatch && method === 'POST') return handlers.postMemoryRecordLink(safeDecodeURIComponent(memoryRecordLinksMatch[1]!), req);
   const memoryRecordMatch = pathname.match(/^\/api\/memory\/records\/([^/]+)$/);
   if (memoryRecordMatch && method === 'GET') return handlers.getMemoryRecord(safeDecodeURIComponent(memoryRecordMatch[1]!));
-  if (memoryRecordMatch && method === 'DELETE') return handlers.deleteMemoryRecord(safeDecodeURIComponent(memoryRecordMatch[1]!));
+  if (memoryRecordMatch && method === 'DELETE') return handlers.deleteMemoryRecord(safeDecodeURIComponent(memoryRecordMatch[1]!), req);
 
   if (pathname === '/api/knowledge/status' && method === 'GET') return handlers.getKnowledgeStatus(url, req);
   if (pathname === '/api/knowledge/sources' && method === 'GET') return handlers.getKnowledgeSources(url, req);
@@ -337,12 +347,12 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/web-search/providers' && method === 'GET') return handlers.getWebSearchProviders();
   if (pathname === '/api/web-search/query' && method === 'POST') return handlers.postWebSearch(req);
 
-  if (pathname === '/api/artifacts' && method === 'GET') return handlers.getArtifacts();
+  if (pathname === '/api/artifacts' && method === 'GET') return handlers.getArtifacts(req);
   if (pathname === '/api/artifacts' && method === 'POST') return handlers.postArtifact(req);
   const artifactContentMatch = pathname.match(/^\/api\/artifacts\/([^/]+)\/content$/);
   if (artifactContentMatch && method === 'GET') return handlers.getArtifactContent(safeDecodeURIComponent(artifactContentMatch[1]!), req);
   const artifactMatch = pathname.match(/^\/api\/artifacts\/([^/]+)$/);
-  if (artifactMatch && method === 'GET') return handlers.getArtifact(safeDecodeURIComponent(artifactMatch[1]!) );
+  if (artifactMatch && method === 'GET') return handlers.getArtifact(safeDecodeURIComponent(artifactMatch[1]!), req);
 
   if (pathname === '/api/media/providers' && method === 'GET') return handlers.getMediaProviders();
   if (pathname === '/api/media/analyze' && method === 'POST') return handlers.postMediaAnalyze(req);
@@ -377,6 +387,7 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/config/credentials' && method === 'GET') return handlers.getCredentials(req);
   if (pathname === '/config' && method === 'GET') return handlers.getConfig(req);
   if (pathname === '/config' && method === 'POST') return handlers.postConfig(req);
+  if (pathname === '/config/reset' && method === 'POST') return handlers.postConfigReset(req);
 
   return null;
 }

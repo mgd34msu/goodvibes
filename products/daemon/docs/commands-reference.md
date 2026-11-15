@@ -26,6 +26,8 @@ use environment homes for them (see [passthrough commands](#passthrough-commands
 
 ## Exit codes
 
+The same numbers mean different things in the other programs; see [Exit codes](../../../docs/exit-codes.md) for all of them side by side.
+
 | Code | Meaning |
 | --- | --- |
 | `0` | the command did what it says |
@@ -41,7 +43,7 @@ Every command that talks to an already-running daemon (`status`, `update`, `pair
 
 | Flag | Default |
 | --- | --- |
-| `--host <name>` | the control plane's configured host (`127.0.0.1` on a default install) |
+| `--host <name>` | the control plane's configured host (`127.0.0.1` on a default install). Another machine needs its connection type stated: `--host https://<name>` (encrypted) or `--host http://<name>` (the operator token travels unencrypted); a bare name is refused |
 | `--port <n>` | the control plane's configured port |
 | `--token <t>` | this machine's own operator token, read from `<daemon home>/operator-tokens.json` |
 
@@ -94,7 +96,7 @@ exits 1, rather than reporting a successful drain.
 
 Overrides apply in this order: repeated `--config` values, feature toggles,
 provider/model flags, then endpoint flags. Explicit `--provider` wins over the
-provider inferred from either `provider:model` or `provider/model`, regardless of argv order.
+provider inferred from `provider:model`, regardless of argv order.
 These overlays are not persisted. See [CLI dispatch and overrides](cli-and-package-contracts.md#command-grammar-and-dispatch).
 
 ### `install-service`
@@ -169,7 +171,7 @@ pick up a settings change that only applies at boot (an endpoint binding, for ex
 ### `status`
 
 ```
-goodvibes-daemon status [--json] [--host <name>] [--port <n>] [--token <t>]
+goodvibes-daemon status [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]
 ```
 
 Talk to a daemon that is already running and print one page about it, one labeled
@@ -192,7 +194,7 @@ With no flags it asks the daemon on this machine. Exit 0 when the daemon answere
 ### `pair`
 
 ```
-goodvibes-daemon pair [--json] [--host <name>] [--port <n>] [--token <t>] [-y]
+goodvibes-daemon pair [--json] [--host <http(s)://name>] [--port <n>] [--token <t>] [-y]
 ```
 
 `qr` and `qrcode` are accepted spellings of the same command. Two forms.
@@ -235,6 +237,35 @@ sessions (see [hosted session commands](cli-and-package-contracts.md#status-sess
 locally on this machine. `kill` with no id is a usage refusal (exit 2), never "kill
 everything."
 
+### `mcp`
+
+```
+goodvibes-daemon mcp serve [--host <http(s)://name>] [--port <n>] [--token <t>]
+```
+
+Serves the operator surface of a running daemon to a Model Context Protocol client over
+stdio, so an editor or another agent can drive GoodVibes sessions through tools: one tool
+per operator method, session lifecycle first. It lives on this binary because it is a
+client of the daemon's operator API and connects by the [remote-target
+convention](#the-remote-target-convention) (no flags: the daemon on this machine, with
+this machine's operator token). The tool set is generated from the operator contract, so
+a tool call is exactly the operator call of the same name.
+
+Stdout carries only protocol frames; every message for a person goes to stderr. The daemon
+is checked before the first frame: when it is not running, or no operator token exists, or
+the token is refused, the command prints one line naming that prerequisite on stderr and
+exits `1`. It exits `0` when the client closes stdin, and `2` for anything other than
+`mcp serve`.
+
+MCP client configuration:
+
+```json
+{ "mcpServers": { "goodvibes": { "command": "goodvibes-daemon", "args": ["mcp", "serve"] } } }
+```
+
+For an editor that speaks the Agent Client Protocol instead, use `goodvibes acp` (see the
+[TUI CLI flags](../../tui/docs/cli-flags.md#goodvibes-acp)).
+
 ### `config`
 
 ```
@@ -245,14 +276,14 @@ goodvibes-daemon config list|get <key>|set <key> <value>|unset <key> [--json]
 | --- | --- |
 | `config list` | schema settings with redacted effective values; JSON includes the surface settings-file path, not per-key origins |
 | `config get <key>` | one setting |
-| `config set <key> <value>` | write one setting to disk (checked against the schema first) |
-| `config unset <key>` | put one setting back to its shipped default |
+| `config set <key> <value>` | write one setting to disk (checked against the schema first). A credential key is never written as plain text: the value goes to the secret store and the settings file keeps a `goodvibes://secrets/` reference. A credential key with no secret-store route refuses a literal and accepts a reference |
+| `config unset <key>` | remove the global, daemon and shared value of one setting. A project settings value is untouched; when one still applies, the receipt says so instead of claiming the shipped default |
 
 Values are read and written on this machine's settings files directly, so every verb
-works whether or not a daemon is running. A running daemon picks up most changes live;
-the write receipt gives a general restart warning for bind-time settings. It does not enumerate per-key reload behavior or the destination tier. Anything that reads like a
+works whether or not a daemon is running. A running daemon picks up most changes live,
+including a changed control-plane host or port; the write receipt says a key that is only read at startup applies the next time the daemon starts. It does not enumerate per-key reload behavior or the destination tier. Anything that reads like a
 credential (a token, a password, an API key) prints as `<redacted>` in every read
-path; `config set` still writes the real value, only the *output* is cleaned. See
+path. See
 [config output and sensitivity](cli-and-package-contracts.md#recursive-config-output)
 for recursive rendering and reader-failure behavior.
 
@@ -362,6 +393,8 @@ Talks to a running daemon over the same `--host`/`--port`/`--token` convention
 goodvibes-daemon webui enable|disable|status [--bundle-dir <dir>] [--lan|--loopback]
 ```
 
+`--bundle-dir`, `--lan` and `--loopback` apply to `enable` only; `disable` and `status` refuse them.
+
 The web UI is a built bundle of static files served by the daemon's own control-plane
 listener, on the same origin as the API. The URL to open is the control-plane
 origin, not the declared `web.port`.
@@ -417,6 +450,14 @@ With no argument, print the command list and the global options. With a command
 name, print that command's arguments, flags and behavior. `goodvibes-daemon <command>
 --help` does the same thing for a real command.
 
+### `check-install-reader`
+
+```
+goodvibes-daemon check-install-reader <installed-executable> | --describe
+```
+
+Internal to the release installer and CI. It reads an installation's data-reader requirements without loading settings, starting services or changing files, and `--describe` reports the readers compiled into this binary. It is not an operator command and has no `--help`.
+
 ### `version`
 
 ```
@@ -424,15 +465,15 @@ goodvibes-daemon version
 ```
 
 Print the product binary name and manifest version, and exit 0. Same as `--version`/`-v`.
-The daemon manifest and compiled fallback use the repository root version, currently `2.0.23`.
+The daemon manifest and compiled fallback use the repository root version.
 
 ## Passthrough commands
 
-`send`, `cluster`, `webui`, and `provision-wake-model` are dispatched with their own trailing-token vocabulary **before** any runtime is composed.
+`send`, `cluster`, `webui`, `provision-wake-model`, and the internal `check-install-reader` are dispatched with their own trailing-token vocabulary **before** any runtime is composed.
 The top-level parser recognizes the command but leaves its trailing arguments to its adapter. Every token
 after the command word belongs to that command's own vocabulary rather than to the
 daemon parser (a `send` message may itself start with a dash, or contain `--port`).
-This means each of them only works as the first argument: `goodvibes-daemon --json
+They do not accept `--daemon-home` or `--working-dir` in any position; select another home with the `GOODVIBES_DAEMON_HOME` and `GOODVIBES_WORKING_DIR` environment variables. Each of them only works as the first argument: `goodvibes-daemon --json
 send hello` is refused with `send has to be the first argument`, not silently
 misparsed.
 

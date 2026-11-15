@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { isEffectiveDangerMode } from '../platform/src/platform/config/index.ts';
+import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -105,8 +106,8 @@ test('a prepared safe-mode mutation captures its legacy override companion befor
   const prepared = manager.prepareSettingMutation({ operation: 'set', key: 'permissions.mode', value: 'safe-jev' });
   const facts = manager.inspectPreparedMutation(prepared);
   expect(facts.effects?.map(effect => ({ key: effect.key, value: effect.value }))).toEqual([
-    { key: 'permissions.mode', value: 'safe-jev' },
     { key: 'behavior.autoApprove', value: false },
+    { key: 'permissions.mode', value: 'safe-jev' },
   ]);
   expect(manager.get('behavior.autoApprove')).toBe(true);
   const transition = manager.beginPreparedMutation(prepared);
@@ -115,4 +116,45 @@ test('a prepared safe-mode mutation captures its legacy override companion befor
   expect(manager.get('permissions.mode')).toBe('safe-jev');
   expect(manager.get('behavior.autoApprove')).toBe(false);
   expect(isEffectiveDangerMode(manager)).toBe(false);
+});
+
+test('a mode change whose second write fails leaves auto-approve cleared, never the old danger mode', () => {
+  const manager = fixture().open();
+  manager.set('behavior.autoApprove', true);
+  const prepared = manager.prepareSettingMutation({ operation: 'set', key: 'permissions.mode', value: 'safe-jev' });
+  const original = atomic.writeJsonFileAtomic;
+  let writes = 0;
+  const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementation((...args: Parameters<typeof atomic.writeJsonFileAtomic>) => {
+    if (++writes === 2) throw new Error('synthetic disk failure');
+    return original(...args);
+  });
+  try {
+    const receipt = manager.finishPreparedMutation(prepared, manager.beginPreparedMutation(prepared));
+    expect(receipt.status).toBe('partial');
+  } finally { write.mockRestore(); }
+  expect(manager.get('behavior.autoApprove')).toBe(false);
+  expect(isEffectiveDangerMode(manager)).toBe(false);
+});
+
+test('a prepared finish re-entered from its own effect check publishes once', () => {
+  const manager = fixture().open();
+  const prepared = manager.prepareSettingMutation({ operation: 'set', key: 'permissions.mode', value: 'safe-jev' });
+  const transition = manager.beginPreparedMutation(prepared);
+  let reentered: unknown;
+  let writes = 0;
+  const original = atomic.writeJsonFileAtomic;
+  const write = spyOn(atomic, 'writeJsonFileAtomic').mockImplementation((...args: Parameters<typeof atomic.writeJsonFileAtomic>) => {
+    writes++;
+    return original(...args);
+  });
+  try {
+    const receipt = manager.finishPreparedMutation(prepared, transition, () => {
+      if (reentered !== undefined) return;
+      try { manager.finishPreparedMutation(prepared, transition); reentered = 'accepted'; }
+      catch (error) { reentered = error; }
+    });
+    expect(receipt.status).toBe('committed');
+  } finally { write.mockRestore(); }
+  expect(reentered).toBeInstanceOf(Error);
+  expect(writes).toBe(1);
 });

@@ -1,7 +1,8 @@
 import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
 
-export type AssistantCockpitLaneState = 'ready' | 'attention' | 'setup';
+/** `unmeasured`: the caller had no data for the lane, so it is neither healthy nor a finding. */
+export type AssistantCockpitLaneState = 'ready' | 'attention' | 'setup' | 'unmeasured';
 export type AssistantCockpitStatus = 'ready' | 'ready-with-optional-setup' | 'attention';
 
 export interface AssistantCockpitLane {
@@ -39,6 +40,11 @@ export interface AssistantCockpitMetrics {
   readonly documentLanes: number;
   readonly documentGaps: number;
   readonly securityFindings: number;
+  /**
+   * Lanes whose numbers the caller could not measure, so their state is not a
+   * finding. Their summaries say so instead of reporting a healthy lane.
+   */
+  readonly unmeasured?: readonly AssistantCockpitLane['id'][];
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
@@ -58,8 +64,13 @@ function readNestedRecord(record: Record<string, unknown>, key: string): Record<
   return readRecord(record[key]);
 }
 
-function lane(options: AssistantCockpitLane): AssistantCockpitLane {
-  return options;
+const UNMEASURED_PREFIX = 'Not measured in this view; ';
+
+function lane(options: AssistantCockpitLane, unmeasured?: readonly AssistantCockpitLane['id'][]): AssistantCockpitLane {
+  // Only a lane that would read healthy is downgraded; a measured problem stays visible.
+  return options.state === 'ready' && unmeasured?.includes(options.id)
+    ? { ...options, state: 'unmeasured', summary: `${UNMEASURED_PREFIX}${options.summary.charAt(0).toLowerCase()}${options.summary.slice(1)}` }
+    : options;
 }
 
 function setupLaneSummary(metrics: AssistantCockpitMetrics): string {
@@ -114,7 +125,7 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
           'setup action:"token"',
           'setup action:"smoke"',
         ],
-      }),
+      }, metrics.unmeasured),
       lane({
         id: 'chat-and-model',
         label: 'Talk and choose models',
@@ -130,7 +141,7 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
         summary: metrics.executionRoutes > 0 ? 'Local read/edit/exec and recovery posture is inspectable.' : 'Execution posture needs tool availability review.',
         nextAction: 'Use local work routes first; delegate only for isolation, remote work, or explicit review.',
         routes: ['context action:"files"', 'agent_harness mode:"execution_posture"', 'agent_harness mode:"file_recovery"'],
-      }),
+      }, metrics.unmeasured),
       lane({
         id: 'personal-ops',
         label: 'Handle personal operations',
@@ -146,7 +157,7 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
         summary: `${metrics.researchRuns} research run(s); ${metrics.documentLanes} document lane(s).`,
         nextAction: 'Start with the research briefing, then use source queues, reports, documents, artifacts, and blind compare as one writing path.',
         routes: ['research action:"briefing"', 'research action:"plan"', 'research action:"search"', 'research action:"runner"', 'research action:"reports"', 'agent_harness mode:"document_ops"'],
-      }),
+      }, metrics.unmeasured),
       lane({
         id: 'background-work',
         label: 'Supervise background work',
@@ -154,7 +165,7 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
         summary: metrics.runningWork > 0 ? `${metrics.runningWork} running item(s) need visible supervision.` : 'No running background work reported by the summary.',
         nextAction: 'Inspect the autonomy queue, visible agents, and tracked local processes before starting, pausing, resuming, or canceling ongoing work.',
         routes: ['agent_harness mode:"autonomy_queue"', 'agent_harness mode:"agent_orchestration"', 'agent_harness mode:"background_processes"', 'agent_harness mode:"autonomy_intake"'],
-      }),
+      }, metrics.unmeasured),
       lane({
         id: 'safety-and-recovery',
         label: 'Stay safe and recover',
@@ -236,6 +247,9 @@ export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentWorksp
     setupBlockers,
     setupSmokeResult: undefined,
     setupSmokeTrend: undefined,
+    // The snapshot carries no execution, document, setup-smoke or background
+    // process data; those lanes say so rather than report a healthy state.
+    unmeasured: ['setup', 'work-and-files', 'research-and-docs', 'background-work'],
     modelStatus,
     executionRoutes: 1,
     personalGaps,

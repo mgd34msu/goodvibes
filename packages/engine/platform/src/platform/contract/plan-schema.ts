@@ -466,7 +466,13 @@ function checkParallel(plan: ContractPlan, shape: RequestShape): PlanProblem[] {
   return [problem('parallel-missing', 'The user asked for agents working in parallel: put the independent units in one group with no dependency between them.')];
 }
 
-/** Check 7: attempts stay at one unless several were asked for, and are positive whole numbers. */
+/**
+ * The most attempts one unit may ask for. Each attempt is a unit with its own worktree record, so a typo in a
+ * model-written plan (100000) would otherwise create that many; the configured default is itself at most 5.
+ */
+export const MAX_UNIT_ATTEMPTS = 16;
+
+/** Check 7: attempts stay at one unless several were asked for, and are positive whole numbers no larger than the ceiling. */
 function checkAttempts(plan: ContractPlan, shape: RequestShape, limits: PlanLimits): PlanProblem[] {
   const severalAllowed = saysYesAtAct(shape.asks_for_attempts) || limits.defaultAttempts > 1;
   const problems: PlanProblem[] = [];
@@ -474,6 +480,8 @@ function checkAttempts(plan: ContractPlan, shape: RequestShape, limits: PlanLimi
     const attempts = effectiveAttempts(unit, limits.defaultAttempts);
     if (!Number.isSafeInteger(attempts) || attempts < 1) {
       problems.push(problem('attempts', `Unit ${unit.id} has ${attempts} attempts; attempts must be a positive safe integer.`, unit.id));
+    } else if (attempts > MAX_UNIT_ATTEMPTS) {
+      problems.push(problem('attempts', `Unit ${unit.id} has ${attempts} attempts; no unit runs more than ${MAX_UNIT_ATTEMPTS}. Lower it.`, unit.id));
     } else if (attempts > 1 && !severalAllowed) {
       problems.push(problem('attempts', `Unit ${unit.id} has ${attempts} attempts, but the user did not ask for several attempts; set attempts to 1.`, unit.id));
     }

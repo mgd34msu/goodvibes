@@ -43,9 +43,11 @@ function normalizeAutonomyAction(value: unknown): AgentAutonomyAction | null {
   return null;
 }
 
-function readAction(args: AgentAutonomyToolArgs): AgentAutonomyAction {
+function readAction(args: AgentAutonomyToolArgs): AgentAutonomyAction | null {
   const explicit = normalizeAutonomyAction(args.action) ?? normalizeAutonomyAction(args.mode);
   if (explicit) return explicit;
+  // An action or mode that was given but is not one of ours is not a request to guess: answering with another view would read as the requested one.
+  if (readString(args.action) || readString(args.mode)) return null;
   if (readString(args.queueItemId) || readString(args.id)) return 'item';
   if (readString(args.query) || readString(args.target)) return 'intake';
   return 'queue';
@@ -124,6 +126,7 @@ export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
       const args = captureModelReadingInput(rawArgs);
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
+      if (action === null) return error('Unknown autonomy action. Use action (or mode) as one of: intake, queue, item, status.');
 
       if (action === 'intake') return forward(intakeArgs(args));
       if (action === 'queue' || action === 'status') return forward(queueArgs(args));

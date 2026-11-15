@@ -11,6 +11,7 @@ import type { RemoteSupervisor } from '../remote/supervisor.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import type { RuntimeStore } from '../store/index.js';
 import type { RuntimeEventBus, RuntimeEventDomain, RuntimeEventEnvelope, AnyRuntimeEvent } from '../events/index.js';
+import { RUNTIME_EVENT_DOMAINS } from '../../../events/domain-map.js';
 import { buildProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { ProviderAccountSnapshot } from '../provider-accounts/registry.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -133,23 +134,13 @@ export interface WorktreeSnapshot {
   readonly records: readonly ManagedWorktreeMeta[];
 }
 
-const EVENT_DOMAINS: readonly RuntimeEventDomain[] = [
-  'session',
-  'turn',
-  'tools',
-  'gate',
-  'tasks',
-  'agents',
-  'contracts',
-  'communication',
-  'planner',
-  'plugins',
-  'mcp',
-  'transport',
-  'compaction',
-  'ui',
-  'ops',
-];
+/** Every event domain, from the one canonical list, so a new domain is streamed without a second edit here. */
+const EVENT_DOMAINS: readonly RuntimeEventDomain[] = RUNTIME_EVENT_DOMAINS;
+
+/** Approvals raised and not yet decided, cancelled or expired. */
+function countUndecidedApprovals(approvals: readonly { readonly status: string }[]): number {
+  return approvals.filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
+}
 
 function serializeEnvelope(envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>): Record<string, unknown> {
   return {
@@ -285,7 +276,7 @@ export class IntegrationHelperService {
       ],
       sessions: state.session.id ? 1 : 0,
       tasks: state.tasks.tasks.size,
-      pendingApprovals: state.permissions.awaitingDecision ? 1 : 0,
+      pendingApprovals: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)),
       remoteContracts: this.context.remoteRunnerRegistry.listContracts().length,
       panels: panelSnapshots.length,
     };
@@ -323,9 +314,14 @@ export class IntegrationHelperService {
         id: task.id,
         kind: task.kind,
         title: task.title,
+        description: task.description,
         status: task.status,
         owner: task.owner,
+        // A client rebuilds a RuntimeTask from these rows; without them a task
+        // panel cannot tell whether to offer cancel or list the child tasks.
+        cancellable: task.cancellable,
         parentTaskId: task.parentTaskId,
+        childTaskIds: [...task.childTaskIds],
         queuedAt: task.queuedAt,
         startedAt: task.startedAt,
         endedAt: task.endedAt,
@@ -391,11 +387,17 @@ export class IntegrationHelperService {
     };
   }
 
-  getApprovalSnapshot(): Record<string, unknown> {
+  getApprovalSnapshot(approvalId?: string): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    const approvals = this.context.approvalBroker.listApprovals(50);
+    // One named record is returned whatever its rank, so a reader following a
+    // single ask is not blind to it once newer asks push it past the first 50.
+    const approvals = approvalId === undefined
+      ? this.context.approvalBroker.listApprovals(50)
+      : [this.context.approvalBroker.getApproval(approvalId)].filter((record) => record !== null);
     return {
-      awaitingDecision: state.permissions.awaitingDecision,
+      // The gate reports a request only after its decision, so the store flag
+      // never reads true while a prompt is open; the broker holds it until decided.
+      awaitingDecision: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)) > 0,
       mode: state.permissions.mode,
       lastDecision: state.permissions.lastDecision,
       approvalCount: state.permissions.approvalCount,
@@ -668,25 +670,51 @@ export class IntegrationHelperService {
     // dropped by the backpressure guard before a consumer has pulled the first chunk.
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
+        let closed = false;
+        let dropped = 0;
+        const send = (chunk: string): void => {
+          if (closed) return;
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            // The consumer went away between the check and the write.
+            teardown();
+          }
+        };
         const unsubs = selectedDomains.map((domain) => this.context.runtimeBus.onDomain(domain, (envelope) => {
-          // Drop event if the stream buffer is full (backpressure guard).
-          if ((controller.desiredSize ?? 1) <= 0) return;
-          controller.enqueue(encoder.encode(`event: ${domain}\ndata: ${JSON.stringify(serializeEnvelope(envelope))}\n\n`));
+          // Drop event if the stream buffer is full (backpressure guard), and
+          // count it so the client is told it missed some.
+          if ((controller.desiredSize ?? 1) <= 0) {
+            dropped += 1;
+            return;
+          }
+          if (dropped > 0) {
+            send(`event: dropped\ndata: ${JSON.stringify({ count: dropped })}\n\n`);
+            dropped = 0;
+          }
+          send(`event: ${domain}\ndata: ${JSON.stringify(serializeEnvelope(envelope))}\n\n`);
         }));
-        const heartbeat = setInterval(() => {
-          controller.enqueue(encoder.encode(': heartbeat\n\n'));
-        }, 15_000);
+        const heartbeat = setInterval(() => send(': heartbeat\n\n'), 15_000);
         // Don't block clean process exit.
         (heartbeat as unknown as { unref?: () => void }).unref?.();
         teardown = () => {
+          if (closed) return;
+          closed = true;
           clearInterval(heartbeat);
           for (const unsub of unsubs) unsub();
         };
-        request.signal.addEventListener('abort', () => {
+        const onAbort = (): void => {
           teardown();
-          controller.close();
-        }, { once: true });
-        controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ domains: selectedDomains })}\n\n`));
+          // `cancel` may already have ended the stream; closing twice throws.
+          try { controller.close(); } catch { /* already closed */ }
+        };
+        // A request aborted before the stream started never fires `abort` again.
+        if (request.signal.aborted) {
+          onAbort();
+          return;
+        }
+        request.signal.addEventListener('abort', onAbort, { once: true });
+        send(`event: ready\ndata: ${JSON.stringify({ domains: selectedDomains })}\n\n`);
       },
       cancel: () => {
         teardown();

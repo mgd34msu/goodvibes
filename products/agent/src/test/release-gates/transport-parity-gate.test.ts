@@ -30,7 +30,6 @@ interface TransportHarness {
   nodeHostBasePath(): Promise<string>;
   snapshotKind(): Promise<TransportKind>;
   onAgentSpawning(listener: (event: Extract<AgentEvent, { type: 'AGENT_SPAWNING' }>) => void): () => void;
-  waitForEventReady(): Promise<void>;
   emitAgentSpawning(agentId: string, task: string): void;
   dispose(): Promise<void>;
 }
@@ -79,8 +78,8 @@ async function createRuntimeFixture(prefix: string) {
   mkdirSync(workingDir, { recursive: true });
   mkdirSync(homeDir, { recursive: true });
   const runtimeBus = new RuntimeEventBus();
-  const configManager = new ConfigManager({ surfaceRoot: 'tui',
-    configDir: join(homeDir, '.goodvibes', 'tui'),
+  const configManager = new ConfigManager({ surfaceRoot: 'agent',
+    configDir: join(homeDir, '.goodvibes', 'agent'),
     workingDir,
     homeDir,
   });
@@ -128,16 +127,30 @@ async function createRuntimeFixture(prefix: string) {
   };
 }
 
+/** Disposes the fixture (and anything started on it) when creation fails part-way, so the failing creation leaks nothing. */
+async function disposeOnFailure<T>(
+  fixture: Awaited<ReturnType<typeof createRuntimeFixture>>,
+  stopListener: (() => Promise<void>) | undefined,
+  create: () => Promise<T> | T,
+): Promise<T> {
+  try {
+    return await create();
+  } catch (error) {
+    await fixture.dispose(stopListener).catch(() => {});
+    throw error;
+  }
+}
+
 async function createDirectHarness(): Promise<TransportHarness> {
   const fixture = (await createRuntimeFixture('gv-transport-parity-direct'));
-  const transport = createDirectTransport(fixture.runtimeServices.asDaemonGradeView());
+  const transport = await disposeOnFailure(fixture, undefined, () => createDirectTransport(fixture.runtimeServices.asDaemonGradeView()));
   return {
     kind: 'direct',
     ensureSession: async (sessionId, title) => await transport.operator.sessions.ensureSession({
       sessionId,
       title,
       participant: {
-        surfaceKind: 'tui',
+        surfaceKind: 'agent',
         surfaceId: 'direct-parity',
         lastSeenAt: Date.now(),
       },
@@ -163,7 +176,6 @@ async function createDirectHarness(): Promise<TransportHarness> {
     nodeHostBasePath: async () => transport.peer.getNodeHostContract().basePath,
     snapshotKind: async () => (await transport.snapshot()).kind,
     onAgentSpawning: (listener) => transport.operator.events.agents.on('AGENT_SPAWNING', listener),
-    waitForEventReady: async () => {},
     emitAgentSpawning: (agentId, task) => {
       fixture.runtimeBus.emit('agents', createEventEnvelope('AGENT_SPAWNING', {
         type: 'AGENT_SPAWNING',
@@ -199,19 +211,21 @@ async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<Transport
     userAuth: createUserAuth(join(fixture.tempRoot, 'home')),
     serveFactory,
   });
-  daemon.enable({ daemon: true }, TEST_TOKEN);
-  await daemon.start();
-  if (boundPort === null) {
-    throw new Error(`Unable to resolve ${kind} daemon test port`);
-  }
-  const baseUrl = `http://127.0.0.1:${boundPort}`;
-  const transport = kind === 'http'
-    ? createHttpTransport({ baseUrl, authToken: TEST_TOKEN })
-    : createRealtimeTransport({
-      baseUrl,
-      authToken: TEST_TOKEN,
-      webSocketImpl: createAuthenticatedWebSocket(TEST_TOKEN),
-    });
+  const transport = await disposeOnFailure(fixture, () => daemon.stop(), async () => {
+    daemon.enable({ daemon: true }, TEST_TOKEN);
+    await daemon.start();
+    if (boundPort === null) {
+      throw new Error(`Unable to resolve ${kind} daemon test port`);
+    }
+    const baseUrl = `http://127.0.0.1:${boundPort}`;
+    return kind === 'http'
+      ? createHttpTransport({ baseUrl, authToken: TEST_TOKEN })
+      : createRealtimeTransport({
+        baseUrl,
+        authToken: TEST_TOKEN,
+        webSocketImpl: createAuthenticatedWebSocket(TEST_TOKEN),
+      });
+  });
 
   return {
     kind,
@@ -241,9 +255,6 @@ async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<Transport
     nodeHostBasePath: async () => (await transport.peer.getNodeHostContract()).basePath,
     snapshotKind: async () => (await transport.snapshot()).kind,
     onAgentSpawning: (listener) => transport.operator.events.agents.on('AGENT_SPAWNING', listener),
-    waitForEventReady: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    },
     emitAgentSpawning: (agentId, task) => {
       fixture.runtimeBus.emit('agents', createEventEnvelope('AGENT_SPAWNING', {
         type: 'AGENT_SPAWNING',
@@ -262,6 +273,17 @@ async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<Transport
 
 const activeDisposers: Array<() => Promise<void>> = [];
 
+/** Created one at a time, each registered for teardown before the next starts, so a failed creation leaves nothing behind. */
+async function createAllHarnesses(): Promise<TransportHarness[]> {
+  const harnesses: TransportHarness[] = [];
+  for (const create of [createDirectHarness, () => createRemoteHarness('http'), () => createRemoteHarness('realtime')]) {
+    const harness = await create();
+    activeDisposers.push(harness.dispose);
+    harnesses.push(harness);
+  }
+  return harnesses;
+}
+
 afterEach(async () => {
   const outcomes = await Promise.allSettled(activeDisposers.splice(0).reverse().map(dispose => dispose()));
   const failures = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : []);
@@ -269,6 +291,15 @@ afterEach(async () => {
 });
 
 describe('transport parity gate', () => {
+  test('a creation that fails part-way disposes its own fixture and listener', async () => {
+    const fixture = await createRuntimeFixture('gv-transport-parity-failed-create');
+    let stopped = 0;
+    await expect(disposeOnFailure(fixture, async () => { stopped++; }, () => { throw new Error('bind failed'); }))
+      .rejects.toThrow('bind failed');
+    expect(stopped).toBe(1);
+    expect(existsSync(fixture.tempRoot)).toBe(false);
+  });
+
   test('fixture teardown drains its direct session broker before removing its root', async () => {
     const fixture = await createRuntimeFixture('gv-transport-parity-broker-drain');
     const broker = fixture.runtimeServices.automationSessionRegister;
@@ -294,12 +325,7 @@ describe('transport parity gate', () => {
   });
 
   test('common operator and peer workflows stay transport-compatible across direct, HTTP, and realtime surfaces', async () => {
-    const harnesses = await Promise.all([
-      (await createDirectHarness()),
-      (await createRemoteHarness('http')),
-      (await createRemoteHarness('realtime')),
-    ]);
-    activeDisposers.push(...harnesses.map((harness) => harness.dispose));
+    const harnesses = await createAllHarnesses();
 
     let expectedProviderIds: readonly string[] | null = null;
     for (const harness of harnesses) {
@@ -325,12 +351,7 @@ describe('transport parity gate', () => {
   });
 
   test('agent spawning events stay transport-compatible across direct, HTTP, and realtime surfaces', async () => {
-    const harnesses = await Promise.all([
-      (await createDirectHarness()),
-      (await createRemoteHarness('http')),
-      (await createRemoteHarness('realtime')),
-    ]);
-    activeDisposers.push(...harnesses.map((harness) => harness.dispose));
+    const harnesses = await createAllHarnesses();
 
     for (const harness of harnesses) {
       const seen: Array<{ type: string; agentId: string; task: string }> = [];
@@ -342,7 +363,6 @@ describe('transport parity gate', () => {
         });
       });
       try {
-        await harness.waitForEventReady();
         const agentId = `agent-${harness.kind}`;
         const task = `transport parity ${harness.kind}`;
         const event = await waitFor(() => {

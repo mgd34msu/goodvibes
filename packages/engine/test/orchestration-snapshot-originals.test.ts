@@ -16,7 +16,6 @@ function fixture() {
   return { root, dir, path: join(dir, 'ws-original.json') };
 }
 
-// UNRUN source regressions: public APIs, original files and actual publication.
 test('future envelopes remain at the original path through load/list and both cached-owner and copied-owner writes', () => {
   const f = fixture(), workstream = make(); writeWorkstreamSnapshot(f.root, workstream, []);
   const future = JSON.stringify({ schemaVersion: 99, workstream: { privateFutureState: 'preserve original bytes' }, completedResults: [] });
@@ -78,6 +77,9 @@ test('only exact native temporary formats with proven-dead owners are reclaimed'
   });
   try {
     const summary = reapOrchestrationSnapshots(f.root, { now });
+    // The liveness probe was consulted for the dead and the inaccessible owner, so the stubbed answers were used.
+    expect(kill.mock.calls.some(([pid]) => pid === 999999)).toBe(true);
+    expect(kill.mock.calls.some(([pid]) => pid === 999998)).toBe(true);
     expect(summary.staleTempRemoved).toBe(2);
     expect(existsSync(join(f.dir, names.dead))).toBe(false);
     expect(existsSync(join(f.dir, names.modern))).toBe(false);
@@ -114,6 +116,7 @@ test('a later real isRunning callback cannot replace an admitted quarantine with
       if (id === 'trigger') { writeFileAtomic(q.path, future); utimesSync(q.path, q.old, q.old); replaced = true; }
       return false;
     } });
+    expect(order).toHaveBeenCalled();
     expect(replaced).toBe(true);
     expect(readFileSync(q.path, 'utf8')).toBe(future);
     expect(summary.quarantineExpired).toBe(0); expect(summary.total).toBe(0); expect(summary.bytesReclaimed).toBe(0);
@@ -124,11 +127,14 @@ test('retiring an original parent alias cannot reclaim even the same original le
   const f = fixture(), q = oldQuarantine(f), physical = join(f.root, 'physical-snapshots');
   fs.renameSync(f.dir, physical); symlinkSync(physical, f.dir, 'dir');
   const order = quarantinesFirst(f.dir);
+  let retired = false;
   try {
     const summary = reapOrchestrationSnapshots(f.root, { isRunning(id) {
-      if (id === 'trigger') { fs.unlinkSync(f.dir); symlinkSync(physical, f.dir, 'dir'); }
+      if (id === 'trigger') { fs.unlinkSync(f.dir); symlinkSync(physical, f.dir, 'dir'); retired = true; }
       return false;
     } });
+    expect(order).toHaveBeenCalled();
+    expect(retired).toBe(true);
     expect(readFileSync(q.path, 'utf8')).toBe('{ original admitted forensic bytes');
     expect(summary.total).toBe(0); expect(summary.bytesReclaimed).toBe(0);
   } finally { order.mockRestore(); }
@@ -151,6 +157,7 @@ test('a failed selected-original unlink is not counted as reclaimed bytes or a r
   });
   try {
     const summary = reapOrchestrationSnapshots(f.root);
+    expect(unlink.mock.calls.some(([path]) => path === q.path)).toBe(true);
     expect(existsSync(q.path)).toBe(true);
     expect(summary.quarantineExpired).toBe(0); expect(summary.total).toBe(0); expect(summary.bytesReclaimed).toBe(0);
   } finally { unlink.mockRestore(); }

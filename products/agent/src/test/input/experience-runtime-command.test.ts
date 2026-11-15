@@ -119,25 +119,6 @@ describe('experience runtime commands', () => {
     registerHealthRuntimeCommands(registry);
     const command = registry.get('health');
     const out: string[] = [];
-    const context = {
-      print: (text: string) => { out.push(text); },
-      platform: {
-        configManager: {
-          get: () => null,
-        },
-        readModels: {
-          session: {
-            getSnapshot: () => { throw new Error('session service unavailable'); },
-          },
-          remote: {
-            getSnapshot: () => ({
-              supervisor: { sessions: [], activeConnections: 0, degradedConnections: 0 },
-            }),
-          },
-        },
-      },
-    } as unknown as CommandContext;
-
     // The review subcommand calls requireReadModels which will reach session.getSnapshot
     // via requireProviderApi, simulate a require* helper that throws
     const contextThrows = {
@@ -482,8 +463,12 @@ describe('experience runtime commands', () => {
     registerExperienceRuntimeCommands(registry);
     const command = registry.get('voice');
     const out: string[] = [];
+    const receiptPrinted = deferred();
     const context = {
-      print: (text: string) => { out.push(text); },
+      print: (text: string) => {
+        out.push(text);
+        if (text.startsWith('Managed Local-Voice Setup')) receiptPrinted.resolve();
+      },
       platform: {
         configManager: { get: () => null },
         voiceSetup: {
@@ -513,8 +498,8 @@ describe('experience runtime commands', () => {
 
     await command!.handler(['setup', '--yes'], context);
     // The install runs fire-and-forget so the prompt is never blocked on a
-    // multi-hundred-MB download; let its .then() callback flush before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // multi-hundred-MB download; wait for its receipt rather than a timer.
+    await awaitFixtureSignal(receiptPrinted.promise, 'voice install receipt');
 
     const text = out.join('\n');
     expect(text).toContain('Installing managed local-voice runtime');
@@ -639,20 +624,30 @@ describe('experience runtime commands', () => {
     const command = registry.get('voice');
     const out: string[] = [];
     // Old-daemon shape: status never carries installInProgress.
+    const finishInstall = deferred();
+    const statusRead = deferred();
+    const receiptPrinted = deferred();
+    fixtureCleanups.add(() => { finishInstall.resolve(); });
     const context = {
-      print: (text: string) => { out.push(text); },
+      print: (text: string) => {
+        out.push(text);
+        if (text.startsWith('Managed Local-Voice Setup')) receiptPrinted.resolve();
+      },
       platform: {
         configManager: { get: () => null },
         voiceSetup: {
-          status: () => ({
-            platform: 'linux',
-            state: 'not-provisioned',
-            tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '', modelPath: '' },
-            stt: { engine: 'whisper.cpp', supported: false, state: 'unsupported-platform', binaryPresent: false, modelPresent: false, binaryPath: '', modelPath: '' },
-            offerBytes: 219_000_000,
-          }),
+          status: () => {
+            statusRead.resolve();
+            return {
+              platform: 'linux',
+              state: 'not-provisioned',
+              tts: { engine: 'piper', binaryPresent: false, voicePresent: false, binaryPath: '', modelPath: '' },
+              stt: { engine: 'whisper.cpp', supported: false, state: 'unsupported-platform', binaryPresent: false, modelPresent: false, binaryPath: '', modelPath: '' },
+              offerBytes: 219_000_000,
+            };
+          },
           install: async () => {
-            await new Promise((resolve) => setTimeout(resolve, 600));
+            await finishInstall.promise;
             return {
               provisioned: false,
               platform: 'linux',
@@ -670,15 +665,18 @@ describe('experience runtime commands', () => {
     } as unknown as CommandContext;
 
     await command!.handler(['setup', '--yes'], context);
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    // Hold the install open until the poller has read status at least once, so
+    // an absent installInProgress section is really observed mid-install.
+    await awaitFixtureSignal(statusRead.promise, 'a status poll during the install');
+    // No progress lines were fabricated from the absent section: only the busy line so far.
+    expect(out).toEqual(['Installing managed local-voice runtime...']);
+    finishInstall.resolve();
+    await awaitFixtureSignal(receiptPrinted.promise, 'voice install receipt');
 
     const text = out.join('\n');
     expect(text).toContain('Installing managed local-voice runtime');
-    // No progress lines were fabricated from an absent section (live progress
-    // lines are the only ones that carry byte sizes in MB)...
-    expect(text).not.toContain('MB)');
-    expect(text).not.toContain(' of ');
-    // ...and the honest failure receipt still lands.
+    // The honest failure receipt lands, and no progress line was added around it.
+    expect(out.filter((line) => line.includes('MB)'))).toEqual([]);
     expect(text).toContain('piper-engine: failed (network unreachable)');
     expect(text).toContain('result: not provisioned');
   });

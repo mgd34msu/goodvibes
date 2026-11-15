@@ -68,8 +68,9 @@ export function PhoneNodeView() {
       onState: (next) => setState(next),
     });
     clientRef.current = client;
+    // An already connected phone is started by the status effect below once this state
+    // lands. start() stops and restarts, so starting here too would abort the first pull.
     setState(client.getState());
-    if (client.getState().status === 'connected') client.start();
     return () => {
       client.stop();
       clientRef.current = null;

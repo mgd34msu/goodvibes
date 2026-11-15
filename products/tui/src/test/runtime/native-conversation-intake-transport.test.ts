@@ -4,6 +4,7 @@ import { dispatchNativeConversationTurn } from '../../runtime/native-conversatio
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { tmpdir } from 'node:os';
 import type { NativeConversationIntakeCaptureRequest, NativeConversationIntakeResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
@@ -18,6 +19,11 @@ async function fixture() {
   const requests: string[] = []; const captures: NativeConversationIntakeCaptureRequest[] = []; const states = new Map<string, NativeConversationIntakeResult>();
   const executionStarts: NativeWorkExecutionIdentity[] = []; const executions = new Map<string, NativeWorkExecutionSnapshot>(); let loseStart = false; let invalidStartRevision = false;
   let processing = true; let loseAdmit = false; let turnMode = false; let revoked = false;
+  // A failed expectation inside the server handler would only become an HTTP 500
+  // the client reads as an unknown outcome, so handler checks are recorded here
+  // and asserted when the fixture closes.
+  const violations: string[] = [];
+  const ensure = (ok: boolean, what: string): void => { if (!ok) violations.push(what); };
   let heldAdmit: Promise<void> | undefined; let releaseAdmit = () => {}; let admitArrived = () => {};
   const common = (command: NativeConversationIntakeCaptureRequest) => ({ projectId: 'p', requestId: command.requestId,
     sourceRef: { version: 1 as const, inputId: command.inputId, sourceId: 'host-source', sourceRevision: 'r1', sessionId: 'host-session' } });
@@ -28,8 +34,11 @@ async function fixture() {
     return { ...c, kind: 'work', receipt: { projectId: 'p', requestId: command.requestId, inputId: command.inputId, ledgerRevision: 1, workId: 'native-recorded-work', attemptId: 'native-recorded-attempt', expectedRevision: { work: 1, criteria: 1, attempt: 1 }, source: { version: 2, sourceId: c.sourceRef.sourceId, sourceRevision: c.sourceRef.sourceRevision, sessionId: c.sourceRef.sessionId, offsetEncoding: 'utf16', proposalRevision: 'proposal-r1', spans: [{ partId: 'input', start: 0, end: command.text.length }], admissionDecisionId: 'admission', judgmentDecisionIds: ['judge'] }, goal: command.text, criteria: [command.text] } };
   };
   const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(request) {
-    expect(request.headers.get('authorization')).toBe('Bearer synthetic-intake-token');
     const path = new URL(request.url).pathname; requests.push(path);
+    if (request.headers.get('authorization') !== 'Bearer synthetic-intake-token') {
+      violations.push(`${path} was called without the paired bearer`);
+      return Response.json({ error: 'Unexpected credential' }, { status: 401 });
+    }
     if (revoked) return Response.json({ error: 'Revoked authority' }, { status: 403 });
     if (path === '/api/control-plane/auth') return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true, sessionCookiePresent: false, principalId: 'paired-principal', principalKind: 'token', admin: true, scopes: ['read:work-ledger', 'write:work-ledger', 'write:fleet'], roles: [] });
     if (path === '/api/work-ledger/project') return Response.json({ projectId: 'p' });
@@ -37,8 +46,9 @@ async function fixture() {
     if (path === '/api/work-ledger/history') return Response.json({ projectId: 'p', afterSequence: 0, throughSequence: 0, cursor: 0, hasMore: false, events: [] });
     if (path === '/api/work-ledger/intake/capture') {
       const command = await request.json() as NativeConversationIntakeCaptureRequest; captures.push(command);
-      const stored = JSON.parse(readFileSync(`${journalPath}.intake`, 'utf8')); expect(stored.records[0].command).toEqual(command);
-      expect(Object.keys(stored.records[0].binding)).toEqual(['endpoint', 'projectId', 'workspace', 'principalId']);
+      const stored = JSON.parse(readFileSync(`${journalPath}.intake`, 'utf8'));
+      ensure(isDeepStrictEqual(stored.records[0].command, command), 'capture was sent before the journal held the exact command');
+      ensure(isDeepStrictEqual(Object.keys(stored.records[0].binding), ['endpoint', 'projectId', 'workspace', 'principalId']), 'the journal binding has unexpected fields');
       const result: NativeConversationIntakeResult = { ...common(command), kind: 'captured' }; states.set(command.inputId, result); return Response.json(result);
     }
     if (path === '/api/work-ledger/intake/get') {
@@ -46,7 +56,7 @@ async function fixture() {
     }
     if (path === '/api/work-ledger/intake/admit' || path === '/api/work-ledger/intake/resume' || path === '/api/work-ledger/intake/cancel') {
       const body = await request.json() as { inputId: string; sourceRevision: string }; const command = captures.find(command => command.inputId === body.inputId)!;
-      expect(body.sourceRevision).toBe('r1');
+      ensure(body.sourceRevision === 'r1', `${path} carried source revision ${body.sourceRevision}`);
       const result: NativeConversationIntakeResult = path.endsWith('/cancel') ? { ...common(command), kind: 'cancelled' } : processing ? { ...common(command), kind: 'processing', stage: 'routing', recovery: 'required' } : terminal(command);
       states.set(command.inputId, result);
       if (heldAdmit && path.endsWith('/admit')) { admitArrived(); await heldAdmit; }
@@ -55,11 +65,11 @@ async function fixture() {
     }
     if (path === '/api/work-ledger/execution/status' || path === '/api/work-ledger/execution/start') {
       const body = await request.json() as NativeWorkExecutionIdentity & { projectId: string };
-      const { projectId, ...target } = body; expect(projectId).toBe('p');
+      const { projectId, ...target } = body; ensure(projectId === 'p', `${path} carried project ${projectId}`);
       if (path.endsWith('/status')) return executions.has(target.attemptId) ? Response.json(executions.get(target.attemptId)) : Response.json({ error: 'Not found', code: 'NATIVE_EXECUTION_NOT_FOUND' }, { status: 404 });
       executionStarts.push(target);
       const stored = JSON.parse(readFileSync(`${journalPath}.intake`, 'utf8'));
-      expect(stored.records[0].execution).toEqual({ sourceRevision: 'r1', target });
+      ensure(isDeepStrictEqual(stored.records[0].execution, { sourceRevision: 'r1', target }), 'execution start was sent before the journal held the exact intent');
       const snapshot: NativeWorkExecutionSnapshot = { kind: 'execution', projectId, ...target, currentRevision: target.expectedRevision, currentAttempt: true, stale: false, state: 'launch-claimed', recovery: 'available', receipt: { contractId: 'native-contract', ownerAgentId: 'native-owner' }, progress: null };
       if (invalidStartRevision) return Response.json({ ...snapshot, expectedRevision: { work: 2, criteria: 2, attempt: 2 } });
       executions.set(target.attemptId, snapshot);
@@ -84,7 +94,10 @@ async function fixture() {
     settle() { processing = false; }, loseAdmit() { loseAdmit = true; },
     turn() { processing = false; turnMode = true; }, revoke() { revoked = true; },
     holdAdmit() { heldAdmit = new Promise(resolve => { releaseAdmit = resolve; }); return { arrived: new Promise<void>(resolve => { admitArrived = resolve; }), release: () => releaseAdmit() }; },
-    close() { releaseAdmit(); close(); server.stop(true); rmSync(home, { recursive: true, force: true }); } };
+    close() {
+      releaseAdmit(); close(); server.stop(true); rmSync(home, { recursive: true, force: true });
+      if (violations.length) throw new Error(`the native host fixture saw unexpected requests: ${violations.join('; ')}`);
+    } };
 }
 test('ordinary product transport persists exact source and explicitly recovered admission starts its native target', async () => {
   const f = await fixture(); const text = '  Deliver the exact change\r\nkeep 😀 and spaces  ';
@@ -134,7 +147,7 @@ test('real turn permit outlives intake transport, preserves exact source and rec
     expect(delivered).toEqual(['p', { text, content: undefined, options: { nativeConversationTurnPermit: permit } }]);
     const before = f.requests.length; await revalidateNativeConversationTurnPermit(permit);
     expect(f.requests.slice(before)).toEqual(['/api/work-ledger/intake/get']);
-    f.revoke(); await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow();
+    f.revoke(); await expect(revalidateNativeConversationTurnPermit(permit)).rejects.toThrow('Revoked authority');
   } finally { f.close(); }
 });
 test('lost settled turn reply requires explicit resume and a single durable dispatch claim', async () => {
@@ -219,7 +232,7 @@ for (const change of ['token', 'store', 'missing', 'corrupt'] as const) test(`qu
     if (change === 'store') replaceNativeTestCredential(f.home);
     if (change === 'missing') rmSync(tuiHostPairingStorePath(f.home));
     if (change === 'corrupt') writeFileSync(tuiHostPairingStorePath(f.home), '{invalid');
-    await expect(revalidateNativeConversationTurnPermit(state!.turnPermit!)).rejects.toThrow();
+    await expect(revalidateNativeConversationTurnPermit(state!.turnPermit!)).rejects.toThrow('Native intake host selection changed');
     expect(f.requests.length).toBe(before);
   } finally { f.close(); }
 });

@@ -66,7 +66,7 @@ for (const change of ['config', 'policy', 'caller-cancel', 'source']) test(`MCP 
     if (change === 'caller-cancel') f.operationLifetime.abort();
     if (change === 'source') f.changeGoal('A substituted goal must not borrow the original admission');
   });
-  await expect(f.call()).rejects.toThrow(); expect(changed).toBe(true);
+  await expect(f.call()).rejects.toThrow(({ config: 'Autonomous preparation authority changed', policy: 'is blocked', 'caller-cancel': 'aborted', source: 'Autonomous preparation authority changed' } as const)[change]); expect(changed).toBe(true);
   expect(f.calls).toHaveLength(0); expect(f.human).not.toHaveBeenCalled();
 });
 
@@ -83,7 +83,7 @@ for (const change of ['config', 'stop']) test(`ACP ${change} cancels in-flight r
 test('MCP revocation after the first write prevents elicitation continuation', async () => {
   const f = await fixture(); f.elicit();
   f.onAdmission(() => { if (f.calls.length) f.registry.setServerTrustMode('owned-protocol', 'blocked'); });
-  await expect(f.call()).rejects.toThrow(); expect(f.calls).toHaveLength(1); expect(f.human).not.toHaveBeenCalled();
+  await expect(f.call()).rejects.toThrow('permission request was cancelled'); expect(f.calls).toHaveLength(1); expect(f.human).not.toHaveBeenCalled();
 });
 
 test('outer daemon shutdown immediately fences ACP/MCP before a blocked plugin drain', async () => {
@@ -132,10 +132,10 @@ test('overlapping ACP prompts cannot replace the source of a pending child permi
 
 test('closed daemon owner cannot start new ACP or MCP transports', async () => {
   const f = await fixture(); const hosted = await f.spawn(); await f.daemon.services.close(); const rows = f.acp.list().length;
-  await expect(f.acp.spawnAgent({ agent: { id: 'never-spawn', title: 'Must not start', binaryPath: process.execPath, args: ['--version'] }, cwd: f.daemon.workingDirectory })).rejects.toThrow();
+  await expect(f.acp.spawnAgent({ agent: { id: 'never-spawn', title: 'Must not start', binaryPath: process.execPath, args: ['--version'] }, cwd: f.daemon.workingDirectory })).rejects.toThrow('aborted');
   expect(f.acp.list()).toHaveLength(rows);
   expect(f.acp.prompt(hosted.id, 'Must not start a turn')).toMatchObject({ queued: false });
-  await expect(f.daemon.daemon.registerMcpServer({ name: 'never-connect', url: 'http://127.0.0.1:1/never-connect' })).rejects.toThrow();
+  await expect(f.daemon.daemon.registerMcpServer({ name: 'never-connect', url: 'http://127.0.0.1:1/never-connect' })).rejects.toThrow('aborted');
   expect(f.registry.serverNames).not.toContain('never-connect'); expect(f.calls).toHaveLength(0); expect(f.human).not.toHaveBeenCalled();
 });
 
@@ -144,7 +144,7 @@ test('configured plan mode remains a deterministic refusal through the product p
   // Consume this test's explicit setup write before starting a new handshake.
   // Later mutation tests deliberately leave their invalidation live.
   f.daemon.services.configManager.flushConfigFileChanges();
-  await expect(f.call()).rejects.toThrow(); const hosted = await f.spawn('Original caller: only the synthetic file');
+  await expect(f.call()).rejects.toThrow('plan mode'); const hosted = await f.spawn('Original caller: only the synthetic file');
   await until(() => f.acp.get(hosted.id)?.state === 'idle', 'Plan-mode ACP refusal settles');
   expect(f.acp.get(hosted.id)?.progress).toContain('permission denied'); expect(f.calls).toHaveLength(0); expect(f.human).not.toHaveBeenCalled();
 });

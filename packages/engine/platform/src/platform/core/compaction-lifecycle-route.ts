@@ -35,7 +35,6 @@ export function createSessionCompactionManager(
   return createCompactionManager({
     sessionId,
     bus,
-    flags,
     contextWindow: () => {
       const registry = getProviderRegistry();
       // The manager's legacy numeric API uses 0 for unknown; automatic runs

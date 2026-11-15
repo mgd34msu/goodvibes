@@ -133,12 +133,21 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   requireString(analysis['classification'], 'request.analysis.classification');
   requireString(analysis['summary'], 'request.analysis.summary');
   const workingDirectory = optionalString(raw['workingDirectory'], 'request.workingDirectory');
+  const attribution = raw['attribution'];
+  const rememberOptions = raw['rememberOptions'];
+  const rememberEffect = raw['rememberEffect'];
+  // Only the fields of a permission ask are copied: the record is stored and
+  // shown to every surface, so a field nobody validated must not ride along.
   return {
-    ...(raw as unknown as PermissionPromptRequest),
     callId,
     tool,
     args,
+    category: category as PermissionPromptRequest['category'],
+    analysis: analysis as unknown as PermissionPromptRequest['analysis'],
     ...(workingDirectory === undefined ? {} : { workingDirectory }),
+    ...(isRecord(attribution) ? { attribution: attribution as unknown as PermissionPromptRequest['attribution'] } : {}),
+    ...(Array.isArray(rememberOptions) ? { rememberOptions: rememberOptions as PermissionPromptRequest['rememberOptions'] } : {}),
+    ...(rememberEffect === 'skips-ask' || rememberEffect === 'owner-asked-again' ? { rememberEffect } : {}),
   };
 }
 
@@ -167,16 +176,28 @@ export function buildRaiseMetadata(
 }
 
 /** Wait for a decision for at most `waitMs`; resolves false when it runs out. */
-async function awaitDecision(raised: RaisedApproval, waitMs: number): Promise<boolean> {
+async function awaitDecision(raised: RaisedApproval, waitMs: number, signal?: AbortSignal): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   const expired = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), waitMs);
     timer.unref?.();
+    // A caller that went away stops waiting; the ask itself stays raised.
+    if (signal) {
+      if (signal.aborted) resolve(false);
+      else {
+        onAbort = () => resolve(false);
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
   });
   try {
-    return await Promise.race([raised.decision.then(() => true), expired]);
+    // A decision that settles by rejecting is not a decision: the record read
+    // back below says where the ask stands.
+    return await Promise.race([raised.decision.then(() => true, () => false), expired]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -202,7 +223,7 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService): Gatewa
     // down, and the broker rejects nothing today only by construction.
     raised.decision.catch(() => undefined);
 
-    const decided = waitMs !== undefined && waitMs > 0 ? await awaitDecision(raised, waitMs) : false;
+    const decided = waitMs !== undefined && waitMs > 0 ? await awaitDecision(raised, waitMs, invocation.signal) : false;
     // Read the record BACK rather than returning the one raise produced: if a
     // decision landed during the wait, the caller should see the resolved
     // record, and the store is the authority on what it says.
@@ -211,6 +232,7 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService): Gatewa
       approval,
       coalesced: raised.coalesced,
       decided,
+      ...(raised.holdId === undefined ? {} : { holdId: raised.holdId }),
     };
   };
 }

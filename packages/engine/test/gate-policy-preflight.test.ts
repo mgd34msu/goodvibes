@@ -77,6 +77,6 @@ describe('buildPolicyPreflightReview', () => {
 
     expect(review.status).toBe('warn');
     expect(review.issueCount).toBe(1);
-    expect(review.issues[0]?.message).toContain('requires approval for risky actions');
+    expect(review.issues[0]?.message).toContain('calls outside it are denied');
   });
 });

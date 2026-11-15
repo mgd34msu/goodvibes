@@ -19,7 +19,10 @@
  * exactly what would leave the machine and stops; only a re-run carrying
  * `--confirm` sets both flags the daemon's gate demands. That mirrors the
  * preview-then-confirm shape `/review` uses for hunk reverts, and it means the
- * dangerous action cannot happen from a typo or a recalled line of history.
+ * dangerous action cannot happen from a typo. Slash commands are not kept in
+ * the prompt history, so a recalled line cannot re-send either. The wire has no
+ * idempotency key, so this process refuses to send the exact same message twice
+ * unless `--again` is given, which covers a retry after a timeout.
  *
  * Message bodies are attacker-controlled text. They are printed as transcript
  * output, which is display-only and never enters the model's message history,
@@ -27,8 +30,10 @@
  */
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
+  claimIrreversibleWrite,
   READ_INVOCATION_CONTEXT,
   errorText,
   probeConnection,
@@ -63,13 +68,28 @@ function truncate(value: string, width: number): string {
   return flat.length <= width ? flat : `${flat.slice(0, width - 1)}…`;
 }
 
-export function renderInboxList(messages: readonly InboxMessage[]): string {
-  if (messages.length === 0) return 'Inbox is empty (nothing matched).';
-  const lines = [`Inbox: ${messages.length} message${messages.length === 1 ? '' : 's'}:`];
+/** The parts of the `email.inbox.list` output beyond the messages themselves. */
+type InboxListOutput = OperatorMethodOutput<'email.inbox.list'>;
+interface InboxPageNotes {
+  readonly total?: InboxListOutput['total'] | undefined;
+  readonly unreadable?: InboxListOutput['unreadable'] | undefined;
+}
+
+export function renderInboxList(messages: readonly InboxMessage[], notes: InboxPageNotes = {}): string {
+  const unreadable = notes.unreadable ?? [];
+  const unreadableLine = unreadable.length > 0
+    ? `  ${unreadable.length} message${unreadable.length === 1 ? '' : 's'} on this page could not be read and ${unreadable.length === 1 ? 'is' : 'are'} not shown (${unreadable.map((entry) => entry.detail).join('; ')}). They are not deleted.`
+    : undefined;
+  if (messages.length === 0) {
+    if (unreadableLine) return ['No messages could be shown.', unreadableLine, ...(notes.total ? [`  ${notes.total} matched in the mailbox.`] : [])].join('\n');
+    return 'Inbox is empty (nothing matched).';
+  }
+  const lines = [`Inbox: ${messages.length} message${messages.length === 1 ? '' : 's'}${notes.total !== undefined && notes.total > messages.length ? ` of ${notes.total}` : ''}:`];
   for (const message of messages) {
     const mark = message.unread ? '●' : ' ';
     lines.push(`  ${mark} ${String(message.uid).padStart(6)}  ${truncate(message.from, 28).padEnd(28)}  ${truncate(message.subject, 48)}`);
   }
+  if (unreadableLine) lines.push(unreadableLine);
   lines.push('', '  /mail read <uid>: open one message');
   return lines.join('\n');
 }
@@ -186,7 +206,7 @@ async function listInbox(ctx: CommandContext, gateway: Gateway, limit: number, w
     const result = await gateway.invoke('email.inbox.list', {
       ...READ_INVOCATION_CONTEXT,
       body: { limit },
-    }) as { readonly messages?: readonly InboxMessage[] };
+    }) as InboxListOutput;
     if (withStatus) {
       ctx.print(renderConnectionStatus({
         surface: 'mail',
@@ -195,7 +215,7 @@ async function listInbox(ctx: CommandContext, gateway: Gateway, limit: number, w
         nextActions: [],
       }));
     }
-    ctx.print(renderInboxList(result.messages ?? []));
+    ctx.print(renderInboxList(result.messages ?? [], { total: result.total, unreadable: result.unreadable }));
   });
 }
 
@@ -215,8 +235,9 @@ async function readMessage(ctx: CommandContext, gateway: Gateway, rawUid: string
 }
 
 async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 'send', rest: readonly string[]): Promise<void> {
-  const raw = rest.filter((part) => part !== '--confirm').join(' ');
+  const raw = rest.filter((part) => part !== '--confirm' && part !== '--again').join(' ');
   const confirmed = rest.includes('--confirm');
+  const again = rest.includes('--again');
   const parsed = parseComposeArgs(raw);
   if (parsed === null) {
     ctx.print([
@@ -236,8 +257,10 @@ async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 's
       const result = await gateway.invoke('email.draft.create', {
         ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
         body: { to: parsed.to, subject: parsed.subject, body: parsed.body },
-      }) as { readonly uid: number; readonly draftId: string };
-      ctx.print(`Draft saved to the account (uid ${result.uid}). Nothing was sent.`);
+      }) as OperatorMethodOutput<'email.draft.create'>;
+      // Without UIDPLUS the server returns no uid; name the folder instead of printing "undefined".
+      const where = result.uid !== undefined ? `uid ${result.uid}` : `folder ${result.mailbox}`;
+      ctx.print(`Draft saved to the account (${where}). Nothing was sent.`);
     });
     return;
   }
@@ -252,8 +275,18 @@ async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 's
       '',
       parsed.body,
       '',
-      'Nothing has been sent. Re-run the same line with --confirm to send it.',
+      'Nothing has been sent. Re-run the same line with --confirm to send it (add --again to resend an identical message).',
     ].join('\n'));
+    return;
+  }
+
+  // The daemon treats this call as the user's own explicit request, so only the user's own line may make it.
+  if (ctx.invokedByModel === true) {
+    ctx.print('Refused: /mail send must be typed by the user; a model-invoked send is not allowed. The preview above is all it can do.');
+    return;
+  }
+  if (!claimIrreversibleWrite(gateway, `mail.send\0${parsed.to}\0${parsed.subject}\0${parsed.body}`, again)) {
+    ctx.print('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again. Check the Sent folder first; add --again to send it anyway.');
     return;
   }
 
@@ -261,7 +294,7 @@ async function compose(ctx: CommandContext, gateway: Gateway, verb: 'draft' | 's
     const result = await gateway.invoke('email.send', {
       ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
       body: { to: parsed.to, subject: parsed.subject, body: parsed.body, confirm: true },
-    }) as { readonly messageId: string; readonly sentAt: string };
+    }) as OperatorMethodOutput<'email.send'>;
     ctx.print(`Sent to ${parsed.to} at ${result.sentAt} (message id ${result.messageId}).`);
   });
 }

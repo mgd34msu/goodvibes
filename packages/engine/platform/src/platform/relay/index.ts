@@ -27,10 +27,13 @@ export {
   type StepUpDecision,
   type StepUpEvaluationInput,
   type StepUpAssertionVerifier,
+  type StepUpRequestContext,
 } from './step-up-policy.js';
 
 export {
   StepUpService,
+  StepUpChallengeLimitError,
+  StepUpValidationError,
   parseAssertionHeader,
   encodeAssertionHeader,
   type StepUpSecretStore,

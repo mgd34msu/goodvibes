@@ -32,14 +32,14 @@ describe('provider runtime snapshots', () => {
     process.env.HOME = root;
     process.chdir(root);
     secrets = new SecretsManager({ projectRoot: root, globalHome: root });
-    subscriptions = new SubscriptionManager(join(root, '.goodvibes', 'tui', 'subscriptions.json'));
-    const serviceRegistry = new ServiceRegistry(join(root, '.goodvibes', 'tui', 'services.json'), {
+    subscriptions = new SubscriptionManager(join(root, '.goodvibes', 'agent', 'subscriptions.json'));
+    const serviceRegistry = new ServiceRegistry(join(root, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: secrets,
       subscriptionManager: subscriptions,
     });
-    const favoritesStore = new FavoritesStore({ dir: join(root, '.goodvibes', 'tui') });
-    const benchmarkStore = new BenchmarkStore({ dir: join(root, '.goodvibes', 'tui') });
-    const configManager = new ConfigManager({ surfaceRoot: 'tui',  configDir: join(root, '.goodvibes', 'tui') });
+    const favoritesStore = new FavoritesStore({ dir: join(root, '.goodvibes', 'agent') });
+    const benchmarkStore = new BenchmarkStore({ dir: join(root, '.goodvibes', 'agent') });
+    const configManager = new ConfigManager({ surfaceRoot: 'agent',  configDir: join(root, '.goodvibes', 'agent') });
     configManager.setDynamic('provider.model', 'openai:gpt-5-test');
     providerRegistry = createLaunchTolerantProviderRegistry({
       configManager,

@@ -88,7 +88,8 @@ async function scene(mode: 'prompt' | 'plan' | 'custom') {
       const input: unknown = await request.json();
       const supplied = input && typeof input === 'object' && 'path' in input && typeof input.path === 'string'
         ? input.path.trim() : '';
-      return Response.json(await browser.screenshot({ sessionId: attached.sessionId }, supplied ? { path: supplied } : {}));
+      try { return Response.json(await browser.screenshot({ sessionId: attached.sessionId }, supplied ? { path: supplied } : {})); }
+      catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Screenshot refused' }, { status: 400 }); }
     }
     if (path === '/api/memory/review-queue') return Response.json({ records: await registry.reviewQueue(10) });
     if (path === `/api/memory/records/${record.id}`) return Response.json({ record: registry.get(record.id) });
@@ -102,7 +103,8 @@ async function scene(mode: 'prompt' | 'plan' | 'custom') {
   fixture.registry.unregister(tool.definition.name);
   fixture.registry.register(tool, { inputProjection: createOperatorInputProjector(paths, config, 'method') });
   const dispatches = () => readings.filter(request => request.context?.battery === 'engine.state.memory-review-priority').length;
-  return { fixture, record, destination, screenshotDirectory, screenshots: () => screenshots, httpRequests: () => httpRequests, dispatches };
+  const ownedDestination = join(screenshotDirectory, 'chosen-name.png');
+  return { fixture, record, destination, ownedDestination, screenshotDirectory, screenshots: () => screenshots, httpRequests: () => httpRequests, dispatches };
 }
 
 test('a genuinely admitted prompt-mode review reaches real SQL and native metered work', async () => {
@@ -129,11 +131,18 @@ test('metered method preview stays available in plan mode without HTTP or native
   expect({ success: result.success, http: f.httpRequests(), provider: f.dispatches() }).toEqual({ success: true, http: 0, provider: 0 });
 });
 
-test('prompt-mode explicit screenshot destination reaches BrowserEngine and the actual filesystem', async () => {
+test('prompt-mode explicit screenshot destination inside the owned directory reaches BrowserEngine and the actual filesystem', async () => {
+  const f = await scene('prompt');
+  const result = await f.fixture.run({ methodId: 'browser.screenshot', input: { path: f.ownedDestination } });
+  expect({ success: result.success, http: f.httpRequests(), captures: f.screenshots() }).toEqual({ success: true, http: 1, captures: 1 });
+  expect(readFileSync(f.ownedDestination, 'utf8')).toBe('synthetic isolated screenshot');
+});
+
+test('prompt-mode screenshot destination outside the owned directory is refused before capture and the project file is kept', async () => {
   const f = await scene('prompt');
   const result = await f.fixture.run({ methodId: 'browser.screenshot', input: { path: f.destination } });
-  expect({ success: result.success, http: f.httpRequests(), captures: f.screenshots() }).toEqual({ success: true, http: 1, captures: 1 });
-  expect(readFileSync(f.destination, 'utf8')).toBe('synthetic isolated screenshot');
+  expect({ success: result.success, captures: f.screenshots() }).toEqual({ success: false, captures: 0 });
+  expect(readFileSync(f.destination, 'utf8')).toBe('original project content');
 });
 
 test.each(['plan', 'custom'] as const)('an explicit screenshot destination cannot overwrite a project file in %s', async mode => {

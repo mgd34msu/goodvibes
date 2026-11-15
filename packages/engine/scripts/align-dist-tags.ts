@@ -1,6 +1,6 @@
 // align-dist-tags.ts
 //
-// Post-publish repair for the `latest` dist-tag across the 11 public packages.
+// Post-publish repair for the `latest` dist-tag across the public packages (publicPackageDirs).
 //
 // The defect it exists for: `npm publish` with no `--tag` moves `latest` to
 // whatever it just published. Two release runs for DIFFERENT versions that
@@ -146,7 +146,7 @@ export function parseVersionsResponse(raw: string): readonly string[] {
  * npm answers with the value WRAPPED in a one-element array (`["2.0.17"]`), not
  * a bare string. Reading it as a string makes every package look like it has no
  * latest tag at all, which turns this repair into an unconditional rewrite of
- * all 11 tags (observed against the live registry before this was fixed). Both
+ * every tag (observed against the live registry before this was fixed). Both
  * shapes are accepted so an npm change in either direction stays correct.
  */
 export function parseDistTagLatestResponse(raw: string): string | null {

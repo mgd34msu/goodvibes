@@ -5,7 +5,11 @@ import { createProtectedInboxMapper } from '../platform/src/platform/intake/prot
 import { parseIntakeFetchResponse } from '../platform/src/platform/intake/providers/imap-response.ts';
 import { digestSender } from '../platform/src/platform/intake/text-normalization.ts';
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
+const missingPrivateText: string[] = [];
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
+  expect(missingPrivateText.splice(0)).toEqual([]);
+});
 interface RecordedSource { revision: string; parts: string[]; }
 function fixture(selections: readonly { text: string; privateText: string }[] = [], settled = true) {
   const calls: { path: string; source?: RecordedSource }[] = [];
@@ -16,7 +20,7 @@ function fixture(selections: readonly { text: string; privateText: string }[] = 
       const source = JSON.parse(body.messages[1]!.content) as RecordedSource; calls.push({ path, source });
       // Literal recorded fixture offsets, not a source classifier or production fallback.
       const spans = source.parts.flatMap((part, index) => selections.filter(row => row.text === part).map(row => {
-        const start = part.indexOf(row.privateText); expect(start).toBeGreaterThanOrEqual(0);
+        const start = part.indexOf(row.privateText); if (start < 0) missingPrivateText.push(row.privateText);
         return { part: index, start, end: start + row.privateText.length };
       }));
       return Response.json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ revision: source.revision, spans }) } }] });

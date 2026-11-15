@@ -191,7 +191,6 @@ test('successive owned graphs rebuild after shutdown and repeated shutdown stays
   try {
     first = await startDaemonFixture({ root, inboxFactory });
     const oldGraph = first.services;
-    expect(first.services).toBe(oldGraph);
     expect(intervals.count).toBeGreaterThan(3);
     await first.stop();
     expect(intervals.remaining()).toEqual([]);

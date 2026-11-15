@@ -5,6 +5,7 @@ import { formatModelDiscoveryReport } from '@goodvibes-jev/engine/platform/platf
 import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
+import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -127,7 +128,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
           return;
         }
         const stat = statSync(resolvedPath);
-        if (stat.size > 20 * 1024 * 1024) {
+        if (stat.size > MAX_IMAGE_ATTACH_BYTES) {
           ctx.print(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). ${policy.maximumImageSize}`);
           return;
         }
@@ -241,6 +242,8 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
           ctx.print(`Pinned: ${modelId}`);
         } catch (e) {
           ctx.print(policy.error(summarizeError(e)));
+          // The model picker undoes its optimistic star only when the command fails.
+          throw e;
         }
       },
     } satisfies TerminalSlashCommand<Context>,

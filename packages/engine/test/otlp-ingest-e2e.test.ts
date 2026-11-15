@@ -72,7 +72,7 @@ function makeRouter(): { router: DaemonHttpRouter; dispose: () => void; setRawEn
       createEventStream: () => { throw new Error('not expected'); },
       recordApiRequest: () => {},
     } as never,
-    gatewayMethods: {} as never,
+    gatewayMethods: { findByHttpBinding: () => null } as never,
     providerRegistry,
     sessionBroker: {} as never,
     routeBindings: {} as never,

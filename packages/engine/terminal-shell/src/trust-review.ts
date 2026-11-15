@@ -1,6 +1,6 @@
 /** Trust evidence construction is shared; product command authority remains in its registrar. */
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 export interface TrustReviewBundle {
   readonly version: 1;
   readonly capturedAt: number;
@@ -22,6 +22,18 @@ export interface TrustReviewBundle {
     readonly blocked: number;
     readonly quarantined: number;
   };
+}
+function isCount(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+function readTrustBundle(value: unknown): TrustReviewBundle | null {
+  if (!value || typeof value !== 'object') return null;
+  const b = value as Record<string, unknown>;
+  const summary = (entry: unknown): boolean => !!entry && typeof entry === 'object' && isCount((entry as { total?: unknown }).total);
+  if (b['version'] !== 1 || !isCount(b['capturedAt']) || Number.isNaN(new Date(b['capturedAt'] as number).getTime())) return null;
+  if (typeof b['permissionMode'] !== 'string' || !Array.isArray(b['secretKeys']) || !Array.isArray(b['serviceNames'])) return null;
+  if (!summary(b['pluginSummary']) || !summary(b['mcpSummary'])) return null;
+  return value as TrustReviewBundle;
 }
 export interface TrustReviewSources<Context> {
   readonly listSecrets: (context: Context) => Promise<readonly string[]>;
@@ -91,7 +103,8 @@ export function createTrustReviewTools<Context>(sources: TrustReviewSources<Cont
     ].join('\n');
   }
   function inspectTrustBundle(path: string): string {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as TrustReviewBundle;
+    const parsed = readTrustBundle(JSON.parse(readFileSync(path, 'utf-8')) as unknown);
+    if (!parsed) return `${path} is not a trust bundle (expected version 1 with capturedAt, permissionMode, secretKeys, serviceNames, pluginSummary and mcpSummary).`;
     return [
       'Trust Bundle Review',
       `  captured: ${new Date(parsed.capturedAt).toISOString()}`,
@@ -138,8 +151,8 @@ export function createTrustCommandFlow<Context extends { print(text: string): vo
       if (!ports.allowExport(path)) return true;
       const bundle = await tools.buildTrustReviewBundle(context);
       const target = ports.resolvePath(path);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+      // Owner-only (0600): the bundle lists secret key names and service names.
+      atomicWriteFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { mkdirp: true });
       context.print(`Trust bundle exported to ${target}`);
       return true;
     }

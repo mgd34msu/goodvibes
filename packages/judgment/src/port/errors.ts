@@ -30,14 +30,17 @@ export class JudgmentError extends Error {
   readonly requestId: string | undefined;
 
   readonly lineage: JudgmentLineage | undefined;
+  /** For `unavailable` failures caused by a provider cooldown: milliseconds until a target may be asked again. */
+  readonly retryAfterMs: number | undefined;
 
   constructor(
     kind: JudgmentErrorKind,
     message: string,
-    options: { cause?: unknown; status?: number; requestId?: string; lineage?: JudgmentLineage } = {},
+    options: { cause?: unknown; status?: number; requestId?: string; lineage?: JudgmentLineage; retryAfterMs?: number } = {},
   ) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.lineage = options.lineage;
+    this.retryAfterMs = options.retryAfterMs;
     this.kind = kind;
     this.status = options.status;
     this.requestId = options.requestId;

@@ -154,10 +154,9 @@ export async function createNativeIntegrationFixture(options: {
   async function dispose() {
     if (disposed) return; disposed = true;
     client.dispose(); reader.dispose();
-    if (replacement) { await replacement.host.close(); replacement.harness.dispose(); }
+    if (replacement) { await replacement.host.close(); await replacement.harness.dispose(); }
     await host.close();
-    installJudgmentPort(previous); harness.dispose();
-    await Promise.all(harness.runner.list({ includeTerminal: true }).map(contract => harness.runner.join(contract.id)));
+    installJudgmentPort(previous); await harness.dispose();
     await ledger.service.close(); await store.close(); log[Symbol.dispose](); rmSync(root, { recursive: true, force: true });
   }
   return { root, ...owned, get key() { return owned.key; }, addWork, tokens, paired, helper, authority, catalog, scopes, store, storage, ledger, log, host, hostOptions,

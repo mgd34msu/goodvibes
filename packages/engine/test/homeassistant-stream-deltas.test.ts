@@ -74,6 +74,8 @@ function buildStreamingRoutes(
     },
     chatManager,
     parseJsonBody: async (req: Request) => await req.json() as Record<string, unknown>,
+    requireScope: () => null,
+    requireAdmin: () => null,
     resolveDefaultProviderModel: () => ({ provider: 'openai', model: 'gpt-5.5' }),
   } as unknown as ConstructorParameters<typeof HomeAssistantConversationRoutes>[0]);
 }
@@ -84,7 +86,11 @@ function makeRoutesForCancel(hooks: {
 }): HomeAssistantConversationRoutes {
   const chatManager = {
     init: async () => undefined,
-    getSession: (id: string) => ({ id, status: 'active', title: 'HA chat', updatedAt: Date.now() }),
+    // A Home Assistant chat carries the surface's own system prompt; anything else is some other chat.
+    getSession: (id: string) => ({
+      id, status: 'active', title: 'HA chat', updatedAt: Date.now(),
+      systemPrompt: id.startsWith('tui-') ? null : 'You are GoodVibes responding inside Home Assistant.\n\nAnswer as a normal assistant.',
+    }),
     createSession: () => ({ id: 'unused', status: 'active', title: 'unused', updatedAt: Date.now() }),
     updateSession: (id: string) => ({ id, status: 'active', updatedAt: Date.now() }),
     postMessageAndWaitForReply: async () => ({ messageId: 'unused' }),
@@ -120,6 +126,8 @@ function makeRoutesForCancel(hooks: {
     },
     chatManager,
     parseJsonBody: async (req: Request) => await req.json() as Record<string, unknown>,
+    requireScope: () => null,
+    requireAdmin: () => null,
     resolveDefaultProviderModel: () => ({ provider: 'openai', model: 'gpt-5.5' }),
   } as unknown as ConstructorParameters<typeof HomeAssistantConversationRoutes>[0]);
 }

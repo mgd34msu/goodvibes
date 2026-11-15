@@ -95,6 +95,8 @@ export interface SessionDomainState {
   lastCompactedAt?: number | undefined;
   /** Number of messages at last compaction checkpoint. */
   compactionMessageCount?: number | undefined;
+  /** Why the last compaction failed; cleared when a compaction succeeds. */
+  compactionError?: string | undefined;
 }
 
 /**

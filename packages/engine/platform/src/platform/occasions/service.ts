@@ -11,7 +11,8 @@ import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { AuthoritySurface } from '../security/untrusted-content.js';
 import type { ProfileSurface, ProfileWriteResult } from '../owner-profile/types.js';
-import { daysBetween, nextOccurrence, todayInZone, minutesOfDayInZone, type IsoDate } from './dates.js';
+import { daysBetween, isIsoDate, nextOccurrence, todayInZone, minutesOfDayInZone, type IsoDate } from './dates.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { conflictItemId, interviewItemId, laterReturnDate, nudgeItemId } from './cadence.js';
 import {
   answerStep,
@@ -31,12 +32,14 @@ import {
   nudgeDestinationSurface,
   resolveNudgeDestinations,
 } from './destinations.js';
-import { composeConflictMessage, prepareNudge, subjectFor } from './nudge.js';
+import { composeConflictMessage, composeInterviewResumeMessage, prepareNudge, subjectFor } from './nudge.js';
 import {
   pushNudge,
   type OccasionNudgeDeliverer,
 } from './push.js';
 import { storedGiftEvidence } from './stored-reading-evidence.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { preparePending } from './pending.js';
 import { readOccasionsPolicy, readOccasionsTimezone, type OccasionsConfigAccess } from './policy.js';
 import { readOccasions, readOccasionDeclarations, readPlans, type OccasionProfileSource } from './reader.js';
@@ -320,9 +323,21 @@ export class OccasionsService {
     if (occasion === undefined) {
       return { ok: false, reason: 'There is no occasion by that name.', interview: null };
     }
+    if (input.occurrence !== undefined && !isOccurrenceDate(input.occurrence)) {
+      return { ok: false, reason: OCCURRENCE_REFUSAL, interview: null };
+    }
     const occurrence = input.occurrence ?? nextOccurrence(occasion.date, occasion.recurrence, today);
     if (occurrence === null) {
       return { ok: false, reason: 'That occasion has no upcoming date.', interview: null };
+    }
+
+    // "Acknowledged" says the owner has this one in hand, which must leave the
+    // open item standing. Recording it as an ordinary answer would resolve and
+    // delete the item, so it takes the acknowledge path instead.
+    if (input.answer === 'acknowledged') {
+      await this.acknowledgeAs(occasion, occurrence, 'explicit', work.assertCurrent);
+      work.assertCurrent();
+      return { ok: true, reason: null, interview: null };
     }
 
     const answer: OccasionAcknowledgement = {
@@ -360,14 +375,11 @@ export class OccasionsService {
       // ignoring it, it is an instruction, and a system that took the
       // instruction and then stayed silent because it had used up its two
       // turns would be worse than one that never offered "later" at all.
-      const item = await this.deps.state.openItem(nudgeItemId(occasion.id, occurrence));
-      if (item !== undefined) {
-        await this.deps.state.putOpenItem({
-          ...item,
-          servedBoundaries: [],
-          dueOn: laterReturnDate(today, occurrence),
-        }, work.assertCurrent);
-      }
+      await this.deps.state.settleOpenItem(nudgeItemId(occasion.id, occurrence), item => item === undefined ? null : {
+        ...item,
+        servedBoundaries: [],
+        dueOn: laterReturnDate(today, occurrence),
+      }, work.assertCurrent);
       return { ok: true, reason: null, interview: null };
     }
 
@@ -423,11 +435,21 @@ export class OccasionsService {
   }, options: OccasionMutationOptions = {}): Promise<InterviewProgress | null> {
     const owned = captureOccasionOperation(this.deps, options, () => this.deps);
     await this.deps.state.prepareRead(options);
-    const found = await this.deps.state.interview(input.interviewId);
+    // Read, apply and write in one store write: two answers arriving together
+    // each build on the interview the other left.
+    const updated = await this.deps.state.updateInterview(input.interviewId, (found) => {
+      if (!found.steps.some((step) => step.id === input.stepId)) {
+        const next = nextStep(found);
+        throw new GatewayVerbError(
+          `This interview has no step "${input.stepId.slice(0, 80)}", so nothing was recorded. `
+          + (next === undefined ? 'Every step is already answered.' : `The next unanswered step is "${next.id}".`),
+          'INVALID_ARGUMENT', 400, 'stepId',
+        );
+      }
+      return answerStep(found, input.stepId, input.text, this.now());
+    }, owned.assertCurrent);
     owned.assertCurrent?.();
-    if (found === undefined) return null;
-    const updated = answerStep(found, input.stepId, input.text, this.now());
-    await this.deps.state.putInterview(updated, owned.assertCurrent);
+    if (updated === undefined) return null;
     // Working on the gift IS acknowledging the occasion. Being asked whether the
     // owner has thought about a birthday while they are in the middle of answering
     // questions about what to buy for it would be the feature interrupting its
@@ -458,16 +480,7 @@ export class OccasionsService {
     const existing = await this.deps.state.answerFor(occasionId, occurrence);
     assertCurrent();
     if (existing?.answer === 'yes' || existing?.answer === 'no') return;
-    await acknowledgeOccurrence({
-      recordAnswer: entry => this.deps.state.recordAnswer(entry, assertCurrent),
-      openItem: async id => { const result = await this.deps.state.openItem(id); assertCurrent(); return result; },
-      putOpenItem: item => this.deps.state.putOpenItem(item, assertCurrent),
-    }, {
-      occasion,
-      occurrence,
-      now: this.now(),
-      source: 'gift-flow',
-    });
+    await this.acknowledgeAs(occasion, occurrence, 'gift-flow', assertCurrent);
     assertCurrent();
   }
 
@@ -484,11 +497,13 @@ export class OccasionsService {
   }, options: OccasionMutationOptions = {}): Promise<InterviewProgress | null> {
     const owned = captureOccasionOperation(this.deps, options, () => this.deps);
     await this.deps.state.prepareRead(options);
-    const found = await this.deps.state.interview(input.interviewId);
+    const completed = await this.deps.state.updateInterview(
+      input.interviewId,
+      (found) => completeInterview(found, input.landedOn.trim(), this.now()),
+      owned.assertCurrent,
+    );
     owned.assertCurrent?.();
-    if (found === undefined) return null;
-    const completed = completeInterview(found, input.landedOn.trim(), this.now());
-    await this.deps.state.putInterview(completed, owned.assertCurrent);
+    if (completed === undefined) return null;
     const record = giftRecordFor(completed);
     if (record !== null) await this.deps.state.recordGift(record, owned.assertCurrent);
     await this.deps.state.resolveOpenItem(interviewItemId(completed.occasionId, completed.occurrence), owned.assertCurrent);
@@ -520,7 +535,12 @@ export class OccasionsService {
       const housekeeping = await this.deps.state.sweep({
         today,
         now,
-        declaredOccasionIds: new Set(occasions.map((entry) => entry.id)),
+        // A profile that declares nothing cannot tell "the owner removed every
+        // line" from "the profile is unavailable or not loaded yet", and acting
+        // on the wrong guess deletes every answer and gift record. Without a
+        // declaration the orphan rules wait; time-based expiry still runs, and
+        // an explicit removal drops its own records.
+        declaredOccasionIds: occasions.length === 0 ? undefined : new Set(occasions.map((entry) => entry.id)),
         giftHistoryYears: policy.giftHistoryYears,
       }, work.assertCurrent);
 
@@ -530,6 +550,8 @@ export class OccasionsService {
       let stateCurrent = this.deps.state.captureRead().assertCurrent;
       work.retain(() => stateCurrent());
       const published = () => { stateCurrent = this.deps.state.captureRead().assertCurrent; };
+      const acknowledgements = await this.deps.state.acknowledgements();
+      const openItemsBefore = await this.deps.state.openItems();
       const decision = decideSweep({
         now,
         today,
@@ -537,8 +559,8 @@ export class OccasionsService {
         occasions,
         conflicts,
         plans,
-        acknowledgements: await this.deps.state.acknowledgements(),
-        openItems: await this.deps.state.openItems(),
+        acknowledgements,
+        openItems: openItemsBefore,
         interviews: await this.interviewsInFlight(),
         policy,
       });
@@ -569,27 +591,71 @@ export class OccasionsService {
       work.assertCurrent();
       if (isClassicOperation()) return classicSweep(now, today, housekeeping, mirrored);
       const nudge = preparedNudge === null ? null : { ...preparedNudge, id: `occasions-${now}`, raisedAt: now };
-      await this.deps.state.putOpenItems(decision.openItemWrites, work.assertCurrent, published);
+      const destinations = resolveNudgeDestinations(policy.nudgeChannel);
+
+      // The lead boundary is spent by a push that ACCEPTED, not by an attempt: a
+      // dead destination would otherwise leave the owner with one push on the day
+      // instead of two. So when a push is actually going out, the items it covers
+      // are written after it, and only if a destination took it. With nowhere to
+      // push (pull-only), nothing can ever land and they are written now.
+      const dueItemIds = new Set(decision.due.map((entry) => nudgeItemId(entry.occasion.id, entry.occurrence)));
+      const pushExpected = nudge !== null && this.deps.deliverer !== undefined && destinations.length > 0;
+      const awaitingPush = pushExpected
+        ? decision.openItemWrites.filter((item) => item.kind === 'nudge' && dueItemIds.has(item.id))
+        : [];
+      await this.deps.state.putOpenItems(
+        decision.openItemWrites.filter((item) => !awaitingPush.includes(item)),
+        work.assertCurrent, published,
+      );
 
       const conflictMessages = decision.conflicts.map(
         (conflict) => composeConflictMessage(conflict.title, conflict.dates),
       );
+      const resumeMessages = decision.resumeInterviews.flatMap((interview) => {
+        const occasion = occasions.find((entry) => entry.id === interview.occasionId);
+        return occasion === undefined ? [] : [composeInterviewResumeMessage(occasion.title)];
+      });
 
-      const destinations = resolveNudgeDestinations(policy.nudgeChannel);
       const deliveries = nudge === null
         ? []
         : await pushNudge(this.deps.deliverer, nudge, destinations, work.assertCurrent, options.withNudgeDelivery);
       work.assertCurrent();
       const landed = deliveries.filter((entry) => entry.delivered);
-      // Only a push that ACTUALLY landed on the agent stamps the items. A stamp
-      // written on an attempt would silence the pull for a nudge that never
-      // arrived anywhere, which is the one outcome this feature cannot have.
-      if (landed.some((entry) => nudgeDestinationSurface(entry.channel) === NUDGE_AGENT_SURFACE)) {
-        await this.deps.state.putOpenItems(
-          decision.openItemWrites.filter(item => item.kind === 'nudge').map(item => ({ ...item, agentPushedOn: today })),
-          work.assertCurrent, published,
-        );
+      if (awaitingPush.length > 0) {
+        if (landed.length > 0) {
+          // Only a push that ACTUALLY landed on the agent stamps the items. A stamp
+          // written on an attempt would silence the pull for a nudge that never
+          // arrived anywhere, which is the one outcome this feature cannot have.
+          const onAgent = landed.some((entry) => nudgeDestinationSurface(entry.channel) === NUDGE_AGENT_SURFACE);
+          await this.deps.state.putOpenItems(
+            awaitingPush.map((item) => (onAgent ? { ...item, agentPushedOn: today } : item)),
+            work.assertCurrent, published,
+          );
+        } else {
+          // Nothing accepted it. An item already stored keeps its unspent
+          // boundary as it is; a new one is opened unspent so the pull lists it
+          // and the next sweep tries again.
+          const stored = new Set(openItemsBefore.map((item) => item.id));
+          await this.deps.state.putOpenItems(
+            awaitingPush.filter((item) => !stored.has(item.id)).map((item) => ({ ...item, raiseCount: 0, servedBoundaries: [] })),
+            work.assertCurrent, published,
+          );
+        }
       }
+
+      // Conflicts and an unfinished gift conversation are raised again on their
+      // own cadence, so they are delivered like any other raise. Each line names
+      // the occasion and never a date.
+      const reminderLines = [...conflictMessages, ...resumeMessages];
+      const reminderDeliveries = reminderLines.length === 0
+        ? []
+        : await pushNudge(this.deps.deliverer, {
+          id: `occasions-reminders-${now}`,
+          raisedAt: now,
+          subjects: [],
+          message: reminderLines.join('\n'),
+          answerable: false,
+        }, destinations, work.assertCurrent, options.withNudgeDelivery);
 
       work.assertCurrent();
       return {
@@ -602,7 +668,7 @@ export class OccasionsService {
         delivered: landed.length > 0,
         deliveryChannel: destinations.join(', '),
         deliveryId: landed[0]?.deliveryId ?? null,
-        deliveries,
+        deliveries: [...deliveries, ...reminderDeliveries],
         mirrored,
         housekeeping,
       };
@@ -656,7 +722,16 @@ export class OccasionsService {
       const existing = await this.deps.state.mirrorFor(occasion.id, occurrence);
       if (existing !== undefined) continue;
       work.assertCurrent();
-      const externalId = await mirror.mirror({ occasion, occurrence });
+      let externalId: string | null;
+      try {
+        externalId = await mirror.mirror({ occasion, occurrence });
+      } catch (error) {
+        work.assertCurrent();
+        // One calendar failure must not stop the sweep before it decides and
+        // delivers; the occurrence is simply offered again next pass.
+        logger.warn('occasions: calendar mirror failed for one occasion', { error: summarizeError(error) });
+        continue;
+      }
       work.assertCurrent();
       if (externalId === null) continue;
       await this.deps.state.recordMirror({
@@ -747,23 +822,26 @@ export class OccasionsService {
     if (occasion === undefined) {
       return { ok: false, reason: 'There is no occasion by that name.', reply: '' };
     }
+    if (input.occurrence !== undefined && !isOccurrenceDate(input.occurrence)) {
+      return { ok: false, reason: OCCURRENCE_REFUSAL, reply: '' };
+    }
     const occurrence = input.occurrence
       ?? nextOccurrence(occasion.date, occasion.recurrence, today);
     if (occurrence === null) {
       return { ok: false, reason: 'That occasion has no upcoming date.', reply: '' };
     }
-    await acknowledgeOccurrence({
-      recordAnswer: entry => this.deps.state.recordAnswer(entry, assertCurrent),
-      openItem: async id => { const item = await this.deps.state.openItem(id); assertCurrent(); return item; },
-      putOpenItem: item => this.deps.state.putOpenItem(item, assertCurrent),
-    }, {
-      occasion,
-      occurrence,
-      now: this.now(),
-      source: input.source,
-    });
+    await this.acknowledgeAs(occasion, occurrence, input.source, assertCurrent);
     assertCurrent();
     return { ok: true, reason: null, reply: acknowledgementReply(occasion.title) };
+  }
+
+  /** The one write path for "the owner has this occurrence in hand". */
+  private async acknowledgeAs(occasion: Occasion, occurrence: IsoDate, source: OccasionAckSource, assertCurrent: () => void): Promise<void> {
+    await acknowledgeOccurrence({
+      recordAnswer: entry => this.deps.state.recordAnswer(entry, assertCurrent),
+      settleOpenItem: (id, build) => this.deps.state.settleOpenItem(id, build, assertCurrent),
+    }, { occasion, occurrence, now: this.now(), source });
+    assertCurrent();
   }
 
   /** Mark a conflict as dealt with, so it stops being re-raised. */
@@ -784,6 +862,12 @@ function classicSweep(now: number, today: IsoDate, housekeeping: SweepOutcome['h
     nudge: null, conflictMessages: [], resumedInterviews: [], delivered: false, deliveryChannel: '', deliveryId: null,
     deliveries: [], mirrored, housekeeping,
   };
+}
+
+const OCCURRENCE_REFUSAL = 'The occurrence must be an ISO date such as 2026-03-14, or be left out to mean the next one.';
+
+function isOccurrenceDate(value: string): boolean {
+  return value.trim() === value && isIsoDate(value);
 }
 
 function progressOf(interview: Interview): InterviewProgress {

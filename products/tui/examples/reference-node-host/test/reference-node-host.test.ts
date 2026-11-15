@@ -243,6 +243,46 @@ describe('ReferenceNodeHostClient', () => {
     expect(recordedCompletions[0]?.body.result).toBeDefined();
   });
 
+  test('re-pairing the same requested id retries the approval with confirmReplace after the daemon refuses', async () => {
+    const approvals: Array<Record<string, unknown>> = [];
+    const refusing = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const url = new URL(req.url);
+        if (url.pathname === '/api/remote/pair/requests/pair-test/approve') {
+          const body = await req.json() as Record<string, unknown>;
+          approvals.push(body);
+          return body.confirmReplace === true
+            ? Response.json({ ok: true })
+            : Response.json({ error: 'names an existing peer', code: 'REMOTE_PAIR_REPLACES_PEER' }, { status: 409 });
+        }
+        return new Response('unexpected', { status: 500 });
+      },
+    });
+    try {
+      const make = (overrides: Partial<ReferenceNodeHostConfig>) => {
+        const client = new ReferenceNodeHostClient(createDefaultReferenceNodeHostConfig({
+          baseUrl: `http://127.0.0.1:${refusing.port}`,
+          statePath: join(tempDir, `state-${String(overrides.confirmReplace)}.json`),
+          operatorToken: 'operator-token',
+          ...overrides,
+        }));
+        (client as unknown as { state: unknown }).state = { pairRequest: { id: 'pair-test' }, challenge: 'c' };
+        return client;
+      };
+      expect(await make({}).approvePairRequest()).toBe(true);
+      expect(approvals).toEqual([
+        { note: 'reference node-host approval' },
+        { note: 'reference node-host approval', confirmReplace: true },
+      ]);
+      approvals.length = 0;
+      expect(await make({ confirmReplace: false }).approvePairRequest()).toBe(false);
+      expect(approvals).toEqual([{ note: 'reference node-host approval' }]);
+    } finally {
+      refusing.stop(true);
+    }
+  });
+
   test('enforces a command allowlist for generic invoke work', async () => {
     const config = createDefaultReferenceNodeHostConfig({
       baseUrl,

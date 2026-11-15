@@ -180,6 +180,9 @@ export interface TelemetryListResponse<T> {
   readonly pageInfo: TelemetryPageInfo;
 }
 
+/** Most open start-without-end spans kept per kind. */
+const MAX_ACTIVE_SYNTHETIC_SPANS = 1000;
+
 interface ActiveSyntheticSpan {
   readonly name: string;
   readonly kind: SpanKind;
@@ -198,6 +201,12 @@ interface TelemetryApiServiceOptions {
   readonly eventLimit?: number | undefined;
   readonly errorLimit?: number | undefined;
   readonly spanLimit?: number | undefined;
+  /**
+   * Lists approvals so the snapshot can count those still undecided. The
+   * store's gate flag cannot: the gate reports a request only after its
+   * decision. Omitted, the pending count falls back to that flag.
+   */
+  readonly listApprovals?: (() => readonly { readonly status: string }[]) | undefined;
 }
 
 export class TelemetryRawViewDisabledError extends Error {
@@ -216,6 +225,7 @@ export class TelemetryApiService {
   private readonly eventLimit: number;
   private readonly errorLimit: number;
   private readonly spanLimit: number;
+  private readonly listApprovals: (() => readonly { readonly status: string }[]) | undefined;
   private readonly records: TelemetryRecord[] = [];
   private readonly errors: TelemetryRecord[] = [];
   private readonly spans: ReadableSpan[] = [];
@@ -232,12 +242,18 @@ export class TelemetryApiService {
   private readonly turnSpanIds = new Map<string, string>();
   private readonly taskSpanIds = new Map<string, string>();
   private readonly agentSpanIds = new Map<string, string>();
+  // Lifetime counters. The record, error and span buffers are bounded rings, so
+  // their lengths stop growing at the limit and cannot feed a cumulative metric.
+  private eventsRecorded = 0;
+  private warningsRecorded = 0;
+  private spansRecorded = 0;
   private seq = 0;
 
   constructor(options: TelemetryApiServiceOptions) {
     this.runtimeBus = options.runtimeBus;
     this.runtimeStore = options.runtimeStore;
     this.includeRawPrompts = options.includeRawPrompts ?? (() => false);
+    this.listApprovals = options.listApprovals;
     this.eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
     this.errorLimit = options.errorLimit ?? DEFAULT_ERROR_LIMIT;
     this.spanLimit = options.spanLimit ?? DEFAULT_SPAN_LIMIT;
@@ -331,7 +347,9 @@ export class TelemetryApiService {
           active: state.agents.activeAgentIds.length,
         },
         approvals: {
-          pending: state.permissions.awaitingDecision ? 1 : 0,
+          pending: this.listApprovals
+            ? this.listApprovals().filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length
+            : state.permissions.awaitingDecision ? 1 : 0,
         },
       },
       sessionMetrics: telemetry.sessionMetrics,
@@ -346,12 +364,11 @@ export class TelemetryApiService {
 
   getAggregates(): TelemetryAggregates {
     const totalErrors = [...this.errorCountsByCategory.values()].reduce((sum, count) => sum + count, 0);
-    const totalWarnings = this.listEvents({ severity: 'warn', limit: this.records.length }).length;
     return {
-      totalEvents: this.records.length,
+      totalEvents: this.eventsRecorded,
       totalErrors,
-      totalWarnings,
-      totalSpans: this.spans.length,
+      totalWarnings: this.warningsRecorded,
+      totalSpans: this.spansRecorded,
       byDomain: toObjectMap(this.eventCountsByDomain),
       byEventType: toObjectMap(this.eventCountsByType),
       errorsByCategory: toObjectMap(this.errorCountsByCategory),
@@ -415,8 +432,6 @@ export class TelemetryApiService {
       assertViewAvailable: () => this.assertViewAvailable(view),
       records: this.records,
       matchesRecord: (record, nextFilter) => telemetryRecordMatches(record, this.resolveTraceFilter(nextFilter)),
-      listEventPage: (nextFilter, nextView, nextRawAccessible) =>
-        this.listEventPage(nextFilter, nextView, nextRawAccessible),
       subscribe: (listener) => this.subscribe(listener),
       getCapabilities: () => this.getCapabilities(),
       getSubscriberCount: () => this.subscribers.size,
@@ -462,15 +477,32 @@ export class TelemetryApiService {
   private appendSpan(span: ReadableSpan): void {
     Object.freeze(span.spanContext);
     Object.freeze(span);
+    this.spansRecorded += 1;
     this.traceIdentities.retain(span.spanContext.traceId);
     appendBounded(this.spans, span, this.spanLimit, evicted => this.traceIdentities.release(evicted.spanContext.traceId));
   }
 
-  private startSyntheticSpan(active: Map<string, ActiveSyntheticSpan>, key: string, span: ActiveSyntheticSpan): void {
+  private startSyntheticSpan(
+    active: Map<string, ActiveSyntheticSpan>,
+    key: string,
+    span: ActiveSyntheticSpan,
+    spanIds?: Map<string, string>,
+  ): void {
     this.traceIdentities.retain(span.traceId);
     const previous = active.get(key);
     active.set(key, span);
+    spanIds?.set(key, span.spanId);
     if (previous !== undefined) this.traceIdentities.release(previous.traceId);
+    // A start whose end event never arrives (a crash, a dropped event) would
+    // otherwise stay here for the life of the process. Drop the oldest; it is
+    // never exported, which is what a span that never ended amounts to.
+    while (active.size > MAX_ACTIVE_SYNTHETIC_SPANS) {
+      const oldestKey = active.keys().next().value as string;
+      const oldest = active.get(oldestKey);
+      active.delete(oldestKey);
+      spanIds?.delete(oldestKey);
+      if (oldest !== undefined) this.traceIdentities.release(oldest.traceId);
+    }
   }
 
   private handleEnvelope(
@@ -506,11 +538,13 @@ export class TelemetryApiService {
       };
 
       this.appendRecord(record);
-      this.eventCountsByDomain.set(domain, (this.eventCountsByDomain.get(domain) ?? 0) + 1);
-      this.eventCountsByType.set(envelope.type, (this.eventCountsByType.get(envelope.type) ?? 0) + 1);
-      if (normalizedError) {
+      this.countRecord(record);
+      // An error-severity event with no error text is still an error: the
+      // errors list and its counts must agree with the severity filter.
+      const errorCategory = normalizedError?.category ?? (record.severity === 'error' ? 'unknown' : undefined);
+      if (errorCategory !== undefined) {
         this.appendRecord(record, this.errors, this.errorLimit);
-        this.errorCountsByCategory.set(normalizedError.category, (this.errorCountsByCategory.get(normalizedError.category) ?? 0) + 1);
+        this.errorCountsByCategory.set(errorCategory, (this.errorCountsByCategory.get(errorCategory) ?? 0) + 1);
       }
       telemetryBufferFill.set(this.eventLimit > 0 ? this.records.length / this.eventLimit : 0);
       this.captureSyntheticSpan(record);
@@ -523,7 +557,6 @@ export class TelemetryApiService {
       case 'TURN_SUBMITTED':
         if (record.turnId) {
           const spanId = createSpanId();
-          this.turnSpanIds.set(record.turnId, spanId);
           this.startSyntheticSpan(this.activeTurnSpans, record.turnId, {
             name: 'turn.lifecycle',
             kind: SpanKinds.INTERNAL,
@@ -531,13 +564,12 @@ export class TelemetryApiService {
             spanId,
             startTimeMs: record.timestamp,
             attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          });
+          }, this.turnSpanIds);
         }
         return;
       case 'TASK_STARTED':
         if (record.taskId) {
           const spanId = createSpanId();
-          this.taskSpanIds.set(record.taskId, spanId);
           this.startSyntheticSpan(this.activeTaskSpans, record.taskId, {
             name: 'task.lifecycle',
             kind: SpanKinds.INTERNAL,
@@ -545,7 +577,7 @@ export class TelemetryApiService {
             spanId,
             startTimeMs: record.timestamp,
             attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          });
+          }, this.taskSpanIds);
         }
         return;
       case 'AGENT_SPAWNING':
@@ -553,7 +585,6 @@ export class TelemetryApiService {
         if (record.agentId && !this.activeAgentSpans.has(record.agentId)) {
           const spanId = createSpanId();
           const parentSpanId = record.taskId ? this.taskSpanIds.get(record.taskId) : undefined;
-          this.agentSpanIds.set(record.agentId, spanId);
           this.startSyntheticSpan(this.activeAgentSpans, record.agentId, {
             name: 'agent.lifecycle',
             kind: SpanKinds.INTERNAL,
@@ -562,7 +593,7 @@ export class TelemetryApiService {
             ...(parentSpanId ? { parentSpanId } : {}),
             startTimeMs: record.timestamp,
             attributes: this.buildSpanAttributes(record, { startEventType: record.type }),
-          });
+          }, this.agentSpanIds);
         }
         return;
       case 'TOOL_EXECUTING':
@@ -591,17 +622,17 @@ export class TelemetryApiService {
       case 'TURN_ERROR':
       case 'TURN_CANCEL':
       case 'PREFLIGHT_FAIL':
-        this.completeSyntheticSpan(record.turnId, this.activeTurnSpans, record, 'turn.lifecycle');
+        this.completeSyntheticSpan(record.turnId, this.activeTurnSpans, record, 'turn.lifecycle', this.turnSpanIds);
         return;
       case 'TASK_COMPLETED':
       case 'TASK_FAILED':
       case 'TASK_CANCELLED':
-        this.completeSyntheticSpan(record.taskId, this.activeTaskSpans, record, 'task.lifecycle');
+        this.completeSyntheticSpan(record.taskId, this.activeTaskSpans, record, 'task.lifecycle', this.taskSpanIds);
         return;
       case 'AGENT_COMPLETED':
       case 'AGENT_FAILED':
       case 'AGENT_CANCELLED':
-        this.completeSyntheticSpan(record.agentId, this.activeAgentSpans, record, 'agent.lifecycle');
+        this.completeSyntheticSpan(record.agentId, this.activeAgentSpans, record, 'agent.lifecycle', this.agentSpanIds);
         return;
       case 'TOOL_SUCCEEDED':
       case 'TOOL_FAILED':
@@ -620,6 +651,7 @@ export class TelemetryApiService {
     activeMap: Map<string, ActiveSyntheticSpan>,
     record: TelemetryRecord,
     defaultName: string,
+    spanIds?: Map<string, string>,
   ): void {
     const active = key ? activeMap.get(key) : undefined;
     const durationMs = typeof record.attributes.durationMs === 'number' ? Math.max(0, record.attributes.durationMs) : undefined;
@@ -631,11 +663,14 @@ export class TelemetryApiService {
       startTimeMs: durationMs !== undefined ? Math.max(0, record.timestamp - durationMs) : record.timestamp,
       attributes: this.buildSpanAttributes(record, { synthesized: true }),
     };
-    if (key) activeMap.delete(key);
+    if (key) {
+      activeMap.delete(key);
+      spanIds?.delete(key);
+    }
 
     try {
-      const status: SpanStatus = record.error
-        ? { code: SpanStatusCode.ERROR, message: record.error.summary }
+      const status: SpanStatus = record.error || record.severity === 'error'
+        ? { code: SpanStatusCode.ERROR, message: record.error?.summary ?? record.type }
         : { code: SpanStatusCode.OK };
       const events: SpanEvent[] = [
         {
@@ -679,7 +714,16 @@ export class TelemetryApiService {
   }
 
   private buildSpanAttributes(record: TelemetryRecord, extra: Record<string, unknown> = {}): SpanAttributes {
-    const attributes: SpanAttributes = {
+    const attributes: SpanAttributes = {};
+    // Event payload fields first: one named `severity` or `source` must not
+    // replace the envelope's value below.
+    for (const [key, value] of Object.entries(record.attributes)) {
+      const attributeValue = toAttributeValue(value);
+      if (attributeValue !== undefined) {
+        attributes[key] = attributeValue;
+      }
+    }
+    Object.assign(attributes, {
       telemetryDomain: record.domain,
       eventType: record.type,
       source: record.source,
@@ -688,13 +732,7 @@ export class TelemetryApiService {
       ...(record.agentId ? { agentId: record.agentId } : {}),
       ...(record.taskId ? { taskId: record.taskId } : {}),
       ...extra,
-    };
-    for (const [key, value] of Object.entries(record.attributes)) {
-      const attributeValue = toAttributeValue(value);
-      if (attributeValue !== undefined) {
-        attributes[key] = attributeValue;
-      }
-    }
+    });
     if (record.error) {
       attributes.errorCategory = record.error.category;
       attributes.errorSource = record.error.source;
@@ -777,10 +815,16 @@ export class TelemetryApiService {
     });
   }
 
-  private recordIngestedEvent(type: string, record: TelemetryRecord): void {
-    this.eventCountsByDomain.set('ops', (this.eventCountsByDomain.get('ops') ?? 0) + 1);
-    this.eventCountsByType.set(type, (this.eventCountsByType.get(type) ?? 0) + 1);
+  private recordIngestedEvent(_type: string, record: TelemetryRecord): void {
+    this.countRecord(record);
     this.notify(record);
+  }
+
+  private countRecord(record: TelemetryRecord): void {
+    this.eventsRecorded += 1;
+    if (record.severity === 'warn') this.warningsRecorded += 1;
+    this.eventCountsByDomain.set(record.domain, (this.eventCountsByDomain.get(record.domain) ?? 0) + 1);
+    this.eventCountsByType.set(record.type, (this.eventCountsByType.get(record.type) ?? 0) + 1);
   }
 
   private notify(record: TelemetryRecord): void {

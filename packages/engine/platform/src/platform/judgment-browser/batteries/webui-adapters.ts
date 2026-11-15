@@ -4,12 +4,11 @@ import type { BatteryRun, Outcome, Reading, YesNoReading } from '@goodvibes-jev/
 import { BrowserJudgmentError, type BrowserJudgmentInputMap } from '@goodvibes-jev/engine/daemon-api';
 import { requireSynchronousAssertion } from '../guards.js';
 import type { BrowserJudgmentBattery, BrowserJudgmentProjection, BrowserJudgmentResolveContext, BrowserJudgmentResolvedInput } from '../types.js';
-import { catalogProviderMatchBattery, cardMaterialKeyBattery, daemonRefusalBattery, statusToneBattery, commandRankBattery, mailReplySubjectBattery, installPlatformBattery, credentialProviderBattery, codeLanguageBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
-import { readStructuredDaemonRefusal, snapshotWebuiCommandRank, snapshotWebuiDaemonRefusal, snapshotWebuiStatus, snapshotWebuiMailSubject, snapshotWebuiInstallPlatform, snapshotWebuiCredentialNames, snapshotWebuiCode, snapshotWebuiConfigKeys } from './webui-readers.js';
-import { REFUSAL_ITEMS, WEBUI_READER_LIMITS, type CommandRankValue, type DaemonRefusalValue, type ResolvedCommandRank, type ResolvedDaemonRefusal, type ResolvedStatus, type StatusValue } from './webui-types.js';
+import { catalogProviderMatchBattery, cardMaterialKeyBattery, daemonRefusalBattery, commandRankBattery, mailReplySubjectBattery, credentialProviderBattery, codeLanguageBattery, WEBUI_BATTERY_QUESTIONS } from './webui-specs.js';
+import { readStructuredDaemonRefusal, snapshotWebuiCommandRank, snapshotWebuiDaemonRefusal, snapshotWebuiMailSubject, snapshotWebuiCredentialNames, snapshotWebuiCode, snapshotWebuiConfigKeys } from './webui-readers.js';
+import { REFUSAL_ITEMS, WEBUI_READER_LIMITS, type CommandRankValue, type DaemonRefusalValue, type ResolvedCommandRank, type ResolvedDaemonRefusal } from './webui-types.js';
 
 const ERRORS = 'webui.errors.daemon-refusal';
-const STATUS = 'webui.status.badge-tone';
 const PALETTE = 'webui.palette.command-rank';
 const MAIL = 'webui.mail.reply-subject';
 const inputHeld = (): never => { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); };
@@ -21,6 +20,14 @@ function preflight<T>(capture: () => T): T {
 }
 function held(readings: Readonly<Record<string, Reading>>, compoundOutcome?: Exclude<Outcome, 'act'>): Extract<BrowserJudgmentProjection<never>, { status: 'held' }> {
   return { status: 'held', reason: 'uncertain', readings, ...(compoundOutcome === undefined ? {} : { compoundOutcome }) };
+}
+/**
+ * The retained decision names what was actually sent. Adapters call this from `record`, which the
+ * service runs only after the projection passed validation and the final authorization check.
+ */
+function recordProjection(runs: readonly { recordAction(action: string): void }[], projection: BrowserJudgmentProjection<unknown>): void {
+  const action = projection.status === 'settled' ? 'ready' : projection.compoundOutcome !== undefined ? 'conflicting-evidence' : 'unsettled';
+  for (const run of runs) run.recordAction(action);
 }
 const unsettled = (readings: Readonly<Record<string, Reading>>): boolean => Object.values(readings).some((reading) => reading.outcome !== 'act');
 const hasHttpStatus = (source: ResolvedDaemonRefusal): source is ResolvedDaemonRefusal & { readonly status: number } => source.status !== undefined && Number.isInteger(source.status) && source.status >= 100 && source.status <= 599;
@@ -35,9 +42,10 @@ export function createWebuiCodeLanguageAdapter(resolve: BrowserJudgmentBattery<'
     },
     project(run) {
       const readings = { language: run.readings.language };
-      if (unsettled(readings)) { run.recordAction('unsettled'); return held(readings); }
-      run.recordAction('ready'); return { status: 'settled', value: { language: readings.language.choice }, readings };
+      if (unsettled(readings)) return held(readings);
+      return { status: 'settled', value: { language: readings.language.choice }, readings };
     },
+    record(run, projection) { recordProjection([run], projection); },
   };
 }
 
@@ -61,10 +69,10 @@ export function createWebuiConfigKeyAdapter(resolve: BrowserJudgmentBattery<'web
     },
     project(runs) {
       const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.credential]));
-      if (unsettled(readings)) { runs.forEach(run => run.recordAction('unsettled')); return held(readings); }
-      runs.forEach(run => run.recordAction('ready'));
+      if (unsettled(readings)) return held(readings);
       return { status: 'settled', value: { matches: runs.map(run => run.readings.credential.verdict === 'yes') }, readings };
     },
+    record(runs, projection) { recordProjection(runs, projection); },
   };
 }
 
@@ -88,10 +96,10 @@ export function createWebuiCardMaterialKeyAdapter(resolve: BrowserJudgmentBatter
     },
     project(runs) {
       const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.material]));
-      if (unsettled(readings)) { runs.forEach(run => run.recordAction('unsettled')); return held(readings); }
-      runs.forEach(run => run.recordAction('ready'));
+      if (unsettled(readings)) return held(readings);
       return { status: 'settled', value: { matches: runs.map(run => run.readings.material.verdict === 'yes') }, readings };
     },
+    record(runs, projection) { recordProjection(runs, projection); },
   };
 }
 
@@ -115,10 +123,10 @@ export function createWebuiCredentialProviderAdapter(resolve: BrowserJudgmentBat
     },
     project(runs) {
       const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.matches]));
-      if (unsettled(readings)) { runs.forEach(run => run.recordAction('unsettled')); return held(readings); }
-      runs.forEach(run => run.recordAction('ready'));
+      if (unsettled(readings)) return held(readings);
       return { status: 'settled', value: { matches: runs.map(run => run.readings.matches.verdict === 'yes') }, readings };
     },
+    record(runs, projection) { recordProjection(runs, projection); },
   };
 }
 
@@ -143,28 +151,10 @@ export function createWebuiCatalogProviderAdapter(resolve: BrowserJudgmentBatter
     },
     project(runs) {
       const readings = Object.fromEntries(runs.map((run, index) => [`key_${index}`, run.readings.matches]));
-      if (unsettled(readings)) { runs.forEach(run => run.recordAction('unsettled')); return held(readings); }
-      runs.forEach(run => run.recordAction('ready'));
+      if (unsettled(readings)) return held(readings);
       return { status: 'settled', value: { matches: runs.map(run => run.readings.matches.verdict === 'yes') }, readings };
     },
-  };
-}
-
-export function createWebuiInstallPlatformAdapter(resolve: BrowserJudgmentBattery<'webui.pwa.install-platform', BrowserJudgmentInputMap['webui.pwa.install-platform'], BatteryRun<typeof installPlatformBattery.items>>['resolve']): BrowserJudgmentBattery<'webui.pwa.install-platform', BrowserJudgmentInputMap['webui.pwa.install-platform'], BatteryRun<typeof installPlatformBattery.items>> {
-  return {
-    id: 'webui.pwa.install-platform', version: 1, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS['webui.pwa.install-platform']!, resolve,
-    async run(port, input, { signal }) {
-      checkAbort(signal);
-      const source = preflight(() => snapshotWebuiInstallPlatform(input));
-      const run = await installPlatformBattery.run(port, source, { signal, site: 'webui.pwa.install-platform' });
-      checkAbort(signal); return run;
-    },
-    project(run) {
-      const readings = { platform: run.readings.platform };
-      if (unsettled(readings)) { run.recordAction('unsettled'); return held(readings); }
-      run.recordAction('ready');
-      return { status: 'settled', value: { platform: readings.platform.choice }, readings };
-    },
+    record(runs, projection) { recordProjection(runs, projection); },
   };
 }
 
@@ -184,10 +174,10 @@ export const webuiMailReplySubjectAdapter: BrowserJudgmentBattery<typeof MAIL, {
   },
   project(run) {
     const readings = { already_reply: run.readings.already_reply };
-    if (unsettled(readings)) { run.recordAction('unsettled'); return held(readings); }
-    run.recordAction('ready');
+    if (unsettled(readings)) return held(readings);
     return { status: 'settled', value: { alreadyReply: readings.already_reply.verdict === 'yes' }, readings };
   },
+  record(run, projection) { recordProjection([run], projection); },
 };
 
 /** Server-only intermediate evidence consumed by the refusal descriptor. */
@@ -221,7 +211,7 @@ export const webuiDaemonRefusalAdapter: BrowserJudgmentBattery<'webui.errors.dae
     const readings: Record<string, YesNoReading> = Object.fromEntries(names.map((name) => [name, run.readings[name]]));
     if (names.some((name) => !readings[name])) return invalid();
     const basis = source.status === 404 ? {} : { structuralBasis: { method_unknown: 'http-status-not-404' as const } };
-    if (unsettled(readings)) { run.recordAction('unsettled'); return { ...held(readings), ...basis }; }
+    if (unsettled(readings)) return { ...held(readings), ...basis };
     const value: DaemonRefusalValue = {
       session_not_found: run.readings.session_not_found.verdict === 'yes',
       session_closed: run.readings.session_closed.verdict === 'yes',
@@ -232,51 +222,10 @@ export const webuiDaemonRefusalAdapter: BrowserJudgmentBattery<'webui.errors.dae
     const conflict = (value.session_not_found && (value.session_closed || value.session_active || value.session_not_local))
       || (value.session_closed && value.session_active)
       || (value.method_unknown && (value.session_not_found || value.session_closed || value.session_active || value.session_not_local));
-    if (conflict) { run.recordAction('conflicting-evidence'); return { ...held(readings, 'escalate'), ...basis }; }
-    run.recordAction('ready');
+    if (conflict) return { ...held(readings, 'escalate'), ...basis };
     return { status: 'settled', value, readings, ...basis };
   },
-};
-
-/** Server-only intermediate evidence consumed by the status descriptor. */
-export interface WebuiStatusToneRun {
-  readonly source: Extract<ResolvedStatus, { kind: 'text' }>;
-  readonly run: BatteryRun<typeof statusToneBattery.items>;
-}
-
-/** Catalog enums resolve in code before the endpoint. No dynamic issuer is assumed. */
-export const webuiStatusToneAdapter: BrowserJudgmentBattery<'webui.status.badge-tone', Extract<ResolvedStatus, { kind: 'text' }>, WebuiStatusToneRun> = {
-  id: STATUS, version: 1, maxCalls: 1, questions: WEBUI_BATTERY_QUESTIONS[STATUS]!,
-  async resolve(input, context) {
-    checkAbort(context.signal);
-    if (input.source.kind === 'catalog') return inputHeld();
-    return context.references.resolve(input.source.statusRef, context.currentPrincipal, STATUS, (snapshot) => {
-      const source = snapshotWebuiStatus(snapshot);
-      if (source.kind !== 'text' || source.vocabulary !== input.vocabulary) return referenceHeld();
-      return source;
-    });
-  },
-  async run(port, raw, { signal }) {
-    checkAbort(signal);
-    const source = preflight(() => snapshotWebuiStatus(raw));
-    if (source.kind !== 'text') return inputHeld();
-    const item = source.vocabulary === 'badge' ? 'badge' : 'library_dot';
-    const run = await statusToneBattery.run(port, { status: source.status, domain: source.domain }, { signal, only: [item], site: STATUS });
-    checkAbort(signal);
-    return { source, run };
-  },
-  project({ source, run }) {
-    const item = source.vocabulary === 'badge' ? 'badge' : 'library_dot';
-    const reading = run.readings[item];
-    if (!reading) return invalid();
-    const readings = { [item]: reading };
-    if (reading.outcome !== 'act') { run.recordAction('unsettled'); return held(readings); }
-    const value: StatusValue = source.vocabulary === 'badge'
-      ? { vocabulary: 'badge', tone: run.readings.badge.choice }
-      : { vocabulary: 'library-dot', tone: run.readings.library_dot.choice };
-    run.recordAction('ready');
-    return { status: 'settled', value, readings };
-  },
+  record({ run }, projection) { recordProjection([run], projection); },
 };
 
 /**
@@ -347,7 +296,7 @@ export function createWebuiCommandRankAdapter(sources: WebuiPaletteSources): Bro
     project({ registryVersion, pairs }) {
       const readings = Object.fromEntries(pairs.map((pair, index) => [`candidate_${index}`, pair.readings.match]));
       if (!pairs.length || pairs.length > WEBUI_READER_LIMITS.candidateCount || Object.values(readings).some((reading) => !reading)) return invalid();
-      if (unsettled(readings)) { pairs.forEach((pair) => pair.recordAction('unsettled')); return held(readings); }
+      if (unsettled(readings)) return held(readings);
       const accepted: { candidateIndex: number; probability: number }[] = [];
       const rejected: number[] = [];
       pairs.forEach((pair, candidateIndex) => {
@@ -357,9 +306,9 @@ export function createWebuiCommandRankAdapter(sources: WebuiPaletteSources): Bro
         else return invalid();
       });
       accepted.sort((a, b) => b.probability - a.probability || a.candidateIndex - b.candidateIndex);
-      pairs.forEach((pair) => pair.recordAction('ready'));
       const value: CommandRankValue = { registryVersion, accepted, rejected };
       return { status: 'settled', value, readings };
     },
+    record({ pairs }, projection) { recordProjection(pairs, projection); },
   };
 }

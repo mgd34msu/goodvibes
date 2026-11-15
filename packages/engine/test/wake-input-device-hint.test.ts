@@ -115,6 +115,11 @@ function makeListener(options: {
   return { listener, capture, bindings, timers, takeRecheck };
 }
 
+/** Let queued promise work finish: setImmediate runs after every pending microtask, so this never depends on elapsed time. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 3; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+};
+
 describe('an absent pinned device falls back and keeps listening', () => {
   test('the binding names the missing device and moves to the system default', async () => {
     const binding = await resolveAudioInputBinding(HEADSET, async () => [mic('alsa_input.pci-0000_00_1f.3.analog-stereo')]);
@@ -158,7 +163,7 @@ describe('when the pinned device returns, capture moves back with one line', () 
     expect(recheck).toBeDefined();
     recheck!();
     // Let the rebind's async reopen settle.
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
 
     // Capture reopened ON THE PIN, and the old stream was released.
     expect(wake.capture.opened).toEqual(['', HEADSET]);
@@ -174,7 +179,7 @@ describe('when the pinned device returns, capture moves back with one line', () 
     const recheck = wake.takeRecheck();
     expect(recheck).toBeDefined();
     recheck!();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
 
     expect(wake.capture.opened).toEqual(['']);
     // Still one announcement, a timer that repeats "still not connected" every
@@ -377,7 +382,7 @@ describe('the listening indicator reflects capture truth, not intent', () => {
   test('a start that never completes is NOT reported as listening', async () => {
     const wake = stalledStartListener(true);
     void wake.listener.start();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
 
     const state = wake.listener.state();
     expect(state.phase).toBe('starting');
@@ -392,7 +397,7 @@ describe('the listening indicator reflects capture truth, not intent', () => {
   test('a start that never completes is reported rather than sitting silent forever', async () => {
     const wake = stalledStartListener(true);
     void wake.listener.start();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
 
     // Fire the start watchdog.
     const startTimer = wake.timers.find((timer) => timer.ms === 100);
@@ -550,7 +555,7 @@ describe('auto means a recorder that captures, not the first one installed', () 
     const restart = timers.find((timer) => timer.ms > 40 && timer.ms < 9_000);
     expect(restart).toBeDefined();
     restart!.run();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await settle();
 
     // The second open EXCLUDES the recorder that produced silence.
     expect(requests).toHaveLength(2);

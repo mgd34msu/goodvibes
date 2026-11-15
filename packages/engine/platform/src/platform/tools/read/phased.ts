@@ -12,8 +12,8 @@ import type { ProjectIndex } from '../../state/project-index.js';
  *   - No write permissions need to be checked before reading.
  *   - Reads are fast and low-risk, making audit overhead disproportionate.
  *
- * The tool is not cancellable: individual file reads complete in milliseconds
- * and there is no long-running process to abort mid-flight.
+ * The tool is not cancellable: each file is read in one synchronous call, and
+ * files past the read size limit are refused before they are loaded.
  *
  * @param fileCache    - Shared FileStateCache instance for this session.
  * @param projectIndex - Shared ProjectIndex instance for this session.

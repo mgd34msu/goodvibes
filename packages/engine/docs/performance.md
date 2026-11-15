@@ -27,43 +27,46 @@ const platformClient = createGoodVibesPlatform({
 Delay for a one-based attempt `n` is: `min(baseDelayMs * backoffFactor^(attempt-1), maxDelayMs)`. So attempt 1 waits `baseDelayMs`, attempt 2 applies one backoff factor, and so on. `backoffFactor` defaults to `2` and is configurable. There is no jitter. When a server sends a `Retry-After` header on a retryable response, it raises the computed delay to at least that value, but the result is still capped at 10 minutes so a hostile or misconfigured server cannot park a client indefinitely.
 
 Retries are only triggered for retryable errors. In the transport-http retry loop an error is retryable when:
-- Its HTTP status is in `RETRYABLE_STATUS_CODES` (408, 429, 500, 502, 503, 504) and the request method is eligible for retry, meaning a safe method (`GET`, `HEAD`, or `OPTIONS`), or a mutation the contract marks `idempotent` or that has a `perMethodPolicy` entry; or
-- It is a network-level failure (status `0`) surfaced as a `GoodVibesError` with `recoverable: true` (the transport flags fetch/connection errors recoverable).
+- Its HTTP status is in `RETRYABLE_STATUS_CODES` (408, 429, 500, 502, 503, 504, 529) and the request method is in `retryOnMethods` (default `GET`, `HEAD`, `OPTIONS`). A mutation additionally needs a `perMethodPolicy` entry or an `idempotent` contract mark, and its verb must be added to `retryOnMethods`; the default policy never retries one. A reply whose body says `recoverable: false`, or whose category is `billing`, is not retried; or
+- It is a network-level failure (status `0`) surfaced as a `GoodVibesError` with `recoverable: true` (the transport flags every connection failure recoverable except a deliberate abort), on a method in `retryOnMethods`.
 
 Never retry unsafe mutations blindly. Only idempotent reads and operations with application-level idempotency guarantees are safe to retry.
 
 ### Adaptive execution planner
 
-The `AdaptivePlanner` selects an execution strategy each turn based on risk, latency budget, and task shape. It supports five strategies. `single` makes one LLM call with no parallelism. `cohort` fans out to a coordinated agent group. `background` defers the work to an async task. `remote` delegates to a remote provider or agent endpoint. `auto` is not itself a candidate; it tells the planner to score the other four and pick the highest.
+The `AdaptivePlanner` selects an execution strategy each turn based on risk, latency budget, and task shape. It supports five strategies. `single` makes one LLM call with no parallelism. `cohort` fans out to a coordinated agent group. `background` defers the work to an async task. `remote` delegates to a remote provider or agent endpoint. `auto` is never a result of a settled selection; it is the mode that asks the planner to choose, and it appears on a decision only when the choice was held.
 
-Selection is a 0-100 score per strategy, not a hard gate, apart from three disqualifying conditions. `cohort` scores 0 unless `isMultiStep` is true, `background` scores 0 unless `backgroundEligible` is true, and `remote` scores 0 unless `remoteAvailable` is true. Within those bounds, risk acts as a strong penalty rather than a cutoff. `cohort` and `remote` still receive a small nonzero score above risk 0.7, so they can theoretically still win if every other candidate is disqualified, and `background` is penalized above risk 0.6. `single` always has a baseline score of 50 and gains bonuses when risk exceeds 0.7, the latency budget is under 5 seconds, or the task has no multi-step signal, which is why those conditions are the practical case where `single` wins.
+`select` resolves in this order:
 
-| Strategy | Score shape |
-|---|---|
-| `single` | Baseline 50, +30 if risk > 0.7, +20 if latency budget < 5 s, +10 if not multi-step |
-| `cohort` | 0 unless multi-step; ~5 if risk > 0.7; otherwise 70 + (1 − risk) × 20 |
-| `background` | 0 unless `backgroundEligible`; ~10 if risk > 0.6; otherwise 60, +20 more if the latency budget is unconstrained |
-| `remote` | 0 unless `remoteAvailable`; ~5 if risk > 0.7; otherwise 65 + (1 − risk) × 15 |
+1. An active user override (`planner.override(...)`) is returned as the selected strategy, reason `OVERRIDE_IN_EFFECT`.
+2. A pinned mode other than `auto` (`planner.setMode(...)`) is returned, reason `PINNED_MODE`.
+3. In Classic operation (decision models off) the result is `single`, reason `CLASSIC_SINGLE`. No reading is taken.
+4. Otherwise a Jev reading chooses from the actual task, its risk, latency budget and the available capabilities. A settled reading returns that strategy with reason `JUDGMENT_SELECTED`, plus the reading's `outcome` and `decisionId`. A `remote` or `background` choice whose capability is not available counts as unsettled.
+5. If the reading does not settle, `select` records a decision with `selected: 'auto'` and reason `JUDGMENT_UNSETTLED` in the audit log and then throws `PlannerJudgmentError` (`reason` is `unsettled` or `unavailable-strategy`). No strategy is guessed and no work starts; the owner decides, for example by pinning a mode or setting an override. Callers must handle this error.
 
-`background`'s latency-budget bonus is exactly that, a bonus. An unconstrained latency budget is not required for `background` to win; it only pushes the score higher when present.
+Each decision lists its `candidates` with a 0-100 weight taken from the reading's probabilities. These weights describe the reading; they are not a score table the planner applies.
 
 ```ts
-import { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/core';
+import { AdaptivePlanner, PlannerJudgmentError } from '@goodvibes-jev/engine/platform/platform/core';
 
 const planner = new AdaptivePlanner();
 
-const decision = await planner.select({
-  riskScore: 0.3,         // supply the normalized risk reading, not a hand-selected score
-  latencyBudgetMs: Infinity,
-  isMultiStep: true,
-  taskDescription: 'Implement and integrate the independent client and server changes.',
-  remoteAvailable: false,
-  backgroundEligible: false,
-  taskDescription: 'Refactor auth module',
-});
-
-console.log(decision.selected);    // 'cohort'
-console.log(decision.reasonCode);  // 'COHORT_CAPABLE'
+try {
+  const decision = await planner.select({
+    riskScore: 0.3,         // supply the normalized risk reading, not a hand-selected score
+    latencyBudgetMs: Infinity,
+    isMultiStep: true,
+    taskDescription: 'Refactor auth module',
+    remoteAvailable: false,
+    backgroundEligible: false,
+  });
+  console.log(decision.selected);    // a strategy the reading settled on, or 'single' in Classic operation
+  console.log(decision.reasonCode);  // 'JUDGMENT_SELECTED' or 'CLASSIC_SINGLE'
+  console.log(decision.decisionId);  // set when a reading was taken
+} catch (error) {
+  if (!(error instanceof PlannerJudgmentError)) throw error;
+  // The reading held: nothing was selected. error.reason says why.
+}
 ```
 
 The planner keeps a rolling audit log of the last 100 decisions (`MAX_HISTORY`). Use `planner.explain()` to see a human-readable breakdown of the most recent decision, or `planner.getHistory(limit = 20)` to retrieve the most recent decisions. The default `limit` is `20`. Pass a higher value (up to the 100-entry cap) to read further back.
@@ -93,6 +96,11 @@ breaker.recordSuccess(); // resets counter to 0
 ```
 
 Default thresholds: warn at 5 consecutive failures, break at 10.
+
+In a sub-agent's turn loop the warning is shown to the model. At the break
+the model gets one final reply, with any tool call in it left unrun, to report
+what it was trying to do; that reply is kept as the agent's output and the run
+ends failed with the `circuit_breaker` reason.
 
 ---
 
@@ -133,7 +141,7 @@ The control-plane gateway's SSE `ReadableStream` is constructed with a bounded `
 new ReadableStream(..., new CountQueuingStrategy({ highWaterMark: 256 }));
 ```
 
-When a subscriber falls behind, the stream stops pulling new chunks from the producer rather than buffering indefinitely. Producers (the event bus) are not blocked. The back-pressure is isolated to the per-subscriber stream. A subscriber that stays behind long enough to drop events will surface as a `TRANSPORT_STALE` or disconnect event; reconnect with `Last-Event-ID` replays missed events where the server retains them.
+When a subscriber falls behind, the stream stops queuing new chunks for it rather than buffering indefinitely: events that arrive while 256 chunks are already waiting are dropped for that subscriber only. Producers (the event bus) are not blocked and the connection stays open. Nothing is sent at the moment of the drop; the next frame that fits is preceded by a `gap` event (`{ dropped, afterId }`) giving the number of events missed and the id of the last event delivered before the gap. A client that sees `gap` should reconnect with `Last-Event-ID: <afterId>` (or refresh its state); the server replays what it still retains. The gateway logs the first drop of each stream.
 
 Startup events (initial snapshot, recent-event replay) are delivered before the `highWaterMark` gate engages in practice, but high-volume workloads should still prefer domain-filtered subscriptions to reduce the event rate per subscriber.
 
@@ -141,20 +149,14 @@ Startup events (initial snapshot, recent-event replay) are delivered before the 
 
 The control-plane strategy above governs the **server → client** SSE stream. The
 transport-realtime WebSocket connector applies separate **client → server**
-outbound backpressure. Messages enqueued while the socket is connecting or
-reconnecting are held in a bounded, drop-oldest queue:
-
-| Cap | Value |
-|---|---|
-| `MAX_OUTBOUND_QUEUE` | 1,024 messages |
-| `MAX_OUTBOUND_QUEUE_BYTES` | 16 MiB total |
-| `MAX_OUTBOUND_MESSAGE_BYTES` | 1 MiB per message |
-
-A single message larger than 1 MiB is rejected rather than queued. On overflow
-the oldest entry is dropped and the connector's `onBackpressure(info)` hook fires
-with `{ droppedCount, queueLength, queueBytes, reason }`. To avoid flooding
-callers during sustained disconnects, `onBackpressure` fires on the first overflow
-and every tenth overflow thereafter; `droppedCount` is always the cumulative total.
+outbound queue. Messages enqueued while the socket is connecting, reconnecting
+or authenticating are held in an unbounded queue, kept in order across
+reconnects and flushed when the socket is ready. Nothing is dropped or
+rejected, whatever the number of the messages (a single message over 64M
+characters is refused when it is sent), so a client that sends
+during a long disconnect should bound what it sends. The connector's
+`onBackpressure(info)` hook is accepted but never called, and no
+`TRANSPORT_BACKPRESSURE` event is emitted.
 
 ### Token rotation on long-lived connections
 
@@ -180,7 +182,7 @@ The platform tracks token usage continuously against the active model's context 
 | Constant | Value | Purpose |
 |---|---|---|
 | `COMPACTION_BUFFER_TOKENS` | 15,000 | Safety buffer kept free below the window ceiling |
-| `SMALL_WINDOW_THRESHOLD` | 12,000 | Models with windows ≤ this use simplified compaction |
+| `SMALL_WINDOW_THRESHOLD` | 12,000 | Models with windows below this use simplified compaction |
 
 Automatic compaction is controlled by `behavior.autoCompactThreshold`, a
 percentage of the active context window. The default is `80`, meaning
@@ -252,7 +254,7 @@ import { compactMessages } from '@goodvibes-jev/engine/platform/platform/core';
 const result = await compactMessages(ctx, providerRegistry);
 ```
 
-**Small-window compaction** handles models with tight context windows (≤ 12,000 token effective budget). It uses a simpler keep-recent strategy (`compactSmallWindow`) that retains the last N messages without an LLM extraction pass.
+**Small-window compaction** handles models with tight context windows (a window below 12,000 tokens). It uses a simpler keep-recent strategy (`compactSmallWindow`) that retains the last N messages without an LLM extraction pass.
 
 ### Compaction section budgets
 
@@ -292,8 +294,6 @@ excluding imported dependencies. Historical references are advisory; this
 report does not enforce a consumer bundle-size limit. Actual package and
 browser/RN compatibility checks remain separate required checks.
 
-See Testing and Validation.
-
 **Runtime SLO gates** use consecutive-violation counting. A budget fails only when the threshold is exceeded on `tolerance` consecutive samples, which prevents transient spikes from failing the gate.
 
 | Metric | Threshold | Tolerance |
@@ -316,11 +316,11 @@ Four end-to-end SLO latency gates are enforced at runtime via `SloCollector`:
 | SLO | Target (p95) |
 |---|---|
 | Turn start (TURN_SUBMITTED → first STREAM_DELTA) | 2,000 ms |
-| Cancel latency (TURN_CANCEL → confirmed stop) | 500 ms |
+| Cancel latency (TURN_CANCEL → TURN_COMPLETED or TURN_ERROR) | 500 ms |
 | Reconnect recovery (TRANSPORT_RECONNECTING → TRANSPORT_CONNECTED) | 10,000 ms |
-| Permission decision (PERMISSION_REQUESTED → DECISION_EMITTED) | 100 ms |
+| Permission decision (GATE_REQUESTED → DECISION_EMITTED) | 2,500 ms |
 
-SLO metrics are computed over a rolling window of 200 samples. Expired pending measurements are swept every 30 seconds to prevent stale correlation entries from distorting p95 values.
+SLO metrics are computed over a rolling window of 200 samples. The permission decision target is wider than the others because the span includes one Jev stakes reading for a side-effecting call. A measurement still waiting for its end event after 60 seconds is dropped by a sweep that runs every 30 seconds, so stale correlation entries cannot distort p95 values. An SLO with no samples yet reads as no data, not as 0 ms. Reconnect recovery only has samples when a host publishes TRANSPORT_RECONNECTING and TRANSPORT_CONNECTED for a reconnecting transport.
 
 ---
 
@@ -345,7 +345,7 @@ const telemetry = selectTelemetry(state);
 
 // Composite health across all health domains
 const health = selectSystemHealth(state);
-// health.status: 'healthy' | 'degraded' | 'failed'
+// health.status: 'healthy' | 'degraded' | 'critical' | 'unknown'
 // health.hasCritical: boolean
 // health.hasDegraded: boolean
 // health.domains: Record<HealthDomain, CompositeHealthStatus>
@@ -432,11 +432,11 @@ Components progress through three health states based on contract compliance:
 ```
 normal → throttled (rate or render cost exceeded)
 throttled → degraded (consecutiveViolations >= degradeAfterViolations)
-throttled → normal (3 consecutive clean windows)
-degraded → normal (3 consecutive clean windows)
+throttled → normal (3 consecutive clean observations)
+degraded → normal (3 consecutive clean observations)
 ```
 
-When `throttled`, `canRender` returns false until `throttleIntervalMs` has elapsed. When `degraded`, the component renders at `degradedIntervalMs` regardless of update rate. Recovery to `normal` requires 3 consecutive measurement windows without violations, and applies the same way whether the component was throttled or degraded; a throttled component does not have to pass through degraded to recover.
+When `throttled`, `canRender` returns false until `throttleIntervalMs` has elapsed. When `degraded`, the component renders at `degradedIntervalMs` regardless of update rate. Recovery to `normal` requires 3 consecutive clean observations, either measurement windows without violations or renders that stayed within their budget, so three cheap renders in a row also recover a component. It applies the same way whether the component was throttled or degraded; a throttled component does not have to pass through degraded to recover.
 
 ```ts
 const health = monitor.getHealth('agent-logs');
@@ -482,7 +482,7 @@ GET /api/control-plane/events?domains=turn,agents,tools
 
 ### Parallel tool execution
 
-Configure `cohort` strategy via the adaptive planner to fan tasks out across agent cohorts. A registered Jev reading selects the strategy from the actual task, its recorded risk and current capabilities; uncertainty holds the selection rather than guessing:
+Configure `cohort` strategy via the adaptive planner to fan tasks out across agent cohorts. A Jev reading selects the strategy from the actual task, its recorded risk and current capabilities; uncertainty holds the selection (`select` throws `PlannerJudgmentError`) rather than guessing, and the example below assumes the reading settled on `cohort`:
 
 ```ts
 const decision = await planner.select({
@@ -493,12 +493,12 @@ const decision = await planner.select({
   remoteAvailable: false,
   backgroundEligible: false,
 });
-// decision.selected === 'cohort'
+// decision.selected === 'cohort' when the reading settles on it
 ```
 
 ### Background execution
 
-Defer latency-insensitive work to background execution to avoid blocking the conversation loop:
+Defer latency-insensitive work to background execution to avoid blocking the conversation loop. The reading may choose another strategy, or hold the choice, in which case `select` throws `PlannerJudgmentError`; handle it as shown above.
 
 ```ts
 const decision = await planner.select({
@@ -509,7 +509,7 @@ const decision = await planner.select({
   remoteAvailable: false,
   backgroundEligible: true,
 });
-// decision.selected === 'background'
+// decision.selected === 'background' when the reading settles on it
 ```
 
 ---

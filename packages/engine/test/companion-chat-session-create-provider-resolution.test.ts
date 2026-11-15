@@ -106,8 +106,10 @@ describe('companion-chat session-create: resolver happy path', () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(201);
     const body = await res!.json() as Record<string, unknown>;
-    expect(typeof body['sessionId']).toBe('string');
     expect(typeof body['createdAt']).toBe('number');
+    const session = manager.getSession(body['sessionId'] as string);
+    expect(session?.provider).toBe('inception');
+    expect(session?.model).toBe('mercury-2');
   });
 
   test('resolver returns values; body also has model/provider → body values take precedence, session created', async () => {
@@ -119,9 +121,10 @@ describe('companion-chat session-create: resolver happy path', () => {
       ctx,
     );
     expect(res!.status).toBe(201);
-    // Session exists (was created)
     const body = await res!.json() as Record<string, unknown>;
-    expect(typeof body['sessionId']).toBe('string');
+    const session = manager.getSession(body['sessionId'] as string);
+    expect(session?.provider).toBe('venice');
+    expect(session?.model).toBe('llama-3.3-70b');
   });
 
   test('resolver returns {provider, model}; session persists in manager', async () => {
@@ -135,6 +138,8 @@ describe('companion-chat session-create: resolver happy path', () => {
     const session = manager.getSession(sessionId);
     expect(session).not.toBeNull();
     expect(session!.id).toBe(sessionId);
+    expect(session!.provider).toBe('inception');
+    expect(session!.model).toBe('mercury-2');
   });
 });
 

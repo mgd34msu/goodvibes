@@ -7,15 +7,13 @@
  *   - rotatePassword (triggers re-persist)
  */
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, rmSync, statSync, existsSync } from 'node:fs';
+import { rmSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.js';
+import { makeProjectTempDir } from './_helpers/project-temp.js';
 
 function tempDir(suffix: string): string {
-  const d = join(tmpdir(), `gv-sec01-${suffix}-${Date.now()}`);
-  mkdirSync(d, { recursive: true });
-  return d;
+  return makeProjectTempDir(`gv-sec01-${suffix}`);
 }
 
 function cleanup(...dirs: string[]): void {

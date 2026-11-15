@@ -47,7 +47,9 @@ import {
   type DaemonConfigMovedMarker,
   type DiscardedConfigKey,
   type MovedConfigKey,
+  type SkippedSurfaceFile,
 } from './daemon-config-migration-io.js';
+import { summarizeError } from '../utils/error-display.js';
 import { daemonConfigPath } from './daemon-config-tier.js';
 
 /** The surface store the daemon has historically read; wins on conflict. */
@@ -87,6 +89,8 @@ interface SurfaceFile {
   readonly surface: string;
   readonly path: string;
   readonly raw: Record<string, unknown>;
+  /** The file as read, so a write can prove nothing else changed it meanwhile. */
+  readonly readAs: string;
   stripped: boolean;
 }
 
@@ -115,12 +119,19 @@ export function migrateDaemonOwnedConfig(
   const now = options.now ?? (() => new Date());
 
   const store = readSettingsFileStrict(storePath);
-  const surfaceFiles: SurfaceFile[] = surfaces.map((entry) => ({
-    surface: entry.surface,
-    path: entry.path,
-    raw: readSettingsFileStrict(entry.path),
-    stripped: false,
-  }));
+  const storeReadAs = JSON.stringify(store);
+  // One unreadable surface file must not strand every other surface's values:
+  // it is left untouched and disclosed in the marker.
+  const surfaceFiles: SurfaceFile[] = [];
+  const skipped: SkippedSurfaceFile[] = [];
+  for (const entry of surfaces) {
+    try {
+      const raw = readSettingsFileStrict(entry.path);
+      surfaceFiles.push({ surface: entry.surface, path: entry.path, raw, readAs: JSON.stringify(raw), stripped: false });
+    } catch (error) {
+      skipped.push({ path: entry.path, reason: summarizeError(error) });
+    }
+  }
 
   const plan = planMove({ store, storePath, surfaceFiles, primarySurface });
 
@@ -138,7 +149,10 @@ export function migrateDaemonOwnedConfig(
     sources: surfaceFiles.map((entry) => entry.path),
     moved,
     discarded,
-    coveredKeys: [...ownedKeys],
+    // A skipped file still holds values nobody moved. Covering nothing makes
+    // the next start try again, which succeeds once the file is repaired.
+    coveredKeys: skipped.length === 0 ? [...ownedKeys] : [],
+    ...(skipped.length === 0 ? {} : { skipped }),
   };
 
   // This pre-ConfigManager writer owns every settings root it will change.
@@ -149,7 +163,13 @@ export function migrateDaemonOwnedConfig(
     ...(writesStore ? [storePath] : []), ...surfaceFiles.filter(entry => entry.stripped).map(entry => entry.path),
   ])].map(path => [path, new DurablePolicyEpochOwner([path], true)]));
   for (const owner of policyOwners.values()) owner.advance();
-  const writeSettings = (path: string, value: Record<string, unknown>) => {
+  const writeSettings = (path: string, value: Record<string, unknown>, readAs: string | null) => {
+    // The files were read once, before the plan. Another process saving a
+    // setting since then would be overwritten by this write; refuse instead and
+    // leave the marker in-progress so the next start plans from what is there.
+    if (readAs !== null && existsSync(path) && JSON.stringify(readSettingsFileStrict(path)) !== readAs) {
+      throw new Error(`Settings file changed while the daemon-owned config migration was running; it will be retried on the next start: ${path}`);
+    }
     writeJsonAtomic(path, value);
     policyOwners.get(path)?.reconcile();
   };
@@ -157,11 +177,11 @@ export function migrateDaemonOwnedConfig(
   // 1. Announce the plan before touching anything.
   writeJsonAtomic(markerPath, { ...marker, status: 'in-progress' });
   // 2. The daemon store becomes authoritative.
-  if (writesStore) writeSettings(storePath, plan.store);
+  if (writesStore) writeSettings(storePath, plan.store, storeReadAs);
   // 3. Only then do the surfaces give the keys up, one writer per key.
   for (const entry of surfaceFiles) {
     if (!entry.stripped) continue;
-    writeSettings(entry.path, entry.raw);
+    writeSettings(entry.path, entry.raw, entry.readAs);
   }
   // 4. The ledger is final.
   writeJsonAtomic(markerPath, marker);
@@ -282,7 +302,8 @@ function mergeLedger<T>(
 
 /** Human-readable disclosure of a completed migration, for a startup notice. */
 export function describeDaemonConfigMigration(marker: DaemonConfigMovedMarker): string {
-  if (marker.moved.length === 0 && marker.discarded.length === 0) {
+  const skipped = marker.skipped ?? [];
+  if (marker.moved.length === 0 && marker.discarded.length === 0 && skipped.length === 0) {
     return 'Daemon-owned settings already had a single home; nothing moved.';
   }
   const lines = [
@@ -292,6 +313,9 @@ export function describeDaemonConfigMigration(marker: DaemonConfigMovedMarker): 
   const conflicts = marker.discarded.filter((entry) => entry.reason === 'conflict');
   for (const conflict of conflicts) {
     lines.push(`  ${conflict.key}: kept the value from ${conflict.supersededBy}, discarded ${JSON.stringify(conflict.value)} from ${conflict.from}`);
+  }
+  for (const entry of skipped) {
+    lines.push(`  ${entry.path}: not migrated, ${entry.reason}. Repair the file and restart to move its daemon-owned values.`);
   }
   return lines.join('\n');
 }

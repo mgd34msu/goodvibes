@@ -1,14 +1,15 @@
 /**
  * Connected-host receipt delivery: a current daemon delivers its undelivered
  * honesty receipts ("updated from X to Y", "restarted after a crash") once, and
- * ONLY to a /status read that opts in with ?receipts=consume, a plain /status
- * read is receipt-neutral. The agent's consuming reader is a single
- * ?receipts=consume read issued once per attach; the liveness probe stays plain.
- * Every consumed receipt must render exactly once.
+ * ONLY to a /status read that opts in with ?receipts=, a plain /status read is
+ * receipt-neutral. The agent's receipt reader runs once per attach, through the
+ * same factory services.ts uses; the build read stays plain. Every taken receipt
+ * must render exactly once.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AgentDaemonReceiptFeed, type DaemonReceipt } from '../../runtime/daemon-receipts.ts';
+import { AgentDaemonReceiptFeed, createDaemonReceiptConsumption, type DaemonReceipt } from '../../runtime/daemon-receipts.ts';
 import { createSessionSpineReceiptConsumer as createSpineReceiptConsumer } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { DaemonBuildGuard, readDaemonStatusPayload } from '../../runtime/daemon-build-compatibility.ts';
 
 describe('AgentDaemonReceiptFeed', () => {
   test('buffers receipts captured before the renderer attaches, then flushes in order', () => {
@@ -29,32 +30,93 @@ describe('AgentDaemonReceiptFeed', () => {
   });
 });
 
-describe('receipt consumer (?receipts=consume, once per attach)', () => {
+describe('receipt consumption once per attach', () => {
   let server: ReturnType<typeof Bun.serve> | null = null;
   afterEach(() => {
     server?.stop(true);
     server = null;
   });
 
-  test('the consumed payload flows through AgentDaemonReceiptFeed to a render sink exactly once', async () => {
+  /**
+   * A daemon that honours the receipt contract: a plain read carries no receipts,
+   * `receipts=peek` shows the undelivered ones without delivering, and
+   * `receipts=ack&ids=` marks exactly those delivered.
+   */
+  function startDaemon(): { requests: string[] } {
+    const requests: string[] = [];
+    const undelivered = new Map([['update-1', 'updated from 1.9.0 to 1.9.1']]);
     server = Bun.serve({
       port: 0,
-      fetch: () => Response.json({
-        status: 'running',
-        version: '1.9.1',
-        receipts: [{ id: 'update-1', text: 'updated from 1.9.0 to 1.9.1', at: 9 }],
-      }),
+      fetch: (request) => {
+        const url = new URL(request.url);
+        requests.push(`${url.pathname}${url.search}`);
+        const mode = url.searchParams.get('receipts');
+        if (mode === 'ack') {
+          for (const id of (url.searchParams.get('ids') ?? '').split(',')) undelivered.delete(id);
+          return Response.json({ status: 'running', version: '3.2.0', receipts: [] });
+        }
+        if (mode === 'peek' || mode === 'consume') {
+          const receipts = [...undelivered].map(([id, text]) => ({ id, text, at: 9 }));
+          if (mode === 'consume') undelivered.clear();
+          return Response.json({ status: 'running', version: '3.2.0', receipts });
+        }
+        return Response.json({ status: 'running', version: '3.2.0' });
+      },
     });
+    return { requests };
+  }
+
+  test('a plain status read takes no receipts; the attach read takes them, acknowledges them, and renders them once', async () => {
+    const { requests } = startDaemon();
+    const connection = () => ({ baseUrl: `http://127.0.0.1:${server!.port}`, token: 'test-token' });
     const feed = new AgentDaemonReceiptFeed();
-    const consume = createSpineReceiptConsumer({
-      resolveConnection: () => ({ baseUrl: `http://127.0.0.1:${server!.port}`, token: 'test-token' }),
+    const rendered: string[] = [];
+    feed.attach((receipt) => rendered.push(receipt.text));
+
+    // A plain read, what the liveness probe and the build read do.
+    const plain = await readDaemonStatusPayload(connection());
+    expect(plain).toEqual({ status: 'running', version: '3.2.0' });
+    expect(rendered).toEqual([]);
+
+    const attach = createDaemonReceiptConsumption({
+      resolveConnection: connection,
+      readStatus: readDaemonStatusPayload,
+      guard: new DaemonBuildGuard({ floor: '3.2.0' }),
+      consumeReceipts: createSpineReceiptConsumer({ resolveConnection: connection }),
+      feed,
+      afterAttach: async () => {},
     });
-    // Mirror services.consumeDaemonReceipts: one consuming read, push to the feed.
-    feed.push(await consume());
-    feed.push(await consume()); // dedupe by id, a re-consume must not double-render.
+    requests.length = 0;
+    await attach();
+
+    expect(requests).toEqual(['/status', '/status?receipts=peek', '/status?receipts=ack&ids=update-1']);
+    expect(rendered).toEqual(['updated from 1.9.0 to 1.9.1']);
+
+    // The daemon delivered it, so a second attach finds nothing to render.
+    await attach();
+    expect(rendered).toEqual(['updated from 1.9.0 to 1.9.1']);
+  });
+
+  test('receipts taken before the sink attaches are buffered, and the post-attach hook runs after the read', async () => {
+    startDaemon();
+    const connection = () => ({ baseUrl: `http://127.0.0.1:${server!.port}`, token: null });
+    const feed = new AgentDaemonReceiptFeed();
+    const order: string[] = [];
+    await createDaemonReceiptConsumption({
+      resolveConnection: connection,
+      readStatus: readDaemonStatusPayload,
+      guard: new DaemonBuildGuard({ floor: '3.2.0' }),
+      consumeReceipts: async () => {
+        order.push('consume');
+        return [{ id: 'r-1', text: 'restarted after a crash', at: 1 }];
+      },
+      feed,
+      afterAttach: async () => { order.push('afterAttach'); },
+    })();
+    expect(order).toEqual(['consume', 'afterAttach']);
 
     const rendered: string[] = [];
     feed.attach((receipt) => rendered.push(receipt.text));
-    expect(rendered).toEqual(['updated from 1.9.0 to 1.9.1']);
+    expect(rendered).toEqual(['restarted after a crash']);
   });
 });

@@ -334,10 +334,9 @@ export function buildRegistryModelPricingDeps(input: RegistryModelPricingInput):
     getProviderServedPricing: (provider, modelId) =>
       provider === 'openrouter' ? input.openRouterPricing(modelId) : input.gatewayPricing(provider, modelId),
     getCatalog: input.getCatalog,
-    providerMatchesCatalogId: (provider, catalogId) => provider === catalogId
-      || input.providerAliases[catalogId] === provider
-      || input.providerAliases[provider] === catalogId
-      || (provider === 'gemini' && catalogId === 'google'),
+    // Both sides are read through the one alias table, the same rule the catalog facts use.
+    providerMatchesCatalogId: (provider, catalogId) =>
+      (input.providerAliases[provider] ?? provider) === (input.providerAliases[catalogId] ?? catalogId),
     isKnownProviderId: input.isKnownProviderId,
   };
 }

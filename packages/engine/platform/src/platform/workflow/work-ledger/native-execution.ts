@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import type { CiWatchSubscription } from '../../ci-watch/types.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
@@ -52,6 +54,27 @@ export interface NativeWorkExecutionStatus {
   readonly recovery: 'available' | 'required' | 'terminal' | 'cancelled';
   readonly integration: ContractIntegrationInspection;
   readonly settlement?: { readonly state: 'pending' | 'required' | 'failed' | 'published'; readonly evidenceId?: string; readonly reportSequence?: number; readonly evidenceSequence?: number };
+  /**
+   * Why the last automatic settlement failed, as a fixed code (never the raw
+   * message): only set while `settlement.state` is `failed`. The control-plane
+   * route copies it onto the wire settlement as `reason`.
+   */
+  readonly settlementFailure?: NativeSettlementFailureCode;
+}
+export type NativeSettlementFailureCode =
+  | 'evidence-over-capacity' | 'artifact-access-restricted' | 'artifact-budget-exceeded'
+  | 'review-not-genuine' | 'changed-during-verification' | 'cancelled' | 'host-state' | 'verification-failed';
+/** Maps a settlement error to its fixed code, so the reason survives without carrying raw text. */
+function settlementFailureCode(error: unknown): NativeSettlementFailureCode {
+  if (error instanceof NativeWorkExecutionError) return error.code === 'stale' || error.code === 'conflict' ? 'changed-during-verification' : 'host-state';
+  const message = error instanceof Error ? error.message : '';
+  if (message.startsWith('Native evidence exceeds ledger reference capacity')) return 'evidence-over-capacity';
+  if (message.startsWith('Native artifact read is access-restricted')) return 'artifact-access-restricted';
+  if (message.startsWith('Native artifact capture exceeds total budget')) return 'artifact-budget-exceeded';
+  if (message.startsWith('Native execution lacks')) return 'review-not-genuine';
+  if (message.includes('changed during verification')) return 'changed-during-verification';
+  if (error instanceof Error && error.name === 'AbortError') return 'cancelled';
+  return 'verification-failed';
 }
 export interface NativeWorkExecutionIntentStatus {
   readonly kind: 'intent';
@@ -114,13 +137,15 @@ export function createNativeWorkExecutionHost(deps: {
   /** Trusted host lifetime, invoked only for this owner's actual admitted receipt. */
   readonly cancelForeground?: (contractId: string) => Promise<void>;
   readonly joinForeground?: (contractId: string) => Promise<void>;
+  /** Lifts the fence `cancelForeground` put on a contract whose cancellation was then refused, so it is driven again. */
+  readonly releaseForeground?: (contractId: string) => void;
 }): NativeWorkExecutionHost {
   const projectRoot = realpathSync(deps.projectRoot);
   let runner: NativeRunner | undefined; let closed = false; let closing: Promise<void> | undefined;
   interface Delivery { target: NativeWorkExecutionTarget; identity: NativePairedExecutionSnapshot; controller: AbortController; generation?: number; promise: Promise<DurableStartedContract>; }
   const deliveries = new Map<string, Delivery>();
   interface Settlement { readonly authority: NativePairedExecutionSnapshot; readonly controller: AbortController; readonly promise: Promise<NativeWorkSettlementReceipt>; }
-  const settlements = new Map<string, Settlement>(); const settlementFailures = new Set<string>();
+  const settlements = new Map<string, Settlement>(); const settlementFailures = new Map<string, NativeSettlementFailureCode>();
   const active = new Map<string, ActiveOwner>(); const pending = new Set<Promise<unknown>>(); const lifetime = new AbortController();
   const recordRetirements = new Map<string, Promise<void>>();
   const requireRunner = () => { if (!runner) throw new NativeWorkExecutionError('unavailable'); return runner; };
@@ -138,11 +163,12 @@ export function createNativeWorkExecutionHost(deps: {
     const work = current.ledger.works.find(item => item.id === execution.target.workId);
     const attempt = current.ledger.attempts.find(item => item.id === execution.target.attemptId && item.workId === execution.target.workId);
     const currentTarget = work && attempt ? { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision } : null;
-    const recovery = execution.state === 'cancelled' ? 'cancelled' : contract && isTerminalContractStatus(contract.status) ? 'terminal'
+    const recovery = execution.state === 'cancelled' ? 'cancelled' : (contract && isTerminalContractStatus(contract.status)) || current.settlement ? 'terminal'
       : execution.state === 'launch-claimed' && !active.get(execution.target.attemptId)?.claimed ? 'required' : 'available';
     const key = durableKeyIdentity(execution.request.key);
     const settlement: NativeWorkExecutionStatus['settlement'] = current.settlement ? { state: 'published', evidenceId: current.settlement.evidenceId, reportSequence: current.settlement.reportSequence, evidenceSequence: current.settlement.evidenceSequence }
       : settlements.has(key) ? { state: 'pending' } : settlementFailures.has(key) ? { state: 'failed' } : { state: 'required' };
+    const settlementFailure = current.settlement ? undefined : settlementFailures.get(key);
     const currentAttempt = !!work && !!attempt && work.currentAttemptId === attempt.id && attempt.state === 'active';
     const integration: ContractIntegrationInspection = !execution.receipt ? { state: 'unavailable', reason: 'no-receipt' }
       : !currentAttempt || !currentTarget || !equalTarget(execution.target, currentTarget) || attempt?.ownerId !== authenticated.current.principalId
@@ -153,7 +179,7 @@ export function createNativeWorkExecutionHost(deps: {
     // The narrow reader cannot select another receipt, including a stale attempt's live run.
     if (integration.state !== 'unavailable' && integration.contractId !== execution.receipt?.contractId) throw new NativeWorkExecutionError('unavailable');
     inspectAuthority(execution, authority);
-    return { kind: 'execution', execution, contract, currentTarget, currentAttempt, recovery, settlement, integration };
+    return { kind: 'execution', execution, contract, currentTarget, currentAttempt, recovery, settlement, integration, ...(settlementFailure !== undefined && !settlements.has(key) ? { settlementFailure } : {}) };
   }
   function track<T>(run: () => Promise<T>): Promise<T> {
     assertOpen(); const promise = Promise.resolve().then(run); pending.add(promise);
@@ -384,7 +410,17 @@ export function createNativeWorkExecutionHost(deps: {
       }));
     });
     const owned = { authority: identity, controller, promise }; settlements.set(id, owned); settlementFailures.delete(id);
-    void promise.then(() => { if (settlements.get(id) === owned) settlements.delete(id); }, () => { if (settlements.get(id) === owned) settlements.delete(id); settlementFailures.add(id); });
+    const mapped = active.get(key.attemptId);
+    void promise.then(() => {
+      if (settlements.get(id) === owned) settlements.delete(id);
+      // Settled: nothing more runs for this attempt, so the owner (and the authority it holds) is released.
+      if (mapped !== undefined && active.get(key.attemptId) === mapped && !closed) active.delete(key.attemptId);
+    }, (error: unknown) => {
+      if (settlements.get(id) === owned) settlements.delete(id);
+      const code = settlementFailureCode(error);
+      settlementFailures.set(id, code);
+      logger.warn('Native work settlement failed', { attemptId: key.attemptId, reason: code, error: summarizeError(error) });
+    });
     return promise;
   }
   function settleAfterCompletion(result: DurableStartedContract, authority: NativePairedExecutionAuthority): void {
@@ -399,7 +435,9 @@ export function createNativeWorkExecutionHost(deps: {
     const background = Promise.resolve().then(async () => { requireRunner().cancel(contractId, reason); await requireRunner().join(contractId); });
     const results = await Promise.allSettled([foreground, background]);
     const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (failed) throw failed.reason;
+    // A refused cancellation leaves the contract running behind the foreground fence; lift it so it is driven again.
+    // A contract that did end is never driven, so this cannot restart it.
+    if (failed) { deps.releaseForeground?.(contractId); throw failed.reason; }
   }
   async function cancelAttempt(workId: string, attemptId: string, suppliedTarget: NativeWorkExecutionTarget | undefined, authority: NativePairedExecutionAuthority, reason: string): Promise<void> {
     if (!reason.trim()) throw new NativeWorkExecutionError('invalid');
@@ -472,6 +510,7 @@ export function createNativeWorkExecutionHost(deps: {
             if (!sameDurableRequest(existing.request, request)) throw new NativeWorkExecutionError('stale');
             inspectAuthority(existing, authority); validated = true; validatedKey = durableKeyIdentity(existing.request.key);
             if (current.record?.receipt) contractIds.add(current.record.receipt.contractId);
+            // Storage publishes an association with its record in one step and refuses any other write of it, so this state is a damaged store, not a reachable one.
             if (current.intent?.state === 'associated' && !current.record) throw new NativeWorkExecutionError('recovery-required');
             return { next: current.record && current.record.state !== 'cancelled' ? { ...current.record, state: 'cancelled' } : null,
               nextIntent: current.intent && current.intent.state !== 'cancelled' ? { ...current.intent, state: 'cancelled' } : null, value: undefined };
@@ -489,6 +528,8 @@ export function createNativeWorkExecutionHost(deps: {
     }
     // Persist first, release locks, then abort and join real evaluation settlement.
     await drain();
+    // Cancelled: no run owns this attempt any more.
+    active.delete(attemptId);
   }
   async function retainReceipt(result: DurableStartedContract): Promise<DurableStartedContract> {
     const original = active.get(result.admission.key.attemptId)?.record;
@@ -580,6 +621,7 @@ export function createNativeWorkExecutionHost(deps: {
       if (retained !== undefined && durablePayloadRevision(stored.request) !== retained) throw new NativeWorkExecutionError('stale');
       if (current.record) return status(current, authority);
       const intent = current.intent!; inspectAuthority(intent, authority);
+      // An association always carries its record (storage writes both atomically), so an associated intent here means a damaged store.
       if (intent.state === 'associated') throw new NativeWorkExecutionError('recovery-required');
       const work = current.ledger.works.find(item => item.id === workId);
       const attempt = current.ledger.attempts.find(item => item.id === attemptId && item.workId === workId);

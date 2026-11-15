@@ -72,7 +72,7 @@ import type {
   RandomSource,
   WatcherClock,
 } from './ports.js';
-import type { InboundMailSourceFactory } from './supervisor.js';
+import { InboundMailboxIdentityChangedError, type InboundMailSourceFactory } from './supervisor.js';
 
 /**
  * The Gmail poll cadence, resolved from config into milliseconds.
@@ -267,11 +267,17 @@ function liveConnectionPort(
   };
 }
 
-/** The old supervisor's sinks/cursors cannot be rebound by a connection setting. */
+/**
+ * What a source is bound to for its whole life: whose mailbox, which folder,
+ * and the account the cursors, the dedup sink and the cluster surface were
+ * keyed on at boot. Host, port and TLS are deliberately NOT here: they only
+ * say how to reach that mailbox, so a corrected host rebuilds the source live,
+ * and a cursor carried to a different server is already caught by its
+ * UIDVALIDITY check.
+ */
 function sourceIdentity(deps: InboundMailSourceFactoryDeps): string {
   const settings = readSurfaceEmailSettings(deps.getConfig);
-  return JSON.stringify([settings.imapHost, settings.imapPort, settings.imapSecure, settings.username,
-    settings.mailbox, deps.getConfig('surfaces.email.inbound.accounts')]);
+  return JSON.stringify([settings.username, settings.mailbox, deps.getConfig('surfaces.email.inbound.accounts')]);
 }
 
 export function createInboundMailSourceFactory(
@@ -281,6 +287,10 @@ export function createInboundMailSourceFactory(
   const identity = sourceIdentity(deps);
   return {
     async create(input): Promise<InboundMailSource | null> {
+      // Both sources are bound to the mailbox the daemon booted with; a Gmail
+      // source that kept polling the old account after the owner pointed the
+      // settings elsewhere would leave them believing the new one is watched.
+      if (sourceIdentity(deps) !== identity) throw new InboundMailboxIdentityChangedError();
       if (input.kind === 'gmail') {
         if (!deps.gmail) return null;
         return deps.gmail({
@@ -308,7 +318,6 @@ export function createInboundMailSourceFactory(
       // a mailbox nobody configured. Answering `null` puts that in status with
       // the step that fixes it, rather than opening a socket to nothing and
       // reporting the resulting DNS failure as a capability verdict.
-      if (sourceIdentity(deps) !== identity) return null;
       const settings = readSurfaceEmailSettings(deps.getConfig);
       if (settings.imapHost === undefined || settings.username === undefined) return null;
       const lifetime = beginImapSourceReading(deps, { assertCurrent: () => {

@@ -59,6 +59,8 @@ export interface CommandRuntimeState extends TerminalCommandRuntimeState {
 export interface CommandUiActions extends TerminalCommandUiActions<import('./model-picker.ts').ModelPickerTarget> {
   /** Open the current composer draft in the user's $EDITOR and load back the edited text. */
   openComposerEditor?: () => void;
+  /** Put refused, unsent input back into an empty composer; text typed since is never overwritten. */
+  restoreDraft?: (text: string) => void;
   nativeConversationIntake?: NativeConversationIntakeActions;
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
   submitInput?: (

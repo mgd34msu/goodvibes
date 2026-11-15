@@ -37,7 +37,7 @@ function deferred() {
 }
 function harness(unregistered = false) {
   let policy = { surface: 'homeassistant', allowlistUserIds: ['owner'], groupPolicies: [], enabled: true };
-  const runs = new Map<string, { id: string; status: string }>([['run-1', { id: 'run-1', status: 'running' }]]);
+  const runs = new Map<string, { id: string; status: string; routeId?: string }>([['run-1', { id: 'run-1', status: 'running', routeId: 'route-a' }]]);
   const effects: string[] = [];
   const agent = { id: 'agent-1', status: 'running' };
   const session = { id: 'session-1', status: 'active', messageCount: 1 };
@@ -46,7 +46,8 @@ function harness(unregistered = false) {
     automationManager: { getRun: (id: string) => runs.get(id), cancelRun: async (id: string) => { effects.push(`cancel:${id}`); return runs.get(id); },
       retryRun: async (id: string) => { effects.push(`retry:${id}`); return runs.get(id); } },
     agentManager: { getStatus: (id: string) => id === 'agent-1' ? agent : undefined },
-    sessionBroker: { getSession: (id: string) => id === 'session-1' ? session : undefined },
+    sessionBroker: { getSession: (id: string) => id === 'session-1' ? session : undefined,
+      listSessions: () => [{ id: 'session-1', routeIds: ['route-a'], activeAgentId: 'agent-1' }], getInputs: () => [] },
   } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
   helper.authorizeSurfaceIngress = async () => ({ allowed: true, reason: 'authorized', policy } as unknown as ChannelPolicyDecision);
   const context = helper.buildSurfaceAdapterContext();
@@ -84,6 +85,20 @@ describe('the real daemon surface control caller', () => {
     expect(requests[0]!.context?.battery).toBe('engine.daemon.surface-control');
     expect(JSON.stringify(requests[0]!.state)).toContain(text);
     expect(() => h.context.performSurfaceControlCommand(command!)).toThrow('no current source reading');
+  });
+  test('a command that names its conversation acts only on what that conversation started', async () => {
+    const h = harness(); h.runs.set('run-2', { id: 'run-2', status: 'running', routeId: 'route-b' });
+    const own = { surface: 'homeassistant', routeId: 'route-a' };
+    for (const [action, id] of [['cancel', 'run-1'], ['status', 'agent-1'], ['cancel', 'run-2']] as const) {
+      route = action; const text = `${action} ${id}`; await h.authorize(text);
+      const command = await h.context.parseSurfaceControlCommand(text);
+      expect(command).toEqual({ action, id });
+      const reply = await h.context.performSurfaceControlCommand(command!, own);
+      if (id === 'run-2') expect(reply).toContain('Not done');
+      else expect(reply).not.toContain('Not done');
+    }
+    // The other conversation's run was never cancelled; the conversation's own were.
+    expect(h.effects).toEqual(['cancel:run-1']);
   });
   test('a default unregistered policy does not expire just because its generated timestamp changes', async () => {
     const h = harness(true); const text = 'Stop run-1'; await h.authorize(text);

@@ -26,16 +26,17 @@
  *     establish they are not card material; unresolved secrets remain masked.
  *
  * Writes go through config.set one key at a time (the daemon's real /config
- * contract); the raw key/value form remains, demoted to an explicit escape hatch
- * for unschema'd keys (RawConfigEditor, in "All settings").
+ * contract). The daemon refuses any key outside its config schema, so keys it
+ * holds beyond the schema are listed read-only and have no editor.
  */
 import { createContext, useCallback, useContext, useMemo, useState, useEffect, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { isDeclaredCardMaterialKey } from '../../../lib/card-material';
 import { readConfigKey, type ConfigKeyResult } from '../../../lib/config-key-judgment';
 import { subscribeClientLifetime } from '../../../lib/client-lifetime';
 import { client as platformClient, type ConfigSetOutcome } from '../../../lib/goodvibes';
-import { formatError, serializeError } from '../../../lib/errors';
+import { isSecretStoreOnlyConfigKey, secretStoreSetCommandFor } from '../../../lib/secret-store-only-config-keys';
+import { formatError, isMethodUnavailableError, serializeError } from '../../../lib/errors';
 import { asRecord } from '../../../lib/object';
 import { useToast } from '../../../lib/toast';
 import { ErrorState } from '../../feedback/ErrorState';
@@ -55,11 +56,60 @@ import {
   readConfigPath,
   type SettingsGroupModel,
 } from '../../../lib/settings-model';
-import { isSecretStoreOnlyConfigKey, secretStoreSetCommandFor } from '../../../lib/secret-store-only-config-keys';
-import { Button } from '../../ui/Button';
-import { Input, Textarea, Field } from '../../ui/Field';
+
+/** readConfigKey refuses more than this many names in one reading. */
+const CONFIG_KEY_READ_LIMIT = 64;
+
+/** Reads any number of names by splitting them into readings the judgment boundary accepts; one unsettled batch leaves the whole answer unsettled. */
+async function readConfigKeyInBatches(
+  names: readonly string[],
+  signal: AbortSignal,
+  battery?: Parameters<typeof readConfigKey>[2]
+): Promise<ConfigKeyResult> {
+  const batches: string[][] = [];
+  for (let at = 0; at < names.length; at += CONFIG_KEY_READ_LIMIT)
+    batches.push(names.slice(at, at + CONFIG_KEY_READ_LIMIT));
+  const results = await Promise.all(batches.map((batch) => readConfigKey(batch, signal, battery)));
+  const ready: Extract<ConfigKeyResult, { status: 'ready' }>[] = [];
+  for (const result of results) {
+    if (result.status !== 'ready') return result;
+    ready.push(result);
+  }
+  const classic = ready.every((result) => result.provenance === 'classic');
+  return {
+    status: 'ready',
+    matches: ready.flatMap((result) => result.matches),
+    ...(classic ? { provenance: 'classic' as const } : {}),
+    isCurrent: () => ready.every((result) => result.isCurrent()),
+  };
+}
 
 /** The daemon's real 403 admin-scope refusal on config.get carries no machine `code`, status only. */
+/**
+ * The mail and calendar passwords are read only from the daemon's secret store,
+ * so a config.set would save a copy nothing reads. They go through
+ * credentials.set, which stores the value there and leaves a reference in
+ * config. Only a daemon that does not have the method falls back to naming the
+ * terminal command, and nothing is written.
+ */
+async function setSecretStoreOnlyCredential(key: string, value: unknown): Promise<ConfigSetOutcome> {
+  if (typeof value !== 'string') throw new Error(`${key} takes a text value.`);
+  try {
+    const stored = await platformClient.operator.credentials.set({ key, value });
+    return {
+      success: stored.success,
+      key,
+      persistedTo: `the daemon's secret store (${stored.scope} scope, ${stored.reference})`,
+      daemonOwned: true,
+    };
+  } catch (error) {
+    if (!isMethodUnavailableError(error)) throw error;
+    throw new Error(
+      `This daemon cannot store credentials from the browser, so nothing was saved. Run ${secretStoreSetCommandFor(key)} from a terminal with daemon access.`,
+    );
+  }
+}
+
 export function isAdminRequiredError(error: unknown): boolean {
   const serialized = serializeError(error);
   const transport = asRecord(serialized.transport);
@@ -74,6 +124,10 @@ interface ConfigSettingsValue {
   refused: boolean;
   degraded: boolean;
   commit: (key: string, value: unknown) => Promise<void>;
+  /** Remove one key's explicit value on the daemon so it reads as its default again. */
+  reset: (key: string) => Promise<void>;
+  /** The daemon's current value for one key, for editors whose write replaces a whole object. */
+  readLatest: (key: string) => Promise<unknown>;
   persistedByKey: Readonly<Record<string, ConfigSetOutcome>>;
   pendingRestartIds: ReadonlySet<string>;
   markPendingRestart: (featureId: string) => void;
@@ -121,10 +175,10 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   );
   useEffect(() => {
     const names = JSON.parse(nameSignature) as string[];
-    if (!enabled || !config.isSuccess || config.isFetching || !names.length || names.length > 64)
+    if (!enabled || !config.isSuccess || config.isFetching || !names.length)
       return;
     const abort = new AbortController();
-    void Promise.all([readConfigKey(names, abort.signal), readConfigKey(names, abort.signal, "webui.settings.card-material-key")]).then(([result, cardResult]) => {
+    void Promise.all([readConfigKeyInBatches(names, abort.signal), readConfigKeyInBatches(names, abort.signal, "webui.settings.card-material-key")]).then(([result, cardResult]) => {
       if (!abort.signal.aborted)
         setClassification({
           data: config.data,
@@ -174,7 +228,9 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   const commit = useCallback(
     async (key: string, value: unknown): Promise<void> => {
       try {
-        const outcome = await platformClient.operator.config.set(key, value);
+        const outcome = isSecretStoreOnlyConfigKey(key)
+          ? await setSecretStoreOnlyCredential(key, value)
+          : await platformClient.operator.config.set(key, value);
         setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
         await queryClient.invalidateQueries({ queryKey: ['config'] });
         toast({
@@ -190,6 +246,26 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     [queryClient, toast],
   );
 
+  const reset = useCallback(
+    async (key: string): Promise<void> => {
+      try {
+        const outcome = await platformClient.operator.config.reset(key);
+        setPersistedByKey((prev) => ({ ...prev, [key]: outcome }));
+        await queryClient.invalidateQueries({ queryKey: ['config'] });
+        toast({ title: 'Setting reset', description: `${key} is back to its default.`, tone: 'success' });
+      } catch (error) {
+        toast({ title: 'Failed to reset setting', description: formatError(error), tone: 'danger' });
+        throw error;
+      }
+    },
+    [queryClient, toast],
+  );
+
+  const readLatest = useCallback(
+    async (key: string): Promise<unknown> => readConfigPath(await platformClient.operator.config.get(), key).value,
+    [],
+  );
+
   const markPendingRestart = useCallback((featureId: string) => {
     setPendingRestartIds((prev) => new Set(prev).add(featureId));
   }, []);
@@ -201,10 +277,12 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     refused,
     degraded,
     commit,
+    reset,
+    readLatest,
     persistedByKey,
     pendingRestartIds,
     markPendingRestart,
-  }), [config, groups, currency, refused, degraded, commit, persistedByKey, pendingRestartIds, markPendingRestart]);
+  }), [config, groups, currency, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestartIds, markPendingRestart]);
 
   return <ConfigSettingsContext.Provider value={value}>{children}</ConfigSettingsContext.Provider>;
 }
@@ -228,7 +306,7 @@ export function ConfigGroupList({
   /** Shown when there is nothing to render (after the search). */
   emptyText?: string;
 }) {
-  const { config, refused, degraded, commit, persistedByKey, pendingRestartIds, markPendingRestart, currency } = useConfigSettings();
+  const { config, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestartIds, markPendingRestart, currency } = useConfigSettings();
   const shown = useMemo(() => filterSettingsModel([...groups], query), [groups, query]);
   // One level under the section heading when the list sits inside a titled section.
   const GroupHeading = useContext(SettingsHeadingLevel) === 4 ? 'h4' : 'h3';
@@ -282,6 +360,7 @@ export function ConfigGroupList({
               key={unit.feature.id}
               unit={unit}
               onCommit={commit}
+              onReset={reset}
               persistedByKey={persistedByKey}
               pendingRestart={pendingRestartIds.has(unit.feature.id)}
               currency={currency}
@@ -297,6 +376,8 @@ export function ConfigGroupList({
                   key={field.key}
                   field={field}
                   onCommit={commit}
+                  onReset={reset}
+                  readLatest={readLatest}
                   persisted={persistedByKey[field.key]}
                   currency={currency}
                 />
@@ -306,8 +387,8 @@ export function ConfigGroupList({
           {group.rawRows.length > 0 && (
             <div className="settings-raw-rows">
               <p className="settings-raw-note">
-                Held by the daemon but not in the config schema; shown read-only. Edit them with the raw editor
-                at the end of All settings.
+                Held by the daemon but not in the config schema; shown read-only. The daemon only accepts
+                writes to keys in its config schema, so these cannot be changed from here.
               </p>
               <dl className="settings-readable">
                 {group.rawRows.map((row) => (
@@ -336,84 +417,5 @@ export function ConfigGroupList({
         </section>
       ))}
     </div>
-  );
-}
-
-/** Escape hatch for keys the config schema does not define. */
-export function RawConfigEditor() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [rawKey, setRawKey] = useState('');
-  const [rawValue, setRawValue] = useState('');
-  const [rawError, setRawError] = useState('');
-
-  const saveRaw = useMutation({
-    mutationFn: () => {
-      const key = rawKey.trim();
-      if (!key) throw new Error('Config key is required');
-      // secret-store-only-config-keys.ts: these keys' real value is resolved
-      // exclusively from the daemon's secret store; a config.set write here
-      // would leave a plaintext, never-read copy in the daemon's config file
-      // and configure nothing. Refuse and name the real command instead.
-      if (isSecretStoreOnlyConfigKey(key)) {
-        throw new Error(
-          `${key} is only ever read from the daemon's secret store, never from config, writing it here `
-          + `would save a plaintext copy that the mail/calendar connector ignores. Run `
-          + `"${secretStoreSetCommandFor(key)}" from a terminal with daemon access instead.`,
-        );
-      }
-      let parsed: unknown = rawValue;
-      if (rawValue.trim()) {
-        try {
-          parsed = JSON.parse(rawValue);
-        } catch {
-          parsed = rawValue;
-        }
-      }
-      return platformClient.operator.config.set(key, parsed);
-    },
-    onSuccess: async () => {
-      const key = rawKey.trim();
-      setRawKey('');
-      setRawValue('');
-      setRawError('');
-      await queryClient.invalidateQueries({ queryKey: ['config'] });
-      toast({ title: 'Config saved', description: `Key "${key}" updated.`, tone: 'success' });
-    },
-    onError: (error: unknown) => {
-      const message = formatError(error);
-      setRawError(message);
-      if (message === 'Config key is required') return;
-      toast({ title: 'Failed to save config', description: message, tone: 'danger' });
-    },
-  });
-
-  return (
-    <section className="settings-block settings-advanced" aria-labelledby="settings-advanced-title">
-      <h3 id="settings-advanced-title" className="settings-block__title">Advanced: unschema'd keys</h3>
-      <p className="settings-block__description">
-        For keys the config schema does not define. Schema-known keys have typed editors above; prefer those.
-      </p>
-      <form
-        className="settings-advanced__form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          saveRaw.mutate();
-        }}
-      >
-        <Field label="Key">
-          <Input value={rawKey} onChange={(event) => setRawKey(event.target.value)} placeholder="settings.path" />
-        </Field>
-        <Field label="Value">
-          <Textarea value={rawValue} onChange={(event) => setRawValue(event.target.value)} placeholder="JSON or text" rows={3} />
-        </Field>
-        <div className="settings-actions">
-          <Button variant="primary" type="submit" disabled={saveRaw.isPending || !rawKey.trim()}>
-            Save
-          </Button>
-        </div>
-      </form>
-      {rawError && <div className="banner warning" role="alert">{rawError}</div>}
-    </section>
   );
 }

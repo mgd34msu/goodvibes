@@ -180,6 +180,14 @@ export class ControlPlaneGateway {
     }
   }
 
+  /**
+   * Whether the client's connection is open right now. `listClients` also lists
+   * clients that disconnected recently, so a lease probe must ask this instead.
+   */
+  isClientConnected(clientId: string): boolean {
+    return this.isEnabled() && this.clients.get(clientId)?.connected === true;
+  }
+
   listClients(): ControlPlaneClientDescriptor[] {
     if (!this.isEnabled()) return [];
     pruneDisconnectedClientRecords(this.clients);
@@ -264,6 +272,7 @@ export class ControlPlaneGateway {
   publishEvent(event: string, payload: unknown, filter?: {
     readonly clientKind?: LiveControlPlaneClient['kind'] | undefined;
     readonly clientId?: string | undefined;
+    readonly clientIdPrefix?: string | undefined;
     readonly routeId?: string | undefined;
     readonly surfaceId?: string | undefined;
   }): void {
@@ -273,6 +282,7 @@ export class ControlPlaneGateway {
     for (const client of this.liveClients.values()) {
       if (filter?.clientKind && client.kind !== filter.clientKind) continue;
       if (filter?.clientId && client.clientId !== filter.clientId) continue;
+      if (filter?.clientIdPrefix && !client.clientId.startsWith(filter.clientIdPrefix)) continue;
       if (filter?.routeId && client.routeId !== filter.routeId) continue;
       if (filter?.surfaceId && client.surfaceId !== filter.surfaceId) continue;
       if (requiredScope && !clientMaySeeScopedChannel(client, requiredScope)) continue;
@@ -538,10 +548,16 @@ export class ControlPlaneGateway {
     this.touchWebSocketClient(clientId, { domains: [...wsClient.domains] });
   }
 
-  closeWebSocketClient(clientId: string, reason = 'socket-closed'): void {
+  /**
+   * Pass the `send` the socket was opened with when the client id can be
+   * reused: a socket that has since been replaced by a newer one on the same id
+   * then closes without disconnecting its successor.
+   */
+  closeWebSocketClient(clientId: string, reason = 'socket-closed', send?: (event: string, payload: unknown, id?: string) => void): void {
     if (!this.isEnabled()) return;
     const wsClient = this.websocketClients.get(clientId);
     if (!wsClient) return;
+    if (send && this.liveClients.get(clientId)?.send !== send) return;
     if (this.runtimeBus) {
       emitControlPlaneSubscriptionDropped(this.runtimeBus, {
         sessionId: this.clients.get(clientId)?.sessionId ?? 'control-plane',
@@ -652,11 +668,31 @@ export class ControlPlaneGateway {
     // HWM 256 (default 1 drops handshake/replay chunks before the consumer pulls).
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
-        const send = (event: string, payload: unknown, id?: string): void => {
-          // Backpressure guard: drop when the consumer is falling behind (desiredSize<=0).
-          if ((controller.desiredSize ?? 1) <= 0) return;
+        // Events dropped while the consumer was behind. The next frame that
+        // fits is preceded by a `gap` event naming the last id that was
+        // delivered, so the client can reconnect with Last-Event-ID instead of
+        // waiting on a stream that only looks healthy.
+        let dropped = 0;
+        let lastDeliveredId: string | undefined;
+        const write = (event: string, payload: unknown, id?: string): void => {
           controller.enqueue(encoder.encode(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
+        const rawSend = (event: string, payload: unknown, id?: string): void => {
+          // Backpressure guard: drop when the consumer is falling behind (desiredSize<=0).
+          if ((controller.desiredSize ?? 1) <= 0) {
+            if (dropped === 0) logger.warn('Control-plane stream consumer is behind; dropping events', { clientId, event });
+            dropped += 1;
+            return;
+          }
+          if (dropped > 0) {
+            write('gap', { dropped, ...(lastDeliveredId ? { afterId: lastDeliveredId } : {}) });
+            dropped = 0;
+          }
+          write(event, payload, id);
+          if (id) lastDeliveredId = id;
+        };
+        // Live broadcasts and replay both go through the stream's session rule.
+        const send = scoped.wrapSend(rawSend);
         const unsubs = selectedDomains.map((domain) => this.runtimeBus!.onDomain(domain, (envelope) => {
           if (!scoped.mayDeliver(envelope.sessionId)) return;
           const updated: ControlPlaneClientRecord = {
@@ -689,7 +725,7 @@ export class ControlPlaneGateway {
           subscriberId: clientId,
           streamType: transport,
         });
-        const emitHeartbeat = (): void => send('heartbeat', { clientId, ts: Date.now() });
+        const emitHeartbeat = (): void => rawSend('heartbeat', { clientId, ts: Date.now() });
         const heartbeatIntervalMs = options.heartbeatIntervalMs ?? SSE_HEARTBEAT_INTERVAL_MS;
         const heartbeat = setInterval(emitHeartbeat, heartbeatIntervalMs);
         (heartbeat as unknown as { unref?: () => void }).unref?.();
@@ -699,6 +735,10 @@ export class ControlPlaneGateway {
           torn = true;
           clearInterval(heartbeat);
           for (const unsub of unsubs) unsub();
+          // A newer stream may have taken this client id (a reconnect or a second
+          // tab on the same session). Only the stream that still owns the entry
+          // removes it or reports the client as disconnected.
+          if (this.liveClients.get(clientId)?.send !== send) return;
           this.liveClients.delete(clientId);
           const previous = this.clients.get(clientId);
           if (previous) {
@@ -732,20 +772,27 @@ export class ControlPlaneGateway {
             });
           }
         };
-        request.signal.addEventListener('abort', () => {
+        const onAbort = (): void => {
           teardown();
           // cancel may have already closed the controller; closing twice throws.
           try { controller.close(); } catch { /* already closed by cancel */ }
-        }, { once: true });
+        };
+        request.signal.addEventListener('abort', onAbort, { once: true });
+        // An already-aborted request never fires the event, and the reader that
+        // would call cancel never starts: release everything now.
+        if (request.signal.aborted) {
+          onAbort();
+          return;
+        }
         // A resuming client is told what its position turned into BEFORE any
         // replay lands, so "I asked to resume and received nothing" is a stated
         // outcome rather than something it has to infer from silence.
-        send('ready', {
+        rawSend('ready', {
           clientId,
           domains: selectedDomains,
           resume: resolveReplayResume(this.recentEvents, lastEventId),
         });
-        replayRecentTraffic(this.recentEvents, scoped.wrapSend(send), { ...options, clientId, domains: selectedDomains }, sseLiveDomains, lastEventId);
+        replayRecentTraffic(this.recentEvents, send, { ...options, clientId, domains: selectedDomains }, sseLiveDomains, lastEventId, scoped.mayDeliverPayload);
         // First keep-alive immediately on open (not one interval later), so the
         // window before the first interval can't strand a quiet stream.
         emitHeartbeat();

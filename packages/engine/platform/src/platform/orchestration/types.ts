@@ -761,6 +761,8 @@ export type OrchestrationEvent =
   /** An item's phase spawned its agent: dispatched synchronously after spawn, before any await (the contract runner takes a unit's baseline here). */
   | { readonly type: 'item-agent-spawned'; readonly workstreamId: string; readonly itemId: string; readonly agentId: string }
   | { readonly type: 'workstream-persisted'; readonly workstreamId: string }
+  /** The snapshot write for this workstream failed: a restart resumes from an older state until a later write succeeds. */
+  | { readonly type: 'workstream-persistence-failed'; readonly workstreamId: string }
   /**
    * Worktree-isolation lifecycle events (worktree mode only). Each names the
    * item and, where relevant, the on-disk worktree path and branch so an

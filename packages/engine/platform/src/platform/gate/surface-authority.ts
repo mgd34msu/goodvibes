@@ -19,9 +19,9 @@
  *
  *   'command'   , the owner is the only party who can put a message here.
  *                  Messages can request work, agree to it, and confirm it.
- *                  The local terminal, Telegram, and ntfy are declared this
- *                  way because reaching them means holding the owner's
- *                  device or credentials.
+ *                  The local terminal and Telegram are declared this way
+ *                  because reaching them means holding the owner's device or
+ *                  credentials.
  *
  *   'input-only', anyone can put a message here. Content is EVIDENCE ABOUT
  *                  THE WORLD, never a directive. The agent reads it,
@@ -80,13 +80,15 @@ const SURFACE_AUTHORITY_TABLE: Readonly<Record<string, SurfaceCommandAuthority>>
   // Anyone who knows the address can write here. Input only.
   email: 'input-only',
   webhook: 'input-only',
+  // A message carries no sender identity and the default server is public, so
+  // whoever can publish to the subscribed topic would be taken for the owner.
+  ntfy: 'input-only',
 
   // The owner's own session and devices.
   terminal: 'command',
   cli: 'command',
   tui: 'command',
   telegram: 'command',
-  ntfy: 'command',
 };
 
 /**

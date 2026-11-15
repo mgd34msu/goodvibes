@@ -40,6 +40,8 @@ export interface DiscordInboxOwnerOptions {
   readonly assertCurrent: () => void;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  /** Clock for the read-proof reuse window; defaults to `Date.now`. */
+  readonly now?: () => number;
 }
 
 /** A constructor seam for hosts/tests; never decoded from settings or messages. */
@@ -113,6 +115,9 @@ function usableToken(token: string | null): token is string {
 }
 
 /** Explicit real provider owner; nothing polls, reads credentials or registers at construction. */
+/** How long a completed read proof may start another read. */
+const READ_PROOF_REUSE_MS = 5_000;
+
 export async function createDiscordInboxOwner(
   context: Pick<AdapterContext, 'credentials' | 'logger' | 'resolveRouteId'>,
   options: DiscordInboxOwnerOptions,
@@ -329,12 +334,33 @@ export async function createDiscordInboxOwner(
       return identityEpoch;
     } catch { throw new Error('Discord inbox account scope is unavailable'); }
   });
+  // Every read and lease validation proves the account again, which costs the identity call plus one call
+  // per configured channel. Readers that arrive while a proof is already in flight share it, so a
+  // refreshing client cannot multiply those calls into provider throttling. Eligibility proofs never join it.
+  let forcedVerification: Promise<number> | undefined;
+  const now = options.now ?? Date.now;
+  // A proof that finished moments ago also covers the next read that starts, so back-to-back lists cost one
+  // proof each instead of two. A lease's closing validation never reuses it.
+  let proven: { epoch: number; at: number } | undefined;
+  const verifyForced = (fresh = true): Promise<number> => {
+    if (!fresh && proven && now() - proven.at >= 0 && now() - proven.at < READ_PROOF_REUSE_MS
+      && proven.epoch === identityEpoch && verifiedCredential) {
+      const epoch = proven.epoch;
+      return (async () => { current(); assertCredentialCurrent(); return epoch; })();
+    }
+    if (forcedVerification) return forcedVerification;
+    const shared = verifyIdentity(true);
+    forcedVerification = shared;
+    const clear = (): void => { if (forcedVerification === shared) forcedVerification = undefined; };
+    void shared.then(epoch => { proven = { epoch, at: now() }; clear(); }, clear);
+    return shared;
+  };
   return {
     account, scopeId, triageStoreFileName, adapter,
     invalidateCredential: invalidateIdentity,
-    async assertReadCurrent() { await verifyIdentity(true); },
+    async assertReadCurrent() { await verifyForced(false); },
     async acquireReadLease() {
-      const epoch = await verifyIdentity(true);
+      const epoch = await verifyForced(false);
       const observed = identityLifetime;
       const assertCurrent = (): void => {
         current(); assertCredentialCurrent();
@@ -345,7 +371,7 @@ export async function createDiscordInboxOwner(
       assertCurrent();
       return Object.freeze(Object.assign(async () => {
         assertCurrent();
-        const latest = await verifyIdentity(true);
+        const latest = await verifyForced();
         assertCurrent();
         if (latest !== epoch) throw new Error('Discord inbox read identity was revoked');
       }, { assertCurrent }));

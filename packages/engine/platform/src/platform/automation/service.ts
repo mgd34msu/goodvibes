@@ -35,6 +35,15 @@ function sortSources(sources: Iterable<AutomationSourceRecord>): AutomationSourc
   return [...sources].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt);
 }
 
+/**
+ * A standalone read/write facade over the automation stores, for tooling and
+ * tests that work on the persisted records directly. It keeps its own copy of
+ * the records and never schedules or runs anything, so it must not be used
+ * alongside a live AutomationManager over the same files: use the manager's
+ * own job and run methods there, which keep what the manager holds in memory
+ * in step with the files. Removing a job here also removes the runs and routes
+ * that refer to it; the manager's removeJob removes only the job record.
+ */
 export class AutomationService {
   private readonly jobStore: AutomationJobStore;
   private readonly runStore: AutomationRunStore;

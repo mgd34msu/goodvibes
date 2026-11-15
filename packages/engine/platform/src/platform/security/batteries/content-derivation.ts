@@ -38,9 +38,21 @@ export function derivationView(
   const view = { field, text, source: { surface: source.surface, origin: source.origin, text: source.text } };
   assertJudgmentInput(view);
   if (text.length > MAX_DERIVATION_CHARS || source.text.length > MAX_DERIVATION_CHARS) {
-    throw new JudgmentError('invalid-request', 'The complete content derivation input exceeds the judgment budget');
+    const which = text.length > MAX_DERIVATION_CHARS
+      ? `the outgoing ${field} field is ${text.length} characters`
+      : `content read from ${source.surface} is ${source.text.length} characters`;
+    throw new JudgmentError('invalid-request', `The complete content derivation input exceeds the judgment budget: ${which}, over the ${MAX_DERIVATION_CHARS} character limit. A prefix cannot clear the whole action, so shorten the field and send it in parts.`);
   }
   return view;
+}
+
+/** True when any outgoing field or untrusted source is too long for a derivation reading, so a caller can report that up front instead of catching the refusal. */
+export function exceedsDerivationBudget(
+  fields: Readonly<Record<string, string | undefined>>,
+  sources: readonly { readonly text: string }[],
+): boolean {
+  return Object.values(fields).some((text) => text !== undefined && text.length > MAX_DERIVATION_CHARS)
+    || sources.some((source) => source.text.length > MAX_DERIVATION_CHARS);
 }
 
 const FIELD_AND_SOURCE =

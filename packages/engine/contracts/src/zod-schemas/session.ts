@@ -8,6 +8,11 @@ import { z } from 'zod/v4';
 export const ControlStatusResponseSchema = z.object({
   status: z.string(),
   version: z.string(),
+  // The daemon always sends the two versions separately, and `cluster` whenever it has a coordinator.
+  buildVersion: z.string().optional(),
+  platformVersion: z.string().optional(),
+  receipts: z.array(z.object({ id: z.string(), text: z.string(), at: z.number() })).optional(),
+  cluster: z.unknown().optional(),
 }).strict();
 
 export type ControlStatusResponse = z.infer<typeof ControlStatusResponseSchema>;

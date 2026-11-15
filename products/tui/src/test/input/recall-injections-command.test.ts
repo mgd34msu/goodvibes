@@ -63,10 +63,10 @@ function makeContext(
 }
 
 describe('/recall injections', () => {
-  test('no agentId, accessor unwired: honest main-session empty state (not a usage hint, not a fabricated record)', () => {
+  test('no agentId, accessor unwired: honest main-session empty state (not a usage hint, not a fabricated record)', async () => {
     const printed: string[] = [];
     const context = makeContext([makeAgentRecord({ id: 'agent-abc', task: 'do a thing' })], printed);
-    recallCommand.handler(['injections'], context);
+    await recallCommand.handler(['injections'], context);
     const text = printed.join('\n');
     expect(text).toContain('No per-turn injection records for the main session yet');
     expect(text).toContain('disabled');
@@ -76,7 +76,7 @@ describe('/recall injections', () => {
     expect(text).not.toContain('agent-abc');
   });
 
-  test('no agentId, stub orchestrator with records: renders the MAIN session ring, most recent first', () => {
+  test('no agentId, stub orchestrator with records: renders the MAIN session ring, most recent first', async () => {
     const printed: string[] = [];
     const mainSessionInjections: TurnInjectionEntry[] = [
       {
@@ -110,7 +110,7 @@ describe('/recall injections', () => {
       },
     ];
     const context = makeContext([], printed, mainSessionInjections);
-    recallCommand.handler(['injections'], context);
+    await recallCommand.handler(['injections'], context);
     const text = printed.join('\n');
     expect(text).toContain('Per-turn knowledge injections for the main session (2, most recent first)');
     expect(text).toContain('turn 1');
@@ -124,23 +124,23 @@ describe('/recall injections', () => {
     expect(text).not.toContain('for agent');
   });
 
-  test('unknown agentId: prints an honest not-found message', () => {
+  test('unknown agentId: prints an honest not-found message', async () => {
     const printed: string[] = [];
     const context = makeContext([], printed);
-    recallCommand.handler(['injections', 'no-such-agent'], context);
+    await recallCommand.handler(['injections', 'no-such-agent'], context);
     expect(printed.join('\n')).toContain('Agent not found: no-such-agent');
   });
 
-  test('agent with no turnInjections yet: honest empty state, not a fabricated "nothing injected"', () => {
+  test('agent with no turnInjections yet: honest empty state, not a fabricated "nothing injected"', async () => {
     const printed: string[] = [];
     const context = makeContext([makeAgentRecord({ id: 'agent-1', task: 'task' })], printed);
-    recallCommand.handler(['injections', 'agent-1'], context);
+    await recallCommand.handler(['injections', 'agent-1'], context);
     const text = printed.join('\n');
     expect(text).toContain('No per-turn injection records for agent agent-1');
     expect(text).toContain('disabled');
   });
 
-  test('agent with populated turnInjections: renders each turn, most recent first', () => {
+  test('agent with populated turnInjections: renders each turn, most recent first', async () => {
     const printed: string[] = [];
     const record = makeAgentRecord({
       id: 'agent-2',
@@ -178,7 +178,7 @@ describe('/recall injections', () => {
       ],
     });
     const context = makeContext([record], printed);
-    recallCommand.handler(['injections', 'agent-2'], context);
+    await recallCommand.handler(['injections', 'agent-2'], context);
     const text = printed.join('\n');
     expect(text).toContain('agent-2');
     expect(text).toContain('turn 1');

@@ -36,10 +36,12 @@ export class TemplateManager {
     this.projectDir = roots.projectDirectory ?? join(roots.projectRoot, '.goodvibes', 'templates');
   }
 
-  save(name: string, content: string): void {
+  /** Saves the template and returns the name it is stored under: names are folded to lower case and `[a-z0-9_-]`, so "My Plan" and "my-plan" are one template. */
+  save(name: string, content: string): string {
     const safeName = sanitizeName(name);
     mkdirSync(this.projectDir, { recursive: true });
     writeFileSync(join(this.projectDir, `${safeName}.md`), content, 'utf-8');
+    return safeName;
   }
 
   load(name: string): string | null {
@@ -118,7 +120,8 @@ export class TemplateManager {
 
     result = result.replace(/\{\{([^}]+)\}\}/g, (_match, key: string) => {
       const trimmedKey = key.trim();
-      if (trimmedKey in args) {
+      // Own keys only: `in` also finds inherited names such as `toString` and `constructor`.
+      if (Object.hasOwn(args, trimmedKey)) {
         return args[trimmedKey]!;
       }
       return `{{${trimmedKey}}}`;

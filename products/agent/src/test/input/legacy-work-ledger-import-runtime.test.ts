@@ -33,7 +33,7 @@ test('actual Agent model harness reads without confirmation claims; forged flags
   await expect(runCommand(deps, forgedInput)).rejects.toMatchObject({ problem: 'held' });
   expect(calls).toEqual(['prepare']);
   const forged = await runRecordedImportProof(deps, forgedInput, '/synthetic/legacy-import');
-  expect(forged.output).toContain('payload flags cannot authorize'); expect(calls).toEqual(['prepare']);
+  expect(forged.success).toBe(false); expect(forged.error).toContain('payload flags cannot authorize'); expect(calls).toEqual(['prepare']);
 });
 
 import { createLegacyImportHostFixture, IMPORT_FIXTURE_TOKEN, IMPORT_ROUTES } from '../helpers/legacy-import-host-fixture.ts';

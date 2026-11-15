@@ -104,7 +104,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
   methodDescriptor({
     id: 'push.subscriptions.list',
     title: 'List Web Push Subscriptions',
-    description: 'List the authenticated operator\'s registered push devices as redacted subscription views (id, endpoint origin + hash, timestamps, last delivery outcome). The capability URL and key material are never included.',
+    description: 'List the authenticated operator\'s registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId). The capability URL and key material are never included.',
     category: 'push',
     scopes: ['read:push'],
     transport: ['ws'],

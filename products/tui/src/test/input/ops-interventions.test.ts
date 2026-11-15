@@ -9,36 +9,56 @@
  * (controlPlane.gateway, enabled in a stock configuration).
  *
  * These tests treat the whole path as previously unproven:
- *   - the gate derives honestly from controlPlane.gateway (on by default,
- *     off when the key is off);
+ *   - the gate id bootstrap.ts uses (the platform's CONTROL_PLANE_FEATURE_FLAG)
+ *     is a registered flag that derives honestly from controlPlane.gateway
+ *     (on by default, off when the key is off);
  *   - the /ops command family performs real interventions through
  *     createRuntimeOpsApi + OpsControlPlane against a REAL task manager and
  *     runtime store (no mocks in the intervention path);
  *   - illegal actions and missing targets surface honest [Ops] errors;
- *   - bootstrap.ts gates on the registered capability id (drift gate so the
- *     permanently-false id can never return).
+ *   - an id no registry knows is permanently false, which is how this surface
+ *     shipped dead; the registered-id test fails for such an id.
  */
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   OpsControlPlane,
   RuntimeEventBus,
   createRuntimeOpsApi,
   createTaskManager,
 } from '@/runtime/index.ts';
+import type { OpsAgentCanceller } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { registerOperatorRuntimeCommands } from '../../input/commands/operator-runtime.ts';
 import { withPublicErrorText } from '../helpers/user-error-reading.ts';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { CONTROL_PLANE_FEATURE_FLAG } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { bindFeatureSettingsBridge, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { createFeatureFlagManager } from '@/runtime/index.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const SESSION_ID = 'ops-proof-session';
 
-function makeEnv() {
+/** `null`: no agent manager is wired, as when the control plane is built without one. */
+function makeEnv(options: { readonly withCanceller?: boolean } = {}) {
   const store = createRuntimeStore();
   const bus = new RuntimeEventBus();
   const dispatch = createDomainDispatch(store);
   const taskManager = createTaskManager(store, bus, SESSION_ID);
-  const opsControlPlane = new OpsControlPlane(taskManager, bus, store, SESSION_ID);
+  // Stands in for the agent manager: it runs every agent it is asked about and,
+  // like the real manager, publishes AGENT_CANCELLED, which moves the store record.
+  const cancelCalls: string[] = [];
+  const canceller: OpsAgentCanceller = {
+    cancel: (agentId) => {
+      cancelCalls.push(agentId);
+      dispatch.dispatchAgentEvent({ type: 'AGENT_CANCELLED', agentId, timestamp: Date.now() } as never);
+      return true;
+    },
+  };
+  const opsControlPlane = new OpsControlPlane(taskManager, bus, store, SESSION_ID,
+    options.withCanceller === false ? undefined : canceller);
   const opsApi = createRuntimeOpsApi({
     // Read model: a thin live projection of the real store (reads are not
     // under test here; the intervention path is).
@@ -69,8 +89,49 @@ function makeEnv() {
     await command.handler(args, ctx);
   };
 
-  return { store, bus, dispatch, taskManager, opsControlPlane, opsApi, printed, run };
+  return { store, bus, dispatch, taskManager, opsControlPlane, opsApi, printed, run, cancelCalls };
 }
+
+describe('/ops gate: control-plane gateway capability', () => {
+  function makeGate() {
+    const root = makeProjectTempDir('gv-ops-gate');
+    const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root, homeDir: root });
+    const featureFlags = createFeatureFlagManager();
+    featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
+    const unbind = bindFeatureSettingsBridge(configManager, featureFlags);
+    return { configManager, featureFlags, dispose: () => { unbind(); configManager.stopWatchingConfigFiles(); } };
+  }
+
+  test('the gate id is a registered flag, never the unregistered id that shipped dead', () => {
+    const gate = makeGate();
+    try {
+      // getState throws for an id no registry knows; isEnabled would silently say false.
+      expect(() => gate.featureFlags.getState(CONTROL_PLANE_FEATURE_FLAG)).not.toThrow();
+      expect(() => gate.featureFlags.getState('operator-control-plane')).toThrow();
+    } finally {
+      gate.dispose();
+    }
+  });
+
+  test('bootstrap gates OpsControlPlane on the registered flag, not a literal id', () => {
+    const source = readFileSync(new URL('../../runtime/bootstrap.ts', import.meta.url), 'utf8');
+    expect(source).toContain('featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)\n    ? new OpsControlPlane(');
+    expect(source).not.toContain("'operator-control-plane'");
+  });
+
+  test('the gate is on in a stock configuration and follows controlPlane.gateway', () => {
+    const gate = makeGate();
+    try {
+      expect(gate.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)).toBe(true);
+      gate.configManager.setDynamic('controlPlane.gateway', false);
+      expect(gate.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)).toBe(false);
+      gate.configManager.setDynamic('controlPlane.gateway', true);
+      expect(gate.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)).toBe(true);
+    } finally {
+      gate.dispose();
+    }
+  });
+});
 
 describe('/ops task interventions: real task manager, real control plane', () => {
   test('pause blocks a running task, resume returns it to running', async () => {
@@ -156,8 +217,24 @@ describe('/ops agent interventions', () => {
     expect(env.store.getState().agents.agents.get('agent-live-1')?.status).toBe('spawning');
 
     await env.run('ops agent cancel agent-live-1 no longer needed');
+    expect(env.cancelCalls).toEqual(['agent-live-1']);
     expect(env.store.getState().agents.agents.get('agent-live-1')?.status).toBe('cancelled');
     expect(env.printed.some((line) => line.includes('Agent agent-live-1: cancel dispatched.'))).toBe(true);
+  });
+
+  test('cancel without an agent manager refuses and leaves the agent running', async () => {
+    const env = makeEnv({ withCanceller: false });
+    env.dispatch.dispatchAgentEvent({
+      type: 'AGENT_SPAWNING',
+      agentId: 'agent-live-2',
+      task: 'demo work',
+      timestamp: Date.now(),
+    } as never);
+
+    await env.run('ops agent cancel agent-live-2');
+    expect(env.store.getState().agents.agents.get('agent-live-2')?.status).toBe('spawning');
+    expect(env.printed.some((line) => line.startsWith('[Ops] Error:') && line.includes('no agent manager is connected'))).toBe(true);
+    expect(env.printed.join('\n')).not.toContain('dispatched');
   });
 
   test('a missing agent id surfaces an honest [Ops] error', async () => {

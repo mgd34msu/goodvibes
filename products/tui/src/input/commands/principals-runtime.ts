@@ -13,7 +13,7 @@
  * with `known: false`, the registry never guesses, and this command never
  * papers over that with a name that looks real.
  */
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
@@ -26,15 +26,31 @@ function isPrincipalKind(value: string | undefined): value is PrincipalKind {
   return PRINCIPAL_KINDS.includes(value as PrincipalKind);
 }
 
-/** Parse `channel:value` tokens (e.g. `slack:U123`) into identity pairs. Skips malformed tokens. */
-function parseIdentities(tokens: readonly string[]): Array<{ channel: string; value: string }> {
+/** Parse `channel:value` tokens (e.g. `slack:U123`) into identity pairs; malformed tokens are returned in `rejected`. */
+function parseIdentities(tokens: readonly string[]): {
+  identities: Array<{ channel: string; value: string }>;
+  rejected: string[];
+} {
   const identities: Array<{ channel: string; value: string }> = [];
+  const rejected: string[] = [];
   for (const token of tokens) {
     const idx = token.indexOf(':');
-    if (idx <= 0 || idx === token.length - 1) continue;
+    if (idx <= 0 || idx === token.length - 1) {
+      rejected.push(token);
+      continue;
+    }
     identities.push({ channel: token.slice(0, idx), value: token.slice(idx + 1) });
   }
-  return identities;
+  return { identities, rejected };
+}
+
+function refuseMalformedIdentities(ctx: CommandContext, verb: string, rejected: readonly string[]): boolean {
+  if (rejected.length === 0) return false;
+  ctx.print(
+    `[principals ${verb}] refused: not a channel:value identity: ${rejected.join(', ')}. `
+    + 'Nothing was changed. Write identities as slack:U123 (comma separated for --identities).',
+  );
+  return true;
 }
 
 /** Extract `--flag value` pairs from an args array, returning the remaining positional tokens. */
@@ -73,7 +89,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
   registry.register({
     name: 'principals',
     description: 'Identity mappings: named principals and their channel identities',
-    usage: '[list|get <id>|create <name> <kind> [channel:value...]|update <id> [--name x] [--kind x] [--identities c:v,c:v]|delete <id>|resolve <channel> <value>]',
+    usage: '[list|get <id>|create <name> <kind> [channel:value...]|update <id> [--name x] [--kind x] [--identities c:v,c:v|none]|delete <id>|resolve <channel> <value>]',
     argsHint: '[list|get|create|update|delete|resolve]',
     async handler(args, ctx) {
       const sub = args[0] ?? 'list';
@@ -84,7 +100,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           + '  /principals list                                          — list every principal\n'
           + '  /principals get <id>                                      — show one principal\n'
           + '  /principals create <name> <user|bot|service|token> [channel:value...]\n'
-          + '  /principals update <id> [--name x] [--kind x] [--identities c:v,c:v]\n'
+          + '  /principals update <id> [--name x] [--kind x] [--identities c:v,c:v|none]\n'
           + '  /principals delete <id>                                   — permanently remove a principal\n'
           + '  /principals resolve <channel> <value>                     — resolve a sender identity to its principal, or "unknown principal"'
         );
@@ -103,7 +119,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         return;
       }
       if (sub === 'update' && !args[1]) {
-        ctx.print('Usage: /principals update <id> [--name x] [--kind user|bot|service|token] [--identities c:v,c:v]');
+        ctx.print('Usage: /principals update <id> [--name x] [--kind user|bot|service|token] [--identities c:v,c:v|none]');
         return;
       }
       if (sub === 'delete' && !args[1]) {
@@ -113,6 +129,31 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       if (sub === 'resolve' && (!args[1] || !args[2])) {
         ctx.print('Usage: /principals resolve <channel> <value>');
         return;
+      }
+
+      // Identities are validated before the daemon is contacted: a typo must never
+      // reach the store, and the refusal does not depend on the daemon being up.
+      let createIdentities: Array<{ channel: string; value: string }> = [];
+      let identitiesUpdate: Array<{ channel: string; value: string }> | undefined;
+      if (sub === 'create') {
+        const parsed = parseIdentities(args.slice(3));
+        if (refuseMalformedIdentities(ctx, 'create', parsed.rejected)) return;
+        createIdentities = parsed.identities;
+      }
+      if (sub === 'update') {
+        const { flags } = extractFlags(args.slice(2), ['name', 'kind', 'identities']);
+        const identitiesRaw = flags.get('identities');
+        // Clearing every identity mapping must be asked for: an empty value or the word "none".
+        if (identitiesRaw !== undefined) {
+          const clear = identitiesRaw.trim() === '' || identitiesRaw.trim().toLowerCase() === 'none';
+          const parsed = clear ? { identities: [], rejected: [] } : parseIdentities(identitiesRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0));
+          if (refuseMalformedIdentities(ctx, 'update', parsed.rejected)) return;
+          if (!clear && parsed.identities.length === 0) {
+            ctx.print('[principals update] refused: --identities named no channel:value pair. Use --identities none to clear every identity mapping.');
+            return;
+          }
+          identitiesUpdate = parsed.identities;
+        }
       }
 
       const rpc = getOperatorRpc(ctx);
@@ -149,7 +190,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       if (sub === 'create') {
         const name = args[1]!;
         const kind = args[2] as PrincipalKind;
-        const identities = parseIdentities(args.slice(3));
+        const identities = createIdentities;
         try {
           const { principal } = await rpc.platformClient.operator.invoke('principals.create', { name, kind, identities });
           ctx.print(`[principals create] created ${principal.id}\n${renderPrincipal(principal)}`);
@@ -167,13 +208,12 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           ctx.print(`Invalid --kind "${kind}". Valid values: ${PRINCIPAL_KINDS.join(', ')}`);
           return;
         }
-        const identitiesRaw = flags.get('identities');
         try {
           const { principal } = await rpc.platformClient.operator.invoke('principals.update', {
             principalId: id,
             ...(flags.has('name') ? { name: flags.get('name')! } : {}),
             ...(kind !== undefined ? { kind } : {}),
-            ...(identitiesRaw !== undefined ? { identities: parseIdentities(identitiesRaw.split(',')) } : {}),
+            ...(identitiesUpdate !== undefined ? { identities: identitiesUpdate } : {}),
           });
           ctx.print(`[principals update] updated ${principal.id}\n${renderPrincipal(principal)}`);
         } catch (error) {

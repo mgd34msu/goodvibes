@@ -1,99 +1,18 @@
-import { packageBinIssues, packageBinTargets } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import type { PackageBinVerification, PackageInspectionReport } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import { readPackageManifest, inspectPackageBin, inspectTarballContents } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
-import { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
+import { readPackageManifest } from '@goodvibes-jev/engine/terminal-shell/package-inspection';
 export { parseNpmPackJson, type NpmPackDryRunResult } from '@goodvibes-jev/engine/terminal-shell/npm-pack-report';
 /**
- * Retained standalone package verification: what a published @goodvibes-jev/agent tarball must
- * hold, what it must never hold, and the package.json shape npm and `bun add -g`
- * rely on. publish:check and package:install-check run it per push; the
- * package-facing text rule and the version-stamp agreement run at the version
- * bump (scripts/release-prepare.ts) and in the release cut (scripts/release.ts).
+ * The release-time text rules `scripts/release-prepare.ts` runs when it rewrites
+ * the version stamps: the package-facing README, CHANGELOG and docs pages carry
+ * no retired route or foreign package name, and every stamp agrees with
+ * package.json. This workspace package is private; nothing here publishes it.
  *
  * It deliberately does not read scripts, workflows or product source as text:
  * the 2026-09 testing overhaul removed those policies (they pinned wording, not
  * behavior). See docs/testing-and-validation.md.
  */
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join, normalize } from 'node:path';
-import { assertStandaloneReleaseAllowed } from '../../scripts/standalone-release-policy.ts';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-export interface PackageCliBinVerification extends PackageBinVerification<'goodvibes-agent'> {
-  readonly hasSourceEntrypoint: boolean;
-}
-
-export interface PackageCliVerificationReport extends PackageInspectionReport<PackageCliBinVerification> {}
-
-const REQUIRED_BIN_COMMANDS = ['goodvibes-agent'] as const;
-/**
- * The release artifacts under release/ ship because the agent_harness tool's
- * release-evidence route reads them from the installed package
- * (src/tools/agent-harness-release-evidence.ts). They are regenerated at the
- * version bump, not checked for age.
- */
-const BASE_REQUIRED_TARBALL_PATHS = [
-  'README.md',
-  'CHANGELOG.md',
-  'LICENSE',
-  'package.json',
-  'src/main.ts',
-  'dist/package/main.js',
-  'bin/goodvibes-agent.ts',
-  'tsconfig.json',
-  'release/release-notes.md',
-  'release/performance-snapshot.json',
-  'release/release-readiness.json',
-  'release/live-verification/live-verification.json',
-  'release/live-verification/live-verification.md',
-] as const;
-const REQUIRED_PACKAGE_FILE_ENTRIES = [
-  'bin',
-  'dist/package',
-  'src',
-  'LICENSE',
-  'tsconfig.json',
-  'README.md',
-  'CHANGELOG.md',
-  'docs/*.md',
-  'release/release-notes.md',
-  'release/performance-snapshot.json',
-  'release/release-readiness.json',
-  'release/live-verification/live-verification.json',
-  'release/live-verification/live-verification.md',
-] as const;
-const REQUIRED_PACKAGE_FILE_EXCLUSIONS = [
-  '!src/test',
-  '!src/**/*.test.ts',
-  '!src/**/__tests__',
-  '!src/cli/package-verification.ts',
-  '!src/verification',
-] as const;
-const FORBIDDEN_TARBALL_PREFIXES = [
-  '.github/',
-  'src/test/',
-  'src/.test/',
-  'src/verification/',
-  'src/daemon/',
-  '.goodvibes/',
-  'vendor/',
-] as const;
-const FORBIDDEN_TARBALL_DOCS = [
-  ['docs/cloud', 'flare-batch.md'].join(''),
-  ['docs/home', 'assistant-surface.md'].join(''),
-  'docs/wrfc/',
-  'docs/competitive-parity-plan.md',
-] as const;
-const FORBIDDEN_TARBALL_FILES = new Set([
-  'src/cli/package-verification.ts',
-  'src/input/commands/quit-shared.ts',
-  'src/cli/service-command.ts',
-  'src/cli/surface-command.ts',
-  'src/tools/wrfc-agent-guard.ts',
-  'src/renderer/agent-detail-modal.ts',
-  'src/renderer/git-status.ts',
-  'src/renderer/process-summary.ts',
-]);
 const BASE_PACKAGE_FACING_TEXT_PATHS = ['README.md', 'CHANGELOG.md'] as const;
 const PACKAGE_FACING_FORBIDDEN_TEXT = [
   ['/api/', 'knowledge'].join(''),
@@ -142,7 +61,6 @@ const PACKAGE_FACING_FORBIDDEN_TEXT = [
   'ReviewerReport',
   '"wrfcId"',
 ] as const;
-const EXACT_SEMVER_PATTERN = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 /**
  * Legacy registry package names remain restricted to Agent. Public monorepo
  * engine package/export names are valid references and are not legacy packages.
@@ -151,6 +69,26 @@ const ALLOWED_PACKAGE_FACING_PACKAGE_NAMES = new Set(['@goodvibes-jev/agent']);
 const NON_BUN_INSTALL_COMMAND_PATTERN =
   /(?:^|[\s`])(?:npm\s+(?:install|i|exec)|npx|pnpm\s+(?:add|dlx|exec)|yarn\s+(?:add|global\s+add|dlx|exec))\b.*(?:@goodvibes-jev\/agent|goodvibes-agent)/i;
 const RELEASE_NOTES_STAMP_PATTERN = /^GoodVibes Agent ([0-9]+\.[0-9]+\.[0-9]+)\s+(?:-|\u2014)\s+([0-9]{4}-[0-9]{2}-[0-9]{2})$/;
+
+const readPackageJson = readPackageManifest;
+
+function readStringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Every `docs/*.md` page: the package `files` list ships that whole glob, so the
+ * package-facing text rules cover the same set instead of a
+ * hand-kept subset that lets a shipped page go unscanned.
+ */
+export function packageDocPaths(root: string): readonly string[] {
+  const docsPath = join(root, 'docs');
+  if (!existsSync(docsPath)) return [];
+  return readdirSync(docsPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => `docs/${entry.name}`)
+    .sort();
+}
 
 /**
  * Release-notes problems that are a property of the TEXT, so they can be tested
@@ -169,178 +107,6 @@ const RELEASE_NOTES_STAMP_PATTERN = /^GoodVibes Agent ([0-9]+\.[0-9]+\.[0-9]+)\s
  * numbers happened to coincide, so a substring rule would have been green
  * against exactly the file this is meant to reject.
  */
-function matchesForbiddenPrefix(path: string, prefix: string): boolean {
-  const directory = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
-  return path === directory || path.startsWith(prefix);
-}
-
-export function isForbiddenPackageTarballPath(path: string): boolean {
-  if (FORBIDDEN_TARBALL_PREFIXES.some((prefix) => matchesForbiddenPrefix(path, prefix))) return true;
-  if (path.endsWith('.test.ts')) return true;
-  if (path.includes('/__tests__/') || path.endsWith('/__tests__')) return true;
-  if (FORBIDDEN_TARBALL_FILES.has(path)) return true;
-  return FORBIDDEN_TARBALL_DOCS.some((docPath) => {
-    if (docPath.endsWith('/')) return matchesForbiddenPrefix(path, docPath);
-    return path === docPath || path.startsWith(docPath);
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-const readPackageJson = readPackageManifest;
-
-function readStringValue(value: unknown): string {
-  return typeof value === 'string' ? value : '';
-}
-
-function readStringRecord(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {};
-  const result: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === 'string') result[key] = entry;
-  }
-  return result;
-}
-
-function readStringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
-}
-
-export function isExactSemver(value: string): boolean {
-  return EXACT_SEMVER_PATTERN.test(value);
-}
-
-const ALLOWED_PACKAGE_DOC_FILENAMES = [
-  'README.md',
-  'channels-remote-and-api.md',
-  'connected-host.md',
-  'getting-started.md',
-  // The Google pages are user-facing package docs: the runbook is the written
-  // fallback for the /google setup automation (generated from the platform's setup
-  // plan) and the scope strategy explains exactly what that integration
-  // requests. They ship via the package `files` glob either way; listing them
-  // here brings them under the same required-path, docs-index, and
-  // package-facing text policy as every other shipped docs page instead of
-  // leaving them packaged but un-policed.
-  'google-scope-strategy.md',
-  'google-setup-runbook.md',
-  'knowledge-artifacts-and-multimodal.md',
-  'providers-and-routing.md',
-  'release-and-publishing.md',
-  'tools-and-commands.md',
-  'voice-and-live-tts.md',
-] as const;
-
-export function packageDocPaths(root: string): readonly string[] {
-  const docsPath = join(root, 'docs');
-  if (!existsSync(docsPath)) return [];
-  return ALLOWED_PACKAGE_DOC_FILENAMES.map((entry) => `docs/${entry}`)
-    .filter((docPath) => existsSync(join(root, docPath)))
-    .sort();
-}
-
-export function requiredTarballPaths(root: string): readonly string[] {
-  return [...BASE_REQUIRED_TARBALL_PATHS, ...packageDocPaths(root)];
-}
-
-function normalizedPackageFileEntry(entry: string): string {
-  return normalize(entry)
-    .replace(/\\/g, '/')
-    .replace(/^\.\/+/, '')
-    .replace(/\/+$/, '');
-}
-
-function packageManifestPositiveEntryCoversPath(entry: string, path: string): boolean {
-  if (entry.startsWith('!')) return false;
-  const normalizedEntry = normalizedPackageFileEntry(entry);
-  if (normalizedEntry.length === 0) return false;
-  if (normalizedEntry.endsWith('/*.md')) {
-    const directory = normalizedEntry.slice(0, -'/*.md'.length);
-    const relativePath = path.startsWith(`${directory}/`) ? path.slice(directory.length + 1) : '';
-    return relativePath.length > 0 && !relativePath.includes('/') && relativePath.endsWith('.md');
-  }
-  return path === normalizedEntry || path.startsWith(`${normalizedEntry}/`);
-}
-
-function existingForbiddenPackagePathsCoveredByManifest(root: string, files: readonly string[]): readonly string[] {
-  const forbiddenCandidates = [...FORBIDDEN_TARBALL_PREFIXES, ...FORBIDDEN_TARBALL_DOCS, ...FORBIDDEN_TARBALL_FILES].map(
-    normalizedPackageFileEntry,
-  );
-  return [...new Set(forbiddenCandidates)]
-    .filter((path) => existsSync(join(root, path)))
-    .filter((path) => files.some((entry) => packageManifestPositiveEntryCoversPath(entry, path)))
-    .sort();
-}
-
-function verifyPackageFilesManifest(root: string, files: readonly string[]): readonly string[] {
-  const issues: string[] = [];
-  for (const requiredFile of REQUIRED_PACKAGE_FILE_ENTRIES) {
-    if (!files.includes(requiredFile)) {
-      issues.push(`package.json files must include ${requiredFile}.`);
-    }
-  }
-  for (const excludedFile of REQUIRED_PACKAGE_FILE_EXCLUSIONS) {
-    if (!files.includes(excludedFile)) {
-      issues.push(`package.json files must exclude ${excludedFile}.`);
-    }
-  }
-  for (const entry of files) {
-    if (entry.startsWith('!')) continue;
-    const normalizedEntry = normalizedPackageFileEntry(entry);
-    if (isForbiddenPackageTarballPath(normalizedEntry)) {
-      issues.push(`package.json files must not include forbidden Agent package path: ${entry}.`);
-    }
-  }
-  for (const path of existingForbiddenPackagePathsCoveredByManifest(root, files)) {
-    const exclusion = `!${path}`;
-    if (!files.includes(exclusion)) {
-      issues.push(`package.json files must exclude existing forbidden Agent package path covered by broad includes: ${exclusion}.`);
-    }
-  }
-  return issues;
-}
-
-function verifyBin(root: string, command: (typeof REQUIRED_BIN_COMMANDS)[number], target: string | undefined): PackageCliBinVerification {
-  const { bin, source } = inspectPackageBin(root, command, target);
-  return { ...bin, hasSourceEntrypoint: source.includes('dist') && source.includes('package') && source.includes('main.js') };
-}
-
-function verifyPackageBinIssues(root: string, pkg: Record<string, unknown>): readonly string[] {
-  const issues: string[] = [];
-  const bin = readStringRecord(pkg.bin);
-  for (const command of REQUIRED_BIN_COMMANDS) {
-    const item = verifyBin(root, command, bin[command]);
-    issues.push(...packageBinIssues(item));
-    if (!item.hasSourceEntrypoint) issues.push(`bin target does not load the packaged Agent runtime: ${item.command}`);
-  }
-  return issues;
-}
-
-/**
- * The package.json fields a publish and a `bun add -g` depend on: the name and
- * visibility npm publishes under, the module entry and bin the install links,
- * the files manifest that decides what the tarball holds, and an exact version.
- */
-export function verifyReleaseMetadata(root: string): readonly string[] {
-  const issues: string[] = [];
-  const pkg = readPackageJson(root);
-  if (pkg.name !== '@goodvibes-jev/agent') issues.push('package.json name must be @goodvibes-jev/agent.');
-  if (pkg.private !== false) issues.push('package.json private must be false for the public Agent package.');
-  if (pkg.type !== 'module') issues.push('package.json type must be module.');
-  if (pkg.main !== 'dist/package/main.js') issues.push('package.json main must be dist/package/main.js.');
-  const publishConfig = isRecord(pkg.publishConfig) ? pkg.publishConfig : {};
-  if (publishConfig.access !== 'public') issues.push('package.json publishConfig.access must be public.');
-  const bin = readStringRecord(pkg.bin);
-  if (bin['goodvibes-agent'] !== 'bin/goodvibes-agent.ts') issues.push('package.json bin.goodvibes-agent must be bin/goodvibes-agent.ts.');
-  issues.push(...verifyPackageBinIssues(root, pkg));
-  issues.push(...verifyPackageFilesManifest(root, readStringArray(pkg.files)));
-  const version = readStringValue(pkg.version);
-  if (!isExactSemver(version)) issues.push(`package.json version must be an exact semver like 1.2.3: ${version || '(missing)'}.`);
-  return issues;
-}
-
 export function releaseNotesTextIssues(content: string, packageVersion: string): readonly string[] {
   const issues: string[] = [];
   const stampLine =
@@ -439,48 +205,4 @@ export function verifyPackageFacingText(root: string): { readonly checkedPaths: 
     }
   }
   return { checkedPaths: paths, failures };
-}
-
-export type PackageInstallCommandRunner = (command: string, root: string) => string;
-
-const runPackageInstallCommand: PackageInstallCommandRunner = (command, root) => {
-  if (command === 'bun run build:package-runtime') {
-    execSync(command, { cwd: root, stdio: 'inherit' });
-    return '';
-  }
-  return execSync(command, {
-    cwd: root,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-};
-
-function registryPackDryRun(root: string, runCommand: PackageInstallCommandRunner): NpmPackDryRunResult {
-  runCommand('bun run build:package-runtime', root);
-  const raw = runCommand('npm pack --json --dry-run', root);
-  return parseNpmPackJson(raw);
-}
-
-export function verifyPackageCliInstall(
-  root: string,
-  runCommand: PackageInstallCommandRunner = runPackageInstallCommand,
-): PackageCliVerificationReport {
-  const pkg = readPackageJson(root);
-  assertStandaloneReleaseAllowed(pkg, 'package install verification');
-  const bin = packageBinTargets(pkg);
-  const bins = REQUIRED_BIN_COMMANDS.map((command) => verifyBin(root, command, bin[command]));
-  const pack = registryPackDryRun(root, runCommand);
-  const requiredPaths = requiredTarballPaths(root);
-  const { tarball, issues: tarballIssues } = inspectTarballContents(pack, requiredPaths, isForbiddenPackageTarballPath, 'registry tarball');
-  const issues: string[] = [];
-  issues.push(...tarballIssues);
-
-  issues.push(...verifyReleaseMetadata(root));
-  return {
-    packageName: String(pkg.name ?? ''),
-    version: String(pkg.version ?? ''),
-    bins,
-    tarball,
-    issues,
-  };
 }

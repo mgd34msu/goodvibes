@@ -52,8 +52,8 @@ export const CLOUDFLARE_BATCH_MODE_OPTIONS: readonly OnboardingWizardRadioOption
   },
   {
     id: 'eligible-by-default',
-    label: 'Eligible requests batch by default',
-    hint: 'Batch-capable daemon work can use the configured batch path unless the caller opts out.',
+    label: 'Eligible requests (not yet enforced)',
+    hint: 'Accepted and reported to clients, but not yet enforced by the daemon: it behaves like explicit.',
   },
 ];
 
@@ -120,14 +120,21 @@ export function getCloudflareSetupSource(controller: OnboardingWizardControllerL
   return 'save-only';
 }
 
+/** A component's starting selection: an integration that is already enabled keeps only Workers and Queues; otherwise the stock defaults. */
+export function defaultCloudflareComponentSelected(integrationEnabled: boolean, component: CloudflareComponent): boolean {
+  return integrationEnabled
+    ? component === 'workers' || component === 'queues'
+    : DEFAULT_CLOUDFLARE_COMPONENT_SELECTION[component];
+}
+
 export function getCloudflareComponentSelection(controller: OnboardingWizardControllerLike): Record<CloudflareComponent, boolean> {
   const selected: Record<CloudflareComponent, boolean> = { ...DEFAULT_CLOUDFLARE_COMPONENT_SELECTION };
   const configured = controller.runtimeSnapshot?.config.cloudflare;
   for (const component of CLOUDFLARE_COMPONENT_IDS) {
-    const fallback = configured?.enabled === true
-      ? component === 'workers' || component === 'queues'
-      : DEFAULT_CLOUDFLARE_COMPONENT_SELECTION[component];
-    selected[component] = controller.getBooleanFieldValue(cloudflareComponentFieldId(component), fallback);
+    selected[component] = controller.getBooleanFieldValue(
+      cloudflareComponentFieldId(component),
+      defaultCloudflareComponentSelected(configured?.enabled === true, component),
+    );
   }
   return selected;
 }

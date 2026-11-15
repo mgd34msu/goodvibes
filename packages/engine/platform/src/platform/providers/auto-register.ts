@@ -3,8 +3,10 @@
  *
  * Automatically registers providers when their API keys are detected in the environment.
  *
- * When a user has an API key set in their environment (e.g. GROQ_API_KEY),
+ * When a user has an API key set in their environment (e.g. COHERE_API_KEY),
  * auto-register that provider using catalog data, zero manual configuration.
+ * Only the environment is read, once at startup: a key stored in the secrets
+ * store does not activate these providers.
  *
  * Multi-endpoint providers (e.g. ZenMux) are handled by registering separate
  * provider instances for each endpoint, routed by the model's native API format.
@@ -65,90 +67,9 @@ export interface AutoRegisterEntry extends CatalogProvider {
  * same model. Earlier entries take precedence in the auto-registration log.
  */
 export const AUTO_REGISTER_CATALOG: AutoRegisterEntry[] = [
-  // -------------------------------------------------------------------------
-  // Free / no-key-required providers
-  // -------------------------------------------------------------------------
-  {
-    id: 'nvidia',
-    name: 'NVIDIA',
-    envVars: ['NVIDIA_API_KEY', 'NIM_API_KEY'],
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    apiFormat: 'openai',
-    defaultModel: 'meta/llama-4-scout-17b-16e-instruct',
-    seedModels: [
-      'meta/llama-4-scout-17b-16e-instruct',
-      'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-      'moonshotai/kimi-k2-instruct',
-    ],
-  },
-
-  // -------------------------------------------------------------------------
-  // OpenAI-compatible paid providers
-  // -------------------------------------------------------------------------
-  {
-    id: 'groq',
-    name: 'Groq',
-    envVars: ['GROQ_API_KEY'],
-    baseUrl: 'https://api.groq.com/openai/v1',
-    apiFormat: 'openai',
-    defaultModel: 'qwen/qwen3-32b',
-    seedModels: [
-      'qwen/qwen3-32b',
-      'moonshotai/kimi-k2-instruct',
-      'llama-3.3-70b-versatile',
-      'llama-3.1-8b-instant',
-    ],
-  },
-  {
-    id: 'cerebras',
-    name: 'Cerebras',
-    envVars: ['CEREBRAS_API_KEY'],
-    baseUrl: 'https://api.cerebras.ai/v1',
-    apiFormat: 'openai',
-    defaultModel: 'qwen-3-235b-a22b-instruct-2507',
-    seedModels: [
-      'qwen-3-235b-a22b-instruct-2507',
-      'llama3.1-8b',
-    ],
-  },
-  {
-    id: 'together',
-    name: 'Together AI',
-    envVars: ['TOGETHER_API_KEY'],
-    baseUrl: 'https://api.together.xyz/v1',
-    apiFormat: 'openai',
-    defaultModel: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
-    seedModels: [
-      'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
-      'Qwen/Qwen3-235B-A22B-fp8-tput',
-      'moonshotai/Kimi-K2-Instruct',
-    ],
-  },
-  {
-    id: 'fireworks',
-    name: 'Fireworks',
-    envVars: ['FIREWORKS_API_KEY'],
-    baseUrl: 'https://api.fireworks.ai/inference/v1',
-    apiFormat: 'openai',
-    defaultModel: 'accounts/fireworks/models/kimi-k2p5-turbo',
-    seedModels: [
-      'accounts/fireworks/models/kimi-k2p5-turbo',
-      'accounts/fireworks/models/llama-v3p1-405b-instruct',
-    ],
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    envVars: ['MISTRAL_API_KEY'],
-    baseUrl: 'https://api.mistral.ai/v1',
-    apiFormat: 'openai',
-    defaultModel: 'mistral-large-latest',
-    seedModels: [
-      'mistral-large-latest',
-      'codestral-latest',
-      'mistral-small-latest',
-    ],
-  },
+  // Only providers the builtin registry does not already register belong here: a
+  // second entry for a builtin id would be skipped today and silently swap
+  // that provider's settings if the call order ever changed.
   {
     id: 'cohere',
     name: 'Cohere',
@@ -171,30 +92,6 @@ export const AUTO_REGISTER_CATALOG: AutoRegisterEntry[] = [
     seedModels: [
       'moonshotai/Kimi-K2-Instruct',
       'meta-llama/Llama-4-Maverick-17B-128E-Instruct',
-    ],
-  },
-  {
-    id: 'huggingface',
-    name: 'HuggingFace',
-    envVars: ['HF_TOKEN', 'HUGGINGFACE_API_KEY', 'HUGGING_FACE_HUB_TOKEN'],
-    baseUrl: 'https://api-inference.huggingface.co/v1',
-    apiFormat: 'openai',
-    defaultModel: 'Qwen/Qwen3-235B-A22B',
-    seedModels: [
-      'Qwen/Qwen3-235B-A22B',
-      'moonshotai/Kimi-K2-Instruct',
-    ],
-  },
-  {
-    id: 'xai',
-    name: 'xAI',
-    envVars: ['XAI_API_KEY'],
-    baseUrl: 'https://api.x.ai/v1',
-    apiFormat: 'openai',
-    defaultModel: 'grok-4',
-    seedModels: [
-      'grok-4',
-      'grok-3-mini',
     ],
   },
   {
@@ -264,22 +161,6 @@ export const AUTO_REGISTER_CATALOG: AutoRegisterEntry[] = [
       'claude-opus-4-6',
       'claude-sonnet-4-6',
       'claude-haiku-4-5',
-    ],
-  },
-
-  // -------------------------------------------------------------------------
-  // Ollama Cloud / self-hosted
-  // -------------------------------------------------------------------------
-  {
-    id: 'ollama-cloud',
-    name: 'Ollama Cloud',
-    envVars: ['OLLAMA_API_KEY', 'OLLAMA_HOST'],
-    baseUrl: 'https://ollama.com/api',
-    apiFormat: 'openai',
-    defaultModel: 'llama3.3',
-    seedModels: [
-      'llama3.3',
-      'qwen3:32b',
     ],
   },
 ];

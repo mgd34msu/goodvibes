@@ -138,6 +138,45 @@ describe('applyHunkRevert / previewHunkRevert (workspace)', () => {
     expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(OLD_CONTENT);
   });
 
+  test('the file is read before the snapshot and the write happens after it', async () => {
+    writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
+    let seenDuringCreate: string | null = null;
+    const workspace: HunkRevertWorkspace = {
+      workspaceRoot: root,
+      create: async () => {
+        seenDuringCreate = readFileSync(join(root, 'f.ts'), 'utf8');
+        return null;
+      },
+    };
+    await applyHunkRevert(workspace, 'f.ts', FORWARD_HUNK);
+    // The snapshot must capture the pre-revert tree, so the write cannot precede it.
+    expect(seenDuringCreate === NEW_CONTENT).toBe(true);
+    expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(OLD_CONTENT);
+  });
+
+  test('an edit saved while the snapshot runs is refused, not overwritten', async () => {
+    writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
+    const edited = `${NEW_CONTENT}// saved during the checkpoint\n`;
+    const workspace: HunkRevertWorkspace = {
+      workspaceRoot: root,
+      create: async () => {
+        writeFileSync(join(root, 'f.ts'), edited, 'utf8');
+        return null;
+      },
+    };
+    await expect(applyHunkRevert(workspace, 'f.ts', FORWARD_HUNK)).rejects.toBeInstanceOf(HunkRevertConflictError);
+    expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(edited);
+  });
+
+  test('a no-op snapshot with no listing succeeds with a null undo point', async () => {
+    writeFileSync(join(root, 'f.ts'), NEW_CONTENT, 'utf8');
+    const receipt = await applyHunkRevert(fakeWorkspace(null), 'f.ts', FORWARD_HUNK);
+    expect(receipt.reverted).toBe(true);
+    expect(receipt.safetyCheckpointId).toBeNull();
+    expect(receipt.undo).toBeNull();
+    expect(readFileSync(join(root, 'f.ts'), 'utf8')).toBe(OLD_CONTENT);
+  });
+
   test('a stale hunk throws a conflict and never writes', async () => {
     writeFileSync(join(root, 'f.ts'), OLD_CONTENT, 'utf8');
     await expect(applyHunkRevert(fakeWorkspace(null), 'f.ts', FORWARD_HUNK)).rejects.toBeInstanceOf(HunkRevertConflictError);

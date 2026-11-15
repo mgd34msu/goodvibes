@@ -62,7 +62,9 @@ export const analyzeSchema: ToolDefinition = {
       submode: {
         type: 'string',
         enum: ['analyze', 'circular', 'upgrade'],
-        description: 'Sub-mode for dependencies analysis. Default: analyze.',
+        description:
+          'Sub-mode for dependencies analysis. analyze: the import graph. circular: import cycles. ' +
+          'upgrade: lists the external packages the scanned files import, with no version check (mode upgrade checks versions). Default: analyze.',
       },
       // mode: security
       securityScope: {
@@ -73,11 +75,11 @@ export const analyzeSchema: ToolDefinition = {
       // mode: diff
       before: {
         type: 'string',
-        description: 'Git ref or file path for before state (mode: diff).',
+        description: "Git ref (branch, tag or commit; must not start with '-') for the before state (modes: diff, breaking, semantic_diff). Not a file path; use files to narrow the diff to paths.",
       },
       after: {
         type: 'string',
-        description: 'Git ref or file path for after state (mode: diff).',
+        description: "Git ref (branch, tag or commit; must not start with '-') for the after state (modes: diff, breaking, semantic_diff). Not a file path.",
       },
       // mode: preview
       find: {
@@ -93,12 +95,6 @@ export const analyzeSchema: ToolDefinition = {
         type: 'array',
         items: { type: 'string' },
         description: 'Package names to check (mode: upgrade). Defaults to all packages in package.json.',
-      },
-      // mode: surface
-      include: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Sections to include in surface output: deps, security, tests, api.',
       },
       output: {
         type: 'object',

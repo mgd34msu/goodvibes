@@ -106,16 +106,18 @@ const MODAL_FIELDS = ['conversationManager', 'selectionModal', 'bookmarkModal', 
   'scroll', 'getScrollTop', 'openModelPickerWithTarget', 'openProviderModelPickerWithTarget', 'onModelPickerCommit'] as const;
 type SourceFields<Fields extends readonly string[]> = Readonly<Record<Fields[number], unknown>>;
 interface CursorOwner { ensureInputCursorVisible(contentWidth?: number): void }
+interface ConcealedOwner { readonly isConcealedInput?: (() => boolean) | undefined }
 
 /** Scalar fields are a per-route snapshot; maps, controllers and callbacks
  * remain the original services. The shared feed pipeline owns write-back. */
-export function capturePromptTextState<Source extends SourceFields<typeof TEXT_FIELDS> & CursorOwner>(source: Source) {
-  return captureFields(source, TEXT_FIELDS, { ensureInputCursorVisible: () => source.ensureInputCursorVisible() });
+export function capturePromptTextState<Source extends SourceFields<typeof TEXT_FIELDS> & CursorOwner & ConcealedOwner>(source: Source) {
+  return captureFields(source, TEXT_FIELDS, { ensureInputCursorVisible: () => source.ensureInputCursorVisible(),
+    isConcealedInput: () => source.isConcealedInput?.() ?? false });
 }
-export function capturePromptKeyState<Source extends SourceFields<typeof KEY_FIELDS> & {
+export function capturePromptKeyState<Source extends SourceFields<typeof KEY_FIELDS> & ConcealedOwner & {
   blockActionsMenu: { open(block: BlockMeta): void };
 }>(source: Source) {
-  return captureFields(source, KEY_FIELDS, { maxInputRows: 8,
+  return captureFields(source, KEY_FIELDS, { maxInputRows: 8, isConcealedInput: () => source.isConcealedInput?.() ?? false,
     blockActionsMenu: { open: (block: BlockMeta) => source.blockActionsMenu.open(block) } });
 }
 export function captureMouseFeedState<Source extends SourceFields<typeof MOUSE_FIELDS>>(source: Source,

@@ -320,18 +320,6 @@ test('an admin-scope refusal offers no config rows to edit', async ({ page }) =>
   await expect(dialog.locator('[data-config-key]')).toHaveCount(0);
 });
 
-test('the Advanced editor writes the parsed value through config.set', async ({ page }) => {
-  const dialog = await openSection(page, 'all', 'General');
-  const advanced = dialog.locator('.settings-advanced');
-  await expect(advanced).toHaveCount(1);
-  await advanced.getByPlaceholder('settings.path').fill('display.theme');
-  await advanced.getByPlaceholder('JSON or text').fill('"dracula"');
-  expect(configWrites()).toHaveLength(0);
-  await advanced.getByRole('button', { name: 'Save', exact: true }).click();
-  // The JSON input is parsed: the string itself is written, not its quoted source.
-  await expect.poll(configWrites).toEqual([{ key: 'display.theme', value: 'dracula' }]);
-});
-
 test.describe('pricing.modelPrices: the structured per-model price editor', () => {
   test('a manual price set via the editor is written, persists across reopen, and makes the priced fleet node editable', async ({ page }) => {
     let dialog = await openSection(page, 'models', 'Models and providers');

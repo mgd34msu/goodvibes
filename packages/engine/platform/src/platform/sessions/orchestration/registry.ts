@@ -35,7 +35,7 @@ import type {
   CancellationResult,
   SessionTaskGraphSnapshot,
 } from './types.js';
-import { makeRefKey } from './types.js';
+import { isLegacyTaskNamespace, makeRefKey } from './types.js';
 import type { TaskLifecycleState } from '../../runtime/store/domains/tasks.js';
 import { summarizeError } from '../../utils/error-display.js';
 import {
@@ -48,6 +48,10 @@ import {
   reapGraphSnapshot,
   type CrossSessionGraphReapSummary,
 } from './registry-housekeeping.js';
+
+/** Debounce before a mutation is written, and the slower beat for retrying a failed write. */
+const FLUSH_DEBOUNCE_MS = 100;
+const FLUSH_RETRY_MS = 5000;
 
 export class CrossSessionGraphUnavailableError extends Error {
   override readonly name = 'CrossSessionGraphUnavailableError';
@@ -183,20 +187,12 @@ export class CrossSessionTaskRegistry {
     reason?: string,
   ): { ok: boolean; error?: string | undefined } {
     this._assertCurrent();
-    this._graph.upsertRef(ref);
-
-    if (dependsOn) {
-      const edgeResult = this._graph.addEdge(
-        { sessionId: ref.sessionId, taskId: ref.taskId },
-        dependsOn,
-        reason,
-      );
-      if (!edgeResult.ok) {
-        this._flush();
-        return { ok: false, error: edgeResult.error };
-      }
-    }
-
+    // A ref that is already registered keeps its lifecycle status: linking is not a status
+    // report, and a caller that only names the task must not reset a running or blocked one.
+    const existing = this._graph.getRef(ref.sessionId, ref.taskId);
+    const result = this._graph.linkRef(existing ? { ...ref, status: existing.status } : ref, dependsOn, reason);
+    // A refused link changed nothing (the graph restores the ref), so there is nothing to write.
+    if (!result.ok) return { ok: false, error: result.error };
     this._flush();
     return { ok: true };
   }
@@ -260,8 +256,12 @@ export class CrossSessionTaskRegistry {
   /**
    * Initiate a task handoff from one session to another.
    *
-   * Both sessions must have their task refs registered before calling this.
-   * The originating task ref status is updated to 'blocked' (awaiting handoff).
+   * The task's ref must be registered under the originating session, and the
+   * destination must be a session this host knows (it exists, or already owns
+   * a task ref). The ref moves to 'blocked' while the handoff awaits the
+   * destination's acknowledgement, and returns to the status it had when the
+   * handoff is acknowledged. A handoff that cannot move the task (a finished
+   * task) is refused and recorded nowhere.
    *
    * @param taskRef - The task being handed off.
    * @param fromSessionId - Source session.
@@ -284,6 +284,18 @@ export class CrossSessionTaskRegistry {
           'Register the task with /session link-task first.',
       };
     }
+    if (taskRef.sessionId !== fromSessionId) {
+      return { ok: false, error: `Task ${taskRef.taskId} belongs to session ${taskRef.sessionId}, not ${fromSessionId}; only the owning session can hand it off. Nothing was changed.` };
+    }
+    if (toSessionId === fromSessionId) {
+      return { ok: false, error: 'A task cannot be handed off to its own session. Nothing was changed.' };
+    }
+    if (!this._knowsSession(toSessionId)) {
+      return { ok: false, error: `Destination session ${toSessionId} is not a known session, so nobody could acknowledge the handoff. Check the session id; nothing was changed.` };
+    }
+    if (ref.status !== 'blocked' && !this._graph.propagateStatus(taskRef.sessionId, taskRef.taskId, 'blocked')) {
+      return { ok: false, error: `Task ${taskRef.taskId} is ${ref.status} and cannot be handed off (it cannot move to blocked). Nothing was changed.` };
+    }
 
     const handoffId = crypto.randomUUID();
     const record: TaskHandoffRecord = {
@@ -294,28 +306,41 @@ export class CrossSessionTaskRegistry {
       reason,
       initiatedAt: this._now(),
       acknowledged: false,
+      previousStatus: ref.status,
     };
-
     this._graph.recordHandoff(record);
-
-    // Mark the task as blocked while awaiting handoff acknowledgement
-    this._graph.propagateStatus(taskRef.sessionId, taskRef.taskId, 'blocked');
 
     this._flush();
     return { ok: true, handoffId };
   }
 
   /**
-   * Acknowledge a handoff from the destination session.
+   * Acknowledge a handoff from the destination session. The source task, held
+   * 'blocked' only while the handoff awaited this, goes back to the status it
+   * had before (a task that moved on in the meantime is left as it is).
    *
    * @param handoffId - The handoff to acknowledge.
    * @returns `true` if the handoff was found and acknowledged.
    */
   public acknowledgeHandoff(handoffId: string): boolean {
     this._assertCurrent();
+    const record = this._graph.getHandoffs().find((handoff) => handoff.handoffId === handoffId);
     const ok = this._graph.acknowledgeHandoff(handoffId);
+    if (ok && record && !record.acknowledged) {
+      const held = this._graph.getRef(record.taskRef.sessionId, record.taskRef.taskId);
+      const before = record.previousStatus ?? 'running';
+      if (held?.status === 'blocked' && before !== 'blocked') {
+        this._graph.propagateStatus(record.taskRef.sessionId, record.taskRef.taskId, before);
+      }
+    }
     if (ok) this._flush();
     return ok;
+  }
+
+  /** Whether `sessionId` is one this host can vouch for: alive, legacy, or already owning refs. */
+  private _knowsSession(sessionId: string): boolean {
+    if (!this._sessionExists || isLegacyTaskNamespace(sessionId)) return true;
+    return this._sessionExists(sessionId) || this._graph.getRefsBySession(sessionId).length > 0;
   }
 
   /**
@@ -397,7 +422,11 @@ export class CrossSessionTaskRegistry {
       clearTimeout(this._flushTimer);
       this._flushTimer = null;
     }
-    this._flushSync();
+    try { this._flushSync(); }
+    catch (error) {
+      if (!this._failure) this._armFlush(FLUSH_RETRY_MS);
+      throw error;
+    }
   }
 
   /**
@@ -409,6 +438,7 @@ export class CrossSessionTaskRegistry {
   public dispose(): void {
     try { this.flush(); }
     finally {
+      if (this._flushTimer !== null) { clearTimeout(this._flushTimer); this._flushTimer = null; }
       if (this._sweepTimer !== null) { clearInterval(this._sweepTimer); this._sweepTimer = null; }
       if (this._exitHandler) { process.removeListener('exit', this._exitHandler); this._exitHandler = null; }
     }
@@ -488,8 +518,9 @@ export class CrossSessionTaskRegistry {
     const hydrationSummary: CrossSessionGraphReapSummary = {
       ...summary,
       refsMalformed: verdict.refsMalformed,
+      edgesMalformed: verdict.edgesMalformed,
       handoffsMalformed: verdict.handoffsMalformed,
-      total: summary.total + verdict.refsMalformed + verdict.handoffsMalformed,
+      total: summary.total + verdict.refsMalformed + verdict.edgesMalformed + verdict.handoffsMalformed,
     };
     this._lastReap = hydrationSummary;
 
@@ -518,6 +549,7 @@ export class CrossSessionTaskRegistry {
       refsOverCap: summary.refsOverCap,
       refsMalformed: summary.refsMalformed,
       edgesDangling: summary.edgesDangling,
+      edgesMalformed: summary.edgesMalformed,
       handoffsOrphaned: summary.handoffsOrphaned,
       handoffsRetired: summary.handoffsRetired,
       handoffsOverCap: summary.handoffsOverCap,
@@ -576,13 +608,28 @@ export class CrossSessionTaskRegistry {
    * publish stale bytes after flush/dispose has already published newer state. */
   private _scheduledFlush(): void {
     this._assertCurrent();
+    this._armFlush(FLUSH_DEBOUNCE_MS);
+  }
+
+  /** A failed write is retried on a slower beat: the in-memory graph is the only copy of
+   * the unpublished work, so it is never abandoned, and a full disk is not hammered. */
+  private _armFlush(delayMs: number): void {
     if (this._flushTimer !== null) return;
-    this._flushTimer = setTimeout(() => { this._flushTimer = null; try { this._flushSync(); } catch (error) { logger.warn('CrossSessionTaskRegistry: scheduled flush refused; original graph preserved', { error: summarizeError(error) }); } }, 100);
+    this._flushTimer = setTimeout(() => {
+      this._flushTimer = null;
+      try { this._flushSync(); }
+      catch (error) {
+        logger.warn('CrossSessionTaskRegistry: scheduled flush failed', { error: summarizeError(error), retryInMs: this._failure ? undefined : FLUSH_RETRY_MS });
+        if (!this._failure) this._armFlush(FLUSH_RETRY_MS);
+      }
+    }, delayMs);
     this._flushTimer.unref?.();
   }
 
-  /** Complete the native atomic publication within this call. A failed write
-   * preserves in-memory work, but cannot overwrite another source incarnation. */
+  /** Complete the native atomic publication within this call. Another source
+   * incarnation (a foreign writer or a newer version) retires this owner for good.
+   * A plain write failure (full disk, I/O error) does not: the in-memory work is
+   * kept, the error is thrown to the caller, and the next flush publishes it. */
   private _flushSync(): void {
     this._assertCurrent();
     try {
@@ -593,9 +640,14 @@ export class CrossSessionTaskRegistry {
       if (this._publishingSource === undefined) this._retire('unavailable');
       this._source = this._publishingSource;
     } catch (error) {
-      logger.warn('CrossSessionTaskRegistry: task graph publication unavailable; original data preserved', { path: this._graphPath, error: summarizeError(error) });
-      if (error instanceof CrossSessionGraphUnavailableError || this._failure) throw this._failure ?? error;
-      this._retire('unavailable');
+      if (error instanceof CrossSessionGraphUnavailableError || this._failure) {
+        logger.warn('CrossSessionTaskRegistry: task graph publication unavailable; original data preserved', { path: this._graphPath, error: summarizeError(error) });
+        throw this._failure ?? error;
+      }
+      logger.warn('CrossSessionTaskRegistry: task graph write failed; changes stay in memory and will be retried', { path: this._graphPath, error: summarizeError(error) });
+      // The file may already be our own new incarnation when a later step failed.
+      if (this._publishingSource !== undefined) this._source = this._publishingSource;
+      throw error;
     } finally { this._publishingSource = undefined; }
   }
 }

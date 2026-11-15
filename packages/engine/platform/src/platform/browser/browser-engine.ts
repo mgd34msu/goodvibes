@@ -5,7 +5,8 @@ import type { ToolExecuteOptions } from '../types/tools.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import type { BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { resolveAndValidatePath } from '../utils/path-safety.js';
 import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions, RestoredBrowserPage } from './browser-sessions.js';
@@ -14,7 +15,7 @@ import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './
 import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
 import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
-import { assertCaptureAllowed, fillSecretsIntoPage } from './browser-secret-fill.js';
+import { assertCaptureAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
   BrowserProvisionReport,
   BrowserSnapshot,
@@ -32,6 +33,7 @@ import {
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_NAVIGATION_TIMEOUT_MS,
   DEFAULT_TEXT_LIMIT,
+  classifyNavigationTarget,
   launchNote,
   normalizeUrl,
   readElementData,
@@ -45,6 +47,18 @@ import type {
 } from './browser-engine-contract.js';
 
 export { UntrustedEffectError };
+
+/**
+ * Whether pressing `key` can submit a form. Enter always can, whatever
+ * modifiers come with it (Control+Enter sends a chat box); Space does when the
+ * focused control is one that submits (a submit button). The key is read by its
+ * final segment, so the spelling of the combination does not matter.
+ */
+function keyCanSubmit(key: string, controlSubmits: boolean): boolean {
+  const final = (key.length > 1 && key.endsWith('+') ? '+' : key.split('+').pop() ?? key).toLowerCase();
+  if (final === 'enter' || final === 'numpadenter' || final === 'return') return true;
+  return controlSubmits && (final === 'space' || final === ' ');
+}
 export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget };
 
 /** Host-owned attachment. The driver must bind snapshotId to every control
@@ -77,6 +91,8 @@ export class BrowserEngine {
   private readonly untrusted: UntrustedContentPort;
   private readonly cardGuard: CardFieldGuard | null;
   private approval: OwnerApproval | null;
+  /** The provision report whose setup receipt was last handed to a caller. */
+  private receiptDelivered: BrowserProvisionReport | null = null;
 
   constructor(
     private readonly sessions: BrowserSessionManager,
@@ -237,7 +253,11 @@ export class BrowserEngine {
   }
 
   async status(): Promise<Record<string, unknown>> {
-    const report = this.sessions.provisionReport() ?? await this.sessions.provision({ allowDownload: false });
+    // A report that says something is wrong is read again: the person may have
+    // installed the driver or browser since, and a stale problem/fix is worse
+    // than no answer. A passing report is kept, it costs nothing to trust.
+    const cached = this.sessions.provisionReport();
+    const report = cached?.ok ? cached : await this.sessions.provision({ allowDownload: false });
     return {
       browserAvailable: report.ok,
       binarySource: report.source,
@@ -265,7 +285,12 @@ export class BrowserEngine {
 
   /** The one-act setup receipt for a call that may have provisioned something. */
   private setupReceipt(): { readonly setup?: string } {
-    const setup = describeProvisionWork(this.sessions.provisionReport());
+    const report = this.sessions.provisionReport();
+    // Told once: the report stays on the manager, and repeating "first browser
+    // call" on every later navigation would describe work that is long done.
+    if (report === this.receiptDelivered) return {};
+    this.receiptDelivered = report;
+    const setup = describeProvisionWork(report);
     return setup ? { setup } : {};
   }
 
@@ -281,16 +306,46 @@ export class BrowserEngine {
 
   release(sessionId: string): Record<string, unknown> {
     const session = this.sessions.release(sessionId);
+    this.forgetSessionState(sessionId);
     return { released: session, note: 'Disconnected. The browser is still running.' };
   }
 
   async close(sessionId: string): Promise<Record<string, unknown>> {
-    const session = await this.sessions.closeSession(sessionId);
-    // Every page's material in this session is gone with the browser that held
-    // it. Material bound to a page that outlives the session it was typed in
-    // would be material with no page left to be redacted out of.
+    try {
+      const session = await this.sessions.closeSession(sessionId);
+      return { closed: session };
+    } finally {
+      // Every page's material in this session is gone with the browser that held
+      // it. Material bound to a page that outlives the session it was typed in
+      // would be material with no page left to be redacted out of. Done even
+      // when the close itself failed: the session's controls are unusable either way.
+      this.forgetSessionState(sessionId);
+    }
+  }
+
+  /** Drops what this engine holds for a session it no longer drives: snapshots and armed card material. */
+  private forgetSessionState(sessionId: string): void {
+    this.snapshots.clearSession(sessionId);
     this.cardGuard?.disarmSession?.(sessionId);
-    return { closed: session };
+  }
+
+  /**
+   * Opening a local file or a private-network address reads it into the
+   * conversation, so it is put through the same outward-effect check as a
+   * submit: refused when this turn has read page content, unless the owner
+   * approved it. Cloud metadata addresses are never opened.
+   */
+  private async requireNavigationAllowed(url: string): Promise<void> {
+    const reach = classifyNavigationTarget(url);
+    if (reach === 'public') return;
+    const origin = this.untrusted.originOf(url);
+    if (reach === 'link-local') {
+      throw new BrowserSessionError(
+        `${origin} is a link-local or cloud-metadata address, which the browser tool does not open.`,
+        'Use a public address, or ask the owner to open it in their own browser.',
+      );
+    }
+    await this.requireOutwardEffectAllowed('browser.navigate-local', `open ${origin} (a local file or private-network address) in the browser`);
   }
 
   private resolveSessionId(target: BrowserTarget): string {
@@ -352,6 +407,7 @@ export class BrowserEngine {
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     const url = normalizeUrl(args.url);
+    await this.requireNavigationAllowed(url);
     const sessionId = await this.ensureSession(target, args.launch ?? {});
     return this.withTarget({ sessionId, pageId: target.pageId }, async ({ pageId, page, current }) => {
       const response = await page.goto(url, {
@@ -482,7 +538,13 @@ export class BrowserEngine {
         name: selected.element.name, role: selected.element.role, submits: selected.element.submits,
       } } : {}) });
       if (!state || typeof state !== 'object' || Array.isArray(state)) throw new BrowserSessionError('Checkout evidence is incomplete.');
-      this.recordPageIngest(observation.url, JSON.stringify(state)); current();
+      // Not recorded as a page ingest. This observation is read by the payments
+      // flow itself and never reaches the conversation; recording it would make
+      // the flow's own reading count as content the turn read, and the final
+      // submit would be refused for something the purchase did to itself. The
+      // checkout is already bound by the flow's retained evidence and the
+      // card-field guard.
+      current();
       return { state, signal, assertCurrent: async () => {
         try { await this.sessions.withPage(sessionId, pageId, async (original, assertPage) => {
           if (original !== page) throw new BrowserSessionError('The original checkout page was replaced.');
@@ -713,7 +775,10 @@ export class BrowserEngine {
       const { locator, element, revalidate } = await scope.resolve(args.ref);
       current();
       const timeout = args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
-      if (args.submit === true) {
+      // Typing a line break key by key presses Enter in the field, which
+      // submits a form just as `submit` does, so it is checked the same way.
+      const typesLineBreak = args.replace === false && /[\r\n]/.test(args.text);
+      if (args.submit === true || typesLineBreak) {
         // The text about to be typed is named explicitly as well as read back off
         // the form, because the fill has not happened yet at this point: the
         // guard runs BEFORE anything is entered, so a body lifted from a page
@@ -723,7 +788,7 @@ export class BrowserEngine {
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(
           'browser.submit',
-          `submit the form on ${this.untrusted.originOf(page.url())} after typing into ${element.role} "${element.name}"`,
+          `submit the form on ${this.untrusted.originOf(page.url())} after typing ${args.submit === true ? '' : 'a line break '}into ${element.role} "${element.name}"`,
           { ...(formFields ?? {}), [element.name || 'typed text']: args.text },
         ));
       }
@@ -776,7 +841,7 @@ export class BrowserEngine {
    */
   async fillSecretBatch(
     target: BrowserTarget,
-    args: { readonly fills: readonly { readonly ref: string; readonly value: string }[]; readonly timeoutMs?: number | undefined },
+    args: { readonly fills: readonly { readonly ref: string; readonly value: string; readonly kind?: SecretFillKind | undefined }[]; readonly timeoutMs?: number | undefined },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, fills: args.fills.map(fill => ({ ...fill })) }; target = { ...target }; ownership = ownership && { ...ownership };
@@ -832,7 +897,7 @@ export class BrowserEngine {
       const scope = this.refScope(sessionId, pageId, page, work, ownership, 'press', args);
       const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
       const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
-      if (args.key === 'Enter' || args.key === 'NumpadEnter') {
+      if (keyCanSubmit(args.key, element.submits)) {
         const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(
@@ -932,7 +997,9 @@ export class BrowserEngine {
         current();
         const frameText = await frame.evaluate(() => document.body?.innerText ?? '').catch(() => ''); current();
         if (!frameText.trim()) continue;
-        this.recordPageIngest(frame.url());
+        // With its text, so the ledger can check content instead of treating
+        // the turn as holding text it could not see.
+        this.recordPageIngest(frame.url(), this.scrub(sessionId, pageId, frameText.trim()));
         frameTexts.push(`\n\n[embedded frame ${this.untrusted.originOf(frame.url())}]\n${frameText.trim()}`);
       }
       // Scrubbed before it is labelled, recorded, or returned. A page is free to
@@ -970,18 +1037,33 @@ export class BrowserEngine {
     return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
       assertCaptureAllowed(this.cardGuard, sessionId, pageId);
       const fileName = `${sessionId}-${pageId}-${String(Date.now())}.png`;
+      mkdirSync(this.options.screenshotDirectory, { recursive: true });
       // Resolved once, so the path written, the path recorded, and the path
       // returned to the model are the same string. The ledger matches on exact
       // spelling and deliberately does not guess a working directory at read
       // time, so an unresolved relative path here would record one spelling and
-      // hand back another.
-      const path = resolve(args.path ?? join(this.options.screenshotDirectory, fileName));
+      // hand back another. A caller's path must stay inside the screenshot
+      // directory: this is a file write the write tool's checks never see.
+      let path: string;
+      try {
+        path = args.path === undefined
+          ? resolve(join(this.options.screenshotDirectory, fileName))
+          : resolveAndValidatePath(args.path, this.options.screenshotDirectory);
+      } catch {
+        throw new BrowserSessionError(
+          `Screenshots are saved inside ${this.options.screenshotDirectory}; ${args.path ?? ''} is outside it.`,
+          'Omit path to use the default location, or give a file name inside that directory.',
+        );
+      }
       let buffer: Awaited<ReturnType<Page['screenshot']>>;
       try { buffer = await page.screenshot({ fullPage: args.fullPage === true }); }
       catch { current(); throw new BrowserSessionError('The page could not be captured.', 'Read the current page before trying another capture.'); }
       current(); assertCaptureAllowed(this.cardGuard, sessionId, pageId); current();
-      mkdirSync(this.options.screenshotDirectory, { recursive: true });
-      writeFileSync(path, buffer);
+      mkdirSync(dirname(path), { recursive: true });
+      try { writeFileSync(path, buffer, { flag: 'wx' }); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        throw new BrowserSessionError(`A file already exists at ${path}, so the screenshot was not written.`, 'Choose a file name that does not exist yet, or omit path.');
+      }
       // Recorded as written by this session, which is what lets the agent open
       // the file it just made even though it lives under a dotted storage root.
       //
@@ -1004,7 +1086,13 @@ export class BrowserEngine {
 
   async tabs(target: BrowserTarget): Promise<Record<string, unknown>> {
     const sessionId = this.resolveSessionId(target);
-    return { sessionId, pages: await this.sessions.pageList(sessionId) };
+    const pages = await this.sessions.pageList(sessionId);
+    // Tabs the person closed natively are gone from the list; what this engine
+    // held for them goes with them.
+    for (const pageId of this.snapshots.retainPages(sessionId, new Set(pages.map((page) => page.pageId)))) {
+      this.cardGuard?.disarm(sessionId, pageId);
+    }
+    return { sessionId, pages };
   }
 
   async newTab(
@@ -1012,13 +1100,15 @@ export class BrowserEngine {
     args: { readonly url?: string | undefined; readonly launch?: BrowserLaunchOptions | undefined } = {},
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
+    const startUrl = args.url ? normalizeUrl(args.url) : undefined;
+    if (startUrl) await this.requireNavigationAllowed(startUrl);
     const sessionId = await this.ensureSession(target, args.launch ?? {});
     const { pageId, page } = await this.sessions.newPage(sessionId);
     return this.sessions.withPage(sessionId, pageId, async (original, current) => {
       if (original !== page) throw new BrowserSessionError('The original new browser tab was replaced.', 'Select a live tab before retrying.');
       current();
-      if (args.url) {
-        await page.goto(normalizeUrl(args.url), { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+      if (startUrl) {
+        await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
       }
       current();
       const pages = await this.sessions.pageList(sessionId); current();

@@ -80,14 +80,19 @@ export function createMemoryProvenanceUi(deps: {
   // id -> resolved record (null = not found). Absent = not yet fetched.
   const resolved = new Map<string, ResolvedRecord>();
   const inFlight = new Set<string>();
+  // Ids whose lookup failed since the chip was last toggled.
+  const failed = new Set<string>();
 
   const resolveExpanded = (): void => {
     for (const id of latestRecordIds) {
-      if (resolved.has(id) || inFlight.has(id)) continue;
+      if (resolved.has(id) || inFlight.has(id) || failed.has(id)) continue;
       inFlight.add(id);
       void deps.memorySpine.get(id)
         .then((record) => { resolved.set(id, record ? { summary: record.summary, cls: record.cls } : null); })
-        .catch(() => { resolved.set(id, null); })
+        // A failed lookup (a daemon blip) is not "the record is gone": the id stays
+        // unresolved and is asked again on the next toggle. Not on the next
+        // render, or each failure's repaint would retry it in a loop.
+        .catch(() => { failed.add(id); })
         .finally(() => { inFlight.delete(id); deps.render(); });
     }
   };
@@ -95,7 +100,10 @@ export function createMemoryProvenanceUi(deps: {
   return {
     toggle() {
       expanded = !expanded;
-      if (expanded) resolveExpanded();
+      if (expanded) {
+        failed.clear();
+        resolveExpanded();
+      }
       deps.render();
     },
     onTurnCompleted(evt) { latestRecordIds = memoryRecordIdsFromTurn(evt); expanded = false; },

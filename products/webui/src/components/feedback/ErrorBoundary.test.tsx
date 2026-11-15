@@ -89,38 +89,47 @@ describe('ErrorBoundary', () => {
     unmount();
   });
 
-  test('reset path: clicking Try again recovers to safe children', () => {
+  test('reset path: the fallback reset callback re-renders the children without a remount', () => {
     let throwing = true;
     let doReset!: () => void;
-
-    function Wrapper(): React.ReactElement {
-      const [resetKey, setResetKey] = React.useState(0);
-      return (
-        <ErrorBoundary
-          key={resetKey}
-          fallback={(_err, resetFn) => {
-            doReset = () => {
-              throwing = false;
-              resetFn();
-              setResetKey((n) => n + 1);
-            };
-            return (
-              <button type="button" data-testid="reset-btn" onClick={doReset}>
-                Reset
-              </button>
-            );
-          }}
-        >
-          <Bomb shouldThrow={throwing} />
-        </ErrorBoundary>
-      );
+    function Flaky(): React.ReactElement {
+      return <Bomb shouldThrow={throwing} />;
     }
 
-    const { el, unmount } = renderInto(<Wrapper />);
-    expect(el.querySelector('[data-testid="reset-btn"]')).not.toBeNull();
+    const { el, unmount } = renderInto(
+      <ErrorBoundary
+        fallback={(_err, resetFn) => {
+          doReset = resetFn;
+          return <div data-testid="custom-fallback">fallback</div>;
+        }}
+      >
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    expect(el.querySelector('[data-testid="custom-fallback"]')).not.toBeNull();
 
+    // Children stop throwing only after the reset; nothing else re-renders the boundary.
+    throwing = false;
+    expect(el.querySelector('[data-testid="safe"]')).toBeNull();
     flushSync(() => { doReset(); });
     expect(el.querySelector('[data-testid="safe"]')?.textContent).toBe('Safe');
+    unmount();
+  });
+
+  test('default fallback: clicking Try again recovers to safe children', () => {
+    let throwing = true;
+    function Flaky(): React.ReactElement {
+      return <Bomb shouldThrow={throwing} />;
+    }
+    const { el, unmount } = renderInto(<ErrorBoundary><Flaky /></ErrorBoundary>);
+    const retry = el.querySelector('button');
+    expect(retry?.textContent).toContain('Try again');
+
+    throwing = false;
+    expect(el.querySelector('[data-testid="safe"]')).toBeNull();
+    flushSync(() => { retry?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(el.querySelector('[data-testid="safe"]')?.textContent).toBe('Safe');
+    expect(el.querySelector('[role="alert"]')).toBeNull();
     unmount();
   });
 

@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
 
 export type AgentResearchSourceStatus = 'candidate' | 'reviewed' | 'rejected' | 'used';
 /**
@@ -160,8 +160,19 @@ function boundedScore(value: unknown, fallback = 50): number {
 export function sanitizeResearchSourceUrl(value: string): string {
   try {
     const url = new URL(value);
+    // A stored source URL is echoed back to the model and into reports, so
+    // credentials in the authority and in `#access_token=...` style fragments
+    // go too, not only query values.
+    url.username = '';
+    url.password = '';
     for (const key of [...url.searchParams.keys()]) {
       if (SECRETISH.test(key)) url.searchParams.set(key, '<redacted>');
+    }
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const secretFragmentKeys = [...fragment.keys()].filter((key) => SECRETISH.test(key));
+    if (secretFragmentKeys.length > 0) {
+      for (const key of secretFragmentKeys) fragment.set(key, '<redacted>');
+      url.hash = fragment.toString();
     }
     return url.toString();
   } catch {
@@ -212,19 +223,39 @@ function parseSource(value: unknown): AgentResearchSourceRecord | null {
   };
 }
 
-function parseStore(raw: string): ResearchSourceStoreFile {
+function parseStore(raw: string, forWrite = false): ResearchSourceStoreFile {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, sources: [] };
-  return {
-    version: STORE_VERSION,
-    sources: Array.isArray(parsed.sources)
-      ? parsed.sources.map(parseSource).filter((entry): entry is AgentResearchSourceRecord => entry !== null)
-      : [],
-  };
+  if (!isRecord(parsed)) {
+    if (forWrite) assertStoreRewritable(parsed, 'sources', 0, STORE_VERSION);
+    return { version: STORE_VERSION, sources: [] };
+  }
+  const sources = Array.isArray(parsed.sources)
+    ? parsed.sources.map(parseSource).filter((entry): entry is AgentResearchSourceRecord => entry !== null)
+    : [];
+  if (forWrite) assertStoreRewritable(parsed, 'sources', sources.length, STORE_VERSION);
+  return { version: STORE_VERSION, sources };
 }
 
 function formatStore(store: ResearchSourceStoreFile): string {
   return `${JSON.stringify(store, null, 2)}\n`;
+}
+
+/**
+ * The parts of a stored URL the sanitizer cannot judge by name: the path and
+ * any query or fragment value it left in place.
+ */
+function urlPathForScreening(url: string | undefined): string {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    // Values under names the sanitizer did not recognise are screened too; the
+    // redaction marker itself is skipped so cleaned URLs are not rejected.
+    const rest = [...parsed.searchParams.values(), ...new URLSearchParams(parsed.hash.slice(1)).values(), parsed.hash.slice(1)]
+      .filter((part) => part && part !== '<redacted>');
+    return [decodeURIComponent(`${parsed.host}${parsed.pathname}`), ...rest].join('\n');
+  } catch {
+    return url;
+  }
 }
 
 function assertSourceContentSafe(fields: readonly string[]): void {
@@ -294,146 +325,156 @@ export class AgentResearchSourceRegistry {
   }
 
   public create(input: AgentResearchSourceCreateInput): AgentResearchSourceRecord {
-    const store = this.readStore();
-    const question = normalizeText(input.question);
-    const title = normalizeText(input.title);
-    const summary = input.summary.trim();
-    if (!question) throw new Error('question is required.');
-    if (!title) throw new Error('title is required.');
-    if (!summary) throw new Error('summary is required.');
-    const url = input.url?.trim() ? sanitizeResearchSourceUrl(input.url.trim()) : undefined;
-    const publisher = input.publisher?.trim() || undefined;
-    const publishedAt = input.publishedAt?.trim() || undefined;
-    const accessedAt = input.accessedAt?.trim() || nowIso();
-    const evidence = input.evidence?.trim() || undefined;
-    const note = input.note?.trim() || undefined;
-    const tags = normalizeList(input.tags);
-    assertSourceContentSafe([question, title, publisher ?? '', summary, evidence ?? '', note ?? '', ...tags]);
-    const duplicate = store.sources.find((source) => (
-      (url && source.url?.toLowerCase() === url.toLowerCase())
-      || (!url && source.title.toLowerCase() === title.toLowerCase() && source.question.toLowerCase() === question.toLowerCase())
-    ));
-    if (duplicate) throw new Error(`Research source already exists ${duplicate.id}.`);
-    const timestamp = nowIso();
-    const source: AgentResearchSourceRecord = {
-      id: this.nextId(title, store.sources),
-      question,
-      title,
-      ...(url ? { url } : {}),
-      ...(publisher ? { publisher } : {}),
-      ...(publishedAt ? { publishedAt } : {}),
-      accessedAt,
-      summary,
-      ...(evidence ? { evidence } : {}),
-      credibility: input.credibility ?? 'unreviewed',
-      score: boundedScore(input.score, input.credibility === 'high' ? 80 : input.credibility === 'medium' ? 60 : 50),
-      status: input.credibility && input.credibility !== 'unreviewed' ? 'reviewed' : 'candidate',
-      tags,
-      ...(note ? { note } : {}),
-      provenance: input.provenance?.trim() || 'agent-research-sources',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      ...(input.credibility && input.credibility !== 'unreviewed' ? { reviewedAt: timestamp } : {}),
-    };
-    this.writeStore({ ...store, sources: [...store.sources, source] });
-    return source;
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const question = normalizeText(input.question);
+      const title = normalizeText(input.title);
+      const summary = input.summary.trim();
+      if (!question) throw new Error('question is required.');
+      if (!title) throw new Error('title is required.');
+      if (!summary) throw new Error('summary is required.');
+      const url = input.url?.trim() ? sanitizeResearchSourceUrl(input.url.trim()) : undefined;
+      const publisher = input.publisher?.trim() || undefined;
+      const publishedAt = input.publishedAt?.trim() || undefined;
+      const accessedAt = input.accessedAt?.trim() || nowIso();
+      const evidence = input.evidence?.trim() || undefined;
+      const note = input.note?.trim() || undefined;
+      const tags = normalizeList(input.tags);
+      assertSourceContentSafe([question, title, urlPathForScreening(url), publisher ?? '', summary, evidence ?? '', note ?? '', ...tags]);
+      const duplicate = store.sources.find((source) => (
+        (url && source.url?.toLowerCase() === url.toLowerCase())
+        || (!url && source.title.toLowerCase() === title.toLowerCase() && source.question.toLowerCase() === question.toLowerCase())
+      ));
+      if (duplicate) throw new Error(`Research source already exists ${duplicate.id}.`);
+      const timestamp = nowIso();
+      const source: AgentResearchSourceRecord = {
+        id: this.nextId(title, store.sources),
+        question,
+        title,
+        ...(url ? { url } : {}),
+        ...(publisher ? { publisher } : {}),
+        ...(publishedAt ? { publishedAt } : {}),
+        accessedAt,
+        summary,
+        ...(evidence ? { evidence } : {}),
+        credibility: input.credibility ?? 'unreviewed',
+        score: boundedScore(input.score, input.credibility === 'high' ? 80 : input.credibility === 'medium' ? 60 : 50),
+        status: input.credibility && input.credibility !== 'unreviewed' ? 'reviewed' : 'candidate',
+        tags,
+        ...(note ? { note } : {}),
+        provenance: input.provenance?.trim() || 'agent-research-sources',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        ...(input.credibility && input.credibility !== 'unreviewed' ? { reviewedAt: timestamp } : {}),
+      };
+      this.writeStore({ ...store, sources: [...store.sources, source] });
+      return source;
+    });
   }
 
   public review(idOrTitle: string, input: AgentResearchSourceReviewInput): AgentResearchSourceRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-    assertSourceMove(existing, 'reviewed');
-    const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
-    const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
-    const summary = input.summary === undefined ? existing.summary : input.summary.trim();
-    if (!summary) throw new Error('summary is required.');
-    const evidence = input.evidence === undefined ? existing.evidence : input.evidence.trim() || undefined;
-    assertSourceContentSafe([summary, evidence ?? '', note ?? '', ...tags]);
-    const credibilityValue = input.credibility ?? (existing.credibility === 'unreviewed' ? 'medium' : existing.credibility);
-    const timestamp = nowIso();
-    const { evidence: _oldEvidence, note: _oldNote, rejectedAt: _oldRejectedAt, ...base } = existing;
-    const reviewed: AgentResearchSourceRecord = {
-      ...base,
-      summary,
-      ...(evidence ? { evidence } : {}),
-      credibility: credibilityValue,
-      score: boundedScore(input.score, existing.score),
-      status: 'reviewed',
-      tags,
-      ...(note ? { note } : {}),
-      reviewedAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      sources: store.sources.map((source) => source.id === existing.id ? reviewed : source),
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+      assertSourceMove(existing, 'reviewed');
+      const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
+      const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
+      const summary = input.summary === undefined ? existing.summary : input.summary.trim();
+      if (!summary) throw new Error('summary is required.');
+      const evidence = input.evidence === undefined ? existing.evidence : input.evidence.trim() || undefined;
+      assertSourceContentSafe([summary, evidence ?? '', note ?? '', ...tags]);
+      const credibilityValue = input.credibility ?? (existing.credibility === 'unreviewed' ? 'medium' : existing.credibility);
+      const timestamp = nowIso();
+      const { evidence: _oldEvidence, note: _oldNote, rejectedAt: _oldRejectedAt, ...base } = existing;
+      const reviewed: AgentResearchSourceRecord = {
+        ...base,
+        summary,
+        ...(evidence ? { evidence } : {}),
+        credibility: credibilityValue,
+        score: boundedScore(input.score, existing.score),
+        status: 'reviewed',
+        tags,
+        ...(note ? { note } : {}),
+        reviewedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        sources: store.sources.map((source) => source.id === existing.id ? reviewed : source),
+      });
+      return reviewed;
     });
-    return reviewed;
   }
 
   public reject(idOrTitle: string, reason: string): AgentResearchSourceRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-    assertSourceMove(existing, 'rejected');
-    const note = reason.trim() || 'Rejected during source review.';
-    assertSourceContentSafe([note]);
-    const timestamp = nowIso();
-    const rejected: AgentResearchSourceRecord = {
-      ...existing,
-      note,
-      status: 'rejected',
-      rejectedAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      sources: store.sources.map((source) => source.id === existing.id ? rejected : source),
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+      assertSourceMove(existing, 'rejected');
+      const note = reason.trim() || 'Rejected during source review.';
+      assertSourceContentSafe([note]);
+      const timestamp = nowIso();
+      const rejected: AgentResearchSourceRecord = {
+        ...existing,
+        note,
+        status: 'rejected',
+        rejectedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        sources: store.sources.map((source) => source.id === existing.id ? rejected : source),
+      });
+      return rejected;
     });
-    return rejected;
   }
 
   public markUsed(idOrTitle: string, input: AgentResearchSourceUseInput = {}): AgentResearchSourceRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-    assertSourceMove(existing, 'used');
-    const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
-    const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
-    assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);
-    const timestamp = nowIso();
-    const { note: _oldNote, usedInReportArtifactId: _oldArtifactId, ...base } = existing;
-    const used: AgentResearchSourceRecord = {
-      ...base,
-      ...(note ? { note } : {}),
-      ...(reportArtifactId ? { usedInReportArtifactId: reportArtifactId } : {}),
-      status: 'used',
-      usedAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      sources: store.sources.map((source) => source.id === existing.id ? used : source),
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+      assertSourceMove(existing, 'used');
+      const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
+      const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
+      assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);
+      const timestamp = nowIso();
+      const { note: _oldNote, usedInReportArtifactId: _oldArtifactId, ...base } = existing;
+      const used: AgentResearchSourceRecord = {
+        ...base,
+        ...(note ? { note } : {}),
+        ...(reportArtifactId ? { usedInReportArtifactId: reportArtifactId } : {}),
+        status: 'used',
+        usedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        sources: store.sources.map((source) => source.id === existing.id ? used : source),
+      });
+      return used;
     });
-    return used;
   }
 
   public delete(idOrTitle: string): AgentResearchSourceRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-    this.writeStore({
-      ...store,
-      sources: store.sources.filter((source) => source.id !== existing.id),
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+      this.writeStore({
+        ...store,
+        sources: store.sources.filter((source) => source.id !== existing.id),
+      });
+      return existing;
     });
-    return existing;
   }
 
-  private readStore(): ResearchSourceStoreFile {
+  private readStore(forWrite = false): ResearchSourceStoreFile {
     if (!existsSync(this.storePath)) return { version: STORE_VERSION, sources: [] };
     try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'));
+      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
     } catch (error) {
       throw new Error(`Could not read Agent research source store: ${error instanceof Error ? error.message : String(error)}`);
     }

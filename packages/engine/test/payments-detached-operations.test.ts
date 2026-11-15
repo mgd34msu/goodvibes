@@ -18,6 +18,7 @@ import { paymentContinuationBinding } from '../platform/src/platform/payments/ho
 import { PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
 import { readPaymentOperation, paymentOperationDescription } from '../platform/src/platform/payments/operation-view.js';
 import { protectedPaymentWindow } from './helpers/protected-payment-window.js';
+import { turnsUntil } from './_helpers/turns-until.ts';
 
 const roots: string[] = [], cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -131,6 +132,19 @@ test('bounded recent status keeps open financial uncertainty and old request ide
   expect(readdirSync(path).filter(file => file.endsWith('.json'))).toHaveLength(106);
 });
 
+test('an unconfirmed submission stays listed after more than a hundred later purchases', () => {
+  const path = directory(), store = new DurablePaymentOperations(path);
+  const unconfirmed = store.create(view('unconfirmed'), null, () => {});
+  unconfirmed.update({ ...unconfirmed.read(), state: 'completed', phase: 'submitted', outcome: 'submitted-unverified' }); unconfirmed.release();
+  for (let i = 0; i < 105; i++) {
+    const writer = store.create(view(`finished-${i}`), null, () => {});
+    writer.update({ ...writer.read(), state: 'refused', outcome: 'refused:no-card' }); writer.release();
+  }
+  const reopened = new DurablePaymentOperations(path);
+  expect(reopened.list().some(entry => entry.purchaseId === 'unconfirmed')).toBe(true);
+  expect(paymentOperationDescription(reopened.get('unconfirmed')!)).toContain('cannot confirm orders');
+});
+
 test('durable acknowledgement survives request abort, uses a root-owned context and drains on stop', async () => {
   const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')), request = new AbortController();
   const context = new AsyncLocalStorage<string>(), entered = barrier(), gate = barrier();
@@ -177,11 +191,7 @@ test('a refused reply source reaches real durable status and the shared browser/
   cleanup.push(async () => { release.release(); await operations.close(); }); await operations.recover();
   await operations.admit('source-unavailable', input, { principalId: 'pairing:owner', assertCurrent() {} }, () => {}, () => {});
   await entered.wait; release.release();
-  const deadline = Date.now() + 2000;
-  while (store.get('source-unavailable')?.state !== 'failed') {
-    if (Date.now() >= deadline) throw new Error('Source failure was not accounted');
-    await new Promise(resolve => setTimeout(resolve, 1));
-  }
+  await turnsUntil(() => store.get('source-unavailable')?.state === 'failed', 'source failure accounted');
   const view = readPaymentOperation(new DurablePaymentOperations(join(path, 'operations')).get('source-unavailable'));
   expect(view.outcome).toBe('reply-source-unavailable');
   expect(paymentOperationDescription(view)).toContain('Telegram polling');

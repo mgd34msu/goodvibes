@@ -14,15 +14,17 @@ import type { RouteBindingManager, ChannelPolicyManager } from '../channels/inde
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext } from '../adapters/index.js';
 import type { AutomationManager } from '../automation/index.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../channels/index.js';
+import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/events/index.js';
 import { emitCompanionMessageReceived } from '../runtime/emitters/index.js';
-import { NtfyIntegration } from '../integrations/ntfy.js';
+import { NtfyIntegration, resolveNtfyDefaultPriority } from '../integrations/ntfy.js';
 import {
   postHomeAssistantSurfaceChatMessage,
   type HomeAssistantSurfaceChatInput,
   type HomeAssistantSurfaceChatResult,
 } from './surface-homeassistant-reply.js';
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
+import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
@@ -32,11 +34,40 @@ import { PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inb
 import { refuseCardShapedIngress, CARD_SHAPES_REFUSED_REASON, JUDGMENT_INPUT_REFUSED_REASON } from './surface-card-gate.js';
 import {
   deliverProposalNotice,
+  settleUnstartedWork,
   gateSurfaceSpawn,
   startAgreedWork,
   type SurfaceIngressOrigin,
 } from './surface-conversation-gate.js';
 import type { WorkProposalStore } from '../agents/work-proposal-store.js';
+
+/**
+ * Where to answer the owner who wrote `input`. Purchase notices go out by
+ * surface kind, so the chat they were answered in may have no bound route; the
+ * message carries everything a one-off reply needs, and a reply with nowhere to
+ * go would leave the owner unaware their answer was set aside.
+ */
+export function ownerReplyBinding(
+  bindings: readonly AutomationRouteBinding[],
+  input: Pick<ChannelIngressPolicyInput, 'surface' | 'channelId' | 'threadId'>,
+): AutomationRouteBinding | undefined {
+  const bound = bindings.find(candidate => candidate.surfaceKind === input.surface
+    && (candidate.channelId ?? candidate.externalId) === input.channelId && candidate.threadId === input.threadId);
+  if (bound) return bound;
+  if (!input.channelId) return undefined;
+  const now = Date.now();
+  return {
+    id: `owner-reply:${input.surface}:${input.channelId}${input.threadId ? `:${input.threadId}` : ''}`,
+    kind: input.threadId ? 'thread' : 'channel',
+    surfaceKind: input.surface as AutomationRouteBinding['surfaceKind'],
+    surfaceId: input.surface,
+    externalId: input.channelId,
+    channelId: input.channelId,
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    lastSeenAt: now, createdAt: now, updatedAt: now,
+    metadata: {},
+  };
+}
 
 interface PendingNtfyChatReply {
   readonly sessionId: string;
@@ -89,6 +120,7 @@ interface DaemonSurfaceActionContext {
     approvalId: string,
     action: 'claim' | 'approve' | 'deny' | 'cancel',
     req: Request,
+    interaction?: { readonly surface: string; readonly userId: string } | undefined,
   ) => Promise<Response>;
   /**
    * Shared pending-approval broker, the same machinery the TUI and webui
@@ -123,7 +155,12 @@ interface DaemonSurfaceActionContext {
 export class DaemonSurfaceActionHelper {
   private controlAbort = new AbortController();
   private readonly controlTargets = new WeakMap<SurfaceControlReading, () => void>();
+  /** How long an ntfy message may wait for its turn to start. */
   private static readonly NTFY_CHAT_REPLY_TTL_MS = 10 * 60_000;
+  /** How soon after an ntfy message another session's identical prompt may still be taken as its turn. */
+  private static readonly NTFY_CROSS_SESSION_MATCH_MS = 2 * 60_000;
+  /** A matched turn may run much longer than the wait to start; this only reaps turns that never finish. */
+  private static readonly NTFY_MATCHED_TURN_TTL_MS = 6 * 60 * 60_000;
   private readonly pendingNtfyChatReplies = new Map<string, PendingNtfyChatReply[]>();
   private ntfyChatReplyUnsubscribers: Array<() => void> = [];
   private ntfyRemoteSessionId: string | null = null;
@@ -159,10 +196,14 @@ export class DaemonSurfaceActionHelper {
     // Unconfigured surfaces synthesize a fresh default timestamp on each read.
     // Compare semantic policy fields plus registered-record identity instead.
     const policyState = (policy: ChannelPolicyDecision['policy']) => JSON.stringify({ ...policy, updatedAt: undefined });
-    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; policy: string; record: ChannelPolicyDecision['policy'] | undefined } | null = null;
+    let authorization: { text: string; surface: ChannelIngressPolicyInput['surface']; policy: string; record: ChannelPolicyDecision['policy'] | undefined; operator: boolean } | null = null;
     const commands = new WeakMap<SurfaceControlReading, () => void>();
+    // Commands read from an admitted sender who is not the surface owner. They address
+    // any run or agent id and carry no origin, so only the owner may act on them.
+    const nonOperatorCommands = new WeakSet<SurfaceControlReading>();
     return {
       delegatedTelegram: this.context.delegatedTelegram,
+      ...(this.context.deliverSurfaceNotice ? { deliverSurfaceNotice: this.context.deliverSurfaceNotice } : {}),
       hasPaymentReplyWindow: () => this.paymentReplies.pending > 0,
       serviceRegistry: this.context.serviceRegistry,
       secretsManager: this.context.secretsManager,
@@ -186,7 +227,13 @@ export class DaemonSurfaceActionHelper {
           ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
         };
         const decision = await this.authorizeSurfaceIngress(input);
-        if (decision.allowed) authorization = { text: input.text ?? '', surface: input.surface, policy: policyState(decision.policy), record: decision.policy };
+        if (decision.allowed) {
+          const allowlist = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
+          // An identity-less surface is admitted by its webhook secret and only exists
+          // with an empty allowlist; an identified sender is the operator only as the owner.
+          const operator = input.userId === undefined || allowlist.length === 0 || allowlist[0] === input.userId;
+          authorization = { text: input.text ?? '', surface: input.surface, policy: policyState(decision.policy), record: decision.policy, operator };
+        }
         // A protected-input refusal must not stay readable from the cell the gated
         // spawn path reads. Every adapter does return early on a not-allowed
         // decision, so this changes no behaviour today, it stops the guarantee
@@ -212,6 +259,7 @@ export class DaemonSurfaceActionHelper {
         assertCurrent();
         const command = await this.parseSurfaceControlCommand(text, { ...options, signal, beforeAttempt: assertCurrent });
         assertCurrent();
+        if (command && accepted?.operator === false) nonOperatorCommands.add(command);
         if (command) commands.set(command, () => {
           assertCurrent();
           const targetCurrent = this.controlTargets.get(command);
@@ -220,15 +268,23 @@ export class DaemonSurfaceActionHelper {
         });
         return command;
       },
-      performSurfaceControlCommand: (command) => {
+      performSurfaceControlCommand: async (command, controlOrigin) => {
         const assertCurrent = commands.get(command);
         if (!assertCurrent) throw new Error('Surface control has no current source reading');
         commands.delete(command);
         assertCurrent();
         this.controlTargets.delete(command);
+        if (nonOperatorCommands.has(command)) {
+          return `Not done: ${command.action} ${command.id} was refused. Status, cancel and retry act on any run or agent, so only the surface owner (the first user on its allowlist) may send them. Ask the owner, or have them change the allowlist.`;
+        }
+        // A command that names its conversation acts only on what that conversation started.
+        // The reply is the same for a target that exists elsewhere and one that does not.
+        if (controlOrigin && !this.controlTargetBelongsToRoute(command.id, controlOrigin.routeId)) {
+          return `Not done: ${command.action} ${command.id} was refused. This conversation did not start ${command.id}, so it cannot act on it. Send the command from the conversation that did.`;
+        }
         return this.performSurfaceControlCommand(command);
       },
-      performInteractiveSurfaceAction: (actionId, surface, request) => this.performInteractiveSurfaceAction(actionId, surface, request),
+      performInteractiveSurfaceAction: (actionId, surface, request, userId) => this.performInteractiveSurfaceAction(actionId, surface, request, userId),
       // The shared spawn boundary: every channel surface adapter routes its
       // spawn through the conversation-first gate (surface-conversation-gate.ts).
       trySpawnAgent: (input, logLabel, sessionId) => {
@@ -334,12 +390,15 @@ export class DaemonSurfaceActionHelper {
         throw new Error('The original reply owner policy is no longer current');
       }
     };
+    // The conversation the owner wrote from: a route already bound for it, or one made from the message itself.
+    const replyToOwner = async (text: string): Promise<unknown> => deliverProposalNotice(
+      this.context, ownerReplyBinding(this.context.routeBindings.listBindings(), input), text);
     let addressedPayment: PaymentReplyOffer | undefined;
     if (typeof input.metadata?.['replyToMessageId'] === 'string') {
       // An explicit provider reply names its notice before another pending
       // dialogue can interpret the same short answer against different text.
       addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
-        { assertCurrent: assertReplyCurrent, signal: lifecycle });
+        { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
       if (addressedPayment.consumed) return { ...decision, allowed: false, reason: `payment-reply-${addressedPayment.answer}` };
       if (addressedPayment.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded' };
     }
@@ -359,6 +418,7 @@ export class DaemonSurfaceActionHelper {
         return () => { if (routeState() !== source) throw new Error('Work proposal route changed'); };
       },
       startAgreedWork: (proposal, note) => startAgreedWork(this.conversationGateDeps(), proposal, note),
+      settleUnstartedWork: (proposal, reason) => settleUnstartedWork(this.conversationGateDeps(), proposal, reason),
       replyOnChannel: async (proposal, text) => {
         const binding = proposal.routeId ? this.context.routeBindings.getBinding(proposal.routeId) : undefined;
         await deliverProposalNotice(this.context, binding, text);
@@ -372,7 +432,7 @@ export class DaemonSurfaceActionHelper {
     // An answer to a purchase approval or veto notice, read against the notice
     // it follows. Consumed the same way: the window already has its answer.
     const paymentReply = addressedPayment ?? await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
-      { assertCurrent: assertReplyCurrent, signal: lifecycle });
+      { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
     if (paymentReply.consumed) {
       return { ...decision, allowed: false, reason: `payment-reply-${paymentReply.answer}` };
     }
@@ -434,6 +494,19 @@ export class DaemonSurfaceActionHelper {
     return command;
   }
 
+  /** Whether a run, agent or session was started from the conversation (route binding) a control command arrived on. */
+  private controlTargetBelongsToRoute(id: string, routeId: string): boolean {
+    const run = this.context.automationManager.getRun(id);
+    if (run) return run.routeId === routeId || run.route?.id === routeId;
+    const { sessionBroker } = this.context;
+    for (const session of sessionBroker.listSessions(500)) {
+      if (!session.routeIds.includes(routeId)) continue;
+      if (session.id === id || session.activeAgentId === id || session.lastAgentId === id) return true;
+      if (sessionBroker.getInputs(session.id, 500).some(input => input.routeId === routeId && input.activeAgentId === id)) return true;
+    }
+    return false;
+  }
+
   async performSurfaceControlCommand(
     command: { readonly action: 'status' | 'cancel' | 'retry'; readonly id: string },
   ): Promise<string> {
@@ -491,6 +564,7 @@ export class DaemonSurfaceActionHelper {
     actionId: string,
     surface: 'slack' | 'discord',
     req: Request,
+    userId?: string | undefined,
   ): Promise<string> {
     const approvalMatch = actionId.match(/^gv:approval:(approve|deny|claim):(.+)$/);
     if (approvalMatch) {
@@ -502,6 +576,8 @@ export class DaemonSurfaceActionHelper {
           method: 'POST',
           headers: req.headers,
         }),
+        // The approval's audit names who pressed the button, not the daemon token the callback rode in on.
+        userId ? { surface, userId } : undefined,
       );
       const body = await result.json().catch(() => ({} as Record<string, unknown>));
       return result.ok
@@ -591,6 +667,23 @@ export class DaemonSurfaceActionHelper {
           });
         },
       ),
+      this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>(
+        'TURN_CANCEL',
+        (envelope) => {
+          if (!envelope.sessionId) return;
+          void this.deliverNtfyChatReply(
+            envelope.sessionId,
+            envelope.payload.turnId,
+            'The request was cancelled before it finished.',
+          ).catch((error: unknown) => {
+            logger.warn('Daemon surface action: ntfy cancel notice delivery failed', {
+              sessionId: envelope.sessionId,
+              turnId: envelope.payload.turnId,
+              error: summarizeError(error),
+            });
+          });
+        },
+      ),
       this.context.runtimeBus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>(
         'TURN_ERROR',
         (envelope) => {
@@ -628,7 +721,7 @@ export class DaemonSurfaceActionHelper {
       return;
     }
     const normalizedPrompt = prompt.trim();
-    const match = this.findPendingNtfyChatReplyForPrompt(sessionId, normalizedPrompt);
+    const match = this.findPendingNtfyChatReplyForPrompt(sessionId, normalizedPrompt, origin?.surface === 'ntfy');
     if (!match) return;
     match.pending.turnId = turnId;
     match.pending.turnSessionId = sessionId;
@@ -667,28 +760,37 @@ export class DaemonSurfaceActionHelper {
   private findPendingNtfyChatReplyForPrompt(
     preferredSessionId: string,
     normalizedPrompt: string,
+    fromNtfy: boolean,
   ): { readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string } | null {
     const preferredBucket = this.pendingNtfyChatReplies.get(preferredSessionId);
     const preferred = preferredBucket?.find((entry) => !entry.turnId && entry.body.trim() === normalizedPrompt);
     if (preferred) return { pending: preferred, bucketSessionId: preferredSessionId };
 
-    let crossSessionCandidate: { readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string } | null = null;
+    // An ntfy turn that does not carry the message id may run under another
+    // runtime session id, so the text is matched across sessions. Only for a
+    // turn that says it came from ntfy, only within a short window and only
+    // when exactly one message waits on that text: an identical prompt typed in
+    // any other session ("yes", "hi") would otherwise have its answer published
+    // to the ntfy topic. Clients that pass the message id are matched by it.
+    if (!fromNtfy) return null;
+    const now = Date.now();
+    const candidates: Array<{ readonly pending: PendingNtfyChatReply; readonly bucketSessionId: string }> = [];
     for (const [bucketSessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
       if (bucketSessionId === preferredSessionId) continue;
-      const candidate = bucket.find((entry) => !entry.turnId && entry.body.trim() === normalizedPrompt);
-      if (!candidate) continue;
-      if (!crossSessionCandidate || candidate.createdAt < crossSessionCandidate.pending.createdAt) {
-        crossSessionCandidate = { pending: candidate, bucketSessionId };
+      for (const entry of bucket) {
+        if (!entry.turnId && entry.body.trim() === normalizedPrompt
+          && now - entry.createdAt < DaemonSurfaceActionHelper.NTFY_CROSS_SESSION_MATCH_MS) {
+          candidates.push({ pending: entry, bucketSessionId });
+        }
       }
     }
-    if (crossSessionCandidate) {
-      logger.debug('DaemonSurfaceActionHelper: matched pending ntfy chat reply in another session bucket', {
-        preferredSessionId,
-        matchedSessionId: crossSessionCandidate.bucketSessionId,
-        messageId: crossSessionCandidate.pending.messageId,
-      });
-    }
-    return crossSessionCandidate;
+    if (candidates.length !== 1) return null;
+    logger.debug('DaemonSurfaceActionHelper: matched pending ntfy chat reply in another session bucket', {
+      preferredSessionId,
+      matchedSessionId: candidates[0]!.bucketSessionId,
+      messageId: candidates[0]!.pending.messageId,
+    });
+    return candidates[0]!;
   }
 
   private findPendingNtfyChatReplyForMessageId(
@@ -718,7 +820,9 @@ export class DaemonSurfaceActionHelper {
 
   private cleanupExpiredNtfyChatReplies(now = Date.now()): void {
     for (const [sessionId, bucket] of this.pendingNtfyChatReplies.entries()) {
-      const fresh = bucket.filter((entry) => now - entry.createdAt < DaemonSurfaceActionHelper.NTFY_CHAT_REPLY_TTL_MS);
+      const fresh = bucket.filter((entry) => now - entry.createdAt < (entry.turnId
+        ? DaemonSurfaceActionHelper.NTFY_MATCHED_TURN_TTL_MS
+        : DaemonSurfaceActionHelper.NTFY_CHAT_REPLY_TTL_MS));
       if (fresh.length === 0) {
         this.pendingNtfyChatReplies.delete(sessionId);
       } else if (fresh.length !== bucket.length) {
@@ -847,15 +951,20 @@ export class DaemonSurfaceActionHelper {
       String(this.context.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh'),
       await this.resolveNtfyToken() ?? undefined,
     );
+    const priority = resolveNtfyDefaultPriority(this.context.configManager.get('surfaces.ntfy.defaultPriority'));
     await ntfy.publish(topic, message, {
       title,
+      ...(priority === undefined ? {} : { priority }),
       markGoodVibesOrigin: true,
     });
   }
 
   private async resolveNtfyToken(): Promise<string | null> {
     return await this.context.serviceRegistry.resolveSecret('ntfy', 'primary')
-      || String(this.context.configManager.get('surfaces.ntfy.token') || '')
+      || await resolveSecretInput(this.context.configManager.get('surfaces.ntfy.token'), {
+        resolveLocalSecret: (key) => this.context.secretsManager.get(key),
+        homeDirectory: this.context.secretsManager.getGlobalHome?.() ?? undefined,
+      })
       || process.env.NTFY_ACCESS_TOKEN
       || null;
   }

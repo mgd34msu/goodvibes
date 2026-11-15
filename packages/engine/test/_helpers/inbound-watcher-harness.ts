@@ -11,11 +11,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FakeMailboxServer } from './fake-imap-mailbox.ts';
 import { MailboxCursorStore } from '../../platform/src/platform/email/inbound/cursor-store.ts';
 import type { CursorResolution } from '../../platform/src/platform/email/inbound/cursor-store.ts';
-import { imapMailboxConnectionPort } from '../../platform/src/platform/email/inbound/index.ts';
-import type { ImapMailboxConnectionOptions } from '../../platform/src/platform/email/inbound/connection.ts';
 import type { MailboxCursor } from '../../platform/src/platform/email/inbound/types.ts';
 import type {
   InboundCapabilityTransition,
@@ -25,10 +22,7 @@ import type {
   InboundMailTerminalFailure,
   InboundMailboxMessage,
   ImapInboundMessage,
-  MailboxConnection,
-  MailboxConnectionPort,
   MailboxCursorPort,
-  MailboxWire,
   WatcherClock,
 } from '../../platform/src/platform/email/inbound/ports.ts';
 
@@ -154,11 +148,6 @@ export class FakeClock implements WatcherClock {
 // ---------------------------------------------------------------------------
 
 /**
- * An in-memory `MailboxCursorPort` implementing the §4 rules the real store
- * will implement against disk: a first run establishes the mark without
- * backfilling, and a changed `UIDVALIDITY` discards rather than replays.
- */
-/**
  * The REAL `MailboxCursorStore`, with an audit trail wrapped round it.
  *
  * This used to be a hand-written in-memory cursor store, and that was a third
@@ -283,7 +272,7 @@ export async function makeCursorStore(seed?: {
   readonly mailbox: string;
   readonly uidValidity: number;
   readonly lastSeenUid: number;
-}): Promise<{ store: RecordingCursorStore; dir: string }> {
+}): Promise<{ store: RecordingCursorStore; path: string }> {
   const path = scratchFile('cursors.json');
   const inner = new MailboxCursorStore(path);
   if (seed !== undefined) {
@@ -295,7 +284,7 @@ export async function makeCursorStore(seed?: {
       currentMessageCount: 0,
     });
   }
-  return { store: new RecordingCursorStore(inner), dir: path };
+  return { store: new RecordingCursorStore(inner), path };
 }
 
 
@@ -438,156 +427,4 @@ export function scriptedRandom(values: readonly number[]): () => number {
     index += 1;
     return value;
   };
-}
-
-// ---------------------------------------------------------------------------
-// Driving a wake that can be missed
-// ---------------------------------------------------------------------------
-
-/**
- * Setting this to a millisecond count widens the lost-wake window described on
- * `nudgeUntil`, turning a race that shows up once a fortnight in CI into a
- * deterministic failure. `scripts/sweep-wake-race.ts` is the supported way to
- * run it; see that file for why the sweep has to be a measurement rather than
- * a source scan.
- */
-export const WAKE_RACE_PROBE_ENV = 'GOODVIBES_WAKE_RACE_PROBE_MS';
-
-/** The configured probe delay, or 0 when the probe is off. */
-export function wakeRaceProbeMs(): number {
-  const raw = process.env[WAKE_RACE_PROBE_ENV];
-  if (raw === undefined || raw === '') return 0;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-/**
- * The connection port every watcher suite here builds its watcher on.
- *
- * It is `imapMailboxConnectionPort` with ONE addition, and only while
- * `WAKE_RACE_PROBE_ENV` is set: `waitForUntagged` sleeps before it registers.
- *
- * That single call is the whole of the race `nudgeUntil` exists for.
- * `waitForWake` in `idle-watcher.ts` reaches it one round trip after the IDLE
- * command the fake server has already recorded in `commands`, so a test that
- * pushes a one-shot wake edge on the strength of `commands` is aiming at a
- * listener that is not there yet. Delaying exactly this call, and nothing
- * else, widens that window to whatever the probe is set to.
- *
- * WHY THE PROBE LIVES HERE AND NOT IN `idle-watcher.ts`. The sweep was
- * originally run by hand-patching a sleep into the production file, which is
- * both a step nobody repeats and a hook in shipped code. Wrapping the wire
- * from the test side puts the delay at the identical position, the same call,
- * the same await, one frame earlier, with production untouched. The real port
- * is returned unwrapped when the probe is off, so an ordinary run pays
- * nothing.
- *
- * `probeMsOverride` turns the probe on for one port regardless of the
- * environment. `inbound-mail-wake-race-probe.test.ts` uses it to assert that
- * this widening still reproduces the race on every run, so the sweep cannot
- * quietly become a no-op against a watcher that has moved on.
- */
-export function watcherConnectionPort(
-  options: ImapMailboxConnectionOptions,
-  probeMsOverride?: number,
-): MailboxConnectionPort {
-  const port = imapMailboxConnectionPort(options);
-  const delayMs = probeMsOverride ?? wakeRaceProbeMs();
-  if (delayMs === 0) return port;
-  return {
-    async open(): Promise<MailboxConnection> {
-      const connection = await port.open();
-      // Rebuilt field by field rather than spread: `MailboxConnection` carries
-      // methods, and a spread of a class instance would drop the ones living
-      // on its prototype.
-      const wire: MailboxWire = {
-        onUntagged: (listener) => connection.wire.onUntagged(listener),
-        sendCommand: (text, sendOptions) => connection.wire.sendCommand(text, sendOptions),
-        sendRawLine: (text) => connection.wire.sendRawLine(text),
-        awaitContinuation: (tag, readOptions) => connection.wire.awaitContinuation(tag, readOptions),
-        awaitTag: (tag, readOptions) => connection.wire.awaitTag(tag, readOptions),
-        waitForUntagged: async (matches, readOptions) => {
-          await new Promise<void>((resolve) => { setTimeout(resolve, delayMs); });
-          return connection.wire.waitForUntagged(matches, readOptions);
-        },
-      };
-      return {
-        report: connection.report,
-        reader: connection.reader,
-        bodyCapability: connection.bodyCapability,
-        wire,
-        close: () => connection.close(),
-      };
-    },
-  };
-}
-
-/**
- * Wait for `predicate`, re-sending `line` if the original wake was lost.
- *
- * THE RACE THIS EXISTS FOR. `runIdleRound` opens its line COLLECTOR before
- * sending `IDLE`, but the waiter that actually ends the round,
- * `waitForUntagged(isIdleWakeLine, …)`, is not registered until `waitForWake`
- * runs, which is after the server's `+ idling` continuation comes back. So
- * there is a window in which an untagged line is seen by the collector and by
- * nobody who can act on it.
- *
- * A test that observes `mailbox.commands` to decide the watcher is idling is
- * reading a SERVER-side fact and using it as a proxy for a CLIENT-side one.
- * They are correctly ordered and not simultaneous, and under the I/O pressure
- * of a full-suite run the gap opens. `clock.waitForSleepers(1)` is closer,
- * the re-issue timer IS armed client-side, but it is armed one line BEFORE
- * the untagged waiter, so it does not close the window either.
- *
- * When the edge is lost the only recovery is the 27-minute IDLE re-issue,
- * which runs on a `FakeClock` these tests do not advance. So a lost wake does
- * not present as slowness; it presents as a hard timeout at the deadline.
- *
- * A FALLBACK, NOT A SECOND STIMULUS. Nothing is sent until `intervalMs` has
- * passed with the predicate still false, so in the ordinary case, the edge
- * lands immediately, this behaves exactly like `waitFor` and sends nothing at
- * all. That matters: a test whose cursor deliberately does not advance would
- * re-deliver the same message on a duplicate wake, and the assertion is
- * usually an exact `toEqual`.
- *
- * Re-sending is faithful to IMAP rather than a trick. `* n EXISTS` reports the
- * mailbox's current message count and servers re-send it whenever they like; a
- * client that only ever woke on the first would be broken against real
- * servers. `line` is explicit because it must MATCH THE STIMULUS: nudging an
- * EXPUNGE test with EXISTS would provoke the very refetch it asserts does not
- * happen.
- *
- * WHETHER ANY TEST STILL NEEDS THIS is a question to answer by running
- * `bun run sweep:wake-race`, never by reading. The race has been swept twice by
- * inspection and both sweeps were incomplete, the second missed a whole suite
- * that arrived from another branch, and two tests in a file it had already
- * swept, and CI found them on a 2-vCPU runner instead. The sweep widens the
- * window with `watcherConnectionPort` above and reports what stops passing.
- */
-export async function nudgeUntil(
-  mailbox: Pick<FakeMailboxServer, 'push' | 'uids'>,
-  predicate: () => boolean,
-  what: string,
-  options: {
-    /** Defaults to re-announcing the mailbox's current message count. */
-    readonly line?: string | undefined;
-    /** How long to wait before the first re-send. */
-    readonly intervalMs?: number | undefined;
-    readonly timeoutMs?: number | undefined;
-  } = {},
-): Promise<void> {
-  const intervalMs = options.intervalMs ?? 100;
-  const timeoutMs = options.timeoutMs ?? 3_000;
-  const deadline = Date.now() + timeoutMs;
-  // Starts "just nudged", so the caller's own stimulus gets the first window.
-  let lastNudge = Date.now();
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    if (Date.now() - lastNudge >= intervalMs) {
-      mailbox.push(options.line ?? `* ${String(mailbox.uids.length)} EXISTS`);
-      lastNudge = Date.now();
-    }
-    await new Promise<void>((resolve) => { setTimeout(resolve, 5); });
-  }
-  throw new Error(`Timed out after ${String(timeoutMs)} ms waiting for: ${what}`);
 }

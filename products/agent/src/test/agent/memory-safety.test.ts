@@ -103,7 +103,7 @@ describe('Agent memory issuer protection', () => {
         for (const credential of ISSUERS) {
           const refused = tools.projectCall(`unsafe-create-${ISSUERS.indexOf(credential)}`, 'agent_local_registry', { domain: 'memory', action: 'create', cls: 'fact', summary: credential });
           await expect(refused).rejects.toBeInstanceOf(ToolInputProjectionError);
-          await expect(refused).rejects.toMatchObject({ problem: 'held', message: 'Tool input projection held.' });
+          await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
           expect(JSON.stringify(readings.admissionRequests)).not.toContain(credential);
           expect(readings.admissionRequests).toHaveLength(0);
           expect(registry.getAll()).toHaveLength(0);
@@ -115,7 +115,7 @@ describe('Agent memory issuer protection', () => {
         for (const credential of ISSUERS) {
           const beforeAsks = readings.admissionRequests.length;
           const refused = tools.projectCall(`unsafe-update-${ISSUERS.indexOf(credential)}`, 'agent_local_registry', { domain: 'memory', action: 'update', id: original!.id, detail: credential });
-          await expect(refused).rejects.toMatchObject({ problem: 'held', message: 'Tool input projection held.' });
+          await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
           expect(readings.admissionRequests).toHaveLength(beforeAsks);
           expect(registry.getAll()).toEqual([original!]);
         }
@@ -161,7 +161,7 @@ describe('Agent memory issuer protection', () => {
       });
       const args = { domain: 'memory', action: 'create', cls: 'fact', summary: ISSUERS[3]! };
       const refused = toolRegistry.execute('issuer-memory', 'agent_local_registry', args);
-      await expect(refused).rejects.toMatchObject({ problem: 'held', message: 'Tool input projection held.' });
+      await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
       expect(services.memoryRegistry.getAll()).toHaveLength(0);
       const controller = new AbortController();
       controller.abort();
@@ -187,7 +187,7 @@ describe('Agent memory issuer protection', () => {
             ...accountInput, [field]: credential,
           });
           await expect(account).rejects.toBeInstanceOf(ToolInputProjectionError);
-          await expect(account).rejects.toMatchObject({ problem: 'held', message: 'Tool input projection held.' });
+          await expect(account).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
           expect(protectedReads.requests).toHaveLength(0);
           expect(JSON.stringify(protectedPrivacy.privacyRequests)).not.toContain(credential);
           expect(existsSync(accountFile)).toBe(false);

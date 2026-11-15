@@ -11,7 +11,7 @@
  * escalation").
  *
  * The decision is the platform's `decideSandboxedExec`, never re-implemented here.
- * This module only (a) reads the live sandbox posture, (b) extracts the exec
+ * This module only (a) reads the sandbox posture the exec tool was registered with, (b) extracts the exec
  * command(s) from the request, (c) maps the platform decision onto the existing ask
  * callback: allow → approve without prompting; ask → attach the named
  * escalations to the request so the approval card renders them, then delegate to
@@ -23,8 +23,9 @@
  * base policy already resolved to "ask", it can never turn a deny into an allow,
  * and the frozen catastrophic block is untouched.
  */
-import { decideSandboxedExec, readCommandNeeds } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
+import { decideSandboxedExec, readCommandNeeds, recordGateEscalationApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 import { detectSandboxAvailability, probeSandboxHost, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
+import type { ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { JudgmentAuthorityRetiredError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type {
   PermissionPromptRequest,
@@ -48,11 +49,11 @@ export interface SandboxAskAnnotation {
 }
 
 export interface SandboxExecAskDeps {
-  /** The graduation-gated `exec-sandbox` feature flag state (read live). */
+  /** The graduation-gated `exec-sandbox` feature flag state. */
   readonly isSandboxFeatureEnabled: () => boolean;
-  /** The `sandbox.enabled` config switch (read live). */
+  /** The `sandbox.enabled` config switch. */
   readonly isSandboxConfigEnabled: () => boolean;
-  /** The `sandbox.egressAllowlist` command base names (read live). */
+  /** The `sandbox.egressAllowlist` command base names. */
   readonly readEgressAllowlist: () => readonly string[];
   /**
    * Honest host availability of the exec sandbox backend. Probing the host spawns
@@ -63,38 +64,87 @@ export interface SandboxExecAskDeps {
 }
 
 /**
- * Build the gate's live-reading dependencies from the runtime's config + feature
- * flags. The host probe (a bwrap spawn) is deferred to first use inside
- * createSandboxExecAsk, so the default path stays zero-cost until an exec ask
- * actually arrives with the sandbox turned on.
+ * Build the gate's dependencies from the runtime's config + feature flags.
+ * The exec tool decides at registration whether to wire a sandbox at all (feature
+ * flag and `sandbox.enabled` both on), then reads `sandbox.enabled` and the egress
+ * allowlist live for every command. The gate prices an ask against the same
+ * posture: the startup decision is captured once (a sandbox switched on mid-session
+ * was never wired, so it must not be trusted), while the config switch and the
+ * allowlist are read live (a sandbox switched off mid-session runs unsandboxed, so
+ * the ask must go to the owner). Call this where the tools are registered. The host
+ * probe (a bwrap spawn) is deferred to first use inside createSandboxExecAsk.
  */
 export function sandboxExecAskDepsFromRuntime(
   configManager: Pick<ConfigManager, 'get' | 'getCategory'>,
   featureFlags: Pick<FeatureFlagManager, 'isEnabled'>,
 ): SandboxExecAskDeps {
+  const featureEnabled = featureFlags.isEnabled('exec-sandbox');
+  const wiredAtStartup = featureEnabled && Boolean(configManager.getCategory('sandbox').enabled);
   return {
-    isSandboxFeatureEnabled: () => featureFlags.isEnabled('exec-sandbox'),
-    isSandboxConfigEnabled: () => Boolean(configManager.getCategory('sandbox').enabled),
+    isSandboxFeatureEnabled: () => featureEnabled,
+    isSandboxConfigEnabled: () => wiredAtStartup && Boolean(configManager.getCategory('sandbox').enabled),
     readEgressAllowlist: () => readSandboxExecList(configManager, SANDBOX_EGRESS_ALLOWLIST_CONFIG_KEY),
     detectAvailability: () => detectSandboxAvailability(probeSandboxHost()),
   };
 }
 
-/** Pull the shell command string(s) out of an exec request's args. */
+/**
+ * Pull the shell command text(s) out of an exec request's args. Only entries whose
+ * text is plainly the `cmd` the owner sees are read; a `cmd_base64` entry runs text
+ * other than `cmd`, so it is left out here and `execArgsNeedOwner` sends it to the owner.
+ */
 export function extractExecCommands(request: PermissionPromptRequest): string[] {
   const args = request.args ?? {};
   const out: string[] = [];
   if (Array.isArray(args.commands)) {
     for (const entry of args.commands) {
-      if (typeof entry === 'string') out.push(entry);
-      else if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).cmd === 'string') {
-        out.push((entry as Record<string, string>).cmd);
-      }
+      const text = entryText(entry);
+      if (text !== null) out.push(text);
     }
   }
   if (typeof args.command === 'string') out.push(args.command);
   if (typeof args.cmd === 'string') out.push(args.cmd);
   return out.filter((c) => c.length > 0);
+}
+
+function entryText(entry: unknown): string | null {
+  if (typeof entry === 'string') return entry;
+  if (!entry || typeof entry !== 'object') return null;
+  const record = entry as Record<string, unknown>;
+  if (record.cmd_base64 !== undefined && record.cmd_base64 !== null && record.cmd_base64 !== '') return null;
+  return typeof record.cmd === 'string' && record.cmd.length > 0 ? record.cmd : null;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * True when the request carries something the gate's command reading does not
+ * cover, so the owner must be asked rather than the sandbox decision trusted:
+ * host-side `file_ops` (they run on the host before any command, outside the
+ * boundary), a command entry the gate cannot read as plain `cmd` text (such as `cmd_base64`), or a working directory
+ * other than the one the commands were judged against.
+ */
+export function execArgsNeedOwner(request: PermissionPromptRequest): boolean {
+  const args = request.args ?? {};
+  if (Array.isArray(args.file_ops) ? args.file_ops.length > 0 : args.file_ops !== undefined && args.file_ops !== null) return true;
+  const judgedDirectory = request.workingDirectory;
+  const differs = (value: unknown): boolean => {
+    const directory = nonEmptyString(value);
+    return directory !== undefined && directory !== judgedDirectory;
+  };
+  if (differs(args.working_dir)) return true;
+  if (Array.isArray(args.commands)) {
+    for (const entry of args.commands) {
+      if (entryText(entry) === null) return true;
+      if (entry && typeof entry === 'object') {
+        const record = entry as Record<string, unknown>;
+        if (differs(record.cwd) || differs(record.working_dir)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** True for the shell-command tool whose asks the sandbox policy can relax. */
@@ -118,7 +168,7 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
     if (decisionModelPolicyState().operation === 'classic') return ask(request, options);
     if (!isExecRequest(request)) return ask(request, options);
     const commands = extractExecCommands(request);
-    if (commands.length === 0) return ask(request, options);
+    if (commands.length === 0 || execArgsNeedOwner(request)) return ask(request, options);
 
     // The sandbox is genuinely active only when the feature flag AND the config
     // switch are on AND the host can actually provide a boundary.
@@ -132,6 +182,7 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
       const currentCommands = extractExecCommands(request);
       const currentEgress = deps.readEgressAllowlist();
       if (options?.signal?.aborted || !isExecRequest(request) || request.workingDirectory !== workspace
+        || execArgsNeedOwner(request)
         || currentCommands.length !== commands.length || currentCommands.some((command, index) => command !== commands[index])
         || !deps.isSandboxFeatureEnabled() || !deps.isSandboxConfigEnabled()
         || currentEgress.length !== egressAllowlist.length || currentEgress.some((command, index) => command !== egressAllowlist[index])) {
@@ -150,8 +201,26 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
     }
 
     const escalations = dedupe(decisions.flatMap((decision) => decision.escalations));
-    return ask(annotateExecAsk(request, { sandboxed: true, sandboxEscalations: escalations }), options);
+    const decision = await ask(annotateExecAsk(request, { sandboxed: true, sandboxEscalations: escalations }), options);
+    // The card named the escalations, so approving it answers the exec-time ask for the same commands.
+    if (decision.approved) commands.forEach((command, index) => { if (decisions[index]?.effect === 'ask') recordGateEscalationApproval(command); });
+    return decision;
   };
+}
+
+/**
+ * The same sandbox-aware exec policy in front of an approval raiser, for the
+ * asks a worker raises (it has no permission manager of its own). The gate is
+ * built per ask so the caller's signal and routing travel with it; the host
+ * probe is cached across asks.
+ */
+export function sandboxAwareApprovalRaiser(deps: SandboxExecAskDeps, raise: ApprovalRaise): ApprovalRaise {
+  let availability: SandboxAvailability | null = null;
+  const cachedDeps: SandboxExecAskDeps = { ...deps, detectAvailability: () => (availability ??= deps.detectAvailability()) };
+  return ({ request, ...extras }) =>
+    createSandboxExecAsk(cachedDeps, (annotated, execution) =>
+      raise({ ...extras, request: annotated, ...(execution?.signal ? { signal: execution.signal } : {}) }),
+    )(request, extras.signal ? { signal: extras.signal } : undefined);
 }
 
 function dedupe(values: readonly string[]): string[] {

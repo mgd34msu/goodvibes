@@ -110,6 +110,10 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
             ].join('\n'));
             return;
           }
+          if (ctx.invokedByModel === true && parsed.flags.has('review')) {
+            ctx.print('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use. Nothing was imported; rerun without --review, then review it yourself with /personas review <id>.');
+            return;
+          }
           const personaRegistry = AgentPersonaRegistry.fromShellPaths(shellPaths);
           const persona = personaRegistry.create({
             name,

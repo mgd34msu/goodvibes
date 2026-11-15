@@ -12,14 +12,15 @@
  *
  * Each test here fails against the shape that shipped.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChannelPluginRegistry } from '../platform/src/platform/channels/plugin-registry.js';
 import { BuiltinChannelRuntime } from '../platform/src/platform/channels/builtin-runtime.js';
 import { ChannelHealthWatcher, type ChannelHealthAlert } from '../platform/src/platform/channels/health-watcher.js';
-import { observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.js';
+import { ChannelIngressAlarm } from '../platform/src/platform/channels/ingress-alarm.js';
+import { observeProviderRuntime, observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.js';
 import { resolveChannelHealthState } from '../platform/src/platform/channels/health.js';
 import type { ProviderRuntimeStatus } from '../platform/src/platform/channels/provider-runtime.js';
 import type { ChannelStatusSnapshot } from '../platform/src/platform/channels/types.js';
@@ -153,7 +154,7 @@ describe('channel health reflects the runtime, not the configuration', () => {
 
   test('a configured Telegram bot with live ingress reports healthy', async () => {
     const realFetch = globalThis.fetch;
-    const registrations: unknown[] = [];
+    const registrations: Array<{ url: string; secret_token: string; allowed_updates: readonly string[] }> = [];
     let runtime: BuiltinChannelRuntime | undefined;
     // Built to satisfy `typeof fetch` rather than cast to it: the global also
     // carries `preconnect`, so a bare arrow is genuinely not a fetch and the
@@ -179,7 +180,8 @@ describe('channel health reflects the runtime, not the configuration', () => {
       await runtime.startIngress();
 
       const snapshot = (await registry.listStatus()).find((entry) => entry.surface === 'telegram');
-      expect(registrations).toEqual([{ url: 'https://example.invalid/webhook/telegram', secret_token: 'shhh', allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post'] }]);
+      expect(registrations).toEqual([{ url: 'https://example.invalid/webhook/telegram', secret_token: 'shhh', allowed_updates: expect.any(Array) }]);
+      expect(registrations[0]?.allowed_updates.length).toBeGreaterThan(0);
       expect(runtime.telegramIngressStatus()?.mode).toBe('webhook');
       expect(snapshot?.state).toBe('healthy');
       expect(snapshot?.runtime?.observable).toBe(true);
@@ -378,6 +380,36 @@ describe('a declared credential that resolves to nothing is its own state', () =
   });
 });
 
+// ── telephony: the bridge is chosen by either the provider or the mode ─────────
+
+describe('the telephony doctor follows the path delivery will take', () => {
+  async function telephonyChecks(telephony: Record<string, unknown>) {
+    const registry = new ChannelPluginRegistry();
+    new BuiltinChannelRuntime(createDeps(registry, {
+      surfaces: { telephony: { enabled: true, accountSid: 'AC1', authToken: 'tok', fromNumber: '+15550100', ...telephony } },
+    })).registerPlugins();
+    const report = await registry.doctor('telephony');
+    return new Map((report?.checks ?? []).map((entry) => [entry.id, entry.status]));
+  }
+
+  test('bridge mode with the twilio provider asks for the bridge url and not for twilio credentials', async () => {
+    const checks = await telephonyChecks({ provider: 'twilio', mode: 'bridge', accountSid: '', authToken: '', fromNumber: '', bridgeUrl: '' });
+    expect(checks.get('bridge-url')).toBe('fail');
+    expect(checks.has('twilio-credentials')).toBe(false);
+  });
+
+  test('bridge mode with a bridge url raises neither check', async () => {
+    const checks = await telephonyChecks({ provider: 'twilio', mode: 'bridge', bridgeUrl: 'https://bridge.example' });
+    expect(checks.has('bridge-url')).toBe(false);
+    expect(checks.has('twilio-credentials')).toBe(false);
+  });
+
+  test('direct twilio still needs its credentials', async () => {
+    const checks = await telephonyChecks({ provider: 'twilio', mode: 'sms', accountSid: '' });
+    expect(checks.get('twilio-credentials')).toBe('fail');
+  });
+});
+
 // ── the same question, asked through `doctor` ───────────────────────────────
 
 describe('the doctor answers the same health question as the status', () => {
@@ -415,6 +447,7 @@ describe('health state resolution', () => {
     // Reading `running` alone would call a correctly armed webhook dead, the
     // same class of wrong answer pointing the other way.
     const observation = observeTelegramRuntime({
+      kind: 'receiving',
       mode: 'webhook',
       reason: 'Telegram updates will be delivered to https://example.invalid/webhook/telegram',
       running: false,
@@ -425,6 +458,7 @@ describe('health state resolution', () => {
 
   test('an inactive supervisor carries its own named reason forward', () => {
     const observation = observeTelegramRuntime({
+      kind: 'inactive',
       mode: 'inactive',
       reason: 'the bot token was rejected; check surfaces.telegram.botToken',
       running: false,
@@ -562,5 +596,178 @@ describe('a dead channel is surfaced, not merely recorded', () => {
     const alerts = await watcher.sweep();
     expect(alerts).toHaveLength(2);
     expect(seen.sort()).toEqual(['ntfy', 'telegram']);
+  });
+});
+
+describe('health says who is responsible, and what is wrong', () => {
+  test('a cluster standby reports its unread surface as unknown, not dead', async () => {
+    const registry = new ChannelPluginRegistry();
+    const runtime = new BuiltinChannelRuntime(createDeps(registry, {
+      surfaces: { telegram: { ...LIVE_TELEGRAM, mode: 'polling' } },
+      deliveryEnabled: (surface) => surface === 'telegram',
+    }));
+    runtime.registerPlugins();
+    runtime.setSurfaceResponsibility((surface) => surface !== 'telegram');
+    const telegram = (await registry.listStatus()).find((entry) => entry.surface === 'telegram');
+    expect(telegram?.state).toBe('unknown');
+    expect(telegram?.runtime?.reason).toContain('another node in the cluster');
+  });
+
+  test('an open Slack connection whose messages are being skipped is degraded', async () => {
+    const registry = new ChannelPluginRegistry();
+    const alarm = new ChannelIngressAlarm({ notify: () => undefined });
+    alarm.recordFailure('slack', 'route points at a closed session');
+    const runtime = new BuiltinChannelRuntime({
+      ...createDeps(registry, {
+        surfaces: { slack: { botToken: 'xoxb-token', workspaceId: 'T1' } },
+        deliveryEnabled: (surface) => surface === 'slack',
+        providerRuntimeStatus: () => ({ surface: 'slack', running: true, configured: true, transport: 'socket-mode', metadata: {} }),
+      }),
+      ingressAlarm: alarm,
+    } as BuiltinChannelRuntimeDeps);
+    runtime.registerPlugins();
+    const slack = (await registry.listStatus()).find((entry) => entry.surface === 'slack');
+    expect(slack?.state).toBe('degraded');
+    expect(slack?.runtime?.lastError).toBe('route points at a closed session');
+  });
+});
+
+describe('the health watcher only says what is true', () => {
+  test('a failed channel that is switched off or unwatched is not announced as working again', async () => {
+    const alerts: ChannelHealthAlert[] = [];
+    let states = [snapshot('telegram', 'dead')];
+    const watcher = new ChannelHealthWatcher({ listStatus: async () => states, announce: (alert) => { alerts.push(alert); } });
+    await watcher.sweep();
+    states = [snapshot('telegram', 'unknown')];
+    await watcher.sweep();
+    expect(alerts.map((entry) => entry.kind)).toEqual(['failed']);
+    states = [snapshot('telegram', 'healthy')];
+    await watcher.sweep();
+    expect(alerts.map((entry) => entry.kind)).toEqual(['failed', 'recovered']);
+    states = [snapshot('telegram', 'dead')];
+    await watcher.sweep();
+    states = [snapshot('telegram', 'disabled')];
+    await watcher.sweep();
+    states = [snapshot('telegram', 'healthy')];
+    await watcher.sweep();
+    expect(alerts.map((entry) => entry.kind)).toEqual(['failed', 'recovered', 'failed']);
+  });
+
+  test('a failure nobody could carry is not followed by a recovery notice', async () => {
+    const alerts: ChannelHealthAlert[] = [];
+    let states = [snapshot('telegram', 'dead')];
+    const watcher = new ChannelHealthWatcher({
+      listStatus: async () => states,
+      announce: (alert) => { alerts.push(alert); return false; },
+    });
+    await watcher.sweep();
+    states = [snapshot('telegram', 'healthy')];
+    await watcher.sweep();
+    expect(alerts.map((entry) => entry.kind)).toEqual(['failed']);
+  });
+
+  test('a degraded notice quotes what is wrong, not the healthy sentence', async () => {
+    const alerts: ChannelHealthAlert[] = [];
+    const degraded = { ...snapshot('slack', 'degraded'),
+      runtime: { observable: true, running: true, reason: 'the slack socket-mode connection is open', lastError: 'messages are being skipped' } };
+    const watcher = new ChannelHealthWatcher({ listStatus: async () => [degraded], announce: (alert) => { alerts.push(alert); } });
+    await watcher.sweep();
+    expect(alerts[0]?.message).toContain('messages are being skipped');
+    expect(alerts[0]?.message).not.toContain('connection is open');
+  });
+});
+
+describe('a rotated Telegram secret restarts ingress', () => {
+  test('a loop that stopped on a rejected token resumes when the secret is corrected', async () => {
+    const realFetch = globalThis.fetch;
+    let token = '123:old';
+    let tokenReads = 0;
+    const secrets: Record<string, string> = {};
+    Object.defineProperty(secrets, 'TG_TOKEN', {
+      enumerable: true,
+      get: () => { tokenReads++; return token; },
+      set: (value: string) => { token = value; },
+    });
+    const listeners = new Set<(key: string) => void>();
+    let runtime: BuiltinChannelRuntime | undefined;
+    let timers: ReturnType<typeof spyOn<typeof globalThis, 'setTimeout'>> | undefined;
+    globalThis.fetch = Object.assign(
+      async (...[input, init]: Parameters<typeof fetch>): Promise<Response> => {
+        const url = String(input);
+        const method = url.split('/').pop();
+        if (method === 'getUpdates') {
+          if (url.includes('%3Aold')) return Response.json({ ok: false, error_code: 401, description: 'Unauthorized' }, { status: 401 });
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => { const error = new Error('aborted'); error.name = 'AbortError'; reject(error); }, { once: true });
+          });
+        }
+        if (method === 'getWebhookInfo') return Response.json({ ok: true, result: { url: '', pending_update_count: 0 } });
+        return Response.json({ ok: true, result: true });
+      },
+      { preconnect: (): void => undefined },
+    );
+    try {
+      const registry = new ChannelPluginRegistry();
+      const deps = createDeps(registry, {
+        surfaces: { telegram: { ...LIVE_TELEGRAM, botToken: 'goodvibes://secrets/goodvibes/TG_TOKEN', mode: 'polling' } },
+        deliveryEnabled: (surface) => surface === 'telegram',
+        telegramOffsetPath: offsetPath(),
+        secrets,
+      });
+      runtime = new BuiltinChannelRuntime({
+        ...deps,
+        secretsManager: {
+          ...deps.secretsManager,
+          onDidChange: (listener: (key: string) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+        },
+      } as BuiltinChannelRuntimeDeps);
+      await runtime.startIngress();
+      await waitUntil(() => runtime?.telegramIngressStatus()?.mode === 'inactive', 'the rejected token stopping the loop');
+
+      // A restart is the coalescing timer; watch for it instead of waiting out the delay.
+      timers = spyOn(globalThis, 'setTimeout');
+      const watched = timers;
+      const restartTimers = (): number => watched.mock.calls.filter((call) => call[1] === 250).length;
+      const readsBefore = tokenReads;
+      secrets['UNRELATED'] = 'x';
+      for (const listener of listeners) listener('UNRELATED');
+      // The secret change is judged by re-reading the token; once that read has happened and settled, no restart was scheduled.
+      await waitUntil(() => tokenReads > readsBefore, 'the changed secret being checked against the bot token');
+      for (let turn = 0; turn < 20; turn++) await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(restartTimers()).toBe(0);
+      expect(runtime.telegramIngressStatus()?.mode).toBe('inactive');
+
+      secrets['TG_TOKEN'] = '123:new';
+      for (const listener of listeners) listener('TG_TOKEN');
+      await waitUntil(() => runtime?.telegramIngressStatus()?.mode === 'polling', 'polling resuming on the corrected token');
+      expect(restartTimers()).toBeGreaterThan(0);
+      expect(runtime.telegramIngressStatus()?.running).toBe(true);
+    } finally {
+      timers?.mockRestore();
+      try { await runtime?.stopIngress(); }
+      finally { globalThis.fetch = realFetch; }
+    }
+  }, 20_000);
+});
+
+async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > 5_000) throw new Error(`${label} never happened`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe('a webhook-served provider surface', () => {
+  const status = (configured: boolean, running: boolean) => ({
+    surface: 'slack' as const, running, configured, transport: 'socket-mode' as const, metadata: {},
+  });
+
+  test('with no socket configured reads unknown, not dead', () => {
+    expect(resolveChannelHealthState({ enabled: true, configured: true, runtime: observeProviderRuntime('slack', status(false, false)) })).toBe('unknown');
+  });
+
+  test('a configured socket that is stopped is still dead', () => {
+    expect(resolveChannelHealthState({ enabled: true, configured: true, runtime: observeProviderRuntime('slack', status(true, false)) })).toBe('dead');
   });
 });

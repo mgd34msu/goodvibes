@@ -239,7 +239,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     const afterCancel = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 2, 'late revalidation reply');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(ui.controller.active).toBe(false);
     expect(ui.text()).toBe(afterCancel);
     expect(f.migrations()).toBe(0);
@@ -259,7 +259,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     const afterTakeover = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 2, 'authority reply after takeover');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(f.migrations()).toBe(0);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
     expect(ui.text()).toBe(afterTakeover);
@@ -349,12 +349,17 @@ describe('interactive pairing controller over the real pairing core', () => {
     const afterCancel = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 3, 'late migration response');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(ui.text()).toBe(afterCancel);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
     await ui.controller.start(apply);
-    expect(ui.controller.active).toBe(false);
+    // The only thing offered is forgetting the attempt, behind its own phrase; no migration is made.
+    expect(ui.controller.waitingForOwner).toBe(true);
     expect(ui.text()).toContain('unknown');
+    expect(ui.text()).toContain('forget this unresolved attempt');
+    ui.feed('\r');
+    await untilPairing(() => !ui.controller.active, 'the declined clear to finish');
+    expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');
     expect(f.migrations()).toBe(1);
   }, { holdMigration: true }));
 
@@ -367,7 +372,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     const afterReplace = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 2, 'replaced authority response');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(ui.text()).toBe(afterReplace);
     expect(f.migrations()).toBe(0);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('missing');
@@ -385,7 +390,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     const afterCancel = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 4, 'late paired verification');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(ui.text()).toBe(afterCancel);
     expect(readAgentHostPairing(f.homeDirectory, f.host)).toEqual(saved);
     await ui.controller.start(apply);
@@ -402,7 +407,7 @@ describe('interactive pairing controller over the real pairing core', () => {
     const disposed = ui.text();
     f.release();
     await untilPairing(() => f.returned() === 3, 'disposed migration response');
-    await Bun.sleep(10);
+    await ui.controller.settled();
     expect(ui.controller.active).toBe(false);
     expect(ui.text()).toBe(disposed);
     expect(readAgentHostPairing(f.homeDirectory, f.host).status).toBe('unknown');

@@ -14,7 +14,8 @@
  * in the repository. These tests pin the two outcomes it can have now,
  * sent, or written down, and that neither is silence.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { wireMemoryPressureChannelNotice, type DaemonNoticeChannel } from '../../runtime/notification-dispatch.js';
 
 type OpsListener = (envelope: { type: string; ts: number; traceId?: string; payload: unknown }) => void;
@@ -33,11 +34,11 @@ function pressureBus() {
   };
 }
 
-function pressurePayload(tier: 'high' | 'critical') {
+function pressurePayload(tier: 'elevated' | 'high' | 'critical') {
   return {
     type: 'OPS_MEMORY_PRESSURE',
     tier,
-    previousTier: tier === 'critical' ? 'high' : 'elevated',
+    previousTier: tier === 'critical' ? 'high' : tier === 'high' ? 'elevated' : 'normal',
     rssMb: 3600,
     heapMb: 900,
     budgetMb: 4096,
@@ -70,16 +71,29 @@ describe('memory pressure leaves the daemon over the configured notice destinati
     expect(sent[0]).toContain('memory pressure');
   });
 
-  test('with no destination configured the notice is still written, not dropped', async () => {
+  test.each([
+    ['critical', 'error'],
+    ['high', 'warn'],
+    ['elevated', 'info'],
+  ] as const)('with no destination configured a %s notice is written at logger level %s, not dropped', async (tier, level) => {
     const { bus, emitOps } = pressureBus();
     const { channel, sent } = sendingChannel(false);
     wireMemoryPressureChannelNotice(bus as never, channel);
+    const lines: unknown[][] = [];
+    const levels = ['error', 'warn', 'info'] as const;
+    const spies = levels.map((name) => spyOn(logger, name).mockImplementation((...args: unknown[]) => { lines.push([name, ...args]); }));
 
-    emitOps({ type: 'OPS_MEMORY_PRESSURE', ts: 1, payload: pressurePayload('critical') });
-    await Promise.resolve();
+    try {
+      emitOps({ type: 'OPS_MEMORY_PRESSURE', ts: 1, payload: pressurePayload(tier) });
+      await Promise.resolve();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
 
-    // Nothing sent, because nothing is configured, and nothing thrown either.
     expect(sent).toHaveLength(0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.[0]).toBe(level);
+    expect(String(lines[0]?.[1])).toContain(`→ ${tier}`);
   });
 
   test('the high-churn rest of the ops domain is not a notice', async () => {
@@ -102,9 +116,20 @@ describe('memory pressure leaves the daemon over the configured notice destinati
       },
     };
     wireMemoryPressureChannelNotice(bus as never, channel);
+    const warnings: unknown[][] = [];
+    const spy = spyOn(logger, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args); });
 
-    expect(() => emitOps({ type: 'OPS_MEMORY_PRESSURE', ts: 1, payload: pressurePayload('high') })).not.toThrow();
-    await Promise.resolve();
+    try {
+      expect(() => emitOps({ type: 'OPS_MEMORY_PRESSURE', ts: 1, payload: pressurePayload('high') })).not.toThrow();
+      // Let the rejected send and its catch handler settle.
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.[0]).toBe('Memory pressure notice could not be delivered');
+    expect(warnings[0]?.[1]).toMatchObject({ error: 'webhook endpoint unreachable' });
   });
 
   test('unsubscribing stops the notices', async () => {

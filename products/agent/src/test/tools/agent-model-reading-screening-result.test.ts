@@ -30,7 +30,7 @@ async function refusal(read: () => Promise<unknown>): Promise<ToolInputProjectio
   catch (error) {
     if (!(error instanceof ToolInputProjectionError)) throw error;
     expect(error.problem).toBe('held'); expect(error.message).toBe('Tool input projection held.');
-    expect(Object.keys(error).sort()).toEqual(['name', 'problem']); return error;
+    expect(Object.keys(error).sort()).toEqual(['detail', 'name', 'problem']); expect(error.detail).toBeUndefined(); return error;
   }
   throw new Error('An unaccepted source reached consumption');
 }

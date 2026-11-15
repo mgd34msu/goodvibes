@@ -5,7 +5,7 @@ import { applyRuntimeConfigValue } from '@goodvibes-jev/engine/terminal-shell';
 import * as pairing from '@goodvibes-jev/engine/platform/platform/pairing';
 import * as reconcile from '../../runtime/legacy-daemon-reconcile.js';
 import { createDaemonCliConfiguration } from '../../cli/configuration.js';
-import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup } from '../../cli/startup-maintenance.js';
+import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup, sweepDaemonWorktrees } from '../../cli/startup-maintenance.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const restores: Array<() => void> = [];
@@ -77,8 +77,7 @@ test('reconcile skips overridden homes and pre-aborted admission without touchin
   expect(spy).not.toHaveBeenCalled();
 });
 
-test('reconcile receives login unit home and fresh configured client endpoint without runtime overrides', async () => {
-  if (process.platform !== 'linux') return;
+test('reconcile receives login unit home and fresh configured client endpoint without runtime overrides, on the one platform with systemd units', async () => {
   const f = fixture(false);
   f.configuration.config.setDaemonValues({ 'controlPlane.hostMode': 'local', 'controlPlane.port': 4567 });
   f.configuration.config.setDynamic('service.serviceName', 'fixture-daemon');
@@ -88,6 +87,8 @@ test('reconcile receives login unit home and fresh configured client endpoint wi
   restores.push(() => spy.mockRestore());
   const signal = new AbortController().signal;
   await reconcileDaemonStartup(f.configuration, f.env, signal);
+  // Other platforms have no systemd units to reconcile, so the owner is never consulted there.
+  if (process.platform !== 'linux') { expect(spy).not.toHaveBeenCalled(); return; }
   expect(spy).toHaveBeenCalledWith({ homeDir: f.root, trackedServiceName: 'fixture-daemon', configuredEndpoint: { host: '127.0.0.1', port: 4567 }, signal });
 });
 
@@ -126,3 +127,8 @@ for (const mode of ['placeholder', 'explicit', 'runtime', 'missing-bundle', 'por
     expect(f.spy).not.toHaveBeenCalled(); expect(readFileSync(path, 'utf8')).toBe(before);
   });
 }
+
+test('the worktree sweep never stops startup when the workspace is not a git repository', async () => {
+  const f = fixture();
+  expect(await sweepDaemonWorktrees(f.configuration)).toBeNull();
+});

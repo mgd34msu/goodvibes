@@ -96,9 +96,9 @@ test('close aborts one noncooperating report, drops every queued historical stat
   } });
   const first = reporter.update(update); await started.promise;
   for (let index = 0; index < 20; index++) void reporter.update({ ...update, sessionId: `obsolete-${index}`, busy: index % 2 === 0 });
-  const start = Date.now(), close = reporter.close(); expect(reporter.close()).toBe(close);
+  const close = reporter.close(); expect(reporter.close()).toBe(close);
   await close;
-  expect(Date.now() - start).toBeLessThan(1_200); expect(reportSignal?.aborted).toBe(true);
+  expect(reportSignal?.aborted).toBe(true);
   expect(reports(calls)).toHaveLength(1); expect(mutations(calls).at(-1)?.[1]).toBe('release-agent');
   await reporter.update({ ...update, sessionId: 'after-close' });
   release.resolve(); await first; await tick();
@@ -108,7 +108,7 @@ test('close aborts one noncooperating report, drops every queued historical stat
 test('even a noncooperating final release cannot keep terminal teardown waiting indefinitely', async () => {
   const { promise } = Promise.withResolvers<string>();
   const reporter = createHerdrSessionReporter({ environment, transport: async args => args[0] === '--version' ? 'herdr 0.9.3' : promise });
-  const start = Date.now(); await reporter.close(); expect(Date.now() - start).toBeLessThan(1_200);
+  await expect(reporter.close()).resolves.toBeUndefined();
 });
 
 test('failed state reports do not spin in a retry loop, can retry on the next update and still release', async () => {

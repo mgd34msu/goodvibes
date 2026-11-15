@@ -163,12 +163,14 @@ export function normalizeKnowledgeMapFilters(options: KnowledgeMapFilterOptions 
   const minConfidence = readNumber(options.minConfidence) ?? readNumber(nested.minConfidence);
   const knowledgeSpaceId = readString(options.knowledgeSpaceId) ?? readString(nested.knowledgeSpaceId);
   const includeAllSpaces = readBoolean(options.includeAllSpaces) ?? readBoolean(nested.includeAllSpaces);
+  // A list with no valid kind (a typo) is ignored rather than filtering every kind out.
+  const validRecordKinds = recordKinds.filter(isRecordKind);
   return {
     ...(query ? { query } : {}),
     ...(minConfidence === undefined ? {} : { minConfidence }),
     ...(knowledgeSpaceId ? { knowledgeSpaceId } : {}),
     ...(includeAllSpaces === undefined ? {} : { includeAllSpaces }),
-    ...(recordKinds.length > 0 ? { recordKinds: new Set(recordKinds.filter(isRecordKind)) } : {}),
+    ...(validRecordKinds.length > 0 ? { recordKinds: new Set(validRecordKinds) } : {}),
     ids: normalizeStringArray(options.ids ?? nested.ids),
     linkedToIds: normalizeStringArray(options.linkedToIds ?? nested.linkedToIds),
     nodeKinds: normalizeStringArray(options.nodeKinds ?? nested.nodeKinds),

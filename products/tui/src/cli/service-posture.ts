@@ -25,6 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import type { RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
@@ -219,11 +220,28 @@ export function resolveGoodVibesDaemonExecutable(options: DaemonExecutableResolu
 }
 
 export function getServiceStateRoot(runtime: CliServiceRuntime): string {
-  return join(runtime.homeDirectory, '.goodvibes', 'daemon');
+  return resolveGoodVibesDaemonHome(runtime.homeDirectory);
 }
 
 function pidFilePath(runtime: CliServiceRuntime, platform: ManagedServiceStatus['platform']): string {
   return join(getServiceStateRoot(runtime), 'service', `${platform}.pid`);
+}
+
+/** The release installer registers the daemon under this unit name; the CLI manages the same unit unless the owner configured another. */
+const INSTALLED_SERVICE_NAME = 'goodvibes-jev';
+
+/** The slice of the config manager that names the service; provenance is optional so callers holding only `get` still resolve. */
+export interface CliServiceNameSource {
+  get(key: string): unknown;
+  describeConfigKeySource?(key: string): { readonly tier: string; readonly effectiveOrigin?: string | undefined } | undefined;
+}
+
+export function resolveCliServiceName(configManager: CliServiceNameSource): string {
+  const source = typeof configManager.describeConfigKeySource === 'function'
+    ? configManager.describeConfigKeySource('service.serviceName')
+    : undefined;
+  if (source && source.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default')) return INSTALLED_SERVICE_NAME;
+  return String(configManager.get('service.serviceName') ?? INSTALLED_SERVICE_NAME).trim() || INSTALLED_SERVICE_NAME;
 }
 
 function runStatusCommand(command: string, args: readonly string[], options: CliServicePostureOptions): CliServiceStatusCommandResult {
@@ -248,7 +266,7 @@ function reconcileSystemdServiceStatus(
 ): ManagedServiceStatus {
   if (status.platform !== 'systemd') return status;
 
-  const name = String(runtime.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+  const name = resolveCliServiceName(runtime.configManager);
   const result = runStatusCommand(
     'systemctl',
     ['--user', 'show', `${name}.service`, '--property=LoadState,ActiveState,UnitFileState,MainPID', '--no-page'],
@@ -277,7 +295,7 @@ function reconcileSystemdServiceStatus(
 
 export function createPlatformServiceManager(runtime: CliServiceRuntime): PlatformServiceManager {
   const daemonHomeDir = getServiceStateRoot(runtime);
-  const serviceName = String(runtime.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+  const serviceName = resolveCliServiceName(runtime.configManager);
   const daemonExecutable = resolveGoodVibesDaemonExecutable();
   const definition: ServiceDefinitionOverride = {
     name: serviceName,
@@ -303,7 +321,7 @@ export function createPlatformServiceManager(runtime: CliServiceRuntime): Platfo
     homeDirectory: runtime.homeDirectory,
     surfaceRoot: 'daemon',
     definitionOverride: definition,
-    defaultServiceName: 'goodvibes',
+    defaultServiceName: INSTALLED_SERVICE_NAME,
     defaultServiceDescription: 'GoodVibes daemon, control-plane, listener, and web host',
   });
 }

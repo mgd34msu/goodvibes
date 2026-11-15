@@ -170,7 +170,7 @@ describe('standalone send provider wire contract', () => {
     expect(owned.captured[0]!.url).toBe('https://ntfy.example/gv-default'); expect(owned.captured[0]!.body).toBe('first');
     const request = owned.captured[1]!;
     expect(request.url).toBe('https://ntfy.example/gv-noisy'); expect(request.body).toBe(body);
-    expect(request.headers.get('Title')).toBe('Release'); expect(request.headers.has('Priority')).toBe(false);
+    expect(request.headers.get('Title')).toBe('Release'); expect(request.headers.get('Priority')).toBe('3');
     expect(owned.configuration.config.get('surfaces.ntfy.topic')).toBe('gv-default');
   });
 

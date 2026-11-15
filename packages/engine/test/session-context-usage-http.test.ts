@@ -121,6 +121,9 @@ test('real HTTP facade carries nullable capacity and provenance without exposing
     }
     // The browser replays these exact real HTTP bodies; schema-valid hand-written
     // substitutes or stale captures must fail this route proof as well.
+    // After an intended change to these responses, rewrite the capture with
+    //   GOODVIBES_TEST_CONTEXT_USAGE_FIXTURE_DIR=<repo>/products/webui/e2e/support/fixtures bun run test:one test/session-context-usage-http.test.ts
+    // and commit the regenerated products/webui/e2e/support/fixtures/session-context-usage.json.
     const recorded = JSON.parse(readFileSync(new URL('../../../products/webui/e2e/support/fixtures/session-context-usage.json', import.meta.url), 'utf8')) as unknown;
     expect(recorded).toEqual(capture);
   } finally { server.stop(true); }

@@ -228,6 +228,20 @@ export class CardMaterialRedactor {
   }
 }
 
+/**
+ * A secret that is only a few digits (a security code) is echoed, if at all, as
+ * a token of its own. Matched inside a longer digit run or an amount it would
+ * blank prices (`$41.23` holds `123`) and the checkout could no longer be read.
+ */
+const MAX_STANDALONE_DIGITS = 4;
+const isShortDigitSecret = (secret: LiveSecret): boolean => secret.digits.length > 0 && secret.digits.length <= MAX_STANDALONE_DIGITS;
+
+/** The literal as a whole token: not part of a longer number, a grouped or decimal amount, or a currency-prefixed price. */
+function standaloneLiteral(literal: string): RegExp {
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(String.raw`(?<![\d$€£¥]|\d[.,])${escaped}(?!\d|[.,]\d)`, 'g');
+}
+
 function redactWithSecrets(text: string, secrets: readonly LiveSecret[]): string {
   if (typeof text !== 'string' || text.length === 0) return text;
   let output = text;
@@ -235,14 +249,16 @@ function redactWithSecrets(text: string, secrets: readonly LiveSecret[]): string
   // Literal spellings first, the cheapest and most common case.
   for (const secret of secrets) {
     if (secret.literal.length === 0) continue;
-    output = output.split(secret.literal).join(REDACTED_MARKER);
+    output = isShortDigitSecret(secret)
+      ? output.replace(standaloneLiteral(secret.literal), REDACTED_MARKER)
+      : output.split(secret.literal).join(REDACTED_MARKER);
   }
 
   // Then the reformatted spellings: any digit run whose digits contain a
   // secret's digits is replaced whole. Replacing the run rather than the
   // matched digits inside it avoids leaving `4242 [redacted] 4242` behind,
   // which would disclose the shape and part of the value.
-  const digitSecrets = secrets.filter((secret) => secret.digits.length >= MIN_MATCHABLE_LENGTH);
+  const digitSecrets = secrets.filter((secret) => secret.digits.length >= MIN_MATCHABLE_LENGTH && !isShortDigitSecret(secret));
   if (digitSecrets.length === 0) return output;
 
   for (const { run, digits } of digitRuns(output)) {

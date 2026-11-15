@@ -157,4 +157,24 @@ describe('principals CLI command', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('update --clear-identities sends an empty identity list and conflicts with --identity', async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: string[] = [];
+    globalThis.fetch = mockFetch(async (_input, init) => {
+      bodies.push(typeof init?.body === 'string' ? init.body : '');
+      return jsonResponse({ principal: { id: 'principal-1', name: 'Mike', kind: 'user', identities: [], createdAt: 1, updatedAt: 2 } });
+    });
+    try {
+      const cleared = await handlePrincipalsCommand(runtime(['update', 'principal-1', '--clear-identities', '--yes']));
+      expect(cleared.exitCode).toBe(0);
+      expect((JSON.parse(bodies[0] ?? '{}') as { readonly identities?: unknown }).identities).toEqual([]);
+
+      const both = await handlePrincipalsCommand(runtime(['update', 'principal-1', '--clear-identities', '--identity', 'slack:U1', '--yes']));
+      expect(both.exitCode).toBe(2);
+      expect(bodies).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

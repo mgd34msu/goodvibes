@@ -45,7 +45,7 @@ describe('what a conversational turn is spawned with', () => {
 
   it('does not offer profile without an explicit owner-channel grant', () => {
     const options = conversationalTurnSpawnOptions({ sessionId: 's1', surfaceKind: 'telegram' });
-    expect(options.tools).toEqual(['read', 'find', 'fetch']);
+    expect(options.tools).toEqual(['read', 'find']);
     expect(options.captureAuthority.canCapture).toBe(false);
   });
 

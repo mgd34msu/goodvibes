@@ -39,9 +39,25 @@ export interface NativeWorkExecutionIntent {
   readonly generation: number;
   readonly state: 'admitting' | 'associated' | 'cancelled' | 'refused';
 }
+type NativeWorkExecutionErrorCode = 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission';
+/** The allowed next step per code. Every text is fixed, so none can carry an owner's raw failure message across the public boundary. */
+const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
+  unavailable: 'The execution could not be reached or confirmed; read the execution status to see where it stands, then retry, or cancel it.',
+  'unsupported-authority': 'Execution needs a native pairing token with the work-ledger read and write scopes; pair with those scopes, then retry.',
+  stale: 'The work, attempt, authority or workspace scope changed since it was read; read the work again and start from its current revisions.',
+  conflict: 'A concurrent change won; read the execution status, then retry only if it is still unstarted, or cancel it.',
+  'recovery-required': 'An earlier attempt has no live owner; read its status, then resume it, or cancel it and start again.',
+  closed: 'The execution host is closing; retry once it is running again.',
+  invalid: 'The request is malformed; correct it and send it again.',
+  refused: 'Admission refused this work; read its status for the reason, then start again with changed work, or cancel it.',
+  'not-found': 'No execution exists for this work and attempt; start it first.',
+  'pending-intent': 'An admission is still in flight for this work; read its status and wait for it to finish, or cancel it.',
+  'prevented-before-admission': 'This work was cancelled before it was admitted and cannot start; submit new work to run it.',
+};
 export class NativeWorkExecutionError extends Error {
-  constructor(readonly code: 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission', readonly decision?: JevDecision) {
-    super(`Native work execution: ${code}`); this.name = 'NativeWorkExecutionError';
+  /** `detail` is fixed text naming the current state and the moves that remain; never an owner's raw failure message. */
+  constructor(readonly code: NativeWorkExecutionErrorCode, readonly decision?: JevDecision, detail?: string) {
+    super(`Native work execution: ${code}. ${NEXT_STEP[code]}${detail ? ` ${detail}` : ''}`); this.name = 'NativeWorkExecutionError';
   }
 }
 /** Private original facts, never copied into public protocol labels. Paired

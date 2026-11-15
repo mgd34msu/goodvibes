@@ -1,5 +1,8 @@
 import type { CatalogModel } from './model-catalog.js';
-import { CATALOG_PROVIDER_NAME_ALIASES } from './provider-aliases.js';
+import { CATALOG_PROVIDER_NAME_ALIASES, sameProviderCatalog } from './provider-aliases.js';
+
+/** Facts are indexed under the canonical catalog name, so a registered alias and the catalog's own spelling meet. */
+const canonicalProviderId = (providerId: string): string => CATALOG_PROVIDER_NAME_ALIASES[providerId] ?? providerId;
 
 /** Public repository facts shared by provider discovery and benchmark matching. */
 let catalog: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map();
@@ -13,16 +16,17 @@ export function installCatalogModelFacts(models: readonly CatalogModel[]): void 
   const providers = new Map<string, Map<string, CatalogModel>>();
   const references = new Map<string, CatalogModel[]>();
   for (const model of models) {
-    let records = providers.get(model.providerId);
-    if (!records) { records = new Map(); providers.set(model.providerId, records); }
+    const providerKey = canonicalProviderId(model.providerId);
+    let records = providers.get(providerKey);
+    if (!records) { records = new Map(); providers.set(providerKey, records); }
     records.set(model.id, model);
     for (const reference of new Set([model.id, `${model.providerId}:${model.id}`, ...(model.canonicalModelId ? [model.canonicalModelId] : [])])) {
       const matches = references.get(reference) ?? [];
       matches.push(model); references.set(reference, matches);
     }
     if (model.modelType) {
-      let provider = next.get(model.providerId);
-      if (!provider) { provider = new Map(); next.set(model.providerId, provider); }
+      let provider = next.get(providerKey);
+      if (!provider) { provider = new Map(); next.set(providerKey, provider); }
       provider.set(model.id, model.modelType);
     }
     if (!model.canonicalModelId) continue;
@@ -46,7 +50,7 @@ export function knownCatalogModelIdentity(reference: string): string | undefined
 }
 
 export function knownCatalogChatCapability(provider: string, modelId: string): boolean | undefined {
-  const type = catalog.get(CATALOG_PROVIDER_NAME_ALIASES[provider] ?? provider)?.get(modelId);
+  const type = catalog.get(canonicalProviderId(provider))?.get(modelId);
   if (type === undefined) return undefined;
   if (type === 'chat') return true;
   return ['embedding', 'reranking', 'image', 'video', 'speech', 'transcription', 'decision', 'realtime'].includes(type) ? false : undefined;
@@ -55,11 +59,10 @@ export function knownCatalogChatCapability(provider: string, modelId: string): b
 /** Exact endpoint facts. A canonical ID can join only this provider's offerings. */
 export function catalogModelsForReference(modelId: string, provider?: string): readonly CatalogModel[] {
   if (provider === undefined) return byReference.get(modelId) ?? [];
-  const records = byProvider.get(CATALOG_PROVIDER_NAME_ALIASES[provider] ?? provider);
+  const records = byProvider.get(canonicalProviderId(provider));
   const direct = records?.get(modelId);
   if (direct) return [direct];
-  return (byReference.get(modelId) ?? []).filter(model =>
-    model.providerId === (CATALOG_PROVIDER_NAME_ALIASES[provider] ?? provider));
+  return (byReference.get(modelId) ?? []).filter(model => sameProviderCatalog(model.providerId, provider));
 }
 
 /** Unknown or conflicting endpoint limits remain unknown. */

@@ -9,10 +9,9 @@ import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engi
 import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { createBrokeredPermissionManager } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { createArchivableFleetRegistry } from '@goodvibes-jev/engine/terminal-shell';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
-import { approvalMetadataForRequest } from '../../runtime/bootstrap-core.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -58,6 +57,21 @@ function makeMockProvider(
   };
 }
 
+/**
+ * A judgment port that reads every permission question as a file write. With `critical`, the
+ * write is also read as loosening a security boundary: critical stakes, which every preset asks about.
+ */
+function writeJudgmentPort(critical = false) {
+  return fakePort((wireName, question) => {
+    const name = wireName.replace(/^(effect|risk|edge)__/, '');
+    if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.97);
+    if (name === 'kind') return choiceAnswer(question, 'write', 0.97);
+    if (name === 'capability') return choiceAnswer(question, 'generic', 0.97);
+    if (question.type === 'noul') return noulAnswer(name === 'mutates' || (critical && name === 'weakensSecurity') ? 0.97 : 0.03);
+    throw new Error(`Unexpected fleet-attention reading: ${name}`);
+  }).port;
+}
+
 const MOCK_MODEL = {
   id: 'mock-model',
   provider: 'mock',
@@ -89,6 +103,55 @@ describe('fleet plane adoption', () => {
     expect(node?.task).toBe('Stuck task');
   });
 
+  test('a background agent blocked on a human approval shows awaiting-approval with an attention flag', async () => {
+    resetTestRuntimeServices();
+    const runtime = (await getTestRuntimeServices());
+    const record = runtime.agentManager.spawn({ mode: 'spawn', task: 'Stuck task', template: 'general', tools: [] });
+    // A pending record projects as queued; only a running agent can be blocked on an ask.
+    record.status = 'running';
+
+    const previousJudgmentPort = installJudgmentPort(writeJudgmentPort(true));
+    const release = new AbortController();
+    let outcome: Promise<unknown> | undefined;
+    try {
+      // Critical stakes ask under every preset, so this write is held for a human.
+      runtime.configManager.set('permissions.mode', 'safe-owner');
+      runtime.configManager.set('behavior.autoApprove', false);
+      // The manager production builds for background agents; its ask carries the agent's attribution.
+      const permissionManager = createBrokeredPermissionManager({
+        workspaceTrust: null,
+        requestApproval: (input) => runtime.approvalBroker.requestApproval({ ...input, sessionId: 'fleet-attention-held-session' }),
+        configManager: runtime.configManager,
+        policyRuntimeState: new PolicyRuntimeState(),
+        hookDispatcher: runtime.hookDispatcher,
+        featureFlags: runtime.featureFlags,
+        userRuleStore: null,
+      });
+      outcome = permissionManager
+        .checkDetailed(
+          'write',
+          { files: [{ path: 'held.txt', content: 'hi' }] },
+          { kind: 'background-agent', agentId: record.id, template: 'general' },
+          { signal: release.signal },
+        )
+        .catch(() => undefined);
+      const pendingFor = () => runtime.approvalBroker.listApprovals().filter((a) => a.status === 'pending' && a.metadata['agentId'] === record.id);
+      for (let i = 0; pendingFor().length === 0 && i < 500; i++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(pendingFor()).toHaveLength(1);
+
+      const node = runtime.processRegistry.query({ kinds: ['agent'] }).nodes.find((n) => n.id === record.id);
+      expect(node?.state).toBe('awaiting-approval');
+      expect(node?.needsAttention?.reason).toBe('approval');
+    } finally {
+      release.abort();
+      await outcome;
+      installJudgmentPort(previousJudgmentPort);
+      runtime.configManager.set('permissions.mode', 'prompt');
+    }
+  });
+
   test('a configured background write finishes without manufacturing approval attention', async () => {
     resetTestRuntimeServices();
     const runtime = (await getTestRuntimeServices());
@@ -104,36 +167,19 @@ describe('fleet plane adoption', () => {
     await Promise.all([memoryStore.init(), projectIndex.load()]);
 
     // Install after runtime construction; ordinary configured writes stay automatic.
-    const previousJudgmentPort = installJudgmentPort(fakePort((wireName, question) => {
-    const name = wireName.replace(/^(effect|risk|edge)__/, '');
-      if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.97);
-      if (name === 'kind') return choiceAnswer(question, 'write', 0.97);
-      if (name === 'capability') return choiceAnswer(question, 'generic', 0.97);
-      if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.97 : 0.03);
-      throw new Error(`Unexpected fleet-attention reading: ${name}`);
-    }).port);
+    const previousJudgmentPort = installJudgmentPort(writeJudgmentPort());
     try {
       runtime.configManager.set('permissions.mode', 'prompt');
       runtime.configManager.set('behavior.autoApprove', false);
-      const policyRuntimeState = new PolicyRuntimeState();
-      const permissionManager = new PermissionManager(
-        (request) => {
-          // The production wiring under test (bootstrap-core.ts): forward
-          // request.attribution.agentId into the shared approval's metadata
-          // so the fleet registry can attach the pending ask to this agent's
-          // ProcessNode instead of leaving it unattributed.
-          const metadata = approvalMetadataForRequest(request);
-          return runtime.approvalBroker.requestApproval({
-            request,
-            sessionId: 'fleet-attention-test-session',
-            ...(metadata ? { metadata } : {}),
-          });
-        },
-        createPermissionConfigReader(runtime.configManager),
-        policyRuntimeState,
-        null,
-        runtime.featureFlags,
-      );
+      const permissionManager = createBrokeredPermissionManager({
+        workspaceTrust: null,
+        requestApproval: (input) => runtime.approvalBroker.requestApproval({ ...input, sessionId: 'fleet-attention-test-session' }),
+        configManager: runtime.configManager,
+        policyRuntimeState: new PolicyRuntimeState(),
+        hookDispatcher: runtime.hookDispatcher,
+        featureFlags: runtime.featureFlags,
+        userRuleStore: null,
+      });
 
       // A fresh AgentOrchestrator (mirrors orchestrator.test.ts's proven
       // wiring recipe) rather than runtime.agentOrchestrator, so this test

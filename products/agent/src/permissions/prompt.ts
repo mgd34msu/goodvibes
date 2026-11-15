@@ -45,8 +45,8 @@ export class PermissionPromptUI extends PermissionPromptFacts {
    * "Who is asking" line for the two attribution kinds (platform 1.6.1) that have
    * no OTHER rendered channel for it. `background-agent` attribution is
    * deliberately excluded here: it already flows into the fleet
-   * ProcessRegistry via `metadata.agentId` (see
-   * bootstrap-core.ts's approvalMetadataForRequest), so a spawned agent's
+   * ProcessRegistry via `metadata.agentId` (set by the
+   * engine's createBrokeredPermissionManager), so a spawned agent's
    * pending ask is attributed on its own ProcessNode. An MCP server
    * elicitation or a sandbox host-access escalation has no ProcessNode to
    * attach to, this prompt is the ONLY place a user learns who/what is
@@ -69,7 +69,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
 
   /** Returns the category label and the active-theme color for display. */
 
-  /** The facts of a request as label / value pairs, every one shown in full. */
+  /** The facts of a request as label / value pairs. The dialog shows every one; a subject too long for the screen is cut in the middle with a marker. */
   static promptFacts(request: PermissionRequest): Array<{ label: string; value: string; fg: string }> {
     const tokens = activeTokens();
     const analysis = this.fallbackAnalysis(request);
@@ -82,9 +82,11 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     add('Tool', request.tool, tokens.text);
     const attribution = this.attributionLine(request);
     if (attribution) add('Asked by', attribution);
+    // Risk comes before the command or path: that subject can run to many rows, and
+    // whatever the screen has to cut must never be the risk.
+    add('Risk', `${analysis.riskLevel} (${analysis.classification})`, color);
     add(brief.subjectLabel, this.getDisplayArg(request.tool, request.args), tokens.text);
     add('Directory', request.workingDirectory ?? '(unknown)');
-    add('Risk', `${analysis.riskLevel} (${analysis.classification})`, color);
     if (analysis.surface || analysis.blastRadius)
       add('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? `  radius=${analysis.blastRadius}` : ''}`);
     if (analysis.host) add('Host', analysis.host);
@@ -98,7 +100,8 @@ export class PermissionPromptUI extends PermissionPromptFacts {
 
   /**
    * The permission dialog as a kit modal layer: an amber cap (red for a high
-   * risk), the request's title, every fact wrapped in full, and the three
+   * risk), the request's title, the facts wrapped (a command or path longer than the
+   * screen keeps its start and end around a "not shown" marker), and the three
    * choices. Drawn above every other modal; the keys (y / a / n, Esc denies)
    * live in shell/blocking-input.ts.
    */
@@ -114,11 +117,12 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const facts = this.promptFacts(request);
     const factRows = facts.reduce((n, fact) => n + wrapLines(fact.value, valueW).length, 0);
     const body = factRows + 2;
-    const height = modalHeightFor(screenWidth, screenHeight, { hints: PROMPT_HINTS }, body);
+    const hints = promptHints(request);
+    const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
       title: brief.title,
       sub: label.toLowerCase(),
-      hints: PROMPT_HINTS,
+      hints,
       height,
       center: true,
       cap: high ? 'danger' : 'warning',
@@ -126,23 +130,63 @@ export class PermissionPromptUI extends PermissionPromptFacts {
       escKey: false,
     });
     let y = f.top;
-    for (const fact of facts) {
-      if (y > f.bottom - 2) break;
-      f.canvas.put(f.l, y, fact.label, { fg: tokens.textFaint });
-      for (const part of wrapLines(fact.value, valueW)) {
-        if (y > f.bottom - 2) break;
-        f.canvas.put(f.l + labelW + 1, y++, part, { fg: fact.fg });
-      }
+    const capacity = Math.max(0, f.bottom - 1 - f.top);
+    const subjectIndex = facts.findIndex((fact) => fact.label === brief.subjectLabel);
+    for (const fact of fitFactRows(facts, valueW, capacity, subjectIndex, tokens.warning)) {
+      if (fact.label) f.canvas.put(f.l, y, fact.label, { fg: tokens.textFaint });
+      f.canvas.put(f.l + labelW + 1, y++, fact.text, { fg: fact.fg });
     }
     // The choices, as chips on the last body row.
     let x = f.l;
     const by = f.bottom;
-    for (const [key, text, tone] of PROMPT_CHOICES) {
+    for (const [key, text, tone] of promptChoices(request)) {
       if (x + buttonWidth(`${text} ${key}`) > f.r) break;
       x = button(f.canvas, x, by, `${text} ${key}`, false, tone) + 2;
     }
     return finishModal(f);
   }
+}
+
+/**
+ * Lay the wrapped facts out in `capacity` rows. When they do not fit, the subject (command or
+ * path) is cut in the middle first, so its start and its end both stay visible, with a marker
+ * saying how many rows are not shown. If the other facts still do not fit (a very small
+ * terminal) the rows after the last one that fits are replaced by the same kind of marker.
+ */
+function fitFactRows(
+  facts: ReadonlyArray<{ label: string; value: string; fg: string }>,
+  valueW: number,
+  capacity: number,
+  subjectIndex: number,
+  markerFg: string,
+): Array<{ label: string; text: string; fg: string }> {
+  const wrapped = facts.map((fact) => wrapLines(fact.value, valueW));
+  const total = wrapped.reduce((n, rows) => n + rows.length, 0);
+  const subject = subjectIndex >= 0 ? wrapped[subjectIndex]! : null;
+  if (total > capacity && subject) {
+    const budget = Math.max(3, capacity - (total - subject.length));
+    if (subject.length > budget) {
+      const head = Math.ceil((budget - 1) / 2);
+      const tail = budget - 1 - head;
+      const hidden = subject.length - head - tail;
+      wrapped[subjectIndex] = [
+        ...subject.slice(0, head),
+        `… ${hidden} more row${hidden === 1 ? '' : 's'} not shown …`,
+        ...subject.slice(subject.length - tail),
+      ];
+    }
+  }
+  const rows: Array<{ label: string; text: string; fg: string }> = [];
+  facts.forEach((fact, index) => {
+    wrapped[index]!.forEach((text, row) => rows.push({ label: row === 0 ? fact.label : '', text, fg: fact.fg }));
+  });
+  if (rows.length <= capacity) return rows;
+  const shown = Math.max(0, capacity - 1);
+  const hidden = rows.length - shown;
+  return [
+    ...rows.slice(0, shown),
+    ...(capacity > 0 ? [{ label: '', text: `… ${hidden} more row${hidden === 1 ? '' : 's'} not shown; enlarge the terminal …`, fg: markerFg }] : []),
+  ];
 }
 
 /** Keycap hints of the permission dialog (the keys live in shell/blocking-input.ts). */
@@ -157,3 +201,14 @@ const PROMPT_CHOICES: ReadonlyArray<readonly [key: string, text: string, tone: B
   ['a', 'Allow for session', 'warning'],
   ['n', 'Deny', 'danger'],
 ];
+
+/** An ask the mode always puts to the owner again is not skipped by a remembered allow, so it is not offered. */
+function remembersAllow(request: PermissionRequest): boolean {
+  return request.rememberEffect !== 'owner-asked-again';
+}
+function promptHints(request: PermissionRequest): readonly KitHint[] {
+  return remembersAllow(request) ? PROMPT_HINTS : PROMPT_HINTS.filter(([key]) => key !== 'a');
+}
+function promptChoices(request: PermissionRequest): typeof PROMPT_CHOICES {
+  return remembersAllow(request) ? PROMPT_CHOICES : PROMPT_CHOICES.filter(([key]) => key !== 'a');
+}

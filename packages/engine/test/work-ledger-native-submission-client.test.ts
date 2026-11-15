@@ -15,6 +15,11 @@ import {
 import { createOperatorRemoteClient, type OperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { getOperatorContract } from '@goodvibes-jev/engine/contracts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
+import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
+import { createNativeWorkExecutionHost } from '../platform/src/platform/workflow/work-ledger/native-execution.js';
+import { createNativeConversationIntakeHost } from '../platform/src/platform/workflow/work-ledger/native-intake.js';
+import { captureNativeContractSource } from '../platform/src/platform/contract/native-source.js';
+import { captureJevDecisionContext } from '../../judgment/src/autonomy/validation.js';
 import { createHttpTransport, firstJsonSchemaFailure } from '../transport-http/src/index.js';
 
 const projectId = 'native-submission-project';
@@ -107,7 +112,10 @@ describe('native submission transport contract', () => {
 
   test('the narrow public client subpath bundles for browser with no host or execution authority', async () => {
     const bundled = await bundleBrowserEntrypoint(join(import.meta.dir, '../platform/src/platform/workflow/work-ledger/native-submission-client.ts'));
-    for (const hostSymbol of ['createNativeWorkExecution', 'captureJevDecisionContext', 'captureNativeContractSource', 'createWorkLedgerService']) expect(bundled).not.toContain(hostSymbol);
+    // Taken from the real exports so a rename breaks this file instead of leaving a guard that matches nothing.
+    const hostSymbols = [createWorkLedger, createNativeWorkExecutionHost, createNativeConversationIntakeHost, captureNativeContractSource, captureJevDecisionContext].map((fn) => fn.name);
+    expect(hostSymbols.every((name) => name.length > 0)).toBe(true);
+    for (const hostSymbol of hostSymbols) expect(bundled).not.toContain(hostSymbol);
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'));
     expect(manifest.exports['./platform/platform/workflow/work-ledger/native-submission-client']).toEqual({
       bun: './platform/src/platform/workflow/work-ledger/native-submission-client.ts',

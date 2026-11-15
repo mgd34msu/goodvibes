@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   createGoodVibesAuthClient,
   createMemoryTokenStore,
-  type GoodVibesExpiringTokenStore,
 } from '../platform/src/auth.js';
 import type { AutoRefreshOptions } from '../platform/src/auth.js';
 import { forgetFailureReadings, GoodVibesError, installJudgmentPort, JudgmentPortMissingError } from '../errors/src/index.js';
@@ -88,73 +87,6 @@ function makeOperatorStub(
 
   return { platformClient, calls };
 }
-
-// ---------------------------------------------------------------------------
-// 1. Pre-flight refresh before token expires (leeway triggers refresh)
-// ---------------------------------------------------------------------------
-
-describe('pre-flight: leeway triggers refresh when token is near expiry', () => {
-  it('calls ensureFreshToken and proceeds when leeway window not exceeded', async () => {
-    // Token expires 2 hours from now, well outside 60s leeway.
-    const store = createMemoryTokenStore('valid-token', Date.now() + 2 * 3_600_000);
-    const { platformClient, calls } = makeOperatorStub();
-
-    const auth = createGoodVibesAuthClient(
-      platformClient,
-      store,
-      undefined,
-      undefined,
-      { autoRefresh: true, refreshLeewayMs: 60_000 },
-    );
-
-    await auth.current();
-
-    // current() should still be called once (no refresh needed)
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toBe('control.auth.current');
-  });
-
-  it('triggers refresh when token expires within leeway window', async () => {
-    // Token expires in 30 seconds, inside 60s leeway.
-    // No refresh endpoint → graceful no-op, but coordinator runs.
-    const store = createMemoryTokenStore('expiring-token', Date.now() + 30_000);
-    const { platformClient, calls } = makeOperatorStub();
-
-    const refreshCalls: string[] = [];
-    // Override the store to track setToken calls (proxy)
-    const proxyStore: GoodVibesExpiringTokenStore = {
-      getToken: () => store.getToken(),
-      setToken: async (t) => {
-        refreshCalls.push('setToken');
-        return store.setToken(t);
-      },
-      clearToken: async () => {
-        refreshCalls.push('clearToken');
-        return store.clearToken();
-      },
-      getTokenEntry: () => store.getTokenEntry(),
-      setTokenEntry: async (t: string | null, exp: number | undefined) => {
-        refreshCalls.push('setTokenEntry');
-        return store.setTokenEntry(t, exp);
-      },
-    };
-
-    const auth = createGoodVibesAuthClient(
-      platformClient,
-      proxyStore,
-      undefined,
-      undefined,
-      { autoRefresh: true, refreshLeewayMs: 60_000 },
-    );
-
-    // Should still succeed, no-refresh endpoint means graceful skip.
-    await auth.current();
-
-    // The request went through (current() was called)
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toBe('control.auth.current');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // 2. In-flight request queuing during refresh

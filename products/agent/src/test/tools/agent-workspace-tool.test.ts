@@ -72,19 +72,20 @@ describe('workspace adapter', () => {
     ]);
   });
 
-  test('removed panel actions (panels, panel, open_panel) are absent from the enum and fall through safely', async () => {
+  test('removed panel actions (panels, panel, open_panel) are absent from the enum and are refused, not inferred', async () => {
     const calls: Record<string, unknown>[] = [];
     const tool = makeTool(calls);
 
-    // These inputs are no longer advertised; if passed they fall through to safe defaults (no crash).
-    const panelsResult = await tool.execute({ action: 'panels' }) as { success: boolean };
-    const panelResult = await tool.execute({ action: 'panel' }) as { success: boolean };
-    const openPanelResult = await tool.execute({ action: 'open_panel' }) as { success: boolean };
+    // These inputs are no longer advertised; if passed they are refused with the valid actions (no crash, no inferred default).
+    const panelsResult = await tool.execute({ action: 'panels' }) as { success: boolean; error?: string };
+    const panelResult = await tool.execute({ action: 'panel' }) as { success: boolean; error?: string };
+    const openPanelResult = await tool.execute({ action: 'open_panel' }) as { success: boolean; error?: string };
 
-    // All three fall through gracefully, no thrown exception
-    expect(panelsResult.success).toBe(true);
-    expect(panelResult.success).toBe(true);
-    expect(openPanelResult.success).toBe(true);
+    for (const refused of [panelsResult, panelResult, openPanelResult]) {
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain('Unknown workspace action');
+    }
+    expect(calls).toHaveLength(0);
 
     // The enum no longer carries the removed actions, model cannot discover or invoke them
     const toolDef = tool.definition;

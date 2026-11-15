@@ -1,4 +1,6 @@
 import type { SettingsPreconditionReceipt } from './settings-precondition.js';
+import { createSingleUseReferenceTable } from './single-use-reference-table.js';
+import { isPairingStoreFault, settingsRefusalReason, type SettingsRefusalReason } from './settings-precondition.js';
 
 /** Private authenticated ingress. Values never form hosted judgment evidence. */
 export interface SettingsImportPreconditionRequest {
@@ -37,8 +39,6 @@ interface Options<Prepared, Transition, Authority> {
   readonly admit: <T>(req: Request, authority: Authority, prepared: Prepared, assertCurrent: () => void,
     apply: (claim: () => void, assertAdmissionCurrent: () => void) => Promise<T>) => Promise<T>;
 }
-const LIFETIME_MS = 5 * 60_000;
-const MAX_REFERENCES = 256;
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -46,16 +46,14 @@ function exact(value: Record<string, unknown>, fields: readonly string[]): boole
   const keys = Object.keys(value);
   return keys.length === fields.length && keys.every(key => fields.includes(key));
 }
-function refusal(status: number, code: string): Response {
-  return Response.json({ error: 'Settings import owner unavailable', code }, { status });
+function refusal(status: number, code: string, reason?: SettingsRefusalReason): Response {
+  return Response.json({ error: 'Settings import owner unavailable', code, ...(reason ? { reason } : {}) }, { status });
 }
 export function createSettingsImportPreconditionHandler<Prepared, Transition, Authority>(options: Options<Prepared, Transition, Authority>): SettingsImportPreconditionHandler {
-  const references = new Map<string, { prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
-  let servingLifetime: object | null = null;
+  const references = createSingleUseReferenceTable<{ prepared: Prepared; authority: Authority; lifetime: object; expiresAt: number }>();
   const synchronize = () => {
     const current = options.lifetime();
-    if (current !== servingLifetime) { references.clear(); servingLifetime = current; }
-    for (const [reference, entry] of references) if (entry.expiresAt <= Date.now()) references.delete(reference);
+    references.synchronize(current);
     return current;
   };
   return { lifetime: options.lifetime, async handle(req, payload, requestLifetime) {
@@ -67,7 +65,7 @@ export function createSettingsImportPreconditionHandler<Prepared, Transition, Au
         return refusal(400, 'SETTINGS_IMPORT_PRECONDITION_INVALID');
       }
       const lifetime = synchronize();
-      if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE');
+      if (lifetime === null || lifetime !== requestLifetime) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE', 'stale');
       try {
         // Structural validation precedes this copy; private values stay in the native owner.
         const settings = arm.settings.map(entry => ({ key: entry.key as string, value: entry.value }));
@@ -75,18 +73,16 @@ export function createSettingsImportPreconditionHandler<Prepared, Transition, Au
         const facts = options.owner.inspect(prepared);
         options.owner.assert(prepared);
         const authority = options.captureAuthority(req);
-        if (authority === null || options.lifetime() !== lifetime || req.signal.aborted) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE');
-        const reference = crypto.randomUUID(), expiresAt = Date.now() + LIFETIME_MS;
-        while (references.size >= MAX_REFERENCES) references.delete(references.keys().next().value!);
-        references.set(reference, { prepared, authority, lifetime, expiresAt });
+        if (authority === null || options.lifetime() !== lifetime || req.signal.aborted) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE', 'stale');
+        const { reference, expiresAt } = references.issue({ prepared, authority, lifetime });
         return Response.json({ settingsImportPrecondition: { version: 1, action: 'captured', reference, expiresAt, facts } });
-      } catch { return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE'); }
+      } catch (error) { return refusal(409, isPairingStoreFault(error) ? 'PAIRING_STORE_FAULTED' : 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
     }
     if (arm.action !== 'apply' || !exact(arm, ['version', 'action', 'reference']) || typeof arm.reference !== 'string'
       || !arm.reference || arm.reference.length > 128) return refusal(400, 'SETTINGS_IMPORT_PRECONDITION_INVALID');
-    const lifetime = synchronize(), entry = references.get(arm.reference);
-    references.delete(arm.reference);
-    if (!entry || lifetime === null || lifetime !== requestLifetime || entry.lifetime !== lifetime || entry.expiresAt <= Date.now()) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE');
+    const lifetime = synchronize();
+    const { entry, spent: wasSpent } = references.take(arm.reference);
+    if (!entry || lifetime === null || lifetime !== requestLifetime || entry.lifetime !== lifetime || entry.expiresAt <= Date.now()) return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_STALE', wasSpent ? 'spent' : 'stale');
     const assertBound = () => {
       req.signal.throwIfAborted();
       if (options.lifetime() !== entry.lifetime || Date.now() >= entry.expiresAt) throw new Error('Settings import retired');
@@ -102,6 +98,6 @@ export function createSettingsImportPreconditionHandler<Prepared, Transition, Au
           return options.owner.finish(entry.prepared, transition, current);
         }), assertAdmissionCurrent));
       return Response.json({ settingsImportPrecondition: { version: 1, action: 'applied', reference: arm.reference, receipt } });
-    } catch { return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE'); }
+    } catch (error) { return refusal(409, 'SETTINGS_IMPORT_PRECONDITION_UNAVAILABLE', settingsRefusalReason(error)); }
   } };
 }

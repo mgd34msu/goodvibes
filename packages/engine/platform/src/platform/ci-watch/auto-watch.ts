@@ -14,7 +14,7 @@ import type { ExternalOperationSource } from '../permissions/external-request.js
  *
  * Delivery defaults to the daemon's own operator-surface channel ('web', the
  * control-plane delivery the existing push-notification path rides), and the
- * red-run "fix this?" offer plus verdict-retirement behavior come free from
+ * verdict notification plus verdict-retirement behavior come free from
  * CiWatchService: the watch EXPIRES once its terminal verdict is delivered.
  * The scripted path (/ci watch → ci.watches.create) is untouched.
  */
@@ -33,6 +33,9 @@ export interface DetectedCiPush {
   /** The pushed branch when the command names one (else the current branch is resolved). */
   readonly branch?: string | undefined;
 }
+
+/** Push flags after which there is no branch worth a CI watch. */
+const PUSH_FLAG_NO_BRANCH = new Set(['--delete', '--tags']);
 
 const PUSH_FLAG_WITH_VALUE = new Set(['-o', '--push-option', '--receive-pack', '--repo', '--exec']);
 
@@ -70,20 +73,42 @@ export function detectCiPushInCommand(command: string): DetectedCiPush | null {
     // Positional args after `push`, skipping flags (and their values where known):
     // the first positional is the remote, the second the refspec/branch.
     const positionals: string[] = [];
+    let skipped = false;
     for (let i = pushIndex + 1; i < tokens.length; i++) {
       const token = tokens[i]!;
       if (token.startsWith('-')) {
+        // Deleting a ref or pushing only tags leaves no branch whose CI could be watched.
+        if (PUSH_FLAG_NO_BRANCH.has(token) || /^-[a-zA-Z]*d[a-zA-Z]*$/.test(token)) skipped = true;
         if (PUSH_FLAG_WITH_VALUE.has(token)) i += 1;
         continue;
       }
       positionals.push(token);
     }
-    const refspec = positionals[1];
-    // `HEAD:feature-x` pushes the right-hand branch; a plain branch is itself.
-    const branch = refspec?.includes(':') ? refspec.split(':')[1] : refspec;
-    return { kind: 'push', branch: branch || undefined };
+    if (skipped) continue;
+    const branch = branchFromRefspec(positionals[1]);
+    if (branch === null) continue;
+    return { kind: 'push', branch };
   }
   return null;
+}
+
+/**
+ * The branch a refspec pushes to; undefined when it names none and the current
+ * branch should be resolved (`HEAD`, nothing); null when the push has no branch
+ * to watch (a delete such as `:branch`, or a tag or other non-branch ref). A
+ * leading `+` (force) and `refs/heads/` are not part of the branch name.
+ */
+function branchFromRefspec(refspec: string | undefined): string | undefined | null {
+  if (!refspec) return undefined;
+  let target = refspec.startsWith('+') ? refspec.slice(1) : refspec;
+  if (target.includes(':')) {
+    const [source, destination] = target.split(':', 2);
+    if (!source) return null;
+    target = destination ?? '';
+  }
+  if (target.startsWith('refs/heads/')) target = target.slice('refs/heads/'.length);
+  else if (target.startsWith('refs/')) return null;
+  return !target || target === 'HEAD' ? undefined : target;
 }
 
 /** Extract the command strings from exec-tool args ({ commands: [{cmd}] } or strings). */

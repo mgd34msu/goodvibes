@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { provideNativeAddon, resolveNativeAddonPayload, resolveOwnedPackageManifest } from '../../toolchain/src/lib/binary-dependency-resolution.ts';
@@ -27,9 +28,13 @@ function fixture() {
     symlinkSync(native, join(dirname(owner), selected.nativeAddonPackage!), 'dir');
     return native;
   };
+  const archiveBytes = 'fixture tarball bytes';
+  const integrityOf = (bytes: string) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
+  /** The product lockfile records the integrity of the archive the fetch is expected to return. */
+  const lockCross = (bytes = archiveBytes) => writeFileSync(join(product, 'bun.lock'), `{\n  "packages": {\n    "${cross.nativeAddonPackage}": ["${cross.nativeAddonPackage}@0.1.9", "", { "os": "darwin" }, "${integrityOf(bytes)}"],\n  }\n}\n`);
   const destination = (selected = target) => join(product, 'dist', 'lib', selected.nativeAddonPackage!, selected.nativeAddonFile!);
   const stage = (selected = target, sameHost = true, exec?: Exec) => provideNativeAddon({ root: product, addonOutDir: 'dist/lib', target: selected, sameHost, ...(exec ? { exec } : {}), logger: { info() {}, warn() {}, error() {} } });
-  return { root, product, owner, install, destination, stage };
+  return { root, product, owner, install, destination, stage, lockCross, archiveBytes };
 }
 
 test('resolves the linked dependency owner and stages its native package with admitted modes under a private umask', () => {
@@ -89,10 +94,10 @@ test.each(['payload', 'manifest'] as const)('a linked %s outside the installed n
 });
 
 test('cross-target fetch retains the exact target/version and validates the extracted payload', () => {
-  const f = fixture(); const calls: { command: string; args: readonly string[] }[] = [];
+  const f = fixture(); const calls: { command: string; args: readonly string[] }[] = []; f.lockCross();
   const exec: Exec = (command, args) => {
     calls.push({ command, args });
-    if (command === 'npm') return { status: 0, stdout: 'fixture.tgz\n', stderr: '' };
+    if (command === 'npm') { writeFileSync(join(args[args.indexOf('--pack-destination') + 1]!, 'fixture.tgz'), f.archiveBytes); return { status: 0, stdout: 'fixture.tgz\n', stderr: '' }; }
     const scratch = args[args.indexOf('-C') + 1]!;
     const native = pkg(join(scratch, 'package'), cross.nativeAddonPackage!);
     writeFileSync(join(native, cross.nativeAddonFile!), 'extracted target bytes');
@@ -106,11 +111,11 @@ test('cross-target fetch retains the exact target/version and validates the extr
 });
 
 test.each(['wrong-name', 'wrong-version', 'linked-payload', 'linked-manifest', 'linked-package'] as const)('cross-target %s is refused without output', kind => {
-  const f = fixture();
+  const f = fixture(); f.lockCross();
   const outside = pkg(join(f.root, 'unrelated'), cross.nativeAddonPackage!);
   writeFileSync(join(outside, cross.nativeAddonFile!), 'unrelated bytes');
   const exec: Exec = (command, args) => {
-    if (command === 'npm') return { status: 0, stdout: 'fixture.tgz', stderr: '' };
+    if (command === 'npm') { writeFileSync(join(args[args.indexOf('--pack-destination') + 1]!, 'fixture.tgz'), f.archiveBytes); return { status: 0, stdout: 'fixture.tgz', stderr: '' }; }
     const scratch = args.at(-1)!;
     const native = join(scratch, 'package');
     if (kind === 'linked-package') symlinkSync(outside, native, 'dir');
@@ -128,6 +133,24 @@ test.each(['wrong-name', 'wrong-version', 'linked-payload', 'linked-manifest', '
     return { status: 0, stdout: '', stderr: '' };
   };
   expect(() => f.stage(cross, false, exec)).toThrow();
+  expect(existsSync(f.destination(cross))).toBe(false);
+});
+
+test('a cross-target archive that differs from the lockfile integrity is refused before extraction', () => {
+  const f = fixture(); f.lockCross(); let extracted = false;
+  const exec: Exec = (command, args) => {
+    if (command === 'npm') { writeFileSync(join(args[args.indexOf('--pack-destination') + 1]!, 'fixture.tgz'), 'altered archive bytes'); return { status: 0, stdout: 'fixture.tgz', stderr: '' }; }
+    extracted = true;
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  expect(() => f.stage(cross, false, exec)).toThrow('does not match the lockfile integrity');
+  expect(extracted).toBe(false);
+  expect(existsSync(f.destination(cross))).toBe(false);
+});
+
+test('a cross-target fetch with no lockfile integrity is refused without contacting the registry', () => {
+  const f = fixture();
+  expect(f.stage(cross, false, () => { throw new Error('must not fetch without a pinned integrity'); })).toBe(false);
   expect(existsSync(f.destination(cross))).toBe(false);
 });
 

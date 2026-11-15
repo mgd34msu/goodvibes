@@ -105,6 +105,27 @@ export class SessionTaskGraph {
   }
 
   /**
+   * Register or update a ref and, when `dependsOn` is given, add the dependency
+   * edge, as one step: a refused edge (missing target, cycle, self-dependency)
+   * leaves the graph exactly as it was, including the ref.
+   */
+  public linkRef(
+    ref: CrossSessionTaskRef,
+    dependsOn?: { sessionId: string; taskId: string },
+    reason?: string,
+  ): { ok: boolean; error?: string | undefined } {
+    const key = makeRefKey(ref.sessionId, ref.taskId);
+    const prior = this._refs.get(key);
+    this.upsertRef(ref);
+    if (!dependsOn) return { ok: true };
+    const edge = this.addEdge({ sessionId: ref.sessionId, taskId: ref.taskId }, dependsOn, reason);
+    if (edge.ok) return { ok: true };
+    if (prior) this._refs.set(key, prior);
+    else this._refs.delete(key);
+    return { ok: false, error: edge.error };
+  }
+
+  /**
    * Retrieve a ref by session + task ID.
    *
    * @returns The ref if found, or `undefined`.

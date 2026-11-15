@@ -1,5 +1,5 @@
 /** Host-private dispatch fences. Identity and observation only, never a turn permit. */
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, type Stats } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, type Stats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { acquireCrossProcessLock, confirmFileDurable, writeJsonFileAtomic } from '../state/durable-file-io.js';
@@ -30,15 +30,35 @@ export interface NativeHostedTurnDispatch {
   readonly correlationId: string | null;
 }
 
+/**
+ * The process that created a claim. Kept beside the journal, not in it, so
+ * the journal's record shape is unchanged. Evidence only: it can prove that
+ * a claim's owner has exited, never that it is still running.
+ */
+export interface NativeHostedTurnClaimOwner {
+  readonly pid: number;
+  /** Random per process; distinguishes a restarted process that reused the pid. */
+  readonly instance: string;
+  /** Which machine and pid namespace the pid belongs to; a pid says nothing about a process elsewhere. */
+  readonly host?: string;
+}
+
 export interface NativeHostedTurnJournalIO {
   readonly acquireCrossProcessLock: typeof acquireCrossProcessLock;
   readonly writeJsonFileAtomic: typeof writeJsonFileAtomic;
   readonly confirmFileDurable: typeof confirmFileDurable;
 }
 
+/** Compaction is tried once the journal holds this share of either cap. */
+const COMPACT_AT = 0.9;
+
+type JournalErrorCode = 'invalid-identity' | 'invalid-dispatch' | 'invalid-journal' | 'journal-limit' | 'conflict' | 'surface-conflict';
+const NEXT_STEP: Partial<Record<JournalErrorCode, string>> = {
+  'journal-limit': 'The journal is full of turns that cannot be dropped yet (still running or awaiting recovery, or not yet marked finished on intake). Cancel the stale native turns, then start again.',
+};
 export class NativeHostedTurnJournalError extends Error {
-  constructor(readonly code: 'invalid-identity' | 'invalid-dispatch' | 'invalid-journal' | 'journal-limit' | 'conflict' | 'surface-conflict') {
-    super(`Native hosted turn journal: ${code}`);
+  constructor(readonly code: JournalErrorCode) {
+    super(`Native hosted turn journal: ${code}${NEXT_STEP[code] ? `. ${NEXT_STEP[code]}` : ''}`);
     this.name = 'NativeHostedTurnJournalError';
   }
 }
@@ -160,8 +180,30 @@ function readFile(path: string): JournalFile {
   } finally { closeSync(fd); }
 }
 
+const terminalState = (state: DispatchState): boolean => state === 'completed' || state === 'cancelled';
+
+/** Owners of claims that are not yet terminal. Unreadable means "no evidence", never an error. */
+function readOwners(path: string): Map<string, NativeHostedTurnClaimOwner> {
+  const owners = new Map<string, NativeHostedTurnClaimOwner>();
+  try {
+    const stat = regularFile(path);
+    if (!stat || stat.size > NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES) return owners;
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!exact(value, ['version', 'owners']) || value.version !== 1 || !exact(value.owners, Object.keys(value.owners as object))) return owners;
+    for (const [key, owner] of Object.entries(value.owners as Record<string, unknown>)) {
+      const hasHost = exact(owner, ['pid', 'instance', 'host']);
+      if ((hasHost || exact(owner, ['pid', 'instance'])) && Number.isSafeInteger(owner.pid) && (owner.pid as number) > 0 && validId(owner.instance)
+        && (!hasHost || (typeof owner.host === 'string' && owner.host.length > 0 && owner.host.length <= 512))) {
+        owners.set(key, { pid: owner.pid as number, instance: owner.instance as string, ...(hasHost ? { host: owner.host as string } : {}) });
+      }
+    }
+  } catch { owners.clear(); }
+  return owners;
+}
+
 /**
- * No expiry, eviction or replay. A persisted preparing/dispatching claim after
+ * No expiry and no replay. Records leave only through `compact`, which the caller may use
+ * only for inputs whose intake capture can no longer be dispatched. A persisted preparing/dispatching claim after
  * restart is evidence of uncertainty, never fresh permission to execute.
  * Post-publication durability errors escape unchanged; bytes are never restored.
  */
@@ -216,9 +258,11 @@ export class NativeHostedTurnJournal {
   }
 
   /** Only the call that durably creates the claim may proceed toward dispatch. */
-  async claim(identity: NativeHostedTurnIdentity, locallyOwnedInputs: readonly string[] = [], originSurface?: NativeHostedTurnOriginSurface): Promise<boolean> {
+  async claim(identity: NativeHostedTurnIdentity, locallyOwnedInputs: readonly string[] = [], originSurface?: NativeHostedTurnOriginSurface, owner?: NativeHostedTurnClaimOwner): Promise<boolean> {
     const expected = copyIdentity(identity);
     if (originSurface !== undefined && originSurface !== 'webui' && originSurface !== 'agent') throw new NativeHostedTurnJournalError('invalid-dispatch');
+    if (owner !== undefined && (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || !validId(owner.instance)
+      || (owner.host !== undefined && (owner.host.length === 0 || owner.host.length > 512)))) throw new NativeHostedTurnJournalError('invalid-dispatch');
     const surface = originSurface ?? 'webui';
     return this.locked(() => {
       const file = readFile(this.path);
@@ -241,8 +285,80 @@ export class NativeHostedTurnJournal {
       }
       file.records.push({ identity: expected, ...(originSurface ? { originSurface } : {}), state: 'preparing', sessionId: null, brokerInputId: null, correlationId: null });
       this.write(file);
+      if (owner) this.recordOwner(file, keyOf(expected), owner);
       return true;
     });
+  }
+
+  /** Best effort after the claim is durable: a missing owner only withholds later proof. */
+  private recordOwner(file: JournalFile, key: string, owner: NativeHostedTurnClaimOwner): void {
+    const path = `${this.path}.owners`;
+    try {
+      const open = new Set(file.records.filter(record => !terminalState(record.state)).map(record => keyOf(record.identity)));
+      const owners = readOwners(path);
+      for (const existing of [...owners.keys()]) if (!open.has(existing)) owners.delete(existing);
+      owners.set(key, { pid: owner.pid, instance: owner.instance, ...(owner.host === undefined ? {} : { host: owner.host }) });
+      // Deliberately not `this.io`: that seam governs the journal's own bytes.
+      writeJsonFileAtomic(path, { version: 1, owners: Object.fromEntries(owners) }, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+    } catch { /* The claim stands; without an owner it can only be resolved as recovery-required. */ }
+  }
+
+  /** The process that created this claim, when it was recorded. */
+  async owner(identity: NativeHostedTurnIdentity): Promise<NativeHostedTurnClaimOwner | null> {
+    const expected = copyIdentity(identity);
+    return this.locked(() => {
+      this.find(readFile(this.path), expected);
+      return readOwners(`${this.path}.owners`).get(keyOf(expected)) ?? null;
+    });
+  }
+
+  /** Terminal records, and whether the journal is close enough to a cap that they are worth compacting. */
+  async census(): Promise<{ readonly nearCap: boolean; readonly terminal: readonly NativeHostedTurnDispatch[] }> {
+    return this.locked(() => {
+      const file = readFile(this.path);
+      const nearCap = file.records.length >= NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS * COMPACT_AT
+        || Buffer.byteLength(JSON.stringify(file), 'utf8') >= NATIVE_HOSTED_TURN_JOURNAL_MAX_BYTES * COMPACT_AT;
+      return { nearCap, terminal: nearCap ? file.records.filter(record => terminalState(record.state)) : [] };
+    });
+  }
+
+  /**
+   * Drop records the caller has proven finished on intake, and only those that are
+   * still terminal here and that no live owner holds. `held` is consulted under the
+   * lock with the recorded claim owner. Terminal states never change, so the proof
+   * cannot go stale between the caller's check and this write.
+   */
+  async compact(proven: readonly NativeHostedTurnIdentity[], held: (record: NativeHostedTurnDispatch, owner: NativeHostedTurnClaimOwner | null) => boolean): Promise<number> {
+    const wanted = new Map(proven.map(identity => { const copy = copyIdentity(identity); return [keyOf(copy), copy] as const; }));
+    if (!wanted.size) return 0;
+    return this.locked(() => {
+      const file = readFile(this.path);
+      const owners = readOwners(`${this.path}.owners`);
+      const droppedKeys: string[] = [];
+      const kept = file.records.filter(record => {
+        const key = keyOf(record.identity), proof = wanted.get(key);
+        const drop = !!proof && terminalState(record.state) && sameIdentity(record.identity, proof) && !held(record, owners.get(key) ?? null);
+        if (drop) droppedKeys.push(key);
+        return !drop;
+      });
+      const dropped = droppedKeys.length;
+      if (!dropped) return 0;
+      // The terminal bytes being relied on must be durable before anything that proves them is removed.
+      this.io.confirmFileDurable(this.path);
+      this.write({ version: 1, records: kept });
+      this.pruneOwners(droppedKeys);
+      return dropped;
+    });
+  }
+
+  /** Only the dropped claims lose their owner entry; a kept terminal record may still be held. */
+  private pruneOwners(dropped: readonly string[]): void {
+    const path = `${this.path}.owners`;
+    try {
+      const owners = readOwners(path);
+      for (const key of dropped) owners.delete(key);
+      writeJsonFileAtomic(path, { version: 1, owners: Object.fromEntries(owners) }, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
+    } catch { /* Stale owner entries are only evidence; the next claim prunes them. */ }
   }
 
   /** Prevent an unclaimed input without borrowing ownership of any other turn. */

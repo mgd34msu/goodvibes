@@ -52,7 +52,9 @@ jobs:
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
       - name: Install build toolchain
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake build-essential
+        uses: ./.github/actions/apt-install
+        with:
+          packages: cmake build-essential
       - name: Build the reproducible bundle
         env:
           BUNDLE_VERSION: ${{ github.event.inputs.version }}
@@ -72,7 +74,8 @@ jobs:
             gh release create "$VOICE_RUNTIMES_TAG" \
               --repo "$REPO" \
               --title "Voice runtimes (append-only)" \
-              --notes "Append-only host for goodvibes voice engine bundles. Assets are never re-uploaded in place or renamed; each carries a .sha256 sidecar."
+              --notes "Append-only host for goodvibes voice engine bundles. Assets are never re-uploaded in place or renamed; each carries a .sha256 sidecar." \
+              || gh release view "$VOICE_RUNTIMES_TAG" --repo "$REPO" >/dev/null  # another version's run may have created it first
           fi
       - name: Upload bundle + sidecar (append-only, fails if the asset already exists)
         env:
@@ -80,9 +83,21 @@ jobs:
           BUNDLE_VERSION: ${{ github.event.inputs.version }}
           REPO: ${{ github.repository }}
         run: |
-          # No --clobber: uploading a filename that already exists must FAIL so a
-          # pinned asset is never silently replaced.
-          gh release upload "$VOICE_RUNTIMES_TAG" \
+          # No --clobber: a pinned asset is never replaced. Each file is uploaded on its
+          # own so a rerun after a half-finished upload adds only what is missing, and
+          # refuses an existing file whose bytes differ from the build.
+          release_url="repos/$REPO/releases/tags/$VOICE_RUNTIMES_TAG"
+          for file in \
             ".tmp/voice-runtimes/goodvibes-whisper-cpp-${BUNDLE_VERSION}-linux-x64.tar.gz" \
-            ".tmp/voice-runtimes/goodvibes-whisper-cpp-${BUNDLE_VERSION}-linux-x64.tar.gz.sha256" \
-            --repo "$REPO"
+            ".tmp/voice-runtimes/goodvibes-whisper-cpp-${BUNDLE_VERSION}-linux-x64.tar.gz.sha256"; do
+            name=$(basename "$file")
+            remote=$(gh api "$release_url" --jq ".assets[] | select(.name == \"$name\") | .digest")
+            if [ -z "$remote" ]; then
+              gh release upload "$VOICE_RUNTIMES_TAG" "$file" --repo "$REPO"
+            elif [ "$remote" = "sha256:$(sha256sum "$file" | cut -d' ' -f1)" ]; then
+              echo "$name is already published with identical bytes"
+            else
+              echo "::error::$name is already published with different bytes; voice runtime assets are append-only. Publish a new version instead."
+              exit 1
+            fi
+          done

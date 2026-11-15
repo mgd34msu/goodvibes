@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.ts';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -219,7 +220,9 @@ test('MCP HTTP late admission cannot POST after session replacement', async () =
   const http = (client as unknown as { http: { captureSessionId(response: Response): void } }).http;
   http.captureSessionId(new Response(null, { headers: { 'mcp-session-id': 'session-two' } })); release();
   for (const stream of streams.values()) stream.controller.close();
-  expect(await pending).toBeInstanceOf(Error); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(await pending).toBeInstanceOf(Error);
+  // Let any late POST land before asserting there was none.
+  for (let turn = 0; turn < 3; turn++) await new Promise<void>(resolve => setImmediate(resolve));
   expect(responses).toHaveLength(0); expect(humans).toBe(0); await client.disconnect(); expect(invalidations.size).toBe(0);
 });
 test('ACP duplicate pending IDs cancel both, even with a late act', async () => {
@@ -259,11 +262,8 @@ test('scripted ACP wire round-trip is autonomous with reordered permission optio
     args: ['run', `${import.meta.dir}/fixtures/fake-acp-agent.ts`, 'permission-reject-first'] };
   const record = await service.spawnAgent({ agent, cwd: import.meta.dir, prompt: 'Write the project file' });
   try {
-    const deadline = Date.now() + 10_000;
-    while (!(service.get(record.id)?.progress ?? '').includes('permission granted')) {
-      if (Date.now() > deadline) throw new Error(`ACP failed: ${JSON.stringify(service.get(record.id))}`);
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    await waitFor(() => (service.get(record.id)?.progress ?? '').includes('permission granted'), { timeoutMs: 10_000 })
+      .catch(error => { throw new Error(`ACP failed: ${JSON.stringify(service.get(record.id))}`, { cause: error }); });
     expect(humans).toBe(0); expect(service.get(record.id)?.state).not.toBe('awaiting-approval');
   } finally { await service.stop(record.id); }
 }, 15_000);

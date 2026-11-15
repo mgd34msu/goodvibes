@@ -17,7 +17,7 @@ import { createNativeConversationCaptureTable } from './store-native-intake.js';
 import { createNativeWorkSettlementTable, createNativeWorkExecutionTable, createNativeWorkExecutionIntentTable } from './store-native-work-execution.js';
 import { createWorkLedgerTable } from './store-work-ledger.js';
 import { join } from 'node:path';
-import type { AutomationScheduleDefinition } from '../automation/schedules.js';
+import { validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import type {
   KnowledgeConsolidationCandidateRecord,
   KnowledgeConsolidationReportRecord,
@@ -599,17 +599,46 @@ export function mapSemanticEnrichmentStateRow(columns: string[], values: unknown
   };
 }
 
+/**
+ * A stored schedule that does not parse or does not validate loads as a disabled
+ * schedule that names the problem, instead of a default the scheduler later
+ * throws on. Reading must never fail the whole store for one bad row, and a
+ * schedule listed as enabled must be one that can actually run.
+ */
+function readStoredSchedule(raw: unknown): { readonly schedule: AutomationScheduleDefinition; readonly invalid?: string } {
+  const unusable: AutomationScheduleDefinition = { kind: 'at', at: 0 };
+  if (typeof raw !== 'string') return { schedule: unusable, invalid: 'the stored schedule is missing' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { schedule: unusable, invalid: 'the stored schedule is not valid JSON' };
+  }
+  const kind = typeof parsed === 'object' && parsed !== null ? (parsed as { kind?: unknown }).kind : undefined;
+  if (kind !== 'at' && kind !== 'every' && kind !== 'cron') return { schedule: unusable, invalid: 'the stored schedule has no known kind' };
+  try {
+    validateSchedule(parsed as AutomationScheduleDefinition);
+  } catch (error) {
+    return { schedule: unusable, invalid: `the stored schedule is not usable: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  return { schedule: parsed as AutomationScheduleDefinition };
+}
+
 export function mapScheduleRow(columns: string[], values: unknown[]): KnowledgeScheduleRecord {
   const row = rowObject(columns, values);
+  const { schedule, invalid } = readStoredSchedule(row.schedule);
   return {
     id: String(row.id),
     jobId: String(row.job_id),
     label: String(row.label),
-    enabled: Boolean(row.enabled),
-    schedule: parseJsonValue<AutomationScheduleDefinition>(row.schedule, { kind: 'at', at: 0 }),
+    enabled: invalid === undefined && Boolean(row.enabled),
+    schedule,
     ...(typeof row.last_run_at === 'number' ? { lastRunAt: Number(row.last_run_at) } : {}),
-    ...(typeof row.next_run_at === 'number' ? { nextRunAt: Number(row.next_run_at) } : {}),
-    metadata: parseJsonValue<Record<string, unknown>>(row.metadata, {}),
+    ...(typeof row.next_run_at === 'number' && invalid === undefined ? { nextRunAt: Number(row.next_run_at) } : {}),
+    metadata: {
+      ...parseJsonValue<Record<string, unknown>>(row.metadata, {}),
+      ...(invalid !== undefined ? { disabledReason: `${invalid}; the schedule was disabled instead of running with a made-up time. Recreate it to run again.` } : {}),
+    },
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };

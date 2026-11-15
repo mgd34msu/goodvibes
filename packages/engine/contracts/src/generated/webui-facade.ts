@@ -9,8 +9,8 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.2.0
- * Methods: 549 total, 475 REST-routed, 74 ws-only invoke.
+ * Contract product version: 3.3.0
+ * Methods: 572 total, 497 REST-routed, 75 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -179,6 +179,30 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "automation.schedules.run": {
     "method": "POST",
     "path": "/api/automation/schedules/{scheduleId}/run"
+  },
+  "batch.jobs.cancel": {
+    "method": "POST",
+    "path": "/api/batch/jobs/{jobId}/cancel"
+  },
+  "batch.jobs.create": {
+    "method": "POST",
+    "path": "/api/batch/jobs"
+  },
+  "batch.jobs.get": {
+    "method": "GET",
+    "path": "/api/batch/jobs/{jobId}"
+  },
+  "batch.jobs.list": {
+    "method": "GET",
+    "path": "/api/batch/jobs"
+  },
+  "batch.run": {
+    "method": "POST",
+    "path": "/api/batch/tick"
+  },
+  "batch.runtime.get": {
+    "method": "GET",
+    "path": "/api/batch/runtime"
   },
   "browser.click": {
     "method": "POST",
@@ -456,6 +480,22 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/channels/tools/{surface}"
   },
+  "homeassistant.conversation.cancel": {
+    "method": "POST",
+    "path": "/api/homeassistant/conversation/cancel"
+  },
+  "homeassistant.conversation.health": {
+    "method": "GET",
+    "path": "/api/homeassistant/health"
+  },
+  "homeassistant.conversation.stream": {
+    "method": "POST",
+    "path": "/api/homeassistant/conversation/stream"
+  },
+  "homeassistant.conversation.submit": {
+    "method": "POST",
+    "path": "/api/homeassistant/conversation"
+  },
   "checkin.config.get": {
     "method": "GET",
     "path": "/api/checkin/config"
@@ -491,6 +531,38 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "ci.watches.run": {
     "method": "POST",
     "path": "/api/ci/watches/{watchId}/run"
+  },
+  "cloudflare.credentials.verify": {
+    "method": "POST",
+    "path": "/api/cloudflare/validate"
+  },
+  "cloudflare.disable": {
+    "method": "POST",
+    "path": "/api/cloudflare/disable"
+  },
+  "cloudflare.provision": {
+    "method": "POST",
+    "path": "/api/cloudflare/provision"
+  },
+  "cloudflare.resources.list": {
+    "method": "POST",
+    "path": "/api/cloudflare/discover"
+  },
+  "cloudflare.status": {
+    "method": "GET",
+    "path": "/api/cloudflare/status"
+  },
+  "cloudflare.token.create": {
+    "method": "POST",
+    "path": "/api/cloudflare/token/create"
+  },
+  "cloudflare.token.requirements.get": {
+    "method": "POST",
+    "path": "/api/cloudflare/token/requirements"
+  },
+  "cloudflare.worker.verify": {
+    "method": "POST",
+    "path": "/api/cloudflare/verify"
   },
   "companion.chat.events.stream": {
     "method": "GET",
@@ -547,6 +619,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "config.get": {
     "method": "GET",
     "path": "/config"
+  },
+  "config.reset": {
+    "method": "POST",
+    "path": "/config/reset"
   },
   "config.set": {
     "method": "POST",
@@ -711,6 +787,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "inbound.telegram.read": {
     "method": "POST",
     "path": "/api/inbound/telegram/read"
+  },
+  "inbound.telegram.release": {
+    "method": "POST",
+    "path": "/api/inbound/telegram/release"
   },
   "inbound.telegram.revoke": {
     "method": "POST",
@@ -1444,9 +1524,17 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "POST",
     "path": "/api/stepup/challenge"
   },
+  "stepup.credentials.list": {
+    "method": "GET",
+    "path": "/api/stepup/credentials"
+  },
   "stepup.credentials.register": {
     "method": "POST",
     "path": "/api/stepup/credentials"
+  },
+  "stepup.credentials.remove": {
+    "method": "DELETE",
+    "path": "/api/stepup/credentials/{credentialId}"
   },
   "remote.node_host.contract": {
     "method": "GET",
@@ -1988,6 +2076,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "pairing.tokens.migrate",
   "pairing.tokens.rename",
   "pairing.tokens.revokeShared",
+  "payments.checkout.approve",
   "permissions.rules.delete",
   "permissions.rules.list",
   "push.subscriptions.create",
@@ -2061,6 +2150,12 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "automation.schedules.enable": "rest",
   "automation.schedules.list": "rest",
   "automation.schedules.run": "rest",
+  "batch.jobs.cancel": "rest",
+  "batch.jobs.create": "rest",
+  "batch.jobs.get": "rest",
+  "batch.jobs.list": "rest",
+  "batch.run": "rest",
+  "batch.runtime.get": "rest",
   "browser.click": "rest",
   "browser.extract": "rest",
   "browser.history.back": "rest",
@@ -2131,6 +2226,10 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "channels.tools.invoke": "rest",
   "channels.tools.list": "rest",
   "channels.tools.surface.list": "rest",
+  "homeassistant.conversation.cancel": "rest",
+  "homeassistant.conversation.health": "rest",
+  "homeassistant.conversation.stream": "rest",
+  "homeassistant.conversation.submit": "rest",
   "checkin.config.get": "rest",
   "checkin.config.set": "rest",
   "checkin.receipts.list": "rest",
@@ -2147,6 +2246,14 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "ci.watches.delete": "rest",
   "ci.watches.list": "rest",
   "ci.watches.run": "rest",
+  "cloudflare.credentials.verify": "rest",
+  "cloudflare.disable": "rest",
+  "cloudflare.provision": "rest",
+  "cloudflare.resources.list": "rest",
+  "cloudflare.status": "rest",
+  "cloudflare.token.create": "rest",
+  "cloudflare.token.requirements.get": "rest",
+  "cloudflare.worker.verify": "rest",
   "companion.chat.events.stream": "rest",
   "companion.chat.messages.create": "rest",
   "companion.chat.messages.edit": "rest",
@@ -2161,6 +2268,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "companion.chat.sessions.update": "rest",
   "companion.chat.turns.cancel": "rest",
   "config.get": "rest",
+  "config.reset": "rest",
   "config.set": "rest",
   "credentials.delete": "ws-invoke",
   "credentials.get": "rest",
@@ -2226,6 +2334,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "inbound.telegram.decide": "rest",
   "inbound.telegram.list": "rest",
   "inbound.telegram.read": "rest",
+  "inbound.telegram.release": "rest",
   "inbound.telegram.revoke": "rest",
   "inbound.telegram.status": "rest",
   "intelligence.snapshot": "rest",
@@ -2388,6 +2497,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "payments.cards.create": "rest",
   "payments.cards.delete": "rest",
   "payments.cards.list": "rest",
+  "payments.checkout.approve": "ws-invoke",
   "payments.checkout.begin": "rest",
   "payments.checkout.fillCard": "rest",
   "payments.purchase.approve": "rest",
@@ -2428,7 +2538,9 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "quota.fanout.get": "ws-invoke",
   "quota.snapshot.get": "ws-invoke",
   "stepup.challenge.mint": "rest",
+  "stepup.credentials.list": "rest",
   "stepup.credentials.register": "rest",
+  "stepup.credentials.remove": "rest",
   "remote.node_host.contract": "rest",
   "remote.pair.requests.approve": "rest",
   "remote.pair.requests.list": "rest",
@@ -2756,8 +2868,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -2771,6 +2881,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -2783,7 +2895,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "approvalId": "sample",
       "note": "sample",
-      "remember": false
+      "remember": false,
+      "release": false,
+      "holdId": "sample"
     },
     "output": {
       "approval": {
@@ -2841,8 +2955,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -2856,6 +2968,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -2924,8 +3038,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -2939,6 +3051,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3012,8 +3126,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -3027,6 +3139,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ]
       },
+      "applied": false,
+      "refusal": "sample",
       "recorded": {
         "approved": false,
         "rememberTier": "session",
@@ -3036,7 +3150,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "approvals.list": {
-    "input": {},
+    "input": {
+      "approvalId": "sample"
+    },
     "output": {
       "awaitingDecision": false,
       "mode": "safe-owner",
@@ -3114,8 +3230,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "modifiedArgs": {},
             "disposition": "approved"
           },
-          "fixSessionId": "sample",
-          "fixSessionError": "sample",
           "expiresAt": 0,
           "metadata": {},
           "audit": [
@@ -3231,8 +3345,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "modifiedArgs": {},
           "disposition": "approved"
         },
-        "fixSessionId": "sample",
-        "fixSessionError": "sample",
         "expiresAt": 0,
         "metadata": {},
         "audit": [
@@ -3247,7 +3359,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         ]
       },
       "coalesced": false,
-      "decided": false
+      "decided": false,
+      "holdId": "sample"
     }
   },
   "artifacts.content.get": {
@@ -5319,6 +5432,193 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "status": "sample"
     }
   },
+  "batch.jobs.cancel": {
+    "input": {
+      "jobId": "sample"
+    },
+    "output": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.create": {
+    "input": {
+      "provider": "sample",
+      "model": "sample",
+      "request": {
+        "messages": [
+          {}
+        ],
+        "tools": [
+          {}
+        ],
+        "systemPrompt": "sample",
+        "maxTokens": 0,
+        "reasoningEffort": "sample",
+        "reasoningSummary": false
+      },
+      "executionMode": "sample",
+      "source": {
+        "kind": "daemon-api",
+        "id": "sample"
+      },
+      "metadata": {},
+      "flush": false
+    },
+    "output": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.get": {
+    "input": {
+      "jobId": "sample"
+    },
+    "output": {
+      "job": {
+        "id": "sample",
+        "provider": "sample",
+        "model": "sample",
+        "status": "queued",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "request": {},
+        "source": {
+          "kind": "sample",
+          "id": "sample"
+        },
+        "metadata": {},
+        "attempts": 0,
+        "providerBatchId": "sample",
+        "providerBatchStatus": "sample",
+        "submittedAt": 0,
+        "completedAt": 0,
+        "result": {},
+        "error": {
+          "message": "sample",
+          "code": "sample"
+        }
+      }
+    }
+  },
+  "batch.jobs.list": {
+    "input": {
+      "limit": 0
+    },
+    "output": {
+      "jobs": [
+        {
+          "id": "sample",
+          "provider": "sample",
+          "model": "sample",
+          "status": "queued",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "request": {},
+          "source": {
+            "kind": "sample",
+            "id": "sample"
+          },
+          "metadata": {},
+          "attempts": 0,
+          "providerBatchId": "sample",
+          "providerBatchStatus": "sample",
+          "submittedAt": 0,
+          "completedAt": 0,
+          "result": {},
+          "error": {
+            "message": "sample",
+            "code": "sample"
+          }
+        }
+      ]
+    }
+  },
+  "batch.run": {
+    "input": {
+      "force": false
+    },
+    "output": {
+      "submittedProviderBatches": 0,
+      "submittedJobs": 0,
+      "polledProviderBatches": 0,
+      "completedJobs": 0,
+      "failedJobs": 0
+    }
+  },
+  "batch.runtime.get": {
+    "input": {},
+    "output": {
+      "mode": "off",
+      "fallback": "live",
+      "queueBackend": "local",
+      "cloudflare": {
+        "enabled": false,
+        "freeTierMode": false,
+        "accountId": "sample",
+        "workerName": "sample",
+        "workerBaseUrl": "sample",
+        "daemonBaseUrl": "sample",
+        "queueName": "sample",
+        "deadLetterQueueName": "sample",
+        "maxQueueOpsPerDay": 0
+      },
+      "limits": {
+        "tickIntervalMs": 0,
+        "maxDelayMs": 0,
+        "maxJobsPerProviderBatch": 0,
+        "maxQueuePayloadBytes": 0,
+        "maxQueueMessagesPerDay": 0
+      },
+      "supportedProviders": [
+        "sample"
+      ]
+    }
+  },
   "browser.click": {
     "input": {
       "sessionId": "sample",
@@ -5878,6 +6178,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.accounts.action.default": {
     "input": {
+      "surface": "sample",
+      "action": "sample",
       "accountId": "sample",
       "metadata": {}
     },
@@ -5935,6 +6237,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.accounts.action.named": {
     "input": {
+      "surface": "sample",
+      "action": "sample",
       "accountId": "sample",
       "metadata": {}
     },
@@ -6101,6 +6405,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.actions.invoke": {
     "input": {
+      "surface": "sample",
+      "actionId": "sample",
       "accountId": "sample",
       "metadata": {}
     },
@@ -6184,6 +6490,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.allowlist.edit": {
     "input": {
+      "surface": "sample",
       "add": [
         "sample"
       ],
@@ -6270,6 +6577,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.allowlist.resolve": {
     "input": {
+      "surface": "sample",
       "add": [
         "sample"
       ],
@@ -6301,6 +6609,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.authorize": {
     "input": {
+      "surface": "sample",
       "actionId": "sample",
       "actorId": "sample",
       "accountId": "sample",
@@ -6613,7 +6922,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "mailboxProgress": {
             "uidValidity": 0,
             "pendingMessages": 0
-          }
+          },
+          "skippedMessages": [
+            {
+              "uid": 0,
+              "reason": "sample"
+            }
+          ]
         }
       ],
       "partial": false
@@ -6715,6 +7030,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.policies.update": {
     "input": {
+      "surface": "sample",
       "enabled": false,
       "requireMention": false,
       "allowDirectMessages": false,
@@ -7068,6 +7384,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.tools.invoke": {
     "input": {
+      "surface": "sample",
+      "toolId": "sample",
       "accountId": "sample",
       "metadata": {}
     },
@@ -7115,6 +7433,54 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "homeassistant.conversation.cancel": {
+    "input": {
+      "sessionId": "sample",
+      "messageId": "sample"
+    },
+    "output": {
+      "ok": false,
+      "sessionId": "sample",
+      "status": "sample"
+    }
+  },
+  "homeassistant.conversation.health": {
+    "input": {},
+    "output": {}
+  },
+  "homeassistant.conversation.stream": {
+    "input": {
+      "message": "sample",
+      "conversationId": "sample",
+      "messageId": "sample",
+      "threadId": "sample",
+      "surfaceId": "sample",
+      "providerId": "sample",
+      "modelId": "sample"
+    },
+    "output": {}
+  },
+  "homeassistant.conversation.submit": {
+    "input": {
+      "message": "sample",
+      "conversationId": "sample",
+      "messageId": "sample",
+      "threadId": "sample",
+      "surfaceId": "sample",
+      "providerId": "sample",
+      "modelId": "sample",
+      "wait": false,
+      "timeoutMs": 0
+    },
+    "output": {
+      "ok": false,
+      "status": "sample",
+      "messageId": "sample",
+      "conversationId": "sample",
+      "sessionId": "sample",
+      "error": "sample"
+    }
+  },
   "checkin.config.get": {
     "input": {},
     "output": {
@@ -7139,6 +7505,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "cadence": "sample",
         "deliveryChannel": "sample",
         "quietHours": "sample"
+      },
+      "schedule": {
+        "state": "scheduled",
+        "reason": "sample"
       }
     }
   },
@@ -7189,7 +7559,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "outcome": "delivered",
       "summary": "sample",
-      "deliveryId": "sample"
+      "deliveryId": "sample",
+      "error": "sample"
     }
   },
   "checkpoints.create": {
@@ -7261,7 +7632,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "commit": "sample",
           "sizeBytes": 0
         }
-      ]
+      ],
+      "retentionFailure": {
+        "error": "sample",
+        "at": 0
+      }
     }
   },
   "checkpoints.restore": {
@@ -7283,6 +7658,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         ],
         "removedFiles": [
           "sample"
+        ],
+        "failedPaths": [
+          {
+            "path": "sample",
+            "reason": "sample"
+          }
         ]
       },
       "refused": false,
@@ -7298,10 +7679,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "checkpoints.restorePreview": {
     "input": {
-      "id": "sample",
-      "paths": [
-        "sample"
-      ]
+      "id": "sample"
     },
     "output": {
       "token": "sample",
@@ -7408,6 +7786,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "watch": {
         "id": "sample",
+        "continuationId": "sample",
         "repo": "sample",
         "ref": "sample",
         "prNumber": 0,
@@ -7434,6 +7813,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "watches": [
         {
           "id": "sample",
+          "continuationId": "sample",
           "repo": "sample",
           "ref": "sample",
           "prNumber": 0,
@@ -7478,8 +7858,334 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "fixSessionTriggered": false,
       "fixSessionId": "sample",
       "fixSessionError": "sample",
-      "fixSessionOffered": false,
       "retired": false
+    }
+  },
+  "cloudflare.credentials.verify": {
+    "input": {
+      "accountId": "sample",
+      "apiToken": "sample",
+      "apiTokenRef": "sample"
+    },
+    "output": {
+      "ok": false,
+      "account": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "tokenSource": "sample"
+    }
+  },
+  "cloudflare.disable": {
+    "input": {
+      "accountId": "sample",
+      "apiToken": "sample",
+      "apiTokenRef": "sample",
+      "workerName": "sample",
+      "disableWorkerSubdomain": false,
+      "disableCron": false,
+      "persistConfig": false
+    },
+    "output": {
+      "ok": false,
+      "steps": [
+        {
+          "name": "sample",
+          "status": "ok",
+          "message": "sample",
+          "resourceId": "sample"
+        }
+      ],
+      "remote": "disabled"
+    }
+  },
+  "cloudflare.provision": {
+    "input": {
+      "accountId": "sample",
+      "apiToken": "sample",
+      "apiTokenRef": "sample",
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "batchMode": "off",
+      "workerName": "sample",
+      "workerSubdomain": "sample",
+      "workerHostname": "sample",
+      "workerBaseUrl": "sample",
+      "daemonBaseUrl": "sample",
+      "daemonHostname": "sample",
+      "zoneId": "sample",
+      "zoneName": "sample",
+      "queueName": "sample",
+      "deadLetterQueueName": "sample",
+      "tunnelName": "sample",
+      "tunnelId": "sample",
+      "tunnelServiceUrl": "sample",
+      "tunnelTokenRef": "sample",
+      "accessAppId": "sample",
+      "accessServiceTokenId": "sample",
+      "accessServiceTokenRef": "sample",
+      "kvNamespaceName": "sample",
+      "kvNamespaceId": "sample",
+      "durableObjectNamespaceName": "sample",
+      "durableObjectNamespaceId": "sample",
+      "r2BucketName": "sample",
+      "secretsStoreName": "sample",
+      "secretsStoreId": "sample",
+      "workerCron": "sample",
+      "operatorToken": "sample",
+      "operatorTokenRef": "sample",
+      "workerClientToken": "sample",
+      "workerClientTokenRef": "sample",
+      "storeApiToken": false,
+      "storeOperatorToken": false,
+      "storeWorkerClientToken": false,
+      "returnGeneratedSecrets": false,
+      "enableWorkersDev": false,
+      "queueJobPayloads": false,
+      "verify": false,
+      "persistConfig": false
+    },
+    "output": {
+      "ok": false,
+      "dryRun": false,
+      "steps": [
+        {
+          "name": "sample",
+          "status": "ok",
+          "message": "sample",
+          "resourceId": "sample"
+        }
+      ],
+      "account": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "worker": {},
+      "queues": {},
+      "tunnel": {},
+      "access": {},
+      "dns": {},
+      "kv": {},
+      "durableObjects": {},
+      "r2": {},
+      "secretsStore": {},
+      "verification": {
+        "ok": false,
+        "workerHealth": {
+          "ok": false,
+          "status": 0,
+          "error": "sample"
+        },
+        "daemonBatchProxy": {
+          "ok": false,
+          "status": 0,
+          "error": "sample"
+        }
+      },
+      "generatedSecrets": {}
+    }
+  },
+  "cloudflare.resources.list": {
+    "input": {
+      "accountId": "sample",
+      "apiToken": "sample",
+      "apiTokenRef": "sample",
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "zoneId": "sample",
+      "zoneName": "sample",
+      "includeResources": false
+    },
+    "output": {
+      "ok": false,
+      "tokenSource": "sample",
+      "accounts": [
+        {
+          "id": "sample",
+          "name": "sample",
+          "type": "sample"
+        }
+      ],
+      "selectedAccount": {
+        "id": "sample",
+        "name": "sample",
+        "type": "sample"
+      },
+      "zones": [
+        {}
+      ],
+      "selectedZone": {},
+      "workerSubdomain": "sample",
+      "queues": [
+        {}
+      ],
+      "kvNamespaces": [
+        {}
+      ],
+      "durableObjectNamespaces": [
+        {}
+      ],
+      "r2Buckets": [
+        {}
+      ],
+      "secretsStores": [
+        {}
+      ],
+      "tunnels": [
+        {}
+      ],
+      "accessApplications": [
+        {}
+      ],
+      "warnings": [
+        "sample"
+      ]
+    }
+  },
+  "cloudflare.status": {
+    "input": {},
+    "output": {
+      "enabled": false,
+      "ready": false,
+      "configured": {},
+      "config": {},
+      "warnings": [
+        "sample"
+      ]
+    }
+  },
+  "cloudflare.token.create": {
+    "input": {
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "includeBootstrap": false,
+      "accountId": "sample",
+      "zoneId": "sample",
+      "zoneName": "sample",
+      "bootstrapToken": "sample",
+      "tokenName": "sample",
+      "expiresOn": "sample",
+      "persistConfig": false,
+      "storeApiToken": false,
+      "returnGeneratedToken": false
+    },
+    "output": {
+      "ok": false,
+      "tokenId": "sample",
+      "tokenName": "sample",
+      "tokenSource": "sample",
+      "apiTokenRef": "sample",
+      "generatedToken": "sample",
+      "accountId": "sample",
+      "zoneId": "sample",
+      "permissions": [
+        {
+          "component": "sample",
+          "scope": "sample",
+          "permission": "sample",
+          "alternatives": [
+            "sample"
+          ],
+          "reason": "sample"
+        }
+      ]
+    }
+  },
+  "cloudflare.token.requirements.get": {
+    "input": {
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "includeBootstrap": false
+    },
+    "output": {
+      "ok": false,
+      "components": {
+        "workers": false,
+        "queues": false,
+        "zeroTrustTunnel": false,
+        "zeroTrustAccess": false,
+        "dns": false,
+        "kv": false,
+        "durableObjects": false,
+        "secretsStore": false,
+        "r2": false
+      },
+      "permissions": [
+        {
+          "component": "sample",
+          "scope": "sample",
+          "permission": "sample",
+          "alternatives": [
+            "sample"
+          ],
+          "reason": "sample"
+        }
+      ],
+      "bootstrapToken": {
+        "requiredForPlatformCreation": false,
+        "storeInGoodVibes": false,
+        "instructions": [
+          "sample"
+        ]
+      }
+    }
+  },
+  "cloudflare.worker.verify": {
+    "input": {
+      "workerBaseUrl": "sample",
+      "workerClientToken": "sample",
+      "workerClientTokenRef": "sample"
+    },
+    "output": {
+      "ok": false,
+      "workerHealth": {
+        "ok": false,
+        "status": 0,
+        "error": "sample"
+      },
+      "daemonBatchProxy": {
+        "ok": false,
+        "status": 0,
+        "error": "sample"
+      }
     }
   },
   "companion.chat.events.stream": {
@@ -7550,6 +8256,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "companion.chat.messages.retry": {
     "input": {
+      "sessionId": "sample",
       "messageId": "sample"
     },
     "output": {
@@ -7745,6 +8452,19 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "channels": {},
       "watchers": {},
       "memory": {}
+    }
+  },
+  "config.reset": {
+    "input": {
+      "key": "sample"
+    },
+    "output": {
+      "success": false,
+      "key": "sample",
+      "value": "sample",
+      "persistedTo": "sample",
+      "tier": "sample",
+      "daemonOwned": false
     }
   },
   "config.set": {
@@ -8037,7 +8757,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "maxTokens": 0,
             "maxCostUsd": 0
           },
-          "isolation": "auto"
+          "isolation": "auto",
+          "selectedModel": {
+            "id": "sample",
+            "provider": "sample",
+            "registryKey": "sample",
+            "displayName": "sample"
+          },
+          "taskEvidence": "sample"
         },
         "contractId": "sample",
         "ownerAgentId": "sample",
@@ -8149,7 +8876,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "outcome": "act",
               "severity": "critical",
               "decisionId": "sample",
-              "severityDecisionId": "sample"
+              "severityDecisionId": "sample",
+              "rationale": "sample"
             }
           ]
         }
@@ -8196,7 +8924,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -8349,7 +9078,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -8612,7 +9342,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -8967,6 +9698,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "decisionIds": [
             "sample"
           ],
+          "failurePause": true,
           "resolvedAt": 0,
           "reply": {
             "text": "sample",
@@ -9218,7 +9950,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "maxTokens": 0,
                 "maxCostUsd": 0
               },
-              "isolation": "auto"
+              "isolation": "auto",
+              "selectedModel": {
+                "id": "sample",
+                "provider": "sample",
+                "registryKey": "sample",
+                "displayName": "sample"
+              },
+              "taskEvidence": "sample"
             },
             "contractId": "sample",
             "ownerAgentId": "sample",
@@ -9330,7 +10069,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "outcome": "act",
                   "severity": "critical",
                   "decisionId": "sample",
-                  "severityDecisionId": "sample"
+                  "severityDecisionId": "sample",
+                  "rationale": "sample"
                 }
               ]
             }
@@ -9377,7 +10117,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -9530,7 +10271,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "outcome": "act",
                       "severity": "critical",
                       "decisionId": "sample",
-                      "severityDecisionId": "sample"
+                      "severityDecisionId": "sample",
+                      "rationale": "sample"
                     }
                   ]
                 }
@@ -9793,7 +10535,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                           "outcome": "act",
                           "severity": "critical",
                           "decisionId": "sample",
-                          "severityDecisionId": "sample"
+                          "severityDecisionId": "sample",
+                          "rationale": "sample"
                         }
                       ]
                     }
@@ -10148,6 +10891,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "decisionIds": [
                 "sample"
               ],
+              "failurePause": true,
               "resolvedAt": 0,
               "reply": {
                 "text": "sample",
@@ -10416,7 +11160,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "maxTokens": 0,
               "maxCostUsd": 0
             },
-            "isolation": "auto"
+            "isolation": "auto",
+            "selectedModel": {
+              "id": "sample",
+              "provider": "sample",
+              "registryKey": "sample",
+              "displayName": "sample"
+            },
+            "taskEvidence": "sample"
           },
           "contractId": "sample",
           "ownerAgentId": "sample",
@@ -10528,7 +11279,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "outcome": "act",
                 "severity": "critical",
                 "decisionId": "sample",
-                "severityDecisionId": "sample"
+                "severityDecisionId": "sample",
+                "rationale": "sample"
               }
             ]
           }
@@ -10575,7 +11327,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "outcome": "act",
                     "severity": "critical",
                     "decisionId": "sample",
-                    "severityDecisionId": "sample"
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
                   }
                 ]
               }
@@ -10728,7 +11481,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "outcome": "act",
                     "severity": "critical",
                     "decisionId": "sample",
-                    "severityDecisionId": "sample"
+                    "severityDecisionId": "sample",
+                    "rationale": "sample"
                   }
                 ]
               }
@@ -10991,7 +11745,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                         "outcome": "act",
                         "severity": "critical",
                         "decisionId": "sample",
-                        "severityDecisionId": "sample"
+                        "severityDecisionId": "sample",
+                        "rationale": "sample"
                       }
                     ]
                   }
@@ -11346,6 +12101,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "decisionIds": [
               "sample"
             ],
+            "failurePause": true,
             "resolvedAt": 0,
             "reply": {
               "text": "sample",
@@ -11870,13 +12626,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "control.status": {
     "input": {
-      "receipts": "consume"
+      "receipts": "consume",
+      "ids": "sample"
     },
     "output": {
       "status": "sample",
       "version": "sample",
       "buildVersion": "sample",
       "platformVersion": "sample",
+      "cluster": "sample",
       "receipts": [
         {
           "id": "sample",
@@ -11924,7 +12682,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
-      "rejectedVersion": "sample"
+      "rejectedVersion": "sample",
+      "recoveryRequired": true,
+      "transactionRecovery": {
+        "operation": "update",
+        "phase": "claim",
+        "committed": false,
+        "recoveryRequired": false,
+        "targets": [
+          "sample"
+        ],
+        "recoveryPaths": [
+          "sample"
+        ],
+        "recoveryErrors": [
+          "sample"
+        ]
+      },
+      "check": "ran"
     }
   },
   "update.status": {
@@ -11939,7 +12714,23 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "failedCheckCount": 0,
       "lastCheckFailure": "sample",
       "pendingVersion": "sample",
-      "rejectedVersion": "sample"
+      "rejectedVersion": "sample",
+      "recoveryRequired": true,
+      "transactionRecovery": {
+        "operation": "update",
+        "phase": "claim",
+        "committed": false,
+        "recoveryRequired": false,
+        "targets": [
+          "sample"
+        ],
+        "recoveryPaths": [
+          "sample"
+        ],
+        "recoveryErrors": [
+          "sample"
+        ]
+      }
     }
   },
   "cost.attribution.get": {
@@ -12106,7 +12897,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "openedAt": "sample",
       "expiresAt": "sample",
       "authority": "sample",
-      "remainingMs": 0
+      "remainingMs": 0,
+      "watching": {
+        "running": false,
+        "reason": "sample"
+      }
     }
   },
   "email.inbound.status": {
@@ -12171,7 +12966,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastSweep": {
           "sweptAt": 0,
           "trigger": "sample",
-          "summary": "sample"
+          "summary": "sample",
+          "failures": [
+            "sample"
+          ]
         }
       },
       "stores": [
@@ -12945,7 +13743,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "tripwire": {
         "armed": false,
         "sustainedSec": 0,
-        "rateMbPerSec": 0
+        "rateMbPerSec": 0,
+        "thresholdMbPerSec": 0
       },
       "thresholds": {
         "elevatedPct": 0,
@@ -12985,7 +13784,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "deniedClasses": [
           "handle-lid-switch"
         ],
-        "note": "sample"
+        "note": "sample",
+        "state": "off"
       }
     }
   },
@@ -13018,7 +13818,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "deniedClasses": [
           "handle-lid-switch"
         ],
-        "note": "sample"
+        "note": "sample",
+        "state": "off"
       }
     }
   },
@@ -13078,6 +13879,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           {
             "key": "sample",
             "reason": "sample"
+          }
+        ],
+        "superseded": [
+          {
+            "key": "sample",
+            "previousValue": "sample",
+            "value": "sample"
           }
         ]
       }
@@ -13830,6 +14638,152 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sourceRevision": "sample",
         "requestId": "sample"
       }
+    },
+    "output": {
+      "accountIdentity": {
+        "id": "sample",
+        "username": "sample",
+        "revision": "sample"
+      },
+      "outcome": "sample",
+      "reason": "sample",
+      "ref": {
+        "sessionId": "sample",
+        "inputId": "sample",
+        "sourceId": "sample",
+        "sourceRevision": "sample",
+        "requestId": "sample"
+      },
+      "configurationId": "sample",
+      "expiresAt": 0,
+      "pendingRetentionMs": 0,
+      "processing": "sample",
+      "restart": "sample",
+      "route": "sample",
+      "execution": "not-started",
+      "approvalId": "sample",
+      "source": "sample",
+      "recovery": "sample",
+      "record": {
+        "id": "sample",
+        "ref": {
+          "sessionId": "sample",
+          "inputId": "sample",
+          "sourceId": "sample",
+          "sourceRevision": "sample",
+          "requestId": "sample"
+        },
+        "origin": {
+          "kind": "external-original",
+          "accountId": "sample",
+          "accountRevision": "sample",
+          "routeId": "sample",
+          "routeRevision": "sample"
+        },
+        "configurationId": "sample",
+        "ownerRevision": "sample",
+        "owner": {
+          "kind": "pairing-token",
+          "principalId": "sample",
+          "tokenId": "sample",
+          "authorityId": "sample",
+          "authorityRevision": "sample",
+          "scopes": [
+            "sample"
+          ]
+        },
+        "workspaceRevision": "sample",
+        "approvalId": "sample",
+        "choices": {
+          "processingPurpose": "accept-external-message-for-owner-review",
+          "sourceRetention": "memory-only-until-review-close-or-deadline",
+          "sourceRetentionMs": 0,
+          "derivedRecord": "external-source-reference-only-v1",
+          "derivedRecordRetentionMs": 0,
+          "execution": "none",
+          "ownerMayReadOriginal": true
+        },
+        "acceptedAt": 0,
+        "sourceExpiresAt": 0,
+        "recordExpiresAt": 0,
+        "state": "accepted-for-review",
+        "execution": "not-started"
+      },
+      "records": [
+        {
+          "id": "sample",
+          "ref": {
+            "sessionId": "sample",
+            "inputId": "sample",
+            "sourceId": "sample",
+            "sourceRevision": "sample",
+            "requestId": "sample"
+          },
+          "origin": {
+            "kind": "external-original",
+            "accountId": "sample",
+            "accountRevision": "sample",
+            "routeId": "sample",
+            "routeRevision": "sample"
+          },
+          "configurationId": "sample",
+          "ownerRevision": "sample",
+          "owner": {
+            "kind": "pairing-token",
+            "principalId": "sample",
+            "tokenId": "sample",
+            "authorityId": "sample",
+            "authorityRevision": "sample",
+            "scopes": [
+              "sample"
+            ]
+          },
+          "workspaceRevision": "sample",
+          "approvalId": "sample",
+          "choices": {
+            "processingPurpose": "accept-external-message-for-owner-review",
+            "sourceRetention": "memory-only-until-review-close-or-deadline",
+            "sourceRetentionMs": 0,
+            "derivedRecord": "external-source-reference-only-v1",
+            "derivedRecordRetentionMs": 0,
+            "execution": "none",
+            "ownerMayReadOriginal": true
+          },
+          "acceptedAt": 0,
+          "sourceExpiresAt": 0,
+          "recordExpiresAt": 0,
+          "state": "accepted-for-review",
+          "execution": "not-started"
+        }
+      ],
+      "pending": [
+        {
+          "ref": {
+            "sessionId": "sample",
+            "inputId": "sample",
+            "sourceId": "sample",
+            "sourceRevision": "sample",
+            "requestId": "sample"
+          },
+          "approvalId": "sample",
+          "sourceExpiresAt": 0,
+          "outcome": "sample"
+        }
+      ],
+      "original": {
+        "text": "sample",
+        "unsupportedSources": [
+          {
+            "kind": "sample",
+            "label": "sample"
+          }
+        ]
+      }
+    }
+  },
+  "inbound.telegram.release": {
+    "input": {
+      "configurationId": "sample"
     },
     "output": {
       "accountIdentity": {
@@ -15965,6 +16919,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "knowledge.candidate.decide": {
     "input": {
+      "id": "sample",
       "decision": "accept",
       "decidedBy": "sample",
       "reason": "sample",
@@ -16436,7 +17391,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "knowledge.ingest.connector": {
-    "input": null,
+    "input": {
+      "input": "sample"
+    },
     "output": {
       "imported": 0,
       "failed": 0,
@@ -16839,6 +17796,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "knowledge.job.run": {
     "input": {
+      "jobId": "sample",
       "mode": "inline",
       "sourceIds": [
         "sample"
@@ -17554,6 +18512,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "knowledge.schedule.enable": {
     "input": {
+      "id": "sample",
       "enabled": false
     },
     "output": {
@@ -19728,6 +20687,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "name": "sample",
           "command": "sample",
+          "url": "sample",
           "args": [
             "sample"
           ],
@@ -19781,6 +20741,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -19812,7 +20773,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "servers": [
         {
           "name": "sample",
-          "connected": false
+          "connected": false,
+          "transport": "stdio",
+          "protocolVersion": "sample",
+          "protocolEra": "modern",
+          "phase": "idle",
+          "lastError": "sample"
         }
       ],
       "security": [
@@ -19858,6 +20824,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -19898,6 +20865,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "name": "sample",
           "command": "sample",
+          "url": "sample",
           "args": [
             "sample"
           ],
@@ -19927,23 +20895,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "scope": "project",
       "server": {
-        "name": "sample",
-        "command": "sample",
-        "args": [
-          "sample"
-        ],
-        "env": {},
-        "envKeys": [
-          "sample"
-        ],
-        "role": "sample",
-        "trustMode": "sample",
-        "allowedPaths": [
-          "sample"
-        ],
-        "allowedHosts": [
-          "sample"
-        ]
+        "command": "sample"
       }
     },
     "output": {
@@ -19976,6 +20928,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           {
             "name": "sample",
             "command": "sample",
+            "url": "sample",
             "args": [
               "sample"
             ],
@@ -21851,6 +22804,22 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "defaultCardId": "sample"
     }
   },
+  "payments.checkout.approve": {
+    "input": {
+      "confirm": false,
+      "merchantDomain": "sample",
+      "item": "sample",
+      "amount": "sample"
+    },
+    "output": {
+      "approved": false,
+      "action": "sample",
+      "merchantDomain": "sample",
+      "item": "sample",
+      "amount": "sample",
+      "expiresAt": "sample"
+    }
+  },
   "payments.checkout.begin": {
     "input": {
       "requestId": "sample",
@@ -22029,6 +22998,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "outcome": "sample",
           "totalMinorUnits": 0,
           "currency": "AAA"
+        }
+      ],
+      "unreadable": [
+        {
+          "purchaseId": "sample",
+          "reason": "sample"
         }
       ]
     }
@@ -22308,7 +23283,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "provenance": {
           "surface": "sample",
           "date": "sample",
-          "said": "sample"
+          "said": "sample",
+          "origin": "owner-direct",
+          "source": {
+            "goal": "sample",
+            "criteria": [
+              "sample"
+            ]
+          }
         }
       },
       "disclosure": "sample"
@@ -22328,7 +23310,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "provenance": {
             "surface": "sample",
             "date": "sample",
-            "said": "sample"
+            "said": "sample",
+            "origin": "owner-direct",
+            "source": {
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            }
           }
         }
       ],
@@ -22346,7 +23335,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "provenance": {
         "surface": "sample",
         "date": "sample",
-        "said": "sample"
+        "said": "sample",
+        "origin": "owner-direct",
+        "source": {
+          "goal": "sample",
+          "criteria": [
+            "sample"
+          ]
+        }
       },
       "superseded": [
         {
@@ -22360,7 +23356,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "provenance": {
             "surface": "sample",
             "date": "sample",
-            "said": "sample"
+            "said": "sample",
+            "origin": "owner-direct",
+            "source": {
+              "goal": "sample",
+              "criteria": [
+                "sample"
+              ]
+            }
           }
         }
       ]
@@ -22401,7 +23404,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "provenance": {
                 "surface": "sample",
                 "date": "sample",
-                "said": "sample"
+                "said": "sample",
+                "origin": "owner-direct",
+                "source": {
+                  "goal": "sample",
+                  "criteria": [
+                    "sample"
+                  ]
+                }
               }
             }
           ],
@@ -22413,7 +23423,14 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "provenance": {
                 "surface": "sample",
                 "date": "sample",
-                "said": "sample"
+                "said": "sample",
+                "origin": "owner-direct",
+                "source": {
+                  "goal": "sample",
+                  "criteria": [
+                    "sample"
+                  ]
+                }
               }
             }
           ]
@@ -23015,12 +24032,27 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "rendezvousId": "sample",
       "sessionId": "sample",
+      "method": "sample",
+      "path": "sample",
       "ttlMs": 0
     },
     "output": {
       "challengeId": "sample",
       "challenge": "sample",
       "expiresAt": 0
+    }
+  },
+  "stepup.credentials.list": {
+    "input": {},
+    "output": {
+      "credentials": [
+        {
+          "credentialId": "sample",
+          "label": "sample",
+          "createdAt": 0,
+          "signCount": 0
+        }
+      ]
     }
   },
   "stepup.credentials.register": {
@@ -23040,6 +24072,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "createdAt": 0,
         "signCount": 0
       }
+    }
+  },
+  "stepup.credentials.remove": {
+    "input": {
+      "credentialId": "sample"
+    },
+    "output": {
+      "credentialId": "sample",
+      "removed": false
     }
   },
   "remote.node_host.contract": {
@@ -23084,7 +24125,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "requestId": "sample",
       "note": "sample",
       "label": "sample",
-      "metadata": {}
+      "metadata": {},
+      "confirmReplace": false
     },
     "output": {
       "request": {
@@ -23197,7 +24239,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "requestId": "sample",
       "note": "sample",
       "label": "sample",
-      "metadata": {}
+      "metadata": {},
+      "confirmReplace": false
     },
     "output": {
       "request": {
@@ -23810,7 +24853,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "tailscale.get": {
-    "input": null,
+    "input": {},
     "output": {
       "available": false,
       "loggedIn": false,
@@ -23827,7 +24870,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "tailscale.serve.run": {
-    "input": null,
+    "input": {},
     "output": {
       "receipt": {
         "at": 0,
@@ -23836,7 +24879,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "url": "sample",
         "detail": "sample"
       },
-      "publicBaseUrlUpdated": false
+      "publicBaseUrlUpdated": false,
+      "receiptRecorded": false
     }
   },
   "review.snapshot": {
@@ -24868,6 +25912,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sample"
       ],
       "from": "sample",
+      "baseUnavailable": false,
+      "attributionApproximate": false,
       "to": "sample",
       "files": [
         "sample"
@@ -25044,6 +26090,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "sessions.followUp": {
     "input": {
+      "sessionId": "sample",
       "body": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
@@ -25277,7 +26324,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "content": "sample",
           "at": 0
         }
-      ]
+      ],
+      "historyAsOf": 0
     }
   },
   "sessions.hosted.create": {
@@ -25484,7 +26532,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "consumed": false,
       "agentId": "sample",
       "answer": "sample",
-      "status": "sample"
+      "status": "sample",
+      "claim": false
     },
     "output": {
       "input": {
@@ -25696,6 +26745,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "sessions.messages.create": {
     "input": {
+      "sessionId": "sample",
       "body": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
@@ -26021,6 +27071,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "sessions.steer": {
     "input": {
+      "sessionId": "sample",
       "body": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
@@ -26426,13 +27477,33 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "id": "sample",
           "kind": "exec",
           "title": "sample",
+          "description": "sample",
           "status": "queued",
           "owner": "sample",
+          "cancellable": false,
           "parentTaskId": "sample",
+          "childTaskIds": [
+            "sample"
+          ],
           "queuedAt": 0,
           "startedAt": 0,
           "endedAt": 0,
-          "error": "sample"
+          "retryPolicy": {
+            "maxAttempts": 0,
+            "currentAttempt": 0,
+            "delayMs": 0,
+            "backoff": "fixed",
+            "retryOn": [
+              "network"
+            ]
+          },
+          "retryDelayMs": 0,
+          "retryAt": 0,
+          "exitCode": 0,
+          "error": "sample",
+          "result": "sample",
+          "correlationId": "sample",
+          "turnId": "sample"
         }
       ]
     }
@@ -27630,7 +28701,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -27723,7 +28795,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -27816,7 +28889,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",
@@ -27909,7 +28983,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "state": "pending",
         "evidenceId": "sample",
         "reportSequence": 0,
-        "evidenceSequence": 0
+        "evidenceSequence": 0,
+        "reason": "evidence-over-capacity"
       },
       "progress": {
         "status": "queued",

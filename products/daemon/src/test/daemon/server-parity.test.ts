@@ -26,6 +26,7 @@ import { RuntimeEventBus, createFeatureFlagManager, deriveFeatureStates, type Tr
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { createProductionDaemonInboxFactory } from '../../runtime/production-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { waitFor } from '../helpers/wait.js';
 import { installProviderPricingFixture } from '../helpers/provider-pricing-fixture.js';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -99,18 +100,6 @@ function externalTransportFixture(request: { readonly url: string; readonly meth
   if (knownNotice) return new Response('Synthetic cancellation delivery unavailable', { status: 503 });
   return undefined;
 }
-async function waitFor<T>(fn: () => Promise<T | undefined | null> | T | undefined | null, timeoutMs = 5_000, intervalMs = 25): Promise<T> {
-  const startedAt = Date.now();
-  for (;;) {
-    const value = await fn();
-    if (value !== undefined && value !== null) return value;
-    if (Date.now() - startedAt >= timeoutMs) {
-      throw new Error('Timed out waiting for value');
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
 function waitForSocketFrame(
   socket: WebSocket,
   predicate: (frame: Record<string, unknown>) => boolean,
@@ -489,9 +478,12 @@ async function proveAutonomousRead(): Promise<void> {
     expect(stream.status).toBe(200);
     expect(stream.headers.get('content-type')).toContain('text/event-stream');
     const reader = stream.body?.getReader();
-    const firstChunk = await reader!.read();
-    expect(new TextDecoder().decode(firstChunk.value)).toContain('event: ready');
-    await reader!.cancel();
+    try {
+      const firstChunk = await reader!.read();
+      expect(new TextDecoder().decode(firstChunk.value)).toContain('event: ready');
+    } finally {
+      await reader!.cancel().catch(() => {});
+    }
   });
 
   // Original server case 14, source line 374.
@@ -725,8 +717,10 @@ async function proveAutonomousRead(): Promise<void> {
       errors: string[];
       sources: Array<{ id: string }>;
     };
-    expect(connectorIngestJson.imported + connectorIngestJson.failed).toBeGreaterThan(0);
-    expect(Array.isArray(connectorIngestJson.sources)).toBe(true);
+    expect(connectorIngestJson.errors).toEqual([]);
+    expect(connectorIngestJson.failed).toBe(0);
+    expect(connectorIngestJson.imported).toBe(1);
+    expect(connectorIngestJson.sources).toHaveLength(1);
 
   });
 
@@ -1148,8 +1142,11 @@ async function proveAutonomousRead(): Promise<void> {
     });
     expect(heartbeat.status, heartbeat.status === 200 ? undefined : (await heartbeat.clone().text()).slice(0, 500)).toBe(200);
 
+    // Aborted in the finally below, so an assertion that fails first cannot leave this request waiting on the daemon.
+    const invokeAbort = new AbortController();
     const invokePromise = fetch(`http://127.0.0.1:${boundPort}/api/remote/peers/${verified.peer.id}/invoke`, {
       method: 'POST',
+      signal: invokeAbort.signal,
       headers: {
         Authorization: `Bearer ${TEST_TOKEN}`,
         'Content-Type': 'application/json',
@@ -1161,36 +1158,41 @@ async function proveAutonomousRead(): Promise<void> {
       }),
     });
 
-    const pull = await fetch(`http://127.0.0.1:${boundPort}/api/remote/work/pull`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${verified.token.value}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ maxItems: 1 }),
-    });
-    expect(pull.status, pull.status === 200 ? undefined : (await pull.clone().text()).slice(0, 500)).toBe(200);
-    const pulled = await pull.json() as { work: Array<{ id: string; status: string }> };
-    expect(pulled.work).toHaveLength(1);
-    expect(pulled.work[0]?.status).toBe('claimed');
+    try {
+      const pull = await fetch(`http://127.0.0.1:${boundPort}/api/remote/work/pull`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${verified.token.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ maxItems: 1 }),
+      });
+      expect(pull.status, pull.status === 200 ? undefined : (await pull.clone().text()).slice(0, 500)).toBe(200);
+      const pulled = await pull.json() as { work: Array<{ id: string; status: string }> };
+      expect(pulled.work).toHaveLength(1);
+      expect(pulled.work[0]?.status).toBe('claimed');
 
-    const complete = await fetch(`http://127.0.0.1:${boundPort}/api/remote/work/${pulled.work[0]!.id}/complete`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${verified.token.value}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        result: { ok: true, summary: 'status collected' },
-      }),
-    });
-    expect(complete.status, complete.status === 200 ? undefined : (await complete.clone().text()).slice(0, 500)).toBe(200);
+      const complete = await fetch(`http://127.0.0.1:${boundPort}/api/remote/work/${pulled.work[0]!.id}/complete`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${verified.token.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          result: { ok: true, summary: 'status collected' },
+        }),
+      });
+      expect(complete.status, complete.status === 200 ? undefined : (await complete.clone().text()).slice(0, 500)).toBe(200);
 
-    const invoke = await invokePromise;
-    expect(invoke.status, invoke.status === 202 ? undefined : (await invoke.clone().text()).slice(0, 500)).toBe(202);
-    const invokeBody = await invoke.json() as { completed: boolean; work: { status: string } };
-    expect(invokeBody.completed).toBe(true);
-    expect(invokeBody.work.status).toBe('completed');
+      const invoke = await invokePromise;
+      expect(invoke.status, invoke.status === 202 ? undefined : (await invoke.clone().text()).slice(0, 500)).toBe(202);
+      const invokeBody = await invoke.json() as { completed: boolean; work: { status: string } };
+      expect(invokeBody.completed).toBe(true);
+      expect(invokeBody.work.status).toBe('completed');
+    } finally {
+      invokeAbort.abort();
+      await invokePromise.catch(() => {});
+    }
 
     const rotate = await fetch(`http://127.0.0.1:${boundPort}/api/remote/peers/${verified.peer.id}/token/rotate`, {
       method: 'POST',
@@ -1528,34 +1530,37 @@ async function proveAutonomousRead(): Promise<void> {
     expect(stream.headers.get('content-type')).toContain('text/event-stream');
     const reader = stream.body?.getReader();
     expect(reader).toBeDefined();
-    const firstChunk = await reader!.read();
-    expect(new TextDecoder().decode(firstChunk.value)).toContain('event: ready');
+    try {
+      const firstChunk = await reader!.read();
+      expect(new TextDecoder().decode(firstChunk.value)).toContain('event: ready');
 
-    const snapshot = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane`, {
-      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
-    });
-    expect(snapshot.status, snapshot.status === 200 ? undefined : (await snapshot.clone().text()).slice(0, 500)).toBe(200);
-    const snapshotBody = await snapshot.json() as { totals: { clients: number } };
-    expect(snapshotBody.totals.clients).toBeGreaterThanOrEqual(1);
+      const snapshot = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      expect(snapshot.status, snapshot.status === 200 ? undefined : (await snapshot.clone().text()).slice(0, 500)).toBe(200);
+      const snapshotBody = await snapshot.json() as { totals: { clients: number } };
+      expect(snapshotBody.totals.clients).toBeGreaterThanOrEqual(1);
 
-    const clients = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/clients`, {
-      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
-    });
-    expect(clients.status, clients.status === 200 ? undefined : (await clients.clone().text()).slice(0, 500)).toBe(200);
-    const clientsBody = await clients.json() as { clients: Array<{ surface: string }> };
-    expect(clientsBody.clients.some((client) => client.surface === 'web')).toBe(true);
+      const clients = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/clients`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      expect(clients.status, clients.status === 200 ? undefined : (await clients.clone().text()).slice(0, 500)).toBe(200);
+      const clientsBody = await clients.json() as { clients: Array<{ surface: string }> };
+      expect(clientsBody.clients.some((client) => client.surface === 'web')).toBe(true);
 
-    const web = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/web`);
-    expect(web.status, web.status === 200 ? undefined : (await web.clone().text()).slice(0, 500)).toBe(200);
-    expect(web.headers.get('content-type')).toContain('text/html');
-    const html = await web.text();
-    expect(html).toContain('goodvibes control plane');
-    expect(html).toContain('Approvals');
-    expect(html).toContain('Sessions');
-    expect(html).toContain('Deliveries');
-    expect(html).not.toContain(TEST_TOKEN);
+      const web = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/web`);
+      expect(web.status, web.status === 200 ? undefined : (await web.clone().text()).slice(0, 500)).toBe(200);
+      expect(web.headers.get('content-type')).toContain('text/html');
+      const html = await web.text();
+      expect(html).toContain('goodvibes control plane');
+      expect(html).toContain('Approvals');
+      expect(html).toContain('Sessions');
+      expect(html).toContain('Deliveries');
+      expect(html).not.toContain(TEST_TOKEN);
 
-    await reader!.cancel();
+    } finally {
+      await reader!.cancel().catch(() => {});
+    }
   });
 
   // Original server case 29, source line 1340.
@@ -1565,48 +1570,51 @@ async function proveAutonomousRead(): Promise<void> {
 
     const AuthenticatedWebSocket = createAuthenticatedWebSocket(TEST_TOKEN);
     const socket = new AuthenticatedWebSocket(`ws://127.0.0.1:${boundPort}/api/control-plane/ws?clientKind=web&domains=control-plane,automation`);
-    const ready = await waitForSocketFrame(socket, (frame) => frame.type === 'event' && frame.event === 'ready');
-    expect(ready.type).toBe('event');
+    try {
+      const ready = await waitForSocketFrame(socket, (frame) => frame.type === 'event' && frame.event === 'ready');
+      expect(ready.type).toBe('event');
 
-    socket.send(JSON.stringify({
-      type: 'auth',
-      token: TEST_TOKEN,
-      domains: ['control-plane', 'automation'],
-    }));
-    const authenticated = await waitForSocketFrame(socket, (frame) => frame.type === 'auth' && frame.ok === true);
-    expect(authenticated.ok).toBe(true);
+      socket.send(JSON.stringify({
+        type: 'auth',
+        token: TEST_TOKEN,
+        domains: ['control-plane', 'automation'],
+      }));
+      const authenticated = await waitForSocketFrame(socket, (frame) => frame.type === 'auth' && frame.ok === true);
+      expect(authenticated.ok).toBe(true);
 
-    socket.send(JSON.stringify({ type: 'ping' }));
-    const pong = await waitForSocketFrame(socket, (frame) => frame.type === 'pong');
-    expect(pong.type).toBe('pong');
+      socket.send(JSON.stringify({ type: 'ping' }));
+      const pong = await waitForSocketFrame(socket, (frame) => frame.type === 'pong');
+      expect(pong.type).toBe('pong');
 
-    socket.send(JSON.stringify({
-      type: 'call',
-      id: 'snapshot-1',
-      method: 'GET',
-      path: '/api/control-plane',
-    }));
-    const snapshot = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'snapshot-1');
-    expect(snapshot.ok).toBe(true);
-    expect(((snapshot.body as { totals?: { clients?: number } }).totals?.clients ?? 0)).toBeGreaterThanOrEqual(1);
+      socket.send(JSON.stringify({
+        type: 'call',
+        id: 'snapshot-1',
+        method: 'GET',
+        path: '/api/control-plane',
+      }));
+      const snapshot = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'snapshot-1');
+      expect(snapshot.ok).toBe(true);
+      expect(((snapshot.body as { totals?: { clients?: number } }).totals?.clients ?? 0)).toBeGreaterThanOrEqual(1);
 
-    socket.send(JSON.stringify({
-      type: 'call',
-      id: 'status-method-1',
-      methodId: 'control.status',
-    }));
-    const methodStatus = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'status-method-1');
-    expect(methodStatus.ok).toBe(true);
-    expect((methodStatus.body as { status?: string }).status).toBe('running');
+      socket.send(JSON.stringify({
+        type: 'call',
+        id: 'status-method-1',
+        methodId: 'control.status',
+      }));
+      const methodStatus = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'status-method-1');
+      expect(methodStatus.ok).toBe(true);
+      expect((methodStatus.body as { status?: string }).status).toBe('running');
 
-    socket.send(JSON.stringify({
-      type: 'subscribe',
-      domains: ['routes'],
-    }));
-    const subscribed = await waitForSocketFrame(socket, (frame) => frame.type === 'subscribed');
-    expect(subscribed.type).toBe('subscribed');
+      socket.send(JSON.stringify({
+        type: 'subscribe',
+        domains: ['routes'],
+      }));
+      const subscribed = await waitForSocketFrame(socket, (frame) => frame.type === 'subscribed');
+      expect(subscribed.type).toBe('subscribed');
 
-    socket.close();
+    } finally {
+      socket.close();
+    }
   });
 
   // Original server case 30, source line 1390.
@@ -1767,43 +1775,48 @@ async function proveAutonomousRead(): Promise<void> {
     });
     expect(readInvoke.status, readInvoke.status === 200 ? undefined : (await readInvoke.clone().text()).slice(0, 500)).toBe(200);
 
-    const writeInvoke = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/methods/automation.heartbeat.run/invoke`, {
+    // A write-scoped method an operator may call by role but whose scope this session lacks. Admin-only methods
+    // refuse earlier, on role, so they cannot show scope enforcement.
+    const writeInvoke = await fetch(`http://127.0.0.1:${boundPort}/api/control-plane/methods/browser.navigate/invoke`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${operatorToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ body: { source: 'scope-test' } }),
+      body: JSON.stringify({ body: { url: 'https://example.invalid/' } }),
     });
     expect(writeInvoke.status, writeInvoke.status === 403 ? undefined : (await writeInvoke.clone().text()).slice(0, 500)).toBe(403);
     const writeInvokeBody = await writeInvoke.json() as { error: string; missingScopes?: string[] };
     expect(writeInvokeBody.error).toContain('Missing required scope');
-    expect(writeInvokeBody.missingScopes).toContain('write:automation');
+    expect(writeInvokeBody.missingScopes).toContain('write:browser');
 
     const AuthenticatedWebSocket = createAuthenticatedWebSocket(operatorToken);
     const socket = new AuthenticatedWebSocket(`ws://127.0.0.1:${boundPort}/api/control-plane/ws?clientKind=web&domains=control-plane`);
-    const ready = await waitForSocketFrame(socket, (frame) => frame.type === 'event' && frame.event === 'ready');
-    expect(ready.type).toBe('event');
+    try {
+      const ready = await waitForSocketFrame(socket, (frame) => frame.type === 'event' && frame.event === 'ready');
+      expect(ready.type).toBe('event');
 
-    socket.send(JSON.stringify({
-      type: 'auth',
-      token: operatorToken,
-      domains: ['control-plane'],
-    }));
-    const authenticated = await waitForSocketFrame(socket, (frame) => frame.type === 'auth' && frame.ok === true);
-    expect(authenticated.ok).toBe(true);
+      socket.send(JSON.stringify({
+        type: 'auth',
+        token: operatorToken,
+        domains: ['control-plane'],
+      }));
+      const authenticated = await waitForSocketFrame(socket, (frame) => frame.type === 'auth' && frame.ok === true);
+      expect(authenticated.ok).toBe(true);
 
-    socket.send(JSON.stringify({
-      type: 'call',
-      id: 'raw-write-1',
-      method: 'POST',
-      path: '/api/automation/heartbeat',
-      body: { source: 'raw-ws-scope-test' },
-    }));
-    const denied = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'raw-write-1');
-    expect(denied.status).toBe(403);
-    expect((denied.body as { error?: string }).error).toContain('Missing required scope');
-    socket.close();
+      socket.send(JSON.stringify({
+        type: 'call',
+        id: 'raw-write-1',
+        method: 'POST',
+        path: '/api/browser/navigate',
+        body: { url: 'https://example.invalid/' },
+      }));
+      const denied = await waitForSocketFrame(socket, (frame) => frame.type === 'response' && frame.id === 'raw-write-1');
+      expect(denied.status).toBe(403);
+      expect((denied.body as { error?: string }).error).toContain('Missing required scope');
+    } finally {
+      socket.close();
+    }
   });
 
   // Original server case 33, source line 1584.
@@ -2040,13 +2053,19 @@ async function proveAutonomousRead(): Promise<void> {
         message: '/run policy',
         title: 'Policy Allowed',
         mentioned: true,
-        members: [
-          { id: 'alice', label: 'Alice Example', handle: '@alice' },
-          { id: 'ops-bot', label: 'Ops Bot', handle: '@ops-bot' },
-        ],
+        // A caller cannot describe the channel's member directory; the webhook route does not store this.
+        members: [{ id: 'mallory', label: 'Injected Member', handle: '@mallory' }],
       }),
     });
     expect(allowed.status, allowed.status === 200 ? undefined : (await allowed.clone().text()).slice(0, 500)).toBe(200);
+    // The directory comes from the operator-side binding, so it is recorded there.
+    await runtimeServices.routeBindings.upsertBinding({
+      kind: 'channel', surfaceKind: 'webhook', surfaceId: 'webhook', externalId: 'policy-allowed', channelId: 'policy-channel',
+      metadata: { members: [
+        { id: 'alice', label: 'Alice Example', handle: '@alice' },
+        { id: 'ops-bot', label: 'Ops Bot', handle: '@ops-bot' },
+      ] },
+    });
 
     const directory = await fetch(`http://127.0.0.1:${boundPort}/api/channels/directory/webhook?q=policy&scope=groups&groupId=policy-channel&limit=1`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
@@ -2063,6 +2082,7 @@ async function proveAutonomousRead(): Promise<void> {
     expect(members.status, members.status === 200 ? undefined : (await members.clone().text()).slice(0, 500)).toBe(200);
     const membersBody = await members.json() as { entries: Array<{ kind: string; label: string }> };
     expect(membersBody.entries.some((entry) => entry.kind === 'member' && entry.label === 'Alice Example')).toBe(true);
+    expect(membersBody.entries.some((entry) => entry.label === 'Injected Member')).toBe(false);
 
     const status = await fetch(`http://127.0.0.1:${boundPort}/api/channels/status`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
@@ -2340,9 +2360,9 @@ async function proveAutonomousRead(): Promise<void> {
     });
     expect(providers.status, providers.status === 200 ? undefined : (await providers.clone().text()).slice(0, 500)).toBe(200);
     const providersBody = await providers.json() as {
-      providers: Array<{ id: string }>;
+      providers: Array<{ providerId: string }>;
     };
-    expect(Array.isArray(providersBody.providers)).toBe(true);
+    expect(providersBody.providers.some((entry) => entry.providerId === 'openai')).toBe(true);
 
     const provider = await fetch(`http://127.0.0.1:${boundPort}/api/providers/openai`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
@@ -2350,7 +2370,7 @@ async function proveAutonomousRead(): Promise<void> {
     expect(provider.status, provider.status === 200 ? undefined : (await provider.clone().text()).slice(0, 500)).toBe(200);
     const providerBody = await provider.json() as { providerId: string; models: Array<{ id: string }> };
     expect(providerBody.providerId).toBe('openai');
-    expect(Array.isArray(providerBody.models)).toBe(true);
+    expect(providerBody.models.length).toBeGreaterThan(0);
 
     const usage = await fetch(`http://127.0.0.1:${boundPort}/api/providers/openai/usage`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
@@ -2741,7 +2761,9 @@ async function proveAutonomousRead(): Promise<void> {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
     expect(content.status, content.status === 200 ? undefined : (await content.clone().text()).slice(0, 500)).toBe(200);
-    expect(content.headers.get('content-type')).toContain('text/markdown');
+    // Markdown is not a type a browser may render on the daemon's origin, so it is served as an opaque download.
+    expect(content.headers.get('content-type')).toBe('application/octet-stream');
+    expect(content.headers.get('x-content-type-options')).toBe('nosniff');
     expect(await content.text()).toBe('# shipped\n');
 
     const rawCreate = await fetch(`http://127.0.0.1:${boundPort}/api/artifacts?filename=raw-notes.txt`, {
@@ -3161,7 +3183,7 @@ async function proveAutonomousRead(): Promise<void> {
       expect(response.status, (await response.clone().text()).slice(0, 500)).toBe(400);
       expect(response.headers.get('content-type')).toContain('application/json');
       expect(await response.json()).toMatchObject({ code: 'INVALID_ARGUMENT', status: 400,
-        error: 'This approval requires its exact current owner decision.' });
+        error: 'This approval requires its exact current owner decision. Deny and cancel are allowed here; approve it with the paired-owner decision command.' });
       expect(broker.getApproval(exact.approval.id)?.status).toBe('pending');
       await exact.resolveOwnerDecision({ decision: { approved: false }, actor: 'paired-owner', actorSurface: 'paired-gateway', assertCurrent() {} });
       expect(await exact.decision).toMatchObject({ approved: false });

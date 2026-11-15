@@ -84,6 +84,7 @@ export function observeTelegramRuntime(status: TelegramIngressStatus | null): Ch
 export function observeProviderRuntime(
   surface: ProviderRuntimeSurface,
   status: ProviderRuntimeStatus | null,
+  processingFailure?: string | undefined,
 ): ChannelRuntimeObservation {
   if (!status) {
     return unobservableRuntime(
@@ -91,11 +92,19 @@ export function observeProviderRuntime(
       + 'Configuration is all this status knows.',
     );
   }
+  if (!status.configured && !status.running) {
+    // A surface served by webhook has no socket to watch; "no connection" is
+    // its normal state, and calling it dead would alarm the owner for nothing.
+    return unobservableRuntime(`no socket is configured for ${surface}; inbound arrives by webhook`);
+  }
   if (status.running) {
+    // An open connection whose messages are being skipped is not working: the
+    // owner has already been told the surface is degraded, and status must not
+    // say otherwise.
     return observedRuntime(
       true,
       `the ${surface} ${status.transport} connection is open`,
-      status.lastError,
+      status.lastError ?? processingFailure,
     );
   }
   return observedRuntime(
@@ -112,6 +121,13 @@ export interface BuiltinRuntimeObservers {
   readonly telegramIngressStatus: () => TelegramIngressStatus | null;
   /** The provider connection manager's state, or null when none is wired. */
   readonly providerRuntimeStatus: (surface: ProviderRuntimeSurface) => ProviderRuntimeStatus | null;
+  /** The live run of skipped inbound messages for a surface, if any. */
+  readonly processingFailure?: ((surface: ChannelSurface) => string | undefined) | undefined;
+  /**
+   * Whether this node is the one meant to read `surface`. Absent means it is:
+   * without clustering every node reads everything it is configured for.
+   */
+  readonly isResponsible?: ((surface: ChannelSurface) => boolean) | undefined;
 }
 
 /** The live observation for one built-in surface. */
@@ -119,9 +135,18 @@ export function observeBuiltinRuntime(
   observers: BuiltinRuntimeObservers,
   surface: ChannelSurface,
 ): ChannelRuntimeObservation {
+  const received = surface === 'telegram' || surface === 'slack' || surface === 'discord' || surface === 'ntfy';
+  if (received && observers.isResponsible && !observers.isResponsible(surface)) {
+    // A standby is not reading by design. Calling that dead would have every
+    // standby in a cluster alarm the owner about a surface a peer is serving.
+    return unobservableRuntime(
+      `another node in the cluster is responsible for ${surface}; this node is standing by and does not read it. `
+      + 'Ask the node that holds it for its state.',
+    );
+  }
   if (surface === 'telegram') return observeTelegramRuntime(observers.telegramIngressStatus());
   if (surface === 'slack' || surface === 'discord' || surface === 'ntfy') {
-    return observeProviderRuntime(surface, observers.providerRuntimeStatus(surface));
+    return observeProviderRuntime(surface, observers.providerRuntimeStatus(surface), observers.processingFailure?.(surface));
   }
   if (surface === 'tui') {
     return observedRuntime(true, 'the terminal surface is served in this process; it has no remote path that can fail');

@@ -36,7 +36,7 @@ function fixture(kind: 'shared' | 'session' = 'shared') {
   const sharedToken = 'synthetic-loopback-settings';
   const session = users.createSession('fixture');
   const token = kind === 'shared' ? sharedToken : session.token;
-  const helper = new DaemonControlPlaneHelper({ authToken: () => sharedToken, pairingTokens: pairing, userAuth: users,
+  const helper = new DaemonControlPlaneHelper({ authToken: () => sharedToken, trustProxyEnabled: () => false, pairingTokens: pairing, userAuth: users,
     settingsLifetime: () => lifetime } as unknown as DaemonControlPlaneContext);
   const authority = { settingsLifetime: () => lifetime, captureSettingsAdminAuthority: helper.captureSettingsAdminAuthority.bind(helper), withSettingsAdminAuthority: helper.withSettingsAdminAuthority.bind(helper) };
   const context = { configManager: config, settingsAuthority: authority, secretsManager: secrets, runtimeStore: null,
@@ -55,11 +55,11 @@ function fixture(kind: 'shared' | 'session' = 'shared') {
     revoke: () => { if (kind === 'shared') pairing.revokeLegacyShared(); else users.revokeSession(session.token); }, restart: () => { lifetime = {}; }, loseResponse: () => { loseResponse = true; } };
 }
 
-for (const operation of ['set', 'reset-default'] as const) test(`real loopback compound ${operation} clears exact scope before config`, async () => {
+for (const operation of ['set', 'reset-default'] as const) test(`real loopback compound ${operation} publishes config before clearing the exact credential scope`, async () => {
   const f = fixture(); const prepared = await f.capability.capture({ operation, key, ...(operation === 'set' ? { value: '' } : {}), credentialClear: true });
   const facts = f.capability.inspect(prepared);
   expect(facts.credential?.key).toBe(secretKey); expect(facts.credential?.scope).toBe('daemon');
-  expect(facts.destinations.map(d => d.operation)).toEqual(['remove', 'set']);
+  expect(facts.destinations.map(d => d.operation)).toEqual(['set', 'remove']);
   expect(JSON.stringify(facts)).not.toContain('synthetic-daemon-value');
   const receipt = await f.capability.apply(prepared);
   expect(receipt.status).toBe('committed'); expect(receipt.completedPaths).toEqual(facts.destinations.map(d => d.path));
@@ -76,14 +76,17 @@ for (const change of ['revoke', 'restart', 'replaceConfig', 'replaceSecret'] as 
   expect((await f.capability.apply(prepared)).status).toBe('unknown');
   expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBe('synthetic-daemon-value');
 });
-test('credential settlement revocation reports the completed secret effect and stops config', async () => {
-  const f = fixture('session'); const before = f.config.get(key);
+test('revocation after the config is published reports it, leaves an orphan credential and stops the credential tail', async () => {
+  const f = fixture('session');
   const prepared = await f.capability.capture({ operation: 'set', key, value: '', credentialClear: true });
-  f.secrets.onDidChange(f.revoke);
+  const [configDestination, credentialDestination] = f.capability.inspect(prepared).destinations;
+  f.config.subscribe(key, f.revoke);
   const receipt = await f.capability.apply(prepared);
-  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([f.credentialPath]);
-  expect(receipt.uncertainPath).toBe(f.capability.inspect(prepared).destinations[1]!.path);
-  expect(f.config.get(key)).toBe(before); expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBeUndefined();
+  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([configDestination!.path]);
+  expect(receipt.uncertainPath).toBe(credentialDestination!.path);
+  expect(f.config.get(key)).toBe('');
+  // The failure leaves the credential behind, never config pointing at a missing credential.
+  expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBe('synthetic-daemon-value');
 });
 test('response loss after compound effect is unknown and cannot replay', async () => {
   const f = fixture(); const prepared = await f.capability.capture({ operation: 'set', key, value: '', credentialClear: true });
@@ -113,26 +116,27 @@ test('revocation while exact credential file lock is awaited fences both compoun
   } finally { release(); }
 });
 
-test('same secret owner replacement during settlement stops the config tail', async () => {
-  const f = fixture(); const before = f.config.get(key);
+test('same secret owner replacement after the config is published stops the credential tail', async () => {
+  const f = fixture();
   const prepared = await f.capability.capture({ operation: 'set', key, value: '', credentialClear: true });
+  const configPath = f.capability.inspect(prepared).destinations[0]!.path;
   let replacing: Promise<void> | undefined;
-  const unsubscribe = f.secrets.onDidChange(() => { unsubscribe(); replacing = f.secrets.set(secretKey, 'synthetic-replacement', { scope: 'daemon', medium: 'plaintext' }); });
+  const unsubscribe = f.config.subscribe(key, () => { unsubscribe(); replacing = f.secrets.set(secretKey, 'synthetic-replacement', { scope: 'daemon', medium: 'plaintext' }); });
   const receipt = await f.capability.apply(prepared);
-  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([f.credentialPath]);
-  expect(f.config.get(key)).toBe(before); await replacing;
+  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([configPath]);
+  expect(f.config.get(key)).toBe(''); await replacing;
   expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBe('synthetic-replacement');
 });
 
-test('external credential store replacement during settlement cannot authorize config tail', async () => {
-  const f = fixture(); const before = f.config.get(key);
+test('external credential store replacement after the config is published cannot authorize the credential tail', async () => {
+  const f = fixture();
   const prepared = await f.capability.capture({ operation: 'set', key, value: '', credentialClear: true });
-  f.secrets.onDidChange(() => { writeFileSync(f.credentialPath, JSON.stringify({ version: 1, secrets: { [secretKey]: 'synthetic-external-replacement' } })); });
+  const configPath = f.capability.inspect(prepared).destinations[0]!.path;
+  f.config.subscribe(key, () => { writeFileSync(f.credentialPath, JSON.stringify({ version: 1, secrets: { [secretKey]: 'synthetic-external-replacement' } })); });
   const receipt = await f.capability.apply(prepared);
-  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([f.credentialPath]);
-  expect(f.config.get(key)).toBe(before);
+  expect(receipt.status).toBe('partial'); expect(receipt.completedPaths).toEqual([configPath]);
+  expect(JSON.parse(readFileSync(f.credentialPath, 'utf8')).secrets[secretKey]).toBe('synthetic-external-replacement');
 });
-
 
 test('route observation callback cannot replace the captured installation after its guard', async () => {
   let current = true; let observations = 0;

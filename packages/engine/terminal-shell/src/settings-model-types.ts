@@ -45,7 +45,6 @@ export type CommonSettingsCategory =
   | 'integrations'
   | 'policy'
   | 'notifications'
-  | 'release'
   | 'update'
   | 'power'
   | 'memory'

@@ -5,7 +5,7 @@ import {
   createGoodVibesPlatform,
   createReactNativeGoodVibesPlatform,
   createWebGoodVibesPlatform,
-} from '../platform/dist/index.js';
+} from '../platform/src/index.ts';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

@@ -189,6 +189,10 @@ async function buildRollbackAction(deps: OnboardingApplyDependencies, operation:
   if (operation.kind === 'create-agent-profile') {
     const resolution = resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, operation.name);
     return () => {
+      // Only a directory this apply began creating is its to remove. The
+      // pipeline also runs the rollback of the operation that failed, and a
+      // failure here can be "already exists": that directory is someone else's.
+      if (!profileHomesStartedBy(deps).has(resolution.homeDirectory)) return;
       if (existsSync(resolution.homeDirectory)) rmSync(resolution.homeDirectory, { recursive: true, force: true });
     };
   }
@@ -222,11 +226,26 @@ async function buildRollbackAction(deps: OnboardingApplyDependencies, operation:
   throw new Error(`Unsupported onboarding operation: ${JSON.stringify(neverOperation)}`);
 }
 
+/** Profile homes each apply began creating, so a rollback never removes one it did not start. */
+const profileHomesStarted = new WeakMap<OnboardingApplyDependencies, Set<string>>();
+
+function profileHomesStartedBy(deps: OnboardingApplyDependencies): Set<string> {
+  let homes = profileHomesStarted.get(deps);
+  if (!homes) {
+    homes = new Set();
+    profileHomesStarted.set(deps, homes);
+  }
+  return homes;
+}
+
 function applyCreateAgentProfileOperation(
   deps: OnboardingApplyDependencies,
   operation: Extract<OnboardingApplyOperation, { kind: 'create-agent-profile' }>,
 ): OnboardingAppliedOperation {
   validateCreateAgentProfileOperation(deps, operation);
+  // Validation just saw the home absent; from here the directory is this
+  // apply's, including a half-written one if creation fails part-way.
+  profileHomesStartedBy(deps).add(resolveAgentRuntimeProfileHome(deps.shellPaths.homeDirectory, operation.name).homeDirectory);
   const templateId = operation.templateId?.trim();
   const profile = createAgentRuntimeProfile(deps.shellPaths.homeDirectory, operation.name, {
     ...(templateId ? { templateId } : {}),

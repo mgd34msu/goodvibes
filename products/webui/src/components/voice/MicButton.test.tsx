@@ -50,14 +50,18 @@ mock.module('../../hooks/useOriginPosture', () => ({
 
 const { MicButton } = await import('./MicButton');
 
-function render(): { el: HTMLElement; unmount: () => void } {
+const cleanups: Array<() => void> = [];
+
+function render(): { el: HTMLElement } {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   flushSync(() => {
     root.render(React.createElement(MicButton, { onTranscript: () => {} }));
   });
-  return { el: container, unmount: () => { flushSync(() => root.unmount()); container.remove(); } };
+  // Unmounted in afterEach so a failed assertion cannot leave the root in document.body.
+  cleanups.push(() => { flushSync(() => root.unmount()); container.remove(); });
+  return { el: container };
 }
 
 function clickMic(el: HTMLElement): void {
@@ -67,6 +71,7 @@ function clickMic(el: HTMLElement): void {
 }
 
 afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
   supportValue = 'insecure-context';
   phaseValue = 'idle';
   postureCapabilities = [{ capability: 'microphone', available: false, reason: 'needs https, available via tailscale' }];
@@ -75,56 +80,52 @@ afterEach(() => {
 
 describe('MicButton capability label', () => {
   test('insecure-context: no bubble by default; the reason lives in the hover title', () => {
-    const { el, unmount } = render();
+    const { el } = render();
     expect(el.querySelector('.voice-mic-note')).toBeNull();
     expect(el.querySelector('button')?.getAttribute('title')).toContain('needs https, available via tailscale');
     expect(el.querySelector('button')?.hasAttribute('disabled')).toBe(false);
-    unmount();
   });
 
   test('insecure-context: tapping the crossed mic shows the daemon posture reason, tapping again hides it', () => {
-    const { el, unmount } = render();
+    const { el } = render();
     clickMic(el);
     expect(el.textContent).toContain('needs https, available via tailscale');
     expect(el.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
     clickMic(el);
     expect(el.querySelector('.voice-mic-note')).toBeNull();
     expect(el.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    unmount();
   });
 
   test('insecure-context: no daemon reason is shown while posture is loading', () => {
     posturePending = true;
-    const { el, unmount } = render();
+    const { el } = render();
     clickMic(el);
     expect(el.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
     expect(el.textContent).not.toContain('needs https, available via tailscale');
-    unmount();
+    // The still-true generic pointer stands in until the daemon answers.
+    expect(el.querySelector('.voice-mic-note')?.textContent).toContain('Open this page over HTTPS');
   });
 
   test('unsupported: tapping reveals a note, never the posture reason', () => {
     supportValue = 'unsupported';
-    const { el, unmount } = render();
+    const { el } = render();
     expect(el.querySelector('.voice-mic-note')).toBeNull();
     clickMic(el);
     expect(el.querySelector('.voice-mic-note')).not.toBeNull();
     expect(el.textContent).not.toContain('needs https, available via tailscale');
-    unmount();
   });
 
   test('transient feedback still shows its bubble without any tap', () => {
     supportValue = 'ok';
     phaseValue = 'transcribing';
-    const { el, unmount } = render();
+    const { el } = render();
     expect(el.querySelector('.voice-mic-note')).not.toBeNull();
-    unmount();
   });
 
   test('ok: renders the real dictate button with no note', () => {
     supportValue = 'ok';
-    const { el, unmount } = render();
+    const { el } = render();
     expect(el.querySelector('button')?.hasAttribute('disabled')).toBe(false);
     expect(el.querySelector('.voice-mic-note')).toBeNull();
-    unmount();
   });
 });

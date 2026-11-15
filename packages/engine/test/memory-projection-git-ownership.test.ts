@@ -114,12 +114,12 @@ describe('memory projection commits only to a repository it owns (real git)', ()
     const log = git(['log', '--oneline'], projectionDir);
     expect(log).toContain('memory projection: 1 record(s)');
 
-    // A second projection with no changes stays clean (no throw, no new commit).
+    // A second projection with no changes stays clean: no throw, no new commit, and the report says nothing was committed.
     const second = projectMemoryToFiles([record()], projectionDir, {
       now: 1000,
       git: createMemoryProjectionGit(),
     });
-    expect(second.committed).toBe(true);
+    expect(second.committed).toBe(false);
     expect(git(['log', '--oneline'], projectionDir).split('\n').length).toBe(1);
   });
 

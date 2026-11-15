@@ -1,6 +1,6 @@
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -58,6 +58,15 @@ afterEach(async () => {
 });
 
 describe('runtime knowledge store isolation', () => {
+  test('closing the Agent runtime closes the memory and code index database handles', async () => {
+    const { services } = await makeRuntime();
+    const memoryClose = spyOn(services.memoryStore, 'close');
+    const codeIndexClose = spyOn(services.codeIndexStore, 'close');
+    await services.close();
+    expect(memoryClose).toHaveBeenCalled();
+    expect(codeIndexClose).toHaveBeenCalled();
+  }, 60_000);
+
   test('Agent Knowledge is the only runtime knowledge surface created by Agent', async () => {
     const { configManager, services } = (await makeRuntime());
     const controlPlaneDir = configManager.getControlPlaneConfigDir();

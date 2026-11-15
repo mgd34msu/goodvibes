@@ -167,18 +167,41 @@ describe('loadFromDisk()', () => {
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
   });
 
-  it('rejects unknown actions with a debug log (no throw, no binding change)', () => {
-    const configPath = writeConfig({ 'totally-unknown-action': { key: 'x', ctrl: true } });
+  it('reports an unknown action as a notice and leaves every binding unchanged', () => {
+    const configPath = writeConfig({ 'totally-unknown-action': { key: 'j', ctrl: true, alt: true } });
     const km = new KeybindingsManager({ configPath });
-    expect(() => km.loadFromDisk()).not.toThrow();
-    // The real actions must still be intact
+    const notices = km.loadFromDisk();
+    expect(notices).toEqual(['keybindings: unknown action "totally-unknown-action" ignored']);
+    // The real actions must still be intact, and the unknown action's chord is not bound to anything
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
+    expect(km.lookup({ logicalName: 'j', ctrl: true, alt: true })).toBeNull();
+  });
+
+  it('reports a malformed file as a notice and keeps the defaults', () => {
+    const path = makeConfigPath();
+    writeFileSync(path, '{ invalid json !!', 'utf-8');
+    const km = new KeybindingsManager({ configPath: path });
+    const notices = km.loadFromDisk();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('could not be read');
+    expect(notices[0]).toContain('defaults are in use');
+  });
+
+  it('a deleted override file drops the earlier overrides on reload', () => {
+    const configPath = writeConfig({ search: { key: 'g', ctrl: true } });
+    const km = new KeybindingsManager({ configPath });
+    km.loadFromDisk();
+    expect(km.lookup({ logicalName: 'g', ctrl: true })).toBe('search');
+    rmSync(configPath);
+    expect(km.loadFromDisk()).toEqual([]);
+    expect(km.lookup({ logicalName: 'f', ctrl: true })).toBe('search');
+    expect(km.lookup({ logicalName: 'g', ctrl: true })).toBeNull();
   });
 
   it('rejects invalid combos missing the key field', () => {
     const configPath = writeConfig({ search: { ctrl: true } }); // no key
     const km = new KeybindingsManager({ configPath });
-    km.loadFromDisk();
+    expect(km.loadFromDisk()).toEqual(['keybindings: invalid key combination for "search" ignored; the default stays']);
     // search must fall back to default Ctrl+F
     expect(km.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
   });

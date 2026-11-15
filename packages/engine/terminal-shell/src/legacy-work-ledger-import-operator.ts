@@ -75,9 +75,12 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
   };
   const status = async () => { await authenticate(); return journal(store => store.read(binding!)); };
   const selectedEntry = (requestId: string): LegacyImportEntry => journal(store => {
-    const entry = store.readForUpdate(binding!);
+    // Look without writing first: a mistyped request ID must not create a journal or raise the writer format floor.
+    // A journal that cannot be read read-only (an interrupted write) is recovered through the update path.
+    let entry: LegacyImportEntry | null;
+    try { entry = store.read(binding!); } catch { entry = store.readForUpdate(binding!); }
     if (!entry || entry.command.requestId !== requestId) throw new Error('Selected import request does not match the saved command');
-    return entry;
+    return store.readForUpdate(binding!) ?? entry;
   });
   const prepareSources = async (): Promise<LegacyMigrationPreparation> => {
       const sourceIds: string[] = []; const seen = new Set<string>(); const cursors = new Set<string>(); let cursor: string | undefined;

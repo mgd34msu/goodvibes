@@ -4,6 +4,9 @@ import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools
 import { SessionViews } from '../../shell/session-views.ts';
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 
+/** Lets every already-queued promise continuation run, however many awaits the code under test makes. */
+const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 const text = (lines: readonly import('@goodvibes-jev/engine/platform/platform/types').Line[]): string => lines.map((line) => line.map((cell) => cell.char).join('')).join('\n');
 function setup(initial: ContractView, replyResult: Promise<OwnerReplyOutcome> = Promise.resolve({ escalationId: 'e1', reading: 'approve', outcome: 'act', action: 'approved' })) {
   let contract = initial;
@@ -81,8 +84,30 @@ describe('contract owner session controls', () => {
     expect(s.views.steer('Duplicate')).toBe(false);
     expect(s.replies).toEqual([['contract-1', 'e1', 'Apply it']]);
     expect(s.calls().genericSteers).toBe(0);
-    await Promise.resolve(); await Promise.resolve();
+    await flush();
     expect(s.views.frame(120)?.footer.notice?.text).toContain('Owner reply accepted');
+  });
+  test('a refused or failed owner reply hands the typed text back; an accepted one does not', async () => {
+    // Built per case: a rejected promise created up front would be reported unhandled while an earlier case is still being awaited.
+    const outcomes: Array<[() => Promise<OwnerReplyOutcome>, boolean]> = [
+      [() => Promise.resolve({ escalationId: 'e1', reading: 'unclear', outcome: 'act', action: 'refused' }), true],
+      [() => Promise.reject(new Error('runner down')), true],
+      [() => Promise.resolve({ escalationId: 'e1', reading: 'approve', outcome: 'act', action: 'approved' }), false],
+    ];
+    for (const [result, restored] of outcomes) {
+      const s = setup(contractFixture({ status: 'awaiting-owner', completedAt: undefined, escalations: [question] }), result());
+      let restoredCalls = 0;
+      expect(s.views.steer('Apply it', () => { restoredCalls++; })).toBe(true);
+      await flush();
+      expect(restoredCalls).toBe(restored ? 1 : 0);
+    }
+  });
+  test('an answer to a failed-turn question says the turn retries, not that the contract changed', async () => {
+    const s = setup(contractFixture({ status: 'awaiting-owner', completedAt: undefined, escalations: [{ ...question, reason: 'owner-decision-needed', failurePause: true }] }),
+      Promise.resolve({ escalationId: 'e1', reading: 'amend', outcome: 'act', action: 'amended' }));
+    expect(s.views.steer('retry')).toBe(true);
+    await flush();
+    expect(s.views.frame(120)?.footer.notice?.text).toBe('Retrying the failed turn.');
   });
   test('an active contract without an owner question refuses generic steering', () => {
     const s = setup(contractFixture({ status: 'running', completedAt: undefined }));

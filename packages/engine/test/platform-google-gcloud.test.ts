@@ -82,13 +82,15 @@ describe('detectGcloud', () => {
   });
 });
 
+const LINUX_X64 = { os: 'linux', arch: 'x64' } as const;
+
 describe('installGcloud', () => {
   test('is idempotent: skips download and install when the binary already exists', async () => {
     const port = fakePort((command) => {
       if (command === FALLBACK_GCLOUD) return okResult('Google Cloud SDK 123.0.0');
       throw new Error(`unexpected command during already-installed check: ${command}`);
     });
-    const result = await installGcloud(port, { homeDirectory: HOME });
+    const result = await installGcloud(port, { homeDirectory: HOME, platform: LINUX_X64 });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.outcome).toBe('already-installed');
@@ -112,7 +114,7 @@ describe('installGcloud', () => {
       }
       throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
     });
-    const result = await installGcloud(port, { homeDirectory: HOME });
+    const result = await installGcloud(port, { homeDirectory: HOME, platform: LINUX_X64 });
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.outcome).toBe('installed');
@@ -124,13 +126,24 @@ describe('installGcloud', () => {
     expect(commands).toContain(`${HOME}/google-cloud-sdk/install.sh`);
   });
 
+  test('refuses a non-https download URL before fetching or running anything', async () => {
+    const port = fakePort((command) => {
+      if (command === FALLBACK_GCLOUD) return spawnFailResult();
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const result = await installGcloud(port, { homeDirectory: HOME, platform: LINUX_X64, downloadUrl: 'http://mirror.example.test/gcloud.tar.gz' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.problem).toContain('https');
+    expect(port.calls.map((call) => call.command)).toEqual([FALLBACK_GCLOUD]);
+  });
+
   test('reports a clear problem when the download step fails', async () => {
     const port = fakePort((command) => {
       if (command === FALLBACK_GCLOUD) return spawnFailResult();
       if (command === 'curl') return failResult('curl: (6) Could not resolve host');
       throw new Error(`unexpected command: ${command}`);
     });
-    const result = await installGcloud(port, { homeDirectory: HOME });
+    const result = await installGcloud(port, { homeDirectory: HOME, platform: LINUX_X64 });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.problem).toContain('Downloading');
@@ -320,5 +333,49 @@ describe('enableServices', () => {
       expect(result.alreadyEnabled).toEqual(['gmail.googleapis.com', 'calendar-json.googleapis.com']);
     }
     expect(port.calls.some((call) => call.args.includes('enable'))).toBe(false);
+  });
+});
+
+describe('installGcloud archive handling', () => {
+  function installScript(extract: GoogleCommandResult = okResult('')) {
+    let installed = false;
+    return fakePort((command) => {
+      if (command === FALLBACK_GCLOUD) return installed ? okResult('Google Cloud SDK 1.0.0') : spawnFailResult();
+      if (command === 'curl' || command === 'rm') return okResult('');
+      if (command === 'tar') return extract;
+      if (command === `${HOME}/google-cloud-sdk/install.sh`) {
+        installed = true;
+        return okResult('');
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+  }
+
+  test('downloads the archive that matches the machine, and fails on an HTTP error instead of saving the error page', async () => {
+    const port = installScript();
+    await installGcloud(port, { homeDirectory: HOME, platform: { os: 'darwin', arch: 'arm64' } });
+    const curl = port.calls.find((call) => call.command === 'curl');
+    expect(curl?.args[0]).toContain('f');
+    expect(curl?.args.at(-1)).toContain('google-cloud-cli-darwin-arm.tar.gz');
+  });
+
+  test('says so when there is no archive for the machine, and downloads nothing', async () => {
+    const port = installScript();
+    const result = await installGcloud(port, { homeDirectory: HOME, platform: { os: 'win32', arch: 'x64' } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.problem).toContain('win32');
+    expect(port.calls.map((call) => call.command)).not.toContain('curl');
+  });
+
+  test('removes the downloaded archive after a successful install and after a failed extract', async () => {
+    const ok = installScript();
+    await installGcloud(ok, { homeDirectory: HOME, platform: LINUX_X64 });
+    expect(ok.calls.filter((call) => call.command === 'rm')).toHaveLength(1);
+
+    const bad = installScript(failResult('tar: not in gzip format'));
+    const result = await installGcloud(bad, { homeDirectory: HOME, platform: LINUX_X64 });
+    expect(result.ok).toBe(false);
+    const rm = bad.calls.find((call) => call.command === 'rm');
+    expect(rm?.args).toContain(`${HOME}/google-cloud-cli-linux-x86_64.tar.gz`);
   });
 });

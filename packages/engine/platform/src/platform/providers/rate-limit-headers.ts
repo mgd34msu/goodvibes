@@ -168,3 +168,16 @@ function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
   }
   return undefined;
 }
+
+/** The wait the server asked for, read from the SDK error's response headers. */
+export function openAiRetryAfterMs(err: unknown): number | undefined {
+  const headers = err && typeof err === 'object' ? (err as { headers?: unknown }).headers : undefined;
+  if (!headers || typeof headers !== 'object') return undefined;
+  return parseRateLimitHeaders(headers as Headers)?.retryAfterMs;
+}
+
+/** A 429 that says the account is out of quota is a billing failure: waiting does not clear it. */
+export function isOpenAiSpentQuota(err: unknown): boolean {
+  const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+  return code === 'insufficient_quota';
+}

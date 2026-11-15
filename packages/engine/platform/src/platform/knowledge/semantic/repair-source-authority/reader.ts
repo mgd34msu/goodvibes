@@ -7,24 +7,11 @@ import { freezeSupport } from '../verification/projection.js';
 import { repairSourceAuthority } from './battery.js';
 import { KnowledgeRepairSourceAuthorityHeldError as Held, REPAIR_SOURCE_AUTHORITY_LIMITS as LIMITS,
   type RepairSourceAuthorityInput, type RepairSourceAuthorityOptions, type RepairSourceAuthorityReading } from './types.js';
+import { assertJsonTree as assertSharedJsonTree, hasOnlyKeys as keys, isOptionalText as optionalText, isRecord as record, isStringArray as strings } from '../reader-validation.js';
 export * from './types.js';
 
 const SITE = repairSourceAuthority.name;
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function keys(value: Record<string, unknown>, allowed: readonly string[]): boolean { return Object.keys(value).every((key) => allowed.includes(key)); }
-function strings(value: unknown): value is readonly string[] { return Array.isArray(value) && Array.from(value).every((item) => typeof item === 'string'); }
-function optionalText(value: unknown): boolean { return value === undefined || typeof value === 'string'; }
-/** Privacy has rejected accessors/cycles/prototypes; also refuse hidden or lossy JSON data. */
-function jsonTree(value: unknown): void {
-  if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return;
-  if (typeof value !== 'object' || Object.getOwnPropertySymbols(value).length) throw new Held('malformed');
-  if (Array.isArray(value) && Object.keys(value).length !== value.length) throw new Held('malformed');
-  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-    if (Array.isArray(value) && key === 'length') continue;
-    if (!descriptor.enumerable || descriptor.get || descriptor.set) throw new Held('malformed');
-    jsonTree(descriptor.value);
-  }
-}
+const jsonTree = (value: unknown): void => assertSharedJsonTree(value, () => new Held('malformed'), true);
 function snapshotInputs(inputs: readonly RepairSourceAuthorityInput[]) {
   // Full selected batch, including late fields, precedes serialization, caps,
   // cache lookup and acquiring a model/port. No truncation chooses the evidence.

@@ -57,6 +57,8 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
     }
     let closed = false;
     let replacing = false;
+    // True while a request that changes a purchase is on the wire, so closing the view cannot claim it did nothing.
+    let mutating = false;
     let pickerAbort: AbortController | undefined;
     let principal: string | undefined;
     const finish = () => {
@@ -82,7 +84,11 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
       pickerAbort = new AbortController();
       open.call(context, title, items, { allowSearch: false, primaryVerbLabel: 'Choose', signal: AbortSignal.any([connection.signal, pickerAbort.signal]) }, result => {
         if (replacing || closed) return;
-        if (result === null || result.action !== 'select') { finish(); return; }
+        if (result === null || result.action !== 'select') {
+          if (mutating) report('[payments] The request may already have reached the host. Reopen /payments pending to confirm what it did before trying again.');
+          finish();
+          return;
+        }
         try { connection.assertCurrent(); chosen(result); }
         catch { report('[payments] The host or purchase window changed. Reopen /payments pending.'); finish(); }
       });
@@ -95,28 +101,34 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
       }
       principal = auth.principalId;
     };
-    const fail = (answering: boolean) => {
+    const mutate = async <T>(send: () => Promise<T>): Promise<T> => {
+      mutating = true;
+      try { return await send(); } finally { mutating = false; }
+    };
+    const fail = (what: 'answer' | 'stop' | 'read') => {
       // Typed failures can contain neither a semantic reinterpretation nor
       // provider/transport text which might echo the credential or request.
-      report(answering
+      report(what === 'answer'
         ? '[payments] Could not confirm the purchase-window answer. Refresh /payments pending before trying again.'
-        : '[payments] Could not read purchase windows. Check the selected host, pairing and payment scopes, then retry /payments pending.');
+        : what === 'stop'
+          ? '[payments] Could not confirm the checkout stop. Refresh /payments pending to see whether it was applied before trying again.'
+          : '[payments] Could not read purchase windows. Check the selected host, pairing and payment scopes, then retry /payments pending.');
       finish();
     };
     const answer = async (window: PaymentWindowView, action: 'approve' | 'deny' | 'cancel') => {
       try {
         loading('Sending purchase-window answer — Escape closes this view');
         await authenticate();
-        const result = await connection.run(async (operator, signal) => readPaymentWindowAnswer(await operator.invoke(
+        const result = await mutate(() => connection.run(async (operator, signal) => readPaymentWindowAnswer(await operator.invoke(
           `payments.purchase.${action}`,
           { purchaseId: window.purchaseId, windowId: window.windowId, confirm: true },
           { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
-        )));
+        ))));
         const expected = window.kind === 'approval' ? (action === 'approve' ? 'approve' : 'deny') : (action === 'approve' ? 'acknowledge' : 'object');
         if (result.purchaseId !== window.purchaseId || result.windowId !== window.windowId || result.answer !== expected) throw new Error('Mismatched answer.');
         report('[payments] Purchase-window answer accepted.');
         finish();
-      } catch { fail(true); }
+      } catch { fail('answer'); }
     };
     const choose = (window: PaymentWindowView) => {
       const notice = detail(window);
@@ -133,31 +145,31 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
       try {
         loading('Requesting checkout stop — Escape closes this view');
         await authenticate();
-        const result = await connection.run(async (operator, signal) => readPaymentOperationCancellation(await operator.invoke(
+        const result = await mutate(() => connection.run(async (operator, signal) => readPaymentOperationCancellation(await operator.invoke(
           'payments.purchase.cancel', { purchaseId: operation.purchaseId, operationId: operation.operationId, confirm: true },
           { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
-        )));
+        ))));
         if (result.purchaseId !== operation.purchaseId || result.operationId !== operation.operationId) throw new Error('Mismatched stop acknowledgement.');
         report(result.mayHaveSubmitted
           ? '[payments] Stop requested; submission may already have begun. Check purchase status and the merchant. This does not undo an order.'
           : '[payments] Stop requested. Check final purchase status before taking further action.');
         await refresh();
-      } catch { fail(true); }
+      } catch { fail('stop'); }
     };
     const reconcile = async (operation: PaymentOperationView, outcome: 'purchased' | 'not-purchased'): Promise<void> => {
       try {
         loading('Recording your merchant-history finding — Escape closes this view');
         await authenticate();
-        const result = await connection.run(async (operator, signal) => readPaymentOperation(await operator.invoke(
+        const result = await mutate(() => connection.run(async (operator, signal) => readPaymentOperation(await operator.invoke(
           'payments.purchase.reconcile', { purchaseId: operation.purchaseId, operationId: operation.operationId,
             outcome, inspectedMerchantHistory: true, confirm: true },
           { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
-        )));
+        ))));
         if (result.purchaseId !== operation.purchaseId || result.operationId !== operation.operationId || result.outcome !== `owner-confirmed-${outcome}`) throw new Error('Mismatched reconciliation.');
         report(`[payments] ${paymentOperationDescription(result)}`);
         await refresh();
       } catch {
-        report('[payments] Could not confirm completed reconciliation. Refresh /payments pending and repeat only the finding already saved. Do not submit another order.');
+        report('[payments] Could not confirm completed reconciliation. Refresh /payments pending; if it shows your finding as saved, repeat that same finding. Do not submit another order.');
         finish();
       }
     };
@@ -187,12 +199,14 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
       try {
         loading('Reading purchase windows — Escape cancels');
         await authenticate();
-        const { windows, operations } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
-        if (windows.length === 0 && operations.length === 0) { report('[payments] No purchase operations or windows on the selected host.'); finish(); return; }
+        const { windows, operations, unreadable } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
+        if (windows.length === 0 && operations.length === 0 && unreadable.length === 0) { report('[payments] No purchase operations or windows on the selected host.'); finish(); return; }
         const byId = new Map(windows.map((window, index) => [`window-${index}`, window]));
         const byOperationId = new Map(operations.map((operation, index) => [`operation-${index}`, operation]));
         const items: SelectionItem[] = [...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) }));
         for (const [id, operation] of byOperationId) items.push({ id, label: `${operation.state}: ${text(operation.purchaseId)}`, detail: paymentOperationDescription(operation) });
+        // Named so its evidence is inspected; there is nothing to answer or stop on it from here.
+        for (const [index, row] of unreadable.entries()) items.push({ id: `unreadable-${index}`, label: `unreadable: ${text(row.purchaseId)}`, detail: text(row.reason) });
         items.push({ id: 'refresh', label: 'Refresh purchases', detail: 'Read current operations and windows from this same paired host.' });
         show('Purchases', items, result => {
           if (result.item.id === 'refresh') { void refresh(); return; }
@@ -202,7 +216,7 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
           if (!window) { finish(); return; }
           choose(window);
         });
-      } catch { fail(false); }
+      } catch { fail('read'); }
     };
     await refresh();
   };

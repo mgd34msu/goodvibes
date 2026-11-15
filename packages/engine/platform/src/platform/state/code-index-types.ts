@@ -34,6 +34,10 @@ export interface CodeIndexBuildStats {
   readonly durationMs: number;
   /** Present exactly when the build was aborted (reroot()/close() during the walk), partial results were discarded, not recorded as lastBuild. */
   readonly abortReason?: string | undefined;
+  /** Files that could not be indexed for a reason other than changing under the build (embedding provider or storage failure). Absent when none. */
+  readonly filesFailed?: number | undefined;
+  /** The first such failure, for the status line. */
+  readonly firstFailure?: string | undefined;
 }
 
 export interface CodeIndexBuildProgress {
@@ -63,6 +67,13 @@ export interface CodeIndexStats {
   readonly building: boolean;
   readonly lastBuild: CodeIndexBuildStats | null;
   readonly error?: string | undefined;
+  /**
+   * Present when the most recent build did not run or did not finish: why. Cleared by the
+   * next build that completes. `error` is the open failure; this is the build's own.
+   */
+  readonly lastBuildError?: string | undefined;
+  /** Present when the latest search could not embed its query (so it returned nothing for that reason); cleared by the next search that embeds. */
+  readonly lastSearchError?: string | undefined;
 }
 
 /** A single search hit: the matched chunk plus its distance/similarity and an honest retrieval-quality label. */

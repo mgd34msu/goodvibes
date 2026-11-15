@@ -35,7 +35,9 @@ test('the complete environment declaration catalog participates in template sele
   const variables = Array.from({ length: 600 }, (_, index) => ({ key: `FIELD_${index}`, blank: index !== 599 }));
   expect(JSON.stringify(envTemplateCandidate('fixture.env', variables))).toContain('FIELD_599=(set)');
 });
-test('oversized evidence holds instead of silently supplying a prefix', () => {
-  expect(() => handlerView('fixture.ts', 'x'.repeat(160_001))).not.toThrow();
-  expect(() => credentialValueState('fixture', '', 'x'.repeat(160_001))).not.toThrow();
+test('oversized evidence is supplied whole, not as a prefix', () => {
+  const tail = 'TAIL-MARKER-AFTER-160K';
+  const oversized = `${'x'.repeat(160_001)}${tail}`;
+  expect(handlerView('fixture.ts', oversized).code).toBe(oversized);
+  expect(JSON.stringify(credentialValueState('fixture', '', oversized))).toContain(tail);
 });

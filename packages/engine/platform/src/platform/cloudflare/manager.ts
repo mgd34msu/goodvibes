@@ -17,7 +17,7 @@ import {
   DEFAULT_WORKER_CRON,
   DEFAULT_WORKER_NAME,
 } from './constants.js';
-import { discoverZones, resolveZone, selectDiscoveredZone, tryDiscover } from './discovery.js';
+import { discoverZones, resolveZone, selectDiscoveredZone, truncationWarning, tryDiscover } from './discovery.js';
 import { normalizeProvisionHostnames } from './hostnames.js';
 import { buildCloudflareControlPlaneStatus } from './status.js';
 import {
@@ -89,6 +89,17 @@ import {
   type TokenResolverContext,
 } from './cloudflare-token-resolvers.js';
 
+const WORKER_FETCH_TIMEOUT_MS = 15_000;
+
+function httpsOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export class CloudflareControlPlaneManager {
   private readonly createClient: (apiToken: string) => Promise<CloudflareApiClient>;
   private readonly fetchImpl: typeof fetch;
@@ -133,6 +144,16 @@ export class CloudflareControlPlaneManager {
         400,
       );
     }
+    if (input.storeApiToken === false && !input.returnGeneratedToken) {
+      // Cloudflare shows a token's value once. With nowhere to keep it and no
+      // way to hand it back, the token would exist with broad rights and
+      // nobody could ever use or find it.
+      throw new CloudflareControlPlaneError(
+        'storeApiToken is false and returnGeneratedToken is not set, so the new token value would be discarded. Set returnGeneratedToken to receive it, or leave storeApiToken on to store it in the GoodVibes secret store.',
+        'CLOUDFLARE_TOKEN_UNRECOVERABLE',
+        400,
+      );
+    }
     const persist = input.persistConfig !== false;
     const config = this.readConfig();
     const accountId = this.resolveAccountId(input.accountId);
@@ -153,6 +174,22 @@ export class CloudflareControlPlaneManager {
         configuredZoneName: config.zoneName,
         required: components.dns,
       });
+      if (!zone) {
+        // Without a zone the DNS permission falls back to every zone in the
+        // account, which is never what a named zone asked for.
+        throw new CloudflareControlPlaneError(
+          `No Cloudflare zone named ${explicitZoneName} was found in account ${accountId}. Check the spelling, or omit zoneName to create a token without a DNS component.`,
+          'CLOUDFLARE_ZONE_NOT_FOUND',
+          400,
+        );
+      }
+    }
+    if (components.dns && !zone) {
+      throw new CloudflareControlPlaneError(
+        'The dns component needs a zone. Pass zoneId or zoneName (or configure cloudflare.zoneId), so the token is limited to that zone instead of every zone in the account.',
+        'CLOUDFLARE_ZONE_REQUIRED',
+        400,
+      );
     }
     const tokenApi = this.requireUserTokens(client);
     const permissionGroups = await resolvePermissionGroups(requirements, (params) => tokenApi.permissionGroups.list(params));
@@ -170,13 +207,22 @@ export class CloudflareControlPlaneManager {
 
     let apiTokenRef: string | undefined;
     if (input.storeApiToken !== false) {
-      await this.storeSecret(CLOUDFLARE_API_TOKEN_KEY, token.value);
-      apiTokenRef = `goodvibes://secrets/goodvibes/${CLOUDFLARE_API_TOKEN_KEY}`;
-      this.setConfig('cloudflare.apiTokenRef', apiTokenRef, persist);
-      this.setConfig('cloudflare.accountId', accountId, persist);
-      if (zone) {
-        this.setConfig('cloudflare.zoneId', zone.id, persist);
-        this.setConfig('cloudflare.zoneName', zone.name, persist);
+      try {
+        await this.storeSecret(CLOUDFLARE_API_TOKEN_KEY, token.value);
+        apiTokenRef = `goodvibes://secrets/goodvibes/${CLOUDFLARE_API_TOKEN_KEY}`;
+        this.setConfig('cloudflare.apiTokenRef', apiTokenRef, persist);
+        this.setConfig('cloudflare.accountId', accountId, persist);
+        if (zone) {
+          this.setConfig('cloudflare.zoneId', zone.id, persist);
+          this.setConfig('cloudflare.zoneName', zone.name, persist);
+        }
+      } catch (error: unknown) {
+        throw new CloudflareControlPlaneError(
+          `Cloudflare created the operational token${token.id ? ` (token id ${token.id})` : ''} but it could not be stored: ${summarizeError(error)}. The token value was not saved anywhere. Delete that token in the Cloudflare dashboard (My Profile > API Tokens), fix the storage problem, then create it again.`,
+          'CLOUDFLARE_TOKEN_NOT_STORED',
+          500,
+          { cause: error },
+        );
       }
     }
 
@@ -205,8 +251,10 @@ export class CloudflareControlPlaneManager {
     const client = await this.createClient(apiToken.value);
     const config = this.readConfig();
     const warnings: string[] = [];
+    const listed = <T>(label: string, items: AsyncIterable<T>): Promise<readonly T[]> =>
+      collectAsync(items, undefined, () => truncationWarning(label, warnings));
     const accounts = client.accounts.list
-      ? await collectAsync(client.accounts.list())
+      ? await listed('accounts', client.accounts.list())
       : await collectSingleAccount(client, clean(input.accountId) || config.accountId, warnings);
     const selectedAccountId = clean(input.accountId) || config.accountId || (accounts.length === 1 ? accounts[0]?.id ?? '' : '');
     const selectedAccount = selectedAccountId ? accounts.find((account) => account.id === selectedAccountId) ?? await client.accounts.get({ account_id: selectedAccountId }) : undefined;
@@ -234,13 +282,13 @@ export class CloudflareControlPlaneManager {
 
     if (input.includeResources !== false && selectedAccount) {
       workerSubdomain = await tryDiscover('worker-subdomain', warnings, async () => (await client.workers.subdomains.get({ account_id: selectedAccount.id })).subdomain);
-      queues = await tryDiscover('queues', warnings, async () => collectAsync(client.queues.list({ account_id: selectedAccount.id })));
-      if (client.kv) kvNamespaces = await tryDiscover('kv-namespaces', warnings, async () => collectAsync(client.kv!.namespaces.list({ account_id: selectedAccount.id })));
-      if (client.durableObjects) durableObjectNamespaces = await tryDiscover('durable-object-namespaces', warnings, async () => collectAsync(client.durableObjects!.namespaces.list({ account_id: selectedAccount.id })));
+      queues = await tryDiscover('queues', warnings, async () => listed('queues', client.queues.list({ account_id: selectedAccount.id })));
+      if (client.kv) kvNamespaces = await tryDiscover('kv-namespaces', warnings, async () => listed('KV namespaces', client.kv!.namespaces.list({ account_id: selectedAccount.id })));
+      if (client.durableObjects) durableObjectNamespaces = await tryDiscover('durable-object-namespaces', warnings, async () => listed('Durable Object namespaces', client.durableObjects!.namespaces.list({ account_id: selectedAccount.id })));
       if (client.r2) r2Buckets = await tryDiscover('r2-buckets', warnings, async () => (await client.r2?.buckets.list({ account_id: selectedAccount.id }))?.buckets ?? []);
-      if (client.secretsStore) secretsStores = await tryDiscover('secrets-stores', warnings, async () => collectAsync(client.secretsStore!.stores.list({ account_id: selectedAccount.id })));
-      if (client.zeroTrust?.tunnels) tunnels = await tryDiscover('zero-trust-tunnels', warnings, async () => collectAsync(client.zeroTrust!.tunnels!.cloudflared.list({ account_id: selectedAccount.id, is_deleted: false })));
-      if (client.zeroTrust?.access) accessApplications = await tryDiscover('access-applications', warnings, async () => collectAsync(client.zeroTrust!.access!.applications.list({ account_id: selectedAccount.id })));
+      if (client.secretsStore) secretsStores = await tryDiscover('secrets-stores', warnings, async () => listed('Secrets Stores', client.secretsStore!.stores.list({ account_id: selectedAccount.id })));
+      if (client.zeroTrust?.tunnels) tunnels = await tryDiscover('zero-trust-tunnels', warnings, async () => listed('tunnels', client.zeroTrust!.tunnels!.cloudflared.list({ account_id: selectedAccount.id, is_deleted: false })));
+      if (client.zeroTrust?.access) accessApplications = await tryDiscover('access-applications', warnings, async () => listed('Access applications', client.zeroTrust!.access!.applications.list({ account_id: selectedAccount.id })));
     } else if (!selectedAccount) {
       warnings.push('Select a Cloudflare account before discovering account-scoped resources.');
     }
@@ -289,6 +337,26 @@ export class CloudflareControlPlaneManager {
 
   async provision(input: CloudflareProvisionInput): Promise<CloudflareProvisionResult> {
     const steps: CloudflareProvisionStep[] = [];
+    try {
+      return await this.runProvision(input, steps);
+    } catch (error: unknown) {
+      // Provisioning has no rollback. When it stops part-way the steps already
+      // taken are the only record of what now exists at Cloudflare, so they
+      // travel with the error (in its message, since a route may drop fields).
+      if (steps.length === 0) throw error;
+      const known = error instanceof CloudflareControlPlaneError ? error : null;
+      const reason = error instanceof Error ? error.message : String(error);
+      const done = steps.map((step) => `${step.name} (${step.status})`).join(', ');
+      throw new CloudflareControlPlaneError(
+        `${reason} Provisioning stopped part-way. Done before the failure: ${done}. Nothing was rolled back; running provision again is safe because existing resources are found by name and reused.`,
+        known?.code ?? 'CLOUDFLARE_ERROR',
+        known?.status ?? 500,
+        { partial: { steps: [...steps] }, cause: error },
+      );
+    }
+  }
+
+  private async runProvision(input: CloudflareProvisionInput, steps: CloudflareProvisionStep[]): Promise<CloudflareProvisionResult> {
     const persist = input.persistConfig !== false;
     const config = this.readConfig();
     const components = resolveComponents(input.components);
@@ -310,6 +378,13 @@ export class CloudflareControlPlaneManager {
       );
     }
 
+    // Verification and the stored config both need an https Worker URL, so a
+    // URL that can never work is refused before anything is written.
+    const requestedWorkerBaseUrl = stripTrailingSlash(clean(input.workerBaseUrl) || config.workerBaseUrl);
+    if (components.workers && requestedWorkerBaseUrl && (clean(input.workerBaseUrl) || input.verify !== false) && !httpsOrigin(requestedWorkerBaseUrl)) {
+      throw new CloudflareControlPlaneError('cloudflare.workerBaseUrl must be an https URL.', 'CLOUDFLARE_WORKER_URL_INVALID', 400);
+    }
+
     const apiToken = await this.resolveApiToken(input);
     if (!apiToken.value) {
       throw new CloudflareControlPlaneError(
@@ -319,16 +394,36 @@ export class CloudflareControlPlaneManager {
       );
     }
 
-    if (input.storeApiToken && input.apiToken) {
-      await this.storeSecret(CLOUDFLARE_API_TOKEN_KEY, input.apiToken);
-      this.setConfig('cloudflare.apiTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_API_TOKEN_KEY}`, persist);
-      steps.push({ name: 'store-api-token', status: 'ok', message: 'Stored Cloudflare API token in the GoodVibes secret store.' });
+    // A run that keeps nothing locally must hand back what Cloudflare or this
+    // run generated and will not show again.
+    const exposeGeneratedSecrets = input.returnGeneratedSecrets === true || !persist;
+
+    // Everything that can be refused locally is refused before the first write
+    // at Cloudflare, so a missing credential never leaves a half-built account.
+    const operatorToken = components.workers ? await this.resolveOperatorToken(input) : undefined;
+    if (operatorToken && !operatorToken.value) {
+      throw new CloudflareControlPlaneError(
+        'A Worker-to-daemon operator token is required. Pass operatorToken, configure cloudflare.workerTokenRef, or ensure the daemon has an operator token.',
+        'CLOUDFLARE_OPERATOR_TOKEN_REQUIRED',
+        400,
+      );
     }
 
     const client = await this.createClient(apiToken.value);
     const resourceContext = this.createProvisioningContext();
     const account = await client.accounts.get({ account_id: accountId });
     steps.push({ name: 'validate-account', status: 'ok', message: `Validated Cloudflare account ${account.name}.`, resourceId: account.id });
+
+    // Only a token the account accepted may replace the stored one.
+    if (input.storeApiToken && input.apiToken) {
+      if (persist) {
+        await this.storeSecret(CLOUDFLARE_API_TOKEN_KEY, input.apiToken);
+        this.setConfig('cloudflare.apiTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_API_TOKEN_KEY}`, persist);
+        steps.push({ name: 'store-api-token', status: 'ok', message: 'Stored Cloudflare API token in the GoodVibes secret store.' });
+      } else {
+        steps.push({ name: 'store-api-token', status: 'skipped', message: 'persistConfig is false, so the Cloudflare API token was not stored.' });
+      }
+    }
 
     const zone = await resolveZone(client, {
       accountId,
@@ -392,6 +487,7 @@ export class CloudflareControlPlaneManager {
     let effectiveWorkerClientToken = '';
     let subdomain = '';
     let workerBaseUrl = stripTrailingSlash(clean(input.workerBaseUrl) || config.workerBaseUrl);
+    const workerOrigins: string[] = [config.workerBaseUrl];
     if (components.workers) {
       const workerUpload = await uploadWorker(client, {
         accountId,
@@ -413,39 +509,49 @@ export class CloudflareControlPlaneManager {
         });
       }
 
-      const operatorToken = await this.resolveOperatorToken(input);
-      if (!operatorToken.value) {
-        throw new CloudflareControlPlaneError(
-          'A Worker-to-daemon operator token is required. Pass operatorToken, configure cloudflare.workerTokenRef, or ensure the daemon has an operator token.',
-          'CLOUDFLARE_OPERATOR_TOKEN_REQUIRED',
-          400,
-        );
-      }
       if (input.storeOperatorToken && input.operatorToken) {
-        await this.storeSecret(CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY, input.operatorToken);
-        this.setConfig('cloudflare.workerTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY}`, persist);
-        steps.push({ name: 'store-worker-token', status: 'ok', message: 'Stored Worker-to-daemon token in the GoodVibes secret store.' });
+        if (persist) {
+          await this.storeSecret(CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY, input.operatorToken);
+          this.setConfig('cloudflare.workerTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_OPERATOR_TOKEN_KEY}`, persist);
+          steps.push({ name: 'store-worker-token', status: 'ok', message: 'Stored Worker-to-daemon token in the GoodVibes secret store.' });
+        } else {
+          steps.push({ name: 'store-worker-token', status: 'skipped', message: 'persistConfig is false, so the Worker-to-daemon token was not stored.' });
+        }
       }
       await client.workers.scripts.secrets.update(workerName, {
         account_id: accountId,
         name: 'GOODVIBES_OPERATOR_TOKEN',
-        text: operatorToken.value,
+        text: operatorToken?.value ?? '',
         type: 'secret_text',
       });
-      steps.push({ name: 'set-worker-daemon-secret', status: 'ok', message: 'Configured Worker-to-daemon bearer token secret.' });
+      steps.push(operatorToken?.source === 'auth-token'
+        ? {
+            name: 'set-worker-daemon-secret',
+            status: 'warning',
+            message: "Configured the Worker-to-daemon bearer token from the daemon's own auth token. Anyone who can read this Worker's secrets can then call the daemon with its main credential; pass a dedicated operatorToken to avoid that.",
+          }
+        : { name: 'set-worker-daemon-secret', status: 'ok', message: 'Configured Worker-to-daemon bearer token secret.' });
 
       const workerClientToken = await this.resolveWorkerClientToken(input);
       effectiveWorkerClientToken = workerClientToken.value ?? '';
       if (!effectiveWorkerClientToken) {
         effectiveWorkerClientToken = this.generateToken();
         generatedWorkerClientToken = effectiveWorkerClientToken;
-        await this.storeSecret(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY, effectiveWorkerClientToken);
-        this.setConfig('cloudflare.workerClientTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY}`, persist);
-        steps.push({ name: 'generate-worker-client-token', status: 'ok', message: 'Generated and stored Worker client bearer token.' });
+        if (persist) {
+          await this.storeSecret(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY, effectiveWorkerClientToken);
+          this.setConfig('cloudflare.workerClientTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY}`, persist);
+          steps.push({ name: 'generate-worker-client-token', status: 'ok', message: 'Generated and stored Worker client bearer token.' });
+        } else {
+          steps.push({ name: 'generate-worker-client-token', status: 'skipped', message: 'persistConfig is false, so the generated Worker client token was not stored; it is returned in generatedSecrets.' });
+        }
       } else if (input.storeWorkerClientToken && input.workerClientToken) {
-        await this.storeSecret(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY, input.workerClientToken);
-        this.setConfig('cloudflare.workerClientTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY}`, persist);
-        steps.push({ name: 'store-worker-client-token', status: 'ok', message: 'Stored Worker client bearer token in the GoodVibes secret store.' });
+        if (persist) {
+          await this.storeSecret(CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY, input.workerClientToken);
+          this.setConfig('cloudflare.workerClientTokenRef', `goodvibes://secrets/goodvibes/${CLOUDFLARE_WORKER_CLIENT_TOKEN_KEY}`, persist);
+          steps.push({ name: 'store-worker-client-token', status: 'ok', message: 'Stored Worker client bearer token in the GoodVibes secret store.' });
+        } else {
+          steps.push({ name: 'store-worker-client-token', status: 'skipped', message: 'persistConfig is false, so the Worker client token was not stored.' });
+        }
       }
       await client.workers.scripts.secrets.update(workerName, {
         account_id: accountId,
@@ -464,6 +570,10 @@ export class CloudflareControlPlaneManager {
         persist,
       });
       const inferredWorkerBaseUrl = subdomain ? `https://${workerName}.${subdomain}.workers.dev` : '';
+      workerOrigins.push(inferredWorkerBaseUrl, workerHostname ? `https://${workerHostname}` : '');
+      // A Worker URL typed into this request receives only a token this request
+      // supplied or generated; a stored token still goes only to configured URLs.
+      if (workerClientToken.source === 'body' || workerClientToken.source === 'missing') workerOrigins.push(clean(input.workerBaseUrl));
       workerBaseUrl = workerBaseUrl || inferredWorkerBaseUrl;
       if (workerBaseUrl) {
         this.setConfig('cloudflare.workerBaseUrl', workerBaseUrl, persist);
@@ -518,7 +628,7 @@ export class CloudflareControlPlaneManager {
         accessServiceTokenRef: clean(input.accessServiceTokenRef) || config.accessServiceTokenRef,
         ...(zone ? { zone } : {}),
         persist,
-        returnGeneratedSecrets: input.returnGeneratedSecrets === true,
+        returnGeneratedSecrets: exposeGeneratedSecrets,
         steps,
       })
       : undefined;
@@ -540,7 +650,7 @@ export class CloudflareControlPlaneManager {
     if (input.batchMode) this.setConfig('batch.mode', input.batchMode, persist);
 
     const verification = components.workers && input.verify !== false && workerBaseUrl
-      ? await this.verify({ workerBaseUrl, workerClientToken: effectiveWorkerClientToken })
+      ? await this.verifyWorker(workerBaseUrl, effectiveWorkerClientToken, workerOrigins)
       : undefined;
     if (verification) {
       steps.push({
@@ -551,16 +661,17 @@ export class CloudflareControlPlaneManager {
     }
 
     const generatedSecrets = {
-      ...(generatedWorkerClientToken && input.returnGeneratedSecrets ? { workerClientToken: generatedWorkerClientToken } : {}),
+      ...(generatedWorkerClientToken && exposeGeneratedSecrets ? { workerClientToken: generatedWorkerClientToken } : {}),
       ...(tunnel?.token && input.returnGeneratedSecrets ? { tunnelToken: tunnel.token } : {}),
-      ...(access?.clientId && input.returnGeneratedSecrets ? { accessServiceTokenClientId: access.clientId } : {}),
-      ...(access?.clientSecret && input.returnGeneratedSecrets ? { accessServiceTokenClientSecret: access.clientSecret } : {}),
+      ...(access?.clientId && exposeGeneratedSecrets ? { accessServiceTokenClientId: access.clientId } : {}),
+      ...(access?.clientSecret && exposeGeneratedSecrets ? { accessServiceTokenClientSecret: access.clientSecret } : {}),
     };
 
     return {
       ok: true,
       dryRun: false,
       steps,
+      warnings: steps.filter((step) => step.status === 'warning').map((step) => step.message ?? step.name),
       account: { id: account.id, name: account.name },
       ...(components.queues ? {
         queues: {
@@ -606,13 +717,34 @@ export class CloudflareControlPlaneManager {
   }
 
   async verify(input: CloudflareVerifyInput = {}): Promise<CloudflareVerifyResult> {
-    const workerBaseUrl = stripTrailingSlash(clean(input.workerBaseUrl) || this.readConfig().workerBaseUrl);
+    const config = this.readConfig();
+    const workerBaseUrl = stripTrailingSlash(clean(input.workerBaseUrl) || config.workerBaseUrl);
     if (!workerBaseUrl) {
       throw new CloudflareControlPlaneError('cloudflare.workerBaseUrl is required for verification.', 'CLOUDFLARE_WORKER_URL_REQUIRED', 400);
     }
     const workerClientToken = await this.resolveWorkerClientToken(input);
+    // A token the caller typed is theirs to send anywhere; a stored one only
+    // goes to the Worker this daemon was configured with.
+    const origins = workerClientToken.source === 'body' ? [workerBaseUrl] : [config.workerBaseUrl];
+    return await this.verifyWorker(workerBaseUrl, workerClientToken.value ?? '', origins);
+  }
+
+  private async verifyWorker(workerBaseUrl: string, workerClientToken: string, trustedBaseUrls: readonly string[]): Promise<CloudflareVerifyResult> {
+    const origin = httpsOrigin(workerBaseUrl);
+    if (!origin) {
+      throw new CloudflareControlPlaneError('cloudflare.workerBaseUrl must be an https URL.', 'CLOUDFLARE_WORKER_URL_INVALID', 400);
+    }
     const health = await this.fetchWorker(`${workerBaseUrl}/batch/health`);
-    const proxy = await this.fetchWorker(`${workerBaseUrl}/api/batch/config`, workerClientToken.value ?? undefined);
+    const mayAuthenticate = trustedBaseUrls.some((trusted) => httpsOrigin(trusted) === origin);
+    const proxy = !workerClientToken
+      ? await this.fetchWorker(`${workerBaseUrl}/api/batch/config`)
+      : mayAuthenticate
+        ? await this.fetchWorker(`${workerBaseUrl}/api/batch/config`, workerClientToken)
+        : {
+            ok: false,
+            status: 0,
+            error: `The stored Worker client token was not sent because ${origin} is not the configured cloudflare.workerBaseUrl. Configure that URL first, or pass workerClientToken in the request.`,
+          };
     return {
       ok: health.ok && proxy.ok,
       workerHealth: health,
@@ -627,21 +759,33 @@ export class CloudflareControlPlaneManager {
     const workerName = clean(input.workerName) || this.readConfig().workerName || DEFAULT_WORKER_NAME;
     const apiToken = await this.resolveApiToken(input);
 
+    let remote: 'disabled' | 'not-disabled' = 'disabled';
     if (apiToken.value && accountId) {
-      const client = await this.createClient(apiToken.value);
+      // A revoked token or a Cloudflare outage must not stop the operator from
+      // switching the integration off here, so each remote step is isolated and
+      // the local configuration is always written.
+      const remoteStep = async (name: string, run: (client: CloudflareApiClient) => Promise<void>): Promise<void> => {
+        try {
+          await run(await this.createClient(apiToken.value!));
+        } catch (error: unknown) {
+          remote = 'not-disabled';
+          steps.push({ name, status: 'warning', message: `Could not reach Cloudflare to disable this: ${summarizeError(error)}. The deployed Worker may keep calling the daemon until it is disabled in the Cloudflare dashboard.` });
+        }
+      };
       if (input.disableCron !== false) {
-        await disableWorkerSchedule(client, accountId, workerName, steps);
+        await remoteStep('disable-cron', (client) => disableWorkerSchedule(client, accountId, workerName, steps));
       }
       if (input.disableWorkerSubdomain) {
-        await disableWorkerSubdomain(client, accountId, workerName, steps);
+        await remoteStep('disable-worker-subdomain', (client) => disableWorkerSubdomain(client, accountId, workerName, steps));
       }
     } else {
-      steps.push({ name: 'cloudflare-api', status: 'skipped', message: 'No Cloudflare API token/account configured; only local config was disabled.' });
+      remote = 'not-disabled';
+      steps.push({ name: 'cloudflare-api', status: 'skipped', message: 'No Cloudflare API token/account configured; only local config was disabled. The deployed Worker may keep calling the daemon until it is disabled in the Cloudflare dashboard.' });
     }
 
     this.setConfig('cloudflare.enabled', false, persist);
     this.setConfig('batch.queueBackend', 'local', persist);
-    return { ok: true, steps };
+    return { ok: true, steps, remote };
   }
 
   private readConfig(): CloudflareControlPlaneConfig {
@@ -712,7 +856,10 @@ export class CloudflareControlPlaneManager {
     try {
       const headers = new Headers();
       if (bearerToken) headers.set('Authorization', `Bearer ${bearerToken}`);
-      const response = await this.fetchImpl(url, { headers });
+      // Bounded, and no redirects: the Worker URL can come from a request, and
+      // a hung or redirecting host must neither stall provisioning nor receive
+      // the bearer header at a different address.
+      const response = await this.fetchImpl(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS) });
       return response.ok
         ? { ok: true, status: response.status }
         : { ok: false, status: response.status, error: await safeResponseText(response) };

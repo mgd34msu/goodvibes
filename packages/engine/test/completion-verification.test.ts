@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakePort as baseFakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
@@ -18,7 +18,7 @@ import { VerificationStore } from '../platform/src/platform/core/verification/st
 import { createVerificationWriter } from '../platform/src/platform/core/verification/writer.js';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 import { snapshotJudgmentEvidence } from '../platform/src/platform/gate/judgment-input.js';
-import { ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
+import { ResponseCompletionError, ResponseCompletionGuard } from '../platform/src/platform/core/response-completion.js';
 import { appendVerificationObservation, beginVerificationConversation, verificationHistory, verificationMessages,
 } from '../platform/src/platform/core/verification/archive.js';
 import { verificationWriter } from './_helpers/verification.js';
@@ -58,7 +58,7 @@ test('an account-held private draft survives session restore and still needs fre
   const restored = create();
   expect(restored.resumedRepair()).toContain(response);
   expect(restored.resumedRepair()).toContain('Do not restart the task');
-  expect(() => restored.beginFinalization({ content: response })).toThrow();
+  expect(() => restored.beginFinalization({ content: response })).toThrow(new ResponseCompletionError('unavailable'));
   installJudgmentPort(fake.port);
   expect(await restored.checkUntilAvailable(() => input)).toBeNull();
   expect(() => restored.beginFinalization({ content: response })).not.toThrow();
@@ -95,7 +95,7 @@ test.each([false, true])('a small ambiguous completion is assessed against prima
   expect(final.some((request) => (request.state as never as { verification?: unknown }).verification)).toBe(true);
   if (realDefect) {
     expect(result).toBeString();
-    expect(() => guard.beginFinalization({ content: response })).toThrow();
+    expect(() => guard.beginFinalization({ content: response })).toThrow(new ResponseCompletionError('unavailable'));
   } else {
     expect(result).toBeNull();
     expect(() => guard.beginFinalization({ content: response })).not.toThrow();
@@ -248,6 +248,8 @@ test.each([false, true])('bounded worker receipts stay primary while older histo
     };
     const audited = new Set<string>();
     let checked = 0;
+    // Recorded here and asserted after prepare: an assertion thrown inside a port answer could be absorbed by the verifier.
+    const openedPrimaries: { evidence: boolean; assignment: boolean }[] = [];
     const fake = fakePort((_name, _question, raw) => {
       const input = raw as unknown as {
         requirement?: unknown;
@@ -257,17 +259,15 @@ test.each([false, true])('bounded worker receipts stay primary while older histo
       if (input.opened && input.requirement) {
         checked++;
         const primaries = input.opened.sources;
-        expect(
-          primaries.some(
+        openedPrimaries.push({
+          evidence: primaries.some(
             (source) => source.reference.startsWith('delegated worker.evidence') && source.text.includes('Complete actual report'),
           ),
-        ).toBe(true);
-        expect(
-          primaries.some(
+          assignment: primaries.some(
             (source) =>
               source.reference.startsWith('delegated assignment/result worker') && source.text.includes('Verified report consistency'),
           ),
-        ).toBe(true);
+        });
       }
       for (const source of input.sources ?? []) audited.add(source.id);
       return noulAnswer(0.01);
@@ -280,6 +280,8 @@ test.each([false, true])('bounded worker receipts stay primary while older histo
     const result = await verifier.prepare(full, access(fake.port));
     expect(result.findings).toHaveLength(0);
     expect(checked).toBeGreaterThan(0);
+    expect(openedPrimaries).toHaveLength(checked);
+    expect(openedPrimaries.every((opened) => opened.evidence && opened.assignment)).toBe(true);
     expect(result.state.delegated).toMatchObject(full.delegated.map(({ evidence: _evidence, ...assignment }) => assignment));
     const originals = ownedSources(verifier, full).filter((source) => source.kind !== 'answer');
     expect(originals.every((source) => audited.has(source.id))).toBe(true);
@@ -442,14 +444,17 @@ test('resuming retains the actual worker read behind its native parent receipt w
   expect(restored.every((source) => source.reference.includes('Not a new execution'))).toBe(true);
   expect(retainedDelegationSources({ transcript: [], delegated: [] }, restartedStore.sources)).toEqual([]);
   expect(retainedDelegationSources({ transcript: parent, delegated: [{ id: 'worker' }] }, restartedStore.sources)).toEqual([]);
+  const retainedRead: boolean[] = [];
   const fake = fakePort((_name, _question, raw) => {
     const input = raw as unknown as { requirement?: unknown; opened?: { sources: { text: string }[] } };
     if (input.requirement && input.opened)
-      expect(input.opened.sources.some((source) => source.text.includes('EXACT-RETAINED-REPORT-READ'))).toBe(true);
+      retainedRead.push(input.opened.sources.some((source) => source.text.includes('EXACT-RETAINED-REPORT-READ')));
     return noulAnswer(0.01);
   });
   const checked = await new CompletionVerification(verificationWriter, restartedStore).prepare(full, access(fake.port));
   expect(checked.findings).toEqual([]);
+  expect(retainedRead.length).toBeGreaterThan(0);
+  expect(retainedRead.every(Boolean)).toBe(true);
   expect(checked.state.delegated).toMatchObject([
     { id: 'worker', task: 'Read review.md only.', status: 'completed', output: 'Report consistency verified.' },
   ]);
@@ -604,22 +609,31 @@ test('a permanently mid-band observation audit becomes a disclosed limitation af
   });
   const verifier = new CompletionVerification(noIssueWriter),
     identity = {};
+  // The first prepare is held (an unsettled audit is not approval); the repeat over the
+  // same unchanged evidence discloses it. A bound of 1 resolves the first call, a larger
+  // one rejects the second.
   await expect(verifier.prepare(input, access(fake.port, identity))).rejects.toThrow('unsettled');
-  let resolved: Awaited<ReturnType<CompletionVerification['prepare']>> | undefined;
-  for (let attempt = 2; attempt <= 4 && !resolved; attempt++) {
-    try {
-      resolved = await verifier.prepare(
-        { ...input, response: `Draft ${attempt}: the requested review is saved.` },
-        access(fake.port, identity),
-      );
-    } catch {
-      /* still within the bounded attempts */
+  const resolved = await verifier.prepare(
+    { ...input, response: 'Draft 2: the requested review is saved.' },
+    access(fake.port, identity),
+  );
+  expect(resolved.findings).toHaveLength(0);
+  expect(JSON.stringify(resolved.state)).toContain('disclosedLimitations');
+  expect(JSON.stringify(resolved.state)).toContain('never established counterevidence');
+  // The disclosure is made after exactly three distinct attempts, so a larger or smaller bound fails here.
+  const findDisclosed = (value: unknown): { entries: { attempts: number }[] } | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.disclosedLimitations) return record.disclosedLimitations as { entries: { attempts: number }[] };
+    for (const child of Object.values(record)) {
+      const found = findDisclosed(child);
+      if (found) return found;
     }
-  }
-  expect(resolved).toBeDefined();
-  expect(resolved!.findings).toHaveLength(0);
-  expect(JSON.stringify(resolved!.state)).toContain('disclosedLimitations');
-  expect(JSON.stringify(resolved!.state)).toContain('never established counterevidence');
+    return undefined;
+  };
+  const disclosed = findDisclosed(JSON.parse(JSON.stringify(resolved.state)));
+  expect(disclosed?.entries.length).toBeGreaterThan(0);
+  expect(new Set(disclosed?.entries.map((entry) => entry.attempts))).toEqual(new Set([3]));
 });
 
 test.each([0.4, 0.99])('a factual dismissal held at %s cannot clear an uncertain original-source audit', async (probability) => {
@@ -706,7 +720,7 @@ test('an unsettled semantic audit returns one specific private evidence question
   expect(correction).toContain('Do not restart the review');
   expect(waits).toBe(0);
   expect(conversation.getMessageSnapshot()).toEqual(before);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   resolved = true;
   // An unchanged cached question is not an invitation to sample new answers
   // until one permits publication. Actual new evidence must settle the hold.
@@ -867,9 +881,10 @@ test('a small held draft retains worker evidence for its resumed fix list and fr
   ).toBeString();
   const resumed = new ConversationManager();
   resumed.fromJSON(JSON.parse(JSON.stringify(conversation.toJSON())));
+  const packets: string[] = [];
   const check = fakePort((_name, _question, raw) => {
     const packet = (raw as { retainedWorkerObservations?: unknown }).retainedWorkerObservations;
-    expect(JSON.stringify(packet)).toContain('FULL-WORKER-READ');
+    packets.push(JSON.stringify(packet) ?? '');
     return noulAnswer(0.01);
   });
   installJudgmentPort(check.port);
@@ -891,6 +906,8 @@ test('a small held draft retains worker evidence for its resumed fix list and fr
   ).toBeNull();
   expect(check.requests.some((request) => request.context?.battery === 'engine.core.response-completion')).toBe(true);
   expect(check.requests.some((request) => request.context?.battery === 'engine.core.delegation-consolidation')).toBe(true);
+  expect(packets.length).toBeGreaterThan(0);
+  expect(packets.every((packet) => packet.includes('FULL-WORKER-READ'))).toBe(true);
   resumed.addUserMessage('Verify the report with one worker.');
   const next = new ResponseCompletionGuard({
     request: 'Verify the report with one worker.',
@@ -901,7 +918,7 @@ test('a small held draft retains worker evidence for its resumed fix list and fr
   expect(next.resumedRepair()).toContain('FULL-WORKER-READ');
   expect(next.resumedRepair()).not.toContain('Fix list');
   expect(next.resumedRepair()).toContain('cannot override a new user instruction');
-  expect(() => next.beginFinalization({ content: 'The worker verified review.md.' })).toThrow();
+  expect(() => next.beginFinalization({ content: 'The worker verified review.md.' })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('a no-issue diagnosis rechecks the original requirement instead of manufacturing a repair', async () => {
@@ -910,11 +927,11 @@ test('a no-issue diagnosis rechecks the original requirement instead of manufact
     return noulAnswer(name === 'unfinished' && current.requirement && !current.privateRepairAssessment ? 0.4 : 0.01);
   });
   let diagnostics = 0;
+  const frozen: boolean[] = [];
   const result = await new CompletionVerification(async request => {
     if (request.operation === 'findings') {
       diagnostics++;
-      expect(Object.isFrozen(request.context)).toBe(true);
-      expect(Object.isFrozen((request.context as { evidence: object }).evidence)).toBe(true);
+      frozen.push(Object.isFrozen(request.context) && Object.isFrozen((request.context as { evidence: object }).evidence));
     }
     return noIssueWriter(request);
   }).prepare(
@@ -923,6 +940,7 @@ test('a no-issue diagnosis rechecks the original requirement instead of manufact
   );
   expect(result.findings).toHaveLength(0);
   expect(diagnostics).toBeGreaterThan(0);
+  expect(frozen.every(Boolean)).toBe(true);
   const checks = fake.requests.filter((request) => request.context?.battery === 'engine.verification.requirement');
   expect(checks.length).toBeGreaterThan(1);
   expect(JSON.stringify(checks.at(-1)!.state)).toContain('privateRepairAssessment');
@@ -1611,11 +1629,12 @@ test('publication reuses qualified earlier case records instead of expanding and
     completedWork: [{ kind: 'host-completed-contract', id: 'review', status: 'passed', finalCheck: { result: 'pass' } }],
   };
   const earlier = new Set<string>();
+  const reexpanded: boolean[] = [];
   const writer: VerificationWriter = async (request) => {
     const context = request.context as { focusedRequirement?: unknown; sources?: { id: string }[] };
     if (request.operation === 'evidence') {
       if (context.focusedRequirement) for (const source of context.sources ?? []) earlier.add(source.id);
-      else expect(context.sources?.some((source) => earlier.has(source.id))).toBe(false);
+      else reexpanded.push(context.sources?.some((source) => earlier.has(source.id)) === true);
     }
     return verificationWriter(request);
   };
@@ -1625,6 +1644,7 @@ test('publication reuses qualified earlier case records instead of expanding and
   const result = await new CompletionVerification(writer).prepare(input, access(fake.port));
   expect(result.findings).toHaveLength(0);
   expect(earlier.size).toBeGreaterThan(0);
+  expect(reexpanded.some(Boolean)).toBe(false);
   expect(JSON.stringify(result.state.transcript)).toContain('jev-qualified');
 });
 
@@ -1643,11 +1663,12 @@ test('each requirement question binds its exact root scope even when source data
 
 test('invalid proposal citations receive the exact schema defect and valid immediate citation IDs', async () => {
   let feedback: unknown;
+  const citationContexts: { citationIds: string[]; sourceIds: string[] }[] = [];
   const writer: VerificationWriter = async (request) => {
     const proposal = await verificationWriter(request);
     if (request.operation !== 'evidence') return proposal;
     const context = request.context as { sources: { id: string }[]; citationIds: string[] };
-    expect(context.citationIds).toEqual(context.sources.map((source) => source.id));
+    citationContexts.push({ citationIds: context.citationIds, sourceIds: context.sources.map((source) => source.id) });
     if (request.repair) { feedback = request.repair; return proposal; }
     const value = JSON.parse(proposal);
     value.facts[0].sources = ['nested-original-not-an-immediate-input'];
@@ -1656,6 +1677,8 @@ test('invalid proposal citations receive the exact schema defect and valid immed
   expect((await new CompletionVerification(writer).prepare(state('Exact original source. '.repeat(200)), access(good().port))).findings,
   ).toHaveLength(0);
   expect((feedback as { problem: string }).problem).toBe('Fact needs known supporting citations');
+  expect(citationContexts.length).toBeGreaterThan(0);
+  for (const { citationIds, sourceIds } of citationContexts) expect(citationIds).toEqual(sourceIds);
 });
 
 test('an irreducible summary tree switches to audited original retrieval and still holds unfinished work', async () => {
@@ -1934,7 +1957,7 @@ test('a checked work repair reaches the model without waiting for publication-on
   const guard = new ResponseCompletionGuard({ ...input, verificationWriter });
   expect(await guard.checkUntilAvailable(() => input)).toContain('Fix list');
   expect(fake.requests.some((request) => request.context?.battery === 'engine.core.response-completion')).toBeFalse();
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('a confirmed defect defers unrelated pending checks without creating any completion permission', async () => {
@@ -2227,7 +2250,7 @@ test.each([
   expect(checks.length).toBeGreaterThan(1);
   if (invalidating) {
     expect(correction).toContain(heldAspect);
-    expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+    expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
   } else {
     expect(correction).toBeNull();
     expect(checks).toHaveLength(2);
@@ -2260,7 +2283,7 @@ test('new confirmed counterevidence reopens a previously qualified publication c
   };
   const guard = new ResponseCompletionGuard({ ...input, verificationWriter });
   expect(await guard.checkUntilAvailable(() => input)).toContain('irrelevant_verification');
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('lossless repeated-line encoding retains exact bytes and a different middle line', () => {
@@ -2296,7 +2319,7 @@ test('a refused checker RESULT halts validation and preserves the exact unpublis
   await expect(guard.checkUntilAvailable(() => input)).rejects.toMatchObject({ problem: 'invalid-response' });
   expect(attempts).toBe(1);
   expect(conversation.getMessageSnapshot()).toEqual(before);
-  expect(() => guard.beginFinalization({ content: input.response })).toThrow();
+  expect(() => guard.beginFinalization({ content: input.response })).toThrow(new ResponseCompletionError('unavailable'));
 });
 
 test('the native source fence catches nested argument mutations even after the accepted final is appended', async () => {
@@ -2311,7 +2334,7 @@ test('the native source fence catches nested argument mutations even after the a
   conversation.addAssistantMessage(input.response);
   expect(assertCurrent).not.toThrow();
   args.options.complete = false;
-  expect(assertCurrent).toThrow();
+  expect(assertCurrent).toThrow(ResponseCompletionError);
 });
 
 test('archive journals preserve A B A position changes and append each original history once', () => {
@@ -2578,7 +2601,7 @@ test('private proposal calls publish no deltas or tools and abort even when the 
   });
   await started.promise;
   controller.abort();
-  await expect(pending).rejects.toThrow();
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   expect(usage).toBe(0);
 });
 
@@ -2627,7 +2650,7 @@ test('saved repair findings survive restart only for the same source history and
   const second = new ResponseCompletionGuard({ ...initial, verificationStore: new VerificationStore(root, 'resume-repair') });
   expect(second.resumedRepair()).toContain('Fix list');
   expect(second.repairContext()).toContain('completion-repair');
-  expect(() => second.beginFinalization({ content: 'The report is saved.' })).toThrow();
+  expect(() => second.beginFinalization({ content: 'The report is saved.' })).toThrow(new ResponseCompletionError('unavailable'));
   const other = new ConversationManager();
   other.addUserMessage(request);
   other.addToolResults([{ callId: 'different', success: true, output: 'Different source.' }]);
@@ -2669,7 +2692,7 @@ test.each([true, false])(
       verificationStore: new VerificationStore(root, 'repair-turn'),
     });
     expect(guard.resumedRepair().includes('Fix list')).toBe(!ownerInput);
-    expect(() => guard.beginFinalization({ content: 'The worker verified the report.' })).toThrow();
+    expect(() => guard.beginFinalization({ content: 'The worker verified the report.' })).toThrow(new ResponseCompletionError('unavailable'));
   },
 );
 
@@ -2796,3 +2819,53 @@ test.each([true, false])(
     ]);
   },
 );
+
+test('a requirement ledger that the scope check never accepts, over an instruction history too large to quote whole, ends in a held error after a bounded number of drafts', async () => {
+  const instruction = (index: number) => ({ role: 'user', content: `Instruction ${index}. ` + 'Keep every earlier restriction in force. '.repeat(1_000) });
+  const input = { ...state(), transcript: [instruction(1), instruction(2), instruction(3), instruction(4), { role: 'tool', callId: 'read-1', content: 'Observed source.' }] };
+  const clean = good(), refusing = fakePort(() => noulAnswer(0.99));
+  const port: VerificationAccess['port'] = { model: clean.port.model,
+    ask: request => (request.context?.battery === 'engine.verification.scope' ? refusing.port : clean.port).ask(request) };
+  let ledgerDrafts = 0;
+  const writer: VerificationWriter = async proposal => {
+    if (proposal.operation === 'requirements') ledgerDrafts++;
+    return verificationWriter(proposal);
+  };
+  await expect(new CompletionVerification(writer).prepare(input, access(port))).rejects.toMatchObject({ name: 'Error', message: expect.stringContaining('held') });
+  expect(ledgerDrafts).toBeGreaterThan(1);
+  expect(ledgerDrafts).toBeLessThanOrEqual(6);
+});
+
+test('archived message bodies are journalled once however many archive positions list them, and restore intact', () => {
+  const root = directory(), store = new VerificationStore(root, 'session');
+  const histories = [{ messages: [{ role: 'user', content: 'Original request.' }] }];
+  const body = 'UNIQUE-ARCHIVED-MESSAGE-BODY '.repeat(40);
+  const records = [{ id: 'message-1', message: { role: 'user', content: body } }, { id: 'message-2', message: { role: 'assistant', content: 'Second.' } }];
+  store.rememberArchive({ histories, derived: [[0, 'message-1']], messageRecords: records.slice(0, 1) });
+  store.rememberArchive({ histories, derived: [[0, 'message-1'], [1, 'message-2']], messageRecords: records });
+  store.rememberArchive({ histories, derived: [[0, 'message-1']], messageRecords: records });
+  const journal = readFileSync(join(root, '.goodvibes/verification/session.jsonl'), 'utf8');
+  expect(journal.split(body).length - 1).toBe(1);
+  const restored = new VerificationStore(root, 'session');
+  expect(restored.archive?.messageRecords).toEqual(records);
+  expect(restored.archive?.derived).toEqual([[0, 'message-1']]);
+});
+
+test('a journal written with inline archived message records still restores', () => {
+  const root = directory();
+  const record = { id: 'message-1', message: { role: 'user', content: 'Legacy inline record.' } };
+  const archive = { kind: 'archive', key: 'main', value: { branch: 'main', historyKeys: [], derived: [[0, 'message-1']], messageRecords: [record] } };
+  const path = join(root, '.goodvibes/verification/session.jsonl');
+  mkdirSync(join(root, '.goodvibes/verification'), { recursive: true });
+  writeFileSync(path, `\n${JSON.stringify(archive)}\n`);
+  expect(new VerificationStore(root, 'session').archive?.messageRecords).toEqual([record]);
+});
+
+test('a disclosed limitation about an observation that left the history is not carried into the final checks', async () => {
+  const verifier = new CompletionVerification(verificationWriter);
+  const holder = verifier as unknown as { disclosedLimitations: Map<string, { observation: string; reference: string; requirement: string; attempts: number }> };
+  holder.disclosedLimitations.set('earlier-key', { observation: 'observation-that-is-gone', reference: 'gone', requirement: 'requirement-1', attempts: 3 });
+  const result = await verifier.prepare(state(), access(good().port));
+  expect(holder.disclosedLimitations.size).toBe(0);
+  expect(JSON.stringify(result.state)).not.toContain('observation-that-is-gone');
+});

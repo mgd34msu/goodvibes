@@ -40,6 +40,12 @@ export interface BrowserJudgmentBattery<K extends BrowserJudgmentBatteryId, S, R
   readonly resolve: (input: BrowserJudgmentInputMap[K], context: BrowserJudgmentResolveContext) => Promise<BrowserJudgmentResolvedInput<S>>;
   readonly run: (port: JudgmentPort, state: S, options: { readonly signal: AbortSignal }) => Promise<R>;
   readonly project: (result: R) => BrowserJudgmentProjection<BrowserJudgmentValueMap[K]>;
+  /**
+   * Retain what was prepared for the client (`recordAction`). The service calls it only after the
+   * projection validated and the response is about to be returned, so the decision log never says
+   * 'ready' for a result the client was refused. `project` itself must not record.
+   */
+  readonly record?: (result: R, projection: BrowserJudgmentProjection<BrowserJudgmentValueMap[K]>) => void;
 }
 /** Acquired by server composition. Neither route identity nor port comes from browser JSON. */
 export interface BrowserJudgmentRoute {

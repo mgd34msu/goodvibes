@@ -70,6 +70,12 @@ export interface ObservedAgentSourceDeps {
   readonly now?: (() => number) | undefined;
   /** Detection cadence, at most one scan per this many ms (default 2500). */
   readonly refreshIntervalMs?: number | undefined;
+  /**
+   * The pid whose process tree this runtime owns (default: this process).
+   * Sessions it spawned or hosts, an ACP-hosted `codex acp` for one, have
+   * their own fleet rows and are never reported as observed.
+   */
+  readonly ownPid?: number | undefined;
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 2_500;
@@ -92,6 +98,7 @@ export class ObservedAgentSource {
   private readonly steerRunner: TmuxCommandRunner;
   private readonly now: () => number;
   private readonly refreshIntervalMs: number;
+  private readonly ownPid: number;
 
   /** pid → cumulative CPU seconds at the previous refresh (the liveness delta baseline). */
   private readonly cpuByPid = new Map<number, number>();
@@ -105,6 +112,7 @@ export class ObservedAgentSource {
     this.steerRunner = deps.steerRunner ?? defaultTmuxCommandRunner();
     this.now = deps.now ?? ((): number => Date.now());
     this.refreshIntervalMs = deps.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
+    this.ownPid = deps.ownPid ?? process.pid;
   }
 
   /** Current observed rows. Lazily re-scans (read-only) at most once per refresh interval. */
@@ -118,7 +126,7 @@ export class ObservedAgentSource {
   }
 
   private scan(): readonly ObservedAgentRow[] {
-    const classified = classifyObservedProcesses(this.processReader.read());
+    const classified = classifyObservedProcesses(this.processReader.read(), new Set([this.ownPid]));
     const panes = classified.length > 0 ? this.paneReader.listPanes() : [];
     const rows: ObservedAgentRow[] = [];
     const seenPids = new Set<number>();
@@ -158,14 +166,28 @@ export class ObservedAgentSource {
   /**
    * Steer a tmux-hosted foreign session with the exact three-send recipe: one
    * send carries the literal message text, then two separate Enter sends. An
-   * honest refusal (queued:false) when the row exposes no tmux channel, or when
-   * a send-keys call fails. STOP is never offered here, this is steer only.
+   * honest refusal (queued:false) when the row exposes no tmux channel, when the
+   * session is no longer there, or when a send-keys call fails. STOP is never
+   * offered here, this is steer only.
+   *
+   * The row is up to a refresh interval old, and text plus Enter typed into a
+   * pane whose agent has exited would run in whatever has the terminal now, so
+   * the process table and the pane list are read again first: the same process
+   * must still be running on the same terminal, and that terminal must still be
+   * the pane the row names.
    */
   steer(row: ObservedAgentRow, text: string): SteerResult {
     if (row.steer.kind !== 'tmux') {
       return { queued: false, reason: `this session cannot be steered: ${row.steer.reason}` };
     }
     const pane = row.steer.paneId;
+    const current = classifyObservedProcesses(this.processReader.read(), new Set([this.ownPid])).find((proc) => proc.pid === row.pid);
+    if (!current || current.externalKind !== row.externalKind || (row.startedAt !== undefined && current.startedAt !== row.startedAt)) {
+      return { queued: false, reason: `nothing was sent: the observed session (pid ${row.pid}) is no longer running` };
+    }
+    if (paneForTty(this.paneReader.listPanes(), current.tty)?.paneId !== pane) {
+      return { queued: false, reason: `nothing was sent: the session (pid ${row.pid}) is no longer on tmux pane ${pane}` };
+    }
     const sends: readonly (readonly string[])[] = [
       ['send-keys', '-t', pane, '-l', '--', text],
       ['send-keys', '-t', pane, 'Enter'],

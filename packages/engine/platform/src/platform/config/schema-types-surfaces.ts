@@ -68,6 +68,7 @@ export interface TelegramSurfaceConfig {
   webhookSecret: string;
   defaultChatId: string;
   botUsername: string;
+  discoveredBotTokenId: string;
   mode: 'webhook' | 'polling';
   setupVersion: number;
 }
@@ -241,12 +242,12 @@ export interface DaemonMailboxConfig {
   from: string;
   /** Held in the daemon secret tier, never written to a settings file. */
   password: string;
-  /** Flat spelling, read by the inbox provider. */
+  /** Flat spelling. Both spellings resolve through readSurfaceEmailSettings (email/surface-config.ts) in a fixed order. */
   imapHost: string;
   imapPort: number;
   imapUser: string;
   imapPassword: string;
-  /** Nested spelling, read by the triage tagger and the settings resolver. */
+  /** Nested spelling, written by the settings surface; wins over the flat one for host and port. */
   imap: {
     host: string;
     port: number;

@@ -103,7 +103,10 @@ function buildWorkerMetadata(
     compatibility_date: '2026-04-25',
     bindings,
     ...(migrations ? { migrations } : {}),
-    keep_bindings: ['secret_text'],
+    // Plain-text variables are kept too: the Worker's own error messages tell an
+    // operator to set GOODVIBES_ALLOW_PRIVATE_DAEMON_URL / _INSECURE_ by hand,
+    // and a redeploy must not silently remove what they set.
+    keep_bindings: ['secret_text', 'plain_text'],
   };
 }
 

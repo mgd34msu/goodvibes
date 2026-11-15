@@ -34,10 +34,11 @@ export interface CandidateView {
   summary: string;
 }
 
-export function parseCandidate(candidate: unknown, index: number): CandidateView {
+/** `id` is '' when the daemon sent none: a decision needs the candidate's own id, so such a row is not listed. */
+export function parseCandidate(candidate: unknown): CandidateView {
   const summary = firstString(candidate, ['summary']);
   return {
-    id: firstString(candidate, ['id']) || String(index),
+    id: firstString(candidate, ['id']),
     title: firstString(candidate, ['title']) || summary || 'Untitled candidate',
     status: firstString(candidate, ['status']) || 'unknown',
     type: firstString(candidate, ['candidateType']) || 'candidate',
@@ -77,6 +78,7 @@ export function KnowledgeCandidateRows({ query = '', selectedId = null, onSelect
 
   const all = candidateItems(candidates.data)
     .map(parseCandidate)
+    .filter((c) => c.id !== '')
     .filter((c) => includesText([c.title, c.summary, c.type], query));
   const undecided = all.filter((c) => isUndecidedCandidate(c.status));
   const decided = all.filter((c) => !isUndecidedCandidate(c.status));
@@ -113,7 +115,7 @@ export function KnowledgeCandidatePane({ candidate, onClose }: KnowledgeCandidat
     },
   });
   const decided = !isUndecidedCandidate(candidate.status);
-  const busy = decide.isPending;
+  const busy = decide.isPending || candidate.id === '';
 
   return (
     <DetailPane

@@ -8,6 +8,13 @@ import { SpokenTurnController } from '@goodvibes-jev/engine/platform/platform/vo
 export interface SpokenTurnRuntime {
     readonly unsubs: readonly (() => void)[];
     submitNextTurn(prompt: string): boolean;
+    /**
+     * Like submitNextTurn, and returns the means to withdraw exactly that arm
+     * (see controller.armNextTurn); null when nothing was armed.
+     */
+    armNextTurn(prompt: string): {
+        readonly disarm: () => boolean;
+    } | null;
     /** Returns whether speech was actually active (see controller.stop). */
     stop(message?: string | undefined): boolean;
     /** Exit-path stop: lets the audio already playing drain, bounded (see controller.stopForExit). */
@@ -23,6 +30,9 @@ export interface WireSpokenTurnRuntimeOptions {
      * subprocesses. Defaults to LocalStreamingAudioPlayer.
      */
     readonly playerFactory?: (() => StreamingAudioPlayer) | undefined;
+    /** Injectable timers for the synthesis retry backoff, so tests do not wait in real time. */
+    readonly setTimeout?: typeof setTimeout | undefined;
+    readonly clearTimeout?: typeof clearTimeout | undefined;
 }
 /**
  * wireSpokenTurnRuntime, wires the spoken-turn pipeline against the runtime
@@ -46,6 +56,8 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
         sink: player,
         source,
         notify: options.notify,
+        ...(options.setTimeout ? { setTimeout: options.setTimeout } : {}),
+        ...(options.clearTimeout ? { clearTimeout: options.clearTimeout } : {}),
     });
     const turns = options.events.turns;
     const unsubs = [
@@ -66,6 +78,7 @@ export function wireSpokenTurnRuntime(options: WireSpokenTurnRuntimeOptions, sou
     return {
         unsubs,
         submitNextTurn: (prompt) => controller.submitNextTurn(prompt),
+        armNextTurn: (prompt) => controller.armNextTurn(prompt),
         stop: (message) => controller.stop(message),
         stopForExit: (drainTimeoutMs) => controller.stopForExit(drainTimeoutMs),
     };

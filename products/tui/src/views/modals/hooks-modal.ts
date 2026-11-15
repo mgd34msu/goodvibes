@@ -1,5 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type {
   HookActivityTracker,
@@ -138,17 +138,17 @@ class HooksModalSurface implements ConfigModalSurface {
     switch (id) {
       case 'toggle':
         if (!name) { ctx.print('This hook has no managed name to toggle.'); return; }
-        void ctx.executeCommand?.('hooks', [entry.hook.enabled === false ? 'enable' : 'disable', name]);
-        ctx.setStatus(`Dispatched /hooks ${entry.hook.enabled === false ? 'enable' : 'disable'} ${name}.`);
+        {
+          const verb = entry.hook.enabled === false ? 'enable' : 'disable';
+          runModalCommand(ctx, 'hooks', [verb, name], `/hooks ${verb} ${name}`);
+        }
         break;
       case 'remove':
         if (!name) { ctx.print('This hook has no managed name to remove.'); return; }
-        void ctx.executeCommand?.('hooks', ['remove', name]);
-        ctx.setStatus(`Dispatched /hooks remove ${name}.`);
+        runModalCommand(ctx, 'hooks', ['remove', name], `/hooks remove ${name}`);
         break;
       case 'simulate':
-        void ctx.executeCommand?.('hooks', ['simulate', entry.pattern]);
-        ctx.setStatus(`Dispatched /hooks simulate ${entry.pattern}.`);
+        runModalCommand(ctx, 'hooks', ['simulate', entry.pattern], `/hooks simulate ${entry.pattern}`);
         break;
     }
   }

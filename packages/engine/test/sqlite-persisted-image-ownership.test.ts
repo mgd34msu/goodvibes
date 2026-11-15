@@ -140,7 +140,6 @@ test('incorrect published bytes are indeterminate and never become an accepted b
 });
 
 
-// Regression source intentionally UNRUN during the coding-first pass.
 test('baseline capture, unchanged replacement comparison and native saves do not compute a digest', () => {
   const f = fixture(), hash = spyOn(crypto, 'createHash');
   try {

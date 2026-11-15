@@ -18,7 +18,6 @@ import {
 // Synthetic protocol fixtures only: no daemon, provider, credential, or live proof.
 const REQUEST_ID = '12345678-1234-4234-9234-123456789abc';
 const ERROR_BATTERY = 'webui.errors.daemon-refusal';
-const STATUS_BATTERY = 'webui.status.badge-tone';
 const RANK_BATTERY = 'webui.palette.command-rank';
 
 function envelope(battery: string = ERROR_BATTERY, input: unknown = { errorRef: 'fixture-error' }) {
@@ -53,7 +52,7 @@ describe('browser judgment closed envelope', () => {
   test('publishes the fixed protocol and closed battery IDs', () => {
     expect(BROWSER_JUDGMENT_PROTOCOL_VERSION).toBe(1);
     expect(BROWSER_JUDGMENT_PATH).toBe('/api/judgment/batteries/run');
-    expect(BROWSER_JUDGMENT_BATTERY_IDS).toEqual(['webui.voice.speech-seams', ERROR_BATTERY, STATUS_BATTERY, RANK_BATTERY, 'webui.mail.reply-subject', 'webui.pwa.install-platform', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key', 'webui.models.catalog-provider-match']);
+    expect(BROWSER_JUDGMENT_BATTERY_IDS).toEqual(['webui.voice.speech-seams', ERROR_BATTERY, RANK_BATTERY, 'webui.mail.reply-subject', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key', 'webui.models.catalog-provider-match']);
     expect(Object.isFrozen(LIMIT)).toBe(true);
   });
 
@@ -135,38 +134,9 @@ describe('browser judgment battery input variants', () => {
     }
   });
 
-  test('accepts both status vocabularies with each registered source variant', () => {
-    for (const vocabulary of ['badge', 'library-dot']) {
-      for (const source of [{ kind: 'catalog', labelId: 'fixture-label' }, { kind: 'daemon', statusRef: 'fixture-status' }]) {
-        const request = envelope(STATUS_BATTERY, { vocabulary, source });
-        expect<unknown>(parseBrowserJudgmentRequest(request)).toEqual(request);
-      }
-    }
-  });
-
-  test('status input and discriminated source records reject missing and extra fields', () => {
-    for (const input of [
-      null, {}, { vocabulary: 'other', source: { kind: 'catalog', labelId: 'fixture-label' } },
-      { vocabulary: 'badge' }, { source: { kind: 'catalog', labelId: 'fixture-label' } },
-      { vocabulary: 'badge', source: { kind: 'catalog', labelId: 'fixture-label' }, text: 'untrusted' },
-    ]) invalidRequest(envelope(STATUS_BATTERY, input));
-    for (const source of [
-      null, false, 'catalog', [], {}, { kind: 'other', labelId: 'fixture-label' },
-      { kind: 'catalog' }, { kind: 'catalog', labelId: '' }, { kind: 'catalog', labelId: 1 },
-      { kind: 'catalog', labelId: 'fixture-label', statusRef: 'fixture-status' },
-      { kind: 'daemon' }, { kind: 'daemon', statusRef: '' }, { kind: 'daemon', statusRef: 1 },
-      { kind: 'daemon', statusRef: 'fixture-status', labelId: 'fixture-label' },
-    ]) invalidRequest(envelope(STATUS_BATTERY, { vocabulary: 'badge', source }));
-  });
-
-  test('bounds references in both status source variants', () => {
-    for (const [kind, key] of [['catalog', 'labelId'], ['daemon', 'statusRef']] as const) {
-      expect(parseBrowserJudgmentRequest(envelope(STATUS_BATTERY, {
-        vocabulary: 'badge', source: { kind, [key]: 'x'.repeat(LIMIT.referenceChars) },
-      }))).toMatchObject({ battery: STATUS_BATTERY });
-      tooLarge(() => parseBrowserJudgmentRequest(envelope(STATUS_BATTERY, {
-        vocabulary: 'badge', source: { kind, [key]: 'x'.repeat(LIMIT.referenceChars + 1) },
-      })));
+  test('batteries with no server adapter are not part of the contract', () => {
+    for (const battery of ['webui.status.badge-tone', 'webui.pwa.install-platform']) {
+      expectRefusal(() => parseBrowserJudgmentRequest(envelope(battery, {})), 'JUDGMENT_BATTERY_UNKNOWN', 404);
     }
   });
 
@@ -307,7 +277,7 @@ describe('bounded JSON capture before admission', () => {
     for (const key of ['protocolVersion', 'battery', 'input']) {
       invalidRequest(Object.defineProperty(envelope(), key, getter));
     }
-    invalidRequest(envelope(STATUS_BATTERY, { vocabulary: 'badge', source: Object.defineProperty({}, 'kind', getter) }));
+    invalidRequest(envelope(RANK_BATTERY, { query: Object.defineProperty({}, 'kind', getter), registryVersion: 'v1', candidates: [{ kind: 'builtin', commandId: 'a' }] }));
     invalidRequest(envelope(ERROR_BATTERY, Object.defineProperty({}, 'errorRef', getter)));
     const setter = Object.defineProperty({}, 'value', { enumerable: true, set(_value: unknown) { reads++; } });
     expectRefusal(() => captureBrowserJudgmentJson(setter), 'JUDGMENT_INVALID_INPUT');

@@ -34,7 +34,7 @@ export function nativeConversationIntakeFixture() {
     async resume() { throw new Error('Unexpected automatic execution resume'); }, async cancel() { throw new Error('Unexpected automatic execution cancel'); }, dispose() {},
   };
   const key = (binding: NativeIntakeJournalBinding) => JSON.stringify(binding);
-  const journal = {
+  const journalBase = {
     async read(binding: NativeIntakeJournalBinding) { calls.push('read'); return structuredClone(records.get(key(binding))); },
     async save(binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest, expected: string | null) {
       calls.push('save'); if ((records.get(key(binding))?.command.requestId ?? null) !== expected) throw new Error('conflict');
@@ -52,6 +52,11 @@ export function nativeConversationIntakeFixture() {
       if (record.dispatch) return false; records.set(key(binding), { ...record, dispatch: { sourceRevision } }); return true;
     },
   };
+  // Tests opt in to these two members; the host's journal has them as optional.
+  const journal: typeof journalBase & {
+    releaseTurnClaim?: (binding: NativeIntakeJournalBinding, command: NativeConversationIntakeCaptureRequest, sourceRevision: string) => Promise<void>;
+    discardUncaptured?: (binding: NativeIntakeJournalBinding) => Promise<void>;
+  } = journalBase;
   const select = (): NativeConversationIntakeSelection => ({ available: true, identity, endpoint: 'https://native.invalid', projectId: 'project', workspace, journal,
     bind: () => ({ client, execution, readPrincipal: async () => { calls.push('principal'); return principal; }, dispose: () => { disposed++; } }) });
   const create = () => new NativeConversationIntakeControls(select, () => `id-${++ids}`);

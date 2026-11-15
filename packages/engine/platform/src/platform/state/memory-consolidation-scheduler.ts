@@ -66,6 +66,7 @@ export class MemoryConsolidationScheduler {
   private startedAt: number | null = null;
   private idleSince: number | null = null;
   private readonly receipts: MemoryConsolidationRunReceipt[] = [];
+  private running: Promise<void> | null = null;
 
   constructor(private readonly options: MemoryConsolidationSchedulerOptions) {}
 
@@ -93,8 +94,12 @@ export class MemoryConsolidationScheduler {
 
   private scheduleNext(): void {
     if (this.stopped) return;
+    // Every tick ends here, including ticks an external caller made while a
+    // timer was already armed: replace that timer rather than adding a chain.
+    if (this.timer) (this.options.clearTimer ?? clearTimeout)(this.timer);
     const setTimer = this.options.setTimer ?? setTimeout;
     this.timer = setTimer(() => {
+      this.timer = null;
       void this.tick();
     }, this.checkIntervalMs);
     (this.timer as { unref?: () => void }).unref?.();
@@ -103,11 +108,36 @@ export class MemoryConsolidationScheduler {
   /**
    * One wake: track continuous idleness, then run when due, the idle trigger
    * at intervalMs cadence, or the slow schedule fallback when the runtime has
-   * not offered an idle window for SCHEDULE_FACTOR x intervalMs. The next wake
-   * is scheduled only after this one settles, so runs never overlap.
+   * not offered an idle window for SCHEDULE_FACTOR x intervalMs. A wake that
+   * arrives while a pass is in flight joins that pass instead of starting a
+   * second one, and the next wake is armed once it settles.
    */
   async tick(): Promise<void> {
     if (this.stopped) return;
+    try {
+      await this.runOnce();
+    } finally {
+      this.scheduleNext();
+    }
+  }
+
+  /**
+   * The same due-ness check and run as a wake, for callers outside the timer
+   * (power wake catch-up). It joins an in-flight pass and never arms a timer.
+   */
+  runNow(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    return this.runOnce();
+  }
+
+  private runOnce(): Promise<void> {
+    if (!this.running) {
+      this.running = this.evaluate().finally(() => { this.running = null; });
+    }
+    return this.running;
+  }
+
+  private async evaluate(): Promise<void> {
     try {
       const now = (this.options.now ?? Date.now)();
       if (this.startedAt === null) this.startedAt = now;
@@ -123,6 +153,9 @@ export class MemoryConsolidationScheduler {
       const dueForScheduleRun = now - Math.max(this.lastRunAt, this.startedAt) >= config.intervalMs * SCHEDULE_FACTOR;
       if (!dueForIdleRun && !dueForScheduleRun) return;
 
+      // A failed pass counts as an attempt too: without this a provider outage
+      // leaves the pass due, and every wake would start the whole pass again.
+      this.lastRunAt = now;
       const receipt = await runMemoryConsolidation({
         memoryRegistry: this.options.memoryRegistry,
         config,
@@ -131,7 +164,6 @@ export class MemoryConsolidationScheduler {
         idle: idleNow,
         ...(this.options.usageLookup ? { usageLookup: this.options.usageLookup } : {}),
       });
-      this.lastRunAt = now;
       this.receipts.push(receipt);
       if (this.receipts.length > RECEIPT_RING_SIZE) this.receipts.splice(0, this.receipts.length - RECEIPT_RING_SIZE);
       logger.info('[memory] consolidation ran', {
@@ -150,8 +182,6 @@ export class MemoryConsolidationScheduler {
       }
     } catch (error) {
       logger.warn('[memory] consolidation run failed', { error: summarizeError(error) });
-    } finally {
-      this.scheduleNext();
     }
   }
 }

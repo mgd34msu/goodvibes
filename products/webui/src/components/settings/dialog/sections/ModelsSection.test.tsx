@@ -183,7 +183,9 @@ mock.module('../../../../lib/goodvibes', () => ({
 const { ModelsSection, contextLabel, priceLabel } = await import('./ModelsSection');
 const { ConfigSettingsProvider } = await import('../ConfigSettings');
 
-function render(): { el: HTMLElement; unmount: () => void } {
+const cleanups: Array<() => void> = [];
+
+function render(): { el: HTMLElement } {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -201,13 +203,12 @@ function render(): { el: HTMLElement; unmount: () => void } {
       ),
     );
   });
-  return {
-    el: container,
-    unmount: () => {
-      flushSync(() => root.unmount());
-      container.remove();
-    },
-  };
+  // Unmounted in afterEach so a failed assertion cannot leave the root in document.body.
+  cleanups.push(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+  return { el: container };
 }
 
 function click(el: Element | null | undefined) {
@@ -240,46 +241,43 @@ async function openProvider(el: HTMLElement, title: string): Promise<void> {
 }
 
 afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
   getCalls.length = 0;
 });
 
 describe('Models and providers: provider rows say their real state in words', () => {
 
   test('configured providers are listed before unconfigured ones', async () => {
-    const { el, unmount } = render();
+    const { el } = render();
     await waitFor(() => rows(el).length >= 4);
     const titles = rows(el).map((row) => row.querySelector('.gv-row__title')?.textContent ?? '');
     expect(titles.indexOf('Anthropic')).toBe(titles.length - 1);
-    unmount();
   });
 
   test('the current model shows its registry key', async () => {
-    const { el, unmount } = render();
+    const { el } = render();
     await waitFor(() => (el.textContent ?? '').includes('openai:gpt-5'));
     expect(el.querySelector('[data-testid="current-model"]')?.textContent).toContain('openai:gpt-5');
-    unmount();
   });
 });
 
 describe('Models and providers: a provider opens in place', () => {
   test('a provider present only in providers.list (no catalog match, no flat `configured`) opens and fetches its detail', async () => {
-    const { el, unmount } = render();
+    const { el } = render();
     await openProvider(el, 'mistral');
     await waitFor(() => getCalls.includes('mistral'));
-    unmount();
   });
 
   test('an expired route shows its detail and repair hints', async () => {
-    const { el, unmount } = render();
+    const { el } = render();
     await openProvider(el, 'Azure');
     await waitFor(() => (el.textContent ?? '').includes('refresh token expired 2h ago'));
     expect(el.textContent).toContain('refresh token expired 2h ago');
     expect(el.textContent).toContain('re-authenticate in the daemon settings');
-    unmount();
   });
 
   test('model rows read name left and context right, with one action; back returns to the list', async () => {
-    const { el, unmount } = render();
+    const { el } = render();
     await openProvider(el, 'Azure');
     await waitFor(() => (el.textContent ?? '').includes('GPT-5 (Azure)'));
     const row = [...el.querySelectorAll('.settings-model-row')].find((r) => r.textContent?.includes('GPT-5 (Azure)'));
@@ -288,7 +286,6 @@ describe('Models and providers: a provider opens in place', () => {
     const back = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('All providers'));
     click(back);
     await waitFor(() => rows(el).length > 0);
-    unmount();
   });
 });
 

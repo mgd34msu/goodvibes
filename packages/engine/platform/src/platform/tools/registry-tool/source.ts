@@ -1,12 +1,14 @@
 /** Registry modes share one reader; captured readers never fall back to live files. */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   collectMarkdownReferences, extractMarkdownPreview, extractMarkdownSections,
   parseMarkdownFrontmatter, type MarkdownDisclosure,
 } from '../../utils/markdown-disclosure.js';
 
 export interface RegistryToolSource {
+  /** True for the live file-system source, whose judgments need no per-candidate serialisation. */
+  readonly live?: true | undefined;
   readonly signal?: AbortSignal | undefined;
   exists(path: string): Promise<boolean>;
   includeExists(path: string): Promise<boolean>;
@@ -14,13 +16,57 @@ export interface RegistryToolSource {
   read(path: string): Promise<string>;
   assertCurrent(): Promise<void>;
 }
-export const liveRegistrySource: RegistryToolSource = {
-  exists: async (path) => existsSync(path),
-  includeExists: async (path) => existsSync(path),
-  list: async (path) => readdirSync(path),
-  read: async (path) => readFileSync(path, 'utf8'),
-  assertCurrent: async () => undefined,
-};
+export interface LiveRegistryRoots {
+  readonly workingDirectory: string;
+  readonly homeDirectory?: string | undefined;
+}
+
+/** The only directories a live registry read may reach: `.goodvibes/{skills,agents}` of the project and of the home directory. */
+export function liveRegistryScope(roots: LiveRegistryRoots): string[] {
+  const owners = [roots.workingDirectory, ...(roots.homeDirectory ? [roots.homeDirectory] : [])];
+  return owners.flatMap((owner) => ['skills', 'agents'].map((kind) => join(owner, '.goodvibes', kind)));
+}
+
+function realOrUndefined(path: string): string | undefined {
+  try { return realpathSync(path); } catch { return undefined; }
+}
+
+/**
+ * True when `path`, after resolving every `..` and symlink, lies inside one of
+ * the scope directories. A path that does not exist is never contained.
+ */
+export function isInsideLiveRegistryScope(scope: readonly string[], path: string): boolean {
+  const real = realOrUndefined(resolve(path));
+  if (real === undefined) return false;
+  return scope.some((root) => {
+    const realRoot = realOrUndefined(root);
+    if (realRoot === undefined) return false;
+    const rel = relative(realRoot, real);
+    return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+  });
+}
+
+/** A live source whose reads, listings and includes stay inside the scope; escaping paths read as absent or are refused. */
+export function createLiveRegistrySource(roots: LiveRegistryRoots): RegistryToolSource {
+  const scope = liveRegistryScope(roots);
+  const assertInside = (path: string): void => {
+    if (!isInsideLiveRegistryScope(scope, path)) {
+      throw new Error(`registry source ${resolve(path)} is outside .goodvibes/skills and .goodvibes/agents`);
+    }
+  };
+  return {
+    live: true,
+    exists: async (path) => existsSync(path),
+    includeExists: async (path) => {
+      if (!existsSync(path)) return false;
+      assertInside(path);
+      return true;
+    },
+    list: async (path) => { assertInside(path); return readdirSync(path); },
+    read: async (path) => { assertInside(path); return readFileSync(path, 'utf8'); },
+    assertCurrent: async () => undefined,
+  };
+}
 
 export async function registryMarkdown(source: RegistryToolSource, path: string): Promise<MarkdownDisclosure> {
   const { metadata, body } = parseMarkdownFrontmatter(await source.read(path));

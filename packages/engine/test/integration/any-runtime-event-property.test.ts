@@ -1,251 +1,142 @@
 /**
  * any-runtime-event-property.test.ts
  *
- * Property-based tests on `AnyRuntimeEvent` discriminants using `fast-check`.
+ * Property-based tests of the production event validator (`validateKnownEvent`)
+ * against the shared fixture events, plus drift guards that compare the fixture
+ * tables with the event sources.
  *
  * Properties tested:
- *   1. Round-trip: JSON.stringify → JSON.parse preserves structural equality for every known event.
- *   2. Malformed event: wrong `type` field → validator returns a typed error (not silent pass).
- *   3. Missing required field on a known type → validator returns a typed error.
+ *   1. Every fixture event whose type has a registered validator passes it.
+ *   2. Dropping a required field from such an event makes the validator reject it.
+ *   3. Unknown types and non-objects are rejected with a named violation.
+ *   4. Every event type declared under platform/src/events has a fixture, or is
+ *      listed as fixtureless; a new event type fails until one of the two happens.
  *
- * Coverage: ≥ 100 iterations per event kind (fast-check default is 100).
- *
- * Import strategy: leaf event source files are imported directly by relative path
- * so bun can resolve them as TypeScript without any package import. This matches
- * the pattern used in runtime-event-discriminated-union.test.ts.
- *
- * Arbitraries and fixture data are shared via `./_shared/arbitraries.ts` for reuse
- * across integration tests.
+ * Arbitraries and fixture data are shared via `./_shared/arbitraries.ts`.
  */
 
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import * as fc from 'fast-check';
 
+import { registeredEventTypes, validateKnownEvent } from '../../platform/src/events/contracts.js';
 import {
-  jsonValueArb,
   FIXTURE_EVENTS,
+  FIXTURELESS_EVENT_TYPES,
   KNOWN_EVENT_TYPES,
   REQUIRED_FIELDS_BY_TYPE,
 } from './_shared/arbitraries.js';
 
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
-
 /**
- * A typed validation error returned by the event validator.
- *
- * Validation failures must produce this instead of throwing.
- */
-export interface EventValidationError {
-  readonly kind: 'EventValidationError';
-  readonly message: string;
-  readonly received: unknown;
-}
-
-function validationError(message: string, received: unknown): EventValidationError {
-  return { kind: 'EventValidationError', message, received };
-}
-
-/**
- * Minimal runtime validator for `AnyRuntimeEvent`.
- *
- * Accepts any plain object with a known `type` discriminant and at least
- * the required fields for that type. Returns `EventValidationError` on failure.
- *
- * This is deliberately not a full JSON schema validator, it checks:
- *   - `type` is a string and is a known event type
- *   - required discriminant-specific fields are present
- */
-/**
- * REQUIRED_FIELDS_BY_TYPE is keyed by the production event union now, so a
- * plain `string` cannot index it. This narrows once, in one place; an event
- * type that is not a real union member yields undefined, which every caller
- * below already handles.
+ * REQUIRED_FIELDS_BY_TYPE is keyed by the production event union, so a plain
+ * `string` cannot index it. This narrows once, in one place; an event type that
+ * is not a real union member yields undefined, which every caller handles.
  */
 function requiredFieldsFor(type: string): readonly string[] | undefined {
   return REQUIRED_FIELDS_BY_TYPE[type as keyof typeof REQUIRED_FIELDS_BY_TYPE];
 }
 
-function validateAnyRuntimeEvent(
-  value: unknown,
-): { ok: true; event: { type: string } } | { ok: false; error: EventValidationError } {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { ok: false, error: validationError('Expected a plain object', value) };
-  }
-  const obj = value as Record<string, unknown>;
-  if (typeof obj['type'] !== 'string' || !obj['type']) {
-    return { ok: false, error: validationError('Missing or non-string `type` field', value) };
-  }
-  const t = obj['type'] as string;
-  if (!KNOWN_EVENT_TYPES.has(t)) {
-    return { ok: false, error: validationError(`Unknown event type: ${t}`, value) };
-  }
-  // Check required fields per type (representative sample covering each domain)
-  const missing = requiredFieldsFor(t)?.filter((f) => !(f in obj)) ?? [];
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      error: validationError(`Missing required fields for ${t}: ${missing.join(', ')}`, value),
-    };
-  }
-  return { ok: true, event: obj as { type: string } };
-}
+const REGISTERED = new Set(registeredEventTypes());
+const VALIDATED_FIXTURES = FIXTURE_EVENTS.filter((event) => REGISTERED.has(event.type));
 
 // ---------------------------------------------------------------------------
-// Serialize/deserialize round-trip helper
+// The production validator accepts the fixtures and rejects damaged copies
 // ---------------------------------------------------------------------------
 
-function roundTrip(event: Record<string, unknown>): unknown {
-  return JSON.parse(JSON.stringify(event));
-}
-
-// ---------------------------------------------------------------------------
-// Property: round-trip, parse(serialize(event)) ≡ event (structural equality)
-// ---------------------------------------------------------------------------
-
-describe('AnyRuntimeEvent: JSON round-trip property', () => {
-  test('every fixture event survives JSON serialize → parse with structural equality', () => {
-    for (const event of FIXTURE_EVENTS) {
-      const restored = roundTrip(event);
-      // Deep structural equality: all fields present and values match.
-      // Note: undefined-valued optional fields may be dropped by JSON, that is correct
-      // behaviour; we only assert that present fields are preserved.
-      expect(restored).toMatchObject(event);
-    }
+describe('AnyRuntimeEvent: production validator', () => {
+  test('a fixture exists for every event type that has a registered validator', () => {
+    const fixtureTypes = new Set(FIXTURE_EVENTS.map((event) => event.type));
+    expect([...REGISTERED].filter((type) => !fixtureTypes.has(type))).toEqual([]);
   });
 
-  test('fast-check: generated extra fields on known events are preserved by round-trip', () => {
+  test('every fixture event with a registered validator passes it', () => {
+    const failures = VALIDATED_FIXTURES.map((event) => ({ event, result: validateKnownEvent(event) }))
+      .filter(({ result }) => !result.valid)
+      .map(({ event, result }) => `${event.type}: ${result.violations.join('; ')}`);
+    expect(failures).toEqual([]);
+  });
+
+  test('fast-check: dropping a required field makes the validator reject the event', () => {
+    const withRequiredFields = VALIDATED_FIXTURES.filter((event) => (requiredFieldsFor(event.type)?.length ?? 0) > 0);
+    expect(withRequiredFields.length).toBeGreaterThan(0);
     fc.assert(
-      fc.property(
-        fc.constantFrom(...FIXTURE_EVENTS),
-        // Extra fields must never collide with the discriminant itself, the
-        // spread would overwrite it and the property would test the generator,
-        // not the round-trip (CI seed found exactly that: extraFields {type:""}).
-        fc.dictionary(fc.string({ minLength: 1, maxLength: 16 }).filter((k) => k !== 'type'), jsonValueArb),
-        (baseEvent, extraFields) => {
-          // Merge extra fields onto a copy of the event
-          const extended: Record<string, unknown> = { ...baseEvent, ...extraFields };
-          const restored = roundTrip(extended) as Record<string, unknown>;
-          // The `type` discriminant must survive
-          return restored['type'] === baseEvent.type;
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-
-  test('fast-check: round-trip preserves all required fields for every fixture event kind', () => {
-    fc.assert(
-      fc.property(
-        fc.constantFrom(...FIXTURE_EVENTS),
-        (event) => {
-          const restored = roundTrip(event) as Record<string, unknown>;
-          const requiredFields = requiredFieldsFor(event.type) ?? [];
-          return requiredFields.every((field) => field in restored);
-        },
-      ),
-      { numRuns: 200 },
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Property: malformed events, wrong type or missing required field → error
-// ---------------------------------------------------------------------------
-
-describe('AnyRuntimeEvent: validation rejects malformed events', () => {
-  test('null input → validation error', () => {
-    const result = validateAnyRuntimeEvent(null);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.kind).toBe('EventValidationError');
-    }
-  });
-
-  test('non-object input → validation error', () => {
-    for (const bad of [42, 'string', true, [], undefined]) {
-      const result = validateAnyRuntimeEvent(bad);
-      expect(result.ok).toBe(false);
-    }
-  });
-
-  test('object with missing type field → validation error', () => {
-    const result = validateAnyRuntimeEvent({ sessionId: 's1' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.kind).toBe('EventValidationError');
-      expect(result.error.message).toContain('type');
-    }
-  });
-
-  test('object with unknown type → validation error with type name in message', () => {
-    const result = validateAnyRuntimeEvent({ type: 'UNKNOWN_EVENT_TYPE_XYZ', sessionId: 's1' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.kind).toBe('EventValidationError');
-      expect(result.error.message).toContain('UNKNOWN_EVENT_TYPE_XYZ');
-    }
-  });
-
-  test('fast-check: arbitrary unknown type strings always rejected', () => {
-    fc.assert(
-      fc.property(
-        fc.string({ minLength: 1 }).filter((s) => !KNOWN_EVENT_TYPES.has(s)),
-        (unknownType) => {
-          const result = validateAnyRuntimeEvent({ type: unknownType });
-          return result.ok === false;
-        },
-      ),
-      { numRuns: 100 },
-    );
-  });
-
-  test('fast-check: known type with missing required fields → validation error', () => {
-    // Pick events that have at least one required field to drop
-    const eventsWithRequiredFields = FIXTURE_EVENTS.filter(
-      (e) => (requiredFieldsFor(e.type)?.length ?? 0) > 0,
-    );
-    fc.assert(
-      fc.property(
-        fc.constantFrom(...eventsWithRequiredFields),
-        (event) => {
-          const requiredFields = requiredFieldsFor(event.type)!;
-          // Drop the first required field
+      fc.property(fc.constantFrom(...withRequiredFields), (event) => {
+        const fields = requiredFieldsFor(event.type)!;
+        return fields.every((field) => {
           const truncated: Record<string, unknown> = { ...event };
-          delete truncated[requiredFields[0]!];
-          const result = validateAnyRuntimeEvent(truncated);
-          return result.ok === false;
+          delete truncated[field];
+          return !validateKnownEvent(truncated).valid;
+        });
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  test('non-object input is rejected', () => {
+    for (const bad of [null, 42, 'string', true, [], undefined]) {
+      expect(validateKnownEvent(bad).valid).toBe(false);
+    }
+  });
+
+  test('an object without a string type is rejected naming the type field', () => {
+    for (const bad of [{ sessionId: 's1' }, { type: 7 }]) {
+      const result = validateKnownEvent(bad);
+      expect(result.valid).toBe(false);
+      expect(result.violations.join(' ')).toContain('type');
+    }
+  });
+
+  test('fast-check: an unregistered type string is rejected naming the type', () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1 }).filter((type) => !REGISTERED.has(type) && type !== '__proto__'),
+        (unknownType) => {
+          const result = validateKnownEvent({ type: unknownType });
+          return !result.valid && result.violations.join(' ').includes(unknownType);
         },
       ),
       { numRuns: 100 },
     );
   });
-
-  test('valid fixture events all pass validation', () => {
-    for (const event of FIXTURE_EVENTS) {
-      const result = validateAnyRuntimeEvent(event);
-      expect(result.ok).toBe(true);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
-// Domain coverage: verify KNOWN_EVENT_TYPES covers every fixture event
+// Drift guards against the event sources
 // ---------------------------------------------------------------------------
 
-describe('AnyRuntimeEvent: coverage invariant', () => {
-  test('every fixture event type is in KNOWN_EVENT_TYPES', () => {
-    for (const event of FIXTURE_EVENTS) {
-      expect(KNOWN_EVENT_TYPES.has(event.type)).toBe(true);
+/** Every `type: 'UPPER_SNAKE'` discriminant declared in the event source files. */
+function declaredEventTypes(): Set<string> {
+  const dir = resolve(import.meta.dir, '../../platform/src/events');
+  const declared = new Set<string>();
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.ts') || file === 'index.ts' || file === 'domain-map.ts') continue;
+    for (const match of readFileSync(resolve(dir, file), 'utf8').matchAll(/\btype: '([A-Z][A-Z0-9_]+)'/g)) {
+      declared.add(match[1]!);
     }
+  }
+  return declared;
+}
+
+describe('AnyRuntimeEvent: fixture coverage', () => {
+  test('every declared event type has a fixture or is listed as fixtureless', () => {
+    const covered = new Set<string>([...KNOWN_EVENT_TYPES, ...FIXTURELESS_EVENT_TYPES]);
+    expect([...declaredEventTypes()].filter((type) => !covered.has(type)).sort()).toEqual([]);
   });
 
-  test('KNOWN_EVENT_TYPES matches fixture event count (no gaps, no extras)', () => {
-    const fixtureTypes = new Set(FIXTURE_EVENTS.map((e) => e.type));
-    // Note: PLAN_STRATEGY_SELECTED / PLAN_STRATEGY_OVERRIDDEN are included in both
-    for (const type of KNOWN_EVENT_TYPES) {
-      expect(fixtureTypes.has(type)).toBe(true);
-    }
+  test('the fixture tables name only declared event types', () => {
+    const declared = declaredEventTypes();
+    const stale = [...KNOWN_EVENT_TYPES, ...FIXTURELESS_EVENT_TYPES].filter((type) => !declared.has(type));
+    expect(stale.sort()).toEqual([]);
+  });
+
+  test('a type is not both fixtured and listed as fixtureless', () => {
+    expect([...FIXTURELESS_EVENT_TYPES].filter((type) => KNOWN_EVENT_TYPES.has(type))).toEqual([]);
+  });
+
+  test('every fixture type is in KNOWN_EVENT_TYPES and every known type has a fixture', () => {
+    const fixtureTypes = new Set(FIXTURE_EVENTS.map((event) => event.type));
+    expect(FIXTURE_EVENTS.filter((event) => !KNOWN_EVENT_TYPES.has(event.type)).map((event) => event.type)).toEqual([]);
+    expect([...KNOWN_EVENT_TYPES].filter((type) => !fixtureTypes.has(type))).toEqual([]);
   });
 });

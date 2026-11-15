@@ -101,6 +101,12 @@ export interface InboundNoticeHealth {
    * failing, they are told again.
    */
   announced(at: string): void;
+  /**
+   * The owner switched notices off, so there is nothing left to refuse. Drops
+   * the latch (it is not just hidden: switching notices back on must not bring
+   * back a refusal nobody has seen since) and re-arms the log.
+   */
+  clear(reason: string): void;
   /** The live condition, or null when nothing is being refused. */
   get(): InboundNoticeRefusalState | null;
 }
@@ -119,9 +125,13 @@ export interface InboundNoticeHealthOptions {
  * drift from the first.
  */
 export function describeNoticeRefusal(state: InboundNoticeRefusalState): string {
-  const plural = state.unannounced === 1 ? 'message has' : 'messages have';
+  // A failed delivery is retried, so its count is attempts on the waiting
+  // message, not distinct messages recorded without a notice.
+  const tally = state.reason === 'delivery-failed'
+    ? `${String(state.unannounced)} delivery ${state.unannounced === 1 ? 'attempt has' : 'attempts have'} failed`
+    : `${String(state.unannounced)} ${state.unannounced === 1 ? 'message has' : 'messages have'} been recorded without a notice`;
   return `Mail is arriving and is NOT being announced (${state.reason}): ${state.detail} ${state.fix} `
-    + `${String(state.unannounced)} ${plural} been recorded without a notice since ${state.since}.`;
+    + `${tally} since ${state.since}.`;
 }
 
 export function createInboundNoticeHealth(
@@ -167,6 +177,19 @@ export function createInboundNoticeHealth(
         unannouncedWhileRefused: cleared.unannounced,
         since: cleared.since,
         at,
+      });
+    },
+
+    clear(reason: string): void {
+      if (state === null) return;
+      const cleared = state;
+      state = null;
+      log('Inbound mail notice refusal no longer applies', {
+        surface: 'email-inbound',
+        clearedReason: cleared.reason,
+        unannouncedWhileRefused: cleared.unannounced,
+        since: cleared.since,
+        why: reason,
       });
     },
 

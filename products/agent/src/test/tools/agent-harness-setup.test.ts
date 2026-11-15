@@ -23,6 +23,23 @@ beforeEach(() => {
 afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); });
 
 
+  test('a limited setup status says it is a partial view and how to see the rest', async () => {
+    const fixture = makeFixture();
+    try {
+      const posture = await executeHarnessJson<{
+        readonly readinessPlan: readonly unknown[];
+        readonly readinessPlanTotal: number;
+        readonly readinessPlanReturned: number;
+        readonly note?: string;
+      }>(fixture, { mode: 'setup_posture', limit: 3 });
+      expect(posture.readinessPlanTotal).toBeGreaterThan(3);
+      expect(posture.readinessPlan).toHaveLength(3);
+      expect(posture.readinessPlanReturned).toBe(3);
+      expect(posture.note).toContain('Partial view');
+      expect(posture.note).toContain('at most 500');
+    } finally { await fixture.cleanup(); }
+  });
+
   test('exposes connected-host auth as a token-safe setup blocker', async () => {
     await withClearedEnv(CONNECTED_HOST_AUTH_ENV_KEYS, async () => {
       const fixture = makeFixture();
@@ -139,7 +156,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(provisioned.token.present).toBe(true);
         expect(provisioned.token.usable).toBe(true);
         expect(provisioned.token.rawValueReturned).toBe(false);
-        expect(provisioned.token.path).toBe(join(fixture.root, '.goodvibes', 'daemon', 'operator-tokens.json'));
+        // Paths under the home directory are shown as ~/... to the model.
+        expect(provisioned.token.path).toBe('~/.goodvibes/daemon/operator-tokens.json');
         expect(provisioned.token.fileMode).toBe('0600');
         expect(provisioned.token).not.toHaveProperty('fingerprint');
         expect(provisioned.companionRecord?.surface).toBe('goodvibes-agent');
@@ -175,7 +193,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(ready.authPosture?.operatorToken).not.toHaveProperty('fingerprint');
         expect(JSON.stringify(ready)).not.toContain('fixture-connected-host-token');
       } finally {
-        fixture.cleanup();
+        await fixture.cleanup();
       }
     });
   });
@@ -183,7 +201,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
 
   for (const clock of [1_900_000_000_001, 1_900_000_000_000]) test(`setup ranking preserves native capture clocks: ${clock}`, async () => {
     const now = spyOn(Date, 'now').mockReturnValue(clock);
-    const fixture = makeFixture();
+    // A fixture that fails to build must not leave the clock mocked for later tests.
+    const fixture = (() => { try { return makeFixture(); } catch (error) { now.mockRestore(); throw error; } })();
     try {
       expect(judgmentInputCardProblem(clock)).toBe(clock === 1_900_000_000_000 ? 'card-material' : undefined);
       const posture = await executeHarnessJson<{ readonly capturedAt: string }>(fixture, {
@@ -192,7 +211,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(posture.capturedAt).toBe(new Date(clock).toISOString());
       await expect(fixture.admittedTool.execute({ mode: 'setup_posture', query: 'provider-access', suppliedClock: 1_900_000_000_000 }))
         .rejects.toBeInstanceOf(ToolInputProjectionError);
-    } finally { fixture.cleanup(); now.mockRestore(); }
+    } finally { await fixture.cleanup(); now.mockRestore(); }
   });
 
 
@@ -218,7 +237,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(repair.success).toBe(false);
         expect(sourceReads).toBe(0);
       } finally {
-        missingHost.cleanup();
+        await missingHost.cleanup();
       }
 
       const providerFixture = makeFixture();
@@ -231,7 +250,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(provider?.nextAction).toContain('Choose a provider/model route');
         expect(provider?.signals ?? []).toEqual([]);
       } finally {
-        providerFixture.cleanup();
+        await providerFixture.cleanup();
       }
 
       await withTcpListener(async (port) => {
@@ -279,7 +298,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           });
           expect(auth.status).toBe('blocked');
         } finally {
-          reachableHost.cleanup();
+          await reachableHost.cleanup();
         }
       });
     });

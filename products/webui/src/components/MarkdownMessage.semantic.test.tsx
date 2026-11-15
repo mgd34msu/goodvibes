@@ -23,10 +23,16 @@ function response(request: Request, held = false) {
 }
 let root: ReturnType<typeof createRoot> | undefined;
 let container: HTMLDivElement | undefined;
-function render(text = content, withSource = true) {
+function render(text = content, withSource = true, bound = source) {
   if (!container) { container = document.createElement('div'); document.body.append(container); root = createRoot(container); }
-  flushSync(() => root!.render(<MarkdownMessage content={text} source={withSource ? source : undefined} />));
+  flushSync(() => root!.render(<MarkdownMessage content={text} source={withSource ? bound : undefined} />));
   return container;
+}
+// The reading path is promise-driven end to end (no timers), so draining the microtask queue
+// lets every continuation of an already-settled read run, with no assumed latency.
+async function drain() {
+  for (let i = 0; i < 20; i++) { await Promise.resolve(); }
+  flushSync(() => {});
 }
 async function wait(predicate: () => boolean) {
   for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); flushSync(() => {}); }
@@ -47,7 +53,7 @@ test('actual Markdown caller sends source binding only and adopts typed language
 });
 test('no source or an unavailable reader stays escaped plaintext with no heuristic language', async () => {
   const el = render('```\n<script>alert(1)</script>\n```', false);
-  await new Promise(resolve => setTimeout(resolve, 30));
+  await drain();
   expect(calls).toHaveLength(0); expect(el.querySelector('script')).toBeNull();
   expect(el.querySelector('.markdown-code-label')?.textContent).toBe('code');
   expect(el.querySelector('code')?.textContent).toBe('<script>alert(1)</script>');
@@ -60,18 +66,22 @@ test('declared library aliases stay mechanical; invented aliases do not select a
 });
 test.each(['held', 'outage'])('%s preserves plain code', async kind => {
   transport = kind === 'held' ? async request => response(request, true) : async () => { throw new Error('fixture outage'); };
-  const el = render(); await wait(() => calls.length === 1); await new Promise(resolve => setTimeout(resolve, 20));
+  const el = render(); await wait(() => calls.length === 1); await drain();
   expect(el.querySelector('.hljs-keyword')).toBeNull(); expect(el.querySelector('code')?.textContent).toBe('const count: number = 2;');
 });
 test.each(['unmount', 'replace', 'identity'])('%s aborts old reading and prevents late adoption', async kind => {
-  const barrier = Promise.withResolvers<unknown>(); transport = () => barrier.promise;
+  const barrier = Promise.withResolvers<unknown>();
+  // Only the first reading waits on the barrier; a replacement's own reading never settles,
+  // so any highlight below could only come from the stale first reading being adopted.
+  transport = () => (calls.length === 1 ? barrier.promise : new Promise(() => {}));
   const el = render(); await wait(() => calls.length === 1); const previous = calls[0]!;
   if (kind === 'unmount') { flushSync(() => root!.unmount()); root = undefined; }
-  else if (kind === 'replace') render('```\nDifferent plain text\n```', false);
+  else if (kind === 'replace') render(content, true, { ...source, messageId: 'replacement-message' });
   else invalidateClientLifetime();
   flushSync(() => {}); await wait(() => previous.signal.aborted);
-  barrier.resolve(response(previous.request)); await new Promise(resolve => setTimeout(resolve, 20)); flushSync(() => {});
+  barrier.resolve(response(previous.request)); await drain();
   expect(el.querySelector('.hljs-keyword')).toBeNull();
+  if (kind === 'replace') expect(el.querySelector('code')?.textContent).toBe('const count: number = 2;');
 });
 test('client rejects wrong request, mismatched value and malformed language evidence', async () => {
   render(); await wait(() => calls.length === 1); const request = calls[0]!.request; const wire = response(request);
@@ -124,6 +134,9 @@ test.each(['negative', 'over-one', 'non-finite', 'non-maximal', 'unknown-choice'
 test.each(['contentRevision', 'content', 'end'] as const)('%s source replacement refuses a valid late language reading', async field => {
   const answer = Promise.withResolvers<unknown>(); transport = () => answer.promise;
   const current = { ...source, content, start: content.indexOf('```'), end: content.lastIndexOf('```') + 3 };
+  // The reader snapshots its source, so a replacement is only visible through the caller's currency check.
+  const issued = { ...current };
+  Object.assign(current, { isSourceCurrent: () => current.contentRevision === issued.contentRevision && current.content === issued.content && current.end === issued.end });
   const pending = readCodeLanguage(current, new AbortController().signal);
   await wait(() => calls.length === 1);
   if (field === 'end') current.end--;

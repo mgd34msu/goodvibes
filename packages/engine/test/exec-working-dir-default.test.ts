@@ -13,8 +13,8 @@
  * still honestly reports the resolved cwd (verbose verbosity echoes `cwd`).
  */
 
-import { describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, readdirSync, realpathSync } from 'node:fs';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
@@ -27,10 +27,17 @@ import { useToolReadings } from './_helpers/tool-readings.ts';
 // forwarded with EXEC_GATE_TABLE, the gate's questions, in one fake port.
 useToolReadings([], EXEC_GATE_TABLE);
 
+const tempRoots: string[] = [];
+afterAll(() => {
+  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 function tempRoot(prefix: string): string {
   // realpath: on macOS tmpdir() is a symlink (/tmp -> /private/tmp) and `pwd`
   // inside the spawned shell resolves the real path, so compare against that.
-  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  tempRoots.push(root);
+  return root;
 }
 
 describe('exec tool: working_dir default fallback', () => {

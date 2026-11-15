@@ -194,7 +194,7 @@ describe('the tool pipeline emits the gate events', () => {
     const { manager } = gate('yolo');
     const result = await permissionPhase(
       { id: 'c1', name: 'exec', arguments: { command: 'ls' } },
-      {} as never,
+      { definition: { name: 'exec', description: 'Synthetic', parameters: { type: 'object' } }, execute: async () => ({ success: true }) },
       { permissionManager: manager, runtimeBus: bus, ids: { sessionId: 's', traceId: 't' } } as never,
       {} as never,
     );

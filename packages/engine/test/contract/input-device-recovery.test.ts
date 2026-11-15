@@ -53,6 +53,9 @@ for (const mutation of ['source', 'view', 'root-inode', 'git-inode', 'same-boot'
     if (mutation === 'root-inode') saved = { ...saved, sourceIdentity: saved.sourceIdentity.replace(/:\d+$/, ':999999999999') };
     if (mutation === 'git-inode') saved = { ...saved, gitIdentity: saved.gitIdentity.replace(/:\d+(?=\||$)/g, ':999999999999') };
     if (mutation === 'same-boot') saved = { ...saved, capturedAt: Date.now() };
-    await expect(restoreContractInputDevice(saved)).rejects.toThrow();
+    const refusal = { source: 'contract input owner changed: README.md', view: 'contract input view changed: README.md',
+      'root-inode': 'contract input source root was replaced', 'git-inode': 'contract input Git directory was replaced',
+      'same-boot': 'contract input source root was replaced' }[mutation];
+    await expect(restoreContractInputDevice(saved)).rejects.toThrow(refusal);
   });
 }

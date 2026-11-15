@@ -164,6 +164,8 @@ export interface DedupingInboundMailSinkDeps {
  */
 export class DedupingInboundMailSink implements InboundMailSink {
   private readonly deps: DedupingInboundMailSinkDeps;
+  /** Handling that has started and not yet settled, by dedup key. */
+  private readonly inFlight = new Map<string, Promise<void>>();
 
   constructor(deps: DedupingInboundMailSinkDeps) {
     this.deps = deps;
@@ -186,6 +188,12 @@ export class DedupingInboundMailSink implements InboundMailSink {
     });
 
     if (!this.deps.dedup.claim(key)) {
+      // A claim can belong to an attempt that has not finished. Resolving now
+      // would let the cursor pass a message whose first attempt may still fail
+      // and give its claim back, so a concurrent repeat waits for that outcome
+      // and fails with it.
+      const pending = this.inFlight.get(key);
+      if (pending !== undefined) await pending;
       // Handled already. Resolving rather than throwing is deliberate: the
       // message IS dealt with, so the cursor should advance past it. Throwing
       // would pin the cursor below a message that will be suppressed again on
@@ -204,13 +212,17 @@ export class DedupingInboundMailSink implements InboundMailSink {
       return;
     }
 
+    const handling = this.deps.handle(message);
+    this.inFlight.set(key, handling);
     try {
-      await this.deps.handle(message);
+      await handling;
     } catch (error) {
       // The claim outliving a failed attempt would suppress the retry, and the
       // retry is the recovery. Give it back before rethrowing.
       this.deps.dedup.release(key);
       throw error;
+    } finally {
+      if (this.inFlight.get(key) === handling) this.inFlight.delete(key);
     }
   }
 }

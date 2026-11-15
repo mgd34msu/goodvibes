@@ -118,7 +118,13 @@ export interface ConversationDomainState {
   stream: StreamProgress;
 
   // ── Tool dispatch ──────────────────────────────────────────────────────────
-  /** Map of callId → ActiveToolCall for all in-flight tool calls. */
+  /**
+   * Map of callId → ActiveToolCall for tool calls of this turn, including ones
+   * already finished (the map is reset at the next submitted turn). Populated
+   * only where the host forwards the `tools` event domain to the store, so an
+   * empty map is not evidence that no tool is running; count entries in a
+   * non-terminal state rather than the map's size.
+   */
   activeToolCalls: Map<string, ActiveToolCall>;
   /** Count of tool calls dispatched in the current turn. */
   toolCallsThisTurn: number;

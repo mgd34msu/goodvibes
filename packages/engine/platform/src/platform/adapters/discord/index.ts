@@ -3,7 +3,10 @@ import { logger } from '../../utils/logger.js';
 import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionType } from '../../integrations/index.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { readTextBodyWithinLimit } from '../helpers.js';
+import { policyReplyText, readTextBodyWithinLimit } from '../helpers.js';
+
+/** Discord message flag: only the user who ran the command sees the reply. */
+const EPHEMERAL_MESSAGE_FLAG = 64;
 
 const completedInteractions = new InboundMessageDedup();
 const pendingInteractions = new Set<string>();
@@ -96,10 +99,13 @@ async function dispatchDiscordInteraction(
       },
     });
     if (!policy.allowed) {
+      // Discord shows an interaction reply only when it arrives with 200; no work
+      // was started, so the claim on this interaction is given back.
+      finished();
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
-        data: { content: `Blocked by channel policy: ${policy.reason}` },
-      }, { status: 403 });
+        data: { content: policyReplyText(policy.reason), flags: EPHEMERAL_MESSAGE_FLAG },
+      });
     }
 
     const binding = await context.routeBindings.upsertBinding({
@@ -113,7 +119,11 @@ async function dispatchDiscordInteraction(
         userId: interaction.userId,
         commandName: interaction.commandName,
         applicationId: interaction.applicationId,
-        interactionToken: interaction.token,
+        // The interaction token edits this one command's response for 15 minutes.
+        // It stays out of the channel's shared, durable binding (and a copy an
+        // earlier release stored there is cleared); this command's reply carries
+        // it instead.
+        interactionToken: undefined,
       },
     });
 
@@ -127,7 +137,7 @@ async function dispatchDiscordInteraction(
 
     const controlCommand = await context.parseSurfaceControlCommand(task, { signal: req.signal });
     if (controlCommand) {
-      const message = await context.performSurfaceControlCommand(controlCommand);
+      const message = await context.performSurfaceControlCommand(controlCommand, { surface: 'discord', routeId: binding.id });
       committed(); finished();
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
@@ -142,6 +152,7 @@ async function dispatchDiscordInteraction(
       void (async () => {
         const submission = await context.sessionBroker.submitMessage({
           routeId: binding.id,
+          ...(interaction.id ? { providerMessageId: interaction.id } : {}),
           surfaceKind: 'discord',
           surfaceId: binding.surfaceId,
           externalId: interaction.channelId ?? interaction.id,
@@ -152,13 +163,12 @@ async function dispatchDiscordInteraction(
           body: task,
           metadata: {
             applicationId: appId,
-            interactionToken: token,
           },
         });
-        if (submission.mode === 'continued-live') {
+        if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
           committed();
           await discord
-            .editOriginalResponse(appId, token, `Continuing session ${submission.session.id} via agent ${submission.activeAgentId}.`)
+            .editOriginalResponse(appId, token, submission.activeAgentId ? `Continuing session ${submission.session.id} via agent ${submission.activeAgentId}.` : `Queued for session ${submission.session.id}; it will run when the agent now starting finishes.`)
             .catch((error) => logger.warn('handleDiscordSurfaceWebhook: failed to edit continuation response', {
               error: summarizeError(error),
             }));
@@ -183,12 +193,16 @@ async function dispatchDiscordInteraction(
         }
 
         committed();
-        await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
-        context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
-          agentId: spawnResult.id,
-          task,
-          sessionId: submission.session.id,
-        });
+        await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
+        const replyBinding = submission.routeBinding ?? binding;
+        context.queueSurfaceReplyFromBinding(
+          { ...replyBinding, metadata: { ...replyBinding.metadata, interactionToken: token } },
+          {
+            agentId: spawnResult.id,
+            task,
+            sessionId: submission.session.id,
+          },
+        );
         const embed = discord.formatAgentResult(
           spawnResult.id,
           task,
@@ -236,10 +250,10 @@ async function dispatchDiscordInteraction(
       if (!policy.allowed) {
         return Response.json({
           type: DiscordInteractionResponseType.ChannelMessageWithSource,
-          data: { content: `Blocked by channel policy: ${policy.reason}` },
-        }, { status: 403 });
+          data: { content: `Blocked by channel policy: ${policy.reason}`, flags: EPHEMERAL_MESSAGE_FLAG },
+        });
       }
-      const message = await context.performInteractiveSurfaceAction(customId, 'discord', req);
+      const message = await context.performInteractiveSurfaceAction(customId, 'discord', req, interaction.userId);
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
         data: { content: message },
@@ -310,6 +324,7 @@ export async function handleDiscordGatewayDispatchPayload(
   });
   const submission = await context.sessionBroker.submitMessage({
     routeId: binding.id,
+    ...(messageId ? { providerMessageId: messageId } : {}),
     surfaceKind: 'discord',
     surfaceId: binding.surfaceId,
     externalId: binding.externalId,
@@ -323,7 +338,7 @@ export async function handleDiscordGatewayDispatchPayload(
       gatewayEvent: dispatch.t,
     },
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     return Response.json({
       ok: true,
       continued: true,
@@ -337,7 +352,7 @@ export async function handleDiscordGatewayDispatchPayload(
     submission.session.id,
   );
   if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
     agentId: spawnResult.id,
     task: content,

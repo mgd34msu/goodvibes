@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { AgentManager } from '../../tools/agent/index.js';
 import type { AgentRecord } from '../../tools/agent/manager.js';
 import type { RuntimeStore } from '../store/index.js';
@@ -19,6 +20,73 @@ import { summarizeError } from '../../utils/error-display.js';
 
 const DEFAULT_ARTIFACT_DIR = '.goodvibes/remote-artifacts';
 const DEFAULT_SESSION_BUNDLE_DIR = '.goodvibes/remote-sessions';
+/** Captured artifacts hold whole agent output, so the registry keeps only the newest. */
+const MAX_ARTIFACTS = 100;
+
+/**
+ * Imports are checked for the fields the review, contract and artifact views
+ * read before anything is stored, so a file that is not an export cannot sit
+ * in the registry and break those views until restart. The first missing
+ * field is named, so the person importing knows what is wrong with the file.
+ */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function missingField(value: Record<string, unknown>, fields: Readonly<Record<string, 'string' | 'number' | 'boolean' | 'array' | 'object'>>, prefix: string): string | null {
+  for (const [field, kind] of Object.entries(fields)) {
+    const entry = value[field];
+    const ok = kind === 'array' ? Array.isArray(entry) : kind === 'object' ? isObject(entry) : typeof entry === kind;
+    if (!ok) return `${prefix}${field} (${kind})`;
+  }
+  return null;
+}
+
+function contractProblem(value: unknown, prefix: string): string | null {
+  if (!isObject(value)) return `${prefix || 'contract'} (object)`;
+  const missing = missingField(value, { id: 'string', runnerId: 'string', label: 'string', template: 'string', capabilityCeiling: 'object', transport: 'object', createdAt: 'number', lastUpdatedAt: 'number' }, prefix);
+  if (missing) return missing;
+  return missingField(value['capabilityCeiling'] as Record<string, unknown>, { allowedTools: 'array', capabilityCeilingTools: 'array', successCriteria: 'array', requiredEvidence: 'array', writeScope: 'array' }, `${prefix}capabilityCeiling.`);
+}
+
+function artifactProblem(value: unknown, prefix: string): string | null {
+  if (!isObject(value)) return `${prefix || 'artifact'} (object)`;
+  const missing = missingField(value, { id: 'string', runnerId: 'string', createdAt: 'number', runnerContract: 'object', task: 'object', evidence: 'object', knowledgeInjections: 'array' }, prefix);
+  if (missing) return missing;
+  return contractProblem(value['runnerContract'], `${prefix}runnerContract.`)
+    ?? missingField(value['task'] as Record<string, unknown>, { task: 'string', status: 'string', summary: 'string', startedAt: 'number' }, `${prefix}task.`)
+    ?? missingField(value['evidence'] as Record<string, unknown>, { toolCallCount: 'number', messageCount: 'number', errorCount: 'number' }, `${prefix}evidence.`);
+}
+
+function bundleProblem(value: unknown): string | null {
+  if (!isObject(value)) return 'session bundle (object)';
+  const missing = missingField(value, { pools: 'array', contracts: 'array', artifacts: 'array' }, '');
+  if (missing) return missing;
+  const pools = value['pools'] as unknown[];
+  for (const [index, pool] of pools.entries()) {
+    if (!isObject(pool)) return `pools[${index}] (object)`;
+    const problem = missingField(pool, { id: 'string', label: 'string', runnerIds: 'array' }, `pools[${index}].`);
+    if (problem) return problem;
+  }
+  for (const [index, contract] of (value['contracts'] as unknown[]).entries()) {
+    const problem = contractProblem(contract, `contracts[${index}].`);
+    if (problem) return problem;
+  }
+  for (const [index, artifact] of (value['artifacts'] as unknown[]).entries()) {
+    const problem = artifactProblem(artifact, `artifacts[${index}].`);
+    if (problem) return problem;
+  }
+  return null;
+}
+
+async function readImportFile(path: string, kind: string): Promise<unknown> {
+  const raw = await readFile(resolve(path), 'utf-8');
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`Cannot import ${kind} from ${path}: the file is not JSON. Import a file written by the matching remote export.`);
+  }
+}
 
 function buildCapabilityCeiling(agent: AgentRecord): RemoteRunnerCapabilityCeiling {
   return Object.freeze({
@@ -81,7 +149,7 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
 
 function buildArtifact(agent: AgentRecord, contract: RemoteRunnerContract, connection?: AcpConnection): RemoteExecutionArtifact {
   return Object.freeze({
-    id: `artifact:${agent.id}:${Date.now()}`,
+    id: `artifact:${agent.id}:${Date.now()}-${randomUUID().slice(0, 8)}`,
     runnerId: agent.id,
     createdAt: Date.now(),
     runnerContract: contract,
@@ -155,7 +223,7 @@ function buildArtifactFromStore(
   const connection = contract.runnerId ? store?.getState().acp.connections.get(contract.runnerId) : undefined;
   const task = findTaskForContract(contract, store);
   return Object.freeze({
-    id: `artifact:${contract.runnerId}:${Date.now()}`,
+    id: `artifact:${contract.runnerId}:${Date.now()}-${randomUUID().slice(0, 8)}`,
     runnerId: contract.runnerId,
     createdAt: Date.now(),
     runnerContract: contract,
@@ -193,6 +261,21 @@ export class RemoteRunnerRegistry {
     private readonly agentManager: Pick<AgentManager, 'getStatus' | 'list'>,
     private readonly workspaceRoot?: string | undefined,
   ) {
+  }
+
+  private storeArtifact(artifact: RemoteExecutionArtifact): void {
+    // Evict by storage order, not createdAt: an older artifact being imported must not be the one dropped at once.
+    this.artifacts.delete(artifact.id);
+    this.artifacts.set(artifact.id, artifact);
+    for (const oldest of this.artifacts.keys()) {
+      if (this.artifacts.size <= MAX_ARTIFACTS) break;
+      this.artifacts.delete(oldest);
+    }
+  }
+
+  /** A runner the agent manager still tracks keeps the contract built from its live state. */
+  private storeImportedContract(contract: RemoteRunnerContract): void {
+    if (!this.agentManager.getStatus(contract.runnerId)) this.contracts.set(contract.runnerId, contract);
   }
 
   private resolveConnection(agentId: string, store?: RuntimeStore): AcpConnection | undefined {
@@ -302,7 +385,7 @@ export class RemoteRunnerRegistry {
     const connection = this.resolveConnection(agentId, store);
     const contract = this.upsertContractForAgent(agentId, store) ?? buildContract(agent, this.workspaceRoot, connection);
     const artifact = buildArtifact(agent, contract, connection);
-    this.artifacts.set(artifact.id, artifact);
+    this.storeArtifact(artifact);
     return artifact;
   }
 
@@ -312,7 +395,7 @@ export class RemoteRunnerRegistry {
     const contract = this.contracts.get(runnerId);
     if (!contract) return null;
     const artifact = buildArtifactFromStore(contract, store);
-    this.artifacts.set(artifact.id, artifact);
+    this.storeArtifact(artifact);
     return artifact;
   }
 
@@ -332,17 +415,21 @@ export class RemoteRunnerRegistry {
     if (!artifact) return null;
     const path = explicitPath
       ? resolve(explicitPath)
-      : resolve(DEFAULT_ARTIFACT_DIR, `${artifact.id.replace(/[:]/g, '_')}.json`);
+      : resolve(this.workspaceRoot ?? process.cwd(), DEFAULT_ARTIFACT_DIR, `${artifact.id.replace(/[:]/g, '_')}.json`);
     mkdirSync(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(artifact, null, 2)}\n`, 'utf-8');
+    await writeFile(path, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
     return { artifact, path };
   }
 
   async importArtifact(path: string): Promise<RemoteExecutionArtifact> {
-    const raw = await readFile(resolve(path), 'utf-8');
-    const parsed = JSON.parse(raw) as RemoteExecutionArtifact;
-    this.artifacts.set(parsed.id, parsed);
-    this.contracts.set(parsed.runnerId, parsed.runnerContract);
+    const value = await readImportFile(path, 'a remote artifact');
+    const problem = artifactProblem(value, '');
+    if (problem) {
+      throw new Error(`Cannot import a remote artifact from ${path}: it has no valid ${problem}. Nothing was imported; import a file written by a remote artifact export.`);
+    }
+    const parsed = value as unknown as RemoteExecutionArtifact;
+    this.storeArtifact(parsed);
+    this.storeImportedContract(parsed.runnerContract);
     return parsed;
   }
 
@@ -367,23 +454,30 @@ export class RemoteRunnerRegistry {
     const bundle = this.buildSessionBundle(store);
     const path = explicitPath
       ? resolve(explicitPath)
-      : resolve(DEFAULT_SESSION_BUNDLE_DIR, `${bundle.sessionId}-${bundle.exportedAt}.json`);
+      : resolve(this.workspaceRoot ?? process.cwd(), DEFAULT_SESSION_BUNDLE_DIR, `${bundle.sessionId}-${bundle.exportedAt}.json`);
     mkdirSync(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
+    await writeFile(path, `${JSON.stringify(bundle, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
     return { bundle, path };
   }
 
   async importSessionBundle(path: string): Promise<RemoteSessionBundle> {
-    const raw = await readFile(resolve(path), 'utf-8');
-    const parsed = JSON.parse(raw) as RemoteSessionBundle;
+    const value = await readImportFile(path, 'a remote session bundle');
+    const problem = bundleProblem(value);
+    if (problem) {
+      throw new Error(`Cannot import a remote session bundle from ${path}: it has no valid ${problem}. Nothing was imported; import a file written by a remote session bundle export.`);
+    }
+    const parsed = value as unknown as RemoteSessionBundle;
+    if (parsed.artifacts.length > MAX_ARTIFACTS) {
+      throw new Error(`Cannot import a remote session bundle from ${path}: it holds ${parsed.artifacts.length} artifacts and this runtime keeps at most ${MAX_ARTIFACTS}. Nothing was imported; export a smaller bundle.`);
+    }
     for (const pool of parsed.pools) {
       this.pools.set(pool.id, pool);
     }
     for (const contract of parsed.contracts) {
-      this.contracts.set(contract.runnerId, contract);
+      this.storeImportedContract(contract);
     }
     for (const artifact of parsed.artifacts) {
-      this.artifacts.set(artifact.id, artifact);
+      this.storeArtifact(artifact);
     }
     return parsed;
   }

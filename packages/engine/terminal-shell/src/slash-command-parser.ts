@@ -16,6 +16,8 @@ export function tokenizeSlashCommand(command: string): readonly string[] {
   let current = '';
   let quote: '"' | "'" | null = null;
   let escaping = false;
+  // A quoted empty string is still an argument.
+  let hadQuote = false;
 
   for (const char of command) {
     if (escaping) {
@@ -37,12 +39,14 @@ export function tokenizeSlashCommand(command: string): readonly string[] {
     }
     if (char === '"' || char === "'") {
       quote = char;
+      hadQuote = true;
       continue;
     }
     if (/\s/.test(char)) {
-      if (current.length > 0) {
+      if (current.length > 0 || hadQuote) {
         tokens.push(current);
         current = '';
+        hadQuote = false;
       }
       continue;
     }
@@ -50,7 +54,7 @@ export function tokenizeSlashCommand(command: string): readonly string[] {
   }
 
   if (escaping) current += '\\';
-  if (current.length > 0) tokens.push(current);
+  if (current.length > 0 || hadQuote) tokens.push(current);
   return tokens;
 }
 

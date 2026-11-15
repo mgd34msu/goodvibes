@@ -13,12 +13,14 @@ test('actual TUI keyboard route and direct tool registry both permit protected r
     prepare: async () => ({ kind: 'blocked', code: 'invalid-source', reason: 'Synthetic test does not prepare' }),
     submit: forbidden, reconsider: forbidden, recover: forbidden, cancel: forbidden, restart: forbidden, dispose() {},
   }));
-  const context = { print: (line: string) => lines.push(line), workspace: {} } as unknown as CommandContext;
+  // Resolves when the keyboard route's own (second) status report has printed, instead of polling for it.
+  let secondPrinted!: () => void; const second = new Promise<void>(resolve => { secondPrinted = resolve; });
+  const context = { print: (line: string) => { lines.push(line); if (lines.length === 2) secondPrinted(); }, workspace: {} } as unknown as CommandContext;
   await registry.execute('work-import', ['status', 'project'], context); expect(lines[0]).toContain('No saved legacy import for selected project.');
   expect(lines[0]?.split('\n')[0]).toBe('No saved legacy import for selected project.');
   const state: CommandModeRouteState = { commandMode: true, prompt: '/work-import status project', cursorPos: 0, autocomplete: null, modalStack: ['command'], commandRegistry: registry, commandContext: context, conversationManager: null, requestRender() {}, handleEscape() {}, projectRoot: '/workspace', pasteRegistry: new Map(), imageRegistry: new Map(), nextPasteId: 1, nextImageId: 1, saveUndoState() {}, ensureInputCursorVisible() {} };
   expect(handleCommandModeToken(state, { type: 'key', name: 'enter', logicalName: 'enter', ctrl: false, shift: false, meta: false })).toBe(true);
-  const deadline = Date.now() + 2000; while (lines.length < 2 && Date.now() < deadline) await Bun.sleep(1);
+  await second;
   expect(lines[1]).toContain('No saved legacy import for selected project.'); expect(calls).toEqual(['status', 'status']);
 });
 

@@ -93,9 +93,10 @@ describe('createRoutePlannerContractSelector', () => {
 
 describe('the runner when the route planner finds no route', () => {
   let harness: Harness | undefined;
-  afterEach(() => {
-    harness?.dispose();
+  afterEach(async () => {
+    const finished = harness;
     harness = undefined;
+    await finished?.dispose();
   });
 
   const noRoute = new NoRouteError('No configured model fits this work: none of the 3 eligible models read as able to do it in any tier.');

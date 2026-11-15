@@ -24,7 +24,9 @@
  * Nothing here ever prints a credential.
  */
 
+import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import type { GoogleClientIntakeChoice } from '@goodvibes-jev/engine/platform/platform/google';
@@ -35,6 +37,7 @@ import {
   connectGoogle,
   describeGoogleConnection,
   forgetGoogleCredentials,
+  GOOGLE_CALENDAR_SUBSCRIPTION_NAME,
   googleConfigPort,
   googleSecretPort,
   reauthorizeGoogle,
@@ -57,7 +60,7 @@ const USAGE = [
   '  client <client-id> <client-secret>',
   '                                  Use an OAuth client id and secret you copied from the console.',
   '  account <address>               Set the Gmail address to connect as.',
-  '  calendar-address <url>          Store the private iCal address for read-only calendar access.',
+  '  calendar-address <url>          Store the private iCal address and subscribe to it for read-only calendar access.',
   '  setup [--path app-password|oauth|existing-client]',
   '                                  Run one specific path. /google connect picks for you.',
   '  runbook                         Print the written step-by-step instructions.',
@@ -83,12 +86,13 @@ function progressPort(ctx: CommandContext): GoogleProgressPort {
   };
 }
 
-function parsePath(args: readonly string[]): GoogleSetupPath {
+/** The setup path named by `--path`, `app-password` when the flag is absent, null when its value is not a path. */
+function parsePath(args: readonly string[]): GoogleSetupPath | null {
   const index = args.indexOf('--path');
-  const value = index >= 0 ? args[index + 1] : undefined;
-  if (value === 'oauth') return 'oauth';
-  if (value === 'existing-client') return 'existing-client';
-  return 'app-password';
+  if (index < 0) return 'app-password';
+  const value = args[index + 1];
+  if (value === 'oauth' || value === 'existing-client' || value === 'app-password') return value;
+  return null;
 }
 
 /** True when the owner typed an explicit yes on this invocation. */
@@ -113,7 +117,12 @@ function consentAnnouncer(ctx: CommandContext): (url: string) => void {
 }
 
 async function runSetup(args: readonly string[], ctx: CommandContext, intake?: GoogleClientIntakeChoice): Promise<void> {
-  const report = await runGoogleSetup(parsePath(args), ctx, progressPort(ctx), intake);
+  const path = parsePath(args);
+  if (path === null) {
+    ctx.print('Unknown setup path. Use /google setup --path app-password|oauth|existing-client. Nothing was run.');
+    return;
+  }
+  const report = await runGoogleSetup(path, ctx, progressPort(ctx), intake);
   ctx.print(renderGoogleSetupReport(report));
 }
 
@@ -132,8 +141,13 @@ async function setAccount(args: readonly string[], ctx: CommandContext): Promise
 /**
  * The private iCal address is a credential in URL form, anyone holding it can
  * read the calendar, so it goes to the encrypted store, not to config.
+ *
+ * It is also subscribed as a read-only feed, because that registry is what
+ * `/calendar refresh` and `/calendar upcoming` read. The subscription goes
+ * first: it fetches the feed once, so an address that does not work stores
+ * nothing and says why.
  */
-async function setCalendarAddress(args: readonly string[], ctx: CommandContext): Promise<void> {
+async function setCalendarAddress(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
   const url = (args[0] ?? '').trim();
   if (!url.startsWith('https://')) {
     ctx.print('Give the private iCal address: /google calendar-address <https://calendar.google.com/calendar/ical/.../basic.ics>');
@@ -142,9 +156,28 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext):
   // Touch the secrets manager through the same accessor the ports use, so an
   // unavailable secret store fails here rather than half-way through a write.
   requireSecretsManager(ctx);
+  const registry = subscriptionRegistryForWrite(ctx, fetcher);
+  if (registry === null) {
+    ctx.print('Nothing was stored: no secret manager is available, and the feed address is stored only as a secret.');
+    return;
+  }
+  // Setting the address again replaces the earlier one: the old feed is
+  // dropped (with its stored URL) first, or the subscribe below is refused as a
+  // duplicate name and the new address never lands.
+  const replaced = await registry.unsubscribeWithReport(GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
+  const subscribed = await registry.subscribe(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
+  if (!subscribed.ok) {
+    if (replaced.removed) {
+      ctx.print([`The calendar address could not be subscribed (${subscribed.stage}), and the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed was already removed.`, `  ${subscribed.detail}`].join('\n'));
+      return;
+    }
+    ctx.print([`Nothing was stored: the calendar address could not be subscribed (${subscribed.stage}).`, `  ${subscribed.detail}`].join('\n'));
+    return;
+  }
+  // The setup status reads this key to say a calendar address is present.
   await googleSecretPort(ctx).set(GOOGLE_SECRET_KEYS.calendarIcsUrl, url);
   googleConfigPort(ctx).set(GOOGLE_CONFIG_KEYS.calendarIcsUrl, GOOGLE_CONFIG_KEYS.calendarIcsUrl);
-  ctx.print('Stored the private calendar address in the encrypted secret store. Read it with: /calendar refresh');
+  ctx.print(`Stored the private calendar address in the encrypted secret store and subscribed to it as '${subscribed.name}' (${subscribed.eventCount} events loaded). Update it with: /calendar refresh`);
 }
 
 /**
@@ -187,7 +220,8 @@ function approveRefusedOutwardAction(ctx: CommandContext): void {
   ].join(' '));
 }
 
-export async function runGoogleCommand(args: readonly string[], ctx: CommandContext): Promise<void> {
+/** `fetcher` replaces the real HTTP feed fetch, for tests. */
+export async function runGoogleCommand(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
   const sub = (args[0] ?? 'status').trim().toLowerCase();
   const rest = args.slice(1);
 
@@ -209,13 +243,13 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
     if (sub === 'forget') {
       // Every stored Google credential is in scope, and none of it goes
       // without the owner's yes on this exact invocation.
-      ctx.print(
-        await forgetGoogleCredentials(
-          ctx,
-          ['refresh-token', 'client-secret', 'app-password', 'calendar-address'],
-          saidYes(rest),
-        ),
+      const yes = saidYes(rest);
+      const receipt = await forgetGoogleCredentials(
+        ctx,
+        ['refresh-token', 'client-secret', 'app-password', 'calendar-address'],
+        yes,
       );
+      ctx.print(receipt);
       return;
     }
     if (sub === 'adopt') {
@@ -229,7 +263,7 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
     }
     if (sub === 'setup') return await runSetup(rest, ctx);
     if (sub === 'account') return await setAccount(rest, ctx);
-    if (sub === 'calendar-address') return await setCalendarAddress(rest, ctx);
+    if (sub === 'calendar-address') return await setCalendarAddress(rest, ctx, fetcher);
     if (sub === 'runbook') {
       ctx.print(renderGoogleSetupRunbook());
       return;
@@ -265,6 +299,6 @@ export function registerGoogleRuntimeCommands(registry: CommandRegistry): void {
     description: 'Connect Gmail and Google Calendar: one command, one consent link, proven by use',
     usage: 'connect | status | reauthorize | forget [--yes] | adopt [--yes] | setup [--path app-password|oauth|existing-client] | client-file <path> | client <id> <secret> | account <address> | calendar-address <url> | runbook | approve',
     argsHint: 'connect|status|reauthorize|forget|adopt|setup|client-file|client|account|calendar-address|runbook|approve',
-    handler: runGoogleCommand,
+    handler: (args, ctx) => runGoogleCommand(args, ctx),
   });
 }

@@ -1,5 +1,6 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -16,10 +17,6 @@ type AgentWorkspaceSecretEditorSubmission =
     readonly status: string;
     readonly actionResult: AgentWorkspaceActionResult;
   };
-
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
 
 function secretScopeFlag(scope: string): string | null {
   const normalized = scope.trim().toLowerCase();
@@ -42,6 +39,25 @@ function appendOptionalSecretFlags(parts: string[], scope: string, storage: stri
   if (storageFlag) parts.push(storageFlag);
 }
 
+/** A typo in Scope or Storage must not fall back to the default scope or storage: that stores or deletes in the wrong place. Blank is allowed. */
+function rejectUnrecognizedSecretOptions(
+  editor: AgentWorkspaceLocalEditor,
+  readField: AgentWorkspaceFieldReader,
+): AgentWorkspaceSecretEditorSubmission | null {
+  const scope = readField('scope');
+  const storage = readField('storage');
+  const problems: string[] = [];
+  if (scope.trim() && !secretScopeFlag(scope)) {
+    problems.push(`Scope "${scope.trim()}" is not recognised. Use project or user, or leave it blank.`);
+  }
+  if (storage.trim() && !secretStorageFlag(storage)) {
+    problems.push(`Storage "${storage.trim()}" is not recognised. Use secure or plaintext, or leave it blank.`);
+  }
+  if (problems.length === 0) return null;
+  const message = `${problems.join(' ')} Nothing was run.`;
+  return { kind: 'editor', editor: { ...editor, message }, status: message };
+}
+
 export function isAgentWorkspaceSecretEditorKind(kind: AgentWorkspaceLocalEditor['kind']): kind is 'secret-set' | 'secret-link' | 'secret-test' | 'secret-delete' {
   return kind === 'secret-set' || kind === 'secret-link' || kind === 'secret-test' || kind === 'secret-delete';
 }
@@ -58,6 +74,8 @@ export function buildAgentWorkspaceSecretEditorSubmission(
         status: 'Secret value storage not confirmed.',
       };
     }
+    const rejected = rejectUnrecognizedSecretOptions(editor, readField);
+    if (rejected) return rejected;
     const key = readField('key');
     const parts = ['/secrets', 'set', quoteSlashCommandArg(key), quoteSlashCommandArg(readField('value'))];
     appendOptionalSecretFlags(parts, readField('scope'), readField('storage'));
@@ -86,6 +104,8 @@ export function buildAgentWorkspaceSecretEditorSubmission(
         status: 'Secret reference link not confirmed.',
       };
     }
+    const rejected = rejectUnrecognizedSecretOptions(editor, readField);
+    if (rejected) return rejected;
     const key = readField('key');
     const parts = ['/secrets', 'link', quoteSlashCommandArg(key), quoteSlashCommandArg(readField('ref'))];
     appendOptionalSecretFlags(parts, readField('scope'), readField('storage'));
@@ -134,6 +154,8 @@ export function buildAgentWorkspaceSecretEditorSubmission(
       status: 'Secret deletion not confirmed.',
     };
   }
+  const rejected = rejectUnrecognizedSecretOptions(editor, readField);
+  if (rejected) return rejected;
   const key = readField('key');
   const parts = ['/secrets', 'delete', quoteSlashCommandArg(key)];
   appendOptionalSecretFlags(parts, readField('scope'), readField('storage'));

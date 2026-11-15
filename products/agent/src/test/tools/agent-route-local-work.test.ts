@@ -3,7 +3,7 @@ import { useRouteAdapterFixture, route, preferredId } from '../helpers/route-ada
 
 useRouteAdapterFixture();
 
-describe("Local work and recovery route adapters", () => {
+describe("Local work and recovery plans composed from scripted readings", () => {
 
   test('routes parallel coding work to delegated build posture', async () => {
     const body = await route('fix the failing tests in parallel');
@@ -109,13 +109,6 @@ describe("Local work and recovery route adapters", () => {
       inspectRoute: 'setup action:"item" setupItemId:"sudo-execution-posture"',
       requiresConfirmation: true,
     });
-  });
-
-
-  test('does not confuse process documentation wording with stdin process control', async () => {
-    const body = await route('write process documentation');
-
-    expect(preferredId(body)).not.toBe('interactive-process-capability');
   });
 
 

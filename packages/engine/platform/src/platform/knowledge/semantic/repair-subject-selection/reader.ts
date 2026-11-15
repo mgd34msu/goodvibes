@@ -7,36 +7,12 @@ import { freezeSupport } from '../verification/projection.js';
 import { repairSubjectSelection } from './battery.js';
 import { KnowledgeRepairSubjectSelectionHeldError as Held, REPAIR_SUBJECT_SELECTION_LIMITS as LIMITS,
   type RepairSubjectSelectionInput, type RepairSubjectSelectionOptions, type RepairSubjectSelectionReading } from './types.js';
+import { assertJsonTree as assertSharedJsonTree, hasOnlyKeys as keys, isOptionalText as optionalText, isRecord as record, isStringArray as strings } from '../reader-validation.js';
 export * from './types.js';
 
 
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function keys(value: Record<string, unknown>, allowed: readonly string[]): boolean { return Object.keys(value).every((key) => allowed.includes(key)); }
-function strings(value: unknown): value is readonly string[] {
-  if (!Array.isArray(value)) return false;
-  for (const item of value) if (typeof item !== 'string') return false;
-  return true;
-}
-function optionalText(value: unknown): boolean { return value === undefined || typeof value === 'string'; }
 
-/** The privacy guard has already rejected accessors, cycles and exotic prototypes. */
-function assertJsonTree(value: unknown, optional = false): void {
-  if (value === undefined && optional) return;
-  if (value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) return;
-  if (typeof value !== 'object' || value === null || Object.getOwnPropertySymbols(value).length) throw new Held('malformed');
-  if (Array.isArray(value)) {
-    if (Object.keys(value).length !== value.length) throw new Held('malformed');
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-      if (key !== 'length' && (!descriptor.enumerable || descriptor.get || descriptor.set)) throw new Held('malformed');
-    }
-    for (const child of value) assertJsonTree(child, optional);
-  } else {
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-      if (!descriptor.enumerable || descriptor.get || descriptor.set) throw new Held('malformed');
-      assertJsonTree(descriptor.value, optional);
-    }
-  }
-}
+const assertJsonTree = (value: unknown, optional = false): void => assertSharedJsonTree(value, () => new Held('malformed'), optional);
 
 function snapshotInputs(inputs: readonly RepairSubjectSelectionInput[]) {
   assertJudgmentInput(inputs);

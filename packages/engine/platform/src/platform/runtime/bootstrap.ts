@@ -16,7 +16,7 @@ export {
   synchronizeConfiguredServices,
 } from './bootstrap-helpers.js';
 export type { RuntimeModelSelectionState } from './bootstrap-helpers.js';
-export { registerBootstrapRuntimeEvents, registerHostRuntimeEvents, registerContractRuntimeEvents, runtimeEventKey, runtimeEventOfNotice } from './bootstrap-runtime-events.js';
+export { registerBootstrapRuntimeEvents, registerHostRuntimeEvents, registerContractRuntimeEvents, checkCohortCompletion, runtimeEventKey, runtimeEventOfNotice } from './bootstrap-runtime-events.js';
 export type {
   BootstrapRuntimeEventBridgeOptions,
   ContractRuntimeEventBridgeOptions,
@@ -115,7 +115,7 @@ export type {
 } from './home-single-writer.js';
 // The free functions both compositions share, so a product that hand-composes
 // a graph builds each piece the one way rather than a fourth way.
-export { resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
+export { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
 export type { RuntimeFeatureFlagOptions } from './feature-flag-composition.js';
 export { createProviderStack } from './provider-stack.js';
 export type { ProviderStack, ProviderStackOptions } from './provider-stack.js';

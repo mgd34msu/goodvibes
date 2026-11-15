@@ -92,7 +92,7 @@ function createEnrichmentHarness(): EnrichmentHarness {
   benchmarkStore.initBenchmarks();
 
   const providerRegistry = createLaunchTolerantProviderRegistry({
-    configManager: new ConfigManager({ surfaceRoot: 'tui',  configDir }),
+    configManager: new ConfigManager({ surfaceRoot: 'agent',  configDir }),
     subscriptionManager,
     secretsManager,
     serviceRegistry,
@@ -231,25 +231,50 @@ describe('enrichModelEntries: contextWindow fields', () => {
 // ---------------------------------------------------------------------------
 
 describe('getContextIngestionDiagnostics', () => {
+  const originalFetch = globalThis.fetch;
+  let clock = 1_700_000_000_000;
+
   beforeEach(() => {
-    harness.contextIngestionService.clearAllCaches();
+    clock = 1_700_000_000_000;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === 'http://local-a.test/v1/models') {
+        return new Response(
+          JSON.stringify({ data: [{ id: 'big', max_context_length: 131072 }, { id: 'small', max_context_length: 4096 }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    }) as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
   test('returns empty array when no ingestion has occurred', () => {
-    const diag = harness.contextIngestionService.getDiagnostics();
-    expect(diag).toEqual([]);
+    expect(new LocalContextIngestionService(() => clock).getDiagnostics()).toEqual([]);
   });
 
-  test('returns correct shape', () => {
-    // Diagnostics are provider-level; we check the shape contract here.
-    const diag = harness.contextIngestionService.getDiagnostics();
-    expect(diag).toEqual(expect.any(Array));
-    // Each entry should have the expected keys (checked on a non-empty array in integration tests)
-    for (const entry of diag) {
-      expect(typeof entry.providerName).toBe('string');
-      expect(typeof entry.fetchedAt).toBe('number');
-      expect(typeof entry.modelCount).toBe('number');
-      expect(typeof entry.failed).toBe('boolean');
-    }
+  test('reports one row per ingested provider with its model count and failure flag', async () => {
+    const service = new LocalContextIngestionService(() => clock);
+    await service.ingestProviderContextWindows('local-a', 'http://local-a.test/v1');
+    clock += 5;
+    await service.ingestProviderContextWindows('local-offline', 'http://local-offline.test/v1');
+
+    const diag = service.getDiagnostics();
+    expect(diag).toHaveLength(2);
+    expect(diag).toEqual([
+      { providerName: 'local-a', fetchedAt: 1_700_000_000_000, modelCount: 2, failed: false },
+      { providerName: 'local-offline', fetchedAt: 1_700_000_000_005, modelCount: 0, failed: true },
+    ]);
+  });
+
+  test('clearAllCaches empties the diagnostics', async () => {
+    const service = new LocalContextIngestionService(() => clock);
+    await service.ingestProviderContextWindows('local-a', 'http://local-a.test/v1');
+    expect(service.getDiagnostics()).toHaveLength(1);
+    service.clearAllCaches();
+    expect(service.getDiagnostics()).toEqual([]);
   });
 });

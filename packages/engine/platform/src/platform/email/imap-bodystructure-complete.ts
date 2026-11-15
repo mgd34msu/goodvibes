@@ -1,5 +1,6 @@
 /** Fail-closed MIME proof, layered over the canonical BODYSTRUCTURE reader. */
 import {
+  legacyCharsetDecoder,
   parseBodyStructure,
   parseCompleteBodyStructureNodes,
   type ImapBodyPart,
@@ -44,6 +45,8 @@ function extensions(node: Node[], start: number, multipart: boolean): boolean {
   // Unknown extensions can change which bytes count as body; no silent skip.
   return node.length <= start + 4;
 }
+
+const BUILT_IN_CHARSET = /^(?:utf-8|utf8|us-ascii|ascii|iso-?8859-1|latin-?1|windows-1252|cp1252)$/;
 
 /** Validates every node before the compatibility collector can omit anything. */
 export function parseCompleteBodyStructure(raw: string): readonly ImapBodyPart[] | null {
@@ -98,6 +101,10 @@ export function parseCompleteBodyStructure(raw: string): readonly ImapBodyPart[]
     if (part.isAttachment !== attachmentKinds[index]) return null;
     if (part.isAttachment) continue;
     if (part.type !== 'text' || !/^(?:plain|html)$/.test(part.subtype)) return null;
+    // A charset this runtime cannot decode is a property of the message, so it
+    // is refused here with the other unsupported structures.
+    if (!BUILT_IN_CHARSET.test(part.charset || 'us-ascii')
+      && (!/^(?:base64|quoted-printable)$/.test(part.encoding) || legacyCharsetDecoder(part.charset) === null)) return null;
     total += part.sizeBytes;
     if (!Number.isSafeInteger(total) || total > COMPLETE_MESSAGE_SOURCE_BYTES) return null;
   }
@@ -121,7 +128,11 @@ function quotedPrintable(raw: string): Buffer | null {
 export function decodeCompleteTextPart(raw: string, part: ImapBodyPart): string | null {
   if (/\ufffd/.test(raw) || Buffer.byteLength(raw, 'utf8') !== part.sizeBytes) return null;
   const charset = part.charset || 'us-ascii';
-  if (!/^(?:utf-8|utf8|us-ascii|ascii|iso-?8859-1|latin-?1|windows-1252|cp1252)$/.test(charset)) return null;
+  const builtIn = BUILT_IN_CHARSET.test(charset);
+  // Other charsets are only decodable from base64 or quoted-printable, where the
+  // original bytes are recoverable; an 8-bit body arrives already re-decoded as UTF-8.
+  const legacy = builtIn || !/^(?:base64|quoted-printable)$/.test(part.encoding) ? null : legacyCharsetDecoder(charset, true);
+  if (!builtIn && legacy === null) return null;
   let bytes: Buffer | null;
   if (part.encoding === 'base64') {
     if (/[^A-Za-z0-9+/=\t\r\n ]/.test(raw)) return null;
@@ -144,6 +155,7 @@ export function decodeCompleteTextPart(raw: string, part: ImapBodyPart): string 
       if (bytes.some(byte => byte > 0x7f)) return null;
       decoded = bytes.toString('ascii');
     } else if (/^(?:iso-?8859-1|latin-?1)$/.test(charset)) decoded = bytes.toString('latin1');
+    else if (legacy) decoded = legacy.decode(bytes);
     else decoded = new TextDecoder(/^(?:cp1252|windows-1252)$/.test(charset) ? 'windows-1252' : 'utf-8',
       { fatal: true, ignoreBOM: true }).decode(bytes);
     return /\ufffd|\u0000/.test(decoded) ? null : decoded;

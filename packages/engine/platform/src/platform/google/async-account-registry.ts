@@ -60,6 +60,17 @@ function readRevision(path: string): FileRevision | null {
   } finally { closeSync(fd); }
 }
 
+/**
+ * Refuses to go on when the file changed since it was read, so a write made by
+ * another process during the (slow, asynchronous) safety readings is noticed
+ * and the caller retries from the current file.
+ *
+ * This is a check, not a lock: a second process that writes between this
+ * check and the rename that follows is still overwritten. Accounts have one
+ * writing process (the daemon that owns the store); the in-process queue
+ * serializes that process's own operations, and nothing here makes a second
+ * concurrent writer safe.
+ */
 function assertCurrentRevision(path: string, expected: FileRevision | null): void {
   const actual = readRevision(path);
   if (actual === null && expected === null) return;

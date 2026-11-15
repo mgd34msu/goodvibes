@@ -266,11 +266,12 @@ describe('fence syntax variants', () => {
   test('asymmetric close: backtick fence closed with tilde is treated as content, not close', () => {
     // A ~~~ close should NOT close a ``` fence, the ~~~ line becomes content
     const md = '```\ncode line\n~~~\nmore content\n```';
-    const result = renderMarkdown(md, 80);
-    const text = textLines(result).join('\n');
-    // The ~~~ line should be inside the code block, not close it early
-    // All four content lines should be rendered
-    expect(text).toContain('code line');
+    const { lines, codeBlocks } = renderMarkdownTracked(md, 80);
+    const text = textLines(lines).join('\n');
+    // One block holds all three lines: the ~~~ line is content, and the block did not close early.
+    expect(codeBlocks).toHaveLength(1);
+    expect(codeBlocks[0]!.rawContent).toBe('code line\n~~~\nmore content');
+    expect(text).toContain('~~~');
     expect(text).toContain('more content');
   });
 
@@ -315,14 +316,15 @@ describe('fence syntax variants', () => {
   test('fence close immediately followed by next paragraph (no blank line)', () => {
     // Content after the closing fence delimiter must not bleed into the code block
     const md = '```ts\nconst x = 1;\n```\nThis is a paragraph.';
-    const result = renderMarkdown(md, 80);
-    const text = textLines(result).join('\n');
+    const { lines, codeBlocks } = renderMarkdownTracked(md, 80);
+    const text = textLines(lines).join('\n');
     expect(text).toContain('x');
-    expect(text).toContain('This is a paragraph.');
-    // The paragraph text must appear as its own line, not inside the code block
-    const lines = textLines(result);
-    const paraIdx = lines.findIndex((l) => l.includes('This is a paragraph.'));
-    expect(paraIdx).toBeGreaterThan(-1);
+    // The paragraph is not part of the code block's content...
+    expect(codeBlocks).toHaveLength(1);
+    expect(codeBlocks[0]!.rawContent).toBe('const x = 1;');
+    // ...and its row comes after every row the block occupies.
+    const paraIdx = lines.findIndex((l) => lineToString(l).includes('This is a paragraph.'));
+    expect(paraIdx).toBeGreaterThanOrEqual(codeBlocks[0]!.startOffset + codeBlocks[0]!.lineCount);
   });
 
   test('backtick inside inline code span does not open a fence', () => {

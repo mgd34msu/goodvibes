@@ -6,10 +6,10 @@ import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platfor
 import { hasResumableWizardProgress, readOnboardingCheckMarker, readWizardProgress } from '../runtime/onboarding/index.ts';
 import { startOnboardingFastPath } from '../runtime/onboarding/fast-path.ts';
 import { checkRecoveryForSession, readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { offerRecoverySnapshot, type RecoveryTypeaheadHooks } from '../runtime/recovery-prompt.ts';
-import { buildRecoveryOfferWiring } from '../runtime/recovery-offer-wiring.ts';
+import { buildRecoveryOfferWiring, type RecoveryOfferWiringInput } from '../runtime/recovery-offer-wiring.ts';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
@@ -34,6 +34,8 @@ export interface TuiStartupRecoveryDeps {
   readonly runtime: { sessionId: string; model: string; provider: string };
   readonly conversation: ConversationManager;
   readonly writeLastSessionPointer: (sessionId: string) => void;
+  readonly sessionSpine?: RecoveryOfferWiringInput['sessionSpine'];
+  readonly project?: string;
   readonly receipt: (line: string) => void;
   /** Holds typeahead out of the offer modal (see RecoveryPromptDeps.typeahead). */
   readonly typeahead?: RecoveryTypeaheadHooks;
@@ -99,6 +101,8 @@ async function resumeNamedSessionWithRecoveryCheck(options: {
       conversation: recovery.conversation,
       commandContext,
       writeLastSessionPointer: recovery.writeLastSessionPointer,
+      ...(recovery.sessionSpine ? { sessionSpine: recovery.sessionSpine } : {}),
+      ...(recovery.project !== undefined ? { project: recovery.project } : {}),
       receipt: recovery.receipt,
       render,
       ...(recovery.typeahead ? { typeahead: recovery.typeahead } : {}),
@@ -176,9 +180,14 @@ export async function selfRecordWorkspaceRegistration(
   registrationManager: Pick<WorkspaceRegistrationManager, 'evaluate' | 'register'> | undefined,
 ): Promise<void> {
   if (!registrationManager) return;
-  const evaluation = await registrationManager.evaluate();
-  if (!evaluation.offerRegister) return;
-  await registrationManager.register('via TUI', 'tui');
+  // Callers fire and forget; an unreadable or unwritable registry must be a log line, not an unhandled rejection.
+  try {
+    const evaluation = await registrationManager.evaluate();
+    if (!evaluation.offerRegister) return;
+    await registrationManager.register('via TUI', 'tui');
+  } catch (error) {
+    logger.warn('Workspace registration was not recorded', { error: summarizeError(error) });
+  }
 }
 
 export function applyInitialTuiCliState(options: {

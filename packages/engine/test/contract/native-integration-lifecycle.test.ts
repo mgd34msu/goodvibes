@@ -245,16 +245,15 @@ test('legacy native runner capability preserves authenticated status with explic
     await waitFor(() => f.harness.agentsOf('u1').length === 1, 'real native work behind legacy capability');
     // The actual factory still guarantees and supplies a genuine live reader.
     expect(f.harness.runner.inspectIntegration(id).state).toBe('live');
-    const inspect = spyOn(f.harness.runner, 'inspectIntegration');
     const start = spyOn(f.harness.runner, 'startDurable'); const resume = spyOn(f.harness.runner, 'resumeDurable');
     const status = await f.client.status(f.identity);
     expect(status).toMatchObject({ kind: 'execution', currentAttempt: true, stale: false, recovery: 'available', receipt: started.receipt,
       progress: { status: 'running' }, integration: { state: 'unavailable', reason: 'unsupported-runner' } });
-    expect(inspect).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled();
     expect(f.harness.agentsOf('u1')).toHaveLength(1);
     f.tokens.revoke(f.paired.id);
     await expect(f.client.status(f.identity)).rejects.toMatchObject({ status: 401 });
-    expect(inspect).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled();
-    inspect.mockRestore(); start.mockRestore(); resume.mockRestore();
+    expect(start).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled();
+    start.mockRestore(); resume.mockRestore();
   } finally { await f.dispose(); }
 }, 20_000);

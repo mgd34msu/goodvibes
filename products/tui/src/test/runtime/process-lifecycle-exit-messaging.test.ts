@@ -57,24 +57,27 @@ function makeHarness(opts: {
   shutdownHardTimeoutMs?: number;
   sessionId?: string;
   recoverySnapshotExists?: (surface: unknown, sessionId: string) => boolean;
-}): { exitApp: () => Promise<void>; written: () => string } {
+  /** Messages in the conversation; an empty conversation writes no recovery snapshot. */
+  messages?: ReadonlyArray<{ id: string; role: string; content: string; timestamp: number }>;
+  onWrite?: (text: string) => void;
+}): { exitApp: () => Promise<void>; written: () => string; recoveryFile: string } {
   const chunks: string[] = [];
   const sessionId = opts.sessionId ?? 'exit-test-session';
-  const deletedRecoveryFor: string[] = [];
+  const surface = makeTestSurface(tmpHome);
 
   const ctx = {
     conversation: {
-      toJSON: () => ({ messages: [] }),
+      toJSON: () => ({ messages: opts.messages ?? [] }),
       getTitleSource: () => 'auto',
     },
     runtime: { sessionId },
-    services: { homeDirectory: tmpHome, surface: makeTestSurface(tmpHome) },
+    services: { homeDirectory: tmpHome, surface },
     shutdown: opts.shutdown,
   } as unknown as BootstrapContext;
 
   const deps = {
     stdin: { setRawMode: () => {}, removeAllListeners: () => {} },
-    stdout: { write: (s: string) => { chunks.push(s); return true; }, removeListener: () => {} },
+    stdout: { write: (s: string) => { chunks.push(s); opts.onWrite?.(s); return true; }, removeListener: () => {} },
     ctx,
     noAltScreen: false,
     ansi: { CLEAR_SCREEN, ALT_SCREEN_EXIT, PASTE_DISABLE, KEYBOARD_EXT_DISABLE, MOUSE_DISABLE, CURSOR_SHOW, FOCUS_DISABLE },
@@ -95,21 +98,22 @@ function makeHarness(opts: {
   const handlers = installProcessLifecycle(deps);
   handlers.enterTerminal();
   chunks.length = 0;
-  void deletedRecoveryFor;
   // restoreTerminal() (called synchronously at the top of exitApp, before any
   // of this test's own assertions matter) writes its own ANSI escape
   // sequences to the same stdout, strip those so assertions here only see
   // the plain-text progress/receipt lines this item actually adds.
   const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?<>]*[a-zA-Z]/g, '');
-  return { exitApp: handlers.exitApp, written: () => stripAnsi(chunks.join('')) };
+  return { exitApp: handlers.exitApp, written: () => stripAnsi(chunks.join('')), recoveryFile: surface.recoveryFile(sessionId) };
 }
 
 describe('exitApp: exit-progress messaging', () => {
   test('a fast, clean shutdown prints nothing at all (quiet stays quiet)', async () => {
     const h = makeHarness({
       shutdown: () => Promise.resolve(),
-      saveNoticeAfterMs: 200,
-      shutdownHardTimeoutMs: 2000,
+      // Far beyond any stall of a loaded machine: the notice timer is cleared
+      // when shutdown settles, so a quiet exit never reaches it.
+      saveNoticeAfterMs: 600_000,
+      shutdownHardTimeoutMs: 600_000,
     });
     await h.exitApp();
     expect(h.written()).toBe('');
@@ -117,10 +121,15 @@ describe('exitApp: exit-progress messaging', () => {
   });
 
   test('a shutdown slower than the notice threshold prints "saving session…" once, then nothing else on success', async () => {
+    // Shutdown stays pending until the notice has actually been written, so the
+    // order is held by the test rather than by two competing timers.
+    let noticeWritten!: () => void;
+    const noticeShown = new Promise<void>((resolve) => { noticeWritten = resolve; });
     const h = makeHarness({
-      shutdown: () => new Promise((resolve) => setTimeout(resolve, 40)),
+      shutdown: () => noticeShown,
+      onWrite: (text) => { if (text.includes('saving session…')) noticeWritten(); },
       saveNoticeAfterMs: 10,
-      shutdownHardTimeoutMs: 2000,
+      shutdownHardTimeoutMs: 600_000,
     });
     await h.exitApp();
     const out = h.written();
@@ -159,12 +168,27 @@ describe('exitApp: exit-progress messaging', () => {
   test('an immediate rejection from ctx.shutdown is treated like a timeout: the recovery snapshot is kept and reported', async () => {
     const h = makeHarness({
       shutdown: () => Promise.reject(new Error('shutdown blew up')),
-      saveNoticeAfterMs: 200,
-      shutdownHardTimeoutMs: 2000,
+      saveNoticeAfterMs: 600_000,
+      shutdownHardTimeoutMs: 600_000,
+      messages: [{ id: 'm1', role: 'user', content: 'a turn worth keeping', timestamp: 1 }],
     });
     await h.exitApp();
-    const out = h.written();
-    expect(out).toContain('exit before save completed');
+    // The snapshot written at the start of the exit is still on disk, and the
+    // receipt says so because it is true.
+    expect(existsSync(h.recoveryFile)).toBe(true);
+    expect(h.written()).toContain('exit before save completed: a recovery snapshot was kept for next launch\n');
+  });
+
+  test('a confirmed save removes the recovery snapshot and prints no exit-before-save line', async () => {
+    const h = makeHarness({
+      shutdown: () => Promise.resolve(),
+      saveNoticeAfterMs: 600_000,
+      shutdownHardTimeoutMs: 600_000,
+      messages: [{ id: 'm1', role: 'user', content: 'a turn worth keeping', timestamp: 1 }],
+    });
+    await h.exitApp();
+    expect(existsSync(h.recoveryFile)).toBe(false);
+    expect(h.written()).not.toContain('exit before save completed');
   });
 });
 
@@ -175,8 +199,8 @@ describe('exitApp: liveness marker cleanup (item 6a)', () => {
 
     const h = makeHarness({
       shutdown: () => Promise.resolve(),
-      saveNoticeAfterMs: 200,
-      shutdownHardTimeoutMs: 2000,
+      saveNoticeAfterMs: 600_000,
+      shutdownHardTimeoutMs: 600_000,
       sessionId: 'sess-clean-exit',
     });
     await h.exitApp();
@@ -199,7 +223,7 @@ describe('exitApp: liveness marker cleanup (item 6a)', () => {
   });
 
   test('no marker present is a harmless no-op', async () => {
-    const h = makeHarness({ shutdown: () => Promise.resolve(), sessionId: 'sess-no-marker' });
+    const h = makeHarness({ shutdown: () => Promise.resolve(), saveNoticeAfterMs: 600_000, sessionId: 'sess-no-marker' });
     await expect(h.exitApp()).resolves.toBeUndefined();
   });
 });

@@ -1,16 +1,16 @@
 /**
  * Plugin lifecycle system, barrel export and factory.
  *
- * Gated by the `plugin-lifecycle` capability gate (runtime.pluginLifecycle). Import and call
- * `createPluginLifecycleManager()` at startup after the gate
- * manager has been initialised.
+ * For embedders: no GoodVibes product composes this manager, so the `plugin-lifecycle` gate
+ * (runtime.pluginLifecycle) is marked not operable and changes nothing; plugins load through the
+ * standard plugin manager. Call `createPluginLifecycleManager()` yourself to use it.
  *
  * @example
  * ```ts
  * import { createPluginLifecycleManager } from './src/runtime/plugins/index.js';
  *
  * const lcm = createPluginLifecycleManager({ sessionId: session.id, runtimeBus });
- * lcm.scanAndRegister();
+ * lcm.scanAndRegister({ cwd: workingDirectory, homeDir });
  * ```
  */
 
@@ -23,6 +23,7 @@ export type {
   PluginHealthCheckResult,
   PluginLifecycleRecord,
   PluginLifecycleManagerOptions,
+  PluginUnloadResult,
   PluginLifecycleState,
 } from './types.js';
 

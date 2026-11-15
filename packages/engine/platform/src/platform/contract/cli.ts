@@ -302,10 +302,17 @@ async function runCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedCon
   return exitCodeOf(await follower.follow([contractId]));
 }
 
+function resumeFailedLine(projectRoot: string): string {
+  return `Resuming the contracts in ${projectRoot} failed; the log under .goodvibes/logs says why.`;
+}
+
 async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const id = args.positionals[0]!;
   // The contracts on disk are held by the runner once its startup resume has read them.
-  await opened.resumed();
+  if (await opened.resumed() === null) {
+    io.err(resumeFailedLine(args.projectRoot));
+    return EXIT_FAILED;
+  }
   if (!opened.runner.cancel(id, CLI_CANCEL_REASON)) {
     io.err(`No running contract ${id} in ${args.projectRoot} (unknown or already ended).`);
     return EXIT_FAILED;
@@ -316,7 +323,10 @@ async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
 
 async function replyCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const [id, text] = args.positionals as [string, string];
-  await opened.resumed();
+  if (await opened.resumed() === null) {
+    io.err(resumeFailedLine(args.projectRoot));
+    return EXIT_FAILED;
+  }
   const contract = opened.runner.get(id);
   if (contract === null) {
     io.err(`No contract ${id} in ${args.projectRoot}.`);
@@ -329,7 +339,7 @@ async function replyCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedC
   }
   try {
     const outcome = await opened.runner.reply(id, waiting.escalation.id, text);
-    io.out(describeReply(id, outcome));
+    io.out(describeReply(id, outcome, waiting.escalation));
     return EXIT_OK;
   } catch (error) {
     io.err(`The reply to contract ${id} was not taken: ${summarizeError(error)}`);
@@ -342,11 +352,17 @@ async function resumeCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
   const report = await opened.resumed();
   if (report === null) {
     follower.stop();
-    io.err(`Resuming the contracts in ${args.projectRoot} failed; the log under .goodvibes/logs says why.`);
+    io.err(resumeFailedLine(args.projectRoot));
     return EXIT_FAILED;
   }
   for (const reaped of report.reaped) io.err(`Contract ${reaped.contractId} could not resume and was failed: ${reaped.reason}`);
-  const ids = [...new Set([...report.resumed.map((entry) => entry.contractId), ...report.queued, ...report.skipped])];
+  // A skipped contract is only held by the store: it has no run, never emits an event, and following it would hang or report an old outcome.
+  const heldReasons = new Map((report.heldForPolicy ?? []).map((entry) => [entry.contractId, entry.reason]));
+  for (const skippedId of report.skipped) {
+    const reason = heldReasons.get(skippedId) === 'decision-model-required' ? 'it needs a decision model, which is not configured' : 'it is held by this runner policy or is already live';
+    io.err(`Contract ${skippedId} was not resumed: ${reason}.`);
+  }
+  const ids = [...new Set([...report.resumed.map((entry) => entry.contractId), ...report.queued])];
   if (ids.length === 0) {
     follower.stop();
     if (report.reaped.length > 0) return EXIT_FAILED;
@@ -494,7 +510,7 @@ function createFollower(io: ContractCliIo, opened: OpenedContractRunner, json: b
       if (text.trim().length === 0) continue;
       try {
         const outcome = await runner.reply(state.id, escalation.id, text);
-        talk(describeReply(state.id, outcome));
+        talk(describeReply(state.id, outcome, escalation));
         if (outcome.nextEscalationId === undefined) return;
         escalationId = outcome.nextEscalationId;
         state.asked.add(escalationId);

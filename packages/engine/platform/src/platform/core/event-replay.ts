@@ -50,6 +50,8 @@ export class EventReplayQueue {
   private queue: QueuedEvent[] = [];
   private currentTurn = 0;
   private droppedCount = 0;
+  /** Acknowledged events already removed from the queue, kept so the stats stay a running total. */
+  private acknowledgedRemoved = 0;
   private readonly maxReplays: number;
   private readonly graceTurns: number;
 
@@ -111,6 +113,8 @@ export class EventReplayQueue {
    * Signal that an LLM turn has completed.
    * Increments the turn counter and returns events that need replaying.
    * Events that exceed maxReplays are dropped (logged and removed from queue).
+   * Acknowledged events are removed here too: an acknowledged event is never
+   * replayed again, so keeping it (with its payload) would only grow the queue.
    */
   onTurnComplete(): QueuedEvent[] {
     this.currentTurn++;
@@ -119,7 +123,11 @@ export class EventReplayQueue {
     const toRemove: string[] = [];
 
     for (const event of this.queue) {
-      if (event.acknowledged) continue;
+      if (event.acknowledged) {
+        toRemove.push(event.id);
+        this.acknowledgedRemoved++;
+        continue;
+      }
 
       const turnsElapsed = this.currentTurn - event.turnCount;
       if (turnsElapsed <= this.graceTurns) continue;
@@ -137,7 +145,7 @@ export class EventReplayQueue {
       }
     }
 
-    // Remove dropped events
+    // Remove dropped and acknowledged events
     if (toRemove.length > 0) {
       const toRemoveSet = new Set(toRemove);
       this.queue = this.queue.filter((e) => !toRemoveSet.has(e.id));
@@ -173,7 +181,7 @@ export class EventReplayQueue {
     replayed: number;
     dropped: number;
   } {
-    const acknowledged = this.queue.filter((e) => e.acknowledged).length;
+    const acknowledged = this.acknowledgedRemoved + this.queue.filter((e) => e.acknowledged).length;
     const pending = this.queue.filter((e) => !e.acknowledged).length;
     const replayed = this.queue.filter((e) => e.replayCount > 0).length;
 
@@ -193,6 +201,7 @@ export class EventReplayQueue {
     this.queue = [];
     this.currentTurn = 0;
     this.droppedCount = 0;
+    this.acknowledgedRemoved = 0;
   }
 
   /** Format a human-readable message for a single event. */

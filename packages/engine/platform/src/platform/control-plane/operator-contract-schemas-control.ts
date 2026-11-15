@@ -3,6 +3,7 @@ import {
   NUMBER_SCHEMA,
   STRING_SCHEMA,
   arraySchema,
+  exhaustiveStringEnumSchema,
   objectSchema,
 } from './method-catalog-shared.js';
 import {
@@ -14,6 +15,8 @@ import {
   nullableSchema,
   recordSchema,
 } from './operator-contract-schemas-shared.js';
+
+import type { ManagedWorktreeKind, ManagedWorktreeState } from '../runtime/worktree/registry.js';
 
 const CONTROL_PLANE_MESSAGE_LEVEL_SCHEMA = enumSchema(['info', 'success', 'warn', 'error']);
 
@@ -226,8 +229,8 @@ export const WORKTREE_SETUP_RESULT_SCHEMA = objectSchema({
 
 const WORKTREE_META_SCHEMA = objectSchema({
   path: STRING_SCHEMA,
-  kind: enumSchema(['agent', 'orchestrator', 'manual']),
-  state: enumSchema(['active', 'paused', 'kept', 'discard', 'pending-cleanup']),
+  kind: exhaustiveStringEnumSchema<ManagedWorktreeKind>()(['agent', 'orchestrator', 'manual']),
+  state: exhaustiveStringEnumSchema<ManagedWorktreeState>()(['active', 'paused', 'kept', 'discard', 'pending-cleanup']),
   ownerId: STRING_SCHEMA,
   sessionId: STRING_SCHEMA,
   taskId: STRING_SCHEMA,

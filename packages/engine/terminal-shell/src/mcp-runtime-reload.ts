@@ -46,6 +46,13 @@ export function startMcpConfigAutoReload(options: McpRuntimeReloadOptions): McpR
   let stopped = false;
   let reloading = false;
   let last: readonly FileSignature[] = paths.map(signatureFor);
+  // A reload that keeps failing is retried on a growing number of ticks (1, 3, 7 ... up to 30), so a broken
+  // config or an unreachable server does not reconnect and report every two seconds. An edit to the config
+  // is new information and retries at once.
+  const MAX_SKIPPED_TICKS = 30;
+  let failures = 0;
+  let skipTicks = 0;
+  let failedFor: readonly FileSignature[] | undefined;
 
   const reload = async (signature: readonly FileSignature[]): Promise<void> => {
     if (stopped || reloading) return;
@@ -60,11 +67,17 @@ export function startMcpConfigAutoReload(options: McpRuntimeReloadOptions): McpR
       // was never retried: the poller saw no further difference and left the
       // registry on stale state until a human edited the config again.
       last = signature;
+      failures = 0;
+      skipTicks = 0;
+      failedFor = undefined;
       options.onReload?.({
         connected: servers.filter((server) => server.connected).length,
         total: servers.length,
       });
     } catch (error) {
+      failures += 1;
+      skipTicks = Math.min(2 ** failures - 1, MAX_SKIPPED_TICKS);
+      failedFor = signature;
       if (!stopped) options.onError?.(error);
     } finally {
       reloading = false;
@@ -74,6 +87,14 @@ export function startMcpConfigAutoReload(options: McpRuntimeReloadOptions): McpR
   const interval = setInterval(() => {
     const next = paths.map(signatureFor);
     if (!signaturesDiffer(last, next)) return;
+    if (failedFor && signaturesDiffer(failedFor, next)) {
+      failures = 0;
+      skipTicks = 0;
+    }
+    if (skipTicks > 0) {
+      skipTicks -= 1;
+      return;
+    }
     void reload(next);
   }, intervalMs);
   interval.unref?.();

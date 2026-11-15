@@ -57,8 +57,10 @@ export async function withPublicErrorText<T>(lines: readonly string[], run: () =
   }
 }
 
-export function installUserErrorReading(kind: ErrorClass = 'generic', sessionEnded = false) {
-  const { port } = fakePort((name, question) => {
+/** `states`, when given, collects the failure state each question was asked about. */
+export function installUserErrorReading(kind: ErrorClass = 'generic', sessionEnded = false, states?: string[]) {
+  const { port } = fakePort((name, question, state) => {
+    if (states !== undefined && typeof state === 'string' && !states.includes(state)) states.push(state);
     if (question.type === 'choice') return choiceAnswer(question,
       name === 'failure__category' ? kind === 'auth' ? 'authentication' : kind === 'network' ? 'network' : 'unknown' : 'none', 0.99);
     const yes = (name === 'failure__rate_limited' && kind === 'rate-limit')

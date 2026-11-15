@@ -25,6 +25,8 @@
  * the restored state is, never where a surface keeps its sessions.
  */
 
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { journalPathFor, openTranscriptJournal, replayJournal } from './transcript-journal.js';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.js';
 import type { SessionSurface } from './session-surface.js';
@@ -68,6 +70,12 @@ export interface ReplayIntoConversationResult {
   readonly replayed: number;
   /** True if the journal tail was corrupt (quarantined). */
   readonly hadCorruptTail: boolean;
+  /**
+   * Why the journal could not be applied, when it could not. The journal file is kept,
+   * so the turns are not lost; `replayed` is 0 and a caller should say recovery failed
+   * rather than that there was nothing to recover.
+   */
+  readonly failed?: string | undefined;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -76,8 +84,8 @@ export interface ReplayIntoConversationResult {
  * Replay journal records newer than `snapshotTimestamp` onto `conversation`.
  *
  * Returns a result object so the caller can emit an appropriate notice.
- * Never throws, all errors are swallowed to preserve the "best-effort"
- * recovery contract.
+ * Never throws: a failure is logged and reported as `failed` on the result,
+ * which keeps the "best-effort" recovery contract without hiding it.
  */
 export function replayJournalIntoConversation(
   options: ReplayIntoConversationOptions,
@@ -136,9 +144,12 @@ export function replayJournalIntoConversation(
     journal.rotate();
 
     return { replayed: records.length, hadCorruptTail };
-  } catch {
-    // Absolute last-resort guard, recovery must never crash a resume.
-    return { replayed: 0, hadCorruptTail: false };
+  } catch (error) {
+    // Absolute last-resort guard, recovery must never crash a resume. The journal
+    // file is left in place, and the caller is told it could not be applied.
+    const failed = summarizeError(error);
+    logger.warn('Transcript journal could not be replayed', { journalPath, sessionId, error: failed });
+    return { replayed: 0, hadCorruptTail: false, failed };
   }
 }
 

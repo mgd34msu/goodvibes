@@ -1,5 +1,5 @@
 /**
- * Main-conversation policy for the `analyze` and `registry` tools: local static analysis and bounded registry discovery only.
+ * Main-conversation policy for the `analyze` and `registry` tools: the read-only analysis modes (including registry upgrade checks) and bounded registry discovery only.
  *
  * Hoisted from the agent (src/tools/agent-analysis-registry-policy.ts) into the engine gate. A fixed
  * allowlist over the tool's arguments, kept as code because it is the Agent product's
@@ -43,21 +43,15 @@ const READ_ONLY_REGISTRY_TOOL_MODES = ['search', 'recommend', 'dependencies', 'p
 
 const READ_ONLY_REGISTRY_TOOL_MODE_SET = new Set<string>(READ_ONLY_REGISTRY_TOOL_MODES);
 
-const ANALYZE_NETWORK_DENIAL = [
-  'GoodVibes Agent only exposes local, static analyze modes from the main conversation.',
-  'npm registry upgrade checks and hidden secondary LLM diff analysis are disabled here.',
-  'Use explicit Agent CLI/slash commands or GoodVibes TUI delegation for package-upgrade and code-review workflows.',
-].join(' ');
-
 const REGISTRY_CONTENT_DENIAL = [
   'GoodVibes Agent only exposes registry discovery, recommendation, dependency, and bounded preview from the main conversation.',
   'Full registry content materialization and arbitrary .goodvibes file reads are disabled here.',
   'Use explicit Agent CLI/slash commands for intentional local registry changes or deeper inspection.',
+  'A call the owner has approved through the Agent approval flow is not limited to this list.',
 ].join(' ');
 
 export const AGENT_READ_ONLY_ANALYZE_TOOL_MODES = READ_ONLY_ANALYZE_TOOL_MODES;
 export const AGENT_READ_ONLY_REGISTRY_TOOL_MODES = READ_ONLY_REGISTRY_TOOL_MODES;
-export const AGENT_ANALYZE_NETWORK_DENIAL_MESSAGE = ANALYZE_NETWORK_DENIAL;
 export const AGENT_REGISTRY_CONTENT_DENIAL_MESSAGE = REGISTRY_CONTENT_DENIAL;
 
 export function wrapAnalyzeToolForAgentPolicy(tool: Tool): void {

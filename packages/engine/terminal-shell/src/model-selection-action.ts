@@ -7,6 +7,17 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
+/** Keys a model selection writes that hold text. */
+type SelectionTextKey =
+  | 'helper.globalProvider'
+  | 'helper.globalModel'
+  | 'tools.llmProvider'
+  | 'tools.llmModel'
+  | 'tts.llmProvider'
+  | 'tts.llmModel'
+  | 'provider.reasoningEffort'
+  | 'provider.model';
+
 export interface TerminalModelSelection {
   readonly model: {
     readonly id: string;
@@ -42,27 +53,42 @@ export function createModelSelectionAction(
     const def = model;
     const key = def.registryKey ?? `${def.provider}:${def.id}`;
     const resolvedTarget = target ?? 'main';
+    // Every write is recorded so a failure part-way leaves the previous selection, not a mixture of old and new.
+    const undo: Array<() => void> = [];
+    const write = (configKey: SelectionTextKey, value: string): void => {
+      const previous = configManager.get(configKey);
+      configManager.set(configKey, value);
+      undo.push(() => configManager.set(configKey, previous));
+    };
+    const enableHelper = (): void => {
+      const previous = configManager.get('helper.enabled');
+      configManager.set('helper.enabled', true);
+      undo.push(() => configManager.set('helper.enabled', previous));
+    };
+    const previousRuntime = { model: runtime.model, provider: runtime.provider, reasoningEffort: runtime.reasoningEffort };
     try {
       if (resolvedTarget === 'helper') {
         // Write to helper config keys and enable the helper
-        configManager.set('helper.globalProvider', def.provider);
-        configManager.set('helper.globalModel', key);
-        configManager.set('helper.enabled', true);
+        write('helper.globalProvider', def.provider);
+        write('helper.globalModel', key);
+        enableHelper();
         conversation.log(`Helper model set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else if (resolvedTarget === 'tool') {
         // Write to tool LLM config keys and enable the tool LLM
-        configManager.set('tools.llmProvider', def.provider);
-        configManager.set('tools.llmModel', key);
+        write('tools.llmProvider', def.provider);
+        write('tools.llmModel', key);
         policy.setToolEnabled();
         conversation.log(`Tool LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else if (resolvedTarget === 'tts') {
-        configManager.set('tts.llmProvider', def.provider);
-        configManager.set('tts.llmModel', key);
+        write('tts.llmProvider', def.provider);
+        write('tts.llmModel', key);
         conversation.log(`TTS LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else {
         // Default: main provider/model
         if (contextCap != null && contextCap > 0) {
-          providerRegistry.setModelContextCap(key, contextCap);
+          providerRegistry.setModelContextCap(key, contextCap, (reason) => {
+            conversation.log(`Context window cap for ${def.displayName} not saved: ${reason}.`, { fg: policy.noteColor() });
+          });
         }
         providerRegistry.setCurrentModel(key);
         runtime.model = key;
@@ -89,10 +115,10 @@ export function createModelSelectionAction(
         // write below and a later `config set provider.reasoningEffort` are
         // validated against them.
         policy.publishEffortOptions(effortModel);
-        if (effortChosenByUser && effort) configManager.set('provider.reasoningEffort', effort);
+        if (effortChosenByUser && effort) write('provider.reasoningEffort', effort);
         const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
         runtime.reasoningEffort = serving.effective ?? '';
-        configManager.set('provider.model', key);
+        write('provider.model', key);
         const ctxNote = contextCap != null && contextCap > 0 ? `, context cap: ${contextCap.toLocaleString()}` : '';
         const effortNote =
           policy.alwaysShowEffort || serving.requested !== '' ? `, effort: ${describeServingEffort(serving, effortModel)}` : '';
@@ -102,7 +128,24 @@ export function createModelSelectionAction(
         // The switch receipt already includes requested and effective effort.
       }
     } catch (e) {
-      conversation.log(`Error switching model: ${summarizeError(e)}`, { fg: activeTokens().error });
+      for (const revert of undo.reverse()) {
+        try {
+          revert();
+        } catch {
+          /* best effort: the error below is still reported */
+        }
+      }
+      if (runtime.model !== previousRuntime.model) {
+        try {
+          providerRegistry.setCurrentModel(previousRuntime.model);
+        } catch {
+          /* the registry keeps the new model; the log line says the switch failed */
+        }
+      }
+      Object.assign(runtime, previousRuntime);
+      conversation.log(`Error switching model: ${summarizeError(e)}. The previous selection was restored.`, { fg: activeTokens().error });
+      requestRender();
+      return;
     }
     completeModelSelectionSideEffect?.();
     requestRender();

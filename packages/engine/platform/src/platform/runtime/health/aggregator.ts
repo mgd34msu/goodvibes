@@ -10,6 +10,8 @@ import type {
   DomainHealth,
   CompositeHealth,
 } from './types.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 
 /** Shallow array equality check for string arrays */
 function arraysEqual(a?: string[], b?: string[]): boolean {
@@ -84,7 +86,8 @@ export class RuntimeHealthAggregator {
       domain,
       status,
       lastTransitionAt: existing?.status !== status ? now : (existing?.lastTransitionAt ?? now),
-      recoveryAttempts: details?.recoveryAttempts ?? existing?.recoveryAttempts ?? 0,
+      // Attempts count a failure being worked on; a domain that is healthy again starts over.
+      recoveryAttempts: details?.recoveryAttempts ?? (status === 'healthy' ? 0 : existing?.recoveryAttempts ?? 0),
       maxRecoveryAttempts: details?.maxRecoveryAttempts ?? existing?.maxRecoveryAttempts ?? DEFAULT_MAX_RECOVERY_ATTEMPTS,
       degradedCapabilities: details?.degradedCapabilities ?? existing?.degradedCapabilities,
       failureReason: details?.failureReason ?? (status !== 'failed' ? undefined : existing?.failureReason),
@@ -104,6 +107,19 @@ export class RuntimeHealthAggregator {
     if (statusChanged || capabilitiesChanged || reasonChanged) {
       this.notifySubscribers();
     }
+  }
+
+  /**
+   * Record that a recovery attempt was made for a domain that is still
+   * unhealthy. The cascade engine applies `recoveryFirst` rules once the count
+   * reaches `maxRecoveryAttempts`; it resets when the domain turns healthy.
+   * Returns the new count.
+   */
+  recordRecoveryAttempt(domain: HealthDomain): number {
+    const existing = this.getDomainHealth(domain);
+    const recoveryAttempts = existing.recoveryAttempts + 1;
+    this.domainHealth.set(domain, { ...existing, recoveryAttempts });
+    return recoveryAttempts;
   }
 
   /**
@@ -212,8 +228,14 @@ export class RuntimeHealthAggregator {
   /** Notify all subscribers with current composite health */
   private notifySubscribers(): void {
     const composite = this.getCompositeHealth();
-    for (const subscriber of this.subscribers) {
-      subscriber(composite);
+    // One throwing subscriber must not stop the rest, nor fail the update whose
+    // state is already stored.
+    for (const subscriber of [...this.subscribers]) {
+      try {
+        subscriber(composite);
+      } catch (error) {
+        logger.warn('Health subscriber threw; remaining subscribers still notified', { error: summarizeError(error) });
+      }
     }
   }
 }

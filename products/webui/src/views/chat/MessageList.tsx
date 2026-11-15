@@ -5,7 +5,7 @@ import { Spark } from '../../components/shell/Spark';
 import { useReducedMotion } from '../../components/motion/useReducedMotion';
 import { MessageItem } from './MessageItem';
 import { lineageNodeKey, type LineageNode } from './lineage';
-import { bestId } from './message-utils';
+import { bestId, canResendUserMessage } from './message-utils';
 import type { ChatMessage } from './types';
 import type { ActiveToolCall } from './useChatStream';
 import '../../styles/components/chat-stream.css';
@@ -22,6 +22,8 @@ interface MessageListProps {
   /** Id of the message to flash-highlight (search jump-to-message target), or '' for none. */
   highlightedMessageId?: string;
   scrollRef: RefObject<HTMLDivElement | null>;
+  /** Whether the files of a failed send are still held (so Resend can include them). */
+  hasHeldFiles?: (messageId: string) => boolean;
   onScroll: () => void;
   onJumpToBottom: () => void;
   onCopyMessage: (message: ChatMessage) => void;
@@ -53,6 +55,7 @@ export function MessageList({
   copiedMessageId,
   highlightedMessageId = '',
   scrollRef,
+  hasHeldFiles = () => false,
   onScroll,
   onJumpToBottom,
   onCopyMessage,
@@ -88,6 +91,7 @@ export function MessageList({
               reason={node.reason}
               revisionOf={node.revisionOf}
               isHighlighted={highlightedMessageId !== '' && bestId(node.message) === highlightedMessageId}
+              canResend={canResendUserMessage(node.message, hasHeldFiles(bestId(node.message)))}
               onCopyMessage={onCopyMessage}
               onResendMessage={onResendMessage}
               onRegenerateFrom={onRegenerateFrom}

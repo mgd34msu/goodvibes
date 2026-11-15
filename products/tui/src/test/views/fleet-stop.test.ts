@@ -1,6 +1,6 @@
 import { contractFixture } from '../helpers/contract-work-tree-fixtures.ts';
 /**
- * d1/d2, fleet-stop.ts: the 'stopping…' write-window overlay tracker and
+ * fleet-stop.ts: the 'stopping…' write-window overlay tracker and
  * the state-dependent pause<->resume toggle + tree hints, split out of
  * src/input/agents-modal.ts. Pure/isolated, so unit-tested here directly.
  */

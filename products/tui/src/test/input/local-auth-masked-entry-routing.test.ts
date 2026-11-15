@@ -153,7 +153,7 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     expect(text).not.toContain('secret-1');
     feed(host, '\r');
     expect(host.active).toBe(false);
-    expect(printed.join('\n')).toContain('Added local auth user carol');
+    expect(printed.join('\n')).toContain('Added local auth user carol');    expect(auth.listUsers().find((user) => user.username === 'carol')?.roles).toEqual(['user']);
   });
 
   test('a too-short password is refused by the manager and the modal stays open', async () => {
@@ -194,5 +194,24 @@ describe('local-auth masked entry: command routing into the kit modal', () => {
     host.escape();
     expect(host.active).toBe(false);
     expect(modal.passwordLength).toBe(0);
+  });
+
+  test('add-user with no roles argument creates a non-admin user; admin must be asked for', async () => {
+    const registry = new CommandRegistry();
+    registerLocalAuthRuntimeCommands(registry);
+    const { context } = makeContext(auth, host, true);
+    await registry.execute('local-auth', ['add-user', 'plain', 'long-enough-pw'], context);
+    await registry.execute('local-auth', ['add-user', 'boss', 'long-enough-pw', 'admin'], context);
+    const roles = Object.fromEntries(auth.listUsers().map((user) => [user.username, [...user.roles]]));
+    expect(roles['plain']).toEqual(['user']);
+    expect(roles['boss']).toEqual(['admin']);
+  });
+
+  test('the argument-password warning does not claim history scrubbing', async () => {
+    const registry = new CommandRegistry();
+    registerLocalAuthRuntimeCommands(registry);
+    const { context, printed } = makeContext(auth, host, true);
+    await registry.execute('local-auth', ['add-user', 'carol', 'long-enough-pw'], context);
+    expect(printed.join('\n')).not.toContain('scrubbed');
   });
 });

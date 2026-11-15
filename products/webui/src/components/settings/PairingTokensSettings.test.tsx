@@ -67,6 +67,8 @@ mock.module('../../lib/goodvibes', () => ({
 }));
 
 const { PairingTokensSettings } = await import('./PairingTokensSettings');
+const { storeRelayPairing, getStoredRelayPairing, clearStoredRelayPairing } = await import('../../lib/relay-pairing');
+const { getActiveRoute, setActiveRoute } = await import('../../lib/relay-connection');
 
 function render(): { el: HTMLElement; unmount: () => void } {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -268,6 +270,38 @@ describe('PairingTokensSettings migrate + revoke-shared', () => {
     expect(document.activeElement?.textContent).toBe('Cancel');
     click(el.querySelector('.gv-confirm__confirm'));
     await waitFor(() => revokeSharedCalls.length > 0);
+    unmount();
+  });
+});
+
+describe('PairingTokensSettings relay pairing', () => {
+  const pairing = {
+    protocol: 1 as const,
+    relayUrl: 'wss://relay.example.com/ws',
+    rid: 'rid_abc123',
+    daemonPublicKey: 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD',
+  };
+
+  test('offers no unpair action when no relay is paired', async () => {
+    clearStoredRelayPairing();
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('Phone'));
+    expect([...el.querySelectorAll('button')].some((b) => b.textContent?.includes('Unpair relay'))).toBe(false);
+    unmount();
+  });
+
+  test('Unpair relay asks first, then forgets the pairing and returns to the direct route', async () => {
+    storeRelayPairing(pairing);
+    setActiveRoute('relay');
+    const { el, unmount } = render();
+    await waitFor(() => (el.textContent ?? '').includes('Unpair relay'));
+    click([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Unpair relay')));
+    await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
+    expect(getStoredRelayPairing()).not.toBeNull();
+    click(el.querySelector('.gv-confirm__confirm'));
+    await waitFor(() => getStoredRelayPairing() === null);
+    expect(getActiveRoute()).toBe('direct');
+    await waitFor(() => ![...el.querySelectorAll('button')].some((b) => b.textContent?.includes('Unpair relay')));
     unmount();
   });
 });

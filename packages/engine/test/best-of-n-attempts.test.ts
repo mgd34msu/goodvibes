@@ -166,6 +166,8 @@ describe('pickWinner', () => {
     const result = await h.coordinator.pickWinner(groupId, winner.id);
     expect(result.winnerItemId).toBe(winner.id);
     expect(result.auto).toBe(false);
+    // Losers are cleaned once the winner's merge has been attempted, which settles after the pick returns.
+    await h.coordinator.join();
     expect(h.enqueued).toEqual([winner.id]);
     expect(h.cleaned.sort()).toEqual([siblings[0]!.id, siblings[2]!.id].sort());
     expect(winner.state).toBe('passed');
@@ -221,8 +223,8 @@ describe('judge', () => {
     const siblings = h.coordinator.expandItems('ws-1', 'worktree', [{ title: 'T', task: 'x', attempts: 2, autoAcceptWinner: true }], makeItem);
     ws = makeWorkstream(siblings);
     for (const s of siblings) h.coordinator.onItemPassedTerminal(ws, s);
-    // Auto judge-and-pick runs async off the readiness event; let microtasks flush.
-    await new Promise((r) => setTimeout(r, 0));
+    // Auto judge-and-pick runs off the readiness event as owned work; join drains it.
+    await h.coordinator.join();
     const picked = h.events.find((e) => e.type === 'attempt-winner-picked');
     expect(picked?.type).toBe('attempt-winner-picked');
     if (picked?.type === 'attempt-winner-picked') expect(picked.auto).toBe(true);
@@ -318,7 +320,7 @@ describe('the contract.best-of-n selector as the judge', () => {
   test('auto-accept picks the selected winner once the group is ready', async () => {
     selectPort('feat#a2', 0.95, { 'feat#a2': 0.96 });
     const { h } = await readyGroup(createSelectAttemptJudge(), false, true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await h.coordinator.join();
     const picked = h.events.find((event) => event.type === 'attempt-winner-picked');
     expect(picked?.type === 'attempt-winner-picked' && picked.auto && picked.winnerItemId).toBe('feat#a2');
     expect(h.enqueued).toEqual(['feat#a2']);

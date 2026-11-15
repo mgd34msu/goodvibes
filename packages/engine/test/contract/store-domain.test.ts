@@ -108,7 +108,8 @@ describe('the contracts store domain', () => {
     const dispatch = createDomainDispatch(store);
     for (const event of ALL_CONTRACT_EVENTS) dispatch.dispatchContractEvent(event);
     const state = selectContracts(store.getState());
-    expect(state.contracts.get(CTR)?.status).toBe('cancelled');
+    // The sample walk passes the contract and then cancels it: the first outcome stands.
+    expect(state.contracts.get(CTR)?.status).toBe('passed');
     expect(state.totalContracts).toBe(1);
     expect(state.spawnGuardTrips).toBe(1);
     expect(state.revision).toBeGreaterThan(0);

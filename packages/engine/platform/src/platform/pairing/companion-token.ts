@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, existsSync, realpathSync, renameSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
+import { readFileSync, existsSync, linkSync, realpathSync, renameSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
@@ -138,7 +138,16 @@ export function getOrCreateCompanionToken(
     if (loaded.record) {
       return { token: loaded.record.token, peerId: loaded.record.peerId, createdAt: loaded.record.createdAt };
     }
-    quarantined = quarantineTokenStore(tokenPath, loaded.reason, options.receipts);
+    // A file another process removed between the check and the read is simply absent.
+    if (loaded.reason !== ABSENT) {
+      // Another process may have published a valid token since the read above; moving that
+      // aside would rotate the token it just handed out. Judge the file as it is now.
+      const current = readTokenRecord(tokenPath);
+      if (current.record) {
+        return { token: current.record.token, peerId: current.record.peerId, createdAt: current.record.createdAt };
+      }
+      if (current.reason !== ABSENT) quarantined = quarantineTokenStore(tokenPath, current.reason, options.receipts);
+    }
   }
 
   const record: CompanionTokenRecord = {
@@ -149,7 +158,15 @@ export function getOrCreateCompanionToken(
 
   // Publish a complete owner-only record before returning a usable token.
   // Publication failures must reach the caller instead of reporting success.
-  writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+  if (!options.regenerate) {
+    // Another process on this home (daemon and TUI) may be minting right now.
+    // The loser adopts the winner's token instead of overwriting it with one
+    // that no client was given.
+    const winner = publishNewTokenRecord(tokenPath, record);
+    if (winner) return { token: winner.token, peerId: winner.peerId, createdAt: winner.createdAt };
+  } else {
+    writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+  }
 
   return {
     token: record.token,
@@ -159,13 +176,49 @@ export function getOrCreateCompanionToken(
   };
 }
 
+/**
+ * Write the record complete to a private neighbour, then link it into place:
+ * the link fails when the token file already exists, so a concurrent first mint
+ * cannot be overwritten. Returns the record that is already there when this
+ * call lost the race, otherwise null. A filesystem without hard links falls
+ * back to the plain atomic replace.
+ */
+function publishNewTokenRecord(tokenPath: string, record: CompanionTokenRecord): CompanionTokenRecord | null {
+  const staging = `${tokenPath}.new-${process.pid}-${randomBytes(4).toString('hex')}`;
+  writeJsonFileAtomic(staging, record, { mode: 0o600, trailingNewline: false });
+  try {
+    linkSync(staging, tokenPath);
+    return null;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      const existing = readTokenRecord(tokenPath).record;
+      if (existing) return existing;
+      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+      return null;
+    }
+    if (code === 'EPERM' || code === 'ENOSYS' || code === 'EOPNOTSUPP' || code === 'EXDEV') {
+      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+      return null;
+    }
+    throw error;
+  } finally {
+    try { unlinkSync(staging); } catch { /* already gone */ }
+  }
+}
+
+const ABSENT = 'absent';
+
 /** Read the stored record, or say in one line why it is not usable. */
 function readTokenRecord(tokenPath: string): { record: CompanionTokenRecord | null; reason: string } {
   let raw: string;
   try {
     raw = readFileSync(tokenPath, 'utf-8');
   } catch (error) {
-    return { record: null, reason: `the file could not be read (${String(error)})` };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { record: null, reason: ABSENT };
+    // A transient fault (EMFILE, EACCES, EIO) says nothing about the content; moving the file
+    // aside would rotate the token for every paired client over a read that may succeed next time.
+    throw error;
   }
   if (!raw.trim()) {
     // The classic torn write: created or truncated, then the process died
@@ -204,11 +257,14 @@ function quarantineTokenStore(
     renameSync(tokenPath, destination);
   } catch (error) {
     destination = '';
-    logger.error('The unreadable operator token store could not be moved aside; it is about to be overwritten', {
-      path: tokenPath,
-      reason,
-      error: String(error),
-    });
+    // Another process already moved it aside; nothing is about to be overwritten.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.error('The unreadable operator token store could not be moved aside; it is about to be overwritten', {
+        path: tokenPath,
+        reason,
+        error: String(error),
+      });
+    }
   }
   logger.error('The operator token store was unreadable, a new token was issued and every paired client must pair again', {
     path: tokenPath,

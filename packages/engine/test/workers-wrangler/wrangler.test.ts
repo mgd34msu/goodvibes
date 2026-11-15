@@ -1,27 +1,22 @@
 /**
  * wrangler-CLI harness, @goodvibes-jev/engine/platform Workers parity test.
  *
- * Spawns `wrangler dev --local` against test/workers-wrangler/worker.ts and
- * exercises the same endpoint surface as the Miniflare harness in
- * test/workers/workers.test.ts.
+ * Spawns `wrangler dev --local` against test/workers/worker.ts (see wrangler.toml),
+ * the same worker the Miniflare harness in test/workers/workers.test.ts runs, and
+ * exercises the same endpoint surface.
  *
  * IMPORTANT: `wrangler dev --local` uses Miniflare 4 as its local runtime
- * layer internally, it is NOT the raw workerd binary. Both this harness and
- * the standalone Miniflare harness share the same Miniflare 4 runtime, which
- * means EventSource IS available in both harnesses (Miniflare injects it).
- * The production EventSource absence can only be verified via a real CF
- * deployment. See test/workers/NOTES.md for details.
+ * layer internally, it is NOT the raw workerd binary.
  *
  * What this harness adds over the standalone Miniflare harness:
- *   - Exercises wrangler's esbuild bundling pipeline (not the manual esbundle step)
+ *   - Exercises wrangler's esbuild bundling pipeline (not the manual esbuild step)
  *   - Exercises wrangler CLI config surface (wrangler.toml, entry resolution)
- *   - EventSource is present in BOTH harnesses (Miniflare 4 injects it in both)
  *
  * Run:
  *   bun run build && bun run test:workers:wrangler
  *
  * Prerequisites:
- *   - wrangler must be installed (devDependency)
+ *   - wrangler must be installed (devDependency); the suite is skipped without it
  *   - platform must be built (dist/web.js must exist)
  *   - No Cloudflare account or API token required (--local mode)
  *
@@ -33,25 +28,28 @@
 
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 
 // ---------------------------------------------------------------------------
-// Wrangler availability check, skip all tests if wrangler is not accessible.
-// wrangler ships as a devDependency; invoke via bunx in this project.
+// Wrangler availability check. wrangler is a devDependency, so the installed
+// copy is run directly under Node (wrangler refuses the Bun runtime): `bunx`
+// would fetch it from the network when missing.
+// The suite is skipped (not failed) when it has not been installed.
 // ---------------------------------------------------------------------------
-function checkWranglerAvailable(): boolean {
+function resolveWranglerEntry(): string | null {
   try {
-    execFileSync('bunx', ['wrangler', '--version'], { stdio: 'ignore', timeout: 10_000 });
-    return true;
+    execFileSync('node', ['--version'], { stdio: 'ignore' });
+    return createRequire(import.meta.url).resolve('wrangler/bin/wrangler.js');
   } catch {
-    return false;
+    return null;
   }
 }
 
-const wranglerAvailable = checkWranglerAvailable();
-
+const wranglerEntry = resolveWranglerEntry();
+const wranglerAvailable = wranglerEntry !== null;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HARNESS_DIR = resolve(__dirname); // test/workers-wrangler/
@@ -87,18 +85,14 @@ async function findAvailablePort(): Promise<number> {
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
-  if (!wranglerAvailable) {
-    // wrangler is not accessible via bunx, fail fast with a clear message.
-    // Install via: npm install -g wrangler  OR ensure devDependencies are installed (bun install).
-    throw new Error('[wrangler.test.ts] FAIL: wrangler unavailable via bunx. Run `bun install` or install wrangler globally.');
-  }
+  if (!wranglerEntry) return;
 
   port = await findAvailablePort();
   baseUrl = `http://127.0.0.1:${port}`;
   wranglerProcess = spawn(
-    'bunx',
+    'node',
     [
-      'wrangler',
+      wranglerEntry,
       'dev',
       '--local',
       '--port', String(port),
@@ -193,7 +187,7 @@ async function get(path: string): Promise<{ status: number; body: unknown }> {
 // Tests, match the Miniflare harness assertions
 // ---------------------------------------------------------------------------
 
-describe('Workers wrangler: smoke', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: smoke', () => {
   test('platform loads and factory produces a valid platform object through wrangler bundling pipeline', async () => {
     const { status, body } = await get('/smoke');
     expect(status).toBe(200);
@@ -211,7 +205,7 @@ describe('Workers wrangler: smoke', () => {
   }, 15_000);
 });
 
-describe('Workers wrangler: auth flow', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: auth flow', () => {
   test('auth token is stored and retrievable inside wrangler-hosted worker', async () => {
     const { status, body } = await get('/auth');
     expect(status).toBe(200);
@@ -223,7 +217,7 @@ describe('Workers wrangler: auth flow', () => {
   }, 10_000);
 });
 
-describe('Workers wrangler: transport-http round-trip', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: transport-http round-trip', () => {
   test('success path: mock returns real-shape JSON, result is populated', async () => {
     const { status, body } = await get('/transport-success');
     expect(status).toBe(200);
@@ -260,7 +254,7 @@ describe('Workers wrangler: transport-http round-trip', () => {
   }, 10_000);
 });
 
-describe('Workers wrangler: error taxonomy', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: error taxonomy', () => {
   test('errors subpath loads and GoodVibesError is instantiable', async () => {
     const { status, body } = await get('/errors');
     expect(status).toBe(200);
@@ -274,7 +268,7 @@ describe('Workers wrangler: error taxonomy', () => {
   }, 10_000);
 });
 
-describe('Workers wrangler: crypto', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: crypto', () => {
   test('crypto.randomUUID produces valid UUID v4 in wrangler-hosted worker', async () => {
     const { status, body } = await get('/crypto');
     expect(status).toBe(200);
@@ -288,7 +282,7 @@ describe('Workers wrangler: crypto', () => {
   }, 10_000);
 });
 
-describe('Workers wrangler: globals audit', () => {
+describe.skipIf(!wranglerAvailable)('Workers wrangler: globals audit', () => {
   test('fetch, Request, Response, Headers, URL, crypto are available', async () => {
     const { status, body } = await get('/globals');
     expect(status).toBe(200);
@@ -306,25 +300,8 @@ describe('Workers wrangler: globals audit', () => {
     expect(globals.setTimeout).toBe(true);
   }, 10_000);
 
-  // wrangler dev --local uses Miniflare 4 internally as its local runtime layer.
-  // Both this harness and the Miniflare standalone harness share the same
-  // Miniflare 4 runtime, which injects EventSource as a simulation artifact.
-  // EventSource === true in BOTH harnesses, the gap cannot be exercised locally
-  // without a real Cloudflare deployment (CF_API_TOKEN required).
-  //
-  // See test/workers/NOTES.md for the runtime boundary.
-  test('EventSource: wrangler dev --local uses Miniflare 4 (EventSource present, same as standalone Miniflare)', async () => {
-    const { status, body } = await get('/globals');
-    expect(status).toBe(200);
-
-    const b = body as Record<string, unknown>;
-    const globals = b.globals as Record<string, boolean>;
-
-    // wrangler dev --local routes through Miniflare 4, which injects EventSource.
-    // This matches the standalone Miniflare harness (both true).
-    // A real production Workers deployment would return false, not testable locally.
-    expect(globals.EventSource).toBe(true);
-  }, 10_000);
+  // The EventSource-less realtime check lives in the Miniflare harness: it removes
+  // the global inside the isolate, which does not depend on how the worker is bundled.
 
   test('location is NOT available in wrangler-hosted worker (must pass explicit baseUrl)', async () => {
     const { status, body } = await get('/globals');

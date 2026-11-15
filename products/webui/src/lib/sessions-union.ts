@@ -13,7 +13,7 @@
 import { asArray, firstString, readPath } from './object';
 import { companionSessionsFromListResponse } from './companion-chat';
 
-/** The six kinds the 0.38 wire enum declares (SHARED_SESSION_KINDS). */
+/** The kinds the wire enum declares (SHARED_SESSION_KINDS in daemon-api's runtime-session-routes.ts). */
 export const KNOWN_SESSION_KINDS = [
   'tui',
   'agent',
@@ -21,6 +21,9 @@ export const KNOWN_SESSION_KINDS = [
   'companion-task',
   'companion-chat',
   'automation',
+  'channel',
+  'acp',
+  'hosted',
 ] as const;
 export type KnownSessionKind = (typeof KNOWN_SESSION_KINDS)[number];
 
@@ -33,7 +36,8 @@ export const SESSION_UPDATE_WIRE_EVENT = 'session-update';
 
 /**
  * Local mirror of the platform's SESSION_UPDATE_INTENT_MAP. Kept here (not imported)
- * because the platform does not re-export it to the browser bundle; verified against
+ * because the platform does not re-export it to the browser bundle; sessions-union-drift.test.ts
+ * fails when it falls out of step with
  * packages/engine/platform/src/platform/control-plane/method-catalog-events.ts. If the daemon
  * adds a new wire event we do not know, sessionUpdateIntent() returns null and the
  * caller invalidates the whole list defensively rather than guessing an intent.
@@ -45,9 +49,12 @@ export const SESSION_UPDATE_INTENT_MAP = {
     'session-agent-completed',
     'session-route-attached',
     'session-reopened',
+    'session-permission-mode-changed',
+    'session-detached',
   ],
-  steered: ['session-input-delivered', 'session-message-forwarded'],
+  steered: ['session-input-delivered', 'session-message-forwarded', 'session-input-queued-for-surface'],
   closed: ['session-closed'],
+  deleted: ['session-deleted'],
 } as const;
 
 export type SessionUpdateIntent = keyof typeof SESSION_UPDATE_INTENT_MAP;

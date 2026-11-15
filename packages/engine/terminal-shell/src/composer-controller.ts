@@ -53,7 +53,7 @@ export abstract class TerminalComposerController {
     );
   }
   public getVisiblePromptLineCount(this: TerminalComposerHost, contentWidth?: number | undefined): number {
-    const info = this.getWrappedPromptInfo(contentWidth ?? 76);
+    const info = this.getWrappedPromptInfo(contentWidth ?? this.contentWidth);
     return Math.min(info.wrappedLines.length, this.composerMaxRows);
   }
   public getWrappedPromptInfo(this: TerminalComposerHost, contentWidth: number): WrappedPromptInfo {

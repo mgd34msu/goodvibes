@@ -52,6 +52,8 @@ export class PolicyRuntimeState {
   private readonly _subscribers = new Set<() => void>();
   /** The findings of the last lint read of the loaded bundles (refreshLint). */
   private _lintFindings: readonly PolicyLintFinding[] = [];
+  /** Why the bundle named by `policy.bundlePath` did not load, or null when it loaded or none is configured. */
+  private _configuredBundleFailure: string | null = null;
 
   public constructor(registry: PolicyRegistry = new PolicyRegistry()) {
     this._registry = registry;
@@ -71,6 +73,15 @@ export class PolicyRuntimeState {
 
   public getRegistry(): PolicyRegistry {
     return this._registry;
+  }
+
+  public getConfiguredBundleFailure(): string | null {
+    return this._configuredBundleFailure;
+  }
+
+  public recordConfiguredBundleFailure(reason: string | null): void {
+    this._configuredBundleFailure = reason;
+    this.notify();
   }
 
   public getDashboard(): DivergenceDashboard | null {
@@ -103,7 +114,7 @@ export class PolicyRuntimeState {
       this._lastSimulationSummary,
       this._lastPreflightReview,
     );
-    return panel.getSnapshot();
+    return { ...panel.getSnapshot(), configuredBundleFailure: this._configuredBundleFailure };
   }
 
   /**

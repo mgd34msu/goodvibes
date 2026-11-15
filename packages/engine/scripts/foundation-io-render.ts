@@ -137,7 +137,7 @@ export function renderType(schema: Record<string, unknown>): string {
   if (schema.type === 'string') {
     if (Array.isArray(schema.enum)) {
       const sorted = [...(schema.enum as string[])].sort();
-      return sorted.map((v) => `"${v}"`).join(' | ');
+      return sorted.map((v) => JSON.stringify(v)).join(' | ');
     }
     return 'string';
   }

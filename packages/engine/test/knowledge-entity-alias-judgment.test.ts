@@ -20,10 +20,13 @@ beforeEach(() => {
   previous = installJudgmentPort(undefined);
   root = mkdtempSync(join(tmpdir(), 'knowledge-entity-alias-'));
 });
-afterEach(() => { installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); });
+const stores: KnowledgeStore[] = [];
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); rmSync(root, { recursive: true, force: true }); });
 function context() {
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
   return {
-    store: new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }),
+    store,
     artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }),
     connectorRegistry: new KnowledgeConnectorRegistry(),
     emitIfReady: () => {}, syncReviewedMemory: async () => {}, lint: async () => [], listConnectors: () => [],

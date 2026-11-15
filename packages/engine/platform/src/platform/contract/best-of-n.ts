@@ -30,8 +30,9 @@ import type { Contract } from './types.js';
 import { emptyJudgmentUsage, meteredPort } from './check.js';
 import { DIFF_FILE_CAP_CHARS, EVIDENCE_TOKEN_BUDGET, headAndTail, splitUnifiedDiff } from './evidence.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
-import type { AttemptSelectionRecord, ContractFailureKind, ContractUnit, JudgmentUsage } from './types.js';
+import { UNIT_TRANSITIONS, type AttemptSelectionRecord, type ContractFailureKind, type ContractUnit, type JudgmentUsage } from './types.js';
 import { addJudgmentUsage } from './usage.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /** The decision site the selection is logged under. */
 export const BEST_OF_N_SITE = 'contract.best-of-n';
@@ -280,12 +281,12 @@ export interface AttemptSelectionDeps {
 }
 
 /**
- * Takes attempt `attemptId` as unit `unitId`'s work: the engine merges it into
- * the contract branch and cleans the others, and the unit waits in
- * `held-merge` until the merge lands. Throws when `attemptId` is not one of
- * the passing candidates, or an attempt was already taken.
+ * Refuses a pick before anything changes: a pick the engine then rejects would
+ * leave the unit held-merge with a recorded pick and no merge on its way.
  */
-export async function acceptAttempt(run: ContractRun, unitId: string, attemptId: string, reason: string, decisionIds: readonly string[] = []): Promise<void> {
+export function assertAttemptTakeable(run: ContractRun, unitId: string, attemptId: string): {
+  readonly unit: ContractUnit; readonly selection: AttemptSelectionRecord; readonly attempt: ContractUnit; readonly engine: NonNullable<ContractRun['engine']>;
+} {
   const unit = run.unit(unitId);
   const selection = unit?.attemptSelection;
   if (unit === undefined || selection === undefined) throw new Error(`unit ${unitId} has no attempt selection to accept`);
@@ -296,6 +297,25 @@ export async function acceptAttempt(run: ContractRun, unitId: string, attemptId:
   const attempt = run.unit(attemptId);
   const engine = run.engine;
   if (attempt === undefined || engine === null) throw new Error(`attempt ${attemptId} of unit ${unitId} is not running on this contract's engine`);
+  const items = engine.listWorkstreams().flatMap((workstream) => workstream.items).filter((item) => item.attemptGroupId === selection.engineGroupId);
+  const item = items.find((candidate) => candidate.id === attemptId);
+  if (attempt.status !== 'held-merge' || item?.state !== 'held-merge') {
+    throw new Error(`attempt ${attemptId} of unit ${unitId} is ${attempt.status} and its work item is ${item?.state ?? 'missing'}; only an attempt that passed and waits to merge can be taken`);
+  }
+  const unfinished = items.filter((candidate) => candidate.state !== 'held-merge' && candidate.state !== 'failed');
+  if (unfinished.length > 0) throw new Error(`unit ${unitId}'s attempts ${unfinished.map((candidate) => candidate.id).join(', ')} have not finished; an attempt can be taken once every attempt passed or failed`);
+  if (!UNIT_TRANSITIONS[unit.status].includes('held-merge')) throw new Error(`unit ${unitId} is ${unit.status}; an attempt can be taken while it is checking or awaiting its owner`);
+  return { unit, selection, attempt, engine };
+}
+
+/**
+ * Takes attempt `attemptId` as unit `unitId`'s work: the engine merges it into
+ * the contract branch and cleans the others, and the unit waits in
+ * `held-merge` until the merge lands. Throws when `attemptId` is not one of
+ * the passing candidates, or an attempt was already taken.
+ */
+export async function acceptAttempt(run: ContractRun, unitId: string, attemptId: string, reason: string, decisionIds: readonly string[] = []): Promise<void> {
+  const { unit, selection, attempt, engine } = assertAttemptTakeable(run, unitId, attemptId);
   // Everything the merge event reads is in place before the engine starts the merge.
   selection.pickedId = attemptId;
   adoptAttempt(unit, attempt);
@@ -304,7 +324,21 @@ export async function acceptAttempt(run: ContractRun, unitId: string, attemptId:
   for (const loser of losers) run.moveUnit(loser, 'passed');
   const others = losers.length === 0 ? '' : `; not selected: ${losers.map((loser) => loser.id).join(', ')}`;
   run.decide('attempts-selected', unit.id, `${attemptId} taken: ${reason}${others}`, decisionIds);
-  await engine.pickAttemptWinner(selection.engineGroupId, attemptId);
+  try {
+    await engine.pickAttemptWinner(selection.engineGroupId, attemptId);
+  } catch (error) {
+    // The engine did not start the merge. Left as it is, the unit would sit in
+    // held-merge with a recorded pick and no merge coming, and every retry would
+    // be refused as "already took". Withdraw the pick and hand the unit back to
+    // its owner, who can take the same attempt again; the other attempts have
+    // already been released and cannot be taken.
+    if (!run.terminal && selection.pickedId === attemptId) {
+      delete selection.pickedId;
+      run.tryMoveUnit(unit, 'awaiting-owner');
+      run.decide('escalated', unit.id, `${attemptId} could not be merged (${summarizeError(error)}); the pick was withdrawn and ${attemptId} can be taken again`);
+    }
+    throw error;
+  }
 }
 
 /**

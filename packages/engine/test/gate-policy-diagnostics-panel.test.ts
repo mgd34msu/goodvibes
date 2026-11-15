@@ -53,7 +53,7 @@ function promoteBundle(registry: PolicyRegistry, id: string): void {
 }
 
 describe('PolicyDiagnosticsPanel', () => {
-  test('snapshots policy registry state without exposing the retired UI panel name', () => {
+  test('snapshots the current, candidate and history bundles of the registry', () => {
     const registry = new PolicyRegistry();
     promoteBundle(registry, 'policy-a');
     promoteBundle(registry, 'policy-b');

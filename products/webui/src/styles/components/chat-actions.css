@@ -183,7 +183,8 @@
   white-space: nowrap;
 }
 
-.delivery-indicator.failed {
+.delivery-indicator.failed,
+.delivery-indicator.unanswered {
   color: var(--bad);
 }
 

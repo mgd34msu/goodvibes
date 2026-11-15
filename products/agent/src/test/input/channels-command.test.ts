@@ -110,6 +110,22 @@ describe('/channels command', () => {
     expect(output).not.toContain('discord-redacted-token');
   });
 
+  test('the attention filter lists a channel whose configuration could not be read', async () => {
+    const { context, printed } = channelContext();
+    const configManager = context.platform.configManager as unknown as { get: (key: string) => unknown };
+    const read = configManager.get;
+    configManager.get = (key: string) => {
+      if (key.startsWith('surfaces.slack.')) throw new Error('settings unreadable');
+      return read(key);
+    };
+
+    await runChannels(['attention'], context);
+
+    const output = printed.join('\n');
+    expect(output).toContain('Slack');
+    expect(output).not.toContain('No attention channels matched');
+  });
+
   test('prints a read-only channel setup guide with policy and live-check steps', async () => {
     const { context, printed } = channelContext();
 
@@ -306,11 +322,11 @@ describe('/channels command', () => {
 
     const output = printed.join('\n');
     expect(output).toContain('Channel Triage');
-    expect(output).toContain('summary: 1 channel setup blocker(s), 1 delivery attention item(s), 1 retry candidate(s), 1 visible surface message(s), 1 route binding(s).');
+    expect(output).toContain('summary: 0 channel setup blocker(s), 1 channel(s) without a default target, 1 delivery attention item(s), 1 retry candidate(s), 1 visible surface message(s), 1 route binding(s).');
     expect(output).toContain('inbox: visible_surface_messages; provider inbox feed not_published_by_current_channel_contract');
     expect(output).toContain('delivery-1: failed webhook https://hooks.example.test/...');
     expect(output).toContain('error=HTTP 500 token=[redacted]');
-    expect(output).toContain('slack: warn Slack token=[redacted]');
+    expect(output).toContain('slack: warn (message text withheld from this summary)');
     expect(output).toContain('binding-1: slack channel sender=');
     expect(output).toContain('Agent Receipts');
     expect(output).toContain('target=webhook https://hooks.example.test/...');

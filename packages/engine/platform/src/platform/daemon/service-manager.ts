@@ -1,6 +1,7 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawnSync, spawn, type SpawnOptions } from 'node:child_process';
+import { spawnSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { processStartTime } from '../config/process-start-time.js';
 import { ConfigManager } from '../config/manager.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
@@ -53,7 +54,23 @@ interface ManagedServicePaths {
   readonly homeDirectory: string;
 }
 
+/** Process-level seams of the manual platform, injectable so pid reuse and slow exits are testable. */
+export interface ManagedServiceProcessControl {
+  readonly isRunning?: ((pid: number) => boolean) | undefined;
+  readonly startTime?: ((pid: number) => string | null) | undefined;
+  readonly signal?: ((pid: number, signal: NodeJS.Signals) => void) | undefined;
+  readonly pause?: ((milliseconds: number) => void) | undefined;
+  readonly spawn?: ((command: string, args: readonly string[], options: SpawnOptions) => ChildProcess) | undefined;
+}
+
+/** How long a manual restart waits for the previous process to exit before refusing to start a second one. */
+const MANUAL_STOP_WAIT_MS = 10_000;
+const MANUAL_STOP_POLL_MS = 100;
+/** A service-manager query that hangs (broken user bus) must not freeze the daemon's event loop. */
+const SERVICE_QUERY_TIMEOUT_MS = 10_000;
+
 export interface ManagedServiceManagerOptions extends ManagedServicePaths {
+  readonly processControl?: ManagedServiceProcessControl | undefined;
   readonly definitionOverride?: ManagedServiceDefinition | undefined;
   readonly actionRunner?: ((command: string, args: readonly string[]) => ManagedServiceActionResult) | undefined;
   /** A retained caller restriction checked before native publication and platform actions. */
@@ -65,7 +82,8 @@ export interface ManagedServiceManagerOptions extends ManagedServicePaths {
   readonly featureFlags?: FeatureFlagReader | undefined;
 }
 
-function detectPlatform(platform: string): ManagedServicePlatform {
+/** Resolves the configured `service.platform` (default `auto`) against the host operating system. */
+export function detectPlatform(platform: string, hostPlatform: string = process.platform): ManagedServicePlatform {
   switch (platform) {
     case 'systemd':
     case 'launchd':
@@ -74,9 +92,9 @@ function detectPlatform(platform: string): ManagedServicePlatform {
       return platform;
     case 'auto':
     default:
-      if (process.platform === 'darwin') return 'launchd';
-      if (process.platform === 'win32') return 'windows';
-      if (process.platform === 'linux') return 'systemd';
+      if (hostPlatform === 'darwin') return 'launchd';
+      if (hostPlatform === 'win32') return 'windows';
+      if (hostPlatform === 'linux') return 'systemd';
       return 'manual';
   }
 }
@@ -237,13 +255,17 @@ export function renderSystemdUnit(
  */
 const LAUNCHD_MANAGED_BY_PREFIX = 'goodvibes daemon service manager';
 
+function xmlText(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
+}
+
 function renderLaunchdPlist(definition: ManagedServiceDefinition): string {
   const envLines = Object.entries(definition.env)
     .filter(([, value]) => value.length > 0)
-    .map(([key, value]) => `    <key>${key}</key>\n    <string>${value}</string>`)
+    .map(([key, value]) => `    <key>${xmlText(key)}</key>\n    <string>${xmlText(value)}</string>`)
     .join('\n');
   const args = [definition.command, ...definition.args]
-    .map((value) => `    <string>${value}</string>`)
+    .map((value) => `    <string>${xmlText(value)}</string>`)
     .join('\n');
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -251,15 +273,15 @@ function renderLaunchdPlist(definition: ManagedServiceDefinition): string {
     '<plist version="1.0">',
     '<dict>',
     '  <key>Label</key>',
-    `  <string>${definition.name}</string>`,
+    `  <string>${xmlText(definition.name)}</string>`,
     '  <key>GoodVibesManagedBy</key>',
-    `  <string>${LAUNCHD_MANAGED_BY_PREFIX}, ${definition.description}</string>`,
+    `  <string>${xmlText(`${LAUNCHD_MANAGED_BY_PREFIX}, ${definition.description}`)}</string>`,
     '  <key>ProgramArguments</key>',
     '  <array>',
     args,
     '  </array>',
     '  <key>WorkingDirectory</key>',
-    `  <string>${definition.workingDirectory}</string>`,
+    `  <string>${xmlText(definition.workingDirectory)}</string>`,
     '  <key>RunAtLoad</key>',
     '  <true/>',
     '  <key>KeepAlive</key>',
@@ -275,6 +297,33 @@ function renderWindowsCommand(definition: ManagedServiceDefinition): string {
   const taskName = definition.name;
   const commandLine = [definition.command, ...definition.args].join(' ');
   return `schtasks /Create /SC ONLOGON /TN "${taskName}" /TR "${commandLine}" /F`;
+}
+
+function windowsCreateArgs(definition: ManagedServiceDefinition): string[] {
+  const commandLine = [definition.command, ...definition.args].join(' ');
+  return ['/Create', '/SC', 'ONLOGON', '/TN', definition.name, '/TR', commandLine, '/F'];
+}
+
+/**
+ * The definition file carries the daemon's tokens, so status output shows the
+ * variable names but never their values.
+ */
+function redactDefinitionSecrets(contents: string): string {
+  let inLaunchdEnvironment = false;
+  let pendingLaunchdKey = false;
+  return contents.split('\n').map((line) => {
+    if (/^\s*Environment="?[A-Za-z_][A-Za-z0-9_]*=/.test(line)) {
+      return line.replace(/^(\s*Environment="?[A-Za-z_][A-Za-z0-9_]*=).*$/, '$1<redacted>');
+    }
+    if (/<key>EnvironmentVariables<\/key>/.test(line)) { inLaunchdEnvironment = true; return line; }
+    if (inLaunchdEnvironment && /<\/dict>/.test(line)) { inLaunchdEnvironment = false; return line; }
+    if (inLaunchdEnvironment && /<key>.*<\/key>/.test(line)) { pendingLaunchdKey = true; return line; }
+    if (inLaunchdEnvironment && pendingLaunchdKey && /<string>.*<\/string>/.test(line)) {
+      pendingLaunchdKey = false;
+      return line.replace(/<string>.*<\/string>/, '<string>&lt;redacted&gt;</string>');
+    }
+    return line;
+  }).join('\n');
 }
 
 function definitionPath(
@@ -347,6 +396,7 @@ export class PlatformServiceManager {
   private readonly defaultServiceName?: string | undefined;
   private readonly defaultServiceDescription?: string | undefined;
   private readonly featureFlags: FeatureFlagReader;
+  private readonly processControl: ManagedServiceProcessControl;
 
   constructor(configManager: ConfigManager, options: ManagedServiceManagerOptions) {
     this.configManager = configManager;
@@ -360,6 +410,7 @@ export class PlatformServiceManager {
     this.defaultServiceName = options.defaultServiceName;
     this.defaultServiceDescription = options.defaultServiceDescription;
     this.featureFlags = options.featureFlags ?? null;
+    this.processControl = options.processControl ?? {};
   }
 
   private assertCurrent(): void {
@@ -426,7 +477,7 @@ export class PlatformServiceManager {
       };
     }
     const installed = existsSync(path);
-    const { running, pid } = this.queryRunning(platform, serviceName);
+    const { running, pid, unreachable } = this.queryRunning(platform, serviceName);
     const definition = this.resolveDefinition();
     return {
       platform,
@@ -438,9 +489,10 @@ export class PlatformServiceManager {
       ...(pid !== undefined && running ? { pid } : {}),
       logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.surfaceRoot),
       commandPreview: installed ? path : [definition.command, ...definition.args].join(' '),
-      contents: installed ? readFileSync(path, 'utf-8') : undefined,
+      contents: installed ? redactDefinitionSecrets(readFileSync(path, 'utf-8')) : undefined,
       suggestedCommands: suggestedCommands(platform, path, serviceName),
       lastAction: 'status',
+      ...(unreachable ? { actionError: unreachable } : {}),
     };
   }
 
@@ -461,13 +513,30 @@ export class PlatformServiceManager {
     this.assertCurrent();
     mkdirSync(dirname(path), { recursive: true });
     this.assertCurrent();
-    writeFileSync(path, `${contents}\n`, 'utf-8');
+    // The definition embeds the daemon's tokens: owner-only, and tightened
+    // again because an older install left it world-readable.
+    writeFileSync(path, `${contents}\n`, { encoding: 'utf-8', mode: 0o600 });
+    try { chmodSync(path, 0o600); } catch { /* a platform without POSIX modes */ }
+    // Without the reload, systemd keeps acting on the previously loaded unit.
+    const registrationError = this.registerInstalledDefinition(platform, definition);
     const lingerNote = platform === 'systemd' ? this.ensureLinger() : undefined;
     return {
       ...this.status(),
       lastAction: 'install',
+      ...(registrationError === undefined ? {} : { actionError: registrationError }),
       ...(lingerNote ? { lingerNote } : {}),
     };
+  }
+
+  /** Makes the platform pick up a freshly written definition; returns the failure text, or undefined. */
+  private registerInstalledDefinition(platform: ManagedServicePlatform, definition: ManagedServiceDefinition): string | undefined {
+    const argv = platform === 'systemd' ? ['systemctl', '--user', 'daemon-reload']
+      : platform === 'windows' ? ['schtasks', ...windowsCreateArgs(definition)]
+        : undefined;
+    if (argv === undefined) return undefined;
+    const result = this.runQuery(argv[0]!, argv.slice(1));
+    if ((result.status ?? 1) === 0) return undefined;
+    return `${argv.slice(0, 2).join(' ')} failed: ${((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim()}`;
   }
 
   /** systemd major version via the injected runner, or null when unreadable. */
@@ -508,9 +577,28 @@ export class PlatformServiceManager {
     this.assertCurrent();
     this.requireEnabled('uninstall service');
     const status = this.status();
+    let actionError: string | undefined;
     if (existsSync(status.path)) {
+      // Stop and unregister while the definition still names the service, so
+      // removing the file does not leave a running, autostarting daemon behind.
+      // Ending a task that is not running, or unloading a job that is not loaded,
+      // exits non-zero without anything being left behind, so those are best effort.
+      const teardown: ReadonlyArray<{ readonly argv: readonly string[]; readonly bestEffort?: boolean }> = status.platform === 'systemd'
+        ? [{ argv: ['systemctl', '--user', 'disable', '--now', `${status.serviceName}.service`] }]
+        : status.platform === 'launchd'
+          ? [{ argv: ['launchctl', 'unload', status.path], bestEffort: true }]
+          : status.platform === 'windows'
+            ? [{ argv: ['schtasks', '/End', '/TN', status.serviceName], bestEffort: true }, { argv: ['schtasks', '/Delete', '/TN', status.serviceName, '/F'] }]
+            : [];
+      for (const { argv, bestEffort } of teardown) {
+        const result = this.runQuery(argv[0]!, argv.slice(1));
+        if ((result.status ?? 1) !== 0 && !bestEffort && actionError === undefined) {
+          actionError = `${argv.slice(0, 2).join(' ')} failed, so the service may still be running: ${((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim()}`;
+        }
+      }
       this.assertCurrent();
       rmSync(status.path, { force: true });
+      if (status.platform === 'systemd') this.runQuery('systemctl', ['--user', 'daemon-reload']);
     }
     const pidPath = pidFilePath(status.platform, this.workingDirectory, this.surfaceRoot);
     if (existsSync(pidPath)) {
@@ -520,6 +608,7 @@ export class PlatformServiceManager {
     return {
       ...this.status(),
       lastAction: 'uninstall',
+      ...(actionError === undefined ? {} : { actionError }),
     };
   }
 
@@ -548,8 +637,7 @@ export class PlatformServiceManager {
     this.requireEnabled('restart service');
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     if (platform === 'manual') {
-      this.stopManual(platform);
-      return this.startManual(platform, 'restart');
+      return this.restartManual(platform);
     }
     return this.runPlatformAction(platform, 'restart');
   }
@@ -588,21 +676,41 @@ export class PlatformServiceManager {
         cwd: definition.workingDirectory,
         detached: true,
         stdio: ['ignore', stdoutFd, stderrFd],
+        // An empty value means "not set" (the unit renderers drop it too); passing
+        // it on would shadow a token the child resolves for itself.
         env: {
           ...process.env,
-          ...definition.env,
+          ...Object.fromEntries(Object.entries(definition.env).filter(([, value]) => value.length > 0)),
         },
       };
       this.assertCurrent();
-      child = spawn(definition.command, [...definition.args], spawnOptions);
+      const launch = this.processControl.spawn ?? ((command: string, args: readonly string[], options: SpawnOptions) => spawn(command, [...args], options));
+      child = launch(definition.command, definition.args, spawnOptions);
+    } catch (error) {
+      return {
+        ...this.status(),
+        lastAction: action,
+        actionError: `could not start ${definition.command}: ${error instanceof Error ? error.message : String(error)}`,
+      };
     } finally {
       closeSync(stdoutFd);
       if (stderrFd !== undefined) closeSync(stderrFd);
     }
+    // A failed spawn reports asynchronously; without a listener it would be an
+    // uncaught exception in the daemon.
+    child.once('error', () => {});
     child.unref();
+    if (child.pid === undefined) {
+      return {
+        ...this.status(),
+        lastAction: action,
+        actionError: `could not start ${definition.command}: the process did not launch (check that the command exists and is executable)`,
+      };
+    }
     try {
       this.assertCurrent();
-      writeFileSync(pidPath, `${child.pid}\n`, 'utf-8');
+      const startedAt = this.startTimeOf(child.pid);
+      writeFileSync(pidPath, `${child.pid}\n${startedAt ?? ''}\n`, 'utf-8');
     } catch (error) {
       // This newly acquired child belongs to this call even if its restriction retired.
       child.kill('SIGTERM');
@@ -616,11 +724,12 @@ export class PlatformServiceManager {
 
   private stopManual(platform: ManagedServicePlatform): ManagedServiceStatus {
     const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
-    const pid = existsSync(pidPath) ? this.readPid(pidPath) : undefined;
-    if (pid !== undefined && this.isPidRunning(pid)) {
+    const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
+    if (record !== undefined && this.isServiceProcess(record)) {
       this.assertCurrent();
       try {
-        process.kill(pid, 'SIGTERM');
+        if (this.processControl.signal) this.processControl.signal(record.pid, 'SIGTERM');
+        else process.kill(record.pid, 'SIGTERM');
       } catch {
         // ignore stale processes
       }
@@ -633,6 +742,39 @@ export class PlatformServiceManager {
       ...this.status(),
       lastAction: 'stop',
     };
+  }
+
+  /** Stops the recorded process, waits for it to exit, and only then starts a new one. */
+  private restartManual(platform: ManagedServicePlatform): ManagedServiceStatus {
+    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
+    if (record !== undefined && record.pid === process.pid && this.isServiceProcess(record)) {
+      // This daemon is the recorded process: its own SIGTERM cannot be handled
+      // while this call waits for it, so it would only time out and start nothing.
+      return {
+        ...this.status(),
+        lastAction: 'restart',
+        actionError: `the service process (pid ${record.pid}) is the daemon answering this request and cannot restart itself; run the restart from a terminal (service restart) instead`,
+      };
+    }
+    this.stopManual(platform);
+    if (record !== undefined && this.isServiceProcess(record)) {
+      const pause = this.processControl.pause ?? sleepSynchronously;
+      for (let waited = 0; this.isServiceProcess(record) && waited < MANUAL_STOP_WAIT_MS; waited += MANUAL_STOP_POLL_MS) {
+        pause(MANUAL_STOP_POLL_MS);
+      }
+      if (this.isServiceProcess(record)) {
+        // Keep tracking it so stop/status can still find the process that did not exit.
+        this.assertCurrent();
+        writeFileSync(pidPath, `${record.pid}\n${record.startTime ?? ''}\n`, 'utf-8');
+        return {
+          ...this.status(),
+          lastAction: 'restart',
+          actionError: `the previous service process (pid ${record.pid}) did not exit within ${MANUAL_STOP_WAIT_MS / 1000} seconds, so no second one was started`,
+        };
+      }
+    }
+    return this.startManual(platform, 'restart');
   }
 
   private runPlatformAction(platform: ManagedServicePlatform, action: 'start' | 'stop' | 'restart'): ManagedServiceStatus {
@@ -652,7 +794,12 @@ export class PlatformServiceManager {
             ]
           : [{ argv: ['launchctl', action === 'stop' ? 'unload' : 'load', path] }]
         : platform === 'windows'
-          ? [{ argv: ['schtasks', action === 'start' ? '/Run' : action === 'stop' ? '/End' : '/Run', '/TN', serviceName] }]
+          ? action === 'restart'
+            ? [
+                { argv: ['schtasks', '/End', '/TN', serviceName], bestEffort: true },
+                { argv: ['schtasks', '/Run', '/TN', serviceName] },
+              ]
+            : [{ argv: ['schtasks', action === 'start' ? '/Run' : '/End', '/TN', serviceName] }]
           : [];
     if (steps.length === 0) {
       return {
@@ -687,26 +834,34 @@ export class PlatformServiceManager {
    * `actionRunner` used by start/stop/restart (never a raw exec bypassing it,
    * so tests can fake the query deterministically).
    */
-  private queryRunning(platform: ManagedServicePlatform, serviceName: string): { running: boolean; pid?: number | undefined } {
+  private queryRunning(platform: ManagedServicePlatform, serviceName: string): { running: boolean; pid?: number | undefined; unreachable?: string | undefined } {
     if (platform === 'systemd' || platform === 'launchd') {
       return this.queryPlatformRunning(platform, serviceName);
     }
     const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
-    const pid = existsSync(pidPath) ? this.readPid(pidPath) : undefined;
-    const running = pid !== undefined ? this.isPidRunning(pid) : false;
+    const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
+    const running = record !== undefined ? this.isServiceProcess(record) : false;
     // Status is observational; explicit stop/uninstall own stale PID cleanup.
 
-    return running ? { running, pid } : { running };
+    return running && record !== undefined ? { running, pid: record.pid } : { running };
   }
 
   private queryPlatformRunning(
     platform: 'systemd' | 'launchd',
     serviceName: string,
-  ): { running: boolean; pid?: number | undefined } {
+  ): { running: boolean; pid?: number | undefined; unreachable?: string | undefined } {
     if (platform === 'systemd') {
       const result = this.runQuery('systemctl', ['--user', 'is-active', `${serviceName}.service`]);
       const state = (result.stdout ?? '').trim();
-      return { running: (result.status ?? 1) === 0 && state === 'active' };
+      // A reachable manager always names a state ("inactive", "failed", ...),
+      // even for a unit it has never heard of. No exit status or an empty
+      // answer means no systemctl or no user bus (containers, WSL without
+      // systemd, other init systems): "not running" there would invite an
+      // unattended handover that cannot be completed after the stop.
+      if (result.status === null || (result.status !== 0 && state === '')) {
+        return { running: false, unreachable: 'the systemd user manager could not be reached (no systemctl or no user session bus)' };
+      }
+      return { running: result.status === 0 && state === 'active' };
     }
     // launchd: no single-job query is used here, `launchctl list <label>` prints
     // a plist dump on modern macOS, not a stable parseable field. Instead run the
@@ -716,6 +871,9 @@ export class PlatformServiceManager {
     // matching line = not loaded = not running; a `-` PID column = loaded but
     // stopped; a numeric PID = running.
     const result = this.runQuery('launchctl', ['list']);
+    if (result.status === null) {
+      return { running: false, unreachable: 'launchctl could not be reached or did not answer in time' };
+    }
     const match = (result.stdout ?? '')
       .split('\n')
       .map((line) => line.trim().split(/\s+/))
@@ -732,17 +890,32 @@ export class PlatformServiceManager {
     try {
       return this.actionRunner
         ? this.actionRunner(command, args)
-        : spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8' });
+        : spawnSync(command, args, { stdio: 'pipe', encoding: 'utf-8', timeout: SERVICE_QUERY_TIMEOUT_MS });
     } finally { this.assertCurrent(); }
   }
 
-  private readPid(path: string): number | undefined {
-    const raw = readFileSync(path, 'utf-8').trim();
-    const pid = Number.parseInt(raw, 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : undefined;
+  /** The pid file is `pid` then, optionally, the process start time that proves a reused pid is not ours. */
+  private readPidRecord(path: string): { pid: number; startTime?: string | undefined } | undefined {
+    const [first = '', second = ''] = readFileSync(path, 'utf-8').split('\n').map((line) => line.trim());
+    const pid = Number.parseInt(first, 10);
+    if (!Number.isFinite(pid) || pid <= 0) return undefined;
+    return second.length > 0 ? { pid, startTime: second } : { pid };
+  }
+
+  private startTimeOf(pid: number): string | null {
+    return (this.processControl.startTime ?? processStartTime)(pid);
+  }
+
+  /** Alive, and (when a start time was recorded and is readable) still the process that was started. */
+  private isServiceProcess(record: { pid: number; startTime?: string | undefined }): boolean {
+    if (!this.isPidRunning(record.pid)) return false;
+    if (record.startTime === undefined) return true;
+    const current = this.startTimeOf(record.pid);
+    return current === null || current === record.startTime;
   }
 
   private isPidRunning(pid: number): boolean {
+    if (this.processControl.isRunning) return this.processControl.isRunning(pid);
     try {
       process.kill(pid, 0);
       return true;
@@ -750,4 +923,8 @@ export class PlatformServiceManager {
       return false;
     }
   }
+}
+
+function sleepSynchronously(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }

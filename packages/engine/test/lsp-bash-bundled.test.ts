@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -8,6 +8,8 @@ import { execFileSync } from 'node:child_process';
 import { LspService } from '../platform/src/platform/intelligence/lsp/service.ts';
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 
+// These pin the installed bash-language-server and the `node` it runs under (both are required by the Bash LSP);
+// a failure here after a dependency upgrade means the new version changed behaviour the Bash LSP relies on.
 describe('bundled Bash LSP', () => {
   test('the native Node runtime preserves nested formatting defaults and validates ShellCheck diagnostics', () => {
     const require = createRequire(new URL('../package.json', import.meta.url));
@@ -44,6 +46,34 @@ describe('bundled Bash LSP', () => {
     } finally {
       await service.shutdown();
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a server binary inside the opened repository is not trusted, one in the user directory is', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'gv-lsp-repo-'));
+    const home = mkdtempSync(join(tmpdir(), 'gv-lsp-home-'));
+    const paths = createShellPathService({ workingDirectory: repo, homeDirectory: home });
+    const service = new LspService(paths);
+    const command = 'goodvibes-fixture-repo-lsp';
+    try {
+      service.registerServer('fixture', { command, args: [] });
+      for (const dir of [join(repo, 'node_modules', '.bin'), join(repo, '.goodvibes', 'bin')]) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, command), '#!/bin/sh\nexit 0\n');
+        chmodSync(join(dir, command), 0o755);
+      }
+      expect(await service.isAvailable('fixture')).toBe(false);
+      expect((await service.detectServers()).has('fixture')).toBe(false);
+
+      const userBin = paths.resolveUserPath('bin');
+      mkdirSync(userBin, { recursive: true });
+      writeFileSync(join(userBin, command), '#!/bin/sh\nexit 0\n');
+      chmodSync(join(userBin, command), 0o755);
+      expect(await service.isAvailable('fixture')).toBe(true);
+    } finally {
+      await service.shutdown();
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

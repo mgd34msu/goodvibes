@@ -1,7 +1,8 @@
 /**
  * MCP server configuration, scans multiple locations in precedence order.
  */
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
@@ -20,6 +21,8 @@ export interface McpServerConfig {
   args?: string[] | undefined;
   /** Optional environment variables to merge with process.env */
   env?: Record<string, string> | undefined;
+  /** Optional HTTP headers sent to a `url` server on every request, such as `Authorization`. Never shown on read routes. */
+  headers?: Record<string, string> | undefined;
   /** Optional role used by runtime coherence checks. */
   role?: 'general' | 'docs' | 'filesystem' | 'git' | 'database' | 'browser' | 'automation' | 'ops' | 'remote' | undefined;
   /** Optional initial trust mode for the runtime MCP trust layer. */
@@ -98,6 +101,7 @@ function normalizeServerConfig(name: string, raw: Record<string, unknown>): McpS
     url,
     args: optionalStringArray(raw.args) ?? [],
     env: optionalStringRecord(raw.env),
+    headers: optionalStringRecord(raw.headers),
     role: knownValue<NonNullable<McpServerConfig['role']>>(name, 'role', raw.role, MCP_SERVER_ROLES),
     trustMode: knownValue<NonNullable<McpServerConfig['trustMode']>>(name, 'trustMode', raw.trustMode, MCP_TRUST_MODES),
     allowedPaths: optionalStringArray(raw.allowedPaths),
@@ -163,16 +167,44 @@ function parseMcpServers(raw: unknown): McpServerConfig[] | null {
 
   if (isMcpConfig(raw)) {
     return raw.servers.map((server) => {
-      const { role, trustMode, ...rest } = server;
+      const { role, trustMode, headers, ...rest } = server;
+      const knownHeaders = optionalStringRecord(headers);
       const knownRole = knownValue<NonNullable<McpServerConfig['role']>>(server.name, 'role', role, MCP_SERVER_ROLES);
       const knownTrust = knownValue<NonNullable<McpServerConfig['trustMode']>>(server.name, 'trustMode', trustMode, MCP_TRUST_MODES);
       return {
         ...rest,
+        ...(knownHeaders !== undefined ? { headers: knownHeaders } : {}),
         ...(knownRole !== undefined ? { role: knownRole } : {}),
         ...(knownTrust !== undefined ? { trustMode: knownTrust } : {}),
       };
     });
   }
+  return null;
+}
+
+/** Fields this module models; anything else in a file is the user's and is carried through a rewrite. */
+const MODELLED_SERVER_FIELDS = new Set(['name', 'command', 'url', 'args', 'env', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts']);
+
+function readUnmodelledFields(path: string): Map<string, Record<string, unknown>> {
+  const found = new Map<string, Record<string, unknown>>();
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch { return found; }
+  if (!isRecord(raw)) return found;
+  const entries: [string, unknown][] = isRecord(raw.mcpServers)
+    ? Object.entries(raw.mcpServers)
+    : Array.isArray(raw.servers) ? raw.servers.map((value): [string, unknown] => [isRecord(value) && typeof value.name === 'string' ? value.name : '', value]) : [];
+  for (const [name, value] of entries) {
+    if (!name || !isRecord(value)) continue;
+    const extra = Object.fromEntries(Object.entries(value).filter(([key]) => !MODELLED_SERVER_FIELDS.has(key)));
+    if (Object.keys(extra).length > 0) found.set(name, extra);
+  }
+  return found;
+}
+
+/** A name the registry cannot address (it splits qualified tool names on ':' and '/'). */
+function serverNameProblem(name: string): string | null {
+  if (!name.trim()) return 'MCP server name is required.';
+  if (name.includes(':') || name.includes('/')) return 'MCP server name may not contain ":" or "/".';
   return null;
 }
 
@@ -194,15 +226,13 @@ function readMcpConfigAtPath(path: string): McpConfig {
 }
 
 function assertServerConfig(server: McpServerConfig): void {
-  if (!server.name.trim()) throw new Error('MCP server name is required.');
+  const nameProblem = serverNameProblem(server.name);
+  if (nameProblem) throw new Error(nameProblem);
   if (server.role !== undefined && !MCP_SERVER_ROLES.has(server.role)) {
     throw new Error(`MCP server role '${server.role}' is not one of: ${[...MCP_SERVER_ROLES].join(', ')}.`);
   }
   if (server.trustMode !== undefined && !MCP_TRUST_MODES.has(server.trustMode)) {
     throw new Error(`MCP server trustMode '${server.trustMode}' is not one of: ${[...MCP_TRUST_MODES].join(', ')}.`);
-  }
-  if (server.name.includes(':') || server.name.includes('/')) {
-    throw new Error('MCP server name may not contain ":" or "/".');
   }
   const hasCommand = Boolean(server.command?.trim());
   const hasUrl = Boolean(server.url?.trim());
@@ -210,16 +240,23 @@ function assertServerConfig(server: McpServerConfig): void {
   if (hasCommand && hasUrl) throw new Error('MCP server may set command (stdio) or url (HTTP), not both.');
 }
 
+/**
+ * Entries other than the one being written are carried through as read: an
+ * entry this module would refuse to add (an unaddressable name) must not make
+ * every later add or remove fail, and must not be deleted by one.
+ */
 function writeMcpConfigFile(path: string, config: McpConfig): void {
+  const unmodelled = existsSync(path) ? readUnmodelledFields(path) : new Map<string, Record<string, unknown>>();
   const normalized = {
     servers: config.servers.map((server) => {
-      assertServerConfig(server);
       return {
+        ...(unmodelled.get(server.name) ?? {}),
         name: server.name,
         ...(server.command !== undefined ? { command: server.command } : {}),
         ...(server.url !== undefined ? { url: server.url } : {}),
         ...(server.args !== undefined ? { args: [...server.args] } : {}),
         ...(server.env !== undefined ? { env: { ...server.env } } : {}),
+        ...(server.headers !== undefined ? { headers: { ...server.headers } } : {}),
         ...(server.role !== undefined ? { role: server.role } : {}),
         ...(server.trustMode !== undefined ? { trustMode: server.trustMode } : {}),
         ...(server.allowedPaths !== undefined ? { allowedPaths: [...server.allowedPaths] } : {}),
@@ -246,7 +283,19 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfi
     try {
       if (!existsSync(location.path)) continue;
       const config = readMcpConfigAtPath(location.path);
-      for (const server of config.servers) {
+      const projectScope = location.kind === 'project-mcp' || location.kind === 'project-goodvibes';
+      for (const parsed of config.servers) {
+        const nameProblem = serverNameProblem(parsed.name);
+        if (nameProblem) {
+          logger.warn('[MCP] Skipped a server entry that cannot be addressed; rename it in the file', { path: location.path, server: parsed.name, problem: nameProblem });
+          continue;
+        }
+        let server = parsed;
+        if (projectScope && server.trustMode === 'allow-all') {
+          // A checked-out repository must not grant its own servers unrestricted trust; the user's global config can.
+          logger.warn('[MCP] Ignored trustMode allow-all from a project file; the default trust mode applies', { path: location.path, server: server.name });
+          server = { ...server, trustMode: undefined };
+        }
         serversByName.set(server.name, { server, source: location });
       }
     } catch (err) {
@@ -291,14 +340,27 @@ export function upsertMcpServerConfig(
   const existing = current.servers.find((entry) => entry.name === server.name);
   const nextServers = current.servers.filter((entry) => entry.name !== server.name);
   const preservedEnv = server.env === undefined ? existing?.env : undefined;
+  const preservedHeaders = server.headers === undefined ? existing?.headers : undefined;
   nextServers.push({
     ...server,
     ...(preservedEnv === undefined ? {} : { env: { ...preservedEnv } }),
+    ...(preservedHeaders === undefined ? {} : { headers: { ...preservedHeaders } }),
   });
   nextServers.sort((a, b) => a.name.localeCompare(b.name));
   const config = { servers: nextServers };
   writeMcpConfigFile(location.path, config);
   return { path: location.path, config };
+}
+
+/**
+ * Run a read-modify-write of one writable config file while holding a lock on it,
+ * so two processes (the terminal and the daemon, or two sessions) cannot each
+ * read the same file and lose the other's change.
+ */
+export async function withMcpConfigLock<T>(roots: McpConfigRoots, scope: McpConfigScope, work: () => T): Promise<T> {
+  const location = writableMcpConfigLocation(roots, scope);
+  const release = await acquireCrossProcessLock(`${location.path}.lock`);
+  try { return work(); } finally { release(); }
 }
 
 export function removeMcpServerConfig(

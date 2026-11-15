@@ -7,6 +7,7 @@ import { buildRunTelemetryFromAgent, getTerminalAgentState } from './manager-run
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import {
+  failureNoticeCoversRunDelivery,
   scheduleAutomationFailureFollowUp,
   settleAutomationRunFailure,
   type AutomationFailureFollowUpContext,
@@ -166,7 +167,8 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
     } else if (terminalStatus === 'cancelled') {
       context.emitRunCompleted(updatedJob, updatedRun, 'cancelled');
     }
-    context.maybeDeliverRun(updatedJob, updatedRun);
+    // A failed or cancelled run is announced by its failure notice below.
+    if (terminalStatus === 'completed' || !failureNoticeCoversRunDelivery(updatedJob)) context.maybeDeliverRun(updatedJob, updatedRun);
     if (terminalStatus === 'completed' && updatedJob.deleteAfterRun) {
       context.cancelTimer(updatedJob.id);
       context.jobs.delete(updatedJob.id);

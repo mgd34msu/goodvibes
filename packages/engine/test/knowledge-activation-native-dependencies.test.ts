@@ -1,4 +1,3 @@
-/** Authored native regression SOURCE; execution deferred until coding finishes. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -117,7 +116,7 @@ test.each(['operator-replacement','merge'] as const)('fallible native acknowledg
       return result;
     });
     const fault = spyOn(SQLiteStore.prototype,'exec').mockImplementation(function(this: SQLiteStore, sql, params) {
-      if (this === sqlite && candidateWritten && sql === 'SELECT gv_revision FROM knowledge_nodes WHERE id = ? LIMIT 1') { failedReads++; throw new Error('Original native acknowledgment refused'); }
+      if (this === sqlite && candidateWritten && /^\s*SELECT\s+gv_revision\s+FROM\s+knowledge_nodes\b/i.test(sql)) { failedReads++; throw new Error('Original native acknowledgment refused'); }
       return originalExec.call(this,sql,params);
     });
     try {

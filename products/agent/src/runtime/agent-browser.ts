@@ -27,7 +27,6 @@ import {
 import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
-import { recordAgentSessionWrite } from '../tools/agent-session-write-ledger.ts';
 
 /**
  * What the agent tells someone whose browser host script is missing.
@@ -108,11 +107,6 @@ export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): Br
     {
       screenshotDirectory: options.screenshotDirectory,
       untrusted: options.untrusted ?? createAgentUntrustedContentPort(),
-      // The engine KNOWS it just created this exact file, which is the case
-      // the explicit session-write entry point exists for: the tool-event
-      // classifier deliberately refuses a waiver for browser writes because
-      // those paths did not pass through the model.
-      recordSessionWrite: recordAgentSessionWrite,
     },
   );
 }

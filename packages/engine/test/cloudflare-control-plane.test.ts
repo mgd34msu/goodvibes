@@ -770,13 +770,60 @@ describe('CloudflareControlPlaneManager', () => {
       verify: false,
     });
 
+    // The run reached its end, but nothing hostname-bound was set up: the result says so.
     expect(result.ok).toBe(true);
+    expect(result.warnings?.length).toBeGreaterThanOrEqual(3);
+    expect(result.warnings?.join('\n')).toContain('does not belong to selected zone buzznet.dev');
     expect(calls.dnsCreates).toEqual([]);
     expect(calls.accessAppCreates).toEqual([]);
     expect(calls.tunnelConfigUpdates).toEqual([]);
     expect(result.steps.map((step) => step.message).join('\n')).toContain('Configured daemonHostname daemon.not-owned.test does not belong to selected zone buzznet.dev');
     expect(result.steps.map((step) => step.message).join('\n')).toContain('Configured workerHostname worker.not-owned.test does not belong to selected zone buzznet.dev');
     expect(result.steps.map((step) => step.message).join('\n')).toContain('Access application was skipped because daemonHostname or service token id is missing.');
+  });
+
+  test('a provision whose Worker verification fails reports the warning instead of a clean success', async () => {
+    const configManager = makeConfigManager();
+    const { client } = makeCloudflareClient();
+    const manager = new CloudflareControlPlaneManager({
+      configManager,
+      secretsManager: makeSecrets(),
+      authToken: () => 'daemon-operator-token',
+      createClient: async () => client,
+      fetch: Object.assign(
+        async () => new Response('upstream broke', { status: 500 }),
+        { preconnect: (_url: string | URL, _options?: { dns?: boolean; tcp?: boolean; http?: boolean; https?: boolean }) => {} },
+      ),
+    });
+
+    const result = await manager.provision({
+      accountId: 'acct-1',
+      apiToken: 'cf-token',
+      daemonBaseUrl: 'https://daemon.example.com/',
+      verify: true,
+    });
+
+    expect(result.verification?.ok).toBe(false);
+    expect(result.warnings).toContain('Worker verification completed with warnings.');
+  });
+
+  test('a clean provision carries no warnings', async () => {
+    const { client } = makeCloudflareClient();
+    const manager = new CloudflareControlPlaneManager({
+      configManager: makeConfigManager(),
+      secretsManager: makeSecrets(),
+      authToken: () => 'daemon-operator-token',
+      createClient: async () => client,
+    });
+    const result = await manager.provision({
+      accountId: 'acct-1',
+      apiToken: 'cf-token',
+      operatorToken: 'dedicated-operator-token',
+      daemonBaseUrl: 'http://127.0.0.1:3421',
+      components: { queues: true },
+      verify: false,
+    });
+    expect(result.warnings).toEqual([]);
   });
 
   test('reuses existing Cloudflare resources when provisioning is run again', async () => {

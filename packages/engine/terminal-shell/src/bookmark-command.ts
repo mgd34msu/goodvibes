@@ -38,7 +38,7 @@ export function handleBookmarks(ctx: BookmarkCommandContext, getManager: () => P
             actions: '[d] delete',
           }));
     ctx.openSelection('Bookmarks', items, { allowSearch: true, customActions: deleteAction }, (result) => {
-      if (!result) return;
+      if (!result || result.item.id === '_empty') return;
       if (result.action === 'delete') {
         bm.toggle(result.item.id);
         ctx.print(`Bookmark removed: ${result.item.id}`);

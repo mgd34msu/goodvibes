@@ -7,19 +7,34 @@ export function registerGitRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'git',
     aliases: ['g'],
-    description: 'Git repository commands: status, log, diff',
-    usage: '[status|log|diff]',
-    argsHint: '[status|log|diff]',
+    description: 'Git repository commands: status, log, diff, init',
+    usage: '[status|log|diff|init]',
+    argsHint: '[status|log|diff|init]',
     async handler(args, ctx) {
       const sub = args[0] ?? 'status';
       const cwd = requireShellPaths(ctx).workingDirectory;
-      if (!GitService.isGitRepo(cwd)) {
+      const isRepo = GitService.isGitRepo(cwd);
+      if (sub === 'init') {
+        // Creating repository state is only ever an explicit request: later
+        // commands (the Changes view, checkpoints, quit-commit) treat any
+        // directory with a .git as a repository.
+        if (isRepo) {
+          ctx.print(`${cwd} is already inside a git repository; nothing was changed.`);
+          return;
+        }
         const initResult = GitService.initRepo(cwd);
         if (!initResult.success) {
           ctx.print(`Failed to initialise git repository: ${initResult.error ?? 'unknown error'}`);
           return;
         }
         ctx.print(`Initialized git repository in ${cwd}`);
+        return;
+      }
+      if (!isRepo) {
+        if (sub === 'status' || sub === 'log' || sub === 'diff') {
+          ctx.print(`Not a git repository: ${cwd}. Nothing was changed. Run /git init to create one.`);
+          return;
+        }
       }
 
       const git = new GitService(cwd);
@@ -81,7 +96,7 @@ export function registerGitRuntimeCommands(registry: CommandRegistry): void {
           break;
         }
         default:
-          ctx.print('Usage: /git [status|log|diff]\n  /git          — working tree status (default)\n  /git status   — working tree status\n  /git log      — recent commits\n  /git diff     — unstaged changes');
+          ctx.print('Usage: /git [status|log|diff|init]\n  /git          — working tree status (default)\n  /git status   — working tree status\n  /git log      — recent commits\n  /git diff     — unstaged changes\n  /git init     — create a repository here (never done implicitly)');
       }
     },
   });

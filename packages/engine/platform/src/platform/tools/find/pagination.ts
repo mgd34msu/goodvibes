@@ -1,4 +1,13 @@
 import type { OutputOptions } from './shared.js';
+import { DEFAULT_CEILING_TOKENS } from '../../runtime/tools/output-policy.js';
+
+/**
+ * Ceiling on one query's serialized page when the caller sets no
+ * `output.max_tokens`: a page that would exceed it is shortened and continued
+ * through `next_offset`, so no single call can flood the context.
+ */
+const CHARS_PER_TOKEN = 4;
+export const DEFAULT_FIND_PAGE_CHARS = DEFAULT_CEILING_TOKENS.find * CHARS_PER_TOKEN;
 
 /** Pagination limits output, never search coverage or the reported total. */
 export function paginateFindResult(result: Record<string, unknown>, output: OutputOptions): Record<string, unknown> {
@@ -13,8 +22,13 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
   const offset = output.offset ?? 0;
   const limit = output.max_total_matches ?? output.max_results ?? 100;
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 0) return { error: 'Pagination offset and page size must be nonnegative integers' };
+  // A page of zero rows could never be continued: has_more would be true with no next_offset.
+  if (limit === 0) return { error: "max_results and max_total_matches must be at least 1 (use output.format 'count_only' to get only the count)" };
   const perFile = output.max_per_item;
   if (perFile !== undefined && (!Number.isSafeInteger(perFile) || perFile < 0)) return { error: 'max_per_item must be a nonnegative integer' };
+  const budgetChars = output.max_tokens !== undefined && Number.isSafeInteger(output.max_tokens) && output.max_tokens > 0
+    ? output.max_tokens * CHARS_PER_TOKEN
+    : DEFAULT_FIND_PAGE_CHARS;
   const counts = new Map<string, number>();
   const eligible = perFile === undefined || key === 'files' ? rows : rows.filter(row => {
     const file = row && typeof row === 'object' ? (row as { file?: string }).file : undefined;
@@ -23,16 +37,33 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
     counts.set(file, count + 1);
     return count < perFile;
   });
-  const page = eligible.slice(offset, offset + limit);
-  if (offset === 0 && page.length === rows.length) return result;
-  const selected = new Set(page);
-  const displayed = groups ? Object.fromEntries(groups.map(([name, rows]) => [name, rows.filter(row => selected.has(row))]).filter(([, rows]) => (rows as unknown[]).length)) : page;
-  const hasMore = offset + page.length < eligible.length;
-  return {
-    ...result, [key]: displayed, total: result.count ?? rows.length, returned: page.length,
-    offset, has_more: hasMore,
-    ...(hasMore && page.length > 0 ? { next_offset: offset + page.length } : {}),
-    ...(eligible.length < rows.length ? { omitted_by_per_file_limit: rows.length - eligible.length } : {}),
-    ...(result.relationships && typeof result.relationships === 'object' ? { relationships: Object.fromEntries(Object.entries(result.relationships).filter(([file]) => page.some(row => row && typeof row === 'object' && (row as { file?: string }).file === file))) } : {}),
+  const fullPage = eligible.slice(offset, offset + limit);
+  if (offset === 0 && fullPage.length === rows.length && JSON.stringify(result).length <= budgetChars) return result;
+
+  const build = (page: readonly unknown[], trimmed: boolean): Record<string, unknown> => {
+    const selected = new Set(page);
+    const displayed = groups ? Object.fromEntries(groups.map(([name, rows]) => [name, rows.filter(row => selected.has(row))]).filter(([, rows]) => (rows as unknown[]).length)) : page;
+    const hasMore = offset + page.length < eligible.length;
+    return {
+      ...result, [key]: displayed, total: result.count ?? rows.length, returned: page.length,
+      offset, has_more: hasMore,
+      ...(hasMore && page.length > 0 ? { next_offset: offset + page.length } : {}),
+      ...(trimmed ? { page_shortened_to_fit: output.max_tokens !== undefined && output.max_tokens > 0 ? 'max_tokens' : 'default_size_limit' } : {}),
+      ...(eligible.length < rows.length ? { omitted_by_per_file_limit: rows.length - eligible.length } : {}),
+      ...(result.relationships && typeof result.relationships === 'object' ? { relationships: Object.fromEntries(Object.entries(result.relationships).filter(([file]) => page.some(row => row && typeof row === 'object' && (row as { file?: string }).file === file))) } : {}),
+    };
   };
+
+  const complete = build(fullPage, false);
+  if (fullPage.length <= 1 || JSON.stringify(complete).length <= budgetChars) return complete;
+  // The largest prefix of the page that fits; at least one row so a
+  // continuation always makes progress.
+  let low = 1;
+  let high = fullPage.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (JSON.stringify(build(fullPage.slice(0, middle), true)).length <= budgetChars) low = middle;
+    else high = middle - 1;
+  }
+  return build(fullPage.slice(0, low), true);
 }

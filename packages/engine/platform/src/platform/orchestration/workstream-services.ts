@@ -55,6 +55,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { calcSessionCost, isModelPriced } from '../providers/session-cost.js';
 import { editItemBrief, moveItemInSpec, removeItemFromSpec } from './workstream-draft-edits.js';
 import { createWorkstreamDraftStore, formatWorkstreamDraftReclaim } from './workstream-draft-store.js';
+import { validateAttempts } from './workstream-attempts-validation.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -277,7 +278,7 @@ function createWorkstreamCommandService(
   // nothing ever read it, which is deletion the user has no way to notice.
   const store = createWorkstreamDraftStore(projectRoot, {
     onReclaim: (summary) => {
-      logger.info(formatWorkstreamDraftReclaim(summary), {
+      logger.warn(formatWorkstreamDraftReclaim(summary), {
         projectRoot,
         expired: summary.expired,
         overCap: summary.overCap,
@@ -286,6 +287,19 @@ function createWorkstreamCommandService(
     },
   });
   for (const persisted of store.loadAll()) drafts.set(persisted.id, persisted);
+
+  /**
+   * Journal a draft after a change. A failed write leaves the older file on disk, and when that file was
+   * approved it would come back approved after a restart with the pre-edit plan, so it is retired
+   * (`staleApproved`); the draft is flagged `journaled: false` so the caller can say it lives in memory only.
+   */
+  function journal(draft: WorkstreamDraft, staleApproved: boolean): void {
+    delete draft.journaled; // never written to the snapshot
+    if (store.save(draft)) return;
+    draft.journaled = false;
+    if (staleApproved) store.remove(draft.id);
+    logger.warn('Workstream draft could not be saved to disk; it is held in memory only', { draftId: draft.id, olderApprovedFileRemoved: staleApproved });
+  }
 
   /**
    * Run the decomposition service: it spawns a bounded, read-only planning
@@ -366,9 +380,10 @@ function createWorkstreamCommandService(
     if (!draft) return undefined;
     const result = edit(draft.spec);
     if ('error' in result) return { error: result.error };
+    const wasApproved = draft.approved;
     draft.spec = result.spec;
     draft.approved = false;
-    store.save(draft);
+    journal(draft, wasApproved);
     return draft;
   }
 
@@ -391,7 +406,11 @@ function createWorkstreamCommandService(
     if (spec.items.length > 1) {
       return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) }, options);
     }
-    return contractRunner.start({ ...launch, ask: spec.items[0]?.task ?? draft.task }, options);
+    const only = spec.items[0];
+    if (only !== undefined && ((only.attempts ?? 1) > 1 || (only.files?.length ?? 0) > 0)) {
+      logger.warn('A single-item workstream draft launches as a plain ask; its best-of-N attempts and file list are not carried', { draftId: draft.id });
+    }
+    return contractRunner.start({ ...launch, ask: only?.task ?? draft.task }, options);
   }
 
   return {
@@ -411,7 +430,7 @@ function createWorkstreamCommandService(
       };
       if (drafts.has(draft.id)) throw new RangeError('Workstream draft identity already exists');
       drafts.set(draft.id, draft);
-      store.save(draft);
+      journal(draft, false);
       return draft;
     },
     getDraft: (id) => drafts.get(id),
@@ -420,6 +439,10 @@ function createWorkstreamCommandService(
       const draft = drafts.get(id);
       if (!draft) return undefined;
       const result = await decompose(task);
+      // The planning run is slow; the draft may have been removed or launched meanwhile, and writing it
+      // back would resurrect it on the next restart.
+      if (drafts.get(id) !== draft) return undefined;
+      const wasApproved = draft.approved;
       const nextIsolation = isolation ?? draft.spec.isolation;
       draft.task = task;
       draft.spec = { ...buildSpec(task, result.proposal), isolation: nextIsolation };
@@ -427,7 +450,7 @@ function createWorkstreamCommandService(
       draft.gate = result.gate;
       draft.provenance = toProvenance(result);
       draft.approved = false;
-      store.save(draft);
+      journal(draft, wasApproved);
       return draft;
     },
     editItem: (id, itemRef, brief) => applyItemEdit(id, (spec) => editItemBrief(spec, itemRef, brief)),
@@ -437,7 +460,7 @@ function createWorkstreamCommandService(
       const draft = drafts.get(id);
       if (!draft) return undefined;
       draft.approved = true;
-      store.save(draft); // approval must survive restart too, a resumed approved draft launches straight away
+      journal(draft, false); // approval must survive restart too, a resumed approved draft launches straight away
       return draft;
     },
     removeDraft(id) {
@@ -450,11 +473,26 @@ function createWorkstreamCommandService(
       const draft = drafts.get(id);
       if (!draft || !draft.approved) return Promise.resolve(null);
       requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
+      const attempts = validateAttempts(draft.spec);
+      if (attempts.violations.length > 0) {
+        return Promise.reject(new Error(`The workstream draft cannot launch: ${attempts.violations.join(' ')}`));
+      }
       const captured = structuredClone(draft);
       const unchanged = () => drafts.get(id) === draft && draft.approved && isDeepStrictEqual(draft, captured);
       const assertCurrent = () => { if (!unchanged()) throw new Error('The approved workstream draft changed before launch'); };
       const operation = (async () => {
-        const started = await startDraftContract(captured, { assertCurrent });
+        // While the launch is in flight the journal says "not approved": a crash between the contract
+        // starting and the snapshot being removed then brings the draft back for a fresh approval
+        // instead of launching it a second time on restart.
+        store.save({ ...captured, approved: false });
+        let started: Awaited<ReturnType<typeof startDraftContract>>;
+        try {
+          started = await startDraftContract(captured, { assertCurrent });
+        } catch (error) {
+          // The launch did not happen: put the approval back on disk for the draft still held.
+          if (drafts.get(id) === draft) store.save(draft);
+          throw error;
+        }
         // A later edit is a new draft; never delete it after the old launch
         // committed, or hide the already accepted contract's acknowledgement.
         if (unchanged()) { drafts.delete(id); store.remove(id); }

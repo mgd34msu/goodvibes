@@ -18,7 +18,7 @@
  * started underneath), and the attempt-counted wait that terminates even when
  * the injected sleep does nothing.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import {
   createDaemonFleetRowsPoller,
   daemonOnlyFleetActRefusal,
@@ -42,7 +42,10 @@ function node(id: string, label: string): ProcessNode {
   } as unknown as ProcessNode;
 }
 
-const settle = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 10); });
+/** Lets the promise chains a poll started run to the end; no timer is involved. */
+async function flushMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+}
 
 describe('the fleet is local rows union the daemon\'s', () => {
   test('the daemon\'s rows are folded in alongside this surface\'s', () => {
@@ -79,8 +82,10 @@ describe('the fleet is local rows union the daemon\'s', () => {
       probe: () => ({ available: false, reason: 'the daemon is disabled' }),
       invoke: async <T,>(): Promise<T> => { invoked += 1; return {} as T; },
     };
-    const poller = createDaemonFleetRowsPoller({ verbs, refreshIntervalMs: 5 });
-    await settle();
+    const poller = createDaemonFleetRowsPoller({ verbs, refreshIntervalMs: 10_000 });
+    // The poll that starts with the poller, and an explicit one, both ran to the end.
+    await poller.refresh();
+    await flushMicrotasks();
     expect(invoked).toBe(0);
     expect(poller.rows()).toBeNull();
     poller.stop();
@@ -107,17 +112,25 @@ describe('the fleet is local rows union the daemon\'s', () => {
   });
 
   test('stop() ends the refresh timer', async () => {
-    let invoked = 0;
-    const verbs: DaemonVerbCaller = {
-      probe: () => ({ available: true }),
-      invoke: async <T,>(): Promise<T> => { invoked += 1; return { capturedAt: 1, nodes: [] } as T; },
-    };
-    const poller = createDaemonFleetRowsPoller({ verbs, refreshIntervalMs: 5 });
-    await settle();
-    poller.stop();
-    const after = invoked;
-    await settle();
-    expect(invoked).toBe(after);
+    jest.useFakeTimers();
+    try {
+      let invoked = 0;
+      const verbs: DaemonVerbCaller = {
+        probe: () => ({ available: true }),
+        invoke: async <T,>(): Promise<T> => { invoked += 1; return { capturedAt: 1, nodes: [] } as T; },
+      };
+      const poller = createDaemonFleetRowsPoller({ verbs, refreshIntervalMs: 5 });
+      await flushMicrotasks();
+      expect(invoked).toBe(1);
+      // The timer does refresh while running, so the stop below is what ends it.
+      jest.advanceTimersByTime(5);
+      await flushMicrotasks();
+      expect(invoked).toBe(2);
+      poller.stop();
+      jest.advanceTimersByTime(500);
+      await flushMicrotasks();
+      expect(invoked).toBe(2);
+    } finally { jest.useRealTimers(); }
   });
 });
 

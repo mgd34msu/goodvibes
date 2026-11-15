@@ -60,7 +60,7 @@ export type ContextWindowOrigin =
 export interface ModelDefinition {
   id: string;
   provider: string;
-  /** Compound unique key: `${provider}:${id}`. Safe separator since model IDs use `/` not `:`. */
+  /** Compound unique key: `${provider}:${id}`. An id may itself contain `:` (Ollama `name:tag`), so split at the first colon only. */
   registryKey: string;
   displayName: string;
   description: string;
@@ -100,6 +100,12 @@ export interface RuntimeProviderRegistration {
   readonly models?: readonly ModelDefinition[] | undefined;
   readonly suppressCatalogModelRegistryKeys?: readonly string[] | undefined;
   readonly replace?: boolean | undefined;
+  /**
+   * Keep the runtime models and catalog suppressions this provider already has
+   * and add `models` to them, instead of replacing them. A model with the same
+   * registry key is still replaced.
+   */
+  readonly appendModels?: boolean | undefined;
 }
 
 /** Catalog limits now resolve locally; the former enrichment switch is retained for platform compatibility. */

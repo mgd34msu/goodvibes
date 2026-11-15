@@ -15,6 +15,8 @@
 import { describe, expect, test } from 'bun:test';
 import { DaemonSurfaceDeliveryHelper } from '../platform/src/platform/daemon/surface-delivery.ts';
 import type { AutomationRouteBinding } from '../platform/src/platform/automation/routes.ts';
+import { CONVERSATION_GATE_DEFAULT_SURFACES } from '../platform/src/platform/agents/conversation-gate.ts';
+import { ROUTE_SURFACE_KINDS } from '../platform/src/events/routes.ts';
 import type { ChannelRenderRequest } from '../platform/src/platform/channels/types.ts';
 
 interface RenderCall {
@@ -91,21 +93,23 @@ describe('surface notice delivery', () => {
   });
 
   test('every surface the conversation gate covers by default can carry a notice', async () => {
-    // Straight from conversationGate.gatedSurfaces. A surface that is gated but
-    // cannot be delivered to is a black hole: work is withheld and no question
-    // is ever asked.
-    const gated: readonly AutomationRouteBinding['surfaceKind'][] = [
-      'ntfy', 'telegram', 'slack', 'discord', 'homeassistant', 'google-chat',
-      'signal', 'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles',
-      'mattermost', 'matrix',
-    ];
-    for (const surface of gated) {
+    // A surface that is gated but cannot be delivered to is a black hole: work
+    // is withheld and no question is ever asked. The list is the gate's own, so
+    // a newly gated surface is checked here without anyone editing this test.
+    const unroutable: string[] = [];
+    for (const gatedSurface of CONVERSATION_GATE_DEFAULT_SURFACES) {
+      const surface = ROUTE_SURFACE_KINDS.find((kind) => kind === gatedSurface);
+      if (surface === undefined) { unroutable.push(gatedSurface); continue; }
       const calls: RenderCall[] = [];
       const helper = makeHelper({ calls });
       const outcome = await helper.deliverSurfaceNotice(makeBinding(surface), 'proposal');
       expect({ surface, outcome }).toEqual({ surface, outcome: { delivered: true } });
       expect(calls).toHaveLength(1);
     }
+    // Inbound mail is gated but has no route binding to deliver a notice through
+    // (its watcher cannot spawn work); any other name here is a gated surface
+    // this test could not reach.
+    expect(unroutable).toEqual(['email']);
   });
 
   test('a channel that reports non-delivery refuses rather than claiming success', async () => {

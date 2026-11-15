@@ -19,6 +19,7 @@ import {
   type MemoryEmbeddingProvider,
 } from '../platform/src/platform/state/memory-embeddings.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
+import { CODE_INDEX_SCHEMA_VERSION } from '../platform/src/platform/state/code-index-db.js';
 import { Database } from 'bun:sqlite';
 import { loadSqliteVecExtension } from '../platform/src/platform/state/sqlite-vec-loader.js';
 
@@ -30,7 +31,16 @@ function makeRoot(): string {
   return root;
 }
 
+const stores: CodeIndexStore[] = [];
+/** Every store a test opens is closed in afterEach, so a failed assertion cannot leak a handle. */
+function openStore(...args: ConstructorParameters<typeof CodeIndexStore>): CodeIndexStore {
+  const store = new CodeIndexStore(...args);
+  stores.push(store);
+  return store;
+}
+
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   while (roots.length > 0) {
     const root = roots.pop()!;
     rmSync(root, { recursive: true, force: true });
@@ -61,7 +71,7 @@ function makeCountingRegistry(root: string): { registry: MemoryEmbeddingProvider
 }
 
 async function makeStore(root: string, registry: MemoryEmbeddingProviderRegistry): Promise<CodeIndexStore> {
-  const store = new CodeIndexStore(root, ':memory:', registry);
+  const store = openStore(root, ':memory:', registry);
   await store.init();
   return store;
 }
@@ -250,7 +260,7 @@ describe('CodeIndexStore: chunk shape', () => {
     const root = makeRoot(), path = join(root, '.goodvibes', 'code-index.sqlite');
     writeFileSync(join(root, 'a.ts'), TS_FIXTURE);
     const { registry, callCount } = makeCountingRegistry(root);
-    const initial = new CodeIndexStore(root, path, registry);
+    const initial = openStore(root, path, registry);
     await initial.init();
     await initial.buildFull();
     const before = (await initial.search('foo')).map(result => result.chunk.chunkId).sort();
@@ -264,7 +274,7 @@ describe('CodeIndexStore: chunk shape', () => {
       previous.run("ALTER TABLE code_chunks ADD COLUMN content_hash TEXT NOT NULL DEFAULT 'old-chunk-digest'");
       previous.run('PRAGMA user_version = 1');
     } finally { previous.close(); }
-    const reopened = new CodeIndexStore(root, path, registry);
+    const reopened = openStore(root, path, registry);
     try {
       await reopened.init();
       expect(reopened.stats().available).toBe(true);
@@ -282,7 +292,7 @@ describe('CodeIndexStore: chunk shape', () => {
       expect(columns).toContain('file_revision');
       expect(columns).not.toContain('content_hash');
       expect(columns).not.toContain('file_hash');
-      expect(upgraded.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(3);
+      expect(upgraded.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version).toBe(CODE_INDEX_SCHEMA_VERSION);
     } finally { upgraded.close(); }
   });
 });

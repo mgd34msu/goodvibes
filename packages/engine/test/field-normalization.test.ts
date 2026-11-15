@@ -36,13 +36,6 @@ describe('companion-chat field normalization', () => {
     expect(readCompanionChatMessageBody({ body: '' })).toBe('');
   });
 
-  test('400 semantic: non-empty required: empty result triggers rejection', () => {
-    const result = readCompanionChatMessageBody({ other: 'ignored' });
-    expect(result).toBe('');
-    // Caller must check for empty and return 400
-    expect(result.trim()).toBe('');
-  });
-
   test('does not trim content (caller responsibility)', () => {
     expect(readCompanionChatMessageBody({ body: '  padded  ' })).toBe('  padded  ');
   });

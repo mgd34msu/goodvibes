@@ -21,8 +21,7 @@ export function createBlockContentActions(policy: {
     onCopied: () => void,
   ): void {
     if (!selection.hasSelection()) return;
-    copyToClipboard(selection.getSelectedText(getHistory()));
-    onCopied();
+    if (copyToClipboard(selection.getSelectedText(getHistory()))) onCopied();
     requestRender();
     setTimeout(() => requestRender(), 2005);
   }
@@ -37,8 +36,8 @@ export function createBlockContentActions(policy: {
       const lineIndex = getAnchorLine();
       const content = conversationManager.getBlockContentAtLine(lineIndex);
       if (!content) return;
-      copyToClipboard(content);
-      onCopied();
+      if (copyToClipboard(content)) onCopied();
+      else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
       const nearest = conversationManager.findNearestBlock(lineIndex);
       if (nearest) policy.noteTouch(conversationManager, nearest.collapseKey);
       requestRender();
@@ -52,14 +51,15 @@ export function createBlockContentActions(policy: {
       requestRender();
       return;
     }
-    copyToClipboard(nearest.rawContent);
-    onCopied();
+    const sent = copyToClipboard(nearest.rawContent);
+    if (sent) onCopied();
     // An explicit action on this block permanently exempts it from the
     // search-close auto-re-collapse (see TerminalConversationManager.noteUserTouch),
     // copying content the user just had search reveal is a deliberate choice
     // to keep it visible, not an accident of typing a query.
     policy.noteTouch(conversationManager, nearest.collapseKey);
-    conversationManager.log(`[Copied ${describeBlockForReceipt(nearest)}]`, { fg: activeTokens().success });
+    if (sent) conversationManager.log(`[Copied ${describeBlockForReceipt(nearest)}]`, { fg: activeTokens().success });
+    else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
     requestRender();
     setTimeout(() => requestRender(), 2005);
   }

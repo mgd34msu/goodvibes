@@ -52,7 +52,7 @@ function imap(validity = 7, rejected = false) {
   const events = new EventEmitter(); const writes: string[] = [];
   const socket = { setEncoding() {}, setTimeout() {}, on: events.on.bind(events), destroy() {}, write(line: string) {
     writes.push(line); const tag = line.split(' ')[0];
-    queueMicrotask(() => { if (line.includes('SELECT')) events.emit('data', `* OK [UIDVALIDITY ${validity}] current\r\n`); events.emit('data', `${tag} ${rejected ? 'NO' : 'OK'} done\r\n`); });
+    queueMicrotask(() => { if (line.includes('SELECT')) events.emit('data', `* OK [UIDVALIDITY ${validity}] current\r\n`); if (line.includes('UID STORE')) events.emit('data', '* 1 FETCH (FLAGS (GoodVibes_Spam))\r\n'); events.emit('data', `${tag} ${rejected ? 'NO' : 'OK'} done\r\n`); });
   } } as ImapSocketLike;
   const connect = () => { queueMicrotask(() => events.emit('data', '* OK ready\r\n')); return socket; };
   return { writes, connect };

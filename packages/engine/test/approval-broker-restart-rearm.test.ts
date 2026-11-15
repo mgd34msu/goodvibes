@@ -229,7 +229,7 @@ describe('an approval survives a restart with its deadline intact', () => {
     }
   });
 
-  test('an approval with no timeout is left alone by the re-arm sweep', async () => {
+  test('an in-process approval with no timeout is cancelled at restart, because nothing waits for it', async () => {
     const store = makeStorePath();
     try {
       const first = new ApprovalBroker({ storePath: store.path });
@@ -237,24 +237,39 @@ describe('an approval survives a restart with its deadline intact', () => {
       void first.requestApproval({ request: request('call-3') }).catch(() => undefined);
       await waitFor(() => persisted(store.path, 'call-3'));
 
-      // A second ask, with a deadline, that the sweep has to settle. Creating
-      // it only after call-3 is on disk keeps the two writes from overlapping,
-      // so neither one's snapshot can land on top of the other's.
-      void first.requestApproval({ request: request('call-3-witness', WITNESS_ARGS) }).catch(() => undefined);
-      await waitFor(() => persisted(store.path, 'call-3-witness'));
-      setPersistedDeadline(store.path, 'call-3-witness', Date.now() + REARM_WINDOW_MS);
+      const second = new ApprovalBroker({ storePath: store.path });
+      await second.start();
+      await waitFor(() => statusOf(second, 'call-3') === 'cancelled');
+      const restored = second.listApprovals().find((entry) => entry.callId === 'call-3');
+      expect(restored?.decision?.approved).toBe(false);
+      expect(restored?.audit.at(-1)?.note).toContain('restarted');
+
+      // The next identical ask gets a fresh record and its own prompt rather
+      // than silently joining the dead one.
+      let prompted = 0;
+      const again = second.requestApproval({ request: request('call-3b'), localPrompt: async () => { prompted += 1; return { approved: true }; } });
+      expect((await again).approved).toBe(true);
+      expect(prompted).toBe(1);
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  test('a wire-raised approval with no timeout stays open across a restart for its remote caller', async () => {
+    const store = makeStorePath();
+    try {
+      const first = new ApprovalBroker({ storePath: store.path });
+      await first.start();
+      void first.raiseApproval({ request: request('call-wire'), metadata: { raisedVia: 'approvals.raise' } });
+      await waitFor(() => persisted(store.path, 'call-wire'));
+      void first.requestApproval({ request: request('call-wire-witness', WITNESS_ARGS) }).catch(() => undefined);
+      await waitFor(() => persisted(store.path, 'call-wire-witness'));
+      setPersistedDeadline(store.path, 'call-wire-witness', Date.now() + REARM_WINDOW_MS);
 
       const second = new ApprovalBroker({ storePath: store.path });
       await second.start();
-      await witnessSweepRan(second, 'call-3-witness');
-
-      // No deadline was ever set, so there is nothing to re-arm and nothing to
-      // expire. It stays pending, correctly, until something answers it, and
-      // the witness above is what makes that a statement about a sweep that
-      // ran, rather than about one that had not reached this record yet.
-      const restored = second.listApprovals().find((entry) => entry.callId === 'call-3');
-      expect(restored?.status).toBe('pending');
-      expect(restored?.expiresAt).toBeUndefined();
+      await witnessSweepRan(second, 'call-wire-witness');
+      expect(statusOf(second, 'call-wire')).toBe('pending');
     } finally {
       store.cleanup();
     }

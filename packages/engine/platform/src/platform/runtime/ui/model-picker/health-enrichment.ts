@@ -7,6 +7,7 @@
  */
 import type { ModelDefinition } from '../../../providers/registry.js';
 import type { ProviderRegistry } from '../../../providers/registry.js';
+import { supportsCaching } from '../../../providers/cache-capability.js';
 import { readModelContextWindow } from '../../../providers/context-window-reading.js';
 import type { BenchmarkStore } from '../../../providers/model-benchmarks.js';
 import type { ProviderHealthDomainState, ProviderHealthRecord } from '../../store/domains/provider-health.js';
@@ -75,7 +76,8 @@ function buildHealthContext(record: ProviderHealthRecord | undefined): ProviderH
 function buildCapabilityFlags(model: ModelDefinition): CapabilityFlags {
   return {
     reasoning: model.capabilities?.reasoning ?? false,
-    caching: false, // Provider-level cache support is not part of ModelDefinition capabilities.
+    // Caching is a property of the provider's adapter (providers/cache-capability.ts), not of the model definition.
+    caching: supportsCaching(model.provider),
     toolCalling: model.capabilities?.toolCalling ?? false,
     multimodal: model.capabilities?.multimodal ?? false,
     codeEditing: model.capabilities?.codeEditing ?? false,

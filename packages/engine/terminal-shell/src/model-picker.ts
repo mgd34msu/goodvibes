@@ -137,6 +137,8 @@ export class ModelPickerModal {
   public configuredViaMap: Map<string, 'env' | 'secrets' | 'subscription' | 'anonymous'> = new Map();
   /** IDs of pinned/favorite models, shown at top of list. */
   public pinnedIds: Set<string> = new Set();
+  /** Counts local pin flips, so a slow load of the stored pins can tell it is out of date. */
+  public pinEdits = 0;
   /** IDs of recently used models, shown after pinned, before the rest. */
   public recentIds: string[] = [];
   /** Benchmark score sort order. */
@@ -470,6 +472,7 @@ export class ModelPickerModal {
     next.delete(model.registryKey);
     if (!pinned) next.add(model.registryKey);
     this.pinnedIds = next;
+    this.pinEdits += 1;
     this.clearCaches();
     return !pinned;
   }

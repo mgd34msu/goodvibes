@@ -2,7 +2,7 @@ import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import { operatorFlagValue, operatorRequiredFlag, parseIdentityPairs, parseOperatorCommandArgs } from './operator-command-args.ts';
+import { operatorFlagValue, operatorHasFlag, operatorRequiredFlag, parseIdentityPairs, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
@@ -15,7 +15,7 @@ const PRINCIPALS_GET_USAGE = 'Usage: goodvibes-agent principals get <id>';
 const PRINCIPALS_CREATE_USAGE =
   'Usage: goodvibes-agent principals create --name <name> --kind <user|bot|service|token> [--identity channel:value,channel:value] --yes';
 const PRINCIPALS_UPDATE_USAGE =
-  'Usage: goodvibes-agent principals update <id> [--name <name>] [--kind <user|bot|service|token>] [--identity channel:value,channel:value] --yes';
+  'Usage: goodvibes-agent principals update <id> [--name <name>] [--kind <user|bot|service|token>] [--identity channel:value,channel:value|--clear-identities] --yes';
 const PRINCIPALS_DELETE_USAGE = 'Usage: goodvibes-agent principals delete <id> --yes';
 const PRINCIPALS_RESOLVE_USAGE = 'Usage: goodvibes-agent principals resolve --channel <channel> --value <value>';
 const PRINCIPALS_USAGE =
@@ -127,7 +127,7 @@ async function handlePrincipalsCreate(runtime: CliCommandRuntime, args: readonly
 }
 
 async function handlePrincipalsUpdate(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
-  const parsed = parseOperatorCommandArgs(args, ['name', 'kind', 'identity']);
+  const parsed = parseOperatorCommandArgs(args, ['name', 'kind', 'identity'], ['clear-identities']);
   const principalId = parsed.positionals[0];
   if (!principalId) return usageFailure(runtime, PRINCIPALS_UPDATE_USAGE);
   let kind: PrincipalKind | undefined;
@@ -139,6 +139,10 @@ async function handlePrincipalsUpdate(runtime: CliCommandRuntime, args: readonly
   } catch (error) {
     return usageFailure(runtime, error instanceof Error ? error.message : String(error));
   }
+  const clearIdentities = operatorHasFlag(parsed, 'clear-identities');
+  if (clearIdentities && identities.length > 0) {
+    return usageFailure(runtime, `${PRINCIPALS_UPDATE_USAGE}\n--identity and --clear-identities cannot be used together.`);
+  }
   if (!parsed.yes) {
     return { output: `Refusing to update principal ${principalId} without --yes.`, exitCode: 2 };
   }
@@ -146,7 +150,8 @@ async function handlePrincipalsUpdate(runtime: CliCommandRuntime, args: readonly
     principalId,
     name: operatorFlagValue(parsed, 'name'),
     kind,
-    identities: identities.length > 0 ? identities : undefined,
+    // Supplying identities replaces the set, so an empty list is how they are cleared.
+    identities: clearIdentities ? [] : identities.length > 0 ? identities : undefined,
   };
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);
   const result = await invokeOperatorGatewayMethod(connection, 'principals.update', PRINCIPAL_ROUTE, payload);

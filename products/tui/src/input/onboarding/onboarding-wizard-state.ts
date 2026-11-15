@@ -103,10 +103,18 @@ export function getFieldValidationError(
       return null;
     }
 
-    if (field.id === 'network.service-port' || field.id === 'network.browser-port' || field.id === 'network.webhook-port') {
+    if (field.id === 'network.service-port' || field.id === 'network.browser-port' || field.id === 'network.webhook-port' || field.id === 'network.adopt-daemon-port') {
       const parsed = controller.parseIntegerFieldValue(field.id, Number.parseInt(field.defaultValue, 10));
       if (parsed === null || parsed < 1 || parsed > 65535) {
         return `${step.shortLabel}: ${field.label} must be a port number from 1 to 65535.`;
+      }
+      return null;
+    }
+
+    if (field.id === 'cloudflare.max-queue-ops-per-day') {
+      const parsed = controller.parseIntegerFieldValue(field.id, Number.parseInt(field.defaultValue, 10));
+      if (parsed === null || parsed < 1) {
+        return `${step.shortLabel}: ${field.label} must be a whole number of at least 1.`;
       }
       return null;
     }

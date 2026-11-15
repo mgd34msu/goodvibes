@@ -31,6 +31,12 @@ export interface ReferenceNodeHostConfig {
   readonly maxWorkItemsPerPull: number;
   readonly statePath: string;
   readonly operatorToken?: string;
+  /**
+   * The requested id is fixed per host, so a re-pair names the peer this host already registered and the daemon
+   * refuses to replace it unless the approval confirms it. Retry with confirmation after that refusal (default true;
+   * set false to leave such an approval to a human operator).
+   */
+  readonly confirmReplace?: boolean;
   readonly workLeaseMs?: number;
 }
 
@@ -90,17 +96,31 @@ function normalizeList(values: readonly string[] | undefined, fallback: readonly
   return [...new Set(source.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
-function readJsonFile<T>(path: string): Promise<T | null> {
-  return readFile(path, 'utf-8')
-    .then((raw) => JSON.parse(raw) as T)
-    .catch(() => null);
+/** Null when the file is absent; throws when it exists but is not JSON, so the caller decides what happens to it. */
+async function readJsonFile<T>(path: string): Promise<T | null> {
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  return JSON.parse(raw) as T;
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.${randomUUID().slice(0, 8)}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
+  // The state file holds the peer's bearer token: owner-only, whatever the umask.
+  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
   await rename(tmpPath, path);
+}
+
+/** A non-2xx answer from the host, so callers can tell a refused credential from a transient failure. */
+class HostRejectedError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
 }
 
 class ExponentialBackoff {
@@ -146,8 +166,17 @@ export class ReferenceNodeHostClient {
   }
 
   async loadState(): Promise<void> {
-    const loaded = await readJsonFile<ReferenceNodeHostState>(this.stateFile);
-    this.state = loaded ?? {};
+    let loaded: ReferenceNodeHostState | null = null;
+    let unreadable: string | undefined;
+    try {
+      loaded = await readJsonFile<ReferenceNodeHostState>(this.stateFile);
+    } catch (error) {
+      // Keep the unreadable file for the owner instead of overwriting it, and say so in the state.
+      const keptAs = `${this.stateFile}.corrupt-${Date.now()}`;
+      await rename(this.stateFile, keptAs);
+      unreadable = `State file could not be read (${error instanceof Error ? error.message : String(error)}); kept as ${keptAs}. Pairing again.`;
+    }
+    this.state = loaded ?? (unreadable === undefined ? {} : { lastError: unreadable });
     if (this.state.contract) {
       this.contract = this.state.contract;
     }
@@ -217,12 +246,17 @@ export class ReferenceNodeHostClient {
 
   async approvePairRequest(note = 'reference node-host approval'): Promise<boolean> {
     if (!this.config.operatorToken || !this.state.pairRequest?.id) return false;
-    const response = await fetch(new URL(`/api/remote/pair/requests/${encodeURIComponent(this.state.pairRequest.id)}/approve`, this.config.baseUrl).toString(), {
+    const url = new URL(`/api/remote/pair/requests/${encodeURIComponent(this.state.pairRequest.id)}/approve`, this.config.baseUrl).toString();
+    const approve = (confirmReplace: boolean): Promise<Response> => fetch(url, {
       method: 'POST',
       headers: this.operatorHeaders(),
-      body: JSON.stringify({ note }),
+      body: JSON.stringify({ note, ...(confirmReplace ? { confirmReplace: true } : {}) }),
     });
-    return response.ok;
+    const response = await approve(false);
+    if (response.status !== 409 || this.config.confirmReplace === false) return response.ok;
+    const refusal = await response.json().catch(() => null) as { code?: unknown } | null;
+    if (refusal?.code !== 'REMOTE_PAIR_REPLACES_PEER') return false;
+    return (await approve(true)).ok;
   }
 
   async verifyPairing(): Promise<boolean> {
@@ -278,10 +312,16 @@ export class ReferenceNodeHostClient {
     }
 
     if (this.state.token?.value) {
+      // The heartbeat interval is applied here and nowhere else: a stored token is re-proven only when one is due.
+      const due = !this.state.peer || !this.state.lastHeartbeatAt
+        || (Date.now() - this.state.lastHeartbeatAt) >= this.config.heartbeatIntervalMs;
+      if (!due) return true;
       try {
         await this.heartbeat();
         return true;
-      } catch {
+      } catch (error) {
+        // Only a refused credential discards the pairing. A network failure or a 5xx says nothing about the token, so it is retried with backoff.
+        if (!(error instanceof HostRejectedError) || (error.status !== 401 && error.status !== 403)) throw error;
         this.state = {
           ...this.state,
           token: undefined,
@@ -325,7 +365,7 @@ export class ReferenceNodeHostClient {
       }),
     });
     if (!response.ok) {
-      throw new Error(`Heartbeat failed (${response.status})`);
+      throw new HostRejectedError(`Heartbeat failed (${response.status})`, response.status);
     }
     const payload = await response.json() as { peer?: DistributedPeerRecord };
     if (!payload.peer) {
@@ -477,23 +517,17 @@ export class ReferenceNodeHostClient {
   }
 
   async runOnce(): Promise<ReferenceNodeHostRunSummary> {
+    const heartbeatBefore = this.state.lastHeartbeatAt;
     const paired = await this.ensureSession();
     if (!paired || !this.state.token?.value) {
       return { paired: false, heartbeated: false, claimed: 0, completed: 0, failed: 0 };
     }
 
-    let heartbeated = false;
+    // ensureSession owns the heartbeat schedule; a changed timestamp means one was sent.
+    const heartbeated = this.state.lastHeartbeatAt !== heartbeatBefore;
     let claimed = 0;
     let completed = 0;
     let failed = 0;
-
-    const shouldHeartbeat =
-      !this.state.lastHeartbeatAt
-      || (Date.now() - this.state.lastHeartbeatAt) >= this.config.heartbeatIntervalMs;
-    if (shouldHeartbeat) {
-      await this.heartbeat();
-      heartbeated = true;
-    }
 
     const shouldPull =
       !this.state.lastWorkPullAt
@@ -590,6 +624,7 @@ export function createDefaultReferenceNodeHostConfig(overrides: Partial<Referenc
     verifyRetryMs: 2_500,
     verifyTimeoutMs: 10 * 60_000,
     maxWorkItemsPerPull: 4,
+    confirmReplace: true,
     statePath: '~/.goodvibes/reference-node-host/state.json',
     ...overrides,
   };

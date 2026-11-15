@@ -15,16 +15,15 @@ import {
   HttpStatusError,
   RETRYABLE_STATUS_CODES,
   createHttpStatusError,
-} from '../errors/dist/index.js';
-import { RETRYABLE_STATUS_CODES as ENGINE_RETRYABLE_STATUS_CODES } from '../platform/dist/platform/types/errors.js';
-import { DEFAULT_HTTP_RETRY_POLICY } from '../transport-http/dist/index.js';
-import type { EngineErrorKind } from '../errors/dist/index.js';
+} from '../errors/src/index.js';
+import { RETRYABLE_STATUS_CODES as ENGINE_RETRYABLE_STATUS_CODES } from '../platform/src/platform/types/errors.js';
+import { DEFAULT_HTTP_RETRY_POLICY } from '../transport-http/src/index.js';
+import type { EngineErrorKind } from '../errors/src/index.js';
 
 describe('error-kind: packages/errors', () => {
   describe('GoodVibesError base class', () => {
     test('has kind field', () => {
       const err = new GoodVibesError('base');
-      expect(typeof err.kind).toBe('string'); // kind is always a string
       expect(typeof err.kind).toBe('string');
     });
 
@@ -210,7 +209,7 @@ describe('error-kind: packages/errors', () => {
   });
 
   describe('kind as tagged union discriminant', () => {
-    test('switch on kind covers all values without runtime errors', () => {
+    test('each error shape maps to its own kind', () => {
       const errors = [
         new ConfigurationError('c'),
         new ContractError('c'),
@@ -223,25 +222,7 @@ describe('error-kind: packages/errors', () => {
         new GoodVibesError('x'),
       ];
 
-      const kinds: EngineErrorKind[] = [];
-      for (const err of errors) {
-        switch (err.kind) {
-          case 'auth': kinds.push('auth'); break;
-          case 'config': kinds.push('config'); break;
-          case 'contract': kinds.push('contract'); break;
-          case 'network': kinds.push('network'); break;
-          case 'not-found': kinds.push('not-found'); break;
-          case 'protocol': kinds.push('protocol'); break;
-          case 'rate-limit': kinds.push('rate-limit'); break;
-          case 'service': kinds.push('service'); break;
-          case 'internal': kinds.push('internal'); break;
-          case 'tool': kinds.push('tool'); break;
-          case 'validation': kinds.push('validation'); break;
-          case 'unknown': kinds.push('unknown'); break;
-        }
-      }
-
-      expect(kinds).toEqual([
+      expect(errors.map((err) => err.kind)).toEqual([
         'config',
         'contract',
         'auth',
@@ -260,33 +241,5 @@ describe('retryable status codes', () => {
   test('platform and HTTP retry policies use the canonical errors package list', () => {
     expect(ENGINE_RETRYABLE_STATUS_CODES).toEqual(RETRYABLE_STATUS_CODES);
     expect(DEFAULT_HTTP_RETRY_POLICY.retryOnStatuses).toEqual(RETRYABLE_STATUS_CODES);
-  });
-});
-
-describe('error-kind: canonical errors package', () => {
-  test('GoodVibesError from canonical errors package has kind field', async () => {
-    const { GoodVibesError: PlatformMirrorBase } = await import('../errors/src/index.js');
-    const err = new PlatformMirrorBase('test', { category: 'rate_limit' });
-    expect(err.kind).toBe('rate-limit');
-  });
-
-  test('ConfigurationError from canonical errors package has kind config', async () => {
-    const { ConfigurationError: PlatformConfigError } = await import('../errors/src/index.js');
-    const err = new PlatformConfigError('bad config');
-    expect(err.kind).toBe('config');
-  });
-
-  test('ContractError from canonical errors package has kind contract', async () => {
-    const { ContractError: PlatformContractError } = await import('../errors/src/index.js');
-    const err = new PlatformContractError('bad contract');
-    expect(err.kind).toBe('contract');
-  });
-
-  test('HttpStatusError from canonical errors package instanceof works', async () => {
-    const { HttpStatusError: PlatformHttpError, GoodVibesError: PlatformBase } = await import('../errors/src/index.js');
-    const err = new PlatformHttpError('test', { category: 'service' });
-    expect(err).toBeInstanceOf(PlatformBase);
-    expect(err).toBeInstanceOf(PlatformHttpError);
-    expect(err.kind).toBe('service');
   });
 });

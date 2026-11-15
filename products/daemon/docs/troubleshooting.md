@@ -24,8 +24,7 @@ Configured Slack/email sources need explicit account and trusted local screening
 owners. Merely filling token settings does not construct that authority. A fresh,
 unconfigured inbox may boot; configured missing/unreadable authority refuses with
 owned rollback instead of silently becoming an empty inbox. Configured Discord
-inbox/DM catalog qualification remains open. See [deployment boundaries](../README.md)
-and production intake contract.
+inbox/DM catalog qualification remains open. See [deployment boundaries](../README.md).
 
 Malformed settings are not treated as safe defaults. Preserve the file and fix the
 reported key/schema/version issue; do not delete safety constraints to force boot.
@@ -51,7 +50,7 @@ release/feed/activation policy remains unresolved.
 
 ```sh
 goodvibes-daemon status --json
-goodvibes-daemon status --host daemon.example --port 3421 --token "$TOKEN" --json
+goodvibes-daemon status --host https://daemon.example --port 3421 --token "$TOKEN" --json
 ```
 
 The token must belong to the target daemon. `/status` and `/api/health` require
@@ -85,7 +84,7 @@ fabricated usable QR.
 
 Pass the same effective token and nonzero port override used by the serving process
 when necessary. A separate CLI cannot discover another process's ephemeral port.
-Remote `pair --host <name>` mints a new per-device token through
+Remote `pair --host https://<name>` (the scheme is required for another machine) mints a new per-device token through
 `pairing.handoff.create` only with its explicit `-y` confirmation; no confirmation
 means no remote mutation. Existing tokens remain intact. See the
 [command reference](commands-reference.md#pair).
@@ -101,6 +100,11 @@ goodvibes-daemon config set controlPlane.host 127.0.0.1
 goodvibes-daemon config set controlPlane.port 3431
 goodvibes-daemon restart-service
 ```
+
+A running daemon also applies a changed control-plane host or port without a
+restart. It binds the new address before releasing the old one, so an address
+that cannot be bound leaves the daemon serving on the previous address (the
+error is logged) and the setting can be corrected over the same connection.
 
 The final command still requires the service-launcher prerequisites. `--port` and
 `--host` are runtime-only on foreground serve and refused on service commands.

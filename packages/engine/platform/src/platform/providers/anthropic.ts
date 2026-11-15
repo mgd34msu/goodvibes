@@ -43,10 +43,19 @@ import { resolveCompletedStopReason, withProviderStopReason } from './provider-s
 import type { AnthropicContentBlock } from './tool-formats.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
-import { toRecord } from '../utils/record-coerce.js';
+import { isRecord, toRecord } from '../utils/record-coerce.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com/v1';
+
+function isAnthropicApiUrl(url: string): boolean {
+  try {
+    return new URL(url).origin === new URL(ANTHROPIC_API_BASE).origin;
+  } catch {
+    return false;
+  }
+}
 const ANTHROPIC_API_VERSION = '2023-06-01';
 
 /**
@@ -189,7 +198,8 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
-    const { messages, tools, model, maxTokens, signal, systemPrompt, onDelta, onRetry, reasoningEffort } = params;
+    const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry, reasoningEffort } = params;
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
       const resolvedModel = normalizeAnthropicModel(model);
@@ -233,23 +243,24 @@ export class AnthropicProvider implements LLMProvider {
       let breakpointsPlaced = 0;
 
       if (strategy.breakpoints.length > 0) {
-        // BP1: System prompt + tools (1h TTL for stable content).
+        // BP1: System prompt + tools (1h TTL for stable content). A cache
+        // breakpoint covers everything before it, and the request prefix is
+        // tools, then system, then messages: the marker goes on the LAST SYSTEM
+        // block so it covers tools and system together (the strategy sized it
+        // for both). On the last tool it would cover the tools alone, leaving
+        // the system prompt to be re-billed in full until a later breakpoint.
         const bp1 = strategy.breakpoints.find(b => b.position === 'system_and_tools');
         if (bp1) {
-          if (anthropicTools && anthropicTools.length > 0) {
-            const lastTool = toRecord(anthropicTools[anthropicTools.length - 1]);
-            lastTool['cache_control'] = bp1.ttl !== '5m'
-              ? { type: 'ephemeral', ttl: bp1.ttl }
-              : { type: 'ephemeral' };
+          const bp1Control = bp1.ttl !== '5m'
+            ? { type: 'ephemeral', ttl: bp1.ttl }
+            : { type: 'ephemeral' };
+          const sysBlocks = systemPrompt ? body['system'] as Array<Record<string, unknown>> : undefined;
+          if (sysBlocks?.length) {
+            sysBlocks[sysBlocks.length - 1]!['cache_control'] = bp1Control;
             breakpointsPlaced++;
-          } else if (systemPrompt) {
-            const sysBlocks = body['system'] as Array<Record<string, unknown>>;
-            if (sysBlocks?.length) {
-              sysBlocks[sysBlocks.length - 1]!['cache_control'] = bp1.ttl !== '5m'
-                ? { type: 'ephemeral', ttl: bp1.ttl }
-                : { type: 'ephemeral' };
-              breakpointsPlaced++;
-            }
+          } else if (anthropicTools && anthropicTools.length > 0) {
+            toRecord(anthropicTools[anthropicTools.length - 1])['cache_control'] = bp1Control;
+            breakpointsPlaced++;
           }
         }
 
@@ -363,11 +374,13 @@ export class AnthropicProvider implements LLMProvider {
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
         const effortHint = (await describeReasoningRejection(res.status, text, resolvedEffort.value, 'providers.anthropic.reasoning-rejection')) ?? '';
+        const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(`${formatAnthropicErrorText(res.status, text)}${effortHint}`, {
           statusCode: res.status,
           provider: this.name,
           operation: 'chat',
           phase: 'request',
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         });
       }
 
@@ -414,7 +427,7 @@ export class AnthropicProvider implements LLMProvider {
         },
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, onRetry), { provider: 'anthropic', model: model })).result;
+    }, { ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: 'anthropic', model: model })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
@@ -425,8 +438,8 @@ export class AnthropicProvider implements LLMProvider {
       serviceNames: ['anthropic'],
     }, deps);
     const auth = summarizeProviderAuth({
-      configured: Boolean(this.apiKey),
-      detail: this.apiKey ? 'Anthropic API key available' : 'Anthropic API key is not configured',
+      configured: this.isConfigured(),
+      detail: this.isConfigured() ? 'Anthropic API key available' : 'Anthropic API key is not configured',
     }, authRoutes);
     return {
       auth: {
@@ -588,6 +601,15 @@ export class AnthropicProvider implements LLMProvider {
     const batch = await this.readJsonResponse(retrieveRes, 'retrieve batch results');
     const resultsUrl = typeof batch['results_url'] === 'string' ? batch['results_url'] : '';
     if (!resultsUrl) return [];
+    // The results request carries the API key: only ever send it to the API's own origin.
+    if (!isAnthropicApiUrl(resultsUrl)) {
+      throw new ProviderError('Anthropic batch results_url points outside the Anthropic API; it was not fetched and the API key was not sent.', {
+        statusCode: 502,
+        provider: this.name,
+        operation: 'batch.results',
+        phase: 'response',
+      });
+    }
     const resultsRes = await instrumentedFetch(resultsUrl, {
       method: 'GET',
       headers: this.batchHeaders({ accept: 'application/jsonl' }),
@@ -652,7 +674,9 @@ export class AnthropicProvider implements LLMProvider {
   private mapAnthropicBatchStatus(body: Record<string, unknown>): ProviderBatchPollResult['status'] {
     const status = typeof body['processing_status'] === 'string' ? body['processing_status'] : '';
     if (status === 'ended') return 'completed';
-    if (status === 'canceling') return 'cancelled';
+    // Still running: requests that finished before the cancel are collected once it ends,
+    // so a consumer that stops polling at a terminal status must not see one yet.
+    if (status === 'canceling') return 'running';
     if (status === 'in_progress') return 'running';
     const archivedAt = body['archived_at'];
     if (archivedAt != null) return 'cancelled';
@@ -695,7 +719,8 @@ export class AnthropicProvider implements LLMProvider {
       };
     }
     const status = type === 'canceled' ? 'cancelled' : type === 'expired' ? 'expired' : 'failed';
-    const error = toRecord(result['error']);
+    // A canceled or expired request carries no `error` object at all.
+    const error: Record<string, unknown> = isRecord(result['error']) ? result['error'] : {};
     return {
       customId,
       status,

@@ -47,7 +47,8 @@ export function resolveTurnBudget(input: ResolveTurnBudgetInput): ResolvedTurnBu
   if (cap > 0 && (requested === 0 || requested > cap)) {
     return { limit: cap, source: 'policy-bound' };
   }
-  return { limit: requested, source: input.spawnOverride === undefined ? 'default' : 'spawn-override' };
+  const overrideApplied = turnLimitOr(input.spawnOverride, -1) >= 0;
+  return { limit: requested, source: overrideApplied ? 'spawn-override' : 'default' };
 }
 
 /** The human-readable turn-limit error string, unchanged prose, so nothing that reads it breaks. */
@@ -55,3 +56,15 @@ export function formatTurnLimitError(limit: number): string {
   return `Exceeded maximum turn limit (${limit})`;
 }
 
+
+/** The turn on which the model is told its budget is nearly spent: the first turn at or past 80% of it (0 for no ceiling). */
+export function turnLimitWarningTurn(limit: number): number {
+  return limit > 0 ? Math.max(1, Math.ceil(limit * 0.8)) : 0;
+}
+
+/** What the model is told on that turn, so it can finish before the ceiling fails the run. */
+export function formatTurnLimitWarning(turn: number, limit: number): string {
+  const remaining = limit - turn + 1;
+  return `Turn budget: this is turn ${turn} of ${limit}; ${remaining <= 1 ? 'it is your last turn' : `${remaining} turns remain, including this one`}. `
+    + 'When the budget is spent the run fails and only your last message is kept. Finish the essential work and end with your final answer.';
+}

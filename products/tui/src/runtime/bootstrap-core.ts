@@ -1,8 +1,9 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
+  disposeTerminalFeatureFlags,
   createTerminalEventState,
   initializeTerminalMemory,
   attachTerminalCompanionInput,
@@ -23,13 +24,14 @@ export {
   type CompanionMessagePayload,
 } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
+import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { registerSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -158,6 +160,16 @@ export interface BootstrapCoreState {
 
 // --- Operator narration of inbound channel events ---
 
+/**
+ * One bounded, single-line piece of sender-supplied text for an operator notice:
+ * control characters (newlines, escapes) become spaces, so a remote sender cannot
+ * start a second line or fake a prefix, and the length is capped.
+ */
+function narrationText(value: string, max = 80): string {
+  const flat = value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 /** Narrate an inbound channel event (GitHub, Slack, ntfy, etc.) that triggered an
  * agent turn, via the SystemMessageRouter, null for internal/companion sources. */
 export function narrateInboundEvent(event: { source: string; metadata: Readonly<Record<string, unknown>> | undefined }): string | null {
@@ -165,7 +177,8 @@ export function narrateInboundEvent(event: { source: string; metadata: Readonly<
   if (!source) return null;
 
   // Derive the effective surface, prefer metadata.surface, fall back to source.
-  const surface = typeof metadata?.surface === 'string' ? metadata.surface : source;
+  // An empty or blank metadata surface names nothing, so the source stands in.
+  const surface = (typeof metadata?.surface === 'string' ? metadata.surface.trim() : '') || source;
 
   // Internal / companion sources do not need operator narration.
   if (surface === 'companion' || source === 'companion') return null;
@@ -205,16 +218,21 @@ export function narrateInboundEvent(event: { source: string; metadata: Readonly<
       case 'webhook':
         return '[Webhook]';
       default:
-        return `[${surface[0]!.toUpperCase()}${surface.slice(1)}]`;
+      {
+        // A surface this list does not know is sender-supplied: keep only name-like characters so it cannot carry a bracketed fake prefix.
+        const name = surface.replace(/[^A-Za-z0-9_.-]+/g, ' ').trim().slice(0, 24);
+        return name ? `[${name.charAt(0).toUpperCase()}${name.slice(1)}]` : '[Channel]';
+      }
     }
   })();
 
-  const eventType = typeof metadata?.eventType === 'string' ? metadata.eventType : null;
-  const eventAction = typeof metadata?.eventAction === 'string' ? metadata.eventAction : null;
-  const topic = typeof metadata?.topic === 'string' ? metadata.topic : null;
+  const text = (value: unknown): string | null => (typeof value === 'string' ? narrationText(value) || null : null);
+  const eventType = text(metadata?.eventType);
+  const eventAction = text(metadata?.eventAction);
+  const topic = text(metadata?.topic);
   const prNumber = typeof metadata?.prNumber === 'number' ? metadata.prNumber : null;
   const issueNumber = typeof metadata?.issueNumber === 'number' ? metadata.issueNumber : null;
-  const repo = typeof metadata?.repo === 'string' ? metadata.repo : null;
+  const repo = text(metadata?.repo);
 
   // Build event-specific detail for GitHub events.
   if (surface === 'github' && eventType) {
@@ -248,7 +266,7 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
-  await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
 
   // Gate states derive from the domain settings keys; the bridge keeps live
   // config writes flowing (honest pending-restart markers for startup-gated
@@ -274,7 +292,8 @@ export async function initializeBootstrapCore(
   });
   await services.workspaceTrustManager.load(); // settle any already-persisted trust decision before any tool runs
   const providerRegistry = services.providerRegistry;
-  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => services.keybindingsManager.loadFromDisk(), wireCostPricing);
+  let keybindingNotices: readonly string[] = [];
+  initializeTerminalCatalog(providerRegistry, services.benchmarkStore, () => { keybindingNotices = services.keybindingsManager.loadFromDisk(); }, wireCostPricing);
   seedTerminalControlPlane(domainDispatch, configManager, userSessionId, {
     id: 'client:tui',
     kind: 'tui',
@@ -313,24 +332,32 @@ export async function initializeBootstrapCore(
   const compositor = new Compositor(stdout);
   const selection = new SelectionManager();
 
+  // Declared before the tool composition: its `resolveSessionId` reads it.
+  const runtimeSessionIdRef = { value: userSessionId };
+
   const toolRegistry = new ToolRegistry();
-  const { fileCache, projectIndex } = registerTuiTurnTools(toolRegistry, services, {
+  const { fileCache, projectIndex, dispose: disposeTurnTools } = registerTuiTurnTools(toolRegistry, services, {
+    // `permissionManager` is created further down; the gate only runs when a model asks to change a hook, long after bootstrap.
+    hookChangeGate: (request, { signal }) => permissionManager.checkHookChange(request, { signal }),
     resolveSessionId: () => runtimeSessionIdRef.value,
     onSandboxedRun: createSandboxContainmentNotice({
       configManager,
       notify: (text) => conversation.log(`[Sandbox] ${text}`, { fg: activeTokens().secondary }),
     }),
   });
-  registerClientPhoneTool(toolRegistry, services.devices); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the platform's client/phone-tool.ts)
+  registerClientPhoneTool(toolRegistry, services.devices, { sessionId: () => runtimeSessionIdRef.value }); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the platform's client/phone-tool.ts)
   services.agentOrchestrator.setDependencies({
     ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
     contractHooks: services.contractRunner.hooks(),
     surfaceRoot: services.surface.surfaceRoot,
     knowledgeService: services.knowledgeService,
+    cloudflareAuthToken: () => readDaemonOperatorToken(services.shellPaths.homeDirectory),
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
   bootstrapUnsubs.push(stopRuntimeBindings);
+  bootstrapUnsubs.push(disposeTurnTools);
+  bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));
   bootstrapUnsubs.push(() => conversation.setNoticeSink(null));
   await initializeTerminalMemory(memoryStore, bootstrapUnsubs);
   // Fold this project's legacy per-project TUI memory into the home-scoped canonical store, ONCE, AFTER init(). Idempotent and non-fatal.
@@ -350,11 +377,12 @@ export async function initializeBootstrapCore(
   const permissionPromptRef = services.localPromptRef as { requestPermission: PermissionRequestHandler };
   // Trust-at-consequence-time: raised by trustGatedAsk on the first non-read
   // request in an undecided workspace; overridden once the UI layer exists, same ref-patching pattern as permissionPromptRef above.
-  const trustPromptRef = { requestTrustDecision: (async () => 'restricted') as () => Promise<WorkspaceTrustLevel> };
+  const trustPromptRef = services.trustPromptRef;
   approvalBroker.start().catch((err) => logger.warn('approval broker start failed at bootstrap', { err }));
   sharedSessionBroker.start().catch((err) => logger.warn('shared session broker start failed at bootstrap', { err }));
-  const runtimeSessionIdRef = { value: userSessionId };
   const startupNoticeBuffer = new StartupNoticeBuffer();
+  // A keybindings file that was skipped or overridden would otherwise leave a shortcut silently doing nothing.
+  for (const notice of keybindingNotices) startupNoticeBuffer.push(`[Startup] ${notice}`, 'high');
   // Smart ref: setting .value auto-flushes the pre-router buffer so events
   // buffered before the SystemMessageRouter attaches are not permanently lost.
   const systemMessageRouterRef = ((): { value: SystemMessageRouter | null } => {
@@ -434,8 +462,16 @@ export async function initializeBootstrapCore(
   } = { value: null };
   runtimeUnsubs.push(
     attachTerminalCompanionInput(runtimeBus, orchestratorHandleUserInputRef, conversation, requestRender, (payload) => {
-      const narration = narrateInboundEvent({ source: payload.source, metadata: payload.metadata });
-      if (narration) routeOrBuffer(narration, 'low');
+      // Narration is a courtesy to the operator: it runs before the message is handed to the agent, so it must never be able to stop delivery.
+      try {
+        const narration = narrateInboundEvent({ source: payload.source, metadata: payload.metadata });
+        if (narration) routeOrBuffer(narration, 'low');
+      } catch (error) {
+        logger.warn('Could not narrate an inbound companion message', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }, {
+      activeSessionId: () => runtimeSessionIdRef.value,
+      notice: (text) => routeOrBuffer(text, 'high'),
     }),
   );
 
@@ -480,13 +516,18 @@ export async function initializeBootstrapCore(
   }
   runtimeUnsubs.push(attachTypedRuntimeNotifications(services.webhookNotifier, runtimeBus));
 
-  const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager));
+  const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager), configManager, services.secretsManager);
   runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch));
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
-  const permissionManager = createTuiTurnPermissionManager(services, () => trustPromptRef.requestTrustDecision());
-  await hookWorkbench.loadAndApplyManagedHooks();
+  const permissionManager = createTuiTurnPermissionManager(services, () => services.requestTrustDecision());
+  // A bad hooks file must not stop the product from starting; it runs without file hooks until fixed.
+  try {
+    await hookWorkbench.loadAndApplyManagedHooks();
+  } catch (err) {
+    logger.warn('tui hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
+  }
 
   const runtime: MutableRuntimeState = {
     ...initialTerminalRuntimeFields(

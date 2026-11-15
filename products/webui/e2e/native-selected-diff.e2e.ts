@@ -1,6 +1,7 @@
 /** Production UI + Chromium IndexedDB + unchanged real checkpoint/native HTTP bytes. */
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { detailPane, expectNoHorizontalScroll, nextFrames, openRow } from "./support/app";
+import { E2E_OPERATOR_TOKEN } from "./support/seed";
 import {
   isLegacyExecutionMutation,
   nativeBrowserRecords,
@@ -64,7 +65,7 @@ function noLegacyWrites(fixture: Fixture) {
     []
   );
   expect(
-    fixture.nativeRequests.every((request) => request.authorization === "Bearer e2e-operator-token")
+    fixture.nativeRequests.every((request) => request.authorization === `Bearer ${E2E_OPERATOR_TOKEN}`)
   ).toBe(true);
 }
 async function originalAndFacts(dialog: Locator, fixture: Fixture, name: DiffCaseName = "session") {

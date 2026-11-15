@@ -1,4 +1,4 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately a per-repo test: the module it exercises is this repo's own, so the sibling product's tests do not stand in for it.
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
 import { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
@@ -59,6 +59,9 @@ async function withMockProvider<T>(
   }
 }
 
+// Disposed in afterEach so a failed assertion cannot leak a collector's bus subscription.
+const collectors: ForensicsCollector[] = [];
+
 function buildHarness(options: { hookResult?: HookResult } = {}) {
   const configManager = testManagers.configManager;
   const runtimeBus = new RuntimeEventBus();
@@ -98,6 +101,7 @@ function buildHarness(options: { hookResult?: HookResult } = {}) {
     providerRegistry: testManagers.providerRegistry,
   });
 
+  collectors.push(collector);
   return { runtimeBus, store, registry, collector, orchestrator };
 }
 
@@ -148,6 +152,7 @@ describe('runtime substrate gate', () => {
   });
 
   afterEach(() => {
+    for (const collector of collectors.splice(0)) collector.dispose();
     installJudgmentPort(previousJudgmentPort);
     judgmentLog[Symbol.dispose]();
     forgetFailureReadings();
@@ -155,9 +160,9 @@ describe('runtime substrate gate', () => {
     Date.now = realDateNow;
   });
 
-  test('preflight overflow fails with explicit terminal stop reason and forensic evidence', async () => {
+  test('a preflight that reports overflow fails the turn with an explicit terminal stop reason and forensic evidence', async () => {
     configManager.set('display.stream', false);
-    const { orchestrator, store, registry, collector } = buildHarness();
+    const { orchestrator, store, registry } = buildHarness();
     const provider: LLMProvider = {
       name: 'mock',
       models: ['mock-model'],
@@ -169,6 +174,7 @@ describe('runtime substrate gate', () => {
       })),
     };
 
+    // Detection itself (window vs. estimated tokens) is covered by the engine's context-guard tests; this pins what the turn does with an overflow verdict.
     (orchestrator as unknown as { checkContextWindowPreflight: () => Promise<'error'> }).checkContextWindowPreflight =
       (async () => 'error');
 
@@ -177,12 +183,11 @@ describe('runtime substrate gate', () => {
     expect(store.getState().conversation.turnState).toBe('failed');
     expect(store.getState().conversation.lastTurnStopReason).toBe('context_overflow');
     expect((await waitForReport(registry)).classification).toBe('max_tokens');
-    collector.dispose();
   });
 
   test('hook denial fails with permission-style classification', async () => {
     configManager.set('display.stream', false);
-    const { orchestrator, store, registry, collector } = buildHarness({
+    const { orchestrator, store, registry } = buildHarness({
       hookResult: { ok: true, decision: 'deny', reason: 'policy blocked' },
     });
     const provider: LLMProvider = {
@@ -201,13 +206,12 @@ describe('runtime substrate gate', () => {
     expect(store.getState().conversation.turnState).toBe('failed');
     expect(store.getState().conversation.lastTurnStopReason).toBe('hook_denied');
     expect((await waitForReport(registry)).classification).toBe('permission_denied');
-    collector.dispose();
   });
 
   test('synthetic provider exhaustion classifies as llm_error with explicit stop reason', async () => {
     rateLimited = true;
     configManager.set('display.stream', false);
-    const { orchestrator, store, registry, collector } = buildHarness();
+    const { orchestrator, store, registry } = buildHarness();
     const provider: LLMProvider = {
       name: 'synthetic',
       models: ['mock-model'],
@@ -221,13 +225,12 @@ describe('runtime substrate gate', () => {
     expect(store.getState().conversation.turnState).toBe('failed');
     expect(store.getState().conversation.lastTurnStopReason).toBe('provider_exhausted');
     expect((await waitForReport(registry)).classification).toBe('llm_error');
-    collector.dispose();
   });
 
   test('abort during provider wait yields cancelled terminal state and forensics', async () => {
     const providerStarted = Promise.withResolvers<void>();
     configManager.set('display.stream', false);
-    const { orchestrator, store, registry, collector } = buildHarness();
+    const { orchestrator, store, registry } = buildHarness();
     const provider: LLMProvider = {
       name: 'mock',
       models: ['mock-model'],
@@ -252,12 +255,11 @@ describe('runtime substrate gate', () => {
     expect(store.getState().conversation.turnState).toBe('cancelled');
     expect(store.getState().conversation.lastTurnStopReason).toBe('cancelled');
     expect((await waitForReport(registry)).classification).toBe('cancelled');
-    collector.dispose();
   });
 
   test('repeated failed tool rounds request recovery and complete only after a checked repair', async () => {
     configManager.set('display.stream', false);
-    const { orchestrator, store, collector } = buildHarness();
+    const { orchestrator, store } = buildHarness();
     let callSequence = 0;
     const recoveryRequests: ChatRequest[] = [];
     const provider: LLMProvider = {
@@ -279,6 +281,5 @@ describe('runtime substrate gate', () => {
     expect(store.getState().conversation.turnState).toBe('completed');
     expect(store.getState().conversation.lastTurnStopReason).toBe('completed');
     expect(judgmentLog.query({ site: 'engine.core.response-completion' }).length).toBeGreaterThan(0);
-    collector.dispose();
   });
 });

@@ -1,6 +1,7 @@
 import { createContractInputAuthority, assertContractInputAdmission, type ContractInputAuthority } from './input-authority.js';
 /** A corrective planner reads produced contract work, frozen independently of the live owner tree. */
-import { join } from 'node:path';
+import { readdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { IsolatedWorktree } from '../agents/worktree.js';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { assertContractExecutionView, assertContractInputObjects, assertContractInputOwner, assertContractInputView, captureContractInput, materializeContractInput, prepareContractInputParent } from './input-snapshot.js';
@@ -12,6 +13,22 @@ export interface FixPlannerInput {
   readonly resultRevision?: string;
   /** Discard the plan if the source result tree or the frozen view changed while it was read. */
   assertCurrent(): Promise<void>;
+}
+
+/**
+ * Each fix round writes a receipt of the result view its planner read. Only the
+ * newest one of a contract is kept, so repeated rounds do not accumulate
+ * receipts that each embed a full input snapshot.
+ */
+export function pruneOlderPlannerReceipts(receiptPath: string, contractId: string): void {
+  const directory = dirname(receiptPath);
+  let names: string[];
+  try { names = readdirSync(directory); } catch { return; }
+  for (const name of names) {
+    const path = join(directory, name);
+    if (path === receiptPath || !name.startsWith(`${contractId}-`) || !name.endsWith('.json')) continue;
+    try { rmSync(path, { force: true }); } catch { /* A receipt that cannot be removed now is removed by the next round. */ }
+  }
 }
 
 /** Shared/session execution retains its explicit live-tree semantics. */
@@ -34,6 +51,7 @@ export async function prepareFixPlannerInput(run: ContractRun): Promise<FixPlann
   signal.throwIfAborted();
   // Keep the original admission receipt unchanged: apply-back is always checked against that owner generation.
   writeFileAtomic(receiptPath, JSON.stringify({ version: 1, purpose: 'fix', contractId: contract.id, originalInputId: original.id, workingDirectory, snapshot: current }));
+  pruneOlderPlannerReceipts(receiptPath, contract.id);
   await new IsolatedWorktree(source, workingDirectory, `contract-planner/${current.id}`, contract.branch).create(current.inputCommit, false);
   await materializeContractInput(current, workingDirectory, signal);
   run.decide('created', contract.id, `fix planner admitted result view ${current.id} at ${current.inputCommit}; original input ${original.id}`);

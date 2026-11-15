@@ -3,7 +3,10 @@ import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-je
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, temporalStatusLabel } from './recall-shared.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;
+  /** True when a model, not the owner at the keyboard, is running the command. */
+  readonly invokedByModel?: boolean | undefined;
 }
+const RECALL_LIST_LIMIT = 50;
 type Awaitable<T> = T | Promise<T>;
 export interface RecallQueryPort {
   list(filter: MemorySearchFilter): Promise<readonly MemoryRecord[]>;
@@ -71,7 +74,11 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     }
     const limit = limitIdx !== -1 ? args[limitIdx + 1] : undefined;
     if (limit) {
-      filter.limit = parseInt(limit, 10) || 20;
+      if (!/^[1-9]\d*$/.test(limit)) {
+        context.print(`${presentation.tag} Invalid --limit "${limit}". Use a positive whole number.`);
+        return;
+      }
+      filter.limit = Number(limit);
     }
     const queryTokens = args.filter((token, index) => {
       if (token.startsWith('--')) return false;
@@ -135,9 +142,17 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (!memory) {
       return;
     }
-    const cls = args.find((arg) => !arg.startsWith('--'));
-    const filter: MemorySearchFilter = { limit: 50 };
-    if (cls && isValidClass(cls)) filter.cls = cls;
+    const cls = args.find((arg, index) => !arg.startsWith('--') && args[index - 1] !== '--scope');
+    const filter: MemorySearchFilter = { limit: RECALL_LIST_LIMIT };
+    if (cls) {
+      if (!isValidClass(cls)) {
+        context.print(
+          `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
+        );
+        return;
+      }
+      filter.cls = cls;
+    }
     const scopeIdx = args.indexOf('--scope');
     const scope = scopeIdx !== -1 ? args[scopeIdx + 1] : undefined;
     if (scope) {
@@ -153,6 +168,11 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (!records.length) {
       context.print(`${presentation.tag} No records.`);
       return;
+    }
+    if (records.length >= RECALL_LIST_LIMIT) {
+      context.print(
+        `${presentation.tag} Showing ${records.length} records; there may be more. The per-class counts below cover only these. Narrow with a class or --scope, or use search.`,
+      );
     }
     const grouped: Record<string, Array<(typeof records)[number]>> = {};
     for (const record of records) {

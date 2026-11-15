@@ -1,4 +1,4 @@
-import { test, expect, spyOn } from 'bun:test';
+import { afterEach, test, expect, spyOn } from 'bun:test';
 import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
@@ -22,6 +22,14 @@ import type { Contract } from '../platform/src/platform/contract/types.js';
 import { installJudgmentPort } from '../errors/src/index.js';
 import { fakePort, noulAnswer, choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
+
+// Each install registers its own undo the moment it happens, so a setup failure cannot leak a spy, port or directory into later tests.
+const cleanups: Array<() => void> = [];
+afterEach(() => {
+  const errors: unknown[] = [];
+  for (const cleanup of cleanups.splice(0).reverse()) try { cleanup(); } catch (error) { errors.push(error); }
+  if (errors.length) throw new AggregateError(errors, 'fixture cleanup failed');
+});
 
 function git(root: string, ...args: string[]): void {
   const result = spawnSync('git', ['-C', root, ...args]);
@@ -55,6 +63,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
       if (access !== 'denied' && access !== 'allowed' && access !== 'concurrent' && workflow !== 'find') continue;
       test(`actual ${viewKind} Agent ${workflow} preserves stored original-path ${access}`, async () => {
         const root = mkdtempSync(join(tmpdir(), 'captured-authority-'));
+        cleanups.push(() => rmSync(root, { recursive: true, force: true }));
         git(root, 'init', '-q');
         git(root, 'config', 'user.name', 'Fixture');
         git(root, 'config', 'user.email', 'fixture@example.invalid');
@@ -120,6 +129,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           providerRegistryFactory: createLaunchTolerantProviderRegistry,
           requestApproval: async () => ({ approved: true }),
         });
+        cleanups.push(() => runtime.dispose());
         await runtime.userPermissionRuleStore.add({
           rule: {
             id: 'deny-original-private',
@@ -139,6 +149,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
             ? 'Message: captured input authority is missing or revoked'
             : undefined;
         const decisionLog = new SqliteDecisionLog(':memory:');
+        cleanups.push(() => decisionLog[Symbol.dispose]());
         const judgment = fakePort((name, question, state) => {
           if (failureState !== undefined && state === failureState && question.type === 'choice') {
             if (name === 'category') return choiceAnswer(question, 'unknown', 0.99);
@@ -152,6 +163,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           return noulAnswer(0.01);
         });
         const previous = installJudgmentPort(withDecisionLog(judgment.port, decisionLog));
+        cleanups.push(() => { installJudgmentPort(previous); });
         expect(await runtime.permissionManager.readAccess(join(root, 'private.ts'))).toBe('restricted');
         expect(await runtime.permissionManager.readAccess(join(root, 'allowed.ts'))).toBe('allow');
         const requests: string[] = [];
@@ -161,6 +173,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           opened.push(String(args[0]));
           return syncRead(...args);
         }) as typeof fs.readFileSync);
+        cleanups.push(() => readTap.mockRestore());
         let policyChange: Promise<void> | undefined;
         const file = Bun.file;
         const tap = spyOn(Bun, 'file').mockImplementation(((...args: Parameters<typeof Bun.file>) => {
@@ -191,6 +204,7 @@ for (const viewKind of ['snapshot', 'member'] as const) {
           }
           return handle;
         }) as typeof Bun.file);
+        cleanups.push(() => tap.mockRestore());
         let calls = 0;
         const perRunCalls = { survivor: 0, cancelled: 0 };
         const target = access === 'denied' ? 'private.ts' : workflow === 'write-read' ? 'generated.ts' : 'allowed.ts';
@@ -456,15 +470,9 @@ for (const viewKind of ['snapshot', 'member'] as const) {
             expect(requests.some((request) => request.includes('SYNTHETIC_ALLOWED_MARKER'))).toBe(true);
           }
         } finally {
-          tap.mockRestore();
-          readTap.mockRestore();
           if (id) runtime.agentManager.cancel(id);
           if (secondId) runtime.agentManager.cancel(secondId);
           stop.abort();
-          runtime.dispose();
-          installJudgmentPort(previous);
-          decisionLog[Symbol.dispose]();
-          rmSync(root, { recursive: true, force: true });
         }
       }, 20_000);
     }

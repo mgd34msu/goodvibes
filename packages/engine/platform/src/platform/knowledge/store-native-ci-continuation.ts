@@ -57,7 +57,8 @@ export function createNativeCiContinuationStorage(sqlite: SQLiteStore, projectId
             || (before.record.watch !== null && !isDeepStrictEqual(before.record.watch, next.watch))
             || (before.record.state !== 'issued' && next.state !== before.record.state && next.state !== 'cancelled')
             || !isDeepStrictEqual(before.record.successor, next.successor)
-            || before.record.failureRevision !== next.failureRevision)) throw new Error('Native continuation identity changed');
+            || before.record.failureRevision !== next.failureRevision)) throw new Error(`Native continuation ${before.record.state} cannot become ${next.state}, and its issue, grant, watch and successor cannot change; `
+            + 'from issued it may attach its watch once or become cancelled, claimed is reached only by claiming it, and cancelled is final.');
           if (!before.record && (next.state !== 'issued' || next.watch !== null)) throw new Error('Invalid native continuation issuance');
         }
         assertCurrent(); if (next) put(db, next); assertCurrent();

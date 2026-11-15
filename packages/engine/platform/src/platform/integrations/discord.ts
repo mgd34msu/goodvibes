@@ -99,13 +99,30 @@ export interface DiscordGatewayClientOptions {
    * nominally responsible while reading nothing is the starvation this design
    * exists to avoid, so the holder stands down and another machine takes it.
    */
-  readonly onClosed?: ((reason: string) => void) | undefined;
+  readonly onClosed?: ((reason: string, code?: number) => void) | undefined;
+  /** Random source for the first-heartbeat jitter (0 to 1); a seam for tests. */
+  readonly jitter?: (() => number) | undefined;
+  /** How long `start()` waits for the socket to open before reporting that it did not. */
+  readonly openTimeoutMs?: number | undefined;
+  /** Timer seam for the open deadline; returns its own cancel function. */
+  readonly setTimer?: ((fn: () => void, ms: number) => () => void) | undefined;
+}
+
+/** A socket that has not opened by now will not; 30 s is well past a slow handshake. */
+const SOCKET_OPEN_TIMEOUT_MS = 30_000;
+
+function defaultSocketTimer(fn: () => void, ms: number): () => void {
+  const handle = setTimeout(fn, ms);
+  (handle as unknown as { unref?: () => void }).unref?.();
+  return () => { clearTimeout(handle); };
 }
 
 export const DiscordGatewayOpcode = {
   Dispatch: 0,
   Heartbeat: 1,
   Identify: 2,
+  Reconnect: 7,
+  InvalidSession: 9,
   Hello: 10,
   HeartbeatAck: 11,
 } as const;
@@ -528,6 +545,11 @@ export class DiscordIntegration {
 export class DiscordGatewayClient {
   private socket: WebSocket | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private firstBeat: ReturnType<typeof setTimeout> | null = null;
+  /** A heartbeat was sent and op 11 has not come back: two in a row means the connection is dead. */
+  private awaitingAck = false;
+  /** Dispatches run one at a time so an async handler cannot reorder events. */
+  private dispatchQueue: Promise<void> = Promise.resolve();
   private sequence: number | null = null;
   private started = false;
   /** The one start in progress, shared by every concurrent `start()` caller. */
@@ -565,23 +587,57 @@ export class DiscordGatewayClient {
     const url = `${gateway.url.replace(/\/+$/, '')}/?v=10&encoding=json`;
     const socket = new this.WebSocketImpl(url);
     this.socket = socket;
-    this.started = true;
+    // `started` means the gateway socket is open, not that one was constructed:
+    // a start that resolved at construction reported a connection not yet made.
+    let opened = false;
+    const opening = new Promise<DiscordGatewayBotResponse>((resolve, reject) => {
+      const schedule = this.options.setTimer ?? defaultSocketTimer;
+      const cancelDeadline = schedule(() => fail('the Discord gateway connection did not open in time'),
+        this.options.openTimeoutMs ?? SOCKET_OPEN_TIMEOUT_MS);
+      const fail = (error: string): void => {
+        cancelDeadline();
+        if (this.socket === socket) {
+          this.socket = null;
+          socket.close();
+        }
+        reject(new Error(`DiscordGatewayClient: ${error}`));
+      };
+      socket.addEventListener('open', () => {
+        if (this.socket !== socket || opened) return;
+        opened = true;
+        cancelDeadline();
+        this.started = true;
+        resolve(gateway);
+      });
+      socket.addEventListener('error', () => {
+        if (!opened) fail('the gateway connection failed before it opened');
+      });
+      socket.addEventListener('close', (event: { code?: number; reason?: string } | undefined) => {
+        // A socket that is no longer current was either closed on purpose (stop()
+        // detaches it first) or replaced; its close must not touch the live one's
+        // heartbeat or started state.
+        // Before it opened, even a deliberate stop() has to settle the start.
+        if (!opened) return fail('the gateway connection closed before it opened');
+        if (this.socket !== socket) return;
+        this.socket = null;
+        this.cleanup();
+        // The close code says why: 4004 (bad token) and 4013/4014 (intent not
+        // enabled) are permanent, a network drop has no useful code.
+        const code = typeof event?.code === 'number' && event.code > 0 ? event.code : undefined;
+        const detail = typeof event?.reason === 'string' && event.reason ? `: ${event.reason}` : '';
+        this.options.onClosed?.(
+          code === undefined ? 'the Discord gateway connection closed' : `the Discord gateway connection closed (code ${code}${detail})`,
+          code,
+        );
+      });
+    });
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return;
       void this.handleMessage(event.data).catch((error: unknown) => {
         logger.warn('[discord] gateway message handling failed', { error: summarizeError(error) });
       });
     });
-    socket.addEventListener('close', () => {
-      // A socket that is no longer current was either closed on purpose (stop()
-      // detaches it first) or replaced; its close must not touch the live one's
-      // heartbeat or started state.
-      if (this.socket !== socket) return;
-      this.socket = null;
-      this.cleanup();
-      this.options.onClosed?.('the Discord gateway connection closed');
-    });
-    return gateway;
+    return opening;
   }
 
   stop(): void {
@@ -620,9 +676,38 @@ export class DiscordGatewayClient {
       this.identify();
       return;
     }
-    if (dispatch.op === DiscordGatewayOpcode.Dispatch) {
-      await this.options.onDispatch(dispatch, this);
+    if (dispatch.op === DiscordGatewayOpcode.HeartbeatAck) {
+      this.awaitingAck = false;
+      return;
     }
+    if (dispatch.op === DiscordGatewayOpcode.Heartbeat) {
+      this.send(DiscordGatewayOpcode.Heartbeat, this.sequence);
+      return;
+    }
+    if (dispatch.op === DiscordGatewayOpcode.Reconnect) {
+      this.declareDead('the Discord gateway asked this client to reconnect');
+      return;
+    }
+    if (dispatch.op === DiscordGatewayOpcode.InvalidSession) {
+      // This client does not resume, so the session is unusable either way.
+      this.declareDead('the Discord gateway rejected the session');
+      return;
+    }
+    if (dispatch.op === DiscordGatewayOpcode.Dispatch) {
+      const run = this.dispatchQueue.then(() => this.options.onDispatch(dispatch, this));
+      this.dispatchQueue = run.catch(() => undefined);
+      await run;
+    }
+  }
+
+  /** Give up on the live socket and tell the owner, as a close would. */
+  private declareDead(reason: string): void {
+    const socket = this.socket;
+    if (!socket) return;
+    this.socket = null;
+    this.cleanup();
+    socket.close();
+    this.options.onClosed?.(reason);
   }
 
   private identify(): void {
@@ -639,19 +724,42 @@ export class DiscordGatewayClient {
   }
 
   private startHeartbeat(intervalMs: number): void {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = setInterval(() => {
+    this.clearHeartbeat();
+    this.awaitingAck = false;
+    const beat = (): void => {
+      if (this.awaitingAck) {
+        this.declareDead('the Discord gateway stopped acknowledging heartbeats');
+        return;
+      }
+      this.awaitingAck = true;
       this.send(DiscordGatewayOpcode.Heartbeat, this.sequence);
-    }, intervalMs);
-    this.heartbeat.unref?.();
-    this.send(DiscordGatewayOpcode.Heartbeat, this.sequence);
+    };
+    // Discord asks for the first beat after interval * jitter, not at once. The
+    // steady interval starts from that first beat so the gap to the second beat
+    // is a full interval and an ack in flight is never judged missing early.
+    this.firstBeat = setTimeout(() => {
+      this.firstBeat = null;
+      beat();
+      if (!this.socket) return;
+      this.heartbeat = setInterval(beat, intervalMs);
+      this.heartbeat.unref?.();
+    }, Math.floor(intervalMs * (this.options.jitter ?? Math.random)()));
+    this.firstBeat.unref?.();
   }
 
   private cleanup(): void {
     this.started = false;
+    this.clearHeartbeat();
+  }
+
+  private clearHeartbeat(): void {
     if (this.heartbeat) {
       clearInterval(this.heartbeat);
       this.heartbeat = null;
+    }
+    if (this.firstBeat) {
+      clearTimeout(this.firstBeat);
+      this.firstBeat = null;
     }
   }
 }

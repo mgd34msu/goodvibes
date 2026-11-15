@@ -284,12 +284,19 @@ describe('canonical repair subject selection through real consumers', () => {
     const plan = await select(item, { signal: controller.signal }); controller.abort();
     expect(() => plan.assertCurrent()).toThrow(Held);
     const pendingController = new AbortController();
-    let release!: () => void, started!: () => void;
+    let release!: () => void, started!: () => void, finish!: () => void;
     const wait = new Promise<void>(resolve => { release = resolve; });
     const entered = new Promise<void>(resolve => { started = resolve; });
-    installJudgmentPort({ model: fake.port.model, async ask(request) { started(); await wait; return fake.port.ask(request); } });
+    const finished = new Promise<void>(resolve => { finish = resolve; });
+    installJudgmentPort({ model: fake.port.model, async ask(request) {
+      started();
+      try { await wait; return await fake.port.ask(request); } finally { finish(); }
+    } });
     const pending = linkRepairSources(item.store, spaceId, item.gap, [item.source.id], item.gap.title, [], () => false, pendingController.signal);
-    await entered; pendingController.abort(); await held(pending, 'aborted'); release();
+    await entered; pendingController.abort(); await held(pending, 'aborted');
+    // Let the model answer, then yield a macrotask so a continuation that
+    // ignored the abort would have written its links before the assertion.
+    release(); await finished; await new Promise<void>(resolve => setImmediate(resolve));
     expect(item.store.listEdges()).toEqual([]);
   });
 });

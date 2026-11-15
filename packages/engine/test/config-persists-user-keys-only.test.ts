@@ -8,16 +8,20 @@
  * between load and set). Now a set() is a per-key read-merge-write, and an
  * invisible migration strips previously-frozen defaults from existing files.
  */
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { DEFAULT_CONFIG } from '../platform/src/platform/config/schema.ts';
 
+const tempDirs: string[] = [];
+afterEach(() => { for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 function tempConfigDir(): string {
   const dir = join(tmpdir(), `gv-cfg-${randomUUID()}`);
+  tempDirs.push(dir);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

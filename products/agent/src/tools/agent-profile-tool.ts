@@ -13,16 +13,16 @@
  * different authority anywhere in this file, and no path that turns a refusal
  * into a success.
  *
- * The human-facing daemon protocol requires `authority` on every write verb: an absent one is a
- * 400 INVALID_ARGUMENT, not a silent fallback to `owner-direct`. `forget` and
- * `undo` are why, §7 gives them an authority check and nothing else (no
- * derivation check, no verbatim quote, because a deletion has neither a value
- * to compare nor an utterance to quote), so an omitted authority on a delete
- * meant no gate at all: a caller sending no authority could delete the owner's
- * shipping address. This tool still requires the caller to state one, because
- * the caller here is a model that knows where the fact came from and the
- * daemon cannot. Leaving it out would make an untrusted-sourced write look
- * exactly like a spoken one to the layer that has the answer.
+ * What the daemon's write protocol requires is an `authority` on every write
+ * verb: an absent one is a 400 INVALID_ARGUMENT. `forget` and `undo` are why,
+ * §7 gives them an authority check and nothing else (no derivation check, no
+ * verbatim quote, because a deletion has neither a value to compare nor an
+ * utterance to quote). This tool therefore always sends one, and the model
+ * does not have to: an absent or `owner-direct` authority is sent as
+ * `autonomous`, the recorded native delegation, and the model's `said` quote is
+ * not forwarded with it because it could not make that write any stronger. Only
+ * an external-source label (email, web page, channel, document) is forwarded as
+ * given, together with `said`, so the daemon can refuse it for what it is.
  *
  * §8.2, it tells him what it recorded. The daemon returns a one-line
  * disclosure; every write result carries it forward as the line to say, naming
@@ -38,8 +38,10 @@
  * such read is disclosed.
  */
 
+import { homedir } from 'node:os';
+import { basename } from 'node:path';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
@@ -110,6 +112,21 @@ function describeProfileFieldCatalog(): string {
 /** The sections that hold prose lines rather than keyed fields, in file order. */
 const PROSE_SECTION_LIST = PROSE_ONLY_SECTIONS.join(', ');
 
+/** The profile file's location for the owner's eyes: no account or home directory name goes into model context. */
+function displayPath(path: string): string {
+  const home = homedir();
+  if (home && (path === home || path.startsWith(`${home}/`))) return `~${path.slice(home.length)}`;
+  return basename(path) || 'profile file';
+}
+
+/** A daemon reason can embed the absolute file path; swap it, and any other home-relative path, for the display form. */
+function scrubPaths(reason: string, path?: string): string {
+  let text = path ? reason.split(path).join(displayPath(path)) : reason;
+  const home = homedir();
+  if (home) text = text.split(`${home}/`).join('~/');
+  return text;
+}
+
 type ToolProfileAuthority = ProfileAuthority | 'autonomous';
 const WRITE_ACTIONS = new Set(['set', 'append', 'forget', 'undo']);
 const ACTION_METHODS = {
@@ -157,17 +174,17 @@ async function handleRead(deps: AgentProfileToolDeps): Promise<ToolOutcome> {
   if (response.state.kind === 'unavailable') {
     return fail([
       'Your profile could not be read.',
-      `  ${response.state.reason ?? 'no reason given'}`,
-      `  ${response.state.path}`,
+      `  ${scrubPaths(response.state.reason ?? 'no reason given', response.state.path)}`,
+      `  ${displayPath(response.state.path)}`,
       'This is not an empty profile, say that it could not be read, and why.',
     ]);
   }
   if (response.state.kind === 'disabled') {
-    return fail([`Your profile is turned off (${response.state.path}). Nothing is recorded or read while it is off.`]);
+    return fail([`Your profile is turned off (${displayPath(response.state.path)}). Nothing is recorded or read while it is off.`]);
   }
   if (response.state.exists === false) {
     return ok([
-      `Your profile file does not exist yet (${response.state.path}).`,
+      `Your profile file does not exist yet (${displayPath(response.state.path)}).`,
       'Nothing has been recorded about you. This is an honest empty, not a read failure.',
     ]);
   }
@@ -282,8 +299,8 @@ async function handleStatus(deps: AgentProfileToolDeps): Promise<ToolOutcome> {
   const response = narrowProfileStatus(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   const lines = [`Profile: ${response.kind}`];
-  if (response.reason) lines.push(`  ${response.reason}`);
-  lines.push(`  path ${response.path}`);
+  if (response.reason) lines.push(`  ${scrubPaths(response.reason, response.path)}`);
+  lines.push(`  path ${displayPath(response.path)}`);
   if (response.exists === false) lines.push('  the file does not exist yet');
   if (response.sections && response.sections.length > 0) lines.push(`  sections ${response.sections.join(', ')}`);
   if (response.lineCount !== undefined) lines.push(`  lines ${response.lineCount}`);
@@ -307,14 +324,14 @@ async function handleStatus(deps: AgentProfileToolDeps): Promise<ToolOutcome> {
  * profile that is off, and a field that was not there to delete. It is
  * deliberately not distinguished by parsing the reason: the platform runtime's
  * own note says the wire answer must not depend on wording the trust module is
- * free to reword. So the reason is passed through untouched, the outcome is a
+ * free to reword. So the reason is passed through with only home paths shortened, the outcome is a
  * failure either way, and nothing here softens it, retries it, or reports it as
  * partly done.
  */
 function notDoneOutcome(what: string, reason: string | null | undefined, authority: ToolProfileAuthority): ToolOutcome {
   return fail([
     `Not done: ${what}.`,
-    `  reason: ${reason ?? 'no reason given'}`,
+    `  reason: ${scrubPaths(reason ?? 'no reason given')}`,
     `  authority sent: ${authority}`,
     'Tell him this happened and why, in the daemon\'s own words above.',
     'Never retry with a different authority, and never report this as done.',
@@ -499,7 +516,7 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
             enum: [...PROFILE_AUTHORITIES],
             description: 'Optional source provenance. External-source labels further restrict independently admitted profile writes.',
           },
-          said: { type: 'string', description: 'Optional exact request provenance. This never grants write authority.' },
+          said: { type: 'string', description: 'Optional exact request provenance, sent only with an external-source `authority`; it is ignored otherwise and never grants write authority.' },
         },
         additionalProperties: false,
       },
@@ -510,6 +527,8 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
     },
     execute: async (rawArgs, options) => {
       let assertCurrent = () => { options?.signal?.throwIfAborted(); assertAgentLocalStateCurrent(rawArgs, options); };
+      // True once a write has been handed to the daemon: after that a throw cannot say "nothing was recorded".
+      let writeSent = false;
       try {
         const restrictions = options && captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']);
         const input = captureCatalogSnapshot(rawArgs), args = input.captured;
@@ -533,6 +552,7 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
           assertCurrent();
           const invoke: ProfileGatewayInvoke = async (methodId, body) => {
             assertCurrent();
+            if (writing) writeSent = true;
             const result = await deps.invoke(methodId, body, { signal: options?.signal, assertCurrent, delegation,
               onWriteIntent: () => effects?.onWriteIntent?.('profile'),
               onEffect: published => effects?.onEffect(published, 'profile'),
@@ -575,8 +595,18 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
         const result = await run();
         assertCurrent();
         return result;
-      } catch {
-        return fail(['Profile operation held: current admitted authority or source is unavailable.']);
+      } catch (error) {
+        const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        if (writeSent) {
+          return fail([
+            `Profile write outcome unknown: the write was sent to the daemon and then failed (${cause}).`,
+            'It may have been recorded. Read the profile (action:"read" or action:"get") before repeating it; do not append the same note twice.',
+          ]);
+        }
+        if (options?.signal?.aborted === true || error instanceof ToolInputProjectionError) {
+          return fail(['Profile operation held: current admitted authority or source is unavailable.']);
+        }
+        return fail([`Profile operation failed before anything was recorded: ${cause}`]);
       }
     },
   };
@@ -590,7 +620,16 @@ export function registerAgentProfileTool(
   registry: ToolRegistry,
   options: RegisterAgentProfileToolOptions,
 ): void {
-  if (!registry.has('profile')) registry.register(createAgentProfileTool({ invoke: options.invoke }), {
+  if (registry.has('profile')) {
+    const existing = registry.list().find(tool => tool.definition.name === 'profile');
+    const actions = (existing?.definition.parameters as { properties?: { action?: { enum?: unknown } } } | undefined)?.properties?.action?.enum;
+    // Registering again is harmless; a different tool already holding the name would silently replace the owner profile tool.
+    if (JSON.stringify(actions) !== JSON.stringify([...PROFILE_ACTIONS])) {
+      throw new Error(`Cannot register the Agent profile tool: a different tool named 'profile' is already registered (actions: ${Array.isArray(actions) ? actions.join(', ') : 'none declared'}). Rename one of them.`);
+    }
+    return;
+  }
+  registry.register(createAgentProfileTool({ invoke: options.invoke }), {
     inputProjection: createAgentLocalStateInputProjector(args => {
       const descriptors = captureCatalogMethods(options, ['invoke']);
       const action = normalizeProfileAction(args.action) ?? normalizeProfileAction(args.mode);

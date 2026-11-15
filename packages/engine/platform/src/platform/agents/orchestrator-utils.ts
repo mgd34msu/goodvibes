@@ -2,7 +2,6 @@
 
 import type { ChatResponse } from '../providers/interface.js';
 import { isContextOverflowSignal } from '../providers/stop-reason-maps.js';
-import { compactSmallWindow } from '../core/context-compaction.js';
 import type { ProviderMessage } from '../providers/interface.js';
 import { logger } from '../utils/logger.js';
 import { setAgentProgress, type ProgressAudience } from './progress-audience.js';
@@ -28,7 +27,7 @@ export function maybeCompactAfterModelContextWarning(opts: {
     getMessagesForLLM(): ProviderMessage[];
     replaceMessagesForLLM(messages: ProviderMessage[]): void;
   };
-  record: { id: string; progress?: string | undefined; progressAudience?: ProgressAudience | undefined };
+  record: { id: string; task?: string | undefined; progress?: string | undefined; progressAudience?: ProgressAudience | undefined };
   turn: number;
   contextWindowAwarenessEnabled: boolean;
   emitProgress: (progress: string) => void;
@@ -44,9 +43,31 @@ export function maybeCompactAfterModelContextWarning(opts: {
   opts.emitProgress(record.progress ?? '');
   const messages = conversation.getMessagesForLLM();
   conversation.replaceMessagesForLLM(
-    compactSmallWindow(messages, Math.max(5, Math.floor(messages.length / 3))),
+    compactAgentConversation(messages, Math.max(5, Math.floor(messages.length / 3)), record.task),
   );
   return true;
+}
+
+/**
+ * Sub-agent compaction: keep the newest `keepRecent` messages plus the task.
+ * The task reaches the model only as the run's first user message (the system
+ * prompt leaves it out), so a plain tail cut would drop the goal and its
+ * criteria. Nothing is summarised, and the notice says so.
+ */
+export function compactAgentConversation(messages: ProviderMessage[], keepRecent: number, task: string | undefined): ProviderMessage[] {
+  if (messages.length <= keepRecent) return messages;
+  let start = messages.length - keepRecent;
+  // A tool result is only valid after the assistant message that made the call, so the cut moves back to include that message.
+  while (start > 0 && messages[start]!.role === 'tool') start -= 1;
+  const taskIndex = task === undefined ? -1 : messages.findIndex((message) => message.role === 'user' && message.content === task);
+  const pinned = taskIndex >= 0 && taskIndex < start ? [messages[taskIndex]!] : [];
+  const dropped = start - pinned.length;
+  if (dropped === 0) return messages;
+  const notice = `[Context compacted: ${dropped} earlier message${dropped === 1 ? ' was' : 's were'} dropped, not summarised, to fit the context window.`
+    + `${pinned.length > 0 ? ' The task above is the original, unchanged.' : ''} Their tool results are gone: re-read any file you still need.]`;
+  return pinned.length > 0
+    ? [pinned[0]!, { role: 'assistant', content: notice }, ...messages.slice(start)]
+    : [{ role: 'user', content: notice }, { role: 'assistant', content: '[Continuing from the most recent messages.]' }, ...messages.slice(start)];
 }
 
 /** The argument names that actually say what a tool is doing. */

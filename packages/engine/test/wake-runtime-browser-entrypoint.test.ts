@@ -24,8 +24,12 @@ interface BuildMetafile {
   readonly inputs: Readonly<Record<string, { readonly imports: readonly { readonly path: string; readonly external?: boolean }[] }>>;
 }
 
-/** Retain the whole public wake surface and every repaired battery with minimal browser intrinsics. */
-async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
+/**
+ * Retain the whole public wake surface and every repaired battery with minimal browser intrinsics.
+ * Resolved through the `bun` source condition: the published `import` condition points at build
+ * output, which a unit run must not depend on.
+ */
+async function bundleConsumer(): Promise<BrowserSurface> {
   const dir = mkdtempSync(join(tmpdir(), 'gv-wake-browser-'));
   try {
     const scope = join(dir, 'node_modules', '@goodvibes-jev');
@@ -34,7 +38,7 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
     symlinkSync(JUDGMENT_ROOT, join(scope, 'judgment'), 'dir');
     writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
     const entry = join(dir, 'consumer.ts');
-    const battery = (path: string) => JSON.stringify(join(ENGINE_ROOT, `platform/${source ? 'src' : 'dist'}/platform/${path}.${source ? 'ts' : 'js'}`));
+    const battery = (path: string) => JSON.stringify(join(ENGINE_ROOT, `platform/src/platform/${path}.ts`));
     writeFileSync(entry, `
       import * as wake from '${PUBLIC_ENTRY}';
       import * as judgment from '@goodvibes-jev/judgment/decisions';
@@ -49,7 +53,7 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
     const metafile = join(dir, 'metafile.json');
     const child = Bun.spawn([
       process.execPath, 'build', entry, '--target=browser', '--format=iife',
-      `--outfile=${output}`, `--metafile=${metafile}`, ...(source ? ['--conditions=bun'] : []),
+      `--outfile=${output}`, `--metafile=${metafile}`, '--conditions=bun',
     ], { cwd: dir, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
     const stdout = new Response(child.stdout).text().catch(() => '');
     const stderr = new Response(child.stderr).text().catch(() => '');
@@ -58,9 +62,9 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
       expect(code, `${await stdout}\n${await stderr}`).toBe(0);
       const graph = JSON.parse(readFileSync(metafile, 'utf8')) as BuildMetafile;
       const paths = Object.keys(graph.inputs).map((path) => path.replaceAll('\\', '/'));
-      const tree = source ? 'src' : 'dist';
-      const extension = source ? 'ts' : 'js';
-      // The package resolver really used the requested condition, and the
+      const tree = 'src';
+      const extension = 'ts';
+      // The package resolver really used the source condition, and the
       // formerly leaking modules are present rather than optimized away.
       for (const suffix of [
         `platform/${tree}/platform/voice/wake/runtime.${extension}`,
@@ -94,10 +98,10 @@ async function bundleConsumer(source: boolean): Promise<BrowserSurface> {
   }
 }
 
-for (const source of [true, false]) {
-  describe(`wake browser runtime through the ${source ? 'Bun source' : 'published import'} condition`, () => {
+{
+  describe('wake browser runtime through the Bun source condition', () => {
     test('executes neutral decisions and the wake error path without a host runtime', async () => {
-      const { wake, display, retry, provider, judgment, nativeSummary, nativeErrors } = await bundleConsumer(source);
+      const { wake, display, retry, provider, judgment, nativeSummary, nativeErrors } = await bundleConsumer();
       expect(judgment.estimateTokens('abcdefg')).toBe(3);
       expect(judgment.LIMITS.maxChoiceOptions).toBe(255);
       expect(judgment.NONE).toBe('none');

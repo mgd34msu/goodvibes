@@ -1,7 +1,8 @@
-import { closeSync, existsSync, mkdirSync, openSync, statSync, unlinkSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
-import { readVersioned } from '@goodvibes-jev/engine/platform/platform/config';
+import { readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OnboardingAcknowledgementRuntimeState, OnboardingAcknowledgementTarget, OnboardingMode, OnboardingShellPaths, OnboardingStateScope, } from './onboarding-state-types.js';
 const ONBOARDING_RUNTIME_STATE_FILE = 'onboarding-state.json';
 /**
@@ -13,14 +14,24 @@ const ONBOARDING_RUNTIME_STATE_FILE = 'onboarding-state.json';
  *
  *   - Acquire: open(<statefile>.lock, O_CREAT|O_EXCL|O_WRONLY), atomic on POSIX.
  *   - Stale detection: if the lockfile mtime is >= LOCK_STALE_MS old, force-remove.
- *   - Retry: up to LOCK_MAX_RETRIES rapid non-blocking attempts (no sleep, main-thread safe).
- *   - Release: unlink the lockfile (best-effort on failure).
+ *   - Retry: up to LOCK_MAX_RETRIES attempts LOCK_RETRY_MS apart, which spans the stale window so a crashed holder is taken over.
+ *   - Release: unlink the lockfile only while it still carries this writer's token (best-effort on failure).
  *
  * O_EXCL was chosen over flock(2) because it works on all POSIX targets
  * without requiring an open fd on the guarded file, and is Bun-compatible.
  */
-const LOCK_MAX_RETRIES = 10;
 const LOCK_STALE_MS = 5000;
+const LOCK_RETRY_MS = 20;
+const LOCK_MAX_RETRIES = Math.ceil(LOCK_STALE_MS / LOCK_RETRY_MS) + 25;
+/** The write path is synchronous, so waiting for the holder blocks the thread for a few milliseconds at a time. */
+function blockingSleep(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+/** Clock and sleep seams for the lock wait. */
+export interface OnboardingStateLockTiming {
+    readonly sleep?: ((ms: number) => void) | undefined;
+    readonly now?: (() => number) | undefined;
+}
 export interface OnboardingRuntimeStateRecord {
     readonly scope: OnboardingStateScope;
     readonly path: string;
@@ -37,7 +48,9 @@ interface WriteOnboardingAcknowledgementStateOptions {
     readonly mode?: OnboardingMode | undefined;
     readonly workspaceRoot?: string | undefined;
 }
-export function createOnboardingStateStorage(surfaceRoot: string) {
+export function createOnboardingStateStorage(surfaceRoot: string, timing: OnboardingStateLockTiming = {}) {
+    const sleep = timing.sleep ?? blockingSleep;
+    const now = timing.now ?? Date.now;
     function resolveStatePath(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope): string {
         return scope === 'project'
             ? shellPaths.resolveProjectPath(surfaceRoot, ONBOARDING_RUNTIME_STATE_FILE)
@@ -70,19 +83,17 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
         return `${statePath}.lock`;
     }
     /**
-     * Attempt to acquire an O_EXCL advisory lock. Returns true if acquired.
+     * Acquire an O_EXCL advisory lock, waiting for a live holder. Returns the
+     * token written into the lockfile, or null when the wait ran out.
      * Stale locks (older than LOCK_STALE_MS) are forcibly removed before retry.
-     *
-     * Retries are non-blocking (no sleep between attempts) so this function is
-     * safe to call on the main thread. Each O_EXCL open is a single syscall;
-     * 10 rapid retries add negligible latency and are safe for a one-shot path.
      */
-    function acquireLock(lp: string): boolean {
+    function acquireLock(lp: string): string | null {
+        const token = `${process.pid}:${Math.random().toString(36).slice(2)}`;
         for (let attempt = 0; attempt < LOCK_MAX_RETRIES; attempt++) {
             // Stale-lock takeover: if the lockfile is old enough, forcibly remove it.
             try {
                 const st = statSync(lp);
-                if (Date.now() - st.mtimeMs >= LOCK_STALE_MS) {
+                if (now() - st.mtimeMs >= LOCK_STALE_MS) {
                     try {
                         unlinkSync(lp);
                     }
@@ -93,16 +104,24 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
             try {
                 // 'wx' ≡ O_CREAT | O_EXCL | O_WRONLY, fails atomically if file exists.
                 const fd = openSync(lp, 'wx');
-                closeSync(fd);
-                return true;
+                try {
+                    writeSync(fd, token);
+                }
+                finally {
+                    closeSync(fd);
+                }
+                return token;
             }
             catch { /* file exists, held by another process */ }
+            sleep(LOCK_RETRY_MS);
         }
-        return false;
+        return null;
     }
-    /** Release the advisory lockfile (best-effort). */
-    function releaseLock(lp: string): void {
+    /** Release the advisory lockfile (best-effort); a lock another writer took over after going stale stays theirs. */
+    function releaseLock(lp: string, token: string): void {
         try {
+            if (readFileSync(lp, 'utf-8') !== token)
+                return;
             unlinkSync(lp);
         }
         catch { /* best-effort */ }
@@ -148,14 +167,12 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
         const lp = stateLockPath(path);
         // Ensure the parent directory exists before we try to create the lockfile.
         mkdirSync(dirname(path), { recursive: true });
-        const acquired = acquireLock(lp);
-        if (!acquired) {
-            // Lock exhaustion: another process has held the lock for all LOCK_MAX_RETRIES
-            // attempts. Proceeding without the lock, the atomic write (rename) prevents
-            // torn files, but under true concurrent contention a concurrent read-modify-write
-            // may result in a lost-update (last writer wins). Surfaced here so it is
-            // detectable in logs rather than silently discarded.
-            console.warn('[goodvibes] onboarding-state: lock exhausted, proceeding without lock.', { path, target: options.target, source: options.source });
+        const token = acquireLock(lp);
+        if (token === null) {
+            // The holder stayed alive past the stale window. The atomic write still prevents
+            // torn files, but a concurrent read-modify-write can lose an update, so it is logged
+            // (not printed: this runs under a live full-screen terminal).
+            logger.warn('onboarding-state: lock wait ran out, proceeding without the lock', { path, target: options.target, source: options.source });
         }
         try {
             // Re-read (inside the lock when acquired; best-effort when degraded) to get
@@ -175,11 +192,13 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
                     [options.target]: options.acknowledged,
                 },
             };
+            // A file from a newer release is moved aside, not overwritten, so downgrading never destroys its state.
+            setAsideNewerVersionFile(path, 1);
             atomicWriteFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mkdirp: true });
         }
         finally {
-            if (acquired)
-                releaseLock(lp);
+            if (token !== null)
+                releaseLock(lp, token);
         }
         return readOnboardingRuntimeState(shellPaths, scope);
     }

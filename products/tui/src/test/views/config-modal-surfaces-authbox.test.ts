@@ -27,9 +27,10 @@ function rowsText(view: { tabs: readonly { rows: readonly ConfigModalRow[] }[] }
 const FAKE_PASSWORD = 'super-secret-hunter2';
 
 describe('local-auth modal surface', () => {
-  function makeAuthManager(withMutations: boolean): LocalAuthInspectionQuery {
+  function makeAuthManager(withMutations: boolean, secrets: Record<string, string> = {}): LocalAuthInspectionQuery {
     const base = {
       inspect: () => ({
+        ...secrets,
         userStorePath: '/tmp/gv-test/users.json',
         bootstrapCredentialPath: '/tmp/gv-test/bootstrap.json',
         persisted: true,
@@ -37,10 +38,10 @@ describe('local-auth modal surface', () => {
         userCount: 2,
         sessionCount: 1,
         users: [
-          { username: 'alice', roles: ['admin'] },
-          { username: 'bob', roles: [] },
+          { username: 'alice', roles: ['admin'], ...secrets },
+          { username: 'bob', roles: [], ...secrets },
         ],
-        sessions: [{ id: 'session-one', username: 'alice', expiresAt: Date.now() + 1_000 }],
+        sessions: [{ id: 'session-one', username: 'alice', expiresAt: Date.now() + 1_000, ...secrets }],
       }),
     };
     const mutations = withMutations
@@ -69,12 +70,17 @@ describe('local-auth modal surface', () => {
     expect(text).toContain('bob');
   });
 
-  test('no password string ever appears in a rendered row label', () => {
-    const surface = createLocalAuthModalSurface(makeAuthManager(true));
+  test('a password or hash the inspection carries never reaches the rendered view', () => {
+    const surface = createLocalAuthModalSurface(makeAuthManager(true, {
+      password: FAKE_PASSWORD,
+      passwordHash: `hash:${FAKE_PASSWORD}`,
+      token: FAKE_PASSWORD,
+    }));
     const view = surface.buildView();
-    const text = rowsText(view);
-    expect(text).not.toContain(FAKE_PASSWORD);
-    expect(text).not.toContain('password');
+    // The whole view, not only row labels: headers, details and actions too.
+    const rendered = JSON.stringify(view);
+    expect(rendered).not.toContain(FAKE_PASSWORD);
+    expect(rendered).toContain('alice');
   });
 
   test('degrades honestly when mutations are unavailable', () => {
@@ -192,9 +198,9 @@ describe('sandbox modal surface', () => {
         calls.stop.push(sessionId);
         return null;
       },
-      execute: (sessionId: string, command: string, args: string[]) => {
+      execute: async (sessionId: string, command: string, args: string[]) => {
         calls.execute.push({ sessionId, command, args });
-        return { exitCode: 0 } as unknown;
+        return { status: 0, stdout: 'sandbox modal probe ok\n', stderr: '' };
       },
     };
     return { calls, registry: registry as unknown as SandboxSessionRegistry };
@@ -245,14 +251,20 @@ describe('sandbox modal surface', () => {
     expect(calls.stop).toEqual(['s1']);
   });
 
-  test('e executes a probe against the selected session row', () => {
+  test('e executes a probe against the selected session row and reports its outcome', async () => {
     const { calls, registry } = makeRegistry([
       { id: 's1', profileId: 'eval-py', state: 'running', backend: 'local', resolvedBackend: 'local', executionCount: 0 },
     ]);
-    const surface = createSandboxModalSurface(makeConfig(), registry, () => {});
-    surface.onAction?.('execute', ctx({ id: 'session:s1', label: '' }));
+    let rendered!: () => void;
+    const done = new Promise<void>((resolve) => { rendered = resolve; });
+    const surface = createSandboxModalSurface(makeConfig(), registry, rendered);
+    const statuses: string[] = [];
+    surface.onAction?.('execute', ctx({ id: 'session:s1', label: '' }, { setStatus: (text: string) => { statuses.push(text); } }));
+    await done;
     expect(calls.execute).toHaveLength(1);
     expect(calls.execute[0]?.sessionId).toBe('s1');
+    expect(statuses[0]).toBe('Running probe in s1...');
+    expect(statuses.at(-1)).toBe('Probe succeeded: sandbox modal probe ok');
   });
 
   test('start/stop/execute are gated to the right tab and row kind', () => {

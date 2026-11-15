@@ -17,6 +17,7 @@
 import type { Page, Route } from '@playwright/test';
 import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 import { describeOriginPostureForMock } from './mock-daemon';
+import { E2E_OPERATOR_TOKEN } from './seed';
 
 const TOKEN_KEY = 'goodvibes.webui.token';
 
@@ -132,7 +133,7 @@ export async function installChatMockDaemon(page: Page, options: ChatMockOptions
     } catch {
       /* ignore */
     }
-  }, [TOKEN_KEY, 'e2e-operator-token'] as const);
+  }, [TOKEN_KEY, E2E_OPERATOR_TOKEN] as const);
 
   function sessionDto(session: StoredSession) {
     const list = messages.get(session.id) ?? [];

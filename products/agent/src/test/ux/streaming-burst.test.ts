@@ -1,347 +1,171 @@
 /**
- * UX Anti-Regression: Streaming + Tool Burst + Agent Burst (v3 §18.5)
+ * UX Anti-Regression: Streaming + Tool Burst + Agent Burst
  *
- * Verifies that simultaneous streaming, concurrent tool calls, and agent
- * state changes do not corrupt conversation state consistency.
- *
- * All tests use pure state manipulation, no real I/O, no event bus.
+ * Drives the real runtime store with interleaved stream deltas, tool phase events
+ * and agent events, and checks that the conversation and agent domains each keep
+ * the state the UI renders from.
  */
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { createInitialRuntimeState } from '../../runtime/store/state.ts';
-import type { RuntimeState } from '../../runtime/store/state.ts';
+import { describe, test, expect } from 'bun:test';
+import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import {
   selectConversation,
   selectAgents,
-  selectTasks,
   selectIsTurnActive,
-  selectRunningTasks,
   selectRunningAgents,
 } from '../../runtime/store/selectors/index.ts';
-import type {
-  ConversationDomainState,
-  ActiveToolCall,
-} from '@/runtime/index.ts';
-import type { AgentDomainState, RuntimeAgent } from '@/runtime/index.ts';
-import type { TaskDomainState } from '@/runtime/index.ts';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const TURN_ID = 'turn-stream-001';
 
-/** Fixed timestamp used in test helpers to avoid non-deterministic Date.now() calls. */
-const TEST_TIMESTAMP = 1700000000000;
-
-/** Produce a streaming-active conversation state. */
-function makeStreamingConversation(
-  base: ConversationDomainState,
-  opts: { deltaCount?: number; accumulated?: string } = {},
-): ConversationDomainState {
-  return {
-    ...base,
-    turnState: 'streaming',
-    currentTurnId: 'turn-stream-001',
-    turnStartedAt: TEST_TIMESTAMP - 500,
-    revision: base.revision + 1,
-    lastUpdatedAt: TEST_TIMESTAMP,
-    source: 'streaming-burst-test',
-    stream: {
-      accumulated: opts.accumulated ?? 'partial response text',
-      reasoningAccumulated: '',
-      deltaCount: opts.deltaCount ?? 12,
-      firstDeltaAt: TEST_TIMESTAMP - 400,
-      lastDeltaAt: TEST_TIMESTAMP - 10,
-    },
-  };
+function startStreamingTurn() {
+  const store = createRuntimeStore();
+  const dispatch = createDomainDispatch(store);
+  dispatch.dispatchTurnEvent({ type: 'TURN_SUBMITTED', turnId: TURN_ID, prompt: 'go' });
+  dispatch.dispatchTurnEvent({ type: 'STREAM_START', turnId: TURN_ID });
+  return { store, dispatch };
 }
 
-/** Produce an active tool call record. */
-function makeToolCall(callId: string, toolName: string): ActiveToolCall {
-  return {
-    callId,
-    toolName,
-    args: JSON.stringify({ path: '/tmp/test.ts' }),
-    state: 'executing',
-    stateEnteredAt: TEST_TIMESTAMP - 100,
-    phaseTimestamps: {
-      received: TEST_TIMESTAMP - 200,
-      validated: TEST_TIMESTAMP - 180,
-      executing: TEST_TIMESTAMP - 100,
-    },
-  };
+function delta(accumulated: string) {
+  return { type: 'STREAM_DELTA' as const, turnId: TURN_ID, content: accumulated.slice(-1), accumulated, toolCalls: [] };
 }
-
-/** Produce a running agent. */
-function makeRunningAgent(id: string, parentId?: string): RuntimeAgent {
-  return {
-    id,
-    label: `Agent ${id}`,
-    role: 'engineer',
-    status: 'running',
-    providerId: 'anthropic',
-    modelId: 'claude-sonnet-4-6',
-    parentAgentId: parentId,
-    childAgentIds: [],
-    turnCount: 0,
-    toolCallCount: 0,
-    latestOutput: '',
-    spawnedAt: TEST_TIMESTAMP - 200,
-  };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ux:streaming-burst: simultaneous streaming + tool + agent bursts', () => {
-  let state: RuntimeState;
-
-  beforeEach(() => {
-    state = createInitialRuntimeState();
-  });
-
   describe('streaming state integrity during concurrent tool calls', () => {
-    test('adding tool calls during streaming does not change turnState', () => {
-      // Simulate: streaming starts
-      const withStreaming: RuntimeState = {
-        ...state,
-        conversation: makeStreamingConversation(state.conversation),
-      };
+    test('tool calls registered while streaming do not change the turn state', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchTurnEvent(delta('partial response text'));
 
-      // Simulate: 3 tool calls dispatched concurrently during streaming
-      const toolCalls = new Map(withStreaming.conversation.activeToolCalls);
-      toolCalls.set('call-001', makeToolCall('call-001', 'Read'));
-      toolCalls.set('call-002', makeToolCall('call-002', 'Edit'));
-      toolCalls.set('call-003', makeToolCall('call-003', 'Bash'));
+      for (const [callId, tool] of [['call-001', 'Read'], ['call-002', 'Edit'], ['call-003', 'Bash']] as const) {
+        dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId, turnId: TURN_ID, tool, args: { path: '/tmp/test.ts' } });
+        dispatch.dispatchToolEvent({ type: 'TOOL_EXECUTING', callId, turnId: TURN_ID, tool, startedAt: 1 });
+      }
 
-      const withTools: RuntimeState = {
-        ...withStreaming,
-        conversation: {
-          ...withStreaming.conversation,
-          activeToolCalls: toolCalls,
-          toolCallsThisTurn: 3,
-          revision: withStreaming.conversation.revision + 1,
-          lastUpdatedAt: TEST_TIMESTAMP,
-          source: 'tool-dispatch',
-        },
-      };
-
-      // Contract: turnState remains 'streaming', tool dispatch does not preempt it
-      expect(selectConversation(withTools).turnState).toBe('streaming');
-      expect(selectConversation(withTools).activeToolCalls.size).toBe(3);
-      expect(selectConversation(withTools).toolCallsThisTurn).toBe(3);
+      const conversation = selectConversation(store.getState());
+      expect(conversation.turnState).toBe('streaming');
+      expect(selectIsTurnActive(store.getState())).toBe(true);
+      expect(conversation.activeToolCalls.size).toBe(3);
+      expect(conversation.toolCallsThisTurn).toBe(3);
+      expect(conversation.activeToolCalls.get('call-002')?.toolName).toBe('Edit');
     });
 
-    test('stream delta accumulation is not disrupted by concurrent tool call state changes', () => {
-      const withStreaming: RuntimeState = {
-        ...state,
-        conversation: makeStreamingConversation(state.conversation, {
-          deltaCount: 50,
-          accumulated: 'x'.repeat(2000),
-        }),
-      };
+    test('stream accumulation is not disturbed by tool events between deltas', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchTurnEvent(delta('He'));
+      dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId: 'c1', turnId: TURN_ID, tool: 'Read', args: {} });
+      dispatch.dispatchTurnEvent(delta('Hel'));
+      dispatch.dispatchToolEvent({ type: 'TOOL_EXECUTING', callId: 'c1', turnId: TURN_ID, tool: 'Read', startedAt: 1 });
+      dispatch.dispatchTurnEvent(delta('Hello'));
+      dispatch.dispatchToolEvent({ type: 'TOOL_SUCCEEDED', callId: 'c1', turnId: TURN_ID, tool: 'Read', durationMs: 3 });
 
-      // Simulate: tool call state transitions during streaming deltas
-      const toolCalls = new Map<string, ActiveToolCall>();
-      for (let i = 0; i < 5; i++) {
-        const call = makeToolCall(`call-${i}`, 'Read');
-        toolCalls.set(call.callId, { ...call, state: 'succeeded' });
-      }
-
-      const withSettledTools: RuntimeState = {
-        ...withStreaming,
-        conversation: {
-          ...withStreaming.conversation,
-          activeToolCalls: toolCalls,
-          stream: {
-            ...withStreaming.conversation.stream,
-            deltaCount: 75,
-            accumulated: 'x'.repeat(3000),
-          },
-          revision: withStreaming.conversation.revision + 1,
-        },
-      };
-
-      const conv = selectConversation(withSettledTools);
-      expect(conv.stream.deltaCount).toBe(75);
-      expect(conv.stream.accumulated).toHaveLength(3000);
-      // All tool calls are settled but streaming continues
-      expect(conv.turnState).toBe('streaming');
-      for (const [, tc] of conv.activeToolCalls) {
-        expect(tc.state).toBe('succeeded');
-      }
+      const { stream } = selectConversation(store.getState());
+      expect(stream.accumulated).toBe('Hello');
+      expect(stream.deltaCount).toBe(3);
+      expect(stream.firstDeltaAt).toBeDefined();
     });
 
-    test('burst of 10 concurrent tool calls preserves all call IDs', () => {
-      const withStreaming: RuntimeState = {
-        ...state,
-        conversation: makeStreamingConversation(state.conversation),
-      };
-
-      const toolCalls = new Map<string, ActiveToolCall>();
+    test('a burst of 10 concurrent tool calls keeps every call id and counts each once', () => {
+      const { store, dispatch } = startStreamingTurn();
       for (let i = 0; i < 10; i++) {
-        const callId = `burst-call-${i.toString().padStart(3, '0')}`;
-        toolCalls.set(callId, makeToolCall(callId, `Tool${i}`));
+        dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId: `call-${i}`, turnId: TURN_ID, tool: `Tool${i}`, args: {} });
       }
 
-      const withBurst: RuntimeState = {
-        ...withStreaming,
-        conversation: {
-          ...withStreaming.conversation,
-          activeToolCalls: toolCalls,
-          toolCallsThisTurn: 10,
-        },
-      };
+      const conversation = selectConversation(store.getState());
+      expect([...conversation.activeToolCalls.keys()]).toEqual(Array.from({ length: 10 }, (_, i) => `call-${i}`));
+      expect(conversation.toolCallsThisTurn).toBe(conversation.activeToolCalls.size);
+    });
 
-      const conv = selectConversation(withBurst);
-      expect(conv.activeToolCalls.size).toBe(10);
-      for (let i = 0; i < 10; i++) {
-        expect(conv.activeToolCalls.has(`burst-call-${i.toString().padStart(3, '0')}`)).toBe(true);
-      }
+    test('tool events carrying another turn id are dropped', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId: 'stray', turnId: 'other-turn', tool: 'Read', args: {} });
+
+      const conversation = selectConversation(store.getState());
+      expect(conversation.activeToolCalls.size).toBe(0);
+      expect(conversation.toolCallsThisTurn).toBe(0);
+    });
+
+    test('a settled tool call is not reopened by a stale phase event from the burst', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId: 'c1', turnId: TURN_ID, tool: 'Read', args: {} });
+      dispatch.dispatchToolEvent({ type: 'TOOL_SUCCEEDED', callId: 'c1', turnId: TURN_ID, tool: 'Read', durationMs: 1 });
+      dispatch.dispatchToolEvent({ type: 'TOOL_EXECUTING', callId: 'c1', turnId: TURN_ID, tool: 'Read', startedAt: 2 });
+
+      expect(selectConversation(store.getState()).activeToolCalls.get('c1')?.state).toBe('succeeded');
+    });
+
+    test('the batch-ready event moves the streaming turn on to tool dispatch', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchTurnEvent(delta('x'));
+      dispatch.dispatchTurnEvent({ type: 'TOOL_BATCH_READY', turnId: TURN_ID, toolCalls: ['c1', 'c2'] });
+      expect(selectConversation(store.getState()).turnState).toBe('tool_dispatch');
     });
   });
 
   describe('agent burst during active streaming', () => {
-    test('spawning multiple agents during streaming does not affect conversation state', () => {
-      const withStreaming: RuntimeState = {
-        ...state,
-        conversation: makeStreamingConversation(state.conversation),
-      };
+    test('spawning agents while streaming leaves the conversation slice untouched', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchTurnEvent(delta('streaming'));
+      const conversation = selectConversation(store.getState());
 
-      // Simulate: 3 agents spawned concurrently
-      const agentMap = new Map<string, RuntimeAgent>();
-      const agent1 = makeRunningAgent('agent-001');
-      const agent2 = makeRunningAgent('agent-002', 'agent-001');
-      const agent3 = makeRunningAgent('agent-003', 'agent-001');
-      agentMap.set(agent1.id, agent1);
-      agentMap.set(agent2.id, agent2);
-      agentMap.set(agent3.id, agent3);
+      for (let i = 0; i < 5; i++) {
+        dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: `agent-${i}`, task: `task ${i}` });
+        dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: `agent-${i}` });
+      }
 
-      const withAgents: RuntimeState = {
-        ...withStreaming,
-        agents: {
-          ...withStreaming.agents,
-          agents: agentMap,
-          activeAgentIds: ['agent-001', 'agent-002', 'agent-003'],
-          totalSpawned: 3,
-          peakConcurrency: 3,
-          revision: withStreaming.agents.revision + 1,
-          lastUpdatedAt: TEST_TIMESTAMP,
-          source: 'agent-burst-test',
-        },
-      };
-
-      // Contract: streaming conversation state unaffected
-      expect(selectConversation(withAgents).turnState).toBe('streaming');
-      expect(selectConversation(withAgents).currentTurnId).toBe('turn-stream-001');
-
-      // Contract: agents reflect burst correctly
-      const agents = selectRunningAgents(withAgents);
-      expect(agents).toHaveLength(3);
-      expect(selectAgents(withAgents).peakConcurrency).toBe(3);
+      expect(selectConversation(store.getState())).toBe(conversation);
+      expect(selectAgents(store.getState()).totalSpawned).toBe(5);
+      expect(selectRunningAgents(store.getState())).toHaveLength(5);
     });
 
-    test('agent hierarchy is preserved under concurrent burst', () => {
-      const agentMap = new Map<string, RuntimeAgent>();
-      const root = makeRunningAgent('root-001');
-      const children = Array.from({ length: 5 }, (_, i) =>
-        makeRunningAgent(`child-${i}`, 'root-001'),
-      );
-      const updatedRoot = { ...root, childAgentIds: children.map((c) => c.id) };
-      agentMap.set(updatedRoot.id, updatedRoot);
-      for (const child of children) agentMap.set(child.id, child);
-
-      const withBurstAgents: RuntimeState = {
-        ...state,
-        agents: {
-          ...state.agents,
-          agents: agentMap,
-          activeAgentIds: [root.id, ...children.map((c) => c.id)],
-          totalSpawned: 6,
-          peakConcurrency: 6,
-          revision: 6,
-          lastUpdatedAt: TEST_TIMESTAMP,
-          source: 'hierarchy-burst-test',
-        },
-      };
-
-      const rootAgent = selectAgents(withBurstAgents).agents.get('root-001');
-      expect(rootAgent).toEqual(expect.objectContaining({
-        childAgentIds: expect.arrayContaining(children.map((child) => child.id)),
-      }));
-      for (const child of children) {
-        const childAgent = selectAgents(withBurstAgents).agents.get(child.id);
-        expect(childAgent?.parentAgentId).toBe('root-001');
+    test('a child agent records its parent and peak concurrency counts the whole burst', () => {
+      const { store, dispatch } = startStreamingTurn();
+      dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: 'parent', task: 'lead' });
+      dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: 'parent' });
+      for (let i = 0; i < 3; i++) {
+        dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: `child-${i}`, task: `sub ${i}`, parentAgentId: 'parent' });
+        dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: `child-${i}`, parentAgentId: 'parent' });
       }
+
+      const agents = selectAgents(store.getState());
+      for (let i = 0; i < 3; i++) expect(agents.agents.get(`child-${i}`)?.parentAgentId).toBe('parent');
+      expect(agents.agents.get('parent')?.parentAgentId).toBeUndefined();
+      expect(agents.peakConcurrency).toBe(4);
     });
   });
 
   describe('state consistency invariants under burst load', () => {
-    test('revision counter is monotonically increasing across burst mutations', () => {
-      let current = createInitialRuntimeState();
-      const revisions: number[] = [current.conversation.revision];
-
-      for (let i = 1; i <= 20; i++) {
-        current = {
-          ...current,
-          conversation: {
-            ...current.conversation,
-            revision: i,
-            lastUpdatedAt: TEST_TIMESTAMP,
-          },
-        };
-        revisions.push(current.conversation.revision);
-      }
-
-      for (let i = 1; i < revisions.length; i++) {
-        expect(revisions[i]).toBeGreaterThan(revisions[i - 1]!);
+    test('the conversation revision only ever increases across a mixed burst', () => {
+      const { store, dispatch } = startStreamingTurn();
+      let previous = selectConversation(store.getState()).revision;
+      const burst = [
+        () => dispatch.dispatchTurnEvent(delta('a')),
+        () => dispatch.dispatchToolEvent({ type: 'TOOL_RECEIVED', callId: 'c1', turnId: TURN_ID, tool: 'Read', args: {} }),
+        () => dispatch.dispatchTurnEvent(delta('ab')),
+        () => dispatch.dispatchToolEvent({ type: 'TOOL_EXECUTING', callId: 'c1', turnId: TURN_ID, tool: 'Read', startedAt: 1 }),
+        () => dispatch.dispatchTurnEvent(delta('abc')),
+        () => dispatch.dispatchToolEvent({ type: 'TOOL_SUCCEEDED', callId: 'c1', turnId: TURN_ID, tool: 'Read', durationMs: 1 }),
+      ];
+      for (const step of burst) {
+        step();
+        const revision = selectConversation(store.getState()).revision;
+        expect(revision).toBeGreaterThan(previous);
+        previous = revision;
       }
     });
 
-    test('tool call count matches active tool map size after burst', () => {
-      const toolCalls = new Map<string, ActiveToolCall>();
-      const count = 7;
-      for (let i = 0; i < count; i++) {
-        const callId = `tc-${i}`;
-        toolCalls.set(callId, makeToolCall(callId, 'Tool'));
+    test('activeAgentIds matches exactly the agents that are not finished', () => {
+      const { store, dispatch } = startStreamingTurn();
+      for (let i = 0; i < 6; i++) {
+        dispatch.dispatchAgentEvent({ type: 'AGENT_SPAWNING', agentId: `a${i}`, task: 't' });
+        dispatch.dispatchAgentEvent({ type: 'AGENT_RUNNING', agentId: `a${i}` });
       }
+      dispatch.dispatchAgentEvent({ type: 'AGENT_COMPLETED', agentId: 'a0', durationMs: 1 });
+      dispatch.dispatchAgentEvent({ type: 'AGENT_FAILED', agentId: 'a1', error: 'boom', durationMs: 1 });
+      dispatch.dispatchAgentEvent({ type: 'AGENT_CANCELLED', agentId: 'a2' });
 
-      const withBurst: RuntimeState = {
-        ...state,
-        conversation: {
-          ...makeStreamingConversation(state.conversation),
-          activeToolCalls: toolCalls,
-          toolCallsThisTurn: count,
-        },
-      };
-
-      const conv = selectConversation(withBurst);
-      expect(conv.activeToolCalls.size).toBe(conv.toolCallsThisTurn);
-    });
-
-    test('activeAgentIds array stays consistent with agents Map after burst', () => {
-      const agentMap = new Map<string, RuntimeAgent>();
-      const ids: string[] = [];
-      for (let i = 0; i < 8; i++) {
-        const id = `a-${i}`;
-        agentMap.set(id, makeRunningAgent(id));
-        ids.push(id);
-      }
-
-      const withBurst: RuntimeState = {
-        ...state,
-        agents: {
-          ...state.agents,
-          agents: agentMap,
-          activeAgentIds: ids,
-          totalSpawned: 8,
-          peakConcurrency: 8,
-          revision: 8,
-          lastUpdatedAt: TEST_TIMESTAMP,
-          source: 'invariant-test',
-        },
-      };
-
-      const agentDomain = selectAgents(withBurst);
-      expect(agentDomain.activeAgentIds).toHaveLength(agentDomain.agents.size);
-      for (const id of agentDomain.activeAgentIds) {
-        expect(agentDomain.agents.has(id)).toBe(true);
-      }
+      const agents = selectAgents(store.getState());
+      expect([...agents.activeAgentIds].sort()).toEqual(['a3', 'a4', 'a5']);
+      expect(agents.totalCompleted).toBe(1);
+      expect(agents.totalFailed).toBe(1);
+      expect(agents.agents.size).toBe(6);
     });
   });
 });

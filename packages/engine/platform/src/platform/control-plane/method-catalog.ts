@@ -28,6 +28,7 @@ import {
 import {
   builtinGatewayEmailMethodDescriptors,
 } from './method-catalog-email.js';
+import { builtinGatewayHomeAssistantMethodDescriptors } from './method-catalog-homeassistant.js';
 import { builtinGatewayPaymentsMethodDescriptors } from './method-catalog-payments.js';
 import {
   builtinGatewayCalendarMethodDescriptors,
@@ -70,6 +71,8 @@ import {
 import {
   builtinGatewayModelMethodDescriptors,
 } from './method-catalog-models.js';
+import { builtinGatewayBatchMethodDescriptors } from './method-catalog-batch.js';
+import { builtinGatewayCloudflareMethodDescriptors } from './method-catalog-cloudflare.js';
 import {
   builtinGatewayUpdateMethodDescriptors,
 } from './method-catalog-update.js';
@@ -148,6 +151,7 @@ const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayControlMethodDescriptors,
   ...builtinBrowserJudgmentMethodDescriptors,
   ...builtinGatewayChannelMethodDescriptors,
+  ...builtinGatewayHomeAssistantMethodDescriptors,
   ...builtinTriggerSupervisorMethodDescriptors,
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
@@ -158,6 +162,8 @@ const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayBrowserMethodDescriptors,
   ...builtinGatewayRuntimeMethodDescriptors,
   ...builtinGatewayModelMethodDescriptors,
+  ...builtinGatewayBatchMethodDescriptors,
+  ...builtinGatewayCloudflareMethodDescriptors,
   ...builtinGatewayUpdateMethodDescriptors,
   ...builtinGatewayRelayMethodDescriptors,
   ...builtinGatewayKnowledgeMethodDescriptors,

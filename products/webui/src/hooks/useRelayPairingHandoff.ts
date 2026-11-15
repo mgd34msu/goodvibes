@@ -13,14 +13,15 @@
  * useUrlState's own mount effect normalizes a bare URL and drops the fragment, so the
  * token/pairing MUST be read at module/render-init time, before any effect can run.
  *
- * Unlike the token flow, storing a relay pairing needs no round trip to the daemon to
- * validate, decoding it is fully offline (decodeRelayPairingString), so there is no
- * 'pending' network state. `status` is 'idle' until a fragment is present, 'stored' once
- * a decoded pairing has been persisted (a one-tick confirmation a caller can use to show
- * a toast), or 'error' when the fragment was malformed.
+ * A relay pairing routes this browser's requests (bearer token included) to whichever
+ * daemon holds the pinned key, so a link must never store itself. Decoding is offline;
+ * the decoded pairing is held as a pending offer (`status` 'pending', with `pairing`)
+ * until the caller invokes `confirm()`, which is the only path that stores it.
+ * `dismiss()` drops the offer. `status` is 'idle' until a fragment is present, 'stored'
+ * once confirmed, or 'error' when the fragment was malformed.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   decodeRelayPairingCode,
   parseRelayPairingFromHash,
@@ -29,20 +30,27 @@ import {
   type RelayPairingPayload,
 } from '../lib/relay-pairing';
 
-export type RelayPairingHandoffStatus = 'idle' | 'stored' | 'error';
+export type RelayPairingHandoffStatus = 'idle' | 'pending' | 'stored' | 'error';
 
 export interface RelayPairingHandoff {
   status: RelayPairingHandoffStatus;
   error: unknown;
+  /** The offered pairing while 'pending', the stored one once 'stored'. */
   pairing: RelayPairingPayload | null;
+  /** Store the pending offer. No-op unless 'pending'. */
+  confirm: () => void;
+  /** Drop the pending offer without storing anything. */
+  dismiss: () => void;
 }
 
 type RelayOutcome =
+  | { readonly status: 'pending'; readonly pairing: RelayPairingPayload }
   | { readonly status: 'stored'; readonly pairing: RelayPairingPayload }
+  | { readonly status: 'dismissed' }
   | { readonly status: 'error'; readonly error: unknown };
 
-// `outcome` is the remembered result of consuming the code once; a remount reports it
-// instead of reading as idle, and never decodes or stores the pairing a second time.
+// `outcome` is the remembered result of the hand-off; a remount reports it instead of
+// reading as idle, and never decodes the code a second time.
 const capture: { done: boolean; outcome: RelayOutcome | null; code: string | null } = { done: false, outcome: null, code: null };
 
 function captureRelayPairingCode(): string | null {
@@ -63,41 +71,47 @@ export function resetRelayPairingCaptureForTest(): void {
   capture.code = null;
 }
 
-/** Decode and store the captured code, at most once per capture. */
-function consumeRelayPairingCode(code: string): RelayOutcome {
+/** Decode the captured code into a pending offer, at most once per capture. Stores nothing. */
+function offerRelayPairingCode(code: string): RelayOutcome {
   if (capture.outcome !== null) return capture.outcome;
   try {
-    const pairing = decodeRelayPairingCode(code);
-    storeRelayPairing(pairing);
-    capture.outcome = { status: 'stored', pairing };
+    capture.outcome = { status: 'pending', pairing: decodeRelayPairingCode(code) };
   } catch (error) {
     capture.outcome = { status: 'error', error };
   }
   return capture.outcome;
 }
 
+function viewOf(outcome: RelayOutcome | null): { status: RelayPairingHandoffStatus; error: unknown; pairing: RelayPairingPayload | null } {
+  if (outcome === null || outcome.status === 'dismissed') return { status: 'idle', error: null, pairing: null };
+  if (outcome.status === 'error') return { status: 'error', error: outcome.error, pairing: null };
+  return { status: outcome.status, error: null, pairing: outcome.pairing };
+}
+
 export function useRelayPairingHandoff(): RelayPairingHandoff {
   const [code] = useState(captureRelayPairingCode);
-  const remembered = capture.outcome;
-  const [status, setStatus] = useState<RelayPairingHandoffStatus>(remembered?.status ?? 'idle');
-  const [error, setError] = useState<unknown>(remembered?.status === 'error' ? remembered.error : null);
-  const [pairing, setPairing] = useState<RelayPairingPayload | null>(remembered?.status === 'stored' ? remembered.pairing : null);
+  const [view, setView] = useState(() => viewOf(capture.outcome));
 
   useEffect(() => {
     if (code === null) return;
-    const outcome = consumeRelayPairingCode(code);
-    if (outcome.status === 'stored') {
-      setPairing(outcome.pairing);
-      setStatus('stored');
-    } else {
-      setError(outcome.error);
-      setStatus('error');
-    }
+    setView(viewOf(offerRelayPairingCode(code)));
     // Mount-once: the code was captured synchronously above; a later hash change is not
-    // a new hand-off. No reactive value is read here (decode/store are pure/local), so
-    // the empty deps array is genuinely exhaustive, unlike usePairingHandoff's version,
-    // which also touches queryClient.
+    // a new hand-off.
   }, [code]);
 
-  return { status, error, pairing };
+  const confirm = useCallback(() => {
+    const outcome = capture.outcome;
+    if (outcome?.status !== 'pending') return;
+    storeRelayPairing(outcome.pairing);
+    capture.outcome = { status: 'stored', pairing: outcome.pairing };
+    setView(viewOf(capture.outcome));
+  }, []);
+
+  const dismiss = useCallback(() => {
+    if (capture.outcome?.status !== 'pending') return;
+    capture.outcome = { status: 'dismissed' };
+    setView(viewOf(capture.outcome));
+  }, []);
+
+  return { ...view, confirm, dismiss };
 }

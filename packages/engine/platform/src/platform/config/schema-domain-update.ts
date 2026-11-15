@@ -97,7 +97,21 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     key: 'update.releasesUrl',
     type: 'string',
     default: DAEMON_RELEASES_LATEST_URL,
-    description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes; explicit custom feeds remain unchanged. Native suite updates replace installed sibling programs and configured release WebUI/browser support together',
+    description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be an https://github.com URL, or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other remote host would let a config write replace the installed programs',
+    validate: (v) => {
+      if (typeof v !== 'string') return false;
+      if (v.trim() === '') return true;
+      try {
+        const url = new URL(v.trim());
+        if (url.username !== '' || url.password !== '') return false;
+        if (url.protocol === 'https:') return url.hostname === 'github.com';
+        // A feed on this machine cannot be reached by another host, so plain http is safe there (the acceptance runs serve one).
+        return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]');
+      } catch {
+        return false;
+      }
+    },
+    validationHint: 'an https://github.com releases URL (or http on 127.0.0.1, localhost or [::1]) without credentials, or empty to turn the update loop off',
   },
   {
     key: 'update.rollbackAfterFailedStarts',

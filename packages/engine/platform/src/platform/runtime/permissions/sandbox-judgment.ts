@@ -80,8 +80,8 @@ const percent = (p: number): string => `${Math.round(p * 100)}%`;
 
 /**
  * Reads the escalation through `engine.gate.sandbox-advisory`. A judgment-port
- * failure propagates: the reading is required, and outage handling is the
- * provider failover chain behind the port.
+ * failure propagates from here; the escalation handler (sandbox-escalation.ts)
+ * catches it and still asks the owner, so an advisory outage never blocks the prompt.
  */
 export async function runSandboxJudgment(input: SandboxJudgmentInput, site = 'engine.gate.sandbox-escalation'): Promise<SandboxJudgmentResult> {
   const run = await sandboxAdvisory.run(judgmentPort(site), {

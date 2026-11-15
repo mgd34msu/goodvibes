@@ -25,7 +25,8 @@ export interface ExternalPermissionHost {
   /** Trusted composition resolver for the actual process cwd, never peer supplied. */
   readonly workspaceTrustFor?: ((cwd: string) => Pick<WorkspaceTrustManager, 'prepareAutonomousConstraint'> | null | undefined) | undefined;
   readonly port: JudgmentPort;
-  readonly permissionManager: Pick<PermissionManager, 'admitAutonomous'>;
+  /** `retireAutonomousSource` lets a settled request release its bookkeeping; a host without it keeps it for its lifetime. */
+  readonly permissionManager: Pick<PermissionManager, 'admitAutonomous'> & Partial<Pick<PermissionManager, 'retireAutonomousSource'>>;
   readonly config: { onDidInvalidate(listener: () => void): () => void };
   readonly signal: AbortSignal;
 }
@@ -69,6 +70,8 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
     }), signal);
     assertCurrent();
     let finished = false, claimed = false;
+    // Every request id is fresh, so nothing else ever releases what this admission recorded.
+    const settle = () => { finished = true; unsubscribe(); host.permissionManager.retireAutonomousSource?.(requestId); };
     const retainedCurrent = () => {
       if (finished && input.effect) throw new Error('External admission is closed');
       assertCurrent();
@@ -85,14 +88,13 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
         claimed = true; retainedCurrent();
         // Existing protocol owners consume their response at claim. Native
         // multi-effect owners opt into the retained issuer lifetime explicitly.
-        if (!input.effect) { finished = true; unsubscribe(); }
+        if (!input.effect) settle();
       },
       close() {
         if (!finished) {
-          finished = true;
           try {
             if (input.effect && admission.result.approved) closeExternalAdmission(admission, host.permissionManager);
-          } finally { unsubscribe(); }
+          } finally { settle(); }
         }
       },
     };

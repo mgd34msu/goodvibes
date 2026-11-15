@@ -86,7 +86,6 @@ export const DEFAULT_CONFIG = {
   sandbox: coreConfigDefaults.sandbox,
   ui: coreConfigDefaults.ui,
   tts: coreConfigDefaults.tts,
-  release: coreConfigDefaults.release,
   automation: runtimeConfigDefaults.automation,
   checkin: runtimeConfigDefaults.checkin,
   controlPlane: runtimeConfigDefaults.controlPlane,

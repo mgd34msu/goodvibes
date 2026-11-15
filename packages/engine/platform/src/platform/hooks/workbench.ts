@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { dirname, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { getHookPointContract } from './contracts.js';
 import { matchesEventPath, matchesMatcher } from './matcher.js';
-import type { HookDispatcher } from './dispatcher.js';
+import { chainProblem, hookDefinitionProblem, hooksFileRefusal, type HookDispatcher } from './dispatcher.js';
 import type { HookChain, HookDefinition, HookEvent, HookResult, HookType, HooksConfig } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -39,7 +39,7 @@ export interface HookConfigInspection {
 }
 
 export interface HookWorkbenchOptions {
-  readonly hookDispatcher: Pick<HookDispatcher, 'clear' | 'loadFromFile'>;
+  readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>;
   readonly configManager: Pick<ConfigManager, 'get' | 'getWorkingDirectory'>;
   readonly hooksFilePathResolver?: (() => string) | undefined;
 }
@@ -68,14 +68,38 @@ function ensureConfigShape(parsed: unknown): HooksConfig {
   };
 }
 
+/** Splits an imported config into the entries the dispatcher would accept and a reason for each it would drop. */
+function screenImport(config: HooksConfig): { config: HooksConfig; rejected: string[] } {
+  const rejected: string[] = [];
+  const hooks: Record<string, HookDefinition[]> = {};
+  for (const [pattern, defs] of Object.entries(config.hooks ?? {})) {
+    if (!Array.isArray(defs)) { rejected.push(`${pattern}: the value must be an array of hook definitions`); continue; }
+    for (const def of defs) {
+      const problem = hookDefinitionProblem(def);
+      if (problem !== null) rejected.push(`${pattern}: ${problem}`);
+      else (hooks[pattern] ??= []).push(def);
+    }
+  }
+  const chains: HookChain[] = [];
+  for (const chain of config.chains ?? []) {
+    const problem = chainProblem(chain);
+    if (problem !== null) rejected.push(problem);
+    else chains.push(chain);
+  }
+  return { config: { hooks, chains }, rejected };
+}
+
 export class HookWorkbench {
   private managedConfig: HooksConfig = cloneConfig(EMPTY_CONFIG);
   private recentActions: HookAuthoringAction[] = [];
   private lastSimulation: HookSimulationResult | null = null;
   private lastLoadedPath: string | null = null;
+  /** Why the last load could not read the hooks file; while set, nothing may overwrite it. */
+  private loadFailure: string | null = null;
+  private lastImportRejections: string[] = [];
 
   constructor(
-    private readonly hookDispatcher: Pick<HookDispatcher, 'clear' | 'loadFromFile'>,
+    private readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>,
     private readonly hooksFilePathResolver: () => string,
   ) {}
 
@@ -111,6 +135,18 @@ export class HookWorkbench {
     return this.lastSimulation;
   }
 
+  /** Entries the last import left out, each with the reason; empty when it took everything. */
+  getLastImportRejections(): readonly string[] {
+    return [...this.lastImportRejections];
+  }
+
+  /** Refuses to change or write a config that was never read: the empty one would replace the real file. */
+  private assertWritable(): void {
+    if (this.loadFailure !== null) {
+      throw new Error(`The hooks file${this.lastLoadedPath ? ` ${this.lastLoadedPath}` : ''} was not changed: it ${this.loadFailure.replace(/^it /, '')}. Fix or remove the file, then retry.`);
+    }
+  }
+
   private recordAction(action: HookAuthoringAction): void {
     this.recentActions.unshift(action);
     if (this.recentActions.length > 25) this.recentActions.length = 25;
@@ -118,6 +154,7 @@ export class HookWorkbench {
 
   loadManagedConfig(path = this.getHooksFilePath()): HooksConfig {
     this.lastLoadedPath = path;
+    this.loadFailure = null;
     if (!existsSync(path)) {
       this.managedConfig = cloneConfig(EMPTY_CONFIG);
       this.recordAction({ kind: 'load', target: path, timestamp: Date.now(), detail: 'empty config' });
@@ -128,28 +165,47 @@ export class HookWorkbench {
       this.managedConfig = ensureConfigShape(parsed);
       this.recordAction({ kind: 'load', target: path, timestamp: Date.now(), detail: `${this.listManagedHooks().length} hooks / ${this.listManagedChains().length} chains` });
     } catch (error) {
-      logger.warn('HookWorkbench.loadManagedConfig failed, using empty config', { path, error: summarizeError(error) });
+      logger.warn('HookWorkbench.loadManagedConfig failed, nothing may be written over it', { path, error: summarizeError(error) });
       this.managedConfig = cloneConfig(EMPTY_CONFIG);
-      this.recordAction({ kind: 'load', target: path, timestamp: Date.now(), detail: 'invalid JSON; using empty config' });
+      this.loadFailure = `it could not be read as JSON (${summarizeError(error)})`;
+      this.recordAction({ kind: 'load', target: path, timestamp: Date.now(), detail: 'invalid JSON; file left untouched' });
     }
     return this.getManagedConfig();
   }
 
   async saveManagedConfig(path = this.lastLoadedPath ?? this.getHooksFilePath()): Promise<void> {
+    this.assertWritable();
     mkdirSync(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(this.managedConfig, null, 2)}\n`, 'utf-8');
+    // Written beside the target and renamed over it, so a failed write leaves the old file whole.
+    // The shared writer stages under a name unique to each call, so two saves in one process cannot collide.
+    let mode: number | undefined;
+    try { mode = statSync(path).mode & 0o777; } catch { mode = undefined; }
+    writeFileAtomic(path, `${JSON.stringify(this.managedConfig, null, 2)}\n`, { ...(mode === undefined ? {} : { mode }), durable: false });
     this.lastLoadedPath = path;
     this.recordAction({ kind: 'save', target: path, timestamp: Date.now(), detail: `${this.listManagedHooks().length} hooks / ${this.listManagedChains().length} chains` });
   }
 
+  /** Throws when the hooks file would be refused at load (unparseable, world-writable, foreign-owned); call it before changing the file so a verb never saves what it cannot then apply. */
+  assertHooksFileTrusted(path = this.getHooksFilePath()): void {
+    this.assertWritable();
+    const refusal = existsSync(path) ? hooksFileRefusal(path) : null;
+    if (refusal !== null) throw new Error(`The hooks file ${path} was not changed: it was not loaded because ${refusal}. Fix the file, then retry.`);
+  }
+
   async loadAndApplyManagedHooks(path = this.getHooksFilePath()): Promise<void> {
     this.loadManagedConfig(path);
-    this.hookDispatcher.clear();
+    // Hooks already running stay as they are when the file cannot be trusted or read.
+    if (this.loadFailure !== null) throw new Error(`The running hooks were left unchanged: ${path} ${this.loadFailure}.`);
+    const refusal = existsSync(path) ? hooksFileRefusal(path) : null;
+    if (refusal !== null) throw new Error(`The running hooks were left unchanged: ${path} was not loaded because ${refusal}.`);
+    // Only what came from a file is replaced; hooks added at runtime stay.
+    this.hookDispatcher.clearLoaded();
     this.hookDispatcher.loadFromFile(path);
     this.recordAction({ kind: 'reload', target: path, timestamp: Date.now(), detail: 'dispatcher refreshed' });
   }
 
   scaffoldHook(name: string, match: string, type: HookType): HookDefinition {
+    this.assertWritable();
     const hook: HookDefinition = {
       name,
       match,
@@ -172,6 +228,7 @@ export class HookWorkbench {
   }
 
   scaffoldChain(name: string, matches: readonly string[]): HookChain {
+    this.assertWritable();
     const chain: HookChain = {
       name,
       description: `Managed hook workflow for ${matches.join(' -> ')}`,
@@ -193,6 +250,7 @@ export class HookWorkbench {
   }
 
   removeManagedEntry(name: string): boolean {
+    this.assertWritable();
     const config = cloneConfig(this.managedConfig);
     let removed = false;
     for (const [pattern, defs] of Object.entries(config.hooks ?? {})) {
@@ -216,6 +274,7 @@ export class HookWorkbench {
   }
 
   toggleManagedHook(name: string, enabled: boolean): boolean {
+    this.assertWritable();
     let changed = false;
     const config = cloneConfig(this.managedConfig);
     for (const defs of Object.values(config.hooks ?? {})) {
@@ -257,7 +316,9 @@ export class HookWorkbench {
   }
 
   importManagedConfig(path: string, strategy: 'merge' | 'replace' = 'merge'): HooksConfig {
-    const incoming = ensureConfigShape(JSON.parse(readFileSync(path, 'utf-8')));
+    this.assertWritable();
+    const { config: incoming, rejected } = screenImport(ensureConfigShape(JSON.parse(readFileSync(path, 'utf-8'))));
+    this.lastImportRejections = rejected;
     if (strategy === 'replace') {
       this.managedConfig = cloneConfig(incoming);
     } else {
@@ -265,9 +326,9 @@ export class HookWorkbench {
       merged.hooks ??= {};
       for (const [pattern, defs] of Object.entries(incoming.hooks ?? {})) {
         const existing = merged.hooks[pattern]! ?? [];
-        const byName = new Map(existing.map((def) => [def.name ?? `${pattern}:${def.type}:${existing.indexOf(def)}`, { ...def }]));
+        const byName = new Map(existing.map((def) => [def.name ?? `${pattern}:${JSON.stringify(def)}`, { ...def }]));
         for (const def of defs) {
-          byName.set(def.name ?? `${pattern}:${def.type}:${byName.size}`, { ...def });
+          byName.set(def.name ?? `${pattern}:${JSON.stringify(def)}`, { ...def });
         }
         merged.hooks[pattern] = [...byName.values()];
       }
@@ -290,7 +351,7 @@ export class HookWorkbench {
       kind: 'import',
       target: path,
       timestamp: Date.now(),
-      detail: `${strategy} -> ${this.listManagedHooks().length} hooks / ${this.listManagedChains().length} chains`,
+      detail: `${strategy} -> ${this.listManagedHooks().length} hooks / ${this.listManagedChains().length} chains${rejected.length > 0 ? `; ${rejected.length} rejected` : ''}`,
     });
     return this.getManagedConfig();
   }
@@ -342,6 +403,8 @@ export class HookWorkbench {
     this.recentActions = [];
     this.lastSimulation = null;
     this.lastLoadedPath = null;
+    this.loadFailure = null;
+    this.lastImportRejections = [];
   }
 }
 

@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeSymbolsQuery } from '../platform/src/platform/tools/find/symbols.ts';
@@ -8,9 +8,15 @@ import {
   extractSymbols,
 } from '../platform/src/platform/tools/read/text.ts';
 
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function tempDir(): string {
-  const dir = join(tmpdir(), `gv-find-symbols-${Date.now()}-${crypto.randomUUID()}`);
+  const dir = join(tmpdir(), `gv-find-symbols-${crypto.randomUUID()}`);
   mkdirSync(dir, { recursive: true });
+  dirs.push(dir);
   return dir;
 }
 

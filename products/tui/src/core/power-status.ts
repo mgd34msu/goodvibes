@@ -12,7 +12,7 @@
 // options, the keep-awake toggle is exactly one boolean.
 // ---------------------------------------------------------------------------
 
-import { LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
+import { KEEP_AWAKE_NOT_HELD, LID_SWITCH_HONEST_SPLIT, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 
 /** The always-visible chip text shown while keep-awake holds (danger-mode idiom). */
 export const SLEEP_DISABLED_CHIP = 'sleep disabled';
@@ -66,6 +66,14 @@ export function powerSurfaceFromEvent(ev: PowerStateChangedPayload): PowerSurfac
 }
 
 /**
+ * True while keep-awake is on AND its inhibitor is actually held. Keep-awake
+ * that the OS refused is on but holds nothing, so the host can still sleep.
+ */
+export function keepAwakeHolding(state: Pick<PowerSurfaceState, 'keepAwake' | 'note'>): boolean {
+  return state.keepAwake && state.note !== KEEP_AWAKE_NOT_HELD;
+}
+
+/**
  * The ops/status detail lines, the honest, plain-language account of sleep
  * ownership. Order: the chip's meaning, then each "held because X" work reason,
  * then the lid-split note VERBATIM when the platform served it. Empty when nothing
@@ -73,7 +81,8 @@ export function powerSurfaceFromEvent(ev: PowerStateChangedPayload): PowerSurfac
  */
 export function powerStatusLines(state: PowerSurfaceState): string[] {
   const lines: string[] = [];
-  if (state.keepAwake) {
+  // Refused keep-awake says so through its note below, never "will not idle-sleep".
+  if (keepAwakeHolding(state)) {
     lines.push(`${SLEEP_DISABLED_CHIP}: keep-awake is on (this host will not idle-sleep)`);
   }
   for (const reason of state.workReasons) {

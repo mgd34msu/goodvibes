@@ -17,14 +17,15 @@ import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:link-readings', installationId = 'link-readings';
-const roots: string[] = [], services: HomeGraphService[] = [];
+const roots: string[] = [], services: HomeGraphService[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const service of services.splice(0)) service.dispose();
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(services.splice(0).map(service => service.dispose()));
+  await Promise.all(stores.splice(0).map(store => store.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'homegraph-auto-link-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await store.init();
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); await store.init();
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   const service = new HomeGraphService(store, artifactStore); services.push(service);
   const device = await seedHomeAssistantObservation(store, { id: 'exact-device-id', kind: 'ha_device', slug: 'router', title: 'Hall network box',
@@ -170,21 +171,29 @@ test('full original source metadata remains protected even when excluded from th
   const f = await fixture(); Object.assign(f.source.metadata, { privatePayload: 'Authorization: Bearer synthetic-protected-fixture' });
   const fake = readings(); await expect(run(f)).rejects.toMatchObject({ problem: 'credential-material' }); expect(fake.requests).toHaveLength(0);
 });
-test('fresh same-value replacement owns a new row and raw numeric privacy admission still applies', async () => {
-  const f = await fixture(); await f.store.replaceSourceRecord(f.source);
-  const replacement = f.store.getSource(f.source.id)!;
-  expect(replacement).not.toBe(f.source); expect(replacement).toEqual(f.source);
+// A replacement is arbitrary raw input. Owned clocks are stored as canonical
+// text, so even a card-shaped Date.now cannot hold a row; a numeric the caller
+// put in the record can.
+test('fresh same-value replacement owns a new row that links even at a card-shaped clock', async () => {
+  const clock = spyOn(Date, 'now').mockReturnValue(4_222_222_222_222);
+  try {
+    const f = await fixture(); await f.store.replaceSourceRecord(f.source);
+    const replacement = f.store.getSource(f.source.id)!;
+    expect(replacement).not.toBe(f.source); expect(replacement).toEqual(f.source);
+    readings();
+    expect(() => assertJudgmentInput(f.store.getSourceSnapshot({ id: replacement.id }).raw)).not.toThrow();
+    const linked = await run(f);
+    expect(linked[0]?.edge).toMatchObject({ fromId: replacement.id, toId: f.device.id });
+    expect(f.store.getSource(replacement.id)).toBe(replacement);
+  } finally { clock.mockRestore(); }
+});
+test('a replacement carrying caller card-shaped numeric input stays held and never reaches the model', async () => {
+  const f = await fixture();
+  await f.store.replaceSourceRecord({ ...f.source, metadata: { ...f.source.metadata, reading: 4111111111111111 } });
   const fake = readings();
-  // Replacement is arbitrary raw input. If its numeric clock collides with the
-  // card policy, restoration must remain held rather than regain old provenance.
-  try { assertJudgmentInput(f.store.getSourceSnapshot({ id: replacement.id }).raw); } catch (error) {
-    expect(error).toBeInstanceOf(JudgmentInputError);
-    await expect(run(f)).rejects.toMatchObject({ problem: 'card-material' });
-    expect(fake.requests).toHaveLength(0); return;
-  }
-  const linked = await run(f);
-  expect(linked[0]?.edge).toMatchObject({ fromId: replacement.id, toId: f.device.id });
-  expect(f.store.getSource(replacement.id)).toBe(replacement);
+  expect(() => assertJudgmentInput(f.store.getSourceSnapshot({ id: f.source.id }).raw)).toThrow(JudgmentInputError);
+  await expect(run(f)).rejects.toMatchObject({ problem: 'card-material' });
+  expect(fake.requests).toHaveLength(0);
 });
 
 test('auto-link reads complete canonical rows under an adversarial colliding owned clock', async () => {
@@ -243,7 +252,7 @@ test.each(['uncertain', 'source-change'] as const)('actual snapshot sync commits
 });
 
 
-test('all authored document kind and subject fixtures settle their exact expected outcomes', async () => {
+test('authored document kind and subject fixtures are wired to their questions and settle through the battery thresholds', async () => {
   for (const battery of [homeGraphDocumentKind, homeGraphDocumentSubject]) {
     const fake = fakePort((name, question, state) => {
       const fixture = battery.fixtures.find(item => JSON.stringify(item.state) === JSON.stringify(state));

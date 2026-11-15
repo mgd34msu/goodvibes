@@ -68,7 +68,13 @@ source and 128 chunks. Preparation and query/currentness operations each have a
 15-second cancellation deadline, with elapsed-time checks before later work.
 Existing synchronous host-integrity operations retain their own finite bounds;
 an elapsed deadline stops subsequent work rather than weakening validation.
-An exhausted preparation budget reports a skipped/unavailable code source.
+A file over the per-file size is left out of the index. Exceeding any other cap, or
+the preparation deadline, reports an unavailable code source ("too large") and the
+run continues without code context. Any other failure while preparing or
+retrieving code context (an authority refusal included) also leaves that turn
+without it; only cancellation fails the turn. Code context that was injected is
+still checked again before each provider attempt, and a changed source or
+permission fails that attempt.
 Expensive immutable full-tree checks can therefore skip code on larger views.
 This feature does not introduce metadata-only snapshot validation.
 

@@ -1,6 +1,9 @@
 import { AGENT_HARNESS_MODES } from './agent-harness-tool-schema.ts';
 import { catalogEnvelope, readLimit } from './agent-harness-tool-utils.ts';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
 
 export type AgentHarnessMode = typeof AGENT_HARNESS_MODES[number];
 
@@ -15,6 +18,8 @@ interface HarnessModeDescriptor {
   readonly aliases?: readonly AgentHarnessMode[];
   readonly keywords?: readonly string[];
   readonly parameters?: readonly string[];
+  /** Explicit required parameters; an entry `a|b` means any one of a or b. */
+  readonly requires?: readonly string[];
 }
 
 interface HarnessModeCatalogArgs {
@@ -35,19 +40,19 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'mode', kind: 'inspect', family: 'start', summary: 'Inspect one agent_harness mode contract and common next step.', next: 'Use target or query with a mode id or task phrase.', parameters: ['target', 'query'] },
   { id: 'route_decision', kind: 'inspect', family: 'start', summary: 'Choose the best visible Agent route for a plain user task.', next: 'Prefer route action:"plan" for first-class access.', keywords: ['where should this go', 'which tool', 'route user task', 'one assistant', 'user-first route'], parameters: ['query', 'target', 'limit', 'includeParameters'] },
   { id: 'cli_commands', kind: 'discover', family: 'cli', summary: 'List top-level package CLI mirrors for discovery only.', next: 'Prefer workspace action:"cli_commands|cli_command".', parameters: ['query', 'limit', 'includeParameters'] },
-  { id: 'cli_command', kind: 'inspect', family: 'cli', summary: 'Inspect one CLI command parser result, policy, aliases, and model route.', parameters: ['cliCommand', 'command', 'commandName', 'target', 'query'] },
+  { id: 'cli_command', kind: 'inspect', family: 'cli', summary: 'Inspect one CLI command parser result, policy, aliases, and model route.', parameters: ['command', 'target', 'query'] },
   { id: 'ui_surfaces', kind: 'discover', family: 'ui', summary: 'List modal, picker, and visible UI surfaces the model can request.', next: 'Prefer workspace action:"surfaces|surface|open".', keywords: ['web dashboard', 'pwa', 'browser cockpit', 'connected browser', 'mobile web'], parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'ui_surface', kind: 'inspect', family: 'ui', summary: 'Inspect one visible modal or picker surface and route contract.', keywords: ['web dashboard', 'pwa', 'browser cockpit', 'connected browser', 'mobile web'], parameters: ['surfaceId', 'target', 'query'] },
-  { id: 'open_ui_surface', kind: 'effect', family: 'ui', summary: 'Open one visible modal, picker, or operator workspace route.', keywords: ['web dashboard', 'pwa', 'browser cockpit', 'connected browser', 'mobile web'], parameters: ['surfaceId', 'target', 'query'] },
+  { id: 'open_ui_surface', kind: 'effect', family: 'ui', summary: 'Open one visible modal, picker, or operator workspace route.', keywords: ['web dashboard', 'pwa', 'browser cockpit', 'connected browser', 'mobile web'], parameters: ['surfaceId', 'target', 'query', 'categoryId'] },
   { id: 'shortcuts', kind: 'discover', family: 'keyboard', summary: 'List fixed shortcuts and keybinding overview.', next: 'Prefer workspace action:"shortcuts|keybindings|keybinding".', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'keybindings', kind: 'discover', family: 'keyboard', summary: 'List configurable keybinding actions and current/default combos.', next: 'Prefer workspace keybinding actions.', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'keybinding', kind: 'inspect', family: 'keyboard', summary: 'Inspect one keybinding action, current combos, defaults, and policy.', parameters: ['actionId', 'key', 'target', 'query'] },
-  { id: 'run_keybinding', kind: 'effect', family: 'keyboard', summary: 'Run one supported keybinding action through the active UI route.', parameters: ['actionId', 'key', 'target', 'query'] },
-  { id: 'set_keybinding', kind: 'effect', family: 'keyboard', summary: 'Set one configurable keybinding action.', parameters: ['actionId', 'combo', 'combos'] },
-  { id: 'reset_keybinding', kind: 'effect', family: 'keyboard', summary: 'Reset one configurable keybinding action to defaults.', parameters: ['actionId'] },
+  { id: 'run_keybinding', kind: 'effect', family: 'keyboard', summary: 'Run one supported keybinding action through the active UI route.', parameters: ['actionId', 'key', 'target', 'query', 'value'] },
+  { id: 'set_keybinding', kind: 'effect', family: 'keyboard', summary: 'Set one configurable keybinding action.', parameters: ['actionId', 'key', 'target', 'query', 'combo', 'combos', 'fields', 'value'] },
+  { id: 'reset_keybinding', kind: 'effect', family: 'keyboard', summary: 'Reset one configurable keybinding action to defaults.', parameters: ['actionId', 'key', 'target', 'query'] },
   { id: 'commands', kind: 'discover', family: 'slash', summary: 'List registered slash commands and compact policies.', next: 'Prefer workspace action:"commands|command|run_command".', keywords: ['payment card entry', 'credit card', 'enter card', 'guided flow', 'chained prompt'], parameters: ['query', 'limit', 'includeParameters'] },
-  { id: 'command', kind: 'inspect', family: 'slash', summary: 'Inspect slash command, parsed args, policy, aliases, and model route.', parameters: ['command', 'commandName', 'target', 'query'] },
-  { id: 'run_command', kind: 'effect', family: 'slash', summary: 'Run one slash command through shared command dispatch.', parameters: ['command', 'commandName', 'args', 'target', 'query'] },
+  { id: 'command', kind: 'inspect', family: 'slash', summary: 'Inspect slash command, parsed args, policy, aliases, and model route.', parameters: ['command', 'target', 'query'] },
+  { id: 'run_command', kind: 'effect', family: 'slash', summary: 'Run one slash command through shared command dispatch.', parameters: ['command', 'args', 'target', 'query'] },
   { id: 'channels', kind: 'discover', family: 'delivery', summary: 'List channel readiness, accounts, delivery posture, and safe setup keys.', next: 'Prefer channels action:"status|channel|setup".', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'channel', kind: 'inspect', family: 'delivery', summary: 'Inspect one channel readiness entry and delivery policy.', next: 'Prefer channels action:"channel".', parameters: ['channelId', 'target', 'query'] },
   { id: 'channel_setup_guide', kind: 'inspect', family: 'delivery', summary: 'Inspect the ordered channel setup guide and current per-channel step.', next: 'Prefer channels action:"setup".', parameters: ['channelId', 'target', 'query'] },
@@ -70,7 +75,7 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'project_context', kind: 'discover', family: 'context', summary: 'List AGENTS, HERMES, CLAUDE, SOUL, and Cursor context files.', next: 'Prefer context action:"files|file".', keywords: ['agents.md', 'hermes.md', '.hermes.md', 'claude.md', 'soul.md', '.cursorrules', '.cursor/rules', 'project instructions'], parameters: ['target', 'query', 'includeParameters'] },
   { id: 'project_context_file', kind: 'inspect', family: 'context', summary: 'Inspect one project context file body, source, or blocked reason.', next: 'Prefer context action:"file".', keywords: ['agents.md', 'hermes.md', '.hermes.md', 'claude.md', 'soul.md', '.cursorrules', '.cursor/rules', 'project instructions'], parameters: ['contextFileId', 'target', 'query', 'includeParameters'] },
   { id: 'prompt_context', kind: 'inspect', family: 'context', summary: 'Inspect prompt context, receipt outcomes, and token budget.', next: 'Prefer context action:"prompt|receipts|receipt".', keywords: ['prompt context', 'system prompt', 'why assistant acts', 'selected memory', 'active persona', 'suppressed context', 'token budget', 'receipt id', 'turn outcome', 'prompt receipt filters'], parameters: ['receiptId', 'turnId', 'outcomeStatus', 'limit', 'includeParameters'] },
-  { id: 'agent_orchestration', kind: 'discover', family: 'execution', summary: 'Inspect plan cards, closeout, live remote outcomes, and dispatch.', next: 'Inspect one agent; dispatch approved plan items via agent_work_plan.', keywords: ['subagent', 'subagents', 'agent spawn', 'batch-spawn', 'dispatch agents', 'work plan dispatch', 'dispatch receipts', 'closeout evidence', 'remote read model', 'capture outcome', 'workspace isolation', 'worktree evidence', 'multi-agent', 'multi-runner', 'managed plan', 'milestone', 'remote runner', 'artifact trail', 'visible agents', 'cancellable agents', 'wrfc', 'cohort'], parameters: ['query', 'limit', 'includeParameters'] },
+  { id: 'agent_orchestration', kind: 'discover', family: 'execution', summary: 'Inspect plan cards, closeout, live remote outcomes, and dispatch.', next: 'Inspect one agent; the owner dispatches approved plan items from /work.', keywords: ['subagent', 'subagents', 'agent spawn', 'batch-spawn', 'dispatch agents', 'work plan dispatch', 'dispatch receipts', 'closeout evidence', 'remote read model', 'capture outcome', 'workspace isolation', 'worktree evidence', 'multi-agent', 'multi-runner', 'managed plan', 'milestone', 'remote runner', 'artifact trail', 'visible agents', 'cancellable agents', 'wrfc', 'cohort'], parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'agent_orchestration_agent', kind: 'inspect', family: 'execution', summary: 'Inspect one visible Agent plan card with remote evidence.', keywords: ['subagent', 'subagents', 'agent status', 'agent cancel', 'agent wait', 'agent message', 'batch-spawn', 'dispatch receipts', 'closeout evidence', 'remote read model', 'capture outcome', 'workspace isolation', 'worktree evidence', 'multi-agent', 'multi-runner', 'managed plan', 'milestone', 'remote runner', 'artifact trail', 'visible agents', 'cancellable agents', 'wrfc', 'cohort'], parameters: ['agentId', 'target', 'query', 'includeParameters'] },
   { id: 'model_routing', kind: 'discover', family: 'providers', summary: 'List model routes, readiness scores, local cookbook, and pins.', next: 'Prefer models action:"status|local|route|smoke".', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'model_route', kind: 'inspect', family: 'providers', summary: 'Inspect one model route, local endpoint, fit score, or picker path.', parameters: ['modelRouteId', 'target', 'query'] },
@@ -79,8 +84,8 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'execution_route', kind: 'inspect', family: 'execution', summary: 'Inspect one local, browser, web, or delegation route.', next: 'Prefer execution action:"route".', keywords: ['sudo', 'sudo_password', 'SUDO_PASSWORD', 'foreground shell', 'privilege escalation'], parameters: ['executionRouteId', 'target', 'query'] },
   { id: 'browser_control_route', kind: 'inspect', family: 'execution', summary: 'Plan browser, screenshot, or desktop-control route.', next: 'Prefer computer action:"plan".', keywords: ['browser control plan', 'take screenshot', 'screen observe', 'desktop control', 'live ui control', 'browser navigation'], parameters: ['target', 'query', 'includeParameters'] },
   { id: 'background_processes', kind: 'discover', family: 'execution', summary: 'List tracked local background processes, logs, and lifecycle routes.', next: 'Prefer execution action:"processes"; use process for lifecycle effects.', parameters: ['query', 'target', 'limit', 'includeParameters'] },
-  { id: 'background_process', kind: 'inspect', family: 'execution', summary: 'Inspect one tracked background process with bounded output tails.', next: 'Prefer execution action:"process".', keywords: ['session id', 'process session', 'poll', 'log'], parameters: ['processId', 'processSessionId', 'sessionId', 'session_id', 'target', 'query', 'includeParameters'] },
-  { id: 'run_background_process', kind: 'effect', family: 'execution', summary: 'Process lifecycle with poll/log/kill aliases and PTY/sudo gaps.', keywords: ['process tool', 'session id', 'process session', 'poll', 'kill', 'write', 'log', 'pty', 'sudo'], parameters: ['processAction', 'action', 'processId', 'processSessionId', 'sessionId', 'session_id', 'command', 'cwd', 'timeoutMs', 'pty', 'data', 'fields'] },
+  { id: 'background_process', kind: 'inspect', family: 'execution', summary: 'Inspect one tracked background process with bounded output tails.', next: 'Prefer execution action:"process".', keywords: ['session id', 'process session', 'poll', 'log'], parameters: ['processId', 'processSessionId', 'sessionId', 'target', 'query', 'includeParameters'] },
+  { id: 'run_background_process', kind: 'effect', family: 'execution', summary: 'Process lifecycle with poll/log/kill aliases and PTY/sudo gaps.', keywords: ['process tool', 'session id', 'process session', 'poll', 'kill', 'write', 'log', 'pty', 'sudo'], parameters: ['processAction', 'action', 'processId', 'processSessionId', 'sessionId', 'command', 'cwd', 'timeoutMs', 'pty', 'data', 'fields'] },
   { id: 'execution_history', kind: 'discover', family: 'execution', summary: 'List recent execution activity cards and raw records.', next: 'Prefer execution action:"history"; use action:"record" for one.', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'execution_history_item', kind: 'inspect', family: 'execution', summary: 'Inspect one execution record with user card, routes, and recovery.', next: 'Prefer execution action:"record".', parameters: ['executionRecordId', 'recordId', 'target', 'query'] },
   { id: 'file_recovery', kind: 'discover', family: 'execution', summary: 'Inspect local file edit undo/redo recovery.', next: 'Prefer execution action:"recovery"; apply with confirmation.', parameters: ['includeParameters'] },
@@ -115,7 +120,7 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'delegation_route', kind: 'inspect', family: 'delegation', summary: 'Inspect one delegation route and exact visible submission contract.', next: 'Prefer delegation action:"route".', parameters: ['delegationRouteId', 'target', 'query'] },
   { id: 'security_posture', kind: 'discover', family: 'security', summary: 'List security posture findings without exposing secrets or raw config.', next: 'Use security_finding.', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'security_finding', kind: 'inspect', family: 'security', summary: 'Inspect one security posture finding and safe remediation route.', parameters: ['findingId', 'target', 'query'] },
-  { id: 'policy_explain', kind: 'inspect', family: 'security', summary: 'Explain one model action policy and confirmation route.', next: 'Prefer security action:"explain".', keywords: ['why allowed', 'why denied', 'requires confirmation', 'permission policy', 'tool policy'], parameters: ['toolName', 'tool', 'toolArgs', 'target', 'query', 'includeParameters'] },
+  { id: 'policy_explain', kind: 'inspect', family: 'security', summary: 'Explain one model action policy and confirmation route.', next: 'Prefer security action:"explain".', keywords: ['why allowed', 'why denied', 'requires confirmation', 'permission policy', 'tool policy'], parameters: ['toolName', 'toolArgs', 'target', 'query', 'includeParameters'] },
   { id: 'support_bundles', kind: 'discover', family: 'support', summary: 'List support bundle artifacts and redacted export/import posture.', next: 'Use support_bundle.', parameters: ['query', 'limit', 'includeParameters'] },
   { id: 'support_bundle', kind: 'inspect', family: 'support', summary: 'Inspect one support bundle artifact and redaction posture.', parameters: ['bundlePath', 'target', 'query'] },
   { id: 'media_posture', kind: 'discover', family: 'media', summary: 'List media/voice readiness, browser posture, and artifact routes.', next: 'Use media_provider or agent_media_generate.', keywords: ['push to talk', 'wake word', 'spoken response', 'tts voice', 'voice controls', 'phone voice'], parameters: ['query', 'limit', 'includeParameters'] },
@@ -155,7 +160,7 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'remote_peers', kind: 'inspect', family: 'remote', summary: 'Route to list connected remote peers.', next: 'Call agent_operator_method methodId:"remote.peers.list".', keywords: ['remote peers', 'connected peers', 'distributed execution', 'remote runner', 'peer list'], parameters: ['includeParameters'] },
   { id: 'remote_work', kind: 'inspect', family: 'remote', summary: 'Route to list queued and leased remote work.', next: 'Call agent_operator_method methodId:"remote.work.list".', keywords: ['remote work', 'queued work', 'leased work', 'distributed execution', 'remote work items', 'work queue'], parameters: ['includeParameters'] },
   { id: 'remote_pair_requests', kind: 'inspect', family: 'remote', summary: 'Route to list remote pair requests.', next: 'Call agent_operator_method methodId:"remote.pair.requests.list".', keywords: ['remote pairing', 'pair requests', 'pending pair', 'distributed execution', 'remote pair'], parameters: ['includeParameters'] },
-  { id: 'remote_pair_approve', kind: 'effect', family: 'remote', summary: 'Admitted handoff to approve a remote pair request.', next: 'Execute the returned modelRoute with agent_operator_method.', keywords: ['approve pair request', 'remote pairing', 'accept pair', 'distributed execution'], parameters: ['requestId', 'target', 'note'] },
+  { id: 'remote_pair_approve', kind: 'effect', family: 'remote', summary: 'Admitted handoff to approve a remote pair request.', next: 'Execute the returned modelRoute with agent_operator_method.', keywords: ['approve pair request', 'remote pairing', 'accept pair', 'distributed execution'], parameters: ['requestId', 'target', 'note', 'confirmReplace'] },
   { id: 'remote_pair_reject', kind: 'effect', family: 'remote', summary: 'Admitted handoff to reject a remote pair request.', next: 'Execute the returned modelRoute with agent_operator_method.', keywords: ['reject pair request', 'remote pairing', 'deny pair', 'distributed execution'], parameters: ['requestId', 'target', 'note'] },
   { id: 'remote_peers_invoke', kind: 'effect', family: 'remote', summary: 'Admitted handoff to invoke a command on a peer.', next: 'Execute the returned modelRoute with agent_operator_method.', keywords: ['peer invoke', 'remote command', 'invoke peer', 'distributed execution', 'remote execution'], parameters: ['peerId', 'command', 'payload', 'target'] },
   { id: 'remote_work_cancel', kind: 'effect', family: 'remote', summary: 'Admitted handoff to cancel a remote work item.', next: 'Execute the returned modelRoute with agent_operator_method.', keywords: ['cancel work', 'remote work cancel', 'cancel remote work', 'distributed execution'], parameters: ['workId', 'target', 'reason'] },
@@ -172,6 +177,47 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Required parameters the handlers themselves enforce, where the descriptor's parameter list alone cannot say. */
+const EXPLICIT_REQUIRED_PARAMETERS: Readonly<Partial<Record<AgentHarnessMode, readonly string[]>>> = {
+  open_ui_surface: ['surfaceId|target|query'],
+  run_keybinding: ['actionId|key|target|query'],
+  set_keybinding: ['actionId|key|target|query', 'combo|combos|fields|value'],
+  reset_keybinding: ['actionId|key|target|query'],
+  run_command: ['command|target|query'],
+  run_background_process: ['processAction|action'],
+  run_file_recovery: ['recoveryAction'],
+  set_setting: ['key|target|query', 'value'],
+  reset_setting: ['key|target|query'],
+  remote_pair_approve: ['requestId|target'],
+  remote_pair_reject: ['requestId|target'],
+  remote_peers_invoke: ['peerId|target', 'command'],
+  remote_work_cancel: ['workId|target'],
+  channel_draft_save: ['draftMessage'],
+  channel_draft_send: ['draftId|target'],
+  channel_routing_assign: ['surfaceKind', 'profileId'],
+  channel_routing_remove: ['draftRoute|target'],
+  cli_command: [],
+  command: ['command|target|query'],
+  mode: ['target|query'],
+  run_workspace_action: ['actionId|command|target|query'],
+};
+
+/**
+ * The parameters a call to this mode must carry. An inspect-one mode takes its
+ * id, or `target`, or `query` (any one); an explicit entry wins. Every other
+ * mode lists none, because its parameters are filters and limits.
+ */
+export function requiredParametersFor(descriptor: HarnessModeDescriptor): readonly string[] {
+  const explicit = descriptor.requires ?? EXPLICIT_REQUIRED_PARAMETERS[descriptor.id];
+  if (explicit) return explicit;
+  const parameters = descriptor.parameters ?? [];
+  const [first] = parameters;
+  if (descriptor.kind !== 'inspect' || first === undefined) return [];
+  const selectors = parameters.filter((name) => name === 'target' || name === 'query' || name.endsWith('Id') || name === 'bundlePath' || name === 'toolName' || name === 'command' || name === 'key');
+  const names = selectors.some((name) => name !== 'target' && name !== 'query');
+  return names && parameters.includes('target') && parameters.includes('query') ? [selectors.join('|')] : [];
+}
+
 function describeHarnessModeDescriptor(
   descriptor: HarnessModeDescriptor,
   options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
@@ -185,6 +231,7 @@ function describeHarnessModeDescriptor(
     ...(descriptor.next ? { next: descriptor.next } : {}),
     ...(descriptor.kind === 'effect' ? { admission: 'current recorded effect admission' } : {}),
     ...(descriptor.aliases ? { aliases: descriptor.aliases } : {}),
+    ...(requiredParametersFor(descriptor).length > 0 ? { requires: requiredParametersFor(descriptor) } : {}),
     ...(options.lookup ? { lookup: options.lookup } : {}),
     ...(options.includeParameters ? {
       parameters: descriptor.parameters ?? [],
@@ -207,9 +254,21 @@ function harnessModeSearchText(descriptor: HarnessModeDescriptor): string {
   ].filter(Boolean).join('\n');
 }
 
-async function matchingHarnessModes(input: string, options: CatalogRankingOptions) {
-  if (!input) return { matches: HARNESS_MODE_DESCRIPTORS.map((entry) => ({ entry, judgment: undefined })) };
-  return rankHarnessCatalog(HARNESS_MODE_DESCRIPTORS, input,
+const RELEASE_EVIDENCE_MODES: ReadonlySet<string> = new Set(['release_evidence', 'release_evidence_artifact', 'release_readiness', 'release_readiness_item']);
+
+/**
+ * The release audit modes read files the release scripts generate in a source
+ * checkout; an installed package ships only the release notes. Advertising
+ * them there sends a model to modes that can only answer "unavailable".
+ */
+export function installedModeDescriptors(releaseRoot: string = RELEASE_PACKAGE_ROOT): readonly HarnessModeDescriptor[] {
+  if (existsSync(join(releaseRoot, 'release', 'release-readiness.json'))) return HARNESS_MODE_DESCRIPTORS;
+  return HARNESS_MODE_DESCRIPTORS.filter((descriptor) => !RELEASE_EVIDENCE_MODES.has(descriptor.id));
+}
+
+async function matchingHarnessModes(descriptors: readonly HarnessModeDescriptor[], input: string, options: CatalogRankingOptions) {
+  if (!input) return { matches: descriptors.map((entry) => ({ entry, judgment: undefined })) };
+  return rankHarnessCatalog(descriptors, input,
     (entry) => ({ id: entry.id, description: harnessModeSearchText(entry), evidence: entry }), 'agent.harness.modes', { ...options, requirePreservedSource: true });
 }
 
@@ -220,25 +279,27 @@ function modeLookupInput(args: HarnessModeCatalogArgs): { readonly source: 'targ
   return query ? { source: 'query', input: query } : null;
 }
 
-export async function listHarnessModes(args: HarnessModeCatalogArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function listHarnessModes(args: HarnessModeCatalogArgs, options: CatalogRankingOptions = {}, releaseRoot: string = RELEASE_PACKAGE_ROOT): Promise<Record<string, unknown>> {
+  const descriptors = installedModeDescriptors(releaseRoot);
   const lookup = modeLookupInput(args);
   const limit = readLimit(args.limit, 120);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const found = await matchingHarnessModes(lookup?.input ?? '', options);
+  const found = await matchingHarnessModes(descriptors, lookup?.input ?? '', options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const modes = found.matches
     .map(({ entry, judgment }) => ({ ...describeHarnessModeDescriptor(entry, { includeParameters: args.includeParameters === true }), ...(judgment ? { judgment } : {}) }))
     .slice(0, limit);
   return {
-    ...catalogEnvelope('modes', modes, HARNESS_MODE_DESCRIPTORS.length, {
+    ...catalogEnvelope('modes', modes, descriptors.length, {
       ...(lookup ? { [lookup.source]: lookup.input } : {}),
     }, 'agent_harness mode:"modes" with no query'),
-    families: Array.from(new Set(HARNESS_MODE_DESCRIPTORS.map((descriptor) => descriptor.family))).sort(),
+    families: Array.from(new Set(descriptors.map((descriptor) => descriptor.family))).sort(),
     policy: 'Mode discovery is read-only. Effects require current recorded admission and their original live source authority.',
   };
 }
 
-export async function describeHarnessMode(args: HarnessModeCatalogArgs, options: CatalogRankingOptions = {}): Promise<HarnessModeResolution> {
+export async function describeHarnessMode(args: HarnessModeCatalogArgs, options: CatalogRankingOptions = {}, releaseRoot: string = RELEASE_PACKAGE_ROOT): Promise<HarnessModeResolution> {
+  const descriptors = installedModeDescriptors(releaseRoot);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const lookup = modeLookupInput(args);
   if (!lookup) {
@@ -248,11 +309,11 @@ export async function describeHarnessMode(args: HarnessModeCatalogArgs, options:
     };
   }
   const normalized = lookup.input.toLowerCase();
-  const exact = HARNESS_MODE_DESCRIPTORS.find((descriptor) => descriptor.id === lookup.input);
+  const exact = descriptors.find((descriptor) => descriptor.id === lookup.input);
   if (exact) return { status: 'found', mode: describeHarnessModeDescriptor(exact, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'id' } }) };
-  const insensitive = HARNESS_MODE_DESCRIPTORS.find((descriptor) => descriptor.id.toLowerCase() === normalized);
+  const insensitive = descriptors.find((descriptor) => descriptor.id.toLowerCase() === normalized);
   if (insensitive) return { status: 'found', mode: describeHarnessModeDescriptor(insensitive, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } }) };
-  const searched = await matchingHarnessModes(lookup.input, options);
+  const searched = await matchingHarnessModes(descriptors, lookup.input, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   if (searched.matches.length === 1 && searched.matches[0]!.judgment?.reading.verdict === 'yes' && searched.matches[0]!.judgment?.reading.outcome === 'act') {
     const { entry, judgment } = searched.matches[0]!;

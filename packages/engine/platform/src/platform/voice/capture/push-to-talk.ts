@@ -133,7 +133,9 @@ export class PushToTalkSession {
    * recorder installed, permission refused, plain-http origin.
    */
   async start(): Promise<void> {
-    if (this.#stream !== null || this.#phase === 'requesting') return;
+    // While an auto-stop is releasing the device its utterance has not been
+    // delivered yet; a new start here would retire it and lose what was said.
+    if (this.#stream !== null || this.#phase === 'requesting' || this.#phase === 'stopping') return;
     const generation = ++this.#captureGeneration;
     const current = (): boolean => generation === this.#captureGeneration;
     this.#setPhase('requesting');

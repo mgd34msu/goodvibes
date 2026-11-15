@@ -60,6 +60,8 @@ export interface LearningConsolidationPlan {
   readonly survivorId: string;
   readonly duplicateIds: readonly string[];
   readonly sharedKey: string;
+  /** Duplicates that were already staged as stale; they stay in the plan so they can be deleted, and are never staged again. */
+  readonly staleDuplicateIds?: readonly string[];
   readonly diffs: readonly LearningConsolidationDiff[];
   readonly updateFields?: LearningConsolidationFields;
   readonly rollbackFields: LearningConsolidationFields;
@@ -110,8 +112,8 @@ export interface LearningConsolidationBatchCandidate {
   readonly duplicateIds?: readonly string[];
   readonly diffFields: readonly string[];
   readonly detailRoute: string;
-  readonly applyRoute: string;
-  readonly mergeRoute: string;
+  readonly previewRoute: string;
+  readonly mergeRoute?: string;
   readonly stalePhaseRoute: string;
   readonly deletePhaseRoute: string;
   readonly updateRoute?: string;

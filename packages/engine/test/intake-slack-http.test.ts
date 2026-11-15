@@ -155,9 +155,10 @@ describe('private Slack inbox fixed HTTP owner', () => {
 
   test('snapshots caller URL and credential accessors before authority callbacks', async () => {
     const calls: string[] = [];
+    const authorizations: (string | null)[] = [];
     const local = endpoint(incoming => {
       calls.push(new URL(incoming.url).pathname);
-      expect(incoming.headers.get('authorization')).toBe(request.headers.Authorization);
+      authorizations.push(incoming.headers.get('authorization'));
       return Response.json({ ok: true });
     });
     const url = auth();
@@ -168,6 +169,7 @@ describe('private Slack inbox fixed HTTP owner', () => {
       return { get Authorization() { tokenRead++; return request.headers.Authorization; }, Accept: 'application/json' as const };
     } });
     expect(calls).toEqual(['/api/auth.test']);
+    expect(authorizations).toEqual([request.headers.Authorization]);
     expect(headersRead).toBe(1); expect(tokenRead).toBe(1);
   });
 
@@ -234,9 +236,13 @@ describe('private Slack inbox fixed HTTP owner', () => {
     expect(await owned.http(list(), request)).toEqual({ ok: true, body: { ok: true } });
     expect(listCalls).toBe(1);
     await rejection(owned.http(auth(), request)); expect(authCalls).toBe(1);
-    await pause(170);
-    expect(authCalls).toBe(1); // The owner did not schedule a retry.
-    await owned.http(auth(), request); expect(authCalls).toBe(2);
+    // The owner reads `performance.now()` for the fence: move that clock past Retry-After instead of sleeping.
+    const realNow = performance.now.bind(performance);
+    const clock = spyOn(performance, 'now').mockImplementation(() => realNow() + 151);
+    try {
+      expect(authCalls).toBe(1); // Waiting out the fence did not retry on its own.
+      await owned.http(auth(), request); expect(authCalls).toBe(2);
+    } finally { clock.mockRestore(); }
   });
 
   test.each([undefined, '-1', 'synthetic-private-header', 'Infinity', '1e2'])(

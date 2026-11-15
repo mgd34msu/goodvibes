@@ -18,6 +18,7 @@ import {
   RELAY_VIA_HEADER,
 } from '../daemon-api/src/index.js';
 import { createRelayClient } from '../transport-realtime/src/relay-transport.js';
+import { isRelayTunneledRequest } from '../daemon-api/src/relay-registration.js';
 import { createOperatorApiClient } from '../operator-client/src/client.js';
 import { generateRelayIdentity, relayIdentityPublicKeyBase64Url } from '../transport-core/src/relay/index.js';
 
@@ -100,6 +101,41 @@ describe('typed operator client over the relay', () => {
       await client.connect();
       const response = await client.fetch('https://relay.invalid/binary', { method: 'POST', body: bytes });
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    } finally { client.close(); reg.stop(); }
+  });
+
+  test('a client-supplied via-relay header cannot replace the daemon-owned marker', async () => {
+    const seen: boolean[] = [];
+    const values: Array<string | null> = [];
+    let streamDispatched: () => void = () => {};
+    const streamSeen = new Promise<void>((resolve) => { streamDispatched = resolve; });
+    const reg = await standUpDaemon('rid-spoofed-marker', async (req) => {
+      seen.push(isRelayTunneledRequest(req));
+      values.push(req.headers.get(RELAY_VIA_HEADER));
+      if (values.length === 2) streamDispatched();
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    const client = createRelayClient({ pairing: await reg.mintPairing('test-daemon') });
+    try {
+      await client.connect();
+      await client.fetch('https://relay.invalid/api/x', { method: 'POST', headers: { [RELAY_VIA_HEADER]: '0' }, body: '{}' });
+      const stream = await client.fetch('https://relay.invalid/api/events', { headers: { accept: 'text/event-stream', [RELAY_VIA_HEADER]: '0' } });
+      await streamSeen;
+      await stream.body?.cancel().catch(() => {});
+      expect(values).toEqual(['1', '1']);
+      expect(seen).toEqual([true, true]);
+    } finally { client.close(); reg.stop(); }
+  });
+
+  test('a stream the daemon refuses with 401 fails the client reader with that status', async () => {
+    const reg = await standUpDaemon('rid-refused-stream', async () =>
+      new Response('{"error":"Unauthorized"}', { status: 401, headers: { 'content-type': 'application/json' } }));
+    const client = createRelayClient({ pairing: await reg.mintPairing('test-daemon') });
+    try {
+      await client.connect();
+      const response = await client.fetch('https://relay.invalid/api/events', { headers: { accept: 'text/event-stream' } });
+      const failure = await response.body!.getReader().read().then(() => undefined, (error: unknown) => error);
+      expect((failure as { status?: number }).status).toBe(401);
     } finally { client.close(); reg.stop(); }
   });
 

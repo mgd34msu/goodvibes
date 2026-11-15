@@ -2,6 +2,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessDelegationArgs {
   readonly delegationRouteId?: unknown;
@@ -63,9 +64,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function lookupFromArgs(args: AgentHarnessDelegationArgs): { readonly source: DelegationLookupSource; readonly input: string } | null {
@@ -94,7 +93,7 @@ function routes(): readonly DelegationRoute[] {
       requiredFields: ['full original user ask', 'delegation reason', 'success criteria or expected evidence'],
       optionalFields: ['workspace/worktree hint', 'deadline/priority', 'review requested yes/no'],
       successEvidence: ['delegation receipt/session id', 'status update', 'diff or artifact summary', 'verification result when available'],
-      statusRoutes: ['/delegate status', '/health remote', 'delegation action:"status"'],
+      statusRoutes: ['execution action:"history"', '/health remote', 'delegation action:"status"'],
       recoveryRoutes: ['Open GoodVibes TUI shared session', 'Use local Agent read/edit/exec when the current workspace is sufficient'],
       commandTemplate: '/delegate <full original user ask>',
       workspaceActionId: 'delegate-task',
@@ -115,28 +114,12 @@ function routes(): readonly DelegationRoute[] {
       requiredFields: ['full original user ask', 'explicit review request', 'review focus', 'success criteria or expected evidence'],
       optionalFields: ['files/components in scope', 'known risks', 'deadline/priority'],
       successEvidence: ['review receipt/session id', 'findings or approval summary', 'artifact/diff references', 'follow-up questions when blocked'],
-      statusRoutes: ['/delegate status', '/health remote', 'delegation action:"route" delegationRouteId:"delegate-build-task-with-review"'],
+      statusRoutes: ['execution action:"history"', '/health remote', 'delegation action:"route" delegationRouteId:"delegate-build-task-with-review"'],
       recoveryRoutes: ['Use local Agent review when the current workspace is sufficient', 'Open GoodVibes TUI shared session for review follow-up'],
       commandTemplate: '/delegate --review <full original user ask>',
       workspaceActionId: 'delegate-task',
       confirmationRequired: true,
       reviewPolicy: 'explicit-only',
-    },
-    {
-      id: 'delegation-status',
-      label: 'Delegation status',
-      detail: 'Inspect build-delegation receipts and shared-session status without starting coding work.',
-      effect: 'read-only',
-      lane: 'tui-shared-session',
-      bestFor: ['Checking whether a delegated build/fix/review task was submitted', 'Finding the shared-session receipt before follow-up'],
-      requiredFields: [],
-      optionalFields: ['session id or task text when available'],
-      successEvidence: ['receipt/session id', 'latest shared-session status'],
-      statusRoutes: ['/delegate status'],
-      recoveryRoutes: ['/health remote', 'Open GoodVibes TUI in the target workspace'],
-      command: '/delegate status',
-      workspaceActionId: 'delegation-status',
-      reviewPolicy: 'not-applicable',
     },
     {
       id: 'ordinary-agent-work',
@@ -235,9 +218,9 @@ export function delegationDecisionCards(context: CommandContext): readonly Deleg
         'The task is ordinary local work that Agent can complete directly.',
         'The user has not confirmed a mutating delegation submission.',
       ],
-      routeIds: ['delegate-build-task', 'delegation-status'],
+      routeIds: ['delegate-build-task'],
       requiredFields: ['full original user ask', 'delegation reason', 'success criteria or expected evidence'],
-      supervision: ['/delegate status', '/health remote', 'GoodVibes TUI shared session'],
+      supervision: ['execution action:"history"', '/health remote', 'GoodVibes TUI shared session'],
       confirmationBoundary: 'Submitting delegated work requires a confirmed workspace form or slash command and an attached operator client.',
     },
     {
@@ -254,9 +237,9 @@ export function delegationDecisionCards(context: CommandContext): readonly Deleg
         'Review is only implied by the existence of a handoff.',
         'A local code review in the current workspace is sufficient.',
       ],
-      routeIds: ['delegate-build-task-with-review', 'delegation-status'],
+      routeIds: ['delegate-build-task-with-review'],
       requiredFields: ['full original user ask', 'explicit review request', 'review focus', 'success criteria or expected evidence'],
-      supervision: ['/delegate status', 'GoodVibes TUI shared session'],
+      supervision: ['execution action:"history"', 'GoodVibes TUI shared session'],
       confirmationBoundary: 'The --review lane is explicit-only; Agent must not add review by default.',
     },
     {

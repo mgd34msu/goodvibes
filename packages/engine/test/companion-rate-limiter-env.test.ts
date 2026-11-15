@@ -10,6 +10,7 @@ import {
   readThresholdFromEnv,
   DEFAULT_MESSAGES_PER_MINUTE_PER_SESSION,
 } from '../platform/src/platform/companion/companion-chat-rate-limiter.ts';
+import { runtimeConfigDefaults } from '../platform/src/platform/config/schema-domain-runtime.ts';
 
 // ---------------------------------------------------------------------------
 // readThresholdFromEnv
@@ -93,5 +94,23 @@ describe('CompanionChatRateLimiter threshold precedence', () => {
     const caught = (() => { try { limiter.check('session-f15', 'client-1'); } catch (e) { return e; } })();
     // GoodVibesError should have category 'rate_limit'
     expect((caught as { category?: string }).category).toBe('rate_limit');
+  });
+
+  test('a config manager still holding the schema default leaves the env baseline in force', () => {
+    const env = { GOODVIBES_CHAT_LIMITER_THRESHOLD: '50' };
+    const unset = runtimeConfigDefaults.runtime.companionChatLimiter.perSessionLimit;
+    const limiter = new CompanionChatRateLimiter({ configManager: { get: () => unset } as never }, env);
+    for (let i = 0; i < 50; i++) {
+      expect(() => limiter.check('session-env-baseline', '')).not.toThrow();
+    }
+    expect(() => limiter.check('session-env-baseline', '')).toThrow();
+  });
+
+  test('a positive config value overrides the env baseline', () => {
+    const env = { GOODVIBES_CHAT_LIMITER_THRESHOLD: '50' };
+    const limiter = new CompanionChatRateLimiter({ configManager: { get: () => 2 } as never }, env);
+    limiter.check('session-config-wins', '');
+    limiter.check('session-config-wins', '');
+    expect(() => limiter.check('session-config-wins', '')).toThrow();
   });
 });

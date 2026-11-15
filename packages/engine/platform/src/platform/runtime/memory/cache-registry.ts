@@ -80,7 +80,7 @@ export interface CacheFootprint {
   readonly id: MemoryCacheId;
   readonly name: string;
   readonly entries: number;
-  readonly estimatedBytes?: number | undefined;
+  readonly estimatedBytes?: number;
 }
 
 /**

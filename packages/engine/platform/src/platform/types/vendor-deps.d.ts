@@ -27,6 +27,10 @@ declare module '@agentclientprotocol/sdk' {
     constructor(toAgent: (conn: AgentSideConnection) => Agent, stream: any);
     sessionUpdate(params: SessionNotification): Promise<void>;
     requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse>;
+    /** Aborted when the connection closes. */
+    readonly signal: AbortSignal;
+    /** Resolves when the connection closes (the underlying stream ended). */
+    readonly closed: Promise<void>;
   }
   // ClientSideConnection is used as a constructor (new ClientSideConnection(...)),
   // so it must be a value (class), not just a type alias.

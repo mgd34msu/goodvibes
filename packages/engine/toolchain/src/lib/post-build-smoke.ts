@@ -397,7 +397,8 @@ async function runOwnedPostBuildSmoke(options: RunSmokeOptions): Promise<SmokeRe
     }
     finally {
       signal?.removeEventListener('abort', cancelSource);
-      if (source && sourceMethods) await sourceMethods.release.call(sourceOwner, source);
+      // A failing release must not replace the result this call is already returning.
+      if (source && sourceMethods) { try { await sourceMethods.release.call(sourceOwner, source); } catch { /* the returned result stands */ } }
     }
   }
   return finish(evaluated);

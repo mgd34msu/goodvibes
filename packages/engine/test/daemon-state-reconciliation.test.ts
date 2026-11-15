@@ -16,14 +16,13 @@
  * (idle >= idleLongMs) while leaving sessions with live agents alone.
  */
 
-import { describe, expect, test, beforeEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { AgentTaskAdapter } from '../platform/src/platform/runtime/tasks/adapters/agent-adapter.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 import type { RuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 import { createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
 import type { AgentEvent } from '../platform/src/events/agents.js';
-import { settleEvents } from './_helpers/test-timeout.js';
 import { trackDisposables } from './_helpers/disposables.ts';
 
 const disposables = trackDisposables();
@@ -110,16 +109,35 @@ describe('AgentTaskAdapter.attachRuntimeBus: task registry sync', () => {
     expect(known?.status).toBe('running'); // unchanged
   });
 
-  test('unsubscribe tears down listeners: subsequent events do not affect tasks', () => {
-    const unsub = adapter.attachRuntimeBus(bus); // second subscription
-    const taskId = adapter.wrapAgent('ag-unsub', 'Test', { sessionId: 'sess-x' });
-    adapter.handleAgentStateChange('ag-unsub', 'running');
+  test('the unsubscribe returned by the first attach stops later events from affecting tasks', async () => {
+    const freshBus = new RuntimeEventBus();
+    const freshStore = makeStore();
+    const freshAdapter = new AgentTaskAdapter(freshStore);
+    const unsub = freshAdapter.attachRuntimeBus(freshBus);
+    const taskId = freshAdapter.wrapAgent('ag-unsub', 'Test', { sessionId: 'sess-x' });
+    freshAdapter.handleAgentStateChange('ag-unsub', 'running');
 
     unsub();
 
-    // Fire, the second subscription was torn down; first still works but
-    // the point is no crash and state is correct regardless
-    expect(() => emitAgent('AGENT_COMPLETED', 'ag-unsub')).not.toThrow();
+    const payload = { type: 'AGENT_COMPLETED', agentId: 'ag-unsub', durationMs: 100 } as AgentEvent;
+    freshBus.emit('agents', createEventEnvelope('AGENT_COMPLETED', payload, {
+      sessionId: 'sess-x', traceId: 'unsub', source: 'test',
+    }));
+    await Promise.resolve(); // drain queueMicrotask
+
+    expect(freshStore.getState().tasks.tasks.get(taskId)?.status).toBe('running');
+  });
+
+  test('the unsubscribe returned by a duplicate attach does not detach the first subscription', async () => {
+    const unsub = adapter.attachRuntimeBus(bus); // duplicate: no-op
+    const taskId = adapter.wrapAgent('ag-dup-unsub', 'Test', { sessionId: 'sess-x' });
+    adapter.handleAgentStateChange('ag-dup-unsub', 'running');
+
+    unsub();
+    emitAgent('AGENT_COMPLETED', 'ag-dup-unsub');
+    await Promise.resolve(); // drain queueMicrotask
+
+    expect(store.getState().tasks.tasks.get(taskId)?.status).toBe('completed');
   });
 });
 
@@ -130,7 +148,7 @@ describe('AgentTaskAdapter.attachRuntimeBus: task registry sync', () => {
 import type { SharedSessionRecord, SharedSessionMessage } from '../platform/src/platform/control-plane/session-types.js';
 import type { SharedSessionInputRecord } from '../platform/src/platform/control-plane/session-intents.js';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.js';
-import { finalizeAgentSessionInputs } from '../platform/src/platform/control-plane/session-broker-inputs.js';
+import { finalizeAgentSessionInputs, recordSharedSessionInput } from '../platform/src/platform/control-plane/session-broker-inputs.js';
 import type { SharedSessionStoreSnapshot, SharedSessionEventPublisher } from '../platform/src/platform/control-plane/session-broker-helpers.js';
 import type { PersistentStore } from '../platform/src/platform/state/persistent-store.js';
 import type { RouteBindingManager } from '../platform/src/platform/channels/route-manager.js';
@@ -345,14 +363,17 @@ describe('AgentTaskAdapter.attachRuntimeBus is idempotent', () => {
     const taskId = adapter.wrapAgent('ag-idem2', 'Task', { sessionId: 'sess-x' });
     adapter.handleAgentStateChange('ag-idem2', 'running');
     unsub2(); // no-op unsub should not break anything
+    const stateChanges = spyOn(adapter, 'handleAgentStateChange');
 
     const payload = { type: 'AGENT_COMPLETED', agentId: 'ag-idem2', durationMs: 100 } as AgentEvent;
     bus.emit('agents', createEventEnvelope('AGENT_COMPLETED', payload, {
       sessionId: 'sess-x', traceId: 'idem2', source: 'test',
     }));
     await Promise.resolve(); // drain queueMicrotask
-    // Should still complete (first subscription still active)
+    // Completed by the first subscription, and handled exactly once: a second
+    // subscription would also complete the task, so the status alone cannot tell.
     expect(store.getState().tasks.tasks.get(taskId)?.status).toBe('completed');
+    expect(stateChanges.mock.calls.filter(([id, state]) => id === 'ag-idem2' && state === 'completed')).toHaveLength(1);
   });
 });
 
@@ -469,12 +490,16 @@ describe('SharedSessionBroker.stop() tears down resources', () => {
     await broker.start();
     const session = await broker.createSession({ title: 'Stop unsubscribe' });
     await broker.bindAgent(session.id, 'ag-stop');
-    broker.attachRuntimeBus(bus, () => null);
+    broker.attachRuntimeBus(bus, (agentId) => agentId === 'ag-stop' ? session.id : null);
+    const completions = spyOn(broker, 'completeAgent');
 
     await broker.stop();
     emitAgentOnBus(bus, 'AGENT_COMPLETED', 'ag-stop', { output: 'late completion' });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
+    // The resolver maps this agent to the session, so only the unsubscribe
+    // keeps the late completion from landing.
+    expect(completions).not.toHaveBeenCalled();
     expect(broker.getSession(session.id)?.activeAgentId).toBe('ag-stop');
   });
 
@@ -500,27 +525,56 @@ describe('SharedSessionBroker.attachRuntimeBus is idempotent', () => {
     const bus = new RuntimeEventBus();
     const broker = makeBroker();
     await broker.start();
-    broker.attachRuntimeBus(bus, () => null);
+    const session = await broker.createSession({ title: 'Duplicate attach' });
+    await broker.bindAgent(session.id, 'ag-dup');
+    const resolver = (agentId: string): string | null => agentId === 'ag-dup' ? session.id : null;
+    broker.attachRuntimeBus(bus, resolver);
+    const completions = spyOn(broker, 'completeAgent');
 
-    const unsub = broker.attachRuntimeBus(bus, () => null);
+    const unsub = broker.attachRuntimeBus(bus, resolver);
+    expect(typeof unsub).toBe('function');
+    unsub(); // the duplicate's unsubscribe must not detach the first subscription
+
+    emitAgentOnBus(bus, 'AGENT_COMPLETED', 'ag-dup', { output: 'done' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(completions).toHaveBeenCalledTimes(1);
+    expect(broker.getSession(session.id)?.activeAgentId).toBeUndefined();
   });
 });
 
 describe('lastActivityAt is bumped at touch sites', () => {
+  // A frozen clock that only moves when the test advances it, so "bumped" is a
+  // strict inequality that does not depend on how long a real timer takes.
+  let now = 1_700_000_000_000;
+  let clock: ReturnType<typeof spyOn<DateConstructor, 'now'>>;
+  beforeEach(() => {
+    now = 1_700_000_000_000;
+    clock = spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  afterEach(() => {
+    clock.mockRestore();
+  });
+  const advance = (ms: number): void => {
+    now += ms;
+  };
+
   test('recordInput bumps lastActivityAt', async () => {
     const broker = makeBroker();
     const sess = await broker.createSession({ title: 'Touch test' });
     const before = broker.getSession(sess.id)!.lastActivityAt;
-    // Wait a tick to ensure time advances
-    await settleEvents(2);
-    await broker.submitMessage({
+    advance(10);
+    // Called directly: submitMessage also bumps through the participant touch and
+    // the message append, which would mask a missing touch in the record path.
+    const store = (broker as unknown as { sessionInputStore(): { sessions: Map<string, SharedSessionRecord>; inputs: Map<string, SharedSessionInputRecord[]> } }).sessionInputStore();
+    recordSharedSessionInput(store, {
       sessionId: sess.id,
-      surfaceKind: 'tui',
-      surfaceId: 'tui-1',
-      body: 'hello',
+      intent: 'submit',
+      message: { sessionId: sess.id, surfaceKind: 'tui', surfaceId: 'tui-1', body: 'hello' },
+      maxPersistedInputs: 10,
     });
     const after = broker.getSession(sess.id)!.lastActivityAt;
-    expect(after).toBeGreaterThanOrEqual(before);
+    expect(after).toBeGreaterThan(before);
   });
 
   test('completeAgent bumps lastActivityAt explicitly', async () => {
@@ -528,7 +582,7 @@ describe('lastActivityAt is bumped at touch sites', () => {
     const sess = await broker.createSession({ title: 'Complete touch' });
     await broker.bindAgent(sess.id, 'ag-touch');
     const before = broker.getSession(sess.id)!.lastActivityAt;
-    await settleEvents(2);
+    advance(10);
     await broker.completeAgent(sess.id, 'ag-touch', 'result', { status: 'completed' });
     const after = broker.getSession(sess.id)!.lastActivityAt;
     expect(after).toBeGreaterThan(before);
@@ -538,7 +592,7 @@ describe('lastActivityAt is bumped at touch sites', () => {
     const broker = makeBroker();
     const sess = await broker.createSession({ title: 'Close touch' });
     const before = broker.getSession(sess.id)!.lastActivityAt;
-    await settleEvents(2);
+    advance(10);
     await broker.closeSession(sess.id);
     const after = broker.getSession(sess.id)!.lastActivityAt;
     expect(after).toBeGreaterThan(before);
@@ -556,7 +610,7 @@ describe('lastActivityAt is bumped at touch sites', () => {
     });
     await broker.bindAgent(sess.id, 'ag-finalize');
     const before = broker.getSession(sess.id)!.lastActivityAt;
-    await settleEvents(2);
+    advance(10);
     // Call finalizeAgentSessionInputs directly against the broker's internal
     // input store (bypasses completeAgent), proves the touch side effect
     // fires from the finalize path itself, not just completeAgent's other

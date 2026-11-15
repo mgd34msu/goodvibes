@@ -19,7 +19,7 @@ import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
 import { getConfigSnapshot } from '../config/index.ts';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { startPlanActivationTurn } from './plan-activation.ts';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
@@ -29,7 +29,6 @@ import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { TaskManager } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createKnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
@@ -53,6 +52,7 @@ export interface BootstrapShellOptions {
   readonly onSessionIdChanged: (sessionId: string) => void;
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly restoreTurnAnchors: (sessionId: string) => number;
+  readonly announceSessionResumed: (resumedSessionId: string, turnCount: number) => void;
   readonly getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[];
   readonly toolRegistry: ToolRegistry;
   readonly promptContextReceipts?: AgentPromptContextReceiptStore;
@@ -114,6 +114,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     permissionPromptRef,
     writeLastSessionPointer,
     restoreTurnAnchors,
+    announceSessionResumed,
     getControlPlaneRecentEvents,
     toolRegistry,
     promptContextReceipts,
@@ -197,18 +198,24 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     approvalsView: services.approvalsView,
     knowledgeService: services.agentKnowledgeService,
     agentKnowledgeApi,
+    memorySpine: services.memorySpineClient,
     promptContextReceipts,
     memoryConsolidationScheduler: services.memoryConsolidationScheduler,
     loadSystemPrompt: () => loadBootstrapSystemPrompt(configManager),
-    activatePlan: (_planId, task) => {
-      setTimeout(() => {
-        orchestrator.handleUserInput(task).catch((err) => {
-          logger.debug('activatePlan handler failed', { error: summarizeError(err) });
-        });
-      }, 50);
+    activatePlan: (planId, task) => {
+      startPlanActivationTurn({
+        planId,
+        task,
+        handleUserInput: (text) => orchestrator.handleUserInput(text),
+        notify: (message) => {
+          systemMessageRouter.high(message);
+          requestRender();
+        },
+      });
     },
     writeLastSessionPointer,
     restoreTurnAnchors,
+    announceSessionResumed,
   });
   commandContextRef = commandContext;
 

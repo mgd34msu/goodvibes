@@ -26,6 +26,7 @@ export const {
   readHostPairing: readAgentHostPairing,
   beginHostPairing: beginAgentHostPairing,
   completeHostPairing: completeAgentHostPairing,
+  clearHostPairingAttempt: clearAgentHostPairingAttempt,
 } = createHostPairingStore({
   unavailableReason: AGENT_HOST_PAIRING_UNAVAILABLE_REASON,
   surfaceRoot: 'agent',

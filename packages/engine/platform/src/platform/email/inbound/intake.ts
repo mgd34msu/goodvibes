@@ -553,13 +553,15 @@ export function createInboundMailIntake(
     const alreadyAnnounced = prior !== null && prior.noticeStatus === 'delivered';
 
     // Decide everything BEFORE anything irreversible happens.
-    const plan: NoticePlan = !shouldAnnounce(deps.noticeMode(), match)
-      ? { kind: 'settled', status: 'suppressed' }
-      : alreadyAnnounced
-        // Announced on an earlier pass whose cursor advance never landed. The
-        // message is genuinely handled; announcing it again is the duplicate
-        // the dedup cache exists to prevent and cannot, across a restart.
-        ? { kind: 'settled', status: 'delivered' }
+    const plan: NoticePlan = alreadyAnnounced
+      // Announced on an earlier pass whose cursor advance never landed. The
+      // message is genuinely handled; announcing it again is the duplicate
+      // the dedup cache exists to prevent and cannot, across a restart. Decided
+      // before the notice mode, so a mode that would now suppress the message
+      // cannot relabel one the owner was already told about.
+      ? { kind: 'settled', status: 'delivered' }
+      : !shouldAnnounce(deps.noticeMode(), match)
+        ? { kind: 'settled', status: 'suppressed' }
         : await planFor(
           deps.notices.resolveBinding(),
           message,
@@ -569,10 +571,16 @@ export function createInboundMailIntake(
           bodiesWithheld,
         );
 
+    // Notices are switched off: an earlier refusal no longer describes anything.
+    if (deps.noticeMode() === 'none') deps.noticeHealth?.clear('notices were switched off');
+
     // THE RECORD GOES IN FIRST, and this is the ordering the file header is
     // about. Everything that can fail happens with nothing announced, so a
     // failure here produces a redelivery that announces ONCE.
-    await write(plan.kind === 'send' ? 'pending' : plan.status, undefined);
+    // Not for a message already recorded as delivered: the grant it matched has
+    // since been consumed, so a rewrite would replace its outcome with
+    // `no-expectation` and lose what "why did I get that message" answers.
+    if (!alreadyAnnounced) await write(plan.kind === 'send' ? 'pending' : plan.status, undefined);
 
     let status: InboundNoticeStatus;
     let failureReason: string | undefined;
@@ -595,6 +603,19 @@ export function createInboundMailIntake(
         // stays below this message, and the next pass announces it. The record
         // stays at `pending`, which is what it truthfully is, and the retry
         // replaces it rather than writing a second row.
+        //
+        // Latched as well, because the retry is otherwise invisible: the
+        // watcher keeps saying healthy while this message, and every message
+        // behind it, waits for a route that is down. The next notice that
+        // gets through clears it.
+        deps.noticeHealth?.refused({
+          reason: 'delivery-failed',
+          detail: `the notice for a new message could not be delivered (${delivery.error ?? 'no detail'}); `
+            + 'the message is kept and retried with backoff, and mail arriving after it waits behind it.',
+          fix: 'Check that the channel inbound-mail notices go to is reachable; the waiting notices are '
+            + 'sent as soon as delivery works again.',
+          at: receivedAt.iso,
+        });
         throw new InboundNoticeTransportError(delivery.error ?? 'delivery-failed');
       } else {
         status = delivery.reason;

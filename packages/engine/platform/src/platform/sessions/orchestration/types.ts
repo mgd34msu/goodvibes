@@ -75,6 +75,8 @@ export interface TaskHandoffRecord {
   acknowledged: boolean;
   /** Epoch ms when the destination acknowledged. */
   acknowledgedAt?: number | undefined;
+  /** The source task's status before the handoff held it 'blocked'; restored on acknowledgement. */
+  readonly previousStatus?: TaskLifecycleState | undefined;
 }
 
 // ── Cancellation scope ────────────────────────────────────────────────────────
@@ -153,9 +155,11 @@ export interface SessionTaskGraphSnapshot {
  * @param sessionId - The owning session ID.
  * @param taskId - The task ID within that session.
  * @returns A colon-delimited composite key suitable for Map/Record keying.
+ *   A `:` or `\` inside the session id is escaped, so `a:b` + `c` and `a` + `b:c`
+ *   never share a key; ids without those characters are unchanged.
  */
 export function makeRefKey(sessionId: string, taskId: string): string {
-  return `${sessionId}:${taskId}`;
+  return `${sessionId.replace(/[\\:]/g, (char) => `\\${char}`)}:${taskId}`;
 }
 
 /**

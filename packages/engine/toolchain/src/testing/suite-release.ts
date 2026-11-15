@@ -1,9 +1,9 @@
 /** Synthetic complete release bytes and a real temporary installed suite.
  * No program execution, network or test registration occurs here. */
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { makeTestTempDir } from '../test-runner/temp.js';
 import { nativeReaderCapabilities, sha256, clientReaderMemberAsset, clientReaderPayloadPaths } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 
@@ -20,7 +20,7 @@ export function suiteArchive(files: Readonly<Record<string, string>>): Buffer {
   return gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)]));
 }
 export function suiteReleaseFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'goodvibes-suite-update-'));
+  const root = makeTestTempDir('goodvibes-suite-update');
   const programs = [
     { name: 'goodvibes', packageName: '@goodvibes-jev/tui' },
     { name: 'goodvibes-agent', packageName: '@goodvibes-jev/agent' },

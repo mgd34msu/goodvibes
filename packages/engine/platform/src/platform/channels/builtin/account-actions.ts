@@ -1,5 +1,6 @@
 import { DiscordIntegration, NtfyIntegration, SlackIntegration } from '../../integrations/index.js';
 import type { ProviderRuntimeSurface } from '../provider-runtime.js';
+import type { ChannelPolicyManager } from '../policy-manager.js';
 import type {
   ChannelAccountLifecycleAction,
   ChannelAccountLifecycleResult,
@@ -29,6 +30,10 @@ interface BuiltinAccountActionContext {
   readonly deps: BuiltinChannelRuntimeDeps;
   readonly buildAccount: (surface: ChannelSurface) => Promise<ChannelAccountRecord>;
   readonly resolveAccount: (surface: ChannelSurface, accountId: string) => Promise<ChannelAccountRecord | null>;
+}
+
+interface BuiltinActorAuthorizationContext extends BuiltinAccountActionContext {
+  readonly channelPolicy: Pick<ChannelPolicyManager, 'start' | 'getPolicy'>;
 }
 
 export async function runBuiltinAccountAction(
@@ -180,23 +185,44 @@ export async function runBuiltinAccountAction(
 }
 
 export async function authorizeBuiltinActorAction(
-  context: BuiltinAccountActionContext,
+  context: BuiltinActorAuthorizationContext,
   surface: ChannelSurface,
   request: ChannelActorAuthorizationRequest,
 ): Promise<ChannelActorAuthorizationResult> {
   const account = request.accountId ? await context.resolveAccount(surface, request.accountId) : await context.buildAccount(surface);
   const requestedAction = request.actionId.trim().toLowerCase();
   const matchingAction = account?.actions.find((entry) => entry.id === requestedAction || entry.kind === requestedAction);
-  const actionAvailable = matchingAction?.available ?? Boolean(account?.configured);
-  const allowed = Boolean(account?.enabled && actionAvailable);
+  // An action name this surface does not have is refused, not defaulted to the
+  // account's state: otherwise any made-up name is "allowed" on an enabled account.
+  const actionAvailable = matchingAction?.available ?? false;
+  // The actor is judged against the surface's user allowlist the same way
+  // ingress judges a sender: an empty list restricts nobody, a non-empty one
+  // admits only the listed ids and refuses an anonymous actor.
+  await context.channelPolicy.start();
+  const allowlistUserIds = context.channelPolicy.getPolicy(surface).allowlistUserIds;
+  const actorAllowed = allowlistUserIds.length === 0
+    || (request.actorId !== undefined && allowlistUserIds.includes(request.actorId));
+  const allowed = Boolean(account?.enabled && actionAvailable && actorAllowed);
   return {
     allowed,
     reason: allowed
-      ? 'Account is enabled and the requested action is available.'
-      : 'The account is disabled, unconfigured, or the requested action is unavailable.',
+      ? 'Account is enabled, the requested action is available, and the actor passes the channel allowlist.'
+      : !account
+        ? 'No matching channel account was found.'
+        : matchingAction === undefined
+          ? `Unknown action '${request.actionId}' for this surface; known actions: ${account.actions.map((entry) => entry.id).join(', ')}.`
+          : !account.enabled
+            ? 'The account is disabled; enable the surface before this action.'
+            : !actionAvailable
+              ? `The action '${matchingAction.id}' is unavailable until the surface is configured.`
+              : request.actorId === undefined
+                ? 'The channel allowlist is not empty and no actorId was given; name the actor to check.'
+                : `Actor '${request.actorId}' is not on the channel allowlist; add it with the allowlist edit action first.`,
     account,
     actionAvailable,
     metadata: {
+      actorEvaluated: true,
+      actorAllowlisted: actorAllowed,
       actorId: request.actorId ?? null,
       actionId: request.actionId,
       target: request.target?.sessionTarget ?? request.target?.to ?? null,
@@ -349,11 +375,13 @@ async function runProviderSetupAction(
     if (workspaceId) context.deps.configManager.set('surfaces.slack.workspaceId', workspaceId);
     const hasDirectSlackSecret = Boolean(directBotToken || directSigningSecret || directAppToken);
     if (hasDirectSlackSecret || defaultChannel || workspaceId) {
-      if (hasDirectSlackSecret || account.configured) {
+      // Enabled only when a credential that resolves exists (just stored, or
+      // already linked), never for metadata alone.
+      const configured = Boolean(hasDirectSlackSecret || account.secrets.some((entry) => entry.configured && entry.resolved !== false));
+      if (configured) {
         context.deps.configManager.set('surfaces.slack.enabled', true);
       }
       const refreshed = await context.buildAccount('slack');
-      const configured = Boolean(hasDirectSlackSecret || account.configured);
       return {
         ...base,
         ok: configured,
@@ -426,6 +454,21 @@ async function runProviderSetupAction(
         metadata: { oauth: true, requiresCodeExchange: true },
       };
     }
+
+    return {
+      ...base,
+      ok: account.linked,
+      login: account.linked
+        ? { kind: 'none' }
+        : {
+            kind: 'manual',
+            instructions: 'Provide botToken, signingSecret or appToken to store credentials, or clientId to generate the Slack install URL.',
+          },
+      message: account.linked
+        ? 'Slack is already linked.'
+        : 'Slack setup needs botToken, signingSecret, appToken or clientId; none was provided.',
+      metadata: { providerNative: true, action },
+    };
   }
 
   if (surface === 'discord') {
@@ -479,9 +522,11 @@ async function runProviderSetupAction(
     if (remoteTopic) context.deps.configManager.set('surfaces.ntfy.remoteTopic', remoteTopic);
     if (baseUrl) context.deps.configManager.set('surfaces.ntfy.baseUrl', baseUrl);
     if (token) await context.deps.secretsManager.set('NTFY_ACCESS_TOKEN', token, { scope: readSecretScope(input?.secretScope) });
-    context.deps.configManager.set('surfaces.ntfy.enabled', true);
-    const refreshed = await context.buildAccount('ntfy');
     const configured = Boolean(topic || chatTopic || agentTopic || remoteTopic || token || account.configured);
+    // A call that supplied nothing, on an account with nothing set up, must not
+    // switch the surface on and report success.
+    if (configured) context.deps.configManager.set('surfaces.ntfy.enabled', true);
+    const refreshed = await context.buildAccount('ntfy');
     return {
       ...base,
       ok: configured,

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync, watch, watchFile, unwatchFile, type Stats } from 'fs';
 import type { FSWatcher } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, sep } from 'path';
 import { logger } from '../utils/logger.js';
 import type { FileStateCache } from './file-cache.js';
 import type { ProjectIndex } from './project-index.js';
@@ -95,7 +95,48 @@ export class FileWatcher {
       this.addPath(absPath);
     }
 
+    this.watchRootForNewFiles();
+
     logger.debug('FileWatcher: started', { watched: this.watchedPaths.size });
+  }
+
+  /**
+   * A file created in the root after start() (and a `.goodvibes` that did not
+   * exist yet) is picked up here: the root directory is watched without
+   * recursion, only to register new regular files and to retry paths that
+   * were missing when they were added.
+   */
+  private watchRootForNewFiles(): void {
+    try {
+      const watcher = watch(this.projectRoot, { recursive: false }, (_event: string, filename: string | null) => {
+        if (!this.watching) return;
+        if (filename) {
+          const created = join(this.projectRoot, filename);
+          try {
+            if (!this.watchedPaths.has(created) && statSync(created).isFile()) {
+              this.addPath(created);
+              this._scheduleChange(created);
+            }
+          } catch { /* gone again, or not a file: nothing to watch */ }
+        }
+        this.retryMissingPaths();
+      });
+      watcher.on('error', (err) => {
+        logger.warn('FileWatcher: root watcher error', { projectRoot: this.projectRoot, error: summarizeError(err) });
+        try { watcher.close(); } catch { /* already closed */ }
+        this.watchers.delete(this.projectRoot);
+      });
+      this.watchers.set(this.projectRoot, watcher);
+    } catch (err) {
+      logger.warn('FileWatcher: could not watch the project root for new files', { projectRoot: this.projectRoot, error: summarizeError(err) });
+    }
+  }
+
+  /** Open a watcher for every registered path that has none yet (it did not exist, or its watcher failed). */
+  private retryMissingPaths(): void {
+    for (const absPath of this.watchedPaths) {
+      if (!this.watchers.has(absPath)) this._openWatcher(absPath);
+    }
   }
 
   /** Root entries are watched as files; directories retain their separate policy. */
@@ -233,7 +274,14 @@ export class FileWatcher {
 
       watcher.on('error', (err) => {
         logger.warn('FileWatcher: watcher error', { absPath, error: summarizeError(err) });
+        // Closed and released, so the path can be opened again; the path stays registered.
+        try { watcher.close(); } catch { /* already closed */ }
         this.watchers.delete(absPath);
+        const poll = this.pollListeners.get(absPath);
+        if (poll) {
+          try { unwatchFile(absPath, poll); } catch { /* not polled */ }
+          this.pollListeners.delete(absPath);
+        }
       });
 
       this.watchers.set(absPath, watcher);
@@ -269,21 +317,29 @@ export class FileWatcher {
   }
 
   private _handleChange(absPath: string): void {
+    const platformDir = join(this.projectRoot, '.goodvibes') + sep;
+    const insidePlatformDir = absPath.startsWith(platformDir);
+    // The index writes its own file (and a temp file next to it) under
+    // `.goodvibes`; reacting to those would write the index again, forever.
+    if (insidePlatformDir && absPath.slice(platformDir.length).startsWith('project-index.json')) return;
+
     logger.debug('FileWatcher: file changed', { absPath });
 
     // 1. Invalidate the file cache entry
     this.fileCache.invalidate(absPath);
 
-    // 2. Update ProjectIndex with fresh token estimate
-    let tokenEstimate: number | undefined;
-    try {
-      const size = statSync(absPath).size;
-      // Rough heuristic: ~4 bytes per token (same as ReadTool/ProjectIndex)
-      tokenEstimate = Math.ceil(size / 4);
-    } catch {
-      // File may have been deleted, leave token estimate as undefined
+    // 2. Keep ProjectIndex in step: a deleted file leaves it, any other change
+    // refreshes its token estimate. Platform state under `.goodvibes` is not
+    // project content and is not indexed.
+    if (!insidePlatformDir) {
+      try {
+        // Rough heuristic: ~4 bytes per token (same as ReadTool/ProjectIndex)
+        this.projectIndex.upsertFile(absPath, Math.ceil(statSync(absPath).size / 4));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') this.projectIndex.removeFile(absPath);
+        else this.projectIndex.upsertFile(absPath);
+      }
     }
-    this.projectIndex.upsertFile(absPath, tokenEstimate);
 
     // 3. Fire Change:file:external hook (fire-and-forget)
     if (this.hookDispatcher) {

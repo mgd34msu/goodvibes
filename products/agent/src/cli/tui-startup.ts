@@ -7,6 +7,7 @@ import { readOnboardingCompletionMarker } from '../runtime/onboarding/markers.ts
 import type { GoodVibesCliParseResult } from './types.ts';
 import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 
 export type InteractiveTerminalCheckInput = {
@@ -157,7 +158,10 @@ export function applyInitialTuiCliState(options: {
     const requested = cli.flags.resume ?? cli.commandArgs.slice(1).join(' ').trim();
     const target = requested === 'latest' ? (readLastSessionPointer({ surface }) ?? '') : requested;
     if (target) {
-      void resumeSessionAndRender(commandRegistry, target, commandContext, render);
+      // A handler that throws (a corrupt session file, say) must be said, not left to the process-level rejection handler.
+      resumeSessionAndRender(commandRegistry, target, commandContext, render).catch((error: unknown) => {
+        commandContext.print(`[Resume] Could not resume session ${target}: ${summarizeError(error)}`);
+      });
     } else {
       commandContext.print('[Resume] No saved session pointer is available. Run /session list to choose a saved session.');
     }

@@ -20,6 +20,7 @@ export function formatHarnessMutation(result: HarnessSettingMutationResult): str
     `  previous ${String(result.previous)}`,
     `  current ${String(result.current)}`,
     ...(result.alsoSet ? [`  also set ${result.alsoSet.key} to ${String(result.alsoSet.value)}, ${result.alsoSet.message}`] : []),
+    ...(result.alsoSetFailed ? [`  warning ${result.alsoSetFailed}`] : []),
     ...(result.scope ? [`  owner ${result.scope}`] : []),
     ...(result.appliedBy ? [`  applied by ${result.appliedBy}`] : []),
     ...(result.persistedTo ? [`  stored in ${result.persistedTo}`] : []),

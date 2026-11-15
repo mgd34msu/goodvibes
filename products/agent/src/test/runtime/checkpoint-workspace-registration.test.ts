@@ -107,9 +107,9 @@ describe('registered-workspaces-only automatic checkpoints', () => {
 
     emitTurnCompleted(runtimeBus, 'turn-1');
 
-    // Give any (unexpected) async subscription a real chance to fire before
-    // asserting the negative, a bounded wait, not a race.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // drain() waits for every automatic snapshot this manager accepted, so an
+    // unexpected subscription would have finished (and listed) by now.
+    await services.workspaceCheckpointManager.drain();
     const checkpoints = await services.workspaceCheckpointManager.list();
     expect(checkpoints).toHaveLength(0);
   }, 10000);
@@ -168,8 +168,6 @@ describe('registered-workspaces-only automatic checkpoints', () => {
     await services.workspaceCheckpointManager.init();
 
     emitTurnCompleted(runtimeBus, 'turn-before-registration');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(await services.workspaceCheckpointManager.list()).toHaveLength(0);
 
     const shellPaths = createShellPathService({ workingDirectory: workingDir, homeDirectory: homeDir });
     await registerWorkspaceForCheckpoints(shellPaths, workingDir);
@@ -179,6 +177,10 @@ describe('registered-workspaces-only automatic checkpoints', () => {
     expect(created).toBe(true);
     const checkpoints = await services.workspaceCheckpointManager.list();
     expect(checkpoints[0]?.kind).toBe('turn');
+    // Snapshots serialize in arrival order and the tree is unchanged between the
+    // two turns, so a snapshot taken for the earlier, unregistered turn would be
+    // the only one listed and would carry its id.
+    expect(checkpoints.map((checkpoint) => checkpoint.turnId)).toEqual(['turn-after-registration']);
   }, 10000);
 
   test('explicit checkpoints.create also succeeds mid-launch once the workspace is registered, without a restart', async () => {

@@ -97,21 +97,23 @@ export interface ToolExecutionRecord {
   wallStartedAt?: number | undefined;
   /** Unix timestamp (ms) when execution completed (success, failure, or cancel). */
   completedAt?: number | undefined;
-  /** Final tool result (set on success). */
+  /** Monotonic timestamp (ms) from performance.now() when the execute phase began; the time budget is measured from here. */
+  executeStartedAt?: number | undefined;
+  /** Final tool result (set once the execute phase produced one). */
   result?: ToolResult | undefined;
   /** Whether this execution was cancelled. */
   cancelled: boolean;
   /** Human-readable cancellation reason if cancelled. */
   cancelledReason?: string | undefined;
   /**
-   * Args updated by the prehook phase.
-   * Subsequent phases (permission, execute, map-output) use these instead of
+   * Args updated by the prehook phase, then replaced by their auto-repaired form.
+   * Subsequent phases (permission, execute, posthook) use these instead of
    * the original call.arguments when present.
    */
   _updatedArgs?: Record<string, unknown> | undefined;
   /**
-   * The auto-repair the execute phase applied to the arguments before running
-   * the tool (tools/auto-repair.ts); map-output annotates the result from it.
+   * The auto-repair applied to the arguments before the permission check and the
+   * run (tools/auto-repair.ts); map-output annotates the result from it.
    */
   _repair?: RepairResult | undefined;
 }
@@ -134,7 +136,8 @@ export interface ExecutorConfig {
   /**
    * Whether to enforce runtime budget limits (time, tokens, cost) at phase
    * entry and exit. When disabled, budget fields on ToolRuntimeContext are
-   * ignored. Controlled by the runtime.toolBudget.enforced setting.
+   * ignored, including as an execution timeout. Controlled by the
+   * runtime.toolBudget.enforced setting.
    */
   enableBudgetEnforcement?: boolean | undefined;
   /**

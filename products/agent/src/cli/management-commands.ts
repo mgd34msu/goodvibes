@@ -16,7 +16,7 @@ import { buildCompanionConnectionInfo, encodeConnectionPayload, formatConnection
 import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding } from './endpoints.ts';
 import type { CliCommandRuntime } from './management.ts';
-import { urlHostForBindHost, withRuntimeServices } from './management.ts';
+import { urlHostForBindHost, withReadOnlyRuntimeServices } from './management.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { connectedHostTokenRequiredMessage, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { formatAgentRecordSource } from '../agent/record-labels.ts';
@@ -38,7 +38,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
   return [formatConnectionBlock(info, payload), '', qr].join('\n');
 }
 
-export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRuntime, RuntimeServices>(withReadOnlyRuntimeServices, {
   inline: false,
   manualOnly: true,
   binary: (runtime) => runtime.cli.binary,
@@ -62,7 +62,10 @@ export const { handleSecrets } = createCliSecretsCommand<CliCommandRuntime>({
         ]
       : [],
 });
-export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+// Listing sessions and tasks needs no model catalog, so it never reaches for the network.
+const withWorkspaceServices: typeof withReadOnlyRuntimeServices = (runtime, fn, options) =>
+  withReadOnlyRuntimeServices(runtime, fn, { modelData: 'skip', ...options });
+export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCommandRuntime, RuntimeServices>(withWorkspaceServices, {
   binary: (runtime) => runtime.cli.binary,
   inline: false,
   time: (timestamp) => appendTemporalLabel(new Date(timestamp).toISOString(), timestamp),

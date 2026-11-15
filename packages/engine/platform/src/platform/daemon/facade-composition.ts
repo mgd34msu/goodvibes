@@ -27,6 +27,7 @@ import { buildSharedSessionAgentSpawnRoutingInput } from '../control-plane/sessi
 import type { ModelIdCandidate } from '../providers/model-id-resolution.js';
 import {
   GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
+  REGULAR_KNOWLEDGE_DB_FILE,
   KnowledgeGraphqlService,
   KnowledgeSemanticService,
   KnowledgeService,
@@ -38,7 +39,7 @@ import {
 import { createBuiltinChannelRuntime } from './facade-builtin-channels.js';
 import { DaemonControlPlaneHelper } from './control-plane.js';
 import { DaemonSurfaceDeliveryHelper, type SurfaceDeliveryLedgerEntry } from './surface-delivery.js';
-import { ROUTE_SURFACE_KINDS, type RouteSurfaceKind } from '../../events/routes.js';
+import { type RouteSurfaceKind } from '../../events/routes.js';
 import {
   emitDeliveryFailed,
   emitDeliveryQueued,
@@ -60,7 +61,7 @@ import type { DaemonConfig, PendingSurfaceReply } from './types.js';
 import { PlatformServiceManager } from './service-manager.js';
 import { resolveDaemonServiceDefault } from './daemon-service-default.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
-import { PermissionManager, createPermissionConfigReader } from '../permissions/manager.js';
+import { createBrokeredPermissionManager } from '../runtime/permissions/permission-composition.js';
 // Re-export type definitions from the dedicated types module.
 export type {
   ResolvedDaemonFacadeRuntime,
@@ -89,7 +90,7 @@ function ensureAgentKnowledgeService(runtimeServices: RuntimeServices, ownership
     return existing;
   }
 
-  const store = new KnowledgeStore({
+  const store = KnowledgeStore.forFamily({
     configManager: runtimeServices.configManager,
     dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
     family: 'agent',
@@ -302,13 +303,15 @@ function daemonFacadeRuntimeInputs(config: DaemonConfig) {
 export async function prepareDaemonFacadeRuntime(config: DaemonConfig): Promise<void> {
   const inputs = daemonFacadeRuntimeInputs(config);
   if (!config.runtimeServices) {
-    await prepareConfiguredProjectContext(inputs.configManager, inputs.workingDirectory!, 'knowledge-wiki.sqlite', { activate: true });
+    await prepareConfiguredProjectContext(inputs.configManager, inputs.workingDirectory!, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
   }
 }
 
 export function resolveDaemonFacadeRuntime(
   config: DaemonConfig,
   supplementalOwnership: AsyncDisposalScope = createAsyncDisposalScope('daemon supplemental knowledge'),
+  /** The bearer token this daemon serves with, read live; hosted sessions count it as the Worker operator token, as the status route does. */
+  authToken?: () => string | null,
 ): ResolvedDaemonFacadeRuntime {
   try {
   const { configManager: resolvedConfigManager, workingDirectory: ownedWorkingDir, homeDirectory: ownedHomeDirectory } = daemonFacadeRuntimeInputs(config);
@@ -406,15 +409,21 @@ export function resolveDaemonFacadeRuntime(
     sessionBroker: runtimeServices.sessionBroker,
     // Wire the full ToolRegistry so LLM-emitted tool calls are executed.
     toolRegistry: runtimeServices.agentOrchestrator.getToolRegistry(),
-    permissionManager: new PermissionManager(
-      undefined,
-      createPermissionConfigReader(resolvedConfigManager),
-      runtimeServices.policyRuntimeState,
-      runtimeServices.hookDispatcher,
-      runtimeServices.featureFlags,
-      runtimeServices.userPermissionRuleStore,
-    ),
+    configManager: runtimeServices.configManager,
+    // Asks ride the daemon's approval broker like every other background caller's, so a tool call that needs
+    // the owner raises a card on every surface instead of being denied as if the user had refused it.
+    permissionManager: createBrokeredPermissionManager({
+      workspaceTrust: null,
+      requestApproval: (input) => runtimeServices.approvalBroker.requestApproval(input),
+      configManager: resolvedConfigManager,
+      policyRuntimeState: runtimeServices.policyRuntimeState,
+      hookDispatcher: runtimeServices.hookDispatcher,
+      featureFlags: runtimeServices.featureFlags,
+      userRuleStore: runtimeServices.userPermissionRuleStore,
+    }),
     hookDispatcher: runtimeServices.hookDispatcher,
+    // The per-session limit follows runtime.companionChatLimiter.perSessionLimit on every check, not only the boot environment.
+    rateLimiter: { configManager: runtimeServices.configManager },
     runtimeBus,
     artifactStore: runtimeServices.artifactStore,
   });
@@ -424,7 +433,7 @@ export function resolveDaemonFacadeRuntime(
   });
 
   // Hosted sessions: composed here because the engine publishes its lifecycle channel through the gateway built here.
-  const hostedSessions = composeHostedSessionsForFacade(config.hostedSessions, runtimeServices, resolvedConfigManager, runtimeBus, controlPlaneGateway);
+  const hostedSessions = composeHostedSessionsForFacade(config.hostedSessions, runtimeServices, resolvedConfigManager, runtimeBus, controlPlaneGateway, authToken);
 
   // Host and port precedence: constructor-injected config.host/config.port win,
   // then fall back to the hostMode-aware binding resolution from configManager.
@@ -505,11 +514,19 @@ export function resolveDaemonFacadeRuntime(
  * an idle daemon produced byte-identical evidence, which is how a real delivery
  * failure stayed invisible.
  */
-function recordSurfaceDeliveryAttempt(runtime: ResolvedDaemonFacadeRuntime, entry: SurfaceDeliveryLedgerEntry): void {
-  const surfaceKind = (ROUTE_SURFACE_KINDS as readonly string[]).includes(entry.surfaceKind)
-    ? entry.surfaceKind as RouteSurfaceKind
-    : 'webhook';
+export function recordSurfaceDeliveryAttempt(runtime: ResolvedDaemonFacadeRuntime, entry: SurfaceDeliveryLedgerEntry, startedAtById: Map<string, number>): void {
+  // A kind outside the route list (a delivery surface without a route kind) keeps its own name:
+  // filing it under another surface would credit its failures to the wrong channel.
+  const surfaceKind = entry.surfaceKind as RouteSurfaceKind;
   const now = Date.now();
+  const terminal = entry.phase === 'succeeded' || entry.phase === 'failed';
+  if (entry.phase === 'started') {
+    startedAtById.set(entry.deliveryId, now);
+    // An attempt that never reports an end must not grow this without bound.
+    if (startedAtById.size > 1_000) startedAtById.delete(startedAtById.keys().next().value!);
+  }
+  const startedAt = startedAtById.get(entry.deliveryId) ?? now;
+  if (terminal) startedAtById.delete(entry.deliveryId);
   runtime.runtimeDispatch?.syncDeliveryAttempt({
     id: entry.deliveryId,
     runId: entry.sessionId ?? entry.agentId,
@@ -526,7 +543,7 @@ function recordSurfaceDeliveryAttempt(runtime: ResolvedDaemonFacadeRuntime, entr
       : entry.phase === 'started'
         ? 'sending'
         : entry.phase === 'succeeded' ? 'sent' : 'failed',
-    ...(entry.phase === 'queued' ? {} : { startedAt: now }),
+    ...(entry.phase === 'queued' ? {} : { startedAt }),
     ...(entry.phase === 'succeeded' || entry.phase === 'failed' ? { endedAt: now } : {}),
     ...(entry.error ? { error: entry.error } : {}),
   }, `deliveries.${entry.phase}`);
@@ -549,11 +566,11 @@ function recordSurfaceDeliveryAttempt(runtime: ResolvedDaemonFacadeRuntime, entr
     return;
   }
   if (entry.phase === 'started') {
-    emitDeliveryStarted(bus, ctx, { ...common, startedAt: now });
+    emitDeliveryStarted(bus, ctx, { ...common, startedAt });
     return;
   }
   if (entry.phase === 'succeeded') {
-    emitDeliverySucceeded(bus, ctx, { ...common, completedAt: now, durationMs: 0, statusCode: 200 });
+    emitDeliverySucceeded(bus, ctx, { ...common, completedAt: now, durationMs: Math.max(0, now - startedAt) });
     return;
   }
   emitDeliveryFailed(bus, ctx, {
@@ -580,6 +597,7 @@ export function createDaemonFacadeCollaborators(
     routeBindings: runtime.routeBindings,
     runtimeBus: runtime.runtimeBus,
   });
+  const surfaceDeliveryStartedAt = new Map<string, number>();
   const surfaceDeliveryHelper = new DaemonSurfaceDeliveryHelper({
     pendingSurfaceReplies: options.pendingSurfaceReplies,
     channelReplyPipeline,
@@ -592,7 +610,7 @@ export function createDaemonFacadeCollaborators(
     channelPlugins: runtime.channelPlugins,
     authToken: options.authToken,
     surfaceDeliveryEnabled: options.surfaceDeliveryEnabled,
-    recordDeliveryAttempt: (entry) => recordSurfaceDeliveryAttempt(runtime, entry),
+    recordDeliveryAttempt: (entry) => recordSurfaceDeliveryAttempt(runtime, entry, surfaceDeliveryStartedAt),
   });
   // Every reply the pipeline could not put on a channel becomes a visible
   // failed delivery rather than an absence.
@@ -618,7 +636,7 @@ export function createDaemonFacadeCollaborators(
   // One alarm, every inbound path, see createChannelIngressAlarm.
   const ingressAlarm = createChannelIngressAlarm(runtime.routeBindings, surfaceDeliveryHelper);
   runtime.channelPlugins.setIngressAlarm(ingressAlarm);
-  const workProposals = createFacadeWorkProposalStore(runtime.configManager);
+  const workProposals = createFacadeWorkProposalStore(runtime.configManager, runtime.sessionBroker);
 
   const terminalPaymentSpan = options.paymentReplies?.mayRetireReceiveSpan.bind(options.paymentReplies);
   const telegramSourceAccounts = createTelegramSourceAccountOwner(purchaseId => terminalPaymentSpan?.(purchaseId) === true);
@@ -661,6 +679,7 @@ export function createDaemonFacadeCollaborators(
     port: runtime.port,
     distributedRuntime: runtime.distributedRuntime,
     trustProxyEnabled: options.trustProxyEnabled,
+    runtimeBus: runtime.runtimeBus,
     allowedBrowserOrigins: () => String(runtime.configManager.get('controlPlane.cors.allowedOrigins') ?? '').split(',').map(origin => origin.trim()).filter(Boolean),
     dispatchApiRoutes: options.dispatchApiRoutes,
     parseJsonBody: options.parseJsonBody,
@@ -747,6 +766,7 @@ export function createDaemonFacadeCollaborators(
     requireAdmin: options.requireAdmin,
     requireRemotePeer: options.requireRemotePeer,
     describeAuthenticatedPrincipal: options.describeAuthenticatedPrincipal,
+    validateGatewayInvocation: (descriptor, context) => controlPlaneHelper.validateGatewayInvocation(descriptor, context),
     invokeGatewayMethodCall: options.invokeGatewayMethodCall,
     queueSurfaceReplyFromBinding: (binding, input) => surfaceDeliveryHelper.queueSurfaceReplyFromBinding(binding, input),
     completeSurfaceReplyFromSurface: (input) => surfaceDeliveryHelper.completeSurfaceReplyFromSurface(input),

@@ -154,6 +154,15 @@ export function isCircuitOpen(record: Pick<TriggerRecord, 'state'>): boolean {
 }
 
 /**
+ * True when a condition check that was already running must not write its
+ * result: the trigger was cancelled or finished while the probe was in flight,
+ * or its breaker is open (only an operator reset closes it).
+ */
+export function holdsAgainstCheckResult(record: Pick<TriggerRecord, 'state'>): boolean {
+  return record.state === 'cancelled' || record.state === 'fired' || record.state === 'circuit-open';
+}
+
+/**
  * Explicit operator reset. The breaker never closes on its own, that is the
  * point of parking, and an auto-closing breaker is just a slower retry loop.
  */

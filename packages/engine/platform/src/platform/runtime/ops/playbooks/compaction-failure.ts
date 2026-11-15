@@ -29,8 +29,9 @@ export const compactionFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Compaction strategy availability requires live CompactionManager context.',
-          severity: 'error',
+          severity: 'info',
           context: { hint: 'Inspect CompactionManager.currentStrategy, confirm it is not null' },
         })),
     },
@@ -41,8 +42,9 @@ export const compactionFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Token budget check requires live ContextWindowManager context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Compare ContextWindowManager.currentTokens with config.compactionTriggerTokens' },
         })),
     },
@@ -53,8 +55,9 @@ export const compactionFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'State machine inspection requires live CompactionStateMachine context.',
-          severity: 'error',
+          severity: 'info',
           context: { hint: 'Call CompactionStateMachine.getState(), expect "error" or "failed"' },
         })),
     },
@@ -74,12 +77,11 @@ export const compactionFailurePlaybook: Playbook = {
       step: 2,
       title: 'Reset the compaction state machine',
       action:
-        'Call runtime.compaction.reset() to transition the state machine back to idle. ' +
+        'Reset the compaction state machine back to idle. ' +
         'This unblocks new turns without re-attempting the failed compaction.',
       kind: 'command',
-      command: 'runtime.compaction.reset()',
       expectedOutcome: 'CompactionStateMachine returns to idle; new turns unblocked.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 3,
@@ -88,7 +90,6 @@ export const compactionFailurePlaybook: Playbook = {
         'If the default strategy continues to fail, switch to a simpler fallback ' +
         '(e.g. truncation or summarization) to restore turn availability.',
       kind: 'config',
-      command: 'runtime.compaction.setStrategy("truncate")',
       expectedOutcome: 'Compaction succeeds with fallback strategy; turns resume.',
       automatable: false,
     },
@@ -98,7 +99,6 @@ export const compactionFailurePlaybook: Playbook = {
       action:
         'Trigger a manual compaction run with verbose logging to isolate the failure point.',
       kind: 'command',
-      command: 'runtime.compaction.runNow({ verbose: true })',
       expectedOutcome: 'Compaction completes or fails with a detailed error message.',
       automatable: false,
     },

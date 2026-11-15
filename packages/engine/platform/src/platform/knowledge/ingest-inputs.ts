@@ -20,6 +20,7 @@ import {
   emitKnowledgeIngestStarted,
 } from '../runtime/emitters/index.js';
 import { readNormalizedError, summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { createSemanticWriteGuard } from './semantic/primary-source-plan.js';
 import { finalizeKnowledgeIngestedSource } from './ingest-compile.js';
 import type { KnowledgeIngestContext, KnowledgeIngestOwnership } from './ingest-context.js';
@@ -38,8 +39,23 @@ import type {
   KnowledgeExtractionRecord,
   KnowledgeIssueRecord,
   KnowledgeSourceRecord,
+  KnowledgeSourceUpsertInput,
   KnowledgeSourceType,
 } from './types.js';
+
+// Remember an allow-private-hosts fetch on the source itself so a later refresh repeats it,
+// whichever entry point (API, HTTP route, batch import) made the request.
+function withPrivateHostIntent(
+  metadata: Record<string, unknown> | undefined,
+  allowPrivateHosts: boolean | undefined,
+): Record<string, unknown> | undefined {
+  if (allowPrivateHosts !== true) return metadata;
+  const existing = metadata?.knowledgeIntent;
+  return { ...(metadata ?? {}), knowledgeIntent: {
+    ...(typeof existing === 'object' && existing !== null ? existing : {}),
+    remoteFetchMode: 'allow-private-hosts',
+  } };
+}
 
 export async function ingestKnowledgeUrl(
   context: KnowledgeIngestContext,
@@ -92,6 +108,9 @@ export async function ingestKnowledgeUrl(
       return prepareKnowledgeExtraction(context, sourceId, artifact.id, uris, { signal, assertCurrent });
     });
     assertCurrent();
+    // Remember an allow-private-hosts fetch on the source itself so a later refresh repeats it,
+    // whichever entry point (API, HTTP route, batch import) made the request.
+    const metadata = withPrivateHostIntent(input.metadata, input.allowPrivateHosts);
     const pending = stageKnowledgePendingSource(context, {
       id: sourceId,
       connectorId,
@@ -103,13 +122,13 @@ export async function ingestKnowledgeUrl(
       folderPath: input.folderPath,
       status: 'pending',
       sessionId: input.sessionId,
-      metadata: input.metadata,
+      metadata,
     });
     context.emitIfReady((bus, ctx) => emitKnowledgeIngestStarted(bus, ctx, {
       sourceId: pending.id,
       connectorId: pending.connectorId,
       sourceType: pending.sourceType,
-      uri: input.url,
+      uri: eventSafeUri(input.url),
     }), pending.sessionId);
     try {
       if (!preparation.ready) throw preparation.error;
@@ -126,10 +145,10 @@ export async function ingestKnowledgeUrl(
         sessionId: input.sessionId ?? pending.sessionId,
         metadata: {
           ...pending.metadata,
-          ...(input.metadata ?? {}),
+          ...(metadata ?? {}),
         },
       }, uris, { ...ownership, signal, assertCurrent: assertOwned });
-      const issues = await context.lint();
+      const issues = await lintCommittedIngest(context, result.source.id);
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestCompleted(bus, ctx, {
         sourceId: result.source.id,
         status: result.source.status,
@@ -158,10 +177,9 @@ export async function ingestKnowledgeUrl(
         canonicalUri: pending.canonicalUri,
         tags: pending.tags,
         folderPath: pending.folderPath,
-        status: 'failed',
         crawlError: diagnostic.summary,
         sessionId: pending.sessionId,
-        metadata: pending.metadata,
+        ...failedIngestOutcome(context, pending),
       });
       await context.syncReviewedMemory();
       const issues = await context.lint();
@@ -240,9 +258,9 @@ export async function ingestKnowledgeArtifact(
         sourceUri = artifact.sourceUri ?? input.uri;
       }
     }
-    if (!artifactId) throw new Error('Artifact ingest requires artifactId, path, or uri.');
+    if (!artifactId) throw Object.assign(new Error('Artifact ingest requires artifactId, path, or uri.'), { status: 400 });
     const record = context.artifactStore.getRecord(artifactId);
-    if (!record) throw new Error(`Unknown artifact: ${artifactId}`);
+    if (!record) throw Object.assign(new Error(`Unknown artifact: ${artifactId}`), { status: 400 });
     sourceUri ??= record.sourceUri;
     const recordBefore = JSON.stringify(record);
     const canonicalUri = await uris.canonicalize(sourceUri ?? '') ?? undefined;
@@ -267,7 +285,7 @@ export async function ingestKnowledgeArtifact(
       status: 'pending',
       sessionId: input.sessionId,
       metadata: {
-        ...(input.metadata ?? {}),
+        ...(withPrivateHostIntent(input.metadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
         artifactMimeType: record.mimeType,
       },
     });
@@ -275,7 +293,7 @@ export async function ingestKnowledgeArtifact(
       sourceId: pending.id,
       connectorId: pending.connectorId,
       sourceType: pending.sourceType,
-      uri: sourceUri,
+      uri: eventSafeUri(sourceUri),
     }), pending.sessionId);
     try {
       if (!preparation.ready) throw preparation.error;
@@ -292,10 +310,10 @@ export async function ingestKnowledgeArtifact(
         sessionId: input.sessionId ?? pending.sessionId,
         metadata: {
           ...pending.metadata,
-          ...(input.metadata ?? {}),
+          ...(withPrivateHostIntent(input.metadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
         },
       }, uris, { ...ownership, signal, assertCurrent: assertOwned });
-      const issues = await context.lint();
+      const issues = await lintCommittedIngest(context, result.source.id);
       context.emitIfReady((bus, ctx) => emitKnowledgeIngestCompleted(bus, ctx, {
         sourceId: result.source.id,
         status: result.source.status,
@@ -326,10 +344,9 @@ export async function ingestKnowledgeArtifact(
         canonicalUri: pending.canonicalUri,
         tags: pending.tags,
         folderPath: pending.folderPath,
-        status: 'failed',
         crawlError: diagnostic.summary,
         sessionId: pending.sessionId,
-        metadata: pending.metadata,
+        ...failedIngestOutcome(context, pending),
       });
       await context.syncReviewedMemory();
       const issues = await context.lint();
@@ -344,18 +361,18 @@ export async function ingestKnowledgeArtifact(
 
 export async function importKnowledgeBookmarksFromFile(
   context: KnowledgeIngestContext,
-  input: { readonly path: string; readonly sessionId?: string | undefined; readonly allowPrivateHosts?: boolean | undefined },
+  input: { readonly path: string; readonly sessionId?: string | undefined; readonly allowPrivateHosts?: boolean | undefined; readonly metadata?: Record<string, unknown> | undefined },
 ): Promise<KnowledgeBatchIngestResult> {
   const content = await readFile(input.path, 'utf-8');
-  return ingestKnowledgeWithConnector(context, 'bookmark', content, input.sessionId, input.allowPrivateHosts);
+  return ingestKnowledgeWithConnector(context, 'bookmark', content, input.sessionId, input.allowPrivateHosts, input.metadata);
 }
 
 export async function importKnowledgeUrlsFromFile(
   context: KnowledgeIngestContext,
-  input: { readonly path: string; readonly sessionId?: string | undefined; readonly allowPrivateHosts?: boolean | undefined },
+  input: { readonly path: string; readonly sessionId?: string | undefined; readonly allowPrivateHosts?: boolean | undefined; readonly metadata?: Record<string, unknown> | undefined },
 ): Promise<KnowledgeBatchIngestResult> {
   const content = await readFile(input.path, 'utf-8');
-  return ingestKnowledgeWithConnector(context, 'url-list', content, input.sessionId, input.allowPrivateHosts);
+  return ingestKnowledgeWithConnector(context, 'url-list', content, input.sessionId, input.allowPrivateHosts, input.metadata);
 }
 
 export async function ingestKnowledgeBookmarkSeeds(
@@ -365,14 +382,16 @@ export async function ingestKnowledgeBookmarkSeeds(
   sourceType: KnowledgeSourceType = 'bookmark',
   connectorId = 'bookmark',
   allowPrivateHosts?: boolean,
+  metadata?: Record<string, unknown>,
 ): Promise<KnowledgeBatchIngestResult> {
   const sources: KnowledgeSourceRecord[] = [];
   const errors: string[] = [];
   let imported = 0;
   let failed = 0;
+  const batch = deferPostIngestWork(context);
   for (const seed of seeds) {
     try {
-      const result = await ingestKnowledgeUrl(context, {
+      const result = await ingestKnowledgeUrl(batch.context, {
         url: seed.url,
         title: seed.title,
         tags: seed.tags,
@@ -381,7 +400,8 @@ export async function ingestKnowledgeBookmarkSeeds(
         sourceType,
         connectorId,
         allowPrivateHosts,
-        metadata: seed.metadata,
+        // Request-level provenance rides on every source of the batch; a seed's own keys stay unless the request names them.
+        metadata: metadata || seed.metadata ? { ...seed.metadata, ...metadata } : undefined,
       });
       sources.push(result.source);
       if (result.source.status === 'failed') failed += 1;
@@ -391,6 +411,7 @@ export async function ingestKnowledgeBookmarkSeeds(
       errors.push(`${seed.url}: ${summarizeError(error)}`);
     }
   }
+  errors.push(...await batch.flush());
   return { imported, failed, sources, errors };
 }
 
@@ -400,6 +421,7 @@ export async function ingestKnowledgeWithConnector(
   input: unknown,
   sessionId?: string,
   allowPrivateHosts?: boolean,
+  metadata?: Record<string, unknown>,
 ): Promise<KnowledgeBatchIngestResult> {
   const resolved = await context.connectorRegistry.resolve(connectorId, input);
   return ingestKnowledgeBookmarkSeeds(
@@ -409,6 +431,7 @@ export async function ingestKnowledgeWithConnector(
     resolved.sourceType ?? 'other',
     resolved.connectorId ?? connectorId,
     allowPrivateHosts,
+    metadata,
   );
 }
 
@@ -419,9 +442,10 @@ export async function ingestKnowledgeConnectorInput(context: KnowledgeIngestCont
   readonly path?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly allowPrivateHosts?: boolean | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
 }): Promise<KnowledgeBatchIngestResult> {
   const connectorId = input.connectorId.trim();
-  if (!connectorId) throw new Error('Missing connectorId');
+  if (!connectorId) throw Object.assign(new Error('Missing connectorId'), { status: 400 });
   let resolvedInput: unknown;
   if (Object.hasOwn(input, 'input')) {
     resolvedInput = input.input;
@@ -430,30 +454,49 @@ export async function ingestKnowledgeConnectorInput(context: KnowledgeIngestCont
   } else if (typeof input.path === 'string' && input.path.trim()) {
     resolvedInput = await readFile(input.path, 'utf-8');
   } else {
-    throw new Error('Connector ingest requires input, content, or path.');
+    throw Object.assign(new Error('Connector ingest requires input, content, or path.'), { status: 400 });
   }
-  return ingestKnowledgeWithConnector(context, connectorId, resolvedInput, input.sessionId, input.allowPrivateHosts);
+  return ingestKnowledgeWithConnector(context, connectorId, resolvedInput, input.sessionId, input.allowPrivateHosts, input.metadata);
 }
 
 export async function refreshKnowledgeSources(context: KnowledgeIngestContext, sources: readonly KnowledgeSourceRecord[]): Promise<number> {
   let refreshed = 0;
+  const batch = deferPostIngestWork(context);
   for (const source of sources) {
-    const result = await ingestKnowledgeUrl(context, {
-      url: source.sourceUri ?? source.canonicalUri ?? '',
-      title: source.title,
-      tags: source.tags,
-      folderPath: source.folderPath,
-      sessionId: source.sessionId,
-      sourceType: source.sourceType,
-      connectorId: source.connectorId,
-      metadata: {
-        ...knowledgeRawRepresentation(source.metadata),
-        refreshedAt: knowledgeClockIso(Date.now()),
-      },
-    });
-    if (result.source.status === 'indexed') refreshed += 1;
+    try {
+      const result = await ingestKnowledgeUrl(batch.context, {
+        url: source.sourceUri ?? source.canonicalUri ?? '',
+        title: source.title,
+        tags: source.tags,
+        folderPath: source.folderPath,
+        sessionId: source.sessionId,
+        sourceType: source.sourceType,
+        connectorId: source.connectorId,
+        allowPrivateHosts: sourceAllowsPrivateHosts(source),
+        metadata: {
+          ...knowledgeRawRepresentation(source.metadata),
+          refreshedAt: knowledgeClockIso(Date.now()),
+        },
+      });
+      // A failed refresh keeps an indexed source indexed but records crawlError.
+      if (result.source.status === 'indexed' && !result.source.crawlError) refreshed += 1;
+    } catch (error) {
+      // One held or failing source must not stop the rest of the refresh or discard the count.
+      logger.warn('Knowledge source refresh failed', { sourceId: source.id, error: summarizeError(error) });
+    }
   }
+  for (const error of await batch.flush()) logger.warn('Knowledge refresh follow-up failed', { error });
   return refreshed;
+}
+
+/**
+ * The fetch mode chosen at ingest is a stored intent. The daemon-level remote
+ * fetch gate still decides whether a private host is actually reachable.
+ */
+function sourceAllowsPrivateHosts(source: KnowledgeSourceRecord): boolean | undefined {
+  const intent = knowledgeRawRepresentation(source.metadata).knowledgeIntent;
+  if (typeof intent !== 'object' || intent === null) return undefined;
+  return (intent as Record<string, unknown>).remoteFetchMode === 'allow-private-hosts' ? true : undefined;
 }
 
 export function pickKnowledgeRefreshCandidates(
@@ -472,12 +515,77 @@ export function pickKnowledgeRefreshCandidates(
     sources = sources.filter((source) => source.connectorId === 'bookmark' || source.connectorId === 'url-list');
   } else {
     sources = sources.filter((source) => (
-      source.status === 'stale'
-      || source.status === 'failed'
-      || isSourcePastRefreshWindow(source)
+      !(source.status === 'stale' && !explicitIds?.length && isForgottenSource(source))
+      && (source.status === 'stale' || source.status === 'failed' || isSourcePastRefreshWindow(source))
     ));
   }
   return sources.filter((source) => isHttpUri(source.sourceUri)).slice(0, max);
+}
+
+/** Forgotten by an operator in review; only an explicit refresh may bring it back. */
+function isForgottenSource(source: KnowledgeSourceRecord): boolean {
+  const review = source.metadata.review;
+  return source.metadata.staleReason === 'forgotten'
+    || (typeof review === 'object' && review !== null && (review as Record<string, unknown>).action === 'forget');
+}
+
+/**
+ * A refresh that cannot fetch must not demote a source whose earlier content
+ * is still indexed: answers only accept indexed sources, so writing `failed`
+ * would drop facts that remain valid. Such a source stays indexed with the
+ * crawl error and failure time recorded (lint reports the crawl error); only a
+ * source with no indexed content is recorded failed.
+ */
+function failedIngestOutcome(context: KnowledgeIngestContext, pending: KnowledgeSourceRecord): Pick<KnowledgeSourceUpsertInput, 'status' | 'metadata'> {
+  const existing = context.store.getSource(pending.id);
+  if (existing?.status !== 'indexed' || !context.store.getExtractionBySourceId(pending.id)) return { status: 'failed', metadata: pending.metadata };
+  return { status: 'indexed', metadata: { ...knowledgeRawRepresentation(pending.metadata), lastCrawlFailedAt: knowledgeClockIso(Date.now()) } };
+}
+
+/**
+ * The source is already published when this runs, so a lint failure must not
+ * reach the failure path that stamps a crawl error on committed content.
+ */
+async function lintCommittedIngest(context: KnowledgeIngestContext, sourceId: string): Promise<readonly KnowledgeIssueRecord[]> {
+  try { return await context.lint(); }
+  catch (error) {
+    logger.warn('Knowledge source committed; the post-ingest lint failed.', { sourceId, error: summarizeError(error) });
+    return [];
+  }
+}
+
+/**
+ * A batch ingests many sources: whole-store lint and memory sync run once after
+ * the loop instead of once per source. `flush` returns one error line per step
+ * that failed.
+ */
+function deferPostIngestWork(context: KnowledgeIngestContext): { readonly context: KnowledgeIngestContext; readonly flush: () => Promise<string[]> } {
+  let pending = false;
+  const deferred: KnowledgeIngestContext = {
+    ...context,
+    syncReviewedMemory: async () => { pending = true; },
+    lint: async () => { pending = true; return []; },
+  };
+  return {
+    context: deferred,
+    flush: async () => {
+      const errors: string[] = [];
+      if (!pending) return errors;
+      try { await context.syncReviewedMemory(); } catch (error) { errors.push(`memory sync: ${summarizeError(error)}`); }
+      try { await context.lint(); } catch (error) { errors.push(`lint: ${summarizeError(error)}`); }
+      return errors;
+    },
+  };
+}
+
+/** Event streams reach every subscriber: drop credentials, query and fragment (signed links) from a remote URL. */
+function eventSafeUri(uri: string | undefined): string | undefined {
+  if (!uri || !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return uri;
+  try {
+    const parsed = new URL(uri);
+    parsed.username = ''; parsed.password = ''; parsed.search = ''; parsed.hash = '';
+    return parsed.href;
+  } catch { return undefined; }
 }
 
 /** Reserve identity without publishing pending or overwriting an existing source. */

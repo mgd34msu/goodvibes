@@ -54,15 +54,32 @@ export class DistillerUnavailableError extends Error {
   }
 }
 
-/** Max characters of conversation transcript fed into the distiller prompt. */
+/** Longest rendering of one tool call's arguments in the transcript. */
+const TOOL_ARGUMENT_CHARS = 300;
+/** Tokens held back from the extraction model's window for the instructions and its reply. */
+const DISTILLER_RESERVED_TOKENS = 8_000;
+/** Matches the 4-characters-per-token estimate used across compaction. */
+const CHARS_PER_TOKEN = 4;
+
+function describeToolCalls(msg: ProviderMessage): string {
+  if (msg.role !== 'assistant' || !msg.toolCalls?.length) return '';
+  return msg.toolCalls.map((call) => {
+    let args: string;
+    try { args = JSON.stringify(call.arguments) ?? ''; } catch { args = '[unreadable arguments]'; }
+    if (args.length > TOOL_ARGUMENT_CHARS) args = `${args.slice(0, TOOL_ARGUMENT_CHARS)}...`;
+    return `tool call ${call.name}(${args})`;
+  }).join('; ');
+}
 
 /**
  * Build the transcript text handed to the distiller. Prior re-injected
  * instruction blocks are stripped so the model never distills the standing
  * instructions back into the brief on top of the fresh copy re-injected at the
- * boundary (mirrors `runCompaction`).
+ * boundary (mirrors `runCompaction`). Tool calls are rendered by name and
+ * arguments so tool-only turns still reach the brief. When `maxChars` is
+ * given, the oldest messages are dropped first and the omission is named.
  */
-function buildTranscript(messages: readonly ProviderMessage[]): string {
+function buildTranscript(messages: readonly ProviderMessage[], maxChars?: number): string {
   const lines: string[] = [];
   for (const msg of messages) {
     let text = extractText(msg.content);
@@ -70,11 +87,25 @@ function buildTranscript(messages: readonly ProviderMessage[]): string {
       text = stripReinjectedInstructions(text);
     }
     text = text.trim();
-    if (!text) continue;
-    lines.push(`[${msg.role}]: ${text}`);
+    const calls = describeToolCalls(msg);
+    const body = [text, calls].filter(Boolean).join('\n');
+    if (!body) continue;
+    lines.push(`[${msg.role}]: ${body}`);
   }
-  const joined = lines.join('\n\n');
-  return joined;
+  if (maxChars === undefined) return lines.join('\n\n');
+
+  let used = 0;
+  let keepFrom = lines.length;
+  while (keepFrom > 0) {
+    const cost = lines[keepFrom - 1]!.length + 2;
+    if (used + cost > maxChars && keepFrom < lines.length) break;
+    used += cost;
+    keepFrom--;
+  }
+  const kept = lines.slice(keepFrom);
+  if (kept.length === 1 && kept[0]!.length > maxChars) kept[0] = kept[0]!.slice(kept[0]!.length - maxChars);
+  if (keepFrom === 0) return kept.join('\n\n');
+  return [`[earlier conversation omitted: ${keepFrom} message${keepFrom === 1 ? '' : 's'} did not fit the extraction model's window]`, ...kept].join('\n\n');
 }
 
 /** The instruction prompt that shapes the continuation brief. */
@@ -112,7 +143,7 @@ function resolveProvider(
   registry: ProviderRegistry,
   modelId: string,
   providerName: string | undefined,
-): { provider: LLMProvider; providerModelId: string } | null {
+): { provider: LLMProvider; providerModelId: string; contextWindow: number | null } | null {
   try {
     const provider = registry.getForModel(modelId, providerName);
     const modelDef = registry.listModels().find((model) => (
@@ -121,7 +152,10 @@ function resolveProvider(
         : model.registryKey === modelId
     ));
     if (!modelDef) return null;
-    return { provider, providerModelId: modelDef.id };
+    // An unreadable window only means the transcript is not capped.
+    let contextWindow: number | null = null;
+    try { contextWindow = registry.getKnownContextWindowForModel(modelDef); } catch { contextWindow = null; }
+    return { provider, providerModelId: modelDef.id, contextWindow };
   } catch (err) {
     logger.warn('Distiller: failed to resolve provider', { modelId, err: summarizeError(err) });
     return null;
@@ -146,9 +180,8 @@ export async function distillConversation(
   const work = new OwnedJudgmentWork(ctx);
   work.assertCurrent();
   const tokensBeforeEstimate = estimateConversationTokens(ctx.messages);
-  const transcript = buildTranscript(ctx.messages);
-
-  if (!transcript.trim()) {
+  const fullTranscript = buildTranscript(ctx.messages);
+  if (!fullTranscript.trim()) {
     throw new DistillerUnavailableError('No distillable conversation content.');
   }
 
@@ -160,6 +193,14 @@ export async function distillConversation(
     );
   }
 
+  // The extraction model may have a smaller window than the conversation being
+  // distilled; feed it what fits (newest first) rather than a call that fails.
+  const transcript = resolved.contextWindow === null
+    ? fullTranscript
+    : buildTranscript(ctx.messages, Math.max(
+      CHARS_PER_TOKEN * 1_000,
+      (resolved.contextWindow - Math.min(DISTILLER_RESERVED_TOKENS, Math.floor(resolved.contextWindow / 2))) * CHARS_PER_TOKEN,
+    ));
   const prompt = buildDistillerPrompt(transcript, ctx.activePlan?.title ?? null);
 
   let brief: string;
@@ -211,6 +252,7 @@ export async function distillConversation(
     tokensAfterEstimate,
     modelId: ctx.extractionModelId,
     trigger: ctx.trigger,
+    ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
     sectionsIncluded,
     validationPassed: true,
     instructionsReinjected,

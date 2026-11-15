@@ -22,6 +22,7 @@ import { assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtime-metadata.js';
 import { toProviderError } from '../utils/error-display.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
@@ -87,7 +88,13 @@ export interface AnthropicMessagesProviderOptions {
    * instance) still satisfies the type unchanged.
    */
   readonly createClient: () => AnthropicStreamCapableClient | Promise<AnthropicStreamCapableClient>;
-  readonly auth: AnthropicMessagesProviderAuthConfig;
+  /**
+   * How the provider authenticates. A function is read on every
+   * `describeRuntime` call, for providers whose credentials come from the live
+   * environment: a value frozen at construction would keep reporting the
+   * credentials that existed at boot after they are set or removed.
+   */
+  readonly auth: AnthropicMessagesProviderAuthConfig | (() => AnthropicMessagesProviderAuthConfig);
   readonly streamProtocol: string;
   readonly notes?: readonly string[] | undefined;
 }
@@ -104,8 +111,8 @@ export class AnthropicMessagesProvider implements LLMProvider {
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
+    const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     return withRetry(async () => {
-      const client = await this.options.createClient();
       const resolvedModel = normalizeAnthropicModel(params.model ?? this.options.defaultModel);
       const body: Record<string, unknown> = {
         model: resolvedModel,
@@ -135,6 +142,13 @@ export class AnthropicMessagesProvider implements LLMProvider {
       let stopReason: ChatStopReason = 'unknown';
 
       if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
+      // Built only once nothing before the request can still refuse it: a client
+      // starts its credential lookup on construction, so one built ahead of a
+      // denied attempt would leave that lookup running with nobody awaiting it.
+      const client = await this.options.createClient();
+      // Client setup can be asynchronous (a credential lookup), so the guard is
+      // asked again immediately before the request goes out.
+      if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
       try {
         const streamFactory = client.messages.stream as (
           body: Record<string, unknown>,
@@ -149,20 +163,20 @@ export class AnthropicMessagesProvider implements LLMProvider {
               name: event.content_block.name ?? '',
               args: '',
             });
-            params.onDelta?.({
+            onDelta?.({
               toolCalls: [{ index: idx, id: event.content_block.id, name: event.content_block.name }],
             });
           } else if (event.type === 'content_block_delta') {
             const idx = event.index ?? 0;
             if (event.delta.type === 'text_delta' && event.delta.text) {
               responseText += event.delta.text;
-              params.onDelta?.({ content: event.delta.text });
+              onDelta?.({ content: event.delta.text });
             } else if (event.delta.type === 'thinking_delta' && event.delta.thinking) {
-              params.onDelta?.({ reasoning: event.delta.thinking });
+              onDelta?.({ reasoning: event.delta.thinking });
             } else if (event.delta.type === 'input_json_delta' && event.delta.partial_json) {
               const block = toolBlocks.get(idx);
               if (block) block.args += event.delta.partial_json;
-              params.onDelta?.({
+              onDelta?.({
                 toolCalls: [{ index: idx, arguments: event.delta.partial_json }],
               });
             }
@@ -207,29 +221,30 @@ export class AnthropicMessagesProvider implements LLMProvider {
           phase: 'stream',
         });
       }
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry);
+    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry);
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
+    const config = typeof this.options.auth === 'function' ? this.options.auth() : this.options.auth;
     const authRoutes = await buildStandardProviderAuthRoutes({
       providerId: this.options.name,
-      apiKeyEnvVars: this.options.auth.envVars,
-      secretKeys: this.options.auth.secretKeys,
-      serviceNames: this.options.auth.serviceNames,
-      allowAnonymous: this.options.auth.allowAnonymous,
-      anonymousConfigured: this.options.auth.anonymousConfigured,
-      anonymousDetail: this.options.auth.anonymousDetail,
+      apiKeyEnvVars: config.envVars,
+      secretKeys: config.secretKeys,
+      serviceNames: config.serviceNames,
+      allowAnonymous: config.allowAnonymous,
+      anonymousConfigured: config.anonymousConfigured,
+      anonymousDetail: config.anonymousDetail,
     }, deps);
     const auth = summarizeProviderAuth({
-      configured: this.options.auth.configured,
-      detail: this.options.auth.detail,
+      configured: config.configured,
+      detail: config.detail,
     }, authRoutes);
     return {
       auth: {
-        mode: this.options.auth.mode,
+        mode: config.mode,
         configured: auth.configured,
         detail: auth.detail,
-        ...(this.options.auth.envVars ? { envVars: this.options.auth.envVars } : {}),
+        ...(config.envVars ? { envVars: config.envVars } : {}),
         routes: authRoutes,
       },
       models: {
@@ -240,7 +255,8 @@ export class AnthropicMessagesProvider implements LLMProvider {
         streaming: true,
         toolCalling: true,
         parallelTools: true,
-        promptCaching: true,
+        // No cache_control blocks are sent on this path, so it does not claim caching.
+        promptCaching: false,
         ...(this.options.notes ? { notes: this.options.notes } : {}),
       },
       policy: {

@@ -13,8 +13,13 @@ import {
   bytesToBase64Url,
   encodeAssertionHeader,
   extractCosePublicKey,
+  STEP_UP_ASSERTION_HEADER,
   type StepUpAssertionEnvelope,
 } from './stepup';
+import {
+  STEP_UP_ASSERTION_HEADER as PLATFORM_STEP_UP_ASSERTION_HEADER,
+  encodeAssertionHeader as platformEncodeAssertionHeader,
+} from '@goodvibes-jev/engine/platform/daemon';
 
 describe('base64url codec', () => {
   test('round-trips arbitrary bytes', () => {
@@ -32,17 +37,27 @@ describe('base64url codec', () => {
 });
 
 describe('step-up assertion header encoding', () => {
-  test('encodeAssertionHeader is base64url(utf8(JSON.stringify(envelope)))', () => {
-    const envelope: StepUpAssertionEnvelope = {
-      credentialId: 'Y3JlZA',
-      authenticatorData: 'YXV0aA',
-      clientDataJSON: 'Y2xpZW50',
-      signature: 'c2ln',
-    };
+  const envelope: StepUpAssertionEnvelope = {
+    credentialId: 'Y3JlZA',
+    authenticatorData: 'YXV0aA',
+    clientDataJSON: 'Y2xpZW50',
+    signature: 'c2ln',
+  };
+
+  test('the header name is the platform header name', () => {
+    expect(STEP_UP_ASSERTION_HEADER).toBe(PLATFORM_STEP_UP_ASSERTION_HEADER);
+    expect(STEP_UP_ASSERTION_HEADER).toBe('x-goodvibes-stepup-assertion');
+  });
+
+  test('encodeAssertionHeader produces exactly what the platform encoder produces', () => {
+    expect(encodeAssertionHeader(envelope)).toBe(platformEncodeAssertionHeader(envelope));
+  });
+
+  test('encodeAssertionHeader matches a fixed wire vector and decodes back to the envelope', () => {
     const header = encodeAssertionHeader(envelope);
-    const expected = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(envelope)));
-    expect(header).toBe(expected);
-    // and it decodes back to the same envelope
+    expect(header).toBe(
+      'eyJjcmVkZW50aWFsSWQiOiJZM0psWkEiLCJhdXRoZW50aWNhdG9yRGF0YSI6IllYVjBhQSIsImNsaWVudERhdGFKU09OIjoiWTJ4cFpXNTAiLCJzaWduYXR1cmUiOiJjMmxuIn0',
+    );
     expect(JSON.parse(new TextDecoder().decode(base64UrlToBytes(header)))).toEqual(envelope);
   });
 });

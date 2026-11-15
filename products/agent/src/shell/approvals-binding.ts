@@ -32,6 +32,8 @@ export interface ApprovalsBindingOptions {
   readonly render: () => void;
   readonly getPending: () => PendingPermissionState | null;
   readonly setPending: (next: PendingPermissionState | null) => void;
+  /** Told when answering a broker card failed, so the owner sees why the card is back. */
+  readonly onResolveFailed?: (error: unknown) => void;
 }
 
 export interface ApprovalsBinding {
@@ -55,11 +57,13 @@ export function bindApprovals(options: ApprovalsBindingOptions): ApprovalsBindin
       render: options.render,
       getPending: options.getPending,
       setPending: options.setPending,
+      ...(options.onResolveFailed ? { onResolveFailed: options.onResolveFailed } : {}),
     });
     queueMicrotask(() => {
       for (const waiting of options.broker.listApprovals(Number.MAX_SAFE_INTEGER)) {
         handleBrokerApprovalChange({ approval: waiting, broker: options.broker,
-          render: options.render, getPending: options.getPending, setPending: options.setPending });
+          render: options.render, getPending: options.getPending, setPending: options.setPending,
+          ...(options.onResolveFailed ? { onResolveFailed: options.onResolveFailed } : {}) });
       }
     });
   });

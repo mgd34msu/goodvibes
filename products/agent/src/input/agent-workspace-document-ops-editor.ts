@@ -1,4 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -143,10 +144,6 @@ export function createAgentDocumentReviewPacketShareEditor(
   };
 }
 
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
-}
 
 function readList(value: string): readonly string[] {
   const seen = new Set<string>();
@@ -310,6 +307,30 @@ export function buildAgentDocumentReviewerReadinessPromptSubmission(
   };
 }
 
+/** Mutating packet actions never reach the model unless the Confirm field says yes. */
+function unconfirmedPacketAction(editor: AgentWorkspaceLocalEditor, action: string): {
+  readonly kind: 'editor';
+  readonly editor: AgentWorkspaceLocalEditor;
+  readonly status: string;
+  readonly actionResult: AgentWorkspaceActionResult;
+} {
+  return {
+    kind: 'editor',
+    editor: {
+      ...editor,
+      selectedFieldIndex: Math.max(0, editor.fields.findIndex((field) => field.id === 'confirm')),
+      message: `Review packet ${action} not confirmed. Type yes, then press Enter.`,
+    },
+    status: `Review packet ${action} not confirmed.`,
+    actionResult: {
+      kind: 'error',
+      title: `Review packet ${action} not confirmed`,
+      detail: 'Type yes on the confirmation field to continue. Nothing was submitted.',
+      safety: 'safe',
+    },
+  };
+}
+
 export function buildAgentDocumentReviewPacketPresetPromptSubmission(
   editor: AgentWorkspaceLocalEditor,
   readField: AgentWorkspaceFieldReader,
@@ -325,6 +346,7 @@ export function buildAgentDocumentReviewPacketPresetPromptSubmission(
   readonly status: string;
   readonly actionResult: AgentWorkspaceActionResult;
 } {
+  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'preset save');
   if (!promptDispatchAvailable) {
     return {
       kind: 'editor',
@@ -357,7 +379,7 @@ export function buildAgentDocumentReviewPacketPresetPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Save review packet preset',
-      detail: 'Submitted a confirmed preset-save request for the current document/review packet artifact ids.',
+      detail: 'Asked the model to save a review packet preset. Nothing is saved until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -378,6 +400,7 @@ export function buildAgentDocumentReviewPacketPresetRefreshPromptSubmission(
   readonly status: string;
   readonly actionResult: AgentWorkspaceActionResult;
 } {
+  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'preset refresh');
   if (!promptDispatchAvailable) {
     return {
       kind: 'editor',
@@ -410,7 +433,7 @@ export function buildAgentDocumentReviewPacketPresetRefreshPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Refresh review packet preset',
-      detail: 'Submitted a confirmed preset-refresh request that saves a new local artifact from freshness recommendations.',
+      detail: 'Asked the model to refresh the review packet preset into a new local artifact. Nothing is saved until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -431,6 +454,7 @@ export function buildAgentDocumentReviewPacketSharePromptSubmission(
   readonly status: string;
   readonly actionResult: AgentWorkspaceActionResult;
 } {
+  if (!isAffirmative(readField('confirm'))) return unconfirmedPacketAction(editor, 'share');
   if (!promptDispatchAvailable) {
     return {
       kind: 'editor',
@@ -463,7 +487,7 @@ export function buildAgentDocumentReviewPacketSharePromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Share review packet',
-      detail: 'Submitted a confirmed reviewer packet share request that sends a channel reference to the saved handoff archive.',
+      detail: 'Asked the model to share the saved handoff archive reference through the chosen target. Nothing is sent until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

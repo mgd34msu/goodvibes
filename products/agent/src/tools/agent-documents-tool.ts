@@ -11,6 +11,7 @@ import {
   type AgentDocumentRecord,
   type AgentDocumentStatus,
 } from '../agent/document-registry.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export type AgentDocumentsToolMode = 'list' | 'show' | 'create' | 'update' | 'review' | 'comment' | 'resolveComment' | 'suggest' | 'acceptSuggestion' | 'rejectSuggestion' | 'export' | 'insertArtifact' | 'attachArtifact';
 
@@ -63,9 +64,7 @@ function readBoolean(value: unknown, fallback = false): boolean {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(100, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 100);
 }
 
 function readStatus(value: unknown): AgentDocumentStatus | undefined {
@@ -111,6 +110,23 @@ function requireSuggestionId(args: AgentDocumentsToolArgs): string {
   const id = readString(args.suggestionId);
   if (!id) throw new Error('suggestionId is required.');
   return id;
+}
+
+/**
+ * A suggestion carries a full replacement of title, body and tags, so accepting one made against
+ * older text would silently drop the edits made since. Refuse instead and name the way forward.
+ */
+function assertSuggestionStillFits(document: AgentDocumentRecord | null | undefined, suggestionId: string): void {
+  const suggestion = document?.suggestions.find((entry) => entry.id === suggestionId);
+  if (!document || !suggestion || suggestion.status !== 'proposed') return;
+  const suggestedAt = Date.parse(suggestion.createdAt);
+  const edited = document.versions.some((version) => Date.parse(version.createdAt) > suggestedAt);
+  if (edited) {
+    throw new Error(
+      `Document ${document.id} was edited after suggestion ${suggestion.id} was made, and accepting it would replace those edits. `
+      + `Nothing changed. Use mode:"rejectSuggestion" and then mode:"suggest" against the current text, or mode:"show" to compare first.`,
+    );
+  }
 }
 
 function formatDocumentSummary(document: AgentDocumentRecord): string {
@@ -245,6 +261,11 @@ async function loadArtifactForInsert(
   throw new Error(`Unknown artifact ${artifactId}. Use agent_artifacts mode:"list" to inspect available artifacts.`);
 }
 
+/** Every save rewrites the whole document file and keeps earlier versions, so one inserted artifact must stay small. */
+const MAX_INSERTED_ARTIFACT_TEXT_BYTES = 64 * 1024;
+
+type InsertedArtifactContent = 'text' | 'truncated-text' | 'reference' | 'text-unreadable';
+
 function renderArtifactDocumentBlock(
   artifact: ArtifactDescriptor,
   buffer: Buffer | undefined,
@@ -252,7 +273,7 @@ function renderArtifactDocumentBlock(
     readonly sectionTitle: string;
     readonly includeContent: boolean;
   },
-): string {
+): { readonly text: string; readonly inserted: InsertedArtifactContent } {
   const heading = artifactSectionTitle(artifact, options.sectionTitle);
   const lines = [
     `## ${heading}`,
@@ -265,22 +286,34 @@ function renderArtifactDocumentBlock(
 
   if (!options.includeContent) {
     lines.push('', '_Content omitted by request; use the artifact id above to inspect or attach it._');
-    return lines.join('\n');
+    return { text: lines.join('\n'), inserted: 'reference' };
   }
 
   if (!isTextLike(artifact.mimeType)) {
     lines.push('', `_Content omitted for non-text artifact ${artifact.mimeType}; binary/base64 bytes were not inserted._`);
-    return lines.join('\n');
+    return { text: lines.join('\n'), inserted: 'reference' };
   }
 
   if (!buffer) {
     lines.push('', '_Text content could not be read in this runtime._');
-    return lines.join('\n');
+    return { text: lines.join('\n'), inserted: 'text-unreadable' };
   }
 
-  const text = buffer.toString('utf-8').replace(/\0/g, '').trim();
+  const truncated = buffer.length > MAX_INSERTED_ARTIFACT_TEXT_BYTES;
+  // A cut inside a multi-byte character leaves one replacement character at the end; drop it.
+  const text = buffer.subarray(0, MAX_INSERTED_ARTIFACT_TEXT_BYTES).toString('utf-8').replace(/\0/g, '').replace(/\uFFFD$/, '').trim();
   lines.push('', text || '_Empty text artifact._');
-  return lines.join('\n');
+  if (truncated) {
+    lines.push('', `_Truncated: the first ${formatBytes(MAX_INSERTED_ARTIFACT_TEXT_BYTES)} of ${formatBytes(buffer.length)} were inserted. Use agent_artifacts mode:"show" artifactId:"${artifact.id}" to read the rest._`);
+  }
+  return { text: lines.join('\n'), inserted: truncated ? 'truncated-text' : 'text' };
+}
+
+function describeInserted(inserted: InsertedArtifactContent, totalBytes: number | undefined): string {
+  if (inserted === 'text') return 'text content';
+  if (inserted === 'truncated-text') return `text content truncated to the first ${formatBytes(MAX_INSERTED_ARTIFACT_TEXT_BYTES)} of ${formatBytes(totalBytes ?? 0)}; the document holds an artifact reference to the rest`;
+  if (inserted === 'text-unreadable') return 'artifact reference only; this runtime could not read the text';
+  return 'safe artifact reference';
 }
 
 function insertBlock(body: string, block: string, placement: 'append' | 'prepend' | 'replace'): string {
@@ -406,7 +439,7 @@ async function insertArtifactIntoDocument(
   const loaded = await loadArtifactForInsert(artifactStore, artifactId, includeContent);
   assertCurrent();
   if (loaded.buffer) assertAgentArtifactBytes(loaded.descriptor, loaded.buffer);
-  const block = renderArtifactDocumentBlock(loaded.descriptor, loaded.buffer, {
+  const rendered = renderArtifactDocumentBlock(loaded.descriptor, loaded.buffer, {
     sectionTitle: readString(args.sectionTitle),
     includeContent,
   });
@@ -414,7 +447,7 @@ async function insertArtifactIntoDocument(
   assertCurrent(); assertSource();
   if (JSON.stringify(registry.get(document.id)) !== JSON.stringify(document)) throw new ToolInputProjectionError('stale');
   const updated = registry.update(document.id, {
-    body: insertBlock(document.body, block, placement),
+    body: insertBlock(document.body, rendered.text, placement),
     summary: readString(args.changeSummary) || `Inserted artifact ${artifactId}.`,
   });
   return [
@@ -423,7 +456,7 @@ async function insertArtifactIntoDocument(
     `  artifact ${loaded.descriptor.id}`,
     `  placement ${placement}`,
     `  versions ${updated.versions.length}`,
-    `  inserted ${isTextLike(loaded.descriptor.mimeType) && includeContent ? 'bounded text content' : 'safe artifact reference'}`,
+    `  inserted ${describeInserted(rendered.inserted, loaded.buffer?.length)}`,
   ].join('\n');
 }
 
@@ -445,7 +478,7 @@ export function createAgentDocumentsTool(
           },
           documentId: {
             type: 'string',
-            description: 'Document id or exact title for show, update, review, or export.',
+            description: 'Document id or exact title. Required by every mode except create and list (show, update, review, export, comment, resolveComment, suggest, acceptSuggestion, rejectSuggestion, insertArtifact, attachArtifact).',
           },
           query: {
             type: 'string',
@@ -457,7 +490,7 @@ export function createAgentDocumentsTool(
           },
           body: {
             type: 'string',
-            description: 'Markdown body for create or update.',
+            description: 'Markdown body for create or update; for suggest, the full replacement body.',
           },
           tags: {
             type: 'array',
@@ -467,7 +500,7 @@ export function createAgentDocumentsTool(
           status: {
             type: 'string',
             enum: ['draft', 'reviewed', 'archived'],
-            description: 'Optional document status for update.',
+            description: 'Optional document status for update; suggest also accepts it.',
           },
           commentId: {
             type: 'string',
@@ -508,7 +541,7 @@ export function createAgentDocumentsTool(
           },
           includeContent: {
             type: 'boolean',
-            description: 'Insert bounded text for text artifacts; reference non-text artifacts.',
+            description: 'For insertArtifact, default true: insert the text of a text artifact, truncated to the first 64 KB with a note, and only a reference for non-text artifacts. False inserts a reference only.',
           },
           changeSummary: {
             type: 'string',
@@ -516,7 +549,7 @@ export function createAgentDocumentsTool(
           },
           includeVersions: {
             type: 'boolean',
-            description: 'Include version history in show mode.',
+            description: 'Include version history in show mode. Defaults to true.',
           },
           limit: {
             type: 'number',
@@ -646,7 +679,9 @@ export function createAgentDocumentsTool(
         }
         if (mode === 'acceptSuggestion') {
           assertCurrent();
-          const document = registry.acceptSuggestion(requireDocumentId(args), requireSuggestionId(args));
+          const acceptId = requireDocumentId(args), acceptSuggestionId = requireSuggestionId(args);
+          assertSuggestionStillFits(registry.get(acceptId), acceptSuggestionId);
+          const document = registry.acceptSuggestion(acceptId, acceptSuggestionId);
           return output([
             'Accepted Agent document suggestion',
             `  document ${document.id}`,

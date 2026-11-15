@@ -7,10 +7,11 @@
  * (which deliberately contain floor-failing branch-exercising fixtures),
  * GATE_SUITES must clear every absolute floor on a clean run.
  *
- * Deterministic: gate scenarios run in well under the 500 ms latency-excellent
- * threshold, so scores are reproducible (no coupling to wall-clock or VERSION).
+ * Deterministic: the scenarios time themselves with Date.now, so the clock is
+ * frozen here and every run scores the same latency whatever the machine load
+ * (no coupling to wall-clock or VERSION).
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import {
   EvalRunner,
   GATE_SUITES,
@@ -21,6 +22,9 @@ import {
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+beforeEach(() => { setSystemTime(new Date('2030-01-01T00:00:00Z')); });
+afterEach(() => { setSystemTime(); });
 
 describe('standing-gate eval suite', () => {
   test('every gate scenario clears its absolute per-dimension floor', async () => {
@@ -49,14 +53,16 @@ describe('standing-gate eval suite', () => {
   test('the gate flags a regression when a scenario drops below its baseline score', async () => {
     const runner = new EvalRunner({ regressionThreshold: 5 });
     const scenarios = GATE_SUITES['standing-gate']!;
-    const result = await runner.runSuite('standing-gate', scenarios);
-    // Baseline the scenarios far above their real scores → the fresh run regresses.
-    const inflated = captureBaseline('inflated', [result]);
-    const firstId = result.results[0]!.scenario.id;
-    inflated.suites['standing-gate']!.scenarioScores[firstId] = 100;
-    // Re-run and gate against the inflated baseline; the real ~93 vs 100 is a >5pt drop.
-    const fresh = await runner.runSuite('standing-gate', scenarios);
-    const gate = runner.evaluateGate(fresh, inflated);
+    const baseline = captureBaseline('main', [await runner.runSuite('standing-gate', scenarios)]);
+    // The same scenario now completes with an error, which scores far below its baseline.
+    const first = scenarios[0]!;
+    const degraded = [
+      { ...first, run: async () => ({ ...(await first.run()), errorMessage: 'regressed' }) },
+      ...scenarios.slice(1),
+    ];
+    const fresh = await runner.runSuite('standing-gate', degraded);
+    const firstId = first.id;
+    const gate = runner.evaluateGate(fresh, baseline);
     expect(gate.regressions.some((r) => r.scenarioId === firstId)).toBe(true);
     expect(gate.passed).toBe(false);
   });

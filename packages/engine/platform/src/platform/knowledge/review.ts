@@ -47,13 +47,17 @@ export async function reviewKnowledgeIssue(
         value: key === 'title' ? String(facts[key]).trim() : String(facts[key]).trim() || node.summary,
       })) } : {}),
   }) : undefined;
-  const updatedSource = source && Object.keys(facts).length > 0
-    ? await applySourceFacts(store, source, facts, input, reviewedAt)
-    : source ?? undefined;
+  // Forgetting retires the source and node whether or not corrected facts came with it.
+  const writes = Object.keys(facts).length > 0 || input.action === 'forget';
+  // Both conflict-checked writes (issue token, node token) are refused before the
+  // unchecked source write, so a conflict never leaves a retired source behind.
   assertKnowledgeIssueOperatorMutation(store.getIssue(issue.id), issueMutation);
-  const updatedNode = node && Object.keys(facts).length > 0
+  const updatedNode = node && writes
     ? await applyNodeFacts(store, node, facts, input, nodeMutation!)
     : node ?? undefined;
+  const updatedSource = source && writes
+    ? await applySourceFacts(store, source, facts, input, reviewedAt)
+    : source ?? undefined;
   const suppression = buildSuppression(input, issue, reviewedAt);
   const updatedIssue = await store.upsertIssue({
     id: issue.id,
@@ -110,6 +114,8 @@ async function applySourceFacts(
     metadata: {
       reviewedFacts: facts,
       review: { action: input.action, reviewer: input.reviewer ?? 'knowledge-review', reviewedAt },
+      // Stale also means "due for recrawl"; this marks an operator's forget so refresh leaves it alone.
+      ...(input.action === 'forget' ? { staleReason: 'forgotten' } : {}),
     },
   });
 }

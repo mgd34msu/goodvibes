@@ -1,10 +1,14 @@
 import { paginateFindResult } from './pagination.js';
 import type { FindSearchOptions } from './shared.js';
 import { assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
-import { CodeIntelligence, uriToPath } from '../../intelligence/index.js';
+import { uriToPath } from '../../intelligence/index.js';
+import type { CodeIntelligence } from '../../intelligence/index.js';
+import { partitionByReadAccess, accessRestrictedNote, type ReadAccessFilter } from '../shared/read-access.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ReferencesQuery, OutputOptions } from './shared.js';
 import {
+  addBudgetStopWarning,
+  addDiscoveryCutWarning,
   addFindWarning,
   collectTextFiles,
   createFindDiagnostics,
@@ -15,6 +19,9 @@ import {
   withFindWarnings,
   validateSearchPath,
 } from './shared.js';
+
+/** The part of the code-intelligence facade the find tool uses. */
+export type FindCodeIntelligence = Pick<CodeIntelligence, 'getReferences' | 'getEnclosingScope'>;
 
 function withFallbackReason<T extends Record<string, unknown>>(
   result: T,
@@ -28,8 +35,15 @@ async function scanReferencesQuery(
   output: OutputOptions,
   projectRoot: string,
   walkOptions: FindSearchOptions = {},
+  readAccessFilter?: ReadAccessFilter,
+  intelligence?: FindCodeIntelligence | (() => Promise<FindCodeIntelligence>),
 ): Promise<Record<string, unknown>> {
 
+  // Lines are one-based here, as in every other find result; the language
+  // server counts from zero.
+  if (!Number.isInteger(query.line) || query.line < 1) {
+    return { error: `references 'line' is one-based (the line number find results report); got ${String(query.line)}. Nothing was searched.` };
+  }
   const basePath = validateSearchPath(query.path, projectRoot, walkOptions.allowOutsideProject);
   if (typeof basePath === 'object') return basePath;
   const sourcePath = validateSearchPath(query.file, projectRoot, walkOptions.allowOutsideProject);
@@ -40,14 +54,28 @@ async function scanReferencesQuery(
     line: number;
   }
   let locations: ReferenceLocation[] = [];
-  let lspFallbackReason = 'lsp returned no reference locations';
+  let lspFallbackReason = 'no language server answered (none is attached to this tool, or it returned no references); matched the symbol name as text';
   let skippedInvalidLspUris = 0;
   const diagnostics = createFindDiagnostics();
 
   await assertCapturedToolReadAccess(sourcePath);
-  const ci = new CodeIntelligence({});
+  let restrictedCount = 0;
+  /** Drops locations in files the read gate holds back; names are not shown either. */
+  const readable = async (found: ReferenceLocation[]): Promise<ReferenceLocation[]> => {
+    const files = [...new Set(found.map((l) => l.file))];
+    const { allowed, restricted } = await partitionByReadAccess(files, (f) => f, readAccessFilter);
+    if (restricted.length === 0) return found;
+    const denied = new Set(restricted);
+    restrictedCount += found.filter((l) => denied.has(l.file)).length;
+    return found.filter((l) => !denied.has(l.file));
+  };
+  const noteRestricted = (): void => {
+    const note = accessRestrictedNote(restrictedCount);
+    if (note) addFindWarning(diagnostics, note);
+  };
   try {
-    const lspLocations = await ci.getReferences(sourcePath, query.line, query.column);
+    const ci = typeof intelligence === 'function' ? await intelligence() : intelligence;
+    const lspLocations = ci ? await ci.getReferences(sourcePath, query.line - 1, query.column) : [];
     if (lspLocations.length > 0) {
       for (const loc of lspLocations) {
 
@@ -60,6 +88,8 @@ async function scanReferencesQuery(
         }
       }
 
+      locations = await readable(locations);
+      noteRestricted();
       const source = skippedInvalidLspUris > 0 ? 'lsp_with_invalid_uri_skips' : undefined;
       if (output.format === 'count_only') {
         return withFindWarnings(
@@ -113,7 +143,14 @@ async function scanReferencesQuery(
   }
 
   const files = await collectTextFiles(basePath, diagnostics, walkOptions);
-  for (const file of files) {
+  if (walkOptions.shouldContinue?.() === false) addDiscoveryCutWarning(diagnostics, files.length);
+  for (const [fileIndex, file] of files.entries()) {
+    walkOptions.signal?.throwIfAborted();
+    walkOptions.beforeAttempt?.();
+    if (walkOptions.shouldContinue?.() === false) {
+      addBudgetStopWarning(diagnostics, fileIndex, files.length, locations.length, 'reference(s)');
+      break;
+    }
 
     const content = await readTextFile(file, diagnostics);
     if (content === null) continue;
@@ -126,6 +163,9 @@ async function scanReferencesQuery(
       }
     }
   }
+
+  locations = await readable(locations);
+  noteRestricted();
 
   if (output.format === 'count_only') {
     return withFindWarnings(

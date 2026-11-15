@@ -17,6 +17,26 @@ export function compileDaemonSqliteLibrary(arch: 'x64' | 'arm64', sourceFile: st
     { cwd: dirname(sourceFile), stdio: 'inherit' });
 }
 
+/**
+ * Publish the library and its provenance as a pair. The `.building` names belong
+ * to this script, so leftovers of an interrupted run are cleared first rather
+ * than failing the next run with EEXIST. Any previous pair is removed up front,
+ * so an interruption leaves either nothing or a library without provenance,
+ * which the consumer refuses; the next run starts clean either way.
+ */
+export function publishDaemonSqliteCompanion(output: string, provenance: string, bytes: Uint8Array, metadata: DaemonSqliteOwner): void {
+  const paths = [output + '.building', provenance + '.building', output, provenance];
+  for (const path of paths) rmSync(path, { force: true });
+  try {
+    writeFileSync(provenance + '.building', JSON.stringify(metadata, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
+    writeFileSync(output + '.building', bytes, { flag: 'wx', mode: 0o644 });
+    renameSync(output + '.building', output); renameSync(provenance + '.building', provenance);
+  } catch (error) {
+    for (const path of paths) rmSync(path, { force: true });
+    throw error;
+  }
+}
+
 /** Native source compilation is part of the producer; consumers never run it. */
 export async function buildDaemonSqliteRuntime(root: string, target: string): Promise<DaemonSqliteOwner | null> {
   if (!target.startsWith('bun-darwin-')) return null;
@@ -46,8 +66,11 @@ export async function buildDaemonSqliteRuntime(root: string, target: string): Pr
   const archive = Buffer.concat(chunks);
   if (createHash('sha3-256').update(archive).digest('hex') !== runtime.sourceSha3) throw new Error('Pinned SQLite source checksum differs');
   const entries = [...readTarGzEntries(archive, { strict: true, maxOutputLength: 64 * 1024 * 1024 })];
+  // The archive's top directory is named by the pinned URL, not a second literal.
+  const archiveRoot = new URL(runtime.sourceUrl).pathname.split('/').pop()?.replace(/\.tar\.gz$/, '');
+  if (!archiveRoot) throw new Error('Pinned SQLite source URL does not name an archive');
   const selected = ['sqlite3.c', 'sqlite3.h'].map(name => {
-    const files = entries.filter(entry => entry.path === `sqlite-autoconf-3540000/${name}`);
+    const files = entries.filter(entry => entry.path === `${archiveRoot}/${name}`);
     if (files.length !== 1 || files[0]?.kind !== 'file') throw new Error('Pinned SQLite amalgamation is incomplete');
     return { name, bytes: files[0].data };
   });
@@ -62,9 +85,7 @@ export async function buildDaemonSqliteRuntime(root: string, target: string): Pr
     const metadata: DaemonSqliteOwner = { schema: 1, packageName: '@goodvibes-jev/daemon', daemonVersion: VERSION, target: runtime.target,
       sqliteVersion: runtime.sqliteVersion, sourceUrl: runtime.sourceUrl, sourceSha3: runtime.sourceSha3,
       sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
-    writeFileSync(provenance + '.building', JSON.stringify(metadata, null, 2) + '\n', { flag: 'wx', mode: 0o644 });
-    writeFileSync(output + '.building', bytes, { flag: 'wx', mode: 0o644 });
-    renameSync(output + '.building', output); renameSync(provenance + '.building', provenance);
+    publishDaemonSqliteCompanion(output, provenance, bytes, metadata);
     return Object.freeze(metadata);
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }

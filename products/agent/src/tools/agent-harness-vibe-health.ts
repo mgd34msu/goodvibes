@@ -2,6 +2,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentVibeFile, BlockedAgentVibeFile } from '../agent/vibe-file.ts';
 import { discoverVibeFiles } from '../agent/vibe-file.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
 
 export interface AgentHarnessVibeHealthFile {
   readonly path: string;
@@ -31,17 +32,17 @@ export interface AgentHarnessVibeHealth {
   readonly signals: readonly string[];
 }
 
-function describeVibeFile(file: AgentVibeFile): AgentHarnessVibeHealthFile {
+function describeVibeFile(file: AgentVibeFile, home: string): AgentHarnessVibeHealthFile {
   return {
-    path: file.path,
+    path: homeRelativePath(file.path, home),
     scope: file.scope,
     ...(file.truncated ? { truncated: true } : {}),
   };
 }
 
-function describeBlockedVibeFile(file: BlockedAgentVibeFile): AgentHarnessVibeHealthBlockedFile {
+function describeBlockedVibeFile(file: BlockedAgentVibeFile, home: string): AgentHarnessVibeHealthBlockedFile {
   return {
-    path: file.path,
+    path: homeRelativePath(file.path, home),
     scope: file.scope,
     reason: previewHarnessText(file.reason, 180),
   };
@@ -84,19 +85,19 @@ export function agentHarnessVibeHealth(context: CommandContext): AgentHarnessVib
     `applied VIBE.md files: ${snapshot.files.length}`,
     `blocked VIBE.md files: ${snapshot.blocked.length}`,
     `truncated VIBE.md files: ${truncated.length}`,
-    ...(snapshot.files.slice(0, 3).map((file) => `${file.scope}: ${file.path}${file.truncated ? ' (truncated)' : ''}`)),
-    ...(snapshot.blocked.slice(0, 3).map((file) => `blocked ${file.scope}: ${file.path} - ${previewHarnessText(file.reason, 96)}`)),
+    ...(snapshot.files.slice(0, 3).map((file) => `${file.scope}: ${homeRelativePath(file.path, shellPaths.homeDirectory)}${file.truncated ? ' (truncated)' : ''}`)),
+    ...(snapshot.blocked.slice(0, 3).map((file) => `blocked ${file.scope}: ${homeRelativePath(file.path, shellPaths.homeDirectory)} - ${previewHarnessText(file.reason, 96)}`)),
   ];
   return {
     status,
     applied: snapshot.files.length,
     blocked: snapshot.blocked.length,
     truncated: truncated.length,
-    files: snapshot.files.map(describeVibeFile),
-    blockedFiles: snapshot.blocked.map(describeBlockedVibeFile),
-    searchedPaths: snapshot.searchedPaths,
-    projectInitPath: snapshot.projectInitPath,
-    globalInitPath: snapshot.globalInitPath,
+    files: snapshot.files.map((file) => describeVibeFile(file, shellPaths.homeDirectory)),
+    blockedFiles: snapshot.blocked.map((file) => describeBlockedVibeFile(file, shellPaths.homeDirectory)),
+    searchedPaths: snapshot.searchedPaths.map((path) => homeRelativePath(path, shellPaths.homeDirectory)),
+    projectInitPath: homeRelativePath(snapshot.projectInitPath, shellPaths.homeDirectory),
+    globalInitPath: homeRelativePath(snapshot.globalInitPath, shellPaths.homeDirectory),
     nextAction,
     userRoute: 'Agent Workspace -> Local Context -> Inspect VIBE.md; /vibe status',
     modelRoute: 'vibe action:"status"',

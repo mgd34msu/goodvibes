@@ -49,6 +49,8 @@ export interface BudgetBreachNotifierDeps {
   readonly configGet: ConfigGet;
   readonly webhookNotifier?: WebhookNotifier | null;
   readonly sessionId: string;
+  /** Read at alert time; a resumed or forked session changes the id after the notifier is built. Wins over `sessionId`. */
+  readonly getSessionId?: (() => string) | undefined;
   /** The name of the turn that just ended (the one during which the budget tripped). */
   readonly getTurnName?: (() => string | null) | undefined;
   /** Desktop delivery; defaults to the platform notifyCompletion. Tests pass a spy to read the text. */
@@ -60,7 +62,7 @@ export interface BudgetBreachNotifier {
   /**
    * Evaluate current usage against the configured threshold and fire an
    * alert on the false→true breach edge. Returns true when an alert was
-   * fired this call (for tests / observability), false otherwise.
+   * delivered this call (for tests / observability), false otherwise.
    */
   check(usage: BudgetBreachUsageSnapshot, sessionModel: string, budgetThresholdUsd: number): boolean;
 }
@@ -94,21 +96,23 @@ export function createBudgetBreachNotifier(deps: BudgetBreachNotifierDeps): Budg
       }
       if (notified) return false; // already alerted for this crossing
 
-      notified = true;
-      fireBudgetBreachAlert(deps, sessionCost, budgetThresholdUsd);
-      return true;
+      // The latch is consumed only by an alert that went out: a crossing seen while the
+      // terminal is focused must still alert on a later turn once the user is away.
+      notified = fireBudgetBreachAlert(deps, sessionCost, budgetThresholdUsd);
+      return notified;
     },
   };
 }
 
-function fireBudgetBreachAlert(deps: BudgetBreachNotifierDeps, sessionCost: number, budgetThresholdUsd: number): void {
-  if (!shouldFireAlert(deps.focusTracker, deps.configGet, 'behavior.notifyOnBudgetBreach')) return;
+/** True when the alert was handed to delivery; false when the focus or config gate held it back. */
+function fireBudgetBreachAlert(deps: BudgetBreachNotifierDeps, sessionCost: number, budgetThresholdUsd: number): boolean {
+  if (!shouldFireAlert(deps.focusTracker, deps.configGet, 'behavior.notifyOnBudgetBreach')) return false;
 
   const metadataOnly = readNotificationsMetadataOnly(deps.configGet);
   const facts: BudgetNotificationFacts = {
     sessionCostUsd: sessionCost,
     budgetUsd: budgetThresholdUsd,
-    sessionId: deps.sessionId,
+    sessionId: deps.getSessionId?.() ?? deps.sessionId,
     get turnName() { return metadataOnly ? null : deps.getTurnName?.() ?? null; },
   };
   const notice = buildBudgetNotification(facts, { metadataOnly });
@@ -128,4 +132,5 @@ function fireBudgetBreachAlert(deps: BudgetBreachNotifierDeps, sessionCost: numb
       });
     }
   }
+  return true;
 }

@@ -134,21 +134,34 @@ describe('approval decision fields round-trip over HTTP', () => {
 
   test('a generalizing rememberTier over HTTP sweeps a queued ask the decision covers', async () => {
     const first = await seedPending(execRequest('tier-a', 'git status'));
-    const second = await seedPending(execRequest('tier-b', 'git status'));
+    // Different arguments, so the broker keeps it as its own record rather than joining the first.
+    const covered = await seedPending(execRequest('tier-b', 'git log --oneline'));
+    const unrelated = await seedPending(execRequest('tier-c', 'ls -la'));
+    expect(covered.id).toBeDefined();
+    expect(new Set([first.id, covered.id, unrelated.id]).size).toBe(3);
     const res = await fetch(`${daemon.url}/api/approvals/${first.id}/approve`, {
       method: 'POST',
       headers: auth(),
-      body: JSON.stringify({ rememberTier: 'exact' }),
+      body: JSON.stringify({ rememberTier: 'command-class' }),
     });
     expect(res.status).toBe(200);
     const body = await res.json() as ActionResponse;
     expect(body.recorded.approved).toBe(true);
-    expect(body.recorded.rememberTier).toBe('exact');
-    // The tier reached the broker's own generalization logic, not just the
-    // record: the second identical ask resolves without a second answer.
-    const swept = await second.decided;
+    expect(body.recorded.rememberTier).toBe('command-class');
+    // The tier reached the broker's own generalization logic: the other git ask
+    // resolves without its own answer, recorded as covered by the remembered rule.
+    const swept = await covered.decided;
     expect(swept.approved).toBe(true);
     expect((await first.decided).approved).toBe(true);
+    const sweptRecord = daemon.approvals.listApprovals().find((a) => a.id === covered.id);
+    expect(sweptRecord?.decision?.disposition).toBe('remembered');
+    // An ask outside the command class is not answered by the sweep.
+    expect(daemon.approvals.listApprovals().find((a) => a.id === unrelated.id)?.status).toBe('pending');
+    const denied = await fetch(`${daemon.url}/api/approvals/${unrelated.id}/deny`, {
+      method: 'POST', headers: auth(), body: JSON.stringify({}),
+    });
+    expect(denied.status).toBe(200);
+    expect((await unrelated.decided).approved).toBe(false);
   });
 
   test('recorded reports the ORIGINAL decision when a late action no-ops on a resolved approval', async () => {

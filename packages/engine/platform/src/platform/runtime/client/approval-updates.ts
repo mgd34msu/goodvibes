@@ -32,6 +32,7 @@
  */
 
 import { openServerSentEventStream } from '../transports/sse-stream.js';
+import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 
@@ -104,7 +105,7 @@ export function readApprovalUpdateNotice(payload: unknown): ApprovalUpdateNotice
  * it will discard.
  */
 export function approvalUpdateStreamUrl(baseUrl: string): string {
-  const url = new URL('/api/control-plane/events', baseUrl);
+  const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', APPROVAL_UPDATE_DOMAIN);
   return url.toString();
 }
@@ -173,7 +174,10 @@ export async function watchApprovalUpdates(
  * The seam every raise path wants: raise, then watch the id you were handed.
  */
 export async function awaitApprovalDecision(input: {
-  readonly subscribe: (onUpdate: (notice: ApprovalUpdateNotice) => void) => Promise<ApprovalUpdateSubscription | null>;
+  readonly subscribe: (
+    onUpdate: (notice: ApprovalUpdateNotice) => void,
+    onTerminate?: () => void,
+  ) => Promise<ApprovalUpdateSubscription | null>;
   readonly approvalId: string;
   readonly isDecided: (record: ApprovalUpdateRecord) => boolean;
   readonly stop: () => boolean;
@@ -189,7 +193,7 @@ export async function awaitApprovalDecision(input: {
       return;
     }
     if (input.isDecided(notice.approval)) settle?.(notice.approval);
-  });
+  }, () => settle?.(null));
   if (!subscription) return null;
   try {
     return await decided;

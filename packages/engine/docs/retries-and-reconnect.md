@@ -47,6 +47,8 @@ const platformClient = createBrowserGoodVibesPlatform({
 
 The platform preserves `Last-Event-ID` and sends it on reconnect so the server can replay missed events when supported.
 
+The retry budget refills only after a connection delivers a real event: the `ready` greeting does not count, so a stream the daemon greets and drops at once still runs out of attempts. When a reconnect is refused with a `Retry-After` (429, 503), the next attempt waits at least that long, capped at 10 minutes.
+
 ## WebSocket reconnect
 
 WebSocket reconnect is controlled through `realtime.webSocketReconnect`:
@@ -68,38 +70,25 @@ const platformClient = createReactNativeGoodVibesPlatform({
 
 ## Idempotency keys
 
-For non-GET mutations, the platform automatically injects an `Idempotency-Key` header when the call is marked idempotent. This enables safe retry of state-changing operations without duplicate side effects.
+For non-GET mutations, the platform injects an `Idempotency-Key` header when the call has a `perMethodPolicy` entry or the contract marks the route `idempotent: true`. The same UUID is sent on every attempt of one call.
 
-**Precedence chain (highest → lowest):**
+**The header is advisory, except on `POST /api/contracts` (`contracts.start`), the one route where the daemon reads it (see below). Everywhere else it does not deduplicate retried requests.** Otherwise only the methods that carry a replay key in their request body deduplicate: sending the same body key again returns the original result instead of repeating the work. The operator OpenAPI marks each such method with `x-replay-key` and names the field. Retrying any other mutation can repeat its side effect (a second session, a second message) when the first response was lost after the daemon acted.
 
-1. **`perMethodPolicy[methodId]`.** An explicit per-method retry policy set on the platform options overrides everything else.
-2. **`contract.idempotent`.** The operator contract marks certain POST/PUT/PATCH/DELETE routes as idempotent (`idempotent: true`). Those methods automatically get an `Idempotency-Key` on each call.
-3. **HTTP-verb default.** Safe methods (`GET`, `HEAD`, `OPTIONS`) are retried by default. Unsafe methods are not retried unless explicitly marked idempotent.
+**When a mutation is retried (all must hold):**
 
-When an idempotent call is retried, the same `Idempotency-Key` UUID is used on each attempt. This lets the daemon detect and deduplicate retried requests.
+1. The call has a `perMethodPolicy[methodId]` entry, or the contract marks the route `idempotent: true`. No method in the current catalog sets `idempotent: true`, so in practice this means a `perMethodPolicy` entry.
+2. The verb is listed in `retryOnMethods`. The default is `['GET', 'HEAD', 'OPTIONS']`, so add the mutation verb (for example `'POST'`) or the call fails on its first error.
+3. The attempt budget allows it (`maxAttempts` above 1) and the failure is retryable: a status in `retryOnStatuses` (408, 429, 500, 502, 503, 504, 529), or a connection failure with no response.
+
+Safe methods (`GET`, `HEAD`, `OPTIONS`) are retried by default once `maxAttempts` is raised. A reply whose body says `recoverable: false`, or whose category is `billing`, is never retried, whatever its status.
 
 There is no per-call `idempotencyKey` request option. The per-call options accepted by the transport layer (`ContractInvokeOptions`) are `signal`, `headers`, and `responseSchema` only. The `Idempotency-Key` is generated internally (`generateIdempotencyKey`) and is attached only when the resolved method is a mutation (POST/PUT/PATCH/DELETE) **and** either the contract marks the route `idempotent: true` or a `perMethodPolicy` entry exists for that method ID.
 
-For application-level idempotency on a mutation the contract does not already mark idempotent, register a `perMethodPolicy` entry keyed by the method ID. That both enables retries for the method and causes the platform to attach a stable `Idempotency-Key` on each attempt:
+The daemon acts on the key for `POST /api/contracts` (`contracts.start`): a repeat with the same key from the same caller returns the first contract (header `Idempotent-Replayed: true`) instead of starting another, the same key with a different request is refused with 409 `IDEMPOTENCY_KEY_REUSED`, and a start that failed is not remembered so it can be retried. The daemon keeps keys in memory (up to 1000), so a retry that crosses a daemon restart starts a new contract.
 
-```ts
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+To retry a mutation that has a body replay key (or `contracts.start`, which honours the header), register a `perMethodPolicy` entry for its method ID and add its verb to `retryOnMethods`, and send the same replay key value on every attempt. For a mutation without one, do not enable retries: the daemon cannot tell a repeat from a new request.
 
-const platformClient = createGoodVibesPlatform({
-  baseUrl: 'http://127.0.0.1:3421',
-  authToken: process.env.GOODVIBES_TOKEN ?? null,
-  retry: {
-    perMethodPolicy: {
-      'sessions.create': { maxAttempts: 3 },
-    },
-  },
-});
-
-// The Idempotency-Key is generated and reused across retries automatically.
-const result = await platformClient.operator.sessions.create({ title: 'My session' });
-```
-
-Never retry unsafe mutations blindly. Only operations with application-level or contract-level idempotency guarantees are safe to retry.
+Never retry unsafe mutations blindly. Only operations whose repeat is harmless, because the body replay key deduplicates it or because the operation is naturally idempotent, are safe to retry.
 
 ## Token rotation
 

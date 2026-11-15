@@ -156,8 +156,15 @@ export async function generateAgentMedia(
       artifacts.push(toGeneratedArtifact(descriptor));
       assertCurrent();
     }
-  } catch {
-    throw new Error(`Media generation stopped after ${artifacts.length} confirmed artifact writes. The provider request completed; any interrupted write may also have completed. Inspect stored artifacts before retrying.`);
+  } catch (error) {
+    // A cancellation or a changed owner is not a failed write: callers branch on these.
+    lifetime.signal?.throwIfAborted();
+    if (error instanceof ToolInputProjectionError) throw error;
+    // The reason a write was refused (non-public URI, mime, size, disk) tells a
+    // permanent refusal from a transient one; without it the caller regenerates
+    // and pays for a second provider call.
+    const reason = (error instanceof Error ? error.message : String(error)).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 300);
+    throw new Error(`Media generation stopped after ${artifacts.length} confirmed artifact writes${reason ? ` (${reason})` : ''}. The provider request completed; any interrupted write may also have completed. Inspect stored artifacts before retrying.`, { cause: error });
   }
   if (artifacts.length === 0) throw new Error(`Media provider ${generated.providerId} did not return artifacts.`);
   return {

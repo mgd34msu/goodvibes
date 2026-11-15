@@ -11,7 +11,7 @@ import { plannerOutput, type AnswerContext } from './plan-support.js';
 const source: NativeContractSource = { sourceId: 'native-work', sourceRevision: '1', inputRevision: 'input-1', criteriaId: 'native-criteria', criteriaRevision: '1', goal: 'Deliver the exact parser', criteria: ['The parser preserves all documented input forms'] };
 function plan() { const value = oneUnitPlan(1); return { ...value, goal: source.goal, criteria: [{ id: 'c1', text: source.criteria[0]!, quote: source.criteria[0]! }] }; }
 const harnesses: Harness[] = [];
-afterEach(() => { for (const h of harnesses.splice(0).reverse()) h.dispose(); });
+afterEach(async () => { await Promise.all(harnesses.splice(0).reverse().map(h => h.dispose())); });
 function use(options: HarnessOptions): Harness { const h = makeHarness({ recordNative: true, plan: plan(), ...options }); harnesses.push(h); return h; }
 function isStage(context: AnswerContext, stage: string): boolean { return String((context.state['binding'] as { actionId?: string } | undefined)?.actionId).includes(`:${stage}:`); }
 function select(context: AnswerContext, value: string, probability = 0.99): unknown { return context.name === 'disposition' ? choiceAnswer(context.question, value, probability) : undefined; }

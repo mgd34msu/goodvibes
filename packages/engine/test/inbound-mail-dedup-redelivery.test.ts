@@ -35,15 +35,14 @@ import {
 import type { InboundMailboxMessage } from '../platform/src/platform/email/inbound/ports.ts';
 import type { ImapEnvelope } from '../platform/src/platform/email/imap-types.ts';
 import { makeFakeMailbox, openMailboxSocket, type FakeMailboxServer } from './_helpers/fake-imap-mailbox.ts';
+import { imapMailboxConnectionPort } from '../platform/src/platform/email/inbound/index.ts';
 import {
   FakeClock,
   RecordingObserver,
   fixedRandom,
   cleanupInboundScratch,
   makeCursorStore,
-  nudgeUntil,
   waitFor,
-  watcherConnectionPort,
   imapMessageFixture,
   requireImapMessage,
   type RecordingCursorStore,
@@ -123,7 +122,7 @@ async function build(): Promise<Harness> {
 
   const watcher = new InboundMailboxWatcher({
     settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX }),
-    connections: watcherConnectionPort({
+    connections: imapMailboxConnectionPort({
       connect: () => openMailboxSocket(mailbox.port),
       username: 'watched@example.test',
       password: 'an-app-password',
@@ -204,18 +203,15 @@ describe('a redelivered message produces exactly one notice', () => {
     );
 
     harness.mailbox.deliver('the only notice the owner should get');
-    await nudgeUntil(harness.mailbox, () => harness.notices.length >= 1, 'the first notice');
+    await waitFor(() => harness.notices.length >= 1, 'the first notice');
 
-    // The wake is driven until it takes, rather than pushed once and hoped
-    // for. Waiting on `commands` to show a second IDLE proves the SERVER saw
-    // it, which is strictly earlier than the client arming the waiter that
-    // ends the round, see `nudgeUntil`.
+    // One further wake, sent once the watcher is back inside an IDLE: a line
+    // arriving between rounds has nobody collecting it.
+    const idleCount = (): number => harness.mailbox.commands.filter((l) => /^\S+ IDLE$/.test(l)).length;
+    await waitFor(() => idleCount() >= 2, 'the watcher to re-enter IDLE after the first delivery');
     const searchesBefore = harness.mailbox.commands.filter((l) => /UID SEARCH/.test(l)).length;
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.mailbox.commands.filter((l) => /UID SEARCH/.test(l)).length > searchesBefore,
-      'the second pass to search the mailbox again',
-    );
+    harness.mailbox.push(`* ${String(harness.mailbox.uids.length)} EXISTS`);
+    await waitFor(() => harness.mailbox.commands.filter((l) => /UID SEARCH/.test(l)).length > searchesBefore, 'the second pass to search the mailbox again');
 
     // Searched again, found nothing above the cursor, offered nothing.
     expect(harness.handled).toEqual([102]);
@@ -238,7 +234,7 @@ describe('a redelivered message produces exactly one notice', () => {
 
     harness.mailbox.deliver('must survive a failed first attempt');
 
-    await nudgeUntil(harness.mailbox, () => harness.handled.length >= 1, 'the first, failing attempt');
+    await waitFor(() => harness.handled.length >= 1, 'the first, failing attempt');
     expect(harness.notices).toEqual([]);
     expect((await harness.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid).toBe(101);
 
@@ -365,9 +361,11 @@ describe('a redelivered message produces exactly one notice', () => {
 
     const first = sink.deliver(msg);
     await waitFor(() => handled.length === 1, 'the first delivery to start');
-    await sink.deliver(msg); // the concurrent second arrival
+    // The concurrent second arrival waits for the first attempt's outcome, so
+    // it can only settle once that attempt does.
+    const second = sink.deliver(msg);
     for (const release of releases) release();
-    await first;
+    await Promise.all([first, second]);
 
     expect(handled).toEqual([9]);
   });

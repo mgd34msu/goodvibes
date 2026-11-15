@@ -46,12 +46,18 @@ export interface JudgmentConfig {
   readonly fetch?: Fetch;
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['localhost', '::1', '[::1]']);
+
+/** Only a literal 127.0.0.0/8 address is loopback; a DNS name that merely begins with "127." is not. */
+function isLoopbackIPv4(host: string): boolean {
+  const octets = host.split('.');
+  return octets.length === 4 && octets.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255) && octets[0] === '127';
+}
 
 /** A base URL on a loopback host is a local System One model. */
 export function endpointKind(baseURL: string): JudgmentEndpoint['kind'] {
   const host = new URL(baseURL).hostname;
-  return LOOPBACK_HOSTS.has(host) || host.startsWith('127.') ? 'local' : 'hosted';
+  return LOOPBACK_HOSTS.has(host) || isLoopbackIPv4(host) ? 'local' : 'hosted';
 }
 
 /**

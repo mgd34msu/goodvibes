@@ -336,7 +336,10 @@ describe('an occasion about him that he only has to remember is never pushed', (
       .toBe(true);
   });
 
-  test('the subject is resolved from his declared names, not from a name literal', async () => {
+  // Wiring only: the reading here is a recorded fixture, so this proves the
+  // declared names reach it and its answer drives pushing. Whether the real
+  // reading classifies a line by those names is the recorded battery's job.
+  test('the declared names reach the subject reading and its answer decides whether the line is pushed', async () => {
     const his = occasionLine("Avery's birthday · 08-06 · annual · remember-only");
     const hers = occasionLine("Natalie Sons's birthday · 08-20 · annual · gift-giving · for Natalie Sons");
     const names = ['Avery Chen', 'Avery'];

@@ -26,7 +26,8 @@ export interface LearningCuratorNativeContext {
   readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlanStore?: Pick<NonNullable<CommandContext['workspace']['workPlanStore']>, 'listItems'> };
   readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> } };
   readonly session?: {
-    readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>;
+    readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>
+      & Partial<Pick<NonNullable<CommandContext['session']['sessionManager']>, 'fingerprint'>>;
     readonly runtime?: Pick<CommandContext['session']['runtime'], 'sessionId'>;
   };
 }
@@ -73,7 +74,8 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   if (runtime) guards.push(captureCatalogMethods(runtime, ['sessionId']));
   if (memory) guards.push(captureCatalogMethods(memory, ['getAll']));
   if (work) guards.push(captureCatalogMethods(work, ['listItems', 'getActivePlan', 'readPlan', 'options', 'homeDirectory']), captureWorkPlanLocation(work));
-  if (manager) guards.push(captureCatalogMethods(manager, ['list', 'load', 'sessionsDir', 'sanitizeName']));
+  if (manager) guards.push(captureCatalogMethods(manager, typeof manager.fingerprint === 'function'
+    ? ['list', 'load', 'fingerprint', 'sessionsDir', 'sanitizeName'] : ['list', 'load', 'sessionsDir', 'sanitizeName']));
   if (shellPaths) guards.push(captureCatalogMethods(shellPaths, ['resolveProjectPath', 'resolveUserPath', 'homeDirectory', 'workingDirectory']));
   const notes = shellPaths ? AgentNoteRegistry.fromShellPaths(shellPaths) : undefined;
   const personas = shellPaths ? AgentPersonaRegistry.fromShellPaths(shellPaths) : undefined;
@@ -106,7 +108,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     try { nativeWorkItems.assertCurrent(); } catch { throw new ToolInputProjectionError('held'); }
     return nativeWorkItems.items;
   };
-  const read = () => {
+  // Parsing every saved session on each currentness check grows with the number of sessions.
+  // When no session file changed (same fingerprint, which a save always changes), the last
+  // full reading of them stands; publication points still read everything.
+  const readSessionList = () => captureCatalogData(manager?.list() ?? []);
+  const readSessionBodies = (list: ReturnType<typeof readSessionList>) =>
+    list.filter(session => session.name !== sessionId).map(session => ({ session, loaded: captureCatalogData(manager?.load(session.name)) }));
+  let sessionReading: { readonly fingerprint: string; readonly sessionList: ReturnType<typeof readSessionList>; readonly sessions: ReturnType<typeof readSessionBodies> } | undefined;
+  const read = (reuseSessions = false) => {
     assertNative();
     const memoryRecords = captureCatalogData(memory?.getAll() ?? []);
     const noteSnapshot = captureCatalogData(notes?.snapshot());
@@ -123,8 +132,15 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       return { ...file, exists, bytes: exists ? fs.readFileSync(file.path, 'utf8') : undefined };
     });
     const workItems = captureCatalogData(readWorkItems());
-    const sessionList = captureCatalogData(manager?.list() ?? []);
-    const sessions = sessionList.filter(session => session.name !== sessionId).map(session => ({ session, loaded: captureCatalogData(manager?.load(session.name)) }));
+    const fingerprint = manager?.fingerprint?.();
+    let sessionList: ReturnType<typeof readSessionList>, sessions: ReturnType<typeof readSessionBodies>;
+    if (reuseSessions && fingerprint !== undefined && sessionReading?.fingerprint === fingerprint) {
+      ({ sessionList, sessions } = sessionReading);
+    } else {
+      sessionList = readSessionList();
+      sessions = readSessionBodies(sessionList);
+      sessionReading = fingerprint === undefined ? undefined : { fingerprint, sessionList, sessions };
+    }
     const vibe = shellPaths ? captureCatalogData(discoverVibeFiles(shellPaths)) : undefined;
     const vibeEvidence = vibe ? [...vibe.files, ...vibe.blocked].map(file => ({ ...file, body: fs.readFileSync(file.path, 'utf8') })) : [];
     assertNative();
@@ -196,9 +212,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   let expected = source;
   let assertSnapshot = captureModelReadingSnapshotGuard(expected);
   let active: object | undefined;
-  const assertEvidence = () => { assertReadingBackends(); assertSnapshot(read()); assertReadingSnapshot(readingSource); assertNative(); };
+  const checkEvidence = (full: boolean) => { assertReadingBackends(); assertSnapshot(read(!full)); assertReadingSnapshot(readingSource); assertNative(); };
+  const assertEvidence = () => checkEvidence(false);
   const assertCurrent = () => {
     assertCaller(); assertEvidence(); assertCaller(); assertEvidence();
+  };
+  // Before anything is published every source is read again, session files included.
+  const assertCurrentFully = () => {
+    assertCaller(); checkEvidence(true); assertCaller(); checkEvidence(true);
   };
   assertCurrent();
   const originalRecord = (state: typeof source, domain: LocalLearningCandidateDomain, id: string): unknown => {
@@ -230,10 +251,10 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       if (active !== lease || phase === 'finished') throw new ToolInputProjectionError('held');
     };
     const effects = Object.freeze({
-      assertCurrent: () => { assertLease(); if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrent(); },
+      assertCurrent: () => { assertLease(); if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrentFully(); },
       onEffect: (published?: boolean) => {
         assertLease();
-        if (published !== true) { if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrent(); return; }
+        if (published !== true) { if (phase !== 'unpublished') throw new ToolInputProjectionError('held'); assertCurrentFully(); return; }
         if (phase !== 'unpublished') throw new ToolInputProjectionError('held');
         phase = 'published';
       },

@@ -26,6 +26,7 @@ export async function buildBuiltinAccount(
         label: 'Terminal UI',
         enabled: true,
         accountId: 'surface:tui',
+        selfContained: true,
         secrets: [],
         metadata: { managed: 'local' },
       });
@@ -35,6 +36,7 @@ export async function buildBuiltinAccount(
         label: 'Web control plane',
         enabled: Boolean(context.deps.configManager.get('web.enabled') || context.deps.configManager.get('controlPlane.enabled')),
         accountId: 'surface:web',
+        selfContained: true,
         secrets: [],
         metadata: {
           baseUrl: context.deps.configManager.get('web.publicBaseUrl'),
@@ -205,7 +207,7 @@ export async function buildBuiltinAccount(
     case 'whatsapp': {
       const surfaces = context.deps.configManager.getCategory('surfaces');
       const secrets = await Promise.all([
-        describeBuiltinSecret(context.deps, 'primary', 'Access token', surfaces.whatsapp.accessToken, ['WHATSAPP_ACCESS_TOKEN'], 'whatsapp', 'primary'),
+        describeBuiltinSecret(context.deps, 'primary', 'Access token', surfaces.whatsapp.accessToken, ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_BRIDGE_TOKEN'], 'whatsapp', 'primary'),
         describeBuiltinSecret(context.deps, 'verifyToken', 'Verify token', surfaces.whatsapp.verifyToken, ['WHATSAPP_VERIFY_TOKEN']),
         describeBuiltinSecret(context.deps, 'signingSecret', 'Signing secret', surfaces.whatsapp.signingSecret, ['WHATSAPP_SIGNING_SECRET', 'WHATSAPP_BRIDGE_TOKEN'], 'whatsapp', 'signingSecret'),
       ]);
@@ -468,25 +470,48 @@ function buildBuiltinAccountActions(configured: boolean, linked: boolean): reado
   ];
 }
 
+/** The account id a surface reports when it has no identity of its own. */
+const FALLBACK_ACCOUNT_ID_PREFIX = 'surface:';
+
 function finalizeBuiltinChannelAccount(input: {
   surface: ChannelSurface;
   label: string;
   enabled: boolean;
+  /** A local surface that has nothing to configure (the terminal UI, the web control plane). */
+  selfContained?: boolean | undefined;
   accountId?: string | undefined;
   workspaceId?: string | undefined;
   secrets: readonly ChannelSecretStatus[];
   metadata: Record<string, unknown>;
 }): ChannelAccountRecord {
-  const configured = Boolean(input.accountId || input.workspaceId || input.secrets.some((entry) => entry.configured));
+  // The `surface:<name>` fallback id is a placeholder, not an identity: counting
+  // it made every surface read as configured, so `unconfigured` could never be
+  // reported and a surface with nothing set up passed its doctor.
+  const hasIdentity = Boolean(input.workspaceId)
+    || (Boolean(input.accountId) && !input.accountId!.startsWith(FALLBACK_ACCOUNT_ID_PREFIX));
+  const configured = Boolean(input.selfContained) || hasIdentity || input.secrets.some((entry) => entry.configured);
+  // `linked` is what is DECLARED (health reads it as such). Whether the surface
+  // can actually send is a separate question: a `goodvibes://secrets/...`
+  // reference to an absent key, or only a signing secret with no bot token,
+  // cannot send, and the state must not read healthy for it. Surfaces with a
+  // primary credential are judged by it; the rest by whether any of theirs
+  // resolves.
   const linked = input.secrets.some((entry) => entry.configured);
+  const primary = input.secrets.find((entry) => entry.field === 'primary');
+  // A webhook URL is a complete send path on its own (Slack and Discord post
+  // through it with no bot token), so a resolvable one keeps the surface healthy.
+  const webhookSends = input.secrets.some((entry) => entry.field === 'webhookUrl' && entry.configured && entry.resolved !== false);
+  const canSend = input.selfContained === true || webhookSends || (primary
+    ? primary.configured && primary.resolved !== false
+    : input.secrets.some((entry) => entry.configured && entry.resolved !== false));
   const state = !configured
     ? input.enabled ? 'unconfigured' : 'disabled'
     : input.enabled
-      ? linked ? 'healthy' : 'degraded'
+      ? canSend ? 'healthy' : 'degraded'
       : 'disabled';
   const authState = !configured
     ? 'not-configured'
-    : linked
+    : canSend
       ? 'linked'
       : input.enabled
         ? 'degraded'

@@ -355,3 +355,28 @@ test('continuation claims fence nonlocal session ownership while retaining local
   await journal.transition(second, 'dispatching', { ...change, state: 'completed' });
   expect((await foreign.read(second))?.state).toBe('completed');
 }));
+
+test('compaction drops only proven terminal records that no live owner holds', async () => fixture(async path => {
+  const at = (inputId: string, extra: Partial<NativeHostedTurnIdentity> = {}): NativeHostedTurnIdentity => ({ ...identity, inputId, ...extra });
+  const finished = (inputId: string, state: 'completed' | 'cancelled'): NativeHostedTurnDispatch => ({ identity: at(inputId), state, ...(state === 'completed' ? bound : unbound) });
+  writeFileSync(path, savedFile([finished('proven', 'completed'), finished('unproven', 'completed'), { identity: at('live'), state: 'preparing', ...unbound },
+    finished('held', 'cancelled'), finished('moved', 'completed')]));
+  writeFileSync(`${path}.owners`, JSON.stringify({ version: 1, owners: { [JSON.stringify(['project', 'paired-owner', 'held'])]: { pid: process.ppid, instance: 'another-process' } } }));
+  const journal = new NativeHostedTurnJournal(path);
+  expect((await journal.census()).nearCap).toBe(false);
+  const dropped = await journal.compact([at('proven'), at('live'), at('held'), at('moved', { sourceRevision: 'other-revision' })],
+    (_record, owner) => owner?.pid === process.ppid);
+  expect(dropped).toBe(1);
+  const remaining = JSON.parse(readFileSync(path, 'utf8')).records.map((record: NativeHostedTurnDispatch) => record.identity.inputId);
+  expect(remaining).toEqual(['unproven', 'live', 'held', 'moved']);
+  expect(JSON.parse(readFileSync(`${path}.owners`, 'utf8')).owners).toHaveProperty([JSON.stringify(['project', 'paired-owner', 'held'])]);
+}));
+
+test('a journal full of live records stays full and refuses with the way out', async () => fixture(async path => {
+  const records = Array.from({ length: NATIVE_HOSTED_TURN_JOURNAL_MAX_RECORDS }, (_unused, index) => preparing({ ...identity, inputId: `input-${index}` }));
+  writeFileSync(path, savedFile(records));
+  const journal = new NativeHostedTurnJournal(path);
+  expect((await journal.census()).nearCap).toBe(true);
+  await expect(journal.compact(records.map(record => record.identity), () => false)).resolves.toBe(0);
+  await expect(journal.claim(identity)).rejects.toThrow(/journal-limit.*Cancel the stale native turns/su);
+}));

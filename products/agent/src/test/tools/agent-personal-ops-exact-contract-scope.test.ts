@@ -10,7 +10,9 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import type { CommandContext } from '../../input/command-registry.ts';
 import { captureModelReadingInput } from '../../tools/agent-harness-model-reading-source.ts';
 import { describePersonalOpsLane } from '../../tools/agent-harness-personal-ops.ts';
+import { CONTRACT_DISCOVERY_BATCH_SIZE, CONTRACT_DISCOVERY_LANES } from '../../tools/agent-harness-personal-ops-discovery.ts';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
+import { expectHeld } from '../helpers/expect-held.ts';
 
 // These are authored synthetic protocol controls, not genuine semantic readings.
 // The original native catalog, complete schemas and source owners remain real.
@@ -20,14 +22,9 @@ beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
 
 function fixture() {
-  const thread = { threadId: 'synthetic-thread', subject: 'Synthetic nonselected inbox source', status: 'unread' };
-  const reminder = { reminderId: 'synthetic-reminder', title: 'Synthetic selected reminder', status: 'pending',
-    readRoute: 'synthetic_read reminderId:"synthetic-reminder"' };
-  const inbox = { getSnapshot: () => ({ threads: [thread] }) };
-  const reminders = { getSnapshot: () => ({ reminders: [reminder] }) };
-  const context = { platform: { config: {}, readModels: { personalOps: { inboxThreads: inbox, reminders } } }, clients: {},
+  const context = { platform: { config: {} }, clients: {},
     session: { runtime: { sessionId: 'exact-lane-synthetic' } } } as unknown as CommandContext;
-  return { context, thread, reminder, inbox };
+  return { context };
 }
 
 function reader(beforeAnswer?: (name: string, state: unknown) => void) {
@@ -78,7 +75,7 @@ describe('Personal Ops exact native lane contract dependencies', () => {
       const fullReader = reader(); installJudgmentPort(fullReader.fake.port);
       expect(await describePersonalOpsLane(context, args, readingOptions())).toEqual(exact);
       expect(fullReader.seen.size).toBe(fullReader.native.length);
-      expect([...fullReader.seen.values()].every(count => count === 4)).toBe(true);
+      expect([...fullReader.seen.values()].every(count => count === CONTRACT_DISCOVERY_LANES.length)).toBe(true);
     }
   }, 60_000);
 
@@ -93,61 +90,43 @@ describe('Personal Ops exact native lane contract dependencies', () => {
     const fullReader = reader(); installJudgmentPort(fullReader.fake.port);
     expect(await describePersonalOpsLane(context, { query: 'reminders', includeParameters: true }, readingOptions())).toEqual(exact);
     expect(fullReader.seen.size).toBe(fullReader.native.length);
-    expect([...fullReader.seen.values()].every(count => count === 4)).toBe(true);
+    expect([...fullReader.seen.values()].every(count => count === CONTRACT_DISCOVERY_LANES.length)).toBe(true);
   }, 60_000);
 
-  test('unsupported hidden metadata in a nonselected provider remains held without invoking its accessor', async () => {
-    const { context, thread } = fixture(); let getters = 0, published = 0;
-    Object.defineProperty(thread, 'opaqueMetadata', { configurable: true, enumerable: false, get() { getters++; return 'unused'; } });
-    const scripted = reader(); installJudgmentPort(scripted.fake.port);
-    await expect(describePersonalOpsLane(context, { laneId: 'notes' }, { ...readingOptions(), retainCurrent() { published++; } })).rejects.toThrow();
-    expect(getters).toBe(0); expect(published).toBe(0); expect(scripted.seen.size).toBe(0);
-  });
-
-  test('exact notes still acquires all raw MCP schemas and refuses malformed nonselected schema metadata', async () => {
-    const { context } = fixture(); let lists = 0, schemas = 0, getters = 0;
-    const schema = { inputSchema: { type: 'object', properties: {} } };
-    Object.defineProperty(schema, 'opaqueMetadata', { enumerable: false, get() { getters++; return 'unused'; } });
+  test('exact notes and reminders never touch the MCP connector list or schemas, so a connector failure cannot fail them', async () => {
+    const { context } = fixture(); let lists = 0, schemas = 0;
     const withMcp = { ...context, clients: { ...context.clients, mcpApi: {
-      async listAllTools() { lists++; return [{ serverName: 'synthetic', toolName: 'opaque_operation', description: 'Synthetic unrelated operation' }]; },
-      async getToolSchema() { schemas++; return schema; },
+      async listAllTools() { lists++; throw new Error('connector list unavailable'); },
+      async getToolSchema() { schemas++; throw new Error('connector schema unavailable'); },
     } } } as unknown as CommandContext;
     const scripted = reader(); installJudgmentPort(scripted.fake.port);
-    await expect(describePersonalOpsLane(withMcp, { laneId: 'notes' }, readingOptions())).rejects.toThrow();
-    expect(lists).toBe(1); expect(schemas).toBe(1); expect(getters).toBe(0); expect(scripted.seen.size).toBe(0);
-  });
-
-  test('a nonselected provider changing during its actual privacy read prevents selected publication', async () => {
-    const { context, thread } = fixture(); let changed = false, published = 0;
-    const scripted = reader((name, state) => {
-      if (!changed && name !== 'match' && JSON.stringify(state).includes(thread.subject)) {
-        changed = true; thread.subject = 'Competing native nonselected inbox source';
-      }
-    });
-    installJudgmentPort(scripted.fake.port);
-    await expect(describePersonalOpsLane(context, { laneId: 'notes' }, { ...readingOptions(), retainCurrent() { published++; } })).rejects.toThrow();
-    expect(changed).toBe(true); expect(published).toBe(0);
-  });
+    expect(await describePersonalOpsLane(withMcp, { laneId: 'notes' }, readingOptions())).toMatchObject({ status: 'found', lane: { id: 'notes' } });
+    expect(await describePersonalOpsLane(withMcp, { laneId: 'reminders' }, readingOptions())).toMatchObject({ status: 'found', lane: { id: 'reminders' } });
+    expect(lists).toBe(0); expect(schemas).toBe(0);
+  }, 60_000);
 
   test('caller cancellation during a later reminders response prevents further selections or publication', async () => {
     const { context } = fixture(); const controller = new AbortController(); let matches = 0, published = 0;
-    const scripted = reader(name => { if (name === 'match' && ++matches === 17) controller.abort(new Error('Synthetic caller cancellation')); });
+    const scripted = reader(name => { if (name === 'match' && ++matches === CONTRACT_DISCOVERY_BATCH_SIZE + 1) controller.abort(new Error('Synthetic caller cancellation')); });
     installJudgmentPort(scripted.fake.port);
-    await expect(describePersonalOpsLane(context, { laneId: 'reminders' }, { ...readingOptions(), signal: controller.signal,
-      retainCurrent() { published++; } })).rejects.toThrow();
-    expect(matches).toBeGreaterThanOrEqual(17); expect(matches).toBeLessThanOrEqual(32); expect(published).toBe(0);
+    await expectHeld(describePersonalOpsLane(context, { laneId: 'reminders' }, { ...readingOptions(), signal: controller.signal,
+      retainCurrent() { published++; } }));
+    expect(matches).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE); expect(matches).toBeLessThanOrEqual(2 * CONTRACT_DISCOVERY_BATCH_SIZE); expect(published).toBe(0);
   });
 
   test('native port retirement during a reminders response cannot publish a selected lane', async () => {
     const { context } = fixture(); let matches = 0, published = 0;
-    const scripted = reader(name => { if (name === 'match' && ++matches === 17) installJudgmentPort(undefined); });
+    const scripted = reader(name => { if (name === 'match' && ++matches === CONTRACT_DISCOVERY_BATCH_SIZE + 1) installJudgmentPort(undefined); });
     installJudgmentPort(scripted.fake.port);
-    await expect(describePersonalOpsLane(context, { laneId: 'reminders' }, { ...readingOptions(), retainCurrent() { published++; } })).rejects.toThrow();
-    expect(matches).toBeGreaterThanOrEqual(17); expect(matches).toBeLessThanOrEqual(32); expect(published).toBe(0);
+    await expectHeld(describePersonalOpsLane(context, { laneId: 'reminders' }, { ...readingOptions(), retainCurrent() { published++; } }));
+    expect(matches).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE); expect(matches).toBeLessThanOrEqual(2 * CONTRACT_DISCOVERY_BATCH_SIZE); expect(published).toBe(0);
   });
 
   test('a real recorded permission admission remains live during the exact notes source read', async () => {
-    const { context } = fixture(); let mode: PermissionMode = 'prompt', entered = false, revoked = false, published = 0;
+    let mode: PermissionMode = 'prompt', entered = false, revoked = false, published = 0;
+    // The notes lane reads no catalog candidates, so the revocation lands on its first workspace source read.
+    const context = { platform: { config: {} }, session: { runtime: { sessionId: 'exact-lane-synthetic' } },
+      clients: { mcpApi: { listServerSecurity() { if (entered && !revoked) { revoked = true; mode = 'plan'; } return []; } } } } as unknown as CommandContext;
     const directory = '/synthetic/exact-lane';
     const permissions = () => ({ ...DEFAULT_CONFIG.permissions, mode, tools: {} });
     const configReader: PermissionConfigReader = {
@@ -165,7 +144,7 @@ describe('Personal Ops exact native lane contract dependencies', () => {
         published++; return { success: true, output: JSON.stringify(lane) };
       },
     });
-    const scripted = reader(() => { if (entered && !revoked) { revoked = true; mode = 'plan'; } });
+    const scripted = reader();
     using log = new SqliteDecisionLog(':memory:'); installJudgmentPort(withDecisionLog(scripted.fake.port, log));
     const call = await registry.prepareCall('synthetic-exact-lane-revocation', 'native_exact_lane_read', { laneId: 'notes' });
     const admission = await manager.admitAutonomous('synthetic-exact-lane-revocation', 'native_exact_lane_read', call.args, {
@@ -173,7 +152,7 @@ describe('Personal Ops exact native lane contract dependencies', () => {
       schemaRevision: call.schemaRevision, preparedCall: { registry, call },
     });
     expect(admission.result.approved).toBe(true);
-    await expect(registry.executePrepared(call, admission)).rejects.toBeInstanceOf(ToolInputProjectionError);
+    await expect(registry.executePrepared(call, admission)).rejects.toThrow('Autonomous execution authority');
     expect(entered).toBe(true); expect(revoked).toBe(true); expect(published).toBe(0);
   });
 });

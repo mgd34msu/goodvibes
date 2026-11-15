@@ -61,6 +61,14 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+/** Let every already-resolved promise continuation and its React commit run, so a
+ * negative assertion is made after a late result could have landed. */
+async function drain() {
+  for (let turn = 0; turn < 5; turn++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(() => {});
+  }
+}
 async function settle(check: () => boolean) {
   for (let tries = 0; tries < 200; tries++) {
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -178,7 +186,7 @@ for (const message of [
     const h = render();
     await settle(() => h.el.textContent?.includes(message) === true);
     expect(h.el.querySelector("input")).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     expect(invoke).toHaveBeenCalledTimes(1);
     invoke.mockResolvedValue(native());
     flushSync(() => h.el.querySelector("button")!.click());
@@ -197,8 +205,7 @@ test("late discovery cannot change a newer session selection", async () => {
   await settle(() => Boolean(h.el.querySelector('[data-native-session="native-b"]')));
   expect(signal?.aborted).toBe(true);
   pending.resolve({ kind: "legacy" });
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  flushSync(() => {});
+  await drain();
   expect(h.el.querySelector("input")).toBeNull();
   expect(h.el.querySelector('[data-native-session="native-b"]')).not.toBeNull();
 });
@@ -218,8 +225,7 @@ for (const change of ["account", "relay", "unmount"] as const)
     if (change === "unmount") h.unmount();
     await settle(() => signal?.aborted === true);
     pending.resolve({ kind: "legacy" });
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    flushSync(() => {});
+    await drain();
     expect(h.el.querySelector("input")).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
@@ -244,8 +250,7 @@ test("hung discovery times out honestly and a late result cannot enable sending"
     expect(h.el.textContent).toContain("Session verification timed out");
     expect(invoke.mock.calls[0]?.[2]?.aborted).toBe(true);
     pending.resolve({ kind: "legacy" });
-    await new Promise((resolve) => realTimeout(resolve, 5));
-    flushSync(() => {});
+    await drain();
     expect(h.el.querySelector("input")).toBeNull();
     expect(h.el.textContent).toContain("Session verification timed out");
     expect(send).not.toHaveBeenCalled();

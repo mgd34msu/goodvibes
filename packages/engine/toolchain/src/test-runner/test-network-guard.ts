@@ -3,9 +3,21 @@
 // preload sees must stay on loopback (or a local Unix socket). This is not an
 // OS sandbox: native addons, UDP and independently launched subprocesses are
 // outside these JavaScript hooks. Live proofs do not install this guard.
+// node:http, node:https and node:http2 clients do not pass through the TCP hook
+// under Bun, so their entry points are checked as well.
 import net from 'node:net';
-import tls from 'node:tls';
-import { syncBuiltinESMExports } from 'node:module';
+import type { TLSSocket } from 'node:tls';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+
+// These are loaded with require so the guard patches them before any ESM
+// import of the same module exists. Bun fixes a builtin's named ESM exports when
+// it is first imported, so patching after a static import would leave
+// `import { request } from 'node:http'` (named imports) unguarded.
+const nodeRequire = createRequire(import.meta.url);
+const http = nodeRequire('node:http') as typeof import('node:http');
+const https = nodeRequire('node:https') as typeof import('node:https');
+const http2 = nodeRequire('node:http2') as typeof import('node:http2');
+const tls = nodeRequire('node:tls') as typeof import('node:tls');
 
 export type NetworkViolationReporter = (diagnostic: string) => void;
 
@@ -73,12 +85,29 @@ function localSocket(args: readonly unknown[], reporter: NetworkViolationReporte
   }
 }
 
+/** node:http and node:https accept (url, options) or (options); a stated host in either must be local. */
+function localHttp(args: readonly unknown[], reporter: NetworkViolationReporter, kind: string): void {
+  const [first, second] = args;
+  const objects = [first, second].filter((value): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !(value instanceof URL));
+  if (objects.some((option) => typeof option.socketPath === 'string')) return;
+  if (typeof first === 'string' || first instanceof URL) localUrl(first, reporter, kind);
+  const hosts = objects.flatMap((option) => [option.host, option.hostname]).filter((host) => host !== undefined && host !== null);
+  if (typeof first !== 'string' && !(first instanceof URL) && hosts.length === 0) hosts.push('localhost');
+  for (const host of hosts) if (typeof host !== 'string' || !loopback(host)) {
+    reject(reporter, kind, typeof host === 'string' && /^[a-z\d.:[\]_-]+$/i.test(host) ? host : '[invalid host]');
+  }
+}
+
 /** Install without freezing globals, so existing per-test mocks still work. */
 export function installTestNetworkGuard(reporter: NetworkViolationReporter): () => void {
   const originalFetch = globalThis.fetch;
   const originalConnect = net.Socket.prototype.connect;
   const originalTlsConnect = tls.connect;
   const originalBunConnect = Bun.connect;
+  const originalHttp = { request: http.request, get: http.get };
+  const originalHttps = { request: https.request, get: https.get };
+  const originalHttp2Connect = http2.connect;
   const originalWebSocket = globalThis.WebSocket;
 
   const guardedFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
@@ -127,10 +156,33 @@ export function installTestNetworkGuard(reporter: NetworkViolationReporter): () 
     localSocket(args, reporter, 'TCP');
     return Reflect.apply(originalConnect, this, args) as net.Socket;
   } as typeof originalConnect;
-  tls.connect = function (...args: unknown[]): tls.TLSSocket {
+  tls.connect = function (...args: unknown[]): TLSSocket {
     localSocket(args, reporter, 'TLS');
-    return Reflect.apply(originalTlsConnect, tls, args) as tls.TLSSocket;
+    return Reflect.apply(originalTlsConnect, tls, args) as TLSSocket;
   } as typeof originalTlsConnect;
+  http.request = function (...args: unknown[]) {
+    localHttp(args, reporter, 'HTTP');
+    return Reflect.apply(originalHttp.request, http, args);
+  } as typeof http.request;
+  http.get = function (...args: unknown[]) {
+    localHttp(args, reporter, 'HTTP');
+    return Reflect.apply(originalHttp.get, http, args);
+  } as typeof http.get;
+  https.request = function (...args: unknown[]) {
+    localHttp(args, reporter, 'HTTPS');
+    return Reflect.apply(originalHttps.request, https, args);
+  } as typeof https.request;
+  https.get = function (...args: unknown[]) {
+    localHttp(args, reporter, 'HTTPS');
+    return Reflect.apply(originalHttps.get, https, args);
+  } as typeof https.get;
+  http2.connect = function (...args: unknown[]) {
+    const [authority, options] = args;
+    if (!(typeof options === 'object' && options !== null && typeof (options as { socketPath?: unknown }).socketPath === 'string')) {
+      localUrl(authority as string | URL, reporter, 'HTTP/2');
+    }
+    return Reflect.apply(originalHttp2Connect, http2, args);
+  } as typeof http2.connect;
   Reflect.set(Bun, 'connect', (...args: unknown[]) => {
     localSocket(args, reporter, 'Bun TCP');
     return Reflect.apply(originalBunConnect, Bun, args);
@@ -153,6 +205,11 @@ export function installTestNetworkGuard(reporter: NetworkViolationReporter): () 
     net.Socket.prototype.connect = originalConnect;
     tls.connect = originalTlsConnect;
     Reflect.set(Bun, 'connect', originalBunConnect);
+    http.request = originalHttp.request;
+    http.get = originalHttp.get;
+    https.request = originalHttps.request;
+    https.get = originalHttps.get;
+    http2.connect = originalHttp2Connect;
     globalThis.WebSocket = originalWebSocket;
     syncBuiltinESMExports();
   };

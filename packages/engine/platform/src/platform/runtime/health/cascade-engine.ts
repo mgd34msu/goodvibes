@@ -118,6 +118,19 @@ export class CascadeEngine {
   }
 
   /**
+   * Rules of any effect type that target this domain (or ALL) whose source is
+   * currently in the triggering state, i.e. the sources still holding it down.
+   */
+  getActiveRulesTargeting(domain: HealthDomain): CascadeRule[] {
+    return this.rules.filter(
+      (rule) =>
+        (rule.target === domain || rule.target === 'ALL') &&
+        rule.effect.type !== 'EMIT_EVENT' &&
+        this.aggregator.getDomainHealth(rule.source).status === rule.sourceState,
+    );
+  }
+
+  /**
    * Check whether a domain's upstream dependencies are healthy enough to allow dispatch.
    * Traverses the cascade rules in reverse: finds rules whose TARGET is this domain
    * and whose SOURCE is currently in the triggering state.

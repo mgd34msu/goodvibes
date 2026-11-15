@@ -126,6 +126,24 @@ export class FileStateCache {
   }
 
   /**
+   * Compare the file on disk with the last observation without recording a
+   * new one. A writer uses this: a refused write must keep refusing until the
+   * file is read again, so only a read (`lookup`/`update`) may advance it.
+   */
+  peek(filePath: string): { status: CacheStatus } {
+    const node = this.cache.get(filePath);
+    if (!node) return { status: 'miss' };
+    let currentContent: string;
+    try {
+      currentContent = readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      if (isMissingFileError(err)) return { status: 'miss' };
+      throw new Error(`FileStateCache failed to read cached file ${filePath}: ${summarizeError(err)}`);
+    }
+    return { status: currentContent === node.observedContent ? 'unchanged' : 'modified' };
+  }
+
+  /**
    * Record that a file was read or written by a tool/agent.
    * Creates or updates the cache entry.
    */
@@ -351,7 +369,28 @@ function computeHunks(oldLines: string[], newLines: string[], CONTEXT = 3): stri
   return result;
 }
 
-function computeEdits(oldLines: string[], newLines: string[]): HunkLine[] {
+function computeEdits(allOld: string[], allNew: string[]): HunkLine[] {
+  // Unchanged leading and trailing lines never need the LCS table, so a small
+  // change in a large file is diffed on the changed middle only.
+  let prefix = 0;
+  const maxPrefix = Math.min(allOld.length, allNew.length);
+  while (prefix < maxPrefix && allOld[prefix] === allNew[prefix]) prefix++;
+  let suffix = 0;
+  const maxSuffix = maxPrefix - prefix;
+  while (suffix < maxSuffix && allOld[allOld.length - 1 - suffix] === allNew[allNew.length - 1 - suffix]) suffix++;
+  if (prefix > 0 || suffix > 0) {
+    const middle = computeEdits(
+      allOld.slice(prefix, allOld.length - suffix),
+      allNew.slice(prefix, allNew.length - suffix),
+    );
+    return [
+      ...allOld.slice(0, prefix).map((text): HunkLine => ({ type: 'context', text })),
+      ...middle,
+      ...allOld.slice(allOld.length - suffix).map((text): HunkLine => ({ type: 'context', text })),
+    ];
+  }
+  const oldLines = allOld;
+  const newLines = allNew;
   // Build LCS table
   const m = oldLines.length;
   const n = newLines.length;

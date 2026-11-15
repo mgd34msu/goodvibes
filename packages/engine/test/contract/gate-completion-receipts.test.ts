@@ -242,7 +242,6 @@ test('a changed configured command cannot receive a receipt from the previous pl
 });
 
 
-// Regression source intentionally unrun during the coding-first pass.
 test('pre-provenance historical test booleans retain their required obligation instead of authorizing a pass', async () => {
   const historical = [{ gate: 'test', passed: true, output: 'Historical success', durationMs: 1 }];
   const refreshed = refreshGateResults(historical);

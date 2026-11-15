@@ -76,7 +76,7 @@ Raw JSON schema for the peer ACP contract.
 
 **Status:** stable
 
-Generated OpenAPI document for the operator HTTP surface, derived from the same operator contract manifest as `./contracts/operator-contract.json`. See [`docs/operator-openapi.json`](./operator-openapi.json) for the document itself.
+Generated OpenAPI document for the operator HTTP surface, derived from the same operator contract manifest as `./contracts/operator-contract.json`. The tracked copy is `contracts/artifacts/operator-openapi.json`; see [OpenAPI operator contract](./openapi-contract.md).
 
 > **Bundle-budget note:** JSON artifacts are static and excluded from gzip bundle-budget tracking.
 
@@ -239,7 +239,7 @@ Types-only ambient declaration for the optional `sql.js` dependency, which ships
 
 Granular platform modules exposed through explicit public subpaths. Each path is listed intentionally rather than exposed by a wildcard.
 
-The `platform/...` surface is the canonical way for downstream consumers (e.g., the goodvibes-tui) to access platform subsystems. The package does not export a wildcard `./platform/*` pattern; every public platform path is listed intentionally in `package.json`. Paths not listed below should be considered unsupported.
+The `platform/...` surface is the canonical way for downstream consumers (e.g., the goodvibes-tui) to access platform subsystems. The package does not export a wildcard `./platform/*` pattern; every public platform path is listed intentionally in `package.json`. Paths absent from `package.json` are unsupported.
 
 **Stability contract:** exported names and their TypeScript signatures are the current package contract. Pre-1.0 releases may make breaking changes; current behavior is recorded in `CHANGELOG.md`.
 
@@ -251,10 +251,9 @@ that base through `@goodvibes-jev/engine/platform/platform/knowledge/home-graph`
 
 #### Platform subpaths: exact export map entries
 
-The following subpaths are the complete list of exported platform paths.
-Importing any path not in this table will produce an `ERR_PACKAGE_PATH_NOT_EXPORTED` error.
+The following table lists the notable platform subpaths. The `exports` map in `packages/engine/package.json` is the complete and authoritative list: it also holds further `platform/...` paths and the `daemon-api`, `operator-client`, `peer-client`, `terminal-shell`, `toolchain` and `transport-*` families. Importing a path that is in neither this table nor `exports` produces an `ERR_PACKAGE_PATH_NOT_EXPORTED` error.
 
-> **Note:** `etc/goodvibes-platform.api.md` is an API Extractor report for the root `.` entry point only; it does not enumerate these subpath surfaces. This document is the authoritative subpath list.
+> **Note:** `etc/goodvibes-platform.api.md` is an API Extractor report for the root `.` entry point only; it does not enumerate these subpath surfaces. `packages/engine/package.json` is the authoritative subpath list.
 
 | Subpath | Description | Status |
 |---|---|---|
@@ -299,7 +298,7 @@ Importing any path not in this table will produce an `ERR_PACKAGE_PATH_NOT_EXPOR
 | `platform/knowledge/home-graph` | Home Assistant Home Graph extension | beta |
 | `platform/media` | Media indexing, search, and image-understanding APIs | beta |
 | `platform/mcp` | MCP config, registry, client, and sandbox bridge | beta |
-| `platform/mcp/server` | Local-first MCP server generated from the operator contract manifest, exposing the daemon's operator surface as MCP tools for external agent tooling | beta |
+| `platform/mcp/server` | Local-first MCP server generated from the operator contract manifest, exposing the daemon's operator surface as MCP tools for external agent tooling; the installed `goodvibes-daemon mcp serve` command runs it over stdio | beta |
 | `platform/multimodal` | Multimodal input | beta |
 | `platform/node` | Runtime capability metadata plus Node-like runtime-boundary helpers; not a platform aggregate | beta |
 | `platform/node/runtime-boundary` | Client-safe runtime boundary detection (no Bun globals) | beta |
@@ -329,7 +328,7 @@ Importing any path not in this table will produce an `ERR_PACKAGE_PATH_NOT_EXPOR
 | `platform/runtime/ecosystem` | Curated catalog and capability-bundle distribution layer: catalog/receipt/rollback machinery, SHA-256-pinned bundle distribution, and the governed marketplace index | beta |
 | `platform/runtime/emitters` | Typed emission wrappers and the `EmitterContext` used to construct them from session/turn/agent context | beta |
 | `platform/runtime/feature-announcements` | One-time feature announcement store (`FeatureAnnouncementStore`), startup announcement collection (`collectStartupAnnouncements`), sandbox-containment announcer (`createSandboxContainmentAnnouncer`), and the shared announcement ids and text. The store path and ids are shared across surfaces so announcements deduplicate everywhere | beta |
-| `platform/runtime/feature-flags` | Capability gates and per-feature settings metadata (`FEATURE_SETTINGS`), including the emergency kill switch | beta |
+| `platform/runtime/feature-flags` | Capability gates and per-feature settings metadata (`FEATURE_SETTINGS`) | beta |
 | `platform/runtime/fleet` | Live process registry | beta |
 | `platform/runtime/fleet/observed` | Observed-source variant of the fleet registry | beta |
 | `platform/runtime/memory` | Memory governance layer: a registry of retained caches, a seam to pause deferrable background jobs, and a governor that samples RSS/heap and sheds memory by tier before the OS OOM-kills the process | beta |

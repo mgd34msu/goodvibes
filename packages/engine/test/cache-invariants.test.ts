@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConversationManager } from '../platform/src/platform/core/conversation.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
+import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
 
 // ---------------------------------------------------------------------------
 // ProviderRegistry cache invalidation
@@ -24,8 +25,6 @@ import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gate
 // the class directly from source and constructing a minimal stub.
 import { ProviderRegistry, type ProviderRegistryOptions } from '../platform/src/platform/providers/registry.js';
 import type { DiscoveredServer } from '../platform/src/platform/discovery/scanner.js';
-import type { DomainDispatch } from '../platform/src/platform/runtime/store/index.js';
-import type { ControlPlaneDomainState } from '../platform/src/platform/runtime/store/domains/control-plane.js';
 import { ProviderCapabilityRegistry } from '../platform/src/platform/providers/capabilities.js';
 
 // Each registry gets its own persistence root: setModelContextCap persists
@@ -193,49 +192,29 @@ describe('registerRuntimeProvider unregister callback invalidates cache', () => 
 // ---------------------------------------------------------------------------
 
 describe('recentEvents ring buffer ordering', () => {
-  // ControlPlaneGateway.rememberEvent is private, so we access it via a
-  // public method that calls it indirectly. We drive events through
-  // trackRequest which calls rememberEvent internally.
-  // Instead, we call the public handleSseEvent path via a no-op runtimeBus.
-  // The simplest unit-testable surface is getSnapshot().totals.recentEvents
-  // and listRecentEvents().
-
   function driveEvents(gw: ControlPlaneGateway, n: number): void {
-    // handleEvent is not public, use the public `handleControlEvent` if available,
-    // or drive via the `handleRequest` path. Since ControlPlaneGateway exposes
-    // `getSnapshot` which reports ring state, we drive events through
-    // `trackRequest` public method if available, else call the private method
-    // via type-casting.
-    const gw_any = gw as unknown as { rememberEvent(event: string, data: Record<string, unknown>): void; _syncScheduled: boolean; };
-    for (let i = 0; i < n; i++) {
-      gw_any.rememberEvent(`test-event-${i}`, { seq: i });
-    }
+    for (let i = 0; i < n; i++) gw.publishEvent(`test-event-${i}`, { seq: i });
   }
 
   test('count < cap (3 events in 500-slot ring): newest-first ordering', () => {
     const gw = new ControlPlaneGateway({});
     driveEvents(gw, 3);
 
-    const events = (gw as unknown as { recentEvents: Array<{ event: string }> }).recentEvents;
-    expect(events.length).toBe(3);
-    // newest first: event-2, event-1, event-0
-    expect(events[0]!.event).toBe('test-event-2');
-    expect(events[1]!.event).toBe('test-event-1');
-    expect(events[2]!.event).toBe('test-event-0');
+    expect(gw.listRecentEvents(500).map((entry) => entry.event)).toEqual(['test-event-2', 'test-event-1', 'test-event-0']);
   });
 
   test('count >= cap (600 events in 500-slot ring): newest-first, length capped at 500', () => {
     const gw = new ControlPlaneGateway({});
     driveEvents(gw, 600);
 
-    const events = (gw as unknown as { recentEvents: Array<{ event: string }> }).recentEvents;
-    expect(events.length).toBe(500);
+    const events = gw.listRecentEvents(1_000);
+    expect(events).toHaveLength(500);
     // newest first: event-599, event-598, ...
     expect(events[0]!.event).toBe('test-event-599');
     expect(events[499]!.event).toBe('test-event-100');
   });
 
-  test('getSnapshot totals.recentEvents uses _recentEventsCount (O(1), no array alloc)', () => {
+  test('getSnapshot totals.recentEvents reports the retained event count', () => {
     const gw = new ControlPlaneGateway({});
     driveEvents(gw, 7);
     const snap = gw.getSnapshot() as Record<string, unknown> & { totals?: Record<string, unknown> };
@@ -244,94 +223,48 @@ describe('recentEvents ring buffer ordering', () => {
 });
 
 // ---------------------------------------------------------------------------
-// _syncScheduled coalesces burst
+// A burst of events reaches the runtime store once
 // ---------------------------------------------------------------------------
 
-describe('_syncScheduled coalesces burst of rememberEvent calls', () => {
-  test('N synchronous rememberEvent calls produce exactly 1 syncControlPlaneState dispatch per microtask', async () => {
-    let dispatchCount = 0;
-    const mockDispatch = {
-      syncControlPlaneState: (..._args: Parameters<DomainDispatch['syncControlPlaneState']>) => { dispatchCount++; },
-      syncControlPlaneClient: () => {},
-      syncControlPlaneServer: () => {},
-    };
+describe('a burst of published events syncs the runtime store once', () => {
+  function observedGateway() {
+    const runtimeStore = createRuntimeStore();
+    const gw = new ControlPlaneGateway({ runtimeStore });
+    let notifications = 0;
+    runtimeStore.subscribe(() => { notifications++; });
+    return { gw, runtimeStore, notifications: () => notifications };
+  }
 
-    // Build a gateway with a mock store that creates the dispatch
-    const mockStore = {
-      getState: () => ({}),
-      dispatch: (fn: (slice: Partial<DomainDispatch>) => void) => fn({ syncControlPlaneState: mockDispatch.syncControlPlaneState }),
-      subscribe: () => () => {},
-    } as unknown as import('../platform/src/platform/runtime/store/index.js').RuntimeStore;
+  test('N synchronous events produce exactly one store update, after the burst', async () => {
+    const { gw, notifications } = observedGateway();
 
-    // We use the internal attach mechanism to inject dispatch
-    const gw = new ControlPlaneGateway({});
-    // Manually inject the dispatch mock (normally done by attachRuntime)
-    (gw as unknown as { dispatch: Partial<DomainDispatch> }).dispatch = mockDispatch;
+    for (let i = 0; i < 10; i++) gw.publishEvent(`burst-event-${i}`, { i });
 
-    const gw_any = gw as unknown as { rememberEvent(event: string, data: Record<string, unknown>): void; _syncScheduled: boolean; };
-
-    // Burst: 10 synchronous rememberEvent calls
-    for (let i = 0; i < 10; i++) {
-      gw_any.rememberEvent(`burst-event-${i}`, { i });
-    }
-
-    // dispatchCount should be 0 synchronously (setImmediate defers)
-    expect(dispatchCount).toBe(0);
-    expect(gw_any._syncScheduled).toBe(true);
-
-    // After awaiting a microtask tick, setImmediate has fired
+    expect(notifications()).toBe(0);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(notifications()).toBe(1);
 
-    // Exactly 1 dispatch for the whole burst
-    expect(dispatchCount).toBe(1);
-    expect(gw_any._syncScheduled).toBe(false);
+    // A later burst is scheduled afresh rather than swallowed.
+    gw.publishEvent('after-burst', {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(notifications()).toBe(2);
   });
 
-  test('lastEventAt inside setImmediate reflects most recent event, not first', async () => {
-    // Deterministic version: emit both events synchronously so setImmediate
-    // cannot fire between them, then verify the dispatch carries the LAST
-    // event's createdAt timestamp.
-    //
-    // Emit both events synchronously. To distinguish which event's timestamp
-    // was captured we read _lastEventAt directly from the gateway after the
-    // second call and assert the dispatch payload matches it.
-    // gateway's own _lastEventAt field, which is always the most recent).
-    let capturedLastEventAt = -1;
-    const mockDispatch = {
-      syncControlPlaneState: (payload: Partial<ControlPlaneDomainState>) => { capturedLastEventAt = payload.lastEventAt ?? -1; },
-    };
-
-    const gw = new ControlPlaneGateway({});
-    (gw as unknown as { dispatch: Partial<DomainDispatch> }).dispatch = mockDispatch;
-    const gw_any = gw as unknown as {
-      rememberEvent(event: string, data: Record<string, unknown>): void;
-      _syncScheduled: boolean;
-      _lastEventAt: number;
-    };
+  test('the store carries the timestamp of the most recent event, not the first', async () => {
+    const { gw, runtimeStore } = observedGateway();
 
     const t0 = Date.now();
-    gw_any.rememberEvent('first', {});
-    // Read first event timestamp before the second event overwrites _lastEventAt
-    const firstEventAt = gw_any._lastEventAt;
-    gw_any.rememberEvent('last', {});
-    // Read second event timestamp, this is what the dispatch MUST carry
-    const secondEventAt = gw_any._lastEventAt;
-
-    // Both events scheduled a single setImmediate (coalesced). The dispatch
-    // hasn't fired yet (still synchronous).
-    expect(capturedLastEventAt).toBe(-1);
+    gw.publishEvent('first', {});
+    gw.publishEvent('last', {});
+    expect(runtimeStore.getState().controlPlane.lastEventAt).toBeUndefined();
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    // The dispatch must carry the SECOND event's timestamp.
-    // We assert equality against secondEventAt (the gateway's own field at
-    // the time of the second rememberEvent), which is always the most recent.
-    expect(capturedLastEventAt).toBe(secondEventAt);
-    // Sanity: second event's timestamp is >= first's (even if same ms)
-    expect(secondEventAt).toBeGreaterThanOrEqual(firstEventAt);
-    // Sanity: captured value is within the wall-clock range of this test
-    expect(capturedLastEventAt).toBeGreaterThanOrEqual(t0);
-    expect(capturedLastEventAt).toBeLessThanOrEqual(Date.now());
+    const recorded = gw.listRecentEvents(2);
+    expect(recorded.map((entry) => entry.event)).toEqual(['last', 'first']);
+    expect(runtimeStore.getState().controlPlane.lastEventAt).toBe(recorded[0]!.createdAt);
+    expect(recorded[0]!.createdAt).toBeGreaterThanOrEqual(recorded[1]!.createdAt);
+    expect(recorded[0]!.createdAt).toBeGreaterThanOrEqual(t0);
   });
 });
 

@@ -9,10 +9,12 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  * expose secrets", and it decided every unlisted path by omission: a token in
  * `~/.config/gh/hosts.yml`, a `.env.production` or a keystore anywhere else read
  * as harmless. That is a judgment about what a file holds, so it is now Jev's
- * reading: the side-effect battery's `secrets` question, asked for every call
- * of a built-in read-only tool (read, find, analyze, inspect, state, registry
- * and the other read-category tools) and for every file a search or map is
- * about to surface.
+ * reading: the side-effect battery's `secrets` question, asked for a call of a
+ * built-in read-only tool (read, find, analyze, inspect, state, registry and
+ * the other read-category tools). It is not asked per file a search or map
+ * surfaces: that filter is `PermissionManager.readAccess`, which applies only
+ * the owner's read rules, so a model reading every candidate file would
+ * multiply cost on a large search.
  *
  * A yes (or an uncertain reading) sends the call through the gate's full
  * reading, where touching secrets is at least high stakes. Readings are kept
@@ -22,10 +24,16 @@ import { decisionOrClassic } from '../runtime/decision-policy.js';
  */
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { sideEffect } from '../gate/batteries/side-effect.js';
 import { readingState } from '../gate/reading.js';
 
-const SEEN = new Map<string, boolean>();
+/**
+ * Readings are kept per installed judgment port and per model it reports: a
+ * verdict one model gave never answers for another, whether the model change
+ * installs a new port or only changes the model setting of the installed one.
+ */
+let SEEN = new WeakMap<JudgmentPort, Map<string, boolean>>();
 const SEEN_LIMIT = 2_048;
 
 /** The decision site read-only secrets readings are logged under. */
@@ -38,19 +46,24 @@ export const READ_SECRETS_SITE = 'engine.gate.read-secrets';
 export async function readTouchesSecrets(toolName: string, args: Record<string, unknown>, workingDirectory?: string, signal?: AbortSignal): Promise<boolean> {
   signal?.throwIfAborted();
   const state = readingState(toolName, args, workingDirectory);
-  const key = JSON.stringify(state);
+  const stateKey = JSON.stringify(state);
   return decisionOrClassic(async () => {
-    const seen = SEEN.get(key);
+    const port = judgmentPort(READ_SECRETS_SITE);
+    const seenByPort = SEEN.get(port) ?? new Map<string, boolean>();
+    SEEN.set(port, seenByPort);
+    // One settings-driven port stays installed while its model setting changes, so the model is part of the key.
+    const key = `${port.model}\0${stateKey}`;
+    const seen = seenByPort.get(key);
     if (seen !== undefined) return seen;
     const run = await executePolicyCheck(
-      () => sideEffect.run(judgmentPort(READ_SECRETS_SITE), state, { site: READ_SECRETS_SITE, only: ['secrets'], ...(signal === undefined ? {} : { signal }) }),
+      () => sideEffect.run(port, state, { site: READ_SECRETS_SITE, only: ['secrets'], ...(signal === undefined ? {} : { signal }) }),
       signal,
     );
     signal?.throwIfAborted();
     const touches = run.readings.secrets.verdict !== 'no';
     run.recordAction(touches ? 'secrets' : 'no-secrets');
-    SEEN.set(key, touches);
-    if (SEEN.size > SEEN_LIMIT) SEEN.delete(SEEN.keys().next().value!);
+    seenByPort.set(key, touches);
+    if (seenByPort.size > SEEN_LIMIT) seenByPort.delete(seenByPort.keys().next().value!);
     return touches;
   }, () => {
     signal?.throwIfAborted();
@@ -60,7 +73,7 @@ export async function readTouchesSecrets(toolName: string, args: Record<string, 
   });
 }
 
-/** Forgets every remembered reading (tests, and a settings change that alters the model). */
+/** Forgets every remembered reading. */
 export function forgetReadSecrets(): void {
-  SEEN.clear();
+  SEEN = new WeakMap();
 }

@@ -172,6 +172,11 @@ export interface DaemonReceipt {
   readonly at: number;
 }
 
+/** Names an object type declares, leaving out an index signature such as the `[key: string]: unknown` the generated inputs carry. */
+type DeclaredKeys<T> = keyof { [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K] };
+/** A session verb's input without `sessionId`, which the wrapper takes as its own argument. */
+type WithoutSessionId<T> = Pick<T, Exclude<DeclaredKeys<T>, 'sessionId'>>;
+
 export const WEBUI_SURFACE_KIND = 'webui';
 export const WEBUI_SURFACE_ID = 'goodvibes-webui';
 // The daemon-served world is one origin: the web UI's own bundle and the API it calls
@@ -179,7 +184,7 @@ export const WEBUI_SURFACE_ID = 'goodvibes-webui';
 // context always has `window.location.origin`; the 3421 fallback below is reached only
 // outside one (tests, SSR-style module evaluation).
 export const GOODVIBES_BASE_URL = import.meta.env.VITE_GOODVIBES_BASE_URL
-  ?? (typeof window === 'undefined' ? 'http://127.0.0.1:3421' : window.location.origin);
+  || (typeof window === 'undefined' ? 'http://127.0.0.1:3421' : window.location.origin);
 
 /** This build's own version (vite.config.ts's `define`, from package.json), for
  * comparison against a daemon-announced client-build floor, see client-compatibility.ts.
@@ -289,6 +294,26 @@ function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+/**
+ * The daemon's own words about an HTTP failure (category, hint, recoverable,
+ * retryAfterMs) lifted onto the thrown error, where formatError reads them. A body
+ * category never decides the two answers the app keys off: only a 401 is
+ * 'authentication' and only a transport failure is 'network'.
+ */
+export function daemonErrorFields(status: number, body: unknown): { category: string; hint?: string; recoverable?: boolean; retryAfterMs?: number } {
+  const record = asRecord(body);
+  const bodyCategory = typeof record.category === 'string' ? record.category.trim() : '';
+  const category = status === 401
+    ? 'authentication'
+    : bodyCategory && bodyCategory !== 'authentication' && bodyCategory !== 'network' ? bodyCategory : 'service';
+  return {
+    category,
+    ...(typeof record.hint === 'string' && record.hint.trim() ? { hint: record.hint } : {}),
+    ...(typeof record.recoverable === 'boolean' ? { recoverable: record.recoverable } : {}),
+    ...(typeof record.retryAfterMs === 'number' && Number.isFinite(record.retryAfterMs) ? { retryAfterMs: record.retryAfterMs } : {}),
+  };
+}
+
 function buildUrl(path: string, query?: JsonRecord): string {
   const url = new URL(path, `${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/`);
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -356,7 +381,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
       url,
       method,
       body,
-      category: response.status === 401 ? 'authentication' : 'service',
+      ...daemonErrorFields(response.status, body),
     });
     if (options.interpretRefusal !== false && path !== WEBUI_METHOD_ROUTES['judgment.battery.run'].path && path !== WEBUI_METHOD_ROUTES['control.status'].path) await resolveDaemonRefusal(error, runBrowserJudgment, {
       signal: options.signal, isCurrent: () => isClientLifetimeCurrent(failureLifetime),
@@ -395,7 +420,7 @@ async function requestStream(path: string, body: unknown, signal?: AbortSignal):
       url,
       method: 'POST' as HttpMethod,
       body: errBody,
-      category: response.status === 401 ? 'authentication' : 'service',
+      ...daemonErrorFields(response.status, errBody),
     });
   }
   return response;
@@ -936,22 +961,6 @@ export interface ApprovalRecord {
   readonly resolvedAt?: number;
   readonly resolvedBy?: string;
   readonly decision?: ApprovalDecision;
-  /**
-   * The session an ACCEPTED ask spawned: a CI "fix this?" offer that was
-   * approved gets the started fix-session's REAL, attachable session id (never
-   * an internal scheduling handle, platform bb4b9c30) stamped onto the resolved
-   * APPROVED record by the broker and published live through the broker-update
-   * path, so the accepting surface can open the session. Mutually exclusive
-   * with fixSessionError; never present on denied records; absent until the
-   * spawn completes.
-   */
-  readonly fixSessionId?: string;
-  /**
-   * The honest failure when the accepted ask's spawn did NOT produce an
-   * attachable session (platform bb4b9c30): stamped on the approved record instead
-   * of a dead id. Mutually exclusive with fixSessionId.
-   */
-  readonly fixSessionError?: string;
   readonly metadata: Record<string, unknown>;
   /**
    * The full decision trail. Optional in this client-side type (rather than
@@ -978,6 +987,10 @@ export interface ApprovalActionResult {
   /** The daemon's authoritative report of what it recorded (see
    * ApprovalRecordedOutcome). Absent only from a daemon predating the block. */
   readonly recorded?: ApprovalRecordedOutcome;
+  /** False when the decision arrived after the record had already settled and nothing changed. */
+  readonly applied?: boolean;
+  /** Why an unapplied decision changed nothing, in the daemon's words. */
+  readonly refusal?: string;
 }
 
 /**
@@ -1744,6 +1757,14 @@ export interface StepUpRegisterCredentialResult {
   };
 }
 
+/** One registered step-up passkey as the daemon reports it (no key material). */
+export interface StepUpCredentialSummary {
+  readonly credentialId: string;
+  readonly label?: string;
+  readonly createdAt: number;
+  readonly signCount: number;
+}
+
 /**
  * config.set's write outcome. See the `config.set` comment below for why this
  * exists rather than relying on the pinned contracts package's generated
@@ -1761,6 +1782,21 @@ export interface ConfigSetOutcome {
   readonly effectiveOrigin?: 'daemon' | 'shared' | 'project' | 'global' | 'default' | 'runtime' | 'runtime-default';
   /** True when the daemon, not this client, is the writer/reader-of-record for this key. */
   readonly daemonOwned?: boolean;
+}
+
+/**
+ * What credentials.set reports back: where the credential now lives, never the
+ * value. Mirrors the daemon's createCredentialSetHandler response.
+ */
+export interface CredentialSetOutcome {
+  readonly success: boolean;
+  readonly key: string;
+  readonly secretKey: string;
+  readonly scope: string;
+  readonly reference: string;
+  readonly configScope?: string;
+  readonly ownership?: string;
+  readonly credentialScope?: string;
 }
 
 /**
@@ -1827,11 +1863,12 @@ export const client = {
   operator: {
     invoke: invokeOperator,
     control: {
-      // A plain status read is receipt-NEUTRAL (never consumes). Pass
-      // { receipts: 'consume' }, done exactly once per daemon connect, not per
-      // poll, to receive undelivered update/crash/migration receipts and mark
-      // them delivered; the daemon returns each such receipt exactly once.
-      status: (input?: { receipts?: 'consume' }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
+      // A plain status read is receipt-NEUTRAL (never consumes). Once per
+      // daemon connect, not per poll, pass { receipts: 'peek' } to receive
+      // undelivered update/crash/migration receipts without marking them, then
+      // { receipts: 'ack', ids } for the ones shown. 'consume' marks on read
+      // and is only for a daemon that predates peek.
+      status: (input?: { receipts?: 'consume' | 'peek' | 'ack'; ids?: string }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
       snapshot: () => scopedPlatform.operator.invoke('control.snapshot', {}),
       // methodInfo: an honest, read-only capability probe. 'control.methods.get'
       // IS in the installed 0.38 OperatorMethodId union with a real generated I/O map
@@ -1856,6 +1893,11 @@ export const client = {
       // CHANGELOG.md). The browser reaches the shared store only over the
       // daemon. Status only, never bytes.
       get: () => invokeOperator('credentials.get'),
+      // Writes a credential into the daemon's own secret store and leaves a
+      // reference in config. ws-only (no REST binding), so it goes through the
+      // generic invoke endpoint. The response never contains the value.
+      set: (input: { key: string; value: string }) =>
+        invokeGatewayMethod<'credentials.set', CredentialSetOutcome>('credentials.set', input),
     },
     // stepup.*, the WebAuthn step-up ceremony's two server verbs. mintChallenge is the
     // bootstrap call the relay gate exempts from step-up (it is the prerequisite for
@@ -1863,13 +1905,19 @@ export const client = {
     // key so the daemon can verify later assertions. Both are REST-routed (see the
     // StepUpMintChallengeResult comment above) and resolve through invokeOperator.
     stepup: {
-      mintChallenge: (input?: { rendezvousId?: string; sessionId?: string; ttlMs?: number }, signal?: AbortSignal) =>
+      mintChallenge: (input?: { rendezvousId?: string; sessionId?: string; method?: string; path?: string; ttlMs?: number }, signal?: AbortSignal) =>
         invokeOperator<'stepup.challenge.mint', StepUpMintChallengeResult>('stepup.challenge.mint', input ?? {}, signal),
       registerCredential: (input: StepUpRegisterCredentialInput) =>
         invokeOperatorUncheckedInput<StepUpRegisterCredentialResult>(
           'stepup.credentials.register',
           input,
         ),
+      // The daemon's registered passkeys. Both verbs are admin-only and resolve through the
+      // generated REST routes (GET /api/stepup/credentials, DELETE .../{credentialId}).
+      listCredentials: (signal?: AbortSignal) =>
+        invokeOperator('stepup.credentials.list', {}, signal) as Promise<{ credentials: readonly StepUpCredentialSummary[] }>,
+      removeCredential: (credentialId: string) =>
+        invokeOperator('stepup.credentials.remove', { credentialId }) as Promise<{ credentialId: string; removed: boolean }>,
     },
     // config.*, like models.*, no OperatorMethodId coverage in the pinned
     // browser platform route maps, so both resolve through EXTRA_METHOD_ROUTES.
@@ -1890,6 +1938,9 @@ export const client = {
       get: () => invokeOperator('config.get'),
       set: (key: string, value: unknown) =>
         invokeOperator<'config.set', ConfigSetOutcome>('config.set', { key, value }),
+      // Removes the key's explicit value so it reads as its default again; the
+      // outcome reports the value the daemon now holds and the file it came from.
+      reset: (key: string) => invokeOperator<'config.reset', ConfigSetOutcome>('config.reset', { key }),
     },
     // payments.cards.*, the ONLY path card material takes off this surface.
     //
@@ -2212,10 +2263,12 @@ export const client = {
     // webui-facade artifact and pinned by the drift test, so a hand-written row is neither
     // allowed nor needed. Real generated I/O maps throughout.
     //
-    // AUTHORITY AND USER-REQUEST: neither is sent. routes/owner-profile.ts reads an absent
-    // `authority` as owner-direct and an absent `explicitUserRequest` as no claim either
-    // way, both because no live transport populates them; declaring either from here would
-    // be this surface asserting something it cannot know. The gates that do NOT trust the
+    // AUTHORITY AND USER-REQUEST: the caller sends `authority` (WEBUI_PROFILE_AUTHORITY,
+    // 'owner-direct', owner-profile.ts: the owner typing into their own settings page) on
+    // every profile write, because the daemon answers an absent or unrecognised value with
+    // a 400. `explicitUserRequest` is not sent: an absent one reads as no claim either way,
+    // since no live transport populates it, and declaring it from here would be this
+    // surface asserting something it cannot know. The gates that do NOT trust the
     // caller's self-description, the derivation check against the untrusted-content
     // ledger, and the requirement that a verbatim owner utterance exists, still run.
     //
@@ -2464,9 +2517,9 @@ export const client = {
       // of these call sites, TypeScript rejects a wrong-shaped `input` here at compile
       // time (see goodvibes.test.ts's "wrong-typed steer input is a compile error" case).
       get: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.get', { sessionId }, signal),
-      steer: (sessionId: string, input: OperatorMethodInput<'sessions.steer'>, signal?: AbortSignal) =>
+      steer: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.steer'>>, signal?: AbortSignal) =>
         invokeOperator('sessions.steer', { sessionId, ...input }, signal),
-      followUp: (sessionId: string, input: OperatorMethodInput<'sessions.followUp'>, signal?: AbortSignal) =>
+      followUp: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.followUp'>>, signal?: AbortSignal) =>
         invokeOperator('sessions.followUp', { sessionId, ...input }, signal),
       create: (input: OperatorMethodInput<'sessions.create'>) => invokeOperator('sessions.create', input),
       close: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.close', { sessionId }, signal),
@@ -2497,7 +2550,7 @@ export const client = {
       // until real I/O shapes land upstream.
       search: (input?: SessionsSearchInput) => invokeGatewayMethod<'sessions.search', SessionsSearchResult>('sessions.search', input ?? {}),
       messages: {
-        create: (sessionId: string, input: OperatorMethodInput<'sessions.messages.create'>) =>
+        create: (sessionId: string, input: WithoutSessionId<OperatorMethodInput<'sessions.messages.create'>>) =>
           invokeOperator('sessions.messages.create', { sessionId, ...input }),
         list: (sessionId: string) => invokeOperator('sessions.messages.list', { sessionId }),
       },
@@ -2970,15 +3023,32 @@ export async function login(username: string, password: string): Promise<unknown
   };
 }
 
+function isAuthRejection(error: unknown): boolean {
+  const record = asRecord(error);
+  return record.status === 401 || record.category === 'authentication';
+}
+
 export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
   const token = rawToken.replace(/^Bearer\s+/i, '').trim();
   if (!token) throw new Error('Token is required');
+  const previous = await tokenStore.getTokenEntry();
   await client.auth.setToken(token);
   const validationLifetime = getClientLifetime();
   try {
-    return await getCurrentAuth();
+    try {
+      return await getCurrentAuth();
+    } catch (error) {
+      if (isAuthRejection(error) || getClientLifetime() !== validationLifetime) throw error;
+      // One more look before judging: a transient failure says nothing about the token.
+      return await getCurrentAuth();
+    }
   } catch (error) {
-    if (getClientLifetime() === validationLifetime) await client.auth.clearToken();
+    if (getClientLifetime() === validationLifetime) {
+      if (isAuthRejection(error) || previous.token === null) await client.auth.clearToken();
+      // Not a verdict on the new token (network, daemon error): the browser keeps the
+      // credential it already had instead of being signed out by a failed switch.
+      else await tokenStore.setTokenEntry(previous.token, previous.expiresAt);
+    }
     throw error;
   }
 }

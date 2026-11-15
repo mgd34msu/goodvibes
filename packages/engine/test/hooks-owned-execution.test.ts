@@ -8,7 +8,7 @@ import { run as runCommand } from '../platform/src/platform/hooks/runners/comman
 import { run as runPrompt } from '../platform/src/platform/hooks/runners/prompt.ts';
 import { run as runHttp } from '../platform/src/platform/hooks/runners/http.ts';
 import { run as runTypeScript } from '../platform/src/platform/hooks/runners/typescript.ts';
-import { OwnedProcessGroupUnsupportedError, runProcess } from '../platform/src/platform/runtime/remote/host/backends/process-runner.ts';
+import { OwnedProcessGroupUnsupportedError, runProcess } from '../platform/src/platform/utils/process-runner.ts';
 import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 import { ToolLLM } from '../platform/src/platform/config/tool-llm.ts';
 import type { ConfigManager } from '../platform/src/platform/config/manager.ts';

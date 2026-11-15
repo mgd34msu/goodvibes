@@ -4,7 +4,9 @@ import { fakePort, choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/test
 import { wireStreamEventMetrics, createStreamMetrics, type WireStreamEventMetricsOptions } from '../../core/stream-event-wiring.ts';
 import { preparePublicErrorText, publicErrorTextAnswer, withPublicErrorText, type PublicErrorTextReadings } from '../helpers/user-error-reading.ts';
 import { yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
+import { holdTimers } from '../helpers/held-timers.ts';
 
+const NOTICE_TIMEOUT_MS = 71_234;
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
@@ -183,13 +185,15 @@ test('the bounded owner preserves error arrival order when reads resolve backwar
 
 test('a never-settling reader does not block failover forever or authorize a late result', async () => {
   const pending = deferred(); reader({ wait: pending.promise, auth: true });
-  const f = fixture({ errorNoticeTimeoutMs: 5, providerOptimizer: { enabled: true, testFallback: () => ({ chain: [{ position: 0, capable: true, providerId: 'second', modelId: 'two' }] }), recordFallbackTransition() {}, fallbackLog: [] } });
+  const held = holdTimers(NOTICE_TIMEOUT_MS);
+  const f = fixture({ errorNoticeTimeoutMs: NOTICE_TIMEOUT_MS, providerOptimizer: { enabled: true, testFallback: () => ({ chain: [{ position: 0, capable: true, providerId: 'second', modelId: 'two' }] }), recordFallbackTransition() {}, fallbackLog: [] } });
   try {
     f.turns.emit('TURN_ERROR', { turnId: 'turn-a', error: 'unread failure' });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await flush(); expect(f.retries).toHaveLength(0);
+    held.fire(); await flush();
     expect(f.retries).toHaveLength(1); expect(f.messages[0]).toContain('Error details unavailable');
     pending.resolve(); await flush(); expect(f.retries).toHaveLength(1); expect(f.messages[0]).not.toContain('Authentication failed');
-  } finally { f.close(); }
+  } finally { f.close(); held.restore(); }
 });
 
 for (const boundary of ['cancel', 'new-turn', 'new-session', 'close'] as const) {

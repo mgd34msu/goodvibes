@@ -123,6 +123,12 @@ export function resolveAutomationCronStaggerMs(schedule: AutomationCronSchedule)
   return resolveDefaultCronStaggerMs(schedule.expression) ?? 0;
 }
 
+/** A cron schedule written without a zone is pinned to the zone of the process that stored it, so moving the host does not shift its wall-clock time. */
+export function withCronTimezone(schedule: AutomationScheduleDefinition): AutomationScheduleDefinition {
+  if (!schedule || typeof schedule !== 'object' || schedule.kind !== 'cron' || schedule.timezone) return schedule;
+  return { ...schedule, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+}
+
 /** Assign once before persistence. A changed cron expression/window can retain the same phase. */
 export function ensureAutomationCronPhase(
   schedule: AutomationScheduleDefinition,
@@ -201,7 +207,8 @@ export function normalizeCronSchedule(expression: string, timezone?: string, sta
   const schedule: AutomationCronSchedule = {
     kind: 'cron',
     expression,
-    ...(timezone ? { timezone } : {}),
+    // Stored with the zone it was written in, so moving the host does not shift a job's wall-clock time.
+    timezone: timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     ...(effectiveStaggerMs !== undefined ? { staggerMs: effectiveStaggerMs } : {}),
   };
   validateSchedule(schedule);

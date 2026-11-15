@@ -16,6 +16,14 @@ const older = (): KnowledgeIssueRecord => ({
   message: 'Earlier generated quality issue', createdAt: 1, updatedAt: 1,
   metadata: { knowledgeSpaceId: space, namespace: space, generated: true, homeGraph: true, subjectId: 'LOCAL_DEVICE' },
 });
+// The contract is reuse versus recomputation, not how many digests one recipe takes.
+function hashCounter(hashes: { readonly mock: { readonly calls: readonly unknown[] } }) {
+  let seen = 0;
+  return {
+    reused: () => expect(hashes.mock.calls.length).toBe(seen),
+    rehashed: () => { expect(hashes.mock.calls.length).toBeGreaterThan(seen); seen = hashes.mock.calls.length; },
+  };
+}
 const close: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of close.splice(0).reverse()) await release(); });
 
@@ -25,30 +33,30 @@ test('actual indexed original issue identity guards reuse the checked older reci
   await store.init();
   await store.upsertNode({ id: 'LOCAL_DEVICE', kind: 'ha_device', slug: 'fixture', title: 'Synthetic device', status: 'draft', metadata: { knowledgeSpaceId: space } });
   const original = await store.upsertIssue(older());
-  const hashes = spyOn(crypto, 'createHash');
+  const hashes = spyOn(crypto, 'createHash'), count = hashCounter(hashes);
   try {
     const identities = createHomeGraphQualityIssueIdentities(store, space, `homegraph:${space}:quality`);
     const identity = identities.prepare(code, 'LOCAL_DEVICE');
     expect(identity.original).toBe(original);
-    expect(hashes).toHaveBeenCalledTimes(1);
+    count.rehashed();
     for (let index = 0; index < 8; index++) {
       expect(store.getSemanticIssueCandidates({ spaceId: space, namespace: space, code, nodeId: 'LOCAL_DEVICE' })[0]).toBe(original);
       identity.assertCurrent(); identities.assertCurrent();
     }
-    expect(hashes).toHaveBeenCalledTimes(1);
+    count.reused();
     expect(isLegacyHomeGraphQualityIssue(structuredClone(original), space)).toBe(true);
-    expect(hashes).toHaveBeenCalledTimes(2); // The copied row independently checks, never inherits original reuse.
+    count.rehashed(); // The copied row independently checks, never inherits original reuse.
   } finally { hashes.mockRestore(); }
 });
 
 test('recipe, ID and footprint changes cannot inherit a cached old-row classification', () => {
-  const original = older(), hashes = spyOn(crypto, 'createHash');
+  const original = older(), hashes = spyOn(crypto, 'createHash'), count = hashCounter(hashes);
   try {
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(true);
-    expect(hashes).toHaveBeenCalledTimes(1);
+    count.rehashed();
     Object.assign(original, { id: 'hg-issue-000000000000000000000000' });
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(false);
-    expect(hashes).toHaveBeenCalledTimes(1); // Same recipe, current ID still compared.
+    count.reused(); // Same recipe, current ID still compared.
     Object.assign(original, { id: older().id });
     original.metadata.generated = false;
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(false);
@@ -63,15 +71,15 @@ test('recipe, ID and footprint changes cannot inherit a cached old-row classific
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(false);
     original.metadata.knowledgeSpaceId = space;
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(true);
-    expect(hashes).toHaveBeenCalledTimes(1);
+    count.reused();
     Object.assign(original, { code: 'homegraph.device.unknown_battery' });
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(false);
-    expect(hashes).toHaveBeenCalledTimes(2);
+    count.rehashed();
     Object.assign(original, { id: 'hg-issue-bc6bee5d2b03fbd74b1be1f3' });
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(true);
-    expect(hashes).toHaveBeenCalledTimes(2);
+    count.reused();
     Object.assign(original, { nodeId: 'different-native-device' }); original.metadata.subjectId = 'different-native-device';
     expect(isLegacyHomeGraphQualityIssue(original, space)).toBe(false);
-    expect(hashes).toHaveBeenCalledTimes(3);
+    count.rehashed();
   } finally { hashes.mockRestore(); }
 });

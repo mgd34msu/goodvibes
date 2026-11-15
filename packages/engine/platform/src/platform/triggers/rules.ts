@@ -86,10 +86,21 @@ export function compare(operator: ComparisonOperator, left: TriggerValue, right:
     case 'not-contains':
       return !leftText.includes(rightText);
     case 'matches':
-      return validateRegexSource(rightText, 'rule.operand').test(leftText);
+      // Synchronous on the daemon: scan a bounded prefix, never an unbounded probe result.
+      return validateRegexSource(rightText, 'rule.operand').test(leftText.length > 65_536 ? leftText.slice(0, 65_536) : leftText);
     default:
       return false;
   }
+}
+
+/**
+ * Level conditions (a rate, an aggregate, a correlation window) stay true across
+ * many checks. Firing on every check would start one agent turn per check for a
+ * single event, so these fire on the rising edge and re-arm once the condition
+ * stops holding.
+ */
+function onRisingEdge(hit: boolean, state: TriggerRuleState): { fire: boolean; ruleState: TriggerRuleState; held: boolean } {
+  return { fire: hit && state.lastMatched !== true, ruleState: { ...state, lastMatched: hit }, held: hit && state.lastMatched === true };
 }
 
 function windowSlice(context: RuleEvaluationContext, windowMs: number): TriggerObservation[] {
@@ -142,21 +153,23 @@ function evaluateCorrelation(rule: CorrelationRule, context: RuleEvaluationConte
 
   if (rule.require === 'any') {
     const hit = rule.triggerIds.find((id) => seen.has(id));
+    const edge = onRisingEdge(hit !== undefined, context.ruleState);
     return {
-      fire: hit !== undefined,
-      ruleState: context.ruleState,
-      reason: hit ? `correlated trigger ${hit} fired within ${rule.withinMs}ms` : 'no correlated trigger fired in the window',
+      fire: edge.fire,
+      ruleState: edge.ruleState,
+      reason: hit ? `correlated trigger ${hit} fired within ${rule.withinMs}ms${edge.held ? ' (already acted on)' : ''}` : 'no correlated trigger fired in the window',
       fingerprint,
     };
   }
 
   if (rule.require === 'all') {
     const missing = rule.triggerIds.filter((id) => !seen.has(id));
+    const edge = onRisingEdge(missing.length === 0, context.ruleState);
     return {
-      fire: missing.length === 0,
-      ruleState: context.ruleState,
+      fire: edge.fire,
+      ruleState: edge.ruleState,
       reason: missing.length === 0
-        ? `all of ${rule.triggerIds.join(', ')} fired within ${rule.withinMs}ms`
+        ? `all of ${rule.triggerIds.join(', ')} fired within ${rule.withinMs}ms${edge.held ? ' (already acted on)' : ''}`
         : `still waiting on ${missing.join(', ')}`,
       fingerprint,
     };
@@ -168,11 +181,12 @@ function evaluateCorrelation(rule: CorrelationRule, context: RuleEvaluationConte
     if (entry.triggerId === rule.triggerIds[cursor]) cursor += 1;
     if (cursor === rule.triggerIds.length) break;
   }
+  const edge = onRisingEdge(cursor === rule.triggerIds.length, context.ruleState);
   return {
-    fire: cursor === rule.triggerIds.length,
-    ruleState: context.ruleState,
+    fire: edge.fire,
+    ruleState: edge.ruleState,
     reason: cursor === rule.triggerIds.length
-      ? `sequence ${rule.triggerIds.join(' -> ')} completed within ${rule.withinMs}ms`
+      ? `sequence ${rule.triggerIds.join(' -> ')} completed within ${rule.withinMs}ms${edge.held ? ' (already acted on)' : ''}`
       : `sequence reached ${cursor}/${rule.triggerIds.length} (next: ${rule.triggerIds[cursor] ?? 'n/a'})`,
     fingerprint,
   };
@@ -324,10 +338,11 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
       const perMs = ((last.numeric ?? 0) - (first.numeric ?? 0)) / elapsedMs;
       const rate = rule.per === 'minute' ? perMs * 60_000 : perMs * 1_000;
       const hit = compare(rule.operator, rate, rule.operand);
+      const edge = onRisingEdge(hit, state);
       return {
-        fire: hit,
-        ruleState: state,
-        reason: `rate ${rate.toFixed(4)}/${rule.per ?? 'second'} over ${elapsedMs}ms ${hit ? 'satisfied' : 'did not satisfy'} ${rule.operator} ${rule.operand}`,
+        fire: edge.fire,
+        ruleState: edge.ruleState,
+        reason: `rate ${rate.toFixed(4)}/${rule.per ?? 'second'} over ${elapsedMs}ms ${hit ? 'satisfied' : 'did not satisfy'} ${rule.operator} ${rule.operand}${edge.held ? ' (already acted on)' : ''}`,
         fingerprint: `rate:${rule.operator}:${rule.operand}`,
       };
     }
@@ -349,10 +364,11 @@ export function evaluateRule(rule: TriggerRule, context: RuleEvaluationContext):
         return { fire: false, ruleState: state, reason: 'aggregate is undefined for this window', fingerprint: `agg:${rule.aggregate}` };
       }
       const hit = compare(rule.operator, computed, rule.operand);
+      const edge = onRisingEdge(hit, state);
       return {
-        fire: hit,
-        ruleState: state,
-        reason: `${rule.aggregate}=${computed} over ${window.length} samples ${hit ? 'satisfied' : 'did not satisfy'} ${rule.operator} ${rule.operand}`,
+        fire: edge.fire,
+        ruleState: edge.ruleState,
+        reason: `${rule.aggregate}=${computed} over ${window.length} samples ${hit ? 'satisfied' : 'did not satisfy'} ${rule.operator} ${rule.operand}${edge.held ? ' (already acted on)' : ''}`,
         fingerprint: `agg:${rule.aggregate}:${rule.operator}:${rule.operand}`,
       };
     }

@@ -31,6 +31,7 @@ import { McpHttpConnection, McpRpcError, captureMcpHttpToolCatalogSource } from 
 import type {
   McpClientNotification,
   McpClientOptions,
+  McpClientPhase,
   McpClientServerRequest,
   McpClientUnhandledResponse,
   McpToolInfo,
@@ -75,16 +76,20 @@ interface PendingRequest {
 }
 
 const DEFAULT_TIMEOUT_MS = 0;
+const MAX_TOOL_LIST_PAGES = 100;
 const PING_TIMEOUT_MS = 5_000;
 const RESTART_DELAY_MS = 2_000;
 const MAX_RESTART_ATTEMPTS = 3;
 /** Era-detection probe: a legacy server answers `server/discover` quickly with method-not-found; this bound covers servers that stay silent instead. */
 const DISCOVER_PROBE_TIMEOUT_MS = 3_000;
+/** The handshake is bounded separately from tool calls; OAuth-style servers can take a while to answer it. */
+const INITIALIZE_TIMEOUT_MS = 30_000;
 
 export type { JsonRpcId } from './jsonrpc.js';
 export type {
   McpClientNotification,
   McpClientOptions,
+  McpClientPhase,
   McpClientServerRequest,
   McpClientUnhandledResponse,
   McpElicitationResolver,
@@ -94,12 +99,13 @@ export type {
 } from './client-types.js';
 
 export class McpClient {
-  // Native byte dispatch cannot be substituted while its reader is awaiting input.
-  static readonly #processBuffer = McpClient.prototype._processBuffer;
-  static readonly #dispatchLine = McpClient.prototype._dispatchLine;
-  static readonly #handleResponse = McpClient.prototype._handleResponse;
-  static readonly #handleNotification = McpClient.prototype._handleNotification;
-  static readonly #handleServerRequest = McpClient.prototype._handleServerRequest;
+  // Native byte dispatch cannot be substituted while its reader is awaiting input. `this`, not the class name: the emitted
+  // JavaScript otherwise reads the class through a variable that is not assigned yet and fails to load under Node.
+  static readonly #processBuffer = this.prototype._processBuffer;
+  static readonly #dispatchLine = this.prototype._dispatchLine;
+  static readonly #handleResponse = this.prototype._handleResponse;
+  static readonly #handleNotification = this.prototype._handleNotification;
+  static readonly #handleServerRequest = this.prototype._handleServerRequest;
 
   private connectionId = randomUUID();
   private connectionLife = new AbortController();
@@ -160,22 +166,37 @@ export class McpClient {
         || !this.isConnected) throw new Error('MCP request connection changed');
     };
     const close = () => { if (this.incoming.get(key) === controller) this.incoming.delete(key); controller.abort(); };
+    let held: McpElicitationOutcome | undefined;
     try {
       const owned = snapshotJudgmentInput(params);
       assertCurrent();
       const outcome = await awaitPermission(() => resolver({ serverName, id, params: owned,
         context: { scope: { connectionId, destination, signal, assertCurrent }, ...(operation ? { operation } : {}) } }), signal);
+      held = outcome;
       assertCurrent();
-      return bindMcpElicitationResponse(outcome, assertCurrent, close);
-    } catch (error) { close(); throw error; }
+      const bound = bindMcpElicitationResponse(outcome, assertCurrent, close);
+      held = undefined;
+      return bound;
+    } catch (error) {
+      // An accepted outcome already owns an admission and a listener; releasing the request alone would leak both.
+      if (held) discardMcpElicitation(held);
+      close(); throw error;
+    }
   }
 
   private proc: ReturnType<typeof Bun.spawn> | null = null;
   private nextId = 1;
   private pendingRequests = new Map<string, PendingRequest>();
   private buffer = '';
-  private readLoopRunning = false;
+  /**
+   * The process whose stdout is being read. Tracked per process, not as one
+   * flag: a loop still blocked on an old process's pipe (a grandchild holding
+   * it open) must not stop the next process from getting its own reader.
+   */
+  private readLoopProc: ReturnType<typeof Bun.spawn> | null = null;
   private restartCount = 0;
+  #phase: McpClientPhase = 'idle';
+  #lastError: string | null = null;
   /** The pending crash-restart timer, held so a deliberate disconnect can cancel it. */
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
@@ -218,15 +239,31 @@ export class McpClient {
     assertCurrent(); return assertCurrent;
   }
 
+  /** Every page of tools/list: a server that pages is never silently cut to its first page. */
+  async #requestAllTools<T>(assertCurrent: () => void): Promise<T[]> {
+    const tools: T[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_LIST_PAGES; page++) {
+      const result = await this._request<{ tools?: T[]; nextCursor?: unknown }>('tools/list', cursor === undefined ? undefined : { cursor }, undefined, undefined, assertCurrent);
+      assertCurrent();
+      tools.push(...(result.tools ?? []));
+      const next = typeof result.nextCursor === 'string' && result.nextCursor !== '' ? result.nextCursor : undefined;
+      if (next === undefined) return tools;
+      if (seen.has(next)) throw new Error(`McpClient(${this.config.name}): tools/list repeated a page cursor`);
+      seen.add(next); cursor = next;
+    }
+    throw new Error(`McpClient(${this.config.name}): tools/list returned more than ${MAX_TOOL_LIST_PAGES} pages; the catalog would be incomplete`);
+  }
+
   #collectToolInfo(assertCurrent: () => void): Promise<{ readonly owner: object; readonly tools: McpToolInfo[] }> {
     assertCurrent(); const owner = this.#toolCatalogOwner;
     if (this.toolInfoCache) return Promise.resolve({ owner, tools: this.toolInfoCache });
     if (this.#pendingToolInfo?.owner === owner) return this.#pendingToolInfo.promise;
     const pending = { owner, promise: Promise.resolve().then(async () => {
       assertCurrent();
-      const result = await this._request<{ tools: Array<{ name: string; description?: string }> }>('tools/list', undefined, undefined, undefined, assertCurrent);
-      assertCurrent();
-      const tools = (result.tools ?? []).map(tool => ({ name: tool.name, description: tool.description ?? '' }));
+      const listed = await this.#requestAllTools<{ name: string; description?: string }>(assertCurrent);
+      const tools = listed.map(tool => ({ name: tool.name, description: tool.description ?? '' }));
       this.toolInfoCache = tools;
       return { owner, tools };
     }) };
@@ -300,13 +337,43 @@ export class McpClient {
     return this.negotiated;
   }
 
+  /** Where the connection is in its life; `connected:false` alone cannot tell restarting from given up. */
+  get phase(): McpClientPhase {
+    // An HTTP session can close underneath a ready client without any local event.
+    if (this.#phase === 'ready' && !this.#isConnected()) return 'closed';
+    return this.#phase;
+  }
+
+  /** The most recent connect, handshake or crash failure; cleared once the server is ready again. */
+  get lastError(): string | null {
+    return this.#lastError;
+  }
+
+  #fail(phase: McpClientPhase, error: unknown): void {
+    this.#phase = phase;
+    this.#lastError = summarizeError(error);
+  }
+
   /**
    * connect, Start the transport and negotiate a protocol version.
    * After connect, listTools() is available. No tool data is fetched here.
    */
   async connect(): Promise<void> {
+    try {
+      await this.#connect();
+    } catch (error) {
+      // A process that died mid-handshake may already have a restart queued.
+      this.#fail(this.restartTimer ? 'restart-wait' : 'gave-up', error);
+      throw error;
+    }
+    this.#phase = 'ready';
+    this.#lastError = null;
+  }
+
+  async #connect(): Promise<void> {
     if (this.config.url) {
       if (this.http?.isOpen) return;
+      this.#phase = 'negotiating';
       this.renewConnection();
       this.http = new McpHttpConnection({
         serverName: this.config.name,
@@ -315,6 +382,7 @@ export class McpClient {
         clientCapabilities: this._clientCapabilities(),
         timeoutMs: this.options?.timeout ?? DEFAULT_TIMEOUT_MS,
         fetchImpl: this.options?.fetchImpl,
+        ...(this.config.headers ? { headers: this.config.headers } : {}),
         handlers: {
           onNotification: (method, params) => {
             applyNative(McpClient.#handleNotification, this, [{ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) }]);
@@ -357,12 +425,9 @@ export class McpClient {
     }
 
     // Fetch all tools with full schemas and cache them all at once
-    const result = await this._request<{
-      tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: unknown }>;
-    }>('tools/list', undefined, undefined, undefined, assertCurrent);
-    assertCurrent();
+    const listed = await this.#requestAllTools<{ name: string; description?: string; inputSchema?: Record<string, unknown>; annotations?: unknown }>(assertCurrent);
 
-    for (const t of result.tools ?? []) {
+    for (const t of listed) {
       const inputSchema = t.inputSchema ?? { type: 'object', properties: {} };
       // On the HTTP transport the specification requires excluding tool
       // definitions whose x-mcp-header annotations are invalid.
@@ -426,8 +491,13 @@ export class McpClient {
         const pendingResponses = responses;
         const beforeSend = () => { assertCurrent(); if (this.schemaCache.get(toolName) !== schema) throw new Error('MCP tool schema changed'); if (!claimed) { effect?.claim(); claimed = true; } if (pendingResponses) for (const response of Object.values(pendingResponses)) commitMcpElicitation(response); };
         const result = await this._request('tools/call', params, this._toolCallHeaders(toolName, ownedArgs), boundOperation, beforeSend);
-        assertCurrent(); responses = null;
-        if (this.negotiated?.era !== 'modern' || !isInputRequiredResult(result)) return result;
+        // The tool has run once its result is back: a change after that point must
+        // not discard the result. Only an interim result that asks for another
+        // request still needs the call to be current.
+        const interim = this.negotiated?.era === 'modern' && isInputRequiredResult(result);
+        if (interim) assertCurrent();
+        responses = null;
+        if (!interim) return result;
         const ownedResult = readProtocolRequest(captureMcpInputRequired(result)).wire as typeof result;
         responses = await this._resolveInputRequests(toolName, ownedResult.inputRequests, boundOperation);
         assertCurrent();
@@ -483,10 +553,10 @@ export class McpClient {
     if (this.http) {
       const http = this.http;
       await http.close();
-      if (this.http === http) { this.http = null; this.negotiated = null; }
+      if (this.http === http) { this.http = null; this.negotiated = null; this.#phase = 'closed'; }
       return;
     }
-    if (!this.proc) return;
+    if (!this.proc) { this.#phase = 'closed'; return; }
     const proc = this.proc;
     // Reject all pending requests
     for (const [, pending] of this.pendingRequests) {
@@ -503,10 +573,11 @@ export class McpClient {
       // The process may already be gone; record the shutdown error for ops.
       logger.warn('[McpClient] error during process shutdown', { error: String(err) });
     } finally {
+      this.#phase = 'closed';
       if (this.proc !== proc) return;
       this.proc = null;
       this.buffer = '';
-      this.readLoopRunning = false;
+      if (this.readLoopProc === proc) this.readLoopProc = null;
       this.initialized = false;
       this.negotiated = null;
     }
@@ -518,6 +589,10 @@ export class McpClient {
 
   private async _startProcess(): Promise<void> {
     this.renewConnection();
+    this.#phase = 'starting';
+    // A new process has negotiated nothing, whatever the previous one did.
+    this.initialized = false;
+    this.negotiated = null;
     const processSpec = this.options?.processSpec;
     const cmd = processSpec?.command ?? this.config.command;
     if (!cmd) {
@@ -564,12 +639,15 @@ export class McpClient {
    */
   private async _negotiate(): Promise<void> {
     if (this.initialized) return;
+    this.#phase = 'negotiating';
     let modernSupported: string[] | 'legacy';
     try {
       const meta = buildModernMeta(MCP_STATELESS_REVISION, { name: 'goodvibes-platform', version: VERSION }, this._clientCapabilities());
       const result = await this._rawRequest('server/discover', withModernMeta({}, meta), DISCOVER_PROBE_TIMEOUT_MS);
       modernSupported = parseDiscoverSupportedVersions(result) ?? [MCP_STATELESS_REVISION];
     } catch (err) {
+      // The process died or the connection was retired: there is nothing to fall back to.
+      if (this.connectionLife.signal.aborted) throw err;
       const supported = err instanceof McpRpcError && isRecognizedModernErrorCode(err.code)
         ? parseSupportedVersionsFromError(err.data)
         : null;
@@ -599,7 +677,7 @@ export class McpClient {
         protocolVersion: requested,
         capabilities: this._clientCapabilities(),
         clientInfo: { name: 'goodvibes-platform', version: VERSION },
-      });
+      }, this.options?.initializeTimeoutMs ?? (this.options?.timeout || INITIALIZE_TIMEOUT_MS));
       const serverVersion = isRecord(result) && typeof result.protocolVersion === 'string'
         ? result.protocolVersion
         : requested;
@@ -645,11 +723,16 @@ export class McpClient {
 
     const signal = operationSignal ? AbortSignal.any([this.connectionLife.signal, operationSignal]) : this.connectionLife.signal;
     return new Promise<T>((resolve, reject) => {
+      let written = false;
       const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); };
-      const onAbort = () => { this.pendingRequests.delete(pendingKey); cleanup(); reject(signal.reason); };
+      const onAbort = () => {
+        this.pendingRequests.delete(pendingKey);
+        cleanup(); if (written) this.#cancelRequest(id, method, 'request aborted'); reject(signal.reason);
+      };
       const timer = timeoutMs > 0 ? setTimeout(() => {
         this.pendingRequests.delete(pendingKey);
         cleanup();
+        if (written) this.#cancelRequest(id, method, `request timed out after ${timeoutMs}ms`);
         reject(new Error(`McpClient(${this.config.name}): request '${method}' timed out after ${timeoutMs}ms`));
       }, timeoutMs) : undefined;
       timer?.unref?.();
@@ -662,15 +745,31 @@ export class McpClient {
 
       signal.addEventListener('abort', onAbort, { once: true });
       if (signal.aborted) { onAbort(); return; }
+      // The caller's own refusal reaches it as thrown, so it is not mistaken for a transport write failure.
+      try { beforeSend?.(); } catch (err) { cleanup(); this.pendingRequests.delete(pendingKey); reject(err); return; }
       try {
-        beforeSend?.();
         (this.proc?.stdin as import('bun').FileSink | undefined)?.write(line);
+        written = true;
       } catch (err) {
         cleanup();
         this.pendingRequests.delete(pendingKey);
         reject(new Error(`McpClient(${this.config.name}): write failed: ${summarizeError(err)}`));
       }
     });
+  }
+
+  /**
+   * Tell the server a request it may still be running was given up on, so a slow
+   * mutating tool is not left running while the caller retries it. Best effort:
+   * the specification forbids cancelling `initialize`, and a gone process needs nothing.
+   */
+  #cancelRequest(requestId: number, method: string, reason: string): void {
+    if (method === 'initialize' || !this.proc || !this.isConnected) return;
+    try {
+      (this.proc.stdin as import('bun').FileSink).write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId, reason } })}\n`);
+    } catch (err) {
+      logger.debug('McpClient: could not send request cancellation', { server: this.config.name, method, err: summarizeError(err) });
+    }
   }
 
   /** Send a JSON-RPC notification (no response expected). */
@@ -688,10 +787,9 @@ export class McpClient {
   }
 
   private _startReadLoop(): void {
-    if (this.readLoopRunning || !this.proc) return;
-    this.readLoopRunning = true;
-
+    if (!this.proc || this.readLoopProc === this.proc) return;
     const proc = this.proc;
+    this.readLoopProc = proc;
     const decoder = new TextDecoder();
 
     (async () => {
@@ -706,26 +804,37 @@ export class McpClient {
       } catch (err) {
         logger.warn('McpClient: stdout read loop ended', { server: this.config.name, err: summarizeError(err) });
       } finally {
+        if (this.readLoopProc === proc) this.readLoopProc = null;
         if (this.proc !== proc) return;
-        this.retireConnection();
-        this.readLoopRunning = false;
-        // The process is gone; any restart must re-negotiate the protocol.
-        this.initialized = false;
-        this.negotiated = null;
-        // Reject remaining pending requests
+        // Reject remaining pending requests before retiring the connection, so
+        // callers learn the process exited rather than a bare abort.
         for (const [, pending] of this.pendingRequests) {
           clearTimeout(pending.timer);
           pending.reject(new Error(`McpClient(${this.config.name}): process exited unexpectedly`));
         }
         this.pendingRequests.clear();
+        this.retireConnection();
+        // The process is gone; any restart must re-negotiate the protocol.
+        this.initialized = false;
+        this.negotiated = null;
 
         // Auto-restart only on an unexpected crash, never after a deliberate disconnect.
         if (this.intentionalClose) {
-          // Deliberate shutdown: leave the process down.
-        } else if (this.restartCount < MAX_RESTART_ATTEMPTS) {
-          this._scheduleRestart();
+          this.#phase = 'closed';
         } else {
-          logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+          // stdout can close while the process lives on; nothing would read its
+          // replies again, so it must not keep reporting itself connected.
+          if (this.#isConnected()) {
+            try { proc.kill(); } catch { /* already gone */ }
+          }
+          // Keep a more specific failure (a timed-out restart handshake) when there is one.
+          this.#lastError ??= 'the server process exited unexpectedly';
+          if (this.restartCount < MAX_RESTART_ATTEMPTS) {
+            this._scheduleRestart();
+          } else {
+            this.#phase = 'gave-up';
+            logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
+          }
         }
       }
     })();
@@ -944,13 +1053,15 @@ export class McpClient {
   private _scheduleRestart(): void {
     this._cancelRestart();
     this.restartCount++;
-    const delay = RESTART_DELAY_MS * this.restartCount;
+    const delay = (this.options?.restartDelayMs ?? RESTART_DELAY_MS) * this.restartCount;
     logger.info('McpClient: scheduling restart', { server: this.config.name, attempt: this.restartCount, delayMs: delay });
+    this.#phase = 'restart-wait';
 
     const timer = setTimeout(async () => {
       if (this.restartTimer === timer) this.restartTimer = null;
       if (this.intentionalClose) return; // Deliberately disconnected, do not restart
-      if (this.proc && this.isConnected) return; // Already restarted by something else
+      // Already restarted by something else (a live process nobody reads is not a restart).
+      if (this.proc && this.isConnected && this.readLoopProc === this.proc) return;
       try {
         await this._startProcess();
         await this._negotiate();
@@ -960,9 +1071,12 @@ export class McpClient {
         // Invalidate tool caches so they're re-fetched after restart (the
         // restarted server may advertise changed tool lists or schemas).
         this.#invalidateToolCatalog();
+        this.#phase = 'ready';
+        this.#lastError = null;
         logger.info('McpClient: restart successful', { server: this.config.name });
       } catch (err) {
         logger.error('McpClient: restart failed', { server: this.config.name, err: summarizeError(err) });
+        this.#lastError = summarizeError(err);
         this._handleFailedRestart();
       }
     }, delay);
@@ -987,6 +1101,7 @@ export class McpClient {
     if (this.restartCount < MAX_RESTART_ATTEMPTS) {
       this._scheduleRestart();
     } else {
+      this.#phase = 'gave-up';
       logger.info('McpClient: exceeded max restart attempts', { server: this.config.name });
     }
   }

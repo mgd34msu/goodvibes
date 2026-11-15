@@ -41,6 +41,7 @@ function makeMatrixContext(overrides: Partial<Record<string, unknown>> = {}) {
             mode: 'spawn',
             task: { prompt: 'hello matrix' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },
@@ -112,7 +113,8 @@ describe('matrix adapter: contract surface', () => {
       channelId: '!room:example.org',
       threadId: '$thread',
       text: 'hello matrix',
-      mentioned: true,
+      // The message does not name the bot, so it is not counted as addressed to it.
+      mentioned: false,
     });
   });
 });

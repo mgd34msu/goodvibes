@@ -4,16 +4,14 @@
  * foreground child. Engine dependencies use public package exports only.
  */
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createExecTool, OverflowHandler, ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { AGENT_OWNER_TERMINAL_GUARD } from '../../runtime/agent-exec-posture.ts';
 import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard.ts';
-import { installAgentPlatformBoundaryGuard } from '../../tools/agent-platform-boundary-policy.ts';
 import { installToolExecutionSafetyGuard } from '../../tools/tool-execution-safety.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 async function within<T>(promise: Promise<T>, label: string, timeoutMs = 2_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -57,22 +55,17 @@ function pipeline(root: string) {
   registry.register(createExecTool(manager, {
     defaultWorkingDirectory: root,
     overflowHandler: new OverflowHandler({ baseDir: root }),
-    ownerTerminal: AGENT_OWNER_TERMINAL_GUARD,
   }));
-  // Same installation order as composeAgentToolRegistry. The boundary guard
-  // does not alter exec, but remains installed alongside its product peers.
+  // Same installation order as composeAgentToolRegistry.
   installAgentToolPolicyGuard(registry);
-  installAgentPlatformBoundaryGuard(registry, () => 'Run the scratch fixture command');
   installToolExecutionSafetyGuard(registry);
   return { manager, registry };
 }
 
-function readings(denied: 'catastrophic' | 'owner-terminal' | null = null) {
+function readings(denied: 'catastrophic' | null = null) {
   return fakePort((name, _question, state) => {
     switch (name) {
       case 'catastrophic': return noulAnswer(denied === 'catastrophic' ? 0.999 : 0.001);
-      case 'acts_on_session': return noulAnswer(denied === 'owner-terminal' ? 0.999 : 0.001);
-      case 'owned_targets': return noulAnswer(denied === 'owner-terminal' ? 0.001 : 0.999);
       // Keep environment hygiene enabled; the fixture needs no credentials.
       case 'credential': return noulAnswer(/key|token|secret|password|credential/i.test(String((state as { name?: string }).name)) ? 0.999 : 0.001);
       default: throw new Error(`Unscripted Agent exec judgment: ${name}`);
@@ -82,7 +75,7 @@ function readings(denied: 'catastrophic' | 'owner-terminal' | null = null) {
 
 for (const progress of [false, true]) {
   test(`registry cancellation stops a real ${progress ? 'progress-streamed' : 'foreground'} child through Agent wrappers`, async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-exec-wrapper-cancel-'));
+    const root = makeProjectTempDir('agent-exec-wrapper-cancel');
     const answers = readings();
     const previous = installJudgmentPort(answers.port);
     const { registry, manager } = pipeline(root);
@@ -108,16 +101,14 @@ for (const progress of [false, true]) {
       pid = Number(readFileSync(ready, 'utf8'));
       expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
       expect(alive(pid)).toBe(true);
-      const abortAt = Date.now();
       controller.abort(new Error('cancel this Agent tool call'));
       const result = await within(pending, 'Agent exec cancellation');
-      expect(Date.now() - abortAt).toBeLessThan(2_000);
       expect(result).toMatchObject({ callId: 'cancel-real-child', success: false });
       expect(JSON.parse(String(result.output))).toMatchObject({ cancelled: true });
       expect(JSON.parse(String(result.output)).timed_out).toBeUndefined();
       await waitFor(() => !alive(pid!), 'child termination');
       expect(existsSync(sentinel)).toBe(false);
-      expect(answers.requests.filter(request => ['engine.gate.boundary', 'engine.tools.owner-terminal'].includes(request.context?.battery ?? ''))).toHaveLength(0);
+      expect(answers.requests.filter(request => request.context?.battery === 'engine.gate.boundary')).toHaveLength(0);
       // Cancellation is per call. The same wrapped registry remains usable.
       const next = await registry.execute('after-cancel', 'exec', {
         commands: [{ cmd: `printf recovered > ${quote(sentinel)}`, timeout_ms: 2_000 }],
@@ -137,7 +128,7 @@ for (const progress of [false, true]) {
 }
 
 test('Agent-wrapped exec distinguishes a real timeout kill from cancellation', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agent-exec-wrapper-timeout-'));
+  const root = makeProjectTempDir('agent-exec-wrapper-timeout');
   const previous = installJudgmentPort(readings().port);
   const { registry, manager } = pipeline(root);
   const ready = join(root, 'ready-pid');
@@ -176,7 +167,7 @@ test('Agent-wrapped exec distinguishes a real timeout kill from cancellation', a
 }, 10_000);
 
 test('a cancelled Agent call cannot start a child through the wrappers', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agent-exec-wrapper-cancelled-'));
+  const root = makeProjectTempDir('agent-exec-wrapper-cancelled');
   const answers = readings(); const previous = installJudgmentPort(answers.port);
   const { registry, manager } = pipeline(root); const controller = new AbortController();
   const marker = join(root, 'must-not-launch'); controller.abort(new Error('cancel before dispatch'));
@@ -187,7 +178,7 @@ test('a cancelled Agent call cannot start a child through the wrappers', async (
 });
 
 test('Agent wrappers preserve supported background, parallel and file operations', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agent-exec-wrapper-modes-'));
+  const root = makeProjectTempDir('agent-exec-wrapper-modes');
   const answers = readings('catastrophic'); const previous = installJudgmentPort(answers.port);
   const { registry, manager } = pipeline(root);
   try {
@@ -206,6 +197,6 @@ test('Agent wrappers preserve supported background, parallel and file operations
       expect(readFileSync(marker, 'utf8')).toBe('completed');
       if (mode === 'file_ops') expect(readFileSync(copy, 'utf8')).toBe('copy contents');
     }
-    expect(answers.requests.filter(request => ['engine.gate.boundary', 'engine.tools.owner-terminal'].includes(request.context?.battery ?? ''))).toHaveLength(0);
+    expect(answers.requests.filter(request => request.context?.battery === 'engine.gate.boundary')).toHaveLength(0);
   } finally { await manager.close(); installJudgmentPort(previous); rmSync(root, { recursive: true, force: true }); }
 });

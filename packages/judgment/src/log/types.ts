@@ -159,8 +159,15 @@ export interface DecisionLog {
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   Object.prototype.toString.call(value) === '[object Object]';
 
+// The collator is pinned so the order, and so the stored state hash, does not
+// follow the process locale. en-US is what keys were ordered by when hashes were
+// first stored. Keys it ties (canonically equivalent spellings) fall back to
+// code units so insertion order never decides.
+const keyCollator = new Intl.Collator('en-US');
+const compareKeys = (a: string, b: string): number => keyCollator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
+
 const sortKeys = (value: Readonly<Record<string, unknown>>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+  Object.fromEntries(Object.entries(value).sort(([a], [b]) => compareKeys(a, b)));
 
 /** Canonical JSON: object keys sorted, so equal states hash equally. */
 export function canonicalJson(value: EntryType | JsonValue | undefined): string {

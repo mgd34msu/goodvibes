@@ -108,48 +108,75 @@ export interface ToolResultWithAudit extends ToolResult {
 const BYTES_PER_TOKEN = 4;
 
 /**
+ * The one place a tool result's default size ceiling lives, in tokens (about four characters each).
+ * Tools that page or cap their own output (read, find, analyze, inspect) take their default from here;
+ * a call's explicit `max_tokens` still wins. `DEFAULT_POLICIES` below derives from the same numbers.
+ */
+export const DEFAULT_CEILING_TOKENS = {
+  read: 25_000,
+  /** find pages its results; this is the size of one page. */
+  find: 10_000,
+  write: 10_000,
+  execute: 25_000,
+  network: 25_000,
+  analyze: 25_000,
+} as const;
+
+/**
+ * Cut `text` to `maxTokens` and say so. Cuts at a line boundary when one is near the limit, and the note
+ * names the size cut and what to do, so a clipped result never looks like a complete one.
+ */
+export function capToolText(text: string, maxTokens: number, guidance: string): string {
+  const maxChars = Math.max(32, Math.floor(maxTokens) * BYTES_PER_TOKEN);
+  if (text.length <= maxChars) return text;
+  const lineEnd = text.lastIndexOf('\n', maxChars);
+  const keep = lineEnd > maxChars * 0.8 ? lineEnd : maxChars;
+  return `${text.slice(0, keep)}\n[Output cut: kept the first ${keep} of ${text.length} characters (limit ${maxTokens} tokens). ${guidance}]`;
+}
+
+/**
  * DEFAULT_POLICIES, one policy per tool class.
  *
- * Defaults preserve the full result. A caller can supply an explicit output
- * policy; large background streams retain complete output in spill files.
+ * Ceilings come from {@link DEFAULT_CEILING_TOKENS}. A caller can supply an explicit output
+ * policy; classes that spill keep the complete output in a file and embed its path.
  */
 export const DEFAULT_POLICIES: Readonly<Record<ToolClass, ToolOutputPolicy>> = {
   read: {
     toolClass: 'read',
-    maxBytes: Number.POSITIVE_INFINITY,
-    maxTokens: Number.POSITIVE_INFINITY,
+    maxBytes: DEFAULT_CEILING_TOKENS.read * BYTES_PER_TOKEN,
+    maxTokens: DEFAULT_CEILING_TOKENS.read,
     truncationMode: 'tail',
     spillMode: 'file',
     auditMetadata: true,
   },
   write: {
     toolClass: 'write',
-    maxBytes: Number.POSITIVE_INFINITY,
-    maxTokens: Number.POSITIVE_INFINITY,
+    maxBytes: DEFAULT_CEILING_TOKENS.write * BYTES_PER_TOKEN,
+    maxTokens: DEFAULT_CEILING_TOKENS.write,
     truncationMode: 'tail',
     spillMode: 'inline',
     auditMetadata: true,
   },
   execute: {
     toolClass: 'execute',
-    maxBytes: Number.POSITIVE_INFINITY,
-    maxTokens: Number.POSITIVE_INFINITY,
+    maxBytes: DEFAULT_CEILING_TOKENS.execute * BYTES_PER_TOKEN,
+    maxTokens: DEFAULT_CEILING_TOKENS.execute,
     truncationMode: 'head',
     spillMode: 'file',
     auditMetadata: true,
   },
   network: {
     toolClass: 'network',
-    maxBytes: Number.POSITIVE_INFINITY,
-    maxTokens: Number.POSITIVE_INFINITY,
+    maxBytes: DEFAULT_CEILING_TOKENS.network * BYTES_PER_TOKEN,
+    maxTokens: DEFAULT_CEILING_TOKENS.network,
     truncationMode: 'tail',
     spillMode: 'file',
     auditMetadata: true,
   },
   analyze: {
     toolClass: 'analyze',
-    maxBytes: Number.POSITIVE_INFINITY,
-    maxTokens: Number.POSITIVE_INFINITY,
+    maxBytes: DEFAULT_CEILING_TOKENS.analyze * BYTES_PER_TOKEN,
+    maxTokens: DEFAULT_CEILING_TOKENS.analyze,
     truncationMode: 'tail',
     spillMode: 'inline',
     auditMetadata: true,
@@ -157,6 +184,27 @@ export const DEFAULT_POLICIES: Readonly<Record<ToolClass, ToolOutputPolicy>> = {
 };
 
 // ─── Policy Lookup ───────────────────────────────────────────────────────────
+
+/**
+ * The tool class a `PhasedTool.category` is judged and run under. The contract
+ * verifier (registration time) and the map-output phase (run time) both read
+ * this one table, so the policy a tool is certified against is the one applied.
+ * `delegate` reads as `read`: its output can be long, and the `read` policy keeps
+ * the full text in a spill file instead of cutting it. An unknown category gets
+ * the same `read` policy that {@link getPolicy} falls back to.
+ */
+export const TOOL_CLASS_BY_CATEGORY: Readonly<Record<string, ToolClass>> = {
+  read: 'read',
+  write: 'write',
+  execute: 'execute',
+  network: 'network',
+  delegate: 'read',
+  analyze: 'analyze',
+};
+
+export function toolClassForCategory(category: string): ToolClass {
+  return Object.hasOwn(TOOL_CLASS_BY_CATEGORY, category) ? TOOL_CLASS_BY_CATEGORY[category]! : 'read';
+}
 
 /**
  * Returns the output policy for the given tool class.
@@ -272,6 +320,8 @@ function parsesAsJson(trimmed: string): boolean {
  *
  * @param result - The raw tool result to enforce limits on.
  * @param policy - The policy to apply (obtain via `getPolicy`).
+ * @param overflowHandler - Where a `file`-mode overflow is spilled. When absent the
+ * output is cut inline instead, so the limit still holds.
  * @param call - The tool call that produced the result (name and arguments);
  * a spilled output shows the parts `engine.tools.output-keep` ranks highest
  * against it.
@@ -283,7 +333,7 @@ function parsesAsJson(trimmed: string): boolean {
 export async function applyOutputPolicy(
   result: ToolResult,
   policy: ToolOutputPolicy,
-  overflowHandler: OverflowHandler,
+  overflowHandler: OverflowHandler | undefined,
   call: string,
 ): Promise<{ result: ToolResultWithAudit; audit: OutputPolicyResult }> {
   const output = typeof result.output === 'string' ? result.output : '';
@@ -310,10 +360,18 @@ export async function applyOutputPolicy(
   // Over limit, enforce according to spillMode
   switch (policy.spillMode) {
     case 'file': {
+      // Without a spill handler the output is cut in place, never passed whole.
+      if (!overflowHandler) {
+        result.output = await truncate(output, policy.maxBytes, policy.truncationMode);
+        audit.actionTaken = 'truncated';
+        audit.resultSize = encoder.encode(result.output as string).length;
+        break;
+      }
       const overflowResult = await overflowHandler.handle(output, {
-        // Convert bytes to a conservative char estimate (worst-case 4 bytes per
-        // UTF-8 char). The overflow handler works in chars, not bytes.
-        maxChars: Math.floor(policy.maxBytes / 4),
+        // The overflow handler works in characters, and a character is at least
+        // one byte, so the byte limit is the character budget (the same
+        // tokens * 4 that capToolText uses).
+        maxChars: policy.maxBytes,
         label: policy.toolClass,
         call,
       });

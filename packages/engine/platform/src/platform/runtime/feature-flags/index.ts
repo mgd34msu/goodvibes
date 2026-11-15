@@ -4,7 +4,7 @@
  * Surfaces render FEATURE_SETTINGS: every platform capability as a first-class
  * domain setting (enablement key, option shapes, real descriptions). The gate
  * manager underneath is internal plumbing whose state derives from those same
- * settings keys; it also carries the emergency kill switch.
+ * settings keys.
  *
  * Usage:
  * ```ts
@@ -16,9 +16,6 @@
  * if (gates.isEnabled('exec-sandbox')) {
  *   // per-command sandbox is active
  * }
- *
- * // Emergency kill
- * gates.kill('exec-sandbox', 'Crash loop detected in production');
  * ```
  */
 

@@ -46,13 +46,14 @@ describe('agent_harness catalogs: an empty page states its cause', () => {
         const page = await executeHarnessJson<CatalogPage & Record<string, unknown[]>>(fixture, { mode, limit: 500 });
         expect(page.total).toBeGreaterThan(0);
         expect(page.returned).toBeGreaterThan(0);
+        expect(page.returned).toBe(page.total);
         expect((page[key] ?? []).length).toBe(page.returned);
         // Nothing was filtered, so nothing is echoed and no note is needed.
         expect(page.appliedFilters).toBeUndefined();
         expect(page.note).toBeUndefined();
       }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -77,7 +78,7 @@ describe('agent_harness catalogs: an empty page states its cause', () => {
         expect(page.note).toContain(String(page.total));
       }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -97,7 +98,7 @@ describe('agent_harness catalogs: an empty page states its cause', () => {
       expect(page.total).toBeGreaterThan(0);
       expect(page.note).toContain('category="actions"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });
@@ -183,7 +184,7 @@ describe('registered Personal Ops writing-style draft', () => {
       expect(new Set(fake.requests.map(request => request.context?.battery))).toEqual(styleNames);
       expect(fixture.processManager.list()).toHaveLength(0); expect(fixture.openedSurfaces).toHaveLength(0);
       expect(fixture.printed).toHaveLength(0);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
   test('caller cancellation during actual admitted style reading cannot publish a draft', async () => {
     const fixture = makeFixture(), controller = new AbortController(), fake = installStyles(controller);
@@ -193,6 +194,6 @@ describe('registered Personal Ops writing-style draft', () => {
       expect(controller.signal.aborted).toBe(true); expect(fake.requests.length).toBeGreaterThan(0);
       expect(fake.requests.some(request => request.context?.battery === 'email.style.sender-name')).toBe(false);
       expect(fixture.processManager.list()).toHaveLength(0); expect(fixture.printed).toHaveLength(0);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 });

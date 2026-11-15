@@ -1,4 +1,4 @@
-/** UNRUN: real signed group flood against an actual held credential read. */
+/** Real signed group flood against an actual held credential read. */
 import { expect, test } from 'bun:test';
 import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.ts';
 import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.ts';

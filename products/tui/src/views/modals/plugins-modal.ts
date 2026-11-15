@@ -1,5 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -31,9 +31,15 @@ export interface PluginsModalDeps {
 }
 
 interface VerifyResult {
+  /** The plugin's version and enabled/active/quarantined state when it was verified; a result only applies while this still matches. */
+  readonly stamp: string;
   readonly valid: boolean;
   readonly fingerprint?: string | undefined;
   readonly reason?: string | undefined;
+}
+
+function verifyStamp(plugin: PluginStatus): string {
+  return `${plugin.version}|${plugin.enabled}|${plugin.active}|${plugin.quarantined}`;
 }
 
 function statusLabel(plugin: PluginStatus): string {
@@ -102,10 +108,11 @@ class PluginsModalSurface implements ConfigModalSurface {
       const caps = this.deps.pluginManager.capabilities(plugin.name);
       const trustRecord = this.deps.pluginManager.getTrustRecord(plugin.name);
       const quarantineRecord = this.deps.pluginManager.getQuarantineRecord(plugin.name);
-      const verify = this.verifyResults.get(plugin.name);
+      const recorded = this.verifyResults.get(plugin.name);
+      const verify = recorded && recorded.stamp === verifyStamp(plugin) ? recorded : undefined;
       const suffix = [
         trustRecord?.signatureFingerprint ? `sig ${trustRecord.signatureFingerprint}` : 'unsigned',
-        caps ? `caps ${caps.requested.length}/${caps.highRisk.length}hr/${caps.blocked.length}blk` : null,
+        caps ? `caps ${caps.requested.length}/${caps.highRisk.length}hr/${caps.blocked.length}untrusted` : null,
         quarantineRecord ? `quarantine: ${quarantineRecord.reason}` : null,
         verify ? `verify ${verify.valid ? 'VALID' : 'INVALID'}${verify.fingerprint ? ` fp=${verify.fingerprint}` : (!verify.valid && verify.reason ? `: ${verify.reason}` : '')}` : null,
       ].filter((s): s is string => s !== null).join(' · ');
@@ -120,28 +127,28 @@ class PluginsModalSurface implements ConfigModalSurface {
   }
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
-    if (id === 'refresh') { ctx.setStatus('Plugins are read live.'); ctx.requestRender(); return; }
+    if (id === 'refresh') { this.verifyResults.clear(); ctx.setStatus('Plugins are read live; earlier verify results cleared.'); ctx.requestRender(); return; }
     const plugin = this.pluginFrom(ctx.row);
     if (!plugin) return;
     switch (id) {
       case 'enable':
-        if (!plugin.active) { void ctx.executeCommand?.('plugin', ['enable', plugin.name]); ctx.setStatus(`Dispatched /plugin enable ${plugin.name}.`); }
+        if (!plugin.active) runModalCommand(ctx, 'plugin', ['enable', plugin.name], `/plugin enable ${plugin.name}`);
         break;
       case 'disable':
-        if (plugin.enabled) { void ctx.executeCommand?.('plugin', ['disable', plugin.name]); ctx.setStatus(`Dispatched /plugin disable ${plugin.name}.`); }
+        if (plugin.enabled) runModalCommand(ctx, 'plugin', ['disable', plugin.name], `/plugin disable ${plugin.name}`);
         break;
       case 'verify': {
         const result = this.deps.pluginManager.verify(plugin.name);
-        this.verifyResults.set(plugin.name, { valid: result.valid, fingerprint: result.fingerprint, reason: result.reason });
+        this.verifyResults.set(plugin.name, { stamp: verifyStamp(plugin), valid: result.valid, fingerprint: result.fingerprint, reason: result.reason });
         ctx.setStatus(`verify ${result.valid ? 'VALID' : 'INVALID'}`);
         this.requestRender();
         break;
       }
       case 'liftQuarantine':
-        if (plugin.quarantined) { void ctx.executeCommand?.('plugin', ['quarantine', plugin.name, 'lift']); ctx.setStatus(`Dispatched /plugin quarantine ${plugin.name} lift.`); }
+        if (plugin.quarantined) runModalCommand(ctx, 'plugin', ['quarantine', plugin.name, 'lift'], `/plugin quarantine ${plugin.name} lift`);
         break;
       case 'captureToMemory':
-        if (plugin.quarantined) { void ctx.executeCommand?.('recall', ['capture', 'plugin', plugin.name]); ctx.setStatus(`Dispatched /recall capture plugin ${plugin.name}.`); }
+        if (plugin.quarantined) runModalCommand(ctx, 'recall', ['capture', 'plugin', plugin.name], `/recall capture plugin ${plugin.name}`);
         break;
     }
   }

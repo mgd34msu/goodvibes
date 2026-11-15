@@ -4,7 +4,7 @@ import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { NativeWorkExecutionError, type NativeWorkExecutionHost, type NativeWorkExecutionObservation, type NativeWorkExecutionTarget } from '../../workflow/work-ledger/native-execution.js';
 import { nativeWorkExecutionRequestSchema, nativeWorkExecutionSnapshotSchema, NATIVE_WORK_EXECUTION_MAX_REQUEST_BYTES, NATIVE_WORK_EXECUTION_MAX_RESPONSE_BYTES,
   type NativeWorkExecutionRequest, type NativeWorkExecutionRevision, type NativeWorkExecutionSnapshot } from '../../workflow/work-ledger/native-execution-wire.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
+import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
 const SCOPES = ['read:work-ledger', 'write:fleet'] as const;
@@ -43,7 +43,7 @@ function project(status: NativeWorkExecutionObservation): NativeWorkExecutionSna
   } else {
     const { execution, contract } = status;
     value = { kind: 'execution', ...common, state: execution.state, recovery: status.recovery,
-      ...(status.settlement ? { settlement: status.settlement } : {}),
+      ...(status.settlement ? { settlement: status.settlementFailure !== undefined && status.settlement.state === 'failed' ? { ...status.settlement, reason: status.settlementFailure } : status.settlement } : {}),
       receipt: execution.receipt ? { contractId: execution.receipt.contractId, ownerAgentId: execution.receipt.ownerAgentId } : null,
       integration: status.integration,
       progress: contract ? {
@@ -113,7 +113,11 @@ export function registerNativeWorkExecutionGatewayMethods(catalog: GatewayMethod
           // admission. Refusal/unavailability remain their distinct errors.
           if (!(error instanceof NativeWorkExecutionError) || !['pending-intent', 'prevented-before-admission'].includes(error.code)) throw error;
         }
-        authorize(invocation);
+        // The host call above may have started, cancelled or resumed the work;
+        // a revocation seen only now must not read as "nothing happened".
+        if (operation !== 'status') {
+          try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, `The ${operation} request was applied.`); }
+        } else authorize(invocation);
         return project(execution.statusByAttempt(input.workId, input.attemptId, authority));
       } catch (error) {
         if (error instanceof GatewayVerbError) throw error;
@@ -121,7 +125,7 @@ export function registerNativeWorkExecutionGatewayMethods(catalog: GatewayMethod
           const code = error.code;
           const status = code === 'not-found' ? 404 : code === 'unsupported-authority' ? 403 : code === 'invalid' ? 400 : code === 'refused' ? 422
             : code === 'stale' || code === 'conflict' || code === 'recovery-required' ? 409 : 503;
-          throw new GatewayVerbError(`Native work execution ${code}`, `NATIVE_EXECUTION_${code.toUpperCase().replaceAll('-', '_')}`, status);
+          throw new GatewayVerbError(error.message, `NATIVE_EXECUTION_${code.toUpperCase().replaceAll('-', '_')}`, status);
         }
         // No source, tool output, credential, filesystem path or internal owner
         // record is copied into a wire error. A lost response is not a replay grant.

@@ -48,6 +48,8 @@ export interface ProviderModelPricing {
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const FETCH_TIMEOUT_MS = 15_000;
+/** The rough characters-per-token ratio the compaction code also uses. */
+const APPROX_CHARS_PER_TOKEN = 4;
 
 const DEFAULT_TOKEN_LIMITS: Required<TokenLimits> = {
   maxOutputTokens: 0,
@@ -294,9 +296,12 @@ export class ModelLimitsService {
     return Number.isFinite(window) && window > 0 && window >= acceptedContextFloor(modelDef) ? window : null;
   }
 
+  /** The limit is configured in tokens; 0 means no limit and stays 0. */
   getToolResultMaxCharsForModel(model: ModelDefinition | null | undefined): number {
-    if (!model) return DEFAULT_TOKEN_LIMITS.maxToolResultTokens!;
-    return this.resolveTokenLimits(model).maxToolResultTokens!;
+    const tokens = model
+      ? this.resolveTokenLimits(model).maxToolResultTokens!
+      : DEFAULT_TOKEN_LIMITS.maxToolResultTokens!;
+    return tokens * APPROX_CHARS_PER_TOKEN;
   }
 
   async refresh(): Promise<number> {

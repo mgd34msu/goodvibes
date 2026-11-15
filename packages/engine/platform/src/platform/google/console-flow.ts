@@ -235,14 +235,21 @@ export async function publishApp(
   });
 }
 
-const CLIENT_ID_PATTERN = /[\w-]+\.apps\.googleusercontent\.com/;
-const CLIENT_SECRET_PATTERN = /GOCSPX-[\w-]+/;
+const CLIENT_ID_PATTERN = /[\w-]+\.apps\.googleusercontent\.com/g;
+const CLIENT_SECRET_PATTERN = /GOCSPX-[\w-]+/g;
 
-function extractClientCredentials(text: string): { readonly clientId: string; readonly clientSecret: string } | null {
-  const idMatch = CLIENT_ID_PATTERN.exec(text);
-  const secretMatch = CLIENT_SECRET_PATTERN.exec(text);
-  if (!idMatch || !secretMatch) return null;
-  return { clientId: idMatch[0], clientSecret: secretMatch[0] };
+/**
+ * The client id and secret the click produced: the first of each that was NOT
+ * already on the page beforehand. The clients page lists every existing client
+ * too, and pairing an older client's id with the new secret would store
+ * credentials that fail at consent.
+ */
+function extractClientCredentials(text: string, before: string): { readonly clientId: string; readonly clientSecret: string } | null {
+  const known = new Set([...before.matchAll(CLIENT_ID_PATTERN), ...before.matchAll(CLIENT_SECRET_PATTERN)].map((match) => match[0]));
+  const clientId = [...text.matchAll(CLIENT_ID_PATTERN)].map((match) => match[0]).find((candidate) => !known.has(candidate));
+  const clientSecret = [...text.matchAll(CLIENT_SECRET_PATTERN)].map((match) => match[0]).find((candidate) => !known.has(candidate));
+  if (clientId === undefined || clientSecret === undefined) return null;
+  return { clientId, clientSecret };
 }
 
 /**
@@ -284,6 +291,8 @@ export async function createDesktopOAuthClient(
         fix: `Open ${AUTH_CLIENTS_URL} by hand and click "CREATE CLIENT".`,
       };
     }
+    // The clients page names every existing client: none of those ids can be the new one.
+    const clientsListText = await browser.readText();
     await consumeGoogleElement(browser, createClientLookup.element);
 
     elements = await browser.snapshot();
@@ -332,10 +341,11 @@ export async function createDesktopOAuthClient(
         fix: 'Click "Create" by hand to finish creating the OAuth client.',
       };
     }
+    const textBeforeCreate = await browser.readText();
     await consumeGoogleElement(browser, createButtonLookup.element);
 
     const resultText = await browser.readText();
-    const credentials = extractClientCredentials(resultText);
+    const credentials = extractClientCredentials(resultText, `${clientsListText}\n${textBeforeCreate}`);
     if (!credentials) {
       return {
         kind: 'failed',

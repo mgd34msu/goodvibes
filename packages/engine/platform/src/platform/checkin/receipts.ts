@@ -29,6 +29,8 @@ function validateSnapshot(snapshot: CheckinReceiptsSnapshot | null): CheckinRece
 export class CheckinReceiptStore {
   private readonly store: PersistentStore<CheckinReceiptsSnapshot>;
   private receipts: CheckinReceipt[] | null = null;
+  /** The in-flight first load, shared so concurrent callers all work on one array. */
+  private loading: Promise<CheckinReceipt[]> | null = null;
   /** Whole-file writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
@@ -36,9 +38,24 @@ export class CheckinReceiptStore {
     this.store = new PersistentStore<CheckinReceiptsSnapshot>(path);
   }
 
-  private async all(): Promise<CheckinReceipt[]> {
-    if (this.receipts === null) this.receipts = validateSnapshot(await this.store.load()).receipts;
-    return this.receipts;
+  /**
+   * The write queue orders writes, not loads: two first calls that each loaded
+   * and assigned their own array would push into different arrays, and the
+   * later snapshot would not contain the earlier receipt. Every caller therefore
+   * awaits the same load.
+   */
+  private all(): Promise<CheckinReceipt[]> {
+    if (this.receipts !== null) return Promise.resolve(this.receipts);
+    this.loading ??= (async () => {
+      try {
+        const loaded = validateSnapshot(await this.store.load()).receipts;
+        this.receipts = loaded;
+        return loaded;
+      } finally {
+        this.loading = null;
+      }
+    })();
+    return this.loading;
   }
 
   /**

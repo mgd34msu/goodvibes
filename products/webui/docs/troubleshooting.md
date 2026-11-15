@@ -9,17 +9,23 @@ sed -n '1,120p' /tmp/goodvibes-webui-vite.log
 ss -ltnp | rg ':3423'
 ```
 
-Expected network bind:
+The expected bind depends on the web listener's host mode. In network mode it
+is all interfaces:
 
 ```text
 0.0.0.0:3423
 ```
 
-If Vite only binds to localhost, inspect the resolved TUI web setting:
+In local mode (the default when no network host mode is set) the bind is
+`127.0.0.1:3423` and the page is reachable only from this machine; that is
+correct, not a fault. To see which binding Vite resolved, ask the daemon first:
 
 ```bash
-goodvibes web --json
+goodvibes-daemon webui status --json
 ```
+
+Only when the daemon does not answer does Vite fall back to the older source,
+which you can inspect with `goodvibes web --json`.
 
 For one-off development, override the bind:
 
@@ -38,7 +44,7 @@ Check daemon status:
 curl -sS http://127.0.0.1:3421/status
 ```
 
-If auth is required, use the Admin page or an authenticated request. Confirm the
+If auth is required, sign in from Settings, Account, or use an authenticated request. Confirm the
 daemon/control-plane listener:
 
 ```bash
@@ -63,7 +69,7 @@ The browser must not read:
 - `operator-tokens.json`
 
 If token auth works but username/password fails, inspect local auth status from
-Admin after authenticating with a valid token. Check that the daemon reports the
+Settings, Account after authenticating with a valid token. Check that the daemon reports the
 expected user store and username list.
 
 ## The QR scanner will not open
@@ -210,8 +216,8 @@ Verify the served app version (match the version in `package.json`):
 curl -sS --max-time 3 http://127.0.0.1:3423/ | rg "$(node -p "require('./package.json').version")"
 ```
 
-Verify installed platform:
+Verify the engine version the dev server runs against (the workspace link to `packages/engine`):
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/platform/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/package.json').version"
 ```

@@ -10,7 +10,9 @@ import { quote } from './text.js';
 import type { TaskRouteDraft, TaskRouteEntry } from './types.js';
 
 /** Every catalog route, in the order the agent's candidate files added them. */
-export const TASK_ROUTES: readonly TaskRouteEntry[] = [...SETUP_ROUTES, ...WORK_ROUTES, ...SURFACE_ROUTES];
+export const TASK_ROUTES: readonly TaskRouteEntry[] = Object.freeze(
+  [...SETUP_ROUTES, ...WORK_ROUTES, ...SURFACE_ROUTES].map((entry) => Object.freeze(entry)),
+);
 
 const ROUTES_BY_ID: ReadonlyMap<string, TaskRouteEntry> = new Map(TASK_ROUTES.map((entry) => [entry.id, entry]));
 

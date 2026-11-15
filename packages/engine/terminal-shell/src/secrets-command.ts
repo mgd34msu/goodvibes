@@ -19,6 +19,7 @@ interface SecretsCommandContext {
   readonly print: (message: string) => void;
   readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
 }
+const SET_OPTIONS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--yes']);
 /** Values stay redacted; each product supplies its credential ownership and confirmation policy. */
 export function createSecretsCommand<Context extends SecretsCommandContext>(
   manager: (context: Context) => Pick<LiteralSecretsManager, 'get' | 'set' | 'delete' | 'listDetailed'>,
@@ -105,8 +106,24 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         return;
       }
       if (subcommand === 'set' || subcommand === 'link') {
-        const flags = new Set(rest.filter((value) => value.startsWith('--')));
-        const [key, ...parts] = rest.filter((value) => !value.startsWith('--'));
+        // Options come first; a bare `--` ends them so a value may itself start
+        // with `--`. The token is never echoed: it may be the secret.
+        const flags = new Set<string>();
+        const positional: string[] = [];
+        let optionsEnded = false;
+        for (const token of rest) {
+          if (!optionsEnded && token === '--') optionsEnded = true;
+          else if (!optionsEnded && token.startsWith('--')) flags.add(token);
+          else positional.push(token);
+        }
+        const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
+        if (unknownFlags.length) {
+          context.print(
+            `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). To store a value that starts with --, put it after a bare --.\nUsage: ${mutationUsage(subcommand)}`,
+          );
+          return;
+        }
+        const [key, ...parts] = positional;
         if (!key) {
           context.print(`[secrets] Usage: ${mutationUsage(subcommand)}`);
           return;
@@ -145,6 +162,10 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
           return;
         }
         const value = parts.join(' ');
+        if (!value.length) {
+          context.print(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
+          return;
+        }
         if (
           (subcommand === 'link' && !isGoodVibesSecretRefInput(value)) ||
           (subcommand === 'set' && isMalformedGoodVibesSecretRefInput(value))
@@ -172,6 +193,14 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       }
       if (subcommand === 'delete') {
         const flags = new Set(rest.filter((value) => value.startsWith('--')));
+        const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
+        if (unknownFlags.length) {
+          // Deleting at a default scope the person did not ask for is not recoverable.
+          context.print(
+            `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). Nothing was deleted.\nUsage: ${deletionUsage}`,
+          );
+          return;
+        }
         const key = rest.find((value) => !value.startsWith('--'));
         if (!key) {
           context.print(`[secrets] Usage: ${deletionUsage}`);

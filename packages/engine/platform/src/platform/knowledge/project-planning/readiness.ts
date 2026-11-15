@@ -164,7 +164,8 @@ export function composeReadiness(state: ProjectPlanningState, semantic: Planning
       'Create task records with likely files, dependencies, and verification notes.',
     ));
   }
-  if (state.tasks.length > 1 && state.dependencies.length === 0) {
+  const hasDependencies = state.dependencies.length > 0 || state.tasks.some((task) => (task.dependencies?.length ?? 0) > 0);
+  if (state.tasks.length > 1 && !hasDependencies) {
     gaps.push({
       id: 'missing-dependencies',
       kind: 'missing-dependencies',
@@ -208,6 +209,8 @@ export function composeReadiness(state: ProjectPlanningState, semantic: Planning
     });
   }
   const readiness = readinessFromGaps(gaps);
+  // An advisory gap can come first and carry no question; the user still needs the blocking one.
+  const nextQuestion = gaps.find((gap) => gap.severity === 'blocking' && gap.question)?.question ?? gaps.find((gap) => gap.question)?.question;
   const readinessAssessment: ProjectPlanningReadinessAssessment = {
     basis: semantic === 'not-evaluated' ? 'native-structure-and-owner-approval' : 'semantic-and-native', semanticAssessment: semantic,
   };
@@ -219,7 +222,7 @@ export function composeReadiness(state: ProjectPlanningState, semantic: Planning
     readinessAssessment,
     ...(semantic === 'not-evaluated' ? { operationProvenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
     gaps,
-    ...(gaps[0]?.question ? { nextQuestion: gaps[0].question } : {}),
+    ...(nextQuestion ? { nextQuestion } : {}),
     state: {
       ...state,
       readiness,
@@ -229,9 +232,8 @@ export function composeReadiness(state: ProjectPlanningState, semantic: Planning
 }
 
 function readinessFromGaps(gaps: readonly ProjectPlanningGap[]): ProjectPlanningReadiness {
-  if (gaps.length === 0) return 'executable';
-  if (gaps.some((gap) => gap.severity === 'blocking')) return 'needs-user-input';
-  return 'not-ready';
+  // Only a blocking gap holds a plan back; an advisory gap is reported but never changes readiness.
+  return gaps.some((gap) => gap.severity === 'blocking') ? 'needs-user-input' : 'executable';
 }
 
 function blockingQuestion(

@@ -1,6 +1,7 @@
+import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.js';
 import { homeGraphSourceIdentityIndexes } from '../platform/src/platform/knowledge/store-homegraph-source-selector.js';
-/** Source regressions for actual persisted scope/target publication. UNRUN until
- * coding is complete; these drive native stores/services, not formatter mocks. */
+/** Regressions for actual persisted scope/target publication; these drive native
+ * stores/services, not formatter mocks. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -133,7 +134,7 @@ describe('native generated projection scope and saved identity', () => {
     expect(refreshed.listSources().filter(source => source.connectorId === 'knowledge-projection')).toHaveLength(1);
   });
 
-  test('an actual schema13 store installs the new index through the current schema without rewriting existing rows', async () => {
+  test('a current-schema store missing its later-added indexes and marked version 13 recreates them without rewriting existing rows', async () => {
     const item = fixture();
     const source = await item.store.upsertSource({ id: 'existing-source', connectorId: 'manual', sourceType: 'document', title: 'Existing source', status: 'indexed' });
     const generation = item.store.getSourceGeneration(source.id);
@@ -157,7 +158,7 @@ describe('native generated projection scope and saved identity', () => {
     await migrated.close();
     const check = new Database(item.dbPath, { readonly: true });
     try {
-      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 17 });
+      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: KNOWLEDGE_SCHEMA_VERSION });
       expect(check.query("SELECT name FROM sqlite_schema WHERE name='idx_knowledge_sources_generated_projection_identity'").get()).not.toBeNull();
     } finally { check.close(); }
   });

@@ -18,16 +18,30 @@ async function refreshApprovals() {
   console.log('approvals', approvals);
 }
 
+// A refresh that fails must not become an unhandled rejection inside an event handler.
+function refreshApprovalsSafely(): void {
+  refreshApprovals().catch((error: unknown) => {
+    console.error('approvals refresh failed', error);
+  });
+}
+
 await refreshApprovals();
 
-const stopAgentCompleted = platformClient.realtime.viaSse().agents.on('AGENT_COMPLETED', async () => {
-  await refreshApprovals();
+// A node waiting on an approval raises FLEET_NODE_BLOCKED_ON_USER (reason 'approval');
+// FLEET_NODE_UNBLOCKED fires once it has been answered. Both change the approvals list.
+const fleetEvents = platformClient.realtime.viaSse().fleet;
+const stopBlocked = fleetEvents.on('FLEET_NODE_BLOCKED_ON_USER', (event) => {
+  if (event.reason === 'approval') refreshApprovalsSafely();
+});
+const stopUnblocked = fleetEvents.on('FLEET_NODE_UNBLOCKED', () => {
+  refreshApprovalsSafely();
 });
 
 // window is typed because tsconfig includes lib: 'DOM'; in a browser this works at runtime.
 // In a non-browser environment (test, SSR), the guard below skips registration.
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
-    stopAgentCompleted();
+    stopBlocked();
+    stopUnblocked();
   });
 }

@@ -92,6 +92,13 @@ function formatSymbolEntries(symbols: SymbolInfo[], includeLineNumbers: boolean)
     .join('\n');
 }
 
+/** Says why the regex result is shown: the parser failed, or it ran and returned nothing (no grammar for the type, or nothing to list). */
+function fallbackNote(what: 'outline' | 'symbols', parserFailed: boolean): string {
+  return parserFailed
+    ? `# Note: tree-sitter ${what} unavailable for this file. Falling back to regex.\n`
+    : `# Note: tree-sitter returned no ${what === 'symbols' ? 'exported symbols' : 'entries'} for this file (its language may have no grammar, or it has none). Falling back to regex; the result may be empty.\n`;
+}
+
 export async function extractOutline(
   filePath: string,
   rawContent: string,
@@ -99,17 +106,16 @@ export async function extractOutline(
   includeLineNumbers: boolean,
   codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
 ): Promise<string> {
+  let failed = false;
   try {
     const ci = codeIntelligence ?? new CodeIntelligence({});
     const entries = await ci.getOutline(filePath, rawContent);
     if (entries.length > 0) return formatOutlineEntries(entries, includeLineNumbers);
   } catch (err) {
+    failed = true;
     logger.debug('read tool: tree-sitter outline failed, using regex fallback', { filePath, error: summarizeError(err) });
   }
-  return (
-    '# Note: tree-sitter outline unavailable for this file. Falling back to regex.\n'
-    + extractOutlineRegex(lines, includeLineNumbers)
-  );
+  return fallbackNote('outline', failed) + extractOutlineRegex(lines, includeLineNumbers);
 }
 
 export async function extractSymbols(
@@ -119,18 +125,17 @@ export async function extractSymbols(
   includeLineNumbers: boolean,
   codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
 ): Promise<string> {
+  let failed = false;
   try {
     const ci = codeIntelligence ?? new CodeIntelligence({});
     const symbols = await ci.getSymbols(filePath, rawContent);
     const exported = symbols.filter((s) => s.exported);
     if (exported.length > 0) return formatSymbolEntries(exported, includeLineNumbers);
   } catch (err) {
+    failed = true;
     logger.debug('read tool: tree-sitter symbols failed, using regex fallback', { filePath, error: summarizeError(err) });
   }
-  return (
-    '# Note: tree-sitter symbols unavailable for this file. Falling back to regex.\n'
-    + extractSymbolsRegex(lines, includeLineNumbers)
-  );
+  return fallbackNote('symbols', failed) + extractSymbolsRegex(lines, includeLineNumbers);
 }
 
 export async function extractAst(
@@ -140,17 +145,16 @@ export async function extractAst(
   includeLineNumbers: boolean,
   codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
 ): Promise<string> {
+  let failed = false;
   try {
     const ci = codeIntelligence ?? new CodeIntelligence({});
     const entries = await ci.getOutline(filePath, rawContent);
     if (entries.length > 0) return formatOutlineEntries(entries, includeLineNumbers);
   } catch (err) {
+    failed = true;
     logger.debug('read tool: tree-sitter ast failed, using outline fallback', { filePath, error: summarizeError(err) });
   }
-  return (
-    '# Note: tree-sitter outline unavailable for this file. Falling back to regex.\n'
-    + extractOutlineRegex(lines, includeLineNumbers)
-  );
+  return fallbackNote('outline', failed) + extractOutlineRegex(lines, includeLineNumbers);
 }
 
 export function formatContent(

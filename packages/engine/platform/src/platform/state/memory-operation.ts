@@ -2,6 +2,8 @@
 export interface MemoryOperationOptions {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
+  /** Set only by the consolidation pass, the one writer allowed to stamp a review as `consolidation`. */
+  readonly automatedReview?: true | undefined;
 }
 
 const capturedOperations = new WeakSet<MemoryOperationOptions>();

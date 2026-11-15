@@ -97,7 +97,10 @@ export function buildCompactionReceiptBlock(receipt: CompactionReceiptInput): st
 
   const gradeStr = receipt.qualityGrade ? `${receipt.qualityGrade} ` : '';
   const qualitySuffix = receipt.lowQuality ? ' (below the quality bar)' : '';
-  lines.push(`  Quality: ${gradeStr}${Math.round(receipt.qualityScore)}/100${qualitySuffix} · strategy: ${receipt.strategy || 'unknown'}.`);
+  // An empty grade means nothing scored this compaction (Classic); a 0/100 line would invent a score.
+  lines.push(receipt.qualityGrade === ''
+    ? `  Strategy: ${receipt.strategy || 'unknown'}; no quality score for this compaction.`
+    : `  Quality: ${gradeStr}${Math.round(receipt.qualityScore)}/100${qualitySuffix} · strategy: ${receipt.strategy || 'unknown'}.`);
 
   // Only present on a distiller→structured fallback, say plainly what was
   // requested, what actually ran, and why, so the fallback is never silent.

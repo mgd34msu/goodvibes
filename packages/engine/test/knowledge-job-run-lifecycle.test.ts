@@ -8,19 +8,26 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { waitFor } from './_helpers/test-timeout.js';
 import { KnowledgeScheduleService } from '../platform/src/platform/knowledge/scheduling.ts';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
 import { knowledgeJobRunLifecycle } from '../platform/src/platform/knowledge/types.ts';
 
 let root: string;
+const stores: KnowledgeStore[] = [];
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'knowledge-job-run-lifecycle-')); });
-afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
+  rmSync(root, { recursive: true, force: true });
+});
 
 function openStore(): KnowledgeStore {
-  return new KnowledgeStore({
+  const store = new KnowledgeStore({
     configManager: { getControlPlaneConfigDir: () => root },
     family: 'wiki',
   } as never);
+  stores.push(store);
+  return store;
 }
 
 describe('knowledge job run lifecycle', () => {
@@ -41,7 +48,7 @@ describe('knowledge job run lifecycle', () => {
     const done = await seed.upsertJobRun({ jobId: 'knowledge-lint', status: 'completed', mode: 'inline', completedAt: 9 });
     // The store is shared between running instances: a recent run may still be another instance's.
     const recent = await seed.upsertJobRun({ jobId: 'knowledge-reindex', status: 'running', mode: 'background', requestedAt: Date.now() - 60_000, startedAt: Date.now() - 60_000 });
-    seed.close();
+    await seed.close();
 
     const store = openStore();
     const service = new KnowledgeScheduleService({ store, emitIfReady: () => undefined, runJobByKind: async () => ({}) });
@@ -57,7 +64,6 @@ describe('knowledge job run lifecycle', () => {
       expect(store.getJobRun(recent.id)!.status).toBe('running');
     } finally {
       service.dispose();
-      store.close();
     }
   });
 
@@ -75,11 +81,10 @@ describe('knowledge job run lifecycle', () => {
     try {
       expect(['queued', 'running']).toContain(store.getJobRun(run.id)!.status);
       release();
-      for (let i = 0; i < 50 && store.getJobRun(run.id)!.status !== 'completed'; i++) await Bun.sleep(10);
+      await waitFor(() => store.getJobRun(run.id)!.status === 'completed');
       expect(store.getJobRun(run.id)!.status).toBe('completed');
     } finally {
       service.dispose();
-      store.close();
     }
   });
 
@@ -94,13 +99,12 @@ describe('knowledge job run lifecycle', () => {
     }) as typeof store.upsertJobRun;
     try {
       const run = await service.runJob('knowledge-reindex', { mode: 'background' });
-      for (let i = 0; i < 50 && store.getJobRun(run.id)!.status === 'queued'; i++) await Bun.sleep(10);
+      await waitFor(() => store.getJobRun(run.id)!.status !== 'queued');
       const settled = store.getJobRun(run.id)!;
       expect(settled.status).toBe('failed');
       expect(settled.error).toContain('disk full');
     } finally {
       service.dispose();
-      store.close();
     }
   });
 });

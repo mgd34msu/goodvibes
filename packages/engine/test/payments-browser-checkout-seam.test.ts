@@ -34,10 +34,8 @@
  * These are primitive platform route/service seam tests. Native detached admission,
  * paired authority and status/restart handling have separate host suites.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 import {
   CheckoutDriverRefusal,
@@ -685,6 +683,9 @@ describe('a pre-click refusal never forwards the engine\'s own message text', ()
       expect(error).toBeInstanceOf(CheckoutSubmitRefused);
       expect((error as Error).message).not.toContain(PAGE_AUTHORED_PAYLOAD);
       expect((error as Error).message).not.toContain('evil.example');
+      // The ledger is shared by the whole daemon, so the cause is not "this turn".
+      expect((error as Error).message).toContain('no order was placed');
+      expect((error as Error).message).not.toContain('this turn');
     }
   });
 
@@ -726,13 +727,22 @@ describe('a pre-click refusal never forwards the engine\'s own message text', ()
   });
 });
 
+// Every composed gateway owns a real engine; shut each one down after its test.
+const composedGateways: Array<{ shutdown(): Promise<void> }> = [];
+afterEach(async () => { for (const gateway of composedGateways.splice(0)) await gateway.shutdown(); });
+function compose(options: Parameters<typeof composeDaemonBrowser>[0]): ReturnType<typeof composeDaemonBrowser> {
+  const gateway = composeDaemonBrowser(options);
+  if (gateway !== null) composedGateways.push(gateway);
+  return gateway;
+}
+
 // ── The composition-only approval path ─────────────────────────
 
 describe('the seam carries a composition-only path to arm the submit approval', () => {
   test('armSubmitApproval reaches the real engine, and is not on the payments-facing surface', async () => {
     let seam: BrowserCheckoutSeam | null = null;
-    composeDaemonBrowser({
-      homeDirectory: mkdtempSync(join(tmpdir(), 'goodvibes-checkout-seam-approval-')),
+    compose({
+      homeDirectory: makeProjectTempDir('goodvibes-checkout-seam-approval'),
       onBrowserCheckout: (received) => { seam = received; },
     });
     const received = seam as BrowserCheckoutSeam | null;
@@ -759,12 +769,12 @@ describe('the seam carries a composition-only path to arm the submit approval', 
 
 describe('the daemon browser composition offers the checkout seam', () => {
   function home(): string {
-    return mkdtempSync(join(tmpdir(), 'goodvibes-checkout-seam-'));
+    return makeProjectTempDir('goodvibes-checkout-seam');
   }
 
   test('a composition that asks for checkout gets one guard bound to one engine', async () => {
     let seam: BrowserCheckoutSeam | null = null;
-    const gateway = composeDaemonBrowser({
+    const gateway = compose({
       homeDirectory: home(),
       onBrowserCheckout: (received) => { seam = received; },
     });
@@ -790,7 +800,7 @@ describe('the daemon browser composition offers the checkout seam', () => {
 
   test('the real engine behind the seam passes both guard checks', async () => {
     let seam: BrowserCheckoutSeam | null = null;
-    composeDaemonBrowser({
+    compose({
       homeDirectory: home(),
       onBrowserCheckout: (received) => { seam = received; },
     });
@@ -825,14 +835,14 @@ describe('the daemon browser composition offers the checkout seam', () => {
 
   test('a composition too narrow to have a home directory registers nothing', () => {
     let seam: BrowserCheckoutSeam | null = null;
-    const gateway = composeDaemonBrowser({ onBrowserCheckout: (received) => { seam = received; } });
+    const gateway = compose({ onBrowserCheckout: (received) => { seam = received; } });
     expect(gateway).toBeNull();
     expect(seam).toBeNull();
   });
 
   test('an overridden gateway with no checkout seam requested is passed through unchanged', () => {
     const override = { async shutdown() { /* nothing to close */ } };
-    const gateway = composeDaemonBrowser({ homeDirectory: home(), browserGateway: override as never });
+    const gateway = compose({ homeDirectory: home(), browserGateway: override as never });
     expect(gateway).toBe(override as never);
   });
 
@@ -844,7 +854,7 @@ describe('the daemon browser composition offers the checkout seam', () => {
     // this function can honour halfway.
     let seam: BrowserCheckoutSeam | null = null;
     const override = { async shutdown() { /* nothing to close */ } };
-    expect(() => composeDaemonBrowser({
+    expect(() => compose({
       homeDirectory: home(),
       browserGateway: override as never,
       onBrowserCheckout: (received) => { seam = received; },
@@ -1201,7 +1211,7 @@ describe('a submit failure releases or holds the reservation depending on which 
       { body: beginParams() } as never,
     ) as Record<string, unknown>;
 
-    expect(response['outcome']).toBe('refused:challenge-abandoned');
+    expect(response['outcome']).toBe('refused:submit-outcome-unknown');
     expect(String(response['reason'])).toContain('cannot tell whether');
     // Held: the click may have reached the merchant.
     expect(harness.ledger.state().reservations.length).toBe(1);
@@ -1256,7 +1266,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
       'payments.checkout.begin',
       { body: beginParams() } as never,
     ) as Record<string, unknown>;
-    expect(response['outcome']).toBe('refused:challenge-abandoned');
+    expect(response['outcome']).toBe('refused:submit-outcome-unknown');
 
     // Whether the click reached the merchant is exactly what is unknown here,
     // so whether the page still shows the card is unknown too. Before the fix

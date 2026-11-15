@@ -2,7 +2,6 @@ import { appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { ConversationManager } from '../core/conversation.js';
 import { verificationHistory, verificationMessages } from '../core/verification/archive.js';
-import { KVState } from '../state/kv-state.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
@@ -33,8 +32,7 @@ function resolveAgentSessionPaths(paths: AgentSessionPaths): AgentSessionPaths {
 /**
  * AgentSession, Isolated session context for a spawned agent.
  *
- * Each agent gets its own ConversationManager, KVState namespace,
- * and JSONL message log file.
+ * Each agent gets its own ConversationManager and JSONL message log file.
  */
 export class AgentSession {
   /** The agent's unique identifier. */
@@ -46,9 +44,6 @@ export class AgentSession {
   /** Isolated conversation history for this agent. */
   readonly conversation: ConversationManager;
 
-  /** KV state namespaced under agentId. */
-  readonly kvState: KVState;
-
   /** Path to the agent's JSONL message log. */
   readonly sessionFile: string;
 
@@ -58,6 +53,12 @@ export class AgentSession {
   /** Keeps journal lines in order while their credential spans are read. */
   private readonly lineWriter = new AtRestLineWriter(AGENT_JOURNAL_CREDENTIAL_SITE);
   private disposal: Promise<void> | undefined;
+  private lostWrites = 0;
+
+  /** Journal lines that could not be written (a full disk, a permission error). The run continues; its history does not. */
+  get lostWriteCount(): number {
+    return this.lostWrites;
+  }
 
   constructor(
     agentId: string,
@@ -81,9 +82,6 @@ export class AgentSession {
 
     // Own ConversationManager, not shared with main session
     this.conversation = new ConversationManager();
-
-    // KV state namespaced to this agent
-    this.kvState = new KVState({ sessionId: agentId, stateDir: resolvedPaths.stateDir });
 
     // JSONL log path
     this.sessionFile = join(resolvedPaths.sessionsDir, `${agentId}.jsonl`);
@@ -121,6 +119,7 @@ export class AgentSession {
         this._appendLine(serialized);
       }
     } catch (err) {
+      this.lostWrites += 1;
       logger.error('AgentSession.appendMessage failed', { agentId: this.agentId, error: summarizeError(err) });
     }
   }
@@ -145,8 +144,9 @@ export class AgentSession {
       archive: verificationHistory(this.conversation), timestamp: Date.now() });
     this.disposal = (async () => {
       await this.flush();
-      try { await this.kvState.dispose(); }
-      catch (err) { logger.error('AgentSession.dispose failed', { agentId: this.agentId, error: summarizeError(err) }); }
+      if (this.lostWrites > 0) {
+        logger.error('AgentSession disposed with an incomplete journal', { agentId: this.agentId, lostWrites: this.lostWrites, sessionFile: this.sessionFile });
+      }
       logger.debug('AgentSession disposed', { agentId: this.agentId });
     })();
     return this.disposal;
@@ -160,6 +160,7 @@ export class AgentSession {
     try {
       appendFileSync(this.sessionFile, line + '\n', 'utf-8');
     } catch (err) {
+      this.lostWrites += 1;
       logger.error('AgentSession.appendMessage failed', { agentId: this.agentId, error: summarizeError(err) });
     }
   }

@@ -26,6 +26,12 @@ function failure(label: string, code: string, detail: string): GoodVibesError {
   });
 }
 
+function normalizePayload(payload: NativeTokenPayload | null): NativeTokenPayload | null {
+  if (payload === null || payload.token === null) return payload;
+  const token = payload.token.trim();
+  return token === '' ? null : { token, expiresAt: payload.expiresAt };
+}
+
 /** Shared only by the three hardware-backed token adapters. Valid reads do not
  * migrate data. Default clear writes a durable empty canonical entry before
  * deleting the earlier entry: an interrupted/failed cleanup must never make a
@@ -77,13 +83,17 @@ export function createNativeTokenPersistence(resolve: () => Promise<NativeTokenS
         const record = decoded as Record<string, unknown>, token = record['token'], expiresAt = record['expiresAt'];
         if (token !== null && typeof token !== 'string') throw Error();
         if (expiresAt !== undefined && expiresAt !== null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt))) throw Error();
-        return { token, expiresAt: typeof expiresAt === 'number' ? expiresAt : null };
+        const usable = typeof token === 'string' && token.trim() === '' ? null : token;
+        return { token: usable, expiresAt: usable === null ? null : typeof expiresAt === 'number' ? expiresAt : null };
       } catch {
         await publish(storage, null);
         // Do not retain a JSON.parse error that can echo credential bytes.
         throw failure(label, 'ENGINE_TOKEN_STORE_CORRUPT', 'the stored payload is corrupt and was cleared.');
       }
     }),
-    writePayload: payload => operation(storage => publish(storage, payload)),
+    // A blank or whitespace-only token is no token: it is stored as a clear, the
+    // same as the memory and browser stores treat it, and a stored token loses
+    // its surrounding whitespace.
+    writePayload: payload => operation(storage => publish(storage, normalizePayload(payload))),
   };
 }

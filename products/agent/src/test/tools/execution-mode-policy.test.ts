@@ -29,7 +29,7 @@ test('Agent wrappers preserve the registered capabilities required by the execut
   const cases: { name: string; wrap: (tool: Tool) => void }[] = [
     { name: 'exec', wrap: wrapExecToolForAgentPolicy }, { name: 'fetch', wrap: wrapFetchToolForAgentPolicy },
     { name: 'task', wrap: tool => wrapModeRestrictedToolForAgentPolicy(tool, {
-      allowedModes: ['read'], modeSet: new Set(['read']), description: 'Old read-only policy', denial: 'Old denial', removedProperties: ['parallel'],
+      allowedModes: ['read'], modeSet: new Set(['read']), denial: 'Old denial',
     }) },
   ];
   for (const entry of cases) {
@@ -44,7 +44,7 @@ test('YOLO executes supported registered actions without a second Agent policy v
     { name: 'exec', args: { parallel: true, commands: [{ cmd: 'fixture only', background: true }] }, wrap: wrapExecToolForAgentPolicy },
     { name: 'fetch', args: { urls: [{ url: 'https://example.invalid', method: 'POST', body: 'fixture' }] }, wrap: wrapFetchToolForAgentPolicy },
     { name: 'task', args: { mode: 'write' }, wrap: value => wrapModeRestrictedToolForAgentPolicy(value, {
-      allowedModes: ['read'], modeSet: new Set(['read']), description: 'Old read-only policy', denial: 'Old denial',
+      allowedModes: ['read'], modeSet: new Set(['read']), denial: 'Old denial',
     }) },
   ];
   for (const entry of cases) {
@@ -78,7 +78,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s local-state preparati
   const request = { callId: 'fixture', name: 'memory', args: { text: 'password=fixture-value' }, assertCurrent() {} };
   try {
     await withMode(mode, async () => {
-      await expect(projector.project(request)).rejects.toThrow('held');
+      await expect(projector.project(request)).rejects.toThrow('invalid');
       const result = await projector.project({ ...request, args: { text: 'A harmless note' } });
       expect(result.status).toBe('projected');
       if (result.status !== 'projected') throw new Error('Expected projected fixture');
@@ -92,7 +92,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s local-state preparati
 test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s preserves local-record secret rules, structural validation and judgment privacy', mode => {
   const text = 'password=fixture-value';
   withMode(mode, () => {
-    expect(() => assertAgentMemoryInput({ text })).toThrow('held');
+    expect(() => assertAgentMemoryInput({ text })).toThrow('invalid');
     expect(() => assertNoSecretLikeMemoryText([text])).toThrow('secret-looking');
     expect(() => assertNoSecretLikeText([text])).toThrow('secret-looking');
     const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;

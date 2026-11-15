@@ -64,7 +64,11 @@ test('a unit worker search does not repeat complete owner verification per file'
   ];
   const results = new Map<string, ToolResult>();
   const verifications = spyOn(services.permissionManager as unknown as { autonomousAuthority: (...args: unknown[]) => unknown }, 'autonomousAuthority');
-  const verifiedAt: [step: string, verifications: number, at: number][] = [];
+  const verifiedAt: [step: string, verifications: number][] = [];
+  const realNow = performance.now.bind(performance);
+  const origin = realNow();
+  let reads = 0;
+  const clock = spyOn(performance, 'now').mockImplementation(() => origin + (reads++) * 0.0001);
   let memberCalls = 0;
   const provider: LLMProvider = {
     name: 'stall-fixture', models: ['fixture'], isConfigured: () => true,
@@ -72,7 +76,7 @@ test('a unit worker search does not repeat complete owner verification per file'
       const planner = !request.tools?.some(tool => tool.name === 'write');
       if (planner) return { content: plannerOutput(oneUnitPlan(1)), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, stopReason: 'completed' };
       const step = steps[memberCalls++];
-      verifiedAt.push([step?.id ?? 'done', verifications.mock.calls.length, performance.now()]);
+      verifiedAt.push([step?.id ?? 'done', verifications.mock.calls.length]);
       return { content: step ? '' : 'Created src/csv.ts. The parser works.', toolCalls: step ? [step] : [],
         usage: { inputTokens: 1, outputTokens: 1 }, stopReason: step ? 'tool_call' : 'completed' };
     },
@@ -112,15 +116,17 @@ test('a unit worker search does not repeat complete owner verification per file'
     expect(contractRunner.get(id)!.status).toBe('passed');
     expect(JSON.parse(results.get('files')!.output!).inv.count).toBe(FILES + 1);
     expect(JSON.parse(results.get('content')!.output!).sig).toEqual({ count: FILES, file_count: FILES });
-    // Complete verifications are bounded by elapsed time (two independent
-    // windows of at least 50 ms each), so a loaded machine is allowed more of
-    // them; they are never owed per file. Before the bounded fences each step
-    // made at least two per file however fast it ran.
+    // The fences stand for a window of wall-clock time, so a wall-clock
+    // bound would let a slow or loaded machine owe more verifications. The
+    // search runs on a virtual clock that advances by a fixed step per read,
+    // far below the window, so every window stays open for the whole search
+    // and the count no longer depends on machine speed. What remains are the
+    // verifications owed by effect checks and by the end of each call; they
+    // must be a small constant, never one or more per file.
     const bounded = (step: string): void => {
       const index = verifiedAt.findIndex(([id]) => id === step);
       const count = verifiedAt[index + 1]![1] - verifiedAt[index]![1];
-      const elapsedMs = verifiedAt[index + 1]![2] - verifiedAt[index]![2];
-      expect(count, `${step}: ${count} complete verifications in ${Math.round(elapsedMs)} ms`).toBeLessThan(Math.max(FILES / 2, 20 + elapsedMs / 20));
+      expect(count, `${step}: ${count} complete verifications`).toBeLessThan(FILES / 4);
     };
     bounded('files');
     bounded('content');
@@ -129,6 +135,7 @@ test('a unit worker search does not repeat complete owner verification per file'
     bounded('complete-unit');
   } finally {
     verifications.mockRestore();
+    clock.mockRestore();
     try { contractRunner.cancel(id, 'cleanup'); await contractRunner.join(id); } catch { /* already settled */ }
     contractRunner.dispose(); store.dispose(); services.dispose(); installJudgmentPort(previous);
     fs.rmSync(root, { recursive: true, force: true });

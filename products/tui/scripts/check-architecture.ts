@@ -33,15 +33,15 @@
  *   - runtime/bootstrap files may import shell-UI (composition-root privilege)
  *   - All layers may import Layer 0 foundation
  *
- * Enforced FORBIDDEN directions (rules added only where zero HEAD violations exist):
- *   - renderer  → cli, daemon
- *   - input     → cli, daemon
- *   - views     → cli, daemon
- *   - config    → renderer, input, views, cli, daemon
- *   - providers → renderer, input, views, cli, daemon
- *   - channels  → renderer, input, views
+ * Enforced FORBIDDEN directions (exactly the rules in LAYER_BOUNDARY_RULES below):
+ *   - renderer  → cli
+ *   - input     → cli
+ *   - views     → cli
+ *   - config    → renderer, input, views, cli
+ *   - providers → renderer, input, views, cli
  *   - audio     → renderer, input, views, cli
- *   - daemon    → renderer, input, views
+ * Only relative static imports are followed: `@/...` aliases and dynamic
+ * `import()` are invisible to both the cycle check and these rules.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  */

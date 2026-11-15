@@ -15,7 +15,7 @@ import type { CommandContext } from '../command-registry.ts';
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
-import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { captureOwnedJson, retainOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { TranscriptSourceChangedError } from '@goodvibes-jev/engine/platform/platform/core';
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
@@ -23,6 +23,7 @@ import { activateClassicFallback, isClassicOperation } from '@goodvibes-jev/engi
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, restoreLoadedSession } from '../../core/session-resume-core.ts';
+import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -206,9 +207,10 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     ['Session forked', '  id ' + id, '  name ' + name, '  from ' + (title || source), '  messages ' + count].join('\n'),
   async productCommand(args, ctx, sm, sub) {
     if (sub === 'resume') {
-      const target = args.slice(1).join(' ').trim();
+      const force = args.includes('--force');
+      const target = args.slice(1).filter((arg) => arg !== '--force').join(' ').trim();
       if (!target) {
-        ctx.print('Usage: /session resume <session-id-or-name>');
+        ctx.print('Usage: /session resume <session-id-or-name> [--force]');
         return true;
       }
       const sessions = sm.list();
@@ -222,8 +224,21 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         ctx.print(`Session not found ${target}\nUse /session list to see available sessions.`);
         return true;
       }
+      // Another running Agent that marked this session as open would be forked by a resume here.
+      // A missing or stale marker, or this process's own, never blocks.
+      const surface = ctx.session.surface;
+      if (surface && !force) {
+        const liveness = checkSessionLiveness(surface, found.name);
+        if (liveness.live && liveness.pid !== process.pid) {
+          ctx.print(
+            `Session ${found.name} appears open in another terminal (pid ${liveness.pid}): resuming it here would fork its live state.\n`
+              + `Run \`/session resume ${found.name} --force\` to resume it anyway.`,
+          );
+          return true;
+        }
+      }
       try {
-        const { meta, messages } = sm.load(found.name);
+        const { meta, messages, branches } = sm.load(found.name);
         const providerApi = requireProviderApi(ctx);
         const sourceSessionId = ctx.session.runtime.sessionId;
         let model = meta.model;
@@ -242,7 +257,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         }
         const restoredAnchorCount = restoreLoadedSession(
           found.name,
-          { meta, messages },
+          { meta, messages, ...(branches ? { branches } : {}) },
           {
             conversation: ctx.session.conversationManager,
             runtime: ctx.session.runtime,
@@ -250,9 +265,11 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
             surface: ctx.session.surface,
           },
         );
+        ctx.abandonHostedSession?.();
         if (model) ctx.session.runtime.model = model;
         if (provider) ctx.session.runtime.provider = provider;
         ctx.session.writeLastSessionPointer?.(found.name);
+        ctx.session.announceSessionResumed?.(found.name, messages.length);
         ctx.renderRequest();
         ctx.print(
           [
@@ -281,11 +298,19 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           }
           if (returnContextMode === 'assisted') {
             const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
-            void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
-              if (!assisted.assistedNarrative) return;
-              ctx.print(`  Assist ${assisted.assistedNarrative}`);
-              ctx.renderRequest();
-            });
+            const resumedSessionId = ctx.session.runtime.sessionId;
+            void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then(
+              (assisted) => {
+                // The summary belongs to the session that was resumed; the owner may have moved on.
+                if (!assisted.assistedNarrative || ctx.session.runtime.sessionId !== resumedSessionId) return;
+                ctx.print(`  Assist ${assisted.assistedNarrative}`);
+                ctx.renderRequest();
+              },
+              (error: unknown) => {
+                // The assisted summary is an extra; the resume itself already succeeded.
+                logger.debug('session resume: the assisted return-context summary failed', { error: summarizeError(error) });
+              },
+            );
           }
         }
       } catch (e) {

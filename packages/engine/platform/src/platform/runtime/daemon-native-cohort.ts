@@ -133,12 +133,19 @@ export function assertDaemonNativePayloadPins(artifact: DaemonCiArtifact, member
   })) throw new Error('Native daemon payload differs from its source manifest');
   assertCapturedBunMetadata(artifact, members[1]?.sha256, metadata);
 }
+/**
+ * The runtime metadata must describe the payload it ships with: its digest is
+ * the bundled Bun's digest, and its upstream source names its own version. The
+ * version is not compared with the Bun of the running build, so a release
+ * built on a newer captured Bun still verifies on an installed daemon.
+ */
 function assertCapturedBunMetadata(artifact: DaemonCiArtifact, bunDigest: string | undefined, metadata: Buffer | undefined): void {
   if (!bunDigest || !metadata) throw new Error('Native daemon runtime is incomplete');
   const value: unknown = JSON.parse(metadata.toString('utf8'));
-  if (!record(value) || value.version !== '1.3.14' || value.target !== artifact.target || value.sha256 !== bunDigest
-    || value.upstreamSource !== 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' || typeof value.source !== 'string'
-    || !(value.source === 'build-interpreter' || value.source.startsWith('installed:@oven/bun-linux-') || value.source.startsWith('npm:@oven/bun-linux-'))) throw new Error('Native daemon Bun runtime provenance is invalid');
+  if (!record(value) || typeof value.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(value.version)
+    || value.target !== artifact.target || value.sha256 !== bunDigest
+    || value.upstreamSource !== `https://github.com/oven-sh/bun/tree/bun-v${value.version}` || typeof value.source !== 'string'
+    || !(value.source === 'build-interpreter' || value.source.startsWith('installed:@oven/bun-linux-') || value.source.startsWith('npm:@oven/bun-linux-'))) throw new Error('Native daemon Bun runtime provenance is invalid: its version, upstream source, target and digest must agree with the bundled runtime');
 }
 /** Resolve the fixed paths ourselves; receipt JSON never supplies filesystem paths. */
 export function inspectDaemonNativeInstallation(execPath: string, platform: string, arch: string, suffix: '' | '.previous', io: UpdateFileIo,

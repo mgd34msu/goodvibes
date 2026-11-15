@@ -4,7 +4,6 @@ import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { repairToolCall } from '../platform/src/platform/tools/auto-repair.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
-import { wrapExecToolForAgentPolicy } from '../platform/src/platform/gate/policy/tool-policy-guard.ts';
 import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { ToolCallAbortRegistry } from '../platform/src/platform/core/orchestrator-live-turn.ts';
 import type { PermissionManager } from '../platform/src/platform/permissions/manager.ts';
@@ -51,13 +50,12 @@ function expectCancelled(error: unknown): void {
   expect(JSON.stringify(error)).not.toContain(SECRET_REASON);
   expect(String(error)).not.toContain(SECRET_REASON);
 }
-function intercepted(guarded = true) {
+function intercepted() {
   const calls: Array<{ args: Record<string, unknown>; options?: ToolExecuteOptions | undefined }> = [];
   const tool: Tool = { definition: structuredClone(SCHEMA), async execute(args, options) {
     calls.push({ args, options });
     return { success: true, output: 'intercepted' };
   } };
-  if (guarded) wrapExecToolForAgentPolicy(tool);
   const registry = new ToolRegistry(); registry.register(tool);
   return { registry, calls };
 }
@@ -198,7 +196,7 @@ describe('ToolRegistry argument repair cancellation before guarded execution', (
     expect(late).toEqual([]);
   });
 
-  for (const guarded of [true, false]) for (const changeSignal of [false, true]) test(`cancellation at the completed repair await edge stops ${guarded ? 'guarded' : 'unwrapped'} execution${changeSignal ? ' with mutated options' : ''}`, async () => {
+  for (const changeSignal of [false, true]) test(`cancellation at the completed repair await edge stops execution${changeSignal ? ' with mutated options' : ''}`, async () => {
     const base = reader(); const controller = new AbortController();
     const options = { signal: controller.signal };
     installJudgmentPort({ ...base.port, recorder: {
@@ -208,7 +206,7 @@ describe('ToolRegistry argument repair cancellation before guarded execution', (
         queueMicrotask(() => controller.abort(new Error(SECRET_REASON)));
       },
     } });
-    const { registry, calls } = intercepted(guarded);
+    const { registry, calls } = intercepted();
     expectCancelled(await settledError(registry.execute('cancelled', 'exec', { command: 'synthetic fixture', enabled: 'enabled' }, options)));
     expect(calls).toHaveLength(0);
   });
@@ -275,7 +273,7 @@ describe('ToolRegistry argument repair cancellation before guarded execution', (
       entered.resolve(); await release.promise;
       return { success: false, ...(toolReportsCancellation ? { cancelled: true } : {}), output };
     } };
-    wrapExecToolForAgentPolicy(tool); registry.register(tool);
+    registry.register(tool);
     const aborts = new ToolCallAbortRegistry();
     const result = executeToolCalls({
       toolRegistry: registry, permissionManager: { check: async () => true } as unknown as PermissionManager,

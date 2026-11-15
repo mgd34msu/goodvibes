@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { compactRegisteredToolDefinitions } from '../../tools/tool-definition-compaction.ts';
+import { compactRegisteredToolDefinitions, CORE_TOOL_NAMES, fullToolDefinition } from '../../tools/tool-definition-compaction.ts';
 
 function makeTool(name: string, description: string): Tool {
   return {
@@ -62,7 +62,8 @@ describe('compactRegisteredToolDefinitions', () => {
     compactRegisteredToolDefinitions(registry);
 
     const descriptions = new Map(registry.getToolDefinitions().map((definition) => [definition.name, definition.description]));
-    expect(descriptions.get('read')).toBe('Read files, outlines, symbols, and ranges.');
+    // A core tool keeps its own description rather than the curated summary.
+    expect(descriptions.get('read')).toBe('Verbose read tool description that should never reach the model catalog.');
     expect(descriptions.get('goodvibes_context')).toBe('Inspect current GoodVibes runtime and host harness.');
     expect(descriptions.get('autonomy')).toBe('Route ongoing work and inspect visible autonomy.');
     expect(descriptions.get('channels')).toBe('Inspect channel readiness, setup, triage, and receipts.');
@@ -79,13 +80,13 @@ describe('compactRegisteredToolDefinitions', () => {
     expect(descriptions.get('settings')).toBe('List, inspect, change, reset, or import settings.');
     expect(descriptions.get('setup')).toBe('Inspect and complete first-run Agent setup.');
     expect(descriptions.get('vibe')).toBe('Inspect/create/import VIBE.md personality.');
-    expect(descriptions.get('workspace')).toBe('Inspect/open workspace actions, UI, commands, keys.');
+    expect(descriptions.get('workspace')).toBe('Inspect or run workspace actions, commands, keys.');
     expect(descriptions.get('agent_local_registry')).toBe('Inspect/update Agent memory, notes, skills, routines.');
     expect(descriptions.get('agent_review_packet_presets')).toBe('Save/list/refresh Document Ops packet presets.');
     for (const description of descriptions.values()) {
-      expect(description.length).toBeLessThanOrEqual(56);
       expect(description).not.toContain('...');
     }
+    for (const [name, description] of descriptions) if (!CORE_TOOL_NAMES.has(name)) expect(description.length).toBeLessThanOrEqual(56);
   });
 
   test('keeps model-visible tool definitions compact while preserving schema shape', () => {
@@ -119,6 +120,61 @@ test('compacting one catalog preserves a shared definition used by another tool 
   const registry = new ToolRegistry(); registry.register(first);
   compactRegisteredToolDefinitions(registry);
   expect(second.definition).toEqual(original);
-  expect(first.definition.description).toBe('Inspect explicit subagent tasks.');
+  expect(first.definition.description).toBe('Original full subagent instructions.');
   expect(first.definition.parameters).not.toBe(second.definition.parameters);
+});
+
+function describedTool(name: string): Tool {
+  const long = 'First sentence of the parameter. Second sentence that explains the value in a good deal more detail than any model needs on every single request. Third sentence, longer still, with even more words so the limit is certainly exceeded. Fourth sentence, which adds still more words so that even the larger core limit is passed by a wide margin.';
+  return {
+    definition: {
+      name,
+      description: 'Does one thing well. Then a second sentence describing a mode. '.repeat(8),
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', description: 'Operation. One of a, b.' },
+          target: { type: 'string', description: long },
+          description: { type: 'string', description: 'A parameter literally named description.' },
+        },
+        required: ['mode'],
+      },
+    },
+    execute: async () => ({ success: true, output: 'ok' }),
+  };
+}
+
+describe('tiers', () => {
+  test('a core tool keeps its parameter descriptions, cut to whole sentences', () => {
+    const registry = new ToolRegistry(); registry.register(describedTool('read'));
+    compactRegisteredToolDefinitions(registry);
+    const properties = (registry.getToolDefinitions()[0]!.parameters as { properties: Record<string, { description?: string }> }).properties;
+    expect(properties.mode!.description).toBe('Operation. One of a, b.');
+    const kept = properties.target!.description!;
+    expect(kept.startsWith('First sentence of the parameter.')).toBe(true);
+    expect(kept.length).toBeLessThanOrEqual(240);
+    expect(kept).not.toContain('Fourth sentence');
+    expect(kept.endsWith('.')).toBe(true);
+    expect(registry.getToolDefinitions()[0]!.description.endsWith('.')).toBe(true);
+  });
+
+  test('another tool is advertised bare except for its mode, and a parameter named description survives', () => {
+    const registry = new ToolRegistry(); registry.register(describedTool('rarely_used'));
+    compactRegisteredToolDefinitions(registry);
+    const definition = registry.getToolDefinitions()[0]!;
+    const properties = (definition.parameters as { properties: Record<string, { description?: string; type?: string }> }).properties;
+    expect(properties.mode!.description).toBe('Operation. One of a, b.');
+    expect(properties.target).toEqual({ type: 'string' });
+    expect(properties.description).toEqual({ type: 'string' });
+  });
+
+  test('the full definition stays available for discovery and survives a second pass', () => {
+    const tool = describedTool('rarely_used');
+    const original = structuredClone(tool.definition);
+    const registry = new ToolRegistry(); registry.register(tool);
+    compactRegisteredToolDefinitions(registry);
+    compactRegisteredToolDefinitions(registry);
+    expect(fullToolDefinition(registry, 'rarely_used')).toEqual(original);
+    expect(fullToolDefinition(registry, 'missing')).toBeUndefined();
+  });
 });

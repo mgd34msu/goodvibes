@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { postToPublicWebhook } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { runStoreFileUpdate, writeStoreJson } from '@/utils/store-file.ts';
 import {
@@ -90,6 +91,8 @@ interface SubscriptionMeta {
    */
   readonly maskedUrl?: string;
   readonly refreshIntervalMs: number;
+  /** The owner subscribed with `--allow-private-host`: this feed is fetched from a loopback, LAN or other private address, on purpose. */
+  readonly allowPrivateHost?: true;
   readonly lastFetchedAt?: number;
   readonly lastSucceededAt?: number;
   readonly etag?: string;
@@ -112,6 +115,7 @@ export interface SubscriptionStatus {
   readonly health: SubscriptionHealth;
   readonly detail?: string;
   readonly refreshIntervalMs: number;
+  readonly allowPrivateHost?: true;
   readonly lastSucceededAt?: number;
   readonly eventCount: number;
 }
@@ -138,6 +142,14 @@ export type SubscribeResult =
 export type ValidateResult =
   | { readonly ok: true; readonly derivedName: string; readonly eventCount: number; readonly calendarName?: string }
   | { readonly ok: false; readonly stage: 'fetch' | 'parse'; readonly detail: string };
+
+export interface UnsubscribeReport {
+  readonly removed: boolean;
+  /** What became of the stored feed URL: `none` when there was no such subscription, `unsupported` when the secret store cannot delete. */
+  readonly secret: 'none' | 'deleted' | 'failed' | 'unsupported';
+  readonly secretKey?: string;
+  readonly secretError?: string;
+}
 
 export interface RefreshOutcome {
   readonly name: string;
@@ -186,24 +198,97 @@ export function subscriptionStorePath(shellPaths: AgentLocalStorePaths): string 
   return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'calendar', 'subscriptions.json');
 }
 
-/** The real HTTP fetcher, conditional GET with etag/last-modified, mapped to FeedFetchResult. */
-export function createHttpFeedFetcher(): FeedFetcher {
+/** How long a feed host may take to answer, headers and body together. */
+const FEED_TIMEOUT_MS = 30_000;
+/** A calendar feed larger than this is refused rather than buffered and cached whole. */
+const FEED_MAX_BYTES = 5 * 1024 * 1024;
+const FEED_MAX_REDIRECTS = 5;
+
+export interface HttpFeedFetcherOptions {
+  /** Sends one request to an already scheme-checked URL. Defaults to the platform's public-host request, which refuses private addresses and does not follow redirects. */
+  readonly send?: (url: string, init: RequestInit) => Promise<Response>;
+  readonly timeoutMs?: number;
+  readonly maxBytes?: number;
+  /**
+   * Fetch from loopback, LAN and other private addresses. Off unless the owner
+   * subscribed to that feed with `--allow-private-host`; https is still required.
+   */
+  readonly allowPrivateHosts?: boolean;
+}
+
+/** webcal:// is https:// under another name; any other scheme than https is refused. */
+function feedRequestUrl(raw: string): { readonly ok: true; readonly url: string } | { readonly ok: false; readonly message: string } {
+  let parsed: URL;
+  try { parsed = new URL(raw.trim().replace(/^webcals?:\/\//i, 'https://')); } catch { return { ok: false, message: 'Feed URL is not a valid address' }; }
+  if (parsed.protocol !== 'https:') return { ok: false, message: `Feed URL must use https or webcal, not ${parsed.protocol.replace(/:$/, '')}` };
+  return { ok: true, url: parsed.toString() };
+}
+
+async function readCappedText(res: Response, maxBytes: number): Promise<string | null> {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) { await res.body?.cancel(); return null; }
+  if (!res.body) return await res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) { await reader.cancel(); return null; }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * The real HTTP fetcher, conditional GET with etag/last-modified, mapped to FeedFetchResult.
+ *
+ * A feed URL is typed by the owner but can be steered by what a model read, so
+ * it is treated as an outward request to a public host: https (or webcal) only,
+ * a host that is not loopback, link-local or private (the platform's check,
+ * which resolves the name and pins the connection; `allowPrivateHosts` is the
+ * owner's per-feed opt-in for a calendar server on their own network), every redirect hop checked
+ * the same way, a time limit, and a size cap. Applied on every refresh, not only
+ * at subscribe, because the stored address is fetched again later.
+ */
+export function createHttpFeedFetcher(options: HttpFeedFetcherOptions = {}): FeedFetcher {
+  const send = options.send ?? (options.allowPrivateHosts
+    ? (url, init) => fetch(url, init)
+    : (url, init) => postToPublicWebhook(url, init));
+  const timeoutMs = options.timeoutMs ?? FEED_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? FEED_MAX_BYTES;
   return async (req) => {
     try {
       const headers: Record<string, string> = { Accept: 'text/calendar, text/plain, */*' };
       if (req.etag) headers['If-None-Match'] = req.etag;
       if (req.lastModified) headers['If-Modified-Since'] = req.lastModified;
-      const res = await fetch(req.url, { headers, redirect: 'follow' });
+      const signal = AbortSignal.timeout(timeoutMs);
+      let target = feedRequestUrl(req.url);
+      let res: Response | undefined;
+      for (let hop = 0; hop <= FEED_MAX_REDIRECTS; hop += 1) {
+        if (!target.ok) return { kind: 'error', message: target.message };
+        res = await send(target.url, { method: 'GET', headers, signal, redirect: 'manual' });
+        const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+        if (location === null) break;
+        await res.body?.cancel();
+        target = feedRequestUrl(new URL(location, target.url).toString());
+        res = undefined;
+      }
+      if (!res) return { kind: 'error', message: `Feed redirected more than ${FEED_MAX_REDIRECTS} times` };
       if (res.status === 304) {
         return { kind: 'not-modified', ...(res.headers.get('etag') ? { etag: res.headers.get('etag')! } : {}), ...(res.headers.get('last-modified') ? { lastModified: res.headers.get('last-modified')! } : {}) };
       }
       if (!res.ok) {
         return { kind: 'error', status: res.status, message: res.statusText || `HTTP ${res.status}` };
       }
-      const body = await res.text();
+      const body = await readCappedText(res, maxBytes);
+      if (body === null) return { kind: 'error', message: `Feed is larger than ${Math.floor(maxBytes / 1024 / 1024)} MiB` };
       return { kind: 'ok', body, ...(res.headers.get('etag') ? { etag: res.headers.get('etag')! } : {}), ...(res.headers.get('last-modified') ? { lastModified: res.headers.get('last-modified')! } : {}) };
     } catch (error) {
-      return { kind: 'error', message: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      return { kind: 'error', message: message.replace(/^Webhook URL/, 'Feed URL') };
     }
   };
 }
@@ -216,6 +301,8 @@ export interface CalendarSubscriptionRegistryOptions {
   readonly storePath: string;
   readonly secrets: SubscriptionSecretStore;
   readonly fetcher: FeedFetcher;
+  /** Fetcher for subscriptions the owner allowed to use a private host; defaults to `fetcher`. */
+  readonly privateHostFetcher?: FeedFetcher;
   readonly clock?: () => number;
   readonly defaultRefreshIntervalMs?: number;
   /**
@@ -230,6 +317,7 @@ export class CalendarSubscriptionRegistry {
   private readonly storePath: string;
   private readonly secrets: SubscriptionSecretStore;
   private readonly fetcher: FeedFetcher;
+  private readonly privateHostFetcher: FeedFetcher;
   private readonly clock: () => number;
   private readonly defaultInterval: number;
   private readonly recordUntrustedIngest?: CalendarUntrustedIngestRecorder;
@@ -238,6 +326,7 @@ export class CalendarSubscriptionRegistry {
     this.storePath = options.storePath;
     this.secrets = options.secrets;
     this.fetcher = options.fetcher;
+    this.privateHostFetcher = options.privateHostFetcher ?? options.fetcher;
     this.clock = options.clock ?? (() => Date.now());
     this.defaultInterval = options.defaultRefreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
     if (options.recordUntrustedIngest) this.recordUntrustedIngest = options.recordUntrustedIngest;
@@ -269,13 +358,14 @@ export class CalendarSubscriptionRegistry {
       storePath: subscriptionStorePath(shellPaths),
       secrets,
       fetcher: fetcher ?? createHttpFeedFetcher(),
+      privateHostFetcher: fetcher ?? createHttpFeedFetcher({ allowPrivateHosts: true }),
       ...(recordUntrustedIngest !== undefined ? { recordUntrustedIngest } : {}),
     });
   }
 
   /** Fetch a feed WITHOUT saving it, the subscribe preview / wizard validate step. */
-  public async validate(url: string, requestedName?: string): Promise<ValidateResult> {
-    const store = new SubscriptionStore({ fetcher: this.fetcher, clock: this.clock });
+  public async validate(url: string, requestedName?: string, options: { readonly allowPrivateHost?: boolean } = {}): Promise<ValidateResult> {
+    const store = new SubscriptionStore({ fetcher: this.fetcherFor(options.allowPrivateHost), clock: this.clock });
     const res = await store.validateByFetch(url, requestedName);
     if (!res.ok) return { ok: false, stage: res.stage, detail: res.detail };
     return { ok: true, derivedName: res.derivedName, eventCount: res.eventCount, ...(res.calendarName !== undefined ? { calendarName: res.calendarName } : {}) };
@@ -291,8 +381,8 @@ export class CalendarSubscriptionRegistry {
    * silently reverted: the section always re-reads the store fresh right
    * before writing.
    */
-  public async subscribe(url: string, requestedName?: string, refreshIntervalMs?: number): Promise<SubscribeResult> {
-    const store = new SubscriptionStore({ fetcher: this.fetcher, clock: this.clock, ...(refreshIntervalMs !== undefined ? { defaultRefreshIntervalMs: refreshIntervalMs } : { defaultRefreshIntervalMs: this.defaultInterval }) });
+  public async subscribe(url: string, requestedName?: string, refreshIntervalMs?: number, options: { readonly allowPrivateHost?: boolean } = {}): Promise<SubscribeResult> {
+    const store = new SubscriptionStore({ fetcher: this.fetcherFor(options.allowPrivateHost), clock: this.clock, ...(refreshIntervalMs !== undefined ? { defaultRefreshIntervalMs: refreshIntervalMs } : { defaultRefreshIntervalMs: this.defaultInterval }) });
     const result = await store.add({ url, ...(requestedName !== undefined ? { name: requestedName } : {}), ...(refreshIntervalMs !== undefined ? { refreshIntervalMs } : {}) });
     if (!result.ok) return { ok: false, stage: result.stage, detail: result.detail };
     const sub = result.subscription;
@@ -300,16 +390,21 @@ export class CalendarSubscriptionRegistry {
 
     return this.withMutationLock(async () => {
       const file = this.readStore();
-      if (file.subscriptions.some((s) => s.name === sub.name)) {
-        return { ok: false, stage: 'duplicate', detail: `A subscription named '${sub.name}' already exists: unsubscribe first or pass a different --name.` };
-      }
       const secretKey = secretKeyForName(sub.name);
+      // Names that differ only in case or punctuation share one secret key, and
+      // a second subscription would overwrite the first one's feed URL. Names
+      // are matched case-insensitively everywhere else (unsubscribe, refresh).
+      const clash = file.subscriptions.find((s) => s.name.toLowerCase() === sub.name.toLowerCase() || s.secretKey === secretKey);
+      if (clash) {
+        return { ok: false, stage: 'duplicate', detail: `A subscription named '${clash.name}' already exists and would share its stored address with '${sub.name}': unsubscribe first or pass a different --name.` };
+      }
       await this.secrets.set(secretKey, url, { scope: resolveCredentialWriteScope(secretKey) });
       const meta: SubscriptionMeta = {
         name: sub.name,
         secretKey,
         maskedUrl: maskFeedUrl(url),
         refreshIntervalMs: sub.refreshIntervalMs,
+        ...(options.allowPrivateHost ? { allowPrivateHost: true as const } : {}),
         ...(sub.lastFetchedAt !== undefined ? { lastFetchedAt: sub.lastFetchedAt } : {}),
         ...(sub.lastSucceededAt !== undefined ? { lastSucceededAt: sub.lastSucceededAt } : {}),
         ...(sub.etag !== undefined ? { etag: sub.etag } : {}),
@@ -332,19 +427,31 @@ export class CalendarSubscriptionRegistry {
    * (including a refresh's write) has already landed.
    */
   public async unsubscribe(name: string): Promise<boolean> {
+    return (await this.unsubscribeWithReport(name)).removed;
+  }
+
+  /**
+   * {@link unsubscribe}, saying whether the stored feed URL went with it. The URL
+   * is a read capability for the whole calendar, so a delete the secret store
+   * refused is reported with the key to remove by hand, not swallowed.
+   */
+  public async unsubscribeWithReport(name: string): Promise<UnsubscribeReport> {
     return this.withMutationLock(async () => {
       const file = this.readStore();
       const target = file.subscriptions.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
-      if (!target) return false;
+      if (!target) return { removed: false, secret: 'none' as const };
+      let secret: UnsubscribeReport['secret'] = 'unsupported';
+      let secretError: string | undefined;
       if (this.secrets.delete) {
         // No scope on the delete: sweep every tier. A feed URL stored before the
         // daemon-tier write shipped is sitting in the project tier, and a delete
         // narrowed to the daemon tier would drop the subscription from the list
         // while leaving the live URL on disk.
-        try { await this.secrets.delete(target.secretKey); } catch { /* best-effort secret cleanup */ }
+        try { await this.secrets.delete(target.secretKey); secret = 'deleted'; }
+        catch (error) { secret = 'failed'; secretError = error instanceof Error ? error.message : String(error); }
       }
       this.writeStore({ version: STORE_VERSION, subscriptions: file.subscriptions.filter((s) => s !== target) });
-      return true;
+      return { removed: true, secret, secretKey: target.secretKey, ...(secretError === undefined ? {} : { secretError }) };
     });
   }
 
@@ -374,6 +481,7 @@ export class CalendarSubscriptionRegistry {
     if (targets.length === 0) return [];
 
     const refreshedByName = new Map<string, SubscriptionMeta>();
+    const baseByName = new Map<string, SubscriptionMeta>();
     const outcomes: RefreshOutcome[] = [];
     for (const target of targets) {
       const url = await this.secrets.get(target.secretKey);
@@ -381,11 +489,12 @@ export class CalendarSubscriptionRegistry {
         outcomes.push({ name: target.name, outcome: 'unreachable', detail: 'Stored feed URL is missing from the secret manager: unsubscribe and re-add.' });
         continue;
       }
-      const store = new SubscriptionStore({ fetcher: this.fetcher, clock: this.clock });
-      store.restore([{ name: target.name, url, refreshIntervalMs: target.refreshIntervalMs, ...(target.lastFetchedAt !== undefined ? { lastFetchedAt: target.lastFetchedAt } : {}), ...(target.lastSucceededAt !== undefined ? { lastSucceededAt: target.lastSucceededAt } : {}), ...(target.etag !== undefined ? { etag: target.etag } : {}), ...(target.lastModified !== undefined ? { lastModified: target.lastModified } : {}) }]);
+      const store = new SubscriptionStore({ fetcher: this.fetcherFor(target.allowPrivateHost), clock: this.clock });
+      store.restore([{ name: target.name, url, refreshIntervalMs: target.refreshIntervalMs, ...(target.lastFetchedAt !== undefined ? { lastFetchedAt: target.lastFetchedAt } : {}), ...(target.lastSucceededAt !== undefined ? { lastSucceededAt: target.lastSucceededAt } : {}), ...(target.etag !== undefined ? { etag: target.etag } : {}), ...(target.lastModified !== undefined ? { lastModified: target.lastModified } : {}) }], { callerKeepsEvents: true });
       const report = (await store.refresh(target.name, { force: opts.force ?? true }))!;
       const sub = store.get(target.name)!;
       const events = report.outcome === 'updated' ? store.events(target.name) : target.events;
+      baseByName.set(target.name, target);
       refreshedByName.set(target.name, {
         name: target.name,
         secretKey: target.secretKey,
@@ -393,6 +502,7 @@ export class CalendarSubscriptionRegistry {
         // is already in hand here and masking it costs nothing.
         maskedUrl: maskFeedUrl(url),
         refreshIntervalMs: sub.refreshIntervalMs,
+        ...(target.allowPrivateHost ? { allowPrivateHost: true as const } : {}),
         ...(sub.lastFetchedAt !== undefined ? { lastFetchedAt: sub.lastFetchedAt } : {}),
         ...(sub.lastSucceededAt !== undefined ? { lastSucceededAt: sub.lastSucceededAt } : {}),
         ...(sub.etag !== undefined ? { etag: sub.etag } : {}),
@@ -408,7 +518,13 @@ export class CalendarSubscriptionRegistry {
 
     await this.withMutationLock(() => {
       const fresh = this.readStore();
-      const merged = fresh.subscriptions.map((s) => refreshedByName.get(s.name) ?? s);
+      // A subscription unsubscribed and created again under the same name during
+      // the fetch is a different record: it has another fetch time, and its
+      // cached events must not be replaced by the old feed's.
+      const merged = fresh.subscriptions.map((s) => {
+        const base = baseByName.get(s.name);
+        return base && base.secretKey === s.secretKey && base.lastFetchedAt === s.lastFetchedAt ? (refreshedByName.get(s.name) ?? s) : s;
+      });
       this.writeStore({ version: STORE_VERSION, subscriptions: merged });
     });
     return outcomes;
@@ -427,11 +543,16 @@ export class CalendarSubscriptionRegistry {
         health: this.healthOf(s, now),
         ...(this.detailOf(s, now) !== undefined ? { detail: this.detailOf(s, now)! } : {}),
         refreshIntervalMs: s.refreshIntervalMs,
+        ...(s.allowPrivateHost ? { allowPrivateHost: true as const } : {}),
         ...(s.lastSucceededAt !== undefined ? { lastSucceededAt: s.lastSucceededAt } : {}),
         eventCount: s.eventCount ?? s.events.length,
       });
     }
     return out;
+  }
+
+  private fetcherFor(allowPrivateHost: boolean | undefined): FeedFetcher {
+    return allowPrivateHost ? this.privateHostFetcher : this.fetcher;
   }
 
   public hasAny(): boolean {
@@ -583,6 +704,7 @@ function coerceMeta(value: Record<string, unknown>): SubscriptionMeta | null {
     secretKey,
     ...(typeof value.maskedUrl === 'string' && value.maskedUrl.length > 0 ? { maskedUrl: value.maskedUrl } : {}),
     refreshIntervalMs,
+    ...(value.allowPrivateHost === true ? { allowPrivateHost: true as const } : {}),
     ...(typeof value.lastFetchedAt === 'number' ? { lastFetchedAt: value.lastFetchedAt } : {}),
     ...(typeof value.lastSucceededAt === 'number' ? { lastSucceededAt: value.lastSucceededAt } : {}),
     ...(typeof value.etag === 'string' ? { etag: value.etag } : {}),

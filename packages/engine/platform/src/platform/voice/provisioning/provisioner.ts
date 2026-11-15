@@ -1,11 +1,13 @@
 /** Provision pinned local TTS and STT artifacts with checksum verification.
  * Completed components are reused; failures report their component and reason.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { downloadVerifiedFile, fileMatches, fileMatchesCached, type VerifiedDownloadResult } from './download-verified.js';
+import { acquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
+import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
+import { downloadVerifiedFile, fileMatches, fileMatchesCached, type VerifiedDownloadResult, type VerifiedDownloadSpec } from './download-verified.js';
 import type { VoiceInstallProgressSnapshot } from './install-progress.js';
 import {
   DEFAULT_PIPER_VOICE,
@@ -96,7 +98,8 @@ export function readVoiceInstallStamp(managedRoot: string): VoiceInstallStamp | 
 export function writeVoiceInstallStamp(managedRoot: string, stamp: VoiceInstallStamp): void {
   try {
     mkdirSync(managedRoot, { recursive: true });
-    writeFileSync(join(managedRoot, INSTALL_STAMP_FILE), JSON.stringify(stamp, null, 2), 'utf-8');
+    // Atomic: a torn stamp reads as absent, which would make every installer-written key look user-set.
+    writeJsonFileAtomic(join(managedRoot, INSTALL_STAMP_FILE), stamp);
   } catch (error) {
     logger.warn('voice install stamp write failed', { managedRoot, error: summarizeError(error) });
   }
@@ -180,7 +183,7 @@ export interface VoiceProvisionOptions {
 }
 
 /** Provision the managed local voice runtime (piper TTS + default voice). */
-export async function provisionLocalVoiceRuntime(options: VoiceProvisionOptions): Promise<VoiceProvisionResult> {
+async function provisionLocalVoiceRuntimeLocked(options: VoiceProvisionOptions): Promise<VoiceProvisionResult> {
   const platform = options.platform === undefined ? currentVoicePlatform() : options.platform;
   const emit = (
     component: string,
@@ -216,7 +219,7 @@ export async function provisionLocalVoiceRuntime(options: VoiceProvisionOptions)
   const extractArchive = options.extractArchive ?? defaultExtractor;
   const priorStamp = readVoiceInstallStamp(options.managedRoot);
 
-  const download = async (id: string, spec: { url: string; bytes: number; sha256: string }, dest: string): Promise<VerifiedDownloadResult> => {
+  const download = async (id: string, spec: VerifiedDownloadSpec, dest: string): Promise<VerifiedDownloadResult> => {
     const result = await downloadVerifiedFile({
       spec,
       destPath: dest,
@@ -346,7 +349,7 @@ async function provisionWhisperStt(ctx: {
   readonly priorStamp: VoiceInstallStamp | null;
   readonly components: VoiceComponentOutcome[];
   readonly extractArchive: ArchiveExtractor;
-  readonly download: (id: string, spec: { url: string; bytes: number; sha256: string }, dest: string) => Promise<VerifiedDownloadResult>;
+  readonly download: (id: string, spec: VerifiedDownloadSpec, dest: string) => Promise<VerifiedDownloadResult>;
   readonly emit: (component: string, phase: ProvisionPhase, message?: string) => void;
 }): Promise<WhisperProvisionOutcome> {
   const { options, platform, paths, priorStamp, components, extractArchive, download, emit } = ctx;
@@ -366,7 +369,7 @@ async function provisionWhisperStt(ctx: {
   let archiveFresh = false;
   let bundleVerified = false;
   if (whisper.bundle.url) {
-    const result = await download('whisper-engine', { url: whisper.bundle.url, bytes: whisper.bundle.bytes, sha256: whisper.bundle.sha256 }, paths.whisperArchive);
+    const result = await download('whisper-engine', { url: whisper.bundle.url, fallbackUrls: whisper.bundle.fallbackUrls, bytes: whisper.bundle.bytes, sha256: whisper.bundle.sha256 }, paths.whisperArchive);
     if (!result.ok) {
       const state: SttProvisionState = result.reason === 'checksum-mismatch' ? 'checksum-mismatch' : 'download-failed';
       emit('whisper-engine', 'error', result.error);
@@ -470,7 +473,7 @@ function isUsableBinary(path: string): boolean {
  * truncated binary at the final path reporting 'provisioned', the exact
  * partial-artifact class the download side already prevents via temp+rename.
  */
-async function extractEngineAtomically(
+export async function extractEngineAtomically(
   enginesDir: string,
   archivePath: string,
   binaryRelPath: string,
@@ -602,4 +605,44 @@ export function resolveManagedEngine(
   // STT: the goodvibes-built whisper.cpp bundle + the default ggml model.
   if (!fileExists(paths.whisperBinary) || !fileExists(paths.whisperModel)) return null;
   return { engine: 'whisper-cpp', binary: paths.whisperBinary, modelPath: paths.whisperModel };
+}
+
+
+/** Install lock file within the managed voice root. */
+const PROVISION_LOCK_FILE = '.provision.lock';
+
+/** A waiting installer outlasts a full download; the holder keeps the lock visibly alive meanwhile. */
+const PROVISION_LOCK_WAIT_MS = 15 * 60_000;
+
+/**
+ * Remove what a killed installer left behind. Only safe while holding the
+ * provision lock, when no other process can be mid-extract or mid-download.
+ */
+function reapProvisionLeftovers(paths: ManagedVoicePaths): void {
+  for (const dir of [paths.enginesDir, paths.modelsDir]) {
+    let names: string[];
+    try { names = readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!(name.startsWith('.extract-') || name.endsWith('.old') || (name.startsWith('.') && name.endsWith('.part')))) continue;
+      try { rmSync(join(dir, name), { recursive: true, force: true }); }
+      catch (error) { logger.warn('voice provisioning leftover could not be removed', { path: join(dir, name), error: summarizeError(error) }); }
+    }
+  }
+}
+
+/**
+ * Provision the managed local voice runtime. Installs are serialized across
+ * processes: the engine swap renames trees in a shared directory, so two
+ * installers (a terminal product and the daemon) would otherwise delete each
+ * other's tree mid-swap.
+ */
+export async function provisionLocalVoiceRuntime(options: VoiceProvisionOptions): Promise<VoiceProvisionResult> {
+  mkdirSync(options.managedRoot, { recursive: true });
+  const release = await acquireCrossProcessLock(join(options.managedRoot, PROVISION_LOCK_FILE), { totalTimeoutMs: PROVISION_LOCK_WAIT_MS });
+  try {
+    reapProvisionLeftovers(resolveManagedVoicePaths(options.managedRoot, options.platform));
+    return await provisionLocalVoiceRuntimeLocked(options);
+  } finally {
+    release();
+  }
 }

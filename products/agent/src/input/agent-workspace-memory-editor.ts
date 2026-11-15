@@ -31,7 +31,9 @@ export async function submitAgentWorkspaceMemoryEditor(
     const updated = memory.update(editor.recordId, {
       scope,
       summary,
-      detail: detail.length > 0 ? detail : undefined,
+      // A blank field must clear the stored detail. The store reads `undefined` as
+      // "keep the existing value", so the empty string is how a clear is sent.
+      detail,
       tags,
     });
     if (!updated) throw new Error(`Unknown Agent memory ${editor.recordId}`);

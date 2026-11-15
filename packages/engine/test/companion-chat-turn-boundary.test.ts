@@ -34,23 +34,34 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { trackDisposables } from './_helpers/disposables.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 import {
   getProcessUntrustedContentLedger,
   resetProcessUntrustedContentLedgerForTests,
 } from '../platform/src/platform/security/untrusted-content.ts';
-import { startTurnForOwnerInput } from '../platform/src/platform/security/turn-boundary.ts';
+import { CompanionChatManager } from '../platform/src/platform/companion/companion-chat-manager.ts';
+import type { CompanionLLMProvider } from '../platform/src/platform/companion/companion-chat-manager.ts';
 
-/**
- * The turn-start funnel's boundary call, as the manager makes it.
- *
- * `_startNextTurn` reads `next.ownerDirect` off the queued entry and calls
- * exactly this. Reproducing that one line keeps the test on the CONTRACT,
- * "an attested turn resets, an unattested one does not", without standing up
- * a provider, a conversation store and a session persister to observe it.
- * The end of this file checks the manager really is wired this way.
- */
-function startCompanionTurn(ownerDirect: boolean | undefined): boolean {
-  return startTurnForOwnerInput({ ownerDirect: ownerDirect === true });
+const disposables = trackDisposables();
+
+function makeManager(options: { readonly gate?: Promise<void> | undefined } = {}): { manager: CompanionChatManager; completed: () => number } {
+  const provider: CompanionLLMProvider = {
+    async *chatStream() {
+      await options.gate;
+      yield { type: 'text_delta', delta: 'ok' };
+      yield { type: 'done' };
+    },
+  };
+  let completedTurns = 0;
+  const manager = disposables.add(new CompanionChatManager({
+    provider,
+    eventPublisher: {
+      publishEvent(event) { if (event === 'companion-chat.turn.completed') completedTurns += 1; },
+    },
+    gcIntervalMs: 999_999,
+  }));
+  return { manager, completed: () => completedTurns };
 }
 
 function recordAPageRead(): void {
@@ -62,86 +73,91 @@ function recordAPageRead(): void {
   });
 }
 
+const exposed = (): boolean => getProcessUntrustedContentLedger().hasIngestedThisTurn();
+
 beforeEach(() => { resetProcessUntrustedContentLedgerForTests(); });
 afterEach(() => { resetProcessUntrustedContentLedgerForTests(); });
 
+// The turn starts synchronously when an idle session accepts the message, so the
+// ledger is read right after the post returns, before the turn can read anything.
 describe('an authenticated owner message ends the previous turn', () => {
-  test('the webui route attests, and the window resets', () => {
+  test('a message the route attests resets the window', async () => {
+    const { manager } = makeManager();
+    const session = manager.createSession();
     recordAPageRead();
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(true);
+    expect(exposed()).toBe(true);
 
-    // What companion-chat-routes.ts passes: ownerDirect: true.
-    expect(startCompanionTurn(true)).toBe(true);
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(false);
+    await manager.postMessage(session.id, 'hello', '', { ownerDirect: true });
+    expect(exposed()).toBe(false);
   });
 
-  test('a second webui message carries nothing from the first', () => {
-    startCompanionTurn(true);
+  test('a message queued behind a running turn resets the window when its own turn starts', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { manager, completed } = makeManager({ gate });
+    const session = manager.createSession();
+    await manager.postMessage(session.id, 'first', '', { ownerDirect: true });
     recordAPageRead();
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(true);
 
-    startCompanionTurn(true);
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(false);
+    // Posted while the first turn runs: it waits, and the attestation must wait with it.
+    await manager.postMessage(session.id, 'second', '', { ownerDirect: true });
+    expect(exposed()).toBe(true);
+
+    release();
+    await waitFor(() => completed() === 2);
+    expect(exposed()).toBe(false);
   });
 });
 
 describe('a relayed message does not', () => {
-  test('the ntfy relay attests nothing, so the window stays open', () => {
+  test('a post with no attestation (ntfy, Home Assistant) leaves the window open', async () => {
+    const { manager } = makeManager();
+    const session = manager.createSession();
     recordAPageRead();
-    // What surface-actions.ts passes: nothing at all.
-    expect(startCompanionTurn(undefined)).toBe(false);
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(true);
+
+    await manager.postMessage(session.id, 'from a topic');
+    expect(exposed()).toBe(true);
   });
 
-  test('Home Assistant attests nothing either: a room is not a person', () => {
+  test('an explicit false is honoured', async () => {
+    const { manager } = makeManager();
+    const session = manager.createSession();
     recordAPageRead();
-    expect(startCompanionTurn(undefined)).toBe(false);
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(true);
+
+    await manager.postMessage(session.id, 'hello', '', { ownerDirect: false });
+    expect(exposed()).toBe(true);
   });
 
-  test('an explicit false is honoured over anything else', () => {
+  test('the wait-for-reply entry the relays use cannot attest', async () => {
+    const { manager } = makeManager();
+    const session = manager.createSession();
     recordAPageRead();
-    expect(startCompanionTurn(false)).toBe(false);
-    expect(getProcessUntrustedContentLedger().hasIngestedThisTurn()).toBe(true);
+
+    await manager.postMessageAndWaitForReply(session.id, 'from a room', '', { timeoutMs: 5_000 });
+    expect(exposed()).toBe(true);
   });
 });
 
-describe('the wiring itself, so this cannot pass while the manager forgets', () => {
-  /**
-   * The defect class being guarded here is a call site that does not exist,
-   * which is what produced the original bug. Behavioural tests above cannot
-   * catch it: they exercise the boundary, not the manager's use of it. So the
-   * manager's source is read, the same way the workspace-card parity test reads
-   * the command file it is checking against.
-   */
-  test('the turn-start funnel opens the boundary from the queued entry', async () => {
-    const source = await Bun.file(
-      new URL('../platform/src/platform/companion/companion-chat-manager.ts', import.meta.url),
-    ).text();
-
-    const funnel = source.slice(source.indexOf('private _startNextTurn('));
-    const body = funnel.slice(0, funnel.indexOf('\n  private '));
-
-    expect(body).toContain('startTurnForOwnerInput');
-    // Read off the QUEUED entry, not from ambient state: a message can wait
-    // behind an active turn, and by then the call that knew who sent it is gone.
-    expect(body).toContain('next.ownerDirect');
-  });
-
-  test('only the authenticated route attests', async () => {
+describe('the transports', () => {
+  test('only the authenticated route attests; the relays name no attestation at all', async () => {
     const routes = await Bun.file(
       new URL('../platform/src/platform/companion/companion-chat-routes.ts', import.meta.url),
     ).text();
-    expect(routes).toContain('ownerDirect: true');
+    expect(routes).toContain('ownerDirect: isOwnerRequest(req, context)');
 
-    // The two relays must not. If either grows an attestation, a stranger's
-    // channel message gains the ability to end the owner's turn.
+    // Any expression, not just a literal true: a stranger's channel message that
+    // can end the owner's turn could erase the record of what it just made the
+    // assistant read. Comments may mention the word; code may not assign it.
     for (const relative of [
       '../platform/src/platform/daemon/surface-actions.ts',
       '../platform/src/platform/daemon/homeassistant-chat.ts',
+      '../platform/src/platform/hosted-sessions/session-runtime.ts',
     ]) {
-      const relay = await Bun.file(new URL(relative, import.meta.url)).text();
-      expect(relay).not.toContain('ownerDirect: true');
+      const code = (await Bun.file(new URL(relative, import.meta.url)).text())
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
+        .join('\n');
+      expect(code).not.toMatch(/ownerDirect\s*[:=]/);
     }
   });
 });

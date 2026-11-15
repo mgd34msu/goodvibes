@@ -6,8 +6,10 @@
  * what is disclosed) stays readable and both halves stay under the line cap.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 
 /** File name of the disclosure marker written beside the daemon config store. */
@@ -20,6 +22,12 @@ export const DAEMON_CONFIG_MOVED_VERSION = 1;
 export interface MovedConfigKey {
   readonly key: string;
   readonly from: string;
+}
+
+/** A surface settings file the migration could not read and therefore left untouched. */
+export interface SkippedSurfaceFile {
+  readonly path: string;
+  readonly reason: string;
 }
 
 /** A value that was NOT kept, disclosed rather than silently dropped. */
@@ -65,6 +73,12 @@ export interface DaemonConfigMovedMarker {
    * "covers nothing" so those installations get one corrective pass.
    */
   readonly coveredKeys: readonly string[];
+  /**
+   * Surface settings files that could not be read (not a JSON object, or
+   * unparseable). They were left as they were and the other surfaces migrated.
+   * Absent when every surface was readable; an older reader ignores it.
+   */
+  readonly skipped?: readonly SkippedSurfaceFile[];
 }
 
 /** Absolute path of the disclosure marker for a daemon config store. */
@@ -111,6 +125,7 @@ export function readDaemonConfigMovedMarker(path: string): DaemonConfigMovedMark
     coveredKeys: Array.isArray(record['coveredKeys'])
       ? (record['coveredKeys'] as readonly unknown[]).filter((entry): entry is string => typeof entry === 'string')
       : [],
+    ...(Array.isArray(record['skipped']) ? { skipped: record['skipped'] as readonly SkippedSurfaceFile[] } : {}),
   };
 }
 
@@ -129,12 +144,14 @@ export function readAnyDaemonConfigMovedMarker(path: string): Partial<DaemonConf
   }
 }
 
-/** Write JSON atomically (temp file + rename) so no reader ever sees a torn file. */
+/**
+ * Write JSON atomically through the platform's store writer: a per-write temp
+ * name (two processes migrating at once cannot publish each other's half file),
+ * fsync, and owner-only mode, since a settings file can hold credential values.
+ */
 export function writeJsonAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-  renameSync(tmp, path);
+  writeJsonFileAtomic(path, value, { mkdirp: true, durable: true, mode: 0o600 });
+  acknowledgeConfigFileWrite(path);
 }
 
 /** Parse a settings JSON file; a missing file reads as {}, an invalid one throws. */
@@ -166,7 +183,8 @@ export function discoverSurfaceSettingsFiles(
   const excluded = new Set(exclude);
   const found: { surface: string; path: string }[] = [];
   for (const entry of entries.sort()) {
-    if (excluded.has(entry)) continue;
+    // A surface root is a plain name; `tui.bak` or `agent.old` is somebody's copy.
+    if (excluded.has(entry) || entry.includes('.')) continue;
     const dir = join(root, entry);
     try {
       if (!statSync(dir).isDirectory()) continue;

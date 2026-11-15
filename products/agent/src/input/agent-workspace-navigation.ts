@@ -71,14 +71,23 @@ export function jumpAgentWorkspaceSelection(host: AgentWorkspaceNavigationHost, 
   host.clampSelection();
 }
 
-export function selectAgentWorkspaceCategory(host: AgentWorkspaceNavigationHost, categoryIdOrLabel: string): boolean {
+function findAgentWorkspaceCategoryIndex(categories: readonly AgentWorkspaceCategory[], categoryIdOrLabel: string): number {
   const normalized = normalizeAgentWorkspaceCategoryRequest(categoryIdOrLabel);
-  if (!normalized) return false;
-  const categoryIndex = host.categories.findIndex((category) =>
+  if (!normalized) return -1;
+  return categories.findIndex((category) =>
     category.id.toLowerCase() === normalized
     || category.label.toLowerCase() === normalized
     || category.label.toLowerCase().replace(/[^a-z0-9]+/g, '-') === normalized
   );
+}
+
+/** True when the workspace would open this area, aliases included. */
+export function isKnownAgentWorkspaceCategory(categories: readonly AgentWorkspaceCategory[], categoryIdOrLabel: string): boolean {
+  return findAgentWorkspaceCategoryIndex(categories, categoryIdOrLabel) >= 0;
+}
+
+export function selectAgentWorkspaceCategory(host: AgentWorkspaceNavigationHost, categoryIdOrLabel: string): boolean {
+  const categoryIndex = findAgentWorkspaceCategoryIndex(host.categories, categoryIdOrLabel);
   if (categoryIndex < 0) return false;
   host.selectedCategoryIndex = categoryIndex;
   host.selectedActionIndex = 0;

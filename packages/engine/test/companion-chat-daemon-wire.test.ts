@@ -189,8 +189,6 @@ describe('companion-chat daemon wire: route reachability', () => {
   });
 
   test('dispatchCompanionChatRoutes returns null for non-companion routes', async () => {
-    // Verifies the guard: without companionChatManager, the router must return
-    // null (fall-through to 404). We simulate this by calling with a non-companion URL.
     const req = new Request('http://localhost/api/tasks', { method: 'GET' });
     const ctx = makeRouteContext(manager);
     const res = await dispatchCompanionChatRoutes(req, ctx);
@@ -267,15 +265,7 @@ describe('companion-chat daemon wire: DaemonHttpRouter.dispatchApiRoutes integra
       body: JSON.stringify({ title: 'no-manager-test' }),
     });
 
-    let result: Response | null;
-    try {
-      result = await router.dispatchApiRoutes(req);
-    } catch {
-      result = null;
-    }
-    if (result !== null) {
-      expect(result.status).not.toBe(201);
-    }
+    expect(await router.dispatchApiRoutes(req)).toBeNull();
   });
 });
 

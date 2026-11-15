@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -136,12 +136,17 @@ describe('complete-candidate bounded relevance batches', () => {
     controller.abort(); await held(work, 'aborted'); expect(signal?.aborted).toBe(true);
   });
   test('deadline is not renewed at a later batch', async () => {
-    const fake = readings(); let count = 0;
+    // The budget is measured against Date.now(); each reading moves a controlled clock
+    // by 3 s of a 5 s budget, so the third batch must not be dispatched.
+    const fake = readings(), start = Date.now(); let count = 0, elapsed = 0;
+    const clock = spyOn(Date, 'now').mockImplementation(() => start + elapsed);
     installJudgmentPort({ ...fake.port, async ask(request) {
-      count++; await new Promise((resolve) => setTimeout(resolve, 20)); return fake.port.ask(request);
+      count++; elapsed += 3_000; return fake.port.ask(request);
     } });
-    await held(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), candidate(2, true), candidate(3, true)] }, { timeoutMs: 35 }), 'budget');
-    expect(count).toBeLessThan(3);
+    try {
+      await held(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1, true), candidate(2, true), candidate(3, true)] }, { timeoutMs: 5_000 }), 'budget');
+    } finally { clock.mockRestore(); }
+    expect(count).toBe(2);
   });
   test('missing ports are held and empty requests need none', async () => {
     await held(prepareAnswerEvidenceRelevanceBatches({ query, candidates: [candidate(1)] }), 'unconfigured');

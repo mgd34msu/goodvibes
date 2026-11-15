@@ -17,7 +17,7 @@ export {
   normalizeWorkspaceRoot,
   pathCovers,
 } from './resolution.js';
-export { probeWorktreeLink, type GitRunner } from './worktree-link.js';
+export { probeWorktreeLink, probeWorktreeLinkAsync, type GitRunner, type AsyncGitRunner } from './worktree-link.js';
 export {
   WorkspaceRegistrationError,
   NativeWorkspaceScopeError,

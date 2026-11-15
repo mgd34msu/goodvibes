@@ -2,6 +2,7 @@
  * UIEvent, discriminated union covering UI render, scroll, and panel events.
  *
  * These events drive terminal and web surface rendering without coupling it to business logic.
+ * Declared, not yet emitted: no code in the platform publishes any UI event, so a subscriber to the `ui` domain receives none.
  */
 
 export type GoodVibesUIEvent =

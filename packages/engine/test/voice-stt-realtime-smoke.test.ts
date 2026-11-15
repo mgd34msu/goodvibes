@@ -1,7 +1,6 @@
 /**
- * Coverage-gap smoke test, platform/voice (STT, realtime providers)
- * Verifies VoiceProviderRegistry can register a mock provider and query it.
- * Closes coverage gap: platform/voice/stt and realtime
+ * Voice provider registry, and which built-in providers offer speech-to-text
+ * and realtime once the built-ins are registered.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -48,8 +47,24 @@ describe('platform/voice: behavior smoke', () => {
     expect(result).toBeNull();
   });
 
-  test('ensureBuiltinVoiceProviders does not throw when called with a registry', () => {
+  test('the built-ins register every cloud route and expose STT and realtime through capability lookup', () => {
     const registry = new VoiceProviderRegistry();
-    expect(() => ensureBuiltinVoiceProviders(registry)).not.toThrow();
+    ensureBuiltinVoiceProviders(registry);
+    expect(registry.list().map((p) => p.id).sort()).toEqual(
+      ['deepgram', 'elevenlabs', 'google', 'microsoft', 'openai', 'vydra'],
+    );
+    const withCapability = (capability: 'stt' | 'realtime') =>
+      registry.list().filter((p) => p.capabilities.includes(capability)).map((p) => p.id).sort();
+    expect(withCapability('stt')).toEqual(['deepgram', 'elevenlabs', 'google', 'openai']);
+    expect(withCapability('realtime')).toEqual(['elevenlabs', 'openai']);
+    expect(registry.findProvider('realtime')).not.toBeNull();
+  });
+
+  test('registering the built-ins twice replaces rather than duplicates', () => {
+    const registry = new VoiceProviderRegistry();
+    ensureBuiltinVoiceProviders(registry);
+    const first = registry.list().length;
+    ensureBuiltinVoiceProviders(registry);
+    expect(registry.list()).toHaveLength(first);
   });
 });

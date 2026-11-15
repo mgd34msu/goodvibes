@@ -3,7 +3,7 @@ import { paginateFindResult } from './pagination.js';
 import type { WalkDirOptions } from '../../utils/walk-dir.js';
 import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
 import { stat as statAsync } from 'node:fs/promises';
-import { relative } from 'node:path';
+import { isAbsolute, relative } from 'node:path';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
 import { contentMatchView, contentRank } from '../batteries/content-rank.js';
@@ -13,6 +13,7 @@ import { createSafeRegex } from '../../utils/safe-regex.js';
 import {
   collectFilesForSearch,
   createFindDiagnostics,
+  addDiscoveryCutWarning,
   addFindWarning,
   isBinary,
   makeCountResult,
@@ -24,6 +25,19 @@ import {
   withFindWarnings,
 } from './shared.js';
 import { partitionByReadAccess, accessRestrictedNote, type ReadAccessFilter } from '../shared/read-access.js';
+import type { FindCodeIntelligence } from './references.js';
+
+type MatchedFiles = Map<string, { content: string; matches: ContentMatch[] }>;
+
+/**
+ * A copy that shares no match object with the original. The cache hands out one
+ * entry to every later call, and `expand_to` writes into the matches it is given.
+ * Cached entries carry no file text (`content` is empty): it is re-read when a
+ * query needs it, so a search on a common token does not pin the repository in memory.
+ */
+function copyMatches(source: MatchedFiles, withContent: boolean): MatchedFiles {
+  return new Map(Array.from(source, ([file, entry]) => [file, { content: withContent ? entry.content : '', matches: entry.matches.map((match) => ({ ...match })) }] as const));
+}
 
 /** The decision site the content-rank reading is logged under. */
 export const CONTENT_RANK_SITE = 'tools.find-content-ranked';
@@ -70,6 +84,7 @@ async function scanContentQuery(
   projectRoot: string,
   readAccessFilter?: ReadAccessFilter,
   options: FindSearchOptions = {},
+  intelligence?: () => Promise<FindCodeIntelligence>,
 ): Promise<Record<string, unknown>> {
   const before = JSON.stringify([query, output]);
   const current = () => {
@@ -82,13 +97,25 @@ async function scanContentQuery(
   const validatedPath = validateSearchPath(query.path, projectRoot, options.allowOutsideProject);
   if (typeof validatedPath === 'object') return validatedPath;
   const basePath = validatedPath;
-  const format = output.format ?? 'matches';
+  let format = output.format ?? 'matches';
   const ctxBefore = output.context_before ?? 0;
   const ctxAfter = output.context_after ?? 0;
   const diagnostics = createFindDiagnostics();
 
   if (format === 'signatures' || format === 'full') {
     return { error: `Output format '${format}' is only valid for symbols mode` };
+  }
+  if (format === 'with_stats' || format === 'with_preview') {
+    // `output` is shared by every query of a call, so a format meant for another
+    // mode is answered with the closest content format, and the call says so.
+    addFindWarning(diagnostics, `Output format '${format}' is only valid for files mode; content mode returned 'matches' instead.`);
+    format = 'matches';
+  }
+  if (query.preview_replace !== undefined && format !== 'matches' && format !== 'context') {
+    addFindWarning(diagnostics, `preview_replace was ignored: it applies only to output formats 'matches' and 'context', not '${format}'.`);
+  }
+  if (query.multiline) {
+    addFindWarning(diagnostics, "multiline has no effect in content mode: each line is matched on its own, so a pattern cannot span lines. Search for one line of the text, or use the edit tool's multiline for replacements across lines.");
   }
 
   let rawPattern: string;
@@ -105,11 +132,12 @@ async function scanContentQuery(
     rawPattern = `\\b(?:${rawPattern})\\b`;
   }
 
-  const flags = [query.case_sensitive === false ? 'i' : '', query.multiline ? 'm' : '', 'g'].join('');
+  const flags = [query.case_sensitive === false ? 'i' : '', 'g'].join('');
 
   await using regex = await createSafeRegex(rawPattern, flags, { ...options, assertCurrent: current, operation: 'find content' });
 
   const files = await collectFilesForSearch(basePath, query.glob, diagnostics, walkOptions);
+  const discoveryCut = options.shouldContinue?.() === false;
   // Read-side deny enforcement: a file whose read the gate would hold behind an
   // ask never has its content returned. content mode is a content surface in
   // EVERY format (even files_only/locations reveal that the pattern matched a
@@ -130,9 +158,17 @@ async function scanContentQuery(
 
   if (query.negate) {
     const nonMatchingFiles: string[] = [];
-    for (const file of files) {
+    if (discoveryCut) addDiscoveryCutWarning(diagnostics, files.length);
+    for (const [fileIndex, file] of files.entries()) {
+      if (options.shouldContinue?.() === false) {
+        addFindWarning(diagnostics, `Stopped at the time budget: checked ${fileIndex} of ${files.length} files, so the list of non-matching files is incomplete. `
+          + "Narrow 'path' or 'glob', or pass a larger timeout_ms.");
+        break;
+      }
       const content = await readTextFile(file, diagnostics);
       if (content === null) continue;
+      // A binary file is not "text without the pattern".
+      if (await isBinary(file, diagnostics)) continue;
       if (!await regex.test(content)) {
         nonMatchingFiles.push(file);
 
@@ -158,26 +194,35 @@ async function scanContentQuery(
 
   let matchedFiles: Map<string, { content: string; matches: ContentMatch[] }>;
   let totalMatches: number;
+  let scanStoppedAt: number | undefined;
+  // Each file's mtime is taken BEFORE its text is read: a file that changes in between is cached as
+  // old text under the old mtime, so the next call sees the newer mtime and rereads it.
+  const fileMtimesForCache = new Map<string, number>();
 
   if (cacheValid && cachedEntry) {
-    matchedFiles = cachedEntry.matchedFiles;
+    matchedFiles = copyMatches(cachedEntry.matchedFiles, false);
     totalMatches = cachedEntry.totalMatches;
   } else {
     matchedFiles = new Map<string, { content: string; matches: ContentMatch[] }>();
     totalMatches = 0;
 
-    for (const file of files) {
+    for (const [fileIndex, file] of files.entries()) {
+      // The call's time budget ran out: stop with what was found and say how far the search got.
+      if (options.shouldContinue?.() === false) { scanStoppedAt = fileIndex; break; }
 
+      try { fileMtimesForCache.set(file, (await statAsync(file)).mtimeMs); } catch { fileMtimesForCache.set(file, 0); }
       const content = await readTextFile(file, diagnostics);
       if (content === null) continue;
       if (await isBinary(file, diagnostics)) continue;
 
-      const lines = content.split('\n');
+      // Lines are matched without their CRLF terminator, so `foo$` matches a Windows file too.
+      const searchable = content.includes('\r\n') ? content.replace(/\r\n/g, '\n') : content;
+      const lines = searchable.split('\n');
       const fileMatches: ContentMatch[] = [];
 
       // Match in the isolated worker once per file, not once per source line.
       // The worker resets lastIndex for each line, preserving search semantics.
-      for (const i of await regex.matchingLines(content)) {
+      for (const i of await regex.matchingLines(searchable)) {
         const match: ContentMatch = { file, line: i + 1, text: lines[i]! };
         if (format === 'context') {
           match.context_before = lines.slice(Math.max(0, i - ctxBefore), i);
@@ -193,9 +238,27 @@ async function scanContentQuery(
     }
   }
 
+  if (scanStoppedAt === undefined && discoveryCut && !cacheValid) scanStoppedAt = files.length;
+  if (scanStoppedAt !== undefined) {
+    addFindWarning(diagnostics, `Stopped at the time budget: searched ${scanStoppedAt} of ${files.length} files${discoveryCut ? ' (finding the files was itself cut short, so more exist)' : ''} and found ${totalMatches} match(es) so far. `
+      + "Narrow 'path' or 'glob', or pass a larger timeout_ms, to search the rest.");
+  }
+
+  // A partial scan must never be served later as if it were the whole answer.
+  // The entry is stored before the read filter runs: it describes the files,
+  // not who may see them, and every call filters its own copy, so a restriction
+  // that is later lifted (or applied) is honoured without a changed file.
+  if (!query.ranked && !query.preview_replace && !query.relationships && scanStoppedAt === undefined) {
+    runtime.searchCacheSet(cacheKey, {
+      files,
+      matchedFiles: copyMatches(matchedFiles, false),
+      totalMatches,
+      fileMtimes: fileMtimesForCache,
+    });
+  }
+
   // The filter is the sole authority over what is reported, for fresh and
-  // cached results alike (a cached entry may predate a mode change); the shared
-  // cache entry itself is never mutated.
+  // cached results alike (a cached entry may predate a mode change).
   if (readAccessFilter && matchedFiles.size > 0) {
     const readable = new Set(await onlyReadable(Array.from(matchedFiles.keys())));
     if (readable.size < matchedFiles.size) {
@@ -213,35 +276,19 @@ async function scanContentQuery(
   }
   noteRestricted();
 
-  if (!query.ranked && !query.preview_replace && !query.relationships) {
-    const fileMtimesForCache = new Map<string, number>();
-    await Promise.all(
-      files.map(async (f) => {
-        try {
-          const s = await statAsync(f);
-          fileMtimesForCache.set(f, s.mtimeMs);
-        } catch {
-          fileMtimesForCache.set(f, 0);
-        }
-      }),
-    );
-    runtime.searchCacheSet(cacheKey, {
-      files,
-      matchedFiles: new Map(matchedFiles),
-      totalMatches,
-      fileMtimes: fileMtimesForCache,
-    });
-  }
-
   if (query.ranked && matchedFiles.size > 1) {
     matchedFiles = await rankMatchedFiles(matchedFiles, searchedPattern, projectRoot);
   }
 
   const expandTo = output.expand_to;
   if (expandTo === 'function' || expandTo === 'class') {
-    const ci = new (await import('../../intelligence/index.js')).CodeIntelligence({});
-    for (const [file, { content, matches }] of matchedFiles) {
-      for (const m of matches) {
+    const ci = intelligence ? await intelligence() : undefined;
+    if (!ci) addFindWarning(diagnostics, `expand_to '${expandTo}' was not applied: no code intelligence is available to this tool.`);
+    for (const [file, entry] of matchedFiles) {
+      if (!ci) break;
+      // Cached entries keep no text; the file is unchanged since the cache entry was checked.
+      const content = entry.content !== '' ? entry.content : await readTextFile(file, diagnostics) ?? '';
+      for (const m of entry.matches) {
         try {
           const scope = await ci.getEnclosingScope(file, content, m.line);
           if (scope) {
@@ -314,14 +361,27 @@ async function scanContentQuery(
     }
 
     if (query.relationships) {
-      const importGraph = await runtime.getImportGraph(basePath);
+      // The graph covers the whole project, so `importedBy` is not cut off at the searched
+      // path. A searched path outside the project gets a graph of its own, and says so.
+      const fromRoot = relative(projectRoot, basePath);
+      const inProject = !isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith('..' + '/');
+      const graphRoot = inProject ? projectRoot : basePath;
+      const importGraph = await runtime.getImportGraph(graphRoot);
       const relMap: Record<string, { imports: string[]; importedBy: string[] }> = {};
+      const related = new Map<string, { imports: string[]; importedBy: string[] }>();
       for (const file of matchedFiles.keys()) {
-        relMap[file] = {
-          imports: importGraph.findImports(file),
-          importedBy: importGraph.findDependents(file),
-        };
+        related.set(file, { imports: importGraph.findImports(file), importedBy: importGraph.findDependents(file) });
       }
+      // Files the read gate holds back are neither named nor counted as importers.
+      const named = [...new Set([...related.values()].flatMap((entry) => [...entry.imports, ...entry.importedBy]))];
+      const { allowed } = await partitionByReadAccess(named, (f) => f, readAccessFilter);
+      const readable = new Set(allowed);
+      for (const [file, entry] of related) {
+        relMap[file] = { imports: entry.imports.filter((f) => readable.has(f)), importedBy: entry.importedBy.filter((f) => readable.has(f)) };
+      }
+      const restrictedNote = accessRestrictedNote(named.length - readable.size);
+      if (restrictedNote) addFindWarning(diagnostics, restrictedNote);
+      if (!inProject) addFindWarning(diagnostics, `Relationships were built from '${graphRoot}' only: 'importedBy' lists importers inside that path, not the whole project.`);
       regex.assertCurrent();
       return withFindWarnings({ matches: results, count: totalMatches, relationships: relMap }, [
         ...diagnostics.warnings,

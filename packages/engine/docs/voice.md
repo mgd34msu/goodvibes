@@ -16,8 +16,8 @@ Voice providers advertise capabilities through the voice registry:
 | `realtime` | Realtime voice session setup. |
 | `voice-list` | Voice discovery for provider-backed voice selection. |
 
-The platform registers six built-in voice providers. Each advertises only the
-capabilities it implements:
+The platform registers six cloud voice providers, plus a seventh, `local`, when the
+host supplies a config reader. Each advertises only the capabilities it implements:
 
 | Provider | `tts` | `tts-stream` | `stt` | `realtime` | `voice-list` |
 |----------|:-----:|:------------:|:-----:|:----------:|:------------:|
@@ -27,8 +27,20 @@ capabilities it implements:
 | `google` | | | yes | | |
 | `deepgram` | | | yes | | |
 | `vydra` | yes | | | | yes |
+| `local` | yes | yes | yes | | |
 
-ElevenLabs is currently the only built-in provider with `tts-stream` support.
+ElevenLabs and `local` are the built-in providers with `tts-stream` support. `local`
+runs free offline engines and reports `unconfigured` until a TTS or STT engine is set
+up; see [voice-local.md](voice-local.md). When a request names no provider, the
+registry picks a configured `local` provider first, then the first other configured
+provider, before falling back to the first one registered. `microsoft` needs no key
+and sends text to an unofficial Microsoft endpoint, so it is never picked for an
+unnamed request; select it with `tts.provider = microsoft`.
+A cloud STT request that names an `audio.uri` fetches it only when it is a public
+`https` URL (no redirects, no loopback, link-local or private addresses); send
+anything else as `dataBase64`. Cloud provider calls end after 60 seconds or when the
+request's `signal` aborts. An empty transcript is an error for every provider,
+`local` included.
 The streaming surface is provider-agnostic. A provider opts in by implementing
 `VoiceProvider.synthesizeStream()` and advertising `tts-stream`, and daemon
 clients do not need ElevenLabs-specific code paths.

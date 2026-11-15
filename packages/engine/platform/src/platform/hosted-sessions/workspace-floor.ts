@@ -80,8 +80,8 @@ export interface HostedWorkspaceFloor {
    * What a session on this floor may do with exec, decided per session.
    *
    * Omitted ⇒ `conversational`: the exec boundary is REQUIRED, so a command
-   * that cannot be contained refuses rather than running on the host, and the
-   * owner's terminal is denied. That is the posture every session created over
+   * that cannot be contained refuses rather than running on the host (which
+   * also keeps it away from the owner's terminal). That is the posture every session created over
    * `sessions.hosted.*` runs under.
    *
    * A product returns `workstream` only for a spawn it composed itself, for a

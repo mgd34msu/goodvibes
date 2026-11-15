@@ -21,6 +21,7 @@ import type {
   McpServerPermissions,
 } from './types.js';
 import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { hostsInScope, pathsInScope, readScopedValues } from './scope.js';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
@@ -44,6 +45,25 @@ function modeFromTrustLevel(level: McpTrustLevel): McpTrustMode {
     case 'standard':
     default:
       return 'ask-on-risk';
+  }
+}
+
+/**
+ * The trust level that matches a trust mode. `constrained` maps to `standard`
+ * rather than `restricted`: `isToolAllowed` has no notion of scope, and
+ * `restricted` there means "deny every tool without an allow override", while a
+ * constrained server may call tools inside its configured scope.
+ */
+function trustLevelFromMode(mode: McpTrustMode): McpTrustLevel {
+  switch (mode) {
+    case 'allow-all':
+      return 'trusted';
+    case 'blocked':
+      return 'blocked';
+    case 'ask-on-risk':
+    case 'constrained':
+    default:
+      return 'standard';
   }
 }
 
@@ -81,7 +101,8 @@ function verdictForPosture(
 ): import('./types.js').McpCoherenceVerdict {
   if (schemaFreshness === 'quarantined' || trustMode === 'blocked') return 'deny';
   if (trustMode === 'allow-all') return 'allow';
-  if (trustMode === 'ask-on-risk') return 'ask';
+  // Enforcement never asks: a call inside the configured scope is allowed and one
+  // outside it is denied, in every mode except allow-all and blocked.
   return 'allow';
 }
 
@@ -108,10 +129,10 @@ function reasonForPosture(
     return `server '${serverName}' is elevated to allow-all`;
   }
   if (trustMode === 'ask-on-risk' && (allowedPaths.length === 0 || allowedHosts.length === 0)) {
-    return `server '${serverName}' requires approval and still exposes broad scope`;
+    return `server '${serverName}' is allowed inside its configured scope and still exposes broad scope`;
   }
   if (trustMode === 'ask-on-risk') {
-    return `server '${serverName}' requires approval for risky actions`;
+    return `server '${serverName}' is allowed inside its configured scope; calls outside it are denied`;
   }
   if (allowedPaths.length === 0 || allowedHosts.length === 0) {
     return `server '${serverName}' is constrained but still has an open scope boundary`;
@@ -169,6 +190,7 @@ export class McpPermissionManager {
   private readonly permissions = new Map<string, McpServerPermissions>();
   private readonly recentDecisions: McpDecisionRecord[] = [];
   private decisionRevision = 0;
+  private readonly decisionListeners = new Set<() => void>();
 
   constructor() {
     setMcpDecisionReadSources(this, () => {
@@ -179,6 +201,12 @@ export class McpPermissionManager {
   }
 
   captureSecurityDecisionReadSource(): () => void { return captureMcpDecisionHistoryReadSource(this); }
+
+  /** Be told whenever a decision is recorded. The listener carries no payload: read the recent decisions again. */
+  subscribeDecisions(listener: () => void): () => void {
+    this.decisionListeners.add(listener);
+    return () => { this.decisionListeners.delete(listener); };
+  }
 
   // ── Registration ─────────────────────────────────────────────────────────
 
@@ -215,6 +243,7 @@ export class McpPermissionManager {
     if (existing) {
       if (!profile) return;
       const previous = existing.profile;
+      if (profile.mode) existing.trustLevel = trustLevelFromMode(profile.mode);
       const notes = profile.notes ?? previous.notes;
       existing.profile = {
         serverName,
@@ -232,7 +261,9 @@ export class McpPermissionManager {
     }
     this.permissions.set(serverName, {
       serverName,
-      trustLevel,
+      // The profile mode decides what a live call may do, so the level that
+      // `isToolAllowed` reads must agree with it.
+      trustLevel: profile?.mode ? trustLevelFromMode(profile.mode) : trustLevel,
       profile: {
         serverName,
         role: profile?.role ?? DEFAULT_SERVER_ROLE,
@@ -272,7 +303,11 @@ export class McpPermissionManager {
   setTrustLevel(serverName: string, level: McpTrustLevel): void {
     const record = this._getRequired(serverName);
     record.trustLevel = level;
+    // `evaluateToolCall`, which every live call goes through, reads the profile
+    // mode; keep the two answers the same so a block applied here is enforced.
+    record.profile.mode = modeFromTrustLevel(level);
     record.lastModifiedAt = Date.now();
+    record.profile.lastModifiedAt = record.lastModifiedAt;
     logger.debug('McpPermissionManager: trust level updated', { serverName, level });
   }
 
@@ -288,6 +323,7 @@ export class McpPermissionManager {
   setTrustMode(serverName: string, mode: McpTrustMode): void {
     const record = this._getRequired(serverName);
     record.profile.mode = mode;
+    record.trustLevel = trustLevelFromMode(mode);
     record.lastModifiedAt = Date.now();
     record.profile.lastModifiedAt = record.lastModifiedAt;
   }
@@ -411,6 +447,30 @@ export class McpPermissionManager {
     args: Record<string, unknown>,
     owner: McpReadingOwner = {},
   ): Promise<McpPermission> {
+    const permission = await this._evaluateToolCall(serverName, toolName, args, owner);
+    const profile = this.permissions.get(serverName)?.profile;
+    if (profile) {
+      this._recordDecision({
+        serverName,
+        toolName,
+        verdict: permission.verdict ?? (permission.allowed ? 'allow' : 'deny'),
+        riskLevel: severityForPosture(profile.mode, 'unknown', profile.allowedPaths, profile.allowedHosts),
+        capability: 'generic',
+        incoherent: (permission.causes?.length ?? 0) > 0,
+        reason: permission.reason,
+        profileMode: profile.mode,
+        evaluatedAt: Date.now(),
+      });
+    }
+    return permission;
+  }
+
+  private async _evaluateToolCall(
+    serverName: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    owner: McpReadingOwner,
+  ): Promise<McpPermission> {
     const record = this.permissions.get(serverName);
     if (!record) {
       return { allowed: false, reason: `server '${serverName}' is not registered`, verdict: 'deny' };
@@ -483,6 +543,11 @@ export class McpPermissionManager {
     this.recentDecisions.unshift(record);
     if (this.recentDecisions.length > MAX_DECISION_HISTORY) {
       this.recentDecisions.length = MAX_DECISION_HISTORY;
+    }
+    for (const listener of [...this.decisionListeners]) {
+      try { listener(); } catch (error) {
+        logger.warn('McpPermissionManager: decision listener failed', { error: summarizeError(error) });
+      }
     }
   }
 }

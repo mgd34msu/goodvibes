@@ -106,10 +106,16 @@ class TransactionalTestStore implements WorkLedgerStorage {
     });
   }
 
-  subscribe(listener: (state: WorkLedgerState) => void): () => void {
+  private unavailableHandlers = new Set<(reason: string) => void>();
+
+  subscribe(listener: (state: WorkLedgerState) => void, onUnavailable?: (reason: string) => void): () => void {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    if (onUnavailable) this.unavailableHandlers.add(onUnavailable);
+    return () => { this.listeners.delete(listener); if (onUnavailable) this.unavailableHandlers.delete(onUnavailable); };
   }
+
+  /** What an adapter does when it cannot read the ledger to observe it. */
+  failObservation(reason: string) { for (const handler of [...this.unavailableHandlers]) handler(reason); }
 
   get subscriberCount() { return this.listeners.size; }
 }
@@ -454,6 +460,19 @@ describe('cancellation and lifecycle', () => {
     expect(f.storage.commits).toBe(1);
   });
 
+  test('a subscriber is told when the ledger cannot be observed and still receives later revisions', async () => {
+    const f = fixture();
+    const revisions: number[] = [];
+    const reasons: string[] = [];
+    f.service.subscribe(f.worker, snapshot => { revisions.push(snapshot.revision); }, reason => { reasons.push(reason); });
+    f.storage.failObservation('Work ledger persisted format is invalid');
+    await flushObservers();
+    expect(reasons).toEqual(['Work ledger persisted format is invalid']);
+    accepted(await f.send({ type: 'create', title: 'Title', goal: 'Goal', criteria: ['Pass'] }));
+    await flushObservers();
+    expect(revisions).toEqual([1]);
+  });
+
   test('close stops new admissions and subscriptions but drains admitted commands exactly once', async () => {
     const f = fixture();
     const notifications: number[] = [];
@@ -639,7 +658,7 @@ describe('commit boundary adversarial checks', () => {
     expect(f.storage.commits).toBe(1);
   });
 
-  test('synchronous host callbacks cannot abort or revoke after the last guard and still publish', async () => {
+  test('a clock or id callback that aborts or revokes while the command is reduced is refused by the final guard and publishes nothing', async () => {
     for (const action of ['abort', 'revoke'] as const) {
       const abort = new AbortController();
       let invalidate = () => {};
@@ -890,15 +909,24 @@ describe('subscription admission reentrancy', () => {
   });
 });
 
-test('final abort-state accessor cannot revoke authority after the commit guard', async () => {
-  const f = fixture();
-  let reads = 0;
+test('an abort-state accessor that revokes authority once the command is reduced cannot be followed by a publication', async () => {
+  // The accessor revokes on every read after the clock has produced the
+  // command's identity (reduction is done), so the test depends on the order of
+  // the checks (authority is judged after the last accessor read) and not on how
+  // many times the service reads the accessor.
+  let reduced = false;
+  const clock: WorkLedgerClock = { now: () => 1, newId: kind => { reduced = true; return `${kind}-1`; } };
+  const f = fixture(new TransactionalTestStore(), clock);
+  let readsAfterReduction = 0;
   const signal = { get aborted() {
-    reads += 1;
-    if (reads === 2) f.authority.revokeActor(f.coordinator);
+    if (reduced) {
+      readsAfterReduction += 1;
+      f.authority.revokeActor(f.coordinator);
+    }
     return false;
   } } as AbortSignal;
   const result = await f.service.execute(f.command({ type: 'create', title: 'Title', goal: 'Goal', criteria: ['Pass'] }, 0), f.coordinator, { signal });
+  expect(readsAfterReduction).toBeGreaterThan(0);
   rejected(result, 'forbidden', 0);
   expect(f.storage.commits).toBe(0);
 });

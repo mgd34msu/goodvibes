@@ -26,7 +26,14 @@ import { GroupStateOwner } from './group-state-owner.js';
 import { ClusterMembershipOperationError, ClusterMembershipOperations, type ClusterMembershipOperation } from './membership-operation.js';
 import { GroupAdmissionService, type AdmissionOutcome } from './group-admissions.js';
 import { ClusterOwnedLifecycle, ClusterPeriodicTasks } from './owned-lifecycle.js';
-import { sealForMember, openSealedEnvelope } from './group-crypto.js';
+import {
+  deriveJoinVerifier,
+  generateJoinKey,
+  isValidGroupId,
+  openSealedEnvelope,
+  sealForMember,
+} from './group-crypto.js';
+import { summarizeError } from '../utils/error-display.js';
 import { GROUP_MESSAGE_TYPES } from './group-membership.js';
 import {
   keyRotationGraceMs,
@@ -35,8 +42,10 @@ import {
 } from './group-settings.js';
 import {
   DEFAULT_GROUP_DISPLAY_NAME,
+  fitStateToBytes,
   mergeGroupState,
   isCurrentMember,
+  normalizeDisplayName,
   readGroupStateDocument,
   sweepGroupState,
   touchMember,
@@ -81,6 +90,19 @@ const REKEY_SEAL_CONTEXT = 'goodvibes-cluster-rekey-v1';
 
 /** How often the housekeeping timer runs: rotation checks, sweeps, gossip. */
 const HOUSEKEEPING_INTERVAL_MS = 30_000;
+
+/** Foreign groups remembered at once. Beacons are unauthenticated, so the list must not grow with them. */
+const MAX_DISCOVERED_GROUPS = 32;
+
+/**
+ * How many more times a key rotation announcement is sent after the first,
+ * once per housekeeping pass. One datagram is one chance to be lost; the
+ * announcement is idempotent, so a member that already has it ignores a repeat.
+ */
+const REKEY_RESENDS = 3;
+
+/** Most JSON the roster body of a gossip datagram may take, leaving room for the envelope around it. */
+const ROSTER_STATE_MAX_BYTES = 24_000;
 
 /** A group seen on the network that this node is not a member of. */
 export interface DiscoveredGroup {
@@ -130,6 +152,12 @@ export interface ClusterGroupRuntimeOptions {
   readonly isMaster?: (() => boolean) | undefined;
   /** The config this machine reads and writes. Absent disables replication. */
   readonly config?: ReplicatedConfigStore | undefined;
+  /**
+   * This machine learned the group's key has moved past what it holds (a
+   * rotation it missed). The composition root decides how to catch up and
+   * must rate-limit: a datagram that triggers this is not authenticated.
+   */
+  readonly onKeyGenerationLost?: (() => void) | undefined;
 }
 
 /** Membership as `cluster status` reports it. */
@@ -145,6 +173,8 @@ export class ClusterGroupRuntime {
   private readonly lifecycle = new ClusterOwnedLifecycle((signal) => this.startOwned(signal), () => this.stopOwned());
   private readonly periodic: ClusterPeriodicTasks;
   private lastRotationCheckAt = 0;
+  /** The latest key rotation announcement, kept to send again; see REKEY_RESENDS. */
+  private pendingRekey: { readonly raw: string; readonly generation: number; resendsLeft: number } | null = null;
   private unreadableMaterial = false;
   private housekeeping = false;
   private readonly membershipOperations = new ClusterMembershipOperations();
@@ -187,6 +217,7 @@ export class ClusterGroupRuntime {
       onGroupMessage: (envelope) => this.onGroupMessage(envelope),
       onOutOfBandMessage: (raw, type) => void this.admissions.handle(raw, type),
       onForeignBeacon: (groupId, body, version) => this.recordDiscoveredGroup(groupId, body, version),
+      onGenerationNotHeld: () => options.onKeyGenerationLost?.(),
     });
     this.configChanges = new GroupConfigChanges({
       config: options.config, secrets: options.secrets, logger: options.logger,
@@ -290,6 +321,9 @@ export class ClusterGroupRuntime {
   }
 
   private async stopOwned(): Promise<void> {
+    // Also the cleanup of a start that failed after opening the network, which
+    // runs without stop() and must not leave the group believed to be online.
+    this.networkStarted = false;
     this.incoming.close();
     await this.incoming.join();
     this.configChanges.stop();
@@ -436,7 +470,9 @@ export class ClusterGroupRuntime {
     this.groupWork.add(task);
     void task.then(() => { this.groupWork.delete(task); }, error => {
       this.groupWork.delete(task);
-      if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError) && !(error instanceof ConfigReplicationPrivacyError)) this.options.logger.warn('cluster: owned group work failed');
+      if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError) && !(error instanceof ConfigReplicationPrivacyError)) {
+        this.options.logger.warn('cluster: owned group work failed', { error: summarizeError(error) });
+      }
     });
     return task;
   }
@@ -643,8 +679,16 @@ export class ClusterGroupRuntime {
     this.stateOwner.write(GROUP_REPLICA_FILENAME, `${JSON.stringify(document, null, 2)}\n`, false);
   }
 
-  /** Persist changed key material. */
-  async commitMaterial(material: GroupKeyMaterial): Promise<void> {
+  /**
+   * Persist changed key material.
+   *
+   * `base` is the material the change was derived from. When it is given and
+   * is no longer the current material (a rotation announced by another member
+   * was adopted while this one was being prepared), the change is abandoned
+   * instead of overwriting what was adopted.
+   */
+  async commitMaterial(material: GroupKeyMaterial, base?: GroupKeyMaterial): Promise<void> {
+    if (base !== undefined && base !== this.material) throw new ClusterMembershipOperationError('abandoned');
     const expected = this.material, revision = this.membershipRevision;
     await this.enqueueMaterialWrite(async () => {
       if (!this.membershipOperations.available || this.membershipTransition || expected !== this.material || revision !== this.membershipRevision
@@ -714,10 +758,19 @@ export class ClusterGroupRuntime {
 
   private async sendRoster(): Promise<void> {
     if (!this.state) return;
+    // A full group with many removal records can be larger than one datagram.
+    // The oldest removal records are left out of what is sent; every receiver
+    // merges into its own copy, so they are not forgotten, only not repeated.
+    const fitted = fitStateToBytes(this.state, ROSTER_STATE_MAX_BYTES);
+    if (fitted.droppedTombstones > 0) {
+      this.options.logger.warn('cluster: the roster is too large for one datagram; the oldest removal records were left out of this gossip', {
+        left_out: fitted.droppedTombstones,
+      });
+    }
     // The replica revision rides along so a machine that missed a settings
     // change while it was unreachable notices it is behind and asks.
     await this.sendGroupMessage(GROUP_MESSAGE_TYPES.roster, {
-      state: this.state,
+      state: fitted.state,
       configRevision: this.replication?.replica.revision ?? 0,
     });
   }
@@ -758,6 +811,7 @@ export class ClusterGroupRuntime {
       this.lastRotationCheckAt = now;
       await this.sendRoster();
     }
+    await this.resendRekey();
     await this.rotateIfDue(now);
     this.configChanges.refresh();
     await this.replication?.retryPendingEffects();
@@ -782,7 +836,11 @@ export class ClusterGroupRuntime {
    */
   private isRotationMinter(now: number): boolean {
     const state = this.state;
-    if (!state || state.members.length === 0) return true;
+    // A machine whose roster is empty or does not list it (the roster file was
+    // lost and no peer has gossiped yet) knows nothing about who is alive, and
+    // would otherwise take itself for the minter and rotate the group's key
+    // into a generation nobody else holds.
+    if (!state || !state.members.some((member) => member.nodeId === this.options.nodeId)) return false;
     const aliveCutoff = now - Math.max(3 * this.options.settings.beaconSeconds * 1_000, 60_000);
     const candidates = state.members
       .filter((member) => member.lastSeenAt >= aliveCutoff || member.nodeId === this.options.nodeId)
@@ -806,20 +864,34 @@ export class ClusterGroupRuntime {
    *
    * The announcement is signed with the OUTGOING generation, because that is
    * the only key the recipients currently accept, announcing under the new key
-   * would be a message nobody could read. Only after it is on the wire does
-   * this node move itself forward.
+   * would be a message nobody could read. It is built and signed first, then
+   * this node moves itself forward, and only then is it sent: a rotation that
+   * cannot be committed here is never announced, so the group is not left on a
+   * key this machine does not hold. The same bytes are sent again on the next
+   * few housekeeping passes (see {@link resendRekey}), because one datagram is
+   * one chance to be lost.
    *
    * `revocation` differs in exactly one way, and it is the important one: the
    * acceptance window is not opened, on this node or on any node that adopts
    * the announcement. The machine that was just removed still holds the old
    * key, and the whole point of rotating on removal is that holding it stops
-   * being enough.
+   * being enough. For the same reason a revocation also replaces the JOIN key:
+   * the removed machine holds that too, and a join key that never changes would
+   * let it walk back in. The new join key travels sealed to each remaining
+   * member inside the announcement and is never sent to the removed one.
    */
   async rotate(cause: 'scheduled' | 'revocation', reason: string): Promise<GroupKeyMaterial> {
     const material = this.requireMaterial();
+    const keyring = this.keyringInstance;
+    if (!keyring) throw new ClusterMembershipOperationError('abandoned');
     const now = this.options.clock.now();
     const graceMs = cause === 'scheduled' ? keyRotationGraceMs(this.options.settings) : 0;
-    const rotated = rotateGroupKeyMaterial(material, cause, this.options.nodeId, now, graceMs);
+    let join: { readonly joinKey: string; readonly joinVerifier: string } | undefined;
+    if (cause === 'revocation') {
+      const joinKey = generateJoinKey();
+      join = { joinKey, joinVerifier: await deriveJoinVerifier(joinKey, material.joinSalt) };
+    }
+    const rotated = rotateGroupKeyMaterial(material, cause, this.options.nodeId, now, graceMs, join);
     const record = rotated.keys.find((entry) => entry.generation === rotated.currentGeneration);
     if (!record) throw new Error('cluster: the rotation produced no key');
 
@@ -828,19 +900,34 @@ export class ClusterGroupRuntime {
       if (member.nodeId === this.options.nodeId) continue;
       wraps[member.nodeId] = sealForMember(
         member.agreementKey,
-        JSON.stringify({ key: record.key }),
+        JSON.stringify({ key: record.key, ...(join ?? {}) }),
         REKEY_SEAL_CONTEXT,
       );
     }
-    await this.sendGroupMessage(GROUP_MESSAGE_TYPES.rekey, {
-      cause,
-      generation: record.generation,
-      createdAt: record.createdAt,
-      mintedBy: record.mintedBy,
-      wraps,
-    });
+    const announcement = encodeEnvelope(
+      {
+        type: GROUP_MESSAGE_TYPES.rekey,
+        nodeId: this.options.nodeId,
+        nodeVersion: this.options.version,
+        seq: this.router.nextSeq(),
+        ts: this.options.clock.now(),
+        surfaceId: null,
+        body: {
+          cause,
+          generation: record.generation,
+          createdAt: record.createdAt,
+          mintedBy: record.mintedBy,
+          wraps,
+        },
+      },
+      keyring,
+    );
 
-    await this.commitMaterial(rotated);
+    // `material` is what this rotation was derived from: if another member's
+    // rotation was adopted meanwhile, this one is abandoned rather than laid over it.
+    await this.commitMaterial(rotated, material);
+    this.pendingRekey = { raw: announcement, generation: record.generation, resendsLeft: REKEY_RESENDS };
+    await this.sendRekeyDatagram(announcement);
     // A removal also replaced the key the group signs with; publish its public
     // half so every remaining member, and every member that joins later, can
     // check a reply that claims to come from the group.
@@ -857,6 +944,37 @@ export class ClusterGroupRuntime {
       members: this.state?.members.length ?? 0,
     });
     return rotated;
+  }
+
+  private async sendRekeyDatagram(raw: string): Promise<void> {
+    try {
+      await this.router.sendRaw(raw);
+    } catch (error) {
+      this.options.logger.warn('cluster: a group message could not be sent', {
+        type: GROUP_MESSAGE_TYPES.rekey,
+        error: summarizeError(error),
+      });
+    }
+  }
+
+  /**
+   * Send the latest key rotation announcement again, a few times.
+   *
+   * Members that already adopted it ignore the repeat. A member that missed
+   * the first copy (a lost datagram, an interface that was down for a moment)
+   * would otherwise sign with the old generation until the grace window closed
+   * and then be dropped by everyone, with nothing on either side saying why.
+   * Stops as soon as another rotation has replaced this one.
+   */
+  private async resendRekey(): Promise<void> {
+    const pending = this.pendingRekey;
+    if (!pending) return;
+    if (!this.material || this.material.currentGeneration !== pending.generation || pending.resendsLeft <= 0) {
+      this.pendingRekey = null;
+      return;
+    }
+    pending.resendsLeft -= 1;
+    await this.sendRekeyDatagram(pending.raw);
   }
 
   // ── inbound: group-key-signed ─────────────────────────────────────────────
@@ -914,11 +1032,16 @@ export class ClusterGroupRuntime {
   /**
    * Adopt a rotation announced by another member.
    *
-   * The envelope already verified under a group key this node holds, so the
-   * sender is a member. What is still checked here: that a wrap addressed to
-   * THIS node is present and opens. A rotation with no wrap for this node is a
-   * rotation this node was not included in, which is what a removed machine
-   * sees, and it is right that it cannot follow.
+   * The envelope already verified under a group key this node holds, which
+   * shows the sender holds one, not that it is a member now: a machine that was
+   * just removed still holds the key it was removed with, for the moments before
+   * its removal reaches everyone. So the sender must also be on this node's
+   * roster, and the generation must be the next one (a rotation is always
+   * announced under the generation it replaces). The minter is recorded as the
+   * sender, never as the body claims. What is still checked here: that a wrap
+   * addressed to THIS node is present and opens. A rotation with no wrap for
+   * this node is a rotation this node was not included in, which is what a
+   * removed machine sees, and it is right that it cannot follow.
    */
   private async onRekey(envelope: ClusterEnvelope): Promise<void> {
     const material = this.material;
@@ -928,6 +1051,19 @@ export class ClusterGroupRuntime {
     // so without this the minting node warns that it was left out of its own
     // rotation, which is both wrong and alarming.
     if (envelope.nodeId === this.options.nodeId) return;
+    if (!this.state || !isCurrentMember(this.state, envelope.nodeId)) {
+      this.options.logger.debug('cluster: ignored a key rotation announced by a machine that is not on this roster', { nodeId: envelope.nodeId });
+      return;
+    }
+    const announced = envelope.body['generation'];
+    if (typeof announced !== 'number' || !Number.isInteger(announced) || announced < 0 || announced > material.currentGeneration + 1) {
+      this.options.logger.warn('cluster: ignored a key rotation that skipped a generation', {
+        generation: announced,
+        action: 'this machine may have missed an earlier rotation; check `cluster status`',
+      });
+      this.options.onKeyGenerationLost?.();
+      return;
+    }
     const wraps = envelope.body['wraps'];
     if (typeof wraps !== 'object' || wraps === null) return;
     const wrap = (wraps as Record<string, unknown>)[this.options.nodeId];
@@ -947,28 +1083,46 @@ export class ClusterGroupRuntime {
       this.options.logger.warn('cluster: a group key rotation could not be opened by this machine');
       return;
     }
-    let key: unknown;
+    let sealed: Record<string, unknown>;
     try {
-      key = (JSON.parse(opened) as Record<string, unknown>)['key'];
+      sealed = JSON.parse(opened) as Record<string, unknown>;
     } catch {
       return;
     }
     const record = readKeyRecord({
       generation: envelope.body['generation'],
       createdAt: envelope.body['createdAt'],
-      mintedBy: envelope.body['mintedBy'],
-      key,
+      mintedBy: envelope.nodeId,
+      key: sealed['key'],
     });
     if (!record) return;
+    // A repeat of an announcement already adopted (see resendRekey).
+    if (material.currentGeneration >= record.generation
+      && material.keys.some((entry) => entry.generation === record.generation && entry.key === record.key)) return;
     const cause = envelope.body['cause'] === 'revocation' ? 'revocation' : 'scheduled';
     const graceMs = cause === 'scheduled' ? keyRotationGraceMs(this.options.settings) : 0;
-    await this.commitMaterial(adoptGroupKeys(
-      material,
+
+    // A revocation also replaced the join key. Take it only if it is the
+    // verifier of that key under this group's salt, so a bad announcement
+    // cannot leave this machine unable to authenticate a join.
+    let replacementJoin: { readonly joinKey: string; readonly joinVerifier: string } | null = null;
+    const announcedJoinKey = sealed['joinKey'], announcedVerifier = sealed['joinVerifier'];
+    if (cause === 'revocation' && typeof announcedJoinKey === 'string' && announcedJoinKey.length > 0 && typeof announcedVerifier === 'string') {
+      const derived = await deriveJoinVerifier(announcedJoinKey, material.joinSalt).catch(() => null);
+      if (derived === announcedVerifier) replacementJoin = { joinKey: announcedJoinKey, joinVerifier: announcedVerifier };
+      else this.options.logger.warn('cluster: a group key rotation carried a join key that does not match its verifier and the join key was left unchanged');
+    }
+    // Read again after the derivation above, so a change adopted meanwhile is built on.
+    const current = this.material;
+    if (!current || current.groupId !== material.groupId) return;
+    const adopted = adoptGroupKeys(
+      current,
       [record],
       record.generation,
       this.options.clock.now(),
       graceMs,
-    ));
+    );
+    await this.commitMaterial(replacementJoin ? { ...adopted, ...replacementJoin } : adopted);
     this.options.logger.info('cluster: adopted a replacement group key', {
       generation: record.generation,
       cause,
@@ -986,10 +1140,18 @@ export class ClusterGroupRuntime {
    * populates a list the operator chooses from and that is all.
    */
   private recordDiscoveredGroup(groupId: string, body: Record<string, unknown>, version: string): void {
-    const displayName = typeof body['displayName'] === 'string' ? body['displayName'] : DEFAULT_GROUP_DISPLAY_NAME;
+    // Anyone on the network can send a beacon, so a group id that is not the
+    // established shape is dropped, and the list holds a bounded number of them.
+    if (!isValidGroupId(groupId)) return;
+    const displayName = normalizeDisplayName(body['displayName'], DEFAULT_GROUP_DISPLAY_NAME);
     const nodeCount = typeof body['nodeCount'] === 'number' && Number.isFinite(body['nodeCount'])
       ? Math.max(0, Math.trunc(body['nodeCount']))
       : 0;
+    if (!this.discovered.has(groupId) && this.discovered.size >= MAX_DISCOVERED_GROUPS) {
+      let oldest: DiscoveredGroup | undefined;
+      for (const entry of this.discovered.values()) if (!oldest || entry.lastSeenAt < oldest.lastSeenAt) oldest = entry;
+      if (oldest) this.discovered.delete(oldest.groupId);
+    }
     this.discovered.set(groupId, {
       groupId,
       displayName,

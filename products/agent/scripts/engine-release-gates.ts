@@ -7,7 +7,7 @@
  * (one implementation across tui/agent/webui). This file is a thin adapter that
  * drives that gate with the Agent's engine workspace dependency and the
  * authoritative monorepo lockfile, mapping results to the issue-string surface
- * that publish-check and `engine:gate` already consume.
+ * that the release flow consumes.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -56,7 +56,7 @@ export function enginePinAgreementIssues(root: string = process.cwd()): string[]
     .map((result) => result.detail);
 }
 
-/** Every engine release-gate issue combined, for a single publish-check call site. */
+/** Every engine release-gate issue combined, for a single call site. */
 export function engineReleaseGateIssues(root: string = process.cwd()): string[] {
   return runEnginePinGate(realFsReader(root), AGENT_ENGINE_PIN)
     .filter((result) => !result.ok)

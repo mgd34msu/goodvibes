@@ -4,6 +4,7 @@ import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { consolidationReading } from './batteries/consolidation.js';
 import type { MemoryClass, MemoryRegistry, MemoryScope } from '../state/index.js';
 import type { KnowledgeStore } from './store.js';
+import { knowledgeConsolidationCandidateLifecycle } from './types.js';
 import type {
   KnowledgeConsolidationCandidateRecord,
   KnowledgeConsolidationReportRecord,
@@ -29,6 +30,20 @@ interface CandidateDecisionInput {
   readonly memoryClass?: string | undefined;
   readonly scope?: string | undefined;
   readonly detail?: string | undefined;
+}
+
+// Exhaustive by construction: adding a class or scope to the memory store fails
+// to compile here until it is listed, so a valid value is never refused.
+const MEMORY_CLASSES = { decision: true, constraint: true, incident: true, pattern: true, fact: true, risk: true, runbook: true, architecture: true, ownership: true } satisfies Record<MemoryClass, true>;
+const MEMORY_SCOPES = { session: true, project: true, team: true } satisfies Record<MemoryScope, true>;
+
+function assertDecisionMemoryTarget(input: CandidateDecisionInput): void {
+  if (input.memoryClass !== undefined && !Object.hasOwn(MEMORY_CLASSES, input.memoryClass)) {
+    throw new Error(`Unknown memory class "${input.memoryClass}". Use one of: ${Object.keys(MEMORY_CLASSES).join(', ')}. Nothing was changed.`);
+  }
+  if (input.scope !== undefined && !Object.hasOwn(MEMORY_SCOPES, input.scope)) {
+    throw new Error(`Unknown memory scope "${input.scope}". Use one of: ${Object.keys(MEMORY_SCOPES).join(', ')}. Nothing was changed.`);
+  }
 }
 
 const decisions = new WeakMap<KnowledgeStore, Map<string, Promise<KnowledgeConsolidationCandidateRecord>>>();
@@ -63,7 +78,21 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
   const candidate = context.store.getConsolidationCandidate(id);
   if (!candidate) throw new Error(`Unknown knowledge consolidation candidate: ${id}`);
   if (automatic && (candidate.status !== 'open' || candidate.metadata.judgmentOutcome !== 'act' || candidate.metadata.classOutcome !== 'act')) return candidate;
-  if (decision === 'accept' && candidate.status === 'accepted') return candidate;
+  assertDecisionMemoryTarget(input);
+  const target = decision === 'accept' ? 'accepted' : decision === 'reject' ? 'rejected' : 'superseded';
+  if (candidate.status === target) return candidate;
+  // Accepting is what writes the memory. The other candidate types have no
+  // action behind accept, so it would only mark a stale source or memory as
+  // handled while it stays stale, and the lifecycle then forbids a second try.
+  if (decision === 'accept' && candidate.candidateType !== 'memory-promotion') {
+    throw new Error(`A ${candidate.candidateType} candidate cannot be accepted: accepting performs no ${candidate.candidateType === 'source-refresh' ? 'source refresh' : 'memory review'}. Run the ${candidate.candidateType === 'source-refresh' ? 'refresh-stale job' : 'memory review'} yourself, then reject or supersede this candidate. Nothing was changed.`);
+  }
+  const move = knowledgeConsolidationCandidateLifecycle.check(candidate.status, target);
+  if (!move.ok) {
+    const memoryId = typeof candidate.metadata.acceptedMemoryId === 'string' ? candidate.metadata.acceptedMemoryId : undefined;
+    throw new Error(`${move.reason}. Nothing was changed.${candidate.status === 'accepted'
+      ? ` Its promoted memory${memoryId ? ` ${memoryId}` : ''} stays; to undo the promotion, forget that memory through memory review.` : ''}`);
+  }
   if (decision === 'accept' && !isCandidateCurrent(context, candidate)) throw new Error('Knowledge candidate is stale; refresh it before accepting.');
   const decidedAt = Date.now();
   let acceptedMemoryId: string | undefined;
@@ -119,7 +148,7 @@ async function applyDecision(context: KnowledgeConsolidationContext, id: string,
     evidence: candidate.evidence,
     suggestedMemoryClass: input.memoryClass ?? candidate.suggestedMemoryClass,
     suggestedScope: input.scope ?? candidate.suggestedScope,
-    status: decision === 'accept' ? 'accepted' : decision === 'reject' ? 'rejected' : 'superseded',
+    status: target,
     decidedAt,
     decidedBy: input.decidedBy,
     metadata: {

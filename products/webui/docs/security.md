@@ -87,12 +87,12 @@ the daemon and selected model route to process them.
 
 ## Dependency and platform safety
 
-- Use the npm-published `@goodvibes-jev/engine/platform` package.
-- Do not point WebUI to a local platform checkout for validation.
-- Verify the installed platform version with:
+- In this monorepo WebUI resolves `@goodvibes-jev/engine` through the workspace
+  link to `packages/engine`, so it always runs against the local engine source.
+- Verify the engine version with:
 
 ```bash
-node -p "require('./node_modules/@goodvibes-jev/engine/platform/package.json').version"
+node -p "require('./node_modules/@goodvibes-jev/engine/package.json').version"
 ```
 
 ## Security issue checklist
@@ -100,7 +100,7 @@ node -p "require('./node_modules/@goodvibes-jev/engine/platform/package.json').v
 When investigating a security-relevant bug, capture:
 
 - WebUI version
-- installed platform version
+- installed engine version
 - daemon `/status` version
 - route or platform helper used
 - request payload shape without secrets

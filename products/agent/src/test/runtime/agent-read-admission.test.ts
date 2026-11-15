@@ -8,7 +8,7 @@ import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-
  */
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/platform/platform/core';
@@ -283,7 +283,11 @@ test.each(['revoke', 'cancel', 'replace-file'] as const)('read %s after an extra
     reached = true; await Promise.resolve();
     if (change === 'revoke') f.runtime.configManager.set('permissions.mode', 'plan');
     else if (change === 'cancel') abort.abort();
-    else f.write('source.ts', 'export const REPLACED_FIXTURE = true;');
+    else {
+      // The file is replaced (new identity), not rewritten in place: admission is for which file is read.
+      f.write('source.ts.next', 'export const REPLACED_FIXTURE = true;');
+      renameSync(join(f.workspace, 'source.ts.next'), join(f.workspace, 'source.ts'));
+    }
     return [];
   });
   restoreOthers.push(() => extraction.mockRestore());
@@ -404,4 +408,17 @@ test.each(['autoApprove', 'allow-all'] as const)('the composed Agent honors %s f
   const bodiesBefore = readBodies;
   await f.run('read', read(outside)).catch(() => undefined);
   expect(readBodies).toBe(bodiesBefore);
+});
+
+test('find content results leave out a file the permission manager withholds', async () => {
+  const f = (await fixture());
+  f.write('notes.txt', 'API_KEY=visible-value\n'); f.write('secrets.cfg', 'API_KEY=withheld-value\n');
+  const readAccess = spyOn(f.runtime.permissionManager, 'readAccess').mockImplementation(async (path: string) => (path.endsWith('secrets.cfg') ? 'restricted' : 'allow'));
+  const find = f.registry.list().find((tool) => tool.definition.name === 'find');
+  if (!find) throw new Error('find is not registered');
+  const result = await find.execute({ queries: [{ id: 'q', mode: 'content', path: f.workspace, pattern: 'API_KEY' }] });
+  const output = result.output ?? result.error ?? '';
+  expect(readAccess).toHaveBeenCalled();
+  expect(output).toContain('visible-value');
+  expect(output).not.toContain('withheld-value');
 });

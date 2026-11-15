@@ -37,6 +37,9 @@ test('an admitted payload or manifest mutation retires original staged ownership
   const original = readFileSync(join(root, 'asset-0.native'));
   writeFileSync(join(root, 'asset-0.native'), original);
   expect(() => admitted.assertCurrent('asset-0.native')).toThrow('changed');
+  const third = candidate(), different = await admitStagedAssets(third);
+  writeFileSync(join(third, 'asset-1.native'), Buffer.from(readFileSync(join(third, 'asset-1.native'))).fill('X'));
+  expect(() => different.assertCurrent('asset-1.native')).toThrow('changed');
   const second = candidate(), other = await admitStagedAssets(second);
   writeFileSync(join(second, 'SHA256SUMS.txt'), 'replaced manifest');
   expect(() => other.assertCurrent('SHA256SUMS.txt')).toThrow('changed');

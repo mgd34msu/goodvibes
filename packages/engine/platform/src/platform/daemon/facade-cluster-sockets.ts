@@ -52,11 +52,15 @@
  *     out by an info line when the identity finally resolves, so the operator
  *     sees both the onset and the recovery, and nothing in between.
  *
- * A socket that drops is deliberately NOT put behind the same backoff: the
- * first attempt after a lost socket is prompt, because a reconnect usually
- * succeeds immediately. If the provider really is down, that prompt attempt
- * fails to resolve the identity and the identity backoff takes over from
- * there, which is the escalation the situation actually calls for.
+ * A socket that drops, or a start the provider refuses, is deliberately NOT
+ * put behind the same backoff: the attempt after it always waits the base
+ * delay (`retryMs`, a minute by default), never a doubled one, because a
+ * reconnect usually works once the provider has had a moment. The wait is not
+ * shorter, because a socket that drops again as soon as it opens would
+ * otherwise cycle through register, win and drop with no pause. If the
+ * provider really is down, that attempt fails to resolve the identity and the
+ * identity backoff takes over from there, which is the escalation the
+ * situation actually calls for.
  */
 import { providerSurface, type ClusterSurfaceKey } from '../cluster/index.js';
 
@@ -109,6 +113,7 @@ export class SocketSurfaceSupervisor {
   private cancelRetry: (() => void) | null = null;
   private identity: string | null = null;
   private disposed = false;
+  private beginning: Promise<void> | null = null;
   /** Identity lookups that have failed in a row; 0 once one succeeds. */
   private identityFailures = 0;
   /** True once the current run of failures has been stated at ERROR. */
@@ -127,7 +132,34 @@ export class SocketSurfaceSupervisor {
    * Safe to call repeatedly: an already-registered surface is left alone
    * rather than registered twice.
    */
-  async begin(): Promise<void> {
+  begin(): Promise<void> {
+    // One attempt at a time: a retry timer and a credential change can both ask,
+    // and two lookups that both resolve would register the same surface twice.
+    if (this.beginning === null) {
+      const attempt = this.attemptBegin().finally(() => {
+        if (this.beginning === attempt) this.beginning = null;
+      });
+      this.beginning = attempt;
+    }
+    return this.beginning;
+  }
+
+  /**
+   * The token may now name a different workspace. When it does, the surface
+   * this node contests is stood down from and the new one is contested; when
+   * it names the same one, or cannot be identified, nothing changes.
+   */
+  async refresh(): Promise<void> {
+    if (this.disposed || !this.withdraw) return this.begin();
+    const identity = await this.options.resolveIdentity();
+    if (this.disposed || !this.withdraw || !identity || identity === this.identity) return;
+    this.onSocketLost('the configured credential now identifies a different workspace');
+    this.cancelRetry?.();
+    this.cancelRetry = null;
+    await this.begin();
+  }
+
+  private async attemptBegin(): Promise<void> {
     if (this.disposed || !this.options.isRunning()) return;
     if (this.withdraw) return;
     const identity = await this.options.resolveIdentity();
@@ -180,11 +212,17 @@ export class SocketSurfaceSupervisor {
    * is stopped and only then is the RESIGN broadcast, so the successor never
    * starts against a consumer that is still running.
    */
-  onSocketLost(reason: string): void {
+  onSocketLost(reason: string, permanent = false): void {
     if (this.disposed) return;
     if (!this.withdraw) return;
     this.withdraw();
     this.withdraw = null;
+    if (permanent) {
+      // The provider refused these credentials or settings; the same attempt
+      // would be refused again every minute. A configuration refresh re-contests.
+      this.options.reportInert(this.options.kind, `${reason}; fix the credential or the provider setting, then reload the configuration`);
+      return;
+    }
     this.options.logger.info('cluster: standing down from a socket surface this node can no longer read', {
       surface: this.options.kind,
       reason,
@@ -219,8 +257,8 @@ export class SocketSurfaceSupervisor {
 
   /**
    * @param retryMs Delay to use. Omitted after a lost socket, which retries at
-   *   the base delay: a reconnect usually works at once, and if the provider is
-   *   genuinely down the identity lookup will fail and start the backoff itself.
+   *   the base delay, never escalated: if the provider is genuinely down the
+   *   identity lookup will fail and start the backoff itself.
    */
   private scheduleRetry(retryMs?: number): void {
     this.cancelRetry?.();

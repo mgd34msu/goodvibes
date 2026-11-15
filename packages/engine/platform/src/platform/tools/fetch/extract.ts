@@ -14,11 +14,12 @@ function stripHtml(html: string): string {
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Last, so that "&amp;lt;" decodes once to "&lt;" and not twice to "<".
+    .replace(/&amp;/g, '&')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -51,11 +52,12 @@ function htmlToMarkdown(html: string): string {
     .replace(/<hr[^>]*>/gi, '\n---\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    // Last, so that "&amp;lt;" decodes once to "&lt;" and not twice to "<".
+    .replace(/&amp;/g, '&')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -88,36 +90,36 @@ function extractLinks(html: string): string {
 
 function extractStructured(html: string, selectors: string[]): string {
   const results: string[] = [];
+  const unsupported: string[] = [];
 
   for (const selector of selectors) {
     const trimmed = selector.trim();
-    let tagPattern: string | null = null;
-    let classFilter: string | null = null;
+    let tagPattern = '[a-z][a-z0-9]*';
     let idFilter: string | null = null;
+    let classFilters: string[] = [];
 
     if (trimmed.startsWith('#')) {
       idFilter = trimmed.slice(1);
-      tagPattern = '[a-z][a-z0-9]*';
-    } else if (trimmed.startsWith('.')) {
-      classFilter = trimmed.slice(1);
-      tagPattern = '[a-z][a-z0-9]*';
-    } else if (trimmed.includes('.')) {
-      const [tag, cls] = trimmed.split('.');
-      tagPattern = tag || '[a-z][a-z0-9]*';
-      classFilter = cls ?? null;
     } else {
-      tagPattern = trimmed || '[a-z][a-z0-9]*';
+      const [tag, ...classes] = trimmed.split('.');
+      if (tag) tagPattern = tag;
+      classFilters = classes;
+      if (trimmed.includes('.') && classes.length === 0) {
+        unsupported.push(selector);
+        continue;
+      }
     }
 
-    if (tagPattern !== '[a-z][a-z0-9]*' && !HTML_SELECTOR_TAG_RE.test(tagPattern)) continue;
-    if (idFilter !== null && !HTML_SELECTOR_ATTRIBUTE_RE.test(idFilter)) continue;
-    if (classFilter !== null && !HTML_SELECTOR_ATTRIBUTE_RE.test(classFilter)) continue;
+    if (tagPattern !== '[a-z][a-z0-9]*' && !HTML_SELECTOR_TAG_RE.test(tagPattern)) { unsupported.push(selector); continue; }
+    if (idFilter !== null && !HTML_SELECTOR_ATTRIBUTE_RE.test(idFilter)) { unsupported.push(selector); continue; }
+    if (classFilters.some((cls) => !HTML_SELECTOR_ATTRIBUTE_RE.test(cls))) { unsupported.push(selector); continue; }
 
     let attrClause = '';
     if (idFilter) {
       attrClause = `(?=[^>]*\\bid=["']${escapeRegExp(idFilter)}["'])`;
-    } else if (classFilter) {
-      attrClause = `(?=[^>]*\\bclass=["'][^"']*\\b${escapeRegExp(classFilter)}\\b[^"']*["'])`;
+    }
+    for (const cls of classFilters) {
+      attrClause += `(?=[^>]*\\bclass=["'][^"']*\\b${escapeRegExp(cls)}\\b[^"']*["'])`;
     }
 
     const re = new RegExp(`<(${tagPattern})${attrClause}[^>]*>([\\s\\S]*?)<\\/\\1>`, 'gi');
@@ -127,6 +129,11 @@ function extractStructured(html: string, selectors: string[]): string {
       const text = stripHtml(m[2]!).trim();
       if (text) results.push(text);
     }
+  }
+
+  // An empty list must mean "no element matched", never "the selector was not understood".
+  if (unsupported.length > 0) {
+    throw new Error(`Unsupported selector${unsupported.length === 1 ? '' : 's'} for structured extraction: ${unsupported.map((item) => JSON.stringify(item)).join(', ')}. Supported: tag, #id, .class, tag.class (several classes allowed, e.g. div.card.big). Nothing was extracted.`);
   }
 
   return JSON.stringify(results);

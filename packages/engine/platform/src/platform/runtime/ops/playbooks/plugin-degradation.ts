@@ -29,8 +29,9 @@ export const pluginDegradationPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Plugin health status requires live PluginManager context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Inspect PluginManager.getHealth(pluginId)' },
         })),
     },
@@ -41,8 +42,9 @@ export const pluginDegradationPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Capability availability requires live plugin registry context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Run PluginRegistry.listCapabilities(pluginId)' },
         })),
     },
@@ -53,8 +55,9 @@ export const pluginDegradationPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Version support requires live plugin manifest context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Compare plugin.manifest.runtimeVersion with runtime.version' },
         })),
     },
@@ -77,9 +80,8 @@ export const pluginDegradationPlaybook: Playbook = {
         'Trigger a graceful plugin restart via the PluginManager. ' +
         'This resets the plugin process and re-establishes MCP connection.',
       kind: 'command',
-      command: 'runtime.plugins.restart(pluginId)',
       expectedOutcome: 'Plugin lifecycle spans show INIT → READY sequence.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 3,
@@ -88,9 +90,8 @@ export const pluginDegradationPlaybook: Playbook = {
         'If the restart does not recover the plugin, disable it to prevent ' +
         'further tool-call failures. Other plugins and turns can continue.',
       kind: 'command',
-      command: 'runtime.plugins.disable(pluginId)',
       expectedOutcome: 'Plugin disabled; tool calls routed away or failing fast.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 4,
@@ -109,7 +110,6 @@ export const pluginDegradationPlaybook: Playbook = {
         'After resolving the root cause, re-enable the plugin and verify ' +
         'capability invocations succeed.',
       kind: 'command',
-      command: 'runtime.plugins.enable(pluginId)',
       expectedOutcome: 'Plugin health returns to HEALTHY; tool calls succeed.',
       automatable: false,
     },

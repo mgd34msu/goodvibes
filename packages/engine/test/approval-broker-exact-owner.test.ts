@@ -110,7 +110,8 @@ describe('exact host-owned approvals', () => {
     const fresh = await restored.raiseOwnerApproval({ request: request('fresh'), requireOwnerDecision: { assertCurrent: current } });
     expect(fresh.approval.id).not.toBe(raised.approval.id);
     await restored.cancelApproval(fresh.approval.id, 'owner');
-    expect((await restored.resolveApproval(raised.approval.id, { approved: false, actor: 'owner' }))?.status).toBe('denied');
+    // Its in-process waiter died with the first broker, so the restart retired it in the deny direction.
+    expect((await restored.resolveApproval(raised.approval.id, { approved: false, actor: 'owner' }))?.decision?.approved).toBe(false);
     await broker.cancelApproval(raised.approval.id, 'owner');
   });
 

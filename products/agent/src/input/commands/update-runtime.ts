@@ -1,6 +1,7 @@
 /** Agent command composition over the platform's complete suite updater. */
 import { installedSuiteNeedsRepair, applySuiteUpdate, rollbackSuiteUpdate, captureUpdateFileIo, realUpdateFileIo,
   type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, createSelfUpdateCommand,
   retainSuiteUpdateConfiguration, formatSuiteUpdateReport,
@@ -12,8 +13,8 @@ import { VERSION } from '../../version.ts';
 import { resolveAgentBinaryAssetName } from '../../runtime/release-artifacts.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
 
-const REPO_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
-const releaseDownloadBaseUrl = (tag: string) => `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
+const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
+const releaseDownloadBaseUrl = (tag: string) => daemonReleaseDownloadBaseUrl(tag);
 export { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 export type CheckForUpdateResult = ReleaseUpdateCheck;
 export async function checkForUpdate(fetchImpl: UpdateFetchLike, currentVersion: string): Promise<CheckForUpdateResult> {

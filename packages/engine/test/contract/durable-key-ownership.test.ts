@@ -1,4 +1,3 @@
-/** Coding-first source regressions. Test execution is deferred. */
 import * as crypto from 'node:crypto';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -9,6 +8,18 @@ import { DurableContractAdmissions, DurableContractAdmissionError, durableKeyHas
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const rawKey = (): DurableContractKey => ({ workId: 'work /: % []', criteriaId: 'criteria shared by independent keys', criteriaRevision: 'revision1', attemptId: 'attempt1' });
+/** Counts sha256 hashes by the exact text they were given, so an unrelated hash elsewhere cannot change a count. */
+function sha256Inputs() {
+  const real = crypto.createHash, updates: { readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> } }[] = [];
+  const spy = spyOn(crypto, 'createHash').mockImplementation((algorithm, options) => {
+    const hash = real(algorithm, options);
+    if (algorithm === 'sha256') updates.push(spyOn(hash, 'update'));
+    return hash;
+  });
+  const given = () => updates.flatMap(update => update.mock.calls.map(call => call[0]));
+  return { ofText: (text: string) => given().filter(value => value === text).length, total: () => given().length, restore: () => spy.mockRestore() };
+}
+const keyText = (key: DurableContractKey): string => JSON.stringify({ attemptId: key.attemptId, criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, workId: key.workId });
 function fixture() { const root = makeProjectTempDir('gv-durable-key'); roots.push(root); return { root, directory: join(root, '.goodvibes', 'contracts', 'admissions'), store: new DurableContractAdmissions(root) }; }
 function admission(root: string, key: DurableContractKey, contractId = 'ctr-1234abcd'): DurableContractAdmission {
   const request = freezeDurableRequest({ key, binding: { sourceId: 'source', inputRevision: 'input', actionId: 'action', actionRevision: 'revision',
@@ -19,23 +30,23 @@ function admission(root: string, key: DurableContractKey, contractId = 'ctr-1234
 
 test('one actual immutable key owns one existing filename digest across real missing read, key lock, lease and publication', async () => {
   const f = fixture(), original = admission(f.root, rawKey()), key = original.key;
-  const hash = spyOn(crypto, 'createHash');
+  const hash = sha256Inputs();
   let releaseLock: (() => void) | undefined, releaseLease: (() => void) | undefined;
   try {
-    const digest = durableKeyHash(key); expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(1);
+    const digest = durableKeyHash(key); expect(hash.ofText(keyText(key))).toBe(1);
     const capturedAgain = freezeDurableRequest({ key, binding: original.binding, input: { ...original.input } });
     expect(capturedAgain.key).toBe(key); expect(durableKeyHash(capturedAgain.key)).toBe(digest);
-    expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(1);
+    expect(hash.ofText(keyText(key))).toBe(1);
     expect(f.store.read(key)).toBeNull(); releaseLock = await f.store.lock(key); releaseLease = await f.store.lease(key);
     expect(existsSync(join(f.directory, `${digest}.json.lock`))).toBe(true); expect(existsSync(join(f.directory, `${digest}.json.execution`))).toBe(true);
     f.store.write(original, 'first checkpoint');
-    expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(1);
+    expect(hash.ofText(keyText(key))).toBe(1);
     expect(f.store.read(key)).toEqual(original);
     // The actual independently read saved payload still verifies its separate
     // complete-request commitment. There is no second filename hash here.
-    expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(2);
+    expect(hash.ofText(keyText(key))).toBe(1); expect(hash.total()).toBeGreaterThan(1);
     expect(readdirSync(f.directory).filter(name => name.endsWith('.json'))).toEqual([digest + '.json']);
-  } finally { releaseLease?.(); releaseLock?.(); hash.mockRestore(); }
+  } finally { releaseLease?.(); releaseLock?.(); hash.restore(); }
 });
 
 test('all four generic references remain separate identities even when an opaque-looking criteria ID is reused', async () => {
@@ -59,9 +70,9 @@ test('a detached original key remains fixed while mutable and foreign frozen cop
   (source as { workId: string }).workId = 'new work';
   expect(durableKeyHash(native)).toBe(original); expect(durableKeyHash(source)).not.toBe(original);
   const foreign = Object.freeze({ ...native }); expect(freezeDurableKey(foreign)).not.toBe(foreign);
-  const hash = spyOn(crypto, 'createHash');
-  try { expect(durableKeyHash(foreign)).toBe(original); expect(durableKeyHash(foreign)).toBe(original); expect(hash.mock.calls.filter(call => call[0] === 'sha256')).toHaveLength(2); }
-  finally { hash.mockRestore(); }
+  const hash = sha256Inputs();
+  try { expect(durableKeyHash(foreign)).toBe(original); expect(durableKeyHash(foreign)).toBe(original); expect(hash.ofText(keyText(native))).toBe(2); }
+  finally { hash.restore(); }
 });
 
 test('original protocol bytes are unchanged for the maximum portable four-reference namespace', () => {

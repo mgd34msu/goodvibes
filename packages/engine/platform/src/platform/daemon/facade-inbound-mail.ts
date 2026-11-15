@@ -71,6 +71,8 @@ import {
   systemWatcherClock,
   type GmailSourceBuilder,
   type InboundMailObserver,
+  type InboundMailSourceFactory,
+  type InboundWatcherSettings,
   type InboundNoticeMode,
   type NoticeRouteResolution,
 } from '../email/inbound/index.js';
@@ -79,7 +81,7 @@ import type {
   GmailInboundReaderResolution,
 } from '../google/gmail-inbound-reader.js';
 import { nodeEmailTransport } from '../email/node.js';
-import { readSurfaceEmailSettings } from '../email/surface-config.js';
+import { configReaderWithOrigins, readSurfaceEmailSettings } from '../email/surface-config.js';
 import { registerEmailExpectationGatewayMethods } from '../control-plane/routes/email-expectations.js';
 import { registerEmailInboundStatusGatewayMethod } from '../control-plane/routes/email-inbound-status.js';
 import { logger } from '../utils/logger.js';
@@ -92,7 +94,7 @@ import type { ShellPathService } from '../runtime/shell-paths.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
 import type { SurfaceNoticeDelivery } from './types.js';
 
-/** How many accounts one supervisor watches. One, today, see `readWatchedAccount`. */
+/** How many accounts one supervisor watches. One, today, see `readWatchedAccounts`. */
 const DEFAULT_MAILBOX = 'INBOX';
 
 export interface InboundMailCompositionOptions {
@@ -138,6 +140,8 @@ export interface InboundMailCompositionOptions {
    * start instead of at the next restart.
    */
   readonly gmailReader: GmailInboundReaderProvider;
+  /** Replaces the live IMAP/Gmail source factory, so a test can hold the sink a started source delivers into. */
+  readonly sources?: InboundMailSourceFactory | undefined;
 }
 
 /**
@@ -148,14 +152,17 @@ export interface InboundMailCompositionOptions {
  * empty list is honest about watching nothing rather than defaulting to a
  * mailbox nobody named.
  */
-function readWatchedAccount(configManager: ConfigManager): string | null {
+function readWatchedAccounts(configManager: ConfigManager): { readonly account: string; readonly ignored: readonly string[] } | null {
   const raw = configManager.get('surfaces.email.inbound.accounts');
   if (typeof raw !== 'string' || raw.trim().length === 0) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
-    const first = parsed.find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
-    return first?.trim() ?? null;
+    const named = parsed
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim());
+    const [account, ...rest] = named;
+    return account === undefined ? null : { account, ignored: [...new Set(rest.filter((entry) => entry !== account))] };
   } catch {
     // A malformed list is a configuration error, not a mailbox. Reported by
     // the supervisor's status rather than guessed at here.
@@ -269,10 +276,11 @@ export function composeInboundMail(
   options: InboundMailCompositionOptions,
 ): InboundMailSupervisor | null {
   const { configManager, shellPaths } = options;
-  const account = readWatchedAccount(configManager);
-  if (account === null) return null;
+  const watched = readWatchedAccounts(configManager);
+  if (watched === null) return null;
+  const { account, ignored: ignoredAccounts } = watched;
 
-  const mailbox = readSurfaceEmailSettings((key) => configManager.get(key as never)).mailbox
+  const mailbox = readSurfaceEmailSettings(configReaderWithOrigins(configManager)).mailbox
     ?? DEFAULT_MAILBOX;
 
   const storePath = (name: string): string => shellPaths.resolveUserPath('daemon', name);
@@ -332,7 +340,7 @@ export function composeInboundMail(
     },
   });
 
-  const settings = resolveWatcherSettings({
+  const readSettings = (): InboundWatcherSettings => resolveWatcherSettings({
     account,
     mailbox,
     mode: readInboundMode(configManager),
@@ -341,6 +349,12 @@ export function composeInboundMail(
     maxBackoffMs: readNumberSetting(configManager, 'surfaces.email.inbound.reconnect.maxBackoffSeconds', 300) * 1_000,
     capabilityRecheckMs: readNumberSetting(configManager, 'surfaces.email.inbound.capabilityRecheckMinutes', 60) * 60_000,
   });
+  // Each field reads the owner's current setting when the source factory builds a source (it spreads or
+  // reads this object then), so a changed cadence applies at the next source start instead of at a daemon restart.
+  const settings = {} as InboundWatcherSettings;
+  for (const key of Object.keys(readSettings()) as (keyof InboundWatcherSettings)[]) {
+    Object.defineProperty(settings, key, { enumerable: true, get: () => readSettings()[key] });
+  }
 
   // ONE instance, shared by the intake that writes it and the supervisor that
   // reports it. Two instances would be two answers to "is the owner being told", and
@@ -377,6 +391,21 @@ export function composeInboundMail(
           detail: error instanceof Error ? error.message : String(error),
         });
       });
+    },
+    // The intake, the watcher and the Gmail source report what happened to a
+    // message here (a failed delivery, a notice refused, a cursor reset, a lost
+    // connection). With no handler these reached nothing at all.
+    note: (note) => {
+      const fields = { surface: 'email-inbound', kind: note.kind, mailbox: note.mailbox, detail: note.detail };
+      // Routine progress is debug; anything that means mail is waiting, was
+      // skipped or went unannounced is a warning someone should see.
+      if (note.kind === 'delta-drained' || note.kind === 'idle-reissued' || note.kind === 'expunge-observed') {
+        logger.debug('Inbound mail', fields);
+      } else if (note.kind === 'cursor-established') {
+        logger.info('Inbound mail', fields);
+      } else {
+        logger.warn('Inbound mail', fields);
+      }
     },
   };
 
@@ -437,18 +466,24 @@ export function composeInboundMail(
       // here would be a second answer to a question that decides whether the
       // daemon announces mail it can never act on.
       capabilityPolicy: input.capabilityPolicy,
-      observer,
+      // The supervisor's observer, which forwards to `observer` above. Handing
+      // the source `observer` directly went around the supervisor, so its
+      // status never heard a Gmail verdict change after start: a held refusal
+      // that recovered stayed `inactive`, and one that started failing stayed
+      // `running`.
+      observer: input.observer,
     });
   };
 
   supervisor = new InboundMailSupervisor({
     config: configManager,
     account,
+    ignoredAccounts,
     mailbox,
-    sources: createInboundMailSourceFactory({
+    sources: options.sources ?? createInboundMailSourceFactory({
       getConfigurationIncarnation: () => configManager.getConfigurationIncarnation?.(),
       onDidChangeConfiguration: (listener) => configManager.onDidChangeIncarnation?.(listener) ?? (() => {}),
-      getConfig: (key) => configManager.get(key as never),
+      getConfig: configReaderWithOrigins(configManager),
       secrets: options.secretsManager,
       transport: nodeEmailTransport,
       cursors,
@@ -508,23 +543,40 @@ export function composeInboundMail(
     observer,
   });
 
-  // The existing supervisor rebuilds same-identity sources after source retirement.
-  // A different account/mailbox still requires a fresh composition with new sinks.
-  configManager.onDidChangeIncarnation?.(() => queueMicrotask(() => supervisor?.recheckNow()));
-  options.secretsManager.onDidInvalidateCredentials?.(() => {
-    if (!options.secretsManager.getCredentialMutationState?.().pending) supervisor?.recheckNow();
-  });
+  // Everything below runs while the supervisor runs and is released when it stops, so a node that handed the
+  // mailbox over (or a stopped daemon) neither sweeps nor writes the stores and does not keep listeners.
+  // The expectation sweep sits beside the housekeeper rather than inside the supervisor's start because
+  // `email.expectation.open` can register an expectation while no source is running, so it also starts here.
+  const expectationSweepMs = expectationSweepIntervalMs(expectationWindowMs);
+  let releaseBackground: (() => void) | null = null;
+  const attachBackground = (): void => {
+    if (releaseBackground) return;
+    // The existing supervisor rebuilds same-identity sources after source retirement.
+    // A different account/mailbox still requires a fresh composition with new sinks.
+    const unsubscribeConfig = configManager.onDidChangeIncarnation?.(() => queueMicrotask(() => supervisor?.recheckNow()));
+    const unsubscribeCredentials = options.secretsManager.onDidInvalidateCredentials?.(() => {
+      if (!options.secretsManager.getCredentialMutationState?.().pending) supervisor?.recheckNow();
+    });
+    housekeeper.start(6 * 60 * 60_000);
+    expectations.startSweeping(expectationSweepMs);
+    releaseBackground = () => {
+      unsubscribeConfig?.(); unsubscribeCredentials?.();
+      housekeeper.stop(); expectations.stopSweeping();
+      releaseBackground = null;
+    };
+  };
+  const startSupervisor = supervisor.start.bind(supervisor);
+  const stopSupervisor = supervisor.stop.bind(supervisor);
+  supervisor.start = () => { attachBackground(); return startSupervisor(); };
+  supervisor.stop = async () => {
+    try { await stopSupervisor(); } finally { releaseBackground?.(); }
+  };
 
-  registerEmailExpectationGatewayMethods(options.gatewayMethods, expectations);
+  registerEmailExpectationGatewayMethods(options.gatewayMethods, expectations, () => supervisor?.status ?? { running: false, reason: 'The inbound mail supervisor is not available.' });
   registerEmailInboundStatusGatewayMethod(options.gatewayMethods, supervisor);
-  housekeeper.start(6 * 60 * 60_000);
-  // The call `sweep()` never had. Beside the housekeeper's timer and not inside
-  // the supervisor's start, because `email.expectation.open` can register an
-  // expectation while no source is running, and a daemon watching no mailbox
-  // is exactly when an expectation running out would otherwise be reported by
-  // nothing. Six hours is right for reaping records off disk; it is not right
-  // for a promise measured in minutes, so this runs on its own cadence.
-  expectations.startSweeping(expectationSweepIntervalMs(expectationWindowMs));
+  // Six hours is right for reaping records off disk; it is not right for a promise measured in
+  // minutes, so the expectation sweep runs on its own cadence.
+  attachBackground();
   return supervisor;
 }
 
@@ -582,7 +634,7 @@ function isGmailMailbox(
   account: string,
   connectedAddress: string,
 ): boolean {
-  const host = (readSurfaceEmailSettings((key) => configManager.get(key as never)).imapHost ?? '')
+  const host = (readSurfaceEmailSettings(configReaderWithOrigins(configManager)).imapHost ?? '')
     .trim().toLowerCase();
   if (namesAnAddress(account)) {
     if (sameAddress(account, connectedAddress)) return true;

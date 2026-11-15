@@ -20,6 +20,13 @@ import type { FleetProcessNode } from '../../src/lib/contract-bridge-types';
 import type { OperatorMethodOutput } from '../../src/lib/goodvibes';
 
 /**
+ * The operator token every hermetic suite seeds into the browser and every host-side
+ * fixture checks the Authorization header against. One value, so a rename cannot leave
+ * part of the harness answering 403.
+ */
+export const E2E_OPERATOR_TOKEN = 'e2e-operator-token';
+
+/**
  * The fleet node fixtures below are annotated with the app's own FleetProcessNode
  * (= FleetSnapshotResult['nodes'][number], generated from the platform's operator
  * contract) rather than left to inference. Left inferred, the array in
@@ -888,10 +895,62 @@ export const OCCASIONS_NOT_INVOKABLE_BODY = { error: 'Gateway method is cataloge
 export function knowledgeMapResponse() {
   return {
     svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120"><rect width="200" height="120" fill="#0a0a14"/><circle cx="60" cy="60" r="18" fill="#00ffff"/><circle cx="150" cy="40" r="14" fill="#ff00ff"/><line x1="60" y1="60" x2="150" y2="40" stroke="#8ab" stroke-width="2"/><text x="40" y="100" fill="#cde" font-size="10">knowledge map</text></svg>',
-    nodes: [{ id: 'n1', label: 'session-spine' }, { id: 'n2', label: 'daemon' }],
-    jobs: [],
+    ok: true,
+    title: 'Knowledge map',
+    generatedAt: 1_700_000_000_000,
+    width: 200,
+    height: 120,
+    nodeCount: 2,
+    edgeCount: 1,
+    nodes: [
+      { id: 'n1', recordKind: 'node', kind: 'concept', title: 'session-spine', x: 60, y: 60, radius: 18, metadata: {} },
+      { id: 'n2', recordKind: 'node', kind: 'concept', title: 'daemon', x: 150, y: 40, radius: 14, metadata: {} },
+    ],
+    edges: [{ id: 'e1', fromId: 'n1', toId: 'n2', relation: 'relates-to', weight: 1, metadata: {} }],
   };
 }
+
+/**
+ * The knowledge reads the app issues on its own (the Knowledge view, the boot snapshot,
+ * the library search). Each answers its own method's output shape; a knowledge route not
+ * listed here is the mock's 404, never another method's body.
+ */
+const KNOWLEDGE_NODES = knowledgeMapResponse().nodes;
+const KNOWLEDGE_READS: readonly { id: string; route: string; body: () => unknown }[] = [
+  { id: 'knowledge.map', route: 'GET /api/knowledge/map', body: knowledgeMapResponse },
+  {
+    id: 'knowledge.status',
+    route: 'GET /api/knowledge/status',
+    body: () => ({
+      ready: true, storagePath: '/home/operator/.goodvibes/knowledge', sourceCount: 0, nodeCount: KNOWLEDGE_NODES.length,
+      edgeCount: 0, issueCount: 0, extractionCount: 0, jobRunCount: 0, usageCount: 0, candidateCount: 0,
+      reportCount: 0, scheduleCount: 0,
+    }),
+  },
+  { id: 'knowledge.sources.list', route: 'GET /api/knowledge/sources', body: () => ({ sources: [] }) },
+  { id: 'knowledge.nodes.list', route: 'GET /api/knowledge/nodes', body: () => ({ nodes: KNOWLEDGE_NODES }) },
+  { id: 'knowledge.issues.list', route: 'GET /api/knowledge/issues', body: () => ({ issues: [] }) },
+  { id: 'knowledge.projections.list', route: 'GET /api/knowledge/projections', body: () => ({ targets: [] }) },
+  { id: 'knowledge.refinement.tasks.list', route: 'GET /api/knowledge/refinement/tasks', body: () => ({ tasks: [] }) },
+  { id: 'knowledge.jobs.list', route: 'GET /api/knowledge/jobs', body: () => ({ jobs: [] }) },
+  { id: 'knowledge.job-runs.list', route: 'GET /api/knowledge/job-runs', body: () => ({ runs: [] }) },
+  { id: 'knowledge.search', route: 'POST /api/knowledge/search', body: () => ({ results: [] }) },
+];
+
+/** The seeded answer for a knowledge read, by method id. Undefined when the mock has none. */
+export function knowledgeReadByMethod(methodId: string): { id: string; body: unknown } | undefined {
+  const read = KNOWLEDGE_READS.find((entry) => entry.id === methodId);
+  return read && { id: read.id, body: read.body() };
+}
+
+/** The seeded answer for a REST knowledge request. Undefined when the mock has none. */
+export function knowledgeReadByRoute(method: string, path: string): { id: string; body: unknown } | undefined {
+  const read = KNOWLEDGE_READS.find((entry) => entry.route === `${method} ${path}`);
+  return read && { id: read.id, body: read.body() };
+}
+
+/** Every knowledge method id the mock answers, for the contract-shape test. */
+export const KNOWLEDGE_READ_METHOD_IDS: readonly string[] = KNOWLEDGE_READS.map((entry) => entry.id);
 
 // ─── Fleet / approvals / watchers (WEBUI-FLEET-DEPTH) ─────────────────────────
 //
@@ -1171,34 +1230,6 @@ export const EXEC_PROMPT_APPROVAL = {
   createdAt: 530,
   updatedAt: 530,
   metadata: { source: 'exec-prompt', command: 'ssh deploy@staging.internal' },
-};
-
-// A pending CI "fix this?" offer, the red-run fix-session ask the ci-watch
-// service raises through the approval broker (tool 'ci:fix-session'). Accepting
-// it spawns a fix session whose id the broker stamps onto the resolved APPROVED
-// record (platform 1d6a85e2), the mock daemon mirrors that stamp on approve.
-export const CI_FIX_OFFER_APPROVAL = {
-  id: 'appr-ci-fix-1',
-  callId: 'ci-fix-e2e1',
-  status: 'pending',
-  request: {
-    callId: 'ci-fix-e2e1',
-    tool: 'ci:fix-session',
-    args: { repo: 'acme/example', ref: 'main', failingJobs: ['lint'] },
-    category: 'delegate',
-    analysis: {
-      classification: 'ci-fix-session',
-      riskLevel: 'medium',
-      summary: 'CI went red on acme/example (main): start a fix session for lint?',
-      reasons: [
-        'The watched CI run on acme/example reached a failed verdict.',
-        "Accepting starts an isolated fix session seeded with the failing jobs' logs; declining leaves the red run untouched.",
-      ],
-    },
-  },
-  createdAt: 540,
-  updatedAt: 540,
-  metadata: { source: 'ci-watch', repo: 'acme/example' },
 };
 
 // One pre-seeded durable rule for the permissions-rules view proofs.

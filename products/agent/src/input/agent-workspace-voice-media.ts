@@ -2,7 +2,8 @@ import type { CommandContext } from './command-registry.ts';
 import { getAgentWorkspaceConfigReader } from './agent-workspace-config-reader.ts';
 
 export type AgentWorkspaceVoiceMediaDomain = 'voice' | 'media';
-export type AgentWorkspaceVoiceMediaSetupState = 'ready' | 'registered' | 'needs-secret' | 'not-registered';
+// 'ready-agent-env' means a key was found in this Agent process only; the connected host's environment is not visible from here, so it never counts as ready.
+export type AgentWorkspaceVoiceMediaSetupState = 'ready' | 'ready-agent-env' | 'registered' | 'needs-secret' | 'not-registered';
 
 export interface AgentWorkspaceVoiceMediaProviderDescriptor {
   readonly id: string;
@@ -111,16 +112,20 @@ function buildProviderStatus(
   const spec = specFor(domain, provider.id);
   const configured = configuredSecretKeys(spec.secretKeyOptions);
   const selected = selectedProviderId === provider.id;
-  const setupState: AgentWorkspaceVoiceMediaSetupState = spec.noSecretRequired || configured.length > 0
+  const setupState: AgentWorkspaceVoiceMediaSetupState = spec.noSecretRequired
     ? 'ready'
-    : spec.secretKeyOptions.length > 0
+    : configured.length > 0
+      ? 'ready-agent-env'
+      : spec.secretKeyOptions.length > 0
       ? 'needs-secret'
       : 'registered';
   const label = providerLabel(provider);
   const nextStep = setupState === 'ready'
-    ? `${label} is ready for explicit Agent voice/media use.`
-    : setupState === 'needs-secret'
-      ? `Configure one of ${spec.secretKeyOptions.join('|')} in the owning GoodVibes host environment.`
+    ? `${label} needs no secret and is ready for explicit Agent voice/media use.`
+    : setupState === 'ready-agent-env'
+      ? `${label} has ${configured.join('|')} set in this Agent environment. The connected GoodVibes host's environment is not checked from here, so this is not counted as ready.`
+      : setupState === 'needs-secret'
+      ? `No ${spec.secretKeyOptions.join('|')} found in this Agent environment. Configure one in the owning GoodVibes host environment; the host's environment is not checked from here.`
       : `${label} is registered; confirm any provider-specific setup in the owning GoodVibes host.`;
   return {
     id: provider.id,

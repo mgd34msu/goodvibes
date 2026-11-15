@@ -1,6 +1,7 @@
 import { Parser } from 'tar';
 import { parse } from 'smol-toml';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { logger } from '../utils/logger.js';
 
 type Table = Record<string, unknown>;
 export type RepositoryCatalog = Record<string, Table & { models: Record<string, Table> }>;
@@ -39,12 +40,19 @@ export async function parseModelCatalogRepository(files: ReadonlyMap<string, str
     const authored = parse(text), baseId = authored.base_model;
     let model: Table = authored;
     if (baseId !== undefined) {
-      if (typeof baseId !== 'string' || !metadata.has(baseId)) throw new Error(`Model catalog has an unresolved base_model in ${path}`);
+      if (typeof baseId !== 'string' || !metadata.has(baseId)) {
+        // One bad file upstream must not block every refresh; the rest of the snapshot is still coherent.
+        logger.warn('Model catalog entry skipped: unresolved base_model', { path });
+        continue;
+      }
       const base = Object.fromEntries(Object.entries(metadata.get(baseId)!).filter(([key]) => !['id', 'benchmarks', 'license', 'links', 'weights'].includes(key)));
       const overrides = Object.fromEntries(Object.entries(authored).filter(([key]) => key !== 'base_model' && key !== 'base_model_omit'));
       model = structuredClone(merge(base, overrides));
-      if (Array.isArray(authored.base_model_omit)) for (const omitted of authored.base_model_omit) {
-        if (typeof omitted !== 'string') throw new Error(`Invalid base_model_omit in ${path}`);
+      if (Array.isArray(authored.base_model_omit) && authored.base_model_omit.some(omitted => typeof omitted !== 'string')) {
+        logger.warn('Model catalog entry skipped: invalid base_model_omit', { path });
+        continue;
+      }
+      if (Array.isArray(authored.base_model_omit)) for (const omitted of authored.base_model_omit as string[]) {
         const parts = omitted.split('.');
         let parent = model;
         for (const part of parts.slice(0, -1)) { const child = parent[part]; if (!Object.hasOwn(parent, part) || !table(child)) { parent = {}; break; } parent = child; }
@@ -64,14 +72,18 @@ export async function fetchModelCatalogRepository(): Promise<RepositoryCatalog> 
   if (!response.ok) throw new Error(`Model catalog repository returned HTTP ${response.status}`);
   const files = new Map<string, string>();
   let totalBytes = 0;
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve, rejectOnce) => {
+    // Once the parser has failed the download is pointless: the reader loop
+    // stops pulling and cancels the response instead of feeding a dead parser.
+    let failed = false;
+    const reject = (error: unknown): void => { failed = true; rejectOnce(error); };
     const parser = new Parser({ strict: true, onReadEntry(entry) {
       const path = entry.path.split('/').slice(1).join('/');
       if (entry.type !== 'File' || !/^(?:models\/.+\.toml|providers\/[^/]+\/(?:provider\.toml|models\/.+\.toml))$/.test(path)) { entry.resume(); return; }
       const chunks: Buffer[] = [];
       entry.on('data', (chunk: Buffer) => {
         totalBytes += chunk.length;
-        if (totalBytes > 64 * 1024 * 1024) { parser.abort(new Error('Model catalog exceeds its data budget')); return; }
+        if (totalBytes > 64 * 1024 * 1024) { const error = new Error('Model catalog exceeds its data budget'); parser.abort(error); reject(error); return; }
         chunks.push(chunk);
       });
       entry.on('end', () => files.set(path, Buffer.concat(chunks).toString('utf8')));
@@ -83,13 +95,13 @@ export async function fetchModelCatalogRepository(): Promise<RepositoryCatalog> 
       const reader = response.body.getReader();
       let compressedBytes = 0;
       try {
-        while (true) {
+        while (!failed) {
           const { done, value } = await reader.read(); if (done) break;
           compressedBytes += value.byteLength;
           if (compressedBytes > 32 * 1024 * 1024) throw new Error('Model catalog archive exceeds its download budget');
           parser.write(value);
         }
-        parser.end();
+        if (!failed) parser.end();
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     };
     void consume().catch(error => { parser.abort(error instanceof Error ? error : new Error('Model catalog download failed')); reject(error); });

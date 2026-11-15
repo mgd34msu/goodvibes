@@ -179,3 +179,82 @@ describe('router-e2e remote: failure paths', () => {
     expect(await composed!.json()).toEqual({ contract: { kind: 'node-host' } });
   });
 });
+
+// ---------------------------------------------------------------------------
+// describe: peer routes the happy-path block does not exercise
+// ---------------------------------------------------------------------------
+
+describe('router-e2e remote: peer token revoke, disconnect and invoke', () => {
+  type Calls = string[];
+
+  /** Every id-taking mutating handler records `<name>:<id>`, so a swapped mapping shows as the wrong name. */
+  function recordingHandlers(calls: Calls, reqs: Request[]) {
+    const rec = (name: string) => (id: string, req: Request) => {
+      calls.push(`${name}:${id}`);
+      reqs.push(req);
+      return Response.json({ ok: true });
+    };
+    return makeDefaultDaemonHandlerStub({
+      approveRemotePairRequest: rec('approve'),
+      rejectRemotePairRequest: rec('reject'),
+      rotateRemotePeerToken: rec('rotate'),
+      revokeRemotePeerToken: rec('revoke'),
+      disconnectRemotePeer: rec('disconnect'),
+      invokeRemotePeer: rec('invoke'),
+      cancelRemoteWork: rec('cancel'),
+    });
+  }
+
+  const cases: Array<[string, string]> = [
+    ['/api/remote/peers/peer-7/token/revoke', 'revoke:peer-7'],
+    ['/api/remote/peers/peer-7/token/rotate', 'rotate:peer-7'],
+    ['/api/remote/peers/peer-7/disconnect', 'disconnect:peer-7'],
+    ['/api/remote/peers/peer-7/invoke', 'invoke:peer-7'],
+    ['/api/remote/pair/requests/r-1/approve', 'approve:r-1'],
+    ['/api/remote/pair/requests/r-1/reject', 'reject:r-1'],
+    ['/api/remote/work/w-1/cancel', 'cancel:w-1'],
+  ];
+
+  for (const [path, expected] of cases) {
+    test(`POST ${path} calls exactly ${expected} with the request`, async () => {
+      const calls: Calls = [];
+      const reqs: Request[] = [];
+      const req = makeRequest('POST', `http://localhost${path}`, { reason: 'x' });
+      const res = await dispatchRemoteRoutes(req, recordingHandlers(calls, reqs));
+      expect(res?.status).toBe(200);
+      expect(calls).toEqual([expected]);
+      expect(reqs[0]).toBe(req);
+    });
+  }
+
+  test('a percent-encoded peer id is decoded before it reaches the handler', async () => {
+    const calls: Calls = [];
+    await dispatchRemoteRoutes(
+      makeRequest('POST', 'http://localhost/api/remote/peers/p%2F1%20x/disconnect'),
+      recordingHandlers(calls, []),
+    );
+    expect(calls).toEqual(['disconnect:p/1 x']);
+  });
+
+  test('a malformed percent-encoding is answered as a bad request, not dispatched', async () => {
+    const calls: Calls = [];
+    const res = await dispatchRemoteRoutes(
+      makeRequest('POST', 'http://localhost/api/remote/peers/%E0%A4%A/invoke'),
+      recordingHandlers(calls, []),
+    );
+    expect(res?.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  test('GET on a mutating peer route is not dispatched', async () => {
+    const calls: Calls = [];
+    for (const tail of ['token/revoke', 'disconnect', 'invoke']) {
+      const res = await dispatchRemoteRoutes(
+        makeRequest('GET', `http://localhost/api/remote/peers/peer-7/${tail}`),
+        recordingHandlers(calls, []),
+      );
+      expect(res).toBeNull();
+    }
+    expect(calls).toEqual([]);
+  });
+});

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { handleCommandModeToken, type CommandModeRouteState } from '../../input/handler-command-route.ts';
+import { waitUntil } from '../helpers/wait-until.ts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 
 function makeEnterToken(): InputToken {
@@ -60,8 +61,7 @@ describe('command dispatch error boundary', () => {
 
     handleCommandModeToken(state, makeEnterToken());
 
-    // Give the promise microtask queue time to settle
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => out.join('\n').includes('catastrophic failure'), 'the failure to be reported');
 
     expect(out.length).toBeGreaterThan(0);
     const combined = out.join('\n');
@@ -82,7 +82,7 @@ describe('command dispatch error boundary', () => {
     const state = makeState('/explodes', out, registry);
 
     handleCommandModeToken(state, makeEnterToken());
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => out.join('\n').includes('cannot read property of undefined'), 'the failure to be reported');
 
     expect(out.join('\n')).toContain('cannot read property of undefined');
   });

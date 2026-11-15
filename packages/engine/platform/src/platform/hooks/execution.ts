@@ -3,6 +3,20 @@ export interface HookExecutionOptions {
   readonly signal?: AbortSignal | undefined;
 }
 
+const DEFAULT_TIMEOUT_SECONDS: Readonly<Record<string, number>> = { agent: 60 };
+const FALLBACK_TIMEOUT_SECONDS = 30;
+
+/**
+ * The deadline, in seconds, a hook runs under: its own `timeout` when set
+ * (0 asks for no deadline), otherwise 30s (60s for an agent hook). Every
+ * runner reads it here so the documented default is the one that applies.
+ */
+export function hookTimeoutSeconds(hook: { readonly timeout?: number | undefined }, kind: string): number {
+  const own = hook.timeout;
+  if (typeof own === 'number' && Number.isFinite(own) && own >= 0) return own;
+  return DEFAULT_TIMEOUT_SECONDS[kind] ?? FALLBACK_TIMEOUT_SECONDS;
+}
+
 /**
  * A hook deadline requests cancellation; it is never a substitute for joining
  * the operation. Callers must await the provider/handler/body before disposing

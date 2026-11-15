@@ -144,6 +144,55 @@ describe('CalendarView: a genuine failure', () => {
   });
 });
 
+describe('CalendarView: refusals are told apart', () => {
+  const headings = (el: HTMLElement) => el.textContent ?? '';
+
+  test('a 412 CALENDAR_NOT_CONFIGURED says the calendar is not set up and points to Settings, with no retry', async () => {
+    eventsList = () => refusal(412, { code: 'CALENDAR_NOT_CONFIGURED' });
+    const { el, unmount } = render();
+    await waitFor(() => headings(el).includes('Calendar isn’t configured'));
+    expect(hasButton('Open settings')).toBe(true);
+    expect(hasButton('Try again')).toBe(false);
+    expect(headings(el)).not.toContain('Events failed to load');
+    unmount();
+  });
+
+  test('a 412 CALENDAR_CREDENTIALS_MISSING reads as unconfigured too', async () => {
+    eventsList = () => refusal(412, { code: 'CALENDAR_CREDENTIALS_MISSING' });
+    const { el, unmount } = render();
+    await waitFor(() => headings(el).includes('Calendar isn’t configured'));
+    unmount();
+  });
+
+  test('a CalDAV rejection of the saved password names the password, not a missing setup', async () => {
+    eventsList = () => refusal(502, { code: 'CALENDAR_AUTH_FAILED' });
+    const { el, unmount } = render();
+    await waitFor(() => headings(el).includes('The calendar server refused the saved password'));
+    expect(headings(el)).not.toContain('Calendar isn’t configured');
+    expect(hasButton('Open settings')).toBe(true);
+    expect(hasButton('Try again')).toBe(false);
+    unmount();
+  });
+
+  test('a 501 says the daemon has no calendar service and offers an update, with no retry', async () => {
+    eventsList = () => refusal(501, { error: 'not invokable' });
+    const { el, unmount } = render();
+    await waitFor(() => headings(el).includes('Calendar isn’t available on this daemon yet'));
+    expect(hasButton('Update daemon')).toBe(true);
+    expect(hasButton('Try again')).toBe(false);
+    expect(headings(el)).not.toContain('Calendar isn’t configured');
+    unmount();
+  });
+
+  test('a 404 unknown-method refusal is the not-available state', async () => {
+    eventsList = () => refusal(404, { code: 'METHOD_NOT_FOUND' });
+    const { el, unmount } = render();
+    await waitFor(() => headings(el).includes('Calendar isn’t available on this daemon yet'));
+    expect(hasButton('Try again')).toBe(false);
+    unmount();
+  });
+});
+
 describe('CalendarView: populated / empty', () => {
 
   test('events render sorted by start time, and opening one shows its detail', async () => {

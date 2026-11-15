@@ -124,7 +124,11 @@ Supported chat behavior:
 - search chat history, both session titles across full history (a daemon-side
   search) and message text within recently loaded sessions
 - see queued messages while a turn is active, and dictate or speak replies
-  with the voice controls
+  with the voice controls. A queued message whose chat closed, or whose daemon
+  restarted, before it ran is marked "Not answered"; send it again to get a
+  reply. A reply that could not be saved because the chat's storage was full or
+  unwritable is retried by the daemon on its own, and the chat accepts changes
+  again once that works
 
 Provider/model controls in the composer update daemon model selection. Message
 sends themselves do not include provider/model routing.
@@ -188,10 +192,17 @@ file) are reported verbatim as limitations rather than silently ignored.
 Work is one list of everything running for you, in three groups: Needs you
 (the daemon's attention states and retained compatibility records), Running, and
 Finished. A segmented control filters the list to All,
-Sessions, Agents or Processes, and a search box and a status filter narrow it.
-The header line counts what is running and what needs you. Select a row to open
+Sessions, Agents or Processes, and a search box narrows it. The Show select
+switches between Active (the default), Active and finished (adds the Finished
+group) and Archive. The header line counts what is running and what needs you; in
+the Archive it counts what is archived. Select a row to open
 its detail beside the list (over the page on a phone). New offers Native request,
 task, hosted session, CI watch and a one-off CI status check.
+
+Under the list, Archive finished processes moves fully finished processes out of
+the default list straight away, without a confirmation. They stay readable under
+Show, Archive, which is view-only: this page has no unarchive control yet.
+Workspace checkpoints opens the workspace's snapshots.
 
 What the list brings together:
 
@@ -234,7 +245,7 @@ rather than implying completeness. In a session's detail you can:
 - read and set the session's gate preset through the permission-mode picker.
   Labels and choices come from the engine. The preset is session-scoped, and
   a session the daemon cannot answer for shows an honest unavailable state; the
-  read-only `custom` mode is shown but never offered as a choice
+  picker offers exactly the four modes `safe-owner`, `safe-jev`, `yolo` and `plan`
 - read the context-usage figure, an estimate marked with `~`, and the
   per-session cost for the last 24 hours; a session with no recorded cost says
   so instead of showing a fabricated zero
@@ -281,7 +292,8 @@ the mutation actions are desktop-only and an honest note says so.
 
 Legacy approval details preserve the recorded request, hunks, attribution and
 audit trail. Resolved records render as history. A legacy pending record may
-still show compatibility controls, and legacy attempt groups may show their
+still show compatibility controls; a claimed record keeps Approve, Deny and
+Withdraw because a claim is advisory. Legacy attempt groups may show their
 comparison view. These controls are separate from native contract admission;
 they do not supply a human fallback for held Jev decisions.
 
@@ -337,7 +349,9 @@ should be fixed in platform/daemon, not filtered in the WebUI.
 Review presents daemon-selected records in one list: consolidation
 proposals (contradictions, cross-scope duplicates, stale deletes) first, then
 the memory review queue, then knowledge candidates. Selecting a proposal also
-highlights the queue rows it points at.
+highlights the queue rows it points at. The queue and the candidate list each
+load at most 50 rows and report no total, so a full page shows the tab count as
+"50+" and a note that more may be waiting; decide some and the next ones appear.
 
 ## Personal
 

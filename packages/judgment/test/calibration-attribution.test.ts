@@ -330,7 +330,7 @@ describe('calibration truth belongs to the returned calls of this run', () => {
     expect(truthOf(log.get(id)!)).toBeUndefined();
   });
 
-  test('repeated calls for one fixture use query recency rather than lexical id order', async () => {
+  test('a fixture that made several calls receives no truth rather than a guessed call', async () => {
     const log = new OpaqueDecisionLog(['z-first-call', 'a-latest-call']);
     const run = decision(async (port) => {
       await port.ask({ state: 'first', questions, context });
@@ -338,9 +338,9 @@ describe('calibration truth belongs to the returned calls of this run', () => {
       return [check()];
     });
     const report = await calibrate(withDecisionLog(answering(), log, fixedNow), [run], { endpoint, log });
-    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 1 });
+    expect(report.decisions[0]).toMatchObject({ passed: true, truthRecorded: 0 });
     expect(truthOf(log.get('z-first-call')!)).toBeUndefined();
-    expect(truthOf(log.get('a-latest-call')!)).toEqual({ source: 'fixture', checks: [check()] });
+    expect(truthOf(log.get('a-latest-call')!)).toBeUndefined();
   });
 
   test.each(['site', 'status', 'fixture', 'missing-fixture'] as const)('a returned id still must match calibration %s', async (mismatch) => {

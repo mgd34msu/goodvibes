@@ -1,10 +1,11 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { KnowledgeStore, KnowledgeStoreConflictError } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { SQLiteStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema.js';
+import * as lockModule from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { acquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
 
 const roots: string[] = [];
@@ -14,21 +15,25 @@ const source = (id: string) => ({ id, connectorId: 'fixture', sourceType: 'manua
 const job = (id: string) => ({ id, jobId: 'fixture-job', status: 'completed' as const, mode: 'inline' as const });
 async function open(file: string) { const store = new KnowledgeStore({ dbPath: file }); await store.init(); return store; }
 
-test('ordinary stale source and other-table saves refuse to replace a newer whole image', async () => {
+test('ordinary stale source and other-table saves refuse to replace a newer whole image, then reload it', async () => {
   const file = path();
   const first = await open(file); await first.upsertSource(source('original'));
   const second = await open(file);
   await second.upsertJobRun(job('other-owner'));
   const bytes = readFileSync(file);
-  await expect(first.upsertSource(source('stale-write'))).rejects.toThrow('persisted state changed');
+  const refused = await first.upsertSource(source('stale-write')).then(() => null, (error: unknown) => error);
+  expect(refused).toBeInstanceOf(KnowledgeStoreConflictError);
+  expect(refused).toMatchObject({ reloaded: true, retryable: true });
   expect(readFileSync(file)).toEqual(bytes);
-  // The failed save is retained locally, not silently dropped by a guarded refresh.
-  expect(first.getSource('stale-write')).not.toBeNull();
-  expect(await first.upsertSourceIfCurrent(source('conditional'), null)).toMatchObject({ kind: 'held', reason: 'pending-local-changes' });
-  expect(readFileSync(file)).toEqual(bytes);
+  // The refused write is dropped from memory and the winner's rows are adopted.
+  expect(first.getSource('stale-write')).toBeNull();
+  expect(first.getJobRun('other-owner')).not.toBeNull();
+  expect(await first.upsertSourceIfCurrent(source('conditional'), null)).toMatchObject({ kind: 'written' });
+  await first.upsertSource(source('retried'));
   const third = await open(file);
   expect(third.getJobRun('other-owner')).not.toBeNull();
   expect(third.getSource('stale-write')).toBeNull();
+  expect(third.getSource('retried')).not.toBeNull();
 });
 
 test('overlapping saves on one handle publish in admission order without dropping later rows', async () => {
@@ -60,7 +65,7 @@ test('an unchanged save queued behind fresh-image adoption cannot restore the ea
   store.close(); reopened.close();
 });
 
-test('a stale batch preserves current disk and keeps its pending local records on failure', async () => {
+test('a stale batch preserves current disk and reloads only after the batch settles', async () => {
   const file = path(); const first = await open(file); await first.upsertSource(source('original'));
   const second = await open(file);
   let bytes: Buffer<ArrayBuffer> | undefined;
@@ -68,9 +73,12 @@ test('a stale batch preserves current disk and keeps its pending local records o
     await first.upsertJobRun(job('pending-local'));
     await second.upsertSource(source('other-owner'));
     bytes = readFileSync(file);
-  })).rejects.toThrow('persisted state changed');
+    // Still inside the batch: its pending row is not discarded underneath it.
+    expect(first.getJobRun('pending-local')).not.toBeNull();
+  })).rejects.toBeInstanceOf(KnowledgeStoreConflictError);
   expect(readFileSync(file)).toEqual(bytes!);
-  expect(first.getJobRun('pending-local')).not.toBeNull();
+  expect(first.getJobRun('pending-local')).toBeNull();
+  expect(first.getSource('other-owner')).not.toBeNull();
   const reopened = await open(file);
   expect(reopened.getSource('other-owner')).not.toBeNull();
   expect(reopened.getJobRun('pending-local')).toBeNull();
@@ -207,10 +215,12 @@ test('an initialization retention conflict refuses stale persistence and a retry
   writer.run("UPDATE knowledge_job_runs SET status = 'completed'"); await writer.save();
   const release = await acquireCrossProcessLock(`${file}.knowledge-lock`);
   const target = new KnowledgeStore({ dbPath: file });
+  // Initialization is waiting on the held lock once it has asked for it, so the
+  // ordinary writer below is guaranteed to queue after it.
+  const requested = Promise.withResolvers<void>(), acquire = lockModule.acquireCrossProcessLock;
+  const lockSpy = spyOn(lockModule, 'acquireCrossProcessLock').mockImplementation((...args) => { requested.resolve(); return acquire(...args); });
   const initialization = target.init().then(() => ({ kind: 'ready' }), (error: unknown) => ({ kind: 'error', error }));
-  // Drain initialization's already-loaded WASM promise. The held file lock
-  // keeps it queued before the ordinary writer and its later retention save.
-  await new Promise<void>(resolve => setImmediate(resolve));
+  try { await requested.promise; } finally { lockSpy.mockRestore(); }
   writer.run('UPDATE knowledge_job_runs SET result = ? WHERE id = ?', [JSON.stringify({ owner: 'winner' }), 'retained-500']);
   const saved = writer.save();
   release();
@@ -262,49 +272,30 @@ test('default in-memory subclasses retain their existing batch save lifecycle', 
   store.close();
 });
 
-test('a concurrent ordinary process writer cannot undo a successful guarded process write', async () => {
-  const file = path(); const seed = await open(file); await seed.upsertSource(source('original'));
-  const script = `
-    import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
-    const store = new KnowledgeStore({ dbPath: process.argv[1] }); await store.init();
-    console.log('ready'); await Bun.stdin.text();
-    let result;
-    if (process.argv[2] === 'ordinary') {
-      try { await store.upsertJobRun({ id: 'ordinary-job', jobId: 'fixture', status: 'completed', mode: 'inline' }); result = 'written'; }
-      catch (error) { if (!String(error.message).startsWith('SQLiteStore: persisted state changed;')) throw error; result = 'conflict'; }
-    } else {
-      result = (await store.upsertSourceIfCurrent({ id: 'guarded-source', connectorId: 'fixture', sourceType: 'manual', status: 'indexed' }, null)).kind;
-    }
-    console.log(result);
-  `;
-  const children = ['ordinary', 'guarded'].map(mode => Bun.spawn([
-    process.execPath, '--no-env-file', '--preload', new URL('../toolchain/src/test-runner/test-network-preload.ts', import.meta.url).pathname, '-e', script, file, mode,
-  ], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
-  const readers = children.map(child => child.stdout.getReader());
-  const deadline = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill(); }, 12000);
-  try {
-    await Promise.all(readers.map(async reader => {
-      let line = '';
-      while (!line.includes('\n')) { const chunk = await reader.read(); if (chunk.done) break; line += new TextDecoder().decode(chunk.value); }
-      expect(line.trim()).toBe('ready');
-    }));
-    for (const child of children) { child.stdin.write('go'); child.stdin.end(); }
-    const outcomes = await Promise.all(children.map(async (child, index) => {
-      const output = async () => { let text = ''; for (;;) { const chunk = await readers[index]!.read(); if (chunk.done) return text.trim(); text += new TextDecoder().decode(chunk.value); } };
-      const [exit, result, error] = await Promise.all([child.exited, output(), new Response(child.stderr).text()]);
-      expect({ exit, error }).toEqual({ exit: 0, error: '' });
-      return result;
-    }));
-    expect(['written', 'conflict']).toContain(outcomes[0]!);
-    expect(outcomes[1]).toBe('written');
-    const reopened = await open(file);
-    expect(reopened.getSource('guarded-source')).not.toBeNull();
-    expect(reopened.getSource('original')).not.toBeNull();
-    expect(reopened.getJobRun('ordinary-job') !== null).toBe(outcomes[0] === 'written');
-  } finally {
-    clearTimeout(deadline);
-    for (const child of children) if (child.exitCode === null) child.kill();
-    await Promise.allSettled(children.map(child => child.exited));
-    for (const reader of readers) reader.releaseLock();
-  }
-}, 20000);
+test('an ordinary writer holding a stale image cannot undo a guarded write from another handle', async () => {
+  const file = path(); await (await open(file)).upsertSource(source('original'));
+  const ordinary = await open(file), guarded = await open(file);
+  expect(await guarded.upsertSourceIfCurrent(source('guarded-source'), null)).toMatchObject({ kind: 'written' });
+  const refused = await ordinary.upsertJobRun(job('ordinary-job')).then(() => null, (error: unknown) => error);
+  expect(refused).toBeInstanceOf(KnowledgeStoreConflictError);
+  const reopened = await open(file);
+  expect(reopened.getSource('guarded-source')).not.toBeNull();
+  expect(reopened.getSource('original')).not.toBeNull();
+  expect(reopened.getJobRun('ordinary-job')).toBeNull();
+  // After the reload the refused writer's retry lands on top of the guarded row.
+  await ordinary.upsertJobRun(job('ordinary-job'));
+  const final = await open(file);
+  expect(final.getSource('guarded-source')).not.toBeNull();
+  expect(final.getJobRun('ordinary-job')).not.toBeNull();
+});
+
+test('a guarded write after an ordinary write from another handle keeps both rows', async () => {
+  const file = path(); await (await open(file)).upsertSource(source('original'));
+  const ordinary = await open(file), guarded = await open(file);
+  await ordinary.upsertJobRun(job('ordinary-job'));
+  expect(await guarded.upsertSourceIfCurrent(source('guarded-source'), null)).toMatchObject({ kind: 'written' });
+  const reopened = await open(file);
+  expect(reopened.getSource('original')).not.toBeNull();
+  expect(reopened.getSource('guarded-source')).not.toBeNull();
+  expect(reopened.getJobRun('ordinary-job')).not.toBeNull();
+});

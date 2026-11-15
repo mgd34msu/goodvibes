@@ -1,5 +1,6 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
+import { isAffirmative, redactWebhookForDisplay } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -27,10 +28,6 @@ export function isAgentWorkspaceNotifyEditorKind(kind: string): kind is AgentWor
     || kind === 'notify-send';
 }
 
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
-
 function unconfirmed(editor: AgentWorkspaceLocalEditor, message: string, status: string): AgentWorkspaceNotifyEditorSubmission {
   return {
     kind: 'editor',
@@ -39,7 +36,8 @@ function unconfirmed(editor: AgentWorkspaceLocalEditor, message: string, status:
   };
 }
 
-function dispatch(command: string, title: string, status: string, detail: string): AgentWorkspaceNotifyEditorSubmission {
+/** `display` is what the result pane shows; the webhook URL is a credential, so it never is the command itself. */
+function dispatch(command: string, title: string, status: string, detail: string, display: string = command): AgentWorkspaceNotifyEditorSubmission {
   return {
     kind: 'dispatch',
     command,
@@ -48,7 +46,7 @@ function dispatch(command: string, title: string, status: string, detail: string
       kind: 'dispatched',
       title,
       detail,
-      command,
+      command: display,
       safety: 'safe',
     },
   };
@@ -63,11 +61,13 @@ export function buildAgentWorkspaceNotifyEditorSubmission(
       return unconfirmed(editor, 'Notification webhook add not confirmed. Type yes, then press Enter.', 'Notification webhook add not confirmed.');
     }
     const command = `/notify add ${quoteSlashCommandArg(readField('url'))} --yes`;
+    const display = `/notify add ${quoteSlashCommandArg(redactWebhookForDisplay(readField('url')))} --yes`;
     return dispatch(
       command,
       'Opening notification webhook add',
       'Opening notification webhook add.',
       'The workspace handed a confirmed notification target command to the shell-owned command router.',
+      display,
     );
   }
 
@@ -76,11 +76,13 @@ export function buildAgentWorkspaceNotifyEditorSubmission(
       return unconfirmed(editor, 'Notification webhook remove not confirmed. Type yes, then press Enter.', 'Notification webhook remove not confirmed.');
     }
     const command = `/notify remove ${quoteSlashCommandArg(readField('url'))} --yes`;
+    const display = `/notify remove ${quoteSlashCommandArg(redactWebhookForDisplay(readField('url')))} --yes`;
     return dispatch(
       command,
       'Opening notification webhook remove',
       'Opening notification webhook remove.',
       'The workspace handed a confirmed notification target remove command to the shell-owned command router.',
+      display,
     );
   }
 

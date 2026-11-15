@@ -32,6 +32,11 @@ async function settle(predicate: () => boolean, timeout = 2500) {
     flushSync(() => {});
   }
 }
+/** Let every already-resolved promise chain and fetch body decode run; no wall-clock wait. */
+async function drain() {
+  for (let turn = 0; turn < 10; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  flushSync(() => {});
+}
 function receipt(id = 'input-1', state: Receipt['state'] = 'queued', sessionId = 's-a', updatedAt = 100): Receipt {
   return { id, sessionId, intent: 'follow-up', state, body: id, correlationId: id, createdAt: 1, updatedAt, metadata: {} };
 }
@@ -164,7 +169,7 @@ describe('SteerComposer input receipts', () => {
       const h = render(); h.post(() => { if (mode === 'disconnect') throw new TypeError('Connection lost'); return Response.json({ error: 'Unavailable', code: mode === 'capacity' ? 'CAPACITY_EXCEEDED' : 'UNAVAILABLE' }, { status: mode === 'capacity' ? 429 : 503 }); });
       h.submit(); await settle(() => h.state() === 'follow-up · unknown');
       expect(h.el.textContent).toContain('will not be retried automatically');
-      await new Promise(resolve => setTimeout(resolve, 30));
+      await drain();
       expect(h.requests.filter(request => request.method === 'POST')).toHaveLength(1); h.unmount();
     }
   });
@@ -178,12 +183,22 @@ describe('SteerComposer input receipts', () => {
     expect(h.el.textContent).not.toContain('could not be refreshed');
   });
   test('paused-stream fallback polling updates queued without resending', async () => {
-    const h = render({ streamPaused: true }); h.submit(); await settle(() => h.state() === 'follow-up · queued');
-    await settle(() => h.requests.some(request => request.method === 'GET'));
-    h.inputs([receipt('input-1', 'completed', 's-a', 300)]);
-    await settle(() => h.state() === 'follow-up · completed', 8000);
-    expect(h.requests.filter(request => request.method === 'POST')).toHaveLength(1);
-  }, 10_000);
+    const realInterval = globalThis.setInterval;
+    let tick: (() => void) | undefined;
+    const timer = spyOn(globalThis, 'setInterval').mockImplementation(((callback: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (delay === 5_000 && typeof callback === 'function') tick = () => callback(...args);
+      return realInterval(callback, delay, ...args);
+    }) as typeof setInterval);
+    try {
+      const h = render({ streamPaused: true }); h.submit(); await settle(() => h.state() === 'follow-up · queued');
+      await settle(() => h.requests.some(request => request.method === 'GET'));
+      expect(tick).toBeDefined();
+      h.inputs([receipt('input-1', 'completed', 's-a', 300)]);
+      tick!();
+      await settle(() => h.state() === 'follow-up · completed');
+      expect(h.requests.filter(request => request.method === 'POST')).toHaveLength(1);
+    } finally { timer.mockRestore(); }
+  });
   test('a hung input read times out honestly and a later refresh recovers without another POST', async () => {
     const realTimeout = globalThis.setTimeout;
     let deadline: (() => void) | undefined;
@@ -216,17 +231,18 @@ describe('SteerComposer input receipts', () => {
       h.submit(); await settle(() => h.requests.length === 1);
       expect(deadline).toBeDefined(); flushSync(() => deadline!());
       expect(h.state()).toBe('follow-up · unknown'); expect(h.requests[0].signal?.aborted).toBe(true);
-      pending.resolve(accepted(receipt('late', 'completed'))); await new Promise(resolve => setTimeout(resolve, 30));
+      pending.resolve(accepted(receipt('late', 'completed'))); await drain();
       expect(h.state()).toBe('follow-up · unknown'); expect(h.requests).toHaveLength(1);
     } finally { timer.mockRestore(); }
   });
-  test('session A → B → A drops text and aborts late writes without contaminating the new selection', async () => {
+  test('session A → B → A drops text and lets the sent POST finish without contaminating the new selection', async () => {
     const h = render(); const pending = deferred<Response>(); h.post(() => pending.promise);
     h.submit('old session text'); await settle(() => h.requests.length === 1);
     h.type('unsent draft'); h.rerender({ sessionId: 's-b' }); h.rerender({ sessionId: 's-a' });
-    expect(h.requests[0].signal?.aborted).toBe(true);
+    // Leaving a session is not an identity change: a POST already sent may have reached the daemon, so it is not aborted.
+    expect(h.requests[0].signal?.aborted).toBe(false);
     expect(h.rows()).toHaveLength(0); expect(h.el.querySelector('textarea')?.value).toBe('');
-    pending.resolve(accepted(receipt('old', 'completed'))); await new Promise(resolve => setTimeout(resolve, 30));
+    pending.resolve(accepted(receipt('old', 'completed'))); await drain();
     expect(h.rows()).toHaveLength(0); expect(h.requests).toHaveLength(1);
   });
   for (const change of ['account', 'relay', 'sign-out', 'unmount'] as const) {
@@ -238,8 +254,9 @@ describe('SteerComposer input receipts', () => {
       if (change === 'sign-out') await tokenStore.clearToken();
       if (change === 'unmount') h.unmount();
       else await settle(() => h.rows().length === 0);
-      expect(h.requests[0].signal?.aborted).toBe(true);
-      pending.resolve(accepted(receipt('old', 'completed'))); await new Promise(resolve => setTimeout(resolve, 30));
+      // A new identity aborts the in-flight POST; merely leaving the composer lets it finish.
+      expect(h.requests[0].signal?.aborted).toBe(change !== 'unmount');
+      pending.resolve(accepted(receipt('old', 'completed'))); await drain();
       expect(h.el.textContent).not.toContain('private old text'); expect(h.rows()).toHaveLength(0);
       expect(h.client.getMutationCache().getAll()).toHaveLength(0);
       expect(h.requests).toHaveLength(1);
@@ -253,7 +270,7 @@ describe('SteerComposer input receipts', () => {
     await tokenStore.setToken('synthetic-receipt-account-b'); await settle(() => h.rows().length === 0);
     expect(read.signal?.aborted).toBe(true);
     pending.resolve(Response.json({ inputs: [receipt('input-1', 'completed', 's-a', 300)] }));
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await drain();
     expect(h.client.getQueryData(queryKeys.sessionInputs(oldRevision, 's-a'))).toBeUndefined();
     expect(h.rows()).toHaveLength(0);
   });
@@ -262,8 +279,8 @@ describe('SteerComposer input receipts', () => {
     for (const options of [{ isComposing: true }, { shiftKey: true }]) {
       flushSync(() => h.el.querySelector('textarea')!.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options })));
     }
-    await new Promise(resolve => setTimeout(resolve, 10)); expect(h.requests).toHaveLength(0);
-    h.rerender({ closed: true }); h.submit('closed message'); await new Promise(resolve => setTimeout(resolve, 10));
+    await drain(); expect(h.requests).toHaveLength(0);
+    h.rerender({ closed: true }); h.submit('closed message'); await drain();
     expect(h.requests).toHaveLength(0);
     h.rerender({ closed: false }); h.submit('reopened message'); await settle(() => h.state() === 'follow-up · queued');
     expect(h.requests.filter(request => request.method === 'POST')).toHaveLength(1);

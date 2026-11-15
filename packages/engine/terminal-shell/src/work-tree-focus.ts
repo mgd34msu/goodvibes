@@ -135,8 +135,12 @@ export interface WorkTreeControllerDeps {
   readonly drewLive: () => boolean;
 }
 
-/** Collapse keys the work tree owns (work-tree-model.ts). */
-const FOLD_KEY = /^(turn_\d+|bead_|beadmore_|lane_)/;
+/** Collapse keys the work tree owns (work-tree-model.ts); the one shape rule for live state and the saved sidecar. */
+const FOLD_KEY = /^(turn_\d+|bead_[\w:./-]+|beadmore_[\w:./-]+|lane_[\w:./-]+)$/;
+
+export function isWorkTreeFoldKey(key: string): boolean {
+  return FOLD_KEY.test(key);
+}
 
 /**
  * The work tree's keyboard focus, live repaint tick and fold state, owned by a

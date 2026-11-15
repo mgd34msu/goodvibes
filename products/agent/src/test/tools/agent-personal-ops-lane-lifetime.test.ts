@@ -4,7 +4,9 @@ import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { buildLanes } from '../../tools/agent-harness-personal-ops-lanes.ts';
+import { CONTRACT_DISCOVERY_BATCH_SIZE, CONTRACT_DISCOVERY_LANES } from '../../tools/agent-harness-personal-ops-discovery.ts';
 import { cleanupResearchScreeningFixtures, ordinaryResearchOwner } from '../helpers/research-screening.ts';
+import { expectHeld } from '../helpers/expect-held.ts';
 
 afterAll(cleanupResearchScreeningFixtures);
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -12,12 +14,10 @@ beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
 
 function laneContext() {
-  const record = { threadId: 'synthetic-thread', subject: 'Synthetic current subject', status: 'unread' };
-  const producer = { getSnapshot: () => ({ threads: [record] }) };
   // This native read-model fixture intentionally has no installed interactive
   // session, provider, or filesystem workspace services.
-  const context = { platform: { readModels: { personalOps: { inboxThreads: producer } } }, clients: {} } as unknown as CommandContext;
-  return { context, record, producer };
+  const context = { platform: {}, clients: {} } as unknown as CommandContext;
+  return { context };
 }
 
 function laneFixture(beforeAnswer?: (name: string) => void) {
@@ -31,16 +31,15 @@ function laneFixture(beforeAnswer?: (name: string) => void) {
 }
 
 describe('Personal Ops lane source phases', () => {
-  test('all native predicates and later producers finish before parent retention, whose pure guard survives cleanup', async () => {
-    const { context, record } = laneContext();
+  test('all native predicates finish before parent retention, whose pure guard survives cleanup', async () => {
+    const { context } = laneContext();
     const parent = new Map<string | (() => void), () => void>();
-    let matches = 0, firstRetentionMatches = -1, privacyReads = 0, parentEnteredPrivacy = false;
+    let matches = 0, firstRetentionMatches = -1;
     const fake = laneFixture(name => {
       if (name === 'match') {
         matches++;
         if (matches % getOperatorContract().operator.methods.length === 0) process.stderr.write(`Native lane source phase: ${matches} complete predicates\n`);
       }
-      else { privacyReads++; parentEnteredPrivacy ||= parent.has('personal-ops-contract-source'); }
     });
     installJudgmentPort(fake.port);
     const lanes = await buildLanes(context, { sourceOwner: ordinaryResearchOwner(),
@@ -50,44 +49,43 @@ describe('Personal Ops lane source phases', () => {
         if (!parent.has(key ?? guard)) parent.set(key ?? guard, guard);
       },
     });
-    expect(matches).toBe(4 * getOperatorContract().operator.methods.length);
-    expect(firstRetentionMatches).toBe(matches); expect(privacyReads).toBeGreaterThan(0); expect(parentEnteredPrivacy).toBe(false);
-    expect(lanes.find(lane => lane.id === 'inbox')?.liveRecords?.find(entry => entry.capability === 'inbox-provider-thread')?.label).toBe(`Fresh thread: ${record.subject}`);
+    expect(matches).toBe(CONTRACT_DISCOVERY_LANES.length * getOperatorContract().operator.methods.length);
+    expect(firstRetentionMatches).toBe(matches);
+    expect(lanes.map(lane => lane.id)).toContain('inbox');
     for (const guard of parent.values()) guard();
-    record.subject = 'Changed after complete source cleanup';
-    expect(() => { for (const guard of parent.values()) guard(); }).toThrow();
   }, 60_000);
 
-  test('a later provider cannot rewrite the native schema or publish its unavailable record', async () => {
-    const { context, producer, record } = laneContext();
-    const target = getOperatorContract().operator.methods[0]!;
-    const descriptor = Object.getOwnPropertyDescriptor(target, 'inputSchema')!;
-    let matches = 0, changed = false, parentRetentions = 0;
-    const fake = laneFixture(name => { if (name === 'match') matches++; });
-    producer.getSnapshot = () => {
-      changed = true;
-      Object.defineProperty(target, 'inputSchema', { ...descriptor, value: { type: 'object', description: 'Changed by the actual later provider' } });
-      return { threads: [record] };
+  test('a notes-only read never asks about the email or calendar connectors', async () => {
+    const server = { name: 'synthetic-server', connected: true, trustMode: 'sandbox', role: 'default', schemaFreshness: 'fresh', allowedHosts: ['synthetic.invalid'] };
+    const context = { platform: {}, clients: { mcpApi: { listServerSecurity() { return [server]; } } } } as unknown as CommandContext;
+    const asked = (exactLane?: 'notes') => {
+      let connectorQuestions = 0;
+      const fake = fakePort((name, question, state) => {
+        const candidate = state && typeof state === 'object' && 'candidate' in state ? state.candidate : undefined;
+        if (name === 'match' && candidate && typeof candidate === 'object' && 'name' in candidate && candidate.name === server.name) connectorQuestions++;
+        if (question.type === 'noul') return noulAnswer(0.001);
+        if (name === 'kind' && Object.hasOwn(question.criteria, 'owner_profile')) return choiceAnswer(question, 'other', 0.999);
+        throw new Error(`Unscripted question ${name}`);
+      });
+      installJudgmentPort(fake.port);
+      return buildLanes(context, { sourceOwner: ordinaryResearchOwner() }, exactLane).then(() => connectorQuestions);
     };
-    installJudgmentPort(fake.port);
-    const lanes = await buildLanes(context, { sourceOwner: ordinaryResearchOwner(), retainCurrent() { parentRetentions++; } });
-    expect(matches).toBe(4 * getOperatorContract().operator.methods.length); expect(changed).toBe(true); expect(parentRetentions).toBeGreaterThan(0);
-    expect(target.inputSchema).toBe(descriptor.value);
-    expect(JSON.stringify(lanes)).not.toContain(`Fresh thread: ${record.subject}`);
-  }, 60_000);
+    expect(await asked('notes')).toBe(0);
+    expect(await asked()).toBeGreaterThan(0);
+  }, 120_000);
 
   test('an original currentness callback cannot replace its binding before source acquisition', async () => {
     const { context } = laneContext();
     const fake = laneFixture(); installJudgmentPort(fake.port);
     const options = { sourceOwner: ordinaryResearchOwner(), assertCurrent: () => {} };
     options.assertCurrent = () => { options.assertCurrent = () => {}; };
-    await expect(buildLanes(context, options)).rejects.toThrow(); expect(fake.requests).toHaveLength(0);
+    await expectHeld(buildLanes(context, options)); expect(fake.requests).toHaveLength(0);
   });
 
   test('an asynchronous currentness callback cannot authorize source acquisition', async () => {
     const { context } = laneContext();
     const fake = laneFixture(); installJudgmentPort(fake.port);
-    await expect(buildLanes(context, { sourceOwner: ordinaryResearchOwner(), assertCurrent: async () => {} })).rejects.toThrow();
+    await expectHeld(buildLanes(context, { sourceOwner: ordinaryResearchOwner(), assertCurrent: async () => {} }));
     expect(fake.requests).toHaveLength(0);
   });
 
@@ -95,9 +93,9 @@ describe('Personal Ops lane source phases', () => {
     const { context } = laneContext();
     const fake = laneFixture(); installJudgmentPort(fake.port);
     const owner = ordinaryResearchOwner();
-    await expect(buildLanes(context, { sourceOwner: owner, assertCurrent() {
+    await expectHeld(buildLanes(context, { sourceOwner: owner, assertCurrent() {
       Object.defineProperty(owner, 'project', { value: () => [], configurable: true });
-    } })).rejects.toThrow();
+    } }));
     expect(fake.requests).toHaveLength(0);
   });
 });

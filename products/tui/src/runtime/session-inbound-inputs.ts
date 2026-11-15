@@ -25,8 +25,10 @@
  *
  * Discipline (mirrors SessionSpineClient): every wire call is best-effort and
  * never throws into the render/keystroke path; a failed poll leaves the cursor
- * where it was so the input is retried on the next tick (deliver is the only
- * de-dup, an input already advanced past 'queued' is not returned again).
+ * where it was so the input is retried on the next tick. The cursor never moves
+ * past an input that was not acknowledged (the daemon's `since` filter is
+ * exclusive, so it would never be listed again); an input already injected but
+ * not yet acknowledged is acknowledged on the retry without being injected twice.
  */
 
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -95,6 +97,8 @@ export class SessionInboundInputPoller {
   /** Exclusive createdAt cursor, per session, a session swap resets it. */
   private cursor = 0;
   private cursorSessionId: string | null = null;
+  /** Inputs already handed to onSteer whose delivery ack has not gone through yet. */
+  private readonly injected = new Set<string>();
 
   constructor(options: SessionInboundInputPollerOptions) {
     this.sessionId = options.sessionId;
@@ -156,6 +160,7 @@ export class SessionInboundInputPoller {
     if (sessionId !== this.cursorSessionId) {
       this.cursor = 0;
       this.cursorSessionId = sessionId;
+      this.injected.clear();
     }
 
     this.polling = true;
@@ -163,40 +168,58 @@ export class SessionInboundInputPoller {
     try {
       const result = await client.listInputs(sessionId, { state: 'queued', since: this.cursor });
       const inputs = result?.inputs ?? [];
+      // The cursor advances across a contiguous prefix of inputs that are done
+      // (acknowledged, or not ours to deliver). After the first failure it holds,
+      // so the failed input is listed again on the next tick.
+      let cursorHeld = false;
+      // `since` is exclusive and createdAt has millisecond resolution, so stop one
+      // short of an input's own timestamp: a later input sharing that millisecond
+      // that failed would otherwise be filtered out and never listed again.
+      const settle = (createdAt: number): void => {
+        if (!cursorHeld && createdAt - 1 > this.cursor) this.cursor = createdAt - 1;
+      };
       for (const input of inputs) {
-        // Advance the cursor across every queued input we observe (even skipped
-        // ones) so it is monotonic; deliver() is the real de-dup for injected ones.
-        if (input.createdAt > this.cursor) this.cursor = input.createdAt;
+        if (input.state !== 'queued'
+          || (input.intent !== 'steer' && input.intent !== 'follow-up')
+          // Never re-inject this surface's OWN submissions.
+          || input.surfaceId === this.ownSurfaceId) {
+          settle(input.createdAt);
+          continue;
+        }
 
-        if (input.state !== 'queued') continue;
-        if (input.intent !== 'steer' && input.intent !== 'follow-up') continue;
-        // Never re-inject this surface's OWN submissions.
-        if (input.surfaceId === this.ownSurfaceId) continue;
-
-        const steer: InboundSteer = {
-          inputId: input.id,
-          sessionId,
-          intent: input.intent,
-          body: input.body,
-          surfaceKind: input.surfaceKind,
-          surfaceId: input.surfaceId,
-          displayName: input.displayName,
-        };
-        try {
-          this.onSteer(steer);
-        } catch (error) {
-          // A failing injection must not wedge the poll loop or drop the ack,
-          // narrate-and-continue; the input is still acked so it is not re-picked.
-          this.log.debug('session inbound steer injection threw; continuing', {
-            error: error instanceof Error ? error.message : String(error),
-          });
+        if (!this.injected.has(input.id)) {
+          const steer: InboundSteer = {
+            inputId: input.id,
+            sessionId,
+            intent: input.intent,
+            body: input.body,
+            surfaceKind: input.surfaceKind,
+            surfaceId: input.surfaceId,
+            displayName: input.displayName,
+          };
+          try {
+            this.onSteer(steer);
+            this.injected.add(input.id);
+          } catch (error) {
+            // Not injected, so not acknowledged: the sending surface must not be
+            // told a steer was delivered that never reached the turn. It is
+            // retried on the next tick, and the loop carries on with the rest.
+            cursorHeld = true;
+            this.log.debug('session inbound steer injection threw; not acknowledged, will retry', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+          }
         }
         try {
           // consumed:false → queued → delivered (surface has collected it).
           await client.deliverInput(sessionId, input.id, { consumed: false });
+          this.injected.delete(input.id);
           delivered += 1;
+          settle(input.createdAt);
         } catch (error) {
-          this.log.debug('session inbound deliver ack failed; will retry', {
+          cursorHeld = true;
+          this.log.debug('session inbound deliver ack failed; will retry the acknowledgement', {
             error: error instanceof Error ? error.message : String(error),
           });
         }

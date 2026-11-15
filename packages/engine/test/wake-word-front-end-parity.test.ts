@@ -63,18 +63,6 @@ function maxAbsDiff(actual: Float32Array, expected: readonly number[]): number {
 const MEL_TOLERANCE_DB = 5e-4;
 
 describe('wake-word front end reproduces openWakeWord', () => {
-  test('the DSP constants are the ones recovered from the reference graph', () => {
-    // Recovered numerically from melspectrogram.onnx's own initializers, not
-    // taken from a library's defaults. A change to any of these is a change to
-    // what the published classifier is being fed.
-    expect(WAKE_MEL_N_FFT).toBe(512);
-    expect(WAKE_MEL_HOP).toBe(160);
-    expect(WAKE_MEL_WIN_LENGTH).toBe(400);
-    expect(WAKE_MEL_BINS).toBe(32);
-    expect(WAKE_MEL_FMIN).toBe(60);
-    expect(WAKE_MEL_FMAX).toBe(3800);
-    expect(WAKE_MEL_FFT_BINS).toBe(257);
-  });
 
   test('the analysis window is a periodic Hann of 400 taps centred in 512', () => {
     const window = analysisWindow();

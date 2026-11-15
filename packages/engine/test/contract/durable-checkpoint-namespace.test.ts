@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';

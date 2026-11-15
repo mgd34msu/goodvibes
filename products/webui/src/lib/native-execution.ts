@@ -14,6 +14,7 @@ import type {
   NativeExecutionBrowserRecord,
 } from "./native-execution-journal";
 import { errorCode } from "./errors";
+import { exclusiveOperation } from "./exclusive-operation";
 
 export type NativeExecutionObservation =
   | { kind: "not-requested" }
@@ -149,6 +150,20 @@ export function createNativeIntakeExecution(options: {
   ): Promise<NativeExecutionObservation> {
     // Detach before the first asynchronous journal or network boundary.
     const original = structuredClone(record);
+    if (action === "inspect") return perform(action, original, signal);
+    // Status-then-start reads "absent" and then sends: two tabs, or a double click, must
+    // not both act on the same absence.
+    const { endpoint, projectId, principalId, transport } = options.binding;
+    return exclusiveOperation(
+      JSON.stringify(["goodvibes.native-execution", endpoint, projectId, principalId, transport, original.command.inputId]),
+      () => perform(action, original, signal)
+    );
+  }
+  async function perform(
+    action: "inspect" | "request" | "resume" | "cancel",
+    original: NativeIntakeBrowserRecord,
+    signal?: AbortSignal
+  ): Promise<NativeExecutionObservation> {
     const saved = await target(original, signal);
     if (!saved) return { kind: "not-requested" };
     if (action === "inspect") return status(saved, signal);

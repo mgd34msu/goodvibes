@@ -1,12 +1,13 @@
 import { assertCapturedToolAccessCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, extname, join, relative } from 'node:path';
-import { walk, safeRead, scanRead, resolvePath } from './shared.js';
+import { dirname, extname, isAbsolute, join, relative } from 'node:path';
+import { safeRead, scanRead, resolvePath, SKIPPED_DIRS } from './shared.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { declaredTestRunner } from '../../utils/project-test-runner.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { entryPointView, projectTooling } from '../batteries/project-tooling.js';
-import { inspectApi } from './project-routes.js';
+import { inspectApi, walkSourceFiles } from './project-routes.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import type {
   ApiFramework,
@@ -52,21 +53,6 @@ type PackageManager = Exclude<ProjectInfo['packageManager'], 'none'>;
 const isPackageManager = (value: string): value is PackageManager =>
   value === 'npm' || value === 'bun' || value === 'yarn' || value === 'pnpm';
 
-/** Folders that hold dependencies or build output rather than the project's own source. */
-const SKIPPED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'target',
-  'dist',
-  'build',
-  'vendor',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.next',
-  'out',
-  'coverage',
-]);
 /** Count source files across the complete project tree. */
 function countSourceFiles(root: string): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -140,9 +126,11 @@ async function readDecisionEntryPoints(root: string, scripts: Record<string, str
       return [];
     }
   };
+  // package.json is repository content: a script token that climbs out of the project (or is absolute)
+  // is not a project file and is never read.
   const named = Object.values(scripts).flatMap((script) =>
     script.split(/\s+/).map((token) => token.replace(/^['"]|['"]$/g, '').replace(/^\.\//, '')),
-  );
+  ).filter((token) => !isAbsolute(token) && !token.split(/[\\/]/).includes('..'));
   const candidates = [...new Set([...listed(''), ...listed('src'), ...named])].filter(
     (file) => SCRIPT_FILE.test(file) && isFile(file),
   );
@@ -263,6 +251,9 @@ async function detectProjectUnderPolicy(root: string): Promise<ProjectInfo> {
     }
   }
 
+  // Workspaces are declared in package.json (npm, yarn, bun) or in the package manager's own file (pnpm, lerna, nx).
+  if (!isMonorepo) isMonorepo = has('pnpm-workspace.yaml') || has('lerna.json') || has('nx.json');
+
   const hasTypeScript = has('tsconfig.json') || has('tsconfig.base.json');
   const entryPoints = declaredEntries.length > 0 ? declaredEntries : await readEntryPoints(root, scripts);
 
@@ -299,29 +290,62 @@ function parseModelFields(body: string, modelNames: ReadonlySet<string>): DbFiel
   return fields;
 }
 
+/**
+ * The `keyword Name { body }` blocks of a Prisma schema. The body ends at the matching brace, so a
+ * brace inside a quoted default (`@default("{}")`) or a `//` comment does not end it early. A string
+ * does not run past its line. A block that never closes is named in `unterminated`.
+ */
+function schemaBlocks(content: string, keyword: 'model' | 'enum', unterminated: string[] = []): Array<{ name: string; body: string }> {
+  const blocks: Array<{ name: string; body: string }> = [];
+  const open = new RegExp(`^${keyword}\\s+(\\w+)\\s*\\{`, 'gm');
+  let m: RegExpExecArray | null;
+  while ((m = open.exec(content)) !== null) {
+    let depth = 1;
+    let inString = false;
+    let i = open.lastIndex;
+    for (; i < content.length && depth > 0; i++) {
+      const ch = content[i]!;
+      if (inString) {
+        if (ch === '\\') i++;
+        else if (ch === '"' || ch === '\n') inString = false;
+      } else if (ch === '"') inString = true;
+      else if (ch === '/' && content[i + 1] === '/') {
+        while (i < content.length && content[i] !== '\n') i++;
+      } else if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+    }
+    if (depth !== 0) { unterminated.push(`${keyword} ${m[1]}`); break; } // nothing after an unclosed block can be trusted
+    blocks.push({ name: m[1]!, body: content.slice(open.lastIndex, i - 1) });
+    open.lastIndex = i;
+  }
+  return blocks;
+}
+
 export function parsePrismaSchema(content: string): DatabaseInfo {
   const models: DbModel[] = [];
   const enums: DbEnum[] = [];
 
-  const MODEL_RE = /^model\s+(\w+)\s*\{([^}]*)\}/gm;
-  const declared = [...content.matchAll(MODEL_RE)];
-  const modelNames = new Set(declared.map((match) => match[1]!));
-  for (const match of declared) {
-    models.push({ name: match[1]!, fields: parseModelFields(match[2]!, modelNames) });
+  const unterminated: string[] = [];
+  const declared = schemaBlocks(content, 'model', unterminated);
+  const modelNames = new Set(declared.map((block) => block.name));
+  for (const block of declared) {
+    models.push({ name: block.name, fields: parseModelFields(block.body, modelNames) });
   }
-  let m: RegExpExecArray | null;
 
-  const ENUM_RE = /^enum\s+(\w+)\s*\{([^}]*)\}/gm;
-  while ((m = ENUM_RE.exec(content)) !== null) {
-    const values = m[2]!
+  for (const block of schemaBlocks(content, 'enum', unterminated)) {
+    const values = block.body
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('//'))
       .filter((l) => /^\w+$/.test(l));
-    enums.push({ name: m[1]!, values });
+    enums.push({ name: block.name, values });
   }
 
-  return { models, enums };
+  return {
+    models,
+    enums,
+    ...(unterminated.length > 0 ? { warning: `The block(s) ${unterminated.join(', ')} never close with a matching brace; the blocks after them were not read.` } : {}),
+  };
 }
 
 function normalizeScaffoldModuleName(moduleName: string): { kebab: string; pascal: string } {
@@ -364,11 +388,23 @@ export async function buildScaffold(moduleName: string, projectRoot: string, dry
   ];
 
   if (!dryRun) {
+    // A scaffold only creates: an existing module file is never replaced.
+    const existing = files.filter((f) => existsSync(resolvePath(projectRoot, f.path))).map((f) => f.path);
+    if (existing.length > 0) {
+      throw new Error(`scaffold refused: ${existing.join(', ')} already exist(s); nothing was written. Choose another moduleName or edit the existing files.`);
+    }
+    const written: string[] = [];
     for (const f of files) {
       const absPath = resolvePath(projectRoot, f.path);
-      await assertCapturedToolReadAccess(absPath);
-      mkdirSync(dirname(absPath), { recursive: true });
-      writeFileSync(absPath, f.content, 'utf-8');
+      try {
+        await assertCapturedToolReadAccess(absPath);
+        mkdirSync(dirname(absPath), { recursive: true });
+        writeFileSync(absPath, f.content, { encoding: 'utf-8', flag: 'wx' });
+      } catch (error) {
+        const done = written.length > 0 ? `; already written: ${written.join(', ')}` : '; nothing was written';
+        throw new Error(`scaffold stopped at ${f.path}: ${summarizeError(error)}${done}`);
+      }
+      written.push(f.path);
     }
   }
 
@@ -418,59 +454,70 @@ export function validateApiSpec(specContent: string, routes: ApiRoute[]): ApiVal
   try {
     specObj = JSON.parse(specContent);
   } catch {
-    throw new Error('specPath must be a valid JSON OpenAPI spec file');
+    throw new Error('The spec file is not valid JSON. Only JSON OpenAPI files are read; convert a YAML spec to JSON first.');
   }
 
+  // Parameter names do not distinguish routes (`/users/{id}` and `/users/:userId` are one route),
+  // the same rule api_sync applies, so both sides compare on the normalised path.
   const specPaths = (specObj.paths ?? {}) as Record<string, Record<string, unknown>>;
-  const specRouteMap = new Map<string, Set<string>>();
+  const specRouteMap = new Map<string, { path: string; methods: Set<string> }>();
   for (const [rawPath, pathItem] of Object.entries(specPaths)) {
-    const normalPath = rawPath.replace(/\{([^}]+)\}/g, ':$1');
     const methods = new Set(
       Object.keys(pathItem)
         .filter((k) => ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'].includes(k))
         .map((m) => m.toUpperCase()),
     );
-    specRouteMap.set(normalPath, methods);
+    const key = normalizeUrlForMatch(rawPath);
+    const existing = specRouteMap.get(key);
+    if (existing) for (const m of methods) existing.methods.add(m);
+    else specRouteMap.set(key, { path: rawPath, methods });
   }
 
-  const codeRouteMap = new Map<string, Set<string>>();
+  const codeRouteMap = new Map<string, { path: string; methods: Set<string> }>();
   for (const route of routes) {
-    const methods = codeRouteMap.get(route.path) ?? new Set<string>();
-    methods.add(route.method);
-    codeRouteMap.set(route.path, methods);
+    const key = normalizeUrlForMatch(route.path);
+    const entry = codeRouteMap.get(key) ?? { path: route.path, methods: new Set<string>() };
+    entry.methods.add(route.method);
+    codeRouteMap.set(key, entry);
   }
 
   const missing_from_spec: string[] = [];
   const missing_from_code: string[] = [];
   const mismatched_methods: ApiValidateResult['mismatched_methods'] = [];
 
-  for (const [path, codeMethods] of codeRouteMap) {
-    const specMethods = specRouteMap.get(path);
-    if (!specMethods) {
-      for (const m of codeMethods) {
-        missing_from_spec.push(`${m} ${path}`);
+  for (const [key, code] of codeRouteMap) {
+    const spec = specRouteMap.get(key);
+    if (!spec) {
+      for (const m of code.methods) {
+        missing_from_spec.push(`${m} ${code.path}`);
       }
     } else {
-      const specArr = [...specMethods];
-      const codeArr = [...codeMethods];
-      const onlyInSpec = specArr.filter((m) => !codeMethods.has(m));
-      const onlyInCode = codeArr.filter((m) => !specMethods.has(m));
+      const specArr = [...spec.methods];
+      const codeArr = [...code.methods];
+      const onlyInSpec = specArr.filter((m) => !code.methods.has(m));
+      const onlyInCode = codeArr.filter((m) => !spec.methods.has(m));
       if (onlyInSpec.length || onlyInCode.length) {
-        mismatched_methods.push({ path, spec_methods: specArr, code_methods: codeArr });
+        mismatched_methods.push({ path: code.path, spec_methods: specArr, code_methods: codeArr });
       }
     }
   }
 
-  for (const [path, specMethods] of specRouteMap) {
-    if (!codeRouteMap.has(path)) {
-      for (const m of specMethods) {
-        missing_from_code.push(`${m} ${path}`);
+  for (const [key, spec] of specRouteMap) {
+    if (!codeRouteMap.has(key)) {
+      for (const m of spec.methods) {
+        missing_from_code.push(`${m} ${spec.path}`);
       }
     }
   }
 
   const valid = missing_from_spec.length === 0 && missing_from_code.length === 0 && mismatched_methods.length === 0;
-  return { valid, missing_from_spec, missing_from_code, mismatched_methods };
+  return {
+    valid,
+    missing_from_spec,
+    missing_from_code,
+    mismatched_methods,
+    note: 'Routes are compared as written: a mount prefix (an Express router mounted at /api, a spec `servers` base path) is not resolved.',
+  };
 }
 
 function normalizeUrlForMatch(url: string): string {
@@ -487,11 +534,11 @@ function normalizeUrlForMatch(url: string): string {
  * standard a path resolves only against a document's base URL, so such a
  * call is client code wherever the file sits; the whole project is scanned.
  */
-async function findFetchCalls(root: string, unavailable: string[]): Promise<FetchCall[]> {
+async function findFetchCalls(root: string, files: readonly string[], unavailable: string[], current?: () => void): Promise<FetchCall[]> {
   const calls: FetchCall[] = [];
   const FETCH_RE = /fetch\(\s*[`'"](\/[^`'"?#]*)[`'"]/g;
-  const files = await walk(root, (p) => /\.[tj]sx?$/.test(p));
   for (const file of files) {
+    current?.();
     const relFile = relative(root, file);
     (await scanRead(file, unavailable)).split('\n').forEach((line, i) => {
       for (const m of line.matchAll(FETCH_RE)) calls.push({ url: m[1]!, file: relFile, line: i + 1 });
@@ -500,9 +547,11 @@ async function findFetchCalls(root: string, unavailable: string[]): Promise<Fetc
   return calls;
 }
 
-export async function inspectApiSync(root: string, framework: ApiFramework): Promise<ApiSyncResult> {
+export async function inspectApiSync(root: string, framework: ApiFramework, current?: () => void): Promise<ApiSyncResult> {
   const unavailable: string[] = [];
-  const [routes, fetchCalls] = await Promise.all([inspectApi(root, framework, unavailable), findFetchCalls(root, unavailable)]);
+  const notes: string[] = [];
+  const files = await walkSourceFiles(root, notes, current);
+  const [routes, fetchCalls] = await Promise.all([inspectApi(root, framework, unavailable, notes, current, files), findFetchCalls(root, files, unavailable, current)]);
 
   const normalizedRoutes = routes.map((r) => ({
     ...r,
@@ -528,5 +577,5 @@ export async function inspectApiSync(root: string, framework: ApiFramework): Pro
 
   const drift_detected = unmatched_fetches.length > 0;
 
-  return { ...(unavailable.length ? { unavailable_files: [...new Set(unavailable)].sort() } : {}), fetch_calls: fetchCalls, unmatched_fetches, unmatched_routes, drift_detected };
+  return { ...(unavailable.length ? { unavailable_files: [...new Set(unavailable)].sort() } : {}), ...(notes.length ? { warnings: [...new Set(notes)] } : {}), fetch_calls: fetchCalls, unmatched_fetches, unmatched_routes, drift_detected };
 }

@@ -4,7 +4,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { AgentResearchRunRegistry, researchRunStorePath } from '../agent/research-run-registry.ts';
-import { AgentResearchSourceRegistry, researchSourceStorePath } from '../agent/research-source-registry.ts';
+import { AgentResearchSourceRegistry, researchSourceStorePath, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -118,14 +118,37 @@ export async function withCapturedResearchCatalog<A, D, R>(context: CommandConte
   return withCapturedNativeCatalog(caller, paths, read, consume);
 }
 
+/** Quotes one route argument in the key:"value" form every research route uses. */
+export function researchRouteString(value: string): string {
+  return JSON.stringify(value);
+}
+
+/** How urgently a source needs attention; the queue and the briefing rank sources with this one rule. */
+export function researchSourcePriority(source: AgentResearchSourceRecord): number {
+  if (source.status === 'candidate') return 90;
+  if (source.status === 'reviewed') return 84 + Math.min(10, Math.round(source.score / 10));
+  if (source.status === 'used') return 54;
+  return 24;
+}
+
+/** The checkpoint call a run advertises, spelled once so each catalog offers the same one. */
+export function researchCheckpointRoute(runId: string, progress: number): string {
+  return `research action:"checkpoint" id:${researchRouteString(runId)} phase:"reading" progress:${Math.max(progress, 25)} note:"..." sourceIds:["..."]`;
+}
+
 /** Unknown or held candidates cannot become an inclusion decision. */
 export async function rankResearchRecords<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
   options: CatalogRankingOptions, site: string, decisionName = 'engine.tools.registry-rank'): Promise<readonly T[]> {
   if (!query) { options.assertCurrent?.(); return entries; }
   const ids: string[] = [];
+  const seen = new Map<string, number>();
   const result = await rankHarnessCatalog(entries, query, entry => {
-    options.assertCurrent?.(); const description = describe(entry); ids.push(description.id); options.assertCurrent?.(); return description;
+    options.assertCurrent?.(); const description = describe(entry);
+    // A repeated or empty id would map every match back to the first entry, so later ones carry their position.
+    const count = seen.get(description.id) ?? 0; seen.set(description.id, count + 1);
+    const id = count === 0 && description.id ? description.id : `${description.id || 'item'}#${ids.length}`;
+    ids.push(id); options.assertCurrent?.(); return { ...description, id };
   }, site, { ...options, requirePreservedSource: true }, decisionName);
   options.assertCurrent?.();
   if (result.judgments.some(judgment => judgment?.reading.outcome !== 'act' || judgment?.reading.verdict === 'uncertain')) throw new ToolInputProjectionError('held');

@@ -6,11 +6,12 @@
  * relay server. These cases cover what is unit-testable without one: the route store's
  * pub/sub, routedFetch falling through to the plain fetch on the direct route (the
  * common, unchanged case), and that a stream request over relay is NO LONGER rejected,
- * the relay tunnel now carries event streams, so a stream request routes like any other
- * (falling through to the plain fetch when no pairing is stored). A real tunnelled stream
- * belongs to an integration test against a real or stubbed relay server.
+ * the relay tunnel now carries event streams, so with a stored pairing a stream request is
+ * handed to the relay client like any other (and falls through to the plain fetch when no
+ * pairing is stored). A real tunnelled stream belongs to an integration test against a real
+ * or stubbed relay server.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   closeRelayClient,
   getActiveRoute,
@@ -77,10 +78,8 @@ describe('routedFetch', () => {
     }
   });
 
-  test('no longer rejects an event-stream request over relay; it routes like any other call', async () => {
-    // The relay tunnel now carries event streams, so the old immediate rejection is gone.
-    // With no pairing stored there is no relay client, so the request falls through to the
-    // global fetch (proving it is NOT special-cased into a rejection anymore).
+  test('an event-stream request over relay with no stored pairing falls through to the global fetch', async () => {
+    // Without a pairing there is no relay client, so this pins only the fallback, not relay stream handling.
     setActiveRoute('relay');
     let sawUrl: unknown;
     const originalFetch = globalThis.fetch;
@@ -96,6 +95,35 @@ describe('routedFetch', () => {
       expect(res.status).toBe(200);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('an event-stream request over relay with a stored pairing is handed to the relay client, not the global fetch', async () => {
+    storeRelayPairing({ protocol: 1, relayUrl: 'wss://relay.example.test', rid: 'rid-1', daemonPublicKey: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc' });
+    setActiveRoute('relay');
+    const relayClient = getRelayClient();
+    if (relayClient === null) throw new Error('A stored pairing must yield a relay client');
+    const relayCalls: { url: string; accept: string | null }[] = [];
+    spyOn(relayClient, 'fetch').mockImplementation((input, init) => {
+      relayCalls.push({ url: String(input), accept: new Headers(init?.headers).get('accept') });
+      return Promise.resolve(new Response('event: ping\n\n', { headers: { 'content-type': 'text/event-stream' } }));
+    });
+    let directCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = stubFetch(() => {
+      directCalls += 1;
+      return Promise.resolve(new Response('direct'));
+    });
+    try {
+      const res = await routedFetch('https://daemon.example/api/control-plane/events', {
+        headers: { Accept: 'text/event-stream' },
+      });
+      expect(res.headers.get('content-type')).toBe('text/event-stream');
+      expect(relayCalls).toEqual([{ url: 'https://daemon.example/api/control-plane/events', accept: 'text/event-stream' }]);
+      expect(directCalls).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      closeRelayClient();
     }
   });
 

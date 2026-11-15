@@ -9,7 +9,7 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as crypto from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -96,7 +96,7 @@ describe('managed path resolution + status', () => {
     writeFileSync(paths.defaultVoiceOnnx, 'model');
     const tts = resolveManagedEngine('tts', dir);
     expect(tts).toEqual({ engine: 'piper', binary: paths.piperBinary, modelPath: paths.defaultVoiceOnnx });
-    expect(resolveManagedEngine('stt', dir)).toBeNull(); // STT is never managed (whisper unsupported)
+    expect(resolveManagedEngine('stt', dir)).toBeNull(); // only piper was installed here; STT resolves only from a managed whisper install
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -337,25 +337,68 @@ describe('provisioning failure handling', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('status verification reuses one result only for the same file revision and expected pin', async () => {
+  test('status verification hashes once per file revision and expected pin', async () => {
     const dir = scratch();
     const { fileMatchesCached } = await import('../platform/src/platform/voice/provisioning/index.ts');
     const file = join(dir, 'model.onnx');
-    const bytes = new Uint8Array(1024 * 1024);
+    const bytes = new Uint8Array(1024);
     bytes[0] = 0x08;
     writeFileSync(file, bytes);
     const spec = { url: 'u', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
-    const t0 = performance.now();
-    expect(fileMatchesCached(file, spec)).toBe(true); // first call hashes
-    const firstMs = performance.now() - t0;
-    const t1 = performance.now();
-    for (let i = 0; i < 200; i++) expect(fileMatchesCached(file, spec)).toBe(true);
-    const cachedMsPer = (performance.now() - t1) / 200;
-    expect(cachedMsPer).toBeLessThan(Math.max(0.5, firstMs)); // cached polls are stat-only
-    expect(fileMatchesCached(file, { ...spec, sha256: '0'.repeat(64) })).toBe(false);
-    expect(fileMatchesCached(file, spec)).toBe(true);
-    expect(fileMatchesCached(file, { ...spec, bytes: spec.bytes + 1 })).toBe(false);
-    expect(fileMatchesCached(file, spec)).toBe(true);
+    const hash = spyOn(crypto, 'createHash');
+    try {
+      expect(fileMatchesCached(file, spec)).toBe(true); // first call hashes
+      expect(hash).toHaveBeenCalledTimes(1);
+      for (let i = 0; i < 20; i++) expect(fileMatchesCached(file, spec)).toBe(true);
+      expect(hash).toHaveBeenCalledTimes(1); // repeated polls are stat-only
+      // A different expected pin or size is a different question: re-verified, and answered correctly.
+      expect(fileMatchesCached(file, { ...spec, sha256: '0'.repeat(64) })).toBe(false);
+      expect(hash).toHaveBeenCalledTimes(2);
+      expect(fileMatchesCached(file, spec)).toBe(true);
+      expect(fileMatchesCached(file, { ...spec, bytes: spec.bytes + 1 })).toBe(false);
+      expect(fileMatchesCached(file, spec)).toBe(true);
+      // A rewrite with the same size but different content is a new revision, never the cached answer.
+      const hashesBefore = hash.mock.calls.length;
+      const rewritten = new Uint8Array(bytes.length);
+      rewritten[0] = 0x09;
+      writeFileSync(file, rewritten);
+      expect(fileMatchesCached(file, spec)).toBe(false);
+      expect(hash.mock.calls.length).toBeGreaterThan(hashesBefore);
+    } finally { hash.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('a stray aside or extract tree from a killed install is removed, and the install still completes', async () => {
+    const dir = scratch();
+    const paths = resolveManagedVoicePaths(dir, 'linux-x64');
+    // What a kill between the two renames of the swap leaves: no tree at the final path, an aside copy and a temp tree.
+    mkdirSync(join(paths.enginesDir, 'piper.old'), { recursive: true });
+    mkdirSync(join(paths.enginesDir, '.extract-killed', 'piper'), { recursive: true });
+    const v1 = fixtureManifests('binary-v1', 'v1');
+    const result = await provisionLocalVoiceRuntime({ managedRoot: dir, platform: 'linux-x64', engineOverride: v1.engine, voiceOverride: v1.voice, fetchImpl: v1.fetchImpl, extractArchive: fakeExtractor() });
+    expect(result.tts.state).toBe('provisioned');
+    expect(readdirSync(paths.enginesDir).filter((name) => name.startsWith('.extract-') || name.includes('.old'))).toEqual([]);
+    expect(readFileSync(paths.piperBinary, 'utf-8')).toBe('binary-v1');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('two installs into one managed root run one after the other and both finish provisioned', async () => {
+    const dir = scratch();
+    const paths = resolveManagedVoicePaths(dir, 'linux-x64');
+    const v1 = fixtureManifests('binary-v1', 'v1');
+    let active = 0, maxActive = 0, extractions = 0;
+    const extractor = async (archivePath: string, destDir: string): Promise<void> => {
+      active++; extractions++; maxActive = Math.max(maxActive, active);
+      try {
+        for (let i = 0; i < 3; i++) await new Promise<void>((resolve) => setImmediate(resolve)); // lets a second install interleave if nothing serialises them
+        await fakeExtractor()(archivePath, destDir);
+      } finally { active--; }
+    };
+    const run = () => provisionLocalVoiceRuntime({ managedRoot: dir, platform: 'linux-x64', engineOverride: v1.engine, voiceOverride: v1.voice, fetchImpl: v1.fetchImpl, extractArchive: extractor });
+    const results = await Promise.all([run(), run()]);
+    expect(results.map((result) => result.tts.state)).toEqual(['provisioned', 'provisioned']);
+    expect(maxActive).toBe(1);
+    expect(readdirSync(paths.enginesDir).filter((name) => name.startsWith('.extract-') || name.includes('.old'))).toEqual([]);
+    expect(readFileSync(paths.piperBinary, 'utf-8')).toBe('binary-v1');
     rmSync(dir, { recursive: true, force: true });
   });
 });

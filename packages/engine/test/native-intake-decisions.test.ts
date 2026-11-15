@@ -228,34 +228,24 @@ test('missing recorder or mismatched log lineage fails closed', async () => {
   await expect(readNativeIntakeRoute(read)).rejects.toMatchObject({ kind: 'unrecorded' });
 });
 
-for (const copied of [false, true]) test(`intake reuses only the actual recorded input commitment (copy=${copied})`, async () => {
+for (const copied of [false, true]) test(`intake accepts the actual recorded input, including a copied result (copy=${copied})`, async () => {
   using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
   const selected: JudgmentPort = copied ? { ...recorded, async ask(request) { return { ...await recorded.ask(request) }; } } : recorded;
-  const hash = spyOn(Bun.CryptoHasher, 'hash');
-  try {
-    const route = await readNativeIntakeRoute(input(selected, log)); expect(route.route).toBe('contract');
-    expect(fake.requests).toHaveLength(1); expect(log.get(route.decisionId)?.status).toBe('answered');
-    // One actual recorder input hash; only a copied result needs one extra
-    // independent forwarded-input comparison to the real saved log row.
-    expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(copied ? 2 : 1);
-  } finally { hash.mockRestore(); }
+  const route = await readNativeIntakeRoute(input(selected, log)); expect(route.route).toBe('contract');
+  expect(fake.requests).toHaveLength(1); expect(log.get(route.decisionId)?.status).toBe('answered');
 });
 
-test('an absent borrowed decision ID has no fallback state-commitment consumer', async () => {
+test('an absent borrowed decision ID is refused as unrecorded', async () => {
   using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
   const port: JudgmentPort = { ...recorded, ask: request => fake.port.ask(request) };
   let assertions = 0;
-  const hashing = spyOn(Bun.CryptoHasher, 'hash');
-  try {
-    await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; } })).rejects.toMatchObject({ kind: 'unrecorded' });
-    expect(fake.requests).toHaveLength(1); expect(log.query()).toHaveLength(0);
-    expect(assertions).toBeGreaterThan(1);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-  } finally { hashing.mockRestore(); }
+  await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; } })).rejects.toMatchObject({ kind: 'unrecorded' });
+  expect(fake.requests).toHaveLength(1); expect(log.query()).toHaveLength(0);
+  expect(assertions).toBeGreaterThan(1);
 });
 
 for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-absent', 'hash-shape', 'context', 'context-absent', 'questions', 'answers', 'state'] as const) {
-  test(`a present borrowed ID with ${mode} recorded provenance avoids an impossible fallback comparison`, async () => {
+  test(`a present borrowed ID with ${mode} recorded provenance is refused as unrecorded`, async () => {
     using log = new SqliteDecisionLog(':memory:'); const seedFake = answers(), recorded = withDecisionLog(seedFake.port, log);
     const seeded = await readNativeIntakeRoute(input(recorded, log));
     const seed = log.get(seeded.decisionId);
@@ -276,15 +266,9 @@ for (const mode of ['absent', 'failed', 'id', 'id-number', 'id-empty', 'hash-abs
         : { ...seedWithoutHash, ...common, answers: mode === 'answers' ? {} : JSON.parse(canonicalJson(raw.answers as unknown as import('@goodvibes-jev/judgment').EntryType)) as typeof seed.answers };
       return { ...raw, decisionId: mode === 'id-number' ? 42 : mode === 'id-empty' ? '' : seed.id } as never;
     } };
-    const hashing = spyOn(Bun.CryptoHasher, 'hash');
-    try {
-      await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; },
-        decisionLog: { get() { reads++; return candidate; } } })).rejects.toMatchObject({ kind: 'unrecorded' });
-      expect(fake.requests).toHaveLength(1); expect(reads).toBe(mode === 'id-number' || mode === 'id-empty' ? 0 : 1); expect(assertions).toBeGreaterThan(1);
-      // Only the last case has a real possible consumer: its independent state
-      // binding must still be computed and rejected, rather than blindly trusted.
-      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(mode === 'state' ? 1 : 0);
-    } finally { hashing.mockRestore(); }
+    await expect(readNativeIntakeRoute({ ...input(port, log), assertCurrent() { assertions++; },
+      decisionLog: { get() { reads++; return candidate; } } })).rejects.toMatchObject({ kind: 'unrecorded' });
+    expect(fake.requests).toHaveLength(1); expect(reads).toBe(mode === 'id-number' || mode === 'id-empty' ? 0 : 1); expect(assertions).toBeGreaterThan(1);
   });
 }
 
@@ -304,17 +288,13 @@ for (const mode of ['returned', 'thrown', 'typed-error'] as const) test(`native 
   expect(fake.requests).toHaveLength(0); expect(log.query()).toHaveLength(0);
 });
 
-test('a duplicate borrowed decision ID refuses before computing a discarded fallback commitment', async () => {
+test('a duplicate borrowed decision ID is refused as unrecorded', async () => {
   using log = new SqliteDecisionLog(':memory:'); const fake = answers(), recorded = withDecisionLog(fake.port, log);
   const routeEvidence = await readNativeIntakeRoute(input(recorded, log));
   const port: JudgmentPort = { ...recorded, async ask(request) { return { ...await fake.port.ask(request), decisionId: routeEvidence.decisionId }; } };
-  const hashing = spyOn(Bun.CryptoHasher, 'hash');
-  try {
-    await expect(decideNativeIntake({ ...input(port, log), routeEvidence, requirements: requirements(), allowAct: true,
-      continuations: [repair], conditions: [] })).rejects.toMatchObject({ kind: 'unrecorded' });
-    expect(fake.requests).toHaveLength(2); expect(log.query()).toHaveLength(1);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
-  } finally { hashing.mockRestore(); }
+  await expect(decideNativeIntake({ ...input(port, log), routeEvidence, requirements: requirements(), allowAct: true,
+    continuations: [repair], conditions: [] })).rejects.toMatchObject({ kind: 'unrecorded' });
+  expect(fake.requests).toHaveLength(2); expect(log.query()).toHaveLength(1);
 });
 
 test('a custom port cannot mutate the original source before its recorded-input comparison', async () => {

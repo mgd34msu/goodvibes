@@ -62,7 +62,7 @@ describe('clientMayReceiveEventDomain: the migration-safe default', () => {
     expect(clientMayReceiveEventDomain(narrow, 'brand-new-untagged-event')).toBe(true);
   });
 
-  test('EVENT_DOMAIN tags session-update→session and approval-update→permissions', () => {
+  test('EVENT_DOMAIN tags session-update→session and approval-update→gate', () => {
     expect(EVENT_DOMAIN['session-update']).toBe('session');
     expect(EVENT_DOMAIN['approval-update']).toBe('gate');
   });
@@ -111,14 +111,14 @@ describe('publishEvent: domain-scoped delivery', () => {
     gateway.publishEvent('session-update', { event: 'session-created' });
     gateway.publishEvent('approval-update', { id: 'a1' });
 
-    // permissions is NOT in DEFAULT_DOMAINS, this proves the default is null
+    // gate is NOT in DEFAULT_DOMAINS, this proves the default is null
     // (deliver-all) and not the normalized DEFAULT_DOMAINS set, which would have
     // wrongly excluded approval-update.
     expect(defaultSub.received).toContain('session-update');
     expect(defaultSub.received).toContain('approval-update');
   });
 
-  test('(3) the webui profile (tasks,permissions,providers,knowledge,control-plane) drops session-update but keeps approval-update, no error', () => {
+  test('(3) the webui profile (tasks,gate,providers,knowledge,control-plane) drops session-update but keeps approval-update, no error', () => {
     const gateway = makeGateway();
     const webui = connect(gateway, {
       clientKind: 'web',
@@ -131,7 +131,7 @@ describe('publishEvent: domain-scoped delivery', () => {
     }).not.toThrow();
 
     expect(webui.received).not.toContain('session-update'); // the fix, was over-delivered before
-    expect(webui.received).toContain('approval-update'); // permissions ∈ webui domains
+    expect(webui.received).toContain('approval-update'); // gate ∈ webui domains
   });
 
   test('(4) scope and domain filters are AND-ed: matching domain but missing scope is still denied', () => {
@@ -185,25 +185,19 @@ describe('publishEvent: domain-scoped delivery', () => {
 // transports.
 // ---------------------------------------------------------------------------
 
-/** Read SSE frames off a stream whose body is already fully buffered (synchronous replay). */
-async function readSseFrames(
-  res: Response,
-  minCount: number,
-  timeoutMs = 200,
-): Promise<{ event: string; data: unknown }[]> {
+/**
+ * Read SSE frames until the first heartbeat. `start` enqueues `ready`, the replay
+ * and the opening heartbeat synchronously, so everything the replay delivers is
+ * already buffered when the heartbeat arrives: no deadline is needed.
+ */
+async function readSseFrames(res: Response): Promise<{ event: string; data: unknown }[]> {
   const frames: { event: string; data: unknown }[] = [];
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
-  const deadline = Date.now() + timeoutMs;
   let buffer = '';
   try {
-    while (frames.length < minCount && Date.now() < deadline) {
-      const chunk = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), Math.max(1, deadline - Date.now())),
-        ),
-      ]);
+    while (!frames.some((frame) => frame.event === 'heartbeat')) {
+      const chunk = await reader.read();
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
       let sep: number;
@@ -267,7 +261,7 @@ describe('replay parity: reconnect must mirror live delivery', () => {
     gateway.publishEvent('approval-update', { id: 'a1' });
 
     const res = gateway.createEventStream(new Request('http://localhost/stream'), { clientKind: 'web' });
-    const frames = await readSseFrames(res, 2);
+    const frames = await readSseFrames(res);
 
     expect(frames.map((frame) => frame.event)).toContain('approval-update');
   });
@@ -280,7 +274,7 @@ describe('replay parity: reconnect must mirror live delivery', () => {
       clientKind: 'web',
       domains: ['gate'],
     });
-    const frames = await readSseFrames(res, 2);
+    const frames = await readSseFrames(res);
 
     expect(frames.map((frame) => frame.event)).toContain('approval-update');
   });
@@ -293,8 +287,9 @@ describe('replay parity: reconnect must mirror live delivery', () => {
       clientKind: 'web',
       domains: ['tasks'],
     });
-    const frames = await readSseFrames(res, 1, 150); // only 'ready' should ever arrive
+    const frames = await readSseFrames(res);
 
-    expect(frames.map((frame) => frame.event)).not.toContain('approval-update');
+    // Nothing but the handshake and the opening heartbeat: the replayed approval is filtered out.
+    expect(frames.map((frame) => frame.event)).toEqual(['ready', 'heartbeat']);
   });
 });

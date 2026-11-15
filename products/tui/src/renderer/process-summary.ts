@@ -1,4 +1,4 @@
-import type { ContractView, ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { isTerminalContractStatus, type ContractStatus, type ContractView, type ContractUnitView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { RuntimeAgent } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 
@@ -7,8 +7,17 @@ export type ProcessSummaryAgent = Pick<AgentRecord, 'id'> & Partial<Pick<AgentRe
 export type RuntimeProcessSummaryAgent = Pick<RuntimeAgent, 'id'> & Partial<Pick<RuntimeAgent, 'latestProgress' | 'status' | 'contractRef'>>;
 export type RunningAgentSummary = { readonly count: number; readonly progress?: string };
 
+/** An agent's own run is over; agent statuses are not contract statuses (`completed` is an agent word). */
 function terminal(status: string | undefined): boolean {
   return status === 'passed' || status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+/**
+ * A contract is doing work right now: not finished, and not parked on the owner
+ * (that state is reported as "waiting for owner", never as busy).
+ */
+export function contractIsWorking(status: ContractStatus): boolean {
+  return !isTerminalContractStatus(status) && status !== 'awaiting-owner';
 }
 
 function memberIds(contract: ContractView): Set<string> {
@@ -30,7 +39,7 @@ export function summarizeRunningAgents(
 ): RunningAgentSummary {
   const owners = new Set(contracts.map((contract) => contract.ownerAgentId));
   const ended = new Set<string>();
-  for (const contract of contracts) if (terminal(contract.status)) {
+  for (const contract of contracts) if (isTerminalContractStatus(contract.status)) {
     ended.add(contract.ownerAgentId);
     for (const id of memberIds(contract)) ended.add(id);
   }
@@ -47,7 +56,7 @@ export function summarizeRunningAgents(
     if (!progress && agent.latestProgress) progress = agent.latestProgress;
   }
   if (!progress) for (const contract of contracts) {
-    if (terminal(contract.status)) continue;
+    if (isTerminalContractStatus(contract.status)) continue;
     const members = memberIds(contract);
     if ([...members].some((id) => runningAgentIds.has(id))) { progress = `Contract ${contract.status}`; break; }
   }

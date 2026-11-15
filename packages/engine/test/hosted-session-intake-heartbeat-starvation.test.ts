@@ -83,10 +83,12 @@ describe('one hosted turn must not starve every session heartbeat', () => {
     const spine = buildSpine(queued);
     const turn = gate();
     let deliveriesStarted = 0;
+    // An unchanged session is registered again once per heartbeat interval, so the clock moves between ticks.
+    let clock = 1;
     const intake = new HostedSessionSpineIntake({
       spine,
       liveSessions: () => [record('slow-session'), record('other-session')],
-      now: () => 1,
+      now: () => clock,
       deliver: async () => {
         deliveriesStarted += 1;
         // Exactly the shape of the reported defect: a turn that runs for
@@ -104,7 +106,9 @@ describe('one hosted turn must not starve every session heartbeat', () => {
 
     // Ticks two and three land while that same turn is still running. Under the
     // defect the guard was still held and neither produced a single heartbeat.
+    clock += 30_000;
     await intake.tick();
+    clock += 30_000;
     await intake.tick();
     expect(spine.heartbeats).toEqual([
       'slow-session', 'other-session',

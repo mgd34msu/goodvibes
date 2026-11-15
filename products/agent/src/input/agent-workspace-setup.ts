@@ -18,6 +18,10 @@ export interface AgentWorkspaceSetupChecklistInput {
   readonly connectedHostTokenReadable: boolean;
   readonly connectedHostTokenPath: string;
   readonly connectedHostTokenError?: string | null;
+  /** True when no Agent home directory is known, so no token file could be looked for at all. */
+  readonly agentHomeUnavailable?: boolean;
+  /** Checklist item ids whose local store could not be read; their counts are unknown, not zero. */
+  readonly unreadableItemIds?: readonly string[];
   readonly activeSubscriptionCount: number;
   readonly pendingSubscriptionCount: number;
   readonly availableSubscriptionProviderCount: number;
@@ -56,9 +60,20 @@ function sampleNames(summary: AgentBehaviorDiscoverySummary): string {
 }
 
 export function buildAgentWorkspaceSetupChecklist(input: AgentWorkspaceSetupChecklistInput): readonly AgentWorkspaceSetupChecklistItem[] {
+  const unreadable = new Set(input.unreadableItemIds ?? []);
+  return buildChecklistItems(input).map((item) => (unreadable.has(item.id)
+    ? {
+      ...item,
+      status: 'recommended' as const,
+      detail: `Could not read the local ${item.label.toLowerCase()} store, so what it holds is unknown. Check it before creating new records.`,
+    }
+    : item));
+}
+
+function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly AgentWorkspaceSetupChecklistItem[] {
   const providerReady = input.provider !== 'unknown' && input.model !== 'unknown';
   // A synchronous snapshot has no fresh host-bound authority evidence.
-  const connectedHostAuthStatus: AgentWorkspaceSetupStatus = input.connectedHostTokenReadable || input.connectedHostTokenPath === '(Agent home unavailable)'
+  const connectedHostAuthStatus: AgentWorkspaceSetupStatus = input.connectedHostTokenReadable || input.agentHomeUnavailable === true
     ? 'recommended' : 'blocked';
   const hasActivePersona = input.activePersonaName !== '(none)' && input.activePersonaName !== '(unavailable)';
   const discoveredBehaviorCount = input.discoveredPersonas.count + input.discoveredSkills.count + input.discoveredRoutines.count;
@@ -167,7 +182,7 @@ export function buildAgentWorkspaceSetupChecklist(input: AgentWorkspaceSetupChec
       label: 'Local memory',
       status: setupStatusForCount(input.localMemoryCount, 'ready', 'optional'),
       detail: input.localMemoryCount > 0
-        ? `${input.localMemoryCount} Agent memory record(s) are available; ${input.localMemoryReviewQueueCount} need review.`
+        ? `${input.localMemoryCount} Agent memory record(s) are available; review queue holds ${input.localMemoryReviewQueueCount}.`
         : 'Memory starts empty; durable facts should be stored deliberately and never include secrets.',
       breadcrumb: 'Memory',
     },

@@ -180,7 +180,13 @@ export async function postSessionSpineClose(
  * `rejected` so the client logs it and never retries forever.
  */
 function foldSpineResult(result: SessionSpineRegisterResult | SessionSpineCloseResult): SpineResult {
-  if (result.ok) return { outcome: 'ok' };
+  if (result.ok) {
+    // HTTP 200 with a closed conflict: the daemon refused to reopen the session.
+    if ('conflict' in result && result.conflict?.status === 'closed') {
+      return { outcome: 'rejected', error: 'session is closed on the daemon', conflict: 'closed' };
+    }
+    return { outcome: 'ok' };
+  }
   if (result.kind === 'connected_host_unavailable') return { outcome: 'offline', error: result.error };
   return { outcome: 'rejected', error: result.error };
 }
@@ -277,36 +283,60 @@ export function extractSessionSpineReceipts(body: unknown): DaemonReceipt[] {
   return parsed;
 }
 
-async function defaultConsumeReceipts(
+async function readStatusBody(
   connection: SessionSpineRestConnection,
+  query: Readonly<Record<string, string>>,
   timeoutMs: number,
-): Promise<readonly DaemonReceipt[]> {
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const url = new URL(`${connection.baseUrl}/status`);
-    url.searchParams.set('receipts', 'consume');
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
     const response = await fetch(url, {
       ...(connection.token ? { headers: { authorization: `Bearer ${connection.token}` } } : {}),
       signal: controller.signal,
     });
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     try {
-      return extractSessionSpineReceipts(await response.json());
+      return await response.json();
     } catch {
-      return [];
+      return null;
     }
   } catch {
-    return [];
+    return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
+/**
+ * Reads the daemon's undelivered receipts without losing them to a dropped
+ * response: `receipts=peek` leaves them undelivered, and only after the body
+ * has been parsed does `receipts=ack` mark exactly those delivered. A daemon
+ * that predates peek omits the `receipts` key, so that case falls back to the
+ * destructive `receipts=consume` read.
+ */
+async function defaultConsumeReceipts(
+  connection: SessionSpineRestConnection,
+  timeoutMs: number,
+): Promise<readonly DaemonReceipt[]> {
+  const peeked = await readStatusBody(connection, { receipts: 'peek' }, timeoutMs);
+  if (peeked === null) return [];
+  if (!isRecord(peeked) || !Array.isArray(peeked.receipts)) {
+    return extractSessionSpineReceipts(await readStatusBody(connection, { receipts: 'consume' }, timeoutMs));
+  }
+  const receipts = extractSessionSpineReceipts(peeked);
+  if (receipts.length > 0) {
+    await readStatusBody(connection, { receipts: 'ack', ids: receipts.map((receipt) => receipt.id).join(',') }, timeoutMs);
+  }
+  return receipts;
+}
+
 export interface SessionSpineReceiptConsumerOptions {
   readonly resolveConnection: () => SessionSpineRestConnection;
   readonly consumeTimeoutMs?: number;
-  /** Override for tests; default does a short GET {baseUrl}/status?receipts=consume. */
+  /** Override for tests; default does a short GET {baseUrl}/status?receipts=peek, then acknowledges what it parsed. */
   readonly consumeImpl?: (
     connection: SessionSpineRestConnection,
     timeoutMs: number,
@@ -315,8 +345,8 @@ export interface SessionSpineReceiptConsumerOptions {
 
 /**
  * Builds the zero-argument receipt consumer a consumer invokes once per
- * attach. Delivery is destructive at the daemon (served exactly once), so
- * this must be called on attach only, never on the frequent liveness probe
+ * attach. Receipts are shown once per attach and acknowledged
+ * at the daemon, so this must be called on attach only, never on the frequent liveness probe
  * cadence above.
  */
 export function createSessionSpineReceiptConsumer(

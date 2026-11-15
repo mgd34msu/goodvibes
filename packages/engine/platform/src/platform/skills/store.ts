@@ -14,7 +14,7 @@
  * file is removed, not tombstoned.
  */
 
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   parseSkill,
@@ -32,13 +32,25 @@ export interface SkillStore {
   get(name: string): Promise<Skill | null>;
   /** Whether a skill with this name currently exists. */
   has(name: string): Promise<boolean>;
-  /** Write a skill (create or overwrite), returning the stored form. */
-  put(skill: Skill): Promise<Skill>;
+  /**
+   * Write a skill (create or overwrite), returning the stored form. With `ifAbsent`, a skill
+   * that already exists is left untouched and `SkillAlreadyExistsError` is thrown.
+   */
+  put(skill: Skill, options?: { readonly ifAbsent?: boolean }): Promise<Skill>;
   /** Remove a skill. Returns false when no skill with that name existed. */
   delete(name: string): Promise<boolean>;
 }
 
+/** Thrown by `put(..., { ifAbsent: true })` when the skill already exists. */
+export class SkillAlreadyExistsError extends Error {
+  constructor(name: string) {
+    super(`a skill named "${name}" already exists`);
+    this.name = 'SkillAlreadyExistsError';
+  }
+}
+
 const SKILL_FILE_SUFFIX = '.md';
+let tempCounter = 0;
 
 /** A directory-of-Markdown-files skill store. */
 export class FileSystemSkillStore implements SkillStore {
@@ -77,7 +89,9 @@ export class FileSystemSkillStore implements SkillStore {
       if (!read) continue;
       // Index read: parseSkillIndex discards the body, so nothing but the
       // frontmatter line ever crosses back to the caller.
-      entries.push(parseSkillIndex(read.text, read.updatedAt));
+      // The file name is the address (get/update/delete use it), so it is the name; a
+      // different `name:` inside the file would list a skill that cannot be opened.
+      entries.push({ ...parseSkillIndex(read.text, read.updatedAt), name: fileName.slice(0, -SKILL_FILE_SUFFIX.length) });
     }
     return entries.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -86,7 +100,7 @@ export class FileSystemSkillStore implements SkillStore {
     try {
       const path = this.filePath(name);
       const [text, info] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
-      return parseSkill(text, info.mtimeMs);
+      return { ...parseSkill(text, info.mtimeMs), name };
     } catch {
       return null;
     }
@@ -101,10 +115,26 @@ export class FileSystemSkillStore implements SkillStore {
     }
   }
 
-  async put(skill: Skill): Promise<Skill> {
+  async put(skill: Skill, options?: { readonly ifAbsent?: boolean }): Promise<Skill> {
     await mkdir(this.dir, { recursive: true });
     const path = this.filePath(skill.name);
-    await writeFile(path, serializeSkill(skill), 'utf8');
+    // Stage then publish, so a crash never leaves a torn skill file.
+    const staged = `${path}.${process.pid}.${tempCounter++}.tmp`;
+    await writeFile(staged, serializeSkill(skill), 'utf8');
+    try {
+      if (options?.ifAbsent) {
+        // A hard link fails when the target exists, which makes the create atomic across processes.
+        try { await link(staged, path); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new SkillAlreadyExistsError(skill.name);
+          throw error;
+        }
+      } else {
+        await rename(staged, path);
+      }
+    } finally {
+      await rm(staged, { force: true });
+    }
     const info = await stat(path);
     return { ...skill, updatedAt: info.mtimeMs };
   }
@@ -139,7 +169,8 @@ export class InMemorySkillStore implements SkillStore {
     return this.skills.has(name);
   }
 
-  async put(skill: Skill): Promise<Skill> {
+  async put(skill: Skill, options?: { readonly ifAbsent?: boolean }): Promise<Skill> {
+    if (options?.ifAbsent && this.skills.has(skill.name)) throw new SkillAlreadyExistsError(skill.name);
     const stored: Skill = { ...skill, updatedAt: Date.now() };
     this.skills.set(skill.name, stored);
     return stored;

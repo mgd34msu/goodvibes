@@ -202,6 +202,7 @@ describe('CheckpointsPanel create: honest noop', () => {
     const button = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Snapshot'));
     click(button);
     await waitFor(() => createCalls.length > 0);
+    await waitFor(() => (el.querySelector('.toast-viewport')?.textContent ?? '').includes('No checkpoint created'));
     // No new row was fabricated, still exactly the two fixture rows.
     expect(el.querySelectorAll('.gv-row__main').length).toBe(2);
     unmount();
@@ -284,8 +285,9 @@ describe('CheckpointsPanel restore: destructive confirm gate', () => {
     previewImpl = () => Promise.reject(new Error('preview transport blip'));
     const { el, unmount } = render();
     openRestore(el);
-    // The confirm sheet still opens (best-effort preview), with the un-enriched message.
+    // The confirm sheet still opens (best-effort preview), and says the preview is missing.
     await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
+    expect(el.querySelector('.gv-confirm')!.textContent).toContain('preview of the files this restore changes could not be loaded');
     click(el.querySelector('.gv-confirm__confirm'));
     await waitFor(() => restoreCalls.length > 0);
     expect(restoreCalls[0]).toMatchObject({ id: 'wcp_1', confirm: true });

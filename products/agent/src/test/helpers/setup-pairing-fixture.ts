@@ -7,7 +7,7 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from './project-temp.ts';
 
 export async function untilPairing(predicate: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 10_000;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
     await Bun.sleep(2);

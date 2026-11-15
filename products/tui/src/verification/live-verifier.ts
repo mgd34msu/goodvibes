@@ -11,7 +11,7 @@ import {
 export type { LiveVerificationStatus, LiveVerificationCheck } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { auditGoodVibesHome } from '../config/goodvibes-home-audit.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
@@ -51,6 +51,38 @@ const { runCommand, commandCheck, fetchCheck, countStatuses } = createVerificati
   validateJsonOnNonZero: false,
 });
 
+/**
+ * The environment the CLI commands run in. The audit and the token come from
+ * `homeDir`, so the commands must read the same tree: GOODVIBES_HOME is the root
+ * the `.goodvibes` directory sits under, so an explicit `.../.goodvibes` home is
+ * mapped to its parent.
+ */
+export function verificationCommandEnv(homeDir: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const resolved = resolve(homeDir);
+  return { ...base, NO_COLOR: '1', GOODVIBES_HOME: basename(resolved) === '.goodvibes' ? dirname(resolved) : resolved };
+}
+
+type HomeAudit = Awaited<ReturnType<typeof auditGoodVibesHome>>;
+
+/** A stale setting is a warning, so the summary says so instead of "no findings". */
+export function homeAuditCheck(audit: HomeAudit): LiveVerificationCheck {
+  const staleCandidates = audit.settings?.staleCandidates?.length ?? 0;
+  const clean = audit.findings.length === 0 && staleCandidates === 0;
+  const parts: string[] = [];
+  if (audit.findings.length > 0) parts.push(`${audit.findings.length} audit finding(s)`);
+  if (staleCandidates > 0) parts.push(`${staleCandidates} stale setting candidate(s)`);
+  return {
+    id: 'goodvibes-home-audit',
+    title: 'GoodVibes home ownership/settings audit',
+    status: clean ? 'pass' : 'warn',
+    summary: clean ? 'No ownership, stale-setting, or secret-permission findings.' : `${parts.join(', ')}.`,
+    detail:
+      audit.findings.length === 0
+        ? `${audit.settings?.recognizedKeyCount ?? 0} current schema key(s), ${staleCandidates} stale candidate(s).`
+        : audit.findings.map((finding) => `${finding.severity}: ${finding.message}`).join('\n'),
+  };
+}
+
 function readDaemonToken(homeDir: string): string | undefined {
   return readVerificationHostToken(homeDir, ['GOODVIBES_DAEMON_TOKEN'], readJsonFile);
 }
@@ -66,22 +98,10 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   const daemonBaseUrl = resolveDaemonBaseUrl(homeDir, options.daemonBaseUrl);
   const token = options.token ?? readDaemonToken(homeDir);
   const checks: LiveVerificationCheck[] = [];
+  const commandEnv = verificationCommandEnv(homeDir);
 
   const audit = await auditGoodVibesHome({ homeDir });
-  const staleCandidates = audit.settings?.staleCandidates?.length ?? 0;
-  checks.push({
-    id: 'goodvibes-home-audit',
-    title: 'GoodVibes home ownership/settings audit',
-    status: audit.findings.length === 0 && staleCandidates === 0 ? 'pass' : 'warn',
-    summary:
-      audit.findings.length === 0
-        ? 'No ownership, stale-setting, or secret-permission findings.'
-        : `${audit.findings.length} audit finding(s).`,
-    detail:
-      audit.findings.length === 0
-        ? `${audit.settings?.recognizedKeyCount ?? 0} current schema key(s), ${staleCandidates} stale candidate(s).`
-        : audit.findings.map((finding) => `${finding.severity}: ${finding.message}`).join('\n'),
-  });
+  checks.push(homeAuditCheck(audit));
 
   checks.push({
     id: 'compiled-cli-present',
@@ -95,7 +115,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-version',
         'CLI version command',
-        await runCommand(binaryPath, ['version'], projectRoot),
+        await runCommand(binaryPath, ['version'], projectRoot, { env: commandEnv }),
         'CLI version returned successfully.',
       ),
     );
@@ -103,7 +123,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-status-json',
         'CLI status JSON command',
-        await runCommand(binaryPath, ['status', '--output', 'json'], projectRoot),
+        await runCommand(binaryPath, ['status', '--output', 'json'], projectRoot, { env: commandEnv }),
         'CLI status returned parseable JSON.',
         { parseJson: true },
       ),
@@ -112,7 +132,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-providers',
         'CLI providers command',
-        await runCommand(binaryPath, ['providers'], projectRoot),
+        await runCommand(binaryPath, ['providers'], projectRoot, { env: commandEnv }),
         'Provider inventory rendered successfully.',
       ),
     );
@@ -120,7 +140,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-control-plane-status',
         'CLI control-plane status command',
-        await runCommand(binaryPath, ['control-plane', 'status'], projectRoot),
+        await runCommand(binaryPath, ['control-plane', 'status'], projectRoot, { env: commandEnv }),
         'Control-plane status rendered successfully.',
         { warnOnNonZero: true },
       ),
@@ -129,7 +149,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-listener-test',
         'CLI listener readiness command',
-        await runCommand(binaryPath, ['listener', 'test'], projectRoot),
+        await runCommand(binaryPath, ['listener', 'test'], projectRoot, { env: commandEnv }),
         'HTTP listener readiness rendered successfully.',
         { warnOnNonZero: true },
       ),
@@ -138,7 +158,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-surfaces-check',
         'CLI surfaces readiness command',
-        await runCommand(binaryPath, ['surfaces', 'check'], projectRoot),
+        await runCommand(binaryPath, ['surfaces', 'check'], projectRoot, { env: commandEnv }),
         'Surface readiness rendered successfully.',
         { warnOnNonZero: true },
       ),
@@ -147,7 +167,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-service-check',
         'CLI service posture command',
-        await runCommand(binaryPath, ['service', 'check'], projectRoot),
+        await runCommand(binaryPath, ['service', 'check'], projectRoot, { env: commandEnv }),
         'Service posture rendered successfully.',
         { warnOnNonZero: true },
       ),
@@ -156,7 +176,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
       commandCheck(
         'cli-doctor',
         'CLI doctor command',
-        await runCommand(binaryPath, ['doctor', '--output', 'text'], projectRoot),
+        await runCommand(binaryPath, ['doctor', '--output', 'text'], projectRoot, { env: commandEnv }),
         'Doctor completed without findings.',
         { warnOnNonZero: true },
       ),
@@ -204,7 +224,7 @@ export async function buildLiveVerificationReport(options: LiveVerificationOptio
   );
 
   const counts = countStatuses(checks);
-  const ok = counts.fail === 0 && (!options.strict || counts.warn === 0);
+  const ok = counts.fail === 0 && (!options.strict || (counts.warn === 0 && counts.skip === 0));
   return {
     generatedAt: new Date().toISOString(),
     homeDir,

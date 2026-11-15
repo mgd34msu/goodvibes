@@ -17,7 +17,8 @@ export function cellText(text: string): string {
     return stripDangerousAnsi(text)
         // CSI (colors included), OSC, and two-byte escapes.
         .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/g, '')
-        .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+        // C0, DEL and the C1 range: U+009B is a one-character CSI and U+009D an OSC for terminals that decode UTF-8 C1 controls.
+        .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
 }
 /**
  * ok      ✓ done
@@ -140,6 +141,7 @@ function extractKeyArg(toolCall: ToolCall): string {
 // Parsing helpers
 // ---------------------------------------------------------------------------
 type Json = Record<string, unknown>;
+type UsableEdit = Json & { find: string; replace: string };
 function parseObject(content: string | undefined): Json | null {
     if (!content)
         return null;
@@ -671,10 +673,21 @@ function editDiff(call: ToolCall, content: string | undefined): {
         return { text, numbered: true, path };
     }
     const edits = Array.isArray(call.arguments.edits) ? call.arguments.edits.filter((e): e is Json => e !== null && typeof e === 'object') : [];
-    const usable = edits.filter((e) => typeof e.find === 'string' && typeof e.replace === 'string');
+    // A base64 field wins over its plain twin, as the edit tool reads it, so the diff shows the bytes written.
+    const effective = (e: Json, name: 'find' | 'replace'): string | undefined => {
+        const encoded = e[`${name}_base64`];
+        if (typeof encoded === 'string' && (name === 'replace' || encoded !== ''))
+            return Buffer.from(encoded, 'base64').toString('utf-8');
+        return typeof e[name] === 'string' ? e[name] as string : undefined;
+    };
+    const usable = edits.flatMap((e): UsableEdit[] => {
+        const find = effective(e, 'find');
+        const replace = effective(e, 'replace');
+        return find !== undefined && replace !== undefined ? [{ ...e, find, replace }] : [];
+    });
     if (usable.length === 0)
         return null;
-    const byPath = new Map<string, Json[]>();
+    const byPath = new Map<string, UsableEdit[]>();
     for (const edit of usable) {
         const path = str(edit.path) ?? 'file';
         byPath.set(path, [...(byPath.get(path) ?? []), edit]);
@@ -683,8 +696,8 @@ function editDiff(call: ToolCall, content: string | undefined): {
     for (const [path, list] of byPath) {
         chunks.push(`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`);
         for (const edit of list) {
-            const find = (edit.find as string).split('\n');
-            const replace = (edit.replace as string).split('\n');
+            const find = edit.find.split('\n');
+            const replace = edit.replace.split('\n');
             // Shared leading and trailing lines are context, not change.
             let head = 0;
             while (head < find.length && head < replace.length && find[head] === replace[head])
@@ -753,6 +766,8 @@ export function beadBody(call: ToolCall, status: BeadStatus, content: string | u
             })),
         };
         case 'text': return { kind: 'text', lines: body.lines.map(cellText) };
+        case 'diff': return { ...body, diff: cellText(body.diff), path: body.path !== undefined ? cellText(body.path) : undefined };
+        case 'output': return { ...body, lines: body.lines.map((line) => ({ ...line, text: cellText(line.text) })), ...(body.footer !== undefined ? { footer: cellText(body.footer) } : {}) };
         case 'error': return { kind: 'error', text: body.text.split('\n').map(cellText).join('\n') };
         default: return body;
     }

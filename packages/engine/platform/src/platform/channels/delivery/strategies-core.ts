@@ -2,29 +2,63 @@ import { assertDeliveryCurrent, runDeliveryPublication } from '../../utils/deliv
 import { retireDeliveryResponse } from '../../integrations/delivery-diagnostics.js';
 import { ArtifactStore } from '../../artifacts/index.js';
 import { ConfigManager } from '../../config/manager.js';
+import { DEFAULT_CONFIG } from '../../config/schema.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
 import { resolveSecretInput } from '../../config/secret-refs.js';
 import { ControlPlaneGateway } from '../../control-plane/gateway.js';
-import { DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration } from '../../integrations/index.js';
+import { DiscordIntegration, HomeAssistantIntegration, NtfyIntegration, SlackIntegration, resolveNtfyDefaultPriority } from '../../integrations/index.js';
 import { postToPublicWebhook, validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import type { HostResolver } from '../../tools/fetch/pinned-request.js';
 import { resolveReachableBaseUrl } from '../../utils/reachable-base-url.js';
-import type { ChannelDeliveryStrategy } from './types.js';
+import { resolveHomeAssistantAccessToken, resolveHomeAssistantEventType } from '../builtin/homeassistant.js';
+import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from './types.js';
 import {
   appendAttachmentSummary,
+  assertPublicWebhookAddress,
   deliveryFetch,
   extractResponseId,
   firstNonEmpty,
+  fitForSurface,
   requireOkResponse,
   resolveDeliveryCredential,
   resolveAttachments,
   resolveChannelDeliverySurfaceKind,
   success,
   titleFromBody,
-  trimForSurface,
 } from './shared.js';
 import { HttpStatusError } from '@goodvibes-jev/engine/errors';
+
+/**
+ * Posts to an explicit chat webhook address taken from a target or binding.
+ * Such an address is untrusted input, so it is resolved, every answer checked,
+ * pinned to a checked address, and never redirected (utils/url-safety.ts); a
+ * name that merely looks public cannot carry the agent's output to an internal host.
+ */
+function postToExplicitChatWebhook(
+  request: ChannelDeliveryRequest,
+  label: string,
+  address: string,
+  headers: Record<string, string>,
+  payload: unknown,
+  resolveHost: HostResolver | undefined,
+): Promise<Response> {
+  assertPublicWebhookAddress(label, address);
+  return postToPublicWebhook(address, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    ...(request.signal ? { signal: request.signal } : {}),
+  }, { resolveHost, assertCurrent: request.assertCurrent, withPublication: request.withPublication });
+}
+
+async function requireChatWebhookOk(label: string, response: Response): Promise<void> {
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new HttpStatusError(`${label} webhook rejected the request (${response.status}): ${detail}`, { status: response.status });
+  }
+  await retireDeliveryResponse(response);
+}
 
 export function createWebhookDeliveryStrategy(
   configManager: ConfigManager,
@@ -55,7 +89,7 @@ export function createWebhookDeliveryStrategy(
       if (!address) throw new Error('Missing webhook delivery target');
       const validation = validatePublicWebhookUrl(address);
       if (!validation.ok) throw new Error(validation.error);
-      const timeoutMs = Number(configManager.get('surfaces.webhook.timeoutMs') ?? 15_000);
+      const timeoutMs = Number(configManager.get('surfaces.webhook.timeoutMs') ?? DEFAULT_CONFIG.surfaces.webhook.timeoutMs);
       // Resolved, every answer checked, pinned to a checked address (utils/url-safety.ts).
       const response = await postToPublicWebhook(validation.url, {
         method: 'POST',
@@ -88,6 +122,8 @@ export function createSlackDeliveryStrategy(
   configManager: ConfigManager,
   artifactStore: ArtifactStore,
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
+  /** Resolves an explicit webhook host before delivery; the system resolver when absent. */
+  options: { readonly resolveHost?: HostResolver | undefined } = {},
 ): ChannelDeliveryStrategy {
   return {
     id: 'channel-delivery:slack',
@@ -119,7 +155,9 @@ export function createSlackDeliveryStrategy(
         return success();
       }
       if (request.target.address?.startsWith('https://')) {
-        await slack.postWebhook(bodyWithAttachments, undefined, request.target.address, request);
+        await requireChatWebhookOk('Slack', await postToExplicitChatWebhook(
+          request, 'Slack', request.target.address, { 'Content-Type': 'application/json' }, { text: bodyWithAttachments }, options.resolveHost,
+        ));
         return success();
       }
       const channelId = firstNonEmpty(
@@ -148,6 +186,8 @@ export function createDiscordDeliveryStrategy(
   configManager: ConfigManager,
   artifactStore: ArtifactStore,
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
+  /** Resolves an explicit webhook host before delivery; the system resolver when absent. */
+  options: { readonly resolveHost?: HostResolver | undefined } = {},
 ): ChannelDeliveryStrategy {
   return {
     id: 'channel-delivery:discord',
@@ -177,7 +217,9 @@ export function createDiscordDeliveryStrategy(
         return success();
       }
       if (request.target.address?.startsWith('https://')) {
-        await discord.postWebhook(bodyWithAttachments, undefined, request.target.address, request);
+        await requireChatWebhookOk('Discord', await postToExplicitChatWebhook(
+          request, 'Discord', request.target.address, { 'Content-Type': 'application/json' }, { content: bodyWithAttachments }, options.resolveHost,
+        ));
         return success();
       }
       const channelId = firstNonEmpty(
@@ -199,6 +241,11 @@ export function createDiscordDeliveryStrategy(
       return success();
     },
   };
+}
+
+function priorityOption(configured: unknown): { priority?: 1 | 2 | 3 | 4 | 5 } {
+  const priority = resolveNtfyDefaultPriority(configured);
+  return priority === undefined ? {} : { priority };
 }
 
 export function createNtfyDeliveryStrategy(
@@ -235,6 +282,7 @@ export function createNtfyDeliveryStrategy(
       const primaryAttachment = attachments[0]!;
       await ntfy.publish(topic, appendAttachmentSummary(request.body, attachments), {
         title: request.target.label ?? titleFromBody(request.body),
+        ...priorityOption(configManager.get('surfaces.ntfy.defaultPriority')),
         ...(request.includeLinks && baseUrlHint ? { click: `${baseUrlHint}/api/control-plane/web` } : {}),
         ...(primaryAttachment?.contentUrl ? { attach: primaryAttachment.contentUrl } : {}),
         markGoodVibesOrigin: true,
@@ -309,22 +357,9 @@ export function createHomeAssistantDeliveryStrategy(
         process.env.HA_URL,
       );
       if (!baseUrl) throw new Error('Missing Home Assistant instance URL');
-      const token = firstNonEmpty(
-        await serviceRegistry.resolveSecret('homeassistant', 'primary'),
-        await resolveSecretInput(configManager.get('surfaces.homeassistant.accessToken'), {
-          diagnosticMode: 'structural',
-          resolveLocalSecret: (key) => secretsManager.get(key),
-          homeDirectory: secretsManager.getGlobalHome?.() ?? undefined,
-        }),
-        process.env.HOMEASSISTANT_ACCESS_TOKEN,
-        process.env.HOME_ASSISTANT_ACCESS_TOKEN,
-        process.env.HA_ACCESS_TOKEN,
-      );
+      const token = await resolveHomeAssistantAccessToken({ configManager, secretsManager, serviceRegistry });
       if (!token) throw new Error('Missing Home Assistant access token');
-      const eventType = firstNonEmpty(
-        String(configManager.get('surfaces.homeassistant.eventType') ?? ''),
-        'goodvibes_message',
-      )!;
+      const eventType = resolveHomeAssistantEventType(configManager);
       const client = new HomeAssistantIntegration({ baseUrl, accessToken: token });
       const pending = readRecord(request.metadata?.pending);
       const messageId = firstNonEmpty(
@@ -393,12 +428,13 @@ export function createTelegramDeliveryStrategy(
       );
       if (!token) throw new Error('Missing Telegram bot token');
       if (!chatId) throw new Error('Missing Telegram chat id');
+      const fitted = fitForSurface(request.body, attachments, 4_096);
       const response = await deliveryFetch(request, `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: trimForSurface(appendAttachmentSummary(request.body, attachments), 4_096),
+          text: fitted.text,
           disable_web_page_preview: true,
           ...(request.binding?.threadId && /^\d+$/.test(request.binding.threadId)
             ? { message_thread_id: Number(request.binding.threadId) }
@@ -422,7 +458,7 @@ export function createTelegramDeliveryStrategy(
         ? { surfaceKind: 'telegram' as const, conversationId: String(conversationId), messageId: String(messageId),
           ...(sender?.['is_bot'] === true && typeof accountId === 'number' && Number.isSafeInteger(accountId) && accountId > 0 ? { accountId: String(accountId) } : {}),
           ...(threadId === undefined ? {} : { threadId: String(threadId) }) } : undefined;
-      return { ...success(extractResponseId(payload)), ...(receipt === undefined ? {} : { receipt }) };
+      return { ...success(extractResponseId(payload), fitted), ...(receipt === undefined ? {} : { receipt }) };
     },
   };
 }
@@ -432,6 +468,8 @@ export function createGoogleChatDeliveryStrategy(
   serviceRegistry: ServiceRegistry,
   artifactStore: ArtifactStore,
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
+  /** Resolves an explicit webhook host before delivery; the system resolver when absent. */
+  options: { readonly resolveHost?: HostResolver | undefined } = {},
 ): ChannelDeliveryStrategy {
   return {
     id: 'channel-delivery:google-chat',
@@ -442,13 +480,17 @@ export function createGoogleChatDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
-      const explicitTarget = request.target.address;
-      if (explicitTarget !== undefined) {
-        let valid = false;
-        try { valid = new URL(explicitTarget).protocol === 'https:'; } catch { /* Closed protocol refusal below. */ }
-        if (!valid) throw new Error('Google Chat requires an explicit HTTPS webhook target');
-      }
-      const webhookUrl = firstNonEmpty(explicitTarget, readString(request.binding?.metadata.webhookUrl))
+      // A conversation reply carries the space name (`spaces/AAAA`) as its
+      // address; that is not a webhook, so the configured webhook is used. A
+      // value that is written as a URL must be an https webhook of Google's.
+      const addressText = firstNonEmpty(request.target.address);
+      const addressIsUrl = addressText !== undefined && /^[a-z][a-z0-9+.-]*:\/\//i.test(addressText);
+      const explicitTarget = addressIsUrl ? addressText : undefined;
+      if (explicitTarget !== undefined) assertPublicWebhookAddress('Google Chat', explicitTarget);
+      const boundWebhook = readString(request.binding?.metadata.webhookUrl);
+      if (boundWebhook !== undefined) assertPublicWebhookAddress('Google Chat', boundWebhook);
+      const untrustedWebhook = firstNonEmpty(explicitTarget, boundWebhook);
+      const webhookUrl = untrustedWebhook
         ?? await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
           serviceName: 'google-chat', serviceField: 'webhookUrl', configKey: 'surfaces.googleChat.webhookUrl',
           serviceDefault: () => serviceRegistry.get('google-chat')?.baseUrl,
@@ -458,16 +500,21 @@ export function createGoogleChatDeliveryStrategy(
         throw new Error('Missing Google Chat webhook URL');
       }
       const threadKey = firstNonEmpty(request.binding?.threadId, request.binding?.channelId, request.binding?.externalId);
-      const response = await deliveryFetch(request, webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
-        body: JSON.stringify({
-          text: trimForSurface(appendAttachmentSummary(request.body, attachments), 4_000),
-          ...(threadKey ? { thread: { threadKey } } : {}),
-        }),
-      }, 'opaque-url');
+      const fitted = fitForSurface(request.body, attachments, 4_000);
+      const chatPayload = {
+        text: fitted.text,
+        ...(threadKey ? { thread: { threadKey } } : {}),
+      };
+      // A webhook from the target or binding is untrusted input; the configured one is the owner's.
+      const response = untrustedWebhook !== undefined
+        ? await postToExplicitChatWebhook(request, 'Google Chat', webhookUrl, { 'Content-Type': 'application/json; charset=UTF-8' }, chatPayload, options.resolveHost)
+        : await deliveryFetch(request, webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+          body: JSON.stringify(chatPayload),
+        }, 'opaque-url');
       const payload = await requireOkResponse('Google Chat delivery failed', response);
-      return success(extractResponseId(payload));
+      return success(extractResponseId(payload), fitted);
     },
   };
 }

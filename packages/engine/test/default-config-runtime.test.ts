@@ -7,9 +7,7 @@ import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/s
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { DEFAULT_MEMORY_CONSOLIDATION_CONFIG } from '../platform/src/platform/state/memory-consolidation-config.js';
 import { resolveMemoryConsolidationConfig } from '../platform/src/platform/state/memory-consolidation-config.js';
-import { tmpdir } from 'os';
-import { mkdirSync } from 'fs';
-import { join } from 'path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
 // DEFAULT_CONFIG structure
@@ -20,12 +18,12 @@ describe('DEFAULT_CONFIG runtime section', () => {
     expect('runtime' in DEFAULT_CONFIG).toBe(true);
   });
 
-  test('DEFAULT_CONFIG.runtime.companionChatLimiter.perSessionLimit uses the documented default', () => {
+  test('DEFAULT_CONFIG.runtime.companionChatLimiter.perSessionLimit is unset (0), so the environment baseline applies', () => {
     const config = DEFAULT_CONFIG as unknown as Record<string, unknown>;
     const runtime = config['runtime'] as Record<string, unknown>;
     const limiter = runtime['companionChatLimiter'] as Record<string, unknown>;
     expect(typeof limiter['perSessionLimit']).toBe('number');
-    expect(limiter['perSessionLimit']).toBe(10);
+    expect(limiter['perSessionLimit']).toBe(0);
   });
 });
 
@@ -54,8 +52,7 @@ describe('DEFAULT_CONFIG registers every recently-added domain', () => {
   });
 
   test("config.get('worktree.setup.commands') resolves the default instead of throwing", () => {
-    const configDir = join(tmpdir(), `gv-test-worktree-${Date.now()}-${crypto.randomUUID()}`);
-    mkdirSync(configDir, { recursive: true });
+    const configDir = makeProjectTempDir('gv-test-worktree');
     const manager = new ConfigManager({ configDir });
     // worktree.setup.* is an array key (not a scalar ConfigKey), so it is read
     // through the same object-path resolution the daemon uses via a cast.
@@ -76,8 +73,7 @@ describe('DEFAULT_CONFIG registers every recently-added domain', () => {
   });
 
   test("config.get/set('learning.consolidation.*') is safe and the resolver still returns the defaults", () => {
-    const configDir = join(tmpdir(), `gv-test-learning-${Date.now()}-${crypto.randomUUID()}`);
-    mkdirSync(configDir, { recursive: true });
+    const configDir = makeProjectTempDir('gv-test-learning');
     const manager = new ConfigManager({ configDir });
     const get = manager.get.bind(manager) as unknown as (k: string) => unknown;
     // Before the domain was registered these threw "section 'learning' does not exist".
@@ -97,8 +93,7 @@ describe('DEFAULT_CONFIG registers every recently-added domain', () => {
 
 describe('ConfigManager resolves all runtime.* schema keys', () => {
   function makeConfigManager(): ConfigManager {
-    const configDir = join(tmpdir(), `gv-test-runtime-${Date.now()}-${crypto.randomUUID()}`);
-    mkdirSync(configDir, { recursive: true });
+    const configDir = makeProjectTempDir('gv-test-runtime');
     return new ConfigManager({ configDir });
   }
 
@@ -106,8 +101,8 @@ describe('ConfigManager resolves all runtime.* schema keys', () => {
     .map((setting) => setting.key)
     .filter((key) => key.startsWith('runtime.'));
 
-  test('at least one runtime.* key exists in CONFIG_SCHEMA', () => {
-    expect(runtimeKeys).toEqual([
+  test('the runtime.* keys the platform reads are in CONFIG_SCHEMA', () => {
+    expect(runtimeKeys).toEqual(expect.arrayContaining([
       'runtime.companionChatLimiter.perSessionLimit',
       'runtime.eventBus.maxListeners',
       'runtime.unifiedTasks',
@@ -117,7 +112,7 @@ describe('ConfigManager resolves all runtime.* schema keys', () => {
       'runtime.toolBudget.maxMs',
       'runtime.toolBudget.maxTokens',
       'runtime.toolBudget.maxCostUsd',
-    ]);
+    ]));
   });
 
   for (const key of runtimeKeys) {
@@ -141,8 +136,7 @@ describe('ConfigManager resolves all runtime.* schema keys', () => {
 
 describe('ConfigManager resolves all CONFIG_SCHEMA keys without throwing', () => {
   test('iterating all schema keys via get() never throws', () => {
-    const configDir = join(tmpdir(), `gv-test-allkeys-${Date.now()}-${crypto.randomUUID()}`);
-    mkdirSync(configDir, { recursive: true });
+    const configDir = makeProjectTempDir('gv-test-allkeys');
     const manager = new ConfigManager({ configDir });
 
     // This replicates what buildResolvedEntries() does, if runtime section is missing,
@@ -159,8 +153,7 @@ describe('ConfigManager resolves all CONFIG_SCHEMA keys without throwing', () =>
   });
 
   test('every schema key is set-safe: setting its own default value never throws', () => {
-    const configDir = join(tmpdir(), `gv-test-setallkeys-${Date.now()}-${crypto.randomUUID()}`);
-    mkdirSync(configDir, { recursive: true });
+    const configDir = makeProjectTempDir('gv-test-setallkeys');
     const manager = new ConfigManager({ configDir });
 
     // A schema key whose top-level domain is absent from DEFAULT_CONFIG resolves

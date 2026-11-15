@@ -44,7 +44,7 @@ function driftSection(rows: readonly BatteryDrift[]): string[] {
   const lines = heading('Drift per window (reading distribution and outcome mix; change flag computed in code)');
   if (rows.length === 0) return [...lines, `${INDENT}no readings in this window`];
   for (const row of rows) {
-    lines.push(`${row.battery}  ${row.changed ? 'CHANGED' : 'steady'}  ${row.windows.length} window(s)`);
+    lines.push(`${row.battery}  ${row.changed ? 'CHANGED' : 'steady'}  ${row.windows.length} window(s)${row.skippedReadings === undefined ? '' : `  ${row.skippedReadings} reading(s) skipped: time could not be read`}`);
     for (const window of row.windows) {
       const mean = window.meanSignal.toFixed(2);
       const bins = window.signalBins.filter((bin) => bin.readings > 0).map((bin) => `>=${bin.from.toFixed(2)}:${bin.readings}`).join(' ');

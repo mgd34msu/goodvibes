@@ -24,6 +24,7 @@ import {
   SurfaceHomeInUseError,
   type HomeOwnerClaim,
 } from '../platform/src/platform/runtime/home-single-writer.ts';
+import { tryAcquireCrossProcessLock } from '../platform/src/platform/workspace/checkpoint/cross-process-lock.ts';
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
@@ -92,15 +93,15 @@ describe('claimSurfaceHome', () => {
   test('simultaneous processes cannot both acquire an empty home', async () => {
     const home = newHome();
     const module = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
-    const children = Array.from({ length: 6 }, () => Bun.spawn([process.execPath, '-e', `
-      const { claimSurfaceHome, readProcessIdentity } = await import(process.argv[1]);
+    const children = Array.from({ length: 6 }, () => Bun.spawn(['bun', '-e', `
+      const { claimSurfaceHome } = await import(process.argv[1]);
       console.log('ready');
       await new Promise(resolve => process.stdin.once('data', resolve));
       try {
-        claimSurfaceHome({ homeDirectory: process.argv[2], surfaceRoot: 'agent', identity: readProcessIdentity(process.pid) });
+        claimSurfaceHome({ homeDirectory: process.argv[2], surfaceRoot: 'agent' });
         console.log('acquired');
         setInterval(() => {}, 1000);
-      } catch { console.log('refused'); }
+      } catch (error) { console.log(error && error.name === 'SurfaceHomeInUseError' ? 'refused' : 'error: ' + error); }
     `, module, home], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
     const readers = children.map(child => child.stdout.getReader());
     try {
@@ -109,10 +110,56 @@ describe('claimSurfaceHome', () => {
       const results = await Promise.all(readers.map(async reader => new TextDecoder().decode((await reader.read()).value).trim()));
       expect(results.filter(value => value === 'acquired')).toHaveLength(1);
       expect(results.filter(value => value === 'refused')).toHaveLength(5);
+      // The one winner's claim, and nobody else's, is what is on disk.
+      const winner = children[results.indexOf('acquired')]!;
+      expect((JSON.parse(readFileSync(surfaceHomeClaimPath(home, 'agent'), 'utf8')) as HomeOwnerClaim).pid).toBe(winner.pid);
     } finally {
       for (const child of children) child.kill();
       await Promise.all(children.map(child => child.exited));
       for (const reader of readers) reader.releaseLock();
+    }
+  });
+
+  test('a claim attempted while another process holds the claim lock is refused with a next step', () => {
+    const home = newHome();
+    const path = surfaceHomeClaimPath(home, 'agent');
+    mkdirSync(dirname(path), { recursive: true });
+    const unlock = tryAcquireCrossProcessLock(`${path}.lock`);
+    if (!unlock) throw new Error('the fixture lock could not be taken');
+    try {
+      let thrown: unknown;
+      try { claimSurfaceHome({ homeDirectory: home, surfaceRoot: 'agent', pid: 501, identity: AGENT }); } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(SurfaceHomeInUseError);
+      expect((thrown as SurfaceHomeInUseError).message).toContain(path);
+      expect((thrown as SurfaceHomeInUseError).message).toContain('start again');
+      expect(existsSync(path)).toBe(false);
+    } finally { unlock(); }
+  });
+
+  test('a second process launched by name is refused while the first still lives', async () => {
+    const home = newHome();
+    const module = new URL('../platform/src/platform/runtime/home-single-writer.ts', import.meta.url).href;
+    const script = `
+      const { claimSurfaceHome } = await import(process.argv[1]);
+      try {
+        claimSurfaceHome({ homeDirectory: process.argv[2], surfaceRoot: 'agent' });
+        console.log('acquired');
+        setInterval(() => {}, 1000);
+      } catch (error) { console.log(error.name); }
+    `;
+    const spawn = () => Bun.spawn(['bun', '-e', script, module, home], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+    const first = spawn();
+    const firstReader = first.stdout.getReader();
+    let second: ReturnType<typeof spawn> | undefined;
+    try {
+      expect(new TextDecoder().decode((await firstReader.read()).value).trim()).toBe('acquired');
+      second = spawn();
+      expect((await new Response(second.stdout).text()).trim()).toBe('SurfaceHomeInUseError');
+    } finally {
+      first.kill();
+      second?.kill();
+      await Promise.all([first.exited, second?.exited]);
+      firstReader.releaseLock();
     }
   });
 
@@ -231,18 +278,18 @@ describe('createClientRuntimeServices homeSingleWriter', () => {
     return { home, services, claimPath: surfaceHomeClaimPath(home, 'agent') };
   };
 
-  test("'claim' records this process as the home's owner, and dispose gives it back", () => {
+  test("'claim' records this process as the home's owner, and dispose gives it back", async () => {
     const { services, claimPath } = compose('claim');
     const record = JSON.parse(readFileSync(claimPath, 'utf-8')) as HomeOwnerClaim;
     expect(record.pid).toBe(process.pid);
-    services.dispose();
+    await services.close();
     expect(existsSync(claimPath)).toBe(false);
   });
 
-  test('the default claims nothing: a terminal is legitimately run twice', () => {
+  test('the default claims nothing: a terminal is legitimately run twice', async () => {
     const { services, claimPath } = compose();
     expect(existsSync(claimPath)).toBe(false);
-    services.dispose();
+    await services.close();
   });
 
   test('cleanup', () => {

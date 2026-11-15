@@ -1,4 +1,4 @@
-import { withResearchCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
+import { withResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as quote } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
@@ -32,10 +32,6 @@ interface AgentHarnessResearchWorkflowArgs {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function quote(value: string): string {
-  return JSON.stringify(value);
 }
 
 function fallbackTitle(question: string): string {
@@ -90,9 +86,9 @@ function runSummary(run: AgentResearchRunRecord, includeParameters: boolean): Re
     progress: run.progress,
     sources: run.sourceIds.length,
     inspectRoute: `research action:"run" runId:${quote(run.id)}`,
-    checkpointRoute: `research action:"checkpoint" id:${quote(run.id)} phase:"reading" progress:${Math.max(run.progress, 25)} note:"..." sourceIds:["..."] confirm:true explicitUserRequest:"..."`,
-    cancelRoute: `research action:"cancel" id:${quote(run.id)} note:"..." confirm:true explicitUserRequest:"..."`,
-    completeRoute: `research action:"complete" id:${quote(run.id)} reportArtifactId:"..." confirm:true explicitUserRequest:"..."`,
+    checkpointRoute: researchCheckpointRoute(run.id, run.progress),
+    cancelRoute: `research action:"cancel" id:${quote(run.id)} note:"..."`,
+    completeRoute: `research action:"complete" id:${quote(run.id)} reportArtifactId:"..."`,
     runLine: researchRunReportLine(run),
     ...(includeParameters ? {
       question: run.question,
@@ -113,7 +109,7 @@ function sourceSummary(source: AgentResearchSourceRecord): Record<string, unknow
     credibility: source.credibility,
     score: source.score,
     inspectRoute: `research action:"source" sourceId:${quote(source.id)}`,
-    reviewRoute: `research action:"review_source" id:${quote(source.id)} credibility:"high|medium|mixed|low" score:80 note:"..." confirm:true explicitUserRequest:"..."`,
+    reviewRoute: `research action:"review_source" id:${quote(source.id)} credibility:"high|medium|mixed|low" score:80 note:"..."`,
     reportLine: researchSourceReportLine(source),
   };
 }
@@ -197,13 +193,13 @@ function visualReportContract(options: {
       saveMarkdownReport: options.reportRoute,
       ...(certified[0] ? { openRenderedReport: certified[0].renderRoute } : {}),
       reviewPacketWizard: 'agent_harness mode:"document_ops_lane" laneId:"review_packet_wizard"',
-      archiveArtifacts: 'agent_artifacts mode:"archive" artifactIds:["..."] destinationPath:"exports/research-report.zip" confirm:true explicitUserRequest:"..."',
+      archiveArtifacts: 'agent_artifacts mode:"archive" artifactIds:["..."] destinationPath:"exports/research-report.zip"',
     },
     fallbackRoutes: [
       options.bundleRoute,
       options.reportRoute,
       'agent_harness mode:"document_ops_lane" laneId:"review_packet_wizard"',
-      'agent_artifacts mode:"archive" artifactIds:["..."] destinationPath:"exports/research-report.zip" confirm:true explicitUserRequest:"..."',
+      'agent_artifacts mode:"archive" artifactIds:["..."] destinationPath:"exports/research-report.zip"',
     ],
     liveRecords: options.liveRecords.slice(0, 5),
     certifiedRendererRecords: certified.slice(0, 5),
@@ -244,10 +240,10 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
               ? 'needs-source-collection'
               : 'needs-visible-run';
 
-    const createRoute = `research action:"create_run" title:${quote(title)} question:${quote(question)} plan:["Search bounded public web sources","Capture candidate sources","Review credibility and citation value","Save sourced report artifact"] nextSteps:["Run bounded web_search/fetch and capture source candidates"] confirm:true explicitUserRequest:"..."`;
+    const createRoute = `research action:"create_run" title:${quote(title)} question:${quote(question)} plan:["Search bounded public web sources","Capture candidate sources","Review credibility and citation value","Save sourced report artifact"] nextSteps:["Run bounded web_search/fetch and capture source candidates"]`;
     const sourceQuery = question;
     const reportTitle = run ? `${run.title} report` : `${title} report`;
-    const reportRoute = `research action:"report" title:${quote(reportTitle)} question:${quote(question)} sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."`;
+    const reportRoute = `research action:"report" title:${quote(reportTitle)} question:${quote(question)} sources:[...] visualReport:true requireCitationCoverage:true`;
     const bundleRoute = `research action:"bundle" query:${quote(sourceQuery)} includeReportLines:true`;
 
     return {
@@ -261,8 +257,8 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
         used: matchedSources.filter((source) => source.status === 'used').length,
         queueRoute: `research action:"sources" query:${quote(sourceQuery)}`,
         bundleRoute,
-        captureRoute: `research action:"add_source" question:${quote(question)} title:"..." url:"..." summary:"..." credibility:"unreviewed" tags:["research"] confirm:true explicitUserRequest:"..."`,
-        reviewRoute: 'research action:"review_source" id:"..." credibility:"high|medium|mixed|low" score:80 note:"..." confirm:true explicitUserRequest:"..."',
+        captureRoute: `research action:"add_source" question:${quote(question)} title:"..." url:"..." summary:"..." credibility:"unreviewed" tags:["research"]`,
+        reviewRoute: 'research action:"review_source" id:"..." credibility:"high|medium|mixed|low" score:80 note:"..."',
         reportReadySources: reviewedSources.slice(0, includeParameters ? 8 : 3).map(sourceSummary),
         candidateSources: candidateSources.slice(0, includeParameters ? 8 : 3).map(sourceSummary),
       },
@@ -304,14 +300,14 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
             ? 'Collect bounded sources, preferring primary/current sources, then capture each useful source in the queue.'
             : 'Use web_search/fetch for public sources and capture each useful source in the queue.',
           route: certifiedRunnerRecords[0]?.modelRoute ?? 'web_search query:"..." verbosity:"evidence" maxResults:10 evidenceTopN:3 or fetch urls:[...]',
-          captureRoute: `research action:"add_source" question:${quote(question)} title:"..." url:"..." summary:"..." credibility:"unreviewed" tags:["research"] confirm:true explicitUserRequest:"..."`,
+          captureRoute: `research action:"add_source" question:${quote(question)} title:"..." url:"..." summary:"..." credibility:"unreviewed" tags:["research"]`,
         },
         {
           id: 'review-sources',
           status: candidateSources.length > 0 ? 'needed' : reviewedSources.length > 0 ? 'ready' : 'waiting',
           next: candidateSources.length > 0 ? 'Review candidate source credibility, score, and citation value.' : 'Wait until sources are captured, then review them before report generation.',
           route: `research action:"sources" query:${quote(sourceQuery)} includeParameters:true`,
-          reviewRoute: 'research action:"review_source" id:"..." credibility:"high|medium|mixed|low" score:80 note:"..." confirm:true explicitUserRequest:"..."',
+          reviewRoute: 'research action:"review_source" id:"..." credibility:"high|medium|mixed|low" score:80 note:"..."',
         },
         {
           id: 'save-report',
@@ -325,8 +321,8 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
           status: run?.reportArtifactId ? 'ready' : 'waiting',
           next: run?.reportArtifactId ? 'Promote the reviewed report artifact only if the user wants it durable in Agent Knowledge.' : 'Wait for a saved report artifact before Knowledge promotion.',
           route: run?.reportArtifactId
-            ? `agent_knowledge_ingest sourceKind:"artifact" artifactId:${quote(run.reportArtifactId)} confirm:true explicitUserRequest:"..."`
-            : 'agent_knowledge_ingest sourceKind:"artifact" artifactId:"..." confirm:true explicitUserRequest:"..."',
+            ? `agent_knowledge_ingest sourceKind:"artifact" artifactId:${quote(run.reportArtifactId)}`
+            : 'agent_knowledge_ingest sourceKind:"artifact" artifactId:"..."',
         },
       ],
       routes: {
@@ -338,8 +334,8 @@ export async function researchWorkflowSummary(context: CommandContext, rawArgs: 
         ...(certifiedRunnerRecords[0] ? { liveRunner: certifiedRunnerRecords[0].modelRoute } : {}),
         ...(certifiedVisualRecords[0] ? { liveVisualReport: certifiedVisualRecords[0].modelRoute } : {}),
         ...(run ? {
-          checkpointRun: `research action:"checkpoint" id:${quote(run.id)} phase:"reading" progress:${Math.max(run.progress, 25)} note:"..." sourceIds:["..."] confirm:true explicitUserRequest:"..."`,
-          completeRun: `research action:"complete" id:${quote(run.id)} reportArtifactId:"..." confirm:true explicitUserRequest:"..."`,
+          checkpointRun: `research action:"checkpoint" id:${quote(run.id)} phase:"reading" progress:${Math.max(run.progress, 25)} note:"..." sourceIds:["..."]`,
+          completeRun: `research action:"complete" id:${quote(run.id)} reportArtifactId:"..."`,
         } : {}),
       },
       policy: 'This is a read-only workflow plan. It does not search the web, mutate run/source state, save a report, ingest Knowledge, or send external messages. Use the returned confirmed routes for each separate effect.',

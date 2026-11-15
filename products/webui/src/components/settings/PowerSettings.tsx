@@ -6,7 +6,7 @@
  * so they get their own panel rather than a schema-driven SettingsModal row.
  *
  * The ruled shape (owner ruling, 2026-07): ONE toggle, no timers, no AC-only
- * sub-options. The always-visible "sleep disabled" chip (StatusStrip/PowerChip)
+ * sub-options. The always-visible "sleep disabled" chip (PowerChip, in the shell header)
  * is the safety mechanism that keeps this override from being forgotten, not a
  * countdown.
  *
@@ -114,8 +114,8 @@ export function PowerSettings() {
       </div>
       {work.capExpired && (
         <div className="banner warning" role="alert">
-          The work inhibitor's cap ({work.capMinutes}m) has expired, the host may sleep during
-          active work.
+          The work inhibitor's cap ({work.capMinutes}m) ran out for work that is still running; that
+          work no longer keeps this host awake, so the host may sleep before it finishes.
         </div>
       )}
     </SettingsBlock>

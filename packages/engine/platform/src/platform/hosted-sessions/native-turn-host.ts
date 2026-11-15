@@ -1,9 +1,11 @@
 /** Current native source + strict dispatch journal + actual hosted turn ownership. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
 import { captureNativeSelectedDiffContext, selectNativeDiffHunk, NativeSelectedDiffError } from '../workflow/work-ledger/native-diff-context.js';
 import type { WorkspaceCheckpointManager } from '../workspace/checkpoint/manager.js';
-import { realpathSync } from 'node:fs';
+import { readlinkSync, realpathSync } from 'node:fs';
+import { hostname } from 'node:os';
+import { logger } from '../utils/logger.js';
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, type NativeConversationTurnSource } from '../workflow/work-ledger/native-intake-client.js';
 import type { NativeConversationIntakeHost, NativeConversationContinuationOwner } from '../workflow/work-ledger/native-intake.js';
@@ -14,12 +16,37 @@ import { NativeHostedTurnJournal, NativeHostedTurnJournalError, type NativeHoste
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest, type NativeHostedTurnLookup, type NativeHostedTurnSnapshot, type NativeHostedSessionLookup } from './native-turn-wire.js';
 import type { GatePresetName } from '../gate/presets.js';
 
-export const NATIVE_HOSTED_TURN_SCOPES = ['read:work-ledger', 'write:work-ledger', 'write:sessions'] as const;
+import { NATIVE_HOSTED_TURN_SCOPES } from '../control-plane/method-catalog-native-hosted-turn.js';
+export { NATIVE_HOSTED_TURN_SCOPES };
+type NativeHostedTurnErrorCode = 'invalid' | 'forbidden' | 'unavailable' | 'not-turn' | 'stale' | 'closed' | 'recovery-required';
+const NEXT_STEP: Record<NativeHostedTurnErrorCode, string> = {
+  invalid: 'The request is malformed; correct it and send it again.',
+  forbidden: `This pairing lacks the authority for native hosted turns (${NATIVE_HOSTED_TURN_SCOPES.join(', ')}); pair with those scopes, then retry.`,
+  unavailable: 'The host could not read this turn\'s dispatch record; read its status again.',
+  'not-turn': 'This input is not an admitted conversation turn; inspect its intake state before starting it.',
+  stale: 'The source, session or pairing changed since it was read; read the current status and start from the current source.',
+  closed: 'The host is closing or this turn was cancelled; start a new turn once the host is available.',
+  'recovery-required': 'A turn on this session has no live owner on this host; cancel that turn, then continue the session.',
+};
 export class NativeHostedTurnError extends Error {
-  constructor(readonly code: 'invalid' | 'forbidden' | 'unavailable' | 'not-turn' | 'stale' | 'closed' | 'recovery-required') {
-    super(`Native hosted turn: ${code}`); this.name = 'NativeHostedTurnError';
+  constructor(readonly code: NativeHostedTurnErrorCode, detail?: string) {
+    super(`Native hosted turn: ${code}. ${NEXT_STEP[code]}${detail ? ` ${detail}` : ''}`); this.name = 'NativeHostedTurnError';
   }
 }
+
+/** Random per process: with the pid, it proves a claim's owner process has exited. */
+const PROCESS_INSTANCE = randomUUID();
+const processAlive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+};
+/** Machine and pid namespace of this process: a pid in another container or host means nothing here. */
+export const NATIVE_HOST_IDENTITY = (() => {
+  let namespace = '';
+  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable: the hostname alone */ }
+  return `${hostname()}|${namespace}`;
+})();
+const BROKER_TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 export interface NativeHostedTurnOptions {
   readonly signal?: AbortSignal;
   readonly isAuthorized: () => boolean;
@@ -27,13 +54,15 @@ export interface NativeHostedTurnOptions {
 export interface NativeHostedTurnDependencies {
   readonly projectId: string;
   readonly projectRoot: string;
-  readonly intake: Pick<NativeConversationIntakeHost, 'get' | 'admit'>;
+  readonly intake: Pick<NativeConversationIntakeHost, 'get' | 'admit'> & Partial<Pick<NativeConversationIntakeHost, 'settle'>>;
   readonly journalPath: string;
   readonly checkpoints?: Pick<WorkspaceCheckpointManager, 'init' | 'workspaceRoot' | 'sessionChanges' | 'diff'>;
   readonly installContinuationOwner?: (owner: NativeConversationContinuationOwner) => void;
 }
 interface NativeTurnOwnership {
   cancelled: boolean;
+  /** Set only when the runtime confirmed it aborted this turn while it was still running; a turn that already finished is not interrupted. */
+  interrupted: boolean;
   controller: AbortController;
   sessionId: string | null;
   brokerInputId: string | null;
@@ -48,6 +77,11 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
   const projectRoot = realpathSync(deps.projectRoot);
   const journal = deps.journal ?? new NativeHostedTurnJournal(deps.journalPath);
   const active = new Map<string, NativeTurnOwnership>();
+  /** Claims this host created. Only the claimer may dispatch, so one not in `active` has no live owner. */
+  const claimedHere = new Set<string>();
+  /** Turns whose owner lifetime ended before their broker reservation could be durably settled; the permit lets a later cancel finish the settlement. */
+  const stranded = new Map<string, NativeTurnOwnership>();
+  let lastSettleRefusal: string | null = null;
   let claims = Promise.resolve();
   const starting = new Map<string, { readonly identity: NativeHostedTurnIdentity; readonly originSurface: NativeHostedTurnOriginSurface; readonly promise: Promise<NativeHostedTurnLookup> }>();
   const sessionTails = new Map<string, Promise<void>>();
@@ -80,6 +114,10 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       !(record.state === 'cancelled' && record.sessionId === null) && (record.originSurface ?? 'webui') !== surface)) throw new NativeHostedTurnError('stale');
     if (records.some(record => record.identity.projectId !== deps.projectId || record.identity.principalId !== principalId)) throw new NativeHostedTurnError('forbidden');
     if (!allowRecovery && records.some(record => !['completed', 'cancelled'].includes(record.state) && !active.has(keyOf(record.identity)))) throw new NativeHostedTurnError('recovery-required');
+    for (const proven of provenSessionOwners.keys()) {
+      const known = deps.manager.get(proven);
+      if (!known || known.status === 'terminated') provenSessionOwners.delete(proven);
+    }
     provenSessionOwners.set(sessionId, { principalId, originSurface: surface });
     if (allowRecovery) {
       const session = deps.manager.get(sessionId);
@@ -143,14 +181,50 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     return { kind: 'native', projectId: deps.projectId, sessionId, busy: owned.status === 'running' || sessionTails.has(sessionId) };
   }
   const localInputs = () => [...active.keys()].map(key => (JSON.parse(key) as [string, string, string])[2]);
-  async function claimOwned(identity: NativeHostedTurnIdentity, originSurface: NativeHostedTurnOriginSurface, owned: NativeTurnOwnership, reserve: () => void): Promise<boolean> {
+  /** Records the end of a hosted turn on its intake capture, so intake alone refuses a replay. Best effort: unsettled only means the journal record stays. */
+  async function settleIntake(identity: NativeHostedTurnIdentity, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<boolean> {
+    if (!deps.intake.settle) return false;
+    try {
+      await deps.intake.settle({ inputId: identity.inputId, sourceRevision: identity.sourceRevision }, authority, { isAuthorized: options.isAuthorized });
+      return true;
+    } catch (error) {
+      // The same refusal repeats for every turn until the cause is fixed; say it once.
+      const reason = error instanceof Error ? error.message : String(error);
+      if (reason !== lastSettleRefusal) {
+        lastSettleRefusal = reason;
+        logger.warn('Native turn left unsettled on intake; its journal record is kept', { inputId: identity.inputId, reason });
+      }
+      return false;
+    }
+  }
+  /**
+   * Before a claim, when the journal is near a cap, drop records that are terminal here and
+   * durably settled on intake. Settling is attempted first, so a crash between a terminal
+   * journal write and its intake write heals here instead of pinning the record forever.
+   * Only the caller's own principal can be read; others are kept. Never drops a live turn.
+   */
+  async function compactJournal(principalId: string, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<void> {
+    if (!deps.intake.settle) return;
+    const { nearCap, terminal } = await journal.census();
+    if (!nearCap) return;
+    const finished: NativeHostedTurnIdentity[] = [];
+    for (const record of terminal) {
+      if (record.identity.projectId !== deps.projectId || record.identity.principalId !== principalId || active.has(keyOf(record.identity))) continue;
+      if (await settleIntake(record.identity, authority, options)) finished.push(record.identity);
+    }
+    await journal.compact(finished, (record, owner) => active.has(keyOf(record.identity))
+      || (owner !== null && owner.instance !== PROCESS_INSTANCE && owner.pid !== process.pid && processAlive(owner.pid)));
+  }
+  async function claimOwned(identity: NativeHostedTurnIdentity, originSurface: NativeHostedTurnOriginSurface, owned: NativeTurnOwnership, reserve: () => void,
+    authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<boolean> {
     const previous = claims;
     let release = () => {};
     claims = new Promise<void>(resolve => { release = resolve; });
     await previous;
     try {
-      const claimed = await journal.claim(identity, localInputs(), originSurface);
-      if (claimed) { active.set(keyOf(identity), owned); reserve(); }
+      await compactJournal(identity.principalId, authority, options).catch(() => {});
+      const claimed = await journal.claim(identity, localInputs(), originSurface, { pid: process.pid, instance: PROCESS_INSTANCE, host: NATIVE_HOST_IDENTITY });
+      if (claimed) { active.set(keyOf(identity), owned); claimedHere.add(keyOf(identity)); reserve(); }
       return claimed;
     } catch (error) {
       if (error instanceof NativeHostedTurnJournalError && error.code === 'surface-conflict') throw new NativeHostedTurnError('stale');
@@ -233,8 +307,8 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       sessionTails.set(sessionId, barrier);
       void barrier.then(() => { if (sessionTails.get(sessionId) === barrier) sessionTails.delete(sessionId); });
     };
-    const owned: NativeTurnOwnership = { cancelled: false, controller: new AbortController(), sessionId: null, brokerInputId: null, permit: null, done: Promise.resolve() };
-    if (!await claimOwned(identity, originSurface, owned, () => { if (identity.continuationSessionId) reserve(identity.continuationSessionId); })) {
+    const owned: NativeTurnOwnership = { cancelled: false, interrupted: false, controller: new AbortController(), sessionId: null, brokerInputId: null, permit: null, done: Promise.resolve() };
+    if (!await claimOwned(identity, originSurface, owned, () => { if (identity.continuationSessionId) reserve(identity.continuationSessionId); }, authority, options)) {
       const record = await journal.read(identity);
       if (!record) throw new NativeHostedTurnError('unavailable');
       return project(record);
@@ -297,7 +371,8 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         assertCurrent();
         if (owned.cancelled || closed) throw new NativeHostedTurnError('closed');
         await deps.manager.deliverNative(session.id, input.id, permit);
-        if (owned.cancelled || closed) {
+        // A cancel or close that arrives after the turn finished and was saved did not stop it: record the completion.
+        if (owned.interrupted) {
           const terminal = await deps.broker.settleNativeTurnInput(session.id, input.id, permit, 'cancelled');
           if (terminal.state !== 'cancelled') throw new NativeHostedTurnError('recovery-required');
           const record = await journal.read(identity);
@@ -310,6 +385,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         if (terminal.state !== 'completed') throw new NativeHostedTurnError('recovery-required');
         await journal.transition(identity, 'dispatching', { ...dispatch, state: 'completed' });
       }).catch(async () => {
+        stranded.set(key, owned);
         const brokerState = deps.broker.getInputsSince(session.id).find(item => item.id === input.id)?.state;
         // A strict settlement failure may leave visible in-memory terminal
         // state. Reconfirm it through the exact-owned durable operation; merely
@@ -322,7 +398,13 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         if (record && (record.state === 'preparing' || record.state === 'queued' || record.state === 'dispatching')) {
           await journal.transition(identity, record.state, { state: owned.cancelled ? 'cancelled' : 'recovery-required', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId });
         }
-      }).finally(() => { if (active.get(key) === owned) active.delete(key); releaseSlot(); client.dispose(); });
+        stranded.delete(key);
+      }).finally(async () => {
+        if (active.get(key) === owned) active.delete(key); releaseSlot(); client.dispose();
+        // The journal is written first: a crash between the two leaves the record un-evictable, never replayable.
+        const record = await journal.read(identity).catch(() => null);
+        if (record && ['completed', 'cancelled'].includes(record.state)) { claimedHere.delete(key); await settleIntake(identity, authority, options); }
+      });
       // Observe persistence failures without pretending they succeeded. Status
       // retains the durable claim and reports recovery-required after this drains.
       void owned.done.catch(() => {});
@@ -330,14 +412,93 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     } catch (error) {
       // No native runtime was dispatched on this preparation failure. Release
       // the empty session so a cancelled/revoked preparation cannot exhaust capacity.
+      let reservationSettled = owned.brokerInputId === null;
       if (owned.sessionId && owned.brokerInputId && owned.permit) {
-        await deps.broker.settleNativeTurnInput(owned.sessionId, owned.brokerInputId, owned.permit, owned.cancelled ? 'cancelled' : 'failed').catch(() => {});
+        const expected = owned.cancelled ? 'cancelled' : 'failed';
+        reservationSettled = await deps.broker.settleNativeTurnInput(owned.sessionId, owned.brokerInputId, owned.permit, expected)
+          .then(terminal => terminal.state === expected, () => false);
+        // Keep the permit so a later cancel in this process can retry the settlement instead of staying recovery-required.
+        if (!reservationSettled) stranded.set(key, owned);
       }
       if (createdNewSession && owned.sessionId) await deps.manager.kill(owned.sessionId).catch(() => {});
+      // Retire the claim, or it would stay non-terminal with no owner and
+      // block every later turn on its session. Only once any reservation is
+      // durably settled; otherwise the record honestly stays unresolved.
+      // A transient refusal (the source or pairing moved, or the record could not
+      // be read) is not a verdict on the input: it stays unsettled so a later
+      // cancel decides, instead of being cancelled and settled here for good.
+      const transient = error instanceof NativeHostedTurnError && !owned.cancelled && (error.code === 'unavailable' || error.code === 'stale');
+      let outcome = error;
+      if (reservationSettled) {
+        if (transient) {
+          await parkUndispatched(identity).catch(() => {});
+          outcome = new NativeHostedTurnError(error.code, 'Preparation did not finish and the input was not cancelled; read its status, and cancel it to release the session.');
+        } else {
+          await retireUndispatched(identity).catch(() => {});
+          const record = await journal.read(identity).catch(() => null);
+          if (record?.state === 'cancelled') {
+            claimedHere.delete(key);
+            await settleIntake(identity, authority, options);
+            if (error instanceof NativeHostedTurnError) outcome = new NativeHostedTurnError(error.code, 'The input was cancelled and cannot be started again.');
+          }
+        }
+      }
       releaseSlot();
       active.delete(key); client.dispose();
-      throw error;
+      throw outcome;
     }
+  }
+  /** A claim whose preparation failed for a transient reason is held as recovery-required, so only an explicit cancel ends it. */
+  async function parkUndispatched(identity: NativeHostedTurnIdentity): Promise<void> {
+    const record = await journal.read(identity);
+    if (!record || !['preparing', 'queued', 'dispatching'].includes(record.state)) return;
+    try { await journal.transition(identity, record.state, { state: 'recovery-required', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId }); }
+    catch (error) { if (!(error instanceof NativeHostedTurnJournalError) || error.code !== 'conflict') throw error; }
+  }
+  /** A claim whose preparation failed before dispatch becomes cancelled; a concurrent move wins. */
+  async function retireUndispatched(identity: NativeHostedTurnIdentity): Promise<void> {
+    const record = await journal.read(identity);
+    if (!record || !['preparing', 'queued', 'dispatching'].includes(record.state)) return;
+    try { await journal.transition(identity, record.state, { state: 'cancelled', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId }); }
+    catch (error) { if (!(error instanceof NativeHostedTurnJournalError) || error.code !== 'conflict') throw error; }
+  }
+  /**
+   * Whether a non-terminal record with no live owner here may be cancelled.
+   * Never inferred from `active` alone: another daemon may be dispatching it.
+   * Proof is either this host's own claim whose lifetime ended after durably
+   * settling its reservation (`recovery-required`), or a claim whose recorded
+   * owner process has exited and whose reservation is no longer pending.
+   */
+  async function settleStranded(record: NativeHostedTurnDispatch, key: string): Promise<boolean> {
+    const owned = stranded.get(key);
+    if (!owned?.sessionId || !owned.brokerInputId || !owned.permit) return false;
+    const visible = deps.broker.getInputsSince(owned.sessionId).find(item => item.id === owned.brokerInputId)?.state;
+    const expected = visible === 'completed' || visible === 'failed' ? visible : 'cancelled';
+    try {
+      const terminal = await deps.broker.settleNativeTurnInput(owned.sessionId, owned.brokerInputId, owned.permit, expected);
+      if (terminal.state !== expected) return false;
+      if (expected === 'completed' && !['completed', 'cancelled'].includes(record.state)) {
+        await journal.transition(record.identity, record.state, { state: 'completed', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId });
+      }
+    } catch { return false; }
+    stranded.delete(key);
+    return true;
+  }
+  async function ownerEnded(record: NativeHostedTurnDispatch, key: string): Promise<boolean> {
+    if (starting.has(key)) return false;
+    if (claimedHere.has(key)) {
+      if (record.state === 'recovery-required') return true;
+      // This host claimed it and its owner lifetime is over (it is neither live nor starting), but a failed
+      // durable write left the reservation or the record unsettled. Finish that settlement with the retained
+      // permit; if the write still fails, the turn honestly stays recovery-required.
+      return !active.has(key) && await settleStranded(record, key);
+    }
+    const owner = await journal.owner(record.identity);
+    // Unknown host (a record that does not say) or another host: this machine cannot see that process, so it is kept.
+    if (!owner || owner.host !== NATIVE_HOST_IDENTITY || owner.instance === PROCESS_INSTANCE || (owner.pid !== process.pid && processAlive(owner.pid))) return false;
+    if (record.sessionId === null || record.brokerInputId === null) return true;
+    const reservation = deps.broker.getInputsSince(record.sessionId).find(item => item.id === record.brokerInputId);
+    return reservation === undefined || BROKER_TERMINAL.has(reservation.state ?? '');
   }
   async function cancel(input: NativeHostedTurnRequest, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<NativeHostedTurnLookup> {
     const { identity } = await sourceOf(input, authority, options), key = keyOf(identity);
@@ -345,7 +506,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       const owned = active.get(key);
       if (owned) {
         owned.cancelled = true; owned.controller.abort();
-        if (owned.sessionId && owned.permit) deps.manager.cancelNative(owned.sessionId, owned.permit);
+        if (owned.sessionId && owned.permit && deps.manager.cancelNative(owned.sessionId, owned.permit) === true) owned.interrupted = true;
       }
       return owned;
     };
@@ -366,7 +527,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       }
     }
     const current = fence();
-    if (!earlier && !current && !['completed', 'cancelled'].includes(record.state)) {
+    if (!earlier && !current && !['completed', 'cancelled'].includes(record.state) && !await ownerEnded(record, key)) {
       // Another process, or an interrupted process, owns the ambiguity. A file
       // write cannot stop that lifetime or prove its effects have drained.
       return { ...project(record), state: 'recovery-required' };
@@ -378,12 +539,13 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     if (!record) throw new NativeHostedTurnError('unavailable');
     if (!['completed', 'cancelled'].includes(record.state)) record = await journal.transition(identity, record.state, { state: 'cancelled', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId });
     authorize(authority, options);
+    if (['completed', 'cancelled'].includes(record.state)) { claimedHere.delete(key); stranded.delete(key); await settleIntake(identity, authority, options); }
     return project(record);
   }
   return { start, startAgent, status, cancel, session, continuation,
     async close(): Promise<void> {
       closed = true;
-      for (const owned of active.values()) { owned.cancelled = true; owned.controller.abort(); if (owned.sessionId && owned.permit) deps.manager.cancelNative(owned.sessionId, owned.permit); }
+      for (const owned of active.values()) { owned.cancelled = true; owned.controller.abort(); if (owned.sessionId && owned.permit && deps.manager.cancelNative(owned.sessionId, owned.permit) === true) owned.interrupted = true; }
       await Promise.allSettled([...starting.values()].map(pending => pending.promise));
       await Promise.allSettled([...active.values()].map(owned => owned.done));
     },

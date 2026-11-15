@@ -1,9 +1,9 @@
 /**
  * PowerChip, the always-visible "sleep disabled" chip, rendered in the
- * StatusStrip footer while the owner's keep-awake toggle actually holds a
- * sleep inhibitor (power.status.get's `keepAwake.held`, platform 1.8.0). Absent
+ * shell header's indicators while the owner's keep-awake toggle actually holds
+ * a sleep inhibitor (power.status.get's `keepAwake.held`, platform 1.8.0). Absent
  * while the toggle is off or unheld, there is nothing dangerous to flag,
- * so this never pads the strip with a dead segment.
+ * so this never pads the header with a dead segment.
  *
  * Danger idiom (--status-danger/--status-danger-soft, same tokens
  * checkpoints.css's destructive-restore chip uses): keep-awake is an active

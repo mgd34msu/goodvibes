@@ -47,7 +47,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: true,
     description:
-      'Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you".',
+      'Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.',
   },
   {
     key: 'profile.autonomousWrites',
@@ -89,7 +89,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 2000,
     description:
-      'How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows.',
+      'How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.',
     ...intRange(50, 3_600_000),
   },
   {
@@ -97,7 +97,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely.',
+      'Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts.',
   },
   {
     key: 'profile.conversationalCapture',
@@ -111,6 +111,6 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else\'s words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means the channels already set to reach you privately in occasions.nudgeChannel, so the channel that sends you a birthday reminder can also hear you say when your flight leaves.',
+      'The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else\'s words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means no channel counts as you on a conversational turn: only a surface you are sitting at (the terminal, the web UI) can record to your profile, and the refusal names this setting. occasions.nudgeChannel is where reminders are sent and is not an owner grant, so the channel that sends you a birthday reminder cannot also record that your flight leaves at nine until you list it here.',
   },
 ];

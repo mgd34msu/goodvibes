@@ -147,7 +147,7 @@ test('a judgment port reentering close cannot escape the accepted-work drain', a
     const offering = inbox.offer('telegram', 'stop');
     await entered.promise;
     await expect(waiting).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
-    await Promise.resolve();
+    await new Promise<void>(resolve => setImmediate(resolve));
     expect(closed).toBe(false);
     release.resolve();
     expect(await offering).toEqual({ consumed: false, reason: 'no-window' });

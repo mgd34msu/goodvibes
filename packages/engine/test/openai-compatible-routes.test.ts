@@ -169,4 +169,17 @@ describe('OpenAI-compatible daemon routes', () => {
     const models = await listing!.json() as { data: Array<{ id: string }> };
     expect(models.data.map((model) => model.id)).toEqual(['anthropic:gpt-test', 'goodvibes/current', 'openai:gpt-test']);
   });
+
+  test('a caller without the admin role cannot spend provider money; model listing stays open', async () => {
+    const provider = makeProvider();
+    const context = { ...makeContext(provider), requireAdmin: () => Response.json({ error: 'Admin role required' }, { status: 403 }) };
+    const chat = await dispatchOpenAICompatibleRoutes(request('/v1/chat/completions', {
+      model: 'openai:gpt-test',
+      messages: [{ role: 'user', content: 'hi' }],
+    }), context);
+    const models = await dispatchOpenAICompatibleRoutes(request('/v1/models'), context);
+    expect(chat?.status).toBe(403);
+    expect(models?.status).toBe(200);
+    expect(provider.requests.length).toBe(0);
+  });
 });

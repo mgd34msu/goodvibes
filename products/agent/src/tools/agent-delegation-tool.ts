@@ -42,9 +42,11 @@ function normalizeDelegationAction(value: unknown): AgentDelegationAction | null
   return null;
 }
 
-function readAction(args: AgentDelegationToolArgs): AgentDelegationAction {
+function readAction(args: AgentDelegationToolArgs): AgentDelegationAction | null {
   const explicit = normalizeDelegationAction(args.action) ?? normalizeDelegationAction(args.mode);
   if (explicit) return explicit;
+  // An action or mode that was given but is not one of ours is not a request to guess: answering with another view would read as the requested one.
+  if (readString(args.action) || readString(args.mode)) return null;
   if (readString(args.delegationRouteId) || readString(args.id)) return 'route';
   return 'status';
 }
@@ -113,6 +115,7 @@ export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
       const args = captureModelReadingInput(rawArgs);
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
+      if (action === null) return error('Unknown delegation action. Use action (or mode) as one of: status, routes, route.');
 
       if (action === 'status' || action === 'routes') return forward(postureArgs(args));
       if (action === 'route') return forward(routeArgs(args));

@@ -17,6 +17,7 @@ import { z } from 'zod/v4';
 
 import type { Exec } from './effects.js';
 import { realExec } from './effects.js';
+import { DEFAULT_ENGINE_PACKAGE } from '../config.js';
 
 export type RepoKind = 'platform' | 'engine-consumer' | 'independent';
 
@@ -95,7 +96,7 @@ export interface RepoRow {
 }
 
 /** The engine package a consumer depends on (the same name as DEFAULT_ENGINE_PACKAGE in config.ts). */
-export const ENGINE_PACKAGE_NAME = '@goodvibes-jev/engine';
+export const ENGINE_PACKAGE_NAME = DEFAULT_ENGINE_PACKAGE;
 
 /** Render the engine-consumer pin ⇄ latest column. `n/a` for non-consumer kinds. */
 export function classifyEnginePin(pin: string | null, latest: string | null, kind: RepoKind): string {

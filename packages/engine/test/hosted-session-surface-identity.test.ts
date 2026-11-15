@@ -13,11 +13,11 @@
  * `~/.goodvibes/agent/settings.json`, which nobody had touched. Every part of
  * that exchange was internally consistent and none of it was true.
  *
- * These tests pin the two halves of the fix:
- *   - identity TRAVELS: a session created for a surface carries that surface,
- *     through the create call, the record, and a rebuild after a restart;
- *   - identity is USED: client-owned keys resolve against the originating
- *     surface's own file, and the host's store is left alone.
+ * These tests pin the half of the fix that decides where a setting lives:
+ * identity is USED, so client-owned keys resolve against the originating
+ * surface's own file and the host's store is left alone. (That a session
+ * carries its surface through the create call, the record and a rebuild is
+ * covered by hosted-native-turn-host.test.ts.)
  *
  * The second file covered here is the daemon-owned config migration, which was
  * the other suspect for the owner's "silent reverts". It is exonerated by

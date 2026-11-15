@@ -207,6 +207,27 @@ describe('SecretsManager', () => {
       expect(keys).toEqual([]);
     });
 
+    test('a write to a corrupted store is refused and leaves the file untouched', async () => {
+      mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+      const { writeFileSync } = await import('fs');
+      const garbage = 'NOT_VALID_JSON_OR_CIPHERTEXT';
+      writeFileSync(encPath, garbage, 'utf-8');
+
+      const mgr = createProjectStoreManager();
+      await expect(mgr.set('K', 'v')).rejects.toThrow('Refusing to write to the secrets store');
+      expect(readFileSync(encPath, 'utf-8')).toBe(garbage);
+    });
+
+    test('inspect reports a corrupted store as unreadable instead of as an empty one', async () => {
+      mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+      const { writeFileSync } = await import('fs');
+      writeFileSync(encPath, 'NOT_VALID_JSON_OR_CIPHERTEXT', 'utf-8');
+
+      const review = await createProjectStoreManager().inspect();
+      expect(review.warnings.some((warning) => warning.includes(encPath) && warning.includes('cannot be read'))).toBe(true);
+      expect(review.locations.find((location) => location.path === encPath)).toMatchObject({ exists: true, readable: false });
+    });
+
     test('returns all stored key names', async () => {
       const mgr = createProjectStoreManager();
       await mgr.set('KEY_ONE', 'v1');

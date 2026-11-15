@@ -8,6 +8,8 @@
  */
 import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /**
  * The suffix every quarantined file on this platform gets. Exported so the
@@ -26,8 +28,9 @@ export interface ReadVersionedOptions {
   /**
    * The version number this reader expects. When the file version equals
    * `currentVersion`, no migrations are run. When it is lower, migrations
-   * are applied stepwise. When it is higher or unrecognised, `onUnknown`
-   * behaviour fires.
+   * are applied stepwise. When it is missing or non-numeric, `onUnknown`
+   * behaviour fires. A file with a HIGHER version belongs to a newer process:
+   * it is left where it is and null is returned.
    */
   readonly currentVersion: number;
 
@@ -53,8 +56,8 @@ export interface ReadVersionedOptions {
  * Parse flow:
  *   1. If the file does not exist → return null.
  *   2. If JSON is corrupt → quarantine to `<path>.unrecognized`, return null.
- *   3. If the version field is missing or higher than currentVersion →
- *      quarantine, return null.
+ *   3. If the version field is missing → quarantine, return null. If it is
+ *      higher than currentVersion → leave the file in place, return null.
  *   4. If the version is lower than currentVersion → apply stepwise migrations.
  *      If no migration exists for a version gap, or a migration throws,
  *      quarantine and return null.
@@ -88,8 +91,8 @@ export function readVersioned<T extends { version: number }>(
   }
 
   if (fileVersion > options.currentVersion) {
-    // Produced by a newer process, quarantine rather than corrupt.
-    quarantine(path);
+    // Produced by a newer process, and perfectly good for it: moving it aside
+    // would take the newer process's state away. This reader just cannot use it.
     return null;
   }
 
@@ -116,17 +119,53 @@ export function readVersioned<T extends { version: number }>(
   return data as T;
 }
 
+/**
+ * Call before a writer replaces a versioned file in place. A file written by a
+ * newer process (its version is above `currentVersion`) is renamed to the
+ * quarantine name instead of being overwritten, so the newer state survives a
+ * downgrade. Returns true when a file was set aside. Any other file (missing,
+ * unreadable, same or older version) is left for the writer, which replaces it.
+ */
+export function setAsideNewerVersionFile(path: string, currentVersion: number): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(raw)) return false;
+  const fileVersion = raw['version'];
+  if (typeof fileVersion !== 'number' || !Number.isFinite(fileVersion) || fileVersion <= currentVersion) return false;
+  quarantine(path);
+  return true;
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The first quarantine name not already taken, so an earlier forensic copy is never overwritten. */
+function freeQuarantineName(path: string): string {
+  const first = `${path}${UNRECOGNIZED_SUFFIX}`;
+  if (!existsSync(first)) return first;
+  for (let n = 1; n <= 1000; n++) {
+    const candidate = `${path}.${n}${UNRECOGNIZED_SUFFIX}`;
+    if (!existsSync(candidate)) return candidate;
+  }
+  return first;
+}
+
 function quarantine(path: string): void {
   try {
-    renameSync(path, `${path}${UNRECOGNIZED_SUFFIX}`);
-  } catch {
-    // Best-effort, if rename fails (e.g. race), proceed silently.
+    renameSync(path, freeQuarantineName(path));
+  } catch (error) {
+    // Another process already moved it aside: nothing is left to report.
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return;
+    // The caller still gets null (the store starts from defaults), but the
+    // corrupt file stays where it is, so say so rather than hide it.
+    logger.warn('Could not move an unreadable file aside; it was left in place', { path, error: summarizeError(error) });
   }
 }
 

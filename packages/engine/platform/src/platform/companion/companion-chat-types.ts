@@ -84,10 +84,13 @@ export interface CompanionChatMessage {
    *   answer.
    * - `'queued'` (user): the message is in the transcript but its LLM turn
    *   has not started yet (posted while another turn was running). Cleared
-   *   when its turn starts; a session closed first leaves the marker as the
-   *   honest record that the message was never answered.
+   *   when its turn starts.
+   * - `'unanswered'` (user, terminal): the message was queued and its turn can
+   *   never start, because the chat was closed, the service shut down, or the
+   *   daemon restarted first. The honest record that nothing answered it;
+   *   resend it to get a reply.
    */
-  readonly deliveryState?: 'cancelled' | 'queued' | undefined;
+  readonly deliveryState?: 'cancelled' | 'queued' | 'unanswered' | undefined;
   /**
    * On an assistant message: the id of the user message this reply answers.
    * The transcript is append-ordered, so with queued sends a reply can land

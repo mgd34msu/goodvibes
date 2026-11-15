@@ -10,7 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCommandOptions = getCommandOptions;
-const node_child_process_1 = require("node:child_process");
 const path = require("node:path");
 const node_util_1 = require("node:util");
 const TurndownService = require("turndown");
@@ -744,14 +743,9 @@ function getMarkdownContent(documentation, language) {
         kind: LSP.MarkupKind.Markdown,
     };
 }
-function getCommandOptions(name, word) {
-    const options = (0, node_child_process_1.spawnSync)(path.join(__dirname, '../src/get-options.sh'), [name, word]);
-    if (options.status !== 0) {
-        return [];
-    }
-    return options.stdout
-        .toString()
-        .split('\t')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
+function getCommandOptions(_name, _word) {
+    // Upstream asks ../src/get-options.sh, which is not vendored and would
+    // source system completion scripts that can run the typed program. Flag
+    // completion is therefore not offered.
+    return [];
 }

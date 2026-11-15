@@ -136,7 +136,9 @@ describe('inbox query and wire contracts', () => {
     expect(normalizeInboxQuery({})).toEqual({ limit: DEFAULT_LIMIT });
     expect(normalizeInboxQuery({}, { limit: '100000' }).limit).toBe(MAX_LIMIT);
     expect(normalizeInboxQuery({}, { limit: '0' }).limit).toBe(1);
-    expect(normalizeInboxQuery({}, { limit: 'banana', since: '-1' })).toEqual({ limit: DEFAULT_LIMIT });
+    expect(() => normalizeInboxQuery({}, { limit: 'banana' })).toThrow(/limit must be a number/);
+    expect(() => normalizeInboxQuery({}, { since: '-1' })).toThrow(/since must be a non-negative number/);
+    expect(() => normalizeInboxQuery({ since: Number.NaN })).toThrow(/since must be/);
   });
 
   test('page cursors round trip IDs with delimiters and reject malformed values', () => {

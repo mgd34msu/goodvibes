@@ -266,7 +266,10 @@ export function useHostedAttachment(
       toast({ title: updated?.status === 'terminated' ? 'Session ended' : 'Left the session', tone: 'info' });
     } catch (error) {
       if (detachRef.current !== owner) return;
+      // The daemon still counts this client as attached, so keep the pane and the
+      // owner: Leave can be retried, and unmount or pagehide still send a detach.
       toast({ title: 'Detach failed', description: formatError(error), tone: 'danger' });
+      return;
     }
     detachRef.current = null;
     setAttachedSession(null);
@@ -342,6 +345,7 @@ export function HostedSessionDetail({
       closeLabel="Close hosted session"
     >
       {attachment.confirmElement}
+      {attachment.streamError && <p className="dv-notice dv-notice--bad" role="status">{attachment.streamError}</p>}
       {attachment.attaching && <SkeletonRows count={4} label="Attaching" />}
       {!attachment.attaching && (Boolean(attachment.attachError) || !session) && (
         <p className="dv-notice dv-notice--bad" role="alert">

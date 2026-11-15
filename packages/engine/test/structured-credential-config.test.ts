@@ -31,8 +31,11 @@ test('structured references have an exact declaration without entering scalar se
   expect(isStructuredCredentialReferenceConfigKey('judgment.fallbacks.0.keyName')).toBe(false);
   expect(isStructuredCredentialReferenceConfigKey('provider.unrecognizedSecret')).toBe(false);
   expect(structuredCredentialConfigSchemaFailures(CONFIG_SCHEMA)).toEqual([]);
-  expect(undeclaredSchemaKeys().some(entry => entry.key === key)).toBe(false);
-  expect(undeclaredSchemaKeys().some(entry => entry.key === 'judgment.timeoutMs')).toBe(true);
+  // The structured reference is declared, so it is not reported; the report is not simply empty.
+  const undeclared = undeclaredSchemaKeys();
+  expect(undeclared.some(entry => entry.key === key)).toBe(false);
+  expect(undeclared.some(entry => isStructuredCredentialReferenceConfigKey(entry.key))).toBe(false);
+  expect(undeclared.length).toBeGreaterThan(0);
 });
 
 test('the declaration gate rejects missing, duplicate, wrong-shaped, wrong-parser and invalid-default contracts', () => {

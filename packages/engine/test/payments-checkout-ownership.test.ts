@@ -12,6 +12,7 @@ import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutTerms } from 
 import { createChannelPaymentNotifier } from '../platform/src/platform/payments/notice-delivery.js';
 import { PaymentReplyInbox, PaymentReplyWindowError } from '../platform/src/platform/payments/reply-inbox.js';
 import type { RawCheckoutReading } from '../platform/src/platform/payments/checkout-extraction.js';
+import type { PaymentNoticeWindow } from '../platform/src/platform/payments/payment-ports.js';
 import type { PurchaseRecord } from '../platform/src/platform/payments/purchase-record.js';
 import { PaymentsGatewayServiceImpl } from '../platform/src/platform/payments/payments-gateway-service.js';
 import { readPaymentsServiceConfig } from '../platform/src/platform/payments/payments-config.js';
@@ -33,7 +34,7 @@ afterEach(async () => {
 });
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); gates.push(release); return { wait, release }; }
 const material = { number: '4242424242424242', expiryMonth: '01', expiryYear: '2030', cvv: '918', cardholderName: 'Fixture Owner' };
-function fixture() {
+function fixture(requestedMax?: string) {
   const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Fixture currency failed');
   const ledger = new BudgetLedger(), journal = new MemoryCheckoutJournal(), redactor = new CardMaterialRedactor();
   let active = true, page = 'page', metadataFailure = false, liveTotal = 1_100;
@@ -44,7 +45,8 @@ function fixture() {
   const effects: string[] = [], records: PurchaseRecord[] = [], notices: { kind: string; message: string }[] = [];
   let merchantCalls = 0;
   const request: PurchaseRequest = { purchaseId: 'owned-purchase', merchantDomain: 'bestbuy.com', checkoutUrl: 'https://www.bestbuy.com/checkout',
-    item: unsafeOwnerSuppliedTextForTests('Original item'), requestedLines: [{ label: 'Original item', quantity: 1 }], cardId: 'card', preferredTier: 'normal' };
+    item: unsafeOwnerSuppliedTextForTests('Original item'), requestedLines: [{ label: 'Original item', quantity: 1 }], cardId: 'card', preferredTier: 'normal',
+    ...(requestedMax === undefined ? {} : { requestedMax }) };
   const reading: RawCheckoutReading = { lines: [{ label: 'Original item', quantity: '1', unitPrice: '$10.00' }], tax: '$1.00', fees: [],
     shippingOptions: [{ label: 'Standard', cost: '$0.00' }], statedTotal: '$11.00', currency: 'USD', orderSummaryText: 'One original item' };
   const controls: CheckoutControls = { cardFields: [{ field: 'number', target: 'card-field' }], shippingTargets: ['shipping-original'], placeOrderTarget: 'submit-original' };
@@ -162,7 +164,7 @@ test.each(['approve', 'deny'] as const)('repricing across the original request m
     return { answer, channel: 'operator' };
   };
   const result = await f.run();
-  expect(f.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'veto'] : ['veto', 'approval']);
+  expect(f.notices.map(notice => notice.kind)).toEqual(answer === 'approve' ? ['veto', 'approval', 'notice'] : ['veto', 'approval']);
   expect(f.notices[1]?.message).toContain('Requested maximum: USD 15.00');
   expect(f.notices[1]?.message).toContain('full total exceeds your requested maximum');
   expect(f.notices[1]?.message).not.toContain('remaining daily item budget');
@@ -363,7 +365,7 @@ test('an async ownership assertion is drained and refused before any model or pa
 test('an uncertain submit keeps its protected budget and redaction after the owner retires', async () => {
   const f = fixture(); f.onSubmit(async () => { f.revoke(); throw new Error('No merchant acknowledgement'); });
   const result = await f.run();
-  expect(result).toMatchObject({ kind: 'refused', code: 'challenge-abandoned' });
+  expect(result).toMatchObject({ kind: 'refused', code: 'submit-outcome-unknown' });
   expect(f.ledger.state().reservations[0]?.retainUntilSettled).toBe(true);
   expect((await f.journal.list())[0]?.phase).toBe('submit-pending');
   expect(f.redactor.hasLiveMaterial('session', 'page')).toBe(true); expect(f.records).toEqual([]);
@@ -591,7 +593,7 @@ test('uncertain submit never invokes repricing or releases its protected origina
   const f = fixture(); let rereads = 0;
   f.deps.driver.readCurrentQuote = async () => { rereads++; return null; };
   f.deps.driver.submitOrder = async () => { throw new Error('The merchant may already have received the click'); };
-  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'challenge-abandoned' });
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'submit-outcome-unknown' });
   expect(rereads).toBe(0); expect(f.notices).toHaveLength(1);
   expect(f.ledger.state().reservations).toHaveLength(1);
   expect(await f.journal.list()).toMatchObject([{ phase: 'submit-pending' }]);
@@ -754,14 +756,14 @@ test.each(['approval', 'veto'] as const)('an unavailable recovered %s source is 
     cancel() {}, async awaitAnswer() { throw new Error('An unavailable source cannot answer'); } });
   await expect(f.run()).rejects.toMatchObject({ kind: 'source-unavailable' });
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
-  expect(f.effects).not.toContain('submit'); expect(f.effects).not.toContain('card');
+  expect(f.effects.some(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toBe(false); expect(f.effects).not.toContain('card-read');
 });
 
 /** Capture an actual running flow's published checkpoint/accounting, retire
  * that owner, then load the captured bookkeeping into another real flow.
  * This tests engine resumption, not native grant/browser/history recovery. */
-async function resumedFixture() {
-  const before = fixture(), entered = barrier(), retire = barrier();
+async function resumedFixture(requestedMax?: string) {
+  const before = fixture(requestedMax), entered = barrier(), retire = barrier();
   let saved: CheckoutWindowCheckpoint | undefined;
   Reflect.set(before.deps, 'retainWindowCheckpoint', async (value: CheckoutWindowCheckpoint) => {
     saved = captureCheckoutWindowCheckpoint(value); entered.release(); await retire.wait;
@@ -770,11 +772,11 @@ async function resumedFixture() {
   await entered.wait;
   const state = before.ledger.state(); before.revoke(); retire.release(); await first;
   if (!saved?.terms) throw new Error('The real initial flow did not retain exact selected terms');
-  const checkpoint = saved, f = fixture(), ledger = new BudgetLedger(state), journal = new MemoryCheckoutJournal();
+  const checkpoint = saved, f = fixture(requestedMax), ledger = new BudgetLedger(state), journal = new MemoryCheckoutJournal();
   await journal.put(checkpoint.record);
   Reflect.set(f.deps, 'ledger', ledger); Reflect.set(f.deps, 'registry', new CheckoutRegistry(journal));
   let prepared = 0;
-  const resume = { checkpoint, prepare(owner: { readonly assertCurrent?: (() => void) | undefined }) {
+  const resume = { checkpoint, prepare(owner: { readonly assertCurrent?: (() => void) | undefined }): PaymentNoticeWindow & { readonly deadlineMs: Promise<number> } {
     owner.assertCurrent?.(); prepared++;
     return { deliveries: Promise.resolve(checkpoint.record.windowDeliveries ?? []), deadlineMs: Promise.resolve(checkpoint.record.windowDeadlineMs ?? 0),
       async awaitAnswer(deadlineMs: number) { owner.assertCurrent?.(); expect(checkpoint.record.windowDeadlineMs).toBe(deadlineMs);
@@ -795,6 +797,55 @@ test('actual flow resumption reuses the original reservation, journal and notice
     expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
     expect(f.notices).toHaveLength(1); // Completion report only; original window was not sent twice.
   } finally { reserve.mockRestore(); open.mockRestore(); }
+});
+
+test.each([
+  ['losing the purchase owner', () => new CheckoutOwnershipError(), 'owner-changed'],
+  ['an unreadable address store', () => new Error('Private store diagnostic'), 'no-shipping-address'],
+] as const)('address verification failing by %s is reported as %s and releases without submitting', async (_name, failure, code) => {
+  const f = fixture(); Reflect.set(f.controls, 'addressFields', [{ kind: 'shipping', field: 'line1', target: 'address-line' }]);
+  Reflect.set(f.deps, 'addresses', { async read() { throw failure(); } });
+  expect(await f.run()).toMatchObject({ kind: 'refused', code });
+  expect(f.effects.some(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toBe(false);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('a missing billing address is refused as a billing address problem, not a shipping or card one', async () => {
+  const f = fixture(); Reflect.set(f.controls, 'addressFields', [{ kind: 'billing', field: 'line1', target: 'billing-line' }]);
+  Reflect.set(f.deps, 'addresses', { async read() { return null; } });
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'no-billing-address' });
+  expect(f.effects.some(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toBe(false);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('address verification interrupted by a stop is left to the caller to settle rather than reported as an address problem', async () => {
+  const f = fixture(), stop = new AbortController(); Reflect.set(f.controls, 'addressFields', [{ kind: 'shipping', field: 'line1', target: 'address-line' }]);
+  Reflect.set(f.deps, 'signal', stop.signal);
+  Reflect.set(f.deps, 'addresses', { async read() { stop.abort(); throw new Error('Aborted while reading'); } });
+  await expect(f.run()).rejects.toThrow('Aborted while reading');
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('a resumed approval window whose deadline passed unanswered is denied, submits nothing and releases the hold', async () => {
+  const f = await resumedFixture('5.00');
+  expect(f.checkpoint.record.windowKind).toBe('approval');
+  f.resume.prepare = owner => { owner.assertCurrent?.(); return { deliveries: Promise.resolve(f.checkpoint.record.windowDeliveries ?? []),
+    deadlineMs: Promise.resolve(f.checkpoint.record.windowDeadlineMs ?? 0), async awaitAnswer() { return null; }, cancel() {} }; };
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'requested-maximum-exceeded-expired' });
+  expect(f.effects.filter(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toEqual([]);
+  expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('a resumed window answered while its host was stopping is still checked against the live quote before any card entry', async () => {
+  const f = await resumedFixture('5.00');
+  f.setLiveTotal(1_200);
+  f.resume.prepare = owner => { owner.assertCurrent?.(); return { deliveries: Promise.resolve(f.checkpoint.record.windowDeliveries ?? []),
+    deadlineMs: Promise.resolve(f.checkpoint.record.windowDeadlineMs ?? 0),
+    async awaitAnswer() { return { answer: 'approve' as const, channel: 'operator' as const }; }, cancel() {} }; };
+  const result = await f.run().catch((error: unknown) => error);
+  expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(f.effects.filter(effect => effect.startsWith('submit') || effect.startsWith('secret'))).toEqual([]);
+  expect(f.records).toEqual([]);
 });
 
 test('a resumed purchase excludes only its own hold when deciding, preserving another purchase reservation', async () => {
@@ -829,7 +880,8 @@ test.each(['release', 'same-id-replacement'] as const)('a resumed hold cannot be
     if (kind === 'same-id-replacement') expect(f.ledger.reserve({ id: f.request.purchaseId, itemMinorUnits: 1_000, overageMinorUnits: 100, toleranceMinorUnits: 0,
       limits: f.deps.limits, nowMs: f.deps.now(), timezone: 'UTC', retainUntilSettled: true })).not.toBeNull();
   });
-  await expect(f.run()).rejects.toThrow();
+  // The lost hold identity ends the flow with the settlement refusal, not an unrelated failure.
+  await expect(f.run()).rejects.toThrow('journal or budget hold could not be released');
   expect(f.prepared()).toBe(0); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
   if (kind === 'same-id-replacement') expect(f.ledger.state().reservations).toHaveLength(1);
 });

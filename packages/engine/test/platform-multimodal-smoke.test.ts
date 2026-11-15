@@ -2,70 +2,67 @@
 import { describe, expect, test } from 'bun:test';
 import { MultimodalService } from '../platform/src/platform/multimodal/service.js';
 
-/** Minimal stub for MediaProviderRegistry, returns empty provider list. */
-function makeMediaProviders() {
-  return {
-    status: async () => [],
-  };
+interface StubProvider {
+  readonly id: string;
+  readonly label: string;
+  readonly capabilities: readonly string[];
+  readonly configured: boolean;
+  readonly metadata: Record<string, unknown>;
 }
 
-/** Minimal stub for VoiceService, returns status with empty providers. */
-function makeVoiceService() {
-  return {
-    getStatus: async (_detail?: boolean) => ({ providers: [] }),
-  };
-}
-
-/** Minimal stub for ArtifactStore, not used by getStatus/listProviders. */
-function makeArtifactStore() {
-  return {};
-}
-
-/** Minimal stub for KnowledgeService, not used by getStatus/listProviders. */
-function makeKnowledgeService() {
-  return {};
-}
-
-function makeService(): MultimodalService {
+function makeService(media: readonly StubProvider[] = [], voice: readonly StubProvider[] = []): MultimodalService {
   return new MultimodalService(
-    makeArtifactStore() as never,
-    makeMediaProviders() as never,
-    makeVoiceService() as never,
-    makeKnowledgeService() as never,
+    {} as never,
+    { status: async () => media } as never,
+    { getStatus: async () => ({ providers: voice }) } as never,
+    {} as never,
   );
 }
 
-describe('platform/multimodal: behavior smoke', () => {
-  test('listProviders() resolves to a readonly array', async () => {
-    const service = makeService();
+describe('platform/multimodal: provider listing', () => {
+  test('with no media or voice providers only the built-in extractor is listed', async () => {
+    const providers = await makeService().listProviders();
+    expect(providers).toEqual([
+      {
+        id: 'knowledge-extractors',
+        label: 'Built-in Knowledge Extractors',
+        transport: 'extractor',
+        capabilities: ['document.extract', 'video.keyframe-fusion'],
+        configured: true,
+        metadata: {},
+      },
+    ]);
+  });
+
+  test('media providers that understand, and voice providers that transcribe, are mapped by capability and sorted by label', async () => {
+    const service = makeService(
+      [
+        { id: 'vision', label: 'Vision', capabilities: ['understand', 'generate'], configured: true, metadata: { region: 'eu' } },
+        { id: 'painter', label: 'Painter', capabilities: ['generate'], configured: true, metadata: {} },
+      ],
+      [
+        { id: 'live', label: 'Live Voice', capabilities: ['stt', 'realtime'], configured: false, metadata: {} },
+        { id: 'batch', label: 'Batch Voice', capabilities: ['stt'], configured: true, metadata: {} },
+        { id: 'speaker', label: 'Speaker', capabilities: ['tts'], configured: true, metadata: {} },
+      ],
+    );
     const providers = await service.listProviders();
-    expect(providers).toBeInstanceOf(Array);
-    // With no configured media/voice providers, only the built-in extractor is present
-    expect(providers.length).toBeGreaterThanOrEqual(1);
-    const extractor = providers.find((p) => p.id === 'knowledge-extractors');
-    expect(extractor?.id).toBe('knowledge-extractors');
-    expect(typeof extractor!.id).toBe('string');
-    expect(typeof extractor!.label).toBe('string');
-    expect(extractor!.capabilities).toBeInstanceOf(Array);
-    expect(typeof extractor!.configured).toBe('boolean');
+    expect(providers.map((p) => [p.id, p.transport, p.capabilities, p.configured])).toEqual([
+      ['batch', 'voice', ['audio.transcribe'], true],
+      ['knowledge-extractors', 'extractor', ['document.extract', 'video.keyframe-fusion'], true],
+      ['live', 'hybrid', ['audio.transcribe', 'audio.realtime'], false],
+      ['vision', 'media', ['image.describe'], true],
+    ]);
+    expect(providers.find((p) => p.id === 'vision')?.metadata).toEqual({ region: 'eu' });
   });
 
-  test('getStatus() resolves with enabled, providerCount, and providers fields', async () => {
-    const service = makeService();
-    const status = await service.getStatus();
-    expect(typeof status.enabled).toBe('boolean');
-    expect(typeof status.providerCount).toBe('number');
-    expect(status.providers).toBeInstanceOf(Array);
-    expect(status.providerCount).toBe(status.providers.length);
-  });
-
-  test('getStatus() returns consistent providerCount matching providers array length', async () => {
-    const service = makeService();
-    const status = await service.getStatus();
-    // providerCount should always equal the length of the providers array
-    expect(status.providerCount).toBe(status.providers.length);
-    // enabled should be true when providers are present
-    expect(status.enabled).toBe(status.providers.length > 0);
+  test('getStatus reports the listed providers and how many there are', async () => {
+    const status = await makeService(
+      [{ id: 'vision', label: 'Vision', capabilities: ['understand'], configured: true, metadata: {} }],
+    ).getStatus();
+    expect(status.enabled).toBe(true);
+    expect(status.providerCount).toBe(2);
+    expect(status.providers.map((p) => p.id).sort()).toEqual(['knowledge-extractors', 'vision']);
   });
 });
 

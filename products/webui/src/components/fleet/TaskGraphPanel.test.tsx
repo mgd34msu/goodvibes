@@ -1,7 +1,7 @@
 /**
  * TaskGraphPanel, the fix-phase task graph (fleet.graph.get, platform 1.8.0).
- * Covers every state tell the brief calls out (ready/running/blocked/at-cap/
- * stalled), the pool summary line, loading/error states, and phone-width
+ * Covers the per-row state tells (ready/running/blocked/done/stalled), the
+ * at-cap pool summary line, loading/error states, and phone-width
  * legibility (a vertical list, not a diagram).
  */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
@@ -103,6 +103,16 @@ describe('TaskGraphPanel', () => {
     const byTitle = (title: string) => rows.find((r) => r.textContent?.includes(title));
 
     expect(byTitle('Blocked item')?.textContent).toContain('waiting on: Ready item');
+
+    // Each row carries its own state word; the Stalled chip belongs to wi-4 only.
+    const stateOf = (title: string) => byTitle(title)?.querySelector('.gv-row__trailing .gv-chip')?.textContent;
+    expect(stateOf('Ready item')).toBe('Ready');
+    expect(stateOf('Running item')).toBe('Running');
+    expect(stateOf('Blocked item')).toBe('Blocked');
+    expect(stateOf('Stalled item')).toBe('Running');
+    expect(stateOf('Done item')).toBe('Done');
+    const stalledRows = rows.filter((r) => r.querySelector('.gv-row__trailing')?.textContent?.includes('Stalled'));
+    expect<Array<Element | undefined>>(stalledRows).toEqual([byTitle('Stalled item')]);
   });
 
   test('the at-cap pool state carries its counts', async () => {

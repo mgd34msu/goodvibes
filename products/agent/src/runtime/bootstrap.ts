@@ -34,7 +34,7 @@ import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
-import { createTaskManager } from '@/runtime/index.ts';
+import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
@@ -64,6 +64,8 @@ import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import '../tools/agent-audit-tool.ts';
 import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
+import { recordComposedPromptUsage } from './prompt-usage-record.ts';
+import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import '../tools/agent-mcp-call-route.ts';
 import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
 import './bootstrap-capability-wiring.ts';
@@ -199,6 +201,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     agentStatusIntervalRef,
     permissionPromptRef,
     systemMessageRouterRef,
+    startupNotices,
     conversationFollowUpRef,
     orchestratorHandleUserInputRef,
     requestRender,
@@ -208,7 +211,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher: services.hookDispatcher });
   const providerRegistry = services.providerRegistry;
   // A saved custom-provider model must never crash boot, see provider-boot.ts.
-  await ensureBootModelResolvable(providerRegistry, options.configManager);
+  const bootModelSubstitution = await ensureBootModelResolvable(providerRegistry, options.configManager);
+  if (bootModelSubstitution) {
+    startupNotices.report(
+      `[Startup] Configured model '${bootModelSubstitution.configured}' is unavailable; using '${bootModelSubstitution.replacement}' this session. Your saved model is unchanged.`,
+    );
+  }
   const promptContextReceipts = new AgentPromptContextReceiptStore(
     services.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'prompt-context-receipts.jsonl'),
   );
@@ -363,7 +371,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           const composed = await composeRuntimePromptWithReceipt({ ...captured, tierPrompt });
           signal?.throwIfAborted();
           promptContextReceipts.record(composed.receipt);
-          memoryUsageTracker.onComposed(turnId, composed.receipt);
+          recordComposedPromptUsage(() => memoryUsageTracker.onComposed(turnId, composed.receipt));
           return composed.prompt;
         })();
         if (signal) systemPromptBySignal.set(signal, composedPrompt);
@@ -373,6 +381,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       flagManager: services.featureFlags,
       runtimeBus,
       sessionId: runtime.sessionId,
+      resolveSessionId: () => runtime.sessionId,
       services: {
         agentManager: services.agentManager,
         contractRunner: services.contractRunner,
@@ -445,6 +454,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     },
     writeLastSessionPointer: writeLastSessionPointerForSurface,
     restoreTurnAnchors: restoreTurnAnchorsForSurface,
+    announceSessionResumed: (resumedSessionId, turnCount) => {
+      emitSessionResumed(
+        runtimeBus,
+        { sessionId: resumedSessionId, traceId: `${resumedSessionId}:session-resume`, source: 'bootstrap' },
+        { sessionId: resumedSessionId, turnCount },
+      );
+    },
     getControlPlaneRecentEvents: (limit) => controlPlaneRecentEventsRef.value(limit),
     toolRegistry,
     promptContextReceipts,
@@ -458,6 +474,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   });
   const systemMessageRouter = shell.systemMessageRouter;
   systemMessageRouterRef.value = systemMessageRouter;
+  startupNotices.flush();
   // Announce-once receipts due at boot (e.g. the web surface URL when
   // web.enabled). The store is shared per install, so whichever process of
   // this install boots first (daemon, TUI, or this Agent) announces; every
@@ -546,7 +563,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // whole process lifetime on the same cadence as the runtime heartbeat: adopt late
   // if one shows up, and hand back to local (deactivate) the moment a PREVIOUSLY
   // adopted daemon stops answering, never guess and keep routing to a dead wire.
-  let memorySpineHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  // Armed from the deferred task below even when file watchers are off: a daemon
+  // can appear or vanish after boot regardless of that setting.
+  const memorySpineRecheck = createMemorySpineRecheck({
+    intervalMs: () => resolveMemorySpineRecheckMs(configManager.get('watchers.heartbeatIntervalMs')),
+    reconcile: () => reconcileMemorySpine(),
+  });
   //
   // Inbound continuation dispatch rides the SAME adoption edge. It has to: the
   // wire dispatch polls `sessions.inputs.list` on the adopted daemon, and there
@@ -565,9 +587,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // so nothing activates and the spine keeps its local store. Re-asked per
       // attempt, so a daemon updated mid-session is adopted on the next tick.
       mayAdopt: () => services.mayAdoptDaemonBuild(),
-      // One consuming /status read per attach: a current daemon delivers its
+      // One receipt-reading /status read per attach: a current daemon delivers its
       // one-shot honesty receipts ("restarted after a crash at HH:MM", "updated
-      // from X to Y") only to a ?receipts=consume read, and this adoption edge is
+      // from X to Y") only to a receipt-reading /status read (peek then acknowledge), and this adoption edge is
       // exactly where the agent (re)attaches to a daemon. The plain liveness probe
       // stays receipt-neutral.
       onAttach: () => {
@@ -583,27 +605,24 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // installed-but-stopped daemon) so the first adoption decision sees the
       // settled daemon state instead of racing it; the heartbeat below keeps
       // reconciling for the rest of the process lifetime either way.
-      await agentExternalServices.whenDiscovered();
-      await reconcileMemorySpine();
-      // Prime the recall snapshot (platform 1.2.0 sync-recall seam) so the FIRST
-      // system prompt built after boot already has a real snapshot to read
-      // instead of the honest-but-empty "not yet captured" one, see
-      // recallSnapshot's doc comment on prompt-context-receipts.ts's
-      // memoryRecallSnapshot field. { recall: false } captures an unfiltered
-      // browse set: the receipt's own eligibility/suppression logic (not the
-      // snapshot) decides what is prompt-active, so this must mirror the old
-      // memoryRegistry.getAll() read exactly, not the recall-floor-filtered set.
-      await services.memorySpineClient.refreshRecallSnapshot(undefined, { recall: false }).catch((error: unknown) => {
-        logger.debug('Initial memory recall snapshot refresh failed', { error: summarizeError(error) });
-      });
-      if (configManager.get('watchers.enabled')) {
-        const intervalMs = Number(configManager.get('watchers.heartbeatIntervalMs') ?? 30_000);
-        memorySpineHeartbeatTimer = setInterval(() => {
-          reconcileMemorySpine().catch((error: unknown) => {
-            logger.debug('Memory-spine reachability recheck failed', { error: summarizeError(error) });
-          });
-        }, intervalMs);
-        memorySpineHeartbeatTimer.unref?.();
+      try {
+        await agentExternalServices.whenDiscovered();
+        await reconcileMemorySpine();
+        // Prime the recall snapshot (platform 1.2.0 sync-recall seam) so the FIRST
+        // system prompt built after boot already has a real snapshot to read
+        // instead of the honest-but-empty "not yet captured" one, see
+        // recallSnapshot's doc comment on prompt-context-receipts.ts's
+        // memoryRecallSnapshot field. { recall: false } captures an unfiltered
+        // browse set: the receipt's own eligibility/suppression logic (not the
+        // snapshot) decides what is prompt-active, so this must mirror the old
+        // memoryRegistry.getAll() read exactly, not the recall-floor-filtered set.
+        await services.memorySpineClient.refreshRecallSnapshot(undefined, { recall: false }).catch((error: unknown) => {
+          logger.debug('Initial memory recall snapshot refresh failed', { error: summarizeError(error) });
+        });
+      } finally {
+        // The recheck keeps the spine honest for the whole process life, so a failed
+        // first adoption must not leave it unarmed.
+        memorySpineRecheck.arm();
       }
     },
     onError: (error) => {
@@ -720,18 +739,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       get provider() { return runtime.provider; },
       conversationTitle: () => conversation.title || '',
       sessionSpineClient: services.sessionSpineClient,
-      takeMemorySpineTimer: () => {
-        const timer = memorySpineHeartbeatTimer;
-        memorySpineHeartbeatTimer = null;
-        return timer;
-      },
+      takeMemorySpineTimer: () => memorySpineRecheck.take(),
       bootstrapUnsubs,
       runtimeUnsubs,
       forensicsCollector,
       executionLedger: services.executionLedger,
-      disposeSessionWriteLedger: () => {
-        services.disposeSessionWriteLedger();
-      },
       disposeRuntimeGraph: () => services.close(),
       deferredStartup,
       agentExternalServices,

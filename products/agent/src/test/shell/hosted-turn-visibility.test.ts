@@ -30,16 +30,17 @@ function turnState(): ThinkingUiState {
 
 /** The overlay's real dependency shape, over our state. */
 function overlayOrchestrator(state: ThinkingUiState): Pick<
-  Orchestrator, 'isThinking' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'
+  Orchestrator, 'isTurnActive' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'
 > {
   return {
-    get isThinking() { return state.isThinking; },
+    // The orchestrator's own derivation: the indicator a hosted turn turns on occupies it.
+    get isTurnActive() { return state.isThinking; },
     // The same derivation the orchestrator uses: the glyph follows the frame.
     getSpinner: () => ['|', '/', '-', '\\'][state.thinkingFrame % 4] as string,
     get thinkingFrame() { return state.thinkingFrame; },
     get streamingInputTokens() { return state.streamingInputTokens; },
     get streamingOutputTokens() { return state.streamingOutputTokens; },
-  } as Pick<Orchestrator, 'isThinking' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'>;
+  } as Pick<Orchestrator, 'isTurnActive' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'>;
 }
 
 /**
@@ -62,7 +63,27 @@ function overlayLines(state: ThinkingUiState): string[] {
   return throbber && throbber.activity.kind === 'model' ? [`${throbber.spinner} ${throbber.activity.phrase}`] : [];
 }
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+/**
+ * Replaces setInterval/clearInterval with a manual clock: `tick()` runs every live
+ * interval callback once, so repaint cadence is asserted without waiting on real time.
+ */
+function manualIntervals(): { tick: () => void; live: () => number; restore: () => void } {
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  const callbacks = new Map<number, () => void>();
+  let nextId = 1;
+  globalThis.setInterval = ((fn: () => void) => {
+    const id = nextId++;
+    callbacks.set(id, fn);
+    return id;
+  }) as unknown as typeof globalThis.setInterval;
+  globalThis.clearInterval = ((id: number) => { callbacks.delete(id); }) as unknown as typeof globalThis.clearInterval;
+  return {
+    tick: () => { for (const fn of [...callbacks.values()]) fn(); },
+    live: () => callbacks.size,
+    restore: () => { globalThis.setInterval = realSet; globalThis.clearInterval = realClear; },
+  };
+}
 
 describe('symptom 1: the waiting state exists during a hosted turn', () => {
   test('no waiting state before, a waiting state during, none after', () => {
@@ -109,46 +130,51 @@ describe('symptom 1: the waiting state exists during a hosted turn', () => {
 });
 
 describe('symptom 2: the shell repaints with no input events at all', () => {
-  test('hosted turn activity schedules real repaints on the local cadence', async () => {
-    let repaints = 0;
-    const state = turnState();
-    const activity = createHostedTurnActivity({
-      turnState: state,
-      requestRender: () => { repaints += 1; },
-      intervalMs: 5,
-    });
+  test('hosted turn activity schedules real repaints on the local cadence', () => {
+    const clock = manualIntervals();
+    try {
+      let repaints = 0;
+      const state = turnState();
+      const activity = createHostedTurnActivity({
+        turnState: state,
+        requestRender: () => { repaints += 1; },
+      });
 
-    activity.begin();
-    // The waiting state has to appear on the keystroke, not one interval later.
-    expect(repaints).toBe(1);
+      activity.begin();
+      // The waiting state has to appear on the keystroke, not one interval later.
+      expect(repaints).toBe(1);
 
-    // Zero input events happen here, only time passes.
-    await wait(60);
-    activity.end();
+      // Zero input events happen here, only timer ticks.
+      for (let i = 0; i < 4; i += 1) clock.tick();
+      activity.end();
 
-    // THIS is the assertion the regression fails without the fix: nothing was
-    // typed, and the shell repainted anyway.
-    expect(repaints).toBeGreaterThan(3);
-    // …and the animation actually advanced, so the spinner turns.
-    expect(state.thinkingFrame).toBeGreaterThan(0);
-    activity.dispose();
+      // THIS is the assertion the regression fails without the fix: nothing was
+      // typed, and the shell repainted anyway.
+      expect(repaints).toBeGreaterThan(3);
+      // …and the animation actually advanced, so the spinner turns.
+      expect(state.thinkingFrame).toBe(4);
+      activity.dispose();
+    } finally { clock.restore(); }
   });
 
-  test('repainting stops when the turn ends: no timer outlives the turn', async () => {
-    let repaints = 0;
-    const state = turnState();
-    const activity = createHostedTurnActivity({
-      turnState: state,
-      requestRender: () => { repaints += 1; },
-      intervalMs: 5,
-    });
-    activity.begin();
-    await wait(30);
-    activity.end();
-    const settled = repaints;
-    await wait(40);
-    expect(repaints).toBe(settled);
-    activity.dispose();
+  test('repainting stops when the turn ends: no timer outlives the turn', () => {
+    const clock = manualIntervals();
+    try {
+      let repaints = 0;
+      const state = turnState();
+      const activity = createHostedTurnActivity({
+        turnState: state,
+        requestRender: () => { repaints += 1; },
+      });
+      activity.begin();
+      clock.tick();
+      activity.end();
+      const settled = repaints;
+      expect(clock.live()).toBe(0);
+      clock.tick();
+      expect(repaints).toBe(settled);
+      activity.dispose();
+    } finally { clock.restore(); }
   });
 
 });

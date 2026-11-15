@@ -27,11 +27,15 @@ for (const mode of ['staged', 'published'] as const) {
       FIXTURE_SOURCE: 'b'.repeat(40), FIXTURE_TOOLING: 'a'.repeat(40) };
     const run = (delta: Record<string, string> = {}) => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', guard.run!],
       { cwd: root, env: { ...valid, ...delta }, encoding: 'utf8', timeout: 5000 });
+    // Only both inputs empty (a first release) may skip the job; either one alone must reach the identity check.
+    const runs = (tag: string, source: string): boolean => Function(`return ${upgrade.if!.replace(/inputs\.previous-(tag|source)/g, (_, key: string) => JSON.stringify(key === 'tag' ? tag : source)).replaceAll('!=', '!==')}`)() as boolean;
+    expect([runs('v3.1.2', ''), runs('', previousSource), runs('v3.1.2', previousSource), runs('', '')]).toEqual([true, true, true, false]);
     const accepted = run(); expect(accepted.error).toBeUndefined(); expect(accepted.status, accepted.stderr).toBe(0);
     const invalidInputs: Record<string, string>[] = [{ PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
       { RELEASE_TAG: 'v3.1.4', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' }, { RELEASE_TAG: 'v3.1.5', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
       { RELEASE_TAG: 'v3.1.6', PREVIOUS_TAG: '', PREVIOUS_SOURCE: '' },
       { PREVIOUS_TAG: '' }, { PREVIOUS_SOURCE: '' }, { PREVIOUS_SOURCE: 'main' },
+      { PREVIOUS_TAG: 'v3.1.3-rc.1' }, { RELEASE_TAG: 'v3.1.4-rc.1', PREVIOUS_TAG: 'v3.1.3' },
       { PREVIOUS_TAG: 'v3.1.3' }, { FIXTURE_SOURCE: 'c'.repeat(40) }, { FIXTURE_TOOLING: 'c'.repeat(40) }];
     for (const invalid of invalidInputs) {
       const refused = run(invalid); expect(refused.error).toBeUndefined(); expect(refused.status, JSON.stringify(invalid)).not.toBe(0);

@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { assertNoSecretLikeText } from './persona-registry.ts';
 import type {
@@ -261,6 +262,20 @@ function parseStore(raw: string): DocumentStoreFile {
   };
 }
 
+/**
+ * The next version id: one past the highest present, not one past the count.
+ * Only the newest MAX_VERSIONS are kept, so the count stops growing at the cap
+ * and a count-based id would repeat for every later revision.
+ */
+function nextVersionId(versions: readonly AgentDocumentVersion[]): string {
+  let highest = versions.length;
+  for (const version of versions) {
+    const number = /^v(\d+)$/.exec(version.id)?.[1];
+    if (number !== undefined) highest = Math.max(highest, Number(number));
+  }
+  return `v${highest + 1}`;
+}
+
 function formatStore(store: DocumentStoreFile): string {
   return `${JSON.stringify(store, null, 2)}\n`;
 }
@@ -396,278 +411,296 @@ export class AgentDocumentRegistry {
   }
 
   public create(input: AgentDocumentCreateInput): AgentDocumentRecord {
-    const store = this.readStore();
-    const title = normalizeTitle(input.title);
-    const body = input.body.trim();
-    this.validateRequired(title, body);
-    const tags = normalizeList(input.tags);
-    const summary = input.summary?.trim() || 'Initial draft.';
-    assertDocumentContentSafe([title, body, summary, ...tags]);
-    const duplicate = store.documents.find((document) => document.title.toLowerCase() === title.toLowerCase());
-    if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
-    const timestamp = nowIso();
-    const version: AgentDocumentVersion = {
-      id: 'v1',
-      title,
-      body,
-      summary,
-      createdAt: timestamp,
-    };
-    const document: AgentDocumentRecord = {
-      id: this.nextId(title, store.documents),
-      title,
-      body,
-      tags,
-      status: 'draft',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      versions: [version],
-      comments: [],
-      suggestions: [],
-      attachments: [],
-    };
-    this.writeStore({ ...store, documents: [...store.documents, document] });
-    return document;
+    return this.locked(() => {
+      const store = this.readStore();
+      const title = normalizeTitle(input.title);
+      const body = input.body.trim();
+      this.validateRequired(title, body);
+      const tags = normalizeList(input.tags);
+      const summary = input.summary?.trim() || 'Initial draft.';
+      assertDocumentContentSafe([title, body, summary, ...tags]);
+      const duplicate = store.documents.find((document) => document.title.toLowerCase() === title.toLowerCase());
+      if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
+      const timestamp = nowIso();
+      const version: AgentDocumentVersion = {
+        id: 'v1',
+        title,
+        body,
+        summary,
+        createdAt: timestamp,
+      };
+      const document: AgentDocumentRecord = {
+        id: this.nextId(title, store.documents),
+        title,
+        body,
+        tags,
+        status: 'draft',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        versions: [version],
+        comments: [],
+        suggestions: [],
+        attachments: [],
+      };
+      this.writeStore({ ...store, documents: [...store.documents, document] });
+      return document;
+    });
   }
 
   public update(idOrTitle: string, input: AgentDocumentUpdateInput): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
-    const body = input.body === undefined ? existing.body : input.body.trim();
-    this.validateRequired(title, body);
-    const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
-    const summary = input.summary?.trim() || 'Updated draft.';
-    assertDocumentContentSafe([title, body, summary, ...tags]);
-    const duplicate = store.documents.find((document) => document.id !== existing.id && document.title.toLowerCase() === title.toLowerCase());
-    if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
-    const timestamp = nowIso();
-    const version: AgentDocumentVersion = {
-      id: `v${existing.versions.length + 1}`,
-      title,
-      body,
-      summary,
-      createdAt: timestamp,
-    };
-    const versions = [...existing.versions, version].slice(-MAX_VERSIONS);
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      title,
-      body,
-      tags,
-      status: input.status ?? existing.status,
-      updatedAt: timestamp,
-      versions,
-      lastArtifactId: input.lastArtifactId === undefined ? existing.lastArtifactId : input.lastArtifactId || undefined,
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
+      const body = input.body === undefined ? existing.body : input.body.trim();
+      this.validateRequired(title, body);
+      const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
+      const summary = input.summary?.trim() || 'Updated draft.';
+      assertDocumentContentSafe([title, body, summary, ...tags]);
+      const duplicate = store.documents.find((document) => document.id !== existing.id && document.title.toLowerCase() === title.toLowerCase());
+      if (duplicate) throw new Error(`Document already exists ${duplicate.id}`);
+      const timestamp = nowIso();
+      const version: AgentDocumentVersion = {
+        id: nextVersionId(existing.versions),
+        title,
+        body,
+        summary,
+        createdAt: timestamp,
+      };
+      const versions = [...existing.versions, version].slice(-MAX_VERSIONS);
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        title,
+        body,
+        tags,
+        status: input.status ?? existing.status,
+        updatedAt: timestamp,
+        versions,
+        lastArtifactId: input.lastArtifactId === undefined ? existing.lastArtifactId : input.lastArtifactId || undefined,
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public updateArtifactId(idOrTitle: string, artifactId: string): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      lastArtifactId: artifactId,
-      updatedAt: nowIso(),
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        lastArtifactId: artifactId,
+        updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public addComment(idOrTitle: string, input: AgentDocumentCommentInput): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const body = input.body.trim();
-    if (!body) throw new Error('Comment body is required.');
-    assertDocumentContentSafe([body]);
-    const timestamp = nowIso();
-    const comment: AgentDocumentComment = {
-      id: this.nextCommentId(existing.comments),
-      body,
-      status: 'open',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      comments: [...existing.comments, comment],
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const body = input.body.trim();
+      if (!body) throw new Error('Comment body is required.');
+      assertDocumentContentSafe([body]);
+      const timestamp = nowIso();
+      const comment: AgentDocumentComment = {
+        id: this.nextCommentId(existing.comments),
+        body,
+        status: 'open',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        comments: [...existing.comments, comment],
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public resolveComment(idOrTitle: string, commentId: string): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const lookup = commentId.trim().toLowerCase();
-    if (!lookup) throw new Error('commentId is required.');
-    const target = existing.comments.find((comment) => comment.id.toLowerCase() === lookup);
-    if (!target) throw new Error(`Unknown document comment ${commentId}`);
-    const timestamp = nowIso();
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      updatedAt: timestamp,
-      comments: existing.comments.map((comment) => comment.id === target.id
-        ? { ...comment, status: 'resolved', updatedAt: timestamp, resolvedAt: timestamp }
-        : comment),
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const lookup = commentId.trim().toLowerCase();
+      if (!lookup) throw new Error('commentId is required.');
+      const target = existing.comments.find((comment) => comment.id.toLowerCase() === lookup);
+      if (!target) throw new Error(`Unknown document comment ${commentId}`);
+      const timestamp = nowIso();
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        updatedAt: timestamp,
+        comments: existing.comments.map((comment) => comment.id === target.id
+          ? { ...comment, status: 'resolved', updatedAt: timestamp, resolvedAt: timestamp }
+          : comment),
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public suggestUpdate(idOrTitle: string, input: AgentDocumentSuggestionInput): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
-    const body = input.body.trim();
-    this.validateRequired(title, body);
-    const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
-    const summary = input.summary?.trim() || 'AI suggested revision.';
-    const rationale = input.rationale?.trim() || 'No rationale provided.';
-    assertDocumentContentSafe([title, body, summary, rationale, ...tags]);
-    const timestamp = nowIso();
-    const suggestion: AgentDocumentSuggestion = {
-      id: this.nextSuggestionId(existing.suggestions),
-      title,
-      body,
-      tags,
-      ...(input.status === undefined ? {} : { documentStatus: input.status }),
-      summary,
-      rationale,
-      status: 'proposed',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      suggestions: [...existing.suggestions, suggestion],
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
+      const body = input.body.trim();
+      this.validateRequired(title, body);
+      const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
+      const summary = input.summary?.trim() || 'AI suggested revision.';
+      const rationale = input.rationale?.trim() || 'No rationale provided.';
+      assertDocumentContentSafe([title, body, summary, rationale, ...tags]);
+      const timestamp = nowIso();
+      const suggestion: AgentDocumentSuggestion = {
+        id: this.nextSuggestionId(existing.suggestions),
+        title,
+        body,
+        tags,
+        ...(input.status === undefined ? {} : { documentStatus: input.status }),
+        summary,
+        rationale,
+        status: 'proposed',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        suggestions: [...existing.suggestions, suggestion],
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public acceptSuggestion(idOrTitle: string, suggestionId: string): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const target = this.findSuggestion(existing, suggestionId);
-    if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
-    if (target.status === 'accepted') return existing;
-    const move = agentDocumentSuggestionLifecycle.check(target.status, 'accepted');
-    if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
-    const timestamp = nowIso();
-    const version: AgentDocumentVersion = {
-      id: `v${existing.versions.length + 1}`,
-      title: target.title,
-      body: target.body,
-      summary: target.summary,
-      createdAt: timestamp,
-    };
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      title: target.title,
-      body: target.body,
-      tags: [...target.tags],
-      status: target.documentStatus ?? existing.status,
-      updatedAt: timestamp,
-      versions: [...existing.versions, version].slice(-MAX_VERSIONS),
-      suggestions: existing.suggestions.map((suggestion) => suggestion.id === target.id
-        ? { ...suggestion, status: 'accepted', updatedAt: timestamp, resolvedAt: timestamp }
-        : suggestion),
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const target = this.findSuggestion(existing, suggestionId);
+      if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
+      if (target.status === 'accepted') return existing;
+      const move = agentDocumentSuggestionLifecycle.check(target.status, 'accepted');
+      if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
+      const timestamp = nowIso();
+      const version: AgentDocumentVersion = {
+        id: nextVersionId(existing.versions),
+        title: target.title,
+        body: target.body,
+        summary: target.summary,
+        createdAt: timestamp,
+      };
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        title: target.title,
+        body: target.body,
+        tags: [...target.tags],
+        status: target.documentStatus ?? existing.status,
+        updatedAt: timestamp,
+        versions: [...existing.versions, version].slice(-MAX_VERSIONS),
+        suggestions: existing.suggestions.map((suggestion) => suggestion.id === target.id
+          ? { ...suggestion, status: 'accepted', updatedAt: timestamp, resolvedAt: timestamp }
+          : suggestion),
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public rejectSuggestion(idOrTitle: string, suggestionId: string): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const target = this.findSuggestion(existing, suggestionId);
-    if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
-    if (target.status === 'rejected') return existing;
-    const move = agentDocumentSuggestionLifecycle.check(target.status, 'rejected');
-    if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
-    const timestamp = nowIso();
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      updatedAt: timestamp,
-      suggestions: existing.suggestions.map((suggestion) => suggestion.id === target.id
-        ? { ...suggestion, status: 'rejected', updatedAt: timestamp, resolvedAt: timestamp }
-        : suggestion),
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const target = this.findSuggestion(existing, suggestionId);
+      if (!target) throw new Error(`Unknown document suggestion ${suggestionId}`);
+      if (target.status === 'rejected') return existing;
+      const move = agentDocumentSuggestionLifecycle.check(target.status, 'rejected');
+      if (!move.ok) throw new Error(`Document suggestion ${target.id}: ${move.reason}.`);
+      const timestamp = nowIso();
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        updatedAt: timestamp,
+        suggestions: existing.suggestions.map((suggestion) => suggestion.id === target.id
+          ? { ...suggestion, status: 'rejected', updatedAt: timestamp, resolvedAt: timestamp }
+          : suggestion),
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public attachArtifact(idOrTitle: string, input: AgentDocumentAttachmentInput): AgentDocumentRecord {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
-    const artifactId = input.artifactId.trim();
-    if (!artifactId) throw new Error('artifactId is required.');
-    const label = normalizeTitle(input.label?.trim() || input.filename?.trim() || artifactId);
-    const note = input.note?.trim() || undefined;
-    assertDocumentContentSafe([label, note ?? '']);
-    const timestamp = nowIso();
-    const duplicate = existing.attachments.find((attachment) => attachment.artifactId.toLowerCase() === artifactId.toLowerCase());
-    const snapshot = {
-      artifactId,
-      label,
-      ...(note ? { note } : {}),
-      ...(input.filename?.trim() ? { filename: input.filename.trim() } : {}),
-      ...(input.mimeType?.trim() ? { mimeType: input.mimeType.trim() } : {}),
-      ...(input.kind?.trim() ? { kind: input.kind.trim() } : {}),
-      ...(typeof input.sizeBytes === 'number' && Number.isFinite(input.sizeBytes)
-        ? { sizeBytes: Math.max(0, Math.trunc(input.sizeBytes)) }
-        : {}),
-    };
-    const attachment: AgentDocumentAttachment = duplicate
-      ? { ...duplicate, ...snapshot, updatedAt: timestamp }
-      : { id: this.nextAttachmentId(existing.attachments), ...snapshot, createdAt: timestamp, updatedAt: timestamp };
-    const attachments = duplicate
-      ? existing.attachments.map((entry) => entry.id === duplicate.id ? attachment : entry)
-      : [...existing.attachments, attachment];
-    const updated: AgentDocumentRecord = {
-      ...existing,
-      attachments,
-      updatedAt: timestamp,
-    };
-    this.writeStore({
-      ...store,
-      documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown document ${idOrTitle}`);
+      const artifactId = input.artifactId.trim();
+      if (!artifactId) throw new Error('artifactId is required.');
+      const label = normalizeTitle(input.label?.trim() || input.filename?.trim() || artifactId);
+      const note = input.note?.trim() || undefined;
+      assertDocumentContentSafe([label, note ?? '']);
+      const timestamp = nowIso();
+      const duplicate = existing.attachments.find((attachment) => attachment.artifactId.toLowerCase() === artifactId.toLowerCase());
+      const snapshot = {
+        artifactId,
+        label,
+        ...(note ? { note } : {}),
+        ...(input.filename?.trim() ? { filename: input.filename.trim() } : {}),
+        ...(input.mimeType?.trim() ? { mimeType: input.mimeType.trim() } : {}),
+        ...(input.kind?.trim() ? { kind: input.kind.trim() } : {}),
+        ...(typeof input.sizeBytes === 'number' && Number.isFinite(input.sizeBytes)
+          ? { sizeBytes: Math.max(0, Math.trunc(input.sizeBytes)) }
+          : {}),
+      };
+      const attachment: AgentDocumentAttachment = duplicate
+        ? { ...duplicate, ...snapshot, updatedAt: timestamp }
+        : { id: this.nextAttachmentId(existing.attachments), ...snapshot, createdAt: timestamp, updatedAt: timestamp };
+      const attachments = duplicate
+        ? existing.attachments.map((entry) => entry.id === duplicate.id ? attachment : entry)
+        : [...existing.attachments, attachment];
+      const updated: AgentDocumentRecord = {
+        ...existing,
+        attachments,
+        updatedAt: timestamp,
+      };
+      this.writeStore({
+        ...store,
+        documents: store.documents.map((document) => document.id === existing.id ? updated : document),
+      });
+      return updated;
     });
-    return updated;
   }
 
   public markReviewed(idOrTitle: string): AgentDocumentRecord {
@@ -675,14 +708,16 @@ export class AgentDocumentRegistry {
   }
 
   public delete(idOrTitle: string): boolean {
-    const store = this.readStore();
-    const existing = this.findInStore(store, idOrTitle);
-    if (!existing) return false;
-    this.writeStore({
-      ...store,
-      documents: store.documents.filter((document) => document.id !== existing.id),
+    return this.locked(() => {
+      const store = this.readStore();
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) return false;
+      this.writeStore({
+        ...store,
+        documents: store.documents.filter((document) => document.id !== existing.id),
+      });
+      return true;
     });
-    return true;
   }
 
   private readStore(): DocumentStoreFile {
@@ -694,8 +729,16 @@ export class AgentDocumentRegistry {
     }
   }
 
+  /** One read-modify-write at a time across the CLI and every agent process using this file. */
+  private locked<T>(update: () => T): T {
+    return runStoreFileUpdateSync(this.storePath, update);
+  }
+
   private writeStore(store: DocumentStoreFile): void {
     this.assertWriteCurrent?.();
+    // An entry the parser rejects was not carried into `store`; keep the file
+    // as it was before this write drops it.
+    keepUnreadableStoreCopy(this.storePath, 'documents', parseDocument);
     writeStoreFile(this.storePath, formatStore(store));
   }
 

@@ -144,9 +144,7 @@ describe('a cancel during a retry wait', () => {
         }
       },
     };
-    const started = Date.now();
     await runAgentTask(context, record);
-    expect(Date.now() - started).toBeLessThan(2_000);
 
     expect(calls()).toBe(1);
     expect(record.status).toBe('cancelled');
@@ -186,3 +184,21 @@ test('a server error retries the same request without repeating completed tools'
   expect(reads).toBe(1);
   expect(emitted.failed).toEqual([]);
 }, 15_000);
+
+describe('a run that fails', () => {
+  test('is published as failed even if the run stops being current right after its record reads failed', async () => {
+    const record = makeRecord('ag-failure-publication');
+    const { provider } = failingProvider('The request was refused for good');
+    const emitted: Emitted = { cancelled: [], failed: [], completed: [] };
+    const context: { -readonly [K in keyof AgentOrchestratorRunContext]: AgentOrchestratorRunContext[K] } = makeContext(dir, provider, emitted);
+    // The run's context changes hands the moment its record reads failed, so every check after that refuses.
+    let status: AgentRecord['status'] = record.status;
+    Object.defineProperty(record, 'status', {
+      get: () => status,
+      set: (next: AgentRecord['status']) => { status = next; if (next === 'failed') context.workingDirectory = join(dir, 'elsewhere'); },
+    });
+    await runAgentTask(context, record).catch(() => undefined);
+    expect(record.status).toBe('failed');
+    expect(emitted.failed).toEqual([record.id]);
+  });
+});

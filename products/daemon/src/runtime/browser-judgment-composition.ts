@@ -63,7 +63,7 @@ export function composeBrowserJudgment(input: {
     };
     assertCurrent();
     return {
-      revision: capturedRevision, kind, endpointKinds, port: input.judgment.port, signal, assertCurrent,
+      revision: capturedRevision, kind, endpointKinds, port: input.judgment.browserPort ?? input.judgment.port, signal, assertCurrent,
     };
   };
   const service = createWebuiBrowserJudgment({ methods: input.methods, currentRoute,
@@ -133,8 +133,6 @@ export function composeBrowserJudgment(input: {
             ? sources.length === 1 && sources[0] === 'chat-code'
             : battery === 'webui.credentials.provider-key'
             ? sources.length === 1 && sources[0] === 'credential-names'
-            : battery === 'webui.pwa.install-platform'
-            ? sources.length === 1 && sources[0] === 'browser-platform'
             : battery === 'webui.mail.reply-subject' && sources.length === 1 && sources[0] === 'mail-subject';
     },
   });

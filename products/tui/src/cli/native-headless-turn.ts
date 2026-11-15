@@ -1,4 +1,6 @@
-import { observeHeadlessTurn } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import { createHeadlessPermissionInput, observeHeadlessTurn, type HeadlessTurnObserverOptions } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ConversationMessageSnapshot } from '../core/conversation.ts';
 import type { BootstrapContext } from '../runtime/bootstrap.ts';
 import { dispatchNativeConversationTurn } from '../runtime/native-conversation-ingress.ts';
 import type { NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
@@ -10,6 +12,7 @@ export async function executeHeadlessTurn(
   input: string | NativeConversationIntakeState,
   signal: AbortSignal,
   format: string,
+  limits: Pick<HeadlessTurnObserverOptions, 'maxTurns' | 'omitAccumulated'> & { readonly answerPermissions?: boolean | undefined } = {},
 ): Promise<NativeHeadlessTurnResult> {
   const runner = ctx.uiServices.agents.contractRunner;
   const agents = ctx.uiServices.agents.agentManager;
@@ -18,14 +21,19 @@ export async function executeHeadlessTurn(
   const existing = new Set(runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true }).map((contract) => contract.id));
   const owned = () =>
     runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true }).filter((contract) => !existing.has(contract.id));
-  const observer = observeHeadlessTurn(ctx.runtimeBus, format, 'turn-unsettled');
-  const state = observer.state;
   // This freshly bootstrapped executor belongs only to this invocation.
   const abort = () => {
     ctx.orchestrator.abort();
     for (const contract of owned()) runner.cancel(contract.id, 'Headless invocation cancelled');
     for (const agent of ownedAgents()) agents.cancel(agent.id);
   };
+  const observer = observeHeadlessTurn(ctx.runtimeBus, format, 'turn-unsettled', { ...limits, stop: abort });
+  const state = observer.state;
+  // A script answers the owner prompts this run raises (stream-json only, checked at parse time); otherwise a headless run has nobody to ask.
+  const permissionAnswers = limits.answerPermissions
+    ? createHeadlessPermissionInput({ input: process.stdin, emit: observer.frame, signal })
+    : undefined;
+  if (permissionAnswers) ctx.permissionPromptRef.requestPermission = permissionAnswers.prompt;
   signal.addEventListener('abort', abort, { once: true });
   try {
     if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
@@ -87,6 +95,73 @@ export async function executeHeadlessTurn(
     return observer.result(signal, ctx.runtime);
   } finally {
     signal.removeEventListener('abort', abort);
+    permissionAnswers?.dispose();
     observer.dispose();
   }
+}
+
+/**
+ * Runs a turn, then always shuts the runtime down and records the session
+ * pointer. A cleanup failure never replaces the turn's answer or its real
+ * error: it is reported on the result and turns a clean exit into exit 1.
+ */
+export async function settleHeadlessTurn(
+  turn: () => Promise<NativeHeadlessTurnResult>,
+  cleanup: {
+    readonly shutdown: () => Promise<unknown>;
+    readonly sessionReady: () => boolean;
+    readonly writeSessionPointer: () => void;
+    /**
+     * Removes the session file shutdown just saved. Called only when the turn
+     * never got as far as having a session (a `--resume` of a missing id, say),
+     * so the empty entry is not left in the session list.
+     */
+    readonly discardUnusedSession?: () => void;
+  },
+): Promise<NativeHeadlessTurnResult> {
+  let result: NativeHeadlessTurnResult | undefined;
+  let turnFailure: { readonly error: unknown } | undefined;
+  try {
+    result = await turn();
+  } catch (error) {
+    turnFailure = { error };
+  }
+  const problems: string[] = [];
+  try {
+    await cleanup.shutdown();
+  } catch (error) {
+    problems.push(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!cleanup.sessionReady() && cleanup.discardUnusedSession) {
+    try {
+      cleanup.discardUnusedSession();
+    } catch {
+      // Already absent, or the save itself failed: there is nothing to take back.
+    }
+  }
+  if (cleanup.sessionReady()) {
+    try {
+      cleanup.writeSessionPointer();
+    } catch (error) {
+      problems.push(`session pointer not written: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (turnFailure) throw turnFailure.error;
+  if (!result) throw new Error('Headless turn produced no result.');
+  if (problems.length === 0) return result;
+  const detail = problems.join('; ');
+  return {
+    ...result,
+    exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+    error: result.error ? `${result.error}; ${detail}` : detail,
+  };
+}
+
+/** The saved session of a headless run carries the same return context an interactive exit saves. */
+export function headlessSessionSnapshot<T extends { readonly messages: readonly ConversationMessageSnapshot[] }>(
+  snapshot: T,
+  titleSource: Parameters<typeof buildPersistedSessionContextFromFacts>[1],
+  pendingApprovals: number,
+) {
+  return { ...snapshot, ...buildPersistedSessionContextFromFacts(snapshot.messages, titleSource, { pendingApprovals }) };
 }

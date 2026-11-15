@@ -101,7 +101,10 @@ export function createFleetUnionReadModel(options: FleetUnionOptions): FleetUnio
       const localSnapshot = local.getSnapshot();
       const merged = poller.mergedRows(localSnapshot.rows.map((row) => row.node));
       if (!merged) return localSnapshot;
-      return buildFleetSnapshot(merged.nodes, Math.max(localSnapshot.capturedAt, merged.capturedAt));
+      const snapshot = buildFleetSnapshot(merged.nodes, Math.max(localSnapshot.capturedAt, merged.capturedAt));
+      return merged.truncated && merged.totalCount !== undefined
+        ? { ...snapshot, daemonPartial: { shown: merged.nodes.filter((node) => !isLocalId(node.id)).length, total: merged.totalCount } }
+        : snapshot;
     },
 
     subscribe(listener: () => void): () => void {

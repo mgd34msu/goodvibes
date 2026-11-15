@@ -18,6 +18,7 @@ import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runt
 import { registerAgentArtifactsTool } from '../../tools/agent-artifacts-tool.ts';
 import { recordAgentChannelDeliveryReceipt } from '../../agent/channel-delivery-receipts.ts';
 import { AgentDocumentRegistry } from '../../agent/document-registry.ts';
+import { AGENT_WORKSPACE_CATEGORIES } from '../../input/agent-workspace-categories.ts';
 import { createHarnessArtifactStore, makeFixture, registerStubTool, readAuthorizationHeader, expectCompactModelRoute, expectRowsHaveCompactModelRoutes, executeHarnessJson, LOCAL_MODEL_ENDPOINT_ENV_KEYS, clearEnvForTest, restoreEnvForTest, scriptHarnessLocalReading, createHarnessFixtureReadings } from "./agent-harness-tool-fixture.ts";
 
 
@@ -82,6 +83,19 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           revealIncludedInJudgment: false,
         },
       });
+      await artifacts.create({
+        kind: 'data',
+        mimeType: 'application/json',
+        filename: 'blind-model-comparison-cmp_revealed.json',
+        text: '{}',
+        metadata: {
+          purpose: 'agent-model-compare',
+          comparisonId: 'cmp_revealed',
+          candidateCount: 2,
+          completedCandidates: 2,
+          revealIncludedInTranscript: true,
+        },
+      });
       const revealedJudgment = await artifacts.create({
         kind: 'data',
         mimeType: 'application/json',
@@ -118,7 +132,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(summary.documentOps?.lanes).toBe(10);
         expect(summary.documentOps?.ready).toBeGreaterThanOrEqual(2);
         expect(summary.documentOps?.attention).toBeGreaterThanOrEqual(1);
-        expect(summary.documentOps?.partial).toBeGreaterThanOrEqual(1);
+        expect(summary.documentOps?.partial).toBe(0);
         expect(summary.documentOps?.gap).toBe(0);
         return;
       }
@@ -168,6 +182,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               }[];
             };
             readonly actionIds?: readonly string[];
+            readonly signals?: readonly string[];
           }[];
           readonly policy: string;
           readonly nextActions: readonly string[];
@@ -254,7 +269,14 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(artifactBrowser?.actionIds).toContain('document-insert-artifact');
         expect(artifactBrowser?.actionIds).toContain('document-attach-artifact');
         expect(artifactBrowser?.actionIds).toContain('document-promote-artifact');
-        expect(modelCompare?.status).toBe('partial');
+        // A fully wired runtime must not read "gap" for an action id the category table never had.
+        for (const lane of [artifactBrowser, modelCompare]) {
+          expect(lane?.signals?.length).toBeGreaterThan(0);
+          expect((lane?.signals ?? []).filter((signal) => signal.endsWith(': gap'))).toEqual([]);
+        }
+        const knownActionIds = new Set(AGENT_WORKSPACE_CATEGORIES.flatMap((category) => category.actions.map((action) => action.id)));
+        for (const lane of ops.lanes) for (const id of lane.actionIds ?? []) expect(knownActionIds.has(id)).toBe(true);
+        expect(modelCompare?.status).toBe('ready');
         expect(modelCompare?.current).toContain('admitted blind comparison runner');
         expect(modelCompare?.actionIds).toContain('document-run-compare');
         expect(modelCompare?.actionIds).toContain('document-review-compare');
@@ -285,7 +307,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           readonly routes?: { readonly model: string };
         }>(fixture, { mode: 'document_ops_lane', laneId: 'model_compare' });
         expect(lane.id).toBe('model_compare');
-        expect(lane.status).toBe('partial');
+        expect(lane.status).toBe('ready');
         expect(lane.routes?.model).toBe('agent_model_compare');
         return;
       }
@@ -384,7 +406,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -516,7 +538,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
             readonly retryCandidateCount: number;
             readonly retryCandidates: readonly { readonly target: { readonly address?: string }; readonly error?: string }[];
           };
-          readonly surfaceMessages: { readonly totalMessages: number; readonly messages: readonly { readonly title: string; readonly bodyPreview: string }[] };
+          readonly surfaceMessages: { readonly totalMessages: number; readonly messages: readonly { readonly untrustedContent: string }[] };
           readonly routeBindings: { readonly totalBindings: number; readonly bindings: readonly Record<string, unknown>[] };
           readonly inboundFeed: { readonly providerInboxFeed: string };
         }>(fixture, { mode: 'channel_triage', limit: 3 });
@@ -527,8 +549,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(triage.deliveries.retryCandidates[0]?.target).not.toHaveProperty('addressDigest');
         expect(triage.deliveries.retryCandidates[0]?.error).toBe('HTTP 500 api_key=[redacted]');
         expect(triage.surfaceMessages.totalMessages).toBe(1);
-        expect(triage.surfaceMessages.messages[0]?.title).toBe('Route token=[redacted]');
-        expect(triage.surfaceMessages.messages[0]?.bodyPreview).toContain('[redacted-url]');
+        expect(triage.surfaceMessages.messages[0]?.untrustedContent).toContain('title: Route token=[redacted]');
+        expect(triage.surfaceMessages.messages[0]?.untrustedContent).toContain('[redacted-url]');
         expect(triage.routeBindings.totalBindings).toBe(1);
         expect(triage.routeBindings.bindings[0]).not.toHaveProperty('externalIdDigest');
         expect(triage.inboundFeed.providerInboxFeed).toBe('not_published_by_current_channel_contract');
@@ -681,7 +703,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expectCompactModelRoute(expandedOperatorMethod.modelRoute);
       expect(expandedOperatorMethod.preferredModelTool).toContain('agent_operator_method');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -761,7 +783,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -772,13 +794,17 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       process.env.OPENAI_API_KEY = 'voice-workflow-secret-key';
       fixture.configManager.setDynamic('ui.voiceEnabled', true);
-      fixture.configManager.setDynamic('tts.provider', 'openai');
+      fixture.configManager.setDynamic('tts.provider', 'microsoft');
       fixture.configManager.setDynamic('tts.voice', 'alloy');
       (fixture.context as { submitSpokenInput?: (text: string) => void }).submitSpokenInput = () => {};
       (fixture.context as { stopSpokenOutput?: () => void }).stopSpokenOutput = () => {};
       const voiceRegistry = new VoiceProviderRegistry();
       voiceRegistry.register({ id: 'openai', label: 'OpenAI Voice', capabilities: ['tts', 'stt', 'realtime', 'voice-list'], billing: 'none',
         status: async () => ({ id: 'openai', label: 'OpenAI Voice', capabilities: ['tts', 'stt', 'realtime', 'voice-list'], metadata: {}, state: 'healthy', configured: true, detail: 'OpenAI voice ready.' }) });
+      // A key found only in this Agent's environment never counts as ready (the host's
+      // environment is not visible), so readiness comes from a provider that needs no secret.
+      voiceRegistry.register({ id: 'microsoft', label: 'Microsoft Voice', capabilities: ['tts', 'stt', 'realtime', 'voice-list'], billing: 'none',
+        status: async () => ({ id: 'microsoft', label: 'Microsoft Voice', capabilities: ['tts', 'stt', 'realtime', 'voice-list'], metadata: {}, state: 'healthy', configured: true, detail: 'Microsoft voice ready.' }) });
       Object.assign(fixture.context.platform, { voiceProviderRegistry: voiceRegistry });
       (fixture.context.platform as {
         voiceService?: {
@@ -820,9 +846,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         const wake = posture.voiceWorkflows.find((workflow) => workflow.id === 'wake-and-speak');
         expect(wake?.status).toBe('setup-needed');
         expect(wake?.summary).toContain('voice.wake.surfaces.agent is off');
-        // The next step describes what YOU do for the user, not a command to hand
-        // over: setting the row also moves the surface row and fetches the models.
-        expect(wake?.nextStep).toContain('Set voice.wake.enabled');
+        // The next step asks the user first, then describes what YOU do on their
+        // request: setting the row moves the surface row, and turning wake on
+        // never fetches models.
+        expect(wake?.nextStep).toContain('Ask the user');
+        expect(wake?.nextStep).toContain('set voice.wake.enabled');
+        expect(wake?.nextStep).not.toContain('are fetched and verified');
         expect(wake?.nextStep).not.toContain('/voice');
         expect(wake?.evidence.localCaptureHost).toBe(true);
         expect(wake?.evidence.listening).toBe(false);
@@ -877,7 +906,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     } finally {
       if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = previousOpenAiKey;
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -896,7 +925,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 label: 'Phone camera screen and location',
                 domain: 'device',
                 status: 'ready',
-                summary: 'Foreground camera, screen, location, and device commands are available token=[REDACTED]',
+                summary: 'Foreground camera, screen, location, and device commands are available token=sensor-summary-secret',
                 capabilities: ['camera', 'screen capture', 'location', 'local device command'],
                 permissionScope: 'foreground-camera-location-screen',
                 routes: {
@@ -906,7 +935,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 },
                 schemaStatus: 'certified',
                 schemaVersion: 'goodvibes.device.capability.v1',
-                publicationGuarantee: 'daemon publishes permission-scoped sensor receipts secret=[REDACTED]',
+                publicationGuarantee: 'daemon publishes permission-scoped sensor receipts secret=sensor-publication-secret',
                 publisher: 'goodvibes-daemon',
                 provenance: ['method device.capabilities.list', 'sourceTool companion-daemon'],
                 cursor: 'device-sensor-cursor-1',
@@ -918,7 +947,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 label: 'Wake word route',
                 domain: 'voice',
                 status: 'ready',
-                summary: 'Foreground wake-word route with visible microphone controls token=[REDACTED]',
+                summary: 'Foreground wake-word route with visible microphone controls token=wake-summary-secret',
                 capabilities: ['wake word', 'always listening', 'microphone permission repair'],
                 permissionScope: 'foreground-microphone-wake-word',
                 routes: {
@@ -928,7 +957,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 },
                 schemaStatus: 'certified',
                 schemaVersion: 'goodvibes.device.voice-workflow.v1',
-                publicationGuarantee: 'daemon publishes wake-word permission receipts token=[REDACTED]',
+                publicationGuarantee: 'daemon publishes wake-word permission receipts token=wake-publication-secret',
                 publisher: 'goodvibes-daemon',
                 provenance: ['method voice.workflows.list', 'sourceTool companion-daemon'],
                 cursor: 'wake-word-cursor-1',
@@ -1020,15 +1049,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
-
-
-  // DELETED: 'exposes a local model cookbook through model routing and workspace actions'
-  // account-local-model-cookbook, account-route-readiness, account-local-benchmark-evidence removed.
-  // DELETED: 'exposes a local model cookbook through model routing and workspace actions'
-  // account-local-model-cookbook, account-route-readiness, account-local-benchmark-evidence removed.;
 
   test.each(['cookbook', 'detail'] as const)('maps discovered local provider endpoints into smoke-testable server health: %s', async view => {
     const previousEndpointEnv = clearEnvForTest(LOCAL_MODEL_ENDPOINT_ENV_KEYS);
@@ -1095,7 +1118,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       let heldDiagnostic: unknown;
       try { await fixture.tool.execute({ mode: 'model_routing', query: 'local', includeParameters: true }); }
       catch (error) { heldDiagnostic = error; }
-      expect(heldDiagnostic).toBeInstanceOf(Error);
+      expect(heldDiagnostic).toMatchObject({ name: 'JudgmentInputError', problem: 'credential-material' });
       expect(String(heldDiagnostic)).not.toContain('serving-secret');
       expect(String(heldDiagnostic)).not.toContain('raw-secret');
       servingSnapshot.servers.ollama.publicationGuarantee = 'daemon publishes local serving diagnostics after start/repair receipts';
@@ -1308,7 +1331,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
 
     } finally {
       restoreEnvForTest(previousEndpointEnv);
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1394,9 +1417,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(smoke.policy).toContain('Confirmed read-only local model smoke');
       expect(smoke.policy).toContain('does not add providers');
     } finally {
-      server.stop();
+      await server.stop(true);
       restoreEnvForTest(previousEndpointEnv);
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1444,9 +1467,9 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(smoke.candidateEndpointCount).toBe(smoke.endpointCount);
       expect(smoke.note).toBeUndefined();
     } finally {
-      server.stop();
+      await server.stop(true);
       restoreEnvForTest(previousEndpointEnv);
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1624,7 +1647,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       // Startup preserves the native linked winner but does not read a stack from its name.
       expect(setup.localModelReadiness?.benchmarkHistory?.evidence?.winnerStacks).toEqual([]);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1895,7 +1918,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(healthBacked.readiness?.providerHealth.daemonPublication.status).toBe('published-read-model');
       expect(healthBacked.readiness?.dimensions.find((dimension) => dimension.id === 'latency')?.summary).toContain('rubric reading');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

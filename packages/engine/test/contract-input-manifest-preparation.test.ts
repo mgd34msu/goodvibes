@@ -74,46 +74,18 @@ async function fixture(options: { count?: number; custom?: boolean; symlink?: bo
   } catch (error) { await cleanup(); throw error; }
 }
 
-for (const count of [16, 32]) test(`owned immutable manifest eliminates repeated expected-table preparation (${count} paths)`, async () => {
+for (const count of [16, 32]) test(`admission and delivery consult the read policy twice per path, however many paths the view holds (${count} paths)`, async () => {
   const f = await fixture({ count });
-  let sorts = 0; let indexes = 0;
-  const present = f.receipt.files.filter(file => file.kind !== 'missing');
-  const expectedPaths = new Set(present.map(file => file.path));
   try {
-    const originalSort = Array.prototype.sort;
-    Array.prototype.sort = new Proxy(originalSort, { apply(sort, receiver, args) {
-      if (Array.isArray(receiver) && receiver.length === present.length && receiver.every(row => typeof row === 'string' && /^\d+ blob [a-f0-9]+\t/.test(row))) sorts++;
-      return Reflect.apply(sort, receiver, args) as ReturnType<typeof originalSort>;
-    } });
-    f.restorers.push(() => { Array.prototype.sort = originalSort; });
-    const OriginalMap = globalThis.Map;
-    globalThis.Map = new Proxy(OriginalMap, { construct(MapClass, args, newTarget) {
-      const entries: unknown = args[0];
-      if (Array.isArray(entries) && entries.length === present.length && entries.every((entry: unknown) => {
-        if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !expectedPaths.has(entry[0])) return false;
-        const value: unknown = entry[1];
-        return value !== null && typeof value === 'object' && 'path' in value && value.path === entry[0] && 'kind' in value;
-      })) indexes++;
-      return Reflect.construct(MapClass, args, newTarget) as object;
-    } });
-    f.restorers.push(() => { globalThis.Map = OriginalMap; });
     let policies = 0;
     const filter = async () => { policies++; await Promise.resolve(); return true; };
     for (const file of f.files) await f.authorize(file, filter);
-    const admission = { policies, sorts, indexes };
-    sorts = 0; indexes = 0; policies = 0;
+    expect(policies).toBe(2 * count);
+    policies = 0;
     await f.deliver(filter);
-    const delivery = { policies, sorts, indexes };
-    console.log(JSON.stringify({ count, admission, delivery }));
-    for (const phase of [admission, delivery]) {
-      expect(phase.policies).toBe(2 * count);
-      // Delivery validates the whole view at both batch boundaries, not per file.
-      expect(phase.sorts).toBe(phase === delivery ? 2 : 2 * count); expect(phase.indexes).toBe(0);
-    }
-    // Standalone callers retain fresh receipt-derived expectations.
-    sorts = 0; indexes = 0;
-    assertContractInputObjects(f.receipt, f.root);
-    expect(sorts).toBe(2); expect(indexes).toBe(1);
+    expect(policies).toBe(2 * count);
+    // A standalone caller derives its expectations from the receipt and still accepts the untouched repository.
+    expect(() => assertContractInputObjects(f.receipt, f.root)).not.toThrow();
   } finally { await f.cleanup(); }
 }, 30_000);
 

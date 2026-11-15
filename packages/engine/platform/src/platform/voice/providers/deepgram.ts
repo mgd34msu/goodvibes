@@ -4,8 +4,10 @@ import {
   normalizeBaseUrl,
   readFirstEnv,
   resolveAudioInput,
+  signalInit,
+  voiceFetch,
 } from './shared.js';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+
 
 type DeepgramTranscriptionResponse = {
   readonly results?: {
@@ -42,13 +44,14 @@ export function createDeepgramProvider(): VoiceProvider {
     async transcribe(request) {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('Deepgram API key missing');
-      const { buffer, mimeType } = await resolveAudioInput(request.audio);
+      const { buffer, mimeType } = await resolveAudioInput(request.audio, request.signal);
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://api.deepgram.com/v1');
       const url = new URL(`${baseUrl}/listen`);
       url.searchParams.set('model', request.modelId?.trim() || 'nova-3');
       if (request.language?.trim()) url.searchParams.set('language', request.language.trim());
       url.searchParams.set('smart_format', 'true');
-      const response = await instrumentedFetch(url, {
+      const response = await voiceFetch(url, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           Authorization: `Token ${apiKey}`,

@@ -1,4 +1,4 @@
-/** UNRUN: real signed frames, sealed recipients and persisted metadata ordering. */
+/** Real signed frames, sealed recipients and persisted metadata ordering. */
 import { expect, spyOn, test } from 'bun:test';
 import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.ts';
 import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.ts';

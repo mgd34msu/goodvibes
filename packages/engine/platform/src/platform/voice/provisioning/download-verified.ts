@@ -17,6 +17,12 @@ import { summarizeError } from '../../utils/error-display.js';
 
 export interface VerifiedDownloadSpec {
   readonly url: string;
+  /**
+   * Further origins serving the SAME bytes, tried in order when `url` fails.
+   * Every origin is held to the same pinned size and sha256, so a mirror can
+   * improve availability but never change what is installed.
+   */
+  readonly fallbackUrls?: readonly string[] | undefined;
   /** Expected byte count (pinned). */
   readonly bytes: number;
   /** Expected lowercase hex sha256 (pinned). */
@@ -111,38 +117,56 @@ export async function downloadVerifiedFile(options: VerifiedDownloadOptions): Pr
   }
   const doFetch = options.fetchImpl ?? fetch;
   const dir = dirname(destPath);
-  const tmpPath = join(dir, `.${randomBytes(8).toString('hex')}.part`);
-  try {
-    options.onProgress?.('download', `fetching ${spec.url}`);
-    const response = await doFetch(spec.url, { signal: AbortSignal.timeout(options.timeoutMs ?? 600_000) });
-    if (!response.ok) {
-      return { ok: false, reason: 'download-failed', error: `HTTP ${response.status} for ${spec.url}` };
+  const origins = [declared.url, ...(declared.fallbackUrls ?? [])];
+  const failures: Extract<VerifiedDownloadResult, { ok: false }>[] = [];
+  for (const [index, origin] of origins.entries()) {
+    const outcome = await attempt(origin);
+    if (outcome.ok) return outcome;
+    failures.push(outcome);
+    if (index < origins.length - 1) {
+      logger.warn('verified download origin failed, trying the next', { url: origin, reason: outcome.reason, error: outcome.error });
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length !== spec.bytes) {
-      return { ok: false, reason: 'size-mismatch', error: `expected ${spec.bytes} bytes, got ${bytes.length} (truncated or wrong asset)` };
-    }
-    options.onProgress?.('verify', 'verifying checksum');
-    const actual = sha256Hex(bytes);
-    if (actual !== expected) {
-      // Checksum mismatch: refuse and keep NOTHING.
-      return { ok: false, reason: 'checksum-mismatch', error: `sha256 mismatch: expected ${spec.sha256}, got ${actual}` };
-    }
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(tmpPath, bytes);
-    if (statSync(tmpPath).size !== bytes.length) {
-      unlinkSync(tmpPath);
-      return { ok: false, reason: 'download-failed', error: 'temp write incomplete' };
-    }
-    renameSync(tmpPath, destPath);
-    options.onProgress?.('done', `installed ${destPath}`);
-    return { ok: true, path: destPath, bytes: bytes.length, skipped: false };
-  } catch (error) {
+  }
+  // The first origin's failure is the one reported (its reason is the one a
+  // caller branches on); the mirrors' failures are appended so none is hidden.
+  const [first, ...mirrors] = failures;
+  if (!first) return { ok: false, reason: 'download-failed', error: 'no download origin declared' };
+  return mirrors.length === 0 ? first : { ...first, error: `${first.error}; fallback origins also failed: ${mirrors.map((m) => m.error).join('; ')}` };
+
+  async function attempt(url: string): Promise<VerifiedDownloadResult> {
+    const tmpPath = join(dir, `.${randomBytes(8).toString('hex')}.part`);
     try {
-      if (existsSync(tmpPath)) unlinkSync(tmpPath);
-    } catch (cleanupError) {
-      logger.warn('verified download partial cleanup failed', { tmpPath, error: summarizeError(cleanupError) });
+      options.onProgress?.('download', `fetching ${url}`);
+      const response = await doFetch(url, { signal: AbortSignal.timeout(options.timeoutMs ?? 600_000) });
+      if (!response.ok) {
+        return { ok: false, reason: 'download-failed', error: `HTTP ${response.status} for ${url}` };
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length !== spec.bytes) {
+        return { ok: false, reason: 'size-mismatch', error: `expected ${spec.bytes} bytes, got ${bytes.length} (truncated or wrong asset)` };
+      }
+      options.onProgress?.('verify', 'verifying checksum');
+      const actual = sha256Hex(bytes);
+      if (actual !== expected) {
+        // Checksum mismatch: refuse and keep NOTHING.
+        return { ok: false, reason: 'checksum-mismatch', error: `sha256 mismatch: expected ${spec.sha256}, got ${actual}` };
+      }
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(tmpPath, bytes);
+      if (statSync(tmpPath).size !== bytes.length) {
+        unlinkSync(tmpPath);
+        return { ok: false, reason: 'download-failed', error: 'temp write incomplete' };
+      }
+      renameSync(tmpPath, destPath);
+      options.onProgress?.('done', `installed ${destPath}`);
+      return { ok: true, path: destPath, bytes: bytes.length, skipped: false };
+    } catch (error) {
+      try {
+        if (existsSync(tmpPath)) unlinkSync(tmpPath);
+      } catch (cleanupError) {
+        logger.warn('verified download partial cleanup failed', { tmpPath, error: summarizeError(cleanupError) });
+      }
+      return { ok: false, reason: 'download-failed', error: summarizeError(error) };
     }
-    return { ok: false, reason: 'download-failed', error: summarizeError(error) };
   }
 }

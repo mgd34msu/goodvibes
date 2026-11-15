@@ -9,7 +9,7 @@ import {
   nativeWorkSubmissionResultSchema, nativeWorkSubmissionLookupResultSchema,
   NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES,
 } from '../../workflow/work-ledger/native-submission-wire.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
+import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
@@ -42,7 +42,8 @@ export function registerNativeWorkSubmissionGatewayMethods(catalog: GatewayMetho
           const parsed = nativeWorkSubmissionRequestSchema.safeParse(input);
           if (!parsed.success) throw new GatewayVerbError('Invalid explicit native source', 'INVALID_ARGUMENT', 400);
           const result = await host.submit(parsed.data, authority, options);
-          authorize(invocation); return nativeWorkSubmissionResultSchema.parse(result);
+          try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, 'The submission was recorded.'); }
+          return nativeWorkSubmissionResultSchema.parse(result);
         }
         const parsed = nativeWorkSubmissionLookupRequestSchema.safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid native submission lookup', 'INVALID_ARGUMENT', 400);
@@ -55,7 +56,7 @@ export function registerNativeWorkSubmissionGatewayMethods(catalog: GatewayMetho
             : ['stale', 'conflict', 'request-conflict'].includes(error.code) ? 409 : 503;
           throw new GatewayVerbError(error.code === 'indeterminate'
             ? 'Native submission outcome is unknown. Look up the original request before retrying.'
-            : `Native work submission ${error.code}`, `NATIVE_SUBMISSION_${error.code.replaceAll('-', '_').toUpperCase()}`, status);
+            : error.message, `NATIVE_SUBMISSION_${error.code.replaceAll('-', '_').toUpperCase()}`, status);
         }
         throw new GatewayVerbError('Native work submission is unavailable; retain the original request identity', 'NATIVE_SUBMISSION_UNAVAILABLE', 503);
       }

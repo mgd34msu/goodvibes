@@ -7,12 +7,19 @@
  * structured information about its structure, APIs, database schema, components,
  * layout, accessibility, or a scaffold plan.
  */
+/** Every inspect mode; the schema enum, the InspectMode type and the validity check all derive from this one list. */
+export const INSPECT_MODES = [
+  'project', 'api', 'api_spec', 'api_validate', 'api_sync', 'database', 'components', 'layout', 'accessibility', 'scaffold',
+  'component_state', 'render_triggers', 'hooks', 'overflow', 'sizing', 'stacking', 'responsive', 'events', 'tailwind',
+  'client_boundary', 'error_boundary',
+] as const;
+
 export const INSPECT_TOOL_SCHEMA = {
   type: 'object',
   properties: {
     mode: {
       type: 'string',
-      enum: ['project', 'api', 'api_spec', 'api_validate', 'api_sync', 'database', 'components', 'layout', 'accessibility', 'scaffold', 'component_state', 'render_triggers', 'hooks', 'overflow', 'sizing', 'stacking', 'responsive', 'events', 'tailwind', 'client_boundary', 'error_boundary'],
+      enum: [...INSPECT_MODES],
       description:
         'Analysis mode. project: detect project type and structure; api: scan route definitions;'
         + ' api_spec: generate OpenAPI 3.0 spec from discovered routes;'
@@ -31,12 +38,16 @@ export const INSPECT_TOOL_SCHEMA = {
     projectRoot: {
       type: 'string',
       description:
-        'Root directory for the analysis. Defaults to the current working directory.',
+        'Root directory for the analysis. Defaults to the current working directory. Must be inside the working directory unless access outside the project is allowed; scaffold writes only inside it.',
     },
     file: {
       type: 'string',
       description:
-        'Path to a specific file. Required for component, layout, and accessibility modes.',
+        'Path to a specific file. Required for the single-file modes: components, layout, accessibility, component_state, render_triggers, hooks, overflow, sizing, stacking, responsive, events, tailwind, client_boundary and error_boundary.',
+    },
+    specPath: {
+      type: 'string',
+      description: 'Path to an OpenAPI spec (JSON). Required for api_validate mode.',
     },
     framework: {
       type: 'string',
@@ -47,8 +58,8 @@ export const INSPECT_TOOL_SCHEMA = {
     schemaPath: {
       type: 'string',
       description:
-        'Path to database schema file (Prisma/Drizzle). For database mode. '
-        + 'Defaults to prisma/schema.prisma.',
+        'Path to a Prisma schema file. For database mode. '
+        + 'Defaults to prisma/schema.prisma. Other schema formats (for example Drizzle) are not parsed.',
     },
     moduleName: {
       type: 'string',
@@ -83,28 +94,7 @@ export const INSPECT_TOOL_SCHEMA = {
 // TypeScript types
 // ---------------------------------------------------------------------------
 
-export type InspectMode =
-  | 'project'
-  | 'api'
-  | 'api_spec'
-  | 'api_validate'
-  | 'api_sync'
-  | 'database'
-  | 'components'
-  | 'layout'
-  | 'accessibility'
-  | 'scaffold'
-  | 'component_state'
-  | 'render_triggers'
-  | 'hooks'
-  | 'overflow'
-  | 'sizing'
-  | 'stacking'
-  | 'responsive'
-  | 'events'
-  | 'tailwind'
-  | 'client_boundary'
-  | 'error_boundary';
+export type InspectMode = (typeof INSPECT_MODES)[number];
 
 export type ApiFramework = 'auto' | 'nextjs' | 'express' | 'fastify' | 'hono';
 export type OutputFormat = 'summary' | 'detailed' | 'json';
@@ -175,6 +165,8 @@ export interface DbEnum {
 export interface DatabaseInfo {
   models: DbModel[];
   enums: DbEnum[];
+  /** Set when a block could not be closed, so models after it are missing. */
+  warning?: string;
 }
 
 export interface ComponentInfo {
@@ -249,6 +241,8 @@ export interface ApiValidateResult {
   missing_from_spec: string[];
   missing_from_code: string[];
   mismatched_methods: Array<{ path: string; spec_methods: string[]; code_methods: string[] }>;
+  /** What the comparison does not cover. */
+  note?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,8 +256,10 @@ export interface FetchCall {
 }
 
 export interface ApiSyncResult {
-  /** Files the current access policy denied; they were not inspected. */
+  /** Files the current access policy denied, or that could not be read; they were not inspected. */
   unavailable_files?: string[];
+  /** What the scan could not cover (a depth limit, an unreadable directory, a cap on files read). */
+  warnings?: string[];
   fetch_calls: FetchCall[];
   unmatched_fetches: FetchCall[];
   unmatched_routes: ApiRoute[];

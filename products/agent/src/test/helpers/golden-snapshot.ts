@@ -8,7 +8,7 @@
  *   @STYLES
  *   <row> <col> <attr>=<value>   non-default attributes only
  *
- * Update path: GOODVIBES_UPDATE_GOLDENS=1 bun test <file>
+ * Update path: GOODVIBES_UPDATE_GOLDENS=1 on a local run of the file (refused when CI is set).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -38,6 +38,8 @@ export function assertGoldenIn(dir: string, surface: string, lines: readonly Lin
   const actual = encodeGolden(surface, lines);
   const path = join(dir, `${surface}.txt`);
   if (process.env['GOODVIBES_UPDATE_GOLDENS'] === '1') {
+    // Rewriting the file and then "matching" it would turn every golden suite green without comparing anything.
+    if (process.env['CI']) throw new Error(`[${surface}] GOODVIBES_UPDATE_GOLDENS=1 is set in a CI run, which would rewrite the goldens instead of checking them. Unset it.`);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path, actual, 'utf-8');
     return actual;

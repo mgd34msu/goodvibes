@@ -131,10 +131,17 @@ export function verifyPrivateReceiptPreservation(contract: ArchiveOwner, unit: P
         || JSON.stringify(actual.readEvidence ?? []) !== JSON.stringify(saved.observations)) throw new Error('Archived observations differ from their original accepted host records');
     }
     const referenceChecks: { path: string; sourceUnitId: string; bytes: number; identical: boolean }[] = [];
+    /** Declared public files the baseline tree does not hold: new files, so no previous ledger exists to compare. */
+    const absentAtBaseline: string[] = [];
     if (unit.baseline?.head) {
       for (const path of unit.files.filter(path => !path.startsWith('.goodvibes/') && /(?:\.md|\.json|\.txt|SHA256SUMS)$/.test(path))) {
+        // ls-tree answers success with no output for a path the tree lacks, and fails for an unreadable
+        // repository or commit; only the first means a newly created file. Anything else is not "nothing to compare".
+        const listed = spawnSync('git', ['-C', cwd, 'ls-tree', unit.baseline.head, '--', path], { encoding: 'utf8' });
+        if (listed.error !== undefined || listed.status !== 0) throw new Error(`The baseline tree for ${path} could not be read (${listed.error?.message ?? `git exited ${listed.status}`}); the original public reference cannot be compared`);
+        if (listed.stdout.trim() === '') { absentAtBaseline.push(path); continue; }
         const result = spawnSync('git', ['-C', cwd, 'show', `${unit.baseline.head}:${path}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-        if (result.status !== 0) continue; // A newly created file held no previous public ledger.
+        if (result.error !== undefined || result.status !== 0) throw new Error(`The original public reference ${path} could not be read from the baseline (${result.error?.message ?? `git exited ${result.status}`})`);
         const original = result.stdout.replace(/\r\n/g, '\n').replace(/\n$/, '');
         let matched: { id: string } | undefined;
         for (const saved of archive.units) for (const read of saved.observations) {
@@ -157,6 +164,7 @@ export function verifyPrivateReceiptPreservation(contract: ArchiveOwner, unit: P
           ? { encoding: 'git-object-id-hex-nibbles-a-p', value: opaqueUuid(unit.baseline.head) }
           : unit.baseline?.head ?? null,
         referenceChecks,
+        ...(absentAtBaseline.length === 0 ? {} : { absentAtBaseline }),
         meaning: 'Actual filesystem/provenance comparisons passed. Original declared public reference text is preserved exactly after removing read-tool line-number prefixes and normalizing line endings and one terminal newline. This proves retention, not a new inspection or semantic acceptance. Public edits, citations and final output still require native Jev review.' }) };
   } catch (error) {
     return { gate: 'private-read-receipt-preservation', passed: false, durationMs: performance.now() - start,

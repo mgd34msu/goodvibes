@@ -15,24 +15,12 @@ beforeEach(() => { qualityReadings.set({
   ],
   activation: [['Sensing capabilities', 0.99], ['Garage control', 0.99]],
   homeGraph: [['Front Door Sensor', { batteryApplicable: 0.99, manualApplicable: 0.99 }]],
-  quality: [['Amazon affiliate LG listing', 0.03], ['Pending LG candidate source', 0.03], ['LG 86NANO90UNA official specifications', 0.99]],
-  authorities: [['LG 86NANO90UNA official specifications', 'official-vendor']],
 }); });
 
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { HomeGraphRoutes } from '../platform/src/platform/daemon/http/home-graph-routes.js';
+import { homeAssistantKnowledgeSpaceId } from '../platform/src/platform/knowledge/index.js';
 import {
-  HomeGraphService,
-  homeAssistantKnowledgeSpaceId,
-} from '../platform/src/platform/knowledge/index.js';
-import { answerHomeGraphQuery } from '../platform/src/platform/knowledge/home-graph/ask.js';
-import { reindexHomeGraphSources } from '../platform/src/platform/knowledge/home-graph/reindex.js';
-import { readHomeGraphSearchState } from '../platform/src/platform/knowledge/home-graph/search.js';
-import {
-  createCompressedPdfBuffer,
   createHomeGraphService,
-  readHomeAssistantEntityId,
-  waitFor,
   useHomeGraphFixtures,
 } from './_helpers/homegraph-service-fixtures.js';
 
@@ -244,6 +232,8 @@ describe('Home Graph sync and generated pages', () => {
     expect(pages.pages).toHaveLength(synced.generated.devicePassports); // Every supplied device receives a page.
     expect(new Set(pages.pages.map(page => page.source.id)).size).toBe(deviceCount);
     expect(priorityPages.pages).toHaveLength(5);
+    // The priority reading ranks the LG TV above 32 generic devices, so it leads a short page.
+    expect(priorityPages.pages[0]?.source.title).toContain('LG webOS Smart TV');
     expect(priorityPages.pages.map(page => page.source.id)).toEqual(pages.pages.slice(0, 5).map(page => page.source.id));
   });
 

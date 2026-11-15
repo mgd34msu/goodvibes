@@ -2,7 +2,7 @@ import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';
-import { runChannelPairing } from './channel-pairing.ts';
+import { PAIRABLE_SURFACES, runChannelPairing } from './channel-pairing.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
@@ -16,6 +16,7 @@ function renderProfileBinding(binding: ChannelProfileBinding): string {
   return lines.join('\n');
 }
 
+const PROFILE_FLAGS: readonly string[] = ['model', 'provider', 'permission-mode'];
 const CHANNEL_PROFILES_SUBCOMMANDS = ['list', 'get', 'set', 'delete'] as const;
 
 async function handleChannelProfilesSubcommand(args: string[], ctx: CommandContext): Promise<void> {
@@ -85,13 +86,18 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
     const flags = new Map<string, string>();
     for (let i = 0; i < flagTokens.length; i++) {
       const token = flagTokens[i]!;
-      if (!token.startsWith('--')) continue;
       const name = token.slice(2);
-      const value = flagTokens[i + 1];
-      if (value !== undefined) {
-        flags.set(name, value);
-        i++;
+      if (!token.startsWith('--') || !PROFILE_FLAGS.includes(name)) {
+        ctx.print(`[channel profiles set] Unknown option "${token}"; nothing was bound. Options: ${PROFILE_FLAGS.map((flag) => `--${flag}`).join(', ')}.`);
+        return;
       }
+      const value = flagTokens[i + 1];
+      if (value === undefined || value.startsWith('--')) {
+        ctx.print(`[channel profiles set] --${name} needs a value; nothing was bound.`);
+        return;
+      }
+      flags.set(name, value);
+      i++;
     }
     const rpc = getOperatorRpc(ctx);
     if (!rpc.available) {
@@ -241,11 +247,7 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
         // Channel policy is persisted by ChannelPolicyManager in
         // .goodvibes/tui/channels/policies.json, surface via configManager
         // category (runtime-accessible without a daemon round-trip).
-        const surfaces = [
-          'slack', 'discord', 'ntfy', 'webhook', 'homeassistant',
-          'telegram', 'google-chat', 'signal', 'whatsapp',
-          'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix',
-        ];
+        const surfaces = PAIRABLE_SURFACES;
         const lines: string[] = ['Channel Ingress Policies'];
         let found = false;
         for (const surface of surfaces) {

@@ -6,10 +6,8 @@
  * `cachedReadTokens`/`cachedWriteTokens` naming, onto the platform's `AgentUsage`
  * shape (`cacheReadTokens`/`cacheWriteTokens`), forwarded into AGENT_COMPLETED.
  *
- * Only the pure mapping function is exercised here, spawning a real ACP
- * subprocess and driving the full handshake is out of scope for a unit test
- * and not something this repo's test suite currently does for the acp/
- * module (no existing acp test harness).
+ * Only the pure mapping function is exercised here; the full handshake against
+ * a real ACP subprocess is covered by acp-host.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
 import { mapAcpUsage } from '../platform/src/platform/acp/connection.js';

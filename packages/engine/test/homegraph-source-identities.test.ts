@@ -1,4 +1,4 @@
-/** Actual Home Graph source tuple migration/producer/ownership source regressions. UNRUN. */
+/** Actual Home Graph source tuple migration/producer/ownership source regressions. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';

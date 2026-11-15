@@ -51,6 +51,7 @@ import {
 } from '../voice/provisioning/wake-word-manifest.js';
 import { bytesToBase64 } from '../voice/capture/frames.js';
 import { singleFlight } from '../utils/single-flight.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 
 /**
  * Which pinned artifact a chunk read is asking for.
@@ -174,6 +175,24 @@ function readSlice(path: string, offset: number, length: number): Uint8Array {
   return new Uint8Array(whole.buffer, whole.byteOffset + offset, Math.min(length, whole.length - offset));
 }
 
+/**
+ * Run a read of a managed artifact, turning "the file is not there" into the
+ * recovery step. The raw ENOENT names the managed path under the user's home,
+ * and a remote client asking before anything was provisioned deserves to be told
+ * what to do, not where the daemon keeps its files.
+ */
+function readWhenProvisioned<T>(component: WakeModelComponent, read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      throw new Error(`[wake] the ${component} wake-word model is not provisioned on this host. Run voice.wake.provision (the daemon also fetches it when it starts), then request it again.`);
+    }
+    throw error;
+  }
+}
+
 export function createWakeSetupService(deps: WakeSetupServiceDeps): WakeSetupService {
   const provisionImpl = deps.provision
     ?? ((options: { managedRoot: string }) => provisionWakeWordModels(options));
@@ -202,12 +221,12 @@ export function createWakeSetupService(deps: WakeSetupServiceDeps): WakeSetupSer
         WAKE_MODEL_CHUNK_MAX_BYTES,
         Math.max(1, Math.trunc(request.maxBytes ?? WAKE_MODEL_CHUNK_MAX_BYTES)),
       );
-      const totalBytes = artifactSize(path);
+      const totalBytes = readWhenProvisioned(request.component, () => artifactSize(path));
       if (offset > totalBytes) {
-        throw new Error(`[wake] offset ${offset} is past the end of ${request.component} (${totalBytes} bytes)`);
+        throw new GatewayVerbError(`[wake] offset ${offset} is past the end of ${request.component} (${totalBytes} bytes). Request an offset between 0 and ${totalBytes}.`, 'INVALID_ARGUMENT', 400, 'offset');
       }
       const length = Math.min(cap, totalBytes - offset);
-      const slice = length > 0 ? readArtifact(path, offset, length) : new Uint8Array(0);
+      const slice = length > 0 ? readWhenProvisioned(request.component, () => readArtifact(path, offset, length)) : new Uint8Array(0);
       return {
         component: request.component,
         offset,

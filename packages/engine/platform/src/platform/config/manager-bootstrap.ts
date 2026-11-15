@@ -64,9 +64,15 @@ export function requireAbsoluteOwnedPath(path: string | undefined, name: string)
 
 /** Ensure the shared ~/.goodvibes/<surface>.json exists (empty object if not). */
 export function ensureSharedConfig(sharedPath: string): void {
-  if (!existsSync(sharedPath)) {
-    mkdirSync(dirname(sharedPath), { recursive: true });
-    writeFileSync(sharedPath, '{}\n', 'utf-8');
+  if (existsSync(sharedPath)) return;
+  mkdirSync(dirname(sharedPath), { recursive: true });
+  try {
+    // Exclusive create: a second product starting at the same moment may have
+    // created and already filled this file since the check above, and a plain
+    // write would truncate its settings back to `{}`.
+    writeFileSync(sharedPath, '{}\n', { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
 }
 

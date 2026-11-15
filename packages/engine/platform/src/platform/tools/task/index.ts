@@ -3,6 +3,7 @@ import type { CrossSessionTaskRef, CrossSessionTaskRegistry } from '../../sessio
 import { LEGACY_TASK_NAMESPACE } from '../../sessions/orchestration/types.js';
 import { TASK_TOOL_SCHEMA, type TaskToolInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
+import { taskLifecycle } from '../../runtime/tasks/lifecycle.js';
 
 /** Options for {@link createTaskTool}. */
 export interface TaskToolOptions {
@@ -61,7 +62,8 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
   return {
     definition: {
       name: 'task',
-      description: 'Manage durable cross-session task refs, dependencies, cancellations, and handoffs.',
+      description: 'Manage durable cross-session task refs, dependencies, cancellations, and handoffs.'
+        + ' A handoff blocks the task until its destination session accepts it with mode=acknowledge handoffId=<id>.',
       parameters: toRecord(TASK_TOOL_SCHEMA),
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',
@@ -82,6 +84,10 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
       if (input.mode === 'create') {
         if (!input.taskId || !input.title) {
           return { success: false, error: 'create requires taskId and title.' };
+        }
+        const existing = registry.getRef(sessionId, input.taskId);
+        if (existing) {
+          return { success: false, error: `Task ref ${sessionId}:${input.taskId} already exists (status ${existing.status}); create cannot replace it. Nothing was changed. Use mode=status to move it, or create a new taskId.` };
         }
         const now = Date.now();
         const result = registry.linkTask({
@@ -126,8 +132,19 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
 
       if (input.mode === 'status') {
         if (!input.taskId || !input.status) return { success: false, error: 'status requires taskId and status.' };
+        const before = registry.getRef(sessionId, input.taskId);
+        if (!before) {
+          return { success: false, error: `Unknown task ref: ${sessionId}:${input.taskId}. Create it with mode=create first.` };
+        }
+        if (before.status === input.status) {
+          return { success: true, output: JSON.stringify({ ...registry.getRef(sessionId, input.taskId), unchanged: true }) };
+        }
         const changed = registry.propagateStatus(sessionId, input.taskId, input.status);
-        if (!changed) return { success: false, error: `Task ref not updated: ${sessionId}:${input.taskId}` };
+        if (!changed) {
+          const verdict = taskLifecycle.check(before.status, input.status);
+          const reason = verdict.ok ? `task is ${before.status} and cannot become ${input.status}` : verdict.reason;
+          return { success: false, error: `Task ref not updated: ${sessionId}:${input.taskId}: ${reason}. Nothing was changed.` };
+        }
         return { success: true, output: JSON.stringify(registry.getRef(sessionId, input.taskId)) };
       }
 
@@ -171,6 +188,14 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
         if (!input.taskId || !input.toSessionId) {
           return { success: false, error: 'handoff requires taskId and toSessionId.' };
         }
+        if (!registry.getRef(sessionId, input.taskId)) {
+          return { success: false, error: `Unknown task ref: ${sessionId}:${input.taskId}. Create it with mode=create first.` };
+        }
+        const open = registry.getHandoffs().find((handoff) => !handoff.acknowledged
+          && handoff.taskRef.sessionId === sessionId && handoff.taskRef.taskId === input.taskId);
+        if (open) {
+          return { success: false, error: `Task ${input.taskId} already has an open handoff (${open.handoffId}) to session ${open.toSessionId}. Nothing was changed. Wait for that session to acknowledge it.` };
+        }
         const result = registry.initiateHandoff(
           { sessionId, taskId: input.taskId },
           sessionId,
@@ -200,6 +225,20 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
               })),
           }),
         };
+      }
+
+      if (input.mode === 'acknowledge') {
+        if (!input.handoffId) return { success: false, error: 'acknowledge requires handoffId (see mode=handoffs).' };
+        const handoff = registry.getHandoffs().find((record) => record.handoffId === input.handoffId);
+        if (!handoff) return { success: false, error: `Unknown handoff: ${input.handoffId}. List handoffs with mode=handoffs.` };
+        if (handoff.toSessionId !== sessionId) {
+          return { success: false, error: `Handoff ${input.handoffId} is addressed to session ${handoff.toSessionId}; only that session can acknowledge it. Nothing was changed.` };
+        }
+        if (handoff.acknowledged) {
+          return { success: true, output: JSON.stringify({ handoffId: handoff.handoffId, acknowledged: true, unchanged: true }) };
+        }
+        if (!registry.acknowledgeHandoff(input.handoffId)) return { success: false, error: `Handoff ${input.handoffId} could not be acknowledged.` };
+        return { success: true, output: JSON.stringify({ handoffId: input.handoffId, acknowledged: true, taskRef: handoff.taskRef }) };
       }
 
       return { success: false, error: `Unknown mode: ${input.mode}` };

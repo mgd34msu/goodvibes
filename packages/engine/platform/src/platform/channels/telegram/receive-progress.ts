@@ -38,6 +38,8 @@ export class TelegramPollingReceiveProgress implements TelegramReceiveProgressOw
   private requests = 0;
   private readonly scopedGaps = new Map<string, number>();
   private readonly onAbort: () => void;
+  /** The wall clock moved backwards since the last reading; coverage is re-based at the next safe point. */
+  private steppedBack = false;
 
   constructor(private readonly lifetime: AbortSignal, private readonly now: () => number = Date.now,
     private readonly cursor?: TelegramPollingCursor) {
@@ -48,7 +50,11 @@ export class TelegramPollingReceiveProgress implements TelegramReceiveProgressOw
   }
   private time(): number {
     const now = this.now();
-    if (this.closed || this.lifetime.aborted || !validTime(now) || now < this.lastTime) { this.close(); throw new TelegramReceiveCoverageError(); }
+    if (this.closed || this.lifetime.aborted || !validTime(now)) { this.close(); throw new TelegramReceiveCoverageError(); }
+    // A clock step (NTP, a resumed VM) is not a reason to stop receiving. It does
+    // break the time-based evidence, so it is recorded here and answered with a
+    // gap at the next request boundary, outside any cursor write in progress.
+    if (now < this.lastTime) this.steppedBack = true;
     this.lastTime = now; return now;
   }
   private notify(): void { for (const wait of [...this.waiting]) wait.changed(); }
@@ -71,14 +77,21 @@ export class TelegramPollingReceiveProgress implements TelegramReceiveProgressOw
   }
   beginRequest(): number {
     const now = this.time();
-    if (now - this.completedAt >= RETENTION_MS) this.gap();
+    if (this.steppedBack) { this.steppedBack = false; this.gap(); }
+    else if (now - this.completedAt >= RETENTION_MS) this.gap();
     return now;
   }
   /** Called only after the actual returned batch has finished dispatch and
    * cursor persistence. Nonempty or full batches never prove queue quiet. */
   completeRequest(startedAtMs: number, empty: boolean): void {
     const now = this.time();
-    if (!validTime(startedAtMs) || startedAtMs > now) { this.close(); throw new TelegramReceiveCoverageError(); }
+    if (!validTime(startedAtMs)) { this.close(); throw new TelegramReceiveCoverageError(); }
+    if (startedAtMs > now || this.steppedBack) {
+      // The clock moved during this request, so its start time proves nothing:
+      // no quiet claim is made, and every open claim is invalidated.
+      this.steppedBack = false; this.gap(); this.requests++; this.notify();
+      return;
+    }
     if (now - this.completedAt >= RETENTION_MS) this.gap();
     this.completedAt = now;
     this.requests++;

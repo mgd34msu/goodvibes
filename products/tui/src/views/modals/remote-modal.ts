@@ -1,6 +1,6 @@
 import type { ConfigModalActionContext, ConfigModalSurface, ConfigModalView } from '../../input/config-modal-types.ts';
 import type { UiReadModel, UiRemoteSnapshot } from '../../runtime/ui-read-models.ts';
-import { toneStyle, statusGlyph, pad, postureLine, kv, type Tone } from './modal-surface-helpers.ts';
+import { toneStyle, statusGlyph, pad, postureLine, kv, runModalCommand, type Tone } from './modal-surface-helpers.ts';
 
 function stateTone(state: string): Tone {
   switch (state) {
@@ -104,8 +104,7 @@ class RemoteModalSurface implements ConfigModalSurface {
     if (id !== 'recover') return;
     const rowId = ctx.row?.id ?? '';
     const runner = rowId.includes(':') ? rowId.slice(rowId.indexOf(':') + 1) : '';
-    void ctx.executeCommand?.('remote', runner ? ['recover', runner] : ['recover']);
-    ctx.setStatus(runner ? `Recovering ${runner}…` : 'Recovering…');
+    runModalCommand(ctx, 'remote', runner ? ['recover', runner] : ['recover'], runner ? `/remote recover ${runner}` : '/remote recover', { pending: runner ? `Recovering ${runner}…` : 'Recovering…' });
     this.requestRender();
   }
 }

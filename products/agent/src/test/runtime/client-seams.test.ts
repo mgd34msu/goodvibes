@@ -61,6 +61,7 @@ describe('inbound work reaches the loop', () => {
     });
 
     const delivered: Array<{ sessionId: string; inputId: string }> = [];
+    const acknowledged = Promise.withResolvers<void>();
     let served = false;
     dispatch.activate({
       async listInputs(sessionId) {
@@ -77,12 +78,12 @@ describe('inbound work reaches the loop', () => {
       },
       async deliverInput(sessionId, inputId) {
         delivered.push({ sessionId, inputId });
+        acknowledged.resolve();
         return {};
       },
     });
 
-    const deadline = Date.now() + 3_000;
-    while (delivered.length === 0 && Date.now() < deadline) await Bun.sleep(5);
+    await acknowledged.promise;
     dispatch.stop();
 
     expect(ran).toEqual(['Build the thing']);
@@ -91,21 +92,27 @@ describe('inbound work reaches the loop', () => {
 
   test('a session this process does NOT host is never polled', async () => {
     const hosted = createHostedSessionRegistry();
+    // The hosted session is the positive control: once it has been polled twice,
+    // a whole tick has completed after the first, and every id a tick polls is
+    // polled in that tick.
+    hosted.adopt('session-hosted');
     const dispatch = createWireSessionDispatch({ hostedSessionIds: () => hosted.ids(), intervalMs: 10 });
     dispatch.setContinuationRunner(async () => null);
     const polled: string[] = [];
+    const twoTicks = Promise.withResolvers<void>();
     dispatch.activate({
       async listInputs(sessionId) {
         polled.push(sessionId);
+        if (polled.filter((id) => id === 'session-hosted').length >= 2) twoTicks.resolve();
         return { inputs: [] };
       },
       async deliverInput() { return {}; },
     });
 
-    await Bun.sleep(60);
+    await twoTicks.promise;
     dispatch.stop();
 
-    expect(polled).toEqual([]);
+    expect(new Set(polled)).toEqual(new Set(['session-hosted']));
   });
 
   test('the inputs wire client speaks sessions.inputs.list and .deliver', async () => {
@@ -122,6 +129,15 @@ describe('inbound work reaches the loop', () => {
     expect(calls).toEqual([
       { methodId: 'sessions.inputs.list', input: { sessionId: 'session-a', state: 'queued', limit: 20 } },
       { methodId: 'sessions.inputs.deliver', input: { sessionId: 'session-a', inputId: 'input-1', consumed: true } },
+    ]);
+  });
+
+  test('claiming an input asks the daemon for it with claim:true', async () => {
+    const calls: RecordedCall[] = [];
+    const client = createAgentSessionInputsClient(stubVerbs({ calls }));
+    await client.claimInput?.('session-a', 'input-1');
+    expect(calls).toEqual([
+      { methodId: 'sessions.inputs.deliver', input: { sessionId: 'session-a', inputId: 'input-1', claim: true } },
     ]);
   });
 });

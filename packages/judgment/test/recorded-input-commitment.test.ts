@@ -1,4 +1,3 @@
-/** Source regression UNRUN during the coding-first pass. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { JudgmentError, recordedJudgmentInputHash, SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentRequest } from '../src/index.ts';

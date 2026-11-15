@@ -22,9 +22,9 @@ const CI_STATUS_USAGE = 'Usage: goodvibes-agent ci status <repo> [--ref <ref>] [
 const CI_WATCHES_CREATE_USAGE =
   'Usage: goodvibes-agent ci watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes';
 const CI_WATCHES_DELETE_USAGE = 'Usage: goodvibes-agent ci watches delete <watchId> --yes';
-const CI_WATCHES_RUN_USAGE = 'Usage: goodvibes-agent ci watches run <watchId>';
+const CI_WATCHES_RUN_USAGE = 'Usage: goodvibes-agent ci watches run <watchId> --yes';
 const CI_USAGE =
-  'Usage: goodvibes-agent ci [status <repo> [--ref <ref>] [--pr <number>]|watches list|watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes|watches delete <watchId> --yes|watches run <watchId>]';
+  'Usage: goodvibes-agent ci [status <repo> [--ref <ref>] [--pr <number>]|watches list|watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes|watches delete <watchId> --yes|watches run <watchId> --yes]';
 
 type CiReport = OperatorMethodOutput<'ci.status'>['report'];
 type CiWatch = OperatorMethodOutput<'ci.watches.list'>['watches'][number];
@@ -109,7 +109,7 @@ async function handleCiWatchesList(runtime: CliCommandRuntime): Promise<CliComma
 }
 
 async function handleCiWatchesCreate(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
-  const parsed = parseOperatorCommandArgs(args, ['ref', 'pr', 'delivery-channel']);
+  const parsed = parseOperatorCommandArgs(args, ['ref', 'pr', 'delivery-channel'], ['trigger-fix-session']);
   const repo = parsed.positionals[0];
   if (!repo) return usageFailure(runtime, CI_WATCHES_CREATE_USAGE);
   let deliveryChannel: string;
@@ -164,6 +164,10 @@ async function handleCiWatchesRun(runtime: CliCommandRuntime, args: readonly str
   const parsed = parseOperatorCommandArgs(args);
   const watchId = parsed.positionals[0];
   if (!watchId) return usageFailure(runtime, CI_WATCHES_RUN_USAGE);
+  // A run sends a notification and may start a fix session, like create and delete it changes state outside this process.
+  if (!parsed.yes) {
+    return { output: `Refusing to run CI watch ${watchId} without --yes: a run sends a notification and may start a fix session.`, exitCode: 2 };
+  }
   const payload: OperatorMethodInput<'ci.watches.run'> = { watchId };
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);
   const result = await invokeOperatorGatewayMethod(connection, 'ci.watches.run', CI_WATCH_RUN_ROUTE, payload);

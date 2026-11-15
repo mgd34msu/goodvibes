@@ -6,7 +6,9 @@ import {
   readMemoryShowProvenance,
   MEMORY_SHOW_PROVENANCE_DEFAULT,
 } from '../../core/memory-provenance.ts';
-import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
+import { createMemoryProvenanceUi } from '../../runtime/interaction-seams.ts';
+import { configGetStub } from '../helpers/config-manager-stub.ts';
+import { waitFor } from '../helpers/wait-for.ts';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
 import { createTestManagers } from '../helpers/test-managers.ts';
 
@@ -22,12 +24,15 @@ function turnWithMemories(recordIds: string[]): unknown {
   return { type: 'TURN_COMPLETED', turnId: 't1', response: 'ok', stopReason: 'completed', metadata: { memory: { recordIds } } };
 }
 
-/** The render gate exactly as main.ts applies it: on AND at least one record id. */
-function chipLinesFor(turn: unknown, showProvenance: boolean, expanded = false): Line[] {
-  const ids = memoryRecordIdsFromTurn(turn);
-  if (!showProvenance || ids.length === 0) return [];
-  return UIFactory.createMemoryProvenanceChip(80, ids.length, ids.map((id) => ({ id })), expanded);
+/** The production gate (createMemoryProvenanceUi.renderChip) over a spine that resolves nothing. */
+function chipUi(turn: unknown) {
+  const ui = createMemoryProvenanceUi({ render: () => {}, memorySpine: { get: async () => null } });
+  ui.onTurnCompleted(turn);
+  return ui;
 }
+
+const settingOn = { get: configGetStub({ 'memory.showProvenance': true }) };
+const settingOff = { get: configGetStub({ 'memory.showProvenance': false }) };
 
 describe('memoryRecordIdsFromTurn: the metadata.memory.recordIds convention (STEP 4)', () => {
   test('the setting defaults OFF', () => {
@@ -52,17 +57,20 @@ describe('memoryRecordIdsFromTurn: the metadata.memory.recordIds convention (STE
 
 describe('the render gate: off renders nothing (STEP 4)', () => {
   test('OFF (the default): a turn that used memories renders zero chip lines', () => {
-    expect(chipLinesFor(turnWithMemories(['mem-a', 'mem-b', 'mem-c']), false)).toEqual([]);
+    const turn = turnWithMemories(['mem-a', 'mem-b', 'mem-c']);
+    expect(chipUi(turn).renderChip(80, settingOff)).toEqual([]);
+    // A setting nobody ever wrote reads as the default, OFF.
+    expect(chipUi(turn).renderChip(80, { get: configGetStub() })).toEqual([]);
   });
 
   test('ON: a turn that used memories renders the chip naming the count', () => {
-    const text = linesToText(chipLinesFor(turnWithMemories(['mem-a', 'mem-b', 'mem-c']), true)).join('\n');
+    const text = linesToText(chipUi(turnWithMemories(['mem-a', 'mem-b', 'mem-c'])).renderChip(80, settingOn)).join('\n');
     expect(text).toContain('used 3 memories');
     expect(text).toContain('Alt+M to list');
   });
 
   test('ON but a turn used no memories: still nothing', () => {
-    expect(chipLinesFor({ type: 'TURN_COMPLETED' }, true)).toEqual([]);
+    expect(chipUi({ type: 'TURN_COMPLETED' }).renderChip(80, settingOn)).toEqual([]);
   });
 });
 
@@ -104,36 +112,33 @@ describe('createMemoryProvenanceChip render (STEP 4)', () => {
 
 describe('memory-provenance drill-in resolves ids to summaries (7a)', () => {
   test('expanding resolves each id through the memory spine, per-id, and renders summaries', async () => {
-    const { createMemoryProvenanceUi } = await import('../../runtime/interaction-seams.ts');
     const records: Record<string, { summary: string; cls: string } | null> = {
       'mem-1': { summary: 'first fact', cls: 'fact' },
       'mem-2': null, // forgotten since the turn
     };
     const gets: string[] = [];
+    let renders = 0;
     const ui = createMemoryProvenanceUi({
-      render: () => {},
+      render: () => { renders++; },
       memorySpine: { get: async (id) => { gets.push(id); return records[id] ?? null; } },
     });
     ui.onTurnCompleted(turnWithMemories(['mem-1', 'mem-2']));
-    const cfg = { get: (k: string) => (k === 'memory.showProvenance' ? true : undefined) } as never;
 
-    ui.toggle(); // expand → triggers resolution
-    await Promise.resolve(); await Promise.resolve();
+    ui.toggle(); // expand → triggers resolution; one render for the toggle, one per resolved id
+    await waitFor(() => renders >= 3);
 
-    const text = linesToText(ui.renderChip(80, cfg)).join('\n');
+    const text = linesToText(ui.renderChip(80, settingOn)).join('\n');
     expect(gets.sort()).toEqual(['mem-1', 'mem-2']); // resolved per id
     expect(text).toContain('first fact');
     expect(text).toContain('no longer available'); // the forgotten one degrades honestly
   });
 
-  test('a collapsed chip resolves nothing (lazy)', async () => {
-    const { createMemoryProvenanceUi } = await import('../../runtime/interaction-seams.ts');
+  test('a collapsed chip resolves nothing (lazy)', () => {
     const gets: string[] = [];
     const ui = createMemoryProvenanceUi({ render: () => {}, memorySpine: { get: async (id) => { gets.push(id); return null; } } });
     ui.onTurnCompleted(turnWithMemories(['mem-1']));
-    const cfg = { get: (k: string) => (k === 'memory.showProvenance' ? true : undefined) } as never;
-    ui.renderChip(80, cfg); // collapsed
-    await Promise.resolve();
+    ui.renderChip(80, settingOn); // collapsed
+    // The lookup, when there is one, starts synchronously from the render.
     expect(gets).toEqual([]);
   });
 });

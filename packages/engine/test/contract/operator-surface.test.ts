@@ -57,8 +57,8 @@ describe('the contracts operator service', () => {
 
   test('start names its session and workspace, and an isolation override', async () => {
     const { service, daemon } = surface();
-    await service.start({ ask: 'Fix the flaky test.', sessionId: 'shared-9', workspaceRoot: '/work/other', isolation: 'shared' });
-    expect(daemon.started).toEqual([{ ask: 'Fix the flaky test.', sessionId: 'shared-9', origin: 'external', projectRoot: '/work/other', isolation: 'shared' }]);
+    await service.start({ ask: 'Fix the flaky test.', sessionId: 'shared-9', workspaceRoot: `${WORKDIR}/packages/app`, isolation: 'shared' });
+    expect(daemon.started).toEqual([{ ask: 'Fix the flaky test.', sessionId: 'shared-9', origin: 'external', projectRoot: `${WORKDIR}/packages/app`, isolation: 'shared' }]);
   });
 
   test('start in a live hosted session runs on its floor, origin hosted, in its workspace', async () => {

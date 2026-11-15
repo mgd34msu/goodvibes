@@ -317,34 +317,18 @@ describe('workspace-registration: first-start prompt support', () => {
 
   test('answerWorkspaceRegistrationPrompt(accepted:true) registers the root', async () => {
     const { shellPaths, work } = makeShellPaths();
-    answerWorkspaceRegistrationPrompt(shellPaths, work, true);
+    await answerWorkspaceRegistrationPrompt(shellPaths, work, true);
     const store = createWorkspaceRegistrationStore(shellPaths);
-    const resolved = await pollUntilResolved(store, work, 'covered');
-    expect(resolved).toBe(true);
+    expect((await store.resolve(work)).status).toBe('covered');
   });
 
   test('answerWorkspaceRegistrationPrompt(accepted:false) declines the root', async () => {
     const { shellPaths, work } = makeShellPaths();
-    answerWorkspaceRegistrationPrompt(shellPaths, work, false);
+    await answerWorkspaceRegistrationPrompt(shellPaths, work, false);
     const store = createWorkspaceRegistrationStore(shellPaths);
-    const resolved = await pollUntilResolved(store, work, 'declined');
-    expect(resolved).toBe(true);
+    expect((await store.resolve(work)).status).toBe('declined');
   });
 });
-
-async function pollUntilResolved(
-  store: ReturnType<typeof createWorkspaceRegistrationStore>,
-  path: string,
-  status: 'covered' | 'declined',
-  timeoutMs = 5000,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await store.resolve(path)).status === status) return true;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  return false;
-}
 
 describe('workspace-registration: native v2 preservation', () => {
   test('legacy migration and backfill cannot erase native metadata or resurrect a removed scope', async () => {

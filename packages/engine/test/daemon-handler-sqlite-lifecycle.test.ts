@@ -262,3 +262,35 @@ test('exhausted allocation collisions preserve a healthy image and permit a late
     expect(reopening.all('SELECT * FROM probe')).toEqual([{ id: 'saved', value: 'original data' }]);
   } finally { random.mockRestore(); }
 });
+
+describe('daemon handler store close', () => {
+  test('a save queued behind a staged transaction still lands when the store is closed first', async () => {
+    const store = makeStore();
+    await store.init();
+    const gate = deferred();
+    const staged = store.persistTransaction(
+      (transaction) => { transaction.run('INSERT INTO probe VALUES (?, ?)', ['in-transaction', 'x']); },
+      () => {},
+      async (operation) => { await gate.promise; return operation(() => {}); },
+    );
+    // Let the transaction reach its publication gate before the ordinary write.
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+    store.run('INSERT INTO probe VALUES (?, ?)', ['before-close', 'kept']);
+    const saving = store.save();
+    store.close();
+    gate.resolve();
+    await staged.catch(() => {});
+    await saving;
+
+    const reopened = makeStore();
+    await reopened.init();
+    expect(reopened.all('SELECT id FROM probe ORDER BY id').map((row) => (row as { id: string }).id)).toContain('before-close');
+  });
+
+  test('a closed store says it is closed, not that it was never initialized', async () => {
+    const store = makeStore();
+    await store.init();
+    store.close();
+    expect(() => store.get('SELECT 1')).toThrow('closed');
+  });
+});

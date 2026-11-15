@@ -66,6 +66,7 @@ import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { Field, Input } from '../ui/Field';
 import { Row, RowList } from '../ui/Row';
 import { Select } from '../ui/Select';
@@ -96,6 +97,8 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>('');
   const [errorField, setErrorField] = useState<keyof CardDraft | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const offered = mayOfferCardEntryHere(surface);
 
@@ -156,6 +159,34 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
     }
   }, [draft, currency, queryClient, toast]);
 
+  // A card is retired by id only: the call carries no card value, and the
+  // daemon's own refusal (it needs the admin scope) is shown as it answered.
+  async function remove(card: { readonly id: string; readonly label: string }): Promise<void> {
+    if (removingId !== null) return;
+    const ok = await confirm.ask({
+      title: 'Remove this card?',
+      target: card.label,
+      description: 'The daemon deletes the stored number, expiry, security code and cardholder name. Purchases can no longer use this card, and it cannot be restored. Cancel the card with its issuer too if it should stop working everywhere.',
+      confirmLabel: 'Remove card',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRemovingId(card.id);
+    try {
+      const result = await platformClient.operator.payments.cards.delete(card.id);
+      toast(
+        result.deleted
+          ? { title: 'Card removed', description: `"${card.label}" is deleted from the daemon secret store.`, tone: 'success' }
+          : { title: 'Card not found', description: 'The daemon reported no such card; the list is being refreshed.', tone: 'info' },
+      );
+    } catch (problem) {
+      toast({ title: 'Failed to remove the card', description: formatError(problem), tone: 'danger' });
+    } finally {
+      setRemovingId(null);
+      await queryClient.invalidateQueries({ queryKey: ['payments', 'cards'] });
+    }
+  }
+
   if (!offered) {
     // The prompt is itself the harm: a surface that cannot accept the answer
     // must never ask the question. No inputs are rendered at all, not disabled
@@ -193,7 +224,20 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
                     ? `cap ${minorUnitsToMajorText(card.issuerCapMinorUnits, currency)} ${currency}`
                     : '',
                 ].filter(Boolean).join(' · ')}
-                trailing={<Chip tone={card.materialComplete ? 'ok' : 'warn'}>{card.materialComplete ? 'Complete' : 'Incomplete'}</Chip>}
+                trailing={(
+                  <>
+                    <Chip tone={card.materialComplete ? 'ok' : 'warn'}>{card.materialComplete ? 'Complete' : 'Incomplete'}</Chip>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={removingId !== null}
+                      aria-label={`Remove card ${card.label}`}
+                      onClick={() => void remove(card)}
+                    >
+                      Remove
+                    </Button>
+                  </>
+                )}
               />
             ))}
           </RowList>
@@ -316,6 +360,7 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
           {error}
         </div>
       )}
+      {confirm.element}
     </SettingsBlock>
   );
 }

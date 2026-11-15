@@ -104,10 +104,14 @@ describe('KeybindingsManager.lookup()', () => {
     }), 'utf-8');
     try {
       const km = new KeybindingsManager({ configPath });
-      km.loadFromDisk();
+      const notices = km.loadFromDisk();
       const result = km.lookup({ logicalName: 'x', ctrl: true });
       // 'search' is the last writer (DEFAULT_KEYBINDINGS order: search after clear-cancel).
       expect(result).toBe('search');
+      // The user is told which action lost the chord.
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain('clear-cancel and search');
+      expect(notices[0]).toContain('only search responds');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

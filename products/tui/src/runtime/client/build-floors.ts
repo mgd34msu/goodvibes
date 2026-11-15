@@ -48,17 +48,16 @@ import {
 /**
  * The oldest daemon build this terminal will adopt.
  *
- * 1.28.0 is the daemon release in which the daemon became its own product and
- * this terminal became a pure client of it: the session register, the inbound
- * steer queue, the fleet needs-input push and the credential writes this build
- * calls are all served there. An older daemon answers some of those and not
+ * 3.1.2 is the oldest daemon build that serves the verbs this terminal calls:
+ * the session register, hosted sessions, the conversation rewind verbs and the
+ * inbound steer queue. 3.1.1 and earlier answer some of those with a 404 and not
  * others, which is the half-working state this floor exists to stop.
  *
  * Raise this only for a daemon behavior this terminal MUST have, and say in the
  * release notes what it was raised for. It costs a daemon update for anyone
  * running an older one.
  */
-export const TUI_DAEMON_BUILD_FLOOR = '1.28.0';
+export const TUI_DAEMON_BUILD_FLOOR = '3.1.2';
 
 export interface ClientBuildGuardOptions {
   readonly clientVersion: string;

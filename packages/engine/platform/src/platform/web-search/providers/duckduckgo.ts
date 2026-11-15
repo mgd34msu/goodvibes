@@ -3,6 +3,7 @@ import type { FetchInput } from '../../tools/fetch/schema.js';
 import type {
   WebSearchInstantAnswer,
   WebSearchProvider,
+  WebSearchProviderCall,
   WebSearchProviderResponse,
   WebSearchRelatedTopic,
   WebSearchRequest,
@@ -75,8 +76,9 @@ function unwrapDuckDuckGoRedirect(rawHref: string): string {
   try {
     const base = rawHref.startsWith('//') ? `https:${rawHref}` : new URL(rawHref, 'https://duckduckgo.com').toString();
     const url = new URL(base);
+    // searchParams.get already percent-decodes; a second decode would alter or break the target URL.
     const wrapped = url.searchParams.get('uddg');
-    return wrapped ? decodeURIComponent(wrapped) : base;
+    return wrapped ? wrapped : base;
   } catch {
     return rawHref;
   }
@@ -198,7 +200,7 @@ export function createDuckDuckGoProvider(options: DuckDuckGoProviderOptions = {}
         note: 'Uses lite.duckduckgo.com for organic results and api.duckduckgo.com for instant-answer enrichment.',
       };
     },
-    async search(request: WebSearchRequest): Promise<WebSearchProviderResponse> {
+    async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(25, request.maxResults ?? 10));
       const liteBody: Record<string, string> = {
         q: request.query,
@@ -241,7 +243,7 @@ export function createDuckDuckGoProvider(options: DuckDuckGoProviderOptions = {}
         ...(request.blockedHosts ? { blocked_hosts: [...request.blockedHosts] } : {}),
       };
 
-      const output = await fetcher(input);
+      const output = await (options.fetcher ?? call?.fetcher ?? fetcher)(input);
       const lite = output.results?.[0];
       if (!lite || lite.error || typeof lite.content !== 'string') {
         throw new Error(lite?.error ?? 'DuckDuckGo lite search failed');

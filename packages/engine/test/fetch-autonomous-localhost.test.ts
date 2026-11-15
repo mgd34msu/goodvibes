@@ -69,7 +69,7 @@ afterEach(() => { installJudgmentPort(restore); log[Symbol.dispose](); forgetGat
 function approval() {
   return buildLocalhostFetchApproval({ autonomousHost: host,
     requestApproval: async () => { humans++; return { approved: true }; },
-    configManager: { get: () => true, setProjectValue: () => { writes++; } } as Parameters<typeof buildLocalhostFetchApproval>[0]['configManager'],
+    configManager: { get: () => true, set: () => { writes++; } } as Parameters<typeof buildLocalhostFetchApproval>[0]['configManager'],
   });
 }
 function fetchLocal(url = 'http://localhost/start', extra: Parameters<typeof executeFetchInput>[1] = {}) {

@@ -49,6 +49,7 @@ export type {
 
 export {
   describeOriginPosture,
+  isLoopbackHost,
   BROWSER_GATED_CAPABILITIES,
   LAN_PLAIN_HTTP_NOTICE,
 } from './origin-posture.js';

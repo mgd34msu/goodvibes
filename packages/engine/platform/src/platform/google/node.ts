@@ -123,7 +123,10 @@ export function startLoopbackListener(options: StartLoopbackListenerOptions): Lo
     fetch(request: Request): Response {
       const outcome = classifyLoopbackRedirect(request.url, options.expectedState);
       if (outcome.kind === 'error') {
-        settle(() => rejectCode(outcome.error));
+        // A stray hit (a probe, a prefetch, another page) must not end a
+        // consent the person is still completing: only an error that carries
+        // this run's state is Google's answer.
+        if (outcome.settlesWait) settle(() => rejectCode(outcome.error));
       } else {
         settle(() => resolveCode(outcome.result));
       }
@@ -139,32 +142,74 @@ export function startLoopbackListener(options: StartLoopbackListenerOptions): Lo
   return {
     redirectUri,
     waitForCode(timeoutMs: number): Promise<LoopbackCodeResult> {
+      if (settled) return codePromise;
       activeTimer = setTimeout(() => {
         settle(() => rejectCode(new Error('Timed out waiting for the browser redirect.')));
       }, timeoutMs);
       return codePromise;
     },
     close(): void {
-      if (activeTimer) clearTimeout(activeTimer);
+      // Settle first: a wait that is still pending must end, or whoever
+      // awaits it is suspended for ever once the server is gone.
+      settle(() => rejectCode(new Error('The sign-in listener was closed before a redirect arrived.')));
       server.stop(true);
     },
   };
 }
 
-/** The only place the CalDAV client performs real network I/O: a thin wrapper over the global `fetch`. */
-export function createFetchCalDavHttpPort(): CalDavHttpPort {
+/** Longest a CalDAV request may take before it is abandoned. */
+export const CALDAV_REQUEST_TIMEOUT_MS = 30_000;
+/** Largest CalDAV response body the port will buffer. */
+export const CALDAV_MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+export interface FetchCalDavHttpPortOptions {
+  readonly timeoutMs?: number;
+  readonly maxBodyBytes?: number;
+}
+
+async function readCappedText(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`the response is larger than ${maxBytes} bytes`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * The only place the CalDAV client performs real network I/O: a thin wrapper
+ * over the global `fetch`. A server that stops answering ends in a thrown
+ * error (which the client reports as "could not reach the calendar server")
+ * instead of holding the calling tool open.
+ */
+export function createFetchCalDavHttpPort(options: FetchCalDavHttpPortOptions = {}): CalDavHttpPort {
+  const timeoutMs = options.timeoutMs ?? CALDAV_REQUEST_TIMEOUT_MS;
+  const maxBodyBytes = options.maxBodyBytes ?? CALDAV_MAX_BODY_BYTES;
   return {
     async request(input: CalDavHttpRequest): Promise<CalDavHttpResponse> {
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
       const response = await fetch(input.url, {
         method: input.method,
         headers: input.headers as Record<string, string>,
+        signal,
         ...(input.body !== undefined ? { body: input.body } : {}),
       });
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         headers[key] = value;
       });
-      const body = await response.text();
+      const body = await readCappedText(response, maxBodyBytes);
       return { status: response.status, headers, body };
     },
   };

@@ -6,7 +6,7 @@ import { endAgentSpan, recordAgentPhase, startAgentSpan } from '../spans/agent.j
 import { endCompactionSpan, recordCompactionPhase, startCompactionSpan } from '../spans/compaction.js';
 import { endPermissionSpan, recordPermissionPhase, startPermissionSpan } from '../spans/permission.js';
 import { endSessionSpan, recordSessionPhase, startSessionSpan } from '../spans/session.js';
-import type { DomainBridgeAttachmentInput, Env, SpanMap } from './domain-bridge-shared.js';
+import { trackSpan, type DomainBridgeAttachmentInput, type Env, type SpanMap } from './domain-bridge-shared.js';
 
 export function attachAgentDomain(
   { bus, helpers }: DomainBridgeAttachmentInput,
@@ -23,7 +23,7 @@ export function attachAgentDomain(
           task: env.payload.task,
           traceId: env.traceId ?? '',
         });
-        agentSpans.set(env.payload.agentId, span);
+        trackSpan(agentSpans, env.payload.agentId, span);
       });
     }),
   );
@@ -124,7 +124,7 @@ export function attachPermissionDomain(
           category: env.payload.category,
           traceId: env.traceId ?? '',
         });
-        permissionSpans.set(env.payload.callId, span);
+        trackSpan(permissionSpans, env.payload.callId, span);
       });
     }),
   );
@@ -243,7 +243,7 @@ export function attachSessionDomain(
           profileId: env.payload.profileId,
           workingDir: env.payload.workingDir,
         });
-        sessionSpans.set(env.payload.sessionId, span);
+        trackSpan(sessionSpans, env.payload.sessionId, span);
       });
     }),
   );
@@ -257,7 +257,7 @@ export function attachSessionDomain(
             traceId: env.traceId ?? '',
             path: env.payload.path,
           });
-          sessionSpans.set(env.payload.sessionId, span);
+          trackSpan(sessionSpans, env.payload.sessionId, span);
           return;
         }
         helpers.withSpan(sessionSpans, env.payload.sessionId, (span) => recordSessionPhase(span, 'loading'));
@@ -344,7 +344,7 @@ export function attachCompactionDomain(
           threshold: env.payload.threshold,
           traceId: env.traceId ?? '',
         });
-        compactionSpans.set(env.payload.sessionId, span);
+        trackSpan(compactionSpans, env.payload.sessionId, span);
       });
     }),
   );
@@ -359,7 +359,7 @@ export function attachCompactionDomain(
           tokenCount: env.payload.tokensBefore,
           traceId: env.traceId ?? '',
         });
-        compactionSpans.set(env.payload.sessionId, span);
+        trackSpan(compactionSpans, env.payload.sessionId, span);
       });
     }),
   );
@@ -375,7 +375,7 @@ export function attachCompactionDomain(
           limit: env.payload.limit,
           traceId: env.traceId ?? '',
         });
-        compactionSpans.set(env.payload.sessionId, span);
+        trackSpan(compactionSpans, env.payload.sessionId, span);
       });
     }),
   );

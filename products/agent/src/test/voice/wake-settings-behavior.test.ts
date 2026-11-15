@@ -92,13 +92,17 @@ afterEach(() => { for (const previous of previousPorts.splice(0).reverse()) inst
  * every test below decides what the CLASSIFIER emits, so the embedding only has
  * to keep the pipeline moving.
  */
-function stubEmbedding(): WakeInferenceSession {
+function stubEmbedding(feeds?: Float32Array[]): WakeInferenceSession {
   return {
     inputNames: ['input_1'],
     outputNames: ['embedding'],
-    run: async () => ({
-      embedding: { data: new Float32Array(WAKE_EMBED_DIM).fill(0.5), dims: [1, 1, 1, WAKE_EMBED_DIM] },
-    }),
+    run: async (inputs) => {
+      const fed = inputs['input_1'];
+      if (feeds !== undefined && fed !== undefined) feeds.push(Float32Array.from(fed.data));
+      return {
+        embedding: { data: new Float32Array(WAKE_EMBED_DIM).fill(0.5), dims: [1, 1, 1, WAKE_EMBED_DIM] },
+      };
+    },
   };
 }
 
@@ -296,6 +300,8 @@ interface CaptureHarness {
   readonly transcribed: UtteranceAudioArtifact[];
   readonly timers: Array<{ handler: () => void; ms: number }>;
   readonly loadedModelPaths: string[];
+  /** The mel features each embedding run was fed, in order: what the audio became before it was scored. */
+  readonly embeddingFeeds: Float32Array[];
   /** One entry per noise-suppression stage the listener asked for. */
   readonly suppressionStages: Array<{ frameSamples: number; frames: number; closed: boolean }>;
   /** How many times the stub speech gate was consulted. */
@@ -339,7 +345,8 @@ function makeCaptureHarness(options: CaptureHarnessOptions = {}): CaptureHarness
   const suppressionStages: Array<{ frameSamples: number; frames: number; closed: boolean }> = [];
   let vadRuns = 0;
   const classifier = holdingClassifier(options.scores ?? [0]);
-  const embedding = stubEmbedding();
+  const embeddingFeeds: Float32Array[] = [];
+  const embedding = stubEmbedding(embeddingFeeds);
   /**
    * The speech gate, stubbed: shape-correct over the same embedding the classifiers
    * read, returning one scripted probability and counting every consultation. The
@@ -438,6 +445,7 @@ function makeCaptureHarness(options: CaptureHarnessOptions = {}): CaptureHarness
     transcribed,
     timers,
     loadedModelPaths,
+    embeddingFeeds,
     suppressionStages,
     vadRuns: () => vadRuns,
   }) as CaptureHarness;
@@ -608,6 +616,36 @@ describe('a confirmed wake lands in this surface\'s conversation input', () => {
     expect(harness.drafts).toEqual([]);
   });
 
+  test('voice.wake.autoSubmit changed while listening applies to the next utterance', async () => {
+    const harness = makeCaptureHarness({ scores: [0.99], transcript: 'summarise my inbox' });
+    const recorder = await startListening(harness);
+    await primeFrontEnd(recorder);
+    harness.config.set('voice.wake.autoSubmit', true);
+    for (let i = 0; i < 12; i += 1) {
+      recorder.emitBytes(pcmBytes(silentSamples(WAKE_CHUNK_SAMPLES)));
+      await flush(2);
+    }
+    await flush();
+
+    expect(harness.submitted).toEqual(['summarise my inbox']);
+    expect(harness.drafts).toEqual([]);
+  });
+
+  test('voice.wake.retainAudio changed while listening applies to the next utterance', async () => {
+    const root = makeProjectTempDir('wake-retain-live');
+    const harness = makeCaptureHarness({ scores: [0.99], managedRoot: root });
+    const recorder = await startListening(harness);
+    await primeFrontEnd(recorder);
+    harness.config.set('voice.wake.retainAudio', 'session-temp');
+    for (let i = 0; i < 12; i += 1) {
+      recorder.emitBytes(pcmBytes(silentSamples(WAKE_CHUNK_SAMPLES)));
+      await flush(2);
+    }
+    await flush();
+
+    expect(readdirSync(resolveManagedWakePaths(root).retainedDir).length).toBe(1);
+  });
+
   test('voice.wake.activationSound: the configured kind is the one handed to the player at the moment of the wake', async () => {
     // The row's audible outcome, "none" produces no playback, "chime" produces a
     // WAV, is asserted against the real player path in
@@ -709,15 +747,18 @@ describe('the capture rows choose the device, the recorder, and what is refused'
     expect(speex.suppressionStages.length).toBe(1);
     expect(speex.suppressionStages[0]?.frameSamples).toBe(WAKE_CHUNK_SAMPLES);
 
-    recorder.emitBytes(pcmBytes(loudSamples(WAKE_CHUNK_SAMPLES)));
-    await flush(3);
+    await primeFrontEnd(recorder);
     expect(speex.suppressionStages[0]?.frames).toBeGreaterThan(0);
 
     const none = makeCaptureHarness({ config: { 'voice.wake.noiseSuppression': 'none' } });
     const plain = await startListening(none);
     none.runtime.settings();
-    plain.emitBytes(pcmBytes(loudSamples(WAKE_CHUNK_SAMPLES)));
-    await flush(3);
+    await primeFrontEnd(plain);
+    // The same audio is scored differently once the stage has filtered it: what
+    // reaches the embedding is the stage's output, never the raw frame.
+    expect(speex.embeddingFeeds.length).toBeGreaterThan(0);
+    expect(none.embeddingFeeds.length).toBe(speex.embeddingFeeds.length);
+    expect(speex.embeddingFeeds.at(-1)).not.toEqual(none.embeddingFeeds.at(-1));
     // "none" is NO stage, not a stage that does nothing, nothing was built to skip.
     expect(none.suppressionStages).toEqual([]);
     expect(none.runtime.settings().blockers).toEqual([]);
@@ -949,7 +990,8 @@ describe('a recorder that keeps dying is restarted, then latched, with the reaso
     recorder.emitClose(1);
     await flush();
 
-    expect(harness.runtime.status()).toBeNull();
+    // Stopped, but wake is still enabled: the stopped chip shows instead of no chip at all.
+    expect(harness.runtime.status()?.kind).toBe('wake-latched');
     expect(harness.notices.join('\n')).toContain('failure could not be safely determined');
     expect(harness.timers.some(timer => timer.ms === 250)).toBe(false);
     expect(harness.spawns.calls).toHaveLength(1);

@@ -142,7 +142,8 @@ describe('browser judgment service (synthetic port only)', () => {
     const original = globalThis.setTimeout;
     const scheduled: (() => void)[] = [];
     const replacement = new Proxy(original, { apply(target, receiver: unknown, args: unknown[]) {
-      if (Number(args[1]) === 30_000 && typeof args[0] === 'function') {
+      // Any wall-clock deadline in this range is fired below, so a 29 s or 31 s limit cannot slip past.
+      if (Number(args[1]) >= 1_000 && Number(args[1]) <= 120_000 && typeof args[0] === 'function') {
         const callback = args[0]; scheduled.push(() => Reflect.apply(callback, undefined, args.slice(2)));
       }
       return Reflect.apply(target, receiver, args);
@@ -158,7 +159,6 @@ describe('browser judgment service (synthetic port only)', () => {
       await started;
       for (const deadline of scheduled) deadline();
       expect(signal?.aborted).toBe(false);
-      expect(scheduled).toHaveLength(0);
       finish(); expect(await pending).toMatchObject({ status: 'settled' });
     } finally { finish?.(); await pending.catch(() => {}); await f.service.close(); f.log[Symbol.dispose](); timers.mockRestore(); }
   });
@@ -299,9 +299,12 @@ describe('browser judgment service (synthetic port only)', () => {
     } finally { await f.service.close(); f.log[Symbol.dispose](); }
   });
   test('absent actual installation remains unavailable', async () => {
-    const service = new BrowserJudgmentService({ registry: new BrowserJudgmentRegistry(), references: new BrowserJudgmentReferences(), currentRoute: () => undefined, authorize: () => false });
-    await expect(service.execute(body(), owner, new AbortController().signal, () => (owner))).rejects.toMatchObject({ code: 'JUDGMENT_UNAVAILABLE' });
-    await service.close();
+    // The battery is registered, so what is missing is the route, not the battery.
+    const f = fixture();
+    const service = new BrowserJudgmentService({ registry: f.registry, references: f.references, currentRoute: () => undefined, authorize: () => false });
+    try {
+      await expect(service.execute(body(), owner, new AbortController().signal, () => (owner))).rejects.toMatchObject({ code: 'JUDGMENT_UNAVAILABLE' });
+    } finally { await service.close(); await f.service.close(); f.log[Symbol.dispose](); }
   });
   test('caller cancellation reaches the port; close drains before log disposal', async () => {
     let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
@@ -425,7 +428,7 @@ describe('owned browser references', () => {
     const resolved = refs.resolve(id, () => (owner), ID, (snapshot) => snapshot);
     expect(resolved.state).toEqual({ message: 'text' });
     expect(() => refs.resolve(id, () => ({ ...owner, principalId: 'another' }), ID, (x) => x)).toThrow(BrowserJudgmentError);
-    expect(() => refs.resolve(id, () => (owner), 'webui.status.badge-tone', (x) => x)).toThrow(BrowserJudgmentError);
+    expect(() => refs.resolve(id, () => (owner), 'webui.palette.command-rank', (x) => x)).toThrow(BrowserJudgmentError);
     readable = false; expect(resolved.assertCurrent).toThrow(BrowserJudgmentError); readable = true;
     current = false; expect(resolved.assertCurrent).toThrow(BrowserJudgmentError); current = true;
     now = 200; expect(resolved.assertCurrent).toThrow(BrowserJudgmentError); refs.close();

@@ -16,7 +16,12 @@ import { createOrchestrationEngine } from '../platform/src/platform/orchestratio
 import { runPhase } from '../platform/src/platform/orchestration/phase-runner.js';
 import { createCancellationRegistry } from '../platform/src/platform/orchestration/cancellation.js';
 import type { PhaseSpec } from '../platform/src/platform/orchestration/types.js';
-import { createOrchestrationHarness, makeFakeConfigManager, engineerReportOutput, flushMicrotasks } from './_helpers/orchestration-harness.js';
+import { createOrchestrationHarness, makeFakeConfigManager, engineerReportOutput } from './_helpers/orchestration-harness.js';
+import { waitFor } from './_helpers/test-timeout.js';
+
+/** One macrotask boundary: every promise chain already queued has run to its end, with no wall-clock wait. */
+const drain = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+const started = (f: { item: { agentId?: string | undefined } }) => waitFor(() => f.item.agentId !== undefined);
 
 const roots: string[] = [];
 const engines: ReturnType<typeof createOrchestrationEngine>[] = [];
@@ -56,10 +61,10 @@ function answer(value: number | 'malformed' | 'unavailable') {
   return fake;
 }
 async function finish(f: ReturnType<typeof setup>) {
-  f.engine.start(f.ws.id); await flushMicrotasks(80);
+  f.engine.start(f.ws.id); await started(f);
   writeFileSync(join(f.root, 'file.ts'), 'export const originalFixture = true;\n');
   f.h.completeAgent(f.item.agentId!, engineerReportOutput({ filesCreated: ['file.ts'] }));
-  await flushMicrotasks(150);
+  await f.engine.join();
   expect(f.failureAttempts()).toBe(1);
   expect(f.engine.getPhaseResults(f.ws.id)).toHaveLength(1);
 }
@@ -85,7 +90,7 @@ describe('actual isolated and shared phase consumers', () => {
           cancellation: createCancellationRegistry(), createWorktree: () => f.h.worktree, skipClaimVerification: true,
           ...(isolation === 'isolated' ? { itemWorktree: { path: f.root, commit: async () => { throw new Error('Original complete action failure'); } } } : {}),
         });
-        await flushMicrotasks(80);
+        await started(f);
         f.h.completeAgent(f.item.agentId!, engineerReportOutput({}));
         const outcome = await pending;
         expect(outcome.result.gate.passed).toBe(true);
@@ -104,7 +109,7 @@ for (const [value, state] of [[.99, 'failed'], [.01, 'passed'], [.5, 'blocked-bo
     expect(f.engine.getPhaseResults(f.ws.id)[0]!.commit?.reason).toBe('Original action failure');
     if (state === 'blocked-bookkeeping') {
       expect(f.item.completedAt).toBeUndefined(); expect(f.item.warnings).toBeUndefined();
-      f.engine.start(f.ws.id); await flushMicrotasks(80); expect(f.h.spawnedRecords).toHaveLength(1);
+      f.engine.start(f.ws.id); await f.engine.join(); expect(f.h.spawnedRecords).toHaveLength(1);
     }
   });
 }
@@ -135,13 +140,12 @@ function deferredPort() {
 for (const action of ['kill', 'replace', 'source'] as const) {
   test(`deferred reading ${action} cannot publish a stale non-negating result`, async () => {
     const deferred = deferredPort(); const error = new Error('original action failure'); const f = setup(error);
-    f.engine.start(f.ws.id); await flushMicrotasks(80);
-    f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await flushMicrotasks(80);
-    expect(deferred.entered()).toBe(true);
+    f.engine.start(f.ws.id); await started(f);
+    f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await waitFor(() => deferred.entered());
     if (action === 'kill') f.engine.kill(f.item.id);
     else if (action === 'replace') answer(.99);
     else error.message = 'replacement action failure';
-    deferred.release(); await flushMicrotasks(180);
+    deferred.release(); await f.engine.join();
     expect(f.item.state).toBe(action === 'kill' ? 'failed' : 'blocked-bookkeeping');
     if (action === 'kill') expect(f.engine.getPhaseResults(f.ws.id)).toHaveLength(0);
     else expect(f.engine.getPhaseResults(f.ws.id)[0]!.commit?.classification).toBe('held');
@@ -179,14 +183,13 @@ test('config incarnation replacement holds a pending phase reading, even when re
     agentManager: f.h.agentManager, runtimeBus: f.h.bus, configManager: config, projectRoot: f.root, sessionId: 'test',
     cancellation: createCancellationRegistry(), createWorktree: () => f.h.worktree, skipClaimVerification: true,
   });
-  await flushMicrotasks(80); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await flushMicrotasks(80);
-  expect(deferred.entered()).toBe(true);
+  await started(f); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await waitFor(() => deferred.entered());
   incarnation++; for (const listener of listeners) listener(); incarnation++;
   const outcome = await pending;
   expect(outcome.result.commit?.classification).toBe('held');
   expect(() => outcome.bookkeeping?.assertCurrent()).toThrow();
   expect(listeners.size).toBe(0);
-  deferred.release(); await flushMicrotasks(80);
+  deferred.release(); await drain();
   expect(outcome.result.commit?.classification).toBe('held');
 });
 
@@ -199,14 +202,14 @@ test('isolated phase cancellation settles without waiting for an uncooperative r
     cancellation, createWorktree: () => f.h.worktree, skipClaimVerification: true,
     itemWorktree: { path: f.root, commit: async () => { throw new Error('Original isolated failure'); } },
   });
-  await flushMicrotasks(80); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await flushMicrotasks(80);
-  expect(deferred.entered()).toBe(true); cancellation.abort(f.item.id);
+  await started(f); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await waitFor(() => deferred.entered());
+  cancellation.abort(f.item.id);
   const outcome = await pending;
   expect(outcome.agentStatus).toBe('cancelled');
   expect(outcome.result.commit).toMatchObject({ status: 'failed', classification: 'held', reason: 'Original isolated failure' });
   expect(f.h.worktree.merges).toHaveLength(0);
   expect(f.h.worktree.cleanups).toHaveLength(0);
-  deferred.release(); await flushMicrotasks(80);
+  deferred.release(); await drain();
   expect(outcome.result.commit?.negating).toBeUndefined();
 });
 
@@ -215,23 +218,23 @@ test('held snapshot remains held on import; explicit existing requeue can recons
   const snapshot = f.engine.serializeWorkstream(f.ws.id)!;
   expect(f.engine.importWorkstream(snapshot, true)).toBe(true);
   const restored = f.engine.getWorkstream(f.ws.id)!.items[0]!;
-  f.engine.start(f.ws.id); await flushMicrotasks(80);
+  f.engine.start(f.ws.id); await f.engine.join();
   expect(restored.state).toBe('blocked-bookkeeping');
   expect(f.engine.retryItem(restored.id)).toBe(false);
   expect(f.h.spawnedRecords).toHaveLength(1);
   answer(.01);
   expect(f.engine.requeueItem(restored.id, 'operator explicitly requested reconsideration')).toBe(true);
-  await flushMicrotasks(80);
-  f.h.completeAgent(restored.agentId!, engineerReportOutput({})); await flushMicrotasks(150);
+  await waitFor(() => f.h.spawnedRecords.length === 2);
+  f.h.completeAgent(restored.agentId!, engineerReportOutput({})); await f.engine.join();
   expect(restored.state).toBe('passed');
   expect(f.h.spawnedRecords).toHaveLength(2);
 });
 
 test('disposing the engine during a reading suppresses later outcome publication', async () => {
   const deferred = deferredPort(); const f = setup(new Error('Original failure'));
-  f.engine.start(f.ws.id); await flushMicrotasks(80);
-  f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await flushMicrotasks(80);
-  expect(deferred.entered()).toBe(true); f.engine.dispose(); deferred.release(); await flushMicrotasks(150);
+  f.engine.start(f.ws.id); await started(f);
+  f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await waitFor(() => deferred.entered());
+  f.engine.dispose(); deferred.release(); await f.engine.join();
   expect(f.engine.getPhaseResults(f.ws.id)).toHaveLength(0);
   expect(f.item.state).not.toBe('passed');
 });
@@ -250,23 +253,23 @@ test('actual contract group consumer cannot finish gate-passed units while engin
   run.sharedTreeReleases.set('g1', () => { sharedReleases++; });
   const groups = createGroupRunner({
     createEngine: forbidden, fleetCapacity: forbidden, routeSelector: forbidden, getStatus: forbidden,
-    watchdog: { touch: forbidden, forget: forbidden, tick: forbidden, restart: forbidden, dispose: forbidden },
+    watchdog: { touch: forbidden, forget: forbidden, tick: forbidden, restart: forbidden, trackedAgents: forbidden, dispose: forbidden },
     settlement: { beforeSpawn: forbidden, settle: forbidden },
     steps: { groupUnitsPassed: async (_run, groupId) => { judgedGroups.push(groupId); },
       groupsPassed: forbidden, unitMergeConflict: forbidden, fixGroupPassed: forbidden, attemptsUndecided: forbidden },
     pricing: { priceUsage: forbidden, priceProvenance: forbidden }, failContract: forbidden, failUnit: forbidden,
   });
   groups.unitPassed(run, unit);
-  await flushMicrotasks(80);
+  await drain();
   expect(unit.status).toBe('passed');
   expect(f.item.state).toBe('blocked-bookkeeping');
   expect(contract.groups[0]!.status).toBe('running');
   expect(run.settledGroups.size).toBe(0); expect(judgedGroups).toHaveLength(0); expect(sharedReleases).toBe(0);
   // Only the pre-existing explicit requeue action reconsiders the phase.
   answer(.01); expect(f.engine.requeueItem(f.item.id, 'operator requested reconsideration')).toBe(true);
-  await flushMicrotasks(80); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await flushMicrotasks(150);
+  await waitFor(() => f.h.spawnedRecords.length === 2); f.h.completeAgent(f.item.agentId!, engineerReportOutput({})); await f.engine.join();
   expect(f.item.state).toBe('passed');
-  groups.unitPassed(run, unit); await flushMicrotasks(80);
+  groups.unitPassed(run, unit); await waitFor(() => run.settledGroups.has('g1'));
   expect(judgedGroups).toEqual(['g1']); expect(sharedReleases).toBe(1); expect(run.settledGroups.has('g1')).toBe(true);
 });
 
@@ -284,7 +287,7 @@ test('Classic final phase publication preserves failed git effect and Classic pr
     });
     expect(f.engine.getPhaseResults(f.ws.id)[0]?.commit?.negating).toBeUndefined();
     expect(f.item.state).toBe('blocked-bookkeeping');
-    f.engine.start(f.ws.id); await flushMicrotasks(80);
+    f.engine.start(f.ws.id); await f.engine.join();
     expect(attempts).toBe(1); expect(f.h.spawnedRecords).toHaveLength(1);
     expect(fake.requests).toHaveLength(0);
   });

@@ -47,7 +47,7 @@ function readString(value: unknown): string {
 }
 
 function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && ['true', 'yes', 'apply', 'run'].includes(value.trim().toLowerCase()));
+  return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
 }
 
 function readToolArgs(args: AgentPolicyExplainArgs): Record<string, unknown> {
@@ -174,6 +174,31 @@ function predictPermission(context: CommandContext): PermissionPrediction {
   };
 }
 
+/**
+ * Whether the tool's own schema says `confirm`/`explicitUserRequest` are only provenance. Such a tool
+ * gets its authority from recorded admission, so asking for those fields would send the model after a step that changes nothing.
+ */
+const PROVENANCE_ONLY_WORDING = new RegExp([
+  '\\b(?:does not|do not|never|cannot)\\s+(?:grants?|authori[sz]es?)\\b',
+  '\\bgrants? no\\b',
+  '\\b(?:admission|engine admission) (?:authori[sz]es|supplies)\\b',
+  '\\bsupplies authority\\b',
+  '\\b(?:request|caller|user request) provenance\\b',
+  '\\boptional provenance\\b',
+  '\\baudit (?:annotation|field|text)\\b',
+  '\\bcaller annotation\\b',
+].join('|'), 'i');
+
+function confirmationFieldsAreProvenanceOnly(definition: ToolDefinition | undefined): boolean {
+  const parameters = definition?.parameters;
+  const properties = isRecord(parameters) && isRecord(parameters.properties) ? parameters.properties : {};
+  return ['confirm', 'explicitUserRequest'].some((name) => {
+    const property = properties[name];
+    const description = isRecord(property) && typeof property.description === 'string' ? property.description : '';
+    return PROVENANCE_ONLY_WORDING.test(description);
+  });
+}
+
 function harnessModeRequiresRecordedAdmission(toolName: string, toolArgs: Record<string, unknown>): boolean {
   if (toolName !== 'agent_harness') return false;
   const mode = readString(toolArgs.mode);
@@ -197,6 +222,14 @@ function confirmationState(toolName: string, toolArgs: Record<string, unknown>, 
   }
   const schemaRequestsConfirmation = hasSchemaProperty(definition, 'confirm') && hasSchemaProperty(definition, 'explicitUserRequest');
   const required = schemaRequestsConfirmation && category !== 'read';
+  if (required && confirmationFieldsAreProvenanceOnly(definition)) {
+    return {
+      required: false,
+      confirmed: false,
+      recordedAdmissionRequired: true,
+      reason: 'This tool records confirm and explicitUserRequest as provenance only; they do not grant authority. The call needs current recorded effect admission for the exact invocation and current source and boundary checks.',
+    };
+  }
   if (!required) {
     return {
       required: false,

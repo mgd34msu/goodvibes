@@ -216,7 +216,7 @@ describe('native durable contract admission', () => {
     const checkpoint = admissions.checkpoint(key);
     let joined = false;
     const join = h.runner.join(first.admission.contractId).then(() => { joined = true; });
-    await Promise.resolve();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     expect(joined).toBe(false);
     release(); await join;
     expect(admissions.checkpoint(key)).toBe(checkpoint);

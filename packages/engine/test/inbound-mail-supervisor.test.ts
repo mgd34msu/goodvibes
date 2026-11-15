@@ -30,9 +30,12 @@ import {
   InboundMailSupervisor,
   MailboxCursorStore,
   PersistedExpectationStore,
+  createInboundNoticeHealth,
   type InboundMailSourceFactory,
   type InboundMailSupervisorDeps,
 } from '../platform/src/platform/email/inbound/index.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { firstJsonSchemaFailure } from '../transport-http/src/index.js';
 import { createEmailInboundStatusHandler } from '../platform/src/platform/control-plane/routes/email-inbound-status.ts';
 import type { InboundMailSource, SourceLatency } from '../platform/src/platform/email/inbound/source.ts';
 import type {
@@ -62,12 +65,20 @@ afterEach(() => {
 type ConfigValues = Record<string, unknown>;
 
 function fakeConfig(overrides: ConfigValues = {}): InboundMailSupervisorDeps['config'] {
-  const values: ConfigValues = {
+  return configOver(configValues(overrides));
+}
+
+function configValues(overrides: ConfigValues = {}): ConfigValues {
+  return {
     'surfaces.email.inbound.enabled': true,
     'surfaces.email.inbound.source': 'auto',
     'surfaces.email.inbound.dedupTtlMinutes': 60,
     ...overrides,
   };
+}
+
+/** Reads the object live, so a test can change a setting after the supervisor was built. */
+function configOver(values: ConfigValues): InboundMailSupervisorDeps['config'] {
   return { get: (key: string) => values[key] } as unknown as InboundMailSupervisorDeps['config'];
 }
 
@@ -108,6 +119,10 @@ class RecordingSource implements InboundMailSource {
   async stop(): Promise<void> {
     this.calls.push('stop');
   }
+
+  recheckNow(): void {
+    this.calls.push('recheck');
+  }
 }
 
 function factoryFor(source: InboundMailSource | null): InboundMailSourceFactory {
@@ -122,6 +137,8 @@ interface Rig {
   readonly expectationStore: PersistedExpectationStore;
   readonly housekeeper: InboundMailHousekeeper;
   readonly handled: unknown[];
+  /** The live settings the supervisor reads; mutate to change a setting. */
+  readonly config: ConfigValues;
 }
 
 function buildRig(options: {
@@ -131,6 +148,8 @@ function buildRig(options: {
   readonly mailAccountIsGmail?: boolean;
   readonly observer?: InboundMailObserver;
   readonly now?: () => number;
+  readonly noticeHealth?: InboundMailSupervisorDeps['noticeHealth'];
+  readonly sleep?: InboundMailSupervisorDeps['sleep'];
 }): Rig {
   const cursors = new MailboxCursorStore(join(dir, 'cursors.json'), {
     isAccountConfigured: (account) => account === ACCOUNT,
@@ -150,8 +169,10 @@ function buildRig(options: {
     disclosurePath: join(dir, 'housekeeping.json'),
   });
   const handled: unknown[] = [];
+  const config = configValues(options.config ?? {});
   const supervisor = new InboundMailSupervisor({
-    config: fakeConfig(options.config ?? {}),
+    config: configOver(config),
+    reviveDelayMs: 0,
     account: ACCOUNT,
     mailbox: MAILBOX,
     sources: options.sources,
@@ -167,8 +188,10 @@ function buildRig(options: {
     handle: async (message) => { handled.push(message); },
     ...(options.observer === undefined ? {} : { observer: options.observer }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.noticeHealth === undefined ? {} : { noticeHealth: options.noticeHealth }),
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
   });
-  return { supervisor, cursors, records, expectations, expectationStore, housekeeper, handled };
+  return { supervisor, cursors, records, expectations, expectationStore, housekeeper, handled, config };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +229,7 @@ describe('the supervisor starts, reports live status, and stops cleanly', () => 
     await rig.supervisor.stop();
   });
 
-  test('an insufficient verdict does not run and releases the source', async () => {
+  test('an insufficient verdict is not running, and the source keeps waiting for its re-check', async () => {
     const insufficient: InboundCapabilityVerdict = {
       state: 'insufficient',
       reason: 'credentials-rejected',
@@ -220,9 +243,17 @@ describe('the supervisor starts, reports live status, and stops cleanly', () => 
     expect(status.running).toBe(false);
     expect(status.mode).toBe('inactive');
     expect(status.reason).toContain('Store a current mail password.');
-    // `run` is never entered, and the connection is released rather than held
-    // through the re-check wait (§3.4b).
-    expect(source.calls).toEqual(['start', 'stop']);
+    // The source is held, not released: its own re-check is what notices the
+    // owner fixing the cause. Holding it holds no connection, the watcher
+    // closes before it waits.
+    expect(source.calls).toEqual(['start', 'run']);
+
+    // A settings change asks the held source to look again now.
+    rig.supervisor.recheckNow();
+    expect(source.calls).toEqual(['start', 'run', 'recheck']);
+
+    await rig.supervisor.stop();
+    expect(source.calls).toEqual(['start', 'run', 'recheck', 'stop']);
   });
 
   test('a source the build cannot construct is reported, never silently swapped for the other one', async () => {
@@ -260,6 +291,187 @@ describe('the supervisor starts, reports live status, and stops cleanly', () => 
     expect(status.running).toBe(false);
     expect(status.reason).toContain('surfaces.email.inbound.enabled');
     expect(source.calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A supervisor that is not running can be brought back without a restart
+// ---------------------------------------------------------------------------
+
+// The supervisor's recheck is debounced on a real timer, so this waits on the
+// observable condition, never on a fixed delay.
+async function until(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise<void>((resolve) => { setTimeout(resolve, 2); });
+  }
+}
+
+describe('an inactive supervisor comes back when the cause is fixed', () => {
+  test('switched off and then on starts watching, and off again stops it', async () => {
+    const source = new RecordingSource(HEALTHY, { kind: 'push' });
+    let created = 0;
+    const rig = buildRig({
+      sources: { create: async () => { created += 1; return source; } },
+      config: { 'surfaces.email.inbound.enabled': false },
+    });
+    expect((await rig.supervisor.start()).running).toBe(false);
+
+    rig.config['surfaces.email.inbound.enabled'] = true;
+    rig.supervisor.recheckNow();
+    await until(() => rig.supervisor.status.running, 'the mailbox to be watched');
+    expect(created).toBe(1);
+
+    rig.config['surfaces.email.inbound.enabled'] = false;
+    rig.supervisor.recheckNow();
+    await until(() => !rig.supervisor.status.running, 'the mailbox to stop');
+    expect(rig.supervisor.status.reason).toContain('switched off');
+    expect(source.calls).toContain('stop');
+    await rig.supervisor.stop();
+  });
+
+  test('a source the factory could not build is tried again on the next change, once per burst', async () => {
+    const source = new RecordingSource(HEALTHY, { kind: 'push' });
+    let created = 0;
+    const rig = buildRig({
+      sources: { create: async () => { created += 1; return created === 1 ? null : source; } },
+    });
+    expect((await rig.supervisor.start()).running).toBe(false);
+
+    // A settings page writes several keys at once.
+    rig.supervisor.recheckNow();
+    rig.supervisor.recheckNow();
+    rig.supervisor.recheckNow();
+    await until(() => rig.supervisor.status.running, 'the rebuilt source');
+    expect(created).toBe(2);
+    await rig.supervisor.stop();
+  });
+
+  test('a start that throws says why, tells the owner, and is retried on the next change', async () => {
+    const source = new RecordingSource(HEALTHY, { kind: 'push' });
+    const terminals: string[] = [];
+    let created = 0;
+    const rig = buildRig({
+      sources: {
+        create: async () => {
+          created += 1;
+          if (created === 1) throw new Error('the credential store is mid-write');
+          return source;
+        },
+      },
+      observer: { terminalFailure: (failure) => { terminals.push(failure.detail); } },
+    });
+    const status = await rig.supervisor.start();
+    expect(status.running).toBe(false);
+    expect(status.reason).toContain('failure details withheld');
+    expect(status.reason).not.toContain('the credential store is mid-write');
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]).not.toContain('the credential store is mid-write');
+
+    rig.supervisor.recheckNow();
+    await until(() => rig.supervisor.status.running, 'the retried start');
+    await rig.supervisor.stop();
+  });
+
+  test('stop waits for a start in flight, and a start right after it is not swallowed', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const source = new RecordingSource(HEALTHY, { kind: 'push' }, async () => { await gate; return undefined; });
+    const rig = buildRig({ sources: { create: async () => source } });
+
+    const first = rig.supervisor.start();
+    await until(() => source.calls.includes('start'), 'the first start to reach the source');
+    let stopped = false;
+    const stopping = rig.supervisor.stop().then(() => { stopped = true; });
+    // Event-loop turns, not a wall-clock wait: the gate is closed, so stop has nothing to finish on.
+    for (let turn = 0; turn < 5; turn += 1) await new Promise<void>((resolve) => { setImmediate(resolve); });
+    expect(stopped).toBe(false);
+
+    const second = rig.supervisor.start();
+    release();
+    await stopping;
+    await first;
+    expect((await second).running).toBe(true);
+    await rig.supervisor.stop();
+  });
+
+  test('stop gives up waiting on a start that is too slow, and the late start releases what it builds', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const source = new RecordingSource(HEALTHY, { kind: 'push' }, async () => { await gate; return undefined; });
+    let boundElapsed: () => void = () => undefined;
+    let waiting = false;
+    const rig = buildRig({
+      sources: { create: async () => source },
+      sleep: (_ms, signal) => new Promise<void>((resolve) => {
+        waiting = true;
+        boundElapsed = resolve;
+        signal.addEventListener('abort', () => { resolve(); }, { once: true });
+      }),
+    });
+
+    const first = rig.supervisor.start();
+    await until(() => source.calls.includes('start'), 'the start to reach the source');
+    let stopped = false;
+    const stopping = rig.supervisor.stop().then(() => { stopped = true; });
+    await until(() => waiting, 'the stop to start its bounded wait');
+    expect(source.calls).toContain('stop');
+    expect(stopped).toBe(false);
+
+    boundElapsed();
+    await stopping;
+    expect(stopped).toBe(true);
+    expect(rig.supervisor.status.running).toBe(false);
+
+    release();
+    await first;
+    expect(rig.supervisor.status.running).toBe(false);
+    expect(source.calls.filter((call) => call === 'stop').length).toBeGreaterThanOrEqual(1);
+    expect(source.calls).not.toContain('run');
+  });
+
+  test('a retired source whose loop throws is reported as retired, not as a dead watcher', async () => {
+    const terminals: string[] = [];
+    let fail: (error: Error) => void = () => undefined;
+    const lifetime = { retired: false };
+    const source: InboundMailSource = {
+      kind: 'imap',
+      get retired() { return lifetime.retired; },
+      latency: { kind: 'push' },
+      start: async () => HEALTHY,
+      run: () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+      stop: async () => undefined,
+    };
+    const rig = buildRig({
+      sources: factoryFor(source),
+      observer: { terminalFailure: (failure) => { terminals.push(failure.reason); } },
+    });
+    await rig.supervisor.start();
+    lifetime.retired = true;
+    fail(new Error('reading no longer current'));
+    await until(() => !rig.supervisor.status.running, 'the loop end to settle');
+    expect(rig.supervisor.status.reason).toContain('retired');
+    expect(terminals).toEqual([]);
+  });
+});
+
+describe('notices switched off clear a latched notice refusal', () => {
+  test('mode none does not keep reporting a refusal the owner opted out of', async () => {
+    const noticeHealth = createInboundNoticeHealth({ log: () => undefined });
+    noticeHealth.refused({ reason: 'no-route-binding', detail: 'No route.', fix: 'Connect one.', at: T0.toISOString() });
+    const rig = buildRig({ sources: factoryFor(new RecordingSource(HEALTHY, { kind: 'push' })), noticeHealth });
+    await rig.supervisor.start();
+    expect(rig.supervisor.health().state).toBe('degraded');
+
+    rig.config['surfaces.email.inbound.notice.mode'] = 'none';
+    expect(rig.supervisor.health().state).toBe('healthy');
+    expect(rig.supervisor.status.reason).not.toContain('NOT being announced');
+    // Dropped, not hidden: switching notices back on does not revive it.
+    expect(noticeHealth.get()).toBeNull();
+    rig.config['surfaces.email.inbound.notice.mode'] = 'all';
+    expect(rig.supervisor.health().state).toBe('healthy');
+    await rig.supervisor.stop();
   });
 });
 
@@ -473,6 +685,23 @@ describe('email.inbound.status discloses what is held', () => {
     expect(retention.records!.retentionDays).toBeGreaterThan(0);
     expect(retention.records!.maxBodyExcerptChars).toBe(20_000);
 
+    await rig.supervisor.stop();
+  });
+
+  test('the handler output, including the last sweep and its failures, validates against the published schema', async () => {
+    const rig = buildRig({
+      sources: factoryFor(new RecordingSource(HEALTHY, { kind: 'poll', worstCaseMs: 5_000 })),
+      now: () => T0.getTime(),
+    });
+    await rig.supervisor.start();
+    const disclosed = await createEmailInboundStatusHandler(rig.supervisor)({ methodId: 'email.inbound.status' } as never) as {
+      retention: { lastSweep?: { failures: string[] } };
+    };
+    // The recovery sweep ran at start, so the disclosure carries it.
+    expect(Array.isArray(disclosed.retention.lastSweep?.failures)).toBe(true);
+    const descriptor = new GatewayMethodCatalog().get('email.inbound.status');
+    expect(descriptor?.outputSchema).toBeDefined();
+    expect(firstJsonSchemaFailure(descriptor!.outputSchema!, disclosed)).toBeUndefined();
     await rig.supervisor.stop();
   });
 

@@ -38,11 +38,11 @@ export const REGISTRY_TOOL_SCHEMA = {
     },
     skillName: {
       type: 'string',
-      description: '(mode: dependencies) Name of the skill to inspect for dependencies.',
+      description: '(mode: dependencies) Name of the skill to inspect for dependencies: the name search lists, or its file or directory name. Not a path.',
     },
     path: {
       type: 'string',
-      description: '(mode: preview/content) Absolute or relative path to a skill/agent markdown file.',
+      description: '(mode: preview/content) Absolute or relative path to a skill/agent markdown file inside .goodvibes/skills or .goodvibes/agents (project or home). Paths that resolve outside those directories are refused.',
     },
   },
   required: ['mode'],

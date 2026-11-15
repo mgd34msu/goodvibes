@@ -146,8 +146,8 @@ describe('fetching the inbound feed', () => {
 
 describe('what the inbox reports when the feed is absent', () => {
   test('a daemon that does not serve the method says so', async () => {
-    // What the live platform answers today: the method is cataloged with
-    // invokable:false and its advertised path is served by no route.
+    // A daemon that catalogs the method but refuses to dispatch it answers with
+    // the route-unavailable failure.
     const feed = await fetchInboundChannelFeed(refusingDaemon(
       'connected_host_route_unavailable',
       'HTTP 400: Gateway method is cataloged but not invokable through method dispatch: channels.inbox.list',

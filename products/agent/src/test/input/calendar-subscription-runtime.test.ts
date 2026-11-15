@@ -9,11 +9,11 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { FeedFetcher, FeedFetchResult } from '@goodvibes-jev/engine/platform/platform/calendar';
-import type { CommandContext } from '../../input/command-registry.ts';
+import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { runCalendarSubscriptionCommand } from '../../input/commands/calendar-subscription-runtime.ts';
-import { runCalendarRuntimeCommand } from '../../input/commands/calendar-runtime.ts';
+import { registerCalendarRuntimeCommands, runCalendarRuntimeCommand } from '../../input/commands/calendar-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const ICS = 'BEGIN:VCALENDAR\r\nX-WR-CALNAME:Feed A\r\nBEGIN:VEVENT\r\nUID:e1\r\nSUMMARY:Standup\r\nDTSTART:20260706T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR';
@@ -27,15 +27,23 @@ function tmpRoot(): string {
 }
 afterEach(() => { for (const d of dirs.splice(0)) { try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } });
 
-function makeContext(root: string): { ctx: CommandContext; output: () => string; secretStore: Map<string, string> } {
+function makeContext(root: string, options: { readonly deleteFails?: boolean } = {}): { ctx: CommandContext; output: () => string; secretStore: Map<string, string> } {
   const lines: string[] = [];
   const secretStore = new Map<string, string>();
   const secretsManager = {
     get: async (k: string) => secretStore.get(k) ?? null,
     set: async (k: string, v: string) => { secretStore.set(k, v); },
-    delete: async (k: string) => { secretStore.delete(k); },
+    delete: async (k: string) => {
+      if (options.deleteFails) throw new Error('keychain locked');
+      secretStore.delete(k);
+    },
   };
-  const shellPaths = { resolveUserPath: (_root: string, ...parts: string[]) => join(root, ...parts) };
+  const shellPaths = {
+    resolveUserPath: (_root: string, ...parts: string[]) => join(root, ...parts),
+    resolveWorkspacePath: (path: string) => resolve(root, path),
+    isWithinWorkingDirectory: () => true,
+    workingDirectory: root,
+  };
   const ctx = {
     session: {}, provider: {}, ops: {}, extensions: {}, clients: {},
     workspace: { shellPaths },
@@ -97,6 +105,18 @@ describe('/calendar subscriptions + refresh + unsubscribe', () => {
     await runCalendarSubscriptionCommand('unsubscribe', ['Feed A', '--yes'], ctx, fetcherOf({ kind: 'ok', body: ICS }));
     expect(output()).toContain("Unsubscribed from 'Feed A'");
   });
+
+  test('unsubscribe names the stored feed URL key when the secret store would not delete it', async () => {
+    const { ctx, output, secretStore } = makeContext(tmpRoot(), { deleteFails: true });
+    await runCalendarSubscriptionCommand('subscribe', [SECRET_URL, '--yes'], ctx, fetcherOf({ kind: 'ok', body: ICS }));
+    const [key] = [...secretStore.keys()];
+    await runCalendarSubscriptionCommand('unsubscribe', ['Feed A', '--yes'], ctx, fetcherOf({ kind: 'ok', body: ICS }));
+    const out = output();
+    expect(out).toContain('could not be deleted');
+    expect(out).toContain('keychain locked');
+    expect(out).toContain(key!);
+    expect(out).not.toContain("Unsubscribed from 'Feed A'.");
+  });
 });
 
 describe('merged /calendar list', () => {
@@ -138,5 +158,16 @@ describe('/calendar import honest report', () => {
     const out = output();
     expect(out).toContain('recurrence not fully expanded');
     expect(out).toContain('Monthly bill');
+  });
+});
+
+describe('/calendar run by the model', () => {
+  test.each(['subscribe', 'unsubscribe', 'refresh', 'connect', 'disconnect'])('%s is refused and starts nothing', async (verb) => {
+    const { ctx, output, secretStore } = makeContext(tmpRoot());
+    const registry = new CommandRegistry();
+    registerCalendarRuntimeCommands(registry);
+    await registry.execute('calendar', [verb, 'http://127.0.0.1:1/', '--yes'], { ...ctx, invokedByModel: true } as CommandContext);
+    expect(output()).toStartWith(`Refused: /calendar ${verb}`);
+    expect(secretStore.size).toBe(0);
   });
 });

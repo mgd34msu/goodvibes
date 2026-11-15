@@ -504,6 +504,13 @@ describe('DatesView: manual sweep outcomes', () => {
       const run = buttonNamed(el, 'Run sweep now');
       if (!run) throw new Error('Run sweep action is missing');
       flushSync(() => run.click());
+      // Delivery is real, so nothing runs until the confirmation is accepted.
+      await waitFor(() => Boolean(el.querySelector('.gv-confirm')));
+      expect(sweeps).toBe(0);
+      const confirmation = el.querySelector('.gv-confirm');
+      const accept = confirmation ? buttonNamed(confirmation, 'Run sweep') : undefined;
+      if (!accept) throw new Error('Run sweep confirmation is missing');
+      flushSync(() => accept.click());
       await waitFor(() => el.querySelector('[data-testid="dates-state"] [role="status"]') !== null);
       const status = el.querySelector('[data-testid="dates-state"] [role="status"]');
       expect(status?.textContent).toBe(message);
@@ -545,7 +552,7 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
           recurrence: 'annual', kind: 'gift-giving', person: 'Sarah', leadDays: 21, mirrored: false,
           extras: [], lineIndex: 0, text: 'sample',
         },
-        nextOccurrence: '2027-03-14T00:00:00.000Z', daysUntil: 228, leadDays: 21, inLeadWindow: false,
+        nextOccurrence: '2027-03-14', daysUntil: 228, leadDays: 21, inLeadWindow: false,
         answer: null, mirrored: false,
       }],
       unparsed: [],
@@ -558,6 +565,8 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
     // occasions.list is the explicit-ask read that DOES return the real date
     // (docs/occasions.md §4.3), the formatted nextOccurrence must render.
     expect(el.textContent).toContain('Mar 14, 2027');
+    // A date-only value is a calendar day: it never slips to the 13th west of UTC.
+    expect(el.textContent).not.toContain('Mar 13, 2027');
     unmount();
   });
 
@@ -566,7 +575,7 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
       today: '2026-07-29', timezone: 'America/Chicago',
       occasions: [{
         occasion: { id: 'occ-1', title: 'Dad', date: { kind: 'recurring', month: 11, day: 2 }, recurrence: 'annual', kind: 'remember-only', person: 'Dad', leadDays: 10, mirrored: false, extras: [], lineIndex: 0, text: 'sample' },
-        nextOccurrence: '2026-11-02T00:00:00.000Z', daysUntil: 96, leadDays: 10, inLeadWindow: false, answer: null, mirrored: false,
+        nextOccurrence: '2026-11-02', daysUntil: 96, leadDays: 10, inLeadWindow: false, answer: null, mirrored: false,
       }],
       unparsed: [], conflicts: [],
     });
@@ -585,7 +594,7 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
       today: '2026-07-29', timezone: 'America/Chicago',
       occasions: [{
         occasion: { id: 'occ-9', title: 'Anniversary', date: { kind: 'recurring', month: 9, day: 12 }, recurrence: 'annual', kind: 'gift-giving', person: 'Jane', leadDays: 10, mirrored: false, extras: [], lineIndex: 0, text: 'sample' },
-        nextOccurrence: '2026-09-12T00:00:00.000Z', daysUntil: 45, leadDays: 10, inLeadWindow: false, answer: 'yes', mirrored: false,
+        nextOccurrence: '2026-09-12', daysUntil: 45, leadDays: 10, inLeadWindow: false, answer: 'yes', mirrored: false,
       }],
       unparsed: [], conflicts: [],
     });
@@ -600,13 +609,16 @@ describe('DatesView: populated / empty ("no fourth reading")', () => {
   test('a plan renders its title, date range, destination, and an away badge', async () => {
     plansImpl = () => Promise.resolve({
       today: '2026-07-29',
-      plans: [{ id: 'plan-1', title: 'Lisbon', from: '2026-09-12T00:00:00.000Z', to: '2026-09-19T00:00:00.000Z', away: true, destination: 'Lisbon', extras: [], lineIndex: 0, text: 'sample' }],
+      plans: [{ id: 'plan-1', title: 'Lisbon', from: '2026-09-12', to: '2026-09-19', away: true, destination: 'Lisbon', extras: [], lineIndex: 0, text: 'sample' }],
       unparsed: [],
       awayNow: null,
     });
     const { el, unmount } = render();
     await waitFor(() => Boolean(el.querySelector('[data-testid="dates-plan-list"]')));
-    expect(el.textContent).toContain('Lisbon');
+    const row = el.querySelector('.dates-plan-row');
+    expect(row?.textContent).toContain('Lisbon');
+    expect(row?.textContent).toContain('Sep 12, 2026 to Sep 19, 2026');
+    expect(row?.textContent).toContain('Away');
     unmount();
   });
 });
@@ -783,8 +795,16 @@ describe('DatesView: state disclosure', () => {
     });
     const { el, unmount } = render();
     await waitFor(() => Boolean(el.querySelector('[data-testid="dates-state"]')));
-    expect(el.textContent).toContain('3');
-    expect(el.textContent).toContain('2');
+    const facts = new Map<string, string>();
+    for (const row of el.querySelectorAll('[data-testid="dates-state"] .dv-facts__row')) {
+      facts.set(row.querySelector('dt')?.textContent ?? '', row.querySelector('dd')?.textContent ?? '');
+    }
+    expect(facts.get('Acknowledgements')).toBe('3');
+    expect(facts.get('Gift records')).toBe('2');
+    expect(facts.get('Open items')).toBe('1');
+    expect(facts.get('Interviews')).toBe('0');
+    expect(facts.get('Calendar mirrors')).toBe('0');
+    expect(el.querySelector('[data-testid="dates-state"]')?.textContent).toContain('expired 1 acknowledgement(s)');
     unmount();
   });
 });
@@ -832,6 +852,41 @@ describe('DatesView: a preview answers only the draft it was asked for', () => {
     flushSync(() => {});
 
     expect(document.body.textContent).not.toContain('Add Mum birthday on 2026-09-01?');
+    unmount();
+  });
+});
+
+describe('DatesView: choosing the kind after a kind-less preview', () => {
+  test('previews again with the chosen kind and keeps Confirm available', async () => {
+    proposeImpl = () => Promise.resolve({ ok: true, confirmation: 'Add Mum birthday on 2026-09-01?', conflictsWith: [], needsKind: true } as unknown as OperatorMethodOutput<'occasions.propose'>);
+    const { el, unmount } = render();
+    await waitFor(() => buttonNamed(el, 'Add occasion') !== undefined);
+    flushSync(() => buttonNamed(el, 'Add occasion')?.click());
+    await waitFor(() => Boolean(document.body.querySelector('#dates-add-occasion')));
+    const form = document.body.querySelector('#dates-add-occasion') as HTMLFormElement;
+    const setText = (input: HTMLInputElement, value: string) => flushSync(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    });
+    const inputs = () => [...form.querySelectorAll('input')] as HTMLInputElement[];
+    setText(inputs()[0], 'Mum birthday');
+    setText(inputs()[1], '2026-09-01');
+    const before = proposeCalls.length;
+    flushSync(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    await waitFor(() => proposeCalls.length === before + 1);
+    await waitFor(() => document.body.textContent?.includes('Pick a kind above before confirming.') === true);
+
+    const kind = [...form.querySelectorAll<HTMLElement>('[role="combobox"]')].find((node) => node.textContent?.includes('Choose before confirming'));
+    if (!kind) throw new Error('Kind field is missing');
+    flushSync(() => kind.click());
+    const option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find((node) => node.textContent === 'Gift-giving');
+    if (!option) throw new Error('Gift-giving option is missing');
+    flushSync(() => option.click());
+
+    await waitFor(() => proposeCalls.length === before + 2);
+    expect(proposeCalls[before + 1]).toMatchObject({ kind: 'gift-giving' });
+    await waitFor(() => document.body.textContent?.includes('Add Mum birthday on 2026-09-01?') === true);
+    expect(document.body.textContent).not.toContain('Pick a kind above before confirming.');
     unmount();
   });
 });

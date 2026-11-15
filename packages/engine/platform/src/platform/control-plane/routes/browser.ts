@@ -270,6 +270,28 @@ function provisionLifetime(invocation: GatewayMethodInvocation): BrowserGatewayL
   return { signal: invocation.signal, assertCurrent };
 }
 
+/**
+ * Attach connects the daemon to a debugging port, so the address is the daemon's
+ * own request to make: a caller holding only write:browser must not be able to
+ * aim it at another machine's network. Only this host's loopback is allowed;
+ * a browser elsewhere is reached through a local port forward.
+ */
+export function assertLoopbackCdpEndpoint(endpoint: string): void {
+  const trimmed = endpoint.trim();
+  if (/^\d+$/.test(trimmed)) return;
+  let host: string;
+  try {
+    host = new URL(trimmed.includes('://') ? trimmed : `http://${trimmed}`).hostname;
+  } catch {
+    throw new GatewayVerbError(`Invalid cdpEndpoint: "${endpoint}" is not a port, host:port or URL`, 'INVALID_ARGUMENT', 400, 'cdpEndpoint');
+  }
+  if (host === 'localhost' || host === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(host)) return;
+  throw new GatewayVerbError(
+    `The daemon only attaches to a browser on this machine's loopback address, and "${host}" is not one. Forward the remote debugging port to this host (for example ssh -L 9222:localhost:9222) and attach to 127.0.0.1:9222.`,
+    'BROWSER_REQUEST_REFUSED', 403, 'cdpEndpoint',
+  );
+}
+
 export function createBrowserGatewayHandlers(
   service: BrowserGatewayService,
 ): ReadonlyMap<string, GatewayMethodHandler> {
@@ -282,9 +304,11 @@ export function createBrowserGatewayHandlers(
     }))],
     ['browser.sessions.list', handler(async () => service.listSessions())],
     ['browser.sessions.launch', handler(async (params, invocation) => service.launch({ ...readLaunchArgs(params), ...provisionLifetime(invocation) }))],
-    ['browser.sessions.attach', handler(async (params) => service.attach({
-      cdpEndpoint: readRequiredString(params.cdpEndpoint, 'cdpEndpoint'),
-    }))],
+    ['browser.sessions.attach', handler(async (params) => {
+      const cdpEndpoint = readRequiredString(params.cdpEndpoint, 'cdpEndpoint');
+      assertLoopbackCdpEndpoint(cdpEndpoint);
+      return service.attach({ cdpEndpoint });
+    })],
     ['browser.sessions.release', handler(async (params) => service.release(readRequiredString(params.sessionId, 'sessionId')))],
     ['browser.sessions.close', handler(async (params) => service.close(readRequiredString(params.sessionId, 'sessionId')))],
     ['browser.navigate', handler(async (params, invocation) => {

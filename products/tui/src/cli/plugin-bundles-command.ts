@@ -1,6 +1,6 @@
 import { commandJsonOrText as formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   parseMarketplaceIndex,
   fetchAndVerifyBundle,
@@ -12,6 +12,7 @@ import {
   type BundleActivationPlan,
 } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 
 // ---------------------------------------------------------------------------
@@ -39,21 +40,22 @@ function installedBundlesPath(runtime: CliCommandRuntime): string {
   return join(runtime.homeDirectory, '.goodvibes', 'bundles', 'installed.json');
 }
 
+/** An unreadable ledger is reported, never treated as empty: the next write would replace every earlier record. */
 function readInstalledBundles(runtime: CliCommandRuntime): InstalledBundleRecord[] {
   const path = installedBundlesPath(runtime);
   if (!existsSync(path)) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8'));
-    return Array.isArray(parsed) ? (parsed as InstalledBundleRecord[]) : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(readFileSync(path, 'utf-8'));
+  } catch (error) {
+    throw new Error(`The installed-bundles record at ${path} cannot be read (${summarizeError(error)}). Repair or remove that file; nothing was changed.`);
   }
+  if (!Array.isArray(parsed)) throw new Error(`The installed-bundles record at ${path} is not a list. Repair or remove that file; nothing was changed.`);
+  return parsed as InstalledBundleRecord[];
 }
 
 function writeInstalledBundles(runtime: CliCommandRuntime, records: readonly InstalledBundleRecord[]): void {
-  const path = installedBundlesPath(runtime);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(records, null, 2)}\n`, 'utf-8');
+  writeJsonFileAtomic(installedBundlesPath(runtime), records);
 }
 
 /** file:// / bare-path vs http(s)://, the only two source kinds this CLI surface accepts (no git ref flag exists yet). */
@@ -129,7 +131,7 @@ async function handleBrowse(runtime: CliCommandRuntime, ref: string | undefined)
 /** Render an activation plan (granted capabilities, withheld/quarantined ones) for confirmation. */
 function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
   const lines = [
-    `${committed ? 'Installed' : 'Activation plan (preview; re-run with --yes to install)'}: ${plan.manifest.id} v${plan.manifest.version} (${plan.manifest.kind})`,
+    `${committed ? 'Recorded (not yet activated)' : 'Activation plan (preview; re-run with --yes to record it)'}: ${plan.manifest.id} v${plan.manifest.version} (${plan.manifest.kind})`,
     `  trust tier: ${plan.trustTier}`,
     `  declared runtime capabilities: ${plan.manifest.capabilities.runtime.join(', ') || 'none'}`,
     `  declared tools: ${plan.manifest.capabilities.tools.join(', ') || 'none'}`,
@@ -146,6 +148,7 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
   } else {
     lines.push('  quarantined: no; every declared capability fit the trust tier');
   }
+  if (committed) lines.push('  This version only keeps the record: the bundle\'s tools, hooks and channels are not loaded.');
   return lines.join('\n');
 }
 
@@ -189,9 +192,21 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
     };
   }
   const plan = planBundleActivation(validation.manifest);
+  if (runtime.cli.flags.yes && runtime.cli.flags.nonInteractive && plan.quarantine.required) {
+    return {
+      output: formatJsonOrText(runtime, { ok: false, committed: false, plan }, `${renderPlan(plan, false)}\nNot recorded: this bundle is quarantined and a person has to read the plan. Re-run with --yes in a terminal, without --non-interactive.`),
+      exitCode: 1,
+    };
+  }
   const committed = runtime.cli.flags.yes;
   if (committed) {
-    const records = readInstalledBundles(runtime).filter((r) => r.id !== plan.manifest.id);
+    let existing: InstalledBundleRecord[];
+    try {
+      existing = readInstalledBundles(runtime);
+    } catch (error) {
+      return { output: summarizeError(error), exitCode: 1 };
+    }
+    const records = existing.filter((r) => r.id !== plan.manifest.id);
     records.push({
       id: plan.manifest.id,
       name: plan.manifest.name,
@@ -208,11 +223,16 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
 }
 
 function handleList(runtime: CliCommandRuntime): CliCommandOutput {
-  const records = readInstalledBundles(runtime);
+  let records: InstalledBundleRecord[];
+  try {
+    records = readInstalledBundles(runtime);
+  } catch (error) {
+    return { output: summarizeError(error), exitCode: 1 };
+  }
   if (records.length === 0) {
     return { output: formatJsonOrText(runtime, records, 'No capability bundles installed.'), exitCode: 0 };
   }
-  const lines = [`Installed capability bundles (${records.length}):`];
+  const lines = [`Recorded capability bundles (${records.length}; recorded only, not loaded):`];
   for (const record of records) {
     lines.push(
       `  ${record.id}: ${record.name} v${record.version} (${record.kind})`,

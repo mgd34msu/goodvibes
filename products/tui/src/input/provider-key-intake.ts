@@ -121,10 +121,17 @@ export function runProviderKeyIntake(
           // home every surface and the daemon read, so a key entered here works
           // everywhere, which is the point of configuring it once.
           await secretsManager.set(secretKey, value, { scope: 'daemon', medium: 'secure' });
+        } catch (error) {
+          deps.print(`Could not store the key for ${label}: ${summarizeError(error)}`);
+          finishOnce();
+          return;
+        }
+        // The key is already stored; a failed live registration must not read as "not stored".
+        try {
           await deps.refreshProviderCredentials?.();
           deps.print(`Stored the API key for ${label} and registered it live (value hidden). No restart needed.`);
         } catch (error) {
-          deps.print(`Could not store the key for ${label}: ${summarizeError(error)}`);
+          deps.print(`Stored the API key for ${label} (value hidden), but registering it live failed: ${summarizeError(error)}. Restart to use it; do not re-enter the key.`);
         }
         finishOnce();
       })();

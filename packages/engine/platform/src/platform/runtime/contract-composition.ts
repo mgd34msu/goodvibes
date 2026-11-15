@@ -325,6 +325,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     store,
     dispose: () => {
       options.agentManager.setContractRunner(null);
+      releaseResumedRoots(runner);
       runner.dispose();
       store.dispose();
     },
@@ -332,34 +333,45 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
 }
 
 /**
- * The resume of each project root this process started. Two compositions can
- * share a root in one process (the daemon's own services and a hosted-session
- * floor on the same workspace); only the first resumes what is on disk, so no
- * contract runs twice, and every later call for the root gets the same promise.
+ * The resume of each project root this process started, with the runner that
+ * started it. Two live compositions can share a root in one process (the
+ * daemon's own services and a hosted-session floor on the same workspace); only
+ * the first resumes what is on disk, so no contract runs twice, and every later
+ * call for the root gets the same promise. The entry ends when its owning
+ * runner is disposed or when the resume failed, so a rebuilt composition or a
+ * retry resumes what is still on disk.
  */
-const resumedRoots = new Map<string, Promise<ResumeReport | null>>();
+const resumedRoots = new Map<string, { readonly owner: object; readonly resuming: Promise<ResumeReport | null> }>();
+
+function releaseResumedRoots(owner: object): void {
+  for (const [root, entry] of resumedRoots) {
+    if (entry.owner === owner) resumedRoots.delete(root);
+  }
+}
 
 /**
- * Resumes the contracts left on disk under `projectRoot`, once
- * per root in this process. Every call for a root returns the same promise: it
- * resolves to the report of what was resumed, queued or reaped (also logged),
- * or to null when resuming failed (logged, not thrown into startup). A host
+ * Resumes the contracts left on disk under `projectRoot`, once per root while
+ * the runner that started it is alive. Every call for a root returns the same
+ * promise: it resolves to the report of what was resumed, queued or reaped
+ * (also logged), or to null when resuming failed (logged, not thrown into
+ * startup; a failure is not remembered, so the next call tries again). A host
  * that follows the resumed contracts (the contract CLI) awaits it.
  */
 export function resumeContracts(runner: Pick<ContractRunner, 'resumeAll'>, projectRoot: string): Promise<ResumeReport | null> {
   const root = resolve(projectRoot);
   const started = resumedRoots.get(root);
-  if (started !== undefined) return started;
-  const resuming = runner.resumeAll().then(
+  if (started !== undefined) return started.resuming;
+  const resuming: Promise<ResumeReport | null> = runner.resumeAll().then(
     (report): ResumeReport => {
       logger.info('[contracts] resumed contracts from disk', { projectRoot: root, report });
       return report;
     },
     (error: unknown): null => {
       logger.error('[contracts] resuming contracts from disk failed', { projectRoot: root, error: summarizeError(error) });
+      if (resumedRoots.get(root)?.resuming === resuming) resumedRoots.delete(root);
       return null;
     },
   );
-  resumedRoots.set(root, resuming);
+  resumedRoots.set(root, { owner: runner, resuming });
   return resuming;
 }

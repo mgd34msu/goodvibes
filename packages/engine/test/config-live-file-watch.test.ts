@@ -66,6 +66,33 @@ async function waitForCondition(predicate: () => boolean, label: string): Promis
 }
 
 describe('config live file watch', () => {
+  test('a write this process makes is not reloaded as an outside change', () => {
+    const configDir = tempConfigDir();
+    const manager = new ConfigManager({ configDir });
+    manager.set('provider.model', 'openai:start');
+    // The interval is never reached: flushConfigFileChanges() is the poll.
+    const stop = manager.watchConfigFiles({ intervalMs: 3_600_000 });
+    try {
+      manager.set('provider.model', 'openai:second');
+      const incarnation = manager.getConfigurationIncarnation();
+      manager.flushConfigFileChanges();
+      expect(manager.getConfigurationIncarnation()).toBe(incarnation);
+
+      const handle = manager.prepareSettingMutation({ operation: 'set', key: 'provider.model', value: 'openai:third' });
+      manager.finishPreparedMutation(handle, manager.beginPreparedMutation(handle));
+      const afterPrepared = manager.getConfigurationIncarnation();
+      manager.flushConfigFileChanges();
+      expect(manager.getConfigurationIncarnation()).toBe(afterPrepared);
+      expect(() => manager.assertCompletedMutation(handle)).not.toThrow();
+
+      writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ provider: { model: 'anthropic:outside' } }) + '\n', 'utf-8');
+      manager.flushConfigFileChanges();
+      expect(manager.get('provider.model')).toBe('anthropic:outside');
+    } finally {
+      stop();
+    }
+  });
+
   test('an external edit to a watched file surfaces through a subscription', async () => {
     const configDir = tempConfigDir();
     const manager = new ConfigManager({ configDir });

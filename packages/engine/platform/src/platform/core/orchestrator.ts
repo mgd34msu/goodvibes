@@ -4,6 +4,7 @@ import { readCompletionRepairContext } from './completion-repair-context.js';
 import { readDelegationRequest } from './delegation-request-context.js';
 import { revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { admitNativeConversationTurn, failNativeConversationTurn, NativeConversationTurnAdmissionError, readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn, validateNativeConversationTurn, type NativeConversationTurnAdmission } from './native-turn-admission.js';
+import { phaseIsCompacting, phaseIsInFlight, phaseIsOccupied, phaseIsStreaming, phaseIsThinking, phaseWithCompacting, phaseWithStreaming, phaseWithThinking, phaseWithoutThinking, type TurnPhase } from './turn-phase.js';
 import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, nativeConversationTurnCanRetry, NATIVE_TURN_EXECUTION_REFUSAL, withNativeConversationTurn, withoutNativeConversationTurn } from './native-turn-scope.js';
 import { TurnHookOwner, bindTurnHookDispatcher } from '../hooks/turn-ownership.js';
 import { TurnCancellationFence, type TurnCancellationResult } from './turn-cancellation.js';
@@ -38,7 +39,6 @@ import {
 import { appendPlanModeInstruction } from '../permissions/plan-mode-instructions.js';
 import type { AcpManager } from '../acp/manager.js';
 import type { SubagentTask } from '../acp/protocol.js';
-import type { ExecutionPlan, PlanItem } from './execution-plan.js';
 import { estimateConversationTokens } from './context-compaction.js';
 import { SessionLineageTracker } from './session-lineage.js';
 import { EventReplayQueue } from './event-replay.js';
@@ -67,8 +67,8 @@ import {
   emitTurnSubmitted,
 } from '../runtime/emitters/index.js';
 import {
-  autoSpawnPendingItems,
   executeToolCalls,
+  toolBudgetFromConfig,
   reconcileUnresolvedToolCalls,
 } from './orchestrator-tool-runtime.js';
 import {
@@ -93,6 +93,7 @@ import {
 } from './orchestrator-turn-helpers.js';
 import { executeOrchestratorTurnLoop } from './orchestrator-turn-loop.js';
 import { recordTurnInjection, type TurnInjectionRecord } from '../agents/turn-knowledge-injection.js';
+import { permissionModeLine } from '../agents/orchestrator-prompts.js';
 import type { OrchestratorUsageTotals } from './orchestrator-usage.js';
 
 /** Minimal interface for hook dispatch, allows any hook dispatcher implementation */
@@ -100,8 +101,17 @@ interface HookDispatcherLike {
   fire(event: HookEvent): Promise<HookResult>;
 }
 
-/** Delay (ms) before auto-spawning plan items if the model ends its turn without spawning them. */
-const AUTO_SPAWN_FALLBACK_DELAY_MS = 5_000;
+/** Upper bound on the error text a failed turn publishes to other surfaces. */
+const MAX_TURN_ERROR_TEXT = 2_000;
+
+/** The HTTP status and connection errno of a provider failure, for the TURN_ERROR payload. */
+function providerFailureFacts(err: ProviderError): { status?: number; code?: string } {
+  const cause = err.cause && typeof err.cause === 'object' ? (err.cause as { code?: unknown }).code : undefined;
+  return {
+    ...(typeof err.statusCode === 'number' ? { status: err.statusCode } : {}),
+    ...(typeof cause === 'string' ? { code: cause } : {}),
+  };
+}
 const THINKING_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 interface LowPrioritySystemMessageSink {
@@ -113,6 +123,26 @@ export interface OrchestratorUserInputOptions {
   readonly nativeConversationTurnPermit?: NativeConversationTurnPermit | undefined;
   /** Host-owned dispatch must wait for execution, never mistake queue acceptance for completion. */
   readonly requireImmediateNativeTurn?: boolean | undefined;
+  /**
+   * Settle only when this input's own turn ends, even when it is queued behind
+   * another turn. Rejects with {@link QueuedInputUndeliveredError} when the
+   * orchestrator is disposed before the queued input runs.
+   */
+  readonly awaitQueuedTurn?: boolean | undefined;
+}
+
+/** A queued input that never ran because its orchestrator was disposed first. */
+export class QueuedInputUndeliveredError extends Error {
+  constructor() {
+    super('The session closed before this queued message was delivered; it was not answered. Send it again on a live session.');
+    this.name = 'QueuedInputUndeliveredError';
+  }
+}
+
+/** How a queued input that asked to await its own turn is settled. */
+export interface QueuedInputSettlement {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
 }
 
 /**
@@ -176,7 +206,14 @@ export interface OrchestratorOptions {
  * Supports multi-turn agent loops: call LLM -> execute tools -> send results -> repeat.
  */
 export class Orchestrator {
-  public isThinking = false;
+  /**
+   * What occupies this orchestrator, as one value; every busy question below is derived from it
+   * (see turn-phase.ts). Replaced as a whole when a turn ends, so no part of it can outlive the turn.
+   */
+  private phase: TurnPhase = 'idle';
+  /** Whether the thinking indicator is on: a running turn, or a hosted turn's indicator the product turns on and off. */
+  public get isThinking(): boolean { return phaseIsThinking(this.phase); }
+  public set isThinking(value: boolean) { this.phase = value ? phaseWithThinking(this.phase) : phaseWithoutThinking(this.phase); }
   public completionActivity: { readonly phase: 'checking' | 'waiting'; readonly startedAtMs: number } | null = null;
   public thinkingFrame = 0;
   public usage: OrchestratorUsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -191,7 +228,7 @@ export class Orchestrator {
   public streamingInputTokens = 0;
   /** Output tokens received so far in the current streaming turn (one per delta chunk). */
   public streamingOutputTokens = 0;
-  public messageQueue: { id: string; queuedAt: number; text: string; content?: ContentPart[] | undefined; options?: OrchestratorUserInputOptions | undefined; nativeTurn?: NativeConversationTurnAdmission | undefined }[] = [];
+  public messageQueue: { id: string; queuedAt: number; text: string; content?: ContentPart[] | undefined; options?: OrchestratorUserInputOptions | undefined; nativeTurn?: NativeConversationTurnAdmission | undefined; settlement?: QueuedInputSettlement | undefined }[] = [];
 
   private animInterval: ReturnType<typeof setInterval> | null = null;
   private abortController: AbortController | null = null;
@@ -201,20 +238,20 @@ export class Orchestrator {
   /** Monotonic id source for queued-message ids. */
   private queuedMessageSeq = 0;
   private postTurnPlanOwner: object = {};
-  private autoSpawnTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** Where the most recent user turn's input arrived, so a background-work recovery turn runs under the same authority. */
+  private lastUserTurnOrigin: TurnInputOrigin | undefined;
   private nativeConversationProjectId: string | undefined;
-  private activeNativeConversationTurn = false;
   private activeNativeConversationPermit: NativeConversationTurnPermit | undefined;
   private nativeAdmissionAbort: AbortController | null = null;
   private acpManager: AcpManager | null = null;
   /** Message count at the start of a turn, used to rollback on cancel. */
   private turnStartMessageCount = 0;
   /** Whether a streaming block is currently active (for cleanup on abort). */
-  private isStreaming = false;
+  private get isStreaming(): boolean { return phaseIsStreaming(this.phase); }
   /** Last token warning bracket (multiples of 10%) to avoid repeat warnings at same level. */
   private lastWarningBracket = 0;
   /** Whether auto-compaction is currently in progress (prevents re-entry). */
-  private isCompacting = false;
+  private get isCompacting(): boolean { return phaseIsCompacting(this.phase); }
   /**
    * Pending context-window warning reported by the model/provider itself
    * (stop reason, see isContextOverflowSignal). While set, the next preflight
@@ -324,9 +361,12 @@ export class Orchestrator {
     this.toolRegistry = toolRegistry;
     this.permissionManager = permissionManager;
     // Plan-mode standing instruction rides on the system prompt (told every turn + re-injected through compaction).
-    this.getSystemPrompt = async (signal) => appendPlanModeInstruction(
-      await resolveSystemPrompt(getSystemPrompt, signal), this.permissionManager.getMode?.(),
-    );
+    // Every mode is announced in one line, as a sub-agent's prompt does, so the model knows what will prompt or be refused.
+    this.getSystemPrompt = async (signal) => {
+      const mode = this.permissionManager.getMode?.();
+      const prompt = appendPlanModeInstruction(await resolveSystemPrompt(getSystemPrompt, signal), mode);
+      return mode === undefined ? prompt : `${prompt.trimEnd()}\n\n${permissionModeLine(mode)}`;
+    };
     this.hookDispatcher = hookDispatcher;
     this.replayQueue = new EventReplayQueue();
     this.detachReplay = runtimeBus
@@ -512,7 +552,8 @@ export class Orchestrator {
     // Native execution still requires its owning host's live permit; a background
     // notice can never manufacture a fresh native grant.
     if (this.nativeConversationProjectId) { this.requestRender(); return; }
-    try { await this.runTurn(text, content, undefined, undefined, evidence); }
+    // The recovery turn continues the last user's request, so it runs under that request's input surface, not the context that happened to schedule the flush.
+    try { await withTurnSurface(this.lastUserTurnOrigin, () => this.runTurn(text, content, undefined, undefined, evidence)); }
     finally {
       // Retire the background batch before the queued user's startThinking()
       // cancels pending background work; otherwise it requeues this finished batch.
@@ -554,9 +595,11 @@ export class Orchestrator {
 
   /** Remove a still-queued message before delivery; false once delivered. */
   public deleteQueuedMessage(id: string): boolean {
-    const nativeTurn = this.messageQueue.find(message => message.id === id)?.nativeTurn;
+    const queued = this.messageQueue.find(message => message.id === id);
     const deleted = deleteQueuedMessage(this.messageQueue, id);
-    if (deleted && nativeTurn) settleNativeConversationTurn(nativeTurn);
+    if (deleted && queued?.nativeTurn) settleNativeConversationTurn(queued.nativeTurn);
+    // The owner removed it on purpose: its submitter's wait is over, not failed.
+    if (deleted) queued?.settlement?.resolve();
     if (deleted) {
       this.emitQueueChange('deleted', id);
       this.requestRender();
@@ -590,10 +633,6 @@ export class Orchestrator {
     // tools (exec children, fetches) stop instead of running to completion.
     // (Optional-chained: bare-prototype test fixtures skip field initializers.)
     this.toolCallAborts?.abortAll();
-    if (this.autoSpawnTimeout !== null) {
-      clearTimeout(this.autoSpawnTimeout);
-      this.autoSpawnTimeout = null;
-    }
     // Clear the thinking-animation interval immediately on abort so the Node
     // event loop is not kept alive by a leaked timer. stopThinking() also
     // clears this in the finally block, but abort() can be called from
@@ -617,13 +656,18 @@ export class Orchestrator {
     this.submissionOwner.clear();
     this.coreServices.sessionLiveTurnControls?.unbind(this);
     this.abort();
-    for (const queued of this.messageQueue) if (queued.nativeTurn) failNativeConversationTurn(queued.nativeTurn, false);
+    // Settle each queued entry once: a second dispose finds an empty queue, and a
+    // disposed orchestrator no longer reports itself busy.
+    for (const queued of this.messageQueue.splice(0)) {
+      if (queued.nativeTurn) failNativeConversationTurn(queued.nativeTurn, false);
+      queued.settlement?.reject(new QueuedInputUndeliveredError());
+    }
     if (this.animInterval) {
       clearInterval(this.animInterval);
       this.animInterval = null;
     }
     this.isThinking = false;
-    this.isStreaming = false;
+    this.phase = phaseWithStreaming(this.phase, false);
     this.streamingInputTokens = 0;
     this.streamingOutputTokens = 0;
     if (this.detachReplay) {
@@ -665,20 +709,19 @@ export class Orchestrator {
     if (this.isTurnOccupied) {
       this.queuedMessageSeq += 1;
       const id = `qm-${this.queuedMessageSeq}`;
-      this.messageQueue.push({ id, queuedAt: Date.now(), text, content, options, nativeTurn });
+      let settled: Promise<void> | undefined, settlement: QueuedInputSettlement | undefined;
+      if (options?.awaitQueuedTurn) settled = new Promise<void>((resolve, reject) => { settlement = { resolve, reject }; });
+      this.messageQueue.push({ id, queuedAt: Date.now(), text, content, options, nativeTurn, settlement });
       this.emitQueueChange('enqueued', id);
       this.requestRender();
-      return;
+      return settled;
     }
 
     // Set the original task on the first user message (idempotent, subsequent calls are no-ops)
     getSessionLineageTracker(this.coreServices, this.ownedSessionLineageTracker).setOriginalTask(text);
 
-    // Process any messages queued while the LLM was thinking. Draining is gated on
-    // isCompacting so a queued turn cannot start while a background auto-compaction is
-    // mid-flight (which would let compact() replace the message array and drop the
-    // in-flight turn's freshly appended messages). Messages left queued during
-    // compaction are drained by setCompacting() once compaction settles.
+    // Run this turn, then any messages queued while it was occupied.
+    this.lastUserTurnOrigin = options?.origin;
     try { await withTurnSurface(options?.origin, () => this.runTurn(text, content, options, nativeTurn)); }
     finally {
       if (options?.requireImmediateNativeTurn && nativeTurn) {
@@ -703,38 +746,44 @@ export class Orchestrator {
   /** Product composition calls this from its authenticated native host selection. */
   public bindNativeConversationProject(projectId: string): void {
     if (!projectId.trim() || projectId.length > 200 || (this.nativeConversationProjectId !== projectId
-      && (this.activeNativeConversationTurn || this.messageQueue.some(message => message.nativeTurn)))) {
+      && (this.activeNativeConversationPermit !== undefined || this.messageQueue.some(message => message.nativeTurn)))) {
       throw new NativeConversationTurnAdmissionError('identity_mismatch');
     }
     this.nativeConversationProjectId = projectId;
   }
 
   /**
-   * Drain queued user messages sequentially. Skips draining while a turn is in
-   * flight or a background auto-compaction is running; in the latter case
-   * setCompacting() re-triggers the drain once compaction settles, so no queued
-   * message is lost.
+   * Drain queued user messages sequentially while nothing occupies a turn.
+   * Compaction only ever runs inside a turn, so the turn that owns it drains
+   * the queue when it ends.
    */
   private async drainMessageQueue(): Promise<void> {
     let failure: unknown;
     while (!this.disposed && this.messageQueue.length > 0 && !this.isTurnOccupied) {
       const next = this.messageQueue.shift()!;
       this.emitQueueChange('delivered', next.id);
-      try { await withTurnSurface(next.options?.origin, () => this.runTurn(next.text, next.content, next.options, next.nativeTurn)); }
-      catch (error) { failure ??= error; }
+      try {
+        this.lastUserTurnOrigin = next.options?.origin;
+        await withTurnSurface(next.options?.origin, () => this.runTurn(next.text, next.content, next.options, next.nativeTurn));
+        next.settlement?.resolve();
+      } catch (error) {
+        next.settlement?.reject(error);
+        failure ??= error;
+      }
     }
     this.followUpRuntime.scheduleFlush();
     if (failure !== undefined) throw failure;
   }
 
   /**
-   * Single funnel for mutating the compaction flag. On the true->false edge it
-   * resumes draining any messages that were queued while compaction was in flight.
+   * Single funnel for the compaction state. Compaction runs inside a turn,
+   * whose own end drains the queue; the true->false drain here only matters if
+   * compaction ever settles with no turn occupying the orchestrator.
    */
   private setCompacting(value: boolean): void {
     const wasCompacting = this.isCompacting;
-    this.isCompacting = value;
-    // isCompacting was just cleared (wasCompacting && !value), so this is the same question as isTurnOccupied.
+    this.phase = phaseWithCompacting(this.phase, value);
+    // Compaction was just cleared (wasCompacting && !value), so this is the same question as isTurnOccupied.
     if (wasCompacting && !value && !this.isTurnOccupied && this.messageQueue.length > 0) {
       void this.drainMessageQueue().catch((err) => logger.error('Orchestrator: queued message drain after compaction failed', {
         error: err instanceof Error ? err.message : String(err),
@@ -742,14 +791,19 @@ export class Orchestrator {
     }
   }
 
-  private turnInFlight = false;
-
   /** Actual execution ownership, including cancellation and hook drainage. */
-  public get isTurnInFlight(): boolean { return this.turnInFlight || this.activeNativeConversationTurn; }
+  public get isTurnInFlight(): boolean { return phaseIsInFlight(this.phase); }
+  /**
+   * True whenever a turn occupies this orchestrator: native admission,
+   * thinking, streaming, tools, post-turn maintenance, hook drain and
+   * cancellation. `isThinking` alone goes false on abort while the turn is
+   * still settling; input sent then is queued, not started.
+   */
+  public get isTurnActive(): boolean { return this.isTurnOccupied; }
   /** Session replacement must wait for admission, streaming, compaction and queued input. */
   public get isBusy(): boolean { return this.isTurnOccupied || this.messageQueue.length > 0; }
   /** The one "a new turn cannot start now" question: execution owned, thinking, or compacting. Queued input is not part of it. */
-  private get isTurnOccupied(): boolean { return this.isTurnInFlight || this.isThinking || this.isCompacting; }
+  private get isTurnOccupied(): boolean { return phaseIsOccupied(this.phase); }
 
   private startThinking(estimatedInputTokens?: number, resume = false): void {
     this.postTurnPlanOwner = {};
@@ -803,7 +857,7 @@ export class Orchestrator {
         if (nativeTurn) {
           validateNativeConversationTurn(nativeTurn.permit, text, content, this.nativeConversationProjectId);
           startNativeConversationTurn(nativeTurn);
-          this.activeNativeConversationTurn = true;
+          this.phase = 'admitting';
           this.activeNativeConversationPermit = nativeTurn.permit;
           const admissionAbort = new AbortController();
           this.nativeAdmissionAbort = admissionAbort;
@@ -816,7 +870,14 @@ export class Orchestrator {
         await this.runTurnBody(text, content, options, nativeTurn, resume);
       }
       catch (error) { if (nativeTurn) failNativeConversationTurn(nativeTurn, false); throw error; }
-      finally { if (nativeTurn) { settleNativeConversationTurn(nativeTurn); this.activeNativeConversationTurn = false; this.activeNativeConversationPermit = undefined; this.nativeAdmissionAbort = null; } }
+      finally {
+        if (nativeTurn) {
+          settleNativeConversationTurn(nativeTurn);
+          this.activeNativeConversationPermit = undefined; this.nativeAdmissionAbort = null;
+          // The permit was the last thing holding a finished turn's execution.
+          if (this.phase === 'admitting' || this.phase === 'settling') this.phase = 'idle';
+        }
+      }
     };
     await withDecisionModelPolicy(() => requireConfigManager(this.coreServices).get('judgment.policy'), async () => {
       if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
@@ -855,7 +916,10 @@ export class Orchestrator {
     if (!preflight) return; // duplicate in-flight turn was rejected and reported
     const { submissionKey, turnId } = preflight;
     const hookOwner = this.turnHookOwner!;
-    const terminal: { publish?: () => void } = {};
+    // `answered`: the checked final answer is in the transcript and its
+    // completion is registered. From then on the turn's outcome is that
+    // answer; an abort stops only the maintenance that follows it.
+    const terminal: { publish?: () => void; answered?: boolean } = {};
 
     // Transcript preparation shares the same cancellation and cleanup as streaming.
     try {
@@ -871,21 +935,30 @@ export class Orchestrator {
       this.turnStartMessageCount = this.conversation.getMessageCount();
       this.scrollToEnd(this.getViewportHeight());
       this.streamingInputTokens = estimateFreshTurnInputTokens(this.lastInputTokens, estimateConversationTokens(this.conversation.getMessagesForLLM()), text, content);
-      await this.runTurnStream(text, content, turnId, preTurnPlan, configManager, providerRegistry, (publish) => { terminal.publish = publish; }, resume);
+      await this.runTurnStream(text, content, turnId, preTurnPlan, configManager, providerRegistry,
+        (publish) => { terminal.publish = publish; }, () => { terminal.answered = true; }, resume);
 
-      signal?.throwIfAborted();
+      if (!terminal.answered) signal?.throwIfAborted();
+      // What the stream left is settled output, an answer or a failure note. A
+      // cancel during maintenance must not roll it back, nor roll back by a
+      // position that maintenance compaction may have reordered.
+      this.turnStartMessageCount = this.conversation.getMessageCount();
       // --- Phase 3: Post-turn reconciliation ---
       if (nativeTurn && this._turnFailed) failNativeConversationTurn(nativeTurn, false);
       markNativeConversationTurnEffectsPossible();
-      await this.runTurnReconcile(turnId, configManager, providerRegistry);
+      try {
+        await this.runTurnReconcile(turnId, configManager, providerRegistry);
+      } catch (error) {
+        if (!terminal.answered || !signal?.aborted) throw error;
+      }
       await hookOwner.closeAndDrain();
-      signal?.throwIfAborted();
+      if (!terminal.answered) signal?.throwIfAborted();
       this.turnCancellation.end(turnId);
       terminal.publish?.();
     } catch (err: unknown) {
       this._turnFailed = true;
       await hookOwner.closeAndDrain();
-      // Set before TURN_ERROR: synchronous failover observers read this fence.
+      // Set before TURN_ERROR so a failover observer of that event reads this fence.
       if (nativeTurn) failNativeConversationTurn(nativeTurn, err instanceof ProviderError && !this.abortController?.signal.aborted && nativeConversationTurnCanRetry());
       await this.handleTurnError(err, turnId, configManager, providerRegistry);
     } finally {
@@ -935,18 +1008,32 @@ export class Orchestrator {
     }
     this.currentSubmissionKey = submissionKey;
 
-    // Reserve and bind before notifying synchronous submitted-event observers.
-    this.turnInFlight = true;
-    this.startThinking(undefined, resume);
-    this.turnHookOwner = new TurnHookOwner(this.currentSessionId, turnId, this.abortController!.signal);
-    this.turnCancellation.begin(turnId, () => this.abort());
+    // Reserve and bind before publishing TURN_SUBMITTED, so any observer of it
+    // (the bus delivers on a microtask) already sees this turn as the owner.
+    try {
+      this.phase = 'thinking';
+      this.startThinking(undefined, resume);
+      this.turnHookOwner = new TurnHookOwner(this.currentSessionId, turnId, this.abortController!.signal);
+      this.turnCancellation.begin(turnId, () => this.abort());
 
-    if (this.runtimeBus) {
-      emitTurnSubmitted(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), {
-        turnId,
-        prompt: text,
-        ...(options?.origin ? { origin: options.origin } : {}),
-      });
+      if (this.runtimeBus) {
+        emitTurnSubmitted(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), {
+          turnId,
+          prompt: text,
+          ...(options?.origin ? { origin: options.origin } : {}),
+        });
+      }
+    } catch (error) {
+      // The turn's own clean-up has not been reached yet, so a throw here (a product's
+      // render callback, say) must release what was reserved: otherwise the orchestrator
+      // stays occupied and the same text is refused as an in-flight duplicate.
+      this.turnCancellation.end(turnId);
+      try { idempotencyStore.markFailed(submissionKey); } finally {
+        this.submissionOwner.release(submissionKey);
+        if (this.currentSubmissionKey === submissionKey) this.currentSubmissionKey = null;
+        try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
+      }
+      throw error;
     }
 
     return { submissionKey, turnId };
@@ -961,6 +1048,7 @@ export class Orchestrator {
     configManager: ReturnType<typeof requireConfigManager>,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
     onTurnTerminal?: (publish: () => void) => void,
+    onAnswerCommitted?: () => void,
     continuationEvidence?: string,
   ): Promise<void> {
     // A successful finalization releases the in-flight controller but does not
@@ -975,6 +1063,7 @@ export class Orchestrator {
         if (this.disposed || this.currentSessionId !== sessionId || this.postTurnPlanOwner !== planOwner) throw new Error('Plan continuation retired');
       },
       onTurnTerminal,
+      onAnswerCommitted,
       conversation: this.conversation,
       toolRegistry: this.toolRegistry,
       getSystemPrompt: this.getSystemPrompt,
@@ -1007,11 +1096,7 @@ export class Orchestrator {
       getMessageQueueLength: () => this.messageQueue.length,
       isReconciliationEnabled: () => this.isReconciliationEnabled(),
       setPendingToolCalls: (calls) => { this._pendingToolCalls = calls; },
-      setAutoSpawnTimeout: (timeout) => {
-        if (this.autoSpawnTimeout !== null) clearTimeout(this.autoSpawnTimeout);
-        this.autoSpawnTimeout = timeout;
-      },
-      setStreamingActive: (value) => { this.isStreaming = value; },
+      setStreamingActive: (value) => { this.phase = phaseWithStreaming(this.phase, value); },
       setStreamingInputTokens: (value) => { this.streamingInputTokens = value; },
       addStreamingOutputTokens: (value) => { this.streamingOutputTokens += value; },
       setLastRequestInputTokens: (value) => { this.lastRequestInputTokens = value; },
@@ -1027,7 +1112,7 @@ export class Orchestrator {
       passiveKnowledgeInjectionBudgetTokens: this.passiveKnowledgeInjectionBudgetTokens,
       passiveKnowledgeInjectionRelevanceFloor: this.passiveKnowledgeInjectionRelevanceFloor,
       codeIndex: this.coreServices.codeIndex,
-      codeReadAccessFilter: async path => (await this.permissionManager.readAccess(path)) === 'allow',
+      codeReadAccessFilter: async path => (await this.permissionManager.readAccess(path, this.currentSessionId)) === 'allow',
       isPassiveCodeInjectionEnabled: () => this.isPassiveCodeInjectionEnabled(),
       getAlreadyInjectedKnowledgeIds: () => this.getAlreadyInjectedKnowledgeIds(),
       addInjectedKnowledgeIds: (ids) => { this.addInjectedKnowledgeIds(ids); },
@@ -1068,14 +1153,26 @@ export class Orchestrator {
     configManager: ReturnType<typeof requireConfigManager>,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
   ): Promise<void> {
-    await handlePostTurnContextMaintenance({
-      ...this.contextMaintenanceDeps(configManager, providerRegistry),
-      lastWarningBracket: this.lastWarningBracket,
-      setLastWarningBracket: (value) => { this.lastWarningBracket = value; },
-    }, turnId, this.lastInputTokens);
+    try {
+      await handlePostTurnContextMaintenance({
+        ...this.contextMaintenanceDeps(configManager, providerRegistry),
+        lastWarningBracket: this.lastWarningBracket,
+        setLastWarningBracket: (value) => { this.lastWarningBracket = value; },
+      }, turnId, this.lastInputTokens);
+    } finally { this.settleCompacting(); }
   }
 
-  /** The session state and compaction seams the preflight and post-turn context maintenance share. */
+  /** Compaction never outlives the maintenance pass that started it, whatever that pass threw. */
+  private settleCompacting(): void {
+    if (this.isCompacting) this.setCompacting(false);
+  }
+
+  /**
+   * The session state and compaction seams the preflight and post-turn context
+   * maintenance share. `isCompacting`, `signal` and `modelContextWarning` are
+   * values captured at the start of one pass; build these deps per pass, never
+   * cache them across passes or turns.
+   */
   private contextMaintenanceDeps(configManager: ReturnType<typeof requireConfigManager>, providerRegistry: ReturnType<typeof requireProviderRegistry>) {
     return {
       conversation: this.conversation,
@@ -1108,15 +1205,16 @@ export class Orchestrator {
     configManager: ReturnType<typeof requireConfigManager>,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
   ): Promise<void> {
-    if (this.abortController?.signal.aborted) {
-      // Clean up streaming block if one was active when aborted
-      if (this.isStreaming) {
-        this.isStreaming = false;
-        this.conversation.finalizeStreamingBlock();
-        if (this.runtimeBus) {
-          emitStreamEnd(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), { turnId });
-        }
+    // Close a stream left open by the throw, aborted or not, so this turn does
+    // not end with STREAM_START unmatched and the next turn starts clean.
+    if (this.isStreaming) {
+      this.phase = phaseWithStreaming(this.phase, false);
+      this.conversation.finalizeStreamingBlock();
+      if (this.runtimeBus) {
+        emitStreamEnd(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), { turnId });
       }
+    }
+    if (this.abortController?.signal.aborted) {
       // Cancel the unpublished answer, retaining completed tool observations
       // so resuming the session cannot mistake executed work for missing work.
       // Settle admitted calls before rollback removes an unfinished call block.
@@ -1159,8 +1257,11 @@ export class Orchestrator {
     if (this.runtimeBus) {
       emitTurnError(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), {
         turnId,
-        error: summarizeError(error),
+        // The same redacted text, hint and retry wait the local transcript shows; the raw summary is never put on the wire.
+        error: msg.length > MAX_TURN_ERROR_TEXT ? `${msg.slice(0, MAX_TURN_ERROR_TEXT - 1)}…` : msg,
         stopReason: err instanceof ProviderError ? 'provider_error' : 'unexpected_error',
+        // The structured facts the reader fixes 401, 429 and network failures from; the text above cannot carry them.
+        ...(err instanceof ProviderError ? providerFailureFacts(err) : {}),
       });
     }
   }
@@ -1182,6 +1283,9 @@ export class Orchestrator {
     }
 
     if (this._turnFailed) this.postTurnPlanOwner = {};
+    // Cancelled turns set the same flag; read it before the reset below, and
+    // the abort state before stopThinking() releases the controller.
+    const outcome = !this._turnFailed ? 'complete' : this.abortController?.signal.aborted ? 'cancelled' : 'failed';
 
     // --- Submission key: mark turn complete or failed ---
     // Success: markComplete caches the result for duplicate callers.
@@ -1198,12 +1302,15 @@ export class Orchestrator {
       this._turnFailed = false;
     }
     this.turnCancellation.end(turnId);
-    this.stopThinking();
-    this.turnInFlight = false;
+    // stopThinking() calls product render callbacks; a throw there must not
+    // leave this orchestrator occupied by a turn that has ended.
+    // The turn's whole phase ends here, whatever a stream or compaction left open. A native
+    // turn's permit still holds execution until its owner settles it.
+    try { this.stopThinking(); } finally { this.phase = this.activeNativeConversationPermit === undefined ? 'idle' : 'settling'; }
     const durationMs = Date.now() - turnStartTime;
     const notifyEnabled = configManager.get('behavior.notifyOnComplete') as boolean | undefined;
-    if (notifyEnabled !== false) {
-      notifyCompletion('GoodVibes', `Response complete (${Math.round(durationMs / 1000)}s)`, durationMs);
+    if (outcome !== 'cancelled' && notifyEnabled !== false) {
+      notifyCompletion('GoodVibes', `Response ${outcome === 'complete' ? 'complete' : 'failed'} (${Math.round(durationMs / 1000)}s)`, durationMs);
     }
 
     // ── Event replay queue ────────────────────────────────────────────────
@@ -1239,37 +1346,21 @@ export class Orchestrator {
     turnId: string,
     model: ModelDefinition,
   ): Promise<'ok' | 'compacted' | 'error'> {
-    return checkContextWindowPreflight({
-      ...this.contextMaintenanceDeps(requireConfigManager(this.coreServices), requireProviderRegistry(this.coreServices)),
-      getCompactionStrategy: () => resolveCompactionStrategy(
-        requireConfigManager(this.coreServices).get('behavior.compactionStrategy'),
-        this.flagManager?.isEnabled('compaction-distiller-strategy') ?? false,
-      ),
-    }, turnId, model);
-  }
-
-  /**
-   * Auto-spawn agents for a list of ready plan items under bounded orchestration policy.
-   */
-  private autoSpawnPendingItems(
-    turnId: string,
-    plan: ExecutionPlan,
-    items: PlanItem[],
-  ): string[] {
-    if (isNativeConversationTurn()) return [];
-    const configManager = requireConfigManager(this.coreServices);
-    const providerRegistry = requireProviderRegistry(this.coreServices);
-    return autoSpawnPendingItems(
-      this.conversation,
-      plan,
-      items,
-      this.agentManager,
-      configManager,
-      providerRegistry,
-      this.runtimeBus,
-      createEmitterContext(this.currentSessionId, turnId),
-      this.coreServices.planManager ?? null,
-    );
+    let result: 'ok' | 'compacted' | 'error';
+    try {
+      result = await checkContextWindowPreflight({
+        ...this.contextMaintenanceDeps(requireConfigManager(this.coreServices), requireProviderRegistry(this.coreServices)),
+        getCompactionStrategy: () => resolveCompactionStrategy(
+          requireConfigManager(this.coreServices).get('behavior.compactionStrategy'),
+          this.flagManager?.isEnabled('compaction-distiller-strategy') ?? false,
+        ),
+      }, turnId, model);
+    } finally { this.settleCompacting(); }
+    // Compaction replaced the transcript, so the old turn-start position no
+    // longer names this turn's boundary. A later cancel rolls back only what
+    // this turn adds after the compacted history.
+    if (result === 'compacted') this.turnStartMessageCount = this.conversation.getMessageCount();
+    return result;
   }
 
   /**
@@ -1351,6 +1442,7 @@ export class Orchestrator {
           ? (toolName, args, success) => this.coreServices.codeIndexReindexScheduler!.onToolExecuted(toolName, args, success)
           : undefined,
         toolCallSignals: this.toolCallAborts,
+        toolBudget: () => toolBudgetFromConfig(this.coreServices.configManager),
         onToolSettled: result => { settled.push(result); },
       }, turnId, calls);
     } catch (error) {

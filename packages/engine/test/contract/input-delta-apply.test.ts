@@ -8,9 +8,10 @@ import { plannerOutput } from './plan-support.js';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 for (const autoCommit of [false, true]) {

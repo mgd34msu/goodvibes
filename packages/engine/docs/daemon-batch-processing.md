@@ -32,6 +32,8 @@ Live TUI, companion, and daemon chat behavior remains live unless a client uses 
 
 The `/api/batch/jobs` endpoint itself never executes a live response. It only queues provider-batch jobs.
 
+Finished jobs (completed, failed, cancelled, expired or dead-lettered) are kept for 7 days and at most 1000 are kept; older ones are removed from the store, after which `GET /api/batch/jobs/{id}` answers 404. When a provider reports a batch completed but returns no result for a job, that job is marked failed.
+
 ## Provider support
 
 The platform exposes provider Batch API adapters for:
@@ -45,7 +47,7 @@ Provider runtime metadata exposes `usage.batch` so clients can discover whether 
 
 ## Daemon API
 
-All routes require the same daemon auth as other daemon APIs.
+All routes require the same daemon auth as other daemon APIs. Queuing, cancelling and ticking spend provider budget, so `POST /api/batch/jobs`, `POST /api/batch/jobs/{jobId}/cancel` and `POST /api/batch/tick` also need the admin role; the read routes do not.
 
 | Route | Method | Behavior |
 |---|---:|---|
@@ -92,8 +94,8 @@ Jobs are persisted under the daemon config directory in `batch-jobs.json`.
 | `provider` | `string` (optional) | Provider id; defaults to the daemon's current provider when omitted. |
 | `model` | `string` (optional) | Model id or a `provider:modelId` registry key. |
 | `executionMode` | `"batch" \| "live"` (optional) | How the job runs; batch queuing is the default path. |
-| `request.messages` | `array` | Chat messages for the turn. |
-| `request.tools` | `array` (optional) | Tool definitions to expose to the model. |
+| `request.messages` | `array` | Chat messages for the turn. Each is `{ role: "user" \| "assistant" \| "tool", content }` (a `tool` message also needs `callId`); a malformed message is refused with `400 INVALID_BATCH_REQUEST` instead of queuing a job that can never run. |
+| `request.tools` | `array` (optional) | Tool definitions to expose to the model. Each needs a `name`, a `description` and a `parameters` object. |
 | `request.systemPrompt` | `string` (optional) | System prompt. |
 | `request.maxTokens` | `number` (optional) | Maximum output tokens. |
 | `request.reasoningEffort` | `"instant" \| "low" \| "medium" \| "high"` (optional) | Reasoning-effort hint. |
@@ -112,6 +114,7 @@ Jobs are persisted under the daemon config directory in `batch-jobs.json`.
 | `400` | `LIVE_REQUEST_NOT_ACCEPTED` | A live/immediate request was sent to a batch-only endpoint; use the live daemon route for immediate execution. |
 | `400` | `INVALID_BATCH_REQUEST` | The job is missing required fields (for example `request.messages`). |
 | `413` | `QUEUE_PAYLOAD_TOO_LARGE` | The queued job payload exceeds the maximum allowed size. |
+| `413` | `BATCH_REQUEST_TOO_LARGE` | The batch request exceeds 4 MiB. Split it into smaller jobs. |
 | `409` | `BATCH_JOB_ALREADY_SUBMITTED` | The job has already been submitted and cannot be submitted again. |
 | `409` | `BATCH_PROVIDER_UNSUPPORTED` | The target provider does not expose a provider Batch API adapter. |
 | `409` | `BATCH_PROVIDER_NOT_CONFIGURED` | The target provider lacks the API-key credentials required for Batch API use. |
@@ -151,7 +154,7 @@ The platform provisioning flow needs:
 - A Cloudflare account id.
 - A Cloudflare API token. Pass `apiToken`, configure `cloudflare.apiTokenRef`, store `CLOUDFLARE_API_TOKEN` in `SecretsManager`, or set the `CLOUDFLARE_API_TOKEN` environment variable.
 - `cloudflare.daemonBaseUrl`, the origin URL the Cloudflare Worker or Tunnel should use for Worker-to-daemon calls. Without a Tunnel this must be public; with a Zero Trust Tunnel it may be a local daemon URL such as `http://127.0.0.1:3421` (default control-plane port; configurable via `controlPlane.port`).
-- A Worker-to-daemon operator token. By default the daemon uses its current operator token; callers may pass `operatorToken` or configure `cloudflare.workerTokenRef`.
+- A Worker-to-daemon operator token. Pass `operatorToken` or configure `cloudflare.workerTokenRef` to use a dedicated one. When neither is set the daemon falls back to its own current operator token, and the `set-worker-daemon-secret` step is then reported as a warning, because anyone who can read the Worker's secrets can call the daemon with that credential. Provisioning checks this, and the Cloudflare API token, before the first change at Cloudflare.
 - A Worker client bearer token. If one is not supplied, provisioning generates one, stores it in `SecretsManager`, writes `cloudflare.workerClientTokenRef`, and installs it as the Worker secret `GOODVIBES_WORKER_TOKEN`.
 - For DNS automation, a selected Cloudflare zone via `zoneId` or `zoneName`.
 - For Tunnel or Access automation, `daemonHostname` identifies the hostname to route/protect. Access application and service-token APIs are account-scoped; a zone is only required when GoodVibes should also create DNS records.
@@ -169,7 +172,7 @@ Onboarding clients can either collect a manually-created operational Cloudflare 
 3. Send that temporary token to `POST /api/cloudflare/token/create` as `bootstrapToken`.
 4. The platform uses Cloudflare's `/user/tokens` API to create a narrower operational user token with the returned GoodVibes permission list, stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN` when `storeApiToken` is not `false`, and never persists the bootstrap token.
 
-The returned permission list describes the operational token the platform will create. It is not a list of permissions to add to the temporary bootstrap token. If DNS automation should be scoped to one zone, pass `zoneId` during token creation; otherwise the platform may create a broader zone-scoped operational token so later provisioning can discover/select the zone.
+The returned permission list describes the operational token the platform will create. It is not a list of permissions to add to the temporary bootstrap token. The `dns` component needs a zone: pass `zoneId` or `zoneName` (or configure `cloudflare.zoneId`), and the token is limited to that zone. A `zoneName` that matches no zone fails with `CLOUDFLARE_ZONE_NOT_FOUND`, and `dns` with no zone fails with `CLOUDFLARE_ZONE_REQUIRED`, rather than creating a token for every zone in the account. Cloudflare shows a token's value once, so `storeApiToken: false` requires `returnGeneratedToken: true`; if the new token cannot be stored, the error names its token id so it can be deleted in the Cloudflare dashboard.
 
 The platform resolves Cloudflare permission groups dynamically through the official Cloudflare TypeScript SDK. It resolves each required permission by `name` and Cloudflare scope, with aliases for Cloudflare's `Write`/`Edit` naming variants, before falling back to a broad catalog scan. If Cloudflare still returns account-specific permission names that do not match the platform candidates, token creation fails with the missing permission names so the client can guide the user to create the operational token manually.
 
@@ -212,8 +215,10 @@ All Cloudflare routes require daemon authentication and admin privileges.
 | `/api/cloudflare/discover` | `POST` | Discovers accounts, zones, and optional account-scoped Cloudflare resources visible to the token. |
 | `/api/cloudflare/validate` | `POST` | Resolves the API token and validates Cloudflare account access. |
 | `/api/cloudflare/provision` | `POST` | Creates or reuses enabled components: Worker, Queue/DLQ, Tunnel, Access app/service token, DNS CNAMEs, KV namespace, Durable Object binding, Secrets Store, R2 Standard bucket, config, and optional verification. |
-| `/api/cloudflare/verify` | `POST` | Calls the Worker health endpoint and the Worker-to-daemon batch proxy. |
-| `/api/cloudflare/disable` | `POST` | Disables local Cloudflare usage, returns queue backend to `local`, and can remove Worker cron/subdomain settings. |
+| `/api/cloudflare/verify` | `POST` | Calls the Worker health endpoint and the Worker-to-daemon batch proxy over https, without following redirects and with a 15 second limit per request. The stored Worker client token is sent only to the configured `cloudflare.workerBaseUrl`; a token passed in the request is sent where the request points. |
+| `/api/cloudflare/disable` | `POST` | Disables local Cloudflare usage, returns queue backend to `local`, and can remove Worker cron/subdomain settings. The local switch is always made. `remote` is `disabled` when the Worker changes were made at Cloudflare and `not-disabled` when they were skipped or failed (a `warning` step says why); the deployed Worker may keep calling the daemon until it is disabled in the Cloudflare dashboard. |
+
+If provisioning stops part-way it does not roll back. The error lists the steps already completed (and `partial.steps` carries them where the response keeps extra fields), and running provision again is safe. An Access application or a CNAME record that already exists for a hostname but was not created by GoodVibes (an Access application not named `GoodVibes Daemon`, a CNAME without the GoodVibes comment and pointing elsewhere) is left unchanged and reported as a `warning` step instead of being overwritten. An API token passed with `storeApiToken` replaces the stored one only after the account accepted it, and `persistConfig: false` stores no credential.
 
 Provisioning is idempotent for platform-managed Cloudflare resources. The platform checks for existing resources before creating Queues, queue consumers, KV namespaces, R2 buckets, Secrets Stores, Zero Trust Tunnels, Access service tokens/apps, DNS CNAMEs, account workers.dev subdomains, workers.dev script routes, and the `GoodVibesCoordinator` Durable Object namespace. Worker cron provisioning reads the current schedule before rewriting it, and disable flows check current schedule/subdomain state before removing settings. Hostname-bound DNS and Access operations are preflighted against the selected zone before Cloudflare receives create/update calls.
 
@@ -278,6 +283,8 @@ import { createGoodVibesCloudflareWorker } from '@goodvibes-jev/engine/platform/
 export default createGoodVibesCloudflareWorker();
 ```
 
+The Worker refuses a daemon URL that is not `https:` and one that points at a private, loopback or link-local host. Two bindings relax that for a deliberate setup: `GOODVIBES_ALLOW_INSECURE_DAEMON_URL=true` allows an `http:` URL, and `GOODVIBES_ALLOW_PRIVATE_DAEMON_URL=true` allows a private host, for example behind a tunnel. Leave both unset otherwise.
+
 Manual Worker deployments can still use that entry point, but platform provisioning uploads its own Worker module automatically so a client never has to build or upload one by hand. The two are close but not byte-identical: the auto-uploaded module skips daemon-URL hardening (scheme, private-host, and format checks) and the request-size and content-type checks that `createGoodVibesCloudflareWorker` adds, because provisioning always sets `daemonBaseUrl` itself and always installs `GOODVIBES_WORKER_TOKEN`, which makes those checks redundant on the path the platform controls. Deployments that import `createGoodVibesCloudflareWorker` directly get the fuller check set. The Worker bridge can:
 
 - Proxy `/batch/*` requests to the daemon's `/api/batch/*` routes.
@@ -285,9 +292,9 @@ Manual Worker deployments can still use that entry point, but platform provision
 - Run scheduled events that call `/api/batch/tick`.
 - Consume Cloudflare Queue messages and retry failures so Cloudflare dead-letter queues can capture exhausted messages.
 
-Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>` by default. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`. The platform provisioning flow generates and installs `GOODVIBES_WORKER_TOKEN` automatically. With `createGoodVibesCloudflareWorker`, if no token is configured the Worker refuses every non-health route with `WORKER_AUTH_TOKEN_REQUIRED` rather than silently allowing requests through; manual deployments that intentionally put the Worker behind another trusted auth layer must pass `allowUnauthenticated: true` as an explicit opt-out.
+Every Worker route except `/health` and `/batch/health` requires `Authorization: Bearer <token>` by default. Set the token with the Worker secret `GOODVIBES_WORKER_TOKEN` or `createGoodVibesCloudflareWorker({ workerAuthToken })`. The platform provisioning flow generates and installs `GOODVIBES_WORKER_TOKEN` automatically; the module it uploads answers `503` `WORKER_AUTH_NOT_CONFIGURED` to every non-health route if that secret is ever missing, compares tokens in constant time, and fails a scheduled invocation when the daemon refuses the tick. With `createGoodVibesCloudflareWorker`, if no token is configured the Worker refuses every non-health route with `WORKER_AUTH_TOKEN_REQUIRED` rather than silently allowing requests through; manual deployments that intentionally put the Worker behind another trusted auth layer must pass `allowUnauthenticated: true` as an explicit opt-out.
 
-By default, the Worker does not queue full prompt/job payloads. Queue messages should be small signals, not prompt archives or secrets. This keeps usage free-tier friendly and avoids putting sensitive prompt bodies into Cloudflare Queues. Full job payload queueing requires `createGoodVibesCloudflareWorker({ queueJobPayloads: true })` or the Worker environment binding `GOODVIBES_QUEUE_JOB_PAYLOADS=true`.
+By default, the Worker does not queue full prompt/job payloads. Queue messages should be small signals, not prompt archives or secrets. This keeps usage free-tier friendly and avoids putting sensitive prompt bodies into Cloudflare Queues. Full job payload queueing requires `createGoodVibesCloudflareWorker({ queueJobPayloads: true })` or the Worker environment binding `GOODVIBES_QUEUE_JOB_PAYLOADS=true`. Each queued job carries a stable id that is sent as `source.id` on every delivery attempt. The queue consumer redelivers a message when the daemon answers 401, 403, 408, 429 or 5xx (or the request fails), and acknowledges it, with a logged warning, on any other 4xx or an unknown message type, so a malformed message does not loop. A scheduled tick the daemon refuses fails the invocation, so Cloudflare records it as failed.
 
 The platform provisioning route configures the queue consumer with `dead_letter_queue`. Manual deployments must configure the dead-letter queue in Cloudflare or Wrangler for the queue binding; the platform Worker consumes retries and allows failed messages to flow to the configured DLQ.
 

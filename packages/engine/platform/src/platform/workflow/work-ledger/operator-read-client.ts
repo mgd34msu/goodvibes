@@ -25,6 +25,12 @@ export interface OperatorWorkLedgerReadOptions {
   readonly requestTimeoutMs?: number;
   /** Observation failures; a later successful explicit read may recover. */
   readonly onUnavailable?: (error: Error) => void;
+  /**
+   * Observation ended for good: the host denied the binding (401, 403, 404 or
+   * 410). Subscribed listeners are dropped; subscribe again once access is
+   * restored to resume.
+   */
+  readonly onObservationStopped?: (error: Error) => void;
 }
 function error(message: string): Error { return new Error(`Native work ledger: ${message}`); }
 function validCursor(value: number): boolean { return Number.isSafeInteger(value) && value >= 0; }
@@ -142,9 +148,12 @@ export function createOperatorWorkLedgerReadClient(
     try {
       const value = await snapshot(controller);
       if (disposed || epoch !== generation) return;
-      if (value.cursor < observedCursor) throw error('host cursor regressed');
       failures = 0;
-      if (value.cursor > observedCursor) {
+      // A lower cursor means the host ledger was restored or replaced. The new
+      // state is the truth: adopt it and tell the listeners, instead of failing
+      // every later poll against a cursor that will never be reached again.
+      if (value.cursor < observedCursor) lastSnapshot = value;
+      if (value.cursor !== observedCursor) {
         observedCursor = value.cursor;
         for (const listener of [...listeners.values()]) {
           if (disposed || epoch !== generation) break;
@@ -159,7 +168,11 @@ export function createOperatorWorkLedgerReadClient(
       const status = statusOf(cause);
       notifyObserver(() => options.onUnavailable?.(cause instanceof Error ? cause : error('read unavailable')));
       // Permanent admission failures need a new host/session binding; never keep an old grant alive.
-      if (status === 401 || status === 403 || status === 404 || status === 410) { stopObservation(); return; }
+      if (status === 401 || status === 403 || status === 404 || status === 410) {
+        stopObservation(); listeners.clear();
+        notifyObserver(() => options.onObservationStopped?.(cause instanceof Error ? cause : error('observation stopped')));
+        return;
+      }
       failures = Math.min(failures + 1, 6);
       nextDelay = Math.min(60_000, interval * 2 ** failures);
     } finally { if (pollController === controller) pollController = undefined; }

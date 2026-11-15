@@ -31,7 +31,8 @@ type Token =
   | { kind: 'lparen' }
   | { kind: 'rparen' }
   | { kind: 'dot' }
-  | { kind: 'bang' };
+  | { kind: 'bang' }
+  | { kind: 'invalid'; value: string };
 
 function tokenize(input: string): Token[] {
   const tokens: Token[] = [];
@@ -46,6 +47,11 @@ function tokenize(input: string): Token[] {
       while (i < input.length && input[i] !== quote) {
         if (input[i] === '\\' && i + 1 < input.length) { i++; }
         s += input[i++];
+      }
+      if (i >= input.length) {
+        // No closing quote: the expression is cut off, so it is refused rather than read as the text so far.
+        tokens.push({ kind: 'invalid', value: String(quote) });
+        break;
       }
       i++; // closing quote
       tokens.push({ kind: 'string', value: s });
@@ -83,7 +89,8 @@ function tokenize(input: string): Token[] {
       else tokens.push({ kind: 'ident', value: id });
       continue;
     }
-    // Unknown character, skip (will surface as parse error)
+    // Unknown character: kept as a token so the evaluator can refuse the whole expression.
+    tokens.push({ kind: 'invalid', value: input[i]! });
     i++;
   }
   return tokens;
@@ -103,8 +110,11 @@ function tokenize(input: string): Token[] {
  *   - Grouping: `(expr)`
  *
  * Does NOT use `eval`, `new Function`, or `vm.runInNewContext`.
- * Any expression that references identifiers not in the context, or
- * uses unsupported constructs, evaluates to false.
+ * An identifier that is not in the context, or a property the value does not
+ * own, reads as undefined (so `!flag` is true when `flag` is absent). An
+ * expression that uses an unsupported construct (an unknown character, an
+ * unterminated string, unbalanced parentheses, or tokens left over after a
+ * complete expression) evaluates to false and is logged.
  */
 export function safeEvaluate(condition: string, context: Record<string, unknown>): boolean {
   const tokens = tokenize(condition);
@@ -177,7 +187,8 @@ export function safeEvaluate(condition: string, context: Record<string, unknown>
       if (peek()?.kind === 'lparen') {
         consume(); // '('
         const arg = parsePrimary();
-        if (peek()?.kind === 'rparen') consume(); // ')'
+        if (peek()?.kind !== 'rparen') throw new Error('unbalanced parentheses');
+        consume(); // ')'
         if (typeof val === 'string') {
           if (name === 'startsWith') { val = val.startsWith(String(arg)); continue; }
           if (name === 'endsWith') { val = val.endsWith(String(arg)); continue; }
@@ -186,7 +197,8 @@ export function safeEvaluate(condition: string, context: Record<string, unknown>
         val = false;
       } else {
         // Property access
-        if (val !== null && val !== undefined && typeof val === 'object') {
+        // Own properties only: an inherited one (`constructor`, `__proto__`) is not payload data.
+        if (val !== null && val !== undefined && typeof val === 'object' && Object.prototype.hasOwnProperty.call(val, name)) {
           val = (val as Record<string, unknown>)[name];
         } else {
           val = undefined;
@@ -202,7 +214,8 @@ export function safeEvaluate(condition: string, context: Record<string, unknown>
     if (t.kind === 'lparen') {
       consume();
       const val = parseExpr();
-      if (peek()?.kind === 'rparen') consume();
+      if (peek()?.kind !== 'rparen') throw new Error('unbalanced parentheses');
+      consume();
       return val;
     }
     if (t.kind === 'string') { consume(); return t.value; }
@@ -221,7 +234,17 @@ export function safeEvaluate(condition: string, context: Record<string, unknown>
   }
 
   try {
-    return !!(parseExpr());
+    const invalid = tokens.find((token) => token.kind === 'invalid') as { value: string } | undefined;
+    if (invalid) {
+      logger.warn('ChainEngine: condition uses an unsupported character, evaluating to false', { condition, character: invalid.value });
+      return false;
+    }
+    const value = parseExpr();
+    if (pos !== tokens.length) {
+      logger.warn('ChainEngine: condition has unsupported trailing tokens, evaluating to false', { condition });
+      return false;
+    }
+    return !!value;
   } catch (err) {
     logger.error('ChainEngine: condition evaluation error', {
       condition,
@@ -241,17 +264,50 @@ interface ChainState {
   pendingDebounce?: HookEvent | undefined;
 }
 
+/** Runs a completed chain's action and reports how it went. */
+export type ChainActionRunner = (chain: HookChain, event: HookEvent) => Promise<HookResult>;
+
+/** Combines two results: any failure fails, the first deny wins, context joins. */
+function mergeResults(a: HookResult | null, b: HookResult): HookResult {
+  if (!a) return b;
+  const merged: HookResult = { ok: a.ok && b.ok };
+  const error = a.error ?? b.error;
+  if (error !== undefined) merged.error = error;
+  const deny = a.decision === 'deny' ? a : b.decision === 'deny' ? b : undefined;
+  const decision = deny ? 'deny' : (a.decision ?? b.decision);
+  if (decision !== undefined) merged.decision = decision;
+  const reason = deny ? deny.reason : (a.reason ?? b.reason);
+  if (reason !== undefined) merged.reason = reason;
+  const context = [a.additionalContext, b.additionalContext].filter((part): part is string => !!part).join('\n');
+  if (context) merged.additionalContext = context;
+  const updatedInput = b.updatedInput ?? a.updatedInput;
+  if (updatedInput !== undefined) merged.updatedInput = updatedInput;
+  const code = a.code ?? b.code;
+  if (code !== undefined) merged.code = code;
+  return merged;
+}
+
 export class ChainEngine {
-  private dispatcher: HookDispatcher;
+  private dispatcher: Pick<HookDispatcher, 'fire'>;
+  private readonly runAction: ChainActionRunner;
   private chains: HookChain[] = [];
   private states = new Map<string, ChainState>();
 
-  constructor(dispatcher: HookDispatcher) {
+  /**
+   * `runAction` runs a completed chain's action; without one the action's
+   * `match` path is fired on the dispatcher, which re-enters event handling.
+   */
+  constructor(dispatcher: Pick<HookDispatcher, 'fire'>, runAction?: ChainActionRunner) {
     this.dispatcher = dispatcher;
+    this.runAction = runAction ?? ((chain, event) => this.dispatcher.fire({
+      ...event,
+      path: chain.action.match as unknown as import('./types.js').HookEventPath,
+    }));
   }
 
-  /** Register a chain and initialize its state */
+  /** Register a chain and initialize its state. Chains are tracked by name, so a repeated name is refused. */
   register(chain: HookChain): void {
+    if (this.states.has(chain.name)) throw new Error(`chain "${chain.name}" is already registered`);
     this.chains.push(chain);
     this.states.set(chain.name, {
       currentStep: 0,
@@ -261,14 +317,14 @@ export class ChainEngine {
   }
 
   /** Called after each event to advance matching chains */
-  async evaluate(event: HookEvent): Promise<HookResult | null> {
+  async evaluate(event: HookEvent, runAction: ChainActionRunner = this.runAction): Promise<HookResult | null> {
     let result: HookResult | null = null;
 
-    for (const chain of this.chains) {
-      const state = this.states.get(chain.name);
+    for (const chain of [...this.chains]) {
+      let state = this.states.get(chain.name);
       if (!state) continue;
 
-      const step = chain.steps[state.currentStep] as ChainStep | undefined;
+      let step = chain.steps[state.currentStep] as ChainStep | undefined;
       if (!step) continue;
 
       if (step.within && state.lastAdvance > 0) {
@@ -276,9 +332,19 @@ export class ChainEngine {
         if (withinMs > 0 && Date.now() - state.lastAdvance > withinMs) {
           this._resetState(chain.name);
           // Re-check from step 0 with same event
-          const freshState = this.states.get(chain.name)!;
-          const freshStep = chain.steps[freshState.currentStep] as ChainStep | undefined;
-          if (!freshStep || !matchesEventPath(freshStep.match, event.path)) continue;
+          state = this.states.get(chain.name)!;
+          step = chain.steps[state.currentStep] as ChainStep | undefined;
+          if (!step || !matchesEventPath(step.match, event.path)) continue;
+        }
+      }
+
+      // An optional step without a debounce is skipped when the event that
+      // arrives belongs to the step after it.
+      if (step.optional && !step.debounce && !matchesEventPath(step.match, event.path)) {
+        const next = chain.steps[state.currentStep + 1] as ChainStep | undefined;
+        if (next && matchesEventPath(next.match, event.path)) {
+          state.currentStep++;
+          step = next;
         }
       }
 
@@ -295,28 +361,27 @@ export class ChainEngine {
         if (state.debounceTimer !== undefined) {
           clearTimeout(state.debounceTimer);
         }
-        state.pendingDebounce = event;
-        state.debounceTimer = setTimeout(async () => {
+        const pendingState = state;
+        const debouncedStep = step;
+        pendingState.pendingDebounce = event;
+        pendingState.debounceTimer = setTimeout(async () => {
           try {
-            state.debounceTimer = undefined;
-            const pendingEvent = state.pendingDebounce;
+            pendingState.debounceTimer = undefined;
+            const pendingEvent = pendingState.pendingDebounce;
             if (!pendingEvent) return;
-            state.pendingDebounce = undefined;
+            pendingState.pendingDebounce = undefined;
             // Advance after debounce
-            this._advanceState(chain, state, pendingEvent, step);
-            if (state.currentStep >= chain.steps.length) {
+            this._advanceState(chain, pendingState, pendingEvent, debouncedStep);
+            if (pendingState.currentStep >= chain.steps.length) {
+              this._resetState(chain.name);
               try {
-                await this.dispatcher.fire({
-                  ...pendingEvent,
-                  path: chain.action.match as unknown as import('./types.js').HookEventPath,
-                });
+                await this.runAction(chain, { ...pendingEvent, path: chain.action.match as unknown as import('./types.js').HookEventPath });
               } catch (err) {
                 logger.error('ChainEngine: chain action error', {
                   chain: chain.name,
                   error: summarizeError(err),
                 });
               }
-              this._resetState(chain.name);
             }
           } catch (err) {
             logger.error('ChainEngine: debounce callback error', {
@@ -325,29 +390,30 @@ export class ChainEngine {
             });
           }
         }, debounceMs);
-        state.debounceTimer.unref?.();
+        pendingState.debounceTimer.unref?.();
         continue;
       }
 
       // Advance step
       this._advanceState(chain, state, event, step);
 
-      // Fire chain action if all steps complete
+      // Fire chain action if all steps complete. The state is reset first so
+      // an event that arrives while the action runs starts a fresh pass.
       if (state.currentStep >= chain.steps.length) {
         const actionEvent: HookEvent = {
           ...event,
           path: chain.action.match as unknown as import('./types.js').HookEventPath,
         };
+        this._resetState(chain.name);
         try {
-          result = await this.dispatcher.fire(actionEvent);
+          result = mergeResults(result, await runAction(chain, actionEvent));
         } catch (err) {
           logger.error('ChainEngine: chain action error', {
             chain: chain.name,
             error: summarizeError(err),
           });
-          result = { ok: false, error: summarizeError(err) };
+          result = mergeResults(result, { ok: false, error: summarizeError(err) });
         }
-        this._resetState(chain.name);
       }
     }
 
@@ -378,6 +444,23 @@ export class ChainEngine {
       captures: {},
       lastAdvance: 0,
     });
+  }
+
+  /** Stop tracking one chain by name; false when it is not registered. */
+  unregister(chainName: string): boolean {
+    const idx = this.chains.findIndex((chain) => chain.name === chainName);
+    if (idx === -1) return false;
+    this._resetState(chainName);
+    this.states.delete(chainName);
+    this.chains.splice(idx, 1);
+    return true;
+  }
+
+  /** Stop tracking every chain. */
+  clear(): void {
+    for (const chain of this.chains) this._resetState(chain.name);
+    this.chains = [];
+    this.states.clear();
   }
 
   /** Reset a specific chain */

@@ -235,6 +235,23 @@ export function createPlatformTempDir(prefix: string): string {
   return mkdtempSync(join(ENGINE_TEMP_ROOT, prefix));
 }
 
+/**
+ * Every public package is released at the root version: the engine's
+ * `workspace:` dependency on judgment is rewritten to that version, so a
+ * judgment manifest at another version would be published first and leave the
+ * engine on the registry pointing at a judgment version that does not exist.
+ * Registry versions cannot be unpublished; refuse before the first publish.
+ */
+export function assertStagesAtRootVersion(stages: readonly Pick<PackageStage, 'dir' | 'manifest'>[], rootVersion: string): void {
+  const off = stages.filter((stage) => stage.manifest.version !== rootVersion);
+  if (off.length === 0) return;
+  throw new Error(
+    `Refusing to publish: every public package must be at the root version ${rootVersion}, but `
+    + `${off.map((stage) => `${stage.manifest.name ?? stage.dir} is at ${String(stage.manifest.version)}`).join(', ')}. `
+    + 'Run `bun run sync:version` and `bun run version:check`, then re-cut the release.',
+  );
+}
+
 export async function stagePackages(): Promise<{ readonly tempRoot: string; readonly stages: readonly PackageStage[]; readonly publicStages: readonly PackageStage[] }> {
   return withWorkspaceLock('stage packages', () => {
     const rootVersion = getRootVersion();
@@ -311,7 +328,8 @@ export function createAuthEnv(extraEnv: NodeJS.ProcessEnv = {}, options: { reado
   if (scope && registryHost !== 'registry.npmjs.org') {
     npmrcLines.push(`${scope}:registry=${registry}`);
   }
-  writeFileSync(userConfigPath, `${npmrcLines.join('\n')}\n`);
+  // The file holds the publish token: readable by this user only, whatever the umask or the directory mode.
+  writeFileSync(userConfigPath, `${npmrcLines.join('\n')}\n`, { mode: 0o600 });
   const env: NodeJS.ProcessEnv = {
     ...merged,
     NODE_AUTH_TOKEN: token,
@@ -355,35 +373,46 @@ export function run(command: string, args: readonly string[], cwd: string, optio
 
 /**
  * npm wrappers (version-manager shims, "npm notice" lines) sometimes print plain
- * text on stdout alongside the JSON document. Take the first balanced JSON value
- * and ignore whatever surrounds it, tracking string literals so braces inside
- * paths do not confuse the depth count.
+ * text on stdout alongside the JSON document, and that text can itself contain
+ * brackets ("[notice] ...", "[1/3] ..."). Yield each balanced bracketed span in
+ * order so the caller keeps the first one that is the report, tracking string
+ * literals so braces inside paths do not confuse the depth count.
  */
-function extractJsonDocument(raw: string): string | undefined {
-  const start = raw.search(/[[{]/);
-  if (start < 0) return undefined;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = start; index < raw.length; index += 1) {
-    const char = raw[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === '"') inString = false;
+function* jsonCandidates(raw: string): Generator<string> {
+  let from = 0;
+  for (;;) {
+    const start = raw.slice(from).search(/[[{]/);
+    if (start < 0) return;
+    const first = from + start;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let index = first; index < raw.length && end < 0; index += 1) {
+      const char = raw[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === '[' || char === '{') depth += 1;
+      else if (char === ']' || char === '}') {
+        depth -= 1;
+        if (depth === 0) end = index;
+      }
+    }
+    if (end < 0) {
+      from = first + 1;
       continue;
     }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-    if (char === '[' || char === '{') depth += 1;
-    else if (char === ']' || char === '}') {
-      depth -= 1;
-      if (depth === 0) return raw.slice(start, index + 1);
-    }
+    yield raw.slice(first, end + 1);
+    from = end + 1;
   }
-  return undefined;
 }
 
 function looksLikePackResult(value: unknown): value is { readonly filename: string } {
@@ -409,24 +438,29 @@ export function selectPackResult(parsed: unknown): { readonly filename: string }
 }
 
 export function parseNpmPackJson(raw: string): { readonly filename: string } {
-  const document = extractJsonDocument(raw);
-  if (document === undefined) {
+  let sawCandidate = false;
+  let firstParseError: string | undefined;
+  for (const candidate of jsonCandidates(raw)) {
+    sawCandidate = true;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch (error) {
+      firstParseError ??= error instanceof Error ? error.message : String(error);
+      continue;
+    }
+    const result = selectPackResult(parsed);
+    if (result) return result;
+  }
+  if (!sawCandidate) {
     throw new Error(`npm pack --json printed no JSON document; npm emitted: ${raw.trim().slice(0, 400)}`);
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(document);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`npm pack --json printed JSON that could not be parsed (${reason}); npm emitted: ${raw.trim().slice(0, 400)}`);
+  if (firstParseError !== undefined) {
+    throw new Error(`npm pack --json printed JSON that could not be parsed (${firstParseError}); npm emitted: ${raw.trim().slice(0, 400)}`);
   }
-  const result = selectPackResult(parsed);
-  if (!result) {
-    throw new Error(
-      `npm pack --json returned an unrecognized JSON shape; expected an array of pack results or an object keyed by package name, but npm emitted: ${raw.trim().slice(0, 400)}`,
-    );
-  }
-  return result;
+  throw new Error(
+    `npm pack --json returned an unrecognized JSON shape; expected an array of pack results or an object keyed by package name, but npm emitted: ${raw.trim().slice(0, 400)}`,
+  );
 }
 
 export function packStage(stageDir: string, packDestination: string): { readonly filename: string } {

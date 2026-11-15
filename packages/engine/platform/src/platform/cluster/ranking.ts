@@ -74,7 +74,36 @@ export function compareVersions(a: string, b: string): number {
   if (left.prerelease === right.prerelease) return 0;
   if (left.prerelease === '') return 1;
   if (right.prerelease === '') return -1;
-  return left.prerelease > right.prerelease ? 1 : -1;
+  return comparePrerelease(left.prerelease, right.prerelease);
+}
+
+/**
+ * Semver precedence for two different prerelease tags: dot-separated parts are
+ * compared one by one, numeric parts by value (so `rc.10` is above `rc.9`),
+ * numeric parts below text parts, and a tag that is a prefix of the other below it.
+ */
+function comparePrerelease(a: string, b: string): number {
+  const left = a.split('.');
+  const right = b.split('.');
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const x = left[index];
+    const y = right[index];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) {
+      const delta = Number(x) - Number(y);
+      if (delta !== 0) return delta > 0 ? 1 : -1;
+      continue;
+    }
+    if (xNumeric) return -1;
+    if (yNumeric) return 1;
+    return x > y ? 1 : -1;
+  }
+  return 0;
 }
 
 function splitVersion(raw: string): { release: number[]; prerelease: string } {

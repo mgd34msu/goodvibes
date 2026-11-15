@@ -3,6 +3,7 @@
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { rmSync, existsSync } from 'fs';
+import { ConversationManager } from '../../core/conversation.ts';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -28,7 +29,7 @@ describe('SessionPickerModal', () => {
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    sm = new SessionManager(tmpDir, { surfaceRoot: 'tui' });
+    sm = new SessionManager(tmpDir, { surfaceRoot: 'agent' });
   });
 
   afterEach(() => {
@@ -40,15 +41,27 @@ describe('SessionPickerModal', () => {
     expect(modal.active).toBe(false);
   });
 
-  test('open() on empty dir shows empty sessions', () => {
-    // Override the internal SessionManager by testing with no sessions
+  test('open() on an empty session directory activates with no sessions and nothing selected', () => {
     modal = new SessionPickerModal(sm);
-    // The modal uses getSessionManager() which points to cwd, so just test the interface
-    modal.active = true;
-    modal.sessions = [];
-    modal.selectedIndex = 0;
-    expect(modal.sessions.length).toBe(0);
+    modal.open();
+    expect(modal.active).toBe(true);
+    expect(modal.sessions).toEqual([]);
+    expect(modal.selectedIndex).toBe(0);
     expect(modal.getSelected()).toBeNull();
+  });
+
+  test('open() loads the saved sessions from the SessionManager and selects the first', () => {
+    sm.save('alpha', [{ role: 'user', content: 'hi' }], META);
+    sm.save('beta', [{ role: 'user', content: 'hello' }], { ...META, title: 'Second' });
+    modal = new SessionPickerModal(sm);
+    modal.selectedIndex = 1;
+    modal.statusMessage = 'stale';
+    modal.open();
+    expect(modal.active).toBe(true);
+    expect(modal.sessions.map((entry) => entry.name).sort()).toEqual(['alpha', 'beta']);
+    expect(modal.selectedIndex).toBe(0);
+    expect(modal.statusMessage).toBe('');
+    expect(modal.getSelected()?.name).toBe(modal.sessions[0]!.name);
   });
 
   test('navigation wraps around (moveUp from 0 → last)', () => {
@@ -92,6 +105,21 @@ describe('SessionPickerModal', () => {
     modal.selectedIndex = 1;
     const sel = modal.getSelected();
     expect(sel).toEqual(expect.objectContaining({ name: 'b' }));
+  });
+
+  test('loading without a command context restores the saved side branches', () => {
+    sm.save('branched', [{ role: 'user', content: 'main work' }], META, undefined, undefined, {
+      branches: { alt: [{ role: 'user', content: 'branch work' }] },
+      currentBranch: 'main',
+    });
+    modal = new SessionPickerModal(sm);
+    modal.sessions = sm.list();
+    modal.selectedIndex = 0;
+    const conversation = new ConversationManager(() => 80);
+
+    expect(modal.loadSelected(conversation)).toBe(true);
+
+    expect(conversation.branchState().branches.alt).toHaveLength(1);
   });
 
   test('deleteSelected requires explicit slash command and does not remove files', () => {

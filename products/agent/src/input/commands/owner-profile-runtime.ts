@@ -30,8 +30,8 @@ export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): 
     name: 'owner-profile',
     aliases: ['about-me'],
     description: 'Your profile: read it, see where a fact came from, correct one, or forget one',
-    usage: '[read|get <fieldId>|person <name>|provenance <fieldId>|set <fieldId> <value> --yes|forget <fieldId> --yes|status]',
-    argsHint: 'read|get|person|provenance|set|forget|status',
+    usage: '[read|get <fieldId>|person <name>|provenance <fieldId>|set <fieldId> <value> --yes|note --section <section> --text <line> --yes|undo <fieldId> --yes|forget <fieldId> --yes|status]',
+    argsHint: 'read|get|person|provenance|set|note|undo|forget|status',
     async handler(args, ctx) {
       const cli = parseGoodVibesCli(['owner-profile', ...args], 'goodvibes-agent');
       if (cli.errors.length > 0) {

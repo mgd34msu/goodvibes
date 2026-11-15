@@ -101,7 +101,28 @@ export function createReactNativeGoodVibesPlatform(
     realtime,
     WebSocketImpl: options.WebSocketImpl ?? globalThis.WebSocket,
   });
-  const getAuthToken = () => base.auth.getToken();
+  // Refresh a token inside the leeway window first, as the HTTP transport and
+  // the core realtime connectors do, so a (re)connect does not present a stale bearer.
+  const getAuthToken = async (): Promise<string | null> => {
+    try {
+      await base.auth.ensureFreshToken();
+    } catch {
+      // A refresh that cannot complete leaves the token as it was; connect with it
+      // and let the daemon's answer decide, as a request would.
+    }
+    return base.auth.getToken();
+  };
+  let warnedAboutPlainWebSocket = false;
+  // The daemon refuses an upgrade without an Authorization header, which a plain WebSocket cannot send.
+  const resolveWebSocket = (explicit: typeof WebSocket | undefined): typeof WebSocket => {
+    if (explicit === undefined && !warnedAboutPlainWebSocket) {
+      warnedAboutPlainWebSocket = true;
+      console.warn(
+        'GoodVibes React Native realtime is using the global WebSocket, which sends no Authorization header; the daemon will refuse the upgrade. Pass options.WebSocketImpl (or viaWebSocket(impl)) with a wrapper that attaches the bearer token.',
+      );
+    }
+    return requireReactNativeWebSocket(explicit);
+  };
 
   return {
     ...base,
@@ -111,7 +132,7 @@ export function createReactNativeGoodVibesPlatform(
           createWebSocketConnector(
             baseUrl,
             getAuthToken,
-            requireReactNativeWebSocket(options.WebSocketImpl),
+            resolveWebSocket(options.WebSocketImpl),
             {
               reconnect: realtime.webSocketReconnect,
               onError: options.realtime?.onError,
@@ -127,7 +148,7 @@ export function createReactNativeGoodVibesPlatform(
           createWebSocketConnector(
             baseUrl,
             getAuthToken,
-            requireReactNativeWebSocket(webSocketImpl ?? options.WebSocketImpl),
+            resolveWebSocket(webSocketImpl ?? options.WebSocketImpl),
             {
               reconnect: realtime.webSocketReconnect,
               onError: options.realtime?.onError,

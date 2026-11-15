@@ -169,7 +169,7 @@ describe('status talks to a running daemon over the remote-target convention', (
       ...baseDeps(),
       fetchImpl,
       socketFactory: factory,
-      flags: { host: '10.0.0.7', port: 4321, token: 'other-token', json: false },
+      flags: { host: 'http://10.0.0.7', port: 4321, token: 'other-token', json: false },
     });
 
     expect(result.exitCode).toBe(0);
@@ -195,6 +195,35 @@ describe('status talks to a running daemon over the remote-target convention', (
     expect(text).toContain('1 of 1 switched on');
     expect(text).toContain('master in "the workshop" of 3');
     expect(text).toContain('2 hosted by this daemon');
+  });
+
+  test('a node that fell back to reading everything, or has a fenced surface, does not just say "master"', async () => {
+    const { fetchImpl } = fakeFetch({
+      ...HEALTHY_ROUTES,
+      '/status': {
+        status: 'running',
+        version: '1.28.0',
+        cluster: {
+          enabled: true, coordination: 'ungated-fallback', role: 'master', nodeId: 'n1',
+          surfaces: [{ role: 'master' }, { role: 'fenced' }],
+        },
+      },
+    });
+    const { factory } = fakeSocketFactory({ ok: true, body: { sessions: [] } });
+
+    const result = await runStatusCommand({
+      ...baseDeps(),
+      fetchImpl,
+      socketFactory: factory,
+      flags: { host: undefined, port: undefined, token: undefined, json: false },
+    });
+
+    const text = result.lines.join('\n');
+    expect(text).not.toContain('master in "the workshop"');
+    expect(text).toContain('reading every inbound surface itself');
+    expect(text).toContain('may be answered twice');
+    expect(text).toContain('1 inbound surface fenced');
+    expect(text).toContain('until the daemon restarts');
   });
 
   test('reports uptime, receipts, the rejected version and a rollback for a local daemon', async () => {
@@ -235,7 +264,7 @@ describe('status talks to a running daemon over the remote-target convention', (
       ...baseDeps(),
       fetchImpl,
       socketFactory: factory,
-      flags: { host: '10.0.0.7', port: undefined, token: 'other', json: false },
+      flags: { host: 'http://10.0.0.7', port: undefined, token: 'other', json: false },
     });
 
     expect(result.lines.join('\n')).toContain('run this command on that machine');
@@ -261,7 +290,7 @@ describe('status talks to a running daemon over the remote-target convention', (
 
   test('one broken sub-question is a line, not a failed command', async () => {
     const { fetchImpl } = fakeFetch(HEALTHY_ROUTES, { missing: ['/api/channels/status'] });
-    const { factory } = fakeSocketFactory({ ok: false, status: 404 });
+    const { factory } = fakeSocketFactory({ ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.list', code: 'METHOD_NOT_FOUND' } });
 
     const result = await runStatusCommand({
       ...baseDeps(),

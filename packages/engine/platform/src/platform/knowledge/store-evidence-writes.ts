@@ -1,4 +1,5 @@
 import { assertHomeGraphSourceIdentityWrite } from './store-homegraph-source-selector.js';
+import { generatedProjectionIdentitySql, KnowledgeProjectionIdentityHeldError } from './store-generated-projection-selector.js';
 import { knowledgeRawRepresentation, knowledgeSourceMetadataView, prepareKnowledgeOwnedClocks, retainKnowledgePreparedRecord, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
@@ -37,11 +38,11 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       id: existing?.id ?? input.id ?? `source-${opaqueUuid()}`,
       connectorId: input.connectorId,
       sourceType: input.sourceType,
-      ...opt('title', _title),
-      ...opt('sourceUri', _sourceUri),
-      ...opt('canonicalUri', _canonicalUri),
-      ...opt('summary', _summary),
-      ...opt('description', _description),
+      ...opt('title', _title, existing?.title),
+      ...opt('sourceUri', _sourceUri, existing?.sourceUri),
+      ...opt('canonicalUri', _canonicalUri, existing?.canonicalUri),
+      ...opt('summary', _summary, existing?.summary),
+      ...opt('description', _description, existing?.description),
       tags: uniq(input.tags ?? existing?.tags),
       ...opt('folderPath', _folderPath, existing?.folderPath),
       status: input.status,
@@ -64,9 +65,25 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       ...(typeof input.lastCrawledAt === 'number' ? { lastCrawledAt: inputRaw.lastCrawledAt } : existing?.lastCrawledAt ? { lastCrawledAt: existingRaw?.lastCrawledAt } : {}) }));
 }
 
+/**
+ * The projection identity index is UNIQUE, and INSERT OR REPLACE resolves a clash by
+ * silently deleting the other row. A write under another id that carries the same
+ * scope/target tuple would erase a generated page, so it is refused instead; the
+ * projection's own row (same id) updates normally.
+ */
+function assertGeneratedProjectionIdentityFree(sqlite: Pick<SQLiteStore, 'exec'>, id: string, connectorId: string, metadata: Record<string, unknown>): void {
+  if (connectorId !== 'knowledge-projection') return;
+  const tuple = [metadata.projectionScopeKind, metadata.projectionSpaceId, metadata.targetKind, metadata.targetId];
+  if (!tuple.every((part): part is string => typeof part === 'string')) return;
+  const held = sqlite.exec(generatedProjectionIdentitySql, tuple)[0];
+  const idColumn = held?.columns.indexOf('id') ?? -1;
+  if (held && idColumn >= 0 && held.values.some((row) => row[idColumn] !== id)) throw new KnowledgeProjectionIdentityHeldError('ambiguous');
+}
+
 export function writeKnowledgeSourceRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'>, record: Omit<KnowledgeSourceRecord, 'createdAt' | 'updatedAt'> & { readonly createdAt: number | string; readonly updatedAt: number | string }): void {
     assertHomeGraphSourceIdentityWrite(sqlite, record);
     const raw = knowledgeRawRepresentation(record);
+    assertGeneratedProjectionIdentityFree(sqlite, record.id, record.connectorId, raw.metadata);
     sqlite.run(`
       INSERT OR REPLACE INTO knowledge_sources (
         id, connector_id, source_type, title, source_uri, canonical_uri, summary, description,

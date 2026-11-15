@@ -396,10 +396,20 @@ test('leftover backups from a killed run are all listed in one refusal, never re
   const again = run(); expect(again.status, again.stderr).toBe(0);
 });
 
-test('an interrupt while a Darwin library stage exists is cleaned up and does not block the retry', () => {
+test('a failure while a Darwin library stage exists is cleaned up and does not block the retry', () => {
   darwinAssets();
   const result = run(false, undefined, 'darwin', { FIXTURE_INJECT: 'chmod() { case "${2:-}" in *libsqlite3.dylib.incoming) return 1 ;; esac; command chmod "$@"; }' });
   expect(result.status).not.toBe(0);
+  const bin = join(home, 'bin');
+  expect(existsSync(join(bin, 'lib/sqlite-darwin-x64/libsqlite3.dylib.incoming'))).toBe(false);
+  expect(readdirSync(bin).filter(rollbackScope)).toEqual([]);
+  const retried = run(false, undefined, 'darwin'); expect(retried.status, retried.stderr).toBe(0);
+});
+
+test('an interrupt while a Darwin library stage exists is cleaned up and does not block the retry', () => {
+  darwinAssets();
+  const result = run(false, undefined, 'darwin', { FIXTURE_INJECT: 'chmod() { case "${2:-}" in *libsqlite3.dylib.incoming) kill -INT $$; sleep 2 ;; esac; command chmod "$@"; }' });
+  expect(result.status).toBe(130);
   const bin = join(home, 'bin');
   expect(existsSync(join(bin, 'lib/sqlite-darwin-x64/libsqlite3.dylib.incoming'))).toBe(false);
   expect(readdirSync(bin).filter(rollbackScope)).toEqual([]);

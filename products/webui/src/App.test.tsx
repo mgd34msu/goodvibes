@@ -19,6 +19,9 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+import { storeRelayPairing, getStoredRelayPairing, clearStoredRelayPairing } from './lib/relay-pairing';
+import { getActiveRoute, setActiveRoute } from './lib/relay-connection';
+
 type AuthMode = 'ok' | 'unreachable' | 'unauthorized';
 let authMode: AuthMode = 'ok';
 let hasStoredToken = true;
@@ -276,6 +279,8 @@ afterEach(() => {
   authMode = 'ok';
   hasStoredToken = true;
   healthConnection = 'connected';
+  clearStoredRelayPairing();
+  setActiveRoute('direct');
   window.history.pushState({}, '', '/');
   resetChatDeleteFixtures();
 });
@@ -376,6 +381,54 @@ describe('App: D-WEBUI-3: the health poll drives the unreachable overlay on its 
     expect(container.querySelector('.app-shell')?.hasAttribute('inert')).toBe(false);
     expect(container.textContent).toContain('Session One');
 
+    unmount();
+  });
+
+  test('Retry now re-runs the health probes instead of waiting for the next poll', async () => {
+    window.history.pushState({}, '', '/?view=sessions');
+    const { container, client, unmount } = render();
+    await flushMicrotasks();
+    flushSync(() => {
+      setHealthConnection('down');
+    });
+    await flushMicrotasks();
+    const refetched: unknown[] = [];
+    const original = client.refetchQueries.bind(client);
+    client.refetchQueries = ((filters?: { queryKey?: unknown }) => {
+      refetched.push(filters?.queryKey);
+      return original(filters as never);
+    }) as typeof client.refetchQueries;
+
+    const retry = [...container.querySelectorAll('.daemon-gate-overlay button')].find((b) => b.textContent?.includes('Retry now'));
+    flushSync(() => retry?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+    expect(refetched).toContainEqual(['daemon-health']);
+    unmount();
+  });
+
+  test('signing out also forgets a stored relay pairing and returns to the direct route', async () => {
+    storeRelayPairing({
+      protocol: 1,
+      relayUrl: 'wss://relay.example.com/ws',
+      rid: 'rid_abc123',
+      daemonPublicKey: 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD',
+    });
+    setActiveRoute('relay');
+    const { container, unmount } = render();
+    await flushMicrotasks();
+    const trigger = container.querySelector('button.shell-account') ?? document.querySelector('button.shell-account');
+    expect(trigger).toBeTruthy();
+    flushSync(() => {
+      trigger?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    await flushMicrotasks();
+    const signOut = [...document.querySelectorAll('[role="menuitem"]')].find((n) => n.textContent?.includes('Sign out'));
+    expect(signOut).toBeTruthy();
+    flushSync(() => {
+      signOut?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    await flushMicrotasks();
+    expect(getStoredRelayPairing()).toBeNull();
+    expect(getActiveRoute()).toBe('direct');
     unmount();
   });
 
@@ -511,8 +564,8 @@ describe('App: delete-means-delete, companion chat sidebar delete', () => {
     // the proof-of-gone reconcile finds it still present, the anti-pattern this brief
     // removes is trusting the optimistic hide as "deleted" here; instead the row must
     // come back and the failure must be visible.
-    expect(chatSessionsFixture.some((s) => s.id === 'c1')).toBe(true);
     expect(container.textContent).toContain('Chat One');
+    expect(container.querySelector('.banner.warning')?.textContent).toContain('Delete did not complete');
 
     unmount();
   });
@@ -534,6 +587,7 @@ describe('App: delete-means-delete, companion chat sidebar delete', () => {
     expect(chatCloseCalls).toEqual(['c1']);
     expect(chatDeleteCalls).toEqual(['c1']);
     expect(container.textContent).toContain('Chat One');
+    expect(container.querySelector('.banner.warning')?.textContent).toContain('Delete did not complete');
 
     unmount();
   });

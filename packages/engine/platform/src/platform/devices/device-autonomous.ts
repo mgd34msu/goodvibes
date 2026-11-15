@@ -39,7 +39,10 @@ export function beginDeviceRequest(owner: DeviceAutonomousOwner, grants: DeviceG
   expectedPolicy: DeviceCapabilityPolicy, expectedNode: DeviceNodeProfile, timeoutMs: number) {
   const operation = currentExternalOperationSource();
   const invalidation = new AbortController();
-  const unsubscribe = owner.onDidInvalidate?.(() => invalidation.abort()) ?? (() => {});
+  // Set only by the owner's own invalidation, never by the request deadline, so a
+  // result that arrives after the deadline can still be told apart from a revocation.
+  let invalidated = false;
+  const unsubscribe = owner.onDidInvalidate?.(() => { invalidated = true; invalidation.abort(); }) ?? (() => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     if (!operation || !owner.port?.recorder) throw new Error('Device requests require an original host source and recorded Jev owner');
@@ -56,10 +59,14 @@ export function beginDeviceRequest(owner: DeviceAutonomousOwner, grants: DeviceG
     const deadline = Date.now() + timeoutMs;
     timer = setTimeout(() => invalidation.abort(), timeoutMs); timer.unref?.();
     const signal = AbortSignal.any([invalidation.signal, ...(owner.signal ? [owner.signal] : []), ...(operation.signal ? [operation.signal] : [])]);
-    const current = (checkLedger = true) => {
+    // `afterEffect`: the phone has already acted, so running out of time is no
+    // reason to discard what it answered (the caller would repeat the effect);
+    // revocation, cancellation and policy or node changes still end the request.
+    const current = (checkLedger = true, afterEffect = false) => {
       if (closed) throw new Error('Device request owner closed');
-      signal.throwIfAborted(); operation.assertCurrent();
-      if (Date.now() >= deadline || (expiresAt !== undefined && Date.now() >= expiresAt)) throw new Error('Device authority expired');
+      if (!afterEffect || invalidated || owner.signal?.aborted || operation.signal?.aborted) signal.throwIfAborted();
+      operation.assertCurrent();
+      if (!afterEffect && (Date.now() >= deadline || (expiresAt !== undefined && Date.now() >= expiresAt))) throw new Error('Device authority expired');
       if (!isDeepStrictEqual(captureCurrentAutonomousSourceFrame(operation.sourceOf()).source, source)) throw new Error('Device original source changed');
       if (!isDeepStrictEqual(captureOwnedJson(policyOf()), policy)
         || !isDeepStrictEqual(captureOwnedJson(nodesOf().find(candidate => candidate.nodeId === nodeId) ?? null), node)) throw new Error('Device policy or node changed');

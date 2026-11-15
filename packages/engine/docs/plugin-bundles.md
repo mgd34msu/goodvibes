@@ -18,13 +18,14 @@ Import from `@goodvibes-jev/engine/platform/platform/runtime/ecosystem`.
 The plugin trust platform verifies Ed25519 signatures with the publisher's PEM public
 key. Authors keep the private key in their signing environment and sign the bytes
 returned by `pluginManifestSignaturePayload(manifest)`, exported from
-`@goodvibes-jev/engine/platform/platform/runtime/plugins`. Store the 64-byte signature
+`@goodvibes-jev/engine/platform/platform/runtime/operations`. Store the 64-byte signature
 as canonical base64 in the manifest's `signature` field.
 
 The payload includes every JSON manifest field except `signature`; object keys
 and the capability list are sorted. Entry points, hooks, descriptions, and runtime
 constraints therefore participate in verification. `validatePluginSignature`
 checks a signature, and `PluginTrustStore.trustSigned(name, manifest, publicKey)`
+(both exported from the same subpath)
 grants trust only to the matching plugin name after verification.
 
 Previously accepted HMAC signatures need to be replaced with publisher signatures;

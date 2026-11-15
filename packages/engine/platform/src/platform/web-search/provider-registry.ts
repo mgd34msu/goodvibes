@@ -57,8 +57,15 @@ export class WebSearchProviderRegistry {
       .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
   }
 
+  /**
+   * The provider a search without an id uses: the first one the owner has
+   * configured (a key, a service entry or a base url), otherwise the built-in
+   * keyless default, which is registered first.
+   */
   find(providerId?: string): WebSearchProvider | null {
     if (providerId) return this.get(providerId);
-    return [...this.providers.values()][0] ?? null;
+    const all = [...this.providers.values()];
+    const configured = all.slice(1).find((provider) => provider.descriptor?.().configured === true);
+    return configured ?? all[0] ?? null;
   }
 }

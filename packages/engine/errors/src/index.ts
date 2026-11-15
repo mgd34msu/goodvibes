@@ -1,4 +1,5 @@
 import { TRANSIENT_STATUS_CODES } from './failure-transience.js';
+import { categoryForStatus } from './failure-reading.js';
 import type {
   DaemonErrorCategory,
   DaemonErrorSource,
@@ -143,17 +144,12 @@ export interface GoodVibesErrorOptions {
 /** HTTP statuses a retry can clear; one list shared with the transience decision (failure-transience.ts). */
 export const RETRYABLE_STATUS_CODES: readonly number[] = TRANSIENT_STATUS_CODES;
 
+// One status-to-category table (categoryForStatus) serves the errors thrown by
+// the transport and the ones normalised from providers, so the same status
+// never reads as two categories. 409 Conflict and statuses with no category
+// stay 'unknown': the caller supplies one explicitly.
 function inferCategory(status?: number): ErrorCategory {
-  if (status === 400) return 'bad_request';
-  if (status === 401) return 'authentication';
-  if (status === 402) return 'billing';
-  if (status === 403) return 'authorization';
-  if (status === 404) return 'not_found';
-  if (status === 408) return 'timeout';
-  if (status === 409) return 'unknown'; // 409 Conflict, caller must supply category explicitly
-  if (status === 429) return 'rate_limit';
-  if (status !== undefined && status >= 500) return 'service';
-  return 'unknown';
+  return categoryForStatus(status) ?? 'unknown';
 }
 
 /**
@@ -590,6 +586,12 @@ export class HttpStatusError extends GoodVibesError {
   }
 }
 
+const WIRE_SOURCES: ReadonlySet<string> = new Set(['provider', 'tool', 'transport', 'config', 'permission', 'runtime', 'render', 'acp', 'unknown']);
+
+function readWireSource(value: unknown): DaemonErrorSource | undefined {
+  return typeof value === 'string' && WIRE_SOURCES.has(value) ? value as DaemonErrorSource : undefined;
+}
+
 export function isStructuredDaemonErrorBody(value: unknown): value is StructuredDaemonErrorBody {
   return typeof value === 'object' && value !== null && typeof (value as { error?: unknown }).error === 'string';
 }
@@ -619,44 +621,63 @@ export function createHttpStatusError(
   fallbackHint?: string,
 ): HttpStatusError {
   if (isStructuredDaemonErrorBody(body)) {
+    // The body comes off the wire: keep only fields of the declared type. A
+    // category outside the wire set (including the local-only 'contract'), a
+    // string where a number or boolean belongs, or a non-string label is
+    // dropped, so the category falls back to what the status implies.
+    const rawCategory: unknown = body.category;
+    const wireCategory = rawCategory !== 'contract' ? readErrorCategory(rawCategory) as DaemonErrorCategory | undefined : undefined;
+    const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+    const wireCode = typeof body.code === 'string' && body.code.length > 0 ? body.code : undefined;
+    const wireRetryAfterMs = typeof body.retryAfterMs === 'number' && Number.isFinite(body.retryAfterMs) && body.retryAfterMs >= 0
+      ? body.retryAfterMs
+      : undefined;
     // Code precedence (highest to lowest):
     //   1. Explicit code in the body (daemon-supplied)
     //   2. Category-derived code when body supplies a category (category is
     //      more semantically specific than the HTTP status in this case)
     //   3. Status-derived code as final fallback
     const structuredCode =
-      body.code
-      ?? (body.category !== undefined ? inferCodeFromCategory(body.category) : undefined)
+      wireCode
+      ?? (wireCategory !== undefined ? inferCodeFromCategory(wireCategory) : undefined)
       ?? inferCodeFromStatus(status)
       ?? 'UNKNOWN';
     return new HttpStatusError(body.error, {
       code: structuredCode,
-      category: body.category,
-      source: body.source ?? 'transport',
-      recoverable: body.recoverable,
+      category: wireCategory,
+      source: readWireSource(body.source) ?? 'transport',
+      recoverable: typeof body.recoverable === 'boolean' ? body.recoverable : undefined,
       status,
       url,
       method,
       body,
-      hint: body.hint ?? fallbackHint,
-      provider: body.provider,
-      operation: body.operation,
-      phase: body.phase,
-      requestId: body.requestId,
-      providerCode: body.providerCode,
-      providerType: body.providerType,
-      retryAfterMs: body.retryAfterMs,
+      hint: text(body.hint) ?? fallbackHint,
+      provider: text(body.provider),
+      operation: text(body.operation),
+      phase: text(body.phase),
+      requestId: text(body.requestId),
+      providerCode: text(body.providerCode),
+      providerType: text(body.providerType),
+      retryAfterMs: wireRetryAfterMs,
     });
   }
 
+  // Some routes answer `{ status, error: { code, message } }` rather than a
+  // flat `{ error: string }`; read the nested pair so the code and message the
+  // server chose survive instead of the status-derived defaults.
+  const nested = typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
+  const nestedFields = typeof nested === 'object' && nested !== null ? nested as { code?: unknown; message?: unknown } : undefined;
+  const nestedMessage = typeof nestedFields?.message === 'string' && nestedFields.message.trim() ? nestedFields.message.trim() : undefined;
+  const nestedCode = typeof nestedFields?.code === 'string' && nestedFields.code.length > 0 ? nestedFields.code : undefined;
+
   const message = typeof body === 'string' && body.trim()
     ? body.trim()
-    : `Request failed with status ${status}`;
+    : nestedMessage ?? `Request failed with status ${status}`;
 
   return new HttpStatusError(message, {
     // Explicitly inject the status-inferred code so HttpStatusError's own
     // default ('ENGINE_HTTP_STATUS_ERROR') does not suppress the specific code.
-    code: inferCodeFromStatus(status) ?? 'ENGINE_HTTP_STATUS_ERROR',
+    code: nestedCode ?? inferCodeFromStatus(status) ?? 'ENGINE_HTTP_STATUS_ERROR',
     status,
     url,
     method,

@@ -1,4 +1,4 @@
-/** UNRUN: real authenticated group traffic and controlled storage awaits. */
+/** Real authenticated group traffic and controlled storage awaits. */
 import { expect, test } from 'bun:test';
 import { createGroup, joinGroup } from '../platform/src/platform/cluster/group-operations.js';
 import { CONFIG_MESSAGE_TYPES } from '../platform/src/platform/cluster/config-replication.js';

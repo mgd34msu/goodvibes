@@ -196,9 +196,13 @@ test.each([false, true])('passport complete synchronous checks share original na
       ownership.assertCurrent();
       expect(callbacks).toBeGreaterThan(beforeCallbacks);
       // Both original authority and graph callbacks still run, with all their
-      // nested checks sharing one fresh native image for this complete boundary.
-      // The frame ends before the artifact publisher can await or write.
-      expect(frameImages.slice(before)).toEqual([1]);
+      // nested checks sharing one native image for this complete boundary: a
+      // newly opened one, or the byte-identical idle image left by the previous
+      // frame, never one image per nested check. The frame ends before the
+      // artifact publisher can await or write.
+      const images = frameImages.slice(before);
+      expect(images).toHaveLength(1);
+      expect(images[0]).toBeLessThanOrEqual(1);
     } finally { if (mutateSource) expect(callbacks).toBeGreaterThan(beforeCallbacks); }
     return originalCreate(input, ownership);
   });

@@ -5,13 +5,13 @@ import { describe, expect, test } from 'bun:test';
 import { withTestTimeout } from './_helpers/test-timeout.ts';
 import {
   createBrowserHomeAssistantPlatform,
-} from '../platform/dist/browser-homeassistant.js';
+} from '../platform/src/browser-homeassistant.ts';
 import {
   createBrowserAgentPlatform,
-} from '../platform/dist/browser-agent.js';
+} from '../platform/src/browser-agent.ts';
 import {
   createBrowserKnowledgePlatform,
-} from '../platform/dist/browser-knowledge.js';
+} from '../platform/src/browser-knowledge.ts';
 // The old platform package's exports are the engine manifest's ./platform subpaths.
 import enginePackage from '../package.json' with { type: 'json' };
 
@@ -95,13 +95,9 @@ async function bundleEntrypoint(entrypoint: string): Promise<string> {
     const produced = readdirSync(outDir).filter((name) => name.endsWith('.js'));
     expect(produced, `bun build ${entrypoint} produced no JS output:\n${diagnostics}`).toHaveLength(1);
     const bundle = readFileSync(join(outDir, produced[0]!), 'utf-8');
-    // The home assistant case below is made entirely of `not.toContain`, which
-    // an empty or truncated bundle would satisfy perfectly. The subject of
-    // those assertions is a real bundle of the whole entrypoint or they assert
-    // nothing at all, so its size is checked once, here, rather than trusted.
-    // The three real bundles are 24-31 KB.
-    expect(bundle.length, `bun build ${entrypoint} produced a suspiciously small bundle`)
-      .toBeGreaterThan(10_000);
+    // The home assistant case below is made entirely of `not.toContain`, which an empty or
+    // truncated bundle would satisfy, so require the entrypoint's own factory in the output.
+    expect(bundle, `bun build ${entrypoint} did not bundle the entrypoint's exports`).toMatch(/createBrowser\w+Platform/);
     return bundle;
   } finally {
     // Every path, including the ceiling above and a failed expect: the child is
@@ -224,12 +220,14 @@ describe('scoped browser platform entrypoints', () => {
     });
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions/chat-1/messages');
     const events: unknown[] = [];
+    const delivered = Promise.withResolvers<void>();
     const close = await platformClient.chat.events.stream('chat-1', {
       onEvent: (_eventName, payload) => {
         events.push(payload);
+        delivered.resolve();
       },
     }, { reconnect: { enabled: false } });
-    await Promise.resolve();
+    await delivered.promise;
     close();
     expect(calls.at(-1)).toBe('https://daemon.example.test/api/companion/chat/sessions/chat-1/events');
     expect(events).toEqual([{ type: 'turn.delta', sessionId: 'chat-1', turnId: 'turn-1', delta: 'Hi' }]);

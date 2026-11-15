@@ -250,12 +250,13 @@ describe('credential-owning channel callsites', () => {
         const url = `https://${surface === 'slack' ? 'hooks.slack.com/services' : 'discord.com/api/webhooks/123456789012345678'}/${CAPABILITY}?unclassified=${QUERY}`;
         const registry = services({ [`${surface}:webhookUrl`]: url });
         const strategy = surface === 'slack'
-          ? createSlackDeliveryStrategy(registry, config(), artifacts, secrets)
-          : createDiscordDeliveryStrategy(registry, config(), artifacts, secrets);
+          ? createSlackDeliveryStrategy(registry, config(), artifacts, secrets, { resolveHost: async () => [{ address: '203.0.113.40', family: 4 }] })
+          : createDiscordDeliveryStrategy(registry, config(), artifacts, secrets, { resolveHost: async () => [{ address: '203.0.113.40', family: 4 }] });
         respond = () => new Response('{}');
         const receipt = await router(strategy).deliver(request({ target: { kind: 'surface', surfaceKind: surface, ...(source === 'target' ? { address: url } : {}) } }));
         expect(calls).toHaveLength(1);
-        expect(calls[0]).toMatchObject({ url, method: 'POST' });
+        // An address from the target is pinned to its checked resolution; a configured webhook is posted as written.
+        expect(calls[0]).toMatchObject({ url: source === 'target' ? `https://203.0.113.40${new URL(url).pathname}${new URL(url).search}` : url, method: 'POST' });
         expect(JSON.parse(calls[0]!.body)).toMatchObject(surface === 'slack' ? { text: BODY } : { content: BODY });
         // Slack's direct webhook currently has no OUTBOUND_HTTP wrapper.
         // Check any emitted log as well as the independently public receipt.

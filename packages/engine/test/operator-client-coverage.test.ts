@@ -11,11 +11,11 @@
  * - client.ts lines 74-83: invoke with schema validation
  */
 import { describe, expect, test } from 'bun:test';
-import { createOperatorApiClient } from '../operator-client/dist/index.js';
+import { createOperatorApiClient } from '../operator-client/src/index.js';
 import { createOperatorRemoteClient } from '../operator-client/src/client-core.js';
-import { createHttpTransport } from '../transport-http/dist/index.js';
-import { getOperatorContract } from '../contracts/dist/index.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+import { createHttpTransport } from '../transport-http/src/index.js';
+import { getOperatorContract } from '../contracts/src/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 
@@ -86,8 +86,8 @@ describe('createOperatorRemoteClient: listOperations / getOperation', () => {
   });
 });
 
-describe('createOperatorRemoteClient: invoke throws for missing HTTP binding', () => {
-  test('invoke throws GoodVibesError with category contract when method has no http', () => {
+describe('createOperatorRemoteClient: invoke rejects for missing HTTP binding', () => {
+  test('invoke rejects with a GoodVibesError of category contract when method has no http', async () => {
     const transport = makeTransport(async () => createJsonResponse({ ok: true }));
     // Build a minimal fake contract with a method that has no http binding
     const contract = {
@@ -98,9 +98,8 @@ describe('createOperatorRemoteClient: invoke throws for missing HTTP binding', (
       },
     };
     const client = createOperatorRemoteClient(transport, contract as unknown as ReturnType<typeof getOperatorContract>);
-    // requireMethodRoute throws synchronously when method.http is null
-    expect(() => client.invoke('internal.only' as never)).toThrow(GoodVibesError);
-    const caught = (() => { try { client.invoke('internal.only' as never); } catch (e) { return e; } })();
+    // The failure arrives on the returned promise, not as a synchronous throw.
+    const caught = await client.invoke('internal.only' as never).then(() => null, (e: unknown) => e);
     expect(caught).toBeInstanceOf(GoodVibesError);
     expect((caught as GoodVibesError).category).toBe('contract');
   });
@@ -110,233 +109,6 @@ describe('createOperatorRemoteClient: invoke throws for missing HTTP binding', (
 // createOperatorRemoteClient, shorthand method coverage
 // ---------------------------------------------------------------------------
 
-describe('createOperatorRemoteClient: shorthand methods', () => {
-  test('sessions.get builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ id: 'session-1', status: 'active', messages: [] });
-      }),
-    });
-    const result = await platformClient.sessions.get('session-1');
-    expect(calls[0]).toContain('/sessions/session-1');
-    expect(result).toMatchObject({ id: 'session-1' });
-  });
-
-  test('sessions.messages.create builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ id: 'msg-1' });
-      }),
-    });
-    const result = await platformClient.sessions.messages.create('session-1', { body: 'hello' });
-    expect(calls[0]).toContain('/sessions/session-1/messages');
-    expect(result).toMatchObject({ id: 'msg-1' });
-  });
-
-  test('sessions.inputs.cancel builds path from sessionId + inputId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ cancelled: true });
-      }),
-    });
-    const result = await platformClient.sessions.inputs.cancel('session-1', 'input-1');
-    expect(calls[0]).toContain('session-1');
-    expect(calls[0]).toContain('input-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('sessions.close builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ closed: true });
-      }),
-    });
-    const result = await platformClient.sessions.close('session-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ closed: true });
-  });
-
-  test('sessions.reopen builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ reopened: true });
-      }),
-    });
-    const result = await platformClient.sessions.reopen('session-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ reopened: true });
-  });
-
-  test('tasks.get builds path from taskId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ id: 'task-1' });
-      }),
-    });
-    const result = await platformClient.tasks.get('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ id: 'task-1' });
-  });
-
-  test('tasks.cancel builds path from taskId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ cancelled: true });
-      }),
-    });
-    const result = await platformClient.tasks.cancel('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('tasks.retry builds path from taskId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ retried: true });
-      }),
-    });
-    const result = await platformClient.tasks.retry('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ retried: true });
-  });
-
-  test('approvals.claim builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ claimed: true });
-      }),
-    });
-    const result = await platformClient.approvals.claim('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ claimed: true });
-  });
-
-  test('approvals.approve builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ approved: true });
-      }),
-    });
-    const result = await platformClient.approvals.approve('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ approved: true });
-  });
-
-  test('approvals.deny builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ denied: true });
-      }),
-    });
-    const result = await platformClient.approvals.deny('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ denied: true });
-  });
-
-  test('approvals.cancel builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ cancelled: true });
-      }),
-    });
-    const result = await platformClient.approvals.cancel('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('providers.get builds path from providerId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ id: 'provider-1' });
-      }),
-    });
-    const result = await platformClient.providers.get('provider-1');
-    expect(calls[0]).toContain('provider-1');
-    expect(result).toMatchObject({ id: 'provider-1' });
-  });
-
-  test('providers.usage builds path from providerId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ usage: [] });
-      }),
-    });
-    const result = await platformClient.providers.usage('provider-1');
-    expect(calls[0]).toContain('provider-1');
-    expect(result).toMatchObject({ usage: [] });
-  });
-
-  test('control.methods.get builds path from methodId', async () => {
-    const calls: string[] = [];
-    const platformClient = createOperatorApiClient({
-      validateResponses: false,
-      baseUrl: 'http://127.0.0.1:3210',
-      fetch: withPreconnect(async (input, _init) => {
-        calls.push(String(input));
-        return createJsonResponse({ id: 'method-1' });
-      }),
-    });
-    const result = await platformClient.control.methods.get('method-1');
-    expect(calls[0]).toContain('method-1');
-    expect(result).toMatchObject({ id: 'method-1' });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // createOperatorApiClient, validateResponses option
@@ -381,22 +153,117 @@ describe('createOperatorApiClient: validateResponses option', () => {
 // These cover the arrow-function method bindings in client-core.ts
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shorthand bindings: every shorthand must reach the contract route of the
+// method id it names (HTTP method and exact URL), with its body or query.
+// ---------------------------------------------------------------------------
+
+type SrcClient = ReturnType<typeof createOperatorRemoteClient>;
+
+interface ShorthandCase {
+  /** The operator method id the shorthand is documented to invoke. */
+  readonly id: string;
+  readonly call: (client: SrcClient) => Promise<unknown>;
+  /** Path parameter values, substituted into the contract path. */
+  readonly pathParams?: Readonly<Record<string, string>>;
+  /** Request body expected on the wire (non-GET routes). */
+  readonly body?: Record<string, unknown>;
+  /** Query string expected on the wire (GET routes). */
+  readonly query?: string;
+}
+
+const SHORTHAND_CASES: readonly ShorthandCase[] = [
+  { id: 'sessions.create', call: (c) => c.sessions.create({ task: 'hello' }), body: { task: 'hello' } },
+  { id: 'sessions.turns.cancel', call: (c) => c.sessions.turns.cancel({ sessionId: 's-1', expectedTurnId: 't-1' }), pathParams: { sessionId: 's-1' }, body: { expectedTurnId: 't-1' } },
+  { id: 'sessions.get', call: (c) => c.sessions.get('s-1'), pathParams: { sessionId: 's-1' } },
+  { id: 'sessions.list', call: (c) => c.sessions.list() },
+  { id: 'sessions.messages.create', call: (c) => c.sessions.messages.create('s-1', { body: 'hi' }), pathParams: { sessionId: 's-1' }, body: { body: 'hi' } },
+  { id: 'sessions.messages.list', call: (c) => c.sessions.messages.list('s-1', { limit: 5 }), pathParams: { sessionId: 's-1' }, query: '?limit=5' },
+  { id: 'sessions.inputs.list', call: (c) => c.sessions.inputs.list('s-1'), pathParams: { sessionId: 's-1' } },
+  { id: 'sessions.inputs.cancel', call: (c) => c.sessions.inputs.cancel('s-1', 'in-1'), pathParams: { sessionId: 's-1', inputId: 'in-1' } },
+  { id: 'sessions.inputs.deliver', call: (c) => c.sessions.inputs.deliver('s-1', 'in-1'), pathParams: { sessionId: 's-1', inputId: 'in-1' } },
+  { id: 'sessions.followUp', call: (c) => c.sessions.followUp({ sessionId: 's-1', body: 'more' }), pathParams: { sessionId: 's-1' }, body: { body: 'more' } },
+  { id: 'sessions.steer', call: (c) => c.sessions.steer({ sessionId: 's-1', body: 'left' }), pathParams: { sessionId: 's-1' }, body: { body: 'left' } },
+  { id: 'sessions.close', call: (c) => c.sessions.close('s-1'), pathParams: { sessionId: 's-1' } },
+  { id: 'sessions.reopen', call: (c) => c.sessions.reopen('s-1'), pathParams: { sessionId: 's-1' } },
+  { id: 'tasks.create', call: (c) => c.tasks.create({ task: 'ship it' }), body: { task: 'ship it' } },
+  { id: 'tasks.get', call: (c) => c.tasks.get('t-1'), pathParams: { taskId: 't-1' } },
+  { id: 'tasks.list', call: (c) => c.tasks.list() },
+  { id: 'tasks.status', call: (c) => c.tasks.status({ agentId: 'a-1' }), pathParams: { agentId: 'a-1' } },
+  { id: 'tasks.cancel', call: (c) => c.tasks.cancel('t-1'), pathParams: { taskId: 't-1' } },
+  { id: 'tasks.retry', call: (c) => c.tasks.retry('t-1'), pathParams: { taskId: 't-1' } },
+  { id: 'approvals.list', call: (c) => c.approvals.list() },
+  { id: 'approvals.claim', call: (c) => c.approvals.claim('a-1'), pathParams: { approvalId: 'a-1' } },
+  { id: 'approvals.approve', call: (c) => c.approvals.approve('a-1'), pathParams: { approvalId: 'a-1' } },
+  { id: 'approvals.deny', call: (c) => c.approvals.deny('a-1'), pathParams: { approvalId: 'a-1' } },
+  { id: 'approvals.cancel', call: (c) => c.approvals.cancel('a-1'), pathParams: { approvalId: 'a-1' } },
+  { id: 'providers.list', call: (c) => c.providers.list() },
+  { id: 'providers.get', call: (c) => c.providers.get('p-1'), pathParams: { providerId: 'p-1' } },
+  { id: 'providers.usage.get', call: (c) => c.providers.usage('p-1'), pathParams: { providerId: 'p-1' } },
+  { id: 'accounts.snapshot', call: (c) => c.accounts.snapshot() },
+  { id: 'local_auth.status', call: (c) => c.localAuth.status() },
+  { id: 'control.snapshot', call: (c) => c.control.snapshot() },
+  { id: 'control.status', call: (c) => c.control.status() },
+  { id: 'control.contract', call: (c) => c.control.contract() },
+  { id: 'control.methods.list', call: (c) => c.control.methods.list() },
+  { id: 'control.methods.get', call: (c) => c.control.methods.get('sessions.get'), pathParams: { methodId: 'sessions.get' } },
+  { id: 'control.auth.current', call: (c) => c.control.auth.current() },
+  { id: 'control.auth.login', call: (c) => c.control.auth.login({ username: 'u', password: 'p' }), body: { username: 'u', password: 'p' } },
+  { id: 'control.events.catalog', call: (c) => c.control.events.catalog() },
+  { id: 'telemetry.snapshot', call: (c) => c.telemetry.snapshot() },
+  { id: 'telemetry.events.list', call: (c) => c.telemetry.events() },
+  { id: 'telemetry.errors.list', call: (c) => c.telemetry.errors() },
+  { id: 'telemetry.traces.list', call: (c) => c.telemetry.traces() },
+  { id: 'telemetry.metrics.get', call: (c) => c.telemetry.metrics() },
+  { id: 'telemetry.otlp.traces', call: (c) => c.telemetry.otlp.traces() },
+  { id: 'telemetry.otlp.logs', call: (c) => c.telemetry.otlp.logs() },
+  { id: 'telemetry.otlp.metrics', call: (c) => c.telemetry.otlp.metrics() },
+];
+
 describe('createOperatorRemoteClient (src): shorthand method bindings', () => {
-  function makeSrcClient(fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>) {
-    const transport = makeTransport(fetch);
-    const contract = getOperatorContract();
-    return createOperatorRemoteClient(transport, contract, { validateResponses: false });
+  function expectedPath(id: string, pathParams: Readonly<Record<string, string>>): { method: string; path: string } {
+    const route = getOperatorContract().operator.methods.find((method) => method.id === id)?.http;
+    if (!route) throw new Error(`contract has no HTTP route for ${id}`);
+    const path = route.path.replace(/\{(\w+)\}/g, (_match, name: string) => {
+      const value = pathParams[name];
+      if (value === undefined) throw new Error(`case for ${id} gives no value for {${name}}`);
+      return encodeURIComponent(value);
+    });
+    return { method: route.method, path };
   }
 
-  test('sessions.create invokes sessions.create route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'session-1', status: 'active' });
+  test.each(SHORTHAND_CASES.map((entry) => [entry.id, entry] as const))('%s sends the contract route of that method id', async (_id, entry) => {
+    const sent: Array<{ url: string; method: string | undefined; body: unknown }> = [];
+    const transport = makeTransport(async (input, init) => {
+      sent.push({ url: String(input), method: init?.method, body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body });
+      return createJsonResponse({});
     });
-    const result = await client.sessions.create({ task: 'hello' });
-    expect(calls[0]).toContain('/sessions');
-    expect(result).toMatchObject({ id: 'session-1', status: 'active' });
+    const client = createOperatorRemoteClient(transport, getOperatorContract(), { validateResponses: false });
+
+    await entry.call(client);
+
+    const expected = expectedPath(entry.id, entry.pathParams ?? {});
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.method).toBe(expected.method);
+    expect(sent[0]?.url).toBe(`http://127.0.0.1:3210${expected.path}${entry.query ?? ''}`);
+    if (expected.method !== 'GET' && entry.body) expect(sent[0]?.body).toEqual(entry.body);
+  });
+
+  test('the table covers every shorthand method of the client', () => {
+    // A shorthand added to the client without a row here would escape the route check above.
+    const walk = (node: unknown, prefix: string, out: string[]): void => {
+      if (typeof node === 'function') { out.push(prefix); return; }
+      if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) walk(value, prefix ? `${prefix}.${key}` : key, out);
+      }
+    };
+    const client = createOperatorRemoteClient(makeTransport(async () => createJsonResponse({})), getOperatorContract());
+    const { transport: _transport, contract: _contract, listOperations: _l, getOperation: _g, invoke: _i, stream: _s, ...groups } = client;
+    const shorthands: string[] = [];
+    walk(groups, '', shorthands);
+    // The two stream openers need a live stream.
+    const exempt = new Set(['control.events.stream', 'telemetry.stream']);
+    expect(shorthands.filter((name) => !exempt.has(name)).length).toBe(SHORTHAND_CASES.length);
   });
 
   test('sessions.create validates the shared-session shape returned by daemon routes', async () => {
@@ -468,460 +335,14 @@ describe('createOperatorRemoteClient (src): shorthand method bindings', () => {
     expect(session.metadata).toEqual({ nested: [{ value: 'legacy' }, null] });
   });
 
-  test('sessions.get builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'session-1', status: 'active' });
-    });
-    const result = await client.sessions.get('session-abc');
-    expect(calls[0]).toContain('session-abc');
-    expect(result).toMatchObject({ id: 'session-1', status: 'active' });
-  });
-
-  test('sessions.list invokes sessions.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ sessions: [], total: 0 });
-    });
-    const result = await client.sessions.list();
-    expect(calls[0]).toContain('/sessions');
-    expect(result).toMatchObject({ sessions: [], total: 0 });
-  });
-
-  test('sessions.messages.create builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'msg-1' });
-    });
-    const result = await client.sessions.messages.create('session-1', { body: 'hi' });
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ id: 'msg-1' });
-  });
-
-  test('sessions.messages.list builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ messages: [] });
-    });
-    const result = await client.sessions.messages.list('session-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ messages: [] });
-  });
-
-  test('sessions.inputs.cancel builds path from sessionId + inputId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ cancelled: true });
-    });
-    const result = await client.sessions.inputs.cancel('session-1', 'input-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('sessions.followUp invokes followUp route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.sessions.followUp({ sessionId: 's-1', body: 'continue' });
-    expect(calls[0]).toContain('follow');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('sessions.steer invokes steer route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.sessions.steer({ sessionId: 's-1', body: 'go left' });
-    expect(calls[0]).toContain('steer');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('sessions.close builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ closed: true });
-    });
-    const result = await client.sessions.close('session-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ closed: true });
-  });
-
-  test('sessions.reopen builds path from sessionId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ reopened: true });
-    });
-    const result = await client.sessions.reopen('session-1');
-    expect(calls[0]).toContain('session-1');
-    expect(result).toMatchObject({ reopened: true });
-  });
-
-  test('tasks.create invokes task creation route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ taskId: 'task-1' });
-    });
-    const result = await client.tasks.create({ task: 'do it', sessionId: 's-1' });
-    expect(calls[0]).toContain('task');
-    expect(result).toMatchObject({ taskId: 'task-1' });
-  });
-
-  test('tasks.get builds path from taskId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'task-1' });
-    });
-    const result = await client.tasks.get('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ id: 'task-1' });
-  });
-
-  test('tasks.list invokes tasks.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ tasks: [] });
-    });
-    const result = await client.tasks.list();
-    expect(calls[0]).toContain('task');
-    expect(result).toMatchObject({ tasks: [] });
-  });
-
-  test('tasks.status throws for no HTTP binding (internal-only route)', () => {
-    const client = makeSrcClient(async () => createJsonResponse({ ok: true }));
-    // tasks.status requires an `agentId` input at the type level; this test
-    // deliberately omits it (a real caller forgetting the required field) to
-    // prove the platform rejects rather than sending a malformed request.
+  test('tasks.status without its agentId is refused before any request is sent', async () => {
+    let requests = 0;
+    const client = createOperatorRemoteClient(makeTransport(async () => { requests++; return createJsonResponse({ ok: true }); }), getOperatorContract(), { validateResponses: false });
+    // agentId is required at the type level; a caller that forgets it must not send a malformed request.
     const status = client.tasks.status as unknown as () => Promise<unknown>;
-    expect(() => status()).toThrow(GoodVibesError);
-  });
-
-  test('tasks.cancel builds path from taskId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ cancelled: true });
-    });
-    const result = await client.tasks.cancel('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('tasks.retry builds path from taskId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ retried: true });
-    });
-    const result = await client.tasks.retry('task-1');
-    expect(calls[0]).toContain('task-1');
-    expect(result).toMatchObject({ retried: true });
-  });
-
-  test('approvals.list invokes approvals.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ approvals: [] });
-    });
-    const result = await client.approvals.list();
-    expect(calls[0]).toContain('approval');
-    expect(result).toMatchObject({ approvals: [] });
-  });
-
-  test('approvals.claim builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ claimed: true });
-    });
-    const result = await client.approvals.claim('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ claimed: true });
-  });
-
-  test('approvals.approve builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ approved: true });
-    });
-    const result = await client.approvals.approve('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ approved: true });
-  });
-
-  test('approvals.deny builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ denied: true });
-    });
-    const result = await client.approvals.deny('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ denied: true });
-  });
-
-  test('approvals.cancel builds path from approvalId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ cancelled: true });
-    });
-    const result = await client.approvals.cancel('approval-1');
-    expect(calls[0]).toContain('approval-1');
-    expect(result).toMatchObject({ cancelled: true });
-  });
-
-  test('providers.list invokes providers.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ providers: [] });
-    });
-    const result = await client.providers.list();
-    expect(calls[0]).toContain('provider');
-    expect(result).toMatchObject({ providers: [] });
-  });
-
-  test('providers.get builds path from providerId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'provider-1' });
-    });
-    const result = await client.providers.get('provider-1');
-    expect(calls[0]).toContain('provider-1');
-    expect(result).toMatchObject({ id: 'provider-1' });
-  });
-
-  test('providers.usage builds path from providerId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ usage: [] });
-    });
-    const result = await client.providers.usage('provider-1');
-    expect(calls[0]).toContain('provider-1');
-    expect(result).toMatchObject({ usage: [] });
-  });
-
-  test('accounts.snapshot invokes accounts.snapshot route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ capturedAt: Date.now(), providers: [], configuredCount: 0, issueCount: 0 });
-    });
-    const result = await client.accounts.snapshot();
-    expect(calls[0]).toContain('account');
-    expect(result).toMatchObject({ configuredCount: 0, issueCount: 0 });
-  });
-
-  test('localAuth.status invokes local_auth.status route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({
-        userStorePath: '/tmp/auth-users.json',
-        bootstrapCredentialPath: '/tmp/auth-bootstrap.txt',
-        bootstrapCredentialPresent: false,
-        userCount: 0,
-        sessionCount: 0,
-        users: [],
-        sessions: [],
-      });
-    });
-    const result = await client.localAuth.status();
-    expect(calls[0]).toContain('auth');
-    expect(result).toMatchObject({ userCount: 0, sessionCount: 0 });
-  });
-
-  test('control.snapshot invokes control.snapshot route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.control.snapshot();
-    expect(calls[0]).toContain('control');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('control.status invokes control.status route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ status: 'running', version: '0.19.7' });
-    });
-    const result = await client.control.status();
-    expect(calls).toHaveLength(1); // route was called
-    expect(result).toMatchObject({ version: '0.19.7' });
-  });
-
-  test('control.contract invokes control.contract route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ version: 1 });
-    });
-    const result = await client.control.contract();
-    expect(calls[0]).toContain('control');
-    expect(result).toMatchObject({ version: 1 });
-  });
-
-  test('control.methods.list invokes methods.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ methods: [] });
-    });
-    const result = await client.control.methods.list();
-    expect(calls[0]).toContain('method');
-    expect(result).toMatchObject({ methods: [] });
-  });
-
-  test('control.methods.get builds path from methodId', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ id: 'method-1' });
-    });
-    const result = await client.control.methods.get('method-1');
-    expect(calls[0]).toContain('method-1');
-    expect(result).toMatchObject({ id: 'method-1' });
-  });
-
-  test('control.auth.current invokes auth.current route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ authenticated: true, authMode: 'session', tokenPresent: false, authorizationHeaderPresent: false, sessionCookiePresent: true, principalId: 'alice', principalKind: 'user', admin: false, scopes: [], roles: [] });
-    });
-    const result = await client.control.auth.current();
-    expect(calls[0]).toContain('auth');
-    expect(result).toMatchObject({ authenticated: true, principalId: 'alice' });
-  });
-
-  test('control.auth.login invokes auth.login route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ token: 'tok', authenticated: true, username: 'alice', expiresAt: Date.now() + 60000 });
-    });
-    const result = await client.control.auth.login({ username: 'alice', password: 'pw' });
-    expect(calls).toHaveLength(1); // route was called
-    expect(result).toMatchObject({ token: 'tok', authenticated: true });
-  });
-
-  test('control.events.catalog invokes events.catalog route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ events: [] });
-    });
-    const result = await client.control.events.catalog();
-    expect(calls[0]).toContain('event');
-    expect(result).toMatchObject({ events: [] });
-  });
-
-  test('telemetry.snapshot invokes telemetry.snapshot route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.telemetry.snapshot();
-    expect(calls[0]).toContain('telemetry');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('telemetry.events invokes telemetry.events.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ events: [] });
-    });
-    const result = await client.telemetry.events();
-    expect(calls[0]).toContain('telemetry');
-    expect(result).toMatchObject({ events: [] });
-  });
-
-  test('telemetry.errors invokes telemetry.errors.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ errors: [] });
-    });
-    const result = await client.telemetry.errors();
-    expect(calls[0]).toContain('telemetry');
-    expect(result).toMatchObject({ errors: [] });
-  });
-
-  test('telemetry.traces invokes telemetry.traces.list route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ traces: [] });
-    });
-    const result = await client.telemetry.traces();
-    expect(calls[0]).toContain('telemetry');
-    expect(result).toMatchObject({ traces: [] });
-  });
-
-  test('telemetry.metrics invokes telemetry.metrics.get route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ metrics: [] });
-    });
-    const result = await client.telemetry.metrics();
-    expect(calls[0]).toContain('telemetry');
-    expect(result).toMatchObject({ metrics: [] });
-  });
-
-  test('telemetry.otlp.traces invokes telemetry.otlp.traces route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.telemetry.otlp.traces({ limit: 10 });
-    expect(calls[0]).toContain('otlp');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('telemetry.otlp.logs invokes telemetry.otlp.logs route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.telemetry.otlp.logs({ limit: 10 });
-    expect(calls[0]).toContain('otlp');
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  test('telemetry.otlp.metrics invokes telemetry.otlp.metrics route', async () => {
-    const calls: string[] = [];
-    const client = makeSrcClient(async (input) => {
-      calls.push(String(input));
-      return createJsonResponse({ ok: true });
-    });
-    const result = await client.telemetry.otlp.metrics({ limit: 10 });
-    expect(calls[0]).toContain('otlp');
-    expect(result).toMatchObject({ ok: true });
+    let caught: unknown = null;
+    try { await status(); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(GoodVibesError);
+    expect(requests).toBe(0);
   });
 });

@@ -143,6 +143,9 @@ export function newCardId(): string {
 
 const CARDS_FILE_VERSION = 1;
 
+/** The shape `newCardId` produces. */
+const GENERATED_CARD_ID = /^card-[0-9a-f]{12}$/;
+
 interface CardsFile {
   readonly version: number;
   readonly cards: readonly CardMetadata[];
@@ -203,14 +206,23 @@ function readCardsFile(filePath: string): CardsReadResult {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { status: 'unreadable', reason: 'card file has an unrecognized shape' };
   }
-  const cards = (parsed as Partial<CardsFile>).cards;
-  if (cards === undefined) {
-    // A well-formed document with no `cards` key is an empty store somebody
-    // wrote deliberately, not a damaged one. Distinct from a `cards` that is
-    // present and the wrong type, which is damage.
-    return { status: 'ok', cards: [] };
+  const document = parsed as Partial<CardsFile>;
+  // A different version is a file this build does not know how to rewrite:
+  // reading it as empty and saving it back as version 1 would drop its rows.
+  if (document.version !== undefined && document.version !== CARDS_FILE_VERSION) {
+    return { status: 'unreadable', reason: 'card file was written by a different version' };
   }
-  if (!Array.isArray(cards)) {
+  const cards = document.cards;
+  if (cards === undefined) {
+    // An empty document, or a version 1 one with no `cards` key, is an empty
+    // store somebody wrote deliberately. Any other document with no `cards`
+    // (a renamed key, say) is damage, not emptiness.
+    if (document.version === CARDS_FILE_VERSION || Object.keys(document).length === 0) {
+      return { status: 'ok', cards: [] };
+    }
+    return { status: 'unreadable', reason: 'card file has an unrecognized shape' };
+  }
+  if (!Array.isArray(cards) || cards.some((card) => typeof card !== 'object' || card === null)) {
     return { status: 'unreadable', reason: 'card file has an unrecognized shape' };
   }
   return { status: 'ok', cards: [...cards] };
@@ -396,23 +408,35 @@ export class DaemonCardStore implements CardMaterialStore {
    * and the same principle: a crash between the two leaves a visible row the
    * owner can delete again, never material with no row pointing at it. For the
    * same reason the sweep runs even when there is no row to remove, so material
-   * a crashed `create` stranded can still be cleared by asking for its id.
+   * a crashed `create` stranded can still be cleared by asking for its exact id.
    *
    * Reads the file before it deletes anything, so a damaged store refuses here
    * rather than clearing material it is about to lose the row for.
    */
   async remove(cardId: string): Promise<{ deleted: boolean; secretsCleared: number }> {
-    const cards = this.list();
-    const remaining = cards.filter((card) => card.id !== cardId);
+    const rows = this.list();
+    // Secret keys are case-folded and punctuation-collapsed, rows are matched
+    // exactly: a differently spelled id would find no row yet resolve to a live
+    // card's keys. So the sweep is for an id that has a row or is the exact
+    // shape this store generates (what a crashed `create` strands).
+    const mayHoldMaterial = rows.some((card) => card.id === cardId) || GENERATED_CARD_ID.test(cardId);
     let secretsCleared = 0;
-    for (const field of CARD_MATERIAL_FIELDS) {
-      const key = cardSecretKey(cardId, field);
-      const value = await this.secrets.get(key);
-      if (value === null) continue;
-      await this.secrets.delete(key);
-      secretsCleared += 1;
+    if (mayHoldMaterial) {
+      for (const field of CARD_MATERIAL_FIELDS) {
+        const key = cardSecretKey(cardId, field);
+        const value = await this.secrets.get(key);
+        if (value === null) continue;
+        await this.secrets.delete(key);
+        secretsCleared += 1;
+      }
     }
-    const deleted = remaining.length !== cards.length;
+    // The rows are read again here, not reused from above: a `create` or another
+    // `remove` ran during the awaits, and writing the earlier list back would
+    // drop its row or bring a deleted card back. Nothing awaits between this
+    // read and the write.
+    const fresh = this.list();
+    const remaining = fresh.filter((card) => card.id !== cardId);
+    const deleted = remaining.length !== fresh.length;
     if (deleted) writeCardsFile(this.filePath, remaining);
     return { deleted, secretsCleared };
   }

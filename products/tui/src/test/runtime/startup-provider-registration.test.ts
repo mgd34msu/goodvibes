@@ -78,19 +78,19 @@ describe('TUI startup provider registration', () => {
 
   test('still registers an explicitly configured provider without discovering hosts', () => {
     const f = fixture();
-    const before = process.env.GROQ_API_KEY;
-    process.env.GROQ_API_KEY = 'synthetic-startup-test-key';
+    const before = process.env.COHERE_API_KEY;
+    process.env.COHERE_API_KEY = 'synthetic-startup-test-key';
     const names: string[] = [];
-    f.options.providerRegistry.has = (name) => name !== 'groq';
+    f.options.providerRegistry.has = (name) => name !== 'cohere';
     f.options.providerRegistry.register = (provider) => { names.push(provider.name); };
     try {
       registerStartupProviders(f.options);
-      expect(names).toEqual(['groq']);
+      expect(names).toEqual(['cohere']);
       expect(f.registered).toEqual([]);
       expect(f.runtime.model).toBe('saved:local-model');
     } finally {
-      if (before === undefined) delete process.env.GROQ_API_KEY;
-      else process.env.GROQ_API_KEY = before;
+      if (before === undefined) delete process.env.COHERE_API_KEY;
+      else process.env.COHERE_API_KEY = before;
     }
   });
 

@@ -118,7 +118,8 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     setupDescription: 'Uses an Azure cloud account resource endpoint and account-scoped API key; usage is billed to that cloud account.',
     envVars: getBuiltinProviderEnvVars('microsoft-foundry'),
     serviceNames: ['microsoft-foundry'],
-    baseURL: 'https://example.openai.azure.com/openai/v1',
+    // Placeholder until an endpoint is configured; see builtin-registry.ts.
+    baseURL: 'https://endpoint-not-configured.invalid/openai/v1',
     defaultModel: 'gpt-5.6',
     models: ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.4', 'gpt-4.1', 'gpt-4o', 'o3-mini'],
     aliases: ['azure-openai', 'azure-openai-responses'],

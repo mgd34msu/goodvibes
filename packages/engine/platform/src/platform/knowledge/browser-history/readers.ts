@@ -446,16 +446,20 @@ export async function readBrowserKnowledgeProfile(
   options: BrowserKnowledgeReadOptions = {},
 ): Promise<BrowserKnowledgeEntry[]> {
   const kinds = new Set(options.sourceKinds ?? ['history', 'bookmark']);
-  const entries: BrowserKnowledgeEntry[] = [];
+  const limit = normalizeLimit(options.limit, 2000);
+  const history: BrowserKnowledgeEntry[] = [];
+  const bookmarks: BrowserKnowledgeEntry[] = [];
   if (kinds.has('history')) {
-    if (profile.family === 'chromium') entries.push(...await readChromiumHistory(profile, options));
-    if (profile.family === 'gecko') entries.push(...await readGeckoHistory(profile, options));
-    if (profile.family === 'webkit') entries.push(...await readWebKitHistory(profile, options));
+    if (profile.family === 'chromium') history.push(...await readChromiumHistory(profile, options));
+    if (profile.family === 'gecko') history.push(...await readGeckoHistory(profile, options));
+    if (profile.family === 'webkit') history.push(...await readWebKitHistory(profile, options));
   }
   if (kinds.has('bookmark')) {
-    if (profile.family === 'chromium') entries.push(...await readChromiumBookmarks(profile, options));
-    if (profile.family === 'gecko') entries.push(...await readGeckoBookmarks(profile, options));
-    if (profile.family === 'webkit') entries.push(...await readWebKitBookmarks(profile, options));
+    if (profile.family === 'chromium') bookmarks.push(...await readChromiumBookmarks(profile, options));
+    if (profile.family === 'gecko') bookmarks.push(...await readGeckoBookmarks(profile, options));
+    if (profile.family === 'webkit') bookmarks.push(...await readWebKitBookmarks(profile, options));
   }
-  return entries.slice(0, normalizeLimit(options.limit, 2000));
+  // The limit applies to each kind. A shared cut would let a long visit
+  // history, which comes first, crowd every bookmark out.
+  return [...history.slice(0, limit), ...bookmarks.slice(0, limit)];
 }

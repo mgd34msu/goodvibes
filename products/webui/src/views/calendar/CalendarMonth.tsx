@@ -5,11 +5,15 @@
  */
 import { useMemo } from 'react';
 import { monthGrid, toIsoDate } from '../../components/ui/DateField';
+import { eventDayKey } from './calendar-time';
+
+export { eventDayKey };
 
 export interface MonthEvent {
   id: string;
   title: string;
   start: string;
+  end?: string;
 }
 
 export interface CalendarMonthProps {
@@ -22,18 +26,12 @@ export interface CalendarMonthProps {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
-/** The local date (YYYY-MM-DD) an event starts on. */
-export function eventDayKey(start: string): string {
-  const parsed = new Date(start);
-  return Number.isNaN(parsed.getTime()) ? start.slice(0, 10) : toIsoDate(parsed);
-}
-
 export function CalendarMonth({ month, events, selectedId, onSelect }: CalendarMonthProps) {
   const days = useMemo(() => monthGrid(month), [month]);
   const byDay = useMemo(() => {
     const map = new Map<string, MonthEvent[]>();
     for (const event of events) {
-      const key = eventDayKey(event.start);
+      const key = eventDayKey(event.start, event.end);
       const list = map.get(key);
       if (list) list.push(event);
       else map.set(key, [event]);

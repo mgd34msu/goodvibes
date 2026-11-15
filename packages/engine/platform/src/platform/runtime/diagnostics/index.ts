@@ -47,6 +47,8 @@ export type {
   ActionResult,
   NavigateToEntryCallback,
   PermissionChecker,
+  ReplayRunData,
+  ReplayRunLoader,
   DiagnosticActionDispatcherConfig,
   LoadReplayPayload,
   RunPolicySimulationPayload,

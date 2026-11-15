@@ -1,0 +1,11 @@
+# Search tools (ripgrep, fd) skip these. They are generated, megabytes in size,
+# and some hold single lines of hundreds of kilobytes. Search them on purpose
+# with `rg --no-ignore` or query the JSON with `jq`.
+.goodvibes/
+packages/engine/etc/subpath-api-surface*.json
+packages/engine/etc/*.api.md
+packages/engine/docs/reference-operator.md
+packages/engine/contracts/artifacts/operator-openapi.json
+packages/engine/contracts/artifacts/operator-contract.json
+packages/engine/contracts/src/generated/operator-contract.ts
+products/tui/docs/foundation-artifacts/operator-contract.json

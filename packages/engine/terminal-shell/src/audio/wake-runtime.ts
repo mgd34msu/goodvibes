@@ -1,4 +1,5 @@
 import {
+  WAKE_SETTING_KEYS,
   WakeListener,
   describeWakeListening,
   recordVoiceDiagnostic,
@@ -66,14 +67,23 @@ export interface TerminalWakeRuntime<Kind extends WakeKind = WakeKind> {
   settings(): WakeRuntimeSettings;
   stop(): Promise<void>;
 }
+/**
+ * A listener that stopped itself (a start stall, a restart that could not load
+ * its models, an unreadable recorder failure) sits idle with the reason in
+ * `lastError`. Wake is still enabled, so that must not look like "wake off":
+ * it shows as the stopped chip until the feature is toggled.
+ */
+function stoppedWithReason(state: WakeListenerState, phase: WakeListenerState['phase']): boolean {
+  return phase === 'idle' && state.lastError !== null;
+}
 export function phaseWakeIndicator(
-  _state: WakeListenerState,
+  state: WakeListenerState,
   phase: WakeListenerState['phase'],
 ): Exclude<WakeKind, 'wake-starting' | 'wake-no-audio' | 'wake-no-microphone'> | null {
   if (phase === 'starting' || phase === 'listening') return 'wake-listening';
   if (phase === 'capturing-utterance') return 'wake-capturing';
   if (phase === 'restarting') return 'wake-restarting';
-  if (phase === 'latched') return 'wake-latched';
+  if (phase === 'latched' || stoppedWithReason(state, phase)) return 'wake-latched';
   return null;
 }
 export function liveWakeIndicator(state: WakeListenerState): WakeKind | null {
@@ -84,6 +94,7 @@ export function liveWakeIndicator(state: WakeListenerState): WakeKind | null {
   if (state.phase === 'restarting') return 'wake-restarting';
   if (state.phase === 'latched') return 'wake-latched';
   if (state.deviceBinding?.state === 'no-microphone') return 'wake-no-microphone';
+  if (stoppedWithReason(state, state.phase)) return 'wake-latched';
   return null;
 }
 /** One owned listener/transcription lifetime, with product provisioning and display policies. */
@@ -129,15 +140,25 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         detail: message,
       });
     };
-    const transcribe = async (utterance: CapturedUtterance, settings: WakeRuntimeSettings, signal: AbortSignal): Promise<void> => {
+    const transcribe = async (utterance: CapturedUtterance, startedWith: WakeRuntimeSettings, signal: AbortSignal): Promise<void> => {
       if (signal.aborted) return;
+      // Per-utterance rows follow the live config, like the status line that displays them; the listener's own rows apply on restart.
+      const live = resolve();
+      const settings: WakeRuntimeSettings = { ...startedWith, autoSubmit: live.autoSubmit, retainAudio: live.retainAudio };
       if (settings.retainAudio === 'session-temp') retainWakeClip(deps, utterance);
       if (utterance.silent) {
         deps.notify('[Wake] Heard the wake phrase but nothing above the silence floor followed it.');
         deps.render();
         return;
       }
-      const resolution = deps.resolveTranscriber();
+      let resolution: ReturnType<TerminalWakeRuntimeDeps['resolveTranscriber']>;
+      try {
+        resolution = deps.resolveTranscriber();
+      } catch (error) {
+        deps.notify(`[Wake] Could not look up a speech-to-text route: ${error instanceof Error ? error.message : String(error)}`);
+        deps.render();
+        return;
+      }
       if (!resolution.available) {
         deps.notify(`[Wake] Captured the utterance after the wake phrase but could not transcribe it: ${resolution.reason}`);
         if (policy.diagnostics)
@@ -153,19 +174,14 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
         deps.render();
         return;
       }
+      let text: string;
       try {
-        const text = (await resolution.gateway.transcribe(utteranceToAudioArtifact(utterance), { signal })).trim();
+        text = (await resolution.gateway.transcribe(utteranceToAudioArtifact(utterance), { signal })).trim();
         if (signal.aborted) return;
         if (!text.length) {
           deps.notify('[Wake] Speech-to-text returned no words for what followed the wake phrase.');
           deps.render();
           return;
-        }
-        if (settings.autoSubmit) deps.submitTurn(text);
-        else {
-          deps.writeDraft(text);
-          deps.notify(policy.draftNotice);
-          deps.render();
         }
       } catch (error) {
         if (signal.aborted) return;
@@ -181,6 +197,18 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
             configSource: "this surface's resolved speech-to-text routes",
             error: message,
           });
+        deps.render();
+        return;
+      }
+      try {
+        if (settings.autoSubmit) deps.submitTurn(text);
+        else {
+          deps.writeDraft(text);
+          deps.notify(policy.draftNotice);
+          deps.render();
+        }
+      } catch (error) {
+        deps.notify(`[Wake] The transcript was ready but could not be ${settings.autoSubmit ? 'submitted' : 'placed in the draft'}: ${error instanceof Error ? error.message : String(error)}`);
         deps.render();
       }
     };
@@ -417,9 +445,19 @@ export function createTerminalWakeRuntime<Kind extends WakeKind>(policy: {
     const apply = (): void => {
       void runtime.refresh();
     };
+    // The listener captures its rows at start, so a change to one of them restarts it. autoSubmit and retainAudio are read per utterance and indicator per status read, so they need no restart.
+    const restart = (): void => {
+      void runtime
+        .stop()
+        .catch(() => undefined)
+        .then(() => runtime.refresh());
+    };
+    const appliedLive = new Set(['voice.wake.enabled', 'voice.wake.autoSubmit', 'voice.wake.retainAudio', 'voice.wake.indicator']);
+    const restartKeys = WAKE_SETTING_KEYS.filter((key) => !appliedLive.has(key) && !key.startsWith('voice.wake.surfaces.'));
     const unsubs = [
       deps.subscribeConfig('voice.wake.enabled', apply),
       deps.subscribeConfig(`voice.wake.surfaces.${policy.surface}`, apply),
+      ...restartKeys.map((key) => deps.subscribeConfig(key, restart)),
       () => {
         void runtime.stop();
       },

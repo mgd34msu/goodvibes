@@ -140,7 +140,7 @@ describe('HttpTransport', () => {
     expect(currentAuth.scopes).toContain('read:telemetry');
 
     const providers = await transport.operator.providers.snapshot();
-    expect(providers.providerIds.length).toBeGreaterThanOrEqual(0);
+    expect(providers.providerIds.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
     expect((await transport.peer.getNodeHostContract()).basePath).toBe('/api/remote');
 
     const pair = await transport.peer.pairing.request({
@@ -161,6 +161,19 @@ describe('HttpTransport', () => {
       token: expect.objectContaining({ value: expect.stringMatching(/^gvrt_/) }),
     }));
     const verifiedPeerId = verified?.peer.id ?? '';
+
+    // The same requested id pairing again names the peer registered above: approval must be confirmed to replace it.
+    const rePair = await transport.peer.pairing.request({
+      peerKind: 'node',
+      label: 'http transport peer',
+      requestedId: 'http-transport-peer',
+      capabilities: ['invoke'],
+      commands: ['sync'],
+    });
+    await expect(transport.peer.pairing.approve(rePair.request.id, 'tester', 're-pair')).rejects.toThrow(/REMOTE_PAIR_REPLACES_PEER|existing peer/);
+    await transport.peer.pairing.approve(rePair.request.id, 'tester', 're-pair', true);
+    const reVerified = await transport.peer.pairing.verify(rePair.request.id, rePair.challenge, '10.0.0.71');
+    expect(reVerified?.peer.id).toBe(verifiedPeerId);
 
     const invoked = await transport.peer.work.invoke({
       peerId: verifiedPeerId,

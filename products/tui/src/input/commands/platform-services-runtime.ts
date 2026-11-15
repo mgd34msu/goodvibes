@@ -100,11 +100,11 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
       if (sub === 'bundle') {
         const mode = args[1];
         const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /storage bundle ${mode} <path>`);
+        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
+          ctx.print(`Usage: /storage bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
           return;
         }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
         if (mode === 'export') {
           const bundle: SecureStorageBundle = {
             version: 1,
@@ -158,11 +158,11 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
       if (sub === 'bundle') {
         const mode = args[1];
         const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /helpers bundle ${mode} <path>`);
+        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
+          ctx.print(`Usage: /helpers bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
           return;
         }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
         if (mode === 'export') {
           const bundle: IntegrationHelperBundle = {
             version: 1,
@@ -218,11 +218,11 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
       if (sub === 'bundle') {
         const mode = args[1];
         const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /deeplink bundle ${mode} <path>`);
+        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
+          ctx.print(`Usage: /deeplink bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
           return;
         }
-        const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+        const targetPath = shellPaths.resolveWorkspacePath(pathArg);
         if (mode === 'export') {
           const bundle: DeepLinkBundle = {
             version: 1,

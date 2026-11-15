@@ -1,8 +1,10 @@
 import type { WalkDirOptions } from '../../utils/walk-dir.js';
 import { assertCapturedToolReadAccess, assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
-import { existsSync, readdirSync, type Dirent } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
+import { isBuiltin } from 'node:module';
+import { unifiedDiff } from '../../state/file-cache.js';
 import { CodeIntelligence } from '../../intelligence/facade.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Candidate } from '@goodvibes-jev/judgment';
@@ -16,6 +18,8 @@ import {
 } from '../batteries/test-of-source.js';
 import type { AnalyzeInput, ExportedSymbol } from './types.js';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
+
+import { listProjectEnvFiles } from './scan-findings.js';
 
 export { runPermissions, runSecurity } from './scan-findings.js';
 import {
@@ -31,8 +35,7 @@ import {
   readJsonFile,
   readTextFile,
   resolveRelativeImport,
-  resolveScanRoot,
-  validatePath,
+  resolveInsideRoot,
 } from './shared.js';
 
 function extractExportedSymbols(content: string): Array<{ name: string; kind: string; line: number }> {
@@ -87,18 +90,22 @@ async function collectExportedSymbols(files: string[], intelligence: CodeIntelli
   return exported;
 }
 
-export async function runImpact(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
+export async function runImpact(
+  input: AnalyzeInput,
+  projectRoot: string,
+  walkOptions: WalkDirOptions = {},
+  pastDeadline?: () => boolean,
+): Promise<Record<string, unknown>> {
   const targetFiles = input.files ?? [];
   if (targetFiles.length === 0) {
     return { error: 'impact mode requires at least one file in files[]' };
   }
 
   const deadline = Date.now() + MAX_SCAN_MS;
+  const expired = pastDeadline ?? (() => Date.now() > deadline);
   const intelligence = new CodeIntelligence({});
   const exportedNames = await collectExportedSymbols(
-    targetFiles
-      .map((rawFile) => validatePath(rawFile, projectRoot))
-      .filter((resolved): resolved is string => typeof resolved === 'string'),
+    targetFiles.map((rawFile) => resolveInsideRoot(rawFile, projectRoot)),
     intelligence,
   );
 
@@ -106,13 +113,16 @@ export async function runImpact(input: AnalyzeInput, projectRoot: string, walkOp
     return { affected_files: [], exported_names: [], message: 'No exported symbols found in target files' };
   }
 
-  const allProjectFiles = await collectTextFiles(projectRoot, MAX_SCAN_FILES, deadline, walkOptions);
+  const unreadable: string[] = [];
+  const allProjectFiles = await collectTextFiles(projectRoot, MAX_SCAN_FILES, deadline, walkOptions, unreadable);
   const targetSet = new Set(exportedNames.map((e) => e.file));
   const affected = new Map<string, Array<{ name: string; line: number }>>();
+  // A scan cut short lists only the files read before the cut, so the result must not read as complete.
+  let stopped = false;
 
   for (const file of allProjectFiles) {
     if (targetSet.has(file)) continue;
-    if (Date.now() > deadline) break;
+    if (expired()) { stopped = true; break; }
 
     const content = await readTextFile(file);
     if (content === null) continue;
@@ -139,6 +149,8 @@ export async function runImpact(input: AnalyzeInput, projectRoot: string, walkOp
     })),
     total_affected: affected.size,
     changes: input.changes ?? null,
+    ...(stopped ? { stopped_by_deadline: true } : {}),
+    ...(unreadable.length > 0 ? { unreadable_files: unreadable.map((file) => relative(projectRoot, file)) } : {}),
   };
 }
 
@@ -146,12 +158,23 @@ interface DepGraph {
   [file: string]: string[];
 }
 
-async function buildDepGraph(files: string[], projectRoot: string): Promise<DepGraph> {
+/** The package a bare import specifier names, or null for a relative path, a built-in or a malformed scope. */
+function packageOfSpecifier(specifier: string): string | null {
+  if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('#')) return null;
+  if (specifier.startsWith('node:') || specifier.startsWith('bun:') || specifier === 'bun' || isBuiltin(specifier)) return null;
+  const parts = specifier.split('/');
+  if (specifier.startsWith('@')) return parts[1] ? `${parts[0]!}/${parts[1]}` : null;
+  return parts[0] || null;
+}
+
+async function buildDepGraph(files: string[], projectRoot: string): Promise<{ graph: DepGraph; packages: Set<string> }> {
   const graph: DepGraph = {};
+  const packages = new Set<string>();
   for (const file of files) {
+    const key = relative(projectRoot, file);
     const content = await readTextFile(file);
     if (content === null) {
-      graph[file] = [];
+      graph[key] = [];
       continue;
     }
 
@@ -162,13 +185,15 @@ async function buildDepGraph(files: string[], projectRoot: string): Promise<DepG
         imports.push(relative(projectRoot, resolved));
       } else {
         imports.push(specifier);
+        const pkg = packageOfSpecifier(specifier);
+        if (pkg) packages.add(pkg);
       }
     }
 
-    graph[relative(projectRoot, file)] = [...new Set(imports)];
+    graph[key] = [...new Set(imports)];
   }
 
-  return graph;
+  return { graph, packages };
 }
 
 function detectCycles(graph: DepGraph): string[][] {
@@ -191,7 +216,8 @@ function detectCycles(graph: DepGraph): string[][] {
     path.push(node);
 
     for (const dep of graph[node] ?? []) {
-      if (dep in graph) {
+      // Own keys only: a package named `constructor` is not a graph node.
+      if (Object.hasOwn(graph, dep)) {
         dfs(dep, path);
       }
     }
@@ -210,7 +236,7 @@ function detectCycles(graph: DepGraph): string[][] {
 export async function runDependencies(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
   const submode = input.submode ?? 'analyze';
   const targetFiles = await collectInputFiles(input.files, projectRoot, { expandDirectories: true, walkOptions });
-  const graph = await buildDepGraph(targetFiles, projectRoot);
+  const { graph, packages } = await buildDepGraph(targetFiles, projectRoot);
 
   if (submode === 'analyze') {
     return { graph, file_count: targetFiles.length };
@@ -226,65 +252,79 @@ export async function runDependencies(input: AnalyzeInput, projectRoot: string, 
   }
 
   if (submode === 'upgrade') {
-    const externals = new Set<string>();
-    for (const deps of Object.values(graph)) {
-      for (const dep of deps) {
-        if (!dep.startsWith('.') && !dep.startsWith('/')) {
-          const parts = dep.split('/');
-          const pkg = dep.startsWith('@') ? `${parts[0]!}/${parts[1]!}` : parts[0]!;
-          if (pkg) externals.add(pkg);
-        }
-      }
-    }
-    return { packages: Array.from(externals).sort(), count: externals.size };
+    // The external packages the scanned files import. No version is checked here; mode `upgrade` does that.
+    return { packages: Array.from(packages).sort(), count: packages.size };
   }
 
   return { error: `Unknown dependencies submode: ${submode}` };
 }
 
-export async function runDeadCode(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
+export async function runDeadCode(
+  input: AnalyzeInput,
+  projectRoot: string,
+  walkOptions: WalkDirOptions = {},
+  pastDeadline?: () => boolean,
+): Promise<Record<string, unknown>> {
   const deadline = Date.now() + MAX_SCAN_MS;
+  const expired = pastDeadline ?? (() => Date.now() > deadline);
   const intelligence = new CodeIntelligence({});
-  const scanRoot = input.files && input.files.length > 0 ? resolve(projectRoot, input.files[0]!) : projectRoot;
+  const scanRoot = input.files && input.files.length > 0 ? resolveInsideRoot(input.files[0]!, projectRoot) : projectRoot;
 
-  const allFiles = await collectTextFiles(scanRoot, MAX_SCAN_FILES, deadline, walkOptions);
+  const unreadable: string[] = [];
+  const allFiles = await collectTextFiles(scanRoot, MAX_SCAN_FILES, deadline, walkOptions, unreadable);
   const exports = await collectExportedSymbols(allFiles, intelligence);
 
   const fileContentCache = new Map<string, string>();
+  // Every file must be read for "no reference" to mean anything. A file left unread may hold the reference.
+  let referencesComplete = true;
   for (const file of allFiles) {
-    if (Date.now() > deadline) break;
+    if (expired()) { referencesComplete = false; break; }
     const content = await readTextFile(file);
     if (content !== null) fileContentCache.set(file, content);
   }
 
   const dead: Array<{ name: string; file: string; line: number }> = [];
+  const unverified: Array<{ name: string; file: string; line: number }> = [];
   for (const exp of exports) {
-    if (Date.now() > deadline) break;
     let hasReference = false;
+    let searched = referencesComplete;
 
-    for (const file of allFiles) {
-      if (file === exp.file) continue;
-      if (Date.now() > deadline) break;
+    if (!expired()) {
+      for (const file of allFiles) {
+        if (file === exp.file) continue;
+        if (expired()) { searched = false; break; }
 
-      const content = fileContentCache.get(file);
-      if (content === undefined) continue;
+        const content = fileContentCache.get(file);
+        if (content === undefined) continue;
 
-      const nameRegex = new RegExp(`\\b${escapeRegex(exp.name)}\\b`);
-      if (nameRegex.test(content)) {
-        hasReference = true;
-        break;
+        const nameRegex = new RegExp(`\\b${escapeRegex(exp.name)}\\b`);
+        if (nameRegex.test(content)) {
+          hasReference = true;
+          break;
+        }
       }
+    } else {
+      searched = false;
     }
 
-    if (!hasReference) {
-      dead.push({ name: exp.name, file: relative(projectRoot, exp.file), line: exp.line });
-    }
+    if (hasReference) continue;
+    // Only an export whose whole search finished is dead; the rest are unknown, never reported dead.
+    const entry = { name: exp.name, file: relative(projectRoot, exp.file), line: exp.line };
+    (searched ? dead : unverified).push(entry);
   }
 
+  const stopped = unverified.length > 0 || !referencesComplete;
   return {
     dead_exports: dead,
     total_exports: exports.length,
     dead_count: dead.length,
+    ...(stopped ? {
+      stopped_by_deadline: true,
+      unverified_count: unverified.length,
+      unverified_exports: unverified.slice(0, 50),
+      unverified_note: 'These exports found no reference in the part of the tree read before the scan limit; they are not confirmed dead.',
+    } : {}),
+    ...(unreadable.length > 0 ? { unreadable_files: unreadable.map((file) => relative(projectRoot, file)) } : {}),
   };
 }
 
@@ -376,7 +416,7 @@ export async function runSurface(input: AnalyzeInput, projectRoot: string): Prom
 
   if (input.files && input.files.length > 0) {
     for (const f of input.files) {
-      const resolved = resolve(projectRoot, f);
+      const resolved = resolveInsideRoot(f, projectRoot);
       try {
         const info = await stat(resolved);
         if (info.isDirectory()) {
@@ -432,86 +472,39 @@ export async function runPreview(input: AnalyzeInput, projectRoot: string): Prom
     return { error: 'preview mode requires find string' };
   }
 
-  const filePath = resolve(projectRoot, input.files[0]!);
+  const filePath = resolveInsideRoot(input.files[0]!, projectRoot);
   const relPath = relative(projectRoot, filePath);
   const findStr = input.find;
   const replaceStr = input.replace ?? '';
 
+  // A denial of the file's access propagates as the call's own refusal, like the sibling
+  // tools; only a genuine read failure is reported inside the result.
+  await assertCapturedToolReadAccess(filePath);
   let original: string;
   try {
-    original = (await assertCapturedToolReadAccess(filePath), await Bun.file(filePath).text());
+    original = await Bun.file(filePath).text();
   } catch {
     return { error: `Cannot read file: ${relPath}` };
   }
 
+  if (findStr === '') {
+    return { error: 'preview mode requires a non-empty find string' };
+  }
   if (!original.includes(findStr)) {
     return { error: `String not found in ${relPath}`, find: findStr };
   }
 
-  const modified = original.replace(findStr, replaceStr);
-  const diff = generateUnifiedDiff(relPath, original, modified);
+  // A replacer function keeps `$&`, `$1` and `$$` in the replacement literal, as the edit tool writes them.
+  const modified = original.replace(findStr, () => replaceStr);
+  const diff = unifiedDiff(original, modified, relPath);
 
   return {
     file: relPath,
     find: findStr,
     replace: replaceStr,
     diff,
-    changed_lines: diff.split('\n').filter((l) => l.startsWith('+') || l.startsWith('-')).length,
+    changed_lines: diff.split('\n').slice(2).filter((l) => l.startsWith('+') || l.startsWith('-')).length,
   };
-}
-
-function generateUnifiedDiff(filename: string, before: string, after: string): string {
-  const beforeLines = before.split('\n');
-  const afterLines = after.split('\n');
-
-  const header = `--- ${filename}\n+++ ${filename} (modified)\n`;
-  const hunks: string[] = [];
-  let i = 0;
-  let j = 0;
-
-  while (i < beforeLines.length || j < afterLines.length) {
-    if (beforeLines[i] === afterLines[j]) {
-      i++;
-      j++;
-      continue;
-    }
-
-    const hunkStartI = i;
-    const hunkStartJ = j;
-    const contextLines = 3;
-    const changed: string[] = [];
-
-    while (i < beforeLines.length || j < afterLines.length) {
-      if (i < beforeLines.length && j < afterLines.length && beforeLines[i] === afterLines[j]) {
-        let match = 0;
-        while (
-          i + match < beforeLines.length &&
-          j + match < afterLines.length &&
-          beforeLines[i + match] === afterLines[j + match] &&
-          match < contextLines
-        ) {
-          match++;
-        }
-        if (match >= contextLines) break;
-      }
-
-      if (i < beforeLines.length && beforeLines[i] !== afterLines[j]) {
-        changed.push(`-${beforeLines[i]}`);
-        i++;
-      } else if (j < afterLines.length) {
-        changed.push(`+${afterLines[j]}`);
-        j++;
-      }
-    }
-
-    if (changed.length > 0) {
-      const hunk =
-        `@@ -${hunkStartI + 1},${i - hunkStartI} +${hunkStartJ + 1},${j - hunkStartJ} @@\n` + changed.join('\n');
-      hunks.push(hunk);
-    }
-  }
-
-  return header + hunks.join('\n');
 }
 
 const ENV_TEMPLATE_SITE = 'tools.analyze.env-template';
@@ -521,16 +514,7 @@ const TEST_GROUP_CONCURRENCY = 4;
 
 export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
   // The dotenv convention names its files `.env` and `.env.<suffix>`; every such file at the root is audited.
-  let rootEntries: Dirent[] = [];
-  try {
-    rootEntries = readdirSync(projectRoot, { withFileTypes: true });
-  } catch {
-    rootEntries = [];
-  }
-  const envNames = rootEntries
-    .filter((entry) => entry.isFile() && (entry.name === '.env' || entry.name.startsWith('.env.')))
-    .map((entry) => entry.name)
-    .sort();
+  const envNames = listProjectEnvFiles(projectRoot);
   const found: Array<{ name: string; keys: string[]; variables: Array<{ key: string; blank: boolean }> }> = [];
 
   for (const name of envNames) {
@@ -690,7 +674,7 @@ export async function runTestFind(input: AnalyzeInput, projectRoot: string, walk
   }> = [];
 
   for (const srcFile of sourceFiles) {
-    const source = resolve(projectRoot, srcFile);
+    const source = resolveInsideRoot(srcFile, projectRoot);
     const candidates = importing.flatMap(({ file, lines, imports }) => {
       const importLines = imports.filter(({ target }) => target === source).map(({ line }) => lines[line - 1] ?? '');
       return file !== source && importLines.length > 0

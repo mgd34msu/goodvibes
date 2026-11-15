@@ -1,5 +1,5 @@
-/** Regression source authored during coding; execution deferred. */
-import { afterEach, expect, test } from 'bun:test';
+/** Typed local restriction refusals and the extraction owner's ports. */
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { assertKnowledgeRestriction, createKnowledgeExtractionOwner } from '../platform/src/platform/knowledge/extraction-ownership.js';
@@ -13,7 +13,8 @@ import { KnowledgeGeneratedFactSupportHeldError } from '../platform/src/platform
 import { KnowledgeFactReadSetStaleError } from '../platform/src/platform/knowledge/semantic/fact-quality.js';
 import { KnowledgeRepairFactUsefulnessHeldError } from '../platform/src/platform/knowledge/semantic/repair-usefulness/types.js';
 
-const previous = installJudgmentPort(undefined);
+let previous: ReturnType<typeof installJudgmentPort>;
+beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
 const text = 'The reference manual describes the original device controls.';
 

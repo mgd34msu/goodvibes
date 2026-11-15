@@ -166,6 +166,7 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
         filePicker: State['filePicker'];
         prompt: State['prompt'];
         cursorPos: State['cursorPos'];
+        modalStack: State['modalStack'];
         imageRegistry: State['imageRegistry'];
         nextImageId: State['nextImageId'];
         requestRender: State['requestRender'];
@@ -182,6 +183,7 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       value: {
         blockActionsMenu: State['blockActionsMenu'];
         executeBlockAction: State['executeBlockAction'];
+        modalStack: State['modalStack'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
       },
@@ -384,6 +386,7 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       filePicker: state.filePicker,
       prompt: state.prompt,
       cursorPos: state.cursorPos,
+      modalStack: state.modalStack,
       imageRegistry: state.imageRegistry,
       nextImageId: state.nextImageId,
       requestRender: state.requestRender,
@@ -408,6 +411,7 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
         {
           blockActionsMenu: state.blockActionsMenu,
           executeBlockAction: state.executeBlockAction,
+          modalStack: state.modalStack,
           requestRender: state.requestRender,
           handleEscape: state.handleEscape,
         },

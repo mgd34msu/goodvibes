@@ -56,10 +56,43 @@ export interface McpHttpConnectionOptions {
   readonly clientCapabilities: Record<string, unknown>;
   readonly timeoutMs: number;
   readonly fetchImpl?: typeof fetch | undefined;
+  /** Headers sent on every request, typically `Authorization`; a protocol header of the same name wins. */
+  readonly headers?: Readonly<Record<string, string>> | undefined;
   readonly handlers?: McpHttpServerMessageHandlers | undefined;
 }
 
 const nativeApply = Reflect.apply;
+const SESSION_CLOSE_TIMEOUT_MS = 5_000;
+/** A JSON-RPC answer larger than this is refused rather than buffered without limit. */
+const MAX_JSON_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return response.json();
+  // A stalled body keeps its read pending; cancelling on abort is what releases the stream.
+  const release = () => void reader.cancel().catch(() => undefined);
+  signal.addEventListener('abort', release, { once: true });
+  try {
+    return await readJsonText(reader);
+  } finally { signal.removeEventListener('abort', release); }
+}
+
+async function readJsonText(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<unknown> {
+  const decoder = new TextDecoder();
+  let text = '';
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_JSON_RESPONSE_BYTES) {
+      void reader.cancel().catch(() => undefined);
+      throw new Error(`MCP response body exceeds ${MAX_JSON_RESPONSE_BYTES} bytes`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return JSON.parse(text + decoder.decode());
+}
 function applyNative<Args extends unknown[], Result>(method: (...args: Args) => Result, receiver: unknown, args: Args): Result {
   return nativeApply(method, receiver, args);
 }
@@ -124,6 +157,8 @@ export class McpHttpConnection {
   private nextId = 1;
   private sessionEpoch = 0;
   private readonly lifetime = new AbortController();
+  /** The in-flight replacement of an expired legacy session, shared by every request that finds it expired. */
+  #renewing: Promise<void> | undefined;
 
   readonly #catalogOptions: McpHttpConnectionOptions;
   readonly #handlers: McpHttpServerMessageHandlers | undefined;
@@ -222,6 +257,16 @@ export class McpHttpConnection {
     return this.negotiateLegacy();
   }
 
+  private renewSession(expired: string): Promise<void> {
+    if (this.sessionId !== expired) return this.#renewing ?? Promise.resolve();
+    this.#renewing ??= (async () => {
+      this.sessionId = null; this.sessionEpoch++;
+      try { await this.negotiateLegacy(); }
+      finally { this.#renewing = undefined; }
+    })();
+    return this.#renewing;
+  }
+
   private async negotiateLegacy(): Promise<McpNegotiatedProtocol> {
     const requested = MCP_LEGACY_REVISIONS[0];
     const result = await this.postAndParse('initialize', {
@@ -242,6 +287,7 @@ export class McpHttpConnection {
 
   /** Send a request and return its JSON-RPC result. */
   async request(method: string, params: unknown, extraHeaders?: Record<string, string>, operation?: ExternalOperationSource, beforeSend?: () => void): Promise<unknown> {
+    if (this.#renewing) await this.#renewing.catch(() => {});
     const negotiated = this.negotiatedProtocol;
     if (!negotiated) throw new Error(`MCP server '${this.options.serverName}': not connected`);
     const finalParams = negotiated.era === 'modern'
@@ -279,9 +325,11 @@ export class McpHttpConnection {
     this.sessionEpoch++;
     if (this.sessionId) {
       try {
+        // Bounded: a server that never answers must not stall a reload or shutdown.
         await this.fetchImpl(this.options.url, {
           method: 'DELETE',
-          headers: { 'Mcp-Session-Id': this.sessionId },
+          headers: this.withConfiguredHeaders({ 'Mcp-Session-Id': this.sessionId }),
+          signal: AbortSignal.timeout(SESSION_CLOSE_TIMEOUT_MS),
         });
       } catch {
         // Session termination is best-effort; the server may not support DELETE.
@@ -322,6 +370,15 @@ export class McpHttpConnection {
       if (this.sessionId) headers['Mcp-Session-Id'] = this.sessionId;
     }
     if (input.extraHeaders) Object.assign(headers, input.extraHeaders);
+    return this.withConfiguredHeaders(headers);
+  }
+
+  /** Configured headers fill in around the protocol's own; the protocol never loses a header to a same-named (any case) configured one. */
+  private withConfiguredHeaders(headers: Record<string, string>): Record<string, string> {
+    const taken = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
+    for (const [name, value] of Object.entries(this.options.headers ?? {})) {
+      if (!taken.has(name.toLowerCase())) headers[name] = value;
+    }
     return headers;
   }
 
@@ -337,6 +394,7 @@ export class McpHttpConnection {
     const timer = this.options.timeoutMs > 0 ? setTimeout(() => controller.abort(new Error(`MCP request '${method}' timed out`)), this.options.timeoutMs) : undefined;
     timer?.unref?.();
     let response: Response | undefined;
+    const sessionAtSend = this.sessionId;
     try {
       response = await applyNative(McpHttpConnection.#post, this, [body, { ...options, method, params, signal }]);
 
@@ -344,7 +402,13 @@ export class McpHttpConnection {
         throw new Error(`MCP server '${this.options.serverName}': request '${method}' was accepted as a notification (202) instead of answered`);
       }
       if (!response.ok) {
-        const errorBody = await awaitPermission(() => response!.json(), signal).catch(() => { signal.throwIfAborted(); return null; });
+        // A 404 on a session id means the session ended, whatever the body says: reference servers
+        // answer it with a JSON-RPC "Session not found" error, which must not mask the renewal.
+        if (response.status === 404 && sessionAtSend && options.era === 'legacy' && !options.initialize) {
+          await this.renewSession(sessionAtSend);
+          throw new Error(`MCP server '${this.options.serverName}': its session expired (HTTP 404 for '${method}'); a new session was established, so retry the request`);
+        }
+        const errorBody = await awaitPermission(() => readBoundedJson(response!, signal), signal).catch(() => { signal.throwIfAborted(); return null; });
         const rpcError = parseJsonRpcError(errorBody);
         if (rpcError) throw new McpRpcError(rpcError.code, rpcError.message, rpcError.data);
         throw new Error(`MCP server '${this.options.serverName}': HTTP ${response.status} for '${method}'`);
@@ -356,10 +420,13 @@ export class McpHttpConnection {
       if (contentType.includes('text/event-stream')) {
         return await applyNative(McpHttpConnection.#readSseResponse, this, [response, id, method, options.operation, signal]);
       }
-      const parsed: unknown = await awaitPermission(() => response!.json(), signal);
-      options.operation?.assertCurrent();
+      const parsed: unknown = await awaitPermission(() => readBoundedJson(response!, signal), signal);
       return applyNative(McpHttpConnection.#resolveJsonRpcResponse, this, [parsed, method]);
     } catch (error) {
+      if (signal.aborted && !this.lifetime.signal.aborted && options.era === 'legacy' && !options.initialize) {
+        // Timed out or aborted while the server may still be working: say so, so a slow write is not left running.
+        void this.notify('notifications/cancelled', { requestId: id, reason: 'request timed out or was aborted' });
+      }
       signal.throwIfAborted();
       throw error;
     } finally {

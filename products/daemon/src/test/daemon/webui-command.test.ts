@@ -269,6 +269,25 @@ describe('webui disable and status', () => {
     }
   });
 
+  test('disable withdraws the web surface so status --json stops reporting it enabled', () => {
+    const config = fakeConfig({ 'controlPlane.webui.serve': true });
+    const deps = { configManager: config.manager, probeStableHost: loopbackProbe };
+    expect(runWebuiCommand(['disable'], deps).exitCode).toBe(0);
+    expect(config.values['web.enabled']).toBe(false);
+    const status = runWebuiCommand(['status', '--json'], deps);
+    expect(JSON.parse(status.lines[0]!).enabled).toBe(false);
+  });
+
+  test.each([
+    ['disable', '--loopback'], ['disable', '--lan'], ['status', '--lan'], ['status', '--loopback'],
+    ['disable', '--bundle-dir', '/fixture/bundle'], ['status', '--bundle-dir=/fixture/bundle'],
+  ].map((args) => ({ args })))('refuses a flag the subcommand would silently ignore: %j', ({ args }) => {
+    const config = fakeConfig({ 'controlPlane.webui.serve': true });
+    const result = runWebuiCommand(args, { configManager: config.manager, probeStableHost: loopbackProbe });
+    expect(result.exitCode).toBe(2);
+    expect(config.writes).toEqual([]);
+  });
+
   test('status with serving off says so and names the command that turns it on', () => {
     const config = fakeConfig();
     const result = runWebuiCommand(['status'], {

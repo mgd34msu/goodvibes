@@ -215,6 +215,9 @@ export function parseAutonomyScheduleArgs(args: readonly string[], options: { re
   if (!successCriteria) errors.push('Success criteria are required: use --success-criteria <what a good run reports or produces>.');
   if (options.requireExplicitUserRequest !== false && !explicitUserRequest) errors.push('Explicit user request is required: use --explicit-user-request <authorizing request>.');
   if (!schedule) errors.push('Schedule is required: use --cron <expr>, --every <interval>, or --at <iso-time>.');
+  if (timezone && schedule && schedule.kind !== 'cron') {
+    errors.push(`--timezone only applies to --cron schedules; a --${schedule.kind} schedule would ignore it. Remove --timezone or use --cron.`);
+  }
   const deliveryError = validateDeliveryTargets(deliveryTargets, 'autonomous schedule command');
   if (deliveryError) errors.push(deliveryError);
   return { task, successCriteria, schedule, deliveryTargets, name, timezone, provider, model, enabled, yes, explicitUserRequest, errors };

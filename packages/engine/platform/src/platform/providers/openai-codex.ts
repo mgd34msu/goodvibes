@@ -12,6 +12,7 @@ import type {
 import type { ToolCall, ToolDefinition } from '../types/tools.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { refreshOpenAISubscriptionAfterRejection, resolveFreshOpenAIAccessToken } from '../config/subscription-auth.js';
 import { arch, platform, release } from 'node:os';
 import type { SubscriptionManager } from '../config/subscriptions.js';
@@ -20,7 +21,7 @@ import { parseRateLimitHeaders } from './rate-limit-headers.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { mapCodexStopReason } from './stop-reason-maps.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
-import { parseToolCallArguments } from './tool-formats.js';
+import { toolCallArgumentFields } from './tool-formats.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
 import { resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
@@ -188,13 +189,19 @@ function buildErrorMessage(status: number, body: string): string {
   return `OpenAI Codex API error ${status}: ${body}`;
 }
 
+/**
+ * `sessionId` is the prompt-cache key and `session_id` header. A caller that
+ * makes several requests of one conversation passes the same value so the
+ * backend can reuse the cached prefix; without it each call gets its own.
+ */
 export async function chatWithOpenAICodex(
   accessToken: string,
   params: ChatRequest,
+  sessionId: string = crypto.randomUUID(),
 ): Promise<ChatResponse> {
+  const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
   return withRetry(async () => {
       const accountId = extractAccountId(accessToken);
-      const sessionId = crypto.randomUUID();
       const instructions = params.systemPrompt?.trim() || 'You are a helpful assistant.';
       const model = normalizeOpenAIModel(params.model);
       const body = {
@@ -242,8 +249,10 @@ export async function chatWithOpenAICodex(
 
       if (!response.ok) {
         const errorBody = await response.text();
+        const retryAfterMs = parseRateLimitHeaders(response.headers)?.retryAfterMs;
         throw new ProviderError(buildErrorMessage(response.status, errorBody), {
           statusCode: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
           provider: OPENAI_CODEX_PROVIDER_NAME,
           operation: 'chat',
           phase: 'request',
@@ -271,6 +280,7 @@ export async function chatWithOpenAICodex(
         let outputTokens = 0;
         let cacheReadTokens = 0;
         let status = 'in_progress';
+        let incompleteReason: string | undefined;
 
         const handleDataPayload = (payload: string): void => {
           const fragments = payload
@@ -298,7 +308,7 @@ export async function chatWithOpenAICodex(
               };
               toolStarts.set(callId, partial);
               if (itemId) toolItemIds.set(itemId, callId);
-              params.onDelta?.({ toolCalls: [partial] });
+              onDelta?.({ toolCalls: [partial] });
             }
             return;
           }
@@ -307,7 +317,7 @@ export async function chatWithOpenAICodex(
           const delta = typeof event['delta'] === 'string' ? event['delta'] : '';
           if (!delta) return;
           text += delta;
-          params.onDelta?.({ content: delta });
+          onDelta?.({ content: delta });
           return;
         }
 
@@ -321,7 +331,7 @@ export async function chatWithOpenAICodex(
           if (!partial) return;
           const next = `${toolArgs.get(callId) ?? ''}${delta}`;
           toolArgs.set(callId, next);
-          params.onDelta?.({
+          onDelta?.({
             toolCalls: [{
               index: partial.index,
               id: callId,
@@ -343,16 +353,10 @@ export async function chatWithOpenAICodex(
             ? record['arguments']
             : (toolArgs.get(callId) ?? '{}');
           if (!callId || !name) return;
-          const parsedArguments = parseToolCallArguments(argumentsText, {
-            provider: OPENAI_CODEX_PROVIDER_NAME,
-            toolName: name,
-            callId,
-          });
-          if (parsedArguments === undefined) return;
           toolCalls.set(callId, {
             id: callId,
             name,
-            arguments: parsedArguments,
+            ...toolCallArgumentFields(argumentsText, { provider: OPENAI_CODEX_PROVIDER_NAME, toolName: name, callId }),
           });
           return;
         }
@@ -362,6 +366,11 @@ export async function chatWithOpenAICodex(
           if (!completed || typeof completed !== 'object') return;
           const record = completed as Record<string, unknown>;
           status = type === 'response.incomplete' ? 'incomplete' : 'completed';
+          const incompleteDetails = record['incomplete_details'];
+          if (incompleteDetails && typeof incompleteDetails === 'object') {
+            const reason = (incompleteDetails as Record<string, unknown>)['reason'];
+            if (typeof reason === 'string') incompleteReason = reason;
+          }
           const usage = record['usage'];
           if (usage && typeof usage === 'object') {
             const usageRecord = usage as Record<string, unknown>;
@@ -437,7 +446,7 @@ export async function chatWithOpenAICodex(
             outputTokens,
             ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
           },
-          stopReason: mapCodexStopReason(status, resolvedToolCalls.length > 0),
+          stopReason: mapCodexStopReason(status, resolvedToolCalls.length > 0, incompleteReason),
           ...(status !== 'completed' ? { providerStopReason: status } : {}),
           ...(rateLimit ? { rateLimit } : {}),
         };
@@ -448,7 +457,7 @@ export async function chatWithOpenAICodex(
           phase: 'stream',
         });
       }
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}) }, params.onRetry);
+    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry);
 }
 
 export class OpenAICodexProvider implements LLMProvider {
@@ -459,6 +468,8 @@ export class OpenAICodexProvider implements LLMProvider {
     asOf: OPENAI_CODEX_DATED_STATIC_MODELS_AS_OF,
   };
   readonly models: string[] = [...OPENAI_CODEX_DATED_STATIC_MODELS];
+  /** One cache key for this provider's lifetime, so consecutive turns share a prompt cache. */
+  private readonly promptCacheSessionId = crypto.randomUUID();
 
   constructor(
     private readonly subscriptionManager: Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>,
@@ -487,7 +498,7 @@ export class OpenAICodexProvider implements LLMProvider {
     const accessToken = resolved.accessToken;
     return (await instrumentedLlmCall(async () => {
       try {
-        return await chatWithOpenAICodex(accessToken, params);
+        return await chatWithOpenAICodex(accessToken, params, this.promptCacheSessionId);
       } catch (error) {
         if (!isAuthRejection(error)) throw error;
         // The backend rejected the stored token: expired past its timestamp,
@@ -502,7 +513,7 @@ export class OpenAICodexProvider implements LLMProvider {
         if (outcome.kind === 'unavailable') throw error;
         params.onRetry?.(1, 1, 0, error instanceof Error ? error : new Error(String(error)));
         try {
-          return await chatWithOpenAICodex(outcome.accessToken, params);
+          return await chatWithOpenAICodex(outcome.accessToken, params, this.promptCacheSessionId);
         } catch (retryError) {
           // A fresh token the responses surface still refuses: the account
           // has lost the entitlement (plan lapsed, suspension). Still a

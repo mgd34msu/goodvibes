@@ -113,7 +113,31 @@ export function decodeTunnelFrame(
     return null;
   }
   if (!isTunnelHeader(header)) return null;
-  return { header, body: frame.subarray(4 + headerLen).slice() };
+  return { header: withoutDaemonOwnedHeaders(header), body: frame.subarray(4 + headerLen).slice() };
+}
+
+/**
+ * The daemon marks requests that arrived over the relay with this header. It is
+ * owned by the daemon, so a surface-supplied copy is dropped on decode rather
+ * than merged with the daemon's own value.
+ */
+const RELAY_VIA_HEADER_NAME = 'x-goodvibes-via-relay';
+
+function withoutDaemonOwnedHeaders(header: TunnelHeader): TunnelHeader {
+  if (header.kind !== 'request' && header.kind !== 'stream-open') return header;
+  return { ...header, headers: header.headers.filter(([name]) => name.toLowerCase() !== RELAY_VIA_HEADER_NAME) };
+}
+
+function isHeaderPairs(value: unknown): boolean {
+  return Array.isArray(value) && value.every((entry) => Array.isArray(entry) && entry.length === 2
+    && typeof entry[0] === 'string' && typeof entry[1] === 'string');
+}
+
+/** Path and query only: one leading slash, so resolving it against the local base can never change the host. */
+function isLocalPath(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')
+    // eslint-disable-next-line no-control-regex -- URL parsing drops tab/newline, so "/\t/host" would resolve to another host
+    && !/[\u0000-\u0020\u007f]/.test(value);
 }
 
 function isTunnelHeader(value: unknown): value is TunnelHeader {
@@ -121,10 +145,10 @@ function isTunnelHeader(value: unknown): value is TunnelHeader {
   const v = value as Record<string, unknown>;
   if (typeof v['id'] !== 'string') return false;
   if (v['kind'] === 'request' || v['kind'] === 'stream-open') {
-    return Array.isArray(v['headers']) && typeof v['method'] === 'string' && typeof v['path'] === 'string';
+    return isHeaderPairs(v['headers']) && typeof v['method'] === 'string' && isLocalPath(v['path']);
   }
   if (v['kind'] === 'request-cancel') return true;
-  if (v['kind'] === 'response') return Array.isArray(v['headers']) && typeof v['status'] === 'number';
+  if (v['kind'] === 'response') return isHeaderPairs(v['headers']) && typeof v['status'] === 'number';
   if (v['kind'] === 'stream-data') return typeof v['seq'] === 'number';
   if (v['kind'] === 'stream-overflow') return typeof v['dropped'] === 'number';
   if (v['kind'] === 'stream-close') return v['reason'] === undefined || typeof v['reason'] === 'string';

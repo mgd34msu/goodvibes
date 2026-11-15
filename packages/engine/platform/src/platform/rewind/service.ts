@@ -12,6 +12,8 @@
  */
 import type { WorkspaceEvent } from '../../events/workspace.js';
 import { RewindTokenStore, rewindFingerprint } from './tokens.js';
+import { discardTurnAnchorsAfter, restoreDiscardedTurnAnchors, type TurnAnchor } from './turn-anchors.js';
+import type { SessionSurface } from '../runtime/session-surface.js';
 import type {
   RewindAnchor,
   RewindApplyResult,
@@ -48,6 +50,13 @@ export interface UnifiedRewindServiceDeps {
   readonly emit?: RewindEventSink | null;
   readonly now?: () => number;
   readonly tokens?: RewindTokenStore;
+  /**
+   * The session surface that owns the sessions directory. When present, a
+   * conversation rewind also rewrites the turn-anchor sidecar, so a resume
+   * before the next turn does not bring back anchors for turns that were
+   * rewound away.
+   */
+  readonly anchorSurface?: SessionSurface | null;
 }
 
 export interface RewindApplyOptions {
@@ -55,9 +64,26 @@ export interface RewindApplyOptions {
   readonly confirmToken?: string | undefined;
 }
 
+/** How many rewinds keep their dropped anchors for an undo. */
+const MAX_REMEMBERED_REWINDS = 32;
+
 function wants(scope: RewindScope, part: 'files' | 'conversation'): boolean {
   return scope === 'both' || scope === part;
 }
+
+interface ResolvedFiles {
+  readonly checkpoint: RewindCheckpointView | null;
+  /** The anchor turn, when it has no checkpoint although the session has others. */
+  readonly unmatchedTurn: string | null;
+}
+
+function unmatchedTurnReason(turnId: string): string {
+  return `Turn ${turnId} has no workspace checkpoint of its own (it changed no files, or its checkpoint was pruned), so the files as they were at that turn cannot be identified, and rewinding only the conversation would leave later file edits in place. Rewind with scope "conversation" to keep the files as they are, or pick a turn that changed files to rewind both.`;
+}
+
+// A files rewind restores the whole workspace tree, not only what this session
+// wrote, so edits other sessions, agents or the user made after the checkpoint go too.
+const WHOLE_WORKSPACE_WARNING = 'files rewind resets the whole workspace to the checkpoint, not only this session\'s edits: changes made after it by other sessions, agents or you are reverted too. The receipt names a checkpoint that undoes it.';
 
 export class UnifiedRewindService {
   private readonly workspace: RewindWorkspacePort | null;
@@ -65,6 +91,11 @@ export class UnifiedRewindService {
   private readonly emitSink: RewindEventSink | null;
   private readonly now: () => number;
   private readonly tokens: RewindTokenStore;
+  private readonly anchorSurface: SessionSurface | null;
+  /** Sessions with an apply running; a second apply for one of them is refused. */
+  private readonly applying = new Set<string>();
+  /** The anchors a conversation rewind dropped, by its undo snapshot, so undoing it gives them back. */
+  private readonly droppedAnchors = new Map<string, { sessionId: string; turnId: string; anchors: readonly TurnAnchor[] }>();
 
   constructor(deps: UnifiedRewindServiceDeps = {}) {
     this.workspace = deps.workspace ?? null;
@@ -72,16 +103,35 @@ export class UnifiedRewindService {
     this.emitSink = deps.emit ?? null;
     this.now = deps.now ?? Date.now;
     this.tokens = deps.tokens ?? new RewindTokenStore(this.now);
+    this.anchorSurface = deps.anchorSurface ?? null;
+  }
+
+  /**
+   * The conversation of a rewind was put back (undo): its turn anchors come
+   * back with it, in memory and in the sidecar.
+   */
+  anchorsRestored(undoSnapshotId: string): void {
+    const kept = this.droppedAnchors.get(undoSnapshotId);
+    if (kept) restoreDiscardedTurnAnchors(kept.sessionId, kept.anchors, this.anchorSurface ?? undefined);
+  }
+
+  /** The conversation of an undone rewind was cut again (redo): its anchors go again. */
+  anchorsDropped(undoSnapshotId: string): void {
+    const kept = this.droppedAnchors.get(undoSnapshotId);
+    if (!kept) return;
+    discardTurnAnchorsAfter(kept.sessionId, kept.turnId, this.anchorSurface ?? undefined);
   }
 
   /** Dry-run preview of a rewind + a single-use confirm token authorizing it. */
   async plan(anchor: RewindAnchor, scope: RewindScope): Promise<RewindPlan> {
     const turnId = anchor.turnId ?? null;
     const warnings: string[] = [];
-    const files = wants(scope, 'files') ? await this.planFiles(anchor, warnings) : null;
+    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
+    const files = resolved ? await this.planFiles(resolved, warnings) : null;
     const conversation = wants(scope, 'conversation') ? await this.planConversation(anchor, warnings) : null;
+    if (scope === 'both' && resolved?.unmatchedTurn) warnings.push(unmatchedTurnReason(resolved.unmatchedTurn));
 
-    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope);
+    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope, resolved?.checkpoint?.id ?? null);
     const { token, expiresAt } = this.tokens.issue(fingerprint);
     this.emitEvent({ type: 'REWIND_PLANNED', sessionId: anchor.sessionId, turnId, scope }, anchor.sessionId);
     return { sessionId: anchor.sessionId, turnId, scope, token, expiresAt, files, conversation, warnings };
@@ -89,12 +139,37 @@ export class UnifiedRewindService {
 
   /** Confirm-gated apply. Unconfirmed → a non-error refusal; bad token → RewindTokenError. */
   async apply(anchor: RewindAnchor, scope: RewindScope, opts: RewindApplyOptions = {}): Promise<RewindApplyResult> {
+    // Two applies for one session (a double click, two surfaces) would restore
+    // and truncate over each other and interleave their undo points. The
+    // second is refused before it can spend a confirm token.
+    if (this.applying.has(anchor.sessionId)) {
+      return {
+        receipt: null,
+        refused: true,
+        refusal: {
+          reason: 'Another rewind of this session is still running. Wait for its receipt, then plan again if you still want this rewind.',
+          confirmField: 'confirm',
+          planMethod: 'rewind.plan',
+          options: [],
+        },
+      };
+    }
+    this.applying.add(anchor.sessionId);
+    try {
+      return await this.applyNow(anchor, scope, opts);
+    } finally {
+      this.applying.delete(anchor.sessionId);
+    }
+  }
+
+  private async applyNow(anchor: RewindAnchor, scope: RewindScope, opts: RewindApplyOptions): Promise<RewindApplyResult> {
     const turnId = anchor.turnId ?? null;
-    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope);
+    const resolved = wants(scope, 'files') ? await this.resolveFiles(anchor) : null;
+    const fingerprint = rewindFingerprint(anchor.sessionId, turnId, scope, resolved?.checkpoint?.id ?? null);
     if (opts.confirmToken !== undefined) {
       if (!this.tokens.consume(opts.confirmToken, fingerprint)) {
         throw new RewindTokenError(
-          'confirmToken is invalid, already used, expired, or was issued for a different rewind. Re-run rewind.plan.',
+          'confirmToken is invalid, already used, expired, or was issued for a different rewind (including a plan that previewed a different workspace checkpoint than this anchor resolves to now). Re-run rewind.plan.',
         );
       }
     } else if (opts.confirm !== true) {
@@ -110,13 +185,71 @@ export class UnifiedRewindService {
       };
     }
 
+    if (scope === 'both' && resolved?.unmatchedTurn) {
+      // Truncating the conversation while later file edits stay on disk would
+      // leave the two describing different points in time.
+      return {
+        receipt: null,
+        refused: true,
+        refusal: {
+          reason: unmatchedTurnReason(resolved.unmatchedTurn),
+          confirmField: 'scope',
+          planMethod: 'rewind.plan',
+          options: ['conversation'],
+        },
+      };
+    }
+
+    // Restoring files and then finding the conversation cannot follow would
+    // leave the two at different points in time, so the conversation is asked
+    // first and a refusal changes nothing.
+    if (scope === 'both' && resolved?.checkpoint && this.conversation) {
+      const reason = await this.conversationBlocker(anchor);
+      if (reason !== null) {
+        return {
+          receipt: null,
+          refused: true,
+          refusal: {
+            reason: `The conversation cannot be rewound right now (${reason}), and rewinding only the files would leave the two at different points in time. Nothing was changed. Rewind with scope "files" to restore the files alone, or try again when the conversation is reachable.`,
+            confirmField: 'scope',
+            planMethod: 'rewind.plan',
+            options: ['files'],
+          },
+        };
+      }
+    }
+
     const warnings: string[] = [];
-    const { files, undoFiles } = wants(scope, 'files')
-      ? await this.applyFiles(anchor, warnings)
+    const { files, undoFiles } = resolved
+      ? await this.applyFiles(resolved, warnings)
       : { files: null as RewindReceiptFiles | null, undoFiles: null as RewindUndo['files'] };
-    const { conversation, undoConversation } = wants(scope, 'conversation')
-      ? await this.applyConversation(anchor, warnings)
-      : { conversation: null as RewindReceiptConversation | null, undoConversation: null as RewindUndo['conversation'] };
+    let conversation: RewindReceiptConversation | null = null;
+    let undoConversation: RewindUndo['conversation'] = null;
+    if (wants(scope, 'conversation')) {
+      try {
+        ({ conversation, undoConversation } = await this.applyConversation(anchor, warnings));
+      } catch (error) {
+        // Only the conversation half failed. When the files were already
+        // restored, the receipt that names their undo point must still be
+        // returned; otherwise the caller never learns where to undo to.
+        if (undoFiles === null) throw error;
+        warnings.push(`conversation rewind failed after the files were restored: ${error instanceof Error ? error.message : String(error)}. The conversation was not changed; restore checkpoint ${undoFiles.restoreCheckpointId} to undo the file restore.`);
+        conversation = { rewound: false, droppedMessages: 0, undoSnapshotId: null };
+      }
+    }
+    // Turns after the anchor are gone from the conversation; their anchors
+    // would otherwise cut the new branch at an unrelated message.
+    if (conversation?.rewound && anchor.turnId !== undefined) {
+      const dropped = discardTurnAnchorsAfter(anchor.sessionId, anchor.turnId, this.anchorSurface ?? undefined);
+      if (conversation.undoSnapshotId) {
+        this.droppedAnchors.set(conversation.undoSnapshotId, { sessionId: anchor.sessionId, turnId: anchor.turnId, anchors: dropped });
+        while (this.droppedAnchors.size > MAX_REMEMBERED_REWINDS) {
+          const oldest = this.droppedAnchors.keys().next().value;
+          if (oldest === undefined) break;
+          this.droppedAnchors.delete(oldest);
+        }
+      }
+    }
 
     const receipt = {
       sessionId: anchor.sessionId,
@@ -143,27 +276,49 @@ export class UnifiedRewindService {
     return { receipt, refused: false, refusal: null };
   }
 
-  private async resolveCheckpoint(anchor: RewindAnchor): Promise<RewindCheckpointView | null> {
-    if (!this.workspace) return null;
+  /**
+   * The checkpoint a files rewind to `anchor` restores. With no turn anchor it
+   * is the session's most recent checkpoint. A turn that changed no files has
+   * no checkpoint of its own; when the session has checkpoints from other
+   * turns, `unmatchedTurn` records that the file state at that turn cannot be
+   * identified.
+   */
+  private async resolveFiles(anchor: RewindAnchor): Promise<ResolvedFiles> {
+    if (!this.workspace) return { checkpoint: null, unmatchedTurn: null };
     const list = await this.workspace.list({ sessionId: anchor.sessionId });
-    if (list.length === 0) return null;
+    if (list.length === 0) return { checkpoint: null, unmatchedTurn: null };
     if (anchor.turnId !== undefined) {
-      return list.find((c) => c.turnId === anchor.turnId) ?? null;
+      const checkpoint = list.find((c) => c.turnId === anchor.turnId) ?? null;
+      return { checkpoint, unmatchedTurn: checkpoint ? null : anchor.turnId };
     }
     // No turn anchor → the session's most recent checkpoint (do not assume list order).
-    return [...list].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+    return { checkpoint: [...list].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null, unmatchedTurn: null };
   }
 
-  private async planFiles(anchor: RewindAnchor, warnings: string[]): Promise<RewindPlanFiles> {
+  /** Why the conversation cannot be rewound now, or null when it can. */
+  private async conversationBlocker(anchor: RewindAnchor): Promise<string | null> {
+    try {
+      const preview = await this.conversation!.preview(anchor);
+      if (preview.available === false) {
+        return preview.unavailableReason?.trim() || 'no conversation is reachable for this session';
+      }
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private async planFiles(resolved: ResolvedFiles, warnings: string[]): Promise<RewindPlanFiles> {
     if (!this.workspace) {
       warnings.push('files rewind unavailable: no workspace checkpoint store is wired on this runtime');
       return { available: false, checkpointId: null, checkpointLabel: null, affectedFileCount: 0 };
     }
-    const checkpoint = await this.resolveCheckpoint(anchor);
+    const checkpoint = resolved.checkpoint;
     if (!checkpoint) {
       warnings.push('files rewind: no workspace checkpoint found for this anchor');
       return { available: false, checkpointId: null, checkpointLabel: null, affectedFileCount: 0 };
     }
+    warnings.push(WHOLE_WORKSPACE_WARNING);
     const diff = await this.workspace.diff(checkpoint.id);
     return {
       available: true,
@@ -189,10 +344,10 @@ export class UnifiedRewindService {
   }
 
   private async applyFiles(
-    anchor: RewindAnchor,
+    resolved: ResolvedFiles,
     warnings: string[],
   ): Promise<{ files: RewindReceiptFiles; undoFiles: RewindUndo['files'] }> {
-    const checkpoint = this.workspace ? await this.resolveCheckpoint(anchor) : null;
+    const checkpoint = resolved.checkpoint;
     if (!this.workspace || !checkpoint) {
       warnings.push('files rewind skipped: no workspace checkpoint available for this anchor');
       return {
@@ -203,9 +358,16 @@ export class UnifiedRewindService {
     // safetyCheckpoint: true records the pre-restore state, the undo point that
     // makes this rewind reversible (restore that checkpoint to reverse it).
     const result = await this.workspace.restore(checkpoint.id, { safetyCheckpoint: true });
+    warnings.push(WHOLE_WORKSPACE_WARNING);
+    // A restore that could not apply every path is not a completed rewind: say
+    // so, and keep the undo point so the partial state can be reversed.
+    const failed = result.failedPaths ?? [];
+    if (failed.length > 0) {
+      warnings.push(`files rewind was only partly applied: ${failed.length} path(s) could not be restored (${failed.map((f) => `${f.path}: ${f.reason}`).join('; ')}).${result.safetyCheckpointId ? ` Restore checkpoint ${result.safetyCheckpointId} to return to the state before the rewind.` : ''}`);
+    }
     return {
       files: {
-        restored: true,
+        restored: failed.length === 0,
         checkpointId: result.checkpointId,
         safetyCheckpointId: result.safetyCheckpointId,
         restoredFileCount: result.restoredFiles.length,

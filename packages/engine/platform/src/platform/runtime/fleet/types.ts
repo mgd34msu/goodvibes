@@ -180,6 +180,17 @@ export interface ProcessAttention {
   readonly detail?: string | undefined;
 }
 
+/**
+ * A control request (kill, pause, resume) that was accepted but whose
+ * asynchronous execution then failed. The verbs on `ProcessRegistry` answer
+ * before such a request settles, so this is where its failure is visible.
+ */
+export interface ProcessControlFailure {
+  readonly op: 'kill' | 'pause' | 'resume';
+  readonly message: string;
+  readonly at: number;
+}
+
 /** One normalized process in the fleet. Flat record; `parentId` expresses the tree. */
 export interface ProcessNode {
   readonly id: string;
@@ -209,6 +220,13 @@ export interface ProcessNode {
    */
   readonly needsAttention?: ProcessAttention | undefined;
   readonly sessionRef?: ProcessSessionRef | undefined;
+  /**
+   * Present when the last kill/pause/resume request for this node was accepted
+   * but then failed (automation jobs, whose manager calls are asynchronous).
+   * The node's `state` shows what is really true; a verb's `true`/id result for
+   * these nodes means "requested", not "done".
+   */
+  readonly controlFailure?: ProcessControlFailure | undefined;
   /**
    * One-line headline for this node, derived from its task/phase identity at
    * the read-model (see headlines.ts). Regenerated ONLY on task/phase

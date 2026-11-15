@@ -10,23 +10,32 @@ export function beginImapSourceReading(deps: InboundMailSourceFactoryDeps, owner
 } {
   const retired = new AbortController();
   const invalidate = () => retired.abort();
-  const configOff = deps.onDidChangeConfiguration?.(invalidate);
+  let projection = '';
+  const readProjection = (): string => JSON.stringify([
+    readSurfaceEmailSettings(deps.getConfig),
+    deps.getConfig('surfaces.email.inbound.onInsufficientCapability'),
+  ]);
+  // Every config write announces a new incarnation, including writes to keys
+  // that have nothing to do with mail, and it announces it BEFORE the value is
+  // applied. So the comparison waits a microtask, and only a change to what
+  // this source actually reads retires it; anything else used to cost a full
+  // teardown and a fresh IMAP login per settings save.
+  const configOff = deps.onDidChangeConfiguration?.(() => {
+    queueMicrotask(() => { if (!retired.signal.aborted && readProjection() !== projection) retired.abort(); });
+  });
   const secretsOff = deps.secrets.onDidInvalidateCredentials?.(invalidate);
   const dispose = () => { configOff?.(); secretsOff?.(); retired.abort(); };
   try {
-    const source = JSON.stringify(readSurfaceEmailSettings(deps.getConfig));
-    const policy = deps.getConfig('surfaces.email.inbound.onInsufficientCapability');
-    const incarnation = deps.getConfigurationIncarnation?.();
+    projection = readProjection();
     const credentials = deps.secrets.getCredentialMutationState?.();
     const signal = AbortSignal.any([retired.signal, ...(owner.signal ? [owner.signal] : [])]);
     const reading = { signal, assertCurrent: () => {
       assertImapReadingCurrent(owner);
       const currentCredentials = deps.secrets.getCredentialMutationState?.();
-      if (signal.aborted || incarnation !== deps.getConfigurationIncarnation?.()
+      if (signal.aborted
         || credentials?.pending || currentCredentials?.pending
         || credentials?.generation !== currentCredentials?.generation
-        || policy !== deps.getConfig('surfaces.email.inbound.onInsufficientCapability')
-        || source !== JSON.stringify(readSurfaceEmailSettings(deps.getConfig))) {
+        || projection !== readProjection()) {
         retired.abort();
         throw new ImapReadingError();
       }

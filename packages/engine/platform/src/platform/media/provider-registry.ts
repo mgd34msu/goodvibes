@@ -87,6 +87,16 @@ export interface MediaProviderDescriptor {
   readonly capabilities: readonly MediaProviderCapability[];
 }
 
+function isConfiguredNow(provider: MediaProvider): boolean {
+  if (!provider.status) return true;
+  try {
+    const status = provider.status();
+    return !(status instanceof Promise) && status.configured;
+  } catch {
+    return false;
+  }
+}
+
 const mediaReadSources = new WeakMap<MediaProviderRegistry, () => () => void>();
 const getMediaReadSource = mediaReadSources.get.bind(mediaReadSources);
 const setMediaReadSource = mediaReadSources.set.bind(mediaReadSources);
@@ -176,7 +186,11 @@ export class MediaProviderRegistry {
       const provider = this.get(providerId);
       return provider?.capabilities.includes(capability) ? provider : null;
     }
-    return [...this.providers.values()].find((provider) => provider.capabilities.includes(capability)) ?? null;
+    const candidates = [...this.providers.values()].filter((provider) => provider.capabilities.includes(capability));
+    // A provider that can answer without a lookup and says it is configured beats
+    // one that merely registered first; providers whose status is asynchronous
+    // keep registration order, so register the most general one first.
+    return candidates.find((provider) => isConfiguredNow(provider)) ?? candidates[0] ?? null;
   }
 
   async status(): Promise<MediaProviderStatus[]> {

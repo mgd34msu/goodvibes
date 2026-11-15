@@ -1,8 +1,10 @@
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
 
 interface AgentHarnessAutonomyIntakeArgs {
   readonly query?: unknown;
@@ -28,7 +30,10 @@ interface AutonomyRouteCandidate {
 }
 
 type WatcherEvidenceContractStatus = 'contract-needed' | 'ready';
-type WatcherEvidenceCheckStatus = 'published-route' | 'missing';
+type WatcherEvidenceCheckStatus = 'published-route' | 'published-records' | 'missing';
+
+/** Which watcher record lanes the host publishes right now. */
+interface WatcherPublication { readonly runs: boolean; readonly providerSources: boolean }
 
 interface WatcherEvidenceContractRoute {
   readonly id: string;
@@ -48,14 +53,14 @@ interface WatcherEvidenceContractCheck {
 }
 
 interface WatcherEvidenceReceiptContract {
-  readonly status: 'missing';
+  readonly status: 'missing' | 'published-records';
   readonly appliesTo: readonly string[];
   readonly requiredFields: readonly string[];
   readonly nextWhenPublished: string;
 }
 
 interface WatcherProviderSourceContract {
-  readonly status: 'missing';
+  readonly status: 'missing' | 'published-records';
   readonly supportedSourceKinds: readonly string[];
   readonly requiredFields: readonly string[];
   readonly policy: string;
@@ -175,17 +180,21 @@ function describeTriggerWorkflow(workflow: TriggerWorkflow, includeParameters: b
   };
 }
 
-function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenceContract {
+function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: WatcherPublication): WatcherEvidenceContract {
   const watcherCreatePublished = methodIds.has('watchers.create');
   const watcherListPublished = methodIds.has('watchers.list');
   const watcherRunPublished = methodIds.has('watchers.run');
   const watcherStartStopPublished = methodIds.has('watchers.start') && methodIds.has('watchers.stop');
   return {
-    status: 'contract-needed',
+    status: published.runs && published.providerSources ? 'ready' : 'contract-needed',
     userOutcome: 'Show durable watcher run history and provider-source records in the autonomy queue without hiding trigger ownership.',
-    currentState: watcherListPublished
-      ? 'Watcher create/list routes are published, but durable run-history and provider-source records are not published as Agent-readable records yet.'
-      : 'Watcher visibility, run-history, and provider-source records are not fully published by the current connected-host contract.',
+    currentState: published.runs && published.providerSources
+      ? 'The connected host publishes watcher run-history and provider-source records; the autonomy queue shows them.'
+      : published.runs || published.providerSources
+        ? `The connected host publishes ${published.runs ? 'watcher run-history' : 'provider-source'} records but not ${published.runs ? 'provider-source' : 'watcher run-history'} records yet.`
+        : watcherListPublished
+          ? 'Watcher create/list routes are published, but durable run-history and provider-source records are not published as Agent-readable records yet.'
+          : 'Watcher visibility, run-history, and provider-source records are not fully published by the current connected-host contract.',
     owner: 'goodvibes-platform-or-daemon',
     nextRoutes: [
       {
@@ -245,7 +254,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
       {
         id: 'durable-run-history-records',
         label: 'Durable watcher run history records',
-        status: 'missing',
+        status: published.runs ? 'published-records' : 'missing',
         requiredFor: 'Show past watcher runs, checkpoints, errors, and next recovery routes in the autonomy queue.',
         owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'autonomy action:"queue"',
@@ -253,7 +262,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
       {
         id: 'provider-source-records',
         label: 'Provider-source records',
-        status: 'missing',
+        status: published.providerSources ? 'published-records' : 'missing',
         requiredFor: 'Show source-scoped Gmail/email/webhook/file records without polling or exposing raw provider payloads.',
         owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'personal_ops action:"lane" laneId:"inbox"',
@@ -276,7 +285,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
       },
     ],
     receiptContract: {
-      status: 'missing',
+      status: published.runs ? 'published-records' : 'missing',
       appliesTo: [
         'watchers.create',
         'watchers.patch',
@@ -291,7 +300,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>): WatcherEvidenc
       nextWhenPublished: 'autonomy action:"queue" and autonomy action:"item" should expose watcher run/source receipts with exact recovery and replay routes.',
     },
     providerSourceContract: {
-      status: 'missing',
+      status: published.providerSources ? 'published-records' : 'missing',
       supportedSourceKinds: ['webhook', 'github-webhook', 'file-watcher', 'gmail', 'email', 'calendar'],
       requiredFields: WATCHER_PROVIDER_SOURCE_FIELDS,
       policy: 'Provider-source records must be scoped, permission-aware, redacted, and source-owned; Agent only consumes published records and never polls personal providers silently.',
@@ -306,7 +315,7 @@ function compactWatcherEvidenceContract(contract: WatcherEvidenceContract): Reco
     userOutcome: contract.userOutcome,
     owner: contract.owner,
     missing: contract.contractChecklist.filter((check) => check.status === 'missing').map((check) => check.id),
-    publishedRoutes: contract.contractChecklist.filter((check) => check.status === 'published-route').map((check) => check.id),
+    publishedRoutes: contract.contractChecklist.filter((check) => check.status !== 'missing').map((check) => check.id),
     requiredReceiptFields: contract.receiptContract.requiredFields,
     providerSourceKinds: contract.providerSourceContract.supportedSourceKinds,
     inspectRoute: 'host action:"methods" query:"watchers"',
@@ -326,7 +335,7 @@ function watcherTriggerOutcome(): TriggerWorkflow['outcome'] {
   };
 }
 
-function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, methodIds: ReadonlySet<string>): readonly TriggerWorkflow[] {
+function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, methodIds: ReadonlySet<string>, published: WatcherPublication): readonly TriggerWorkflow[] {
   const schedulesCreatePublished = methodIds.has('automation.schedules.create');
   const schedulesListPublished = methodIds.has('automation.schedules.list');
   const watcherCreatePublished = methodIds.has('watchers.create');
@@ -334,7 +343,7 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
   const watcherRunPublished = methodIds.has('watchers.run');
   const watcherStartStopPublished = methodIds.has('watchers.start') && methodIds.has('watchers.stop');
   const controlEventsPublished = methodIds.has('control.events.stream') || methodIds.has('control.events.catalog');
-  const watcherContract = watcherEvidenceContract(methodIds);
+  const watcherContract = watcherEvidenceContract(methodIds, published);
   const scheduleMissing = schedule.missing.length > 0 ? schedule.missing : schedule.kind ? [] : ['scheduleKind', 'scheduleValue'];
   const scheduleReady = schedulesCreatePublished && schedule.kind !== undefined && scheduleMissing.length === 0;
   const watcherReady = watcherCreatePublished && watcherListPublished;
@@ -352,11 +361,11 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
           ? 'The schedule route is published, but this request still needs an exact cadence before creation.'
           : 'The connected host does not publish automation.schedules.create in the current platform contract.',
       nextStep: scheduleReady
-        ? 'Create through schedule action:"create" with confirm:true and explicit success criteria.'
+        ? 'Create through schedule action:"create" with explicit success criteria; the write needs a recorded owner admission.'
         : 'Ask for the exact ISO time, every interval, or cron expression before offering schedule creation.',
       capabilities: ['cron', 'at', 'every', 'wakeups', 'scheduled autonomous work'],
       requiredFields: ['task', 'successCriteria', ...scheduleMissing],
-      modelRoute: `schedule action:"create" task:"${shortRequest}" successCriteria:"..." scheduleKind:"${schedule.kind ?? 'at|every|cron'}" scheduleValue:"${schedule.value ?? '...'}" confirm:true explicitUserRequest:"..."`,
+      modelRoute: `schedule action:"create" task:"${shortRequest}" successCriteria:"..." scheduleKind:"${schedule.kind ?? 'at|every|cron'}" scheduleValue:"${schedule.value ?? '...'}"`,
       inspectRoute: 'autonomy action:"item" queueItemId:"connected-schedules"',
       setupRoutes: [
         'host action:"method" methodId:"automation.schedules.create"',
@@ -386,7 +395,7 @@ function buildTriggerWorkflows(request: string, schedule: ScheduleDetection, met
         : 'Use operator method discovery and do not claim incoming trigger setup until watcher routes are published.',
       capabilities: ['incoming webhook', 'watcher', 'event trigger', 'source trigger', 'github webhook'],
       requiredFields: ['trusted trigger source', 'source scope', 'task or run target', 'success criteria', 'confirmation'],
-      modelRoute: 'agent_operator_method methodId:"watchers.create" confirm:true explicitUserRequest:"..."',
+      modelRoute: 'agent_operator_method methodId:"watchers.create" input:{...} dryRun:true',
       inspectRoute: 'host action:"method" methodId:"watchers.create"',
       setupRoutes: [
         'host action:"methods" query:"watchers"',
@@ -459,14 +468,14 @@ function reminderRoute(request: string, schedule: ScheduleDetection): string {
   const message = previewHarnessText(request, 72).replace(/"/g, "'");
   const kind = schedule.kind ?? 'at|every|cron';
   const value = schedule.value ?? '...';
-  return `schedule action:"remind" message:"${message}" scheduleKind:"${kind}" scheduleValue:"${value}" confirm:true explicitUserRequest:"..."`;
+  return `schedule action:"remind" message:"${message}" scheduleKind:"${kind}" scheduleValue:"${value}"`;
 }
 
 function autonomyScheduleRoute(request: string, schedule: ScheduleDetection): string {
   const task = previewHarnessText(request, 96).replace(/"/g, "'");
   const kind = schedule.kind ?? 'at|every|cron';
   const value = schedule.value ?? '...';
-  return `schedule action:"create" task:"${task}" successCriteria:"..." scheduleKind:"${kind}" scheduleValue:"${value}" confirm:true explicitUserRequest:"..."`;
+  return `schedule action:"create" task:"${task}" successCriteria:"..." scheduleKind:"${kind}" scheduleValue:"${value}"`;
 }
 
 function buildCandidates(request: string, schedule: ScheduleDetection, intents: AutonomyIntents): readonly AutonomyRouteCandidate[] {
@@ -502,7 +511,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
       confidence: 'high',
       why: 'The request mentions approval review or decision.',
       modelRoute: 'autonomy action:"item" queueItemId:"pending-approvals"',
-      inspectRoute: 'workspace action:"action" actionId:"approvals"',
+      inspectRoute: 'workspace action:"action" actionId:"approval-review"',
       requiresConfirmation: true,
       missingFields: ['exact approvalId', 'approve, deny, or cancel decision'],
       userQuestion: 'Which approval id and decision should be applied?',
@@ -515,7 +524,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
       label: 'Create or review a visible webhook or event-trigger watcher',
       confidence: 'high',
       why: 'The request asks for work to start from an external event, webhook, watcher, Gmail, or inbound message instead of a time-based schedule.',
-      modelRoute: 'agent_operator_method methodId:"watchers.create" confirm:true explicitUserRequest:"..."',
+      modelRoute: 'agent_operator_method methodId:"watchers.create" input:{...} dryRun:true',
       inspectRoute: 'host action:"method" methodId:"watchers.create"',
       requiresConfirmation: true,
       missingFields: [
@@ -587,7 +596,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
       label: 'Start a visible research run',
       confidence: 'high',
       why: 'The request is research/report oriented and needs a visible ledger before long-running work.',
-      modelRoute: 'research action:"create_run" title:"..." question:"..." confirm:true explicitUserRequest:"..."',
+      modelRoute: 'research action:"create_run" title:"..." question:"..."',
       inspectRoute: 'research action:"runs"',
       requiresConfirmation: true,
       missingFields: ['research question', 'success criteria'],
@@ -640,7 +649,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
   return candidates;
 }
 
-export async function autonomyIntakeSummary(_context: CommandContext, args: AgentHarnessAutonomyIntakeArgs, options: AutonomyIntakeOptions = {}): Promise<Record<string, unknown>> {
+export async function autonomyIntakeSummary(context: CommandContext, args: AgentHarnessAutonomyIntakeArgs, options: AutonomyIntakeOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted();
   const request = readString(args.query) || readString(args.target);
   const publishedMethods = operatorMethodIds();
@@ -652,22 +661,23 @@ export async function autonomyIntakeSummary(_context: CommandContext, args: Agen
   const assertOperatorCurrent = () => {
     signal?.throwIfAborted();
     if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== originalCurrent || options.retainCurrent !== originalRetain
-      || JSON.stringify([...operatorMethodIds()].sort()) !== publication) throw new Error('Autonomy operator contract changed.');
+      || JSON.stringify([...operatorMethodIds()].sort()) !== publication) throw new ToolInputProjectionError('stale');
   };
   originalRetain?.(assertOperatorCurrent, 'agent.autonomy-intake.operator-contract');
   const assertCurrent = () => { signal?.throwIfAborted();
     const assertion: unknown = originalCurrent?.();
     if (assertion !== undefined) {
       drainOwned(assertion);
-      throw new Error('Autonomy intake authority must be synchronous.');
+      throw new ToolInputProjectionError('held');
     }
     assertOperatorCurrent();
   };
   const readingOptions = { ...options, assertCurrent };
   assertCurrent();
-  const watcherContract = watcherEvidenceContract(publishedMethods);
+  const published = watcherReadModelPublication(context);
+  const watcherContract = watcherEvidenceContract(publishedMethods, published);
   if (!request) {
-    const workflows = buildTriggerWorkflows('', { missing: [], notes: [] }, publishedMethods);
+    const workflows = buildTriggerWorkflows('', { missing: [], notes: [] }, publishedMethods, published);
     return {
       status: 'missing_request',
       usage: 'Use autonomy action:"intake" with query:"<ongoing work request>". This action is read-only and returns the safest confirmed route.',
@@ -691,7 +701,7 @@ export async function autonomyIntakeSummary(_context: CommandContext, args: Agen
   const schedule = reading.schedule;
   const candidates = buildCandidates(request, schedule, reading.intents);
   const preferred = candidates[0];
-  const workflows = buildTriggerWorkflows(request, schedule, publishedMethods);
+  const workflows = buildTriggerWorkflows(request, schedule, publishedMethods, published);
   return {
     status: 'ready',
     judgment: reading.judgment,

@@ -187,6 +187,8 @@ export type ConfigReplicationClass = 'replicated' | 'node-local';
 export interface ConfigPathClassification {
   readonly path: string;
   readonly replication: ConfigReplicationClass;
+  /** False only for a daemon-owned domain nobody has ruled on (it fails closed to node-local). */
+  readonly ruled: boolean;
   /** Plain-language reason, surfaced by the classification test on failure. */
   readonly reason: string;
 }
@@ -226,26 +228,34 @@ export const REPLICATED_CONFIG_KEYS: readonly string[] = [
   // fresh daily budget or retroactively overspends one, and neither is visible
   // to the operator, who set one zone and was shown one zone.
   'daemon.timezone',
+  // These ports are the remote mail server's, not this machine's. The host they
+  // pair with replicates, so a node taking over with a default port against a
+  // non-default host would fail to read or send as the operator.
+  'email.imapPort',
+  'email.smtpPort',
+  'surfaces.email.imapPort',
+  'surfaces.email.imap.port',
+  'surfaces.email.smtp.port',
 ];
 
 export function classifyDaemonConfigPath(path: string): ConfigPathClassification {
   if (REPLICATED_CONFIG_KEYS.includes(path)) {
-    return { path, replication: 'replicated', reason: 'the group must agree on what day it is' };
+    return { path, replication: 'replicated', ruled: true, reason: 'the group must agree on this key, whatever its domain or schema type says' };
   }
   if (isPortConfigKey(path)) {
-    return { path, replication: 'node-local', reason: 'the schema marks this a port, and a port belongs to a machine' };
+    return { path, replication: 'node-local', ruled: true, reason: 'the schema marks this a port, and a port belongs to a machine' };
   }
   if (NODE_LOCAL_CONFIG_KEYS.includes(path)) {
-    return { path, replication: 'node-local', reason: 'this switch is a property of this installation' };
+    return { path, replication: 'node-local', ruled: true, reason: 'this switch is a property of this installation' };
   }
   if (underAny(path, NODE_LOCAL_CONFIG_DOMAINS)) {
-    return { path, replication: 'node-local', reason: 'this domain describes one machine, not the group' };
+    return { path, replication: 'node-local', ruled: true, reason: 'this domain describes one machine, not the group' };
   }
   if (underAny(path, REPLICATED_CONFIG_DOMAINS)) {
-    return { path, replication: 'replicated', reason: 'the group should agree on this' };
+    return { path, replication: 'replicated', ruled: true, reason: 'the group should agree on this' };
   }
   // Fail closed. A daemon-owned domain nobody has ruled on stays local.
-  return { path, replication: 'node-local', reason: 'no ruling has been made about this domain, so it stays local' };
+  return { path, replication: 'node-local', ruled: false, reason: 'no ruling has been made about this domain, so it stays local' };
 }
 
 /**

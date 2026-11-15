@@ -11,7 +11,7 @@
  *  2. A turn declared the wake word fixed ONE MESSAGE after measuring -90 dB,
  *     silence, from the same microphone.
  *
- * The exec guard now refuses the first mechanically (owner-terminal-guard.ts).
+ * The first is bounded by the exec boundary and the owner's tool permissions.
  * The second has no mechanism and never will: it is a claim, and the only place
  * a claim can be governed is the contract. So both are stated, and the text is
  * pinned here, in the CONVERSATIONAL prompt and in a hosted session's base

@@ -37,9 +37,9 @@ import { withFileWriteLockSync } from '../checkpoint/sync-write-lock.js';
 
 import { PersistentStore } from '../../state/persistent-store.js';
 import { confirmFileDurable } from '../../utils/atomic-json-store.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, sep } from 'node:path';
 import { acquireCrossProcessLock } from '../checkpoint/cross-process-lock.js';
 import { broadRootReason } from '../checkpoint/root-guard.js';
 import { normalizeWorkspaceRoot, resolveWorkspaceRegistration } from './resolution.js';
@@ -54,7 +54,7 @@ import {
   type WorkspaceRegistrySnapshot,
   type WorkspaceResolution,
 } from './types.js';
-import { probeWorktreeLink } from './worktree-link.js';
+import { probeWorktreeLinkAsync } from './worktree-link.js';
 
 interface ScopeTombstone {
   readonly root: string;
@@ -128,6 +128,16 @@ function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
   };
 }
 
+/** Short digest of the registrations and declines at or below `root`, ignoring everything elsewhere in the registry. */
+function subtreeDigest(root: string, registrations: readonly RegisteredWorkspaceRecord[], declinedRoots: readonly string[]): string {
+  const within = (candidate: string): boolean => candidate === root || candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+  const rows = {
+    workspaces: registrations.filter((row) => within(row.root)).map((row) => [row.root, row.nativeScope?.id ?? null]).sort(),
+    declines: declinedRoots.filter(within).sort(),
+  };
+  return createHash('sha256').update(JSON.stringify(rows)).digest('hex').slice(0, 16);
+}
+
 function canonicalDirectory(root: string): string | null {
   try {
     const canonical = normalizeWorkspaceRoot(realpathSync(root));
@@ -172,8 +182,8 @@ export interface WorkspaceRegistrationStoreOptions {
    * See registration/shared-register-path.ts.
    */
   readonly fallbackReadPath?: string | undefined;
-  /** Injectable worktree-link probe; defaults to a real `git rev-parse` probe. */
-  readonly probe?: (path: string) => WorkspaceGitMetadata;
+  /** Injectable worktree-link probe (sync or async); defaults to a real, non-blocking `git rev-parse` probe. */
+  readonly probe?: (path: string) => WorkspaceGitMetadata | Promise<WorkspaceGitMetadata>;
 }
 
 export interface RegisterWorkspaceResult {
@@ -191,7 +201,7 @@ export class WorkspaceRegistrationStore {
   private readonly fallbackStore: PersistentStore<PersistedRegistry> | null;
   private readonly homeDir: string;
   private readonly daemonStateDir: string;
-  private readonly probe: (path: string) => WorkspaceGitMetadata;
+  private readonly probe: (path: string) => WorkspaceGitMetadata | Promise<WorkspaceGitMetadata>;
   /** Orders read-modify-writes within this process. See the header. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -203,7 +213,7 @@ export class WorkspaceRegistrationStore {
       : null;
     this.homeDir = options.homeDir;
     this.daemonStateDir = options.daemonStateDir;
-    this.probe = options.probe ?? probeWorktreeLink;
+    this.probe = options.probe ?? probeWorktreeLinkAsync;
   }
 
   /**
@@ -320,7 +330,11 @@ export class WorkspaceRegistrationStore {
       }
     }
     return Object.freeze({ root: canonical, scopeId: scope.id,
-      scopeRevision: `${state.registryId!}:${state.scopeGeneration!}:${scope.generation}` });
+      // This root's own incarnation plus what is registered or declined inside its
+      // subtree. The registry-wide generation moves on every unrelated add, remove
+      // or decline and would stale every in-flight input; a nearer registration or
+      // a decline below this root, and a removed-then-re-added root, still change it.
+      scopeRevision: `${state.registryId!}:${scope.generation}:${subtreeDigest(registered.root, registrations, state.declines.map((row) => canonicalDirectory(row.root) ?? row.root))}` });
   }
 
   /** Own the writer lock while the host acquires inner ownership; launch uses the synchronous validator. */
@@ -444,7 +458,7 @@ export class WorkspaceRegistrationStore {
    */
   async resolve(path: string, git?: WorkspaceGitMetadata): Promise<WorkspaceResolution> {
     const state = await this.read();
-    const gitMeta = git ?? this.probe(path);
+    const gitMeta = git ?? await this.probe(path);
     const input: ResolveWorkspaceInput = {
       path,
       git: gitMeta,

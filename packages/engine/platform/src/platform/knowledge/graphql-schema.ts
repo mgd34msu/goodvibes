@@ -479,7 +479,7 @@ export const KNOWLEDGE_GRAPHQL_SDL = `
     saveSchedule(id: String, jobId: String!, label: String!, enabled: Boolean!, schedule: JSON!, metadata: JSON): KnowledgeSchedule!
     deleteSchedule(id: String!): Boolean!
     setScheduleEnabled(id: String!, enabled: Boolean!): KnowledgeSchedule
-    decideConsolidationCandidate(id: String!, status: String!, decidedBy: String): KnowledgeConsolidationCandidate!
+    decideConsolidationCandidate(id: String!, status: String!, decidedBy: String, memoryClass: String, scope: String, detail: String): KnowledgeConsolidationCandidate!
     lint: [KnowledgeIssue!]!
   }
 

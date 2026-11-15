@@ -95,7 +95,8 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
     let importedSecret: { key: string; value: string; scope: 'daemon' } | undefined;
     if (action === 'connect.complete') {
       credential = pending() ?? undefined;
-      if (!credential?.refreshToken) throw new ToolInputProjectionError('unavailable');
+      // No token yet: there is nothing to prepare, and the tool answers whether consent is pending, refused or was never started.
+      if (!credential?.refreshToken) return { status: 'projected', args: request.args };
       credential.assertCurrent(); clientId = credential.clientId; clientSecret = credential.clientSecret;
       const retained = credential, token = credential.refreshToken;
       sourceCurrent = () => { if (pending() !== retained || retained.refreshToken !== token) throw new ToolInputProjectionError('stale'); };

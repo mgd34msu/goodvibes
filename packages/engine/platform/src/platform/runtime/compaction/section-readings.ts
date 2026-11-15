@@ -22,8 +22,10 @@ function sourcePrefix(message: ProviderMessage): string {
 function render(message: ProviderMessage): string {
   const body = typeof message.content === 'string' ? message.content.trim() : message.content.map(part => {
     if (part.type === 'text') return part.text;
-    // Text-only canonical readers cannot qualify image meaning.
-    throw new CompactionReadingError('unsupported-image');
+    // Text-only canonical readers cannot qualify image meaning, but one image
+    // must not make the whole conversation uncompactable: it is read, and
+    // quoted if selected, as a marker for what the text cannot carry.
+    return '[image: not quoted in this text excerpt]';
   }).join('');
   return sourcePrefix(message) + body;
 }

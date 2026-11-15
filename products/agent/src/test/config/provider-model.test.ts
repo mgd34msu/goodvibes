@@ -14,20 +14,8 @@ describe('getProviderIdFromModel', () => {
     expect(getProviderIdFromModel('openai:gpt-4o')).toBe('openai');
   });
 
-  it('returns the default provider for a bare model string (no colon)', () => {
-    // A bare model name with no colon is treated as a model-only form
-    // and falls back to the default provider
-    const result = getProviderIdFromModel('gpt-4o');
-    expect(typeof result).toBe('string');
-    expect(result.length).toBeGreaterThan(0);
-  });
-
-  it('returns the default provider for a leading-colon input like ":foo"', () => {
-    // A leading colon means separator === 0 (not > 0), so we fall back to default
-    const result = getProviderIdFromModel(':foo');
-    expect(result).toBe(defaultProviderId);
-    expect(result).not.toBe(':foo');
-    expect(result.startsWith(':')).toBe(false);
+  it('reads a bare value as the provider id', () => {
+    expect(getProviderIdFromModel('gpt-4o')).toBe('gpt-4o');
   });
 
   it('returns the default provider for an empty string', () => {
@@ -50,11 +38,20 @@ describe('getModelIdFromProviderModel', () => {
   it('returns full string for bare model (no provider prefix)', () => {
     expect(getModelIdFromProviderModel('gpt-4o')).toBe('gpt-4o');
   });
+
+  it('falls back to the default model half for an empty value', () => {
+    expect(getModelIdFromProviderModel('')).toBe(getModelIdFromProviderModel(DEFAULT_CONFIG.provider.model));
+  });
 });
 
 describe('formatProviderModel', () => {
   it('formats provider:model correctly', () => {
     expect(formatProviderModel('anthropic', 'claude-3-5-sonnet-20241022')).toBe('anthropic:claude-3-5-sonnet-20241022');
+  });
+
+  it('qualifies a model id that carries its own colon', () => {
+    expect(formatProviderModel('ollama', 'llama3:8b')).toBe('ollama:llama3:8b');
+    expect(formatProviderModel('ollama', 'ollama:llama3:8b')).toBe('ollama:llama3:8b');
   });
 
   it('returns model alone when provider is empty', () => {

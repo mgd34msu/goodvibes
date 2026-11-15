@@ -171,6 +171,12 @@ describe('llama.cpp stop reason mapper', () => {
   it('maps null (no tools) → completed', () => {
     expect(mapLlamaCppStopReason(null, false)).toBe<ChatStopReason>('completed');
   });
+  it('maps content_filter → content_filter', () => {
+    expect(mapLlamaCppStopReason('content_filter', false)).toBe<ChatStopReason>('content_filter');
+  });
+  it('maps a value it does not know → unknown, not a clean completion', () => {
+    expect(mapLlamaCppStopReason('eos_token', false)).toBe<ChatStopReason>('unknown');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -250,104 +256,16 @@ describe('LM Studio stop reason mapper', () => {
   it('maps failed → error', () => {
     expect(mapLmStudioStopReason('failed', false)).toBe<ChatStopReason>('error');
   });
+  it('maps incomplete for content_filter → content_filter', () => {
+    expect(mapLmStudioStopReason('incomplete', false, 'content_filter')).toBe<ChatStopReason>('content_filter');
+  });
+  it('maps incomplete for max_output_tokens → max_tokens', () => {
+    expect(mapLmStudioStopReason('incomplete', false, 'max_output_tokens')).toBe<ChatStopReason>('max_tokens');
+  });
+  it('maps incomplete for a reason it does not know → unknown', () => {
+    expect(mapLmStudioStopReason('incomplete', false, 'something_new')).toBe<ChatStopReason>('unknown');
+  });
   it('maps undefined → completed', () => {
     expect(mapLmStudioStopReason(undefined, false)).toBe<ChatStopReason>('completed');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration, llama.cpp provider wiring
-// ---------------------------------------------------------------------------
-
-describe('llama.cpp provider stop-reason wiring', () => {
-  it('tool_calls finish_reason → tool_call stopReason', () => {
-    // Simulates: choice.finish_reason='tool_calls', no accumulated tool calls
-    expect(mapLlamaCppStopReason('tool_calls', false)).toBe<ChatStopReason>('tool_call');
-  });
-
-  it('accumulated tool calls → tool_call stopReason regardless of finish_reason', () => {
-    expect(mapLlamaCppStopReason('stop', true)).toBe<ChatStopReason>('tool_call');
-  });
-
-  it('length finish_reason → max_tokens stopReason', () => {
-    expect(mapLlamaCppStopReason('length', false)).toBe<ChatStopReason>('max_tokens');
-  });
-
-  it('stop finish_reason → completed stopReason', () => {
-    expect(mapLlamaCppStopReason('stop', false)).toBe<ChatStopReason>('completed');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration, OpenAI Codex provider wiring
-// ---------------------------------------------------------------------------
-
-describe('OpenAI Codex provider stop-reason wiring', () => {
-  it('response.completed with tool calls → tool_call stopReason', () => {
-    // Simulates: status='completed', resolvedToolCalls.length > 0
-    expect(mapCodexStopReason('completed', true)).toBe<ChatStopReason>('tool_call');
-  });
-
-  it('response.completed with no tool calls → completed stopReason', () => {
-    expect(mapCodexStopReason('completed', false)).toBe<ChatStopReason>('completed');
-  });
-
-  it('response.incomplete → max_tokens stopReason', () => {
-    expect(mapCodexStopReason('incomplete', false)).toBe<ChatStopReason>('max_tokens');
-  });
-
-  it('response.failed → error stopReason', () => {
-    expect(mapCodexStopReason('failed', false)).toBe<ChatStopReason>('error');
-  });
-
-  it('response.cancelled → error stopReason', () => {
-    expect(mapCodexStopReason('cancelled', false)).toBe<ChatStopReason>('error');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Integration, LM Studio provider wiring
-// ---------------------------------------------------------------------------
-
-describe('LM Studio provider stop-reason wiring', () => {
-  it('response.completed with tool calls → tool_call stopReason', () => {
-    // Simulates: status='completed', resolvedToolCalls.length > 0
-    expect(mapLmStudioStopReason('completed', true)).toBe<ChatStopReason>('tool_call');
-  });
-
-  it('response.completed with no tool calls → completed stopReason', () => {
-    expect(mapLmStudioStopReason('completed', false)).toBe<ChatStopReason>('completed');
-  });
-
-  it('response.incomplete → max_tokens stopReason', () => {
-    expect(mapLmStudioStopReason('incomplete', false)).toBe<ChatStopReason>('max_tokens');
-  });
-
-  it('response.failed → error stopReason', () => {
-    expect(mapLmStudioStopReason('failed', false)).toBe<ChatStopReason>('error');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// ChatStopReason type exhaustiveness
-// ---------------------------------------------------------------------------
-
-describe('ChatStopReason type exhaustiveness', () => {
-  it('all canonical values are valid ChatStopReason literals', () => {
-    const allValues: ChatStopReason[] = [
-      'completed',
-      'max_tokens',
-      'tool_call',
-      'stop_sequence',
-      'content_filter',
-      'error',
-      'unknown',
-    ];
-    // Every value round-trips through a type-safe assignment
-    for (const v of allValues) {
-      const r: ChatStopReason = v;
-      expect(typeof r).toBe('string');
-    }
-    expect(allValues).toHaveLength(7);
   });
 });

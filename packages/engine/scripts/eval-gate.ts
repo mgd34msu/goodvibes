@@ -8,7 +8,8 @@
  * uses (EvalRunner → scoreScenario → the gate), compares each suite against the
  * checked-in baseline (eval/baseline.json), prints per-scenario results, and
  * exits NON-ZERO when ANY scenario fails its absolute per-dimension floor OR
- * regresses beyond the threshold versus the baseline. A clean run exits 0.
+ * regresses beyond the threshold versus the baseline, or when the baseline and the
+ * run disagree on the scenario set (unbaselined or missing scenarios). A clean run exits 0.
  *
  * Per-job honesty: every scenario's PASS/FAIL and score is printed, and the
  * final summary states floor failures and regressions explicitly, no silent
@@ -42,6 +43,7 @@ if (!baseline) {
 const runner = new EvalRunner();
 let floorFailures = 0;
 let regressions = 0;
+let baselineGaps = 0;
 
 for (const [suite, scenarios] of Object.entries(GATE_SUITES)) {
   const result = await runner.runSuite(suite, scenarios);
@@ -52,6 +54,7 @@ for (const [suite, scenarios] of Object.entries(GATE_SUITES)) {
 
   floorFailures += gate.floorFailures.length;
   regressions += gate.regressions.length;
+  baselineGaps += gate.unbaselined.length + gate.missingFromRun.length;
 }
 
 console.log('-'.repeat(72));
@@ -59,6 +62,13 @@ if (floorFailures > 0 || regressions > 0) {
   console.error(
     `[eval-gate] FAIL: ${floorFailures} floor failure(s), ${regressions} regression(s) ` +
       `against baseline "${baseline.label}".`,
+  );
+  process.exit(1);
+}
+if (baselineGaps > 0) {
+  console.error(
+    `[eval-gate] FAIL: ${baselineGaps} scenario(s) are not in the baseline or missing from this run, so they cannot be regression-checked. ` +
+      'Regenerate the baseline with: bun run eval:baseline',
   );
   process.exit(1);
 }

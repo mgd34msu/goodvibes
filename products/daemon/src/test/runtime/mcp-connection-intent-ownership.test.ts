@@ -2,6 +2,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { McpClient } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { externalProtocolFixture, deferred, until } from '../helpers/external-protocol-fixture.js';
+import { settleTurns } from '../helpers/turns.js';
 
 const fixtures: Array<Awaited<ReturnType<typeof externalProtocolFixture>>> = [];
 afterEach(async () => { for (const fixture of fixtures.splice(0).reverse()) await fixture.close(); });
@@ -60,8 +61,9 @@ test('daemon close drains a cancelled pending MCP transport before resolving', a
     await p.entered.promise;
     closing = f.daemon.services.close();
     await cleanupEntered.promise;
-    const settled = await Promise.race([closing.then(() => 'closed'), new Promise<string>(resolve => setTimeout(() => resolve('waiting'), 200))]);
-    expect(settled).toBe('waiting');
+    let closeSettled = false; void closing.then(() => { closeSettled = true; }, () => { closeSettled = true; });
+    await settleTurns();
+    expect(closeSettled).toBe(false);
   } finally { cleanupRelease.resolve(); p.release.resolve(); await pending; await closing; held.mockRestore(); p.server.stop(true); }
 });
 
@@ -74,7 +76,7 @@ test('explicit disconnect cancels negotiation before a peer answers', async () =
     expect(await f.registry.disconnectServer('pending-review')).toBe(true);
     expect(await pending).toBe('cancelled');
     expect(f.registry.getClient('pending-review')).toBeUndefined();
-    p.release.resolve(); await new Promise(resolve => setImmediate(resolve));
+    p.release.resolve(); await settleTurns();
     expect(f.registry.getClient('pending-review')).toBeUndefined();
   } finally { p.release.resolve(); await pending; p.server.stop(true); }
 });

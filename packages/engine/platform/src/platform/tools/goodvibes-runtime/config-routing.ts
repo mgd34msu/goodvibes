@@ -285,6 +285,24 @@ export async function applyRoutedConfigWrite(
 }
 
 /**
+ * After a local reset, says why the reset did not take effect (a store that still holds a value, a
+ * project overlay that wins on reload), or null when the effective value is the default.
+ */
+export function describeIncompleteLocalReset(configManager: ConfigManager, key: ConfigKey, defaultValue: unknown): string | null {
+  const persistedTo = localStorePathForKey(configManager, key);
+  const stored = readKeyFromFile(persistedTo, key);
+  if (stored.present && !valuesMatch(stored.value, defaultValue)) {
+    return `${key} was reset in memory but ${persistedTo} still holds ${JSON.stringify(stored.value)}, so the reset is NOT applied.`;
+  }
+  const projectPath = configManager.getProjectConfigPath?.();
+  const shadow = projectPath ? readKeyFromFile(projectPath, key) : { present: false, value: undefined };
+  if (shadow.present && !valuesMatch(shadow.value, defaultValue)) {
+    return `${key} was reset in ${persistedTo}, but a project overlay at ${projectPath} sets it to ${JSON.stringify(shadow.value)} and wins on reload. The reset will NOT take effect; remove it from the overlay.`;
+  }
+  return null;
+}
+
+/**
  * Read `key` from the runtime that owns it, and say where the answer came from.
  *
  * A daemon-owned key is read live over the control plane when a daemon is
@@ -349,13 +367,31 @@ export async function readRoutedConfigValue(
     };
   }
   const found = readDotPath(snapshot.config, key);
+  if (!found.present) return notInDaemonSnapshot(configManager, key, ownership);
   return {
     key,
-    value: found.present ? found.value : configManager.get(key),
+    value: found.value,
     available: true,
     readFrom: 'daemon',
     source: snapshot.endpoint.baseUrl,
     scope,
+    ownership,
+  };
+}
+
+/**
+ * The daemon answered but does not list this key, so the value shown is this
+ * host's own (the schema default or a local file). Labelled as local so it is
+ * never mistaken for a setting the daemon reported.
+ */
+function notInDaemonSnapshot(configManager: ConfigManager, key: ConfigKey, ownership: string): ConfigReadResult {
+  return {
+    key,
+    value: configManager.get(key),
+    available: true,
+    readFrom: 'file',
+    source: configManager.getConfigPath(),
+    scope: 'daemon',
     ownership,
   };
 }
@@ -399,9 +435,10 @@ export async function readRoutedConfigValues(
       };
     }
     const found = readDotPath(remote, key);
+    if (!found.present) return notInDaemonSnapshot(configManager, key, ownership);
     return {
       key,
-      value: found.present ? found.value : configManager.get(key),
+      value: found.value,
       available: true,
       readFrom: 'daemon',
       source: endpoint.baseUrl,

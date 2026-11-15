@@ -103,7 +103,7 @@ describe('private workspace package verification', () => {
     expect(report.issues).toContain('npm tarball includes forbidden path: vendor/fixture.txt');
   }, 30_000);
 
-  test('published-package fallback requirements are not relaxed by the private branch', () => {
+  test('a published package still needs its packed GOODVIBES.md', () => {
     const root = workspaceFixture();
     const path = join(root, 'package.json');
     const manifest = JSON.parse(readFileSync(path, 'utf8')); manifest.private = false;
@@ -111,8 +111,6 @@ describe('private workspace package verification', () => {
     const report = verifyPackageCliInstall(root);
     expect(report.distribution).toBe('published-package');
     expect(report.workspace).toBeUndefined();
-    expect(report.issues).toContain('bin target lacks vendored binary fallback: goodvibes');
-    expect(report.issues).toContain('bin target lacks Bun source fallback: goodvibes');
     expect(report.issues).toContain('npm tarball missing required path: .goodvibes/GOODVIBES.md');
   }, 30_000);
 });

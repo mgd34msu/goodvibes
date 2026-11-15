@@ -1,6 +1,6 @@
 /** Random keyfile ownership and AES-256-GCM secret-store envelopes. */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { dirname } from 'path';
 import { logger } from '../utils/logger.js';
@@ -54,6 +54,11 @@ const KEYFILE_PATTERN = /^[0-9a-f]{64}$/i;
 
 function readKeyfile(keyFilePath: string): Buffer {
   const raw = readFileSync(keyFilePath, 'utf-8').trim();
+  if (raw === '') {
+    throw new SecretStoreUnreadableError(
+      `Secrets keyfile at ${keyFilePath} is empty, which means a first start was interrupted while creating it. If no encrypted secrets store exists yet, delete this file and retry; otherwise restore it from backup.`,
+    );
+  }
   if (!KEYFILE_PATTERN.test(raw)) {
     throw new SecretStoreUnreadableError(
       `Secrets keyfile at ${keyFilePath} is malformed. Restore it from backup; without the original key, existing encrypted stores cannot be read.`,
@@ -65,11 +70,27 @@ function readKeyfile(keyFilePath: string): Buffer {
 function writeKeyfileExclusive(keyFilePath: string, key: Buffer): boolean {
   mkdirSync(dirname(keyFilePath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(keyFilePath), 0o700);
+  const content = `${key.toString('hex')}\n`;
+  // The key is written to a private temp file first and then linked into place,
+  // so the keyfile never exists half-written: a racing process either sees no
+  // file or the complete key. A link never replaces an existing keyfile.
+  const temp = `${keyFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
-    writeFileSync(keyFilePath, `${key.toString('hex')}\n`, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw err;
+    writeFileSync(temp, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+    try {
+      linkSync(temp, keyFilePath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      // A filesystem without hard links: fall back to exclusive creation.
+      try {
+        writeFileSync(keyFilePath, content, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
+      } catch (fallbackErr) {
+        if ((fallbackErr as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        throw fallbackErr;
+      }
+    }
+  } finally {
+    try { unlinkSync(temp); } catch { /* the temp file may never have been created */ }
   }
   chmodSync(keyFilePath, 0o600);
   return true;
@@ -92,6 +113,11 @@ export function loadOrCreateKeyfile(keyFilePath: string): Buffer {
   }
   logger.info('SecretsManager: generated new secrets keyfile', { path: keyFilePath });
   return key;
+}
+
+/** The key from an existing keyfile, or null when there is none. Never creates one. */
+export function loadExistingKeyfile(keyFilePath: string): Buffer | null {
+  return existsSync(keyFilePath) ? readKeyfile(keyFilePath) : null;
 }
 
 /**

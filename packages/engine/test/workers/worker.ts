@@ -9,19 +9,16 @@
  * consumers. It contains no node: imports and no Bun.* API calls, making it
  * a direct fit for Workers.
  *
- * Static imports: Miniflare 4 requires static import specifiers (no dynamic
- * import with variable paths). We import from relative paths that Miniflare
- * resolves via modulesRoot pointing to packages/platform/dist.
+ * Both harnesses (Miniflare in workers.test.ts, `wrangler dev` in
+ * ../workers-wrangler) bundle this one file, so the routes cannot drift apart.
+ * The built platform is imported by relative path and inlined by esbuild.
  *
  * Workers-specific notes embedded in each handler.
  */
 
 import type { ExportedHandler, ExecutionContext } from '@cloudflare/workers-types';
-// Static imports resolved via Miniflare modulesRoot -> packages/platform/dist
-// @ts-expect-error resolved by esbuild at bundle time, not tsc
-import { createWebGoodVibesPlatform } from './web.js';
-// @ts-expect-error resolved by esbuild at bundle time, not tsc
-import * as PlatformErrors from './errors.js';
+import { createWebGoodVibesPlatform } from '../../platform/dist/web.js';
+import * as PlatformErrors from '../../platform/dist/errors.js';
 
 interface Env {}
 
@@ -88,7 +85,7 @@ async function handleAuth(): Promise<Response> {
  * Workers concern: setTimeout used in backoff retry is request-scoped.
  * For this test we do NOT retry (maxAttempts: 1) to avoid any
  * cross-request timer issues. Long-running retries with persistent
- * timers across request boundaries would break; see NOTES.md.
+ * timers across request boundaries would break.
  *
  * fetch is native in Workers, no polyfill needed.
  *
@@ -134,7 +131,7 @@ async function handleTransportSuccess(): Promise<Response> {
   const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
-    fetch: mockFetch,
+    fetch: mockFetch as unknown as typeof fetch,
     retry: { maxAttempts: 1 }, // no retries: avoid cross-request timer issues
   });
 
@@ -180,7 +177,7 @@ async function handleTransportError(): Promise<Response> {
   const platformClient = createWebGoodVibesPlatform({
     baseUrl: 'http://127.0.0.1:9999',
     authToken: 'test-token',
-    fetch: mockFetch,
+    fetch: mockFetch as unknown as typeof fetch,
     retry: { maxAttempts: 1 }, // no retries
   });
 
@@ -288,7 +285,7 @@ function handleGlobals(): Response {
       cryptoRandomUUID: typeof crypto?.randomUUID === 'function',
       // NOT available in Workers (server-upgrade only, no client WS)
       WebSocket: typeof WebSocket !== 'undefined',
-      // NOT available in production Workers (Miniflare simulates it)
+      // Miniflare and `wrangler dev --local` inject it; production Workers do not.
       EventSource: typeof EventSource !== 'undefined',
       // NOT available in Workers (no DOM)
       location: typeof (globalThis as Record<string, unknown>).location !== 'undefined',
@@ -301,6 +298,63 @@ function handleGlobals(): Response {
       Buffer: typeof (globalThis as Record<string, unknown>).Buffer !== 'undefined',
     },
   });
+}
+
+/**
+ * /realtime-without-eventsource, SSE realtime must not need the EventSource
+ * global: production Workers lack it, but Miniflare injects it, so a platform
+ * that reached for it would pass locally and fail in production. The global is
+ * removed from the isolate before the stream opens, and one frame is delivered
+ * through the mocked fetch.
+ */
+async function handleRealtimeWithoutEventSource(): Promise<Response> {
+  const scope = globalThis as Record<string, unknown>;
+  const original = Object.getOwnPropertyDescriptor(scope, 'EventSource');
+  Object.defineProperty(scope, 'EventSource', { value: undefined, configurable: true, writable: true });
+  const eventSourceAbsent = typeof EventSource === 'undefined';
+
+  const envelope = {
+    type: 'TURN_SUBMITTED',
+    ts: 1,
+    sessionId: 'workers-sse-session',
+    payload: { type: 'TURN_SUBMITTED', turnId: 'workers-sse-turn' },
+  };
+  const mockFetch = async (): Promise<Response> => new Response(
+    `: ready\n\nevent: turn\ndata: ${JSON.stringify(envelope)}\n\n`,
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  );
+
+  type Delivery = { type: string; sessionId: string | undefined } | null;
+  const errors: string[] = [];
+  let constructionError: string | null = null;
+  let delivered: Delivery = null;
+  let stop = (): void => {};
+  try {
+    // An error before delivery ends the wait; if neither happens the request
+    // hangs and the test's own timeout reports it.
+    delivered = await new Promise<Delivery>((settle) => {
+      const platformClient = createWebGoodVibesPlatform({
+        baseUrl: 'http://127.0.0.1:9999',
+        authToken: 'test-token',
+        fetch: mockFetch as unknown as typeof fetch,
+        realtime: {
+          sseReconnect: { enabled: false },
+          onError: (error: unknown) => { errors.push(error instanceof Error ? error.message : String(error)); settle(null); },
+        },
+      });
+      stop = platformClient.realtime.viaSse().turn.onEnvelope('TURN_SUBMITTED', (received) => {
+        settle({ type: received.type, sessionId: received.sessionId });
+      });
+    });
+  } catch (err: unknown) {
+    constructionError = String(err);
+  } finally {
+    stop();
+    if (original) Object.defineProperty(scope, 'EventSource', original);
+    else delete scope.EventSource;
+  }
+
+  return json({ ok: true, eventSourceAbsent, constructionError, delivered, errors });
 }
 
 // `@cloudflare/workers-types` exports its own nominal `Response` class (used
@@ -317,6 +371,8 @@ const handler = {
 
     try {
       switch (url.pathname) {
+        case '/health':
+          return new Response('ok', { status: 200 });
         case '/smoke':
           return handleSmoke();
         case '/auth':
@@ -331,6 +387,8 @@ const handler = {
           return await handleCrypto();
         case '/globals':
           return handleGlobals();
+        case '/realtime-without-eventsource':
+          return await handleRealtimeWithoutEventSource();
         default:
           return new Response('Not Found', { status: 404 });
       }

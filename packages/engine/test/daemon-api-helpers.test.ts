@@ -33,7 +33,7 @@ import {
   summarizeErrorForRecord,
 } from '../daemon-api/src/error-response.js';
 import { estimateJsonByteLengthWithinLimit } from '../daemon-api/src/remote-routes.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 import type { FailureCategory } from '@goodvibes-jev/engine/errors';
 import { useFailureReadings } from './_helpers/failure-readings.ts';
 
@@ -632,5 +632,28 @@ describe('remote-routes: estimateJsonByteLengthWithinLimit cap-before-allocate',
     if (result.kind === 'ok') {
       expect(result.byteLength).toBeLessThanOrEqual(1000);
     }
+  });
+
+  test('a huge object key counts against the cap', () => {
+    const result = estimateJsonByteLengthWithinLimit({ ['k'.repeat(5_000)]: 1 }, 1000);
+    expect(result).toEqual({ kind: 'ok', byteLength: 1001 });
+  });
+
+  test('numbers and booleans count their printed length, so a small number array fits its real size', () => {
+    const values = Array(200).fill(1);
+    const real = JSON.stringify(values).length;
+    const result = estimateJsonByteLengthWithinLimit(values, real + 5);
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.byteLength).toBeGreaterThanOrEqual(real);
+      expect(result.byteLength).toBeLessThanOrEqual(real + 5);
+    }
+  });
+
+  test('a payload one byte over the cap is reported over it', () => {
+    const value = { flag: true, count: 12345, nothing: null };
+    const real = JSON.stringify(value).length;
+    const result = estimateJsonByteLengthWithinLimit(value, real - 2);
+    expect(result).toEqual({ kind: 'ok', byteLength: real - 1 });
   });
 });

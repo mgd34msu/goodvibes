@@ -29,6 +29,14 @@ export class ThinkingStallClock {
   private startedAt: number | null = null;
   private lastDeltaAt = 0;
   private lastOutputTokens = 0;
+  private reconnectAttempt: number | undefined;
+  private reconnectMaxAttempts: number | undefined;
+
+  /** A provider call is reconnecting after a transport error (STREAM_RETRY); cleared by the next token or reset(). */
+  noteReconnect(attempt: number, maxAttempts: number): void {
+    this.reconnectAttempt = attempt;
+    this.reconnectMaxAttempts = maxAttempts;
+  }
 
   tick(streamingOutputTokens: number, toolActive: boolean, nowMs: number): ThinkingStallInfo | undefined {
     if (this.startedAt === null) {
@@ -38,12 +46,23 @@ export class ThinkingStallClock {
     } else if (streamingOutputTokens > this.lastOutputTokens) {
       this.lastDeltaAt = nowMs;
       this.lastOutputTokens = streamingOutputTokens;
+      // A byte arriving means the reconnect worked.
+      this.reconnectAttempt = undefined;
+      this.reconnectMaxAttempts = undefined;
     }
-    return UIFactory.computeRenderStallInfo({ toolActive, lastDeltaAtMs: this.lastDeltaAt, nowMs });
+    return UIFactory.computeRenderStallInfo({
+      toolActive,
+      lastDeltaAtMs: this.lastDeltaAt,
+      nowMs,
+      reconnectAttempt: this.reconnectAttempt,
+      reconnectMaxAttempts: this.reconnectMaxAttempts,
+    });
   }
 
   reset(): void {
     this.startedAt = null;
+    this.reconnectAttempt = undefined;
+    this.reconnectMaxAttempts = undefined;
   }
 
   /** Ms since the turn started, undefined before the first tick. */
@@ -54,7 +73,7 @@ export class ThinkingStallClock {
 
 export interface ThinkingOverlayDeps {
   readonly orchestrator: Pick<Orchestrator,
-    'isThinking' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'>;
+    'isTurnActive' | 'getSpinner' | 'thinkingFrame' | 'streamingInputTokens' | 'streamingOutputTokens'>;
   readonly configManager: Pick<ConfigManager, 'get'>;
   /** The raw snapshot tool preview (a truthy value means a tool is executing). */
   readonly streamToolPreview: string | undefined;
@@ -76,13 +95,21 @@ export interface ThrobberDeps extends ThinkingOverlayDeps {
 }
 
 /**
+ * A turn occupies main from admission to finalization, before isThinking is
+ * set and after abort clears it; the orchestrator's one occupancy question covers all of it.
+ */
+function mainTurnActive(orchestrator: ThinkingOverlayDeps['orchestrator']): boolean {
+  return orchestrator.isTurnActive;
+}
+
+/**
  * The throbber's state while main works (a turn, a compaction), or null at
  * rest. An idle turn resets the stall clock so the next turn re-seeds. The
  * stall and approval signals decide the honest waiting phrase.
  */
 export function buildThrobberState(deps: ThrobberDeps): ThrobberState | null {
   const now = Date.now();
-  const turnActive = deps.orchestrator.isThinking;
+  const turnActive = mainTurnActive(deps.orchestrator);
   if (!turnActive) deps.clock.reset();
   const toolActive = !!deps.streamToolPreview || deps.activeTool !== null;
   const stallInfo = turnActive ? deps.clock.tick(deps.orchestrator.streamingOutputTokens, toolActive, now) : undefined;
@@ -108,7 +135,7 @@ export function buildThrobberState(deps: ThrobberDeps): ThrobberState | null {
  * is off; the spinner and phrase are the throbber's.
  */
 export function buildThinkingOverlay(deps: ThinkingOverlayDeps): Line[] {
-  if (!deps.orchestrator.isThinking) return [];
+  if (!mainTurnActive(deps.orchestrator)) return [];
   const showPreview = deps.configManager.get('display.showToolPreview') as boolean;
   if (!showPreview || !deps.streamToolPreview) return [];
   return [UIFactory.createToolPreviewRow(deps.width, deps.streamToolPreview)];
@@ -143,7 +170,7 @@ export function createThrobberSource(tools: Parameters<typeof trackActiveTool>[0
       const compacting = isCompacting();
       if (compacting && compactingSinceMs === undefined) compactingSinceMs = Date.now();
       else if (!compacting) compactingSinceMs = undefined;
-      if (!deps.orchestrator.isThinking) activeTool.clear();
+      if (!mainTurnActive(deps.orchestrator)) activeTool.clear();
       const ask = deps.pendingApproval;
       return buildThrobberState({
         ...deps,

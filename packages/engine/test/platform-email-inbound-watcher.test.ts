@@ -19,6 +19,8 @@ useFailureReadings([
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { imapFixturePort } from './_helpers/imap-semantic-port.ts';
 import { beforeEach, afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { ImapTimeoutError } from '../platform/src/platform/email/imap-session.ts';
+import { runIdleRound } from '../platform/src/platform/email/inbound/idle-watcher.ts';
 
 let previousImapPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previousImapPort = installJudgmentPort(imapFixturePort().port); });
@@ -47,11 +49,12 @@ import {
   RecordingSink,
   fixedRandom,
   flush,
-  nudgeUntil,
   waitFor,
-  watcherConnectionPort,
   type RecordingCursorStore,
 } from './_helpers/inbound-watcher-harness.ts';
+
+/** Upper bound for waits that end on a real wire timer; well under the runner's per-test timeout. */
+const WIRE_TIMER_CEILING_MS = 20_000;
 
 const ACCOUNT = 'primary';
 const MAILBOX = 'INBOX';
@@ -97,7 +100,7 @@ async function build(input: {
   });
   const watcher = new InboundMailboxWatcher({
     settings,
-    connections: watcherConnectionPort({
+    connections: imapMailboxConnectionPort({
       connect: () => openMailboxSocket(mailbox.port),
       username: 'watched@example.test',
       password: 'an-app-password',
@@ -174,14 +177,7 @@ describe('inbound watcher: IDLE', () => {
     // only reason to search afterwards is the EXISTS from the handshake.
     harness.mailbox.expunge(101);
 
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.sink.uids.includes(103),
-      'UID 103 delivered',
-      // EXPUNGE, not EXISTS: the search this test asserts must come from the
-      // handshake announcement, so the nudge may not supply one of its own.
-      { line: '* 1 EXPUNGE' },
-    );
+    await waitFor(() => harness.sink.uids.includes(103), 'UID 103 delivered');
     expect(harness.sink.subjects).toEqual(['slipped in during DONE']);
     expect(count(harness.mailbox.commands, SEARCH_COMMAND)).toBeGreaterThan(searchesBefore);
   });
@@ -203,7 +199,7 @@ describe('inbound watcher: IDLE', () => {
     await idleReached(harness);
 
     harness.mailbox.deliver('arrived on a trailing-UID server');
-    await nudgeUntil(harness.mailbox, () => harness.sink.uids.includes(102), 'UID 102 delivered');
+    await waitFor(() => harness.sink.uids.includes(102), 'UID 102 delivered');
 
     expect(harness.sink.subjects).toEqual(['arrived on a trailing-UID server']);
     expect(harness.sink.delivered[0]?.envelope.from).toBe('sender102@sender.test');
@@ -225,13 +221,7 @@ describe('inbound watcher: IDLE', () => {
     // on it would find nothing; treated as a wake-up it finds UID 104.
     harness.mailbox.push('* 2 EXISTS');
 
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.sink.uids.length > 0,
-      'a message delivered',
-      // The same undersized total the test is about, re-sent verbatim.
-      { line: '* 2 EXISTS' },
-    );
+    await waitFor(() => harness.sink.uids.length > 0, 'a message delivered');
     expect(harness.sink.uids).toEqual([104]);
     expect(harness.sink.uids).not.toContain(2);
     expect(harness.mailbox.commands.some((line) => line.endsWith('UID SEARCH UID 104:*')))
@@ -250,14 +240,7 @@ describe('inbound watcher: IDLE', () => {
     harness.mailbox.expunge(101);
     // Wait for the IDLE to be torn down and re-issued, which proves the
     // EXPUNGE was seen and acted on rather than simply not arriving yet.
-    await nudgeUntil(
-      harness.mailbox,
-      () => count(harness.mailbox.commands, IDLE_COMMAND) >= 2,
-      'the IDLE to be re-issued after the EXPUNGE',
-      // EXPUNGE only. An EXISTS nudge would cause exactly the refetch this
-      // test exists to prove does not happen.
-      { line: '* 1 EXPUNGE' },
-    );
+    await waitFor(() => count(harness.mailbox.commands, IDLE_COMMAND) >= 2, 'the IDLE to be re-issued after the EXPUNGE');
     await flush();
 
     expect(count(harness.mailbox.commands, SEARCH_COMMAND)).toBe(searchesBefore);
@@ -290,6 +273,33 @@ describe('inbound watcher: IDLE', () => {
     expect(count(harness.mailbox.commands, SEARCH_COMMAND)).toBeGreaterThanOrEqual(2);
   });
 
+  test('an IDLE whose DONE is never completed ends the round as a stalled re-issue, on the injected clock', async () => {
+    // Deterministic twin of the socket-level stall test below: the wire's own
+    // timeout is replaced by a wire that reports it, so nothing waits on real time.
+    const wire: Parameters<typeof runIdleRound>[0]['wire'] = {
+      onUntagged: () => () => undefined,
+      sendCommand: async () => 'A0001',
+      sendRawLine: async () => undefined,
+      awaitContinuation: async () => undefined,
+      awaitTag: async () => { throw new ImapTimeoutError('DONE was never completed'); },
+      waitForUntagged: (_predicate, options) => new Promise<string>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => { reject(new Error('cancelled')); }, { once: true });
+      }),
+    };
+    const clock = new FakeClock();
+    const settings = resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX, idleReissueMs: 60_000, operationTimeoutMs: 150 });
+    const round = runIdleRound({ wire, clock, settings, signal: new AbortController().signal, roundIndex: 1 });
+
+    await clock.waitForSleepers(1, 'the IDLE re-issue timer');
+    await clock.advance(60_000);
+    const result = await round;
+
+    expect(result.outcome).toBe('reissue-stalled');
+    expect(result.wake.endedBy).toBe('reissue');
+    expect(result.error).toBeInstanceOf(ImapTimeoutError);
+    expect(clock.pending).toBe(0);
+  });
+
   test('a re-issue whose round trip stalls is treated as a dead connection', async () => {
     const harness = await build({
       server: { initial: [message(101, 'a')], stallAfterDoneCount: 1 },
@@ -303,13 +313,16 @@ describe('inbound watcher: IDLE', () => {
     // The server reads DONE and then says nothing. Without a liveness bound
     // this reads as a healthy IDLE for as long as the process lives.
     await harness.clock.advance(60_000);
+    // The stall is detected by the wire's real timer (operationTimeoutMs), so the
+    // ceiling is far above it: it bounds a hang, it does not set the pace.
     await waitFor(
       () => harness.clock.pending > 0 && harness.clock.nextDueIn <= 1_000,
       'the reconnect backoff to be armed after the stalled re-issue',
+      WIRE_TIMER_CEILING_MS,
     );
     await harness.clock.advance(1_000);
 
-    await waitFor(() => harness.mailbox.connectionCount >= 2, 'a rebuilt connection');
+    await waitFor(() => harness.mailbox.connectionCount >= 2, 'a rebuilt connection', WIRE_TIMER_CEILING_MS);
     expect(harness.watcher.status.verdict.state).not.toBe('insufficient');
   });
 });
@@ -359,9 +372,11 @@ describe('inbound watcher: choosing push or poll', () => {
       clientTimeoutMs: 250,
     });
     harness.watcher.start();
+    // The unanswered CAPABILITY ends on the wire's real timer (clientTimeoutMs).
     await waitFor(
       () => count(harness.mailbox.commands, SEARCH_COMMAND) >= 1,
       'the first poll',
+      WIRE_TIMER_CEILING_MS,
     );
 
     expect(count(harness.mailbox.commands, IDLE_COMMAND)).toBe(0);
@@ -387,6 +402,47 @@ describe('inbound watcher: choosing push or poll', () => {
     // Refusal is answered on the SAME connection: reconnecting would only
     // find the same refusal.
     expect(harness.mailbox.connectionCount).toBe(1);
+  });
+});
+
+describe('inbound watcher: what it reports while polling', () => {
+  function recordModes(harness: Harness): string[] {
+    const seen: string[] = [];
+    const forward = harness.observer.stateChanged.bind(harness.observer);
+    harness.observer.stateChanged = (transition) => {
+      seen.push(`${transition.to.reason}:${harness.watcher.status.mode}`);
+      forward(transition);
+    };
+    return seen;
+  }
+
+  test('the mode already says polling when the polling verdict is announced', async () => {
+    const absent = await build({ server: { idle: 'absent', initial: [message(101, 'a')] }, settings: { pollIntervalMs: 30_000 } });
+    const absentModes = recordModes(absent);
+    absent.watcher.start();
+    await waitFor(() => absentModes.some((entry) => entry.startsWith('polling-no-idle')), 'the no-IDLE verdict');
+    expect(absentModes.find((entry) => entry.startsWith('polling-no-idle'))).toBe('polling-no-idle:polling');
+
+    const refused = await build({ server: { refuseIdle: true, initial: [message(101, 'a')] }, settings: { pollIntervalMs: 30_000 } });
+    const refusedModes = recordModes(refused);
+    refused.watcher.start();
+    await waitFor(() => refusedModes.some((entry) => entry.startsWith('polling-idle-refused')), 'the refused-IDLE verdict');
+    expect(refusedModes.find((entry) => entry.startsWith('polling-idle-refused'))).toBe('polling-idle-refused:polling');
+  });
+
+  test('a connection lost between polls backs off and says so instead of logging straight back in', async () => {
+    const harness = await build({ server: { idle: 'absent', initial: [message(101, 'a')] }, settings: { pollIntervalMs: 30_000 } });
+    harness.watcher.start();
+    await waitFor(() => count(harness.mailbox.commands, SEARCH_COMMAND) >= 1, 'the first poll');
+    await harness.clock.waitForSleepers(1, 'the poll interval');
+
+    harness.mailbox.dropConnections();
+    await waitFor(() => harness.watcher.status.verdict.reason === 'reconnecting', 'the reconnecting verdict');
+    await harness.clock.waitForDue(5_000, 'the reconnect backoff');
+    expect(harness.mailbox.connectionCount).toBe(1);
+
+    await harness.clock.advance(5_000);
+    await waitFor(() => harness.mailbox.connectionCount >= 2, 'the reconnect after the backoff');
   });
 });
 
@@ -755,7 +811,7 @@ describe('inbound watcher: can it read message content at all', () => {
     expect(harness.watcher.status.running).toBe(true);
     expect(harness.watcher.status.mode).toBe('idle');
     harness.mailbox.deliver('arrived after the empty probe');
-    await nudgeUntil(harness.mailbox, () => harness.sink.delivered.length >= 1, 'the delivered message');
+    await waitFor(() => harness.sink.delivered.length >= 1, 'the delivered message');
     expect(harness.observer.terminals).toEqual([]);
   });
 
@@ -793,7 +849,7 @@ describe('inbound watcher: can it read message content at all', () => {
     expect(harness.observer.terminals).toEqual([]);
     expect(harness.watcher.status.running).toBe(true);
     harness.mailbox.deliver('arrived after a zero-octet probe');
-    await nudgeUntil(harness.mailbox, () => harness.sink.delivered.length >= 1, 'the delivered message');
+    await waitFor(() => harness.sink.delivered.length >= 1, 'the delivered message');
   });
 
   test('a server that hands over a body passes the probe and reaches healthy', async () => {
@@ -846,15 +902,7 @@ describe('inbound watcher: the cursor', () => {
     harness.mailbox.deliver('processed on the second attempt');
 
     // First attempt: fetched, refused between fetch and completion.
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.sink.attempts.length >= 1,
-      'the first delivery attempt',
-      // The cursor is refused here, so a duplicate wake re-delivers and the
-      // exact-equality assertions below would fail. A long interval keeps this
-      // a recovery from a lost edge rather than a second stimulus.
-      { intervalMs: 500 },
-    );
+    await waitFor(() => harness.sink.attempts.length >= 1, 'the first delivery attempt');
     expect((await harness.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid)
       .toBe(101);
     expect(harness.cursors.advances).toEqual([]);
@@ -893,12 +941,7 @@ describe('inbound watcher: the cursor', () => {
     harness.mailbox.push('* 26 EXISTS');
     // The wake is driven until it takes; the cursor assertion below is the
     // real subject of the test.
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.sink.uids.length > 0,
-      'the bulk delta to start arriving',
-      { line: '* 26 EXISTS' },
-    );
+    await waitFor(() => harness.sink.uids.length > 0, 'the bulk delta to start arriving');
 
     // Waits on the CURSOR, not on the sink. The cursor advances only after
     // deliver() resolves, so "25 messages delivered" is one step short of
@@ -1069,11 +1112,7 @@ describe('inbound watcher: a server that does not report UIDNEXT', () => {
     await idleReached(harness);
 
     harness.mailbox.deliver('the verification email');
-    await nudgeUntil(
-      harness.mailbox,
-      () => harness.sink.uids.length >= 1,
-      'the newly arrived message',
-    );
+    await waitFor(() => harness.sink.uids.length >= 1, 'the newly arrived message');
     // Same ordering as above: the sink sees the message before the cursor
     // records it, so the cursor assertion waits on the cursor.
     await waitFor(
@@ -1137,6 +1176,72 @@ describe('inbound watcher: a server that does not report UIDNEXT', () => {
       .toBe(false);
     const established = harness.observer.notes.find((note) => note.kind === 'cursor-established');
     expect(established?.detail).not.toContain('without reporting a UIDNEXT');
+  });
+});
+
+describe('inbound watcher: restarting', () => {
+  test('a start right after a stop runs one loop, not the unwinding one beside the new one', async () => {
+    const { store: cursors } = await makeCursorStore();
+    let opening = 0;
+    let peak = 0;
+    let opens = 0;
+    const watcher = new InboundMailboxWatcher({
+      settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX }),
+      connections: {
+        open: (reading) => new Promise((_resolve, reject) => {
+          opens += 1;
+          opening += 1;
+          peak = Math.max(peak, opening);
+          reading?.signal?.addEventListener('abort', () => { opening -= 1; reject(new Error('aborted while opening')); });
+        }),
+      },
+      cursors,
+      sink: new RecordingSink(),
+      clock: new FakeClock(),
+      random: fixedRandom(0.5),
+      observer: new RecordingObserver(),
+    });
+    watcher.start();
+    await flush();
+    const stopping = watcher.stop();
+    watcher.start();
+    await stopping;
+    await flush();
+    expect(opens).toBe(2);
+    expect(peak).toBe(1);
+    expect(watcher.status.running).toBe(true);
+    await watcher.stop();
+    await flush();
+    expect(opening).toBe(0);
+    expect(watcher.status.running).toBe(false);
+  });
+
+  test('a stop that follows a start waiting behind the unwinding loop cancels it', async () => {
+    const { store: cursors } = await makeCursorStore();
+    let opens = 0;
+    const watcher = new InboundMailboxWatcher({
+      settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX }),
+      connections: {
+        open: (reading) => new Promise((_resolve, reject) => {
+          opens += 1;
+          reading?.signal?.addEventListener('abort', () => reject(new Error('aborted while opening')));
+        }),
+      },
+      cursors,
+      sink: new RecordingSink(),
+      clock: new FakeClock(),
+      random: fixedRandom(0.5),
+      observer: new RecordingObserver(),
+    });
+    watcher.start();
+    await flush();
+    const first = watcher.stop();
+    watcher.start();
+    const second = watcher.stop();
+    await Promise.all([first, second]);
+    await flush();
+    expect(opens).toBe(1);
+    expect(watcher.status.running).toBe(false);
   });
 });
 

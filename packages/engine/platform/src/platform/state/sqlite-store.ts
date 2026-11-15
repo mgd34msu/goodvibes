@@ -10,7 +10,7 @@ import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowle
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createSqlJsDatabase } from './sqljs-database.js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { knowledgeRowGenerationFromRows } from '../knowledge/store-row-revisions.js';
 import { types as nativeNodeTypes } from 'node:util';
@@ -18,7 +18,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { openVersionedSchema, sqlJsVersionHandle } from './store-versioning.js';
 import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
-import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation, type SQLiteBaselineObservation } from './sqlite-store-persistence.js';
+import { readSQLitePersistedImage, SQLitePersistedStateChangedError, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation, type SQLiteBaselineObservation } from './sqlite-store-persistence.js';
 import { sqliteLocalObservation } from './sqlite-local-observation.js';
 import { nativeKnowledgeSchemaReadPlanMatches, validateNativeKnowledgeReadSchema, type NativeKnowledgeSchemaReadPlan } from './knowledge-schema-read-plan.js';
 import { knowledgeRecordTableSql } from '../knowledge/store-schema-validation-data.js';
@@ -1340,9 +1340,57 @@ type NativeSchemaValidationAcknowledgment = {
   readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
   readonly schemaVersion: number;
 };
+let atomicWriteCounter = 0;
+
+/**
+ * Replaces `target` with `data` so a crash or a full disk mid-write leaves
+ * either the old file or the new one, never a truncated database: write a
+ * sibling temp file, fsync it, then rename over the target.
+ */
+export function writeFileAtomically(target: string, data: Uint8Array): void {
+  let destination = target;
+  let mode: number | undefined;
+  try {
+    // Replace what a symlink points at, not the link itself.
+    destination = realpathSync(target);
+    mode = statSync(destination).mode & 0o777;
+  } catch { /* no existing file yet */ }
+  atomicWriteCounter += 1;
+  const temporary = `${destination}.${process.pid}.${atomicWriteCounter}.tmp`;
+  let fd: number | undefined;
+  try {
+    // A new database holds tool results and user content, so it is private to the owner; an existing file keeps its mode.
+    fd = openSync(temporary, 'wx', mode ?? 0o600);
+    writeFileSync(fd, data);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    renameSync(temporary, destination);
+  } catch (error) {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* already failing */ } }
+    try { unlinkSync(temporary); } catch { /* temp may not exist */ }
+    throw error;
+  }
+  // The rename is only durable once its directory entry is; not every platform lets a directory be synced, and the file itself is already safe.
+  let directory: number | undefined;
+  try { directory = openSync(dirname(destination), 'r'); fsyncSync(directory); }
+  catch { /* directory sync unsupported here */ }
+  finally { if (directory !== undefined) { try { closeSync(directory); } catch { /* nothing left to release */ } } }
+}
+
+/** A prepared image reached disk, but this cache could not adopt it: the effect landed, and the cache is fenced until it is reopened. Retrying the effect would repeat it. */
+export class SQLitePublishedButFencedError extends Error {
+  constructor(cause: unknown) {
+    super('SQLiteStore: the prepared image was published but this cache could not adopt it; it is fenced until reopened', { cause });
+    this.name = 'SQLitePublishedButFencedError';
+  }
+}
+
 export class SQLiteStore {
   #activationPublication: Readonly<{ physical: string | undefined }> = nativeFreeze({ physical: undefined });
   #activationPublicationFailures = 0;
+  /** A publication reached disk but its directory sync failed, so this cache has not adopted what is on disk. */
+  #indeterminatePublication = false;
   static { captureActivationPublication = (store, nodeId, generation) => store.#captureActivationPublication(nodeId, generation); }
   readonly #artifactReferencePath: string | null;
   #validatedNativeSchema: NativeSchemaValidationAcknowledgment | undefined;
@@ -1366,11 +1414,40 @@ export class SQLiteStore {
   private validateCurrentSchema: ((db: SqlDatabase) => void) | undefined;
   private nativeSchemaReadPlan: NativeKnowledgeSchemaReadPlan | undefined;
   private readonly privateSchemaImages = new WeakSet<SqlDatabase>();
+  /**
+   * The private native read image the last read frame ended with, kept so the
+   * next frame over the same unchanged database does not rebuild it. Reuse
+   * requires the same persisted bytes and identity, the same epochs and an
+   * untouched image; any save, reload or close drops it.
+   */
+  #idleReadImage: {
+    readonly db: SqlDatabase;
+    readonly state: OwnedSqlDatabase;
+    readonly revision: bigint;
+    readonly imageEpoch: number;
+    readonly observationEpoch: number;
+    readonly identity: string;
+    readonly baseline: SQLiteBaselineObservation | undefined;
+    readonly bytes: Buffer;
+    readonly persistence: SQLiteStorePersistence;
+    readonly plan: NativeKnowledgeSchemaReadPlan;
+    readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
+    readonly schemaVersion: number;
+  } | null = null;
+
+  private dropIdleReadImage(): void {
+    const idle = this.#idleReadImage;
+    this.#idleReadImage = null;
+    if (idle) { try { this.closeReadImage(idle.db); } catch { /* The image is unreferenced either way. */ } }
+  }
   private imageEpoch = 0;
   private observationEpoch = 0;
   private persistedReadFrame: { db: SqlDatabase | null; owned: boolean; identity: string | undefined; local: string | undefined; persisted: SQLiteImageObservation | undefined; poisoned: boolean; localState: OwnedSqlDatabase | undefined; localRevision: bigint | undefined; localProbe: string | undefined; localIsolated: boolean; rows: Map<string, ReturnType<SqlDatabase['exec']>>; generations: Map<string, string | null>; assertCurrent: (verifyNative?: boolean) => void } | null = null;
   private admission: Promise<void> = Promise.resolve();
   private readonly activeBatches = new Set<Promise<void>>();
+  /** Prepared publications captured but not yet settled; their staged image
+   * was built from the current local one, so it must not be replaced under them. */
+  private stagedPublications = 0;
   private fenced = false;
 
   private readonly beforePersist: (() => void) | undefined;
@@ -1430,8 +1507,9 @@ export class SQLiteStore {
     }
   }
 
+  /** False while fenced: ordinary writes are refused until the store is reloaded from disk. */
   get isReady(): boolean {
-    return this.db !== null;
+    return this.db !== null && !this.fenced;
   }
 
   /** The on-disk database path, or null for an ephemeral/in-memory store. */
@@ -1440,6 +1518,11 @@ export class SQLiteStore {
   }
 
   async init(schema: (db: SqlDatabase) => void, options: SqliteStoreInitOptions = {}): Promise<void> {
+    if (this.db && this.fenced) {
+      // Reopening a fenced owner means adopting the published image.
+      if (!await this.reloadFromDisk()) this.getDb();
+      return;
+    }
     if (this.db) return;
     if (this.initPromise) return this.initPromise;
 
@@ -1958,8 +2041,25 @@ export class SQLiteStore {
             plan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
             imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, evidence: frame.persisted, baseline: persistedImage?.baseline });
         }
-        try { frame.db = this.openPrivateReadImage(stamp); }
-        finally { if (stamp) privateMapDelete(frameImageStamps, stamp); }
+        const idle = this.#idleReadImage;
+        this.#idleReadImage = null;
+        const reusable = idle && stamp && persisted && this.persistence && plan && frame.persisted && frame.identity !== undefined
+          && idle.identity === frame.identity && idle.baseline === persistedImage?.baseline && idle.baseline !== undefined
+          && idle.imageEpoch === this.imageEpoch && idle.observationEpoch === this.observationEpoch
+          && idle.persistence === this.persistence && idle.plan === plan && idle.validator === this.validateCurrentSchema
+          && idle.schemaVersion === this.schemaVersion && persisted.equals(idle.bytes)
+          && privateMapGet(ownedDatabases, idle.db) === idle.state && !idle.state.inFlight && idle.state.revision === idle.revision;
+        if (idle && !reusable) this.closeReadImage(idle.db);
+        if (reusable) {
+          if (stamp) privateMapDelete(frameImageStamps, stamp);
+          frame.db = idle.db;
+          const origin = privateMapGet(nativeReadFrameIdentities, frame)?.identity;
+          if (origin && frame.persisted) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: idle.db, store: this, origin,
+            evidence: frame.persisted, baseline: idle.baseline, state: idle.state, revision: idle.revision }));
+        } else {
+          try { frame.db = this.openPrivateReadImage(stamp); }
+          finally { if (stamp) privateMapDelete(frameImageStamps, stamp); }
+        }
         frame.owned = true;
         frame.assertCurrent();
       }
@@ -2035,6 +2135,7 @@ export class SQLiteStore {
     privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), persistence: this.persistence, assertCurrent,
       expectedMatches: new WeakMap<ExpectedKnowledgeRecordReadset, boolean>() }));
     this.persistedReadFrame = frame;
+    let completed = false;
     try {
       invoke();
       assertCurrent();
@@ -2050,10 +2151,23 @@ export class SQLiteStore {
         }
         assertCurrent();
       }
+      completed = true;
     } finally {
       this.persistedReadFrame = null;
       const release = privateMapGet(nativeFrameReleases, frame);
       privateMapDelete(nativeFrameReleases, frame);
+      const image = privateMapGet(nativeReadImages, frame), retained = privateMapGet(nativeReadFrameIdentities, frame);
+      const keep = completed && !frame.poisoned && frame.owned && frame.db !== null && image !== undefined && image.db === frame.db
+        && image.baseline !== undefined && retained?.bytes !== undefined && frame.identity !== undefined && this.persistence !== null
+        && this.nativeSchemaReadPlan !== undefined && this.imageEpoch === imageEpoch && this.observationEpoch === observationEpoch
+        && privateMapGet(ownedDatabases, image.db) === image.state && !image.state.inFlight && image.state.revision === image.revision;
+      if (keep && image && retained?.bytes && this.persistence && this.nativeSchemaReadPlan && frame.identity !== undefined) {
+        this.dropIdleReadImage();
+        this.#idleReadImage = { db: image.db, state: image.state, revision: image.revision, imageEpoch, observationEpoch,
+          identity: frame.identity, baseline: image.baseline, bytes: retained.bytes, persistence: this.persistence,
+          plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion };
+        frame.owned = false;
+      }
       // Retired reflected frame objects must not retain the private database
       // byte snapshot or become another source of native image evidence.
       privateMapDelete(nativeReadFrameIdentities, frame);
@@ -2072,13 +2186,14 @@ export class SQLiteStore {
     operation: (db: SqlDatabase) => { readonly changed: boolean; readonly value: T },
     onCommit: () => void,
     afterDurable?: ((value: T, db: SqlDatabase) => void) | undefined,
-  ): Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }> {
+  ): Promise<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T; readonly fenced?: true }> {
     if (!this.coordinated) return Promise.reject(new Error('SQLiteStore: guarded persistence requires coordinated storage'));
     // Batch callers must not wait for their own save boundary.
     if (this.saveBatchDepth > 0) return Promise.resolve({ kind: 'local-changes' });
-    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T }>(async () => {
+    return this.enqueue<{ readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T; readonly fenced?: true }>(async () => {
       const release = this.persistence ? await this.persistence.lock() : () => {};
       let current: SqlDatabase | null = null;
+      let commitFenced = false;
       try {
         if (this.saveBatchDepth > 0 || (this.cleanContent === null || observeDatabase(this.getDb(true), 'clean-content') !== this.cleanContent)) {
           return { kind: 'local-changes' };
@@ -2098,7 +2213,15 @@ export class SQLiteStore {
         if (result.changed) {
           const data = current.export();
           const cleanContent = this.readCleanContent(current);
-          if (this.persistence) { this.beforePersistentWrite(); this.persistence.write(data); }
+          if (this.persistence) {
+            this.beforePersistentWrite();
+            try { this.persistence.write(data); } catch (error) {
+              // A visible rename whose directory sync failed leaves disk ahead of this cache. The retry finds the change already present and adopts it (below) instead of confirming a change the cache never took in.
+              if (error instanceof SQLitePublicationError && error.phase === 'indeterminate') this.#indeterminatePublication = true;
+              throw error;
+            }
+            this.#indeterminatePublication = false;
+          }
           const previous = this.db;
           this.db = current;
           current = null;
@@ -2109,9 +2232,27 @@ export class SQLiteStore {
           // cache but cannot change the acknowledged durable outcome.
           this.fenced = false;
           try { previous?.close(); } catch { /* The replaced image cannot affect the current cache. */ }
-          try { onCommit(); } catch { this.fenced = true; }
+          try { onCommit(); } catch { this.fenced = true; commitFenced = true; }
         } else {
           this.persistence?.confirmDurable();
+          if (this.#indeterminatePublication && current !== null) {
+            // The earlier publication reached disk but this cache never adopted it, so reads and the next save would
+            // still see the old image. Take in the image on disk now, as a successful publication would have.
+            const cleanContent = this.readCleanContent(current);
+            if (cleanContent !== this.cleanContent) {
+              const data = current.export();
+              const previous = this.db;
+              this.db = current;
+              current = null;
+              this.imageEpoch += 1;
+              this.cleanContent = cleanContent;
+              this.cleanBytes = this.persistence ? null : data;
+              this.fenced = false;
+              try { previous?.close(); } catch { /* The replaced image cannot affect the current cache. */ }
+              try { onCommit(); } catch { this.fenced = true; commitFenced = true; }
+            }
+            this.#indeterminatePublication = false;
+          }
         }
         // Trusted owners may invoke a synchronous execution boundary only after
         // durable publication/replay confirmation, while file ownership remains held.
@@ -2123,7 +2264,8 @@ export class SQLiteStore {
             throw new TypeError('SQLiteStore: durable boundary must be synchronous');
           }
         }
-        return { kind: 'completed', value: result.value };
+        // The change is durable; `fenced` tells the caller the cache could not adopt it and must be reopened.
+        return commitFenced ? { kind: 'completed', value: result.value, fenced: true } : { kind: 'completed', value: result.value };
       } finally {
         try { current?.close(); } catch { /* Detached image cleanup. */ }
         try { release(); } catch { this.fenced = true; }
@@ -2208,6 +2350,9 @@ export class SQLiteStore {
     const prefix = original.export();
     const local = observeDatabase(original);
     const staged = constructOwnedDatabase(this.sqlEngine!, prefix);
+    this.stagedPublications += 1;
+    let staging = true;
+    const unstage = () => { if (staging) { staging = false; this.stagedPublications -= 1; } };
     let data: Uint8Array, cleanContent: string | null, stagedLocal: string;
     try {
       const result: unknown = operation(staged);
@@ -2219,7 +2364,7 @@ export class SQLiteStore {
       data = staged.export();
       cleanContent = this.readCleanContent(staged);
       stagedLocal = observeDatabase(staged);
-    } catch (error) { staged.close(); return Promise.reject(error); }
+    } catch (error) { staged.close(); unstage(); return Promise.reject(error); }
     const assertOwnedImage = () => {
       if (this.getDb() !== original || this.persistence !== persistence || this.imageEpoch !== epoch
         || observeDatabase(original) !== local || observeDatabase(staged) !== stagedLocal) {
@@ -2260,12 +2405,56 @@ export class SQLiteStore {
           throw error;
         }
         adopted = true;
-        try { adopt(); } catch (error) { this.fenced = true; throw error; }
+        try { adopt(); } catch (error) { this.fenced = true; throw new SQLitePublishedButFencedError(error); }
       } finally {
+        unstage();
         if (!adopted) try { staged.close(); } catch { /* Detached image cleanup. */ }
         try { release?.(); } catch { this.fenced = true; }
       }
     }).then(() => { this.notifyArtifactReferenceClean(); });
+  }
+
+  /**
+   * Adopt the current published image in place of this owner's local one. It is
+   * the recovery after another writer won a save race (SQLitePersistedStateChangedError)
+   * or after a publication fenced this cache. Unpublished local rows are
+   * discarded, so it refuses (resolves false) while a batch or a staged prepared
+   * publication still counts on them. `onReload` runs under the file lock,
+   * before any later queued operation, so mirrors are rebuilt from the new image.
+   */
+  reloadFromDisk(onReload: () => void = () => {}): Promise<boolean> {
+    const persistence = this.persistence;
+    if (!this.coordinated || !persistence || !this.db) return Promise.resolve(false);
+    const held = () => this.saveBatchDepth > 0 || this.stagedPublications > 0 || !this.db || this.persistence !== persistence;
+    if (held()) return Promise.resolve(false);
+    return this.enqueue(async () => {
+      if (held()) return false;
+      const release = await persistence.lock();
+      let current: SqlDatabase | null = null;
+      try {
+        if (held()) return false;
+        const identity = persistence.observationIdentity();
+        current = this.openCurrentImage();
+        const bytes = persistence.read();
+        if (persistence.observationIdentity() !== identity) throw new SQLitePersistedStateChangedError('SQLiteStore: persisted state changed while reloading');
+        persistence.acceptBaseline(bytes);
+        const previous = this.db;
+        this.db = current;
+        current = null;
+        this.imageEpoch += 1;
+        this.observationEpoch += 1;
+        this.cleanContent = this.readCleanContent(this.db);
+        this.cleanBytes = null;
+        this.saveDirty = false;
+        this.fenced = false;
+        try { previous?.close(); } catch { /* The replaced image has no current authority. */ }
+        try { onReload(); } catch (error) { this.fenced = true; throw error; }
+        return true;
+      } finally {
+        try { current?.close(); } catch { /* Detached image cleanup. */ }
+        try { release(); } catch { this.fenced = true; }
+      }
+    });
   }
 
   /** Drain admitted persistence operations before owner teardown. */
@@ -2293,7 +2482,8 @@ export class SQLiteStore {
         this.saveBatchDepth -= 1;
         if (this.saveBatchDepth === 0 && this.saveDirty) {
           this.saveDirty = false;
-          await this.save();
+          // A failed save leaves the rows in memory; keep them marked unsaved so the next boundary saves them.
+          try { await this.save(); } catch (error) { this.saveDirty = true; throw error; }
         }
         cleanBoundary = true;
       } finally {
@@ -2334,7 +2524,7 @@ export class SQLiteStore {
           release = await this.persistence!.lock();
           this.getDb();
           if (this.imageEpoch !== epoch) {
-            throw new Error('SQLiteStore: persisted state changed; captured image was superseded');
+            throw new SQLitePersistedStateChangedError('SQLiteStore: persisted state changed; captured image was superseded');
           }
           this.beforePersistentWrite();
           this.persistence!.writeIfCurrent(data);
@@ -2353,7 +2543,7 @@ export class SQLiteStore {
       this.beforePersistentWrite();
       mkdirSync(dirname(dbPath), { recursive: true });
       const data = this.db.export();
-      writeFileSync(dbPath, Buffer.from(data));
+      writeFileAtomically(dbPath, Buffer.from(data));
       logger.debug('SQLiteStore: saved to disk', { path: dbPath });
       return true;
     } catch (err) {
@@ -2365,6 +2555,7 @@ export class SQLiteStore {
   }
 
   close(): void {
+    this.dropIdleReadImage();
     if (!this.db) return;
     this.imageEpoch += 1;
     this.db.close();
@@ -2397,6 +2588,8 @@ export class SQLiteStore {
       this.persistence?.acceptBaseline(original);
       this.assertInitialReadCurrent();
 
+      // A fresh load is the reopen a fenced cache asks for.
+      this.fenced = false;
       if (existedOnDisk) {
         this.db = constructOwnedDatabase(SQL, original!);
         logger.info('SQLiteStore: loaded from disk', { path: dbPath });
@@ -2429,7 +2622,8 @@ export class SQLiteStore {
         restore: persistent
           ? (snapshotPath) => {
               if (!this.coordinated) restoreStoreSnapshot(dbPath!, snapshotPath);
-              if (this.coordinated) this.db?.close();
+              // The handle of the failed migration is replaced in both modes; leaving it open leaks its WASM database.
+              try { this.db?.close(); } catch { /* the failed handle is being discarded */ }
               this.db = constructOwnedDatabase(SQL, readFileSync(dbPath!));
             }
           : undefined,
@@ -2452,7 +2646,8 @@ export class SQLiteStore {
         this.cleanBytes = this.persistence ? null : data;
       }
     } catch (err) {
-      if (this.coordinated) this.db?.close();
+      // The handle is dropped in both modes: a failed migration leaves the restored (or failed) database open, and its WASM memory is not collected.
+      try { this.db?.close(); } catch { /* already closed */ }
       this.db = null;
       logger.error('SQLiteStore: failed to initialize', {
         error: summarizeError(err),
@@ -2578,7 +2773,7 @@ export class SQLiteStore {
   }
 
   private getDb(allowFenced = false): SqlDatabase {
-    if (this.fenced && !allowFenced) throw new Error('SQLiteStore: cache fenced; reopen owner before ordinary writes');
+    if (this.fenced && !allowFenced) throw new Error('SQLiteStore: cache fenced; reload it from disk (init() or reloadFromDisk()) before ordinary writes');
     if (!this.db) {
       throw new Error('SQLiteStore: not initialized, call init() first');
     }

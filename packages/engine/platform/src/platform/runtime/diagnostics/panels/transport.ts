@@ -362,6 +362,13 @@ export class TransportPanel {
     if (!history) {
       history = [];
       this._histories.set(connectionId, history);
+      // Connection ids are caller-supplied and nothing prunes them; keep the
+      // most recently first-seen connections only.
+      while (this._histories.size > this._config.bufferLimit) {
+        const oldest = this._histories.keys().next();
+        if (oldest.done) break;
+        this._histories.delete(oldest.value);
+      }
     }
     appendBounded(history, entry, this._config.bufferLimit);
   }

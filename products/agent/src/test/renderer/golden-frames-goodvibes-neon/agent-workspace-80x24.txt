@@ -6,7 +6,7 @@
 |                                                                                |
 |   ✦ start                                                                      |
 |     Home                  Home                                                 |
-|   ✦ onboarding            26 more lines                                        |
+|   ✦ onboarding            23 more lines                                        |
 |     ! Start                                                                    |
 |     ! Models                Setting                Default     Current         |
 |     Behavior                Just start typing      —           —               |

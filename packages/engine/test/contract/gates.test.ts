@@ -4,7 +4,7 @@
  * `contract.gates` with CONTRACT_GATE_RESULT events, and failing-gate selection.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RuntimeEventBus } from '../../platform/src/platform/runtime/events/index.js';
@@ -26,6 +26,18 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
+
+/** Reads the pid a gate descendant recorded, then waits for that process to be gone. */
+async function expectDescendantGone(file: string): Promise<void> {
+  const pid = Number(readFileSync(file, 'utf-8').trim());
+  expect(Number.isInteger(pid) && pid > 0).toBe(true);
+  for (let attempt = 0; attempt < 400; attempt++) {
+    try { process.kill(pid, 0); } catch { return; }
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  }
+  process.kill(pid, 'SIGKILL');
+  throw new Error(`gate descendant ${pid} survived the deadline`);
+}
 
 function config(gates: readonly QualityGate[], gateTimeoutMs = 0): ContractConfigReader {
   const values: Record<string, unknown> = { gateTimeoutMs };
@@ -84,35 +96,32 @@ describe('executeGateCommand', () => {
   });
 
   test('a command past its timeout is stopped and fails, saying so', async () => {
-    const started = Date.now();
     const result = await executeGateCommand('sleep 5', dir, 100);
-    expect(Date.now() - started).toBeLessThan(4_000);
     expect(result.passed).toBe(false);
     expect(result.output).toContain('Gate timed out after 100 ms');
   });
 
   test('the deadline still stops descendants after their shell exits', async () => {
-    const started = Date.now();
-    const result = await executeGateCommand('sleep 5 &', dir, 100);
-    expect(Date.now() - started).toBeLessThan(4_000);
+    const result = await executeGateCommand('sleep 30 & echo $! > pid', dir, 100);
     expect(result.passed).toBe(false);
     expect(result.output).toContain('Gate timed out after 100 ms');
+    await expectDescendantGone(join(dir, 'pid'));
   });
 
   test('a timed-out descendant cannot ignore termination and keep changing the worktree', async () => {
-    const result = await executeGateCommand("sh -c 'trap \"\" TERM; sleep 0.3; touch escaped' & wait", dir, 50);
+    const result = await executeGateCommand("sh -c 'echo $$ > pid; trap \"\" TERM; sleep 30; touch escaped' & wait", dir, 200);
     expect(result.passed).toBe(false);
-    await Bun.sleep(400);
+    await expectDescendantGone(join(dir, 'pid'));
     expect(existsSync(join(dir, 'escaped'))).toBe(false);
   });
 
   test('cancellation stops an untimed gate and its descendants', async () => {
     const controller = new AbortController();
-    const work = executeGateCommand("sh -c 'trap \"\" TERM; sleep 0.3; touch escaped' & wait", dir, 0, controller.signal);
-    const timer = setTimeout(() => controller.abort(new Error('review cancelled')), 50);
+    const work = executeGateCommand("sh -c 'echo $$ > pid; trap \"\" TERM; sleep 30; touch escaped' & wait", dir, 0, controller.signal);
+    const timer = setTimeout(() => controller.abort(new Error('review cancelled')), 200);
     try {
       await expect(work).rejects.toThrow('review cancelled');
-      await Bun.sleep(400);
+      await expectDescendantGone(join(dir, 'pid'));
       expect(existsSync(join(dir, 'escaped'))).toBe(false);
     } finally { clearTimeout(timer); }
   });

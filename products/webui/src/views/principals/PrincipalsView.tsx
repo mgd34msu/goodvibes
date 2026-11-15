@@ -45,18 +45,25 @@ type PermissionMode = NonNullable<ChannelBinding['permissionMode']>;
 const PRINCIPAL_KINDS: readonly PrincipalKind[] = ['user', 'bot', 'service', 'token'];
 const PERMISSION_MODES: readonly PermissionMode[] = SESSION_GATE_PRESET_NAMES;
 
-function identitiesFromDraft(draft: string): OperatorMethodInput<'principals.create'>['identities'] {
-  // One "channel:value" pair per line, the simplest phone-friendly encoding for a
-  // repeatable field without a dynamic row-add control.
-  return draft
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [channel, ...rest] = line.split(':');
-      return { channel: channel.trim(), value: rest.join(':').trim() };
-    })
-    .filter((identity) => identity.channel && identity.value);
+/**
+ * One "channel:value" pair per line, the simplest phone-friendly encoding for a
+ * repeatable field without a dynamic row-add control. Blank lines are skipped; a
+ * line that is not a full pair is reported, never dropped, because an update
+ * replaces the whole identity list and a dropped line would delete a mapping.
+ */
+function parseIdentityDraft(draft: string): {
+  identities: NonNullable<OperatorMethodInput<'principals.create'>['identities']>;
+  invalidLines: string[];
+} {
+  const identities: { channel: string; value: string }[] = [];
+  const invalidLines: string[] = [];
+  for (const line of draft.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const [channel, ...rest] = line.split(':');
+    const value = rest.join(':').trim();
+    if (channel.trim() && value) identities.push({ channel: channel.trim(), value });
+    else invalidLines.push(line);
+  }
+  return { identities, invalidLines };
 }
 
 /** "no channel identities", "1 channel identity", "3 channel identities". */
@@ -86,10 +93,15 @@ function PrincipalForm({
   const [kind, setKind] = useState<PrincipalKind>(initial?.kind ?? 'user');
   const [identitiesDraft, setIdentitiesDraft] = useState(initial ? identitiesToDraft(initial.identities) : '');
 
+  const parsed = parseIdentityDraft(identitiesDraft);
+  const identitiesError = parsed.invalidLines.length > 0
+    ? `Not a "channel:value" pair: ${parsed.invalidLines.join(', ')}`
+    : undefined;
+
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!name.trim()) return;
-    onSubmit({ name: name.trim(), kind, identities: identitiesFromDraft(identitiesDraft) });
+    if (!name.trim() || identitiesError) return;
+    onSubmit({ name: name.trim(), kind, identities: parsed.identities });
   }
 
   return (
@@ -106,7 +118,7 @@ function PrincipalForm({
           options={PRINCIPAL_KINDS.map((k) => ({ value: k, label: k }))}
         />
       </Field>
-      <Field label="Channel identities" help={'One per line, written "channel:value".'}>
+      <Field label="Channel identities" help={'One per line, written "channel:value".'} error={identitiesError}>
         <Textarea
           value={identitiesDraft}
           onChange={(e) => setIdentitiesDraft(e.target.value)}
@@ -116,7 +128,7 @@ function PrincipalForm({
         />
       </Field>
       <div className="principals-form__actions">
-        <Button type="submit" variant="primary" size="sm" disabled={submitting || !name.trim()}>{submitting ? 'Saving…' : submitLabel}</Button>
+        <Button type="submit" variant="primary" size="sm" disabled={submitting || !name.trim() || Boolean(identitiesError)}>{submitting ? 'Saving…' : submitLabel}</Button>
         <Button size="sm" onClick={onCancel} disabled={submitting}>Cancel</Button>
       </div>
     </form>
@@ -313,8 +325,8 @@ function ChannelProfileForm({
       <Field label="Surface kind">
         <Input type="text" value={surfaceKind} onChange={(e) => setSurfaceKind(e.target.value)} placeholder="slack" disabled={submitting || Boolean(initial?.surfaceKind)} required />
       </Field>
-      <Field label="Channel id (optional)" help="Scopes the binding to one channel.">
-        <Input type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)} disabled={submitting || Boolean(initial?.channelId)} />
+      <Field label="Channel id (optional)" help={initial ? 'A binding\'s channel cannot change; add a new binding to scope another channel.' : 'Scopes the binding to one channel.'}>
+        <Input type="text" value={channelId} onChange={(e) => setChannelId(e.target.value)} disabled={submitting || Boolean(initial)} />
       </Field>
       <Field label="Model (optional)">
         <Input type="text" value={model} onChange={(e) => setModel(e.target.value)} disabled={submitting} />

@@ -34,16 +34,26 @@ export function createSpokenTurnInputOptions(surface: string): OrchestratorUserI
   };
 }
 
+const routedOrchestrators = new WeakSet<object>();
+
 export function attachSpokenTurnModelRouting(options: SpokenTurnModelRoutingOptions): () => void {
   const target = options.orchestrator as unknown as PatchableOrchestrator;
-  const originalRunTurn = target.runTurn?.bind(options.orchestrator);
-  if (!originalRunTurn) return () => {};
+  if (typeof target.runTurn !== 'function') {
+    // A silent no-op here made tts.llmModel routing vanish whenever the
+    // orchestrator's turn entry point was renamed.
+    throw new Error('Spoken-turn model routing cannot attach: the orchestrator has no runTurn method to route through.');
+  }
+  if (routedOrchestrators.has(target)) {
+    throw new Error('Spoken-turn model routing is already attached to this orchestrator; detach it before attaching again.');
+  }
+  const originalRunTurn = target.runTurn.bind(options.orchestrator);
 
   // This adapter changes only provider selection. Private execution context,
   // including opaque native admission, must cross it unchanged.
-  target.runTurn = async (...args: Parameters<RunTurn>) => {
+  let attached = true;
+  const routedRunTurn = async (...args: Parameters<RunTurn>): Promise<void> => {
     const inputOptions = args[2];
-    if (!isSpokenTurn(inputOptions)) {
+    if (!attached || !isSpokenTurn(inputOptions)) {
       await originalRunTurn(...args);
       return;
     }
@@ -66,9 +76,15 @@ export function attachSpokenTurnModelRouting(options: SpokenTurnModelRoutingOpti
       target.setCoreServices({ providerRegistry: options.providerRegistry });
     }
   };
+  target.runTurn = routedRunTurn;
+  routedOrchestrators.add(target);
 
   return () => {
-    target.runTurn = originalRunTurn;
+    attached = false;
+    routedOrchestrators.delete(target);
+    // A wrapper added after this one owns runTurn now; putting the original back
+    // would silently remove it.
+    if (target.runTurn === routedRunTurn) target.runTurn = originalRunTurn;
     target.setCoreServices({ providerRegistry: options.providerRegistry });
   };
 }

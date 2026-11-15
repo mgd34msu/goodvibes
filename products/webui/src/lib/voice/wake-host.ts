@@ -86,7 +86,7 @@ export interface WakeHostState {
   /** What opened the device, e.g. "getUserMedia (AudioWorklet)"; null when closed. */
   readonly deviceLabel: string | null;
   /** Why the detector is not running, written for a user to read. */
-  readonly refusal: { readonly kind: WakeStartRefusal | 'model-unavailable'; readonly detail: string } | null;
+  readonly refusal: { readonly kind: WakeStartRefusal | 'model-unavailable' | 'host-error'; readonly detail: string } | null;
   /** The most recent failure's message, or null. */
   readonly error: string | null;
   /** The inference backend actually in force, once a runtime has loaded. */
@@ -228,6 +228,12 @@ export class WakeHost {
         return;
       }
       const signature = runtimeSignature(settings);
+      if (this.#suspended && signature !== this.#signature) {
+        // A press holds the device. Rebuilding now would be refused by the arbiter
+        // and leave the host unregistered; resume() applies the stored settings.
+        this.#patch({ settings });
+        return;
+      }
       const unchanged = signature === this.#signature && this.#listener !== null;
       if (unchanged) {
         // Indicator and the written blocker/limitation lists can change without
@@ -235,28 +241,33 @@ export class WakeHost {
         this.#patch({ settings, indicator: settings.active ? settings.indicator : 'off' });
         return;
       }
-      this.#signature = signature;
-      await this.#teardown();
-
-      if (!settings.active) {
-        // The one place the "never open a device while disabled" rule is enforced:
-        // nothing below this line runs, so no model is fetched and getUserMedia is
-        // never called.
-        const askedForHere = settings.enabled && settings.surfaceEnabled;
-        this.#patch({
-          ...IDLE_STATE,
-          settings,
-          phase: askedForHere ? 'refused' : 'off',
-          // A user who switched this on for this origin and got a blocker still
-          // gets the indicator, carrying the reason, the alternative is a feature
-          // that reads as enabled and shows nothing anywhere.
-          indicator: askedForHere ? settings.indicator : 'off',
-          refusal: describeInactive(settings),
-        });
-        return;
-      }
-      await this.#startListening(settings);
+      await this.#rebuild(settings, signature);
     });
+  }
+
+  /** Tear down and start fresh for a changed configuration. */
+  async #rebuild(settings: WakeRuntimeSettings, signature: string): Promise<void> {
+    this.#signature = signature;
+    await this.#teardown();
+
+    if (!settings.active) {
+      // The one place the "never open a device while disabled" rule is enforced:
+      // nothing below this line runs, so no model is fetched and getUserMedia is
+      // never called.
+      const askedForHere = settings.enabled && settings.surfaceEnabled;
+      this.#patch({
+        ...IDLE_STATE,
+        settings,
+        phase: askedForHere ? 'refused' : 'off',
+        // A user who switched this on for this origin and got a blocker still
+        // gets the indicator, carrying the reason, the alternative is a feature
+        // that reads as enabled and shows nothing anywhere.
+        indicator: askedForHere ? settings.indicator : 'off',
+        refusal: describeInactive(settings),
+      });
+      return;
+    }
+    await this.#startListening(settings);
   }
 
   /** Stand down and release the device, so a press can take it. */
@@ -275,7 +286,14 @@ export class WakeHost {
       if (!this.#suspended) return;
       this.#suspended = false;
       const settings = this.#settings;
-      if (!settings?.active) return;
+      if (settings === null) return;
+      const signature = runtimeSignature(settings);
+      if (signature !== this.#signature) {
+        // The configuration changed while the press held the device.
+        await this.#rebuild(settings, signature);
+        return;
+      }
+      if (!settings.active) return;
       const listener = this.#listener;
       if (listener === null) {
         await this.#startListening(settings);
@@ -288,6 +306,7 @@ export class WakeHost {
   async #restartListener(listener: WakeListener): Promise<void> {
     const outcome = await listener.start();
     if (outcome.started) {
+      this.#registerWithArbiter();
       this.#patch({ phase: 'listening', deviceLabel: outcome.deviceLabel, refusal: null, error: null });
     } else {
       this.#patch({ phase: 'refused', refusal: { kind: outcome.refusal, detail: outcome.detail } });
@@ -340,11 +359,17 @@ export class WakeHost {
     const next = this.#chain.then(step, step);
     this.#chain = next.catch((error: unknown) => {
       this.#deps.warn('wake host step failed', { error: String(error) });
+      // A step that threw (listener construction, start or stop) must not leave a
+      // stale 'loading' or 'listening' indicator with nothing to explain it.
+      const detail = `Wake detection stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`;
+      this.#patch({ phase: 'refused', refusal: { kind: 'host-error', detail }, error: detail, deviceLabel: null });
     });
     return this.#chain;
   }
 
   async #teardown(): Promise<void> {
+    // A torn-down host is unregistered, so no lease release will ever resume it.
+    this.#suspended = false;
     this.#unregisterWake?.();
     this.#unregisterWake = null;
     const listener = this.#listener;
@@ -425,12 +450,7 @@ export class WakeHost {
       return;
     }
 
-    if (this.#deps.arbiter) {
-      this.#unregisterWake = this.#deps.arbiter.registerWake({
-        suspend: () => this.suspend(),
-        resume: () => this.resume(),
-      });
-    }
+    this.#registerWithArbiter();
 
     this.#patch({
       phase: 'listening',
@@ -440,6 +460,15 @@ export class WakeHost {
       modelIds: modelSet.models.map((model) => model.id),
       refusal: null,
       error: null,
+    });
+  }
+
+  /** Idempotent: a listener holding the device must always be one a press can stand down. */
+  #registerWithArbiter(): void {
+    if (this.#unregisterWake !== null || !this.#deps.arbiter) return;
+    this.#unregisterWake = this.#deps.arbiter.registerWake({
+      suspend: () => this.suspend(),
+      resume: () => this.resume(),
     });
   }
 
@@ -548,6 +577,8 @@ export function createBrowserModelSetLoader(deps: {
   readonly readChunk: Parameters<typeof loadWakeModel>[1]['readChunk'];
   readonly modelVersion: () => Promise<string | null>;
   readonly warn: (message: string, meta?: Readonly<Record<string, unknown>>) => void;
+  /** Injected so a test can supply sessions; defaults to onnxruntime-web. */
+  readonly loadRuntime?: typeof loadWakeRuntime | undefined;
 }): (settings: WakeRuntimeSettings) => Promise<WakeModelSet> {
   return async (settings) => {
     const [modelVersion, cache] = await Promise.all([deps.modelVersion(), openWakeModelCache()]);
@@ -566,10 +597,26 @@ export function createBrowserModelSetLoader(deps: {
       wantsGate ? loadWakeModel('vad', loaderDeps) : Promise.resolve(null),
     ]);
 
-    const runtime = await loadWakeRuntime(settings.browserBackend);
-    const embedding = await runtime.createSession(embeddingBytes.bytes);
-    const classifier = await runtime.createSession(classifierBytes.bytes);
-    const vadSession = vadBytes === null ? null : await runtime.createSession(vadBytes.bytes);
+    const runtime = await (deps.loadRuntime ?? loadWakeRuntime)(settings.browserBackend);
+    // Sessions hold wasm/GPU memory: if a later one fails to compile, the earlier
+    // ones must be released here, because nothing else will ever hold them.
+    const created: WakeInferenceSession[] = [];
+    const create = async (bytes: Uint8Array): Promise<WakeInferenceSession> => {
+      const session = await runtime.createSession(bytes);
+      created.push(session);
+      return session;
+    };
+    let embedding: WakeInferenceSession;
+    let classifier: WakeInferenceSession;
+    let vadSession: WakeInferenceSession | null;
+    try {
+      embedding = await create(embeddingBytes.bytes);
+      classifier = await create(classifierBytes.bytes);
+      vadSession = vadBytes === null ? null : await create(vadBytes.bytes);
+    } catch (error) {
+      await Promise.allSettled(created.map(async (session) => session.release?.()));
+      throw error;
+    }
 
     const limitations: string[] = [];
     const unservable = settings.modelIds.filter((id) => id !== PINNED_WAKE_MODEL_ID);

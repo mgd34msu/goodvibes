@@ -11,6 +11,7 @@ import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { isolatedEnv, lastUserText, makeHome, removeHome, resolveBinary, startStubModel, waitFor, WORKSPACE_QUESTION } from './harness.ts';
 import { TerminalFrame } from './terminal-frame.ts';
+import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
 import { beginAgentHostPairing, completeAgentHostPairing } from '../../runtime/connected-host-pairing-store.ts';
 import type { NativeIntakeJournalRecord } from '../../runtime/native-conversation-intake-journal.ts';
 
@@ -108,8 +109,8 @@ for (const loseStartReply of [false, true]) test(`compiled owner conversation pr
     stage = 'workspace-question';
     await find('workspace question', text => text.includes(WORKSPACE_QUESTION)); child.terminal!.write('\r');
     await find('owner composer', text => text.includes('Ask anything, or type / for commands') && !text.includes(WORKSPACE_QUESTION));
-    await waitFor('live composer input', () => { if (frame.text().includes('┃  x')) return true; child!.terminal!.write('\x15x'); return false; }, 10_000, 30);
-    child.terminal!.write('\x15'); await find('cleared composer', text => !text.includes('┃  x'));
+    await waitFor('live composer input', () => { if (frame.text().includes(COMPOSER_ECHO)) return true; child!.terminal!.write('\x15x'); return false; }, 10_000, 30);
+    child.terminal!.write('\x15'); await find('cleared composer', text => !text.includes(COMPOSER_ECHO));
     stage = 'first-source';
     child.terminal!.write(`${FIRST}\r`);
     const journalPath = join(home.home, '.goodvibes/agent/native-work-submission.json.intake');

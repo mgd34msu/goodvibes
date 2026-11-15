@@ -8,11 +8,9 @@ import { SettingsModal } from '../../input/settings-modal.ts';
 import { settingContextLines } from '../../renderer/settings-modal-context.ts';
 import { renderSettingsModal } from '../../renderer/settings-modal.ts';
 import { frameFromLayer, frameText } from '../helpers/surface-frame.ts';
-import { encodeGolden } from '../helpers/golden-snapshot.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { setActiveThemeName, setActiveThemeMode, getActiveThemeName, getActiveThemeMode } from '../../renderer/theme.ts';
 
-const PROOF = process.env.GOODVIBES_TEST_HOST_FRAME_PROOF_DIR;
 for (const [width, height] of [[80,24],[120,40]] as const) {
   test(`actual Agent host privacy row renders and persists ${width}x${height}`, () => {
     const root=makeProjectTempDir('host-render'); const configDir=join(root,'config');
@@ -40,9 +38,6 @@ for (const [width, height] of [[80,24],[120,40]] as const) {
         expect(layer.x).toBeGreaterThanOrEqual(0); expect(layer.y).toBeGreaterThanOrEqual(0);
         expect(layer.x+layer.lines[0]!.length).toBeLessThanOrEqual(width!);
         expect(layer.y+layer.lines.length).toBeLessThanOrEqual(height!);
-        const frame=frameFromLayer(layer,width!,height!);
-        if (PROOF) writeFileSync(join(PROOF,`host-${width}x${height}-${phase}.txt`),encodeGolden(`Host notification preference ${phase}`,frame));
-        if (PROOF) writeFileSync(join(PROOF,`host-${width}x${height}-${phase}.plain.txt`),frameText(frame).join('\n'));
       }
     } finally { modal.close(); setActiveThemeName(previousName); setActiveThemeMode(previousMode); }
   });
@@ -94,7 +89,7 @@ test('an open host row observes external revocation and releases subscriptions o
   handles.mockRestore();
 });
 
-test('the actual modal follows file-watch revocation and detaches when its manager is replaced', async () => {
+test('the actual modal follows file-watch revocation and detaches when its manager is replaced', () => {
   const root = makeProjectTempDir('host-watch-render');
   const first = new AgentConfigManager({ configDir: join(root, 'first') });
   const second = new AgentConfigManager({ configDir: join(root, 'second') });
@@ -106,11 +101,13 @@ test('the actual modal follows file-watch revocation and detaches when its manag
     modal.selectTarget(KEY);
   };
   open(first);
-  const stop = first.watchConfigFiles({ intervalMs: 5 });
+  const stop = first.watchConfigFiles({ intervalMs: 3_600_000 });
   try {
     writeFileSync(first.getConfigPath(), JSON.stringify({ behavior: { notificationsMetadataOnly: true } }));
-    const deadline = Date.now() + 2_000;
-    while (modal.getSelected()?.currentValue !== true && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+    // One synchronous poll consumes the visible disk change; the watcher compares
+    // against its own stat baseline, so a later interval tick cannot repaint again.
+    first.flushConfigFileChanges();
+    first.flushConfigFileChanges();
     expect(modal.getSelected()?.currentValue).toBe(true);
     expect(renders).toBe(1);
     open(second);
@@ -154,8 +151,6 @@ for (const [width, height] of [[80, 24], [120, 40]] as const) {
       expect(layer.x).toBeGreaterThanOrEqual(0); expect(layer.y).toBeGreaterThanOrEqual(0);
       expect(layer.x + layer.lines[0]!.length).toBeLessThanOrEqual(width);
       expect(layer.y + layer.lines.length).toBeLessThanOrEqual(height);
-      if (PROOF) writeFileSync(join(PROOF, `host-${width}x${height}-unavailable.txt`), encodeGolden('Host notification preference metadata unavailable', frame));
-      if (PROOF) writeFileSync(join(PROOF, `host-${width}x${height}-unavailable.plain.txt`), visible);
     } finally { modal.close(); setActiveThemeName(previousName); setActiveThemeMode(previousMode); }
   });
 }

@@ -297,7 +297,10 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     }
     // `systemctl --version` is the platform's read-only capability probe.
     const actions = calls.filter((c) => !c.includes('is-active') && !c.includes('--version') && c[0] !== 'loginctl');
-    expect(actions).toEqual([['systemctl', '--user', 'enable', '--now', 'goodvibes.service']]);
+    expect(actions).toEqual([
+      ['systemctl', '--user', 'daemon-reload'],
+      ['systemctl', '--user', 'enable', '--now', 'goodvibes.service'],
+    ]);
     for (const probe of calls.filter((c) => c.includes('is-active'))) {
       expect(probe).toEqual(['systemctl', '--user', 'is-active', 'goodvibes.service']);
     }
@@ -305,7 +308,11 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
   });
 
   test('install-service surfaces an honest failure when enabling fails, without pretending it started', async () => {
-    const runner: ManagedServiceActionRunner = () => ({ status: 1, stderr: 'Failed to enable unit' });
+    // The manager answers its liveness probe (inactive); only the enable action fails.
+    const runner: ManagedServiceActionRunner = (_command, args) => (
+      args.includes('is-active') ? { status: 3, stdout: 'inactive\n' }
+        : args.includes('enable') ? { status: 1, stderr: 'Failed to enable unit' } : { status: 0 }
+    );
     const result = await runDaemonServiceCli(baseInput({ actionRunner: runner }));
 
     expect(result.ok).toBe(true); // the write itself succeeded
@@ -327,6 +334,8 @@ describe('runDaemonServiceCli (systemd path, real PlatformServiceManager, stubbe
     expect(existsSync(unitPath)).toBe(false);
     expect(calls.filter((c) => !c.includes('is-active'))).toEqual([
       ['systemctl', '--user', 'stop', 'goodvibes.service'],
+      ['systemctl', '--user', 'disable', '--now', 'goodvibes.service'],
+      ['systemctl', '--user', 'daemon-reload'],
     ]);
     expect(result.lines.join('\n')).toContain('daemon-reload');
   });
@@ -1009,7 +1018,10 @@ describe('runDaemonServiceCli: migrate-service', () => {
       expect(result.ok).toBe(false);
       expect(result.exitCode).toBe(1);
       expect(removed).toEqual([]);
-      expect(calls.some((call) => call.includes('disable') || call.includes('daemon-reload'))).toBe(false);
+      // Installing the new unit reloads systemd; once the legacy stop has failed, nothing disables or reloads.
+      const legacyStop = calls.findIndex((call) => call.includes('stop') && call.includes('goodvibes-daemon.service'));
+      expect(legacyStop).toBeGreaterThan(-1);
+      expect(calls.slice(legacyStop + 1).some((call) => call.includes('disable') || call.includes('daemon-reload'))).toBe(false);
       const text = result.lines.join('\n');
       expect(text).toContain('migration incomplete');
       expect(text).toContain('state is unconfirmed');
@@ -1464,7 +1476,8 @@ describe('reconcileRedundantLegacyUnit: auto-retire a redundant install-script u
     const dir = makeOwnedTempDir('gv-reconcile-timeout');
     const stub = join(dir, 'systemctl');
     const marker = `${stub}.invoked`;
-    writeFileSync(stub, `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'started');\nsetTimeout(() => process.stdout.write('active\\n'), 2500);\n`);
+    // The shell records the invocation immediately, so the marker does not depend on how long a runtime takes to start before the deadline.
+    writeFileSync(stub, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexec ${JSON.stringify(process.execPath)} -e "setTimeout(() => process.stdout.write('active\\\\n'), 2500)"\n`);
     chmodSync(stub, 0o755);
     try {
       const result = await reconcileRedundantLegacyUnit(baseReconcileInput({

@@ -31,8 +31,18 @@ function makeHarness(options: {
 } = {}) {
   const events: string[] = [];
   const chunks: string[] = [];
+  // A phase that has run resolves its arrival, so a test waits for the work it
+  // asserts about to have started instead of sleeping for a guessed interval.
+  const arrivals = new Map<string, ReturnType<typeof deferred>>();
+  const arrived = (name: string): Promise<void> => {
+    let arrival = arrivals.get(name);
+    if (!arrival) { arrival = deferred(); arrivals.set(name, arrival); }
+    return arrival.promise;
+  };
   const phase = (name: string): void | Promise<void> => {
     events.push(name);
+    void arrived(name);
+    arrivals.get(name)!.resolve();
     if (options.fail === name) throw new Error(`${name} failed`);
     if (options.reject === name) return Promise.reject(new Error(`${name} rejected`));
     if (options.held?.phase === name) return options.held.promise;
@@ -55,7 +65,7 @@ function makeHarness(options: {
     return Reflect.apply(clear, globalThis, [timer]);
   });
   restorers.push(() => clearSpy.mockRestore());
-  const exitSpy = spyOn(process, 'exit').mockImplementation((code) => { events.push(`exit ${code}`); return undefined as never; });
+  const exitSpy = spyOn(process, 'exit').mockImplementation((code) => { phase(`exit ${code}`); return undefined as never; });
   restorers.push(() => exitSpy.mockRestore());
   const remove = process.removeListener;
   const removeSpy = spyOn(process, 'removeListener').mockImplementation((name, listener) => {
@@ -124,7 +134,7 @@ function makeHarness(options: {
   handlers.enterTerminal();
   events.length = 0;
   chunks.length = 0;
-  return { handlers, events, chunks, saved, snapshot, exitSpy, recoveryFile, markerFile };
+  return { handlers, events, chunks, saved, snapshot, exitSpy, recoveryFile, markerFile, arrived };
 }
 
 const synchronousCleanup = [
@@ -213,7 +223,8 @@ describe('exitApp owns asynchronous cleanup and repeated requests', () => {
       let completed = 0;
       void first.then(() => { completed++; });
       void second.then(() => { completed++; });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Every drain has started, and the held one is the only thing left.
+      await Promise.all([h.arrived('unsubscribe second'), h.arrived('shutdown'), h.arrived(phase)]);
       expect(h.handlers.isTerminalRestored()).toBe(true);
       expect(h.events).toContain('unsubscribe second');
       expect(h.events).toContain('shutdown');
@@ -231,7 +242,7 @@ describe('exitApp owns asynchronous cleanup and repeated requests', () => {
       const held = deferred();
       const h = makeHarness({ reject, held: { phase: 'unsubscribe second', promise: held.promise } });
       const exit = h.handlers.exitApp();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await Promise.all([h.arrived('unsubscribe second'), h.arrived('shutdown')]);
       expect(h.exitSpy).not.toHaveBeenCalled();
       held.resolve();
       await exit;
@@ -269,11 +280,9 @@ describe('exitApp owns asynchronous cleanup and repeated requests', () => {
 
   test('the hard deadline also bounds a speech drain that never settles', async () => {
     const h = makeHarness({ held: { phase: 'speech', promise: new Promise(() => {}) }, shutdownHardTimeoutMs: 20 });
-    const outcome = await Promise.race([
-      h.handlers.exitApp().then(() => 'exited'),
-      new Promise<string>((resolve) => setTimeout(() => resolve('still waiting'), 100)),
-    ]);
-    expect(outcome).toBe('exited');
+    // A drain the deadline failed to bound would leave this pending until the
+    // test's own timeout fails it.
+    await h.handlers.exitApp();
     expect(h.exitSpy).toHaveBeenCalledTimes(1);
     expect(existsSync(h.recoveryFile)).toBe(false);
   });
@@ -284,11 +293,12 @@ describe('native terminal session release', () => {
   test('normal quit starts release before saving and waits for it before exiting', async () => {
     const held = deferred();
     let releases = 0;
-    const h = makeHarness({ releaseSession: () => { releases++; return held.promise; } });
+    const h = makeHarness({ releaseSession: () => { releases++; h.events.push('release'); return held.promise; } });
     const pending = h.handlers.exitApp();
-    await Bun.sleep(0);
+    await h.arrived('shutdown');
     expect(releases).toBe(1);
-    expect(h.events).toContain('shutdown');
+    expect(h.events.indexOf('release')).toBeGreaterThanOrEqual(0);
+    expect(h.events.indexOf('release')).toBeLessThan(h.events.indexOf('shutdown'));
     expect(h.exitSpy).not.toHaveBeenCalled();
     held.resolve();
     await pending;
@@ -312,7 +322,7 @@ describe('native terminal session release', () => {
       expect(releases).toBe(1);
       expect(h.exitSpy).not.toHaveBeenCalled();
       held.resolve();
-      await Bun.sleep(0);
+      await h.arrived(`exit ${code}`);
       expect(h.exitSpy).toHaveBeenCalledTimes(1);
       expect(h.exitSpy).toHaveBeenCalledWith(code);
     });
@@ -321,7 +331,7 @@ describe('native terminal session release', () => {
   test('a failed native release cannot strand a restored terminal', async () => {
     const h = makeHarness({ releaseSession: () => Promise.reject(new Error('synthetic transport failure')) });
     h.handlers.terminationSignalHandler('SIGTERM');
-    await Bun.sleep(0);
+    await h.arrived('exit 143');
     expect(h.handlers.isTerminalRestored()).toBe(true);
     expect(h.exitSpy).toHaveBeenCalledTimes(1);
     expect(h.exitSpy).toHaveBeenCalledWith(143);

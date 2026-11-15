@@ -110,7 +110,7 @@ export function createNativeWorkSubmissionHost(deps: {
   }
   return {
     projectId: deps.projectId,
-    submit(input, authority, options = {}) {
+    async submit(input, authority, options = {}) {
       bounded(input, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
       const parsed = nativeWorkSubmissionRequestSchema.safeParse(input);
       if (!parsed.success) throw new NativeWorkSubmissionError('invalid');
@@ -144,7 +144,7 @@ export function createNativeWorkSubmissionHost(deps: {
         return { kind: 'submitted', replayed: result.replayed, receipt: receipt(result.event, deps.projectId, deps.sessionId, identity.principalId, { request: captured, sourceId: source.sourceId, sourceRevision: source.sourceRevision }) };
       }));
     },
-    get(input, authority, options = {}) {
+    async get(input, authority, options = {}) {
       bounded(input, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
       const parsed = nativeWorkSubmissionLookupRequestSchema.safeParse(input);
       if (!parsed.success) throw new NativeWorkSubmissionError('invalid');

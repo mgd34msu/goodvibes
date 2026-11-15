@@ -35,9 +35,10 @@ export function resolveGatewayPathTemplate(
   template: string,
   query?: Record<string, unknown>,
   body?: unknown,
-): { readonly path: string | null; readonly missing: readonly string[] } {
+): { readonly path: string | null; readonly missing: readonly string[]; readonly invalid?: readonly string[] } {
   const bodyRecord = isJsonRecord(body) ? body : null;
   const missingParams: string[] = [];
+  const invalidParams: string[] = [];
   const path = template.replace(/\{([^}]+)\}/g, (_full, rawKey: string) => {
     const key = rawKey.trim();
     const queryValue = query?.[key];
@@ -51,9 +52,19 @@ export function resolveGatewayPathTemplate(
       missingParams.push(key);
       return `{${key}}`;
     }
-    return encodeURIComponent(String(value));
+    // encodeURIComponent leaves '.' and '..' alone, and a URL parser then collapses them
+    // into the parent path, so such a value would reach a route the descriptor never named.
+    const text = String(value);
+    if (text === '.' || text === '..') {
+      invalidParams.push(key);
+      return `{${key}}`;
+    }
+    return encodeURIComponent(text);
   });
-  return missingParams.length > 0 ? { path: null, missing: missingParams } : { path, missing: [] };
+  // A refused value is also listed as missing, so a caller that only reads `missing` still refuses.
+  const refused = [...missingParams, ...invalidParams];
+  if (refused.length === 0) return { path, missing: [] };
+  return { path: null, missing: refused, ...(invalidParams.length > 0 ? { invalid: invalidParams } : {}) };
 }
 
 export function readAutomationWakeMode(value: unknown): AutomationWakeMode | undefined {
@@ -72,36 +83,4 @@ export function readExternalContentSource(value: unknown): AutomationExternalCon
     return value as AutomationExternalContentSource;
   }
   return undefined;
-}
-
-/**
- * Read a response body to text with a hard byte ceiling. Returns
- * `{ ok:false }` (and cancels the body) when the ceiling is exceeded, the
- * caller aborts and reports a structured error instead of buffering forever.
- */
-export async function readBodyBounded(response: Response, maxBytes: number): Promise<{ ok: true; text: string } | { ok: false; bytesRead: number }> {
-  const body = response.body;
-  if (!body) return { ok: true, text: '' };
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => {});
-        return { ok: false, bytesRead: total };
-      }
-      chunks.push(value);
-    }
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { ok: true, text: new TextDecoder().decode(merged) };
 }

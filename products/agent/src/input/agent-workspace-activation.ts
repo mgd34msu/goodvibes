@@ -69,7 +69,7 @@ interface AgentWorkspaceActivationHost {
   openSettingsModalAction(action: AgentWorkspaceCategory['actions'][number], requestRender?: () => void): void;
   completeOnboarding(): void;
   hasCommandDispatch(): boolean;
-  dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit'): void;
+  dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void;
   commitActionSearchSelection(): boolean;
 }
 

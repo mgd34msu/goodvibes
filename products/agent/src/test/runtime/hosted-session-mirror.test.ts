@@ -35,16 +35,24 @@ function harness(overrides: {
   attachError?: Error;
   list?: unknown;
   listError?: Error;
-} = {}): { deps: Parameters<typeof mirrorHostedSessionToStore>[1] & Record<string, unknown>; persisted: PersistCall[] } {
+} = {}): {
+  deps: Parameters<typeof mirrorHostedSessionToStore>[1] & Record<string, unknown>;
+  persisted: PersistCall[];
+  attachedIds: () => string[];
+} {
   const persisted: PersistCall[] = [];
+  const attached: string[] = [];
   const deps = {
     verbs: {
-      invoke: async <T,>(method: string): Promise<T> => {
+      invoke: async <T,>(method: string, input?: unknown): Promise<T> => {
         if (method === 'sessions.hosted.attach') {
+          const sessionId = (input as { sessionId: string }).sessionId;
+          attached.push(sessionId);
           if (overrides.attachError) throw overrides.attachError;
+          // The transcript belongs to the id that was asked for.
           return (overrides.attach ?? {
-            session: { id: 'hosted-1', title: 'Trip timing', modelId: 'm1', providerId: 'p1' },
-            history: HISTORY,
+            session: { id: sessionId, title: 'Trip timing', modelId: 'm1', providerId: 'p1' },
+            history: [{ role: 'user', content: `transcript of ${sessionId}` }, ...HISTORY],
           }) as T;
         }
         if (method === 'sessions.hosted.list') {
@@ -62,7 +70,7 @@ function harness(overrides: {
     fallbackProvider: 'fallback-provider',
     now: () => 1_700_000_000_000,
   };
-  return { deps, persisted };
+  return { deps, persisted, attachedIds: () => attached };
 }
 
 describe('mirroring a hosted conversation into the session store', () => {
@@ -71,11 +79,12 @@ describe('mirroring a hosted conversation into the session store', () => {
 
     const outcome = await mirrorHostedSessionToStore('hosted-1', deps);
 
-    expect(outcome).toEqual({ mirrored: true, sessionId: 'hosted-1', messageCount: 2 });
+    expect(outcome).toEqual({ mirrored: true, sessionId: 'hosted-1', messageCount: 3 });
     expect(persisted).toHaveLength(1);
     // Filed under the hosted id, so a resume of THIS conversation finds it.
     expect(persisted[0]!.sessionId).toBe('hosted-1');
     expect(persisted[0]!.snapshot.messages).toEqual([
+      { role: 'user', content: 'transcript of hosted-1' },
       { role: 'user', content: 'what time should i leave for my trip on the 6th?' },
       { role: 'assistant', content: 'Leave by 5:15 AM.' },
     ]);
@@ -186,13 +195,15 @@ describe('crash path: completion is never delivered', () => {
     expect(persisted).toEqual([]);
   });
 
-  test('recovery is bounded, and the NEWEST session is mirrored last', async () => {
+  test('recovery is bounded, and the NEWEST session is mirrored last, whatever order the daemon lists', async () => {
+    // The daemon lists most recently updated first.
     const sessions = Array.from({ length: 12 }, (_, index) => ({
-      id: `hosted-${index}`,
+      id: `hosted-${11 - index}`,
       workspaceRoot: '/proj',
       messageCount: 2,
+      updatedAt: 1000 + (11 - index),
     }));
-    const { deps, persisted } = harness({ list: { sessions } });
+    const { deps, persisted, attachedIds } = harness({ list: { sessions } });
 
     await recoverUnmirroredHostedSessions({
       ...deps,
@@ -201,9 +212,31 @@ describe('crash path: completion is never delivered', () => {
       maxRecovered: 3,
     });
 
-    expect(persisted).toHaveLength(3);
-    // Last write wins the last-session pointer, so it must be the newest.
-    expect(persisted[persisted.length - 1]!.sessionId).toBe('hosted-11');
+    expect(persisted.map((entry) => entry.sessionId)).toEqual(['hosted-9', 'hosted-10', 'hosted-11']);
+    // Each attach asked for the id it then filed, and each transcript is that id's own.
+    expect(attachedIds()).toEqual(['hosted-9', 'hosted-10', 'hosted-11']);
+    expect(persisted.map((entry) => entry.snapshot.messages[0]?.['content'])).toEqual([
+      'transcript of hosted-9', 'transcript of hosted-10', 'transcript of hosted-11',
+    ]);
+  });
+
+  test('a session the daemon already ended is not attached', async () => {
+    const { deps, persisted } = harness({
+      list: {
+        sessions: [
+          { id: 'hosted-ended', workspaceRoot: '/proj', messageCount: 4, updatedAt: 5, status: 'terminated' },
+        ],
+      },
+    });
+
+    const outcomes = await recoverUnmirroredHostedSessions({
+      ...deps,
+      workspaceRoot: '/proj',
+      knownSessionIds: () => [],
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(persisted).toEqual([]);
   });
 
   test('an unreachable daemon at boot returns nothing and does not throw', async () => {

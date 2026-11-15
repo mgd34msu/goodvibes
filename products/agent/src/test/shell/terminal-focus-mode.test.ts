@@ -68,22 +68,6 @@ describe('installFocusModeExitGuard: ?1004h teardown proof', () => {
     expect(written.join('')).toContain(FOCUS_DISABLE);
   });
 
-  test('the same listener also covers the crash-path: Node fires \'exit\' listeners for the default uncaughtException termination too, with no separate handler needed', () => {
-    // This test documents the crash-path coverage claim rather than actually
-    // crashing the process: Node's documented 'exit' event contract fires for
-    // ANY process termination reachable via process.exit() internally,
-    // including the default uncaughtException handler's exit(1), so the same
-    // listener that covers normal exit and SIGINT (via this app's existing
-    // sigintHandler -> eventual exitApp() -> process.exit()) covers the
-    // crash-path too, with no separate uncaughtException/SIGTERM handler
-    // required in main.ts.
-    const written: string[] = [];
-    const stub = { write: (s: string) => { written.push(s); return true; } };
-    const listener = installAndCapture(stub);
-    listener(); // best-effort: same code path Node invokes pre-crash-exit
-    expect(written.join('')).toContain(FOCUS_DISABLE);
-  });
-
   test('a torn-down stdout (write throws) never propagates: the teardown itself must not crash exit handling', () => {
     const stub = { write: () => { throw new Error('EPIPE'); } };
     const listener = installAndCapture(stub);
@@ -137,6 +121,17 @@ describe('wrapRequestPermissionWithApprovalAlert', () => {
     // Unknown tool metadata stays generic; no args or command strings leak.
     expect(notified[0]!.message).not.toContain('args');
     expect((result as { approved: boolean }).approved).toBe(true); // original handler's resolution is unchanged
+  });
+
+  test('the execution options, including the abort signal, reach the wrapped handler', async () => {
+    const seen: unknown[] = [];
+    const wrapped = wrapRequestPermissionWithApprovalAlert(
+      async (_request, options) => { seen.push(options); return { approved: true, remember: false }; },
+      { focusTracker: new FocusTracker(), notify: () => {} },
+    );
+    const options = { signal: new AbortController().signal };
+    await wrapped(makeRequest(), options);
+    expect(seen).toEqual([options]);
   });
 
   test('the actual platform approval bell passes the installed full-screen guard without leaking direct output', async () => {

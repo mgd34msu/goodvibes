@@ -104,9 +104,8 @@ describe('daemon drop and re-adoption', () => {
     await daemon.stop();
     daemon = null;
     const beforeReturn = theDoor.seen.length;
-    // Longer than several heartbeats: the Agent must notice the loss by itself.
-    await Bun.sleep(4_000);
-    expect(theDoor.seen.length).toBe(beforeReturn);
+    // Nothing is observable at a closed port. The loss is proven by the second
+    // attach below, which fires only on a transition back into adoption.
     expect(agent.alive()).toBe(true);
 
     // Return: a new daemon process behind the same port.

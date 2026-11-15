@@ -7,30 +7,19 @@
  *   - Filter behavior: filterKey narrows the result set by model id substring
  *   - Text format includes position-prefixed backend lines
  *
- * These tests import and exercise the real buildSyntheticChainEntries function
- * exported from management.ts, ensuring regressions in the actual formatting
- * logic are caught, not a local copy.
+ * These tests import and exercise the real buildSyntheticChainEntries and
+ * formatSyntheticChainText functions exported from management.ts, which the
+ * `models synthetic` command itself calls.
  */
 
 import { describe, expect, test } from 'bun:test';
 import type { CanonicalModel } from '@goodvibes-jev/engine/platform/platform/providers';
-import { buildSyntheticChainEntries } from '../../cli/management.ts';
+import { buildSyntheticChainEntries, formatSyntheticChainText } from '../../cli/management.ts';
 
 // Alias for test readability, same function, real implementation.
 const buildChainOutputValue = buildSyntheticChainEntries;
 
-function buildChainTextLines(
-  value: ReturnType<typeof buildChainOutputValue>,
-  filterKey?: string,
-): string {
-  return [
-    `GoodVibes synthetic model chains${filterKey ? ` (${filterKey})` : ''}`,
-    ...value.flatMap((m) => [
-      `  ${m.id}  [${m.tier}]  ${m.keyedBackendCount}/${m.backendCount} backends configured`,
-      ...m.backends.map((b) => `    ${b.position}. ${b.provider}/${b.model}`),
-    ]),
-  ].join('\n');
-}
+const buildChainTextLines = formatSyntheticChainText;
 
 // ---------------------------------------------------------------------------
 // Fixtures

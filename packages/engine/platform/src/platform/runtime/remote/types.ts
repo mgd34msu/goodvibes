@@ -419,6 +419,7 @@ export type VersionNegotiationResult =
         | 'major_version_mismatch'
         | 'peer_version_too_old'
         | 'peer_version_unsupported';
+      /** Same value as `unsupportedCode`; the diagnostics panel reads this name. */
       readonly incompatibilityCode:
         | 'major_version_mismatch'
         | 'peer_version_too_old'

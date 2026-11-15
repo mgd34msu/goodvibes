@@ -171,8 +171,15 @@ export const GMAIL_BODY_SCOPES: readonly string[] = [
  */
 const GMAIL_MESSAGE_GONE_STATUS = 404;
 
-/** `historyTypes[]` values, singular form, exactly as Gmail's API expects them. */
-export type GmailHistoryType = 'messageAdded' | 'messageDeleted' | 'labelAdded' | 'labelRemoved';
+/**
+ * `historyTypes[]` value, singular form, exactly as Gmail's API expects it.
+ *
+ * Only `messageAdded` is offered: a delta here is a list of new messages to
+ * read, and the other record kinds (deleted, label changes) are not read out of
+ * the history records, so accepting them would return an empty delta over a
+ * history that is full of changes.
+ */
+export type GmailHistoryType = 'messageAdded';
 
 /**
  * What to do when the token carries `gmail.metadata` and no body-capable scope.
@@ -379,7 +386,10 @@ async function collectAddedMessageIds(
           status: 404,
           problem:
             `Google reported startHistoryId ${options.startHistoryId} is outside the available history range. ` +
-            'History records are typically retained for about a week and sometimes less, and a 404 here means the whole window has aged out rather than that some records are missing.',
+            'History records are typically retained for about a week and sometimes less, and a 404 here means the whole window has aged out rather than that some records are missing.' +
+            (options.labelId === undefined
+              ? ''
+              : ` Google answers 404 in the same way when the label ${options.labelId} does not exist; if establishing a new position keeps ending here, check that label.`),
           fix: 'Perform a full mailbox sync (listMessages), then re-establish the cursor from the historyId of a current message before resuming historyListDelta.',
         };
       }
@@ -519,4 +529,19 @@ export async function collectHistoryDelta(
     ok: true,
     value: { bodies: 'available', historyId: collected.historyId, messages, unreadable },
   };
+}
+
+/**
+ * True when Google's answer for one message says the message itself can never
+ * be read (a malformed id, a gone resource), as opposed to a fault that a later
+ * attempt may clear: no status at all, a refused or rate-limited credential,
+ * a timeout, or a server error. A caller that must not hold a cursor for ever
+ * behind one message counts consecutive passes that fail permanently, and
+ * transient failures never count.
+ */
+export function isPermanentFetchProblem(problem: Pick<GmailFetchProblem, 'status'>): boolean {
+  const status = problem.status;
+  if (status === null) return false;
+  if (status === 401 || status === 403 || status === 408 || status === 429) return false;
+  return status >= 400 && status < 500;
 }

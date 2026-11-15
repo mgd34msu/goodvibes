@@ -1,5 +1,6 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { EMPTY_OBJECT_SCHEMA,STRING_SCHEMA,BOOLEAN_SCHEMA,NUMBER_SCHEMA,arraySchema,objectSchema,listOutputSchema,bodyEnvelopeSchema,methodDescriptor,runtimeEventId } from './method-catalog-shared.js';
+import { withPathParams } from './method-catalog-path-params.js';
 import {
   HTTP_HEADER_MAP_SCHEMA,
   METADATA_SCHEMA,
@@ -127,9 +128,11 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/accounts/{surface}/actions/{action}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
+      action: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface', 'action']),
     outputSchema: CHANNEL_ACCOUNT_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -141,9 +144,11 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/accounts/{surface}/{accountId}/actions/{action}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
+      action: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface', 'accountId', 'action']),
     outputSchema: CHANNEL_ACCOUNT_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -195,9 +200,11 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/tools/{surface}/{toolId}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
+      toolId: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface', 'toolId']),
     outputSchema: CHANNEL_TOOL_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -249,9 +256,11 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/actions/{surface}/{actionId}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
+      actionId: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface', 'actionId']),
     outputSchema: CHANNEL_OPERATOR_ACTION_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -262,7 +271,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     scopes: ['write:channels'],
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/targets/{surface}/resolve' },
-    inputSchema: CHANNEL_TARGET_RESOLVE_INPUT_SCHEMA,
+    inputSchema: withPathParams(CHANNEL_TARGET_RESOLVE_INPUT_SCHEMA, ['surface']),
     outputSchema: CHANNEL_TARGET_RESOLVE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -274,12 +283,13 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/authorize/{surface}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
       actionId: STRING_SCHEMA,
       actorId: STRING_SCHEMA,
       accountId: STRING_SCHEMA,
       target: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }, ['actionId']),
+    }, ['surface', 'actionId']),
     outputSchema: CHANNEL_AUTHORIZE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -291,6 +301,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/allowlist/{surface}/resolve' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
       add: arraySchema(STRING_SCHEMA),
       remove: arraySchema(STRING_SCHEMA),
       groupId: STRING_SCHEMA,
@@ -298,7 +309,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       workspaceId: STRING_SCHEMA,
       kind: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface']),
     outputSchema: CHANNEL_ALLOWLIST_RESOLUTION_SCHEMA,
   }),
   methodDescriptor({
@@ -310,6 +321,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/allowlist/{surface}/edit' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
       add: arraySchema(STRING_SCHEMA),
       remove: arraySchema(STRING_SCHEMA),
       groupId: STRING_SCHEMA,
@@ -317,7 +329,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       workspaceId: STRING_SCHEMA,
       kind: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface']),
     outputSchema: CHANNEL_ALLOWLIST_EDIT_RESULT_SCHEMA,
   }),
   methodDescriptor({
@@ -339,6 +351,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     access: 'admin',
     http: { method: 'POST', path: '/api/channels/policies/{surface}' },
     inputSchema: bodyEnvelopeSchema({
+      surface: STRING_SCHEMA,
       enabled: BOOLEAN_SCHEMA,
       requireMention: BOOLEAN_SCHEMA,
       allowDirectMessages: BOOLEAN_SCHEMA,
@@ -353,7 +366,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       allowedCommands: arraySchema(STRING_SCHEMA),
       groupPolicies: arraySchema(CHANNEL_GROUP_POLICY_SCHEMA),
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['surface']),
     outputSchema: CHANNEL_POLICY_SCHEMA,
   }),
   methodDescriptor({
@@ -456,7 +469,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       address: STRING_SCHEMA,
       headers: HTTP_HEADER_MAP_SCHEMA,
       run: STRING_SCHEMA,
-    }),
+    }, ['watcherId']),
     outputSchema: WATCHER_RECORD_SCHEMA,
   }),
   methodDescriptor({
@@ -514,6 +527,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     description: 'Return platform service installation and runtime posture.',
     category: 'services',
     scopes: ['read:services'],
+    access: 'admin',
     http: { method: 'GET', path: '/api/service/status' },
     inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: SERVICE_STATUS_SCHEMA,

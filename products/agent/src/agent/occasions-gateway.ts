@@ -137,6 +137,8 @@ export function createOccasionsGatewayInvoke(
         const data = await catalog.invoke(methodId, invocation);
         assertCurrent(); return { ok: true, data, route: 'in-process' };
       } catch (error) {
+        // An abort or a changed owner is a cancellation, not a handler failure: throw it.
+        assertCurrent();
         return { ok: false, data: null, error: summarizeError(error), route: 'in-process' };
       }
     }

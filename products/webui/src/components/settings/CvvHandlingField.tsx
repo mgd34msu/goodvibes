@@ -1,8 +1,8 @@
 /**
  * CvvHandlingField, the typed editor for `payments.cvvHandling`.
  *
- * An ordinary enum select ('stored' | 'prompt'), with one addition: selecting
- * 'prompt' shows CVV_PROMPT_TRADEOFF_WARNING at the moment of selection, the
+ * An ordinary enum select ('stored' | 'prompt'), with one addition: while 'prompt'
+ * is the stored mode, or is being saved, it shows CVV_PROMPT_TRADEOFF_WARNING, the
  * platform's own wording, imported directly from
  * `@goodvibes-jev/engine/platform/platform/payments/browser` (that subpath has no node-only
  * dependencies, so it is safe to import at runtime, unlike `platform/config`,
@@ -22,10 +22,14 @@ export interface CvvHandlingFieldProps {
 }
 
 export function CvvHandlingField({ value, enumValues, disabled, onCommit }: CvvHandlingFieldProps) {
-  const [showPromptWarning, setShowPromptWarning] = useState(value === 'prompt');
+  // The mode the operator just picked. It only counts while the write is in flight
+  // (the parent disables the field then); once the write settles the stored `value`
+  // decides, so a refused or failed commit leaves no warning about a mode that is not active.
+  const [picked, setPicked] = useState<string | null>(null);
+  const showPromptWarning = value === 'prompt' || (disabled === true && picked === 'prompt');
 
   function handleChange(next: string): void {
-    setShowPromptWarning(next === 'prompt');
+    setPicked(next);
     onCommit(next);
   }
 

@@ -17,7 +17,9 @@ import type {
   KnowledgeSemanticSelfImproveInput,
   KnowledgeSemanticSelfImproveResult,
 } from '../platform/src/platform/knowledge/semantic/types.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
+
+useStoreCleanup();
 
 const gapRepairer = {} as unknown as KnowledgeSemanticGapRepairer;
 

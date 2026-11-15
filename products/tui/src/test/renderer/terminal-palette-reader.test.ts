@@ -13,7 +13,7 @@
  *     retries (timer, focus-in, resize, input) and accepts late replies.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { installBackgroundThemeProbe, OSC11_QUERY } from '../../renderer/terminal-bg-probe.ts';
 import { PALETTE_QUERIES, sweepPaletteReplies } from '../../renderer/terminal-palette-probe.ts';
 import { TerminalPaletteReader } from '../../renderer/terminal-palette-reader.ts';
@@ -24,7 +24,10 @@ import { configGetStub } from '../helpers/config-manager-stub.ts';
 
 const readers: TerminalPaletteReader[] = [];
 
+beforeEach(() => { jest.useFakeTimers(); });
+
 afterEach(() => {
+  jest.useRealTimers();
   for (const reader of readers.splice(0)) reader.dispose();
   setActiveThemeMode('dark');
   setActiveThemeName('goodvibes');
@@ -42,7 +45,8 @@ function tmuxReplies(background = 'rgb:1a1a/1b1b/2626'): string {
   return s;
 }
 
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** Move the fake clock forward; every timer due by then fires. */
+const elapse = (ms: number): void => { jest.advanceTimersByTime(ms); };
 
 function config(values: Record<string, unknown>): Pick<ConfigManager, 'get'> {
   return { get: configGetStub(values) };
@@ -80,7 +84,7 @@ describe('system theme under tmux with no client attached at startup', () => {
     expect(getActiveThemeName()).toBe('system');
     expect(h.writes).toEqual([BATCH]);
     const fallback = activeTokens().primary;
-    await wait(40); // round 1 closes with nothing (tmux dropped the query)
+    elapse(40); // round 1 closes with nothing (tmux dropped the query)
     expect(getTerminalPalette()?.background).toBeUndefined();
     expect(activeTokens().primary).toBe(fallback); // still the goodvibes stand-in
 
@@ -96,21 +100,21 @@ describe('system theme under tmux with no client attached at startup', () => {
 
   test('a resize (attach from a differently sized client) also asks again', async () => {
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     h.resize();
     expect(h.writes).toEqual([BATCH, BATCH]);
   });
 
   test('a timed retry after the first frame asks again without any input', async () => {
     const h = install({ 'display.themeMode': 'dark' }, { retryDelayMs: 20 });
-    await wait(90);
+    elapse(90);
     expect(h.writes.length).toBeGreaterThanOrEqual(2);
     expect(h.writes.every((w) => w === BATCH)).toBe(true);
   });
 
   test('rounds stop at the cap on a terminal that never answers', async () => {
     const h = install({ 'display.themeMode': 'dark' }, { retryDelayMs: 5, maxRounds: 3 });
-    await wait(200);
+    elapse(200);
     expect(h.writes).toHaveLength(3);
   });
 
@@ -124,7 +128,7 @@ describe('system theme under tmux with no client attached at startup', () => {
 
   test('auto mode: a light background that arrives after the background probe timed out still settles light', async () => {
     const h = install({ 'display.themeMode': 'auto' });
-    await wait(40);
+    elapse(40);
     expect(activeThemeMode()).toBe('dark');
     h.filter('\x1b[I');
     h.filter(tmuxReplies('rgb:f0f0/f0f0/f0f0'));
@@ -135,7 +139,7 @@ describe('system theme under tmux with no client attached at startup', () => {
 describe('late replies', () => {
   test('a reply slower than the window (ssh) is removed from input and re-themes when it lands', async () => {
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     const repaintsBefore = h.repaints;
     expect(h.filter(`ab${tmuxReplies()}cd`)).toBe('abcd');
     expect(getTerminalPalette()?.foreground).toBe('#a9b1d6');
@@ -151,11 +155,11 @@ describe('late replies', () => {
 describe('keys held at a round close', () => {
   test('an Esc pressed inside a retry window is handed on, not dropped', async () => {
     const h = install({ 'display.themeMode': 'dark' });
-    await wait(40);
+    elapse(40);
     h.filter('a'); // input starts retry round 2
     expect(h.writes).toHaveLength(2);
     expect(h.filter('\x1b')).toBe(''); // held: could be the start of a reply
-    await wait(40);
+    elapse(40);
     expect(h.forwarded).toEqual(['\x1b']);
   });
 });
@@ -167,7 +171,7 @@ describe('TerminalPaletteReader', () => {
     const reader = new TerminalPaletteReader({ writeBatch: () => { writes += 1; }, onPalette: (p) => published.push(p), timeoutMs: 5, retryDelayMs: 60_000, minRoundSpacingMs: 0 });
     readers.push(reader);
     reader.start();
-    await wait(25);
+    elapse(25);
     expect(published).toHaveLength(1);
     expect(published[0]!.background).toBeUndefined();
     expect(reader.retry()).toBe(true);

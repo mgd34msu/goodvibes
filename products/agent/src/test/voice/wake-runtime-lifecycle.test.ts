@@ -17,6 +17,8 @@ const MONITOR: Device = { id: 'alsa_output.hdmi.monitor', label: 'alsa_output.hd
 
 function harness() {
   const notices: string[] = [];
+  let noticeArrived: () => void = () => {};
+  const firstNotice = new Promise<void>((resolve) => { noticeArrived = resolve; });
   const config: Record<string, unknown> = {
     'voice.wake.enabled': true,
     'voice.wake.surfaces.agent': true,
@@ -37,7 +39,7 @@ function harness() {
     playActivationSound: () => {},
     submitTurn: () => {},
     writeDraft: () => {},
-    notify: (message) => { notices.push(message); },
+    notify: (message) => { notices.push(message); noticeArrived(); },
     // The listener reports its state through render, so a render that throws once is a start that rejects.
     render: () => { if (state.renderFailures > 0) { state.renderFailures -= 1; throw new Error('render exploded'); } },
     sessionId: 'test-session',
@@ -48,7 +50,7 @@ function harness() {
     setTimeout: () => 0,
     clearTimeout: () => {},
   };
-  return { runtime: wireWakeRuntime(deps), deps, config, notices, state, listeners };
+  return { runtime: wireWakeRuntime(deps), deps, config, notices, state, listeners, firstNotice };
 }
 
 describe('wake runtime after a failed start', () => {
@@ -83,7 +85,9 @@ describe('wake runtime after a failed start', () => {
     process.on('unhandledRejection', onUnhandled);
     try {
       const unsubs = startWakeRuntime(wake.runtime, { subscribeConfig: wake.deps.subscribeConfig });
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The failed start is reported through notify; one more turn of the event loop lets any unhandled rejection surface.
+      await wake.firstNotice;
+      await new Promise((resolve) => setImmediate(resolve));
       for (const unsub of unsubs) unsub();
     } finally {
       process.off('unhandledRejection', onUnhandled);

@@ -228,7 +228,25 @@ function inspectLock(lockPath: string, staleMs: number, strictOwnership = false)
  * (a process that died mid-takeover). Best-effort; a takeover completes in
  * microseconds, so an old ticket is unambiguously abandoned.
  */
-function reclaimAbandonedTicket(ticketPath: string, staleMs: number): void {
+function reclaimAbandonedTicket(ticketPath: string, staleMs: number, strictOwnership = false): void {
+  if (strictOwnership) {
+    // Strict ownership never judges by age, so a ticket left by a process
+    // killed mid-takeover would wedge every later takeover. The ticket records
+    // its creator's pid (`pid ts`); only a pid proven dead (ESRCH) releases it.
+    try {
+      const before = statSync(ticketPath);
+      const pid = Number(readFileSync(ticketPath, 'utf-8').trim().split(/\s+/)[0]);
+      if (!Number.isSafeInteger(pid) || pid <= 0) return;
+      try { process.kill(pid, 0); return; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return;
+      }
+      const after = statSync(ticketPath);
+      if (after.ino === before.ino && after.dev === before.dev) unlinkSync(ticketPath);
+    } catch {
+      // gone already, or unreadable: leave it
+    }
+    return;
+  }
   try {
     if (Date.now() - statSync(ticketPath).mtimeMs <= staleMs) return;
   } catch {
@@ -329,7 +347,7 @@ function tryTakeOverStaleLock(lockPath: string, staleMs: number, token: string, 
   try {
     ticketFd = openSync(ticketPath, 'wx');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') reclaimAbandonedTicket(ticketPath, staleMs);
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') reclaimAbandonedTicket(ticketPath, staleMs, strictOwnership);
     return null; // someone else is taking over right now; retry the normal path
   }
 

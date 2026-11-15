@@ -14,11 +14,6 @@ describe('runtime meter', () => {
     resetMetrics();
   });
 
-  test('platformMeter is exported from metrics module', async () => {
-    const { platformMeter } = await import('../platform/src/platform/runtime/metrics.js');
-    expect(platformMeter).not.toBeNull(); // presence-only: platformMeter exported
-  });
-
   test('httpRequestsTotal counter add() and value() work', async () => {
     const { httpRequestsTotal } = await import('../platform/src/platform/runtime/metrics.js');
     const before = httpRequestsTotal.value({ status_class: '2xx' });
@@ -26,9 +21,12 @@ describe('runtime meter', () => {
     expect(httpRequestsTotal.value({ status_class: '2xx' })).toBe(before + 1);
   });
 
-  test('llmRequestDurationMs histogram record() does not throw', async () => {
+  test('llmRequestDurationMs histogram record() is reflected in the merged snapshot across label sets', async () => {
     const { llmRequestDurationMs } = await import('../platform/src/platform/runtime/metrics.js');
-    expect(() => llmRequestDurationMs.record(125, { provider: 'anthropic' })).not.toThrow();
+    llmRequestDurationMs.record(100, { provider: 'anthropic' });
+    llmRequestDurationMs.record(300, { provider: 'openai', model: 'm' });
+    expect(llmRequestDurationMs.merged()).toMatchObject({ count: 2, sum: 400, min: 100, max: 300 });
+    expect(llmRequestDurationMs.merged({ provider: 'openai' })).toMatchObject({ count: 1, sum: 300 });
   });
 
   test('sessionsActive gauge can be set and read', async () => {
@@ -85,15 +83,22 @@ describe('runtime meter', () => {
     expect(typeof hSnap.mean).toBe('number');
   });
 
-  // Verifies that direct counter increments are reflected in snapshotMetrics output.
-  test('httpRequestsTotal increments are observable via snapshotMetrics', async () => {
+  test('requests recorded under method and status_class are counted per status class in snapshotMetrics', async () => {
     const { httpRequestsTotal, snapshotMetrics } = await import('../platform/src/platform/runtime/metrics.js');
-    const before = httpRequestsTotal.value({ status_class: '2xx', method: 'GET' });
     httpRequestsTotal.add(1, { status_class: '2xx', method: 'GET' });
+    httpRequestsTotal.add(1, { status_class: '2xx', method: 'POST' });
+    httpRequestsTotal.add(1, { status_class: '5xx', method: 'GET' });
+    expect(snapshotMetrics().counters.http.requests.total).toEqual({ '2xx': 2, '4xx': 0, '5xx': 1 });
+    expect(snapshotMetrics().counters['http.requests.total']).toEqual({ '2xx': 2, '4xx': 0, '5xx': 1 });
+  });
+
+  test('histogram samples and the sessions gauge show up in snapshotMetrics', async () => {
+    const { httpRequestDurationMs, sessionsActive, snapshotMetrics } = await import('../platform/src/platform/runtime/metrics.js');
+    httpRequestDurationMs.record(40, { method: 'GET', path_pattern: '/x', status_class: '2xx' });
+    httpRequestDurationMs.record(60, { method: 'GET', path_pattern: '/y', status_class: '2xx' });
+    sessionsActive.set(3);
     const snap = snapshotMetrics();
-    const afterDirect = httpRequestsTotal.value({ status_class: '2xx', method: 'GET' });
-    expect(afterDirect).toBe(before + 1);
-    // Snapshot includes counters map
-    expect(snap).toHaveProperty('counters');
+    expect(snap.histograms['http.request.duration_ms']).toMatchObject({ count: 2, sum: 100, min: 40, max: 60, mean: 50 });
+    expect(snap.gauges.sessions.active).toBe(3);
   });
 });

@@ -7,7 +7,7 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
-import { withRuntimeServices } from './management.ts';
+import { withReadOnlyRuntimeServices, withRuntimeServices } from './management.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -70,18 +70,36 @@ function renderGroup(group: HeldMergeGroup): string {
   ].join('\n');
 }
 
-function renderGroupList(groups: readonly HeldMergeGroup[]): string {
+export function renderGroupList(groups: readonly HeldMergeGroup[]): string {
   if (groups.length === 0) {
     return ['Best-of-N held-merge groups', '  No groups are currently held for a winner pick.'].join('\n');
   }
   return [`Best-of-N held-merge groups (${groups.length})`, ...groups.map(renderGroup)].join('\n\n');
 }
 
+export function renderPickResult(result: AttemptPickResult): string {
+  return [
+    `Picked winner ${result.winnerItemId} for group ${result.groupId}`,
+    `  losers cleaned: ${result.loserItemIds.length === 0 ? 'none' : result.loserItemIds.join(', ')}`,
+    `  auto-picked ${result.auto ? 'yes (judge auto-accept)' : 'no (explicit operator pick)'}`,
+  ].join('\n');
+}
+
+export function renderJudgeProposal(groupId: string, judgment: AttemptJudgment): string {
+  return [
+    `Judge proposal for group ${groupId}`,
+    ...renderJudgment(judgment),
+    '',
+    'This is a model judgment, not a decision. Confirm with:',
+    `  goodvibes-agent fleet attempts pick ${groupId} <winnerItemId> --yes`,
+  ].join('\n');
+}
+
 async function handleFleetAttemptsList(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args, ['workstream']);
   const workstreamId = operatorFlagValue(parsed, 'workstream');
   try {
-    const groups = await withRuntimeServices(
+    const groups = await withReadOnlyRuntimeServices(
       runtime,
       (services) => services.contractRunner.fleetControls().listHeldMergeGroups(workstreamId),
       { modelData: 'skip' },
@@ -109,12 +127,7 @@ async function handleFleetAttemptsPick(runtime: CliCommandRuntime, args: readonl
       (services) => services.contractRunner.fleetControls().pickAttemptWinner(groupId, winnerItemId),
       { modelData: 'skip' },
     );
-    const text = [
-      `Picked winner ${result.winnerItemId} for group ${result.groupId}`,
-      `  losers cleaned: ${result.loserItemIds.length === 0 ? 'none' : result.loserItemIds.join(', ')}`,
-      `  auto-picked ${result.auto ? 'yes (judge auto-accept)' : 'no (explicit operator pick)'}`,
-    ].join('\n');
-    return { output: jsonOrText(runtime, { ok: true, ...result }, text), exitCode: 0 };
+    return { output: jsonOrText(runtime, { ok: true, ...result }, renderPickResult(result)), exitCode: 0 };
   } catch (error) {
     return errorFailure(runtime, error);
   }
@@ -130,14 +143,7 @@ async function handleFleetAttemptsJudge(runtime: CliCommandRuntime, args: readon
       (services) => services.contractRunner.fleetControls().proposeAttemptWinner(groupId),
       { modelData: 'skip' },
     );
-    const text = [
-      `Judge proposal for group ${groupId}`,
-      ...renderJudgment(judgment),
-      '',
-      'This is a model judgment, not a decision. Confirm with:',
-      `  goodvibes-agent fleet attempts pick ${groupId} <winnerItemId> --yes`,
-    ].join('\n');
-    return { output: jsonOrText(runtime, { ok: true, judgment }, text), exitCode: 0 };
+    return { output: jsonOrText(runtime, { ok: true, judgment }, renderJudgeProposal(groupId, judgment)), exitCode: 0 };
   } catch (error) {
     return errorFailure(runtime, error);
   }

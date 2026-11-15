@@ -4,7 +4,7 @@
  * contract without force.
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, linkSync, symlinkSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, linkSync, symlinkSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ContractEvent } from '../../platform/src/events/contract.js';
@@ -38,8 +38,6 @@ function tempRoot(): string {
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    const dir = contractCheckpointsDir(root);
-    if (existsSync(dir)) chmodSync(dir, 0o700);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -72,6 +70,13 @@ function nativeQuarantines(path: string): string[] {
 
 function storeAt(root: string, now: number = Date.now()): ContractStore {
   return new ContractStore({ projectRoot: root, now: () => now, sweepIntervalMs: 0 });
+}
+
+/** A store whose checkpoint writes fail while `failing.on` holds; injected so the failure does not depend on file modes (root ignores them). */
+function failableStoreAt(root: string): { store: ContractStore; failing: { on: boolean } } {
+  const failing = { on: false };
+  const store = new ContractStore({ projectRoot: root, sweepIntervalMs: 0, beforeWrite() { if (failing.on) throw new Error('fixture: checkpoint directory is not writable'); } });
+  return { store, failing };
 }
 
 function terminalContract(completedAt: number, status: Contract['status'] = 'passed'): Contract {
@@ -184,14 +189,15 @@ describe('atomic write', () => {
 
   test('a write that fails keeps the previous file whole', () => {
     const root = tempRoot();
-    const store = storeAt(root);
+    const { store, failing } = failableStoreAt(root);
     const contract = makeContract();
     store.put(contract);
     store.write(contract.id);
-    chmodSync(contractCheckpointsDir(root), 0o500);
+    failing.on = true;
     contract.goal = 'Never written';
     expect(store.write(contract.id)).toBe(false);
-    chmodSync(contractCheckpointsDir(root), 0o700);
+    expect(store.writeFailure(contract.id)?.message).toContain('could not be written');
+    failing.on = false;
     expect(storeAt(root).load(contract.id)?.goal).toBe('A parser for every documented input form');
     expect(readdirSync(contractCheckpointsDir(root))).toEqual([`${contract.id}.json`]);
   });
@@ -444,12 +450,12 @@ describe('importContract', () => {
 
   test('failed persistence refuses import and preserves the previous memory and disk state', () => {
     const root = tempRoot();
-    const store = storeAt(root);
+    const { store, failing } = failableStoreAt(root);
     const original = makeContract({ status: 'passed', completedAt: 1 });
     store.hold(original); expect(store.write(original.id)).toBe(true);
     const path = contractPath(root, original.id);
     const before = readFileSync(path, 'utf8');
-    chmodSync(contractCheckpointsDir(root), 0o500);
+    failing.on = true;
     try {
       expect(store.importContract(serializeContract({ ...original, goal: 'uncommitted import' }, 2)!, true)).toBe(false);
       expect(store.get(original.id)?.goal).toBe(original.goal);
@@ -457,7 +463,7 @@ describe('importContract', () => {
       const other = makeContract({ id: 'failed-new-import' });
       expect(store.importContract(serializeContract(other, 2)!)).toBe(false);
       expect(store.get(other.id)).toBeNull();
-    } finally { chmodSync(contractCheckpointsDir(root), 0o700); store.dispose(); }
+    } finally { failing.on = false; store.dispose(); }
   });
 
   test('refuses a snapshot it cannot trust', () => {
@@ -494,7 +500,8 @@ describe('the debounced writer', () => {
     contract.status = 'judging';
     events.emit({ type: 'CONTRACT_STATUS_CHANGED', contractId: contract.id, from: 'running', to: 'judging' });
     expect(storeAt(root).load(contract.id)?.status).toBe('running');
-    await Bun.sleep(60);
+    const deadline = Date.now() + 5_000;
+    while (storeAt(root).load(contract.id)?.status !== 'judging' && Date.now() < deadline) await Bun.sleep(5);
     expect(storeAt(root).load(contract.id)?.status).toBe('judging');
     detach();
     expect(events.listeners).toBe(0);

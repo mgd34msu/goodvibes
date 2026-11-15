@@ -81,9 +81,14 @@ describe('localhost dev-server fetch: ask once, allow for this project', () => {
     expect(asks[0]?.attribution).toMatchObject({ kind: 'fetch-localhost', host: 'localhost' });
     expect(asks[0]?.analysis.reasons.join(' ')).toContain('fetch.allowLocalhost');
 
-    // The approval persisted to the PROJECT settings file.
-    const onDisk = JSON.parse(readFileSync(projectSettingsPath, 'utf-8')) as { fetch?: { allowLocalhost?: boolean } };
+    // The grant lives in the user's own settings: a project file cannot turn localhost fetching on.
+    const onDisk = JSON.parse(readFileSync(configManager.getConfigPath(), 'utf-8')) as { fetch?: { allowLocalhost?: boolean } };
     expect(onDisk.fetch?.allowLocalhost).toBe(true);
+    expect(() => readFileSync(projectSettingsPath, 'utf-8')).toThrow();
+
+    // A config reload keeps the approved grant.
+    configManager.load();
+    expect(configManager.get('fetch.allowLocalhost')).toBe(true);
 
     // Same runtime: a second fetch never re-asks.
     const second = await executeFetchInput({ urls: [{ url }] }, deps);

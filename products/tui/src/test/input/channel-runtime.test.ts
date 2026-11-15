@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerChannelRuntimeCommands } from '../../input/commands/channel-runtime.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
+import { PAIRABLE_SURFACES } from '../../input/commands/channel-pairing.ts';
 
 // ---------------------------------------------------------------------------
 // Minimal command context stub for /channel tests
@@ -166,6 +167,15 @@ describe('/channel command', () => {
     expect(output).toContain('enabled=true');
   });
 
+  test('policy covers every surface /channel pair supports', () => {
+    const registry = makeRegistry();
+    const asked: string[] = [];
+    const ctx = makeCtx({ configGet: (key) => { asked.push(key); return false; } });
+    registry.get('channel')!.handler(['policy'], ctx);
+    for (const surface of PAIRABLE_SURFACES) expect(asked).toContain(`surfaces.${surface}.enabled`);
+    expect(asked).toContain('surfaces.telephony.enabled');
+  });
+
   test('policy shows empty state when no surfaces configured', () => {
     const registry = makeRegistry();
     const ctx = makeCtx({ configGet: () => undefined });
@@ -214,6 +224,17 @@ describe('/channel command', () => {
       const ctx = makeCtx();
       await registry.get('channel')!.handler(['profiles', 'delete'], ctx);
       expect(ctx.printed.join('\n')).toContain('Usage: /channel profiles delete');
+    });
+
+    test('set refuses an unknown flag or a flag without a value instead of binding without it', async () => {
+      const registry = makeRegistry();
+      for (const flags of [['--permision-mode', 'plan'], ['--model'], ['--model', '--provider', 'x']]) {
+        const ctx = makeCtx();
+        await registry.get('channel')!.handler(['profiles', 'set', 'slack', ...flags], ctx);
+        const output = ctx.printed.join('\n');
+        expect(output).toContain('nothing was bound');
+        expect(output).not.toContain('no control-plane base URL');
+      }
     });
 
     test('unknown profiles subcommand prints usage', async () => {

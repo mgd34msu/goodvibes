@@ -295,6 +295,23 @@ export function stringEnumSchema(values: readonly string[]): Record<string, unkn
   return { type: 'string', enum: [...values] };
 }
 
+/**
+ * A string enum for a published schema that must list every member of a source
+ * union: `exhaustiveStringEnumSchema<Kind>()([...])` refuses to compile when a
+ * member of `Kind` is missing from the list (and when the list holds a value
+ * that is not a member), so the daemon cannot serve a value its own schema rejects.
+ */
+export function exhaustiveStringEnumSchema<Member extends string>() {
+  return <const Listed extends readonly Member[]>(
+    values: Listed,
+    // Empty when every member is listed; otherwise one required argument named after the gap.
+    ...uncovered: [Exclude<Member, Listed[number]>] extends [never] ? [] : [missing: Exclude<Member, Listed[number]>]
+  ): Record<string, unknown> => {
+    void uncovered;
+    return stringEnumSchema(values);
+  };
+}
+
 export function methodDescriptor(input: Omit<GatewayMethodDescriptor, 'source' | 'transport' | 'access'> & Partial<Pick<GatewayMethodDescriptor, 'source' | 'transport' | 'access'>>): GatewayMethodDescriptor {
   return {
     source: input.source ?? 'builtin',

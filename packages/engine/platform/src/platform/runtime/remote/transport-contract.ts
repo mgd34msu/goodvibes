@@ -106,8 +106,9 @@ export const CURRENT_PROTOCOL_VERSION: Readonly<ProtocolVersion> = Object.freeze
  *
  * Policy:
  * - Peers advertising minor < minSupportedMinor are rejected as unsupported.
- * - Peers advertising minor > maxSupportedMinor are accepted; we downgrade to
- *   the peer's level (peer is newer, they offer a superset of our features).
+ * - Peers advertising minor > maxSupportedMinor are rejected as unsupported
+ *   (`peer_version_unsupported`): a newer peer may send messages this build
+ *   cannot read, so the local build must be upgraded instead.
  * - Peers advertising the same minor connect at full capability.
  */
 export const TRANSPORT_PROTOCOL_SUPPORT_MATRIX: ProtocolSupportMatrix = Object.freeze([
@@ -168,10 +169,11 @@ export class VersionMismatchError extends GoodVibesError {
  * Rules:
  * 1. Major versions must match exactly, a mismatch is always unsupported.
  * 2. Find the protocol support entry for the local version in the matrix.
- * 3. Peer minor below `minSupportedMinor` -> unsupported.
- * 4. Peer minor equal to local minor → full capability, no downgrade.
- * 5. Peer minor above local minor → downgrade to local (we are the older peer).
- * 6. Peer minor in (local, maxSupportedMinor] → downgrade to peer (peer is newer).
+ * 3. Peer minor below `minSupportedMinor` -> unsupported (`peer_version_too_old`).
+ * 4. Peer minor above `maxSupportedMinor` -> unsupported (`peer_version_unsupported`).
+ * 5. Otherwise the agreed minor is the lower of the two. A peer older than
+ *    local connects at the peer's minor (downgraded); an equal or newer peer
+ *    within the matrix connects at the local minor.
  *
  * Unsupported peers cannot proceed, callers must reject the handshake.
  *

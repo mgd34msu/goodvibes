@@ -80,6 +80,25 @@ function ModelFigures({ model }: { model: CatalogModel }) {
   );
 }
 
+/** A multi-key target write that stopped part-way: names the key that failed and the keys already stored. */
+class PartialModelWriteError extends Error {
+  constructor(
+    readonly failedKey: string,
+    readonly written: readonly string[],
+    cause: unknown,
+  ) {
+    super(formatError(cause));
+    this.name = 'PartialModelWriteError';
+  }
+
+  describe(): string {
+    const stored = this.written.length > 0
+      ? ` Already stored: ${this.written.join(', ')}; the rest was not changed.`
+      : ' Nothing was changed.';
+    return `Could not set ${this.failedKey}: ${this.message}.${stored}`;
+  }
+}
+
 export interface ModelWorkspaceModalProps {
   open: boolean;
   onClose: () => void;
@@ -154,8 +173,14 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       // time (see src/lib/goodvibes.ts's config.set comment), writing several keys
       // for one target (e.g. helper.globalProvider + helper.globalModel + helper.enabled)
       // means several awaited config.set calls in a row.
+      const written: string[] = [];
       for (const [key, value] of entries) {
-        await platformClient.operator.config.set(key, value);
+        try {
+          await platformClient.operator.config.set(key, value);
+        } catch (error) {
+          throw new PartialModelWriteError(key, written, error);
+        }
+        written.push(key);
       }
       return { entries };
     },
@@ -168,7 +193,15 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       toast({ title: `${TARGET_LABELS[target]} updated`, description: model.label, tone: 'success' });
     },
     onError: (error: unknown) => {
-      toast({ title: 'Model selection failed', description: formatError(error), tone: 'danger' });
+      // A later key can fail after an earlier one was stored: re-read so the dialog
+      // shows what the daemon holds now, not the routing from before the attempt.
+      void queryClient.invalidateQueries({ queryKey: ['config'] });
+      void queryClient.invalidateQueries({ queryKey: ['models'] });
+      toast({
+        title: error instanceof PartialModelWriteError && error.written.length > 0 ? 'Model selection partly applied' : 'Model selection failed',
+        description: error instanceof PartialModelWriteError ? error.describe() : formatError(error),
+        tone: 'danger',
+      });
     },
   });
 
@@ -277,12 +310,13 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
               {!priceDataAvailable && <small className="model-workspace-filter__note">Not reported by this daemon</small>}
             </div>
 
-            <div className="model-workspace-filter" title="Not reported by this daemon">
+            <div className="model-workspace-filter" title={capabilityDataAvailable ? undefined : 'Not reported by this daemon'}>
               <span className="model-workspace-filter__label" aria-hidden="true">Capability</span>
               <Select
                 aria-label="Capability"
                 value="none"
-                disabled={!capabilityDataAvailable}
+                // No capability filter exists yet, so the control stays inert rather than look live.
+                disabled
                 onChange={() => undefined}
                 options={[
                   { value: 'none', label: 'None' },
@@ -291,7 +325,9 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
                   { value: 'multimodal', label: 'Multimodal' },
                 ]}
               />
-              <small className="model-workspace-filter__note">Not reported by this daemon</small>
+              <small className="model-workspace-filter__note">
+                {capabilityDataAvailable ? 'Filtering by capability is not available yet' : 'Not reported by this daemon'}
+              </small>
             </div>
 
             <div className="model-workspace-filter">

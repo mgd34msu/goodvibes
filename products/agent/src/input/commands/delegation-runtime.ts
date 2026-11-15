@@ -2,14 +2,6 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
-function hasFlag(args: readonly string[], flag: string): boolean {
-  return args.includes(flag);
-}
-
-function hasAnyFlag(args: readonly string[], flags: readonly string[]): boolean {
-  return flags.some((flag) => hasFlag(args, flag));
-}
-
 interface DelegationCommandInput {
   readonly task: string;
   readonly reviewRequested: boolean;
@@ -19,48 +11,48 @@ interface DelegationCommandInput {
   readonly priority: string;
 }
 
-function parseDelegationArgs(args: readonly string[], defaultReview: boolean): DelegationCommandInput {
+const DELEGATION_USAGE = 'Usage: /delegate [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] [--] <build/fix/review task>';
+
+const VALUE_FLAGS: Readonly<Record<string, 'reason' | 'successCriteria' | 'workspaceHint' | 'priority'>> = {
+  '--reason': 'reason',
+  '--success': 'successCriteria',
+  '--success-criteria': 'successCriteria',
+  '--workspace': 'workspaceHint',
+  '--worktree': 'workspaceHint',
+  '--priority': 'priority',
+};
+
+/** The parsed command, or the reason it was refused. Nothing is dropped silently: an unknown option or a value that is missing is an error, and a bare `--` ends the options so a task may mention `--something`. */
+function parseDelegationArgs(args: readonly string[], defaultReview: boolean): DelegationCommandInput | { readonly error: string } {
   const taskValues: string[] = [];
-  let reason = '';
-  let successCriteria = '';
-  let workspaceHint = '';
-  let priority = '';
+  const values = { reason: '', successCriteria: '', workspaceHint: '', priority: '' };
+  let optionsEnded = false;
+  let reviewRequested = defaultReview;
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index]!;
-    if (token === '--review' || token === '--wrfc') continue;
-    if (token === '--reason') {
-      reason = args[index + 1]?.trim() ?? '';
-      index += 1;
-      continue;
-    }
-    if (token === '--success' || token === '--success-criteria') {
-      successCriteria = args[index + 1]?.trim() ?? '';
-      index += 1;
-      continue;
-    }
-    if (token === '--workspace' || token === '--worktree') {
-      workspaceHint = args[index + 1]?.trim() ?? '';
-      index += 1;
-      continue;
-    }
-    if (token === '--priority') {
-      priority = args[index + 1]?.trim() ?? '';
-      index += 1;
-      continue;
-    }
-    if (!token.startsWith('--')) {
+    if (optionsEnded || !token.startsWith('--')) {
       taskValues.push(token);
       continue;
     }
+    if (token === '--') {
+      optionsEnded = true;
+      continue;
+    }
+    if (token === '--review' || token === '--wrfc') {
+      reviewRequested = true;
+      continue;
+    }
+    const target = VALUE_FLAGS[token];
+    if (target === undefined) return { error: `Unknown option ${token}. Nothing was delegated. Put -- before a task that mentions it.` };
+    const value = args[index + 1]?.trim();
+    if (!value || value.startsWith('--')) return { error: `${token} needs a value. Nothing was delegated.` };
+    values[target] = value;
+    index += 1;
   }
-  return {
-    task: taskValues.join(' ').trim(),
-    reviewRequested: defaultReview || hasAnyFlag(args, ['--review', '--wrfc']),
-    reason,
-    successCriteria,
-    workspaceHint,
-    priority,
-  };
+  if (!optionsEnded && taskValues.length === 1 && taskValues[0] === 'status') {
+    return { error: '`status` is not a delegate subcommand. Nothing was delegated. Put -- before a task that is literally the word status.' };
+  }
+  return { task: taskValues.join(' ').trim(), reviewRequested, ...values };
 }
 
 function buildDelegationBody(input: DelegationCommandInput): string {
@@ -95,8 +87,12 @@ function buildDelegationBody(input: DelegationCommandInput): string {
 export function registerDelegationRuntimeCommands(registry: CommandRegistry): void {
   const makeHandler = () => async (args: string[], ctx: CommandContext): Promise<void> => {
     const input = parseDelegationArgs(args, false);
+    if ('error' in input) {
+      ctx.print(`${input.error}\n${DELEGATION_USAGE}`);
+      return;
+    }
     if (!input.task) {
-      ctx.print('Usage: /delegate [--review] [--reason <why>] [--success <evidence>] [--workspace <hint>] [--priority <priority>] <build/fix/review task>');
+      ctx.print(DELEGATION_USAGE);
       return;
     }
     const operator = ctx.clients?.operator;

@@ -1,9 +1,10 @@
 import { useSecurityReadings } from './helpers/security-readings.ts';
-import { afterEach, describe, test, expect } from 'bun:test';
+import { afterEach, describe, test, expect, setSystemTime } from 'bun:test';
 import {
   redactMessage,
   exportToJSON,
   exportToHTML,
+  exportToMarkdown,
   exportToMarkdownExtended,
   defaultExportPath,
 } from '@goodvibes-jev/engine/platform/platform/export';
@@ -542,9 +543,9 @@ describe('defaultExportPath', () => {
   });
 
   test('path contains timestamp in ISO-ish format', async () => {
-    // Format: session-YYYY-MM-DDTHH-MM-SS.html (colons replaced with dashes)
+    // Format: session-YYYY-MM-DDTHH-MM-SS-mmm.html (colons and the dot replaced with dashes)
     const p = defaultExportPath('html', HOME_ROOT);
-    expect(p).toMatch(/session-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html/);
+    expect(p).toMatch(/session-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}\.html/);
   });
 
   test('is under goodvibes-exports directory', async () => {
@@ -553,6 +554,19 @@ describe('defaultExportPath', () => {
 
   test('is an absolute path', async () => {
     expect(defaultExportPath('md', HOME_ROOT)).toMatch(/^\//);
+  });
+
+  test('two exports within the same second get different files', () => {
+    try {
+      setSystemTime(new Date('2030-05-06T07:08:09.100Z'));
+      const first = defaultExportPath('md', HOME_ROOT);
+      setSystemTime(new Date('2030-05-06T07:08:09.600Z'));
+      const second = defaultExportPath('md', HOME_ROOT);
+      expect(first).not.toBe(second);
+      expect(first).toMatch(/session-2030-05-06T07-08-09-100\.md$/);
+    } finally {
+      setSystemTime();
+    }
   });
 });
 
@@ -579,5 +593,102 @@ describe('redaction reaches the title and nested tool arguments', () => {
       toolCalls: [{ id: 't1', name: 'exec', arguments: { argv: [['curl', '-H', `Authorization: Bearer ${secret}`]] } }],
     } as ExportMessage);
     expect(JSON.stringify(redacted)).not.toContain(secret);
+  });
+});
+
+describe('exports never turn remote-chosen text into markup', () => {
+  test('image data that is not base64 is omitted from the HTML export instead of breaking out of the attribute', async () => {
+    const msg: ExportMessage = {
+      role: 'user',
+      content: [{ type: 'image', data: 'x" onerror="alert(1)', mediaType: 'image/png' }],
+    };
+    const html = await exportToHTML([msg], basicMeta, { redact: false });
+    expect(html).not.toContain('onerror');
+    expect(html).toContain('attachment omitted');
+  });
+
+  test('a real base64 image still renders in the HTML export', async () => {
+    const msg: ExportMessage = { role: 'user', content: [{ type: 'image', data: 'iVBORw0KGgo=', mediaType: 'image/png' }] };
+    const html = await exportToHTML([msg], basicMeta, { redact: false });
+    expect(html).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+  });
+
+  test('a tool name is escaped in the Markdown export', () => {
+    const md = exportToMarkdown([
+      { role: 'assistant', content: 'calling', toolCalls: [{ id: 'c1', name: '<img src=x onerror=alert(1)>', arguments: {} }] },
+    ], basicMeta);
+    expect(md).not.toContain('<img src=x');
+    expect(md).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+});
+
+describe('exportToMarkdown (plain)', () => {
+  test('renders the header, each role, code fences, tool blocks and the token totals', () => {
+    const md = exportToMarkdown([
+      { role: 'system', content: 'be brief' },
+      userMsg('run it\n```ts\nconst a = 1;\n```'),
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'calling ' }, { type: 'text', text: 'exec' }],
+        toolCalls: [{ id: 'c1', name: 'exec', arguments: { cmd: 'ls' } }],
+        usage: { inputTokens: 10, outputTokens: 4 },
+      },
+      toolMsg('file.txt', 'exec'),
+    ], { ...basicMeta, title: 'My session' });
+
+    expect(md).toContain('# My session');
+    expect(md).toContain('| **Model** | gpt-4 |');
+    expect(md).toContain('| **Session** | sess-abc123 |');
+    expect(md).toContain('> be brief');
+    expect(md).toContain('## User');
+    expect(md).toContain('```ts\nconst a = 1;\n```');
+    expect(md).toContain('## Assistant');
+    expect(md).toContain('calling exec');
+    expect(md).toContain('<summary>Tool call: <code>exec</code></summary>');
+    expect(md).toContain('"cmd": "ls"');
+    expect(md).toContain('**Tool result: exec**');
+    expect(md).toContain('| Input | 10 |');
+    expect(md).toContain('| Output | 4 |');
+  });
+
+  test('a long tool result is collapsed and an attached image is counted', () => {
+    const md = exportToMarkdown([
+      { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', data: 'iVBORw0KGgo=', mediaType: 'image/png' }] },
+      toolMsg('x'.repeat(600)),
+    ]);
+    expect(md).toContain('*[1 image attachment]*');
+    expect(md).toContain('<summary>Tool result: bash</summary>');
+  });
+
+  test('no token section when nothing was used', () => {
+    expect(exportToMarkdown([userMsg('hi')])).not.toContain('## Token Usage');
+  });
+});
+
+describe('redaction reaches tool-call arguments and reasoning in every format', () => {
+  const secret = 'sk-' + 'q'.repeat(24);
+  const messages: ExportMessage[] = [
+    userMsg('go'),
+    {
+      role: 'assistant',
+      content: 'done',
+      reasoningContent: `thinking about ${secret}`,
+      reasoningSummary: `summary mentions ${secret}`,
+      toolCalls: [{ id: 'c1', name: 'exec', arguments: { env: { API_KEY: secret }, cmd: `curl -H "x: ${secret}"` } }],
+    },
+  ];
+
+  test('HTML, Markdown and JSON exports with redact never contain the secret', async () => {
+    expect(await exportToHTML(messages, basicMeta, { redact: true })).not.toContain(secret);
+    expect(await exportToMarkdownExtended(messages, basicMeta, { redact: true })).not.toContain(secret);
+    expect(await exportToJSON(messages, basicMeta, { redact: true })).not.toContain(secret);
+  });
+
+  test('without redact the same secret does reach the tool-call and reasoning output, so the check above can fail', async () => {
+    const html = await exportToHTML(messages, basicMeta, { redact: false });
+    const md = await exportToMarkdownExtended(messages, basicMeta, { redact: false });
+    expect(html).toContain(secret);
+    expect(md).toContain(secret);
+    expect(await exportToJSON(messages, basicMeta, { redact: false })).toContain(secret);
   });
 });

@@ -377,6 +377,42 @@ for (const retire of ['edit', 'release']) test(`pending transcription respects $
   const notices = [...harness.notices];
   finish('late transcript'); await flush();
   expect(harness.drafts).toEqual([]);
-  expect(harness.notices).toEqual(notices);
+  if (retire === 'edit') expect(harness.notices.slice(notices.length).join('\n')).toContain('transcript was discarded');
+  else expect(harness.notices).toEqual(notices);
   await harness.runtime.release();
+});
+
+describe('recording that stops at the ceiling', () => {
+  const CEILING_SAMPLES = 16_000 * 10 + SAMPLES_PER_FRAME;
+  async function recordToCeiling(harness: VoiceInputHarness): Promise<void> {
+    harness.runtime.toggle(); await flush();
+    const recorder = harness.spawns.processes[0]!;
+    for (let sent = 0; sent < CEILING_SAMPLES; sent += SAMPLES_PER_FRAME) recorder.emitBytes(pcmBytes(loudSamples(SAMPLES_PER_FRAME)));
+    await flush();
+  }
+
+  test('text typed while recording is kept, as with a manual stop', async () => {
+    let revision = 0;
+    const harness = makeVoiceInputHarness({ transcript: 'after the ceiling', readDraftRevision: () => revision });
+    harness.runtime.toggle(); await flush();
+    revision++;
+    const recorder = harness.spawns.processes[0]!;
+    for (let sent = 0; sent < CEILING_SAMPLES; sent += SAMPLES_PER_FRAME) recorder.emitBytes(pcmBytes(loudSamples(SAMPLES_PER_FRAME)));
+    await flush();
+    expect(harness.drafts).toEqual(['after the ceiling']);
+  });
+
+  test('text typed while transcribing discards the transcript and says so', async () => {
+    let finish!: (text: string) => void;
+    let revision = 0;
+    const deferredTranscript = new Promise<string>(resolve => { finish = resolve; });
+    const harness = makeVoiceInputHarness({ deferredTranscript, readDraftRevision: () => revision });
+    await recordToCeiling(harness);
+    expect(harness.transcribed).toHaveLength(1);
+    revision++;
+    finish('late transcript'); await flush();
+    expect(harness.drafts).toEqual([]);
+    expect(harness.notices.some((line) => line.includes('transcript was discarded'))).toBe(true);
+    await harness.runtime.release();
+  });
 });

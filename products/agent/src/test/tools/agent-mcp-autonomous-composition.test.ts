@@ -30,8 +30,8 @@ for (const outcome of ['act', 'reject', 'abort', 'missing-workspace-owner']) tes
   const prior = installJudgmentPort(port); const controller = new AbortController();
   let humans = 0; let writes = 0;
   const config = { isAutoApproveEnabled: () => false, getWorkingDirectory: () => '/synthetic/project',
-    getSnapshot: () => ({ permissions: { mode: outcome === 'reject' ? 'plan' : 'prompt', tools: {} } }),
-    getAutonomousSnapshot: () => ({ permissions: { mode: outcome === 'reject' ? 'plan' : 'prompt', tools: {} }, autoApprove: false, directory: '/synthetic/project' }),
+    getSnapshot: () => ({ permissions: { mode: 'safe-jev', tools: {} } }),
+    getAutonomousSnapshot: () => ({ permissions: { mode: 'safe-jev', tools: {} }, autoApprove: false, directory: '/synthetic/project' }),
   } as PermissionConfigReader;
   const manager = new PermissionManager(async () => { humans++; throw new Error('No human'); }, config, new PolicyRuntimeState());
   const fetchImpl = (async (_url: unknown, init: RequestInit) => {
@@ -69,8 +69,10 @@ for (const outcome of ['act', 'reject', 'abort', 'missing-workspace-owner']) tes
     const result = await executeToolCalls(deps, 'synthetic-turn', [{ id: 'synthetic-call', name: 'mcp',
       arguments: { mode: 'call', qualifiedName: 'mcp:synthetic:write', input: { text: 'requested' } } }])
       .then(results => results[0], (error: unknown) => ({ success: false, error }));
-    expect(result?.success).toBe(outcome === 'act'); expect(registryDispositions).toBe(0);
-    if (outcome === 'missing-workspace-owner') expect(String(result?.error)).toBe('MCP call failed at the connected server boundary.');
+    expect(result?.success).toBe(outcome === 'act');
+    // The semantic disposition for the facade-routed registry call is read exactly once, except where the call never reaches the registry.
+    expect(registryDispositions).toBe(outcome === 'missing-workspace-owner' ? 0 : 1);
+    if (outcome === 'missing-workspace-owner') expect(String(result?.error)).toContain('MCP call failed at the connected server boundary.');
     if (outcome === 'abort') expect(controller.signal.aborted).toBe(true);
     expect(writes).toBe(outcome === 'act' ? 1 : 0); expect(humans).toBe(0);
   } finally { await client.disconnect(); installJudgmentPort(prior); resetAgentMcpCallRouteForTests(); }

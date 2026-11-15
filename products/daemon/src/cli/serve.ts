@@ -18,7 +18,7 @@ import type { RuntimeServicesOptions } from '../runtime/services.js';
 import { runDaemonProcess, type DaemonProcessHandle, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 import type { DaemonCliFlags } from './types.js';
-import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup } from './startup-maintenance.js';
+import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup, sweepDaemonWorktrees } from './startup-maintenance.js';
 import { renderDaemonStartupPairing } from './startup-pairing.js';
 
 /** The launcher supplies real inbox composition and explicitly chooses host-only capabilities. */
@@ -34,10 +34,9 @@ export function prepareDaemonCliServe(config: DaemonCliConfiguration['config'], 
     const current = config.get('provider.model');
     const provider = (flags.provider ?? getProviderIdFromModel(current)).trim();
     const supplied = flags.model?.trim();
-    // The daemon catalog accepts provider:model and provider/model. Strip only
-    // that first provider qualifier, retaining nested model namespaces/colons.
-    const qualified = supplied !== undefined && !supplied.includes(':') ? supplied.replace('/', ':') : supplied;
-    const model = qualified === undefined ? getModelIdFromProviderModel(current) : getModelIdFromProviderModel(qualified);
+    // Only `provider:model` carries a provider; a slash belongs to the model name
+    // (`meta-llama/Llama-3.1-8B`), so such an id keeps the configured provider.
+    const model = supplied === undefined ? getModelIdFromProviderModel(current) : getModelIdFromProviderModel(supplied);
     if (!provider || supplied === '' || !model) return ['Provider and model identifiers must be nonempty'];
     // formatProviderModel intentionally preserves qualified input, which would
     // override the CLI's explicit-provider-wins rule when a model contains ':'.
@@ -58,16 +57,25 @@ export function runConfiguredDaemonCli(
   pairingOutput: ((message: string) => void) | undefined = process.stdout.isTTY === true
     ? (message) => { writeSync(1, `${message}\n`); } : undefined,
   activateConfiguration?: ((signal: AbortSignal) => Promise<DaemonCliConfiguration | null>) | undefined,
+  createHost: typeof createDaemonHost = createDaemonHost,
+  sweepWorktrees: typeof sweepDaemonWorktrees = sweepDaemonWorktrees,
 ) {
   // runDaemonProcess constructs its owner even when shutdown won admission.
   // Keep token and graph acquisition inside start, after that admission fence.
   const restarted = Symbol('native suite replacement completed');
+  // Startup handed the runtime to a managed replacement, or stopped it for a
+  // rollback or promotion that could not finish. Either way nothing serves in
+  // this process any more, and a process idling without a listener is never
+  // restarted by its supervisor. (An incomplete handover ends the process
+  // with status 1 through onIncompleteHandover below.)
+  const handedOver = Symbol('native startup handover settled');
   let processHandle: DaemonProcessHandle;
   processHandle = runDaemonProcess(() => {
     let host: ReturnType<typeof createDaemonHost> | undefined;
     let closed = false;
     const maintenance = new AbortController();
     let configurationWork: Promise<DaemonCliConfiguration | null> | undefined;
+    let worktreeSweep: Promise<void> | undefined;
     return {
       async start() {
         if (closed) return undefined;
@@ -101,8 +109,9 @@ export function runConfiguredDaemonCli(
           stderr('[goodvibes-daemon] warning: some stale workspace operator-token files could not be pruned.');
           if (closed) return undefined;
         }
-        const token = env.GOODVIBES_DAEMON_TOKEN ?? companion.token;
-        host = createDaemonHost({
+        // A set-but-empty override (an env template left blank) is not a token.
+        const token = env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : companion.token;
+        host = createHost({
           runtime: {
             ...runtime, configManager: config, homeDirectory, daemonHomeDirectory, workingDir: workingDirectory,
             runtimeBus: new RuntimeEventBus(runtimeEventBusOptionsFrom((key) => config.get(key))),
@@ -111,10 +120,16 @@ export function runConfiguredDaemonCli(
           daemon: { token },
           hasOverriddenHome: isOverridden,
           ...(updateArtifact ? { updateArtifact } : {}),
-          ...(config.get('danger.httpListener') ? { httpListener: { token: env.GOODVIBES_HTTP_TOKEN ?? token } } : {}),
+          ...(config.get('danger.httpListener') ? { httpListener: { token: env.GOODVIBES_HTTP_TOKEN?.trim() ? env.GOODVIBES_HTTP_TOKEN : token } } : {}),
+          // A handover that stopped the runtime and then could not complete
+          // leaves nothing serving: end the process with status 1 so a
+          // supervisor starts whatever is installed.
+          onIncompleteHandover: () => { void processHandle.shutdown(true); },
         });
         const snapshot = await host.start();
-        if (closed || (snapshot.state !== 'ready' && snapshot.state !== 'degraded')) return undefined;
+        if (closed) return undefined;
+        if (snapshot.state === 'handover') return handedOver;
+        if (snapshot.state !== 'ready' && snapshot.state !== 'degraded') return undefined;
         const daemon = host.daemon;
         if (!daemon) throw new Error('Daemon listener unavailable after startup');
         const requireRunning = () => { if (!daemon.isRunning) throw new Error('Daemon listener unavailable after startup'); };
@@ -142,6 +157,9 @@ export function runConfiguredDaemonCli(
         requireRunning();
         stdout(renderDaemonBoundEndpoint(version, actual));
         if (closed) return undefined;
+        // Background: the sweep reads git for every leftover worktree and must not delay the endpoint line.
+        // close() waits for it, so the process never exits halfway through removing a worktree.
+        worktreeSweep = sweepWorktrees(active).then((notice) => { if (notice && !closed) stderr(`[goodvibes-daemon] ${notice}`); });
         requireRunning();
         const clientBinding = readControlPlaneBinding((key) => isKnownConfigKey(key, config.getSchema()) ? config.get(key) : undefined);
         if (describeDerivedBindMismatch(actual, clientBinding) !== null) {
@@ -167,7 +185,7 @@ export function runConfiguredDaemonCli(
         maintenance.abort();
         // Fence the live host synchronously, then drain both original owners.
         const closing = host?.close() ?? Promise.resolve();
-        const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing]);
+        const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing, worktreeSweep ?? Promise.resolve()]);
         // Startup's own original promise already reports its rejection. A
         // separate host cleanup failure must still fail the process drain.
         const cleanup = results[1]!;
@@ -175,6 +193,6 @@ export function runConfiguredDaemonCli(
       },
     };
   }, processOptions);
-  void processHandle.ready.then(value => { if (value === restarted) void processHandle.shutdown(); }, () => {});
+  void processHandle.ready.then(value => { if (value === restarted || value === handedOver) void processHandle.shutdown(); }, () => {});
   return processHandle;
 }

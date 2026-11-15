@@ -89,6 +89,15 @@ function ownerContext(overrides: Partial<ProbeContext> = {}): ProbeContext {
   };
 }
 
+/** The same session after the owner connected or adopted: the encrypted store holds a complete credential. */
+function connectedOwnerContext(overrides: Partial<ProbeContext> = {}): ProbeContext {
+  return ownerContext({
+    configValuePresent: (key) => key === 'calendar.google.clientId',
+    secretPresent: () => true,
+    ...overrides,
+  });
+}
+
 describe('capability index against the owner\'s machine state', () => {
   beforeEach(() => {
     home = makeProjectTempDir('owner-state');
@@ -102,8 +111,8 @@ describe('capability index against the owner\'s machine state', () => {
     resetCapabilityIndexForTests();
   });
 
-  test('email and calendar resolve as ready with credentials present and the connector registered', () => {
-    const report = resolveCapabilityIndex(ownerContext(), { homeDirectory: home });
+  test('email and calendar resolve as ready with a stored credential and the connector registered', () => {
+    const report = resolveCapabilityIndex(connectedOwnerContext(), { homeDirectory: home });
 
     expect(report.ready).toContain('email.send');
     expect(report.ready).toContain('email.read');
@@ -113,7 +122,7 @@ describe('capability index against the owner\'s machine state', () => {
   });
 
   test('a ready capability names the route the model actually calls', () => {
-    const report = resolveCapabilityIndex(ownerContext(), { homeDirectory: home });
+    const report = resolveCapabilityIndex(connectedOwnerContext(), { homeDirectory: home });
     const send = report.capabilities.find((entry) => entry.id === 'email.send');
 
     expect(send?.state).toBe('ready');
@@ -125,15 +134,45 @@ describe('capability index against the owner\'s machine state', () => {
     // The regression: the old declaration's only route was an operator method
     // the daemon does not serve, so this exact context produced 'unavailable'.
     const report = resolveCapabilityIndex(
-      ownerContext({ servedOperatorMethodIds: new Set<string>() }),
+      connectedOwnerContext({ servedOperatorMethodIds: new Set<string>() }),
       { homeDirectory: home },
     );
 
     expect(report.capabilities.find((entry) => entry.id === 'email.send')?.state).toBe('ready');
   });
 
-  test('the model is never told email is not wired up in this build', () => {
+  test('credential files left by another tool are not an account until adopted', () => {
+    // The connector does not read ~/.gmail-mcp unless the owner runs /google adopt,
+    // so reporting ready here would send the model to a tool that finds no credentials.
     const report = resolveCapabilityIndex(ownerContext(), { homeDirectory: home });
+    const send = report.capabilities.find((entry) => entry.id === 'email.send');
+
+    expect(send?.state).toBe('needs-setup');
+    expect(report.ready).not.toContain('email.read');
+    expect(report.ready).not.toContain('calendar.read');
+    const disagreement = report.disagreements.find((entry) => entry.capabilityId === 'email.send');
+    expect(disagreement?.fix).toContain('/google adopt');
+  });
+
+  test('a client id without the stored secret and refresh token is not an account', () => {
+    rmSync(join(home, '.gmail-mcp'), { recursive: true, force: true });
+    const report = resolveCapabilityIndex(
+      ownerContext({ configValuePresent: (key) => key === 'calendar.google.clientId' }),
+      { homeDirectory: home },
+    );
+
+    expect(report.capabilities.find((entry) => entry.id === 'email.send')?.state).toBe('needs-setup');
+  });
+
+  test('a context that cannot look in the secret store never reports the account ready', () => {
+    const { secretPresent: _unused, ...withoutSecretStore } = connectedOwnerContext();
+    const report = resolveCapabilityIndex(withoutSecretStore, { homeDirectory: home });
+
+    expect(report.capabilities.find((entry) => entry.id === 'email.send')?.state).toBe('needs-setup');
+  });
+
+  test('the model is never told email is not wired up in this build', () => {
+    const report = resolveCapabilityIndex(connectedOwnerContext(), { homeDirectory: home });
     const prompt = buildCapabilitySummaryPrompt(report) ?? '';
 
     expect(prompt).toContain('Send email');

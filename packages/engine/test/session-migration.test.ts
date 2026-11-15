@@ -301,7 +301,7 @@ describe('session-migration: the marker is validated by content, never by existe
   test('a NUL-filled marker (a recovered inode with no data) forces re-migration', () => {
     const { workingDirectory, homeDirectory } = tempRoot();
     const journal = seedOneJournal(workingDirectory);
-    seedMarker(workingDirectory, ' '.repeat(64));
+    seedMarker(workingDirectory, String.fromCharCode(0).repeat(64));
 
     const surface = createSessionSurface({ surfaceRoot: 'tui', workingDirectory, homeDirectory });
     expect(existsSync(join(surface.agentJournalsDir, 'agent-deadbeef.jsonl'))).toBe(true);

@@ -37,6 +37,8 @@ export interface StatusReportSource {
   readonly webSurfaceUrl?: string;
   readonly autoApprove: boolean;
   readonly keepAwake: boolean;
+  /** Keep-awake is on but the OS granted no inhibitor, so the host can still sleep. */
+  readonly keepAwakeRefused?: boolean;
   /** Short microphone state, null when no microphone is open. */
   readonly microphone: string | null;
   readonly runningAgents: number;
@@ -86,7 +88,11 @@ export function formatStatusReport(s: StatusReportSource): string {
   row('web', s.webSurfaceUrl ?? 'off');
   lines.push('Safety');
   row('auto-approve', s.autoApprove ? 'ON: every change is approved automatically' : 'off');
-  row('sleep', s.keepAwake ? 'disabled (keep-awake is on)' : 'allowed');
+  row('sleep', s.keepAwake
+    ? s.keepAwakeRefused === true
+      ? 'allowed (keep-awake is on, but the OS refused it, so this host can still sleep)'
+      : 'disabled (keep-awake is on)'
+    : 'allowed');
   row('microphone', s.microphone ?? 'closed');
   lines.push('Background');
   row('agents', String(s.runningAgents));

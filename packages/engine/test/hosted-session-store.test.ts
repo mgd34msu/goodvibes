@@ -69,6 +69,15 @@ test('a persisted transcript is bounded to the most recent messages', async () =
   expect(persisted.messages.map((m) => m.content)).toEqual(['m3', 'm4', 'm5', 'm6']);
 });
 
+test('has reports a stored session by its file and refuses names that are not plain ids', async () => {
+  const store = new HostedSessionStore(dir, LIMITS);
+  await store.save(record({ id: 'hs-a' }), null);
+  expect(store.has('hs-a')).toBe(true);
+  expect(store.has('hs-b')).toBe(false);
+  expect(store.has('../hs-a')).toBe(false);
+  expect(store.has('')).toBe(false);
+});
+
 test('boundMessages keeps everything when it is already within the bound', () => {
   const messages = [1, 2].map((n) => ({ n }));
   expect(boundMessages(messages, 4)).toBe(messages);
@@ -99,6 +108,8 @@ test('an unusable file is rejected with a reason and moved aside rather than dro
   expect(remaining).toEqual(['broken.json.rejected', 'old-version.json.rejected', 'wrong-shape.json.rejected']);
 });
 
+const COUNTED = { title: 'a session', detachPolicy: null, attachedClients: [], turnCount: 0, messageCount: 0 };
+
 test('the validator names the specific thing that is wrong', () => {
   expect(describeInvalidPersistedHostedSession(null)).toBe('not a JSON object');
   expect(describeInvalidPersistedHostedSession({ version: 3 })).toContain('unsupported version');
@@ -111,9 +122,16 @@ test('the validator names the specific thing that is wrong', () => {
     .toContain('unknown session status');
   expect(describeInvalidPersistedHostedSession({ version: 1, record: { id: 'ok', workspaceRoot: '/w', status: 'idle' } }))
     .toContain('timestamps');
+  const base = { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED };
+  const { title: _title, ...untitled } = base;
+  const { attachedClients: _attached, ...unattached } = base;
+  expect(describeInvalidPersistedHostedSession({ version: 1, record: untitled })).toContain('title');
+  expect(describeInvalidPersistedHostedSession({ version: 1, record: unattached })).toContain('attached client list');
+  expect(describeInvalidPersistedHostedSession({ version: 1, record: { ...base, detachPolicy: 'sometimes' } })).toContain('detach policy');
+  expect(describeInvalidPersistedHostedSession({ version: 1, record: { ...base, turnCount: '3' } })).toContain('count');
   expect(describeInvalidPersistedHostedSession({
     version: 1,
-    record: { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1 },
+    record: { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED },
   })).toBeNull();
 });
 
@@ -139,7 +157,7 @@ test('a save writes version 2 with the contracts the session started, and they l
 });
 
 test('a version 2 record without a contract id list is rejected with that reason', () => {
-  const valid = { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1 };
+  const valid = { id: 'ok', workspaceRoot: '/w', status: 'idle', createdAt: 1, updatedAt: 1, ...COUNTED };
   expect(describeInvalidPersistedHostedSession({ version: 2, record: valid })).toContain('contract id list');
   expect(describeInvalidPersistedHostedSession({ version: 2, record: { ...valid, contractIds: [7] } })).toContain('contract id list');
   expect(describeInvalidPersistedHostedSession({ version: 2, record: { ...valid, contractIds: ['ctr-00000001'] } })).toBeNull();

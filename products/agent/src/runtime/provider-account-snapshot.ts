@@ -47,9 +47,18 @@ export interface ProviderAccountSnapshot {
   readonly providers: readonly ProviderAccountRecord[];
   readonly configuredCount: number;
   readonly issueCount: number;
+  /** Why the services file could not be used; absent when it was read. */
+  readonly servicesUnreadable?: string;
 }
 
-export interface ProviderAccountSnapshotDeps extends ProviderAccountInspectionQuery {}
+export interface ProviderAccountSnapshotDeps extends ProviderAccountInspectionQuery {
+  /**
+   * The credential store. A key saved through `secrets set` or onboarding lives
+   * here, not in the process environment, so a provider whose only key is
+   * stored must count as configured. Omitted, only the environment is read.
+   */
+  readonly secrets?: { get(key: string): Promise<string | null> } | undefined;
+}
 
 export interface ProviderAccountSnapshotQuery {
   readonly loadSnapshot: () => Promise<ProviderAccountSnapshot>;
@@ -119,6 +128,7 @@ export async function buildProviderAccountSnapshot(
 ): Promise<ProviderAccountSnapshot> {
   const models = deps.providerModels.listModels();
   const services = deps.services.getAll();
+  const servicesUnreadable = deps.services.unreadableReason?.() ?? null;
   const subscriptions = deps.subscriptions;
   const builtinSubscriptionProviders = new Set(listBuiltinSubscriptionProviders().map((entry) => entry.provider));
   const serviceInspections = await Promise.all(Object.keys(services).map(async (name) => ({
@@ -155,7 +165,17 @@ export async function buildProviderAccountSnapshot(
       ...providerModels.flatMap((model) => readProviderEnvVars(model)),
       ...defaultProviderEnvKeys(providerId),
     ]);
-    const hasApiKey = [...apiKeyCandidates].some((key) => deps.environment.hasEnvironmentVariable(key));
+    const keyPresent = async (key: string): Promise<boolean> => {
+      if (deps.environment.hasEnvironmentVariable(key)) return true;
+      if (!deps.secrets) return false;
+      try {
+        return (await deps.secrets.get(key)) !== null;
+      } catch {
+        // A store that cannot be read says nothing about the key; the environment answer stands.
+        return false;
+      }
+    };
+    const hasApiKey = (await Promise.all([...apiKeyCandidates].map(keyPresent))).some(Boolean);
     const hasSubscription = subscription != null;
     const hasServiceOAuth = Boolean(serviceOauth?.configured || serviceConfig?.authType === 'oauth' || serviceConfig?.oauth);
     const hasUsableServiceOAuth = Boolean(serviceOauth?.usable);
@@ -283,6 +303,7 @@ export async function buildProviderAccountSnapshot(
     capturedAt: Date.now(),
     providers,
     configuredCount: providers.filter((provider) => provider.configured).length,
-    issueCount: providers.reduce((sum, provider) => sum + provider.issues.length, 0),
+    issueCount: providers.reduce((sum, provider) => sum + provider.issues.length, 0) + (servicesUnreadable ? 1 : 0),
+    ...(servicesUnreadable ? { servicesUnreadable } : {}),
   };
 }

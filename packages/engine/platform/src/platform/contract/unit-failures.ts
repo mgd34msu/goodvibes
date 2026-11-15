@@ -67,6 +67,11 @@ export interface UnitFailureHandling {
   onSilent(agent: WatchedAgent, silentMs: number): void;
   /** Fails one unit and, with it, the contract; a failed attempt of a best-of-N unit fails alone and is never a candidate. */
   failUnit(run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string): void;
+  /**
+   * An agent's execution drained: when its record ended but no terminal event
+   * for it was seen, the unit takes that end as if the event had arrived.
+   */
+  reconcile(agentId: string): void;
   dispose(): void;
 }
 
@@ -87,7 +92,17 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** Unit statuses in which the unit waits on its active agent to end. */
+const AWAITING_AGENT: ReadonlySet<ContractUnit['status']> = new Set(['running', 'checking', 'nudged']);
+
 export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHandling {
+  // Unit agents whose terminal event arrived since they last started running.
+  const ended = new Set<string>();
+
+  function noteEnded(agentId: string): void {
+    if (locate(agentId) !== null) ended.add(agentId);
+  }
+
   function locate(agentId: string): { readonly run: ContractRun; readonly unit: ContractUnit } | null {
     for (const run of deps.runs()) {
       if (run.terminal) continue;
@@ -112,6 +127,7 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
   }
 
   function onCompleted(agentId: string): void {
+    noteEnded(agentId);
     const found = locate(agentId);
     if (found === null) return;
     const { run, unit } = found;
@@ -130,6 +146,7 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
   }
 
   function onFailed(agentId: string, error: string): void {
+    noteEnded(agentId);
     const found = locate(agentId);
     if (found === null) return;
     const { run, unit } = found;
@@ -142,10 +159,15 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
       void deps.checks.runCheck(run, unit, 'agent-failed');
       return;
     }
-    void run.work.run(() => retryOrFail(run, unit, record?.error?.trim() || error.trim() || 'the agent failed without an error message'));
+    void run.work.run(() => retryOrFail(run, unit, agentId, record?.error?.trim() || error.trim() || 'the agent failed without an error message'));
   }
 
-  async function retryOrFail(run: ContractRun, unit: ContractUnit, message: string): Promise<void> {
+  /** Whether the unit still waits on this failed agent: nothing released, replaced or ended it meanwhile. */
+  function stillAwaits(run: ContractRun, unit: ContractUnit, agentId: string): boolean {
+    return !run.terminal && unit.activeAgentId === agentId && !isTerminalUnitStatus(unit.status) && unit.status !== 'held-merge' && !RELEASED.has(unit.status);
+  }
+
+  async function retryOrFail(run: ContractRun, unit: ContractUnit, agentId: string, message: string): Promise<void> {
     const runtime = run.runtime(unit);
     let retryable: boolean;
     let readingIds: readonly string[];
@@ -159,12 +181,12 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
         || (reading.category !== 'unknown' && transienceFromReading(reading).failureClass === 'retryable'));
       readingIds = reading.decisionId === undefined ? [] : [reading.decisionId];
     } catch (error) {
-      if (run.terminal) return;
+      if (!stillAwaits(run, unit, agentId)) return;
       const failure = failureFromError(error);
       failUnit(run, unit, failure.kind, `unit ${unit.id} failed (${message}) and the failure could not be read: ${failure.reason}`);
       return;
     }
-    if (run.terminal || isTerminalUnitStatus(unit.status)) return;
+    if (!stillAwaits(run, unit, agentId)) return;
     const config = run.env.config();
     if (!retryable || unit.transportRetries >= config.transportRetryLimit) {
       const kind: ContractFailureKind = retryable ? 'transport' : 'other';
@@ -175,11 +197,12 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     unit.transportRetries += 1;
     run.decide('transport-retry', unit.id, `retry ${unit.transportRetries} of ${config.transportRetryLimit}: ${message}`, readingIds);
     await sleep(config.transportRetryDelayMs, runtime.abort.signal);
-    if (run.terminal || isTerminalUnitStatus(unit.status)) return;
+    if (!stillAwaits(run, unit, agentId)) return;
     deps.requeueUnit(run, unit, `transport retry ${unit.transportRetries}`, 'transport-retry');
   }
 
   function onCancelled(agentId: string): void {
+    noteEnded(agentId);
     for (const run of deps.runs()) {
       for (const runtime of run.unitRuntimes.values()) {
         if (runtime.expectedCancels.delete(agentId)) return;
@@ -231,7 +254,23 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     }
   }
 
+  function reconcile(agentId: string): void {
+    const seen = ended.delete(agentId);
+    if (seen) return;
+    const found = locate(agentId);
+    if (found === null || !AWAITING_AGENT.has(found.unit.status)) return;
+    const record = deps.agentManager.getStatus(agentId);
+    if (record === null) return;
+    if (record.status !== 'failed' && record.status !== 'completed' && record.status !== 'cancelled') return;
+    logger.warn('contract runner: a unit agent ended without a terminal event; taking its recorded end', { contractId: found.run.id, unitId: found.unit.id, agentId, status: record.status });
+    if (record.status === 'failed') onFailed(agentId, record.error ?? '');
+    else if (record.status === 'completed') onCompleted(agentId);
+    else onCancelled(agentId);
+    ended.delete(agentId);
+  }
+
   const unsubscribers = [
+    deps.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_RUNNING' }>>('AGENT_RUNNING', ({ payload }) => { ended.delete(payload.agentId); }),
     deps.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload }) => onCompleted(payload.agentId)),
     deps.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', ({ payload }) => onFailed(payload.agentId, payload.error)),
     deps.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_CANCELLED' }>>('AGENT_CANCELLED', ({ payload }) => onCancelled(payload.agentId)),
@@ -241,8 +280,10 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
   return {
     onSilent,
     failUnit,
+    reconcile,
     dispose: () => {
       for (const unsubscribe of unsubscribers) unsubscribe();
+      ended.clear();
     },
   };
 }

@@ -96,6 +96,7 @@ function stateFor(ctx: CommandContext): RewindSessionState {
     const service = new UnifiedRewindService({
       workspace: mgr ? makeWorkspacePort(mgr) : null,
       conversation: convPort,
+      anchorSurface: ctx.workspace.surface ?? null,
     });
     state = { service, convPort, undo: [], redo: [] };
     sessions.set(sessionId, state);
@@ -126,24 +127,71 @@ export interface RewindReversalResult {
   readonly message: string;
 }
 
+const BUSY_MESSAGE = (what: string): string =>
+  `A turn is still running, so ${what} was not started and nothing changed. Stop it with Esc or let it finish, then retry.`;
+
 export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversalResult> {
+  if (ctx.isGenerating?.()) return { handled: true, message: BUSY_MESSAGE('undoing the rewind') };
   const state = stateFor(ctx);
   const receipt = state.undo.pop();
   if (!receipt) return { handled: false, message: 'No applied rewind to undo. (Bare /undo removes the last conversation turn.)' };
 
+  // The pre-rewind copy replaces the whole conversation, so it is only safe
+  // while nothing newer has been added since the rewind. Nothing is touched
+  // otherwise, files included, and the receipt stays undoable.
+  const since = receipt.undo.conversation ? state.convPort.messagesSinceRewind(receipt.undo.conversation.undoSnapshotId) : 0;
+  if (since !== null && since !== 0) {
+    state.undo.push(receipt);
+    return { handled: true, message: `Undo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind, and restoring the earlier copy would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Copy what you need, or use /session fork to keep this conversation, before rewinding again.` };
+  }
+
   const mgr = ctx.workspace.workspaceCheckpointManager;
   const parts: string[] = [];
+  let conversationFailed = false;
+  let filesFailed = '';
   try {
     if (receipt.undo.files && mgr) {
-      await mgr.restore(receipt.undo.files.restoreCheckpointId, { safetyCheckpoint: false });
-      parts.push('files restored to pre-rewind state');
+      const restored = await mgr.restore(receipt.undo.files.restoreCheckpointId, { safetyCheckpoint: false });
+      const failed = restored.failedPaths ?? [];
+      if (failed.length > 0) {
+        filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
+        parts.push(`files only partly restored (${failed.length} path${failed.length === 1 ? '' : 's'} failed)`);
+      } else {
+        parts.push('files restored to pre-rewind state');
+      }
     }
-    if (receipt.undo.conversation && state.convPort.restoreBefore(receipt.undo.conversation.undoSnapshotId)) {
-      parts.push('conversation restored to pre-rewind state');
+    if (receipt.undo.conversation) {
+      if (state.convPort.restoreBefore(receipt.undo.conversation.undoSnapshotId)) {
+        state.service.anchorsRestored(receipt.undo.conversation.undoSnapshotId);
+        parts.push('conversation restored to pre-rewind state');
+      }
+      else conversationFailed = true;
     }
   } catch (err) {
     state.undo.push(receipt);
     return { handled: true, message: `Undo rewind failed: ${summarizeError(err)}` };
+  }
+  if (filesFailed) {
+    // Files that could not be put back mean the undo did not complete; keep it retryable.
+    // A conversation that was already restored is not part of the retry: its
+    // pre-rewind copy is now live, so the newer-messages guard would refuse
+    // every later attempt and the files would never be retried.
+    const conversationDone = receipt.undo.conversation !== null && !conversationFailed;
+    state.undo.push(conversationDone ? { ...receipt, undo: { ...receipt.undo, conversation: null } } : receipt);
+    ctx.renderRequest();
+    return {
+      handled: true,
+      message: `Rewind only partly undone: ${parts.join(', ')}; could not restore ${filesFailed}${conversationFailed ? '; the conversation could not be restored either' : ''}. The rewind is still listed under /undo rewind.`,
+    };
+  }
+  if (conversationFailed) {
+    // Half an undo is reported as half, and the receipt stays undoable.
+    state.undo.push(receipt);
+    ctx.renderRequest();
+    return {
+      handled: true,
+      message: `Rewind only partly undone: ${parts.join(', ') || 'no files were reversed'}; the conversation could not be restored (its pre-rewind copy is gone). The rewind is still listed under /undo rewind.`,
+    };
   }
   state.redo.push(receipt);
   ctx.renderRequest();
@@ -151,23 +199,55 @@ export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversa
 }
 
 export async function redoLastRewind(ctx: CommandContext): Promise<RewindReversalResult> {
+  if (ctx.isGenerating?.()) return { handled: true, message: BUSY_MESSAGE('re-applying the rewind') };
   const state = stateFor(ctx);
   const receipt = state.redo.pop();
   if (!receipt) return { handled: false, message: 'No undone rewind to redo. (Bare /redo restores the last conversation turn.)' };
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
   const parts: string[] = [];
+  let conversationFailed = false;
+  let filesFailed = '';
   try {
     if (receipt.files?.checkpointId && mgr) {
-      await mgr.restore(receipt.files.checkpointId, { safetyCheckpoint: false });
-      parts.push('files re-applied');
+      const restored = await mgr.restore(receipt.files.checkpointId, { safetyCheckpoint: false });
+      const failed = restored.failedPaths ?? [];
+      if (failed.length > 0) {
+        filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
+        parts.push(`files only partly re-applied (${failed.length} path${failed.length === 1 ? '' : 's'} failed)`);
+      } else {
+        parts.push('files re-applied');
+      }
     }
-    if (receipt.undo.conversation && state.convPort.restoreAfter(receipt.undo.conversation.undoSnapshotId)) {
-      parts.push('conversation re-applied');
+    if (receipt.undo.conversation) {
+      if (state.convPort.restoreAfter(receipt.undo.conversation.undoSnapshotId)) {
+        state.service.anchorsDropped(receipt.undo.conversation.undoSnapshotId);
+        parts.push('conversation re-applied');
+      }
+      else conversationFailed = true;
     }
   } catch (err) {
     state.redo.push(receipt);
     return { handled: true, message: `Redo rewind failed: ${summarizeError(err)}` };
+  }
+  if (conversationFailed) {
+    state.redo.push(receipt);
+    ctx.renderRequest();
+    return {
+      handled: true,
+      message: `Rewind only partly re-applied: ${parts.join(', ') || 'no files were re-applied'}; the conversation could not be re-applied (its snapshot is gone). The rewind is still listed under /redo rewind.`,
+    };
+  }
+  if (filesFailed) {
+    // The rewind is applied in part. With the conversation re-applied it moves to the undo
+    // list (a redo retry would re-apply the conversation twice); otherwise it stays redoable.
+    const conversationDone = receipt.undo.conversation !== null;
+    (conversationDone ? state.undo : state.redo).push(receipt);
+    ctx.renderRequest();
+    return {
+      handled: true,
+      message: `Rewind only partly re-applied: ${parts.join(', ')}; could not restore ${filesFailed}. ${conversationDone ? 'The rewind is listed under /undo rewind.' : 'The rewind is still listed under /redo rewind.'}`,
+    };
   }
   state.undo.push(receipt);
   ctx.renderRequest();
@@ -329,7 +409,14 @@ async function handleCheckpointOnlyRewind(args: string[], ctx: CommandContext): 
     return;
   }
   try {
-    await mgr.restore(checkpoint.id, { safetyCheckpoint: true });
+    const restored = await mgr.restore(checkpoint.id, { safetyCheckpoint: true });
+    const failed = restored.failedPaths ?? [];
+    if (failed.length > 0) {
+      const names = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
+      ctx.print(`Checkpoint only partly restored (${failed.length} path${failed.length === 1 ? '' : 's'} failed): ${names}. Files only; conversation state is unchanged.`);
+      ctx.renderRequest();
+      return;
+    }
     ctx.session.conversationManager.addTypedSystemMessage(
       `[Rewind] Restored files from checkpoint ${shortId(checkpoint.id)} ("${checkpoint.label}"). Files only: no turn anchors exist this run, so conversation state is unchanged.`,
       'operational',
@@ -364,6 +451,11 @@ export function registerRewindRuntimeCommands(registry: CommandRegistry): void {
 
       if (args.length === 0) {
         ctx.print(renderTurnList(sessionId));
+        return;
+      }
+
+      if (ctx.isGenerating?.()) {
+        ctx.print(BUSY_MESSAGE('/rewind'));
         return;
       }
 
@@ -437,6 +529,11 @@ export function registerRewindRuntimeCommands(registry: CommandRegistry): void {
       if (!confirmed) {
         ctx.print('Rewind cancelled: nothing changed.');
         ctx.renderRequest();
+        return;
+      }
+      // The preview waits on the owner; a turn may have started meanwhile.
+      if (ctx.isGenerating?.()) {
+        ctx.print(BUSY_MESSAGE('applying the rewind'));
         return;
       }
       try {

@@ -5,7 +5,7 @@ import type { ToolLLM } from '../../config/tool-llm.js';
 import { analyzeSchema } from './schema.js';
 import { appendSchemaFingerprint } from '../shared/schema-fingerprint.js';
 import type { AnalyzeInput } from './types.js';
-import { applyAnalyzeTokenBudget, summarizeAnalyzeResult } from './shared.js';
+import { applyAnalyzeTokenBudget, resolveInsideRoot, summarizeAnalyzeResult, MAX_SCAN_MS } from './shared.js';
 import {
   runBundle,
   runCoverage,
@@ -30,10 +30,30 @@ import { summarizeError } from '../../utils/error-display.js';
 
 export type { AnalyzeInput } from './types.js';
 
+/** The modes that stop by themselves at MAX_SCAN_MS. */
+const DEADLINE_MODES: ReadonlySet<AnalyzeInput['mode']> = new Set(['impact', 'dead_code', 'permissions']);
+
+/** The fields that say a result is a refusal or partial; the short form keeps them so it cannot read as an empty success. */
+const NOTE_KEYS = ['error', 'scan_note', 'message', 'unavailable', 'refused_files', 'unreadable_files', 'skipped', 'truncated', 'diff_truncated'] as const;
+function carriedNotes(result: Record<string, unknown>): Record<string, unknown> {
+  const carried = Object.fromEntries(NOTE_KEYS.filter((key) => result[key] !== undefined).map((key) => [key, result[key]]));
+  // The security scan nests its coverage under `secrets`.
+  const secrets = result.secrets as Record<string, unknown> | undefined;
+  const permissions = result.permissions as Record<string, unknown> | undefined;
+  for (const key of ['refused_files', 'unreadable_files'] as const) {
+    if (carried[key] !== undefined) continue;
+    const nested = [secrets?.[key], permissions?.[key]].filter(Array.isArray).flat();
+    if (nested.length > 0) carried[key] = nested;
+  }
+  return carried;
+}
+
 export function createAnalyzeTool(
   toolLLM: Pick<ToolLLM, 'chat'>,
   featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null,
   projectRoot?: string,
+  /** The clock the scan limit is measured on. */
+  now: () => number = Date.now,
 ): Tool {
   if (typeof projectRoot !== 'string' || projectRoot.trim().length === 0) {
     throw new Error('createAnalyzeTool requires projectRoot');
@@ -54,13 +74,14 @@ export function createAnalyzeTool(
         }
 
         const input = args as unknown as AnalyzeInput;
+        const scanStartedAt = now();
         const outputFormat = input.output?.format ?? 'json';
 
-        const resolvedProjectRoot = resolve(
-          typeof input.projectRoot === 'string' && input.projectRoot.trim().length > 0
-            ? input.projectRoot
-            : projectRoot,
-        );
+        // A model-supplied root is only a narrower view of the configured root;
+        // containment is always judged against the tool's own root.
+        const resolvedProjectRoot = typeof input.projectRoot === 'string' && input.projectRoot.trim().length > 0
+          ? resolveInsideRoot(input.projectRoot, projectRoot)
+          : resolve(projectRoot);
 
         let result: Record<string, unknown>;
 
@@ -118,9 +139,17 @@ export function createAnalyzeTool(
         }
 
         assertCurrent();
+        // Only the modes that carry their own deadline stop at MAX_SCAN_MS; a result from one of them that took that long covers only part of the tree.
+        // A mode that reports its own stop (`stopped_by_deadline`) is believed over the clock.
+        const stopped = typeof result.stopped_by_deadline === 'boolean'
+          ? result.stopped_by_deadline
+          : DEADLINE_MODES.has(input.mode) && now() - scanStartedAt >= MAX_SCAN_MS;
+        if (stopped) {
+          result = { ...result, scan_note: `Stopped at the ${Math.round(MAX_SCAN_MS / 1000)}s scan limit: the results cover only the files read in that time. Narrow 'files' or use a more specific mode to see the rest.` };
+        }
         const fingerprinted = appendSchemaFingerprint(result, 'analyze', input.mode, { featureFlags });
         const shaped = outputFormat === 'summary'
-          ? summarizeAnalyzeResult(input.mode, fingerprinted)
+          ? { ...summarizeAnalyzeResult(input.mode, fingerprinted), ...carriedNotes(fingerprinted) }
           : fingerprinted;
         if (result.comparison_inputs !== undefined) shaped.comparison_inputs = result.comparison_inputs;
         const indent = outputFormat === 'json' ? 2 : 0;

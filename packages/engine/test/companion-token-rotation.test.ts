@@ -19,6 +19,7 @@ import {
   regenerateCompanionToken,
   type CompanionTokenRecord,
 } from '../platform/src/platform/pairing/companion-token.ts';
+import { authenticateOperatorToken } from '../platform/src/platform/security/http-auth.ts';
 
 const roots: string[] = [];
 function tempHome(): string {
@@ -50,6 +51,17 @@ describe('regenerateCompanionToken (rotation)', () => {
     const stored = readStore(daemonHomeDir);
     expect(stored.token).toBe(rotated.token);
     expect(stored.token).not.toBe(original.token);
+  });
+
+  test('the operator auth check rejects the rotated-out token and accepts the new one', () => {
+    const daemonHomeDir = tempHome();
+    const original = getOrCreateCompanionToken({ daemonHomeDir });
+    const rotated = regenerateCompanionToken({ daemonHomeDir });
+    const userAuth = { validateSession: () => null, getUser: () => null };
+    const sharedToken = readStore(daemonHomeDir).token;
+
+    expect(authenticateOperatorToken(original.token, { sharedToken, userAuth })).toBeNull();
+    expect(authenticateOperatorToken(rotated.token, { sharedToken, userAuth })?.kind).toBe('shared-token');
   });
 
   test('a subsequent get returns the rotated token (old token never resurfaces)', () => {

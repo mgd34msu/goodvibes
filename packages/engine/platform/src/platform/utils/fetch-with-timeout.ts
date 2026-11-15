@@ -87,8 +87,8 @@ export async function instrumentedFetch(
  * When `parentSignal` is provided the returned signal is merged with it via
  * AbortSignal.any so whichever fires first wins.
  *
- * Uses the faster `AbortSignal.timeout` fast-path when available and no parent
- * signal needs to be merged.
+ * Uses `AbortSignal.timeout` when available. The timeout covers the whole
+ * response, body included, whether or not a parent signal is given.
  *
  * @param timeoutMs    - Milliseconds before aborting.
  * @param parentSignal - Optional caller signal to merge with the timeout.
@@ -100,8 +100,12 @@ export function createTimeoutController(
   parentSignal?: AbortSignal,
 ): { readonly signal: AbortSignal; dispose(): void } {
   if (timeoutMs === 0) return { signal: parentSignal ?? new AbortController().signal, dispose: () => {} };
-  if (typeof AbortSignal.timeout === 'function' && !parentSignal) {
-    return { signal: AbortSignal.timeout(timeoutMs), dispose: () => {} };
+  if (typeof AbortSignal.timeout === 'function') {
+    // The same armed timeout with or without a caller signal, so a body that
+    // stalls after the headers is bounded either way. It is not cleared when the
+    // headers arrive.
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return { signal: parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout, dispose: () => {} };
   }
   const controller = new AbortController();
   const timer = setTimeout(

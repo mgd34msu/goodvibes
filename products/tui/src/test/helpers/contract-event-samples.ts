@@ -59,7 +59,7 @@ export const SAMPLES: { readonly [T in ContractEventType]: Extract<ContractEvent
     type: 'CONTRACT_ESCALATED', contractId: CTR, escalationId: 'e1', scope: 'unit', targetId: 'u1', reason: 'unsettled',
     question: 'Contract needs your decision.', unmetCriterionIds: [],
   },
-  CONTRACT_OWNER_REPLIED: { type: 'CONTRACT_OWNER_REPLIED', contractId: CTR, escalationId: 'e1', reading: 'approve', outcome: 'act', action: 'unit passed on owner confirmation' },
+  CONTRACT_OWNER_REPLIED: { type: 'CONTRACT_OWNER_REPLIED', contractId: CTR, escalationId: 'e1', reading: 'approve', outcome: 'act', action: 'approved' },
   CONTRACT_GATE_RESULT: { type: 'CONTRACT_GATE_RESULT', contractId: CTR, targetId: 'u1', gate: 'lint', passed: true, skipped: true, durationMs: 0 },
   CONTRACT_UNIT_SILENT: { type: 'CONTRACT_UNIT_SILENT', contractId: CTR, unitId: 'u1', agentId: 'a1', silentMs: 120_000, action: 'retried' },
   CONTRACT_MERGE_CONFLICT: { type: 'CONTRACT_MERGE_CONFLICT', contractId: CTR, unitId: 'u1', branch: 'ws/ab/cd', path: '/tmp/wt', files: ['src/a.ts'] },

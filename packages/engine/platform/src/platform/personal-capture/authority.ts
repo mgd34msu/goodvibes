@@ -25,14 +25,15 @@
  *
  * ## What counts as one of the owner's channels
  *
- * `profile.ownerChannels` when it is set. When it is empty, the shipped
- * default, the channels fall back to `occasions.nudgeChannel`, which is where
- * the system already pushes the owner's private occasion reminders. A channel
- * trusted to carry "your mother's birthday is coming up" outbound is a
- * channel the owner has claimed as their own; reading their own words back
- * off it is the same conversation in the other direction. That default is
- * why the reported Telegram case works without anyone editing a setting
- * first.
+ * `profile.ownerChannels` when it is set. This function falls back to
+ * `occasions.nudgeChannel` when that is empty and the caller passes it in
+ * `nudgeChannels`: a channel trusted to carry "your mother's birthday is
+ * coming up" outbound is a channel the owner has claimed as their own. The
+ * conversational turn contract (spawn-contract.ts) deliberately passes no
+ * nudge channels, because a reminder destination is not a grant for a tool
+ * that reads personal data; so on a conversational turn only
+ * `profile.ownerChannels` authorizes capture, and the refusal names that
+ * setting.
  *
  * A turn with no channel at all is a local surface, the owner typed it
  * directly into the TUI, the agent or the web UI, and it carries their

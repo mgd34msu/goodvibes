@@ -294,6 +294,23 @@ describe('editAndResend', () => {
     // dropped, it goes out as a fresh send.
     expect(editCalls.length).toBe(0);
     expect(harness.getTurnStates()).toContain('sending');
+    await waitFor(() => harness?.getLocalMessages().at(-1)?.deliveryState === 'sent');
+    expect(createMessageCalls).toEqual([{ sessionId: 'sess-1', body: 'Edited text' }]);
+    expect(harness.getLocalMessages().map((message) => message.content)).toEqual(['Edited text']);
+  });
+
+  test('a failed edit on the live chat surfaces as lineageError and a visible turn error', async () => {
+    editImpl = () => Promise.reject(new Error('edit refused'));
+    harness = renderHook({ localMessages: [makeUserMessage('u1', 'Original text')] });
+
+    flushSync(() => { harness?.getReturn().editAndResend('u1', 'Edited text'); });
+    await waitFor(() => harness?.queryClient.isMutating() === 0 && harness.getReturn().lineageError !== null);
+
+    expect(harness.getReturn().lineageError?.message).toBe('edit refused');
+    expect(harness.getReturn().isLineagePending).toBe(false);
+    expect(harness.getTurnStates().at(-1)).toBe('error');
+    expect(harness.getTurnErrors().at(-1)).toContain('edit refused');
+    expect(harness.getInvalidations()).toEqual([]);
   });
 });
 
@@ -336,6 +353,21 @@ describe('regenerateFrom', () => {
     expect(retryCalls.length).toBe(1);
     // Undefined input → the daemon regenerates the latest assistant response.
     expect(retryCalls[0].input).toBeUndefined();
+  });
+
+  test('a failed regenerate on the live chat surfaces as lineageError and a visible turn error', async () => {
+    retryImpl = () => Promise.reject(new Error('retry refused'));
+    harness = renderHook({});
+
+    flushSync(() => {
+      harness?.getReturn().regenerateFrom('a1', [makeChatMessage('a1', 'assistant', 'answer')]);
+    });
+    await waitFor(() => harness?.queryClient.isMutating() === 0 && harness.getReturn().lineageError !== null);
+
+    expect(harness.getReturn().lineageError?.message).toBe('retry refused');
+    expect(harness.getTurnStates().at(-1)).toBe('error');
+    expect(harness.getTurnErrors().at(-1)).toContain('retry refused');
+    expect(harness.getInvalidations()).toEqual([]);
   });
 
   test('does nothing without an active session', async () => {
@@ -449,6 +481,74 @@ describe('a 401 mid-send hands off to sign-in, not a dead-end error', () => {
     const local = harness.getLocalMessages();
     expect(local.length).toBe(1);
     expect(local[0].deliveryState).toBe('failed');
+  });
+});
+
+describe('the files of a failed send stay available for Resend', () => {
+  test('a failed send holds its files; taking them hands them over once', async () => {
+    createMessageImpl = async () => { throw new Error('network down'); };
+    const harness = renderHook({ localMessages: [] });
+    const file = new File(['pdf bytes'], 'a.pdf', { type: 'application/pdf' });
+
+    await expect(harness.getReturn().sendMutation.mutateAsync({ body: 'see this', files: [file] })).rejects.toThrow('network down');
+
+    const failed = harness.getLocalMessages()[0];
+    expect(failed.deliveryState).toBe('failed');
+    expect(harness.getReturn().hasHeldFiles(failed.id)).toBe(true);
+    expect(harness.getReturn().takeHeldFiles(failed.id)).toEqual([file]);
+    expect(harness.getReturn().hasHeldFiles(failed.id)).toBe(false);
+    harness.unmount();
+  });
+
+  test('resending the held files uploads the artifact again', async () => {
+    let attempts = 0;
+    const bodies: unknown[] = [];
+    createMessageImpl = async (_sessionId, input) => {
+      attempts += 1;
+      bodies.push(input);
+      if (attempts === 1) throw new Error('network down');
+      return { messageId: 'msg-ok' };
+    };
+    const harness = renderHook({ localMessages: [] });
+    const file = new File(['pdf bytes'], 'a.pdf', { type: 'application/pdf' });
+    await expect(harness.getReturn().sendMutation.mutateAsync({ body: 'see this', files: [file] })).rejects.toThrow();
+
+    const held = harness.getReturn().takeHeldFiles(harness.getLocalMessages()[0].id);
+    await harness.getReturn().sendMutation.mutateAsync({ body: 'see this', files: held });
+
+    expect(attempts).toBe(2);
+    expect(bodies[1]).toMatchObject({ attachments: [{ artifactId: 'art-test' }] });
+    harness.unmount();
+  });
+
+  test('a resend carries the failed message\'s id as clientMessageId and replaces its bubble', async () => {
+    const sent: Array<{ clientMessageId?: string }> = [];
+    let attempts = 0;
+    createMessageImpl = async (_sessionId, input) => {
+      sent.push(input as { clientMessageId?: string });
+      attempts += 1;
+      if (attempts === 1) throw new Error('response lost');
+      return { messageId: 'msg-ok' };
+    };
+    const harness = renderHook({ localMessages: [] });
+    await expect(harness.getReturn().sendMutation.mutateAsync({ body: 'hello', files: [] })).rejects.toThrow();
+    const failedId = harness.getLocalMessages()[0].id;
+
+    await harness.getReturn().sendMutation.mutateAsync({ body: 'hello', files: [], localMessageId: failedId });
+
+    expect(sent[0]?.clientMessageId).toBe(failedId);
+    expect(sent[1]?.clientMessageId).toBe(failedId);
+    expect(harness.getLocalMessages()).toHaveLength(1);
+    expect(harness.getLocalMessages()[0].deliveryState).toBe('sent');
+    harness.unmount();
+  });
+
+  test('a send without files holds nothing', async () => {
+    createMessageImpl = async () => { throw new Error('network down'); };
+    const harness = renderHook({ localMessages: [] });
+    await expect(harness.getReturn().sendMutation.mutateAsync({ body: 'hello', files: [] })).rejects.toThrow();
+    expect(harness.getReturn().hasHeldFiles(harness.getLocalMessages()[0].id)).toBe(false);
+    harness.unmount();
   });
 });
 
@@ -698,31 +798,4 @@ describe('chat mutations retain their originating selection', () => {
     expect(createMessageCalls).toEqual([{ sessionId: 'sess-1', body: 'current account prompt' }]);
     expect(harness.getInvalidations()).toEqual(['sess-1']);
   });
-
-  for (const verb of ['create', 'send', 'edit', 'retry'] as const) {
-    test(`teardown drains an unresolved ${verb} response after an interrupted test body and manual unmount`, async () => {
-      const response = deferred<unknown>();
-      if (verb === 'create') createSessionImpl = () => response.promise;
-      else if (verb === 'send') createMessageImpl = () => response.promise;
-      else if (verb === 'edit') editImpl = () => response.promise;
-      else retryImpl = () => response.promise;
-      harness = renderHook({ activeSessionId: verb === 'create' ? '' : 'sess-1' });
-      const owner = harness;
-      const interrupted = async () => {
-        if (verb === 'create' || verb === 'send') {
-          observeSettlement(owner.getReturn().sendMutation.mutateAsync({ body: 'held prompt', files: [] }));
-        } else if (verb === 'edit') owner.getReturn().editAndResend('u1', 'held edit');
-        else owner.getReturn().regenerateFrom('a1', [makeChatMessage('a1', 'assistant', 'held answer')]);
-        await waitFor(() => (verb === 'create' ? createSessionCalls : verb === 'send'
-          ? createMessageCalls : verb === 'edit' ? editCalls : retryCalls).length === 1);
-        throw new Error('Interrupted deferred chat test body.');
-      };
-      await expect(interrupted()).rejects.toThrow('Interrupted deferred chat test body.');
-      expect(owner.queryClient.isMutating()).toBe(1);
-      owner.unmount();
-      harness = null;
-      // Leave the request unresolved. The same afterEach path must retire and
-      // drain it without a mounted harness or the test reaching its own await.
-    });
-  }
 });

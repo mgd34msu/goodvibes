@@ -75,7 +75,7 @@ describe('createMemorySpineRestTransport: CORE verbs', () => {
   test('get: any OTHER 404 (an older daemon with no such route) rejects rather than returning null', async () => {
     installFetch(() => new Response('not found', { status: 404 }));
     const transport = createMemorySpineRestTransport({ baseUrl: 'http://127.0.0.1:3421', authToken: 'tok' });
-    await expect(transport.get('x')).rejects.toThrow();
+    await expect(transport.get('x')).rejects.toThrow(/does not support the 'get' memory verb/);
   });
 
   test('delete returns the honest deleted boolean from the response body', async () => {
@@ -148,6 +148,43 @@ describe('createMemorySpineRestTransport: EXTENDED verbs (1.2.0 full-detach cata
     const imported = await transport.importBundle?.(bundle);
     expect(imported).toEqual({ importedRecords: 1, skippedRecords: 0, importedLinks: 0 });
   });
+});
+
+describe('createMemorySpineRestTransport: 404 discrimination on every extended verb', () => {
+  const bundle: MemoryBundle = { schemaVersion: 'v1', exportedAt: 0, scope: 'all', recordCount: 0, linkCount: 0, records: [], links: [] };
+  type Transport = ReturnType<typeof createMemorySpineRestTransport>;
+  const verbs: ReadonlyArray<{ name: string; nullable: boolean; call: (t: Transport) => Promise<unknown> | undefined }> = [
+    { name: 'updateReview', nullable: true, call: (t) => t.updateReview?.('m1', {} as never) },
+    { name: 'list', nullable: false, call: (t) => t.list?.({}) },
+    { name: 'searchSemantic', nullable: false, call: (t) => t.searchSemantic?.({}) },
+    { name: 'update', nullable: true, call: (t) => t.update?.('m1', { summary: 's' }) },
+    { name: 'link', nullable: true, call: (t) => t.link?.('a', 'b', 'relates-to') },
+    { name: 'linksFor', nullable: false, call: (t) => t.linksFor?.('m1') },
+    { name: 'reviewQueue', nullable: false, call: (t) => t.reviewQueue?.(5) },
+    { name: 'exportBundle', nullable: false, call: (t) => t.exportBundle?.({}) },
+    { name: 'importBundle', nullable: false, call: (t) => t.importBundle?.(bundle) },
+    { name: 'vectorStats', nullable: false, call: (t) => t.vectorStats?.() },
+    { name: 'doctor', nullable: false, call: (t) => t.doctor?.() },
+  ];
+
+  for (const verb of verbs) {
+    test(`${verb.name}: a route-not-found 404 rejects with the unavailable-verb error, never null`, async () => {
+      installFetch(() => new Response(JSON.stringify({ error: 'Route not found', code: 'NOT_FOUND', category: 'not_found', status: 404 }), { status: 404 }));
+      const transport = createMemorySpineRestTransport({ baseUrl: 'http://127.0.0.1:3421', authToken: 'tok' });
+      const pending = verb.call(transport);
+      expect(pending).toBeDefined();
+      await expect(pending).rejects.toThrow(new RegExp(`does not support the '${verb.name}' memory verb`));
+    });
+
+    test(`${verb.name}: a record-miss 404 ${verb.nullable ? 'folds to null' : 'rejects (no null to fold to)'}`, async () => {
+      installFetch(() => new Response(JSON.stringify({ code: MEMORY_RECORD_NOT_FOUND_CODE, error: 'record not found' }), { status: 404 }));
+      const transport = createMemorySpineRestTransport({ baseUrl: 'http://127.0.0.1:3421', authToken: 'tok' });
+      const pending = verb.call(transport);
+      expect(pending).toBeDefined();
+      if (verb.nullable) expect(await pending).toBeNull();
+      else await expect(pending).rejects.toThrow();
+    });
+  }
 });
 
 describe('createMemorySpineRestTransport: auth', () => {

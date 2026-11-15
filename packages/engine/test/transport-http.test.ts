@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { ContractError, GoodVibesError, HttpStatusError } from '../errors/dist/index.js';
-import { createHttpTransport, openServerSentEventStream } from '../transport-http/dist/index.js';
+import { ContractError, GoodVibesError, HttpStatusError } from '../errors/src/index.js';
+import { createHttpTransport, openServerSentEventStream } from '../transport-http/src/index.js';
 import { createTransportError, createNetworkTransportError } from '../transport-http/src/http-core.js';
 import { normalizeTransportError } from '../transport-http/src/http.js';
 import { ConfigurationError as SourceConfigurationError, ContractError as SourceContractError } from '../errors/src/index.js';
@@ -36,20 +36,27 @@ function createSseResponse(chunks: readonly string[], status = 200): Response {
   });
 }
 
-test('authenticated JSON and SSE requests reject resolved cross-origin paths before fetching', async () => {
-  let requests = 0;
-  const transport = createHttpTransport({ baseUrl: 'https://daemon.example', authToken: 'synthetic-token', fetch: createFetchStub(async () => {
-    requests++;
+test('authenticated JSON and SSE requests never send the token to another origin', async () => {
+  const fetchedUrls: string[] = [];
+  const transport = createHttpTransport({ baseUrl: 'https://daemon.example', authToken: 'synthetic-token', fetch: createFetchStub(async (input) => {
+    fetchedUrls.push(String(input));
     return createJsonResponse({ ok: true });
   }) });
-  for (const path of ['//other.example/path', '\\\\other.example/path', '/\\other.example/path', 'HTTPS://other.example/path']) {
+  // These resolve to another host, so they are refused before any request is made.
+  for (const path of ['\\\\other.example/path', 'HTTPS://other.example/path']) {
     await expect(transport.requestJson(path)).rejects.toThrow();
     await expect(openServerSentEventStream(transport, path, {})).rejects.toThrow();
   }
-  expect(requests).toBe(0);
+  expect(fetchedUrls).toEqual([]);
+  // Leading slashes are dropped, so these stay under the daemon origin as a path.
+  for (const path of ['//other.example/path', '/\\other.example/path']) {
+    await expect(transport.requestJson(path)).resolves.toEqual({ ok: true });
+  }
+  expect(fetchedUrls).toEqual(['https://daemon.example/other.example/path', 'https://daemon.example/other.example/path']);
+  fetchedUrls.length = 0;
   await expect(transport.requestJson('/api/status')).resolves.toEqual({ ok: true });
   await expect(transport.requestJson('HTTPS://daemon.example/api/status')).resolves.toEqual({ ok: true });
-  expect(requests).toBe(2);
+  expect(fetchedUrls.map((url) => new URL(url).href)).toEqual(['https://daemon.example/api/status', 'https://daemon.example/api/status']);
 });
 
 test('204 and 205 mutations preserve empty response bodies through middleware', async () => {
@@ -290,7 +297,7 @@ describe('transport-http', () => {
     expect(err.hint).toContain('5000ms');
   });
 
-  test('429 with HTTP-date retry-after header populates a positive retryAfterMs', async () => {
+  test('429 with a past HTTP-date retry-after header clamps retryAfterMs to 0', async () => {
     const transport = createHttpTransport({
       baseUrl: 'http://127.0.0.1:3210',
       fetch: createFetchStub(async () => new Response(
@@ -309,9 +316,8 @@ describe('transport-http', () => {
     expect(caught).toBeInstanceOf(HttpStatusError);
     const err = caught as HttpStatusError;
     expect(err.category).toBe('rate_limit');
-    // HTTP-date is in the past so retryAfterMs will be 0 or a small negative clamped value;
-    // the key assertion is that the field is present and is a number (not undefined)
-    expect(typeof err.retryAfterMs).toBe('number');
+    // The date is long past, so the wait is clamped to exactly 0, never negative or undefined.
+    expect(err.retryAfterMs).toBe(0);
   });
 
   test('429 without retry-after header still produces rate_limit category with generic hint', async () => {

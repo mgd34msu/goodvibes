@@ -9,6 +9,7 @@ import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input
 import { prepareAnswerEvidence } from '../platform/src/platform/knowledge/semantic/answer-verification/evidence.js';
 import { withAnswerVerificationBudget } from '../platform/src/platform/knowledge/semantic/answer-verification/budget.js';
 import { KnowledgeAnswerQualityHeldError } from '../platform/src/platform/knowledge/semantic/answer-verification/types.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -73,6 +74,6 @@ describe('answer extraction evidence and local provenance', () => {
   test('one total deadline aborts an ignored-signal operation before late continuation can write', async () => {
     const released = Promise.withResolvers<void>(); let writes = 0;
     await expect(withAnswerVerificationBudget(async (signal) => { await released.promise; if (!signal.aborted) writes++; }, 5)).rejects.toBeInstanceOf(KnowledgeAnswerQualityHeldError);
-    released.resolve(); await new Promise<void>((resolve) => setTimeout(resolve, 5)); expect(writes).toBe(0);
+    released.resolve(); await eventLoopTurns(); expect(writes).toBe(0);
   });
 });

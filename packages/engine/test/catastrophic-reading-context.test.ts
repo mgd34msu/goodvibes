@@ -65,3 +65,17 @@ test('replacing borrowed options cannot detach the original cancellation owner',
     expect(early).not.toBeNull(); expect(early).toBe(controller.signal.reason);
   } finally { release.resolve(); await work; }
 });
+
+test('the safety check refuses a command whose reading is uncertain and passes one read as safe', async () => {
+  const fake = gateReadingsPort([['maybe-wipe.sh', { catastrophic: 'uncertain' }], ['list-files.sh', { catastrophic: false }]]);
+  const unsure = await runSafetyChecks({ command: './maybe-wipe.sh' }, { workingDirectory: sandbox, port: fake.port });
+  expect(unsure.blocked).toBe(true);
+  expect(unsure).toMatchObject({ reason: 'SAFETY_DENY_DESTRUCTIVE_PREFIX', detail: 'could not be read as safe' });
+  expect((await runSafetyChecks({ command: './list-files.sh' }, { workingDirectory: sandbox, port: fake.port })).blocked).toBe(false);
+});
+
+test('a call carrying only a base64 command exposes that command to the gate readings', async () => {
+  const { shellCommandsIn } = await import('../platform/src/platform/gate/reading.js');
+  const encoded = Buffer.from(command, 'utf-8').toString('base64');
+  expect(shellCommandsIn({ commands: [{ cmd_base64: encoded }] })).toEqual([command]);
+});

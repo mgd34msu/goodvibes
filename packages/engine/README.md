@@ -226,7 +226,7 @@ versions. The application products are private workspaces and the suite is
 installed from this checkout. Export and compatibility rules are recorded in
 [the semver policy](./docs/semver-policy.md); release machinery and its explicit
 gates are described in release and publishing.
-Update an installed suite with the [repository installer](../../docs/installation.md#update-and-check-the-installation).
+Update an installed suite with the [repository installer](../../docs/installation.md#automatic-updates-and-rollback).
 
 ## Security
 

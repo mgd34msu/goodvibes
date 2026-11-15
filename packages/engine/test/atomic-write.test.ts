@@ -44,11 +44,10 @@ describe('atomicWriteFileSync', () => {
     expect(mode).toBe(0o644);
   });
 
-  test('no .tmp file left on success', () => {
+  test('no staging file left on success', () => {
     const path = join(tmpDir, 'clean.json');
     atomicWriteFileSync(path, 'data');
-    const siblings = readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'));
-    expect(siblings).toHaveLength(0);
+    expect(readdirSync(tmpDir)).toEqual(['clean.json']);
   });
 
   test('overwrites an existing file atomically', () => {
@@ -98,7 +97,7 @@ describe('atomicWriteFileSync', () => {
     expect(readFileSync(path, 'utf-8')).toBe('original content');
   });
 
-  test('tmp file naming includes pid and timestamp: only destination file remains', () => {
+  test('only the destination file remains after a write', () => {
     const path = join(tmpDir, 'named.json');
     atomicWriteFileSync(path, 'named test');
     const files = readdirSync(tmpDir);
@@ -107,8 +106,8 @@ describe('atomicWriteFileSync', () => {
 
   test('same-path atomicity: original content is preserved when the write itself fails', () => {
     // The original file uses a basename near NAME_MAX (255). It fits, but
-    // atomicWrite's tmp suffix (.pid.ts.uuid.tmp, ~63 chars) pushes the tmp name
-    // past the limit, so tmp creation fails with ENAMETOOLONG before the rename.
+    // the staging suffix (.tmp-pid-seq-random, ~20 chars) pushes the staging name
+    // past the limit, so staging creation fails with ENAMETOOLONG before the rename.
     // This is uid-independent (root bypasses chmod), and the original must
     // survive untouched.
     const subDir = join(tmpDir, 'subdir');
@@ -120,9 +119,8 @@ describe('atomicWriteFileSync', () => {
 
     // Original file content is unchanged.
     expect(readFileSync(path, 'utf-8')).toBe('original content');
-    // No tmp file leaked
-    const siblings = readdirSync(subDir).filter((f) => f.endsWith('.tmp'));
-    expect(siblings).toHaveLength(0);
+    // No staging file leaked: the original is the only entry.
+    expect(readdirSync(subDir)).toEqual(['a'.repeat(240) + '.json']);
   });
 
   test('writes Uint8Array content byte-for-byte, including non-UTF8 bytes', () => {
@@ -139,14 +137,13 @@ describe('atomicWriteFileSync', () => {
     expect(mode).toBe(0o644);
   });
 
-  test('no .tmp file left after a successful Uint8Array write', () => {
+  test('no staging file left after a successful Uint8Array write', () => {
     const path = join(tmpDir, 'binary-clean.bin');
     atomicWriteFileSync(path, new Uint8Array([9, 9, 9]));
-    const siblings = readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'));
-    expect(siblings).toHaveLength(0);
+    expect(readdirSync(tmpDir)).toEqual(['binary-clean.bin']);
   });
 
-  test('a failed Uint8Array write leaves no temp file and does not clobber the target', () => {
+  test('a failed Uint8Array write leaves no staging file and does not clobber the target', () => {
     const path = join(tmpDir, 'binary-original.bin');
     const original = new Uint8Array([1, 2, 3, 4]);
     atomicWriteFileSync(path, original);
@@ -160,7 +157,6 @@ describe('atomicWriteFileSync', () => {
     expect(() => atomicWriteFileSync(target, new Uint8Array([5, 6, 7]))).toThrow();
     expect(existsSync(target)).toBe(false);
     expect(new Uint8Array(readFileSync(path))).toEqual(original);
-    const siblings = readdirSync(tmpDir).filter((f) => f.endsWith('.tmp'));
-    expect(siblings).toHaveLength(0);
+    expect(readdirSync(tmpDir).sort()).toEqual(['binary-blocker', 'binary-original.bin']);
   });
 });

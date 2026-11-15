@@ -4,7 +4,8 @@ import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/b
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { formatAgentRecordReviewState } from './record-labels.ts';
-import type { AgentRoutineRecord } from './routine-registry.ts';
+import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from './routine-registry.ts';
+import { formatAgentSkillRequirement } from './skill-registry.ts';
 import {
   deliveryModeFromTargets,
   normalizeProviderModel,
@@ -168,6 +169,16 @@ export interface RoutineScheduleCorrelationSuccess {
   readonly scheduleCount: number;
   readonly receiptCount: number;
   readonly correlations: readonly RoutineScheduleCorrelation[];
+  /**
+   * What this reconciliation retired from the local receipt store. Receipts
+   * whose schedule the host no longer lists are removed, so the caller can name
+   * them. Absent when no store was reaped.
+   */
+  readonly reaping?: {
+    readonly reaped: number;
+    readonly withinGrace: number;
+    readonly reapedIds: readonly string[];
+  };
 }
 
 export interface RoutineScheduleCorrelationFailure {
@@ -227,6 +238,11 @@ export function buildRoutineSchedulePrompt(routine: AgentRoutineRecord): string 
     'Routine steps:',
     routine.steps,
   ].join('\n');
+}
+
+/** The name a promoted schedule is created under: the sent name, or the routine's own when none was given. */
+export function routineScheduleName(preview: Pick<RoutineSchedulePromotionPreview, 'routineName' | 'payload'>): string {
+  return preview.payload.name ?? `Agent routine: ${preview.routineName}`;
 }
 
 export function buildRoutineSchedulePayload(
@@ -311,6 +327,21 @@ export function classifyConnectedHostScheduleError<Route extends string>(
 
 const SCHEDULE_CREATE_INCOMPATIBLE_MESSAGE =
   'Connected GoodVibes host compatibility does not satisfy Agent schedule requirements; automation.schedules.create is unavailable.';
+
+/**
+ * What stands between a routine and an unattended, recurring connected schedule. The workspace
+ * shows the same gate ("needs setup / review before it can be trusted for schedule promotion"):
+ * a routine imported from a project file starts disabled and unreviewed, and its steps become a
+ * standing scheduled prompt, so the review has to have happened.
+ */
+export function routinePromotionBlockers(routine: AgentRoutineRecord): readonly string[] {
+  const blockers: string[] = [];
+  if (!routine.enabled) blockers.push(`it is disabled (run /routines enable ${routine.id})`);
+  if (routine.reviewState !== 'reviewed') blockers.push(`it has not been reviewed (read its steps, then run /routines review ${routine.id})`);
+  const readiness = evaluateAgentRoutineReadiness(routine);
+  if (!readiness.ready) blockers.push(`setup is missing: ${readiness.missing.map(formatAgentSkillRequirement).join(', ')}`);
+  return blockers;
+}
 
 export async function promoteRoutineToConnectedSchedule(
   connection: AgentConnectedHostConnection,

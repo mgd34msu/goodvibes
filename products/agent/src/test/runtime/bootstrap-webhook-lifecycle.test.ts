@@ -102,7 +102,7 @@ describe('bootstrap webhook notifier lifecycle', () => {
     expect(calls.detachCount).toBe(1);
   });
 
-  test('no registration occurs when webhookUrls is empty', () => {
+  test('an empty URL list still attaches the notifier so a later-added URL is served, without seeding any URL', () => {
     const { notifier } = makeWebhookNotifier();
     const runtimeBus = makeRuntimeBus();
     const runtimeUnsubs: Array<() => void> = [];
@@ -110,28 +110,7 @@ describe('bootstrap webhook notifier lifecycle', () => {
     registerWebhookNotifier(notifier as never, [], runtimeBus as never, runtimeUnsubs);
 
     expect(notifier.setUrls).not.toHaveBeenCalled();
-    expect(notifier.attachToRuntimeBus).not.toHaveBeenCalled();
-    expect(runtimeUnsubs).toHaveLength(0);
-  });
-
-  test('single detach call even if runtimeUnsubs drained twice (idempotency of the test harness)', () => {
-    const { notifier, calls } = makeWebhookNotifier();
-    const runtimeBus = makeRuntimeBus();
-    const runtimeUnsubs: Array<() => void> = [];
-
-    registerWebhookNotifier(
-      notifier as never,
-      ['https://hooks.example.com/a'],
-      runtimeBus as never,
-      runtimeUnsubs,
-    );
-
-    // drain once
-    for (const unsub of runtimeUnsubs) unsub();
-    // drain again (each unsub closure calls detach each time, this documents the contract)
-    for (const unsub of runtimeUnsubs) unsub();
-
-    // The closure calls detach() each time it is invoked, two drains = 2 calls
-    expect(calls.detachCount).toBe(2);
+    expect(notifier.attachToRuntimeBus).toHaveBeenCalledTimes(1);
+    expect(runtimeUnsubs).toHaveLength(1);
   });
 });

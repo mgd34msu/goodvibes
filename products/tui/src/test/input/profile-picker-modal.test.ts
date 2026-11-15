@@ -107,10 +107,13 @@ describe('ProfilePickerModal', () => {
     expect(modal.selectedIndex).toBe(0);
   });
 
-  test('saveCurrentAs saves a profile', () => {
+  test('saveCurrentAs persists a profile that the manager then lists and loads back', () => {
     const result = modal.saveCurrentAs('my-profile', cm);
     expect(result).toBe(true);
     expect(modal.statusMessage).toContain('my-profile');
+    expect(pm.list().map((p) => p.name)).toEqual(['my-profile']);
+    expect(modal.profiles.map((p) => p.name)).toEqual(['my-profile']);
+    expect(pm.load('my-profile').data.display?.showTokenSpeed).toBe(cm.get('display.showTokenSpeed'));
   });
 
   test('saveCurrentAs with empty name returns false', () => {
@@ -119,16 +122,35 @@ describe('ProfilePickerModal', () => {
     expect(modal.statusMessage).toBeTruthy();
   });
 
-  test('deleteSelected requires confirmation before removal', () => {
+  test('deleteSelected arms on the first press and removes the profile on the second', () => {
+    pm.save('keep-profile', { display: {}, behavior: {} });
     pm.save('test-profile', { display: {}, behavior: {} });
-    // We can't easily inject pm into the modal since it uses getProfileManager(),
-    // so test the interface with manually set profiles
-    modal.profiles = [{ name: 'nonexistent-xyz', timestamp: 1, filePath: '/nonexistent' }];
-    modal.selectedIndex = 0;
-    const first = modal.deleteSelected();
-    expect(first).toBe(false);
-    expect(modal.deleteConfirmationTarget).toBe('nonexistent-xyz');
+    modal.open();
+    modal.selectedIndex = modal.profiles.findIndex((p) => p.name === 'test-profile');
+
+    expect(modal.deleteSelected()).toBe(false);
+    expect(modal.deleteConfirmationTarget).toBe('test-profile');
     expect(modal.statusMessage).toContain('Press delete again');
+    expect(pm.list().map((p) => p.name).sort()).toEqual(['keep-profile', 'test-profile']);
+
+    expect(modal.deleteSelected()).toBe(true);
+    expect(modal.statusMessage).toContain('Deleted: test-profile');
+    expect(pm.list().map((p) => p.name)).toEqual(['keep-profile']);
+    expect(modal.profiles.map((p) => p.name)).toEqual(['keep-profile']);
+    expect(modal.deleteConfirmationTarget).toBeNull();
+  });
+
+  test('loadSelected applies the stored settings to the config and saves it', () => {
+    const flipped = !cm.get('display.showTokenSpeed');
+    pm.save('flipped', { display: { showTokenSpeed: flipped }, behavior: {} });
+    modal.open();
+    expect(modal.getSelected()?.name).toBe('flipped');
+
+    expect(modal.loadSelected(cm)).toBe(true);
+    expect(modal.statusMessage).toContain('Loaded profile: flipped');
+    expect(cm.get('display.showTokenSpeed')).toBe(flipped);
+    // Saved to disk: a fresh manager over the same directories sees the value.
+    expect(createConfigManager(tmpDir).get('display.showTokenSpeed')).toBe(flipped);
   });
 
   test('loadSelected on missing profile returns false with status message', () => {

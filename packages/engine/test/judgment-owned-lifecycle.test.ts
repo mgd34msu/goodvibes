@@ -7,6 +7,7 @@ import { noul, SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { createAsyncDisposalScope, createDisposalScope } from '../platform/src/platform/runtime/disposal.ts';
 import { composeJudgment, type JudgmentSettingsSource } from '../platform/src/platform/runtime/judgment-services.ts';
 import { decisionLogPath } from '../platform/src/platform/state/decision-log.ts';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const request = { state: { fixture: 'native lifecycle' }, questions: { yes: noul('Is this a lifecycle fixture?') }, context: { site: 'test.native-lifecycle' } };
 const source = (endpoint: string, secrets: JudgmentSettingsSource['secrets'] = { get: async () => 'synthetic-key' }): JudgmentSettingsSource => ({
@@ -49,7 +50,8 @@ describe('native judgment ownership', () => {
     try {
       await queued.promise;
       const closing = scope.close();
-      expect(await Promise.race([closing.then(() => true), Bun.sleep(500).then(() => false)])).toBe(true);
+      // A close that waited on the held publication would never settle and the test would time out.
+      await closing;
       expect(await Promise.all(readings)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ kind: 'aborted' })));
       using persisted = new SqliteDecisionLog(decisionLogPath(root));
       expect(persisted.query()).toHaveLength(3);
@@ -86,7 +88,7 @@ describe('native judgment ownership', () => {
       expect(events).toEqual(['record', 'close']);
       // Settling the abandoned key acquisition after closure cannot send or
       // attempt another record against the now-closed connection.
-      release.resolve(); await Bun.sleep(5); expect(events).toEqual(['record', 'close']);
+      release.resolve(); await eventLoopTurns(); expect(events).toEqual(['record', 'close']);
       using persisted = new SqliteDecisionLog(decisionLogPath(root));
       expect(persisted.query()).toMatchObject([{ status: 'failed', error: { kind: 'aborted' } }]);
       scope.dispose(); expect(disposeSpy).toHaveBeenCalledTimes(1);

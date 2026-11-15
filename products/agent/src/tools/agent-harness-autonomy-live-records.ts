@@ -13,6 +13,7 @@ import { capturePersonalOpsData, assertPersonalOpsDataCurrent, protectPersonalOp
 import { readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, SnapshotReader } from './agent-harness-autonomy-queue-types.ts';
 export interface AutonomyLiveRecordBundle {
@@ -22,7 +23,13 @@ export interface AutonomyLiveRecordBundle {
   readonly watcherReceipts: readonly AutonomyQueueLiveRecord[];
   readonly schedules: readonly AutonomyQueueLiveRecord[];
   readonly researchRuns: readonly AutonomyQueueLiveRecord[];
+  /** Records the source holds beyond what each list shows, so a count can say "N of M". */
+  readonly omitted?: Readonly<Record<'tasks' | 'approvals' | 'automationRuns' | 'watcherReceipts' | 'schedules' | 'researchRuns', number>>;
 }
+
+const LIVE_RECORD_LIMIT = 20;
+const RESEARCH_RECORD_LIMIT = 8;
+const omittedFrom = (total: number, limit: number): number => Math.max(0, total - limit);
 
 export interface AutonomyLiveNativeFact {
   readonly status: string;
@@ -263,6 +270,14 @@ async function ownedCaptureAutonomyLiveRecords(context: CommandContext, options:
     watcherReceipts: watcherReceiptLiveRecords(data.artifacts, statuses),
     schedules: scheduleLiveRecords(data.automation),
     researchRuns: researchRunLiveRecords(data.researchRuns),
+    omitted: {
+      tasks: omittedFrom(data.tasks?.tasks.length ?? 0, LIVE_RECORD_LIMIT),
+      approvals: omittedFrom(data.approvals?.approvals.length ?? 0, LIVE_RECORD_LIMIT),
+      automationRuns: omittedFrom(data.automation?.runs.length ?? 0, LIVE_RECORD_LIMIT),
+      watcherReceipts: omittedFrom(allWatcherReceiptArtifacts(data.artifacts).length, LIVE_RECORD_LIMIT),
+      schedules: omittedFrom(data.automation?.jobs.length ?? 0, LIVE_RECORD_LIMIT),
+      researchRuns: omittedFrom(data.researchRuns.length, RESEARCH_RECORD_LIMIT),
+    },
   };
   assertCurrent(); options.retainCurrent?.(assertSource, 'agent.autonomy-live-records.source'); assertCurrent(); return captureCatalogData(result);
 }
@@ -338,9 +353,13 @@ function artifactTimestamp(artifact: ArtifactDescriptor): number {
   return typeof artifact.createdAt === 'number' && Number.isFinite(artifact.createdAt) ? artifact.createdAt : 0;
 }
 
-function watcherReceiptArtifacts(artifacts: readonly ArtifactDescriptor[]): readonly ArtifactDescriptor[] {
+function allWatcherReceiptArtifacts(artifacts: readonly ArtifactDescriptor[]): readonly ArtifactDescriptor[] {
   return artifacts.filter(artifact => WATCHER_RECEIPT_PURPOSES.has(artifactMetadataString(artifact, 'purpose')))
-    .sort((left, right) => artifactTimestamp(right) - artifactTimestamp(left)).slice(0, 20);
+    .sort((left, right) => artifactTimestamp(right) - artifactTimestamp(left));
+}
+
+function watcherReceiptArtifacts(artifacts: readonly ArtifactDescriptor[]): readonly ArtifactDescriptor[] {
+  return allWatcherReceiptArtifacts(artifacts).slice(0, LIVE_RECORD_LIMIT);
 }
 
 function formatIntervalMs(value: number): string {
@@ -368,6 +387,13 @@ function summarizeSchedule(schedule: UiAutomationSnapshot['jobs'][number]['sched
   if (schedule.kind === 'every') return `every ${formatIntervalMs(schedule.intervalMs)}`;
   return `at ${formatEpochMs(schedule.at) ?? schedule.at}`;
 }
+
+/** Slash commands are typed by the owner; the model reaches the read-only ones through workspace run_command. */
+function commandRoute(command: string): string {
+  return `workspace action:"run_command" command:"${quoteRouteValue(command)}"`;
+}
+
+const SCHEDULE_LIST_ROUTE = 'schedule action:"list"';
 
 function quoteRouteValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -422,7 +448,7 @@ export function firstAvailableControlRoute(records: readonly AutonomyQueueLiveRe
 }
 
 function taskOutputDescriptor(task: UiTasksSnapshot['tasks'][number]): AutonomyQueueRecordOutput {
-  const route = `/tasks output ${task.id}`;
+  const route = commandRoute(`/tasks output ${task.id}`);
   const resultPreview = task.result !== undefined ? compactUnknown(task.result) : '';
   if (resultPreview.length > 0) {
     return {
@@ -465,7 +491,7 @@ function taskDiagnostics(task: UiTasksSnapshot['tasks'][number]): readonly strin
     task.turnId ? `turn ${task.turnId}` : '',
     task.error ? `error ${compactUnknown(task.error)}` : '',
     task.result !== undefined ? `result ${compactUnknown(task.result)}` : '',
-    `output route /tasks output ${task.id}`,
+    `output route ${commandRoute(`/tasks output ${task.id}`)}`,
   ].filter((value): value is string => value.length > 0);
 }
 
@@ -548,7 +574,7 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
     const rightTime = right.endedAt ?? right.startedAt ?? right.queuedAt;
     return rightTime - leftTime || left.title.localeCompare(right.title);
   });
-  return tasks.slice(0, 20).map((task) => {
+  return tasks.slice(0, LIVE_RECORD_LIMIT).map((task) => {
     const active = task.status === 'queued' || task.status === 'running' || task.status === 'blocked';
     const canCancel = task.cancellable && active;
     const canRetry = task.status === 'failed' || task.status === 'cancelled';
@@ -577,11 +603,11 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
       phase: task.kind,
       updatedAt: formatEpochMs(task.endedAt ?? task.startedAt ?? task.queuedAt),
       summary,
-      inspectRoute: `/tasks show ${task.id}`,
+      inspectRoute: commandRoute(`/tasks show ${task.id}`),
       ...(canCancel ? { cancelRoute } : {}),
       nextSteps: [
-        `/tasks show ${task.id}`,
-        `/tasks output ${task.id}`,
+        commandRoute(`/tasks show ${task.id}`),
+        commandRoute(`/tasks output ${task.id}`),
         ...(canCancel ? [cancelRoute] : []),
         ...(canRetry ? [retryRoute] : []),
         'Use /workplan for Agent-owned visible task changes; host task mutation requires current recorded admission on the exact owning daemon method.',
@@ -596,8 +622,8 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
       output,
       diagnostics: taskDiagnostics(task),
       controls: [
-        availableControl('inspect', 'Inspect task', 'read-only', `/tasks show ${task.id}`),
-        availableControl('output', 'Show output', 'read-only', `/tasks output ${task.id}`),
+        availableControl('inspect', 'Inspect task', 'read-only', commandRoute(`/tasks show ${task.id}`)),
+        availableControl('output', 'Show output', 'read-only', commandRoute(`/tasks output ${task.id}`)),
         canCancel
           ? availableControl('cancel', 'Cancel task', 'confirmed-effect', cancelRoute)
           : unavailableControl('cancel', 'Cancel task', task.cancellable ? `Task is ${task.status}; cancel is only useful before terminal completion.` : 'Task owner did not mark this task cancellable.'),
@@ -624,7 +650,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
       if (rankDelta !== 0) return rankDelta;
       return right.updatedAt - left.updatedAt || left.id.localeCompare(right.id);
     })
-    .slice(0, 20)
+    .slice(0, LIVE_RECORD_LIMIT)
     .map((approval) => {
       const active = approval.status === 'pending' || approval.status === 'claimed';
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
@@ -647,7 +673,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           approval.resolvedBy ? `resolved by ${approval.resolvedBy}` : '',
           compactUnknown(approval.request.args),
         ].filter(Boolean).join(' | '),
-        inspectRoute: '/approval matrix',
+        inspectRoute: commandRoute('/approval matrix'),
         ...(active ? {
           cancelRoute,
         } : {}),
@@ -655,7 +681,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           approveRoute,
           denyRoute,
           cancelRoute,
-        ] : [`/approval matrix`],
+        ] : [commandRoute('/approval matrix')],
         sourceIds: [
           approval.callId,
           approval.sessionId,
@@ -669,7 +695,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
           entry.note,
         ].filter(Boolean).join(' ')),
         controls: [
-          availableControl('inspect', 'Inspect approval matrix', 'read-only', '/approval matrix'),
+          availableControl('inspect', 'Inspect approval matrix', 'read-only', commandRoute('/approval matrix')),
           active
             ? availableControl('approve', 'Approve approval', 'confirmed-effect', approveRoute)
             : unavailableControl('approve', 'Approve approval', `Approval is ${approval.status}; only pending or claimed approvals can be approved.`),
@@ -691,7 +717,7 @@ function automationRunLiveRecords(snapshot: UiAutomationSnapshot | null): readon
       if (activeDelta !== 0) return activeDelta;
       return right.queuedAt - left.queuedAt || left.id.localeCompare(right.id);
     })
-    .slice(0, 20)
+    .slice(0, LIVE_RECORD_LIMIT)
     .map((run) => {
       const active = run.status === 'queued' || run.status === 'running';
       const failed = run.status === 'failed';
@@ -722,14 +748,14 @@ function automationRunLiveRecords(snapshot: UiAutomationSnapshot | null): readon
           run.error ? `error ${run.error}` : '',
           run.result !== undefined ? `result ${compactUnknown(run.result)}` : '',
         ].filter(Boolean).join(' | '),
-        inspectRoute: 'workspace action:"action" actionId:"schedule-list"',
+        inspectRoute: SCHEDULE_LIST_ROUTE,
         ...(active ? {
           cancelRoute,
         } : {}),
         nextSteps: [
           ...(active ? [cancelRoute] : []),
           ...(failed ? [retryRoute] : []),
-          `workspace action:"action" actionId:"schedule-list"`,
+          SCHEDULE_LIST_ROUTE,
         ],
         sourceIds: [
           run.jobId,
@@ -745,7 +771,7 @@ function automationRunLiveRecords(snapshot: UiAutomationSnapshot | null): readon
         ].filter((value): value is string => typeof value === 'string' && value.length > 0),
         diagnostics: automationRunDiagnostics(run),
         controls: [
-          availableControl('inspect', 'Inspect schedule list', 'read-only', 'workspace action:"action" actionId:"schedule-list"'),
+          availableControl('inspect', 'Inspect schedule list', 'read-only', SCHEDULE_LIST_ROUTE),
           active
             ? availableControl('cancel', 'Cancel automation run', 'confirmed-effect', cancelRoute)
             : unavailableControl('cancel', 'Cancel automation run', `Run is ${run.status}; cancel is only offered for queued or running runs.`),
@@ -789,7 +815,7 @@ function watcherReceiptLiveRecords(artifacts: readonly ArtifactDescriptor[], sta
     const sourceTool = artifactMetadataString(artifact, 'sourceTool')
       || artifactMetadataString(artifact, 'qualifiedName');
     const payloadRedacted = artifactMetadataBoolean(artifact, 'payloadRedacted');
-    const artifactRoute = `agent_artifacts show artifactId:"${artifact.id}" includeContent:false`;
+    const artifactRoute = `agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:false`;
     const queueRoute = 'autonomy action:"item" queueItemId:"automation-runs" includeParameters:true';
     return {
       id: `watcher-receipt:${artifact.id}`,
@@ -842,7 +868,7 @@ function scheduleLiveRecords(snapshot: UiAutomationSnapshot | null): readonly Au
       if (errorDelta !== 0) return errorDelta;
       return (right.nextRunAt ?? 0) - (left.nextRunAt ?? 0) || left.name.localeCompare(right.name);
     })
-    .slice(0, 20)
+    .slice(0, LIVE_RECORD_LIMIT)
     .map((job) => {
       const enabled = job.enabled && job.status === 'enabled';
       const paused = job.status === 'paused' || !job.enabled;
@@ -870,15 +896,14 @@ function scheduleLiveRecords(snapshot: UiAutomationSnapshot | null): readonly Au
           job.description ?? '',
           job.pausedReason ? `paused ${job.pausedReason}` : '',
         ].filter(Boolean).join(' | '),
-        inspectRoute: '/schedule list',
-        ...(enabled ? { cancelRoute: toggleRoute } : {}),
+        inspectRoute: SCHEDULE_LIST_ROUTE,
         ...(enabled ? { pauseRoute: toggleRoute } : { resumeRoute: toggleRoute }),
         nextSteps: [
           runRoute,
           editRoute,
           toggleRoute,
           deleteRoute,
-          `workspace action:"action" actionId:"schedule-list"`,
+          SCHEDULE_LIST_ROUTE,
         ],
         sourceIds: [
           job.source.id,
@@ -889,7 +914,7 @@ function scheduleLiveRecords(snapshot: UiAutomationSnapshot | null): readonly Au
           logTail: [job.pausedReason ?? `Schedule status ${job.status}`],
         } : {}),
         controls: [
-          availableControl('inspect', 'Inspect schedules', 'read-only', '/schedule list'),
+          availableControl('inspect', 'Inspect schedules', 'read-only', SCHEDULE_LIST_ROUTE),
           availableControl('run', 'Run schedule now', 'confirmed-effect', runRoute),
           availableControl('edit', 'Edit schedule', 'confirmed-effect', editRoute),
           availableControl(enabled ? 'pause' : 'resume', enabled ? 'Pause schedule' : 'Resume schedule', 'confirmed-effect', toggleRoute),
@@ -901,15 +926,16 @@ function scheduleLiveRecords(snapshot: UiAutomationSnapshot | null): readonly Au
 }
 
 function researchRunLiveRecords(runs: readonly AgentResearchRunRecord[]): readonly AutonomyQueueLiveRecord[] {
-  return runs.slice(0, 8).map(summarizeResearchRunItem).map((run) => {
+  return runs.slice(0, RESEARCH_RECORD_LIMIT).map(summarizeResearchRunItem).map((run) => {
     const terminal = run.status === 'cancelled' || run.status === 'completed' || run.status === 'failed';
     const canPause = run.status === 'running' || run.status === 'blocked';
     const canResume = run.status === 'paused' || run.status === 'planned' || run.status === 'blocked';
-    const inspectRoute = `research action:"run" runId="${run.id}"`;
-    const cancelRoute = `research action:"cancel" id="${run.id}" note="..."`;
-    const checkpointRoute = `research action:"checkpoint" id="${run.id}" note="..." progress:${run.progress}`;
-    const pauseRoute = `research action:"pause" id="${run.id}" note="..."`;
-    const resumeRoute = `research action:"resume" id="${run.id}" note="..."`;
+    const quotedId = researchRouteString(run.id);
+    const inspectRoute = `research action:"run" runId:${quotedId}`;
+    const cancelRoute = `research action:"cancel" id:${quotedId} note:"..."`;
+    const checkpointRoute = researchCheckpointRoute(run.id, run.progress);
+    const pauseRoute = `research action:"pause" id:${quotedId} note:"..."`;
+    const resumeRoute = `research action:"resume" id:${quotedId} note:"..."`;
     const availableNextRoutes = [
       checkpointRoute,
       ...(canPause ? [pauseRoute] : []),

@@ -201,7 +201,7 @@ afterEach(async () => {
               readonly duplicateIds?: readonly string[];
               readonly diffFields: readonly string[];
               readonly detailRoute: string;
-              readonly applyRoute?: string;
+              readonly previewRoute?: string;
               readonly mergeRoute?: string;
               readonly stalePhaseRoute?: string;
               readonly deletePhaseRoute?: string;
@@ -277,17 +277,17 @@ afterEach(async () => {
         expect(curator.consolidationBatch?.routes.candidateDetail).toContain('memory action:"candidate"');
         expect(curator.consolidationBatch?.phases.map((phase) => phase.id)).toEqual([
           'inspect',
-          'merge-survivor',
           'stale-duplicates',
           'verify',
           'delete-after-stale',
         ]);
         expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.candidateId.includes('consolidation:skill'))).toBe(true);
         expect(curator.consolidationBatch?.topCandidates.every((candidate) => candidate.updateRoute === undefined)).toBe(true);
-        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.applyRoute?.includes('agent_learning_consolidation'))).toBe(true);
-        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.mergeRoute?.includes('mode=merge'))).toBe(true);
-        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.stalePhaseRoute?.includes('mode=stale'))).toBe(true);
-        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.deletePhaseRoute?.includes('mode=delete'))).toBe(true);
+        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.previewRoute?.includes('agent_learning_consolidation'))).toBe(true);
+        // No candidate carries survivor fields, so no merge step is offered that could only fail.
+        expect(curator.consolidationBatch?.topCandidates.every((candidate) => candidate.mergeRoute === undefined)).toBe(true);
+        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.stalePhaseRoute?.includes('mode:"stale"'))).toBe(true);
+        expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.deletePhaseRoute?.includes('mode:"delete"'))).toBe(true);
         expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.staleRoutes?.join('\n').includes('action:"stale"'))).toBe(true);
         expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.deleteRoutes?.join('\n').includes('action:"delete"'))).toBe(true);
         expect(curator.consolidationBatch?.topCandidates.some((candidate) => candidate.rollbackRoutes?.join('\n').includes('action:"review"'))).toBe(true);
@@ -356,16 +356,16 @@ afterEach(async () => {
         const consolidationDetail = await executeHarnessJson<{
           readonly candidateId: string;
           readonly status: string;
-          readonly routes?: { readonly update: string | null; readonly stale: string | null; readonly delete: string | null; readonly apply?: string | null; readonly merge?: string | null; readonly stalePhase?: string | null; readonly deletePhase?: string | null };
+          readonly routes?: { readonly update: string | null; readonly stale: string | null; readonly delete: string | null; readonly preview?: string | null; readonly merge?: string | null; readonly stalePhase?: string | null; readonly deletePhase?: string | null };
           readonly cleanupRoutes?: readonly string[];
           readonly rollbackRoutes?: readonly string[];
         }>(fixture, { mode: 'learning_candidate', candidateId: `consolidation:skill:${encodeURIComponent(JSON.stringify([firstSkill.id, secondSkill.id].sort((left, right) => left.localeCompare(right))))}` });
         expect(consolidationDetail.status).toBe('needs-consolidation');
         expect(consolidationDetail.routes?.update).toBeNull();
-        expect(consolidationDetail.routes?.apply).toContain('agent_learning_consolidation');
-        expect(consolidationDetail.routes?.merge).toContain('mode=merge');
-        expect(consolidationDetail.routes?.stalePhase).toContain('mode=stale');
-        expect(consolidationDetail.routes?.deletePhase).toContain('mode=delete');
+        expect(consolidationDetail.routes?.preview).toContain('agent_learning_consolidation');
+        expect(consolidationDetail.routes?.merge).toBeNull();
+        expect(consolidationDetail.routes?.stalePhase).toContain('mode:"stale"');
+        expect(consolidationDetail.routes?.deletePhase).toContain('mode:"delete"');
         expect(consolidationDetail.routes?.stale).toContain('action:"stale"');
         expect(consolidationDetail.routes?.delete).toContain('action:"delete"');
         expect(consolidationDetail.cleanupRoutes?.join('\n')).toContain('Duplicate of');
@@ -415,7 +415,7 @@ afterEach(async () => {
 
     } finally {
       setSystemTime();
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   }, 120_000);
 
@@ -439,75 +439,80 @@ afterEach(async () => {
       expect(unconfirmed.success).toBe(false);
       if (!unconfirmed.success) expect(unconfirmed.error).toContain('recorded effect admission');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
 
-  test('learning_auto_promote promotes eligible candidates after confirmation', async () => {
+  async function runAutoPromoteOverSession(lesson: string) {
     const fixture = makeFixture();
+    const memoryRegistry = await createMemoryRegistry(fixture.paths, fixture.configManager);
+    (fixture.context.clients as Record<string, unknown>).agentKnowledgeApi = { memory: memoryRegistry };
+    const savedSession = {
+      name: 'session-auto-promote-test',
+      title: 'Auto-promote integration session',
+      model: 'gpt-4.1',
+      provider: 'openai',
+      timestamp: Date.now(),
+      messageCount: 4,
+      filePath: fixture.paths.resolveUserPath('sessions', 'session-auto-promote-test.json'),
+    };
+    (fixture.context.session as unknown as Record<string, unknown>).sessionManager = {
+      list: () => [savedSession],
+      search: (query: string) => [savedSession]
+        .filter((s) => s.title.toLowerCase().includes(query.toLowerCase()))
+        .map((s) => ({ session: s, matchCount: 1, snippets: [lesson] })),
+      load: (name: string) => {
+        if (name !== savedSession.name) throw new Error(`Unknown session ${name}`);
+        return {
+          meta: { title: savedSession.title },
+          messages: [
+            { role: 'user', content: 'Run auto-promote.' },
+            { role: 'assistant', content: lesson },
+          ],
+        };
+      },
+    };
     try {
-      // Wire up a real MemoryRegistry as the memoryApi (has .add())
-      const memoryRegistry = await createMemoryRegistry(fixture.paths, fixture.configManager);
-      (fixture.context.clients as Record<string, unknown>).agentKnowledgeApi = { memory: memoryRegistry };
-
-      // Add a reviewed note with a session and a completed work-plan so the
-      // learning curator produces skill proposal candidates for runSkillDraftProposer.
-      const savedSession = {
-        name: 'session-auto-promote-test',
-        title: 'Auto-promote integration session',
-        model: 'gpt-4.1',
-        provider: 'openai',
-        timestamp: Date.now(),
-        messageCount: 4,
-        filePath: fixture.paths.resolveUserPath('sessions', 'session-auto-promote-test.json'),
-      };
-      (fixture.context.session as unknown as Record<string, unknown>).sessionManager = {
-        list: () => [savedSession],
-        search: (query: string) => [savedSession]
-          .filter((s) => s.title.toLowerCase().includes(query.toLowerCase()))
-          .map((s) => ({ session: s, matchCount: 1, snippets: ['Lesson: run auto-promote pass after curator review.'] })),
-        load: (name: string) => {
-          if (name !== savedSession.name) throw new Error(`Unknown session ${name}`);
-          return {
-            meta: { title: savedSession.title },
-            messages: [
-              { role: 'user', content: 'Run auto-promote.' },
-              { role: 'assistant', content: 'Lesson: invoke learning_auto_promote after curator review to promote skill drafts autonomously.' },
-            ],
-          };
-        },
-      };
-
-      const result = await executeHarnessJson<{
-        readonly eligible: number;
-        readonly promoted: number;
-        readonly skipped: number;
-        readonly consolidated: number;
-        readonly domains: Record<string, number>;
-        readonly log: readonly string[];
-        readonly message: string;
-        readonly policy: string;
-      }>(fixture, {
+      const execution = await fixture.admittedTool.execute({
         mode: 'learning_auto_promote',
         confirm: true,
         explicitUserRequest: 'Promote the reviewed learnings from this session.',
       });
-
-      // Shape assertions, the mode must always return these fields.
-      expect(typeof result.eligible).toBe('number');
-      expect(typeof result.promoted).toBe('number');
-      expect(typeof result.skipped).toBe('number');
-      expect(typeof result.consolidated).toBe('number');
-      expect(Array.isArray(result.log)).toBe(true);
-      expect(typeof result.message).toBe('string');
-      expect(typeof result.policy).toBe('string');
-      expect(result.policy).toContain('Secret scanning');
-      // At minimum the skill-draft pass runs; promoted + skipped covers all eligible
-      expect(result.promoted + result.skipped).toBeGreaterThanOrEqual(result.eligible);
+      return { execution, skills: AgentSkillRegistry.fromShellPaths(fixture.paths).list() };
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
+  }
+
+  test('learning_auto_promote promotes eligible candidates after confirmation', async () => {
+    const { execution, skills } = await runAutoPromoteOverSession('Lesson: invoke learning_auto_promote after curator review to promote skill drafts autonomously.');
+    expect(execution.success, execution.error).toBe(true);
+    const result = JSON.parse(execution.output ?? '{}') as {
+      readonly eligible: number; readonly promoted: number; readonly skipped: number; readonly consolidated: number;
+      readonly domains: Record<string, number>; readonly log: readonly string[]; readonly message: string; readonly policy: string;
+    };
+    expect(result.eligible).toBe(1);
+    expect(result.promoted).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.consolidated).toBe(0);
+    expect(result.domains).toEqual({ skill: 1 });
+    expect(result.message).toBe('Promoted 1 item(s); consolidated 0 duplicate(s).');
+    // The promoted record exists in the registry, disabled, with the session's lesson as its content.
+    expect(skills).toHaveLength(1);
+    const [skill] = skills;
+    expect(result.log).toEqual([`promoted skill:${skill!.id}  ${skill!.name}`]);
+    expect(skill!.enabled).toBe(false);
+    expect(JSON.stringify(skill)).toContain('learning_auto_promote');
+    expect(result.policy).toContain('Secret scanning');
+  });
+
+  test('learning_auto_promote does not write a candidate whose content holds a secret', async () => {
+    const { execution, skills } = await runAutoPromoteOverSession('Lesson: deploy with token sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH and password=hunter2hunter2 to promote skill drafts.');
+    expect(execution.success).toBe(false);
+    expect(execution.error).toContain('credential material');
+    expect(execution.error).not.toContain('sk-ant-api03');
+    expect(skills).toHaveLength(0);
   });
 
 
@@ -592,7 +597,7 @@ afterEach(async () => {
       expect(action.id).toBe('research-source-queue');
       expect(action.modelRoute).toBe('research action:"sources"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -696,7 +701,7 @@ afterEach(async () => {
       expect(action.id).toBe('research-run-queue');
       expect(action.modelRoute).toBe('research action:"runs"');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -852,7 +857,7 @@ afterEach(async () => {
       expect(fresh.workflow.find((step) => step.id === 'visible-run')?.route).toContain('research action:"create_run"');
       expect(fresh.routes.createRun).toContain('new competitor research request');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1048,7 +1053,7 @@ afterEach(async () => {
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

@@ -3,7 +3,7 @@ import { quoteSlashCommandArg, tokenizeSlashCommand } from './slash-command-pars
 import type { AgentWorkspaceMcpCommandEditorKind } from './agent-workspace-mcp-command-editors.ts';
 import { isAgentWorkspaceMcpCommandEditorKind } from './agent-workspace-mcp-command-editors.ts';
 import type { AgentWorkspaceCommandEditorSubmission, AgentWorkspaceCommandSubmissionHandler, AgentWorkspaceFieldReader } from './agent-workspace-command-editor-engine.ts';
-import { buildCommandEditorSubmissionFromTable, dispatchCommandEditorSubmission, editorMessageSubmission, isAffirmative, splitCommaList } from './agent-workspace-command-editor-engine.ts';
+import { buildCommandEditorSubmissionFromTable, dispatchCommandEditorSubmission, editorMessageSubmission, isAffirmative, redactEnvEntryForDisplay, splitCommaList } from './agent-workspace-command-editor-engine.ts';
 
 export type { AgentWorkspaceMcpCommandEditorKind } from './agent-workspace-mcp-command-editors.ts';
 export type AgentWorkspaceMcpCommandEditorSubmission = AgentWorkspaceCommandEditorSubmission;
@@ -24,7 +24,6 @@ const MCP_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceMcpCommandE
       'add',
       quoteSlashCommandArg(readField('name')),
       quoteSlashCommandArg(readField('command')),
-      ...tokenizeSlashCommand(readField('args')).map(quoteSlashCommandArg),
     ];
     const scope = readField('scope');
     const role = readField('role');
@@ -32,15 +31,37 @@ const MCP_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceMcpCommandE
     if (scope.length > 0) parts.push('--scope', quoteSlashCommandArg(scope));
     if (role.length > 0) parts.push('--role', quoteSlashCommandArg(role));
     if (trust.length > 0) parts.push('--trust', quoteSlashCommandArg(trust));
-    for (const env of splitCommaList(readField('env'))) parts.push('--env', quoteSlashCommandArg(env));
-    for (const path of splitCommaList(readField('paths'))) parts.push('--path', quoteSlashCommandArg(path));
-    for (const host of splitCommaList(readField('hosts'))) parts.push('--host', quoteSlashCommandArg(host));
+    const envEntries = splitCommaList(readField('env'));
+    // The result pane shows the same command with each env value hidden.
+    const display = [...parts];
+    for (const env of envEntries) {
+      parts.push('--env', quoteSlashCommandArg(env));
+      display.push('--env', quoteSlashCommandArg(redactEnvEntryForDisplay(env)));
+    }
+    for (const path of splitCommaList(readField('paths'))) {
+      parts.push('--path', quoteSlashCommandArg(path));
+      display.push('--path', quoteSlashCommandArg(path));
+    }
+    for (const host of splitCommaList(readField('hosts'))) {
+      parts.push('--host', quoteSlashCommandArg(host));
+      display.push('--host', quoteSlashCommandArg(host));
+    }
     parts.push('--yes');
+    display.push('--yes');
+    // The server's own args go after `--`: the add parser reads --host, --path, --env
+    // and the like as MCP sandbox settings anywhere before it, so a server flag named
+    // like one would otherwise widen the allowlists.
+    const serverArgs = tokenizeSlashCommand(readField('args')).map(quoteSlashCommandArg);
+    if (serverArgs.length > 0) {
+      parts.push('--', ...serverArgs);
+      display.push('--', ...serverArgs);
+    }
     return dispatchCommandEditorSubmission(
       parts.join(' '),
       'Opening MCP server add/update',
       'The workspace handed a confirmed MCP server add/update command to the shell-owned command router.',
       'safe',
+      display.join(' '),
     );
   },
 };

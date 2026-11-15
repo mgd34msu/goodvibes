@@ -99,6 +99,8 @@ export class EvalRunner {
     const unbaselined: UnbaselinedScenario[] = [];
 
     const baselineSuite = baseline?.suites[fresh.suite];
+    const freshIds = new Set(fresh.results.map((result) => result.scenario.id));
+    const missingFromRun = Object.keys(baselineSuite?.scenarioScores ?? {}).filter((id) => !freshIds.has(id));
 
     for (const result of fresh.results) {
       const freshScore = result.scorecard.compositeScore;
@@ -146,6 +148,7 @@ export class EvalRunner {
       regressions,
       floorFailures,
       unbaselined,
+      missingFromRun,
     };
   }
 

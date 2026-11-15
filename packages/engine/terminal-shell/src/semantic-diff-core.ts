@@ -59,8 +59,8 @@ interface ParsedImport {
 
 /**
  * Extract import specifiers and named imports from source text using a regex
- * scan. Covers `import ... from '...'` and `import('...')` dynamic imports.
- * Does not require tree-sitter.
+ * scan. Covers `import ... from '...'` and side-effect `import '...'`; a
+ * dynamic `import('...')` is not tracked. Does not require tree-sitter.
  */
 function extractImports(source: string): Map<string, ParsedImport> {
   const map = new Map<string, ParsedImport>();
@@ -69,7 +69,9 @@ function extractImports(source: string): Map<string, ParsedImport> {
   //                 import Foo from './foo'
   //                 import * as Foo from './foo'
   //                 import './side-effect'
-  const staticRe = /import\s+(?:([\s\S]*?)\s+from\s+)?['"]([^'"]+)['"]/g;
+  // The clause stops at a quote or semicolon so a bare `import './a'` never
+  // borrows the `from '...'` of a later statement.
+  const staticRe = /import\s+(?:([^'";]*?)\s+from\s+)?['"]([^'"]+)['"]/g;
   let m: RegExpExecArray | null;
 
   while ((m = staticRe.exec(source)) !== null) {
@@ -236,7 +238,22 @@ export async function computeSemanticDiff(
   }
 
   const svc = new TreeSitterService();
+  try {
+    return await diffWithService(svc, filePath, langId, beforeContent, afterContent, imports);
+  } finally {
+    // Frees the WASM parser and every native tree this call parsed.
+    svc.dispose();
+  }
+}
 
+async function diffWithService(
+  svc: TreeSitterService,
+  filePath: string,
+  langId: NonNullable<ReturnType<typeof detectLanguage>>,
+  beforeContent: string,
+  afterContent: string,
+  imports: ImportChange[],
+): Promise<SemanticDiff | null> {
   try {
     await svc.initialize();
   } catch {

@@ -135,9 +135,22 @@ export function createNotificationDispatcher(
   const router = createNotificationRouter(undefined, undefined, configManager);
   /** Event keys of notifications the router is holding in a batch, for when the batch is flushed. */
   const heldEventKeys = new WeakMap<Notification, string>();
+  /** Notifications already in the feed, so a periodic flush does not count a batch head twice. */
+  const recorded = new WeakSet<Notification>();
   const recordIfFeedTarget = (notification: Notification, decision: RoutingDecision, eventKey: string | undefined): void => {
-    if (decision.suppressed) return;
-    if (decision.target === 'panel_only') feed.record(notification, decision, eventKey);
+    // A notification held back from the screen (quiet while typing, a quiet
+    // mode) is still something that happened: it goes to the history, where it
+    // can be read later, rather than being dropped. Nothing flushes the held
+    // ones, so this is the only place they would ever surface.
+    if (decision.suppressed) {
+      feed.record(notification, { ...decision, target: 'panel_only' }, eventKey);
+      recorded.add(notification);
+      return;
+    }
+    if (decision.target === 'panel_only') {
+      feed.record(notification, decision, eventKey);
+      recorded.add(notification);
+    }
   };
   return {
     router,
@@ -149,6 +162,7 @@ export function createNotificationDispatcher(
     },
     flush() {
       for (const { notification } of router.flush()) {
+        if (recorded.has(notification)) continue;
         // A flushed batch head surfaces as a batch-collapsed feed entry; the
         // feed folds all sharing this batch key into one running-count row.
         feed.record(notification, {
@@ -158,6 +172,44 @@ export function createNotificationDispatcher(
         }, heldEventKeys.get(notification));
       }
     },
+  };
+}
+
+/** How often held batch notifications are surfaced: the router's batch window. */
+export const NOTIFICATION_FLUSH_INTERVAL_MS = 2_000;
+
+/** The timer functions the flush loop uses; injectable so a test can drive ticks. */
+export interface NotificationFlushScheduler {
+  readonly setInterval: (handler: () => void, ms: number) => unknown;
+  readonly clearInterval: (handle: unknown) => void;
+}
+
+const SYSTEM_SCHEDULER: NotificationFlushScheduler = {
+  setInterval: (handler, ms) => {
+    const handle = setInterval(handler, ms);
+    // A pending flush must not keep the process alive.
+    handle.unref();
+    return handle;
+  },
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
+
+/**
+ * Surface batch-held notifications on a timer: the router queues a collapsed
+ * burst until flushed, and nothing else flushes it, so the "N more" row would
+ * never appear. Returns a function that stops the timer.
+ */
+export function startNotificationFlush(
+  dispatcher: Pick<NotificationDispatcher, 'flush'>,
+  scheduler: NotificationFlushScheduler = SYSTEM_SCHEDULER,
+  intervalMs: number = NOTIFICATION_FLUSH_INTERVAL_MS,
+): () => void {
+  const handle = scheduler.setInterval(() => dispatcher.flush(), intervalMs);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    scheduler.clearInterval(handle);
   };
 }
 

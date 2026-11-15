@@ -279,6 +279,8 @@ export interface HunkRevertWorkspace {
   readonly workspaceRoot: string;
   /** Take a whole-tree snapshot; returns null when the tree is unchanged since the last checkpoint. */
   create(opts: { kind: 'manual'; label: string }): Promise<WorkspaceCheckpoint | null>;
+  /** Newest-first listing; when present, the newest checkpoint names the undo point of a revert whose snapshot was a no-op. */
+  list?(filter: { limit: number }): Promise<WorkspaceCheckpoint[]>;
 }
 
 /** Receipt of a single applied hunk revert, reversible via the safety checkpoint. */
@@ -288,16 +290,17 @@ export interface HunkRevertReceipt {
   readonly hunkHeader: string;
   readonly addedLinesRemoved: number;
   readonly removedLinesRestored: number;
-  /** The pre-revert whole-tree checkpoint; restore it to undo. Null only when the tree was already identical to the latest checkpoint. */
+  /** The pre-revert whole-tree checkpoint; restore it to undo. Null when the tree was already identical to the latest checkpoint (that checkpoint is then `undo`'s target). */
   readonly safetyCheckpointId: string | null;
   readonly undo: { readonly restoreCheckpointId: string } | null;
 }
 
 /**
- * Reverse-apply one hunk to a workspace file, snapshotting first. Re-reads and
- * re-validates the current file (a hunk that went stale between preview and here
- * is a conflict, never a partial write), takes a whole-tree safety checkpoint as
- * the undo point, then writes the reversed content.
+ * Reverse-apply one hunk to a workspace file, snapshotting first. Validates the
+ * current file (a hunk that went stale between preview and here is a conflict,
+ * never a partial write), takes a whole-tree safety checkpoint as the undo
+ * point, then re-reads the file: if it changed while the snapshot ran, the
+ * revert is refused rather than overwriting the newer edit.
  */
 export async function applyHunkRevert(
   workspace: HunkRevertWorkspace,
@@ -311,9 +314,13 @@ export async function applyHunkRevert(
   }
   // Snapshot BEFORE mutating so the revert is itself reversible (restore this
   // checkpoint to undo). A null return means the tree already matched the latest
-  // checkpoint, the pre-revert state is already captured, so there is nothing to
-  // undo-point beyond it.
+  // checkpoint, which is then the undo point.
   const safety = await workspace.create({ kind: 'manual', label: `pre-revertHunk: ${path}` });
+  // The snapshot can take long on a large tree; an edit saved meanwhile must not be overwritten.
+  if (readWorkspaceFile(workspace.workspaceRoot, path) !== content) {
+    throw new HunkRevertConflictError(`${path} changed while the safety checkpoint was being taken; nothing was written. Preview the hunk again and retry.`);
+  }
+  const undoPoint = safety ?? (workspace.list ? (await workspace.list({ limit: 1 }))[0] ?? null : null);
   const abs = resolveInsideRoot(workspace.workspaceRoot, path);
   writeFileSync(abs, result.nextContent, 'utf8');
   return {
@@ -323,6 +330,6 @@ export async function applyHunkRevert(
     addedLinesRemoved: result.addedLinesRemoved,
     removedLinesRestored: result.removedLinesRestored,
     safetyCheckpointId: safety?.id ?? null,
-    undo: safety ? { restoreCheckpointId: safety.id } : null,
+    undo: undoPoint ? { restoreCheckpointId: undoPoint.id } : null,
   };
 }

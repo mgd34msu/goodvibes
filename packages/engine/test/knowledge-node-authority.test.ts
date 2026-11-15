@@ -23,15 +23,16 @@ import { useFailureReadings } from './_helpers/failure-readings.js';
 
 useFailureReadings([]);
 
-const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const roots: string[] = [], stores: KnowledgeStore[] = [];
+afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-node-authority-'));
   roots.push(root);
   const dbPath = join(root, 'knowledge.sqlite');
-  return { dbPath, store: new KnowledgeStore({ dbPath }), reload: async () => {
-    const store = new KnowledgeStore({ dbPath });
+  const first = new KnowledgeStore({ dbPath }); stores.push(first);
+  return { dbPath, store: first, reload: async () => {
+    const store = new KnowledgeStore({ dbPath }); stores.push(store);
     await store.init();
     return store;
   } };
@@ -308,7 +309,7 @@ describe('knowledge node operator authority', () => {
     writeKnowledgeNodeRow(sqlite, legacy);
     writeKnowledgeNodeRow(sqlite, { ...legacy, id: 'manual', slug: 'manual', status: 'active', metadata: { author: 'user' } });
     await sqlite.save();
-    const store = new KnowledgeStore({ dbPath });
+    const store = new KnowledgeStore({ dbPath }); stores.push(store);
     await store.init();
     expect(store.getNode(legacy.id)).toEqual(legacy);
     await held(store.upsertNode({ ...legacy, status: 'active', summary: 'Regenerated' }), 'operator-reviewed');
@@ -389,16 +390,20 @@ describe('public node mutation call paths', () => {
     await held(store.upsertNode({ ...snapshot, metadata: { batteryPowered: true } }), 'operator-reviewed');
   });
 
-  test('issue apply-facts cannot overwrite a newer node decision across its source-write await', async () => {
+  test('issue apply-facts cannot overwrite a newer node decision across its node-write await and leaves the source untouched', async () => {
     const { store } = fixture();
     const node = await reviewed(store);
     const source = await store.upsertSource({ id: 'source-1', connectorId: 'manual', sourceType: 'manual', status: 'indexed' });
     const issue = await store.upsertIssue({ severity: 'warning', code: 'bad-claim', message: 'Check the claim', nodeId: node.id, sourceId: source.id });
-    const originalUpsertSource = store.upsertSource.bind(store);
-    store.upsertSource = async (value) => {
-      await reviewKnowledgeNodeRecord(store, { id: node.id, decision: 'reject', reviewer: 'newer operator' });
-      return originalUpsertSource(value);
-    };
+    const originalUpsertNode = store.upsertNode.bind(store);
+    let intercepted = false;
+    store.upsertNode = (async (value, mutation) => {
+      if (!intercepted) {
+        intercepted = true;
+        await reviewKnowledgeNodeRecord(store, { id: node.id, decision: 'reject', reviewer: 'newer operator' });
+      }
+      return originalUpsertNode(value, mutation);
+    }) as typeof store.upsertNode;
     await held(reviewKnowledgeIssue(store, {
       issueId: issue.id, action: 'accept', reviewer: 'old reviewer', value: { fact: { summary: 'Stale correction' } },
     }), 'stale');
@@ -406,6 +411,7 @@ describe('public node mutation call paths', () => {
     expect(store.getNode(node.id)!.summary).toBe(node.summary);
     expect(store.getNode(node.id)!.metadata.review).toMatchObject({ reviewer: 'newer operator' });
     expect(store.getIssue(issue.id)).toEqual(issue);
+    expect(store.getSource(source.id)).toEqual(source);
   });
 
   test('Home Graph issue correction is trusted without changing issue rejection semantics', async () => {

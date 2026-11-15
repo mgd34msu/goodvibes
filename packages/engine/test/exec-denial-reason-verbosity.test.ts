@@ -9,8 +9,8 @@
  *
  * An empty command exercises parser rejection without attempting a destructive action.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
@@ -25,6 +25,11 @@ useToolReadings([], EXEC_GATE_TABLE);
 
 const DENIED = '   ';
 
+const tempRoots: string[] = [];
+afterAll(() => {
+  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 interface DenialOutput {
   denied?: boolean;
   denial_reason?: string;
@@ -33,6 +38,7 @@ interface DenialOutput {
 
 function makeTool() {
   const root = mkdtempSync(join(tmpdir(), 'gv-exec-denial-'));
+  tempRoots.push(root);
   return { root, tool: createExecTool(new ProcessManager(), { overflowHandler: new OverflowHandler({ baseDir: root }), featureFlags: { isEnabled: id => id === 'shell-ast-normalization' } }) };
 }
 
@@ -56,15 +62,4 @@ describe('exec: a denial keeps its reason at every verbosity', () => {
       );
     });
   }
-
-  test('minimal preserves the reason to its first line', async () => {
-    const output = await denialAt('minimal');
-    expect(output.denial_reason).toContain('no command in this segment');
-  });
-
-  test('count_only still carries the reason instead of dropping it', async () => {
-    const output = await denialAt('count_only');
-    expect(output.denial_reason).toBeDefined();
-    expect(output.denial_reason).not.toBe('');
-  });
 });

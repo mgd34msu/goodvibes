@@ -86,6 +86,8 @@ export const CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA = objectSchema({
   }, ['uidValidity', 'kind', 'lowerBoundUid', 'skippedOlderMessages']),
   /** Pending eligible messages at lastSyncAt; absent after interruption/when unknown. */
   mailboxProgress: objectSchema({ uidValidity: NUMBER_SCHEMA, pendingMessages: NUMBER_SCHEMA }, ['uidValidity', 'pendingMessages']),
+  /** Messages the last sync passed without publishing because their content cannot be proven complete. */
+  skippedMessages: arraySchema(objectSchema({ uid: NUMBER_SCHEMA, reason: STRING_SCHEMA }, ['uid', 'reason'])),
 }, ['provider', 'state', 'itemCount', 'storedCount']);
 
 export const CHANNEL_ROUTING_RULE_SCHEMA = objectSchema({

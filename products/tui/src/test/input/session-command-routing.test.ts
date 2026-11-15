@@ -173,7 +173,10 @@ describe('session-command-routing (TASK-032)', () => {
     const output = ctx.printed.join('\n');
     // Should print session info, not a "Usage: /session" error
     expect(output).not.toContain('Usage: /session <subcommand>');
-    expect(output).toMatch(/abc-123|my-session|Current session/);
+    expect(output).toContain('Current session');
+    expect(output).toContain('ID:       abc-123');
+    expect(output).toContain('Name:     my-session');
+    expect(output).toContain('Model:    claude-4 (anthropic)');
   });
 
   test('list subcommand routes to lifecycle handler', async () => {
@@ -184,7 +187,7 @@ describe('session-command-routing (TASK-032)', () => {
     await cmd.handler(['list'], ctx as unknown as CommandContext);
     const output = ctx.printed.join('\n');
     // Lifecycle handler prints either a list or a "no sessions" message
-    expect(output).toMatch(/session|No saved/);
+    expect(ctx.printed).toEqual(['No saved sessions. Use /session save [name] to save the current session.']);
     expect(output).not.toContain('Orchestration:');
   });
 

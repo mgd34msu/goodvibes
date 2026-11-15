@@ -30,8 +30,9 @@ export const permissionDeadlockPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Pending request count requires live PermissionManager context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Inspect PermissionManager.pendingRequests()' },
         })),
     },
@@ -42,8 +43,9 @@ export const permissionDeadlockPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Policy matching requires live policy engine context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Run PermissionPolicyEngine.evaluate(request) to test match' },
         })),
     },
@@ -54,8 +56,9 @@ export const permissionDeadlockPlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'UI responsiveness requires live render context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Check host render context for active PermissionPrompt component' },
         })),
     },
@@ -68,9 +71,8 @@ export const permissionDeadlockPlaybook: Playbook = {
         'Enumerate all requests currently in the AWAITING_PERMISSION state. ' +
         'Note the tool name, requested capability, and how long it has been pending.',
       kind: 'observe',
-      command: 'runtime.permissions.listPending()',
       expectedOutcome: 'List of pending requests with ages.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 2,
@@ -79,9 +81,8 @@ export const permissionDeadlockPlaybook: Playbook = {
         'Evaluate each pending request against the configured policy rules. ' +
         'Identify requests with no matching rule (falling through to manual approval).',
       kind: 'observe',
-      command: 'runtime.permissions.evaluatePolicy(requestId)',
       expectedOutcome: 'Each request either has a matching rule or is identified as uncovered.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 3,
@@ -90,7 +91,6 @@ export const permissionDeadlockPlaybook: Playbook = {
         'Add a scoped allow rule for the blocked capability to unblock forward progress. ' +
         'Log the rule addition for audit review.',
       kind: 'config',
-      command: 'runtime.permissions.addRule({ effect: "allow", tool: "<tool>", capability: "<cap>" })',
       expectedOutcome: 'Pending request auto-approved; tool execution resumes.',
       automatable: false,
     },
@@ -101,9 +101,8 @@ export const permissionDeadlockPlaybook: Playbook = {
         'If adding an allow rule is not appropriate, deny the pending request and ' +
         'allow the turn to continue without the blocked tool.',
       kind: 'command',
-      command: 'runtime.permissions.deny(requestId, { reason: "ops-override" })',
       expectedOutcome: 'Tool call skipped; turn resumes with remaining tools.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 5,

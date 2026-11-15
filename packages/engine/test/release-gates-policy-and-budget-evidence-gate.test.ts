@@ -16,6 +16,7 @@ async function emitTurn(
   payload: Record<string, unknown>,
   sessionId = 'sess-policy-budget-gate',
   traceId = 'trace-policy-budget-gate',
+  settled?: () => boolean,
 ): Promise<void> {
   bus.emit(
     'turn',
@@ -25,8 +26,14 @@ async function emitTurn(
       { sessionId, source: 'test', traceId },
     ),
   );
-  // The report is built after the failure and phase readings resolve.
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  // Listener dispatch and the failure/phase readings are microtask chains, which one
+  // setImmediate turn fully drains. Where the caller can name the observable outcome
+  // (the report existing), keep turning until it is there instead of guessing a count.
+  for (let i = 0; i < 1_000; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (settled === undefined || settled()) return;
+  }
+  throw new Error('The forensic report was not produced after the turn event');
 }
 
 function makeContext(
@@ -98,7 +105,8 @@ describe('policy and budget evidence gate', () => {
     }));
 
     expect(result.success).toBe(false);
-    await emitTurn(bus, { type: 'TURN_ERROR', turnId: 'turn-policy-budget-gate', error: result.error ?? 'permission denied' });
+    await emitTurn(bus, { type: 'TURN_ERROR', turnId: 'turn-policy-budget-gate', error: result.error ?? 'permission denied' },
+      undefined, undefined, () => registry.latest() !== null);
 
     const report = registry.latest()!;
     const bundle = registry.buildBundle(report.id)!;
@@ -136,7 +144,8 @@ describe('policy and budget evidence gate', () => {
     }));
 
     expect(result.success).toBe(false);
-    await emitTurn(bus, { type: 'TURN_ERROR', turnId: 'turn-policy-budget-gate', error: result.error ?? 'budget exceeded' });
+    await emitTurn(bus, { type: 'TURN_ERROR', turnId: 'turn-policy-budget-gate', error: result.error ?? 'budget exceeded' },
+      undefined, undefined, () => registry.latest() !== null);
 
     const report = registry.latest()!;
     const bundle = registry.buildBundle(report.id)!;

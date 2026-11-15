@@ -36,8 +36,15 @@ import type { GoogleFilePort } from './credential-adoption.js';
 
 /** What the repair found, and what it did about it. */
 export type GoogleConnectionRepairOutcome =
-  /** Both halves were already present. Nothing was written. */
+  /** The client id, its secret and a refresh token are all present. Nothing was written. */
   | 'already-connected'
+  /**
+   * A client id is configured but the secret or the refresh token is missing,
+   * and no consent can be completed from here: the owner has to connect again.
+   */
+  | 'incomplete'
+  /** The files hold a different refresh token than the stored one; replacing it needs the owner's yes. */
+  | 'needs-confirmation'
   /** No Google credential exists on this machine at all. Not this function's job. */
   | 'nothing-to-repair'
   /** A credential was present with no config half, and the config half was written. */
@@ -68,8 +75,19 @@ export async function repairHalfLandedGoogleConnection(deps: {
 
   // The config half, present: nothing is broken.
   const clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
-  if (clientId !== null && (state.hasRefreshToken || state.hasOAuthClientSecret)) {
-    return { outcome: 'already-connected', detail: 'The Google connection is complete; nothing was changed.' };
+  if (clientId !== null) {
+    if (state.hasRefreshToken && state.hasOAuthClientSecret) {
+      return { outcome: 'already-connected', detail: 'The Google connection is complete; nothing was changed.' };
+    }
+    const missing = !state.hasRefreshToken && !state.hasOAuthClientSecret
+      ? 'the client secret and the refresh token'
+      : state.hasRefreshToken ? 'the client secret' : 'the refresh token';
+    return {
+      outcome: 'incomplete',
+      detail:
+        `A Google client id is configured but ${missing} ${missing.includes(' and ') ? 'are' : 'is'} not stored, so no Google account can be used yet. `
+        + 'Connect Google again to finish it.',
+    };
   }
 
   // No credential in the store: nobody has run a setup here, and starting one
@@ -88,6 +106,14 @@ export async function repairHalfLandedGoogleConnection(deps: {
     homeDirectory: deps.homeDirectory,
   });
 
+  if (!outcome.adopted && outcome.needsConfirmation === true) {
+    return {
+      outcome: 'needs-confirmation',
+      detail:
+        'A Google credential is stored without its client id, and the files on this machine hold a different refresh token. '
+        + 'Nothing was replaced; adopt the Google credentials and confirm the replacement to finish the connection.',
+    };
+  }
   if (!outcome.adopted) {
     return {
       outcome: 'source-gone',

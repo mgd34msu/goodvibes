@@ -6,6 +6,7 @@ import { captureCurrentAutonomousSourceFrame } from '../../permissions/autonomou
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import { extractHostname } from '../../tools/fetch/trust-tiers.js';
 import { admitExternalRequest } from '../../permissions/external-request.js';
+import { logAdmissionFailure } from './admission-failure.js';
 import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 import type { LocalhostFetchApprovalInput, LocalhostFetchExecutionContext, LocalhostFetchPermit } from './localhost-fetch-approval.js';
 
@@ -62,6 +63,6 @@ export async function admitLocalhostFetch(host: AutonomousToolPromptHost, input:
     });
     transferred = true;
     return permit;
-  } catch { return false; }
+  } catch (error) { logAdmissionFailure('localhost fetch', error); return false; }
   finally { if (!transferred) { admission?.close(); unsubscribe(); } }
 }

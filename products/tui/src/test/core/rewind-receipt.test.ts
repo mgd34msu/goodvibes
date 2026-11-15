@@ -32,4 +32,17 @@ describe('buildRewindReceiptBlock', () => {
     expect(block).toContain('the most recent checkpoint');
     expect(block).toContain('note: files rewind: no workspace checkpoint');
   });
+
+  test('a partly applied file restore is not reported as unmatched', () => {
+    const block = buildRewindReceiptBlock({
+      scope: 'files',
+      turnId: 't1',
+      files: { restored: false, checkpointId: 'wcp_1', restoredFileCount: 4, removedFileCount: 2, safetyCheckpointId: 'wcp_safe' },
+      conversation: null,
+      undoAvailable: true,
+      warnings: ['files rewind was only partly applied: 1 path(s) could not be restored (a.txt: busy).'],
+    });
+    expect(block).toContain('Files: partly restored (4 files restored, 2 files removed)');
+    expect(block).not.toContain('no workspace checkpoint matched');
+  });
 });

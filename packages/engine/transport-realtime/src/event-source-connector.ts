@@ -50,7 +50,8 @@ import type {
   RuntimeEventTurnScope,
 } from './connector-options.js';
 
-function buildGate(scope: RuntimeEventTurnScope | undefined): TurnLifecycleGate | null {
+/** The turn gate a connector applies to its frames; shared by the SSE and WebSocket connectors. */
+export function buildGate(scope: RuntimeEventTurnScope | undefined): TurnLifecycleGate | null {
   if (scope === 'off') return null;
   if (typeof scope === 'object' && scope !== null) return createTurnLifecycleGate({ turnId: scope.turnId });
   return createTurnLifecycleGate();
@@ -81,7 +82,27 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
   // on separate streams and must be judged against the same binding.
   const gate = buildGate(options.turnScope);
 
-  return async (domain, onEnvelope) => {
+  /**
+   * The gateway's `ready` frame states what became of a presented
+   * `Last-Event-ID`. An `unresolved` position replays nothing, so the frames
+   * between it and now are lost to this connection: say so, forget the
+   * position (the next connect starts from the catch-up window) and unbind the
+   * gate, whose binding may name a turn this connection never saw start.
+   */
+  const handleResume = (url: string, ready: unknown, report: (error: Error) => void): void => {
+    const resume = (ready as { resume?: { resume?: unknown } } | null)?.resume?.resume;
+    if (resume !== 'unresolved') return;
+    resumePositions.delete(url);
+    gate?.reset();
+    report(new GoodVibesError('The gateway could not resume the event stream from its last position, so events since then were not replayed.', {
+      category: 'protocol',
+      source: 'transport',
+      recoverable: true,
+      hint: 'The daemon restarted or the position aged out of its recent-event window. Re-read current state instead of waiting for events that may already have happened.',
+    }));
+  };
+
+  return async (domain, onEnvelope, onEnded) => {
     const url = buildEventSourceUrl(baseUrl, domain);
     const getAuthToken = normalizeAuthToken(token ?? undefined);
     // Inject W3C traceparent if OTel is active (async probe for SSE cold-start).
@@ -90,9 +111,26 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
     // Notify observer of outbound SSE connection attempt.
     invokeTransportObserver(() => observer?.onTransportActivity?.({ direction: 'send', url, kind: 'sse' }), observer?.onObserverError);
     try {
+      const reportStreamFailure = (streamError: Error): void => {
+        invokeTransportObserver(() => observer?.onError?.(streamError), observer?.onObserverError);
+        handleError?.(streamError);
+      };
       return await openServerSentEventStream(fetchImpl, url, {
         onEventId: (id) => { resumePositions.set(url, id); },
+        onReady: (ready) => handleResume(url, ready, reportStreamFailure),
         onEvent: (eventName, payload) => {
+          if (eventName === 'relay-overflow') {
+            // The relay's daemon dropped event chunks for a slow consumer. They
+            // are gone from the stream, so the stored position would resume past
+            // them without ever replaying them: forget it.
+            resumePositions.delete(url);
+            const dropped = (payload as { dropped?: unknown } | null)?.dropped;
+            reportStreamFailure(new GoodVibesError(
+              `The relay dropped ${typeof dropped === 'number' ? dropped : 'some'} event chunk(s) because this client was too slow; events, possibly including a turn's end, were lost.`,
+              { category: 'protocol', source: 'transport', recoverable: true, hint: 'Re-read current state instead of waiting for events that may already have happened.' },
+            ));
+            return;
+          }
           if (eventName !== domain) return;
           if (!payload || typeof payload !== 'object') return;
           // Validate the inbound envelope STRUCTURE at the transport boundary, mirroring
@@ -124,16 +162,20 @@ export function createEventSourceConnector<TEvent extends RuntimeEventRecord = R
           // Notify observer of inbound event.
           invokeTransportObserver(() => {
             observer?.onTransportActivity?.({ direction: 'recv', url, kind: 'sse' });
-            if (envelope.payload) {
-              (observer as { onEvent?: (e: unknown) => void } | undefined)?.onEvent?.(envelope.payload);
-            }
           }, observer?.onObserverError);
+          if (envelope.payload) {
+            invokeTransportObserver(() => {
+              (observer as { onEvent?: (e: unknown) => void } | undefined)?.onEvent?.(envelope.payload);
+            }, observer?.onObserverError);
+          }
         },
         onError: (err) => {
-          const streamError = transportErrorFromUnknown(err, 'SSE runtime event stream error');
-          invokeTransportObserver(() => observer?.onError?.(streamError), observer?.onObserverError);
-          handleError?.(streamError);
+          reportStreamFailure(transportErrorFromUnknown(err, 'SSE runtime event stream error'));
         },
+        // The stream ended and is not coming back (closed with reconnect off,
+        // or the reconnect budget spent). Tell the feed so a later on() reopens.
+        onClose: () => onEnded?.(),
+        onTerminate: () => onEnded?.(),
       }, {
         reconnect: options.reconnect,
         getAuthToken,

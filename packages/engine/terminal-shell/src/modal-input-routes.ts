@@ -1,9 +1,13 @@
 /** Shared keyboard mechanics over host-owned picker/control ports. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SelectionResult, SelectionAction } from './selection-modal.js';
 import { isTextBackspace } from './delete-key-policy.js';
+import { modalClosed } from './modal-stack.js';
 import { resolveAndValidatePath, logger } from '@goodvibes-jev/engine/platform/platform/utils';
+/** Largest image either attach path (the file picker or /image) will read into memory. */
+export const MAX_IMAGE_ATTACH_BYTES = 20 * 1024 * 1024;
+class ImageTooLargeError extends Error {}
 interface PickerCommandContext {
     readonly jumpToBookmark?: ((key: string) => void) | undefined;
     readonly workspace: {
@@ -254,6 +258,8 @@ type FilePickerRouteState = {
     };
     prompt: string;
     cursorPos: number;
+    /** When given, a self-close (pick, Space, Backspace past the query) leaves no stale stack entry. */
+    modalStack?: string[] | undefined;
     commandContext?: PickerCommandContext | undefined;
     imageRegistry: Map<string, {
         data: string;
@@ -303,6 +309,9 @@ export function handleFilePickerToken(state: FilePickerRouteState, token: InputT
                             throw new Error('working directory is unavailable');
                         }
                         const resolvedPath = resolveAndValidatePath(selected, projectRoot);
+                        if (statSync(resolvedPath).size > MAX_IMAGE_ATTACH_BYTES) {
+                            throw new ImageTooLargeError(`image is larger than ${MAX_IMAGE_ATTACH_BYTES} bytes`);
+                        }
                         const data = readFileSync(resolvedPath);
                         const base64 = data.toString('base64');
                         const mediaType = state.mediaTypeFromExt(ext);
@@ -315,8 +324,10 @@ export function handleFilePickerToken(state: FilePickerRouteState, token: InputT
                     }
                     catch (err) {
                         logger.debug('file-picker: could not read image file', { err });
-                        state.prompt = state.prompt.slice(0, atPos) + '@' + selected + ' ' + state.prompt.slice(atPos + queryLen);
-                        state.cursorPos = atPos + selected.length + 2;
+                        // An oversize image is inserted as plain text: an @ reference would be read in full by the prompt expander.
+                        const prefix = err instanceof ImageTooLargeError ? '' : '@';
+                        state.prompt = state.prompt.slice(0, atPos) + prefix + selected + ' ' + state.prompt.slice(atPos + queryLen);
+                        state.cursorPos = atPos + prefix.length + selected.length + 1;
                     }
                 }
                 else if (injectMode) {
@@ -352,6 +363,8 @@ export function handleFilePickerToken(state: FilePickerRouteState, token: InputT
             }
         }
     }
+    if (!state.filePicker.active && state.modalStack)
+        modalClosed({ modalStack: state.modalStack }, 'filePicker');
     state.requestRender();
     return true;
 }
@@ -369,6 +382,8 @@ type BlockActionsRouteState<Action extends string> = {
         } | null;
     };
     executeBlockAction: (id: Action) => void;
+    /** When given, closing on an action key leaves no stale stack entry. */
+    modalStack?: string[] | undefined;
     requestRender: () => void;
     handleEscape: () => void;
 };
@@ -403,6 +418,8 @@ export function handleBlockActionsToken<Action extends string>(state: BlockActio
         if (action)
             state.executeBlockAction(action.id);
     }
+    if (!state.blockActionsMenu.active && state.modalStack)
+        modalClosed({ modalStack: state.modalStack }, 'blockActions');
     state.requestRender();
     return true;
 }

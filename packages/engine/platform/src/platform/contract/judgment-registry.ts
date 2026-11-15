@@ -19,6 +19,7 @@ import { UNIT_JUDGES } from './batteries/unit-judge.js';
 import { unitQuality } from './batteries/unit-quality.js';
 import { sourceCitationPurpose } from './batteries/source-citation-purpose.js';
 import { unmetSeverity } from './batteries/unmet-severity.js';
+import { unmetGap } from './batteries/unmet-gap.js';
 import { nativeIntakeCoverage } from '../workflow/work-ledger/native-intake-decisions.js';
 import { publicationOwner } from './batteries/publication-owner.js';
 
@@ -44,6 +45,7 @@ registry.register(UNIT_JUDGES.critical);
 registry.register(unitQuality);
 registry.register(sourceCitationPurpose);
 registry.register(unmetSeverity);
+registry.register(unmetGap);
 
 // Correction and finishing (sections 5 and 6).
 registry.register(stallRoute);

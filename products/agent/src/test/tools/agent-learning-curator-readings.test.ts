@@ -147,7 +147,8 @@ describe('native protected learning curator readings', () => {
       throw new Error(`Unexpected selection before clique proof: ${name}`);
     });
     installJudgmentPort(readings.port);
-    await expect(consolidationCandidatesForDomain('memory', [record('a', 'A'), record('b', 'B'), record('c', 'C')], options())).rejects.toBeInstanceOf(ToolInputProjectionError);
+    // The group is not proposed, and the rest of the curator still reads.
+    expect(await consolidationCandidatesForDomain('memory', [record('a', 'A'), record('b', 'B'), record('c', 'C')], options())).toEqual([]);
     expect(readings.requests).toHaveLength(3);
   });
 
@@ -270,7 +271,7 @@ describe('native protected learning curator readings', () => {
     } finally { Object.defineProperty(definition, key, descriptor); readings.release(); await pending.catch(() => {}); }
   });
 
-  test.each(['memory', 'skill', 'routine', 'persona'])('reviewed note payload retains complete body for $s', async target => {
+  test.each(['memory', 'skill', 'routine', 'persona'])('reviewed note payload retains complete body for %s', async target => {
     const readings = port({ target }); installJudgmentPort(readings.port);
     const root = makeProjectTempDir('learning-note-payload');
     const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
@@ -291,7 +292,7 @@ describe('native protected learning curator readings', () => {
     collection.assertCurrent();
   });
 
-  test.each(['method', 'accessor'])('pending canonical registry $s replacement is never invoked', async replacement => {
+  test.each(['method', 'accessor'])('pending canonical registry %s replacement is never invoked', async replacement => {
     const readings = suspendedPort(); installJudgmentPort(readings.port);
     const owner = Object.hasOwn(gateJudgmentRegistry, 'get') ? gateJudgmentRegistry : Object.getPrototypeOf(gateJudgmentRegistry) as object;
     const descriptor = Object.getOwnPropertyDescriptor(owner, 'get');
@@ -494,7 +495,7 @@ describe('native learning capture clock representation', () => {
     collection.assertCurrent();
   });
 
-  test.each(['number', 'string'] as const)('an unknown borrowed capture-clock $s still refuses before a reading', async shape => {
+  test.each(['number', 'string'] as const)('an unknown borrowed capture-clock %s still refuses before a reading', async shape => {
     const readings = port(); installJudgmentPort(readings.port);
     const original = { ...nativeMemory('opaque-clock', 'Unknown captured clock'), opaque: { capturedAt: shape === 'number' ? epoch : String(epoch) } };
     const pending = (() => {
@@ -563,6 +564,20 @@ describe('native learning capture clock representation', () => {
     const latest = acquireLearningCuratorSource({ session: { sessionManager: manager } }, options());
     session.timestamp++;
     expect(latest.assertCurrent).toThrow();
+  });
+
+  test('an unchanged session fingerprint spares re-reading every session, and a changed one reads them again', () => {
+    const session = { name: 'native-session', title: 'Saved lesson', model: 'synthetic', provider: 'synthetic', timestamp: epoch, messageCount: 1, filePath: '/synthetic/session.json' };
+    const loaded = { meta: { title: session.title, model: session.model, provider: session.provider, timestamp: epoch }, messages: [{ role: 'assistant', content: 'A bounded authored lesson.' }], agentRecords: [], contracts: [] };
+    let reads = 0, fingerprint = 'one';
+    const manager = { list: () => { reads++; return [session]; }, load: () => loaded, fingerprint: () => fingerprint };
+    const source = acquireLearningCuratorSource({ session: { sessionManager: manager } }, options());
+    const afterAcquire = reads;
+    source.assertCurrent(); source.assertCurrent();
+    expect(reads).toBe(afterAcquire);
+    loaded.meta.title = 'Edited lesson'; fingerprint = 'two';
+    expect(source.assertCurrent).toThrow();
+    expect(reads).toBeGreaterThan(afterAcquire);
   });
 
   test('saved-session projection retains hidden collection and nested metadata privacy boundaries', async () => {

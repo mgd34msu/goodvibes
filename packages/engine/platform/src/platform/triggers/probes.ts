@@ -13,7 +13,7 @@
  */
 
 import { statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import type { TriggerProbe, TriggerValue } from './types.js';
 
 export interface ProbeCommandResult {
@@ -32,6 +32,8 @@ export interface ProbeIo {
     readonly status: number;
     readonly ok: boolean;
     readonly text: () => Promise<string>;
+    /** Releases the connection when the body will not be read. */
+    readonly close?: () => void;
   }>;
   readonly readFile: (path: string, maxBytes: number) => Promise<string>;
   readonly statFile: (path: string) => { readonly size: number; readonly mtimeMs: number } | null;
@@ -60,16 +62,37 @@ export function createDefaultProbeIo(): ProbeIo {
     fetch: async (url, init, timeoutMs) => {
       const controller = new AbortController();
       const timer = setTimeout(() => { controller.abort(); }, timeoutMs);
+      timer.unref?.();
+      // The budget covers the whole exchange: a server that sends headers and then
+      // stalls must not hang the body read, so the timer outlives this call.
+      const timedOut = (error: unknown): unknown => {
+        clearTimeout(timer);
+        return controller.signal.aborted ? new ProbeTimeoutError('http', timeoutMs) : error;
+      };
       try {
         const response = await fetch(url, { ...init, signal: controller.signal });
-        return { status: response.status, ok: response.ok, text: () => response.text() };
-      } finally {
-        clearTimeout(timer);
+        return {
+          status: response.status,
+          ok: response.ok,
+          text: async () => {
+            try { return await response.text(); } catch (error) { throw timedOut(error); } finally { clearTimeout(timer); }
+          },
+          close: () => { clearTimeout(timer); controller.abort(); },
+        };
+      } catch (error) {
+        throw timedOut(error);
       }
     },
     readFile: async (path, maxBytes) => {
-      const content = await readFile(path, 'utf-8');
-      return content.length > maxBytes ? content.slice(0, maxBytes) : content;
+      // Read at most maxBytes from the start; a large file is never loaded whole.
+      const handle = await open(path, 'r');
+      try {
+        const buffer = Buffer.alloc(maxBytes);
+        const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+        return buffer.subarray(0, bytesRead).toString('utf-8');
+      } finally {
+        await handle.close();
+      }
     },
     statFile: (path) => {
       try {
@@ -86,7 +109,9 @@ export function createDefaultProbeIo(): ProbeIo {
         stdout: 'pipe',
         stderr: 'pipe',
       } as Parameters<typeof Bun.spawn>[1]);
+      let timedOut = false;
       const timer = setTimeout(() => {
+        timedOut = true;
         try { proc.kill('SIGKILL'); } catch { /* already gone */ }
       }, options.timeoutMs);
       timer.unref?.();
@@ -96,6 +121,8 @@ export function createDefaultProbeIo(): ProbeIo {
           new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
           proc.exited,
         ]);
+        // Output cut off by the kill is not an observation: a `change` rule would fire on it.
+        if (timedOut) throw new ProbeTimeoutError('command', options.timeoutMs);
         return { exitCode, stdout, stderr };
       } finally {
         clearTimeout(timer);
@@ -106,6 +133,18 @@ export function createDefaultProbeIo(): ProbeIo {
 }
 
 const DEFAULT_PROBE_TIMEOUT_MS = 15_000;
+
+function isAbsentFile(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/** Rejects with ProbeTimeoutError when the work outlives its budget. */
+async function withinBudget<T>(kind: string, timeoutMs: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => { reject(new ProbeTimeoutError(kind, timeoutMs)); }, timeoutMs); timer.unref?.(); });
+  try { return await Promise.race([work, expired]); } finally { clearTimeout(timer); }
+}
 const DEFAULT_FILE_MAX_BYTES = 1_048_576;
 
 /** Runs one probe and returns its raw result for the extractor to narrow. */
@@ -126,8 +165,9 @@ export async function runProbe(
         ...(probe.body !== undefined ? { body: probe.body } : {}),
       };
       const response = await io.fetch(probe.url, init, budget);
-      if (probe.capture === 'status') return response.status;
-      const text = await response.text().catch(() => '');
+      if (probe.capture === 'status') { response.close?.(); return response.status; }
+      // A body that cannot be read in full is a failed check, never an empty observation.
+      const text = await response.text();
       if (probe.capture === 'envelope') {
         return { status: response.status, ok: response.ok, body: text };
       }
@@ -140,11 +180,13 @@ export async function runProbe(
         return stat ? { exists: true, size: stat.size, mtimeMs: Math.floor(stat.mtimeMs) } : { exists: false };
       }
       try {
-        return await io.readFile(probe.path, probe.maxBytes ?? DEFAULT_FILE_MAX_BYTES);
-      } catch {
+        return await withinBudget('file', budget, io.readFile(probe.path, probe.maxBytes ?? DEFAULT_FILE_MAX_BYTES));
+      } catch (error) {
         // A missing file is an observation, not a probe failure: a `change`
         // rule watching for a file to appear needs to see the absent state.
-        return null;
+        // Any other failure (permissions, a directory, I/O) is not "absent".
+        if (isAbsentFile(error)) return null;
+        throw error;
       }
     }
 

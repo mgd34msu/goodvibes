@@ -211,8 +211,9 @@ describe('native publication guards before and after deferred capability reads',
         else if (change === 'manager-replaced') workspace.processManager = replacement;
         pending.released.resolve();
         const result = await outcome;
-        if (change === 'live') {
+        if (change !== 'manager-replaced') {
           if (result.kind !== 'returned') throw result.error;
+          // A process finishing mid-read changes the answer, not the source's identity: the selected row is published as read.
           expect(result.value.processes).toMatchObject([{ processId: 'native-process', pid: 301, status: 'running', done: false }]);
         } else {
           if (result.kind !== 'rejected') throw new Error('Changed process source published its earlier DTO');

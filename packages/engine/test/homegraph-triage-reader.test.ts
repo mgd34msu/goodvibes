@@ -15,6 +15,11 @@ const good = (action = 'reject', probability = 0.97, fact = 0.99) => {
   const fake = fakePort((name, question) => name === 'action' ? choiceAnswer(question, action, probability) : noulAnswer(fact));
   installJudgmentPort(fake.port); return fake;
 };
+/** A single unsettled issue is held for a person; the pass still returns a plan for it. */
+async function heldIssue(work: Promise<readonly { readonly action: string; readonly heldReason?: string | undefined; readonly facts: object }[]>, reason: string, index = 0) {
+  const plan = (await work)[index]!;
+  expect(plan.action).toBe('review'); expect(plan.heldReason).toBe(reason); expect(plan.facts).toEqual({});
+}
 async function held(work: Promise<unknown>, reason: TriageHoldReason) {
   let caught: unknown; try { await work; } catch (error) { caught = error; }
   expect(caught).toBeInstanceOf(HomeGraphTriageHeldError); expect((caught as HomeGraphTriageHeldError).reason).toBe(reason);
@@ -41,15 +46,34 @@ describe('registered Home Graph triage readings', () => {
     const review = good('review'); expect((await prepareHomeGraphTriageReadings([input()]))[0]!.facts).toEqual({}); expect(review.requests).toHaveLength(1);
   });
   test('probability boundaries and stricter owner floors never normalize guessed 0–100 readings', async () => {
-    for (const probability of [0.5, 0.8, 0.84999]) { good('reject', probability); await held(prepareHomeGraphTriageReadings([input()], { minConfidence: 0 }), 'unsettled'); }
+    for (const probability of [0.5, 0.8, 0.84999]) { good('reject', probability); await heldIssue(prepareHomeGraphTriageReadings([input()], { minConfidence: 0 }), 'unsettled'); }
     good('reject', 0.85); expect((await prepareHomeGraphTriageReadings([input()], { minConfidence: 1 }))[0]!.probability).toBe(0.85);
-    good('reject', 0.89999); await held(prepareHomeGraphTriageReadings([input()], { minConfidence: 90 }), 'owner-threshold');
+    good('reject', 0.89999); await heldIssue(prepareHomeGraphTriageReadings([input()], { minConfidence: 90 }), 'owner-threshold');
     good('reject', 95); await held(prepareHomeGraphTriageReadings([input()]), 'malformed');
   });
-  test('unsupported or uncertain battery/manual fact holds the entire selected pass', async () => {
+  test('an unsupported or uncertain battery/manual fact holds only that issue and never writes a fact', async () => {
     for (const fact of [0.01, 0.5, 0.8]) {
-      good('reject', 0.99, fact); await held(prepareHomeGraphTriageReadings([input(), { ...input('homegraph.device.missing_manual'), reference: 'issue-2' }]), fact === 0.01 ? 'unsupported-fact' : 'unsettled');
+      good('reject', 0.99, fact);
+      const plans = prepareHomeGraphTriageReadings([input(), { ...input('homegraph.device.missing_manual'), reference: 'issue-2' }]);
+      const reason = fact === 0.01 ? 'unsupported-fact' : 'unsettled';
+      await heldIssue(plans, reason, 0); await heldIssue(plans, reason, 1);
     }
+  });
+  test('one held issue does not stop a confident sibling from settling', async () => {
+    const fake = fakePort((name, question, state) => {
+      const title = (state as { subject?: { title?: string } }).subject?.title;
+      if (name === 'action') return choiceAnswer(question, 'reject', title === 'Ambiguous plug' ? 0.5 : 0.97);
+      return noulAnswer(0.99);
+    });
+    installJudgmentPort(fake.port);
+    const plans = await prepareHomeGraphTriageReadings([
+      { ...input(), reference: 'issue-1', subject: { kind: 'ha_device', title: 'Ambiguous plug' } },
+      { ...input(), reference: 'issue-2', subject: { kind: 'ha_device', title: 'Software-only schedule' } },
+    ]);
+    expect(plans[0]!.heldReason).toBe('unsettled');
+    expect(plans[1]!.heldReason).toBeUndefined();
+    expect(plans[1]!.action).toBe('reject');
+    expect(plans[1]!.facts).toEqual({ batteryPowered: false, batteryType: 'none' });
   });
   test('protected late input and getters are held before any port request; nothing is clipped', async () => {
     const fake = good();

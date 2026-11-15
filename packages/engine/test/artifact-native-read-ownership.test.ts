@@ -1,4 +1,4 @@
-/** Source regressions, deliberately unrun until the coding phase is complete. */
+/** Native read ownership regressions. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

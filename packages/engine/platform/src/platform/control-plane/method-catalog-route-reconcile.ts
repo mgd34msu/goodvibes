@@ -3,6 +3,13 @@ import { GATEWAY_REST_ROUTES } from '@goodvibes-jev/engine/daemon-api';
 import type { DaemonApiRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
+import { MCP_ROUTES } from '../daemon/http/mcp-routes.js';
+import { BATCH_ROUTES } from '../daemon/http/batch-routes.js';
+import { CLOUDFLARE_ROUTES } from '../daemon/http/cloudflare-routes.js';
+import { HOME_ASSISTANT_CONVERSATION_ROUTES } from '../daemon/http/homeassistant-routes.js';
+import { HOME_GRAPH_ROUTES } from '../daemon/http/home-graph-routes.js';
+import { PROJECT_PLANNING_ROUTES } from '../daemon/http/project-planning-routes.js';
+import { COMPANION_CHAT_ROUTES } from '../companion/companion-chat-routes.js';
 
 /**
  * method-catalog-route-reconcile.ts
@@ -24,24 +31,21 @@ import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
  * `dispatchDaemonApiRoutes` from @goodvibes-jev/engine/daemon-api, the function
  * DaemonHttpRouter.dispatchApiRoutes (packages/platform/src/platform/daemon/http/
  * router.ts, read as this reconcile's route authority, never edited by it)
- * ultimately delegates to for every method-catalog family except a short
- * list of specialized sub-routers wired directly in router.ts ahead of that
- * delegation (see SPECIALIZED_SUB_ROUTER_PREFIXES). The probe dispatches a
- * synthetic Request against handler stubs that only ever return a fixed
- * marker Response, no real service, manager, or handler body ever runs, so
+ * ultimately delegates to for every method-catalog family except the
+ * sub-routers wired directly in router.ts ahead of that delegation, which
+ * publish their own path tables (see DECLARED_SUB_ROUTER_ROUTES). The probe
+ * dispatches a synthetic Request against handler stubs that only ever return a
+ * fixed marker Response, no real service, manager, or handler body ever runs, so
  * probing stays side-effect free even for `dangerous: true` write methods
  * (email.send, automation job mutation, etc.).
  *
  * Scope note (read before extending): dispatchDaemonApiRoutes covers the
- * operator / automation / remote / session / task route families, which is
- * most of the catalog (control-core, media, channels, remote, runtime,
- * knowledge). A handful of catalogs point at specialized sub-routers that
- * router.ts special-cases before it ever reaches dispatchDaemonApiRoutes
- * (MCP config, batch, Cloudflare, Home Assistant, model routes, companion
- * chat, project planning). This module has no evidence either way for
- * those paths, so it marks them 'unchecked' rather than guessing, a false
- * "unavailable" verdict would just be a different flavor of the same
- * dishonesty this module exists to catch.
+ * operator / automation / remote / session / task route families. Every
+ * sub-router router.ts special-cases before it (MCP config, batch, Cloudflare,
+ * Home Assistant, home graph, model routes, companion chat, project planning)
+ * exports its path table, so a descriptor pointing at a path none of them serves
+ * is reported 'unavailable' like any other. A new sub-router must export its
+ * table and be listed in DECLARED_SUB_ROUTER_ROUTES, or its descriptors redden.
  */
 
 export type RouteReconcileStatus = 'live' | 'unavailable' | 'unhandled' | 'unchecked';
@@ -72,35 +76,35 @@ export type RouteProbe = (method: string, path: string) => boolean | Promise<boo
 export type HandlerProbe = (methodId: string) => boolean;
 
 /**
- * Path prefixes served by a specialized sub-router that router.ts dispatches
- * to BEFORE falling through to dispatchDaemonApiRoutes. Kept as an explicit,
- * short allowlist (not inferred) so growth here is a deliberate, reviewed
- * decision rather than silent scope creep.
- */
-export const SPECIALIZED_SUB_ROUTER_PREFIXES: readonly string[] = [
-  '/api/mcp',
-  '/api/batch',
-  '/api/cloudflare',
-  '/api/homeassistant',
-  '/api/companion/chat',
-  '/api/projects/planning',
-];
-
-/**
  * Sub-routers that publish their own path table, so the probe can check them
  * for real instead of skipping them by prefix.
  *
- * `/api/models` used to be on the list above, and that is how `models.list`,
+ * `/api/models` was once skipped by prefix, and that is how `models.list`,
  * `models.current.get` and `models.current.set` stayed outside the method
  * catalog while every consumer called them: the reconcile's only question is
  * "does this descriptor's advertised path resolve", and a prefix it never looks
  * at cannot answer it either way. A sub-router that exports what it serves is
- * checkable, and a descriptor pointing at a path it does not serve now reddens
+ * checkable, and a descriptor pointing at a path it does not serve reddens
  * exactly as it does for every route in the shared table.
  */
 const DECLARED_SUB_ROUTER_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
-  ...MODEL_ROUTES.map((entry) => ({ method: entry.method, path: entry.path })),
+  ...MODEL_ROUTES,
+  ...MCP_ROUTES,
+  ...BATCH_ROUTES,
+  ...CLOUDFLARE_ROUTES,
+  ...HOME_ASSISTANT_CONVERSATION_ROUTES,
+  ...HOME_GRAPH_ROUTES,
+  ...PROJECT_PLANNING_ROUTES,
+  ...COMPANION_CHAT_ROUTES,
 ];
+
+/** Whether a declared path (`{param}` is one segment) serves this probe path. */
+function declaredPathMatches(declared: string, path: string): boolean {
+  const want = declared.split('/');
+  const have = path.split('/');
+  return want.length === have.length
+    && want.every((segment, index) => (segment.startsWith('{') && segment.endsWith('}') ? have[index] !== '' : segment === have[index]));
+}
 
 /**
  * The method ids whose advertised path is served by the gateway REST table.
@@ -118,10 +122,6 @@ function gatewayRestMethodIds(): ReadonlySet<string> {
 }
 
 const RECONCILE_PROBE_MARKER = { reconcileProbeMarker: true };
-
-function isSpecializedSubRouterPath(path: string): boolean {
-  return SPECIALIZED_SUB_ROUTER_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-}
 
 /**
  * Replaces every `{param}` template segment with an opaque single-segment
@@ -149,7 +149,7 @@ export function createDaemonApiRouteProbe(): RouteProbe {
   ) as unknown as DaemonApiRouteHandlers;
 
   return async (method, path) => {
-    if (DECLARED_SUB_ROUTER_ROUTES.some((entry) => entry.method === method && entry.path === path)) return true;
+    if (DECLARED_SUB_ROUTER_ROUTES.some((entry) => entry.method === method && declaredPathMatches(entry.path, path))) return true;
     const request = new Request(`http://reconcile-probe.invalid${path}`, { method });
     const response = await dispatchDaemonApiRoutes(request, inertHandlers);
     return response !== null;
@@ -166,14 +166,6 @@ export async function reconcileHttpDescriptor(
     return { methodId: descriptor.id, status: 'unchecked', http: null, reason: 'no http binding to reconcile' };
   }
   const http = { method: descriptor.http.method, path: descriptor.http.path };
-  if (isSpecializedSubRouterPath(descriptor.http.path)) {
-    return {
-      methodId: descriptor.id,
-      status: 'unchecked',
-      http,
-      reason: `path is served by a specialized sub-router outside this reconcile's checked scope: ${descriptor.http.path}`,
-    };
-  }
   const probePath = resolveTemplatePath(descriptor.http.path);
   const resolved = await probe(descriptor.http.method, probePath);
   if (!resolved) {

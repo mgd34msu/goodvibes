@@ -27,29 +27,38 @@ test('fixed burst keys have bounded identity retention and only evicted groups l
   for (let i = 0; i < 200100; i++) append(feed, i);
   expect(feed.list()).toHaveLength(2000);
   expect(total(feed)).toBe(200000);
-  // Inspect the storage bound as well as visible rows: a row cap alone did not bound identity memory.
-  const index = (feed as unknown as { eventEntries: ReadonlyMap<string, string> }).eventEntries;
-  expect(index.size).toBe(200000);
+  // Replay identity is observable: a retained occurrence is not counted twice.
   append(feed, 100);
   append(feed, 200099);
   expect(total(feed)).toBe(200000);
   append(feed, 0); // The first group left the retained history; this is outside its replay horizon.
   expect(total(feed)).toBe(199901);
-  expect(index.size).toBe(199901);
+  // That arrival rotated the next-oldest group out, and its identities went with it: a row cap alone
+  // would have left them behind, so replaying one of them now counts as a new occurrence.
+  append(feed, 150);
+  expect(total(feed)).toBe(199902);
   expect(feed.list()).toHaveLength(2000);
 });
 
-test('active group index is cleaned on eviction, dismissal and clear', () => {
+test('a batch whose row was evicted, dismissed or cleared starts a fresh row instead of joining a stale one', () => {
   const feed = new NotificationFeed();
   for (let i = 0; i < 2100; i++) append(feed, i, `batch-${i}`);
-  const active = (feed as unknown as { activeGroups: ReadonlyMap<string, string> }).activeGroups;
-  expect(active.size).toBe(2000);
-  expect(feed.dismiss(feed.list()[0]!.key)).toBe(true);
-  expect(active.size).toBe(1999);
-  feed.clear();
-  expect(active.size).toBe(0);
-  append(feed, 2100);
-  expect(feed.list()).toHaveLength(1);
+  expect(feed.list()).toHaveLength(2000);
+  // batch-0 was evicted: new arrivals for it make a row of their own.
+  append(feed, 5000, 'batch-0');
+  expect(feed.list()).toHaveLength(2000);
+  expect(feed.list().every((entry) => entry.collapsedCount === 1)).toBe(true);
+
+  const small = new NotificationFeed();
+  append(small, 1, 'a');
+  expect(small.dismiss(small.list()[0]!.key)).toBe(true);
+  append(small, 2, 'a');
+  expect(small.list()).toHaveLength(1);
+  expect(small.list()[0]?.collapsedCount).toBe(1);
+  small.clear();
+  append(small, 3, 'a');
+  expect(small.list()).toHaveLength(1);
+  expect(small.list()[0]?.collapsedCount).toBe(1);
 });
 
 test('distinct occurrence identities cannot overwrite each other through a reused delivery id', () => {
@@ -106,19 +115,19 @@ test('a shorter notice replay cannot erase previously enriched diagnostic text',
 
 test('dismissal and clear retire occurrence diagnostics with their history row', () => {
   const feed = new NotificationFeed();
+  const diagnostic = (eventKey: string, body: string) => feed.recordNotice({ domain: 'agents', level: 'warning', title: 'Agent failed', body, timestamp: 1000, eventKey });
   append(feed, 1);
-  feed.recordNotice({ domain: 'agents', level: 'warning', title: 'Agent failed', body: 'Private local diagnostic', timestamp: 1000, eventKey: 'occurrence-1' });
-  const details = feed as unknown as { noticeDetails: ReadonlyMap<string, string>; groupDetails: ReadonlyMap<string, ReadonlyMap<string, string>> };
-  expect(details.noticeDetails.size).toBe(1);
-  expect(details.groupDetails.size).toBe(1);
+  diagnostic('occurrence-1', 'Private local diagnostic');
+  expect(feed.list()[0]?.body).toContain('Private local diagnostic');
   feed.dismiss(feed.list()[0]!.key);
-  expect(details.noticeDetails.size).toBe(0);
-  expect(details.groupDetails.size).toBe(0);
-  append(feed, 2);
-  feed.recordNotice({ domain: 'agents', level: 'warning', title: 'Agent failed', body: 'Other local diagnostic', timestamp: 1000, eventKey: 'occurrence-2' });
+  // The same occurrence arriving again must not resurrect the diagnostic that was retired with its row.
+  append(feed, 1);
+  expect(feed.list()).toHaveLength(1);
+  expect(feed.list()[0]?.body ?? '').not.toContain('Private local diagnostic');
+  diagnostic('occurrence-2', 'Other local diagnostic');
   feed.clear();
-  expect(details.noticeDetails.size).toBe(0);
-  expect(details.groupDetails.size).toBe(0);
+  append(feed, 2);
+  expect(feed.list()[0]?.body ?? '').not.toContain('Other local diagnostic');
 });
 
 

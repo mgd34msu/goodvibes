@@ -1,0 +1,534 @@
+{
+  ".": [
+    {
+      "name": "AdmittedRegex",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "exec",
+        "matchingLines",
+        "positions",
+        "replace",
+        "test"
+      ],
+      "text": "export interface AdmittedRegex extends AsyncDisposable { assertCurrent(): void; test(input: string, maxInputChars?: number): Promise<boolean>; matchingLines(input: string, maxInputChars?: number): Promise<readonly number[]>; exec(input: string, lastIndex?: number, maxInputChars?: number): Promise<RegexMatch | null>; replace(input: string, replacement: string, maxInputChars?: number): Promise<string>; positions(input: string, maxInputChars?: number): Promise<readonly { start: number; end: number; }[]>; } ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "ConfigurationError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "constructor"
+      ],
+      "text": "export declare class ConfigurationError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
+    },
+    {
+      "name": "ConnectionFailure",
+      "kind": "type",
+      "text": "export type ConnectionFailure = keyof typeof CONNECTION_OPTIONS;"
+    },
+    {
+      "name": "ContractError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "constructor"
+      ],
+      "text": "export declare class ContractError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
+    },
+    {
+      "name": "ContractRegexReadingContext",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "kind",
+        "methodId",
+        "outputSchema"
+      ],
+      "text": "export interface ContractRegexReadingContext { readonly kind: 'operator' | 'peer'; readonly methodId: string; readonly outputSchema: Readonly<Record<string, unknown>>; readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "ContractRegexReadingFactory",
+      "kind": "type",
+      "text": "export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability;"
+    },
+    {
+      "name": "DECISION_MODEL_POLICIES",
+      "kind": "const",
+      "text": "DECISION_MODEL_POLICIES: readonly [\"Default - On\", \"Preferred\", \"Classic - Off\"]"
+    },
+    {
+      "name": "DECISION_MODEL_POLICY_HEADER",
+      "kind": "const",
+      "text": "DECISION_MODEL_POLICY_HEADER = \"x-goodvibes-decision-policy\""
+    },
+    {
+      "name": "DaemonErrorCategory",
+      "kind": "type",
+      "text": "export type DaemonErrorCategory = 'authentication' | 'authorization' | 'billing' | 'rate_limit' | 'timeout' | 'network' | 'bad_request' | 'not_found' | 'permission' | 'tool' | 'config' | 'protocol' | 'service' | 'internal' | 'unknown'; ;; DaemonErrorCategory: { readonly AUTHENTICATION: \"authentication\"; readonly AUTHORIZATION: \"authorization\"; readonly BILLING: \"billing\"; readonly RATE_LIMIT: \"rate_limit\"; readonly TIMEOUT: \"timeout\"; readonly NETWORK: \"network\"; readonly BAD_REQUEST: \"bad_request\"; readonly NOT_FOUND: \"not_found\"; readonly PERMISSION: \"permission\"; readonly TOOL: \"tool\"; readonly CONFIG: \"config\"; readonly PROTOCOL: \"protocol\"; readonly SERVICE: \"service\"; readonly INTERNAL: \"internal\"; readonly UNKNOWN: \"unknown\"; }"
+    },
+    {
+      "name": "DaemonErrorSource",
+      "kind": "type",
+      "text": "export type DaemonErrorSource = 'provider' | 'tool' | 'transport' | 'config' | 'permission' | 'runtime' | 'render' | 'acp' | 'unknown';"
+    },
+    {
+      "name": "DecisionModelPolicy",
+      "kind": "type",
+      "text": "export type DecisionModelPolicy = 'Default - On' | 'Preferred' | 'Classic - Off';"
+    },
+    {
+      "name": "DecisionModelPolicyState",
+      "kind": "interface",
+      "required": [
+        "operation",
+        "policy",
+        "reason",
+        "revision"
+      ],
+      "text": "export interface DecisionModelPolicyState { readonly policy: DecisionModelPolicy; readonly operation: 'decision' | 'classic'; readonly reason: 'selected' | 'unavailable' | null; readonly revision: number; }"
+    },
+    {
+      "name": "DecisionModelsDisabledError",
+      "kind": "class",
+      "publicMembers": [
+        "code",
+        "constructor",
+        "feature"
+      ],
+      "text": "export declare class DecisionModelsDisabledError extends Error { readonly feature: string; readonly code = \"decision-models-disabled\"; constructor(feature: string); }"
+    },
+    {
+      "name": "EngineErrorCode",
+      "kind": "type",
+      "text": "export type EngineErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'ENGINE_CONFIGURATION_ERROR' | 'ENGINE_CONTRACT_ERROR' | 'ENGINE_HTTP_STATUS_ERROR' | 'UNKNOWN';"
+    },
+    {
+      "name": "EngineErrorCodes",
+      "kind": "const",
+      "text": "EngineErrorCodes: { readonly AUTH_REQUIRED: \"AUTH_REQUIRED\"; readonly TOKEN_EXPIRED: \"TOKEN_EXPIRED\"; readonly PERMISSION_DENIED: \"PERMISSION_DENIED\"; readonly PAYMENT_REQUIRED: \"PAYMENT_REQUIRED\"; readonly RATE_LIMITED: \"RATE_LIMITED\"; readonly NETWORK_UNREACHABLE: \"NETWORK_UNREACHABLE\"; readonly TIMEOUT: \"TIMEOUT\"; readonly CANCELLED: \"CANCELLED\"; readonly NOT_FOUND: \"NOT_FOUND\"; readonly CONFLICT: \"CONFLICT\"; readonly SESSION_CLOSED: \"SESSION_CLOSED\"; readonly NOT_INVOKABLE: \"NOT_INVOKABLE\"; readonly METHOD_NOT_FOUND: \"METHOD_NOT_FOUND\"; readonly VALIDATION_FAILED: \"VALIDATION_FAILED\"; readonly AGENT_TIMEOUT: \"AGENT_TIMEOUT\"; readonly AGENT_FAILED: \"AGENT_FAILED\"; readonly TOOL_EXEC_FAILED: \"TOOL_EXEC_FAILED\"; readonly SERVICE_UNAVAILABLE: \"SERVICE_UNAVAILABLE\"; readonly CONTRACT_MISMATCH: \"CONTRACT_MISMATCH\"; readonly PROTOCOL_ERROR: \"PROTOCOL_ERROR\"; readonly INTERNAL_ERROR: \"INTERNAL_ERROR\"; readonly ENGINE_CONFIGURATION_ERROR: \"ENGINE_CONFIGURATION_ERROR\"; readonly ENGINE_CONTRACT_ERROR: \"ENGINE_CONTRACT_ERROR\"; readonly ENGINE_HTTP_STATUS_ERROR: \"ENGINE_HTTP_STATUS_ERROR\"; readonly UNKNOWN: \"UNKNOWN\"; }"
+    },
+    {
+      "name": "EngineErrorKind",
+      "kind": "type",
+      "text": "export type EngineErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';"
+    },
+    {
+      "name": "ErrorCategory",
+      "kind": "type",
+      "text": "export type ErrorCategory = DaemonErrorCategory | 'contract';"
+    },
+    {
+      "name": "ErrorSource",
+      "kind": "type",
+      "text": "export type ErrorSource = DaemonErrorSource | 'contract';"
+    },
+    {
+      "name": "FailureCategory",
+      "kind": "type",
+      "text": "export type FailureCategory = keyof typeof CATEGORY_OPTIONS & DaemonErrorCategory;"
+    },
+    {
+      "name": "FailureClass",
+      "kind": "type",
+      "text": "export type FailureClass = 'retryable' | 'terminal';"
+    },
+    {
+      "name": "FailureConclusions",
+      "kind": "interface",
+      "required": [
+        "beforeResponse",
+        "billing",
+        "category",
+        "connection",
+        "contextExceeded",
+        "providerUnusable",
+        "rateLimited",
+        "transientNetwork"
+      ],
+      "text": "export interface FailureConclusions { readonly source?: 'classic'; readonly category: FailureCategory; readonly billing: boolean; readonly rateLimited: boolean; readonly contextExceeded: boolean; readonly transientNetwork: boolean; readonly providerUnusable: boolean; readonly beforeResponse: boolean; readonly connection: ConnectionFailure; readonly readings?: { readonly category: ChoiceReading<FailureCategory>; readonly connection_failure: ChoiceReading<ConnectionFailure>; } & { readonly [K in Exclude<FailureQuestion, 'category' | 'connection_failure'>]: YesNoReading; }; readonly decisionId?: string | undefined; } ;; via ChoiceReading = export interface ChoiceReading<O extends string = string> { readonly kind: 'choice'; readonly choice: O; readonly confidence: number; readonly probabilities: Readonly<Record<O, number>>; readonly outcome: Outcome; } ;; Exclude = type Exclude<T, U> = T extends U ? never : T; ;; YesNoReading = export interface YesNoReading { readonly kind: 'yes-no'; readonly probability: number; readonly verdict: 'yes' | 'no' | 'uncertain'; readonly outcome: Outcome; }"
+    },
+    {
+      "name": "FailureEvidence",
+      "kind": "interface",
+      "required": [
+        "message"
+      ],
+      "text": "export interface FailureEvidence { readonly message: string; readonly status?: number | undefined; readonly code?: string | undefined; readonly errorName?: string | undefined; }"
+    },
+    {
+      "name": "FailureQuestion",
+      "kind": "type",
+      "text": "export type FailureQuestion = keyof typeof failureReading.items;"
+    },
+    {
+      "name": "FailureReadOptions",
+      "kind": "interface",
+      "required": [
+        "port"
+      ],
+      "text": "export interface FailureReadOptions extends Pick<CallOptions, 'signal' | 'beforeAttempt' | 'onRetry'> { readonly port: JudgmentPort; } ;; via CallOptions = export interface CallOptions { readonly beforeAttempt?: () => void; readonly beforeAsyncAttempt?: () => void | Promise<void>; readonly onRetry?: (progress: import('../port/types.ts').JudgmentRetryProgress) => void; readonly signal?: AbortSignal; readonly site?: string; readonly fixture?: string; } ;; JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "FailureTransience",
+      "kind": "interface",
+      "required": [
+        "basis",
+        "detail",
+        "failureClass"
+      ],
+      "text": "export interface FailureTransience { readonly failureClass: FailureClass; readonly basis: TransienceBasis; readonly detail: string; }"
+    },
+    {
+      "name": "GoodVibesError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "body",
+        "category",
+        "cause",
+        "code",
+        "constructor",
+        "hint",
+        "kind",
+        "method",
+        "operation",
+        "phase",
+        "provider",
+        "providerCode",
+        "providerType",
+        "recoverable",
+        "requestId",
+        "retryAfterMs",
+        "source",
+        "status",
+        "toJSON",
+        "url"
+      ],
+      "text": "export declare class GoodVibesError extends Error { readonly kind: EngineErrorKind; readonly code: EngineErrorCode | (string & {}); readonly category: ErrorCategory; readonly source: ErrorSource; readonly recoverable: boolean; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); toJSON(): Record<string, unknown>; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "GoodVibesErrorOptions",
+      "kind": "interface",
+      "text": "export interface GoodVibesErrorOptions { readonly code?: EngineErrorCode | (string & {}) | undefined; readonly category?: ErrorCategory | undefined; readonly source?: ErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly url?: string | undefined; readonly method?: string | undefined; readonly body?: unknown | undefined; readonly hint?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; readonly cause?: unknown | undefined; }"
+    },
+    {
+      "name": "HttpStatusError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "constructor"
+      ],
+      "text": "export declare class HttpStatusError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
+    },
+    {
+      "name": "JudgmentAuthorityFrame",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "identity"
+      ],
+      "text": "export interface JudgmentAuthorityFrame { readonly identity: object; readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; }"
+    },
+    {
+      "name": "JudgmentAuthorityRetiredError",
+      "kind": "class",
+      "publicMembers": [
+        "constructor"
+      ],
+      "text": "export declare class JudgmentAuthorityRetiredError extends Error { constructor(); }"
+    },
+    {
+      "name": "JudgmentEffectRestriction",
+      "kind": "interface",
+      "required": [
+        "assertCurrent"
+      ],
+      "text": "export interface JudgmentEffectRestriction { readonly assertCurrent: () => void; }"
+    },
+    {
+      "name": "JudgmentPortCapture",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "consumeObservation",
+        "identity",
+        "port",
+        "signal"
+      ],
+      "text": "export interface JudgmentPortCapture { readonly identity: object; readonly consumeObservation: () => JudgmentEffectRestriction; readonly port: JudgmentPort; readonly signal: AbortSignal; readonly assertCurrent: () => void; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "JudgmentPortMissingError",
+      "kind": "class",
+      "publicMembers": [
+        "constructor"
+      ],
+      "text": "export declare class JudgmentPortMissingError extends Error { constructor(site: string); }"
+    },
+    {
+      "name": "JudgmentReadingOptions",
+      "kind": "interface",
+      "text": "export interface JudgmentReadingOptions { readonly prepareResultCapture?: ((questions: Questions) => { readonly questions: Questions; readonly capture: <T extends Awaited<ReturnType<JudgmentPort['ask']>>>(result: T) => T; readonly assertCurrent: () => void; }) | undefined; readonly captureResult?: (<T extends Awaited<ReturnType<JudgmentPort['ask']>>>(result: T) => T) | undefined; readonly assertResult?: ((result: unknown) => void) | undefined; readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Awaited = type Awaited<T> = T extends null | undefined ? T : // special case for `null | undefined` when not in `--strictNullChecks` mode T extends object & { then(onfulfilled: infer F, ...args: infer _): any; } ? // `await` only unwraps object types with a callable `then`. Non-object types are not unwrapped F extends ((value: infer V, ...args: infer _) => any) ? // if the argument to `then` is callable, extracts the first argument Awaited<V> : // recursively unwrap the value never : // the argument to `then` was not callable T; ;; JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; } ;; Questions = interface Questions { [name: string]: Question; } ;; ReturnType = type ReturnType<T extends (...args: any) => any> = T extends (...args: any) => infer R ? R : any;"
+    },
+    {
+      "name": "MEMORY_RECORD_NOT_FOUND_CODE",
+      "kind": "const",
+      "text": "MEMORY_RECORD_NOT_FOUND_CODE = \"MEMORY_RECORD_NOT_FOUND\""
+    },
+    {
+      "name": "RETRYABLE_STATUS_CODES",
+      "kind": "const",
+      "text": "RETRYABLE_STATUS_CODES: readonly number[]"
+    },
+    {
+      "name": "RegexAdmissionError",
+      "kind": "class",
+      "publicMembers": [
+        "constructor"
+      ],
+      "text": "export declare class RegexAdmissionError extends Error { constructor(operation: string, reason: string); }"
+    },
+    {
+      "name": "RegexAdmissionOptions",
+      "kind": "interface",
+      "required": [
+        "operation"
+      ],
+      "text": "export interface RegexAdmissionOptions extends JudgmentReadingOptions { readonly reading?: RegexReadingCapability | undefined; readonly operation: string; readonly maxPatternChars?: number | undefined; readonly maxInputChars?: number | undefined; readonly timeoutMs?: number | undefined; }"
+    },
+    {
+      "name": "RegexMatch",
+      "kind": "interface",
+      "required": [
+        "captures",
+        "index",
+        "lastIndex"
+      ],
+      "text": "export interface RegexMatch { readonly captures: readonly (string | undefined)[]; readonly index: number; readonly lastIndex: number; readonly groups?: Readonly<Record<string, string | undefined>> | undefined; readonly indices?: readonly (readonly [number, number] | undefined)[] | undefined; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "RegexReadingCapability",
+      "kind": "interface",
+      "required": [
+        "assertCurrent",
+        "read",
+        "signal"
+      ],
+      "text": "export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; YesNoReading = export interface YesNoReading { readonly kind: 'yes-no'; readonly probability: number; readonly verdict: 'yes' | 'no' | 'uncertain'; readonly outcome: Outcome; }"
+    },
+    {
+      "name": "StructuredDaemonErrorBody",
+      "kind": "interface",
+      "required": [
+        "error"
+      ],
+      "text": "export interface StructuredDaemonErrorBody { readonly error: string; readonly hint?: string | undefined; readonly code?: string | undefined; readonly category?: DaemonErrorCategory | undefined; readonly source?: DaemonErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly errorRef?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; }"
+    },
+    {
+      "name": "TRANSIENT_STATUS_CODES",
+      "kind": "const",
+      "text": "TRANSIENT_STATUS_CODES: readonly number[]"
+    },
+    {
+      "name": "TransienceBasis",
+      "kind": "type",
+      "text": "export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'classic' | 'no-wording';"
+    },
+    {
+      "name": "TransienceOptions",
+      "kind": "interface",
+      "text": "export interface TransienceOptions { readonly reading?: FailureReadOptions; readonly fromProvider?: boolean; readonly describe?: (error: unknown) => string; }"
+    },
+    {
+      "name": "admitRegex",
+      "kind": "function",
+      "text": "export declare function admitRegex(source: string, flags: string, options: RegexAdmissionOptions): Promise<AdmittedRegex>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "assertDecisionModelsEnabled",
+      "kind": "function",
+      "text": "export declare function assertDecisionModelsEnabled(feature: string): void;"
+    },
+    {
+      "name": "bindJudgmentPortAuthority",
+      "kind": "function",
+      "text": "export declare function bindJudgmentPortAuthority(port: JudgmentPort, capture: () => JudgmentAuthorityFrame): void; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "captureJudgmentPort",
+      "kind": "function",
+      "text": "export declare function captureJudgmentPort(site: string, options?: JudgmentReadingOptions): JudgmentPortCapture;"
+    },
+    {
+      "name": "categoryDependsOnWording",
+      "kind": "function",
+      "text": "export declare function categoryDependsOnWording(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean): boolean;"
+    },
+    {
+      "name": "categoryForCode",
+      "kind": "function",
+      "text": "export declare function categoryForCode(code: string | undefined): DaemonErrorCategory | undefined;"
+    },
+    {
+      "name": "categoryForStatus",
+      "kind": "function",
+      "text": "export declare function categoryForStatus(status: number | undefined): DaemonErrorCategory | undefined;"
+    },
+    {
+      "name": "compileLegacyRegex",
+      "kind": "function",
+      "text": "export declare function compileLegacyRegex(source: string, flags: string, options: RegexAdmissionOptions, schema?: boolean): RegExp; ;; via RegExp = interface RegExp { exec(string: string): RegExpExecArray | null; test(string: string): boolean; readonly source: string; readonly global: boolean; readonly ignoreCase: boolean; readonly multiline: boolean; lastIndex: number; // Non-standard extensions compile(pattern: string, flags?: string): this; }"
+    },
+    {
+      "name": "connectionSummary",
+      "kind": "function",
+      "text": "export declare function connectionSummary(connection: ConnectionFailure | undefined, provider?: string): string | undefined;"
+    },
+    {
+      "name": "createHttpStatusError",
+      "kind": "function",
+      "text": "export declare function createHttpStatusError(status: number, url: string, method: string, body: unknown, fallbackHint?: string): HttpStatusError;"
+    },
+    {
+      "name": "decisionModelPolicyState",
+      "kind": "function",
+      "text": "export declare function decisionModelPolicyState(): DecisionModelPolicyState;"
+    },
+    {
+      "name": "failureReading",
+      "kind": "const",
+      "text": "failureReading: import(\"@goodvibes-jev/judgment\").Battery<{ readonly category: import(\"@goodvibes-jev/judgment\").ChoiceItem<{ readonly authentication: \"Credentials were missing, invalid or expired (API key, token, login)\"; readonly authorization: \"The caller is known but not allowed: forbidden, access denied, no access to this model\"; readonly billing: \"The account cannot pay: credit balance too low, credits or funds exhausted, payment required, plan quota spent\"; readonly rate_limit: \"Too many requests or a temporary usage limit; waiting and retrying would succeed\"; readonly timeout: \"The request or connection timed out or passed a deadline\"; readonly network: \"The connection failed: refused, reset, host not found, DNS, TLS or certificate trouble, fetch failed\"; readonly not_found: \"The model, endpoint or resource does not exist or is not supported\"; readonly bad_request: \"The request itself was invalid: malformed input, bad argument, unsupported parameter, schema violation\"; readonly protocol: \"The response was incomplete or unreadable: invalid JSON, stream ended early, no response body\"; readonly service: \"The server failed or is overloaded or temporarily unavailable\"; readonly unknown: \"None of these, or the message does not say\"; }>; readonly billing: import(\"@goodvibes-jev/judgment\").YesNoItem; readonly rate_limited: import(\"@goodvibes-jev/judgment\").YesNoItem; readonly context_exceeded: import(\"@goodvibes-jev/judgment\").YesNoItem; readonly transient_network: import(\"@goodvibes-jev/judgment\").YesNoItem; readonly provider_unusable: import(\"@goodvibes-jev/judgment\").YesNoItem; readonly connection_failure: import(\"@goodvibes-jev/judgment\").ChoiceItem<{ readonly refused: \"The connection was refused: nothing accepted the connection at that address and port\"; readonly timed_out: \"The connection or the request timed out, or was aborted, before it completed\"; readonly dns_failed: \"The host name could not be resolved: DNS lookup failed or the host was not found\"; readonly none: \"None of these: the error is not one of these connection failures, or the server answered\"; }>; readonly before_response: import(\"@goodvibes-jev/judgment\").YesNoItem; }>"
+    },
+    {
+      "name": "failureState",
+      "kind": "function",
+      "text": "export declare function failureState(evidence: FailureEvidence): string;"
+    },
+    {
+      "name": "forgetFailureReadings",
+      "kind": "function",
+      "text": "export declare function forgetFailureReadings(): void;"
+    },
+    {
+      "name": "httpStatusOf",
+      "kind": "function",
+      "text": "export declare function httpStatusOf(error: unknown): number | undefined;"
+    },
+    {
+      "name": "installDecisionModelPolicyObserver",
+      "kind": "function",
+      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;"
+    },
+    {
+      "name": "installJudgmentPort",
+      "kind": "function",
+      "text": "export declare function installJudgmentPort(port: JudgmentPort | undefined): JudgmentPort | undefined; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "isErrorCode",
+      "kind": "function",
+      "text": "export declare function isErrorCode<C extends EngineErrorCode>(err: { readonly code?: EngineErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
+    },
+    {
+      "name": "isKnownErrorCode",
+      "kind": "function",
+      "text": "export declare function isKnownErrorCode(value: string): value is EngineErrorCode;"
+    },
+    {
+      "name": "isStructuredDaemonErrorBody",
+      "kind": "function",
+      "text": "export declare function isStructuredDaemonErrorBody(value: unknown): value is StructuredDaemonErrorBody;"
+    },
+    {
+      "name": "judgmentPort",
+      "kind": "function",
+      "text": "export declare function judgmentPort(site: string): JudgmentPort; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "parseDecisionModelPolicy",
+      "kind": "function",
+      "text": "export declare function parseDecisionModelPolicy(value: unknown): DecisionModelPolicy;"
+    },
+    {
+      "name": "readDecisionModelPolicyHeader",
+      "kind": "function",
+      "text": "export declare function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): DecisionModelPolicyState | undefined; ;; via Headers = interface Headers { append(name: string, value: string): void; delete(name: string): void; get(name: string): string | null; getSetCookie(): string[]; has(name: string): boolean; set(name: string, value: string): void; forEach(callbackfn: (value: string, key: string, parent: Headers) => void, thisArg?: any): void; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
+    },
+    {
+      "name": "readFailure",
+      "kind": "function",
+      "text": "export declare function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "readFailureTransience",
+      "kind": "function",
+      "text": "export declare function readFailureTransience(error: unknown, site: string, options?: TransienceOptions): Promise<FailureTransience>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "regexBacktracking",
+      "kind": "const",
+      "text": "regexBacktracking: import(\"@goodvibes-jev/judgment/decisions\").Battery<{ readonly backtracking: import(\"@goodvibes-jev/judgment/decisions\").YesNoItem; }>"
+    },
+    {
+      "name": "restoreJudgmentPort",
+      "kind": "function",
+      "text": "export declare function restoreJudgmentPort(owner: JudgmentPort, previous: JudgmentPort | undefined): void; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; }"
+    },
+    {
+      "name": "runDecisionOrClassic",
+      "kind": "function",
+      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "settleCategory",
+      "kind": "function",
+      "text": "export declare function settleCategory(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean, failure: FailureConclusions | undefined): DaemonErrorCategory;"
+    },
+    {
+      "name": "structuredTransience",
+      "kind": "function",
+      "text": "export declare function structuredTransience(error: unknown): FailureTransience | undefined;"
+    },
+    {
+      "name": "summaryDependsOnWording",
+      "kind": "function",
+      "text": "export declare function summaryDependsOnWording(status: number | undefined): boolean;"
+    },
+    {
+      "name": "transienceFromReading",
+      "kind": "function",
+      "text": "export declare function transienceFromReading(failure: FailureConclusions): FailureTransience;"
+    },
+    {
+      "name": "tryClassicDecisionFallback",
+      "kind": "function",
+      "text": "export declare function tryClassicDecisionFallback(error: unknown): boolean;"
+    }
+  ],
+  "./daemon-error-contract": [
+    {
+      "name": "DaemonErrorCategory",
+      "kind": "type",
+      "text": "export type DaemonErrorCategory = 'authentication' | 'authorization' | 'billing' | 'rate_limit' | 'timeout' | 'network' | 'bad_request' | 'not_found' | 'permission' | 'tool' | 'config' | 'protocol' | 'service' | 'internal' | 'unknown'; ;; DaemonErrorCategory: { readonly AUTHENTICATION: \"authentication\"; readonly AUTHORIZATION: \"authorization\"; readonly BILLING: \"billing\"; readonly RATE_LIMIT: \"rate_limit\"; readonly TIMEOUT: \"timeout\"; readonly NETWORK: \"network\"; readonly BAD_REQUEST: \"bad_request\"; readonly NOT_FOUND: \"not_found\"; readonly PERMISSION: \"permission\"; readonly TOOL: \"tool\"; readonly CONFIG: \"config\"; readonly PROTOCOL: \"protocol\"; readonly SERVICE: \"service\"; readonly INTERNAL: \"internal\"; readonly UNKNOWN: \"unknown\"; }"
+    },
+    {
+      "name": "DaemonErrorSource",
+      "kind": "type",
+      "text": "export type DaemonErrorSource = 'provider' | 'tool' | 'transport' | 'config' | 'permission' | 'runtime' | 'render' | 'acp' | 'unknown';"
+    },
+    {
+      "name": "MEMORY_RECORD_NOT_FOUND_CODE",
+      "kind": "const",
+      "text": "MEMORY_RECORD_NOT_FOUND_CODE = \"MEMORY_RECORD_NOT_FOUND\""
+    },
+    {
+      "name": "StructuredDaemonErrorBody",
+      "kind": "interface",
+      "required": [
+        "error"
+      ],
+      "text": "export interface StructuredDaemonErrorBody { readonly error: string; readonly hint?: string | undefined; readonly code?: string | undefined; readonly category?: DaemonErrorCategory | undefined; readonly source?: DaemonErrorSource | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; readonly requestId?: string | undefined; readonly errorRef?: string | undefined; readonly providerCode?: string | undefined; readonly providerType?: string | undefined; readonly retryAfterMs?: number | undefined; }"
+    }
+  ]
+}

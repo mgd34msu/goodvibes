@@ -13,7 +13,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { HARNESS_MODE_DESCRIPTORS, listHarnessModes } from './agent-harness-mode-catalog.ts';
-import { captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogMethods, prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
 import { externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence } from './agent-harness-memory-external-providers.ts';
@@ -44,17 +44,52 @@ export interface AgentTaskRouteSources {
   readonly channelRegistry?: Parameters<typeof channelTargetNamedIds>[0];
 }
 
+type RouteRecord = Record<string, unknown>;
+type RouteDescription = { readonly id: string; readonly description: string; readonly evidence: unknown };
+
+/** Workspace evidence comes from the frozen native declarations, so it is built once. */
+let workspaceEvidenceCatalog: ReadonlyMap<string, unknown> | undefined;
+function workspaceEvidence(): ReadonlyMap<string, unknown> {
+  if (workspaceEvidenceCatalog) return workspaceEvidenceCatalog;
+  const evidence = new Map<string, unknown>();
+  for (const category of AGENT_WORKSPACE_CATEGORIES) for (const action of category.actions) {
+    evidence.set(action.id, { category: { id: category.id, group: category.group, label: category.label,
+      summary: category.summary, detail: category.detail }, action });
+  }
+  return workspaceEvidenceCatalog = evidence;
+}
+
+/** One stable describer per catalog, so a prepared catalog is recognized by the ranking reader. */
+const describeModeRecord = (record: RouteRecord): RouteDescription => {
+  if (typeof record.id !== 'string') throw new ToolInputProjectionError('held');
+  return { id: record.id, description: JSON.stringify(record), evidence: record };
+};
+const describeWorkspaceRecord = (record: RouteRecord): RouteDescription => {
+  if (typeof record.id !== 'string') throw new ToolInputProjectionError('held');
+  return { id: record.id, description: JSON.stringify(record), evidence: workspaceEvidence().get(record.id) ?? record };
+};
+
+/** A prepared catalog is the frozen capture of exactly these records; identical records reuse it. */
+const preparedRouteCatalogs = new Map<string, readonly RouteRecord[]>();
+function preparedRouteCatalog(kind: 'modes' | 'workspace', records: readonly RouteRecord[]): readonly RouteRecord[] {
+  const key = `${kind}:${JSON.stringify(records)}`;
+  const found = preparedRouteCatalogs.get(key);
+  if (found) return found;
+  const prepared = prepareHarnessCatalog(records, kind === 'modes' ? describeModeRecord : describeWorkspaceRecord);
+  if (preparedRouteCatalogs.size >= 4) preparedRouteCatalogs.delete(preparedRouteCatalogs.keys().next().value!);
+  preparedRouteCatalogs.set(key, prepared);
+  return prepared;
+}
+
 /** Rank complete locally screened catalogs through the canonical public reader. */
 async function rankCatalog(
   request: string,
-  records: readonly Record<string, unknown>[],
+  kind: 'modes' | 'workspace',
+  records: readonly RouteRecord[],
   options: CatalogRankingOptions,
-  evidenceById?: ReadonlyMap<string, unknown>,
 ): Promise<TaskRouteCatalogRanking> {
-  const result = await rankHarnessCatalog(records, request, record => {
-    if (typeof record.id !== 'string') throw new ToolInputProjectionError('held');
-    return { id: record.id, description: JSON.stringify(record), evidence: evidenceById?.get(record.id) ?? record };
-  }, 'agent.task-route.catalog', { ...options, requirePreservedSource: true });
+  const result = await rankHarnessCatalog(preparedRouteCatalog(kind, records), request,
+    kind === 'modes' ? describeModeRecord : describeWorkspaceRecord, 'agent.task-route.catalog', { ...options, requirePreservedSource: true });
   return { records, ranked: result.judgments };
 }
 
@@ -71,11 +106,6 @@ export async function planAgentTaskRoute(
   const modes = captureModelReadingInput(HARNESS_MODE_DESCRIPTORS);
   const workspace = captureModelReadingInput(await listWorkspaceActions(context, { limit: 1000 }, options));
   freezeRouteDeclarations(workspace);
-  const workspaceEvidence = new Map<string, unknown>();
-  for (const category of AGENT_WORKSPACE_CATEGORIES) for (const action of category.actions) {
-    workspaceEvidence.set(action.id, { category: { id: category.id, group: category.group, label: category.label,
-      summary: category.summary, detail: category.detail }, action });
-  }
   const assertArgs = captureModelReadingSnapshotGuard(captured);
   const assertModes = captureModelReadingSnapshotGuard(modes);
   const assertCategories = captureModelReadingSnapshotGuard(captureModelReadingInput(AGENT_WORKSPACE_CATEGORIES));
@@ -118,8 +148,8 @@ export async function planAgentTaskRoute(
         ...(channels ? { channelTarget: () => channelTargetNamedIds(channels) } : {}),
         memoryProvider: () => memory.map(({ id, label }) => ({ id, names: [label, id] })),
       },
-      workspaceMatches: (currentRequest, _limit, current) => rankCatalog(currentRequest, workspace, rankOptions(current), workspaceEvidence),
-      modeMatches: (currentRequest, _limit, current) => rankCatalog(currentRequest, modes, rankOptions(current)),
+      workspaceMatches: (currentRequest, _limit, current) => rankCatalog(currentRequest, 'workspace', workspace, rankOptions(current)),
+      modeMatches: (currentRequest, _limit, current) => rankCatalog(currentRequest, 'modes', modes, rankOptions(current)),
     }, readingOptions);
     readingOptions.assertCurrent?.();
     return plan;

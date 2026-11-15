@@ -1,6 +1,47 @@
 import { activeTokens } from './theme.js';
 import type { KitRow } from './surface-kit-list.js';
-import type { McpWorkspaceFormField } from '../mcp-workspace-model.js';
+import { formatArgs, parseArgs, type McpWorkspaceFormField } from '../mcp-workspace-model.js';
+const MASK = '••••';
+/** A value that points at a secret rather than holding one: a stored-secret URI or an env var reference. */
+function isReferenceValue(value: string): boolean {
+  const v = value.trim();
+  return v.startsWith('goodvibes://secrets/') || /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/.test(v);
+}
+const SECRET_FLAG = /token|secret|key|password|passwd|credential|auth/i;
+
+/** Display copy of "KEY=VALUE, KEY=VALUE" with every literal value hidden; references stay readable. */
+export function maskEnvText(text: string): string {
+  return text
+    .split(/,(?=\s*[A-Za-z_][A-Za-z0-9_.-]*=)/)
+    .map((entry) => {
+      const eq = entry.indexOf('=');
+      if (eq <= 0) return entry;
+      return entry.slice(eq + 1).trim() === '' || isReferenceValue(entry.slice(eq + 1)) ? entry : `${entry.slice(0, eq + 1)}${MASK}`;
+    })
+    .join(',');
+}
+
+/** Display copy of launch arguments with the value of a secret-looking flag (--token x, --api-key=x) hidden. */
+export function maskLaunchArgs(args: readonly string[]): string[] {
+  const out: string[] = [];
+  let hideNext = false;
+  for (const arg of args) {
+    if (hideNext) {
+      out.push(isReferenceValue(arg) ? arg : MASK);
+      hideNext = false;
+      continue;
+    }
+    const flag = /^(-{1,2}[^=\s]+)(=(.*))?$/.exec(arg);
+    if (flag && SECRET_FLAG.test(flag[1]!)) {
+      if (flag[2] === undefined) { out.push(arg); hideNext = true; }
+      else out.push(isReferenceValue(flag[3] ?? '') ? arg : `${flag[1]}=${MASK}`);
+      continue;
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
 export function formRows(workspace: {
   readonly formIndex: number;
   readonly formFields: readonly McpWorkspaceFormField<string>[];
@@ -9,7 +50,9 @@ export function formRows(workspace: {
   return workspace.formFields.map((field, index) => {
     const selected = index === workspace.formIndex;
     const isAction = field.id === 'save' || field.id === 'cancel';
-    const value = isAction ? undefined : field.value.length > 0 ? field.value : '(empty)';
+    // The field being edited shows its real text; every other row hides literal secrets.
+    const shown = field.id === 'env' ? maskEnvText(field.value) : field.id === 'args' ? formatArgs(maskLaunchArgs(parseArgs(field.value))) : field.value;
+    const value = isAction ? undefined : shown.length > 0 ? shown : '(empty)';
     return {
       label: field.label,
       desc: value !== undefined && selected && field.editable ? `${field.value}▏` : value,

@@ -28,6 +28,7 @@ is required.
 | --- | --- |
 | `GOODVIBES_VERSION` | One monorepo release, default `latest` |
 | `GOODVIBES_INSTALL_DIR` | Command directory, default `~/.local/bin` |
+| `GOODVIBES_DAEMON_VERSION`, `GOODVIBES_AGENT_VERSION`, `GOODVIBES_WEBUI_VERSION` | Internal per-program pins that default to `GOODVIBES_VERSION`; use `GOODVIBES_VERSION`, because updates and rollback treat the programs as one release |
 | `GOODVIBES_AGENT=0` | Skip Agent; the shared browser driver is still installed |
 | `GOODVIBES_WEBUI=0` | Skip WebUI |
 | `GOODVIBES_VECTOR=0` | Retained compatibility input; required native vector libraries are still installed |
@@ -41,6 +42,13 @@ is required.
 `--uninstall` can also be passed through `sh -s --`. A decision policy is changed
 only when explicitly selected; installing software does not require a live
 judgment-model connection. Provider account setup remains in the application.
+If the daemon cannot save the selected policy, the installation still finishes
+(the programs are already replaced), says the policy was not saved and prints the
+`goodvibes-daemon config set judgment.policy` command to run afterwards.
+
+The installer trusts the release's GitHub download origin over HTTPS. The checksum
+manifest comes from the same origin as the assets, so the checksums catch a corrupt
+or mismatched download rather than a compromised release host.
 
 ## Existing installations and services
 
@@ -112,6 +120,17 @@ Other failure behavior:
 - **Updating a directory.** When an update replaces a directory that an earlier
   installation published, such as the WebUI or browser driver, the previous
   directory is removed after the new one is in place. A failed update keeps it.
+  A directory that already holds exactly the release's files is left untouched,
+  so repeating an installation does not accumulate copies. A previous directory
+  that differs from the new one (local additions, or a WebUI published for another
+  release) is kept, never deleted.
+- **Rollback copies.** When an installation replaces the programs with a different
+  release, the daemon's older `<program>.previous` rollback copies are removed, so
+  `/update rollback` and a crash-loop rollback report nothing to restore instead of
+  restoring a release two versions back. Reinstalling the same release keeps them.
+- **PATH.** The installer adds one marker-tagged `export PATH` line to your shell
+  rc file for each install directory that is not on `PATH`; installing into a
+  second directory adds a second line, and uninstalling removes only its own.
 - **Processes started by hand.** When a daemon or agent running outside a
   service has to be restarted and its arguments contain spaces or wildcard
   characters, the process is left running and the installer prints a fully
@@ -131,7 +150,11 @@ Released native installations enable automatic updates by default. The daemon
 checks shortly after startup and then hourly, deferring replacement while work
 is active. The TUI and Agent also check at launch. An update selects one release
 for installed sibling programs, their native companions, the browser driver and
-the configured release WebUI. Programs already running continue their original
+the configured release WebUI. An update replaces the contents of the configured
+WebUI directory in place (and rewrites its release marker), so after an update a
+directory named for the installed release, such as `webui/3.3.0`, can hold a newer
+release; the installer publishes each release it installs into a new directory and
+never prunes older ones. Programs already running continue their original
 build until restarted. Source and package-managed runs keep their own update
 mechanism.
 
@@ -142,6 +165,40 @@ If the helper cannot be prepared, the daemon reports the problem before replacin
 files or stopping its runtime. A standalone daemon without launchd supervision
 requires the released installer for this update path. Terminal launch updates
 use their separate restart path.
+
+When a newly installed daemon build fails to finish starting three times within
+ten minutes (the count is `update.rollbackAfterFailedStarts`, where `0` turns this
+rollback off; the ten-minute window is fixed), the daemon restores the kept previous version and skips that
+release until a newer one ships. It does not roll back a build that has already
+started successfully on the same machine, because repeated failures of such a
+build come from its environment, such as an occupied port, rather than from the
+update. It also refuses to restore a kept copy that is not older than the
+running build or is the release an earlier rollback rejected. Each refusal is
+written to the daemon's stderr and receipts.
+
+When an unsupervised daemon adopts the systemd user service (after an update,
+a rollback or at boot), it first confirms the user manager answers, installs the
+unit and reloads the manager, all while its runtime is still serving. A refusal
+at that stage leaves a serving daemon, reported in a receipt; only the final
+enable runs after the runtime stops. If the service manager does not accept the
+restart after the daemon has already stopped its runtime for an update, rollback
+or service adoption, the daemon exits with status 1, so a supervisor starts the
+installed build. On Linux, a daemon that cannot reach the systemd user manager
+does not attempt an unattended handover. When another install or update holds
+the installation, the daemon retries the update later. When an earlier install
+or update stopped partway, automatic updates pause, and the receipt lists the
+retained files and says when they can be removed.
+
+The daemon records which release it rolled away from before it exchanges any
+files. If that record cannot be written, the rollback is refused and nothing is
+changed, so the restored build cannot reinstall the release that just failed.
+
+Several daemons can share one home (for example on different ports). The
+lifecycle record belongs to the one that wrote it while that process is alive: a
+second daemon's start attempts are not counted toward a crash-loop rollback, its
+start is not reported as a crash, and its stop does not clear the owner's
+record. A daemon whose previous shutdown finished in order but reported cleanup
+errors says so at the next start instead of reporting a crash.
 
 To disable all unattended updates, set both `update.auto` and
 `update.autoUpdateAtLaunch` to `false` in settings. Setting only
@@ -163,7 +220,9 @@ curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_UNINSTALL=1 sh
 ```
 
 This removes installer-managed programs, runtime companions, known native library
-files and managed service files, keeping `~/.goodvibes` settings, sessions and memory.
+files and managed service files (including a unit the daemon's own `install-service`
+wrote, which carries the product's description rather than the installer's marker),
+keeping `~/.goodvibes` settings, sessions and memory.
 Browser-driver, WebUI and retained directory backups are listed and preserved;
 they may contain local additions or serve another deployment. Review those paths
 before removing their contents. An active update, or one that left its claims
@@ -171,6 +230,7 @@ behind, must be resolved before uninstall can remove its programs. A saved insta
 this operation without release downloads. `scripts/uninstall.sh` also recognizes
 receipt-owned installations made by the earlier checkout installer and invokes
 their installed uninstaller. Their `--prefix` and `--purge` options remain available.
+Without a receipt or a checkout, `uninstall.sh` runs the current installer script; set `GOODVIBES_VERSION=vX.Y.Z` to run that release's script instead.
 
 ## Explicit developer source installation
 
@@ -180,8 +240,15 @@ layout is distinct from release-binary installations. The curl installer does no
 fall back to building source when a release asset is unavailable.
 
 A checkout installation that fails, or is interrupted with Ctrl-C or a
-termination signal, restores the previously installed version, restarts the
-service if it was running before, and releases its locks.
+termination signal or a hang-up (closing the terminal), restores the previously
+installed version, restarts the service if it was running before, and releases
+its locks. If the process is killed outright during an update, the next update or
+uninstall restores the previous version first. After an update, earlier versions
+are removed unless a terminal or agent is still running from them; they are
+checked again on the next update. An existing `environment` file is never
+overwritten: if `TYPESAFE_API_KEY` is exported but the file has no key, the
+installer says so and names the file. Uninstall also completes when the data
+directory has already been removed.
 
 The installer and uninstaller take a lock directory beside each of the program
 and data directories (`<directory>.lock`). The lock records the process that holds it. A lock left by a

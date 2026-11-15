@@ -21,13 +21,20 @@
  * so both resolve, in a fixed order:
  *
  *   imap host  imap.host  →  host  →  imapHost
- *   imap port  imap.port  →  imapPort  →  993
+ *   imap port  imap.port  →  imapPort  →  993 (143 when imap.secure is false)
  *   smtp host  smtp.host  →  host
- *   smtp port  smtp.port  →  465
- *   account    user       →  username  →  imapUser
- *   from       from       →  the account name
+ *   smtp port  smtp.port  →  465 (587 when smtp.secure is false)
+ *   account    imap.user  →  user  →  username  →  imapUser
+ *   from       from       →  user  →  username  →  imapUser (never imap.user)
  *   mailbox    imap.mailbox        →  INBOX
  *   drafts     imap.draftsMailbox  →  the server's own `\Drafts` folder
+ *
+ * A port counts as set only when the operator set it: the config manager answers an
+ * unset key with its default, so an unset nested port would otherwise hide a flat one and
+ * the security answer could never pick the port. A reader that cannot tell (a plain
+ * function) treats a value equal to the schema default as unset.
+ * The mail server login is one account for reading and sending, so `imap.user`
+ * names both; `from` keeps following the plain account chain.
  *
  * The nested spelling and the shared `host` come first because that is the
  * order the mail handlers already resolved in: a machine that worked before
@@ -89,6 +96,37 @@ export const SURFACE_EMAIL_SMTP_PASSWORD_REF =
 
 export type ConfigReader = (key: string) => unknown;
 
+/** A reader that can also say whether the operator set a key, as opposed to it answering its default. */
+export type ConfigReaderWithOrigins = ConfigReader & { readonly isSet?: (key: string) => boolean };
+
+/** The part of the config manager that knows where a key's value comes from. */
+export interface ConfigOriginSource {
+  get(key: string): unknown;
+  describeConfigKeySource?(key: string): { readonly tier: string; readonly effectiveOrigin?: string };
+}
+
+/**
+ * `manager.get` as a reader that also reports whether a key was set. A key counts as set
+ * unless it resolves from the schema default (or a host-supplied default); a key the
+ * manager cannot describe reads as unset.
+ */
+export function configReaderWithOrigins(manager: ConfigOriginSource): ConfigReaderWithOrigins {
+  const read = (key: string): unknown => manager.get(key);
+  const describe = manager.describeConfigKeySource?.bind(manager);
+  if (describe === undefined) return read;
+  return Object.assign(read, {
+    isSet: (key: string): boolean => {
+      try {
+        const source = describe(key);
+        const origin = source.effectiveOrigin ?? source.tier;
+        return origin !== 'default' && origin !== 'runtime-default';
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
 export interface SecretReader {
   getCredentialMutationState?(): Readonly<{ generation: number; pending: boolean }>;
   onDidInvalidateCredentials?(listener: () => void): () => void;
@@ -144,6 +182,26 @@ function readBoolean(getConfig: ConfigReader, key: string, fallback: boolean): b
   return fallback;
 }
 
+/** The schema defaults of the port keys; see `readPort`. */
+const IMAP_PORT_SCHEMA_DEFAULT = 993;
+const SMTP_PORT_SCHEMA_DEFAULT = 465;
+
+/**
+ * The first of `keys` the operator set to a port, else `fallback`. The config manager
+ * answers an unset key with its default, so when the reader can say whether a key was
+ * set (see `configReaderWithOrigins`) that decides, and an explicit 465 or 993 is kept.
+ * A reader that cannot say falls back to treating the schema default as unset.
+ */
+function readPort(getConfig: ConfigReader, keys: readonly string[], schemaDefault: number, fallback: number): number {
+  const isSet = (getConfig as ConfigReaderWithOrigins).isSet;
+  for (const key of keys) {
+    const port = readNumber(getConfig, key);
+    if (port === undefined) continue;
+    if (isSet === undefined ? port !== schemaDefault : isSet(key)) return port;
+  }
+  return fallback;
+}
+
 /** The resolved, non-secret half of the daemon's mailbox settings. */
 export interface SurfaceEmailSettings {
   readonly imapHost: string | undefined;
@@ -168,22 +226,31 @@ export interface SurfaceEmailSettings {
 /** Resolve every non-secret mailbox setting, in the precedence documented above. */
 export function readSurfaceEmailSettings(getConfig: ConfigReader): SurfaceEmailSettings {
   const host = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.host`);
-  const username = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.user`)
+  const account = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.user`)
     ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.username`)
     ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imapUser`);
+  const username = readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.user`) ?? account;
+  const imapSecure = readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.secure`, true);
+  const smtpSecure = readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.smtp.secure`, true);
   return {
     imapHost: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.host`)
       ?? host
       ?? readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imapHost`),
-    imapPort: readNumber(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.port`)
-      ?? readNumber(getConfig, `${SURFACE_EMAIL_PREFIX}.imapPort`)
-      ?? 993,
-    imapSecure: readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.secure`, true),
+    // An unset port follows the security answer: 993 is implicit TLS, so a plain
+    // connection defaults to the IMAP port that carries one (143).
+    imapPort: readPort(
+      getConfig,
+      [`${SURFACE_EMAIL_PREFIX}.imap.port`, `${SURFACE_EMAIL_PREFIX}.imapPort`],
+      IMAP_PORT_SCHEMA_DEFAULT,
+      imapSecure ? 993 : 143,
+    ),
+    imapSecure,
     smtpHost: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.smtp.host`) ?? host,
-    smtpPort: readNumber(getConfig, `${SURFACE_EMAIL_PREFIX}.smtp.port`) ?? 465,
-    smtpSecure: readBoolean(getConfig, `${SURFACE_EMAIL_PREFIX}.smtp.secure`, true),
+    // 465 is implicit TLS; the STARTTLS answer means the submission port, 587.
+    smtpPort: readPort(getConfig, [`${SURFACE_EMAIL_PREFIX}.smtp.port`], SMTP_PORT_SCHEMA_DEFAULT, smtpSecure ? 465 : 587),
+    smtpSecure,
     username,
-    fromAddress: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.from`) ?? username,
+    fromAddress: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.from`) ?? account,
     mailbox: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.mailbox`),
     // Left absent when unset, rather than defaulted to the literal 'Drafts'
     // this setting used to fall back to. An unset folder now means the server
@@ -316,15 +383,19 @@ export interface SurfaceEmailConfigProblem {
 export async function describeSurfaceEmailConfigProblem(
   getConfig: ConfigReader,
   secrets: SecretReader,
+  /** `inbox` is the read-only mailbox, which needs no SMTP host; `full` (the default) also sends. */
+  mode: 'full' | 'inbox' = 'full',
 ): Promise<SurfaceEmailConfigProblem | null> {
   const settings = readSurfaceEmailSettings(getConfig);
   if (
     settings.imapHost === undefined
-    || settings.smtpHost === undefined
+    || (mode === 'full' && settings.smtpHost === undefined)
     || settings.username === undefined
   ) {
     return {
-      message: 'Email is not configured. Set surfaces.email.host, surfaces.email.user, and the email password secret.',
+      message: mode === 'inbox'
+        ? 'Email is not configured. Set surfaces.email.imap.host (or surfaces.email.host), surfaces.email.user, and the email password secret.'
+        : 'Email is not configured. Set surfaces.email.host, surfaces.email.user, and the email password secret.',
       code: 'EMAIL_NOT_CONFIGURED',
     };
   }

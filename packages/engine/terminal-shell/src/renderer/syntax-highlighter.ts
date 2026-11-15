@@ -246,18 +246,6 @@ const NODE_TYPE_COLORS: Record<string, SyntaxRole> = {
 // Default role for unrecognized node types
 const DEFAULT_ROLE: SyntaxRole = 'plain';
 
-// ─── Content Hash ─────────────────────────────────────────────────────────────
-
-/** Cheap DJB2-variant hash for cache keying. */
-function hashString(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) + h) ^ s.charCodeAt(i);
-    h = h >>> 0; // keep unsigned 32-bit
-  }
-  return h;
-}
-
 // ─── AST Walker ──────────────────────────────────────────────────────────────
 
 interface Span {
@@ -495,7 +483,8 @@ export class SyntaxHighlighter {
     const langId = this.fenceToLangId(fenceTag);
     if (!langId) return null; // unsupported language
 
-    const key = `${langId}:${hashString(code)}`;
+    // The whole text is the key: a hash could collide and show another block's colours.
+    const key = `${langId}:${code}`;
     const cached = this.cache.get(key);
     if (cached) {
       // Colours follow the active theme: re-resolve when the theme changed.
@@ -583,7 +572,10 @@ export class SyntaxHighlighter {
         if (parsed) this.service.invalidate(virtualPath);
         this.pending.delete(key);
       }
-      if (landed) for (const listener of this.readyListeners) listener();
+      if (landed) for (const listener of this.readyListeners) {
+        // One listener's failure must not reject this run or starve the rest.
+        try { listener(); } catch (err) { logger.warn('SyntaxHighlighter: ready listener failed', { error: summarizeError(err) }); }
+      }
     });
     this.inflight.add(run);
     void run.finally(() => { this.inflight.delete(run); });

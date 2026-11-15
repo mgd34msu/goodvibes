@@ -32,7 +32,7 @@ export async function refreshHomeGraphQualityReport(
   spaceId: string,
   installationId: string,
   options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined } = {},
-): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number }> {
+): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] }> {
   requireDecisionFeature('semantic Home Graph quality assessment');
   await store.init();
   const originalState = readHomeGraphState(store, spaceId);
@@ -104,9 +104,10 @@ export async function refreshHomeGraphQualityReport(
     if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError || error instanceof KnowledgeRecordAdmissionHeldError) throw new HomeGraphQualityHeldError('stale');
     throw error;
   }
-  const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: guard });
+  const readings = await readHomeGraphQuality(selected.map(({ input }) => input), { ...options, assertCurrent: guard, leaveUnsettledUnanswered: true });
   guard();
   const issues: KnowledgeIssueUpsertInput[] = [];
+  const unansweredDeviceIds: string[] = [];
   try { store.assertRecordSnapshotFrame(() => {
     for (const [index, { node, battery, manual, input }] of selected.entries()) {
       const reading = readings[index]!;
@@ -120,6 +121,16 @@ export async function refreshHomeGraphQualityReport(
       };
       if (manual ?? reading.answers.manualApplicable) append('homegraph.device.missing_manual', `${node.title} has no linked manual or source.`);
       if (battery ?? reading.answers.batteryApplicable) append('homegraph.device.unknown_battery', `${node.title} has no known battery type.`);
+      if (reading.unanswered) {
+        unansweredDeviceIds.push(node.id);
+        // The unsettled questions keep the issue this device already has instead of dropping it.
+        for (const [code, declared] of [['homegraph.device.missing_manual', manual], ['homegraph.device.unknown_battery', battery]] as const) {
+          const existing = declared === undefined ? identities.prepare(code, node.id).original : undefined;
+          if (!existing || preserveLegacyQualityAuthority(existing)) continue;
+          issues.push({ id: existing.id, severity: existing.severity, code: existing.code, message: existing.message, status: existing.status,
+            sourceId: existing.sourceId, nodeId: existing.nodeId, metadata: existing.metadata });
+        }
+      }
     }
     return undefined;
   }); } catch (error) {
@@ -135,7 +146,7 @@ export async function refreshHomeGraphQualityReport(
     homeGraphQualityNamespace(spaceId), () => { guard(); identities.assertCurrent(); for (const reading of readings) reading.assertCurrent(); }, legacy); }
   catch (error) { if (error instanceof KnowledgeIssueReplacementHeldError) throw new HomeGraphQualityHeldError(error.reason);
     if (error instanceof SQLiteObservationRetiredError || error instanceof SemanticIdentityHeldError) throw new HomeGraphQualityHeldError('stale'); throw error; }
-  return { issues: written, retainedLegacyIssues };
+  return { issues: written, retainedLegacyIssues, unansweredDeviceIds };
 }
 
 function qualityIssue(

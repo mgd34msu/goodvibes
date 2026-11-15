@@ -5,18 +5,12 @@ import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/index.ts';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
-import { AGENT_OWNER_TERMINAL_GUARD } from '../platform/src/platform/gate/policy/exec-posture.ts';
 import { EXEC_GATE_TABLE } from './_helpers/gate-readings.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
-// The tools batteries exec reads (credential names, prompts, retries, the
-// owner-terminal reading) and, forwarded with EXEC_GATE_TABLE, the gate's
-// questions, in one fake port. Typing into the owner's `main` session reads as
-// driving a terminal the platform does not own; listing sessions does not.
-useToolReadings([['tmux send-keys -t main', { foreignTerminal: true }]], EXEC_GATE_TABLE);
-
-/** The line the refusal carries, so a person is told which rule stopped them. */
-const RULE = 'the owner\'s terminal is untouchable';
+// The tools batteries exec reads (credential names, prompts, retries) and,
+// forwarded with EXEC_GATE_TABLE, the gate's questions, in one fake port.
+useToolReadings([], EXEC_GATE_TABLE);
 
 const roots: string[] = [];
 
@@ -28,7 +22,6 @@ function agentExecTool() {
   return createExecTool(new ProcessManager(), {
     overflowHandler: new OverflowHandler({ baseDir: root }),
     defaultWorkingDirectory: root,
-    ownerTerminal: AGENT_OWNER_TERMINAL_GUARD,
   });
 }
 
@@ -47,13 +40,9 @@ afterAll(() => {
 });
 
 describe('the Agent exec posture', () => {
-  test('uses the configured permissions without an extra terminal prompt', () => {
-    expect(AGENT_OWNER_TERMINAL_GUARD).toEqual({ posture: 'off' });
-  });
   test.each(['tmux send-keys -t fixture echo owned', 'tmux list-sessions'])('runs authorized terminal command %s through the fixture', async command => {
     const outcome = await run(command);
     expect(outcome.success).toBe(true);
     expect(outcome.stdout).toContain('fixture-tmux:');
-    expect(outcome.stderr).not.toContain(RULE);
   });
 });

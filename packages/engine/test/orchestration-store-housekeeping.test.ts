@@ -695,6 +695,7 @@ function preservedFiles(root: string): string[] {
 describe('worktree register housekeeping', () => {
   test('a refresh preserves attachments made while Git is listing worktrees', async () => {
     const root = makeRepo('wt-refresh-attachment-');
+    runGit(root, ['worktree', 'add', '-b', 'new-worktree', join(root, 'new-worktree')]);
     const registry = new WorktreeRegistry(root);
     registry.attach(root, { sessionId: 'original-session' });
     let finish!: () => void;

@@ -36,7 +36,7 @@ interface CoverageRequirement {
 function parseCliCommands(): readonly string[] {
   const source = readFileSync(join(ROOT, 'src/cli/types.ts'), 'utf-8');
   const unionMatch = source.match(/export type GoodVibesCliCommand =([\s\S]*?);/);
-  if (!unionMatch) return [];
+  if (!unionMatch) throw new Error('GoodVibesCliCommand union not found in src/cli/types.ts');
   return [...unionMatch[1]!.matchAll(/\|\s*'([^']+)'/g)].map((match) => match[1]!).sort();
 }
 
@@ -249,7 +249,10 @@ describe('Agent workspace command parity', () => {
       tasks: { actionIds: ['tasks-filter', 'task-show', 'task-output'] },
     };
 
-    const missing = parseCliCommands()
+    const cliCommands = parseCliCommands();
+    // A reformatted union that captures only part of the list would otherwise gate nothing.
+    expect(cliCommands.length).toBeGreaterThan(10);
+    const missing = cliCommands
       .filter((command) => !shellOnlyCommands.has(command))
       .filter((command) => !hasCoverage(coverage, requirements[command] ?? {}));
 

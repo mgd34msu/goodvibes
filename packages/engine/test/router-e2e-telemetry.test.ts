@@ -80,19 +80,28 @@ function makeTelemetryApi(): {
  * Build a full DaemonApiRouteHandlers stub using createDaemonTelemetryRouteHandlers
  * for the telemetry slice and makeDefaultDaemonHandlerStub for everything else.
  */
+interface StubPrincipal {
+  principalId: string;
+  principalKind: 'token';
+  admin: boolean;
+  scopes: readonly string[];
+}
+
 function makeTelemetryHandlers(
-  opts: { telemetryApiPresent: boolean } = { telemetryApiPresent: true },
+  opts: { telemetryApiPresent: boolean; principal?: StubPrincipal | null } = { telemetryApiPresent: true },
 ): DaemonApiRouteHandlers {
   const api = opts.telemetryApiPresent ? makeTelemetryApi() : null;
 
   // Provide a stub principal with read:telemetry scope so the auth guard passes.
   // The telemetry routes always require an authenticated principal, null returns 401.
-  const stubPrincipal = {
-    principalId: 'test-principal',
-    principalKind: 'token' as const,
-    admin: false,
-    scopes: ['read:telemetry'] as readonly string[],
-  };
+  const stubPrincipal: StubPrincipal | null = opts.principal === undefined
+    ? {
+        principalId: 'test-principal',
+        principalKind: 'token',
+        admin: false,
+        scopes: ['read:telemetry'],
+      }
+    : opts.principal;
 
   const telemetryHandlers = createDaemonTelemetryRouteHandlers({
     telemetryApi: api as never,
@@ -224,5 +233,55 @@ describe('router-e2e telemetry: failure paths (telemetryApi null)', () => {
     const res = await dispatchOperatorRoutes(req, handlers);
     expect(res).not.toBeNull();
     expect(res!.status).toBe(503);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// describe: telemetry routes, authentication and scope
+// ---------------------------------------------------------------------------
+
+describe('router-e2e telemetry: authentication and scope', () => {
+  const paths = ['/api/v1/telemetry', '/api/v1/telemetry/events'];
+
+  for (const path of paths) {
+    test(`GET ${path} without a principal is 401 AUTH_REQUIRED`, async () => {
+      const handlers = makeTelemetryHandlers({ telemetryApiPresent: true, principal: null });
+      const res = await dispatchOperatorRoutes(makeRequest('GET', `http://localhost${path}`), handlers);
+      expect(res?.status).toBe(401);
+      expect((await res!.json() as { code: string }).code).toBe('AUTH_REQUIRED');
+    });
+
+    test(`GET ${path} with a principal lacking read:telemetry is 403 MISSING_SCOPE`, async () => {
+      const handlers = makeTelemetryHandlers({
+        telemetryApiPresent: true,
+        principal: { principalId: 'p', principalKind: 'token', admin: false, scopes: ['read:other'] },
+      });
+      const res = await dispatchOperatorRoutes(makeRequest('GET', `http://localhost${path}`), handlers);
+      expect(res?.status).toBe(403);
+      expect((await res!.json() as { code: string }).code).toBe('MISSING_SCOPE');
+    });
+  }
+
+  test('an admin asking for the raw view passes the scope check and is refused only because raw telemetry is disabled', async () => {
+    const handlers = makeTelemetryHandlers({
+      telemetryApiPresent: true,
+      principal: { principalId: 'a', principalKind: 'token', admin: true, scopes: ['read:telemetry'] },
+    });
+    const res = await dispatchOperatorRoutes(makeRequest('GET', 'http://localhost/api/v1/telemetry?view=raw'), handlers);
+    expect(res?.status).toBe(403);
+    expect((await res!.json() as { code: string }).code).toBe('TELEMETRY_RAW_DISABLED');
+  });
+
+  test('the raw view without read:telemetry-sensitive is refused with 403 even for a read:telemetry principal', async () => {
+    const handlers = makeTelemetryHandlers({ telemetryApiPresent: true });
+    const res = await dispatchOperatorRoutes(makeRequest('GET', 'http://localhost/api/v1/telemetry?view=raw'), handlers);
+    expect(res?.status).toBe(403);
+    expect((await res!.json() as { code: string }).code).toBe('MISSING_SCOPE');
+  });
+
+  test('an unavailable telemetry API is reported as 503 before any credential is examined', async () => {
+    const handlers = makeTelemetryHandlers({ telemetryApiPresent: false, principal: null });
+    const res = await dispatchOperatorRoutes(makeRequest('GET', 'http://localhost/api/v1/telemetry'), handlers);
+    expect(res?.status).toBe(503);
   });
 });

@@ -71,7 +71,7 @@ export function startBundleJudgmentFixture(hold = false, uncertainSetup = false)
       throw new Error('Unexpected synthetic bundle question.');
     }));
     return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
-    } catch { return Response.json({ error: 'Invalid synthetic bundle reading.' }, { status: 400 }); }
+    } catch (error) { return Response.json({ error: 'Invalid synthetic bundle reading.', cause: error instanceof Error ? error.message : String(error) }, { status: 400 }); }
   } });
   const url = `http://127.0.0.1:${server.port}`;
   return { calls, entered, release, url,

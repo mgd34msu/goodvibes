@@ -103,6 +103,21 @@ function sameArtifact(left: ArtifactSnapshot, right: ArtifactSnapshot): boolean 
   return left.kind === 'file' ? right.kind === 'file' && left.bytes.equals(right.bytes) : right.kind === 'absent';
 }
 
+/** Reference slots a ledger evidence record has (types.ts) beyond the five the verifier always writes, less one spare. */
+const MAX_PER_PATH_ARTIFACT_REFERENCES = 94;
+
+/**
+ * One reference per touched path while they fit; past that, a single reference
+ * to the whole set carrying the digest of its sorted path list, so work that
+ * touched many files can still be verified and settled. Every path is still
+ * read, access-checked and byte-compared before this runs.
+ */
+export function artifactReferences(contractId: string, paths: readonly string[]): WorkEvidenceReference[] {
+  if (paths.length <= MAX_PER_PATH_ARTIFACT_REFERENCES) return paths.map(path => ({ kind: 'artifact' as const, ref: `artifact:${contractId}:${path}` }));
+  const sorted = [...paths].sort();
+  return [{ kind: 'artifact' as const, ref: `artifact-set:${contractId}:${sorted.length} files`, digest: hashState(sorted as unknown as EntryType) }];
+}
+
 export interface VerifiedNativeWorkExecution {
   readonly attestation: NativeWorkAttestation;
   readonly report: string;
@@ -325,7 +340,6 @@ export async function verifyNativeWorkExecution(options: {
   }
   const root = evidenceRoot(contract);
   const paths = [...new Set(contract.units.flatMap(unit => unit.touchedPaths))];
-  if (paths.length > 94) throw new Error('Native evidence exceeds ledger reference capacity');
   const captured: (ArtifactSnapshot & { readonly path: string })[] = [];
   let bytes = 0;
   for (const path of paths) {
@@ -418,7 +432,7 @@ export async function verifyNativeWorkExecution(options: {
     { kind: 'test', ref: `check:${contract.id}:${result.check.id}` },
     { kind: 'test', ref: `execution:${contract.id}` },
     { kind: 'test', ref: `receipt:${contract.id}` },
-    ...captured.map(item => ({ kind: 'artifact' as const, ref: `artifact:${contract.id}:${item.path}` }))];
+    ...artifactReferences(contract.id, captured.map(item => item.path))];
   const criteriaResults = source.criteria.map((_text, criterionIndex) => ({ criterionIndex,
     status: result.verdicts.get(`native.c${criterionIndex}`) === 'met' ? 'satisfied' as const : result.verdicts.get(`native.c${criterionIndex}`) === 'unmet' ? 'unsatisfied' as const : 'unknown' as const,
     references: decisionReferences.map(item => item.ref) }));

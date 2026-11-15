@@ -1,4 +1,5 @@
 import { MODAL_TONES } from './modal-theme.ts';
+import { runModalCommand } from './modal-surface-helpers.ts';
 import type {
   DivergenceDashboardSnapshot,
   DivergenceStats,
@@ -24,9 +25,9 @@ import type {
 // gate, history, permission audit, lint findings, preflight review, and
 // simulation samples render as non-selectable rows (the host windows/scrolls
 // them). EVERY dispatchable key in the original view (s/f/l/p/b) already
-// routed to `/policy <sub>` via executeCommand, none were in-view mutations;
-// the earlier view's promote/rollback confirm step is dropped per charter (never fold
-// a confirm into a modal) and the command dispatches directly. Determinism:
+// routed to `/policy <sub>` via executeCommand, none were in-view mutations.
+// Promote and rollback change the active enforcement bundle, so they use the
+// host's standard second-press confirm (like device revoke and sandbox stop). Determinism:
 // timestamps are formatted (fmtTime/fmtRate), never read from the clock.
 // ---------------------------------------------------------------------------
 
@@ -93,8 +94,8 @@ class PolicyModalSurface implements ConfigModalSurface {
     { key: 's', id: 'simulate', label: 'simulate' },
     { key: 'f', id: 'preflight', label: 'preflight' },
     { key: 'l', id: 'lint', label: 'lint' },
-    { key: 'p', id: 'promote', label: 'promote' },
-    { key: 'b', id: 'rollback', label: 'rollback' },
+    { key: 'p', id: 'promote', label: 'promote', confirm: true },
+    { key: 'b', id: 'rollback', label: 'rollback', confirm: true },
   ];
 
   buildView(): ConfigModalView {
@@ -193,8 +194,7 @@ class PolicyModalSurface implements ConfigModalSurface {
     // there is no separate `/policy rollout`.
     const sub = id === 'simulate' ? 'simulate' : id === 'preflight' ? 'preflight' : id === 'lint' ? 'lint' : id === 'promote' ? 'promote' : id === 'rollback' ? 'rollback' : null;
     if (!sub) return;
-    void ctx.executeCommand?.('policy', [sub]);
-    ctx.setStatus(`Dispatched /policy ${sub}.`);
+    runModalCommand(ctx, 'policy', [sub], `/policy ${sub}`);
   }
 }
 

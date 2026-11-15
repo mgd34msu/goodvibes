@@ -26,3 +26,13 @@ export const FIRST_FRAME_TIMEOUT_MS = 5_000;
  * its own kind of lie.
  */
 export const FRAMES_FLOWING_STALE_MS = 2_000;
+
+/**
+ * Default bound on silence AFTER audio has flowed.
+ *
+ * The first-frame bound only covers a stream that never delivers. A recorder
+ * can also deliver and then stop (a device that went away across a suspend,
+ * a stalled pipe) while its process lives on; without this the listener stays
+ * in `listening` over a dead stream for good.
+ */
+export const FRAME_GAP_TIMEOUT_MS = 10_000;

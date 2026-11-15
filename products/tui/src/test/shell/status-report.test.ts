@@ -101,6 +101,12 @@ describe('/status report', () => {
     expect(report()).toMatch(/microphone +closed/);
   });
 
+  test('keep-awake the OS refused does not say sleep is disabled', () => {
+    const text = report({ keepAwake: true, keepAwakeRefused: true });
+    expect(text).not.toContain('disabled (keep-awake is on)');
+    expect(text).toMatch(/sleep +allowed \(keep-awake is on, but the OS refused it/);
+  });
+
   test('an unpriced model says so instead of a false cost', () => {
     expect(report({ cost: null })).toContain('n/a (model not priced)');
   });

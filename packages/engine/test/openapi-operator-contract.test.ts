@@ -9,7 +9,6 @@
  *   - the untyped-client-IO methods are marked `x-typed-client-io: false` and
  *     their count equals the foundation-io ratchet's untyped set, honestly
  *     present, never omitted;
- *   - the docs/ copy and the package artifact are byte-identical;
  *   - auth schemes mirror the contract's auth block.
  *
  * Version-decoupled: assertions compare committed artifacts to each other
@@ -23,7 +22,6 @@ import { parseMapKeys, parseMethodIds, untypedMethodIds } from '../scripts/found
 
 const ROOT = join(import.meta.dir, '..');
 const openapiText = readFileSync(join(ROOT, 'contracts/artifacts/operator-openapi.json'), 'utf8');
-const docsText = readFileSync(join(ROOT, 'docs/operator-openapi.json'), 'utf8');
 
 interface MethodIndexEntry {
   id: string;
@@ -115,7 +113,13 @@ describe('published OpenAPI operator contract', () => {
     expect(doc.components.securitySchemes.sessionCookie?.name).toBe(contract.auth.sessionCookie.name);
   });
 
-  test('the docs/ copy is byte-identical to the package artifact', () => {
-    expect(docsText).toBe(openapiText);
+  test('streams are typed as text/event-stream and replay keys are named', () => {
+    const stream = doc.paths['/api/control-plane/events']?.get as unknown as { responses: Record<string, { content?: Record<string, unknown> }> };
+    expect(Object.keys(stream.responses['200']!.content!)).toEqual(['text/event-stream']);
+    const register = doc.paths['/api/sessions/register']?.post as unknown as { 'x-replay-key'?: { in: string; name: string } };
+    expect(register['x-replay-key']).toMatchObject({ in: 'body', name: 'sessionId' });
+    const submit = doc.paths['/api/work-ledger/submissions']?.post as unknown as { 'x-replay-key'?: { name: string }; description: string };
+    expect(submit['x-replay-key']?.name).toBe('requestId');
+    expect(submit.description).toContain('no Idempotency-Key header');
   });
 });

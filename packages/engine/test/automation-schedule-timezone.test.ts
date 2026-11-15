@@ -28,8 +28,9 @@ describe('requested-zone cron is independent of process-local DST setters', () =
     const source = new URL('../platform/src/platform/scheduler/scheduler.ts', import.meta.url).pathname;
     const script = `import { TaskScheduler } from ${JSON.stringify(source)}; const from = ${Date.parse(after)}; const next = new TaskScheduler('unused-test-store.json').getNextRun(${JSON.stringify(expression)}, new Date(from), ${JSON.stringify(timezone)}).getTime(); console.log(JSON.stringify({ next, after: from, forward: next > from }));`;
     // A broken local-calendar advance used to loop forever. Bound the owned
-    // child so that regression fails rather than hanging the entire test lane.
-    const result = Bun.spawnSync([process.execPath, '--eval', script], { env: { ...process.env, TZ: processZone }, stdout: 'pipe', stderr: 'pipe', timeout: 2000 });
+    // child so that regression fails rather than hanging the entire test lane;
+    // the bound is generous because a loaded machine starts a child slowly.
+    const result = Bun.spawnSync([process.execPath, '--eval', script], { env: { ...process.env, TZ: processZone }, stdout: 'pipe', stderr: 'pipe', timeout: 60_000 });
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout.toString())).toEqual({ next: Date.parse(expected), after: Date.parse(after), forward: true });
   });

@@ -128,7 +128,7 @@ export const deviceConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 200,
     ...intRange(1, 5000),
-    description: 'How many captures are kept at once across all paired phones. Past this count the oldest are deleted even while inside the retention window, so a burst of captures cannot fill the disk between sweeps.',
+    description: 'How many captures are kept at once across all paired phones. The count is enforced when housekeeping runs (see device.capture.sweepIntervalMinutes): then the oldest past it are deleted even while inside the retention window. A burst of captures can exceed it until the next sweep.',
   },
   {
     key: 'device.capture.sweepIntervalMinutes',

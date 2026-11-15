@@ -5,6 +5,7 @@ import { describeInterruption, type CheckoutRegistry, type InFlightCheckout, typ
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
 import { CheckoutOwnershipError } from './checkout-ownership.js';
 import { OwnedWork } from '../utils/owned-work.js';
+import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { PaymentsServiceDeps } from './payments-gateway-service.js';
 
@@ -72,6 +73,8 @@ export interface InterruptedCheckoutRecovery {
    */
   readonly notice: 'delivered' | 'failed' | 'already-notified';
   readonly message: string;
+  /** For `action: 'failed'`: the error class that stopped settling this record. */
+  readonly reason?: string | undefined;
   /**
    * Present when the record carried a persisted delivery report and the
    * delivery-keyed window rules were applied; the audit record for which
@@ -189,17 +192,8 @@ export class CheckoutRecovery {
           if (!isDeepStrictEqual(actual, record)) throw new CheckoutOwnershipError();
         }
         results.push(await this.settleInterrupted(record, verdict, current, io));
-      } catch {
-        results.push({
-          purchaseId: record.purchaseId,
-          merchantDomain: record.merchantDomain,
-          verdict,
-          action: 'failed',
-          reservationReleased: false,
-          notified: false,
-          notice: 'failed',
-          message: 'Recovery failed for this purchase. Its remaining payment evidence requires inspection.',
-        });
+      } catch (error) {
+        results.push(await this.reportFailedSettlement(record, verdict, error, io));
       } finally {
         // A reporting timeout retires the record guard immediately, but an
         // ignored cancellation cannot hand its real execution lease to a new
@@ -214,6 +208,67 @@ export class CheckoutRecovery {
     }
     this.current();
     return { swept: true, settlements: results };
+  }
+
+  /**
+   * One record could not be settled. The cause is logged (error class and
+   * message only, never payment evidence) and carried in the result as
+   * `reason`; the owner is told once, as for a kept record, unless the sweep
+   * stopped because this daemon lost the payments lease or is closing.
+   */
+  private async reportFailedSettlement(
+    record: InFlightCheckout,
+    verdict: InterruptedVerdict,
+    error: unknown,
+    io: OwnedWork,
+  ): Promise<InterruptedCheckoutRecovery> {
+    const reason = error instanceof Error && error.name !== 'Error' ? error.name : 'settlement-error';
+    logger.error('Checkout recovery could not settle an interrupted purchase', {
+      purchaseId: record.purchaseId,
+      verdict,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    const message = `Recovery failed for this purchase (${reason}). Its remaining payment evidence requires inspection.`;
+    let notified = false;
+    let notice: InterruptedCheckoutRecovery['notice'] = 'failed';
+    if (record.recoveryNotifiedAtMs !== undefined) {
+      notice = 'already-notified';
+    } else if (!(error instanceof CheckoutOwnershipError) && !this.closed && this.deps.isPaymentsLeader() && !this.abort.signal.aborted) {
+      // An ownership error means the record changed hands or was rewritten since this sweep read it;
+      // telling the owner about a snapshot that is no longer the record would be wrong.
+      const stillOurs = () => this.current();
+      try {
+        const deliveries = await this.io(
+          () => this.deps.notifier.deliver({ kind: 'notice', message, signal: this.abort.signal, assertCurrent: stillOurs }),
+          'The recovery failure notice delivery', stillOurs, io,
+        );
+        notified = deliveries.some((delivery) => delivery.delivered);
+      } catch { notified = false; }
+      notice = notified ? 'delivered' : 'failed';
+      if (notified) {
+        // The record is kept (it was not settled), so stamp it as a kept record is.
+        try {
+          // Stamp only the record as it was read: a stale snapshot written back would rewind a
+          // journal entry that has moved on, or resurrect one that closed meanwhile.
+          const latest = (await this.deps.journal.list()).find(entry => entry.purchaseId === record.purchaseId);
+          if (latest !== undefined && isDeepStrictEqual(latest, record)) {
+            await this.deps.journal.put({ ...record, recoveryNotifiedAtMs: (this.deps.now ?? Date.now)() });
+          }
+        } catch { /* the next boot repeats the notice */ }
+      }
+    }
+    return {
+      purchaseId: record.purchaseId,
+      merchantDomain: record.merchantDomain,
+      verdict,
+      action: 'failed',
+      reservationReleased: false,
+      notified,
+      notice,
+      message,
+      reason,
+    };
   }
 
   private async settleInterrupted(

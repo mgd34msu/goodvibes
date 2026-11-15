@@ -1,4 +1,5 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { settingsOutcomeError } from './agent-settings-outcome.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { assertCurrentToolInvocation, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
   type ToolInputProjector, type ToolPreparedSettingsMutation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -12,7 +13,8 @@ import { agentResearchSourceOwner } from '../agent/protected-research-report.ts'
 import { bindSettingSchemaDescriptors, coerceHarnessSettingValue } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
-import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, isSecretConfigKey } from '../config/secret-config.ts';
+import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
+import { assertSettingsWriteAllowed } from './agent-settings-admission.ts';
 import { assertAgentWorkspaceImportPreviewPrivacy, captureAgentWorkspaceTuiSettingsImport } from '../input/agent-workspace-settings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
@@ -107,6 +109,10 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
         const setting = schema.find(setting => setting.key === entry.key);
         if (!setting || setting.kind === 'host') throw new ToolInputProjectionError('unavailable');
         const coerced = coerceHarnessSettingValue(setting, entry.value);
+        // A raw credential in the import is stored under the key's own secret; only references can name another key's secret.
+        if (!((isSecretConfigKey(entry.key) || isSecretBearingConfigKey(entry.key)) && typeof coerced === 'string' && !isSecretReferenceValue(coerced))) {
+          assertSettingsWriteAllowed('set', entry.key, coerced);
+        }
         privateValues.set(entry.key, coerced);
         let value = coerced;
         if (isSecretConfigKey(entry.key) || isSecretBearingConfigKey(entry.key)) {
@@ -196,14 +202,29 @@ export async function executeAdmittedAgentSettingsImport(context: CommandContext
   let verified = receipt.status === 'committed';
   if (verified) {
     try {
-      capture.plan.assertSourceCurrent?.();
+      // Whether the commit landed is a question for the owners' completion checks.
+      // The pre-commit source and abort fences are not asked again: a cancel or a
+      // source change after the write does not make a finished import partial.
       if (capture.plan.mutation) capture.plan.owner.assertCompletedMutation(capture.plan.mutation);
       if (capture.plan.secretImport) capture.plan.secretImport.owner.assertCompletedImport(capture.plan.secretImport.mutation);
       if (capture.plan.subscriptionImport) capture.plan.subscriptionImport.owner.assertCompletedImport(capture.plan.subscriptionImport.mutation);
       if (capture.plan.remoteImport) assertCompletedRemoteSettingsImportPrecondition(capture.plan.remoteImport);
     } catch { verified = false; }
   }
-  return { success: receipt.status === 'committed' && verified, output: JSON.stringify({ status: receipt.status, action: 'import_goodvibes_settings',
+  return importReceiptResult(receipt, verified);
+}
+
+/** What the model is told about an import receipt: refused, partial, unknown and unconfirmed are different next steps. */
+export function importReceiptResult(
+  receipt: { readonly status: 'committed' | 'partial' | 'unknown'; readonly completedPaths?: unknown; readonly uncertainPath?: unknown; readonly refused?: boolean; readonly refusalReason?: unknown },
+  verified: boolean,
+): { readonly success: boolean; readonly output: string; readonly error?: string } {
+  const refused = receipt.refused === true;
+  const refusalReason = (['stale', 'spent', 'managed', 'read-only', 'owner-fault'] as const).find(known => known === receipt.refusalReason && refused);
+  return { success: receipt.status === 'committed' && verified, output: JSON.stringify({ status: refused ? 'refused' : receipt.status, action: 'import_goodvibes_settings',
+    ...(refusalReason ? { refusalReason } : {}),
     verifiedInOwningStore: verified, completedPaths: receipt.completedPaths, ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
-    ...(!verified ? { error: 'Settings import is partial or unknown; no effect was retried.' } : {}) };
+    ...(!verified ? { error: receipt.status === 'committed'
+      ? 'The import was committed but could not be confirmed in the owning stores. It was not retried; read the imported settings before relying on them.'
+      : settingsOutcomeError(receipt.status, refused, refusalReason, 'import') } : {}) };
 }

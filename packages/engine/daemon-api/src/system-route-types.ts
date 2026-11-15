@@ -29,6 +29,8 @@ export interface ConfigManagerLike {
   get(key: string): unknown;
   getAll(): Record<string, unknown>;
   setDynamic(key: string, value: unknown): void;
+  /** Remove the explicit value of one key (every key when omitted) so it reads as its default again, in every tier that holds it. */
+  reset?(key?: string): void;
   /**
    * Absolute path of the settings file this manager writes to.
    *
@@ -56,7 +58,7 @@ export interface ConfigManagerLike {
 }
 
 export interface IntegrationApprovalSnapshotSourceLike {
-  getApprovalSnapshot(): unknown;
+  getApprovalSnapshot(approvalId?: string): unknown;
 }
 
 export interface PlatformServiceManagerLike {
@@ -154,8 +156,9 @@ export type ApprovalRememberTier = 'session' | 'exact' | 'command-class' | 'path
 export const APPROVAL_REMEMBER_TIERS: readonly ApprovalRememberTier[] = ['session', 'exact', 'command-class', 'path', 'tool'];
 
 export interface ApprovalBrokerLike {
-  claimApproval(approvalId: string, actor: string, actorSurface: string, note?: string): Promise<unknown | null>;
-  cancelApproval(approvalId: string, actor: string, actorSurface: string, note?: string): Promise<unknown | null>;
+  claimApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
+  cancelApproval(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }): Promise<unknown | null>;
+  releaseApproval?(approvalId: string, actor: string, actorSurface: string, note?: string, outcome?: { applied?: boolean | undefined }, holdId?: string): Promise<unknown | null>;
   resolveApproval(
     approvalId: string,
     input: {
@@ -182,6 +185,8 @@ export interface ApprovalBrokerLike {
        * command's terminal prompt). selectedHunks, when present, supersedes it.
        */
       readonly modifiedArgs?: Record<string, unknown> | undefined;
+      /** Set by the broker to whether this call itself moved the record. */
+      readonly outcome?: { applied?: boolean | undefined } | undefined;
     },
   ): Promise<unknown | null>;
 }
@@ -193,9 +198,18 @@ export interface WorkspaceSwapManagerLike {
   /** Monotonic admitted-transition epoch, including failed and same-path swaps. */
   getWorkspaceRevision?(): number;
   requestSwap(newWorkingDir: string): Promise<
-    | { ok: true; previous: string; current: string }
+    | {
+      ok: true;
+      previous: string;
+      current: string;
+      /** False when the new path could not be saved, so it will not survive a restart. */
+      persisted?: boolean | undefined;
+      /** Subsystems that keep using the previous working directory until restart. */
+      requiresRestart?: readonly string[] | undefined;
+    }
     | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
     | { ok: false; code: 'INVALID_PATH'; reason: string }
+    | { ok: false; code: 'REROOT_FAILED'; reason: string }
   >;
 }
 
@@ -254,6 +268,18 @@ export interface DaemonSystemRouteContext {
   readonly inspectInboundTls: (surface: 'controlPlane' | 'httpListener') => unknown;
   readonly inspectOutboundTls: () => unknown;
   readonly isValidConfigKey: (key: string) => boolean;
+  /**
+   * Whether a config key holds credential material. When supplied, the legacy
+   * single-key write refuses a literal for such a key and the config read
+   * redacts it. Absent hosts keep today's behaviour.
+   */
+  readonly isSecretBearingConfigKey?: ((key: string) => boolean) | undefined;
+  /**
+   * The manager's own normalization of a requested value (permission-mode
+   * aliases, money strings). The config write compares the held value against
+   * this, so a value that was normalized on the way in is reported as applied.
+   */
+  readonly coerceConfigValue?: ((key: string, value: unknown) => unknown) | undefined;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly platformServiceManager: PlatformServiceManagerLike;

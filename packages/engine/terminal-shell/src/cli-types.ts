@@ -68,6 +68,11 @@ export interface GoodVibesCliFlags {
   readonly nonInteractive: boolean;
   /** `doctor --strict`: advisory findings also fail (exit 1), for CI. Ignored by every other command. */
   readonly strict: boolean;
+  /** `run` limits: declared so help and completions list them; `extractHeadlessRunFlags` consumes them before this parser runs. */
+  readonly timeout?: string | undefined;
+  readonly maxTurns?: string | undefined;
+  readonly omitAccumulated?: boolean | undefined;
+  readonly answerPermissions?: boolean | undefined;
 }
 
 export interface GoodVibesCliParseResult {

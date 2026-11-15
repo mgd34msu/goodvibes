@@ -7,7 +7,7 @@ import {
 import type { RoutingChannelRoute } from '../platform/src/platform/channels/host-routing/route-store.ts';
 import { RouteStore } from '../platform/src/platform/channels/host-routing/route-store.ts';
 import { createInboxRouteResolver } from '../platform/src/platform/channels/host-routing/inbox-bridge.ts';
-import { makeTmpWorkingDir } from './_helpers/daemon-routing-temp.ts';
+import { makeTmpWorkingDir } from './_helpers/routing-registration.js';
 
 function route(partial: Partial<RoutingChannelRoute>): RoutingChannelRoute {
   return {
@@ -124,6 +124,6 @@ test('a live-store failure remains distinct from no owner binding', async () => 
   await store.init();
   const bridge = createInboxRouteResolver(createRoutingResolver(store));
   await store.close();
-  try { expect(() => bridge({ provider: 'fixture' })).toThrow('not initialized'); }
+  try { expect(() => bridge({ provider: 'fixture' })).toThrow('RouteStore has been closed'); }
   finally { tmp.cleanup(); }
 });

@@ -32,6 +32,8 @@ export interface NativeConversationCapture extends NativeConversationKey {
   readonly reason: 'unsupported-source' | 'missing-context' | 'semantic' | 'exhausted' | null;
   readonly proposalsSpent: number; readonly proposal: NativeConversationProposal | null;
   readonly decisions: readonly NativeConversationDecision[]; readonly association: NativeConversationAssociation | null;
+  /** Only on a `turn`: its hosted turn has ended, so this input can never be dispatched again. Final. */
+  readonly settled?: true | undefined;
 }
 export interface NativeConversationBindingRefs { readonly authorityId: string; readonly authorityRevision: string; readonly scopeId: string; readonly scopeRevision: string }
 interface ValidatedCapture { readonly bindings: Map<string, JevDecisionBinding>; readonly sourceBase?: Omit<JevDecisionBinding, 'actionRevision'> }
@@ -60,8 +62,9 @@ export interface NativeConversationStorage {
   close(): Promise<void>;
 }
 export class NativeConversationStorageError extends Error {
-  constructor(readonly code: 'invalid' | 'conflict' | 'cancelled' | 'not-found' | 'closed' | 'unavailable' | 'future-version') {
-    super(`Native conversation storage: ${code}`); this.name = 'NativeConversationStorageError';
+  /** `detail` is fixed text naming the current state and the moves that remain; never an owner's raw failure message. */
+  constructor(readonly code: 'invalid' | 'conflict' | 'cancelled' | 'not-found' | 'closed' | 'unavailable' | 'future-version', detail?: string) {
+    super(`Native conversation storage: ${code}${detail ? `. ${detail}` : ''}`); this.name = 'NativeConversationStorageError';
   }
 }
 /** Compatibility only: existing version-one records and recorded sites keep
@@ -172,6 +175,7 @@ const captureFields = {
   route: enumSchema(['converse', 'answer', 'contract']).nullable(), reason: enumSchema(['unsupported-source', 'missing-context', 'semantic', 'exhausted']).nullable(),
   proposalsSpent: revision.max(NATIVE_CONVERSATION_MAX_PROPOSALS), proposal: proposalSchema.nullable(),
   association: strictObject({ workId: id, attemptId: id, ledgerRevision: revision.min(1) }).nullable(),
+  settled: literal(true).optional(),
 };
 const opaque = string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
 const captureSchemas = {
@@ -224,6 +228,7 @@ export function parseNativeConversationCapture(value: unknown, original?: Native
     if ((parsed.state === 'processing') !== (parsed.stage !== null)) throw new Error();
     if (proposal && parsed.proposalsSpent < 1) throw new Error();
     if ((parsed.state === 'associated') !== (parsed.association !== null)) throw new Error();
+    if (parsed.settled && parsed.state !== 'turn') throw new Error();
     const result = { ...parsed, proposal, ...(parsed.continuation ? { continuation: sameSource && original?.continuation ? original.continuation : captureNativeConversationContinuation(parsed.continuation) } : {}), decisions: retained };
     privateSet(validatedCaptures, result, metadata);
     if (parsed.state === 'turn') {

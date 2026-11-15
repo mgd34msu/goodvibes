@@ -93,6 +93,20 @@ export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
   }
 }
 
+/**
+ * What changed for an owner whose saved `permissions.mode` is a retired value.
+ *
+ * None of the retired values asks before ordinary work any more: they all run as
+ * safe-owner, where only critical actions ask. A saved `prompt` that used to ask on
+ * every change is loosened by that, so a surface that reads the saved mode says so
+ * instead of changing the posture silently. Undefined for a current or unknown value.
+ */
+export function retiredPermissionModeNotice(mode: unknown): string | undefined {
+  if (mode !== 'prompt' && mode !== 'normal' && mode !== 'accept-edits' && mode !== 'custom') return undefined;
+  return `permissions.mode "${mode}" is retired and now runs as safe-owner: ordinary actions run without asking and only critical actions ask. `
+    + 'To be asked less or more, choose safe-jev or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.';
+}
+
 export function normalizePermissionMode(mode: unknown): GatePresetName {
   return parsePermissionMode(mode) ?? 'safe-owner';
 }

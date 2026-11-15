@@ -126,6 +126,10 @@ export class WorkTreeTimingStore {
         this.openTurn = userMessageIndex;
         this.trim(this.turns, MAX_TURNS);
     }
+    /** Whether the turn answering this user message is still running. */
+    isTurnOpen(userMessageIndex: number): boolean {
+        return this.openTurn === userMessageIndex;
+    }
     /**
      * Close the open turn with how it ended. Returns the closed turn's index and
      * record, or undefined when no turn was open.

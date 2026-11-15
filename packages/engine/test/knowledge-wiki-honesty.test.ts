@@ -21,9 +21,10 @@ import { HomeGraphService } from '../platform/src/platform/knowledge/home-graph/
 import { isRepairedAnswerGap } from '../platform/src/platform/knowledge/semantic/answer-gaps.js';
 import { resetHomeGraphSpace } from '../platform/src/platform/knowledge/home-graph/reset.js';
 import { homeAssistantKnowledgeSpaceId, knowledgeSpaceMetadata } from '../platform/src/platform/knowledge/spaces.js';
+import { KNOWLEDGE_EXTRACTOR_VERSION } from '../platform/src/platform/knowledge/extraction-policy.js';
 import type { KnowledgeNodeRecord } from '../platform/src/platform/knowledge/types.js';
-import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/dist/index.js';
-import type { DaemonKnowledgeRouteContext } from '../daemon-api/dist/index.js';
+import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/src/index.ts';
+import type { DaemonKnowledgeRouteContext } from '../daemon-api/src/index.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 import type { MemoryRegistry } from '../platform/src/platform/state/memory-registry.js';
 import type { MemoryStore } from '../platform/src/platform/state/memory-store.js';
@@ -451,7 +452,7 @@ describe('knowledge wiki honesty: unlink is a real reversal (unlink sub-defect)'
       extraction: { title: body, summary: body, excerpt: body, sections: [body],
         structure: { lineCount: 1, headingCount: 0, searchText: body },
         metadata: { homeGraph: true, homeAssistant: { installationId: 'house' },
-          knowledgeSpaceId: 'homeassistant:house', namespace: 'homeassistant:house', extractorVersion: 3 } },
+          knowledgeSpaceId: 'homeassistant:house', namespace: 'homeassistant:house', extractorVersion: KNOWLEDGE_EXTRACTOR_VERSION } },
     };
     const candidate = { reference: 'candidate-1', subject: { kind: 'ha_device', title: 'TV',
       aliases: ['TV'], homeAssistant: { objectKind: 'device', objectId: 'tv' } }, entities: [] };

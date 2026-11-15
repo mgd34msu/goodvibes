@@ -67,6 +67,7 @@ import {
   type StatusTone,
 } from '../../components/ui';
 import { DateField } from '../../components/ui/DateField';
+import { formatDateOnly } from './format-date';
 import { PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { DatesGiftHistoryBody } from './DatesGiftHistoryPeek';
@@ -165,12 +166,6 @@ function daysUntilLabel(daysUntil: number | null): string {
   if (daysUntil === 1) return 'Tomorrow';
   if (daysUntil < 0) return `${String(Math.abs(daysUntil))} days ago`;
   return `in ${String(daysUntil)} days`;
-}
-
-function formatDateOnly(iso: string | null): string {
-  if (!iso) return 'No date';
-  const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function joinMeta(parts: readonly (string | null | undefined | false)[]): string {
@@ -387,14 +382,14 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const proposeOccasion = useMutation({
-    mutationFn: () =>
+    mutationFn: (draft: OccasionDraft) =>
       platformClient.operator.occasions.propose({
-        title: occasion.title.trim(),
-        date: occasion.date,
-        ...(occasion.kind ? { kind: occasion.kind } : {}),
-        ...(occasion.person.trim() ? { person: occasion.person.trim() } : {}),
-        recurrence: occasion.recurrence,
-        ...(occasion.leadDays.trim() ? { leadDays: Number(occasion.leadDays) } : {}),
+        title: draft.title.trim(),
+        date: draft.date,
+        ...(draft.kind ? { kind: draft.kind } : {}),
+        ...(draft.person.trim() ? { person: draft.person.trim() } : {}),
+        recurrence: draft.recurrence,
+        ...(draft.leadDays.trim() ? { leadDays: Number(draft.leadDays) } : {}),
       }),
     onMutate: () => occasionDraftEpochRef.current,
     onSuccess: (result, _variables, askedAtEpoch) => {
@@ -477,8 +472,15 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   /** Editing any field makes an earlier preview stale, so it is dropped. */
   function editOccasion(patch: Partial<OccasionDraft>): void {
     occasionDraftEpochRef.current += 1;
-    setOccasion((current) => ({ ...current, ...patch }));
+    const next = { ...occasion, ...patch };
+    setOccasion(next);
     setOccasionProposal(null);
+    // Choosing the kind is the step the preview asked for, so preview again
+    // for them instead of leaving Confirm disabled with the reason gone.
+    const onlyKind = Object.keys(patch).every((key) => key === 'kind');
+    if (onlyKind && occasionProposal?.ok && occasionProposal.needsKind && next.kind && next.title.trim() && next.date) {
+      proposeOccasion.mutate(next);
+    }
   }
 
   function editPlan(patch: Partial<PlanDraft>): void {
@@ -489,12 +491,22 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
 
   function submitOccasionProposal(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (occasion.title.trim() && occasion.date) proposeOccasion.mutate();
+    if (occasion.title.trim() && occasion.date) proposeOccasion.mutate(occasion);
   }
 
   function submitPlanProposal(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (plan.title.trim() && plan.from && plan.to) proposePlan.mutate();
+  }
+
+  /** A sweep sends due nudges through the delivery channels for real, so it asks first. */
+  async function askSweep(): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Run the sweep now?',
+      description: 'This housekeeps your profile and delivers any nudges that are due through their channels right away.',
+      confirmLabel: 'Run sweep',
+    });
+    if (ok) runSweep.mutate();
   }
 
   async function askRemove(target: RemovalTarget): Promise<void> {
@@ -890,7 +902,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
                 <p className="dates-state__text">No sweep has run yet.</p>
               )}
               <div>
-                <Button variant="outline" size="sm" disabled={runSweep.isPending} onClick={() => runSweep.mutate()}>
+                <Button variant="outline" size="sm" disabled={runSweep.isPending} onClick={() => void askSweep()}>
                   {runSweep.isPending ? 'Sweeping…' : 'Run sweep now'}
                 </Button>
               </div>

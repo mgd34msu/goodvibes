@@ -1,4 +1,4 @@
-import type { MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewState, MemoryScope, MemorySearchFilter } from './memory-store.js';
+import type { MemoryBundle, MemoryClass, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewState, MemoryScope, MemorySearchFilter } from './memory-store.js';
 
 export const MEMORY_SCHEMA_VERSION = 2;
 
@@ -176,6 +176,122 @@ export function clampConfidence(value: unknown): number {
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : 60;
 }
 
+const MEMORY_CLASSES: ReadonlySet<string> = new Set<MemoryClass>(['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership']);
+const MEMORY_SCOPES: ReadonlySet<string> = new Set<MemoryScope>(['session', 'project', 'team']);
+const PROVENANCE_KINDS: ReadonlySet<string> = new Set(['session', 'turn', 'task', 'event', 'file']);
+
+/** Most records and links one imported bundle may carry. */
+export const MAX_MEMORY_BUNDLE_RECORDS = 10_000;
+export const MAX_MEMORY_BUNDLE_LINKS = 50_000;
+const MAX_SUMMARY_CHARS = 20_000;
+const MAX_DETAIL_CHARS = 1_000_000;
+const MAX_TAGS = 200;
+const MAX_TAG_CHARS = 500;
+const MAX_PROVENANCE_LINKS = 500;
+const MAX_REF_CHARS = 2_000;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The same shape rules the read path enforces (rowToRecord), applied before a
+ * write: a value the store would refuse to read back is refused when it is
+ * written, naming the field, so one bad row never makes every later read fail.
+ * Only the fields present are checked; `summary` and `cls` are required by the
+ * callers that create a record.
+ */
+export function assertValidMemoryFields(fields: {
+  readonly scope?: unknown;
+  readonly cls?: unknown;
+  readonly summary?: unknown;
+  readonly detail?: unknown;
+  readonly tags?: unknown;
+  readonly provenance?: unknown;
+}, label = 'memory record'): void {
+  const bad = (field: string, expected: string): never => {
+    // The caller's value is the fault, so a route relaying this answers 400, not a server error.
+    throw Object.assign(new Error(`Invalid ${label}: '${field}' must be ${expected}. Nothing was stored.`), { status: 400 });
+  };
+  if (fields.scope !== undefined && !MEMORY_SCOPES.has(String(fields.scope))) bad('scope', 'one of session, project, team');
+  if (fields.cls !== undefined && !MEMORY_CLASSES.has(String(fields.cls))) bad('cls', `one of ${[...MEMORY_CLASSES].join(', ')}`);
+  if (fields.summary !== undefined) {
+    if (typeof fields.summary !== 'string' || !fields.summary.trim()) bad('summary', 'a non-empty string');
+    else if (fields.summary.length > MAX_SUMMARY_CHARS) bad('summary', `at most ${MAX_SUMMARY_CHARS} characters`);
+  }
+  if (fields.detail !== undefined && fields.detail !== null) {
+    if (typeof fields.detail !== 'string') bad('detail', 'a string');
+    else if (fields.detail.length > MAX_DETAIL_CHARS) bad('detail', `at most ${MAX_DETAIL_CHARS} characters`);
+  }
+  if (fields.tags !== undefined) {
+    if (!Array.isArray(fields.tags) || fields.tags.length > MAX_TAGS
+      || !fields.tags.every((tag) => typeof tag === 'string' && tag.length <= MAX_TAG_CHARS)) {
+      bad('tags', `an array of at most ${MAX_TAGS} strings of at most ${MAX_TAG_CHARS} characters`);
+    }
+  }
+  if (fields.provenance !== undefined) {
+    const provenance = fields.provenance;
+    if (!Array.isArray(provenance) || provenance.length > MAX_PROVENANCE_LINKS
+      || !provenance.every((link) => isPlainObject(link) && PROVENANCE_KINDS.has(String(link.kind))
+        && typeof link.ref === 'string' && link.ref.length <= MAX_REF_CHARS
+        && (link.label === undefined || typeof link.label === 'string'))) {
+      bad('provenance', `an array of at most ${MAX_PROVENANCE_LINKS} {kind, ref} links (kind: ${[...PROVENANCE_KINDS].join(', ')})`);
+    }
+  }
+}
+
+function assertFiniteNumber(value: unknown, field: string, label: string, optional: boolean): void {
+  if (optional && (value === undefined || value === null)) return;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw Object.assign(new Error(`Invalid ${label}: '${field}' must be a finite number. Nothing was imported.`), { status: 400 });
+  }
+}
+
+/**
+ * Check a whole bundle before any row is written: shape, field sizes and the
+ * record and link counts. Throws naming the first bad record or link, so a
+ * truncated, edited or foreign file imports nothing instead of part of itself.
+ */
+export function assertValidMemoryBundle(bundle: unknown): asserts bundle is MemoryBundle {
+  if (!isPlainObject(bundle) || !Array.isArray(bundle.records) || !Array.isArray(bundle.links)) {
+    throw Object.assign(new Error("Invalid memory bundle: expected an object with 'records' and 'links' arrays. Nothing was imported."), { status: 400 });
+  }
+  if (bundle.records.length > MAX_MEMORY_BUNDLE_RECORDS) {
+    throw Object.assign(new Error(`Invalid memory bundle: ${bundle.records.length} records exceeds the limit of ${MAX_MEMORY_BUNDLE_RECORDS}. Nothing was imported.`), { status: 400 });
+  }
+  if (bundle.links.length > MAX_MEMORY_BUNDLE_LINKS) {
+    throw Object.assign(new Error(`Invalid memory bundle: ${bundle.links.length} links exceeds the limit of ${MAX_MEMORY_BUNDLE_LINKS}. Nothing was imported.`), { status: 400 });
+  }
+  bundle.records.forEach((record: unknown, index) => {
+    const label = `memory bundle record #${index + 1}`;
+    if (!isPlainObject(record) || typeof record.id !== 'string' || !record.id.trim()) {
+      throw Object.assign(new Error(`Invalid ${label}: 'id' must be a non-empty string. Nothing was imported.`), { status: 400 });
+    }
+    // An imported scope that is not one of ours is normalised to project, as before.
+    assertValidMemoryFields({
+      cls: record.cls ?? '',
+      summary: record.summary ?? '',
+      detail: record.detail,
+      tags: record.tags ?? [],
+      provenance: record.provenance ?? [],
+    }, `${label} (${record.id})`);
+    assertFiniteNumber(record.createdAt, 'createdAt', label, false);
+    assertFiniteNumber(record.updatedAt, 'updatedAt', label, false);
+    assertFiniteNumber(record.confidence, 'confidence', label, true);
+    assertFiniteNumber(record.reviewedAt, 'reviewedAt', label, true);
+    assertFiniteNumber(record.validFrom, 'validFrom', label, true);
+    assertFiniteNumber(record.validUntil, 'validUntil', label, true);
+  });
+  bundle.links.forEach((link: unknown, index) => {
+    const label = `memory bundle link #${index + 1}`;
+    if (!isPlainObject(link) || typeof link.fromId !== 'string' || typeof link.toId !== 'string'
+      || typeof link.relation !== 'string' || !link.relation.trim() || link.relation.length > MAX_TAG_CHARS) {
+      throw Object.assign(new Error(`Invalid ${label}: 'fromId', 'toId' and 'relation' must be strings. Nothing was imported.`), { status: 400 });
+    }
+    assertFiniteNumber(link.createdAt, 'createdAt', label, false);
+  });
+}
+
 export function isReviewFlagged(record: MemoryRecord): boolean {
   return record.reviewState === 'stale' || record.reviewState === 'contradicted';
 }
@@ -194,6 +310,11 @@ export function compareByTrust(a: MemoryRecord, b: MemoryRecord): number {
 }
 
 export function recordMatchesPostSqlFilter(record: MemoryRecord, filter: MemorySearchFilter): boolean {
+  if (filter.scope && record.scope !== filter.scope) return false;
+  if (filter.cls && record.cls !== filter.cls) return false;
+  // Same rules as the literal path's SQL: `since` is creation time, and every tag must be present.
+  if (filter.since && record.createdAt < filter.since) return false;
+  if (filter.tags?.length && !filter.tags.every((tag) => record.tags.includes(tag))) return false;
   if (filter.provenanceKinds?.length) {
     if (!record.provenance.some((entry) => filter.provenanceKinds?.includes(entry.kind))) return false;
   }

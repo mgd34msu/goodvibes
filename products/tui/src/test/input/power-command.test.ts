@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
+import { KEEP_AWAKE_NOT_HELD, LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerPowerRuntimeCommands } from '../../input/commands/power-runtime.ts';
 import { buildSettingGroups } from '../../input/settings-modal-data.ts';
@@ -53,6 +53,18 @@ describe('/power command (STEP 3)', () => {
     expect(await run(['on'], ctx)).toContain('Keep-awake ON');
     expect(await run(['off'], ctx)).toContain('Keep-awake OFF');
     expect(state.value.keepAwake).toBe(false);
+  });
+
+  test('keep-awake the OS refused is reported as not holding, never as "will not idle-sleep"', async () => {
+    const { ctx, state } = makeCtx({ keepAwake: false, inhibited: false, workReasons: [], note: null });
+    (ctx as { setKeepAwake: (enabled: boolean) => Promise<PowerSurfaceState> }).setKeepAwake = async (enabled) => {
+      state.value = { keepAwake: enabled, inhibited: false, workReasons: [], note: enabled ? KEEP_AWAKE_NOT_HELD : null };
+      return state.value;
+    };
+    const on = await run(['on'], ctx);
+    expect(on).toContain('the OS refused the sleep inhibitor');
+    expect(on).not.toContain('will not idle-sleep');
+    expect(await run(['status'], ctx)).toContain('Keep-awake is ON but NOT holding');
   });
 
   test('an off host reports it sleeps on its own schedule', async () => {

@@ -64,7 +64,9 @@ test('Classic catalog browsing and source inspection use literal records without
     expect((await searchEcosystemCatalog('plugin', 'pull request', options)).map(row => row.id)).toEqual(['pr-tools']);
     expect((await searchEcosystemCatalog('plugin', '', options))).toHaveLength(2);
     expect(reviewEcosystemCatalogSource(entry, options).entry.id).toBe('pr-tools');
-    await expect(reviewEcosystemCatalogEntry(entry, options)).rejects.toMatchObject({ code: 'decision-models-disabled' });
+    const review = await reviewEcosystemCatalogEntry(entry, options);
+    expect(review.entry.id).toBe('pr-tools');
+    expect(review.riskLevel).toBe('low');
     await expect(rankRecommendationCandidates([])).rejects.toMatchObject({ code: 'decision-models-disabled' });
   });
   expect({ metadata, requests }).toEqual({ metadata: 0, requests: 0 });

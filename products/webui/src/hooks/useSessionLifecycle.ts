@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { createActionIntent, type ActionIntent } from './createActionIntent';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
 import { serializeError } from '../lib/errors';
@@ -9,24 +10,10 @@ import { queryKeys } from '../lib/queries';
 export type SessionAction = 'close' | 'reopen' | 'delete';
 type Phase = 'idle' | 'confirming' | 'pending' | 'unknown';
 interface Snapshot { phase: Phase; action?: SessionAction; refreshing: boolean; notice?: string }
-interface Intent { snapshot: Snapshot; listeners: Set<() => void>; abort?: AbortController }
-// One flight/unknown-outcome receipt per account lifetime and target, including
-// closing and reopening the pane. No credentials or retained session data here.
-const clients = new WeakMap<QueryClient, WeakMap<ClientLifetime, Map<string, Intent>>>();
-function intentFor(client: QueryClient, lifetime: ClientLifetime, id: string): Intent {
-  let scopes = clients.get(client);
-  if (!scopes) { scopes = new WeakMap(); clients.set(client, scopes); }
-  let intents = scopes.get(lifetime);
-  if (!intents) { intents = new Map(); scopes.set(lifetime, intents); }
-  let intent = intents.get(id);
-  if (!intent) { intent = { snapshot: { phase: 'idle', refreshing: false }, listeners: new Set() }; intents.set(id, intent); }
-  return intent;
-}
+const intents = createActionIntent<Snapshot>(() => ({ phase: 'idle', refreshing: false }));
+type Intent = ActionIntent<Snapshot>;
+const { intentFor, update } = intents;
 function setAbort(intent: Intent, abort: AbortController | undefined): void { intent.abort = abort; }
-function update(intent: Intent, state: Partial<Snapshot>): void {
-  intent.snapshot = { ...intent.snapshot, ...state };
-  for (const listener of intent.listeners) listener();
-}
 // Target-route absence, not a generic router/auth 404. The native transport's
 // generic NOT_FOUND code can shadow the daemon body code. Current GET/close
 // responses use the exact uncoded message; DELETE also carries its typed code.
@@ -76,10 +63,7 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
   const intent = useMemo(() => intentFor(client, lifetime, id), [client, lifetime, id]);
   const selection = useMemo(() => ({ intent }), [intent]);
   const owner = useRef<typeof selection | undefined>(undefined);
-  const store = useMemo(() => ({
-    subscribe: (listener: () => void) => { intent.listeners.add(listener); return () => { intent.listeners.delete(listener); }; },
-    read: () => intent.snapshot,
-  }), [intent]);
+  const store = useMemo(() => intents.store(intent), [intent]);
   const state = useSyncExternalStore(store.subscribe, store.read, store.read);
   const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
   const owned = () => owner.current === selection && current();

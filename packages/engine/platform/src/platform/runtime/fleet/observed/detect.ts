@@ -102,15 +102,32 @@ export interface ClassifiedObservedProcess extends ObservedRawProcess {
  * same kind is a child helper (e.g. the native `codex` binary under its `node`
  * launcher) and is dropped in favour of its root, so a single session never
  * lists twice.
+ *
+ * `ownedRoots` are pids this runtime owns (its own, and any child it hosts):
+ * a match that is one of them or descends from one was spawned or hosted here,
+ * it already has a fleet row of its own, and is not an observed session.
  */
 export function classifyObservedProcesses(
   processes: readonly ObservedRawProcess[],
+  ownedRoots: ReadonlySet<number> = new Set(),
 ): ClassifiedObservedProcess[] {
+  const ppidByPid = new Map<number, number>();
+  for (const proc of processes) ppidByPid.set(proc.pid, proc.ppid);
+  const isOwned = (pid: number): boolean => {
+    const visited = new Set<number>();
+    let current = pid;
+    while (current > 0 && !visited.has(current)) {
+      if (ownedRoots.has(current)) return true;
+      visited.add(current);
+      current = ppidByPid.get(current) ?? 0;
+    }
+    return false;
+  };
   const kindByPid = new Map<number, ObservedAgentKind>();
   const byPid = new Map<number, ObservedRawProcess>();
   for (const proc of processes) {
     const kind = classifyExternalKind(proc.args);
-    if (kind) {
+    if (kind && !isOwned(proc.pid)) {
       kindByPid.set(proc.pid, kind);
       byPid.set(proc.pid, proc);
     }

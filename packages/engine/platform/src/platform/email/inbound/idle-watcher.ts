@@ -229,7 +229,7 @@ export async function runIdleRound(deps: IdleRoundDeps): Promise<IdleRoundResult
       };
     }
 
-    const ended = await waitForWake(deps);
+    const ended = await waitForWake(deps, collected);
     if (ended.kind === 'error') {
       // The wait can only end by a line, by an abort, or by the session
       // failing. Nothing else reached here, so the socket is gone and there is
@@ -288,9 +288,16 @@ type WakeEnd =
  * untagged wait passes `timeoutMs: null`, the whole point is a wait that
  * lasts as long as the silence does, and is bounded by that controller
  * instead, which is what keeps it from being unbounded in both.
+ *
+ * `collected` is everything the round's subscription has seen so far, which
+ * includes lines that arrived before this wait could listen.
  */
-async function waitForWake(deps: IdleRoundDeps): Promise<WakeEnd> {
+async function waitForWake(deps: IdleRoundDeps, collected: readonly string[]): Promise<WakeEnd> {
   if (deps.signal.aborted) return { kind: 'abort' };
+  // A wake line can share a network chunk with the `+` continuation, in which
+  // case it was routed before this wait existed. The collector kept it; the
+  // untagged waiter below only sees lines that arrive after it is attached.
+  if (collected.some(isIdleWakeLine)) return { kind: 'untagged' };
 
   const race = new AbortController();
   const relay = (): void => { race.abort(); };

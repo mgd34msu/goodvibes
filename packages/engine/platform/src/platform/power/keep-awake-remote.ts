@@ -11,13 +11,12 @@
  * the daemon over the wire instead, best-effort, gated on reachability.
  *
  * Written in raw-REST style deliberately, matching every other version-tolerant
- * wire mirror in this platform (session/memory spine REST transports,
- * `session-registration`-style helpers): request/response only, a Bearer
- * token, an AbortController timeout, and the same
- * ok/auth_required/route_unavailable/host_unavailable/error classification,
- * NOT the typed operator platform client, since `power.keepAwake.set` is a ws-only
- * gateway verb (`attachWsOnlyGatewayVerbHandlers`), not part of the operator
- * contract.
+ * wire mirror in this platform: request/response only, a Bearer token, an
+ * AbortController timeout, and the same
+ * ok/auth_required/route_unavailable/host_unavailable/error classification.
+ * The verb is an HTTP route of the operator contract (`POST /api/power/keep-awake`)
+ * and a gateway verb; this helper keeps working against a daemon older than the
+ * typed client.
  *
  * ── Hoist provenance (2026-07-30 daemon/TUI split) ──────────────────────────
  *
@@ -53,6 +52,13 @@ export const POWER_KEEP_AWAKE_SET_TIMEOUT_MS = 1500;
 
 export interface PowerKeepAwakeRemoteSuccess {
   readonly ok: true;
+  /**
+   * What the daemon says keep-awake is doing after the request ('off', 'held',
+   * 'held-partial' or 'refused' when the OS denied the inhibitor); absent when
+   * the daemon's answer did not carry it. `ok` only means the request was
+   * accepted, so a surface must not call the host held unless this says so.
+   */
+  readonly keepAwakeState?: string;
 }
 
 export interface PowerKeepAwakeRemoteFailure {
@@ -132,7 +138,8 @@ export async function postPowerKeepAwakeSet(
     });
     const body = await readResponseBody(response);
     if (!response.ok) return classifyHttpFailure(response.status, body);
-    return { ok: true };
+    const served = isRecord(body) && isRecord(body.keepAwake) ? body.keepAwake.state : undefined;
+    return typeof served === 'string' ? { ok: true, keepAwakeState: served } : { ok: true };
   } catch (error) {
     return { ok: false, kind: 'connected_host_unavailable', error: summarizeError(error) };
   } finally {

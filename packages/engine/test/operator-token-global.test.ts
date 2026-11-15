@@ -7,21 +7,26 @@
  *   1. Token present at global path → getOrCreateCompanionToken returns it
  *   2. No token anywhere → getOrCreateCompanionToken creates one at global path
  *   3. writeOperatorTokenFile sets mode 0600
- *   4. E2E via DaemonHttpRouter.dispatchApiRoutes with authenticated request → 200
- *   5. E2E with no auth token → 401 (auth rejected)
+ *   4. The token on disk, handed to the daemon's own auth (DaemonControlPlaneHelper.checkAuth)
+ *      behind DaemonHttpRouter: the stored bearer → 200, a wrong or missing bearer → 401
  *
  * Explicitly: NO test for workspace-scoped fallback. If you find yourself
  * writing a "workspace tokens also work" test, stop, that's the wrong spec.
  */
 
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, writeFileSync, existsSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { workspaceOperatorTokenCandidates } from '../platform/src/platform/runtime/operator-token-cleanup.ts';
+import {
+  DaemonControlPlaneHelper,
+  type DaemonControlPlaneContext,
+} from '../platform/src/platform/daemon/control-plane.ts';
 import {
   resolveOperatorTokenPath,
   writeOperatorTokenFile,
-  readOperatorTokenFile,
 } from '../platform/src/platform/workspace/daemon-home.ts';
 import {
   getOrCreateCompanionToken,
@@ -65,7 +70,7 @@ function makeMinimalRouterContext(overrides: { checkAuth?: (req: Request) => boo
     automationManager: {} as never,
     approvalBroker: {} as never,
     controlPlaneGateway: { createEventStream: () => { throw new Error('not expected'); } } as never,
-    gatewayMethods: {} as never,
+    gatewayMethods: { findByHttpBinding: () => null } as never,
     providerRegistry: registry,
     sessionBroker: {} as never,
     routeBindings: {} as never,
@@ -149,25 +154,32 @@ describe('global-only operator token: existing token is returned', () => {
 // ---------------------------------------------------------------------------
 
 describe('global-only: workspace-scoped token path is never read', () => {
-  let daemonHome: string;
+  let workspaceRoot: string;
 
-  beforeEach(() => { daemonHome = tempDir('no-ws'); });
-  afterEach(() => { cleanup(daemonHome); });
+  beforeEach(() => { workspaceRoot = makeProjectTempDir('gv-op-tok-no-ws'); });
+  afterEach(() => { cleanup(workspaceRoot); });
 
-  test('generates fresh token even when workspace-scoped file is present', () => {
-    // Place a token at a workspace-scoped path that must not be read.
-    const fakeWorkspaceDotGv = join(daemonHome, '..', 'workspace', '.goodvibes');
-    mkdirSync(fakeWorkspaceDotGv, { recursive: true });
+  test('generates fresh token even when every legacy workspace-scoped file is present', () => {
+    // The daemon home sits inside the workspace, the layout in which a
+    // workspace fallback would be reachable. Decoys go at the real legacy paths.
+    const daemonHome = join(workspaceRoot, '.goodvibes', 'daemon');
+    mkdirSync(daemonHome, { recursive: true });
+    const decoyPaths = workspaceOperatorTokenCandidates(workspaceRoot, 'test-surface');
+    expect(decoyPaths.length).toBeGreaterThan(0);
     const wsToken = { token: 'gv_workspace_should_not_be_used', peerId: 'ws_peer', createdAt: 999 };
-    writeFileSync(join(fakeWorkspaceDotGv, 'operator-tokens.json'), JSON.stringify(wsToken));
+    for (const decoy of decoyPaths) {
+      mkdirSync(join(decoy, '..'), { recursive: true });
+      writeFileSync(decoy, JSON.stringify(wsToken));
+    }
 
-    // companion-token.ts with a fresh daemonHome has no token yet, should create a new one
     const result = getOrCreateCompanionToken({ daemonHomeDir: daemonHome });
 
-    // Must NOT return the workspace-scoped token
-    expect(result.token).not.toBe('gv_workspace_should_not_be_used');
-    // Must be a fresh gv_ token
+    expect(result.token).not.toBe(wsToken.token);
+    expect(result.peerId).not.toBe(wsToken.peerId);
     expect(result.token.startsWith('gv_')).toBe(true);
+    // The fresh token was written to the global path, and the decoys were left as they were.
+    expect(JSON.parse(readFileSync(resolveOperatorTokenPath(daemonHome), 'utf8')).token).toBe(result.token);
+    for (const decoy of decoyPaths) expect(JSON.parse(readFileSync(decoy, 'utf8')).token).toBe(wsToken.token);
   });
 });
 
@@ -197,113 +209,63 @@ describe('writeOperatorTokenFile: mode 0600', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4 & 5. E2E via DaemonHttpRouter.dispatchApiRoutes
+// 4. The token file feeds the daemon's real auth, behind DaemonHttpRouter
 // ---------------------------------------------------------------------------
 
-describe('DaemonHttpRouter: authenticated request succeeds, unauthenticated is rejected', () => {
-  test('GET /api/models with checkAuth=true → 200 (authenticated request processed)', async () => {
-    const ctx = makeMinimalRouterContext({ checkAuth: () => true });
-    const router = new DaemonHttpRouter(ctx as never);
-    const req = new Request('http://localhost/api/models', { method: 'GET' });
-    const res = await router.dispatchApiRoutes(req);
-    // The route exists and returns (may be 200 or any non-auth error)
-    expect(res).not.toBeNull();
-    expect(res!.status).not.toBe(401);
-    router.dispose();
-  });
-
-  test('GET /api/models via handleRequest with checkAuth=false → 401', async () => {
-    const ctx = makeMinimalRouterContext({ checkAuth: () => false });
-    const router = new DaemonHttpRouter(ctx as never);
-    const req = new Request('http://localhost/api/models', { method: 'GET' });
-    const res = await router.handleRequest(req);
-    expect(res.status).toBe(401);
-    router.dispose();
-  });
-
-  test('GET /api/models via handleRequest with checkAuth=true returns valid JSON', async () => {
-    const ctx = makeMinimalRouterContext({ checkAuth: () => true });
-    const router = new DaemonHttpRouter(ctx as never);
-    const req = new Request('http://localhost/api/models', { method: 'GET' });
-    const res = await router.handleRequest(req);
-    expect(res.status).toBe(200);
-    const body = await res.json() as Record<string, unknown>;
-    // Response must include providers array (GET /api/models shape)
-    expect(body['providers']).toBeInstanceOf(Array);
-    router.dispose();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. E2E real-token-through-auth: global file → Authorization header → auth chain
-//
-// This test proves the FULL chain:
-//   writeOperatorTokenFile → token on disk → checkAuth reads via readOperatorTokenFile
-//   → compares Bearer header → 200 on correct token, 401 on wrong token
-// ---------------------------------------------------------------------------
-
-describe('E2E real token through auth chain: file read inside checkAuth', () => {
+describe('operator token file through the daemon auth and router', () => {
   let daemonHome: string;
 
   beforeEach(() => { daemonHome = tempDir('real-auth'); });
   afterEach(() => { cleanup(daemonHome); });
 
-  function makeRealAuthContext(daemonHomeDir: string) {
-    // checkAuth implementation that genuinely reads the token file and
-    // compares it to the Authorization: Bearer <token> request header.
-    // This is the live file-read path, readOperatorTokenFile is called
-    // for every request, proving the global file → auth chain is wired.
-    const checkAuth = (req: Request): boolean => {
-      const raw = readOperatorTokenFile(daemonHomeDir);
-      if (raw === undefined) return false;
-      let storedToken: string;
-      try {
-        const parsed = JSON.parse(raw) as { token?: unknown };
-        if (typeof parsed.token !== 'string') return false;
-        storedToken = parsed.token;
-      } catch {
-        return false;
-      }
-      const authHeader = req.headers.get('Authorization') ?? '';
-      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
-      return bearer === storedToken;
-    };
-    return makeMinimalRouterContext({ checkAuth });
+  /** The router's checkAuth is the control-plane helper's, authenticating against the token the daemon read from disk. */
+  function makeRouter(): DaemonHttpRouter {
+    const { token } = getOrCreateCompanionToken({ daemonHomeDir: daemonHome });
+    const helper = new DaemonControlPlaneHelper({
+      authToken: () => token,
+      trustProxyEnabled: () => false,
+      userAuth: { validateSession: () => null },
+    } as unknown as DaemonControlPlaneContext);
+    return new DaemonHttpRouter(makeMinimalRouterContext({ checkAuth: (req) => helper.checkAuth(req) }) as never);
   }
 
-  test('correct bearer token → 200 (real token read from global file inside checkAuth)', async () => {
-    const realToken = 'gv_real_test_token';
-    writeOperatorTokenFile(
-      daemonHome,
-      JSON.stringify({ token: realToken, peerId: 'test-peer', createdAt: Date.now() }),
-    );
+  function storedToken(): string {
+    return JSON.parse(readFileSync(resolveOperatorTokenPath(daemonHome), 'utf8')).token as string;
+  }
 
-    const ctx = makeRealAuthContext(daemonHome);
-    const router = new DaemonHttpRouter(ctx as never);
-    const req = new Request('http://localhost/api/models', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${realToken}` },
-    });
-    const res = await router.handleRequest(req);
-    expect(res.status).toBe(200);
-    router.dispose();
+  test('the stored bearer token is accepted', async () => {
+    writeOperatorTokenFile(daemonHome, JSON.stringify({ token: 'gv_real_test_token', peerId: 'test-peer', createdAt: 1 }));
+    const router = makeRouter();
+    try {
+      expect(storedToken()).toBe('gv_real_test_token');
+      const res = await router.handleRequest(new Request('http://localhost/api/models', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer gv_real_test_token' },
+      }));
+      expect(res.status).toBe(200);
+      expect((await res.json() as Record<string, unknown>)['providers']).toBeInstanceOf(Array);
+    } finally { router.dispose(); }
   });
 
-  test('wrong bearer token → 401 (real auth rejection via file-read comparison)', async () => {
-    const realToken = 'gv_real_test_token';
-    writeOperatorTokenFile(
-      daemonHome,
-      JSON.stringify({ token: realToken, peerId: 'test-peer', createdAt: Date.now() }),
-    );
+  test('a freshly minted token is accepted, and a different bearer is rejected', async () => {
+    const router = makeRouter();
+    try {
+      const ok = await router.handleRequest(new Request('http://localhost/api/models', {
+        headers: { Authorization: `Bearer ${storedToken()}` },
+      }));
+      expect(ok.status).toBe(200);
+      const wrong = await router.handleRequest(new Request('http://localhost/api/models', {
+        headers: { Authorization: 'Bearer gv_wrong_token' },
+      }));
+      expect(wrong.status).toBe(401);
+    } finally { router.dispose(); }
+  });
 
-    const ctx = makeRealAuthContext(daemonHome);
-    const router = new DaemonHttpRouter(ctx as never);
-    const req = new Request('http://localhost/api/models', {
-      method: 'GET',
-      headers: { Authorization: 'Bearer gv_wrong_token' },
-    });
-    const res = await router.handleRequest(req);
-    expect(res.status).toBe(401);
-    router.dispose();
+  test('a request with no credentials is rejected', async () => {
+    const router = makeRouter();
+    try {
+      const res = await router.handleRequest(new Request('http://localhost/api/models'));
+      expect(res.status).toBe(401);
+    } finally { router.dispose(); }
   });
 });

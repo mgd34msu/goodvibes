@@ -177,13 +177,16 @@ export interface Harness {
   readonly holds: { readonly agentId: string; readonly outcome: ContractHoldOutcome }[];
   /** Agent ids per unit, in spawn order. */
   agentsOf(unitId: string): string[];
-  dispose(): void;
+  /** Stops the runner; the promise settles once cancellation has drained, rejecting with the first drain failure. */
+  dispose(): Promise<void>;
 }
 
 export interface HarnessOptions {
   readonly readOwnerEvidence?: ContractRunnerDeps['readOwnerEvidence'];
   readonly executeAgent?: (record: AgentRecord, context: { readonly root: string; readonly runner: ContractRunner; readonly manager: AgentManager; readonly bus: RuntimeEventBus; readonly messageBus: AgentMessageBus }) => Promise<void>;
   readonly readAccessFilter?: ContractRunnerDeps['readAccessFilter'];
+  readonly wait?: ContractRunnerDeps['wait'];
+  readonly worktrees?: ContractRunnerDeps['worktrees'];
   readonly recordNative?: boolean;
   readonly nativeDecisions?: NativeContractDecisionHost;
   readonly durableAdmission?: ContractRunnerDeps['durableAdmission'];
@@ -313,6 +316,8 @@ export function makeHarness(options: HarnessOptions): Harness {
   };
   runner = createContractRunner({
     judgmentLog: options.decisionLog,
+    ...(options.wait === undefined ? {} : { wait: options.wait }),
+    ...(options.worktrees === undefined ? {} : { worktrees: options.worktrees }),
     readOwnerEvidence: options.readOwnerEvidence,
     ...(options.getSelectedModel ? { getSelectedModel: options.getSelectedModel } : {}),
     ...(options.nativeDecisions === undefined && !options.recordNative ? {} : { nativeDecisions: options.nativeDecisions ?? { authorityOf: () => ({ authorityId: 'test-host', authorityRevision: '1', scopeId: 'test-project', scopeRevision: '1' }) } }),
@@ -373,8 +378,16 @@ export function makeHarness(options: HarnessOptions): Harness {
         ownedLog?.[Symbol.dispose]();
         if (options.root === undefined) rmSync(root, { recursive: true, force: true });
       };
-      void Promise.all(ids.map(id => runner.join(id))).then(cleanup, cleanup);
+      const draining = Promise.allSettled(ids.map(id => runner.join(id))).then(results => {
+        cleanup();
+        const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failed) throw failed.reason;
+      });
+      // A caller that does not await keeps the old behaviour; an awaiting afterEach sees a drain failure.
+      draining.catch(() => undefined);
+      // Restored now, not after the drain: a restarted harness installs its own port first and must keep it.
       installJudgmentPort(previous);
+      return draining;
     },
   };
 }

@@ -80,7 +80,7 @@ export class MaskedEntryModal implements SurfaceModal, MaskedEntryView {
     this.buffer = '';
     try {
       if (this.kind === 'add-user') {
-        const added = this.options.auth.addUser(this.username, password, ['admin']);
+        const added = this.options.auth.addUser(this.username, password, ['user']);
         host.close(this, 'done');
         this.options.onDone?.(`Added local auth user ${added.username}.`);
       } else {

@@ -10,7 +10,7 @@ import {
 import { retainVerifiedDaemonCiArtifact } from './ci-artifact.ts';
 import { nativeArtifactPins } from '@goodvibes-jev/engine/toolchain';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
-import { daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
+import { daemonCiMetadataPath, daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 
 export { assertNativeInstallHost, type DaemonInstallOwner } from '../src/cli/native-installation.ts';
 
@@ -85,7 +85,7 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
     if (!file) throw new Error('Native install source cohort is incomplete');
     return file.bytes;
   });
-  assertDaemonNativePayloadPins(artifact, nativeArtifactPins(verified.retained, join(artifactRoot, 'native'), paths), buffers[3]);
+  assertDaemonNativePayloadPins(artifact, nativeArtifactPins(verified.retained, join(artifactRoot, 'native'), paths), buffers[paths.indexOf(daemonCiMetadataPath(owner.target))]);
   assertSourceCurrent();
   const receipt: InstallationReceipt = { schema: 1, packageName: PACKAGE, version: owner.version, artifact };
   const checksums = targets.slice(0, -1).map((target, index) => `${artifact.files[index]!.sha256}  ${target.assetName}`).join('\n');

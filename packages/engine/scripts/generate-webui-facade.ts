@@ -99,7 +99,14 @@ export function buildWsInvokeIds(methods: readonly OperatorMethodContract[]): st
 export function buildDisposition(methods: readonly OperatorMethodContract[]): Record<string, string> {
   const disposition: Record<string, string> = {};
   for (const method of methods) {
-    disposition[method.id] = method.http ? 'rest' : 'ws-invoke';
+    if (method.http) {
+      disposition[method.id] = 'rest';
+    } else if (method.transport.includes('ws')) {
+      disposition[method.id] = 'ws-invoke';
+    } else {
+      // Not REST-routed and not ws: the facade could neither call it nor list it as a ws invoke.
+      throw new Error(`generate-webui-facade: ${method.id} has no http binding and no ws transport (${method.transport.join(', ') || 'none'}); the facade cannot reach it.`);
+    }
   }
   return disposition;
 }

@@ -69,6 +69,12 @@ export interface GoodVibesAuthClient {
   permissionResolver(snapshot: GoodVibesCurrentAuth): PermissionResolver;
   current(): Promise<GoodVibesCurrentAuth>;
   login(input: GoodVibesLoginInput, options?: GoodVibesAuthLoginOptions): Promise<GoodVibesLoginOutput>;
+  /**
+   * Refresh the stored token now if it is inside the refresh window. Realtime
+   * connectors call this before reading the token so a (re)connect does not
+   * present an expired bearer. Does nothing when auto-refresh is off.
+   */
+  ensureFreshToken(): Promise<void>;
   /** Retrieve the current token. Delegates to `TokenStore.getToken()`. */
   getToken(): Promise<string | null>;
   /** Persist a token. Delegates to `TokenStore.setToken()`. */
@@ -109,16 +115,22 @@ function requireStorage(storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeI
  * const platform = createGoodVibesPlatform({ baseUrl: '...', tokenStore: store });
  * await platform.auth.clearToken(); // clears only in-memory
  */
+/** The one rule every token store applies to a token it is given: surrounding whitespace is dropped and a blank token is no token. */
+function normalizeToken(token: string | null | undefined): string | null {
+  const trimmed = token?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export function createMemoryTokenStore(initialToken: string | null = null, initialExpiresAt?: number): GoodVibesExpiringTokenStore {
-  let token = initialToken;
-  let expiresAt: number | undefined = initialExpiresAt;
+  let token = normalizeToken(initialToken);
+  // A blank initial token is no token, so it carries no expiry.
+  let expiresAt: number | undefined = token === null ? undefined : initialExpiresAt;
   return {
     async getToken(): Promise<string | null> {
       return token;
     },
     async setToken(nextToken: string | null): Promise<void> {
-      // Normalize: treat whitespace-only tokens as null.
-      token = nextToken && nextToken.trim() ? nextToken.trim() : null;
+      token = normalizeToken(nextToken);
       // When setToken is called directly (not via setTokenEntry), clear expiry
       // to avoid stale expiry data attached to a manually-set token.
       expiresAt = undefined;
@@ -131,8 +143,9 @@ export function createMemoryTokenStore(initialToken: string | null = null, initi
       return expiresAt !== undefined ? { token, expiresAt } : { token };
     },
     async setTokenEntry(nextToken: string | null, nextExpiresAt?: number): Promise<void> {
-      token = nextToken;
-      expiresAt = nextExpiresAt;
+      token = normalizeToken(nextToken);
+      // A blank token is a clear: it carries no expiry of its own.
+      expiresAt = token === null ? undefined : nextExpiresAt;
     },
   };
 }
@@ -145,7 +158,8 @@ export function createMemoryTokenStore(initialToken: string | null = null, initi
  * Pass `options.storage` to use `sessionStorage` or a custom adapter.
  *
  * @example
- * import { createBrowserTokenStore, createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+ * import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
+ * import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
  *
  * const tokenStore = createBrowserTokenStore({ storage: sessionStorage });
  * const platform = createBrowserGoodVibesPlatform({ tokenStore });
@@ -158,27 +172,27 @@ export function createBrowserTokenStore(options: BrowserTokenStoreOptions = {}):
   const expiresAtKey = `${key}.expiresAt`;
   return {
     async getToken(): Promise<string | null> {
-      const value = storage.getItem(key);
-      return value && value.trim() ? value : null;
+      return normalizeToken(storage.getItem(key));
     },
     async setToken(token: string | null): Promise<void> {
-      const normalized = token && token.trim() ? token.trim() : null;
+      const normalized = normalizeToken(token);
       if (!normalized) {
         storage.removeItem(key);
         storage.removeItem(expiresAtKey);
         return;
       }
-      storage.setItem(key, normalized);
-      // Clear expiry when set via setToken (no expiry info provided).
+      // The token and its expiry are two entries, and another tab can read between
+      // the writes. Drop the old expiry first so a reader never pairs the new token
+      // with the previous token's expiry (this call carries none).
       storage.removeItem(expiresAtKey);
+      storage.setItem(key, normalized);
     },
     async clearToken(): Promise<void> {
       storage.removeItem(key);
       storage.removeItem(expiresAtKey);
     },
     async getTokenEntry(): Promise<{ token: string | null; expiresAt?: number }> {
-      const value = storage.getItem(key);
-      const token = value && value.trim() ? value : null;
+      const token = normalizeToken(storage.getItem(key));
       const expiresAtStr = storage.getItem(expiresAtKey);
       const expiresAtRaw = expiresAtStr ? Number(expiresAtStr) : NaN;
       const finalExpiresAt = Number.isFinite(expiresAtRaw) && expiresAtRaw > 0
@@ -187,17 +201,22 @@ export function createBrowserTokenStore(options: BrowserTokenStoreOptions = {}):
       return finalExpiresAt !== undefined ? { token, expiresAt: finalExpiresAt } : { token };
     },
     async setTokenEntry(token: string | null, expiresAt?: number): Promise<void> {
-      if (!token) {
+      const normalized = normalizeToken(token);
+      if (!normalized) {
         storage.removeItem(key);
         storage.removeItem(expiresAtKey);
         return;
       }
-      storage.setItem(key, token);
+      // The expiry goes first. A reader that lands between the writes then sees the
+      // old token with the new expiry, which at worst costs a 401 and a refresh;
+      // the other order pairs the new token with an expired old expiry and starts
+      // a refresh the new token never needed.
       if (expiresAt !== undefined) {
         storage.setItem(expiresAtKey, String(expiresAt));
       } else {
         storage.removeItem(expiresAtKey);
       }
+      storage.setItem(key, normalized);
     },
   };
 }
@@ -328,6 +347,9 @@ export function createGoodVibesAuthClient(
         { label: 'onAuthTransition' },
       );
       return result;
+    },
+    async ensureFreshToken(): Promise<void> {
+      if (coordinator) await coordinator.ensureFreshToken();
     },
     async getToken(): Promise<string | null> {
       if (ts) {

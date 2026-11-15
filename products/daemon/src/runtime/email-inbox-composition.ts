@@ -6,7 +6,7 @@ import { ownInboxEligibility } from './inbox-eligibility.js';
 /** Explicit single-account mail inbox; does not enable all-provider default serve. */
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { createEmailInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
@@ -69,8 +69,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
     });
     // The canonical daemon mailbox has no separate enable switch. Its shared
     // reader derives readiness from configured endpoint/account fields.
-    const config: { get(key: string): unknown } = context.configManager;
-    const mailConfig = createSurfaceEmailInboxConfigReader(key => config.get(key));
+    const mailConfig = createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager));
     const clustered = context.configManager.get('cluster.enabled') === true;
     if (clustered && !controls.gatePollingOwned) throw new Error('Clustered inbox requires owned gate retirement');
     const current = (): void => {
@@ -94,6 +93,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
       current();
       owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account, service: mail.service,
         screening: options.screening, assertCurrent: current, resolveRouteId,
+        ...(controls.onOwnerMail ? { onMail: controls.onOwnerMail } : {}),
         getCheckpoint: () => {
           if (!surface?.getImapCheckpoint) throw new Error('Email inbox checkpoint storage is unavailable');
           return surface.getImapCheckpoint('email');

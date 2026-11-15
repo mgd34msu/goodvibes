@@ -43,8 +43,10 @@ export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): vo
         if (!source) { ctx.print('Start work from the terminal with /workstream start <request>. Original owner input is required.'); return; }
         if (!source.text.trim()) { ctx.print('Usage: /workstream start <request>'); return; }
         if (!ctx.dispatchNativeIntakeTurn) { ctx.print('Native conversation intake is unavailable. No ordinary turn was started.'); return; }
-        await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
+        const state = await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
           notify: line => ctx.print(line), dispatch: ctx.dispatchNativeIntakeTurn });
+        // Refused because another input is still being admitted: nothing was sent.
+        if (state?.status === 'pending') ctx.restoreDraft?.(`/workstream start ${source.text}`);
         ctx.renderRequest();
         return;
       }
@@ -72,12 +74,14 @@ export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): vo
           const escalationId = args[2];
           const answer = args.slice(3).join(' ').trim();
           if (!escalationId || !answer) { ctx.print('Usage: /workstream reply <id> <escalation-id> <answer>'); return; }
-          if (isTerminalContractStatus(contract.status) || !contract.escalations.some(entry => entry.id === escalationId && entry.resolvedAt === undefined)) {
+          const asked = contract.escalations.find(entry => entry.id === escalationId && entry.resolvedAt === undefined);
+          if (isTerminalContractStatus(contract.status) || asked === undefined) {
             ctx.print('That owner question is no longer open. Inspect /workstream status before answering.');
             return;
           }
           const reply = await service.reply(contract.id, escalationId, answer);
-          ctx.print(`Owner reply: ${reply.action}.`);
+          // A failed-turn question is answered retry or cancel; "amended" would say the requirement changed.
+          ctx.print(`Owner reply: ${asked.failurePause === true ? (reply.action === 'stopped' ? 'cancelled' : 'retrying') : reply.action}.`);
           const current = service.get(contract.id);
           if (current) ctx.print(renderContractStatus(current));
         }

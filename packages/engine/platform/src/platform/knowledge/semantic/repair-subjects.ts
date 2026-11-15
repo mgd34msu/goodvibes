@@ -33,6 +33,7 @@ interface RepairSubjectInput {
   readonly objectProfiles?: readonly KnowledgeObjectProfilePolicy[] | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly shouldStop?: (() => boolean) | undefined;
+  readonly timeoutMs?: number | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }
 
@@ -122,7 +123,7 @@ async function prepareRepairSubjects(input: RepairSubjectInput): Promise<RepairS
     .filter(node => node.metadata.generatedKnowledgePage !== true && node.metadata.generatedProjection !== true);
   const candidates = usable.map((node, index) => ({ ...repairProfileSubject(node), kind: node.kind,
     aliases: node.aliases, identity: repairProfileSubject(node).identity ?? {}, summary: node.summary, reference: `subject-${index + 1}` }));
-  const reader = createRepairSubjectSelectionReader({ signal, assertCurrent: assertOriginalCurrent });
+  const reader = createRepairSubjectSelectionReader({ signal, timeoutMs: input.timeoutMs, assertCurrent: assertOriginalCurrent });
   const readings = await reader.read(candidates.map(candidate => ({ reference: candidate.reference,
     candidate: candidate.reference, candidates, query: input.text ?? '',
     objectProfiles: (input.objectProfiles ?? []).map(profile => ({ subjectKinds: profile.subjectKinds })) })));

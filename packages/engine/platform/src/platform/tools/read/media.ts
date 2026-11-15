@@ -65,7 +65,10 @@ export const IMAGE_MEDIA_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
 };
 
-export const ARCHIVE_EXTENSIONS = new Set(['.zip', '.tar', '.gz', '.tgz', '.tar.gz']);
+export const ARCHIVE_EXTENSIONS = new Set(['.zip', '.tar', '.gz', '.tgz']);
+
+/** Largest size a gzip file may expand to while it is being listed. */
+export const MAX_GUNZIP_BYTES = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Magic byte signatures
@@ -344,6 +347,8 @@ export async function tryLoadSharp(): Promise<SharpFactory | null> {
 export interface ResizeResult {
   buffer: Buffer;
   resized: boolean;
+  /** Media type of `buffer` when it was re-encoded (resizing writes PNG or JPEG, whatever the input was). */
+  mediaType?: string | undefined;
   width?: number | undefined;
   height?: number | undefined;
 }
@@ -363,8 +368,9 @@ export async function resizeImage(
   buffer: Buffer,
   mediaType: string,
   maxEdge: number,
+  loadSharp: () => Promise<SharpFactory | null> = tryLoadSharp,
 ): Promise<ResizeResult> {
-  const sharpFn = await tryLoadSharp();
+  const sharpFn = await loadSharp();
   if (!sharpFn) return { buffer, resized: false };
 
   try {
@@ -390,6 +396,7 @@ export async function resizeImage(
     return {
       buffer: resized.data,
       resized: true,
+      mediaType: isJpeg ? 'image/jpeg' : 'image/png',
       width: resized.info.width,
       height: resized.info.height,
     };
@@ -470,10 +477,13 @@ function parseZip(buffer: Buffer): ArchiveEntry[] {
       break;
     }
   }
-  if (eocdOffset < 0) return entries;
+  if (eocdOffset < 0) throw new Error('not a readable zip archive (no end-of-central-directory record)');
 
   const centralDirSize = buffer.readUInt32LE(eocdOffset + 12);
   const centralDirOffset = buffer.readUInt32LE(eocdOffset + 16);
+  if (centralDirSize === 0xffffffff || centralDirOffset === 0xffffffff) {
+    throw new Error('zip64 archives are not supported; list it with a zip tool');
+  }
 
   let pos = centralDirOffset;
   const end = centralDirOffset + centralDirSize;
@@ -528,41 +538,53 @@ function parseTar(buffer: Buffer): ArchiveEntry[] {
   return entries;
 }
 
+function isTarBuffer(buffer: Buffer): boolean {
+  return buffer.length >= 512 && buffer.subarray(257, 262).toString('latin1') === 'ustar';
+}
+
 /**
  * List the contents of an archive file.
  * Supports ZIP, .gz (gunzip + tar parse if tar), .tar, .tgz.
+ * Throws when the archive cannot be listed, so the caller reports a failed read
+ * instead of presenting a placeholder as the listing.
  */
 export function listArchiveContents(
   resolvedPath: string,
   buffer: Buffer,
   ext: string,
+  maxGunzipBytes = MAX_GUNZIP_BYTES,
 ): string {
-  try {
-    const lower = ext.toLowerCase();
-    let entries: ArchiveEntry[] = [];
+  const lower = ext.toLowerCase();
+  let entries: ArchiveEntry[] = [];
 
-    if (lower === '.zip') {
-      entries = parseZip(buffer);
-    } else if (lower === '.tar') {
-      entries = parseTar(buffer);
-    } else if (lower === '.gz' || lower === '.tgz') {
-      // Gunzip, then try to parse as tar
-      const decompressed = zlib.gunzipSync(buffer);
-      entries = parseTar(decompressed);
-    } else {
-      return 'Archive (unsupported format)';
+  if (lower === '.zip') {
+    entries = parseZip(buffer);
+  } else if (lower === '.tar') {
+    entries = parseTar(buffer);
+  } else if (lower === '.gz' || lower === '.tgz') {
+    let decompressed: Buffer;
+    try {
+      decompressed = zlib.gunzipSync(buffer, { maxOutputLength: maxGunzipBytes });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
+        throw new Error(`gzip file expands beyond ${humanSize(maxGunzipBytes)}; it was not decompressed.`);
+      }
+      throw err;
     }
-
-    if (entries.length === 0) {
-      return `Archive (0 files): ${resolvedPath}`;
+    if (!isTarBuffer(decompressed)) {
+      return `Compressed file (gzip of a single file, not a tar archive): ${resolvedPath}\nExpands to ${humanSize(decompressed.length)}. Decompress it to read its content.`;
     }
-
-    const lines = entries.map((e) => `  ${e.name} (${humanSize(e.size)})`);
-    return `Archive (${entries.length} files):\n${lines.join('\n')}`;
-  } catch (err) {
-    logger.warn('[media] listArchiveContents failed', { error: summarizeError(err) });
-    return 'Archive (unable to list contents)';
+    entries = parseTar(decompressed);
+  } else {
+    throw new Error('unsupported archive format');
   }
+
+  if (entries.length === 0) {
+    return `Archive (0 files): ${resolvedPath}`;
+  }
+
+  const lines = entries.map((e) => `  ${e.name} (${humanSize(e.size)})`);
+  return `Archive (${entries.length} files):\n${lines.join('\n')}`;
 }
 
 // ---------------------------------------------------------------------------

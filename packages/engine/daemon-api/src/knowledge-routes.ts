@@ -4,7 +4,7 @@ import {
   resolvePrivateHostFetchOptions,
 } from './http-policy.js';
 import { GoodVibesError, DaemonErrorCategory } from '@goodvibes-jev/engine/errors';
-import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
+import { jsonErrorResponse, readJsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 import { paginateItems, hasPaginationParams } from './pagination.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
@@ -66,6 +66,17 @@ type KnowledgeRunJobBody = {
 };
 
 const MAX_KNOWLEDGE_INGEST_TAGS = 64;
+/** The paged listings page through at most this many of the newest records (the store has no offset reads). */
+const KNOWLEDGE_PAGED_LOAD_CAP = 5_000;
+
+/**
+ * Say so when a paged listing could not reach every record: past the load cap `hasMore` is
+ * false for the loaded slice, so without this a cursor walk looks complete. The fields are
+ * additive; `hasMore` keeps its meaning for the records that were loaded.
+ */
+function withTruncation(page: object, total: number, loaded: number): object {
+  return total > loaded ? { ...page, truncated: true, total, loaded } : page;
+}
 
 export function createDaemonKnowledgeRouteHandlers(
   context: DaemonKnowledgeRouteContext,
@@ -127,25 +138,29 @@ export function createDaemonKnowledgeRouteHandlers(
       });
     }),
     getKnowledgeUsage: async (url) => {
-      const targetKind = readKnowledgeSubjectKind(url.searchParams.get('targetKind') ?? undefined);
+      const targetKind = readKnowledgeFilter(url, 'targetKind', KNOWLEDGE_SUBJECT_KINDS);
+      if (targetKind instanceof Response) return targetKind;
       const targetId = url.searchParams.get('targetId') ?? undefined;
-      const usageKind = url.searchParams.get('usageKind') ?? undefined;
+      const usageKind = readKnowledgeFilter(url, 'usageKind', KNOWLEDGE_USAGE_KINDS);
+      if (usageKind instanceof Response) return usageKind;
       return Response.json({
         usage: context.knowledgeService.listUsageRecords(readLimit(url, 100), {
-          ...(targetKind ? { targetKind } : {}),
+          ...(targetKind ? { targetKind: targetKind as 'source' | 'node' | 'issue' } : {}),
           ...(targetId ? { targetId } : {}),
           ...(usageKind ? { usageKind: usageKind as KnowledgeUsageKind } : {}),
         }),
       });
     },
     getKnowledgeCandidates: async (url) => {
-      const status = url.searchParams.get('status') ?? undefined;
-      const subjectKind = readKnowledgeSubjectKind(url.searchParams.get('subjectKind') ?? undefined);
+      const status = readKnowledgeFilter(url, 'status', KNOWLEDGE_CANDIDATE_STATUSES);
+      if (status instanceof Response) return status;
+      const subjectKind = readKnowledgeFilter(url, 'subjectKind', KNOWLEDGE_SUBJECT_KINDS);
+      if (subjectKind instanceof Response) return subjectKind;
       const subjectId = url.searchParams.get('subjectId') ?? undefined;
       return Response.json({
         candidates: context.knowledgeService.listConsolidationCandidates(readLimit(url, 100), {
           ...(status ? { status: status as KnowledgeCandidateStatus } : {}),
-          ...(subjectKind ? { subjectKind } : {}),
+          ...(subjectKind ? { subjectKind: subjectKind as 'source' | 'node' | 'issue' } : {}),
           ...(subjectId ? { subjectId } : {}),
         }),
       });
@@ -379,9 +394,24 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
   }),
 });
 
-/** Usage/candidate kind filter, validated rather than cast so an unknown value drops the filter instead of reaching the service typed as a literal it is not. */
-function readKnowledgeSubjectKind(value: string | undefined): 'source' | 'node' | 'issue' | undefined {
-  return value === 'source' || value === 'node' || value === 'issue' ? value : undefined;
+const KNOWLEDGE_SUBJECT_KINDS: readonly string[] = ['source', 'node', 'issue'];
+const KNOWLEDGE_USAGE_KINDS: readonly string[] = ['search-hit', 'packet-item', 'item-open', 'neighbor-open', 'projection-read', 'multimodal-writeback'];
+const KNOWLEDGE_CANDIDATE_STATUSES: readonly string[] = ['open', 'accepted', 'rejected', 'superseded'];
+
+/**
+ * A query filter checked against its accepted values. An empty value is absent;
+ * any other value outside the set is a 400 naming the accepted values, because a
+ * dropped filter returns every record and a passed-through typo returns none,
+ * and either reads as a true answer to the question asked.
+ */
+function readKnowledgeFilter(url: URL, name: string, accepted: readonly string[]): string | undefined | Response {
+  const value = url.searchParams.get(name);
+  if (value === null || value === '') return undefined;
+  if (accepted.includes(value)) return value;
+  return jsonErrorResponse({
+    error: `${name} must be one of ${accepted.join(', ')}; got "${value}". No filter was applied.`,
+    code: 'INVALID_ARGUMENT',
+  }, { status: 400 });
 }
 
 function readKnowledgeAnswerMode(value: unknown): 'concise' | 'standard' | 'detailed' | undefined {
@@ -530,6 +560,21 @@ async function parseKnowledgeGraphqlRequest(
   };
 }
 
+/**
+ * Whether every error is the document's own fault (syntax or validation: located in the
+ * document, never at a resolver path). An error raised while resolving, such as a store
+ * that is unavailable, is a server fault a client may retry.
+ */
+function graphqlErrorsAreRequestFaults(errors: readonly unknown[]): boolean {
+  return errors.every((entry) => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const { path, locations, extensions } = entry as { path?: unknown; locations?: unknown; extensions?: { code?: unknown } | null };
+    const code = extensions?.code;
+    if (code === 'GRAPHQL_PARSE_FAILED' || code === 'GRAPHQL_VALIDATION_FAILED' || code === 'BAD_USER_INPUT') return true;
+    return path === undefined && Array.isArray(locations);
+  });
+}
+
 async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req: Request): Promise<Response> {
   const parsed = await parseKnowledgeGraphqlRequest(context, req);
   if (parsed instanceof Response) return parsed;
@@ -567,7 +612,7 @@ async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req:
       scopes: principal.scopes,
       scopeOptions: options,
     });
-    const status = result.errors?.length && !result.data ? 400 : 200;
+    const status = result.errors?.length && !result.data ? (graphqlErrorsAreRequestFaults(result.errors) ? 400 : 500) : 200;
     return Response.json(result, { status });
   });
 }
@@ -581,6 +626,15 @@ function buildKnowledgePrivateHostFetchOptions(
   });
 }
 
+function isAbsoluteUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
   const admin = context.requireAdmin(request);
   if (admin) return admin;
@@ -588,6 +642,7 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
   if (body instanceof Response) return body;
   const url = typeof body.url === 'string' ? body.url.trim() : '';
   if (!url) return jsonErrorResponse({ error: 'Missing url' }, { status: 400 });
+  if (!isAbsoluteUrl(url)) return jsonErrorResponse({ error: `url is not a valid absolute URL: ${url}`, code: 'INVALID_REQUEST' }, { status: 400 });
   const privateHostFetchOptions = buildKnowledgePrivateHostFetchOptions(context, body.allowPrivateHosts);
   if (privateHostFetchOptions instanceof Response) return privateHostFetchOptions;
   const tags = readStringArrayField(body, 'tags', MAX_KNOWLEDGE_INGEST_TAGS);
@@ -604,7 +659,7 @@ async function handleKnowledgeIngestUrl(context: DaemonKnowledgeRouteContext, re
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -616,12 +671,23 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
     const uploaded = await createArtifactFromUploadRequest(context.artifactStore, request);
     if (uploaded instanceof Response) return uploaded;
     try {
+      // The artifact is already stored; only descriptive fields carry over. A `uri`, `path` or
+      // `allowPrivateHosts` field would let the uploader name the source's provenance or skip
+      // the private-host gate that the JSON branch applies.
+      const fields = uploaded.fields;
+      const uploadTags = Array.isArray(fields.tags) ? fields.tags.filter((entry): entry is string => typeof entry === 'string').slice(0, MAX_KNOWLEDGE_INGEST_TAGS) : undefined;
       return Response.json(await context.knowledgeService.ingestArtifact({
-        ...uploaded.fields,
         artifactId: uploaded.artifactId,
+        ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
+        ...(typeof fields.folderPath === 'string' ? { folderPath: fields.folderPath } : {}),
+        ...(uploadTags && uploadTags.length > 0 ? { tags: uploadTags } : {}),
+        ...(typeof fields.sessionId === 'string' ? { sessionId: fields.sessionId } : {}),
+        ...(typeof fields.sourceType === 'string' ? { sourceType: fields.sourceType as KnowledgeSourceType } : {}),
+        ...(typeof fields.connectorId === 'string' ? { connectorId: fields.connectorId } : {}),
+        ...(typeof fields.metadata === 'object' && fields.metadata !== null ? { metadata: fields.metadata as Record<string, unknown> } : {}),
       }), { status: 201 });
     } catch (error) {
-      return readJsonErrorResponse(error, { status: 400 });
+      return readServiceErrorResponse(error);
     }
   }
 
@@ -645,8 +711,14 @@ async function handleKnowledgeIngestArtifact(context: DaemonKnowledgeRouteContex
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
+}
+
+/** The caller's provenance object for a batch ingest, when it sent a plain one. */
+function readRequestMetadata(body: Record<string, unknown>): { metadata?: Record<string, unknown> } {
+  const { metadata } = body;
+  return typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata) ? { metadata: metadata as Record<string, unknown> } : {};
 }
 
 async function handleKnowledgeSyncBrowserHistory(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
@@ -668,11 +740,12 @@ async function handleKnowledgeSyncBrowserHistory(context: DaemonKnowledgeRouteCo
       ...(typeof input.homeOverride === 'string' ? { homeOverride: input.homeOverride } : {}),
       ...(typeof input.sessionId === 'string' ? { sessionId: input.sessionId } : {}),
       ...(typeof input.connectorId === 'string' ? { connectorId: input.connectorId } : {}),
+      ...readRequestMetadata(input),
       ...(browsers?.length ? { browsers } : {}),
       ...(sourceKinds?.length ? { sourceKinds } : {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -689,10 +762,11 @@ async function handleKnowledgeImportBookmarks(context: DaemonKnowledgeRouteConte
     return Response.json(await context.knowledgeService.importBookmarksFromFile({
       path,
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
+      ...readRequestMetadata(body),
       ...(privateHostFetchOptions ?? {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -709,10 +783,11 @@ async function handleKnowledgeImportUrls(context: DaemonKnowledgeRouteContext, r
     return Response.json(await context.knowledgeService.importUrlsFromFile({
       path,
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
+      ...readRequestMetadata(body),
       ...(privateHostFetchOptions ?? {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -732,10 +807,11 @@ async function handleKnowledgeIngestConnector(context: DaemonKnowledgeRouteConte
       ...(typeof body.content === 'string' ? { content: body.content } : {}),
       ...(typeof body.path === 'string' ? { path: body.path } : {}),
       ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
+      ...readRequestMetadata(body),
       ...(privateHostFetchOptions ?? {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -744,7 +820,7 @@ async function handleKnowledgeSearch(context: DaemonKnowledgeRouteContext, reque
   if (body instanceof Response) return body;
   const input = knowledgeBodySchemas.search.parse(body);
   if (input instanceof Response) return input;
-  return Response.json({ results: await context.knowledgeService.searchScoped(input) });
+  return readScopedKnowledgeResponse(context, request, async options => Response.json({ results: await context.knowledgeService.searchScoped(input, options) }));
 }
 
 async function handleKnowledgeAsk(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
@@ -752,7 +828,7 @@ async function handleKnowledgeAsk(context: DaemonKnowledgeRouteContext, request:
   if (body instanceof Response) return body;
   const input = knowledgeBodySchemas.ask.parse(body);
   if (input instanceof Response) return input;
-  return Response.json(await context.knowledgeService.ask(input));
+  return readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.ask(input, options)));
 }
 
 async function handleKnowledgePacket(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
@@ -760,12 +836,26 @@ async function handleKnowledgePacket(context: DaemonKnowledgeRouteContext, reque
   if (body instanceof Response) return body;
   const input = knowledgeBodySchemas.packet.parse(body);
   if (input instanceof Response) return input;
-  return Response.json(await context.knowledgeService.buildPacket(input.task, input.writeScope, input.limit, {
+  return readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.buildPacket(input.task, input.writeScope, input.limit, {
     ...(input.detail ? { detail: input.detail } : {}),
     ...(typeof input.budgetLimit === 'number' ? { budgetLimit: input.budgetLimit } : {}),
     ...(input.knowledgeSpaceId ? { knowledgeSpaceId: input.knowledgeSpaceId } : {}),
     ...(input.includeAllSpaces === true ? { includeAllSpaces: true } : {}),
-  }));
+    signal: options.signal,
+    assertCurrent: options.assertCurrent,
+  })));
+}
+
+/**
+ * A knowledge lookup failure is a 404 only when the service named the missing
+ * record with its own code, or the error carries a real HTTP 404. A bare
+ * NOT_FOUND code alone is not enough: every category-only not-found error gets
+ * that code by inference, and those are not "this record does not exist".
+ */
+function isKnowledgeNotFound(error: unknown, domainCode: string): boolean {
+  if (!(error instanceof Error)) return false;
+  const { code, status } = error as { code?: unknown; status?: unknown };
+  return code === domainCode || (code === 'NOT_FOUND' && status === 404);
 }
 
 async function handleKnowledgeReviewIssue(context: DaemonKnowledgeRouteContext, id: string, request: Request): Promise<Response> {
@@ -777,26 +867,18 @@ async function handleKnowledgeReviewIssue(context: DaemonKnowledgeRouteContext, 
   if (!['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'].includes(action)) {
     return jsonErrorResponse({ error: 'Action must be accept, reject, resolve, reopen, edit, or forget.' }, { status: 400 });
   }
+  // The reviewer recorded on the issue is who the daemon authenticated, never a name the
+  // request body claims: the review history is the audit trail for this decision.
+  const principal = context.resolveAuthenticatedPrincipal(request);
   try {
     return Response.json(await context.knowledgeService.reviewIssue({
       issueId: id,
       action,
-      ...(typeof body?.reviewer === 'string' ? { reviewer: body.reviewer } : {}),
+      ...(principal ? { reviewer: principal.principalId } : {}),
       ...(body?.value && typeof body.value === 'object' && !Array.isArray(body.value) ? { value: body.value as Record<string, unknown> } : {}),
     }));
   } catch (error) {
-    // map status from error code, not English-prefix match.
-    const isNotFound = error instanceof Error && (
-      // Domain-specific not-found codes are always explicit (never auto-inferred).
-      (error as { code?: unknown }).code === 'KNOWLEDGE_ISSUE_NOT_FOUND'
-      // Bare NOT_FOUND only maps to 404 when the error carries an actual HTTP 404
-      // status, preventing auto-inferred NOT_FOUND from category-only errors
-      // (which now always have code='NOT_FOUND' via inferCodeFromCategory)
-      // from silently becoming 404 responses.
-      || ((error as { code?: unknown }).code === 'NOT_FOUND'
-        && (error as { status?: unknown }).status === 404)
-    );
-    return readJsonErrorResponse(error, { status: isNotFound ? 404 : 400 });
+    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_ISSUE_NOT_FOUND') ? 404 : 400 });
   }
 }
 
@@ -809,28 +891,18 @@ async function handleKnowledgeDecideCandidate(context: DaemonKnowledgeRouteConte
   if (decision !== 'accept' && decision !== 'reject' && decision !== 'supersede') {
     return jsonErrorResponse({ error: 'Decision must be accept, reject, or supersede.' }, { status: 400 });
   }
+  const principal = context.resolveAuthenticatedPrincipal(request);
   try {
     return Response.json({
       candidate: await context.knowledgeService.decideConsolidationCandidate(id, decision, {
-        ...(typeof body.decidedBy === 'string' ? { decidedBy: body.decidedBy } : {}),
+        ...(principal ? { decidedBy: principal.principalId } : {}),
         ...(typeof body.memoryClass === 'string' ? { memoryClass: body.memoryClass } : {}),
         ...(typeof body.scope === 'string' ? { scope: body.scope } : {}),
         ...(typeof body.detail === 'string' ? { detail: body.detail } : {}),
       }),
     });
   } catch (error) {
-    // map status from error code, not English-prefix match.
-    const isNotFound = error instanceof Error && (
-      // Domain-specific not-found codes are always explicit (never auto-inferred).
-      (error as { code?: unknown }).code === 'KNOWLEDGE_CANDIDATE_NOT_FOUND'
-      // Bare NOT_FOUND only maps to 404 when the error carries an actual HTTP 404
-      // status, preventing auto-inferred NOT_FOUND from category-only errors
-      // (which now always have code='NOT_FOUND' via inferCodeFromCategory)
-      // from silently becoming 404 responses.
-      || ((error as { code?: unknown }).code === 'NOT_FOUND'
-        && (error as { status?: unknown }).status === 404)
-    );
-    return readJsonErrorResponse(error, { status: isNotFound ? 404 : 400 });
+    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_CANDIDATE_NOT_FOUND') ? 404 : 400 });
   }
 }
 
@@ -846,18 +918,7 @@ async function handleKnowledgeRunJob(context: DaemonKnowledgeRouteContext, jobId
       run: await context.knowledgeService.runJob(jobId, input),
     });
   } catch (error) {
-    // map status from error code, not English-prefix match.
-    const isNotFound = error instanceof Error && (
-      // Domain-specific not-found codes are always explicit (never auto-inferred).
-      (error as { code?: unknown }).code === 'KNOWLEDGE_JOB_NOT_FOUND'
-      // Bare NOT_FOUND only maps to 404 when the error carries an actual HTTP 404
-      // status, preventing auto-inferred NOT_FOUND from category-only errors
-      // (which now always have code='NOT_FOUND' via inferCodeFromCategory)
-      // from silently becoming 404 responses.
-      || ((error as { code?: unknown }).code === 'NOT_FOUND'
-        && (error as { status?: unknown }).status === 404)
-    );
-    return readJsonErrorResponse(error, { status: isNotFound ? 404 : 400 });
+    return readJsonErrorResponse(error, { status: isKnowledgeNotFound(error, 'KNOWLEDGE_JOB_NOT_FOUND') ? 404 : 400 });
   }
 }
 
@@ -882,7 +943,7 @@ async function handleKnowledgeSaveSchedule(context: DaemonKnowledgeRouteContext,
       }),
     }, { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -905,11 +966,14 @@ async function handleKnowledgeRenderProjection(context: DaemonKnowledgeRouteCont
   if (body instanceof Response) return body;
   const parsed = readKnowledgeProjectionRequest(body);
   if (parsed instanceof Response) return parsed;
-  try {
-    return Response.json(await context.knowledgeService.renderProjection(parsed));
-  } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
-  }
+  return readScopedKnowledgeResponse(context, request, async options => {
+    try {
+      return Response.json(await context.knowledgeService.renderProjection(parsed, options));
+    } catch (error) {
+      if (options.signal.aborted) throw error;
+      return readServiceErrorResponse(error);
+    }
+  });
 }
 
 async function handleKnowledgeMaterializeProjection(context: DaemonKnowledgeRouteContext, request: Request): Promise<Response> {
@@ -925,7 +989,7 @@ async function handleKnowledgeMaterializeProjection(context: DaemonKnowledgeRout
       ...(typeof body.filename === 'string' ? { filename: body.filename } : {}),
     }), { status: 201 });
   } catch (error) {
-    return readJsonErrorResponse(error, { status: 400 });
+    return readServiceErrorResponse(error);
   }
 }
 
@@ -992,7 +1056,7 @@ async function handleGetKnowledgeSources(
   const limit = readLimit(url, 100);
   const rawCursor = url.searchParams.get('cursor');
   // Load the full in-memory collection (capped at 5_000, see JSDoc note above).
-  const { items: allItems } = await context.knowledgeService.querySources({ limit: 5_000, ...spaceQuery }, options);
+  const { items: allItems, total } = await context.knowledgeService.querySources({ limit: KNOWLEDGE_PAGED_LOAD_CAP, ...spaceQuery }, options);
   const items = allItems as readonly unknown[];
   const result = paginateItems(
     items,
@@ -1006,7 +1070,7 @@ async function handleGetKnowledgeSources(
   if ('error' in result) {
     return jsonErrorResponse({ error: result.error }, { status: 400 });
   }
-  return Response.json(result);
+  return Response.json(withTruncation(result, total, items.length));
 }
 
 /**
@@ -1031,7 +1095,7 @@ async function handleGetKnowledgeNodes(
   const limit = readLimit(url, 100);
   const rawCursor = url.searchParams.get('cursor');
   // Load the full in-memory collection (capped at 5_000, see JSDoc note above).
-  const { items: allItems } = await context.knowledgeService.queryNodes({ limit: 5_000, ...spaceQuery }, options);
+  const { items: allItems, total } = await context.knowledgeService.queryNodes({ limit: KNOWLEDGE_PAGED_LOAD_CAP, ...spaceQuery }, options);
   const items = allItems as readonly unknown[];
   const result = paginateItems(
     items,
@@ -1045,5 +1109,5 @@ async function handleGetKnowledgeNodes(
   if ('error' in result) {
     return jsonErrorResponse({ error: result.error }, { status: 400 });
   }
-  return Response.json(result);
+  return Response.json(withTruncation(result, total, items.length));
 }

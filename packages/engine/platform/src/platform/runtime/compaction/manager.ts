@@ -4,47 +4,32 @@
  * CompactionManager, orchestrates the full compaction lifecycle state machine.
  *
  * Responsibilities:
- * - Gate all compaction behind the `session-compaction` capability gate (behavior.compactionStrategy)
  * - Drive state transitions (idle → checking_threshold → strategy → boundary_commit → done/failed)
- * - Select and execute the appropriate compaction strategy
  * - Create boundary commits with lineage tracking
  * - Emit CompactionEvents at each transition
- * - Expose the resume repair pipeline
  * - Own the lifecycle of a compaction the session itself runs (`runLifecycle`):
  *   the orchestrator's conversation compaction goes through the session's
  *   manager, so every real compaction moves the state machine, emits the
  *   lifecycle events and leaves a boundary commit
  */
 
-import { OwnedJudgmentWork } from '../owned-judgment-work.js';
 import { logger } from '../../utils/logger.js';
 import type { RuntimeEventBus } from '../events/index.js';
-import type { FeatureFlagManager } from '../feature-flags/manager.js';
 import type { EmitterContext } from '../emitters/index.js';
 import {
   compactionLifecycle,
-  selectStrategy,
   strategyToState,
 } from './lifecycle.js';
 import {
-  runMicrocompact,
-  runCollapse,
-  runAutocompact,
-  runReactive,
   createBoundaryCommit,
   validateBoundaryCommit,
 } from './strategies/index.js';
-import { runResumeRepair } from './resume-repair.js';
 import type {
   BoundaryCommit,
-  CompactionLifecycleResult,
   CompactionLifecycleState,
   CompactionStrategy,
   CompactionTrigger,
-  StrategyInput,
-  StrategyOutput,
 } from './types.js';
-import type { ResumeRepairResult } from './types.js';
 import {
   emitCompactionCheck,
   emitCompactionDone,
@@ -54,12 +39,7 @@ import {
   emitCompactionCollapse,
   emitCompactionAutocompact,
   emitCompactionReactive,
-  emitCompactionQualityScore,
-  emitCompactionStrategySwitch,
 } from '../emitters/compaction.js';
-import { computeQualityScore, escalateStrategy, LOW_QUALITY_THRESHOLD } from './quality-score.js';
-import { activateClassicFallback, isClassicOperation } from '../decision-policy.js';
-import type { CompactionQualityScore } from './quality-score.js';
 import type { ProviderMessage } from '../../providers/interface.js';
 import { summarizeError } from '../../utils/error-display.js';
 
@@ -73,8 +53,6 @@ export interface CompactionManagerOptions {
   sessionId: string;
   /** Runtime event bus for emitting CompactionEvents. */
   bus: RuntimeEventBus;
-  /** Capability-gate manager, used to gate on `session-compaction`. */
-  flags: FeatureFlagManager;
   /**
    * Model context window size (tokens). A function is read at each use, so a
    * session whose model changes keeps the window of the model in play.
@@ -104,22 +82,17 @@ export interface SessionCompactionOutcome {
 // ---------------------------------------------------------------------------
 
 /**
- * CompactionManager, manages the full lifecycle of session context compaction.
- *
- * All compaction is gated behind the `session-compaction` capability gate.
- * When the flag is disabled, `compact()` is a no-op and returns the original
- * messages unchanged.
+ * CompactionManager, owns the lifecycle of the compactions a session runs.
  *
  * Usage:
  * ```ts
- * const manager = createCompactionManager({ sessionId, bus, flags, contextWindow });
- * const result = await manager.compact({ messages, tokenCount: 45000, trigger: 'auto' });
+ * const manager = createCompactionManager({ sessionId, bus, contextWindow });
+ * await manager.runLifecycle({ trigger: 'auto', strategy: 'autocompact', messages, tokenCount, execute, outcome });
  * ```
  */
 export class CompactionManager {
   private readonly _sessionId: string;
   private readonly _bus: RuntimeEventBus;
-  private readonly _flags: FeatureFlagManager;
   private readonly _readContextWindow: () => number;
   private readonly _thresholdFraction: number;
 
@@ -142,7 +115,6 @@ export class CompactionManager {
   constructor(opts: CompactionManagerOptions) {
     this._sessionId = opts.sessionId;
     this._bus = opts.bus;
-    this._flags = opts.flags;
     const window = opts.contextWindow;
     this._readContextWindow = typeof window === 'function' ? window : () => window;
     this._thresholdFraction = opts.thresholdFraction ?? 0.75;
@@ -173,302 +145,6 @@ export class CompactionManager {
   /** Returns the most recent boundary commit, or null. */
   get lastCommit(): BoundaryCommit | null {
     return this._lastCommit;
-  }
-
-  /**
-   * Options for a compaction run.
-   */
-
-  /**
-   * Runs the compaction lifecycle for the given messages and trigger.
-   *
-   * If session compaction is off (behavior.compactionStrategy 'off'), returns the
-   * original messages unchanged with no events emitted.
-   *
-   * @param opts - Run options.
-   * @returns Lifecycle result, or null if gated/skipped.
-   */
-  async compact(opts: {
-    messages: ProviderMessage[];
-    tokenCount: number;
-    trigger: CompactionTrigger;
-    isPromptTooLong?: boolean | undefined;
-  }): Promise<CompactionLifecycleResult | null> {
-    if (this._disposed) return null;
-    const run = this._runChain.then(async () => {
-      if (this._disposed) return null;
-      const work = new OwnedJudgmentWork({ signal: this._lifetime.signal });
-      try {
-        const result = await this._compactCurrent(opts, work);
-        work.assertCurrent();
-        return result;
-      }
-      catch (error) { if (!work.current) return null; throw error; }
-      finally {
-        work.retire();
-        if (!this._disposed) this._abandon();
-      }
-    });
-    this._runChain = run.catch(() => undefined);
-    return run;
-  }
-
-  private async _compactCurrent(opts: {
-    messages: ProviderMessage[];
-    tokenCount: number;
-    trigger: CompactionTrigger;
-    isPromptTooLong?: boolean | undefined;
-  }, work: OwnedJudgmentWork): Promise<CompactionLifecycleResult | null> {
-    work.assertCurrent();
-    // ── Capability gate ──────────────────────────────────────────────────────
-    if (!this._flags.isEnabled('session-compaction')) {
-      logger.debug('[CompactionManager] session compaction is off (behavior.compactionStrategy); skipping', {
-        sessionId: this._sessionId,
-      });
-      return null;
-    }
-
-    const runStart = Date.now();
-    const { messages, tokenCount, trigger, isPromptTooLong } = opts;
-    const contextWindow = this._contextWindow;
-    // No known ceiling means no automatic threshold. Manual compaction and
-    // provider prompt-too-long recovery remain explicit reasons to run.
-    // Guard before state transitions/events, including invalid legacy values.
-    if (trigger === 'auto' && !isPromptTooLong && (!Number.isFinite(contextWindow) || contextWindow <= 0)) return null;
-    const threshold = Math.floor(contextWindow * this._thresholdFraction);
-
-    // ── Transition: idle → checking_threshold ────────────────────────────────
-    this._transition('checking_threshold');
-
-    work.assertCurrent();
-    emitCompactionCheck(this._bus, this._ctx, {
-      sessionId: this._sessionId,
-      tokenCount,
-      threshold,
-    });
-    work.assertCurrent();
-
-    // ── Check threshold ──────────────────────────────────────────────────────
-    if (trigger === 'auto' && !isPromptTooLong && tokenCount < threshold) {
-      // Below threshold, go straight to done without compacting
-      this._transition('done');
-      this._transition('idle');
-      logger.debug('[CompactionManager] below threshold; no compaction needed', {
-        sessionId: this._sessionId,
-        tokenCount,
-        threshold,
-      });
-      return null;
-    }
-
-    // ── Select strategy ──────────────────────────────────────────────────────
-    let strategy = selectStrategy({
-      trigger,
-      currentTokens: tokenCount,
-      contextWindow: this._contextWindow,
-      isPromptTooLong,
-    });
-    const strategyState = strategyToState(strategy);
-
-    // ── Transition: checking_threshold → <strategy state> ────────────────────
-    this._transition(strategyState);
-
-    // ── Execute strategy ─────────────────────────────────────────────────────
-    let strategyOutput: StrategyOutput;
-    let qualityScore: CompactionQualityScore | null = null;
-    let strategySwitchReason: string | null = null;
-
-    const strategyInput: StrategyInput = {
-      sessionId: this._sessionId,
-      messages,
-      tokensBefore: tokenCount,
-      contextWindow: this._contextWindow,
-      strategy,
-      meta: isPromptTooLong !== undefined ? { isPromptTooLong } : undefined,
-    };
-
-    try {
-      strategyOutput = await work.wait(() => this._runStrategy(strategy, strategyInput, work));
-    } catch (err) {
-      work.assertCurrent();
-      const error = summarizeError(err);
-      this._transition('failed');
-      work.assertCurrent();
-      emitCompactionFailed(this._bus, this._ctx, {
-        sessionId: this._sessionId,
-        strategy,
-        error,
-      });
-      work.assertCurrent();
-      this._transition('idle');
-      logger.error('[CompactionManager] strategy execution failed', {
-        sessionId: this._sessionId,
-        strategy,
-        error,
-      });
-      return null;
-    }
-
-    // ── Score quality and auto-switch if low ─────────────────────────────────
-    qualityScore = await this._score(strategyInput, strategyOutput, work);
-    work.assertCurrent();
-    if (qualityScore === null && !isClassicOperation()) return null;
-
-    work.assertCurrent();
-    if (qualityScore) emitCompactionQualityScore(this._bus, this._ctx, {
-      sessionId: this._sessionId,
-      strategy,
-      score: qualityScore.score,
-      grade: qualityScore.grade,
-      compressionRatio: qualityScore.compressionRatio,
-      retentionScore: qualityScore.retentionScore,
-      isLowQuality: qualityScore.isLowQuality,
-      description: qualityScore.description,
-    });
-    work.assertCurrent();
-
-    if (qualityScore?.isLowQuality) {
-      const escalated = escalateStrategy(strategy);
-      if (escalated !== strategy) {
-        const reason = `Quality score ${qualityScore.score.toFixed(2)} below threshold ${LOW_QUALITY_THRESHOLD}; escalating from ${strategy} to ${escalated}`;
-        strategySwitchReason = reason;
-
-        logger.warn('[CompactionManager] low quality score, switching strategy', {
-          sessionId: this._sessionId,
-          fromStrategy: strategy,
-          toStrategy: escalated,
-          score: qualityScore.score,
-          grade: qualityScore.grade,
-        });
-
-        work.assertCurrent();
-        emitCompactionStrategySwitch(this._bus, this._ctx, {
-          sessionId: this._sessionId,
-          fromStrategy: strategy,
-          toStrategy: escalated,
-          reason,
-          score: qualityScore.score,
-        });
-        work.assertCurrent();
-
-        // Quality-correction rerun: a declared strategy-to-strategy move.
-        this._setState(strategyToState(escalated));
-
-        const escalatedInput: StrategyInput = { ...strategyInput, strategy: escalated };
-        let escalatedOutput: StrategyOutput | undefined;
-        try {
-          escalatedOutput = await work.wait(() => this._runStrategy(escalated, escalatedInput, work));
-        } catch (err) {
-          work.assertCurrent();
-          const error = summarizeError(err);
-          logger.warn('[CompactionManager] escalated strategy also failed; using original output', {
-            sessionId: this._sessionId,
-            strategy: escalated,
-            error,
-          });
-          // Fall back to the original output, restore to the original strategy state
-          this._setState(strategyToState(strategy));
-        }
-        if (escalatedOutput !== undefined) {
-          // Re-score the escalated result
-          const escalatedScore = await this._score(escalatedInput, escalatedOutput, work);
-          work.assertCurrent();
-          if (escalatedScore === null && !isClassicOperation()) return null;
-          qualityScore = escalatedScore;
-          strategyOutput = escalatedOutput;
-          strategy = escalated;
-        }
-      } else {
-        // No further strategy can repair this candidate; the quality fence below retains the original.
-        logger.debug('[CompactionManager] low quality at ceiling strategy; no escalation possible', {
-          sessionId: this._sessionId,
-          strategy,
-          score: qualityScore.score,
-        });
-      }
-    }
-
-    if (qualityScore?.isLowQuality) {
-      work.assertCurrent();
-      this._transition('failed');
-      emitCompactionFailed(this._bus, this._ctx, {
-        sessionId: this._sessionId, strategy,
-        error: 'Compaction remained below its quality threshold after fallback; the original conversation was retained.',
-      });
-      work.assertCurrent();
-      this._transition('idle');
-      return null;
-    }
-
-    // ── Transition: <strategy> → boundary_commit ─────────────────────────────
-    this._transition('boundary_commit');
-
-    // ── Create boundary commit ───────────────────────────────────────────────
-    const commit = createBoundaryCommit({
-      sessionId: this._sessionId,
-      strategyOutput,
-      parent: this._lastCommit,
-      tokensBefore: tokenCount,
-    });
-
-    const commitErrors = validateBoundaryCommit(commit);
-    if (commitErrors.length > 0) {
-      const error = commitErrors.join('; ');
-      this._transition('failed');
-      work.assertCurrent();
-      emitCompactionFailed(this._bus, this._ctx, {
-        sessionId: this._sessionId,
-        strategy,
-        error,
-      });
-      work.assertCurrent();
-      this._transition('idle');
-      logger.error('[CompactionManager] boundary commit validation failed', {
-        sessionId: this._sessionId,
-        errors: commitErrors,
-      });
-      return null;
-    }
-
-    work.assertCurrent();
-    emitCompactionBoundaryCommit(this._bus, this._ctx, {
-      sessionId: this._sessionId,
-      checkpointId: commit.checkpointId,
-    });
-    work.assertCurrent();
-
-    this._lastCommit = commit;
-
-    // ── Transition: boundary_commit → done ───────────────────────────────────
-    this._transition('done');
-    const durationMs = Date.now() - runStart;
-
-    work.assertCurrent();
-    emitCompactionDone(this._bus, this._ctx, {
-      sessionId: this._sessionId,
-      strategy,
-      tokensBefore: tokenCount,
-      tokensAfter: strategyOutput.tokensAfter,
-      durationMs,
-    });
-    work.assertCurrent();
-
-    // ── Transition: done → idle ───────────────────────────────────────────────
-    this._transition('idle');
-
-    return {
-      sessionId: this._sessionId,
-      strategy,
-      tokensBefore: tokenCount,
-      tokensAfter: strategyOutput.tokensAfter,
-      durationMs,
-      commit,
-      messages: strategyOutput.messages,
-      warnings: strategyOutput.warnings,
-      qualityScore,
-      ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
-      strategySwitchReason,
-    };
   }
 
   /**
@@ -569,55 +245,66 @@ export class CompactionManager {
       throw err;
     }
 
-    // The callback may already have applied messages. Preserve its truthful result.
-    if (!live()) return result;
-    const applied = opts.outcome(result);
-    if (!live()) return result;
-    if (applied === null) {
-      fail('compaction applied no result');
-      return result;
-    }
-
-    this._emitStrategyEvent(strategy, opts.messages.length, tokenCount, applied.tokensAfter, contextWindow);
-    if (!live()) return result;
-
-    this._transition('boundary_commit');
-    const commit = createBoundaryCommit({
-      sessionId: this._sessionId,
-      strategyOutput: {
-        messages: applied.messages,
-        tokensAfter: applied.tokensAfter,
-        summary: applied.summary,
-        strategy,
-        durationMs: Date.now() - runStart,
-        warnings: applied.warnings ?? [],
-      },
-      parent: this._lastCommit,
-      tokensBefore: tokenCount,
-    });
-    const commitErrors = validateBoundaryCommit(commit);
-    if (commitErrors.length > 0) {
-      fail(commitErrors.join('; '));
-      return result;
-    }
-    if (live()) {
-      emitCompactionBoundaryCommit(this._bus, this._ctx, { sessionId: this._sessionId, checkpointId: commit.checkpointId });
+    try {
+      // The callback may already have applied messages. Preserve its truthful result.
       if (!live()) return result;
-      this._lastCommit = commit;
-    }
+      const applied = opts.outcome(result);
+      if (!live()) return result;
+      if (applied === null) {
+        fail('compaction applied no result');
+        return result;
+      }
 
-    this._transition('done');
-    if (live()) {
-      emitCompactionDone(this._bus, this._ctx, {
+      this._emitStrategyEvent(strategy, opts.messages.length, tokenCount, applied.tokensAfter, contextWindow);
+      if (!live()) return result;
+
+      this._transition('boundary_commit');
+      const commit = createBoundaryCommit({
         sessionId: this._sessionId,
-        strategy,
+        strategyOutput: {
+          messages: applied.messages,
+          tokensAfter: applied.tokensAfter,
+          summary: applied.summary,
+          strategy,
+          durationMs: Date.now() - runStart,
+          warnings: applied.warnings ?? [],
+        },
+        parent: this._lastCommit,
         tokensBefore: tokenCount,
-        tokensAfter: applied.tokensAfter,
-        durationMs: Date.now() - runStart,
       });
+      const commitErrors = validateBoundaryCommit(commit);
+      if (commitErrors.length > 0) {
+        // The compaction was applied and announced above, so it is not reported
+        // as failed: it simply has no boundary commit to chain the next run to.
+        logger.warn('[CompactionManager] an applied compaction has no valid boundary commit', {
+          sessionId: this._sessionId, strategy, trigger, problems: commitErrors.join('; '),
+        });
+      } else if (live()) {
+        emitCompactionBoundaryCommit(this._bus, this._ctx, { sessionId: this._sessionId, checkpointId: commit.checkpointId });
+        if (!live()) return result;
+        this._lastCommit = commit;
+      }
+
+      this._transition('done');
+      if (live()) {
+        emitCompactionDone(this._bus, this._ctx, {
+          sessionId: this._sessionId,
+          strategy,
+          tokensBefore: tokenCount,
+          tokensAfter: applied.tokensAfter,
+          durationMs: Date.now() - runStart,
+        });
+      }
+      this._transition('idle');
+      return result;
+    } catch (error) {
+      // Anything that throws after `execute` applied the compaction still ends the
+      // run: the machine returns to idle and observers are told it failed.
+      try { fail(summarizeError(error)); } catch { /* the original error is the one to report */ }
+      throw error;
+    } finally {
+      if (!this._disposed) this._abandon();
     }
-    this._transition('idle');
-    return result;
   }
 
   /** Emits the strategy-specific lifecycle event for a finished strategy run. */
@@ -649,108 +336,7 @@ export class CompactionManager {
     }
   }
 
-  /**
-   * Runs the session resume repair pipeline on the last boundary commit.
-   *
-   * If no commit exists, returns a result with the original messages and
-   * a warning action.
-   *
-   * @param overrideCommit - Optional commit to repair (defaults to lastCommit).
-   * @returns ResumeRepairResult.
-   */
-  repair(
-    overrideCommit?: BoundaryCommit,
-  ): ResumeRepairResult {
-    const commit = overrideCommit ?? this._lastCommit;
-    if (!commit) {
-      return {
-        sessionId: this._sessionId,
-        repaired: false,
-        actions: [
-          {
-            kind: 'no_commit',
-            description: 'No boundary commit available; nothing to repair.',
-            severity: 'info',
-          },
-        ],
-        messages: [],
-        safeToResume: false,
-        failReason: 'No boundary commit available for repair.',
-      };
-    }
-    // With no supported ceiling, token count cannot justify deleting history.
-    // Infinity is internal to this comparison only, never persisted as a limit
-    // or returned in a repair action (the overflow branch cannot fire).
-    const window = this._contextWindow;
-    const maxTokens = Number.isFinite(window) && window > 0 ? Math.floor(window * 0.8) : Number.POSITIVE_INFINITY;
-    return runResumeRepair({ commit, maxTokens });
-  }
-
   // ── Private helpers ────────────────────────────────────────────────────────
-
-  /**
-   * Scores a strategy output. A scoring failure (the quality readings could
-   * not be taken) ends the run the way a strategy failure does: a
-   * COMPACTION_FAILED event, back to idle, and null so no unscored output is
-   * committed.
-   */
-  private async _score(input: StrategyInput, output: StrategyOutput, work: OwnedJudgmentWork): Promise<CompactionQualityScore | null> {
-    if (isClassicOperation()) {
-      work.assertCurrent();
-      output.warnings.push('Classic compaction: no independent semantic quality score was taken. Full saved history remains available.');
-      return null;
-    }
-    try {
-      return await work.wait(() => computeQualityScore(input, output, work.options('runtime.compaction.quality-score')));
-    } catch (err) {
-      if (!work.signal.aborted && activateClassicFallback(err)) {
-        work.assertCurrent();
-        output.warnings.push('Preferred fell back to Classic: this compaction has no independent semantic quality score.');
-        return null;
-      }
-      work.assertCurrent();
-      const error = summarizeError(err);
-      this._transition('failed');
-      emitCompactionFailed(this._bus, this._ctx, {
-        sessionId: this._sessionId,
-        strategy: input.strategy,
-        error,
-      });
-      work.assertCurrent();
-      this._transition('idle');
-      logger.error('[CompactionManager] quality scoring failed', {
-        sessionId: this._sessionId,
-        strategy: input.strategy,
-        error,
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Executes the selected strategy and emits the corresponding domain event.
-   */
-  private async _runStrategy(
-    strategy: CompactionStrategy,
-    input: StrategyInput,
-    work: OwnedJudgmentWork,
-  ): Promise<StrategyOutput> {
-    let output: StrategyOutput;
-    switch (strategy) {
-      case 'microcompact': output = runMicrocompact(input); break;
-      case 'collapse': output = await runCollapse(input, work.options('runtime.compaction.collapse')); break;
-      case 'autocompact': output = runAutocompact(input); break;
-      case 'reactive': output = runReactive(input); break;
-      default: {
-        const _exhaustive: never = strategy;
-        throw new Error(`Unknown compaction strategy: ${_exhaustive}`);
-      }
-    }
-    work.assertCurrent();
-    this._emitStrategyEvent(strategy, input.messages.length, input.tokensBefore, output.tokensAfter, this._contextWindow);
-    work.assertCurrent();
-    return output;
-  }
 
   /**
    * The one place a table-legal move is applied. A refusal is logged and leaves

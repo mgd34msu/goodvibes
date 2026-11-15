@@ -54,7 +54,12 @@ interface UseChatSendOptions {
   onAuthExpired: () => void;
 }
 
-type SendInput = { body: string; files: File[]; steer?: boolean };
+/**
+ * `localMessageId` is set when Resend retries a message that failed: the retry reuses
+ * that message's id, which is also the id the daemon dedupes on, so a send the daemon
+ * had already accepted (only its response was lost) is not run a second time.
+ */
+type SendInput = { body: string; files: File[]; steer?: boolean; localMessageId?: string };
 type SendMutation = Pick<ReturnType<typeof useMutation<undefined, Error, SendInput>>, 'mutate' | 'mutateAsync' | 'reset' | 'isPending' | 'error'>;
 interface SelectionLease {
   selection: ChatSelection;
@@ -95,6 +100,10 @@ export interface UseChatSendReturn {
   isLineagePending: boolean;
   /** The last regenerate/edit error, if any. */
   lineageError: Error | null;
+  /** True when the files of a failed send are still held, so Resend can send them again. */
+  hasHeldFiles: (messageId: string) => boolean;
+  /** Hand over (and stop holding) the files of a failed send, or [] when none are held. */
+  takeHeldFiles: (messageId: string) => File[];
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +147,19 @@ export function useChatSend({
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
+  // The File objects of sends that failed, by local message id. The failed bubble
+  // keeps its attachment chips, and Resend needs the bytes again; they are dropped
+  // once the message is sent or resent.
+  const heldFilesRef = useRef<Map<string, File[]>>(new Map());
+  const holdFiles = (messageId: string, files: File[]) => {
+    if (files.length) heldFilesRef.current.set(messageId, files);
+  };
+  const hasHeldFiles = useCallback((messageId: string) => heldFilesRef.current.has(messageId), []);
+  const takeHeldFiles = useCallback((messageId: string) => {
+    const files = heldFilesRef.current.get(messageId) ?? [];
+    heldFilesRef.current.delete(messageId);
+    return files;
+  }, []);
   // A returned handler belongs to this render, even if navigation leaves and
   // returns to the same session before the handler is invoked.
   const renderedSelection = chatSelection.capture();
@@ -154,7 +176,7 @@ export function useChatSend({
   // Core send mutation (unchanged API, still used by Composer)
   // -------------------------------------------------------------------------
   const ownedSendMutation = useMutation<undefined, Error, OwnedSendInput>({
-    mutationFn: async ({ body, files, steer, lease }) => {
+    mutationFn: async ({ body, files, steer, localMessageId: retriedMessageId, lease }) => {
       if ((!body && !files.length) || !isCurrent(lease)) return;
       // Read the live stream's health at the moment the send starts (not stale,
       // react-query always calls the mutationFn captured on the latest render). A
@@ -197,7 +219,7 @@ export function useChatSend({
         onDraftSessionRequestedChange(false);
       }
 
-      const localMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const localMessageId = retriedMessageId ?? `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const localAttachments = files.map((file, index) => ({
         artifactId: `local-${localMessageId}-${index}`,
         label: file.name,
@@ -205,18 +227,19 @@ export function useChatSend({
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
       }));
-      setLocalMessages((current) => [
-        ...current,
-        {
-          id: localMessageId,
-          sessionId,
-          role: 'user' as const,
-          content: body,
-          createdAt: Date.now(),
-          deliveryState: 'local' as const,
-          attachments: localAttachments,
-        },
-      ]);
+      const localMessage = {
+        id: localMessageId,
+        sessionId,
+        role: 'user' as const,
+        content: body,
+        createdAt: Date.now(),
+        deliveryState: 'local' as const,
+        attachments: localAttachments,
+      };
+      // A resend takes the place of the failed bubble it retries instead of adding a second one.
+      setLocalMessages((current) => (current.some((message) => message.id === localMessageId)
+        ? current.map((message) => (message.id === localMessageId ? localMessage : message))
+        : [...current, localMessage]));
       setPendingUserMessageId(localMessageId);
       setLiveText('');
       setTurnState(sendingWhileReconnecting ? 'sending while reconnecting' : 'submitted');
@@ -245,6 +268,7 @@ export function useChatSend({
         })).then((items) => items.filter((item): item is typeof localAttachments[number] => item !== undefined));
       } catch (error) {
         if (!isCurrent(lease)) throw error;
+        holdFiles(localMessageId, files);
         setLocalMessages((current) => current.map((message) => (
           message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
         )));
@@ -257,6 +281,9 @@ export function useChatSend({
         const payload = {
           body,
           attachments: attachments.map(({ artifactId, label }) => ({ artifactId, label })),
+          // The daemon answers a repeat of this id with the first message, so a resend after a
+          // lost response does not start a second turn.
+          clientMessageId: localMessageId,
         };
         if (steer) {
           // STEER: interrupt the in-flight turn and run this message now
@@ -279,6 +306,7 @@ export function useChatSend({
         }
       } catch (error) {
         if (!isCurrent(lease)) throw error;
+        holdFiles(localMessageId, files);
         setLocalMessages((current) => current.map((message) => (
           message.id === localMessageId ? { ...message, deliveryState: 'failed' as const } : message
         )));
@@ -479,6 +507,8 @@ export function useChatSend({
     regenerateFrom,
     isLineagePending: (regenerateMutation.variables !== undefined && isCurrent(regenerateMutation.variables.lease) && regenerateMutation.isPending)
       || (editMutation.variables !== undefined && isCurrent(editMutation.variables.lease) && editMutation.isPending),
+    hasHeldFiles,
+    takeHeldFiles,
     lineageError: (regenerateMutation.variables !== undefined && isCurrent(regenerateMutation.variables.lease) ? regenerateMutation.error : null)
       ?? (editMutation.variables !== undefined && isCurrent(editMutation.variables.lease) ? editMutation.error : null),
   };

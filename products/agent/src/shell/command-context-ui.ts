@@ -14,6 +14,7 @@
 
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell';
 import { CLEAR_VIEWPORT_HOME } from '../renderer/terminal-escapes.ts';
+import type { PermissionExecutionOptions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { PendingPermissionState } from './blocking-input.ts';
 
 /** What a permission ask resolves with once the person answers it. */
@@ -28,7 +29,8 @@ export interface CommandContextUiOptions {
   readonly render: () => void;
   /** Current terminal width, read at the moment the action runs. */
   readonly terminalWidth: () => number;
-  readonly setPendingPermission: (pending: PendingPermissionState) => void;
+  /** Null clears the card (an ask decided elsewhere, or cancelled). */
+  readonly setPendingPermission: (pending: PendingPermissionState | null) => void;
 }
 
 export interface CommandContextUi {
@@ -38,23 +40,87 @@ export interface CommandContextUi {
    * Park a permission ask on screen and resolve once it is answered.
    *
    * The promise is the answer; the repaint is what makes the prompt appear.
+   * When `options.signal` aborts first (the ask was decided somewhere else, or
+   * the turn was cancelled) the card is taken down if it is still this ask's,
+   * the ask leaves the queue if it was waiting, and the promise settles as a
+   * denial.
    */
-  requestPermission(request: Omit<PendingPermissionState, 'resolve'>): Promise<PermissionAnswer>;
+  requestPermission(request: Omit<PendingPermissionState, 'resolve'>, options?: PermissionExecutionOptions): Promise<PermissionAnswer>;
 }
 
 export function createCommandContextUi(options: CommandContextUiOptions): CommandContextUi {
+  // One card is on screen at a time. The shell keeps a single pending slot, so a
+  // second ask written into it would drop the first ask's resolver and leave the
+  // tool call behind it waiting forever. A later ask waits its turn instead.
+  let active: { readonly callId: string; readonly settle: Array<(approved: boolean, remember: boolean) => void> } | null = null;
+  const waiting: Array<{ readonly request: Omit<PendingPermissionState, 'resolve'>; readonly settle: (approved: boolean, remember: boolean) => void }> = [];
+
+  const showNext = (): void => {
+    if (active !== null) return;
+    const following = waiting.shift();
+    if (following) {
+      show(following.request, [following.settle]);
+      options.render();
+    }
+  };
+
+  const show = (
+    request: Omit<PendingPermissionState, 'resolve'>,
+    settle: Array<(approved: boolean, remember: boolean) => void>,
+  ): void => {
+    const entry = { callId: request.callId, settle };
+    active = entry;
+    options.setPendingPermission({
+      ...request,
+      resolve: (approved: boolean, remember = false) => {
+        if (active !== entry) return;
+        active = null;
+        for (const settleOne of entry.settle) settleOne(approved, remember);
+        // The shell clears its pending slot right after this call returns, so the
+        // next card is placed after that, not into the slot about to be emptied.
+        queueMicrotask(showNext);
+      },
+    } as PendingPermissionState);
+  };
+
   return {
     clearScreen: (): void => {
       options.compositor.resetDiff();
       allowTerminalWrite(() => options.stdout.write(CLEAR_VIEWPORT_HOME));
       options.render();
     },
-    requestPermission: (request) => new Promise<PermissionAnswer>((resolve) => {
-      options.setPendingPermission({
-        ...request,
-        resolve: (approved: boolean, remember = false) => resolve({ approved, remember }),
-      } as PendingPermissionState);
-      options.render();
+    requestPermission: (request, permissionOptions) => new Promise<PermissionAnswer>((resolve) => {
+      const settle = (approved: boolean, remember: boolean): void => resolve({ approved, remember });
+      const signal = permissionOptions?.signal;
+      if (signal?.aborted) {
+        settle(false, false);
+        return;
+      }
+      signal?.addEventListener('abort', () => {
+        if (active !== null && active.callId === request.callId) {
+          // Only this ask's own card comes down; a different card is not touched.
+          const settling = active.settle;
+          active = null;
+          options.setPendingPermission(null);
+          for (const settleOne of settling) settleOne(false, false);
+          showNext();
+          options.render();
+          return;
+        }
+        const index = waiting.findIndex((entry) => entry.settle === settle);
+        if (index >= 0) waiting.splice(index, 1);
+        settle(false, false);
+      }, { once: true });
+      if (active === null) {
+        show(request, [settle]);
+        options.render();
+      } else if (active.callId === request.callId) {
+        // The same ask arriving again replaces its own card; both callers get the one answer.
+        show(request, [...active.settle, settle]);
+        options.render();
+      } else {
+        waiting.push({ request, settle });
+      }
     }),
   };
 }

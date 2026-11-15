@@ -21,13 +21,14 @@ import '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
 import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
 
-const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
+export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'display.themeMode': {
     auto: 'Probe the terminal background colour (OSC 11) once at startup and pick light or dark. Falls back to dark on unreadable/unsupported terminals. Only evaluated at startup: selecting auto takes effect next launch.',
     dark: 'Force the dark theme regardless of terminal background. Applies immediately.',
     light: 'Force the light theme regardless of terminal background. Applies immediately.',
   },
   'behavior.hitlMode': {
+    off: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['off'],
     quiet: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['quiet'],
     balanced: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['balanced'],
     operator: 'Surface more operational detail for users actively supervising agents, tools, services, and automation.',
@@ -54,20 +55,20 @@ const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'batch.mode': {
     off: 'Keep daemon work on the immediate local path.',
     explicit: 'Use batch only when callers explicitly request batch execution.',
-    'eligible-by-default': 'Allow eligible daemon work to use the batch path unless callers opt out.',
+    'eligible-by-default': 'Accepted and reported to clients, but not yet enforced: it behaves like explicit, and daemon chat stays live.',
   },
   'controlPlane.hostMode': {
-    localhost: 'Bind only to this computer.',
+    local: 'Bind only to this computer.',
     network: 'Bind for LAN access using the default network host.',
     custom: 'Use the explicit host value in the related host setting.',
   },
   'httpListener.hostMode': {
-    localhost: 'Bind only to this computer.',
+    local: 'Bind only to this computer.',
     network: 'Bind for LAN/webhook access using the default network host.',
     custom: 'Use the explicit host value in the related host setting.',
   },
   'web.hostMode': {
-    localhost: 'Serve the browser UI only on this computer.',
+    local: 'Serve the browser UI only on this computer.',
     network: 'Serve the browser UI on the LAN.',
     custom: 'Use the explicit host value in the related host setting.',
   },

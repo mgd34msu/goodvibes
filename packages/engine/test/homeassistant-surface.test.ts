@@ -89,6 +89,8 @@ describe('Home Assistant channel surface', () => {
     expect(manifest.capabilities).not.toContain('agent-task-ingress');
     expect(manifest.capabilities).toContain('daemon-agent-tools');
     expect(manifest.recommendedServices.map((service) => service.name)).not.toContain('goodvibes.run_agent');
+    expect(manifest.recommendedServices.map((service) => service.name)).toContain('goodvibes.call_tool');
+    expect(manifest.events.inboundSecretHeaders).toContain('x-goodvibes-webhook-secret');
     expect(manifest.events.outboundEventType).toBe('goodvibes_message');
     expect(tools.map((tool) => tool.name)).toContain('homeassistant_call_service');
     expect(tools.map((tool) => tool.name)).toContain('homeassistant_render_template');
@@ -174,7 +176,6 @@ describe('Home Assistant channel surface', () => {
     let chatBody = '';
     let chatProvider = '';
     let chatModel = '';
-    let chatTools: readonly string[] | undefined;
 
     const context = {
       serviceRegistry: {
@@ -203,13 +204,11 @@ describe('Home Assistant channel surface', () => {
         readonly body: string;
         readonly providerId?: string;
         readonly modelId?: string;
-        readonly tools?: readonly string[];
         readonly publishEvent?: boolean;
       }) => {
         chatBody = input.body;
         chatProvider = input.providerId ?? '';
         chatModel = input.modelId ?? '';
-        chatTools = input.tools;
         expect(input.publishEvent).toBe(true);
         return {
           sessionId: 'ha-chat-session-1',
@@ -233,7 +232,6 @@ describe('Home Assistant channel surface', () => {
         conversationId: 'home',
         providerId: 'openai',
         modelId: 'gpt-5.5',
-        tools: ['homeassistant_state'],
       }),
     }), context);
     const payload = await response.json() as Record<string, unknown>;
@@ -245,7 +243,6 @@ describe('Home Assistant channel surface', () => {
     expect(chatBody).toBe('turn on the kitchen lights');
     expect(chatProvider).toBe('openai');
     expect(chatModel).toBe('gpt-5.5');
-    expect(chatTools).toEqual(['homeassistant_state']);
   });
 
   test('supports submit-and-wait conversation routes with daemon-owned isolated chat sessions', async () => {
@@ -326,6 +323,8 @@ describe('Home Assistant channel surface', () => {
       },
       chatManager,
       parseJsonBody: async (req: Request) => await req.json() as Record<string, unknown>,
+      requireScope: () => null,
+      requireAdmin: () => null,
       resolveDefaultProviderModel: () => ({ provider: 'openai', model: 'gpt-5.5' }),
     } as unknown as ConstructorParameters<typeof HomeAssistantConversationRoutes>[0]);
 
@@ -427,6 +426,8 @@ describe('Home Assistant channel surface', () => {
         },
       },
       parseJsonBody: async (req: Request) => await req.json() as Record<string, unknown>,
+      requireScope: () => null,
+      requireAdmin: () => null,
       resolveDefaultProviderModel: () => ({ provider: 'openai', model: 'gpt-5.5' }),
     } as unknown as ConstructorParameters<typeof HomeAssistantConversationRoutes>[0]);
 

@@ -1,5 +1,5 @@
 /**
- * Fleet depth (WEBUI-FLEET-DEPTH), the process tree's steer/detach/stop actions and
+ * Fleet depth, the process tree's steer/detach/stop actions and
  * "approve from the tree", proved against the hermetic mock daemon on both viewports.
  *
  * Desktop: every new action (steer, detach, stop, approve/deny/claim/cancel inline)

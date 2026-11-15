@@ -201,6 +201,10 @@ export function projectFeedContextClosures<
   Host extends { readonly [Key in (typeof FEED_FORWARD_KEYS)[number]]: (...args: never[]) => unknown } & {
     readonly sessionView: unknown;
     readonly bodyTopRow: number;
+    nextPasteId: number;
+    nextImageId: number;
+    isConcealedInput?(): boolean;
+    readonly concealedInput?: unknown;
     cancelConcealedInput(): boolean;
     handleEscape(): void;
     handleCtrlC(): void;
@@ -217,6 +221,13 @@ export function projectFeedContextClosures<
   return {
     ...forwards,
     getSessionView: () => host.sessionView as Host['sessionView'],
+    isConcealedInput: (): boolean => host.isConcealedInput?.() ?? (host.concealedInput ?? null) !== null,
+    // The handler owns the paste and image id counters; the pipeline reads them
+    // back after each token so a stale feed copy never rewinds them.
+    readPasteCounters: (): { readonly nextPasteId: number; readonly nextImageId: number } => ({
+      nextPasteId: host.nextPasteId,
+      nextImageId: host.nextImageId,
+    }),
     handleEscape: () => {
       if (!host.cancelConcealedInput()) host.handleEscape();
       host.syncFeedContextMutableFields();

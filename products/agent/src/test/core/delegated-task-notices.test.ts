@@ -25,7 +25,9 @@ import { NotificationFeed } from '../../core/notifications-feed.ts';
 import { delegatedTaskEventOfNotice } from '../../core/delegated-task-notices.ts';
 
 const ctx = { sessionId: 's', traceId: 't', source: 'test' };
-const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
+// A macrotask turn runs after every pending microtask, however many awaits the producer chain grows to,
+// so the assertions never race the bus delivery or the status lookup (both in-memory here).
+const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
 
 function wired(execute: () => Promise<{ success: boolean; output: string }> = async () => ({ success: false, output: '' })) {
   const bus = new RuntimeEventBus();

@@ -181,6 +181,46 @@ describe('agent_autonomy_schedule tool', () => {
     }
   });
 
+  test('a task that is itself an option name stays a task, and is not read as a flag', async () => {
+    const paths = shellPaths();
+    const tool = admittedTool(paths);
+    const requests: ScheduleRequest[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async (input, init) => {
+      requests.push({ url: inputUrl(input), method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : '' });
+      return scheduleResponse();
+    });
+    try {
+      const result = await tool.execute({
+        task: '--disabled',
+        successCriteria: '--task',
+        scheduleKind: 'every',
+        scheduleValue: '1d',
+      });
+      expect(result.error).toBeUndefined();
+      const payload = JSON.parse(requests.find((request) => request.method === 'POST')?.body ?? '{}') as { body?: SchedulePayload & { enabled?: boolean } } & SchedulePayload & { enabled?: boolean };
+      const body = (payload.body ?? payload) as SchedulePayload & { enabled?: boolean };
+      expect(body.prompt).toContain('--disabled');
+      expect(body.enabled).not.toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('a link delivery target is not part of the schema, because nothing delivers to one', async () => {
+    const paths = shellPaths();
+    const tool = admittedTool(paths);
+    const result = await tool.execute({
+      task: 'Review the ops queue',
+      successCriteria: 'Report blockers.',
+      scheduleKind: 'every',
+      scheduleValue: '1d',
+      deliveryLink: 'https://example.com/x',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('$.deliveryLink');
+  });
+
   test('creates a connected autonomous schedule under recorded admission', async () => {
     const paths = shellPaths();
     const tool = admittedTool(paths);

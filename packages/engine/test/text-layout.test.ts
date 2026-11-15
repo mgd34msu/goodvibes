@@ -36,15 +36,18 @@ describe('wrapWithHangingIndent', () => {
     }
   });
 
-  test('the indent eats into the continuation budget rather than overflowing', () => {
+  test('the indent narrows the continuation lines and re-wraps, losing no words', () => {
     const width = 20;
-    const wide = wrapWithHangingIndent('alpha bravo charlie delta echo foxtrot', width, '');
-    const indented = wrapWithHangingIndent('alpha bravo charlie delta echo foxtrot', width, '        ');
+    const text = 'alpha bravo charlie delta echo foxtrot';
+    const wide = wrapWithHangingIndent(text, width, '');
+    const indented = wrapWithHangingIndent(text, width, '        ');
+    expect(indented.length).toBeGreaterThan(wide.length);
     for (const line of indented) {
       expect(getDisplayWidth(line)).toBeLessThanOrEqual(width);
     }
-    // Same wrap points, but the indented continuations carry less text each.
-    expect(indented.length).toBe(wide.length);
+    const words = indented.map((line, i) => (i === 0 ? line : line.slice(8))).join(' ');
+    expect(words).toBe(text);
+    expect(indented.slice(1).every((line) => line.startsWith('        '))).toBe(true);
   });
 
   test('maxLines truncates the result without appending an ellipsis', () => {
@@ -73,6 +76,14 @@ describe('wrapWithHangingIndent', () => {
     for (const line of lines) {
       expect(getDisplayWidth(line)).toBeLessThanOrEqual(8);
     }
+  });
+});
+
+describe('wrapWithHangingIndent leading spaces', () => {
+  test('leading spaces are dropped without corrupting or duplicating the text that follows', () => {
+    const lines = wrapWithHangingIndent('  leading spaces here and there ok', 10, '  ');
+    expect(lines[0]).toBe('leading');
+    expect(lines.map((l) => l.trim()).join(' ')).toBe('leading spaces here and there ok');
   });
 });
 

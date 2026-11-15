@@ -11,7 +11,7 @@ import { readLearningGrade, readLearningProposalTarget, readLearningMemoryClass 
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, SessionInfoLike, VibeCandidateKind, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
-import { candidateBase, isReviewed, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
+import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import { consolidationCandidatesForDomain } from './agent-harness-learning-curator-consolidation.ts';
 function captureCandidate(): LearningCandidateDraft {
   return {
@@ -372,12 +372,12 @@ async function candidatesForItem(domain: LocalLearningCandidateDomain, record: L
       'Resolve setup requirements before enabling, scheduling, or relying on this behavior.',
     ));
   }
-  if (item.confidence !== undefined && item.confidence < 70) {
+  if (item.confidence !== undefined && item.confidence < MIN_PROMPT_MEMORY_CONFIDENCE) {
     candidates.push(candidateBase(
       domain,
       item,
       'low-confidence',
-      `Confidence is ${item.confidence}%, below the durable-memory threshold.`,
+      `Confidence is ${item.confidence}%, below the ${MIN_PROMPT_MEMORY_CONFIDENCE}% prompt-recall floor.`,
       'Review, update confidence, or mark stale before using this memory as prompt context.',
     ));
   }
@@ -548,7 +548,7 @@ async function collectLearningDrafts(source: LearningCuratorSource,
       for (const candidate of local) drafts.push({ candidate, record });
       if (isClassicOperation() && local.length === 0) drafts.push({ candidate: candidateBase(domain, record.item, 'unassessed',
         'Stored record; semantic curation was not evaluated.', 'Inspect the source record and use explicit review, update or stale actions.'), record });
-      const eligible = domain === 'memory' ? (record.item.confidence ?? 100) >= 70
+      const eligible = domain === 'memory' ? isMemoryPromptEligible(record.item)
         : domain === 'persona' ? record.item.active === true
         : domain !== 'note' && record.item.enabled === true && missingRequirementCount(record.item) === 0;
       if (eligible) {

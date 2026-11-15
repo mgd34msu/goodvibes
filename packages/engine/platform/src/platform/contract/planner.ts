@@ -85,6 +85,8 @@ export interface ContractPlannerDeps {
   readonly repositoryMap?: ((projectRoot: string) => Promise<string>) | undefined;
   readonly readAccessFilter?: ReadAccessFilter | undefined;
   readonly now?: (() => number) | undefined;
+  /** Backs off before a retry; defaults to a timer. The runner passes its own wait so one clock serves every back-off. */
+  readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
 }
 
 export interface PlanContractInput {
@@ -181,27 +183,39 @@ export interface PlannerRequestInput {
   readonly previousPlan?: string | undefined;
 }
 
-/** What the request shape tells the planner, one line per reading code acts on. */
-function shapeLines(shape: RequestShape, config: PlannerRequestInput['config']): string[] {
+/** What the request shape says about how the user wants the work done, one line per reading code acts on. */
+function shapeLines(shape: RequestShape): string[] {
   const lines: string[] = [];
-  lines.push('- Permission to write a requested review report or other artifact does not authorize production edits or fixes. Preserve the original request and its exact deliverables and restrictions.');
-  lines.push(delegationForbidden(shape)
-    ? '- The user does not allow handing the work to other agents: plan exactly one unit, in one group, with no integration group.'
-    : '- Units run as separate agents.');
+  if (delegationForbidden(shape)) {
+    lines.push('- The user does not allow handing the work to other agents: plan exactly one unit, in one group, with no integration group.');
+  }
   if (saysYesAtAct(shape.requests_parallel_agents)) {
     lines.push('- The user asked for separate agents working in parallel: put the independent units in one group with no dependency between them.');
   }
   if (saysYesAtAct(shape.forbids_writing)) {
     lines.push('- The user does not allow changing files: every unit is read-only, so plan research or design units whose answers are the deliverable.');
-  } else if (writingUnclear(shape)) {
-    lines.push('- The request-shape reading is uncertain about file changes. Resolve the work from the original request: reviews and reports inspect and report; implementation requests make the requested changes. Continue planning without an owner approval question.');
   }
   if (saysYesAtAct(shape.asks_for_attempts)) {
     lines.push(`- The user asked for several attempts to pick from: set "attempts" on each unit that should be tried more than once.`);
-  } else if (config.defaultAttempts > 1) {
-    lines.push(`- Each unit runs ${config.defaultAttempts} attempts unless it sets "attempts".`);
-  } else {
-    lines.push('- Every unit has "attempts": 1.');
+  }
+  return lines;
+}
+
+/**
+ * The host's own planning rules. They are kept apart from the user's words:
+ * a planner that read one of them as a user requirement made it a criterion,
+ * which then failed its quote and trace checks.
+ */
+function hostRuleLines(shape: RequestShape, config: PlannerRequestInput['config']): string[] {
+  const lines: string[] = [
+    '- Permission to write a requested review report or other artifact does not authorize production edits or fixes. Preserve the original request and its exact deliverables and restrictions.',
+  ];
+  if (!delegationForbidden(shape)) lines.push('- Units run as separate agents.');
+  if (!saysYesAtAct(shape.forbids_writing) && writingUnclear(shape)) {
+    lines.push('- The request-shape reading is uncertain about file changes. Resolve the work from the original request: reviews and reports inspect and report; implementation requests make the requested changes. Continue planning without an owner approval question.');
+  }
+  if (!saysYesAtAct(shape.asks_for_attempts)) {
+    lines.push(config.defaultAttempts > 1 ? `- Each unit runs ${config.defaultAttempts} attempts unless it sets "attempts".` : '- Every unit has "attempts": 1.');
   }
   if (config.maxUnits > 0) lines.push(`- The plan has at most ${config.maxUnits} units.`);
   return lines;
@@ -217,8 +231,11 @@ export function buildContractPlannerRequest(input: PlannerRequestInput): string 
     (input.nativeSource === undefined
       ? "## The user's request\nEvery contract criterion quotes these words exactly.\n\n<request>\n"
       : '## Display request\nThe separate immutable native source is authoritative for the full goal and ordered criteria.\n\n<request>\n') + input.ask + '\n</request>',
-    '## How the user wants the work done\n' + shapeLines(input.shape, input.config).join('\n'),
   ];
+  const userLines = shapeLines(input.shape);
+  if (userLines.length > 0) sections.push('## How the user wants the work done\n' + userLines.join('\n'));
+  sections.push('## Host rules\nThese are the host\'s planning rules, not the user\'s words. Follow them, but never make one a criterion or quote it.\n'
+    + hostRuleLines(input.shape, input.config).join('\n'));
   if (input.nativeSource !== undefined) {
     sections.push('## Immutable native source\nThis is the complete original goal and ordered criteria. Host identity and revisions remain in the local source binding. Do not summarize, rewrite, drop, add or reorder these roots. Only derive groups and units. The root goal and criteria in every response must exactly equal the following projection.\n'
       + JSON.stringify(nativeContractTaskSource(input.nativeSource)) + '\nRequired plan roots:\n' + JSON.stringify(nativeSourcePlan(input.nativeSource)));
@@ -605,7 +622,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
         }
         // A model cannot repair a denied native read. Keep its original input,
         // await an actual policy change, and let cancellation drain this wait.
-        await waitForTaskRecovery(delay, signal);
+        await backOff(deps, delay, signal);
         delay = Math.min(delay * 2, 5_000);
       }
     }
@@ -663,14 +680,15 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       const checked = run.status === 'completed' ? await checkPlanOwned(context, run.output, repair, signal, assertCurrent)
         : { text: run.output, plan: undefined, verdict: undefined,
           problems: [{ code: 'unparseable' as const, message: runFailureReason(run) + '. Repair this failed planning attempt; the original request remains active.' }] };
-      if (run.status !== 'completed') await waitForTaskRecovery(Math.min(250 * (repair + 1), 5_000), signal);
+      if (run.status !== 'completed') await backOff(deps, Math.min(250 * (repair + 1), 5_000), signal);
       await assertCurrent();
       if (checked.problems.length === 0 && checked.plan !== undefined) {
         const decisionIds = [...contract.shape.decisionIds, ...(checked.verdict?.decisionIds ?? [])];
         acceptPlan(contract, checked.plan, checked.verdict?.dispositions ?? new Map(), context, decisionIds);
         return { kind: 'accepted', plan: checked.plan, decisionIds };
       }
-      if (context.config.planRepairLimit === 0 && repeatsRejectedPlan(rejectedPlans, checked)) {
+      // A run that failed to finish (an outage, a refused call) is retried with a backoff; only a plan the planner actually returned can repeat.
+      if (context.config.planRepairLimit === 0 && run.status === 'completed' && repeatsRejectedPlan(rejectedPlans, checked)) {
         return context.fail('planning', 'Planning stopped because a repair repeated the same unresolved planning state. ' + checked.problems.map(entry => entry.message).join(' '));
       }
       if (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit) {
@@ -698,6 +716,10 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   }
 }
 
+function backOff(deps: ContractPlannerDeps, ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return deps.wait === undefined ? waitForTaskRecovery(ms, signal) : deps.wait(ms, signal ?? new AbortController().signal);
+}
+
 function priorOwnerReadContext(contract: Contract, deps: ContractPlannerDeps): string {
   const evidence = deps.readOwnerEvidence?.(contract, '');
   return evidence === undefined ? '' : '\nActual earlier owner source-read observations, not new requirements, semantic review approval or acceptance. Use the qualified returned scope to preserve completed work and identify genuine remaining work:\n' + JSON.stringify(evidence);
@@ -714,6 +736,8 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   const rejectedPlans = new Set<string>();
   let output = state.plannerOutputs[budgetKey];
   let needsPlan = output === undefined;
+  /** The output being checked is a planner failure to retry after a backoff, not a plan to be revised. */
+  let failedRun = false;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
   try {
     for (;;) {
@@ -739,13 +763,14 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         signal.throwIfAborted();
         await admitted.assertCurrent();
         await admitted.assertReadAccess();
+        failedRun = run.status !== 'completed';
         output = run.status === 'completed' ? run.output : JSON.stringify({ plannerFailure: runFailureReason(run), partialProposal: run.output });
-        if (run.status !== 'completed') await waitForTaskRecovery(Math.min(250 * attempt, 5_000), signal);
+        if (run.status !== 'completed') await backOff(deps, Math.min(250 * attempt, 5_000), signal);
         state.plannerOutputs[budgetKey] = output; deps.native?.changed(contract);
       }
       const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
       await admitted.assertCurrent();
-      if (context.config.planRepairLimit === 0 && rejectedPlans.has(checked.text)) {
+      if (context.config.planRepairLimit === 0 && !failedRun && rejectedPlans.has(checked.text)) {
         return context.fail('planning', 'Planning stopped because the planner repeated a plan already returned for revision. ' + checked.problems.map(entry => entry.message).join(' '));
       }
       const valid = checked.problems.length === 0 && checked.plan !== undefined;
@@ -765,7 +790,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       if (decision.decision.outcome === 'reject') return context.fail('planning', 'Jev refused the native plan');
       if (decision.continuationId !== 'repair-plan' || !canRepair) throw new Error('Native planner continuation is no longer eligible');
       decision.assertCurrent();
-      rejectedPlans.add(checked.text);
+      if (!failedRun) rejectedPlans.add(checked.text);
       previous = { problems: checked.problems, previousPlan: checked.text }; needsPlan = true;
       context.decide('plan-repaired', 'Jev selected registered native plan repair', decision.decision.judgmentDecisionIds);
       context.move('planning');
@@ -920,6 +945,23 @@ export function buildPlanTree(
   return { goal: plan.goal, criteria, groups, units };
 }
 
+const PLANNING_STATUSES: ReadonlySet<ContractStatus> = new Set(['queued', 'shaping', 'planning', 'checking-plan']);
+const UNSTARTED_WORK: ReadonlySet<string> = new Set(['pending', 'blocked']);
+
+/**
+ * A plan replaces the whole tree, so it may land only while the contract is
+ * still planning and none of its work has started; a late planner result or
+ * owner approval must not wipe groups that agents are already working in.
+ */
+function assertPlanReplaceable(contract: Contract): void {
+  // An owner wait is judged by where the contract was before it (the same reading a resume uses).
+  const status = contract.status === 'awaiting-owner' ? contract.statusBeforeOwner ?? (contract.groups.length > 0 ? 'running' : 'planning') : contract.status;
+  const started = [...contract.groups, ...contract.units].find(entry => !UNSTARTED_WORK.has(entry.status));
+  if (PLANNING_STATUSES.has(status) && started === undefined) return;
+  const why = started === undefined ? `it is ${contract.status}` : `${started.id} is already ${started.status}`;
+  throw new Error(`Contract ${contract.id} is past planning and cannot accept a new plan: ${why}. Amend the running plan or cancel the contract instead.`);
+}
+
 /**
  * Makes the plan the contract tree and records the `plan-accepted` decision
  * with every decision id behind it. The status is left for the runner, which
@@ -933,6 +975,7 @@ function acceptPlan(
   decisionIds: readonly string[],
   how = 'every plan check passed',
 ): void {
+  assertPlanReplaceable(contract);
   const tree = buildPlanTree(plan, dispositions, context.config.defaultAttempts, hasDerivedAcceptanceChecks(contract.originalSource) ? 'derived' : 'stated');
   if (contract.nativeSource === undefined) {
     contract.goal = tree.goal;
@@ -948,8 +991,8 @@ function acceptPlan(
   const structural = tree.criteria.filter((criterion) => criterion.disposition === 'met-by-structure').length;
   const notes = [
     `${tree.units.length} unit${tree.units.length === 1 ? '' : 's'} in ${tree.groups.length} group${tree.groups.length === 1 ? '' : 's'}`,
-    ...(excluded > 0 ? [`${excluded} criterion${excluded === 1 ? '' : 'a'} excluded: requires an agent arrangement`] : []),
-    ...(structural > 0 ? [`${structural} criterion${structural === 1 ? '' : 'a'} met by the plan's structure`] : []),
+    ...(excluded > 0 ? [`${excluded} ${excluded === 1 ? 'criterion' : 'criteria'} excluded: requires an agent arrangement`] : []),
+    ...(structural > 0 ? [`${structural} ${structural === 1 ? 'criterion' : 'criteria'} met by the plan's structure`] : []),
   ];
   context.decide('plan-accepted', `${how}; ${notes.join('; ')}`, decisionIds);
 }

@@ -248,18 +248,18 @@ export interface KnowledgeApi {
     runs(limit?: number, jobId?: string): ReturnType<KnowledgeService['listJobRuns']>;
     run(id: string, input?: RunJobInput): ReturnType<KnowledgeService['runJob']>;
     schedules: {
-      list(limit?: number): ReturnType<KnowledgeService['listSchedules']>;
-      get(id: string): ReturnType<KnowledgeService['getSchedule']>;
+      list(limit?: number): Promise<ReturnType<KnowledgeService['listSchedules']>>;
+      get(id: string): Promise<ReturnType<KnowledgeService['getSchedule']>>;
       save(input: ScheduleSaveInput): ReturnType<KnowledgeService['saveSchedule']>;
       delete(id: string): ReturnType<KnowledgeService['deleteSchedule']>;
       setEnabled(id: string, enabled: boolean): ReturnType<KnowledgeService['setScheduleEnabled']>;
     };
   };
   readonly consolidation: {
-    candidates(limit?: number, input?: CandidateListInput): ReturnType<KnowledgeService['listConsolidationCandidates']>;
-    getCandidate(id: string): ReturnType<KnowledgeService['getConsolidationCandidate']>;
-    reports(limit?: number): ReturnType<KnowledgeService['listConsolidationReports']>;
-    getReport(id: string): ReturnType<KnowledgeService['getConsolidationReport']>;
+    candidates(limit?: number, input?: CandidateListInput): Promise<ReturnType<KnowledgeService['listConsolidationCandidates']>>;
+    getCandidate(id: string): Promise<ReturnType<KnowledgeService['getConsolidationCandidate']>>;
+    reports(limit?: number): Promise<ReturnType<KnowledgeService['listConsolidationReports']>>;
+    getReport(id: string): Promise<ReturnType<KnowledgeService['getConsolidationReport']>>;
     decide(
       candidateId: string,
       decision: ConsolidationDecision,
@@ -366,7 +366,12 @@ export function createCodeIndexApi(codeIndexStore: CodeIndexApiRegistry): CodeIn
   return Object.freeze({
     search: (query: string, opts: { limit?: number } = {}) => codeIndexStore.search(query, opts),
     stats: () => codeIndexStore.stats(),
-    reindex: () => codeIndexStore.buildFull(),
+    reindex: async () => {
+      const stats = await codeIndexStore.buildFull();
+      // An aborted or unstarted build carries empty counts; returning them would read as an index that is simply empty.
+      if (stats.abortReason) throw new Error(`Code index reindex did not run to completion: ${stats.abortReason}`);
+      return stats;
+    },
     scheduleReindex: () => codeIndexStore.scheduleBuild(),
     reindexFile: (absPath: string) => codeIndexStore.reindexFile(absPath),
     describeDegradation: () => codeIndexStore.describeDegradation(),
@@ -377,52 +382,61 @@ export function createKnowledgeApi(
   knowledgeService: KnowledgeService,
   options: CreateKnowledgeApiOptions = {},
 ): KnowledgeApi {
+  // Reads a person asks for first adopt a file another process saved; writes and
+  // in-flight operations never do, so a stale write is still refused as a conflict.
+  const fresh = async <T>(read: () => Promise<T>): Promise<T> => {
+    await knowledgeService.refreshFromDisk();
+    return read();
+  };
   return Object.freeze({
     status: Object.freeze({
-      get: (scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.getStatus(scope, options),
+      get: (scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.getStatus(scope, options)),
       lint: () => knowledgeService.lint(),
       reindex: () => knowledgeService.reindex(),
     }),
     sources: Object.freeze({
-      list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.listSources(limit, options),
-      query: (input: SourceQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.querySources(input, options),
+      list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.listSources(limit, options)),
+      query: (input: SourceQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.querySources(input, options)),
       delete: (id: string) => knowledgeService.deleteSource(id),
     }),
     graph: Object.freeze({
       nodes: Object.freeze({
-        list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.listNodes(limit, options),
-        query: (input: NodeQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.queryNodes(input, options),
+        list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.listNodes(limit, options)),
+        query: (input: NodeQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.queryNodes(input, options)),
         history: (id: string) => knowledgeService.listNodeRevisions(id),
         delete: (id: string) => knowledgeService.deleteNode(id),
         merge: (loserId: string, winnerId: string) => knowledgeService.mergeNodes(loserId, winnerId),
         review: (input: NodeReviewInput) => knowledgeService.reviewNode(input),
       }),
       issues: Object.freeze({
-        list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.listIssues(limit, options),
-        query: (input: IssueQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.queryIssues(input, options),
+        list: (limit = 100, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.listIssues(limit, options)),
+        query: (input: IssueQueryInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.queryIssues(input, options)),
         review: (input: IssueReviewInput) => knowledgeService.reviewIssue(input),
       }),
       extractions: Object.freeze({
         list: (limit: number = 100, sourceId?: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.listExtractions(limit, sourceId, scope, options),
-        get: async (id: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => (
-          await knowledgeService.listExtractions(Number.MAX_SAFE_INTEGER, undefined, scope, options)
-        ).find(extraction => extraction.id === id) ?? null,
+        get: async (id: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => {
+          // Read the one row by id; the scoped listing then only answers whether its source is visible.
+          const extraction = knowledgeService.getExtraction(id);
+          if (!extraction) return null;
+          return (await knowledgeService.listExtractions(1, extraction.sourceId, scope, options)).find(entry => entry.id === id) ?? null;
+        },
         getBySourceId: async (sourceId: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => (
           await knowledgeService.listExtractions(1, sourceId, scope, options)
         )[0] ?? null,
       }),
       items: Object.freeze({
-        get: (id: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.getItemScoped(id, scope, options),
-        getMany: (ids: readonly string[], scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.getItems(ids, scope, options),
+        get: (id: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.getItemScoped(id, scope, options)),
+        getMany: (ids: readonly string[], scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.getItems(ids, scope, options)),
         neighbors: (
           kind: Parameters<KnowledgeService['getNeighbors']>[0],
           id: string,
           input: NeighborInput = {},
           options: KnowledgeScopeSelectionOptions = {},
-        ) => knowledgeService.getNeighbors(kind, id, input, options),
-        search: (query: string, limit = 10, options: Parameters<KnowledgeService['searchScoped']>[1] = {}) => knowledgeService.searchScoped({ query, limit }, options),
+        ) => fresh(() => knowledgeService.getNeighbors(kind, id, input, options)),
+        search: (query: string, limit = 10, options: Parameters<KnowledgeService['searchScoped']>[1] = {}) => fresh(() => knowledgeService.searchScoped({ query, limit }, options)),
       }),
-      map: (input: KnowledgeMapInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.map(input, options),
+      map: (input: KnowledgeMapInput = {}, options: KnowledgeScopeSelectionOptions = {}) => fresh(() => knowledgeService.map(input, options)),
     }),
     usage: Object.freeze({
       list: (limit = 100, input = {}) => knowledgeService.listUsageRecords(limit, input),
@@ -470,19 +484,19 @@ export function createKnowledgeApi(
         writeScope: PacketWriteScope = [],
         limit: PacketLimit = 10,
         options: PacketOptions = {},
-      ) => knowledgeService.buildPacket(task, writeScope, limit, options),
+      ) => fresh(() => knowledgeService.buildPacket(task, writeScope, limit, options)),
       preparePrompt: (
         task: PacketTask,
         writeScope: PacketWriteScope = [],
         limit: PacketLimit = 10,
         options: PacketOptions = {},
-      ) => knowledgeService.preparePromptPacket(task, writeScope, limit, options),
+      ) => fresh(() => knowledgeService.preparePromptPacket(task, writeScope, limit, options)),
       buildPrompt: (
         task: PacketTask,
         writeScope: PacketWriteScope = [],
         limit: PacketLimit = 10,
         options: PacketOptions = {},
-      ) => knowledgeService.buildPromptPacket(task, writeScope, limit, options),
+      ) => fresh(() => knowledgeService.buildPromptPacket(task, writeScope, limit, options)),
     }),
     projections: Object.freeze({
       listTargets: (limit = 25, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}) => knowledgeService.listProjectionTargets(limit, scope, options),
@@ -495,18 +509,18 @@ export function createKnowledgeApi(
       runs: (limit: number = 100, jobId?: string) => knowledgeService.listJobRuns(limit, jobId),
       run: (id: string, input: RunJobInput = {}) => knowledgeService.runJob(id, input),
       schedules: Object.freeze({
-        list: (limit = 100) => knowledgeService.listSchedules(limit),
-        get: (id: string) => knowledgeService.getSchedule(id),
+        list: (limit = 100) => fresh(async () => knowledgeService.listSchedules(limit)),
+        get: (id: string) => fresh(async () => knowledgeService.getSchedule(id)),
         save: (input: ScheduleSaveInput) => knowledgeService.saveSchedule(input),
         delete: (id: string) => knowledgeService.deleteSchedule(id),
         setEnabled: (id: string, enabled: boolean) => knowledgeService.setScheduleEnabled(id, enabled),
       }),
     }),
     consolidation: Object.freeze({
-      candidates: (limit = 100, input = {}) => knowledgeService.listConsolidationCandidates(limit, input),
-      getCandidate: (id: string) => knowledgeService.getConsolidationCandidate(id),
-      reports: (limit = 100) => knowledgeService.listConsolidationReports(limit),
-      getReport: (id: string) => knowledgeService.getConsolidationReport(id),
+      candidates: (limit = 100, input = {}) => fresh(async () => knowledgeService.listConsolidationCandidates(limit, input)),
+      getCandidate: (id: string) => fresh(async () => knowledgeService.getConsolidationCandidate(id)),
+      reports: (limit = 100) => fresh(async () => knowledgeService.listConsolidationReports(limit)),
+      getReport: (id: string) => fresh(async () => knowledgeService.getConsolidationReport(id)),
       decide: (
         candidateId: string,
         decision: ConsolidationDecision,

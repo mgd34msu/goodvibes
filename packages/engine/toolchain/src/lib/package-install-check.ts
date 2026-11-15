@@ -126,7 +126,15 @@ export function runPackageInstallCheck(options: InstallCheckOptions): InstallChe
     issues.push(`npm pack --dry-run failed: ${pack.stderr.trim().slice(0, 300)}`);
     return { ok: false, issues };
   }
-  const { files, unpackedBytes } = parseNpmPack(pack.stdout);
+  let parsedPack: { files: string[]; unpackedBytes: number };
+  try {
+    parsedPack = parseNpmPack(pack.stdout);
+  } catch (error) {
+    // Lifecycle scripts can write to npm's stdout ahead of the JSON; report that as an issue, not a stack trace.
+    issues.push(`could not read npm pack output: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: false, issues };
+  }
+  const { files, unpackedBytes } = parsedPack;
   const policy = evaluateTarballPaths(files, unpackedBytes, options.config);
   if (policy.missing.length > 0) issues.push(`missing required tarball path(s): ${policy.missing.join(', ')}`);
   if (policy.forbidden.length > 0) issues.push(`forbidden tarball path(s): ${policy.forbidden.slice(0, 5).join(', ')}`);

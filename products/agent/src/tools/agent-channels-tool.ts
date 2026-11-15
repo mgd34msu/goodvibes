@@ -24,6 +24,10 @@ interface AgentChannelsToolDeps {
   readonly harnessTool?: Tool;
 }
 
+function error(message: string): { readonly success: false; readonly error: string } {
+  return { success: false, error: message };
+}
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -39,9 +43,11 @@ function normalizeChannelsAction(value: unknown): AgentChannelsAction | null {
   return null;
 }
 
-function readAction(args: AgentChannelsToolArgs): AgentChannelsAction {
+function readAction(args: AgentChannelsToolArgs): AgentChannelsAction | null {
   const explicit = normalizeChannelsAction(args.action) ?? normalizeChannelsAction(args.mode);
   if (explicit) return explicit;
+  // An action or mode that was given but is not one of ours is not a request to guess: answering with another view would read as the requested one.
+  if (readString(args.action) || readString(args.mode)) return null;
   if (readString(args.channelId) || readString(args.id)) return 'channel';
   return 'status';
 }
@@ -90,6 +96,7 @@ export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentChannelsToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
+      if (action === null) return error('Unknown channels action. Use action (or mode) as one of: status, channel, setup, triage, deliveries.');
 
       if (action === 'channel') {
         return forward(compactArgs({

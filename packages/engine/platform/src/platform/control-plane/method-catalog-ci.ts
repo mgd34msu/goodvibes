@@ -46,6 +46,8 @@ export const CI_REPORT_SCHEMA = objectSchema({
 
 export const CI_WATCH_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
+  // Present only on a watch created under a native owner; the service stores and lists it.
+  continuationId: STRING_SCHEMA,
   repo: STRING_SCHEMA,
   ref: STRING_SCHEMA,
   prNumber: NUMBER_SCHEMA,
@@ -93,7 +95,6 @@ export const CI_WATCHES_RUN_OUTPUT_SCHEMA = objectSchema({
   // The honest failure when the auto-start fix-session produced no
   // attachable session; mutually exclusive with fixSessionId.
   fixSessionError: STRING_SCHEMA,
-  fixSessionOffered: BOOLEAN_SCHEMA,
   retired: BOOLEAN_SCHEMA,
 }, ['report', 'notified', 'fixSessionTriggered']);
 

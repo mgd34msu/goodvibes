@@ -4,8 +4,10 @@
  * the transcript.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { startE2ENativeHost } from './native-host-fixture.ts';
-import { closeE2EFixture, inputAreaVisible, isolatedEnv, lastUserText, launchTui, makeHome, resolveBinary, screenText, startStubModel, type TuiSession } from './harness.ts';
+import { closeE2EFixture, inputAreaVisible, isolatedEnv, lastUserText, launchTui, makeHome, resolveBinary, screenText, startStubModel, type E2EHome, type TuiSession } from './harness.ts';
 
 const PROMPT = 'give this project a code review';
 const REPLY = 'I will review the project code.';
@@ -15,12 +17,15 @@ const model = startStubModel((request) => (
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
-afterAll(() => closeE2EFixture(null, () => tui?.stop(), () => host?.stop(), () => model.stop()));
+let ownedHome: E2EHome | null = null;
+afterAll(() => closeE2EFixture(ownedHome, () => tui?.stop(), () => host?.stop(), () => model.stop()));
 
 describe('first turn', () => {
   test('a code-review prompt reaches the model from the composer and CLI without native admission', async () => {
     const home = await makeHome(model);
+    ownedHome = home;
     host = await startE2ENativeHost(home);
+    host.judgments.expectTextOnlyCompletion(PROMPT, REPLY);
     tui = launchTui(home, { cols: 100, rows: 30, env: host.env });
     await tui.waitForScreen('the input area', inputAreaVisible, 45_000);
 
@@ -31,10 +36,6 @@ describe('first turn', () => {
     expect(model.requests.some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
     expect(screenText(screen)).toContain(PROMPT);
     expect(tui.alive()).toBe(true);
-    expect(host.judgments.accepted).not.toContain('native-route');
-    expect(host.judgments.accepted).not.toContain('native-turn');
-    expect(host.judgments.accepted).not.toContain('route');
-    expect(host.judgments.accepted).not.toContain('turn');
     expect(host.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
     expect(host.daemon.services.agentManager.list()).toHaveLength(0);
     await tui.stop();
@@ -46,8 +47,9 @@ describe('first turn', () => {
       const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect({ exitCode, stderr: exitCode ? stderr : '' }).toEqual({ exitCode: 0, stderr: '' });
       expect(JSON.parse(stdout)).toMatchObject({ ok: true, response: REPLY });
-      expect(host.judgments.accepted).not.toContain('native-route');
-      expect(host.judgments.accepted).not.toContain('native-turn');
+      // The interactive session's check ran inside stop(); the headless child writes to the same log.
+      const violations = join(home.root, 'network-violations.log');
+      expect(existsSync(violations) ? readFileSync(violations, 'utf8') : '').toBe('');
     } finally { clearTimeout(timeout); if (child.exitCode === null) child.kill('SIGKILL'); await child.exited; }
   }, 100_000);
 });

@@ -68,6 +68,8 @@ function validatedPort(port: JudgmentPort): JudgmentPort {
 /** Complete protected-input preflight precedes every request; no partial reading pass is returned. */
 export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInput[], options: {
   readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined;
+  /** Leave a device whose readings do not settle `unanswered` instead of holding the whole pass. Only callers that can keep that device's existing state may set it. */
+  readonly leaveUnsettledUnanswered?: boolean | undefined;
 } = {}): Promise<readonly HomeGraphQualityReading[]> {
   requireDecisionFeature('semantic Home Graph quality assessment');
   if (options.signal?.aborted) throw new Held('aborted');
@@ -93,11 +95,20 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
     // can re-read changed evidence; never turn it into a generic page failure.
     callerCurrent?.();
   };
-  const check = () => { checkSource(); try { owner?.assertCurrent(); } catch { throw new Held('stale'); } };
+  // The owner's own currentness check re-runs the source check. When `check`
+  // has just run it in this same synchronous turn, running it again verifies
+  // nothing new and doubles the caller's (page-wide) verification cost.
+  let sourceVerified = false;
+  const ownedSource = () => { if (!sourceVerified) checkSource(); };
+  const check = () => {
+    checkSource();
+    sourceVerified = true;
+    try { owner?.assertCurrent(); } catch { throw new Held('stale'); } finally { sourceVerified = false; }
+  };
   const run = async () => {
     check();
     // Fully structural passes need no semantic port.
-    if (snapshots.some(input => input.questions.length)) owner = captureJudgmentPort('engine.knowledge.homegraph-quality', { signal: controller.signal, assertCurrent: checkSource,
+    if (snapshots.some(input => input.questions.length)) owner = captureJudgmentPort('engine.knowledge.homegraph-quality', { signal: controller.signal, assertCurrent: ownedSource,
       prepareResultCapture: questions => prepareJudgmentResult(questions, reason => new Held(reason)) });
     const port = owner ? validatedPort(owner.port) : undefined;
     const readings: HomeGraphQualityReading[] = []; let next = 0;
@@ -128,7 +139,16 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
             }
             if (read.result.decisionId) decisionIds.push(read.result.decisionId);
             read.recordAction('settled derived-quality readings; no write or operator authority granted');
-          } catch (error) { activateClassicFallback(error); checkSource(); const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+          } catch (error) {
+            activateClassicFallback(error); checkSource();
+            const failure = error instanceof Held ? error : new Held('unavailable');
+            // One device whose readings do not settle is left unanswered; the other devices still refresh.
+            if (failure.reason === 'unsettled' && options.leaveUnsettledUnanswered === true) {
+              readings[index] = { assertCurrent: check, reference: input.reference, answers: {}, provenance: {}, decisionIds: [], batteries: [], model, requestedModel, unanswered: 'unsettled' };
+              continue;
+            }
+            stop(failure); throw failure;
+          }
         }
         readings[index] = { assertCurrent: check, reference: input.reference, answers, provenance, decisionIds, batteries, model, requestedModel };
       }

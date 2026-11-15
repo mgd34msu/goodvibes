@@ -17,5 +17,6 @@ for (const arch of ['x64', 'arm64'] as const) test(`Darwin ${arch} daemon reader
   expect(() => clientReaderMemberPath(execPath, artifact, paths[1]!, '/../foreign' as never)).toThrow();
   expect(() => parseClientReaderArtifact({ ...raw, files: raw.files.map((file, index) => index === 1 ? { ...file, path: `lib/sqlite-vec-${target}/../foreign` } : file) })).toThrow();
   expect(() => parseClientReaderArtifact({ ...raw, files: raw.files.map((file, index) => index === 1 ? { ...file, mode: 0o777 } : file) })).toThrow();
-  expect(parseClientReaderArtifact({ ...raw, files: raw.files.slice(0, 1) }).files).toHaveLength(1);
+  // Evidence that names only the launcher would leave the companions unchecked.
+  expect(() => parseClientReaderArtifact({ ...raw, files: raw.files.slice(0, 1) })).toThrow();
 });

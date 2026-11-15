@@ -1,4 +1,5 @@
 import type { FetchLike } from '@goodvibes-jev/engine/transport-core';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { ConfigurationError, ContractError } from '@goodvibes-jev/engine/errors';
 import type {
   OperatorMethodInput,
@@ -240,7 +241,7 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
     openEventStream: async ({ pathOrUrl, handlers, options: streamOptions = {} }) => {
       const url = pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')
         ? pathOrUrl
-        : new URL(pathOrUrl, baseUrl).toString();
+        : buildUrl(baseUrl, pathOrUrl);
       return await openRawServerSentEventStream(fetchImpl, url, handlers, {
         signal: streamOptions.signal,
         headers: streamOptions.headers,
@@ -312,7 +313,7 @@ function normalizeEnvelope(value: unknown): ScopedRuntimeEventEnvelope | null {
 }
 
 function buildEventUrl(baseUrl: string, domain: string): string {
-  const url = new URL('/api/control-plane/events', baseUrl);
+  const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', domain);
   return url.toString();
 }
@@ -391,7 +392,18 @@ function createScopedRealtime<TDomain extends string>(
               if (frame && !turnGate.accepts(frame)) return;
               for (const listener of [...(active.listenersByType.get(envelope.payload.type) ?? [])]) {
                 if (!isCurrent()) break;
-                listener(envelope);
+                // A throwing listener must not reach the stream reader: it would be
+                // taken for a connection error, tear the stream down and leave the
+                // other listeners without this event.
+                try {
+                  listener(envelope);
+                } catch (error) {
+                  try {
+                    options.realtime?.onError?.(error);
+                  } catch {
+                    // An error reporter that throws is not allowed to end the stream either.
+                  }
+                }
               }
             },
             onError: (error) => {

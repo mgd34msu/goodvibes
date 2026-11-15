@@ -20,6 +20,7 @@ import {
   applyFilter,
   appendBounded,
 } from '../types.js';
+import { maskCapturedArgs } from '../credential-mask.js';
 import { summarizeError } from '../../../utils/error-display.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -96,12 +97,13 @@ export class ToolCallsPanel {
           callId: evt.callId,
           turnId: evt.turnId,
           tool: evt.tool,
-          args: evt.args,
+          args: maskCapturedArgs(evt.args),
           phase: 'received',
           receivedAt: envelope.ts,
           traceId,
           sessionId,
         });
+        this._retireStaleActive();
         this._notify();
         break;
       }
@@ -175,6 +177,23 @@ export class ToolCallsPanel {
   }
 
   /**
+   * A call whose terminal event never arrives (emitter died, bus disconnected)
+   * would stay "running" forever and grow the active map without limit; the
+   * oldest is retired into history in its last known phase with a note saying
+   * why.
+   */
+  private _retireStaleActive(): void {
+    while (this._active.size > this._config.bufferLimit) {
+      const oldest = this._active.values().next();
+      if (oldest.done) return;
+      const record = oldest.value;
+      record.error = 'no terminal event was observed for this call; it was retired from the live list';
+      logger.warn('[ToolCallsPanel] retired a call with no terminal event: too many are outstanding', { callId: record.callId, limit: this._config.bufferLimit });
+      this._finalize(record);
+    }
+  }
+
+  /**
    * Move a completed record from active to history.
    */
   private _finalize(record: MutableToolCallRecord): void {
@@ -232,7 +251,7 @@ export class ToolCallsPanel {
 
     // Combine: history (oldest-first) + active, then apply filter
     const combined: ToolCallEntry[] = [...this._history, ...activeEntries];
-    return applyFilter(combined, filter, (e) => e.receivedAt);
+    return applyFilter(combined, filter, (e) => e.receivedAt, this._config.bufferLimit);
   }
 
   /**

@@ -89,5 +89,7 @@ function humanize(name: string): string {
  */
 export function friendlyToolLabel(toolName: string): string {
   const short = toolName.includes('__') ? toolName.split('__').pop()! : toolName;
-  return TOOL_LABELS[short] ?? TOOL_LABELS[toolName] ?? humanize(toolName);
+  // Own keys only: a tool named like an Object.prototype member must not resolve to a function.
+  const own = (key: string): string | undefined => (Object.hasOwn(TOOL_LABELS, key) ? TOOL_LABELS[key] : undefined);
+  return own(short) ?? own(toolName) ?? humanize(toolName);
 }

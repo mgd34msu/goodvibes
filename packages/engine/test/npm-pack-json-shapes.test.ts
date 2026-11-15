@@ -42,6 +42,10 @@ describe('npm pack --json shapes', () => {
     expect(parseNpmPackJson(noisy).filename).toBe('pellux-goodvibes-errors-1.14.0.tgz');
   });
 
+  test('bracketed wrapper text before the report does not hide it', () => {
+    expect(parseNpmPackJson(`[notice] using shim\n[1/3] packing\n${NPM_10_ARRAY}\n`).filename).toBe('pellux-goodvibes-errors-1.14.0.tgz');
+  });
+
   test('braces inside string values do not truncate the document', () => {
     const withBraces = JSON.stringify({
       '@goodvibes-jev/engine/errors': {

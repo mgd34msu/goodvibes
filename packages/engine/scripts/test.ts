@@ -1,15 +1,18 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
-import { basename, delimiter, dirname, join, relative, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
 import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
+import { staleDistNote } from './dist-freshness.ts';
 import { defaultTestArgs, discoverTestFiles } from './test-discovery.ts';
 import { selectPartition } from './test-partitions.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NETWORK_PRELOAD = join(ENGINE_ROOT, 'toolchain/src/test-runner/test-network-preload.ts');
+// Packages whose compiled output some tests import instead of the source.
+const DIST_PACKAGES = ['platform', 'errors', 'contracts', 'daemon-api', 'operator-client', 'peer-client', 'terminal-shell', 'transport-core', 'transport-http', 'transport-realtime'] as const;
 const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 // bun test flags whose value may be given as the next argument.
 const VALUE_FLAGS = new Set(['--timeout', '--preload', '--path-ignore-patterns', '-t', '--test-name-pattern', '--rerun-each', '--retry',
@@ -66,14 +69,62 @@ function splitArgs(argv: readonly string[]): SplitArgs {
   return out;
 }
 
+/**
+ * A path that does not exist under `cwd` but does from the caller's directory
+ * (`packages/engine/test/x.test.ts` typed at the repo root) becomes the exact
+ * `./` path under `cwd`. Anything else is left for bun to match.
+ */
+function resolveFilters(cwd: string, filters: readonly string[]): string[] {
+  return filters.map((filter) => {
+    const fromCaller = resolve(filter);
+    if (existsSync(resolve(cwd, filter)) || !existsSync(fromCaller)) return filter;
+    const inside = relative(cwd, fromCaller);
+    if (inside.startsWith('..') || isAbsolute(inside)) {
+      throw new Error(`${filter} is outside the test directory ${cwd}; pass --cwd <its package>, relative to ${ENGINE_ROOT}`);
+    }
+    return `./${inside}`;
+  });
+}
+
+/** An exact file, or a directory (bun runs every test under a directory prefix). */
+function matchesPath(file: string, rel: string): boolean {
+  return file === rel || file.startsWith(`${rel.replace(/\/$/, '')}/`);
+}
+
+/** bun's own selection: an exact `./` or absolute path, otherwise a substring of the path. */
+function selects(cwd: string, file: string, filter: string): boolean {
+  return filter.startsWith('./') || filter.startsWith('/') ? matchesPath(file, relative(cwd, resolve(cwd, filter))) : file.includes(filter);
+}
+
+/** A filter that names a file (`./x`, an absolute path, or a `*.test.ts` name) rather than a substring such as `src/`. */
+const PATH_FILTER = /^(?:\.\/|\/)|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/**
+ * Filters that select no test file. A renamed or deleted file in an explicit
+ * list would otherwise drop out of the run while the rest still pass, so a
+ * filter that names a path and matches nothing is an error; a bare substring
+ * that matches nothing is reported but may be intentional.
+ */
+export function checkFilters(cwd: string, files: readonly string[], filters: readonly string[]): string[] {
+  const unmatched = filters.filter((filter) => !files.some((file) => selects(cwd, file, filter)));
+  const missing = unmatched.filter((filter) => PATH_FILTER.test(filter));
+  if (missing.length > 0) {
+    throw new Error(`Test path(s) not found under ${cwd}: ${missing.join(' ')}. Rename or remove them from the list that names them (paths are relative to that directory, or to the current directory).`);
+  }
+  return unmatched;
+}
+
+function noMatch(cwd: string, filters: readonly string[]): string {
+  return `No test files under ${cwd} matched ${filters.join(' ')}. Paths are relative to that directory (or to the current directory).`;
+}
+
 /** Test files of `cwd` selected by bun-style filters, minus `--path-ignore-patterns`. */
 function expandFiles(cwd: string, filters: readonly string[], flags: readonly string[]): string[] {
   const ignores = flags.filter((flag) => flag.startsWith('--path-ignore-patterns=')).flatMap((flag) => flag.slice(23).split(','))
     .map((pattern) => new Bun.Glob(pattern.replace(/^\.\//, '')));
-  const exact = (filter: string) => (filter.startsWith('./') || filter.startsWith('/') ? relative(cwd, resolve(cwd, filter)) : undefined);
   const files = discoverTestFiles(cwd).filter((file) => !ignores.some((glob) => glob.match(file))
-    && (filters.length === 0 || filters.some((filter) => exact(filter) === undefined ? file.includes(filter) : file === exact(filter))));
-  if (files.length === 0) throw new Error('No test files matched');
+    && (filters.length === 0 || filters.some((filter) => selects(cwd, file, filter))));
+  if (files.length === 0) throw new Error(noMatch(cwd, filters));
   return files;
 }
 
@@ -87,16 +138,44 @@ function expandFiles(cwd: string, filters: readonly string[], flags: readonly st
  * Resolves with the exit code (128+n when a signal ended the run).
  */
 export async function runBunTest(run: BunTestRun): Promise<number> {
+  const cwd = run.cwd ?? ENGINE_ROOT;
+  const split = splitArgs(run.args);
+  const flags = split.flags;
+  const filters = resolveFilters(cwd, split.filters);
+  // Checked before anything is created, so a bad list leaves no temp directory behind.
+  if (filters.length > 0) {
+    const files = discoverTestFiles(cwd);
+    for (const filter of checkFilters(cwd, files, filters)) process.stderr.write(`goodvibes: warning: ${noMatch(cwd, [filter])}\n`);
+    if (cwd === ENGINE_ROOT) {
+      const selected = files.filter((file) => filters.some((filter) => selects(cwd, file, filter)));
+      if (selected.length <= 200) {
+        // A test often reaches dist through a helper it imports or spawns (the
+        // dist path is spelled there, sometimes escaped in a regex), so the
+        // text of the helpers it names counts too.
+        const sources = selected.flatMap((file) => {
+          const text = readFileSync(join(cwd, file), 'utf8');
+          const helpers = [...text.matchAll(/['"`]((?:\.{1,2}\/|[^'"`]*\/)?_helpers\/[^'"`]+\.(?:ts|mts|mjs|js))['"`]/g)].flatMap((match) => {
+            const path = resolve(dirname(join(cwd, file)), (match[1] ?? '').replace(/^.*?(?=_helpers\/)/, ''));
+            return existsSync(path) ? [readFileSync(path, 'utf8')] : [];
+          });
+          return [text, ...helpers];
+        });
+        for (const pkg of DIST_PACKAGES) {
+          if (!sources.some((text) => text.includes(`${pkg}/dist`) || text.includes(`${pkg}\\/dist`))) continue;
+          const note = staleDistNote(join(cwd, pkg, 'src'), join(cwd, pkg, 'dist'), 'bun run build');
+          if (note) process.stderr.write(`goodvibes: warning: ${note}\n`);
+        }
+      }
+    }
+  }
   sweepStaleTmpDirs(tmpdir(), RUN_TMP_PREFIX);
   const root = realpathSync(mkdtempSync(join(tmpdir(), RUN_TMP_PREFIX)));
-  const cwd = run.cwd ?? ENGINE_ROOT;
   const violations = join(root, 'network-violations');
   const env = isolatedTestEnvironment({ ...(run.env ?? process.env) }, join(root, 'isolated'), run.fixtureEnv);
   // Set before Bun starts: native spawns keep the startup environment, so a later
   // assignment inside a test never reaches a `git` it launches. In-checkout test
   // dirs (`<cwd>/.test-tmp`) and the run root must both stop git's upward search.
   const ceilings = new Set([root, ...(cwd === ENGINE_ROOT ? [] : [join(cwd, '.test-tmp')]), ...(env.GIT_CEILING_DIRECTORIES?.split(delimiter).filter(Boolean) ?? [])]);
-  const { flags, filters } = splitArgs(run.args);
   if (!flags.some((flag) => flag.startsWith('--timeout='))) flags.unshift(`--timeout=${defaultTimeoutMs()}`);
   let signalled: keyof typeof SIGNAL_NUMBERS | undefined;
   const children = new Set<ReturnType<typeof Bun.spawn>>();
@@ -138,8 +217,9 @@ export async function runBunTest(run: BunTestRun): Promise<number> {
   };
   try {
     let exitCode: number;
-    if ((run.jobs ?? 1) <= 1) exitCode = (await spawnBun([...flags, ...filters], false)).code;
-    else {
+    if ((run.jobs ?? 1) <= 1) {
+      exitCode = (await spawnBun([...flags, ...filters], false)).code;
+    } else {
       // One child per file, at most `jobs` at a time; output is printed as each finishes.
       const files = expandFiles(cwd, filters, flags);
       const failed: string[] = [];
@@ -192,4 +272,12 @@ function parseCli(argv: readonly string[]): BunTestRun {
   return { args: [...flags, ...filters], cwd: resolve(ENGINE_ROOT, cwd ?? '.'), jobs: jobCount };
 }
 
-if (import.meta.main) process.exitCode = await runBunTest(parseCli(process.argv.slice(2)));
+if (import.meta.main) {
+  try {
+    process.exitCode = await runBunTest(parseCli(process.argv.slice(2)));
+  } catch (error) {
+    // A usage mistake gets its message, not a stack trace.
+    console.error(`goodvibes: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 2;
+  }
+}

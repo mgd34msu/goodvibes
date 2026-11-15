@@ -25,7 +25,7 @@ export interface AutonomyQueueItem {
   readonly label: string;
   readonly status: AutonomyQueueStatus;
   readonly owner: 'agent' | 'connected-host' | 'agent-and-connected-host';
-  readonly kind: 'work-plan' | 'research-run' | 'host-task' | 'approval' | 'automation-run' | 'schedule' | 'reminder' | 'routine-schedule' | 'delegated-agent' | 'delivery';
+  readonly kind: 'work-plan' | 'research-run' | 'host-task' | 'approval' | 'automation-run' | 'schedule' | 'reminder' | 'routine-schedule' | 'delegated-agent' | 'background-process' | 'delivery';
   readonly visible: true;
   readonly cancellable: boolean;
   readonly count: number;
@@ -50,6 +50,8 @@ export interface AutonomyQueueLiveRecord {
   readonly updatedAt?: string;
   readonly summary: string;
   readonly inspectRoute: string;
+  /** Present when the routes and next steps below were copied from a host record rather than built by this program. */
+  readonly routeOrigin?: 'host-record';
   readonly cancelRoute?: string;
   readonly checkpointRoute?: string;
   readonly pauseRoute?: string;

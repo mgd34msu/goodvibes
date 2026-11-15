@@ -23,6 +23,9 @@
  * adoption request lets the old process exit. An incomplete handover leaves
  * the disk update and previous binary intact, reports what happened, and
  * pauses this process's updater so it cannot install the same release twice.
+ * When the orderly stop had already run, a host that owns the process
+ * (onIncompleteHandover) ends it with a failure status: the stopped runtime
+ * serves nothing, and a supervisor only restarts a process that has exited.
  *
  * Every applied update leaves a receipt ("updated from X to Y at HH:MM") in
  * the daemon log and in the receipt store surfaced on next surface connect.
@@ -58,6 +61,8 @@ import {
   realUpdateFileIo,
   DEFAULT_UPDATE_TIMEOUT_MS,
   UpdateTransactionError,
+  UpdateTransactionContendedError,
+  describeTransactionRecovery,
   normalizeVersion,
   resolveLatestReleaseTag,
   retainDaemonNativeFiles,
@@ -77,7 +82,8 @@ import { assertStagedClientReaderCompatible } from '../runtime/client-reader-upd
 import { hasNativeUpdateObservations } from '../runtime/update-file-io.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
-import { prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
+import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
+import { writeFatalLine } from './fatal-boot-report.js';
 
 export interface AutoUpdateServiceActions {
   /** Side-effect-free capability check; production checks before publication and cleanup.
@@ -87,6 +93,14 @@ export interface AutoUpdateServiceActions {
   reserve?(supervised: boolean, signal: AbortSignal): Promise<import('./service-handover-preflight.js').ServiceHandoverReservation>;
   /** Whether the daemon currently runs under the platform service manager. */
   isSupervised(): boolean;
+  /**
+   * Everything adoption needs that can fail without harming a running daemon:
+   * confirm the user manager answers, install the unit, reload the manager.
+   * Run BEFORE the runtime is stopped, so a refusal leaves a serving daemon;
+   * `adoptIntoService` then only has to enable. Optional for embedders, whose
+   * `adoptIntoService` keeps doing the whole job.
+   */
+  prepareAdoption?(signal?: AbortSignal): ServiceHandoverOutcome | Promise<ServiceHandoverOutcome>;
   /** Install + enable the service unit. Legacy void carries no acknowledgement. */
   adoptIntoService(signal?: AbortSignal): void | ServiceHandoverOutcome | Promise<void | ServiceHandoverOutcome>;
   /** Enqueue a non-blocking service restart and observe manager acceptance. */
@@ -160,6 +174,15 @@ export interface DaemonAutoUpdaterOptions {
   /** Exits the current process after an unsupervised daemon is adopted. */
   readonly exitProcess?: ((code: number) => void) | undefined;
   /**
+   * Called once when the handover did not complete after the orderly stop
+   * already ran: the process then serves nothing and no supervisor restarts
+   * it while it stays alive, so the host that owns the process ends it with a
+   * failure status. Absent: the incomplete handover is only reported.
+   */
+  readonly onIncompleteHandover?: (() => void) | undefined;
+  /** Injectable stderr; absent = a synchronous write to fd 2, so the service journal records an incomplete handover. */
+  readonly stderr?: { write(chunk: string): unknown } | undefined;
+  /**
    * The version a crash-loop rollback rejected, or null when none stands.
    * Consulted on every check: a release that already failed to start on this
    * host is not installed a second time just because it is still the latest
@@ -179,6 +202,8 @@ export interface DaemonAutoUpdaterOptions {
   readonly alertAfterFailedChecks?: number | undefined;
   /** Quiet window after an update alert, so a persistent failure is one message, not one per hour. Default 12h. */
   readonly alertWindowMs?: number | undefined;
+  /** Unbroken failing time after which a network-shaped failure is reported too. Default 24h. */
+  readonly persistentFailureMs?: number | undefined;
   readonly now?: (() => number) | undefined;
   readonly setTimer?: ((fn: () => void, ms: number) => ReturnType<typeof setTimeout>) | undefined;
   readonly clearTimer?: ((timer: ReturnType<typeof setTimeout>) => void) | undefined;
@@ -189,6 +214,14 @@ export const DEFAULT_UPDATE_ALERT_AFTER_FAILED_CHECKS = 3;
 
 /** Default quiet window between update alerts about the same ongoing failure. */
 export const DEFAULT_UPDATE_ALERT_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * How long checks may fail without interruption before even a network-shaped
+ * failure reaches the owner. A blocked release host looks exactly like a brief
+ * outage on every single check, so the count of failures cannot tell them apart;
+ * the time since the last good check can.
+ */
+export const DEFAULT_UPDATE_PERSISTENT_FAILURE_MS = 24 * 60 * 60 * 1000;
 
 interface PendingSwap {
   readonly tag: string;
@@ -235,6 +268,8 @@ export class DaemonAutoUpdater {
   private lastHandoverPreflightRefusal: string | null = null;
   private handoverCancelled = false;
   private handoverExitRequested = false;
+  /** The orderly stop ran and the handover then did not complete; exit once any reservation is released. */
+  private incompleteAfterStop = false;
   private handoverTask: Promise<void> | null = null;
   private handoverAbort: AbortController | null = null;
   /** Settles only after lookup/apply/handover, including checks started by the timer. */
@@ -242,6 +277,8 @@ export class DaemonAutoUpdater {
   private finishActiveCheck: (() => void) | null = null;
   /** Consecutive checks that threw. Reset by any check that completes. */
   private consecutiveFailures = 0;
+  /** When the current unbroken run of failed checks began, or null. */
+  private failingSince: number | null = null;
   /** When the owner was last told the daemon cannot update itself, or null. */
   private failureAlertedAt: number | null = null;
   /** The last error text told to the owner, so recovery can name what stopped. */
@@ -267,6 +304,7 @@ export class DaemonAutoUpdater {
         adoptIntoService: actions.adoptIntoService.bind(actions),
         restartService: actions.restartService.bind(actions),
         ...(actions.preflight ? { preflight: actions.preflight.bind(actions) } : {}),
+        ...(actions.prepareAdoption ? { prepareAdoption: actions.prepareAdoption.bind(actions) } : {}),
         ...(actions.reserve ? { reserve: actions.reserve.bind(actions) } : {}),
       },
     };
@@ -303,9 +341,11 @@ export class DaemonAutoUpdater {
         return this.pendingSwap ? 'deferred' : 'settled';
       },
       onError: (error) => {
-        // A reading failure is operational: never turn it into an owner alert
-        // or a guessed transience. The cadence remains owned by the loop.
+        // A reading failure is operational: never guess a transience class from
+        // it. It only counts as time spent failing, so a daemon that cannot update
+        // for a day is still reported when the reading itself is unavailable.
         logger.error('DaemonAutoUpdater: update failure reading could not complete', { error: summarizeError(error) });
+        if (!this.failureReadAbort.signal.aborted && !this.handoverCancelled) this.alertIfFailingTooLong();
       },
       setTimer: options.setTimer,
       clearTimer: options.clearTimer,
@@ -338,6 +378,7 @@ export class DaemonAutoUpdater {
     const assertCurrent = () => signal.throwIfAborted();
     assertCurrent();
     this.consecutiveFailures += 1;
+    this.failingSince ??= this.now();
     const captured = captureJudgmentFailure(error);
     const detail = summarizeError(captured);
     this.lastFailureDetail = detail;
@@ -345,12 +386,26 @@ export class DaemonAutoUpdater {
       reading: { get port() { return daemonReadingPort('daemon.auto-updater.failure', assertCurrent, signal); }, signal, beforeAttempt: assertCurrent },
     });
     assertCurrent();
-    if (transience.failureClass === 'retryable') {
+    if (transience.failureClass === 'retryable' && !this.hasFailedTooLong()) {
       logger.warn('DaemonAutoUpdater: transient update check failure; will retry on the next interval', {
         error: detail, consecutiveFailures: this.consecutiveFailures,
       });
       return;
     }
+    this.alertCheckFailing(detail);
+  }
+
+  private hasFailedTooLong(): boolean {
+    return this.failingSince !== null
+      && this.now() - this.failingSince >= Math.max(0, this.options.persistentFailureMs ?? DEFAULT_UPDATE_PERSISTENT_FAILURE_MS);
+  }
+
+  /** The failure reading was unavailable: only the unbroken failing time can justify an alert. */
+  private alertIfFailingTooLong(): void {
+    if (this.hasFailedTooLong() && this.lastFailureDetail !== null) this.alertCheckFailing(this.lastFailureDetail);
+  }
+
+  private alertCheckFailing(detail: string): void {
     const windowMs = Math.max(0, this.options.alertWindowMs ?? DEFAULT_UPDATE_ALERT_WINDOW_MS);
     const now = this.now();
     if (this.failureAlertedAt !== null && now - this.failureAlertedAt < windowMs) {
@@ -362,7 +417,7 @@ export class DaemonAutoUpdater {
     }
     this.failureAlertedAt = now;
     this.alertOwner(
-      `the daemon has not been able to check for updates ${this.consecutiveFailures} times in a row`
+      `the daemon has not been able to check for updates ${this.consecutiveFailures} ${this.consecutiveFailures === 1 ? 'time' : 'times'} in a row`
       + `, it is still running v${normalizeVersion(this.options.currentVersion)} and will keep retrying.`
       + ` Last error: ${detail}`,
     );
@@ -373,11 +428,12 @@ export class DaemonAutoUpdater {
     const wasAlerted = this.failureAlertedAt !== null;
     const failures = this.consecutiveFailures;
     this.consecutiveFailures = 0;
+    this.failingSince = null;
     this.failureAlertedAt = null;
     this.lastFailureDetail = null;
     if (!wasAlerted) return;
     this.alertOwner(
-      `update checks are working again after ${failures} consecutive failures`
+      `update checks are working again after ${failures} consecutive ${failures === 1 ? 'failure' : 'failures'}`
       + (this.appliedVersion
         ? `, v${this.appliedVersion} is installed on disk and the service manager accepted the handover request`
         : `, the daemon is on v${normalizeVersion(this.options.currentVersion)} and checking on schedule`),
@@ -461,8 +517,8 @@ export class DaemonAutoUpdater {
   }
 
   /** One loop iteration; exposed for tests driving mocked time. */
-  async tick(): Promise<void> {
-    await this.loop.tick();
+  tick(): ReturnType<PeriodicUpdateLoop['tick']> {
+    return this.loop.tick();
   }
 
   private async checkAndApply(signal: AbortSignal): Promise<void> {
@@ -628,6 +684,12 @@ export class DaemonAutoUpdater {
           this.pauseForTransactionRecovery(tag, failure);
           return;
         }
+        if (failure.receipt.phase === 'claim' && !failure.receipt.committed && failure.cause instanceof UpdateTransactionContendedError) {
+          // Another live updater holds the installation; nothing was changed.
+          // Keep the descriptor and retry on the short cadence, like a busy daemon.
+          logger.info('DaemonAutoUpdater: another update holds the installation; deferring this one', { tag, detail: failure.cause.message });
+          return;
+        }
         if (failure.receipt.phase === 'admission' && !failure.receipt.committed && failure.cause === busyBeforeCommit) {
           assertCurrent();
           logger.info('DaemonAutoUpdater: daemon became busy before commit; deferring the update', { tag });
@@ -681,7 +743,28 @@ export class DaemonAutoUpdater {
         if (this.appliedVersion !== null) this.reportIncompleteHandover({ status: 'unknown', detail: 'The manager-owned handover helper could not be retired.' });
         else this.reportHandoverPreflightRefusal(new ServiceHandoverPreflightError('The manager-owned handover helper could not be retired; automatic updates are paused.'));
       }
+      // Only after any manager-owned reservation was released.
+      if (this.incompleteAfterStop && !this.handoverCancelled) this.exitAfterIncompleteHandover();
     }
+  }
+
+  /** The runtime already stopped and nothing took over: the process owner ends it so a supervisor starts the installed build. */
+  private exitAfterIncompleteHandover(): void {
+    this.incompleteAfterStop = false;
+    const end = this.options.onIncompleteHandover;
+    if (!end) return;
+    this.announce(`goodvibes daemon: the update handover did not complete after the runtime had stopped; ending this process with status 1 so the service manager can start the installed v${this.appliedVersion ?? 'unknown'}`);
+    flushActivityLogSync();
+    try { end(); }
+    catch (error) { logger.error('DaemonAutoUpdater: the process could not be ended after an incomplete handover', { error: summarizeError(error) }); }
+  }
+
+  /** Synchronous stderr: the activity log flushes asynchronously and this process may exit next. Never throws. */
+  private announce(line: string): void {
+    try {
+      if (this.options.stderr) this.options.stderr.write(`${line}\n`);
+      else writeFatalLine(line);
+    } catch { /* An unwritable stderr must not change the update outcome. */ }
   }
 
   /** Filesystem recovery is an observed outcome, never an automatic retry decision. */
@@ -702,7 +785,7 @@ export class DaemonAutoUpdater {
     }
     const detail = `update to v${normalizeVersion(tag)} requires filesystem recovery after ${error.receipt.phase}`
       + (error.receipt.committed ? '; the complete update is installed on disk.' : '; the complete update was not installed.')
-      + ' Automatic updates are paused in this process. Inspect the retained transaction files before retrying; no service handover was requested.';
+      + ' Automatic updates are paused in this process and no service handover was requested. ' + describeTransactionRecovery(error.receipt);
     this.lastFailureDetail = detail;
     this.recordReceipt(detail);
     this.alertOwner(detail);
@@ -783,6 +866,11 @@ export class DaemonAutoUpdater {
           : { status: 'unknown', detail: 'Service handover support could not be confirmed before cleanup.' });
         return;
       }
+      // Whatever can refuse an adoption is settled while the runtime still
+      // serves; the files are already swapped, so a refusal is reported and the
+      // process keeps running rather than stopping into an unrecoverable state.
+      const prepared = await prepareHandoverBeforeStop(handover, abort.signal);
+      if (prepared.status !== 'accepted') { this.reportIncompleteHandover(prepared); return; }
       if (!await this.stopGracefully()) return;
       await this.requestServiceHandover(abort.signal, handover);
     });
@@ -813,6 +901,7 @@ export class DaemonAutoUpdater {
       // Includes rejected promises and even `throw undefined`: an exception
       // cannot be confused with a legacy action that returned no evidence.
       this.reportIncompleteHandover({ status: 'failed', detail: summarizeError(error) });
+      this.incompleteAfterStop = true;
       return;
     }
 
@@ -821,6 +910,7 @@ export class DaemonAutoUpdater {
     this.handover = outcome ?? { status: 'unknown', detail: 'service action returned no handover acknowledgement' };
     if (this.handover.status !== 'accepted') {
       this.reportIncompleteHandover(this.handover);
+      this.incompleteAfterStop = true;
       return;
     }
     if (this.handoverCancelled) {
@@ -844,6 +934,7 @@ export class DaemonAutoUpdater {
     catch {
       this.handoverExitRequested = false;
       this.reportIncompleteHandover({ status: 'failed', detail: 'The original process could not exit after the acknowledged handover.' });
+      this.incompleteAfterStop = true;
     }
   }
 
@@ -855,6 +946,7 @@ export class DaemonAutoUpdater {
       + ' Automatic updates are paused in this process; inspect the service manager and restart the daemon.';
     this.recordReceipt(detail);
     this.alertOwner(detail);
+    this.announce(`goodvibes daemon: ${detail}`);
     flushActivityLogSync();
   }
 
@@ -893,6 +985,7 @@ export class DaemonAutoUpdater {
     } catch (error) {
       drainOwned(error);
       this.reportIncompleteHandover({ status: 'failed', detail: 'owned runtime cleanup did not complete; no service handover was requested' });
+      this.incompleteAfterStop = true;
       return false;
     }
   }

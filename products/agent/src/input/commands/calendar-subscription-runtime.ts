@@ -45,7 +45,7 @@ function secretStoreFrom(ctx: CommandContext): SubscriptionSecretStore | null {
 export function subscriptionRegistryForWrite(ctx: CommandContext, fetcher?: FeedFetcher): CalendarSubscriptionRegistry | null {
   const secrets = secretStoreFrom(ctx);
   if (!secrets) return null;
-  return CalendarSubscriptionRegistry.create(requireShellPaths(ctx), secrets, fetcher ?? createHttpFeedFetcher());
+  return CalendarSubscriptionRegistry.create(requireShellPaths(ctx), secrets, fetcher);
 }
 
 /**
@@ -143,12 +143,16 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
   const parsed = parseArgs(args);
   const url = parsed.rest[0] ?? parsed.flags.get('url');
   if (!url) {
-    ctx.print('Usage: /calendar subscribe <ics-url> [--name <name>] [--every <minutes>] [--yes]');
+    ctx.print('Usage: /calendar subscribe <ics-url> [--name <name>] [--every <minutes>] [--allow-private-host] [--yes]');
     return;
   }
   const requestedName = parsed.flags.get('name')?.trim() || undefined;
   const everyMin = parsed.flags.has('every') ? Math.max(15, parseInt(parsed.flags.get('every') ?? '', 10) || 60) : undefined;
   const refreshIntervalMs = everyMin !== undefined ? everyMin * 60_000 : undefined;
+
+  // Feeds are fetched from public hosts only; a calendar server on the owner's own network needs this opt-in, per feed.
+  const allowPrivateHost = parsed.flags.has('allow-private-host') || undefined;
+  const hostOptions = allowPrivateHost ? { allowPrivateHost } : {};
 
   const registry = requireRegistry(ctx, fetcher, 'subscribe');
   if (!registry) return;
@@ -156,7 +160,7 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
   // Consent-at-add preview: validate by fetching and state exactly what will be
   // fetched and how often, before anything is saved.
   if (!parsed.yes) {
-    const check = await registry.validate(url, requestedName);
+    const check = await registry.validate(url, requestedName, hostOptions);
     if (!check.ok) {
       ctx.print([`Subscription preview failed at the ${check.stage} stage.`, `  ${check.detail}`].join('\n'));
       return;
@@ -169,12 +173,13 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
       `  events   ${check.eventCount} found`,
       `  refresh  every ${intervalMin} min (read-only; the feed URL is stored as a secret)`,
       '  This will fetch the calendar from the URL you provided, now and on each refresh.',
+      ...(allowPrivateHost ? ['  Private-network addresses are allowed for this feed (--allow-private-host).'] : []),
       '  rerun with --yes to subscribe',
     ].join('\n'));
     return;
   }
 
-  const result = await registry.subscribe(url, requestedName, refreshIntervalMs);
+  const result = await registry.subscribe(url, requestedName, refreshIntervalMs, hostOptions);
   if (!result.ok) {
     ctx.print([`Could not subscribe (${result.stage}).`, `  ${result.detail}`].join('\n'));
     return;
@@ -201,8 +206,20 @@ async function handleUnsubscribe(args: readonly string[], ctx: CommandContext, f
     ctx.print([`Unsubscribe preview`, `  name ${name}`, '  This removes the subscription, its cached events, and its stored feed URL.', '  rerun with --yes to unsubscribe'].join('\n'));
     return;
   }
-  const removed = await registry.unsubscribe(name);
-  ctx.print(removed ? `Unsubscribed from '${name}'.` : `No subscription named '${name}'.`);
+  const report = await registry.unsubscribeWithReport(name);
+  if (!report.removed) {
+    ctx.print(`No subscription named '${name}'.`);
+    return;
+  }
+  // The feed URL is a read capability for the whole calendar, so a copy the secret store would not delete is named, not hidden.
+  if (report.secret === 'failed') {
+    ctx.print([
+      `Unsubscribed from '${name}', but its stored feed URL could not be deleted: ${report.secretError ?? 'the secret store refused'}.`,
+      `  The feed URL is still in the secret store under ${report.secretKey}; remove that key by hand.`,
+    ].join('\n'));
+    return;
+  }
+  ctx.print(`Unsubscribed from '${name}'.`);
 }
 
 async function handleList(ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
@@ -219,7 +236,7 @@ async function handleList(ctx: CommandContext, fetcher?: FeedFetcher): Promise<v
       `    url     ${s.maskedUrl}`,
       `    status  ${formatHealth(s)}`,
       `    events  ${s.eventCount}`,
-      `    refresh every ${Math.round(s.refreshIntervalMs / 60_000)} min`,
+      `    refresh every ${Math.round(s.refreshIntervalMs / 60_000)} min${s.allowPrivateHost ? ' (private-network address allowed)' : ''}`,
     ].join('\n')),
   ].join('\n'));
 }

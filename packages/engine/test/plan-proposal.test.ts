@@ -100,13 +100,13 @@ describe('assemblePlanProposal: happy path', () => {
   });
 });
 
-describe('assemblePlanProposal: dependency resolution parity with ExecutionPlanManager.replaceItems', () => {
-  // Same three resolution rules, exercised against structurally equivalent
-  // fixtures: UUID passthrough, case-insensitive title/description lookup,
-  // drop-unresolved. Never throws either way.
-  const REAL_UUID = '11111111-2222-4333-8444-555555555555';
+describe('assemblePlanProposal: dependency resolution', () => {
+  // Item ids are minted by assemblePlanProposal, so a UUID-shaped dependency
+  // can only be satisfied if it names one of them; anything else would block
+  // its item forever and has to be reported, not passed through.
+  const UNKNOWN_UUID = '11111111-2222-4333-8444-555555555555';
 
-  test('assemblePlanProposal: UUID passthrough + title lookup + drop-unresolved', () => {
+  test('title lookup resolves; an unknown UUID and an unknown title are dropped with an issue each', () => {
     const raw: RawDecomposition = {
       phases: [{ title: 'Only phase' }],
       workItems: [
@@ -115,7 +115,7 @@ describe('assemblePlanProposal: dependency resolution parity with ExecutionPlanM
           title: 'Beta',
           brief: 'b',
           phase: 'Only phase',
-          dependsOn: ['Alpha', REAL_UUID, 'Does Not Exist'],
+          dependsOn: ['Alpha', UNKNOWN_UUID, 'Does Not Exist'],
         },
       ],
     };
@@ -123,14 +123,13 @@ describe('assemblePlanProposal: dependency resolution parity with ExecutionPlanM
     const alpha = proposal.workItems.find((i) => i.title === 'Alpha')!;
     const beta = proposal.workItems.find((i) => i.title === 'Beta')!;
 
-    // UUID passed through unchecked, title resolved to alpha's real id,
-    // unresolved title dropped.
-    expect(beta.dependsOn).toEqual([alpha.id, REAL_UUID]);
-    expect(issues).toHaveLength(1);
-    expect(issues[0]!.kind).toBe('dangling-dependency');
+    expect(beta.dependsOn).toEqual([alpha.id]);
+    expect(issues.map((i) => i.kind)).toEqual(['dangling-dependency', 'dangling-dependency']);
+    expect(issues[0]!.message).toContain(UNKNOWN_UUID);
   });
 
-  test('ExecutionPlanManager.replaceItems: identical rule set on an analogous fixture', () => {
+  test('ExecutionPlanManager.replaceItems keeps a UUID-shaped dependency, since a plan manager owns ids that already exist', () => {
+    const REAL_UUID = UNKNOWN_UUID;
     const manager = new ExecutionPlanManager(createTmpProjectRoot());
     const plan = manager.create('t', [
       { phase: 'Only phase', description: 'Alpha' },
@@ -148,9 +147,8 @@ describe('assemblePlanProposal: dependency resolution parity with ExecutionPlanM
     const alpha = reloaded.items.find((i) => i.description === 'Alpha')!;
     const beta = reloaded.items.find((i) => i.description === 'Beta')!;
 
-    // Identical resolution outcome shape to assemblePlanProposal above:
-    // real id + UUID passthrough, unresolved dropped silently (replaceItems
-    // has no issues channel, but the drop behavior matches).
+    // Title resolved to the real id, the UUID passed through, the unresolved
+    // title dropped silently (replaceItems has no issues channel).
     expect(beta.dependencies).toEqual([alpha.id, REAL_UUID]);
   });
 });
@@ -247,5 +245,30 @@ describe('planProposalToPlanningState', () => {
     expect(buildTask.dependencies).toEqual([prepTask.id]);
 
     expect(state.dependencies).toEqual([{ fromTaskId: buildTask.id, toTaskId: prepTask.id }]);
+  });
+});
+
+describe('assemblePlanProposal: duplicate titles', () => {
+  test('two items with the same title (ignoring case) raise one duplicate-title issue naming the title', () => {
+    const raw: RawDecomposition = {
+      phases: [{ title: 'Build' }],
+      workItems: [
+        { title: 'A', brief: 'first', phase: 'Build' },
+        { title: 'a', brief: 'second', phase: 'Build' },
+        { title: 'C', brief: 'third', phase: 'Build', dependsOn: ['A'] },
+      ],
+    };
+    const { issues } = assemblePlanProposal('goal', 'cohort', raw);
+    const duplicates = issues.filter((i) => i.kind === 'duplicate-title');
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0]!.message).toContain('unique title');
+  });
+
+  test('unique titles raise no duplicate-title issue', () => {
+    const raw: RawDecomposition = {
+      phases: [{ title: 'Build' }],
+      workItems: [{ title: 'A', brief: 'x', phase: 'Build' }, { title: 'B', brief: 'y', phase: 'Build' }],
+    };
+    expect(assemblePlanProposal('goal', 'cohort', raw).issues).toEqual([]);
   });
 });

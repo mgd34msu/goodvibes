@@ -2,6 +2,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { nativeHostedTurnLookupSchema } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { expectNoHorizontalScroll } from "./support/app";
+import { E2E_OPERATOR_TOKEN } from "./support/seed";
 import {
   isLegacyExecutionMutation,
   nativeBrowserRecords,
@@ -47,7 +48,7 @@ function expectOnlyNativeDelivery(daemon: Daemon) {
     )
   ).toBe(true);
   expect(
-    daemon.nativeRequests.every((request) => request.authorization === "Bearer e2e-operator-token")
+    daemon.nativeRequests.every((request) => request.authorization === `Bearer ${E2E_OPERATOR_TOKEN}`)
   ).toBe(true);
 }
 async function screenshot(page: Page, name: string, label: string) {

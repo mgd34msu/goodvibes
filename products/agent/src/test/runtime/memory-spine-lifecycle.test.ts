@@ -43,7 +43,6 @@ test('caller cancellation prevents credential resolution and HTTP dispatch', asy
 
 test('the Agent timeout adapter preserves caller cancellation during a held HTTP response', async () => {
   const started = deferred<void>(), release = deferred<void>();
-  let released = false;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch() {
     started.resolve();
     await release.promise;
@@ -59,8 +58,6 @@ test('the Agent timeout adapter preserves caller cancellation during a held HTTP
   await started.promise;
   controller.abort(reason);
   await expect(pending).rejects.toBe(reason);
-  expect(released).toBe(false);
-  released = true;
   release.resolve();
 });
 

@@ -1,4 +1,3 @@
-/** Real uninstall/claim behavior, authored and intentionally UNRUN during coding first. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

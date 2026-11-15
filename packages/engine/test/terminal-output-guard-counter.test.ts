@@ -27,23 +27,24 @@ describe('terminal-output guard cumulative counter (onCapture)', () => {
     }
   });
 
-  test('a second capture within the 5s rate-limit window does not fire onCapture again', () => {
+  test('every capture in a burst reports the running total, even inside the notice rate-limit window', () => {
     const fakeStdout = { write: () => true };
     const captures: number[] = [];
+    const notices: string[] = [];
 
     const guard = installFullScreenTerminalOutputGuard({
       stdout: fakeStdout as never,
       active: true,
       onCapture: (total) => { captures.push(total); },
+      notify: (notice) => { notices.push(notice); },
     });
     try {
       (fakeStdout.write as (s: string) => boolean)('first\n');
       (fakeStdout.write as (s: string) => boolean)('second, same instant\n');
-      // Only the first capture is inside a fresh rate-limit window; both calls
-      // happen well within 5s of each other in a synchronous test, so the
-      // second capture is suppressed from onCapture, but it is still
-      // suppressed from the real stream either way.
-      expect(captures).toEqual([1]);
+      (fakeStdout.write as (s: string) => boolean)('third, same instant\n');
+      expect(captures).toEqual([1, 2, 3]);
+      // Only the transcript notice is rate-limited.
+      expect(notices).toHaveLength(1);
     } finally {
       guard.dispose();
     }

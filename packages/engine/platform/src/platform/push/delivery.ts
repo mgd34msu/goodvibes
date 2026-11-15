@@ -18,7 +18,8 @@
  * never contacts a hard-coded external service of its own.
  */
 
-import { encryptPushPayload } from './encryption.js';
+import { encryptPushPayload, PUSH_MAX_PLAINTEXT_BYTES } from './encryption.js';
+import { localPushEndpointsAllowed } from './subscription-validation.js';
 import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import type { VapidManager } from './vapid.js';
 import type { PushSubscriptionStore } from './subscription-store.js';
@@ -44,15 +45,30 @@ const GONE_STATUSES = new Set([404, 410]);
  */
 export const DELIVERY_FAILURE_PRUNE_THRESHOLD = 5;
 
+/** How long one push request may take before it counts as a failed delivery. */
+export const DEFAULT_PUSH_REQUEST_TIMEOUT_MS = 10_000;
+/** Subscriptions delivered to at the same time in one fan-out. */
+const FAN_OUT_CONCURRENCY = 4;
+
+/**
+ * The production transport. The endpoint is a URL a remote device chose, so the
+ * request goes only to a public address that was checked after DNS resolution
+ * and is not redirected anywhere else; the daemon's own network is not
+ * reachable through it. A deployment that opted into local endpoints (a
+ * development relay) gets a plain request that still never follows a redirect.
+ */
 function defaultTransport(): PushTransport {
   return async (url, init) => {
     // Re-wrap over a plain ArrayBuffer so the body matches fetch's BodyInit.
-    const res = await fetch(url, {
+    const request = {
       method: init.method,
       headers: init.headers,
       body: new Uint8Array(init.body),
       ...(init.signal ? { signal: init.signal } : {}),
-    });
+    };
+    const res = localPushEndpointsAllowed()
+      ? await fetch(url, { ...request, redirect: 'manual' })
+      : await (await import('../utils/url-safety.js')).postToPublicWebhook(url, request, init.signal ? { signal: init.signal } : {});
     return { status: res.status };
   };
 }
@@ -65,11 +81,29 @@ function endpointOrigin(endpoint: string): string {
   }
 }
 
+const TRUNCATION_MARK = '...';
+const MAX_TITLE_CHARACTERS = 200;
+
+/**
+ * The notification as sent. A title or body that would not fit one push is cut
+ * and marked, because a long approval summary must still reach the person; the
+ * structured `data` is never cut.
+ */
 function messagePlaintext(message: PushMessage): Buffer {
-  return Buffer.from(
-    JSON.stringify({ title: message.title, body: message.body, data: message.data ?? {} }),
-    'utf8',
-  );
+  const data = message.data ?? {};
+  const encode = (title: string, body: string): Buffer => Buffer.from(JSON.stringify({ title, body, data }), 'utf8');
+  const title = message.title.length > MAX_TITLE_CHARACTERS
+    ? `${message.title.slice(0, MAX_TITLE_CHARACTERS - TRUNCATION_MARK.length)}${TRUNCATION_MARK}`
+    : message.title;
+  let body = message.body;
+  let plaintext = encode(title, body);
+  while (plaintext.length > PUSH_MAX_PLAINTEXT_BYTES && body.length > 0) {
+    // Escaping can make a character cost several bytes, so shrink by the excess and re-measure.
+    const keep = Math.max(0, body.length - (plaintext.length - PUSH_MAX_PLAINTEXT_BYTES) - TRUNCATION_MARK.length);
+    body = keep === 0 ? '' : `${body.slice(0, keep)}${TRUNCATION_MARK}`;
+    plaintext = encode(title, body);
+  }
+  return plaintext;
 }
 
 export interface DeliveryDeps {
@@ -84,6 +118,8 @@ export interface DeliveryDeps {
    * about when a push service has proved an endpoint gone.
    */
   readonly failureThreshold?: number | undefined;
+  /** Per-request time limit; absent means {@link DEFAULT_PUSH_REQUEST_TIMEOUT_MS}. */
+  readonly requestTimeoutMs?: number | undefined;
 }
 
 /** The effective bound: the configured value when sane, else the module default. */
@@ -113,6 +149,9 @@ export async function deliverToSubscription(
     assertDeliveryCurrent(lifetime);
     const encrypted = encryptPushPayload(subscription.keys, messagePlaintext(message));
     const authorization = await deps.vapid.buildAuthorizationHeader(subscription.endpoint);
+    const timeoutMs = deps.requestTimeoutMs ?? DEFAULT_PUSH_REQUEST_TIMEOUT_MS;
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = lifetime.signal ? AbortSignal.any([lifetime.signal, timeout]) : timeout;
     const headers: Record<string, string> = {
       'content-encoding': encrypted.contentEncoding,
       'content-type': 'application/octet-stream',
@@ -123,8 +162,7 @@ export async function deliverToSubscription(
     const result = await runDeliveryPublication(lifetime, () => {
       dispatched = true;
       return transport(subscription.endpoint, {
-        method: 'POST', headers, body: encrypted.body,
-        ...(lifetime.signal ? { signal: lifetime.signal } : {}),
+        method: 'POST', headers, body: encrypted.body, signal,
       });
     });
     httpStatus = result.status;
@@ -133,6 +171,15 @@ export async function deliverToSubscription(
     if (!dispatched) {
       assertDeliveryCurrent(lifetime);
       if (lifetime.withPublication) throw error;
+      // The message or the daemon's own key custody failed before anything was
+      // sent. That says nothing about the device, so it is reported but never
+      // counted toward pruning a healthy subscription.
+      return {
+        subscriptionId: subscription.id,
+        endpointOrigin: origin,
+        outcome: 'failed',
+        detail: `not sent: ${error instanceof Error ? error.message : String(error)} (this is not counted against the device)`,
+      };
     }
     const failures = await deps.store.recordOutcome(subscription.id, 'failed');
     const reason = `delivery request failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -195,10 +242,13 @@ async function prunedOrFailed(
 }
 
 /**
- * Fan one message out to every stored subscription, delivering (and pruning) in
- * sequence. Returns one receipt per subscription, an empty array when there
- * are no subscriptions at all (the honest "nobody to notify" result, not a
- * silent success).
+ * Fan one message out to every stored subscription, a few at a time so one
+ * endpoint that never answers cannot hold back the rest. Returns one receipt
+ * per subscription, in store order, an empty array when there are no
+ * subscriptions at all (the honest "nobody to notify" result, not a silent
+ * success). A bookkeeping failure on one subscription becomes that
+ * subscription's `failed` receipt; it never loses the other receipts. A revoked
+ * lifetime still ends the whole fan-out.
  */
 export async function deliverToAll(
   message: PushMessage,
@@ -206,9 +256,52 @@ export async function deliverToAll(
   lifetime: DeliveryLifetime = {},
 ): Promise<PushDeliveryReceipt[]> {
   const subscriptions = await deps.store.all();
-  const receipts: PushDeliveryReceipt[] = [];
-  for (const subscription of subscriptions) {
-    receipts.push(await deliverToSubscription(subscription, message, deps, lifetime));
-  }
+  const receipts = new Array<PushDeliveryReceipt>(subscriptions.length);
+  // One device registered twice is still one device: send it the message once.
+  const firstByEndpoint = new Map<string, number>();
+  const work: number[] = [];
+  subscriptions.forEach((subscription, index) => {
+    if (firstByEndpoint.has(subscription.endpoint)) {
+      receipts[index] = {
+        subscriptionId: subscription.id,
+        endpointOrigin: endpointOrigin(subscription.endpoint),
+        outcome: 'skipped',
+        detail: 'another subscription for the same endpoint was sent this message',
+      };
+      return;
+    }
+    firstByEndpoint.set(subscription.endpoint, index);
+    work.push(index);
+  });
+
+  let next = 0;
+  // Held in an object so the checks below see changes made by the workers.
+  const ended: { error?: { readonly cause: unknown } } = {};
+  const worker = async (): Promise<void> => {
+    while (ended.error === undefined && next < work.length) {
+      const index = work[next++]!;
+      const subscription = subscriptions[index]!;
+      try {
+        receipts[index] = await deliverToSubscription(subscription, message, deps, lifetime);
+      } catch (error) {
+        try {
+          // Revocation, or a publication that owns failure handling, ends the fan-out.
+          assertDeliveryCurrent(lifetime);
+          if (lifetime.withPublication) throw error;
+        } catch (ending) {
+          ended.error ??= { cause: ending };
+          return;
+        }
+        receipts[index] = {
+          subscriptionId: subscription.id,
+          endpointOrigin: endpointOrigin(subscription.endpoint),
+          outcome: 'failed',
+          detail: `delivery could not be recorded: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(FAN_OUT_CONCURRENCY, work.length) }, worker));
+  if (ended.error) throw ended.error.cause;
   return receipts;
 }

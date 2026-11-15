@@ -36,6 +36,8 @@ import { ErrorState } from '../feedback/ErrorState';
 import { SkeletonBlock } from '../feedback/SkeletonBlock';
 import { SettingsBlock } from './dialog/parts';
 import { whenLabel } from '../../lib/when-label';
+import { unpairRelay } from '../../lib/relay-connection';
+import { describeRelayPairingForConfirmation, getStoredRelayPairing } from '../../lib/relay-pairing';
 import '../../styles/components/pairing-tokens.css';
 
 export function PairingTokensSettings() {
@@ -85,7 +87,19 @@ export function PairingTokensSettings() {
     onSuccess: async (result) => {
       // Swap THIS browser over to its own new token immediately, the daemon just
       // minted it for the same principal, so the swap never signs this tab out.
-      await setExplicitAuthToken(result.token.token);
+      try {
+        await setExplicitAuthToken(result.token.token);
+      } catch (error: unknown) {
+        // The secret was served once and is gone now, so the minted device
+        // stays in the list with nothing able to use it. Say which one.
+        await invalidateTokens();
+        toast({
+          title: 'Migrate failed after the token was created',
+          description: `The daemon created "${result.token.name}" but this browser could not switch to it (${formatError(error)}). That device is unusable: revoke it in the list, then try again.`,
+          tone: 'danger',
+        });
+        return;
+      }
       await invalidateTokens();
       await queryClient.invalidateQueries({ queryKey: queryKeys.auth });
       toast({
@@ -137,6 +151,24 @@ export function PairingTokensSettings() {
     });
     if (!ok) return;
     revokeShared.mutate();
+  }
+
+  const [relayPairing, setRelayPairing] = useState(() => getStoredRelayPairing());
+
+  async function handleUnpairRelay(): Promise<void> {
+    if (!relayPairing) return;
+    const { relayHost, fingerprint } = describeRelayPairingForConfirmation(relayPairing);
+    const ok = await confirm.ask({
+      title: 'Unpair from the relay?',
+      target: relayHost,
+      description: `This browser stops reaching its daemon through the relay (key ${fingerprint}) and uses the direct address again. Scan a new pairing code to reconnect.`,
+      confirmLabel: 'Unpair',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    unpairRelay();
+    setRelayPairing(getStoredRelayPairing());
+    toast({ title: 'Relay unpaired', description: 'This browser now connects directly.', tone: 'success' });
   }
 
   function startRename(token: PublicPairingToken): void {
@@ -265,6 +297,16 @@ export function PairingTokensSettings() {
           </div>
         )}
       </SettingsBlock>
+
+      {relayPairing && (
+        <SettingsBlock
+          testId="relay-pairing"
+          title="Relay"
+          description={`This browser reaches its daemon through the relay at ${describeRelayPairingForConfirmation(relayPairing).relayHost}.`}
+        >
+          <Button variant="danger" onClick={() => void handleUnpairRelay()}>Unpair relay</Button>
+        </SettingsBlock>
+      )}
     </>
   );
 }

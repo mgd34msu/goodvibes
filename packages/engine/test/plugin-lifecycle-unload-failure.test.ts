@@ -5,6 +5,9 @@
 import { describe, expect, test } from 'bun:test';
 import { PluginLifecycleManager } from '../platform/src/platform/runtime/plugins/manager.ts';
 import type { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
+import { createInitialPluginsState } from '../platform/src/platform/runtime/store/domains/plugins.ts';
+import { updatePluginState } from '../platform/src/platform/runtime/store/helpers/reducers/sync.ts';
+import type { PluginEvent } from '../platform/src/platform/runtime/store/helpers/events.ts';
 import type { PluginManifestV2 } from '../platform/src/platform/runtime/plugins/types.ts';
 import type { LoadedPlugin } from '../platform/src/platform/plugins/loader.ts';
 
@@ -50,5 +53,41 @@ describe('PluginLifecycleManager.unloadPlugin failure', () => {
     expect(ok).toBe(false);
     expect(events.filter((e) => e.type === 'PLUGIN_ERROR').length).toBe(1);
     expect(mgr.getRecord('p')!.state).toBe('error');
+  });
+});
+
+describe('PluginLifecycleManager.recordReloaded', () => {
+  function storeAfter(events: Array<{ payload: Record<string, unknown> }>) {
+    let state = createInitialPluginsState();
+    for (const e of events) state = updatePluginState(state, e.payload as unknown as PluginEvent);
+    return state.plugins.get('p')!;
+  }
+
+  test('a successful reload after a failed one returns the runtime store from error to active', () => {
+    const { mgr, events } = setup();
+    (mgr.getRecord('p') as { state: string }).state = 'error';
+    events.push({ type: 'PLUGIN_ERROR', payload: { type: 'PLUGIN_ERROR', pluginId: 'p', error: 'reload failed', fatal: true } });
+    expect(storeAfter(events).status).toBe('error');
+
+    mgr.recordReloaded('p');
+
+    expect(mgr.getRecord('p')!.state).toBe('active');
+    const plugin = storeAfter(events);
+    expect(plugin.status).toBe('active');
+    expect(plugin.active).toBe(true);
+    expect(plugin.error).toBeUndefined();
+  });
+
+  test('a reload that recovers a degraded plugin returns the runtime store to active', () => {
+    const { mgr, events } = setup();
+    (mgr.getRecord('p') as { state: string }).state = 'active';
+    mgr.degradePlugin('p', 'slow health check');
+    expect(storeAfter(events).status).toBe('degraded');
+
+    mgr.recordReloaded('p');
+
+    expect(mgr.getRecord('p')!.state).toBe('active');
+    expect(storeAfter(events).status).toBe('active');
+    expect(storeAfter(events).active).toBe(true);
   });
 });

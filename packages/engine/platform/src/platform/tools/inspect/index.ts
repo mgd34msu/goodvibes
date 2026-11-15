@@ -1,6 +1,9 @@
-import type { Tool, ToolDefinition } from '../../types/tools.js';
+import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
+import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { resolve } from 'node:path';
 import { INSPECT_TOOL_SCHEMA } from './schema.js';
+import { DEFAULT_CEILING_TOKENS, capToolText } from '../../runtime/tools/output-policy.js';
 import { appendSchemaFingerprint } from '../shared/schema-fingerprint.js';
 import type { InspectInput } from './schema.js';
 import { VALID_MODES, JSON_OUTPUT_INDENT, type InspectToolResult } from './shared.js';
@@ -11,6 +14,7 @@ export class InspectTool implements Tool {
   public constructor(
     private readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null,
     private readonly projectRoot: string | null = null,
+    private readonly allowOutsideProject: () => boolean = () => false,
   ) {}
 
   readonly definition: ToolDefinition = {
@@ -42,7 +46,7 @@ export class InspectTool implements Tool {
     return output;
   }
 
-  async execute(args: Record<string, unknown>): Promise<InspectToolResult> {
+  async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<InspectToolResult> {
     if (!args.mode || typeof args.mode !== 'string') {
       return { success: false, error: 'mode is required' };
     }
@@ -52,16 +56,31 @@ export class InspectTool implements Tool {
       return { success: false, error: `Invalid mode: ${input.mode}. Valid modes: ${VALID_MODES.join(', ')}` };
     }
 
-    const explicitRoot = (typeof input.projectRoot === 'string' && input.projectRoot.trim().length > 0)
+    const requestedRoot = (typeof input.projectRoot === 'string' && input.projectRoot.trim().length > 0)
       ? input.projectRoot
-      : this.projectRoot;
+      : undefined;
+    const explicitRoot = requestedRoot ?? this.projectRoot;
     if (!explicitRoot) {
       return { success: false, error: 'projectRoot is required' };
     }
-    const projectRoot = resolve(explicitRoot);
+    // The root comes from the model's own arguments, so it is held to the same rule as read and find:
+    // inside the working directory unless access outside the project is allowed.
+    let projectRoot: string;
+    try {
+      projectRoot = requestedRoot !== undefined && this.projectRoot
+        ? resolveAndValidatePath(requestedRoot, this.projectRoot, this.allowOutsideProject())
+        : resolve(explicitRoot);
+    } catch (err) {
+      return { success: false, error: `projectRoot refused: ${summarizeError(err)}. Use a directory inside ${this.projectRoot}.` };
+    }
+    const current = () => { options?.signal?.throwIfAborted(); };
     const format = input.output?.format ?? 'detailed';
-    const rawResult = await executeInspectMode(input, projectRoot, format);
-    return this._fingerprintResult(rawResult, input.mode, format);
+    const rawResult = await executeInspectMode(input, projectRoot, format, current, this.projectRoot);
+    const shaped = this._fingerprintResult(rawResult, input.mode, format);
+    if (!shaped.success || shaped.output === undefined) return shaped;
+    // The schema advertises output.max_tokens; without one the shared default ceiling still applies.
+    return { ...shaped, output: capToolText(shaped.output, input.output?.max_tokens ?? DEFAULT_CEILING_TOKENS.analyze,
+      "Pass output.format 'summary', pick a narrower mode, or raise output.max_tokens to see more.") };
   }
 
   private _fingerprintResult(

@@ -4,7 +4,7 @@ import { registerAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures, researchScreeningFixture, exactSensitiveSpans } from '../helpers/research-screening.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { installJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -133,13 +133,18 @@ describe('PersonalOps canonical catalog readings', () => {
     expect(result).toMatchObject({ status: 'selection_required', reason: 'exact_record_identity_required', candidates: [{ recordId: 'workplan-add' }] });
   });
 
-  test('a missing port stays a typed failure through the actual facade', async () => {
-    await expect(caller().execute({ action: 'intake', query: 'email calendar' })).rejects.toBeInstanceOf(JudgmentPortMissingError);
+  test('a missing port is reported as a failed result through the actual facade', async () => {
+    const r = await caller().execute({ action: 'intake', query: 'email calendar' });
+    expect(r.success).toBe(false);
+    expect(r.output).toBeUndefined();
+    expect(r.error).toContain('No judgment port is installed');
+    expect(r.error).toContain('installJudgmentPort()');
   });
 
   test('an unavailable reader is not replaced by a substring response', async () => {
     installJudgmentPort({ model: 'fixture', ask: async () => { throw new Error('reader unavailable'); } });
-    await expect(caller().execute({ action: 'lane', query: 'mail' })).rejects.toThrow('reader unavailable');
+    const r = await caller().execute({ action: 'lane', query: 'mail' });
+    expect(r).toEqual({ success: false, error: 'reader unavailable' });
   });
 
   test('already aborted facade options stop before discovery or reading', async () => {

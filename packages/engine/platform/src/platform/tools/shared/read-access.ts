@@ -3,12 +3,14 @@
  * the SAME read-permission decision the read tool gets, per candidate file.
  *
  * The single source of truth is the injected {@link ReadAccessFilter}, wired at
- * the composition root to `PermissionManager.readAccess`, which asks Jev whether
- * a read of the file touches secret or credential material. Tools MUST use this
- * filter rather than re-implementing any path matching, so a read the gate would
- * hold behind an ask can never be bypassed by a search that returns content, and
- * can never drift from a parallel matcher. Tools apply it only to the files whose
- * content they are about to surface, so a large search does not read every
+ * the composition root to `PermissionManager.readAccess`. It restricts a file
+ * only on the owner's explicit rules: `permissions.tools.read` set to deny, a
+ * policy-layer rule, or a remembered deny. It never reads the file or asks Jev
+ * what it holds, so a secret in a file nobody denied is not withheld. Tools MUST
+ * use this filter rather than re-implementing any path matching, so a read the
+ * owner denied can never be bypassed by a search that returns content, and can
+ * never drift from a parallel matcher. Tools apply it only to the files whose
+ * content they are about to surface, so a large search does not ask about every
  * candidate.
  *
  * Two enforcement shapes, matching the read tool's contract:

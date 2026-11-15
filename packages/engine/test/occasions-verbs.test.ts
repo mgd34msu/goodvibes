@@ -118,7 +118,7 @@ function harness(): Harness {
   return { catalog, profilePath };
 }
 
-const ctx = { context: { admin: true } } as const;
+const ctx = { context: { admin: true }, isAuthorized: () => true } as const;
 
 describe('the catalog surface', () => {
   test('every verb is cataloged, handled, and carries a read or write scope', () => {
@@ -238,7 +238,7 @@ describe('the verbs, invoked', () => {
           said: 'x',
           authority: 'owner-direct',
         },
-      })).rejects.toThrow();
+      })).rejects.toThrow(new RegExp(`${id.replaceAll('.', '\\.')} needs an explicit user request`));
     }
     expect(readFileSync(profilePath, 'utf-8')).toBe(before);
   });

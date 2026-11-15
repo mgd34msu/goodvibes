@@ -7,7 +7,8 @@
  * recordIds: string[], defensively). Covered here:
  *   - a turn WITH memory injections serves the ids on the wire payload,
  *   - a turn WITHOUT serves NO metadata field at all (absent, not []),
- *   - code-index-sourced injections never leak into the memory chip,
+ *   - code-index-sourced injections never leak into the memory chip
+ *     (memoryRecordIdsOf, the accumulation the turn loop uses),
  *   - the webui-shaped defensive read path round-trips the emitted payload,
  *   - the full emit path through handleFinalResponseOutcome (the real turn-
  *     completion site) stamps the real runtime-bus envelope.
@@ -19,6 +20,7 @@ import { emitTurnCompleted } from '../platform/src/platform/runtime/emitters/tur
 import { handleFinalResponseOutcome } from '../platform/src/platform/core/orchestrator-turn-helpers.js';
 import { validateTurnCompleted } from '../platform/src/events/contracts.js';
 import type { TurnEvent } from '../platform/src/events/turn.js';
+import { memoryRecordIdsOf } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 
 type TurnCompleted = Extract<TurnEvent, { type: 'TURN_COMPLETED' }>;
 
@@ -103,16 +105,20 @@ describe('emitTurnCompleted: metadata.memory.recordIds stamping', () => {
 });
 
 describe('memory-source filtering (the loop stamps only source \'memory\')', () => {
-  test('the loop\'s filter expression keeps memory ids and drops code-index ids', () => {
-    // The exact accumulation the turn loop performs over a TurnInjectionRecord:
-    // parallel arrays injectedIds/injectedSources, keep source === 'memory'.
-    const injectedIds = ['mem-1', 'code-1', 'mem-2'] as const;
-    const injectedSources = ['memory', 'code-index', 'memory'] as const;
-    const kept = new Set<string>();
-    injectedIds.forEach((id, index) => {
-      if (injectedSources[index] === 'memory') kept.add(id);
+  test('memory ids are kept and code-index ids are dropped, in order', () => {
+    expect(memoryRecordIdsOf({
+      injectedIds: ['mem-1', 'code-1', 'mem-2'],
+      injectedSources: ['memory', 'code-index', 'memory'],
+    })).toEqual(['mem-1', 'mem-2']);
+    expect(memoryRecordIdsOf({ injectedIds: ['code-1'], injectedSources: ['code-index'] })).toEqual([]);
+  });
+
+  test('only the memory ids of an injection record reach TURN_COMPLETED metadata', async () => {
+    const record = { injectedIds: ['mem-1', 'code-1'], injectedSources: ['memory', 'code-index'] } as const;
+    const payload = await captureTurnCompleted((bus) => {
+      emitTurnCompleted(bus, CTX, { turnId: 't-6', response: 'ok', stopReason: 'completed', memoryRecordIds: memoryRecordIdsOf(record) });
     });
-    expect([...kept]).toEqual(['mem-1', 'mem-2']);
+    expect(payload.metadata).toEqual({ memory: { recordIds: ['mem-1'] } });
   });
 });
 
@@ -135,8 +141,6 @@ describe('handleFinalResponseOutcome: the real turn-completion emit site', () =>
         response: { content: 'the reply', toolCalls: [], stopReason: 'completed' } as never,
         preTurnPlan: null,
         requestRender: () => undefined,
-        setAutoSpawnTimeout: () => undefined,
-        autoSpawnTimeoutMs: 0,
         sessionId: 's-1',
         memoryRecordIds,
       });

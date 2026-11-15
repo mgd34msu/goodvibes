@@ -23,14 +23,14 @@ import {
   decodeCursor,
   hasPaginationParams,
   paginateItems,
-} from '../daemon-api/dist/index.js';
-import type { PaginatedResponse } from '../daemon-api/dist/index.js';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/dist/index.js';
-import { createDaemonIntegrationRouteHandlers } from '../daemon-api/dist/index.js';
-import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/dist/index.js';
-import type { DaemonRuntimeRouteContext } from '../daemon-api/dist/index.js';
-import type { DaemonIntegrationRouteContext } from '../daemon-api/dist/index.js';
-import type { DaemonKnowledgeRouteContext } from '../daemon-api/dist/index.js';
+} from '../daemon-api/src/index.js';
+import type { PaginatedResponse } from '../daemon-api/src/index.js';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/index.js';
+import { createDaemonIntegrationRouteHandlers } from '../daemon-api/src/index.js';
+import { createDaemonKnowledgeRouteHandlers } from '../daemon-api/src/index.js';
+import type { DaemonRuntimeRouteContext } from '../daemon-api/src/index.js';
+import type { DaemonIntegrationRouteContext } from '../daemon-api/src/index.js';
+import type { DaemonKnowledgeRouteContext } from '../daemon-api/src/index.js';
 
 // ============================================================
 // Cursor encode / decode
@@ -201,15 +201,24 @@ describe('paginateItems', () => {
     expect(page2.hasMore).toBe(true);
   });
 
-  test('deleted-cursor mid-walk: without createdAt falls back to index 0 (legacy behavior)', () => {
-    // Without getCreatedAt supplied, missing id means startIndex=0
+  test('deleted-cursor mid-walk: without createdAt restarts at index 0 by default', () => {
+    // Callers that cannot supply a timestamp and do not opt in to an error get a
+    // restart, so items already seen are returned again.
     const items = makeItems(5);
     const cursor = encodeCursor('item-2'); // id-only cursor, no createdAt
     const withoutItem2 = items.filter((x) => x.id !== 'item-2');
     const result = paginateItems(withoutItem2, 3, cursor, (x) => x.id);
     if ('error' in result) throw new Error(result.error);
-    // Falls back to 0, items 1, 3, 4 (first three)
     expect(result.items.map((x) => x.id)).toEqual(['item-1', 'item-3', 'item-4']);
+  });
+
+  test('deleted-cursor mid-walk: without createdAt and onMissingCursor "error" refuses instead of repeating items', () => {
+    const items = makeItems(5);
+    const cursor = encodeCursor('item-2');
+    const withoutItem2 = items.filter((x) => x.id !== 'item-2');
+    const result = paginateItems(withoutItem2, 3, cursor, (x) => x.id, undefined, { onMissingCursor: 'error' });
+    expect('error' in result).toBe(true);
+    if ('error' in result) expect(result.error).toContain('Cursor expired');
   });
 });
 
@@ -322,6 +331,20 @@ describe('getAutomationJobs', () => {
     } while (nextCursor && iterations < 20);
     expect(seen).toHaveLength(7);
     expect(new Set(seen).size).toBe(7);
+  });
+
+  test('a job deleted while it is the cursor is refused with 400, never a silent restart', async () => {
+    const jobs = Array.from({ length: 6 }, (_, i) => ({ id: `j${i + 1}` }));
+    const first = createDaemonRuntimeAutomationRouteHandlers(makeAutomationContext(jobs));
+    const page1 = await (await first.getAutomationJobs(new URL('http://localhost/api/automation/jobs?limit=3'))).json() as { items: Array<{ id: string }>; nextCursor: string };
+    expect(page1.items.map((x) => x.id)).toEqual(['j1', 'j2', 'j3']);
+
+    const afterDelete = createDaemonRuntimeAutomationRouteHandlers(makeAutomationContext(jobs.filter((j) => j.id !== 'j3')));
+    const response = await afterDelete.getAutomationJobs(new URL(`http://localhost/api/automation/jobs?limit=3&cursor=${page1.nextCursor}`));
+    expect(response.status).toBe(400);
+    const body = await response.json() as { error: string; items?: unknown };
+    expect(body.error).toContain('Cursor expired');
+    expect(body.items).toBeUndefined();
   });
 
   test('last page: hasMore false, no nextCursor', async () => {
@@ -695,14 +718,15 @@ describe('knowledge sources: mid-walk deletion recovery', () => {
     expect(page2.items.every((x) => x.id !== 'k1' && x.id !== 'k2')).toBe(true);
   });
 
-  test('mid-walk UPDATE: updated item moves to front, subsequent pages skip it (no crash, documented behavior)', async () => {
+  test('mid-walk UPDATE: an updated item moves ahead of the cursor, so this walk does not return it (a new walk from the start does)', async () => {
     // Items sorted descending by updatedAt: k1=8000 ... k8=1000.
     // Page 1 (limit=3): k1, k2, k3. cursor encodes k3's updatedAt=6000.
     // k5 is then updated (gains updatedAt=9000), moving it to front of the list.
     // Store now: k5(9000), k1(8000), k2(7000), k3(6000), k4(5000), k6(3000), k7(2000), k8(1000).
     // Page 2 cursor targets updatedAt < 6000 -> starts from k4.
     // k5 has already moved past the cursor boundary so it will NOT appear in remaining pages.
-    // This matches documented behavior: mid-walk update = old position vanishes like a deletion.
+    // A walk is a snapshot of position, not of content: a mid-walk update behaves like a deletion
+    // for that walk. Page 2 must still be consistent (no repeats, resumes at k4).
     const items = makeKnowledgeItemsWithTs(8);
     const handlers = createDaemonKnowledgeRouteHandlers(makeKnowledgeContext(items));
 
@@ -808,7 +832,7 @@ describe('knowledge nodes: mid-walk deletion recovery', () => {
     expect(page2.items.every((x) => x.id !== 'k1' && x.id !== 'k2')).toBe(true);
   });
 
-  test('mid-walk UPDATE: updated node moves to front, subsequent pages skip it (no crash, documented behavior)', async () => {
+  test('mid-walk UPDATE: an updated node moves ahead of the cursor, so this walk does not return it (a new walk from the start does)', async () => {
     // Items sorted descending by updatedAt: k1=8000 ... k8=1000.
     // Page 1 (limit=3): k1, k2, k3. cursor encodes k3's updatedAt=6000.
     // k5 is then updated (gains updatedAt=9000), moving it to front.

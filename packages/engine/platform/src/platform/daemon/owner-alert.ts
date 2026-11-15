@@ -98,9 +98,15 @@ export async function deliverOwnerAlert(
   }
   const refusals: string[] = [];
   for (const binding of candidates) {
-    const result = await delivery.deliverSurfaceNotice(binding, text);
-    if (result.delivered) return binding;
-    refusals.push(`${binding.surfaceKind}:${result.reason ?? 'unknown'}`);
+    try {
+      const result = await delivery.deliverSurfaceNotice(binding, text);
+      if (result.delivered) return binding;
+      refusals.push(`${binding.surfaceKind}:${result.reason ?? 'unknown'}`);
+    } catch (error) {
+      // One malformed or unreachable route must not stop the next one from
+      // being tried, and the fire-and-forget caller has no handler for a rejection.
+      refusals.push(`${binding.surfaceKind}:threw ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   logger.error('An alert for the owner reached no channel at all', {
     preferred,

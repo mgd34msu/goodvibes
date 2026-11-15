@@ -7,7 +7,7 @@
  * which validates permissions before delegating to the appropriate handler.
  *
  * Supported action targets:
- *  - Load replay: loads a forensics run into the replay engine
+ *  - Load replay: loads a forensics run into the replay engine (needs a run loader)
  *  - Run policy simulation: triggers a simulation pass for a tool call
  *  - Jump to task: navigates the UI focus to a related task entry
  *  - Jump to agent: navigates the UI focus to a related agent entry
@@ -18,6 +18,8 @@ import { logger } from '../../utils/logger.js';
 import type { DeterministicReplayEngine } from '../../core/deterministic-replay.js';
 import type { PermissionSimulator } from '../permissions/simulation.js';
 import type { OpsControlPlane } from '../ops/control-plane.js';
+import type { LedgerEntry } from '../telemetry/exporters/local-ledger.js';
+import type { RuntimeStateSnapshot } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
 
 // ── Action type union ─────────────────────────────────────────────────────────
@@ -46,6 +48,23 @@ export type DiagnosticActionType =
  * - `admin`, destructive or sensitive actions requiring elevated access.
  */
 export type DiagnosticActionPermission = 'read' | 'operator' | 'admin';
+
+/**
+ * The permission tier each action type requires. The dispatcher decides the
+ * tier from the action's type, never from the `permission` field of the action
+ * object: a deserialized action can claim any tier, and a mutation must not be
+ * reachable by labelling it `read`.
+ */
+const REQUIRED_PERMISSION: Readonly<Record<DiagnosticActionType, DiagnosticActionPermission>> = {
+  'load-replay': 'operator',
+  'run-policy-simulation': 'operator',
+  'jump-to-task': 'read',
+  'jump-to-agent': 'read',
+  'jump-to-tool-call': 'read',
+  'retry-task': 'operator',
+  'cancel-task': 'operator',
+  'cancel-agent': 'operator',
+};
 
 // ── Action payload shapes ─────────────────────────────────────────────────────
 
@@ -246,6 +265,18 @@ export type PermissionChecker = (
   required: DiagnosticActionPermission,
 ) => boolean;
 
+/** A forensics run as the replay engine loads it: the start snapshot and its ledger entries. */
+export interface ReplayRunData {
+  readonly snapshot: RuntimeStateSnapshot;
+  readonly entries: LedgerEntry[];
+}
+
+/**
+ * Looks up the recorded run for a run id; resolves to undefined when the run
+ * is not known.
+ */
+export type ReplayRunLoader = (runId: string) => ReplayRunData | undefined | Promise<ReplayRunData | undefined>;
+
 /**
  * Configuration for DiagnosticActionDispatcher.
  *
@@ -260,6 +291,11 @@ export interface DiagnosticActionDispatcherConfig {
    */
   readonly replayEngine?: DeterministicReplayEngine | undefined;
   /**
+   * Finds the recorded run for 'load-replay' actions. Without it a load-replay
+   * action fails and leaves the engine's loaded run untouched.
+   */
+  readonly loadReplayRun?: ReplayRunLoader | undefined;
+  /**
    * Permission simulator for 'run-policy-simulation' actions.
    * When absent, policy simulation actions return an error result.
    */
@@ -271,7 +307,7 @@ export interface DiagnosticActionDispatcherConfig {
   readonly controlPlane?: OpsControlPlane | undefined;
   /**
    * Navigation callback for 'jump-to-*' actions.
-   * When absent, jump actions return a success result with a warning note.
+   * When absent, jump actions return a failure result: nothing was navigated.
    */
   readonly navigateTo?: NavigateToEntryCallback | undefined;
   /**
@@ -314,6 +350,7 @@ const DEFAULT_PERMISSION_CHECKER: PermissionChecker = (required) => {
  */
 export class DiagnosticActionDispatcher {
   private readonly _replayEngine: DeterministicReplayEngine | undefined;
+  private readonly _loadReplayRun: ReplayRunLoader | undefined;
   private readonly _simulator: PermissionSimulator | undefined;
   private readonly _controlPlane: OpsControlPlane | undefined;
   private readonly _navigateTo: NavigateToEntryCallback | undefined;
@@ -321,6 +358,7 @@ export class DiagnosticActionDispatcher {
 
   constructor(config: DiagnosticActionDispatcherConfig = {}) {
     this._replayEngine = config.replayEngine;
+    this._loadReplayRun = config.loadReplayRun;
     this._simulator = config.simulator;
     this._controlPlane = config.controlPlane;
     this._navigateTo = config.navigateTo;
@@ -337,15 +375,19 @@ export class DiagnosticActionDispatcher {
    * @returns An ActionResult describing the outcome.
    */
   public async dispatch(action: DiagnosticAction): Promise<ActionResult> {
-    // Permission gate
-    if (!this._checkPermission(action.permission)) {
+    // Permission gate: the tier comes from the action type, not the action object.
+    const required = REQUIRED_PERMISSION[action.type];
+    if (required === undefined) {
+      return { success: false, message: `Unknown action type: ${String(action.type)}` };
+    }
+    if (!this._checkPermission(required)) {
       logger.warn('[DiagnosticActionDispatcher] permission denied', {
         type: action.type,
-        required: action.permission,
+        required,
       });
       return {
         success: false,
-        message: `Permission denied: '${action.permission}' access required for action '${action.type}'.`,
+        message: `Permission denied: '${required}' access required for action '${action.type}'.`,
         permissionDenied: true,
       };
     }
@@ -357,7 +399,7 @@ export class DiagnosticActionDispatcher {
       logger.warn('[DiagnosticActionDispatcher] action error', {
         type: action.type,
         label: action.label,
-        permission: action.permission,
+        permission: required,
         target: describeActionTarget(action),
         err: message,
       });
@@ -371,7 +413,7 @@ export class DiagnosticActionDispatcher {
   private async _route(action: DiagnosticAction): Promise<ActionResult> {
     switch (action.type) {
       case 'load-replay':
-        return this._handleLoadReplay(action.payload);
+        return await this._handleLoadReplay(action.payload);
 
       case 'run-policy-simulation':
         return await this._handlePolicySimulation(action.payload);
@@ -407,26 +449,37 @@ export class DiagnosticActionDispatcher {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  private _handleLoadReplay(payload: LoadReplayPayload): ActionResult {
+  private async _handleLoadReplay(payload: LoadReplayPayload): Promise<ActionResult> {
     if (!this._replayEngine) {
       return {
         success: false,
         message: 'Replay engine is not available. Attach a DeterministicReplayEngine to the dispatcher.',
       };
     }
+    if (!this._loadReplayRun) {
+      return {
+        success: false,
+        message: `Replay run '${payload.runId}' was not loaded: no run loader is attached to the dispatcher (loadReplayRun). The replay engine still holds its previous run.`,
+      };
+    }
 
-    // Reset the engine to 'idle'. The caller is expected to then fetch
-    // ledger entries for the given runId and call engine.load(). The
-    // ReplayPanel will surface the updated state via subscriber notifications.
-    this._replayEngine.reset();
+    const run = await this._loadReplayRun(payload.runId);
+    if (!run) {
+      return {
+        success: false,
+        message: `Replay run '${payload.runId}' was not found. The replay engine still holds its previous run.`,
+      };
+    }
+    this._replayEngine.load(payload.runId, run.snapshot, run.entries);
 
-    logger.debug('[DiagnosticActionDispatcher] load-replay requested', {
+    logger.debug('[DiagnosticActionDispatcher] replay run loaded', {
       runId: payload.runId,
+      entries: run.entries.length,
     });
 
     return {
       success: true,
-      message: `Replay engine reset for run '${payload.runId}'. Load the ledger entries to begin stepping.`,
+      message: `Replay run '${payload.runId}' loaded (${run.entries.length} ledger entries).`,
     };
   }
 
@@ -474,8 +527,8 @@ export class DiagnosticActionDispatcher {
   ): ActionResult {
     if (!this._navigateTo) {
       return {
-        success: true,
-        message: `Jump to ${target} '${id}' requested but no navigation handler is registered.`,
+        success: false,
+        message: `Did not jump to ${target} '${id}': no navigation handler is registered.`,
       };
     }
 

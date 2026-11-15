@@ -86,45 +86,28 @@ describe('session-persistence: legacy form stays byte-compatible and warns once'
     expect(readLastSessionPointer(options)).toBe('legacy-session');
   });
 
-  test('repeated legacy calls emit the migration warning at most once, and never more on repeat calls', () => {
-    // Session-persistence.ts's deprecation flag is process-global (module state
-    // shared across every test file bun runs in this process), so we cannot
-    // assert this is the very FIRST warning the process has ever seen, an
-    // earlier-sorted test file may have already tripped it. What we CAN assert,
-    // order-independently, is the "once" guarantee itself: firing the legacy
-    // path repeatedly never adds more than one occurrence of the migration
-    // message, and a second call never adds a second occurrence on top of a
-    // first that already happened within this test.
-    const { workingDirectory, homeDirectory } = tempSurface();
-    const options: SessionPersistenceOptions = { workingDirectory, homeDirectory };
-    const isMigrationWarning = (w: string) => w.includes('SessionSurface');
-
-    const first = withCapturedWarnings(() => writeLastSessionPointer('warn-once-a', options));
-    const firstCount = first.warnings.filter(isMigrationWarning).length;
-    expect(firstCount).toBeLessThanOrEqual(1);
-
-    const second = withCapturedWarnings(() => writeLastSessionPointer('warn-once-b', options));
-    const secondCount = second.warnings.filter(isMigrationWarning).length;
-    // Once the flag has been tripped (by `first` at the latest), a further
-    // legacy call must not emit the migration warning again.
-    expect(secondCount).toBe(0);
+  test('the legacy-options warning fires exactly once per process, however many times it is requested', async () => {
+    // The flag is module state shared by the whole test process, so exercise a
+    // fresh instance of the module where it is still unset.
+    const freshSpecifier = '../platform/src/platform/runtime/session-persistence-scope.ts?fresh-warning-flag';
+    const fresh: typeof import('../platform/src/platform/runtime/session-persistence-scope.ts') = await import(freshSpecifier);
+    const { warnings } = withCapturedWarnings(() => {
+      fresh.warnLegacyOptionsOnce();
+      fresh.warnLegacyOptionsOnce();
+      fresh.warnLegacyOptionsOnce();
+    });
+    expect(warnings.filter((w) => w.includes('SessionSurface'))).toHaveLength(1);
   });
 });
 
 describe('session-persistence: surface and legacy options cannot be mixed (compile-time)', () => {
   test('mixing surface with a legacy scope field is rejected by the type checker', () => {
     const { surface, workingDirectory } = tempSurface();
-    // NOTE: bun test does not type-check test files (packages/platform/tsconfig.json
-    // excludes **/*.test.ts, and this repo's `pretest` tsc build only compiles
-    // src/**/*.ts, see package.json). So this assertion documents the intended
-    // compile-time contract (as the sibling type-tests under test/types/ do for
-    // other exported types) but is not currently enforced by any `bun test` or
-    // `bun run test` gate; it would only be caught by running `tsc` directly
-    // against this file, which the repo does not do today.
+    // bun does not type-check this file when it runs; the engine-tests tsc
+    // project does, and an unused @ts-expect-error fails that build.
     // @ts-expect-error, surface and workingDirectory are mutually exclusive; SessionPersistenceOptions is a discriminated union, not two independently-optional bags.
     const mixed: SessionPersistenceOptions = { surface, workingDirectory };
-    // Reference `mixed` so the (deliberately not-typechecked-at-runtime) line
-    // above isn't reported as an unused variable if a stricter lint ever runs.
+    // Reference `mixed` so it is not reported as unused.
     expect(typeof mixed).toBe('object');
   });
 });

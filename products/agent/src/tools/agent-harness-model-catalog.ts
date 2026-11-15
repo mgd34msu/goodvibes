@@ -118,9 +118,10 @@ export function readProviderApi(context: CommandContext): ProviderApiLike | null
   }
 }
 
-export async function loadPinnedModelIds(context: CommandContext): Promise<ReadonlySet<string>> {
+/** The pinned ids, or null when the favorites could not be read, so a failed read is never reported as "nothing pinned". */
+export async function loadPinnedModelIds(context: CommandContext): Promise<ReadonlySet<string> | null> {
   const providerApi = readProviderApi(context);
-  if (!providerApi) return new Set();
+  if (!providerApi) return null;
   try {
     const favorites = await providerApi.getFavorites();
     const pinned = readRecord(favorites).pinned;
@@ -130,7 +131,7 @@ export async function loadPinnedModelIds(context: CommandContext): Promise<Reado
       return [readString(record.registryKey), readString(record.modelId)].filter(Boolean);
     }));
   } catch {
-    return new Set();
+    return null;
   }
 }
 
@@ -156,7 +157,7 @@ export async function loadModels(context: CommandContext): Promise<readonly Mode
       tier: modelTier(model),
       benchmarkCompositeScore: modelBenchmarkCompositeScore(model),
       benchmarkQualityTier: modelBenchmarkQualityTier(model),
-      pinned: pinned.has(registryKey) || pinned.has(modelId),
+      pinned: pinned === null ? null : pinned.has(registryKey) || pinned.has(modelId),
       available: modelAvailable(model),
       configured: modelConfigured(model),
     };

@@ -1,7 +1,7 @@
 import { checkEachFixture, decisionHeader, type NamedDecision } from '../batteries/decision.ts';
 import { checkReading } from '../batteries/battery.ts';
 import { choice, type EntryType, type JudgmentPort } from '../port/types.ts';
-import { assertBand, type ChoiceBand } from '../readings/bands.ts';
+import { assertChoiceBand, type ChoiceBand } from '../readings/bands.ts';
 import { readChoice, type ChoiceReading } from '../readings/readings.ts';
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader } from '../batteries/asking.ts';
 
@@ -34,8 +34,8 @@ export interface Dispatch<R extends string> extends NamedDecision {
 
 export function defineDispatch<const R extends string>(spec: DispatchSpec<R>): Dispatch<R> {
   const header = decisionHeader(spec);
-  assertBand(spec.band);
   const routes = Object.keys(spec.routes) as R[];
+  assertChoiceBand(`dispatch ${spec.name}`, spec.band as ChoiceBand, routes);
   for (const fixture of spec.fixtures) {
     if (!routes.includes(fixture.expect)) {
       throw new RangeError(`dispatch ${spec.name}: fixture ${fixture.name} expects unknown route "${fixture.expect}"`);

@@ -1,8 +1,8 @@
 # wrangler.toml — wrangler-CLI harness for @goodvibes-jev/engine/platform
 #
-# Points wrangler dev at the test worker entry (test/workers-wrangler/worker.ts).
-# wrangler bundles via its own esbuild pipeline, resolving relative imports
-# (../../platform/dist/web.js) from the entry file location.
+# Points wrangler dev at the worker shared with the Miniflare harness
+# (test/workers/worker.ts). wrangler bundles via its own esbuild pipeline,
+# resolving relative imports (../../platform/dist/web.js) from the entry file.
 #
 # compatibility_date: 2026-04-01 — within the last quarter of writing.
 # Bump quarterly. This date governs which compat flags workerd enables by default.
@@ -10,7 +10,7 @@
 # Do NOT add CF_API_TOKEN or account_id — wrangler dev --local does not require them.
 
 name = "goodvibes-platform-workers-test"
-main = "worker.ts"
+main = "../workers/worker.ts"
 compatibility_date = "2026-04-01"
 # nodejs_compat compatibility flag enables Node.js built-in polyfills (fs, path, etc.)
 # that the platform imports transitively. node_compat = true was removed in wrangler v4;

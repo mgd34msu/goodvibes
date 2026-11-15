@@ -46,8 +46,11 @@
  *
  * Every wire call is best-effort and never throws into the render or keystroke
  * path. A failed poll leaves the cursor where it was, so the input is retried
- * next tick; `deliver` is the only de-duplication, because an input already
- * advanced past `queued` is not returned again. Nothing here blocks a turn.
+ * next tick. `deliver` de-duplicates across processes, because an input already
+ * advanced past `queued` is not returned again; within this process a claim
+ * remembers what the runner already did with an input whose `deliver` has not
+ * landed, so a retry re-acknowledges it instead of starting a second agent.
+ * Nothing here blocks a turn.
  *
  * ── Why it polls ───────────────────────────────────────────────────────────
  *
@@ -97,6 +100,14 @@ export interface SessionInputsWireClient {
     sessionId: string,
     options: { readonly state?: string; readonly since?: number; readonly limit?: number },
   ): Promise<{ readonly inputs: readonly SharedSessionInputRecord[] }>;
+  /**
+   * Take an input before starting work on it: the daemon grants it to one
+   * caller and refuses the rest (`INPUT_NOT_CLAIMABLE`, see
+   * {@link isInputClaimRefusal}), so two processes hosting one session do not
+   * both start an agent for the same message. Optional: a client without it
+   * dispatches as before.
+   */
+  claimInput?(sessionId: string, inputId: string): Promise<unknown>;
   deliverInput(
     sessionId: string,
     inputId: string,
@@ -109,10 +120,26 @@ export interface SessionInputsWireClient {
   ): Promise<unknown>;
 }
 
+/** Whether a failed `claimInput` was the daemon saying another surface holds the input, not a failure to reach it. */
+export function isInputClaimRefusal(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const candidate = error as { code?: unknown; status?: unknown; transport?: { status?: unknown } };
+  return candidate.code === 'INPUT_NOT_CLAIMABLE'
+    || candidate.status === 409
+    || candidate.transport?.status === 409
+    || summarizeError(error).includes('INPUT_NOT_CLAIMABLE');
+}
+
 /** The setter's own "unbind" argument is part of the seam's signature. */
 type ContinuationRunner = SharedSessionContinuationRunner | null;
 
 const DEFAULT_INTERVAL_MS = 2_000;
+
+/**
+ * How long a claimed input with no agent is left to its claimant. The daemon
+ * enforces the same lease; reading it here only spares claims that cannot succeed yet.
+ */
+const CLAIM_LEASE_MS = 2 * 60_000;
 
 /**
  * How many dispatched runs this dispatcher will wait on answers for at once,
@@ -129,7 +156,29 @@ interface AwaitedAnswer {
   readonly sessionId: string;
   readonly inputId: string;
   readonly startedAt: number;
+  /** Failed attempts to report this answer; bounded by MAX_ANSWER_DELIVERY_ATTEMPTS. */
+  deliveryFailures: number;
 }
+
+/**
+ * How many times a finished run's answer is offered to the daemon before it is
+ * dropped from the watch list. A rejected report is retried on later ticks
+ * instead of being lost on the first failure.
+ */
+const MAX_ANSWER_DELIVERY_ATTEMPTS = 10;
+
+/**
+ * The runner's result for an input whose acknowledgement has not reached the
+ * daemon yet. While one exists, a still-queued input is only re-acknowledged,
+ * never handed to the runner again: the runner already acted on it, and a
+ * second call would start a second agent for the same message.
+ */
+type DispatchClaim =
+  | { readonly kind: 'agent'; readonly agentId: string }
+  | { readonly kind: 'consumed' };
+
+/** Bound on remembered claims; each is removed once its acknowledgement lands. */
+const MAX_DISPATCH_CLAIMS = 500;
 
 export interface WireSessionDispatchOptions {
   /** The sessions this surface is hosting right now. Re-read every tick. */
@@ -151,7 +200,12 @@ export interface WireSessionDispatch extends SessionContinuationDispatch {
   activate(client: SessionInputsWireClient): void;
   /** Detach; the bound runner is kept so a re-adopted daemon resumes dispatch. */
   deactivate(reason: string): void;
-  /** Stop polling entirely. Idempotent. */
+  /** Run one poll now instead of waiting for the interval. Never rejects. */
+  pollNow(): Promise<void>;
+  /**
+   * Stop polling entirely. Idempotent. What was already dispatched stays
+   * remembered, so a later `activate` does not start those inputs a second time.
+   */
   stop(): void;
 }
 
@@ -173,6 +227,56 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
   let generation = 0;
   /** agentId -> the input it is answering. Insertion-ordered, so the oldest is first. */
   const awaitingAnswers = new Map<string, AwaitedAnswer>();
+  /** `sessionId\0inputId` -> what the runner did with it, until the daemon has the acknowledgement. */
+  const claims = new Map<string, DispatchClaim>();
+  const claimKey = (sessionId: string, inputId: string): string => `${sessionId}\0${inputId}`;
+  /** Inputs this process claimed whose runner has not started them yet (held, or it threw); retried without claiming again. */
+  const claimedUnstarted = new Set<string>();
+  const rememberUnstarted = (key: string): void => {
+    claimedUnstarted.add(key);
+    while (claimedUnstarted.size > MAX_DISPATCH_CLAIMS) {
+      const oldest = claimedUnstarted.values().next();
+      if (oldest.done) break;
+      claimedUnstarted.delete(oldest.value);
+    }
+  };
+
+  const recordClaim = (key: string, claim: DispatchClaim): void => {
+    claims.set(key, claim);
+    while (claims.size > MAX_DISPATCH_CLAIMS) {
+      const oldest = claims.keys().next();
+      if (oldest.done) break;
+      claims.delete(oldest.value);
+      log.warn('[session dispatch] forgot an unacknowledged dispatch: too many are outstanding; that input may be dispatched again', {
+        limit: MAX_DISPATCH_CLAIMS,
+      });
+    }
+  };
+
+  /** Acknowledges what the runner did. Throws when the daemon rejects it; the claim then stays for the next tick. */
+  const acknowledge = async (
+    active: SessionInputsWireClient,
+    sessionId: string,
+    inputId: string,
+    claim: DispatchClaim,
+  ): Promise<void> => {
+    const key = claimKey(sessionId, inputId);
+    if (claim.kind === 'consumed') {
+      await active.deliverInput(sessionId, inputId, { consumed: true });
+      claims.delete(key);
+      return;
+    }
+    const { agentId } = claim;
+    // No way to read this surface's outcomes: bind the reply, acknowledge in
+    // one step, and do not pretend an answer is coming.
+    if (!options.readAgentOutcome) {
+      await active.deliverInput(sessionId, inputId, { consumed: true, agentId });
+      claims.delete(key);
+      return;
+    }
+    await active.deliverInput(sessionId, inputId, { agentId });
+    claims.delete(key);
+  };
 
   const trackAnswer = (agentId: string, entry: AwaitedAnswer): void => {
     awaitingAnswers.set(agentId, entry);
@@ -191,7 +295,37 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     const bound = runner; const selectedGeneration = generation;
     const current = () => client === active && runner === bound && generation === selectedGeneration;
     if (!bound) return;
-    const { inputs } = await active.listInputs(sessionId, { state: 'queued', limit: 500 });
+    const { inputs: queued } = await active.listInputs(sessionId, { state: 'queued', limit: 500 });
+    let inputs = queued;
+    // Claims are pruned only against a complete view: when the delivered list
+    // failed, a claimed input missing from `inputs` is not evidence it was acknowledged.
+    let sawDelivered = !active.claimInput;
+    if (active.claimInput) {
+      // A claimed input waits for its agent as `delivered`. Ours are retried;
+      // another process's are taken over only once its lease has run out.
+      try {
+        const { inputs: delivered } = await active.listInputs(sessionId, { state: 'delivered', limit: 500 });
+        inputs = [...queued, ...delivered.filter((input) => {
+          if (input.activeAgentId) return false;
+          const key = claimKey(sessionId, input.id);
+          return claims.has(key) || claimedUnstarted.has(key) || now() - input.updatedAt >= CLAIM_LEASE_MS;
+        })];
+        sawDelivered = true;
+      } catch (error) {
+        log.debug('[session dispatch] listing claimed inputs failed; only queued inputs this tick', { sessionId, error: summarizeError(error) });
+      }
+    }
+    // An acknowledgement whose reply was lost still reached the daemon: the
+    // input is no longer waiting for an agent, so its claim has nothing left to protect.
+    const stillWaiting = new Set(inputs.map((input) => claimKey(sessionId, input.id)));
+    if (sawDelivered) {
+      for (const key of [...claims.keys()]) {
+        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claims.delete(key);
+      }
+      for (const key of [...claimedUnstarted]) {
+        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claimedUnstarted.delete(key);
+      }
+    }
     // The broker retains at most 500 inputs. Read the whole bounded queue so
     // a held tail never starves older eligible inputs.
     for (const input of inputs) {
@@ -202,45 +336,73 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // poller, which injects them into the turn already in flight rather than
       // starting a new run.
       if (input.intent !== 'submit') continue;
-      let agentId: string | undefined;
+      const key = claimKey(sessionId, input.id);
+      const earlier = claims.get(key);
+      if (earlier) {
+        // One input the daemon keeps rejecting must not hold up the ones behind it.
+        try {
+          await acknowledge(active, sessionId, input.id, earlier);
+        } catch (error) {
+          log.debug('[session dispatch] re-acknowledging an input failed; retrying next tick', { sessionId, inputId: input.id, error: summarizeError(error) });
+        }
+        continue;
+      }
+      // The daemon grants a claim to one caller. Refused: another surface holds
+      // this input and will answer it. Failed to reach the daemon: it stays
+      // queued and the next tick tries again, so nothing is lost either way.
+      if (active.claimInput && !claimedUnstarted.has(key)) {
+        try {
+          await active.claimInput(sessionId, input.id);
+        } catch (error) {
+          if (isInputClaimRefusal(error)) log.debug('[session dispatch] another surface holds this input', { sessionId, inputId: input.id });
+          else log.debug('[session dispatch] claiming an input failed; retrying next tick', { sessionId, inputId: input.id, error: summarizeError(error) });
+          continue;
+        }
+        rememberUnstarted(key);
+      }
+      if (!current()) return;
+      let claim: DispatchClaim;
       try {
         const spawned = await bound({ sessionId, task: input.body, input });
-        if (!current()) return;
         // Explicit native outcomes never use null as an ambiguous acknowledgment.
         if (spawned?.disposition === 'held' || spawned?.disposition === 'unknown') continue;
         if (spawned?.disposition === 'transferred') {
           if (!spawned.requestId.trim()) continue;
-          await active.deliverInput(sessionId, input.id, { consumed: true });
-          continue;
+          claim = { kind: 'consumed' };
+        } else {
+          const agentId = spawned?.agentId?.trim();
+          if (spawned?.disposition === 'started' && !agentId) continue;
+          // No agent id means nothing ran HERE, the runner declined, or the work
+          // moved elsewhere (a conversation handed to daemon hosting). The input
+          // is still consumed, because leaving it queued would have it
+          // dispatched again; there is nothing to bind a reply to, and claiming
+          // otherwise would bind one to an agent that does not exist.
+          claim = agentId ? { kind: 'agent', agentId } : { kind: 'consumed' };
         }
-        const claimed = spawned?.agentId?.trim();
-        if (spawned?.disposition === 'started' && !claimed) continue;
-        if (claimed) agentId = claimed;
       } catch (error) {
         log.warn('[session dispatch] the bound runner rejected a continuation', {
           sessionId,
           inputId: input.id,
           error: summarizeError(error),
         });
-        continue; // leave it queued; a transient runner failure must not consume the work
+        continue; // a transient runner failure must not consume the work; this process retries it
       }
-      // No agent id means nothing ran HERE, the runner declined, or the work
-      // moved elsewhere (a conversation handed to daemon hosting). The input is
-      // still consumed, because leaving it queued would have it dispatched
-      // again; there is nothing to bind a reply to, and claiming otherwise
-      // would bind one to an agent that does not exist.
-      if (!agentId) {
-        await active.deliverInput(sessionId, input.id, { consumed: true });
-        continue;
+      // Recorded before anything else can fail or detach, so a later tick only
+      // re-acknowledges this input instead of starting it a second time.
+      recordClaim(key, claim);
+      claimedUnstarted.delete(key);
+      // The answer is watched from the moment the agent exists, not from the
+      // moment the daemon acknowledges it: an acknowledgement whose reply was
+      // lost must not leave the sender without an answer.
+      if (claim.kind === 'agent' && options.readAgentOutcome && !awaitingAnswers.has(claim.agentId)) {
+        trackAnswer(claim.agentId, { sessionId, inputId: input.id, startedAt: now(), deliveryFailures: 0 });
       }
-      // No way to read this surface's outcomes: bind the reply, acknowledge in
-      // one step, and do not pretend an answer is coming.
-      if (!options.readAgentOutcome) {
-        await active.deliverInput(sessionId, input.id, { consumed: true, agentId });
-        continue;
+      if (!current()) return;
+      try {
+        await acknowledge(active, sessionId, input.id, claim);
+      } catch (error) {
+        log.debug('[session dispatch] acknowledging a dispatched input failed; retrying next tick', { sessionId, inputId: input.id, error: summarizeError(error) });
       }
-      await active.deliverInput(sessionId, input.id, { agentId });
-      trackAnswer(agentId, { sessionId, inputId: input.id, startedAt: now() });
     }
   };
 
@@ -249,6 +411,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     if (!readOutcome || awaitingAnswers.size === 0) return;
     for (const [agentId, awaited] of [...awaitingAnswers]) {
       const outcome = readOutcome(agentId);
+      let report: Parameters<SessionInputsWireClient['deliverInput']>[2];
       if (outcome && (outcome.status === 'pending' || outcome.status === 'running')) {
         if (now() - awaited.startedAt < AWAITED_ANSWER_MAX_AGE_MS) continue;
         log.warn('[session dispatch] a dispatched run has not finished within the answer watch window; acknowledging without an answer', {
@@ -256,29 +419,49 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
           agentId,
           ageMs: now() - awaited.startedAt,
         });
-        awaitingAnswers.delete(agentId);
-        await active.deliverInput(awaited.sessionId, awaited.inputId, { consumed: true, agentId });
-        continue;
-      }
-      // A run this surface no longer knows about. It cannot be waited on, and
-      // the daemon must not keep the input open on its account.
-      if (!outcome) {
+        report = { consumed: true, agentId };
+      } else if (!outcome) {
+        // A run this surface no longer knows about. It cannot be waited on, and
+        // the daemon must not keep the input open on its account.
         log.warn('[session dispatch] a dispatched run left this surface\'s register before it reported an answer', {
           sessionId: awaited.sessionId,
           agentId,
         });
-        awaitingAnswers.delete(agentId);
-        await active.deliverInput(awaited.sessionId, awaited.inputId, { consumed: true, agentId });
-        continue;
+        report = { consumed: true, agentId };
+      } else {
+        report = {
+          consumed: true,
+          agentId,
+          answer: outcome.answer ?? '',
+          // Narrowed above: only a terminal status reaches here.
+          status: outcome.status as 'completed' | 'failed' | 'cancelled',
+        };
       }
-      awaitingAnswers.delete(agentId);
-      await active.deliverInput(awaited.sessionId, awaited.inputId, {
-        consumed: true,
-        agentId,
-        answer: outcome.answer ?? '',
-        // Narrowed above: only a terminal status reaches here.
-        status: outcome.status as 'completed' | 'failed' | 'cancelled',
-      });
+      try {
+        await active.deliverInput(awaited.sessionId, awaited.inputId, report);
+        awaitingAnswers.delete(agentId);
+        claims.delete(claimKey(awaited.sessionId, awaited.inputId));
+      } catch (error) {
+        // Kept on the watch list so a later tick offers the answer again; only
+        // a run that keeps failing is given up on, and that is said.
+        awaited.deliveryFailures += 1;
+        if (awaited.deliveryFailures >= MAX_ANSWER_DELIVERY_ATTEMPTS) {
+          awaitingAnswers.delete(agentId);
+          log.warn('[session dispatch] gave up reporting a dispatched run\'s answer after repeated failures; the sender will not receive it', {
+            sessionId: awaited.sessionId,
+            inputId: awaited.inputId,
+            agentId,
+            attempts: awaited.deliveryFailures,
+            error: summarizeError(error),
+          });
+        } else {
+          log.debug('[session dispatch] reporting an answer failed; retrying next tick', {
+            sessionId: awaited.sessionId,
+            agentId,
+            error: summarizeError(error),
+          });
+        }
+      }
     }
   };
 
@@ -287,8 +470,14 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     if (!active || runner === null || inFlight) return;
     inFlight = true;
     try {
+      // One session's failure (an unknown or unreadable session on the daemon)
+      // must not starve the others, nor the answers already waiting.
       for (const sessionId of options.hostedSessionIds()) {
-        await drainSession(active, sessionId);
+        try {
+          await drainSession(active, sessionId);
+        } catch (error) {
+          log.debug('[session dispatch] poll failed for one session; retrying next tick', { sessionId, error: summarizeError(error) });
+        }
       }
       await reportAnswers(active);
     } catch (error) {
@@ -318,10 +507,10 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       ++generation; client = null;
       log.info(`[session dispatch] detached: ${reason}`);
     },
+    pollNow: tick,
     stop() {
       if (timer !== null) { clearInterval(timer); timer = null; }
       ++generation; client = null;
-      awaitingAnswers.clear();
     },
   };
 }

@@ -137,10 +137,9 @@ describe('DaemonBuildFloor', () => {
     expect(check.noticeFor(verdict)).toContain('did not report a version');
   });
 
-  test('the shipped floor is the daemon release this terminal became a client of', () => {
-    expect(TUI_DAEMON_BUILD_FLOOR).toBe('1.28.0');
+  test('the shipped floor refuses a daemon that lacks the hosted-session verbs', () => {
     const check = new DaemonBuildFloor();
-    expect(check.evaluate({ version: '1.28.0' }, 'd').status).toBe('ok');
-    expect(check.evaluate({ version: '1.27.9' }, 'd').status).toBe('daemon-update-required');
+    expect(check.evaluate({ version: TUI_DAEMON_BUILD_FLOOR }, 'd').status).toBe('ok');
+    expect(check.evaluate({ version: '3.1.1' }, 'd').status).toBe('daemon-update-required');
   });
 });

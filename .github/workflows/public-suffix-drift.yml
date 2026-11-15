@@ -30,9 +30,9 @@ name: Public Suffix Drift
 # while this is red; a specific class of multi-label domain is being compared
 # less precisely than it should be.
 #
-# The fix is DATA-ONLY: edit the tables in
-# packages/engine/platform/src/platform/security/public-suffix.ts. No code change, and the
-# module header carries the refresh procedure. The job's own output names each
+# The fix is DATA-ONLY: regenerate the tables with
+# `bun packages/engine/scripts/generate-public-suffix-data.ts` (never edit the generated
+# file by hand). No code change, and the module header carries the refresh procedure. The job's own output names each
 # suffix and says whether it is the security-relevant direction (upstream has
 # it, we do not, so two registrants compare equal) or the correctness one (we
 # carry it, upstream dropped it, so a legitimate link may be refused).

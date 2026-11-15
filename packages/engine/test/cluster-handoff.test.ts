@@ -416,8 +416,15 @@ describe('cluster handoff: the provider-conflict backstop', () => {
 
     standby.election.reportConsumerConflict('terminated by other getUpdates request');
     await advance(world, 2_000);
+    // The standby never ran a consumer, so a stop count of 0 proves little on
+    // its own: it must also still be standing by, with no consumer started
+    // and no claim made, while the holder carries on.
+    expect(roleOf(standby, SURFACE)).toBe('standby');
+    expect(surfaceState(standby, SURFACE).startCount).toBe(0);
     expect(surfaceState(standby, SURFACE).stopCount).toBe(0);
+    expect(roleOf(holder, SURFACE)).toBe('master');
     expect(surfaceState(holder, SURFACE).running).toBe(true);
+    expect(surfaceState(holder, SURFACE).stopCount).toBe(0);
   });
 });
 
@@ -667,7 +674,7 @@ describe('cluster coordinator: the wiring contract', () => {
 });
 
 describe('cluster settings', () => {
-  test('a node with coordination off starts every consumer and opens no socket', async () => {
+  test('coordination is off unless the operator switches it on', () => {
     // The default. It must behave EXACTLY as the product did before the
     // election existed: consume unconditionally, announce nothing, and never
     // be discoverable by anyone else on the network.

@@ -13,17 +13,29 @@ import { parseCurrencyCode } from '../platform/src/platform/payments/types.js';
 import { CheckoutSubmitRefused } from '../platform/src/platform/payments/checkout-page.js';
 
 type Page = Parameters<typeof resolveRef>[0];
+const DIFFERENT_ELEMENT = /now points at a different element, or its identity could not be established/;
+const SNAPSHOT_STALE = /selected browser snapshot is no longer current/;
+const CHANGED_AFTER_READING = /selected control changed after its identity reading/;
 const expectedPages = new Set<string>();
+// The port only records what it was asked: an assertion thrown here would
+// travel through the code under test and turn into a refusal.
+const pageReadings: { name: string; question: unknown; state: string }[] = [];
 const pageAnswers = fakePort((name, question, state) => {
-  expect(name).toBe('credentialPage'); expect<unknown>(question).toEqual(browserCredentialPage.items.credentialPage.question);
-  expect(expectedPages.has(JSON.stringify(state))).toBe(true); return noulAnswer(0.01);
+  pageReadings.push({ name, question, state: JSON.stringify(state) }); return noulAnswer(0.01);
 });
 const pagePort = (port: JudgmentPort): JudgmentPort => ({ ...port, ask: request =>
   request.context?.battery === browserCredentialPage.name ? pageAnswers.port.ask(request) : port.ask(request) });
 const pendingReads: (() => Promise<void>)[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
-beforeEach(() => { expectedPages.clear(); previous = installJudgmentPort(undefined); });
-afterEach(async () => { try { await Promise.all(pendingReads.splice(0).map(drain => drain())); } finally { installJudgmentPort(previous); } });
+beforeEach(() => { expectedPages.clear(); pageReadings.length = 0; previous = installJudgmentPort(undefined); });
+afterEach(async () => {
+  try { await Promise.all(pendingReads.splice(0).map(drain => drain())); } finally { installJudgmentPort(previous); }
+  // Every page projection handed to the credential-page reading is one the fixture's live page produced.
+  for (const reading of pageReadings) {
+    expect(reading.name).toBe('credentialPage'); expect<unknown>(reading.question).toEqual(browserCredentialPage.items.credentialPage.question);
+    expect(expectedPages.has(reading.state)).toBe(true);
+  }
+});
 function reading(probability = 0.99) {
   const fixture = fakePort(() => noulAnswer(probability)), port = pagePort(fixture.port); installJudgmentPort(port); return { ...fixture, port };
 }
@@ -111,11 +123,11 @@ describe('browser control identity', () => {
   });
   test.each(['', 'Delete account', 'Send'])('changed or missing labels have no lexical fallback: %s', async name => {
     const f = fixture('Delete'); f.setName(name); const model = reading(0.01);
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(); expect(model.requests).toHaveLength(1);
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT); expect(model.requests).toHaveLength(1);
   });
   test('empty/empty is not mechanically approved', async () => {
     const f = fixture(''); const model = reading(0.01);
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(); expect(model.requests).toHaveLength(1);
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT); expect(model.requests).toHaveLength(1);
   });
   test('a settled same-control paraphrase is grounded in both descriptors', async () => {
     const f = fixture(); f.setName('Submit message'); const model = reading();
@@ -124,54 +136,55 @@ describe('browser control identity', () => {
   });
   test.each([0.01, 0.5])('no and uncertainty refuse: %s', async probability => {
     const f = fixture(); f.setName('Submit message'); reading(probability);
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow();
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT);
   });
   test('incomplete live descriptors never use the exact-name shortcut or judgment', async () => {
     const f = fixture(); f.malform(); const model = reading();
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(); expect(model.requests).toHaveLength(0);
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(/incomplete or malformed/); expect(model.requests).toHaveLength(0);
   });
   test('unavailable and malformed answers cannot approve', async () => {
     for (const answer of [null, { type: 'noul', probability: NaN }, { type: 'choice', choice: 'yes' }]) {
       const f = fixture(); f.setName('Submit message'); const model = fakePort(() => answer); installJudgmentPort(model.port);
-      await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow();
+      await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT);
     }
     installJudgmentPort(undefined); const f = fixture(); f.setName('Submit message');
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow();
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT);
   });
   test('complete identity metadata is admitted before any model call, without entered values', async () => {
     const f = fixture(); f.setName('Submit message Authorization: Bearer private-test-token'); const model = reading();
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(); expect(model.requests).toHaveLength(0);
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT); expect(model.requests).toHaveLength(0);
     const clean = fixture(); clean.setName('Submit message');
     const snapshot = { ...clean.snapshot, elements: clean.snapshot.elements.map(e => ({ ...e, value: 'private entered value' })) };
     await resolveRef(clean.page, snapshot, 'e1'); expect(JSON.stringify(model.requests)).not.toContain('private entered value');
   });
   test('navigation during the initial count is refused', async () => {
     const f = fixture(); f.onCount(f.navigate);
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow();
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(SNAPSHOT_STALE);
   });
   test('navigation or changed descriptors while a reading waits cannot be adopted', async () => {
+    const refusals = { navigate: SNAPSHOT_STALE, name: CHANGED_AFTER_READING } as const;
     for (const mutate of ['navigate', 'name'] as const) {
       const f = fixture(); f.setName('Submit message'); const model = deferred();
       const result = resolveRef(f.page, f.snapshot, 'e1'); await model.started;
       if (mutate === 'navigate') f.navigate(); else f.setName('Delete account');
-      model.release(); await expect(result).rejects.toThrow();
+      model.release(); await expect(result).rejects.toThrow(refusals[mutate]);
     }
   });
   test('revalidation refuses submit-semantics changes even with an unchanged name', async () => {
     const f = fixture(); const ref = await resolveRef(f.page, f.snapshot, 'e1'); f.setSubmit();
-    await expect(ref.revalidate()).rejects.toThrow();
+    await expect(ref.revalidate()).rejects.toThrow(CHANGED_AFTER_READING);
   });
   test('structural tag changes and mutated recorded selectors cannot be approved', async () => {
     const f = fixture(); f.setTag('a'); const model = reading();
-    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(); expect(model.requests).toHaveLength(0);
+    await expect(resolveRef(f.page, f.snapshot, 'e1')).rejects.toThrow(DIFFERENT_ELEMENT); expect(model.requests).toHaveLength(0);
     const other = fixture(); other.setName('Submit message'); const pending = deferred();
     const result = resolveRef(other.page, other.snapshot, 'e1'); await pending.started;
     Object.assign(other.snapshot.elements[0]!, { selector: '#delete-account' }); pending.release();
-    await expect(result).rejects.toThrow();
+    await expect(result).rejects.toThrow(SNAPSHOT_STALE);
   });
   test('a late port installation is not adopted', async () => {
     const f = fixture(); f.setName('Submit message'); const work = new BrowserControlIdentityWork(); const model = reading();
-    await expect(resolveRef(f.page, f.snapshot, 'e1', work)).rejects.toThrow(); expect(model.requests).toHaveLength(0);
+    await expect(resolveRef(f.page, f.snapshot, 'e1', work)).rejects.toThrow(DIFFERENT_ELEMENT); expect(model.requests).toHaveLength(0);
   });
 });
 
@@ -202,7 +215,7 @@ describe('BrowserEngine identity effect boundaries', () => {
   test('only successful page closure retires the page material', async () => {
     const f = fixture(); f.arm();
     Object.assign(f.page, { close: async () => { throw new Error('Close did not reach the browser'); } });
-    await expect(f.engine.closeTab({}, { pageId: 'p1' })).rejects.toThrow();
+    await expect(f.engine.closeTab({}, { pageId: 'p1' })).rejects.toThrow('Close did not reach the browser');
     expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(true);
     Object.assign(f.page, { close: async () => { f.effects.push('close'); } });
     await f.engine.closeTab({}, { pageId: 'p1' });
@@ -211,7 +224,7 @@ describe('BrowserEngine identity effect boundaries', () => {
   test.each(Object.keys(actions).filter(action => action !== 'secret') as (keyof typeof actions)[])('snapshot replacement blocks %s before its effect', async action => {
     const f = fixture(); await f.engine.snapshot({}); f.setName('Submit message'); const model = deferred();
     const result = actions[action](f.engine); await model.started; await f.engine.snapshot({}); model.release();
-    await expect(result).rejects.toThrow();
+    await expect(result).rejects.toThrow(SNAPSHOT_STALE);
     expect(f.effects).toEqual([]); expect(JSON.stringify(model.requests)).not.toContain('private-secret-fixture');
   });
   test.each(Object.keys(actions) as (keyof typeof actions)[])('exact identity reaches the %s consumer without an identity reading', async action => {
@@ -224,18 +237,18 @@ describe('BrowserEngine identity effect boundaries', () => {
     const f = fixture(); await f.engine.snapshot({}); const model = reading(); let active = true;
     bindJudgmentPortAuthority(model.port, () => ({ identity: {}, assertCurrent: () => { if (!active) throw new Error('retired'); } }));
     f.onApproval(async () => { active = false; });
-    await expect(f.engine.press({}, { ref: 'e1', key: 'Enter' })).rejects.toThrow(); expect(f.effects).toEqual([]);
+    await expect(f.engine.press({}, { ref: 'e1', key: 'Enter' })).rejects.toThrow(/judgment reading owner is no longer current/); expect(f.effects).toEqual([]);
   });
   test('secret batches require an armed guard and never semantically retarget', async () => {
     const f = fixture(); await f.engine.snapshot({}); const model = reading();
-    await expect(actions.secret(f.engine)).rejects.toThrow(); expect(f.effects).toEqual([]);
+    await expect(actions.secret(f.engine)).rejects.toThrow(/no active card-material redaction/); expect(f.effects).toEqual([]);
     f.arm(); f.setName('Submit private-secret-fixture');
     expect(await actions.secret(f.engine)).toMatchObject({ filled: [], failedRef: 'e1' });
     expect(model.requests).toHaveLength(0); expect(f.effects).toEqual([]);
   });
   test('changed labels cannot send copied live payment material to judgment', async () => {
     const f = fixture(); await f.engine.snapshot({}); f.arm(); f.setName('Submit private-cvv-fixture'); const model = reading();
-    await expect(f.engine.click({}, { ref: 'e1' })).rejects.toThrow(); expect(model.requests).toHaveLength(0); expect(f.effects).toEqual([]);
+    await expect(f.engine.click({}, { ref: 'e1' })).rejects.toThrow(/contains live payment material/); expect(model.requests).toHaveLength(0); expect(f.effects).toEqual([]);
     const exact = fixture(); await exact.engine.snapshot({}); exact.arm(); reading();
     await exact.engine.type({}, { ref: 'e1', text: 'authorized local value' }); expect(exact.effects).toEqual(['fill']);
   });
@@ -295,7 +308,7 @@ describe('BrowserEngine identity effect boundaries', () => {
   });
   test('changed DOM after outward approval never submits', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading(); f.onApproval(async () => { f.setName('Delete account'); });
-    await expect(f.engine.press({}, { ref: 'e1', key: 'Enter' })).rejects.toThrow(); expect(f.effects).toEqual([]);
+    await expect(f.engine.press({}, { ref: 'e1', key: 'Enter' })).rejects.toThrow(CHANGED_AFTER_READING); expect(f.effects).toEqual([]);
   });
   test.each(['caller', 'source', 'installation', 'configuration'] as const)('%s cancellation has no late effects', async kind => {
     const f = fixture(); await f.engine.snapshot({}); f.setName('Submit message'); const model = deferred();

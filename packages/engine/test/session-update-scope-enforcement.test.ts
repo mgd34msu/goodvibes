@@ -17,23 +17,31 @@ function makeGateway(): ControlPlaneGateway {
   return new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus(), featureFlags: createFeatureFlagManager() });
 }
 
-/** Read from an SSE stream until `event: session-update` is seen or a short budget elapses. */
+const SENTINEL_EVENT = 'scope-test-sentinel';
+
+/**
+ * Read from an SSE stream until the sentinel frame arrives, then report whether a
+ * `session-update` frame came before it. The sentinel is an untagged event every client
+ * receives and the caller publishes it AFTER the event under test, so frames arrive in
+ * publish order and a session-update that was going to be delivered is already in the
+ * buffer. No wall-clock budget decides the verdict; the timer only bounds a hang.
+ */
 async function sawSessionUpdate(res: Response): Promise<boolean> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const deadline = Date.now() + 200;
+  let ceiling: ReturnType<typeof setTimeout> | undefined;
+  const hung = new Promise<never>((_, reject) => {
+    ceiling = setTimeout(() => reject(new Error('sentinel frame never arrived on the stream')), 10_000);
+  });
   try {
-    while (Date.now() < deadline) {
-      const chunk = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((r) => setTimeout(() => r({ done: true, value: undefined }), 40)),
-      ]);
-      if (chunk.value) buffer += decoder.decode(chunk.value, { stream: true });
-      if (buffer.includes('event: session-update')) return true;
-      if (chunk.done && !chunk.value) break;
+    while (!buffer.includes(`event: ${SENTINEL_EVENT}`)) {
+      const chunk = await Promise.race([reader.read(), hung]);
+      if (chunk.done) throw new Error('stream ended before the sentinel frame');
+      buffer += decoder.decode(chunk.value, { stream: true });
     }
   } finally {
+    clearTimeout(ceiling);
     await reader.cancel().catch(() => {});
   }
   return buffer.includes('event: session-update');
@@ -54,6 +62,7 @@ describe('session-update honors the declared read:sessions scope', () => {
   test('SSE replay uses the same authorization as live delivery', async () => {
     const gateway = makeGateway();
     gateway.publishEvent('session-update', { event: 'session-created' });
+    gateway.publishEvent(SENTINEL_EVENT, {});
     expect(await sawSessionUpdate(openWebStream(gateway, { scopes: ['read:events'] }))).toBe(false);
     expect(await sawSessionUpdate(openWebStream(gateway, { scopes: ['read:sessions'] }))).toBe(true);
   });
@@ -74,6 +83,7 @@ describe('session-update honors the declared read:sessions scope', () => {
     const gateway = makeGateway();
     const res = openWebStream(gateway, { scopes: ['read:events'] });
     gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
+    gateway.publishEvent(SENTINEL_EVENT, {});
     expect(await sawSessionUpdate(res)).toBe(false);
   });
 
@@ -81,6 +91,7 @@ describe('session-update honors the declared read:sessions scope', () => {
     const gateway = makeGateway();
     const res = openWebStream(gateway, { scopes: ['read:sessions'] });
     gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
+    gateway.publishEvent(SENTINEL_EVENT, {});
     expect(await sawSessionUpdate(res)).toBe(true);
   });
 
@@ -88,6 +99,7 @@ describe('session-update honors the declared read:sessions scope', () => {
     const gateway = makeGateway();
     const res = openWebStream(gateway, { scopes: ['read:events'], admin: true });
     gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
+    gateway.publishEvent(SENTINEL_EVENT, {});
     expect(await sawSessionUpdate(res)).toBe(true);
   });
 
@@ -95,6 +107,7 @@ describe('session-update honors the declared read:sessions scope', () => {
     const gateway = makeGateway();
     const res = gateway.createEventStream(new Request('http://localhost/stream'), { clientKind: 'web' });
     gateway.publishEvent('session-update', { event: 'session-created', payload: {}, createdAt: Date.now() });
+    gateway.publishEvent(SENTINEL_EVENT, {});
     expect(await sawSessionUpdate(res)).toBe(true);
   });
 });

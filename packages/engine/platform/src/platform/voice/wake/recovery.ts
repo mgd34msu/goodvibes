@@ -7,8 +7,9 @@
  *
  *  1. REAP ON RECOVERY. Partial `.part` files from an interrupted download,
  *     artifacts of model versions the manifest no longer lists, and retained
- *     audio belonging to sessions that no longer exist are removed at recovery
- *     time instead of accumulating.
+ *     audio belonging to sessions that no longer exist (when the host supplies
+ *     the live session ids; without them only the age and count caps apply) are
+ *     removed at recovery time instead of accumulating.
  *  2. BOUND EVERYTHING. Retained audio carries both a count cap and an age TTL.
  *     An unbounded "it's only debug audio" directory is a leak with a nicer name.
  *  3. VALIDATE BY CONTENT. A model file that exists may be torn, truncated, or
@@ -86,8 +87,12 @@ export interface WakeRecoveryOptions {
   readonly managedRoot: string;
   /** Model version whose artifacts are current. Defaults to the manifest default. */
   readonly version?: string | undefined;
-  /** Session ids still alive; retained audio for any other session is orphaned. */
-  readonly liveSessionIds?: readonly string[] | undefined;
+  /**
+   * Session ids still alive; retained audio for any other session is orphaned.
+   * A function is read at each sweep, so a long-lived sweeper sees sessions
+   * started after it began. Without it no clip is judged orphaned.
+   */
+  readonly liveSessionIds?: readonly string[] | (() => readonly string[]) | undefined;
   readonly retainedMaxFiles?: number | undefined;
   readonly retainedMaxAgeHours?: number | undefined;
   /** Injected clock, so TTL behaviour is deterministic under test. */
@@ -234,6 +239,11 @@ function sweepPinnedArtifacts(
   }
 }
 
+/** The session segment of a clip name; the sweeper compares live ids in this form. */
+function sanitizeSessionSegment(sessionId: string): string {
+  return sessionId.replace(/[^A-Za-z0-9_.-]/g, '_').replace(/-{2,}/g, '-');
+}
+
 /**
  * The filename a retained clip MUST be written under, so the sweeper can tell
  * whose it is.
@@ -246,7 +256,7 @@ function sweepPinnedArtifacts(
 export function retainedClipFileName(sessionId: string, at: number, extension = 'wav'): string {
   // Colons and slashes are not portable in filenames, and the session id is the
   // one segment the sweeper parses, so a `--` inside it would split wrong.
-  const safeSession = sessionId.replace(/[^A-Za-z0-9_.-]/g, '_').replace(/-{2,}/g, '-');
+  const safeSession = sanitizeSessionSegment(sessionId);
   const stamp = new Date(at).toISOString().replace(/[:.]/g, '-');
   return `${safeSession}--${stamp}.${extension}`;
 }
@@ -266,7 +276,7 @@ function sweepRetained(
   if (files.length === 0) return;
   const maxAgeMs = (options.retainedMaxAgeHours ?? WAKE_RETAINED_MAX_AGE_HOURS) * 3600_000;
   const maxFiles = options.retainedMaxFiles ?? WAKE_RETAINED_MAX_FILES;
-  const live = options.liveSessionIds === undefined ? null : new Set(options.liveSessionIds);
+  const live = readLiveSessionSegments(options.liveSessionIds);
   const survivors: typeof files = [];
   for (const entry of files) {
     if (live !== null) {
@@ -286,6 +296,22 @@ function sweepRetained(
   survivors.sort((a, b) => a.mtimeMs - b.mtimeMs);
   for (const entry of survivors.slice(0, survivors.length - maxFiles)) {
     remove(entry.path, 'retained-over-cap');
+  }
+}
+
+/**
+ * The live sessions in the form clip names carry, or null when none were
+ * supplied or they could not be read: an unreadable list must not make every
+ * clip an orphan.
+ */
+function readLiveSessionSegments(source: WakeRecoveryOptions['liveSessionIds']): Set<string> | null {
+  if (source === undefined) return null;
+  try {
+    const ids = typeof source === 'function' ? source() : source;
+    return new Set(ids.map(sanitizeSessionSegment));
+  } catch (error) {
+    logger.warn('wake sweep could not read the live sessions; no retained clip was judged orphaned', { error: summarizeError(error) });
+    return null;
   }
 }
 

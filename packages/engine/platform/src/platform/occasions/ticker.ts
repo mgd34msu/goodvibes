@@ -67,6 +67,9 @@ const NODE_SCHEDULER: TickerScheduler = {
   clearTimeout: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); },
 };
 
+/** Used when the interval setting cannot be read or is not a number. */
+const DEFAULT_INTERVAL_MS = 60 * 60_000;
+
 export function startOccasionSweepTicker(options: SweepTickerOptions): SweepTicker {
   const scheduler = options.scheduler ?? NODE_SCHEDULER;
   let handle: unknown = null;
@@ -75,10 +78,17 @@ export function startOccasionSweepTicker(options: SweepTickerOptions): SweepTick
 
   const arm = (): void => {
     if (stopped) return;
+    let delay = DEFAULT_INTERVAL_MS;
+    try {
+      delay = options.intervalMs();
+    } catch (error) {
+      // A setting that cannot be read this time must not end the loop for good.
+      options.onError?.(error);
+    }
     handle = scheduler.setTimeout(() => {
       handle = null;
       void tick();
-    }, Math.max(1, Math.round(options.intervalMs())));
+    }, Number.isFinite(delay) ? Math.max(1, Math.round(delay)) : DEFAULT_INTERVAL_MS);
   };
 
   const tick = async (): Promise<void> => {

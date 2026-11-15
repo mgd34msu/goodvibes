@@ -113,9 +113,10 @@ export function endToolSpan(span: Span, ctx: ToolSpanEndContext): void {
 
   span.addEvent(`tool.${ctx.outcome}`);
 
-  if (ctx.outcome === 'failed' && ctx.error) {
-    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error });
-    span.setAttribute('tool.error', ctx.error);
+  if (ctx.outcome === 'failed') {
+    // A failure without a message is still a failure: it must not export as OK.
+    span.setStatus({ code: SpanStatusCode.ERROR, message: ctx.error || 'failed' });
+    if (ctx.error) span.setAttribute('tool.error', ctx.error);
   } else if (ctx.outcome === 'cancelled') {
     span.setStatus({ code: SpanStatusCode.OK });
     if (ctx.cancelReason) {

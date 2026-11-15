@@ -42,8 +42,9 @@ function job(name: string, conclusion: string | null, status: CiJob['status'] = 
 }
 
 async function settle(): Promise<void> {
-  // Let the fire-and-forget mint path settle.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The fire-and-forget mint path is in-memory async work only (injected
+  // resolvers, an in-memory store), so draining microtasks runs it to the end.
+  for (let turn = 0; turn < 500; turn += 1) await Promise.resolve();
 }
 
 describe('push detection', () => {
@@ -78,12 +79,12 @@ describe('push detection', () => {
 });
 
 describe('the full self-minting lifecycle', () => {
-  test('platform push -> watch exists -> red -> fix-this offer -> verdict delivered -> watch gone', async () => {
+  test('platform push -> watch exists -> red -> verdict delivered -> watch gone', async () => {
     const store = memoryStore();
     // The CI source starts red (the push broke CI).
     let jobs: CiJob[] = [job('build', 'failure'), job('lint', 'success')];
     const notifications: Array<{ channel: string; title: string }> = [];
-    const offers: FixSessionBrief[] = [];
+    const started: FixSessionBrief[] = [];
 
     const service = new CiWatchService({
       source: { fetchJobs: async () => jobs },
@@ -92,11 +93,7 @@ describe('the full self-minting lifecycle', () => {
         notifications.push({ channel, title });
         return `note-${notifications.length}`;
       },
-      fixSessionStarter: async () => ({ sessionId: 'fix-sess-1' }),
-      fixSessionOffer: async (brief) => {
-        offers.push(brief);
-        return { accepted: false, offerCallId: 'offer-1' }; // human declines; machinery proved
-      },
+      fixSessionStarter: async (brief) => { started.push(brief); return { sessionId: 'fix-sess-1' }; },
     });
 
     const minter = new CiWatchAutoMinter({
@@ -123,11 +120,10 @@ describe('the full self-minting lifecycle', () => {
     expect(pollSummary).toContain('checked 1/1');
     await settle();
 
-    // 3. Red verdict: notified AND the "fix this?" offer arrived.
+    // 3. Red verdict: notified, and no fix session starts for a watch that did not opt in.
     expect(notifications.length).toBe(1);
     expect(notifications[0]!.title).toContain('CI failed');
-    expect(offers.length).toBe(1);
-    expect(offers[0]!.failingJobs).toEqual(['build']);
+    expect(started.length).toBe(0);
 
     // 4. The terminal verdict was delivered, the watch retired itself.
     expect((await service.listWatches()).length).toBe(0);
@@ -208,5 +204,36 @@ describe('the full self-minting lifecycle', () => {
     minter.onToolExecuted('exec', { commands: [{ cmd: 'git push' }] }, true);
     await settle();
     expect((await service.listWatches()).length).toBe(2);
+  });
+
+  test('a push while the previous verdict is being delivered is watched, not deduped against the retiring watch', async () => {
+    const store = memoryStore();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const service = new CiWatchService({
+      source: { fetchJobs: async () => [job('build', 'success')] },
+      store,
+      notifier: async () => { await gate; return 'note-1'; },
+    });
+    const minter = new CiWatchAutoMinter({
+      service,
+      workingDirectory: '/w',
+      resolveRepoSlug: async () => 'owner/repo',
+      resolveCurrentBranch: async () => 'main',
+    });
+    const first = await service.createWatch({ repo: 'owner/repo', ref: 'main', deliveryChannel: 'ntfy' });
+
+    const check = service.checkWatch(first.id);
+    await settle();
+    // The notifier is still pending: the old commit's verdict is terminal and the watch is on its way out.
+    minter.onToolExecuted('exec', { commands: [{ cmd: 'git push origin main' }] }, true);
+    await settle();
+    release();
+    expect(await check).toMatchObject({ retired: true });
+    await settle();
+
+    const remaining = await service.listWatches();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0]!.id).not.toBe(first.id);
   });
 });

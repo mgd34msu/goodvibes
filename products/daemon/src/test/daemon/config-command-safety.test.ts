@@ -105,6 +105,12 @@ for (const json of [false, true]) {
     expect(rejected.exitCode).toBe(1);
     expect(rejected.lines.join('\n')).toContain('Allowed:');
     expect(rejected.lines.join('\n')).not.toContain('owned-fixture-invalid-enum');
+    // The real manager, not a stand-in, refuses a non-numeric value for a number key.
+    const numberSetting = CONFIG_SCHEMA.find((setting) => setting.type === 'number' && setting.unit !== 'money');
+    expect(numberSetting).toBeDefined();
+    const badNumber = await runConfigCommand(['set', numberSetting!.key, 'not-a-number'], { configManager: manager, json });
+    expect(badNumber.exitCode).toBe(1);
+    expect(badNumber.lines.join('\n')).not.toContain('not-a-number');
     const moneySetting = CONFIG_SCHEMA.find((setting) => setting.unit === 'money');
     expect(moneySetting).toBeDefined();
     const result = await runConfigCommand(['set', moneySetting!.key, '$1.25'], { configManager: manager, json });

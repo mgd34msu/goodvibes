@@ -12,20 +12,21 @@ name: Reusable GitHub release
 #   published bytes; reruns never replace an existing program. One copy,
 #   parameterized by the asset manifest.
 #
-#   Call it:
+#   Call it from a workflow in THIS repository only. The job checks out the
+#   caller's repository and runs `./.github/actions/bun` and
+#   `.github/scripts/*` from that checkout, so a caller in another repository
+#   fails at the first local action with a not-found error.
 #     jobs:
 #       gh-release:
-#         uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@<commit-sha>
+#         uses: ./.github/workflows/reusable-gh-release.yml
 #         with:
 #           tag: ${{ github.ref_name }}
 #           artifact-name: release-assets
 #           assets-glob: "dist/goodvibes-*"
 #           notes-file: "docs/releases/{version}.md"   # optional prose override
 #
-#   Pin `<commit-sha>` to a full commit SHA, never `@main`; note alongside the
-#   pin which GoodVibes version it corresponds to. Bumping the pin is a
-#   deliberate, reviewed change (its own commit/PR), not an automatic float
-#   onto whatever main has become.
+#   The called copy is the one at the caller's own commit, so a release always
+#   runs the scripts that were reviewed with it.
 #
 #   Inputs:  tag (required), artifact-name (a CI artifact to download into
 #            dist/, optional), assets-glob (files to hash + upload), notes-file
@@ -204,7 +205,7 @@ jobs:
           python3 - <<'PY_RELEASE'
           import json, os, re, subprocess
           tag, repo = os.environ['RELEASE_TAG'], os.environ['GITHUB_REPOSITORY']
-          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag)
+          assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Only stable vN.N.N tags are published'
           result = subprocess.run(['gh', 'api', f'repos/{repo}/releases/tags/{tag}'], capture_output=True, text=True)
           value = json.loads(result.stdout)
           if result.returncode:
@@ -290,8 +291,17 @@ jobs:
           tag_name: ${{ inputs.tag }}
           name: ${{ inputs.tag }}
           body_path: ${{ steps.changelog.outputs.body }}
+          # Created as a draft so `releases/latest` does not name this tag while its payloads and checksum
+          # manifest are still uploading; the next step publishes it once every file is attached.
+          draft: true
           fail_on_unmatched_files: true
           overwrite_files: false
           files: |
             ${{ steps.payloads.outputs.paths }}
             ${{ steps.checksums.outputs.path }}
+      - name: Publish the release once its payloads are attached
+        if: steps.publication.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false

@@ -1,4 +1,6 @@
-import type { LLMProvider } from './interface.js';
+import type { ChatRequest, ChatResponse, LLMProvider } from './interface.js';
+import { getBuiltinProviderEnvVars } from '../config/provider-credential-catalog.js';
+import { ProviderError } from '../types/errors.js';
 import { OpenAIProvider } from './openai.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicProvider } from './anthropic.js';
@@ -34,11 +36,28 @@ function firstEnvValue(envVars: readonly string[]): string | undefined {
   return undefined;
 }
 
-function resolveFoundryBaseUrl(): string {
+/**
+ * Stands in for the Foundry base URL until an endpoint is configured. `.invalid`
+ * is reserved and can never resolve, unlike a real-looking Azure resource name
+ * that anybody could register: nothing sent to it, the API key included, can
+ * reach another party.
+ */
+const FOUNDRY_UNCONFIGURED_BASE_URL = 'https://endpoint-not-configured.invalid/openai/v1';
+
+function resolveFoundryBaseUrl(): string | null {
   const endpoint = firstEnvValue(['AZURE_OPENAI_ENDPOINT', 'AZURE_FOUNDRY_ENDPOINT']);
-  if (!endpoint) return 'https://example.openai.azure.com/openai/v1';
+  if (!endpoint) return null;
   const normalized = normalizeFoundryEndpoint(endpoint);
   return normalized.endsWith('/openai/v1') ? normalized : `${normalized}/openai/v1`;
+}
+
+/** Microsoft Foundry with no endpoint set: it refuses to send, naming the missing setting. */
+class FoundryEndpointNotConfiguredProvider extends OpenAICompatProvider {
+  override async chat(params: ChatRequest): Promise<ChatResponse> {
+    throw new ProviderError(
+      `Provider "microsoft-foundry" has no endpoint configured, the request for model "${params.model ?? 'default'}" was not sent and the API key was not used. Set AZURE_OPENAI_ENDPOINT or AZURE_FOUNDRY_ENDPOINT to your resource endpoint (https://<resource>.openai.azure.com).`,
+    );
+  }
 }
 
 export function createBuiltinCompatProvider(
@@ -72,13 +91,13 @@ export function createBuiltinCompatProvider(
       ...(definition.allowAnonymous ? { allowAnonymous: true } : {}),
       ...(definition.anonymousConfigured ? { anonymousConfigured: true } : {}),
       ...(definition.anonymousDetail ? { anonymousDetail: definition.anonymousDetail } : {}),
-      ...(options.cacheHitTracker ? { cacheHitTracker: options.cacheHitTracker } : {}),
     });
   }
 
-  const baseURL = definition.id === 'microsoft-foundry' ? resolveFoundryBaseUrl() : definition.baseURL;
+  const foundryBaseUrl = definition.id === 'microsoft-foundry' ? resolveFoundryBaseUrl() : undefined;
+  const baseURL = definition.id === 'microsoft-foundry' ? (foundryBaseUrl ?? FOUNDRY_UNCONFIGURED_BASE_URL) : definition.baseURL;
   const effectiveApiKey = apiKey || (definition.allowAnonymous ? 'gv-local' : '');
-  return new OpenAICompatProvider({
+  const compatOptions: ConstructorParameters<typeof OpenAICompatProvider>[0] = {
     name: definition.id,
     baseURL,
     apiKey: effectiveApiKey,
@@ -110,7 +129,10 @@ export function createBuiltinCompatProvider(
     ...(definition.anonymousConfigured ? { anonymousConfigured: true } : {}),
     ...(definition.anonymousDetail ? { anonymousDetail: definition.anonymousDetail } : {}),
     ...(options.cacheHitTracker ? { cacheHitTracker: options.cacheHitTracker } : {}),
-  });
+  };
+  return foundryBaseUrl === null
+    ? new FoundryEndpointNotConfiguredProvider(compatOptions)
+    : new OpenAICompatProvider(compatOptions);
 }
 
 /**
@@ -436,7 +458,7 @@ export function registerBuiltinProviders(
         'utter-project/EuroLLM-22B-Instruct-2512',
       ],
       reasoningFormat: 'none',
-      authEnvVars: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN'],
+      authEnvVars: [...getBuiltinProviderEnvVars('huggingface')],
       serviceNames: ['huggingface'],
     }),
   );
@@ -567,7 +589,7 @@ export function registerBuiltinProviders(
         'writer/palmyra-med-70b-32k',
       ],
       reasoningFormat: 'none',
-      authEnvVars: ['NVIDIA_API_KEY'],
+      authEnvVars: [...getBuiltinProviderEnvVars('nvidia')],
       serviceNames: ['nvidia'],
     }),
   );
@@ -602,9 +624,12 @@ export function registerBuiltinProviders(
     }));
   }
 
-  registry.register(new AmazonBedrockProvider());
-  registry.register(new AmazonBedrockMantleProvider());
-  registry.register(new AnthropicVertexProvider());
+  // The bearer token resolves the way every other provider key does (environment,
+  // then the secrets store) once the credential resolver maps it for these ids;
+  // until then it is empty and the providers read the environment themselves.
+  registry.register(new AmazonBedrockProvider(modelsCachePath('amazon-bedrock'), { bearerToken: apiKey('amazon-bedrock') }));
+  registry.register(new AmazonBedrockMantleProvider(modelsCachePath('amazon-bedrock-mantle'), { bearerToken: apiKey('amazon-bedrock-mantle') }));
+  registry.register(new AnthropicVertexProvider(modelsCachePath('anthropic-vertex')));
   registry.register(new GitHubCopilotProvider({
     tokenCachePath: options.githubCopilotTokenCachePath,
   }));

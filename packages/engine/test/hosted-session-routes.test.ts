@@ -30,6 +30,7 @@ import { EngineErrorCodes } from '../errors/src/index.ts';
 import {
   HostedSessionArgumentError,
   HostedSessionLimitError,
+  HostedSessionClientOwnerError,
   HostedSessionNotFoundError,
   HostedSessionUnavailableError,
 } from '../platform/src/platform/hosted-sessions/manager.ts';
@@ -229,4 +230,21 @@ test('registering the engine leaves the verbs invokable', () => {
     expect(catalog.hasHandler(id), `${id} handler`).toBe(true);
     expect(catalog.get(id)?.invokable, `${id} invokable`).not.toBe(false);
   }
+});
+
+test('attach and detach pass the calling principal, and a client owned by another principal is a 403', async () => {
+  const seen: Array<string | undefined> = [];
+  const withPrincipal = (body: Record<string, unknown>): GatewayMethodInvocation =>
+    ({ methodId: 'test', body, context: { principalId: 'alice' } }) as unknown as GatewayMethodInvocation;
+  const svc = service({
+    attach: async (_s, _c, options) => { seen.push(options?.principalId); return { session: record(), history: [] }; },
+    detach: async (_s, _c, principalId) => { seen.push(principalId); return record(); },
+  });
+  await createHostedSessionAttachHandler(svc)(withPrincipal({ sessionId: 'hosted-1', clientId: 'a' }));
+  await createHostedSessionDetachHandler(svc)(withPrincipal({ sessionId: 'hosted-1', clientId: 'a' }));
+  expect(seen).toEqual(['alice', 'alice']);
+
+  const refusing = service({ detach: async () => { throw new HostedSessionClientOwnerError('hosted-1', 'a'); } });
+  await expect(createHostedSessionDetachHandler(refusing)(invocation({ sessionId: 'hosted-1', clientId: 'a' })))
+    .rejects.toMatchObject({ status: 403, code: 'HOSTED_CLIENT_FORBIDDEN', field: 'clientId' });
 });

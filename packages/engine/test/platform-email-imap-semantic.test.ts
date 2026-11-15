@@ -261,25 +261,45 @@ describe('IMAP drafts selection boundary', () => {
 });
 
 describe('inbound account and policy owner', () => {
-  test.each(['config-ABA', 'credential-ABA', 'policy'] as const)('%s retires in-flight semantic work', async mode => {
-    let configGeneration = 1; let secretGeneration = 1; let policy = 'refuse-and-notify';
+  function ownerWith(state: { host: string; policy: string; configGeneration: number; secretGeneration: number }) {
     let configChange = () => {}; let secretChange = () => {};
     const deps: InboundMailSourceFactoryDeps = {
       get transport(): never { throw new Error('Unexpected transport access'); },
       get cursors(): never { throw new Error('Unexpected cursor access'); },
       get settings(): never { throw new Error('Unexpected settings access'); },
-      getConfig: (key: string) => key === 'surfaces.email.inbound.onInsufficientCapability' ? policy : undefined,
-      getConfigurationIncarnation: () => configGeneration,
+      getConfig: (key: string) => key === 'surfaces.email.inbound.onInsufficientCapability' ? state.policy
+        : key === 'surfaces.email.imap.host' ? state.host : undefined,
+      getConfigurationIncarnation: () => state.configGeneration,
       onDidChangeConfiguration: (listener: () => void) => { configChange = listener; return () => {}; },
-      secrets: { get: async () => null, getCredentialMutationState: () => ({ generation: secretGeneration, pending: false }),
+      secrets: { get: async () => null, getCredentialMutationState: () => ({ generation: state.secretGeneration, pending: false }),
         onDidInvalidateCredentials: (listener: () => void) => { secretChange = listener; return () => {}; } },
     };
-    const owner = beginImapSourceReading(deps, {});
+    return { owner: beginImapSourceReading(deps, {}), configChange: () => configChange(), secretChange: () => secretChange() };
+  }
+
+  test.each(['config-ABA', 'credential-ABA', 'policy'] as const)('%s retires in-flight semantic work', async mode => {
+    const state = { host: 'imap.one.example', policy: 'refuse-and-notify', configGeneration: 1, secretGeneration: 1 };
+    const { owner, configChange, secretChange } = ownerWith(state);
     const pending = held(facts(['credential']).port); installJudgmentPort(pending.port);
     const work = classifyReadFailure(refusal(), 'fetch', owner.reading).catch(error => error as unknown); await pending.started;
-    if (mode === 'config-ABA') { configGeneration++; configChange(); configGeneration++; }
-    if (mode === 'credential-ABA') { secretGeneration++; secretChange(); secretGeneration++; }
-    if (mode === 'policy') policy = 'notice-only';
+    if (mode === 'config-ABA') {
+      // The mail host really changed, was seen, and was changed back.
+      state.host = 'imap.two.example'; state.configGeneration++; configChange(); await Promise.resolve();
+      state.host = 'imap.one.example'; state.configGeneration++;
+    }
+    if (mode === 'credential-ABA') { state.secretGeneration++; secretChange(); state.secretGeneration++; }
+    if (mode === 'policy') state.policy = 'notice-only';
     pending.release(); expect(await work).toBeInstanceOf(ImapReadingError); owner.dispose();
+  });
+
+  test('a config write that changes nothing about mail leaves in-flight semantic work alone', async () => {
+    const state = { host: 'imap.one.example', policy: 'refuse-and-notify', configGeneration: 1, secretGeneration: 1 };
+    const { owner, configChange } = ownerWith(state);
+    const pending = held(facts(['credential']).port); installJudgmentPort(pending.port);
+    const work = classifyReadFailure(refusal(), 'fetch', owner.reading).catch(error => error as unknown); await pending.started;
+    state.configGeneration++; configChange(); await Promise.resolve();
+    pending.release();
+    expect(await work).not.toBeInstanceOf(Error);
+    owner.dispose();
   });
 });

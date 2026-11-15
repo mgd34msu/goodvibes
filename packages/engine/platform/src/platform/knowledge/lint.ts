@@ -17,6 +17,8 @@ export async function lintKnowledgeStore(context: KnowledgeLintContext): Promise
   const issues: KnowledgeIssueRecord[] = [];
   const sources = context.store.listSources(Number.MAX_SAFE_INTEGER);
   const edges = context.store.listEdges();
+  const linkedSourceIds = new Set<string>();
+  for (const edge of edges) if (edge.fromKind === 'source') linkedSourceIds.add(edge.fromId);
   const byCanonical = new Map<string, KnowledgeSourceRecord[]>();
 
   for (const source of sources) {
@@ -44,8 +46,7 @@ export async function lintKnowledgeStore(context: KnowledgeLintContext): Promise
         `Source is older than its ${refreshWindowDays}-day refresh window and should be recrawled.`,
       ));
     }
-    const linked = edges.some((edge) => edge.fromKind === 'source' && edge.fromId === source.id);
-    if (!linked) {
+    if (!linkedSourceIds.has(source.id)) {
       issues.push(issueForSource(source, 'warning', 'source-unlinked', 'Source has no compiled knowledge links yet.'));
     }
     if (extraction && extraction.sections.length === 0 && !extraction.summary) {

@@ -217,7 +217,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
             `  template: ${contract.template}`,
             `  trustClass: ${contract.trustClass}`,
             `  transport: ${contract.sourceTransport}/${contract.transport.state}`,
-            `  tools: ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
+            `  tools (advisory, not enforced on an external runner): ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
             `  pool: ${contract.poolId ?? '(unassigned)'}`,
           ].join('\n'),
         );
@@ -302,20 +302,20 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       if (sub === 'bundle') {
         const mode = args[1];
         const pathArg = args[2];
-        if ((mode === 'export' || mode === 'inspect') && !pathArg) {
-          ctx.print(`Usage: /release bundle ${mode} <path>`);
+        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
+          ctx.print(`Usage: /release bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
           return;
         }
         if (mode === 'export') {
           const bundle = buildReleaseBundle(ctx);
-          const targetPath = shellPaths.resolveWorkspacePath(pathArg!);
+          const targetPath = shellPaths.resolveWorkspacePath(pathArg);
           mkdirSync(dirname(targetPath), { recursive: true });
           writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
           ctx.print(`Release bundle exported to ${targetPath}`);
           return;
         }
         if (mode === 'inspect') {
-          ctx.print(inspectReleaseBundle(shellPaths.resolveWorkspacePath(pathArg!)));
+          ctx.print(inspectReleaseBundle(shellPaths.resolveWorkspacePath(pathArg)));
           return;
         }
       }

@@ -18,6 +18,8 @@ export interface HandlerContext {
   readonly homeDirectory: string;
   readonly logger: HandlerLogger;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
+  /** Whether this daemon holds a profile with that id; used to flag a mistyped routing assignment. */
+  readonly hasProfile?: ((profileId: string) => boolean) | undefined;
 }
 
 /** A real surface registration with an explicit completion boundary. */

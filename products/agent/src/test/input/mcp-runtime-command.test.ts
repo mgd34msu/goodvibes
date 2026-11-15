@@ -374,18 +374,28 @@ describe('/mcp runtime config commands', () => {
       const callLog = makeCallLog();
       const ctx = makeContext(root, out, callLog);
 
-      await registry.get('mcp')!.handler(['trust', 'docs', 'blocked'], ctx);
-      await registry.get('mcp')!.handler(['role', 'docs', 'docs'], ctx);
-      await registry.get('mcp')!.handler(['reload'], ctx);
-      await registry.get('mcp')!.handler(['quarantine', 'docs', 'review'], ctx);
-      await registry.get('mcp')!.handler(['quarantine', 'docs', 'approve', 'operator'], ctx);
+      // Each mutation names its own refusal; a silent no-op would leave its slot empty.
+      const refusals: Array<{ args: string[]; text: string }> = [];
+      for (const args of [
+        ['trust', 'docs', 'blocked'],
+        ['role', 'docs', 'docs'],
+        ['reload'],
+        ['quarantine', 'docs', 'review'],
+        ['quarantine', 'docs', 'approve', 'operator'],
+      ]) {
+        out.length = 0;
+        await registry.get('mcp')!.handler(args, ctx);
+        refusals.push({ args, text: out.join('\n') });
+      }
+      for (const { args, text } of refusals) {
+        expect({ args, refused: text.includes('without --yes') }).toEqual({ args, refused: true });
+      }
 
       expect(callLog.trustChanges).toBe(0);
       expect(callLog.roleChanges).toBe(0);
       expect(callLog.reloads).toBe(0);
       expect(callLog.quarantines).toBe(0);
       expect(callLog.quarantineApprovals).toBe(0);
-      expect(out.join('\n')).toContain('without --yes');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

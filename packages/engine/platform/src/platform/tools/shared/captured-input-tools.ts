@@ -12,6 +12,7 @@ import { isCapturedExecTool } from '../exec/runtime.js';
 import { isCapturedReplTool } from '../repl/captured.js';
 import type { Tool } from '../../types/tools.js';
 import type { ReadAccessFilter } from './read-access.js';
+import { ToolInputProjectionError } from '../input-projection.js';
 import {
   assertContractInputAuthority,
   assertCapturedInputPathContext,
@@ -274,18 +275,25 @@ export function capturedInputTool(
             } catch (error) {
               if (error instanceof UnsupportedCapturedWorkflow) return { success: false, error: error.message };
               // Backend error strings can include source bytes. A held call returns
-              // only this fixed diagnosis, not an exception or partial tool output.
-              return {
-                success: false,
-                error:
-                  'Captured input tool held: missing, changed, cancelled or restricted original-owner/view authority, or an unsupported captured workflow. Output withheld.',
-              };
+              // only a fixed cause and next step, never the exception text or
+              // partial tool output.
+              return { success: false, error: capturedHeldMessage(error, signal, callSignal, root) };
             }
           },
         ),
       );
     },
   };
+}
+
+function capturedHeldMessage(error: unknown, ownerSignal: AbortSignal | undefined, callSignal: AbortSignal | undefined, root: string): string {
+  if (ownerSignal?.aborted || callSignal?.aborted || (error instanceof ToolInputProjectionError && error.problem === 'cancelled')) {
+    return 'Captured input tool held (cancelled): the call or the work that owns it was cancelled. Output withheld; stop and do not retry.';
+  }
+  if (error instanceof ToolInputProjectionError && error.problem === 'stale') {
+    return 'Captured input tool held (input-changed): a file or the assignment changed while the call ran. Output withheld; re-read the files you need, then re-issue the call.';
+  }
+  return `Captured input tool held (access): the original owner's access to this path or view is missing, changed or restricted. Output withheld; stay within the assigned files under ${root} and do not retry the same path.`;
 }
 
 export function capturedInputReadFilter(

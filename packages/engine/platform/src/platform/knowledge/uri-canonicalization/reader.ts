@@ -22,8 +22,9 @@ function normalized(uri: UriInput, referralPositions: ReadonlySet<number>): stri
   const url = new URL(uri.input);
   url.hash = ''; url.protocol = url.protocol.toLowerCase(); url.hostname = url.hostname.toLowerCase();
   if ((url.protocol === 'https:' && url.port === '443') || (url.protocol === 'http:' && url.port === '80')) url.port = '';
-  const parameters = uri.parameters.filter(([key], position) => !/^utm_/i.test(key) && key !== 'gclid' && key !== 'fbclid'
-    && !(key === 'ref' && referralPositions.has(position))).sort(([a], [b]) => a.localeCompare(b));
+  // A fixed locale: the order is part of a stored identity, so it cannot follow the machine's locale.
+  const parameters = uri.parameters.filter(([key], position) => !/^(?:utm_|gclid$|fbclid$)/i.test(key)
+    && !(key === 'ref' && referralPositions.has(position))).sort(([a], [b]) => a.localeCompare(b, 'en'));
   url.search = '';
   for (const [key, value] of parameters) url.searchParams.append(key, value);
   if (url.pathname !== '/' && url.pathname.endsWith('/')) url.pathname = url.pathname.replace(/\/+$/, '');

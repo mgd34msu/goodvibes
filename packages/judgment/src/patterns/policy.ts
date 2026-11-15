@@ -77,6 +77,8 @@ export function definePolicyChecklist<const H extends string, const A extends st
     route,
     async screen(port, state, options = {}) {
       const policy = options.policy ?? spec.defaultPolicy;
+      // An unknown policy is a caller error; refuse it before the model call is billed and logged.
+      policyNamed(routing, policy);
       const result = await askAs(port, spec, 'policy', state, questions, options);
       const { probabilities, severity } = readScreening(result.answers, hazards);
       const action = route(probabilities, severity.score, policy);

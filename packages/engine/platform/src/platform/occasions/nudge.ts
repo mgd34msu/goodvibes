@@ -209,3 +209,12 @@ export function composeConflictMessage(title: string, dates: readonly string[]):
   return `Your profile has ${dates.length} different dates recorded for ${title}. `
     + 'Nothing has been changed, which one is right?';
 }
+
+/**
+ * The line raised when a gift conversation was left unfinished.
+ *
+ * Names the occasion and nothing else: no date, no count of days, no gift idea.
+ */
+export function composeInterviewResumeMessage(title: string): string {
+  return `Your gift planning for ${title} is still open. Say the word and we can pick it back up.`;
+}

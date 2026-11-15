@@ -8,10 +8,11 @@ import type { CliServicePosture } from '../cli/service-posture.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { operatorMethodRoute, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
 import type { OperatorContractMethod, SetupBootstrapPlan, SetupConnectedHostAuthPosture, SetupPlanStatus, SetupRepairCard, SetupRepairCardEffect, SetupRepairLiveEvidence, SetupRepairOutcome, SetupRepairRecommendation, SetupRepairCardState, SetupServiceLifecycleDecision, SetupServiceProbe, SetupServiceProbeStatus } from './agent-harness-setup-posture-types.ts';
 import type { collectSnapshot } from './agent-harness-setup-posture-utils.ts';
 
-export function connectedHostServiceProbe(posture: CliServicePosture | null): SetupServiceProbe {
+export function connectedHostServiceProbe(posture: CliServicePosture | null, probeFailure?: string): SetupServiceProbe {
   const endpoint = posture?.endpoints.find((candidate) => candidate.id === 'controlPlane');
   if (!posture || !endpoint) {
     return {
@@ -21,7 +22,7 @@ export function connectedHostServiceProbe(posture: CliServicePosture | null): Se
       enabled: false,
       binding: '(unavailable)',
       diagnosticRoute: 'host action:"services" includeParameters:true',
-      issues: ['Service posture probe is unavailable in this runtime.'],
+      issues: [probeFailure ? `Service posture probe failed: ${probeFailure}. Fix the cause and rerun host action:"services".` : 'Service posture probe is unavailable in this runtime.'],
     };
   }
   const binding = `${endpoint.binding.host}:${endpoint.binding.port}`;
@@ -56,7 +57,6 @@ export function repairLiveEvidence(probe: SetupServiceProbe, summary: string): S
 
 export function lifecycleRepairRecommendation(probe: SetupServiceProbe): SetupRepairRecommendation {
   if (probe.status === 'reachable') return 'not-needed';
-  if (probe.status === 'unreachable') return 'inspect-first';
   return 'inspect-first';
 }
 
@@ -83,13 +83,13 @@ export async function connectedHostAuthPosture(
     operatorToken: {
       present: token.present,
       usable,
-      path: token.path,
+      path: homeRelativePath(token.path, shellPaths.homeDirectory),
       ...(token.error ? { error: token.error } : {}),
     },
     compatibilityAuth: {
-      userStorePath: snapshot.auth.snapshot.userStorePath,
+      userStorePath: homeRelativePath(snapshot.auth.snapshot.userStorePath, shellPaths.homeDirectory),
       userStorePresent: snapshot.auth.snapshot.persisted,
-      bootstrapCredentialPath: snapshot.auth.snapshot.bootstrapCredentialPath,
+      bootstrapCredentialPath: homeRelativePath(snapshot.auth.snapshot.bootstrapCredentialPath, shellPaths.homeDirectory),
       bootstrapCredentialPresent: snapshot.auth.snapshot.bootstrapCredentialPresent,
       users: snapshot.auth.snapshot.userCount,
       sessions: snapshot.auth.snapshot.sessionCount,
@@ -113,9 +113,23 @@ export function connectedHostAuthStatus(posture: SetupConnectedHostAuthPosture):
   return 'ready';
 }
 
+/**
+ * The next step is verification, not token repair: the token file is readable, or native intake is ready and
+ * no compatibility bootstrap credential lingers. Every route and reason for this item keys on this one rule.
+ */
+export function connectedHostAuthNeedsVerificationOnly(posture: SetupConnectedHostAuthPosture): boolean {
+  return posture.operatorToken.usable
+    || (posture.nativeIntake.status === 'ready' && posture.compatibilityAuth.bootstrapCredentialPresent !== true);
+}
+
 export function connectedHostAuthNextAction(posture: SetupConnectedHostAuthPosture): string {
   if (posture.operatorToken.path === 'Agent host-bound pairing store' && !posture.operatorToken.usable) {
     return 'The Agent pairing store needs review. Run goodvibes-agent setup pair to inspect the prior host-bound attempt. Do not provision another shared token or retry migration while its outcome is unknown or the store is unsafe.';
+  }
+  // Native intake is the authority; the shared token file is not required once it is ready, so the status
+  // ('ready') and the next action agree instead of asking for a repair of a file nothing depends on.
+  if (connectedHostAuthStatus(posture) === 'ready') {
+    return 'Verify the connection against connected-host status and Agent Knowledge readiness before relying on protected daemon routes.';
   }
   if (!posture.operatorToken.present) {
     return 'Run the confirmed connected-host token provisioning route, inspect pairing posture for visible handoff routes, then rerun auth review and connected-host status.';
@@ -181,7 +195,7 @@ export function setupRepairCard(
     state,
     effect: options.effect,
     ...(options.methodId ? { methodId: options.methodId } : {}),
-    ...(options.methodId && methodPresent ? { modelRoute: operatorMethodRoute(options.methodId, options.effect === 'confirmed-effect') } : {}),
+    ...(options.methodId && methodPresent ? { modelRoute: operatorMethodRoute(options.methodId) } : {}),
     userRoute: options.userRoute,
     ...(options.prerequisite ? { prerequisite: options.prerequisite } : {}),
     recommendation: !methodPresent || state === 'requires-live-host' ? 'unavailable' : options.recommendation ?? 'inspect-first',
@@ -195,7 +209,7 @@ export function setupRepairCard(
 export function serviceRepairOutcome(methodId: 'services.status' | 'services.install' | 'services.start' | 'services.restart'): SetupRepairOutcome {
   const common = {
     evidenceFields: ['installed', 'autostart', 'running', 'pid', 'lastAction', 'actionError', 'network.controlPlane.ready'],
-    verificationRoute: operatorMethodRoute('services.status', false),
+    verificationRoute: operatorMethodRoute('services.status'),
     recoveryRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
   };
   if (methodId === 'services.status') {
@@ -414,7 +428,7 @@ export function setupServiceLifecycleDecision(
     return {
       status: 'no-lifecycle-action',
       recommendedAction: 'none',
-      modelRoute: operatorMethodRoute('services.status', false),
+      modelRoute: operatorMethodRoute('services.status'),
       reason: 'The runtime endpoint is reachable; no install/start/restart mutation is justified by probe evidence alone. Read services.status only for install/autostart audit or setup closeout.',
       evidence,
       receiptRules: serviceLifecycleReceiptRules(),
@@ -424,7 +438,7 @@ export function setupServiceLifecycleDecision(
   return {
     status: 'needs-status-receipt',
     recommendedAction: 'read-services-status',
-    modelRoute: operatorMethodRoute('services.status', false),
+    modelRoute: operatorMethodRoute('services.status'),
     reason: 'Probe evidence is not enough to choose install, start, or restart. Read a services.status receipt first and let agent_operator_method return the exact lifecycle decision.',
     evidence,
     receiptRules: serviceLifecycleReceiptRules(),
@@ -450,7 +464,7 @@ export function connectedHostBootstrapPlan(
       {
         id: 'verify-bun',
         label: 'Verify Bun is installed',
-        purpose: 'GoodVibes TUI and the daemon package are Bun programs; package lifecycle scripts also need Bun.',
+        purpose: 'Only the source-checkout fallback needs Bun; the release installer ships binaries.',
         commands: ['bun --version'],
         expected: 'Prints a Bun version.',
         fallback: 'Install Bun, reopen the terminal so PATH is refreshed, then retry.',
@@ -458,25 +472,23 @@ export function connectedHostBootstrapPlan(
       {
         id: 'install-goodvibes-host',
         label: 'Install the owning GoodVibes host',
-        purpose: 'Install the package that provides both the TUI and goodvibes-daemon launchers.',
+        purpose: 'Install the released goodvibes launcher and goodvibes-daemon with the release installer; the programs are not published as Bun packages.',
         commands: [
-          'bun add -g @goodvibes-jev/tui',
-          'bun pm trust -g @goodvibes-jev/tui @goodvibes-jev/engine/platform core-js tree-sitter-css tree-sitter-javascript tree-sitter-json tree-sitter-python tree-sitter-typescript',
+          'curl -fsSL https://goodvibes.sh/install.sh | sh',
         ],
-        expected: 'Global package install completes and Bun reports lifecycle scripts are trusted.',
+        expected: 'The installer finishes, verifies the release checksums and prints the installed program paths. See docs/installation.md for its options.',
         fallback: 'If release assets cannot download, use the goodvibes-tui source checkout and run bun install before bun run daemon.',
       },
       {
         id: 'verify-goodvibes-binaries',
         label: 'Verify host binaries',
-        purpose: 'Confirm the package installed both user-facing and daemon entrypoints.',
+        purpose: 'Confirm the installer put both user-facing and daemon entrypoints on PATH.',
         commands: [
-          'bun pm -g untrusted',
           'goodvibes --version',
           'goodvibes-daemon --version',
         ],
-        expected: 'Untrusted reports zero remaining lifecycle-script packages, and both binaries print versions.',
-        fallback: 'Rerun the full trust command if Bun still reports untrusted package scripts.',
+        expected: 'Both binaries print versions.',
+        fallback: 'Open a new terminal so PATH is refreshed, or rerun the installer and read its PATH note.',
       },
       {
         id: 'start-goodvibes-host',

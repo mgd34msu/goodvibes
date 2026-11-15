@@ -1,4 +1,4 @@
-import { readWalkDirectories } from '@goodvibes-jev/engine/platform/platform/utils';
+import { WALK_SKIP_DIRS } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
@@ -10,7 +10,7 @@ export interface FilePickerWorkspace { readonly workingDirectory: string; }
  * and lets the user select a file to insert its path.
  */
 export class FilePickerModal {
-  constructor(private readonly shellPaths: FilePickerWorkspace, private readonly site = 'terminal-shell.file-picker.skip-directory') {}
+  constructor(private readonly shellPaths: FilePickerWorkspace) {}
 
   public active = false;
   public query = '';
@@ -27,6 +27,8 @@ export class FilePickerModal {
   private cachedRoot: string | undefined;
   private loading: AbortController | undefined;
   public loadError: string | undefined;
+  /** True when the walk stopped at its file-count or depth limit, so the list is partial. */
+  public truncated = false;
 
   private onUpdate: (() => void) | null = null;
 
@@ -50,36 +52,44 @@ export class FilePickerModal {
     if (this.filesCached && this.cachedRoot === this.shellPaths.workingDirectory) {
       this.updateResults();
     } else {
-      // Show "Loading..." immediately, never filter stale files from another root.
-      this.results = [];
-      this.allFiles = [];
-      this.filesCached = false;
-      this.cachedRoot = undefined;
-      const controller = new AbortController();
-      const root = this.shellPaths.workingDirectory;
-      this.loading = controller;
-      const current = () => this.active && this.loading === controller
-        && !controller.signal.aborted && this.shellPaths.workingDirectory === root;
-      const assertCurrent = () => {
-        if (!current()) controller.abort();
-        controller.signal.throwIfAborted();
-      };
-      void this.loadFiles(root, controller.signal, assertCurrent).then(files => {
-        if (!current()) return;
-        this.allFiles = files;
-        this.filesCached = true;
-        this.cachedRoot = root;
-        this.updateResults();
-        this.onUpdate?.();
-      }).catch(() => {
-        if (!current()) return;
-        this.allFiles = [];
-        this.results = [];
-        this.filesCached = false;
-        this.loadError = 'File listing unavailable. Close and reopen to retry.';
-        this.onUpdate?.();
-      }).finally(() => { if (this.loading === controller) this.loading = undefined; });
+      this.startLoad();
     }
+  }
+
+  /** Walk the working directory in the background; results appear when it finishes. */
+  private startLoad(): void {
+    // Show "Loading..." immediately, never filter stale files from another root.
+    this.loading?.abort();
+    this.results = [];
+    this.allFiles = [];
+    this.filesCached = false;
+    this.cachedRoot = undefined;
+    this.loadError = undefined;
+    this.truncated = false;
+    const controller = new AbortController();
+    const root = this.shellPaths.workingDirectory;
+    this.loading = controller;
+    const current = () => this.active && this.loading === controller
+      && !controller.signal.aborted && this.shellPaths.workingDirectory === root;
+    const assertCurrent = () => {
+      if (!current()) controller.abort();
+      controller.signal.throwIfAborted();
+    };
+    void this.loadFiles(root, assertCurrent).then(files => {
+      if (!current()) return;
+      this.allFiles = files;
+      this.filesCached = true;
+      this.cachedRoot = root;
+      this.updateResults();
+      this.onUpdate?.();
+    }).catch(() => {
+      if (!current()) return;
+      this.allFiles = [];
+      this.results = [];
+      this.filesCached = false;
+      this.loadError = 'File listing unavailable. Close and reopen to retry.';
+      this.onUpdate?.();
+    }).finally(() => { if (this.loading === controller) this.loading = undefined; });
   }
 
   /** Close the file picker without selecting. */
@@ -87,6 +97,7 @@ export class FilePickerModal {
     this.loading?.abort();
     this.loading = undefined;
     this.loadError = undefined;
+    this.truncated = false;
     this.active = false;
     this.query = '';
     this.searchFocused = true;
@@ -179,17 +190,19 @@ export class FilePickerModal {
     }
   }
 
-  private async loadFiles(root: string, signal: AbortSignal, assertCurrent: () => void): Promise<string[]> {
+  private async loadFiles(root: string, assertCurrent: () => void): Promise<string[]> {
     const files: string[] = [];
-    await this.walkDir(root, root, files, 0, signal, assertCurrent);
+    await this.walkDir(root, root, files, 0, assertCurrent);
     assertCurrent();
     return files.sort();
   }
 
-  private async walkDir(root: string, dir: string, files: string[], depth: number, signal: AbortSignal, assertCurrent: () => void): Promise<void> {
+  private async walkDir(root: string, dir: string, files: string[], depth: number, assertCurrent: () => void): Promise<void> {
     assertCurrent();
-    if (depth > 8) return; // Limit depth
-    if (files.length > 5000) return; // Limit total files
+    if (depth > 8 || files.length > 5000) { // Limit depth and total files
+      this.truncated = true;
+      return;
+    }
 
     let entries: Dirent[];
     try {
@@ -199,25 +212,18 @@ export class FilePickerModal {
     }
 
     assertCurrent();
-    // Hidden-dot filtering is literal policy. Only directory meaning goes to Jev.
+    // The same fixed exclusions the find and grep walks use, so the picker lists what they search.
     const visible = entries.filter(entry => !entry.name.startsWith('.'));
-    const directories = visible.filter(entry => entry.isDirectory());
-    const readings = await readWalkDirectories(directories.map(entry => ({
-      name: entry.name, relativePath: relative(root, join(dir, entry.name)),
-    })), { signal, beforeAttempt: assertCurrent, site: this.site });
-    assertCurrent();
-    if (readings.some(reading => reading === null)) throw new Error('Directory reading withheld');
-    const skipped = new Set(directories.filter((_entry, index) => readings[index] === true).map(entry => entry.name));
     for (const entry of visible) {
       assertCurrent();
-      if (entry.isDirectory() && skipped.has(entry.name)) continue;
+      if (entry.isDirectory() && WALK_SKIP_DIRS.has(entry.name)) continue;
 
       const fullPath = join(dir, entry.name);
       const relPath = relative(root, fullPath);
 
       if (entry.isDirectory()) {
         files.push(relPath + '/');
-        await this.walkDir(root, fullPath, files, depth + 1, signal, assertCurrent);
+        await this.walkDir(root, fullPath, files, depth + 1, assertCurrent);
       } else if (entry.isFile()) {
         files.push(relPath);
       }
@@ -234,5 +240,10 @@ export class FilePickerModal {
     this.allFiles = [];
     this.results = [];
     this.selectedIndex = 0;
+    // An open picker would otherwise sit empty with nothing loading.
+    if (this.active) {
+      this.startLoad();
+      this.onUpdate?.();
+    }
   }
 }

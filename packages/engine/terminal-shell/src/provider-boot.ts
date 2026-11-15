@@ -13,9 +13,16 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
  * the provider itself isn't registered yet, which is exactly the
  * custom-provider case. As a last resort (the configured provider's file was
  * deleted entirely), boot on a real selectable model with a warning instead
- * of dying before the UI exists.
+ * of dying before the UI exists. The substitution lasts for this session only:
+ * the saved `provider.model` stays on disk so the chosen model returns once its
+ * provider registers again, and the caller gets the substitution to tell the
+ * user which model is actually running.
  */
-export async function ensureBootModelResolvable(providerRegistry: ProviderRegistry, configManager: ConfigManager): Promise<void> {
+export interface BootModelSubstitution {
+  readonly configured: string;
+  readonly replacement: string;
+}
+export async function ensureBootModelResolvable(providerRegistry: ProviderRegistry, configManager: ConfigManager): Promise<BootModelSubstitution | undefined> {
   await providerRegistry.ready();
   ensureConfiguredModelIsRoutable(providerRegistry, configManager);
   try {
@@ -25,9 +32,10 @@ export async function ensureBootModelResolvable(providerRegistry: ProviderRegist
     const replacement = providerRegistry.getSelectableModels()[0]?.registryKey;
     if (!replacement) throw err;
     providerRegistry.setCurrentModel(replacement);
-    configManager.set('provider.model', replacement);
     logger.warn(
-      `[bootstrap] Configured model '${configured}' is not resolvable (its provider is not registered); switched to '${replacement}'.`,
+      `[bootstrap] Configured model '${configured}' is not resolvable (its provider is not registered); using '${replacement}' for this session.`,
     );
+    return { configured, replacement };
   }
+  return undefined;
 }

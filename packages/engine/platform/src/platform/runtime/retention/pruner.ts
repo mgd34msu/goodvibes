@@ -83,6 +83,15 @@ export class SnapshotPruner {
         byClass[record.retentionClass].deletedIds.push(record.id);
         byClass[record.retentionClass].reclaimedBytes += record.sizeBytes;
       } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+          // Already gone (removed by something else): the record is done, not failed.
+          // Left tracked, its bytes would keep counting against the class size and
+          // newer checkpoints would be pruned to make room for a file that is not there.
+          // Nothing was freed by this prune, so no bytes are reclaimed.
+          deletedIds.push(record.id);
+          byClass[record.retentionClass].deletedIds.push(record.id);
+          continue;
+        }
         failedIds.push(record.id);
         errors[record.id] = errorMessage(err);
         byClass[record.retentionClass].failedIds.push(record.id);

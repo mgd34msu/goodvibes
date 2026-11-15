@@ -25,7 +25,12 @@ export interface MemoryGovernanceHandles {
   readonly cacheRegistry: CacheRegistry;
   readonly pauseController: PauseController;
   readonly memoryGovernor: MemoryGovernor;
+  /** Set when the configured budget, tiers or hard limit were refused and the shipped ones are in use; says why. */
+  readonly configFallback?: string | undefined;
 }
+
+/** The shipped budget, tier and hard-limit values (the defaults of memory.*), used when the configured ones are refused. */
+const SHIPPED_GOVERNOR_POLICY = { budgetMb: 0, elevatedPct: 60, highPct: 80, criticalPct: 95, hardLimitPct: 90 } as const;
 
 export interface MemoryGovernanceWiringOptions {
   readonly config: MemoryGovernorConfig;
@@ -70,7 +75,7 @@ export function createMemoryGovernance(options: MemoryGovernanceWiringOptions): 
   const runtimeBus = options.runtimeBus;
   const receiptPath = options.receiptPath;
 
-  const memoryGovernor = new MemoryGovernor(options.config, {
+  const governorDeps = {
     caches: cacheRegistry,
     pauses: pauseController,
     ...(options.deps ?? {}),
@@ -90,10 +95,21 @@ export function createMemoryGovernance(options: MemoryGovernanceWiringOptions): 
         }
       : undefined,
     shutdown: options.onTripwireShutdown,
-  });
+  } satisfies MemoryGovernorDeps;
+  let memoryGovernor: MemoryGovernor;
+  let configFallback: string | undefined;
+  try {
+    memoryGovernor = new MemoryGovernor(options.config, governorDeps);
+  } catch (error) {
+    // A hand-edited or too-large memory setting must not stop the daemon from starting without its safety governor:
+    // run on the shipped budget, tiers and hard limit, and say so.
+    configFallback = `${error instanceof Error ? error.message : String(error)} The shipped memory budget, tiers and hard limit are in use until it is fixed.`;
+    logger.warn('[memory] configured memory limits refused; using the shipped ones', { reason: configFallback });
+    memoryGovernor = new MemoryGovernor({ ...options.config, ...SHIPPED_GOVERNOR_POLICY }, governorDeps);
+  }
 
   if (options.start !== false) memoryGovernor.start();
-  return { cacheRegistry, pauseController, memoryGovernor };
+  return { cacheRegistry, pauseController, memoryGovernor, ...(configFallback === undefined ? {} : { configFallback }) };
 }
 
 /** The live collaborators the daemon composition hands the standard cache adapters. */

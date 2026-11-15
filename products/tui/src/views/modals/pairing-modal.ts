@@ -1,5 +1,6 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -16,10 +17,13 @@ import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } 
 // scan opens the web app already signed in. No raw JSON connection blob is ever
 // encoded.
 //
-// `getConnectionInfo` is a lazy thunk (loaded once on first buildView, cached):
-// each modal open mints its OWN named per-device token, so a missing pairing
-// service degrades honestly to an "unavailable" state instead of throwing at
-// registration time. "new device token" clears the cache and re-pulls to mint a
+// `getConnectionInfo` is a lazy thunk (loaded on the first buildView of each
+// open, cached until the modal closes): each modal open mints its OWN named
+// per-device token and a closed modal forgets it, so a reopened modal never
+// shows a token that was revoked or has gone stale in between. A missing
+// pairing service, or one that refuses to mint (for example the paired-device
+// cap), degrades honestly to an "unavailable" state with the reason instead of
+// throwing at registration time. "new device token" clears the cache and re-pulls to mint a
 // fresh token + QR in place, non-destructive now, because a freshly minted
 // token no longer rotates a shared secret out from under a live device; old
 // tokens stay valid until explicitly revoked in the settings device surface.
@@ -66,8 +70,9 @@ export interface PairingTailscaleServeReceipt {
 }
 
 export interface PairingModalDeps {
-  /** Lazy connection-info provider, returns null when the daemon/companion
-   *  token cannot be resolved (honest degraded state instead of a throw). */
+  /** Lazy connection-info provider. Returns null when the daemon/companion
+   *  token cannot be resolved, or throws with the reason (for example the
+   *  paired-device cap); either way the modal renders an honest degraded state. */
   readonly getConnectionInfo: () => PairingModalConnectionInfo | null;
   readonly controlPlaneReadModel?: PairingModalReadModel<PairingModalControlPlaneSnapshot>;
   readonly copyToClipboard?: (text: string) => void;
@@ -93,6 +98,8 @@ class PairingModalSurface implements ConfigModalSurface {
   readonly name = 'pairing-modal';
   readonly title = 'Device Pairing';
   private info: PairingModalConnectionInfo | null | undefined = undefined;
+  /** Why the last mint threw, shown in the degraded state; null when it returned null or has not run. */
+  private infoError: string | null = null;
   private revealed = false;
   private requestRender: () => void = () => {};
   /** tailscale.get result: undefined = not probed yet, null = probed/absent (stays quiet). */
@@ -131,9 +138,17 @@ class PairingModalSurface implements ConfigModalSurface {
     }
   }
 
+  /** The token minted for this open is dropped on close, so the next open mints its own. */
+  onClose(): void {
+    this.info = undefined;
+    this.infoError = null;
+    this.revealed = false;
+  }
+
   private ensureInfo(): PairingModalConnectionInfo | null {
     if (this.info === undefined) {
-      try { this.info = this.deps.getConnectionInfo(); } catch { this.info = null; }
+      this.infoError = null;
+      try { this.info = this.deps.getConnectionInfo(); } catch (error) { this.info = null; this.infoError = summarizeError(error); }
     }
     return this.info;
   }
@@ -141,7 +156,9 @@ class PairingModalSurface implements ConfigModalSurface {
   buildView(): ConfigModalView {
     const info = this.ensureInfo();
     if (!info) {
-      return { title: 'Device Pairing', degraded: 'Device pairing is unavailable: the pairing token service could not be resolved for this session.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
+      return { title: 'Device Pairing', degraded: this.infoError
+          ? `Device pairing is unavailable: ${this.infoError}`
+          : 'Device pairing is unavailable: the pairing token service could not be resolved for this session.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
     }
     const { url, token, tokenName, deepLink, offers, posture } = info;
     const displayToken = this.revealed ? token : SECRET_MASK;
@@ -232,9 +249,16 @@ class PairingModalSurface implements ConfigModalSurface {
       // Each open mints its own named token; "new device token" just re-pulls the
       // thunk to mint a fresh one + QR in place. Non-destructive: the prior token
       // stays valid until it is revoked in /settings → security → devices.
+      const previous = this.info;
       this.info = undefined;
       this.revealed = false;
-      this.ensureInfo();
+      if (this.ensureInfo() === null) {
+        // A refused mint (e.g. the device cap) keeps the token already on screen rather than blanking a working QR.
+        this.info = previous ?? null;
+        ctx.setStatus(this.infoError ? `Could not mint a device token: ${this.infoError}` : 'Could not mint a device token.');
+        this.requestRender();
+        return;
+      }
       this.requestRender();
       ctx.setStatus('Minted a fresh device token and QR. Revoke old ones in /settings → security → devices.');
       return;

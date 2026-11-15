@@ -1,7 +1,16 @@
-import { existsSync, readFileSync } from 'fs';
-import { dirname, resolve, join } from 'path';
+import { existsSync, readFileSync, realpathSync } from 'fs';
+import { dirname, isAbsolute, relative, resolve, join, sep } from 'path';
 import { logger } from './logger.js';
 import { summarizeError } from './error-display.js';
+
+function isInsideDirectory(root: string, candidate: string): boolean {
+  try {
+    const rel = relative(realpathSync(root), realpathSync(candidate));
+    return rel === '' || !(rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Read a prompt file, resolving `@path/to/file` includes recursively.
@@ -13,11 +22,20 @@ import { summarizeError } from './error-display.js';
  * within one top-level invocation. This means a file included from one
  * branch is never re-included from a sibling branch, preventing duplicate
  * content and infinite loops across non-trivially circular graphs.
+ *
+ * `containRoot` bounds what an include may reach: a directory every included
+ * file must live under (after links are resolved), defaulting to the directory
+ * of the file being read, so a repository's instruction file cannot pull in
+ * `@/home/me/.ssh/...` or `@../../.env`. Pass `null` only for a file the owner
+ * chose themselves (their home-directory prompts, an explicit CLI or config
+ * path). A line naming a file that does not exist is kept as written: it is
+ * text such as `@someone`, not a lost include.
  */
 export function readPromptFile(
   filePath: string,
   visited?: Set<string>,
   depth?: number,
+  containRoot?: string | null,
 ): string {
   const maxDepth = 5;
   const currentDepth = depth ?? 0;
@@ -56,6 +74,7 @@ export function readPromptFile(
 
   // Process @ includes
   const baseDir = dirname(resolved);
+  const root = containRoot === null ? null : (containRoot ?? baseDir);
   const lines = content.split('\n');
   const result: string[] = [];
 
@@ -66,8 +85,17 @@ export function readPromptFile(
       const includePath = trimmed.slice(1).trim();
       if (includePath) {
         const includeResolved = resolve(baseDir, includePath);
-        const included = readPromptFile(includeResolved, seen, currentDepth + 1);
-        if (included) result.push(included);
+        if (!existsSync(includeResolved)) {
+          result.push(line);
+        } else if (root !== null && !isInsideDirectory(root, includeResolved)) {
+          logger.warn('System prompt include skipped because it is outside the including file\'s allowed directory', {
+            path: includeResolved,
+            source: resolved,
+          });
+        } else {
+          const included = readPromptFile(includeResolved, seen, currentDepth + 1, root);
+          if (included) result.push(included);
+        }
       }
     } else {
       // Unescape @@ to literal @ (preserving leading whitespace)
@@ -172,7 +200,7 @@ export function loadSystemPromptWithSources(
   const argIdx = argv.indexOf('--system-prompt-file');
   if (argIdx !== -1 && argv[argIdx + 1]) {
     const cliPath = argv[argIdx + 1]!;
-    const content = readPromptFile(cliPath);
+    const content = readPromptFile(cliPath, undefined, undefined, null);
     if (content) {
       return { prompt: content, sources: [{ kind: 'cli', path: resolve(cliPath) }] };
     }
@@ -180,12 +208,12 @@ export function loadSystemPromptWithSources(
 
   // 2. ~/.goodvibes/SYSTEM.md (base)
   const basePath = join(options.homeDirectory, '.goodvibes', 'SYSTEM.md');
-  const systemContent = readPromptFile(basePath);
+  const systemContent = readPromptFile(basePath, undefined, undefined, null);
   if (systemContent) add('base', basePath, systemContent);
 
   // 3. ~/.goodvibes/GOODVIBES.md (global extensions)
   const globalPath = join(options.homeDirectory, '.goodvibes', 'GOODVIBES.md');
-  const globalContent = readPromptFile(globalPath);
+  const globalContent = readPromptFile(globalPath, undefined, undefined, null);
   if (globalContent) add('global', globalPath, globalContent);
 
   // 4. Nearest AGENTS.md (nearest-file-wins upward from the working directory).
@@ -199,13 +227,13 @@ export function loadSystemPromptWithSources(
 
   // 5. .goodvibes/GOODVIBES.md (project)
   const projectPath = join(options.workingDirectory, '.goodvibes', 'GOODVIBES.md');
-  const projectContent = readPromptFile(projectPath);
+  const projectContent = readPromptFile(projectPath, undefined, undefined, options.workingDirectory);
   if (projectContent) add('project', projectPath, projectContent);
 
   // 6. Config-specified file (additional, appended last)
   const configPath = options.getConfigPath?.();
   if (typeof configPath === 'string' && configPath) {
-    const configContent = readPromptFile(configPath);
+    const configContent = readPromptFile(configPath, undefined, undefined, null);
     if (configContent) add('config', configPath, configContent);
   }
 

@@ -1,22 +1,45 @@
-import { resolve } from 'node:path';
-import { directOwnerRemoteInput, type CommandRegistry, type CommandContext } from '../command-registry.ts';
+import { readFileSync } from 'node:fs';
+import { directOwnerRemoteInput, isDirectOwnerCommandContext, type CommandRegistry, type CommandContext } from '../command-registry.ts';
 import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
 import { handleRemoteSetupCommand } from './remote-runtime-setup.ts';
 import { handleRemotePoolCommand } from './remote-runtime-pool.ts';
 import { requireAgentManager, requireAcpManager, requirePeerClient, requireShellPaths } from './runtime-services.ts';
+
+/** Own keys only: `constructor` or `toString` are not templates. */
+function isAgentTemplate(name: string | undefined): name is string {
+  return name !== undefined && Object.hasOwn(AGENT_TEMPLATES, name);
+}
+
+/** A reason the artifact file at `path` would replace a known runner's different capability ceiling, else undefined. */
+function importedContractConflict(
+  runners: { getContract(runnerId: string): { capabilityCeiling: unknown } | null | undefined },
+  path: string,
+): string | undefined {
+  let parsed: { runnerId?: unknown; runnerContract?: { capabilityCeiling?: unknown } };
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return undefined; // an unreadable or malformed file is reported by the import itself
+  }
+  if (typeof parsed?.runnerId !== 'string') return undefined;
+  const existing = runners.getContract(parsed.runnerId);
+  if (!existing) return undefined;
+  if (JSON.stringify(existing.capabilityCeiling) === JSON.stringify(parsed.runnerContract?.capabilityCeiling)) return undefined;
+  return `runner ${parsed.runnerId} already has a different capability ceiling in this session; the file would replace it.`;
+}
 
 type RemoteConnectionLike = { agentId: string };
 type RemoteCancelContext = Pick<CommandContext, 'print'>;
 type RemoteCancelAgentManager = Pick<ReturnType<typeof requireAgentManager>, 'cancel'>;
 type RemoteCancelAcpManager = Pick<ReturnType<typeof requireAcpManager>, 'cancel'>;
 
-export function handleRemoteCancelCommand(
+export async function handleRemoteCancelCommand(
   agentId: string | undefined,
   activeConnections: RemoteConnectionLike[],
   ctx: RemoteCancelContext,
   agentManager: RemoteCancelAgentManager,
   acpManager?: RemoteCancelAcpManager,
-): void {
+): Promise<void> {
   if (!agentId) {
     ctx.print('Usage: /remote cancel <agentId>');
     return;
@@ -35,7 +58,12 @@ export function handleRemoteCancelCommand(
     ctx.print(`Remote agent ${agentId} could not be cancelled in this runtime.`);
     return;
   }
-  void acpManager.cancel(agentId);
+  try {
+    await acpManager.cancel(agentId);
+  } catch (error) {
+    ctx.print(`Cancelling remote runner ${agentId} failed: ${error instanceof Error ? error.message : String(error)}. The runner may still be running; retry /remote cancel ${agentId}.`);
+    return;
+  }
   ctx.print(`Cancellation requested for remote runner ${agentId}.`);
 }
 
@@ -110,7 +138,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         if (contracts.length > 0) {
           lines.push('  contracts:');
           for (const contract of contracts.slice(0, 12)) {
-            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport.state}  ${contract.capabilityCeiling.executionProtocol}/${contract.capabilityCeiling.reviewMode}`);
+            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport.state}  ${contract.capabilityCeiling.executionProtocol}/${contract.capabilityCeiling.reviewMode} (review mode advisory)`);
           }
         }
         ctx.print(lines.join('\n'));
@@ -134,7 +162,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  heartbeat: ${selected.heartbeat.status}`,
           `  heartbeat detail: ${selected.heartbeat.detail}`,
           `  executionProtocol: ${selected.negotiation.executionProtocol}`,
-          `  reviewMode: ${selected.negotiation.reviewMode}`,
+          `  reviewMode (advisory): ${selected.negotiation.reviewMode}`,
           `  communicationLane: ${selected.negotiation.communicationLane}`,
           `  trustClass: ${selected.negotiation.trustClass}`,
           `  taskId: ${selected.taskId ?? 'n/a'}`,
@@ -164,7 +192,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  label: ${selected.label}`,
           `  transport: ${selected.transportState}`,
           `  executionProtocol: ${selected.negotiation.executionProtocol}`,
-          `  reviewMode: ${selected.negotiation.reviewMode}`,
+          `  reviewMode (advisory): ${selected.negotiation.reviewMode}`,
           `  communicationLane: ${selected.negotiation.communicationLane}`,
           `  trustClass: ${selected.negotiation.trustClass}`,
           '  capabilities:',
@@ -234,7 +262,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  contract: ${contract?.id ?? 'n/a'}`,
           `  pool: ${contract?.poolId ?? 'n/a'}`,
           `  executionProtocol: ${contract?.capabilityCeiling.executionProtocol ?? 'n/a'}`,
-          `  reviewMode: ${contract?.capabilityCeiling.reviewMode ?? 'n/a'}`,
+          `  reviewMode (advisory): ${contract?.capabilityCeiling.reviewMode ?? 'n/a'}`,
           `  communicationLane: ${contract?.capabilityCeiling.communicationLane ?? 'n/a'}`,
         ].join('\n'));
         return;
@@ -247,7 +275,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         }
         let template = 'general';
         let descriptionArgs = args.slice(1);
-        if (descriptionArgs.length > 0 && descriptionArgs[0] in AGENT_TEMPLATES) {
+        if (descriptionArgs.length > 0 && isAgentTemplate(descriptionArgs[0])) {
           template = descriptionArgs[0]!;
           descriptionArgs = descriptionArgs.slice(1);
         }
@@ -299,7 +327,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         ctx.print([
           `Dispatched remote runner ${runnerId}`,
           `  template: ${template}`,
-          `  tools: ${templateDef.defaultTools.join(', ')}`,
+          `  tools: ${templateDef.defaultTools.join(', ')} (advisory: listed to the runner in its prompt; the runner's own harness is not restricted to them)`,
           `  description: ${description}`,
         ].join('\n'));
         return;
@@ -322,7 +350,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         }
         let template = pool.preferredTemplate ?? 'general';
         let descriptionArgs = args.slice(2);
-        if (descriptionArgs.length > 0 && descriptionArgs[0] in AGENT_TEMPLATES) {
+        if (descriptionArgs.length > 0 && isAgentTemplate(descriptionArgs[0])) {
           template = descriptionArgs[0]!;
           descriptionArgs = descriptionArgs.slice(1);
         }
@@ -376,7 +404,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         ctx.print([
           `Dispatched remote runner ${runnerId} via pool ${poolId}`,
           `  template: ${template}`,
-          `  tools: ${templateDef.defaultTools.join(', ')}`,
+          `  tools: ${templateDef.defaultTools.join(', ')} (advisory: listed to the runner in its prompt; the runner's own harness is not restricted to them)`,
           `  description: ${description}`,
         ].join('\n'));
         return;
@@ -401,12 +429,12 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  trustClass: ${contract.trustClass}`,
           `  template: ${contract.template}`,
           `  transport: ${contract.transport.state}`,
-          `  tools: ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
-          `  ceiling: ${contract.capabilityCeiling.capabilityCeilingTools.join(', ') || '(none)'}`,
+          `  tools (advisory, not enforced on an external runner): ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
+          `  ceiling (advisory, not enforced on an external runner): ${contract.capabilityCeiling.capabilityCeilingTools.join(', ') || '(none)'}`,
           `  protocol: ${contract.capabilityCeiling.executionProtocol}`,
-          `  reviewMode: ${contract.capabilityCeiling.reviewMode}`,
+          `  reviewMode (advisory): ${contract.capabilityCeiling.reviewMode}`,
           `  communicationLane: ${contract.capabilityCeiling.communicationLane}`,
-          `  writeScope: ${contract.capabilityCeiling.writeScope.join(', ') || '(none)'}`,
+          `  writeScope (advisory): ${contract.capabilityCeiling.writeScope.join(', ') || '(none)'}`,
         ].join('\n'));
         return;
       }
@@ -416,7 +444,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Agent manager is not available in this runtime.');
           return;
         }
-        handleRemoteCancelCommand(
+        await handleRemoteCancelCommand(
           args[1],
           activeConnections,
           ctx,
@@ -437,7 +465,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print(`Remote artifact export failed for ${agentId}.`);
           return;
         }
-        const exported = await remoteRunners.exportArtifact(artifact.id, args[2]);
+        const exported = await remoteRunners.exportArtifact(artifact.id, args[2] ? requireShellPaths(ctx).resolveWorkspacePath(args[2]) : undefined);
         if (!exported) {
           ctx.print(`Remote artifact export failed for ${agentId}.`);
           return;
@@ -478,7 +506,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
             ctx.print('Usage: /remote artifact export <artifactId> [path]');
             return;
           }
-          const exported = await remoteRunners.exportArtifact(artifactId, args[3]);
+          const exported = await remoteRunners.exportArtifact(artifactId, args[3] ? requireShellPaths(ctx).resolveWorkspacePath(args[3]) : undefined);
           if (!exported) {
             ctx.print(`Unknown remote artifact: ${artifactId}`);
             return;
@@ -512,7 +540,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print(`Unknown remote artifact: ${artifactId}`);
           return;
         }
-        const template = artifact.runnerContract.template in AGENT_TEMPLATES
+        const template = isAgentTemplate(artifact.runnerContract.template)
           ? artifact.runnerContract.template
           : 'general';
         const agentManager = ctx.ops.agentManager;
@@ -520,11 +548,25 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Agent manager is not available in this runtime.');
           return;
         }
+        // The artifact may come from another machine (/remote import). Running its
+        // task text with its tool list is an owner decision: typed by the owner,
+        // never model-invoked, and shown before it starts.
+        if (!isDirectOwnerCommandContext(ctx, 'remote')) {
+          ctx.print('Remote rerun-local requires the original directly entered command. Enter /remote rerun-local <artifactId> in the terminal.');
+          return;
+        }
+        const ceiling = artifact.runnerContract.capabilityCeiling;
+        if (ceiling.allowedTools.length === 0) {
+          ctx.print(`Artifact ${artifactId} recorded no allowed tools, so a local rerun would have no tools. Nothing was started.`);
+          return;
+        }
         const agent = agentManager.spawn({
           mode: 'spawn',
           task: artifact.task.task,
           template,
-          tools: [...artifact.runnerContract.capabilityCeiling.allowedTools],
+          tools: [...ceiling.allowedTools],
+          // Without this the spawn adds the template's default tools to the recorded set.
+          restrictTools: true,
           successCriteria: [...artifact.runnerContract.capabilityCeiling.successCriteria],
           requiredEvidence: [...artifact.runnerContract.capabilityCeiling.requiredEvidence],
           writeScope: [...artifact.runnerContract.capabilityCeiling.writeScope],
@@ -532,7 +574,13 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           reviewMode: artifact.runnerContract.capabilityCeiling.reviewMode,
           communicationLane: artifact.runnerContract.capabilityCeiling.communicationLane,
         });
-        ctx.print(`Spawned local rerun agent ${agent.id} from remote artifact ${artifactId}.`);
+        ctx.print([
+          `Spawned local rerun agent ${agent.id} from remote artifact ${artifactId}.`,
+          `  template: ${template}`,
+          `  tools (only these): ${ceiling.allowedTools.join(', ')}`,
+          `  writeScope: ${ceiling.writeScope.join(', ') || '(none)'}`,
+          `  task: ${artifact.task.task}`,
+        ].join('\n'));
         return;
       }
 
@@ -542,7 +590,15 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ctx.print('Usage: /remote import <path>');
           return;
         }
-        const artifact = await remoteRunners.importArtifact(path);
+        const sourcePath = requireShellPaths(ctx).resolveWorkspacePath(path);
+        // Importing stores the file's contract under its runner id. A file must not
+        // widen the ceiling of a runner this session already knows.
+        const conflict = importedContractConflict(remoteRunners, sourcePath);
+        if (conflict) {
+          ctx.print(`Remote import refused: ${conflict} Nothing was imported.`);
+          return;
+        }
+        const artifact = await remoteRunners.importArtifact(sourcePath);
         ctx.print(`Imported remote review artifact ${artifact.id} for runner ${artifact.runnerId}.`);
         return;
       }

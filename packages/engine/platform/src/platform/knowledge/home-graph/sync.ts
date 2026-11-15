@@ -24,12 +24,12 @@ import {
   isGeneratedPageSource,
   normalizeHomeGraphObjectInput,
   readRecord,
-  resolveHomeGraphSpace,
 } from './helpers.js';
 import { linkHomeGraphSnapshotObjectReferences } from './link-node.js';
 import { refreshHomeGraphQualityReport } from './quality.js';
 import { HomeGraphQualityHeldError } from './quality/reader.js';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
+import { resolveWritableHomeGraphSpace } from './space-selection.js';
 import { readHomeGraphState } from './state.js';
 import type { HomeGraphObjectInput, HomeGraphSnapshotInput, HomeGraphSyncResult } from './types.js';
 
@@ -54,9 +54,9 @@ export async function runHomeGraphSnapshotSync(input: {
   return withConfiguredDecisionModelPolicy(async () => {
     const { store, artifactStore } = input;
     const snapshot = snapshotNodeInput(input.snapshot);
-    const { spaceId, installationId } = resolveHomeGraphSpace(snapshot);
     const snapshotMembership = captureSnapshotGroups(snapshot);
     await store.init();
+    const { spaceId, installationId } = resolveWritableHomeGraphSpace(store, snapshot);
     // Validate saved membership before any snapshot prefix is mutated.
     for (const node of store.listNodesInSpace(spaceId)) if (SNAPSHOT_NODE_KINDS.has(node.kind) && readRecord(node.metadata.homeAssistant).installationId === installationId) storedSnapshotGroups(node);
     const nodeIdentities = createHomeGraphNodeIdentityPlanner(store);
@@ -116,9 +116,11 @@ export async function runHomeGraphSnapshotSync(input: {
       else try {
         const report = await refreshHomeGraphQualityReport(store, spaceId, installationId, { signal: input.signal });
         issueCount = report.issues.length;
-        quality = report.retainedLegacyIssues
-          ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
-          : { status: 'refreshed' };
+        quality = report.unansweredDeviceIds.length
+          ? { status: 'partial', reason: `unsettled-devices:${report.unansweredDeviceIds.join(',')}`, ...(report.retainedLegacyIssues ? { retainedLegacyIssues: report.retainedLegacyIssues } : {}) }
+          : report.retainedLegacyIssues
+            ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
+            : { status: 'refreshed' };
       } catch (error) {
         if (input.signal?.aborted) throw error;
         if (!(error instanceof HomeGraphQualityHeldError) && !(error instanceof JudgmentInputError)) throw error;

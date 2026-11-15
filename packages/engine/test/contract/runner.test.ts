@@ -34,9 +34,10 @@ import {
 } from './runner-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 function use(h: Harness): Harness {
@@ -228,7 +229,7 @@ describe('transport retry through the failure reading', () => {
         },
       },
     }));
-    const log = new SqliteDecisionLog(':memory:');
+    using log = new SqliteDecisionLog(':memory:');
     installJudgmentPort(withDecisionLog(judgmentPort('test'), log));
     const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
@@ -246,7 +247,6 @@ describe('transport retry through the failure reading', () => {
       transient_network: { kind: 'yes-no', verdict: 'yes', outcome: 'act' },
       before_response: { kind: 'yes-no', verdict: 'yes', outcome: 'act' },
     });
-    log[Symbol.dispose]();
   });
 
   test('a second transport failure fails the unit and the contract with failureKind transport', async () => {
@@ -361,7 +361,8 @@ describe('cancel', () => {
     const ctx = { sessionId: 'test', traceId: 'test', source: 'test' };
     emitAgentCompleted(h.bus, ctx, { agentId: owner.id, durationMs: 1, output: 'too early' });
     emitAgentFailed(h.bus, ctx, { agentId: owner.id, error: 'too early', durationMs: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The bus delivers to listeners in a microtask; let them see the early events first.
+    await new Promise<void>((done) => setImmediate(done));
     expect(h.manager.getStatus(owner.id)!.status).toBe('running');
     expect(h.store.get(contract.id)!.status).toBe('running');
     release();
@@ -427,7 +428,7 @@ describe('isolation', () => {
     expect(done.status).toBe('passed');
     expect(done.commit?.status).toBe('committed');
     expect(spawnSync('git', ['-C', root, 'show', 'HEAD:src/csv.ts'], { encoding: 'utf-8' }).stdout).toBe('export const parse = 1;\n');
-    h.dispose();
+    await h.dispose();
     harness = undefined;
     rmSync(root, { recursive: true, force: true });
   }, 20_000);
@@ -557,7 +558,7 @@ describe('the pass guarantee', () => {
           expect(unit.checks.some((check) => check.result === 'pass')).toBe(false);
         }
       } finally {
-        h.dispose();
+        await h.dispose();
       }
     }
     expect(passedSequences).toBeGreaterThan(0);

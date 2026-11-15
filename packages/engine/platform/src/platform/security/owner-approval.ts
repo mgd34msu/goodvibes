@@ -290,7 +290,10 @@ export class OwnerApprovalStore {
       // Ordinary sends with no matching pending grant need no commitment.
       // Several bound candidates compare this same input at most once.
       if (!compared) { wanted = fingerprintOutwardContent(input.content); compared = true; }
-      return wanted === null || approval.contentFingerprint === wanted;
+      // A grant bound to a payload is spent only by that payload. A caller that
+      // names no content must not be able to spend it, or "forgetting" the
+      // content would widen the approval to the action id alone.
+      return wanted !== null && approval.contentFingerprint === wanted;
     });
     if (index < 0) return null;
     const [approval] = this.approvals.splice(index, 1);

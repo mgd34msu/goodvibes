@@ -13,6 +13,8 @@ import {
   compareSpreadRank,
   compareVersions,
 } from '../platform/src/platform/cluster/ranking.js';
+import { resolveClusterSettings } from '../platform/src/platform/cluster/settings.js';
+import { deriveClusterTiming } from '../platform/src/platform/cluster/timing.js';
 import {
   addNode,
   advance,
@@ -234,27 +236,33 @@ describe('cluster election: ranking decides, not scheduling', () => {
 
   test('a node already holding more surfaces loses to a lighter one', async () => {
     const world = createWorld();
-    // The busy node serves three surfaces and is alone for long enough to take
-    // all of them; the light node serves only the contested one.
+    const holder = addNode(world, { id: 'node-holder', surfaces: ['ntfy-three'] });
+    await startNode(world, holder);
+    await advance(world, 1_100);
+
+    // Both nodes boot into a holder for ntfy-three, so both stand by there and
+    // watch it on the same schedule. The busy node is alone for the other two
+    // and takes them, so it holds two surfaces to the light node's none.
     const busy = addNode(world, {
       id: 'node-busy',
       jitter: 0,
       surfaces: ['ntfy-one', 'ntfy-two', 'ntfy-three'],
     });
-    await startNode(world, busy);
-    await advance(world, 1_100);
-    expect(holders(world, 'ntfy-three')).toEqual([busy]);
-
     const light = addNode(world, { id: 'node-light', jitter: 0.9, surfaces: ['ntfy-three'] });
+    await startNode(world, busy);
     await startNode(world, light);
     await advance(world, 2_000);
+    expect(holders(world, 'ntfy-one')).toEqual([busy]);
+    expect(holders(world, 'ntfy-two')).toEqual([busy]);
+    expect(roleOf(busy, 'ntfy-three')).toBe('standby');
+    expect(roleOf(light, 'ntfy-three')).toBe('standby');
 
-    // The busy node then loses ntfy-three cleanly, so the surface is free and
-    // both nodes contest it: the lighter one takes it even though the busy one
-    // claims first (jitter 0 against 0.9).
-    await busy.election.stop('operator stopped this node');
-    await advance(world, 4_000);
+    // The holder crashes without a word. Both live nodes contest the surface
+    // and the busy one claims first (jitter 0 against 0.9); the lighter one
+    // still takes it because it holds fewer surfaces.
+    await raceAfterHolderLoss(world, holder);
     expect(surfaceState(light, 'ntfy-three').running).toBe(true);
+    expect(surfaceState(busy, 'ntfy-three').running).toBe(false);
   });
 });
 
@@ -364,25 +372,20 @@ describe('cluster election: suspend and wake', () => {
 
 describe('cluster election: configuration', () => {
   test('disabling the election is not a way to make two nodes consume silently', () => {
-    // resolveClusterSettings must preserve an explicit false rather than
-    // defaulting it back on.
-    const resolved = settings({ enabled: false });
-    expect(resolved.enabled).toBe(false);
+    // An explicit false must not be defaulted back on, and a non-boolean must
+    // not switch it on by accident.
+    expect(resolveClusterSettings({ enabled: false }).enabled).toBe(false);
+    expect(resolveClusterSettings({ enabled: true }).enabled).toBe(true);
+    expect(resolveClusterSettings({ enabled: 'yes' }).enabled).toBe(false);
   });
 
-  test('a master timeout shorter than two heartbeats is raised, not accepted', async () => {
-    const world = createWorld();
-    const node = addNode(world, {
-      id: 'node-a',
-      surfaces: ['ntfy-main'],
-      settings: { heartbeatSeconds: 5, masterTimeoutSeconds: 3 },
-    });
-    await startNode(world, node);
-    // 5s heartbeat with a 3s timeout would make a standby declare every holder
-    // dead between beats; the derived timing floors it at two heartbeats, so
-    // the node simply runs rather than flapping.
-    await advance(world, 30_000);
-    expect(roleOf(node, 'ntfy-main')).toBe('master');
-    expect(surfaceState(node, 'ntfy-main').stopCount).toBe(0);
+  test('a master timeout shorter than two heartbeats is raised, not accepted', () => {
+    const raw = { enabled: true, heartbeatSeconds: 5, masterTimeoutSeconds: 3 };
+    // The resolver raises it...
+    expect(resolveClusterSettings(raw).masterTimeoutSeconds).toBe(10);
+    // ...and so does the timing derivation on its own, for settings that did
+    // not come through the resolver.
+    expect(deriveClusterTiming(settings({ heartbeatSeconds: 5, masterTimeoutSeconds: 3 })).masterTimeoutMs)
+      .toBe(10_000);
   });
 });

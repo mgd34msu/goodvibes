@@ -1,7 +1,6 @@
 /**
  * Regression tests for the batch live-replay findings: honest
- * pre-first-token wording, a real /config set verb, attach-and-steer from the
- * fleet tree, and the Ctrl+C chord decoupled from live TTS.
+ * pre-first-token wording and the Ctrl+C chord decoupled from live TTS.
  */
 import { describe, test, expect } from 'bun:test';
 import { UIFactory } from '../../renderer/ui-factory.ts';

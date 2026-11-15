@@ -5,6 +5,7 @@ import type { JudgmentPort, JudgmentRequest, Questions } from '@goodvibes-jev/ju
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { emitToolReceived, emitToolValidated, emitToolPrehooked, emitToolExecuting, emitToolMapped, emitToolPosthooked, emitToolPermissioned, emitToolSucceeded, emitToolFailed, emitToolCancelled } from '../platform/src/platform/runtime/emitters/index.ts';
 import { AgentExecutionLedger, forgetLedgerArgRoles } from '../platform/src/platform/gate/policy/execution-ledger.ts';
+import { emitTurnCancel } from '../platform/src/platform/runtime/emitters/turn.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
 
 const ctx = { sessionId: 'ledger', traceId: 'ledger', source: 'test' };
@@ -202,4 +203,20 @@ test('argument role cache keeps exact tool/name pairs even when they contain del
   receive(bus, 'second', { ['b\u0000c']: 'SYNTHETIC_CACHE_COLLISION' }, 'a'); await subject.settled();
   expect(JSON.stringify(scripted.requests)).not.toContain('SYNTHETIC_CACHE_COLLISION');
   expect(JSON.stringify(subject.getSnapshot())).not.toContain('SYNTHETIC_CACHE_COLLISION');
+});
+
+describe('turn end settles calls that never reported a result', () => {
+  test('a call still running when its turn is cancelled is recorded as cancelled, with the reason', async () => {
+    const bus = new RuntimeEventBus();
+    const subject = ledger(bus);
+    receive(bus, 'admission-cancelled');
+    receive(bus, 'finished');
+    emitToolSucceeded(bus, ctx, { ...call('finished'), durationMs: 1 });
+    emitTurnCancel(bus, ctx, { turnId: 'turn', reason: 'user stopped the turn', stopReason: 'cancelled' });
+    await tick(); await subject.settled();
+    const records = subject.getSnapshot().records;
+    expect(records.find(record => record.callId === 'admission-cancelled')).toMatchObject({ status: 'cancelled', cancelReason: 'The turn ended before this call reported a result.' });
+    expect(records.find(record => record.callId === 'finished')?.status).toBe('succeeded');
+    expect(subject.getSnapshot().running).toBe(0);
+  });
 });

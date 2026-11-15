@@ -1,4 +1,4 @@
-/** UNRUN: actual native artifact publication/cleanup mutual exclusion. */
+/** Actual native artifact publication/cleanup mutual exclusion. */
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, mkdirSync, renameSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

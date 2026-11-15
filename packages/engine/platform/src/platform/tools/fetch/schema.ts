@@ -38,7 +38,7 @@ export const FETCH_TOOL_SCHEMA = {
           },
           body_base64: {
             type: 'string',
-            description: 'Base64-encoded request body. Decoded before sending. Takes precedence over body.',
+            description: 'Base64-encoded request body, decoded to bytes and sent as binary. Content-Type defaults to application/octet-stream unless body_type is json or form. Precedence: body_data (with form or multipart) wins over body_base64, which wins over body.',
           },
           body_type: {
             type: 'string',
@@ -47,7 +47,7 @@ export const FETCH_TOOL_SCHEMA = {
               'How to encode the body. json: sets Content-Type application/json;'
               + ' form: URL-encodes body_data or sends body as application/x-www-form-urlencoded;'
               + ' multipart: builds a FormData body from body_data (object of key-value pairs);'
-              + ' raw: sends as-is.',
+              + ' raw: sends body as-is with no default Content-Type (set one in headers).',
           },
           body_data: {
             type: 'object',
@@ -67,7 +67,7 @@ export const FETCH_TOOL_SCHEMA = {
               + ' readable: extract main content, strip nav/sidebar/footer;'
               + ' code_blocks: extract <pre>/<code> blocks;'
               + ' links: extract all URLs; metadata: extract title/og-tags;'
-              + ' structured: extract text of elements matching CSS selectors (requires selectors field);'
+              + ' structured: extract text of elements matching simple selectors: tag, #id, .class, tag.class (requires selectors field);'
               + ' tables: parse <table> elements into JSON arrays;'
               + ' pdf: extract text from PDF responses;'
               + ' summary: extractive summary (the paragraph that says what the page is about + headings).',
@@ -75,7 +75,7 @@ export const FETCH_TOOL_SCHEMA = {
           selectors: {
             type: 'array',
             items: { type: 'string' },
-            description: 'CSS selectors for structured extraction mode. Each matched element text is returned as an array item.',
+            description: 'Selectors for structured extraction mode: tag, #id, .class, or tag.class with any number of classes (for example "h2", "#main", ".note", "div.card.big"). Combinators, attribute selectors and comma lists are not supported and are reported as an error. Each matched element text is returned as an array item.',
           },
           timeout_ms: {
             type: 'integer',
@@ -85,7 +85,7 @@ export const FETCH_TOOL_SCHEMA = {
           max_content_length: {
             type: 'integer',
             minimum: 1,
-            description: 'Maximum response body size in bytes. Responses exceeding this are truncated. Overrides global max_content_length.',
+            description: 'Maximum response body size in bytes. Responses exceeding this are truncated (truncated: true). Overrides global max_content_length. Default 5000000.',
           },
           retry_on_auth: {
             type: 'boolean',
@@ -136,7 +136,7 @@ export const FETCH_TOOL_SCHEMA = {
     cache_ttl_seconds: {
       type: 'integer',
       minimum: 0,
-      description: 'Cache GET responses by URL+params for this many seconds. 0 disables caching (default).',
+      description: 'Cache successful GET responses (status below 400) by URL+params for this many seconds. Error statuses are never cached. 0 disables caching (default).',
     },
     rate_limit_ms: {
       type: 'integer',
@@ -146,7 +146,7 @@ export const FETCH_TOOL_SCHEMA = {
     max_content_length: {
       type: 'integer',
       minimum: 1,
-      description: 'Global maximum response body size in bytes. Responses exceeding this are truncated. Can be overridden per-URL.',
+      description: 'Global maximum response body size in bytes. Responses exceeding this are truncated (truncated: true). Default 5000000. Can be overridden per-URL.',
     },
     sanitize_mode: {
       type: 'string',
@@ -154,13 +154,14 @@ export const FETCH_TOOL_SCHEMA = {
       description:
         'Response sanitization mode applied to all URL responses.'
         + ' none: content returned verbatim (trusted hosts only);'
-        + ' safe-text: strips script/style blocks and control characters (default);'
-        + ' strict: strips all HTML and non-printable characters (untrusted hosts).',
+        + ' safe-text: strips script/style blocks, control characters and invisible Unicode (default);'
+        + ' strict: strips all HTML and every non-ASCII character (untrusted hosts).'
+        + ' Both modes alter the content, so structured data can change; a result whose content was altered carries sanitized: true.',
     },
     trusted_hosts: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Hostnames or glob patterns explicitly trusted. Trusted hosts may use sanitize_mode: none.',
+      description: 'Ignored. Which hosts are trusted (and may use sanitize_mode: none) is set in configuration (fetch.trustedHosts), not per call.',
     },
     blocked_hosts: {
       type: 'array',
@@ -212,7 +213,7 @@ export interface FetchUrlInput {
   params?: Record<string, string> | undefined;
   headers?: Record<string, string> | undefined;
   body?: string | undefined;
-  /** Base64-encoded request body. Decoded before sending. Takes precedence over body. */
+  /** Base64-encoded request body, sent as bytes. Wins over body; body_data with form or multipart wins over both. */
   body_base64?: string | undefined;
   body_type?: 'json' | 'form' | 'raw' | 'multipart' | undefined;
   /** Key-value pairs used when body_type is 'form' or 'multipart'. */
@@ -257,7 +258,7 @@ export interface FetchInput {
    * Defaults to `'safe-text'` when omitted (rollback-safe default for fetch sanitization).
    */
   sanitize_mode?: FetchSanitizeMode | undefined;
-  /** Hostnames or glob patterns explicitly trusted. Trusted hosts may use sanitize_mode: none. */
+  /** Ignored: trusted hosts come from configuration (fetch.trustedHosts), never from a call. */
   trusted_hosts?: string[] | undefined;
   /** Hostnames or glob patterns explicitly blocked. Denied pre-request regardless of other config. */
   blocked_hosts?: string[] | undefined;

@@ -1,4 +1,4 @@
-/** Real admission/crypto ownership regressions, authored and UNRUN. */
+/** Real admission/crypto ownership regressions. */
 import { expect, test } from 'bun:test';
 import { GroupAdmissionService, type AdmissionHost } from '../platform/src/platform/cluster/group-admissions.ts';
 import { FakeClusterClock } from '../platform/src/platform/cluster/clock.ts';

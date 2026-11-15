@@ -8,9 +8,9 @@ import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { localModelCookbook } from './agent-harness-model-routing.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { agentHarnessVibeHealth } from './agent-harness-vibe-health.ts';
-import { capabilityById, collectSnapshot, setupPlanStatusForCapability, setupProviderSignalIds } from './agent-harness-setup-posture-utils.ts';
+import { capabilityById, collectSnapshot, servicePostureFailure, setupPlanStatusForCapability, setupProviderSignalIds } from './agent-harness-setup-posture-utils.ts';
 import { browserControlSignals, localModelSetupNextAction, localModelSetupReadiness, localModelSetupSignals, localModelSetupStatus, settingsImportChangeCount, settingsImportSignals } from './agent-harness-setup-model-helpers.ts';
-import { connectedHostAuthNextAction, connectedHostAuthPosture, connectedHostAuthSignals, connectedHostAuthStatus, connectedHostBootstrapPlan, connectedHostRepairCards, connectedHostServiceProbe, hostSetupStatus, serviceProbeSignal, setupServiceLifecycleDecision } from './agent-harness-setup-connected-host.ts';
+import { connectedHostAuthNeedsVerificationOnly, connectedHostAuthNextAction, connectedHostAuthPosture, connectedHostAuthSignals, connectedHostAuthStatus, connectedHostBootstrapPlan, connectedHostRepairCards, connectedHostServiceProbe, hostSetupStatus, serviceProbeSignal, setupServiceLifecycleDecision } from './agent-harness-setup-connected-host.ts';
 import { installSmokePlan, installSmokeSignals, setupCompletionMarkerExists } from './agent-harness-setup-smoke.ts';
 import type { SetupPlanItem } from './agent-harness-setup-posture-types.ts';
 
@@ -37,7 +37,7 @@ export async function buildSetupPlan(
   const settingsImportChanges = settingsImportChangeCount(settingsImport);
   const localModels = localModelCookbook(context, true);
   const localModelReadiness = localModelSetupReadiness(localModels);
-  const serviceProbe = connectedHostServiceProbe(servicePosture);
+  const serviceProbe = connectedHostServiceProbe(servicePosture, servicePostureFailure(context));
   const authPosture = await connectedHostAuthPosture(context, snapshot, caller.options);
   caller.assertCurrent();
   const smokePlan = installSmokePlan(providerAccess, serviceProbe, authPosture);
@@ -78,7 +78,7 @@ export async function buildSetupPlan(
       userRoute: 'Agent Workspace -> Connected Host; /auth review',
       modelRoute: authPosture.operatorToken.path === 'Agent host-bound pairing store' && !authPosture.operatorToken.usable
         ? 'agent_harness mode:"run_command" command:"/setup pair"'
-        : authPosture.operatorToken.usable
+        : connectedHostAuthNeedsVerificationOnly(authPosture)
         ? 'host action:"status" includeParameters:true'
         : authPosture.routes.provisionTokenRoute,
       relatedSetupItemId: 'operator-terminal',
@@ -143,10 +143,13 @@ export async function buildSetupPlan(
     {
       id: 'agent-knowledge',
       label: 'Agent Knowledge readiness',
-      status: 'recommended',
+      // The knowledge route lives on the connected host, so it cannot be ready while the host probe says it is not reachable.
+      status: serviceProbe.status === 'reachable' ? 'recommended' : 'check',
       priority: 30,
       blocksAutonomy: false,
-      reason: agentKnowledge.detail,
+      reason: serviceProbe.status === 'reachable'
+        ? `${agentKnowledge.detail} The knowledge route itself is checked by host action:"status", not by this plan.`
+        : `${agentKnowledge.detail} The connected host is ${serviceProbe.status}, so the knowledge route is not verified; check host action:"status" first.`,
       nextAction: 'Inspect isolated Agent Knowledge status before source-backed memory or research ingest.',
       userRoute: 'Agent Workspace -> Knowledge',
       modelRoute: 'host action:"status" or agent_knowledge',

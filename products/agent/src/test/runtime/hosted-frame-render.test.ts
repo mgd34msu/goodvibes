@@ -28,7 +28,7 @@ type Recorded =
   | { readonly kind: 'stream-final' };
 
 /** A conversation that records what it was told, in order. */
-function recorder(): { conversation: HostedFrameConversation; entries: Recorded[]; renders: () => number } {
+function recorder(): { conversation: HostedFrameConversation; entries: Recorded[]; renders: () => number; requestRender: () => void } {
   const entries: Recorded[] = [];
   let renders = 0;
   const conversation: HostedFrameConversation = {
@@ -43,7 +43,7 @@ function recorder(): { conversation: HostedFrameConversation; entries: Recorded[
     updateStreamingBlock: (content) => { entries.push({ kind: 'stream-update', content }); },
     finalizeStreamingBlock: () => { entries.push({ kind: 'stream-final' }); },
   };
-  return { conversation, entries, renders: () => renders };
+  return { conversation, entries, renders: () => renders, requestRender: () => { renders += 1; } };
 }
 
 function frame(type: string, payload: Record<string, unknown> = {}): { type: string; payload: Record<string, unknown> } {
@@ -52,8 +52,8 @@ function frame(type: string, payload: Record<string, unknown> = {}): { type: str
 
 describe('rendering a daemon-hosted turn from its event frames', () => {
   test('text deltas stream into the conversation and close as one assistant message', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
 
     renderer.apply(frame('STREAM_START', { turnId: 't1' }));
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', content: 'Hel', accumulated: 'Hel' }));
@@ -66,11 +66,13 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
     expect(assistant).toHaveLength(1);
     expect((assistant[0] as { content: string }).content).toBe('Hello');
     expect(renderer.isTurnFinished()).toBe(true);
+    // One repaint request per frame that changed what is on screen: start, two deltas, completion.
+    expect(renders()).toBe(4);
   });
 
   test('a tool call closes the assistant message it belongs to, and its result follows', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
 
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'Reading the file' }));
     renderer.apply(frame('TOOL_RECEIVED', {
@@ -96,11 +98,13 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
     expect(results[0]?.success).toBe(true);
     expect(results[0]?.output).toBe('hello');
     expect((ordered[2] as { content: string }).content).toBe('It says hello.');
+    // delta, tool call, tool result, delta, completion; usage-less bookkeeping frames never repaint.
+    expect(renders()).toBe(5);
   });
 
   test('a failed tool arrives as a failed result carrying the reason', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
 
     renderer.apply(frame('TOOL_RECEIVED', { turnId: 't1', callId: 'c9', tool: 'write_file', args: {} }));
     renderer.apply(frame('TOOL_FAILED', {
@@ -111,11 +115,12 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
       { results: readonly RecordedToolResult[] }).results;
     expect(results[0]?.success).toBe(false);
     expect(results[0]?.error).toBe('permission denied');
+    expect(renders()).toBe(2);
   });
 
   test('a truncated tool result says it is a preview instead of passing as the whole output', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
 
     renderer.apply(frame('TOOL_RECEIVED', { turnId: 't1', callId: 'c1', tool: 'read_file', args: {} }));
     renderer.apply(frame('TOOL_SUCCEEDED', {
@@ -130,8 +135,8 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
   });
 
   test('usage from the turn lands on the message that ends it, not on an intermediate one', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
 
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'working' }));
     renderer.apply(frame('TOOL_RECEIVED', { turnId: 't1', callId: 'c1', tool: 'ls', args: {} }));
@@ -149,9 +154,39 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
     expect(assistants[1]?.opts?.model).toBe('claude-opus-5');
   });
 
+  test('a tool loop with several model calls reports the whole turn\'s usage', () => {
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
+
+    renderer.apply(frame('LLM_RESPONSE_RECEIVED', {
+      turnId: 't1', inputTokens: 1000, outputTokens: 50, cacheReadTokens: 400,
+    }));
+    renderer.apply(frame('LLM_RESPONSE_RECEIVED', {
+      turnId: 't1', inputTokens: 1200, outputTokens: 70, cacheReadTokens: 600,
+    }));
+    renderer.apply(frame('TURN_COMPLETED', { turnId: 't1', response: 'done' }));
+
+    const assistant = entries.find((e) => e.kind === 'assistant') as
+      { opts?: { usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } } };
+    expect(assistant.opts?.usage).toEqual({ inputTokens: 2200, outputTokens: 120, cacheReadTokens: 1000 });
+    // Usage frames are held for the closing message and request no repaint; only completion does.
+    expect(renders()).toBe(1);
+  });
+
+  test('a failed tool with no error text still says it failed', () => {
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
+
+    renderer.apply(frame('TOOL_FAILED', { turnId: 't1', callId: 'c2', tool: 'ls', durationMs: 1 }));
+
+    const results = (entries.find((e) => e.kind === 'tool-results') as
+      { results: readonly RecordedToolResult[] }).results;
+    expect(results[0]?.error).toBe('the tool failed');
+  });
+
   test('a turn with no usage frame produces no usage rather than zeros', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'hi' }));
     renderer.apply(frame('TURN_COMPLETED', { turnId: 't1', response: 'hi' }));
     const assistant = entries.find((e) => e.kind === 'assistant') as { opts?: { usage?: unknown } };
@@ -159,16 +194,16 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
   });
 
   test('a non-streaming turn still renders, from the completion frame', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('TURN_COMPLETED', { turnId: 't1', response: 'the whole answer' }));
     const assistant = entries.find((e) => e.kind === 'assistant') as { content: string };
     expect(assistant.content).toBe('the whole answer');
   });
 
   test('a turn the daemon reports failing keeps its partial text and says what happened', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'partial' }));
     renderer.apply(frame('TURN_ERROR', { turnId: 't1', error: 'provider_exhausted' }));
 
@@ -176,40 +211,44 @@ describe('rendering a daemon-hosted turn from its event frames', () => {
     const system = entries.find((e) => e.kind === 'system') as { content: string };
     expect(system.content).toContain('provider_exhausted');
     expect(renderer.isTurnFinished()).toBe(true);
+    expect(renders()).toBe(2);
   });
 
   test('a stream that dies mid-turn keeps the partial text and states the turn may still be running', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'half an answer' }));
     renderer.abandon('The connection to the hosting daemon ended before this turn finished.');
 
     expect((entries.find((e) => e.kind === 'assistant') as { content: string }).content).toBe('half an answer');
     expect((entries.find((e) => e.kind === 'system') as { content: string }).content)
       .toContain('ended before this turn finished');
+    expect(renders()).toBe(2);
   });
 
   test('frames arriving after the turn ended are ignored', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('TURN_COMPLETED', { turnId: 't1', response: 'done' }));
     const afterEnd = entries.length;
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', accumulated: 'late' }));
     renderer.apply(frame('TURN_COMPLETED', { turnId: 't1', response: 'again' }));
     expect(entries.length).toBe(afterEnd);
+    expect(renders()).toBe(1);
   });
 
   test('an unrecognised frame changes nothing', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('SOMETHING_NEW', { turnId: 't1' }));
     renderer.apply(frame('TOOL_PREHOOKED', { turnId: 't1', callId: 'c1', tool: 'ls' }));
     expect(entries).toEqual([]);
+    expect(renders()).toBe(0);
   });
 
   test('a delta with no accumulated field still builds the running text', () => {
-    const { conversation, entries } = recorder();
-    const renderer = createHostedFrameRenderer(conversation, () => {});
+    const { conversation, entries, renders, requestRender } = recorder();
+    const renderer = createHostedFrameRenderer(conversation, requestRender);
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', content: 'one ' }));
     renderer.apply(frame('STREAM_DELTA', { turnId: 't1', content: 'two' }));
     const updates = entries.filter((e) => e.kind === 'stream-update').map((e) => (e as { content: string }).content);

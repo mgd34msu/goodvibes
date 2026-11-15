@@ -27,6 +27,11 @@ const source = {
   id: 'source-1', kind: 'watcher', label: 'Source 1', enabled: true, createdAt: 1, updatedAt: 1, metadata: {},
 } as AutomationSourceRecord;
 
+/** Let queued promise work finish: setImmediate runs after every pending microtask, so this never depends on elapsed time. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 3; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+};
+
 async function failedEventFor(message: string): Promise<{ retryable: boolean; error: string }> {
   const root = mkdtempSync(join(tmpdir(), 'gv-watcher-failed-'));
   roots.push(root);
@@ -44,7 +49,7 @@ async function failedEventFor(message: string): Promise<{ retryable: boolean; er
   registry.attachRuntime({ runtimeBus: bus });
   registry.registerWatcher({ id: 'w1', label: 'W1', source, run: () => { throw new Error(message); } });
   await registry.runWatcherNow('w1');
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle();
   expect(seen).toHaveLength(1);
   return seen[0]!;
 }

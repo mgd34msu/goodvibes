@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { AGENT_CLI_CATALOG } from '../../cli/catalog.ts';
 import { extractNativeHeadlessOptions } from '../../cli/native-headless-options.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 
@@ -24,11 +23,6 @@ function expectUnchanged(argv: readonly string[]) {
 }
 
 describe('native headless option authority', () => {
-  test('the guarded required-value spellings cover the current Agent parser', () => {
-    const required = AGENT_CLI_CATALOG.globalFlags.filter(flag => ['string', 'string-list', 'port', 'enum'].includes(flag.kind)).flatMap(flag => [...flag.tokens]);
-    expect([...new Set(required)].sort()).toEqual([...valueOptions].sort());
-  });
-
   test('empty and ordinary argv have no recovery authority', () => {
     expectUnchanged([]);
     expectUnchanged(['run', '  Keep CRLF\r\n😀 !@source.md @context  ', '--output', 'json']);

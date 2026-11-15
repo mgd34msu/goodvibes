@@ -88,14 +88,24 @@ export interface GoogleDiscoverySources {
   readonly homeDirectory: string;
 }
 
-/** True when a secret exists and is non-empty. Never returns the value. */
+/**
+ * True when a secret exists and is non-empty. Never returns the value.
+ *
+ * A store that cannot be read is not an empty one: treating it as empty would
+ * route a machine that holds a working credential into a new-client
+ * walkthrough, so the failure is raised for the caller to show.
+ */
 async function secretPresent(secrets: GoogleSecretPort, key: string): Promise<boolean> {
+  let value: string | null;
   try {
-    const value = await secrets.get(key);
-    return typeof value === 'string' && value.trim().length > 0;
-  } catch {
-    return false;
+    value = await secrets.get(key);
+  } catch (error) {
+    throw new Error(
+      'The encrypted store could not be read, so it is not known whether a Google credential is stored. '
+      + `Unlock or repair the store and try again (${error instanceof Error ? error.message : String(error)}).`,
+    );
   }
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 /**

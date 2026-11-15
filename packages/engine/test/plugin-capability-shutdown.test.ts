@@ -115,18 +115,17 @@ describe('voice stream ownership', () => {
     expect(() => result.chunks[Symbol.asyncIterator]()).toThrow(PluginClosedError);
   });
 
-  test('an unconsumed stream is honestly pending and an explicit iterator return releases it', async () => {
+  test('a stream nobody started does not hold shutdown, and starting it afterwards is refused', async () => {
     const fx = ownership();
     let produced = 0;
     const provider: VoiceProvider = { id: 'fixture', label: '', capabilities: ['tts-stream'], synthesizeStream() {
       return { providerId: 'fixture', mimeType: 'audio/wav', format: 'wav', metadata: {}, chunks: (async function* () { produced++; yield { data: new Uint8Array(), sequence: 0 }; })() };
     } };
     const result = await fx.owned.voice(provider).synthesizeStream!({ text: '' });
-    let closed = false;
-    const closing = fx.close().then(() => { closed = true; });
-    await turns(); expect(closed).toBe(false); expect(produced).toBe(0);
-    await result.chunks[Symbol.asyncIterator]().return!();
-    await closing; expect(produced).toBe(0);
+    expect(fx.tracker.inFlight('fixture')).toBe(0);
+    await fx.close();
+    expect(produced).toBe(0);
+    expect(() => result.chunks[Symbol.asyncIterator]()).toThrow(PluginClosedError);
   });
 
   test.each(['eof', 'error'] as const)('settles ownership on iterator %s while preserving its result', async (mode) => {

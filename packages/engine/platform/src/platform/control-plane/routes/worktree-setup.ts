@@ -8,6 +8,8 @@
  * and returns the result. Registered from services.ts, the composition root
  * that holds the worktree registry, the daemon config, and the source root.
  */
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { WorktreeRegistry } from '../../runtime/worktree/registry.js';
@@ -17,7 +19,7 @@ import { readInvocationParams } from './invocation-params.js';
 
 /** The deps the worktree lifecycle verbs need, the registry to act on, the source root to carry from, and the current setup config. */
 export interface WorktreeSetupGatewayDeps {
-  readonly registry: Pick<WorktreeRegistry, 'recordSetup' | 'discard'>;
+  readonly registry: Pick<WorktreeRegistry, 'recordSetup' | 'discard' | 'list'>;
   readonly sourceRoot: string;
   /** Resolves the current per-project setup config (read fresh each run so a config change takes effect without a restart). */
   readonly resolveConfig: () => WorktreeSetupConfig;
@@ -30,13 +32,39 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
+/**
+ * The one linked worktree `rawPath` names. Setup commands and discard act on
+ * whatever directory they are given (discard even commits into it), so a path
+ * that is the main checkout, another repository, or just a folder is refused
+ * before anything runs.
+ */
+async function resolveLinkedWorktree(deps: WorktreeSetupGatewayDeps, rawPath: string): Promise<string> {
+  const absolute = resolve(deps.sourceRoot, rawPath);
+  let real = absolute;
+  try { real = realpathSync(absolute); } catch { /* a path that is gone cannot match a live worktree below */ }
+  let main = resolve(deps.sourceRoot);
+  try { main = realpathSync(main); } catch { /* an unreadable source root matches nothing */ }
+  const rows = await deps.registry.list();
+  const known = rows.find((row) => row.path === real || row.path === absolute);
+  if (!known || known.path === main) {
+    throw new GatewayVerbError(
+      `${rawPath} is not a linked worktree of this project, so nothing was run or changed. List the project's worktrees (worktrees.snapshot) and pass one of their paths.`,
+      'NOT_FOUND',
+      404,
+      'path',
+    );
+  }
+  return known.path;
+}
+
 export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requiredString(params.path, 'path');
-    const setup = await runWorktreeSetup(path, deps.sourceRoot, deps.resolveConfig());
-    deps.registry.recordSetup(path, setup);
-    return { path, setup };
+    const worktreePath = await resolveLinkedWorktree(deps, path);
+    const setup = await runWorktreeSetup(worktreePath, deps.sourceRoot, deps.resolveConfig());
+    deps.registry.recordSetup(worktreePath, setup);
+    return { path: worktreePath, setup };
   };
 }
 
@@ -49,7 +77,7 @@ export function createWorktreeDiscardHandler(deps: WorktreeSetupGatewayDeps): Ga
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requiredString(params.path, 'path');
-    return await deps.registry.discard(path);
+    return await deps.registry.discard(await resolveLinkedWorktree(deps, path));
   };
 }
 

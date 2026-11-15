@@ -34,7 +34,7 @@ import { analyzeDecisionLog, JUDGMENT_EVAL_SUITE, judgmentEvalScenarios } from '
 import { EvalRunner } from '../platform/src/platform/runtime/eval/index.ts';
 import { decisionLogPath, openStateDecisionLog } from '../platform/src/platform/state/decision-log.ts';
 import { ENGINE_ROOT, loadEngineRegistries } from './judgment-registries.ts';
-import { prepareObserveProofWorkspace, retainProofOutput } from './proof-temp.ts';
+import { prepareObserveProofWorkspace, settleProofWorkspace } from './proof-temp.ts';
 import { unregisteredProbe } from './fixtures/observe-unregistered.ts';
 
 const { values } = parseArgs({
@@ -96,7 +96,7 @@ const cli = Bun.spawnSync(['bun', 'scripts/observe-report.ts', '--log', logPath,
 process.stdout.write(cli.stdout);
 process.stderr.write(cli.stderr);
 if (cli.exitCode !== 0) {
-  retainProofOutput(workspace);
+  settleProofWorkspace(workspace, false);
   console.error(`[observe-proof] FAIL: the observe report exited ${cli.exitCode}`);
   process.exit(1);
 }
@@ -118,9 +118,9 @@ console.log('\n[observe-proof] analyses with output:');
 for (const [analysis, ok] of Object.entries(outputs)) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${analysis}`);
 const empty = Object.entries(outputs).filter(([, ok]) => !ok).map(([analysis]) => analysis);
 if (empty.length > 0) {
-  retainProofOutput(workspace);
+  settleProofWorkspace(workspace, false);
   console.error(`[observe-proof] FAIL: no output from ${empty.join(', ')}${values.all === true ? '' : '; try --all for more readings'}`);
   process.exit(1);
 }
-retainProofOutput(workspace);
-console.log(`[observe-proof] PASS: every analysis produced output from ${report.entries} logged calls. Log kept at ${logPath}`);
+settleProofWorkspace(workspace, true);
+console.log(`[observe-proof] PASS: every analysis produced output from ${report.entries} logged calls. Log at ${logPath}${values.workspace === undefined ? ' (default scratch, removed after a week)' : ''}`);

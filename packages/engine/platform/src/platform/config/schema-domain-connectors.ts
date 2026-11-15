@@ -51,6 +51,11 @@
  * change does the latter only, for the keys `connector-config-sections.ts`
  * already seeds.
  *
+ * They are NOT the same settings to the daemon: a daemon composing mail for
+ * `email.*` verbs reads `surfaces.email.*` through `withSurfaceEmailConfig`
+ * and does not read the `email.*` rows below. Each `email.*` description says
+ * so, because a value set only here is invisible to daemon-routed mail.
+ *
  * ── Secret-bearing rows ────────────────────────────────────────────────────
  *
  * `email.passwordRef`, `email.smtpPasswordRef`, `calendar.google.clientSecretRef`,
@@ -63,7 +68,7 @@
  * schema-domain-daemon-mailbox.ts: the value held here is a reference into
  * the secret store, and the secret itself is never held in config.
  */
-import { type ConfigSettingDefinition } from './schema-shared.js';
+import { port, type ConfigSettingDefinition } from './schema-shared.js';
 import type {
   CalendarConnectorConfig,
   EmailConnectorConfig,
@@ -126,7 +131,10 @@ export const connectorConfigDefaults: {
   google: GOOGLE_CONNECTOR_DEFAULTS,
 };
 
-export const connectorConfigSettings: ConfigSettingDefinition[] = [
+const EMAIL_ROW_SCOPE_NOTE =
+  ' Read by the mail connector in the process that owns this config; a daemon serving email verbs reads the matching surfaces.email.* setting instead, so set that one too for daemon-routed mail.';
+
+const connectorSettingRows: ConfigSettingDefinition[] = [
   {
     key: 'email.enabled',
     type: 'boolean',
@@ -145,6 +153,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 993,
     description: 'IMAP port the connector reads from',
+    ...port(),
   },
   {
     key: 'email.imapSecurity',
@@ -165,6 +174,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 587,
     description: 'SMTP port the connector sends through: 465 for implicit TLS, or 587 (the default) for STARTTLS',
+    ...port(),
   },
   {
     key: 'email.smtpSecurity',
@@ -223,7 +233,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'A reference into the secret store naming the Google OAuth client secret, needed only for a confidential (Web-app) client registration, a Desktop-app client using PKCE needs none. The secret itself is stored in the daemon secret tier, never in config.',
+      'A reference into the secret store naming the Google OAuth client secret, needed only for a confidential (Web-app) client registration, a Desktop-app client using PKCE needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting\'s key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config.',
   },
   {
     key: 'calendar.google.icsUrl',
@@ -243,7 +253,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'A reference into the secret store naming the Microsoft OAuth client secret, needed only for a confidential registration, a public client with "Allow public client flows" enabled needs none. The secret itself is stored in the daemon secret tier, never in config.',
+      'A reference into the secret store naming the Microsoft OAuth client secret, needed only for a confidential registration, a public client with "Allow public client flows" enabled needs none. Any non-empty value marks the secret as stored; it is always read from the name derived from this setting\'s key, not from where the reference text points. The secret itself is stored in the daemon secret tier, never in config.',
   },
   {
     key: 'google.oauth.projectId',
@@ -263,7 +273,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description:
-      'A reference into the secret store naming the long-lived OAuth refresh token the calendar connector authenticates with after the one-time authorization. The token itself is stored in the daemon secret tier, never in config.',
+      'Not read by the calendar connector. The long-lived OAuth refresh token it authenticates with after the one-time authorization lives only in the daemon secret store, under its own secret key; the connector never looks at this setting, so leave it empty.',
   },
   {
     key: 'google.credentials.migratedFrom',
@@ -273,3 +283,7 @@ export const connectorConfigSettings: ConfigSettingDefinition[] = [
       'Marker recording that a legacy on-disk Google credential (from before credentials lived in the encrypted secret store) was already migrated in, so migration is not repeated on every start. Names where it came from; holds no credential value itself.',
   },
 ];
+
+export const connectorConfigSettings: ConfigSettingDefinition[] = connectorSettingRows.map((row) => (
+  row.key.startsWith('email.') ? { ...row, description: `${row.description}${EMAIL_ROW_SCOPE_NOTE}` } : row
+));

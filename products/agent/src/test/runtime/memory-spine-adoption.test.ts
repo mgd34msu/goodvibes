@@ -146,6 +146,52 @@ describe('reconcileMemorySpineAdoption', () => {
     expect(client.activateCalls).toEqual([FAKE_TRANSPORT]);
   });
 
+  test('an async onAttach rejection is swallowed too, and adoption stands', async () => {
+    const client = spyClient(false);
+    await reconcileMemorySpineAdoption({
+      memorySpineClient: client,
+      transport: FAKE_TRANSPORT,
+      probeReachability: async () => 'online',
+      onAttach: async () => { throw new Error('async receipt read exploded'); },
+    });
+    expect(client.active).toBe(true);
+    expect(client.activateCalls).toEqual([FAKE_TRANSPORT]);
+  });
+
+  test('fires onDetach once on the loss edge, after the hand-back, with the reason; never on a no-op', async () => {
+    const client = spyClient(false);
+    const detaches: { reason: string; activeAtCall: boolean }[] = [];
+    const opts = {
+      memorySpineClient: client,
+      transport: FAKE_TRANSPORT,
+      onDetach: (reason: string) => { detaches.push({ reason, activeAtCall: client.active }); },
+    };
+    // Local and unreachable: nothing was adopted, so nothing is detached.
+    await reconcileMemorySpineAdoption({ ...opts, probeReachability: async () => 'offline' });
+    // Adopting is not a detach.
+    await reconcileMemorySpineAdoption({ ...opts, probeReachability: async () => 'online' });
+    // Still reachable: no-op.
+    await reconcileMemorySpineAdoption({ ...opts, probeReachability: async () => 'online' });
+    expect(detaches).toEqual([]);
+    await reconcileMemorySpineAdoption({ ...opts, probeReachability: async () => 'offline', deactivateReason: 'daemon lost' });
+    expect(detaches).toEqual([{ reason: 'daemon lost', activeAtCall: false }]);
+    // Already local again: a second failed probe does not fire it twice.
+    await reconcileMemorySpineAdoption({ ...opts, probeReachability: async () => 'offline' });
+    expect(detaches).toHaveLength(1);
+  });
+
+  test('a throwing onDetach does not reject the reconcile or undo the hand-back to local', async () => {
+    const client = spyClient(true);
+    await reconcileMemorySpineAdoption({
+      memorySpineClient: client,
+      transport: FAKE_TRANSPORT,
+      probeReachability: async () => 'offline',
+      onDetach: () => { throw new Error('inbound poller stop exploded'); },
+    });
+    expect(client.active).toBe(false);
+    expect(client.deactivateCalls).toHaveLength(1);
+  });
+
   test('a probe rejection propagates rather than being swallowed', async () => {
     const client = spyClient(false);
     await expect(reconcileMemorySpineAdoption({
@@ -289,5 +335,26 @@ describe('reconcileMemorySpineAdoption: the daemon build floor refuses adoption'
       probeReachability: async () => 'online',
     });
     expect(client.active).toBe(true);
+  });
+
+  test('two reconciles overlapping on an asynchronous mayAdopt adopt once', async () => {
+    const client = spyClient(false);
+    const releases: Array<() => void> = [];
+    let attaches = 0;
+    const options = {
+      memorySpineClient: client,
+      transport: FAKE_TRANSPORT,
+      probeReachability: async () => 'online' as const,
+      mayAdopt: () => new Promise<boolean>((resolve) => { releases.push(() => resolve(true)); }),
+      onAttach: async () => { attaches += 1; },
+    };
+    const first = reconcileMemorySpineAdoption(options);
+    const second = reconcileMemorySpineAdoption(options);
+    await Promise.resolve();
+    await Promise.resolve();
+    for (const release of releases) release();
+    await Promise.all([first, second]);
+    expect(client.activateCalls).toHaveLength(1);
+    expect(attaches).toBe(1);
   });
 });

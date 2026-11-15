@@ -5,6 +5,12 @@ import type { TriggerDefinition } from '../tools/workflow/index.js';
 import { matchesEventPath } from '../hooks/matcher.js';
 import { summarizeError } from '../utils/error-display.js';
 import { toRecord } from '../utils/record-coerce.js';
+import {
+  resolveCredentialEnvScrub,
+  scrubCredentialEnv,
+  type CredentialEnvScrubConfig,
+  type ResolvedCredentialEnvScrub,
+} from '../tools/exec/credential-env.js';
 
 // ---------------------------------------------------------------------------
 // TriggerExecutor
@@ -29,6 +35,49 @@ export interface TriggerFireResult {
   pid?: number | undefined;
 }
 
+/** A trigger action that runs longer than this is killed. */
+export const TRIGGER_ACTION_TIMEOUT_MS = 60_000;
+/** Most simultaneous running actions of one trigger; a further fire is refused with a stated reason. */
+export const TRIGGER_MAX_IN_FLIGHT = 4;
+
+/** Test seams and per-call overrides for {@link fireTriggers}. */
+export interface TriggerExecutionOptions {
+  /** Starts the action process. Defaults to Bun.spawn. */
+  readonly spawn?: typeof Bun.spawn | undefined;
+  /** Arms the kill timer and returns its canceller. Defaults to an unref'd setTimeout. */
+  readonly startTimer?: ((callback: () => void, ms: number) => () => void) | undefined;
+  readonly timeoutMs?: number | undefined;
+  readonly maxInFlight?: number | undefined;
+  /** Returns a refusal reason when the command must not run (the exec path's command guard). */
+  readonly guardCommand?: ((command: string) => Promise<string | undefined>) | undefined;
+}
+
+interface TrackedAction {
+  readonly triggerId: string;
+  readonly proc: { kill(): void };
+}
+
+const trackedActions = new Set<TrackedAction>();
+let credentialEnvScrub: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
+
+/**
+ * Sets the credential-env scrub that trigger actions start with: the same
+ * configuration the exec tool and scheduled commands use.
+ */
+export function setTriggerCredentialEnvScrub(config: CredentialEnvScrubConfig | undefined): void {
+  credentialEnvScrub = resolveCredentialEnvScrub(config);
+}
+
+/** Kills every trigger action still running. Call at shutdown. */
+export function killTriggerActions(): void {
+  for (const action of [...trackedActions]) {
+    try { action.proc.kill(); } catch (err) {
+      logger.debug('TriggerExecutor: action kill failed', { triggerId: action.triggerId, error: summarizeError(err) });
+    }
+  }
+  trackedActions.clear();
+}
+
 /**
  * Evaluate all enabled triggers against a fired hook event.
  * Matching triggers have their action executed via Bun.spawn.
@@ -36,6 +85,7 @@ export interface TriggerFireResult {
 export async function fireTriggers(
   event: HookEvent,
   triggerManager: TriggerManagerLike,
+  options: TriggerExecutionOptions = {},
 ): Promise<TriggerFireResult[]> {
   const results: TriggerFireResult[] = [];
   const triggers = triggerManager.list().filter((t) => t.enabled);
@@ -45,20 +95,22 @@ export async function fireTriggers(
 
     // Optional JS-expression condition guard
     if (trigger.condition) {
-      const passed = evaluateCondition(trigger.condition, event);
-      if (!passed) {
+      const evaluation = evaluateCondition(trigger.condition, event);
+      if (!evaluation.passed) {
         results.push({
           triggerId: trigger.id,
           event: trigger.event,
           action: trigger.action,
           executed: false,
+          // A condition that could not be evaluated is not the same as one that did not match.
+          ...(evaluation.error !== undefined ? { error: `Condition could not be evaluated: ${evaluation.error}` } : {}),
         });
         continue;
       }
     }
 
     // Execute the action
-    const fireResult = await executeAction(trigger, event);
+    const fireResult = await executeAction(trigger, event, options);
     results.push(fireResult);
   }
 
@@ -215,8 +267,9 @@ class ConditionParser {
 
   private parseOr(): ConditionValue {
     let left = this.parseAnd();
+    // The operator and right operand are always consumed, even when the left
+    // side already decides the result, so the rest of the condition still parses.
     while (this.peek() === '||') {
-      if (Boolean(left)) break;
       this.consume();
       const right = this.parseAnd();
       left = Boolean(left) || Boolean(right);
@@ -227,7 +280,6 @@ class ConditionParser {
   private parseAnd(): ConditionValue {
     let left = this.parseUnary();
     while (this.peek() === '&&') {
-      if (!Boolean(left)) break;
       this.consume();
       const right = this.parseUnary();
       left = Boolean(left) && Boolean(right);
@@ -285,27 +337,29 @@ class ConditionParser {
  * Uses a restricted expression parser, no eval() or new Function().
  * Returns false if the condition is invalid or throws.
  */
-function evaluateCondition(condition: string, event: HookEvent): boolean {
+function evaluateCondition(condition: string, event: HookEvent): { passed: boolean; error?: string } {
   try {
     const tokens = tokenise(condition);
-    if (tokens.length === 0) return true; // empty condition = always pass
+    if (tokens.length === 0) return { passed: true }; // empty condition = always pass
     const parser = new ConditionParser(tokens, event);
-    return parser.parse();
+    return { passed: parser.parse() };
   } catch (err) {
-    logger.warn('TriggerExecutor: condition evaluation error', {
-      condition,
-      error: summarizeError(err),
-    });
-    return false;
+    const error = summarizeError(err);
+    logger.warn('TriggerExecutor: condition evaluation error', { condition, error });
+    return { passed: false, error };
   }
 }
 
 /**
- * Execute a trigger action command via Bun.spawn (fire-and-forget with PID tracking).
+ * Execute a trigger action command via Bun.spawn with the environment the exec
+ * path gives a command (credential-bearing variables withheld). The process is
+ * tracked so shutdown can kill it, is killed after a timeout, and a non-zero
+ * exit is logged.
  */
 async function executeAction(
   trigger: TriggerDefinition,
   event: HookEvent,
+  options: TriggerExecutionOptions,
 ): Promise<TriggerFireResult> {
   const base: Omit<TriggerFireResult, 'executed'> = {
     triggerId: trigger.id,
@@ -314,15 +368,40 @@ async function executeAction(
   };
 
   // Parse the action string as a shell command (POSIX shellwords tokenizer)
-  const parts = shellSplit(trigger.action);
+  // Strict: an intentional empty argument must keep its place, and an
+  // unterminated quote must not silently become part of the last argument.
+  let parts: string[];
+  try {
+    parts = shellSplit(trigger.action, { strict: true });
+  } catch (err) {
+    return { ...base, executed: false, error: `Action could not be parsed: ${summarizeError(err)}` };
+  }
   if (parts.length === 0) {
     return { ...base, executed: false, error: 'Empty action command' };
   }
 
+  const maxInFlight = options.maxInFlight ?? TRIGGER_MAX_IN_FLIGHT;
+  const running = [...trackedActions].filter((action) => action.triggerId === trigger.id).length;
+  if (running >= maxInFlight) {
+    const error = `Not started: ${running} runs of this trigger are still running (limit ${maxInFlight}). Wait for them to finish or narrow the trigger event.`;
+    logger.warn('TriggerExecutor: in-flight limit reached', { triggerId: trigger.id, running, maxInFlight });
+    return { ...base, executed: false, error };
+  }
+
   try {
-    const proc = Bun.spawn(parts, {
+    if (options.guardCommand) {
+      const refusal = await options.guardCommand(trigger.action);
+      if (refusal !== undefined) {
+        logger.warn('TriggerExecutor: action refused by command guard', { triggerId: trigger.id });
+        return { ...base, executed: false, error: `Action refused by command policy: ${refusal}` };
+      }
+    }
+    const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
+    const { env } = await scrubCredentialEnv(hostEnv, credentialEnvScrub);
+    const spawn = options.spawn ?? Bun.spawn;
+    const proc = spawn(parts, {
       env: {
-        ...process.env,
+        ...env,
         GV_TRIGGER_ID: trigger.id,
         GV_TRIGGER_EVENT: event.path,
         GV_TRIGGER_PHASE: event.phase,
@@ -330,13 +409,34 @@ async function executeAction(
       stdout: 'ignore',
       stderr: 'ignore',
     });
+    const tracked: TrackedAction = { triggerId: trigger.id, proc };
+    trackedActions.add(tracked);
+    let timedOut = false;
+    const startTimer = options.startTimer ?? ((callback, ms) => {
+      const timer = setTimeout(callback, ms);
+      timer.unref?.();
+      return () => clearTimeout(timer);
+    });
+    const cancelTimer = startTimer(() => {
+      timedOut = true;
+      try { proc.kill(); } catch { /* already exited */ }
+    }, options.timeoutMs ?? TRIGGER_ACTION_TIMEOUT_MS);
 
-    // Fire-and-forget: don't await full completion
-    proc.exited.catch((err) => {
+    // Fire-and-forget: the result reports the start, the exit is logged.
+    proc.exited.then((code) => {
+      if (timedOut) {
+        logger.warn('TriggerExecutor: action killed after timeout', { triggerId: trigger.id, pid: proc.pid });
+      } else if (code !== 0) {
+        logger.warn('TriggerExecutor: action exited non-zero', { triggerId: trigger.id, pid: proc.pid, exitCode: code });
+      }
+    }).catch((err) => {
       logger.warn('TriggerExecutor: action process error', {
         triggerId: trigger.id,
         error: summarizeError(err),
       });
+    }).finally(() => {
+      cancelTimer();
+      trackedActions.delete(tracked);
     });
 
     const pid = proc.pid;

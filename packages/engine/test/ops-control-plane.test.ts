@@ -6,16 +6,18 @@
  * coverage was a consumer fork suite, now deleted). Covers, against the REAL
  * UnifiedTaskManager + RuntimeStore + RuntimeEventBus:
  *   - task cancel/pause/resume/retry legality per the lifecycle state machine
- *   - rejected-outcome audit events (the specific OPS_TASK_* event AND the
- *     generic OPS_AUDIT) on every illegal action
+ *   - rejected-outcome OPS_AUDIT events (and no OPS_TASK_* action event) on
+ *     every illegal action
  *   - cancelAgent state gating (cancellable vs terminal states)
  *   - the can* query helpers the UI renders controls from
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  OpsActionUnavailableError,
   OpsControlPlane,
   OpsIllegalActionError,
   OpsTargetNotFoundError,
+  type OpsAgentCanceller,
 } from '../platform/src/platform/runtime/ops/control-plane.ts';
 import { UnifiedTaskManager } from '../platform/src/platform/runtime/tasks/manager.ts';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.ts';
@@ -28,7 +30,14 @@ interface OpsEventCapture {
   readonly payload: Record<string, unknown>;
 }
 
-function makeHarness(): {
+/** An agent manager stand-in: records each cancel, and runs every agent unless told otherwise. */
+function recordingCanceller(runs = true): OpsAgentCanceller & { readonly calls: [string, string | undefined][] } {
+  const calls: [string, string | undefined][] = [];
+  return { calls, cancel: (agentId, kind) => { calls.push([agentId, kind]); return runs; } };
+}
+
+/** `null`: no agent manager is wired. */
+function makeHarness(canceller: OpsAgentCanceller | null = recordingCanceller()): {
   ops: OpsControlPlane;
   tasks: UnifiedTaskManager;
   store: RuntimeStore;
@@ -38,7 +47,7 @@ function makeHarness(): {
   const store = createRuntimeStore();
   const bus = new RuntimeEventBus();
   const tasks = new UnifiedTaskManager(store, bus, 'sess-ops');
-  const ops = new OpsControlPlane(tasks, bus, store, 'sess-ops');
+  const ops = new OpsControlPlane(tasks, bus, store, 'sess-ops', canceller ?? undefined);
   const events: OpsEventCapture[] = [];
   bus.onDomain('ops', (envelope) => {
     events.push({ type: envelope.type, payload: envelope.payload as Record<string, unknown> });
@@ -94,7 +103,7 @@ describe('OpsControlPlane: task cancel legality', () => {
     expect(audits.some((a) => a.payload['action'] === 'task.cancel' && a.payload['outcome'] === 'success' && a.payload['targetId'] === task.id)).toBe(true);
   });
 
-  test('cancelling a terminal (completed) task is REJECTED with both audit events', async () => {
+  test('cancelling a terminal (completed) task is REJECTED: only the audit event is emitted', async () => {
     const { ops, tasks, events, flush } = makeHarness();
     const task = tasks.createTask({ kind: 'exec', title: 'done already', owner: 'test' });
     tasks.startTask(task.id);
@@ -104,11 +113,9 @@ describe('OpsControlPlane: task cancel legality', () => {
     expect(() => ops.cancelTask(task.id)).toThrow(OpsIllegalActionError);
     await flush();
 
-    // BOTH audit events fire on the rejected action: the specific ops event…
-    const rejected = opsEventsOf(events, 'OPS_TASK_CANCELLED');
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0]!.payload).toMatchObject({ taskId: task.id, reason: 'ops_cancel' });
-    // …and the generic OPS_AUDIT carrying the rejected outcome + error text.
+    // The specific action event is not emitted for a request that changed nothing...
+    expect(opsEventsOf(events, 'OPS_TASK_CANCELLED')).toHaveLength(0);
+    // ...the generic OPS_AUDIT carries the rejected outcome + error text.
     const audits = opsEventsOf(events, 'OPS_AUDIT');
     const audit = audits.find((a) => a.payload['action'] === 'task.cancel' && a.payload['targetId'] === task.id);
     expect(audit!.payload['outcome']).toBe('rejected');
@@ -125,7 +132,7 @@ describe('OpsControlPlane: task cancel legality', () => {
 
     expect(() => ops.cancelTask(task.id)).toThrow(OpsIllegalActionError);
     await flush();
-    expect(opsEventsOf(events, 'OPS_TASK_CANCELLED')).toHaveLength(1);
+    expect(opsEventsOf(events, 'OPS_TASK_CANCELLED')).toHaveLength(0);
     expect(opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'task.cancel')!.payload['outcome']).toBe('rejected');
     expect(tasks.getTask(task.id)!.status).toBe('running');
   });
@@ -169,8 +176,8 @@ describe('OpsControlPlane: pause/resume legality', () => {
     expect(() => ops.resumeTask(task.id)).toThrow(OpsIllegalActionError);
     await flush();
 
-    expect(opsEventsOf(events, 'OPS_TASK_PAUSED')).toHaveLength(1);
-    expect(opsEventsOf(events, 'OPS_TASK_RESUMED')).toHaveLength(1);
+    expect(opsEventsOf(events, 'OPS_TASK_PAUSED')).toHaveLength(0);
+    expect(opsEventsOf(events, 'OPS_TASK_RESUMED')).toHaveLength(0);
     const rejectedAudits = opsEventsOf(events, 'OPS_AUDIT').filter((a) => a.payload['outcome'] === 'rejected');
     expect(rejectedAudits.map((a) => a.payload['action']).sort()).toEqual(['task.pause', 'task.resume']);
   });
@@ -205,7 +212,7 @@ describe('OpsControlPlane: retry legality', () => {
     events.length = 0;
     expect(() => ops.retryTask(running.id)).toThrow(OpsIllegalActionError);
     await flush();
-    expect(opsEventsOf(events, 'OPS_TASK_RETRIED')).toHaveLength(1);
+    expect(opsEventsOf(events, 'OPS_TASK_RETRIED')).toHaveLength(0);
     expect(opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'task.retry')!.payload['outcome']).toBe('rejected');
     expect(tasks.getTask(running.id)!.status).toBe('running');
   });
@@ -215,9 +222,10 @@ describe('OpsControlPlane: cancelAgent state gating', () => {
   const cancellable: AgentLifecycleState[] = ['spawning', 'running', 'awaiting_message', 'awaiting_tool', 'finalizing'];
   const terminal: AgentLifecycleState[] = ['completed', 'failed', 'cancelled'];
 
-  test('every non-terminal state is cancellable; the store transition lands with endedAt', async () => {
+  test('every non-terminal state is cancellable: the agent manager stops the run, and its event (not ops) moves the store', async () => {
     for (const status of cancellable) {
-      const { ops, store, events, flush } = makeHarness();
+      const canceller = recordingCanceller();
+      const { ops, store, events, flush } = makeHarness(canceller);
       const id = `agent-${status}`;
       seedAgent(store, id, status);
 
@@ -225,15 +233,14 @@ describe('OpsControlPlane: cancelAgent state gating', () => {
       ops.cancelAgent(id, `cancel from ${status}`);
       await flush();
 
-      const record = store.getState().agents.agents.get(id)!;
-      expect(record.status).toBe('cancelled');
-      expect(typeof record.endedAt).toBe('number');
+      expect(canceller.calls).toEqual([[id, 'kill']]);
+      expect(store.getState().agents.agents.get(id)!.status).toBe(status);
       expect(opsEventsOf(events, 'OPS_AGENT_CANCELLED')[0]!.payload).toMatchObject({ agentId: id });
       expect(opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'agent.cancel')!.payload['outcome']).toBe('success');
     }
   });
 
-  test('every terminal state rejects cancel with both audit events and no mutation', async () => {
+  test('every terminal state rejects cancel with only the audit event and no mutation', async () => {
     for (const status of terminal) {
       const { ops, store, events, flush } = makeHarness();
       const id = `agent-${status}`;
@@ -244,11 +251,28 @@ describe('OpsControlPlane: cancelAgent state gating', () => {
       await flush();
 
       expect(store.getState().agents.agents.get(id)!.status).toBe(status);
-      expect(opsEventsOf(events, 'OPS_AGENT_CANCELLED')[0]!.payload).toMatchObject({ agentId: id });
+      expect(opsEventsOf(events, 'OPS_AGENT_CANCELLED')).toHaveLength(0);
       const audit = opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'agent.cancel');
       expect(audit!.payload['outcome']).toBe('rejected');
       expect(typeof audit!.payload['errorMessage']).toBe('string');
     }
+  });
+
+  test('with no agent manager wired, cancel is refused and nothing claims the agent stopped', async () => {
+    const { ops, store, events, flush } = makeHarness(null);
+    seedAgent(store, 'agent-live', 'running');
+    expect(() => ops.cancelAgent('agent-live')).toThrow(OpsActionUnavailableError);
+    expect(() => ops.cancelAgent('agent-live')).toThrow('no agent manager is connected');
+    await flush();
+    expect(store.getState().agents.agents.get('agent-live')!.status).toBe('running');
+    const audit = opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'agent.cancel');
+    expect(audit!.payload['outcome']).toBe('rejected');
+  });
+
+  test('an agent the manager does not run is refused, naming that', () => {
+    const { ops, store } = makeHarness(recordingCanceller(false));
+    seedAgent(store, 'agent-stale', 'running');
+    expect(() => ops.cancelAgent('agent-stale')).toThrow('the agent manager does not run this agent');
   });
 
   test('an unknown agent id is a not-found error', () => {
@@ -292,5 +316,37 @@ describe('OpsControlPlane: can* query helpers mirror the legality checks', () =>
     expect(ops.canPauseTask('x')).toBe(false);
     expect(ops.canResumeTask('x')).toBe(false);
     expect(ops.canRetryTask('x')).toBe(false);
+  });
+});
+
+describe('OpsControlPlane: a mutation that throws after the legality check is audited', () => {
+  test('a task manager failure is rethrown and audited as an error, with no success event', async () => {
+    const { ops, tasks, events, flush } = makeHarness();
+    const task = tasks.createTask({ kind: 'exec', title: 'build', owner: 'test' });
+    tasks.startTask(task.id);
+    tasks.cancelTask = () => { throw new Error('task store unavailable'); };
+    events.length = 0;
+
+    expect(() => ops.cancelTask(task.id)).toThrow('task store unavailable');
+    await flush();
+
+    expect(opsEventsOf(events, 'OPS_TASK_CANCELLED')).toHaveLength(0);
+    const audit = opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'task.cancel');
+    expect(audit!.payload['outcome']).toBe('error');
+    expect(audit!.payload['errorMessage']).toBe('task store unavailable');
+  });
+
+  test('an agent manager failure is rethrown and audited as an error', async () => {
+    const canceller: OpsAgentCanceller = { cancel: () => { throw new Error('manager crashed'); } };
+    const { ops, store, events, flush } = makeHarness(canceller);
+    seedAgent(store, 'agent-x', 'running');
+
+    expect(() => ops.cancelAgent('agent-x')).toThrow('manager crashed');
+    await flush();
+
+    expect(opsEventsOf(events, 'OPS_AGENT_CANCELLED')).toHaveLength(0);
+    const audit = opsEventsOf(events, 'OPS_AUDIT').find((a) => a.payload['action'] === 'agent.cancel');
+    expect(audit!.payload['outcome']).toBe('error');
+    expect(audit!.payload['errorMessage']).toBe('manager crashed');
   });
 });

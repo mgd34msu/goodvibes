@@ -12,6 +12,8 @@ import { KillRing } from '../../input/kill-ring.ts';
 import { handlePromptKeyToken } from '../../input/handler-feed-routes.ts';
 import { createCancelGeneration } from '../../core/turn-cancellation.ts';
 
+// Typed cron schedules are pinned to the machine's zone so they keep firing at the hour the user typed.
+const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const previous = installJudgmentPort(undefined);
 afterEach(() => {
   installJudgmentPort(previous);
@@ -166,6 +168,16 @@ describe('registered /schedule when owns Jev reading before createJob', () => {
       ['complete', 'timing', 'conditions'],
     ]);
   });
+  test('a second submission refused while one is pending hands its text back to the composer', async () => {
+    const f = context();
+    const drafts: string[] = [];
+    f.ctx.restoreDraft = (text) => drafts.push(text);
+    const pending = await enteredRead(f, choices(interval).port);
+    await f.registry.execute('sched', args(), f.ctx);
+    expect(drafts).toEqual(['/schedule add when every 30 minutes check builds']);
+    pending.release.resolve();
+    await pending.pending;
+  });
   test.each(['cancel', 'session', 'shutdown', 'superseded'] as const)('%s after the read started creates zero old jobs', async (cause) => {
     const f = context();
     const jev = choices(interval);
@@ -215,7 +227,7 @@ describe('registered /schedule when owns Jev reading before createJob', () => {
     await f.registry.execute('schedule', ['add', 'every', '15m', 'check'], f.ctx);
     await f.registry.execute('schedule', ['add', 'at', '2030-01-01T00:00:00Z', 'check'], f.ctx);
     expect(f.jobs.map((j) => j.schedule)).toEqual([
-      { kind: 'cron', expression: '*/30 * * * *' },
+      { kind: 'cron', expression: '*/30 * * * *', timezone: LOCAL_TIMEZONE },
       { kind: 'every', intervalMs: 900000 },
       { kind: 'at', at: Date.parse('2030-01-01T00:00:00Z') },
     ]);
@@ -427,7 +439,7 @@ for (const fallback of [false, true]) {
       expect(f.printed).toContain('Invalid schedule command quoting.');
     });
     test.each([
-      ['/schedule add cron "*/30 * * * *" "check builds"', { kind: 'cron', expression: '*/30 * * * *' } as const],
+      ['/schedule add cron "*/30 * * * *" "check builds"', { kind: 'cron', expression: '*/30 * * * *', timezone: LOCAL_TIMEZONE } as const],
       ['/schedule add every 15m "check builds"', { kind: 'every', intervalMs: 900000 } as const],
       ['/schedule add at 2030-01-01T00:00:00Z "check builds"', { kind: 'at', at: Date.parse('2030-01-01T00:00:00Z') } as const],
     ])('typed command %s stays independent of Jev', async (command, expected) => {

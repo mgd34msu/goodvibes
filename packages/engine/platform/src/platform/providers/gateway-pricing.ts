@@ -113,8 +113,13 @@ export function gatewayPricingCachePath(cacheDir: string, providerId: string): s
   return join(cacheDir, `gateway-pricing-${providerId}.json`);
 }
 
+/** After a failed refresh the gateway is left alone this long, so an offline gateway is not re-fetched on every lookup. */
+const REFRESH_BACKOFF_MS = 5 * 60_000;
+
 export interface GatewayPricingServiceOptions {
   readonly cacheDir: string;
+  /** Clock for the refresh backoff; defaults to `Date.now`. */
+  readonly now?: (() => number) | undefined;
 }
 
 /**
@@ -127,20 +132,20 @@ export interface GatewayPricingServiceOptions {
 export class GatewayPricingService {
   private readonly caches = new Map<string, GatewayPricingCache | null>();
   private readonly refreshing = new Set<string>();
+  private readonly lastFailureAt = new Map<string, number>();
 
   constructor(private readonly options: GatewayPricingServiceOptions) {}
 
   /** True when this provider id has a pricing-bearing /models adapter. */
   static supports(providerId: string): boolean {
-    return providerId in GATEWAY_ADAPTERS;
+    return Object.hasOwn(GATEWAY_ADAPTERS, providerId);
   }
 
   getPricing(providerId: string, modelId: string): ProviderServedPricing | null {
-    const adapter = GATEWAY_ADAPTERS[providerId];
-    if (!adapter) return null;
+    if (!GatewayPricingService.supports(providerId)) return null;
     const cache = this.ensureCache(providerId);
     if (!cache) return null;
-    const rates = cache.models[modelId] ?? null;
+    const rates = Object.hasOwn(cache.models, modelId) ? cache.models[modelId] ?? null : null;
     if (!rates) return null;
     return { ...rates, fetchedAt: cache.fetchedAt };
   }
@@ -182,9 +187,12 @@ export class GatewayPricingService {
 
   private startRefresh(providerId: string): void {
     if (this.refreshing.has(providerId)) return;
+    const failedAt = this.lastFailureAt.get(providerId);
+    if (failedAt !== undefined && this.now() - failedAt < REFRESH_BACKOFF_MS) return;
     this.refreshing.add(providerId);
     void this.refresh(providerId)
       .catch((error) => {
+        this.lastFailureAt.set(providerId, this.now());
         // Degrade to the cached rates (with their date), never to zero.
         logger.warn('[gateway-pricing] Refresh failed; serving cached rates', {
           providerId,
@@ -196,9 +204,13 @@ export class GatewayPricingService {
       });
   }
 
+  private now(): number {
+    return (this.options.now ?? Date.now)();
+  }
+
   async refresh(providerId: string): Promise<number> {
-    const adapter = GATEWAY_ADAPTERS[providerId];
-    if (!adapter) return 0;
+    if (!GatewayPricingService.supports(providerId)) return 0;
+    const adapter = GATEWAY_ADAPTERS[providerId]!;
     const response = await fetchWithTimeout(adapter.url, {
       headers: { Accept: 'application/json' },
     }, FETCH_TIMEOUT_MS, instrumentedFetch);
@@ -206,6 +218,11 @@ export class GatewayPricingService {
       throw new Error(`${providerId} models endpoint returned ${response.status}`);
     }
     const models = adapter.parse(await response.json() as unknown);
+    // A 200 with a changed or empty body parses to no rates; accepting it would
+    // overwrite the good cache and leave every model unpriced for a day.
+    if (Object.keys(models).length === 0) {
+      throw new Error(`${providerId} models endpoint returned no parseable pricing; keeping the cached rates`);
+    }
     const cache: GatewayPricingCache = { version: 1, fetchedAt: Date.now(), ttlMs: TTL_24H_MS, models };
     try {
       writeJsonFileAtomic(this.cachePath(providerId), cache, { trailingNewline: false });
@@ -213,6 +230,7 @@ export class GatewayPricingService {
       logger.warn('[gateway-pricing] Cache write failed', { providerId, error: summarizeError(error) });
     }
     this.caches.set(providerId, cache);
+    this.lastFailureAt.delete(providerId);
     return Object.keys(models).length;
   }
 }

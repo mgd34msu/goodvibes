@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fallbackPattern, VERSION_FALLBACKS, VERSIONED_WORKSPACES } from './version-carriers.ts';
 
 const root = join(import.meta.dir, '..');
 const repoRoot = resolve(root, '../..');
@@ -10,25 +11,18 @@ if (rootPackage.name !== 'goodvibes-jev' || typeof version !== 'string'
   throw new Error('Version synchronization requires the goodvibes-jev root release identity');
 }
 
-const targets = [
-  { path: join(root, 'platform', 'src', 'platform', 'version.ts'), declaration: 'version' },
-  { path: join(repoRoot, 'products/daemon/src/version.ts'), declaration: '_version' },
-  { path: join(repoRoot, 'products/tui/src/version.ts'), declaration: '_version' },
-  { path: join(repoRoot, 'products/agent/src/version.ts'), declaration: '_version' },
-];
-
-const files = targets.map(target => {
-  const source = readFileSync(target.path, 'utf8');
-  const pattern = new RegExp(`^let ${target.declaration} = ['"][^'"\\r\\n]*['"];+$`, 'gm');
+const files = VERSION_FALLBACKS.map(target => {
+  const path = join(repoRoot, target.path);
+  const source = readFileSync(path, 'utf8');
+  const pattern = fallbackPattern(target.declaration);
   if ([...source.matchAll(pattern)].length !== 1) throw new Error('Expected exactly one compiled version fallback');
   const next = source.replace(
     pattern,
     `let ${target.declaration} = '${version}';`,
   );
-  return { path: target.path, before: source, after: next };
+  return { path, before: source, after: next };
 });
-for (const workspace of ['packages/engine', 'packages/judgment', 'products/daemon', 'products/tui', 'products/agent', 'products/webui',
-  ...['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].map(platform => `products/tui/platform-packages/${platform}`)]) {
+for (const workspace of VERSIONED_WORKSPACES) {
   const path = join(repoRoot, workspace, 'package.json');
   const before = readFileSync(path, 'utf8');
   const manifest = JSON.parse(before) as { name?: unknown; version?: unknown };

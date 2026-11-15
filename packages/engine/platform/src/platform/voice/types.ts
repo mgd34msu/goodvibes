@@ -117,6 +117,12 @@ export interface VoiceProvider {
    * default for every cloud provider.
    */
   readonly billing?: 'metered' | 'none' | undefined;
+  /**
+   * True for a provider that sends the user's content to a third party without
+   * any credential the user supplied. An unnamed request never picks it; it is
+   * used only when a caller names it.
+   */
+  readonly explicitSelectionOnly?: boolean | undefined;
   status?(): Promise<VoiceProviderStatus> | VoiceProviderStatus;
   listVoices?(): Promise<readonly VoiceDescriptor[]> | readonly VoiceDescriptor[];
   synthesize?(request: VoiceSynthesisRequest): Promise<VoiceSynthesisResult>;

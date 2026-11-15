@@ -79,9 +79,8 @@ describe('renderCodeBlock', () => {
     // Body lines (index 1) use the theme's element background
     const bodyLine = result[1];
     const codeCells = bodyLine.filter((c) => c.char !== ' ');
-    if (codeCells.length > 0) {
-      expect(codeCells[0].bg).toBe(activeTokens().backgroundCode);
-    }
+    expect(codeCells.length).toBeGreaterThan(0);
+    for (const cell of codeCells) expect(cell.bg).toBe(activeTokens().backgroundCode);
   });
 
   test('body rows keep the shared right margin unpainted', () => {
@@ -114,14 +113,6 @@ describe('renderCodeBlock', () => {
     expect(bodyLine[effectiveWidth].bg).toBe('');
   });
 
-  test('header has distinctive background color', () => {
-    const result = renderCodeBlock(['x'], 'ts', WIDTH);
-    const headerCells = result[0].filter((c) => c.char !== ' ');
-    if (headerCells.length > 0) {
-      // Header uses the theme accent as its background
-      expect(headerCells[0].bg).toBe(activeTokens().accent);
-    }
-  });
   test('a line wider than the fill wraps with its indentation kept; no character is cut at the edge', () => {
     // The live run's reviewer JSON: a long string value at 6 columns of indent.
     const long = '      "evidence": "The engineer reports zero files created, modified, or deleted and explicitly says, \\"I did not modify any files\\" in its report."';

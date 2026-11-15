@@ -75,8 +75,18 @@ export function readOptionValue(args: readonly string[], index: number, inlineVa
 } {
   if (inlineValue !== undefined) return { value: inlineValue, nextIndex: index };
   const next = args[index + 1];
-  if (next === undefined || next.startsWith('--')) return { value: undefined, nextIndex: index };
+  if (next === undefined || looksLikeOptionName(next)) return { value: undefined, nextIndex: index };
   return { value: next, nextIndex: index + 1 };
+}
+
+/**
+ * Whether an argument is the next option rather than a value: `--` and a name,
+ * with nothing after it but an optional `=value`. Free text that merely starts
+ * with dashes ("--- no failed runs", "-- no errors") is a value, so a typed
+ * field that a tool turns into an argument list is not refused as a missing one.
+ */
+function looksLikeOptionName(arg: string): boolean {
+  return /^--[a-z][a-z0-9-]*(=.*)?$/i.test(arg);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +174,27 @@ export function toDeliveryTargetInput(target: RoutineScheduleDeliveryTargetSpec)
   };
 }
 
+/**
+ * The command-line flag and value that parse back into `target`: the inverse of
+ * the four parsers above, so a printed confirmation command reproduces the
+ * targets a preview showed.
+ */
+export function deliveryTargetFlag(target: {
+  readonly kind?: string | undefined;
+  readonly surfaceKind?: string | undefined;
+  readonly address?: string | undefined;
+  readonly routeId?: string | undefined;
+  readonly label?: string | undefined;
+}): { readonly flag: string; readonly value: string } | null {
+  if (target.kind === 'webhook' && target.address) return { flag: '--delivery-webhook', value: target.address };
+  if (target.kind === 'link' && target.address) return { flag: '--delivery-link', value: target.address };
+  if (target.kind !== 'surface') return null;
+  const tail = target.label ? `:${target.routeId ?? ''}:${target.label}` : target.routeId ? `:${target.routeId}` : '';
+  if (target.surfaceKind) return { flag: '--delivery-channel', value: `${target.surfaceKind}${tail}` };
+  if (!target.routeId) return null;
+  return { flag: '--delivery-route', value: `${target.routeId}${target.label ? `:${target.label}` : ''}` };
+}
+
 // ---------------------------------------------------------------------------
 // Provider/model
 // ---------------------------------------------------------------------------
@@ -174,9 +205,11 @@ export function normalizeProviderModel(provider: string | undefined, model: stri
   readonly model?: string;
 } {
   if (!model) return provider ? { provider } : {};
-  const normalizedProvider = provider ?? getProviderIdFromModel(model);
+  // A bare model id carries no provider; only a `provider:model` value names one.
+  const qualified = model.trim().indexOf(':') > 0;
+  const normalizedProvider = provider ?? (qualified ? getProviderIdFromModel(model) : undefined);
   return {
-    provider: normalizedProvider,
+    ...(normalizedProvider ? { provider: normalizedProvider } : {}),
     model: getModelIdFromProviderModel(model),
   };
 }

@@ -9,12 +9,16 @@
 // ---------------------------------------------------------------------------
 
 import { describe, test, expect } from 'bun:test';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ConversationManager } from '../../core/conversation';
 import {
   describeBlockForReceipt,
   handleBlockCopy,
   handleBookmark,
   handleBlockToggle,
+  handleDiffApply,
 } from '../../input/handler-content-actions.ts';
 
 function textOf(cm: ConversationManager): string {
@@ -116,5 +120,59 @@ describe('viewport-anchored block actions', () => {
     expect(cm.isCollapsed(execBlock!.blockIndex)).toBe(collapsed);
     expect(rendered).toBe(2);
     expect(textOf(cm)).not.toMatch(/Expanded tool result|Collapsed tool result/);
+  });
+});
+
+describe('handleDiffApply', () => {
+  test('a multi-hunk diff is refused with the reason before any permission request', () => {
+    const cm = new ConversationManager(() => 80);
+    cm.addUserMessage('show diff');
+    cm.addToolResults([{ callId: 'c1', success: true, output: [
+      '--- a/f.txt', '+++ b/f.txt', '@@ -1,1 +1,1 @@', '-a', '+b', '@@ -9,1 +9,1 @@', '-c', '+d',
+    ].join('\n') }]);
+    cm.getDisplayBlocks();
+    const logged: string[] = [];
+    const manager = {
+      getDiffAtLine: (line: number) => cm.getDiffAtLine(line),
+      log: (message: string) => { logged.push(message); },
+    } as unknown as ConversationManager;
+    let asked = false;
+    const ctx = {
+      requestPermission: async () => { asked = true; return { approved: true }; },
+    } as unknown as Parameters<typeof handleDiffApply>[2];
+
+    expect(cm.getDiffAtLine(0)?.unsupported).toContain('2 separate hunks');
+    expect(handleDiffApply(manager, () => 0, ctx, () => {}, () => 'c', 'write' as never)).toBe(true);
+    expect(asked).toBe(false);
+    expect(logged[0]).toContain('2 separate hunks');
+  });
+
+  test('writes the approved text literally, including replacement-pattern sequences', async () => {
+    const dir = makeProjectTempDir('diff-apply');
+    try {
+      writeFileSync(join(dir, 'f.txt'), 'before\nOLD\nafter\n');
+      const logged: string[] = [];
+      const diff = { filePath: 'f.txt', original: 'OLD', updated: "a$&b$$c$'d$`e" };
+      const manager = {
+        getDiffAtLine: () => diff,
+        log: (message: string) => { logged.push(message); },
+      } as unknown as ConversationManager;
+      let done!: () => void;
+      const finished = new Promise<void>((resolve) => { done = resolve; });
+      const ctx = {
+        workspace: { shellPaths: { workingDirectory: dir } },
+        platform: { configManager: { getWorkingDirectory: () => dir } },
+        requestPermission: async () => ({ approved: true }),
+      } as unknown as Parameters<typeof handleDiffApply>[2];
+
+      const started = handleDiffApply(manager, () => 0, ctx, () => done(), () => 'call-1', 'write' as never);
+      expect(started).toBe(true);
+      await finished;
+
+      expect(readFileSync(join(dir, 'f.txt'), 'utf8')).toBe("before\na$&b$$c$'d$`e\nafter\n");
+      expect(logged.some((line) => line.includes('Applied diff to f.txt'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

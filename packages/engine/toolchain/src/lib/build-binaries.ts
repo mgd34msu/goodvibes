@@ -160,6 +160,16 @@ export function runBuildBinaries(options: RunBuildOptions): BuildOutcome[] {
       else artifacts.push(target.daemonArtifact);
     }
 
+    // A selection can leave a target with nothing to compile (daemon-only on a
+    // target without a daemon leg); that is not a build, and a stale file in the
+    // output directory must not stand in for one.
+    if (ok && artifacts.length === 0) {
+      ok = false;
+      detail = selection.daemonOnly
+        ? 'nothing was built: daemon-only was selected but this target has no daemon binary or the repo has no daemonEntrypoint'
+        : 'nothing was built: no compile ran for this target';
+    }
+
     if (ok && target.nativeAddonPackage && target.nativeAddonFile && options.provideAddon) {
       const provided = options.provideAddon(target, target.key === options.nativeKey);
       if (!provided) { ok = false; detail = `native addon ${target.nativeAddonPackage}/${target.nativeAddonFile} unavailable`; }

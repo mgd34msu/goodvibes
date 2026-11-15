@@ -224,3 +224,17 @@ test('a cancellation snapshot does not abort a later wake admitted by an abort l
   second.resolve();
   await m.join(record.id);
 });
+
+test('a contract unit is registered on the message bus under its contract', () => {
+  const registered: Array<{ agentId: string; contractId?: string | undefined }> = [];
+  const m = new AgentManager({
+    configManager: { get: () => null } as unknown as Pick<ConfigManager, 'get'>,
+    archetypeLoader: { loadArchetype: () => null },
+    executor: { runAgent: async () => {} },
+    messageBus: { registerAgent(meta) { registered.push({ agentId: meta.agentId, contractId: meta.contractId }); } },
+  });
+  const unit = m.spawn({ mode: 'spawn', task: 'unit brief', outsideContract: true }, { contractId: 'ctr-00000001', contractUnitId: 'u1' });
+  const free = spawn(m);
+  expect(registered.find((entry) => entry.agentId === unit.id)?.contractId).toBe('ctr-00000001');
+  expect(registered.find((entry) => entry.agentId === free.id)?.contractId).toBeUndefined();
+});

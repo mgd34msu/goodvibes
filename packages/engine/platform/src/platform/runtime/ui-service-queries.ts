@@ -25,6 +25,8 @@ export interface EnvironmentVariableQuery {
 export interface ServiceInspectionQuery {
   getAll(): Record<string, ServiceConfig>;
   inspect(name: string): Promise<ServiceInspection | null>;
+  /** Why the services file cannot be used, or null; an empty getAll() with a reason is not "no services". */
+  unreadableReason?(): string | null;
   testConnection(name: string): Promise<ServiceConnectionTestResult>;
 }
 
@@ -61,7 +63,7 @@ export interface ProviderModelCatalogQuery {
 
 export interface ProviderAccountInspectionQuery {
   readonly providerModels: ProviderModelCatalogQuery;
-  readonly services: Pick<ServiceInspectionQuery, 'getAll' | 'inspect'>;
+  readonly services: Pick<ServiceInspectionQuery, 'getAll' | 'inspect' | 'unreadableReason'>;
   readonly subscriptions: Pick<SubscriptionAccessQuery, 'list' | 'listPending' | 'get' | 'getPending'>;
   readonly environment: EnvironmentVariableQuery;
 }
@@ -93,6 +95,11 @@ export function createEnvironmentVariableQuery(
   };
 }
 
+/** A reply for another scope than the one asked is a broken contract, not "no providers". */
+function scopeMismatch(asked: string, got: string): Error {
+  return new Error(`Provider runtime metadata query for scope '${asked}' answered with scope '${got}'.`);
+}
+
 export function createProviderRuntimeInspectionQuery(
   providers: Pick<ProviderApi, 'listProviderIds' | 'queryRuntimeMetadata'>,
 ): ProviderRuntimeInspectionQuery {
@@ -103,12 +110,14 @@ export function createProviderRuntimeInspectionQuery(
 
     async inspectAll(): Promise<readonly ProviderRuntimeSnapshot[]> {
       const result = await providers.queryRuntimeMetadata({ scope: 'all' });
-      return result.scope === 'all' ? result.snapshots : [];
+      if (result.scope !== 'all') throw scopeMismatch('all', result.scope);
+      return result.snapshots;
     },
 
     async inspect(providerId: string): Promise<ProviderRuntimeSnapshot | null> {
       const result = await providers.queryRuntimeMetadata({ scope: 'provider', providerId });
-      return result.scope === 'provider' ? result.snapshot : null;
+      if (result.scope !== 'provider') throw scopeMismatch('provider', result.scope);
+      return result.snapshot;
     },
   };
 }

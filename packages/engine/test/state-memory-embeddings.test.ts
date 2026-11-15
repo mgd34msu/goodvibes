@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DEFAULT_MEMORY_EMBEDDING_DIMS,
@@ -23,6 +24,7 @@ describe('MemoryEmbeddingProviderRegistry', () => {
   afterEach(() => {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    rmSync(tempRoot, { recursive: true, force: true });
   });
 
   test('keeps hashed local embeddings as the default sqlite-vec-compatible provider', async () => {

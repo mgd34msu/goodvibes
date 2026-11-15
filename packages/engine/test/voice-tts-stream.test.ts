@@ -139,99 +139,56 @@ describe('ElevenLabs streaming TTS provider', () => {
 });
 
 describe('VoiceService.synthesizeStream: cancellation', () => {
-  test('aborting via AbortController stops iteration and emits no further chunks', async () => {
-    const controller = new AbortController();
-    let cleanupCalled = false;
-
+  /** A provider that records the signal it was handed and yields one chunk per call to next(). */
+  function recordingProvider() {
+    const seen: { signal: AbortSignal | undefined; closed: boolean } = { signal: undefined, closed: false };
     const registry = new VoiceProviderRegistry();
     registry.register({
-      id: 'cancellable',
-      label: 'Cancellable',
+      id: 'recorder',
+      label: 'Recorder',
       capabilities: ['tts-stream'],
       async synthesizeStream(request): Promise<VoiceSynthesisStreamResult> {
-        // Async generator that yields chunks while signal is not aborted,
-        // then performs cleanup when the generator is closed/cancelled.
+        seen.signal = request.signal;
         async function* makeChunks(): AsyncGenerator<VoiceAudioChunk> {
           try {
-            let seq = 0;
+            let sequence = 0;
             while (!request.signal?.aborted) {
-              seq += 1;
-              yield { data: new Uint8Array([seq]), sequence: seq };
-              // Small pause so the consumer has a chance to abort between yields
-              await new Promise<void>((resolve) => setTimeout(resolve, 10));
+              sequence += 1;
+              yield { data: new Uint8Array([sequence]), sequence };
             }
           } finally {
-            cleanupCalled = true;
+            seen.closed = true;
           }
         }
-        return {
-          providerId: 'cancellable',
-          mimeType: 'audio/mpeg',
-          format: 'mp3',
-          chunks: makeChunks(),
-          metadata: {},
-        };
+        return { providerId: 'recorder', mimeType: 'audio/mpeg', format: 'mp3', chunks: makeChunks(), metadata: {} };
       },
     });
+    return { service: new VoiceService(registry), seen };
+  }
 
-    const service = new VoiceService(registry);
-    const result = await service.synthesizeStream(undefined, {
-      text: 'cancel me',
-      signal: controller.signal,
-    });
+  test('the caller\'s own signal reaches the provider, so aborting it ends the stream', async () => {
+    const controller = new AbortController();
+    const { service, seen } = recordingProvider();
+    const result = await service.synthesizeStream(undefined, { text: 'cancel me', signal: controller.signal });
+    expect(seen.signal).toBe(controller.signal);
 
     const collected: number[] = [];
     for await (const chunk of result.chunks) {
       collected.push(...chunk.data);
-      // Abort after receiving the first chunk
-      if (collected.length >= 1) {
-        controller.abort();
-        break;
-      }
+      if (collected.length === 2) controller.abort();
     }
-
-    // Only the first chunk should have been collected before abort
-    expect(collected.length).toBeGreaterThanOrEqual(1);
-    // Generator's finally block must have run after break/abort
-    expect(cleanupCalled).toBe(true);
+    // The provider saw the abort through the forwarded signal and stopped on its own.
+    expect(collected).toEqual([1, 2]);
+    expect(seen.closed).toBe(true);
   });
 
-  test('aborting a pre-aborted signal prevents any chunks from being emitted', async () => {
+  test('a signal aborted before the call is the one the provider sees, and nothing is emitted', async () => {
     const controller = new AbortController();
-    controller.abort(); // abort before synthesis begins
-
-    const registry = new VoiceProviderRegistry();
-    registry.register({
-      id: 'eager-checker',
-      label: 'EagerChecker',
-      capabilities: ['tts-stream'],
-      async synthesizeStream(request): Promise<VoiceSynthesisStreamResult> {
-        async function* makeChunks(): AsyncGenerator<VoiceAudioChunk> {
-          if (request.signal?.aborted) return; // early exit on pre-aborted signal
-          yield { data: new Uint8Array([1]), sequence: 1 };
-        }
-        return {
-          providerId: 'eager-checker',
-          mimeType: 'audio/mpeg',
-          format: 'mp3',
-          chunks: makeChunks(),
-          metadata: {},
-        };
-      },
-    });
-
-    const service = new VoiceService(registry);
-    const result = await service.synthesizeStream(undefined, {
-      text: 'should emit nothing',
-      signal: controller.signal,
-    });
-
-    const collected: number[] = [];
-    for await (const chunk of result.chunks) {
-      collected.push(...chunk.data);
-    }
-
-    expect(collected).toHaveLength(0);
+    controller.abort();
+    const { service, seen } = recordingProvider();
+    const result = await service.synthesizeStream(undefined, { text: 'should emit nothing', signal: controller.signal });
+    expect(seen.signal).toBe(controller.signal);
+    expect(await collectBytes(result.chunks)).toEqual([]);
   });
 });
 

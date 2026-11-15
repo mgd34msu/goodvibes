@@ -80,6 +80,10 @@ function sumBucket(value: unknown): number {
 function narrowMetrics(body: unknown): CliConnectedHostMetrics | null {
   if (!body || typeof body !== 'object') return null;
   const root = body as Record<string, unknown>;
+  // An object with neither bucket (for example an error envelope) is not a
+  // metrics body; reading it as all zeros would report a healthy-looking host.
+  const hasBucket = (value: unknown): boolean => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  if (!hasBucket(root.counters) && !hasBucket(root.gauges)) return null;
   const counters = (root.counters ?? {}) as Record<string, unknown>;
   const gauges = (root.gauges ?? {}) as Record<string, unknown>;
   const http = (counters.http ?? {}) as Record<string, unknown>;

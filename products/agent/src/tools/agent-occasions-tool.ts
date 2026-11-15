@@ -290,6 +290,7 @@ async function handlePropose(
   if (isOutcome(recurrence)) return recurrence;
   const person = readString(args.person);
   const leadDays = readNumber(args.leadDays);
+  if (args.leadDays !== undefined && leadDays === undefined) return fail(['`leadDays` must be a number of days. Nothing was recorded.']);
 
   // Every optional field is spread only when present, so the body carries no
   // key the verb did not declare.
@@ -352,6 +353,7 @@ async function handleConfirm(
   if (isOutcome(recurrence)) return recurrence;
   const person = readString(args.person);
   const leadDays = readNumber(args.leadDays);
+  if (args.leadDays !== undefined && leadDays === undefined) return fail(['`leadDays` must be a number of days. Nothing was recorded.']);
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.confirm, {
     title,
@@ -411,6 +413,7 @@ async function handlePlanPropose(
   if (!title) return fail(['`title` is required: what the plan is called.']);
   if (!from || !to) return fail(['`from` and `to` are both required, as YYYY-MM-DD.']);
   const destination = readString(args.destination);
+  if (args.away !== undefined && typeof args.away !== 'boolean') return fail(['`away` must be true or false. Nothing was recorded.']);
   const away = args.away === true;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansPropose, {
@@ -446,6 +449,7 @@ async function handlePlanConfirm(
   if (!from || !to) return fail(['`from` and `to` are both required, as YYYY-MM-DD.']);
   if (authority !== 'autonomous' && !said) return fail(['`said` is required: his verbatim words for this plan.']);
   const destination = readString(args.destination);
+  if (args.away !== undefined && typeof args.away !== 'boolean') return fail(['`away` must be true or false. Nothing was recorded.']);
   const away = args.away === true;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansConfirm, {
@@ -511,6 +515,21 @@ async function handleSweep(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
 
 // ── Tool ───────────────────────────────────────────────────────────────────
 
+/** A throw is "held" only when authority or source moved before anything was sent; after a write left, the outcome is unknown. */
+function failedOperation(error: unknown, requestSent: boolean, aborted: boolean): ToolOutcome {
+  const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  if (requestSent) {
+    return fail([
+      `Occasion operation outcome unknown: the write was sent to the daemon and then failed (${cause}).`,
+      'The daemon may have applied it. Check with action:"pending" or action:"list" before repeating it.',
+    ]);
+  }
+  if (aborted || error instanceof ToolInputProjectionError) {
+    return fail(['Occasion operation held: current admitted authority or source is unavailable.']);
+  }
+  return fail([`Occasion operation failed before anything was sent: ${cause}`]);
+}
+
 export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
   return {
     definition: {
@@ -553,13 +572,13 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           to: { type: 'string', description: 'A plan\'s last day, YYYY-MM-DD.' },
           away: { type: 'boolean', description: 'True when the plan takes him away from home. Feeds reminder timing.' },
           destination: { type: 'string', description: 'Where, when he said. Omit when he did not.' },
-          confirmed: { type: 'boolean', description: 'Optional provenance; never grants write authority.' },
+          confirmed: { type: 'boolean', description: 'action:"remove" only: true after you asked him once to confirm the removal. Never grants write authority.' },
           authority: {
             type: 'string',
             enum: [...PROFILE_AUTHORITIES],
             description: 'Optional source provenance; external-source labels further restrict profile writes.',
           },
-          said: { type: 'string', description: 'Optional exact request provenance; never grants write authority.' },
+          said: { type: 'string', description: 'His verbatim words. Required for confirm and plan_confirm when `authority` is an external-source label; ignored otherwise. Never grants write authority.' },
         },
         additionalProperties: false,
       },
@@ -570,6 +589,8 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
       concurrency: 'serial',
     },
     execute: async (rawArgs, options) => {
+      // True once a write request has been handed to the daemon: from then on a throw cannot say "nothing happened".
+      let requestSent = false;
       try {
       const args = captureCatalogData(rawArgs);
       const action = normalizeOccasionsAction(args.action) ?? normalizeOccasionsAction(args.mode);
@@ -587,6 +608,7 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
       };
       const invoke: OccasionsGatewayInvoke = async (methodId, body) => {
         assertCurrent();
+        if (writing) requestSent = true;
         const result = await deps.invoke(methodId, body, { signal: options?.signal, assertCurrent, delegation,
           onWriteIntent: () => effects?.onWriteIntent?.('profile'), onEffect: published => effects?.onEffect(published, 'profile'),
           onStateWriteIntent: () => effects?.onWriteIntent?.('state'), onStateEffect: published => effects?.onEffect(published, 'state'),
@@ -599,31 +621,31 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
 
       switch (action) {
         case 'list':
-          return handleList(currentDeps);
+          return await handleList(currentDeps);
         case 'pending':
-          return handlePending(currentDeps);
+          return await handlePending(currentDeps);
         case 'plans':
-          return handlePlans(currentDeps);
+          return await handlePlans(currentDeps);
         case 'state':
-          return handleState(currentDeps);
+          return await handleState(currentDeps);
         case 'gifts':
-          return handleGifts(currentDeps, occasionId);
+          return await handleGifts(currentDeps, occasionId);
         case 'answer':
-          return handleAnswer(currentDeps, occasionId, readString(args.answer), readString(args.occurrence));
+          return await handleAnswer(currentDeps, occasionId, readString(args.answer), readString(args.occurrence));
         case 'interview':
-          return handleInterviewGet(currentDeps, interviewId);
+          return await handleInterviewGet(currentDeps, interviewId);
         case 'interview_answer':
-          return handleInterviewAnswer(currentDeps, interviewId, readString(args.stepId), readString(args.text));
+          return await handleInterviewAnswer(currentDeps, interviewId, readString(args.stepId), readString(args.text));
         case 'interview_record':
-          return handleInterviewRecord(currentDeps, interviewId, readString(args.landedOn));
+          return await handleInterviewRecord(currentDeps, interviewId, readString(args.landedOn));
         case 'resolve_conflict':
-          return handleResolveConflict(currentDeps, occasionId);
+          return await handleResolveConflict(currentDeps, occasionId);
         case 'propose':
-          return handlePropose(currentDeps, args);
+          return await handlePropose(currentDeps, args);
         case 'plan_propose':
-          return handlePlanPropose(currentDeps, args);
+          return await handlePlanPropose(currentDeps, args);
         case 'sweep':
-          return handleSweep(currentDeps);
+          return await handleSweep(currentDeps);
         default:
           break;
       }
@@ -633,13 +655,13 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
       if (isOutcome(authority)) return authority;
 
       if (action === 'confirm') {
-        return handleConfirm(currentDeps, args, authority.authority, authority.authority === 'autonomous' ? '' : readString(args.said));
+        return await handleConfirm(currentDeps, args, authority.authority, authority.authority === 'autonomous' ? '' : readString(args.said));
       }
       if (action === 'plan_confirm') {
-        return handlePlanConfirm(currentDeps, args, authority.authority, authority.authority === 'autonomous' ? '' : readString(args.said));
+        return await handlePlanConfirm(currentDeps, args, authority.authority, authority.authority === 'autonomous' ? '' : readString(args.said));
       }
-      return handleRemove(currentDeps, occasionId, true, authority.authority);
-      } catch { return fail(['Occasion operation held: current admitted authority or source is unavailable.']); }
+      return await handleRemove(currentDeps, occasionId, args.confirmed === true || args.confirmed === 'true', authority.authority);
+      } catch (error) { return failedOperation(error, requestSent, options?.signal?.aborted === true); }
     },
   };
 }

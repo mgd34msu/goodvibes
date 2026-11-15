@@ -75,7 +75,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'Which configured card to use when a purchase does not name one. Refers to a card id from payments.cards.list; the card NUMBER, expiry and CVV live in the daemon secret store and never in config.',
+      'A card id from payments.cards.list, shown as your preferred card. For now every purchase must still name its card: nothing falls back to this setting, and deleting that card does not clear it. The card NUMBER, expiry and CVV live in the daemon secret store and never in config.',
   },
   {
     key: 'payments.currency',
@@ -92,7 +92,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     default: 'stored',
     enumValues: ['stored', 'prompt'],
     description:
-      "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing and stops every purchase to ask you for the code, which DISABLES UNATTENDED PURCHASING; surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
+      "How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing, and there is not yet a place to type the code at purchase time, so while it is selected every purchase is refused as having no usable card; it is for owners who want purchasing off for the card, not a working stop-and-ask mode. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not.",
   },
 
   // ── Budgets ────────────────────────────────────────────────────────────
@@ -159,98 +159,98 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'Full name as it appears on the card statement. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.line1',
     type: 'string',
     default: '',
     description:
-      'Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'Street address, first line. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.line2',
     type: 'string',
     default: '',
     description:
-      'Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'Second address line (apartment, suite); leave empty when unused. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.city',
     type: 'string',
     default: '',
     description:
-      'City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'City or town. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.region',
     type: 'string',
     default: '',
     description:
-      'State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'State, province or region. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.postalCode',
     type: 'string',
     default: '',
     description:
-      'Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'Postal or ZIP code. Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.billingAddress.country',
     type: 'string',
     default: '',
     description:
-      'Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that.',
+      'Country, as the checkout expects it (an ISO two-letter code is safest). Part of the billing address the card issuer checks against (address verification). Stored in daemon-owned config rather than the secret store because surfaces must display and edit it, but note it sits beside stored card material, so anyone holding both has everything a card-not-present charge needs. A virtual card with a hard issuer cap is what bounds that. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.name',
     type: 'string',
     default: '',
     description:
-      'Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'Recipient name. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.line1',
     type: 'string',
     default: '',
     description:
-      'Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'Street address, first line. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.line2',
     type: 'string',
     default: '',
     description:
-      'Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'Second address line (apartment, suite); leave empty when unused. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.city',
     type: 'string',
     default: '',
     description:
-      'City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'City or town. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.region',
     type: 'string',
     default: '',
     description:
-      'State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'State, province or region. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.postalCode',
     type: 'string',
     default: '',
     description:
-      'Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'Postal or ZIP code. Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
   {
     key: 'payments.shippingAddress.country',
     type: 'string',
     default: '',
     description:
-      'Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do.',
+      'Country, as the checkout expects it (an ISO two-letter code is safest). Where purchases are delivered. A purchase is REFUSED while the shipping address is incomplete, there is nowhere to send it, and guessing an address is not a thing this should do. When left empty, the matching address field of the owner profile is used once it has been verified.',
   },
 
   // ── The two windows ────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      'Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is kept, since the addition is the more specific instruction.',
+      'Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.',
     validate: (value: unknown): boolean => typeof value === 'string',
     validationHint: 'a comma-separated list of registrable domains',
   },
@@ -294,7 +294,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 100,
     description:
-      "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, the purchase asks for your yes. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
+      "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, the purchase asks for your yes. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
     ...intRange(0, 1_000_000),
   },
   {
@@ -302,7 +302,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 98,
     description:
-      'Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay\'s own feedback widget, never from the seller\'s listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming.',
+      'Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay\'s own feedback widget, never from the seller\'s listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes.',
     ...intRange(0, 100),
   },
   {
@@ -310,16 +310,16 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'string',
     default: '',
     description:
-      "Comma-separated, ordered list of surfaces that receive approval and veto prompts and may answer them: 'tui', 'agent-terminal', 'telegram'. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means an above-budget purchase has nowhere to ask and is refused, while an in-budget one proceeds unannounced.",
+      "Comma-separated, ordered list of surfaces that receive approval and veto prompts and may answer them. Today only 'telegram' has a delivery path; 'tui' and 'agent-terminal' are rejected until the daemon can deliver a notice to a terminal window, because a channel you believe will reach you and does not is worse than none. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means an above-budget purchase has nowhere to ask and is refused, while an in-budget one proceeds unannounced.",
     validate: (value: unknown): boolean => {
       if (typeof value !== 'string') return false;
       if (value.trim().length === 0) return true;
-      const allowed = new Set(['tui', 'agent-terminal', 'telegram']);
+      const allowed = new Set(['telegram']);
       return value
         .split(',')
         .map((entry) => entry.trim().toLowerCase())
         .every((entry) => allowed.has(entry));
     },
-    validationHint: "a comma-separated list drawn from 'tui', 'agent-terminal', 'telegram'",
+    validationHint: "a comma-separated list; only 'telegram' can deliver a notice today",
   },
 ];

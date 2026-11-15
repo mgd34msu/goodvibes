@@ -146,6 +146,9 @@ export function paramCountFromModel(model: { id: string; displayName?: string })
 // Process-level cache, the probe runs at most once per process.
 // ---------------------------------------------------------------------------
 let cachedProfile: HardwareProfile | null = null;
+// True while the cached entry was built from live probes (not injected by a test), so free RAM may be refreshed.
+let cacheIsLive = false;
+let probeStarted = false;
 
 /**
  * Return a hardware profile immediately without spawning any child process.
@@ -157,15 +160,22 @@ let cachedProfile: HardwareProfile | null = null;
  * This is the correct reader for render-path callers (TUI renderer, cookbook).
  * Never throws; degraded fields are null.
  */
-export function readHardwareProfileSync(): HardwareProfile {
-  if (cachedProfile !== null) return cachedProfile;
+export function readHardwareProfileSync(readRam: () => Pick<HardwareProfile, 'totalRamBytes' | 'availableRamBytes'> = probeRam): HardwareProfile {
+  if (cachedProfile !== null) {
+    if (!cacheIsLive) return cachedProfile;
+    // Free RAM is a "now" figure and the read is cheap; GPUs and CPU cores stay cached.
+    const { availableRamBytes } = readRam();
+    if (availableRamBytes !== cachedProfile.availableRamBytes) cachedProfile = { ...cachedProfile, availableRamBytes };
+    return cachedProfile;
+  }
   // Build an immediate profile with RAM+CPU only (no GPU spawn).
   // Populate the cache so repeated sync calls return the same object, and so
   // that subsequent renders are instant. startHardwareProbe() will upgrade
   // this entry with GPU data when the async probe completes.
-  const { totalRamBytes, availableRamBytes } = probeRam();
+  const { totalRamBytes, availableRamBytes } = readRam();
   const cpuCores = probeCpuCores();
   cachedProfile = { totalRamBytes, availableRamBytes, gpus: [], cpuCores };
+  cacheIsLive = true;
   return cachedProfile;
 }
 
@@ -193,9 +203,11 @@ export function readHardwareProfile(): HardwareProfile {
  * Call once at application startup, off the render frame.
  * Never throws; GPU errors are silently ignored.
  */
-export function startHardwareProbe(): void {
+export function startHardwareProbe(spawnProbe: typeof spawn = spawn): void {
+  if (probeStarted) return;
+  probeStarted = true;
   try {
-    const child = spawn(
+    const child = spawnProbe(
       'nvidia-smi',
       ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
       { timeout: 1500 },
@@ -212,6 +224,7 @@ export function startHardwareProbe(): void {
         // Populate if cache is cold, or upgrade an existing sync-only entry
         // (gpus: []) with the GPU data returned by the async probe.
         cachedProfile = _mergeProbeIntoCache(cachedProfile, { totalRamBytes, availableRamBytes, gpus, cpuCores });
+        cacheIsLive = true;
       } catch {
         // GPU probe failure is non-fatal, leave cache unpopulated.
       }
@@ -227,6 +240,8 @@ export function startHardwareProbe(): void {
 /** Reset the process-level cache (test use only). */
 export function _resetHardwareProfileCache(): void {
   cachedProfile = null;
+  cacheIsLive = false;
+  probeStarted = false;
 }
 
 /**
@@ -236,6 +251,7 @@ export function _resetHardwareProfileCache(): void {
  */
 export function _setHardwareProfileForTest(profile: HardwareProfile): void {
   cachedProfile = profile;
+  cacheIsLive = false;
 }
 
 /**

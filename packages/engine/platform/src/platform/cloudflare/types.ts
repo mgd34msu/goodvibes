@@ -146,6 +146,12 @@ export interface CloudflareProvisionResult {
   readonly ok: boolean;
   readonly dryRun: false;
   readonly steps: readonly CloudflareProvisionStep[];
+  /**
+   * The message of every step that finished with a warning (a skipped hostname
+   * component, failed verification, ...). `ok` only says the run reached its end;
+   * a non-empty list means part of what was asked for was not set up.
+   */
+  readonly warnings?: readonly string[] | undefined;
   readonly account: {
     readonly id: string;
     readonly name: string;
@@ -316,8 +322,15 @@ export interface CloudflareDisableInput {
 }
 
 export interface CloudflareDisableResult {
+  /** True when the local configuration was switched off. See `remote` for the Cloudflare side. */
   readonly ok: boolean;
   readonly steps: readonly CloudflareProvisionStep[];
+  /**
+   * `disabled`: the Worker cron/route changes were made at Cloudflare.
+   * `not-disabled`: they were skipped or failed, so a deployed Worker may keep
+   * calling the daemon until it is disabled in the Cloudflare dashboard.
+   */
+  readonly remote?: 'disabled' | 'not-disabled' | undefined;
 }
 
 export type CloudflareSecretSource = 'body' | 'config-ref' | 'env' | 'goodvibes-secret' | 'auth-token' | 'generated' | 'missing';
@@ -358,6 +371,7 @@ export interface CloudflareDnsRecordLike {
   readonly content: string;
   readonly proxied?: boolean | undefined;
   readonly ttl?: number | undefined;
+  readonly comment?: string | undefined;
 }
 
 export interface CloudflareKvNamespaceLike {
@@ -571,6 +585,7 @@ export interface CloudflareApiClient {
         create(params: { readonly account_id: string; readonly name: string; readonly config_src?: 'local' | 'cloudflare' }): Promise<CloudflareTunnelLike>;
         list(params: { readonly account_id: string; readonly name?: string; readonly is_deleted?: boolean }): AsyncIterable<CloudflareTunnelLike>;
         readonly configurations: {
+          get?(tunnelId: string, params: { readonly account_id: string }): Promise<{ readonly config?: { readonly ingress?: readonly Record<string, unknown>[] } | null }>;
           update(tunnelId: string, params: { readonly account_id: string; readonly config: Record<string, unknown> }): Promise<Record<string, unknown>>;
         };
         readonly token: {
@@ -641,11 +656,19 @@ export interface CloudflareControlPlaneOptions {
 export class CloudflareControlPlaneError extends Error {
   readonly status: number;
   readonly code: string;
+  /** What a multi-step operation had already done when it failed. Never holds a secret value. */
+  readonly partial?: { readonly steps: readonly CloudflareProvisionStep[] } | undefined;
 
-  constructor(message: string, code: string, status = 400) {
-    super(message);
+  constructor(
+    message: string,
+    code: string,
+    status = 400,
+    options: { readonly partial?: { readonly steps: readonly CloudflareProvisionStep[] } | undefined; readonly cause?: unknown } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'CloudflareControlPlaneError';
     this.code = code;
     this.status = status;
+    this.partial = options.partial;
   }
 }

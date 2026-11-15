@@ -75,6 +75,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
     onSuccess: async (result) => {
       if (result.receipt) {
         setReceipt(result.receipt);
+        undoFiles.reset();
         plan.reset();
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         await queryClient.invalidateQueries({ queryKey: queryKeys.sessionMessages(sessionId) });
@@ -95,6 +96,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
   function resetFlow(): void {
     plan.reset();
     apply.reset();
+    undoFiles.reset();
     setReceipt(null);
   }
 
@@ -182,11 +184,16 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
               icon={<Undo2 size={16} aria-hidden="true" />}
               // Locked while an apply is in flight, and after a refusal: the token is
               // spent, so the operator previews again to mint a fresh one.
-              disabled={apply.isPending || Boolean(applyRefused)}
+              disabled={apply.isPending || Boolean(applyRefused) || !planData.token}
               onClick={() => setConfirmApply(true)}
             >
               Rewind to this point…
             </Button>
+            {!planData.token && (
+              <p className="session-rewind__note" role="note">
+                This preview carries no confirmation token, so it cannot be applied. Preview again to get one.
+              </p>
+            )}
           </div>
         )}
 
@@ -230,7 +237,8 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
                 <Button
                   size="sm"
                   className="session-rewind__undo-btn"
-                  disabled={undoFiles.isPending}
+                  // A second restore of the same checkpoint would overwrite work done since the first undo.
+                  disabled={undoFiles.isPending || undoFiles.isSuccess}
                   onClick={() => setConfirmUndo(true)}
                 >
                   {undoFiles.isPending ? 'Undoing…' : 'Undo the file restore'}

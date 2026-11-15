@@ -73,10 +73,18 @@ function selectGroupPolicy(policy: ChannelPolicyRecord, input: ChannelIngressPol
     .sort((a, b) => specificity(b) - specificity(a))[0];
 }
 
+/**
+ * The command a message names. An adapter's explicit `controlCommand` wins; free
+ * text counts only when its first word is written as a command (`/status`,
+ * `!status`, `/status@bot`). Ordinary conversation names no command, so it is
+ * neither held to `allowedCommands` nor allowed past `requireMention` as one.
+ */
 function firstCommand(text: string | undefined, explicit?: string): string {
   if (explicit && explicit.trim().length > 0) return explicit.trim().toLowerCase();
   if (!text) return '';
-  return text.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+  const word = text.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+  if (!/^[/!]\S/.test(word)) return '';
+  return word.startsWith('/') ? word.replace(/@\S*$/, '') : word;
 }
 
 function commandAllowed(command: string, allowedCommands: readonly string[]): boolean {
@@ -391,10 +399,22 @@ export class ChannelPolicyManager {
     if (allowed && allowlistUserIds.length === 0 && input.userId) {
       // Publish ownership before awaiting disk so another ingress cannot also
       // seed the empty scope. An explicit group override owns its own seed.
+      const before = this.policies.get(input.surface);
       effectivePolicy = this.updatePolicy(input.surface, matchedGroupPolicy?.allowlistUserIds !== undefined
         ? { groupPolicies: policy.groupPolicies.map(entry => entry === matchedGroupPolicy ? { ...entry, allowlistUserIds: [input.userId!] } : entry) }
         : { allowlistUserIds: [input.userId] });
-      await this.persist();
+      try {
+        await this.persist();
+      } catch (error) {
+        // An owner that exists only in memory would be forgotten at restart, and
+        // the next sender to speak would then become the owner instead. Leave the
+        // scope unseeded so the next message retries the whole step.
+        if (this.policies.get(input.surface) === effectivePolicy) {
+          if (before) this.policies.set(input.surface, before);
+          else this.policies.delete(input.surface);
+        }
+        throw error;
+      }
       reason = 'owner-allowlist-seeded';
       logger.info('Channel owner allowlist seeded from the first identified sender', {
         surface: input.surface,

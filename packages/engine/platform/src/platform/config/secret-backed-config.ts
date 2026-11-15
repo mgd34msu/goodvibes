@@ -36,15 +36,22 @@ export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
     'surfaces.telegram.botToken',
     'surfaces.telegram.webhookSecret',
     'surfaces.googleChat.verificationToken',
+    // Outbound URLs that carry their own posting token. Their delivery paths
+    // resolve a stored reference before posting, so they route like any credential.
+    'surfaces.googleChat.webhookUrl',
+    'surfaces.webhook.defaultTarget',
     'surfaces.signal.token',
     'surfaces.whatsapp.accessToken',
     'surfaces.whatsapp.verifyToken',
     'surfaces.whatsapp.signingSecret',
     'surfaces.imessage.token',
     'surfaces.msteams.appPassword',
+    'surfaces.msteams.webhookSecret',
     'surfaces.bluebubbles.password',
     'surfaces.mattermost.botToken',
+    'surfaces.mattermost.webhookSecret',
     'surfaces.matrix.accessToken',
+    'surfaces.matrix.webhookSecret',
     ...PAYMENTS_SYNTHETIC_CONFIG_KEYS,
 ]);
 export function createSecretConfigKeyRegistry(extraKeys: readonly ConfigKey[]) {
@@ -108,7 +115,9 @@ export function buildSecretBackedConfigUpdate(configKey: ConfigKey, rawValue: st
     return {
         configValue: buildGoodVibesSecretRef(secretKey),
         secretKey,
-        secretValue: rawValue,
+        // The trimmed text, the same one that was tested for emptiness and for a
+        // reference: a token pasted with a trailing newline must not be stored with it.
+        secretValue: value,
     };
 }
 /**
@@ -153,7 +162,8 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
         readonly daemonWriter?: DaemonCredentialWriter | null | undefined;
     } = {}): Promise<string> {
         const update = buildSecretBackedConfigUpdate(configKey, rawValue);
-        if (route && options.scope === undefined && await route(configKey, rawValue, update))
+        const trimmedValue = rawValue.trim();
+        if (route && options.scope === undefined && await route(configKey, trimmedValue, update))
             return update.configValue;
         const scope = options.scope ?? defaultSecretBackedScope(configKey);
         // A daemon-scoped credential is the daemon's to store, and the daemon does
@@ -166,7 +176,7 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
                 await options.daemonWriter.clear(configKey);
                 return '';
             }
-            await options.daemonWriter.set(configKey, rawValue);
+            await options.daemonWriter.set(configKey, trimmedValue);
             return update.configValue;
         }
         if (update.secretKey && !secretsManager)
@@ -184,12 +194,20 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
             // ownership above selects the tier that executes with this value.
             await secretsManager.set(update.secretKey, update.secretValue, { scope: scope, medium });
         }
-        // Revocation includes material written under earlier storage policies.
-        if (update.clearSecretKey && secretsManager?.delete) {
-            await secretsManager.delete(update.clearSecretKey, { scope });
-        }
         configManager.validateDynamic?.(configKey, update.configValue);
         configManager.setDynamic(configKey, update.configValue);
+        // Revocation includes material written under earlier storage policies.
+        // The reference is unpublished first: failing at the config write must not
+        // leave a reference that resolves to a deleted secret.
+        if (update.clearSecretKey && secretsManager?.delete) {
+            try {
+                await secretsManager.delete(update.clearSecretKey, { scope });
+            }
+            catch {
+                // Store errors may echo credential material, so none is included.
+                throw new Error('The credential reference was cleared, but its stored value could not be removed. Remove it with /secrets delete.');
+            }
+        }
         return update.configValue;
     };
 }

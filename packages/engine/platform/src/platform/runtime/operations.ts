@@ -4,7 +4,8 @@ export type { RemoteSessionBundle } from './remote/types.js';
 export * from './tasks/index.js';
 export * from './tools/index.js';
 export { AcpTaskAdapter } from './tasks/adapters/index.js';
-export { OpsControlPlane, OpsIllegalActionError, OpsTargetNotFoundError } from './ops/control-plane.js';
+export { OpsControlPlane, OpsIllegalActionError, OpsTargetNotFoundError, OpsActionUnavailableError } from './ops/control-plane.js';
+export type { OpsAgentCanceller } from './ops/control-plane.js';
 export { ToolContractVerifier } from './tools/contract-verifier.js';
 export type { ContractVerifierOptions } from './tools/contract-verifier.js';
 export {
@@ -97,6 +98,14 @@ export {
 export {
   createStuckTurnPlaybook,
 } from './ops/playbooks/stuck-turn.js';
+export {
+  getOpsRuntimeContext,
+  withOpsRuntimeContext,
+} from './ops/runtime-context.js';
+export type {
+  OpsRuntimeContextConfig,
+  OpsRuntimeContextState,
+} from './ops/runtime-context.js';
 export {
   evaluateOrchestrationSpawn,
 } from './orchestration/spawn-policy.js';
@@ -248,8 +257,8 @@ export {
 } from './reachability-check.js';
 export type { ReachabilityCheckInput, ReachabilityCheckResult } from './reachability-check.js';
 
-export { createAgentGraph, createAgentExecutionGraph } from './agent-graph-composition.js';
-export type { AgentGraph, AgentGraphOptions, AgentExecutionGraph, AgentExecutionGraphOptions } from './agent-graph-composition.js';
+export { createContractedAgentGraph, createAgentExecutionGraph } from './agent-graph-composition.js';
+export type { ContractedAgentGraph, ContractedAgentGraphOptions, AgentExecutionGraph, AgentExecutionGraphOptions } from './agent-graph-composition.js';
 
 // Product roots compose these once their actual plans and fleet owners exist.
 export { composeContractRunner, resumeContracts } from './contract-composition.js';

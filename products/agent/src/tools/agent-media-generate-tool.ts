@@ -113,7 +113,7 @@ export function createAgentMediaGenerateTool(
         assertCurrent();
         const outward = await evaluateOutwardEffect({ request: { toolName: 'agent_media_generate', action: 'media.generate', description: 'sending the media generation prompt' },
           ledger, content: { prompt }, taintOptions: { signal: executionOptions?.signal } });
-        assertCurrent(); if (!outward.allowed) return failure(outward.reason ?? 'Media prompt content was refused.');
+        assertCurrent(); if (!outward.allowed) return failure([outward.reason ?? 'Media prompt content was refused.', outward.fix].filter(Boolean).join(' '));
         const card = await screenOutboundForCardMaterial({ surface: 'media-provider', message: prompt }, { signal: executionOptions?.signal, assertCurrent });
         assertCurrent(); if (card) throw new CardMaterialRefusedError(card);
         const result = await generateAgentMedia(mediaProviderRegistry, artifactStore, {

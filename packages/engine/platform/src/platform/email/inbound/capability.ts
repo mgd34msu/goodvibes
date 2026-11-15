@@ -408,11 +408,25 @@ export function classifyOpenFailure(error: unknown): OpenFailureVerdict {
  *   - A `NO` to a **SEARCH** is not that claim. Servers refuse searches
  *     transiently, under load, and on a folder being reindexed, and stopping
  *     for an hour over one would turn a hiccup into silence.
+ *
+ * An uncoded `NO` to a FETCH is not always the first claim either: some
+ * providers send a bare `NO Server Unavailable` mid-session. A caller that
+ * counts them passes `uncoded`, and the refusal is treated as a wait until it
+ * has repeated `giveUpAfter` times in a row, after which it is the terminal
+ * claim above, the same bounded-retry rule `classifyLocalFailure` uses. A
+ * caller that passes nothing gets the terminal answer at once.
  */
+export interface UncodedRefusalCount {
+  /** Uncoded refusals seen in a row, not counting this one, with no completed drain between. */
+  readonly consecutive: number;
+  readonly giveUpAfter: number;
+}
+
 export async function classifyReadFailure(
   error: unknown,
   phase: 'search' | 'fetch' = 'fetch',
   options: JudgmentReadingOptions = {},
+  uncoded?: UncodedRefusalCount,
 ): Promise<OpenFailureVerdict> {
   assertImapReadingCurrent(options);
   const text = imapFailureText(error);
@@ -444,7 +458,7 @@ export async function classifyReadFailure(
       notice: null,
     };
   }
-  if (phase === 'fetch') {
+  if (phase === 'fetch' && (uncoded === undefined || uncoded.consecutive + 1 >= uncoded.giveUpAfter)) {
     return { ...retained, verdict: capabilityVerdict('fetch-refused', 'The mail command failed; server details withheld.'), terminal: true, notice: null };
   }
   return { ...retained, verdict: capabilityVerdict('reconnecting', 'The mail command failed; server details withheld.'), ...transient };

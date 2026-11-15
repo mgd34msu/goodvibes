@@ -1,5 +1,5 @@
 import { useMemoryReadings, memoryReadingsPort } from '../helpers/memory-readings.ts';
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
@@ -27,6 +27,10 @@ function shellPaths() {
   return createShellPathService({ workingDirectory: root, homeDirectory: root });
 }
 
+// Every store a test opens is closed after it, whether or not its assertions passed.
+const openStores: MemoryStore[] = [];
+afterEach(() => { for (const store of openStores.splice(0)) store.close(); });
+
 async function createMemoryRegistry(paths: ShellPaths): Promise<MemoryRegistry> {
   const configManager = new ConfigManager({
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -35,6 +39,7 @@ async function createMemoryRegistry(paths: ShellPaths): Promise<MemoryRegistry> 
   });
   const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
   const store = new MemoryStore(paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite'), { embeddingRegistry });
+  openStores.push(store);
   await store.init();
   return new MemoryRegistry(store);
 }
@@ -198,6 +203,7 @@ describe('agent_local_registry tool', () => {
       paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory-disabled-index.sqlite'),
       { embeddingRegistry, enableVectorIndex: false },
     );
+    openStores.push(store);
     await store.init();
     const disabledIndexRegistry = new MemoryRegistry(store);
     const { tool } = admittedLocalTool(paths, disabledIndexRegistry);
@@ -218,7 +224,6 @@ describe('agent_local_registry tool', () => {
     const emptyResult = await tool.execute({ domain: 'memory', action: 'search', query: 'no match at all here' });
     expect(emptyResult.success).toBe(true);
     expect(emptyResult.output).toContain('literal fallback');
-    await store.close();
   });
 
   test('deletes admitted Agent-local records without caller confirmation fields', async () => {
@@ -264,7 +269,7 @@ describe('agent_local_registry tool', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe('Tool input projection held.');
+    expect(result.error).toBe('Tool input projection invalid.');
     expect(JSON.stringify(result)).not.toContain('super-secret-value');
     expect(memoryRegistry.getAll()).toHaveLength(0);
   });

@@ -37,6 +37,9 @@ const readings = useMemoryReadings();
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** A usage lookup that has instrumented every record and seen none of them referenced. */
+const neverReferenced = (): MemoryConsolidationUsageSignal => ({ injectedCount: 3, referencedCount: 0, lastReferencedAt: null });
+
 function rec(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
   const now = 1_000_000_000_000;
   return {
@@ -148,18 +151,17 @@ describe('runMemoryConsolidation: proposals reach the review machinery', () => {
     expect(reg.records.size).toBe(2);
   });
 
-  test('a cross-scope-duplicate proposal re-enters its records into the review queue WITHOUT blocking injection', async () => {
+  test('a cross-scope-duplicate proposal leaves its records injectable and keeps a person\'s review', async () => {
     const a = rec({ id: 'a', scope: 'project', reviewState: 'reviewed', summary: 'shared', updatedAt: NOW });
     const b = rec({ id: 'b', scope: 'team', reviewState: 'reviewed', summary: 'shared', updatedAt: NOW });
     const reg = new FakeRegistry([a, b]);
     const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
     expect(receipt.proposed.some((p) => p.kind === 'cross-scope-duplicate')).toBe(true);
-    // Reviewed records flip to fresh (queue priority), never stale/contradicted:
-    // they do not disagree, so they stay injectable.
-    expect(reg.records.get('a')!.reviewState).toBe('fresh');
-    expect(reg.records.get('b')!.reviewState).toBe('fresh');
-    // And the receipt lists them as touched.
-    expect(receipt.note.length).toBeGreaterThan(0);
+    // They do not disagree, so they stay injectable, and automation does not
+    // demote a person's review; the proposal is what reaches the curator.
+    expect(reg.records.get('a')!.reviewState).toBe('reviewed');
+    expect(reg.records.get('b')!.reviewState).toBe('reviewed');
+    expect(reg.reviewCalls).toEqual([]);
   });
 });
 
@@ -224,7 +226,8 @@ describe('runMemoryConsolidation: pair readings', () => {
     const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
     expect(receipt.merged).toEqual([]);
     expect(receipt.proposed.map((p) => p.kind)).toEqual(['contradiction']);
-    expect(reg.records.get('newer')!.reviewState).toBe('contradicted');
+    // The record a person reviewed keeps that review; the other is flagged.
+    expect(reg.records.get('newer')!.reviewState).toBe('reviewed');
     expect(reg.records.get('older')!.reviewState).toBe('contradicted');
   });
 
@@ -248,7 +251,8 @@ describe('runMemoryConsolidation: pair readings', () => {
     const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
     expect(receipt.merged).toEqual([]);
     expect(receipt.proposed.map((p) => p.kind)).toEqual(['contradiction']);
-    expect(reg.records.get('b')!.reviewState).toBe('contradicted');
+    expect(reg.records.get('b')!.reviewState).toBe('reviewed');
+    expect(reg.records.get('a')!.reviewState).toBe('contradicted');
   });
 
   test('a replacement across scopes is only proposed', async () => {
@@ -303,7 +307,7 @@ describe('runMemoryConsolidation: decay', () => {
       memoryRegistry: reg,
       config: cfg({ decayAgeDays: 0, decayConfidenceStep: 10, archiveConfidenceFloor: 40 }),
       now: NOW, trigger: 'idle', idle: true,
-      usageLookup: () => undefined,
+      usageLookup: neverReferenced,
     });
     expect(receipt.decayed.length).toBe(1);
     expect(receipt.decayed[0]!.toConfidence).toBe(50);
@@ -318,6 +322,7 @@ describe('runMemoryConsolidation: decay', () => {
       memoryRegistry: reg,
       config: cfg({ decayAgeDays: 0, decayConfidenceStep: 10, archiveConfidenceFloor: 55 }),
       now: NOW, trigger: 'idle', idle: true,
+      usageLookup: neverReferenced,
     });
     expect(receipt.archived.length).toBe(1);
     expect(reg.records.get('aged')!.reviewState).toBe('stale');
@@ -386,5 +391,92 @@ describe('MemoryRegistry satisfies the consolidation seam', () => {
     const receipt = await runMemoryConsolidation({ memoryRegistry: registry, config: cfg(), now: Date.now(), trigger: 'manual', idle: true });
     expect(receipt.scanned).toBe(1);
     expect(receipt.note).toContain('never written silently');
+  });
+
+  test('merges a duplicate through the real store: loser stale not deleted, tags unioned on the survivor', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gv-mcon-'));
+    roots.push(root);
+    const configManager = new ConfigManager({ configDir: join(root, 'config') });
+    const store = new MemoryStore(join(root, 'memory.sqlite'), {
+      embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
+      enableVectorIndex: false,
+    });
+    await store.init();
+    const registry = new MemoryRegistry(store);
+    const survivor = await registry.add({ cls: 'fact', summary: 'CI deploy note', tags: ['ci'], review: { state: 'reviewed', confidence: 90, reviewedBy: 'operator' } });
+    const dup = await registry.add({ cls: 'fact', summary: 'CI deploy note', tags: ['deploy'] });
+    const receipt = await runMemoryConsolidation({ memoryRegistry: registry, config: cfg(), now: Date.now(), trigger: 'manual', idle: true });
+    expect(receipt.merged.map((m) => [m.survivorId, m.duplicateIds])).toEqual([[survivor.id, [dup.id]]]);
+    const all = new Map(registry.getAll().map((r) => [r.id, r]));
+    expect(all.size).toBe(2);
+    expect(all.get(dup.id)!.reviewState).toBe('stale');
+    expect(all.get(survivor.id)!.reviewState).toBe('reviewed');
+    expect([...all.get(survivor.id)!.tags].sort()).toEqual(['ci', 'deploy']);
+  });
+});
+
+describe('runMemoryConsolidation: automation never writes over a person or a newer state', () => {
+  test('two records a person reviewed stay reviewed when the reading says they contradict; the pair is only proposed', async () => {
+    const a = rec({ id: 'a', reviewState: 'reviewed', reviewedBy: 'operator', summary: 'the port', detail: 'port is 8080', updatedAt: NOW });
+    const b = rec({ id: 'b', reviewState: 'reviewed', reviewedBy: 'operator', summary: 'the port', detail: 'port is 9090', updatedAt: NOW });
+    const reg = new FakeRegistry([a, b]);
+    const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
+    expect(receipt.proposed.map((p) => p.kind)).toEqual(['contradiction']);
+    expect(reg.records.get('a')!.reviewState).toBe('reviewed');
+    expect(reg.records.get('b')!.reviewState).toBe('reviewed');
+    expect(reg.reviewCalls).toEqual([]);
+  });
+
+  test('a record a person changes while the pass is reading is left alone, and the receipt does not claim the merge', async () => {
+    const survivor = rec({ id: 'survivor', confidence: 80, summary: 'CI deploy note', updatedAt: NOW });
+    const loser = rec({ id: 'loser', confidence: 60, summary: 'CI deploy note', tags: ['deploy'], updatedAt: NOW - 1000 });
+    const reg = new FakeRegistry([survivor, loser]);
+    readings.use({
+      pair: () => {
+        // A person marks the loser reviewed during the reading window.
+        reg.records.set('loser', { ...reg.records.get('loser')!, reviewState: 'reviewed', reviewedBy: 'operator', updatedAt: NOW + 5 });
+        return { link: 2, restates: true, conflicts: false };
+      },
+    });
+    const receipt = await runMemoryConsolidation({ memoryRegistry: reg, config: cfg(), now: NOW, trigger: 'idle', idle: true });
+    expect(receipt.merged).toEqual([]);
+    expect(reg.records.get('loser')!.reviewState).toBe('reviewed');
+    expect(reg.records.get('survivor')!.tags).toEqual([]);
+    expect(reg.reviewCalls).toEqual([]);
+    expect(reg.updateCalls).toEqual([]);
+  });
+
+  test('decay does not write the snapshot state back over a change made during the pass', async () => {
+    const aged = rec({ id: 'aged', summary: 'old fact about builds', confidence: 60, updatedAt: NOW - 100 * DAY_MS });
+    const other = rec({ id: 'other', summary: 'unrelated fact about tests', updatedAt: NOW - 100 * DAY_MS });
+    const reg = new FakeRegistry([aged, other]);
+    readings.use({
+      pair: () => {
+        reg.records.set('aged', { ...reg.records.get('aged')!, reviewState: 'stale', staleReason: 'wrong since v3', updatedAt: NOW });
+        return { link: 0, restates: false, conflicts: false };
+      },
+    });
+    const receipt = await runMemoryConsolidation({
+      memoryRegistry: reg,
+      config: cfg({ decayAgeDays: 0, decayConfidenceStep: 10, archiveConfidenceFloor: 40 }),
+      now: NOW, trigger: 'idle', idle: true,
+      usageLookup: neverReferenced,
+    });
+    expect(receipt.decayed.map((entry) => entry.id)).toEqual(['other']);
+    expect(reg.records.get('aged')!.reviewState).toBe('stale');
+    expect(reg.records.get('aged')!.staleReason).toBe('wrong since v3');
+    expect(reg.records.get('aged')!.confidence).toBe(60);
+  });
+
+  test('decay lowers confidence without restamping the state or the reviewer', async () => {
+    const aged = rec({ id: 'aged', confidence: 60, updatedAt: NOW - 100 * DAY_MS });
+    const reg = new FakeRegistry([aged]);
+    await runMemoryConsolidation({
+      memoryRegistry: reg,
+      config: cfg({ decayAgeDays: 0, decayConfidenceStep: 10, archiveConfidenceFloor: 40 }),
+      now: NOW, trigger: 'idle', idle: true,
+      usageLookup: neverReferenced,
+    });
+    expect(reg.reviewCalls).toEqual([{ id: 'aged', patch: { confidence: 50 } }]);
   });
 });

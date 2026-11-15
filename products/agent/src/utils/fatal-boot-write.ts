@@ -36,18 +36,50 @@ const STDERR_FD = 2;
  */
 function writeLineToFd(fd: number, line: string): void {
   try {
-    const payload = Buffer.from(line.endsWith('\n') ? line : `${line}\n`, 'utf-8');
-    let written = 0;
-    while (written < payload.length) {
-      const n = writeSync(fd, payload, written, payload.length - written);
-      // A zero-byte write would spin forever; stop and take what got through.
-      if (n <= 0) break;
-      written += n;
-    }
+    writeAllToFd(fd, Buffer.from(line.endsWith('\n') ? line : `${line}\n`, 'utf-8'));
   } catch {
     // A closed or unwritable descriptor must never turn a diagnostic into a
     // second failure. There is nothing further to fall back to: this IS the
     // fallback.
+  }
+}
+
+/** A non-blocking pipe whose reader is slow reports EAGAIN until it drains. */
+const MAX_EAGAIN_RETRIES = 40;
+const EAGAIN_BACKOFF_MS = 5;
+
+function pauseSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Write every byte of `payload`. A full non-blocking pipe (EAGAIN) is waited out
+ * with a bounded backoff instead of ending the loop, which would drop the rest of
+ * a long `--help` or `status` render without any sign. Any other error, or a
+ * pipe that stays full, ends the write and keeps what got through.
+ */
+export function writeAllToFd(
+  fd: number,
+  payload: Buffer,
+  write: (fd: number, buffer: Buffer, offset: number, length: number) => number = writeSync,
+  pause: (ms: number) => void = pauseSync,
+): void {
+  let written = 0;
+  let retries = 0;
+  while (written < payload.length) {
+    let n: number;
+    try {
+      n = write(fd, payload, written, payload.length - written);
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code !== 'EAGAIN' || retries >= MAX_EAGAIN_RETRIES) return;
+      retries += 1;
+      pause(EAGAIN_BACKOFF_MS * retries);
+      continue;
+    }
+    // A zero-byte write would spin forever; stop and take what got through.
+    if (n <= 0) break;
+    written += n;
+    retries = 0;
   }
 }
 

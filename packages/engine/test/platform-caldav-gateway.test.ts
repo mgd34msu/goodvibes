@@ -288,8 +288,8 @@ describe('calendar.events.list', () => {
         calendarData: vevent({
           uid: `${String(index)}@example.com`,
           summary: `Event ${String(index)}`,
-          start: `202607${String(10 + index).padStart(2, '0')}T090000Z`,
-          end: `202607${String(10 + index).padStart(2, '0')}T100000Z`,
+          start: `202608${String(1 + index).padStart(2, '0')}T090000Z`,
+          end: `202608${String(1 + index).padStart(2, '0')}T100000Z`,
         }),
       })),
     );

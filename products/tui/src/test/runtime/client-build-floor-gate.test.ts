@@ -96,11 +96,12 @@ describe('a terminal below the daemon floor', () => {
 
     const completion = await services.sessionBroker.completeAgent(sessionId, busyAgentId, 'done');
 
-    // Nothing ran, and the message is still queued rather than marked answered
-    // by an agent that does not exist.
+    // Nothing ran, and the message is not marked answered by an agent that does
+    // not exist: it is refused with the reason, so the sender knows to resend.
     expect(completion?.continuedAgentId).toBeUndefined();
     expect(completion?.continuedInput).toBeUndefined();
-    expect(services.sessionBroker.getInputs(sessionId).some((input) => input.state === 'queued')).toBe(true);
+    const refused = services.sessionBroker.getInputs(sessionId).filter((input) => input.state === 'failed');
+    expect(refused.map((input) => input.error)).toEqual([expect.stringContaining('below the daemon floor')]);
   });
 
   test('the refusal holds for later follow-ups, not just the one that hit the floor', async () => {

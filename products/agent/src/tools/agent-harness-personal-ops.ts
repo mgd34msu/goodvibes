@@ -13,9 +13,11 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { LANE_IDS, QUEUE_CAPABILITIES, type AgentHarnessPersonalOpsArgs, type McpToolSchema, type PersonalOpsBriefingStatus, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLaneResolution, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsStatus, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { mcpToolRecords, mcpToolSchemas, readLimit, readString, toolsByServer } from './agent-harness-personal-ops-discovery.ts';
 import { buildLanes } from './agent-harness-personal-ops-lanes.ts';
-import { describeLane, laneStatusRank, searchText } from './agent-harness-personal-ops-records.ts';
-import { boundedPersonalOpsResult, executionRouteForRecord, liveRecordSearchText, missingRequiredInputFields, personalOpsReadNextRoutes, personalOpsReadReviewRecords, readInputFields, readRunControlBoolean, readRunControlString, redactedPersonalOpsText, resolveRunRecord, savePersonalOpsReviewArtifact, summarizeRunRecord } from './agent-harness-personal-ops-runner.ts';
+import { PERSONAL_OPS_LIVE_READ_TEMPLATE, describeLane, laneStatusRank, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedLabelsUntrusted, savedRecordsAtCap, searchText } from './agent-harness-personal-ops-records.ts';
+import { boundedPersonalOpsResult, executionRouteForRecord, liveRecordSearchText, invalidInputFields, missingRequiredInputFields, personalOpsReadNextRoutes, personalOpsReadReviewRecords, readInputFields, readRunControlBoolean, readRunControlString, redactedPersonalOpsText, resolveRunRecord, savePersonalOpsReviewArtifact, summarizeRunRecord } from './agent-harness-personal-ops-runner.ts';
 import { buildPersonalOpsIntakeCandidates, nextActions } from './agent-harness-personal-ops-intake.ts';
+import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
+import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
 
 export function personalOpsCatalogStatus(context: CommandContext): Record<string, unknown> {
   const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
@@ -30,6 +32,8 @@ export function personalOpsCatalogStatus(context: CommandContext): Record<string
     'needs-setup': Number(readyChannels === 0) + Number(readyRoutines === 0), gap: 4,
     workflows: 0, readyWorkflows: 0, attentionWorkflows: 0, setupWorkflows: 0,
     bestReadyStatus: 3,
+    // These counts cover native lanes only; connector-derived lane status appears in personal_ops action:"status".
+    countsCover: 'native-only',
     configuredChannels: snapshot.channels.length, configuredRoutines: snapshot.localRoutines.length,
     capabilityDiscovery: 'read-on-request',
   };
@@ -61,8 +65,7 @@ function recordCount(lane: PersonalOpsLane, predicate: (record: PersonalOpsLiveR
 }
 
 function isFreshProviderRecord(record: PersonalOpsLiveRecord): boolean {
-  return record.freshness?.status === 'fresh-provider-route-ready'
-    || record.freshness?.status === 'fresh-provider-record-current';
+  return record.freshness?.status === 'fresh-provider-route-ready';
 }
 
 function workflowCount(lane: PersonalOpsLane, status: PersonalOpsWorkflowStatus): number {
@@ -113,14 +116,17 @@ function briefingStepForLane(lane: PersonalOpsLane, includeParameters: boolean):
     .map((workflow) => workflow.modelRoute)
     .filter((route, index, routes) => route && routes.indexOf(route) === index)
     .slice(0, includeParameters ? 4 : 2);
+  // The scan-window notice is the last signal on a lane, so a plain slice would cut it exactly when it matters.
+  const scanWindowFull = lane.signals.includes(SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL);
   const evidence = [
-    ...lane.signals.slice(0, includeParameters ? 8 : 4),
+    ...lane.signals.filter((signal) => signal !== SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL).slice(0, includeParameters ? 8 : 4),
+    ...(scanWindowFull ? [SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL] : []),
     `${records.length} live/operation record(s)`,
     `${workflowCount(lane, 'ready')} ready workflow(s)`,
     `${workflowCount(lane, 'attention')} attention workflow(s)`,
     `${freshProviderReads} fresh provider read/record route(s)`,
     `${refreshableSavedRecords} refreshable saved review record(s)`,
-    `${savedReviewRecords} saved review record(s)`,
+    savedRecordsAtCap(records) ? `${savedReviewRecords}+ saved review record(s) (newest saved shown; older ones are not counted)` : `${savedReviewRecords} saved review record(s)`,
   ];
   return {
     id: lane.id,
@@ -141,6 +147,7 @@ function briefingStepForLane(lane: PersonalOpsLane, includeParameters: boolean):
       freshProviderReads,
       refreshableSavedRecords,
       savedReviewRecords,
+      ...(savedRecordsAtCap(records) ? { savedRecordsCapped: true } : {}),
       connectorSignals: lane.connectorSignals?.length ?? 0,
     },
     confirmationBoundary: lane.id === 'inbox' || lane.id === 'calendar'
@@ -236,13 +243,14 @@ async function ownedPersonalOpsBriefingSummary(context: CommandContext, args: Ag
       freshProviderReads: liveRecords.filter(isFreshProviderRecord).length,
       refreshableSavedRecords: liveRecords.filter((record) => record.freshness?.status === 'saved-review-refreshable').length,
       savedReviewRecords: liveRecords.filter((record) => record.freshness?.source === 'saved-review-artifact' || typeof record.reviewRecordCount === 'number').length,
+      ...(lanes.some((lane) => savedRecordsAtCap(lane.liveRecords ?? [])) ? { savedRecordsCapped: true, savedRecordsNote: 'Saved review records are listed newest first up to a cap; savedReviewRecords is a lower bound.' } : {}),
       connectorSignals: lanes.reduce((sum, lane) => sum + (lane.connectorSignals?.length ?? 0), 0),
     },
     routes: {
       personalOps: 'personal_ops action:"status"',
       intake: 'personal_ops action:"intake" query:"..."',
       laneTemplate: 'personal_ops action:"lane" laneId:"inbox|calendar|notes|tasks|reminders|routines|delivery"',
-      liveReadTemplate: 'personal_ops action:"read" laneId:"inbox|calendar" recordId:"..." fields:{...} confirm:true explicitUserRequest:"..."',
+      liveReadTemplate: PERSONAL_OPS_LIVE_READ_TEMPLATE,
       autonomyQueue: 'autonomy action:"queue"',
       workspace: 'workspace action:"actions" categoryId:"personal-ops"',
     },
@@ -291,7 +299,6 @@ function queueRecordType(record: PersonalOpsLiveRecord): string {
   if (record.capability === 'calendar-event-review') return 'saved-calendar-event';
   if (record.capability === 'inbox-review-artifact') return 'saved-inbox-review';
   if (record.capability === 'calendar-review-artifact') return 'saved-calendar-review';
-  if (record.freshness?.status === 'fresh-provider-record-current') return 'fresh-provider-record';
   if (record.freshness?.status === 'fresh-provider-route-ready') return 'fresh-provider-read';
   if (record.freshness?.status === 'connector-attention') return 'provider-read-attention';
   return record.capability ?? 'personal-ops-record';
@@ -300,7 +307,7 @@ function queueRecordType(record: PersonalOpsLiveRecord): string {
 function queueStatusRank(record: PersonalOpsLiveRecord): number {
   if (record.freshness?.status === 'saved-review-refreshable') return 100;
   if (record.capability === 'inbox-thread-review' || record.capability === 'calendar-event-review') return 90;
-  if (record.freshness?.status === 'fresh-provider-route-ready' || record.freshness?.status === 'fresh-provider-record-current') return 80;
+  if (record.freshness?.status === 'fresh-provider-route-ready') return 80;
   if (record.capability === 'inbox-review-artifact' || record.capability === 'calendar-review-artifact') return 70;
   if (record.freshness?.status === 'connector-attention') return 50;
   if (record.freshness?.status === 'provider-contract-missing') return 35;
@@ -314,7 +321,7 @@ function isPersonalOpsQueueRecord(record: PersonalOpsLiveRecord): boolean {
   return record.capability ? QUEUE_CAPABILITIES.has(record.capability) : false;
 }
 
-function describeQueueItem(lane: PersonalOpsLane, record: PersonalOpsLiveRecord, includeParameters: boolean): Record<string, unknown> {
+export function describeQueueItem(lane: PersonalOpsLane, record: PersonalOpsLiveRecord, includeParameters: boolean): Record<string, unknown> {
   const refreshRoute = record.freshness?.refreshRoute;
   const followUpRoutes = (record.followUpRoutes ?? []).slice(0, includeParameters ? 8 : 3);
   return {
@@ -325,7 +332,7 @@ function describeQueueItem(lane: PersonalOpsLane, record: PersonalOpsLiveRecord,
     label: record.label,
     status: record.status,
     summary: previewHarnessText(record.summary, includeParameters ? 220 : 120),
-    modelRoute: previewHarnessText(record.modelRoute, includeParameters ? 180 : 120),
+    modelRoute: record.modelRoute,
     inspectRoute: record.modelRoute,
     effect: record.effect ?? 'read-only',
     capability: record.capability,
@@ -344,7 +351,7 @@ function describeQueueItem(lane: PersonalOpsLane, record: PersonalOpsLiveRecord,
       lane: `personal_ops action:"lane" laneId:"${lane.id}"`,
       inspect: record.modelRoute,
       ...(refreshRoute ? { refresh: refreshRoute } : {}),
-      ...(record.artifactId ? { artifact: `agent_artifacts show artifactId:"${record.artifactId}" includeContent:true` } : {}),
+      ...(record.artifactId ? { artifact: artifactShowRoute(record.artifactId, true) } : {}),
     },
     followUpRoutes,
     ...(includeParameters && record.certification ? { certification: record.certification } : {}),
@@ -398,6 +405,8 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
   const freshProviderReads = allItems.filter((item) => isFreshProviderRecord(item.record)).length;
   const refreshableSavedRecords = allItems.filter((item) => item.record.freshness?.status === 'saved-review-refreshable').length;
   const savedReviewRecords = allItems.filter((item) => item.record.freshness?.source === 'saved-review-artifact' || typeof item.record.reviewRecordCount === 'number').length;
+  const savedCapped = queueLanes.some((lane) => savedRecordsAtCap(lane.liveRecords ?? []));
+  const scanWindowFull = savedArtifactScanWindowFull(context);
   const attentionRecords = allItems.filter((item) => item.record.freshness?.status === 'connector-attention' || item.lane.status === 'gap' || item.lane.status === 'needs-setup').length;
   return {
     status: allItems.length > 0 ? attentionRecords > 0 ? 'attention' : 'ready' : 'empty',
@@ -405,6 +414,10 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
     ...(ranking ? { judgments: ranking.judgments } : {}),
     returned: items.length,
     total: allItems.length,
+    ...(savedCapped || scanWindowFull ? { totalIsLowerBound: true, totalNote: savedCapped
+      ? 'Saved review artifacts and saved queue items are listed newest first up to a cap; older saved items exist but are not counted in total or summary.'
+      : SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL } : {}),
+    ...savedLabelsUntrusted(allItems.map((item) => item.record), ['queue[].label', 'queue[].summary', 'queue[].reviewLabels']),
     summary: {
       inbox: allItems.filter((item) => item.lane.id === 'inbox').length,
       calendar: allItems.filter((item) => item.lane.id === 'calendar').length,
@@ -421,7 +434,7 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
       intake: 'personal_ops action:"intake" query:"..."',
       inboxLane: 'personal_ops action:"lane" laneId:"inbox"',
       calendarLane: 'personal_ops action:"lane" laneId:"calendar"',
-      liveReadTemplate: 'personal_ops action:"read" laneId:"inbox|calendar" recordId:"..." fields:{...} confirm:true explicitUserRequest:"..."',
+      liveReadTemplate: PERSONAL_OPS_LIVE_READ_TEMPLATE,
     },
     nextActions: allItems.length > 0
       ? [
@@ -594,12 +607,24 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
       policy: 'Required fields must be supplied by the user or an explicit intake plan; placeholder sample values are never executed silently.',
     };
   }
+  const invalidFields = invalidInputFields(fields, record.sampleInput);
+  if (invalidFields.length > 0) {
+    return {
+      status: 'invalid_fields',
+      record: recordSummary,
+      invalidFields,
+      sampleInput: record.sampleInput ?? {},
+      runRoute,
+      policy: 'Each field must match the type its connector sample shows; nothing was sent to the provider.',
+    };
+  }
   if (!harnessCatalogInvocationAuthority(invocationArgs, executionOptions)) {
     return {
       status: 'needs_admission',
       record: recordSummary,
       inputPreview: fields,
       runRoute,
+      next: 'Ask the user to approve this exact read (the connector tool and the fields in inputPreview). Once that approval is recorded for this session, call the same personal_ops read again; adding confirm or explicitUserRequest does not grant it.',
       policy: 'Reading live personal inbox/calendar data requires current recorded admission and a separately admitted MCP child. Caller annotations grant no authority.',
     };
   }
@@ -630,22 +655,35 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
     const output = await boundedPersonalOpsResult(result, includeParameters, reading);
     assertSelectionCurrent();
     const saveRequested = readRunControlBoolean(args.fields, ['saveReviewCards', 'saveReview']);
-    const savedReviewArtifact = saveRequested
-      ? await savePersonalOpsReviewArtifact({
-        context,
-        lane,
-        sourceRecord: record,
-        inputFields: fields,
-        reviewRecords,
-        output,
-        title: readRunControlString(args.fields, 'artifactTitle'),
-        invocationArgs,
-        executionOptions,
-        sourceOwner: options.sourceOwner,
-        signal: options.signal,
-        assertCurrent: assertSelectionCurrent,
-      })
-      : null;
+    let savedReviewArtifact: Record<string, unknown> | null = null;
+    if (saveRequested) {
+      try {
+        savedReviewArtifact = await savePersonalOpsReviewArtifact({
+          context,
+          lane,
+          sourceRecord: record,
+          inputFields: fields,
+          reviewRecords,
+          output,
+          title: readRunControlString(args.fields, 'artifactTitle'),
+          invocationArgs,
+          executionOptions,
+          sourceOwner: options.sourceOwner,
+          signal: options.signal,
+          assertCurrent: assertSelectionCurrent,
+        });
+      } catch (saveError) {
+        // The provider read already succeeded; a failed save must not make the agent repeat the live read.
+        assertSelectionCurrent();
+        options.signal?.throwIfAborted();
+        if (saveError instanceof ToolInputProjectionError) throw saveError;
+        savedReviewArtifact = {
+          status: 'failed',
+          reason: previewHarnessText(await redactedPersonalOpsText(summarizeError(saveError), { signal: options.signal, assertCurrent: assertSelectionCurrent }), 320),
+          policy: 'The provider read succeeded and its review cards are returned below; only saving them as an artifact failed. Do not repeat the live read to save them; retry the save only after the artifact store is repaired.',
+        };
+      }
+    }
     assertSelectionCurrent();
     const nextRoutes = personalOpsReadNextRoutes({ lane, runRoute, savedReviewArtifact });
     return {
@@ -659,6 +697,9 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
         source: record.qualifiedName,
       },
       reviewRecords,
+      // Subjects, senders, titles and notes in `output` and `reviewRecords` were written by whoever
+      // can reach the connector, not by the owner.
+      untrustedContent: { surface: 'document', origin: record.qualifiedName ?? 'an MCP tool', fields: ['output', 'reviewRecords'], rule: UNTRUSTED_CONTENT_RULE },
       ...(savedReviewArtifact ? { savedReviewArtifact } : {}),
       nextRoutes,
       followUp: [
@@ -698,10 +739,13 @@ async function ownedDescribePersonalOpsLane(context: CommandContext, args: Agent
     };
   }
   const normalized = input.toLowerCase();
-  const tools = await mcpToolRecords(context, options);
   const exactLane = args.laneId === 'notes' || args.laneId === 'reminders' || args.laneId === 'inbox' ? args.laneId : undefined;
+  // The notes and reminders lanes read no connector, so a connector list or schema failure must not fail them.
+  const needsConnectors = exactLane !== 'notes' && exactLane !== 'reminders';
+  const tools = needsConnectors ? await mcpToolRecords(context, options) : [];
   const lanes = await buildLanes(context, {
-    ...options, toolsByServer: toolsByServer(tools), schemasByQualifiedName: await mcpToolSchemas(context, tools, options) }, exactLane);
+    ...options, toolsByServer: toolsByServer(tools),
+    schemasByQualifiedName: needsConnectors ? await mcpToolSchemas(context, tools, options) : new Map() }, exactLane);
   options.signal?.throwIfAborted();
   const exact = lanes.find((lane) => lane.id === normalized);
   if (exact) return { status: 'found', lane: describeLane(exact, true) };

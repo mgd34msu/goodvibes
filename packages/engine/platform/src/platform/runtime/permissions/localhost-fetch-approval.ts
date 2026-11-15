@@ -6,9 +6,9 @@
  *
  * STANDING RULE (same as sandbox escalations and MCP elicitations): the ask
  * rides the ONE approval broker so every surface's existing approval UI
- * renders it. Approving persists `fetch.allowLocalhost` in the PROJECT
- * settings tier, so the question is asked once per project and never again,
- * including across restarts. Denying refuses this fetch with an honest
+ * renders it. Approving persists `fetch.allowLocalhost` in the user's own
+ * settings (a project file cannot turn it on), so the question is asked once
+ * and never again, including across restarts. Denying refuses this fetch with an honest
  * tool-result reason; a later fetch may ask again.
  *
  * Private-IP and cloud-metadata blocking is untouched by this flow: those
@@ -30,7 +30,7 @@ export interface LocalhostFetchApprovalDeps {
     readonly request: PermissionPromptRequest;
     readonly metadata?: Record<string, unknown> | undefined;
   }) => Promise<PermissionPromptDecision>;
-  readonly configManager: Pick<ConfigManager, 'get' | 'setProjectValue'>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'set'>;
 }
 
 /** A live, one-use capability, retained until response consumption completes. */
@@ -80,7 +80,7 @@ export function buildLocalhostFetchApproval(deps: LocalhostFetchApprovalDeps): L
             summary: `Fetch a localhost dev server: ${input.url}`,
             reasons: [
               `The fetch tool wants to reach the loopback host "${input.host}" (a local dev server).`,
-              'Approving allows localhost fetches for this project and will not ask again (fetch.allowLocalhost).',
+              'Approving allows localhost fetches in all your projects and will not ask again (fetch.allowLocalhost in your own settings).',
               'Private-IP and cloud-metadata targets stay blocked regardless of this approval.',
             ],
             target: input.url,
@@ -96,9 +96,18 @@ export function buildLocalhostFetchApproval(deps: LocalhostFetchApprovalDeps): L
           metadata: { source: 'fetch-localhost', host: input.host, url: input.url },
         });
         if (decision.approved) {
-          // The one-tap semantics: approval IS "allow for this project".
-          deps.configManager.setProjectValue('fetch.allowLocalhost', true);
-          logger.info('[fetch] localhost fetches allowed for this project (fetch.allowLocalhost persisted)', {
+          // A project file cannot turn this on (it is repository content), so the grant is saved in the user's own settings.
+          try {
+            deps.configManager.set('fetch.allowLocalhost', true);
+          } catch (err) {
+            // Without the saved grant the next fetch would silently ask again, so say what failed.
+            logger.warn('[fetch] localhost fetch was approved but fetch.allowLocalhost could not be saved; refusing this fetch', {
+              host: input.host,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+          }
+          logger.info('[fetch] localhost fetches allowed (fetch.allowLocalhost persisted in user settings)', {
             host: input.host,
           });
         }

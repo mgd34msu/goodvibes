@@ -1,7 +1,7 @@
 import { checkEachFixture, decisionHeader, type NamedDecision } from '../batteries/decision.ts';
 import { checkReading } from '../batteries/battery.ts';
 import { choice, type EntryType, type JsonValue, type JudgmentPort } from '../port/types.ts';
-import { assertBand, type ChoiceBand } from '../readings/bands.ts';
+import { assertChoiceBand, type ChoiceBand } from '../readings/bands.ts';
 import { readChoice, type ChoiceReading } from '../readings/readings.ts';
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader } from '../batteries/asking.ts';
 
@@ -46,8 +46,8 @@ export interface ReplyReader<R extends string> extends NamedDecision {
 
 export function defineReplyReader<const R extends string = ReplyReadingName>(spec: ReplySpec<R>): ReplyReader<R> {
   const header = decisionHeader(spec);
-  assertBand(spec.band);
   const readings = (spec.readings ?? REPLY_READINGS) as Readonly<Record<string, EntryType>>;
+  assertChoiceBand(`reply ${spec.name}`, spec.band as ChoiceBand, Object.keys(readings));
   for (const fixture of spec.fixtures) {
     if (!(fixture.expect in readings)) {
       throw new RangeError(`reply ${spec.name}: fixture ${fixture.name} expects unknown reading "${fixture.expect}"`);

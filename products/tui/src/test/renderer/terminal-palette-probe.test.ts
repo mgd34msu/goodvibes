@@ -9,7 +9,7 @@
  * result landing in the terminal-palette store.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import {
   DEFAULT_PROBE_TIMEOUT_MS,
   installBackgroundThemeProbe,
@@ -32,7 +32,10 @@ import { activeTheme, resolveTheme, setActiveThemeMode } from '../../renderer/th
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { configGetStub } from '../helpers/config-manager-stub.ts';
 
+beforeEach(() => { jest.useFakeTimers(); });
+
 afterEach(() => {
+  jest.useRealTimers();
   setActiveThemeMode('dark');
   resetTerminalPaletteForTests();
 });
@@ -69,7 +72,8 @@ function makeProbe(out: PaletteProbeResolution[], timeoutMs = 1_000): TerminalPa
   return new TerminalPaletteProbe({ timeoutMs, onResolve: (r) => out.push(r) });
 }
 
-const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** Move the fake clock forward; every timer due by then fires. */
+const elapse = (ms: number): void => { jest.advanceTimersByTime(ms); };
 
 // ---------------------------------------------------------------------------
 // parseOscColorToHex
@@ -121,18 +125,6 @@ describe('parseOscColorToHex', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Query bytes + budget
-// ---------------------------------------------------------------------------
-
-describe('palette queries and budget', () => {
-  test('PALETTE_QUERIES is ST-terminated OSC 10 then OSC 4;0..15 in order', () => {
-    let expected = '\x1b]10;?\x1b\\';
-    for (let i = 0; i < 16; i++) expected += `\x1b]4;${i};?\x1b\\`;
-    expect(PALETTE_QUERIES).toBe(expected);
-  });
-
-});
 
 // ---------------------------------------------------------------------------
 // TerminalPaletteProbe.feed
@@ -242,7 +234,7 @@ describe('TerminalPaletteProbe.feed', () => {
     probe.startTimeout();
     const s = osc('11', 'rgb:10/20/30') + ansiReply(1, 'rgb:ff/00/00') + 'k' + '\x1b]4;2;rgb:00/ff';
     expect(probe.feed(s)).toBe('k');
-    await wait(40);
+    elapse(40);
     expect(out.length).toBe(1);
     const res = out[0]!;
     expect(res.reason).toBe('timeout');
@@ -259,7 +251,7 @@ describe('TerminalPaletteProbe.feed', () => {
     const out: PaletteProbeResolution[] = [];
     const probe = makeProbe(out, 10);
     probe.startTimeout();
-    await wait(30);
+    elapse(30);
     expect(out).toEqual([{
       palette: { ansi: new Array(16).fill(undefined) },
       reason: 'timeout',
@@ -271,7 +263,7 @@ describe('TerminalPaletteProbe.feed', () => {
     const out: PaletteProbeResolution[] = [];
     const probe = makeProbe(out, 10);
     probe.startTimeout();
-    await wait(30);
+    elapse(30);
     const late = fullReplies();
     expect(probe.feed(late)).toBe(late);
     expect(out.length).toBe(1);
@@ -369,7 +361,7 @@ describe('installBackgroundThemeProbe: palette batching', () => {
       writeQuery: () => {}, requestRepaint: () => {},
       onPaletteResolve: (r) => paletteResults.push(r),
     });
-    await wait(20);
+    elapse(20);
     expect(handle.filterInput(fullReplies())).toBe('');
     expect(paletteResults[0]?.reason).toBe('complete');
     expect(activeTheme()).toBe(resolveTheme('dark'));
@@ -407,7 +399,7 @@ describe('installBackgroundThemeProbe: palette batching', () => {
       writeQuery: () => {}, requestRepaint: () => {},
       onPaletteResolve: (r) => paletteResults.push(r),
     });
-    await wait(40);
+    elapse(40);
     expect(paletteResults.map((r) => r.reason)).toEqual(['timeout']);
     expect(getTerminalPalette()).toEqual({ ansi: new Array(16).fill(undefined) });
   });

@@ -55,6 +55,15 @@ export interface AutomationManagerExecutionContext {
   readonly emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => void;
   readonly emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => void;
   readonly maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => void;
+  /**
+   * What a run that failed to START needs beyond its failed record: the failure
+   * notice with the job's retry or cooldown policy, the auto-disable event, and
+   * the cancellation of an agent that was spawned before the start failed.
+   * Optional so a caller that only records runs need not wire them.
+   */
+  readonly followUpStartFailure?: ((job: AutomationJob, run: AutomationRun, retryable: boolean) => void) | undefined;
+  readonly emitJobAutoDisabled?: ((job: AutomationJob, reason: string) => void) | undefined;
+  readonly cancelTask?: ((agentId: string) => void) | undefined;
   readonly applyFailureToJob: (job: AutomationJob, timestamp: number, countRun?: boolean) => AutomationJob;
   readonly jobs: Map<string, AutomationJob>;
   readonly runs: Map<string, AutomationRun>;
@@ -73,6 +82,8 @@ interface ResolvedAutomationExecution {
   readonly session?: SharedSessionRecord | undefined;
   readonly route?: AutomationRouteBinding | undefined;
   readonly agentId?: string | undefined;
+  /** The session input this run submitted; the spawned agent claims exactly it. */
+  readonly inputId?: string | undefined;
   readonly target: AutomationSessionTarget;
   readonly executionIntent: AutomationRun['executionIntent'];
   readonly updatedJob?: AutomationJob | undefined;
@@ -119,7 +130,22 @@ export async function executeAutomationJob(
   }
   const now = Date.now();
   const prompt = job.execution.prompt ?? job.description ?? job.name;
-  const resolved = await resolveAutomationExecution(context, job, prompt, trigger);
+  // A target that cannot be resolved (missing session or route, no surface
+  // kind) is a failed start like any other: the run is recorded against the
+  // unresolved target and goes through the failure handling below.
+  let resolveFailure: { readonly error: unknown } | undefined;
+  let resolved: ResolvedAutomationExecution;
+  try {
+    resolved = await resolveAutomationExecution(context, job, prompt, trigger);
+  } catch (error) {
+    resolveFailure = { error };
+    resolved = {
+      task: prompt,
+      continuationMode: 'spawn',
+      target: job.execution.target,
+      executionIntent: buildAutomationExecutionIntent(job.execution.target.kind, 'spawn'),
+    };
+  }
   assertSource();
   const effectiveJob = resolved.updatedJob ?? job;
   const run: AutomationRun = {
@@ -164,7 +190,10 @@ export async function executeAutomationJob(
     agentId: resolved.agentId,
   };
 
+  // Set once the agent exists, so a later failure can cancel and record it.
+  let spawnedAgentId: string | undefined;
   try {
+    if (resolveFailure) throw resolveFailure.error;
     if (resolved.continuationMode === 'continued-live') {
       const runningRun: AutomationRun = {
         ...run,
@@ -204,6 +233,7 @@ export async function executeAutomationJob(
       toolAllowlist: effectiveJob.execution.toolAllowlist,
       ...(executionContext ? { context: executionContext } : {}),
     }, operation));
+    spawnedAgentId = agentId;
     const runningRun: AutomationRun = {
       ...run,
       agentId,
@@ -216,7 +246,7 @@ export async function executeAutomationJob(
       updatedAt: now,
     };
     if (resolved.session?.id && resolved.continuationMode !== 'background') {
-      await context.sessionBroker.bindAgent(resolved.session.id, agentId);
+      await context.sessionBroker.bindAgent(resolved.session.id, agentId, resolved.inputId);
     }
     context.runs.set(runningRun.id, runningRun);
     context.onRunRecorded?.();
@@ -240,34 +270,50 @@ export async function executeAutomationJob(
       });
       throw error;
     }
+    if (spawnedAgentId !== undefined) {
+      // The agent started but the run could not be recorded as running: stop it
+      // so it does not keep working untracked, and keep its id on the record.
+      try { context.cancelTask?.(spawnedAgentId); }
+      catch (cancelError) {
+        logger.warn('AutomationManager: could not cancel the agent of a run that failed to record', { jobId: job.id, runId: run.id, agentId: spawnedAgentId, error: summarizeError(cancelError) });
+      }
+    }
     const failedRun: AutomationRun = {
       ...run,
       status: 'failed',
       endedAt: now,
       durationMs: 0,
       error: message,
+      ...(spawnedAgentId !== undefined ? { agentId: spawnedAgentId } : {}),
     };
     context.runs.set(failedRun.id, failedRun);
     context.onRunRecorded?.();
     const updatedJob = context.applyFailureToJob(effectiveJob, now);
     context.jobs.set(updatedJob.id, updatedJob);
-    await context.syncExecutionRoute(updatedJob, failedRun);
-    if (failedRun.sessionId && failedRun.continuationMode !== 'continued-live') {
-      await context.sessionBroker.appendSystemMessage(failedRun.sessionId, `Automation failed: ${message}`, {
-        automationJobId: updatedJob.id,
-        automationRunId: failedRun.id,
-        status: 'failed',
-      });
+    try {
+      await context.syncExecutionRoute(updatedJob, failedRun);
+      if (failedRun.sessionId && failedRun.continuationMode !== 'continued-live') {
+        await context.sessionBroker.appendSystemMessage(failedRun.sessionId, `Automation failed: ${message}`, {
+          automationJobId: updatedJob.id,
+          automationRunId: failedRun.id,
+          status: 'failed',
+        });
+      }
+      context.pruneRunHistory(updatedJob.id);
+      await Promise.all([context.saveJobs(), context.saveRuns()]);
+    } catch (persistError) {
+      // The in-memory record stands; the start failure below is still reported.
+      logger.warn('AutomationManager: a failed start could not be fully recorded', { jobId: job.id, runId: run.id, error: summarizeError(persistError) });
     }
-    context.pruneRunHistory(updatedJob.id);
-    await Promise.all([context.saveJobs(), context.saveRuns()]);
     context.syncRunToRuntime(failedRun, 'automation.execute');
     context.syncJobToRuntime(updatedJob, 'automation.execute');
     const transience = await readAutomationRunTransience({ error }, 'automation.run.start', { jobId: updatedJob.id, runId: failedRun.id });
-    context.emitRunFailed(updatedJob, failedRun, message, transience?.failureClass === 'retryable');
+    const retryable = transience?.failureClass === 'retryable';
+    context.emitRunFailed(updatedJob, failedRun, message, retryable);
     if (!updatedJob.enabled && effectiveJob.enabled) {
-      // The caller is responsible for surfacing auto-disable events.
+      context.emitJobAutoDisabled?.(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');
     }
+    context.followUpStartFailure?.(updatedJob, failedRun, retryable);
     throw error;
   }
 }
@@ -541,6 +587,7 @@ export function toResolvedExecution(
     session: submission.session,
     route: submission.routeBinding,
     agentId: submission.activeAgentId,
+    inputId: submission.input.id,
     target: resolvedTarget,
     executionIntent: buildAutomationExecutionIntent(
       target.kind,

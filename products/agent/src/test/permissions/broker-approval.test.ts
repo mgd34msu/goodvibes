@@ -229,15 +229,15 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
       defer: (cb) => cb(),
     }));
 
-    void broker.requestApproval({ request: makeRequest('call-approve'), sessionId: 'sess-2' });
+    const decisionPromise = broker.requestApproval({ request: makeRequest('call-approve'), sessionId: 'sess-2' });
     await opened.promise;
     const approvalId = broker.listApprovals().find((a) => a.callId === 'call-approve')!.id;
 
     const card = pendingRef.current;
     if (card === null) throw new Error('expected a card to open');
     card.resolve(true, false);
-    // Allow the broker's own resolveApproval promise chain to settle.
-    await Promise.resolve();
+    // The waiter settles only once the broker has recorded the answer.
+    expect((await decisionPromise).approved).toBe(true);
     expect(broker.getApproval(approvalId)?.status).toBe('approved');
   });
 
@@ -251,14 +251,14 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
       defer: (cb) => cb(),
     }));
 
-    void broker.requestApproval({ request: makeRequest('call-deny'), sessionId: 'sess-3' });
+    const decisionPromise = broker.requestApproval({ request: makeRequest('call-deny'), sessionId: 'sess-3' });
     await opened.promise;
     const approvalId = broker.listApprovals().find((a) => a.callId === 'call-deny')!.id;
 
     const card = pendingRef.current;
     if (card === null) throw new Error('expected a card to open');
     card.resolve(false, false);
-    await Promise.resolve();
+    expect((await decisionPromise).approved).toBe(false);
     expect(broker.getApproval(approvalId)?.status).toBe('denied');
   });
 
@@ -287,7 +287,9 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
     expect(renders).toBeGreaterThan(1);
   });
 
-  test('an approval that expires is removed from the agent UI (no stale prompt)', async () => {
+  test('an approval that ends without an answer here is removed from the agent UI (no stale prompt)', async () => {
+    // The broker's deadline timer is not injectable, so the card-clearing path is driven by a
+    // cancellation; the pure-reducer group above covers the `expired` status itself.
     const broker = new ApprovalBroker({ storePath: ':memory:' });
     const pendingRef = makePendingRef();
     const opened = makeLatch();
@@ -297,14 +299,12 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
       defer: (cb) => cb(),
     }));
 
-    const decisionPromise = broker.requestApproval({
-      request: makeRequest('call-expire'),
-      sessionId: 'sess-5',
-      timeoutMs: 10,
-    });
+    const decisionPromise = broker.requestApproval({ request: makeRequest('call-cancel'), sessionId: 'sess-5' });
     await opened.promise;
     expect(pendingRef.current).not.toBeNull();
+    const approvalId = broker.listApprovals().find((a) => a.callId === 'call-cancel')!.id;
 
+    await broker.cancelApproval(approvalId, 'operator', 'webui');
     const decision = await decisionPromise;
     expect(decision.approved).toBe(false);
     expect(pendingRef.current).toBeNull();
@@ -318,9 +318,12 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
     // subscription, this is the race the module's doc comment describes: the
     // broker calls localPrompt AFTER it publishes, so the deferred broker-card
     // open must see the local card already in place and no-op.
+    // The default microtask defer is wrapped only to learn when its re-check has run.
+    const rechecked = makeLatch();
     broker.subscribe((approval) => handleBrokerApprovalChange({
       approval, broker, render: () => {},
       getPending: () => pendingRef.current, setPending: (next) => { pendingRef.current = next; },
+      defer: (cb) => queueMicrotask(() => { cb(); rechecked.signal(); }),
     }));
 
     // Mirrors main.ts's rawRequestPermission: sets the SAME ref the broker
@@ -346,8 +349,7 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
     expect(localCard.callId).toBe('call-local');
 
     // Let the broker's deferred (queueMicrotask) broker-card open re-check run.
-    await Promise.resolve();
-    await Promise.resolve();
+    await rechecked.promise;
 
     // Still exactly the local card, no second/replacement card was opened.
     expect(pendingRef.current).toBe(localCard);
@@ -359,20 +361,76 @@ describe('permissions/broker-approval: real ApprovalBroker (in-memory)', () => {
 });
 
 
+/** A pending ref whose render hook lets a test wait for a specific card instead of sleeping. */
+function makeCardWatcher() {
+  const ref = makePendingRef();
+  const waiters: Array<{ callId: string; signal: () => void }> = [];
+  return {
+    ref,
+    render: () => {
+      for (const waiter of [...waiters]) {
+        if (ref.current?.callId === waiter.callId) {
+          waiters.splice(waiters.indexOf(waiter), 1);
+          waiter.signal();
+        }
+      }
+    },
+    cardFor: (callId: string): Promise<void> => {
+      if (ref.current?.callId === callId) return Promise.resolve();
+      const latch = makeLatch();
+      waiters.push({ callId, signal: latch.signal });
+      return latch.promise;
+    },
+  };
+}
+
+const idleApprovalsView = { start() {}, snapshot: () => ({ approvals: [] }) } as unknown as ApprovalsView;
+
 test('binding advances from the resolved card to another waiting broker approval', async () => {
   const broker = new ApprovalBroker({ storePath: ':memory:' });
-  const pending = makePendingRef();
-  bindApprovals({ broker, getPending: () => pending.current, setPending: next => { pending.current = next; }, render() {},
-    approvalsView: { start() {}, snapshot: () => ({ approvals: [] }) } as unknown as ApprovalsView });
+  const watcher = makeCardWatcher();
+  const secondPublished = makeLatch();
+  broker.subscribe((approval) => { if (approval.callId === 'second') secondPublished.signal(); });
+  bindApprovals({ broker, getPending: () => watcher.ref.current, setPending: next => { watcher.ref.current = next; }, render: watcher.render,
+    approvalsView: idleApprovalsView });
   const first = broker.requestApproval({ request: makeRequest('first'), sessionId: 'session' });
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await watcher.cardFor('first');
   const second = broker.requestApproval({ request: makeRequest('second', 'fetch'), sessionId: 'session' });
-  await new Promise(resolve => setTimeout(resolve, 10));
-  expect(pending.current?.callId).toBe('first');
-  pending.current!.resolve(true);
+  await secondPublished.promise;
+  expect(watcher.ref.current?.callId).toBe('first');
+  watcher.ref.current!.resolve(true);
   await first;
-  await new Promise(resolve => setTimeout(resolve, 10));
-  expect(pending.current?.callId).toBe('second');
-  pending.current!.resolve(false);
+  await watcher.cardFor('second');
+  expect(watcher.ref.current?.callId).toBe('second');
+  watcher.ref.current!.resolve(false);
   await second;
+});
+
+test('a broker card whose answer is not recorded comes back and the owner is told why', async () => {
+  const broker = new ApprovalBroker({ storePath: ':memory:' });
+  const watcher = makeCardWatcher();
+  const failures: unknown[] = [];
+  const failed = makeLatch();
+  bindApprovals({ broker, getPending: () => watcher.ref.current, setPending: next => { watcher.ref.current = next; }, render: watcher.render,
+    approvalsView: idleApprovalsView,
+    onResolveFailed: (error) => { failures.push(error); failed.signal(); } });
+  const decision = broker.requestApproval({ request: makeRequest('stalled'), sessionId: 'session' });
+  await watcher.cardFor('stalled');
+  const card = watcher.ref.current!;
+
+  // The owner is refused (for example no owner proof, or the store is down).
+  broker.resolveApproval = async () => { throw new Error('owner decision required'); };
+  // The key press clears the card before answering, exactly as the shell does.
+  watcher.ref.current = null;
+  card.resolve(true, false);
+  await failed.promise;
+
+  expect(failures).toHaveLength(1);
+  expect(String(failures[0])).toContain('owner decision required');
+  expect<unknown>(watcher.ref.current).toBe(card);
+
+  // Deny through the real path so the pending ask settles and nothing is left open.
+  delete (broker as { resolveApproval?: unknown }).resolveApproval;
+  watcher.ref.current!.resolve(false);
+  expect((await decision).approved).toBe(false);
 });

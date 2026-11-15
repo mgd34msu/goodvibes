@@ -12,6 +12,9 @@ import { readPreparedKnowledgePromptPacket, type PreparedKnowledgePromptPacket }
 import type { KnowledgeService } from '../knowledge/service.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { findNearestAgentsFile } from '../utils/prompt-loader.js';
+import { presetForMode } from '../gate/presets.js';
+import { knowledgeQueryText } from './turn-knowledge-injection.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
@@ -40,10 +43,19 @@ export async function prepareOrchestratorPromptContext(
   });
 }
 
+/**
+ * The text the knowledge packet is asked about and later checked against: the
+ * brief's leading sections, not a whole inventory-sized task. Preparing and
+ * every later read of the packet must use this same text.
+ */
+function knowledgePromptTask(record: AgentRecord): string {
+  return knowledgeQueryText(record.task);
+}
+
 async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, deps?: PromptContextDeps, signal?: AbortSignal): Promise<PromptContextDeps | undefined> {
   if (!deps?.knowledgeService) return deps;
   const preparedKnowledgePrompt = await deps.knowledgeService.preparePromptPacket(
-    record.task, record.writeScope ?? [], undefined, { ...(signal ? { signal } : {}) },
+    knowledgePromptTask(record), record.writeScope ?? [], undefined, { ...(signal ? { signal } : {}) },
   );
   return { ...deps, preparedKnowledgePrompt };
 }
@@ -55,7 +67,7 @@ export function assertOrchestratorKnowledgeCurrent(record: AgentRecord, deps?: P
   deps?.projectFramework?.assertCurrent();
   if (isClassicOperation()) return;
   if (deps?.preparedKnowledgePrompt) {
-    readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, record.task, record.writeScope ?? []);
+    readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, knowledgePromptTask(record), record.writeScope ?? []);
   } else if (deps?.knowledgeService) {
     throw new KnowledgeEvidenceRelevanceHeldError('malformed');
   }
@@ -119,22 +131,25 @@ function buildProjectContext(workingDirectory: string, observation?: ProjectFram
   }
 }
 
+/**
+ * The project's instruction files, in the foreground loader's order
+ * (utils/prompt-loader.ts): the nearest AGENTS.md first, then the project's
+ * own GOODVIBES.md, which keeps precedence by coming later.
+ */
 function loadConventions(workingDirectory: string): string | null {
-  try {
-    const candidates = [
-      join(workingDirectory, '.goodvibes', 'GOODVIBES.md'),
-      join(workingDirectory, 'GOODVIBES.md'),
-    ];
-    for (const path of candidates) {
-      if (existsSync(path)) {
-        const content = readFileSync(path, 'utf-8');
-        return `## Conventions\n${content}`;
-      }
+  const read = (path: string | null): string | null => {
+    if (path === null || !existsSync(path)) return null;
+    try {
+      const content = readFileSync(path, 'utf-8').trim();
+      return content.length > 0 ? content : null;
+    } catch {
+      return null;
     }
-    return null;
-  } catch {
-    return null;
-  }
+  };
+  const agents = read(findNearestAgentsFile(workingDirectory));
+  const project = read(join(workingDirectory, '.goodvibes', 'GOODVIBES.md')) ?? read(join(workingDirectory, 'GOODVIBES.md'));
+  const content = [agents, project].filter((part): part is string => part !== null);
+  return content.length > 0 ? `## Conventions\n${content.join('\n\n')}` : null;
 }
 
 const AUTONOMOUS_OPENING = 'You are an autonomous agent in GoodVibes. Complete your task fully. No human is monitoring you, never ask questions, never wait for guidance. If something is ambiguous, make the best choice and continue.';
@@ -149,21 +164,27 @@ const AUTONOMOUS_OPENING = 'You are an autonomous agent in GoodVibes. Complete y
  */
 const CONVERSATIONAL_OPENING = 'You are GoodVibes, replying to a person who just messaged you. They are waiting for your answer, so answer them directly. If you need something from them to answer well, ask for it, this is a conversation, not a job.';
 
-/** The completion report every working agent ends with; the contract runner reads a unit's to verify its claims and take its answer. */
-const REPORT_OUTPUT_SECTION = `## Output
+/** The plain-language closing summary for an agent outside a contract. */
+const REPORT_SUMMARY_SECTION = `## Output
 When complete, report only:
 - Summary: 1-2 sentences
 - Changes: files created/modified
 - Decisions: choices made + rationale
 - Issues: problems encountered
-- Uncertainties: anything the caller should verify
+- Uncertainties: anything the caller should verify`;
 
-## Structured Output
-You MUST end your final message with a JSON completion report inside a \`\`\`json block.
-The report format depends on your role:
+/**
+ * A contract unit's brief says what the answer must contain (for a review,
+ * grouped findings with file:line anchors), so a contract unit is not held to
+ * the short summary above.
+ */
+const CONTRACT_UNIT_OUTPUT_SECTION = `## Output
+Your final message is your unit's answer. Give the full result your brief asks for, in the form it asks for, then end with the completion report below.
+- "result": the complete answer, unless it is already in the message body above the report.
+- "finalAnswer": only when your unit delivers the answer the person receives (the integration unit, the single unit of a plan, or a repair of that answer). Write the complete user-facing text, as it should read once the host releases it, without claiming approval. Leave it out otherwise.
+- Put notes for the host about pending checks in "summary" or "issues", never in "finalAnswer".`;
 
-**Engineer:**
-\`\`\`json
+const ENGINEER_REPORT = `\`\`\`json
 {
   "version": 1,
   "archetype": "engineer",
@@ -178,31 +199,53 @@ The report format depends on your role:
   "issues": ["issue description"],
   "uncertainties": ["thing to verify"]
 }
-\`\`\`
+\`\`\``;
 
-**Tester:**
-\`\`\`json
+/** Coverage is reported only when a tool measured it, so the template does not show invented numbers. */
+const TESTER_REPORT = `\`\`\`json
 {
   "version": 1,
   "archetype": "tester",
   "summary": "testing summary",
   "testsWritten": ["test/file.test.ts"],
-  "testsPassed": 10,
+  "testsPassed": 0,
   "testsFailed": 0,
-  "coverage": {"lines": 95, "branches": 88, "functions": 92},
-  "failures": []
+  "failures": [{"test": "name", "error": "message"}]
 }
 \`\`\`
+Add "coverage" only with figures a coverage tool reported in this run.`;
 
-**Other archetypes:**
-\`\`\`json
+function genericReport(archetype: string): string {
+  return `\`\`\`json
 {
   "version": 1,
-  "archetype": "<your-archetype>",
+  "archetype": "${archetype}",
   "summary": "what was accomplished",
   "result": "detailed result"
 }
 \`\`\``;
+}
+
+/** Tools that change files, which is what the engineer report describes. */
+const WRITE_TOOLS = ['write', 'edit'];
+
+/**
+ * The completion report every working agent ends with; the contract runner
+ * reads a unit's to verify its claims and take its answer. Only the template
+ * for this agent's role is shown: an agent that cannot change files is not
+ * handed an engineer report to fill in.
+ */
+function reportOutputSection(record: Pick<AgentRecord, 'template' | 'tools' | 'contractUnitId'>): string {
+  const engineer = ['engineer', 'integrator'].includes(record.template)
+    || (!['tester', 'reviewer', 'researcher'].includes(record.template) && record.tools.some((tool) => WRITE_TOOLS.includes(tool)));
+  const template = record.template === 'tester' ? TESTER_REPORT : engineer ? ENGINEER_REPORT : genericReport(record.template || 'general');
+  const contractUnit = record.contractUnitId !== undefined;
+  return `${contractUnit ? CONTRACT_UNIT_OUTPUT_SECTION : REPORT_SUMMARY_SECTION}
+
+## Structured Output
+You MUST end your final message with a JSON completion report inside a \`\`\`json block:
+${template}${contractUnit && !template.includes('"result"') ? '\nAdd "result" and, when it applies, "finalAnswer" as described above.' : ''}`;
+}
 
 /**
  * What a conversational spawn is asked for instead.
@@ -237,8 +280,46 @@ You are writing a message to a person, most likely read on a phone.
 export async function resolveSpawnKnowledgeInjections(record: AgentRecord, deps?: PromptContextDeps): Promise<void> {
   if (record.knowledgeInjections && record.knowledgeInjections.length > 0) return;
   record.knowledgeInjections = deps?.memoryRegistry
-    ? await selectKnowledgeForTask(deps.memoryRegistry, record.task, record.writeScope ?? [])
+    ? await selectKnowledgeForTask(deps.memoryRegistry, knowledgeQueryText(record.task), record.writeScope ?? [])
     : [];
+}
+
+/**
+ * The rules, recovery and logging blocks, assembled from the tools the agent
+ * actually has: a read-only agent is not told to validate its edits, record
+ * memory with a state tool it lacks, or consult an MCP server it cannot reach.
+ */
+function baseRules(tools: readonly string[]): string {
+  const has = (name: string) => tools.includes(name);
+  const writes = WRITE_TOOLS.some(has);
+  const changes = writes || ['exec', 'repl', 'agent'].some(has);
+  const mcp = tools.some((tool) => tool.startsWith('mcp'));
+  const rules = [
+    ...(changes ? [
+      'Understand before editing. Never modify a file without first reading or searching its content to know what you\'re changing.',
+      'Write-local, read-global. Only create/modify files within the working directory. Read anything for context.',
+    ] : ['Read-only. You cannot change files; base every finding on what you read, with the file and line it is at.']),
+    ...(has('exec') ? ['Validate after changes. Run typecheck/lint/test when the project supports them.'] : []),
+    ...(writes ? ['No mocks, no placeholders. Every implementation must be production-ready with proper error handling and types.'] : []),
+    'No narration. Don\'t explain your process or repeat the task.',
+  ];
+  const recovery = [
+    'Try with your own knowledge',
+    ...(mcp ? ['Search for documentation through an available MCP documentation tool (for example context7: resolve-library-id then query-docs)'] : []),
+    'Read relevant source files, configs, or local docs for context',
+    'Try an alternative approach',
+  ];
+  return [
+    ...(mcp ? ['If MCP tools are available (e.g., context7 for library documentation), use them for research before guessing at API usage.\n'] : []),
+    '## Rules',
+    ...rules.map((rule, index) => `${index + 1}. ${rule}`),
+    '',
+    '## Recovery',
+    'When something fails or you need to learn how a library/framework works:',
+    ...recovery.map((step, index) => `${index + 1}. ${step}`),
+    'If repeated attempts fail, report the failure clearly and move on. Do not loop indefinitely.',
+    ...(has('state') ? ['', '## Logging', 'Use the state tool (mode: memory) to record decisions and failures to .goodvibes/memory/ when you make significant choices or encounter errors worth preventing in future runs.'] : []),
+  ].join('\n');
 }
 
 /**
@@ -281,27 +362,9 @@ export function buildOrchestratorSystemPrompt(
 You have access to: ${toolNames}
 ${toolLines}
 
-If MCP tools are available (e.g., context7 for library documentation), use them for research before guessing at API usage.
+${baseRules(record.tools)}
 
-## Rules
-1. Understand before editing. Never modify a file without first reading or searching its content to know what you're changing.
-2. Write-local, read-global. Only create/modify files within the working directory. Read anything for context.
-3. Validate after changes. Run typecheck/lint/test when the project supports them.
-4. No mocks, no placeholders. Every implementation must be production-ready with proper error handling and types.
-5. No narration. Don't explain your process or repeat the task.
-
-## Recovery
-When something fails or you need to learn how a library/framework works:
-1. Try with your own knowledge
-2. Search for documentation via the context7 MCP tool (resolve-library-id then query-docs) if available
-3. Read relevant source files, configs, or local docs for context
-4. Try an alternative approach
-If repeated attempts fail, report the failure clearly and move on. Do not loop indefinitely.
-
-## Logging
-Use the state tool (mode: memory) to record decisions and failures to .goodvibes/memory/ when you make significant choices or encounter errors worth preventing in future runs.
-
-${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOSIS_SECTION}` : REPORT_OUTPUT_SECTION}`);
+${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOSIS_SECTION}` : reportOutputSection(record)}`);
 
   // --- Layer 2: Archetype overlay ---
   const archetype = deps?.archetypeLoader?.loadArchetype(record.template) ?? null;
@@ -356,7 +419,7 @@ ${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOS
   }
   assertOrchestratorKnowledgeCurrent(record, deps);
   const curatedKnowledgePrompt = !isClassicOperation() && deps?.preparedKnowledgePrompt
-    ? readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, record.task, record.writeScope ?? [])
+    ? readPreparedKnowledgePromptPacket(deps.preparedKnowledgePrompt, knowledgePromptTask(record), record.writeScope ?? [])
     : null;
   if (curatedKnowledgePrompt) {
     parts.push(curatedKnowledgePrompt);
@@ -399,7 +462,7 @@ export function buildLayeredOrchestratorSystemPrompt(
   remainingTokens: number,
   deps?: PromptContextDeps,
 ): string {
-  if (remainingTokens === 0) {
+  if (remainingTokens <= 0) {
     // Emergency: retain base instructions; the user message owns the task.
     logger.warn('[AgentOrchestrator] context-window awareness: emergency system prompt - base layers only', { agentId: record.id });
     const parts: string[] = [];
@@ -465,4 +528,14 @@ export function buildLayeredOrchestratorSystemPrompt(
 export function withOpenTierProfileBlock(base: string): string {
   const block = openTierContextBlock();
   return block.length === 0 ? base : `${base}\n\n${block}`;
+}
+
+/**
+ * One line telling the model which permission mode governs its tool calls and
+ * what that mode lets through, for every mode (not only plan). Composed per
+ * request like the owner block above, so a mode change mid-run is seen.
+ */
+export function permissionModeLine(mode: unknown): string {
+  const preset = presetForMode(mode);
+  return `Permission mode: ${preset.label}. ${preset.summary}`;
 }

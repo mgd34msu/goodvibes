@@ -16,20 +16,18 @@ export const EXEC_TOOL_SCHEMA = {
         properties: {
           cmd: {
             type: 'string',
-            description: 'Shell command to execute via sh -c.',
+            description: 'Shell command to execute via sh -c. Special values manage background processes started'
+              + ' with background: true: "bg_list", "bg_status <process_id>", "bg_output <process_id>", "bg_stop <process_id>".',
           },
           cmd_base64: {
             type: 'string',
-            description: 'Base64-encoded command. Use when cmd contains special characters.',
-          },
-          cwd: {
-            type: 'string',
-            description: 'Per-command working directory override. Prefer top-level working_dir for the project root.',
+            description: 'Base64-encoded command. Use when cmd contains special characters. Give cmd or cmd_base64, not both; entries that give both with different text are refused.',
           },
           working_dir: {
             type: 'string',
             description:
-              'Alias for cwd on a command item. For a single-command call, this can also supply the required top-level working_dir.',
+              'Per-command working directory override. Prefer the top-level working_dir for the project root.'
+              + ' For a single-command call with no top-level working_dir, it is used as the working_dir.',
           },
           timeout_ms: {
             type: 'integer',
@@ -63,7 +61,7 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Run detached, returns immediately with a process_id.'
-              + ' Use bg_status <id>, bg_output <id>, bg_stop <id> to manage.',
+              + ' Manage it with later exec calls whose cmd is "bg_list", "bg_status <id>", "bg_output <id>" or "bg_stop <id>".',
           },
           retry: {
             type: 'object',
@@ -122,7 +120,8 @@ export const EXEC_TOOL_SCHEMA = {
             type: 'boolean',
             description:
               'Stream stdout lines to a pollable progress file at .goodvibes/.overflow/{id}-progress.txt.'
-              + ' Auto-enabled without a timeout or when timeout_ms > 30000. The result includes a progress_file path.',
+              + ' Auto-enabled without a timeout or when timeout_ms > 30000; an automatic file is removed when the command finishes,'
+              + ' while progress: true keeps it. The result includes a progress_file path when one is kept.',
           },
           interactive: {
             type: 'boolean',
@@ -145,7 +144,8 @@ export const EXEC_TOOL_SCHEMA = {
       type: 'string',
       description:
         'Global working directory applied to all commands unless overridden per-command.'
-        + ' Optional, defaults to the session\'s working directory when omitted.',
+        + ' Optional, defaults to the session\'s working directory when omitted.'
+        + ' A sandboxed command must use a directory inside the session\'s project root.',
     },
     timeout_ms: {
       type: 'integer',
@@ -156,26 +156,23 @@ export const EXEC_TOOL_SCHEMA = {
       type: 'string',
       enum: ['count_only', 'minimal', 'standard', 'verbose'],
       description:
-        'count_only: exit codes only; minimal: exit codes + first line stdout/stderr;'
+        'count_only: exit codes only (plus process_id, timed_out, cancelled, expectation_error, warnings and other notices that explain or act on the result);'
+        + ' minimal: exit codes + first line stdout/stderr;'
         + ' standard: full stdout/stderr + exit code (default);'
         + ' verbose: everything + timing, env, cwd.',
     },
     stop_on_error: {
       type: 'boolean',
       description:
-        'Alias for fail_fast. Stop sequential execution on first failed command.'
-        + ' Unexecuted commands appear as {skipped: true} entries. Default: false.',
-    },
-    fail_fast: {
-      type: 'boolean',
-      description:
         'Stop sequential execution on first failed command (non-zero exit, timed_out, or expectation_error).'
-        + ' Unexecuted commands appear as {skipped: true} entries. Default: false.'
-        + ' Alias: stop_on_error.',
+        + ' Unexecuted commands appear as {skipped: true} entries. Default: false.',
     },
     file_ops: {
       type: 'array',
-      description: 'File operations to execute BEFORE commands run.',
+      description:
+        'File operations to execute BEFORE commands run, on the host and outside any sandbox. Every path, absolute or relative,'
+        + ' must be inside the project root; delete refuses the root itself and .git. If one fails, the earlier ones stay applied'
+        + ' (listed in the result), no commands run, and nothing is undone. Refused in sessions that require the exec boundary.',
       items: {
         type: 'object',
         properties: {
@@ -186,7 +183,7 @@ export const EXEC_TOOL_SCHEMA = {
           },
           source: {
             type: 'string',
-            description: 'Source path (relative or absolute, within project root).',
+            description: 'Source path (relative or absolute), which must be inside the project root.',
           },
           destination: {
             type: 'string',
@@ -213,8 +210,9 @@ export const EXEC_TOOL_SCHEMA = {
           update_imports: {
             type: 'boolean',
             description:
-              'After a move, find all TypeScript/JavaScript files that import from the previous path '
-              + 'and rewrite their import statements to use the new path for this move. Default: false.',
+              'After a move, rewrite the relative imports of the moved TypeScript/JavaScript file (imports written with or without'
+              + ' an extension, or as a directory index) in every file that imports it, and rewrite the moved file\'s own relative imports'
+              + ' for its new directory. Non-relative imports (aliases, packages) are not touched. A warning says when nothing changed. Default: false.',
             default: false,
           },
         },
@@ -306,6 +304,8 @@ export interface ExecInput {
 export interface ExecCommandResult {
   captured_exec_unsupported_options?: readonly string[] | undefined;
   captured_exec_availability?: CapturedExecAvailability | undefined;
+  /** Captured exec only: the command's file changes were applied before its output was withheld. */
+  captured_changes_published?: boolean | undefined;
   cmd: string;
   exit_code: number | null;
   stdout: string;
@@ -391,7 +391,43 @@ export interface ExecCommandResult {
   pending_prompt?: string | undefined;
   /** Set when the surfaced prompt ask was declined and the run was stopped. */
   prompt_declined?: boolean | undefined;
+  /**
+   * Answers that were typed but not sent because the program printed more
+   * output before the answer arrived. The prompt is asked again.
+   */
+  prompts_dropped?: number | undefined;
+  /**
+   * Set on a non-PTY run whose command failed because it needed a controlling
+   * terminal; says what to rerun it with.
+   */
+  tty_note?: string | undefined;
 }
 
 // BackgroundProcess is defined in shared/process-manager and re-exported here for consumers of this schema module.
 export type { BackgroundProcess } from '../shared/process-manager.js';
+
+/** Whether `value` is standard base64 (padding optional), so a malformed command is refused rather than half-decoded. */
+function isBase64(value: string): boolean {
+  const compact = value.replace(/\s+/g, '');
+  return /^[A-Za-z0-9+/]*={0,2}$/.test(compact) && compact.replace(/=+$/, '').length % 4 !== 1;
+}
+
+/**
+ * The command text one exec entry runs: `cmd_base64` decoded when present, else
+ * `cmd`. This is the one reading of an entry; the runtime executes it and a
+ * permission or approval reader that judges the command must read the same
+ * text. Throws when neither is given, when the base64 is malformed, or when
+ * both are given and disagree, so no entry can run text other than the text it
+ * shows.
+ */
+export function execCommandText(entry: { readonly cmd?: string | undefined; readonly cmd_base64?: string | undefined }): string {
+  const { cmd, cmd_base64: encoded } = entry;
+  if (encoded) {
+    if (!isBase64(encoded)) throw new Error('cmd_base64 is not valid base64; nothing was run');
+    const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
+    if (cmd && cmd !== decoded) throw new Error('A command entry gave both cmd and cmd_base64 with different text; give one of them. Nothing was run.');
+    return decoded;
+  }
+  if (cmd) return cmd;
+  throw new Error('Each command must have either cmd or cmd_base64');
+}

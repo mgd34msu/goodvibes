@@ -15,8 +15,9 @@ const missing = (error: unknown): boolean => error !== null && typeof error === 
 
 export class PaymentApprovalStoreError extends Error {
   override readonly name = 'PaymentApprovalStoreError';
-  constructor(readonly kind: 'unavailable' | 'busy' | 'invalid-request' | 'write-uncertain') {
-    super(kind === 'busy' ? 'Another payment owner is updating approvals. Refresh this purchase before trying again.'
+  constructor(readonly kind: 'unavailable' | 'busy' | 'invalid-request' | 'write-uncertain' | 'full') {
+    super(kind === 'full' ? `${String(MAX_PENDING_APPROVALS)} approvals are already waiting to be used, so this one was not recorded. They expire after five minutes; have the agent begin one of those purchases, or wait, then approve again.`
+      : kind === 'busy' ? 'Another payment owner is updating approvals. Refresh this purchase before trying again.'
       : kind === 'invalid-request' ? 'The purchase approval must name an action and its content fields.'
       : kind === 'write-uncertain' ? 'The approval write could not be confirmed. Inspect the original purchase and approval evidence before trying again.'
       : 'Purchase approvals are unreadable, unsupported or changed. Repair the original approval evidence and reopen the payment host.');
@@ -132,15 +133,20 @@ export class DaemonApprovalStore {
 
   grant(input: { readonly action: string; readonly content: Readonly<Record<string, string | undefined>> }): OwnerApproval {
     const captured = request(input);
-    return this.mutate(snapshot => {
+    const outcome = this.mutate<OwnerApproval | 'full'>(snapshot => {
       const at = this.now(), nowMs = at.getTime();
       const granted = grantOwnerApproval({ action: captured.action, content: captured.content, surface: 'owner-direct', now: () => at });
       if (granted === null) throw new PaymentApprovalStoreError('invalid-request');
       const approvals = snapshot.approvals.filter(row => Date.parse(row.expiresAt) > nowMs);
-      if (approvals.length >= MAX_PENDING_APPROVALS) approvals.shift();
+      // Never evict: dropping the oldest would destroy an approval the owner was
+      // told was granted. Refuse instead, outside the mutation so a full store
+      // is a normal answer and not a reason to stop using the file.
+      if (approvals.length >= MAX_PENDING_APPROVALS) return { approvals, result: 'full', changed: approvals.length !== snapshot.approvals.length };
       approvals.push(granted);
       return { approvals, result: view(granted), changed: true };
     });
+    if (outcome === 'full') throw new PaymentApprovalStoreError('full');
+    return outcome;
   }
 
   take(input: { readonly action: string; readonly content: Readonly<Record<string, string | undefined>> }): ApprovalTakeHit | ApprovalTakeMiss {

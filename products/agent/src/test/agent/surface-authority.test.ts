@@ -7,7 +7,7 @@
  * write to just gained the ability to direct the agent. The one legitimate
  * reason to edit the expectations here is an owner decision to move a
  * surface between the two categories, and that decision belongs in the diff
- * next to the table edit in src/agent/surface-authority.ts.
+ * next to the table edit in the engine gate's surface-authority module.
  *
  * The property these tests describe, for other surfaces to adopt:
  *   surfaceAuthority(surfaceId) -> 'command' | 'input-only'
@@ -40,11 +40,16 @@ describe('surface command authority', () => {
     expect(surfaceCarriesCommandAuthority('webhook')).toBe(false);
   });
 
-  test('the terminal, the CLI, Telegram and ntfy carry command authority', () => {
-    for (const surface of ['terminal', 'cli', 'tui', 'telegram', 'ntfy']) {
+  test('the terminal, the CLI and Telegram carry command authority', () => {
+    for (const surface of ['terminal', 'cli', 'tui', 'telegram']) {
       expect(surfaceAuthority(surface)).toBe('command');
       expect(surfaceCarriesCommandAuthority(surface)).toBe(true);
     }
+  });
+
+  test('ntfy is input-only because whoever can publish to the topic would otherwise be taken for the owner', () => {
+    expect(surfaceAuthority('ntfy')).toBe('input-only');
+    expect(surfaceCarriesCommandAuthority('ntfy')).toBe(false);
   });
 
   test('an unknown surface defaults to input-only, so a new surface must opt into authority', () => {
@@ -55,8 +60,8 @@ describe('surface command authority', () => {
     }
   });
 
-  test('the declared command surfaces are exactly the five the owner named', () => {
-    expect(listCommandAuthoritySurfaces()).toEqual(['cli', 'ntfy', 'telegram', 'terminal', 'tui']);
+  test('the declared command surfaces are exactly the four the owner named', () => {
+    expect(listCommandAuthoritySurfaces()).toEqual(['cli', 'telegram', 'terminal', 'tui']);
   });
 
   test('every declared surface answers with one of the two authority values', () => {
@@ -86,7 +91,7 @@ describe('confirmation authority', () => {
     expect(decision.allowed).toBe(false);
     if (decision.allowed) throw new Error('email must never be allowed to confirm');
     expect(decision.problem).toContain('input-only');
-    expect(decision.confirmOn).toEqual(['cli', 'ntfy', 'telegram', 'terminal', 'tui']);
+    expect(decision.confirmOn).toEqual(['cli', 'telegram', 'terminal', 'tui']);
     expect(decision.fix).toContain('terminal');
     expect(decision.fix).toContain('telegram');
   });

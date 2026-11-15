@@ -11,10 +11,17 @@ export async function settleTestWebhookNotifications(): Promise<void> {
   await Promise.resolve();
   while (pending.size) await Promise.allSettled([...pending]);
 }
-afterEach(async () => {
-  await settleTestWebhookNotifications();
-  fetchSpy?.mockRestore(); fetchSpy = undefined; routes.clear();
-});
+/**
+ * Call once at the top level of each test file that uses the notifier. The hook
+ * is registered per file, not at import: a cached module would bind an
+ * import-time hook to the first file only.
+ */
+export function useTestWebhookNotifications(): void {
+  afterEach(async () => {
+    await settleTestWebhookNotifications();
+    fetchSpy?.mockRestore(); fetchSpy = undefined; routes.clear();
+  });
+}
 
 export function makeTestWebhookNotifier(
   urls: string[] = ['https://example.com/tui-notification'],

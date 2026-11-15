@@ -35,7 +35,11 @@ import { validateSmtpAddress, validateSmtpSubject } from './smtp-client.js';
 
 const CRLF = '\r\n';
 
-/** The fallback when a server tells us nothing about its folders. */
+/**
+ * The conventional folder name. The IMAP client never falls back to it: a server
+ * that does not say which folder holds drafts is refused rather than guessed at,
+ * so a draft is never appended to a stray `Drafts` folder.
+ */
 export const DEFAULT_DRAFTS_MAILBOX = 'Drafts';
 
 // ---------------------------------------------------------------------------

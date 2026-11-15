@@ -31,11 +31,12 @@
  */
 
 import { Camera, KeyRound, QrCode, Radio, ShieldCheck } from 'lucide-react';
-import { useState, useSyncExternalStore, type SyntheticEvent } from 'react';
+import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
-import { decodeRelayPairingCode, storeRelayPairing } from '../../lib/relay-pairing';
+import { decodeRelayPairingCode, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
+import { RelayPairingOffer } from './RelayPairingOffer';
 import {
   describeScannedPairing,
   isDifferentOrigin,
@@ -51,11 +52,13 @@ import '../../styles/components/auth-gate.css';
 // Credential validation can replace the identity boundary before it rejects.
 // Keep its error outside that private subtree so the new gate can report it.
 let signInError: unknown = null;
+let signInsInFlight = 0;
 const signInListeners = new Set<() => void>();
 const subscribeSignIn = (listener: () => void) => { signInListeners.add(listener); return () => { signInListeners.delete(listener); }; };
 const readSignInError = () => signInError;
 async function validateSignIn<T>(read: () => Promise<T>): Promise<T> {
   signInError = null;
+  signInsInFlight += 1;
   for (const listener of signInListeners) listener();
   try { return await read(); }
   catch (error) {
@@ -63,6 +66,15 @@ async function validateSignIn<T>(read: () => Promise<T>): Promise<T> {
     for (const listener of signInListeners) listener();
     throw error;
   }
+  finally { signInsInFlight -= 1; }
+}
+/** A failure belongs to the gate that showed it: a later sign-out must open on a clean gate. */
+function retireSignInError(): void {
+  // A gate replaced while a check is still running is the case the module state exists
+  // for, so only a gate that leaves with nothing in flight drops the old failure.
+  if (signInsInFlight > 0 || signInError === null) return;
+  signInError = null;
+  for (const listener of signInListeners) listener();
 }
 
 export interface SignedOutGateProps {
@@ -75,6 +87,7 @@ export interface SignedOutGateProps {
 export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGateProps = {}) {
   const queryClient = useQueryClient();
   const validationError = useSyncExternalStore(subscribeSignIn, readSignInError, readSignInError);
+  useEffect(() => retireSignInError, []);
   const [token, setToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
@@ -83,6 +96,7 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   const [relayCode, setRelayCode] = useState('');
   const [relayPasteError, setRelayPasteError] = useState<unknown>(null);
   const [relayStored, setRelayStored] = useState(false);
+  const [relayOffer, setRelayOffer] = useState<RelayPairingPayload | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [scanOriginNote, setScanOriginNote] = useState<string | null>(null);
@@ -119,8 +133,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   }
 
   // Relay pairing is transport-only, it never signs anyone in, so this is a plain
-  // synchronous decode + local store (lib/relay-pairing.ts), no useMutation/network
-  // round trip. decodeRelayPairingCode throws the platform's own GoodVibesError on a
+  // synchronous decode (lib/relay-pairing.ts), no useMutation/network round trip. The
+  // decoded pairing is only offered: it is stored when the operator confirms it. decodeRelayPairingCode throws the platform's own GoodVibesError on a
   // malformed code; formatError renders that the same honest way as every other
   // rejection on this screen.
   function submitRelayCode(event: SyntheticEvent<HTMLFormElement>) {
@@ -129,10 +143,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
     setRelayStored(false);
     if (!relayCode.trim()) return;
     try {
-      const decoded = decodeRelayPairingCode(relayCode);
-      storeRelayPairing(decoded);
+      setRelayOffer(decodeRelayPairingCode(relayCode));
       setRelayCode('');
-      setRelayStored(true);
     } catch (err) {
       setRelayPasteError(err);
     }
@@ -147,11 +159,17 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
     setRelayPasteError(null);
     setRelayStored(false);
     try {
-      storeRelayPairing(decodeRelayPairingCode(code));
-      setRelayStored(true);
+      setRelayOffer(decodeRelayPairingCode(code));
     } catch (err) {
       setRelayPasteError(err);
     }
+  }
+
+  function confirmRelayOffer() {
+    if (relayOffer === null) return;
+    storeRelayPairing(relayOffer);
+    setRelayOffer(null);
+    setRelayStored(true);
   }
 
   // The one place a scan turns into an action. Every branch hands off to the
@@ -310,8 +328,11 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
                 />
               </Field>
               <Button type="submit" disabled={!relayCode.trim()}>
-                Save relay pairing
+                Review relay pairing
               </Button>
+              {relayOffer !== null && (
+                <RelayPairingOffer pairing={relayOffer} onConfirm={confirmRelayOffer} onDismiss={() => setRelayOffer(null)} />
+              )}
               {relayStored && (
                 <div className="banner" role="status">
                   Relay pairing saved. This device will use it automatically when the

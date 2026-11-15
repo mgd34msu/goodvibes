@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { getOperatorContractPath, getPeerContractPath } from '../contracts/dist/node.js';
+import { getOperatorContractPath, getPeerContractPath } from '../contracts/src/node.js';
 
 describe('contracts portability', () => {
   test('default browser-facing entries do not depend on node builtins', () => {

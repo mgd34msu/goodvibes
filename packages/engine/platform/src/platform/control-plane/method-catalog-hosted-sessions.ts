@@ -121,6 +121,7 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
     outputSchema: objectSchema({
       session: HOSTED_SESSION_RECORD_SCHEMA,
       history: HOSTED_SESSION_HISTORY_SCHEMA,
+      historyAsOf: NUMBER_SCHEMA,
     }, ['session', 'history']),
   }),
   methodDescriptor({

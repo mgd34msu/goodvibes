@@ -8,6 +8,7 @@ import {
   buildAgentWorkspaceChannelTriage,
   formatAgentWorkspaceChannelTriage,
 } from '../../input/agent-workspace-channel-triage.ts';
+import { aggregateUnifiedInbox } from '../../agent/unified-inbox.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function writeTokenHome(): string {
@@ -51,6 +52,30 @@ const EMPTY_ROUTE_BODIES: Record<string, unknown> = {
   '/api/deliveries': { totals: {}, attempts: [] },
   '/api/control-plane/messages': { messages: [] },
 };
+
+describe('agent workspace channel triage feeding the unified inbox', () => {
+  test('a real surface message keeps its title and preview in the inbox item, and not as bare triage fields', async () => {
+    const context = triageContext(writeTokenHome());
+    const triage = await withMockFetch(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/control-plane/messages') {
+        return new Response(JSON.stringify({
+          messages: [{ id: 'm1', surface: 'web', level: 'info', title: 'Automation complete', body: 'Your routine ran.', createdAt: 99000 }],
+        }));
+      }
+      if (path in EMPTY_ROUTE_BODIES) return new Response(JSON.stringify(EMPTY_ROUTE_BODIES[path]));
+      return new Response(JSON.stringify({ bindings: [] }));
+    }, () => buildAgentWorkspaceChannelTriage(context, {}));
+
+    const message = (triage.surfaceMessages as { messages: readonly Record<string, unknown>[] }).messages[0];
+    expect(message).not.toHaveProperty('title');
+    expect(message).not.toHaveProperty('bodyPreview');
+
+    const item = aggregateUnifiedInbox(triage, { limit: 10 }).surfaceMessageItems[0];
+    expect(item?.title).toBe('Automation complete');
+    expect(item?.bodyPreview).toBe('Your routine ran.');
+  });
+});
 
 describe('agent workspace channel triage: honest inbound attribution', () => {
   test('a binding whose externalId resolves to a known principal shows the resolved name', async () => {

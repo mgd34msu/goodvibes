@@ -156,6 +156,20 @@ function makeNoopRouteBindings(): RouteBindingManager {
   } as unknown as RouteBindingManager;
 }
 
+type WireTransport = ReturnType<typeof createHttpTransport>;
+
+// Throws when the row never lands, so a slow host fails loudly instead of
+// letting the dedup assertions pass with no wire mirror to deduplicate.
+async function waitForWireRow(transport: WireTransport, id: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const rows = await transport.operator.sessions.list(200);
+    if (rows.some((r) => r.id === id)) return;
+    if (Date.now() > deadline) throw new Error(`waitForWireRow: session ${id} never reached the daemon`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 describe('adopting surface self-mirror identity against a real bootDaemon', () => {
   let harness: Harness | null = null;
   afterEach(async () => { if (harness) await stopHarness(harness); harness = null; });
@@ -199,12 +213,7 @@ describe('adopting surface self-mirror identity against a real bootDaemon', () =
     // case. Even here, the fix must not regress: N others + 1 self = N+1.
     spineClient.register({ sessionId: selfId, project: harness.workingDir, title: 'Terminal UI session' });
 
-    // Wait for the register to actually land on the daemon.
-    for (let i = 0; i < 100; i++) {
-      const rows = await transport.operator.sessions.list(200);
-      if (rows.some((r) => r.id === selfId)) break;
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    await waitForWireRow(transport, selfId);
 
     const cache = new SessionUnionCache({
       local: localBroker,
@@ -258,11 +267,7 @@ describe('adopting surface self-mirror identity against a real bootDaemon', () =
     spineClient.activate(spineTransport);
     spineClient.register({ sessionId: wireId, project: harness.workingDir, title: 'Terminal UI session' });
 
-    for (let i = 0; i < 100; i++) {
-      const rows = await transport.operator.sessions.list(200);
-      if (rows.some((r) => r.id === wireId)) break;
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    await waitForWireRow(transport, wireId);
 
     const cache = new SessionUnionCache({
       local: localBroker,

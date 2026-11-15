@@ -127,6 +127,12 @@ export interface CompactionContext {
   /** Whether this compaction was triggered automatically or manually. */
   trigger: 'auto' | 'manual';
 
+  /**
+   * The session that owns this compaction. Recorded on the compaction event so
+   * a process hosting several sessions can read back its own event.
+   */
+  sessionId?: string | undefined;
+
   /** Provider-qualified registryKey used for LLM extraction calls. */
   extractionModelId: string;
 
@@ -169,6 +175,8 @@ export interface CompactionEvent {
   tokensAfterEstimate: number;
   modelId: string;
   trigger: 'auto' | 'manual';
+  /** The session that ran this compaction, when its context named one. */
+  sessionId?: string | undefined;
   /** Sections included in this compaction (IDs). */
   sectionsIncluded?: string[] | undefined;
   /** Whether post-compaction validation passed. */
@@ -200,9 +208,13 @@ export interface CompactionReceipt {
   tokensAfter: number;
   messagesBefore: number;
   messagesAfter: number;
-  /** Composite quality score (0–1) from the compaction quality scorer. */
+  /** Composite quality score (0–1) from the compaction quality scorer; 0 when no score was taken. */
   qualityScore: number;
-  /** Letter grade (A–F) derived from the quality score. */
+  /**
+   * Letter grade (A–F) derived from the quality score. Empty when no semantic
+   * score was taken (Classic operation does not claim a grade); `detail` then
+   * says so.
+   */
   qualityGrade: string;
   /** Whether the quality scorer flagged the compaction as low quality. */
   lowQuality: boolean;

@@ -8,11 +8,11 @@
  * daemon back ON the moment a user upgrades. migrateDangerDaemonAlias closes
  * that hazard; see manager.ts load() for where it is wired in.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { migrateDangerDaemonAlias } from '../platform/src/platform/config/migrations.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { resolveDaemonEnabled } from '../platform/src/platform/config/index.js';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -78,8 +78,12 @@ describe('migrateDangerDaemonAlias (pure function)', () => {
 });
 
 describe('migration wired into ConfigManager.load', () => {
+  const configDirs: string[] = [];
+  afterEach(() => { for (const dir of configDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
   function managerWithDisk(diskConfig: Record<string, unknown>): ConfigManager {
     const configDir = join(tmpdir(), `gv-migration-${Date.now()}-${crypto.randomUUID()}`);
+    configDirs.push(configDir);
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, 'settings.json'), JSON.stringify(diskConfig), 'utf-8');
     return new ConfigManager({ configDir });

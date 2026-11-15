@@ -1,14 +1,15 @@
 import { createNativeHostFetch } from './native-host-fetch.js';
-import { realpathSync } from 'node:fs';
+import { realpathSync, writeSync } from 'node:fs';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { nativeConversationIntakeResultSchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
-import { NativeConversationIntakeControls, type NativeConversationIntakeSelection, type NativeConversationIntakeState, type NativeConversationIntakePolicy } from './native-conversation-intake.js';
+import { NativeConversationIntakeControls, nativeIntakeFailureCause, type NativeIntakeFailureCause, type NativeConversationIntakeSelection, type NativeConversationIntakeState, type NativeConversationIntakePolicy } from './native-conversation-intake.js';
 import { NativeConversationIntakeJournal, type NativeIntakeJournalRecord } from './native-conversation-intake-journal.js';
 import { createNativeConversationIntakeBinding } from './native-conversation-intake-host.js';
 import { captureNativeConversationInput } from './native-conversation-input.js';
 import { createNativeSubmissionIdentity, type NativeSubmissionHost, type NativeHostIdentityFormat } from './native-work-submission-host.js';
 import type { NativeHeadlessMode } from './native-headless-options.js';
+import { HEADLESS_SCHEMA_VERSION, type HeadlessUsage } from './headless-turn-events.js';
 export type NativeHeadlessHost = (NativeSubmissionHost & {
     readonly journalPath: string;
 }) | {
@@ -23,6 +24,14 @@ export interface NativeHeadlessTurnResult {
     readonly model?: string | undefined;
     readonly provider?: string | undefined;
     readonly events?: number | undefined;
+    readonly usage?: HeadlessUsage | undefined;
+    /** Set on failures: `outcome-unknown` means the host may have acted, `unavailable` that nothing was sent. */
+    readonly kind?: 'outcome-unknown' | 'unavailable' | undefined;
+    readonly cause?: NativeHeadlessFailureCause | undefined;
+}
+export type NativeHeadlessFailureCause = NativeIntakeFailureCause;
+export function nativeHeadlessFailureCause(error: unknown): NativeHeadlessFailureCause {
+    return nativeIntakeFailureCause(error);
 }
 export interface NativeHeadlessResult extends NativeHeadlessTurnResult {
     readonly native?: NativeConversationIntakeState | undefined;
@@ -202,7 +211,7 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
             if (options.signal.aborted)
                 return cancelled();
             if (!cancelledWork)
-                return { exitCode: 3, response: '', error: 'Native work cancellation could not be confirmed. The saved target is unchanged; inspect --intake-status.', stopReason: 'native-unknown', native: state };
+                return { exitCode: 3, response: '', error: 'Native work cancellation could not be confirmed. The saved target is unchanged; inspect --intake-status.', stopReason: 'native-unknown', kind: 'outcome-unknown', cause: 'unknown', native: state };
             return resultForState(cancelledWork, options.mode);
         }
         if (state?.turnReady && state.turnPermit && state.result?.kind === 'turn') {
@@ -213,14 +222,15 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
         }
         return resultForState(state, options.mode);
     }
-    catch {
+    catch (error) {
         if (options.signal.aborted) {
             state = await cancellation ?? state;
             return cancelled();
         }
+        const cause = nativeHeadlessFailureCause(error);
         if (!controls)
-            return resultForState(unavailable('Native host or authenticated project is unavailable. No input was captured.'), options.mode);
-        return { exitCode: 3, response: '', error: 'Native outcome is unknown or unavailable. Inspect --intake-status before explicit recovery.', stopReason: 'native-unknown', ...(state ? { native: state } : {}) };
+            return { ...resultForState(unavailable('Native host or authenticated project is unavailable. No input was captured.'), options.mode), cause };
+        return { exitCode: 3, response: '', error: `Native outcome is unknown or unavailable (${cause}). Inspect --intake-status before explicit recovery.`, stopReason: 'native-unknown', kind: 'outcome-unknown', cause, ...(state ? { native: state } : {}) };
     }
     finally {
         options.signal.removeEventListener('abort', onAbort);
@@ -241,14 +251,62 @@ function resultForState(state: NativeConversationIntakeState | undefined, mode: 
         else if (result.kind === 'work' && state.execution?.snapshot)
             exitCode = 0;
     }
-    return { exitCode, response: state?.message ?? '', stopReason: `native-${result?.kind ?? state?.status ?? 'detached'}`, ...(state ? { native: state } : {}) };
+    const kind = exitCode === 3 ? 'outcome-unknown' : state?.status === 'unavailable' ? 'unavailable' : undefined;
+    return { exitCode, response: state?.message ?? '', stopReason: `native-${result?.kind ?? state?.status ?? 'detached'}`, ...(kind ? { kind } : {}), ...(state?.cause ? { cause: state.cause } : {}), ...(state ? { native: state } : {}) };
 }
-export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: string, stdout: (line: string) => void, alwaysNativeType = false): void {
+/** Headless callers cannot type slash commands: name the equivalent `run` flag instead. */
+export function headlessRecoveryText(text: string): string {
+    return text.replace(/(?<![-\w])(?:\/work )?intake-(status|retry|resume|cancel)\b/g, '--intake-$1');
+}
+// Synchronous so the line lands before the caller's process.exit; a pipe that refuses a sync write falls back.
+const writeStderrLine = (line: string): void => {
+    try {
+        writeSync(2, `${line}\n`);
+    }
+    catch {
+        process.stderr.write(`${line}\n`);
+    }
+};
+export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: string, stdout: (line: string) => void, alwaysNativeType = false, stderr: (line: string) => void = writeStderrLine): void {
     const { exitCode, native, ...turn } = result;
+    const response = headlessRecoveryText(turn.response);
+    const error = turn.error === undefined ? undefined : headlessRecoveryText(turn.error);
+    const execution = native?.execution ? { ...native.execution, message: headlessRecoveryText(native.execution.message) } : undefined;
     // Capabilities remain process-local. Never spread the state containing its permit.
-    const state = native ? { status: native.status, message: native.message, request: native.request, result: native.result, execution: native.execution } : undefined;
-    if (format === 'json' || format === 'stream-json')
-        stdout(JSON.stringify({ ...(format === 'stream-json' ? { type: alwaysNativeType || state ? 'NATIVE_INTAKE_RESULT' : 'TURN_RESULT' } : {}), ok: exitCode === 0, ...turn, ...(state ? { native: state } : {}) }));
-    else
-        stdout([result.response, result.error, state?.execution?.message].filter(Boolean).join('\n'));
+    const state = native ? { status: native.status, message: headlessRecoveryText(native.message), ...(native.cause ? { cause: native.cause } : {}), request: native.request, result: native.result, execution } : undefined;
+    if (format === 'json' || format === 'stream-json') {
+        // sessionId and usage are always present (null before a model turn) so every final frame has one shape.
+        stdout(JSON.stringify({ ...(format === 'stream-json' ? { type: alwaysNativeType || state ? 'NATIVE_INTAKE_RESULT' : 'TURN_RESULT' } : {}), schemaVersion: HEADLESS_SCHEMA_VERSION, ok: exitCode === 0,
+            ...turn, response, error, sessionId: turn.sessionId ?? null, usage: turn.usage ?? null, ...(state ? { native: state } : {}) }));
+        return;
+    }
+    // A failure that never reached a model turn is diagnostic text; a turn's answer stays on stdout.
+    const diagnostic = exitCode !== 0 && turn.sessionId === undefined;
+    const out = (diagnostic ? [] : [response, execution?.message]).filter(Boolean);
+    const err = (diagnostic ? [response, error, execution?.message] : [error]).filter(Boolean);
+    if (out.length)
+        stdout(out.join('\n'));
+    if (err.length)
+        stderr(err.join('\n'));
+}
+/**
+ * Run under `--timeout`: the deadline aborts the same signal Ctrl-C does, and a
+ * run that ended because of it reports exit 124 and stopReason `timeout`.
+ */
+export async function runWithHeadlessTimeout(signal: AbortSignal, timeoutMs: number | undefined, run: (signal: AbortSignal) => Promise<NativeHeadlessResult>): Promise<NativeHeadlessResult> {
+    if (timeoutMs === undefined)
+        return run(signal);
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), timeoutMs);
+    timer.unref?.();
+    try {
+        const result = await run(AbortSignal.any([signal, deadline.signal]));
+        if (!deadline.signal.aborted || signal.aborted || result.exitCode !== 130)
+            return result;
+        const seconds = Number((timeoutMs / 1000).toFixed(3));
+        return { ...result, exitCode: 124, stopReason: 'timeout', error: [`Stopped after --timeout ${seconds}s.`, result.error].filter(Boolean).join(' ') };
+    }
+    finally {
+        clearTimeout(timer);
+    }
 }

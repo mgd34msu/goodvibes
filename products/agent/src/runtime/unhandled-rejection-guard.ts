@@ -12,11 +12,14 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 export function createUnhandledRejectionHandler(deps: {
   readonly notifyHigh: (message: string) => void;
   readonly render: () => void;
+  /** Injectable clock, so the rolling window can be driven without waiting. */
+  readonly now?: () => number;
 }): (reason: unknown) => void {
+  const clock = deps.now ?? Date.now;
   let rejectionCount = 0;
-  let windowStart = Date.now();
+  let windowStart = clock();
   return (reason: unknown): void => {
-    const now = Date.now();
+    const now = clock();
     if (now - windowStart > 10000) {
       rejectionCount = 0;
       windowStart = now;

@@ -6,8 +6,9 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, firstAvailableControlRoute,
   type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts } from './agent-harness-autonomy-live-records.ts';
-import { watcherReadModelLiveRecords, watcherReadModelNativeFacts } from './agent-harness-autonomy-watcher-read-models.ts';
+import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
 import type { AgentHarnessAutonomyQueueArgs, AutonomyQueueItem, AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, AutonomyQueueResolution, AutonomyQueueStatus } from './agent-harness-autonomy-queue-types.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 export type { AutonomyQueueResolution } from './agent-harness-autonomy-queue-types.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 
@@ -16,9 +17,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(200, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 200);
 }
 
 type AutonomyMethods = Awaited<ReturnType<typeof contractMethodsForAutonomy>>;
@@ -117,6 +116,7 @@ function describeLiveRecord(record: AutonomyQueueLiveRecord, includeParameters: 
     ...(record.updatedAt ? { updatedAt: record.updatedAt } : {}),
     summary: previewHarnessText(record.summary, includeParameters ? 180 : 96),
     inspectRoute: record.inspectRoute,
+    ...(record.routeOrigin ? { routeOrigin: record.routeOrigin } : {}),
     ...(record.cancelRoute ? { cancelRoute: record.cancelRoute } : {}),
     ...(record.checkpointRoute ? { checkpointRoute: record.checkpointRoute } : {}),
     ...(record.pauseRoute ? { pauseRoute: record.pauseRoute } : {}),
@@ -131,7 +131,12 @@ function describeLiveRecord(record: AutonomyQueueLiveRecord, includeParameters: 
   };
 }
 
-function describeItem(item: AutonomyQueueItem, includeParameters: boolean, lookup?: Record<string, unknown>): Record<string, unknown> {
+/** "N of M" so a capped list is never read as the whole. */
+export function shownOf(shown: number, hidden: number): string {
+  return hidden > 0 ? `${shown} of ${shown + hidden}` : `${shown}`;
+}
+
+export function describeItem(item: AutonomyQueueItem, includeParameters: boolean, lookup?: Record<string, unknown>): Record<string, unknown> {
   return {
     queueItemId: item.id,
     label: item.label,
@@ -149,6 +154,7 @@ function describeItem(item: AutonomyQueueItem, includeParameters: boolean, looku
     ...(item.createRoute ? { createRoute: item.createRoute } : {}),
     ...(item.batchCreateRoute ? { batchCreateRoute: item.batchCreateRoute } : {}),
     ...(item.liveRecords && item.liveRecords.length > 0 ? { liveRecords: item.liveRecords.slice(0, includeParameters ? 8 : 3).map((record) => describeLiveRecord(record, includeParameters)) } : {}),
+    ...(item.liveRecords && item.liveRecords.length > (includeParameters ? 8 : 3) ? { liveRecordsNotShown: item.liveRecords.length - (includeParameters ? 8 : 3) } : {}),
     ...(lookup ? { lookup } : {}),
     ...(includeParameters ? {
       routes: {
@@ -181,8 +187,31 @@ function nativeFactsForBundle(records: AutonomyLiveRecordBundle): AutonomyLiveNa
   };
 }
 
+/** Supervised work and watcher totals, read once per queue answer so a process ending mid-read does not void it. */
+interface QueueSideFacts {
+  readonly agentsTotal: number;
+  readonly agentsActive: number;
+  readonly processesRunning: number;
+  readonly watcherRecordsOmitted: number;
+}
+
+function captureQueueSideFacts(context: CommandContext): QueueSideFacts {
+  try {
+    const agents = context.ops?.agentManager?.exportState() ?? [];
+    const processes = context.workspace?.processManager?.list() ?? [];
+    return {
+      agentsTotal: agents.length,
+      agentsActive: agents.filter((agent) => agent.status === 'pending' || agent.status === 'running').length,
+      processesRunning: processes.filter((entry) => !entry.done).length,
+      watcherRecordsOmitted: watcherReadModelPublication(context).omitted,
+    };
+  } catch {
+    throw new ToolInputProjectionError('unavailable');
+  }
+}
+
 function buildQueueItems(context: CommandContext, watcherReadModelRecords: readonly AutonomyQueueLiveRecord[],
-  records: AutonomyLiveRecordBundle, methodReadiness: AutonomyMethodReadiness,
+  records: AutonomyLiveRecordBundle, methodReadiness: AutonomyMethodReadiness, supervised: QueueSideFacts,
   facts: AutonomyLiveNativeFacts = nativeFactsForBundle(records),
   watcherFacts: readonly Pick<AutonomyQueueLiveRecord, 'status'>[] = watcherReadModelRecords): readonly AutonomyQueueItem[] {
   const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
@@ -201,6 +230,9 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
   const automationReadModelRecords = records.automationRuns;
   const watcherReceiptRecords = records.watcherReceipts;
   const automationRecords = [...automationReadModelRecords, ...watcherReadModelRecords, ...watcherReceiptRecords];
+  const omitted = records.omitted;
+  const taskOmitted = omitted?.tasks ?? 0, approvalOmitted = omitted?.approvals ?? 0, scheduleOmitted = omitted?.schedules ?? 0;
+  const automationOmitted = (omitted?.automationRuns ?? 0) + (omitted?.watcherReceipts ?? 0) + supervised.watcherRecordsOmitted;
   const automationStates = [...facts.automationRuns, ...watcherFacts, ...facts.watcherReceipts];
   const scheduleRecords = records.schedules;
   const latestResearchRun = researchRuns[0];
@@ -251,10 +283,10 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       count: taskMethods.length,
       current: `Work-plan actions are available in the Agent workspace; ${taskMethods.length} task/work-plan daemon method(s) are discoverable.`,
       next: 'Track ongoing user work here first, then update status to active, blocked, done, failed, or cancelled through the owning route under current recorded admission.',
-      inspectRoute: 'workspace action:"action" actionId:"workplan-show"',
+      inspectRoute: 'agent_work_plan action:"list"',
       modelRoute: 'agent_work_plan',
-      cancelRoute: 'workspace action:"run" actionId:"workplan-status"',
-      createRoute: 'workspace action:"run" actionId:"workplan-add"',
+      cancelRoute: 'agent_work_plan action:"set_status" id:"..." status:"cancelled"',
+      createRoute: 'agent_work_plan action:"create" title:"..."',
       methodIds: taskMethods,
       unavailableMethodIds: methods?.tasks.unavailable,
     },
@@ -284,7 +316,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
           : 'Create a visible research run when the user wants resumable deep research.',
       inspectRoute: 'research action:"runs"',
       modelRoute: 'research action:"runs"',
-      cancelRoute: 'research action:"cancel" id="..." note="..."',
+      cancelRoute: 'research action:"cancel" id:"..." note:"..."',
       createRoute: 'research action:"create_run" title:"..." question:"..."',
       liveRecords: researchRuns,
     },
@@ -296,9 +328,9 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       kind: 'host-task',
       visible: true,
       cancellable: facts.tasks.some(record => record.cancellable),
-      count: taskRecords.length > 0 ? taskRecords.length : taskMethods.length,
+      count: taskRecords.length > 0 ? taskRecords.length + taskOmitted : taskMethods.length,
       current: taskRecords.length > 0
-        ? `${taskRecords.length} live connected-host task record(s); active cancellable tasks expose exact daemon controls under current recorded admission. ${taskMethods.length} task-like daemon method(s) are discoverable.`
+        ? `${shownOf(taskRecords.length, taskOmitted)} live connected-host task record(s); active cancellable tasks expose exact daemon controls under current recorded admission. ${taskMethods.length} task-like daemon method(s) are discoverable.`
         : `${taskMethods.length} task-like daemon method(s) are present; Agent exposes read-only host task inspection.`,
       next: taskRecords.some((record) => record.status === 'blocked' || record.status === 'failed')
         ? 'Inspect failed or blocked host tasks, then use the exact retry control when useful or update Agent workplan state from the visible work-plan route.'
@@ -309,7 +341,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
           : taskMethods.length > 0
             ? 'Inspect host tasks before changing any work plan or automation state.'
         : 'Update the connected GoodVibes host or connector set until task inspection methods are present.',
-      inspectRoute: 'workspace action:"action" actionId:"tasks-list"',
+      inspectRoute: 'workspace action:"action" actionId:"tasks-filter"',
       modelRoute: 'host action:"methods" query:"task"',
       ...(taskCancelRoute ? { cancelRoute: taskCancelRoute } : {}),
       methodIds: taskMethods,
@@ -323,15 +355,15 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       owner: 'connected-host',
       kind: 'approval',
       visible: true,
-      cancellable: true,
-      count: approvalRecords.length > 0 ? approvalRecords.length : approvalMethods.length,
+      cancellable: facts.approvals.some(record => record.cancellable),
+      count: approvalRecords.length > 0 ? approvalRecords.length + approvalOmitted : approvalMethods.length,
       current: approvalRecords.length > 0
-        ? `${approvalRecords.length} recent approval record(s); pending or claimed approvals require explicit user-visible decisions.`
+        ? `${shownOf(approvalRecords.length, approvalOmitted)} recent approval record(s); pending or claimed approvals require explicit user-visible decisions.`
         : `${approvalMethods.length} approval daemon method(s) are present; approval decisions remain explicit and reviewable.`,
       next: approvalRecords.some((record) => record.status === 'pending' || record.status === 'claimed')
         ? 'Review pending approval records, risk, and args; approve, deny, or cancel exactly one id only when the user asks.'
         : 'Review the matrix, then approve, deny, or cancel one exact approval id only when the user asks.',
-      inspectRoute: 'workspace action:"action" actionId:"approvals"',
+      inspectRoute: 'workspace action:"action" actionId:"approval-review"',
       modelRoute: 'host action:"methods" query:"approval"',
       cancelRoute: 'workspace action:"run" actionId:"approval-cancel"',
       methodIds: approvalMethods,
@@ -345,10 +377,10 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       owner: 'connected-host',
       kind: 'automation-run',
       visible: true,
-      cancellable: true,
-      count: automationRecords.length > 0 ? automationRecords.length : automationMethods.length,
+      cancellable: [...automationReadModelRecords, ...watcherReadModelRecords].some(record => controlAvailable(record, 'cancel')),
+      count: automationRecords.length > 0 ? automationRecords.length + automationOmitted : automationMethods.length,
       current: automationRecords.length > 0
-        ? `${automationReadModelRecords.length} recent automation run record(s), ${watcherReadModelRecords.length} live watcher run/source record(s), ${watcherReceiptRecords.length} durable watcher/run receipt(s); active, failed, and retryable live runs expose exact control routes while receipt records stay read-only.`
+        ? `${shownOf(automationRecords.length, automationOmitted)} automation record(s) shown: ${automationReadModelRecords.length} recent automation run record(s), ${watcherReadModelRecords.length} live watcher run/source record(s), ${watcherReceiptRecords.length} durable watcher/run receipt(s); active, failed, and retryable live runs expose exact control routes while receipt records stay read-only.`
         : `${automationMethods.length} automation daemon method(s) are present; run, pause, resume, cancel, and retry actions require current recorded admission.`,
       next: automationRecords.some((record) => record.status === 'failed')
         ? 'Inspect failed automation runs, then retry only through exact owning run routes under current recorded admission.'
@@ -394,19 +426,19 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       owner: 'connected-host',
       kind: 'schedule',
       visible: true,
-      cancellable: true,
-      count: scheduleRecords.length > 0 ? scheduleRecords.length : scheduleMethods.length,
+      // A schedule is paused, disabled or deleted rather than cancelled, so it never offers a cancel control.
+      cancellable: false,
+      count: scheduleRecords.length > 0 ? scheduleRecords.length + scheduleOmitted : scheduleMethods.length,
       current: scheduleRecords.length > 0
-        ? `${scheduleRecords.length} live connected schedule record(s); edit, run-now, enable, disable, and delete require current recorded admission.`
+        ? `${shownOf(scheduleRecords.length, scheduleOmitted)} live connected schedule record(s); edit, run-now, enable, disable, and delete require current recorded admission.`
         : `${scheduleMethods.length} schedule/reminder daemon method(s) are present; schedule inspection, edit, and lifecycle controls are visible.`,
       next: scheduleRecords.some((record) => record.status === 'error')
         ? 'Inspect schedule errors before running, enabling, disabling, deleting, or creating more schedules.'
         : scheduleRecords.length > 0
           ? 'Review live schedules or reconcile routine receipts before controlling one exact schedule id.'
           : 'List schedules or reconcile routine receipts before controlling one schedule by id.',
-      inspectRoute: 'workspace action:"action" actionId:"schedule-list"',
+      inspectRoute: 'schedule action:"list"',
       modelRoute: 'schedule action:"list|edit|run|pause|resume|delete"',
-      cancelRoute: 'schedule action:"pause" scheduleId:"..."',
       createRoute: 'schedule action:"create" task:"..." successCriteria:"..." scheduleKind:"..." scheduleValue:"..."',
       methodIds: scheduleMethods,
       unavailableMethodIds: methods?.schedules.unavailable,
@@ -448,7 +480,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
         : scheduleReadyRoutines > 0
           ? 'Promote one reviewed routine with exact recurrence scope under current recorded admission.'
           : 'Create, enable, and review a routine before schedule promotion.',
-      inspectRoute: 'workspace action:"action" actionId:"schedule-receipts"',
+      inspectRoute: 'workspace action:"action" actionId:"schedule-receipt"',
       modelRoute: 'workspace action:"actions" categoryId:"routines"',
       createRoute: 'workspace action:"run" actionId:"schedule-promote-routine"',
       methodIds: scheduleMethods,
@@ -457,19 +489,37 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
     {
       id: 'delegated-subagents',
       label: 'Delegated subagents',
-      status: 'ready',
+      status: supervised.agentsActive > 0 ? 'active' : 'ready',
       owner: 'agent',
       kind: 'delegated-agent',
       visible: true,
-      cancellable: true,
-      count: 0,
-      current: 'Subagent and delegation routes are visible and cancellable; ordinary chat remains serial by default.',
+      cancellable: supervised.agentsActive > 0,
+      count: supervised.agentsActive,
+      current: `${supervised.agentsActive} running or pending agent(s) of ${supervised.agentsTotal} visible; subagent and delegation routes are visible and cancellable, and ordinary chat remains serial by default.`,
       next: 'Use visible delegation only when isolation, parallelism, remote execution, or an explicit build/fix/review handoff helps the user.',
       inspectRoute: 'agent_harness mode:"agent_orchestration"',
       modelRoute: 'agent_harness mode:"agent_orchestration"',
       cancelRoute: 'agent { mode: "cancel", agentId: "..." }',
       createRoute: 'agent { mode: "spawn", task: "..." }',
       batchCreateRoute: 'agent { mode: "batch-spawn", tasks: [...] }',
+    },
+    {
+      id: 'background-processes',
+      label: 'Background processes',
+      status: supervised.processesRunning > 0 ? 'active' : 'ready',
+      owner: 'agent',
+      kind: 'background-process',
+      visible: true,
+      cancellable: supervised.processesRunning > 0,
+      count: supervised.processesRunning,
+      current: `${supervised.processesRunning} tracked background process(es) running; each has a visible monitor and a kill route.`,
+      next: supervised.processesRunning > 0
+        ? 'Inspect a running process, wait on it, or stop the exact process id when the user asks.'
+        : 'Start long-running commands as tracked background processes so they stay listed here.',
+      inspectRoute: 'execution action:"processes"',
+      modelRoute: 'process action:"list"',
+      cancelRoute: 'process action:"kill" processId:"..."',
+      createRoute: 'terminal command:"..." background:true',
     },
     {
       id: 'delivery-followups',
@@ -500,7 +550,7 @@ function nextActions(items: readonly AutonomyQueueItem[]): readonly string[] {
 }
 
 export function autonomyQueueCatalogStatus(context: CommandContext): Record<string, unknown> {
-  const items = buildQueueItems(context, [], emptyLiveRecords, { status: 'unread' },
+  const items = buildQueueItems(context, [], emptyLiveRecords, { status: 'unread' }, captureQueueSideFacts(context),
     autonomyLiveNativeFacts(context), watcherReadModelNativeFacts(context));
   const counts = items.reduce<Record<AutonomyQueueStatus, number>>((acc, item) => {
     acc[item.status] += 1;
@@ -513,16 +563,18 @@ export function autonomyQueueCatalogStatus(context: CommandContext): Record<stri
     ...counts,
     readOnly: true,
     methodReadiness: 'pending',
+    // Receipt statuses are unread here, so a failed receipt can turn a row to attention in autonomy action:"queue".
+    statusBasis: 'startup facts; run autonomy action:"queue" for the full reading',
   };
 }
 
 function captureQueueSourceGuard(context: CommandContext, items: readonly AutonomyQueueItem[],
-  watchers: readonly AutonomyQueueLiveRecord[], records: AutonomyLiveRecordBundle, methods: AutonomyMethodReadiness,
+  watchers: readonly AutonomyQueueLiveRecord[], records: AutonomyLiveRecordBundle, methods: AutonomyMethodReadiness, supervised: QueueSideFacts,
   assertRestrictions: () => void, assertChildren: () => void) {
   const revision = JSON.stringify(items);
   const assertSourcesCurrent = () => {
     assertRestrictions(); assertChildren();
-    if (JSON.stringify(captureCatalogData(buildQueueItems(context, watchers, records, methods))) !== revision) throw new ToolInputProjectionError('stale');
+    if (JSON.stringify(captureCatalogData(buildQueueItems(context, watchers, records, methods, supervised))) !== revision) throw new ToolInputProjectionError('stale');
     assertRestrictions();
   };
   return assertSourcesCurrent;
@@ -563,8 +615,9 @@ async function captureQueueItems(context: CommandContext, options: CatalogRankin
     methods: captureCatalogData(await readChild(() => contractMethodsForAutonomy(readingOptions))) };
   const records = await readChild(() => captureAutonomyLiveRecords(context, readingOptions));
   const watchers = await readChild(() => watcherReadModelLiveRecords(context, readingOptions));
-  const items = captureCatalogData(buildQueueItems(context, watchers, records, methods));
-  const assertSourcesCurrent = captureQueueSourceGuard(context, items, watchers, records, methods, assertRestrictions, assertChildren);
+  const supervised = captureQueueSideFacts(context);
+  const items = captureCatalogData(buildQueueItems(context, watchers, records, methods, supervised));
+  const assertSourcesCurrent = captureQueueSourceGuard(context, items, watchers, records, methods, supervised, assertRestrictions, assertChildren);
   assertSourcesCurrent(); assertCaller();
   for (const [key, guards] of children) for (const guard of guards) retainCurrent?.(guard, typeof key === 'string' ? key : undefined);
   retainCurrent?.(assertSourcesCurrent, 'agent.harness.autonomy-queue.sources');

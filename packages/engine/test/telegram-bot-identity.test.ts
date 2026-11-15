@@ -165,6 +165,23 @@ describe('telegram bot identity is discovered from the token', () => {
     }
   });
 
+  test('after a rotation the new handle replaces the discovered old one, so the next start keeps it', async () => {
+    const h = makeHarness({
+      'surfaces.telegram.botToken': '999999:rotated-token',
+      'surfaces.telegram.botUsername': 'old_bot',
+      'surfaces.telegram.discoveredBotTokenId': '111111',
+    });
+    h.telegram.getMeResult = { id: 999999, username: 'new_bot', first_name: 'New' };
+    try {
+      await h.supervisor.start();
+      expect(h.config['surfaces.telegram.botUsername']).toBe('new_bot');
+      await h.supervisor.start();
+      expect(h.supervisor.identity?.username).toBe('new_bot');
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   test('an explicitly configured handle wins over discovery and is never overwritten', async () => {
     const h = makeHarness({ 'surfaces.telegram.botUsername': '@operator_choice' });
     h.telegram.getMeResult = { id: 123456, username: 'discovered_bot', first_name: 'Discovered' };

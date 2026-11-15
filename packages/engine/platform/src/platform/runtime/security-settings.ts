@@ -146,9 +146,9 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     securityRelevant: true,
     summary: 'Controls runtime budget enforcement for tool execution pipelines.',
     insecureWhen:
-      'When off, tool phases do not fail closed on platform-level wall-clock, token, or cost budget breaches.',
+      'When off, a tool call over a wall-clock, token or cost limit is not reported as failed.',
     enablementEffect:
-      'When on, tools can be interrupted at phase boundaries when configured budgets are exceeded.',
+      'When on, a tool call that finishes over a configured budget is reported as failed, with its output kept and a note that its action may have taken effect.',
     enablementRequirements: [
       'Configure appropriate budget limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd) for the host surface.',
       'Ensure callers handle budget-exceeded tool errors as normal failures.',
@@ -205,7 +205,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     insecureWhen:
       'At flat, exec command review uses baseline flat segmentation for every command and may provide less precise command verdicts.',
     enablementEffect:
-      'At ast (the default), compound shell commands are decomposed into per-segment verdicts with more specific denial explanations. A parser failure falls back automatically to the baseline flat-segmentation matcher, never a hard error and never a blanket allow, and the frozen catastrophic block is enforced identically in both modes.',
+      'At ast (the default), compound shell commands are decomposed into per-segment verdicts with more specific denial explanations. A parser failure falls back automatically to the baseline flat-segmentation matcher, never a hard error and never a blanket allow, and the permission gate reads the catastrophic case before the call in both modes.',
     enablementRequirements: [
       'None, ast is the default and remains runtime-switchable.',
       'Set permissions.commandParser to flat to force the baseline matcher for every command.',

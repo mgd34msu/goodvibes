@@ -3,6 +3,12 @@ import { captureNativeSelectedDiffContext, nativeSelectedDiffContextSchema, nati
 import { array, enum as enumSchema, literal, strictObject, string, type z } from 'zod/v4';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
+/**
+ * Deliberately unbounded. The transcript is acceptance evidence for the work:
+ * a cap would either refuse a long conversation outright or drop the messages
+ * the judgment must see, and either loses the user's work or its requirements.
+ * Consumers must not present these as limits.
+ */
 export const NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES = Infinity;
 export const NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES = Infinity;
 const id = string().min(1).max(200);

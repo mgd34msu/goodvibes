@@ -2,6 +2,7 @@ import type { WorkLedgerReadSnapshot } from '@goodvibes-jev/engine/platform/plat
 import type { OperatorNativeWorkSubmissionClient, NativeWorkSubmissionRequest, NativeWorkSubmissionReceipt } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission-client';
 import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, readNativeWorkSourceFile, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
 import type { NativeSubmissionJournalBinding, NativeSubmissionJournalRecord, NativeWorkSubmissionJournal } from './native-work-submission-journal.js';
+import { NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS } from './native-work-submission-journal.js';
 
 export interface NativeWorkSubmissionBinding {
   readonly client: OperatorNativeWorkSubmissionClient;
@@ -13,7 +14,7 @@ export interface NativeWorkSubmissionBinding {
 export type NativeWorkSubmissionSelection =
   | { readonly available: false; readonly identity: string; readonly reason: string }
   | { readonly available: true; readonly identity: string; readonly endpoint: string; readonly projectId: string; readonly workspace: string;
-      readonly journal: Pick<NativeWorkSubmissionJournal, 'read' | 'save' | 'confirm'>; readonly bind: () => NativeWorkSubmissionBinding };
+      readonly journal: Pick<NativeWorkSubmissionJournal, 'read' | 'save' | 'confirm'> & Partial<Pick<NativeWorkSubmissionJournal, 'remove' | 'path'>>; readonly bind: () => NativeWorkSubmissionBinding };
 export interface NativeWorkSubmissionState {
   readonly status: 'pending' | 'submitted' | 'not-found' | 'unknown' | 'conflict' | 'invalid' | 'unavailable';
   readonly message: string;
@@ -141,6 +142,7 @@ export class NativeWorkSubmissionControls {
         const found = await binding.client.get({ requestId: draft.command.requestId }, { signal: controller.signal }); if (!current()) return;
         if (found.kind === 'found') {
           this.validateReceipt(found.receipt, draft); draft.outcome = 'submitted';
+          await this.release(selected, scope, draft);
           result = publish({ status: 'submitted', message: 'Original submission found. No execution was started.', request: requestIdentity(draft.command), receipt: found.receipt, replayed: true });
         } else if (mode === 'status' || draft.outcome !== 'unknown') {
           result = publish({ status: 'not-found', message: draft.outcome === 'conflict'
@@ -159,6 +161,7 @@ export class NativeWorkSubmissionControls {
         publish({ status: 'pending', message: mode === 'retry' ? 'Replaying the exact durable request after lookup; IDs, source and revision are unchanged…' : 'Source and identity are durably recorded; submitting to the native ledger…', request: requestIdentity(draft.command) });
         const submitted = await binding.client.submit(draft.command, { signal: controller.signal }); if (!current()) return;
         this.validateReceipt(submitted.receipt, draft); draft.outcome = 'submitted';
+        await this.release(selected, scope, draft);
         result = publish({ status: 'submitted', message: 'Native source submitted. No execution was started.', request: requestIdentity(draft.command), receipt: submitted.receipt, replayed: submitted.replayed });
       }
     } catch (error) {
@@ -170,8 +173,10 @@ export class NativeWorkSubmissionControls {
           if (actual) { operationDraft = { identity: selected.identity, binding: actual.binding, command: freezeCommand(actual.command), outcome: 'unknown' }; this.draft = operationDraft; }
         } catch { /* Keep the original journal error; never send after failed persistence. */ }
       }
-      const request = operationDraft ? requestIdentity(operationDraft.command) : undefined;
+      // At the snapshot step the draft is only the earlier, already settled request; nothing was created for this run.
+      const request = operationDraft && !(mode === 'submit' && phase === 'snapshot') ? requestIdentity(operationDraft.command) : undefined;
       if (error instanceof NativeWorkSourceError) result = publish({ status: 'invalid', message: error.message });
+      else if (phase === 'journal-save' && code === 'journal_limit') result = publish({ status: 'unavailable', message: `The submission journal is full (${NATIVE_SUBMISSION_JOURNAL_MAX_RECORDS} retained submissions across hosts, projects and workspaces). No submission was sent. /work submission-status releases only this workspace's record once its receipt is found; ${selected.journal.path ? `records for other workspaces stay in ${selected.journal.path}. Delete that file only after confirming none of them is an unresolved submission you still need to inspect` : 'records for other workspaces stay in the journal file until it is cleared'}, then retry.`, request });
       else if (isJournalPhase(phase)) result = publish({ status: 'unavailable', message: 'The durable submission journal could not be confirmed. No submission was sent. The visible record was preserved; repair storage, then inspect the same request before retrying.', request });
       else if (code === 'NATIVE_SUBMISSION_CONFLICT' || code === 'CONFLICT') {
         if (operationDraft) operationDraft.outcome = 'conflict';
@@ -193,6 +198,11 @@ export class NativeWorkSubmissionControls {
     }
     if (!current()) { if (operationDraft) operationDraft.outcome = 'unknown'; return; }
     return result;
+  }
+  /** A settled submission no longer needs its journal slot; a failed release leaves the record, which is harmless. */
+  private async release(selected: Extract<NativeWorkSubmissionSelection, { available: true }>, scope: NativeSubmissionJournalBinding | undefined, draft: Draft): Promise<void> {
+    if (!scope || !selected.journal.remove) return;
+    try { await selected.journal.remove(scope, draft.command.requestId); } catch { /* the receipt is already validated */ }
   }
   private validateReceipt(receipt: NativeWorkSubmissionReceipt, draft: Draft): void {
     if (receipt.projectId !== draft.binding.projectId || receipt.requestId !== draft.command.requestId || receipt.inputId !== draft.command.inputId

@@ -42,9 +42,13 @@ export class CompanionBrokerSync {
     if (!this.broker) return;
     const prior = this.pendingOps.get(sessionId) ?? Promise.resolve();
     const next = prior.catch(() => {}).then(run).catch(() => {});
-    this.pendingOps.set(sessionId, next.finally(() => {
-      if (this.pendingOps.get(sessionId) === next) this.pendingOps.delete(sessionId);
-    }));
+    // The map holds the settled-then-cleaned promise, so the cleanup compares
+    // against that one: comparing against `next` never matched and left one
+    // entry per session for the life of the process.
+    const tracked: Promise<void> = next.finally(() => {
+      if (this.pendingOps.get(sessionId) === tracked) this.pendingOps.delete(sessionId);
+    });
+    this.pendingOps.set(sessionId, tracked);
   }
 
   async registerSession(meta: CompanionChatSession): Promise<void> {

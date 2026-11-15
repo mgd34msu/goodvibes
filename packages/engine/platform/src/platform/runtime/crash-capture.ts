@@ -37,6 +37,7 @@ import { appendFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { redactAtRestLine } from './at-rest-persistence.js';
+import { withSyncFileLock } from '../config/sync-file-lock.js';
 
 /** Which process-level fault produced a record. */
 export type CrashKind = 'uncaughtException' | 'unhandledRejection';
@@ -176,34 +177,48 @@ export function readCrashRecords(filePath: string): CrashRecord[] {
  * Fast path is a plain O_APPEND write, a single small line, which is the
  * cheapest thing that can land from a dying process. The rewrite that enforces
  * {@link CRASH_LOG_MAX_RECORDS} only runs once the file has actually grown
- * past the cap, and goes through `writeFileAtomic` so a crash during the
+ * past the cap (a log of unusually small records can sit a little over the
+ * cap until then; the retention janitor still bounds it), and goes through `writeFileAtomic` so a crash during the
  * trim cannot leave a truncated log.
  *
- * Best-effort by contract: returns `false` instead of throwing when the write
- * fails. The caller is an exit-boundary handler whose remaining duty (stderr,
+ * Best-effort by contract: returns `false` instead of throwing when the record
+ * cannot be redacted or written. The caller is an exit-boundary handler whose remaining duty (stderr,
  * activity log, exit code) must still run on a read-only or full disk.
  */
 export function appendCrashRecord(filePath: string, record: CrashRecord): boolean {
-  const line = `${redactAtRestLine(JSON.stringify(record))}\n`;
+  let line: string;
   try {
+    line = `${redactAtRestLine(JSON.stringify(record))}\n`;
     mkdirSync(dirname(filePath), { recursive: true });
-    appendFileSync(filePath, line, { mode: 0o600 });
   } catch {
     return false;
   }
+  // Appending and trimming run under one cross-process lock: a trim rewrites
+  // the whole file, so a record another process appended between its read and
+  // its rename would be lost. The lock is brief and, when it cannot be taken,
+  // the operation still runs rather than dropping the record.
   try {
-    // Cheap guard: only pay for a read+rewrite once the file could plausibly
-    // hold more than the cap. An average record is well under 1 KiB.
-    const size = statSync(filePath).size;
-    if (size < CRASH_LOG_MAX_RECORDS * 1024) return true;
-    const records = readCrashRecords(filePath);
-    if (records.length <= CRASH_LOG_MAX_RECORDS) return true;
-    const kept = records.slice(records.length - CRASH_LOG_MAX_RECORDS);
-    const contents = kept.map((entry) => `${redactAtRestLine(JSON.stringify(entry))}\n`).join('');
-    writeFileAtomic(filePath, contents, { mode: 0o600 });
+    return withSyncFileLock(filePath, () => {
+      try {
+        appendFileSync(filePath, line, { mode: 0o600 });
+      } catch {
+        return false;
+      }
+      try {
+        // Cheap guard: only pay for a read+rewrite once the file could plausibly
+        // hold more than the cap. An average record is well under 1 KiB.
+        if (statSync(filePath).size < CRASH_LOG_MAX_RECORDS * 1024) return true;
+        const records = readCrashRecords(filePath);
+        if (records.length <= CRASH_LOG_MAX_RECORDS) return true;
+        const kept = records.slice(records.length - CRASH_LOG_MAX_RECORDS);
+        const contents = kept.map((entry) => `${redactAtRestLine(JSON.stringify(entry))}\n`).join('');
+        writeFileAtomic(filePath, contents, { mode: 0o600 });
+      } catch {
+        // The record itself already landed; failing to trim is not worth losing it.
+      }
+      return true;
+    });
   } catch {
-    // The record itself already landed; failing to trim is not worth losing it.
-    return true;
+    return false;
   }
-  return true;
 }

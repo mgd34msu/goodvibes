@@ -29,6 +29,27 @@ export class KnowledgeScopeSelectionHeldError extends Error {
   }
 }
 
+/**
+ * Most scope readings one pass may issue. A larger pass reads this many and
+ * remembers each verdict; records past the cap are selected on the classic
+ * (ordinary view) path and the selection is labelled classic, so no pass spends
+ * readings and then discards them. A later pass in the same process reads only
+ * what is still unread, so a big store converges. Verdicts are kept in memory,
+ * so a short-lived process repeats the first batch rather than holding.
+ */
+const MAX_SCOPE_READINGS_PER_PASS = 2_000;
+
+interface ScopeVerdict { readonly version: string; readonly included: boolean }
+/** Verdicts by store, then by judgment authority identity, then record key; a changed record or reader never matches. */
+const scopeVerdicts = new WeakMap<KnowledgeStore, WeakMap<object, Map<string, ScopeVerdict>>>();
+function scopeVerdictsFor(store: KnowledgeStore, identity: object): Map<string, ScopeVerdict> {
+  let byIdentity = scopeVerdicts.get(store);
+  if (!byIdentity) { byIdentity = new WeakMap(); scopeVerdicts.set(store, byIdentity); }
+  let verdicts = byIdentity.get(identity);
+  if (!verdicts) { verdicts = new Map(); byIdentity.set(identity, verdicts); }
+  return verdicts;
+}
+
 export interface KnowledgeScopeSelectionOptions {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
@@ -38,6 +59,8 @@ export interface KnowledgeScopeSelectionOptions {
   readonly sourceIds?: readonly string[] | undefined;
   readonly nodeIds?: readonly string[] | undefined;
   readonly issueIds?: readonly string[] | undefined;
+  /** Lowers the per-pass reading cap; defaults to the built-in cap. */
+  readonly maxReadingsPerPass?: number | undefined;
 }
 
 export interface KnowledgeScopeSelection {
@@ -439,7 +462,8 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
       const state = { view, candidate: toJson(candidateContent), related: relatedContent.map(other => toJson(other)),
         associations: { outsideRequestedScope } };
       assertJudgmentInput(state);
-      return { key: `${value.kind}:${value.record.id}`, state: captureStrictRepairJson(state) };
+      const captured = captureStrictRepairJson(state);
+      return { key: `${value.kind}:${value.record.id}`, state: captured, version: knowledgeRecordVersion(captured) };
     });
     // Original source/node/extraction snapshots and every projection above
     // remain in their old order. Mint the complete retained readsets together
@@ -462,7 +486,6 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
   };
   let jobs: ReturnType<typeof prepareJobs> = [];
   store.assertRecordSnapshotFrame(() => { withLookup(() => { jobs = prepareJobs(); }); });
-  if (jobs.length > 2_000) throw new KnowledgeScopeSelectionHeldError('budget');
   const assertRecordCurrent = (key: string) => {
     store.assertRecordSnapshotFrame(() => {
       assertAuthorityCurrent();
@@ -478,7 +501,16 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
       await decisionOrClassic(async () => {
         authority = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal, assertCurrent: assertInputIdentity, prepareResultCapture: prepareRepairJudgmentResult });
         let resultModel: string | undefined;
-        await mapLimit(jobs, 4, job => decisionOrClassic(async () => {
+        const verdicts = scopeVerdictsFor(store, authority.identity);
+        const unread = jobs.filter(job => verdicts.get(job.key)?.version !== job.version);
+        const deferred = new Set(unread.slice(Math.max(0, options.maxReadingsPerPass ?? MAX_SCOPE_READINGS_PER_PASS)).map(job => job.key));
+        await mapLimit(jobs.filter(job => !deferred.has(job.key)), 4, job => decisionOrClassic(async () => {
+          const known = verdicts.get(job.key);
+          if (known?.version === job.version) {
+            assertRecordCurrent(job.key);
+            (known.included ? accepted : declined).add(job.key);
+            return;
+          }
           let captured: ReturnType<typeof captureJudgmentPort> | undefined;
           store.assertRecordSnapshotFrame(() => {
             captured = captureJudgmentPort(knowledgeScopeSelection.name, { signal: operationSignal,
@@ -492,8 +524,9 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
           if (resultModel !== undefined && resultModel !== run.result.model) throw new KnowledgeScopeSelectionHeldError('stale');
           resultModel = run.result.model;
           if (run.readings.included.outcome !== 'act' || run.readings.included.verdict === 'uncertain') throw new KnowledgeScopeSelectionHeldError('uncertain');
-          if (run.readings.included.verdict === 'yes') accepted.add(job.key);
-          else declined.add(job.key);
+          const included = run.readings.included.verdict === 'yes';
+          (included ? accepted : declined).add(job.key);
+          verdicts.set(job.key, { version: job.version, included });
           run.recordAction(`scope content ${run.readings.included.verdict}; explicit namespace and effect authority unchanged`);
           captured.assertCurrent();
         }, () => {
@@ -501,6 +534,11 @@ async function prepareKnowledgeScopeUnderPolicy(store: KnowledgeStore, scope: Kn
           assertRecordCurrent(job.key);
           if (!declined.has(job.key)) accepted.add(job.key);
         }));
+        for (const key of deferred) {
+          classicSelection = true;
+          assertRecordCurrent(key);
+          if (!declined.has(key)) accepted.add(key);
+        }
       }, () => {
         classicSelection = true;
         assertCurrent();

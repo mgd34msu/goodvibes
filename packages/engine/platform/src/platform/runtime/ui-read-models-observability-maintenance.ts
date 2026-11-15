@@ -47,6 +47,8 @@ export interface UiMaintenanceObservabilityReadModels {
 export function createMaintenanceObservabilityReadModels(runtimeServices: RuntimeServices): UiMaintenanceObservabilityReadModels {
   return {
     settings: {
+      // The conflicts, failures and locks come from the config manager's files; nothing announces a change.
+      pollOnly: true,
       getSnapshot() {
         const snapshot = runtimeServices.integrationHelpers.getSettingsSnapshot() as IntegrationSettingsSnapshot;
         return {
@@ -61,11 +63,15 @@ export function createMaintenanceObservabilityReadModels(runtimeServices: Runtim
         return () => {};
       },
     },
+    // Session id and status follow the runtime store; the recovery file and last-session pointer are read
+    // from disk, so they show on the next store change or the next read.
     continuity: createStoreBackedReadModel(runtimeServices, () => {
       const snapshot = runtimeServices.integrationHelpers.getContinuitySnapshot() as IntegrationContinuitySnapshot;
       return snapshot;
     }),
     worktrees: {
+      // The records are read from the persisted worktree metadata on disk; nothing announces a change.
+      pollOnly: true,
       getSnapshot() {
         const snapshot = runtimeServices.integrationHelpers.getWorktreeSnapshot() as IntegrationWorktreeSnapshot;
         return {

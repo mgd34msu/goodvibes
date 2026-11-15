@@ -96,6 +96,26 @@ describe('HTTP hook SSRF filter', () => {
   });
 });
 
+describe('HTTP hook redirects', () => {
+  test('a redirect from a public hook URL is not followed and is reported', async () => {
+    const requests: { url: string; redirect: RequestRedirect | undefined }[] = [];
+    restoreFetch?.();
+    const mock = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ url: String(input), redirect: init?.redirect });
+      // What a fetch with redirect:'manual' hands back for a redirecting hook.
+      return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } });
+    }, { preconnect() {} }));
+    restoreFetch = () => mock.mockRestore();
+
+    const result = await runHttpHook({ match: 'Post:tool:*', type: 'http', url: 'https://example.com/hook' }, MOCK_EVENT);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/302 redirect/);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.redirect).toBe('manual');
+  });
+});
+
 describe('WebhookNotifier SSRF filter', () => {
   test('localhost webhook URL throws on postOne', async () => {
     const notifier = new WebhookNotifier();

@@ -26,6 +26,7 @@ import type { PermissionRequestHandler } from '../platform/src/platform/permissi
 import type { TurnEvent } from '../platform/src/events/turn.ts';
 import type { ToolEvent } from '../platform/src/events/tools.ts';
 import type { McpServerConfig } from '../platform/src/platform/mcp/config.ts';
+import { waitFor } from './_helpers/test-timeout.js';
 
 interface RecordedUpdate {
   sessionId: string;
@@ -188,7 +189,7 @@ describe('session lifecycle + prompt streaming', () => {
       sessionId: created.sessionId,
       prompt: [{ type: 'text', text: 'do the thing' }],
     });
-    await Bun.sleep(10); // allow submit + subscriptions to settle
+    await waitFor(() => substrate.submitted.length > 0); // the prompt subscribes before it submits
 
     substrate.emitTurn({ type: 'STREAM_DELTA', turnId: 't1', content: 'hello ', accumulated: 'hello ' });
     substrate.emitTool({ type: 'TOOL_EXECUTING', callId: 'c1', turnId: 't1', tool: 'read_file', startedAt: Date.now() });
@@ -216,7 +217,7 @@ describe('session lifecycle + prompt streaming', () => {
     const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
     const created = await agent.newSession({ cwd: '/work/p2', mcpServers: [] });
     const promptPromise = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'long task' }] });
-    await Bun.sleep(10);
+    await waitFor(() => substrate.submitted.length > 0);
     await agent.cancel({ sessionId: created.sessionId });
     const result = await promptPromise;
     expect(result.stopReason).toBe('cancelled');
@@ -229,7 +230,7 @@ describe('session lifecycle + prompt streaming', () => {
     const agent = new GoodVibesAcpAgent(conn, { sessionFactory: substrate.factory });
     const created = await agent.newSession({ cwd: '/work/p2b', mcpServers: [] });
     const promptPromise = agent.prompt({ sessionId: created.sessionId, prompt: [{ type: 'text', text: 'long task' }] });
-    await Bun.sleep(10);
+    await waitFor(() => substrate.submitted.length > 0);
     await agent.cancel({ sessionId: created.sessionId });
     const result = await promptPromise;
     expect(result.stopReason).toBe('cancelled');

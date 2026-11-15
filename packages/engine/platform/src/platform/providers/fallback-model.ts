@@ -62,6 +62,7 @@ export function ensureConfiguredModelIsRoutable(providerRegistry: ProviderRegist
   providerRegistry.registerRuntimeProvider({
     provider,
     replace: true,
+    appendModels: true,
     models: [buildFallbackModelDefinition(providerId, modelId)],
   });
 }

@@ -1,6 +1,7 @@
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -10,10 +11,10 @@ import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readLocalServingBoolean, readLocalServingStatus, readLocalResourcePressure, readLocalServingSchemaStatus } from './agent-harness-local-model-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { LocalModelDetection, LocalModelEndpointSource, LocalModelServerDefaultEndpoint, LocalModelServerDiagnosticsPublication, LocalModelServerEndpoint, LocalModelServerHealthMap, LocalModelServerServingDiagnostics, MutableLocalModelServerEndpoint } from './agent-harness-model-routing-types.ts';
-import { listProviderRegistryProviders, listRegistryModels, modelDisplayName, modelModelId, modelProviderId, modelRegistryKey, readProviderModels } from './agent-harness-model-catalog.ts';
+import { listProviderRegistryProviders, listRegistryModels, modelProviderId, modelRegistryKey, readProviderModels } from './agent-harness-model-catalog.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
-import { extractUrls, isPrivateOrLocalUrl, localStackFor, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate } from './agent-harness-local-model-url.ts';
+import { extractUrls, isPrivateOrLocalUrl, localStackFor, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate, stripUrlCredentials } from './agent-harness-local-model-url.ts';
 
 export type { LocalModelStack } from './agent-harness-local-model-url.ts';
 export { cleanUrlCandidate, extractUrls, isPrivateOrLocalHost, isPrivateOrLocalUrl, localStackFor, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate } from './agent-harness-local-model-url.ts';
@@ -26,7 +27,7 @@ export function localProviderNameFor(providerId: string | null, stack: string | 
 
 export function localProviderAddRoute(providerId: string | null, stack: string | null, baseUrl: string): string {
   const name = localProviderNameFor(providerId, stack, 'local-openai');
-  return `agent_harness mode:"run_command" command:"/provider add ${name} ${baseUrl} local --yes" confirm:true explicitUserRequest:"Add this local provider after the server is running."`;
+  return `agent_harness mode:"run_command" command:"/provider add ${name} ${baseUrl} local --yes" explicitUserRequest:"<the user request, in their own words>"`;
 }
 
 export function localEndpointId(baseUrl: string): string {
@@ -39,7 +40,7 @@ export function localEndpointInspectRoute(endpointId: string): string {
 
 export function localEndpointSmokeRoute(endpointId?: string): string {
   const target = endpointId ? ` modelRouteId:"${endpointId}"` : '';
-  return `models action:"smoke"${target} confirm:true explicitUserRequest:"Check local model servers."`;
+  return `models action:"smoke"${target} explicitUserRequest:"<the user request, in their own words>"`;
 }
 
 export function localEndpointDiagnostics(endpoint: MutableLocalModelServerEndpoint, providerExists: boolean): NonNullable<LocalModelServerEndpoint['diagnostics']> {
@@ -59,7 +60,7 @@ export function localEndpointDiagnostics(endpoint: MutableLocalModelServerEndpoi
     afterSmoke: providerExists
       ? ['Run the refresh route, then run a local benchmark before changing the default route.']
       : ['Add the provider route only after smoke succeeds, then refresh models and run a local benchmark.'],
-    policy: 'Diagnostics are read-only criteria and confirmed route hints. Agent probes local model-list endpoints only through models action:"smoke" after explicit confirmation; provider add, refresh, benchmark, and route changes remain separate actions.',
+    policy: 'Diagnostics are read-only criteria and confirmed route hints. Agent probes local model-list endpoints only through models action:"smoke" after recorded effect admission; provider add, refresh, benchmark, and route changes remain separate actions.',
   };
 }
 
@@ -142,7 +143,10 @@ function isoFromDiagnosticValue(value: unknown): string | null {
     : typeof value === 'string' && value.trim()
       ? Date.parse(value)
       : Number.NaN;
-  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
+  if (Number.isNaN(timestamp)) return null;
+  // A number outside the Date range (a nanosecond epoch) makes toISOString throw, which would drop the whole source.
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 async function localServingStatus(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['status']> {
@@ -357,7 +361,7 @@ async function normalizeServingDiagnosticRecord(value: unknown, source: string, 
       ? normalizeLocalBaseUrl(rawModelsUrl, stack)
       : null;
   const modelsUrl = rawModelsUrl
-    ? modelsUrlFor(normalizeLocalBaseUrl(rawModelsUrl, stack) ?? rawModelsUrl.replace(/\/models\/?$/i, ''))
+    ? modelsUrlFor(normalizeLocalBaseUrl(rawModelsUrl, stack) ?? stripUrlCredentials(rawModelsUrl).replace(/\/models\/?$/i, ''))
     : baseUrl
       ? modelsUrlFor(baseUrl)
       : null;
@@ -465,6 +469,12 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
   const sourcePaths = new Set<string>();
   let sawSource = false;
   let sawError = false;
+  const failedSources: string[] = [];
+  const noteSourceFailure = (path: string, error: unknown) => {
+    sawError = true;
+    failedSources.push(`${path} (${error instanceof Error && error.name ? error.name : 'unreadable'})`);
+    logger.warn('Local serving diagnostics source could not be read', { path, error: summarizeError(error) });
+  };
   const observations: Array<{ readonly entry: LocalModelServingReadModelSource; readonly observation: ReturnType<typeof captureServingSource> }> = [];
   for (const entry of setupServingReadModelSources(context)) {
     if (entry.source === undefined || entry.source === null) continue;
@@ -474,7 +484,7 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
       retained.push(observation.assertCurrent);
       options.retainCurrent?.(observation.assertCurrent, `agent.local-serving-diagnostics.source:${entry.path}`);
       observations.push({ entry, observation });
-    } catch { sawError = true; }
+    } catch (error) { noteSourceFailure(entry.path, error); }
   }
   assertCurrent();
   for (const { entry, observation } of observations) {
@@ -501,7 +511,7 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
       records.push(...sourceRecords);
     } catch (error) {
       activateClassicFallback(error);
-      sawError = true;
+      noteSourceFailure(entry.path, error);
     }
   }
   assertCurrent();
@@ -512,9 +522,13 @@ async function localServingDiagnosticsIndex(context: CommandContext, options: Mo
       : sawSource
         ? 'read-model-empty'
         : 'not-published';
-  const missingSignals = records.length > 0
-    ? []
-    : ['No daemon-published local serving diagnostics read model is available to Agent yet.'];
+  const failureSignal = failedSources.length > 0
+    ? `Local serving diagnostics could not be read from: ${failedSources.join(', ')}.${records.length > 0 ? ' The records shown are from the remaining sources only.' : ''}`
+    : null;
+  const missingSignals = [
+    ...(records.length > 0 || sawError ? [] : ['No daemon-published local serving diagnostics read model is available to Agent yet.']),
+    ...(failureSignal ? [failureSignal] : []),
+  ];
   if (owner && !isClassicOperation()) {
     const restriction = owner.consumeObservation();
     const semanticCurrent = () => { if (!isClassicOperation()) restriction.assertCurrent(); };
@@ -769,9 +783,8 @@ export async function withLocalModelRegistry<T>(context: CommandContext, options
       const providerId = firstString(record, ['name', 'id', 'providerId', 'provider']);
       const stack = await localStackFor(JSON.stringify(record), scoped, record);
       if (stack) { if (providerId) providerIds.add(providerId); stacks.add(stack); }
-      const fields = JSON.stringify(record), routes = readProviderModels(record.models, providerId);
-      const urls = [readString(record.baseURL), readString(record.baseUrl), readString(record.endpoint), ...extractUrls(fields)].filter(Boolean);
-      for (const baseUrl of urls) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
+      const routes = readProviderModels(record.models, providerId);
+      for (const baseUrl of providerEndpointUrls(record)) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
         source: 'provider-registry', sourceDetail: providerId ? `provider:${providerId}` : 'provider-registry',
         modelRoutes: routes, notes: providerId ? ['Provider already exists in the registry.'] : [] });
     }
@@ -779,8 +792,7 @@ export async function withLocalModelRegistry<T>(context: CommandContext, options
       const record = readRecord(model), providerId = modelProviderId(model), registryKey = modelRegistryKey(model);
       const stack = await localStackFor(JSON.stringify(record), scoped, record);
       if (stack) { if (providerId) providerIds.add(providerId); if (registryKey) modelRoutes.add(registryKey); stacks.add(stack); }
-      const urls = [readString(record.baseURL), readString(record.baseUrl), readString(record.endpoint), ...extractUrls(readString(record.description))].filter(Boolean);
-      for (const baseUrl of urls) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
+      for (const baseUrl of modelEndpointUrls(record)) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
         source: 'model-registry', sourceDetail: registryKey ? `model:${registryKey}` : 'model-registry', modelRoutes: registryKey ? [registryKey] : [],
         notes: registryKey ? ['At least one model route is already registered for this endpoint.'] : [] });
     }
@@ -810,6 +822,15 @@ export async function readLocalServerEndpointCandidates(context: CommandContext,
     return binding.endpoints.map(endpoint => ({ ...endpoint, sources: new Set(endpoint.sources),
       sourceDetails: new Set(endpoint.sourceDetails), modelRoutes: new Set(endpoint.modelRoutes), notes: new Set(endpoint.notes) }));
   });
+}
+
+/** Every URL a provider record names, from its endpoint fields or anywhere in its body. The startup snapshot and the explicit inspection both use this, so their endpoint counts agree. */
+function providerEndpointUrls(record: Record<string, unknown>): readonly string[] {
+  return [readString(record.baseURL), readString(record.baseUrl), readString(record.endpoint), ...extractUrls(JSON.stringify(record))].filter(Boolean);
+}
+
+function modelEndpointUrls(record: Record<string, unknown>): readonly string[] {
+  return [readString(record.baseURL), readString(record.baseUrl), readString(record.endpoint), ...extractUrls(readString(record.description))].filter(Boolean);
 }
 
 export function addLocalServerEndpoint(
@@ -853,26 +874,9 @@ export function collectLocalServerEndpointCandidates(context: CommandContext): r
   for (const provider of listProviderRegistryProviders(context)) {
     const record = readRecord(provider);
     const providerId = readString(record.name) || readString(record.id) || readString(record.providerId) || readString(record.provider);
-    const fields = [
-      providerId,
-      readString(record.label),
-      readString(record.displayName),
-      readString(record.description),
-      readString(record.baseURL),
-      readString(record.baseUrl),
-      readString(record.endpoint),
-      JSON.stringify(record.serviceNames ?? ''),
-      JSON.stringify(record.envVars ?? ''),
-    ].join('\n');
     const stack = null;
     const routes = readProviderModels(record.models, providerId);
-    const urls = [
-      readString(record.baseURL),
-      readString(record.baseUrl),
-      readString(record.endpoint),
-      ...extractUrls(fields),
-    ].filter(Boolean);
-    for (const baseUrl of urls) {
+    for (const baseUrl of providerEndpointUrls(record)) {
       addLocalServerEndpoint(endpoints, {
         baseUrl,
         providerId: providerId || null,
@@ -889,25 +893,8 @@ export function collectLocalServerEndpointCandidates(context: CommandContext): r
     const record = readRecord(model);
     const providerId = modelProviderId(model);
     const registryKey = modelRegistryKey(model);
-    const fields = [
-      providerId,
-      registryKey,
-      modelModelId(model),
-      modelDisplayName(model),
-      readString(record.description),
-      readString(record.baseURL),
-      readString(record.baseUrl),
-      readString(record.serverType),
-      JSON.stringify(record.providerEnvVars ?? ''),
-    ].join('\n');
     const stack = null;
-    const urls = [
-      readString(record.baseURL),
-      readString(record.baseUrl),
-      readString(record.endpoint),
-      ...extractUrls(readString(record.description)),
-    ].filter(Boolean);
-    for (const baseUrl of urls) {
+    for (const baseUrl of modelEndpointUrls(record)) {
       addLocalServerEndpoint(endpoints, {
         baseUrl,
         providerId: providerId || null,
@@ -964,7 +951,7 @@ export function describeLocalServerEndpoint(
     modelRoutes: [...endpoint.modelRoutes].sort((a, b) => a.localeCompare(b)),
     smokeCommand: `curl -fsS ${modelsUrl}`,
     smokeRoute: localEndpointSmokeRoute(id),
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh models after verifying the local server."',
+    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     addProviderRoute: providerExists ? null : localProviderAddRoute(endpoint.providerId, endpoint.stack, endpoint.baseUrl),
     notes: [...notes],
     ...(servingDiagnostics ? { servingDiagnostics } : {}),
@@ -1004,7 +991,10 @@ export async function localModelServerHealthMap(
     daemonDiagnostics: {
       ...servingDiagnostics.publication,
       matchedEndpointCount,
-      missingSignals: hasMatchedDiagnostics ? [] : servingDiagnostics.publication.missingSignals,
+      // A source that failed to read stays reported even when another source matched, so a partial result is not shown as complete.
+      missingSignals: hasMatchedDiagnostics
+        ? servingDiagnostics.publication.missingSignals.filter((signal) => signal.startsWith('Local serving diagnostics could not be read'))
+        : servingDiagnostics.publication.missingSignals,
     },
     nextActions: [
       ...(hasMatchedDiagnostics ? ['Review published local serving diagnostics before smoke, refresh, benchmark, or provider changes.'] : []),

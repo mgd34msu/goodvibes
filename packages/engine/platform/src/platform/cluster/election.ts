@@ -27,7 +27,7 @@
  * transition into a half-applied one.
  */
 import { hasCurrentClusterRanking } from './ranking-feature.js';
-import { OwnedClusterDrainError } from './owned-drain-error.js';
+import { ClusterConsumerStopError, OwnedClusterDrainError } from './owned-drain-error.js';
 import {
   compareStableRank,
   isStrictlyNewerVersion,
@@ -39,6 +39,7 @@ import {
   INITIAL_CONSUMER_CONFLICT_STATE,
   nextConsumerConflictBackoff,
 } from './consumer-conflict-backoff.js';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import type { ClusterHoldingsLedger } from './holdings.js';
 import type { ClusterTiming } from './timing.js';
 import type {
@@ -100,6 +101,26 @@ export interface SurfaceElectionHost {
   tryReserveYield(mono: number): boolean;
 }
 
+/**
+ * Every role a surface can be in, and the roles each can move to.
+ *
+ * Two rows carry the safety argument. `stopped` leads only to `probing`, so a
+ * late timer or a queued re-probe cannot bring a stopped election back to life.
+ * `fenced` leads only to `stopped`: a consumer that would not stop must never
+ * be joined by a second one on this node, so nothing short of leaving the
+ * election (a restart) moves it on.
+ */
+const CLUSTER_SURFACE_ROLES = defineLifecycle<ClusterRole>('cluster surface', {
+  stopped: ['probing'],
+  probing: ['probing', 'standby', 'awaiting-handoff', 'master', 'stopped'],
+  standby: ['electing', 'probing', 'stopped'],
+  electing: ['standby', 'master', 'probing', 'stopped'],
+  'awaiting-handoff': ['standby', 'master', 'probing', 'stopped'],
+  master: ['resigning'],
+  resigning: ['standby', 'probing', 'stopped', 'fenced'],
+  fenced: ['stopped'],
+});
+
 export interface SurfaceElectionOptions {
   readonly surfaceId: string;
   /** Local, digest-derived label for logs. Never the topic or bot name. */
@@ -110,13 +131,38 @@ export interface SurfaceElectionOptions {
   readonly random?: (() => number) | undefined;
 }
 
+/**
+ * Failed consumer starts a holder rides out before handing the surface on.
+ * Each retry waits longer than the last, so this is a few minutes at the shipped
+ * timing: long enough for a blip, short enough that a healthier node is not
+ * kept waiting behind a credential that will never work.
+ */
+const MAX_CONSUMER_START_FAILURES = 6;
+
 export class SurfaceElection {
   private readonly surfaceId: string;
   private readonly host: SurfaceElectionHost;
   private readonly random: () => number;
 
   private role: ClusterRole = 'stopped';
+  /**
+   * True from start() until stop(). Checked by every path into `probing`, so a
+   * re-probe that was queued or timed before a stop cannot rejoin the election
+   * after it, even when start() and stop() land in the same tick.
+   */
+  private active = false;
   private consumerRunning = false;
+  /** Consecutive failed starts while holding; drives the retry backoff. */
+  private consumerStartFailures = 0;
+  private cancelStartRetry: (() => void) | null = null;
+  /** When the consumer stop began, so a stop that takes longer than a heartbeat keeps announcing the holder. */
+  private stopBeganMono: number | null = null;
+  /**
+   * Monotonic time before which a standby must not contest this surface after a
+   * consumer conflict. Without it the crash watchdog would start an election as
+   * soon as the master timeout passed and cut every longer backoff short.
+   */
+  private conflictHoldUntilMono: number | null = null;
 
   private holderNodeId: string | null = null;
   private lastHolderHeartbeatAt: number | null = null;
@@ -157,7 +203,8 @@ export class SurfaceElection {
 
   /** Join this surface's election. */
   async start(): Promise<void> {
-    if (this.role !== 'stopped') return;
+    if (this.active) return;
+    this.active = true;
     this.enqueue(() => this.beginProbe('boot'));
     await this.settled();
   }
@@ -171,11 +218,15 @@ export class SurfaceElection {
    * lost power cable, not for the ordinary case.
    */
   async stop(reason = 'shutdown'): Promise<void> {
-    if (this.role === 'stopped') return;
+    if (!this.active && this.role === 'stopped') return;
+    this.active = false;
     this.enqueue(async () => {
-      if (this.role === 'master') await this.stopConsumerThenResign(reason, null);
-      this.clearAllTimers();
-      this.role = 'stopped';
+      try {
+        if (this.role === 'master') await this.stopConsumerThenResign(reason, null);
+      } finally {
+        this.clearAllTimers();
+      }
+      if (this.role !== 'stopped') this.setRole('stopped');
     });
     await this.settled();
   }
@@ -245,11 +296,7 @@ export class SurfaceElection {
           : {}),
       });
       await this.stopConsumerThenResign(`consumer conflict: ${detail}`, null);
-      this.becomeStandby(null, 'a consumer conflict was reported');
-      this.cancelProbe?.();
-      this.cancelProbe = this.host.clock.setTimer(() => {
-        this.enqueue(() => this.beginProbe('re-probe after a consumer conflict'));
-      }, delayMs);
+      this.holdOffThenReprobe(delayMs, 'a consumer conflict was reported', 're-probe after a consumer conflict');
     });
   }
 
@@ -268,8 +315,9 @@ export class SurfaceElection {
   // ── probing ───────────────────────────────────────────────────────────────
 
   private async beginProbe(reason: string): Promise<void> {
+    if (!this.active) return;
+    if (!this.setRole('probing')) return;
     this.clearElectionTimers();
-    this.role = 'probing';
     this.preemptTarget = null;
     this.host.logger.debug('cluster: probing for this surface\'s holder', {
       surface: this.options.label,
@@ -288,8 +336,8 @@ export class SurfaceElection {
   // ── election ──────────────────────────────────────────────────────────────
 
   private beginElection(windowMs: number, reason: string, handoff: 'ordered' | 'gap'): void {
+    if (!this.setRole('electing')) return;
     this.clearElectionTimers();
-    this.role = 'electing';
     this.claimSentThisElection = false;
     const jitter = Math.floor(this.random() * windowMs);
     this.host.logger.debug('cluster: starting an election for a surface', {
@@ -353,13 +401,19 @@ export class SurfaceElection {
       this.becomeStandby(null, 'this node cannot serve the surface');
       return;
     }
+    if (!this.setRole('master')) return;
     this.clearElectionTimers();
-    this.role = 'master';
     this.preemptTarget = null;
+    this.conflictHoldUntilMono = null;
+    this.consumerStartFailures = 0;
     this.host.ledger.noteHolder(this.surfaceId, this.host.nodeId, this.host.clock.monotonicNow());
     // Announce before consuming: a strictly newer peer that disagrees gets its
     // chance to preempt through the ordered path rather than by racing us.
     await this.send('CLAIM');
+    // And say we hold it at once. A consumer start can take seconds, and a
+    // standby that lost this election would otherwise still be timing out the
+    // previous holder and could promote itself into that gap.
+    await this.send('HEARTBEAT');
     const context: ClusterConsumerStartContext = {
       replayFromMs: handoff === 'gap' ? this.lastHolderHeartbeatAt : null,
       reason,
@@ -367,27 +421,129 @@ export class SurfaceElection {
     // Startup may own a held provider read. Keep announcing the original
     // holder while the serialized transition awaits that exact startup.
     this.armHeartbeat();
+    await this.startConsumerAsHolder(context);
+    this.armYieldCheck();
+    await this.send('HEARTBEAT');
+  }
+
+  /**
+   * Start the consumer for a surface this node holds, and keep retrying while
+   * it holds it if the start fails.
+   *
+   * A failed start is not handed on with a RESIGN: a RESIGN tells the
+   * successor nothing was missed, so it would resume "from now" and skip the
+   * replay window (`context.replayFromMs`) this node was meant to cover. The
+   * retry keeps that window. A provider that drops this node for good (a lost
+   * socket) withdraws its gate instead, which is the ordered stand-down.
+   */
+  private async startConsumerAsHolder(
+    context: ClusterConsumerStartContext,
+    addedOnly = false,
+  ): Promise<void> {
     try {
       await this.host.startConsumer(this.surfaceId, context);
       this.consumerRunning = true;
+      if (addedOnly) {
+        this.consumerStartFailures = 0;
+        return;
+      }
       this.consumerStartedMono = this.host.clock.monotonicNow();
       this.host.logger.info('cluster: this node is now responsible for an inbound surface', {
         surface: this.options.label,
         nodeId: this.host.nodeId,
         version: this.host.version,
-        reason,
+        reason: context.reason,
         replayFromMs: context.replayFromMs,
+        ...(this.consumerStartFailures > 0 ? { failedAttemptsBefore: this.consumerStartFailures } : {}),
       });
+      this.consumerStartFailures = 0;
     } catch (error) {
-      this.consumerRunning = false;
-      this.host.logger.error('cluster: took a surface but its consumer failed to start', {
+      // A consumer added beside ones that are already reading does not make the
+      // surface unread when it fails to start; it is only retried.
+      if (!addedOnly) this.consumerRunning = false;
+      this.consumerStartFailures += 1;
+      // Doubling from one heartbeat to the crash timeout: prompt for a blip,
+      // and never more than one attempt per timeout for a lasting fault.
+      const retryMs = Math.min(
+        this.host.timing.heartbeatMs * 2 ** Math.min(this.consumerStartFailures - 1, 20),
+        this.host.timing.masterTimeoutMs,
+      );
+      const meta = {
         surface: this.options.label,
-        reason,
+        reason: context.reason,
         error: error instanceof Error ? error.message : String(error),
-      });
+        attempt: this.consumerStartFailures,
+        retryMs,
+      };
+      if (this.consumerStartFailures === 1) {
+        this.host.logger.error('cluster: took a surface but its consumer failed to start; this node is not reading it and will retry', meta);
+      } else {
+        this.host.logger.debug('cluster: a surface consumer still fails to start', meta);
+      }
+      this.cancelStartRetry?.();
+      this.cancelStartRetry = this.host.clock.setTimer(() => {
+        this.cancelStartRetry = null;
+        this.enqueue(async () => {
+          if (this.role !== 'master' || (this.consumerRunning && !addedOnly)) return;
+          if (!addedOnly && this.consumerStartFailures >= MAX_CONSUMER_START_FAILURES) {
+            await this.standDownAfterFailedStarts();
+            return;
+          }
+          await this.startConsumerAsHolder(context, addedOnly);
+        });
+      }, retryMs);
     }
-    this.armYieldCheck();
-    await this.send('HEARTBEAT');
+  }
+
+  /**
+   * This node holds a surface it has repeatedly failed to read. Holding it only
+   * keeps a node that may be able to read it from trying, so hand it on the
+   * ordered way and stay out of the next election for a while, the same
+   * back-off a refused consumer gets.
+   */
+  private async standDownAfterFailedStarts(): Promise<void> {
+    const failedAttempts = this.consumerStartFailures;
+    this.consumerStartedMono = null;
+    const delayMs = this.nextConsumerConflictDelay();
+    this.host.logger.error('cluster: this node could not start the consumer for a surface it holds, so it is handing the surface to another node', {
+      surface: this.options.label,
+      failedAttempts,
+      holdOffMs: delayMs,
+      action: 'check this machine\'s credential for the surface; until it works another node will read it if one can',
+    });
+    await this.stopConsumerThenResign('its consumer repeatedly failed to start', null);
+    this.holdOffThenReprobe(delayMs, 'its consumer repeatedly failed to start', 're-probe after repeated consumer start failures');
+  }
+
+  /** Stand by, stay out of the election for `delayMs`, then probe afresh. */
+  private holdOffThenReprobe(delayMs: number, standbyReason: string, probeReason: string): void {
+    this.becomeStandby(null, standbyReason);
+    this.conflictHoldUntilMono = this.host.clock.monotonicNow() + delayMs;
+    this.cancelProbe?.();
+    this.cancelProbe = this.host.clock.setTimer(() => {
+      this.enqueue(async () => {
+        // Anything that moved this surface on since (a holder appeared, a
+        // wake re-probe, a stop) already decided what happens next.
+        if (this.role !== 'standby') return;
+        await this.beginProbe(probeReason);
+      });
+    }, delayMs);
+  }
+
+  /**
+   * A consumer was registered on a surface this node may already hold. When it
+   * does, start just that consumer now (the registry skips the ones already
+   * reading) instead of leaving it idle until the next handoff; otherwise the
+   * normal take-over starts it with the rest.
+   */
+  startAddedConsumers(): void {
+    this.enqueue(async () => {
+      if (this.role !== 'master' || !this.consumerRunning) return;
+      await this.startConsumerAsHolder({
+        replayFromMs: null,
+        reason: 'a consumer was registered on a surface this node already holds',
+      }, true);
+    });
   }
 
   /**
@@ -398,15 +554,22 @@ export class SurfaceElection {
    * module exists to fix.
    */
   private async stopConsumerThenResign(reason: string, nextHolderNodeId: string | null): Promise<void> {
-    this.role = 'resigning';
-    this.cancelHeartbeat?.();
-    this.cancelHeartbeat = null;
+    this.setRole('resigning');
+    this.stopBeganMono = this.host.clock.monotonicNow();
+    // The heartbeat keeps running until the consumer has really stopped: a
+    // consumer that is slow to drain is still reading, and peers that stopped
+    // hearing from this node would take the surface over beside it.
+    this.cancelStartRetry?.();
+    this.cancelStartRetry = null;
     // Transport failure is already reported by the heartbeat owner; join it
     // without allowing a failed send to skip the actual consumer stop.
     await Promise.allSettled([this.heartbeatWork]);
     this.cancelYieldCheck?.();
     this.cancelYieldCheck = null;
-    if (this.consumerRunning) {
+    // Stopped even when the start failed: a gate that failed part-way may
+    // still hold something, and stopping a stopped consumer is harmless.
+    let stopFailed = false;
+    if (this.consumerRunning || this.consumerStartFailures > 0) {
       try {
         await this.host.stopConsumer(this.surfaceId, reason);
       } catch (error) {
@@ -417,13 +580,42 @@ export class SurfaceElection {
         });
         // Owned withdrawal must not announce that an undrained consumer stopped.
         // Peers may still take over after heartbeat expiry; this is not a lease
-        // or a global no-overlap guarantee. Local owner authority stays fenced.
-        if (error instanceof OwnedClusterDrainError) throw error;
+        // or a global no-overlap guarantee. Local owner authority stays fenced,
+        // and so does this surface: contesting it again would start a second
+        // consumer beside the one that would not stop.
+        if (error instanceof OwnedClusterDrainError) {
+          this.setRole('fenced');
+          this.host.logger.error('cluster: a surface is fenced on this node until the daemon restarts', {
+            surface: this.options.label,
+            reason: 'its consumer did not stop, so this node will not contest it again',
+            action: 'restart the daemon to recover this surface on this node; another node may take it over meanwhile',
+          });
+          throw error;
+        }
+        // A consumer that may still be reading must not be announced as gone:
+        // RESIGN would let a successor start a second one beside it. Peers take
+        // the surface over once this node's heartbeat times out.
+        if (error instanceof ClusterConsumerStopError) stopFailed = true;
       }
       this.consumerRunning = false;
+      this.consumerStartFailures = 0;
     }
-    this.host.ledger.noteReleased(this.surfaceId, this.host.nodeId);
-    await this.send('RESIGN');
+    // Stopped for good, and any beat still in flight joined, so none can follow
+    // the RESIGN and make the successor think the old holder is back.
+    this.cancelHeartbeat?.();
+    this.cancelHeartbeat = null;
+    await Promise.allSettled([this.heartbeatWork]);
+    this.stopBeganMono = null;
+    if (stopFailed) {
+      this.host.logger.error('cluster: a consumer did not stop, so this node is not announcing that it let the surface go', {
+        surface: this.options.label,
+        reason,
+        action: 'peers take the surface over when this node\'s heartbeat times out',
+      });
+    } else {
+      this.host.ledger.noteReleased(this.surfaceId, this.host.nodeId);
+      await this.send('RESIGN');
+    }
     this.holderNodeId = nextHolderNodeId;
     // This node WAS the reader right up to this moment, so this moment is the
     // surface's last known-alive time. Leaving a stale reading here would have
@@ -440,8 +632,8 @@ export class SurfaceElection {
   }
 
   private becomeStandby(holderNodeId: string | null, reason: string): void {
+    if (!this.setRole('standby')) return;
     this.clearElectionTimers();
-    this.role = 'standby';
     this.preemptTarget = null;
     if (holderNodeId) this.holderNodeId = holderNodeId;
     // A node that just gave a surface up has no holder to time out against
@@ -464,8 +656,8 @@ export class SurfaceElection {
    * its RESIGN, with a grace timer for the case it died mid-handoff.
    */
   private async beginPreemption(target: ClusterMessage): Promise<void> {
+    if (!this.setRole('awaiting-handoff')) return;
     this.clearElectionTimers();
-    this.role = 'awaiting-handoff';
     this.preemptTarget = target.nodeId;
     this.host.logger.info('cluster: preempting an older holder and waiting for its handoff', {
       surface: this.options.label,
@@ -495,11 +687,20 @@ export class SurfaceElection {
    * digest. Everything before that is the node manager's job.
    */
   deliver(message: ClusterMessage): void {
+    // A holder answers "who holds this?" at once, even while its queue is busy
+    // starting the consumer. A peer left unanswered for that long concludes
+    // nobody holds the surface and promotes itself beside us. Only answers
+    // that change no role qualify; a strictly newer CLAIM still waits its turn.
+    if (this.role === 'master' && (message.type === 'PROBE'
+      || (message.type === 'CLAIM' && !isStrictlyNewerVersion(this.peerRank(message), this.selfRank())))) {
+      this.beatOutsideQueue();
+      return;
+    }
     this.enqueue(() => this.dispatch(message));
   }
 
   private async dispatch(message: ClusterMessage): Promise<void> {
-    if (this.role === 'stopped' || this.role === 'resigning') return;
+    if (this.role === 'stopped' || this.role === 'resigning' || this.role === 'fenced') return;
     switch (message.type) {
       case 'PROBE': return this.onProbe();
       case 'HEARTBEAT': return this.onHeartbeat(message);
@@ -585,6 +786,11 @@ export class SurfaceElection {
       case 'electing':
       case 'probing':
         if (outranksForSurface(this.peerRank(message), this.selfRank(), this.surfaceId)) {
+          // The winner is alive as of this CLAIM. Timing it out from the dead
+          // holder's last heartbeat instead would have this node contest again
+          // on its next watchdog tick, while the winner is still starting.
+          // `lastHolderHeartbeatAt` is left alone: it is the replay point.
+          this.lastHolderHeartbeatMono = this.host.clock.monotonicNow();
           this.becomeStandby(message.nodeId, 'a better-ranked node claimed the surface');
           return;
         }
@@ -594,6 +800,7 @@ export class SurfaceElection {
         return;
       case 'awaiting-handoff':
         if (outranksForSurface(this.peerRank(message), this.selfRank(), this.surfaceId)) {
+          this.lastHolderHeartbeatMono = this.host.clock.monotonicNow();
           this.becomeStandby(message.nodeId, 'a better-ranked node claimed during our handoff');
         }
         return;
@@ -626,6 +833,9 @@ export class SurfaceElection {
   private noteHolderAlive(nodeId: string): void {
     this.lastHolderHeartbeatAt = this.host.clock.now();
     this.lastHolderHeartbeatMono = this.host.clock.monotonicNow();
+    // A real holder now answers for the surface, so the conflict backoff has
+    // nothing left to protect; its liveness drives the watchdog again.
+    this.conflictHoldUntilMono = null;
     if (this.role !== 'master') this.holderNodeId = nodeId;
   }
 
@@ -634,24 +844,45 @@ export class SurfaceElection {
   private armHeartbeat(): void {
     this.cancelHeartbeat?.();
     const tick = (): void => {
-      if (this.role !== 'master') return;
+      if (this.role !== 'master' && this.role !== 'resigning') return;
       this.cancelHeartbeat = this.host.clock.setTimer(tick, this.host.timing.heartbeatMs);
-      if (this.heartbeatWork) return;
-      // Heartbeats report the retained holder, not a role transition. They must
-      // not queue behind its provider startup/drain. Own and join each send
-      // before RESIGN, so no late heartbeat can resurrect a retired holder.
-      const work = Promise.resolve().then(async () => {
-        if (this.role !== 'master') return;
-        this.host.ledger.noteHolder(this.surfaceId, this.host.nodeId, this.host.clock.monotonicNow());
-        await this.send('HEARTBEAT');
-      });
-      this.heartbeatWork = work;
-      void work.then(() => { if (this.heartbeatWork === work) this.heartbeatWork = undefined; }, () => {
-        if (this.heartbeatWork === work) this.heartbeatWork = undefined;
-        this.host.logger.error('cluster: holder heartbeat failed');
-      });
+      this.beatOutsideQueue();
     };
     this.cancelHeartbeat = this.host.clock.setTimer(tick, this.host.timing.heartbeatMs);
+  }
+
+  /**
+   * One HEARTBEAT from the holder, outside the transition queue.
+   *
+   * Heartbeats report the retained holder, not a role transition. They must
+   * not queue behind its provider startup/drain. Own and join each send
+   * before RESIGN, so no late heartbeat can resurrect a retired holder. One
+   * already in flight answers for this one too.
+   */
+  /**
+   * A holder announces itself while it holds the surface, and while a consumer
+   * stop that is taking longer than a heartbeat is still in progress: that
+   * consumer is still reading, and silence would let a peer start a second one.
+   * A stop that finishes at once sends nothing extra.
+   */
+  private mayAnnounceHolder(): boolean {
+    if (this.role === 'master') return true;
+    return this.role === 'resigning' && this.stopBeganMono !== null
+      && this.host.clock.monotonicNow() - this.stopBeganMono >= this.host.timing.heartbeatMs;
+  }
+
+  private beatOutsideQueue(): void {
+    if (!this.mayAnnounceHolder() || this.heartbeatWork) return;
+    const work = Promise.resolve().then(async () => {
+      if (!this.mayAnnounceHolder()) return;
+      this.host.ledger.noteHolder(this.surfaceId, this.host.nodeId, this.host.clock.monotonicNow());
+      await this.send('HEARTBEAT');
+    });
+    this.heartbeatWork = work;
+    void work.then(() => { if (this.heartbeatWork === work) this.heartbeatWork = undefined; }, () => {
+      if (this.heartbeatWork === work) this.heartbeatWork = undefined;
+      this.host.logger.error('cluster: holder heartbeat failed');
+    });
   }
 
   /**
@@ -741,6 +972,8 @@ export class SurfaceElection {
   onWatchdogTick(mono: number): void {
     if (this.role !== 'standby' || this.lastHolderHeartbeatMono === null) return;
     if (mono - this.lastHolderHeartbeatMono < this.host.timing.masterTimeoutMs) return;
+    // Backing off after a consumer conflict; its own re-probe timer decides when.
+    if (this.conflictHoldUntilMono !== null && mono < this.conflictHoldUntilMono) return;
     this.enqueue(async () => {
       if (this.role !== 'standby') return;
       this.beginElection(this.host.timing.electionWindowMs, 'the holder stopped heartbeating', 'gap');
@@ -754,9 +987,9 @@ export class SurfaceElection {
    * consumption this module prevents.
    */
   onWakeFromSuspend(gapMs: number): void {
-    if (this.role === 'stopped') return;
+    if (this.role === 'stopped' || this.role === 'fenced') return;
     this.enqueue(async () => {
-      if (this.role === 'stopped') return;
+      if (this.role === 'stopped' || this.role === 'fenced') return;
       this.host.logger.info('cluster: the host was suspended; re-probing a surface before consuming it', {
         surface: this.options.label,
         gapMs,
@@ -768,6 +1001,9 @@ export class SurfaceElection {
       this.lastHolderHeartbeatAt = null;
       this.lastHolderHeartbeatMono = null;
       this.holderNodeId = null;
+      // Measured on a monotonic clock that stood still while asleep, so it
+      // describes a network that has moved on; the probe decides afresh.
+      this.conflictHoldUntilMono = null;
       await this.beginProbe('woke from suspend');
     });
   }
@@ -791,9 +1027,29 @@ export class SurfaceElection {
     this.cancelHeartbeat = null;
     this.cancelYieldCheck?.();
     this.cancelYieldCheck = null;
+    this.cancelStartRetry?.();
+    this.cancelStartRetry = null;
   }
 
   // ── plumbing ──────────────────────────────────────────────────────────────
+
+  /**
+   * The one place a role changes. A move the table does not allow is logged
+   * and refused, leaving the role as it was, so a late timer or a queued
+   * transition cannot carry a stopped or fenced surface somewhere unsafe.
+   */
+  private setRole(to: ClusterRole): boolean {
+    const move = CLUSTER_SURFACE_ROLES.check(this.role, to);
+    if (!move.ok) {
+      this.host.logger.warn('cluster: refused a surface role change', {
+        surface: this.options.label,
+        reason: move.reason,
+      });
+      return false;
+    }
+    this.role = to;
+    return true;
+  }
 
   private selfRank(): ClusterSpreadRankable {
     const ranking = this.host.ranking;

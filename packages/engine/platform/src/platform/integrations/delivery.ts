@@ -194,13 +194,15 @@ function readDeliveryConfig(
   configManager?: Pick<ConfigManager, 'get'> | null | undefined,
 ): Partial<DeliveryQueueConfig> {
   if (!configManager) return {};
-  return {
+  const read = {
     maxRetries: configManager.get('integrations.delivery.maxRetries'),
     initialDelayMs: configManager.get('integrations.delivery.initialDelayMs'),
     maxDelayMs: configManager.get('integrations.delivery.maxDelayMs'),
     maxDlqSize: configManager.get('integrations.delivery.maxDlqSize'),
     sloEnforced: configManager.get('integrations.delivery.sloEnforced'),
   };
+  // An unset key must leave the default in place, not overwrite it with undefined.
+  return Object.fromEntries(Object.entries(read).filter(([, value]) => value !== undefined)) as Partial<DeliveryQueueConfig>;
 }
 
 interface PendingEntry<TPayload> {
@@ -251,6 +253,17 @@ export class DeliveryQueue<TPayload = string> {
   private _closed = false;
   private _closing: Promise<void> | undefined;
   private readonly _active = new Set<Promise<unknown>>();
+  /** The same counters per channel, for a queue shared by several channels. */
+  private readonly _channelTallies = new Map<string, { totalAttempts: number; delivered: number; retrying: number; deadLettered: number }>();
+
+  private _tally(channel: string): { totalAttempts: number; delivered: number; retrying: number; deadLettered: number } {
+    let tally = this._channelTallies.get(channel);
+    if (!tally) {
+      tally = { totalAttempts: 0, delivered: 0, retrying: 0, deadLettered: 0 };
+      this._channelTallies.set(channel, tally);
+    }
+    return tally;
+  }
 
   constructor(config: DeliveryQueueOptions = {}) {
     const { featureFlags, configManager, diagnosticMode, ...queueConfig } = config;
@@ -308,9 +321,9 @@ export class DeliveryQueue<TPayload = string> {
    * Each entry is re-enqueued with a fresh retry budget. The DLQ is cleared
    * on a per-entry basis as each replayed entry resolves.
    *
-   * @param deliver - Optional delivery function override. When omitted,
-   *   the original delivery function is not available (DLQ is persistent
-   *   storage), so a no-op is used and the caller must provide one.
+   * @param deliver - The delivery function to replay with. The dead-letter
+   *   queue keeps payloads, not the original delivery closures (it lives in
+   *   memory and is lost on restart), so the caller supplies how to send.
    *
    * @returns Array of per-entry replay results.
    */
@@ -335,6 +348,7 @@ export class DeliveryQueue<TPayload = string> {
       if (idx === -1) continue;
       this._dlq.splice(idx, 1);
       this._deadLettered = Math.max(0, this._deadLettered - 1);
+      this._tally(dlqEntry.channel).deadLettered = Math.max(0, this._tally(dlqEntry.channel).deadLettered - 1);
 
       try {
         const outcome = await this.enqueue(
@@ -375,14 +389,29 @@ export class DeliveryQueue<TPayload = string> {
   clearDlq(): number {
     const count = this._dlq.length;
     this._dlq.length = 0;
+    this._deadLettered = 0;
+    for (const tally of this._channelTallies.values()) tally.deadLettered = 0;
     return count;
   }
 
   /** Whether SLO enforcement is active for this queue. */
   get sloEnforced(): boolean { return this._config.sloEnforced; }
 
-  /** Current delivery metrics snapshot. */
-  getMetrics(): DeliveryMetrics {
+  /**
+   * Current delivery metrics snapshot: the whole queue, or only the entries
+   * enqueued for `channel` when one queue serves several channels.
+   */
+  getMetrics(channel?: string): DeliveryMetrics {
+    if (channel !== undefined) {
+      const tally = this._channelTallies.get(channel);
+      return {
+        totalAttempts: tally?.totalAttempts ?? 0,
+        delivered: tally?.delivered ?? 0,
+        retrying: tally?.retrying ?? 0,
+        deadLettered: tally?.deadLettered ?? 0,
+        dlqSize: this._dlq.filter((entry) => entry.channel === channel).length,
+      };
+    }
     return {
       totalAttempts: this._totalAttempts,
       delivered: this._delivered,
@@ -398,12 +427,18 @@ export class DeliveryQueue<TPayload = string> {
    */
   dispose(): void {
     this._closed = true;
+    const abandoned = this._timers.size;
     for (const timer of this._timers.values()) {
       clearTimeout(timer);
     }
     this._timers.clear();
     this._pending.clear();
     this._retrying = 0;
+    for (const tally of this._channelTallies.values()) tally.retrying = 0;
+    if (abandoned > 0) {
+      // These were reported to their callers as `retrying`; say they will not be.
+      logger.warn('DeliveryQueue: closed with deliveries still waiting to retry; they will not be sent', { abandoned });
+    }
   }
 
   /**
@@ -444,10 +479,12 @@ export class DeliveryQueue<TPayload = string> {
   private async _attempt(entry: PendingEntry<TPayload>): Promise<DeliveryOutcome> {
     entry.attempts += 1;
     this._totalAttempts += 1;
+    this._tally(entry.channel).totalAttempts += 1;
 
     try {
       await entry.deliver();
       this._delivered += 1;
+      this._tally(entry.channel).delivered += 1;
       this._pending.delete(entry.id);
       logger.debug('DeliveryQueue: delivered', {
         channel: entry.channel,
@@ -463,8 +500,18 @@ export class DeliveryQueue<TPayload = string> {
       try {
         transience = await readFailureTransience(err, 'integrations.delivery.queue');
       } catch (readError: unknown) {
-        this._pending.delete(entry.id);
         this._assertOpen();
+        if (entry.attempts > 1) {
+          // A retry has no caller left to throw to: the first attempt already
+          // answered `retrying`. Dropping it here lost a delivery the caller was
+          // told was still on its way, so it is dead-lettered instead.
+          return this._moveToDlq(entry, errorMsg, {
+            failureClass: 'retryable',
+            basis: 'no-wording',
+            detail: 'whether to retry this failure could not be decided',
+          }, status);
+        }
+        this._pending.delete(entry.id);
         if (this._structuralDiagnostics) {
           // Keep the shape of an aggregate without retaining either private
           // source error as a cause or inner error after the decision failed.
@@ -481,6 +528,9 @@ export class DeliveryQueue<TPayload = string> {
       if (this._structuralDiagnostics) {
         const evidence = structuralDeliveryEvidence(transience);
         if (!evidence) {
+          if (entry.attempts > 1) {
+            return this._moveToDlq(entry, errorMsg, { failureClass: 'retryable', basis: 'no-wording', detail: '' }, status);
+          }
           this._pending.delete(entry.id);
           throw new Error('Delivery failure classification unavailable');
         }
@@ -496,6 +546,7 @@ export class DeliveryQueue<TPayload = string> {
       const delayMs = this._computeDelay(entry.attempts);
       entry.nextAttemptAt = Date.now() + delayMs;
       this._retrying += 1;
+      this._tally(entry.channel).retrying += 1;
 
       logger.warn('DeliveryQueue: retrying', {
         channel: entry.channel,
@@ -513,6 +564,7 @@ export class DeliveryQueue<TPayload = string> {
       const timer = setTimeout(() => {
         this._timers.delete(entry.id);
         this._retrying = Math.max(0, this._retrying - 1);
+        this._tally(entry.channel).retrying = Math.max(0, this._tally(entry.channel).retrying - 1);
         if (this._closed) return;
         void this._startAttempt(entry).catch((error: unknown) => {
           logger.warn('DeliveryQueue: retry attempt could not be settled', {
@@ -595,11 +647,13 @@ export class DeliveryQueue<TPayload = string> {
   private _retainDeadLetter(entry: DeadLetterEntry<TPayload>): void {
     // Bounded DLQ: evict oldest entry when limit exceeded.
     if (this._dlq.length >= this._config.maxDlqSize) {
-      this._dlq.shift();
+      const evicted = this._dlq.shift();
       this._deadLettered = Math.max(0, this._deadLettered - 1);
+      if (evicted) this._tally(evicted.channel).deadLettered = Math.max(0, this._tally(evicted.channel).deadLettered - 1);
     }
     this._dlq.push(entry);
     this._deadLettered += 1;
+    this._tally(entry.channel).deadLettered += 1;
   }
 
   private _computeDelay(attempt: number): number {
@@ -649,10 +703,11 @@ export function snapshotQueueStatus<TPayload>(
   sloEnforced: boolean,
   describePayload?: (payload: TPayload) => string,
 ): IntegrationQueueStatus {
-  const dlq = queue.getDlq();
+  // One queue can serve several channels; each snapshot is that channel's share.
+  const dlq = queue.getDlq().filter((entry) => entry.channel === channel);
   return {
     channel,
-    metrics: queue.getMetrics(),
+    metrics: queue.getMetrics(channel),
     dlqEntries: [...dlq].reverse().slice(0, 50).map(({ payload, ...entry }) => ({
       ...entry,
       payload: describePayload ? describePayload(payload)

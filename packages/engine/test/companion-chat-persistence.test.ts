@@ -11,7 +11,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { settleEvents, withTestTimeout } from './_helpers/test-timeout.js';
+import { waitFor, withTestTimeout } from './_helpers/test-timeout.js';
+import { trackDisposables } from './_helpers/disposables.ts';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +23,8 @@ import type {
   CompanionLLMProvider,
   CompanionProviderChunk,
 } from '../platform/src/platform/companion/companion-chat-manager.js';
+
+const disposables = trackDisposables();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,7 +46,7 @@ function makeManager(
     readonly closedSessionRetentionMs?: number;
   } = {},
 ): CompanionChatManager {
-  return new CompanionChatManager({
+  return disposables.add(new CompanionChatManager({
     provider: makeMockProvider(),
     eventPublisher: { publishEvent() {} },
     gcIntervalMs: 999_999, // disable automatic GC
@@ -52,7 +55,7 @@ function makeManager(
     rateLimiter: false, // disable rate limiting in tests
     ...(overrides.closedSessionMemoryGraceMs !== undefined ? { closedSessionMemoryGraceMs: overrides.closedSessionMemoryGraceMs } : {}),
     ...(overrides.closedSessionRetentionMs !== undefined ? { closedSessionRetentionMs: overrides.closedSessionRetentionMs } : {}),
-  });
+  }));
 }
 
 function makePersistedSession(id: string): PersistedChatSession {
@@ -89,10 +92,7 @@ describe('active sessions restored on re-instantiation', () => {
       const session = managerA.createSession({ title: 'My chat' });
       expect(session.status).toBe('active');
 
-      // Wait for async persist to flush
-      await settleEvents();
-
-      managerA.dispose();
+      await managerA.close(); // drains the pending save
 
       // Simulate daemon restart
       const managerB = makeManager(sessionsDir);
@@ -125,8 +125,7 @@ describe('messages restored in order after restart', () => {
       const session = managerA.createSession();
       await managerA.postMessage(session.id, 'Hello world');
 
-      // Give the async turn time to complete and persist
-      await settleEvents(100);
+      await waitFor(() => managerA.getMessages(session.id).some((message) => message.role === 'assistant'));
 
       const msgsA = managerA.getMessages(session.id);
       expect(msgsA.length).toBeGreaterThanOrEqual(1);
@@ -141,7 +140,7 @@ describe('messages restored in order after restart', () => {
       msgsA.splice(0, 1);
       expect(managerA.getMessages(session.id)[0]!.content).toBe('Hello world');
 
-      managerA.dispose();
+      await managerA.close();
 
       // Simulate daemon restart
       const managerB = makeManager(sessionsDir);
@@ -170,8 +169,8 @@ describe('messages restored in order after restart', () => {
 // Closed sessions SURVIVE restart (closed-skip data-loss fix) and
 // are HISTORY. The old behavior dropped closed sessions on reload, the exact
 // "299 on-disk, serves 0" bug. They must now load (listable + importable). GC's
-// deletion authority is SPLIT: it may evict message BODIES from memory after a
-// grace (meta stays listable, on-disk copy untouched), but it must NOT delete
+// deletion authority is SPLIT: it may evict replay state from memory after a
+// grace (meta and transcript stay, on-disk copy untouched), but it must NOT delete
 // the persisted file unless an explicit finite retention window is configured.
 // ---------------------------------------------------------------------------
 
@@ -185,8 +184,7 @@ describe('closed sessions survive restart and stay listable', () => {
       const session = managerA.createSession();
       managerA.closeSession(session.id);
 
-      await settleEvents();
-      managerA.dispose();
+      await managerA.close();
 
       // Restart
       const managerB = makeManager(sessionsDir);
@@ -240,7 +238,7 @@ describe('closed sessions survive restart and stay listable', () => {
     }
   });
 
-  test('memory eviction: an ancient-closed session drops its message bodies from RAM but keeps meta + disk', async () => {
+  test('memory eviction: an ancient-closed session keeps its transcript, meta and disk copy', async () => {
     const sessionsDir = mkdtempSync(join(tmpdir(), 'companion-persist-evict-'));
     try {
       const stale: PersistedChatSession = {
@@ -260,11 +258,11 @@ describe('closed sessions survive restart and stay listable', () => {
       await manager.init();
       expect(manager.getMessages('evict-me')).toHaveLength(2);
 
-      manager._gcSweep(); // past grace → evict bodies from memory
-      // Meta stays listable; bodies gone from RAM.
+      manager._gcSweep(); // past grace → replay state evicted
+      // The routes serve the transcript from memory, so it stays: an empty list
+      // next to a count of 2 would show a closed chat as erased.
       expect(manager.getSession('evict-me')?.status).toBe('closed');
-      expect(manager.getMessages('evict-me')).toHaveLength(0);
-      // meta.messageCount stays honest (the logical total).
+      expect(manager.getMessages('evict-me')).toHaveLength(2);
       expect(manager.getSession('evict-me')?.messageCount).toBe(2);
       manager.dispose();
 
@@ -295,7 +293,7 @@ describe('closed sessions survive restart and stay listable', () => {
       await manager.init();
       expect(manager.getSession('retire-me')).not.toBeNull();
       manager._gcSweep(); // past the finite retention window → delete
-      await settleEvents();
+      await manager.flushSession('retire-me');
       expect(manager.getSession('retire-me')).toBeNull();
       manager.dispose();
 
@@ -323,7 +321,7 @@ describe('sessions directory created if missing', () => {
       await manager.init(); // should not throw even if dir doesn't exist
 
       const session = manager.createSession({ title: 'Auto-created dir' });
-      await settleEvents();
+      await manager.flushSession(session.id);
 
       // Confirm the session was persisted (directory was auto-created)
       manager.dispose();
@@ -394,7 +392,7 @@ describe('deleteSession drains an in-flight close-time save before unlinking', (
 
       const session = manager.createSession();
       // Let the create-time save land so the file genuinely exists first.
-      await settleEvents();
+      await manager.flushSession(session.id);
       const filePath = join(sessionsDir, `${session.id}.json`);
       expect(existsSync(filePath)).toBe(true);
 
@@ -415,16 +413,14 @@ describe('deleteSession drains an in-flight close-time save before unlinking', (
 
       // Close: schedules the (now-gated) fire-and-forget persist save.
       manager.closeSession(session.id);
-      await settleEvents(10); // let the save chain reach the gate
-      expect(saveEntered).toBe(true);
+      await waitFor(() => saveEntered); // the save chain has reached the gate
 
       // Fire delete WHILE the close-time save is still gated open (in flight).
       const deletePromise = manager.deleteSession(session.id);
 
-      // Give delete every chance to race ahead if it were going to: it must
-      // NOT have unlinked the file yet, because the save it must drain is
-      // still blocked on our gate.
-      await settleEvents(20);
+      // It must NOT have unlinked the file yet, because the save it must drain is
+      // still blocked on our gate. A delete that did not drain would unlink and then
+      // see the released save rewrite the file; the final assertions catch that.
       expect(existsSync(filePath)).toBe(true);
 
       // Now release the gate, the drained save completes its write, and
@@ -435,10 +431,9 @@ describe('deleteSession drains an in-flight close-time save before unlinking', (
 
       // The resurrected-then-deleted file must be gone, not resurrected.
       expect(existsSync(filePath)).toBe(false);
-      await settleEvents();
+      await manager.close(); // drains any save still in flight
       expect(existsSync(filePath)).toBe(false);
 
-      manager.dispose();
 
       // Simulated re-init (fresh manager instance, same dir) must not reload
       // the deleted session, proving there's no leftover file to reload.

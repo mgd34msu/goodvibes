@@ -1,5 +1,4 @@
-/** Real temporary installation + synthetic release wire. Tests are authored
- * but intentionally UNRUN until the coding pass is complete. */
+/** Real temporary installation + synthetic release wire. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

@@ -456,11 +456,13 @@ const MODEL_LIMIT_FALLBACKS: Record<string, Partial<ProviderCapability>> = {
  * 1. `GLOBAL_DEFAULTS`, conservative baseline
  * 2. `PROVIDER_DEFAULTS[providerId]`, provider-level defaults
  * 3. `LLMProvider.capabilities`, self-declared by the provider instance
- * 4. `MODEL_OVERRIDES`, static per-model overrides
+ * 4. `MODEL_LIMIT_FALLBACKS`, static per-model limits
+ * 5. live per-model facts, when a facts source is wired
+ * 6. `MODEL_QUIRKS`, per-model behaviour the other layers do not carry
  *
  * Exception: the `caching` field is always sourced from `getCacheCapability(providerId)`
- * (falling back to `MODEL_OVERRIDES.caching` if present), so self-declared caching
- * from `LLMProvider.capabilities` is intentionally ignored.
+ * (a `MODEL_QUIRKS` or `MODEL_LIMIT_FALLBACKS` entry for the model wins if present),
+ * so self-declared caching from `LLMProvider.capabilities` is intentionally ignored.
  *
  * The cache key is `${providerId}::${modelId}`. Call `invalidate()` after dynamic
  * provider registration to avoid stale entries.

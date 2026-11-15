@@ -30,7 +30,26 @@ import { summarizeError } from '../utils/error-display.js';
 export interface ConfigFileWatchHandle {
   /** Consume every disk change visible now through the normal reload path. */
   poll(): void;
+  /**
+   * Record the file's current state as already known, so a write this process
+   * just made and published is not reported back to it as an external change.
+   * Call it right after the write; a write by anyone else is still reported.
+   */
+  acknowledge(path: string): void;
   stop(): void;
+}
+
+/** Every live watch, so a writer can acknowledge a file without holding a handle. */
+const activeWatches = new Set<ConfigFileWatchHandle>();
+
+/**
+ * Tell every live watcher that this process just wrote `path` and already holds
+ * what it wrote. Without it the next poll sees a changed mtime, reloads, and
+ * revokes every configuration-bound lifetime a second time for a change nothing
+ * outside the process made.
+ */
+export function acknowledgeConfigFileWrite(path: string): void {
+  for (const watch of activeWatches) watch.acknowledge(path);
 }
 
 /** The stat fields the watcher treats as content identity for one path. */
@@ -86,7 +105,9 @@ export function watchConfigFiles(
     if (!path || baselines.has(path)) continue;
     baselines.set(path, readSnapshot(path, trackReadErrors));
   }
-  if (baselines.size === 0) return { poll(): void { /* nothing watched */ }, stop(): void { /* nothing watched */ } };
+  if (baselines.size === 0) {
+    return { poll(): void { /* nothing watched */ }, acknowledge(): void { /* nothing watched */ }, stop(): void { /* nothing watched */ } };
+  }
 
   let stopped = false;
   const poll = (): void => {
@@ -100,7 +121,14 @@ export function watchConfigFiles(
     }
     // One notification per tick even when several files moved together: the
     // reload is a whole-config diff, so per-path fan-out would only re-do it.
-    if (changed) onChange();
+    // A throwing subscriber must not escape from a timer callback: the baseline
+    // is already advanced, so the next tick would not retry it anyway.
+    if (!changed) return;
+    try {
+      onChange();
+    } catch (error) {
+      logger.warn('Config change handler threw; the watch keeps running', { error: summarizeError(error) });
+    }
   };
 
   const timer = setInterval(poll, Math.max(1, intervalMs));
@@ -109,14 +137,21 @@ export function watchConfigFiles(
   // fleet registry's unref'd tick).
   (timer as unknown as { unref?: () => void }).unref?.();
 
-  return {
+  const handle: ConfigFileWatchHandle = {
     poll,
+    acknowledge(path: string): void {
+      if (stopped || !baselines.has(path)) return;
+      baselines.set(path, readSnapshot(path, trackReadErrors));
+    },
     stop(): void {
       stopped = true;
       clearInterval(timer);
       baselines.clear();
+      activeWatches.delete(handle);
     },
   };
+  activeWatches.add(handle);
+  return handle;
 }
 
 /** Injectable dependencies for reloadAndNotifyChanges (ConfigManager provides these). */
@@ -157,6 +192,11 @@ export function reloadAndNotifyChanges(deps: ReloadDeps): void {
       continue;
     }
     if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
-    deps.notify(key, oldValue, newValue);
+    // One subscriber's failure must not leave the remaining keys un-notified.
+    try {
+      deps.notify(key, oldValue, newValue);
+    } catch (error) {
+      logger.warn('Config change listener threw', { key, error: summarizeError(error) });
+    }
   }
 }

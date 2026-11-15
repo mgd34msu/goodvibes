@@ -8,6 +8,7 @@ import type { ContentPart, LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { classifyIntent, type ClassificationResult } from './intent-classifier.js';
 import { logger } from '../utils/logger.js';
+import { appendVerificationRuntimeMessage } from './verification/archive.js';
 import { PlannerJudgmentError, type AdaptivePlanner } from './adaptive-planner.js';
 import type { ExecutionPlan, PlanItem } from './execution-plan.js';
 import type { ExecutionPlanManager } from './execution-plan.js';
@@ -196,12 +197,18 @@ export function reportSessionToolRound(session: ContractSessionTurn, round: { re
   }
 }
 
-/** Adds the mid-run nudges the runner queued for this session turn, as user messages, before the next model call. */
-export function drainSessionNudges(args: ConsumedEmitterArgs & { readonly conversation: ConversationManager }, session: ContractSessionTurn): void {
+/**
+ * Takes the nudges the runner queued for this session turn and reports each as
+ * consumed. The caller puts them in the next model call's private context; they
+ * are host instructions, so they never enter the transcript as the person's words.
+ */
+export function takeSessionNudges(args: ConsumedEmitterArgs, session: ContractSessionTurn): string[] {
+  const messages: string[] = [];
   for (let nudge = session.hooks.takeSessionNudge(session.record); nudge !== null; nudge = session.hooks.takeSessionNudge(session.record)) {
-    args.conversation.addUserMessage(nudge.message);
+    messages.push(nudge.message);
     nudgeConsumed(args, session, nudge.nudgeId);
   }
+  return messages;
 }
 
 /**
@@ -248,12 +255,17 @@ const CONTRACT_STARTED_NOTE = 'A contract is carrying out delegated work for thi
 
 function attachAuthoritativeTaskToAgentCalls(toolCalls: readonly ToolCall[], userText: string): ToolCall[] {
   const authoritativeTask = userText.trim();
-  if (!authoritativeTask) return [...toolCalls];
   return toolCalls.map((call) => {
     if (call.name !== 'agent') return call;
     const args = call.arguments as Record<string, unknown>;
     const mode = args.mode;
     if (mode !== 'spawn' && mode !== 'batch-spawn') return call;
+    if (!authoritativeTask) {
+      // The task is the person's own words; the model's copy is never authoritative.
+      if (!('authoritativeTask' in args)) return call;
+      const { authoritativeTask: _modelSupplied, ...rest } = args;
+      return { ...call, arguments: rest };
+    }
     return {
       ...call,
       arguments: {
@@ -337,7 +349,8 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
       { type: 'text', text: '[Images from read tool results]' },
       ...allImages.map(img => ({ type: 'image' as const, data: img.base64, mediaType: img.mediaType })),
     ];
-    args.conversation.addUserMessage(imageParts);
+    // Host-made, not the person's words: marked so retry, undo and the verifier skip it.
+    appendVerificationRuntimeMessage(args.conversation, imageParts);
   }
 
   const spawnedAgents = !isNativeConversationTurn() && toolCalls.some((tc: ToolCall) => {
@@ -361,7 +374,6 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
       'Update the execution plan to reflect completed work. Mark items as COMPLETE or IN_PROGRESS with the agent ID.'
     );
   }
-  if (args.contractSession) drainSessionNudges(args, args.contractSession);
 
   return { continueLoop: true, results };
 }
@@ -372,6 +384,8 @@ type FinalResponseOutcomeArgs = {
   signal?: AbortSignal | undefined;
   assertCurrent?: (() => void) | undefined;
   onTurnTerminal?: ((publish: () => void) => void) | undefined;
+  /** The checked answer is appended and its completion is registered; nothing later can withdraw it. */
+  onAnswerCommitted?: (() => void) | undefined;
   conversation: ConversationManager;
   agentManager: Pick<AgentManager, 'list' | 'spawn'>;
   planManager: Pick<ExecutionPlanManager, 'parseFromMarkdown' | 'replaceItems' | 'load' | 'save' | 'getActive' | 'getNextItems' | 'updateItem' | 'getIncarnation'> | null;
@@ -383,8 +397,6 @@ type FinalResponseOutcomeArgs = {
   response: ChatResponseWithReasoning;
   preTurnPlan: ExecutionPlan | null;
   requestRender: () => void;
-  setAutoSpawnTimeout: (timeout: ReturnType<typeof setTimeout> | null) => void;
-  autoSpawnTimeoutMs: number;
   sessionId?: string | undefined;
   /** This turn's MEMORY-sourced injected knowledge ids, stamped onto TURN_COMPLETED as metadata.memory.recordIds when non-empty (absent otherwise). */
   memoryRecordIds?: readonly string[] | undefined;
@@ -401,18 +413,23 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
     model: args.providerRegistry.getCurrentModel().displayName,
     provider: args.providerRegistry.getCurrentModel().provider,
   });
-  await handleFinalPlanOutcome(args);
+  // The completion check covers the transcript exactly through this append.
+  // Plan notes, usage warnings and compaction legitimately change the
+  // transcript afterwards; they cannot change the answer checked here, so the
+  // fence is not re-run against them.
   args.assertCompletionCurrent?.();
+  await handleFinalPlanOutcome(args);
   args.signal?.throwIfAborted();
   args.assertCurrent?.();
   if (args.runtimeBus) {
-    publishTurnTerminal(() => { args.assertCompletionCurrent?.(); emitTurnCompleted(args.runtimeBus!, args.emitterContext(args.turnId), {
+    publishTurnTerminal(() => emitTurnCompleted(args.runtimeBus!, args.emitterContext(args.turnId), {
       turnId: args.turnId,
       response: args.response.content,
       stopReason: args.response.content.trim().length > 0 ? 'completed' : 'empty_response',
       memoryRecordIds: args.memoryRecordIds,
-    }); }, args.onTurnTerminal);
+    }), args.onTurnTerminal);
   }
+  args.onAnswerCommitted?.();
 
   return false;
 }
@@ -451,6 +468,8 @@ async function handleFinalPlanOutcome(args: FinalResponseOutcomeArgs): Promise<f
       if (filledPlan) {
         filledPlan.awaitingPlan = false;
         planManager.save(filledPlan);
+      } else {
+        logger.warn('Orchestrator: the plan could not be reloaded after its items were saved; it stays awaiting its items', { planId: args.preTurnPlan.id });
       }
       if (parsed.parseIssues?.length) {
         args.conversation.addSystemMessage(
@@ -460,6 +479,9 @@ async function handleFinalPlanOutcome(args: FinalResponseOutcomeArgs): Promise<f
       args.conversation.addSystemMessage(
         `[Plan] Parsed ${parsed.items.length} item(s). Execution remains subject to the original request and normal checked agent admission.`
       );
+      args.requestRender();
+    } else {
+      args.conversation.addSystemMessage('[Plan] No items could be read from the reply; the plan is still awaiting its items.');
       args.requestRender();
     }
   }

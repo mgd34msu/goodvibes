@@ -1,27 +1,21 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { join } from 'path';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { FavoritesStore, type FavoritesData } from '@goodvibes-jev/engine/platform/platform/providers';
 
 // ---------------------------------------------------------------------------
 // Test isolation, redirect favorites to a per-test temp directory
 // ---------------------------------------------------------------------------
 
-const TMP_BASE = join(import.meta.dir, '__favorites_tmp__');
-
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = join(TMP_BASE, `run-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(tmpDir, { recursive: true });
+  tmpDir = makeProjectTempDir('gv-favorites');
 });
 
 afterEach(() => {
-  try {
-    rmSync(TMP_BASE, { recursive: true, force: true });
-  } catch {
-    // ignore cleanup failures
-  }
+  rmSync(tmpDir, { recursive: true, force: true });
 });
 
 function makeStore(): FavoritesStore {
@@ -53,7 +47,7 @@ describe('FavoritesStore.load', () => {
     expect(loaded.history[0]?.count).toBe(3);
   });
 
-  test('returns empty defaults on invalid JSON', async () => {
+  test('rejects with an error on invalid JSON instead of returning defaults', async () => {
     writeFileSync(join(tmpDir, 'favorites.json'), 'not-valid-json', 'utf-8');
     await expect(makeStore().load()).rejects.toThrow();
   });

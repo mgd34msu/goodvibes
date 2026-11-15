@@ -8,7 +8,7 @@ import type {
 import type { TaskDomainState, RuntimeTask, TaskLifecycleState } from '../../domains/tasks.js';
 import type { AgentDomainState, RuntimeAgent, AgentLifecycleState } from '../../domains/agents.js';
 import type { PermissionCategory } from '../../../../permissions/manager.js';
-import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds } from './shared.js';
+import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds, evictOldestEnded } from './shared.js';
 import { logger } from '../../../../utils/logger.js';
 import { canMirror } from '../../../tasks/lifecycle.js';
 import { parsePermissionMode } from '../../../../gate/presets.js';
@@ -64,9 +64,9 @@ export function updateSessionState(
       // The manager moves done -> idle in the same breath; the mirror settles
       // with it. `failed` is deliberately NOT settled: it stays until the next
       // compaction begins, which is how session-maintenance reports the failure.
-      return { ...base, compactionState: 'idle', lastCompactedAt: now() };
+      return { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined };
     case 'COMPACTION_FAILED':
-      return { ...base, compactionState: 'failed', recoveryError: event.error };
+      return { ...base, compactionState: 'failed', compactionError: event.error };
     case 'COMPACTION_RESUME_REPAIR':
       return { ...base, wasRepaired: event.repaired, recoveryState: event.safeToResume ? 'ready' : domain.recoveryState };
     case 'COMPACTION_RECEIPT':
@@ -74,7 +74,7 @@ export function updateSessionState(
       // compacted context was actually applied; a kept-original/failed receipt
       // leaves the conversation (and compaction state) untouched.
       return event.outcome === 'applied'
-        ? { ...base, compactionState: 'idle', lastCompactedAt: now() }
+        ? { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined }
         : base;
     case 'COMPACTION_QUALITY_SCORE':
     case 'COMPACTION_STRATEGY_SWITCH':
@@ -94,20 +94,26 @@ export function updatePermissionState(
       const mode = parsePermissionMode(event.mode);
       return mode ? { ...base, mode, preset: mode } : base;
     }
-    case 'GATE_REQUESTED':
-      return { ...base, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event), totalChecks: domain.totalChecks + 1 };
+    case 'GATE_REQUESTED': {
+      const inFlightCallIds = withInFlightCall(domain, event.callId);
+      return { ...base, inFlightCallIds, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event), totalChecks: domain.totalChecks + 1 };
+    }
     case 'RULES_COLLECTED':
     case 'INPUT_NORMALIZED':
     case 'POLICY_EVALUATED':
     case 'SESSION_OVERRIDE_EVALUATED':
     case 'BOUNDARY_CHECKED':
     case 'STAKES_READ':
-    case 'PRESET_EVALUATED':
-      return { ...base, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event) };
-    case 'DECISION_EMITTED':
+    case 'PRESET_EVALUATED': {
+      const inFlightCallIds = withInFlightCall(domain, event.callId);
+      return { ...base, inFlightCallIds, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event) };
+    }
+    case 'DECISION_EMITTED': {
+      const inFlightCallIds = (domain.inFlightCallIds ?? []).filter((callId) => callId !== event.callId);
       return {
         ...base,
-        awaitingDecision: false,
+        inFlightCallIds,
+        awaitingDecision: inFlightCallIds.length > 0,
         decisionMachineState: permissionMachineStateForEvent(event),
         approvalCount: domain.approvalCount + (event.approved ? 1 : 0),
         denialCount: domain.denialCount + (event.approved ? 0 : 1),
@@ -127,7 +133,17 @@ export function updatePermissionState(
           decidedAt: now(),
         },
       };
+    }
   }
+}
+
+/** The call ids the gate has started on and not yet decided, bounded so a gate that dies mid-decision cannot grow it without end. */
+const MAX_IN_FLIGHT_GATE_CALLS = 256;
+function withInFlightCall(domain: PermissionDomainState, callId: string): readonly string[] {
+  const current = domain.inFlightCallIds ?? [];
+  if (current.includes(callId)) return current;
+  const next = [...current, callId];
+  return next.length > MAX_IN_FLIGHT_GATE_CALLS ? next.slice(next.length - MAX_IN_FLIGHT_GATE_CALLS) : next;
 }
 
 function updateTaskIndexes(tasks: Map<string, RuntimeTask>) {
@@ -162,8 +178,6 @@ function countTaskTransition(
 }
 
 export function updateTaskState(domain: TaskDomainState, event: TaskEvent): TaskDomainState {
-  // Progress-only events (BATCH_JOB_PROGRESS, EXPORT_PROGRESS) have no taskId,
-  // they are not task lifecycle events and do not mutate the task registry.
   if (!('taskId' in event)) return domain;
   const tasks = new Map(domain.tasks);
   const existing = tasks.get(event.taskId);
@@ -182,7 +196,9 @@ export function updateTaskState(domain: TaskDomainState, event: TaskEvent): Task
     queuedAt: timestamp,
   };
 
-  if (existing && isTerminalTaskStatus(existing.status) && event.type !== 'TASK_CREATED') {
+  // A failed task that starts again is a retry; every other event on an ended task is late and ignored.
+  const retried = existing?.status === 'failed' && event.type === 'TASK_STARTED';
+  if (existing && isTerminalTaskStatus(existing.status) && event.type !== 'TASK_CREATED' && !retried) {
     return domain;
   }
 
@@ -191,16 +207,19 @@ export function updateTaskState(domain: TaskDomainState, event: TaskEvent): Task
       tasks.set(event.taskId, task);
       break;
     case 'TASK_STARTED':
-      tasks.set(event.taskId, { ...task, status: 'running', startedAt: task.startedAt ?? timestamp });
+      // `error` holds a blocked reason; leaving blocked ends it.
+      tasks.set(event.taskId, retried
+        ? { ...task, status: 'running', startedAt: timestamp, endedAt: undefined, result: undefined, error: undefined }
+        : { ...task, status: 'running', startedAt: task.startedAt ?? timestamp, error: undefined });
       break;
     case 'TASK_BLOCKED':
       tasks.set(event.taskId, { ...task, status: 'blocked', error: event.reason });
       break;
     case 'TASK_PROGRESS':
-      tasks.set(event.taskId, { ...task, description: event.message ?? task.description });
+      tasks.set(event.taskId, { ...task, progress: event.message ?? task.progress });
       break;
     case 'TASK_COMPLETED':
-      tasks.set(event.taskId, { ...task, status: 'completed', endedAt: timestamp, result: { durationMs: event.durationMs } });
+      tasks.set(event.taskId, { ...task, status: 'completed', endedAt: timestamp, error: undefined, result: { durationMs: event.durationMs } });
       break;
     case 'TASK_FAILED':
       tasks.set(event.taskId, { ...task, status: 'failed', endedAt: timestamp, error: event.error });
@@ -211,6 +230,7 @@ export function updateTaskState(domain: TaskDomainState, event: TaskEvent): Task
   }
   const updated = tasks.get(event.taskId);
   if (!updated) return domain;
+  evictOldestEnded(tasks, (record) => isTerminalTaskStatus(record.status), (record) => record.endedAt ?? record.queuedAt);
   const indexes = updateTaskIndexes(tasks);
   const counts = countTaskTransition(domain, existing, updated);
   return {
@@ -225,6 +245,7 @@ function updateTaskDomainFromRecord(domain: TaskDomainState, task: RuntimeTask, 
   const tasks = new Map(domain.tasks);
   const previous = tasks.get(task.id);
   tasks.set(task.id, task);
+  evictOldestEnded(tasks, (record) => isTerminalTaskStatus(record.status), (record) => record.endedAt ?? record.queuedAt);
   const indexes = updateTaskIndexes(tasks);
   const counts = countTaskTransition(domain, previous, task);
 
@@ -248,14 +269,20 @@ function transitionTaskDomainRecord(
   return updateTaskDomainFromRecord(domain, { ...existing, ...patch, status }, source);
 }
 
-function agentStatusForEvent(event: AgentEvent): AgentLifecycleState {
+function agentStatusForEvent(event: AgentEvent, existing?: AgentLifecycleState): AgentLifecycleState {
   switch (event.type) {
     case 'AGENT_SPAWNING':
       return 'spawning';
     case 'AGENT_RUNNING':
+      return 'running';
     case 'AGENT_PROGRESS':
     case 'AGENT_STREAM_DELTA':
-      return 'running';
+      // Output and progress carry data, not a state change: they must not clear
+      // a wait the agent is in (`awaiting_tool`, `awaiting_message`,
+      // `finalizing`); only an explicit event moves it out of one.
+      return existing === 'awaiting_tool' || existing === 'awaiting_message' || existing === 'finalizing'
+        ? existing
+        : 'running';
     case 'AGENT_AWAITING_MESSAGE':
       return 'awaiting_message';
     case 'AGENT_AWAITING_TOOL':
@@ -289,6 +316,16 @@ function isContractOwnerRevivalEvent(event: AgentEvent): boolean {
   );
 }
 
+/**
+ * A failed or completed run that its manager woke again (a steer or a contract
+ * nudge): only its AGENT_RUNNING carrying the wake marker revives it. Any other
+ * late event for a finished run, and anything for a cancelled one, stays dropped.
+ */
+function isWakeRevivalEvent(status: AgentLifecycleState, event: AgentEvent): boolean {
+  return (status === 'failed' || status === 'completed')
+    && event.type === 'AGENT_RUNNING' && event.wake === true;
+}
+
 function applyAgentDomainAggregates(
   domain: AgentDomainState,
   agents: Map<string, RuntimeAgent>,
@@ -318,9 +355,14 @@ export function updateAgentState(domain: AgentDomainState, event: AgentEvent): A
   const existing = agents.get(event.agentId);
   if (!existing && event.type !== 'AGENT_SPAWNING') return domain;
 
-  const nextStatus = agentStatusForEvent(event);
-  const revivedContractOwner = Boolean(existing && isTerminalAgentStatus(existing.status) && isContractOwnerRevivalEvent(event));
-  if (existing && isTerminalAgentStatus(existing.status) && nextStatus !== existing.status && !revivedContractOwner) {
+  const nextStatus = agentStatusForEvent(event, existing?.status);
+  // A cancelled run stays cancelled: an owner's late progress or running event
+  // does not bring it back, only a failed or completed one is revived.
+  const revived = Boolean(existing && isTerminalAgentStatus(existing.status)
+    && ((existing.status !== 'cancelled' && isContractOwnerRevivalEvent(event)) || isWakeRevivalEvent(existing.status, event)));
+  // A finished run keeps its first outcome: a late or repeated event, including
+  // a second terminal event of the same kind, must not rewrite `endedAt`/`result`.
+  if (existing && isTerminalAgentStatus(existing.status) && !revived) {
     return domain;
   }
 
@@ -367,10 +409,10 @@ export function updateAgentState(domain: AgentDomainState, event: AgentEvent): A
     endedAt:
       event.type === 'AGENT_COMPLETED' || event.type === 'AGENT_FAILED' || event.type === 'AGENT_CANCELLED'
         ? timestamp
-        : revivedContractOwner
+        : revived
           ? undefined
           : agent.endedAt,
-    error: event.type === 'AGENT_FAILED' ? event.error : revivedContractOwner ? undefined : agent.error,
+    error: event.type === 'AGENT_FAILED' ? event.error : revived ? undefined : agent.error,
     toolCallCount:
       event.type === 'AGENT_COMPLETED' && event.toolCallsMade !== undefined
         ? event.toolCallsMade
@@ -386,10 +428,11 @@ export function updateAgentState(domain: AgentDomainState, event: AgentEvent): A
             ...(event.output !== undefined ? { output: event.output } : {}),
             ...(event.toolCallsMade !== undefined ? { toolCallsMade: event.toolCallsMade } : {}),
           }
-        : revivedContractOwner ? undefined : agent.result,
+        : revived ? undefined : agent.result,
   });
-  const completedCorrection = revivedContractOwner && existing?.status === 'completed' ? -1 : 0;
-  const failedCorrection = revivedContractOwner && existing?.status === 'failed' ? -1 : 0;
+  evictOldestEnded(agents, (record) => isTerminalAgentStatus(record.status), (record) => record.endedAt ?? record.spawnedAt);
+  const completedCorrection = revived && existing?.status === 'completed' ? -1 : 0;
+  const failedCorrection = revived && existing?.status === 'failed' ? -1 : 0;
   return {
     ...updateDomainMetadata(domain, event.type),
     agents,
@@ -407,9 +450,15 @@ function transitionAgentDomainRecord(
 ): AgentDomainState {
   const existing = domain.agents.get(agentId);
   if (!existing) return domain;
+  if (isTerminalAgentStatus(existing.status) && status !== existing.status) {
+    // A refused move is logged and leaves the store as it was; it never throws.
+    logger.warn('[agent-store] transition out of a finished agent state refused', { agentId, from: existing.status, to: status, source });
+    return domain;
+  }
 
   const agents = new Map(domain.agents);
   agents.set(agentId, { ...existing, ...patch, status });
+  evictOldestEnded(agents, (record) => isTerminalAgentStatus(record.status), (record) => record.endedAt ?? record.spawnedAt);
 
   return {
     ...updateDomainMetadata(domain, source),

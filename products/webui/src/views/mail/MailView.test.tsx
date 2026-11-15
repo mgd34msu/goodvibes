@@ -27,6 +27,7 @@ let replyJudgment: (input: ReplyInput, signal: AbortSignal) => Promise<unknown> 
 
 let sentInputs: unknown[] = [];
 let draftInputs: unknown[] = [];
+let sendImpl: () => Promise<unknown> = () => Promise.resolve({ messageId: '<x@example.com>', sentAt: '2026-01-01T00:00:00Z' });
 let createDraft: () => Promise<unknown> = async () => ({ uid: 1, draftId: 'd1' });
 
 let inboxList: InboxListImpl = () => Promise.resolve({ messages: [], total: 0 });
@@ -47,7 +48,7 @@ mock.module('../../lib/goodvibes', () => ({
           list: () => inboxList(),
           read: (uid: number) => inboxRead(uid),
         },
-        send: (input: unknown) => { sentInputs.push(input); return Promise.resolve({ messageId: '<x@example.com>', sentAt: '2026-01-01T00:00:00Z' }); },
+        send: (input: unknown) => { sentInputs.push(input); return sendImpl(); },
         draft: {
           create: (input: unknown) => { draftInputs.push(input); return createDraft(); },
         },
@@ -91,17 +92,23 @@ function render() {
   };
 }
 
+/** Let every already-resolved promise chain run; no wall-clock wait. */
+async function drain() {
+  for (let turn = 0; turn < 10; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  flushSync(() => {});
+}
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
     if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await drain();
     flushSync(() => {});
   }
 }
 
 afterEach(() => {
   replyRequests = [];
+  sendImpl = () => Promise.resolve({ messageId: '<x@example.com>', sentAt: '2026-01-01T00:00:00Z' });
   sentInputs = []; draftInputs = []; createDraft = async () => ({ uid: 1, draftId: 'd1' });
   replyJudgment = async input => replyWire(input);
   inboxList = () => Promise.resolve({ messages: [], total: 0 });
@@ -492,7 +499,7 @@ describe('MailView: subject interpretation owns only its exact pending draft', (
       if (kind === 'unmount') { view.unmount(); unmounted = true; }
       expect(first.signal.aborted).toBe(true);
       barrier.resolve(replyWire(first.input, false));
-      await new Promise(resolve => setTimeout(resolve, 10)); flushSync(() => {});
+      await drain(); flushSync(() => {});
       if (kind === 'close' || kind === 'unmount') expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
       else expect(view.subjectInput.value).toBe(kind === 'subject-edit' ? 'Owner edit' : '');
     } finally { barrier.resolve({}); if (!unmounted) view.unmount(); }
@@ -508,7 +515,7 @@ describe('MailView: subject interpretation owns only its exact pending draft', (
       await waitFor(() => view.subjectInput.value === 'AW: Synthetic exact');
       expect(replyRequests).toHaveLength(2); expect(replyRequests[0]!.signal.aborted).toBe(true);
       first.resolve(replyWire(replyRequests[0]!.input, false));
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await drain();
       expect(view.subjectInput.value).toBe('AW: Synthetic exact');
       expect(document.activeElement).toBe(view.compose.querySelector('textarea'));
       flushSync(() => document.activeElement?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
@@ -525,7 +532,7 @@ describe('MailView: subject interpretation owns only its exact pending draft', (
       flushSync(() => invalidateClientLifetime());
       expect(replyRequests[0]!.signal.aborted).toBe(true);
       barrier.resolve(replyWire(replyRequests[0]!.input));
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await drain();
       expect(view.el.querySelector('[data-testid="mail-compose"]')).toBeNull();
       flushSync(() => buttonNamed(view.el, 'Compose')?.click());
       expect([...view.el.querySelectorAll('[data-testid="mail-compose"] input')].map(input => (input as HTMLInputElement).value)).toEqual(['', '']);
@@ -552,7 +559,7 @@ test('an old send confirmation cannot approve a new draft after account/host ide
       setField(newer.querySelector('textarea')!, 'New body');
       (view.el.querySelector('.gv-confirm__confirm') as HTMLElement).click();
     });
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await drain();
     expect(sentInputs).toEqual([]);
     expect((newer.querySelectorAll('input')[1] as HTMLInputElement).value).toBe('New draft');
   } finally { view.unmount(); }
@@ -576,4 +583,23 @@ test('saving one explicitly requested draft preserves its message identity and c
     expect(view.compose.querySelector('textarea')!.value).toBe('Newer body');
     expect(sentInputs).toEqual([]);
   } finally { response.resolve({ uid: 1 }); view.unmount(); }
+});
+
+test('pressing Enter to submit again while a send is in flight cannot email the draft twice', async () => {
+  const response = Promise.withResolvers<unknown>(); sendImpl = () => response.promise;
+  const view = await openSyntheticReply();
+  try {
+    await waitFor(() => view.subjectInput.value === 'Re: Synthetic original');
+    flushSync(() => setField(view.compose.querySelector('textarea')!, 'Body'));
+    const form = view.compose.querySelector('form')!;
+    const submit = () => flushSync(() => form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+    submit();
+    await waitFor(() => Boolean(view.el.querySelector('.gv-confirm__confirm')));
+    flushSync(() => (view.el.querySelector('.gv-confirm__confirm') as HTMLElement).click());
+    await waitFor(() => sentInputs.length === 1);
+    submit();
+    await drain();
+    expect(view.el.querySelector('.gv-confirm__confirm')).toBeNull();
+    expect(sentInputs).toHaveLength(1);
+  } finally { response.resolve({ messageId: '<x>', sentAt: '2026-01-01T00:00:00Z' }); view.unmount(); }
 });

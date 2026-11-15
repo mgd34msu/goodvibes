@@ -18,6 +18,7 @@ import { createDaemonOperatorInvoke } from '../../agent/daemon-operator-client.t
 import { executeOperatorMethodWithReceipt } from '../../agent/operator-method-receipt.ts';
 import { recordedEffectFixture } from '../helpers/recorded-effect-admission.ts';
 import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
+import { expectHeld, expectNotSucceeded } from '../helpers/expect-held.ts';
 
 let prior: ReturnType<typeof installJudgmentPort>, log: SqliteDecisionLog;
 let readingRequests: unknown[] = [];
@@ -107,7 +108,7 @@ test.each(['before-admission', 'before-body', 'response'] as const)('operator re
   if (when === 'before-admission') f.fixture.beforeAuthorityRead(change);
   else if (when === 'before-body') f.beforeBody(change);
   else f.duringRequest(change);
-  if (when === 'before-admission') await expect(f.fixture.run(METHOD)).rejects.toThrow();
+  if (when === 'before-admission') await expectHeld(f.fixture.run(METHOD));
   else expect(await f.fixture.run(METHOD)).toMatchObject({ success: false });
   expect(f.requests).toHaveLength(when === 'response' ? 1 : 0);
 });
@@ -121,7 +122,7 @@ test('generic schedule update retains private native target before admission and
 });
 test('generic schedule update never advances a native parent to a changed target', async () => {
   const f = scene('method'); f.targets([{ id: 'fixture-job', mutationRevision: 'new-generation' }], 'new-generation');
-  await expect(f.fixture.run({ methodId: 'automation.jobs.update', input: { jobId: 'fixture-job', expectedMutationRevision: 'old-generation', name: 'New name' } })).rejects.toThrow();
+  await expectHeld(f.fixture.run({ methodId: 'automation.jobs.update', input: { jobId: 'fixture-job', expectedMutationRevision: 'old-generation', name: 'New name' } }));
   expect(f.requests).toHaveLength(1); expect(f.nativeMutations()).toBe(0);
 });
 test('native conditional update holds a target changed during local admission', async () => {
@@ -194,7 +195,7 @@ test.each([
   ['profile.undo', { fieldId: 'preferences.color' }, false],
   ['occasions.confirm', { title: 'A date', date: '2030-04-05', kind: 'remember-only', surface: 'agent' }, true],
   ['occasions.plans.confirm', { title: 'A plan', from: '2030-04-05', to: '2030-04-06', surface: 'agent' }, true],
-  ['occasions.remove', { occasionId: 'fixture-occasion', confirmed: false }, false],
+  ['occasions.remove', { occasionId: 'fixture-occasion', confirmed: true }, false],
 ] as const)('native %s wire selects autonomous admission with truthful provenance', async (methodId, fields, quoted) => {
   const f = scene('method');
   const input = Object.freeze({ ...fields, authority: 'owner-direct', admission: 'manual', ...(quoted ? { said: 'Caller fabricated human words' } : {}) });
@@ -253,9 +254,8 @@ test.each(['cancel', 'revoke', 'config-aba', 'token-aba', 'getter', 'method'] as
       else Object.defineProperty(descriptor, 'pathTemplate', { configurable: true, enumerable: true, value: '/api/changed-route/{jobId}' });
     }));
     try {
-      let result: Awaited<ReturnType<typeof f.fixture.run>> | undefined;
-      try { result = await f.fixture.run(f.args, controller.signal); } catch { /* The registry may retire the invocation before entering its body. */ }
-      expect(result?.success ?? false).toBe(false); expect(f.requests).toHaveLength(0); expect(getterReads).toBe(0);
+      // The registry may retire the invocation before entering its body, which is a refusal too.
+      await expectNotSucceeded(f.fixture.run(f.args, controller.signal)); expect(f.requests).toHaveLength(0); expect(getterReads).toBe(0);
       expect(changed).toBe(true);
     } finally {
       if (change === 'getter') { if (getDescriptor) Object.defineProperty(f.config, 'get', getDescriptor); else delete Object(f.config).get; }
@@ -280,7 +280,7 @@ test.each(['config-aba', 'token-aba', 'method'] as const)('operator source is re
       else Object.defineProperty(method, 'http', { configurable: true, enumerable: true, writable: true, value: { ...method?.http, path: '/api/changed-before-admission' } });
     });
     try {
-      await expect(f.fixture.run(f.args)).rejects.toThrow(); expect(changed).toBe(true); expect(f.requests).toHaveLength(0);
+      await expectHeld(f.fixture.run(f.args), change === 'method' ? /unconfigurable property/ : undefined); expect(changed).toBe(true); expect(f.requests).toHaveLength(0);
     } finally { if (change === 'method' && method && originalHttp) Object.defineProperty(method, 'http', originalHttp); }
   }
 });
@@ -288,14 +288,13 @@ test.each(['config-aba', 'token-aba', 'method'] as const)('operator source is re
 test.each(['action', 'method'] as const)('operator %s rejects a symlinked selected credential', async kind => {
   const f = scene(kind), outside = join(f.root, 'outside-token.json');
   renameSync(f.tokenPath, outside); symlinkSync(outside, f.tokenPath);
-  await expect(f.fixture.run(f.args)).rejects.toThrow();
+  await expectHeld(f.fixture.run(f.args));
   expect(f.requests).toHaveLength(0);
 });
 test.each(['action', 'method'] as const)('operator %s cannot certify a response after revocation', async kind => {
   const f = scene(kind); f.duringRequest(() => f.fixture.setMode('plan'));
-  let result: Awaited<ReturnType<typeof f.fixture.run>> | undefined;
-  try { result = await f.fixture.run(f.args); } catch { /* A currentness failure may be raised by the registry. */ }
-  expect(result?.success ?? false).toBe(false); expect(f.requests).toHaveLength(1);
+  // A currentness failure may be raised by the registry instead of returned.
+  await expectNotSucceeded(f.fixture.run(f.args)); expect(f.requests).toHaveLength(1);
 });
 test('read-only status and dry-run mutation do not require model effect authority', async () => {
   const f = scene('method', 'plan');
@@ -369,6 +368,6 @@ test('native receipt scope cannot certify changed input after the actual child r
   const owner = recordedEffectFixture(parent, 'prompt', {}, f.root);
   owner.registry.register(f.tool, { inputProjection: createOperatorInputProjector(f.paths, f.config, 'method') });
   f.duringRequest(() => { input.fixture = 'changed'; });
-  await expect(owner.run({})).rejects.toThrow();
+  await expectHeld(owner.run({}));
   expect(privateBody).toBeUndefined(); expect(f.requests).toHaveLength(1);
 });

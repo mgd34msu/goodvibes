@@ -19,12 +19,12 @@ import type { UnitCheckEscalations, UnitCheckLoop } from './agent-hooks.js';
 import type { ContractConfigReader } from './config.js';
 import { createCompletion } from './completion.js';
 import { createCorrection } from './correction.js';
-import { createEscalations, type OwnerReplyOutcome } from './escalation.js';
+import { createEscalations, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
 import type { GroupRunner, GroupSteps } from './group-runner.js';
 import type { ContractPlannerDeps, PlanningOutcome, ShapeOutcome } from './planner.js';
 import type { ContractRun } from './run-context.js';
 import type { OwnerEvidenceReader } from './owner-evidence.js';
-import type { CheckTrigger, ContractRouteSelector } from './types.js';
+import type { CheckTrigger, ContractRouteSelector, Escalation } from './types.js';
 
 /** The correction and completion steps: what the runner hands a unit, group or contract to when a nudge is not the answer. */
 export interface ContractSteps extends UnitCheckEscalations, GroupSteps {}
@@ -58,6 +58,8 @@ export interface ContractStepsWithReplies extends ContractSteps {
   resumeNative(run: ContractRun): Promise<void>;
   /** An owner's free-text reply to an open escalation, read with the reply pattern (design 6.3). */
   reply(run: ContractRun, escalationId: string, text: string): Promise<OwnerReplyOutcome>;
+  /** A native session contract whose turn keeps failing pauses and asks the owner to retry or cancel. */
+  pauseForOwnerRetry(run: ContractRun, input: FailurePauseInput): Escalation;
   /** An operator's pick of a unit's attempt (fleet.attempts.pick); closes the unit's attempts-undecided escalation. */
   operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void>;
   /** Judges a group now; a restart stopped it while it was being judged (design 7.2). */
@@ -89,6 +91,7 @@ export function createContractSteps(context: StepContext): ContractStepsWithRepl
     groupsPassed: completion.groupsPassed,
     fixGroupPassed: correction.fixGroupPassed,
     reply: escalations.reply,
+    pauseForOwnerRetry: escalations.pauseForOwnerRetry,
     operatorPick: escalations.operatorPick,
     judgeGroup: completion.judgeGroup,
     judgeDeliverable: completion.judgeDeliverable,

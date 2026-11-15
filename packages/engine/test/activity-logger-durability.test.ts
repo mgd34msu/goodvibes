@@ -40,11 +40,6 @@ function track(logger: ActivityLogger): ActivityLogger {
   return logger;
 }
 
-/** Let the buffered writer's 100ms flush timer drain, a few times over. */
-async function settle(ms = 250): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 afterEach(() => {
   for (const logger of loggers.splice(0)) logger.dispose();
   for (const dir of dirs.splice(0)) {
@@ -66,7 +61,7 @@ describe('ActivityLogger durability at exit', () => {
       'process.exit(0);',
     ].join('\n'), 'utf-8');
 
-    const proc = Bun.spawn(['bun', script], { stdout: 'pipe', stderr: 'pipe' });
+    const proc = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
     const exitCode = await proc.exited;
     expect(exitCode).toBe(0);
 
@@ -91,7 +86,7 @@ describe('ActivityLogger destination loss', () => {
     const logger = track(new ActivityLogger());
     logger.configure(dir);
     logger.info('before the directory went away');
-    await settle();
+    logger.flushSync();
     expect(existsSync(join(dir, 'activity.md'))).toBe(true);
 
     // Exactly the teardown shape that produced the repeating ENOENT.
@@ -99,7 +94,7 @@ describe('ActivityLogger destination loss', () => {
     expect(existsSync(dir)).toBe(false);
 
     logger.info('after the directory went away');
-    await settle();
+    logger.flushSync();
 
     expect(logger.isDegraded).toBe(false);
     const written = readFileSync(join(dir, 'activity.md'), 'utf-8');
@@ -113,7 +108,7 @@ describe('ActivityLogger destination loss', () => {
     const logger = track(new ActivityLogger());
     logger.configure(logDir, { report: (line) => { reports.push(line); } });
     logger.info('while the destination still worked');
-    await settle();
+    logger.flushSync();
 
     // Make the destination permanently unreachable: its PARENT becomes a file,
     // so the directory is gone (ENOENT on append) and cannot be recreated.
@@ -121,7 +116,8 @@ describe('ActivityLogger destination loss', () => {
     writeFileSync(base, 'not a directory', 'utf-8');
 
     logger.info('first entry after the destination broke');
-    await settle(600);
+    // A failed batch is held and retried; the logger gives up after a fixed run of failures.
+    for (let attempt = 0; attempt < 20 && !logger.isDegraded; attempt += 1) logger.flushSync();
 
     expect(logger.isDegraded).toBe(true);
     expect(reports).toHaveLength(1);
@@ -130,7 +126,7 @@ describe('ActivityLogger destination loss', () => {
 
     // The spam case: keep logging hard, well past several flush intervals.
     for (let i = 0; i < 200; i += 1) logger.info(`entry ${i} into the void`);
-    await settle(600);
+    logger.flushSync();
     expect(reports).toHaveLength(1);
   });
 

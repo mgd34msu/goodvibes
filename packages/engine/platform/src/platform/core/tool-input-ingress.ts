@@ -29,7 +29,8 @@ export function captureToolInputCalls(incoming: readonly ToolCall[]): ToolCall[]
     const args = descriptors['arguments']?.value as unknown;
     if (typeof id !== 'string' || typeof name !== 'string' || !descriptors['arguments'] || !('value' in descriptors['arguments'])) throw new Error('Tool input batch is invalid');
     captureAutonomousChoices({ resumeConditions: [{ id, revision: 'tool-call' }] });
-    calls.push({ id, name, arguments: captureProjectionArgs(args, name) });
+    const argumentError = descriptors['argumentError']?.value as unknown;
+    calls.push({ id, name, arguments: captureProjectionArgs(args, name), ...(typeof argumentError === 'string' ? { argumentError } : {}) });
   }
   return calls;
 }
@@ -70,7 +71,7 @@ export async function projectToolInputBatch(
       if (!registry.has(call.name)) { calls.push(Object.freeze(call)); continue; }
       const projected = await registry.projectCall(call.id, call.name, call.arguments, options);
       projections.push(projected);
-      calls.push(Object.freeze({ id: projected.callId, name: projected.name, arguments: projected.args }));
+      calls.push(Object.freeze({ id: projected.callId, name: projected.name, arguments: projected.args, ...(call.argumentError === undefined ? {} : { argumentError: call.argumentError }) }));
     }
     assertCurrent();
     return Object.freeze({ calls: Object.freeze(calls) as unknown as ToolCall[], assertCurrent, release });

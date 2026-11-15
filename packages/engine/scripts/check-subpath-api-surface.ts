@@ -106,20 +106,47 @@ interface TrackedPackage {
   readonly snapshot: string;
 }
 
+function tracked(subpath: string, snapshotName: string): TrackedPackage {
+  return {
+    name: `@goodvibes-jev/engine/${subpath}`,
+    subpath,
+    dir: resolve(ENGINE_ROOT, subpath),
+    snapshot: resolve(ENGINE_ROOT, 'etc', snapshotName),
+  };
+}
+
 const TRACKED_PACKAGES: readonly TrackedPackage[] = [
-  {
-    name: '@goodvibes-jev/engine/platform',
-    subpath: 'platform',
-    dir: resolve(ENGINE_ROOT, 'platform'),
-    snapshot: resolve(ENGINE_ROOT, 'etc', 'subpath-api-surface.json'),
-  },
-  {
-    name: '@goodvibes-jev/engine/terminal-shell',
-    subpath: 'terminal-shell',
-    dir: resolve(ENGINE_ROOT, 'terminal-shell'),
-    snapshot: resolve(ENGINE_ROOT, 'etc', 'subpath-api-surface-terminal-shell.json'),
-  },
+  tracked('platform', 'subpath-api-surface.json'),
+  tracked('terminal-shell', 'subpath-api-surface-terminal-shell.json'),
+  tracked('contracts', 'subpath-api-surface-contracts.json'),
+  tracked('daemon-api', 'subpath-api-surface-daemon-api.json'),
+  tracked('errors', 'subpath-api-surface-errors.json'),
+  tracked('operator-client', 'subpath-api-surface-operator-client.json'),
+  tracked('peer-client', 'subpath-api-surface-peer-client.json'),
+  tracked('transport-core', 'subpath-api-surface-transport-core.json'),
+  tracked('transport-http', 'subpath-api-surface-transport-http.json'),
+  tracked('transport-realtime', 'subpath-api-surface-transport-realtime.json'),
 ];
+
+/**
+ * Export prefixes that are published but deliberately not snapshotted, each
+ * with the reason. A prefix that is neither tracked nor listed here fails the
+ * check, so a new published package cannot join the surface unwatched.
+ */
+const UNTRACKED_PREFIXES: Readonly<Record<string, string>> = {
+  toolchain: 'build and test tooling for contributors; it is not a surface consumers code against',
+  'package.json': 'the package manifest itself, not a code entry point',
+};
+
+/** Prefixes (first path segment) the engine's exports map publishes that nothing watches. */
+export function unwatchedPrefixes(
+  exportKeys: readonly string[],
+  trackedSubpaths: readonly string[],
+  untracked: Readonly<Record<string, string>>,
+): string[] {
+  const prefixes = new Set(exportKeys.map((key) => key.split('/')[1] ?? ''));
+  return [...prefixes].filter((prefix) => prefix.length > 0 && !trackedSubpaths.includes(prefix) && !(prefix in untracked)).sort();
+}
 
 function fail(message: string): never {
   console.error(message);
@@ -263,8 +290,27 @@ function check(pkg: TrackedPackage): void {
   );
 }
 
-const checkOnly = process.argv.includes('--check');
-for (const pkg of TRACKED_PACKAGES) {
-  if (checkOnly) check(pkg);
-  else record(pkg);
+if (import.meta.main) {
+  const checkOnly = process.argv.includes('--check');
+  // `--package <subpath>` records or checks a single package, so adding one does not rewrite the others' baselines.
+  const only = process.argv.includes('--package') ? process.argv[process.argv.indexOf('--package') + 1] : undefined;
+  const selected = only === undefined ? TRACKED_PACKAGES : TRACKED_PACKAGES.filter((pkg) => pkg.subpath === only);
+  if (selected.length === 0) fail(`subpath-api-surface: no tracked package named "${String(only)}"`);
+
+  const unwatched = unwatchedPrefixes(
+    Object.keys(readManifest(join(ENGINE_ROOT, 'package.json')).exports),
+    TRACKED_PACKAGES.map((pkg) => pkg.subpath),
+    UNTRACKED_PREFIXES,
+  );
+  if (unwatched.length > 0) {
+    fail(
+      `subpath-api-surface FAILED: the engine publishes ${unwatched.map((prefix) => `./${prefix}/*`).join(', ')} and nothing watches it.\n`
+      + 'Add it to TRACKED_PACKAGES, or to UNTRACKED_PREFIXES with the reason it is not a consumer surface.',
+    );
+  }
+
+  for (const pkg of selected) {
+    if (checkOnly) check(pkg);
+    else record(pkg);
+  }
 }

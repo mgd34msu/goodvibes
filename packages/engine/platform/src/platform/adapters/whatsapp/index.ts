@@ -1,6 +1,6 @@
-import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '../helpers.js';
+import { constantTimeEquals, noticeUnsupportedAttachment, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, verifySha256HmacSignature } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
-import type { SurfaceAdapterContext } from '../types.js';
+import { isOrdinaryIngressRefusal, type SurfaceAdapterContext } from '../types.js';
 import { logger } from '../../utils/logger.js';
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -9,6 +9,41 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * Messages already handled, by phone number and message id. Meta redelivers a whole payload
+ * when any message in it was answered with a failure, so a message that was handled must
+ * not be handled again. Bounded: it only has to cover Meta's redelivery window.
+ */
+const HANDLED_MESSAGE_LIMIT = 4_096;
+/** Per daemon (its route binding manager), so one running daemon's history is not another's. */
+const handledMessagesByOwner = new WeakMap<object, Set<string>>();
+function handledMessagesOf(context: SurfaceAdapterContext): Set<string> {
+  let handled = handledMessagesByOwner.get(context.routeBindings);
+  if (!handled) { handled = new Set(); handledMessagesByOwner.set(context.routeBindings, handled); }
+  return handled;
+}
+function rememberHandled(handled: Set<string>, key: string): void {
+  handled.add(key);
+  if (handled.size > HANDLED_MESSAGE_LIMIT) handled.delete(handled.values().next().value!);
+}
+
+const MEDIA_FIELDS = ['image', 'document', 'video', 'audio', 'voice', 'sticker'] as const;
+
+/** The text of a message: its body, or the caption Meta nests under the media object. */
+function readMessageText(message: Record<string, unknown>): string {
+  const body = readString(readRecord(message.text)?.body) ?? readString(message.caption);
+  if (body) return body;
+  for (const field of MEDIA_FIELDS) {
+    const caption = readString(readRecord(message[field])?.caption);
+    if (caption) return caption;
+  }
+  return '';
+}
+
+function readMediaKind(message: Record<string, unknown>): string | undefined {
+  return MEDIA_FIELDS.find(field => readRecord(message[field]) !== null);
 }
 
 export async function handleWhatsAppSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
@@ -34,7 +69,7 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
     const mode = url.searchParams.get('hub.mode') ?? '';
     const token = url.searchParams.get('hub.verify_token') ?? '';
     const challenge = url.searchParams.get('hub.challenge') ?? '';
-    if (mode === 'subscribe' && verifyToken && token === verifyToken) {
+    if (mode === 'subscribe' && verifyToken && constantTimeEquals(verifyToken, token)) {
       return new Response(challenge, { status: 200 });
     }
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -85,7 +120,14 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
     });
   }
   const responses: Response[] = [];
-  for (const { value, message } of messages) responses.push(await handleWhatsAppMessage(value, message, context));
+  for (const { value, message } of messages) {
+    // One message failing must not stop the others, and must not be reported as if the payload failed
+    // outright: the ones already handled are remembered, so Meta's redelivery only repeats the failed one.
+    responses.push(await handleWhatsAppMessage(value, message, context).catch((error: unknown) => {
+      logger.warn('handleWhatsAppSurfaceWebhook: message handling failed', { messageId: readString(message.id), error: error instanceof Error ? error.message : String(error) });
+      return Response.json({ error: 'Message handling failed' }, { status: 500 });
+    }));
+  }
   if (responses.length === 1) return responses[0]!;
   const failed = responses.find(response => !response.ok);
   const results = await Promise.all(responses.map(response => response.json()));
@@ -93,9 +135,23 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
 }
 
 async function handleWhatsAppMessage(value: Record<string, unknown>, message: Record<string, unknown>, context: SurfaceAdapterContext): Promise<Response> {
+  const messageId = readString(message.id);
+  const phoneNumberId = readString(value?.metadata && readRecord(value.metadata)?.phone_number_id);
+  const handledKey = messageId ? `${phoneNumberId ?? ''}:${messageId}` : undefined;
+  const handled = handledMessagesOf(context);
+  if (handledKey && handled.has(handledKey)) {
+    return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'duplicate-delivery', messageId });
+  }
+  const response = await processWhatsAppMessage(value, message, context);
+  // Only a message that was answered successfully is remembered; a refused or failed one is tried again on redelivery.
+  if (handledKey && response.ok) rememberHandled(handled, handledKey);
+  return response;
+}
+
+async function processWhatsAppMessage(value: Record<string, unknown>, message: Record<string, unknown>, context: SurfaceAdapterContext): Promise<Response> {
   const contact = Array.isArray(value.contacts) ? value.contacts.map(readRecord).find(contact => contact?.wa_id === message.from) ?? readRecord(value.contacts[0]) : null;
   const from = readString(message.from);
-  const text = readString(readRecord(message.text)?.body) ?? readString(message.caption) ?? '';
+  const text = readMessageText(message);
   if (!from) return Response.json({ error: 'Missing sender' }, { status: 400 });
 
   const policy = await context.authorizeSurfaceIngress({
@@ -113,6 +169,12 @@ async function handleWhatsAppMessage(value: Record<string, unknown>, message: Re
     },
   });
   if (!policy.allowed) {
+    // Meta redelivers a payload it was answered with a failure status, and a refusal will not change on
+    // redelivery. Acknowledge it so a blocked sender cannot cause the allowed messages beside it to repeat.
+    if (isOrdinaryIngressRefusal(policy.reason)) {
+      logger.info('handleWhatsAppSurfaceWebhook: message ignored by channel policy', { reason: policy.reason, messageId: readString(message.id) });
+      return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'blocked-by-channel-policy', policyReason: policy.reason });
+    }
     return Response.json({ error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
   }
 
@@ -131,8 +193,12 @@ async function handleWhatsAppMessage(value: Record<string, unknown>, message: Re
     },
   });
   if (!text) {
+    const media = readMediaKind(message);
+    // Every WhatsApp conversation this webhook sees is one-to-one.
+    const notified = media ? await noticeUnsupportedAttachment(context, binding, media, true) : false;
     logger.info('handleWhatsAppSurfaceWebhook: message acknowledged without queueing', {
-      reason: 'no-actionable-text',
+      reason: media ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(media ? { attachment: media } : {}),
       bindingId: binding.id,
       messageId: readString(message.id),
     });
@@ -140,13 +206,15 @@ async function handleWhatsAppMessage(value: Record<string, unknown>, message: Re
       acknowledged: true,
       queued: false,
       outcome: 'ignored',
-      reason: 'no-actionable-text',
+      reason: media ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(media ? { attachment: media, notified } : {}),
       bindingId: binding.id,
     });
   }
 
   const submission = await context.sessionBroker.submitMessage({
     routeId: binding.id,
+    ...(readString(message.id) ? { providerMessageId: readString(message.id) } : {}),
     surfaceKind: 'whatsapp',
     surfaceId: binding.surfaceId,
     externalId: binding.externalId,
@@ -159,7 +227,7 @@ async function handleWhatsAppMessage(value: Record<string, unknown>, message: Re
       messageId: readString(message.id),
     },
   });
-  if (submission.mode === 'continued-live') {
+  if (submission.mode === 'continued-live' || submission.mode === 'queued-follow-up') {
     return Response.json({ acknowledged: true, continued: true, sessionId: submission.session.id, agentId: submission.activeAgentId ?? null });
   }
 
@@ -169,7 +237,7 @@ async function handleWhatsAppMessage(value: Record<string, unknown>, message: Re
     submission.session.id,
   );
   if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id, submission.input.id);
   context.queueSurfaceReplyFromBinding(submission.routeBinding ?? binding, {
     agentId: spawnResult.id,
     task: text,

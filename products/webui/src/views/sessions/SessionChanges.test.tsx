@@ -246,6 +246,21 @@ describe('SessionChanges', () => {
     unmount();
   });
 
+  test('commenting on a hunk whose diff was refreshed under the open sheet says so instead of doing nothing', async () => {
+    const { container, client, unmount } = render({ canSteer: true, closed: false });
+    await settle();
+
+    click(container.querySelector('.diff-mb__hunk'));
+    flushSync(() => client.setQueryData(queryKeys.sessionChanges('s-1'), { ...sessionChangesResult, stat: 'refreshed' }));
+    await settle(2);
+    click(container.querySelector('.hunk-actions__btn:not(.hunk-actions__btn--approve):not(.hunk-actions__btn--reject)'));
+    await settle(2);
+
+    expect(container.querySelector('.hunk-sheet__input')).toBeNull();
+    expect(container.querySelector('.session-changes__send-error')?.textContent).toContain('diff changed');
+    unmount();
+  });
+
   test('with no bound agent COMMENT queues a follow-up instead of steering', async () => {
     const { container, unmount } = render({ canSteer: false, closed: false });
     await settle();
@@ -281,6 +296,9 @@ describe('SessionChanges', () => {
     expect(previewCalls[0].hunk).toContain('+  const c = 3;');
     expect(previewCalls[0].sessionId).toBe('s-1');
     // ready state names the consequence
+    const ready = container.querySelector('.hunk-sheet__mode')?.textContent ?? '';
+    expect(ready).toContain('Will remove 1 added line and restore 0 removed lines');
+    expect(ready).toContain('safety checkpoint');
 
     click(container.querySelector('.hunk-sheet__send--danger'));
     await settle(3);

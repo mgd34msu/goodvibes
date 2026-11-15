@@ -96,9 +96,15 @@ describe('the Google connection cards', () => {
     // If a future change adds an approval card, this fails, and that is the
     // intent: the gesture has to stay something only a human at the keyboard
     // can perform.
+    //
+    // The id is only a naming convention, so the card's command and editor kind
+    // are scanned as well: either one is what actually reaches the approval path.
     const approvalCards = AGENT_WORKSPACE_CATEGORIES
       .flatMap((category) => category.actions)
-      .filter((action) => /google.*approv|approv.*google/i.test(action.id))
+      .filter((action) => {
+        const reachable = [action.id, action.command ?? '', action.editorKind ?? ''].join(' ');
+        return /google[\s\S]*approv|approv[\s\S]*google/i.test(reachable);
+      })
       .map((action) => action.id);
     expect(approvalCards).toEqual([]);
   });

@@ -72,7 +72,7 @@ export type {
 } from './devices-client.js';
 
 export { createClientPhoneTool, registerClientPhoneTool } from './phone-tool.js';
-export type { PhoneToolRegistry } from './phone-tool.js';
+export type { ClientPhoneToolOptions, PhoneToolRegistry } from './phone-tool.js';
 
 export { createTasksClient } from './tasks-client.js';
 export type { LocalTaskSource, TaskOrigin, TasksClient, TasksUnionResult, UnionTask } from './tasks-client.js';

@@ -42,6 +42,8 @@ describe('isKnownProcessKind / isKnownProcessState', () => {
   test('known kinds/states return true', () => {
     expect(isKnownProcessKind('agent')).toBe(true);
     expect(isKnownProcessKind('workflow')).toBe(true);
+    expect(isKnownProcessKind('contract-unit')).toBe(true);
+    expect(isKnownProcessKind('wrfc-chain')).toBe(false);
     expect(isKnownProcessState('thinking')).toBe(true);
     expect(isKnownProcessState('stalled')).toBe(true);
   });

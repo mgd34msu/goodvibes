@@ -170,11 +170,16 @@ export class PushSubscriptionStore {
   /**
    * Find the record this input reconciles onto: by device identity when the
    * input carries a deviceId (so a rotated endpoint heals in place), otherwise
-   * by raw endpoint (the legacy, device-id-less path). Returns the index or -1.
+   * by raw endpoint (the legacy, device-id-less path). A device id that matches
+   * nothing still adopts the same principal's record for the same endpoint: it
+   * is the same browser registering under a new identity (a client upgrade, or
+   * cleared site storage), and a second record would send it every push twice.
+   * Returns the index or -1.
    */
   private matchIndex(records: readonly StoredPushSubscription[], input: RegisterSubscriptionInput): number {
     if (input.deviceId !== undefined) {
-      return records.findIndex((r) => r.principalId === input.principalId && r.deviceId === input.deviceId);
+      const byDevice = records.findIndex((r) => r.principalId === input.principalId && r.deviceId === input.deviceId);
+      if (byDevice >= 0) return byDevice;
     }
     return records.findIndex((r) => r.principalId === input.principalId && r.endpoint === input.endpoint);
   }
@@ -211,12 +216,25 @@ export class PushSubscriptionStore {
       const now = this.now();
       const decision = decidePushSweep(await this.loadRaw(), policy, now);
       const records = decision.kept;
-      const existingIndex = this.matchIndex(records, input);
+      let existingIndex = this.matchIndex(records, input);
+      let mergedDuplicates = false;
       if (existingIndex >= 0) {
+        // Another record of this principal already holding the endpoint this one
+        // is moving to would receive every push twice; the device is one device.
+        const endpointHolders = records.filter((r, i) => i !== existingIndex && r.principalId === input.principalId && r.endpoint === input.endpoint);
+        if (endpointHolders.length > 0) {
+          const survivor = records[existingIndex] as StoredPushSubscription;
+          const kept = records.filter((r) => !endpointHolders.includes(r));
+          records.splice(0, records.length, ...kept);
+          existingIndex = records.indexOf(survivor);
+          mergedDuplicates = true;
+        }
         const prior = records[existingIndex] as StoredPushSubscription;
         const endpointChanged = prior.endpoint !== input.endpoint;
         const keysChanged = prior.keys.p256dh !== input.keys.p256dh || prior.keys.auth !== input.keys.auth;
-        if (!endpointChanged && !keysChanged && (prior.consecutiveFailures ?? 0) === 0 && decision.removed.length === 0) {
+        const deviceIdAdopted = input.deviceId !== undefined && prior.deviceId !== input.deviceId;
+        if (!endpointChanged && !keysChanged && !deviceIdAdopted && !mergedDuplicates
+          && (prior.consecutiveFailures ?? 0) === 0 && decision.removed.length === 0) {
           await this.discloseRegistrationPass(decision, now);
           return { record: prior, drift: 'unchanged' };
         }

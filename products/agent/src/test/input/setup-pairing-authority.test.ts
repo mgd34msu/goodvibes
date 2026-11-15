@@ -214,12 +214,13 @@ describe('actual agent_harness pairing boundary', () => {
     test(`harness confirmation flags cannot replace keyboard confirmation: ${args.join(' ')}`, async () => withRuntime(async r => {
       const result = await r.runHarness({ mode: 'run_command', commandName: 'setup', args,
         confirm: true, explicitUserRequest: 'Pair this Agent with the host and create persistent administrative access.' });
-      expect(result.success).toBe(true); // Command execution succeeds; the command reports its refusal.
+      // A plain --apply is refused as a model request; the flag spellings are refused as bad usage, which the harness reports as not applied.
+      expect(result.success).toBe(args.length === 2);
       expect(r.starts).toEqual([]);
       expect(r.controller.active).toBe(false);
       expect(r.fixture.authCalls()).toBe(0);
       expectUnchanged(r.fixture);
-      r.fixture.assertPrivateOutput(result.output ?? '');
+      r.fixture.assertPrivateOutput(result.output ?? result.error ?? '');
     }));
   }
 

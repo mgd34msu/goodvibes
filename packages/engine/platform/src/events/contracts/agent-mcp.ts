@@ -4,8 +4,8 @@ import type { ContractResult } from './shared.js';
 export function validateAgentSpawning(v: unknown): ContractResult {
   return validateEventFields('AGENT_SPAWNING', v, [
     { key: 'agentId', kind: 'string' },
-    { key: 'role', kind: 'string' },
     { key: 'task', kind: 'string' },
+    { key: 'contractRole', kind: 'enum', values: ['owner', 'unit', 'planner'], optional: true },
   ]);
 }
 
@@ -22,6 +22,7 @@ export function validateAgentFailed(v: unknown): ContractResult {
     { key: 'occurrenceId', kind: 'string', optional: true },
     { key: 'agentId', kind: 'string' },
     { key: 'error', kind: 'string' },
+    { key: 'durationMs', kind: 'number' },
   ]);
 }
 

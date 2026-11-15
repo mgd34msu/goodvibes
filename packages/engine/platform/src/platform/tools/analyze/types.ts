@@ -26,7 +26,6 @@ export interface AnalyzeInput {
   after?: string | undefined;
   find?: string | undefined;
   replace?: string | undefined;
-  include?: string[] | undefined;
   packages?: string[] | undefined;
   output?: {
     format?: 'summary' | 'detailed' | 'json' | undefined;

@@ -83,9 +83,12 @@ export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   'surfaces.whatsapp.signingSecret',
   'surfaces.imessage.token',
   'surfaces.msteams.appPassword',
+  'surfaces.msteams.webhookSecret',
   'surfaces.bluebubbles.password',
   'surfaces.mattermost.botToken',
+  'surfaces.mattermost.webhookSecret',
   'surfaces.matrix.accessToken',
+  'surfaces.matrix.webhookSecret',
   'surfaces.webhook.secret',
   // The default reply target is an outbound webhook URL, which commonly
   // carries its own token; its credential reading could not settle, so it is

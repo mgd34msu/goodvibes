@@ -1,12 +1,12 @@
 /** Original startup maintenance, scoped to the admitted CLI owner. */
-import { accessSync, constants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
+import { hasReadableWebuiBundle } from '../config/webui-bundle.js';
 import { reconcileRedundantLegacyUnit } from '../runtime/legacy-daemon-reconcile.js';
 import { resolveConfiguredServiceName } from '../runtime/legacy-daemon-migration.js';
 import type { DaemonCliConfiguration } from './configuration.js';
@@ -53,11 +53,21 @@ export function persistDaemonStartupPublicUrl(
   const declared = resolveRuntimeEndpointBinding(config, 'controlPlane');
   if (!declared.recognized || declared.host !== bound.host || declared.port !== bound.port
     || (config.get('controlPlane.tls.mode') === 'direct' ? 'https' : 'http') !== bound.scheme) return;
-  const bundle = String(config.get('controlPlane.webui.bundleDir') ?? '').trim()
-    || String(config.get('web.staticAssetsDir') ?? '').trim();
-  try {
-    if (!bundle || !statSync(resolve(bundle, 'index.html')).isFile()) return;
-    accessSync(resolve(bundle, 'index.html'), constants.R_OK);
-  } catch { return; }
+  if (!hasReadableWebuiBundle(config)) return;
   ensurePublicBaseUrl(config, undefined, bound);
+}
+
+/**
+ * Apply the worktree retention policy to leftovers from earlier runs, then
+ * return the one line to print when kept worktrees hold a lot of disk (null
+ * otherwise). Never throws: a failure here must not stop the daemon starting.
+ */
+export async function sweepDaemonWorktrees(configuration: DaemonCliConfiguration): Promise<string | null> {
+  try {
+    const registry = new WorktreeRegistry(configuration.workingDirectory);
+    await registry.sweepRetention();
+    return await registry.keptWorktreeNotice();
+  } catch {
+    return null;
+  }
 }

@@ -447,14 +447,17 @@ describe('RepairResult contract', () => {
     expect((nested as Record<string, unknown>)['extra']).toBeUndefined();
   });
 
-  test('never throws on garbage input', async () => {
+  test('a schema with no properties leaves the arguments unrepaired and never throws', async () => {
     const schema: ToolDefinition = {
       name: 'bad',
       description: 'Bad schema.',
       parameters: { type: 'object' }, // no properties, no required
     };
-    expect(await repairToolCall('bad', {}, schema)).toBeDefined();
-    // Also with null-ish values in args
-    expect(await repairToolCall('bad', { a: null, b: undefined } as Record<string, unknown>, schema)).toBeDefined();
+    expect(await repairToolCall('bad', {}, schema)).toEqual({ repaired: false, original: {}, fixed: {}, repairs: [] });
+    // Also with null-ish values in args: nothing is invented and the null survives untouched.
+    const nullish = await repairToolCall('bad', { a: null, b: undefined } as Record<string, unknown>, schema);
+    expect(nullish.repaired).toBe(false);
+    expect(nullish.fixed).toEqual({ a: null });
+    expect(nullish.repairs).toEqual([]);
   });
 });

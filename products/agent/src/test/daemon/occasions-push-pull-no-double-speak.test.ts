@@ -153,7 +153,7 @@ async function harness(): Promise<Harness> {
     said,
     invoke: async (id, body = {}, readingAvailable = true) => {
       const previous = installJudgmentPort(readingAvailable ? services.judgment.port : undefined);
-      try { return await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke(id, { methodId: id, body } as never); }
+      try { return await buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }).invoke(id, { methodId: id, body, context: { admin: true }, isAuthorized: () => true } as never); }
       finally { installJudgmentPort(previous); }
     },
   };

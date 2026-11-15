@@ -108,7 +108,9 @@ export function createSmtpTlsSocket(
       reject(new Error(`SMTP TLS connect timeout to ${host}:${port}`));
     }, timeoutMs);
 
-    const sock = tlsConnect({ host, port, servername: host }, () => {
+    // The mailbox password follows over AUTH, so the server is authenticated
+    // even when the host process weakens its global TLS defaults.
+    const sock = tlsConnect({ host, port, servername: host, rejectUnauthorized: true }, () => {
       clearTimeout(timer);
       resolve(sock as unknown as Socket);
     });
@@ -183,6 +185,7 @@ export function createSmtpStartTlsSocket(
                   socket: plain,
                   host,
                   servername: host,
+                  rejectUnauthorized: true,
                 }, () => {
                   clearTimeout(timer);
                   resolve(upgraded as unknown as Socket);

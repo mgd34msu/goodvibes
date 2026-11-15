@@ -44,7 +44,7 @@
  */
 
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from './schema.js';
-import { parsePermissionMode } from '../gate/presets.js';
+import { parsePermissionMode, retiredPermissionModeNotice } from '../gate/presets.js';
 import type { ConfigSetting } from './schema.js';
 import { listDaemonOwnedConfigPaths } from './config-ownership.js';
 import { deleteRawDotPath } from './settings-io.js';
@@ -103,7 +103,9 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
   // value an operator can store is `deny`. Falling back therefore opens a gate
   // they closed, which is the whole hazard.
   'permissions.tools.',
-  // The approval mode. Default `prompt`; `plan` is stricter.
+  // The execution mode. Default `safe-owner`; `plan` is the read-only posture
+  // and is stricter than the default, so falling back would open a stored
+  // `plan`; a stored `safe-jev` or `yolo` is looser and is the operator's choice.
   'permissions.mode',
   // Which permission engine decides. Default `baseline`; `policy-engine` is the
   // one that actually enforces a policy bundle.
@@ -121,6 +123,20 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
   'judgment.backend',
   'provider.decisionRouter',
   'judgment.keyName',
+  // Gates whose shipped default is the WEAKER setting and whose strict value is
+  // the one an operator stores. A stored value that cannot be read (wrong type,
+  // misspelt choice) would otherwise fall back to the weaker default after a
+  // restart while the running process had been enforcing the stricter one.
+  'relay.requireStepUpForMutations',
+  'fetch.blockedHosts',
+  'conversationGate.mode',
+  'sandbox.replIsolation',
+  'sandbox.mcpIsolation',
+  'sandbox.windowsMode',
+  'storage.secretPolicy',
+  // The tool budget: shipped off, with every limit at 0 (unlimited), so an
+  // unreadable stored switch or limit falls back to no budget at all.
+  'runtime.toolBudget.',
 ];
 
 /**
@@ -131,7 +147,8 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
  *     `controlPlane.trustProxy` all ship as `false`, and `sandbox.enabled`
  *     ships as `true`. For every one of them the shipped default is the
  *     RESTRICTIVE value, so falling back to it can only ever close something,
- *     never open it. Refusing to start over these would trade a safe fallback
+ *     never open it. A key whose default is the weaker setting does not belong
+ *     here; it belongs in the list above. Refusing to start over these would trade a safe fallback
  *     for a dead daemon.
  *   - credential keys: a daemon short a mailbox password runs with one
  *     connector down. That is a degraded surface, not an open door, and it is
@@ -338,6 +355,10 @@ function screenSchemaValues(
     if (setting.key === 'permissions.mode') {
       const mode = parsePermissionMode(hit.value);
       if (mode && isPlainObject(raw.permissions)) raw.permissions.mode = mode;
+      const retired = retiredPermissionModeNotice(hit.value);
+      if (retired !== undefined) {
+        found.push({ file, key: setting.key, reason: retired, remedy: 'set permissions.mode to a current mode to silence this', action: 'skipped' });
+      }
     }
     const failure = schemaFailure(setting, readDotPath(raw, setting.key).value);
     if (!failure) continue;

@@ -17,11 +17,12 @@
 
 import {
   isValidSkillName,
+  skillContentProblem,
   type Skill,
   type SkillFrontmatterValue,
   type SkillIndexEntry,
 } from './model.js';
-import type { SkillStore } from './store.js';
+import { SkillAlreadyExistsError, type SkillStore } from './store.js';
 
 /** Stable, adapter-mappable failure codes for skill operations. */
 export type SkillErrorCode = 'INVALID_ARGUMENT' | 'NOT_FOUND' | 'ALREADY_EXISTS';
@@ -79,11 +80,30 @@ function requireDescription(description: unknown): string {
   return description.trim();
 }
 
+function requireWritableContent(
+  description: string | undefined,
+  metadata: Readonly<Record<string, SkillFrontmatterValue>> | undefined,
+): void {
+  const problem = skillContentProblem(description, metadata);
+  if (problem) throw new SkillServiceError(`invalid skill: ${problem}`, 'INVALID_ARGUMENT');
+}
+
 export class SkillService {
   private readonly store: SkillStore;
+  /** Tail of the in-flight write for each skill name, so read-then-write calls on one name run in order. */
+  private readonly writes = new Map<string, Promise<unknown>>();
 
   constructor(store: SkillStore) {
     this.store = store;
+  }
+
+  private serialized<T>(name: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.writes.get(name) ?? Promise.resolve();
+    const next = previous.then(run, run);
+    const tail = next.catch(() => undefined);
+    this.writes.set(name, tail);
+    void tail.then(() => { if (this.writes.get(name) === tail) this.writes.delete(name); });
+    return next;
   }
 
   /** List every skill's index line (name + description + metadata), cheap, no bodies. */
@@ -108,41 +128,50 @@ export class SkillService {
     if (typeof input.body !== 'string') {
       throw new SkillServiceError('skill body must be a string', 'INVALID_ARGUMENT');
     }
-    if (await this.store.has(name)) {
-      throw new SkillServiceError(`a skill named "${name}" already exists`, 'ALREADY_EXISTS');
-    }
-    return this.store.put({
-      name,
-      description,
-      body: input.body,
-      metadata: input.metadata ?? {},
+    requireWritableContent(description, input.metadata);
+    return this.serialized(name, async () => {
+      try {
+        return await this.store.put({
+          name,
+          description,
+          body: input.body,
+          metadata: input.metadata ?? {},
+        }, { ifAbsent: true });
+      } catch (error) {
+        if (error instanceof SkillAlreadyExistsError) {
+          throw new SkillServiceError(`a skill named "${name}" already exists`, 'ALREADY_EXISTS');
+        }
+        throw error;
+      }
     });
   }
 
   /** Update an existing skill's description, body, and/or metadata. Throws NOT_FOUND when absent. */
   async update(name: string, patch: UpdateSkillInput): Promise<Skill> {
     const validName = requireValidName(name);
-    const existing = await this.store.get(validName);
-    if (!existing) {
-      throw new SkillServiceError(`no skill named "${validName}"`, 'NOT_FOUND');
-    }
-    const description =
-      patch.description === undefined ? existing.description : requireDescription(patch.description);
+    const patchedDescription = patch.description === undefined ? undefined : requireDescription(patch.description);
     if (patch.body !== undefined && typeof patch.body !== 'string') {
       throw new SkillServiceError('skill body must be a string', 'INVALID_ARGUMENT');
     }
-    return this.store.put({
-      name: validName,
-      description,
-      body: patch.body ?? existing.body,
-      metadata: patch.metadata ?? existing.metadata,
+    requireWritableContent(patchedDescription, patch.metadata);
+    return this.serialized(validName, async () => {
+      const existing = await this.store.get(validName);
+      if (!existing) {
+        throw new SkillServiceError(`no skill named "${validName}"`, 'NOT_FOUND');
+      }
+      return this.store.put({
+        name: validName,
+        description: patchedDescription ?? existing.description,
+        body: patch.body ?? existing.body,
+        metadata: patch.metadata ?? existing.metadata,
+      });
     });
   }
 
   /** Delete a skill. Returns { deleted:false } when no skill with that name existed. */
   async delete(name: string): Promise<DeleteSkillResult> {
     const validName = requireValidName(name);
-    const deleted = await this.store.delete(validName);
+    const deleted = await this.serialized(validName, () => this.store.delete(validName));
     return { name: validName, deleted };
   }
 }

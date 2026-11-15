@@ -23,6 +23,13 @@ export interface NativeIntakeBrowserJournal {
   save(record: NativeIntakeBrowserRecord): Promise<void>;
   /** Confirm the exact persisted original immediately before replay. This never removes it. */
   confirm(record: NativeIntakeBrowserRecord): Promise<void>;
+  /**
+   * Retire one exact original. Only for a request whose daemon state is settled (see
+   * `release` in native-intake.ts); the journal itself never decides that and never evicts.
+   */
+  remove(record: NativeIntakeBrowserRecord): Promise<void>;
+  /** How many stored records could not be read (damaged, or written by another build). They are kept untouched. */
+  unreadable(): Promise<number>;
 }
 
 export const NATIVE_INTAKE_BROWSER_JOURNAL_DATABASE = "goodvibes.native-intake.v1";
@@ -45,7 +52,9 @@ export class NativeIntakeBrowserJournalError extends Error {
       | "capacity"
   ) {
     super(
-      `Native intake source journal: ${code}. Original source must be durably retained before sending.`
+      code === "capacity"
+        ? `Native intake source journal: capacity. This browser keeps at most ${NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS} saved requests. Release a request the daemon reports as finished to make room; unfinished originals are never discarded.`
+        : `Native intake source journal: ${code}. Original source must be durably retained before sending.`
     );
     this.name = "NativeIntakeBrowserJournalError";
   }
@@ -163,22 +172,29 @@ function encodedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
-function readRecords(values: unknown[]): NativeIntakeBrowserRecord[] {
-  if (values.length > NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS)
-    throw new NativeIntakeBrowserJournalError("capacity");
-  let records: NativeIntakeBrowserRecord[];
-  try {
-    records = values.map(recordSnapshot);
-  } catch {
-    throw new NativeIntakeBrowserJournalError("corrupt");
+/**
+ * A record that fails the current strict shape (damaged, or written by another build) is
+ * skipped and counted, never allowed to make every other saved original unreadable or to
+ * block saving a new one. It stays in the store untouched.
+ */
+function readRecords(values: unknown[]): { records: NativeIntakeBrowserRecord[]; unreadable: number } {
+  const records: NativeIntakeBrowserRecord[] = [];
+  let unreadable = 0;
+  for (const value of values) {
+    try {
+      records.push(recordSnapshot(value));
+    } catch {
+      unreadable += 1;
+    }
   }
   if (
+    records.length > NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS ||
     records.reduce((total, record) => total + encodedBytes(record), 0) >
-    NATIVE_INTAKE_BROWSER_JOURNAL_MAX_BYTES
+      NATIVE_INTAKE_BROWSER_JOURNAL_MAX_BYTES
   ) {
     throw new NativeIntakeBrowserJournalError("capacity");
   }
-  return records;
+  return { records, unreadable };
 }
 
 function openDatabase(factory: IDBFactory, name: string): Promise<IDBDatabase> {
@@ -234,7 +250,7 @@ export function createNativeIntakeBrowserJournal(
   } = {}
 ): NativeIntakeBrowserJournal {
   async function transaction<T>(
-    operate: (records: NativeIntakeBrowserRecord[], store: IDBObjectStore) => T
+    operate: (records: NativeIntakeBrowserRecord[], store: IDBObjectStore, unreadable: number) => T
   ): Promise<T> {
     let factory: IDBFactory | undefined;
     try {
@@ -294,13 +310,11 @@ export function createNativeIntakeBrowserJournal(
             fail(new NativeIntakeBrowserJournalError("corrupt"));
             return;
           }
-          const read: IDBRequest<unknown[]> = store.getAll(
-            undefined,
-            NATIVE_INTAKE_BROWSER_JOURNAL_MAX_RECORDS + 1
-          );
+          const read: IDBRequest<unknown[]> = store.getAll();
           read.onsuccess = () => {
             try {
-              result = operate(readRecords(read.result), store);
+              const { records, unreadable } = readRecords(read.result);
+              result = operate(records, store, unreadable);
               ready = true;
             } catch (error) {
               fail(error);
@@ -355,6 +369,27 @@ export function createNativeIntakeBrowserJournal(
         }
         // add (never put) also enforces immutable input identity at the database boundary.
         store.add(snapshot);
+      });
+    },
+    async unreadable() {
+      return transaction((_records, _store, unreadable) => unreadable);
+    },
+    async remove(record) {
+      const snapshot = recordSnapshot(record);
+      await transaction((records, store) => {
+        const existing = records.find(
+          (item) =>
+            sameBinding(item.binding, snapshot.binding) &&
+            item.command.inputId === snapshot.command.inputId
+        );
+        if (!existing) throw new NativeIntakeBrowserJournalError("missing");
+        // Only the exact original that was shown may be retired.
+        if (JSON.stringify(existing) !== JSON.stringify(snapshot))
+          throw new NativeIntakeBrowserJournalError("conflict");
+        store.delete([
+          ...BINDING_KEYS.map((key) => snapshot.binding[key as keyof NativeIntakeBrowserBinding]),
+          snapshot.command.inputId,
+        ]);
       });
     },
     async confirm(record) {

@@ -148,11 +148,25 @@ export class CalendarConnector {
   /** Begin the loopback auth-code flow; returns the URL to open and the waiter. */
   async beginConnectAuthCode(
     config: ResolvedClientConfig,
+    options: { readonly signal?: AbortSignal | undefined } = {},
   ): Promise<{ readonly start: AuthCodeFlowStart; readonly waiter: LoopbackWaiter }> {
     if (!this.listenerFactory) {
       throw new Error('No loopback listener is available; use the device-code flow for headless connect.');
     }
-    return beginAuthCodeFlow(config, this.listenerFactory);
+    options.signal?.throwIfAborted();
+    const flow = await beginAuthCodeFlow(config, this.listenerFactory);
+    // The listener holds a port until it is closed. When the caller cancels the
+    // attempt it is closed here, so a caller that never reaches `close()` does
+    // not leave the port bound.
+    const { signal } = options;
+    if (signal) {
+      if (signal.aborted) {
+        flow.waiter.close();
+        signal.throwIfAborted();
+      }
+      signal.addEventListener('abort', () => flow.waiter.close(), { once: true });
+    }
+    return flow;
   }
 
   /** Complete the auth-code flow after the redirect delivered a code; saves tokens. */
@@ -175,8 +189,9 @@ export class CalendarConnector {
   async completeConnectDeviceCode(
     config: ResolvedClientConfig,
     start: DeviceCodeFlowStart,
+    options: { readonly signal?: AbortSignal | undefined } = {},
   ): Promise<ConnectedAccount> {
-    const tokens = await pollDeviceCodeFlow(config, this.fetchImpl, start, this.clock, this.sleep);
+    const tokens = await pollDeviceCodeFlow(config, this.fetchImpl, start, this.clock, this.sleep, options.signal);
     return this.persistConnection(config, tokens);
   }
 

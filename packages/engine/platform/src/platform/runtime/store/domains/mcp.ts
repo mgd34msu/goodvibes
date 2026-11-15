@@ -34,11 +34,11 @@ export interface McpServerRecord {
   transport: 'stdio' | 'sse' | 'http';
   /** Number of tools registered by this server. */
   toolCount: number;
-  /** Qualified names of all tools from this server. */
+  /** Always empty: the connection event carries a count, not names; the live tool list is the MCP registry's. */
   toolNames: string[];
-  /** Number of successful tool calls to this server. */
+  /** Not maintained by the store (zero); per-server call counts live in the MCP manager. */
   callCount: number;
-  /** Number of failed tool calls to this server. */
+  /** Not maintained by the store (zero); per-server error counts live in the MCP manager. */
   errorCount: number;
   /** Epoch ms of connection establishment. */
   connectedAt?: number | undefined;
@@ -85,7 +85,7 @@ export interface McpDomainState {
   connectedServerNames: string[];
 
   // ── Tool registry ─────────────────────────────────────────────────────────
-  /** All registered MCP tools keyed by qualifiedName. */
+  /** Never populated by the store; read the MCP registry for tools. */
   tools: Map<string, McpRegisteredTool>;
   /** Total number of available (callable) tools. */
   availableToolCount: number;

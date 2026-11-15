@@ -10,10 +10,19 @@
  * puts a human in front of the question "is this display, or is this becoming
  * authority?", the exact question that gets skipped otherwise.
  *
- * The surface that renders the claim keeps the same guard over its own tree.
+ * The surface that renders the claim keeps the same guard over its own tree
+ * (products/agent/src/test/agent/email/sender-confidence-readers.test.ts).
  * This is the platform's half: the mail service now sits between the receiving
  * server's verdict and the sentence a human reads, so the drift could start
  * here just as easily.
+ *
+ * What these checks are: source tripwires. They match literal text (the
+ * property name, a fixed token list on the same line, `commandAuthority:`
+ * written as a string literal, `${password|token|quotedPass}` interpolations),
+ * so an alias, a multi-line expression or a differently named variable gets
+ * past them. The behavioural guarantee, that a fully verified sender gets the
+ * same authority as a stranger, is asserted in platform-email-sender-claim-end-to-end.test.ts
+ * and in the agent's sender-claim-wiring.test.ts.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -34,6 +43,10 @@ const CONFIDENCE_READERS = new Set([
   'sender-claim.ts',
   // Names the property in the module's security notes; carries no logic.
   'index.ts',
+  // Remembers the sender address of a message whose receiving server verified it, so
+  // a reply may be addressed to the sender it read. That only selects a destination from
+  // evidence this process read; it grants no command authority and confirms nothing.
+  'email-service.ts',
 ]);
 
 /** Tokens that would indicate confidence being turned into a decision. */

@@ -19,6 +19,8 @@ const readingEvidence = (readings: Readonly<Record<string, { verdict: string; ou
   Object.fromEntries(Object.entries(readings).map(([aspect, reading]) => [aspect, { verdict: reading.verdict, outcome: reading.outcome }]));
 class VerificationDeferredError extends Error {}
 class VerificationScopeFallback extends Error {}
+/** Drafts of a requirement ledger tried before giving up when the exact originals cannot stand in for it. */
+const MAX_UNFALLBACKABLE_LEDGER_DRAFTS = 4;
 const attemptOwner = Symbol('verification attempt owner');
 type AttemptAccess = VerificationAccess & { [attemptOwner]?: {
   pending: Set<Promise<unknown>>;
@@ -199,6 +201,11 @@ export class CompletionVerification {
       if (candidate === undefined) {
         if (originalScopeAvailable && attempts >= 2) throw new VerificationScopeFallback();
         if ((operation === 'evidence' || operation === 'merge') && attempts >= 2) throw new VerificationSubdivisionError();
+        // A ledger over a history too large to quote whole has neither fallback nor smaller frame,
+        // so a scope check that never accepts it would draft and re-check without end.
+        if (operation === 'requirements' && !originalScopeAvailable && attempts >= MAX_UNFALLBACKABLE_LEDGER_DRAFTS) {
+          throw new VerificationHeldError('requirement ledger over the full instruction history was not accepted by the scope check', { cause: repair });
+        }
         try { candidate = await this.writer({ operation, context, repair, signal: access.signal, assertCurrent: access.assertCurrent }); }
         catch (error) { access.assertCurrent(); throw new VerificationHeldError('private proposal provider', { cause: error }); }
       }
@@ -918,6 +925,13 @@ export class CompletionVerification {
     const currentSources = verificationSources(full, this.ownSource);
     const sources = [...currentSources, ...retainedDelegationSources(full, this.store.sources, this.ownSource)];
     this.originalTurns = verificationOriginalTurns(currentSources);
+    // A disclosed limitation names an observation of the history it was found in. Once that history no longer
+    // contains the observation, the limitation is not about this evidence and must not reach the final checks.
+    const currentIds = new Set(sources.map(source => source.id));
+    for (const [key, entry] of this.disclosedLimitations) {
+      if (currentIds.has(entry.observation)) continue;
+      this.disclosedLimitations.delete(key); this.unsettledAttempts.delete(key);
+    }
     for (const [position, source] of sources.entries()) { this.originals.set(source.id, source); this.sourceOrder.set(source.id, position); }
     const ledger = await this.ledger(sources.filter(source => source.kind === 'instruction'), access);
     const observations = sources.filter(source => source.kind !== 'answer');

@@ -34,6 +34,10 @@ export function createNativeWorkLedgerOwner(options: {
   let closed = false;
   let closing: Promise<void> | undefined;
   const listeners = new Set<(state: WorkLedgerState) => void>();
+  const unavailableHandlers = new Map<(state: WorkLedgerState) => void, (reason: string) => void>();
+  // Storage reports an unreadable ledger once to its single subscriber; keep the
+  // reason so a listener that subscribes afterwards is told too.
+  let unavailableReason: string | undefined;
 
   function acquire(): Promise<KnowledgeWorkLedgerStorage> {
     // Already-admitted core operations may reach this forwarding seam after
@@ -42,8 +46,14 @@ export function createNativeWorkLedgerOwner(options: {
       storage = opened; // Own it before observer setup, which may throw.
       if (!closed) {
         stopObservation = opened.subscribe((state) => {
+          unavailableReason = undefined;
           for (const listener of [...listeners]) {
             try { listener(state); } catch { /* Observers cannot change a durable receipt. */ }
+          }
+        }, (reason) => {
+          unavailableReason = reason;
+          for (const notify of [...unavailableHandlers.values()]) {
+            try { notify(reason); } catch { /* Observers cannot change a durable receipt. */ }
           }
         });
       }
@@ -54,13 +64,27 @@ export function createNativeWorkLedgerOwner(options: {
   const forwarding: WorkLedgerStorage = {
     async read() { return (await acquire()).read(); },
     async transaction(decide) { return (await acquire()).transaction(decide); },
-    subscribe(listener) {
+    subscribe(listener, onUnavailable) {
       listeners.add(listener);
+      if (onUnavailable) {
+        unavailableHandlers.set(listener, onUnavailable);
+        void acquire().then(async (opened) => {
+          if (unavailableReason === undefined || !unavailableHandlers.has(listener)) return;
+          // Storage recovers at an unchanged revision without delivering a state, so the
+          // remembered reason may be stale; only a failing read confirms it still holds.
+          try { await opened.read(); } catch {
+            if (unavailableReason === undefined || !unavailableHandlers.has(listener)) return;
+            try { onUnavailable(unavailableReason); } catch { /* Observers cannot change a durable receipt. */ }
+            return;
+          }
+          unavailableReason = undefined;
+        }, () => {});
+      }
       // Subscription is synchronous, while persistence acquisition is not.
       // Snapshot/history surface initialization errors; close also retains them.
       // Consumers subscribe before reading, then catch up from the durable cursor.
       void acquire().catch(() => {});
-      return () => { listeners.delete(listener); };
+      return () => { listeners.delete(listener); unavailableHandlers.delete(listener); };
     },
   };
   const importHostId = randomUUID();
@@ -84,6 +108,7 @@ export function createNativeWorkLedgerOwner(options: {
       try { stopObservation?.(); } catch (error) { failures.push(error); }
       stopObservation = undefined;
       listeners.clear();
+      unavailableHandlers.clear();
       try { await storage?.close(); } catch (error) { failures.push(error); }
       if (failures.length > 0) throw new AggregateError(failures, 'Native work ledger cleanup failed');
     })();

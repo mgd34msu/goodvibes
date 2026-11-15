@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isolatedTestEnvironment } from '@goodvibes-jev/engine/toolchain/test-runner';
+import { assertEmittedBuildCurrent } from '../helpers/emitted-build.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const launcher = fileURLToPath(new URL('../../../bin/goodvibes-daemon', import.meta.url));
@@ -14,6 +15,7 @@ function writeJson(path: string, data: unknown) {
   writeFileSync(path, JSON.stringify(data));
 }
 function launch(args: readonly string[], env: NodeJS.ProcessEnv, cwd: string) {
+  assertEmittedBuildCurrent();
   // Invoke the package's actual installed launcher and emitted daemon code.
   // The same owned loopback-only guard as the test runner protects its child.
   const child = spawn(process.execPath, ['--no-env-file', '--preload', preload, launcher, ...args], {

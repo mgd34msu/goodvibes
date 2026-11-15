@@ -107,9 +107,6 @@ export const coreConfigDefaults = {
     llmModel: '',
     speed: 1.0,
   },
-  release: {
-    channel: 'stable',
-  },
   daemon: {
     enabled: true,
     timezone: '',
@@ -394,14 +391,14 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'permissions.tools.read',
     type: 'enum',
     default: 'allow',
-    description: 'Permission for file read operations (read, find, analyze). Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.',
+    description: 'Permission for the read tool only; find and analyze have their own settings below. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.',
     enumValues: ['allow', 'prompt', 'deny'],
   },
   {
     key: 'permissions.tools.write',
     type: 'enum',
     default: 'prompt',
-    description: 'Permission for file write operations. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.',
+    description: 'Permission for file write operations, and for changing settings through the goodvibes_settings tool. Explicit deny blocks this tool in safe modes; allow and saved prompt follow the selected execution mode.',
     enumValues: ['allow', 'prompt', 'deny'],
   },
   {
@@ -534,7 +531,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     type: 'boolean',
     default: true,
     description:
-      'Master switch for the per-command exec sandbox (bubblewrap on Linux): the workspace is writable, the rest of the filesystem is read-only, /tmp is isolated, and network is disabled unless a command is on sandbox.egressAllowlist. Default ON where the host probe passes; honestly reported unavailable when bubblewrap is not present, leaving the exec path unchanged.',
+      'Master switch for the per-command exec sandbox (bubblewrap on Linux): the workspace is writable, the rest of the filesystem is read-only, /tmp is isolated, and network is disabled unless a command is on sandbox.egressAllowlist. Default ON where the host probe passes; honestly reported unavailable when bubblewrap is not present, leaving the exec path unchanged. Turning it on takes effect at the next start (the host is probed then); sandbox.egressAllowlist and sandbox.workspaceWritable apply from the next command.',
   },
   {
     key: 'sandbox.judgment',
@@ -629,13 +626,6 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     description: 'Where contract lifecycle updates (status, checks, corrections, owner questions, the outcome) render by default: panel, conversation, or both',
     enumValues: ['panel', 'conversation', 'both'],
   },
-  {
-    key: 'release.channel',
-    type: 'enum',
-    default: 'stable',
-    description: 'Preferred release channel for install/update flows',
-    enumValues: ['stable', 'preview'],
-  },
 ];
 
 export const coreTailConfigSettings: ConfigSettingDefinition[] = [
@@ -694,7 +684,7 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     key: 'tools.hooksFile',
     type: 'string',
     default: 'hooks.json',
-    description: 'Hook configuration file name (relative to the host .goodvibes data directory)',
+    description: 'Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)',
   },
   {
     key: 'tools.overflowSpillBackend',

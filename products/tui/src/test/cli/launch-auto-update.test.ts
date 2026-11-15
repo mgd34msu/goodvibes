@@ -278,7 +278,7 @@ describe('runLaunchAutoUpdate', () => {
     expect(outcome).toEqual({ action: 'continue', reason: 'update-deferred' });
     expect(signalSeen?.aborted).toBe(true);
     expect(printed).toContain('update deferred: will retry next launch');
-    expect(printed.some((line) => line.includes('updated in background'))).toBe(false);
+    expect(printed.some((line) => line.includes('still finishing in background'))).toBe(false);
   });
 
   test('a budget that runs out AFTER the swap began names the installed version and never cancels the swap', async () => {
@@ -298,10 +298,40 @@ describe('runLaunchAutoUpdate', () => {
     const outcome = await runLaunchAutoUpdate(options);
 
     expect(outcome).toEqual({ action: 'continue', reason: 'update-in-background' });
-    expect(printed).toEqual(['downloading v1.1.0…', 'updated in background; restart to use v1.1.0']);
+    expect(printed).toEqual(['downloading v1.1.0…', 'update still finishing in background; restart to use v1.1.0 once it completes']);
     expect(printed).not.toContain('update deferred: will retry next launch');
     // Cancellation is never signalled once the files are being replaced.
     expect(signalSeen?.aborted).toBe(false);
+  });
+
+  test('a swap that fails after the budget ran out is reported, not swallowed', async () => {
+    let fail!: (error: unknown) => void;
+    const { options, printed } = baseOptions({
+      applyTimeoutMs: 10,
+      apply: (applyOptions) => {
+        applyOptions.progress!.begun = true;
+        return new Promise<void>((_resolve, reject) => { fail = reject; });
+      },
+    });
+    const outcome = await runLaunchAutoUpdate(options);
+    expect(outcome).toEqual({ action: 'continue', reason: 'update-in-background' });
+    fail(new Error('rename failed'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(printed.at(-1)).toContain('background update failed: rename failed');
+  });
+
+  test('a download cancelled by the budget stays quiet when it rejects', async () => {
+    let fail!: (error: unknown) => void;
+    const { options, printed } = baseOptions({
+      applyTimeoutMs: 10,
+      apply: () => new Promise<void>((_resolve, reject) => { fail = reject; }),
+    });
+    await runLaunchAutoUpdate(options);
+    fail(new Error('aborted'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(printed).toEqual(['downloading v1.1.0…', 'update deferred: will retry next launch']);
   });
 
   test('the background receipt names the version the install actually resolved, not just the checked tag', async () => {
@@ -319,7 +349,7 @@ describe('runLaunchAutoUpdate', () => {
     const outcome = await runLaunchAutoUpdate(options);
 
     expect(outcome).toEqual({ action: 'continue', reason: 'update-in-background' });
-    expect(printed).toEqual(['downloading v1.1.0…', 'updated in background; restart to use v1.2.0']);
+    expect(printed).toEqual(['downloading v1.1.0…', 'update still finishing in background; restart to use v1.2.0 once it completes']);
   });
 
   test('never throws: even a fetch that rejects after the race resolves leaves the outcome honest', async () => {

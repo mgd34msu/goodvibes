@@ -70,7 +70,7 @@ export function streamDeltaAccumulated(frame: HostedStreamFrame): string | null 
   return typeof value === 'string' ? value : '';
 }
 
-/** A completed/errored/cancelled turn rendered as one appended message, or
+/** A completed/errored/cancelled/context-overflowed turn rendered as one appended message, or
  * null when the frame is not a terminal turn event. */
 export function hostedLiveMessageFromTurnFrame(frame: HostedStreamFrame, now: () => number = Date.now): HostedLiveMessage | null {
   switch (frame.type) {
@@ -84,15 +84,33 @@ export function hostedLiveMessageFromTurnFrame(frame: HostedStreamFrame, now: ()
     }
     case 'TURN_CANCEL':
       return { role: 'system', content: 'Turn cancelled.', at: now() };
+    case 'PREFLIGHT_FAIL': {
+      if (!endsTurn(frame)) return null;
+      const reason = frame.payload.reason;
+      return {
+        role: 'system',
+        content: `Turn could not start: ${typeof reason === 'string' && reason ? reason : 'the context window is full'}. Compact the conversation or start a new session.`,
+        at: now(),
+      };
+    }
     default:
       return null;
   }
 }
 
+/** PREFLIGHT_FAIL ends a turn only when the context window was the reason. The daemon also
+ * answers a rejected duplicate submission with PREFLIGHT_FAIL (`preflight_failed`) under a
+ * fresh turn id while the real turn is still running, which must not clear that turn's live
+ * text or tool calls. */
+function endsTurn(frame: HostedStreamFrame): boolean {
+  return frame.payload.stopReason === 'context_overflow';
+}
+
 /** True for a frame that means the turn is no longer in flight, the local
  * "streaming" indicator drops and any live-text buffer clears. */
 export function isTerminalTurnFrame(frame: HostedStreamFrame): boolean {
-  return frame.type === 'TURN_COMPLETED' || frame.type === 'TURN_ERROR' || frame.type === 'TURN_CANCEL';
+  return frame.type === 'TURN_COMPLETED' || frame.type === 'TURN_ERROR' || frame.type === 'TURN_CANCEL'
+    || (frame.type === 'PREFLIGHT_FAIL' && endsTurn(frame));
 }
 
 /** Read a `tools` domain frame into an active-call transition, or null for a

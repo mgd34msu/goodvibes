@@ -20,6 +20,8 @@ export interface HomeGraphQualityReading {
   readonly batteries: readonly { readonly name: string; readonly version: number }[];
   readonly model?: string | undefined;
   readonly requestedModel?: string | undefined;
+  /** The device's readings did not settle; it has no answers and keeps its existing issues. */
+  readonly unanswered?: 'unsettled' | undefined;
 }
 export type HomeGraphQualityHoldReason = 'unconfigured' | 'unavailable' | 'unsettled' | 'malformed' | 'stale' | 'aborted' | 'budget' | 'protected-input';
 export class HomeGraphQualityHeldError extends Error {

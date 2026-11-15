@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -356,4 +355,16 @@ test('owned unreleased v3 physical checkpoints remain readable without inventing
     expect(baselinePathUnchanged(f.root, cold.baseline!, 'owner-dirty')).toBeUndefined();
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
   } finally { hashing.mockRestore(); f.store.dispose(); }
+});
+
+test('a baseline is taken when a dirty file is larger than the launch snapshot bound', () => {
+  const f = fixture();
+  try {
+    const big = join(f.root, 'big.bin'); writeFileSync(big, Buffer.alloc(9 * 1024 * 1024, 1));
+    const baseline = takeBaseline(f.root)!;
+    expect(Object.keys(baseline.dirty)).toContain('big.bin');
+    expect(baselinePathUnchanged(f.root, baseline, 'big.bin')).toBe(true);
+    writeFileSync(big, Buffer.alloc(9 * 1024 * 1024, 2));
+    expect(baselinePathUnchanged(f.root, baseline, 'big.bin')).toBe(false);
+  } finally { f.store.dispose(); }
 });

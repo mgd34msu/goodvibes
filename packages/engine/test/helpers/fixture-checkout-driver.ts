@@ -210,6 +210,8 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
 
   /** Every fill this driver was asked to perform, for ordering assertions. */
   readonly fillLog: { target: string; kind: CardFieldKind | 'plain' }[] = [];
+  /** Every call to `submitOrder`, counted before it can refuse or throw. */
+  submitAttempts = 0;
 
   constructor(private readonly options: FixtureDriverOptions) {}
 
@@ -325,6 +327,7 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     readonly challenge?: CheckoutChallenge | null | undefined;
     readonly verified: boolean;
   }> {
+    this.submitAttempts += 1;
     const expected = this.verifiedTerms;
     if (!expected || target !== expected.submitTarget || !await this.verifyTerms(expected)) throw new CheckoutSubmitRefused('The fixture checkout no longer matches its current quote.');
     this.verifiedTerms = null;

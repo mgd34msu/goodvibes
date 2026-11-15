@@ -12,14 +12,14 @@
     "method": "GET",
     "path": "/api/control-plane/auth",
     "status": 200,
-    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-8c0a03f3-52b1-4f92-bb01-ad2a7d11d6e8\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
+    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-536adace-baa8-4604-855b-67aa256ec7ab\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:batch\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:cloudflare\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:batch\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:cloudflare\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
   },
   "project": {
     "methodId": "workLedger.project",
     "method": "GET",
     "path": "/api/work-ledger/project",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-ec337bd5ca\"}"
+    "body": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\"}"
   },
   "lookupBefore": {
     "methodId": "workLedger.intake.get",
@@ -44,7 +44,7 @@
       "unsupportedSources": []
     },
     "requestJson": "{\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"text\":\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \",\"unsupportedSources\":[]}",
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\"}}"
   },
   "getCaptured": {
     "methodId": "workLedger.intake.get",
@@ -55,11 +55,11 @@
       "inputId": "webui-native-execution-cancelled-execution-input"
     },
     "requestJson": "{\"inputId\":\"webui-native-execution-cancelled-execution-input\"}",
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\"}}"
   },
   "transition": {
     "inputId": "webui-native-execution-cancelled-execution-input",
-    "sourceRevision": "0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d"
+    "sourceRevision": "3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d"
   },
   "admit": {
     "methodId": "workLedger.intake.admit",
@@ -68,10 +68,10 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-execution-cancelled-execution-input",
-      "sourceRevision": "0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d"
+      "sourceRevision": "3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d"
     },
-    "requestJson": "{\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\"}",
-    "body": "{\"kind\":\"work\",\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\"},\"receipt\":{\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"ledgerRevision\":1,\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"5a5ea0477c0387861e2b17f36e3317e35a8d52b467b068ddf1c8b4ee59e7a0ee\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":123}],\"admissionDecisionId\":\"b2d99ce7-e333-4971-ad31-055a3c2cf1ba\",\"judgmentDecisionIds\":[\"01a11000-1012-7000-964e-1e6745bdd09f\",\"01a11000-104c-7000-a989-80df114f5e2a\",\"01a11000-1053-7000-b5c2-9af73284e055\",\"01a11000-1060-7000-9a6a-cab00c979c16\"]},\"goal\":\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \",\"criteria\":[\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \"]}}"
+    "requestJson": "{\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\"}",
+    "body": "{\"kind\":\"work\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\"},\"receipt\":{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"ledgerRevision\":1,\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"52dff852be12bbf8211737d73b620db32a58cad668ce495938c912408c90de40\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":123}],\"admissionDecisionId\":\"fe5580e8-837d-4a33-9a2d-351e3c01e889\",\"judgmentDecisionIds\":[\"abkbnjbi-gjhi-haaa-jcbo-pfbmjgbabhdl\",\"abkbnjbi-gkep-haaa-jkfp-edccacolnfgb\",\"abkbnjbi-gkgh-haaa-ioke-ifmbgojkocjb\",\"abkbnjbi-gkik-haaa-loim-ncflfkdiiila\"]},\"goal\":\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \",\"criteria\":[\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \"]}}"
   },
   "get": {
     "methodId": "workLedger.intake.get",
@@ -82,12 +82,12 @@
       "inputId": "webui-native-execution-cancelled-execution-input"
     },
     "requestJson": "{\"inputId\":\"webui-native-execution-cancelled-execution-input\"}",
-    "body": "{\"kind\":\"work\",\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\"},\"receipt\":{\"projectId\":\"workspace-ec337bd5ca\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"ledgerRevision\":1,\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"c6f99af37d306f0275f0b95fc193ff758a8656659c2a6b3f85ae6727d9038659\",\"sourceRevision\":\"0c6471859d9e552ac03b2036203acd343dcb6ad3e1a24b5d809a0440157dab8d\",\"sessionId\":\"native-work:workspace-ec337bd5ca\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"5a5ea0477c0387861e2b17f36e3317e35a8d52b467b068ddf1c8b4ee59e7a0ee\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":123}],\"admissionDecisionId\":\"b2d99ce7-e333-4971-ad31-055a3c2cf1ba\",\"judgmentDecisionIds\":[\"01a11000-1012-7000-964e-1e6745bdd09f\",\"01a11000-104c-7000-a989-80df114f5e2a\",\"01a11000-1053-7000-b5c2-9af73284e055\",\"01a11000-1060-7000-9a6a-cab00c979c16\"]},\"goal\":\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \",\"criteria\":[\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \"]}}"
+    "body": "{\"kind\":\"work\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\"},\"receipt\":{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"requestId\":\"webui-native-execution-cancelled-execution-request\",\"inputId\":\"webui-native-execution-cancelled-execution-input\",\"ledgerRevision\":1,\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"source\":{\"version\":2,\"sourceId\":\"lgblhgca-deej-emeo-kddn-bkjkkdiibbmo\",\"sourceRevision\":\"3266a3cc3834290be47c1b47d4db93ae6be871fb2da4515e3d626b35a398b41d\",\"sessionId\":\"native-work:project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"offsetEncoding\":\"utf16\",\"proposalRevision\":\"52dff852be12bbf8211737d73b620db32a58cad668ce495938c912408c90de40\",\"spans\":[{\"partId\":\"input\",\"start\":0,\"end\":123}],\"admissionDecisionId\":\"fe5580e8-837d-4a33-9a2d-351e3c01e889\",\"judgmentDecisionIds\":[\"abkbnjbi-gjhi-haaa-jcbo-pfbmjgbabhdl\",\"abkbnjbi-gkep-haaa-jkfp-edccacolnfgb\",\"abkbnjbi-gkgh-haaa-ioke-ifmbgojkocjb\",\"abkbnjbi-gkik-haaa-loim-ncflfkdiiila\"]},\"goal\":\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \",\"criteria\":[\"  Answer this request yourself without delegation. 🌻\\nSay native execution is complete.\\nSay native execution is complete.  \"]}}"
   },
   "identity": {
-    "projectId": "workspace-ec337bd5ca",
-    "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-    "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+    "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+    "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+    "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
     "expectedRevision": {
       "work": 1,
       "criteria": 1,
@@ -100,17 +100,17 @@
     "path": "/api/work-ledger/execution/status",
     "status": 404,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"error\":\"Native work execution not-found\",\"code\":\"NATIVE_EXECUTION_NOT_FOUND\",\"category\":\"not_found\",\"status\":404}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"error\":\"Native work execution: not-found. No execution exists for this work and attempt; start it first.\",\"code\":\"NATIVE_EXECUTION_NOT_FOUND\",\"category\":\"not_found\",\"status\":404,\"errorRef\":\"2a199dbf-6e74-4aa8-ad30-e244c7b8ac6e\"}"
   },
   "start": {
     "methodId": "workLedger.execution.start",
@@ -118,17 +118,17 @@
     "path": "/api/work-ledger/execution/start",
     "status": 200,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"kind\":\"execution\",\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"launch-claimed\",\"recovery\":\"available\",\"receipt\":{\"contractId\":\"ctr-2b835b6a\",\"ownerAgentId\":\"agent-8fa4efe9\"},\"settlement\":{\"state\":\"pending\"},\"progress\":{\"status\":\"queued\",\"sessionMode\":false,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":0,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"kind\":\"execution\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"launch-claimed\",\"recovery\":\"available\",\"receipt\":{\"contractId\":\"ctr-lddffffl-memp-ecfe-ikoa-ngegppfohhpo\",\"ownerAgentId\":\"agent-65b1c77f\"},\"integration\":{\"state\":\"unavailable\",\"reason\":\"no-engine\"},\"settlement\":{\"state\":\"pending\"},\"progress\":{\"status\":\"queued\",\"sessionMode\":false,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":0,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
   },
   "status": {
     "methodId": "workLedger.execution.status",
@@ -136,17 +136,17 @@
     "path": "/api/work-ledger/execution/status",
     "status": 200,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"kind\":\"execution\",\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"launch-claimed\",\"recovery\":\"available\",\"receipt\":{\"contractId\":\"ctr-2b835b6a\",\"ownerAgentId\":\"agent-8fa4efe9\"},\"settlement\":{\"state\":\"pending\"},\"progress\":{\"status\":\"running\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"kind\":\"execution\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"launch-claimed\",\"recovery\":\"available\",\"receipt\":{\"contractId\":\"ctr-lddffffl-memp-ecfe-ikoa-ngegppfohhpo\",\"ownerAgentId\":\"agent-65b1c77f\"},\"integration\":{\"state\":\"not-applicable\",\"contractId\":\"ctr-lddffffl-memp-ecfe-ikoa-ngegppfohhpo\",\"reason\":\"session-mode\"},\"settlement\":{\"state\":\"pending\"},\"progress\":{\"status\":\"running\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
   },
   "cancel": {
     "methodId": "workLedger.execution.cancel",
@@ -154,17 +154,17 @@
     "path": "/api/work-ledger/execution/cancel",
     "status": 200,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"kind\":\"execution\",\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"cancelled\",\"recovery\":\"cancelled\",\"receipt\":{\"contractId\":\"ctr-2b835b6a\",\"ownerAgentId\":\"agent-8fa4efe9\"},\"settlement\":{\"state\":\"failed\"},\"progress\":{\"status\":\"cancelled\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"kind\":\"execution\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"cancelled\",\"recovery\":\"cancelled\",\"receipt\":{\"contractId\":\"ctr-lddffffl-memp-ecfe-ikoa-ngegppfohhpo\",\"ownerAgentId\":\"agent-65b1c77f\"},\"integration\":{\"state\":\"unavailable\",\"reason\":\"not-live\"},\"settlement\":{\"state\":\"failed\",\"reason\":\"cancelled\"},\"progress\":{\"status\":\"cancelled\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
   },
   "afterCancel": {
     "methodId": "workLedger.execution.status",
@@ -172,17 +172,17 @@
     "path": "/api/work-ledger/execution/status",
     "status": 200,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"kind\":\"execution\",\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"cancelled\",\"recovery\":\"cancelled\",\"receipt\":{\"contractId\":\"ctr-2b835b6a\",\"ownerAgentId\":\"agent-8fa4efe9\"},\"settlement\":{\"state\":\"failed\"},\"progress\":{\"status\":\"cancelled\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"kind\":\"execution\",\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1},\"currentAttempt\":true,\"stale\":false,\"state\":\"cancelled\",\"recovery\":\"cancelled\",\"receipt\":{\"contractId\":\"ctr-lddffffl-memp-ecfe-ikoa-ngegppfohhpo\",\"ownerAgentId\":\"agent-65b1c77f\"},\"integration\":{\"state\":\"unavailable\",\"reason\":\"not-live\"},\"settlement\":{\"state\":\"failed\",\"reason\":\"cancelled\"},\"progress\":{\"status\":\"cancelled\",\"sessionMode\":true,\"semanticState\":null,\"stage\":null,\"retrying\":false,\"units\":{\"total\":1,\"passed\":0,\"failed\":0},\"criteria\":{\"total\":1,\"met\":0,\"unmet\":0,\"unshown\":0}}}"
   },
   "resume": {
     "methodId": "workLedger.execution.resume",
@@ -190,16 +190,16 @@
     "path": "/api/work-ledger/execution/resume",
     "status": 409,
     "requestBody": {
-      "projectId": "workspace-ec337bd5ca",
-      "workId": "work-c0175a09-e79e-463f-b6d5-5225149e8be5",
-      "attemptId": "attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3",
+      "projectId": "project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd",
+      "workId": "work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff",
+      "attemptId": "attempt-nglikdfj-plge-edoo-jpan-omiafjodheok",
       "expectedRevision": {
         "work": 1,
         "criteria": 1,
         "attempt": 1
       }
     },
-    "requestJson": "{\"projectId\":\"workspace-ec337bd5ca\",\"workId\":\"work-c0175a09-e79e-463f-b6d5-5225149e8be5\",\"attemptId\":\"attempt-3c3d1620-a356-4bf4-a17b-255a0b9de5e3\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
-    "body": "{\"error\":\"Native work execution stale\",\"code\":\"NATIVE_EXECUTION_STALE\",\"category\":\"unknown\",\"status\":409}"
+    "requestJson": "{\"projectId\":\"project-omhgnbed-hlpb-edjk-kaif-ekckalbmikpd\",\"workId\":\"work-jbbaichi-jjbg-ella-jdjm-gchmkgdfdpff\",\"attemptId\":\"attempt-nglikdfj-plge-edoo-jpan-omiafjodheok\",\"expectedRevision\":{\"work\":1,\"criteria\":1,\"attempt\":1}}",
+    "body": "{\"error\":\"Native work execution: stale. The work, attempt, authority or workspace scope changed since it was read; read the work again and start from its current revisions.\",\"code\":\"NATIVE_EXECUTION_STALE\",\"category\":\"unknown\",\"status\":409,\"errorRef\":\"b0f63374-7d68-4f53-96c6-54d4b81fa5bf\"}"
   }
 }

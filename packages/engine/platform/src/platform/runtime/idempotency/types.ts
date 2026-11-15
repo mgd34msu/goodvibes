@@ -71,4 +71,16 @@ export interface IdempotencyStoreConfig {
    * @default 5_000
    */
   maxRecords?: number | undefined;
+  /**
+   * How long an `in-flight` record may go without being finalized before it is
+   * treated as abandoned (its caller was torn down without `markComplete` or
+   * `markFailed`). An abandoned record no longer blocks a retry and is swept.
+   * Set it above the longest legitimate run, since a retry of a run that is
+   * still going would execute it twice.
+   *
+   * @default 7_200_000 (2 hours)
+   */
+  inFlightTimeoutMs?: number | undefined;
+  /** Clock override for tests. @default Date.now */
+  now?: (() => number) | undefined;
 }

@@ -97,25 +97,34 @@ test('actual recorded profile publication retains its native final restriction e
 test('native profile provenance evidence retires with its real registry invocation', async () => {
   const f = fixture(); expect((await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root })).success).toBe(true);
   const before = readFileSync(f.profilePath, 'utf8');
-  await expect(f.profile.append({ authority: 'autonomous', surface: 'agent', said: '', section: 'Notes', text: 'After retirement' }, f.retained)).rejects.toThrow();
+  await expect(f.profile.append({ authority: 'autonomous', surface: 'agent', said: '', section: 'Notes', text: 'After retirement' }, f.retained)).rejects.toThrow('Tool input projection stale.');
   expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
 });
 
 test.each(['file', 'parent'] as const)('native pre-admission profile %s ABA is refused', async kind => {
-  const f = fixture(), before = readFileSync(f.profilePath, 'utf8');
+  const f = fixture(), before = readFileSync(f.profilePath, 'utf8'); let swapped = false;
   const result = await admitLocalState(f.register, 'occasions', { action: 'confirm', title: 'Family day', date: '03-14', kind: 'remember-only' }, { directory: f.root,
-    afterCapture() { const path = kind === 'file' ? f.profilePath : f.root, saved = `${path}.saved`; renameSync(path, saved); renameSync(saved, path); } });
-  expect(result.success).toBe(false); expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
+    afterCapture() { swapped = true; const path = kind === 'file' ? f.profilePath : f.root, saved = `${path}.saved`; renameSync(path, saved); renameSync(saved, path); } });
+  expect(swapped).toBe(true);
+  expect(result.success).toBe(false); expect(result.error).toBe('Tool input projection stale.'); expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
 });
 
-test.each(['cancel', 'revoke'] as const)('actual native state write holds %s across its read await', async action => {
-  const f = fixture(), controller = new AbortController(); let mode: PermissionMode = 'prompt';
+test.each(['cancel', 'revoke'] as const)('actual native state write holds %s between reading the interview and writing the answer', async action => {
+  const f = fixture(), controller = new AbortController(); let mode: PermissionMode = 'prompt', reached = false;
   await f.state.putInterview({ id: 'gift-interview', occasionId: 'family-day', occurrence: '2026-03-14', startedAt: 1,
     steps: [{ id: 'step-1', prompt: 'What did you choose?', opensFrom: '' }], answers: [] });
-  const before = readFileSync(f.statePath, 'utf8'), read = f.state.interview.bind(f.state);
-  f.state.interview = async id => { const value = await read(id); if (action === 'cancel') controller.abort(); else mode = 'plan'; return value; };
+  const before = readFileSync(f.statePath, 'utf8'), update = f.state.updateInterview.bind(f.state);
+  // The answer is computed from the stored interview; the owner cancels or loses permission before it is written.
+  f.state.updateInterview = (id, mutate, assertCurrent) => update(id, current => {
+    const next = mutate(current); reached = true;
+    if (action === 'cancel') controller.abort(); else mode = 'plan';
+    return next;
+  }, assertCurrent);
   const result = await admitLocalState(f.register, 'occasions', { action: 'interview_answer' }, { directory: f.root, signal: controller.signal, currentMode: () => mode });
-  expect(result.success).toBe(false); expect(readFileSync(f.statePath, 'utf8')).toBe(before);
+  expect(reached).toBe(true);
+  expect(result.success).toBe(false);
+  expect(result.error).toBe(action === 'cancel' ? 'The operation was aborted.' : 'Autonomous execution authority, source or scope changed');
+  expect(readFileSync(f.statePath, 'utf8')).toBe(before);
 });
 
 test.each([
@@ -138,6 +147,7 @@ test.each([
     directory: f.root, signal: controller.signal, currentMode: () => mode,
   });
   expect(reached).toBe(true); expect(result.success).toBe(false); expect(publications).toBe(0);
+  expect(result.error).toBe(action === 'cancel' ? 'The operation was aborted.' : 'Tool input projection stale.');
   expect(readFileSync(f.profilePath, 'utf8')).toBe(before);
 });
 

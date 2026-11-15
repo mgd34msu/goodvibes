@@ -130,13 +130,13 @@ test('failed partial stream identity is discarded before an actual transport ret
       else controller.error(Object.assign(new Error('fixture stream dropped'), { status: 503 }));
     } }));
   });
-  const result = await new GeminiProvider('fixture-key').chat({ ...request(), onRetry: () => { retries++; } });
+  const result = await new GeminiProvider('fixture-key', undefined, undefined, { initialDelayMs: 0, maxDelayMs: 0 }).chat({ ...request(), onRetry: () => { retries++; } });
   expect(attempts).toBe(2);
   expect(retries).toBe(1);
   expect(result.responseIdentity?.hasUnparsedDataChunks).toBe(false);
   expect(result.responseIdentity?.modelVersion).toEqual({ status: 'observed', value: 'successful-version' });
   expect(result.responseIdentity?.responseId).toEqual({ status: 'observed', value: 'successful-response' });
-}, 10_000);
+});
 
 test('synthetic wrapper preserves the successful response and its adapter request unchanged', async () => {
   installFetch(() => stream([{ modelVersion: 'backend-version', responseId: 'backend-response' }, contentChunk]));
@@ -174,7 +174,7 @@ test('malformed SSE data exposes a parse gap without discarding valid identity o
     controller.close();
   } })));
   let retries = 0;
-  const result = await new GeminiProvider('fixture-key').chat({ ...request(), onRetry: () => { retries++; } });
+  const result = await new GeminiProvider('fixture-key', undefined, undefined, { initialDelayMs: 0, maxDelayMs: 0 }).chat({ ...request(), onRetry: () => { retries++; } });
   expect(result.responseIdentity).toEqual({ requested, source: 'provider-reported', hasUnparsedDataChunks: true, modelVersion: { status: 'observed', value: 'valid-version' }, responseId: { status: 'observed', value: 'valid-response' } });
   expect(result.content).toBe('hello');
   expect(result.stopReason).toBe('completed');

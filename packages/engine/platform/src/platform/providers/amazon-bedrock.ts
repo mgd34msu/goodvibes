@@ -34,9 +34,19 @@ export const BEDROCK_DATED_STATIC_MODELS: readonly string[] = [
 ];
 export const BEDROCK_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
 
-function hasAwsCredentials(): boolean {
+/**
+ * The Bedrock bearer token: one handed in at construction (resolved by the
+ * registry from the environment or the secrets store) first, then the
+ * environment. The AWS access-key pair and the profile are environment-only: a
+ * stored pair would need both values read before the signing path is chosen.
+ */
+export function resolveBedrockBearerToken(injected?: string): string | undefined {
+  return injected?.trim() || process.env['AWS_BEARER_TOKEN_BEDROCK']?.trim() || undefined;
+}
+
+export function hasAwsCredentials(injectedBearerToken?: string): boolean {
   return Boolean(
-    process.env['AWS_BEARER_TOKEN_BEDROCK']
+    resolveBedrockBearerToken(injectedBearerToken)
     || (process.env['AWS_ACCESS_KEY_ID'] && process.env['AWS_SECRET_ACCESS_KEY'])
     || process.env['AWS_PROFILE'],
   );
@@ -79,10 +89,10 @@ interface BedrockListFoundationModelsResponse {
  * ListFoundationModels), just a different runtime data-plane host, so one
  * live-discovery fetcher serves both providers.
  */
-export async function fetchBedrockModelIds(): Promise<string[]> {
+export async function fetchBedrockModelIds(options: { readonly bearerToken?: string | undefined } = {}): Promise<string[]> {
   const region = resolveBedrockRegion();
   const url = `https://bedrock.${region}.amazonaws.com/foundation-models`;
-  const bearerToken = process.env['AWS_BEARER_TOKEN_BEDROCK']?.trim();
+  const bearerToken = resolveBedrockBearerToken(options.bearerToken);
   let headers: Record<string, string>;
   if (bearerToken) {
     headers = { Authorization: `Bearer ${bearerToken}`, Accept: 'application/json' };
@@ -120,9 +130,14 @@ export async function fetchBedrockModelIds(): Promise<string[]> {
 export class AmazonBedrockProvider extends AnthropicMessagesProvider {
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   private readonly modelsCachePath: string | undefined;
+  private readonly bearerToken: string | undefined;
 
-  constructor(modelsCachePath?: string) {
-    const configured = hasAwsCredentials();
+  /**
+   * @param options.bearerToken A bearer token the registry resolved (environment
+   * first, then the secrets store); without one the environment is read per call.
+   */
+  constructor(modelsCachePath?: string, options: { readonly bearerToken?: string | undefined } = {}) {
+    const bearerToken = options.bearerToken;
     super({
       name: 'amazon-bedrock',
       label: 'Amazon Bedrock',
@@ -134,7 +149,7 @@ export class AmazonBedrockProvider extends AnthropicMessagesProvider {
       // naming it instead of preventing the daemon from starting.
       createClient: async () => {
         const { AnthropicBedrock } = await loadBedrockLibrary();
-        const apiKey = process.env['AWS_BEARER_TOKEN_BEDROCK']?.trim();
+        const apiKey = resolveBedrockBearerToken(bearerToken);
         const awsAccessKey = process.env['AWS_ACCESS_KEY_ID']?.trim();
         const awsSecretKey = process.env['AWS_SECRET_ACCESS_KEY']?.trim();
         const awsSessionToken = process.env['AWS_SESSION_TOKEN']?.trim();
@@ -152,26 +167,31 @@ export class AmazonBedrockProvider extends AnthropicMessagesProvider {
         }
         return new AnthropicBedrock(baseOptions);
       },
-      auth: {
-        mode: configured ? 'api-key' : 'anonymous',
-        configured,
-        detail: configured
-          ? 'AWS Bedrock credentials are available through bearer token or AWS credential resolution.'
-          : 'Configure AWS_BEARER_TOKEN_BEDROCK or AWS credentials/profile for Amazon Bedrock.',
-        envVars: ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_REGION'],
-        secretKeys: ['AWS_BEARER_TOKEN_BEDROCK'],
-        allowAnonymous: true,
-        anonymousConfigured: Boolean(process.env['AWS_PROFILE']),
-        anonymousDetail: 'The AWS credential provider chain can satisfy Bedrock auth without storing an API key in GoodVibes.',
+      // Read per call: credentials set or removed after boot change the answer.
+      auth: () => {
+        const configured = hasAwsCredentials(bearerToken);
+        return {
+          mode: configured ? 'api-key' : 'anonymous',
+          configured,
+          detail: configured
+            ? 'AWS Bedrock credentials are available through bearer token or AWS credential resolution.'
+            : 'Configure AWS_BEARER_TOKEN_BEDROCK or AWS credentials/profile for Amazon Bedrock.',
+          envVars: ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'AWS_REGION'],
+          secretKeys: ['AWS_BEARER_TOKEN_BEDROCK'],
+          allowAnonymous: true,
+          anonymousConfigured: Boolean(process.env['AWS_PROFILE']),
+          anonymousDetail: 'The AWS credential provider chain can satisfy Bedrock auth without storing an API key in GoodVibes.',
+        };
       },
       streamProtocol: 'anthropic-sdk-stream',
       notes: ['Claude-on-Bedrock models are exposed through the Anthropic Bedrock SDK.'],
     });
     this.modelsCachePath = modelsCachePath;
+    this.bearerToken = bearerToken;
   }
 
   isConfigured(): boolean {
-    return hasAwsCredentials();
+    return hasAwsCredentials(this.bearerToken);
   }
 
   /**
@@ -190,7 +210,7 @@ export class AmazonBedrockProvider extends AnthropicMessagesProvider {
       datedStaticModels: BEDROCK_DATED_STATIC_MODELS,
       datedStaticAsOf: BEDROCK_DATED_STATIC_MODELS_AS_OF,
       isConfigured: this.isConfigured(),
-      fetchLive: () => fetchBedrockModelIds(),
+      fetchLive: () => fetchBedrockModelIds({ bearerToken: this.bearerToken }),
       force,
     });
     this.models.length = 0;

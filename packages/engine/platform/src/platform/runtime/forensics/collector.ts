@@ -7,7 +7,7 @@
  * - 'tasks' domain: TASK_FAILED, TASK_CANCELLED
  * - 'turn' domain: TURN_ERROR, TURN_CANCEL
  * - 'tools' domain: tool failures (permission denial, execution failure)
- * - Health cascade events from the ops/session domain
+ * - Health cascade events (CASCADE_APPLIED) on the session domain
  *
  * Reports are pushed to the ForensicsRegistry and a FORENSICS_REPORT_CREATED
  * event is emitted so the panel can refresh.
@@ -33,9 +33,19 @@ import { readSlowPhases } from './slow-phases.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import type { ForensicsRegistry } from './registry.js';
 import { emitForensicsReportCreated } from '../emitters/forensics.js';
+import { redactAtRestLine } from '../at-rest-persistence.js';
 
 /** Maximum orphaned trackers retained before evicting oldest entries. */
 const MAX_TRACKER_SIZE = 500;
+
+/**
+ * Error text from events is stored in reports and bundles, so credential-shaped
+ * spans are masked on the way in; a provider error can echo the key it was sent.
+ */
+function scrub(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  try { return redactAtRestLine(text); } catch { return '[REDACTED]'; }
+}
 
 /** Mutable state accumulated while a turn is in flight. */
 interface TurnTracker {
@@ -136,12 +146,25 @@ export class ForensicsCollector {
         this._handlePermissionEnvelope(env as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>);
       }))
     );
-    // Subscribe to session domain for cascade/compaction events
+    // Health cascades are emitted on the session domain.
+    this._unsubs.push(
+      this._bus.onDomain('session', (env) => this._collect('session', env as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>, () => {
+        this._handleCascadeEnvelope(env as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>);
+      }))
+    );
     this._unsubs.push(
       this._bus.onDomain('compaction', (env) => this._collect('compaction', env as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>, () => {
         this._handleCompactionEnvelope(env as RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>);
       }))
     );
+  }
+
+  /** Forget a turn's tracker and the tool calls that were mapped to it. */
+  private _dropTurn(turnId: string): void {
+    this._turns.delete(turnId);
+    for (const [callId, owner] of this._callToTurn) {
+      if (owner === turnId) this._callToTurn.delete(callId);
+    }
   }
 
   private _collect(
@@ -170,7 +193,8 @@ export class ForensicsCollector {
   private _handleTurnEnvelope(
     env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
-    const payload = env.payload as { type: string; turnId?: string; reason?: string; error?: string; response?: string; content?: string; toolCalls?: unknown[]; accumulated?: string; prompt?: string; stopReason?: string };
+    const raw = env.payload as { type: string; turnId?: string; reason?: string; error?: string; response?: string; content?: string; toolCalls?: unknown[]; accumulated?: string; prompt?: string; stopReason?: string };
+    const payload = { ...raw, reason: scrub(raw.reason), error: scrub(raw.error) };
     const turnId = payload.turnId;
     if (!turnId) return;
 
@@ -181,7 +205,7 @@ export class ForensicsCollector {
           const firstKey = this._turns.keys().next().value;
           if (firstKey !== undefined) {
             const evicted = this._turns.get(firstKey);
-            this._turns.delete(firstKey);
+            this._dropTurn(firstKey);
             logger.warn('Forensics collector evicted active turn tracker', {
               turnId: firstKey,
               sessionId: evicted?.sessionId,
@@ -225,7 +249,7 @@ export class ForensicsCollector {
         this._closePhase(t, 'turn', env.ts, 'failed', payload.type, payload.reason);
         this._addCausal(t, env.ts, `Preflight failed: ${payload.reason ?? 'unknown reason'}`, payload.type, true);
         this._finalise_turn(t, payload.stopReason ?? payload.reason, payload.reason ?? 'Preflight failed', false);
-        this._turns.delete(turnId);
+        this._dropTurn(turnId);
         break;
       }
       case 'STREAM_START': {
@@ -262,7 +286,7 @@ export class ForensicsCollector {
         const t = this._turns.get(turnId);
         if (!t) break;
         this._closePhase(t, 'turn', env.ts, 'succeeded', payload.type);
-        this._turns.delete(turnId);
+        this._dropTurn(turnId);
         break;
       }
       case 'TURN_ERROR': {
@@ -271,7 +295,7 @@ export class ForensicsCollector {
         this._closePhase(t, 'turn', env.ts, 'failed', payload.type, payload.error);
         this._addCausal(t, env.ts, `Turn error: ${payload.error ?? 'unknown error'}`, payload.type, true);
         this._finalise_turn(t, payload.stopReason, payload.error, false);
-        this._turns.delete(turnId);
+        this._dropTurn(turnId);
         break;
       }
       case 'TURN_CANCEL': {
@@ -280,7 +304,7 @@ export class ForensicsCollector {
         this._closePhase(t, 'turn', env.ts, 'cancelled', payload.type, payload.reason);
         this._addCausal(t, env.ts, `Turn cancelled: ${payload.reason ?? 'no reason given'}`, payload.type, false);
         this._finalise_turn(t, payload.stopReason ?? payload.reason, payload.reason, true);
-        this._turns.delete(turnId);
+        this._dropTurn(turnId);
         break;
       }
     }
@@ -291,7 +315,8 @@ export class ForensicsCollector {
   private _handleTaskEnvelope(
     env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
-    const payload = env.payload as { type: string; taskId?: string; agentId?: string; error?: string; reason?: string; description?: string; priority?: number; durationMs?: number; progress?: number; message?: string };
+    const raw = env.payload as { type: string; taskId?: string; agentId?: string; error?: string; reason?: string; description?: string; priority?: number; durationMs?: number; progress?: number; message?: string };
+    const payload = { ...raw, reason: scrub(raw.reason), error: scrub(raw.error) };
     const taskId = payload.taskId;
     if (!taskId) return;
 
@@ -379,7 +404,7 @@ export class ForensicsCollector {
   private _handleToolEnvelope(
     env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
-    const payload = env.payload as {
+    const raw = env.payload as {
       type: string;
       turnId?: string | undefined;
       callId?: string | undefined;
@@ -394,8 +419,11 @@ export class ForensicsCollector {
       limitCostUsd?: number | undefined;
       usedCostUsd?: number | undefined;
     };
+    const payload = { ...raw, error: scrub(raw.error) };
 
-    if (payload.callId && payload.turnId) {
+    // Only calls of a turn still being tracked are remembered, so a late event
+    // cannot re-add a call after its turn ended.
+    if (payload.callId && payload.turnId && this._turns.has(payload.turnId)) {
       this._callToTurn.set(payload.callId, payload.turnId);
     }
 
@@ -535,12 +563,33 @@ export class ForensicsCollector {
     }
   }
 
+  // ── Cascade handling ───────────────────────────────────────────────────────
+
+  /**
+   * A cascade applies to the session it names; one raised without a session
+   * (the health system's 'runtime' scope) concerns every turn and task in flight.
+   */
+  private _handleCascadeEnvelope(
+    env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
+  ): void {
+    const payload = env.payload as { type: string; ruleId?: string; source?: string; target?: string };
+    if (payload.type !== 'CASCADE_APPLIED') return;
+    const wholeRuntime = !env.sessionId || env.sessionId === 'runtime';
+    const description = `Health cascade ${payload.ruleId ?? 'unknown rule'} applied: ${payload.source ?? 'unknown'} -> ${payload.target ?? 'unknown'}`;
+    for (const t of [...this._turns.values(), ...this._tasks.values()]) {
+      if (!wholeRuntime && t.sessionId !== env.sessionId) continue;
+      t.hasCascadeEvents = true;
+      t.cascadeEvents.push(this._addCausal(t, env.ts, description, payload.type, false));
+    }
+  }
+
   // ── Compaction handling ────────────────────────────────────────────────────
 
   private _handleCompactionEnvelope(
     env: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
-    const payload = env.payload as { type: string; turnId?: string; error?: string };
+    const raw = env.payload as { type: string; turnId?: string; error?: string };
+    const payload = { ...raw, error: scrub(raw.error) };
     if (payload.type !== 'COMPACTION_FAILED') return;
 
     // Mark all active turns as having a compaction error
@@ -752,15 +801,17 @@ export class ForensicsCollector {
     sourceEventType: string,
     isRootCause: boolean,
     context?: Record<string, string | number | boolean>,
-  ): void {
-    t.causalChain.push({
+  ): CausalChainEntry {
+    const entry: CausalChainEntry = {
       seq: ++t._causalSeq,
       ts,
       description,
       sourceEventType,
       isRootCause,
       context,
-    });
+    };
+    t.causalChain.push(entry);
+    return entry;
   }
 
   /**
@@ -773,11 +824,16 @@ export class ForensicsCollector {
   }
 
   private _publishReport(
-    report: FailureReport,
+    built: FailureReport,
     context: { turnId?: string | undefined; taskId?: string | undefined },
     work: OwnedJudgmentWork,
   ): void {
     work.assertCurrent();
+    // Several failures can share one trace; each report needs its own id so a
+    // lookup by id never resolves to a different failure.
+    let id = built.id;
+    for (let n = 2; this._registry.getById(id); n++) id = `${built.id}-${n}`;
+    const report: FailureReport = id === built.id ? built : { ...built, id };
     try {
       this._registry.push(report);
     } catch (error) {

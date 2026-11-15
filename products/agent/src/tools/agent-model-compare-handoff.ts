@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { createZipArchive, packageArtifactFilename, prepareArtifactMetadata, sanitizeArtifactSourceUri, type ArtifactPackageEntry } from './artifact-archive.ts';
 import type { AgentModelCompareArtifactStore, LoadedComparisonHandoff, SavedComparisonArtifact } from './agent-model-compare-types.ts';
-import { MAX_HANDOFF_ARTIFACT_BYTES, MAX_HANDOFF_DIFF_INPUT_LINES, MAX_HANDOFF_DIFF_ROWS, MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS } from './agent-model-compare-types.ts';
+import { MAX_HANDOFF_ARCHIVE_BYTES, MAX_HANDOFF_ARTIFACT_BYTES, MAX_HANDOFF_DIFF_INPUT_LINES, MAX_HANDOFF_DIFF_ROWS, MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS } from './agent-model-compare-types.ts';
 import { isModelCompareHandoffArtifact, isModelCompareRouteDecisionArtifact, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
-import { isTextLike, readString, readStringList, previewText } from './agent-model-compare-utils.ts';
+import { isTextLike, listAllArtifacts, readString, readStringList, previewText } from './agent-model-compare-utils.ts';
 
 export interface LoadedHandoffArchiveArtifact {
   readonly role: 'handoff' | 'source' | 'related' | 'route-decision';
@@ -293,7 +293,9 @@ export function formatHandoffDiff(input: {
     ...formatHandoffSectionDiff(input.left, input.right),
     '',
     'Aligned line diff',
-    ...(sectionAvailable ? formatHandoffDiffRows(diffRows) : [`  Section ${input.sectionId || '(blank)'} was not found. Use all, policy, related, or comparison.`]),
+    ...(sectionName === 'Metadata delta'
+      ? ['  The line diff does not apply to the metadata section: the Metadata delta above is its comparison. Use all, policy, related, or comparison for a line diff.']
+      : sectionAvailable ? formatHandoffDiffRows(diffRows) : [`  Section ${input.sectionId || '(blank)'} was not found. Use all, policy, related, or comparison.`]),
     '',
     'No selected model was changed.',
   ].join('\n');
@@ -307,17 +309,25 @@ export async function loadHandoffArchiveArtifacts(
   if (!artifactStore?.readContent) {
     throw new Error('Reviewer handoff archive requires an artifact store with readContent support.');
   }
+  // The saved comparison, judgment and route-decision artifacts name the models; a handoff that hides identities must not carry them.
+  const identityRolesIncluded = handoff.revealIncludedInHandoff;
   const requested: Array<{ readonly id: string; readonly role: LoadedHandoffArchiveArtifact['role'] }> = [
     { id: handoff.artifact.artifactId, role: 'handoff' },
-    { id: handoff.sourceArtifactId, role: 'source' },
+    ...(identityRolesIncluded ? [{ id: handoff.sourceArtifactId, role: 'source' as const }] : []),
     ...handoff.relatedArtifactIds.map((id) => ({ id, role: 'related' as const })),
-    ...routeDecisionArtifactIds.map((id) => ({ id, role: 'route-decision' as const })),
+    ...(identityRolesIncluded ? routeDecisionArtifactIds.map((id) => ({ id, role: 'route-decision' as const })) : []),
   ];
   const seen = new Set<string>();
   const artifacts: LoadedHandoffArchiveArtifact[] = [];
+  let totalBytes = 0;
   for (const request of requested) {
     if (!request.id || seen.has(request.id)) continue;
     seen.add(request.id);
+    // Size is known from the descriptor, so an oversized archive is refused before the bytes are read.
+    totalBytes += artifactStore.get?.(request.id)?.sizeBytes ?? 0;
+    if (totalBytes > MAX_HANDOFF_ARCHIVE_BYTES) {
+      throw new Error(`Reviewer handoff archive would exceed ${MAX_HANDOFF_ARCHIVE_BYTES} bytes of source artifacts (reached at ${request.id}). Remove related artifacts and try again.`);
+    }
     const loaded = await artifactStore.readContent(request.id);
     artifacts.push({ role: request.role, ...loaded });
   }
@@ -331,7 +341,7 @@ export function findRouteDecisionArtifactIdsForHandoff(
   if (!artifactStore?.list) return [];
   const seen = new Set<string>();
   const matches: string[] = [];
-  for (const artifact of artifactStore.list(100).filter(isModelCompareRouteDecisionArtifact)) {
+  for (const artifact of listAllArtifacts(artifactStore).filter(isModelCompareRouteDecisionArtifact)) {
     const judgmentArtifactId = readString(artifact.metadata.judgmentArtifactId);
     const comparisonId = readString(artifact.metadata.comparisonId);
     const matchesSource = handoff.sourceKind === 'judgment'
@@ -529,7 +539,9 @@ export function formatHandoffArchivePreview(input: {
     `  related artifacts ${input.handoff.relatedArtifactIds.join(', ') || '(none)'}`,
     `  route-decision receipts ${input.routeDecisionArtifactIds.join(', ') || '(none)'}`,
     `  reveal ${input.handoff.revealIncludedInHandoff ? 'handoff includes model identities when available' : 'handoff keeps model identities hidden'}`,
-    '  policy creates one local ZIP artifact with exact handoff/source/evidence bytes, redacted manifest metadata, and no model route change',
+    input.handoff.revealIncludedInHandoff
+      ? '  policy creates one local ZIP artifact with exact handoff/source/evidence bytes, redacted manifest metadata, and no model route change'
+      : '  policy creates one local ZIP artifact with the exact handoff and related evidence bytes, redacted manifest metadata, and no model route change; the source comparison and route-decision receipts are left out because they name the models',
   ].join('\n');
 }
 

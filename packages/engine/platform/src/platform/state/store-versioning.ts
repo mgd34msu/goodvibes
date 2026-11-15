@@ -19,6 +19,11 @@ import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
 export interface VersionedSqliteHandle {
   getUserVersion(): number;
   setUserVersion(version: number): void;
+  /**
+   * Runs `work` so that a throw undoes everything it did. A migration and the version stamp that
+   * follows it run inside it, so a crash cannot leave a half-migrated file stamped with the old version.
+   */
+  transaction?<T>(work: () => T): T;
 }
 
 /** Adapt a bun:sqlite Database to the version handle. */
@@ -33,6 +38,17 @@ export function bunSqliteVersionHandle(db: {
     },
     setUserVersion: (version) => {
       db.run(`PRAGMA user_version = ${Math.trunc(version)}`);
+    },
+    transaction: <T>(work: () => T): T => {
+      db.run('BEGIN IMMEDIATE');
+      try {
+        const result = work();
+        db.run('COMMIT');
+        return result;
+      } catch (error) {
+        try { db.run('ROLLBACK'); } catch { /* the engine already ended the transaction */ }
+        throw error;
+      }
     },
   };
 }
@@ -194,8 +210,11 @@ export function openVersionedSchema(options: OpenVersionedSchemaOptions): OpenVe
   let reached = current;
   for (const migration of pending) {
     try {
-      migration.migrate();
-      options.handle.setUserVersion(migration.toVersion);
+      const atomically = options.handle.transaction?.bind(options.handle) ?? (<T>(work: () => T): T => work());
+      atomically(() => {
+        migration.migrate();
+        options.handle.setUserVersion(migration.toVersion);
+      });
       reached = migration.toVersion;
       applied.push(migration.toVersion);
     } catch (cause) {

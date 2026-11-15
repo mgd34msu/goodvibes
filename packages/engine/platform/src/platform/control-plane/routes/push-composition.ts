@@ -10,7 +10,10 @@
  *
  * Every config read here is LIVE, evaluated per event or per sweep, never
  * captured at construction, so changing `push.*` or `notifications.push*`
- * takes effect without restarting the daemon.
+ * takes effect without restarting the daemon. The exceptions are
+ * `push.subscriptions.sweepIntervalMinutes` (the sweep timer is created once)
+ * and `push.vapidSubject` (the VAPID manager is built with it once); a new
+ * value for either applies from the next daemon start.
  */
 import {
   DEFAULT_PUSH_ESCALATION,
@@ -56,6 +59,17 @@ function readNumber(deps: PushCompositionDeps, key: ConfigKey, fallback: number)
 }
 
 /**
+ * The consecutive-failure bound both the housekeeping sweep and the delivery
+ * path prune on. One reading of the config key for both, so a hand-edited 0 or
+ * negative value cannot make the sweep treat every subscription (with zero
+ * failures) as dead while delivery falls back to its default.
+ */
+export function resolveFailureThreshold(deps: PushCompositionDeps): number {
+  const value = readNumber(deps, 'push.subscriptions.failureThreshold', DEFAULT_PUSH_SUBSCRIPTION_POLICY.failureThreshold);
+  return value >= 1 ? Math.floor(value) : DEFAULT_PUSH_SUBSCRIPTION_POLICY.failureThreshold;
+}
+
+/**
  * The VAPID JWT `sub`, the contact a push service uses to report a delivery
  * problem. Explicit dep first (embedders), then the `push.vapidSubject` config
  * key, then the documented localhost fallback inside VapidManager. A configured
@@ -93,11 +107,7 @@ export function createPushSubscriptionStore(deps: PushCompositionDeps): PushSubs
       'push.subscriptions.warnAbovePerPrincipal',
       DEFAULT_PUSH_SUBSCRIPTION_POLICY.warnAbovePerPrincipal,
     ),
-    failureThreshold: readNumber(
-      deps,
-      'push.subscriptions.failureThreshold',
-      DEFAULT_PUSH_SUBSCRIPTION_POLICY.failureThreshold,
-    ),
+    failureThreshold: resolveFailureThreshold(deps),
   });
   const store = new PushSubscriptionStore(
     controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'push-subscriptions.json'),
@@ -123,11 +133,7 @@ export function createPushService(deps: PushCompositionDeps): PushService {
     // The bounded-failure threshold the delivery path prunes on, read live from
     // the same config key housekeeping uses so the two cannot disagree about
     // when a push service has proved an endpoint dead.
-    failureThreshold: () => readNumber(
-      deps,
-      'push.subscriptions.failureThreshold',
-      DEFAULT_PUSH_SUBSCRIPTION_POLICY.failureThreshold,
-    ),
+    failureThreshold: () => resolveFailureThreshold(deps),
     // Per-class silencing toggles (notifications.push*), read live per event.
     // Every class defaults ON, the toggles only ever turn a class OFF.
     isCategoryEnabled: (category) => {

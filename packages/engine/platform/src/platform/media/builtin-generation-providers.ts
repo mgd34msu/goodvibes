@@ -31,8 +31,98 @@ function buildStatus(
     capabilities: ['generate'],
     configured,
     detail,
-    metadata: {},
+    // Status reads local configuration only; the provider is not contacted.
+    metadata: { verified: false },
   };
+}
+
+/** A job the provider itself reported as failed or cancelled: nothing is left running. */
+class ProviderTaskEnded extends Error {}
+
+/**
+ * Runs everything that follows a successful submission. The job is paid for and
+ * keeps running remotely, so any failure names the provider and task id (the
+ * only handle for finding or cancelling it) on the thrown error, and an abort
+ * cancels the remote job when the provider has a cancel call.
+ */
+async function afterSubmission<T>(
+  provider: string,
+  taskId: string,
+  lifetime: DeliveryLifetime,
+  cancel: (() => Promise<unknown>) | undefined,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    let note: string | undefined;
+    if (!(error instanceof ProviderTaskEnded)) {
+      note = `${provider} task ${taskId} was submitted and may still be running`;
+      if (lifetime.signal?.aborted && cancel) {
+        try { await cancel(); note = `${provider} task ${taskId} was cancelled because the request was aborted`; }
+        catch { note = `${provider} task ${taskId} may still be running; cancelling it failed`; }
+      }
+    }
+    const providerTask = { providerId: provider, taskId };
+    if (error instanceof Error) {
+      if (note) {
+        try { error.message = `${error.message} (${note})`; }
+        catch {
+          // An abort's message is read-only: carry it, and its name, on a new error that wraps it.
+          const wrapped = new Error(`${error.message} (${note})`, { cause: error });
+          wrapped.name = error.name;
+          throw Object.assign(wrapped, { providerTask });
+        }
+      }
+      Object.defineProperty(error, 'providerTask', { value: providerTask, configurable: true });
+    }
+    throw error;
+  }
+}
+
+/** Best-effort remote cancel with its own deadline: the caller's signal is already aborted when this runs. */
+async function cancelRemoteTask(url: string, method: 'DELETE' | 'POST' | 'PUT', headers: Record<string, string>): Promise<void> {
+  const response = await instrumentedFetch(url, { method, headers, signal: AbortSignal.timeout(15_000) });
+  try { await response.body?.cancel(); } catch { /* the status is all that is read */ }
+  if (!response.ok) throw new Error(`cancel failed (${response.status})`);
+}
+
+/** The registrable domain, so regional hosts of one vendor are accepted and other hosts are not. */
+function registrableDomain(hostname: string): string {
+  return hostname.split('.').slice(-2).join('.');
+}
+
+/**
+ * options.baseUrl receives the provider's API key, so it must stay on the
+ * vendor's own domain over https.
+ */
+function vendorBaseUrl(options: Record<string, unknown>, defaultBaseUrl: string, vendor: string): string {
+  const requested = trimString(options['baseUrl']);
+  if (!requested) return defaultBaseUrl;
+  let parsed: URL;
+  try { parsed = new URL(requested); } catch { throw new Error(`${vendor} options.baseUrl is not a valid URL.`); }
+  if (parsed.protocol !== 'https:' || registrableDomain(parsed.hostname) !== registrableDomain(new URL(defaultBaseUrl).hostname)) {
+    throw new Error(`${vendor} options.baseUrl must be an https URL on ${registrableDomain(new URL(defaultBaseUrl).hostname)}; the provider key is only sent there.`);
+  }
+  return requested;
+}
+
+const COMFY_CLOUD_HOST = 'cloud.comfy.org';
+
+/**
+ * The API key goes to this host, so a per-request options.baseUrl may only name
+ * the configured server (COMFY_BASE_URL, else the local default) or Comfy Cloud over https.
+ */
+function comfyBaseUrl(options: Record<string, unknown>): string {
+  const configured = trimString(process.env['COMFY_BASE_URL']) ?? 'http://127.0.0.1:8188';
+  let allowed: URL;
+  try { allowed = new URL(configured); } catch { throw new Error('COMFY_BASE_URL is not a valid URL.'); }
+  const requested = trimString(options['baseUrl']);
+  if (!requested) return configured;
+  let parsed: URL;
+  try { parsed = new URL(requested); } catch { throw new Error('Comfy options.baseUrl is not a valid URL.'); }
+  if (parsed.origin === allowed.origin || (parsed.protocol === 'https:' && parsed.hostname === COMFY_CLOUD_HOST)) return requested;
+  throw new Error(`Comfy options.baseUrl must be the configured server (${allowed.origin}) or https://${COMFY_CLOUD_HOST}; the Comfy key is only sent there.`);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -223,6 +313,21 @@ function buildArtifactFromRemote(
   };
 }
 
+/** The body, or null once it exceeds `limit` bytes, so a response without a content-length is not buffered whole. */
+async function readBodyUpTo(response: Response, limit: number): Promise<Buffer | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks);
+    size += value.byteLength;
+    if (size > limit) { void reader.cancel().catch(() => undefined); return null; }
+    chunks.push(value);
+  }
+}
+
 async function maybeInlineArtifact(
   providerId: string,
   url: string,
@@ -263,10 +368,10 @@ async function maybeInlineArtifact(
   }
   assertDeliveryCurrent(lifetime);
   const response = await fetchResponse(url, { method: 'GET' }, 120_000, lifetime);
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer = await readBodyUpTo(response, maxInlineBytes);
   assertDeliveryCurrent(lifetime);
   const mimeType = response.headers.get('content-type')?.trim() || contentType;
-  if (buffer.length > maxInlineBytes) {
+  if (buffer === null) {
     return buildArtifactFromRemote(providerId, url, mimeType, filename, {
       ...retrieval,
       headContentType: mimeType,
@@ -307,7 +412,7 @@ function createByteplusProvider(): MediaProvider {
       if (!apiKey) throw new Error('BytePlus API key missing');
       const options = asRecord(request.options) ?? {};
       const model = trimString(request.modelId) ?? trimString(options['model']) ?? defaultModel;
-      const baseUrl = trimString(options['baseUrl']) ?? defaultBaseUrl;
+      const baseUrl = vendorBaseUrl(options, defaultBaseUrl, 'BytePlus');
       const referenceUrl = resolveReferenceUrl(request);
       const content: Array<Record<string, unknown>> = [{ type: 'text', text: request.prompt }];
       if (referenceUrl) {
@@ -335,35 +440,39 @@ function createByteplusProvider(): MediaProvider {
       }) as { id?: string };
       const taskId = trimString(submitted.id);
       if (!taskId) throw new Error('BytePlus response missing task id');
-      let completed: Record<string, unknown> | null = null;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const payload = await fetchJson(`${baseUrl}/contents/generations/tasks/${taskId}`, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${apiKey}` },
-        }, 60_000) as Record<string, unknown>;
-        const status = trimString(payload['status'])?.toLowerCase();
-        if (status === 'succeeded') {
-          completed = payload;
-          break;
-        }
-        if (status === 'failed' || status === 'cancelled') {
-          const error = asRecord(payload['error']);
-          throw new Error(trimString(error?.['message']) ?? 'BytePlus generation failed');
-        }
-        await sleep(5_000);
-      }
-      if (!completed) throw new Error('BytePlus generation timed out');
-      const contentRecord = asRecord(completed['content']);
-      const videoUrl = trimString(contentRecord?.['video_url']) ?? trimString(contentRecord?.['file_url']);
-      if (!videoUrl) throw new Error('BytePlus generation completed without a video URL');
-      return {
-        providerId: 'byteplus',
-        artifacts: [await inferVideoArtifact('byteplus', videoUrl)],
-        metadata: {
-          taskId,
-          model,
-        },
-      };
+      return afterSubmission('BytePlus', taskId, lifetime,
+        () => cancelRemoteTask(`${baseUrl}/contents/generations/tasks/${taskId}`, 'DELETE', { Authorization: `Bearer ${apiKey}` }),
+        async () => {
+          let completed: Record<string, unknown> | null = null;
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const payload = await fetchJson(`${baseUrl}/contents/generations/tasks/${taskId}`, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${apiKey}` },
+            }, 60_000) as Record<string, unknown>;
+            const status = trimString(payload['status'])?.toLowerCase();
+            if (status === 'succeeded') {
+              completed = payload;
+              break;
+            }
+            if (status === 'failed' || status === 'cancelled') {
+              const error = asRecord(payload['error']);
+              throw new ProviderTaskEnded(trimString(error?.['message']) ?? 'BytePlus generation failed');
+            }
+            await sleep(5_000);
+          }
+          if (!completed) throw new Error('BytePlus generation timed out');
+          const contentRecord = asRecord(completed['content']);
+          const videoUrl = trimString(contentRecord?.['video_url']) ?? trimString(contentRecord?.['file_url']);
+          if (!videoUrl) throw new Error('BytePlus generation completed without a video URL');
+          return {
+            providerId: 'byteplus',
+            artifacts: [await inferVideoArtifact('byteplus', videoUrl)],
+            metadata: {
+              taskId,
+              model,
+            },
+          };
+        });
     },
   };
 }
@@ -387,7 +496,7 @@ function createRunwayProvider(): MediaProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('Runway API key missing');
       const options = asRecord(request.options) ?? {};
-      const baseUrl = trimString(options['baseUrl']) ?? defaultBaseUrl;
+      const baseUrl = vendorBaseUrl(options, defaultBaseUrl, 'Runway');
       const model = trimString(request.modelId) ?? trimString(options['model']) ?? defaultModel;
       const referenceArtifact = resolveReferenceArtifact(request);
       const endpoint = referenceArtifact
@@ -413,35 +522,39 @@ function createRunwayProvider(): MediaProvider {
       }) as { id?: string };
       const taskId = trimString(submitted.id);
       if (!taskId) throw new Error('Runway response missing task id');
-      let completed: Record<string, unknown> | null = null;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const payload = await fetchJson(`${baseUrl}/v1/tasks/${taskId}`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'X-Runway-Version': '2024-11-06',
-          },
-        }, 60_000) as Record<string, unknown>;
-        const status = trimString(payload['status'])?.toUpperCase();
-        if (status === 'SUCCEEDED') {
-          completed = payload;
-          break;
-        }
-        if (status === 'FAILED' || status === 'CANCELLED') {
-          throw new Error(trimString(payload['failure']) ?? 'Runway generation failed');
-        }
-        await sleep(5_000);
-      }
-      if (!completed) throw new Error('Runway generation timed out');
-      const outputs = Array.isArray(completed['output'])
-        ? (completed['output'] as unknown[]).filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-        : [];
-      if (outputs.length === 0) throw new Error('Runway generation completed without output URLs');
-      return {
-        providerId: 'runway',
-        artifacts: await Promise.all(outputs.map((url) => inferVideoArtifact('runway', url))),
-        metadata: { taskId, model },
-      };
+      return afterSubmission('Runway', taskId, lifetime,
+        () => cancelRemoteTask(`${baseUrl}/v1/tasks/${taskId}`, 'DELETE', { Authorization: `Bearer ${apiKey}`, 'X-Runway-Version': '2024-11-06' }),
+        async () => {
+          let completed: Record<string, unknown> | null = null;
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const payload = await fetchJson(`${baseUrl}/v1/tasks/${taskId}`, {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'X-Runway-Version': '2024-11-06',
+              },
+            }, 60_000) as Record<string, unknown>;
+            const status = trimString(payload['status'])?.toUpperCase();
+            if (status === 'SUCCEEDED') {
+              completed = payload;
+              break;
+            }
+            if (status === 'FAILED' || status === 'CANCELLED') {
+              throw new ProviderTaskEnded(trimString(payload['failure']) ?? 'Runway generation failed');
+            }
+            await sleep(5_000);
+          }
+          if (!completed) throw new Error('Runway generation timed out');
+          const outputs = Array.isArray(completed['output'])
+            ? (completed['output'] as unknown[]).filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            : [];
+          if (outputs.length === 0) throw new Error('Runway generation completed without output URLs');
+          return {
+            providerId: 'runway',
+            artifacts: await Promise.all(outputs.map((url) => inferVideoArtifact('runway', url))),
+            metadata: { taskId, model },
+          };
+        });
     },
   };
 }
@@ -465,7 +578,7 @@ function createAlibabaProvider(): MediaProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('Alibaba API key missing');
       const options = asRecord(request.options) ?? {};
-      const baseUrl = trimString(options['baseUrl']) ?? defaultBaseUrl;
+      const baseUrl = vendorBaseUrl(options, defaultBaseUrl, 'Alibaba');
       const model = trimString(request.modelId) ?? trimString(options['model']) ?? defaultModel;
       const referenceUrl = resolveReferenceUrl(request);
       const submitted = await fetchJson(`${baseUrl.replace(/\/+$/, '')}/api/v1/services/aigc/video-generation/video-synthesis`, {
@@ -492,36 +605,41 @@ function createAlibabaProvider(): MediaProvider {
       }) as { output?: { task_id?: string } };
       const taskId = trimString(asRecord(submitted.output)?.['task_id']);
       if (!taskId) throw new Error('Alibaba response missing task id');
-      let completed: Record<string, unknown> | null = null;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const payload = await fetchJson(`${baseUrl.replace(/\/+$/, '')}/api/v1/tasks/${taskId}`, {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${apiKey}` },
-        }, 60_000) as Record<string, unknown>;
-        const output = asRecord(payload['output']);
-        const status = trimString(output?.['task_status'])?.toUpperCase();
-        if (status === 'SUCCEEDED') {
-          completed = payload;
-          break;
-        }
-        if (status === 'FAILED' || status === 'CANCELED') {
-          throw new Error(trimString(output?.['message']) ?? 'Alibaba generation failed');
-        }
-        await sleep(2_500);
-      }
-      if (!completed) throw new Error('Alibaba generation timed out');
-      const output = asRecord(completed['output']);
-      const results = Array.isArray(output?.['results']) ? output?.['results'] as Array<Record<string, unknown>> : [];
-      const urls = [
-        ...results.map((entry) => trimString(entry['video_url'])).filter((entry): entry is string => Boolean(entry)),
-        trimString(output?.['video_url']),
-      ].filter((entry): entry is string => Boolean(entry));
-      if (urls.length === 0) throw new Error('Alibaba generation completed without a video URL');
-      return {
-        providerId: 'alibaba',
-        artifacts: await Promise.all(urls.map((url) => inferVideoArtifact('alibaba', url))),
-        metadata: { taskId, model },
-      };
+      const taskBase = `${baseUrl.replace(/\/+$/, '')}/api/v1/tasks/${taskId}`;
+      return afterSubmission('Alibaba', taskId, lifetime,
+        () => cancelRemoteTask(`${taskBase}/cancel`, 'POST', { Authorization: `Bearer ${apiKey}` }),
+        async () => {
+          let completed: Record<string, unknown> | null = null;
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const payload = await fetchJson(taskBase, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${apiKey}` },
+            }, 60_000) as Record<string, unknown>;
+            const output = asRecord(payload['output']);
+            const status = trimString(output?.['task_status'])?.toUpperCase();
+            if (status === 'SUCCEEDED') {
+              completed = payload;
+              break;
+            }
+            if (status === 'FAILED' || status === 'CANCELED') {
+              throw new ProviderTaskEnded(trimString(output?.['message']) ?? 'Alibaba generation failed');
+            }
+            await sleep(2_500);
+          }
+          if (!completed) throw new Error('Alibaba generation timed out');
+          const output = asRecord(completed['output']);
+          const results = Array.isArray(output?.['results']) ? output?.['results'] as Array<Record<string, unknown>> : [];
+          const urls = [
+            ...results.map((entry) => trimString(entry['video_url'])).filter((entry): entry is string => Boolean(entry)),
+            trimString(output?.['video_url']),
+          ].filter((entry): entry is string => Boolean(entry));
+          if (urls.length === 0) throw new Error('Alibaba generation completed without a video URL');
+          return {
+            providerId: 'alibaba',
+            artifacts: await Promise.all(urls.map((url) => inferVideoArtifact('alibaba', url))),
+            metadata: { taskId, model },
+          };
+        });
     },
   };
 }
@@ -545,7 +663,7 @@ function createFalProvider(): MediaProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) throw new Error('fal API key missing');
       const options = asRecord(request.options) ?? {};
-      const baseUrl = trimString(options['baseUrl']) ?? defaultBaseUrl;
+      const baseUrl = vendorBaseUrl(options, defaultBaseUrl, 'fal');
       const model = trimString(request.modelId) ?? trimString(options['model']) ?? defaultModel;
       const isImage = (request.outputMimeType?.startsWith('image/') ?? false) || asBool(options['image']) === true;
       const path = trimString(options['path']) ?? (isImage ? 'fal-ai/flux/dev' : model);
@@ -568,39 +686,75 @@ function createFalProvider(): MediaProvider {
       const statusUrl = trimString(submitted['status_url']);
       const responseUrl = trimString(submitted['response_url']);
       if (!statusUrl || !responseUrl) throw new Error('fal response missing queue URLs');
-      let completed: Record<string, unknown> | null = null;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        const payload = await fetchJson(statusUrl, {
-          method: 'GET',
-          headers: { Authorization: `Key ${apiKey}` },
-        }, 60_000) as Record<string, unknown>;
-        const status = trimString(payload['status'])?.toUpperCase();
-        if (status === 'COMPLETED') {
-          completed = await fetchJson(responseUrl, {
-            method: 'GET',
-            headers: { Authorization: `Key ${apiKey}` },
-          }, 60_000) as Record<string, unknown>;
-          break;
-        }
-        if (status === 'FAILED' || status === 'CANCELLED') {
-          throw new Error(trimString(payload['detail']) ?? trimString(asRecord(payload['error'])?.['message']) ?? 'fal generation failed');
-        }
-        await sleep(5_000);
-      }
-      if (!completed) throw new Error('fal generation timed out');
-      const videoUrl = trimString(asRecord(completed['video'])?.['url'])
-        ?? trimString(asRecord((Array.isArray(completed['videos']) ? (completed['videos'] as Array<Record<string, unknown>>)[0] : null))?.['url']);
-      const imageUrl = trimString(asRecord(completed['image'])?.['url'])
-        ?? trimString(asRecord((Array.isArray(completed['images']) ? (completed['images'] as Array<Record<string, unknown>>)[0] : null))?.['url']);
-      const finalUrl = isImage ? imageUrl ?? videoUrl : videoUrl ?? imageUrl;
-      if (!finalUrl) throw new Error('fal generation completed without an output URL');
-      return {
-        providerId: 'fal',
-        artifacts: [isImage ? await inferImageArtifact('fal', finalUrl) : await inferVideoArtifact('fal', finalUrl)],
-        metadata: { model: path },
+      // The key is sent to these URLs, so they must be on the queue host the job was submitted to.
+      const queueHost = new URL(queueBase).host;
+      const queueUrl = (value: string): string => {
+        let host: string | undefined;
+        try { host = new URL(value).host; } catch { /* reported below */ }
+        if (host !== queueHost) throw new Error(`fal returned a queue URL outside ${queueHost}; it was not followed.`);
+        return value;
       };
+      const taskId = trimString(submitted['request_id']) ?? new URL(responseUrl).pathname.split('/').filter(Boolean).pop() ?? 'unknown';
+      const cancelUrl = trimString(submitted['cancel_url']);
+      return afterSubmission('fal', taskId, lifetime,
+        cancelUrl ? () => cancelRemoteTask(queueUrl(cancelUrl), 'PUT', { Authorization: `Key ${apiKey}` }) : undefined,
+        async () => {
+          let completed: Record<string, unknown> | null = null;
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            const payload = await fetchJson(queueUrl(statusUrl), {
+              method: 'GET',
+              headers: { Authorization: `Key ${apiKey}` },
+            }, 60_000) as Record<string, unknown>;
+            const status = trimString(payload['status'])?.toUpperCase();
+            if (status === 'COMPLETED') {
+              completed = await fetchJson(queueUrl(responseUrl), {
+                method: 'GET',
+                headers: { Authorization: `Key ${apiKey}` },
+              }, 60_000) as Record<string, unknown>;
+              break;
+            }
+            if (status === 'FAILED' || status === 'CANCELLED') {
+              throw new ProviderTaskEnded(trimString(payload['detail']) ?? trimString(asRecord(payload['error'])?.['message']) ?? 'fal generation failed');
+            }
+            await sleep(5_000);
+          }
+          if (!completed) throw new Error('fal generation timed out');
+          const videoUrl = trimString(asRecord(completed['video'])?.['url'])
+            ?? trimString(asRecord((Array.isArray(completed['videos']) ? (completed['videos'] as Array<Record<string, unknown>>)[0] : null))?.['url']);
+          const imageUrl = trimString(asRecord(completed['image'])?.['url'])
+            ?? trimString(asRecord((Array.isArray(completed['images']) ? (completed['images'] as Array<Record<string, unknown>>)[0] : null))?.['url']);
+          const finalUrl = isImage ? imageUrl ?? videoUrl : videoUrl ?? imageUrl;
+          if (!finalUrl) throw new Error('fal generation completed without an output URL');
+          return {
+            providerId: 'fal',
+            artifacts: [isImage ? await inferImageArtifact('fal', finalUrl) : await inferVideoArtifact('fal', finalUrl)],
+            metadata: { model: path, taskId },
+          };
+        });
     },
   };
+}
+
+/**
+ * A workflow file is posted to the Comfy server, so only files under the working
+ * directory or COMFY_WORKFLOW_DIR are read, and a parse failure never quotes the file.
+ */
+async function readWorkflowFile(workflowPath: string): Promise<Record<string, unknown>> {
+  const { readFileSync, realpathSync } = await import('node:fs');
+  const { resolve, sep } = await import('node:path');
+  const roots = [process.cwd(), trimString(process.env['COMFY_WORKFLOW_DIR'])].filter((root): root is string => root !== undefined)
+    .map((root) => realpathSync(resolve(root)));
+  let real: string;
+  try { real = realpathSync(resolve(workflowPath)); } catch { throw new Error('Comfy options.workflowPath does not name a readable file.'); }
+  if (!roots.some((root) => real === root || real.startsWith(root.endsWith(sep) ? root : root + sep))) {
+    throw new Error('Comfy options.workflowPath must be inside the working directory or COMFY_WORKFLOW_DIR.');
+  }
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(real, 'utf-8'));
+    const record = asRecord(parsed);
+    if (record) return record;
+  } catch { /* reported without the file's content below */ }
+  throw new Error('Comfy workflow file is not a JSON object.');
 }
 
 function createComfyProvider(): MediaProvider {
@@ -615,13 +769,16 @@ function createComfyProvider(): MediaProvider {
         'comfy',
         'Comfy',
         configured,
-        'Comfy expects COMFY_BASE_URL plus options.workflow or options.workflowPath; COMFY_API_KEY is optional for cloud deployments.',
+        configured
+          ? 'COMFY_BASE_URL or COMFY_API_KEY is set; the server is not contacted to check it. Generation also needs options.workflow or options.workflowPath.'
+          : 'Comfy expects COMFY_BASE_URL plus options.workflow or options.workflowPath; COMFY_API_KEY is optional for cloud deployments.',
       );
     },
     async generate(request: MediaGenerationRequest, lifetime: DeliveryLifetime = {}): Promise<MediaGenerationResult> {
       const { fetchJson, inferVideoArtifact, inferImageArtifact, sleep } = generationTransport(lifetime, [...envVars, 'COMFY_BASE_URL']);
       const options = asRecord(request.options) ?? {};
-      const baseUrl = trimString(options['baseUrl']) ?? trimString(process.env['COMFY_BASE_URL']) ?? 'http://127.0.0.1:8188';
+      const baseUrl = comfyBaseUrl(options);
+      const cloud = new URL(baseUrl).hostname === COMFY_CLOUD_HOST;
       const apiKey = readFirstEnv(envVars);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) headers['x-api-key'] = apiKey;
@@ -630,8 +787,7 @@ function createComfyProvider(): MediaProvider {
       if (!workflow) {
         const workflowPath = trimString(options['workflowPath']);
         if (!workflowPath) throw new Error('Comfy generation requires options.workflow or options.workflowPath.');
-        const { readFileSync } = await import('node:fs');
-        workflow = JSON.parse(readFileSync(workflowPath, 'utf-8')) as Record<string, unknown>;
+        workflow = await readWorkflowFile(workflowPath);
       }
       const reference = resolveReferenceArtifact(request);
       if (reference && trimString(options['inputImageNodeId']) && reference.dataBase64) {
@@ -642,25 +798,28 @@ function createComfyProvider(): MediaProvider {
           inputs['image'] = `data:${reference.mimeType};base64,${reference.dataBase64}`;
         }
       }
-      const endpoint = baseUrl.includes('cloud.comfy.org') ? '/api/prompt' : '/prompt';
+      const endpoint = cloud ? '/api/prompt' : '/prompt';
       const submitted = await fetchJson(`${baseUrl.replace(/\/+$/, '')}${endpoint}`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           prompt: workflow,
-          ...(apiKey && baseUrl.includes('cloud.comfy.org') ? { extra_data: { api_key_comfy_org: apiKey } } : {}),
+          ...(apiKey && cloud ? { extra_data: { api_key_comfy_org: apiKey } } : {}),
         }),
       }) as Record<string, unknown>;
       const taskId = trimString(submitted['prompt_id']) ?? trimString(submitted['id']);
       if (!taskId) throw new Error('Comfy response missing task id');
+      return afterSubmission('Comfy', taskId, lifetime, undefined, async () => {
       let outputs: Array<Record<string, unknown>> = [];
       for (let attempt = 0; attempt < 120; attempt += 1) {
-        const historyPath = baseUrl.includes('cloud.comfy.org') ? `/api/history_v2/${taskId}` : `/history/${taskId}`;
+        const historyPath = cloud ? `/api/history_v2/${taskId}` : `/history/${taskId}`;
         const payload = await fetchJson(`${baseUrl.replace(/\/+$/, '')}${historyPath}`, {
           method: 'GET',
           ...(apiKey ? { headers: { 'x-api-key': apiKey } } : {}),
         } as RequestInit, 60_000) as Record<string, unknown>;
-        if (baseUrl.includes('cloud.comfy.org')) {
+        const reported = trimString(payload['status'])?.toLowerCase();
+        if (reported === 'failed' || reported === 'error' || reported === 'cancelled') throw new ProviderTaskEnded(`Comfy generation ${reported}`);
+        if (cloud) {
           const records = Array.isArray(payload['outputs']) ? payload['outputs'] as Array<Record<string, unknown>> : [];
           if (records.length > 0) {
             outputs = records;
@@ -668,9 +827,11 @@ function createComfyProvider(): MediaProvider {
           }
         } else {
           const record = asRecord(payload[taskId]);
+          if (trimString(asRecord(record?.['status'])?.['status_str'])?.toLowerCase() === 'error') throw new ProviderTaskEnded('Comfy generation failed');
           const outputRecord = asRecord(record?.['outputs']);
+          // Image nodes report `images`; video nodes report `gifs` or `videos`.
           const flattened = outputRecord
-            ? Object.values(outputRecord).flatMap((value) => Array.isArray(asRecord(value)?.['images']) ? (asRecord(value)?.['images'] as unknown[]) : [])
+            ? Object.values(outputRecord).flatMap((value) => ['images', 'gifs', 'videos'].flatMap((key) => Array.isArray(asRecord(value)?.[key]) ? (asRecord(value)?.[key] as unknown[]) : []))
             : [];
           if (flattened.length > 0) {
             outputs = flattened.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null) as Array<Record<string, unknown>>;
@@ -689,7 +850,7 @@ function createComfyProvider(): MediaProvider {
         }
         const filename = trimString(entry['filename']);
         if (!filename) continue;
-        const viewPath = baseUrl.includes('cloud.comfy.org')
+        const viewPath = cloud
           ? `/api/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(trimString(entry['subfolder']) ?? '')}&type=${encodeURIComponent(trimString(entry['type']) ?? 'output')}`
           : `/view?filename=${encodeURIComponent(filename)}&subfolder=${encodeURIComponent(trimString(entry['subfolder']) ?? '')}&type=${encodeURIComponent(trimString(entry['type']) ?? 'output')}`;
         const remote = `${baseUrl.replace(/\/+$/, '')}${viewPath}`;
@@ -701,6 +862,7 @@ function createComfyProvider(): MediaProvider {
         artifacts,
         metadata: { taskId },
       };
+      });
     },
   };
 }

@@ -77,7 +77,7 @@ test('default conversational goal-only source survives a returned push and compl
   composeCiWatchGatewayVerbs(catalog, { configManager: config, automationManager: automation, workingDirectory: h.root, surfaceRoot: 'tui',
     shellPaths: createShellPathService({ workingDirectory: h.root, homeDirectory: h.root }),
     ciAutonomousHost: () => ({ port: services.judgment.port, permissionManager: services.permissionManager, config, signal: lifetime.signal }),
-    onCiAutoWatch: value => { observer = value; }, requestApproval: async () => { throw new Error('Unexpected human CI offer'); } });
+    onCiAutoWatch: value => { observer = value; } });
   const invoke = (method: string, body: Record<string, unknown>) => catalog.invoke(method, { context: { admin: true }, body });
   const tools = new ToolRegistry(); let pushes = 0;
   tools.register({ definition: { name: 'exec', description: 'Intercepted offline push', parameters: EXEC_TOOL_SCHEMA }, execute: async () => {

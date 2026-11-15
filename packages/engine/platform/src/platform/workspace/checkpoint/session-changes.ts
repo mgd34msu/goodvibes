@@ -35,13 +35,15 @@ export async function computeSessionChanges(
 
   const earliest = sessionCheckpoints[0]!;
   const latest = sessionCheckpoints[sessionCheckpoints.length - 1]!;
-  // The state before the session's first change is that checkpoint's parent;
-  // when the session took the very first checkpoint ever, the base is the empty
-  // tree so the aggregate includes everything the session introduced.
+  // The state before the session's first change is that checkpoint's parent.
+  // The empty tree is the base only when the session really opened the store
+  // (no parentId); a parent that retention removed leaves the base unknown, so
+  // the diff starts at the earliest checkpoint itself and says so instead of
+  // reporting the whole workspace as the session's work.
   const parent = earliest.parentId ? checkpoints.get(earliest.parentId) : undefined;
-  const baseCommit = parent ? parent.commit : EMPTY_TREE_HASH;
-  const fromLabel = parent ? parent.id : 'EMPTY';
-
+  const baseUnavailable = earliest.parentId !== null && earliest.parentId !== undefined && !parent;
+  const baseCommit = parent ? parent.commit : baseUnavailable ? earliest.commit : EMPTY_TREE_HASH;
+  const fromLabel = parent ? parent.id : baseUnavailable ? earliest.id : 'EMPTY';
   const [unifiedDiff, stat_, files] = await Promise.all([
     sideGit.diff(baseCommit, latest.commit),
     sideGit.diffStat(baseCommit, latest.commit),
@@ -53,6 +55,12 @@ export async function computeSessionChanges(
     checkpointCount: sessionCheckpoints.length,
     checkpointIds: sessionCheckpoints.map((c) => c.id),
     from: fromLabel,
+    ...(baseUnavailable ? { baseUnavailable: true } : {}),
+    // A checkpoint holds the whole workspace as it was when the snapshot ran, so
+    // edits by another session, an agent or the user (with or without a
+    // checkpoint of their own) land in this diff and nothing recorded tells
+    // them apart: every result with checkpoints carries the flag.
+    attributionApproximate: true,
     to: latest.id,
     files,
     unifiedDiff,

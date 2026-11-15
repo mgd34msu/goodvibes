@@ -72,11 +72,11 @@ function probeOtelSync(): OtelApi | null {
       : undefined;
     if (typeof nodeRequire === 'function') {
       cacheOtelApi(nodeRequire('@opentelemetry/api') as OtelApi);
-    } else {
-      cacheOtelApi(null);
     }
+    // Without a global require this probe learned nothing, so it must not cache
+    // a negative: the async probe can still find the module.
   } catch {
-    cacheOtelApi(null);
+    // A failed require is not a verdict either; leave the cache for the async probe.
   }
   return readCachedOtelApi() ?? null;
 }
@@ -88,7 +88,8 @@ function buildTraceparent(ctx: SpanContext): string {
 
 /**
  * Inject W3C Trace Context headers (`traceparent`, `tracestate`) if an active
- * OTel span is available. Synchronous; uses require-based detection.
+ * OTel span is available. Synchronous; it detects OTel only where a global `require` exists (CommonJS
+ * hosts). In ES modules prefer `injectTraceparentAsync`.
  *
  * @param headers - Mutable header record to augment in-place.
  */

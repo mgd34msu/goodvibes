@@ -19,6 +19,7 @@
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
+  agentDaemonConfigClient,
   agentDaemonConfigClientInstalled,
   isDaemonOwnedConfigKey,
   routeDaemonOwnedConfigWrite,
@@ -28,6 +29,10 @@ import {
 export interface DaemonSettingWriteReport {
   readonly ok: boolean;
   readonly message: string;
+  /** True on the last report of a write (applied or refused); false while it is still in flight. */
+  readonly settled?: boolean;
+  /** The value the host holds for the key after an applied write. */
+  readonly applied?: { readonly value: unknown };
 }
 
 /**
@@ -50,14 +55,30 @@ export function routeSettingWriteToConnectedHost(
 ): boolean {
   if (!agentDaemonConfigClientInstalled() || !isDaemonOwnedConfigKey(key)) return false;
   report({ ok: true, message: 'Saving on the connected host…' });
-  void routeDaemonOwnedConfigWrite(key, value)
-    .then(() => {
-      report({ ok: true, message: 'Applied by the connected host; it takes effect for every client.' });
-    })
-    .catch((error) => {
+  void (async () => {
+    try {
+      await routeDaemonOwnedConfigWrite(key, value);
+    } catch (error) {
       const message = summarizeError(error);
       logger.error('SettingsModal: the connected host refused a setting write', { key, error: message });
-      report({ ok: false, message: `Save failed: ${message}` });
+      report({ ok: false, settled: true, message: `Save failed: ${message}` });
+      return;
+    }
+    // The host may coerce or clamp what it was sent, so show what it holds. If it cannot be read
+    // back the write still stands; the value sent is the closest answer.
+    let held = value;
+    try {
+      const live = await agentDaemonConfigClient()?.get(key);
+      if (live !== undefined) held = live;
+    } catch (error) {
+      logger.warn('SettingsModal: the connected host applied a setting but it could not be read back', { key, error: summarizeError(error) });
+    }
+    report({
+      ok: true,
+      settled: true,
+      message: 'Applied by the connected host; it takes effect for every client.',
+      applied: { value: held },
     });
+  })();
   return true;
 }

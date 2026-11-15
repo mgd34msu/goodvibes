@@ -8,7 +8,7 @@ import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.t
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '../config/index.ts';
 import { SecretsManager } from '../config/secrets.ts';
-import { withRuntimeServices, type CliCommandRuntime } from './management.ts';
+import { withReadOnlyRuntimeServices, type CliCommandRuntime } from './management.ts';
 
 import { getPackageVersion } from './help.ts';
 import { classifyProviderSetup } from './provider-classification.ts';
@@ -46,7 +46,7 @@ export const handleBundleCommand = createSupportBundleCommand<
         globalHome: runtime.homeDirectory,
         configManager: runtime.configManager,
       }),
-    withServices: withRuntimeServices,
+    withServices: withReadOnlyRuntimeServices,
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,
     servicePosture: buildCliServicePosture,

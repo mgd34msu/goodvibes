@@ -35,6 +35,7 @@ const MEMORY_SNAPSHOT_SCHEMA = objectSchema({
     armed: BOOLEAN_SCHEMA,
     sustainedSec: NUMBER_SCHEMA,
     rateMbPerSec: NUMBER_SCHEMA,
+    thresholdMbPerSec: NUMBER_SCHEMA,
   }, ['armed', 'sustainedSec', 'rateMbPerSec']),
   thresholds: objectSchema({
     elevatedPct: NUMBER_SCHEMA,

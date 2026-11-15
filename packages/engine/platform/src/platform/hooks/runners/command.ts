@@ -8,7 +8,7 @@
  * hooks.json is a TRUST BOUNDARY:
  *   - Only hooks.json files that belong to the current user or that the
  *     user has explicitly opted into should be loaded.
- *   - The HookDispatcher logs a warning if the file is world-writable.
+ *   - The HookDispatcher refuses to load a file that other users can write.
  *   - Never load hooks.json from untrusted sources (e.g., project
  *     directories you did not create or audit).
  */
@@ -16,8 +16,8 @@ import { retainHookWork } from '../live-work.js';
 import type { HookDefinition, HookResult, HookEvent } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import type { HookExecutionOptions } from '../execution.js';
-import { OwnedProcessGroupUnsupportedError, runProcess } from '../../runtime/remote/host/backends/process-runner.js';
+import { hookTimeoutSeconds, type HookExecutionOptions } from '../execution.js';
+import { OwnedProcessGroupUnsupportedError, runProcess } from '../../utils/process-runner.js';
 
 /**
  * Run a shell command hook.
@@ -30,7 +30,8 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     return { ok: false, error: 'command hook missing "command" field' };
   }
 
-  const timeoutMs = (hook.timeout ?? 0) * 1000;
+  const timeoutSeconds = hookTimeoutSeconds(hook, 'command');
+  const timeoutMs = timeoutSeconds * 1000;
   const eventJson = JSON.stringify(event);
 
   try {
@@ -43,7 +44,7 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
         ownedProcessGroup: true,
       });
       options.signal?.throwIfAborted();
-      if (result.timedOut) return { ok: false, error: `command hook timed out after ${hook.timeout ?? 0}s` };
+      if (result.timedOut) return { ok: false, error: `command hook timed out after ${timeoutSeconds}s` };
       if (result.exitCode !== 0) {
         return {
           ok: false,
@@ -57,10 +58,14 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
         return { ok: true };
       }
     }
+    // Its own process group, so a deadline stops the shell and anything it
+    // started, which would otherwise keep the output pipes open.
+    const groupLeader = process.platform !== 'win32';
     const proc = Bun.spawn(['/bin/sh', '-c', command], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
+      detached: groupLeader,
     });
 
     // Write event JSON to stdin then close
@@ -68,9 +73,13 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     proc.stdin.write(encoder.encode(eventJson));
     proc.stdin.end();
 
-    // Kill the process on timeout; always clear the timer on success.
+    // The deadline covers the output drain as well as the shell's exit: a
+    // grandchild holding a pipe past the shell's own exit is still the hook
+    // running.
+    let timedOut = false;
     const timer = timeoutMs > 0 ? setTimeout(() => {
-      killHookProcess(proc, command, 'timeout');
+      timedOut = true;
+      killHookProcess(proc, command, 'timeout', groupLeader);
     }, timeoutMs) : undefined;
     timer?.unref?.();
 
@@ -82,12 +91,15 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     const stderrPromise = retainHookWork(new Response(proc.stderr).text());
 
     let exitCode: number;
+    let stdout: string;
+    let stderr: string;
     try {
       exitCode = await retainHookWork(proc.exited);
+      [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
       clearTimeout(timer);
     } catch (err) {
       clearTimeout(timer);
-      killHookProcess(proc, command, 'spawn error');
+      killHookProcess(proc, command, 'spawn error', groupLeader);
       // We're abandoning the drains on this path; settle them with a no-op
       // catch so a stream rejection can't surface as an unhandled rejection.
       void stdoutPromise.catch(() => {});
@@ -95,7 +107,9 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
       throw err;
     }
 
-    const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+    if (timedOut) {
+      return { ok: false, error: `command hook timed out after ${timeoutSeconds}s` };
+    }
 
     if (exitCode !== 0) {
       logger.error('command hook exited with non-zero code', {
@@ -130,7 +144,12 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
   }
 }
 
-function killHookProcess(proc: ReturnType<typeof Bun.spawn>, command: string, reason: string): void {
+function killHookProcess(proc: ReturnType<typeof Bun.spawn>, command: string, reason: string, groupLeader: boolean): void {
+  try {
+    if (groupLeader && proc.pid > 0) process.kill(-proc.pid, 'SIGKILL');
+  } catch {
+    // The group is already gone; the direct kill below is then a no-op.
+  }
   try {
     proc.kill();
   } catch (error) {

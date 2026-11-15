@@ -1,6 +1,8 @@
 import {
   SHARED_SESSION_INPUT_INTENTS,
   SHARED_SESSION_INPUT_STATES,
+  isDelegatedSessionInput,
+  sharedSessionInputLifecycle,
   type SharedSessionInputRecord,
 } from './session-intents.js';
 import type { SharedSessionStoreSnapshot } from './session-broker-helpers.js';
@@ -23,6 +25,16 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function throwInvalidSessionSnapshot(): never {
   throw new Error('Shared session store snapshot is invalid.');
+}
+
+/** Name the entry that failed, so an operator can repair or remove that one record. */
+function describeInvalidEntry<T>(kind: string, value: unknown, index: number, read: () => T): T {
+  try {
+    return read();
+  } catch {
+    const id = isRecord(value) && typeof value['id'] === 'string' ? `'${value['id']}'` : `at position ${index}`;
+    throw new Error(`Shared session store snapshot is invalid: ${kind} ${id} is malformed. Repair or remove that entry in the sessions store file; no session can be read until then.`);
+  }
 }
 
 function validateOptionalString(value: unknown): void {
@@ -310,14 +322,14 @@ export function loadSessionBrokerState(snapshot: SharedSessionStoreSnapshot | nu
   const sessions = new Map<string, SharedSessionRecord>();
   const messages = new Map<string, SharedSessionMessage[]>();
   const inputs = new Map<string, SharedSessionInputRecord[]>();
-  for (const message of snapshot?.messages ?? []) {
-    const normalized = normalizeSessionMessage(message);
+  for (const [index, message] of (snapshot?.messages ?? []).entries()) {
+    const normalized = describeInvalidEntry('message', message, index, () => normalizeSessionMessage(message));
     const bucket = messages.get(normalized.sessionId) ?? [];
     bucket.push(normalized);
     messages.set(normalized.sessionId, bucket);
   }
-  for (const input of snapshot?.inputs ?? []) {
-    const normalized = normalizeSessionInput(input);
+  for (const [index, input] of (snapshot?.inputs ?? []).entries()) {
+    const normalized = describeInvalidEntry('input', input, index, () => normalizeSessionInput(input));
     const bucket = inputs.get(normalized.sessionId) ?? [];
     bucket.push(normalized);
     inputs.set(normalized.sessionId, bucket);
@@ -332,11 +344,11 @@ export function loadSessionBrokerState(snapshot: SharedSessionStoreSnapshot | nu
     if (!isRecord(session) || typeof session.id !== 'string') {
       throwInvalidSessionSnapshot();
     }
-    sessions.set(session.id, normalizeSessionRecord(
+    sessions.set(session.id, describeInvalidEntry('session', session, 0, () => normalizeSessionRecord(
       session,
       messages.get(session.id) ?? [],
       inputs.get(session.id) ?? [],
-    ));
+    )));
   }
   return { sessions, messages, inputs };
 }
@@ -399,10 +411,19 @@ export function upsertSessionParticipant(
   ];
 }
 
+/** The error a boot reconcile stamps on a row it cancelled; a surface's later completion report may revive it. */
+export const BOOT_RECONCILE_CANCEL_REASON = 'daemon restart, agent state unknown';
+
+/** A delegated row whose host-process binding died with the previous process. */
+export const BOOT_DELEGATED_CANCEL_REASON = 'daemon restart, the held external message can no longer be reviewed; ask the sender to send it again';
+
 /**
  * Boot-time reconciliation of a freshly-loaded broker state (mutates in place):
  * cancels inputs stuck in `spawned`/`delivered` from a prior run (agent state is
- * unknown after a restart) and clears stale `activeAgentId` on every session.
+ * unknown after a restart), cancels queued delegated rows (their source binding
+ * is process-local, so nothing can ever complete them), and clears stale
+ * `activeAgentId` on every session. Ordinary queued rows are kept: a surface
+ * legitimately collects them after a restart.
  * Returns the set of session ids whose input buckets changed so the caller can
  * refresh their pending counts.
  */
@@ -410,13 +431,16 @@ export function reconcileSessionBrokerBoot(
   sessions: Map<string, SharedSessionRecord>,
   inputs: Map<string, SharedSessionInputRecord[]>,
 ): Set<string> {
-  const restartReason = 'daemon restart, agent state unknown';
   const changed = new Set<string>();
   for (const [sessionId, bucket] of inputs.entries()) {
     for (let i = 0; i < bucket.length; i++) {
       const entry = bucket[i]!;
+      if (!sharedSessionInputLifecycle.can(entry.state, 'cancelled')) continue;
       if (entry.state === 'spawned' || entry.state === 'delivered') {
-        bucket[i] = { ...entry, state: 'cancelled', updatedAt: Date.now(), error: restartReason };
+        bucket[i] = { ...entry, state: 'cancelled', updatedAt: Date.now(), error: BOOT_RECONCILE_CANCEL_REASON };
+        changed.add(sessionId);
+      } else if (entry.state === 'queued' && isDelegatedSessionInput(entry)) {
+        bucket[i] = { ...entry, state: 'cancelled', updatedAt: Date.now(), error: BOOT_DELEGATED_CANCEL_REASON };
         changed.add(sessionId);
       }
     }

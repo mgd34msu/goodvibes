@@ -171,11 +171,16 @@ publication cannot turn success into rollback; failed mirror refresh fences
 ordinary cache operations. Corrupt or truncated existing images and missing
 current-version ledger tables are refused before schema repair or ordinary saves.
 An owner that has observed its database also refuses subsequent disappearance.
-IMPORTANT: a newly constructed owner has no external existence manifest. If the
-entire database was deleted before process startup, this owner cannot distinguish
-that loss from first creation and may initialize a new store. This slice does not
-claim cross-restart deletion detection; hosts need independent established-store
-knowledge to enforce an explicit open-existing policy in a follow-on contract.
+A newly constructed owner cannot tell from the database file alone that it was
+deleted before process startup. After every durable commit the store therefore
+records the project's revision in a sibling file, `<database>.work-ledger-revisions.json`
+(the highest revision per project, never lowered). An owner that opens a database
+holding a lower revision than that record refuses to read or write the ledger and
+says why: the file was deleted, replaced by an older copy or restored from a
+backup. Restore the database that held the recorded revision, or delete the
+marker file to accept the ledger as it stands. A missing or unreadable marker is
+treated as no record, and a failed marker write never fails a commit, so deleting
+the database and the marker together is still indistinguishable from first creation.
 
 Notifications use local wakeups and an owned, unreferenced polling fallback for
 cross-process changes. They may coalesce; snapshots and history cursors are the

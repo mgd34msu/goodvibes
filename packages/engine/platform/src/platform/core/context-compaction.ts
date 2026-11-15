@@ -117,7 +117,7 @@ export const SMALL_WINDOW_THRESHOLD = 12_000;
 export const SMALL_WINDOW_KEEP_RECENT = 10;
 
 // ---------------------------------------------------------------------------
-// Compaction event log (in-memory, session-scoped)
+// Compaction event log (in-memory, shared by the sessions of this process)
 // ---------------------------------------------------------------------------
 
 const compactionEvents: CompactionEvent[] = [];
@@ -126,10 +126,17 @@ export function getCompactionEvents(): readonly CompactionEvent[] {
   return compactionEvents;
 }
 
-export function getLastCompactionEvent(): CompactionEvent | null {
-  return compactionEvents.length > 0
-    ? compactionEvents[compactionEvents.length - 1]!
-    : null;
+/**
+ * The most recent compaction event. The log is shared by every session in the
+ * process, so pass the session id to read that session's own latest event
+ * instead of whichever session compacted last.
+ */
+export function getLastCompactionEvent(sessionId?: string): CompactionEvent | null {
+  for (let index = compactionEvents.length - 1; index >= 0; index--) {
+    const event = compactionEvents[index]!;
+    if (sessionId === undefined || event.sessionId === sessionId) return event;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,11 +235,11 @@ export function shouldAutoCompact(opts: AutoCompactOptions): boolean {
 /**
  * Simplified compaction for context windows smaller than SMALL_WINDOW_THRESHOLD (12k).
  * There isn't enough room for LLM extraction calls, so we just keep the last
- * `keepRecent` messages and add a brief summary note.
+ * `keepRecent` messages and add a note that says the rest was dropped, not summarised.
  *
  * @param messages - Full conversation message array
  * @param keepRecent - Number of recent messages to keep verbatim (default: 10)
- * @returns Truncated message array with a summary pair prepended
+ * @returns Truncated message array with a notice pair prepended
  */
 export function compactSmallWindow(
   messages: ProviderMessage[],
@@ -243,7 +250,7 @@ export function compactSmallWindow(
   const omittedCount = messages.length - keepRecent;
   const summaryMsg: ProviderMessage = {
     role: 'user' as const,
-    content: `[Context compacted, small window mode, ${omittedCount} messages summarized]`,
+    content: `[Context compacted, small window mode: ${omittedCount} earlier message${omittedCount === 1 ? ' was' : 's were'} dropped, not summarised, to fit the context window. Their tool results are gone: re-read any file you still need.]`,
   };
   const summaryReply: ProviderMessage = {
     role: 'assistant' as const,
@@ -624,6 +631,7 @@ async function runCompaction(
     tokensAfterEstimate,
     modelId: ctx.extractionModelId,
     trigger: ctx.trigger,
+    ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
     sectionsIncluded: sections.map((s) => s.id),
     validationPassed: validationWarnings.length === 0,
     instructionsReinjected,

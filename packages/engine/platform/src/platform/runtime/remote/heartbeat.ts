@@ -20,7 +20,8 @@ export function deriveRemoteHeartbeat(
     };
   }
   const ageMs = Math.max(0, Date.now() - lastSeenAt);
-  if (connection?.transportState === 'terminal_failure' || connection?.transportState === 'disconnected') {
+  const state = connection?.transportState ?? contract?.transport.state;
+  if (state === 'terminal_failure' || state === 'disconnected') {
     return {
       status: 'offline',
       lastSeenAt,
@@ -28,18 +29,22 @@ export function deriveRemoteHeartbeat(
       detail: 'Transport is offline and requires reattach or redispatch.',
     };
   }
-  if (ageMs > 5 * 60_000) {
+  // Only the time of connection is recorded, never the last message, so age
+  // since connecting says nothing about whether the remote is still answering.
+  // The transport state is what the engine knows: it moves to degraded or
+  // reconnecting when contact is lost, and back to connected when it returns.
+  if (state === 'degraded' || state === 'reconnecting') {
     return {
       status: 'stale',
       lastSeenAt,
       ageMs,
-      detail: 'Heartbeat is stale; remote recovery should be reviewed.',
+      detail: `Transport is ${state}; remote recovery should be reviewed.`,
     };
   }
   return {
     status: 'fresh',
     lastSeenAt,
     ageMs,
-    detail: 'Heartbeat is within the healthy freshness window.',
+    detail: 'Transport is connected; the age shown is the time since it connected, not since the last message.',
   };
 }

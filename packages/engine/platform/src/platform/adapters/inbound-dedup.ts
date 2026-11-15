@@ -114,3 +114,46 @@ export function inboundDedupKey(
 
 /** The ntfy adapter's shared cache, see the module docstring for why it is here. */
 export const ntfyInboundDedup = new InboundMessageDedup();
+
+/** Shared by the chat adapters that have a provider message id; keys carry the surface name. */
+export const surfaceInboundDedup = new InboundMessageDedup();
+
+/**
+ * Run an adapter's pipeline once per provider message.
+ *
+ * The first delivery claims `key` and runs `work`; a redelivery (provider retry,
+ * a second event for the same message) answers `duplicate()` and does no work.
+ * `work` calls `committed()` once an agent is running or the input has been
+ * handed to a live one: from then on the key stays claimed even if a later step
+ * throws, because a retry would start a second agent. A failure before that
+ * point, or a non-2xx answer, gives the key back so the retry does real work.
+ * An empty key (no provider id) is not deduplicated.
+ */
+export async function runOncePerMessage(
+  key: string,
+  duplicate: () => Response,
+  work: (committed: () => void) => Promise<Response>,
+  dedup: InboundMessageDedup = surfaceInboundDedup,
+): Promise<Response> {
+  if (!dedup.claim(key)) return duplicate();
+  let committed = false;
+  try {
+    const response = await work(() => { committed = true; });
+    if (response.ok) committed = true;
+    return response;
+  } finally {
+    if (!committed) dedup.release(key);
+  }
+}
+
+/** The answer for a redelivered message, shaped like the adapters' "ignored" acknowledgements. */
+export function duplicateDeliveryResponse(): Response {
+  return Response.json({
+    ok: true,
+    acknowledged: true,
+    queued: false,
+    outcome: 'ignored',
+    reason: 'duplicate-delivery',
+    ignored: 'duplicate-delivery',
+  });
+}

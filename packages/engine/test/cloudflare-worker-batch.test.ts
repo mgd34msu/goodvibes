@@ -94,3 +94,86 @@ describe('Cloudflare Worker batch bridge', () => {
     expect(await res.json()).toMatchObject({ code: 'WORKER_AUTH_TOKEN_REQUIRED' });
   });
 });
+
+describe('Cloudflare Worker scheduled and queue handlers', () => {
+  const env = { GOODVIBES_DAEMON_URL: 'https://daemon.example', GOODVIBES_OPERATOR_TOKEN: 'token' };
+  const ctx = { waitUntil: () => undefined };
+
+  async function withFetch<T>(handler: (url: string, init?: RequestInit) => Response, run: () => Promise<T>): Promise<T> {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init)) as typeof fetch;
+    try {
+      return await run();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test('a cron tick the daemon rejects fails the invocation', async () => {
+    const worker = createGoodVibesCloudflareWorker();
+    await withFetch(() => new Response('unauthorized', { status: 401 }), async () => {
+      await expect(worker.scheduled({}, env, ctx)).rejects.toThrow('401');
+    });
+  });
+
+  test('a cron tick the daemon accepts resolves', async () => {
+    const worker = createGoodVibesCloudflareWorker();
+    await withFetch(() => Response.json({ ok: true }), async () => {
+      await expect(worker.scheduled({}, env, ctx)).resolves.toBeUndefined();
+    });
+  });
+
+  test('a missing daemon url fails the cron invocation', async () => {
+    const worker = createGoodVibesCloudflareWorker();
+    await expect(worker.scheduled({}, {}, ctx)).rejects.toThrow('503');
+  });
+
+  function runQueue(status: number, body: GoodVibesCloudflareQueuePayload, bodies: string[] = []) {
+    const calls: string[] = [];
+    const worker = createGoodVibesCloudflareWorker();
+    const message = { body, ack: () => { calls.push('ack'); }, retry: () => { calls.push('retry'); } };
+    return withFetch((_url, init) => { bodies.push(String(init?.body)); return new Response('x', { status }); },
+      async () => { await worker.queue({ messages: [message] }, env, ctx); return calls; });
+  }
+
+  const job: GoodVibesCloudflareQueuePayload = { type: 'batch.job.create', body: { request: {} }, jobId: 'job-1' };
+
+  test('a daemon 400 is acknowledged, not redelivered', async () => {
+    expect(await runQueue(400, job)).toEqual(['ack']);
+  });
+
+  test('a daemon 500 is redelivered with the same job id', async () => {
+    const bodies: string[] = [];
+    expect(await runQueue(500, job, bodies)).toEqual(['retry']);
+    expect(await runQueue(500, job, bodies)).toEqual(['retry']);
+    const ids = bodies.map((b) => (JSON.parse(b) as { source: { id: string } }).source.id);
+    expect(ids).toEqual(['job-1', 'job-1']);
+  });
+
+  test('a rotated operator token (401) is redelivered so the job is not lost', async () => {
+    expect(await runQueue(401, job)).toEqual(['retry']);
+  });
+
+  test('a message of an unknown type is acknowledged without calling the daemon', async () => {
+    const bodies: string[] = [];
+    expect(await runQueue(500, { type: 'bogus' } as unknown as GoodVibesCloudflareQueuePayload, bodies)).toEqual(['ack']);
+    expect(bodies).toEqual([]);
+  });
+
+  test('queued job payloads get a minted id that the delivered message carries', async () => {
+    const messages: GoodVibesCloudflareQueuePayload[] = [];
+    const worker = createGoodVibesCloudflareWorker({ queueJobPayloads: true });
+    const res = await worker.fetch(
+      new Request('https://worker.example/batch/jobs/enqueue', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer w', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: {} }),
+      }),
+      { GOODVIBES_WORKER_TOKEN: 'w', GOODVIBES_BATCH_QUEUE: { async send(m) { messages.push(m); } } },
+      ctx,
+    );
+    expect(res.status).toBe(202);
+    const queued = messages[0];
+    expect(queued?.type === 'batch.job.create' && typeof queued.jobId === 'string' && queued.jobId.length > 0).toBe(true);
+  });
+});

@@ -1,4 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor, AgentWorkspaceReviewPacketDefaults } from './agent-workspace-types.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -25,11 +26,6 @@ export interface AgentDocumentWorkspaceToolArgs {
   readonly limit?: number;
   readonly confirm?: true;
   readonly explicitUserRequest?: string;
-}
-
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
 }
 
 function splitList(value: string): readonly string[] {
@@ -495,7 +491,7 @@ export function buildAgentDocumentPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: editor.title,
-      detail: 'Submitted an Agent document request through the first-class document tool.',
+      detail: 'Asked the model to run the document tool. Nothing has changed until the model calls the tool and its result appears in the conversation.',
       safety: mutation ? 'safe' : 'read-only',
     },
   };

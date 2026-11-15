@@ -57,6 +57,7 @@ import {
   maybeDeliverAutomationFailureNotice,
   maybeDeliverAutomationRun,
   readAutomationRunTransience,
+  failureNoticeCoversRunDelivery,
   scheduleAutomationFailureFollowUp,
   type AutomationFailureFollowUpContext,
 } from './manager-runtime-delivery.js';
@@ -313,6 +314,9 @@ export class AutomationManager {
       emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => this.emitRunCompleted(job, run, outcome),
       emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => emitAutomationManagerRunFailed(this.runtimeBus, job, run, error, retryable),
       maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => this.maybeDeliverRun(job, run),
+      followUpStartFailure: (job: AutomationJob, run: AutomationRun, retryable: boolean) => scheduleAutomationFailureFollowUp(this.failureFollowUpContext(), job, run, retryable),
+      emitJobAutoDisabled: (job: AutomationJob, reason: string) => this.emitJobAutoDisabled(job, reason),
+      cancelTask: this.cancelTask,
       applyFailureToJob: (job: AutomationJob, timestamp: number, countRun = true) => this.applyFailureToJob(job, timestamp, countRun),
       jobs: this.jobs,
       runs: this.runs,
@@ -372,6 +376,7 @@ export class AutomationManager {
     const jobId = next?.id ?? previous?.id;
     if (!jobId) throw new Error('An automation mutation requires a job id.');
     const restrictions = retainAutomationMutation(options), original = JSON.stringify(previous);
+    const lifetime = this.mutationLifetime;
     const candidate = next ? ownedAutomationJob(next) : null;
     const current = () => {
       restrictions();
@@ -382,11 +387,16 @@ export class AutomationManager {
       await this.jobStore.commit(jobId, previous ? automationJobRevision(previous) : null, candidate, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
       current();
     } catch (error) {
-      if (error instanceof AutomationJobCommitIndeterminateError && this.jobs.get(jobId) === previous) {
+      // A stale error can mean the jobs file was changed by someone else: the
+      // store has re-read it, so this job's in-memory copy is refreshed from it
+      // and the caller's next attempt starts from the current revision.
+      const reconcile = error instanceof AutomationJobCommitIndeterminateError || error instanceof AutomationJobMutationStaleError;
+      if (reconcile && this.jobs.get(jobId) === previous && this.mutationLifetime === lifetime) {
         // Reconcile the observed bytes, without scheduling or emitting a
         // successful mutation after its authority has gone away.
-        const persisted = (await this.jobStore.load()).jobs.find(job => job.id === jobId);
-        if (this.jobs.get(jobId) === previous) {
+        const loaded = error instanceof AutomationJobMutationStaleError ? await this.jobStore.load().catch(() => undefined) : await this.jobStore.load();
+        const persisted = loaded?.jobs.find(job => job.id === jobId);
+        if (loaded && this.jobs.get(jobId) === previous && this.mutationLifetime === lifetime) {
           if (persisted) this.jobs.restore(persisted);
           else this.jobs.delete(jobId);
         }
@@ -569,6 +579,10 @@ export class AutomationManager {
       if (!source) throw new Error('Automation original source owner is unavailable');
       if (this.sourceClaims.has(jobId)) throw new Error('Automation source owner is already claimed');
       this.sourceClaims.add(jobId);
+      // A run that started consumes the original source owner's claim. A start
+      // that failed did not use it, so it is released for the next attempt.
+      try { return await this.executeJob(job, 'manual', false, 1, source); }
+      catch (error) { this.sourceClaims.delete(jobId); throw error; }
     }
     return await this.executeJob(job, 'manual', false, 1, source);
   }
@@ -583,6 +597,9 @@ export class AutomationManager {
     for (const wake of queued) {
       if (this.activeRunCount() >= this.maxConcurrentRuns()) break;
       const job = this.jobs.get(wake.jobId);
+      // One run of a job at a time, as for timers: the wake stays queued and is
+      // processed by a later heartbeat once the running run has finished.
+      if (job?.enabled && this.hasRunningRun(job.id)) continue;
       this.heartbeatWakes.delete(wake.jobId);
       if (!job?.enabled) continue;
       try {
@@ -611,6 +628,9 @@ export class AutomationManager {
     if (!run) throw new Error(`Automation run not found: ${runId}`);
     const job = this.jobs.get(run.jobId);
     if (!job) throw new Error(`Automation job not found: ${run.jobId}`);
+    if (run.status !== 'failed' && run.status !== 'cancelled' && run.status !== 'missed') {
+      throw new Error(`Automation run ${runId} is ${run.status}; only a failed, cancelled or missed run can be retried`);
+    }
     if (this.activeRunCount() >= this.maxConcurrentRuns()) {
       throw new Error(`Automation concurrency limit reached (${this.maxConcurrentRuns()})`);
     }
@@ -732,7 +752,8 @@ export class AutomationManager {
     } else {
       this.emitRunCompleted(updatedJob, updatedRun, 'cancelled');
     }
-    this.maybeDeliverRun(updatedJob, updatedRun);
+    // A failed run is announced by its failure notice below.
+    if (input.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob)) this.maybeDeliverRun(updatedJob, updatedRun);
     if (input.status === 'completed' && updatedJob.deleteAfterRun) {
       this.cancelTimer(updatedJob.id);
       this.jobs.delete(updatedJob.id);
@@ -779,6 +800,7 @@ export class AutomationManager {
       maxConcurrentRuns: () => this.maxConcurrentRuns(),
       executeJob: (scheduledJob, trigger, dueRun, attempt) => this.executeJob(scheduledJob, trigger, dueRun, attempt),
       recordMissedRun: (missedJob, plannedRunAt) => this.recordMissedRun(missedJob, plannedRunAt),
+      hasRunningRun: (jobId) => this.hasRunningRun(jobId),
     }, job);
   }
 
@@ -889,6 +911,13 @@ export class AutomationManager {
 
   private maxConcurrentRuns(): number {
     return Math.max(1, Number(this.configManager.get('automation.maxConcurrentRuns') ?? 4));
+  }
+
+  private hasRunningRun(jobId: string): boolean {
+    for (const run of this.runs.values()) {
+      if (run.jobId === jobId && run.status === 'running') return true;
+    }
+    return false;
   }
 
   private activeRunCount(): number {

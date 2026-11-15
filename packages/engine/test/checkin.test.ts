@@ -202,7 +202,7 @@ describe('checkin.* gateway verbs', () => {
 
   test('config.set updates config and is reflected by config.get; run records a receipt', async () => {
     const catalog = makeCatalog();
-    const set = await catalog.invoke('checkin.config.set', { ...ctx, body: { enabled: true, quietHours: '22:00-08:00' } }) as { config: { enabled: boolean; quietHours: string } };
+    const set = await catalog.invoke('checkin.config.set', { ...ctx, body: { enabled: true, deliveryChannel: 'slack:C1', quietHours: '22:00-08:00' } }) as { config: { enabled: boolean; quietHours: string } };
     expect(set.config.enabled).toBe(true);
     expect(set.config.quietHours).toBe('22:00-08:00');
 

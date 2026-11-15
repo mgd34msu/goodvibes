@@ -240,3 +240,9 @@ export type { RuntimeMetricsSnapshot, RuntimeMetricsBucket } from './metrics.js'
 export type { ToolFormatFailureClass } from './telemetry/tool-format-telemetry.js';
 export type { ComponentConfig as PanelConfig } from './diagnostics/types.js';
 export { DEFAULT_COMPONENT_CONFIG as DEFAULT_PANEL_CONFIG } from './diagnostics/types.js';
+
+// ── Runtime health ─────────────────────────────────────────────────────────
+// A surface composing its own runtime graph builds the same per-domain health
+// the platform graph carries: the aggregator, kept current from the event bus.
+export { createWiredHealthSystem } from './health/index.js';
+export { bindHealthDomainEvents } from './health/domain-events.js';

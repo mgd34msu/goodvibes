@@ -131,13 +131,20 @@ export function buildSyntheticCanonicalModels(models: readonly CatalogModel[], i
   const canonical: CanonicalModel[] = [];
   const usedIds = new Set<string>();
   const tierPriority: Record<SyntheticTier, number> = { free: 2, subscription: 1, paid: 0 };
-  for (const group of groups.values()) {
-    const distinctProviders = new Set(group.map((model) => model.providerId)).size;
-    if (distinctProviders < 2) continue;
-    const ordered = [...group].sort((a, b) => registryKeyOf(a).localeCompare(registryKeyOf(b)));
+  // Ids are handed out in representative-key order, not catalog order, so a
+  // refresh that reorders the catalog cannot move a slug to a different model
+  // under a persisted `synthetic:<slug>` selection.
+  const orderedGroups = [...groups.values()]
+    .filter((group) => new Set(group.map((model) => model.providerId)).size >= 2)
+    .map((group) => [...group].sort((a, b) => registryKeyOf(a).localeCompare(registryKeyOf(b))))
+    .sort((a, b) => registryKeyOf(a[0]!).localeCompare(registryKeyOf(b[0]!)));
+  for (const ordered of orderedGroups) {
+    const distinctProviders = new Set(ordered.map((model) => model.providerId)).size;
     const representative = ordered[0]!;
     const slug = nameToSlug(representative.name) || nameToSlug(representative.id);
-    const canonicalId = usedIds.has(slug) ? `${nameToSlug(representative.canonicalModelId ?? representative.id)}-${slug}` : slug;
+    let canonicalId = slug;
+    if (usedIds.has(canonicalId)) canonicalId = `${nameToSlug(representative.canonicalModelId ?? representative.id)}-${slug}`;
+    for (let suffix = 2; usedIds.has(canonicalId); suffix += 1) canonicalId = `${slug}-${suffix}`;
     usedIds.add(canonicalId);
     const backends: SyntheticBackend[] = ordered.map((model) => ({
       providerName: model.providerId,

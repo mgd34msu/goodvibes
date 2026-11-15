@@ -10,6 +10,7 @@ import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessCliArgs {
   readonly query?: unknown;
@@ -32,9 +33,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function previewText(value: string, maxLength = 56): string {
@@ -89,7 +88,7 @@ function describeCliCommand(command: GoodVibesCliCommand, lookup?: CliCommandLoo
   const help = describeGoodVibesCommandHelp(command);
   const tokens = cliCommandTokens(command);
   const policy = describeCliCommandPolicy(command);
-  const modelRoute = previewText(policy.preferredModelTool ?? 'agent_harness mode:"cli_command"');
+  const modelRoute = policy.preferredModelTool ?? 'agent_harness mode:"cli_command"';
   return {
     name: command,
     tokens,
@@ -152,7 +151,7 @@ function cliCommandCandidate(command: Record<string, unknown>): Record<string, u
     invocation: command.invocation,
     summary: command.summary,
     effect: typeof policy.effect === 'string' ? policy.effect : 'unknown',
-    ...(typeof policy.preferredModelTool === 'string' ? { modelRoute: previewText(policy.preferredModelTool) } : {}),
+    ...(typeof policy.preferredModelTool === 'string' ? { modelRoute: policy.preferredModelTool } : {}),
   };
 }
 

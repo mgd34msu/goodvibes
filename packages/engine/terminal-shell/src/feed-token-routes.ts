@@ -73,6 +73,8 @@ export type TextRouteState<Context extends FeedCommandContext> = {
   saveUndoStateForText?: (() => void) | undefined;
   ensureInputCursorVisible: () => void;
   registerPaste: (content: string) => string;
+  /** True while the composer is collecting a concealed value: typed text is data, never a shortcut or paste marker. */
+  isConcealedInput?: (() => boolean) | undefined;
   requestRender: () => void;
   killRing?:
     | {
@@ -98,6 +100,8 @@ export type KeyRouteState<Context extends FeedCommandContext> = {
    * test callers omit it.
    */
   submitConcealedInput?: ((value: string) => boolean) | undefined;
+  /** True while the composer is collecting a concealed value; history recall must not write into the masked field. */
+  isConcealedInput?: (() => boolean) | undefined;
   /**
    * Optional: only used by the enter-key desync safety net below (a stray
    * slash-prefixed submission with commandMode somehow still false). When
@@ -221,7 +225,10 @@ export function createFeedTokenRoutes<
     if (token.type !== 'text') {
       return { handled: false, prompt: state.prompt, cursorPos: state.cursorPos, commandMode: state.commandMode };
     }
-    if (token.value === '?' && state.prompt === '' && !state.commandMode) {
+    // A concealed value is typed verbatim: no help key, no file picker, no slash
+    // command and no paste marker (the submit path does not expand markers).
+    const concealed = state.isConcealedInput?.() ?? false;
+    if (!concealed && token.value === '?' && state.prompt === '' && !state.commandMode) {
       if (state.commandContext?.openSelection) {
         state.commandRegistry?.execute('help', [], state.commandContext);
       }
@@ -234,12 +241,12 @@ export function createFeedTokenRoutes<
     state.killRing?.clearYankState();
     if (state.saveUndoStateForText) state.saveUndoStateForText();
     else state.saveUndoState();
-    const text = state.registerPaste(token.value);
+    const text = concealed ? token.value.replace(/\r\n?/g, '\n') : state.registerPaste(token.value);
     let prompt = state.prompt.slice(0, state.cursorPos) + text + state.prompt.slice(state.cursorPos);
     let cursorPos = state.cursorPos + text.length;
     let commandMode = state.commandMode;
     state.ensureInputCursorVisible();
-    if (token.value === '@' && !commandMode) {
+    if (!concealed && token.value === '@' && !commandMode) {
       const charBefore = cursorPos >= 2 ? prompt[cursorPos - 2] : undefined;
       if (charBefore === '!') {
         state.modalOpened('filePicker');
@@ -249,7 +256,9 @@ export function createFeedTokenRoutes<
         state.filePicker.open(cursorPos - 1);
       }
     }
-    if (prompt === '/' && (policy.armCommandWithoutRegistry || state.commandRegistry)) {
+    if (concealed) {
+      // Nothing else to arm: the buffer is a secret, not a command.
+    } else if (prompt === '/' && (policy.armCommandWithoutRegistry || state.commandRegistry)) {
       // Arm commandMode as soon as the prompt becomes a bare '/', regardless of
       // whether commandRegistry has been (re)attached yet, this is a one-shot
       // transition (the only place commandMode ever becomes true), and gating
@@ -520,7 +529,7 @@ export function createFeedTokenRoutes<
       } else {
         const info = computeWrappedPromptInfo(prompt, cursorPos, inputScrollTop, state.contentWidth, state.maxInputRows);
         if (info.cursorWrappedLine === 0) {
-          if (state.inputHistory) {
+          if (state.inputHistory && !state.isConcealedInput?.()) {
             const recalled = state.inputHistory.up(prompt);
             if (recalled !== null) {
               prompt = recalled;

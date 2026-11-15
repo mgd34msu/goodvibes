@@ -283,7 +283,7 @@ describe('model catalog protected source and caller boundaries', () => {
     if (field === 'long-provider') f.providers[0]!.documentation = 'x'.repeat(900) + sensitive;
     if (field === 'config') f.config['helper.globalModel'] = { privateNote: sensitive };
     if (field === 'health') record(f.health.routes[0]).lastErrorMessage = sensitive;
-    if (field === 'artifact') f.artifacts.push({ id: 'hidden-artifact', createdAt: 1_700_000_000_000, metadata: { privateNote: sensitive } });
+    if (field === 'artifact') f.artifacts.push({ id: 'hidden-artifact', createdAt: 1_700_000_000_000, metadata: { purpose: 'agent-model-compare', privateNote: sensitive } });
     const fake = readings({ [`model:${winner}`]: 0.99 }); installJudgmentPort(fake.port);
     await expect(f.tools.models.execute({ action: 'status', query, limit: 1, includeParameters: false })).rejects.toThrow();
     expect(JSON.stringify(screening.calls)).toContain(sensitive); expect(fake.requests).toHaveLength(0); expect(f.effects).toEqual([]);

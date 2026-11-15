@@ -47,7 +47,7 @@ function makeFactory() {
 
 /** Let queued microtasks (the deferred disposal) run. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
 }
 
 test('two sessions in one workspace share one floor', async () => {

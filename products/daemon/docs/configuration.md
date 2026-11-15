@@ -112,8 +112,10 @@ and the [command reference](commands-reference.md#serve-default).
 
 Credential settings are redacted in text and JSON output, including nested
 values. A supported `goodvibes://secrets/` reference can remain visible because
-it is a pointer. Redaction cleans the output; it does not change the value being
-stored. If safe output cannot be prepared before a write, settings remain
+it is a pointer. Redaction cleans the output. A credential key (such as `surfaces.telegram.botToken`) is
+never written to a settings file as plain text: `config set` stores the value in the secret
+store and the settings file keeps a `goodvibes://secrets/` reference, and a credential key
+with no secret-store route refuses a literal value. If safe output cannot be prepared before a write, settings remain
 unchanged. If reporting fails after a completed write, the receipt preserves the
 write outcome with a redacted value.
 
@@ -130,13 +132,3 @@ general restart warning. Service restart requires the supported installed
 service composition.
 See [deployment boundaries](../README.md) and
 [troubleshooting](troubleshooting.md#port-conflicts-and-webui-exposure).
-
-## Verification limits
-
-Existing [command tests](../src/test/daemon/config-command.test.ts) cover settings
-verbs and recursive output. [Safety tests](../src/test/daemon/config-command-safety.test.ts)
-cover real-manager validation, refusal before mutation, unchanged stored bytes,
-and honest post-write receipts. [Emitted CLI tests](../src/test/cli/entrypoint.test.ts)
-cover the selected daemon store across processes and selected-store migration.
-These are bounded fixture contracts, not live-provider or release acceptance.
-See testing and validation for the supported runner.

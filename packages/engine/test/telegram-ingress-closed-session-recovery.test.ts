@@ -236,7 +236,7 @@ describe('a skipped update advances the cursor LOUDLY', () => {
                 throw Object.assign(new Error('the store rejected the write'), { status: 500 });
               }
               processed.push(input.body);
-              return { mode: 'spawn', task: { prompt: input.body }, session: { id: 'session-1' } };
+              return { mode: 'spawn', task: { prompt: input.body }, session: { id: 'session-1' }, input: { id: 'input-1' } };
             },
             bindAgent: async () => { /* no-op */ },
           },

@@ -196,7 +196,8 @@ describe('checkpoint-runtime commands: manager present but init() failed', () =>
     try {
       await registry.execute('checkpoints', [], ctx);
       await registry.execute('checkpoint', ['label'], ctx);
-      await new Promise((r) => setTimeout(r, 10));
+      // A rejection nobody handled is reported after the microtask queue drains; one macrotask turn is enough to see it.
+      await new Promise((r) => setImmediate(r));
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }

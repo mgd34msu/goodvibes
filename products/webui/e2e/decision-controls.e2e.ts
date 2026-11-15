@@ -54,7 +54,7 @@ test("decision controls save models, provider, policy and ordered fallbacks thro
     host.reload();
     expect(host.manager.get("provider.model")).toBe(originalChat);
     expect(host.persisted()).toMatchObject({
-      judgment: { policy: "Classic - Off", model: "english" },
+      judgment: { policy: "Classic - Off", model: DECISION_MODEL_PROFILES.at(-1)?.model },
     });
     await openSettings(page, "models");
     await expect(

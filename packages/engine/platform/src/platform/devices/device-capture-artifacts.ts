@@ -35,6 +35,22 @@ export interface DeviceArtifactRemoval {
 export interface DeviceArtifactSweepReport { readonly sweptAt: number; readonly removed: readonly DeviceArtifactRemoval[]; readonly retained: number; readonly bytesReclaimed: number }
 export interface DeviceArtifactPolicy { readonly retentionMs: number; readonly maxArtifacts: number }
 export const DEFAULT_DEVICE_ARTIFACT_POLICY: DeviceArtifactPolicy = { retentionMs: 24 * 60 * 60 * 1000, maxArtifacts: 200 };
+/**
+ * The index lock keeps its single-attempt, descriptor-proven form, but a second
+ * writer (the next daemon of a handover, or a plain read that rewrites the
+ * index) waits out a short holder instead of failing a request whose device
+ * already acted. A holder still present after the wait is reported as busy.
+ */
+const INDEX_LOCK_ATTEMPTS = 40;
+const INDEX_LOCK_RETRY_MS = 50;
+async function acquireIndexLock(lock: string, assertCurrent: () => void): Promise<() => void> {
+  for (let attempt = 0; attempt < INDEX_LOCK_ATTEMPTS; attempt++) {
+    const release = tryAcquireCrossProcessLock(lock, { assertCurrent });
+    if (release) return release;
+    await new Promise<void>((resolve) => { setTimeout(resolve, INDEX_LOCK_RETRY_MS); });
+  }
+  throw new Error('Another device capture writer is active');
+}
 interface SavedArtifact extends DeviceCaptureArtifact { readonly sourceObservation?: string }
 interface PendingCapture { readonly id: string; readonly fileName: string; readonly sourceIdentity: string; readonly capturedAt: number }
 const pendingIdentity = (entry: BigIntStats): string => {
@@ -148,7 +164,7 @@ export class DeviceCaptureArtifactStore {
   private mutate<T>(fn: (rows: SavedArtifact[], malformed: number, mutation: Mutation) => Promise<{ next: SavedArtifact[]; result: T }>, beforePublish?: () => void): Promise<T> {
     const run = this.writeChain.then(async () => {
       const owner = this.storage(), lock = this.index.lockPath; if (!lock) throw new Error('Device capture index requires native storage');
-      const release = tryAcquireCrossProcessLock(lock, { assertCurrent: () => owner.assertCurrent() }); if (!release) throw new Error('Another device capture writer is active');
+      const release = await acquireIndexLock(lock, () => owner.assertCurrent());
       const retained: (() => void)[] = [], created: ArtifactCreatedLeaf[] = [], removals: { path: string; assertion: () => void; removed?: (() => void) | undefined }[] = [];
       let finalPublished = false;
       try {

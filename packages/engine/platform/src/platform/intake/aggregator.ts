@@ -91,6 +91,8 @@ export interface ChannelInboxProviderStatus {
   mailboxHistory?: ImapUidCheckpoint['history'] & { readonly uidValidity: number };
   /** Eligible messages remaining at lastSyncAt, not a live provider total. Absent when unknown. */
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
+  /** Messages the last sync passed because their content cannot be proven complete, with the reason. */
+  skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
 }
 
 /** platform `channels.inbox.list` output. */
@@ -183,8 +185,9 @@ export function normalizeInboxQuery(
 ): InboxListQuery {
   const fromBody = (body ?? {}) as InboxListInput;
   const provider = firstString(query.provider, fromBody.provider);
-  const limitRaw = firstNumber(query.limit, fromBody.limit);
-  const sinceRaw = firstNumber(query.since, fromBody.since);
+  const limitRaw = firstNumber('limit', query.limit, fromBody.limit);
+  const sinceRaw = firstNumber('since', query.since, fromBody.since);
+  if (sinceRaw !== undefined && sinceRaw < 0) throw invalidNumber('since');
   const cursor = firstString(query.cursor, fromBody.cursor);
 
   const limit = limitRaw === undefined
@@ -194,7 +197,7 @@ export function normalizeInboxQuery(
   return {
     ...(provider ? { providers: [provider] } : {}),
     limit,
-    ...(sinceRaw !== undefined && sinceRaw >= 0 ? { since: Math.floor(sinceRaw) } : {}),
+    ...(sinceRaw !== undefined ? { since: Math.floor(sinceRaw) } : {}),
     ...(cursor ? { after: decodePageCursor(cursor) } : {}),
   };
 }
@@ -206,13 +209,23 @@ function firstString(...candidates: (string | undefined)[]): string | undefined 
   return undefined;
 }
 
-function firstNumber(...candidates: (string | number | undefined)[]): number | undefined {
+/** The first supplied value, which must be a finite number: a bad one is refused like a bad cursor, never read as "no filter". */
+function firstNumber(field: string, ...candidates: (string | number | undefined)[]): number | undefined {
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null || candidate === '') continue;
-    const value = Number(candidate);
-    if (Number.isFinite(value)) return value;
+    const value = typeof candidate === 'string' && candidate.trim() === '' ? Number.NaN : Number(candidate);
+    if (!Number.isFinite(value)) throw invalidNumber(field);
+    return value;
   }
   return undefined;
+}
+
+function invalidNumber(field: string): HandlerError {
+  return new HandlerError(
+    `${field} must be a ${field === 'since' ? 'non-negative ' : ''}number; omit it to use the default`,
+    'INVALID_ARGUMENT',
+    400,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +353,7 @@ function describeProviders(input: {
     const checkpoint = store.getImapCheckpoint?.(status.id);
     if (checkpoint) wire.mailboxHistory = { ...checkpoint.history, uidValidity: checkpoint.uidValidity };
     if (checkpoint && status.mailboxProgress?.uidValidity === checkpoint.uidValidity) wire.mailboxProgress = { ...status.mailboxProgress };
+    if (status.skippedMessages && status.skippedMessages.length > 0) wire.skippedMessages = status.skippedMessages.map((entry) => ({ ...entry }));
     if (status.configured !== undefined) wire.configured = status.configured;
     if (status.lastPolledAt !== undefined) wire.lastSyncAt = status.lastPolledAt;
     // The error belongs to the `error` state only. Carrying the "missing

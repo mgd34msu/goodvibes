@@ -120,9 +120,13 @@ function render(open = true): { el: HTMLElement; unmount: () => void } {
   };
 }
 
-/** React Query runs a mutationFn on a microtask, so a write is observable a tick later. */
-async function flushMutations(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+/** React Query runs a mutationFn after an unspecified number of turns, so wait for the
+ *  observed write itself, yielding to the event loop a bounded number of times. */
+async function waitForConfigWrite(): Promise<void> {
+  for (let turn = 0; turn < 500 && configWrites.length === 0; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  if (configWrites.length === 0) throw new Error('the config write never reached the operator client');
 }
 
 let cleanup: (() => void) | null = null;
@@ -195,7 +199,7 @@ describe('the per-origin opt-in', () => {
     expect((checkbox as HTMLInputElement).checked).toBe(false);
 
     flushSync(() => { (checkbox as HTMLInputElement).click(); });
-    await flushMutations();
+    await waitForConfigWrite();
     expect(configWrites).toEqual([{ key: 'voice.wake.surfaces.webui', value: true }]);
   });
 
@@ -207,7 +211,7 @@ describe('the per-origin opt-in', () => {
       .find((element) => element.closest('label')?.textContent?.includes('all surfaces'));
     expect(checkbox).toBeDefined();
     flushSync(() => { (checkbox as HTMLInputElement).click(); });
-    await flushMutations();
+    await waitForConfigWrite();
     expect(configWrites).toEqual([{ key: 'voice.wake.enabled', value: true }]);
   });
 });

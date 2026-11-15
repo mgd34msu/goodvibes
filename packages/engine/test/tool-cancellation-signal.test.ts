@@ -5,7 +5,7 @@
  * and signal -> runtime-dep pass-through for fetch.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../platform/src/platform/tools/exec/runtime.js';
@@ -31,26 +31,38 @@ describe('exec tool: cooperative cancellation via opts.signal', () => {
     const tool = createExecTool(new ProcessManager(), { overflowHandler: new OverflowHandler({ baseDir: root }) });
     const controller = new AbortController();
 
-    const start = Date.now();
     // timeout_ms stays under PROGRESS_AUTO_THRESHOLD_MS (30s) so this
     // exercises foreground cancellation. Progress-streamed and until-pattern
     // execution also forward opts.signal through their own paths.
+    const pidFile = join(root, 'child.pid');
     const resultPromise = tool.execute(
-      { working_dir: root, commands: [{ cmd: 'sleep 30', timeout_ms: 20_000 }] },
+      { working_dir: root, commands: [{ cmd: `echo $$ > child.pid && exec sleep 30`, timeout_ms: 20_000 }] },
       { signal: controller.signal },
     );
-    // Abort shortly after the process starts, well before `sleep 30` would
+    // Abort once the child has announced itself, well before `sleep 30` would
     // ever return on its own.
-    setTimeout(() => controller.abort(), 50);
+    let pid = 0;
+    for (let attempt = 0; attempt < 500 && !pid; attempt++) {
+      pid = existsSync(pidFile) ? Number.parseInt(readFileSync(pidFile, 'utf8').trim(), 10) || 0 : 0;
+      if (!pid) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(pid).toBeGreaterThan(0);
+    controller.abort();
     const result = await resultPromise;
-    const elapsedMs = Date.now() - start;
 
-    // SIGTERM, a 200ms grace period, then SIGKILL, the process must be gone
-    // in well under a second, not the full 30s sleep duration.
-    expect(elapsedMs).toBeLessThan(5_000);
     const output = JSON.parse(result.output ?? '{}') as { cancelled?: boolean; timed_out?: boolean };
     expect(output.cancelled).toBe(true);
     expect(output.timed_out).toBeUndefined();
+
+    // The child must actually be gone: SIGTERM, a grace period, then SIGKILL.
+    // Waiting longer only helps, so the bounded poll is not a timing assertion.
+    let alive = true;
+    for (let attempt = 0; attempt < 300 && alive; attempt++) {
+      try { process.kill(pid, 0); } catch { alive = false; break; }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (alive) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    expect(alive).toBe(false);
   }, 10_000);
 
   test('an already-aborted signal cancels before the process is ever awaited on', async () => {

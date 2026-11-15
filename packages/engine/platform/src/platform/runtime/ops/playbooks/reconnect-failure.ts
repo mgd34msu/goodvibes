@@ -29,10 +29,11 @@ export const reconnectFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary:
             'Endpoint reachability requires a live network context. ' +
-            'Use the transport.ping() diagnostic API or check connectivity manually.',
-          severity: 'warning',
+            'Check connectivity manually.',
+          severity: 'info',
           context: { hint: 'Run: curl -sf <endpoint>/health' },
         })),
     },
@@ -43,8 +44,9 @@ export const reconnectFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Retry budget state requires live transport context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Inspect TransportManager.retryState()' },
         })),
     },
@@ -55,8 +57,9 @@ export const reconnectFailurePlaybook: Playbook = {
       run: async (): Promise<DiagnosticCheckResult> =>
         safeCheck(async () => ({
           passed: false,
+          evaluated: false,
           summary: 'Credential validation requires live auth context.',
-          severity: 'warning',
+          severity: 'info',
           context: { hint: 'Check token expiry in AuthManager.status()' },
         })),
     },
@@ -69,9 +72,8 @@ export const reconnectFailurePlaybook: Playbook = {
         'Ping the transport endpoint outside the runtime to confirm basic network connectivity. ' +
         'Check DNS resolution and TLS certificate validity.',
       kind: 'observe',
-      command: 'curl -sf --max-time 5 <endpoint>/health',
       expectedOutcome: 'HTTP 200 or endpoint-specific health response.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 2,
@@ -80,7 +82,6 @@ export const reconnectFailurePlaybook: Playbook = {
         'Verify API keys / bearer tokens are set, not expired, and have the required scopes. ' +
         'Rotate credentials if expired.',
       kind: 'observe',
-      command: 'runtime.auth.status()',
       expectedOutcome: 'Credentials valid and not expiring within 5 minutes.',
       automatable: false,
     },
@@ -101,9 +102,8 @@ export const reconnectFailurePlaybook: Playbook = {
         'Emit a transport.reconnect event to trigger an immediate reconnection attempt, ' +
         'bypassing the backoff timer.',
       kind: 'command',
-      command: 'eventBus.emit("transport.reconnect", { transportId })',
       expectedOutcome: 'Connection re-established; transport spans show CONNECT success.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 5,
@@ -112,7 +112,6 @@ export const reconnectFailurePlaybook: Playbook = {
         'If the primary transport remains unreachable after forced reconnect, ' +
         'configure a fallback transport endpoint in TransportManager.',
       kind: 'config',
-      command: 'runtime.transport.setFallback({ endpoint: "<fallback-url>" })',
       expectedOutcome: 'Runtime connected via fallback; primary transport monitored in background.',
       automatable: false,
     },

@@ -15,12 +15,13 @@ import type { PermissionPromptDecision } from '../../permissions/prompt.js';
 import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
 import { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
-import type { FeatureFlagManager } from '../feature-flags/index.js';
+import { isFeatureGateEnabled, type FeatureFlagManager } from '../feature-flags/index.js';
 import {
   createSandboxContainmentAnnouncer,
   type FeatureAnnouncementStore,
 } from '../feature-announcements.js';
 import { PolicyRuntimeState } from './policy-runtime.js';
+import { PolicyRegistry } from './policy-registry.js';
 import { loadConfiguredPolicyBundle } from './policy-config-loader.js';
 import { buildSandboxEscalationHandler, type ExecSandboxEscalationHandler } from './sandbox-escalation-wiring.js';
 import { buildExecPromptAnswerHandler, type ExecPromptAnswerHandler } from './exec-prompt-wiring.js';
@@ -65,12 +66,27 @@ export function createUserPermissionRuleStore(
   return store;
 }
 
-/** Build the policy runtime state and load whatever bundle config names. */
+/**
+ * Build the policy runtime state and load whatever bundle config names.
+ *
+ * With `policy.requireSignedBundles` on, every bundle must carry a valid HMAC-SHA256 signature
+ * made with the key in `GOODVIBES_POLICY_SIGNING_KEY` (hex, at least 16 bytes). With no key the
+ * bundle is refused, never loaded unverified.
+ */
 export function createPolicyRuntimeState(
   configManager: ConfigManager,
   featureFlags: FeatureFlagManager,
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): PolicyRuntimeState {
-  const policyRuntimeState = new PolicyRuntimeState();
+  const signingKey = env['GOODVIBES_POLICY_SIGNING_KEY']?.trim();
+  const policyRuntimeState = new PolicyRuntimeState(new PolicyRegistry({
+    loaderOptions: {
+      featureFlags,
+      managed: isFeatureGateEnabled(featureFlags, 'policy-signing'),
+      ...(signingKey ? { signingKey } : {}),
+      provenanceSource: 'local-file',
+    },
+  }));
   loadConfiguredPolicyBundle(configManager, featureFlags, policyRuntimeState);
   return policyRuntimeState;
 }

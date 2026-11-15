@@ -1,7 +1,7 @@
 import { handleSimplePermissionInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, buildModifiedEditArgs, type HunkSelectionState } from '../permissions/hunk-selection.ts';
-import { permissionButtons } from '../permissions/prompt-card.ts';
+import { asksAgainEvenIfRemembered, permissionButtons } from '../permissions/prompt-card.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   resolve: (
@@ -107,9 +107,11 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         render();
         return { handled: true, pendingPermission: withChoice(req, data === KEY_LEFT ? -1 : 1) };
       }
+      // Deny on a hunk card declines this edit only, exactly as on the plain
+      // card: the model gets the declined result and can adapt. Ctrl+C is the
+      // one abort.
       if ((data === '\r' || data === '\n') && permissionButtons(req, req)[req.choice ?? 0]?.id === 'deny') {
         req.resolve(false, false);
-        abortTurn();
         render();
         return { handled: true, pendingPermission: null };
       }
@@ -121,7 +123,6 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       }
       if (commit === 'cancel') {
         req.resolve(false, false);
-        abortTurn();
         render();
         return { handled: true, pendingPermission: null };
       }
@@ -247,7 +248,8 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         escapeDenies: false,
         abortOnDeny: false,
         resolve: (approved, remember) => {
-          if (remember) req.resolve(approved, true, undefined, { rememberTier: 'session' });
+          // The card does not offer "for session" for an ask that is put to the owner again; the key allows once.
+          if (remember && !asksAgainEvenIfRemembered(req)) req.resolve(approved, true, undefined, { rememberTier: 'session' });
           else req.resolve(approved, false);
         },
         abort: abortTurn,
@@ -259,7 +261,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     // Numbered remember tiers ([1]..[N], most specific first) from the platform's
     // rememberOptions: approve AND remember at that tier. A generalizing tier
     // writes a durable user-origin rule; 'session' only caches in memory.
-    if (/^[1-9]$/.test(key) && req.rememberOptions && req.rememberOptions.length > 0) {
+    if (/^[1-9]$/.test(key) && !asksAgainEvenIfRemembered(req) && req.rememberOptions && req.rememberOptions.length > 0) {
       const option = req.rememberOptions[Number(key) - 1];
       if (option) {
         req.resolve(true, option.tier === 'session', undefined, { rememberTier: option.tier });

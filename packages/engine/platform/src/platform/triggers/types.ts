@@ -221,6 +221,7 @@ export type TriggerRule =
 export interface AgentTurnAction {
   readonly kind: 'agent-turn';
   readonly prompt?: string | undefined;
+  /** Not honoured: a new trigger naming it is refused. Kept so triggers saved with it still load. */
   readonly sessionId?: string | undefined;
   readonly model?: string | undefined;
 }

@@ -13,8 +13,9 @@
  * item that needs you opens in the detail by itself; the detail folds the
  * sidebar to its rail while it is open.
  *
- * Deep links: a push notification's `#approval-action=…` completes the
- * decision on mount (useApprovalActions); `#fleet-node=…` opens that process.
+ * Deep links: a push notification's `#approval-action=…` opens that approval
+ * for review (Allow) or denies it (Deny) on mount (useApprovalActions);
+ * `#fleet-node=…` opens that process.
  * `?tab=checkpoints` (the old Checkpoints page) opens the first session on its
  * Checkpoints tab, or the workspace checkpoints when there is no session.
  */
@@ -152,7 +153,13 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     setSelectedKey('');
   }, []);
   const hostedAttachment = useHostedAttachment(selectedHostedId, data.hostedRecords, closeDetail);
-  const approvalActions = useApprovalActions();
+  // A push notification's "Allow" opens the approval for review; it never approves by itself.
+  const approvalActions = useApprovalActions({
+    onOpenApproval: (id) => {
+      dismissedRef.current = true;
+      setSelectedKey(`approval:${id}`);
+    },
+  });
 
   const items = useMemo(() => buildWorkItems({
     contracts: data.contractRecords,
@@ -239,7 +246,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
             ? () => openItem(`fleet:contract:${id}`) : undefined} />;
       case 'approval': {
         const record = data.approvalRecords.find((a) => a.id === id);
-        return record ? <ApprovalDetail key={record.id} record={record} actions={approvalActions} onClose={closeDetail} onOpenSession={onOpenSession} /> : null;
+        return record ? <ApprovalDetail key={record.id} record={record} actions={approvalActions} onClose={closeDetail} /> : null;
       }
       case 'fleet': {
         const node = data.nodes.find((n) => n.id === id) ?? data.liveNodes.find((n) => n.id === id);
@@ -295,7 +302,8 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
 
   const pendingApprovals = data.approvalRecords.filter((a) => a.status === 'pending' || a.status === 'claimed');
   const showFinished = scope !== 'active';
-  const nothingAtAll = !data.firstLoad && (scope === 'archived' || !data.contracts.isFetching) && data.failures.length === 0 && groups.needs.length === 0 && groups.running.length === 0
+  const showHostedNotice = (kind === 'sessions' || kind === 'all') && data.hostedUnreadable;
+  const nothingAtAll = !data.firstLoad && (scope === 'archived' || !data.contracts.isFetching) && data.failures.length === 0 && !showHostedNotice && groups.needs.length === 0 && groups.running.length === 0
     && (!showFinished || groups.finished.length === 0);
 
   const list = (
@@ -307,7 +315,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
           <Button size="sm" variant="ghost" onClick={() => void failed.refetch()}>Retry</Button>
         </p>
       ))}
-      {kind === 'sessions' && data.hostedUnreadable && (
+      {showHostedNotice && (
         <p className="dv-notice work-notice" role="note">
           The daemon answered the hosted session list in a shape this client does not understand, so hosted sessions are not shown.
         </p>
@@ -392,7 +400,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   return (
     <DataPage
       title={WORK.label}
-      description={data.firstLoad ? WORK.description : workSummary(items.filter((i) => scope === 'archived' || i.group !== 'finished'))}
+      description={data.firstLoad ? WORK.description : workSummary(scope === 'archived' ? items : items.filter((i) => i.group !== 'finished'), scope === 'archived')}
       action={<NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(key); }} />}
       filters={(
         <>

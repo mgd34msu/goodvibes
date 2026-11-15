@@ -140,7 +140,14 @@ export function installInboundIntakeEnrichment(
   broker.submitMessage = async (input: SubmitSharedSessionMessageInput) => {
     const { metadata, permissionMode } = await enrichInboundSubmit(deps, input);
     const result = await original({ ...input, metadata });
-    if (result.created && permissionMode !== undefined) {
+    // Bound on creation, and again on any later submit that finds the session
+    // still without a mode: a bind that failed on the first message (the broker
+    // could not persist) would otherwise never be retried, and the session would
+    // run under the host default instead of this channel's profile. A throw
+    // here refuses the message to the adapter, so no turn starts unbound.
+    const unbound = result.created || (broker.getSession !== undefined
+      && broker.getSession(result.session.id)?.channelPermissionMode === undefined);
+    if (permissionMode !== undefined && unbound) {
       const sessionId = result.session.id;
       await broker.bindChannelExecutionMode?.(sessionId, permissionMode);
       owners.set(sessionId, createChannelModeOwner(broker, sessionId, permissionMode));

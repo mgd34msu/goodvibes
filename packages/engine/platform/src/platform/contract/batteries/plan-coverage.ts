@@ -181,9 +181,11 @@ const OUTCOME_RANK: Readonly<Record<Outcome, number>> = { act: 2, confirm: 1, es
  * The plan-level answer the parts give, for calibration: uncovered when any
  * part leans yes. Uncovered acts when a part reads yes at act; covered acts
  * only when every part reads no at act, and confirms when every part reads no
- * at act or confirm.
+ * at act or confirm. No parts means nothing was read, which is not coverage:
+ * it escalates with no signal rather than reading as covered at act.
  */
 export function coverageConclusion(parts: readonly CoveragePart[]): { readonly uncovered: 'yes' | 'no'; readonly signal: number; readonly outcome: Outcome } {
+  if (parts.length === 0) return { uncovered: 'no', signal: 0, outcome: 'escalate' };
   const worst = Math.max(...parts.map((part) => part.reading.probability));
   if (leansYes(worst)) {
     const yes = parts.filter((part) => part.reading.verdict === 'yes').map((part) => part.reading.outcome);

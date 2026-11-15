@@ -8,13 +8,15 @@ import {
   type ProjectPlanningStateActionInput, type ProjectPlanningStateUpsertInput,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
-const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const roots: string[] = [], stores: KnowledgeStore[] = [];
+function owned(store: KnowledgeStore): KnowledgeStore { stores.push(store); return store; }
+// Stores are closed before their directory is removed.
+afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'planning-revision-')); roots.push(root);
   const path = join(root, 'knowledge.sqlite');
-  const store = new KnowledgeStore({ dbPath: path });
+  const store = owned(new KnowledgeStore({ dbPath: path }));
   const service = new ProjectPlanningService(store);
   const authored: ProjectPlanningStateUpsertInput['state'] = {
     goal: 'Inspect retry behavior only', scope: 'Retry helper', executionApproved: false,
@@ -28,7 +30,7 @@ async function fixture() {
   return { root, path, store, service, selected, authored };
 }
 async function persisted(path: string) {
-  const reopened = new KnowledgeStore({ dbPath: path });
+  const reopened = owned(new KnowledgeStore({ dbPath: path }));
   await reopened.init();
   return reopened.listSources(1000).sort((a,b) => a.id.localeCompare(b.id));
 }
@@ -125,7 +127,7 @@ test('successful explicit approval persists and its revision agrees after reopen
   expect(result).toMatchObject({ applied: true, state: { executionApproved: true, metadata: { approvedFrom: 'plan-command' } } });
   if (result.applied) expect(typeof result.state.metadata?.approvedAt).toBe('number');
   if (!result.applied) throw new Error('Expected explicit approval');
-  const reopened = new KnowledgeStore({ dbPath: f.path }); await reopened.init();
+  const reopened = owned(new KnowledgeStore({ dbPath: f.path })); await reopened.init();
   const loaded = await new ProjectPlanningService(reopened).getState({ projectId: 'fixture' });
   expect(loaded.state).toEqual(result.state);
   expect(loaded.revision).toEqual(result.revision);
@@ -163,7 +165,7 @@ test('legacy answer reports a persisted conflict without syncing or overwriting 
   f.store.init = async () => { if (++calls === 2) { entered.resolve(); await gate.promise; } await originalInit(); };
   const pending = f.service.answerQuestion({ projectId: 'fixture', questionId: 'q1', answer: 'Stale answer' });
   await entered.promise;
-  const other = new ProjectPlanningService(new KnowledgeStore({ dbPath: f.path }));
+  const other = new ProjectPlanningService(owned(new KnowledgeStore({ dbPath: f.path })));
   await other.upsertState({ projectId: 'fixture', state: { ...f.authored, goal: 'Other owner replacement', tasks: [{ id: 'other', title: 'Other work' }] } });
   const bytes = readFileSync(f.path); const rows = await persisted(f.path);
   gate.resolve();
@@ -179,7 +181,7 @@ test('legacy answer reports pending local changes without discarding the batch',
     expect(await f.service.answerQuestion({ projectId: 'fixture', questionId: 'q1', answer: 'Held answer' }))
       .toMatchObject({ answered: false, reason: 'pending-local-changes', state: { answeredQuestions: [] } });
   });
-  const reopened = new KnowledgeStore({ dbPath: f.path }); await reopened.init();
+  const reopened = owned(new KnowledgeStore({ dbPath: f.path })); await reopened.init();
   expect(reopened.getJobRun('pending-answer-job')?.status).toBe('completed');
   expect((await new ProjectPlanningService(reopened).getState({ projectId: 'fixture' })).state!.answeredQuestions).toEqual([]);
 });

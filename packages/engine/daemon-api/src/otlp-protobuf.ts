@@ -176,6 +176,14 @@ function readNumericBigIntAsString(reader: ProtoReader, wireType: WireType): str
   return undefined;
 }
 
+/** Signed int64 / sfixed64 fields: reinterpret the 64 raw bits as two's complement. */
+function readSignedBigIntAsString(reader: ProtoReader, wireType: WireType): string | undefined {
+  if (wireType === 0) return String(BigInt.asIntN(64, reader.readVarint()));
+  if (wireType === 1) return String(BigInt.asIntN(64, reader.readFixed64()));
+  reader.skip(wireType);
+  return undefined;
+}
+
 function readFloating(reader: ProtoReader, wireType: WireType): number | undefined {
   if (wireType === 1) return reader.readDouble();
   if (wireType === 5) return reader.readFloat();
@@ -239,7 +247,7 @@ function decodeAnyValue(bytes: Uint8Array): Record<string, unknown> {
         break;
       }
       case 3: {
-        const value = readNumericBigIntAsString(reader, wireType);
+        const value = readSignedBigIntAsString(reader, wireType);
         if (value !== undefined) out['intValue'] = value;
         break;
       }
@@ -818,7 +826,7 @@ function decodeMetric(bytes: Uint8Array): Record<string, unknown> {
         break;
       }
       case 10: {
-        const value = readMessage(reader, wireType, decodeHistogram);
+        const value = readMessage(reader, wireType, decodeExponentialHistogram);
         if (value) out['exponentialHistogram'] = value;
         break;
       }
@@ -849,8 +857,12 @@ function decodeHistogram(bytes: Uint8Array): Record<string, unknown> {
   return decodeMetricPoints(bytes, decodeGenericDataPoint, true);
 }
 
+function decodeExponentialHistogram(bytes: Uint8Array): Record<string, unknown> {
+  return decodeMetricPoints(bytes, decodeExponentialHistogramDataPoint, true);
+}
+
 function decodeSummary(bytes: Uint8Array): Record<string, unknown> {
-  return decodeMetricPoints(bytes, decodeGenericDataPoint, false);
+  return decodeMetricPoints(bytes, decodeSummaryDataPoint, false);
 }
 
 function decodeMetricPoints(
@@ -896,7 +908,7 @@ function decodeNumberDataPoint(bytes: Uint8Array): Record<string, unknown> {
         break;
       }
       case 6: {
-        const value = readNumericBigIntAsString(reader, wireType);
+        const value = readSignedBigIntAsString(reader, wireType);
         if (value !== undefined) out['asInt'] = value;
         break;
       }
@@ -943,6 +955,139 @@ function decodeGenericDataPoint(bytes: Uint8Array): Record<string, unknown> {
       readKeyValueArray(out, reader, wireType);
     } else {
       reader.skip(wireType);
+    }
+  }
+  return out;
+}
+
+function zigzag32(value: bigint): number {
+  return Number((value >> 1n) ^ -(value & 1n));
+}
+
+function decodeExponentialBuckets(bytes: Uint8Array): Record<string, unknown> {
+  const reader = new ProtoReader(bytes);
+  const out: Record<string, unknown> = { bucketCounts: [] as string[] };
+  const counts = out['bucketCounts'] as string[];
+  while (!reader.eof()) {
+    const { fieldNumber, wireType } = reader.readField();
+    if (fieldNumber === 1 && wireType === 0) {
+      out['offset'] = zigzag32(reader.readVarint());
+    } else if (fieldNumber === 2 && wireType === 2) {
+      // bucket_counts is a packed repeated uint64.
+      const packed = new ProtoReader(reader.readLengthDelimited());
+      while (!packed.eof()) counts.push(String(packed.readVarint()));
+    } else if (fieldNumber === 2 && wireType === 0) {
+      counts.push(String(reader.readVarint()));
+    } else {
+      reader.skip(wireType);
+    }
+  }
+  return out;
+}
+
+/** ExponentialHistogramDataPoint: its field numbers differ from the explicit-bucket histogram. */
+function decodeExponentialHistogramDataPoint(bytes: Uint8Array): Record<string, unknown> {
+  const reader = new ProtoReader(bytes);
+  const out: Record<string, unknown> = { attributes: [] };
+  while (!reader.eof()) {
+    const { fieldNumber, wireType } = reader.readField();
+    switch (fieldNumber) {
+      case 1:
+        readKeyValueArray(out, reader, wireType);
+        break;
+      case 2:
+      case 3: {
+        const value = readNumericBigIntAsString(reader, wireType);
+        if (value !== undefined) out[fieldNumber === 2 ? 'startTimeUnixNano' : 'timeUnixNano'] = value;
+        break;
+      }
+      case 4:
+      case 7:
+      case 10: {
+        const value = readNumeric(reader, wireType);
+        if (value !== undefined) out[fieldNumber === 4 ? 'count' : fieldNumber === 7 ? 'zeroCount' : 'flags'] = value;
+        break;
+      }
+      case 5:
+      case 12:
+      case 13:
+      case 14: {
+        const value = readFloating(reader, wireType);
+        if (value !== undefined) {
+          out[fieldNumber === 5 ? 'sum' : fieldNumber === 12 ? 'min' : fieldNumber === 13 ? 'max' : 'zeroThreshold'] = value;
+        }
+        break;
+      }
+      case 6:
+        if (wireType === 0) out['scale'] = zigzag32(reader.readVarint());
+        else reader.skip(wireType);
+        break;
+      case 8:
+      case 9: {
+        const value = readMessage(reader, wireType, decodeExponentialBuckets);
+        if (value) out[fieldNumber === 8 ? 'positive' : 'negative'] = value;
+        break;
+      }
+      default:
+        reader.skip(wireType);
+    }
+  }
+  return out;
+}
+
+function decodeQuantileValue(bytes: Uint8Array): Record<string, unknown> {
+  const reader = new ProtoReader(bytes);
+  const out: Record<string, unknown> = {};
+  while (!reader.eof()) {
+    const { fieldNumber, wireType } = reader.readField();
+    if (fieldNumber === 1 || fieldNumber === 2) {
+      const value = readFloating(reader, wireType);
+      if (value !== undefined) out[fieldNumber === 1 ? 'quantile' : 'value'] = value;
+    } else {
+      reader.skip(wireType);
+    }
+  }
+  return out;
+}
+
+/** SummaryDataPoint: attributes are field 7 and flags field 8, unlike a histogram point. */
+function decodeSummaryDataPoint(bytes: Uint8Array): Record<string, unknown> {
+  const reader = new ProtoReader(bytes);
+  const out: Record<string, unknown> = { attributes: [] };
+  while (!reader.eof()) {
+    const { fieldNumber, wireType } = reader.readField();
+    switch (fieldNumber) {
+      case 2:
+      case 3: {
+        const value = readNumericBigIntAsString(reader, wireType);
+        if (value !== undefined) out[fieldNumber === 2 ? 'startTimeUnixNano' : 'timeUnixNano'] = value;
+        break;
+      }
+      case 4:
+      case 8: {
+        const value = readNumeric(reader, wireType);
+        if (value !== undefined) out[fieldNumber === 4 ? 'count' : 'flags'] = value;
+        break;
+      }
+      case 5: {
+        const value = readFloating(reader, wireType);
+        if (value !== undefined) out['sum'] = value;
+        break;
+      }
+      case 6: {
+        const value = readMessage(reader, wireType, decodeQuantileValue);
+        if (value) {
+          const list = Array.isArray(out['quantileValues']) ? out['quantileValues'] as unknown[] : [];
+          list.push(value);
+          out['quantileValues'] = list;
+        }
+        break;
+      }
+      case 7:
+        readKeyValueArray(out, reader, wireType);
+        break;
+      default:
+        reader.skip(wireType);
     }
   }
   return out;

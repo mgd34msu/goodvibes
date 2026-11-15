@@ -67,4 +67,9 @@ export interface NormalizedCommand {
   original: string;
   /** Ordered list of command segments (split on &&, ||, ;, |). */
   segments: CommandSegment[];
+  /**
+   * True when the command was longer than the tokenizer reads (65,536 characters or 1,024 tokens),
+   * so `segments` cover only the start of it.
+   */
+  truncated?: boolean | undefined;
 }

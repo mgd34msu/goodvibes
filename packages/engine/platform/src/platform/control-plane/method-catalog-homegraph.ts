@@ -341,7 +341,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.refinement.task.cancel',
     title: 'Cancel Home Graph Refinement Task',
-    description: 'Mark a queued or active Home Graph refinement task as cancelled.',
+    description: 'Mark an open Home Graph refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused, and cancelling an already cancelled task returns it unchanged.',
     method: 'POST',
     path: '/api/homeassistant/home-graph/refinement/tasks/{id}/cancel',
     write: true,

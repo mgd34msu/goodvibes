@@ -66,6 +66,7 @@ describe('formatSetupDetail', () => {
 function makeCtx(overrides: {
   rows?: WorktreeStatusRecord[];
   configGet?: (key: string) => unknown;
+  kept?: Array<{ path: string; summary: string }>;
 } = {}): CommandContext & { printed: string[] } {
   const printed: string[] = [];
   const rows = overrides.rows ?? [];
@@ -77,6 +78,7 @@ function makeCtx(overrides: {
       shellPaths: { workingDirectory: '/tmp/goodvibes-worktree-test' } as CommandContext['workspace']['shellPaths'],
       worktreeRegistry: {
         list: async () => rows,
+        describeKept: async () => overrides.kept ?? [],
         attach: () => {},
         setState: () => {},
         cleanup: async () => {},
@@ -109,6 +111,19 @@ describe('/worktree review', () => {
     registerWorktreeRuntimeCommands(registry);
     return registry;
   }
+
+  test('says how old a kept worktree is, how big, why it is kept, and how to discard it', async () => {
+    const registry = makeRegistry();
+    const ctx = makeCtx({
+      rows: [makeRow({ path: '/tmp/wt/kept' })],
+      kept: [{ path: '/tmp/wt/kept', summary: 'age 3d, 1.2 GB: 2 commit(s) not in main; the directory is pruned in 11 day(s), the branch is kept' }],
+    });
+    await registry.get('worktree')!.handler([], ctx);
+    const text = ctx.printed.join('\n');
+    expect(text).toContain('age 3d, 1.2 GB');
+    expect(text).toContain('pruned in 11 day(s)');
+    expect(text).toContain('/worktree discard <path>');
+  });
 
   test('shows no worktrees message when the registry is empty', async () => {
     const registry = makeRegistry();

@@ -8,6 +8,8 @@ import * as atomic from '../platform/src/platform/utils/atomic-json-store.js';
 import { migrateDaemonOwnedConfig } from '../platform/src/platform/config/daemon-config-migration.js';
 import { daemonConfigMovedPath } from '../platform/src/platform/config/daemon-config-migration-io.js';
 
+const runsAsRoot = process.getuid?.() === 0; // chmod does not deny uid 0, so the denial cases cannot run there
+
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function directory() { const dir = mkdtempSync(join(tmpdir(), 'gv-policy-review-')); dirs.push(dir); return dir; }
@@ -347,8 +349,8 @@ describe('epoch custody and crash boundaries', () => {
     try { item.manager.setRuntimeOverride('behavior.autoApprove', true); } catch { failed = true; }
     finally { write.mockRestore(); }
     expect(failed).toBe(true); expect(item.manager.get('behavior.autoApprove')).toBe(false);
-    // If effects did occur, no new process may reconstruct exactly the old authority.
-    if (!failed) expect(item.restart().getDurableConfigurationIncarnation()).not.toBe(before);
+    // Nothing escaped, so a restart reconstructs exactly the old authority.
+    expect(item.restart().getDurableConfigurationIncarnation()).toBe(before);
   });
 
   test('failed durable intent still fences the existing in-memory source lifetime', () => {
@@ -361,6 +363,7 @@ describe('epoch custody and crash boundaries', () => {
   });
 
   test('active history write failure retains registered host fail-restrictive behavior', () => {
+    if (runsAsRoot) return;
     const dir = directory(); const manager = new ConfigManager({ configDir: dir, surfaceRoot: 'daemon',
       hostSettings: [{ key: 'behavior.syntheticPrivateHost', type: 'boolean', default: true, description: 'Synthetic restrictive fixture' }] });
     const handle = manager.getHostBooleanSetting('behavior.syntheticPrivateHost'); handle.set(false);

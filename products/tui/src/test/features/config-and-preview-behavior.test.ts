@@ -5,7 +5,7 @@ import { UIFactory } from '../../renderer/ui-factory.ts';
 import { getDisplayWidth } from '../../utils/terminal-width.ts';
 
 // ---------------------------------------------------------------------------
-// Config diff tests
+// Throbber and status-line helpers
 // ---------------------------------------------------------------------------
 
 /** The throbber's text for a running turn (the row above the input area). */

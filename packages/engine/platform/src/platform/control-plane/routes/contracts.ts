@@ -95,6 +95,7 @@ export function createContractsStartHandler(service: ContractOperatorService): G
       return await service.start({
         ask,
         ...(sessionId === undefined ? {} : { sessionId }),
+        ...(invocation.context.principalId ? { principalId: invocation.context.principalId } : {}),
         ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         ...(isolation === undefined ? {} : { isolation }),
       });

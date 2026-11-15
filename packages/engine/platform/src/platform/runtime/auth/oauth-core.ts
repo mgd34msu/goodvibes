@@ -114,17 +114,26 @@ async function exchangeOAuthRequest(
   if (typeof json.access_token !== 'string' || json.access_token.length === 0) {
     throw new Error('OAuth token exchange did not return an access token.');
   }
+  const expiresIn = expiresInSeconds(json.expires_in);
   return {
     accessToken: json.access_token,
     ...(typeof json.refresh_token === 'string' && json.refresh_token.length > 0
       ? { refreshToken: json.refresh_token }
       : {}),
     tokenType: typeof json.token_type === 'string' && json.token_type.length > 0 ? json.token_type : 'Bearer',
-    ...(typeof json.expires_in === 'number' && Number.isFinite(json.expires_in)
-      ? { expiresAt: Date.now() + (json.expires_in * 1000) }
-      : {}),
+    ...(expiresIn !== undefined ? { expiresAt: Date.now() + (expiresIn * 1000) } : {}),
     ...(parseOAuthScopes(json.scope) ? { scopes: parseOAuthScopes(json.scope) } : {}),
   };
+}
+
+/** Some token endpoints return `expires_in` as a numeric string. */
+function expiresInSeconds(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 export async function exchangeOAuthAuthorizationCode(
@@ -179,7 +188,9 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
   try {
     // atob is universally available (browsers, React Native, modern Node)
     const base64 = (parts[1]!).replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(base64)) as Record<string, unknown>;
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
   } catch {
     return null;
   }

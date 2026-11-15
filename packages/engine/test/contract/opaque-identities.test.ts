@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import * as atomic from '../../platform/src/platform/utils/atomic-json-store.js';
-/** Regression source authored during coding; execution is deferred. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

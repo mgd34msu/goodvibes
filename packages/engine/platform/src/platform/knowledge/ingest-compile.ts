@@ -77,6 +77,7 @@ export async function finalizeKnowledgeIngestedSource(
   const assertCurrent = () => { assertKnowledgeRestriction(ownership.assertCurrent); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
   assertCurrent();
   let consumed = false, published = false;
+  let committed = undefined as { source: KnowledgeSourceRecord; extraction: KnowledgeExtractionRecord } | undefined;
   try {
     const token = input.preparedExtraction ?? await prepareKnowledgeExtraction(context, input.sourceId, input.artifactId, uris, { signal, assertCurrent });
     const { record, extracted, assertCurrent: assertExtractionCurrent } = consumeKnowledgeExtraction(context, token, input.sourceId, input.artifactId, uris);
@@ -87,8 +88,7 @@ export async function finalizeKnowledgeIngestedSource(
       summary: stableText(extracted.summary) ?? previousExtraction?.summary,
     };
     const extractionId = previousExtraction?.id ?? `extract-${opaqueUuid()}`;
-    const initialStatus = context.store.status();
-    let committed: { source: KnowledgeSourceRecord; extraction: KnowledgeExtractionRecord } | undefined;
+    let compiled = { nodeCount: 0, edgeCount: 0 };
     let assertAliasesCurrent = () => {};
     const assertPrepared = () => {
       assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId, token);
@@ -134,6 +134,7 @@ export async function finalizeKnowledgeIngestedSource(
       const draft = stagedCompileWriter(context, check);
       await compileKnowledgeSourceRecords(context, source, extraction, entityHints, draft.writer, uris);
       check();
+      compiled = { nodeCount: draft.nodes.size, edgeCount: draft.edges.length };
       return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent: assertPrepared };
     }, { signal }, () => {
       published = true;
@@ -143,10 +144,8 @@ export async function finalizeKnowledgeIngestedSource(
     context.emitIfReady((bus, ctx) => emitKnowledgeExtractionCompleted(bus, ctx, {
       sourceId: input.sourceId, extractionId: extraction.id, format: extraction.format, estimatedTokens: extraction.estimatedTokens,
     }), input.sessionId);
-    const finalStatus = context.store.status();
     context.emitIfReady((bus, ctx) => emitKnowledgeCompileCompleted(bus, ctx, {
-      sourceId: source.id, nodeCount: Math.max(0, finalStatus.nodeCount - initialStatus.nodeCount),
-      edgeCount: Math.max(0, finalStatus.edgeCount - initialStatus.edgeCount),
+      sourceId: source.id, ...compiled,
     }), source.sessionId);
     // Host-owned repair consumers promote under their retained read set. Do not
     // launch an unowned second publisher after the guarded source commit.
@@ -159,17 +158,18 @@ export async function finalizeKnowledgeIngestedSource(
     await context.syncReviewedMemory();
     return { source, artifactId: input.artifactId, extraction };
   } catch (error) {
-    if (published) {
-      // A later event/memory followup failure is still returned to its caller,
-      // but cannot truthfully be reported as failed extraction/publication.
-      try { logger.warn('Knowledge source committed; a later ingest completion step failed.'); }
+    if (published && committed) {
+      // The source is already durably published, so a failure in a later step
+      // (memory mirror, completion event) must not be reported to the caller as
+      // a failed ingest, which would stamp a crawl error on indexed content.
+      try { logger.warn('Knowledge source committed; a later ingest completion step failed.', { sourceId: input.sourceId, error: summarizeError(error) }); }
       catch (reportingError) { drainOwned(reportingError); }
-    } else {
-      context.emitIfReady((bus, ctx) => emitKnowledgeExtractionFailed(bus, ctx, {
-        sourceId: input.sourceId,
-        error: summarizeError(error),
-      }), input.sessionId);
+      return { source: committed.source, artifactId: input.artifactId, extraction: committed.extraction };
     }
+    context.emitIfReady((bus, ctx) => emitKnowledgeExtractionFailed(bus, ctx, {
+      sourceId: input.sourceId,
+      error: summarizeError(error),
+    }), input.sessionId);
     throw error;
   } finally { if (consumed) retireKnowledgeIngestUriOperation(uris); }
 }
@@ -251,7 +251,7 @@ async function abortableCompileRead<T>(read: Promise<T>, signal?: AbortSignal): 
 async function commitKnowledgeCompilation(context: KnowledgeIngestContext, source: KnowledgeSourceRecord,
   extraction: KnowledgeExtractionRecord | null | undefined, structuredOnly: boolean, signal: AbortSignal | undefined,
   assertEvidenceCurrent: () => void, uris: KnowledgeUriCanonicalizer, refreshed?: KnowledgeExtractionUpsertInput): Promise<void> {
-  const initialStatus = context.store.status();
+  let compiled = { nodeCount: 0, edgeCount: 0 };
   let assertAliasesCurrent = () => {};
   const assertCurrent = () => { assertEvidenceCurrent(); assertAliasesCurrent(); };
   assertCurrent();
@@ -265,14 +265,12 @@ async function commitKnowledgeCompilation(context: KnowledgeIngestContext, sourc
     if (structuredOnly) await writeKnowledgeStructuredEntityHints(context, source, hints, draft.writer);
     else await compileKnowledgeSourceRecords(context, source, nextExtraction, hints, draft.writer, uris);
     check();
+    compiled = { nodeCount: draft.nodes.size, edgeCount: draft.edges.length };
     return { nodes: [...draft.nodes.values()], edges: draft.edges, issues: [], assertCurrent };
   }, { signal });
   if (structuredOnly) return;
-  const finalStatus = context.store.status();
   context.emitIfReady((bus, ctx) => emitKnowledgeCompileCompleted(bus, ctx, {
-    sourceId: source.id,
-    nodeCount: Math.max(0, finalStatus.nodeCount - initialStatus.nodeCount),
-    edgeCount: Math.max(0, finalStatus.edgeCount - initialStatus.edgeCount),
+    sourceId: source.id, ...compiled,
   }), source.sessionId);
 }
 

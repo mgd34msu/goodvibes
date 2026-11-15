@@ -8,9 +8,15 @@ import subprocess
 import sys
 import tarfile
 
+if sys.flags.optimize:
+    # Every integrity check here is an assert; -O or PYTHONOPTIMIZE would silently remove them all.
+    raise SystemExit('Release integrity checks need assertions; run without -O or PYTHONOPTIMIZE.')
+
 archives, destination, tag = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-assert re.fullmatch(r'v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag)
-repository = 'mgd34msu/goodvibes'
+assert re.fullmatch(r'v\d+\.\d+\.\d+', tag), 'Invalid release tag: only stable vN.N.N tags are published'
+# The same repository the completion script and the reusable release workflow resolve.
+repository = os.environ.get('GITHUB_REPOSITORY', 'mgd34msu/goodvibes')
+assert re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository), 'Invalid release repository'
 def api(path):
     return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/{path}'], text=True))
 assert len(sys.argv) in (4, 5), 'Expected archives, destination, version tag label, and optional candidate SHA'

@@ -60,6 +60,8 @@ export interface DistributedRuntimePairRequest {
   readonly expiresAt: number;
   readonly peerId?: string | undefined;
   readonly remoteAddress?: string | undefined;
+  /** The existing peer this request names by id; verifying it replaces that peer's fields and tokens. */
+  readonly replacesPeerId?: string | undefined;
   readonly metadata: Record<string, unknown>;
 }
 

@@ -35,7 +35,7 @@ export class HostPairingController extends TerminalHostPairingController<Pairing
             status: 'unknown',
             host,
             message:
-              'A pairing attempt may already have created a credential. Inspect its outcome on this host; no automatic remint, reset or revoke is allowed.',
+              'A pairing attempt may already have created a credential. Inspect its outcome on this host; no automatic remint, reset or revoke is allowed. If the host shows no pairing token for it, run /host pair --apply to forget the attempt and pair again.',
           }),
       },
       ui,

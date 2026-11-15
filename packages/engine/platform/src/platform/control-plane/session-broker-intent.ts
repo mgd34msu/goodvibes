@@ -17,6 +17,7 @@ import type {
 import type { SharedSessionMessageSender } from './session-broker-helpers.js';
 import type { AppendSharedSessionMessageInput } from './session-broker-messages.js';
 import {
+  moveSharedSessionInputOrKeep,
   recordSharedSessionInput,
   updateSharedSessionInput,
   type SharedSessionInputStore,
@@ -55,6 +56,8 @@ export interface HandleSharedSessionIntentDeps {
     extra?: Record<string, unknown>,
   ): void;
   resolveActiveAgentId(session: SharedSessionRecord): string | undefined;
+  /** An agent is being started for the session but is not yet bound to it. */
+  hasSpawnInFlight?(sessionId: string): boolean;
   persist(durable?: boolean): Promise<void>;
   publishUpdate(event: string, payload: unknown): void;
   announceSurfaceReply(binding: SharedSessionSurfaceReplyBinding): void;
@@ -65,6 +68,10 @@ export interface HandleSharedSessionIntentDeps {
    */
   sendSurfaceNotice?: ((routeId: string, text: string) => void) | undefined;
   buildContinuationTask(sessionId: string): string;
+  /** The earlier submission recorded under this provider message key, when there is one still worth answering from. */
+  findProviderMessage?(key: string): SharedSessionSubmission | null;
+  /** Remember which input holds a provider message key. */
+  noteProviderMessage?(key: string, sessionId: string, inputId: string): void;
   /**
    * Reads `conversationGate.*` for the live-agent handover decision below.
    * Optional: absent means the defaults in conversation-gate.ts, which gate
@@ -189,6 +196,16 @@ function announceRolloverOnChannel(
   }
 }
 
+/** Input-row metadata field holding the idempotency key of a message that carried a provider id. */
+export const PROVIDER_MESSAGE_KEY_FIELD = 'providerMessageKey';
+
+/** surface kind, surface id, conversation and provider id: the same message is never recorded under two of these. */
+export function providerMessageKey(input: SubmitSharedSessionMessageInput): string | null {
+  const id = input.providerMessageId?.trim();
+  if (!id) return null;
+  return `${input.surfaceKind}:${input.surfaceId}:${input.externalId ?? ''}:${id}`;
+}
+
 export async function handleSharedSessionIntent(
   deps: HandleSharedSessionIntentDeps,
   intent: SharedSessionInputIntent,
@@ -197,6 +214,12 @@ export async function handleSharedSessionIntent(
   onQueued?: (input: SharedSessionInputRecord) => void,
 ): Promise<SharedSessionSubmission> {
   await deps.start();
+
+  const providerKey = providerMessageKey(input);
+  if (providerKey) {
+    const earlier = deps.findProviderMessage?.(providerKey);
+    if (earlier) return earlier;
+  }
 
   const binding = await deps.resolveBinding(input);
   // WHERE the session came from decides what a CLOSED one means, and the two
@@ -236,6 +259,13 @@ export async function handleSharedSessionIntent(
     } else {
       session = bound ?? undefined;
     }
+  }
+  // A steer or follow-up names the session it is about. Minting a new session
+  // for an id nobody holds would answer a typo or a stale id with a fresh empty
+  // conversation, and with spawn fallback start an agent in it. A route binding
+  // is different: it is the thing that may create its own session.
+  if (!session && !binding && input.sessionId && intent !== 'submit') {
+    throw Object.assign(new Error(`Unknown shared session ${JSON.stringify(input.sessionId)}. Nothing was recorded; list the sessions and send the ${intent} to one that exists.`), { code: 'SESSION_NOT_FOUND', status: 404 });
   }
   if (!session) {
     const participant: SharedSessionParticipant = {
@@ -286,11 +316,12 @@ export async function handleSharedSessionIntent(
   const queuedInput = recordSharedSessionInput(deps.sessionInputStore(), {
     sessionId: updatedSession.id,
     intent,
-    message: input,
+    message: providerKey ? { ...input, metadata: { ...(input.metadata ?? {}), [PROVIDER_MESSAGE_KEY_FIELD]: providerKey } } : input,
     routeId: binding?.id,
     causationId: userMessage.id,
     maxPersistedInputs: MAX_PERSISTED_INPUTS,
   });
+  if (providerKey) deps.noteProviderMessage?.(providerKey, updatedSession.id, queuedInput.id);
   if (delegated) {
     try {
       // No await between canonical row creation and this trusted host binder.
@@ -298,9 +329,8 @@ export async function handleSharedSessionIntent(
       onQueued?.(structuredClone(queuedInput));
       await deps.persist(true);
     } catch (error) {
-      updateSharedSessionInput(deps.sessionInputStore(), updatedSession.id, queuedInput.id, entry => ({
-        ...entry, state: 'failed', updatedAt: Date.now(), error: 'Delegated input binding or durability failed',
-      }));
+      moveSharedSessionInputOrKeep(deps.sessionInputStore(), updatedSession.id, queuedInput.id, 'failed',
+        { error: 'Delegated input binding or durability failed' });
       await deps.persist(true).catch(() => {});
       throw error;
     }
@@ -358,12 +388,8 @@ export async function handleSharedSessionIntent(
     const sent = handover.startsContract
       && deps.messageSender.send('orchestrator', activeAgentId, input.body, { kind: 'directive' });
     if (sent) {
-      const delivered = updateSharedSessionInput(deps.sessionInputStore(), updatedSession.id, queuedInput.id, (entry) => ({
-        ...entry,
-        state: 'delivered',
-        activeAgentId,
-        updatedAt: Date.now(),
-      })) ?? queuedInput;
+      const delivered = moveSharedSessionInputOrKeep(deps.sessionInputStore(), updatedSession.id, queuedInput.id, 'delivered',
+        { activeAgentId }) ?? queuedInput;
       await deps.persist();
       deps.publishInputLifecycleEvent('session-input-delivered', delivered, {
         agentId: activeAgentId,
@@ -404,12 +430,8 @@ export async function handleSharedSessionIntent(
       };
     }
     if (intent === 'steer' && !allowSpawnFallback) {
-      const rejected = updateSharedSessionInput(deps.sessionInputStore(), updatedSession.id, queuedInput.id, (entry) => ({
-        ...entry,
-        state: 'rejected',
-        updatedAt: Date.now(),
-        error: 'No active agent accepted the steer request.',
-      })) ?? queuedInput;
+      const rejected = moveSharedSessionInputOrKeep(deps.sessionInputStore(), updatedSession.id, queuedInput.id, 'rejected',
+        { error: 'No active agent accepted the steer request.' }) ?? queuedInput;
       await deps.persist();
       deps.publishInputLifecycleEvent('session-input-rejected', rejected, {
         messageId: userMessage.id,
@@ -442,6 +464,26 @@ export async function handleSharedSessionIntent(
       mode: 'queued-follow-up',
       state: queuedInput.state,
       activeAgentId,
+      created,
+    };
+  }
+
+  // An agent is being started for this session and has no id yet, so there is nothing to hand the
+  // message to and starting a second agent would split the conversation. The message waits as a
+  // follow-up; the agent's completion (or the end of a start that never produced one) runs it.
+  if (intent === 'submit' && !activeAgentId && deps.hasSpawnInFlight?.(updatedSession.id)) {
+    const waiting = updateSharedSessionInput(deps.sessionInputStore(), updatedSession.id, queuedInput.id,
+      (entry) => ({ ...entry, intent: 'follow-up', updatedAt: Date.now() })) ?? queuedInput;
+    await deps.persist();
+    deps.publishInputLifecycleEvent('session-follow-up-queued', waiting, { messageId: userMessage.id });
+    return {
+      session: deps.sessions.get(updatedSession.id)!,
+      userMessage,
+      routeBinding: binding ?? undefined,
+      input: waiting,
+      intent: 'follow-up',
+      mode: 'queued-follow-up',
+      state: waiting.state,
       created,
     };
   }

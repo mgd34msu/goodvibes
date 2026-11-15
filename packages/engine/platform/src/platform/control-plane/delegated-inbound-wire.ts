@@ -24,6 +24,8 @@ export const delegatedTelegramDecisionSchema = z.object({
 });
 export const delegatedTelegramLookupSchema = z.object({ ref: delegatedSourceRefSchema }).strict();
 export const delegatedTelegramRevokeSchema = z.object({ configurationId: id }).strict();
+/** Release names a configuration, or the selected chat itself when no configuration exists (a held configure, or a restart). */
+export const delegatedTelegramReleaseSchema = z.union([delegatedTelegramRevokeSchema, z.object({ chatId: id, threadId: id.optional() }).strict()]);
 export type DelegatedTelegramConfiguration = z.infer<typeof delegatedTelegramConfigureSchema>;
 export type DelegatedTelegramDecision = z.infer<typeof delegatedTelegramDecisionSchema>;
 export type DelegatedInboundChoices = NonNullable<DelegatedTelegramDecision['choices']>;

@@ -19,7 +19,6 @@ function fixture() {
   return { root, path: join(root, 'isolated'), branch: 'fixture-owned' };
 }
 
-// UNRUN: actual native command/receipt regressions, never model fixtures.
 for (const checkout of [true, false]) test(`only actual native creation issues an instance receipt (checkout ${checkout})`, async () => {
   const f = fixture(), instance = new IsolatedWorktree(f.root, f.path, f.branch, 'main');
   expect(readIsolatedWorktreeCreation(instance)).toBeUndefined();

@@ -82,9 +82,19 @@ function loadCustomCaEntries(configManager: OutboundTlsConfigReader): {
   const customCaFile = readCustomCaFile(configManager);
   const customCaDir = readCustomCaDir(configManager);
 
+  // An unreadable file (permissions, a directory where a file was expected) is
+  // reported like a missing one rather than thrown out of every fetch.
+  const readEntry = (path: string): void => {
+    try {
+      entries.push(readFileSync(path, 'utf-8'));
+    } catch (error) {
+      errors.push(`Custom CA could not be read: ${path} (${summarizeError(error)})`);
+    }
+  };
+
   if (customCaFile) {
     if (existsSync(customCaFile)) {
-      entries.push(readFileSync(customCaFile, 'utf-8'));
+      readEntry(customCaFile);
     } else {
       errors.push(`Custom CA file not found: ${customCaFile}`);
     }
@@ -92,8 +102,10 @@ function loadCustomCaEntries(configManager: OutboundTlsConfigReader): {
 
   if (customCaDir) {
     if (existsSync(customCaDir)) {
-      for (const path of readPemEntriesFromDirectory(customCaDir)) {
-        entries.push(readFileSync(path, 'utf-8'));
+      try {
+        for (const path of readPemEntriesFromDirectory(customCaDir)) readEntry(path);
+      } catch (error) {
+        errors.push(`Custom CA directory could not be read: ${customCaDir} (${summarizeError(error)})`);
       }
     } else {
       errors.push(`Custom CA directory not found: ${customCaDir}`);
@@ -115,10 +127,11 @@ function getBundledCaEntries(): readonly string[] {
   return getCaCertificates ? getCaCertificates('bundled') : rootCertificates;
 }
 
-export function inspectOutboundTls(configManager: OutboundTlsConfigReader): OutboundTlsSnapshot {
-  const mode = readMode(configManager);
-  const allowInsecureLocalhost = readAllowInsecureLocalhost(configManager);
-  const custom = loadCustomCaEntries(configManager);
+function snapshotOf(
+  mode: OutboundTlsSnapshot['mode'],
+  allowInsecureLocalhost: boolean,
+  custom: ReturnType<typeof loadCustomCaEntries>,
+): OutboundTlsSnapshot {
   return {
     mode,
     allowInsecureLocalhost,
@@ -134,9 +147,14 @@ export function inspectOutboundTls(configManager: OutboundTlsConfigReader): Outb
   };
 }
 
+export function inspectOutboundTls(configManager: OutboundTlsConfigReader): OutboundTlsSnapshot {
+  return snapshotOf(readMode(configManager), readAllowInsecureLocalhost(configManager), loadCustomCaEntries(configManager));
+}
+
 function resolveOutboundTlsContext(configManager: OutboundTlsConfigReader): ResolvedOutboundTlsContext {
-  const snapshot = inspectOutboundTls(configManager);
+  // One read of the custom CA files serves both the snapshot and the CA list.
   const custom = loadCustomCaEntries(configManager);
+  const snapshot = snapshotOf(readMode(configManager), readAllowInsecureLocalhost(configManager), custom);
   const caEntries = snapshot.mode === 'bundled'
     ? undefined
     : snapshot.mode === 'bundled+custom'
@@ -249,6 +267,14 @@ export function applyOutboundTlsToFetchInit(
   if (context.snapshot.mode === 'custom' && !nextTls.ca && (!context.caEntries || context.caEntries.length === 0)) {
     throw new Error(
       'network.outboundTls.mode is custom, but no custom CA entries were loaded. Configure network.outboundTls.customCaFile or network.outboundTls.customCaDir.',
+    );
+  }
+
+  // Silently falling back to the bundled CAs would leave the configured
+  // corporate CA untrusted and surface later as an unexplained TLS failure.
+  if (context.snapshot.mode === 'bundled+custom' && !nextTls.ca && context.snapshot.errors.length > 0) {
+    throw new Error(
+      `network.outboundTls.mode is bundled+custom, but a configured custom CA could not be loaded: ${context.snapshot.errors.join('; ')}. Fix the path or switch network.outboundTls.mode to bundled.`,
     );
   }
 

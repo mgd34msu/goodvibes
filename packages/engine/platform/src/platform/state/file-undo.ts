@@ -1,4 +1,4 @@
-import { unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -25,9 +25,33 @@ export interface FileOperation {
 
 const MAX_STACK_SIZE = 50;
 
+/**
+ * Raised when the file no longer holds what the operation left, so restoring
+ * would overwrite a later change. The file is untouched.
+ */
+export class FileUndoConflictError extends Error {
+  constructor(readonly path: string, readonly direction: 'undo' | 'redo') {
+    super(`Cannot ${direction} the change to ${path}: the file was changed after that operation (by you, another tool or another program). The file was left as it is and that history entry was dropped; the next ${direction} acts on the one before it.`);
+    this.name = 'FileUndoConflictError';
+  }
+}
+
+/** The file's text, or null when it does not exist. */
+function readCurrent(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
 export class FileUndoManager {
   private undoStack: FileOperation[] = [];
   private redoStack: FileOperation[] = [];
+
+  /** `onFileChanged` lets a file-content cache drop its copy of a path undo or redo rewrote. */
+  constructor(private readonly options: { readonly onFileChanged?: (path: string) => void } = {}) {}
 
   // ---------------------------------------------------------------------------
   // Snapshot, called by write/edit tools after a successful write
@@ -62,19 +86,30 @@ export class FileUndoManager {
     if (!op) return null;
 
     try {
+      const current = readCurrent(op.path);
       if (op.beforeContent === null) {
-        unlinkSync(op.path);
-        logger.debug('file-undo: removed newly created file', { path: op.path });
+        // Created by the operation: already gone is the state undo wants.
+        if (current === null) {
+          logger.debug('file-undo: created file is already gone', { path: op.path });
+        } else if (current !== op.afterContent) {
+          throw new FileUndoConflictError(op.path, 'undo');
+        } else {
+          unlinkSync(op.path);
+          logger.debug('file-undo: removed newly created file', { path: op.path });
+        }
       } else {
+        if (current !== op.afterContent) throw new FileUndoConflictError(op.path, 'undo');
         writeFileSync(op.path, op.beforeContent, 'utf-8');
         logger.debug('file-undo: restored previous content', { path: op.path });
       }
     } catch (err) {
-      logger.warn('file-undo: undo write failed', { path: op.path, error: summarizeError(err) });
-      // Put it back on the stack so state is consistent
-      this.undoStack.push(op);
+      logger.warn('file-undo: undo failed', { path: op.path, error: summarizeError(err) });
+      // A conflict drops the entry (it can never apply again, and keeping it
+      // would block every older operation); a write failure keeps it to retry.
+      if (!(err instanceof FileUndoConflictError)) this.undoStack.push(op);
       throw err;
     }
+    this.options.onFileChanged?.(op.path);
 
     this.redoStack.push(op);
     if (this.redoStack.length > MAX_STACK_SIZE) {
@@ -96,13 +131,15 @@ export class FileUndoManager {
     if (!op) return null;
 
     try {
+      if (readCurrent(op.path) !== op.beforeContent) throw new FileUndoConflictError(op.path, 'redo');
       writeFileSync(op.path, op.afterContent, 'utf-8');
       logger.debug('file-undo: re-applied operation', { path: op.path });
     } catch (err) {
-      logger.warn('file-undo: redo write failed', { path: op.path, error: summarizeError(err) });
-      this.redoStack.push(op);
+      logger.warn('file-undo: redo failed', { path: op.path, error: summarizeError(err) });
+      if (!(err instanceof FileUndoConflictError)) this.redoStack.push(op);
       throw err;
     }
+    this.options.onFileChanged?.(op.path);
 
     this.undoStack.push(op);
     if (this.undoStack.length > MAX_STACK_SIZE) {

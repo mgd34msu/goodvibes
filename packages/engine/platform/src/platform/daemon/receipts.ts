@@ -10,9 +10,9 @@
  * keepalive, version poll) neither receives nor consumes receipts, so a
  * non-rendering reader can never eat one before a rendering surface.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
 
 export interface DaemonReceipt {
@@ -25,13 +25,16 @@ export interface DaemonReceipt {
 export interface ReceiptStoreIo {
   read(path: string): string | null;
   write(path: string, contents: string): void;
+  /** Sets an unreadable file aside (returning where it went) so the next write cannot erase it. */
+  quarantine?(path: string): string | null;
 }
 
 export const realReceiptStoreIo: ReceiptStoreIo = {
   read: (path) => (existsSync(path) ? readFileSync(path, 'utf-8') : null),
-  write: (path, contents) => {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, contents, 'utf-8');
+  write: (path, contents) => writeFileAtomic(path, contents),
+  quarantine: (path) => {
+    const aside = `${path}.unreadable-${Date.now()}`;
+    try { renameSync(path, aside); return aside; } catch { return null; }
   },
 };
 
@@ -101,8 +104,10 @@ export class DaemonReceiptStore {
     // user's receipt history with nothing to show for it. Say what was lost.
     const loaded = parseReceipts(this.io.read(this.path));
     if (loaded.unreadable) {
+      const keptAt = this.io.quarantine?.(this.path) ?? null;
       logger.warn('[daemon-receipt] receipt file was unreadable, starting from an empty receipt history', {
         path: this.path,
+        ...(keptAt === null ? {} : { keptAt }),
       });
     } else if (loaded.droppedEntries > 0) {
       logger.warn('[daemon-receipt] discarded malformed receipt entries', {
@@ -161,8 +166,8 @@ export class DaemonReceiptStore {
         keptReceipts: this.receipts.length,
       });
     }
-    this.persist();
     logger.info(`[daemon-receipt] ${text}`, { receiptId: receipt.id });
+    this.persistOrLog();
     return receipt;
   }
 
@@ -184,8 +189,38 @@ export class DaemonReceiptStore {
     const deliveredIds = new Set(undelivered.map((receipt) => receipt.id));
     this.receipts = this.receipts.map((receipt) =>
       deliveredIds.has(receipt.id) ? { ...receipt, deliveredAt } : receipt);
-    this.persist();
+    // A failed write must not hide the receipts from this reader: the disk keeps
+    // them undelivered, so the worst outcome is one repeat after a restart.
+    this.persistOrLog();
     return undelivered;
+  }
+
+  /** Undelivered receipts, left undelivered until {@link markDelivered} names them. */
+  peekUndelivered(): readonly DaemonReceipt[] {
+    return this.receipts.filter((receipt) => receipt.deliveredAt === undefined);
+  }
+
+  /** Marks the named receipts delivered; ids that are unknown or already delivered are ignored. */
+  markDelivered(ids: ReadonlySet<string>): void {
+    const deliveredAt = this.now();
+    let changed = false;
+    this.receipts = this.receipts.map((receipt) => {
+      if (receipt.deliveredAt !== undefined || !ids.has(receipt.id)) return receipt;
+      changed = true;
+      return { ...receipt, deliveredAt };
+    });
+    if (changed) this.persistOrLog();
+  }
+
+  private persistOrLog(): void {
+    try {
+      this.persist();
+    } catch (error) {
+      logger.warn('[daemon-receipt] could not persist receipts', {
+        path: this.path,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private persist(): void {

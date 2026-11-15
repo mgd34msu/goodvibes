@@ -67,6 +67,7 @@ case "\${1:-}" in
   install-service)
     if [ -f "$here/install.fail" ]; then
       cat "$here/install.fail" >&2
+      rm -f "$here/install.fail"
       exit 1
     fi
     printf 'service installed and started\\n'
@@ -77,6 +78,7 @@ case "\${1:-}" in
   start-service)
     if [ -f "$here/start.fail" ]; then
       cat "$here/start.fail" >&2
+      rm -f "$here/start.fail"
       exit 1
     fi
     printf 'service start ok\\n'

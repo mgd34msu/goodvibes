@@ -203,7 +203,19 @@ export function loadLanguageConfigs(roots: IntelligenceRoots): Map<string, Langu
     ? roots.resolveProjectPath('languages')
     : join(roots.workingDirectory, '.goodvibes', 'languages');
 
-  for (const layer of [readConfigDirectory(userDir), readConfigDirectory(projectDir)]) {
+  const projectLayer = readConfigDirectory(projectDir);
+  // A language server is a program the project would pick for the user, and a
+  // cloned repository is not trusted to do that. The command comes from the
+  // defaults or the user's own directory; a project file may still describe
+  // the language in every other respect.
+  for (const [langId, cfg] of projectLayer) {
+    if (!cfg.lsp) continue;
+    logger.warn('config: ignoring the language server a project file asks for; set it in your user languages directory instead', { langId, dir: projectDir });
+    const { lsp: _ignored, ...rest } = cfg;
+    projectLayer.set(langId, rest);
+  }
+
+  for (const layer of [readConfigDirectory(userDir), projectLayer]) {
     for (const [langId, cfg] of layer) {
       result.set(langId, { ...(result.get(langId) ?? {}), ...cfg });
     }

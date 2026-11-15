@@ -23,7 +23,16 @@ const OUTWARD_METHOD_IDS = new Set([
   'automation.schedules.run', 'automation.runs.retry', 'checkin.run',
   'media.analyze', 'media.transform', 'media.generate', 'memory.vector.rebuild',
   'tasks.create', 'tasks.retry',
+  'automation.heartbeat.run', 'ci.watches.run', 'watchers.run', 'knowledge.job.run', 'knowledge.refinement.run',
+  'homeassistant.homeGraph.refinement.run', 'channels.test.send', 'fleet.observed.steer',
+  'multimodal.analyze', 'homeassistant.conversation.submit', 'homeassistant.conversation.stream', 'batch.run',
+  // Read-scoped POSTs that still run metered model work or may carry a mutation.
+  'knowledge.ask', 'homeassistant.homeGraph.askHomeGraph',
+  // Read-scoped, but the body is a GraphQL document that may be a mutation.
+  'knowledge.graphql.execute',
 ]);
+
+export { assertSafeOperatorPathValue } from '../agent/operator-contract-routes.ts';
 
 export function operatorMethodIsOutward(methodId: string): boolean { return OUTWARD_METHOD_IDS.has(methodId); }
 

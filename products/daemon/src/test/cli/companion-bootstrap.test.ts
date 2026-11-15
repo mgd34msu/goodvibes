@@ -197,7 +197,7 @@ test('emitted launcher reports an unreadable identity once, preserves it and ser
   } finally { await child.close(); }
 }, 45_000);
 
-for (const mode of ['stored fallback', 'daemon override', 'HTTP override'] as const) {
+for (const mode of ['stored fallback', 'daemon override', 'HTTP override', 'blank HTTP override'] as const) {
   test(`emitted launcher applies ${mode} to the optional HTTP listener without replacing the stored identity`, async () => {
     const fx = companionCliFixture();
     const [port, httpPort] = await availableLoopbackPorts(2);
@@ -206,13 +206,15 @@ for (const mode of ['stored fallback', 'daemon override', 'HTTP override'] as co
     // Noncanonical formatting and extra metadata expose any accidental rewrite.
     const storedBytes = '{ "token": "synthetic-existing-companion-token", "peerId": "original-peer", "createdAt": 123, "fixture": true }\n';
     writeFileSync(tokenPath(fx.daemonHome), storedBytes, { mode: 0o600 });
-    const daemonToken = mode === 'stored fallback' ? storedToken : 'synthetic-daemon-override';
+    const daemonToken = mode === 'stored fallback' || mode === 'blank HTTP override' ? storedToken : 'synthetic-daemon-override';
     const httpToken = mode === 'HTTP override' ? 'synthetic-http-override' : daemonToken;
     const child = fx.launch([...selectedHomeFlags, 'serve', '--hostname', '127.0.0.1', '--port', String(port)], {
       composed: true,
       env: {
-        ...(mode === 'stored fallback' ? {} : { GOODVIBES_DAEMON_TOKEN: daemonToken }),
+        ...(mode === 'stored fallback' || mode === 'blank HTTP override' ? {} : { GOODVIBES_DAEMON_TOKEN: daemonToken }),
         ...(mode === 'HTTP override' ? { GOODVIBES_HTTP_TOKEN: httpToken } : {}),
+        // A blank template value is no token: the listener keeps the daemon's.
+        ...(mode === 'blank HTTP override' ? { GOODVIBES_HTTP_TOKEN: '' } : {}),
       },
     });
     try {
@@ -222,7 +224,7 @@ for (const mode of ['stored fallback', 'daemon override', 'HTTP override'] as co
       expect(await httpStatus(httpPort, '/health', httpToken)).toBe(200);
       expect(await httpStatus(httpPort, '/health')).toBe(401);
       expect(await httpStatus(httpPort, '/health', 'wrong-http-token')).toBe(401);
-      if (mode !== 'stored fallback') {
+      if (mode !== 'stored fallback' && mode !== 'blank HTTP override') {
         expect(await httpStatus(port, '/api/channels/inbox', storedToken)).toBe(401);
         expect(await upgradeStatus(port, storedToken)).toMatch(/^HTTP\/1\.1 401\b/);
         expect(await httpStatus(httpPort, '/health', storedToken)).toBe(401);

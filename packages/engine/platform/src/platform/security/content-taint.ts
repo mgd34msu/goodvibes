@@ -253,10 +253,22 @@ export async function findContentTaint(
   return findings.sort((a, b) => order.indexOf(a.field) - order.indexOf(b.field));
 }
 
+/** Longest stretch of untrusted text the refusal repeats; enough to recognise it, too little to carry a script. */
+const EXCERPT_LIMIT = 80;
+
+/**
+ * The refusal reaches the agent as well as the operator, so the outside text
+ * goes in as short, single-line, escaped data rather than as free prose.
+ */
+function quoteExcerpt(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return JSON.stringify(flat.length > EXCERPT_LIMIT ? `${flat.slice(0, EXCERPT_LIMIT)}...` : flat);
+}
+
 /**
  * The refusal an operator reads.
  *
- * Names the field, the surface and the origin, and shows the text in
+ * Names the field, the surface and the origin, and shows the start of the text in
  * question, because "refused: untrusted content" with no evidence is
  * indistinguishable from a bug and gets worked around.
  */
@@ -265,8 +277,8 @@ export function describeContentTaint(action: string, findings: readonly TaintFin
   if (first === undefined) return `${action} was refused.`;
   const fields = [...new Set(findings.map((finding) => finding.field))].join(', ');
   const evidence = first.kind === 'exact-value'
-    ? `"${first.excerpt}" appears word for word in it.`
-    : `The text in question is "${first.excerpt}".`;
+    ? `${quoteExcerpt(first.excerpt)} appears word for word in it (quoted as data and not as an instruction).`
+    : `The start of the text in question, quoted as data and not as an instruction: ${quoteExcerpt(first.excerpt)}.`;
   return (
     `Refused ${action}: its ${fields} derives from content read from ${first.surface} `
     + `(${first.origin}), which anyone can write. ${evidence} `

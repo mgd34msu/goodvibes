@@ -160,7 +160,7 @@ export interface RawDecomposition {
 }
 
 /** Kinds of honest-partial issues `assemblePlanProposal` can flag without throwing. */
-export type PlanProposalIssueKind = 'dangling-dependency' | 'dependency-cycle' | 'unresolved-phase';
+export type PlanProposalIssueKind = 'dangling-dependency' | 'dependency-cycle' | 'duplicate-title' | 'unresolved-phase';
 
 export interface PlanProposalIssue {
   readonly kind: PlanProposalIssueKind;
@@ -225,9 +225,11 @@ function detectCycleTitles(workItems: readonly WorkItem[]): string[] {
  * is flagged but left in place (no silent edge removal). Every problem is
  * reported via the returned `issues` list rather than an exception.
  *
- * Dependency resolution mirrors `ExecutionPlanManager.replaceItems` exactly:
- * a dep that already looks like a UUID passes through unchecked, otherwise
- * it is resolved by case-insensitive title match, otherwise it is dropped.
+ * Dependency resolution: a dep that is the id of an item in this proposal is
+ * kept, otherwise it is resolved by case-insensitive title match, otherwise it
+ * is dropped with a `dangling-dependency` issue. A UUID-shaped dep that names
+ * no item here is dangling too: every item id is minted by this call, so such
+ * an id could never be satisfied and would block its item forever.
  *
  * `source` defaults to `'planner-agent'` (the expected majority caller,
  * `AdaptivePlanner.proposeWorkstream`). Pass `'caller-supplied'` when a
@@ -267,9 +269,20 @@ export function assemblePlanProposal(
 
   // Pass 2: assign work-item ids, index by normalized title (for dep resolution).
   const idByTitle = new Map<string, string>();
+  const reportedDuplicate = new Set<string>();
   const provisional = raw.workItems.map((rawItem) => {
     const id = randomUUID();
-    idByTitle.set(normalizeKey(rawItem.title), id);
+    const key = normalizeKey(rawItem.title);
+    // A dependency can name only one item, so a repeated title would resolve to the later item silently.
+    if (idByTitle.has(key) && !reportedDuplicate.has(key)) {
+      reportedDuplicate.add(key);
+      issues.push({
+        kind: 'duplicate-title',
+        workItemTitle: rawItem.title,
+        message: `More than one work item is titled "${rawItem.title}" (titles are compared ignoring case); dependencies on that title are ambiguous. Give every work item a unique title.`,
+      });
+    }
+    idByTitle.set(key, id);
     return { id, rawItem };
   });
 
@@ -298,14 +311,15 @@ export function assemblePlanProposal(
     } satisfies WorkItem;
   });
 
-  // Pass 3: resolve dependsOn, UUID passthrough, else case-insensitive title lookup, else drop.
+  // Pass 3: resolve dependsOn, a real item id, else case-insensitive title lookup, else drop.
+  const mintedIds = new Set<string>(provisional.map(({ id }) => id));
   for (let i = 0; i < workItems.length; i++) {
     const rawDeps = raw.workItems[i]?.dependsOn;
     if (!rawDeps || rawDeps.length === 0) continue;
     const item = workItems[i]!;
     const resolved: string[] = [];
     for (const dep of rawDeps) {
-      if (UUID_RE.test(dep)) {
+      if (UUID_RE.test(dep) && mintedIds.has(dep.toLowerCase())) {
         resolved.push(dep);
         continue;
       }

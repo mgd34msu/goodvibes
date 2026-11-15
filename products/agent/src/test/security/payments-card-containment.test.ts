@@ -67,7 +67,7 @@ import {
   startCardEntryFlow,
   startAddressEntryFlow,
   CARD_ENTRY_SURFACE,
-  CARD_SECRET_FIELDS,
+  CARD_ENTRY_FIELDS,
 } from '../../input/commands/payment-card-intake.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { handleCommandModeToken } from '../../input/handler-command-route.ts';
@@ -368,7 +368,7 @@ describe('payments card containment (agent terminal)', () => {
     expect(plainCancelled).toBe(true);
   });
 
-  test('END TO END: typing /payments card puts the REAL composer into masked mode and stores at daemon scope', async () => {
+  test('END TO END: typing /payments card puts the REAL composer into masked mode and the next field is offered after Enter', async () => {
     // Everything above tests one link. This drives the whole chain the way a
     // person does: slash-command mode consumes the Enter that runs the command,
     // the command asks the live InputHandler for a masked line, the next Enter
@@ -423,7 +423,7 @@ describe('payments card containment (agent terminal)', () => {
     // command mode released, and the composer is now waiting for a masked line
     expect(commandState.commandMode).toBe(false);
     expect(input.concealedInput).not.toBeNull();
-    expect(input.concealedInput?.label).toBe('Card number');
+    expect(input.concealedInput?.label).toBe('Card label');
 
     // typing the number shows bullets, not the number
     input.prompt = FAKE_CARD_NUMBER;
@@ -462,38 +462,17 @@ describe('payments card containment (agent terminal)', () => {
       exitApp: () => {},
       requestRender: () => {},
     } as unknown as KeyRouteState;
-    const originalSet = secrets.set.bind(secrets);
-    let releaseStore!: () => void;
-    const storeReady = new Promise<void>(resolve => { releaseStore = resolve; });
-    const delayedStore = spyOn(secrets, 'set').mockImplementation(async (...args) => {
-      await storeReady;
-      return originalSet(...args);
-    });
     const route = handlePromptKeyToken(routeState, { type: 'key', logicalName: 'enter' } as never);
-    try {
-      expect(input.concealedInput?.label).toBe('Saving concealed input');
-      input.prompt = FAKE_CVV;
-      expect(input.getWrappedPromptInfo(80).visibleLines.join('\n')).not.toContain(FAKE_CVV);
-      const repeated = handlePromptKeyToken({ ...routeState, prompt: FAKE_CVV }, { type: 'key', logicalName: 'enter' } as never);
-      expect(repeated.handled).toBe(true);
-      expect(delayedStore).toHaveBeenCalledTimes(1);
-      expect(addSpy).not.toHaveBeenCalled();
-    } finally { releaseStore(); }
     await waitForConcealedSubmission(input);
-    delayedStore.mockRestore();
 
     expect(route.handled).toBe(true);
     expect(route.prompt).toBe('');
     expect(addSpy).not.toHaveBeenCalled();
 
-    // it was really stored, at daemon scope, as a reference
-    const storedRef = cm.get(PAYMENTS_CARD_NUMBER_CONFIG_KEY);
-    expect(isSecretReferenceValue(String(storedRef))).toBe(true);
-    expect(await secrets.get(buildGoodVibesSecretKey(PAYMENTS_CARD_NUMBER_CONFIG_KEY))).toBe(FAKE_CARD_NUMBER);
-
-    // nothing printed carries the number, and the flow moved to the next field
+    // nothing printed carries what was typed, nothing was written to this machine, and the flow moved to the next field
     expect(printed.join('\n')).not.toContain(FAKE_CARD_NUMBER);
-    expect(input.concealedInput?.label).toBe('Expiry (MM/YY)');
+    expect(String(cm.get(PAYMENTS_CARD_NUMBER_CONFIG_KEY) ?? '')).toBe('');
+    expect(input.concealedInput?.label).toBe('Card kind (virtual or real; blank for virtual)');
   });
 
   test('the settings modal masks a card value mid-edit, not only at rest', () => {
@@ -575,14 +554,14 @@ describe('payments card containment (agent terminal)', () => {
   // 4. Nothing reaches a log line.
   // -------------------------------------------------------------------------
 
-  test('a failed card store logs the key and the error, never the value', async () => {
+  test('a failed card store logs only the key and leaves no card value in config', async () => {
     const errorSpy = spyOn(logger, 'error').mockImplementation(() => {});
     try {
       const throwingSecrets = {
         set: async () => { throw new Error('secret store unavailable'); },
         delete: async () => {},
       };
-      await setSecretBackedSettingValue({
+      const saved = await setSecretBackedSettingValue({
         key: PAYMENTS_CARD_CVV_CONFIG_KEY,
         value: FAKE_CVV,
         configManager: cm,
@@ -590,8 +569,12 @@ describe('payments card containment (agent terminal)', () => {
         setConfigValue: (k, v) => cm.setDynamic(k, v),
       });
 
+      expect(saved).toBe(false);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy.mock.calls[0]?.[1]).toEqual({ key: PAYMENTS_CARD_CVV_CONFIG_KEY });
       const serialized = JSON.stringify(errorSpy.mock.calls);
       expect(leakedDigits(serialized, FAKE_CVV)).toBe(false);
+      expect(leakedDigits(JSON.stringify(cm.get(PAYMENTS_CARD_CVV_CONFIG_KEY) ?? null), FAKE_CVV)).toBe(false);
     } finally {
       errorSpy.mockRestore();
     }
@@ -635,32 +618,31 @@ describe('payments card containment (agent terminal)', () => {
     return { ctx, printed, concealedOffers, submitField };
   }
 
-  test('the /payments card transcript never prints any card field it just stored', async () => {
+  test('the /payments card transcript never prints any typed card field, and with no daemon selected nothing is stored locally', async () => {
     const { ctx, printed, submitField } = makeCommandContext();
     startCardEntryFlow(ctx);
 
-    const values = [FAKE_CARD_NUMBER, FAKE_EXPIRY, FAKE_CVV, FAKE_CARDHOLDER];
+    const values = ['groceries card', '', FAKE_CARD_NUMBER, FAKE_EXPIRY, FAKE_CVV, FAKE_CARDHOLDER];
+    expect(values).toHaveLength(CARD_ENTRY_FIELDS.length);
     for (const value of values) await submitField(value);
 
     const transcript = printed.join('\n');
-    for (const value of values) expect(transcript).not.toContain(value);
-
-    // and every field really was stored (the flow works, it is not just quiet)
-    for (let i = 0; i < CARD_SECRET_FIELDS.length; i += 1) {
-      const key = CARD_SECRET_FIELDS[i]!.key;
-      const stored = cm.get(key);
-      expect(isSecretReferenceValue(String(stored))).toBe(true);
-      expect(await secrets.get(buildGoodVibesSecretKey(key))).toBe(values[i]);
+    for (const value of [FAKE_CARD_NUMBER, FAKE_CVV, FAKE_CARDHOLDER]) expect(transcript).not.toContain(value);
+    // No paired daemon is selected in this context: the card is refused as unsent, not parked in this machine's config or secret store.
+    expect(transcript).toContain('Nothing was sent');
+    for (const key of ['payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName'] as const) {
+      expect(String(cm.get(key as never) ?? '')).toBe('');
+      expect(await secrets.get(buildGoodVibesSecretKey(key))).toBeNull();
     }
   });
 
-  test('/payments status reports set / not set and never a value, not even a partial one', async () => {
+  test('/payments status reads cards from the daemon and prints no stored card value', async () => {
     await persistSecretBackedConfigValue(cm, secrets, PAYMENTS_CARD_NUMBER_CONFIG_KEY, FAKE_CARD_NUMBER, { scope: 'daemon' });
     const { ctx, printed } = makeCommandContext();
-    runPaymentsCommand([], ctx);
+    await runPaymentsCommand([], ctx);
 
     const transcript = printed.join('\n');
-    expect(transcript).toContain('set');
+    expect(transcript).toContain('could not be read');
     expect(transcript).not.toContain(FAKE_CARD_NUMBER);
     // not even the last four
     expect(leakedDigits(transcript, FAKE_CARD_NUMBER.slice(-4))).toBe(false);
@@ -724,7 +706,7 @@ describe('payments card containment (agent terminal)', () => {
       for (const c of cases) expect(readConfigKey(c.key)).toBe(c.a);
 
       const statusA = makeCommandContext();
-      runPaymentsCommand(['status'], statusA.ctx);
+      await runPaymentsCommand(['status'], statusA.ctx);
       for (const c of cases) expect(statusA.printed.join('\n')).toContain(c.a);
 
       // a second run drives every key to a DIFFERENT value; the outcome changes
@@ -737,7 +719,7 @@ describe('payments card containment (agent terminal)', () => {
       }
 
       const statusB = makeCommandContext();
-      runPaymentsCommand(['status'], statusB.ctx);
+      await runPaymentsCommand(['status'], statusB.ctx);
       const renderedB = statusB.printed.join('\n');
       for (const c of cases) expect(renderedB).toContain(c.b);
       // the replaced values are gone from the rendering, not merely appended to
@@ -790,7 +772,7 @@ describe('payments card containment (agent terminal)', () => {
     const { ctx, concealedOffers } = makeCommandContext();
     startCardEntryFlow(ctx);
     expect(concealedOffers.length).toBeGreaterThan(0);
-    expect(concealedOffers[0]).toBe('Card number');
+    expect(concealedOffers[0]).toBe('Card label');
   });
 
   test('the registered /payments card path uses the same gate (defaults to the real surface)', () => {
@@ -954,9 +936,11 @@ describe('payments card containment (agent terminal)', () => {
     expect(stringLeaves.filter((leaf) => leakedDigits(leaf, FAKE_CVV))).toEqual([]);
   }, 60_000);
 
-  test('DEFECT BACKSTOP: a raw literal under payments.card* is redacted by NAME: the suffix list does not catch these', async () => {
+  test('a raw literal under payments.card* is redacted once the credential judgment names its key', async () => {
     // If a future bug ever wrote a literal instead of a reference, this is what
-    // stands between it and a file the owner emails to someone.
+    // stands between it and a file the owner emails to someone. The judgment port
+    // is scripted by exact key: this proves redaction, collection and the serialized
+    // sweep all obey the credential answer for these card keys.
     const config = {
       payments: {
         cardNumber: FAKE_CARD_NUMBER,

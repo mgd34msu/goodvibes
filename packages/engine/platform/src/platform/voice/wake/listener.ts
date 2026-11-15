@@ -51,6 +51,7 @@ import { recorderBackendFromLabel } from '../capture/recorder-command.js';
 import {
   FIRST_FRAME_TIMEOUT_MS,
   FRAMES_FLOWING_STALE_MS,
+  FRAME_GAP_TIMEOUT_MS,
   START_TIMEOUT_MS,
 } from './capture-watchdogs.js';
 import {
@@ -91,6 +92,13 @@ export type {
  * saying so beats growing a queue that turns into latency and then memory.
  */
 const MAX_QUEUED_FRAMES = 4;
+
+/**
+ * How long scoring one frame may take before inference counts as hung and the
+ * capture is restarted. A frame costs milliseconds; a call that has not
+ * returned in seconds will not, and every later frame queues behind it.
+ */
+const FRAME_SCORING_TIMEOUT_MS = 5_000;
 
 /**
  * How often a run of dropped frames is summarised while it continues. The first
@@ -153,6 +161,8 @@ export class WakeListener {
   /** Bounds a start that neither succeeds nor fails, and an open stream that is silent. */
   #startTimer: unknown = null;
   #firstFrameTimer: unknown = null;
+  /** Bounds silence after audio has flowed: a live recorder that stopped delivering. */
+  #frameGapTimer: unknown = null;
   /** Which recorder the current stream is, parsed from its label. */
   #openedBackend: Exclude<WakeRuntimeSettings['capture']['backend'], 'auto'> | null = null;
   #framesSeen = 0;
@@ -249,6 +259,9 @@ export class WakeListener {
   async stop(): Promise<void> {
     this.#stopping = true;
     const generation = ++this.#captureGeneration;
+    this.#resetScoring();
+    // A later start() must not take the quiet device wait this listener was in before it was stopped.
+    this.#waitingForDevice = false;
     if (this.#restartTimer !== null) {
       this.#clearTimer(this.#restartTimer);
       this.#restartTimer = null;
@@ -256,6 +269,7 @@ export class WakeListener {
     this.#disarmDeviceRecheck();
     this.#clearStartWatchdog();
     this.#clearFirstFrameWatchdog();
+    this.#clearFrameGapWatchdog();
     const stream = this.#stream;
     this.#stream = null;
     this.#engine = null;
@@ -292,10 +306,19 @@ export class WakeListener {
   clearLatch(): void {
     this.#supervisor.clearLatch();
     this.#lastError = null;
+    // A cleared latch is not still latched: nothing is running until the next start().
+    if (this.#phase === 'latched') this.#setPhase('idle');
   }
 
-  async #open(): Promise<WakeStartOutcome> {
+  /**
+   * Open capture. `restart` is true when a timer (crash backoff, device wait,
+   * device re-check) drives the open rather than a caller's start(): nobody
+   * reads the return value then, so every failure must be reported or turned
+   * into the next wait, never a silent drop to idle.
+   */
+  async #open(restart = false): Promise<WakeStartOutcome> {
     const generation = ++this.#captureGeneration;
+    this.#resetScoring();
     const current = (): boolean => generation === this.#captureGeneration && !this.#stopping;
     const retired = (): WakeStartOutcome => ({ started: false, refusal: 'capture-unavailable', detail: 'the capture start was retired' });
     this.#setPhase('starting');
@@ -310,8 +333,17 @@ export class WakeListener {
     const binding = await this.#resolveDeviceBinding();
     if (!current()) return retired();
     if (!binding.usable) {
-      this.#setPhase('idle');
       this.#lastError = binding.message;
+      if (restart) {
+        // The restart found no microphone: keep the promised wait for one.
+        // Never from start(): a host drops a refused listener without stop(),
+        // and a timer there would open the microphone from an orphan.
+        this.#clearStartWatchdog();
+        this.#waitForDevice(new AudioCaptureError('device-missing', binding.message));
+        return { started: false, refusal: 'no-microphone', detail: binding.message };
+      }
+      this.#clearStartWatchdog();
+      this.#setPhase('idle');
       return { started: false, refusal: 'no-microphone', detail: binding.message };
     }
 
@@ -323,7 +355,16 @@ export class WakeListener {
       if (!current()) return retired();
       const detail = error instanceof Error ? error.message : String(error);
       this.#lastError = detail;
+      this.#clearStartWatchdog();
       this.#setPhase('idle');
+      if (restart) {
+        // Nobody holds this return value; without the report wake would just vanish.
+        this.#options.handlers?.onFailure?.(
+          new AudioCaptureError('unsupported', detail),
+          false,
+          `wake listening stopped: the wake models could not be loaded when restarting: ${detail}`,
+        );
+      }
       return { started: false, refusal: 'capture-unavailable', detail: `the wake models could not be loaded: ${detail}` };
     }
     const handlers: AudioCaptureHandlers = {
@@ -372,8 +413,14 @@ export class WakeListener {
         this.#restartTimer = this.#setTimer(() => {
           this.#restartTimer = null;
           if (!current()) return;
-          void this.#open();
+          void this.#open(true);
         }, DEVICE_WAIT_RETRY_MS);
+        return { started: false, refusal: 'capture-unavailable', detail: captureError.message };
+      }
+      if (restart) {
+        // A failed reopen is one more crash: the supervisor's backoff and latch
+        // budget decide what happens next, the same as for a stream that died.
+        this.#onStreamStopped('failed', captureError);
         return { started: false, refusal: 'capture-unavailable', detail: captureError.message };
       }
       this.#setPhase('idle');
@@ -459,6 +506,57 @@ export class WakeListener {
   }
 
   /**
+   * Bound silence after audio has flowed. One timer per interval, not per
+   * frame: it fires, and if no frame arrived since it was armed the stream is
+   * treated as failed and goes through the supervisor like a recorder that
+   * exited. Never marks the backend silent: it HAS captured on this host.
+   */
+  #armFrameGapWatchdog(): void {
+    this.#clearFrameGapWatchdog();
+    const generation = this.#captureGeneration;
+    const seen = this.#framesSeen;
+    const timeout = this.#options.frameGapTimeoutMs ?? FRAME_GAP_TIMEOUT_MS;
+    this.#frameGapTimer = this.#setTimer(() => {
+      if (generation !== this.#captureGeneration) return;
+      this.#frameGapTimer = null;
+      if (this.#stopping || this.#stream === null) return;
+      if (this.#framesSeen !== seen) { this.#armFrameGapWatchdog(); return; }
+      const detail = `the capture stream stopped delivering audio for ${timeout} ms after it had been working`;
+      this.#options.warn?.('wake capture stopped delivering audio', { timeoutMs: timeout });
+      this.#onStreamStopped('failed', new AudioCaptureError('no-audio', detail));
+    }, timeout);
+  }
+
+  #clearFrameGapWatchdog(): void {
+    if (this.#frameGapTimer === null) return;
+    this.#clearTimer(this.#frameGapTimer);
+    this.#frameGapTimer = null;
+  }
+
+  /**
+   * Pause on a machine with no usable microphone and re-probe gently. Announced
+   * once per wait, never counted against the crash latch.
+   */
+  #waitForDevice(error: AudioCaptureError): void {
+    const firstNotice = !this.#waitingForDevice;
+    this.#waitingForDevice = true;
+    this.#setPhase('restarting');
+    if (firstNotice) {
+      this.#options.handlers?.onFailure?.(
+        error,
+        true,
+        `no microphone is available on this machine (${error.message}); wake listening is paused and retries every ${Math.round(DEVICE_WAIT_RETRY_MS / 1000)} s until a device appears`,
+      );
+    }
+    const generation = this.#captureGeneration;
+    this.#restartTimer = this.#setTimer(() => {
+      this.#restartTimer = null;
+      if (generation !== this.#captureGeneration || this.#stopping) return;
+      void this.#open(true);
+    }, DEVICE_WAIT_RETRY_MS);
+  }
+
+  /**
    * Resolve the device pin, announcing it when the answer CHANGED.
    *
    * Announced on change rather than on every resolve: the re-check runs on a
@@ -540,10 +638,18 @@ export class WakeListener {
     const stream = this.#stream;
     this.#stream = null;
     this.#engine = null;
+    this.#clearFrameGapWatchdog();
     const rebinding = ++this.#captureGeneration;
-    await stream.stop();
+    try {
+      await stream.stop();
+    } catch (error) {
+      // The old stream is retired either way; reopening is still the way back to audio.
+      this.#options.warn?.('wake capture did not release cleanly before a device change', {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
     if (rebinding !== this.#captureGeneration || this.#stopping) return;
-    const outcome = await this.#open();
+    const outcome = await this.#open(true);
     if (!outcome.started) {
       this.#options.warn?.('wake could not reopen capture after a device change', {
         detail: outcome.detail,
@@ -561,6 +667,7 @@ export class WakeListener {
     this.#framesSeen += 1;
     this.#lastFrameAt = this.#now();
     if (this.#firstFrameTimer !== null) this.#clearFirstFrameWatchdog();
+    if (this.#frameGapTimer === null) this.#armFrameGapWatchdog();
     // While the utterance after a wake is being recorded, frames belong to it and
     // nothing is scored, the phrase just spoken must not be scored again.
     const recorder = this.#recorder;
@@ -591,20 +698,48 @@ export class WakeListener {
     const generation = this.#captureGeneration;
     const engine = this.#engine;
     this.#chain = this.#chain.then(async () => {
+      let hungTimer: unknown = null;
+      let hung = false;
       try {
         if (generation !== this.#captureGeneration || engine === null) return;
-        const result = await engine.pushFrame(frame);
+        // Scoring that never returns would hold this chain, and so every later
+        // frame, for good while frames kept arriving and the surface said
+        // "listening". The timeout turns it into a capture failure and a restart.
+        const deadline = new Promise<never>((_resolve, reject) => {
+          hungTimer = this.#setTimer(() => {
+            hung = true;
+            reject(new Error(`wake-word scoring did not finish within ${FRAME_SCORING_TIMEOUT_MS} ms`));
+          }, FRAME_SCORING_TIMEOUT_MS);
+        });
+        const result = await Promise.race([engine.pushFrame(frame), deadline]);
         if (generation !== this.#captureGeneration) return;
         for (const detection of result.detections) this.#onDetection(detection);
       } catch (error) {
         if (generation !== this.#captureGeneration) return;
+        if (hung) {
+          const detail = error instanceof Error ? error.message : String(error);
+          this.#options.warn?.('wake frame scoring hung; restarting capture', { error: detail });
+          this.#onStreamStopped('failed', new AudioCaptureError('stream-ended', detail));
+          return;
+        }
         this.#options.warn?.('wake frame scoring failed', {
           error: error instanceof Error ? error.message : String(error),
         });
       } finally {
-        this.#queued -= 1;
+        if (hungTimer !== null) this.#clearTimer(hungTimer);
+        // A chain from an earlier generation was replaced; its count is not this one's.
+        if (generation === this.#captureGeneration) this.#queued -= 1;
       }
     });
+  }
+
+  /**
+   * Scoring belongs to one capture generation. Frames queued behind a call that
+   * never returned must not hold up the engine the next generation builds.
+   */
+  #resetScoring(): void {
+    this.#chain = Promise.resolve();
+    this.#queued = 0;
   }
 
   /**
@@ -741,6 +876,7 @@ export class WakeListener {
   #onStreamStopped(reason: 'requested' | 'stream-ended' | 'failed', error?: AudioCaptureError): void {
     if (this.#stopping || reason === 'requested') return;
     const generation = ++this.#captureGeneration;
+    this.#resetScoring();
     const retiredStream = this.#stream;
     // Retire in-flight diagnostic readings even when a watchdog initiated this
     // transition. Do not await stop inside the recorder's own onStopped callback.
@@ -757,6 +893,7 @@ export class WakeListener {
     // on the next open rather than a restart loop against a dead target.
     this.#disarmDeviceRecheck();
     this.#clearFirstFrameWatchdog();
+    this.#clearFrameGapWatchdog();
     const captureError = error ?? new AudioCaptureError('stream-ended', 'the capture stream ended');
     this.#lastError = captureError.message;
     if (captureError.reason === 'failure-reading-unavailable') {
@@ -766,21 +903,7 @@ export class WakeListener {
       return;
     }
     if (captureError.reason === 'device-missing') {
-      const firstNotice = !this.#waitingForDevice;
-      this.#waitingForDevice = true;
-      this.#setPhase('restarting');
-      if (firstNotice) {
-        this.#options.handlers?.onFailure?.(
-          captureError,
-          true,
-          `no microphone is available on this machine (${captureError.message}); wake listening is paused and retries every ${Math.round(DEVICE_WAIT_RETRY_MS / 1000)} s until a device appears`,
-        );
-      }
-      this.#restartTimer = this.#setTimer(() => {
-        this.#restartTimer = null;
-        if (generation !== this.#captureGeneration || this.#stopping) return;
-        void this.#open();
-      }, DEVICE_WAIT_RETRY_MS);
+      this.#waitForDevice(captureError);
       return;
     }
     const decision = this.#supervisor.noteCrashed(this.#now());
@@ -798,7 +921,7 @@ export class WakeListener {
     this.#restartTimer = this.#setTimer(() => {
       this.#restartTimer = null;
       if (generation !== this.#captureGeneration || this.#stopping) return;
-      void this.#open();
+      void this.#open(true);
     }, decision.delayMs);
   }
 

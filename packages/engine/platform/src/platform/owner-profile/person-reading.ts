@@ -22,8 +22,15 @@ export const profilePersonLine = defineBattery({
 });
 
 export class ProfilePersonReadingHeldError extends Error {
-  constructor() { super('The named-person profile reading is unavailable, unsettled or no longer current.'); this.name = 'ProfilePersonReadingHeldError'; }
+  constructor(reason = 'The named-person profile reading is unavailable, unsettled or no longer current.') { super(reason); this.name = 'ProfilePersonReadingHeldError'; }
 }
+
+/**
+ * Each People line is one model request that also carries the whole People list, so a reading costs
+ * O(n) requests and O(n^2) text. Past this many lines it is refused before any model access (never
+ * answered from a part of the list, which could leave out the line asked about).
+ */
+export const MAX_PEOPLE_LINES_PER_READING = 200;
 
 /** Carry the observation restriction through an asynchronous caller's final use. */
 export interface ProfilePersonReadingOptions extends JudgmentReadingOptions {
@@ -59,6 +66,9 @@ export async function readProfilePerson(
     current();
     // Only negative structural guards remain local; no positive name matching.
     if (typeof captured.name !== 'string' || !/[\p{L}\p{N}]/u.test(captured.name) || captured.lines.length === 0) return [];
+    if (captured.lines.length > MAX_PEOPLE_LINES_PER_READING) {
+      throw new ProfilePersonReadingHeldError(`The People section has ${captured.lines.length} lines, more than the ${MAX_PEOPLE_LINES_PER_READING} a named-person reading can attribute at once; nothing was read. Shorten the People section.`);
+    }
     requireDecisionFeature('attributing private profile prose to a named person');
     try {
       const owner = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: current });

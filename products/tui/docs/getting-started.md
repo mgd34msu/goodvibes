@@ -2,18 +2,21 @@
 
 ## Install
 
-The Jev TUI is a private workspace in `goodvibes-jev`. Follow the
-[suite installation guide](../../../docs/installation.md) to build and install
-it with the daemon, Agent and WebUI. The installer supports Linux x64/arm64 with
-glibc, supplies Bun and Node when needed, and requires a TypeSafe key for Jev.
-Run it as your normal user. Upstream npm and `goodvibes.sh` installs do not
+The Jev TUI is part of the `goodvibes-jev` suite. Install released binaries with
+the [release installer](../../../docs/installation.md)
+(`curl -fsSL https://goodvibes.sh/install.sh | sh`, Linux or macOS, no build tools
+needed), or build and install from a checkout with
+`scripts/install-from-checkout.sh` (Linux x64/arm64 with glibc, supplies Bun and
+Node when needed, and requires a TypeSafe key for Jev). Run either as your normal
+user. Both install the TUI with the daemon, Agent and WebUI; npm installs do not
 install this workspace.
 
-The installer pairs the local TUI and registers a project workspace. Launch
-`goodvibes` from that directory, then configure a conversation provider below.
+The checkout installer pairs the local TUI with the daemon and registers a project
+workspace; after the release installer, pair from the TUI with `/host pair` (see
+[host pairing](host-pairing.md)). Launch `goodvibes` from that directory, then configure a conversation provider below.
 Jev credentials and conversation-provider credentials serve different purposes.
 Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the installed
-products. Updates and data-preserving uninstall use the suite installer.
+products. Updates and data-preserving uninstall use the installer you installed with.
 
 For source development, use Bun **1.3.14** and Node **22 or later**. Go is
 optional for Go language-server support, and `rust-analyzer` can be downloaded
@@ -177,9 +180,10 @@ crash. Keeping (or dismissing) stays quiet for the rest of the run.
 ## Common paths
 
 Project runtime data lives under `.goodvibes/` in the working directory. The
-suite installer also sets `GOODVIBES_HOME` to
+release installer keeps global data in `~/.goodvibes` unless `GOODVIBES_HOME` is
+set. The checkout installer sets `GOODVIBES_HOME` to
 `~/.local/share/goodvibes-jev-data`, so global paths shown as `~/.goodvibes`
-below resolve under that directory instead. A custom `--data-dir` relocates it.
+below resolve under that directory instead; a custom `--data-dir` relocates it.
 The specific files worth knowing:
 
 | Path | What it holds |
@@ -196,7 +200,7 @@ The specific files worth knowing:
 | `~/.goodvibes/tui/keybindings.json` | Keybinding overrides |
 | `.goodvibes/agents/*.md` | Agent archetypes |
 | `.goodvibes/mcp.json` | MCP server config |
-| `.goodvibes/hooks.json` | Hook config (or the file named by `tools.hooksFile`) |
+| `hooks.json` (project root) | Hook config (or the file named by `tools.hooksFile`, resolved against the project directory) |
 
 ## First things to open in the product
 

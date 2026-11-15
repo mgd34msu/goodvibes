@@ -23,7 +23,9 @@ async function fixture() {
   let sourceCurrent = true, authorized = true, ownerRevision = 'synthetic-owner:workspace:grant:revision1';
   let ownerLifetime = new AbortController();
   const origin = { kind: 'external-original' as const, accountId: 'synthetic-account', accountRevision: 'a1', routeId: 'synthetic-route', routeRevision: 'r1' };
-  const sourceDeps = { origin, lifetime: lifetime.signal, assertCurrent: () => { if (!sourceCurrent) throw new Error('source expired'); },
+  const sourceDeps = { origin, lifetime: lifetime.signal, assertCurrent: () => {
+      if (!sourceCurrent) throw new Error('source expired');
+    },
     readBrokerInput: (target: { sessionId: string; inputId: string }) => broker.getInputsSince(target.sessionId).find(row => row.id === target.inputId) ?? null };
   const sources = createNativeInboundSourceOwner(sourceDeps);
   cleanups.push(() => sources.close());
@@ -39,9 +41,11 @@ async function fixture() {
     const result: NativeInboundAcceptance = { ref: source.ref, disposition: 'transferred' };
     writeFileSync(acceptancePath, JSON.stringify(result), { flush: true }); return result;
   };
+  let signalEntered = () => {};
+  const entered = new Promise<void>(done => { signalEntered = done; });
   let proof: NativeInboundAcceptance | null = null;
   const inspected: NativeInboundSourceRef[] = [], cancelled: NativeInboundSourceRef[] = [];
-  const receiver = { accept: async (source: NativeInboundResolvedSource, options: { assertCurrent: () => void }) => { options.assertCurrent(); accepted.push(source); return accept(source); },
+  const receiver = { accept: async (source: NativeInboundResolvedSource, options: { assertCurrent: () => void }) => { options.assertCurrent(); accepted.push(source); signalEntered(); return accept(source); },
     inspect: async (reference: NativeInboundSourceRef) => { inspected.push(reference); return proof; },
     cancel: async (reference: NativeInboundSourceRef) => { cancelled.push(reference); } };
   const owner = { async withCurrent<T>(source: Pick<NativeInboundResolvedSource, 'ref' | 'origin'>, use: (assert: () => void, revision: string, signal: AbortSignal) => Promise<T>) {
@@ -50,7 +54,7 @@ async function fixture() {
   } };
   const handoff = createNativeInboundHandoff({ sources: sources.resolver, owner, receiver, lifetime: lifetime.signal });
   cleanups.push(() => handoff.close());
-  return { sources, sourceDeps, sourceLifetime, brokerConfig, acceptancePath, handoff, broker, ref, target, request, handle, lifetime, accepted, inspected, cancelled, receiver, owner,
+  return { entered, sources, sourceDeps, sourceLifetime, brokerConfig, acceptancePath, handoff, broker, ref, target, request, handle, lifetime, accepted, inspected, cancelled, receiver, owner,
     expireOwner: () => ownerLifetime.abort(),
     sourceCurrent: (value: boolean) => { sourceCurrent = value; }, authorize: (value: boolean) => { authorized = value; if (!value) ownerLifetime.abort(); else if (ownerLifetime.signal.aborted) ownerLifetime = new AbortController(); }, replaceOwner: () => { ownerLifetime.abort(); ownerLifetime = new AbortController(); ownerRevision += '-replacement'; },
     accept: (fn: typeof accept) => { accept = fn; }, proof: (value: NativeInboundAcceptance) => { proof = value; } };
@@ -128,7 +132,7 @@ test('cancellation and close suppress a late acceptance without consuming the in
   const f = await fixture(); let resolve!: (value: NativeInboundAcceptance) => void;
   f.accept(() => new Promise(done => { resolve = done; }));
   const pending = f.handoff.run(f.request());
-  while (!resolve) await Bun.sleep(1);
+  await f.entered;
   expect((await f.handoff.cancel(f.target)).disposition).toBe('held');
   resolve({ ref: f.ref, disposition: 'transferred' }); expect((await pending).disposition).toBe('unknown');
   expect(f.cancelled).toEqual([f.ref]); expect(f.request().input.state).toBe('queued');
@@ -157,9 +161,8 @@ test('equivalent reordered acceptance fields recover the original request', asyn
 });
 
 test('source expiry detaches an uncooperative receiver and never allows its late acceptance', async () => {
-  const f = await fixture(); let entered = false;
-  f.accept(async () => { entered = true; return new Promise(() => {}); });
-  const result = f.handoff.run(f.request()); while (!entered) await Bun.sleep(1);
+  const f = await fixture();   f.accept(() => new Promise(() => {}));
+  const result = f.handoff.run(f.request()); await f.entered;
   f.lifetime.abort(); expect((await result).disposition).toBe('unknown');
   expect(f.sources.resolver.reference(f.target)).toBeNull(); expect(f.request().input.state).toBe('queued');
 });
@@ -172,9 +175,8 @@ test('producer release retires abandoned content and cannot rebind the same hand
 });
 
 test.each(['source expiry', 'explicit release', 'owner close'] as const)('%s interrupts pending acceptance independently of Agent lifetime', async kind => {
-  const f = await fixture(); let entered = false;
-  f.accept(async () => { entered = true; return new Promise(() => {}); });
-  const pending = f.handoff.run(f.request()); while (!entered) await Bun.sleep(1);
+  const f = await fixture();   f.accept(() => new Promise(() => {}));
+  const pending = f.handoff.run(f.request()); await f.entered;
   if (kind === 'source expiry') f.sourceLifetime.abort();
   else if (kind === 'explicit release') f.sources.producer.release(f.handle);
   else f.sources.close();
@@ -212,14 +214,15 @@ test('concurrent calls join one exact source; revoked owner prevents late accept
   const f = await fixture(); let resolve!: (value: NativeInboundAcceptance) => void;
   f.accept(() => new Promise(done => { resolve = done; }));
   const first = f.handoff.run(f.request()); const second = f.handoff.run(f.request());
-  while (!resolve) await Bun.sleep(1); f.authorize(false); resolve({ disposition: 'transferred', ref: f.ref });
+  await f.entered; f.authorize(false); resolve({ disposition: 'transferred', ref: f.ref });
   expect((await first).disposition).toBe('unknown'); expect((await second).disposition).toBe('unknown');
   expect(f.accepted).toHaveLength(1); expect(f.request().input.state).toBe('queued');
 });
 
-test.each(['account incarnation', 'route incarnation', 'source-read permission', 'retention permission'] as const)('%s replacement invalidates source rather than creating permission', async () => {
+test('a source that is no longer current is held, never accepted, and retired', async () => {
   const f = await fixture(); f.sourceCurrent(false);
   expect((await f.handoff.run(f.request())).disposition).toBe('held'); expect(f.accepted).toHaveLength(0);
+  expect(f.sources.resolver.reference(f.target)).toBeNull();
 });
 
 test('a different current owner/scope incarnation cannot reuse cached acceptance', async () => {
@@ -235,9 +238,8 @@ test('source references reject mutable non-string fields before hashing', async 
 });
 
 test('scoped owner revocation detaches a pending uncooperative receiver', async () => {
-  const f = await fixture(); let entered = false;
-  f.accept(async () => { entered = true; return new Promise(() => {}); });
-  const pending = f.handoff.run(f.request()); while (!entered) await Bun.sleep(1);
+  const f = await fixture();   f.accept(() => new Promise(() => {}));
+  const pending = f.handoff.run(f.request()); await f.entered;
   f.authorize(false); expect((await pending).disposition).toBe('unknown'); expect(f.request().input.state).toBe('queued');
 });
 

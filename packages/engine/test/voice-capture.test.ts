@@ -20,9 +20,11 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 let previousPort: ReturnType<typeof installJudgmentPort>;
 let portInstalled = false;
-function recorderAnswer(choice: string): void {
-  previousPort = installJudgmentPort(fakePort((_name, question) => choiceAnswer(question, choice, 0.99)).port);
+function recorderAnswer(choice: string): ReturnType<typeof fakePort>['requests'] {
+  const fixture = fakePort((_name, question) => choiceAnswer(question, choice, 0.99));
+  previousPort = installJudgmentPort(fixture.port);
   portInstalled = true;
+  return fixture.requests;
 }
 afterEach(() => { if (portInstalled) installJudgmentPort(previousPort); portInstalled = false; });
 import {
@@ -799,41 +801,47 @@ describe('the recorder capture stream', () => {
   });
 
   test('a device error in stderr is classified, not dumped as a generic failure', async () => {
-    recorderAnswer('device-missing');
+    const requests = recorderAnswer('device-missing');
     const child = fakeProcess();
-    let captured: AudioCaptureError | undefined;
+    let captured: AudioCaptureError | undefined; let stopped!: () => void;
+    const done = new Promise<void>(resolve => { stopped = resolve; });
     await opener(child)(request, {
       onFrame: () => {},
-      onStopped: (_reason, error) => { captured = error; },
+      onStopped: (_reason, error) => { captured = error; stopped(); },
     });
     child.emitStderr('stream node 56 error: no target node available');
     child.close(1);
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    await done;
+    expect(JSON.stringify(requests[0]?.state)).toContain('stream node 56 error: no target node available');
     expect(captured?.reason).toBe('device-missing');
   });
 
   test('a busy device classifies as unavailable, not missing: contention gets prompt retries', async () => {
-    recorderAnswer('device-unavailable');
+    const requests = recorderAnswer('device-unavailable');
     const child = fakeProcess();
-    let captured: AudioCaptureError | undefined;
+    let captured: AudioCaptureError | undefined; let stopped!: () => void;
+    const done = new Promise<void>(resolve => { stopped = resolve; });
     await opener(child)(request, {
       onFrame: () => {},
-      onStopped: (_reason, error) => { captured = error; },
+      onStopped: (_reason, error) => { captured = error; stopped(); },
     });
     child.emitStderr('open failed: device or resource busy');
     child.close(1);
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    await done;
+    expect(JSON.stringify(requests[0]?.state)).toContain('open failed: device or resource busy');
     expect(captured?.reason).toBe('device-unavailable');
   });
 
   test('a permission refusal is its own reason, because the remedy is different', async () => {
-    recorderAnswer('permission-denied');
+    const requests = recorderAnswer('permission-denied');
     const child = fakeProcess();
-    let captured: AudioCaptureError | undefined;
-    await opener(child)(request, { onFrame: () => {}, onStopped: (_r, e) => { captured = e; } });
+    let captured: AudioCaptureError | undefined; let stopped!: () => void;
+    const done = new Promise<void>(resolve => { stopped = resolve; });
+    await opener(child)(request, { onFrame: () => {}, onStopped: (_r, e) => { captured = e; stopped(); } });
     child.emitStderr('arecord: main:850: audio open error: Permission denied');
     child.close(1);
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    await done;
+    expect(JSON.stringify(requests[0]?.state)).toContain('arecord: main:850: audio open error: Permission denied');
     expect(captured?.reason).toBe('permission-denied');
   });
 

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -47,10 +48,17 @@ function flagValue(args: readonly string[], names: readonly string[]): string | 
   return null;
 }
 
+const VALUED_FLAGS: readonly string[] = ['--label'];
+
+// A flag's value is not a positional: `--label Work` must not shift the path argument.
 function commandValues(args: readonly string[]): readonly string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index]!;
+    if (VALUED_FLAGS.includes(token)) {
+      index += 1;
+      continue;
+    }
     if (!token.startsWith('--')) values.push(token);
   }
   return values;
@@ -103,7 +111,8 @@ export async function handleWorkspacesCommand(runtime: CliCommandRuntime): Promi
   }
 
   if (sub === 'register' || sub === 'add') {
-    const target = values[0] ?? runtime.workingDirectory;
+    // Relative paths are relative to the command's working directory (--cd), not the process cwd.
+    const target = resolve(runtime.workingDirectory, values[0] ?? '.');
     if (!hasYes(rawRest)) {
       return usage(runtime, `Refusing to register workspace ${normalizeWorkspaceRoot(target)} for automatic checkpoints without --yes.`);
     }
@@ -124,7 +133,7 @@ export async function handleWorkspacesCommand(runtime: CliCommandRuntime): Promi
   }
 
   if (sub === 'unregister' || sub === 'remove' || sub === 'rm') {
-    const target = values[0] ?? runtime.workingDirectory;
+    const target = resolve(runtime.workingDirectory, values[0] ?? '.');
     if (!hasYes(rawRest)) {
       return usage(runtime, `Refusing to unregister workspace ${normalizeWorkspaceRoot(target)} without --yes.`);
     }

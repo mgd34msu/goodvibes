@@ -74,6 +74,15 @@ describe('acp.agents.list / acp.sessions.create over the composed daemon', () =>
     // asserting the shape (an array, present) is what this composition owes,
     // not any particular agent being present.
     expect(Array.isArray(result.agents)).toBe(true);
+    // Whatever this machine has installed, every entry a client receives is complete.
+    for (const agent of result.agents) {
+      expect(typeof agent.id).toBe('string');
+      expect(agent.id.length).toBeGreaterThan(0);
+      expect(typeof agent.title).toBe('string');
+      expect(agent.title.length).toBeGreaterThan(0);
+      expect(typeof agent.binaryPath).toBe('string');
+      expect(agent.binaryPath.length).toBeGreaterThan(0);
+    }
   });
 
   test('acp.sessions.create refuses an unauthenticated caller', async () => {

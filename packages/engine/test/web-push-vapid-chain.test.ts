@@ -27,6 +27,7 @@
 
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { allowLocalPushEndpoints } from './_helpers/local-push-endpoints.ts';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +68,7 @@ interface CapturedPush {
   readonly body: Buffer;
 }
 const captured: CapturedPush[] = [];
+allowLocalPushEndpoints();
 let sink: ReturnType<typeof Bun.serve>;
 let sinkOrigin: string;
 
@@ -319,6 +321,8 @@ beforeAll(async () => {
   });
   sinkOrigin = `http://127.0.0.1:${sink.port}`;
   await restartDaemon();
+  // Booting the daemon must not mint a key: only the first need for one does.
+  expect(await readStoredKeypair()).toBeNull();
 });
 
 afterAll(async () => {
@@ -333,9 +337,6 @@ afterAll(async () => {
 
 describe('web push: VAPID keypair lifecycle (generate once, reuse forever)', () => {
   test('the first need mints and persists the pair into the secrets store', async () => {
-    // Nothing has asked for a key yet, so nothing should exist.
-    expect(await readStoredKeypair()).toBeNull();
-
     const first = await invokeVerb('push.vapid.get');
     expect(first.status).toBe(200);
     const publicKey = first.json.publicKey as string;
@@ -350,8 +351,8 @@ describe('web push: VAPID keypair lifecycle (generate once, reuse forever)', () 
   });
 
   test('later needs reuse the SAME pair: no silent regeneration', async () => {
-    const storedBefore = await readStoredKeypair();
     const first = (await invokeVerb('push.vapid.get')).json.publicKey as string;
+    const storedBefore = await readStoredKeypair();
 
     // Repeated reads, a subscribe, and a real delivery all force the key path.
     const second = (await invokeVerb('push.vapid.get')).json.publicKey as string;
@@ -391,6 +392,7 @@ describe('web push: VAPID keypair lifecycle (generate once, reuse forever)', () 
   });
 
   test('the private component is in no verb response and in no config file', async () => {
+    await invokeVerb('push.vapid.get');
     const stored = JSON.parse((await readStoredKeypair()) as string) as { privateJwk: { d: string } };
     const privateD = stored.privateJwk.d;
     expect(privateD.length).toBeGreaterThan(0);

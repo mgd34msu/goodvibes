@@ -11,21 +11,20 @@ import type { EditToolOptions } from '@goodvibes-jev/engine/platform/platform/to
 import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// resolveAndValidatePath uses process.cwd() as project root.
-// All test files must be created inside process.cwd().
-const PROJECT_ROOT = process.cwd();
-
-let tmpCounter = 0;
+// The tool resolves paths against its `cwd` option, so every test points it at a
+// per-run temp directory instead of the checkout.
+let projectRoot = '';
 
 function makeTmpDir(): string {
-  const dir = join(PROJECT_ROOT, `.test-edit-tmp-${process.pid}-${++tmpCounter}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  projectRoot = makeProjectTempDir('test-edit');
+  mkdirSync(projectRoot, { recursive: true });
+  return projectRoot;
 }
 
 function writeFile(dir: string, name: string, content: string): string {
@@ -40,7 +39,7 @@ function relPathFrom(root: string, absPath: string): string {
 }
 
 function relPath(absPath: string): string {
-  return relPathFrom(PROJECT_ROOT, absPath);
+  return relPathFrom(projectRoot, absPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +56,7 @@ describe('edit tool', () => {
     priorJudgment = installJudgmentPort(fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'none', 1) : noulAnswer(0)).port);
     tmpDir = makeTmpDir();
     fileCache = new FileStateCache();
-    tool = createEditTool(fileCache, { cwd: PROJECT_ROOT });
+    tool = createEditTool(fileCache, { cwd: tmpDir });
   });
 
   afterEach(() => {
@@ -870,7 +869,7 @@ describe('edit tool', () => {
         edits: [{ path: '../../etc/passwd', find: 'root', replace: 'pwned' }],
       });
       expect(result.success).toBe(false);
-      expect(result.error ?? result.output).toMatch(/outside|traversal|not allowed|invalid|path/i);
+      expect(result.error).toBe("Path error for '../../etc/passwd': Path '../../etc/passwd' is outside the project root");
     });
   });
 
@@ -959,8 +958,8 @@ describe('edit tool', () => {
     });
 
     test('does not run validators in dry_run mode', async () => {
-      // Even with a failing validator, dry_run bypasses it
-      writeFile(tmpDir, 'package.json', JSON.stringify({ scripts: { build: 'exit 1' } }));
+      // The failing validator leaves a marker when it runs, so skipping it is observable.
+      writeFile(tmpDir, 'package.json', JSON.stringify({ scripts: { build: 'echo ran > validator-ran && exit 1' } }));
       const editFile = writeFile(tmpDir, 'val_dry.ts', 'original');
       const localTool = createEditTool(new FileStateCache(), { cwd: tmpDir });
 
@@ -970,12 +969,10 @@ describe('edit tool', () => {
         dry_run: true,
       });
 
-      // dry_run skips validate.before, file remains unchanged
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('(dry run)');
       expect(readFileSync(editFile, 'utf-8')).toBe('original');
-      // result may succeed (dry_run returns diff) or fail for other reasons, but NOT validator failure
-      if (!result.success) {
-        expect(result.error ?? '').not.toMatch(/Pre-edit validation failed/i);
-      }
+      expect(existsSync(join(tmpDir, 'validator-ran'))).toBe(false);
     });
   });
 
@@ -1035,7 +1032,7 @@ describe('edit tool', () => {
     });
 
     test('validate.after is skipped when dry_run is true', async () => {
-      writeFile(tmpDir, 'package.json', JSON.stringify({ scripts: { build: 'exit 1' } }));
+      writeFile(tmpDir, 'package.json', JSON.stringify({ scripts: { build: 'echo ran > validator-ran && exit 1' } }));
       const editFile = writeFile(tmpDir, 'val_after_dry.ts', 'original');
       const localTool = createEditTool(new FileStateCache(), { cwd: tmpDir });
 
@@ -1045,11 +1042,10 @@ describe('edit tool', () => {
         dry_run: true,
       });
 
-      // dry_run: file untouched, no after-validator runs
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('(dry run)');
       expect(readFileSync(editFile, 'utf-8')).toBe('original');
-      if (!result.success) {
-        expect(result.error ?? '').not.toMatch(/Post-edit validation failed/i);
-      }
+      expect(existsSync(join(tmpDir, 'validator-ran'))).toBe(false);
     });
 
     test('validator failure message includes validator name and output', async () => {
@@ -1064,7 +1060,8 @@ describe('edit tool', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toMatch(/build/i);
+      expect(result.error).toContain("Validator 'build' failed (exit 1)");
+      expect(result.error).toContain('BUILD_FAILED_MSG');
     });
   });
 

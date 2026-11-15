@@ -5,9 +5,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.js';
 
-const tmpRoots: string[] = [];
+const tmpRoots: string[] = [], stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -51,12 +52,15 @@ describe('knowledge review decisions', () => {
 
     expect(reviewed.issue.status).toBe('resolved');
     expect(refreshed[0]?.status).toBe('resolved');
-    expect(refreshed[0]?.metadata.review).not.toBeUndefined(); // presence-only: review metadata set
+    expect(refreshed[0]?.metadata.review).toMatchObject({ action: 'reject', reviewer: 'llm-review' });
+    expect(refreshed[0]?.metadata.review).toEqual(reviewed.issue.metadata.review);
   });
 });
 
 function createStore(): KnowledgeStore {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-knowledge-review-'));
   tmpRoots.push(root);
-  return new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
+  return store;
 }

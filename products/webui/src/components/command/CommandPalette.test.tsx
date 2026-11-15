@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { CommandPalette, formatShortcut } from './CommandPalette';
+import { CommandPalette, formatShortcut, SEARCH_DEBOUNCE_MS } from './CommandPalette';
 import { getCommands, registerCommand, unregisterCommand, type CommandDef } from '../../lib/commands';
 import type { BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import { clearStoredAuthToken, client as platformClient, tokenStore } from '../../lib/goodvibes';
@@ -37,6 +37,11 @@ async function until(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('Expected palette state did not appear');
+}
+
+// A "never replayed" assertion only means something once the search debounce has elapsed.
+async function pastSearchDebounce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 60));
 }
 
 function renderPalette(open: boolean): void {
@@ -305,7 +310,7 @@ describe('CommandPalette: admitted semantic search', () => {
     await admitAccount('offline-account-b');
     flushSync(() => registerCommand(cmd('chat.new', { title: 'New Chat', group: 'chat', run: () => ran.push('new-account') })));
     if (pending) finish(answer(requests[0]!.input));
-    await new Promise((resolve) => setTimeout(resolve, 260));
+    await pastSearchDebounce();
     expect(requests).toHaveLength(1);
     key('Enter'); expect(ran).toEqual([]);
     type('account B explicit query');
@@ -346,7 +351,7 @@ describe('CommandPalette: admitted semantic search', () => {
     await until(() => Boolean(pending));
     await change();
     pending.finish(answer(pending.request));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await pastSearchDebounce();
     key('Enter');
     expect(ran).toEqual([]);
     expect(options()).toHaveLength(0);
@@ -371,7 +376,7 @@ describe('CommandPalette: admitted semantic search', () => {
       expect(ran).toEqual([]);
       await until(() => options().length === 0);
       expect(document.querySelector('[data-search-status="unavailable"]')).not.toBeNull();
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      await pastSearchDebounce();
       expect(calls).toBe(1); // Never replay the old account's query under a new identity.
       type(''); key('Enter');
       expect(ran).toEqual(['nav.chat']); // Explicit manual browse still works.

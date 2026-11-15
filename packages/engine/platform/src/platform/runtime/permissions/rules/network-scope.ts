@@ -47,40 +47,52 @@ function toolMatchesNetworkPattern(
   return toolPattern === '*' || toolPattern === toolName;
 }
 
+const DEFAULT_PORTS: Readonly<Record<string, number>> = {
+  'http:': 80, 'https:': 443, 'ws:': 80, 'wss:': 443, 'ftp:': 21,
+};
+
 /**
- * extractHostAndPort, Extracts the hostname and port from args.
- *
- * Checks `url`, `host`, `hostname`, `endpoint` fields.
- * Parses full URLs to extract hostname + port.
- *
- * Returns `null` if no network-related argument is found.
+ * One host the call would reach, with the port in effect: the explicit one, or
+ * the scheme's default so a `ports` restriction also holds for `https://host/`.
  */
-function extractHostAndPort(
-  args: Record<string, unknown>,
-): { host: string; port: number | null } | null {
-  // Try URL-shaped fields first
-  const urlCandidates = ['url', 'endpoint', 'uri', 'href'];
-  for (const key of urlCandidates) {
-    if (typeof args[key]! === 'string') {
-      const raw = args[key]! as string;
-      try {
-        const parsed = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
-        const port = parsed.port ? parseInt(parsed.port, 10) : null;
-        return { host: parsed.hostname, port };
-      } catch {
-        // Not a valid URL, validate it looks like a hostname before using it
-        // Reject strings with spaces or exceeding max hostname length (RFC 1035: 253 chars)
-        if (raw.includes(' ') || raw.length > 253 || raw.length === 0) {
-          return null;
-        }
-        return { host: raw, port: null };
-      }
-    }
+function parseHostTarget(raw: string): { host: string; port: number | null } | null {
+  // The URL parser is the authority on what reads as a scheme: it also accepts `http:evil.com`, `https:/evil.com`
+  // and `http:\\evil.com` as host evil.com, so try the text as written before treating it as a bare host.
+  try {
+    let parsed: URL | null = null;
+    try {
+      const direct = new URL(raw.trim());
+      if (direct.hostname !== '') parsed = direct;
+    } catch { /* no scheme: fall through to a bare host */ }
+    parsed ??= new URL(`https://${raw}`);
+    const port = parsed.port ? parseInt(parsed.port, 10) : (DEFAULT_PORTS[parsed.protocol] ?? null);
+    return { host: parsed.hostname, port };
+  } catch {
+    // Not a valid URL, validate it looks like a hostname before using it
+    // Reject strings with spaces or exceeding max hostname length (RFC 1035: 253 chars)
+    if (raw.includes(' ') || raw.length > 253 || raw.length === 0) return null;
+    return { host: raw, port: null };
   }
-  // Try plain host/hostname fields
-  if (typeof args['host'] === 'string') return { host: args['host'], port: null };
-  if (typeof args['hostname'] === 'string') return { host: args['hostname'], port: null };
-  return null;
+}
+
+/**
+ * extractHostTargets, Extracts every hostname (and port) the call names.
+ *
+ * Checks `url`, `endpoint`, `uri`, `href`, `host` and `hostname`; every one that
+ * is present is returned so a rule cannot be sidestepped by naming a second field.
+ */
+function extractHostTargets(args: Record<string, unknown>): Array<{ host: string; port: number | null }> {
+  const targets: Array<{ host: string; port: number | null }> = [];
+  for (const key of ['url', 'endpoint', 'uri', 'href']) {
+    const raw = args[key];
+    if (typeof raw !== 'string') continue;
+    const target = parseHostTarget(raw);
+    if (target !== null) targets.push(target);
+  }
+  for (const key of ['host', 'hostname']) {
+    if (typeof args[key] === 'string') targets.push({ host: args[key] as string, port: null });
+  }
+  return targets;
 }
 
 /**
@@ -136,8 +148,8 @@ export function evaluateNetworkScopeRule(
     };
   }
 
-  const hostInfo = extractHostAndPort(args);
-  if (hostInfo === null) {
+  const targets = extractHostTargets(args);
+  if (targets.length === 0) {
     return {
       matched: false,
       step: {
@@ -149,43 +161,23 @@ export function evaluateNetworkScopeRule(
     };
   }
 
-  const { host, port } = hostInfo;
-
-  if (rule.ports !== undefined && rule.ports.length > 0 && port !== null) {
-    const portAllowed = rule.ports.includes(0) || rule.ports.includes(port);
-    if (!portAllowed) {
-      return {
-        matched: false,
-        step: {
-          layer: 'policy',
-          check: `network-scope-rule:${rule.id}`,
-          matched: false,
-          detail: `port ${port} not in allowed ports [${rule.ports.join(', ')}]`,
-        },
-      };
+  const check = `network-scope-rule:${rule.id}`;
+  const outcomes = targets.map(({ host, port }) => {
+    if (rule.ports !== undefined && rule.ports.length > 0 && port !== null) {
+      const portAllowed = rule.ports.includes(0) || rule.ports.includes(port);
+      if (!portAllowed) {
+        return { matched: false, detail: `port ${port} not in allowed ports [${rule.ports.join(', ')}]` };
+      }
     }
-  }
-
-  const matchedPattern = rule.hostPatterns.find((p) => hostMatchesPattern(host, p));
-  if (matchedPattern !== undefined) {
-    return {
-      matched: true,
-      step: {
-        layer: 'policy',
-        check: `network-scope-rule:${rule.id}`,
-        matched: true,
-        detail: `host "${host}" matched pattern "${matchedPattern}"`,
-      },
-    };
-  }
-
-  return {
-    matched: false,
-    step: {
-      layer: 'policy',
-      check: `network-scope-rule:${rule.id}`,
-      matched: false,
-      detail: `host "${host}" did not match any of [${rule.hostPatterns.join(', ')}]`,
-    },
-  };
+    const matchedPattern = rule.hostPatterns.find((p) => hostMatchesPattern(host, p));
+    return matchedPattern !== undefined
+      ? { matched: true, detail: `host "${host}" matched pattern "${matchedPattern}"` }
+      : { matched: false, detail: `host "${host}" did not match any of [${rule.hostPatterns.join(', ')}]` };
+  });
+  // Same batch semantics as command rules: a deny matches when ANY named host does,
+  // an allow only when EVERY named host does.
+  const decisive = rule.effect === 'deny'
+    ? (outcomes.find((o) => o.matched) ?? outcomes[0]!)
+    : (outcomes.find((o) => !o.matched) ?? outcomes[0]!);
+  return { matched: decisive.matched, step: { layer: 'policy', check, matched: decisive.matched, detail: decisive.detail } };
 }

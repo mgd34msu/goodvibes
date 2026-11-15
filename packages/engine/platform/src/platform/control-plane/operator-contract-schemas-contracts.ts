@@ -40,7 +40,7 @@ import {
   UNIT_ROLES,
   YES_NO_VERDICTS,
 } from '../../events/contract.js';
-import type { Contract, ContractUnit } from '../contract/types.js';
+import type { Contract, ContractUnit, Criterion, CriterionReading, Escalation } from '../contract/types.js';
 import { BOOLEAN_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, objectSchema } from './method-catalog-shared.js';
 import { STRING_LIST_SCHEMA, enumSchema, recordSchema } from './operator-contract-schemas-shared.js';
 import {
@@ -105,7 +105,8 @@ const CRITERION_READING_SCHEMA = objectSchema({
   severity: enumSchema(CRITERION_SEVERITIES),
   decisionId: STRING_SCHEMA,
   severityDecisionId: STRING_SCHEMA,
-}, ['checkId', 'at', 'probabilityUnmet', 'verdict', 'outcome']);
+  rationale: STRING_SCHEMA,
+} satisfies Record<keyof CriterionReading, Record<string, unknown>>, ['checkId', 'at', 'probabilityUnmet', 'verdict', 'outcome']);
 
 const CRITERION_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
@@ -118,7 +119,7 @@ const CRITERION_SCHEMA = objectSchema({
   dispositionReason: STRING_SCHEMA,
   status: enumSchema(CRITERION_STATUSES),
   readings: arraySchema(CRITERION_READING_SCHEMA),
-}, ['id', 'text', 'origin', 'serves', 'disposition', 'status', 'readings']);
+} satisfies Record<keyof Criterion, Record<string, unknown>>, ['id', 'text', 'origin', 'serves', 'disposition', 'status', 'readings']);
 
 const GATE_RESULT_SCHEMA = objectSchema({
   gate: STRING_SCHEMA,
@@ -263,6 +264,8 @@ const ESCALATION_SCHEMA = objectSchema({
   question: STRING_SCHEMA,
   unmetCriterionIds: STRING_LIST_SCHEMA,
   decisionIds: STRING_LIST_SCHEMA,
+  // Present only on the retry-or-cancel question a failing native turn asks; not an approval.
+  failurePause: { type: 'boolean', enum: [true] },
   resolvedAt: NUMBER_SCHEMA,
   reply: objectSchema({
     text: STRING_SCHEMA,
@@ -270,7 +273,7 @@ const ESCALATION_SCHEMA = objectSchema({
     outcome: OUTCOME_SCHEMA,
     decisionId: STRING_SCHEMA,
   }, ['text', 'reading', 'outcome']),
-}, ['id', 'at', 'scope', 'targetId', 'reason', 'question', 'unmetCriterionIds']);
+} satisfies Record<keyof Escalation, Record<string, unknown>>, ['id', 'at', 'scope', 'targetId', 'reason', 'question', 'unmetCriterionIds']);
 
 const DECISION_SCHEMA = objectSchema({
   id: STRING_SCHEMA,

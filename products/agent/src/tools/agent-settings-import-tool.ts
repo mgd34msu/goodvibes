@@ -4,6 +4,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import {
   previewAgentWorkspaceTuiSettingsImport,
 } from '../input/agent-workspace-settings.ts';
+import { settingsThrownFailure } from './agent-settings-admission.ts';
 import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
 
 type SettingsImportAction = 'preview' | 'apply';
@@ -62,7 +63,7 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSettingsImportArgs;
       if (isAgentSettingsImportMutation('import_goodvibes_settings', args as Record<string, unknown>)) {
         try { return await executeAdmittedAgentSettingsImport(commandContext, args as Record<string, unknown>, options); }
-        catch { return error('Settings import requires a current recorded effect-owner admission.'); }
+        catch (thrown) { return settingsThrownFailure('import', thrown); }
       }
       const preview = previewAgentWorkspaceTuiSettingsImport(commandContext);
       if (!preview) return error('GoodVibes settings import is unavailable in this runtime.');
@@ -77,7 +78,7 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
         });
       }
 
-      return error('Settings import requires a current recorded effect-owner admission.');
+      return error('Settings import requires a current recorded effect-owner admission. Nothing was applied. Settings change only for what the owner asked in this turn; confirm and explicitUserRequest are not authority. Ask the owner to make the request, and do not retry the same call.');
     },
   };
 }

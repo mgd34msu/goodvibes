@@ -149,32 +149,42 @@ export class KnowledgeGraphqlService {
     return result;
   }
 
+  /**
+   * One resolver per field the schema declares: graphql-js reads `rootValue[field]`,
+   * so a field with no entry here answers with a null-field error that names nothing
+   * about the cause. The schema test walks both lists and keeps them equal.
+   */
   private createRootValue(scopeOptions: KnowledgeScopeSelectionOptions) {
+    const listUsage = ({ limit, targetKind, targetId, usageKind }: { limit?: number; targetKind?: 'source' | 'node' | 'issue'; targetId?: string; usageKind?: string }) => (
+      this.service.listUsageRecords(clampInt(limit, 100), {
+        ...(targetKind ? { targetKind } : {}),
+        ...(targetId ? { targetId } : {}),
+        ...(usageKind ? { usageKind: usageKind as 'search-hit' | 'packet-item' | 'item-open' | 'neighbor-open' | 'projection-read' | 'multimodal-writeback' } : {}),
+      })
+    );
     return {
       status: async (args: { knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => this.service.getStatus(graphqlScope(args), scopeOptions),
-      sources: async (args: { limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
+      sources: async (args: { limit?: number; offset?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
         await this.service.querySources({
           limit: clampInt(args.limit, 100),
+          offset: clampOffset(args.offset),
           ...graphqlScope(args),
         }, scopeOptions)
       ).items,
-      nodes: async (args: { limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
+      nodes: async (args: { limit?: number; offset?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
         await this.service.queryNodes({
           limit: clampInt(args.limit, 100),
+          offset: clampOffset(args.offset),
           ...graphqlScope(args),
         }, scopeOptions)
       ).items,
-      issues: async (args: { limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
+      issues: async (args: { limit?: number; offset?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
         await this.service.queryIssues({
           limit: clampInt(args.limit, 100),
+          offset: clampOffset(args.offset),
           ...graphqlScope(args),
         }, scopeOptions)
       ).items,
-      source: async ({ id }: { id: string }) => (await this.service.listSources(Number.MAX_SAFE_INTEGER, scopeOptions)).find((source) => source.id === id) ?? null,
-      node: async ({ id }: { id: string }) => (await this.service.listNodes(Number.MAX_SAFE_INTEGER, scopeOptions)).find((node) => node.id === id) ?? null,
-      issue: async ({ id }: { id: string }) => (await this.service.listIssues(Number.MAX_SAFE_INTEGER, scopeOptions)).find((issue) => issue.id === id) ?? null,
-      item: ({ id }: { id: string }) => this.service.getItemScoped(id, {}, scopeOptions),
-      items: ({ ids }: { ids: string[] }) => this.service.getItems(ids, {}, scopeOptions),
       itemView: async ({ kind, id }: { kind: string; id: string }) => {
         if (kind !== 'source' && kind !== 'node' && kind !== 'issue') {
           throw new (graphqlModule().GraphQLError)(`Unsupported knowledge item kind: ${kind}`);
@@ -182,60 +192,6 @@ export class KnowledgeGraphqlService {
         const item = await this.service.getItemScoped(id, {}, scopeOptions);
         return item?.[kind] ? item : null;
       },
-      sourcesConnection: (args: {
-        limit?: number | undefined;
-        offset?: number | undefined;
-        knowledgeSpaceId?: string | undefined;
-        includeAllSpaces?: boolean | undefined;
-        status?: string | undefined;
-        connectorId?: string | undefined;
-        sourceType?: string | undefined;
-        tag?: string | undefined;
-        query?: string | undefined;
-      }) => this.service.querySources({
-        limit: clampInt(args.limit, 100),
-        offset: clampOffset(args.offset),
-        ...graphqlScope(args),
-        status: args.status,
-        connectorId: args.connectorId,
-        sourceType: args.sourceType,
-        tag: args.tag,
-        query: args.query,
-      }, scopeOptions),
-      nodesConnection: (args: {
-        limit?: number;
-        offset?: number;
-        knowledgeSpaceId?: string;
-        includeAllSpaces?: boolean;
-        kind?: string;
-        status?: string;
-        query?: string;
-      }) => this.service.queryNodes({
-        limit: clampInt(args.limit, 100),
-        offset: clampOffset(args.offset),
-        ...graphqlScope(args),
-        kind: args.kind,
-        status: args.status,
-        query: args.query,
-      }, scopeOptions),
-      issuesConnection: (args: {
-        limit?: number;
-        offset?: number;
-        knowledgeSpaceId?: string;
-        includeAllSpaces?: boolean;
-        severity?: string;
-        status?: string;
-        code?: string;
-        query?: string;
-      }) => this.service.queryIssues({
-        limit: clampInt(args.limit, 100),
-        offset: clampOffset(args.offset),
-        ...graphqlScope(args),
-        severity: args.severity,
-        status: args.status,
-        code: args.code,
-        query: args.query,
-      }, scopeOptions),
       extractions: async (args: { limit?: number; sourceId?: string; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
         await this.service.listExtractions(clampInt(args.limit, 100), args.sourceId, graphqlScope(args), scopeOptions)
       ).slice(0, clampInt(args.limit, 100)),
@@ -273,7 +229,6 @@ export class KnowledgeGraphqlService {
         },
       )),
       connectors: () => this.service.listConnectors(),
-      connector: ({ id }: { id: string }) => this.service.getConnector(id),
       connectorDoctor: ({ id }: { id: string }) => this.service.doctorConnector(id),
       projectionTargets: async (args: { limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean }) => (
         await this.service.listProjectionTargets(clampInt(args.limit, 25), graphqlScope(args), scopeOptions)
@@ -290,13 +245,8 @@ export class KnowledgeGraphqlService {
         return job ? mapJob(job) : null;
       },
       jobRuns: ({ limit, jobId }: { limit?: number; jobId?: string }) => this.service.listJobRuns(clampInt(limit, 25), jobId).map((run) => mapJobRun(run)),
-      usage: ({ limit, targetKind, targetId, usageKind }: { limit?: number; targetKind?: 'source' | 'node' | 'issue'; targetId?: string; usageKind?: string }) => (
-        this.service.listUsageRecords(clampInt(limit, 100), {
-          ...(targetKind ? { targetKind } : {}),
-          ...(targetId ? { targetId } : {}),
-          ...(usageKind ? { usageKind: usageKind as 'search-hit' | 'packet-item' | 'item-open' | 'neighbor-open' | 'projection-read' | 'multimodal-writeback' } : {}),
-        })
-      ),
+      usage: listUsage,
+      usageRecords: listUsage,
       consolidationCandidates: ({ limit, status, subjectKind, subjectId }: { limit?: number; status?: string; subjectKind?: 'source' | 'node' | 'issue'; subjectId?: string }) => (
         this.service.listConsolidationCandidates(clampInt(limit, 100), {
           ...(status ? { status: status as 'open' | 'accepted' | 'rejected' | 'superseded' } : {}),
@@ -304,11 +254,8 @@ export class KnowledgeGraphqlService {
           ...(subjectId ? { subjectId } : {}),
         })
       ),
-      consolidationCandidate: ({ id }: { id: string }) => this.service.getConsolidationCandidate(id),
       consolidationReports: ({ limit }: { limit?: number }) => this.service.listConsolidationReports(clampInt(limit, 100)),
-      consolidationReport: ({ id }: { id: string }) => this.service.getConsolidationReport(id),
       schedules: ({ limit }: { limit?: number }) => this.service.listSchedules(clampInt(limit, 100)),
-      schedule: ({ id }: { id: string }) => this.service.getSchedule(id),
       ingestUrl: async (
         args: {
           url: string;
@@ -369,20 +316,36 @@ export class KnowledgeGraphqlService {
         });
         return result.source;
       },
-      importBookmarks: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
+      importBookmarksFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
         assertWriteAccess(context);
         return this.service.importBookmarksFromFile(args);
       },
-      importUrls: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
+      importUrlsFromFile: async (args: { path: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
         assertWriteAccess(context);
         return this.service.importUrlsFromFile(args);
       },
-      ingestConnector: async (
-        args: { connectorId: string; input?: unknown; content?: string; path?: string; sessionId?: string; allowPrivateHosts?: boolean },
-        context: KnowledgeGraphqlContext,
-      ) => {
+      ingestBookmarkSeeds: async (args: { seeds: string[]; connectorId?: string; sessionId?: string }, context: KnowledgeGraphqlContext) => {
         assertWriteAccess(context);
-        return this.service.ingestConnectorInput(args);
+        return this.service.ingestBookmarkSeeds(
+          args.seeds.map((url) => ({ url })),
+          args.sessionId,
+          'bookmark',
+          args.connectorId ?? 'bookmark',
+        );
+      },
+      ingestWithConnector: async (args: { connectorId: string; input: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
+        assertWriteAccess(context);
+        return this.service.ingestWithConnector(args.connectorId, args.input, args.sessionId, args.allowPrivateHosts);
+      },
+      ingestConnectorInput: async (args: { input: string; connectorId?: string; sessionId?: string; allowPrivateHosts?: boolean }, context: KnowledgeGraphqlContext) => {
+        assertWriteAccess(context);
+        if (!args.connectorId) throw new (graphqlModule().GraphQLError)('ingestConnectorInput needs a connectorId; list the available ones with the connectors query.');
+        return this.service.ingestConnectorInput({
+          connectorId: args.connectorId,
+          content: args.input,
+          ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
+          ...(args.allowPrivateHosts !== undefined ? { allowPrivateHosts: args.allowPrivateHosts } : {}),
+        });
       },
       lint: async (_args: Record<string, never>, context: KnowledgeGraphqlContext) => {
         assertWriteAccess(context);
@@ -400,9 +363,13 @@ export class KnowledgeGraphqlService {
           ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
         }));
       },
-      decideCandidate: async (args: { id: string; decision: 'accept' | 'reject' | 'supersede'; decidedBy?: string; memoryClass?: string; scope?: string; detail?: string }, context: KnowledgeGraphqlContext) => {
+      decideConsolidationCandidate: async (args: { id: string; status: string; decidedBy?: string; memoryClass?: string; scope?: string; detail?: string }, context: KnowledgeGraphqlContext) => {
         assertWriteAccess(context);
-        return this.service.decideConsolidationCandidate(args.id, args.decision, {
+        const decision = CANDIDATE_DECISIONS[args.status];
+        if (!decision) {
+          throw new (graphqlModule().GraphQLError)(`Unsupported candidate status "${args.status}". Use accepted, rejected or superseded.`);
+        }
+        return this.service.decideConsolidationCandidate(args.id, decision, {
           decidedBy: args.decidedBy,
           memoryClass: args.memoryClass,
           scope: args.scope,
@@ -459,6 +426,10 @@ export class KnowledgeGraphqlService {
     };
   }
 }
+
+const CANDIDATE_DECISIONS: Readonly<Record<string, 'accept' | 'reject' | 'supersede'>> = Object.assign(Object.create(null) as Record<string, 'accept' | 'reject' | 'supersede'>, {
+  accepted: 'accept', accept: 'accept', rejected: 'reject', reject: 'reject', superseded: 'supersede', supersede: 'supersede',
+});
 
 function graphqlScope(input: KnowledgeSpaceScopeInput = {}): KnowledgeSpaceScopeInput {
   return {

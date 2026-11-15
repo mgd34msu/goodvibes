@@ -72,10 +72,26 @@ export type McpElicitationResolver = (input: {
   context?: McpElicitationContext | undefined;
 }) => Promise<{ action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> | undefined }>;
 
+/**
+ * Where a client's connection is in its life. `restart-wait` means a crashed
+ * stdio server will be respawned on a timer; `gave-up` means it will not be
+ * respawned without a reconnect (configuration reload).
+ */
+export type McpClientPhase = 'idle' | 'starting' | 'negotiating' | 'ready' | 'restart-wait' | 'gave-up' | 'closed';
+
 export interface McpClientOptions {
   /** Live owner check immediately before every initial or restarted process spawn. */
   beforeProcessStart?: (() => void) | undefined;
+  /** Bound for one tool call or other request; 0 (the default) means unbounded. */
   timeout?: number | undefined;
+  /**
+   * Bound for the stdio `initialize` handshake, so a spawned server that never
+   * answers cannot hold a connect open forever even when `timeout` is 0.
+   * Defaults to `timeout` when that is set, otherwise 30 s; 0 disables it.
+   */
+  initializeTimeoutMs?: number | undefined;
+  /** Base delay before a crashed stdio server is restarted; attempt N waits N times this. Defaults to 2 s. */
+  restartDelayMs?: number | undefined;
   processSpec?: McpProcessSpec | undefined;
   onNotification?: ((notification: McpClientNotification) => void) | undefined;
   onServerRequest?: ((request: McpClientServerRequest) => void) | undefined;

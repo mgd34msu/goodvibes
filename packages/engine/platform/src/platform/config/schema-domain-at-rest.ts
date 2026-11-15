@@ -26,7 +26,7 @@ export const atRestConfigSettings: ConfigSetting[] = [
     type: 'boolean',
     default: true,
     description:
-      'When true (default), secret/credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials, home paths) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl) and the local execution ledger (spans + ledger jsonl), reusing the same pattern set as the telemetry egress. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets on disk are acceptable.',
+      'When true (default), credential patterns (API keys, bearer tokens, GitHub/GitLab/Slack/AWS credentials) are redacted at WRITE time from the on-disk transcript journal (per-agent <agentId>.jsonl), reusing the same pattern set as the telemetry egress. Home paths are NOT redacted. The local execution ledger gets the same treatment only when the application embedding the platform wires the policy in. Crash reports are always redacted, whatever this setting says. A redacted value shows a [REDACTED_*] marker, a record never pretends the content was absent. Set false ONLY for local debugging where plaintext secrets in the transcript journal are acceptable.',
   },
   {
     key: 'atRest.retentionMaxAgeDays',

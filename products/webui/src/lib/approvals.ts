@@ -38,15 +38,39 @@ export function isActionableApproval(record: ApprovalRecord): boolean {
   return record.status === 'pending';
 }
 
-function isEditHunkLike(value: unknown): value is ApprovalEditHunk {
-  if (typeof value !== 'object' || value === null) return false;
+/** A base64 field is UTF-8 text, as the edit tool decodes it. */
+function decodeBase64Text(value: string): string {
+  const binary = atob(value);
+  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+}
+
+/**
+ * The text the edit tool will really match and write: a base64 field wins over
+ * its plain twin (a plain '' beside base64 is allowed), so the approval shows
+ * the bytes that would be written.
+ */
+function effectiveText(candidate: Record<string, unknown>, plain: 'find' | 'replace'): string | null {
+  const encoded = candidate[`${plain}_base64`];
+  if (typeof encoded === 'string' && (plain === 'replace' || encoded !== '')) {
+    try {
+      return decodeBase64Text(encoded);
+    } catch {
+      return null;
+    }
+  }
+  const direct = candidate[plain];
+  return typeof direct === 'string' ? direct : null;
+}
+
+function toEditHunk(value: unknown): ApprovalEditHunk | null {
+  if (typeof value !== 'object' || value === null) return null;
   const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.path === 'string'
-    && typeof candidate.find === 'string'
-    && typeof candidate.replace === 'string'
-    && (candidate.id === undefined || typeof candidate.id === 'string')
-  );
+  if (typeof candidate.path !== 'string') return null;
+  if (candidate.id !== undefined && typeof candidate.id !== 'string') return null;
+  const find = effectiveText(candidate, 'find');
+  const replace = effectiveText(candidate, 'replace');
+  if (find === null || replace === null) return null;
+  return { ...(candidate as Record<string, unknown>), path: candidate.path, find, replace } as ApprovalEditHunk;
 }
 
 /**
@@ -60,8 +84,9 @@ export function readApprovalEditHunks(record: ApprovalRecord): ApprovalEditHunk[
   if (!Array.isArray(edits) || edits.length === 0) return null;
   const items: ApprovalEditHunk[] = [];
   for (const entry of edits) {
-    if (!isEditHunkLike(entry)) return null;
-    items.push(entry);
+    const hunk = toEditHunk(entry);
+    if (!hunk) return null;
+    items.push(hunk);
   }
   return items;
 }

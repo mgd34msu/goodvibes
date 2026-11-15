@@ -1,4 +1,3 @@
-/** Native snapshot compatibility/ownership regressions, authored and UNRUN. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';

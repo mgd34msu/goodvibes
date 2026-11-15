@@ -48,6 +48,14 @@ export interface PendingApprovalEntry {
   /** Restored asks retain their durable/wire owner even without local waiters. */
   readonly externallyOwned?: boolean | undefined;
   retired?: boolean | undefined;
+  /**
+   * Surfaces that raised this ask over the wire and have not given up their
+   * claim on it: the creator plus every identical ask that attached to it.
+   * Unset (read as one) for restored records and in-process asks.
+   */
+  raiseHolds?: number | undefined;
+  /** Ids of the holds above, one per wire raiser, so a repeated release names the hold it already gave up. */
+  holdIds?: Set<string> | undefined;
 }
 
 /** Everything raising an ask needs from the broker that owns the state. */
@@ -82,6 +90,8 @@ export interface RaisedApproval {
   readonly decision: Promise<PermissionPromptDecision>;
   /** True when this ask attached to an identical one already in flight. */
   readonly coalesced: boolean;
+  /** The hold this wire raiser owns on the ask; pass it to `releaseApproval` so a retried release is harmless. */
+  readonly holdId?: string | undefined;
 }
 
 /** A consumer owns its waiter, never another consumer's shared prompt. */
@@ -148,9 +158,15 @@ export async function raiseSharedApproval(
       && deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args) === coalesceKey) {
       const pending = deps.pendingResolvers.get(existing.id);
       if (pending && !pending.retired) {
+        const holdId = input.metadata?.['raisedVia'] === 'approvals.raise' ? randomUUID() : undefined;
+        if (holdId !== undefined) {
+          pending.raiseHolds = (pending.raiseHolds ?? 1) + 1;
+          (pending.holdIds ??= new Set()).add(holdId);
+        }
         return {
           approval: existing,
           coalesced: true,
+          ...(holdId === undefined ? {} : { holdId }),
           decision: joinApproval(existing.id, pending, deps, signal),
         };
       }
@@ -182,7 +198,9 @@ export async function raiseSharedApproval(
       }, input.timeoutMs)
       : undefined;
   timer?.unref?.();
-  const pending: PendingApprovalEntry = { resolvers: [], timer, promptController: new AbortController() };
+  const creatorHoldId = input.metadata?.['raisedVia'] === 'approvals.raise' ? randomUUID() : undefined;
+  const pending: PendingApprovalEntry = { resolvers: [], timer, promptController: new AbortController(), raiseHolds: 1,
+    ...(creatorHoldId === undefined ? {} : { holdIds: new Set([creatorHoldId]) }) };
   deps.pendingResolvers.set(approval.id, pending);
   const pendingDecision = joinApproval(approval.id, pending, deps, signal);
   deps.approvals.set(approval.id, approval);
@@ -219,5 +237,6 @@ export async function raiseSharedApproval(
   // A coalesced live consumer still owns publication if the creator left.
   if (!pending.retired && deps.approvals.get(approval.id) === approval) deps.publish(approval);
 
-  return { approval: deps.approvals.get(approval.id) ?? approval, decision: pendingDecision, coalesced: false };
+  return { approval: deps.approvals.get(approval.id) ?? approval, decision: pendingDecision, coalesced: false,
+    ...(creatorHoldId === undefined ? {} : { holdId: creatorHoldId }) };
 }

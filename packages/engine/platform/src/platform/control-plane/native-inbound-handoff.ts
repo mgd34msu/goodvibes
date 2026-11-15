@@ -26,6 +26,19 @@ export interface NativeInboundReceiver {
   inspect(ref: NativeInboundSourceRef): Promise<NativeInboundAcceptance | null>;
   cancel(ref: NativeInboundSourceRef): Promise<void>;
 }
+/**
+ * A receiver throws (or rejects with) this when it refused BEFORE doing anything
+ * with the request, so nothing was delivered or started. The handoff then reports
+ * the input as held and forgets the attempt, so a later `run` can try again. Any
+ * other failure after `accept` was called stays `unknown`: it may have been
+ * delivered, and an uncertain accept is never replayed.
+ */
+export class NativeInboundReceiverRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NativeInboundReceiverRefusal';
+  }
+}
 const identity = (target: NativeInboundBrokerIdentity) => JSON.stringify([target.sessionId, target.inputId]);
 const held = (): NativeInboundDisposition => ({ disposition: 'held', reason: 'A current original source and scoped processing/retention authority are required; this broker input is retained.' });
 const unknown = (): NativeInboundDisposition => ({ disposition: 'unknown', reason: 'The original request requires receiver recovery. It was not replayed or consumed.' });
@@ -82,6 +95,7 @@ export function createNativeInboundHandoff(deps: {
       const attempt: Attempt = { ref, controller: new AbortController(), state: held(), cancelled: false };
       attempts.set(identity(target), attempt);
       let attempted = false;
+      let refused = false;
       attempt.pending = deps.sources.withSource(ref, async (source, assertSource, sourceLifetime) => deps.owner!.withCurrent({ ref: source.ref, origin: source.origin }, async (assertOwner, ownerRevision, ownerLifetime) => {
         const assertCurrent = () => { current(attempt); ownerLifetime.throwIfAborted(); assertSource(); assertOwner(); fenceOwner(attempt, ownerRevision); };
         assertCurrent(); deps.sources!.assertQueued(ref);
@@ -96,9 +110,12 @@ export function createNativeInboundHandoff(deps: {
             .then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
         });
         assertCurrent(); return acceptance(attempt, result);
-      })).catch(() => attempted ? unknown() : held());
+      })).catch(error => {
+        refused = attempted && error instanceof NativeInboundReceiverRefusal;
+        return attempted && !refused ? unknown() : held();
+      });
       try { attempt.state = await attempt.pending; return attempt.state; }
-      finally { attempt.pending = undefined; if (!attempted && attempts.get(identity(target)) === attempt) attempts.delete(identity(target)); }
+      finally { attempt.pending = undefined; if ((!attempted || refused) && attempts.get(identity(target)) === attempt) attempts.delete(identity(target)); }
     },
     async status(target: NativeInboundBrokerIdentity): Promise<NativeInboundDisposition> {
       const attempt = attempts.get(identity(target));

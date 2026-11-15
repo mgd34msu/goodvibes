@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { setImmediate } from 'node:timers/promises';
 import { createDaemonTelemetryRouteHandlers } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { RuntimeEventBus, createEventEnvelope } from '../../runtime/index.ts';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { TelemetryApiService } from '../../runtime/index.ts';
 
 
-// Drain queued microtasks so bus.emit() listeners (OBS-14 async dispatch) run before assertions.
-const flushMicrotasks = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+// The bus dispatches listeners asynchronously, so wait until the service has
+// recorded the emitted events instead of guessing how many ticks that takes.
+async function waitForRecordedEvents(api: TelemetryApiService, count: number): Promise<void> {
+  for (let turn = 0; turn < 100; turn++) {
+    if (api.getSnapshot({ limit: 500 }).recent.events.items.length >= count) return;
+    await setImmediate();
+  }
+  throw new Error(`telemetry service did not record ${count} events`);
+}
 describe('daemon telemetry routes', () => {
   let telemetryApi: TelemetryApiService | null = null;
 
@@ -59,7 +67,7 @@ describe('daemon telemetry routes', () => {
       turnId: 'turn-route',
     }));
 
-    await flushMicrotasks();
+    await waitForRecordedEvents(telemetryApi, 2);
     const handlers = createDaemonTelemetryRouteHandlers({
       telemetryApi,
       ingestSink: null,
@@ -128,5 +136,19 @@ describe('daemon telemetry routes', () => {
       headers: { Authorization: 'Bearer limited-token' },
     }));
     expect(response.status).toBe(403);
+  });
+
+  test('answers 401 when the request carries no authenticated principal', async () => {
+    telemetryApi = new TelemetryApiService({ runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore() });
+    const handlers = createDaemonTelemetryRouteHandlers({
+      telemetryApi,
+      ingestSink: null,
+      resolveAuthenticatedPrincipal: () => null,
+    });
+    for (const handler of [handlers.getTelemetrySnapshot, handlers.getTelemetryEvents, handlers.getTelemetryOtlpLogs]) {
+      const response = await handler(new Request('http://127.0.0.1/api/v1/telemetry'));
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ code: 'AUTH_REQUIRED' });
+    }
   });
 });

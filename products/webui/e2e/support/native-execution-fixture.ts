@@ -20,6 +20,7 @@ import type { NativeExecutionBrowserRecord } from "../../src/lib/native-executio
 import type { NativeIntakeBrowserRecord } from "../../src/lib/native-intake-journal";
 import { installMockDaemon } from "./mock-daemon";
 import type { RecordedRequest } from "./requests";
+import { installRecordedIds } from "./recorded-ids";
 
 /**
  * Generic invoke uses POST for reads too. Classify those by canonical required
@@ -231,16 +232,9 @@ export async function installNativeExecutionDaemon(
   let authBody = capture.auth.body;
   const reply = (route: Route, wire: WireResponse) =>
     route.fulfill({ status: wire.status, contentType: "application/json", body: wire.body });
-  await page.addInitScript(({ requestId, inputId }) => {
-    localStorage.setItem("goodvibes.webui.hosted.clientId", "native-execution-proof-hosted-client");
-    localStorage.setItem("goodvibes.webui.push.deviceId", "native-execution-proof-push-device");
-    const original = crypto.randomUUID.bind(crypto);
-    const ids = [requestId, inputId];
-    Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => ids.shift() ?? original(),
-    });
-  }, capture.input);
+  await page.addInitScript(installRecordedIds, {
+    ids: [capture.input.requestId, capture.input.inputId],
+  });
   await page.route("**/api/control-plane/auth", (route) =>
     route.fulfill({ status: capture.auth.status, contentType: "application/json", body: authBody })
   );

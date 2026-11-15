@@ -55,7 +55,7 @@ describe('retired pane state in return context', () => {
       futureField: ['preserved'],
       lines: ['open panels: keep', ' Open panels: keep', 'Open panels:keep', 'Quoted Open panels: keep', 12],
     });
-    expect<unknown>(loadedReturnContext({ futureField: true })).toEqual({ futureField: true, lines: undefined });
+    expect<unknown>(loadedReturnContext({ futureField: true })).toEqual({ futureField: true, lines: [] });
   });
 
   test('new summaries ignore legacy pane hints while keeping explicit pending-approval facts', async () => {

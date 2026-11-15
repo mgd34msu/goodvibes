@@ -42,7 +42,10 @@ finally the provider id itself with its first letter capitalized. Env vars
 come from the built-in provider env-key map. A provider is reported as
 `configured` when any of its environment variables is set, or when
 credentials are supplied through the `SecretsManager` or an OAuth/subscription
-route.
+route. Providers registered from the environment alone at startup (`cohere`,
+`deepinfra`, `opencode-zen`, `perplexity`, `sambanova`, `zenmux`,
+`zenmux-anthropic`) are only usable when their environment variable is set; a
+stored secret does not register them.
 
 | Provider id | Label | Primary env var(s) |
 |-------------|-------|--------------------|
@@ -62,8 +65,8 @@ route.
 | `perplexity` | Perplexity | `PERPLEXITY_API_KEY` |
 | `deepgram` | Deepgram | `DEEPGRAM_API_KEY` |
 | `elevenlabs` | ElevenLabs | `ELEVENLABS_API_KEY` (or `XI_API_KEY`) |
-| `amazon-bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`) |
-| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`) |
+| `amazon-bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept in `/secrets`; the key pair and profile are read from the environment. |
+| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept in `/secrets`; the key pair and profile are read from the environment. |
 | `anthropic-vertex` | Anthropic (Vertex) | `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_VERTEX_PROJECT_ID` (or `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_PROJECT_ID`) |
 | `github-copilot` | GitHub Copilot | `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN`, `GITHUB_TOKEN`) |
 | `byteplus` | BytePlus | `BYTEPLUS_API_KEY` |

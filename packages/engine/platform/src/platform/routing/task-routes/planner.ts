@@ -150,6 +150,15 @@ const MISSING_REQUEST: MissingRequestPlan = {
   policy: 'Route planning is read-only. It never runs tools, creates jobs, sends messages, changes settings, or opens UI surfaces.',
 };
 
+/** True when every node is frozen and holds only data slots; such a tree cannot change. */
+function isDeepFrozenData(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value !== 'object') return true;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (nodeTypes.isProxy(value) || !Object.isFrozen(value)) return false;
+  return Object.values(Object.getOwnPropertyDescriptors(value)).every((field) => 'value' in field && isDeepFrozenData(field.value, seen));
+}
+
 /**
  * Plans the route for a user task. Needs an installed judgment port
  * and a current protected source owner; `deps` supplies the product catalogs
@@ -189,6 +198,9 @@ export async function planTaskRoute(
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const depsPrototype = Object.getPrototypeOf(deps), optionsPrototype = Object.getPrototypeOf(options);
   const ownerPrototype = Object.getPrototypeOf(owner), listingPrototype = listing === undefined ? undefined : Object.getPrototypeOf(listing);
+  // Frozen data cannot change after capture, so only mutable inputs are compared again.
+  const argsFrozen = isDeepFrozenData(args);
+  const routesFrozen = Object.isFrozen(TASK_ROUTES) && TASK_ROUTES.every((entry) => Object.isFrozen(entry));
   const assertBindings = () => {
     signal?.throwIfAborted();
     if (Object.getPrototypeOf(deps) !== depsPrototype || Object.getPrototypeOf(options) !== optionsPrototype
@@ -196,7 +208,7 @@ export async function planTaskRoute(
       || !sameBindings(descriptors(deps), depsFields) || !sameBindings(descriptors(options), optionsFields)
       || !sameBindings(descriptors(owner), ownerFields)
       || (listing !== undefined && listingFields !== undefined && !sameBindings(descriptors(listing), listingFields))
-      || !isDeepStrictEqual(captureStrictJudgmentJson(args), originalArgs)) throw new ToolInputProjectionError('held');
+      || (!argsFrozen && !isDeepStrictEqual(captureStrictJudgmentJson(args), originalArgs))) throw new ToolInputProjectionError('held');
   };
   const assertCaller = () => {
     signal?.throwIfAborted();
@@ -214,8 +226,8 @@ export async function planTaskRoute(
   const routeBuilders = TASK_ROUTES.map(entry => ({ entry, build: entry.build }));
   const sourceCurrent = () => {
     assertBindings();
-    if (!isDeepStrictEqual(captureStrictJudgmentJson(routeCandidates()), routeSource)
-      || routeBuilders.some(({ entry, build }, index) => TASK_ROUTES[index] !== entry || entry.build !== build)) throw new ToolInputProjectionError('held');
+    if (!routesFrozen && (!isDeepStrictEqual(captureStrictJudgmentJson(routeCandidates()), routeSource)
+      || routeBuilders.some(({ entry, build }, index) => TASK_ROUTES[index] !== entry || entry.build !== build))) throw new ToolInputProjectionError('held');
     for (const { source, ids } of snapshots) {
       if (!isDeepStrictEqual(captureStrictJudgmentJson(source?.() ?? []), ids)) throw new ToolInputProjectionError('held');
     }
@@ -233,10 +245,12 @@ export async function planTaskRoute(
   let receipt: SourceScreeningReceipt | undefined;
   let projection: readonly string[] | undefined;
   let publicationCurrent = sourceCurrent;
+  // The source, then the caller, bracket the owner's projection; each foreign call is
+  // followed by a check, and nothing is re-proven between two calls that run no foreign code.
   const assertSource = () => {
-    assertOriginal();
+    sourceCurrent(); assertCaller();
     if (receipt && !isDeepStrictEqual(project.call(owner, receipt), projection)) throw new ToolInputProjectionError('held');
-    assertOriginal();
+    assertCaller(); sourceCurrent();
   };
   const abort = () => { void release.call(owner, handle).catch(() => {}); };
   signal?.addEventListener('abort', abort, { once: true });

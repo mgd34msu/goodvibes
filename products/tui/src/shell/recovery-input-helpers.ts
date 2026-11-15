@@ -8,8 +8,8 @@
  * createReopenRecoveryViews factories) has been removed: state restores
  * happen ONLY when the user explicitly asks (a CLI flag, a slash command, or
  * a prompt), never automatically at bare launch (owner ruling). A live
- * recovery snapshot is now surfaced, never applied, by the boot resume
- * notice, see announceResumeState in runtime/resume-notice.ts.
+ * recovery snapshot is offered by an explicit ask-then-retire modal raised
+ * after first render (runtime/recovery-prompt.ts), never applied silently.
  */
 
 export interface ErrorAffordanceDeps {

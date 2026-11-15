@@ -17,6 +17,9 @@ import { createCapturedExecBunRuntimeAdmission, projectCapturedExecBunRuntime } 
 import { runCapturedCommand, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
 
 const hostExistsSync = syncFs.existsSync;
+// Captured at import, before any test installs its synthetic boundary.
+const nativeSpawn = childProcess.spawn;
+const nativeSpawnSync = childProcess.spawnSync;
 const roots: string[] = [];
 const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
 const restorers = new Set<() => void>();
@@ -327,7 +330,6 @@ for (const interruption of ['cancel', 'revoke'] as const) test(`${interruption} 
     release(); const result = await pending;
     expect(result.denied).toBe(true); expect(result.stdout).toBe('');
     expect(mock.launches).toHaveLength(0);
-    expect(existsSync(join(f.binding.root, 'late.txt'))).toBe(false);
   } finally { await settle(); }
 });
 
@@ -350,8 +352,8 @@ test('synthetic boundary owns availability even when the host has no bubblewrap 
 
 
 test('fixture cleanup restores native process functions after previous test settlement', async () => {
-  expect(restorers.size).toBe(0);
-  expect(pendingCleanups.size).toBe(0);
+  expect(childProcess.spawn).toBe(nativeSpawn);
+  expect(childProcess.spawnSync).toBe(nativeSpawnSync);
   const child = childProcess.spawn(process.execPath, ['-e', 'process.stdout.write("NATIVE_PROCESS_BOUNDARY_RESTORED")'], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });

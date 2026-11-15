@@ -77,6 +77,8 @@ export class BuiltinChannelRuntime {
   private inboundMailConfigUnsubscribes: Array<() => void> = [];
   private inboundMailRecheckTimer: ReturnType<typeof setTimeout> | null = null;
   private consumerConflictHandler: ((detail: string) => void) | null = null;
+  private surfaceResponsibility: ((surface: ChannelSurface) => boolean) | null = null;
+  private telegramCredentialUnsubscribe: (() => void) | null = null;
 
   /**
    * Register who to tell when Telegram reports that ANOTHER process is already
@@ -89,6 +91,16 @@ export class BuiltinChannelRuntime {
    */
   setConsumerConflictHandler(handler: (detail: string) => void): void {
     this.consumerConflictHandler = handler;
+  }
+
+  /**
+   * Tell health which received surfaces this node is meant to be reading.
+   *
+   * Late-bound for the same reason as the conflict handler: leadership is
+   * composed after this runtime. Unset, every surface counts as this node's.
+   */
+  setSurfaceResponsibility(isResponsible: ((surface: ChannelSurface) => boolean) | null): void {
+    this.surfaceResponsibility = isResponsible;
   }
 
   /**
@@ -184,6 +196,22 @@ export class BuiltinChannelRuntime {
     for (const key of keys) {
       this.telegramConfigUnsubscribes.push(this.deps.configManager.subscribe(key, restart));
     }
+    // The token usually lives in the secret store, which config does not see.
+    // A loop that stopped on a rejected token stays stopped unless a corrected
+    // secret restarts it; unrelated secrets must not restart polling.
+    if (typeof this.deps.secretsManager.onDidChange === 'function') {
+      this.telegramCredentialUnsubscribe = this.deps.secretsManager.onDidChange(() => {
+        const ingress = this.telegramIngress;
+        if (!ingress) return;
+        void ingress.botTokenChangedSinceStart().then((changed) => {
+          if (changed && this.telegramIngress === ingress && this.telegramConfigUnsubscribes.length > 0) restart();
+        }, (error: unknown) => {
+          logger.warn('Telegram ingress could not re-read its bot token after a secret change', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      });
+    }
   }
 
   /** Tear the inbound paths down; the poll loop must not outlive the daemon. */
@@ -194,6 +222,8 @@ export class BuiltinChannelRuntime {
       this.telegramRestartTimer = null;
     }
     for (const unsubscribe of this.telegramConfigUnsubscribes.splice(0)) unsubscribe();
+    this.telegramCredentialUnsubscribe?.();
+    this.telegramCredentialUnsubscribe = null;
     await this.telegramIngress?.stop();
   }
 
@@ -239,7 +269,7 @@ export class BuiltinChannelRuntime {
   /**
    * Re-probe the mailbox when a setting the running source re-reads changes.
    *
-   * These five keys and no others, because the list is not "everything about
+   * These seven keys and no others, because the list is not "everything about
    * email", it is exactly what `source-factory.ts`'s connection port resolves
    * again inside every `open()`. A corrected host, port or account is therefore
    * picked up by the reconnect this triggers, and an owner is told within
@@ -270,6 +300,8 @@ export class BuiltinChannelRuntime {
       'surfaces.email.imap.host',
       'surfaces.email.imapHost',
       'surfaces.email.imap.port',
+      'surfaces.email.imapPort',
+      'surfaces.email.imap.user',
       'surfaces.email.user',
       'surfaces.email.username',
     ] as const;
@@ -334,9 +366,12 @@ export class BuiltinChannelRuntime {
    * the first place.
    */
   observeSurfaceRuntime(surface: ChannelSurface): ChannelRuntimeObservation {
+    const responsibility = this.surfaceResponsibility;
     return observeBuiltinRuntime({
       telegramIngressStatus: () => this.telegramIngressStatus(),
       providerRuntimeStatus: (providerSurface) => this.deps.providerRuntime?.status(providerSurface) ?? null,
+      processingFailure: (current) => this.deps.ingressAlarm?.failure(current)?.detail,
+      ...(responsibility ? { isResponsible: responsibility } : {}),
     }, surface);
   }
 
@@ -501,16 +536,23 @@ export class BuiltinChannelRuntime {
       });
     }
     if (actionId === 'authorize-actor-action') {
+      const requestedAction = typeof input?.actionId === 'string' ? input.actionId.trim() : '';
+      if (!requestedAction) {
+        return {
+          surface,
+          ok: false,
+          error: 'authorize-actor-action requires input.actionId, the action to check; it was missing or empty, so nothing was evaluated.',
+        };
+      }
       const targetInput = typeof input?.target === 'string' ? input.target : undefined;
       const target = targetInput
         ? await this.resolveTarget(surface, {
             input: targetInput,
             ...(typeof input?.accountId === 'string' ? { accountId: input.accountId } : {}),
-            createIfMissing: true,
           })
         : undefined;
       return this.authorizeActorAction(surface, {
-        actionId: typeof input?.actionId === 'string' ? input.actionId : 'unknown',
+        actionId: requestedAction,
         ...(typeof input?.actorId === 'string' ? { actorId: input.actorId } : {}),
         ...(typeof input?.accountId === 'string' ? { accountId: input.accountId } : {}),
         ...(target ? { target } : {}),
@@ -651,6 +693,7 @@ export class BuiltinChannelRuntime {
   ): Promise<ChannelActorAuthorizationResult> {
     return authorizeBuiltinActorAction({
       deps: this.deps,
+      channelPolicy: this.deps.channelPolicy,
       buildAccount: (currentSurface) => this.buildAccount(currentSurface),
       resolveAccount: (currentSurface, currentAccountId) => this.resolveAccount(currentSurface, currentAccountId),
     }, surface, request);

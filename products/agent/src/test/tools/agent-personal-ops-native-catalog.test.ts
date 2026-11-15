@@ -2,9 +2,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:tes
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { contractMethodsForLane, contractMethodsForLanes } from '../../tools/agent-harness-personal-ops-discovery.ts';
+import { LANE_DEPENDENCY_METHODS } from '../../tools/agent-harness-personal-ops-readings.ts';
+import { CONTRACT_DISCOVERY_BATCH_SIZE, CONTRACT_DISCOVERY_LANES, contractMethodsForLane, contractMethodsForLanes } from '../../tools/agent-harness-personal-ops-discovery.ts';
 import { captureModelReadingInput } from '../../tools/agent-harness-model-reading-source.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
+import { expectHeld } from '../helpers/expect-held.ts';
 
 afterAll(cleanupResearchScreeningFixtures);
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -22,6 +24,8 @@ function candidate(raw: unknown): { readonly name: string; readonly evidenceJson
 describe('Personal Ops complete native catalog batching', () => {
   test('reads every real native method once with complete schemas exceeding aggregate and individual source limits', async () => {
     const native = getOperatorContract().operator.methods;
+    // The abort-in-a-later-batch tests below only mean something while the contract spans several batches.
+    expect(native.length).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE);
     expect(JSON.stringify(native).length).toBeGreaterThan(1_000_000);
     const expected = new Map(native.map(method => [method.id, JSON.stringify(captureModelReadingInput(method))]));
     expect(Math.max(...[...expected.values()].map(value => value.length))).toBeGreaterThan(40_000);
@@ -65,13 +69,14 @@ describe('Personal Ops complete native catalog batching', () => {
     let count = 0;
     const fake = fakePort((name) => {
       expect(name).toBe('match');
-      if (++count >= 17) Object.defineProperty(target, 'inputSchema', { ...descriptor, value: { type: 'object', description: 'Changed earlier batch schema' } });
+      if (++count > CONTRACT_DISCOVERY_BATCH_SIZE) Object.defineProperty(target, 'inputSchema', { ...descriptor, value: { type: 'object', description: 'Changed earlier batch schema' } });
       return noulAnswer(0.01);
     });
     installJudgmentPort(fake.port);
-    await expect(contractMethodsForLane('tasks', { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
-    expect(count).toBeGreaterThanOrEqual(17);
-    expect(count).toBeLessThanOrEqual(32);
+    // The write to the frozen native schema is itself the refusal.
+    await expectHeld(contractMethodsForLane('tasks', { sourceOwner: ordinaryResearchOwner() }), /readonly property/);
+    expect(count).toBeGreaterThan(CONTRACT_DISCOVERY_BATCH_SIZE);
+    expect(count).toBeLessThanOrEqual(2 * CONTRACT_DISCOVERY_BATCH_SIZE);
     expect(target.inputSchema).toBe(descriptor.value);
   });
 
@@ -98,7 +103,7 @@ describe('Personal Ops complete native catalog batching', () => {
     const controller = new AbortController(); let count = 0;
     const fake = fakePort(name => {
       expect(name).toBe('match');
-      if (++count === 17) controller.abort();
+      if (++count === CONTRACT_DISCOVERY_BATCH_SIZE + 1) controller.abort();
       return noulAnswer(0.99);
     });
     installJudgmentPort({ model: fake.port.model, async ask(request) {
@@ -106,8 +111,8 @@ describe('Personal Ops complete native catalog batching', () => {
       await Promise.resolve();
       return response;
     } });
-    await expect(contractMethodsForLane('calendar', { sourceOwner: ordinaryResearchOwner(), signal: controller.signal })).rejects.toThrow();
-    expect(controller.signal.aborted).toBe(true); expect(count).toBe(17);
+    await expectHeld(contractMethodsForLane('calendar', { sourceOwner: ordinaryResearchOwner(), signal: controller.signal }));
+    expect(controller.signal.aborted).toBe(true); expect(count).toBe(CONTRACT_DISCOVERY_BATCH_SIZE + 1);
   });
 
   test('all four native predicates complete before the parent receives one full catalog guard', async () => {
@@ -131,10 +136,12 @@ describe('Personal Ops complete native catalog batching', () => {
         } else if (!guards.has(key ?? guard)) guards.set(key ?? guard, guard);
       },
     })).toEqual({ inbox: { available: [], unavailable: [] }, calendar: { available: [], unavailable: [] },
-      tasks: { available: [], unavailable: [] }, reminders: { available: [], unavailable: [] } });
+      tasks: { available: [], unavailable: [] },
+      // The reminders lane always carries the method its own schedule tool dispatches.
+      reminders: { available: [...LANE_DEPENDENCY_METHODS.reminders!], unavailable: [] } });
     expect([...seen.keys()]).toEqual(['inbox', 'calendar', 'tasks', 'reminders']);
     expect([...seen.values()].every(ids => ids.size === native.length)).toBe(true);
-    expect(count).toBe(4 * native.length); expect(sourceRegisteredAt).toBe(count); expect(wholeGuardCalls).toBeLessThanOrEqual(2);
+    expect(count).toBe(CONTRACT_DISCOVERY_LANES.length * native.length); expect(sourceRegisteredAt).toBe(count); expect(wholeGuardCalls).toBeLessThanOrEqual(2);
     for (const guard of guards.values()) guard();
   }, 60_000);
 
@@ -153,8 +160,8 @@ describe('Personal Ops complete native catalog batching', () => {
       return noulAnswer(0.01);
     });
     installJudgmentPort(fake.port);
-    await expect(contractMethodsForLanes({ sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
-    expect(changed).toBe(true); expect(count).toBeGreaterThan(native.length); expect(count).toBeLessThanOrEqual(native.length + 16);
+    await expectHeld(contractMethodsForLanes({ sourceOwner: ordinaryResearchOwner() }), /readonly property/);
+    expect(changed).toBe(true); expect(count).toBeGreaterThan(native.length); expect(count).toBeLessThanOrEqual(native.length + CONTRACT_DISCOVERY_BATCH_SIZE);
     expect(target.inputSchema).toBe(descriptor.value);
   }, 60_000);
 });

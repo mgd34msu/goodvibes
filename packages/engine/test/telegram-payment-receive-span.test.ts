@@ -1,4 +1,3 @@
-/** Source-only regressions; execution is deferred until the coding worklist is complete. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +41,7 @@ test('restart restores the exact original selector but requires actual drained q
   const after = f.attach(), restored = after.progress.restore(span.selector); let complete = false;
   const waiting = restored.waitFor(100, 250, after.lifetime.signal, scope).then(assertCurrent => { complete = true; return assertCurrent; });
   f.at(260); const nonempty = after.progress.beginRequest(); after.progress.completeRequest(nonempty, false);
-  await Promise.resolve(); expect(complete).toBe(false);
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(complete).toBe(false);
   const empty = after.progress.beginRequest(); f.at(270); after.progress.completeRequest(empty, true);
   const current = await waiting; expect(() => current()).not.toThrow();
   expect(() => after.progress.restore({ ...selector, offsetAtStart: 999 })).toThrow();

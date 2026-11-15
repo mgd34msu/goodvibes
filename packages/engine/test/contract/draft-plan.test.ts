@@ -12,9 +12,10 @@ import { asPlan, draftUnit, plannerOutput, shapeOf, type DraftPlan } from './pla
 import { ASK, makeHarness, twoUnitPlan, waitFor, type Harness } from './runner-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 /** The draft twoUnitPlan() keeps: the parser, then the wiring that depends on it. */

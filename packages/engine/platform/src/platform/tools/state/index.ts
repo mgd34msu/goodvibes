@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KVState } from '../../state/kv-state.js';
 import { ProjectIndex } from '../../state/project-index.js';
@@ -43,9 +43,27 @@ function sanitizeMemoryKey(key: string): string | null {
   return key;
 }
 
+/** A change to the registered hooks, shown to the approval gate before it is made. */
+export interface HookChangeRequest {
+  readonly action: 'add' | 'enable' | 'disable' | 'remove';
+  /** The event the hook is (or will be) registered under. */
+  readonly eventPattern: string;
+  /** The hook being added, or the existing hook being changed. */
+  readonly hook: import('../../hooks/types.js').HookDefinition;
+}
+
+/**
+ * Decides whether a model-requested hook change may happen. A hook runs a command, a script or a request
+ * on events, so the approval has to be the one the same command, script or request would need if the model
+ * ran it directly. The host wires this to the permission manager; without it, hook changes are refused.
+ */
+export type HookChangeGate = (request: HookChangeRequest, execution: { readonly signal?: AbortSignal | undefined }) => Promise<{ readonly approved: boolean; readonly reason?: string | undefined }>;
+
 export interface StateToolOptions {
   readonly memoryDir: string;
   readonly hookDispatcher?: HookDispatcher | undefined;
+  /** Approval for hook changes (add/enable/disable/remove). Absent: `mode=hooks` can list but not change. */
+  readonly hookGate?: HookChangeGate | undefined;
   readonly modeManager?: ModeManager | undefined;
   readonly telemetryDB?: TelemetryDB | undefined;
   /**
@@ -53,18 +71,18 @@ export interface StateToolOptions {
    * read-only key `runtime.workingDir` via `mode=get`.
    * Updated dynamically via WorkspaceSwapManager on workspace swap.
    */
-  readonly workingDir?: string | undefined;
+  readonly workingDir?: string | (() => string | undefined) | undefined;
   /**
    * Daemon home directory (immutable after startup). Exposed as the well-known
    * read-only key `daemon.homeDir` via `mode=get`.
    */
-  readonly daemonHomeDir?: string | undefined;
+  readonly daemonHomeDir?: string | (() => string | undefined) | undefined;
   /**
    * Workspace swap manager. When provided, `set({values: {'runtime.workingDir': '/new/path'}})`
    * will trigger a real workspace swap via `requestSwap()` instead of returning an error.
    * Swap failures are surfaced as `success: false` with the error reason.
    */
-  readonly swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string }> };
+  readonly swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean | undefined; requiresRestart?: readonly string[] | undefined }> };
   /**
    * Project memory registry. When provided, `mode=memory action=set` mirrors the written
    * preference into a retrievable `memory_records` row (deduped per key) so passive per-turn
@@ -73,6 +91,12 @@ export interface StateToolOptions {
    * write that fails never fails the file write itself.
    */
   readonly memoryRegistry?: MemoryRegistry | undefined;
+  /**
+   * True while this process's memory is served by a connected host over the wire. The local
+   * registry is then a stale image nothing writes, so the mirror is skipped and `set` says the
+   * value was saved to the memory file only.
+   */
+  readonly memoryRoutedOverWire?: (() => boolean) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,12 +119,14 @@ export function createStateTool(
   }
   const memoryDir = options.memoryDir;
   const hookDispatcher = options.hookDispatcher;
+  const hookGate = options.hookGate;
   const modeManager = options.modeManager;
   const telemetryDB = options.telemetryDB;
-  const workingDir = options.workingDir;
-  const daemonHomeDir = options.daemonHomeDir;
+  // A getter follows a workspace swap; a plain string is a fixed answer.
+  const workingDir = (): string | undefined => typeof options.workingDir === 'function' ? options.workingDir() : options.workingDir;
+  const daemonHomeDir = (): string | undefined => typeof options.daemonHomeDir === 'function' ? options.daemonHomeDir() : options.daemonHomeDir;
   const swapManager = options.swapManager;
-  const memoryRegistry = options.memoryRegistry;
+  const overWire = (): boolean => options.memoryRoutedOverWire?.() === true;
   // Session start time and telemetry are scoped per-instance so multiple
   // createStateTool() calls don't share state.
   const SESSION_START_MS = Date.now();
@@ -109,21 +135,31 @@ export function createStateTool(
     errors: 0,
   };
 
+  // Only modes this session can serve are advertised; the others are refused
+  // with the list of available ones.
+  const unavailableModes = new Set<string>([
+    ...(hookDispatcher ? [] : ['hooks']),
+    ...(telemetryDB ? [] : ['analytics']),
+  ]);
   const definition: ToolDefinition = {
     name: 'state',
     description:
       'Access and manipulate session state. Modes: get/set/list/clear operate on KVState;'
-      + ' budget reports token usage; context reports conversation info;'
-      + ' memory reads/writes persistent .goodvibes/memory files; telemetry reports session metrics;'
-      + ' hooks manages registered hooks (list/enable/disable/add/remove);'
+      + ' budget and context report project-index size (files and estimated tokens), not conversation token usage:'
+      + ' for context-window and token state use the context_accounting tool;'
+      + ' memory reads/writes/deletes persistent .goodvibes/memory files; telemetry reports this tool\'s call counts and how many of them failed or were refused;'
+      + (hookDispatcher ? ' hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove);' : '')
       + ' mode manages output verbosity mode (get/set/list).'
-      + ' Discovery: use mode=list to see existing KV keys, mode=hooks hookAction=list to see registered hooks,'
+      + ' Discovery: use mode=list to see existing KV keys,'
+      + (hookDispatcher ? ' mode=hooks hookAction=list to see registered hooks,' : '')
       + ' mode=mode modeAction=get to see the current output mode.'
-      + ' Also: mode=memory memoryAction=list to list persistent memory keys, mode=analytics analyticsAction=summary for session metrics.',
-    parameters: toRecord(STATE_TOOL_SCHEMA),
+      + ' Also: mode=memory memoryAction=list to list persistent memory keys'
+      + (telemetryDB ? ', mode=analytics analyticsAction=summary for session metrics.' : '.'),
+    parameters: narrowStateModes(toRecord(STATE_TOOL_SCHEMA), unavailableModes),
     sideEffects: ['state'],
     concurrency: 'serial',
   };
+  const availableModes = STATE_TOOL_SCHEMA.properties.mode.enum.filter((mode) => !unavailableModes.has(mode));
 
   async function execute(
     args: Record<string, unknown>,
@@ -131,47 +167,57 @@ export function createStateTool(
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     return withConfiguredDecisionModelPolicy(async () => {
       _telemetry.toolCalls++;
-      try {
-        const signal = executionOptions?.signal, owner = executionOptions?.assertCurrent;
-        const current = () => {
-          signal?.throwIfAborted();
-          if (executionOptions?.signal !== signal || executionOptions?.assertCurrent !== owner) throw new Error('State tool owner changed.');
-          const result: unknown = owner?.(args);
-          if (result !== undefined) { drainOwned(result); throw new Error('State tool owner must be synchronous.'); }
-          signal?.throwIfAborted();
-        };
-        current();
-        if (typeof args.mode !== 'string') {
-          _telemetry.errors++;
-          return { success: false, error: 'Missing or invalid "mode" field (string required)' };
-        }
-        const input = args as unknown as StateInput;
-        const { mode } = input;
-
-        switch (mode) {
-          case 'get':   return runGet(input, kvState, workingDir, daemonHomeDir);
-          case 'set':   return runSet(input, kvState, workingDir, daemonHomeDir, swapManager);
-          case 'list':  return runList(input, kvState);
-          case 'clear': return runClear(input, kvState);
-          case 'budget': return runBudget(kvState, projectIndex);
-          case 'context': return runContext(kvState, projectIndex);
-          case 'memory': return runMemory(input, memoryDir, memoryRegistry, { signal, assertCurrent: current });
-          case 'telemetry': return runTelemetry();
-          case 'hooks': return runHooks(input, hookDispatcher);
-          case 'mode': return runMode(input, modeManager);
-          case 'analytics': return runAnalytics(input, telemetryDB);
-          default: {
-            _telemetry.errors++;
-            return { success: false, error: `Unknown mode: ${String(mode)}` };
-          }
-        }
-      } catch (err) {
-        _telemetry.errors++;
-        const message = summarizeError(err);
-        logger.error('state tool: unexpected error', { error: message });
-        return { success: false, error: `Unexpected error: ${message}` };
-      }
+      const result = await dispatch(args, executionOptions);
+      // Every refusal and failure counts, not only thrown ones.
+      if (!result.success) _telemetry.errors++;
+      return result;
     });
+  }
+
+  async function dispatch(
+    args: Record<string, unknown>,
+    executionOptions?: ToolExecuteOptions,
+  ): Promise<{ success: boolean; output?: string; error?: string }> {
+    try {
+      const signal = executionOptions?.signal, owner = executionOptions?.assertCurrent;
+      const current = () => {
+        signal?.throwIfAborted();
+        if (executionOptions?.signal !== signal || executionOptions?.assertCurrent !== owner) throw new Error('State tool owner changed.');
+        const result: unknown = owner?.(args);
+        if (result !== undefined) { drainOwned(result); throw new Error('State tool owner must be synchronous.'); }
+        signal?.throwIfAborted();
+      };
+      current();
+      if (typeof args.mode !== 'string') {
+        return { success: false, error: 'Missing or invalid "mode" field (string required)' };
+      }
+      const input = args as unknown as StateInput;
+      const { mode } = input;
+
+      switch (mode) {
+        case 'get':   return await runGet(input, kvState, workingDir(), daemonHomeDir());
+        case 'set':   return await runSet(input, kvState, swapManager);
+        case 'list':  return await runList(input, kvState);
+        case 'clear': return await runClear(input, kvState);
+        case 'budget': return await runBudget(kvState, projectIndex);
+        case 'context': return await runContext(kvState, projectIndex);
+        case 'memory': return await runMemory(input, memoryDir, overWire() ? undefined : options.memoryRegistry, { signal, assertCurrent: current }, overWire());
+        case 'telemetry': return await runTelemetry();
+        case 'hooks':
+          if (!hookDispatcher) return unavailableMode('hooks', 'hook registration belongs to the user\'s hook settings, not this tool', availableModes);
+          return await runHooks(input, hookDispatcher, hookGate, signal);
+        case 'mode': return await runMode(input, modeManager);
+        case 'analytics':
+          if (!telemetryDB) return unavailableMode('analytics', 'this session has no telemetry store; mode=telemetry reports this tool\'s call counts', availableModes);
+          return await runAnalytics(input, telemetryDB);
+        default:
+          return { success: false, error: `Unknown mode: ${String(mode)}` };
+      }
+    } catch (err) {
+      const message = summarizeError(err);
+      logger.error('state tool: unexpected error', { error: message });
+      return { success: false, error: `Unexpected error: ${message}` };
+    }
   }
 
   function runTelemetry(): { success: boolean; output?: string; error?: string } {
@@ -190,9 +236,23 @@ export function createStateTool(
   return { definition, execute };
 }
 
+function unavailableMode(mode: string, why: string, available: readonly string[]): { success: false; error: string } {
+  return { success: false, error: `state mode=${mode} is not available in this session: ${why}. Nothing was read or changed; do not retry. Available modes: ${available.join(', ')}.` };
+}
+
+function narrowStateModes(parameters: Record<string, unknown>, unavailable: ReadonlySet<string>): Record<string, unknown> {
+  if (unavailable.size === 0) return parameters;
+  const properties = parameters.properties as Record<string, { enum?: readonly string[] }>;
+  const mode = properties.mode;
+  if (!mode?.enum) return parameters;
+  return { ...parameters, properties: { ...properties, mode: { ...mode, enum: mode.enum.filter((value) => !unavailable.has(value)) } } };
+}
+
 // ---------------------------------------------------------------------------
 // Analytics handler
 // ---------------------------------------------------------------------------
+
+const ANALYTICS_EXPORT_MAX_CHARS = 50_000;
 
 async function runAnalytics(
   input: StateInput,
@@ -219,22 +279,11 @@ async function runAnalytics(
   const action = input.analyticsAction ?? 'summary';
   const view = input.view ?? 'summary';
 
-  if (action === 'record') {
-    const tool = input.analyticsTool;
-    if (!tool) return { success: false, error: 'analytics action "record" requires "analyticsTool"' };
-    const args = input.analyticsArgs ?? {};
-    const result = input.analyticsResult ?? {};
-    const duration = input.analyticsDuration ?? 0;
-    const tokens = input.analyticsTokens ?? 0;
-    try {
-      db.recordToolCall(tool, args, result, duration, tokens);
-      return {
-        success: true,
-        output: JSON.stringify({ mode: 'analytics', action: 'record', tool, duration, tokens }),
-      };
-    } catch (err) {
-      return { success: false, error: `record failed: ${summarizeError(err)}` };
-    }
+  if ((action as string) === 'record') {
+    return {
+      success: false,
+      error: 'analytics action "record" is not available: the runtime records every tool call itself, and rows written by the model would be forged telemetry. Nothing was recorded. Use action=query or action=summary to read the recorded calls.',
+    };
   }
 
   if (action === 'query') {
@@ -286,10 +335,16 @@ async function runAnalytics(
   if (action === 'export') {
     const format = input.analyticsFormat ?? 'json';
     try {
-      const data = db.export(format);
+      const exported = db.export(format);
+      // Stored calls include their arguments and results, so a bounded slice is returned, not the whole history.
+      const truncated = exported.length > ANALYTICS_EXPORT_MAX_CHARS;
+      const data = truncated ? exported.slice(0, ANALYTICS_EXPORT_MAX_CHARS) : exported;
       return {
         success: true,
-        output: JSON.stringify({ mode: 'analytics', action: 'export', format, data }),
+        output: JSON.stringify({
+          mode: 'analytics', action: 'export', format, data,
+          ...(truncated ? { truncated: true, note: `Export cut at ${ANALYTICS_EXPORT_MAX_CHARS} characters of ${exported.length}. Use action=query with a filter (tool, since, until, limit) for the rest.` } : {}),
+        }),
       };
     } catch (err) {
       return { success: false, error: `export failed: ${summarizeError(err)}` };
@@ -342,15 +397,30 @@ async function runAnalytics(
 // Mode handlers
 // ---------------------------------------------------------------------------
 
-function runHooks(
+async function runHooks(
   input: StateInput,
   dispatcher: HookDispatcher | undefined,
-): { success: boolean; output?: string; error?: string } {
+  gate: HookChangeGate | undefined,
+  signal: AbortSignal | undefined,
+): Promise<{ success: boolean; output?: string; error?: string }> {
   if (!dispatcher) {
     return { success: false, error: 'hooks mode requires a HookDispatcher (not provided at startup)' };
   }
 
   const action = input.hookAction ?? 'list';
+
+  if (action !== 'list' && gate === undefined) {
+    return { success: false, error: 'A hook runs on events (and an http hook sends their tool arguments and results to its URL), so changing one is always put to the owner, and this session cannot ask for it. '
+      + 'Nothing was changed; do not retry. mode=hooks hookAction=list still works; ask the user to change hooks in their settings.' };
+  }
+  // Every change is gated and asked every time, including enable/disable/remove: re-enabling a hook the user
+  // turned off runs it, and removing or disabling one lifts whatever protection it gave.
+  const approve = async (request: HookChangeRequest): Promise<{ success: false; error: string } | undefined> => {
+    const verdict = await gate!(request, { signal });
+    if (verdict.approved) return undefined;
+    return { success: false, error: `Hook change refused${verdict.reason ? `: ${verdict.reason}` : ''}. Nothing was changed; do not retry the same change.` };
+  };
+  const existing = (name: string | undefined) => name === undefined ? undefined : dispatcher.listHooks().find(entry => entry.hook.name === name);
 
   if (action === 'list') {
     const entries = dispatcher.listHooks();
@@ -380,6 +450,8 @@ function runHooks(
   if (action === 'enable') {
     const name = input.hookName;
     if (!name) return { success: false, error: 'hooks action "enable" requires "hookName"' };
+    const target = existing(name);
+    if (target) { const refused = await approve({ action: 'enable', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
     const found = dispatcher.enableHook(name);
     if (!found) return { success: false, error: `No hook named "${name}" found` };
     return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'enable', name, enabled: true }) };
@@ -388,6 +460,8 @@ function runHooks(
   if (action === 'disable') {
     const name = input.hookName;
     if (!name) return { success: false, error: 'hooks action "disable" requires "hookName"' };
+    const target = existing(name);
+    if (target) { const refused = await approve({ action: 'disable', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
     const found = dispatcher.disableHook(name);
     if (!found) return { success: false, error: `No hook named "${name}" found` };
     return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'disable', name, enabled: false }) };
@@ -396,6 +470,8 @@ function runHooks(
   if (action === 'remove') {
     const name = input.hookName;
     if (!name) return { success: false, error: 'hooks action "remove" requires "hookName"' };
+    const target = existing(name);
+    if (target) { const refused = await approve({ action: 'remove', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
     const removed = dispatcher.unregister(name);
     if (!removed) return { success: false, error: `No hook named "${name}" found` };
     return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'remove', name }) };
@@ -412,10 +488,32 @@ function runHooks(
     if (!VALID_HOOK_TYPES.has(hookDef.type)) {
       return { success: false, error: `hookDefinition.type must be one of: command, http, ts` };
     }
+    // Enable, disable and remove address a hook by name, so a hook without a unique name could never be managed again.
+    if (typeof hookDef.name !== 'string' || hookDef.name.trim().length === 0) {
+      return { success: false, error: 'hookDefinition.name is required: it is how the hook is later enabled, disabled or removed. Nothing was added.' };
+    }
+    if (existing(hookDef.name)) {
+      return { success: false, error: `A hook named "${hookDef.name}" already exists. Choose another name, or remove the existing one first. Nothing was added.` };
+    }
+    const typeField = { command: 'command', http: 'url', ts: 'path' } as const;
+    const requiredField = typeField[hookDef.type];
+    const fieldValue: unknown = hookDef[requiredField];
+    if (typeof fieldValue !== 'string' || fieldValue.trim().length === 0) {
+      return { success: false, error: `hookDefinition.${requiredField} is required for a ${hookDef.type} hook. Nothing was added.` };
+    }
+    const refused = await approve({ action: 'add', eventPattern, hook: hookDef as import('../../hooks/types.js').HookDefinition });
+    if (refused) return refused;
+    // The approval above awaits; a parallel add of the same name may have registered while this one waited.
+    if (existing(hookDef.name)) {
+      return { success: false, error: `A hook named "${hookDef.name}" was added while this call waited for approval. Nothing was added; remove it first or choose another name.` };
+    }
     dispatcher.register(eventPattern, hookDef as import('../../hooks/types.js').HookDefinition);
     return {
       success: true,
-      output: JSON.stringify({ mode: 'hooks', action: 'add', eventPattern, name: hookDef.name ?? null }),
+      output: JSON.stringify({
+        mode: 'hooks', action: 'add', eventPattern, name: hookDef.name, persisted: false,
+        note: 'The hook is registered for this session only; it is not written to the hooks file and is gone when the host restarts.',
+      }),
     };
   }
 
@@ -521,9 +619,7 @@ async function runGet(
 async function runSet(
   input: StateInput,
   kvState: KVState,
-  _workingDir: string | undefined,
-  _daemonHomeDir: string | undefined,
-  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string }> },
+  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean | undefined; requiresRestart?: readonly string[] | undefined }> },
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const values = input.values;
   if (!values || typeof values !== 'object') {
@@ -532,6 +628,13 @@ async function runSet(
 
   // Handle runtime.workingDir specially, delegate to swap manager if available.
   if ('runtime.workingDir' in values) {
+    const others = Object.keys(values).filter((key) => key !== 'runtime.workingDir');
+    if (others.length > 0) {
+      return {
+        success: false,
+        error: `runtime.workingDir switches the workspace and must be set on its own; it was sent together with ${others.join(', ')}. Nothing was changed. Send the working directory in one call and the other keys in another.`,
+      };
+    }
     const newDir = values['runtime.workingDir'];
     if (typeof newDir !== 'string' || !newDir.trim()) {
       return { success: false, error: 'runtime.workingDir must be a non-empty string.' };
@@ -539,14 +642,22 @@ async function runSet(
     if (!swapManager) {
       return {
         success: false,
-        error: 'Cannot write to runtime.workingDir: no swap manager available. Use POST /config to change runtime.workingDir.',
+        error: 'Cannot write to runtime.workingDir: this session cannot switch workspaces. Nothing was changed; do not retry. Ask the user to change the working directory from their client.',
       };
     }
     const result = await swapManager.requestSwap(newDir);
     if (!result.ok) {
-      return { success: false, error: `Workspace swap failed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}` };
+      const next = result.code === 'REROOT_FAILED'
+        ? ' Some of the workspace may already have moved; read runtime.workingDir to see which root is in effect before changing anything else.'
+        : '';
+      return { success: false, error: `Workspace swap failed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}${next}` };
     }
-    return { success: true, output: JSON.stringify({ mode: 'set', swapped: true, newWorkingDir: newDir }) };
+    const requiresRestart = result.requiresRestart?.length ? result.requiresRestart : undefined;
+    return { success: true, output: JSON.stringify({
+      mode: 'set', swapped: true, newWorkingDir: newDir,
+      ...(result.persisted === false ? { persisted: false, note: 'The new working directory is active now but could not be saved, so it is lost when the host restarts.' } : {}),
+      ...(requiresRestart ? { requiresRestart, restartNote: `These keep using the previous working directory until the host restarts: ${requiresRestart.join(', ')}.` } : {}),
+    }) };
   }
 
   // Reject writes to other read-only well-known keys
@@ -581,7 +692,7 @@ async function runList(
   kvState: KVState,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const entries = await kvState.list(input.prefix);
-  const view = input.view ?? 'full';
+  const view = input.view ?? 'summary';
   return {
     success: true,
     output: JSON.stringify({
@@ -640,6 +751,7 @@ async function runBudget(
         file_count: fileCount,
         total_tokens: totalProjectTokens,
       },
+      note: 'project_index counts the indexed project files. session_metrics are null unless a host records them; for conversation token and context-window usage call the context_accounting tool.',
       session_metrics: {
         tokens_used: (metrics.tokens_used as number | undefined) ?? null,
         files_modified: (metrics.files_modified as number | undefined) ?? null,
@@ -675,6 +787,7 @@ async function runMemory(
   memoryDir: string,
   memoryRegistry?: MemoryRegistry | undefined,
   options: JudgmentReadingOptions = {},
+  routedOverWire = false,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const action = input.memoryAction ?? 'list';
   const view = action === 'get' ? (input.view ?? 'full') : (input.view ?? 'summary');
@@ -687,9 +800,19 @@ async function runMemory(
           output: JSON.stringify({ mode: 'memory', action: 'list', view, keys: [] }),
         };
       }
-      const keys = readdirSync(memoryDir)
+      // Only keys `get` and `set` accept are listed, and only regular files: anything else could not be read back.
+      const listed = readdirSync(memoryDir)
         .filter(f => f.endsWith('.json'))
-        .map(f => f.slice(0, -5)); // strip .json
+        .map(f => f.slice(0, -5))
+        .filter((key) => sanitizeMemoryKey(key) !== null)
+        .flatMap((key) => {
+          // A dangling link, or a file removed since the directory was read, is not a key; it must not fail the whole list.
+          try {
+            const stat = statSync(join(memoryDir, `${key}.json`));
+            return stat.isFile() ? [{ key, size: stat.size }] : [];
+          } catch { return []; }
+        });
+      const keys = listed.map((entry) => entry.key);
       return {
         success: true,
         output: JSON.stringify({
@@ -697,13 +820,7 @@ async function runMemory(
           action: 'list',
           view,
           keys,
-          entries: view === 'full'
-            ? keys.map((key) => {
-              const filePath = join(memoryDir, `${key}.json`);
-              const raw = readFileSync(filePath, 'utf-8');
-              return { key, bytes: raw.length };
-            })
-            : undefined,
+          entries: view === 'full' ? listed.map(({ key, size }) => ({ key, bytes: size })) : undefined,
         }),
       };
     } catch (err) {
@@ -732,6 +849,11 @@ async function runMemory(
         };
       }
       const raw = readFileSync(filePath, 'utf-8');
+      const records = memoryRegistry ? recordsForKey(memoryRegistry, safeKey) : undefined;
+      const retrievable = records?.length;
+      // The record is a copy made at write time; a correction made through recall changes it and not the file.
+      const differs = records !== undefined && records.length > 0 && !records.some((record) => record.detail === raw);
+      const retrieval = { ...retrievabilityOf(retrievable), ...(differs ? { retrieved_text_differs: true, note: 'The text retrieved in prompts for this key differs from this file (it was changed through recall). Use memoryAction=set to make the file the retrieved text, or memoryAction=delete to remove both.' } : {}) };
       let value: unknown;
       try {
         value = JSON.parse(raw);
@@ -741,14 +863,15 @@ async function runMemory(
       return {
         success: true,
         output: JSON.stringify(view === 'full'
-          ? { mode: 'memory', action: 'get', view, key: safeKey, value }
+          ? { mode: 'memory', action: 'get', view, key: safeKey, value, ...retrieval }
           : {
             mode: 'memory',
             action: 'get',
             view,
             key: safeKey,
             type: Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value,
-            bytes: raw.length,
+            bytes: Buffer.byteLength(raw),
+            ...retrieval,
           }),
       };
     } catch (err) {
@@ -786,10 +909,14 @@ async function runMemory(
       // can surface it. Best-effort and deduped per key, a registry failure never fails the file
       // write, which remains the source of truth for `mode=memory list/get`.
       const indexed = await mirrorMemoryRecord(memoryRegistry, safeKey, value, plan);
+      // When the new text was not indexed, an earlier record of this key (if any) keeps being retrieved.
+      const staleRecords = !indexed && memoryRegistry ? recordsForKey(memoryRegistry, safeKey)?.length ?? 0 : 0;
       return {
         success: true,
-        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: value.length, retrievable: indexed,
-          classification: plan?.classification ?? 'not-indexed', ...(classic ? { provenance: 'classic' } : {}) }),
+        output: JSON.stringify({ mode: 'memory', action: 'set', key: safeKey, bytes_written: Buffer.byteLength(value), retrievable: indexed,
+          classification: plan?.classification ?? 'not-indexed', ...(classic ? { provenance: 'classic' } : {}),
+          ...(routedOverWire ? { note: 'Memory is served by the connected host, so this value was saved to the memory file only and is not retrievable in prompts from this process.' } : {}),
+          ...(staleRecords > 0 ? { note: 'The new value is saved in the memory file but was not indexed, so an earlier version of this key stays retrievable in prompts. Use memoryAction=delete to remove the key and its retrieval record.' } : {}) }),
       };
     } catch (err) {
       return {
@@ -799,8 +926,55 @@ async function runMemory(
     }
   }
 
+  if (action === 'delete') {
+    const key = input.memoryKey;
+    if (!key) {
+      return { success: false, error: 'memory action "delete" requires "memoryKey"' };
+    }
+    const safeKey = sanitizeMemoryKey(key);
+    if (!safeKey) {
+      return { success: false, error: 'Invalid memoryKey: must be alphanumeric, hyphens, or underscores only' };
+    }
+    try {
+      options.signal?.throwIfAborted(); options.assertCurrent?.();
+      const filePath = join(memoryDir, `${safeKey}.json`);
+      const fileExisted = existsSync(filePath);
+      // The retrieval record goes first: if it cannot be removed the file stays, so the key is never half-deleted unnoticed.
+      let recordsRemoved = 0;
+      if (memoryRegistry) {
+        const records = recordsForKey(memoryRegistry, safeKey);
+        if (records === undefined) return { success: false, error: `Memory delete failed: the memory registry cannot be read. Nothing was deleted.` };
+        for (const record of records) {
+          if (memoryRegistry.delete(record.id, { signal: options.signal, assertCurrent: options.assertCurrent })) recordsRemoved++;
+        }
+      }
+      if (fileExisted) unlinkSync(filePath);
+      if (!fileExisted && recordsRemoved === 0) {
+        return { success: false, error: `No memory named "${safeKey}" exists. Use memoryAction=list to see the keys.` };
+      }
+      return { success: true, output: JSON.stringify({ mode: 'memory', action: 'delete', key: safeKey, file_deleted: fileExisted, records_deleted: recordsRemoved,
+        ...(routedOverWire ? { note: 'Memory is served by the connected host: only the memory file was deleted. The host\'s retrieval record of this key is not removed from this process and may still be retrieved in prompts.' } : {}) }) };
+    } catch (err) {
+      return { success: false, error: `Memory delete failed: ${summarizeError(err)}` };
+    }
+  }
+
   return {
     success: false,
     error: `Unknown memory action: ${String(action)}`,
   };
+}
+
+/** The retrieval records mirrored from a memory key, or undefined when the registry cannot be read. */
+function recordsForKey(registry: MemoryRegistry, safeKey: string): Array<{ id: string; detail?: string | undefined }> | undefined {
+  try {
+    return registry.getAll().filter((record) => record.tags.includes(`state-memory:${safeKey}`));
+  } catch (err) {
+    logger.warn('state tool: memory registry unreadable', { key: safeKey, error: summarizeError(err) });
+    return undefined;
+  }
+}
+
+function retrievabilityOf(recordCount: number | undefined): { retrievable?: boolean } {
+  return recordCount === undefined ? {} : { retrievable: recordCount > 0 };
 }

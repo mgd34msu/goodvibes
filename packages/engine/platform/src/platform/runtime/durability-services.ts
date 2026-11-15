@@ -36,6 +36,7 @@ import { UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { startDurabilityHousekeeping } from './durability-housekeeping.js';
+import { hasLiveCredentialRefresh } from './provider-stack.js';
 import type { SessionSurface } from './session-surface.js';
 
 export interface DurabilityServicesInput {
@@ -94,14 +95,36 @@ export interface DurabilityServices {
    * the work rather than to release the loop.
    */
   readonly stopDurabilityHousekeeping: () => void;
-  /** Stops the live config-file watch this factory started. */
+  /**
+   * Stops the live external-change watches this factory started: the config-file
+   * watch and the secrets-change listener that refreshes provider credentials.
+   * After it runs a late secrets change no longer reaches the provider registry.
+   */
   readonly stopConfigWatch: () => void;
 }
 
 export function createDurabilityServices(input: DurabilityServicesInput): DurabilityServices {
   const { configManager, secretsManager, providerRegistry } = input;
-  secretsManager.onDidChange(() => void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('live credential refresh failed', { error: summarizeError(error) })));
-  void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('boot credential refresh failed', { error: summarizeError(error) }));
+  // Credential refreshes run one at a time, in the order they were asked for, so
+  // a secrets change during the boot refresh cannot finish before it and leave
+  // the older credentials in place. A refresh queued before teardown is skipped
+  // once the graph is stopped.
+  let credentialWatchStopped = false;
+  let credentialRefreshes: Promise<void> = Promise.resolve();
+  const refreshCredentials = (label: string): void => {
+    credentialRefreshes = credentialRefreshes.then(async () => {
+      if (credentialWatchStopped) return;
+      try {
+        await providerRegistry.refreshProviderCredentials();
+      } catch (error) {
+        logger.warn(`${label} credential refresh failed`, { error: summarizeError(error) });
+      }
+    });
+  };
+  // A registry the provider stack already refreshes (boot and every secrets change) needs no second listener.
+  const ownsCredentialRefresh = !hasLiveCredentialRefresh(providerRegistry);
+  const stopCredentialWatch = ownsCredentialRefresh ? secretsManager.onDidChange(() => refreshCredentials('live')) : () => undefined;
+  if (ownsCredentialRefresh) refreshCredentials('boot');
 
   const storeSnapshotScheduler = new StoreSnapshotScheduler({
     stores: [
@@ -147,7 +170,12 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
   // in-process set() uses; the underlying watchers are unref'd. The returned
   // handle is the only way to stop them, dropping it left a 250ms poll running
   // for the life of the process after the graph that started it was gone.
-  const stopConfigWatch = configManager.watchConfigFiles();
+  const stopConfigFileWatch = configManager.watchConfigFiles();
+  const stopConfigWatch = (): void => {
+    credentialWatchStopped = true;
+    stopCredentialWatch();
+    stopConfigFileWatch();
+  };
 
   const userPermissionRuleStore = new UserPermissionRuleStore(join(configManager.getControlPlaneConfigDir(), 'permission-rules.json'));
   void userPermissionRuleStore.init().catch((error) => logger.warn('user permission rule store init failed; asks will prompt', { error: summarizeError(error) }));

@@ -32,23 +32,24 @@ const NOWHERE = join(tmpdir(), 'gv-spine-adoption-wrapper-test', 'sessions.json'
 function harness() {
   const events: string[] = [];
   let bundle: Record<string, unknown> | null = null;
+  const capture = (key: string, value: unknown): void => { bundle = { ...(bundle ?? {}), [key]: value }; };
 
   const sync = createSpineAdoptionSync({
     sessionSpine: {
-      activate: () => { events.push('session:activate'); },
+      activate: (transport: unknown) => { events.push('session:activate'); capture('sessionTransport', transport); },
       deactivate: () => { events.push('session:deactivate'); },
       foldLegacyRecords: () => ({ folded: 0 }) as never,
     } as never,
     memorySpine: {
-      activate: () => { events.push('memory:activate'); },
+      activate: (transport: unknown) => { events.push('memory:activate'); capture('memoryTransport', transport); },
       deactivate: () => { events.push('memory:deactivate'); },
     },
     sessionInboundInputs: {
-      activate: (client: unknown) => { events.push('inbound:activate'); bundle = { ...(bundle ?? {}), inboundInputs: client }; },
+      activate: (client: unknown) => { events.push('inbound:activate'); capture('inboundInputs', client); },
       deactivate: () => { events.push('inbound:deactivate'); },
     },
     sessionUnionCache: {
-      activate: (source: unknown) => { events.push('union:activate'); bundle = { ...(bundle ?? {}), sessionList: source }; },
+      activate: (source: unknown) => { events.push('union:activate'); capture('sessionList', source); },
       deactivate: () => { events.push('union:deactivate'); },
     },
     legacyStorePath: NOWHERE,
@@ -106,4 +107,25 @@ describe('this terminal gates adoption on its discovery probe', () => {
 });
 
 describe('the wire this terminal injects carries every member the mirror needs', () => {
+  test('an adopted daemon hands over the session and memory transports, the inbound client and the union source', () => {
+    const h = harness();
+    h.sync(h.status('external', 'http://127.0.0.1:39471'), 'token-1');
+    const bundle = h.readBundle();
+    expect(bundle).not.toBeNull();
+    const wire = bundle as Record<string, Record<string, unknown> | undefined>;
+    expect(typeof wire.sessionTransport).toBe('object');
+    expect(wire.sessionTransport).not.toBeNull();
+    expect(typeof wire.memoryTransport).toBe('object');
+    expect(wire.memoryTransport).not.toBeNull();
+    expect(typeof wire.inboundInputs?.listInputs).toBe('function');
+    expect(typeof wire.inboundInputs?.claimInput).toBe('function');
+    expect(typeof wire.inboundInputs?.deliverInput).toBe('function');
+    expect(typeof wire.sessionList?.list).toBe('function');
+  });
+
+  test('a refused probe hands over no wire at all', () => {
+    const h = harness();
+    h.sync(h.status('unavailable', 'http://127.0.0.1:39471'), 'token-1');
+    expect(h.readBundle()).toBeNull();
+  });
 });

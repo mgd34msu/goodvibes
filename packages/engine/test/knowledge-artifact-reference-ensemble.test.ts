@@ -1,4 +1,4 @@
-/** UNRUN: genuine configured owners, cross-family/other-process-style saved
+/** Genuine configured owners, cross-family/other-process-style saved
  * references, original artifacts and zero-write inactive families. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -32,7 +32,7 @@ test('a pending unpublished family preserves its artifact until a genuine clean 
     expect(existsSync(f.store.storagePath)).toBe(false);
   });
   const published = readFileSync(f.store.storagePath);
-  for (let turn = 0; existsSync(record.contentPath) && turn < 100; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  await waitFor(() => !existsSync(record.contentPath));
   expect(existsSync(record.contentPath)).toBe(false);
   expect(readFileSync(f.store.storagePath)).toEqual(published);
   for (const file of ['knowledge-wiki.sqlite', 'knowledge-home-graph.sqlite']) expect(existsSync(join(f.root, file))).toBe(false);
@@ -103,7 +103,7 @@ test('a deferred same-process candidate retries after the actual outer batch sav
     expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held');
     expect(existsSync(record.contentPath)).toBe(true);
   });
-  for (let turn = 0; existsSync(record.contentPath) && turn < 100; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  await waitFor(() => !existsSync(record.contentPath));
   expect(existsSync(record.contentPath)).toBe(false);
 });
 
@@ -122,7 +122,7 @@ test('restart discovers current-format orphan metadata while preserving unattrib
   expect(artifacts.getRecord(current.artifact.id)).not.toBeNull();
   current.lease.release();
   await store.upsertSource({ id: 'next-clean', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'clean again' });
-  for (let turn = 0; artifacts.getRecord(current.artifact.id) && turn < 100; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  await waitFor(() => !artifacts.getRecord(current.artifact.id));
   expect(artifacts.getRecord(current.artifact.id)).toBeNull(); expect(artifacts.getRecord(old.id)).not.toBeNull();
 });
 
@@ -152,7 +152,7 @@ test('a64-artifact restart batch reads each actual persisted family image once i
   const read = spyOn(persistedImages, 'readSQLitePersistedImage').mockImplementation(owner => { imageReads++; return nativeRead(owner); });
   try {
     configureKnowledgeArtifactReferences({ artifactStore: artifacts, controlPlaneDirectory: root, stores: owners });
-    for (let turn = 0; ids.some(id => artifacts.getRecord(id)) && turn < 500; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+    await waitFor(() => !ids.some(id => artifacts.getRecord(id)));
     expect(ids.every(id => artifacts.getRecord(id) === null)).toBe(true); expect(imageReads).toBe(3);
   } finally { read.mockRestore(); }
 });

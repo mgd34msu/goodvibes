@@ -8,6 +8,7 @@ import { readFileObservation, type FileObservation } from '../../utils/file-obse
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readTelegramPaymentReceiveSpan, MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS, type TelegramPaymentReceiveSpan } from './payment-receive-span.js';
+import { TelegramReceiveCoverageError } from './receive-progress.js';
 
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_ACCOUNTS = 64;
@@ -15,7 +16,7 @@ const missing = (error: unknown): boolean => error !== null && typeof error === 
 const offsetValue = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const accountValue = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-export type TelegramOffsetFailure = 'unavailable' | 'unbound' | 'busy' | 'write-uncertain' | 'invalid-request';
+export type TelegramOffsetFailure = 'unavailable' | 'unbound' | 'busy' | 'write-uncertain' | 'invalid-request' | 'identity-unavailable';
 export class TelegramOffsetStoreError extends Error {
   override readonly name = 'TelegramOffsetStoreError';
   constructor(readonly kind: TelegramOffsetFailure) {
@@ -23,6 +24,7 @@ export class TelegramOffsetStoreError extends Error {
       ? 'The saved Telegram cursor has no bot binding. Inspect its original bot and missed messages before migrating it.'
       : kind === 'busy' ? 'Another Telegram owner is updating the saved cursor. Restart ingress after that owner finishes.'
       : kind === 'invalid-request' ? 'The Telegram bot cursor request is invalid.'
+      : kind === 'identity-unavailable' ? 'Telegram could not confirm which bot this is right now (network or token). The saved cursor was not touched; try again shortly.'
       : 'The saved Telegram cursor could not be confirmed. Restore its original state and inspect missed messages before restarting ingress.');
   }
 }
@@ -197,6 +199,9 @@ export class TelegramOffsetStore {
         replaceReceiveSpans: (input: readonly TelegramPaymentReceiveSpan[], current: () => void) => {
           const spans = Object.freeze(input.map(readTelegramPaymentReceiveSpan));
           if (spans.some(span => span.accountId !== this.accountId) || new Set(spans.map(span => span.id)).size !== spans.length) throw new TelegramOffsetStoreError('invalid-request');
+          // The cap counts every bot in the file, so it is checked before the write: a refusal inside the write would latch this store as failed.
+          const others = expected.accounts.reduce((count, entry) => count + (entry.accountId === this.accountId ? 0 : entry.receiveSpans?.length ?? 0), 0);
+          if (others + spans.length > MAX_TELEGRAM_PAYMENT_RECEIVE_SPANS) throw new TelegramReceiveCoverageError();
           const selected = expected, owned = () => { assertLease(); current(); assertLease(); };
           this.mutate(owned, mutationLease => {
             owned(); this.assertFileCurrent(selected.observed);

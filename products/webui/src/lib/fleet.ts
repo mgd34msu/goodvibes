@@ -12,7 +12,7 @@
  * never drop it.
  */
 
-import type { ProcessCheckSummary, ProcessCheckCriterion } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessCheckSummary, ProcessCheckCriterion, ProcessKind } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import type { ApprovalRecord, FleetProcessNode } from './goodvibes';
 import { asRecord } from './object';
 
@@ -23,22 +23,23 @@ import { asRecord } from './object';
  * renders it with the same generic KindBadge every other kind gets (kindLabel just prints
  * the string), the honest minimal treatment; a dedicated spawn UX is a later round.
  */
-export const KNOWN_PROCESS_KINDS = [
-  'agent',
-  'wrfc-chain',
-  'wrfc-subtask',
-  'workflow',
-  'trigger',
-  'schedule',
-  'watcher',
-  'background-process',
-  'workstream',
-  'phase',
-  'work-item',
-  'acp-agent',
-  'code-index',
-  'observed-external',
-] as const;
+const PROCESS_KIND_TABLE: Record<ProcessKind, true> = {
+  agent: true,
+  contract: true,
+  'contract-group': true,
+  'contract-unit': true,
+  workflow: true,
+  trigger: true,
+  schedule: true,
+  watcher: true,
+  'background-process': true,
+  'acp-agent': true,
+  'observed-external': true,
+  'code-index': true,
+};
+
+/** Every kind the engine's ProcessKind names; a kind added there fails to compile here until listed. */
+export const KNOWN_PROCESS_KINDS = Object.keys(PROCESS_KIND_TABLE) as ProcessKind[];
 
 /**
  * The one fleet kind goodvibes did not spawn or host, an externally-launched

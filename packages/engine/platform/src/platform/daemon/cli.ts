@@ -1,4 +1,5 @@
 import { prepareConfiguredProjectContext } from '../knowledge/project-planning/configured-project.js';
+import { REGULAR_KNOWLEDGE_DB_FILE } from '../knowledge/store-config.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../config/manager.js';
@@ -8,6 +9,7 @@ import { createRuntimeStore } from '../runtime/store/index.js';
 import { createRuntimeServices } from '../runtime/services.js';
 import { createHostPowerSeam } from '../power/runtime-wiring.js';
 import { DaemonServer } from './server.js';
+import { createHostShutdown, settleDaemonStart } from './cli-shutdown.js';
 import { HttpListener } from './http-listener.js';
 import { PlatformServiceManager } from './service-manager.js';
 import { VERSION } from '../version.js';
@@ -17,20 +19,8 @@ import { summarizeError } from '../utils/error-display.js';
 import { ensureDaemonHome } from '../workspace/daemon-home.js';
 import { resolveDaemonCliPaths } from './cli-paths.js';
 import { reportFatalBootFailure, writeExitingStdoutLine, writeFatalLine } from './fatal-boot-report.js';
+import { readDaemonCliTokens } from './cli-tokens.js';
 import { WorkspaceSwapManager } from '../workspace/workspace-swap-manager.js';
-
-type DaemonCliTokens = {
-  readonly daemonToken: string | undefined;
-  readonly httpToken: string | undefined;
-};
-
-function readDaemonCliTokens(env: NodeJS.ProcessEnv): DaemonCliTokens {
-  const daemonToken = env.GOODVIBES_DAEMON_TOKEN;
-  return {
-    daemonToken,
-    httpToken: env.GOODVIBES_HTTP_TOKEN ?? daemonToken,
-  };
-}
 
 /**
  * The one-command service install: `goodvibes-daemon --install-service`
@@ -104,7 +94,7 @@ async function main(): Promise<void> {
 
   ensureDaemonHome(daemonHomeDir);
   const runtimeStore = createRuntimeStore();
-  await prepareConfiguredProjectContext(config, workingDir, 'knowledge-wiki.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(config, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
   const runtimeServices = createRuntimeServices({
     configManager: config,
     runtimeBus,
@@ -137,39 +127,47 @@ async function main(): Promise<void> {
     getBusySessionCount: () => runtimeServices.sessionBroker.countBusySessions(),
     rerootStores: (newDir: string) => runtimeServices.rerootStores(newDir),
   });
+  // A turn recorded while the stores move would land in the old workspace's files.
+  runtimeServices.sessionBroker.setIntakeHold(() => swapManager.isSwapping());
 
   // The daemon CLI IS the platform-released artifact, so its update identity is
   // the platform release version and the running executable. Embedders never get
   // this default, they pass their own artifact identity (or none).
-  const daemon = new DaemonServer({ runtimeBus, userAuth, runtimeServices, swapManager, updateArtifact: { version: VERSION } });
+  // Declared before the daemon: a handover that stopped the runtime and then could not complete leaves this
+  // process serving nothing, and a service manager restarts it only if it ends with a failure status.
+  let shutdown: (exitCode?: number) => Promise<void> = async () => {};
+  const daemon = new DaemonServer({ runtimeBus, userAuth, runtimeServices, swapManager, updateArtifact: { version: VERSION },
+    onIncompleteHandover: () => { void shutdown(1).finally(() => process.exit(1)); } });
   const listener = new HttpListener({
     hookDispatcher: runtimeServices.hookDispatcher,
     userAuth,
     configManager: config,
+    runtimeBus,
   });
   const { daemonToken, httpToken } = readDaemonCliTokens(process.env);
 
   daemon.enable({ daemon: true }, daemonToken);
   listener.enable({ httpListener: true }, httpToken);
 
-  await Promise.all([
-    daemon.start(),
-    config.get('danger.httpListener') ? listener.start() : Promise.resolve(),
-  ]);
-
-  const shutdown = async (): Promise<void> => {
+  shutdown = createHostShutdown(async () => {
     logger.info('goodvibes daemon host stopping');
     await Promise.allSettled([listener.stop(), daemon.stop()]);
-    // Set exitCode rather than calling process.exit(0) so that connection
+  }, exitCode => {
+    // Set exitCode rather than calling process.exit so that connection
     // drains can complete before the process terminates naturally. The log is
     // not left to that: it is written here, on this thread, because a shutdown
     // that then dies to a signal or a hung socket must still have said so.
     flushActivityLogSync();
-    process.exitCode = 0;
-  };
-
+    process.exitCode = exitCode;
+  });
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
+
+  const [startOutcome] = await Promise.all([
+    daemon.start(),
+    config.get('danger.httpListener') ? listener.start() : Promise.resolve(),
+  ]);
+  if (await settleDaemonStart(startOutcome, shutdown, message => logger.error(message)) === 'ended') return;
 
   logger.info('goodvibes daemon host started', {
     daemon: resolveDaemonEnabled(config),

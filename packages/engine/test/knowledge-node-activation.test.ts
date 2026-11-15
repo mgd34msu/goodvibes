@@ -298,10 +298,12 @@ describe('synthesized knowledge serving authority', () => {
   });
   test('bounded timeout and cancellation settle even if the port ignores its signal', async () => {
     const { store } = await fixture(); const fake = reading();
-    installJudgmentPort({ ...fake.port, ask: () => new Promise(() => {}) });
+    let asked = Promise.withResolvers<void>();
+    installJudgmentPort({ ...fake.port, ask: () => { asked.resolve(); return new Promise(() => {}); } });
     await held(store.prepareNodeWrites([input()], { timeoutMs: 5 }), 'budget');
+    asked = Promise.withResolvers<void>();
     const controller = new AbortController(); const pending = store.prepareNodeWrites([input()], { signal: controller.signal });
-    setTimeout(() => controller.abort(), 5); await held(pending, 'aborted'); expect(store.listNodes()).toHaveLength(0);
+    await asked.promise; controller.abort(); await held(pending, 'aborted'); expect(store.listNodes()).toHaveLength(0);
   });
   test('trusted explicit operator decisions need no semantic provider', async () => {
     const { store } = await fixture(); const draft = await store.upsertNode(input());

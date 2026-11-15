@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile, runStoreFileUpdateSync } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
 
 export type AgentNoteSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentNoteReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -122,15 +122,17 @@ function parseNote(value: unknown): AgentNoteRecord | null {
   };
 }
 
-function parseStore(raw: string): NoteStoreFile {
+function parseStore(raw: string, forWrite = false): NoteStoreFile {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, notes: [] };
-  return {
-    version: STORE_VERSION,
-    notes: Array.isArray(parsed.notes)
-      ? parsed.notes.map(parseNote).filter((entry): entry is AgentNoteRecord => entry !== null)
-      : [],
-  };
+  if (!isRecord(parsed)) {
+    if (forWrite) assertStoreRewritable(parsed, 'notes', 0, STORE_VERSION);
+    return { version: STORE_VERSION, notes: [] };
+  }
+  const notes = Array.isArray(parsed.notes)
+    ? parsed.notes.map(parseNote).filter((entry): entry is AgentNoteRecord => entry !== null)
+    : [];
+  if (forWrite) assertStoreRewritable(parsed, 'notes', notes.length, STORE_VERSION);
+  return { version: STORE_VERSION, notes };
 }
 
 function formatStore(store: NoteStoreFile): string {
@@ -184,7 +186,7 @@ export class AgentNoteRegistry {
 
   public create(input: AgentNoteCreateInput): AgentNoteRecord {
     return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore();
+      const store = this.readStore(true);
       const title = normalizeTitle(input.title);
       const body = input.body.trim();
       this.validateRequired(title, body);
@@ -212,7 +214,7 @@ export class AgentNoteRegistry {
 
   public update(idOrTitle: string, input: AgentNoteUpdateInput): AgentNoteRecord {
     return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore();
+      const store = this.readStore(true);
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
@@ -242,7 +244,7 @@ export class AgentNoteRegistry {
 
   public markReviewed(idOrTitle: string): AgentNoteRecord {
     return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore();
+      const store = this.readStore(true);
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
@@ -260,7 +262,7 @@ export class AgentNoteRegistry {
 
   public markStale(idOrTitle: string, reason: string): AgentNoteRecord {
     return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore();
+      const store = this.readStore(true);
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
@@ -278,7 +280,7 @@ export class AgentNoteRegistry {
 
   public deleteNote(idOrTitle: string): AgentNoteRecord {
     return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore();
+      const store = this.readStore(true);
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       this.writeStore({
@@ -311,10 +313,10 @@ export class AgentNoteRegistry {
     return store.notes.find((note) => note.id.toLowerCase() === lookup || note.title.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(): NoteStoreFile {
+  private readStore(forWrite = false): NoteStoreFile {
     if (!existsSync(this.storePath)) return { version: STORE_VERSION, notes: [] };
     try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'));
+      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
     } catch (error) {
       throw new Error(`Could not read Agent note store ${error instanceof Error ? error.message : String(error)}`);
     }

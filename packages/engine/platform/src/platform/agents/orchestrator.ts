@@ -122,6 +122,8 @@ type AgentOrchestratorToolDeps = {
   readonly remoteRunnerRegistry?: import('../runtime/remote/index.js').RemoteRunnerRegistry | undefined;
   readonly knowledgeService?: import('../knowledge/index.js').KnowledgeService | undefined;
   readonly memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
+  /** True while memory is served by a connected host; a worker's state tool then does not mirror into the local registry. */
+  readonly memoryRoutedOverWire?: (() => boolean) | undefined;
   /** Supplying it registers the `profile` capture tool. See registerAllTools. */
   readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
   readonly codeIndex?: import('./turn-knowledge-injection.js').TurnCodeIndexSource | undefined;
@@ -149,6 +151,8 @@ type AgentOrchestratorToolDeps = {
     | Pick<import('../config/secrets.js').SecretsManager, 'get' | 'set' | 'getGlobalHome'>
     | null
     | undefined;
+  /** The daemon's own auth token reader; a worker's goodvibes_context Cloudflare status counts it as the Worker-to-daemon operator token, as the daemon's routes do. */
+  readonly cloudflareAuthToken?: (() => string | null) | undefined;
   readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
   readonly overflowHandler?: import('../tools/shared/overflow.js').OverflowHandler | undefined;
   readonly sandboxSessionRegistry: import('../runtime/sandbox/session-registry.js').SandboxSessionRegistry;
@@ -187,6 +191,35 @@ type AgentOrchestratorToolDeps = {
   readonly localhostFetchApproval?: LocalhostFetchApproval | undefined;
   /** Reports each contained (sandboxed) command run for the announce-once containment receipt. */
   readonly onSandboxedRun?: (() => void) | undefined;
+  /**
+   * Whether a worker's exec REQUIRES the boundary. Reaches every worker
+   * registry through registerAllTools; omitted → the host fallback, as a
+   * terminal composes it. A daemon-hosted composition states it so a worker
+   * spawned by a hosted turn is held to the same posture as the turn.
+   */
+  readonly execContainment?: import('../tools/exec/containment.js').ExecContainmentRequirement | undefined;
+  /**
+   * Where daemon-owned settings are read and written. Without it a worker's
+   * settings tool writes such a key into the local file, reports success and
+   * configures nothing. See registerAllTools.
+   */
+  readonly configRouting?: import('../tools/goodvibes-runtime/config-routing.js').ConfigRoutingOptions | undefined;
+  /**
+   * Lets a product install its own wrappers on each worker registry once its
+   * tools are registered, so the restrictions it puts on its main conversation
+   * are not bypassed by delegating. The wrappers must not need the owner's
+   * last message: a worker has none. A throw fails the registry build.
+   */
+  readonly decorateRegistry?: ((registry: ToolRegistry) => void) | undefined;
+  /**
+   * The admission policies the main registry's read and settings tools are
+   * built with. A product whose decorateRegistry installs the admitted-read or
+   * admitted-settings wrapper must pass the same policy here: the wrapper
+   * refuses every call that has no input projector, and only the matching
+   * policy registers one.
+   */
+  readonly readAdmissionPolicy?: 'agent-main-conversation' | undefined;
+  readonly settingsAdmissionPolicy?: 'agent-main-conversation' | undefined;
   /**
    * Broker an exec PTY terminal-prompt answer through the approval broker
    * while the command keeps running. Threaded to registerAllTools so the exec
@@ -230,6 +263,22 @@ export class AgentOrchestrator {
    * borrowed object is how a live session loses its index.
    */
   private ownedProjectIndexes = new Map<string, ProjectIndex>();
+  /**
+   * Flushes and unregisters the session key-value store each registry owns,
+   * keyed like `fullRegistries`. The store holds a debounced write and sits in a
+   * process-wide set until disposed, so a registry that is dropped without it
+   * leaks one store per registry for the process lifetime.
+   */
+  private registryDisposers = new Map<string, () => Promise<void>>();
+  /**
+   * The disposers of default-directory registries dropped for a rebuild. The host may still hold the
+   * dropped registry, so its state stays open until the orchestrator is disposed or given new dependencies.
+   */
+  private retiredRegistryDisposers: Array<() => Promise<void>> = [];
+  /** Registries built for one captured run; the run deletes its own, a channel change must not. */
+  private runKeyedRegistries = new Set<string>();
+  /** Runs currently using a non-default working directory's registry; the last one out releases it. */
+  private cwdRunCounts = new Map<string, number>();
   private fullRegistryChannelVersion = -2;
   private toolDeps: AgentOrchestratorToolDeps | null = null;
   private featureFlagManager: FeatureFlagManager | null = null;
@@ -362,6 +411,7 @@ export class AgentOrchestrator {
     this.toolDeps = toolDeps;
     this.releaseOwnedProjectIndexes();
     this.fullRegistries = new Map();
+    this.runKeyedRegistries.clear();
     this.fullRegistryChannelVersion = -2;
   }
 
@@ -374,6 +424,7 @@ export class AgentOrchestrator {
   dispose(): void {
     this.releaseOwnedProjectIndexes();
     this.fullRegistries.clear();
+    this.runKeyedRegistries.clear();
   }
 
   /**
@@ -386,15 +437,31 @@ export class AgentOrchestrator {
    * whether or not the write lands.
    */
   private releaseOwnedProjectIndexes(): void {
-    for (const [cwd, index] of this.ownedProjectIndexes) {
-      void index.dispose().catch((error: unknown) => {
-        logger.warn('AgentOrchestrator: project index teardown failed', {
-          workingDirectory: cwd,
-          error: summarizeError(error),
-        });
+    for (const key of new Set([...this.ownedProjectIndexes.keys(), ...this.registryDisposers.keys()])) {
+      void this.releaseRegistry(key);
+    }
+    for (const dispose of this.retiredRegistryDisposers.splice(0)) {
+      dispose().catch((error: unknown) => {
+        logger.warn('AgentOrchestrator: session state teardown failed', { error: summarizeError(error) });
       });
     }
-    this.ownedProjectIndexes.clear();
+  }
+
+  /** Drop one cached registry and release the index and key-value store built for it. */
+  private async releaseRegistry(key: string): Promise<void> {
+    this.fullRegistries.delete(key);
+    this.runKeyedRegistries.delete(key);
+    const index = this.ownedProjectIndexes.get(key);
+    const disposeState = this.registryDisposers.get(key);
+    this.ownedProjectIndexes.delete(key);
+    this.registryDisposers.delete(key);
+    const failed = (what: string) => (error: unknown): void => {
+      logger.warn(`AgentOrchestrator: ${what} teardown failed`, { workingDirectory: key, error: summarizeError(error) });
+    };
+    await Promise.all([
+      index?.dispose().catch(failed('project index')),
+      disposeState?.().catch(failed('session state')),
+    ]);
   }
 
   /**
@@ -435,9 +502,22 @@ export class AgentOrchestrator {
     if (this.fullRegistryChannelVersion !== channelVersion) {
       // Dropping the registries drops the only references to the indexes built
       // for them, so release those first, a channel plugin being installed or
-      // removed must not be a way to accumulate orphaned flush timers.
-      this.releaseOwnedProjectIndexes();
-      this.fullRegistries.clear();
+      // removed must not be a way to accumulate orphaned flush timers. A registry a
+      // run is still using stays (its tools already hold its index) and is released
+      // when that run ends. The default directory's registry may be held by the host's
+      // own callers, so it is dropped for a rebuild without closing what it holds.
+      const defaultKey = this.toolDeps?.workingDirectory ?? '';
+      for (const key of [...this.fullRegistries.keys()]) {
+        if (this.runKeyedRegistries.has(key) || (this.cwdRunCounts.get(key) ?? 0) > 0) continue;
+        if (key === defaultKey) {
+          const retired = this.registryDisposers.get(key);
+          if (retired) this.retiredRegistryDisposers.push(retired);
+          this.fullRegistries.delete(key);
+          this.registryDisposers.delete(key);
+          continue;
+        }
+        void this.releaseRegistry(key);
+      }
       this.fullRegistryChannelVersion = channelVersion;
     }
     const defaultCwd = this.toolDeps?.workingDirectory ?? '';
@@ -500,11 +580,17 @@ export class AgentOrchestrator {
       // cwd: for the default one it hands back the very object the composition
       // root passed in, which this class borrows and must not dispose.
       if (!isDefaultCwd || authority) this.ownedProjectIndexes.set(key, registered.projectIndex);
+      this.registryDisposers.set(key, registered.dispose);
+      if (runKey) this.runKeyedRegistries.add(key);
       registerChannelAgentTools(registry, this.toolDeps?.channelRegistry ?? this.channelRegistry);
+      this.toolDeps.decorateRegistry?.(registry);
       if (authority) {
         const guarded = new ToolRegistry();
         for (const tool of registry.list())
-          guarded.register(capturedInputTool(tool, authority, cwd, ownerReadAccess, signal));
+          guarded.register(
+            capturedInputTool(tool, authority, cwd, ownerReadAccess, signal),
+            registry.registrationOptionsFor(tool.definition.name),
+          );
         registry = guarded;
       }
       this.fullRegistries.set(key, registry);
@@ -533,10 +619,10 @@ export class AgentOrchestrator {
       // the composition root resolved for this turn is bound onto the instance
       // this run sees, and never appears in the tool's arguments.
       if (captureAuthority && isCaptureBindableTool(tool)) {
-        scopedRegistry.register(tool.bindCapture(captureAuthority));
+        scopedRegistry.register(tool.bindCapture(captureAuthority), fullRegistry.registrationOptionsFor(tool.definition.name));
         continue;
       }
-      scopedRegistry.register(tool);
+      scopedRegistry.register(tool, fullRegistry.registrationOptionsFor(tool.definition.name));
     }
 
     return scopedRegistry;
@@ -728,12 +814,15 @@ export class AgentOrchestrator {
   ): Promise<AgentOrchestratorRunContext> {
     const cwd = workingDirectory ?? this.toolDeps?.workingDirectory ?? '';
     const delivered = new Set<string>();
-    // Wake/steer can reuse one captured authority for another actual run.
-    // Only registry rebuilds inside this invocation retain the same journal.
-    const capturedReplHistory = authority ? createCapturedReplHistory(authority, signal) : undefined;
     const originalPermissionManager = this.toolDeps?.permissionManager;
     if (autonomousSource && (!originalPermissionManager?.admitAutonomous || !originalPermissionManager.autonomousPreparation))
       throw new Error('Native contract member requires the shared autonomous permission owner');
+    if (authority && !originalPermissionManager)
+      throw new Error('captured agent requires original-owner read authorization');
+    // Wake/steer can reuse one captured authority for another actual run.
+    // Only registry rebuilds inside this invocation retain the same journal.
+    // Created after the guards above: a refused run has no settlement to close it.
+    const capturedReplHistory = authority ? createCapturedReplHistory(authority, signal) : undefined;
     const processManager = this.toolDeps?.processManager;
     const inputResources = new Set<() => void>();
     let inputsRetired = false;
@@ -766,8 +855,6 @@ export class AgentOrchestrator {
       return runSettlement;
     } : undefined;
     const contractHooks = this.toolDeps?.contractHooks;
-    if (authority && !originalPermissionManager)
-      throw new Error('captured agent requires original-owner read authorization');
     const ownerReadAccess = originalPermissionManager
       ? async (path: string): Promise<boolean> => (await originalPermissionManager.readAccess(path)) === 'allow'
       : undefined;
@@ -818,6 +905,7 @@ export class AgentOrchestrator {
         workingDirectory: cwd,
         journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.workingDirectory ?? cwd,
         agentManager: this.toolDeps?.agentManager,
+        contextAccountingHolder: this.toolDeps?.contextAccountingHolder,
         ...(autonomousSource ? { autonomousSource } : {}),
         ...(autonomousPort ? { autonomousPort } : {}),
         ...(authority || autonomousSource
@@ -937,6 +1025,9 @@ export class AgentOrchestrator {
     const signal = this.cancellationSource?.get(record.id);
     const runKey = authority ? `${cwd}:captured-run:${randomUUID()}` : undefined;
     if (authority) await assertContractInputAuthority(authority, cwd, signal);
+    // A registry for a dedicated worktree lives only while a run uses it; the default one is shared and stays.
+    const sharesCwdRegistry = runKey === undefined && cwd !== (this.toolDeps?.workingDirectory ?? '');
+    if (sharesCwdRegistry) this.cwdRunCounts.set(cwd, (this.cwdRunCounts.get(cwd) ?? 0) + 1);
     let context: AgentOrchestratorRunContext | undefined;
     try {
       context = await this.createRunContext(
@@ -951,13 +1042,17 @@ export class AgentOrchestrator {
       );
       await runAgentTask(context, record);
     } finally {
-      try { await context?.beforeRunSettlement?.(); }
+      try {
+        // The captured code source belongs to this run; the shared one is not ours to close.
+        if (authority) context?.codeIndex?.dispose?.();
+        await context?.beforeRunSettlement?.();
+      }
       finally {
-        if (runKey) {
-          this.fullRegistries.delete(runKey);
-          const index = this.ownedProjectIndexes.get(runKey);
-          this.ownedProjectIndexes.delete(runKey);
-          await index?.dispose();
+        if (runKey) await this.releaseRegistry(runKey);
+        else if (sharesCwdRegistry) {
+          const remaining = (this.cwdRunCounts.get(cwd) ?? 1) - 1;
+          if (remaining > 0) this.cwdRunCounts.set(cwd, remaining);
+          else { this.cwdRunCounts.delete(cwd); await this.releaseRegistry(cwd); }
         }
       }
     }

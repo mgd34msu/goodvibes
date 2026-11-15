@@ -35,6 +35,7 @@ interface AgentMemoryToolArgs {
   readonly query?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly semantic?: unknown;
   readonly cls?: unknown;
   readonly scope?: unknown;
   readonly summary?: unknown;
@@ -68,7 +69,7 @@ function readString(value: unknown): string {
 function normalizeMemoryAction(value: unknown): AgentMemoryAction | null {
   const action = readString(value).toLowerCase().replace(/-/g, '_');
   if (!action) return null;
-  if (action === 'status' || action === 'summary' || action === 'posture' || action === 'memory_posture' || action === 'recall' || action === 'providers') return 'status';
+  if (action === 'status' || action === 'summary' || action === 'posture' || action === 'memory_posture' || action === 'providers') return 'status';
   if (action === 'provider' || action === 'memory_provider' || action === 'embedding' || action === 'external' || action === 'external_provider') return 'provider';
   if (action === 'refinement' || action === 'refinement_tasks' || action === 'semantic_refinement' || action === 'self_improvement' || action === 'semantic_self_improvement' || action === 'learning_loop') return 'refinement';
   if (action === 'run_refinement' || action === 'refine' || action === 'run_semantic_refinement' || action === 'run_self_improvement' || action === 'self_improve') return 'run_refinement';
@@ -82,6 +83,15 @@ function normalizeMemoryAction(value: unknown): AgentMemoryAction | null {
   if (action === 'review' || action === 'approve') return 'review';
   if (action === 'stale' || action === 'mark_stale') return 'stale';
   if (action === 'delete' || action === 'remove' || action === 'forget') return 'delete';
+  return null;
+}
+
+/** The action or mode text the caller gave when it names nothing this tool does. */
+function unrecognisedAction(args: AgentMemoryToolArgs): string | null {
+  for (const value of [args.action, args.mode]) {
+    const text = readString(value);
+    if (text && normalizeMemoryAction(value) === null) return text;
+  }
   return null;
 }
 
@@ -113,6 +123,8 @@ function localMemoryArgs(action: AgentMemoryAction, args: AgentMemoryToolArgs): 
     action,
     id: lookupId(args),
     query: args.query ?? args.target,
+    limit: args.limit,
+    semantic: args.semantic,
     cls: args.cls,
     scope: args.scope,
     summary: args.summary,
@@ -156,7 +168,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
           target: { type: 'string', description: 'Lookup target or search text.' },
           query: { type: 'string', description: 'Search text.' },
           includeParameters: { type: 'boolean', description: 'Include provider setup contracts or candidate details.' },
-          limit: { type: 'number', description: 'Maximum posture, curator, or search rows.' },
+          limit: { type: 'number', description: 'Maximum rows for posture, curator, list and search. Record search defaults to 10 and returns at most 50.' },
+          semantic: { type: 'boolean', description: 'Record search: semantic by default; false forces literal matching.' },
           cls: { type: 'string', description: 'Memory class for create/update.' },
           scope: { type: 'string', description: 'Memory scope for create/update.' },
           summary: { type: 'string', description: 'Memory summary for create/update.' },
@@ -167,8 +180,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
           reason: { type: 'string', description: 'Reason for stale/delete decisions.' },
           maxRunMs: { type: 'number', description: 'Maximum semantic refinement run budget in milliseconds.' },
           force: { type: 'boolean', description: 'Force semantic refinement reprocessing where supported.' },
-          confirm: { type: 'boolean', description: 'Required for deletion and other confirmed memory effects.' },
-          explicitUserRequest: { type: 'string', description: 'User request authorizing confirmed memory effects.' },
+          confirm: { type: 'boolean', description: 'Optional audit annotation; does not grant authority. Memory writes and deletes need current recorded admission.' },
+          explicitUserRequest: { type: 'string', description: 'Optional request text recorded with the effect; does not grant authority.' },
         },
         additionalProperties: false,
       },
@@ -178,6 +191,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
     execute: async (rawArgs, options) => {
       const args = captureModelReadingInput(rawArgs);
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
+      const unrecognised = unrecognisedAction(args);
+      if (unrecognised) return error(`Unknown memory action "${unrecognised}". Valid actions: status, provider, refinement, run_refinement, curator, candidate, list, search, get, create, update, review, stale, delete.`);
       const action = readAction(args);
 
       if (action === 'status') {

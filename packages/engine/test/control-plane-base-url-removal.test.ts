@@ -14,9 +14,9 @@
  * external address is an override rather than a mirror.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { migrateControlPlaneBaseUrlRemoval } from '../platform/src/platform/config/migrations.js';
 import { applyControlPlaneBaseUrlMigrationPass } from '../platform/src/platform/config/manager-migration-passes.js';
 import {
@@ -73,7 +73,7 @@ describe('migrateControlPlaneBaseUrlRemoval (pure function)', () => {
 
 describe('applyControlPlaneBaseUrlMigrationPass', () => {
   test('rewrites the settings file on disk and emits one receipt naming publicBaseUrl', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-cp-baseurl-'));
+    const dir = makeProjectTempDir('gv-cp-baseurl');
     const file = join(dir, 'settings.json');
     writeFileSync(file, JSON.stringify({ controlPlane: { port: 8443, baseUrl: 'http://127.0.0.1:3421' } }));
 
@@ -93,7 +93,7 @@ describe('applyControlPlaneBaseUrlMigrationPass', () => {
   });
 
   test('a file without the legacy key produces no receipt', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-cp-baseurl-'));
+    const dir = makeProjectTempDir('gv-cp-baseurl');
     const file = join(dir, 'settings.json');
     const receipts: string[] = [];
     applyControlPlaneBaseUrlMigrationPass({ controlPlane: { port: 3421 } }, file, (id) => receipts.push(id));

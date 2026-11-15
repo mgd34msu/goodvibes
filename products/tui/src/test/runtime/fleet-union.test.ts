@@ -11,7 +11,7 @@
  * shared id, because the local copy is live and actionable while the daemon's
  * arrives over a poll, plus the two degrade paths that must not lose rows.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { createFleetUnionReadModel } from '../../runtime/client/fleet-union.ts';
 import { createStaticFleetReadModel, buildFleetSnapshot } from '../../views/fleet-read-model.ts';
 import type { ProcessNode } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
@@ -47,15 +47,13 @@ function verbs(answer: (() => unknown) | { unavailable: string }) {
   };
 }
 
-const settle = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 10); });
-
 describe('the Agents modal reads local rows union the daemon\'s', () => {
   test('with no daemon configured the local view IS the fleet, unchanged', async () => {
     const union = createFleetUnionReadModel({
       local: localModel([node('a1', 'local agent')]),
       verbs: verbs({ unavailable: 'the daemon is disabled' }) as never,
     });
-    await settle();
+    await union.refresh();
     expect(union.getSnapshot().rows.map((r) => r.node.id)).toEqual(['a1']);
     union.stop();
   });
@@ -69,6 +67,23 @@ describe('the Agents modal reads local rows union the daemon\'s', () => {
     const ids = union.getSnapshot().rows.map((r) => r.node.id).sort();
     expect(ids).toEqual(['a1', 'd1', 'd2']);
     union.stop();
+  });
+
+  test('a capped daemon answer is labelled partial, and a complete one is not', async () => {
+    const capped = createFleetUnionReadModel({
+      local: localModel([node('a1', 'local agent')]),
+      verbs: verbs(() => ({ capturedAt: 2_000, nodes: [node('d1', 'job')], truncated: true, totalCount: 40 })) as never,
+    });
+    await capped.refresh();
+    expect(capped.getSnapshot().daemonPartial).toEqual({ shown: 1, total: 40 });
+    capped.stop();
+    const whole = createFleetUnionReadModel({
+      local: localModel([node('a1', 'local agent')]),
+      verbs: verbs(() => ({ capturedAt: 2_000, nodes: [node('d1', 'job')] })) as never,
+    });
+    await whole.refresh();
+    expect(whole.getSnapshot().daemonPartial).toBeUndefined();
+    whole.stop();
   });
 
   test('a row both halves carry is shown from the LOCAL copy', async () => {
@@ -134,17 +149,26 @@ describe('the Agents modal reads local rows union the daemon\'s', () => {
     union.stop();
   });
 
-  test('stop() ends the refresh timer', async () => {
-    const caller = verbs(() => ({ capturedAt: 2_000, nodes: [] }));
-    const union = createFleetUnionReadModel({
-      local: localModel([]),
-      verbs: caller as never,
-      refreshIntervalMs: 5,
-    });
-    await settle();
-    union.stop();
-    const after = caller.calls.length;
-    await settle();
-    expect(caller.calls.length).toBe(after);
+  test('stop() ends the refresh timer', () => {
+    const handle = { unref: () => {} };
+    const started = spyOn(globalThis, 'setInterval').mockImplementation((() => handle) as unknown as typeof setInterval);
+    const cleared = spyOn(globalThis, 'clearInterval').mockImplementation((() => {}) as unknown as typeof clearInterval);
+    try {
+      const union = createFleetUnionReadModel({
+        local: localModel([]),
+        verbs: verbs(() => ({ capturedAt: 2_000, nodes: [] })) as never,
+        refreshIntervalMs: 5,
+      });
+      expect(started).toHaveBeenCalledTimes(1);
+      expect(started.mock.calls[0]?.[1]).toBe(5);
+      expect(cleared).not.toHaveBeenCalled();
+
+      union.stop();
+
+      expect(cleared).toHaveBeenCalledWith(handle);
+    } finally {
+      started.mockRestore();
+      cleared.mockRestore();
+    }
   });
 });

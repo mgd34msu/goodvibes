@@ -19,7 +19,7 @@
 import { buildPendingPermissionExtras } from './hunk-selection.ts';
 import type { ApprovalRequesterLookup } from './hunk-selection.ts';
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
-import type { PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { PermissionPromptDecision, PermissionPromptRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** The broker seam this helper answers through, a subset of ApprovalBroker. */
 export interface BrokerApprovalCardBroker extends ApprovalRequesterLookup {
@@ -44,31 +44,15 @@ export interface BrokerApprovalChangeParams {
     readonly callId: string;
     readonly status: string;
     readonly request: PermissionPromptRequest;
-    /** The REAL attachable session id once an ACCEPTED ask (e.g. a ci:fix-session offer) has spawned its session. */
-    readonly fixSessionId?: string | undefined;
-    /** The honest failure when an accepted ask's spawn did NOT produce an attachable session, mutually exclusive with fixSessionId. */
-    readonly fixSessionError?: string | undefined;
   };
   readonly getPending: () => PendingPermissionState | null;
   readonly setPending: (pending: PendingPermissionState | null) => void;
   readonly broker: BrokerApprovalCardBroker;
   readonly render: () => void;
-  /**
-   * Fired when a record carries the id of a session an accepted ask spawned
-   * (the CI fix-session). The surface that accepted, attached now, turns this
-   * into a jump/attach affordance. Called each time the field is seen; the
-   * caller de-duplicates by id.
-   */
-  readonly onFixSessionStarted?: (fixSessionId: string) => void;
-  /**
-   * Fired when a record carries the honest failure from an accepted ask whose
-   * spawn produced no attachable session. The surface renders it as an error
-   * line with NO action to jump to (there is no session). Called each time the
-   * field is seen; the caller de-duplicates.
-   */
-  readonly onFixSessionError?: (fixSessionError: string) => void;
   /** Defers the open (default queueMicrotask); injectable so tests run it synchronously. */
   readonly defer?: (callback: () => void) => void;
+  /** Tells the owner their answer did not reach the broker; the card is offered again if the ask is still waiting. */
+  readonly notify?: (message: string) => void;
 }
 
 const isActiveStatus = (status: string): boolean => status === 'pending' || status === 'claimed';
@@ -85,8 +69,7 @@ export interface FixSessionAffordanceDeps {
  * time a given session id is seen it ARMS the jump (the surface attaches on the
  * jump key, the machine does the resume, the user never retypes an id) and
  * surfaces a one-line actionable notice. Repeats are no-ops (de-duplicated by
- * id), so the live record update and the listApprovals refresh path can both
- * feed it safely.
+ * id), so a repeated run result never arms or announces it twice.
  */
 export function buildFixSessionAffordance(deps: FixSessionAffordanceDeps): (fixSessionId: string) => void {
   const seen = new Set<string>();
@@ -95,21 +78,6 @@ export function buildFixSessionAffordance(deps: FixSessionAffordanceDeps): (fixS
     seen.add(fixSessionId);
     deps.arm(fixSessionId);
     deps.notify('[CI] Fix session ready: press j to jump to it.');
-  };
-}
-
-/**
- * Build the honest failure notice for an accepted fix-session offer whose spawn
- * produced no attachable session: one error line, NO jump action (there is no
- * session to attach to). De-duplicated by the error text so the live record
- * update and the listApprovals refresh path can both feed it safely.
- */
-export function buildFixSessionErrorNotice(notify: (message: string) => void): (fixSessionError: string) => void {
-  const seen = new Set<string>();
-  return (fixSessionError) => {
-    if (seen.has(fixSessionError)) return;
-    seen.add(fixSessionError);
-    notify(`[CI] Fix session could not start: ${fixSessionError}`);
   };
 }
 
@@ -137,22 +105,6 @@ export function handleFixSessionAttachKey(data: string, deps: FixSessionAttachKe
 }
 
 /**
- * The refresh path: sweep current approval records for spawned fix-sessions and
- * feed each to the (de-duplicating) affordance. Catches a session stamped before
- * the live subscription attached, or a record update the subscription missed.
- */
-export function refreshFixSessionsFromApprovals(
-  listApprovals: () => readonly { readonly fixSessionId?: string | undefined; readonly fixSessionError?: string | undefined }[],
-  onFixSessionStarted: (fixSessionId: string) => void,
-  onFixSessionError?: (fixSessionError: string) => void,
-): void {
-  for (const record of listApprovals()) {
-    if (record.fixSessionId) onFixSessionStarted(record.fixSessionId);
-    else if (record.fixSessionError && onFixSessionError) onFixSessionError(record.fixSessionError);
-  }
-}
-
-/**
  * React to one broker approval change: clear the active card when ITS approval
  * resolves, or open a card for a newly-pending broker-originated ask that no
  * local prompt is handling.
@@ -161,14 +113,6 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
   const { approval, getPending, setPending, broker, render } = params;
   const defer = params.defer ?? queueMicrotask;
   const active = isActiveStatus(approval.status);
-
-  // An accepted ask that spawned a session (the CI fix-session) publishes its
-  // REAL session id as a record update, the live in-process handle to jump to
-  // it, or, when the spawn failed, an honest error instead of a dead id
-  // (mutually exclusive). Both arrive after the card has resolved and cleared,
-  // so surface them independently of the card lifecycle below.
-  if (approval.fixSessionId) params.onFixSessionStarted?.(approval.fixSessionId);
-  else if (approval.fixSessionError) params.onFixSessionError?.(approval.fixSessionError);
 
   const pending = getPending();
   if (pending && pending.callId === approval.callId) {
@@ -193,9 +137,117 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           ...(decision.modifiedArgs ? { modifiedArgs: decision.modifiedArgs } : {}),
           actor: 'tui',
           actorSurface: 'tui',
-        }).catch(() => {});
+        }).catch((error: unknown) => {
+          // The card is already cleared, so without this the answer would vanish and the tool call would keep waiting.
+          params.notify?.(`[Approval] Your answer for ${current.request.tool} was not recorded (${error instanceof Error ? error.message : String(error)}). The request is asked again if it is still waiting.`);
+          defer(() => handleBrokerApprovalChange(params));
+        });
       }, broker),
     } as PendingPermissionState);
     render();
   });
+}
+
+/**
+ * Re-offer every waiting record after a change. A broker-originated ask that
+ * published while another card was up was skipped by the deferred open above,
+ * and nothing published for it again, so without a sweep it never got a card.
+ */
+export function sweepBrokerApprovals(
+  params: Omit<BrokerApprovalChangeParams, 'approval'> & {
+    readonly listApprovals: () => readonly BrokerApprovalChangeParams['approval'][];
+  },
+): void {
+  const { listApprovals, ...rest } = params;
+  for (const waiting of listApprovals()) {
+    if (isActiveStatus(waiting.status)) handleBrokerApprovalChange({ ...rest, approval: waiting });
+  }
+}
+
+/** A broker record, as far as settling a queued local ask needs it. */
+export interface SettledApprovalRecord {
+  readonly callId: string;
+  readonly status: string;
+  readonly updatedAt: number;
+  readonly resolvedAt?: number | undefined;
+  readonly decision?: {
+    readonly approved: boolean;
+    readonly remember?: boolean | undefined;
+    readonly rememberTier?: RememberTier | undefined;
+    readonly reason?: string | undefined;
+    readonly modifiedArgs?: Record<string, unknown> | undefined;
+  } | undefined;
+}
+
+/**
+ * The answer another surface already gave to a local ask that was waiting for its
+ * card, or null when none did. Only a record settled after the ask was queued
+ * counts (a call id from an earlier turn must not answer a new ask), the newest
+ * wins, and the whole decision is carried over so a per-hunk or amended approval
+ * is applied as granted, not as the original arguments.
+ */
+export function settledAskDecision(
+  records: readonly SettledApprovalRecord[],
+  callId: string,
+  queuedAt: number,
+): PermissionPromptDecision | null {
+  let newest: SettledApprovalRecord | null = null;
+  for (const record of records) {
+    if (record.callId !== callId || isActiveStatus(record.status)) continue;
+    const settledAt = record.resolvedAt ?? record.updatedAt;
+    if (settledAt < queuedAt) continue;
+    if (newest === null || settledAt >= (newest.resolvedAt ?? newest.updatedAt)) newest = record;
+  }
+  if (newest === null) return null;
+  const decision = newest.decision;
+  const approved = newest.status === 'approved' && decision?.approved === true;
+  return {
+    approved,
+    remember: decision?.remember ?? false,
+    ...(decision?.rememberTier ? { rememberTier: decision.rememberTier } : {}),
+    ...(decision?.reason ? { reason: decision.reason } : {}),
+    ...(approved && decision?.modifiedArgs ? { modifiedArgs: decision.modifiedArgs } : {}),
+  };
+}
+
+/** The surface's single approval card slot, as the local-ask queue reads it. */
+export interface ApprovalCardQueue<T> {
+  /** Show this ask now, or after the cards ahead of it are answered. */
+  readonly offer: (entry: T) => void;
+  /** Call whenever the card slot may have emptied. */
+  readonly next: () => void;
+  readonly size: () => number;
+}
+
+/**
+ * One card is on screen at a time. A second local ask arriving while a card is
+ * up waits its turn instead of replacing it: a replaced card's resolver is gone,
+ * so the tool call that raised it would wait forever. The same ask arriving
+ * again (its broker card opened a microtask before its local prompt) replaces
+ * its own card. `show` returns false when the ask no longer needs a card (it
+ * was settled elsewhere while waiting), and the next one is offered instead.
+ */
+export function createApprovalCardQueue<T>(deps: {
+  readonly getPending: () => { readonly callId: string } | null;
+  readonly callIdOf: (entry: T) => string;
+  readonly show: (entry: T) => boolean;
+}): ApprovalCardQueue<T> {
+  const waiting: T[] = [];
+  const next = (): void => {
+    while (deps.getPending() === null && waiting.length > 0) {
+      if (deps.show(waiting.shift()!)) return;
+    }
+  };
+  return {
+    offer: (entry) => {
+      const pending = deps.getPending();
+      if (pending === null || pending.callId === deps.callIdOf(entry)) {
+        if (!deps.show(entry)) next();
+        return;
+      }
+      waiting.push(entry);
+    },
+    next,
+    size: () => waiting.length,
+  };
 }

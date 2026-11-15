@@ -11,6 +11,9 @@ import { DeliveryError, DeliveryQueue } from './delivery.js';
 import type { DeliveryQueueConfig, IntegrationQueueStatus } from './delivery.js';
 import { snapshotQueueStatus } from './delivery.js';
 import { ServiceRegistry } from '../config/service-registry.js';
+import type { ConfigManager } from '../config/manager.js';
+import type { SecretsManager } from '../config/secrets.js';
+import { resolveSecretInput } from '../config/secret-refs.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 
 const NOTIFICATION_EVENT_IDS: ReadonlySet<string> = new Set([
@@ -51,6 +54,8 @@ export class Notifier {
     delivery?: Partial<DeliveryQueueConfig> | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
     metadataOnly?: NotificationPrivacyReader | undefined;
+    /** Source of the integrations.delivery.* retry, backoff, dead-letter and SLO settings. */
+    configManager?: Pick<ConfigManager, 'get'> | null | undefined;
   }) {
     this.metadataOnly = options?.metadataOnly;
     this.slack = options?.slack;
@@ -58,6 +63,7 @@ export class Notifier {
     this._queue = new DeliveryQueue<NotificationEnvelope | string>({
       ...(options?.delivery ?? {}),
       featureFlags: options?.featureFlags,
+      configManager: options?.configManager,
       diagnosticMode: 'structural',
     });
   }
@@ -67,24 +73,48 @@ export class Notifier {
    */
   static async fromConfig(
     serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
-    options: { featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null; metadataOnly?: NotificationPrivacyReader } = {},
+    options: {
+      featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null;
+      metadataOnly?: NotificationPrivacyReader;
+      /**
+       * Supplies `surfaces.slack.botToken`, `surfaces.discord.botToken` (the
+       * tokens an account setup flow stores) and the integrations.delivery.*
+       * settings. Without it only the service registry and the environment are read.
+       */
+      configManager?: Pick<ConfigManager, 'get'> | null;
+      /** Resolves a config value that is a secret reference; defaults to {@link resolveSecretInput}. */
+      resolveConfigSecret?: (value: unknown) => Promise<string | null>;
+      /**
+       * Resolves the `goodvibes://secrets/...` references an account setup flow stores
+       * as bot tokens. Without it (or `resolveConfigSecret`) a stored reference cannot
+       * be read and the channel is not built from config.
+       */
+      secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null;
+    } = {},
   ): Promise<Notifier> {
+    const resolveConfigSecret = options.resolveConfigSecret ?? ((value: unknown) => resolveSecretInput(value, options.secretsManager
+      ? { resolveLocalSecret: (key) => options.secretsManager!.get(key), homeDirectory: options.secretsManager.getGlobalHome() }
+      : undefined));
     const [
       slackWebhookFromService,
       slackTokenFromService,
       discordWebhookFromService,
       discordTokenFromService,
+      slackTokenFromConfig,
+      discordTokenFromConfig,
     ] = await Promise.all([
       serviceRegistry.resolveSecret('slack', 'webhookUrl'),
       serviceRegistry.resolveSecret('slack', 'primary'),
       serviceRegistry.resolveSecret('discord', 'webhookUrl'),
       serviceRegistry.resolveSecret('discord', 'primary'),
+      options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.slack.botToken')) : null,
+      options.configManager ? resolveConfigSecret(options.configManager.get('surfaces.discord.botToken')) : null,
     ]);
 
     const slackWebhook = slackWebhookFromService ?? process.env.SLACK_WEBHOOK_URL;
-    const slackToken = slackTokenFromService ?? process.env.SLACK_BOT_TOKEN;
+    const slackToken = slackTokenFromService ?? slackTokenFromConfig ?? process.env.SLACK_BOT_TOKEN;
     const discordWebhook = discordWebhookFromService ?? process.env.DISCORD_WEBHOOK_URL;
-    const discordToken = discordTokenFromService ?? process.env.DISCORD_BOT_TOKEN;
+    const discordToken = discordTokenFromService ?? discordTokenFromConfig ?? process.env.DISCORD_BOT_TOKEN;
 
     const slack =
       slackWebhook || slackToken
@@ -96,7 +126,7 @@ export class Notifier {
         ? new DiscordIntegration(discordWebhook, discordToken)
         : undefined;
 
-    return new Notifier({ slack, discord, featureFlags: options.featureFlags, metadataOnly: options.metadataOnly });
+    return new Notifier({ slack, discord, featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager: options.configManager });
   }
 
   // -------------------------------------------------------------------------
@@ -131,14 +161,30 @@ export class Notifier {
   }
 
   private async deliverNotification(event: string, envelope: NotificationEnvelope): Promise<void> {
+    // Every channel is attempted, in order: a Slack failure must not cost the
+    // Discord copy. A failure still reaches the caller once all were tried.
+    // A 'retrying' outcome is accepted: the queue still holds the message and
+    // will resend it. 'dead_letter' means the queue gave up, and the dead-letter
+    // list is in memory only, so the caller is told.
+    const failures: unknown[] = [];
+    const attempt = async (channel: 'slack' | 'discord', send: (text: string) => Promise<void>): Promise<void> => {
+      try {
+        const outcome = await this._queue.enqueue(channel, event, envelope, () => this.postEnvelope(envelope, send));
+        if (outcome === 'dead_letter') {
+          failures.push(new DeliveryError(`The ${channel} notification could not be delivered and was moved to the dead-letter list; replayDeadLetters() resends it while this process runs.`, 'terminal'));
+        }
+      } catch (error) { failures.push(error); }
+    };
     if (this.slack) {
       const slack = this.slack;
-      await this._queue.enqueue('slack', event, envelope, () => this.postEnvelope(envelope, (text) => slack.postWebhook(text)));
+      await attempt('slack', (text) => slack.postWebhook(text));
     }
     if (this.discord) {
       const discord = this.discord;
-      await this._queue.enqueue('discord', event, envelope, () => this.postEnvelope(envelope, (text) => discord.postWebhook(text)));
+      await attempt('discord', (text) => discord.postWebhook(text));
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, 'Notification delivery failed on more than one channel');
   }
 
   /**

@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureContractInput, contractInputPath, materializeContractInput } from '../platform/src/platform/contract/input-snapshot.js';
@@ -10,7 +10,7 @@ import type { Contract } from '../platform/src/platform/contract/types.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.js';
 import { probeCapturedExecAvailability, type CapturedExecAuthority } from '../platform/src/platform/tools/exec/captured-exec.js';
-import { createCapturedReplHistory, createCapturedReplTool, disposeCapturedReplHistory, isCapturedReplTool } from '../platform/src/platform/tools/repl/captured.js';
+import { createCapturedReplHistory, createCapturedReplTool, disposeCapturedReplHistory, isCapturedReplTool, resolveEvalTimeoutMs } from '../platform/src/platform/tools/repl/captured.js';
 import { createReplTool } from '../platform/src/platform/tools/repl/index.js';
 import { capturedReplScript } from '../platform/src/platform/tools/repl/captured-script.js';
 import { capturedInputTool } from '../platform/src/platform/tools/shared/captured-input-tools.js';
@@ -23,6 +23,22 @@ afterEach(() => {
   try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
   finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
 });
+/** Resolves when the child has ended, however it ended. */
+function ended(child: childProcess.ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => child.once('close', () => resolve()));
+}
+/** Records the contained evaluation's process so a test can wait for it to end instead of sleeping. */
+function watchContainedEvaluation(onStart?: () => void): { children: childProcess.ChildProcess[]; restore: () => void } {
+  const originalSpawn = childProcess.spawn;
+  const children: childProcess.ChildProcess[] = [];
+  const tap = spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
+    const child = originalSpawn(...args);
+    if (String(args[0]) === '/usr/bin/bwrap' && JSON.stringify(args[1]).includes('.goodvibes-repl-')) { children.push(child); onStart?.(); }
+    return child;
+  }) as typeof childProcess.spawn);
+  return { children, restore: () => tap.mockRestore() };
+}
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
   throw new Error('required captured REPL containment backend is unavailable');
@@ -102,17 +118,20 @@ for (const side of ['original', 'copy'] as const) {
     const f = await fixture(path => path !== denied);
     denied = join(side === 'original' ? f.owner : f.root, 'private.ts');
     symlinkSync(join(f.root, 'private.ts'), join(f.root, 'alias.ts'));
+    // Captured bytes are retained through open(), not readFile(), so that is the call watched.
     const opened: string[] = [];
-    const read = fs.readFile;
-    const tap = spyOn(fs, 'readFile').mockImplementation(((path, ...args) => {
-      opened.push(String(path)); return read(path, ...args);
-    }) as typeof fs.readFile);
+    const open = fs.open;
+    const tap = spyOn(fs, 'open').mockImplementation(((path, ...args) => {
+      opened.push(String(path)); return open(path, ...args);
+    }) as typeof fs.open);
     try {
       const result = await f.tool.execute({ mode: 'eval', expression: 'import { value } from "./allowed.ts"; const fs = require("node:fs"); [value, fs.existsSync("private.ts"), fs.existsSync("alias.ts")]' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('CAPTURED_ALLOWED');
       expect(JSON.parse(result.output!).result).toContain('false, false');
       expect(JSON.stringify(result)).not.toContain('DENIED_REPL_BYTES');
+      // Positive control: the spy sees the allowed file being captured.
+      expect(opened.some((path) => path.endsWith('/allowed.ts'))).toBe(true);
       expect(opened).not.toContain(join(f.root, 'private.ts'));
       expect(opened).not.toContain(join(f.owner, 'private.ts'));
       expect(opened).not.toContain(join(f.root, 'alias.ts'));
@@ -204,6 +223,7 @@ test('unsupported runtimes do not start evaluation or import host history', asyn
   writeFileSync(history, '[{"result":"UNRELATED_HISTORY_BYTES"}]');
   const spawn = spyOn(childProcess, 'spawn');
   const read = spyOn(fs, 'readFile');
+  const open = spyOn(fs, 'open');
   try {
     expect(JSON.parse((await f.tool.execute({ mode: 'history' })).output!)).toEqual({ count: 0, history: [] });
     for (const args of ['python', 'sql', 'graphql'].map(runtime => ({ mode: 'eval', runtime, expression: '42' }))) {
@@ -218,7 +238,8 @@ test('unsupported runtimes do not start evaluation or import host history', asyn
     expect(JSON.stringify(result)).not.toContain('UNRELATED_HISTORY_BYTES');
     expect(spawn).not.toHaveBeenCalled();
     expect(read.mock.calls.some(args => String(args[0]) === history)).toBe(false);
-  } finally { spawn.mockRestore(); read.mockRestore(); }
+    expect(open.mock.calls.some(args => [history, process.execPath].includes(String(args[0])))).toBe(false);
+  } finally { spawn.mockRestore(); read.mockRestore(); open.mockRestore(); }
 });
 
 test.skipIf(!availability.available)('history retains actual success, error and refusal metadata across registry reconstruction', async () => {
@@ -268,7 +289,28 @@ test('same-root authorities and resumed bindings cannot select a previous journa
   expect(JSON.parse((await createCapturedReplTool({ ...f.binding, authority: rebound }).execute({ mode: 'history' })).output!)).toEqual({ count: 0, history: [] });
 });
 
-test('an attempt cancelled after backend completion is not replayed from history', async () => {
+test('a run leaves no journal file behind, used or not, and history still reads while it runs', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'repl-home-')); roots.push(home);
+  const previous = process.env.GOODVIBES_HOME;
+  process.env.GOODVIBES_HOME = home;
+  try {
+    const journal = join(home, '.goodvibes', 'repl-history');
+    const files = (): string[] => existsSync(journal) ? readdirSync(journal) : [];
+    const f = await fixture();
+    await f.raw.execute({ mode: 'eval', runtime: 'python', expression: 'JOURNALED_ATTEMPT' });
+    expect(files()).toEqual([]);
+    expect((await f.raw.execute({ mode: 'history' })).output).toContain('JOURNALED_ATTEMPT');
+    disposeCapturedReplHistory(f.historyOwner);
+    expect(files()).toEqual([]);
+    const unused = await fixture();
+    disposeCapturedReplHistory(unused.historyOwner);
+    expect(files()).toEqual([]);
+  } finally {
+    if (previous === undefined) delete process.env.GOODVIBES_HOME; else process.env.GOODVIBES_HOME = previous;
+  }
+});
+
+test('an attempt whose call signal aborts after it was recorded is not replayed from history', async () => {
   const f = await fixture();
   const controller = new AbortController();
   await f.raw.execute({ mode: 'eval', runtime: 'python', expression: 'CANCELLED_BEFORE_DELIVERY' }, { signal: controller.signal });
@@ -378,21 +420,20 @@ for (const interruption of ['abort', 'revoke', 'permission'] as const) {
     let allowed = true;
     const f = await fixture(() => allowed);
     const controller = new AbortController();
-    const originalSpawn = childProcess.spawn;
     let started = false;
-    const tap = spyOn(childProcess, 'spawn').mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
-      const child = originalSpawn(...args);
-      if (String(args[0]) === '/usr/bin/bwrap' && JSON.stringify(args[1]).includes('.goodvibes-repl-')) {
-        started = true;
-        setTimeout(() => { if (interruption === 'abort') controller.abort(); else if (interruption === 'revoke') revokeContractInputAuthority(f.binding.authority); else allowed = false; }, 50);
-      }
-      return child;
-    }) as typeof childProcess.spawn);
+    const watch = watchContainedEvaluation(() => {
+      started = true;
+      setTimeout(() => { if (interruption === 'abort') controller.abort(); else if (interruption === 'revoke') revokeContractInputAuthority(f.binding.authority); else allowed = false; }, 50);
+    });
+    const tap = { mockRestore: watch.restore };
     try {
       const result = await f.tool.execute({ mode: 'eval', expression: 'console.log("EARLY_REPL_OUTPUT"); await Bun.sleep(500); require("node:fs").writeFileSync("late.txt", "LATE_REPL_OUTPUT"); "LATE_REPL_OUTPUT"' }, { signal: controller.signal });
       expect(started).toBe(true); expect(result.success).toBe(false);
       expect(JSON.stringify(result)).not.toContain('EARLY_REPL_OUTPUT');
       expect(JSON.stringify(result)).not.toContain('LATE_REPL_OUTPUT');
+      // The snippet would finish cleanly on its own; only a kill ends it any other way.
+      await ended(watch.children[0]!);
+      expect(watch.children[0]!.exitCode).not.toBe(0);
       expect(existsSync(join(f.root, 'late.txt'))).toBe(false);
       if (interruption === 'abort')
         expect(JSON.parse((await f.raw.execute({ mode: 'history' })).output!)).toEqual({ count: 0, history: [] });
@@ -424,9 +465,16 @@ test.skipIf(!availability.available)('revocation of a previously read file preve
 
 test.skipIf(!availability.available)('the execution deadline withholds partial output and leaves no late member changes', async () => {
   const f = await fixture();
-  const result = await f.tool.execute({ mode: 'eval', timeout_ms: 100, expression: 'console.log("PARTIAL_TIMEOUT_OUTPUT"); await Bun.sleep(1000); require("node:fs").writeFileSync("late-timeout.txt", "TOO_LATE")' });
+  const watch = watchContainedEvaluation();
+  let result: Awaited<ReturnType<typeof f.tool.execute>>;
+  try {
+    result = await f.tool.execute({ mode: 'eval', timeout_ms: 100, expression: 'console.log("PARTIAL_TIMEOUT_OUTPUT"); await Bun.sleep(1000); require("node:fs").writeFileSync("late-timeout.txt", "TOO_LATE")' });
+  } finally { watch.restore(); }
   expect(result.success).toBe(false); expect(result.error).toContain('timed out');
   expect(JSON.stringify(result)).not.toContain('PARTIAL_TIMEOUT_OUTPUT');
+  // The snippet would finish cleanly on its own; only a kill ends it any other way.
+  await ended(watch.children[0]!);
+  expect(watch.children[0]!.exitCode).not.toBe(0);
   expect(existsSync(join(f.root, 'late-timeout.txt'))).toBe(false);
   const history = JSON.parse((await f.raw.execute({ mode: 'history' })).output!);
   expect(history.count).toBe(1);
@@ -456,9 +504,25 @@ test('unsupported host capability is surfaced without host fallback', async () =
   expect((await fs.readdir(f.root)).some(name => name.startsWith('.goodvibes-repl-'))).toBe(false);
 });
 
-test.skipIf(!availability.available)('default REPL execution outlives the retired ten-second deadline', async () => {
+test('the default eval deadline outlives ten seconds, zero waits, and anything else invalid is refused', () => {
+  expect(resolveEvalTimeoutMs(undefined)).toBeGreaterThan(10_000);
+  expect(resolveEvalTimeoutMs(0)).toBe(0);
+  expect(resolveEvalTimeoutMs(250)).toBe(250);
+  for (const invalid of [-1, 1.5, '100', Number.NaN]) expect(resolveEvalTimeoutMs(invalid)).toBeUndefined();
+});
+
+test.skipIf(!availability.available)('a snippet that exits non-zero without error output is reported as its exit, not as an authority hold', async () => {
   const f = await fixture();
-  const result = await f.tool.execute({ mode: 'eval', expression: 'await Bun.sleep(10_100); "completed"' });
-  expect(result.success).toBe(true);
-  expect(JSON.parse(result.output!).result).toBe('completed\n');
+  const result = await f.tool.execute({ mode: 'eval', expression: 'process.exit(3)' });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('exited with code 3');
+  expect(result.error).not.toContain('authority');
 }, 20_000);
+
+test('an eval that names no timeout is bounded; 0 still waits, and a bad value is refused', async () => {
+  const { resolveEvalTimeoutMs } = await import('../platform/src/platform/tools/repl/captured.js');
+  expect(resolveEvalTimeoutMs(undefined)).toBeGreaterThan(0);
+  expect(resolveEvalTimeoutMs(0)).toBe(0);
+  expect(resolveEvalTimeoutMs(2500)).toBe(2500);
+  for (const bad of [-1, 1.5, '5', Number.POSITIVE_INFINITY]) expect(resolveEvalTimeoutMs(bad)).toBeUndefined();
+});

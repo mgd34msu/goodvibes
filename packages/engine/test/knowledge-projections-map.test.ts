@@ -878,7 +878,10 @@ describe('knowledge generated projections and maps', () => {
     expect(allPacket?.items.map((item) => item.id)).toContain(haNode.id);
   });
 
-  test('default knowledge views reject unscoped source-derived extension records', async () => {
+  // 'structure' leaves every record at the fake's default 0.99 verdict, so only the structural scoping can exclude
+  // them; the records whose exclusion is the model's scope/priority verdict are asserted only in 'verdicts' mode,
+  // which scripts a settled "no" for their titles.
+  for (const mode of ['structure', 'verdicts'] as const) test(`default knowledge views reject unscoped source-derived extension records (${mode})`, async () => {
     const { store, artifactStore } = createStores();
     const baseSource = await store.upsertSource({
       connectorId: 'manual',
@@ -1269,9 +1272,12 @@ describe('knowledge generated projections and maps', () => {
     }), disposeKnowledgeService);
     const projectionService = new KnowledgeProjectionService(store, artifactStore);
 
-    const scope = [
+    const verdicts = mode === 'verdicts';
+    const positiveControls = [
       ['source', 'Base Knowledge Manual', 0.99],
       ['node', 'Base Widget', 0.99],
+    ] satisfies NonNullable<Parameters<typeof answerReadings.set>[0]['scope']>;
+    const scriptedRejections = [
       ['source', 'Navigation Menu', 0.01],
       ['source', 'Cohere-Labs-Community/language-confusion - GitHub', 0.01],
       ['source', 'Specification: GoodVibes Agents with YAML frontmatter', 0.01],
@@ -1285,10 +1291,11 @@ describe('knowledge generated projections and maps', () => {
       ['issue', 'No knowledge answer available for: What smart TV features does it have?', 0.01],
       ['issue', 'No knowledge answer available for: BRAVIA XBR-55X850B Home Assistant', 0.01],
     ] satisfies NonNullable<Parameters<typeof answerReadings.set>[0]['scope']>;
-    const scopeByView = [
+    const scope = verdicts ? [...positiveControls, ...scriptedRejections] : positiveControls;
+    const scopeByView = verdicts ? [
       ['node', 'DisplaySpecifications', 'ordinary', 0.01],
       ['node', 'DisplaySpecifications', 'all', 0.99],
-    ] satisfies NonNullable<Parameters<typeof answerReadings.set>[0]['scopeByView']>;
+    ] satisfies NonNullable<Parameters<typeof answerReadings.set>[0]['scopeByView']> : [];
     answerReadings.set({ scope, scopeByView });
 
     const ordinaryNodeIds = (await service.queryNodes({ limit: 100 })).items.map(node => node.id);
@@ -1297,50 +1304,50 @@ describe('knowledge generated projections and maps', () => {
     expect(ordinaryNodeIds).not.toContain(explicitDefaultGap.id);
     expect(ordinaryNodeIds).not.toContain(edgeOnlyTopic.id);
     expect(ordinaryNodeIds).not.toContain(edgeOnlyDomain.id);
-    expect(ordinaryNodeIds).not.toContain(orphanCatalogTopic.id);
-    expect(ordinaryNodeIds).not.toContain(orphanAnswerGap.id);
-    expect(ordinaryNodeIds).not.toContain(tvFact.id);
-    expect(ordinaryNodeIds).not.toContain(productNavigationFact.id);
-    expect(ordinaryNodeIds).not.toContain(productNavigationMemory.id);
-    expect(ordinaryNodeIds).not.toContain(orphanNavigationMemory.id);
-    expect(ordinaryNodeIds).not.toContain(legacyAgentWikiNode.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(orphanCatalogTopic.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(orphanAnswerGap.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(tvFact.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(productNavigationFact.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(productNavigationMemory.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(orphanNavigationMemory.id);
+    if (verdicts) expect(ordinaryNodeIds).not.toContain(legacyAgentWikiNode.id);
     const ordinarySourceIds = (await service.querySources({ limit: 100 })).items.map(source => source.id);
-    expect(ordinarySourceIds).not.toContain(agentAmbiguitySource.id);
+    if (verdicts) expect(ordinarySourceIds).not.toContain(agentAmbiguitySource.id);
     for (const source of productNavigationSources) {
-      expect(ordinarySourceIds).not.toContain(source.id);
+      if (verdicts) expect(ordinarySourceIds).not.toContain(source.id);
     }
-    expect(ordinarySourceIds).not.toContain(githubRepairSource.id);
-    expect(ordinarySourceIds).not.toContain(legacyAgentWikiSource.id);
+    if (verdicts) expect(ordinarySourceIds).not.toContain(githubRepairSource.id);
+    if (verdicts) expect(ordinarySourceIds).not.toContain(legacyAgentWikiSource.id);
     const allNodeIds = (await service.queryNodes({ limit: 100, includeAllSpaces: true })).items.map(node => node.id);
     expect(allNodeIds).toContain(leakedNode.id);
-    expect(allNodeIds).not.toContain(explicitDefaultGap.id);
+    if (verdicts) expect(allNodeIds).not.toContain(explicitDefaultGap.id);
     expect(allNodeIds).toContain(edgeOnlyTopic.id);
     expect(allNodeIds).toContain(edgeOnlyDomain.id);
     expect(allNodeIds).toContain(orphanCatalogTopic.id);
-    expect(allNodeIds).not.toContain(orphanAnswerGap.id);
-    expect(allNodeIds).not.toContain(tvFact.id);
-    expect(allNodeIds).not.toContain(productNavigationFact.id);
-    expect(allNodeIds).not.toContain(productNavigationMemory.id);
-    expect(allNodeIds).not.toContain(orphanNavigationMemory.id);
-    expect(allNodeIds).not.toContain(legacyAgentWikiNode.id);
+    if (verdicts) expect(allNodeIds).not.toContain(orphanAnswerGap.id);
+    if (verdicts) expect(allNodeIds).not.toContain(tvFact.id);
+    if (verdicts) expect(allNodeIds).not.toContain(productNavigationFact.id);
+    if (verdicts) expect(allNodeIds).not.toContain(productNavigationMemory.id);
+    if (verdicts) expect(allNodeIds).not.toContain(orphanNavigationMemory.id);
+    if (verdicts) expect(allNodeIds).not.toContain(legacyAgentWikiNode.id);
     const allSourceIds = (await service.querySources({ limit: 100, includeAllSpaces: true })).items.map(source => source.id);
-    expect(allSourceIds).not.toContain(agentAmbiguitySource.id);
+    if (verdicts) expect(allSourceIds).not.toContain(agentAmbiguitySource.id);
     for (const source of productNavigationSources) {
-      expect(allSourceIds).not.toContain(source.id);
+      if (verdicts) expect(allSourceIds).not.toContain(source.id);
     }
-    expect(allSourceIds).not.toContain(githubRepairSource.id);
-    expect(allSourceIds).not.toContain(legacyAgentWikiSource.id);
+    if (verdicts) expect(allSourceIds).not.toContain(githubRepairSource.id);
+    if (verdicts) expect(allSourceIds).not.toContain(legacyAgentWikiSource.id);
     const homeNodeIds = (await service.queryNodes({ limit: 100, knowledgeSpaceId: 'homeassistant:test' })).items.map(node => node.id);
     expect(homeNodeIds).toContain(edgeOnlyTopic.id);
     expect(homeNodeIds).toContain(edgeOnlyDomain.id);
     const ordinaryIssueIds = (await service.queryIssues({ limit: 100 })).items.map(issue => issue.id);
     expect(ordinaryIssueIds).not.toContain(leakedIssue.id);
     expect(ordinaryIssueIds).not.toContain(explicitDefaultIssue.id);
-    expect(ordinaryIssueIds).not.toContain(orphanAnswerIssue.id);
+    if (verdicts) expect(ordinaryIssueIds).not.toContain(orphanAnswerIssue.id);
     const allIssueIds = (await service.queryIssues({ limit: 100, includeAllSpaces: true })).items.map(issue => issue.id);
-    expect(allIssueIds).not.toContain(leakedIssue.id);
-    expect(allIssueIds).not.toContain(explicitDefaultIssue.id);
-    expect(allIssueIds).not.toContain(orphanAnswerIssue.id);
+    if (verdicts) expect(allIssueIds).not.toContain(leakedIssue.id);
+    if (verdicts) expect(allIssueIds).not.toContain(explicitDefaultIssue.id);
+    if (verdicts) expect(allIssueIds).not.toContain(orphanAnswerIssue.id);
 
     const defaultTargets = await projectionService.listTargets(100);
     const defaultPacket = await buildKnowledgePacket(packetContext(store), 'BRAVIA Home Assistant', [], 10);
@@ -1354,47 +1361,47 @@ describe('knowledge generated projections and maps', () => {
     expect(defaultTargets.map((target) => target.itemId)).not.toContain(leakedNode.id);
     expect(defaultTargets.map((target) => target.itemId)).not.toContain(edgeOnlyTopic.id);
     expect(defaultTargets.map((target) => target.itemId)).not.toContain(edgeOnlyDomain.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanCatalogTopic.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanAnswerGap.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(tvFact.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(productNavigationFact.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(productNavigationMemory.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanNavigationMemory.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(githubRepairSource.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(legacyAgentWikiNode.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanCatalogTopic.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanAnswerGap.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(tvFact.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(productNavigationFact.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(productNavigationMemory.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanNavigationMemory.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(githubRepairSource.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(legacyAgentWikiNode.id);
     expect(defaultTargets.map((target) => target.itemId)).not.toContain(leakedIssue.id);
     expect(defaultTargets.map((target) => target.itemId)).not.toContain(explicitDefaultIssue.id);
-    expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanAnswerIssue.id);
+    if (verdicts) expect(defaultTargets.map((target) => target.itemId)).not.toContain(orphanAnswerIssue.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(leakedNode.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(leakedIssue.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(explicitDefaultGap.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(edgeOnlyTopic.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(edgeOnlyDomain.id);
-    expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanCatalogTopic.id);
-    expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanAnswerGap.id);
+    if (verdicts) expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanCatalogTopic.id);
+    if (verdicts) expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanAnswerGap.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(tvFact.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(productNavigationFact.id);
-    expect(defaultPacket?.items.map((item) => item.id)).not.toContain(productNavigationMemory.id);
-    expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanNavigationMemory.id);
+    if (verdicts) expect(defaultPacket?.items.map((item) => item.id)).not.toContain(productNavigationMemory.id);
+    if (verdicts) expect(defaultPacket?.items.map((item) => item.id)).not.toContain(orphanNavigationMemory.id);
     expect(defaultPacket?.items.map((item) => item.id)).not.toContain(githubRepairSource.id);
-    expect(defaultPacket?.items.map((item) => item.id)).not.toContain(legacyAgentWikiNode.id);
+    if (verdicts) expect(defaultPacket?.items.map((item) => item.id)).not.toContain(legacyAgentWikiNode.id);
     expect(defaultMap.nodes.map((node) => node.id)).not.toContain(leakedNode.id);
     expect(defaultMap.nodes.map((node) => node.id)).not.toContain(leakedIssue.id);
     expect(defaultMap.nodes.map((node) => node.id)).not.toContain(explicitDefaultIssue.id);
     expect(defaultMap.nodes.map((node) => node.id)).not.toContain(edgeOnlyTopic.id);
     expect(defaultMap.nodes.map((node) => node.id)).not.toContain(edgeOnlyDomain.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanCatalogTopic.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanAnswerGap.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(tvFact.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(agentAmbiguitySource.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanCatalogTopic.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanAnswerGap.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(tvFact.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(agentAmbiguitySource.id);
     for (const source of productNavigationSources) {
-      expect(defaultMap.nodes.map((node) => node.id)).not.toContain(source.id);
+      if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(source.id);
     }
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(productNavigationFact.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(productNavigationMemory.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanNavigationMemory.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(githubRepairSource.id);
-    expect(defaultMap.nodes.map((node) => node.id)).not.toContain(legacyAgentWikiNode.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(productNavigationFact.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(productNavigationMemory.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(orphanNavigationMemory.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(githubRepairSource.id);
+    if (verdicts) expect(defaultMap.nodes.map((node) => node.id)).not.toContain(legacyAgentWikiNode.id);
 
     const defaultAnswer = await service.ask({
       query: 'What features does the BRAVIA XBR-55X850B have?',
@@ -1405,30 +1412,33 @@ describe('knowledge generated projections and maps', () => {
     expect(defaultAnswer.results.map((result) => result.id)).not.toContain(leakedNode.id);
     expect(defaultAnswer.answer.sources.map((source) => source.id)).not.toContain(haSource.id);
     expect(defaultAnswer.answer.linkedObjects.map((node) => node.id)).not.toContain(leakedNode.id);
-    answerReadings.set({ scope, scopeByView, initialEvidenceDefault: 0.01 }); // This authored query has no relevant permitted default-space evidence.
+    // With scripted verdicts this authored query has no relevant permitted default-space evidence.
+    answerReadings.set({ scope, scopeByView, ...(verdicts ? { initialEvidenceDefault: 0.01 } : {}) });
     const agentAnswer = await service.ask({
       query: 'What is GoodVibes Agent?',
       includeSources: true,
       includeLinkedObjects: true,
       includeConfidence: true,
     });
-    expect(agentAnswer.answer.sources.map((source) => source.id)).not.toContain(agentAmbiguitySource.id);
+    if (verdicts) expect(agentAnswer.answer.sources.map((source) => source.id)).not.toContain(agentAmbiguitySource.id);
     for (const source of productNavigationSources) {
-      expect(agentAnswer.answer.sources.map((entry) => entry.id)).not.toContain(source.id);
+      if (verdicts) expect(agentAnswer.answer.sources.map((entry) => entry.id)).not.toContain(source.id);
     }
-    expect(agentAnswer.answer.sources.map((source) => source.id)).not.toContain(legacyAgentWikiSource.id);
+    if (verdicts) expect(agentAnswer.answer.sources.map((source) => source.id)).not.toContain(legacyAgentWikiSource.id);
     expect(agentAnswer.answer.facts.map((fact) => fact.id)).not.toContain(tvFact.id);
     expect(agentAnswer.answer.facts.map((fact) => fact.id)).not.toContain(productNavigationFact.id);
     expect(agentAnswer.results.map((result) => result.id)).not.toContain(legacyAgentWikiNode.id);
     expect(agentAnswer.results.map((result) => result.id)).not.toContain(productNavigationFact.id);
     expect(agentAnswer.results.map((result) => result.id)).not.toContain(productNavigationMemory.id);
     expect(agentAnswer.results.map((result) => result.id)).not.toContain(orphanNavigationMemory.id);
-    expect(agentAnswer.results.map((result) => result.id)).not.toContain(githubRepairSource.id);
-    expect(agentAnswer.results).toEqual([]);
-    expect(agentAnswer.answer.sources).toEqual([]);
-    expect(agentAnswer.answer.facts).toEqual([]);
-    expect(agentAnswer.answer.confidence).toBe(0);
-    expect(agentAnswer.answer.gaps).toEqual([]);
+    if (verdicts) expect(agentAnswer.results.map((result) => result.id)).not.toContain(githubRepairSource.id);
+    if (verdicts) {
+      expect(agentAnswer.results).toEqual([]);
+      expect(agentAnswer.answer.sources).toEqual([]);
+      expect(agentAnswer.answer.facts).toEqual([]);
+      expect(agentAnswer.answer.confidence).toBe(0);
+      expect(agentAnswer.answer.gaps).toEqual([]);
+    }
   });
 });
 

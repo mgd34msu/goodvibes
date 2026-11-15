@@ -32,7 +32,6 @@ import {
   belongsToSpace,
   isGeneratedPageSource,
   readRecord,
-  resolveHomeGraphSpace,
   uniqueStrings,
 } from './helpers.js';
 import { refreshHomeGraphQualityIssues } from './quality.js';
@@ -81,7 +80,7 @@ import {
   runHomeGraphSyncSelfImprovementPump,
 } from './sync-self-improvement.js';
 import { readHomeGraphSearchSelection } from './search-judgments.js';
-import { resolveReadableHomeGraphSpace } from './space-selection.js';
+import { resolveHomeGraphResetSpace, resolveReadableHomeGraphSpace, resolveWritableHomeGraphSpace } from './space-selection.js';
 import { runHomeGraphSnapshotSync } from './sync.js';
 import { autoLinkExistingHomeGraphSources, extractHomeGraphArtifact, prepareHomeGraphArtifactExtraction, storeHomeGraphArtifactExtraction } from './extraction.js';
 import type {
@@ -95,7 +94,10 @@ import type {
 
 export class HomeGraphService {
   private readonly autoLinkController = new AbortController();
-  private activeReindex: Promise<HomeGraphReindexResult> | null = null;
+  private readonly activeReindex = new Map<string, { readonly key: string; readonly run: Promise<HomeGraphReindexResult> }>();
+  private readonly syncTails = new Map<string, Promise<void>>();
+  private readonly resettingSpaces = new Set<string>();
+  private readonly spaceWrites = new Map<string, Set<Promise<unknown>>>();
   private pendingSyncSelfImprove = new Set<string>();
   private syncSelfImproveControllers = new Map<string, AbortController>();
   private syncSelfImproveRuns = new Map<string, Promise<void>>();
@@ -155,16 +157,29 @@ export class HomeGraphService {
   }
 
   async syncSnapshot(input: HomeGraphSnapshotInput): Promise<HomeGraphSyncResult> {
-    return this.ownForegroundOperation(() => withConfiguredDecisionModelPolicy(async () => {
+    return this.ownForegroundOperation((writes) => withConfiguredDecisionModelPolicy(async () => {
       this.autoLinkController.signal.throwIfAborted();
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const result = await runHomeGraphSnapshotSync({
-        store: this.store,
-        artifactStore: this.artifactStore,
-        snapshot: input,
-        signal: this.autoLinkController.signal,
+      const target = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(target.spaceId);
+      // One snapshot per space at a time: a retried sync waits for the first
+      // instead of racing it through half-written identities.
+      const previous = this.syncTails.get(target.spaceId) ?? Promise.resolve();
+      const turn = previous.then(async () => {
+        this.autoLinkController.signal.throwIfAborted();
+        return runHomeGraphSnapshotSync({
+          store: this.store,
+          artifactStore: this.artifactStore,
+          snapshot: { ...input, knowledgeSpaceId: target.spaceId },
+          signal: this.autoLinkController.signal,
+        });
       });
+      const tail = turn.then(() => undefined, () => undefined);
+      this.syncTails.set(target.spaceId, tail);
+      let result: HomeGraphSyncResult;
+      try { result = await turn; }
+      finally { if (this.syncTails.get(target.spaceId) === tail) this.syncTails.delete(target.spaceId); }
       this.autoLinkController.signal.throwIfAborted();
       this.scheduleSyncSelfImprovement(result.spaceId, result.installationId);
       return result;
@@ -172,7 +187,7 @@ export class HomeGraphService {
   }
 
   async ingestUrl(input: HomeGraphIngestUrlInput, ownership: KnowledgeIngestOwnership = {}): Promise<HomeGraphIngestResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       return withConfiguredDecisionModelPolicy(async () => {
         const { signal: callerSignal, assertCurrent, onCommitted, deferSemanticEnrichment } = ownership;
         const signal = callerSignal ? AbortSignal.any([this.autoLinkController.signal, callerSignal]) : this.autoLinkController.signal;
@@ -184,8 +199,10 @@ export class HomeGraphService {
         };
         current();
         this.requireAdmission('home-graph url ingestion');
-        const { spaceId, installationId } = resolveHomeGraphSpace(input), url = input.url;
         await this.store.init(); current();
+        const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input), url = input.url;
+        writes.begin(spaceId);
+        this.assertIngestTarget(spaceId, input.target);
         const identity = createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'url', locator: 'uri', value: url });
         const publication = await this.artifactStore.createForPublication({
           uri: url,
@@ -214,12 +231,14 @@ export class HomeGraphService {
   }
 
   async ingestNote(input: HomeGraphIngestNoteInput): Promise<HomeGraphIngestResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       return withConfiguredDecisionModelPolicy(async () => {
         this.requireAdmission('home-graph note ingestion');
-        const { spaceId, installationId } = resolveHomeGraphSpace(input);
-        const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
         await this.store.init();
+        const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+        writes.begin(spaceId);
+        this.assertIngestTarget(spaceId, input.target);
+        const title = input.title ?? `Home Assistant note ${new Date().toISOString()}`;
         this.autoLinkController.signal.throwIfAborted();
         const publication = await this.artifactStore.createForPublication({
           kind: 'document',
@@ -250,12 +269,14 @@ export class HomeGraphService {
   }
 
   async ingestArtifact(input: HomeGraphIngestArtifactInput): Promise<HomeGraphIngestResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       return withConfiguredDecisionModelPolicy(async () => {
         this.requireAdmission('home-graph artifact ingestion');
-        const { spaceId, installationId } = resolveHomeGraphSpace(input);
-        const artifactId = input.artifactId, uri = input.uri, path = input.path;
         await this.store.init();
+        const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+        writes.begin(spaceId);
+        this.assertIngestTarget(spaceId, input.target);
+        const artifactId = input.artifactId, uri = input.uri, path = input.path;
         this.autoLinkController.signal.throwIfAborted();
         const knownUri = uri ?? path;
         const identity = knownUri ? createHomeGraphSourceIdentityPlanner(this.store).prepare({ spaceId, role: 'artifact', locator: 'uri', value: knownUri }) : undefined;
@@ -288,32 +309,38 @@ export class HomeGraphService {
   }
 
   async linkKnowledge(input: HomeGraphLinkInput): Promise<HomeGraphLinkResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return linkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
     });
   }
 
   async unlinkKnowledge(input: HomeGraphLinkInput): Promise<HomeGraphUnlinkResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return unlinkHomeGraphKnowledge(this.store, { ...input, spaceId, installationId });
     });
   }
 
   async ask(input: HomeGraphAskInput): Promise<HomeGraphAskResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search during Classic');
+      this.requireAdmission('home-graph ask');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      // A read-only ask writes nothing; any other ask repairs extractions and
+      // refreshes pages, so a reset must wait for it and refuse a new one.
+      if (!input.readOnly) writes.begin(spaceId);
       return this.runForegroundOperation(spaceId, installationId, async () => {
         const initialState = readHomeGraphSearchState(this.store, spaceId);
-        const repairedExtractions = await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
+        const repairedExtractions = input.readOnly ? 0 : await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
         this.autoLinkController.signal.throwIfAborted();
         const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
         const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
@@ -321,7 +348,7 @@ export class HomeGraphService {
         const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
           spaceId, query: input, state, results: selection.results, signal: this.autoLinkController.signal });
         this.autoLinkController.signal.throwIfAborted();
-        const pageRefresh = await refreshDevicePagesForHomeGraphAsk({
+        const pageRefresh = input.readOnly ? { requested: false, refreshed: 0 } : await refreshDevicePagesForHomeGraphAsk({
           store: this.store,
           artifactStore: this.artifactStore,
           spaceId,
@@ -329,19 +356,27 @@ export class HomeGraphService {
           answer,
           signal: this.autoLinkController.signal,
         });
-        this.queueAnswerEnrichment(spaceId, answer);
+        if (!input.readOnly) this.queueAnswerEnrichment(spaceId, answer);
         return withHomeGraphAskPageRefresh(answer, pageRefresh);
       });
     });
   }
 
   async reindex(input: HomeGraphReindexInput = {}): Promise<HomeGraphReindexResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('semantic Home Graph reindexing');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      if (this.activeReindex) return coalescedHomeGraphReindexResult(this.store, input);
       const { spaceId, installationId } = resolveReadableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
+      const key = JSON.stringify([input.limit, input.maxRunMs, input.semanticLimit, input.semanticMaxRunMs, input.generatedPageLimit, input.force === true, input.refreshPages]);
+      // One run per space. An identical request joins it; a different one
+      // (another limit, force, refreshPages) waits its turn and then runs.
+      for (let active = this.activeReindex.get(spaceId); active; active = this.activeReindex.get(spaceId)) {
+        if (active.key === key) return coalescedHomeGraphReindexResult(this.store, { ...input, knowledgeSpaceId: spaceId });
+        await active.run.then(() => undefined, () => undefined);
+        this.autoLinkController.signal.throwIfAborted();
+      }
       const run = this.runForegroundOperation(spaceId, installationId, () => runHomeGraphReindex({
         store: this.store,
         artifactStore: this.artifactStore,
@@ -350,12 +385,12 @@ export class HomeGraphService {
         extract: (source, artifact, spaceId, installationId) => this.extractArtifact(source, artifact, spaceId, installationId),
         autoLinkExistingSources: (spaceId, installationId, sourceIds) => this.autoLinkExistingSources(spaceId, installationId, sourceIds),
         refreshQualityIssues: (spaceId, installationId) => this.refreshQualityIssues(spaceId, installationId),
-      }, input));
-      this.activeReindex = run;
+      }, { ...input, knowledgeSpaceId: spaceId }));
+      this.activeReindex.set(spaceId, { key, run });
       try {
         return await run;
       } finally {
-        if (this.activeReindex === run) this.activeReindex = null;
+        if (this.activeReindex.get(spaceId)?.run === run) this.activeReindex.delete(spaceId);
       }
     });
   }
@@ -410,11 +445,12 @@ export class HomeGraphService {
   }
 
   async refreshDevicePassport(input: HomeGraphProjectionInput): Promise<HomeGraphDevicePassportResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph device passports');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return this.runForegroundOperation(spaceId, installationId, async () => {
         await this.enrichSpaceSources(spaceId);
         this.autoLinkController.signal.throwIfAborted();
@@ -431,11 +467,12 @@ export class HomeGraphService {
   }
 
   async generateRoomPage(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph room pages');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return this.runForegroundOperation(spaceId, installationId, async () => {
         await this.enrichSpaceSources(spaceId);
         this.autoLinkController.signal.throwIfAborted();
@@ -452,11 +489,12 @@ export class HomeGraphService {
   }
 
   async generatePacket(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       requireDecisionFeature('verified Home Graph sharing packets');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return this.runForegroundOperation(spaceId, installationId, async () => {
         await this.enrichSpaceSources(spaceId);
         this.autoLinkController.signal.throwIfAborted();
@@ -493,10 +531,11 @@ export class HomeGraphService {
   }
 
   async reviewFact(input: HomeGraphReviewInput): Promise<HomeGraphReviewResult> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return reviewHomeGraphFact(this.store, spaceId, installationId, input);
     });
   }
@@ -570,8 +609,16 @@ export class HomeGraphService {
     readonly triage?: HomeGraphTriageOptions | boolean | undefined;
     readonly skipGapRefinement?: boolean | undefined;
   } = {}) {
-    return this.ownForegroundOperation(() => runHomeGraphRefinement({ ...input, store: this.store,
-      semanticService: this.options.semanticService, signal: this.autoLinkController.signal }));
+    return this.ownForegroundOperation(async (writes) => {
+      requireDecisionFeature('automatic Home Graph refinement and triage');
+      await this.store.init();
+      this.autoLinkController.signal.throwIfAborted();
+      // Refinement and triage write issues, tasks and pages: claim the space so a reset waits for the run.
+      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
+      return runHomeGraphRefinement({ ...input, knowledgeSpaceId: spaceId, store: this.store,
+        semanticService: this.options.semanticService, signal: this.autoLinkController.signal });
+    });
   }
 
   async cancelRefinementTask(input: HomeGraphSpaceInput & { readonly taskId: string }) {
@@ -616,10 +663,11 @@ export class HomeGraphService {
     readonly spaceId: string;
     readonly imported: { readonly sources: number; readonly nodes: number; readonly edges: number; readonly issues: number; readonly extractions: number };
   }> {
-    return this.ownForegroundOperation(async () => {
+    return this.ownForegroundOperation(async (writes) => {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId, installationId } = resolveHomeGraphSpace(input);
+      const { spaceId, installationId } = resolveWritableHomeGraphSpace(this.store, input);
+      writes.begin(spaceId);
       return importHomeGraphSpace(this.store, { spaceId, installationId, data: input.data });
     });
   }
@@ -628,8 +676,18 @@ export class HomeGraphService {
     return this.ownForegroundOperation(async () => {
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
-      const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
-      if (input.dryRun !== true) {
+      // Resolved once: the space whose work is cancelled is the space deleted.
+      const { spaceId, installationId } = resolveHomeGraphResetSpace(this.store, input);
+      const target: HomeGraphResetInput = { ...input, knowledgeSpaceId: spaceId, installationId };
+      if (input.dryRun === true) return resetHomeGraphSpace(this.store, this.artifactStore, target);
+      if (this.resettingSpaces.has(spaceId)) {
+        throw new GoodVibesError(`Home Graph space ${spaceId} is already being reset.`, {
+          category: 'bad_request', source: 'runtime', operation: 'homegraph.reset', recoverable: true,
+        });
+      }
+      this.resettingSpaces.add(spaceId);
+      try {
+        await Promise.all([...(this.spaceWrites.get(spaceId) ?? [])].map(run => run.then(() => undefined, () => undefined)));
         const sync = this.syncSelfImproveRuns.get(spaceId);
         this.cancelSyncSelfImprovement(spaceId);
         const tail = this.answerEnrichmentRuns.get(spaceId)?.run;
@@ -639,9 +697,29 @@ export class HomeGraphService {
         ingest?.controller.abort();
         await Promise.all([sync, tail, ingest?.run]);
         this.autoLinkController.signal.throwIfAborted();
+        return await resetHomeGraphSpace(this.store, this.artifactStore, target);
+      } finally {
+        this.resettingSpaces.delete(spaceId);
+        // Nothing is left to enrich or repair in a space that was just deleted.
+        this.pendingAnswerEnrichment.delete(spaceId); this.resumeSyncSelfImprove.delete(spaceId);
       }
-      return resetHomeGraphSpace(this.store, this.artifactStore, input);
     });
+  }
+
+  /** A bad link target must refuse the ingest before anything is published, not after the source exists. */
+  private assertIngestTarget(spaceId: string, target: HomeGraphKnowledgeTarget | undefined): void {
+    if (!target) return;
+    if (target.kind === 'source') {
+      const source = this.store.getSource(target.id);
+      if (!source || !belongsToSpace(source, spaceId)) {
+        throw new GoodVibesError(`Unknown Home Graph source target: ${target.id}`, { category: 'not_found', source: 'runtime', recoverable: false });
+      }
+      return;
+    }
+    const node = this.store.getNode(target.id);
+    if (node && !belongsToSpace(node, spaceId)) {
+      throw new GoodVibesError('Home Graph link target belongs to another knowledge space.', { category: 'not_found', source: 'runtime', recoverable: false });
+    }
   }
 
   private async withIngestArtifactPublication<T>(publication: Awaited<ReturnType<ArtifactStore['createForPublication']>>, created: boolean,
@@ -819,20 +897,42 @@ export class HomeGraphService {
     return refreshHomeGraphQualityIssues(this.store, spaceId, installationId, { signal: this.autoLinkController.signal });
   }
 
-  private async ownForegroundOperation<T>(operation: () => Promise<T>): Promise<T> {
+  private async ownForegroundOperation<T>(operation: (writes: { begin(spaceId: string): void }) => Promise<T>): Promise<T> {
     this.autoLinkController.signal.throwIfAborted();
+    const writtenSpaces = new Set<string>();
+    // A write claims its space so a reset can refuse new writers and wait for
+    // the ones already running before it deletes anything.
+    const writes = {
+      begin: (spaceId: string): void => {
+        if (this.resettingSpaces.has(spaceId)) {
+          throw new GoodVibesError(`Home Graph space ${spaceId} is being reset; retry after the reset finishes.`, {
+            category: 'bad_request', source: 'runtime', operation: 'homegraph.write', recoverable: true,
+          });
+        }
+        writtenSpaces.add(spaceId);
+        const runs = this.spaceWrites.get(spaceId) ?? new Set<Promise<unknown>>();
+        runs.add(run); this.spaceWrites.set(spaceId, runs);
+      },
+    };
     // Publish ownership before invoking even the first borrowed dependency: an
     // init hook may synchronously start shutdown while it still owns work.
     const run = Promise.resolve().then(() => {
       this.autoLinkController.signal.throwIfAborted();
-      return operation();
+      return operation(writes);
     });
     this.foregroundRuns.add(run);
     try {
       const result = await run;
       this.autoLinkController.signal.throwIfAborted();
       return result;
-    } finally { this.foregroundRuns.delete(run); }
+    } finally {
+      this.foregroundRuns.delete(run);
+      for (const spaceId of writtenSpaces) {
+        const runs = this.spaceWrites.get(spaceId);
+        runs?.delete(run);
+        if (runs?.size === 0) this.spaceWrites.delete(spaceId);
+      }
+    }
   }
 
   private async runForegroundOperation<T>(spaceId: string, installationId: string, operation: () => Promise<T>): Promise<T> {

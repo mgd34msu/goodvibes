@@ -2,13 +2,19 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { exportToMarkdown, type ExportMessage } from '@goodvibes-jev/engine/platform/platform/export';
+import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 interface ContentContext {
   readonly session: {
     readonly runtime: { readonly model: string; readonly provider: string; readonly sessionId: string };
-    readonly conversationManager: { title: string; getLastUserMessage(): string | null | undefined; undo(): boolean };
+    readonly conversationManager: {
+      title: string;
+      getLastUserMessage(): string | null | undefined;
+      undo(): boolean;
+      branchState?(): { readonly branches: Readonly<Record<string, readonly object[]>>; readonly currentBranch: string };
+    };
   };
   print(message: string): void;
   renderRequest(): void;
@@ -28,6 +34,12 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   readonly titleSet: (title: string) => string;
   readonly retryDescription: string;
   readonly retryRemovesLastTurn: boolean;
+  /**
+   * Redacts the transcript before it becomes a file. Defaults to the platform's
+   * export redactor; a product passes its own when it needs to bind the
+   * redaction to its own cancellation and source-lifetime checks.
+   */
+  readonly redact?: ((text: string, context: Context) => Promise<string>) | undefined;
 }) {
   const exportCommand: TerminalSlashCommand<Context> = {
     name: 'export',
@@ -76,6 +88,9 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
           }
           fileContent = lines.join('\n');
         }
+        // The file is the durable copy of a transcript, so it is redacted like
+        // the printed `/session export`. A failed redaction writes nothing.
+        fileContent = await (policy.redact ? policy.redact(fileContent, ctx) : redactSensitiveDataAsync(fileContent, { purpose: 'export' }));
         const dir = dirname(resolvedPath);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         await writeFile(resolvedPath, fileContent, 'utf-8');
@@ -112,8 +127,17 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
         ctx.print('No message to retry.');
         return;
       }
-      if (policy.retryRemovesLastTurn) ctx.session.conversationManager.undo();
-      ctx.submitInput?.(args.length ? args.join(' ') : last);
+      if (!ctx.submitInput) {
+        ctx.print('Retry is unavailable here: this surface cannot resubmit a message, so the conversation was left unchanged.');
+        return;
+      }
+      // Remove the old turn only when the message can be sent again, and send
+      // nothing if it could not be removed (that would duplicate the turn).
+      if (policy.retryRemovesLastTurn && !ctx.session.conversationManager.undo()) {
+        ctx.print('Nothing was retried: the last turn could not be removed.');
+        return;
+      }
+      ctx.submitInput(args.length ? args.join(' ') : last);
     },
   };
   return { exportCommand, titleCommand, retryCommand };
@@ -151,7 +175,7 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
       try {
         const records = policy.records(ctx);
         if (records === null) return;
-        const result = manager.save(rawName, messages, meta, records);
+        const result = manager.save(rawName, messages, meta, records, undefined, ctx.session.conversationManager.branchState?.());
         ctx.print(policy.saved(rawName, result, records?.length ?? 0));
       } catch (error) {
         ctx.print(policy.failed(error));
@@ -165,14 +189,20 @@ export function restoreConversationContent<Message>(
   conversation: {
     title: string;
     resetAll(): void;
-    fromJSON(data: { messages: Message[] }): void;
+    fromJSON(data: { messages: Message[]; branches?: Record<string, Message[]> | undefined; currentBranch?: string | undefined }): void;
     rebuildHistory(): void;
   },
   messages: Message[],
   title: string | undefined,
+  /** Side branches saved with the session, so /branch work survives loading it. */
+  branches?: { readonly branches: Readonly<Record<string, readonly object[]>>; readonly currentBranch: string } | undefined,
 ): void {
   conversation.resetAll();
-  conversation.fromJSON({ messages });
+  conversation.fromJSON(branches === undefined ? { messages } : {
+    messages,
+    branches: Object.fromEntries(Object.entries(branches.branches).map(([name, saved]) => [name, [...saved] as Message[]])),
+    currentBranch: branches.currentBranch,
+  });
   if (title) conversation.title = title;
   conversation.rebuildHistory();
 }

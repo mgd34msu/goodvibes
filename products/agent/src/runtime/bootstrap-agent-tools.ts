@@ -12,6 +12,7 @@ import type { ConfigManager } from '../config/index.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { RuntimeServices } from './services.ts';
+import { bindControlCommands } from './control-surfaces.ts';
 import { missingConversationalCaptureTools } from './agent-conversational-capture.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
@@ -66,6 +67,7 @@ export interface AgentToolRegistrationDeps {
 
 export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   const { toolRegistry, commandRegistry, commandContext, configManager, services } = deps;
+  bindControlCommands(services, commandRegistry);
   registerAgentHarnessTool(toolRegistry, commandRegistry, commandContext, { channelRegistry: services.channelPlugins });
   registerAgentAuditTool(toolRegistry, commandRegistry, commandContext);
   registerAgentAutonomyTool(toolRegistry, commandRegistry, commandContext);
@@ -78,12 +80,13 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
     toolRegistry,
     commandContext,
     configManager,
+    secretsManager: services.secretsManager,
     homeDirectory: services.shellPaths.homeDirectory,
     workingDirectory: services.shellPaths.workingDirectory,
   });
   // ...and let the model ask the same question mid-turn, live, instead of
   // reasoning about what it can do from a search over the source tree.
-  registerAgentCapabilityTool({ toolRegistry, commandContext, configManager });
+  registerAgentCapabilityTool({ toolRegistry, commandContext, configManager, secretsManager: services.secretsManager });
   registerAgentContextTool(toolRegistry, commandRegistry, commandContext);
   registerAgentDelegationTool(toolRegistry, commandRegistry, commandContext);
   registerAgentDeviceTool(toolRegistry, commandRegistry, commandContext);
@@ -99,7 +102,7 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   //, that would be a second-writer hazard, and registers no `devices.*`
   // handlers on a catalog nothing outside this process can call, so the web
   // app's grants surface is served from the daemon, not from here.
-  registerClientPhoneTool(toolRegistry, services.devicesClient);
+  registerClientPhoneTool(toolRegistry, services.devicesClient, { sessionId: deps.getSessionId });
   registerAgentExecutionTool(toolRegistry, commandRegistry, commandContext);
   registerAgentHostTool(toolRegistry, commandRegistry, commandContext);
   registerAgentMemoryTool(toolRegistry, commandRegistry, commandContext);

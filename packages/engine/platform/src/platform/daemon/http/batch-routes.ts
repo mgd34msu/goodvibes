@@ -2,13 +2,31 @@ import type { DaemonBatchManager } from '../../batch/index.js';
 import { DaemonBatchError } from '../../batch/index.js';
 import type { CreateDaemonBatchJobInput } from '../../batch/types.js';
 import { readReasoningEffortLevel } from '../../providers/reasoning-effort.js';
-import { readBoundedPositiveInteger } from './route-helpers.js';
+import { decodePathSegment, readBoundedPositiveInteger } from './route-helpers.js';
 
 export interface DaemonBatchRouteContext {
   readonly batchManager: DaemonBatchManager;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<Record<string, unknown> | null | Response>;
+  /** Admin gate for the routes that spend provider budget (create, cancel, tick). Reads stay open to any authenticated caller. */
+  readonly requireAdmin?: ((req: Request) => Response | null) | undefined;
 }
+
+/**
+ * The paths this sub-router serves.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const BATCH_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/batch' },
+  { method: 'GET', path: '/api/batch/config' },
+  { method: 'GET', path: '/api/batch/runtime' },
+  { method: 'GET', path: '/api/batch/jobs' },
+  { method: 'POST', path: '/api/batch/jobs' },
+  { method: 'GET', path: '/api/batch/jobs/{jobId}' },
+  { method: 'POST', path: '/api/batch/jobs/{jobId}/cancel' },
+  { method: 'POST', path: '/api/batch/tick' },
+];
 
 export async function dispatchBatchRoutes(
   req: Request,
@@ -26,6 +44,14 @@ export async function dispatchBatchRoutes(
     return Response.json({ jobs: await context.batchManager.listJobs(limit) });
   }
 
+  const isWrite = req.method === 'POST' && (
+    pathname === '/api/batch/jobs' || pathname === '/api/batch/tick' || /^\/api\/batch\/jobs\/[^/]+\/cancel$/.test(pathname)
+  );
+  if (isWrite) {
+    const adminError = context.requireAdmin?.(req) ?? null;
+    if (adminError) return adminError;
+  }
+
   if (pathname === '/api/batch/jobs' && req.method === 'POST') {
     const bodyOrErr = await context.parseJsonBody(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
@@ -37,15 +63,19 @@ export async function dispatchBatchRoutes(
 
   const jobMatch = pathname.match(/^\/api\/batch\/jobs\/([^/]+)$/);
   if (jobMatch && req.method === 'GET') {
-    const job = await context.batchManager.getJob(decodeURIComponent(jobMatch[1]!));
+    const jobId = decodePathSegment(jobMatch[1]!);
+    if (jobId === null) return Response.json({ error: 'Malformed batch job id in path', code: 'INVALID_BATCH_REQUEST' }, { status: 400 });
+    const job = await context.batchManager.getJob(jobId);
     if (!job) return Response.json({ error: 'Batch job not found', code: 'BATCH_JOB_NOT_FOUND' }, { status: 404 });
     return Response.json({ job });
   }
 
   const cancelMatch = pathname.match(/^\/api\/batch\/jobs\/([^/]+)\/cancel$/);
   if (cancelMatch && req.method === 'POST') {
+    const jobId = decodePathSegment(cancelMatch[1]!);
+    if (jobId === null) return Response.json({ error: 'Malformed batch job id in path', code: 'INVALID_BATCH_REQUEST' }, { status: 400 });
     return handleBatchError(async () => {
-      const job = await context.batchManager.cancelJob(decodeURIComponent(cancelMatch[1]!));
+      const job = await context.batchManager.cancelJob(jobId);
       return Response.json({ job });
     });
   }
@@ -84,8 +114,8 @@ function parseCreateJobInput(body: Record<string, unknown>): CreateDaemonBatchJo
     ...(typeof body['provider'] === 'string' ? { provider: body['provider'] } : {}),
     ...(typeof body['model'] === 'string' ? { model: body['model'] } : {}),
     request: {
-      messages: Array.isArray(request['messages']) ? request['messages'] as CreateDaemonBatchJobInput['request']['messages'] : [],
-      ...(Array.isArray(request['tools']) ? { tools: request['tools'] as CreateDaemonBatchJobInput['request']['tools'] } : {}),
+      messages: parseMessages(request['messages']),
+      ...(Array.isArray(request['tools']) ? { tools: parseTools(request['tools']) } : {}),
       ...(typeof request['systemPrompt'] === 'string' ? { systemPrompt: request['systemPrompt'] } : {}),
       ...(typeof request['maxTokens'] === 'number' ? { maxTokens: request['maxTokens'] } : {}),
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
@@ -104,6 +134,49 @@ function parseCreateJobInput(body: Record<string, unknown>): CreateDaemonBatchJo
     ...(typeof body['flush'] === 'boolean' ? { flush: body['flush'] } : {}),
   };
   return input;
+}
+
+function invalidBatchRequest(message: string): DaemonBatchError {
+  return new DaemonBatchError(message, 'INVALID_BATCH_REQUEST', 400);
+}
+
+type BatchMessages = CreateDaemonBatchJobInput['request']['messages'];
+type BatchTools = NonNullable<CreateDaemonBatchJobInput['request']['tools']>;
+
+// A job is queued and only runs at a later provider tick, so a message or tool
+// the provider can never accept must be refused here, not accepted with a job id.
+function parseMessages(value: unknown): BatchMessages {
+  if (!Array.isArray(value)) return [];
+  value.forEach((entry, index) => {
+    const message = toRecord(entry);
+    const where = `request.messages[${index}]`;
+    const role = message['role'];
+    const content = message['content'];
+    if (role === 'user') {
+      if (typeof content !== 'string' && !Array.isArray(content)) throw invalidBatchRequest(`${where}.content must be a string or an array of content parts.`);
+    } else if (role === 'assistant') {
+      if (typeof content !== 'string') throw invalidBatchRequest(`${where}.content must be a string.`);
+    } else if (role === 'tool') {
+      if (typeof content !== 'string' || typeof message['callId'] !== 'string') throw invalidBatchRequest(`${where} needs a string content and a string callId.`);
+    } else {
+      throw invalidBatchRequest(`${where}.role must be "user", "assistant" or "tool".`);
+    }
+  });
+  return value as BatchMessages;
+}
+
+function parseTools(value: readonly unknown[]): BatchTools {
+  value.forEach((entry, index) => {
+    const tool = toRecord(entry);
+    if (typeof tool['name'] !== 'string' || tool['name'].length === 0 || typeof tool['description'] !== 'string' || !isPlainRecord(tool['parameters'])) {
+      throw invalidBatchRequest(`request.tools[${index}] needs a name, a description and a parameters object.`);
+    }
+  });
+  return value as BatchTools;
+}
+
+function isPlainRecord(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseSourceKind(value: unknown): NonNullable<CreateDaemonBatchJobInput['source']>['kind'] {

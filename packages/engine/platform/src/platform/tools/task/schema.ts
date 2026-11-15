@@ -5,7 +5,7 @@ export const TASK_TOOL_SCHEMA = {
   properties: {
     mode: {
       type: 'string',
-      enum: ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs'],
+      enum: ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs', 'acknowledge'],
     },
     view: { type: 'string', enum: ['summary', 'full'] },
     sessionId: {
@@ -26,6 +26,10 @@ export const TASK_TOOL_SCHEMA = {
     dependsOnTaskId: { type: 'string' },
     reason: { type: 'string' },
     toSessionId: { type: 'string' },
+    handoffId: {
+      type: 'string',
+      description: 'acknowledge: the handoff (from mode=handoffs) this session, its destination, accepts.',
+    },
     scope: {
       type: 'string',
       enum: ['task', 'subtree', 'session'],
@@ -36,7 +40,7 @@ export const TASK_TOOL_SCHEMA = {
 } as const;
 
 export type TaskToolInput = {
-  mode: 'create' | 'list' | 'show' | 'status' | 'depend' | 'cancel' | 'handoff' | 'handoffs';
+  mode: 'create' | 'list' | 'show' | 'status' | 'depend' | 'cancel' | 'handoff' | 'handoffs' | 'acknowledge';
   view?: 'summary' | 'full' | undefined;
   sessionId?: string | undefined;
   taskId?: string | undefined;
@@ -47,5 +51,6 @@ export type TaskToolInput = {
   dependsOnTaskId?: string | undefined;
   reason?: string | undefined;
   toSessionId?: string | undefined;
+  handoffId?: string | undefined;
   scope?: 'task' | 'subtree' | 'session' | undefined;
 };

@@ -8,6 +8,7 @@ import type {
 import type { JsonRecord } from '../helpers.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isRecord } from '../../utils/record-coerce.js';
+import { decodePathSegment } from './route-helpers.js';
 
 interface McpRouteContext {
   readonly mcpRegistry: Pick<
@@ -73,12 +74,52 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
   };
 }
 
+const REDACTED = '***';
+const CREDENTIAL_NAME = /token|secret|key|passw|auth|credential|bearer|cookie|session/i;
+
+/** Keeps the shape of a URL and drops userinfo and every query value, where an API key usually rides. */
+export function redactMcpUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.username) parsed.username = REDACTED;
+    if (parsed.password) parsed.password = REDACTED;
+    for (const key of [...parsed.searchParams.keys()]) parsed.searchParams.set(key, REDACTED);
+    return parsed.toString();
+  } catch {
+    return value.replace(/\/\/[^/@\s]*@/, `//${REDACTED}@`).replace(/([?&][^=&#]*=)[^&#]*/g, `$1${REDACTED}`);
+  }
+}
+
+/** Hides the value of a credential-looking flag, in both `--flag=value` and `--flag value` form, and any URL argument's secrets. */
+export function redactMcpArgs(args: readonly string[]): string[] {
+  const out: string[] = [];
+  let redactNext = false;
+  for (const arg of args) {
+    if (redactNext) {
+      out.push(REDACTED);
+      redactNext = false;
+      continue;
+    }
+    const flag = /^(-{1,2}[^=\s]+)(=(.*))?$/s.exec(arg);
+    if (flag && CREDENTIAL_NAME.test(flag[1]!)) {
+      if (flag[2] !== undefined) out.push(`${flag[1]}=${REDACTED}`);
+      else {
+        out.push(arg);
+        redactNext = true;
+      }
+      continue;
+    }
+    out.push(/^[a-z][a-z0-9+.-]*:\/\//i.test(arg) ? redactMcpUrl(arg) : arg);
+  }
+  return out;
+}
+
 function redactServer(server: McpServerConfig): Record<string, unknown> {
   return {
     name: server.name,
     command: server.command ?? null,
-    url: server.url ?? null,
-    args: server.args ?? [],
+    url: server.url ? redactMcpUrl(server.url) : null,
+    args: redactMcpArgs(server.args ?? []),
     envKeys: Object.keys(server.env ?? {}).sort(),
     role: server.role ?? null,
     trustMode: server.trustMode ?? null,
@@ -94,6 +135,10 @@ function redactServer(server: McpServerConfig): Record<string, unknown> {
  * redacted one: a reader has to ask for the values by name, so a surface that
  * only ever wanted `envKeys` cannot acquire them by accident.
  *
+ * `args` and `url` are redacted on the plain routes as well, since a token
+ * passed as `--token=...` or `?key=` is just as secret as an env value; the
+ * reveal route returns them whole so an edit can resend them.
+ *
  * It exists because `envKeys` alone made env values readable by nothing at
  * all. An admin who had set them could not see what was set, could not check a
  * value against the server it authenticates to, and, since the write path is
@@ -103,6 +148,8 @@ function redactServer(server: McpServerConfig): Record<string, unknown> {
 function revealServer(server: McpServerConfig): Record<string, unknown> {
   return {
     ...redactServer(server),
+    url: server.url ?? null,
+    args: [...(server.args ?? [])],
     env: { ...(server.env ?? {}) },
   };
 }
@@ -126,6 +173,21 @@ function serializeRevealedConfig(config: McpEffectiveConfig): Record<string, unk
     })),
   };
 }
+
+/**
+ * The paths this sub-router serves.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const MCP_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/mcp/config' },
+  { method: 'GET', path: '/api/mcp/servers' },
+  { method: 'GET', path: '/api/mcp/servers/reveal' },
+  { method: 'GET', path: '/api/mcp/tools' },
+  { method: 'POST', path: '/api/mcp/reload' },
+  { method: 'POST', path: '/api/mcp/config/servers' },
+  { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}' },
+];
 
 export async function dispatchMcpRoutes(req: Request, context: McpRouteContext): Promise<Response | null> {
   const url = new URL(req.url);
@@ -187,7 +249,8 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     const body = await context.parseOptionalJsonBody(req);
     if (body instanceof Response) return body;
     const scope = parseScope(body?.scope ?? url.searchParams.get('scope'));
-    const serverName = decodeURIComponent(serverMatch[1]!);
+    const serverName = decodePathSegment(serverMatch[1]!);
+    if (serverName === null) return Response.json({ error: 'Malformed server name in path' }, { status: 400 });
     const result = await context.mcpRegistry.removeServerConfig(context.roots, scope, serverName);
     return Response.json({
       scope,

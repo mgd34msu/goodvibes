@@ -1,3 +1,4 @@
+import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-channels.ts';
 import { readAgentChannelDeliveryReceipts } from '../agent/channel-delivery-receipts.ts';
@@ -5,6 +6,7 @@ import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } fr
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { withInventoryDisclosure } from './inventory-disclosure.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessChannelArgs {
   readonly channelId?: unknown;
@@ -31,9 +33,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function channelLookupFromArgs(args: AgentHarnessChannelArgs): { readonly source: ChannelLookupSource; readonly input: string } | null {
@@ -156,7 +156,7 @@ export function channelReadinessCatalogStatus(context: CommandContext): Record<s
     channels: channels.length,
     enabled: channels.filter((channel) => channel.enabled).length,
     ready: channels.filter((channel) => channel.ready).length,
-    attention: channels.filter((channel) => channel.enabled && channel.setupState !== 'ready').length,
+    attention: channels.filter((channel) => (channel.enabled || channel.setupState === 'unknown') && channel.setupState !== 'ready').length,
     setupGuide: {
       status: guide.status,
       currentChannelId: guide.currentChannelId,
@@ -201,7 +201,7 @@ export function listHarnessChannels(context: CommandContext, args: AgentHarnessC
     total: channels.length,
     enabled,
     ready,
-    attention: channels.filter((channel) => channel.enabled && channel.setupState !== 'ready').length,
+    attention: channels.filter((channel) => (channel.enabled || channel.setupState === 'unknown') && channel.setupState !== 'ready').length,
     ...(query === '' ? {} : { query: rawQuery }),
     ...(filteredOutByQuery
       ? {
@@ -365,7 +365,7 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
   return {
     mode: 'channel_deliveries',
     status: snapshot.parseError ? 'attention' : snapshot.exists ? 'ready' : 'empty',
-    path: snapshot.path,
+    path: harnessDisplayPath(snapshot.path, shellPaths.homeDirectory),
     total: snapshot.receipts.length,
     returned: receipts.length,
     receipts,

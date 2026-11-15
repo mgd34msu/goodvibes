@@ -9,10 +9,10 @@
  * is not a regression.
  *
  * Usage:
- *   bun run release:prepare --patch | --minor | --major
- *   bun run release:prepare --version 2.2.0     bump to an exact version
- *   bun run release:prepare --no-bump           regenerate at the current version
- *   bun run release:prepare --no-bump --no-changelog --no-live
+ *   bun scripts/release-prepare.ts --patch | --minor | --major
+ *   bun scripts/release-prepare.ts --version 2.2.0     bump to an exact version
+ *   bun scripts/release-prepare.ts --no-bump           regenerate at the current version
+ *   bun scripts/release-prepare.ts --no-bump --no-changelog --no-live
  *                                               the npm `version` hook and the
  *                                               release cut's sync command (they
  *                                               bump the manifest and write the
@@ -113,7 +113,7 @@ export function parsePrepareArgs(argv: readonly string[]): PrepareArgs {
   const noBump = argv.includes('--no-bump');
   const chosen = kinds.length + (versionIdx >= 0 ? 1 : 0) + (noBump ? 1 : 0);
   if (chosen !== 1 || (versionIdx >= 0 && (exact === undefined || !/^\d+\.\d+\.\d+$/.test(exact)))) {
-    throw new Error('Usage: bun run release:prepare (--patch | --minor | --major | --version X.Y.Z | --no-bump) [--no-changelog] [--no-install] [--no-pins] [--no-live]');
+    throw new Error('Usage: bun scripts/release-prepare.ts (--patch | --minor | --major | --version X.Y.Z | --no-bump) [--no-changelog] [--no-install] [--no-pins] [--no-live]');
   }
   return {
     bump: noBump ? null : exact !== undefined ? { exact } : kinds[0]!,
@@ -157,7 +157,7 @@ export function resumeCommandAfterBump(argv: readonly string[]): string {
     if (arg === '--version') { i += 1; continue; }
     kept.push(arg);
   }
-  return ['bun', 'run', 'release:prepare', '--no-bump', ...kept].join(' ');
+  return ['bun', 'scripts/release-prepare.ts', '--no-bump', ...kept].join(' ');
 }
 
 function afterBumpFailure(error: unknown, argv: readonly string[], from: string, to: string): Error {

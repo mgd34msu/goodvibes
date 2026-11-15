@@ -21,23 +21,19 @@ describe('KnowledgeApi', () => {
 
     const status = await api.status.get();
     expect(status).toMatchObject({
-      ready: expect.any(Boolean),
+      ready: true,
+      sourceCount: 0,
+      nodeCount: 0,
       note: expect.stringContaining('Structured knowledge'),
     });
 
     const connectors = api.connectors.list();
-    expect(connectors.length).toBeGreaterThan(0);
+    expect(connectors.map((connector) => connector.id)).toEqual(['bookmark', 'url', 'url-list']);
     expect(api.connectors.get(connectors[0]!.id)?.id).toBe(connectors[0]!.id);
 
     const sourceQuery = await api.sources.query({ limit: 5 });
-    expect(sourceQuery).toMatchObject({
-      total: expect.any(Number),
-      items: expect.any(Array),
-    });
-    expect(await api.graph.nodes.query({ limit: 5 })).toMatchObject({
-      total: expect.any(Number),
-      items: expect.any(Array),
-    });
+    expect(sourceQuery).toMatchObject({ total: 0, items: [] });
+    expect(await api.graph.nodes.query({ limit: 5 })).toMatchObject({ total: 0, items: [] });
 
     await runtimeServices.memoryRegistry.getStore().init();
     await runtimeServices.memoryRegistry.add({
@@ -96,24 +92,25 @@ describe('KnowledgeApi', () => {
     installJudgmentPort(nativeMemoryWorkPrivacy(publicEvidence.port).port);
     const packet = await api.packets.build('knowledge api artifact', [], 5, { budgetLimit: 2_000 });
     expect(packet.items.length).toBeGreaterThan(0);
+    expect(await api.sources.query({ limit: 5 })).toMatchObject({ total: 1, items: [{ id: ingest.source.id }] });
 
     const targets = await api.projections.listTargets(10);
     expect(targets.length).toBeGreaterThan(0);
 
     const jobs = api.jobs.list();
-    expect(jobs.length).toBeGreaterThan(0);
-    const job = jobs[0]!;
-    expect(api.jobs.get(job.id)?.id).toBe(job.id);
+    const job = jobs.find((entry) => entry.id === 'knowledge-lint');
+    expect(job).toBeDefined();
+    expect(api.jobs.get('knowledge-lint')?.id).toBe('knowledge-lint');
 
-    const run = await api.jobs.run(job.id, { mode: 'inline' });
-    expect(run.jobId).toBe(job.id);
-    expect(api.jobs.runs(10, job.id)).toContainEqual(
+    const run = await api.jobs.run('knowledge-lint', { mode: 'inline' });
+    expect(run).toMatchObject({ jobId: 'knowledge-lint', status: 'completed', mode: 'inline', result: { issueCount: 0 } });
+    expect(api.jobs.runs(10, 'knowledge-lint')).toContainEqual(
       expect.objectContaining({ id: run.id }),
     );
 
-    const candidates = api.consolidation.candidates(10);
-    expect(candidates).toEqual(expect.any(Array));
-    expect(api.consolidation.reports(10)).toEqual(expect.any(Array));
+    // No consolidation job has run, so nothing is proposed or reported.
+    expect(await api.consolidation.candidates(10)).toEqual([]);
+    expect(await api.consolidation.reports(10)).toEqual([]);
   });
 });
 

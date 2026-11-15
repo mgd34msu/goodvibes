@@ -17,10 +17,10 @@
  *
  * The command runner is injectable so tests never touch a real tailscale.
  */
-import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync, existsSync, renameSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 
 /** One command's result. `errorCode` is the spawn error's errno code (ENOENT, ETIMEDOUT, ...) when it did not run to an exit status. */
 export interface TailscaleCommandResult {
@@ -30,16 +30,47 @@ export interface TailscaleCommandResult {
   readonly errorCode?: string | undefined;
 }
 
-/** Injectable command execution seam. */
+/**
+ * Injectable command execution seam. `run` blocks the calling thread until the
+ * command ends; `runAsync` does not, and is what the daemon's request handlers
+ * use so a wedged tailscale cannot stall every other request. A runner without
+ * `runAsync` is run through `run`.
+ */
 export interface TailscaleCommandRunner {
   run(command: string, args: readonly string[]): TailscaleCommandResult;
+  runAsync?(command: string, args: readonly string[]): Promise<TailscaleCommandResult>;
 }
 
 const COMMAND_TIMEOUT_MS = 10_000;
 
-/** Real runner: spawnSync with a hard timeout, never a shell. */
+/** Real runner: a hard timeout, never a shell. `run` is spawnSync; `runAsync` is a non-blocking spawn. */
 export function defaultTailscaleRunner(): TailscaleCommandRunner {
   return {
+    runAsync(command, args) {
+      return new Promise<TailscaleCommandResult>((resolve) => {
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        const finish = (result: TailscaleCommandResult): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        };
+        const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          finish({ status: null, stdout, stderr, errorCode: 'ETIMEDOUT' });
+        }, COMMAND_TIMEOUT_MS);
+        timer.unref?.();
+        child.stdout.setEncoding('utf-8').on('data', (chunk: string) => { stdout += chunk; });
+        child.stderr.setEncoding('utf-8').on('data', (chunk: string) => { stderr += chunk; });
+        child.on('error', (error: NodeJS.ErrnoException) => {
+          finish({ status: null, stdout, stderr: stderr || error.message, ...(error.code ? { errorCode: error.code } : {}) });
+        });
+        child.on('close', (code) => finish({ status: code, stdout, stderr }));
+      });
+    },
     run(command, args) {
       try {
         const result = spawnSync(command, [...args], { encoding: 'utf-8', timeout: COMMAND_TIMEOUT_MS });
@@ -91,7 +122,19 @@ function notRunDetail(result: TailscaleCommandResult): string {
  * error and never a nag.
  */
 export function detectTailscale(runner: TailscaleCommandRunner = defaultTailscaleRunner()): TailscaleDetection {
-  const status = runner.run('tailscale', ['status', '--json']);
+  return interpretTailscaleStatus(runner.run('tailscale', ['status', '--json']));
+}
+
+/** {@link detectTailscale} without blocking the thread while tailscale answers. */
+export async function detectTailscaleAsync(runner: TailscaleCommandRunner = defaultTailscaleRunner()): Promise<TailscaleDetection> {
+  return interpretTailscaleStatus(await runCommand(runner, 'tailscale', ['status', '--json']));
+}
+
+async function runCommand(runner: TailscaleCommandRunner, command: string, args: readonly string[]): Promise<TailscaleCommandResult> {
+  return runner.runAsync ? runner.runAsync(command, args) : runner.run(command, args);
+}
+
+function interpretTailscaleStatus(status: TailscaleCommandResult): TailscaleDetection {
   if (status.status === null) {
     // Which of these it was is the spawn error's errno code: ENOENT is a
     // missing binary, ETIMEDOUT is a tailscale that did not answer in time.
@@ -152,7 +195,10 @@ export function enableTailscaleServe(
   if (!detection.available || !detection.loggedIn || !detection.httpsUrl) {
     return { at: Date.now(), command, ok: false, detail: detection.detail };
   }
-  const result = runner.run('tailscale', ['serve', '--bg', String(port)]);
+  return serveReceipt(port, command, detection.httpsUrl, runner.run('tailscale', ['serve', '--bg', String(port)]));
+}
+
+function serveReceipt(port: number, command: string, httpsUrl: string, result: TailscaleCommandResult): TailscaleServeReceipt {
   if (result.status === null) return { at: Date.now(), command, ok: false, detail: notRunDetail(result) };
   if (result.status !== 0) {
     const stderr = result.stderr.trim() || result.stdout.trim() || 'tailscale serve failed';
@@ -162,9 +208,35 @@ export function enableTailscaleServe(
     at: Date.now(),
     command,
     ok: true,
-    url: detection.httpsUrl,
-    detail: `tailscale serve is fronting port ${port} at ${detection.httpsUrl}`,
+    url: httpsUrl,
+    detail: `tailscale serve is fronting port ${port} at ${httpsUrl}`,
   };
+}
+
+/** Serve attempts running now, by port: a second request for the same port waits for the first and shares its receipt. */
+const serveInFlight = new Map<number, Promise<TailscaleServeReceipt>>();
+
+/**
+ * {@link enableTailscaleServe} without blocking the thread while tailscale
+ * answers. Calls for the same port made while one is running (a double click,
+ * two surfaces) share that one run, so `tailscale serve` is started once.
+ */
+export function enableTailscaleServeAsync(
+  port: number,
+  runner: TailscaleCommandRunner = defaultTailscaleRunner(),
+): Promise<TailscaleServeReceipt> {
+  const running = serveInFlight.get(port);
+  if (running) return running;
+  const attempt = (async (): Promise<TailscaleServeReceipt> => {
+    const command = `tailscale serve --bg ${port}`;
+    const detection = await detectTailscaleAsync(runner);
+    if (!detection.available || !detection.loggedIn || !detection.httpsUrl) {
+      return { at: Date.now(), command, ok: false, detail: detection.detail };
+    }
+    return serveReceipt(port, command, detection.httpsUrl, await runCommand(runner, 'tailscale', ['serve', '--bg', String(port)]));
+  })().finally(() => { serveInFlight.delete(port); });
+  serveInFlight.set(port, attempt);
+  return attempt;
 }
 
 const MAX_RECEIPTS = 20;
@@ -184,12 +256,31 @@ export class TailscaleServeReceiptStore {
   }
 
   append(receipt: TailscaleServeReceipt): void {
+    this.setAsideUnreadableLog();
     const receipts = [...this.list(), receipt].slice(-MAX_RECEIPTS);
     try {
-      mkdirSync(dirname(this.filePath), { recursive: true });
-      writeFileSync(this.filePath, JSON.stringify({ receipts }, null, 2), 'utf-8');
+      // Staged beside the log and renamed over it, so a crash mid-write leaves
+      // the previous log intact instead of a torn file the next append would
+      // overwrite.
+      writeFileAtomic(this.filePath, JSON.stringify({ receipts }, null, 2), { durable: false });
     } catch (error) {
       logger.warn('TailscaleServeReceiptStore: flush failed', { path: this.filePath, error: String(error) });
+    }
+  }
+
+  /** A log that exists but cannot be read is kept as `.corrupt` rather than silently replaced by the next append. */
+  private setAsideUnreadableLog(): void {
+    if (!existsSync(this.filePath)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(this.filePath, 'utf-8')) as { receipts?: unknown };
+      if (Array.isArray(parsed.receipts)) return;
+    } catch {
+      // fall through to set the file aside
+    }
+    try {
+      renameSync(this.filePath, `${this.filePath}.corrupt`);
+    } catch (error) {
+      logger.warn('TailscaleServeReceiptStore: could not set aside an unreadable log', { path: this.filePath, error: String(error) });
     }
   }
 

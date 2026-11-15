@@ -3,11 +3,14 @@ import { capturePersonalOpsSnapshot } from './agent-harness-personal-ops-source.
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { types as nodeTypes } from 'node:util';
 import { captureCatalogData, captureCatalogMethods, prepareHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
+import { LANE_DEPENDENCY_METHODS, personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getOperatorContract, OPERATOR_CONTRACT } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 const isFrozen = Object.isFrozen;
 const descriptorsOf = Object.getOwnPropertyDescriptors;
@@ -19,9 +22,7 @@ export function readString(value: unknown): string {
 }
 
 export function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(12, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 12);
 }
 
 export function operatorContractMethods(): readonly OperatorContractMethod[] {
@@ -32,12 +33,13 @@ export function isInvokableContractMethod(method: OperatorContractMethod): boole
   return method.invokable !== false;
 }
 
-export function partitionInvokableMethods(methods: readonly OperatorContractMethod[]): {
-  readonly available: readonly string[]; readonly unavailable: readonly string[];
+/** `unassessed` names methods a lane reading could not settle; they are in neither list. */
+export function partitionInvokableMethods(methods: readonly OperatorContractMethod[], unassessed: readonly string[] = []): {
+  readonly available: readonly string[]; readonly unavailable: readonly string[]; readonly unassessed?: readonly string[];
 } {
   const ids = (invokable: boolean) => methods.filter(method => isInvokableContractMethod(method) === invokable)
     .map(method => method.id).sort((left, right) => left.localeCompare(right));
-  return { available: ids(true), unavailable: ids(false) };
+  return { available: ids(true), unavailable: ids(false), ...(unassessed.length > 0 ? { unassessed: [...unassessed].sort((left, right) => left.localeCompare(right)) } : {}) };
 }
 
 /** Retain the complete native contract source without selecting an unrelated lane. */
@@ -45,9 +47,7 @@ export async function retainPersonalOpsContractSource(options: CatalogRankingOpt
   await readContractMethodLanes([], options);
 }
 
-export async function contractMethodsForLane(lane: DiscoveryLane, options: CatalogRankingOptions): Promise<{
-  readonly available: readonly string[]; readonly unavailable: readonly string[];
-}> {
+export async function contractMethodsForLane(lane: DiscoveryLane, options: CatalogRankingOptions): Promise<ReturnType<typeof partitionInvokableMethods>> {
   const result = (await readContractMethodLanes([lane], options))[0];
   if (!result) throw new ToolInputProjectionError('held');
   return result;
@@ -59,7 +59,7 @@ export async function contractMethodsForLanes(options: CatalogRankingOptions): P
   readonly tasks: ReturnType<typeof partitionInvokableMethods>;
   readonly reminders: ReturnType<typeof partitionInvokableMethods>;
 }> {
-  const [inbox, calendar, tasks, reminders] = await readContractMethodLanes(['inbox', 'calendar', 'tasks', 'reminders'], options);
+  const [inbox, calendar, tasks, reminders] = await readContractMethodLanes(CONTRACT_DISCOVERY_LANES, options);
   if (!inbox || !calendar || !tasks || !reminders) throw new ToolInputProjectionError('held');
   return { inbox, calendar, tasks, reminders };
 }
@@ -101,6 +101,11 @@ function isFrozenDataTree(value: unknown, seen = new WeakSet<object>()): boolean
     && isFrozenDataTree(descriptors[key]!.value, seen));
 }
 
+/** Methods read per discovery batch; the lanes read every batch once each. */
+export const CONTRACT_DISCOVERY_BATCH_SIZE = 16;
+/** The lanes `contractMethodsForLanes` reads, each over the whole contract. */
+export const CONTRACT_DISCOVERY_LANES = ['inbox', 'calendar', 'tasks', 'reminders'] as const;
+
 const describeContractMethod = (method: OperatorContractMethod) => ({
   id: method.id, description: method.description ?? method.title ?? '', evidence: method,
 });
@@ -114,7 +119,7 @@ function prepareContractMetadata(manifest: ReturnType<typeof getOperatorContract
   for (const method of captured) {
     if (!method.value.id) continue;
     const size = JSON.stringify([method.value.id, method.value.description ?? method.value.title ?? '', method.value]).length;
-    if (batch.length && (characters + size + 16 > 250_000 || batch.length >= 16)) {
+    if (batch.length && (characters + size + 16 > 250_000 || batch.length >= CONTRACT_DISCOVERY_BATCH_SIZE)) {
       batches.push(batch); batch = []; characters = 0;
     }
     batch.push(method); characters += size;
@@ -179,6 +184,8 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
   const results: ReturnType<typeof partitionInvokableMethods>[] = [];
   for (const lane of lanes) {
     const selected: OperatorContractMethod[] = [];
+    const unassessed: string[] = [];
+    const dependencies = LANE_DEPENDENCY_METHODS[lane] ?? [];
     for (const { methods, entries } of batches) {
       assertCurrent();
       const assertIndices = captureCatalogMethods(original, methods.map(method => String(method.index)));
@@ -192,10 +199,14 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
         for (const guard of retained.values()) guard();
       };
       const matches = await personalOpsLaneMembers(entries, lane, describeContractMethod,
-        { ...options, assertCurrent: assertBatch, retainCurrent(guard, key) { if (!retained.has(key ?? guard)) retained.set(key ?? guard, guard); } });
+        { ...options, assertCurrent: assertBatch, retainCurrent(guard, key) { if (!retained.has(key ?? guard)) retained.set(key ?? guard, guard); } },
+        unsettled => unassessed.push(...unsettled.map(entry => entry.id)));
       assertCurrent(); selected.push(...matches);
+      // A method the lane's own tool dispatches belongs to the lane whatever a reading says.
+      for (const entry of entries) if (dependencies.includes(entry.id) && !selected.some(method => method.id === entry.id)) selected.push(entry);
     }
-    results.push(partitionInvokableMethods(selected));
+    const selectedIds = new Set(selected.map(method => method.id));
+    results.push(partitionInvokableMethods(selected, unassessed.filter(id => !selectedIds.has(id))));
   }
   for (const [key, guard] of retained) retainCurrent?.(guard, typeof key === 'string' ? key : undefined);
   retainCurrent?.(assertSource, 'personal-ops-contract-source');
@@ -349,7 +360,7 @@ export async function summarizeInputSchema(
   const fields = [...requiredFields, ...optionalFields.slice(0, Math.max(0, 4 - requiredFields.length))];
   const sampleInput: Record<string, unknown> = {};
   for (const field of fields) sampleInput[field] = await readPersonalOpsSampleField({ field, inputSchema: contract.inputSchema, contract, lane, effect }, options);
-  return { schemaRoute: `mcp schema qualifiedName:"${qualifiedName}"`, requiredFields, optionalFields, sampleInput };
+  return { schemaRoute: mcpSchemaRoute(qualifiedName), requiredFields, optionalFields, sampleInput };
 }
 
 export async function mcpToolSchemas(
@@ -419,7 +430,7 @@ async function acquireConnectorSignalsMatching(
   const currentOptions = { ...options, assertCurrent };
   const matches = await personalOpsLaneMembers(source, options.lane, entry => ({
     id: entry.server.name, description: entry.tools.map(tool => tool.description ?? '').join('\n'), evidence: entry,
-  }), currentOptions);
+  }), currentOptions, undefined, false);
   const signals: PersonalOpsConnectorSignal[] = [];
   for (const { server, tools } of matches) {
     assertCurrent();
@@ -432,7 +443,7 @@ async function acquireConnectorSignalsMatching(
       assertCurrent();
       if (!reading || reading.lane !== options.lane) {
         if (isClassicOperation()) unassessedTools.push({ name: tool.toolName, qualifiedName: qualifiedToolName(tool), description: tool.description ?? '',
-          schemaRoute: `mcp schema qualifiedName:"${qualifiedToolName(tool)}"` });
+          schemaRoute: mcpSchemaRoute(qualifiedToolName(tool)) });
         continue;
       }
       const summary = await summarizeInputSchema(qualifiedToolName(tool), contract, reading.lane, reading.effect, currentOptions);
@@ -615,9 +626,9 @@ export function taskWorkflows(methodIds: readonly string[]): readonly PersonalOp
       next: 'Review the plan, add or update one item when useful, and keep status changes visible.',
       modelRoute: 'agent_work_plan action:"list"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"workplan"',
-        'workspace action:"action" actionId:"workplan-add"',
-        'workspace action:"action" actionId:"workplan-status"',
+        'workspace action:"action" actionId:"work-autonomy-queue"',
+        'agent_work_plan action:"create" title:"..."',
+        'agent_work_plan action:"set_status" id:"..." status:"..."',
       ],
       prerequisites: ['Use the work plan when the user asks for task tracking, multi-step work, or a visible checkpoint.'],
       runBoundary: 'Agent-owned work-plan edits stay local and visible; deletion/clear-completed routes require explicit confirmation.',
@@ -630,9 +641,9 @@ export function taskWorkflows(methodIds: readonly string[]): readonly PersonalOp
       next: hostTaskStatus === 'ready'
         ? 'List host tasks, inspect one exact task id, then cancel or retry only through confirmed daemon controls when the user asks.'
         : 'Update or connect the GoodVibes host until task inspection methods are present.',
-      modelRoute: 'workspace action:"action" actionId:"tasks-list"',
+      modelRoute: 'workspace action:"action" actionId:"tasks-filter"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"tasks-list"',
+        'workspace action:"action" actionId:"tasks-filter"',
         'workspace action:"action" actionId:"task-show"',
         ...methodIds.map((methodId) => `host action:"method" methodId:"${methodId}"`),
       ],
@@ -654,7 +665,7 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
       status: reminderStatus,
       summary: 'Create one visible reminder only from a direct user request with real timing and optional delivery target.',
       next: reminderStatus === 'ready'
-        ? 'Collect title, timing, delivery scope, and explicit user request, then use the confirmed reminder route.'
+        ? 'Collect the message, timing and delivery scope from the user, then use the reminder route.'
         : reminderStatus === 'attention'
           ? 'Configure or confirm a delivery target before relying on reminder delivery, or create the reminder with explicit scope.'
           : 'Update the connected GoodVibes host until schedule/reminder creation methods are available.',
@@ -662,13 +673,13 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
       inspectRoutes: [
         'workspace action:"action" actionId:"schedule-reminder"',
         'channels action:"status"',
-        ...methodIds.filter((methodId) => methodId.startsWith('schedules.')).slice(0, 6).map((methodId) => `host action:"method" methodId:"${methodId}"`),
+        ...methodIds.filter((methodId) => methodId.startsWith('automation.schedules.')).slice(0, 6).map((methodId) => `host action:"method" methodId:"${methodId}"`),
       ],
       prerequisites: [
-        'The user must provide a concrete reminder title and time.',
+        'The user must provide the reminder message and a concrete time.',
         deliveryConfigured ? 'At least one delivery target or channel is configured.' : 'No configured delivery target was detected; delivery setup may be needed.',
       ],
-      runBoundary: 'Reminder creation requires confirm:true and explicitUserRequest; vague follow-up ideas stay as notes or work-plan items.',
+      runBoundary: `Reminder creation: ${EFFECT_ADMISSION_SENTENCE} Vague follow-up ideas stay as notes or work-plan items.`,
     },
     {
       id: 'connected-schedule-review',
@@ -680,7 +691,7 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
         : 'Update the connected GoodVibes host until schedule list/control methods are available.',
       modelRoute: 'autonomy action:"item" queueItemId:"connected-schedules"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"schedule-list"',
+        'schedule action:"list"',
         'autonomy action:"item" queueItemId:"connected-schedules"',
         'workspace action:"action" actionId:"schedule-edit"',
       ],

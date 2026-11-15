@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { invalidateClientLifetime } from './client-lifetime';
 import {
   CLIENT_COMPATIBILITY_FLOOR_HEADER,
   compareBuildVersions,
   evaluateClientCompatibility,
+  getObservedClientCompatibilityFloor,
   readClientCompatibilityFloor,
+  recordObservedClientCompatibilityFloor,
 } from './client-compatibility';
 
 describe('compareBuildVersions', () => {
@@ -48,14 +51,44 @@ describe('evaluateClientCompatibility', () => {
 });
 
 describe('readClientCompatibilityFloor', () => {
-  test('reads the header case-sensitively first, then lowercased', () => {
+  test('reads the header from a Headers object', () => {
     const upper = new Headers({ [CLIENT_COMPATIBILITY_FLOOR_HEADER]: '1.14.0' });
     expect(readClientCompatibilityFloor(upper)).toBe('1.14.0');
+  });
+
+  // A header source whose lookup is case-sensitive, as a plain map of headers is.
+  const caseSensitive = (entries: Record<string, string>) => ({ get: (name: string) => entries[name] ?? null });
+
+  test('reads the exact-case key from a case-sensitive source', () => {
+    expect(readClientCompatibilityFloor(caseSensitive({ [CLIENT_COMPATIBILITY_FLOOR_HEADER]: '1.14.0' }))).toBe('1.14.0');
+  });
+
+  test('falls back to the lowercased key when the exact-case key is absent', () => {
+    const lower = caseSensitive({ [CLIENT_COMPATIBILITY_FLOOR_HEADER.toLowerCase()]: '1.15.0' });
+    expect(readClientCompatibilityFloor(lower)).toBe('1.15.0');
+  });
+
+  test('prefers the exact-case key over the lowercased one', () => {
+    const both = caseSensitive({
+      [CLIENT_COMPATIBILITY_FLOOR_HEADER]: '1.14.0',
+      [CLIENT_COMPATIBILITY_FLOOR_HEADER.toLowerCase()]: '1.15.0',
+    });
+    expect(readClientCompatibilityFloor(both)).toBe('1.14.0');
   });
 
   test('undefined when the header is absent or blank', () => {
     expect(readClientCompatibilityFloor(new Headers())).toBeUndefined();
     expect(readClientCompatibilityFloor(new Headers({ [CLIENT_COMPATIBILITY_FLOOR_HEADER]: '   ' }))).toBeUndefined();
     expect(readClientCompatibilityFloor(undefined)).toBeUndefined();
+  });
+});
+
+describe('observed floor store', () => {
+  test('a response without the header keeps the floor already seen; a client lifetime change clears it', () => {
+    recordObservedClientCompatibilityFloor('3.0.0');
+    recordObservedClientCompatibilityFloor(undefined);
+    expect(getObservedClientCompatibilityFloor()).toBe('3.0.0');
+    invalidateClientLifetime();
+    expect(getObservedClientCompatibilityFloor()).toBeUndefined();
   });
 });

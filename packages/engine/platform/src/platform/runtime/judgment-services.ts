@@ -1,4 +1,4 @@
-import { composeJudgmentVolumeMonitor } from './judgment-volume-monitor.js';
+import { composeJudgmentVolumeMonitor, type JudgmentVolumeMonitorHandle } from './judgment-volume-monitor.js';
 import { activateClassicFallback, configureDecisionModelPolicy, isClassicOperation } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -22,7 +22,8 @@ import {
 import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
-import { openStateDecisionLog } from '../state/decision-log.js';
+import { openStateDecisionLogWithNotice } from '../state/decision-log.js';
+import { withWebuiAnswerBoundary, type WebuiAnswerBoundaryOptions } from '../judgment-browser/batteries/webui-answers.js';
 import type { DisposalRegistry } from './disposal.js';
 
 /** The secret-store and environment name of the judgment API key. */
@@ -197,7 +198,17 @@ const retired = new WeakSet<JudgmentPort>();
 export interface JudgmentServices {
   /** The installed port: settings-driven, recording to the decision log. */
   readonly port: JudgmentPort;
+  /**
+   * The port browser-initiated readings use: the same transport, lifetime and decision log as
+   * `port`, with answers and failures validated and scrubbed before anything is retained.
+   * Absent for a composition that hands the browser route its own port.
+   */
+  readonly browserPort?: JudgmentPort;
   readonly decisionLog: SqliteDecisionLog;
+  /** Set when the previous log could not be read: it was kept aside and this one is new. */
+  readonly decisionLogNotice?: string;
+  /** The call-volume monitor's last alert (budget breach, unreadable log), for status reads; the log line stays too. */
+  readonly volumeMonitor: JudgmentVolumeMonitorHandle;
 }
 
 export interface JudgmentServicesInput extends JudgmentSettingsSource {
@@ -213,6 +224,28 @@ export interface JudgmentServicesInput extends JudgmentSettingsSource {
 }
 
 /**
+ * The model names the browser answer boundary admits, from the same settings that build the
+ * transport chain: the primary model, every configured fallback, and the response-model aliases
+ * each endpoint declares. Read on every call so an edited chain applies at once.
+ */
+function browserBoundaryOptions(source: JudgmentSettingsSource): WebuiAnswerBoundaryOptions {
+  const targets = captureJudgmentFallbackSettings(source.config.get('judgment.fallbacks'));
+  const returned = new Map<string, Set<string>>();
+  const declare = (model: string, aliases: readonly string[] | undefined): void => {
+    if (aliases === undefined) return;
+    const set = returned.get(model) ?? new Set<string>();
+    for (const alias of aliases) set.add(alias);
+    returned.set(model, set);
+  };
+  declare(settingsModel(source), captureJudgmentBackendSettings(source.config.get('judgment.backend')).responseModels);
+  for (const target of targets) declare(target.model, target.backend?.responseModels);
+  return {
+    fallbackModels: targets.map(target => target.model),
+    returnedModels: Object.fromEntries([...returned].map(([model, aliases]) => [model, [...aliases]])),
+  };
+}
+
+/**
  * Builds a composition's judgment port from the judgment settings, recording
  * every call to the state root's decision log, and installs it as the port
  * every engine decision site reads through. Disposal retires the port and
@@ -223,7 +256,7 @@ export interface JudgmentServicesInput extends JudgmentSettingsSource {
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
   const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'));
   input.disposal.add('decision-model policy', restorePolicy);
-  const decisionLog = openStateDecisionLog(input.stateRoot);
+  const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
   // Publish one completed response per event-loop turn. Each response records
   // its decision, readings and action synchronously; a burst of responses must
@@ -238,38 +271,54 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     completions.push(resolve);
     if (completions.length === 1) setImmediate(publish);
   });
-  const recorded = withDecisionLog({
-    get model() { return transport.model; },
-    async ask(request) {
-      try { return await transport.ask(request); }
-      finally { await yieldCompletion(); }
-    },
-  }, decisionLog);
   const lifetime = new AbortController();
   const active = new Set<Promise<unknown>>();
-  const port: JudgmentPort = {
-    get model() { return recorded.model; },
-    recorder: recorded.recorder!,
-    ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
-      // Retained port references must not reopen a retired runtime or write to
-      // its closed log. Calls admitted before retirement still record failure.
-      if (lifetime.signal.aborted) return Promise.reject(new JudgmentError('aborted', 'the judgment runtime is shutting down'));
-      // Reserve ownership before reading borrowed inputs or live settings:
-      // their accessors can synchronously initiate runtime disposal.
-      const { promise: work, resolve, reject } = Promise.withResolvers<JudgmentResult<Q>>();
-      active.add(work);
-      const release = () => { active.delete(work); };
-      void work.then(release, release);
-      try {
-        const callerSignal = request.signal;
-        const signal = callerSignal === undefined ? lifetime.signal : AbortSignal.any([lifetime.signal, callerSignal]);
-        void recorded.ask({ ...request, signal }).then(resolve, reject);
-      } catch (error) { reject(error); }
-      return work;
-    },
+  // Both ports share one lifetime, one set of owned calls and one decision log.
+  const owned = (base: JudgmentPort): JudgmentPort => {
+    const recorded = withDecisionLog({
+      get model() { return base.model; },
+      async ask(request) {
+        try { return await base.ask(request); }
+        finally { await yieldCompletion(); }
+      },
+    }, decisionLog);
+    return {
+      get model() { return recorded.model; },
+      recorder: recorded.recorder!,
+      ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
+        // Retained port references must not reopen a retired runtime or write to
+        // its closed log. Calls admitted before retirement still record failure.
+        if (lifetime.signal.aborted) return Promise.reject(new JudgmentError('aborted', 'the judgment runtime is shutting down'));
+        // Reserve ownership before reading borrowed inputs or live settings:
+        // their accessors can synchronously initiate runtime disposal.
+        const { promise: work, resolve, reject } = Promise.withResolvers<JudgmentResult<Q>>();
+        active.add(work);
+        const release = () => { active.delete(work); };
+        void work.then(release, release);
+        try {
+          const callerSignal = request.signal;
+          const signal = callerSignal === undefined ? lifetime.signal : AbortSignal.any([lifetime.signal, callerSignal]);
+          void recorded.ask({ ...request, signal }).then(resolve, reject);
+        } catch (error) { reject(error); }
+        return work;
+      },
+    };
   };
+  const port = owned(transport);
+  // The boundary is placed per call, around the non-recording transport and inside the decision
+  // log, so a malformed answer or a failure echo is never retained.
+  const browserPort = owned({
+    get model() { return transport.model; },
+    ask(request) {
+      let options: WebuiAnswerBoundaryOptions;
+      try { options = browserBoundaryOptions(input); }
+      catch { return Promise.reject(new JudgmentError('invalid-request', 'Invalid judgment settings')); }
+      return withWebuiAnswerBoundary(transport, options).ask(request);
+    },
+  });
   const sourceLifetime = createJudgmentSourceLifetime(input);
   bindJudgmentPortAuthority(port, sourceLifetime.capture);
+  bindJudgmentPortAuthority(browserPort, sourceLifetime.capture);
   const previous = installJudgmentPort(port);
   // Config loaded before this port existed; what its load kept for a reading is read now.
   if (!isClassicOperation()) void input.config.announceUnknownSettingForms?.();
@@ -287,6 +336,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     // shape: AsyncDisposalRegistry observes it and waits before older owners.
     return Promise.allSettled([...active]).then(() => { decisionLog[Symbol.dispose](); });
   });
-  composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
-  return { port, decisionLog };
+  const volumeMonitor = composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
+  return { port, browserPort, decisionLog, volumeMonitor, ...(decisionLogNotice === undefined ? {} : { decisionLogNotice }) };
 }

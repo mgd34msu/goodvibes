@@ -86,11 +86,11 @@ export const workflowSchema: ToolDefinition = {
       },
       scheduleInterval: {
         type: 'string',
-        description: "Repeat interval, e.g. '5m', '1h', '30s' (mode: schedule, action: add).",
+        description: "Repeat interval: a number followed by s, m, h or d, from 1s up to 24d, e.g. '5m', '1h', '30s' (mode: schedule, action: add).",
       },
       scheduleCommand: {
         type: 'string',
-        description: 'Command to run on each interval tick (mode: schedule, action: add).',
+        description: 'Command to run on each interval tick, split into words with no shell; single or double quotes group a word (mode: schedule, action: add). A tick is skipped while the previous run is still going.',
       },
     },
   },

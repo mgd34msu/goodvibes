@@ -38,16 +38,21 @@ export function getProviderIdFromModel(model: unknown): string {
 /** The model half of a `provider:model` value; a bare value is the model. */
 export function getModelIdFromProviderModel(model: unknown): string {
   const raw = String(model ?? '').trim();
-  if (!raw) return String(DEFAULT_CONFIG.provider.model);
+  if (!raw) return getModelIdFromProviderModel(DEFAULT_CONFIG.provider.model);
   const separator = raw.indexOf(':');
   return separator > 0 ? raw.slice(separator + 1) : raw;
 }
 
-/** Compose `provider:model`, leaving an already-qualified model untouched. */
+/**
+ * Compose `provider:model`. Only a model that already starts with this
+ * provider's own prefix is left alone: model ids may carry colons themselves
+ * (Ollama `llama3:8b`, OpenRouter `:free`), so a colon alone does not mean
+ * the id is qualified.
+ */
 export function formatProviderModel(providerId: string, modelId: string): string {
   const provider = providerId.trim();
   const model = modelId.trim();
   if (!provider) return model;
   if (!model) return `${provider}:`;
-  return model.includes(':') ? model : `${provider}:${model}`;
+  return model.startsWith(`${provider}:`) ? model : `${provider}:${model}`;
 }

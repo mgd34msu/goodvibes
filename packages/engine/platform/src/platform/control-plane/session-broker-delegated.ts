@@ -74,6 +74,13 @@ export async function submitDelegatedSessionMessage(
         || JSON.stringify(current) !== JSON.stringify(original)) throw new Error('Delegated input is no longer queued and current');
       completion = deps.complete(original.sessionId, original.id);
     }
-    return structuredClone(await completion);
+    const pending = completion;
+    try {
+      return structuredClone(await pending);
+    } catch (error) {
+      // A failed completion (for example a write error) must stay retryable, not be replayed to every later caller.
+      if (completion === pending) completion = undefined;
+      throw error;
+    }
   } });
 }

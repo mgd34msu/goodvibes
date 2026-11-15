@@ -217,7 +217,7 @@ test('connection shutdown drains a borrowed transport instead of declaring an ab
   await entered.wait;
   let closed = false;
   const close = connection.close().then(() => { closed = true; });
-  await Promise.resolve(); await Promise.resolve();
+  await new Promise<void>(resolve => setImmediate(resolve));
   expect(connection.signal.aborted).toBe(true); expect(closed).toBe(false);
   gate.release();
   await cancelling.wait; expect(closed).toBe(false);

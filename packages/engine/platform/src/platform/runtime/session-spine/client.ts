@@ -29,14 +29,18 @@
  *
  * Discipline (load-bearing for the interactive-latency budget):
  *  - Every public method (register / reopen / heartbeat / close /
- *    foldLegacyRecords) is fire-and-forget: it returns `void` SYNCHRONOUSLY and
- *    never throws into the caller, even when the wire call rejects. Session
+ *    foldLegacyRecords) is fire-and-forget: it returns SYNCHRONOUSLY and never
+ *    throws into the caller, even when the wire call rejects. (foldLegacyRecords
+ *    returns a never-rejecting promise of whether the fold reached the daemon,
+ *    which is what gates the fold's completion marker.) Session
  *    start/resume/heartbeat never block the render or turn path.
  *  - Before a transport is attached every op is queued, never dropped-on-the-floor
  *    and never attempted over a transport that does not exist. Attaching flushes
  *    the backlog.
- *  - Offline ops go into a bounded ring (drop-oldest); flush is idempotent because
- *    register is an upsert.
+ *  - Offline ops go into a bounded ring (drop-oldest) holding at most one
+ *    register per session (later ones merge into it); flush is idempotent
+ *    because register is an upsert, and stops at the first op the daemon
+ *    cannot take so the rest keep their order.
  *  - Heartbeat is debounced/coalesced to at most one wire call per window and omits
  *    the title so it never renames a titled session.
  *  - A timer-driven keepalive fires the heartbeat on a fixed cadence INDEPENDENT of
@@ -44,9 +48,9 @@
  *    lastSeenAt fresh and never falls outside the daemon's freshness/reaper windows.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
+import { writeFileAtomic } from '../../utils/atomic-json-store.js';
 import type {
   RegisterSharedSessionInput,
   SharedSessionKind,
@@ -92,6 +96,12 @@ export type SpineOutcome = 'ok' | 'offline' | 'rejected';
 export interface SpineResult {
   readonly outcome: SpineOutcome;
   readonly error?: string | undefined;
+  /**
+   * Set on a `rejected` register the daemon answered with "this session is
+   * closed here". The daemon is reachable and holds the session, so it is not
+   * a failure to retry; it is a disagreement between this surface and the daemon.
+   */
+  readonly conflict?: 'closed' | undefined;
 }
 
 /**
@@ -115,6 +125,27 @@ interface QueuedOp {
   readonly type: 'register' | 'close';
   readonly sessionId: string;
   readonly input?: RegisterSharedSessionInput;
+  /** Fold closes only: the session's register count when queued. A flush that already took the op
+   * out of its queue skips it when the session was registered again since. */
+  readonly registeredAt?: number;
+  /** Told once whether the daemon took the op (`ok` or a durable refusal) or it was dropped. */
+  readonly onSettled?: ((applied: boolean) => void) | undefined;
+}
+
+/**
+ * One queued register per session is enough: a later one carries the same
+ * identity with a fresher lastSeenAt. The merge keeps a title and a reopen
+ * flag from either, so a burst of heartbeats cannot evict the titled
+ * registration or the reopen they follow.
+ */
+function mergeRegisterInputs(older: RegisterSharedSessionInput, newer: RegisterSharedSessionInput): RegisterSharedSessionInput {
+  const title = newer.title ?? older.title;
+  return {
+    ...older,
+    ...newer,
+    ...(title !== undefined ? { title } : {}),
+    ...(older.reopen || newer.reopen ? { reopen: true } : {}),
+  };
 }
 
 /**
@@ -180,8 +211,19 @@ export class SessionSpineClient {
   private reachability: SpineReachability = 'unknown';
   private readonly records = new Map<string, RegisterSharedSessionInput>();
   private readonly queue: QueuedOp[] = [];
-  private lastHeartbeatAt = 0;
-  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The legacy fold's ops. Kept apart from the bounded ring, whose drop-oldest
+   * would evict a large fold wholesale; it is finite (one store's records) and
+   * drained after the live ops.
+   */
+  private readonly foldQueue: QueuedOp[] = [];
+  /** Throttle window and trailing timer are per session: one session's beat must not swallow another's. */
+  private readonly lastHeartbeatAt = new Map<string, number>();
+  private readonly heartbeatTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Sessions the daemon already told us are closed there; warned once, not on every beat. */
+  private readonly closedOnDaemon = new Set<string>();
+  /** Per session, how many times this surface registered or reopened it. */
+  private readonly registerCount = new Map<string, number>();
   private flushing = false;
   /** The most recently registered/reopened session, the keepalive heartbeat target. */
   private lastSessionId: string | null = null;
@@ -220,9 +262,9 @@ export class SessionSpineClient {
     return this.transport !== null;
   }
 
-  /** Current bounded offline-queue depth (for diagnostics / tests). */
+  /** Ops waiting for the daemon: the bounded offline queue plus any unfinished legacy fold (for diagnostics / tests). */
   get pendingOps(): number {
-    return this.queue.length;
+    return this.queue.length + this.foldQueue.length;
   }
 
   /** The session the keepalive heartbeat currently targets (diagnostics/tests). */
@@ -277,6 +319,7 @@ export class SessionSpineClient {
   /** RESUME: fire-and-forget reopen (reopen:true, no title), the only reopen path. */
   reopen(record: SessionSpineRecord): void {
     this.cacheHeartbeatRecord(record);
+    this.closedOnDaemon.delete(record.sessionId);
     this.dispatchRegister(this.buildInput(record, { includeTitle: false, reopen: true }));
   }
 
@@ -289,27 +332,40 @@ export class SessionSpineClient {
     const cached = this.records.get(sessionId);
     if (!cached) return;
     const now = this.now();
-    if (now - this.lastHeartbeatAt >= this.heartbeatMinIntervalMs) {
-      this.lastHeartbeatAt = now;
+    const last = this.lastHeartbeatAt.get(sessionId) ?? 0;
+    if (now - last >= this.heartbeatMinIntervalMs) {
+      this.lastHeartbeatAt.set(sessionId, now);
       this.dispatchRegister(this.withFreshLastSeen(cached));
       return;
     }
-    if (this.heartbeatTimer) return; // already a trailing beat scheduled -> coalesced
-    const delay = Math.max(0, this.heartbeatMinIntervalMs - (now - this.lastHeartbeatAt));
-    this.heartbeatTimer = setTimeout(() => {
-      this.heartbeatTimer = null;
-      this.lastHeartbeatAt = this.now();
+    if (this.heartbeatTimers.has(sessionId)) return; // already a trailing beat scheduled -> coalesced
+    const delay = Math.max(0, this.heartbeatMinIntervalMs - (now - last));
+    const timer = setTimeout(() => {
+      this.heartbeatTimers.delete(sessionId);
+      this.lastHeartbeatAt.set(sessionId, this.now());
       const rec = this.records.get(sessionId);
       if (rec) this.dispatchRegister(this.withFreshLastSeen(rec));
     }, delay);
-    this.heartbeatTimer.unref?.();
+    timer.unref?.();
+    this.heartbeatTimers.set(sessionId, timer);
   }
 
   /** CLOSE: best-effort, fire-and-forget; tolerate a racing daemon stop. */
   close(sessionId: string): void {
     this.records.delete(sessionId);
-    if (!this.transport) {
+    this.lastHeartbeatAt.delete(sessionId);
+    this.closedOnDaemon.delete(sessionId);
+    const trailing = this.heartbeatTimers.get(sessionId);
+    if (trailing) {
+      clearTimeout(trailing);
+      this.heartbeatTimers.delete(sessionId);
+    }
+    if (this.lastSessionId === sessionId) this.lastSessionId = [...this.records.keys()].at(-1) ?? null;
+    // A register for this session still waiting in the queue must reach the
+    // daemon before the close does, or its later replay would reopen it.
+    if (!this.transport || this.queue.some((op) => op.sessionId === sessionId)) {
       this.enqueue({ type: 'close', sessionId });
+      void this.flush();
       return;
     }
     void this.runClose(sessionId);
@@ -321,14 +377,29 @@ export class SessionSpineClient {
    * (honest history). Idempotent, register is an upsert; closing an already-closed
    * record is a no-op.
    */
-  foldLegacyRecords(records: readonly SessionSpineRecord[], closedIds: ReadonlySet<string>): void {
+  foldLegacyRecords(records: readonly SessionSpineRecord[], closedIds: ReadonlySet<string>): Promise<boolean> {
+    // Resolves once every fold op has reached the daemon (true) or one was
+    // dropped (false); stays pending while no daemon is attached. Never rejects.
+    let outstanding = 0;
+    let allApplied = true;
+    let resolveSettled: (allApplied: boolean) => void = () => {};
+    const settled = new Promise<boolean>((resolve) => { resolveSettled = resolve; });
+    const settle = (applied: boolean): void => {
+      if (!applied) allApplied = false;
+      outstanding -= 1;
+      if (outstanding === 0) resolveSettled(allApplied);
+    };
     for (const record of records) {
-      this.enqueue({ type: 'register', sessionId: record.sessionId, input: this.buildInput(record, { includeTitle: true }) });
+      outstanding += 1;
+      this.foldQueue.push({ type: 'register', sessionId: record.sessionId, input: this.buildInput(record, { includeTitle: true }), onSettled: settle });
       if (closedIds.has(record.sessionId)) {
-        this.enqueue({ type: 'close', sessionId: record.sessionId });
+        outstanding += 1;
+        this.foldQueue.push({ type: 'close', sessionId: record.sessionId, registeredAt: this.registerCount.get(record.sessionId) ?? 0, onSettled: settle });
       }
     }
+    if (outstanding === 0) resolveSettled(true);
     void this.flush();
+    return settled;
   }
 
   /** Reachability probe, runs OFF the interactive path (deferred startup). Flushes on
@@ -352,17 +423,15 @@ export class SessionSpineClient {
 
   /** Clears the pending heartbeat + keepalive timers; call on shutdown. */
   dispose(): void {
-    if (this.heartbeatTimer) {
-      clearTimeout(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    for (const timer of this.heartbeatTimers.values()) clearTimeout(timer);
+    this.heartbeatTimers.clear();
     this.stopKeepalive();
   }
 
   private startKeepalive(): void {
     if (this.keepaliveTimer !== null || this.heartbeatMinIntervalMs <= 0) return;
     this.keepaliveTimer = setInterval(() => {
-      if (this.lastSessionId) this.heartbeat(this.lastSessionId);
+      for (const sessionId of this.records.keys()) this.heartbeat(sessionId);
     }, this.heartbeatMinIntervalMs);
     this.keepaliveTimer.unref?.();
   }
@@ -405,11 +474,36 @@ export class SessionSpineClient {
   }
 
   private dispatchRegister(input: RegisterSharedSessionInput): void {
+    this.registerCount.set(input.sessionId, (this.registerCount.get(input.sessionId) ?? 0) + 1);
+    this.dropFoldCloses(input.sessionId);
     if (!this.transport) {
       this.enqueue({ type: 'register', sessionId: input.sessionId, input });
       return;
     }
+    // A close for this session still waiting in the queue must reach the daemon
+    // before this register does; sent first, the replayed close would shut a
+    // session this surface just reopened.
+    if (this.queue.some((op) => op.sessionId === input.sessionId)) {
+      this.enqueue({ type: 'register', sessionId: input.sessionId, input });
+      void this.flush();
+      return;
+    }
     void this.runRegister(input);
+  }
+
+  /**
+   * The fold drains after the live queue, so a fold close still waiting for a
+   * session this surface has just (re)opened would shut it again. The reopen
+   * supersedes the legacy "closed" history: drop those closes.
+   */
+  private dropFoldCloses(sessionId: string): void {
+    for (let index = this.foldQueue.length - 1; index >= 0; index -= 1) {
+      const op = this.foldQueue[index]!;
+      if (op.type === 'close' && op.sessionId === sessionId) {
+        this.foldQueue.splice(index, 1);
+        op.onSettled?.(true);
+      }
+    }
   }
 
   private async runRegister(input: RegisterSharedSessionInput): Promise<void> {
@@ -420,12 +514,23 @@ export class SessionSpineClient {
     }
     try {
       const result = await transport.register(input);
+      // Detached while the call was out: this transport no longer speaks for
+      // the spine, so its answer must not set reachability. A non-ok answer
+      // still keeps the op for the next transport.
+      if (this.transport !== transport) {
+        if (result.outcome === 'offline') this.enqueue({ type: 'register', sessionId: input.sessionId, input });
+        return;
+      }
       if (result.outcome === 'ok') {
         this.reachability = 'online';
         await this.flush();
       } else if (result.outcome === 'offline') {
         this.reachability = 'offline';
         this.enqueue({ type: 'register', sessionId: input.sessionId, input });
+      } else if (result.conflict === 'closed') {
+        // The daemon answered, so it is reachable, but it holds this session as closed.
+        this.reachability = 'online';
+        this.noteClosedOnDaemon(input.sessionId);
       } else {
         // Durable reject: honest local-only. Never claim online; do not queue (this is
         // not a transient connectivity fault, so it must not retry-forever).
@@ -434,7 +539,7 @@ export class SessionSpineClient {
     } catch (error) {
       // Fire-and-forget contract: absorb everything. An unexpected transport throw is
       // treated as transient offline and queued for reconnect replay.
-      this.reachability = 'offline';
+      if (this.transport === transport) this.reachability = 'offline';
       this.enqueue({ type: 'register', sessionId: input.sessionId, input });
       this.log.debug('session spine register threw, queued for reconnect', { error: errorMessage(error) });
     }
@@ -448,6 +553,10 @@ export class SessionSpineClient {
     }
     try {
       const result = await transport.close(sessionId);
+      if (this.transport !== transport) {
+        if (result.outcome === 'offline') this.enqueue({ type: 'close', sessionId });
+        return;
+      }
       if (result.outcome === 'ok') {
         this.reachability = 'online';
       } else if (result.outcome === 'offline') {
@@ -457,45 +566,99 @@ export class SessionSpineClient {
         this.log.debug('session spine close not applied', { error: result.error });
       }
     } catch (error) {
-      this.reachability = 'offline';
+      if (this.transport === transport) this.reachability = 'offline';
       this.enqueue({ type: 'close', sessionId });
       this.log.debug('session spine close threw, queued for reconnect', { error: errorMessage(error) });
     }
   }
 
+  private noteClosedOnDaemon(sessionId: string): void {
+    if (this.closedOnDaemon.has(sessionId)) return;
+    this.closedOnDaemon.add(sessionId);
+    spineWarn(this.log, 'session spine: the daemon holds this session as closed, so its identity is not mirrored as open', { sessionId });
+  }
+
   private enqueue(op: QueuedOp): void {
-    if (this.queue.length >= this.queueLimit) this.queue.shift(); // drop-oldest
+    if (op.type === 'register' && op.input) {
+      // Coalesce with this session's queued register when nothing for the
+      // session sits after it (a close in between must keep its order).
+      for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+        const queued = this.queue[index]!;
+        if (queued.sessionId !== op.sessionId) continue;
+        if (queued.type === 'register' && queued.input) {
+          this.queue[index] = { ...queued, input: mergeRegisterInputs(queued.input, op.input) };
+          return;
+        }
+        break;
+      }
+    }
+    if (this.queue.length >= this.queueLimit) this.queue.shift()?.onSettled?.(false); // drop-oldest
     this.queue.push(op);
   }
 
+  /**
+   * Replay queued ops in order: the live queue, then the legacy fold. The
+   * first op the daemon cannot take (offline, or a throw) goes back with
+   * everything after it, in order, and the flush stops; trying the rest
+   * against an unreachable daemon would only reorder them.
+   */
   private async flush(): Promise<void> {
-    if (this.flushing || this.queue.length === 0) return;
+    if (this.flushing || (this.queue.length === 0 && this.foldQueue.length === 0)) return;
     const transport = this.transport;
     if (!transport) return;
     this.flushing = true;
     try {
-      const pending = this.queue.splice(0, this.queue.length);
-      for (const op of pending) {
-        try {
-          let result: SpineResult;
-          if (op.type === 'register') {
-            if (!op.input) continue;
-            result = await transport.register(op.input);
-          } else {
-            result = await transport.close(op.sessionId);
+      // Ops queued while this flush runs are taken on the next pass.
+      while (this.queue.length > 0 || this.foldQueue.length > 0) {
+        for (const source of [this.queue, this.foldQueue]) {
+          const pending = source.splice(0, source.length);
+          for (let index = 0; index < pending.length; index += 1) {
+            const op = pending[index]!;
+            let result: SpineResult;
+            try {
+              if (op.type === 'register') {
+                if (!op.input) {
+                  op.onSettled?.(true);
+                  continue;
+                }
+                result = await transport.register(op.input);
+              } else {
+                // A flush that took this fold close before the reopen cannot be reached by dropFoldCloses.
+                if (op.registeredAt !== undefined && op.registeredAt !== (this.registerCount.get(op.sessionId) ?? 0)) {
+                  op.onSettled?.(true);
+                  continue;
+                }
+                result = await transport.close(op.sessionId);
+              }
+            } catch (error) {
+              this.log.debug('session spine flush op threw, re-queued', { error: errorMessage(error) });
+              result = { outcome: 'offline' };
+            }
+            const detached = this.transport !== transport;
+            if (result.outcome === 'offline' || (detached && result.outcome !== 'ok')) {
+              if (!detached) this.reachability = 'offline';
+              // Ahead of anything queued while this flush ran, so order is kept.
+              source.unshift(...pending.slice(index));
+              return;
+            }
+            if (result.outcome === 'ok') {
+              if (!detached) this.reachability = 'online';
+            }
+            // A durable refusal is dropped (never retried forever on the live path) but
+            // is not "taken": a fold whose ops were refused must not write its marker.
+            // A closed-session answer means the daemon holds the session, which is all
+            // a fold needs.
+            const refused = result.outcome === 'rejected' && result.conflict !== 'closed';
+            if (result.outcome === 'rejected') {
+              if (result.conflict === 'closed') this.noteClosedOnDaemon(op.sessionId);
+              else this.log.debug('session spine flush op not applied', { error: result.error });
+            }
+            op.onSettled?.(!refused);
+            if (detached) {
+              source.unshift(...pending.slice(index + 1));
+              return;
+            }
           }
-          if (result.outcome === 'ok') {
-            this.reachability = 'online';
-          } else if (result.outcome === 'offline') {
-            this.reachability = 'offline';
-            this.enqueue(op);
-          } else {
-            this.log.debug('session spine flush op not applied', { error: result.error });
-          }
-        } catch (error) {
-          this.reachability = 'offline';
-          this.enqueue(op);
-          this.log.debug('session spine flush op threw, re-queued', { error: errorMessage(error) });
         }
       }
     } finally {
@@ -606,10 +769,10 @@ function hasCompletedFold(markerPath: string, log: SpineLogger): boolean {
  * Written to a sibling temp file and renamed into place, so an interruption
  * leaves either no marker at all (the fold retries next boot) or the complete
  * previous one, never a half-written file a later boot would trust. The temp
- * name carries the pid so two processes folding the same surface at once cannot
- * scribble over each other's partial file; `rename` onto the final path is
+ * name is unique per call so two processes folding the same surface at once cannot
+ * scribble over each other's partial file; publication is
  * atomic and both write the same completion assertion, so whichever lands last
- * is equally correct. A failed write removes its own temp file and is logged,
+ * is equally correct. A failed write is cleaned up by the shared writer and logged,
  * not thrown: the fold itself already succeeded, and a marker-less re-run is
  * safe.
  */
@@ -618,11 +781,9 @@ function writeCompletedFoldMarker(
   body: { readonly migratedAt: number; readonly count: number; readonly source: string },
   log: SpineLogger,
 ): void {
-  const temp = `${markerPath}.${process.pid}.tmp`;
   try {
-    mkdirSync(dirname(markerPath), { recursive: true });
-    writeFileSync(
-      temp,
+    writeFileAtomic(
+      markerPath,
       JSON.stringify(
         {
           schemaVersion: FOLD_MARKER_SCHEMA_VERSION,
@@ -634,15 +795,9 @@ function writeCompletedFoldMarker(
         null,
         2,
       ) + '\n',
-      'utf-8',
+      { mode: 0o644, durable: false },
     );
-    renameSync(temp, markerPath);
   } catch (err) {
-    try {
-      rmSync(temp, { force: true });
-    } catch {
-      // The temp file is inert; failing to clean it up is not worth a second error.
-    }
     log.debug('session spine legacy fold marker write failed', { error: errorMessage(err) });
   }
 }
@@ -661,12 +816,21 @@ function writeCompletedFoldMarker(
  * forever. An unreadable/absent legacy store still writes NO marker, so a later
  * run with a real store folds it.
  */
+/** Marker paths whose fold has been queued and has not settled yet, in this process. */
+const foldsInFlight = new Set<string>();
+
 export function foldLegacySpineStore(
-  client: Pick<SessionSpineClient, 'foldLegacyRecords'>,
+  client: {
+    /** A client that returns a promise has the marker wait for it; one that returns nothing is taken at its word. */
+    foldLegacyRecords(records: readonly SessionSpineRecord[], closedIds: ReadonlySet<string>): void | Promise<boolean>;
+  },
   options: FoldLegacySpineStoreOptions,
 ): FoldLegacySpineStoreResult {
   const log = options.log ?? logger;
   if (hasCompletedFold(options.markerPath, log)) return { folded: 0, skipped: true };
+  // A fold whose ops are still on their way to the daemon has not written its
+  // marker yet; a second fold of the same store would only queue them twice.
+  if (foldsInFlight.has(options.markerPath)) return { folded: 0, skipped: true };
 
   let raw: unknown;
   try {
@@ -688,13 +852,25 @@ export function foldLegacySpineStore(
     if (value.status === 'closed') closedIds.add(sessionId);
   }
 
-  client.foldLegacyRecords(records, closedIds);
-
-  writeCompletedFoldMarker(
+  // The marker is written only once the daemon has taken every folded op. A
+  // fold the process exits before finishing, or one an op of which was
+  // dropped, leaves no marker and runs again (register is an upsert).
+  const writeMarker = (): void => writeCompletedFoldMarker(
     options.markerPath,
     { migratedAt: (options.now ?? Date.now)(), count: records.length, source: options.storePath },
     log,
   );
+  const settled = client.foldLegacyRecords(records, closedIds);
+  if (settled instanceof Promise) {
+    foldsInFlight.add(options.markerPath);
+    void settled.then((allApplied) => {
+      foldsInFlight.delete(options.markerPath);
+      if (allApplied) writeMarker();
+      else spineWarn(log, 'session spine legacy fold did not complete; it will run again', { source: options.storePath });
+    });
+  } else {
+    writeMarker();
+  }
 
   return { folded: records.length, skipped: false };
 }

@@ -3,6 +3,9 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/g
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { fullToolDefinition } from './tool-definition-compaction.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessModelToolCatalogArgs {
   readonly query?: unknown;
@@ -24,9 +27,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function previewText(value: string, maxLength = 56): string {
@@ -99,13 +100,20 @@ function modelToolLookupFromArgs(args: AgentHarnessModelToolCatalogArgs): { read
   return query ? { source: 'query', input: query } : null;
 }
 
-function describeModelTool(tool: HarnessModelToolDefinition, options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {}): Record<string, unknown> {
+/**
+ * `registry` lets a detail lookup return the tool's full description and every
+ * parameter description: the advertised definition is the short form, and this
+ * is where the rest is deferred to.
+ */
+function describeModelTool(registry: ToolRegistry, advertised: HarnessModelToolDefinition, options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {}): Record<string, unknown> {
+  const full = options.includeParameters ? fullToolDefinition(registry, advertised.name) : undefined;
+  const tool = full ? { ...advertised, description: full.description, parameters: full.parameters } : advertised;
   return {
     name: tool.name,
     ...(options.includeParameters ? { description: tool.description } : { summary: previewText(tool.description) }),
     modelRoute: tool.name,
     modelAccess: {
-      inspect: `agent_harness mode:"tool" toolName:"${tool.name}"`,
+      inspect: `agent_harness mode:"tool" toolName:"${tool.name}" includeParameters:true`,
       invoke: tool.name,
     },
     sideEffects: tool.sideEffects ?? [],
@@ -122,7 +130,7 @@ function describeModelToolCandidates(tools: readonly HarnessModelToolDefinition[
     toolName: tool.name,
     summary: previewText(tool.description),
     modelRoute: tool.name,
-    inspectRoute: `agent_harness mode:"tool" toolName:"${tool.name}"`,
+    inspectRoute: `agent_harness mode:"tool" toolName:"${tool.name}" includeParameters:true`,
     sideEffects: tool.sideEffects ?? [],
   }));
 }
@@ -138,7 +146,7 @@ export async function searchHarnessModelTools(
   const found = await matchingModelTools(toolRegistry, query, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   return {
-    matches: found.matches.slice(0, limit).map(({ entry, judgment }) => ({ ...describeModelTool(entry, { includeParameters }), ...(judgment ? { judgment } : {}) })),
+    matches: found.matches.slice(0, limit).map(({ entry, judgment }) => ({ ...describeModelTool(toolRegistry, entry, { includeParameters }), ...(judgment ? { judgment } : {}) })),
   };
 }
 
@@ -203,8 +211,8 @@ export async function describeHarnessModelTool(toolRegistry: ToolRegistry, args:
   }
   if (!found) return null;
   return { status: 'found', tool: {
-    ...describeModelTool(found.tool, { includeParameters: true, lookup: { ...lookup, resolvedBy: found.resolvedBy } }),
+    ...describeModelTool(toolRegistry, found.tool, { includeParameters: true, lookup: { ...lookup, resolvedBy: found.resolvedBy } }),
     ...(found.judgment ? { judgment: found.judgment } : {}),
-    policy: 'This is a first-class model tool definition. Use the returned JSON schema directly; mutating or external side-effect tools still require the explicit confirmation arguments defined by that tool.',
+    policy: `This is a first-class model tool definition. Use the returned JSON schema directly. For a mutating or external side-effect tool: ${EFFECT_ADMISSION_SENTENCE} Pass any argument the schema marks required.`,
   } };
 }

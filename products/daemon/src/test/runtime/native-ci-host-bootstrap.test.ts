@@ -1,95 +1,15 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import * as nativeActivation from '../../runtime/native-work-execution-activation.js';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
-import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
-import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
-import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
-import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { createDaemonHost } from '../../runtime/daemon-host.js';
+import { useDaemonHostFixture } from '../helpers/daemon-host-fixture.js';
 
-let hosts: DaemonHost[];
-let restores: Array<() => void>;
-let releases: Array<() => void>;
-function keep<T extends { mockRestore(): void }>(spy: T): T { restores.push(() => spy.mockRestore()); return spy; }
-function gate() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((yes) => { resolve = yes; });
-  releases.push(resolve);
-  return { promise, resolve };
-}
-beforeEach(() => {
-  hosts = []; restores = []; releases = [];
-  keep(spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]));
-  keep(spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue());
-});
-afterEach(async () => {
-  for (const release of releases) release();
-  for (const host of hosts) { try { await host.close(); } catch { /* Failure cases assert the bounded result. */ } }
-  for (const restore of restores.reverse()) restore();
-});
-
-function fixture(configure?: (runtime: RuntimeServices) => void, extra: DaemonHostFactories = {}) {
-  const root = makeOwnedTempDir('owned-daemon-host');
-  const homeDirectory = join(root, 'home'); const workingDir = join(root, 'workspace');
-  const configDir = join(homeDirectory, '.goodvibes', 'daemon');
-  mkdirSync(configDir, { recursive: true }); mkdirSync(workingDir, { recursive: true });
-  const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir, workingDir, homeDir: homeDirectory });
-  configManager.set('cluster.enabled', false);
-  configManager.set('relay.enabled', false);
-  const featureFlags = createFeatureFlagManager();
-  featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-  let port = 0;
-  const serveFactory = ((options) => {
-    const server = Bun.serve(options); port = server.port!; return server;
-  }) as typeof Bun.serve;
-  const options: DaemonHostOptions = {
-    runtime: { configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), featureFlags,
-      homeDirectory, workingDir, daemonHomeDirectory: configDir,
-      inboxFactory: (context, _routing, inboxOptions) => registerInboxSurface(context, { ...inboxOptions, adapters: new Map() }),
-      localUserAuthManager: new UserAuthManager({ bootstrapFilePath: join(homeDirectory, 'users.json'), bootstrapCredentialPath: join(homeDirectory, 'bootstrap.txt'),
-        users: [{ username: 'admin', passwordHash: UserAuthManager.hashPassword('fixture'), roles: ['admin'] }] }),
-    },
-    daemon: { host: '127.0.0.1', port: 0, token: 'synthetic-host-token', serveFactory },
-  };
-  const factories: DaemonHostFactories = {
-    providerDiscovery: { scan: async () => ({ servers: [], scannedHosts: 0, scannedPorts: 0, durationMs: 0 }) },
-    async createRuntime(runtimeOptions) {
-      expect(runtimeOptions.createBootOperations).toBe(createDaemonBootOperations);
-      const runtime = await createRuntimeServices(runtimeOptions);
-      keep(spyOn(runtime.serviceRegistry, 'resolveSecret').mockResolvedValue(''));
-      configure?.(runtime); return runtime;
-    }, ...extra,
-  };
-  const host = createDaemonHost(options, factories); hosts.push(host);
-  return { root, homeDirectory, workingDir, options, factories, host, get baseUrl() { return `http://127.0.0.1:${port}`; } };
-}
-
-function seedPlugin(fx: ReturnType<typeof fixture>) {
-  const directory = join(fx.workingDir, '.goodvibes', 'plugins', 'owned-host');
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'manifest.json'), JSON.stringify({ name: 'owned-host', version: '1.0.0', description: 'owned fixture' }));
-  writeFileSync(join(directory, 'index.js'), `
-    let release; const held = new Promise(resolve => { release = resolve; });
-    export function finish() { release('finished'); }
-    export function init(api) {
-      api.registerGatewayMethod({ id: 'held', title: 'Held fixture', description: 'fixture', category: 'plugins', access: 'authenticated', transport: ['internal'], scopes: [], invokable: true }, () => held);
-      api.registerChannelPlugin({ id: 'owned-host', surface: 'webhook', displayName: 'Fixture', capabilities: [], webhookPath: '/webhook/owned-host',
-        async handleInbound() { return new Response('owned configured host', { status: 202 }); } });
-    }
-  `);
-  const preferences = join(fx.homeDirectory, '.goodvibes', 'tui', 'plugins.json');
-  mkdirSync(join(preferences, '..'), { recursive: true });
-  writeFileSync(preferences, JSON.stringify({ enabled: { 'owned-host': true }, config: {}, trust: {}, quarantine: {} }));
-  return { directory, preferences };
-}
-
+const { fixture, seedPlugin, keep, gate, onRelease, track } = useDaemonHostFixture();
 
 test('actual host clean shutdown preserves captured durable policy with enabled plugin', async () => {
   const fx = fixture(); seedPlugin(fx);
@@ -106,7 +26,7 @@ test('actual host clean shutdown preserves captured durable policy with enabled 
   const successorConfig = new ConfigManager({ surfaceRoot: 'tui', configDir: join(fx.homeDirectory, '.goodvibes', 'daemon'), workingDir: fx.workingDir, homeDir: fx.homeDirectory });
   const featureFlags = createFeatureFlagManager(); featureFlags.loadFromConfig({ flags: deriveFeatureStates(successorConfig) });
   const successor = createDaemonHost({ ...fx.options, runtime: { ...fx.options.runtime, configManager: successorConfig, featureFlags, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore() } }, fx.factories);
-  hosts.push(successor);
+  track(successor);
   expect((await successor.start()).state).toBe('ready');
   expect(successor.services!.pluginManager.isEnabled('owned-host')).toBe(true);
   expect(successor.services!.configManager.getDurableConfigurationIncarnation()).toBe(before);

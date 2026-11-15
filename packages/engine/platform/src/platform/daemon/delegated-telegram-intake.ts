@@ -16,6 +16,8 @@ import { delegatedTelegramDecisionSchema, type DelegatedTelegramConfiguration, t
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/native-error-summary.js';
 // Isolate the provider reader from the long-lived coordinator closure context.
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
@@ -60,6 +62,18 @@ function movePending(pending: { state: PendingState }, to: PendingState): boolea
   pending.state = to;
   return true;
 }
+/** Most live provider messages one intake tracks; entries leave when their source deadline passes. */
+const MAX_TRACKED_INGRESSES = 500;
+/** Redelivery guard for a message edit that replaced a captured original. */
+const EDIT_DEDUPE_FALLBACK_MS = 600_000;
+// Brokers keep only unfinished and recent rows per session, so asking for "all" is bounded by the broker.
+const ALL_INPUTS = Number.MAX_SAFE_INTEGER;
+interface IngressEntry {
+  readonly result: Promise<Record<string, unknown>>;
+  /** Infinity while the capture is still being decided; then the source deadline. */
+  until: number;
+  requestId?: string;
+}
 interface Pending {
   readonly ref: NativeInboundSourceRef; readonly configuration: Configuration;
   readonly sourceController: AbortController; readonly assertCurrent: () => void;
@@ -74,7 +88,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   private readonly configurations = new Map<string, Configuration>();
   private readonly selectionAttempts = new Map<string, string>();
   private readonly selected = new Map<string, Selection>();
-  private readonly ingresses = new Map<string, Promise<Record<string, unknown>>>();
+  private readonly ingresses = new Map<string, IngressEntry>();
   private readonly pending = new Map<string, Pending>();
   private readonly selectionStore: PersistentStore<SelectionStore>;
   private readonly selectionWrites = new StoreWriteQueue();
@@ -173,10 +187,10 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const handle = prepared === undefined ? await this.prepareAccount() : prepared;
     const account = handle ? this.deps.accounts.assertCurrent(handle) : null;
     assertOwner();
-    if (!handle || !account) return { outcome: 'held', route: 'selected-and-held', reason: 'Verified polling account identity is required; no source permission was created.' };
+    if (!handle || !account) return { outcome: 'held', route: 'selected-and-held', reason: 'Verified polling account identity is required; no source permission was created. The chat stays selected and held; call inbound.telegram.release with its chatId to return it to normal handling.' };
     this.deps.accounts.assertCurrent(handle);
     const expectedAccount = choice.accountId.replace(/^@/, '').trim().toLowerCase();
-    if (expectedAccount !== account.id && expectedAccount !== account.username.toLowerCase()) return { outcome: 'held', route: 'selected-and-held', reason: 'Choose the verified provider account explicitly.', accountIdentity: account };
+    if (expectedAccount !== account.id && expectedAccount !== account.username.toLowerCase()) return { outcome: 'held', route: 'selected-and-held', reason: 'Choose the verified provider account explicitly. The chat stays selected and held; call inbound.telegram.release with its chatId to return it to normal handling.', accountIdentity: account };
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), choice.configurationLifetimeMs); timer.unref();
     const config: Configuration = { id: `telegram-config-${randomUUID()}`, choice: Object.freeze({ ...choice }), owner, expected, account,
       revision: randomUUID(), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
@@ -195,17 +209,40 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     if (this.closed || generation !== this.lifecycleGeneration) return { outcome: 'held', reason: 'Ingress lifecycle changed; no original captured.' };
     if (!input.providerMessageId) return { outcome: 'held', reason: 'Provider message identity is missing; no original captured.' };
     const key = JSON.stringify([account.id, account.revision, input.binding.id, input.providerMessageId]);
+    this.prune();
     const previous = this.ingresses.get(key);
+    const full = { outcome: 'held', reason: `Delegated intake is tracking ${MAX_TRACKED_INGRESSES} messages whose source deadline has not passed; no original captured. New messages are accepted again as earlier ones expire.` };
     if (input.edited) {
-      if (!previous && this.ingresses.size >= 500) return { outcome: 'held', reason: 'Delegated intake capacity reached; no original captured.' };
+      if (!previous && this.ingresses.size >= MAX_TRACKED_INGRESSES) return full;
       const held = { outcome: 'held', reason: 'Edited provider message requires a fresh original and explicit owner decision.' };
-      this.ingresses.set(key, Promise.resolve(held));
-      if (previous) { const found = await previous; const entry = [...this.pending.values()].find(value => value.ref === found.ref); entry?.sourceController.abort(); }
+      const retention = this.configurations.get(routeKey(input.chatId, input.threadId))?.choice.pendingRetentionMs ?? EDIT_DEDUPE_FALLBACK_MS;
+      this.ingresses.set(key, { result: Promise.resolve(held), until: Date.now() + retention });
+      if (previous) { const found = await previous.result; const entry = [...this.pending.values()].find(value => value.ref === found.ref); entry?.sourceController.abort(); }
       return held;
     }
-    if (previous) return previous;
-    if (this.ingresses.size >= 500) return { outcome: 'held', reason: 'Delegated intake capacity reached; no original captured.' };
-    const result = this.acceptOnce(input, account, generation); this.ingresses.set(key, result); return result;
+    if (previous) return previous.result;
+    if (this.ingresses.size >= MAX_TRACKED_INGRESSES) return full;
+    const entry: IngressEntry = { result: this.acceptOnce(input, account, generation), until: Infinity };
+    this.ingresses.set(key, entry);
+    // A held answer that captured nothing needs no redelivery guard; a captured one keeps it until its source deadline.
+    void entry.result.then(result => {
+      const ref = result.ref as NativeInboundSourceRef | undefined;
+      if (typeof result.sourceExpiresAt === 'number' && ref) { entry.until = result.sourceExpiresAt; entry.requestId = ref.requestId; }
+      else if (this.ingresses.get(key) === entry) this.ingresses.delete(key);
+    }, () => { if (this.ingresses.get(key) === entry) this.ingresses.delete(key); });
+    return entry.result;
+  }
+  /** Forget redelivery guards and pending reviews whose source deadline has passed. */
+  private prune(): void {
+    const now = Date.now();
+    for (const [requestId, entry] of this.pending) {
+      if (now < entry.sourceExpiresAt.value) continue;
+      entry.sourceController.abort(); this.pending.delete(requestId);
+    }
+    for (const [key, entry] of this.ingresses) {
+      const live = entry.requestId ? this.pending.get(entry.requestId)?.sourceExpiresAt.value : undefined;
+      if (now >= Math.max(entry.until, live ?? 0)) this.ingresses.delete(key);
+    }
   }
   private async acceptOnce(input: DelegatedTelegramIngress, account: TelegramSourceAccountSnapshot, generation: number): Promise<Record<string, unknown>> {
     if (this.closed || generation !== this.lifecycleGeneration) return { outcome: 'held', reason: 'Ingress lifecycle changed; no original captured.' };
@@ -229,8 +266,9 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const lifetime = AbortSignal.any([sourceController.signal, config.controller.signal]);
     const sources = createNativeInboundSourceOwner({ origin: { kind: 'external-original', accountId: config.account.id,
       accountRevision: config.account.revision, routeId: input.binding.id, routeRevision: incarnation ?? 'unavailable' }, lifetime, assertCurrent,
-      readBrokerInput: target => this.deps.broker.getInputs(target.sessionId, 500).find(row => row.id === target.inputId) ?? null });
+      readBrokerInput: target => this.findInput(target.sessionId, target.inputId) ?? null });
     lifetime.addEventListener('abort', () => { for (const timer of timers) clearTimeout(timer); sources.close(); }, { once: true });
+    let queuedRef = undefined as NativeInboundSourceRef | undefined;
     try {
       this.deps.accounts.assertCurrent(input.account!);
       const handle = sources.producer.capture(sourceReader(input.readOriginal), lifetime);
@@ -240,7 +278,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
         body: '[External Telegram message held for explicit owner review]', title: 'External Telegram intake',
         metadata: { providerMessageId: input.providerMessageId } }, row => {
           boundSessionId = row.sessionId;
-          ref = sources.producer.bind(handle, { sessionId: row.sessionId, inputId: row.id }); return { ref, assertCurrent };
+          ref = sources.producer.bind(handle, { sessionId: row.sessionId, inputId: row.id }); queuedRef = ref; return { ref, assertCurrent };
         });
       assertCurrent();
       const approval = await this.deps.approvals.raiseOwnerApproval({ sessionId: ref.sessionId, signal: lifetime,
@@ -272,9 +310,25 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       };
       Object.assign(pending, { run }); this.pending.set(ref.requestId, pending);
       // Await the real broker outcome without holding the provider invocation open.
-      void approval.decision.then(async decision => { if (!decision.approved) { movePending(pending, 'held'); sourceController.abort(); } }).catch(() => { sourceController.abort(); });
+      // Any outcome but an approval (deny, expiry, cancel, revoke) leaves no
+      // work to do, so the held input must not stay queued and keep the session busy.
+      const retireQueuedInput = () => this.retireQueuedInput(ref);
+      void approval.decision.then(async decision => {
+        if (decision.approved) return;
+        movePending(pending, 'held'); sourceController.abort(); await retireQueuedInput();
+      }).catch(async () => { sourceController.abort(); await retireQueuedInput().catch(() => {}); });
       return { outcome: 'held', reason: 'awaiting-exact-owner-decision', approvalId: approval.approval.id, ref, sourceExpiresAt: sourceExpiresAt.value };
-    } catch { sourceController.abort(); return { outcome: 'held', reason: 'Original source or canonical binding is unavailable; no legacy fallback.' }; }
+    } catch (error) {
+      sourceController.abort();
+      // A failure after the broker queued the message must not leave that input holding the session busy.
+      if (queuedRef) await this.retireQueuedInput(queuedRef).catch(() => {});
+      logger.warn('Delegated Telegram intake held a message; no original was kept', { routeId: input.binding.id, providerMessageId: input.providerMessageId, error: summarizeError(error) });
+      return { outcome: 'held', reason: 'Original source or canonical binding is unavailable; no legacy fallback.' };
+    }
+  }
+  private findInput(sessionId: string, inputId: string) { return this.deps.broker.getInputs(sessionId, ALL_INPUTS).find(row => row.id === inputId); }
+  private async retireQueuedInput(ref: NativeInboundSourceRef): Promise<void> {
+    if (this.findInput(ref.sessionId, ref.inputId)?.state === 'queued') await this.deps.broker.cancelInput(ref.sessionId, ref.inputId);
   }
   async decide(input: DelegatedTelegramDecision, authority: NativeExecutionAuthority, prepared?: TelegramSourceAccountHandle | null): Promise<Record<string, unknown>> {
     this.assertWorkspace();
@@ -298,14 +352,16 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
           approvalId: input.approvalId, choices: Object.freeze({ ...input.choices }), sourceExpiresAt: expiresAt };
       }
       movePending(pending, 'deciding');
+      // Once the broker has recorded the owner's answer, a later failure must not look retryable.
+      let resolved = false;
       try {
       const settled = await pending.approval.resolveOwnerDecision({ decision: { approved: input.approved, ...(input.approved ? { modifiedArgs: input } : {}) }, actor: expectedOwner.principalId, actorSurface: 'paired-owner-command', assertCurrent: assert });
+      resolved = true;
       assertOwner();
       if (input.approved && (settled?.status !== 'approved' || settled.decision?.disposition !== 'approved' || JSON.stringify(settled.decision.modifiedArgs) !== JSON.stringify(input))) { pending.sourceController.abort(); throw new Error('Exact approval was not durably resolved'); }
       if (!input.approved) {
         pending.sourceController.abort();
-        const row = this.deps.broker.getInputs(input.ref.sessionId, 500).find(value => value.id === input.ref.inputId);
-        if (row?.state === 'queued') { await this.deps.broker.cancelInput(input.ref.sessionId, input.ref.inputId); assertOwner(); }
+        await this.retireQueuedInput(input.ref); assertOwner();
         return { outcome: 'held', reason: 'owner-denied' };
       }
       assert();
@@ -316,11 +372,17 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
       movePending(pending, 'approved'); const outcome = await pending.run(); assertOwner(); return outcome;
       } catch (error) {
         // A failed attempt must not strand the review in 'deciding': that state
-        // rejects every retry. Return it to the owner, unless something already
-        // moved it on (approved, or a final state).
+        // rejects every retry. Before the broker recorded an answer, return it to
+        // the owner. After that the broker and the review would disagree if it went
+        // back to awaiting-owner, so it is held (original released, cancel still
+        // allowed) or, once handed off, unknown.
         // movePending assigns state, which the compiler cannot see through the earlier narrowing.
         const stateNow: string = pending.state;
-        if (stateNow === 'deciding') { delete pending.grant; movePending(pending, 'awaiting-owner'); }
+        if (stateNow === 'deciding' && !resolved) { delete pending.grant; movePending(pending, 'awaiting-owner'); }
+        else if (stateNow === 'deciding') {
+          delete pending.grant; pending.sourceController.abort(); movePending(pending, 'held');
+          await this.retireQueuedInput(input.ref).catch(() => {});
+        } else if (stateNow === 'approved') movePending(pending, 'unknown');
         throw error;
       }
     }
@@ -357,6 +419,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   }
   async list(authority: NativeExecutionAuthority): Promise<Record<string, unknown>> {
     const { owner, assertCurrent } = this.captureOwner(authority);
+    this.prune();
     const records = await this.receiver.list(); assertCurrent();
     return { records: records.filter(delegatedReviewOwnership(owner)).map(record => ({ ...record, execution: 'not-started' })),
       pending: [...this.pending.values()].filter(entry => isDeepStrictEqual(entry.configuration.expected, owner)).map(entry => ({ ref: entry.ref, approvalId: entry.approval.approval.id, sourceExpiresAt: entry.sourceExpiresAt.value, outcome: entry.sourceController.signal.aborted ? 'held' : entry.state })) };
@@ -368,8 +431,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     else if (pending && sameNativeInboundSourceRef(pending.ref, ref)) { if (!isDeepStrictEqual(pending.configuration.expected, owner)) throw new Error('Review receipt belongs to another paired owner'); }
     else return { outcome: 'held', reason: 'missing-source-proof' };
     if (pending) { pending.sourceController.abort(); movePending(pending, 'cancelled'); await this.deps.approvals.cancelApproval(pending.approval.approval.id, owner.principalId, 'paired-owner-command'); assertCurrent(); }
-    const row = this.deps.broker.getInputs(ref.sessionId, 500).find(value => value.id === ref.inputId);
-    if (row?.state === 'queued') { await this.deps.broker.cancelInput(ref.sessionId, ref.inputId); assertCurrent(); }
+    await this.retireQueuedInput(ref); assertCurrent();
     await this.receiver.cancel(ref); assertCurrent(); return { outcome: 'cancelled', execution: 'not-started' };
   }
   revoke(configurationId: string, authority: NativeExecutionAuthority): Record<string, unknown> {
@@ -380,7 +442,33 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     config.controller.abort(); clearTimeout(config.timer);
     return { outcome: 'revoked', route: 'remains-selected-and-held' };
   }
+  /**
+   * Selecting a chat routes every later message through this intake and, with no
+   * live configuration, holds it. Releasing returns the chat to normal handling.
+   */
+  async release(target: string | { readonly chatId: string; readonly threadId?: string | undefined }, authority: NativeExecutionAuthority): Promise<Record<string, unknown>> {
+    const { owner, assertCurrent } = this.captureOwner(authority);
+    await this.start();
+    let key: string;
+    if (typeof target === 'string') {
+      const config = [...this.configurations.values()].find(value => value.id === target);
+      if (!config) return { outcome: 'held', reason: 'configuration-unavailable; release the selected chat by chatId (and threadId) instead.' };
+      if (!isDeepStrictEqual(owner, config.expected)) throw new Error('Configuration belongs to another paired owner');
+      key = routeKey(config.choice.chatId, config.choice.threadId);
+    } else {
+      key = routeKey(target.chatId, target.threadId);
+      if (!this.selected.has(key)) return { outcome: 'held', reason: 'chat-not-selected' };
+      const config = this.configurations.get(key);
+      if (config && !isDeepStrictEqual(owner, config.expected)) throw new Error('Configuration belongs to another paired owner');
+    }
+    const live = this.configurations.get(key);
+    if (live) { live.controller.abort(); clearTimeout(live.timer); }
+    this.configurations.delete(key); this.selectionAttempts.delete(key); this.selected.delete(key);
+    const selection = { selected: [...this.selected.values()] };
+    await this.selectionWrites.run(() => this.selectionStore.persist(selection, { durable: true })); assertCurrent();
+    return { outcome: 'released', route: 'normal-handling-resumes' };
+  }
   /** A new daemon lifecycle restores commands, never previous source/grant lifetimes. */
   startLifecycle(): void { if (this.workspaceInvalidated || this.deps.isWorkspaceCurrent?.() === false) return; this.closed = false; this.watchWorkspace(); this.receiver.reopen(); }
-  close(): void { this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.workspaceUnsubscribe?.(); this.workspaceUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
+  close(): void { this.ingresses.clear(); this.pending.clear(); this.selectionAttempts.clear(); this.accountUnsubscribe?.(); this.accountUnsubscribe = undefined; this.workspaceUnsubscribe?.(); this.workspaceUnsubscribe = undefined; this.lifecycleGeneration++; this.closed = true; for (const config of this.configurations.values()) { config.controller.abort(); clearTimeout(config.timer); } this.receiver.close(); }
 }

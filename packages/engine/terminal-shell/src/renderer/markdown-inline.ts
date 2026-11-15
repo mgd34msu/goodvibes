@@ -16,6 +16,25 @@ import { activeTheme } from './theme.js';
 /** Module-level set of inline markdown special characters (hoisted out of hot loop). */
 const INLINE_SPECIAL_CHARS = new Set(['[', '`', '*', '_', '~']);
 
+const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+const isSpace = (ch: string | undefined): boolean => ch === undefined || /\s/.test(ch);
+
+/** `_` inside a word (my_var_name) and `*` followed by a space (2 * 3) are text, not emphasis. */
+function canOpenItalic(text: string, i: number): boolean {
+  if (isSpace(text[i + 1])) return false;
+  return text[i] === '*' || !isWordChar(text[i - 1]);
+}
+
+/** Index of the closer of an italic run opened at `i`, or -1. */
+function findItalicCloser(text: string, i: number, closer: string): number {
+  for (let end = text.indexOf(closer, i + 1); end !== -1; end = text.indexOf(closer, end + 1)) {
+    if (end === i + 1 || isSpace(text[end - 1])) continue;
+    if (closer === '_' && isWordChar(text[end + 1])) continue;
+    return end;
+  }
+  return -1;
+}
+
 /** Candidate matching leaves sentence punctuation outside the clickable target. */
 function bareLinkAt(text: string, index: number): string | undefined {
   if (index > 0 && !/[\s(<"']/.test(requireDefined(text[index - 1]))) return;
@@ -104,12 +123,13 @@ export function renderInlineMarkdown(text: string): InlineToken[] {
     // starting italic when bold/underscore-bold detection failed (e.g. unclosed **).
     if (
       (text[i] === '*' || text[i] === '_') &&
+      canOpenItalic(text, i) &&
       text[i - 1] !== text[i] &&
       text[i + 1] !== text[i]
     ) {
       const closer = requireDefined(text[i]);
-      const end = text.indexOf(closer, i + 1);
-      if (end !== -1 && end > i + 1) {
+      const end = findItalicCloser(text, i, closer);
+      if (end !== -1) {
         tokens.push({ type: 'text', text: text.slice(i + 1, end), style: { italic: true } });
         i = end + 1;
         continue;

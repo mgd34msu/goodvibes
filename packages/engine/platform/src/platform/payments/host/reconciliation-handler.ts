@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { assertConfirmed, HandlerError, type TypedHandler } from './handler-plumbing.js';
-import type { PurchaseReconciliations } from './purchase-reconciliation.js';
+import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
+import { PaymentOperationStoreError } from './operation-store.js';
 
 /** An explicit observation of merchant history, with the same current paired
  * admin authority as answering a window. Classic policy may settle old funds;
@@ -36,7 +37,10 @@ export function purchaseReconciliationHandler(owner: PurchaseReconciliations): T
         () => { assertPaired(); current(); }));
     } catch (error) {
       if (error instanceof HandlerError) throw error;
-      throw new HandlerError('The purchase finding could not be fully settled. Refresh its status and repeat only the finding already saved. Do not submit another order.', 'FAILED_PRECONDITION', 409);
+      if (error instanceof PurchaseReconciliationError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof PaymentOperationStoreError && error.kind === 'busy') throw new HandlerError(
+        'This purchase is still being processed, so it cannot be reconciled yet. Wait for its status to settle, then try again. No new order was submitted.', 'FAILED_PRECONDITION', 409);
+      throw new HandlerError('The purchase finding could not be fully settled. Refresh its status; if it shows a saved finding, repeat that same finding. Do not submit another order.', 'FAILED_PRECONDITION', 409);
     }
   };
 }

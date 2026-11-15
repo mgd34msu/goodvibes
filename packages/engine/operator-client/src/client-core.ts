@@ -98,8 +98,13 @@ export interface OperatorRemoteClient {
     methodId: TMethodId,
     ...args: KnownMethodArgs<TMethodId>
   ): Promise<OperatorMethodOutput<TMethodId>>;
-  invoke<T = unknown>(
-    methodId: string,
+  /**
+   * Untyped call for a method id the contract has no typed entry for. A typed id
+   * is refused here (its parameter is `never`), so a wrong body for a known
+   * method is a compile error instead of silently matching this overload.
+   */
+  invoke<T = unknown, TMethodId extends string = string>(
+    methodId: TMethodId extends OperatorTypedMethodId ? never : TMethodId,
     input?: Record<string, unknown>,
     options?: OperatorRemoteClientInvokeOptions,
   ): Promise<T>;
@@ -242,6 +247,20 @@ export function createOperatorRemoteClient(
     input?: Record<string, unknown>,
     options: OperatorRemoteClientInvokeOptions = {},
   ): Promise<T> {
+    // An unknown method id, or one with no HTTP binding, rejects the returned
+    // promise like every other failure instead of throwing before `.catch` attaches.
+    try {
+      return startInvoke<T>(methodId, input, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  function startInvoke<T>(
+    methodId: string,
+    input: Record<string, unknown> | undefined,
+    options: OperatorRemoteClientInvokeOptions,
+  ): Promise<T> {
     const schema = options.responseSchema ?? clientOptions.getResponseSchema?.(methodId);
     const method = requireMethod(contract, methodId);
     const validateResponse = clientOptions.validateResponses !== false;
@@ -296,12 +315,17 @@ export function createOperatorRemoteClient(
     // validateResponses option is intentionally not forwarded because streams
     // do not have a single response body to validate.
     const streamOptions = options ?? { handlers: {} };
-    return openContractRouteStream(
-      transport,
-      requireMethodRoute(contract, methodId),
-      clientInputRecord(input),
-      streamOptions,
-    );
+    try {
+      return openContractRouteStream(
+        transport,
+        requireMethodRoute(contract, methodId),
+        clientInputRecord(input),
+        streamOptions,
+      );
+    } catch (error) {
+      // An unknown method id rejects, as every other failure does.
+      return Promise.reject(error);
+    }
   }
 
   const client: OperatorRemoteClient = {
@@ -452,13 +476,25 @@ export function createOperatorRemoteClient(
   return client;
 }
 
+/**
+ * Said on a response-shape failure of a request that changes state: the
+ * transport only gets here after a 2xx answer, so the daemon already acted.
+ */
+const REQUEST_APPLIED_NOTICE = 'The daemon answered successfully, so this request was applied; only its response did not match the expected shape. Do not repeat the request: check the resulting state instead.';
+
+function isMutatingRoute(method: unknown): boolean {
+  return typeof method === 'string' && !['GET', 'HEAD'].includes(method.toUpperCase());
+}
+
 async function validateJsonSchemaResponse(method: OperatorMethodContract, body: unknown, options: { readonly signal?: AbortSignal | undefined; readonly reading?: RegexReadingCapability | undefined; readonly assertCurrent: () => void }): Promise<void> {
   const schema = method.outputSchema;
   if (!schema || typeof schema !== 'object') return;
   const failure = await firstJsonSchemaFailureAsync(schema as Record<string, unknown>, body, options);
   if (!failure) return;
+  const applied = isMutatingRoute(method.http?.method);
   throw new ContractError(
-    `Response validation failed for operator method "${method.id}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`,
-    { source: 'contract' },
+    `Response validation failed for operator method "${method.id}": field "${failure.path}" expected ${failure.expected} but received ${failure.received}. Ensure the daemon is running the matching GoodVibes contract version.`
+      + (applied ? ` ${REQUEST_APPLIED_NOTICE}` : ''),
+    { source: 'contract', ...(applied ? { phase: 'response-validation', hint: REQUEST_APPLIED_NOTICE } : {}) },
   );
 }

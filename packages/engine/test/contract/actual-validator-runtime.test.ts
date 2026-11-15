@@ -2,7 +2,7 @@ import { withDecisionLog } from '@goodvibes-jev/judgment';
 /** Real contract -> default AgentOrchestrator -> registerAllTools -> contained validators. */
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '../../errors/src/index.js';
@@ -19,6 +19,7 @@ import { probeCapturedExecAvailability } from '../../platform/src/platform/tools
 import type { LLMProvider } from '../../platform/src/platform/providers/interface.js';
 import type { ToolCall, ToolResult } from '../../platform/src/platform/types/tools.js';
 import { makeRepo, oneUnitPlan, runnerPort, waitFor } from './runner-support.js';
+import { findInstalledToolEntry } from '../_helpers/installed-package.js';
 import { plannerOutput } from './plan-support.js';
 
 
@@ -85,7 +86,7 @@ async function assertActualRuntimeFlow(mode: 'direct' | 'validators'): Promise<v
     const modules = join(root, 'node_modules'); mkdirSync(modules);
     const installed = realpathSync(join(import.meta.dir, '../../../../node_modules'));
     copyPackage(realpathSync(join(installed, 'typescript')), modules);
-    const store = join(installed, '.bun'); const eslint = readdirSync(store).find((name) => name.startsWith('eslint@'));
+    const store = join(installed, '.bun'); const eslint = findInstalledToolEntry(store, 'eslint');
     expect(eslint).toBeDefined(); copyPackage(join(store, eslint!, 'node_modules/eslint'), modules);
     mkdirSync(join(modules, '.bin')); symlinkSync('../typescript/bin/tsc', join(modules, '.bin/tsc')); symlinkSync('../eslint/bin/eslint.js', join(modules, '.bin/eslint'));
   }

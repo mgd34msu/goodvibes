@@ -96,6 +96,39 @@ export interface ProviderStack {
   readonly providerOptimizer: ProviderOptimizer;
 }
 
+/** Registries whose credential refresh a stack is already driving from the secrets store. */
+const liveCredentialRegistries = new WeakSet<object>();
+
+/**
+ * Whether a provider stack already refreshes this registry's credentials on every secrets change
+ * (and at boot). A second owner of the same registry must not register a second listener.
+ */
+export function hasLiveCredentialRefresh(registry: object): boolean {
+  return liveCredentialRegistries.has(registry);
+}
+
+/**
+ * Makes `refreshProviderCredentials` single-flight with a trailing run: a request that arrives
+ * while a refresh is running waits for it and then runs once more (all such requests share that
+ * run). A refresh that read the store before a later write can therefore never finish last and
+ * re-register stale keys.
+ */
+function coalesceCredentialRefreshes(registry: ProviderRegistry): void {
+  const refresh = registry.refreshProviderCredentials.bind(registry);
+  let active: Promise<void> | null = null;
+  let queued: Promise<void> | null = null;
+  const launch = (): Promise<void> => {
+    const run: Promise<void> = refresh().finally(() => { if (active === run) active = null; });
+    active = run;
+    return run;
+  };
+  registry.refreshProviderCredentials = (): Promise<void> => {
+    if (active === null) return launch();
+    queued ??= active.catch(() => undefined).then(() => { queued = null; return launch(); });
+    return queued;
+  };
+}
+
 export function createProviderStack(options: ProviderStackOptions): ProviderStack {
   const { configManager, shellPaths, surfaceRoot } = options;
   const providerCapabilityRegistry = new ProviderCapabilityRegistry();
@@ -131,16 +164,24 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     benchmarkStore.initBenchmarks();
   }
   // ONE credential chain (env -> secrets -> subscription): boot applies secrets-backed keys; every secrets write/delete re-registers builtins LIVE (no restart); badges/picker/chat read the same instances.
-  options.secretsManager.onDidChange(() => void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('live credential refresh failed', { error: summarizeError(error) })));
+  coalesceCredentialRefreshes(providerRegistry);
+  const stopCredentialWatch = options.secretsManager.onDidChange(() => void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('live credential refresh failed', { error: summarizeError(error) })));
   void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('boot credential refresh failed', { error: summarizeError(error) }));
+  liveCredentialRegistries.add(providerRegistry);
   const toolLLM = new ToolLLM({
     configManager,
     providerRegistry,
     runtimeBus: options.runtimeBus,
   });
   const providerOptimizer = new ProviderOptimizer(providerRegistry, providerCapabilityRegistry, false);
-  bindProviderOptimizerFeatureFlag(options.featureFlags, providerOptimizer);
+  const unbindOptimizerFlag = bindProviderOptimizerFeatureFlag(options.featureFlags, providerOptimizer);
   applyProviderOptimizerConfigMode(configManager, providerOptimizer);
+  // A disposed composition (a test, a one-shot command) must stop reacting to later secret and flag changes.
+  options.registerDispose?.(() => {
+    stopCredentialWatch();
+    unbindOptimizerFlag();
+    liveCredentialRegistries.delete(providerRegistry);
+  });
   return {
     providerCapabilityRegistry,
     cacheHitTracker,

@@ -45,9 +45,16 @@ const reportPath = process.env.GOODVIBES_LEAK_REPORT ?? resolve(ROOT, '.test-tmp
 
 console.log(`leak-scan: ${testArgs.length} test file(s) discovered`);
 
+// The repository's runner supplies the isolated home, temp directory and network block that a plain `bun test` skips.
+const ENGINE_ROOT = resolve(ROOT, '../../packages/engine');
 const result = spawnSync(
-  'bun',
-  ['test', '--preload', './src/test/_helpers/leak-detector.ts', ...testArgs],
+  process.execPath,
+  [
+    join(ENGINE_ROOT, 'scripts/test.ts'),
+    '--cwd', relative(ENGINE_ROOT, ROOT),
+    '--preload', './src/test/_helpers/leak-detector.ts',
+    ...testArgs,
+  ],
   {
     cwd: ROOT,
     stdio: 'inherit',
@@ -63,3 +70,5 @@ console.log(`\nleak report written to ${reportPath}`);
 if (result.status !== 0) {
   console.log(`(suite exited ${result.status ?? 'null'}: leak data above is still valid)`);
 }
+// A failing suite is a failing scan; the report above is still written.
+process.exitCode = result.status ?? 1;

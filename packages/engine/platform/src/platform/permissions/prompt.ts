@@ -2,6 +2,9 @@ import type { TurnHookOwner } from '../hooks/turn-ownership.js';
 import type { PermissionCategory, PermissionRequestAnalysis } from './types.js';
 import type { RememberTier, RememberTierOption } from './approval-rules.js';
 
+/** Stands in for a typed terminal-prompt answer in every stored or published approval record. */
+export const WITHHELD_PROMPT_ANSWER = '[answer withheld]';
+
 /**
  * Attribution for a permission ask that did NOT originate from the foreground
  * turn loop. Populated when a background/subagent tool call, or an MCP server's
@@ -104,6 +107,16 @@ export interface PermissionPromptRequest {
    * same options. A decision answers with `rememberTier`.
    */
   rememberOptions?: readonly RememberTierOption[] | undefined;
+  /**
+   * What a remembered ALLOW does for the next matching call. Absent or `skips-ask`:
+   * the next matching call is allowed without asking. `owner-asked-again`: this
+   * ask is one the mode always puts to the owner (critical, irreversible,
+   * security-weakening or boundary-failing action), so a remembered allow is
+   * recorded but the owner is asked again; a surface must not promise otherwise.
+   * A remembered DENY is enforced in every mode except the one that skips all prompts and
+   * consults no remembered rule at all.
+   */
+  rememberEffect?: 'skips-ask' | 'owner-asked-again' | undefined;
 }
 
 export interface PermissionPromptDecision {
@@ -136,6 +149,8 @@ export interface PermissionExecutionOptions {
   /** Trusted in-process turn owner; never included in a prompt payload. */
   readonly hookOwner?: TurnHookOwner | undefined;
   readonly signal?: AbortSignal | undefined;
+  /** The tool declares itself dangerous: it is never allowed without the owner's answer except in allow-all. */
+  readonly dangerous?: boolean | undefined;
 }
 
 export type PermissionRequestHandler = (

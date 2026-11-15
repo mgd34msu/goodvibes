@@ -52,14 +52,16 @@ export function parseClientReaderArtifact(value: unknown): ClientReaderArtifact 
     || typeof value.version !== 'string' || !parseSemanticVersion(value.version)
     || (value.target !== 'linux-x64' && value.target !== 'linux-arm64' && value.target !== 'darwin-x64' && value.target !== 'darwin-arm64')
     || ![value.sourceCommit, value.sourceTree, value.headCommit].every(item => typeof item === 'string' && /^[a-f0-9]{40}$/.test(item))
-    || !Array.isArray(value.files) || (value.files.length !== 1 && value.files.length !== 4)) throw new Error('Terminal reader artifact is invalid');
+    || !Array.isArray(value.files)) throw new Error('Terminal reader artifact is invalid');
   const target = value.target, asset = clientReaderAsset(value.packageName, target);
   const expected = clientReaderPayloadPaths(value.packageName, value.target);
-  if (value.files.length === 4 && expected.length !== 4) throw new Error('Terminal reader runtime target is invalid');
+  // Evidence names every member of its cohort. A shorter list would pin the
+  // launcher alone and leave the runtime, licence and json members unchecked.
+  if (value.files.length !== expected.length) throw new Error('Terminal reader runtime target is invalid');
   const paths = new Set<string>(), inputFiles = value.files;
   const files = inputFiles.map((item: unknown) => {
     if (!record(item) || !exact(item, ['path', 'sha256', 'mode', 'size']) || typeof item.path !== 'string'
-      || !expected.slice(0, inputFiles.length).includes(item.path) || paths.has(item.path)
+      || !expected.includes(item.path) || paths.has(item.path)
       || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)
       || item.mode !== (item.path === asset || target.startsWith('linux-') && item.path === asset + '.bun' ? 0o755 : 0o644)
       || typeof item.size !== 'number' || !Number.isSafeInteger(item.size) || item.size <= 0) throw new Error('Terminal reader payload is invalid');

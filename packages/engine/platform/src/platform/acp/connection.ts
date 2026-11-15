@@ -20,7 +20,14 @@ import type {
   RequestPermissionResponse,
 } from './protocol.js';
 import type { SubagentInfo, SubagentResult, SubagentTask } from './protocol.js';
-import { permissionOutcomeFor, type AcpPermissionOptionLike } from './protocol.js';
+import {
+  ACP_HANDSHAKE_TIMEOUT_MS,
+  drainStderrTail,
+  messageChunkText,
+  permissionOutcomeFor,
+  withTimeout,
+  type AcpPermissionOptionLike,
+} from './protocol.js';
 import { admitExternalRequest, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
 import type { PermissionRequestHandler } from '../permissions/prompt.js';
@@ -45,19 +52,8 @@ import type { HookCategory, HookEventPath, HookPhase } from '../hooks/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { AgentUsage } from '../../events/agents.js';
 
-/** Shape of an agent_message_chunk session update that carries text content. */
-interface MessageChunkUpdate {
-  sessionUpdate: 'agent_message_chunk';
-  content?: Array<{ type: string; text?: string }> | undefined;
-}
-
-/** Runtime type guard for agent_message_chunk updates. */
-function isMessageChunk(update: { sessionUpdate?: unknown }): update is MessageChunkUpdate {
-  return (
-    update.sessionUpdate === 'agent_message_chunk' &&
-    ('content' in update)
-  );
-}
+/** Most streamed text kept as the run's `output`; beyond it the text is cut and says so. */
+const OUTPUT_CAP_CHARS = 64_000;
 
 /** Shape of the (experimental/unstable) ACP `PromptResponse.usage` field. */
 interface AcpPromptUsage {
@@ -103,7 +99,12 @@ export class AcpConnection {
   private sessionId: string | null = null;
   private childProcess: ReturnType<typeof Bun.spawn> | null = null;
   private toolCallsMade = 0;
+  /** Tail of the streamed text, for progress display only. */
   private lastProgressText = '';
+  /** The streamed text kept for the final `output`, up to OUTPUT_CAP_CHARS. */
+  private outputText = '';
+  private outputTruncated = false;
+  private stderr: { tail(): string } | null = null;
   private transportClosed = false;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
 
@@ -111,11 +112,13 @@ export class AcpConnection {
     id: string,
     private task: SubagentTask,
     spawnCmd: string[],
+    /** Ignored: child permission asks are answered only through `permissionHost`; without one every ask is cancelled. */
     _requestPermission: PermissionRequestHandler = async () => ({ approved: false, remember: false }),
     runtimeBus: RuntimeEventBus | null = null,
     hookDispatcher: Pick<HookDispatcher, 'fire'> | null = null,
     private readonly permissionHost?: ExternalPermissionHost,
     private readonly operation?: ExternalOperationSource,
+    private readonly handshakeTimeoutMs: number = ACP_HANDSHAKE_TIMEOUT_MS,
   ) {
     this.id = id;
     this.task = { ...task, tools: [...task.tools] };
@@ -159,6 +162,7 @@ export class AcpConnection {
         stdout: 'pipe',
         stderr: 'pipe',
       });
+      this.stderr = drainStderrTail(this.childProcess.stderr);
 
       // 2. Build ndJsonStream from child stdio.
       //
@@ -219,19 +223,19 @@ export class AcpConnection {
 
       // 5. ACP handshake: initialize (protocolVersion is a number)
       this.emitTransportAuthenticating();
-      await this.conn.initialize({
+      await withTimeout(this.conn.initialize({
         protocolVersion: 1,
         clientInfo: { name: 'goodvibes-platform', version: VERSION },
         clientCapabilities: {},
-      });
+      }), this.handshakeTimeoutMs, 'ACP initialize');
 
       this.lifetime.signal.throwIfAborted();
 
       // 6. Create a session (cwd is required, mcpServers is required)
-      const sessionResp = await this.conn.newSession({
+      const sessionResp = await withTimeout<{ readonly sessionId: string }>(this.conn.newSession({
         cwd: this.task.workingDirectory,
         mcpServers: [],
-      });
+      }), this.handshakeTimeoutMs, 'ACP session/new');
       this.lifetime.signal.throwIfAborted();
       this.sessionId = sessionResp.sessionId;
       this.emitTransportConnected();
@@ -249,10 +253,16 @@ export class AcpConnection {
       });
 
       this.lifetime.signal.throwIfAborted();
-      const output = this.lastProgressText || `Completed with stop reason: ${promptResp.stopReason}`;
+      // Only `end_turn` is finished work: a refusal, a token or turn limit or a
+      // cancel left the task incomplete, and the parent must not read it as done.
+      const finished = promptResp.stopReason === 'end_turn';
+      const streamed = this.outputText + (this.outputTruncated ? `\n[output truncated at ${OUTPUT_CAP_CHARS} characters]` : '');
+      const output = finished
+        ? streamed || `Completed with stop reason: ${promptResp.stopReason}`
+        : `Stopped before finishing (stop reason: ${promptResp.stopReason})${streamed ? `:\n${streamed}` : '.'}`;
       const result: SubagentResult = {
         id: this.id,
-        success: promptResp.stopReason !== 'cancelled',
+        success: finished,
         output,
         toolCallsMade: this.toolCallsMade,
         duration: Date.now() - startedAt,
@@ -260,20 +270,36 @@ export class AcpConnection {
 
       // The first terminal outcome wins: a cancel that already settled this run
       // is not overwritten, and no second terminal event is emitted.
-      if (!this.settle(result.success ? 'complete' : 'error')) return result;
+      const cancelledByChild = promptResp.stopReason === 'cancelled';
+      if (!this.settle(finished ? 'complete' : cancelledByChild ? 'cancelled' : 'error')) return result;
       if (this.runtimeBus) {
-        emitAgentCompleted(this.runtimeBus, this.emitterContext(), {
-          agentId: this.id,
-          durationMs: result.duration,
-          output: result.output,
-          toolCallsMade: result.toolCallsMade,
-          usage: mapAcpUsage(promptResp.usage),
-        });
+        if (finished) {
+          emitAgentCompleted(this.runtimeBus, this.emitterContext(), {
+            agentId: this.id,
+            durationMs: result.duration,
+            output: result.output,
+            toolCallsMade: result.toolCallsMade,
+            usage: mapAcpUsage(promptResp.usage),
+          });
+        } else if (cancelledByChild) {
+          emitAgentCancelled(this.runtimeBus, this.emitterContext(), {
+            agentId: this.id,
+            reason: 'ACP agent ended the prompt as cancelled',
+          });
+        } else {
+          emitAgentFailed(this.runtimeBus, this.emitterContext(), {
+            agentId: this.id,
+            error: result.output,
+            durationMs: result.duration,
+          });
+        }
       }
-      this.emitTransportDisconnected('ACP session completed', false);
+      this.emitTransportDisconnected(finished ? 'ACP session completed' : `ACP session stopped (${promptResp.stopReason})`, false);
       return result;
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(summarizeError(err));
+      const cause = err instanceof Error ? err : new Error(summarizeError(err));
+      const stderrTail = this.stderr?.tail();
+      const error = stderrTail ? new Error(`${cause.message} (agent stderr: ${stderrTail})`) : cause;
       const failureResult = {
         id: this.id,
         success: false,
@@ -504,22 +530,20 @@ export class AcpConnection {
           this.toolCallsMade++;
         }
 
-        // Collect streamed text chunks as progress
-        if (isMessageChunk(update)) {
-          const text = update.content
-            ?.filter((c) => c.type === 'text')
-            .map((c) => c.text ?? '')
-            .join('') ?? '';
-          if (text) {
-            this.lastProgressText = (this.lastProgressText + text).slice(-1000);
-            this.info.progress = this.lastProgressText.slice(-200);
-            if (this.runtimeBus) {
-              emitAgentStreamDelta(this.runtimeBus, this.emitterContext(), {
-                agentId: this.id,
-                content: text,
-                accumulated: this.lastProgressText,
-              });
-            }
+        // Collect streamed text: the whole answer (capped) for `output`, a short tail for progress.
+        const text = messageChunkText(update);
+        if (text) {
+          const room = OUTPUT_CAP_CHARS - this.outputText.length;
+          this.outputText += text.slice(0, Math.max(room, 0));
+          if (text.length > room) this.outputTruncated = true;
+          this.lastProgressText = (this.lastProgressText + text).slice(-1000);
+          this.info.progress = this.lastProgressText.slice(-200);
+          if (this.runtimeBus) {
+            emitAgentStreamDelta(this.runtimeBus, this.emitterContext(), {
+              agentId: this.id,
+              content: text,
+              accumulated: this.lastProgressText,
+            });
           }
         }
       },

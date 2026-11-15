@@ -21,7 +21,7 @@ function fixture(raw: object = { session: { autoTitle: true } }) {
     configManager: { getRaw: () => raw, get: () => false },
     events: { turns }, conversation,
     toolLLM: { chat: () => { calls++; return new Promise<string>(resolve => { release = resolve; }); } },
-    voiceService: {}, orchestrator: {}, providerRegistry: {}, workingDir: '.',
+    voiceService: {}, orchestrator: { runTurn: async () => undefined, setCoreServices: () => {} }, providerRegistry: {}, workingDir: '.',
     notify: (message: string) => { messages.push(message); }, render: () => { renders++; },
     getSessionId: () => sessionId, isActive: () => active,
   } as unknown as SessionAmbienceDeps;

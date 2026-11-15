@@ -148,6 +148,10 @@ export function MailView({ tabs }: MailViewProps = {}) {
   const replyRequest = useRef<{ readonly abort: AbortController; readonly message: MailMessageData } | null>(null);
   const composerLifetime = useRef<ClientLifetime | null>(null);
   const composerRevision = useRef(0);
+  // Set from the first Send press until the send settles or is declined. Enter in a field
+  // submits the form even while the Send button is disabled, and `email.send` has no
+  // idempotency key, so a second confirmed press would email the recipients twice.
+  const sendInFlight = useRef(false);
   const cancelReply = useCallback(() => {
     const previous = replyRequest.current;
     replyRequest.current = null;
@@ -301,17 +305,25 @@ export function MailView({ tabs }: MailViewProps = {}) {
   }
 
   async function submitSend(): Promise<void> {
-    if (!composerReady || surfaceRefusing) return;
+    if (!composerReady || surfaceRefusing || sendInFlight.current) return;
     const snapshot = captureComposer();
     if (!snapshot) return;
-    const agreed = await confirm.ask({
-      title: 'Send this message?',
-      target: snapshot.to,
-      description: 'It leaves the account right away and cannot be recalled.',
-      confirmLabel: 'Send',
-      tone: 'danger',
-    });
-    if (agreed && composerCurrent(snapshot)) send.mutate(snapshot);
+    sendInFlight.current = true;
+    let agreed = false;
+    try {
+      agreed = await confirm.ask({
+        title: 'Send this message?',
+        target: snapshot.to,
+        description: 'It leaves the account right away and cannot be recalled.',
+        confirmLabel: 'Send',
+        tone: 'danger',
+      });
+    } catch (error) {
+      sendInFlight.current = false;
+      throw error;
+    }
+    if (agreed && composerCurrent(snapshot)) send.mutate(snapshot, { onSettled: () => { sendInFlight.current = false; } });
+    else sendInFlight.current = false;
   }
 
   const filters = inboxNote ? undefined : (
@@ -480,7 +492,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
             onBodyChange={(value) => { composerRevision.current++; setBody(value); }}
             onClearReply={() => { composerRevision.current++; cancelReply(); setReplySubjectState(undefined); setInReplyTo(''); }}
             onSend={() => void submitSend()}
-            onSaveDraft={() => { const snapshot = captureComposer(); if (snapshot && composerReady && !surfaceRefusing) saveDraft.mutate(snapshot); }}
+            onSaveDraft={() => { const snapshot = captureComposer(); if (snapshot && composerReady && !surfaceRefusing && !saveDraft.isPending) saveDraft.mutate(snapshot); }}
             onClose={() => { composerRevision.current++; cancelReply(); setReplySubjectState(undefined); setComposeOpen(false); }}
             ready={composerReady}
             sending={send.isPending}

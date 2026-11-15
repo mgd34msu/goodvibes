@@ -5,6 +5,9 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { answerExcerptSelection } from '../platform/src/platform/knowledge/semantic/answer-excerpts/battery.js';
 import { registry } from '../platform/src/platform/knowledge/semantic/answer-excerpts/judgment-registry.js';
+import { ANSWER_EXCERPT_LIMITS } from '../platform/src/platform/knowledge/semantic/answer-excerpts/types.js';
+import { waitFor } from './_helpers/test-timeout.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 import { prepareAnswerExcerptReadings, answerExcerptSpans, type AnswerExcerptInput } from '../platform/src/platform/knowledge/semantic/answer-excerpts/reader.js';
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
@@ -125,9 +128,13 @@ describe('exact answer excerpt reader', () => {
     const fake = readings();
     const value = input(); const documents = Array.from({ length: 50 }, (_, index) => ({ reference: `document-${index + 1}`, kind: 'extraction' as const, text: `${'x'.repeat(1_450)}\n\n${'y'.repeat(1_450)}` }));
     expect(() => prepare([{ ...value, documents }])).not.toThrow(); expect(fake.requests).toHaveLength(0);
-    let active = 0, maximum = 0;
-    installJudgmentPort({ ...fake.port, async ask(request) { active++; maximum = Math.max(maximum, active); await new Promise((resolve) => setTimeout(resolve, 1)); const result = await fake.port.ask(request); active--; return result; } });
-    await prepare(Array.from({ length: 20 }, (_, index) => input('AC-7: No Bluetooth.', `source-${index + 1}`))).read();
-    expect(maximum).toBeLessThanOrEqual(4); expect(fake.requests).toHaveLength(20);
+    let active = 0, maximum = 0; const gate = Promise.withResolvers<void>();
+    installJudgmentPort({ ...fake.port, async ask(request) { active++; maximum = Math.max(maximum, active); await gate.promise; const result = await fake.port.ask(request); active--; return result; } });
+    const reading = prepare(Array.from({ length: 20 }, (_, index) => input('AC-7: No Bluetooth.', `source-${index + 1}`))).read();
+    // The held requests fill the pool to its limit and no further request starts while they are held.
+    await waitFor(() => active === ANSWER_EXCERPT_LIMITS.concurrency); await eventLoopTurns();
+    expect(active).toBe(ANSWER_EXCERPT_LIMITS.concurrency);
+    gate.resolve(); await reading;
+    expect(maximum).toBe(ANSWER_EXCERPT_LIMITS.concurrency); expect(fake.requests).toHaveLength(20);
   });
 });

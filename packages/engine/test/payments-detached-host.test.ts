@@ -21,15 +21,13 @@ import { readPaymentWindowStatus } from '../platform/src/platform/payments/brows
 import { getProcessUntrustedContentLedger, resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.js';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { turnsUntil } from './_helpers/turns-until.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 const readings = usePaymentsReadings();
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); resetProcessUntrustedContentLedgerForTests(); });
-async function until(check: () => boolean | Promise<boolean>) {
-  const deadline = Date.now() + 2000;
-  while (!await check()) { if (Date.now() > deadline) throw new Error('Detached payment fixture did not settle'); await new Promise(resolve => setTimeout(resolve, 1)); }
-}
+const until = (check: () => boolean | Promise<boolean>) => turnsUntil(check, 'detached payment fixture settling');
 
 test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher retains original %s taint through preflight, later owner turns and socket abort', async original => {
   resetProcessUntrustedContentLedgerForTests();

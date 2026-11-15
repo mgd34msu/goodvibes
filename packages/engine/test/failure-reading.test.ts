@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { Question } from '@goodvibes-jev/judgment';
+import type { JudgmentPort, Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
   categoryDependsOnWording,
   categoryForStatus,
   forgetFailureReadings,
+  bindJudgmentPortAuthority,
   installJudgmentPort,
+  JudgmentAuthorityRetiredError,
   JudgmentPortMissingError,
   readFailure,
   settleCategory,
@@ -158,5 +160,45 @@ describe('call sites', () => {
     const body = await readErrorResponseBody(new Error('out of credits'));
     expect(body.category).toBe('billing');
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe('one reading shared by two callers of the same wording', () => {
+  test('a caller whose own owner is still current is not failed by the retirement of the caller that started the reading', async () => {
+    const answers = billingPort('service');
+    let asks = 0;
+    let began!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { began = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const port: JudgmentPort = {
+      ...answers.port,
+      async ask(request) {
+        asks += 1;
+        if (asks === 1) { began(); await gate; }
+        return answers.port.ask(request);
+      },
+    };
+    const sharedIdentity = {};
+    const firstOwner = new AbortController();
+    let caller: 'first' | 'second' = 'first';
+    bindJudgmentPortAuthority(port, () => ({
+      identity: sharedIdentity,
+      ...(caller === 'first' ? { signal: firstOwner.signal } : {}),
+      assertCurrent: () => {},
+    }));
+    installJudgmentPort(port);
+
+    caller = 'first';
+    const first = readFailure({ message: 'something odd' }, 'test.shared-reading').then(() => null, (error: unknown) => error);
+    caller = 'second';
+    const second = readFailure({ message: 'something odd' }, 'test.shared-reading');
+    await started;
+    firstOwner.abort();
+    release();
+
+    expect(await first).toBeInstanceOf(JudgmentAuthorityRetiredError);
+    expect((await second).category).toBe('service');
+    expect(asks).toBe(2);
   });
 });

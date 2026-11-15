@@ -5,8 +5,8 @@
  * conclusion; the verdict is derived from those per-job conclusions, never a
  * rollup, and continue-on-error jobs are surfaced as violations. Standing
  * watches are polled by the daemon (poller.ts), fire a channel notification on
- * their terminal verdict, raise a "fix this?" offer (or auto-start, when opted
- * in) on a red run, and retire once the verdict is delivered.
+ * their terminal verdict, auto-start a fix session on a red run when opted
+ * in, and retire once the verdict is delivered.
  */
 export { CiWatchService, type CiWatchServiceDeps, type CreateCiWatchInput, type CiWatchCheckResult } from './service.js';
 export {
@@ -41,8 +41,6 @@ export {
   type CiWatchSubscription,
   type CiNotifier,
   type FixSessionBrief,
-  type FixSessionOffer,
-  type FixSessionOfferOutcome,
   type FixSessionStartOutcome,
   type FixSessionStarter,
 } from './types.js';

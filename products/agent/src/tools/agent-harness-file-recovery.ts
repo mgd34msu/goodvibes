@@ -19,6 +19,8 @@ export interface AgentHarnessFileRecoveryArgs {
 
 type FileRecoveryAction = 'undo' | 'redo';
 
+const RECOVERY_NEXT_STEP = 'Nothing was changed. Re-inspect with execution action:"recovery", then call run_file_recovery again under current admission.';
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -32,7 +34,7 @@ function recoveryActionFromArgs(args: AgentHarnessFileRecoveryArgs): FileRecover
 
 function workspacePath(context: FileRecoveryContext, filePath: string): string {
   const root = context.workspace?.shellPaths?.workingDirectory;
-  if (!root) return filePath;
+  if (!root) return '<unknown-workspace>';
   const rel = relative(root, filePath);
   if (rel === '') return '.';
   if (!rel.startsWith('..') && !isAbsolute(rel)) return rel;
@@ -88,6 +90,9 @@ export function fileRecoveryCatalogStatus(context: FileRecoveryContext): Record<
     available: status.available,
     undoDepth: status.undoDepth,
     redoDepth: status.redoDepth,
+    // Undo reverts only the newest entry; this says which one that is, so a
+    // reader can tell which execution record the undo would actually revert.
+    ...(typeof status.nextUndo?.timestamp === 'string' ? { nextUndoAt: status.nextUndo.timestamp } : {}),
     readOnly: true,
   };
 }
@@ -111,7 +116,7 @@ export function fileRecoverySummary(context: FileRecoveryContext, args: AgentHar
 
 export function runFileRecovery(context: FileRecoveryContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Record<string, unknown> {
   if (!harnessCatalogInvocationAuthority(args, options, 'write')) {
-    return { status: 'held', error: 'File recovery requires current recorded effect admission.' };
+    return { status: 'held', error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
   }
   const manager = context.workspace.fileUndoManager;
   if (!manager) {
@@ -130,16 +135,16 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
   const next = action === 'undo' ? manager.peekUndo() : manager.peekRedo();
   if (!next) return { status: 'nothing_to_recover', recoveryAction: action, summary: managerStatus(context) };
   const root = context.workspace.shellPaths?.workingDirectory;
-  if (!root) return { status: 'held', error: 'File recovery requires an active workspace.' };
+  if (!root) return { status: 'held', error: `File recovery requires an active workspace, and none is set for this session. ${RECOVERY_NEXT_STEP}` };
   const captured = { ...next };
   if (!harnessCatalogInvocationAuthority(args, options, 'write')) {
-    return { status: 'held', error: 'File recovery requires current recorded effect admission.' };
+    return { status: 'held', error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
   }
   if (context.workspace.fileUndoManager !== manager || context.workspace.shellPaths?.workingDirectory !== root
     || (action === 'undo' ? manager.peekUndo() : manager.peekRedo()) !== next
     || next.path !== captured.path || next.tool !== captured.tool || next.timestamp !== captured.timestamp
     || next.beforeContent !== captured.beforeContent || next.afterContent !== captured.afterContent) {
-    return { status: 'held', error: 'File recovery source or workspace changed.' };
+    return { status: 'held', error: `File recovery source or workspace changed between inspection and the action. ${RECOVERY_NEXT_STEP}` };
   }
   try {
     const target = resolveAndValidatePath(captured.path, root);
@@ -147,7 +152,7 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
     // Inspect that final component independently before restoring any bytes.
     if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) realpathSync(target);
   } catch {
-    return { status: 'held', error: 'File recovery target is outside or unavailable in the active workspace.' };
+    return { status: 'held', error: `File recovery target is outside the active workspace, or cannot be resolved (missing, or a dangling or escaping symlink). ${RECOVERY_NEXT_STEP}` };
   }
   const result = action === 'undo' ? manager.undo() : manager.redo();
   if (!result) {

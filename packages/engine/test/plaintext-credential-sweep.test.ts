@@ -15,6 +15,7 @@
 import { useConfigReadings } from './_helpers/config-readings.js';
 import { describe, expect, test } from 'bun:test';
 import {
+  DIFFERS_FROM_STORED_DETAIL,
   describePlaintextSweep,
   secretReferenceFor,
   sweepPlaintextCredentials,
@@ -157,14 +158,26 @@ describe('the sweep moves a literal out of config, and never breaks it doing so'
     expect(config.values[MAIL_PASSWORD]).toBe('hunter2-test-only');
   });
 
-  test('a value already in the store is not overwritten by an older config copy', async () => {
-    const config = fakeConfig({ [MAIL_PASSWORD]: 'old-pasted-copy' });
+  test('a config value that differs from the stored secret changes neither and is reported', async () => {
+    const config = fakeConfig({ [MAIL_PASSWORD]: 'newly-pasted-copy' });
+    const secrets = fakeSecrets({ [MAIL_SECRET_KEY]: 'the-one-in-use' });
+
+    const report = await sweepPlaintextCredentials(config, secrets);
+
+    expect(report.entries[0]?.outcome).toBe('left-in-place');
+    expect(report.entries[0]?.detail).toBe(DIFFERS_FROM_STORED_DETAIL);
+    expect(secrets.stored[MAIL_SECRET_KEY]).toBe('the-one-in-use');
+    expect(config.values[MAIL_PASSWORD]).toBe('newly-pasted-copy');
+    expect(describePlaintextSweep(report)).toContain('differ from the value already in the store');
+  });
+
+  test('a config value identical to the stored secret is replaced by a reference', async () => {
+    const config = fakeConfig({ [MAIL_PASSWORD]: 'the-one-in-use' });
     const secrets = fakeSecrets({ [MAIL_SECRET_KEY]: 'the-one-in-use' });
 
     const report = await sweepPlaintextCredentials(config, secrets);
 
     expect(report.entries[0]?.outcome).toBe('already-stored');
-    expect(secrets.stored[MAIL_SECRET_KEY]).toBe('the-one-in-use');
     expect(config.values[MAIL_PASSWORD]).toBe(secretReferenceFor(MAIL_SECRET_KEY));
   });
 

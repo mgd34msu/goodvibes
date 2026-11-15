@@ -2,7 +2,7 @@
  * Cost-attribution actuals from the emit sites: tool-internal (ToolLLM) and
  * helper-model LLM calls emit LLM_RESPONSE_RECEIVED with their real token
  * usage, the ambient cost-origin scope stamps the tool/hook/MCP cause, and
- * the turn-domain ingest fills the per-dimension buckets with actuals only,
+ * the production cost ingest (bindCostAttributionIngest) fills the per-dimension buckets with actuals only,
  * no estimates, no allocation heuristics. The per-dimension rows sum exactly
  * to the session total.
  */
@@ -14,6 +14,9 @@ import {
   type ResolvePricing,
 } from '../platform/src/platform/runtime/cost/attribution.ts';
 import { emitLlmResponseReceived } from '../platform/src/platform/runtime/emitters/turn.ts';
+import { emitProviderVoiceUsage } from '../platform/src/platform/runtime/emitters/providers.ts';
+import { QuotaWindowTracker } from '../platform/src/platform/runtime/cost/quota-window.ts';
+import { bindCostAttributionIngest } from '../platform/src/platform/control-plane/routes/attribution-ingest.ts';
 import { ToolLLM } from '../platform/src/platform/config/tool-llm.ts';
 import { HelperModel } from '../platform/src/platform/config/helper-model.ts';
 import type { LLMProvider, ChatResponse } from '../platform/src/platform/providers/interface.ts';
@@ -34,29 +37,13 @@ function makeFakeProvider(usage: { inputTokens: number; outputTokens: number }):
   } as unknown as LLMProvider;
 }
 
-/**
- * Mirrors the production turn-domain ingest (the gateway verb registration
- * subscribes to LLM_RESPONSE_RECEIVED and maps origin fields onto the
- * CostUsageRecord) so this test proves the full emit-to-bucket pipeline.
- */
-function installIngest(bus: RuntimeEventBus, svc: CostAttributionService): void {
-  bus.onDomain('turn', (envelope) => {
-    const event = envelope.payload as Record<string, unknown> & { type: string };
-    if (event.type !== 'LLM_RESPONSE_RECEIVED') return;
-    svc.record({
-      at: Date.now(),
-      provider: event.provider as string,
-      model: event.model as string,
-      sessionId: envelope.sessionId,
-      ...(event.originTool !== undefined ? { tool: event.originTool as string } : {}),
-      ...(event.originHook !== undefined ? { hook: event.originHook as string } : {}),
-      ...(event.originMcpServer !== undefined ? { mcpServer: event.originMcpServer as string } : {}),
-      inputTokens: event.inputTokens as number,
-      outputTokens: event.outputTokens as number,
-      cacheReadTokens: (event.cacheReadTokens as number | undefined) ?? 0,
-      cacheWriteTokens: (event.cacheWriteTokens as number | undefined) ?? 0,
-    });
-  });
+/** The bus delivers each subscriber in its own microtask, so a few yields drain every emit made so far. */
+async function drainBus(): Promise<void> {
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+}
+
+function installIngest(bus: RuntimeEventBus, svc: CostAttributionService, quota: QuotaWindowTracker = new QuotaWindowTracker()): void {
+  bindCostAttributionIngest(bus, svc, quota);
 }
 
 function makeToolLLM(bus: RuntimeEventBus, provider: LLMProvider): ToolLLM {
@@ -95,8 +82,7 @@ describe('per-dimension cost actuals from real emit sites', () => {
     // A hook prompt runner scope.
     await withCostOriginAsync({ hook: 'Post:tool:edit' }, () => toolLLM.chat('hook prompt'));
 
-    // Bus delivery is microtask-scheduled.
-    await Bun.sleep(1);
+    await drainBus();
 
     const byTool = svc.attribution('24h', 'tool');
     const byMcp = svc.attribution('24h', 'mcp');
@@ -153,12 +139,55 @@ describe('per-dimension cost actuals from real emit sites', () => {
     });
 
     await withCostOriginAsync({ tool: 'commit_helper', callId: 'call-9' }, () => helper.chat('commit_message', 'msg'));
-    await Bun.sleep(1);
+    await drainBus();
 
     const byTool = svc.attribution('24h', 'tool');
     const row = byTool.rows.find((r) => r.key === 'commit_helper');
     expect(row?.tokens.inputTokens).toBe(40);
     expect(row?.tokens.outputTokens).toBe(4);
+  });
+
+  test('the agent on the event envelope becomes the agent dimension', async () => {
+    const bus = new RuntimeEventBus();
+    const svc = new CostAttributionService({ resolvePricing: pricing });
+    installIngest(bus, svc);
+    emitLlmResponseReceived(bus, { sessionId: 'session-3', source: 'turn-loop', traceId: 't3', turnId: 'turn-3', agentId: 'agent-7' }, {
+      turnId: 'turn-3', provider: 'fake-provider', model: 'fake-model', contentSummary: 'x',
+      toolCallCount: 0, inputTokens: 70, outputTokens: 7,
+    });
+    await drainBus();
+    const byAgent = svc.attribution('24h', 'agent');
+    expect(byAgent.rows.find((r) => r.key === 'agent-7')?.tokens.inputTokens).toBe(70);
+  });
+
+  test('metered voice usage lands as units under a voice-scoped model, unpriced', async () => {
+    const bus = new RuntimeEventBus();
+    const svc = new CostAttributionService({ resolvePricing: pricing });
+    installIngest(bus, svc);
+    emitProviderVoiceUsage(bus, { sessionId: 'session-4', source: 'voice', traceId: 't4' }, {
+      provider: 'elevenlabs', kind: 'tts', billableUnits: 1200, unit: 'characters',
+    });
+    await drainBus();
+    const byModel = svc.attribution('24h', 'model');
+    const row = byModel.rows.find((r) => r.key === 'elevenlabs:voice-tts:characters');
+    expect(row?.tokens.inputTokens).toBe(1200);
+    expect(row?.tokens.outputTokens).toBe(0);
+  });
+
+  test('rate-limit headers on a response reach the quota window', async () => {
+    const bus = new RuntimeEventBus();
+    const svc = new CostAttributionService({ resolvePricing: pricing });
+    const quota = new QuotaWindowTracker();
+    installIngest(bus, svc, quota);
+    emitLlmResponseReceived(bus, { sessionId: 'session-5', source: 'turn-loop', traceId: 't5', turnId: 'turn-5' }, {
+      turnId: 'turn-5', provider: 'fake-provider', model: 'fake-model', contentSummary: 'x',
+      toolCallCount: 0, inputTokens: 1, outputTokens: 1, rateLimit: { limit: 100, remaining: 12 },
+    });
+    await drainBus();
+    const snapshot = quota.snapshot('fake-provider');
+    expect(snapshot.hasSignal).toBe(true);
+    expect(snapshot.remaining).toBe(12);
+    expect(snapshot.limit).toBe(100);
   });
 
   test('without a runtime bus, tool-internal calls still work (no emission, no crash)', async () => {

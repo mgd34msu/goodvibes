@@ -36,6 +36,10 @@ export interface DaemonStatusProviders {
   readonly buildVersion?: (() => string | null) | undefined;
   /** Undelivered daemon receipts (update, crash-restart, migration notices). */
   readonly collectReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
+  /** The same receipts as {@link collectReceipts}, left undelivered until acknowledged. */
+  readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
+  /** Marks receipts a reader has confirmed it received as delivered. */
+  readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;
   /**
    * Which node on this network currently consumes inbound channel messages,
    * for on-request inspection. Elections are otherwise invisible: no
@@ -157,6 +161,8 @@ export function buildSystemRouteContext(input: {
   readonly inspectInboundTls: (surface: 'controlPlane' | 'httpListener') => unknown;
   readonly inspectOutboundTls: () => unknown;
   readonly isValidConfigKey: (key: string) => boolean;
+  readonly isSecretBearingConfigKey: (key: string) => boolean;
+  readonly coerceConfigValue?: ((key: string, value: unknown) => unknown) | undefined;
   readonly parseJsonBody: (request: Request) => Promise<JsonRecord | Response>;
   readonly parseOptionalJsonBody: (request: Request) => Promise<JsonRecord | null | Response>;
   readonly platformServiceManager: PlatformServiceManager;
@@ -197,6 +203,8 @@ export function buildSystemRouteContext(input: {
     inspectInboundTls: input.inspectInboundTls,
     inspectOutboundTls: input.inspectOutboundTls,
     isValidConfigKey: input.isValidConfigKey,
+    isSecretBearingConfigKey: input.isSecretBearingConfigKey,
+    coerceConfigValue: input.coerceConfigValue,
     parseJsonBody: input.parseJsonBody,
     parseOptionalJsonBody: input.parseOptionalJsonBody,
     platformServiceManager: {
@@ -345,11 +353,13 @@ export function buildKnowledgeRouteContext(input: {
       ingestConnectorInput: (body) => input.knowledgeService.ingestConnectorInput(
         body as Parameters<KnowledgeService['ingestConnectorInput']>[0],
       ),
-      searchScoped: (query) => input.knowledgeService.searchScoped(
+      searchScoped: (query, options) => input.knowledgeService.searchScoped(
         query as Parameters<KnowledgeService['searchScoped']>[0],
+        options as Parameters<KnowledgeService['searchScoped']>[1],
       ),
-      ask: (body) => input.knowledgeService.ask(
+      ask: (body, options) => input.knowledgeService.ask(
         body as Parameters<KnowledgeService['ask']>[0],
+        options,
       ),
       buildPacket: (task, writeScope, limit, options) => input.knowledgeService.buildPacket(
         task,
@@ -373,8 +383,9 @@ export function buildKnowledgeRouteContext(input: {
       ),
       deleteSchedule: (id) => input.knowledgeService.deleteSchedule(id),
       setScheduleEnabled: (id, enabled) => input.knowledgeService.setScheduleEnabled(id, enabled),
-      renderProjection: (projection) => input.knowledgeService.renderProjection(
+      renderProjection: (projection, options) => input.knowledgeService.renderProjection(
         projection as Parameters<KnowledgeService['renderProjection']>[0],
+        options,
       ),
       materializeProjection: (projection) => input.knowledgeService.materializeProjection(
         projection as Parameters<KnowledgeService['materializeProjection']>[0],

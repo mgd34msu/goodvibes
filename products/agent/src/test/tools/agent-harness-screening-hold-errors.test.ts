@@ -52,7 +52,8 @@ for (const reason of reasons) {
     expect(Object.isFrozen(cause)).toBe(true);
     expect(fake.requests).toHaveLength(0); expect(f.native.calls).toHaveLength(0);
     expect(f.native.owner.screen).toBe(f.originalScreen);
-    expect(Object.keys(error).sort()).toEqual(['name', 'problem']);
+    expect(Object.keys(error).sort()).toEqual(['detail', 'name', 'problem']);
+    expect(error.detail).toBeUndefined();
   });
 }
 

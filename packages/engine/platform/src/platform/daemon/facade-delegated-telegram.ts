@@ -5,9 +5,11 @@ import { DelegatedTelegramIntake } from './delegated-telegram-intake.js';
 import type { ResolvedDaemonFacadeRuntime } from './facade-types.js';
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import type { GatewayMethodInvocation } from '../control-plane/method-catalog-shared.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/native-error-summary.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { readInvocationParams } from '../control-plane/routes/invocation-params.js';
-import { delegatedTelegramResultSchema, delegatedTelegramConfigureSchema, delegatedTelegramDecisionSchema, delegatedTelegramLookupSchema, delegatedTelegramRevokeSchema } from '../control-plane/delegated-inbound-wire.js';
+import { delegatedTelegramResultSchema, delegatedTelegramConfigureSchema, delegatedTelegramDecisionSchema, delegatedTelegramLookupSchema, delegatedTelegramRevokeSchema, delegatedTelegramReleaseSchema } from '../control-plane/delegated-inbound-wire.js';
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
 function owner(invocation: GatewayMethodInvocation) {
   const authority = invocation.nativeExecutionAuthority; const current = authority?.current(); const context = invocation.context;
@@ -18,8 +20,13 @@ function owner(invocation: GatewayMethodInvocation) {
   }
   return { authority, current };
 }
+function releaseTarget(input: ReturnType<typeof delegatedTelegramReleaseSchema.parse>): string | { readonly chatId: string; readonly threadId?: string | undefined } {
+  return 'configurationId' in input ? input.configurationId : input;
+}
 export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog, host: DelegatedTelegramIntake): void {
-  for (const operation of ['configure', 'decide', 'status', 'revoke', 'list', 'read', 'cancel'] as const) {
+  // `release` takes a configuration id like `revoke` and returns the chat to normal handling; it is served once the catalog describes it.
+  const operations = ['configure', 'decide', 'status', 'revoke', 'list', 'read', 'cancel', ...(catalog.get('inbound.telegram.release') ? ['release' as const] : [])] as const;
+  for (const operation of operations) {
     const descriptor = catalog.get(`inbound.telegram.${operation}`);
     if (!descriptor) throw new Error('Missing delegated Telegram command descriptor');
     catalog.register(descriptor, async invocation => {
@@ -39,11 +46,13 @@ export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog,
           if (operation === 'configure') result = await host.configure(delegatedTelegramConfigureSchema.parse(input), authority, prepared, selection);
           else if (operation === 'decide') result = await host.decide(delegatedTelegramDecisionSchema.parse(input), authority, prepared);
           else if (operation === 'revoke') result = host.revoke(delegatedTelegramRevokeSchema.parse(input).configurationId, authority);
+          else if (operation === 'release') result = await host.release(releaseTarget(delegatedTelegramReleaseSchema.parse(input)), authority);
           else if (operation === 'list') { if (Object.keys(input).length) throw new Error('List takes no source payload'); result = await host.list(authority); }
           else { const { ref } = delegatedTelegramLookupSchema.parse(input); result = operation === 'cancel' ? await host.cancel(ref, authority) : await host.status(ref, authority, operation === 'read'); }
           invocation.signal?.throwIfAborted(); assertCurrent(); owner(invocation); return delegatedTelegramResultSchema.parse(result);
         } catch (error) {
           if (error instanceof GatewayVerbError) throw error;
+          logger.warn('Delegated Telegram command held', { operation, error: summarizeError(error) });
           throw new GatewayVerbError('Delegated Telegram intake is held. Inspect the original source identity; no fallback or replay occurred.', 'DELEGATED_INTAKE_HELD', 409);
         }
       });

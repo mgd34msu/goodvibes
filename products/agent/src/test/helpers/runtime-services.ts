@@ -47,7 +47,6 @@ import { MemoryEmbeddingProviderRegistry } from '@goodvibes-jev/engine/platform/
 import { ModeManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
 import { AgentManager, type AgentExecutor } from '@goodvibes-jev/engine/platform/platform/tools';
-import { AutoHealer } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ScheduleManager, TriggerManager, WorkflowManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { VoiceProviderRegistry } from '@goodvibes-jev/engine/platform/platform/voice';
@@ -79,7 +78,6 @@ class RetiredRuntimePreparationError extends Error {
 let runtimeCounter = 0;
 let toolLLM: ToolLLM | null = null;
 let toolLLMRuntimeServices: RuntimeServices | null = null;
-let autoHealer: AutoHealer | null = null;
 let lspService: LspService | null = null;
 let treeSitterService: TreeSitterService | null = null;
 let codeIntelligence: CodeIntelligence | null = null;
@@ -179,7 +177,6 @@ export function resetTestRuntimeServices(): void {
   runtimeServices = null;
   toolLLM = null;
   toolLLMRuntimeServices = null;
-  autoHealer = null;
   for (const services of ownedRuntimes) {
     ownedRuntimes.delete(services);
     let closing: Promise<void>;
@@ -404,18 +401,6 @@ export function resetTestToolLLM(): void {
   toolLLMRuntimeServices = null;
 }
 
-export async function getTestAutoHealer(): Promise<AutoHealer> {
-  const services = await getTestRuntimeServices();
-  const llm = await getTestToolLLM();
-  if (services !== runtimeServices || toolLLMRuntimeServices !== services) throw new Error('Test runtime acquisition was reset');
-  autoHealer ??= new AutoHealer(services.configManager, llm);
-  return autoHealer;
-}
-
-export function resetTestAutoHealer(): void {
-  autoHealer = null;
-}
-
 export function getTestLspService(): LspService {
   lspService ??= new LspService(getTestRoots().shellPaths);
   return lspService;
@@ -537,7 +522,6 @@ export function resetAllTestServiceState(): void {
   installAgentDaemonConfigClient(null);
   resetTestRuntimeServices();
   resetTestToolLLM();
-  resetTestAutoHealer();
   resetTestCodeIntelligence();
   resetTestTaskScheduler();
   resetTestSpawnTokenManagers();

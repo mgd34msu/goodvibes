@@ -17,6 +17,7 @@ import {
   auditEntryLabel,
   auditTrail,
   isDurableRememberTier,
+  readApprovalEditHunks,
   readExecPromptAsk,
   readRememberOptions,
   recordedAnswerDelivered,
@@ -212,5 +213,23 @@ describe('recordedAnswerDelivered', () => {
 describe('attributionLabel: exec-prompt', () => {
   test('names the waiting command', () => {
     expect(attributionLabel({ kind: 'exec-prompt', command: 'ssh host', prompt: 'Continue?' })).toContain('ssh host');
+  });
+});
+
+describe('readApprovalEditHunks', () => {
+  const b64 = (text: string): string => btoa(text);
+  const recordWith = (edits: unknown[]): ApprovalRecord => {
+    const base = baseRecord();
+    return { ...base, request: { ...base.request, tool: 'edit', args: { edits } } };
+  };
+
+  test('a replace_base64 beside a plain empty replace shows the decoded replacement', () => {
+    const hunks = readApprovalEditHunks(recordWith([{ path: 'a.ts', find: 'x', replace: '', replace_base64: b64('z') }]));
+    expect(hunks?.[0]).toMatchObject({ find: 'x', replace: 'z' });
+  });
+
+  test('a find_base64 beside a plain empty find shows the decoded find', () => {
+    const hunks = readApprovalEditHunks(recordWith([{ path: 'a.ts', find: '', find_base64: b64('old'), replace: 'new' }]));
+    expect(hunks?.[0]).toMatchObject({ find: 'old', replace: 'new' });
   });
 });

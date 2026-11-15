@@ -1,4 +1,6 @@
 import { toJson, type JsonValue } from '@goodvibes-jev/judgment';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { assertKnowledgeExtractionInput } from '../extraction-policy.js';
 import { snapshotNodeInput } from '../activation/projection.js';
@@ -102,6 +104,9 @@ export async function prepareHomeGraphAnswerScope(input: {
       error.reason === 'unsettled' ? 'uncertain' : error.reason === 'unconfigured' ? 'unavailable' : error.reason);
     if (error instanceof KnowledgeSourceQualityHeldError) throw new KnowledgeAnswerQualityHeldError(
       error.reason === 'aborted' ? 'aborted' : 'stale');
+    // Only an outage is expected here. Anything else, a TypeError above all, is a
+    // defect that would otherwise read as the model service being down.
+    logger.error('Home Graph answer scope failed with an unclassified error; holding as unavailable', { error: summarizeError(error) });
     throw new KnowledgeAnswerQualityHeldError('unavailable');
   }
 }

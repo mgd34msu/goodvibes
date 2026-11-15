@@ -37,6 +37,8 @@ export interface DevicesModalDeps {
 }
 
 const DEVICE_ROW_PREFIX = 'device:';
+// Fixed-width placeholder, not derived from the token's length.
+const SECRET_MASK = '••••••••••••';
 
 function deviceIdOf(row: ConfigModalRow | null): string | null {
   return row && row.id.startsWith(DEVICE_ROW_PREFIX) ? row.id.slice(DEVICE_ROW_PREFIX.length) : null;
@@ -46,17 +48,24 @@ class DevicesModalSurface implements ConfigModalSurface {
   readonly name = 'devices-modal';
   readonly title = 'Paired Devices';
   private requestRender: () => void = () => {};
+  /** The one-time token minted by 'm' when no clipboard is wired. Shown masked in a row, never printed to the transcript. */
+  private minted: { readonly name: string; readonly token: string } | null = null;
+  private mintedRevealed = false;
 
   constructor(private readonly deps: DevicesModalDeps) {}
 
   readonly actions = [
     { key: 'r', id: 'rename', label: 'rename', enabledFor: (row: ConfigModalRow | null) => deviceIdOf(row) !== null },
     { key: 'x', id: 'revoke', label: 'revoke', confirm: true, enabledFor: (row: ConfigModalRow | null) => deviceIdOf(row) !== null },
-    { key: 'm', id: 'migrateShared', label: 'migrate off shared token' },
+    { key: 'm', id: 'migrateShared', label: 'migrate off shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
+    { key: 'v', id: 'toggleReveal', label: 'reveal minted token', enabledFor: () => this.minted !== null },
     { key: 's', id: 'revokeShared', label: 'revoke shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
   ];
 
   onOpen(requestRender: () => void): void { this.requestRender = requestRender; }
+
+  /** A one-time token held for display is dropped when the modal closes. */
+  onClose(): void { this.minted = null; this.mintedRevealed = false; }
 
   buildView(): ConfigModalView {
     const now = this.deps.now?.() ?? Date.now();
@@ -72,6 +81,10 @@ class DevicesModalSurface implements ConfigModalSurface {
       }
     }
 
+    if (this.minted) {
+      rows.push(infoRow('minted', `One-time token for "${this.minted.name}": ${this.mintedRevealed ? this.minted.token : SECRET_MASK}  (v ${this.mintedRevealed ? 'hide' : 'reveal'})`, { fg: MODAL_TONES.reasoning }));
+    }
+
     const legacyRevoked = this.deps.pairingTokens.isLegacyRevoked();
     rows.push(infoRow(
       'legacy',
@@ -83,7 +96,7 @@ class DevicesModalSurface implements ConfigModalSurface {
 
     return {
       title: 'Paired Devices',
-      tabs: [{ id: 'devices', label: 'Devices', rows, hints: ['r rename', 'x revoke', 'm migrate off shared', 's revoke shared'] }],
+      tabs: [{ id: 'devices', label: 'Devices', rows, hints: ['r rename', 'x revoke', 'm migrate off shared', 's revoke shared', ...(this.minted ? ['v reveal minted token'] : [])] }],
     };
   }
 
@@ -115,8 +128,18 @@ class DevicesModalSurface implements ConfigModalSurface {
         this.deps.copyToClipboard(minted.token);
         ctx.print(`Minted "${minted.name}" and copied its one-time token to the clipboard. Pair the device, then revoke the shared token (s).`);
       } else {
-        ctx.print(`Minted "${minted.name}" (one-time token): ${minted.token}\nPair the device with it, then revoke the shared token (s).`);
+        // No clipboard: keep the secret out of the transcript and show it masked in this modal until the user reveals it.
+        this.minted = { name: minted.name, token: minted.token };
+        this.mintedRevealed = false;
+        ctx.setStatus(`Minted "${minted.name}". Press v to reveal its one-time token, pair the device with it, then revoke the shared token (s).`);
       }
+      this.requestRender();
+      return;
+    }
+
+    if (id === 'toggleReveal') {
+      if (!this.minted) return;
+      this.mintedRevealed = !this.mintedRevealed;
       this.requestRender();
       return;
     }

@@ -26,22 +26,37 @@ test('span scanning preserves the prior flag and field declaration grammar, incl
       const spans = [...inlineDeclarations(text, flags)];
       const expected = originalDeclarations(text, flags);
       expect(spans.map(span => ({ key: span.key, value: text.slice(span.valueStart, span.valueEnd) }))).toEqual(expected);
-      for (const [index, span] of spans.entries()) {
-        const raw = expected[index]!.value.trim().replace(/^["']|["']$/g, '');
-        const reference = /^goodvibes:\/\/secrets\/[^\s?#]+$/.test(raw);
-        for (const evidence of [false, true]) {
-          expect(literalDeclarationValue(text, span, evidence)).toBe(raw.length > 0 && !reference && !(evidence && raw === '[REDACTED]'));
-        }
-      }
     }
   }
 });
 
-test('nested reference spans distinguish separators before their start from separators inside their own path', () => {
-  for (const text of ['note=?password=goodvibes://secrets/key', 'password=goodvibes://secrets/a=password=goodvibes://secrets/key', 'password=goodvibes://secrets/key?other=value', 'password=goodvibes://secrets/key#fragment', 'password=goodvibes://secrets/']) {
-    for (const span of inlineDeclarations(text, false)) {
-      const value = text.slice(span.valueStart, span.valueEnd).replace(/^["']|["']$/g, '');
-      expect(literalDeclarationValue(text, span, false)).toBe(value.length > 0 && !/^goodvibes:\/\/secrets\/[^\s?#]+$/.test(value));
-    }
+/**
+ * Explicit cases rather than a restatement of the rule: each row is one declaration the scanner finds,
+ * and whether its value is a literal (a real inline secret) or a secret-store reference, with and
+ * without evidence that the text was already redacted.
+ */
+const LITERAL_CASES: readonly { text: string; flags: boolean; key: string; value: string; literal: boolean; literalWhenRedactedEvidence?: boolean }[] = [
+  { text: 'password=hunter2', flags: false, key: 'password', value: 'hunter2', literal: true },
+  { text: 'password="hunter2"', flags: false, key: 'password', value: '"hunter2"', literal: true },
+  { text: '--password hunter2', flags: true, key: 'password', value: 'hunter2', literal: true },
+  { text: 'password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/key', literal: false },
+  { text: 'password="goodvibes://secrets/key"', flags: false, key: 'password', value: '"goodvibes://secrets/key"', literal: false },
+  { text: 'note=?password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/key', literal: false },
+  { text: 'password=goodvibes://secrets/a=password=goodvibes://secrets/key', flags: false, key: 'password', value: 'goodvibes://secrets/a=password=goodvibes://secrets/key', literal: false },
+  // A reference followed by a query or fragment is not a bare reference: the tail is unknown text.
+  { text: 'password=goodvibes://secrets/key?other=value', flags: false, key: 'password', value: 'goodvibes://secrets/key?other=value', literal: true },
+  { text: 'password=goodvibes://secrets/key#fragment', flags: false, key: 'password', value: 'goodvibes://secrets/key#fragment', literal: true },
+  // No key name after the scheme path: nothing is being referenced.
+  { text: 'password=goodvibes://secrets/', flags: false, key: 'password', value: 'goodvibes://secrets/', literal: true },
+  { text: "password=''", flags: false, key: 'password', value: "''", literal: false },
+  { text: 'password=[REDACTED]', flags: false, key: 'password', value: '[REDACTED]', literal: true, literalWhenRedactedEvidence: false },
+];
+
+test('literalDeclarationValue separates real inline values from references and empty values', () => {
+  for (const row of LITERAL_CASES) {
+    const span = [...inlineDeclarations(row.text, row.flags)].find(candidate => candidate.key === row.key && row.text.slice(candidate.valueStart, candidate.valueEnd) === row.value);
+    expect(span, row.text).toBeDefined();
+    expect(literalDeclarationValue(row.text, span!, false), row.text).toBe(row.literal);
+    expect(literalDeclarationValue(row.text, span!, true), `${row.text} with redaction evidence`).toBe(row.literalWhenRedactedEvidence ?? row.literal);
   }
 });

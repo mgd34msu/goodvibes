@@ -1,18 +1,23 @@
 /** Lazy daemon-owned native graph; ordinary conversations keep their own runner. */
 import { createAgentExecutionGraph } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { WORKSTREAM_CONTAINMENT } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionServices } from './native-work-execution-composition.js';
+import type { ContractOperatorService } from '@goodvibes-jev/engine/platform/platform/contract';
 import { createNativeWorkSessionDriver, type NativeSessionDriverOptions } from './native-work-session-driver.js';
 
 type NativeOptions = Parameters<typeof createDaemonNativeWorkExecutionServices>[0];
-export type NativeWorkExecutionActivationOptions = Omit<NativeOptions, 'agentManager' | 'agentMessageBus' | 'readAccessFilter' | 'cancelForeground'> & {
+export type NativeWorkExecutionActivationOptions = Omit<NativeOptions, 'agentManager' | 'agentMessageBus' | 'readAccessFilter' | 'cancelForeground' | 'releaseForeground'> & {
   readonly permissionManager: PermissionManager;
   readonly toolDependencies: Parameters<AgentOrchestrator['setDependencies']>[0];
   readonly featureFlags: NativeSessionDriverOptions['featureFlags'];
   readonly hookDispatcher: NativeSessionDriverOptions['hookDispatcher'];
+  readonly retry?: NativeSessionDriverOptions['retry'];
+  /** Where the owner answers a paused turn's retry-or-cancel question; absent, that question cannot be answered over the operator surface. */
+  readonly contractOperator?: Pick<ContractOperatorService, 'attachNative'> | undefined;
 };
 
 /** Public lifetime boundary: opaque execution authority stays behind the engine host type. */
@@ -45,24 +50,30 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
     let native: Awaited<ReturnType<typeof createDaemonNativeWorkExecutionServices>> | undefined;
     let cancelForeground: (contractId: string) => Promise<void> = async () => { throw new NativeWorkExecutionError('unavailable'); };
     let joinForeground: (contractId: string) => Promise<void> = async () => { throw new NativeWorkExecutionError('unavailable'); };
+    let releaseForeground: (contractId: string) => void = () => {};
     try {
       native = await createDaemonNativeWorkExecutionServices({ ...options,
         agentManager: graph.agentManager, agentMessageBus: graph.agentMessageBus,
         cancelForeground: contractId => cancelForeground(contractId),
         joinForeground: contractId => joinForeground(contractId),
+        releaseForeground: contractId => releaseForeground(contractId),
         additionalFleetOwnership: () => [...(options.additionalFleetOwnership?.() ?? []), ...foregroundFleetOwnership()],
         readAccessFilter: async path => (await options.permissionManager.readAccess(path)) === 'allow' });
       const toolDependencies = { ...options.toolDependencies, ...graph, processManager,
         // The ordinary remote runner registry owns the ordinary manager.
         remoteRunnerRegistry: undefined,
+        // A composed workstream the owner authorized: the boundary where available, the host where not.
+        execContainment: WORKSTREAM_CONTAINMENT,
         contractRunner: native.runner, contractHooks: native.runner.hooks(), permissionManager: options.permissionManager };
       graph.agentOrchestrator.setDependencies(toolDependencies);
       const owner = native;
       const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies,
         assertCurrent: contract => { owner.execution.nativeOwner.decisions.authorityOf(contract); } });
       foregroundFleetOwnership = driver.fleetOwnership;
+      options.contractOperator?.attachNative(owner.runner);
       cancelForeground = driver.cancel;
       joinForeground = driver.join;
+      releaseForeground = driver.release;
       let drain: Promise<void> | undefined;
       async function cancelWithForeground(workId: string, attemptId: string, authority: Parameters<typeof owner.execution.cancel>[1], operation: () => Promise<void>) {
         const read = () => owner.execution.statusByAttempt(workId, attemptId, authority);
@@ -71,6 +82,8 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
         const receipt = observed?.kind === 'execution' ? observed.execution.receipt : null;
         // Existing effects are fenced before the durable operation can await.
         // Intent-only cancellation still reaches the host and may win first.
+        const fenced = new Set<string>();
+        if (receipt) fenced.add(receipt.contractId);
         const foreground = receipt ? driver.cancel(receipt.contractId) : Promise.resolve();
         const results = await Promise.allSettled([Promise.resolve().then(operation), foreground]);
         let failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')?.reason;
@@ -78,9 +91,17 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
           // Association publication may have won after the first observation.
           // Join its actual foreground lifetime before reporting cancellation.
           const latest = read();
-          if (latest.kind === 'execution' && latest.execution.receipt) await driver.cancel(latest.execution.receipt.contractId);
+          if (latest.kind === 'execution' && latest.execution.receipt) {
+            fenced.add(latest.execution.receipt.contractId);
+            await driver.cancel(latest.execution.receipt.contractId);
+          }
         } catch (error) { failure ??= error; }
-        if (failure !== undefined) throw failure;
+        if (failure !== undefined) {
+          // A refused cancellation leaves its contract running; a committed one
+          // has already made it terminal. The driver decides from that status.
+          for (const contractId of fenced) driver.release(contractId);
+          throw failure;
+        }
       }
       const execution = { ...owner.execution,
         cancel(...args: Parameters<typeof owner.execution.cancel>) {
@@ -92,6 +113,7 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
       };
       return { execution, close() {
         if (drain) return drain;
+        options.contractOperator?.attachNative(null);
         // Fence admission, abort foreground turns and cancel background work
         // before waiting on any one of their drains.
         const execution = owner.execution.close();

@@ -17,6 +17,9 @@ import {
   CLOSED_SESSION,
   FLEET_SNAPSHOT,
   FOLLOWUP_SESSION,
+  KNOWLEDGE_READ_METHOD_IDS,
+  knowledgeReadByMethod,
+  knowledgeReadByRoute,
   messagesResponse,
   providersResponse,
   STEERABLE_SESSION,
@@ -120,11 +123,11 @@ describe('e2e fixtures conform to the platform operator contract', () => {
   // daemon's own answer shapes for the local-session-only verbs, pinned against the
   // real installed contract the same way every other fixture above is.
   test('sessions.permissionMode.get: the mock daemon\'s response shape conforms', () => {
-    expect(() => assertFixtureMatchesOperatorContract('sessions.permissionMode.get', { sessionId: 's-agent-live', mode: 'normal' })).not.toThrow();
+    expect(() => assertFixtureMatchesOperatorContract('sessions.permissionMode.get', { sessionId: 's-agent-live', mode: 'safe-owner' })).not.toThrow();
   });
 
   test('sessions.permissionMode.set: the mock daemon\'s response shape conforms', () => {
-    expect(() => assertFixtureMatchesOperatorContract('sessions.permissionMode.set', { sessionId: 's-agent-live', mode: 'auto', previousMode: 'normal' })).not.toThrow();
+    expect(() => assertFixtureMatchesOperatorContract('sessions.permissionMode.set', { sessionId: 's-agent-live', mode: 'yolo', previousMode: 'safe-owner' })).not.toThrow();
   });
 
   test('sessions.contextUsage.get: the mock daemon\'s response shape conforms', () => {
@@ -223,5 +226,20 @@ describe('assertFixtureMatchesOperatorContract actually catches drift', () => {
 
   test('binding to a method id the installed contract no longer declares FAILS', () => {
     expect(() => assertFixtureMatchesOperatorContract('sessions.doesNotExist', {})).toThrow(ContractShapeError);
+  });
+
+  test.each([...KNOWLEDGE_READ_METHOD_IDS])('%s: the knowledge read the mock answers conforms to that method\'s own output shape', (methodId) => {
+    const read = knowledgeReadByMethod(methodId);
+    if (!read) throw new ContractShapeError(`No seeded knowledge read for ${methodId}`);
+    expect(() => assertFixtureMatchesOperatorContract(methodId, read.body)).not.toThrow();
+  });
+
+  test('knowledge.issues.list answers {issues}, not the map body, and an unseeded knowledge route has no answer', () => {
+    const issues = knowledgeReadByRoute('GET', '/api/knowledge/issues');
+    expect(issues?.id).toBe('knowledge.issues.list');
+    expect(issues?.body).toEqual({ issues: [] });
+    expect(knowledgeReadByRoute('GET', '/api/knowledge/lint')).toBeUndefined();
+    expect(knowledgeReadByRoute('POST', '/api/knowledge/issues')).toBeUndefined();
+    expect(knowledgeReadByMethod('knowledge.never-seeded')).toBeUndefined();
   });
 });

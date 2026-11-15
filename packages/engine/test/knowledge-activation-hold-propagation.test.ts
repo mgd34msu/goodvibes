@@ -220,9 +220,9 @@ describe('required activation holds across knowledge refresh catches', () => {
     };
     const result = await promoteRepairSources({ store: item.store, enrichSource: async () => {
       await captureRepairText(item); phase = 'fallback'; throw new Error('Synthetic extraction worker unavailable');
-    // This complete recovery/publication fixture took 64 seconds on CI. Its
-    // support budget must cover that work, within the finite outer deadline.
-    } }, spaceId, gap, [item.source.id], task, Date.now() + 90_000);
+    // No deadline: this recovery/publication fixture is slow on loaded machines,
+    // and a wall-clock budget would turn that into a failure unrelated to the claim.
+    } }, spaceId, gap, [item.source.id], task, Number.POSITIVE_INFINITY);
     expect(result).toEqual({ promotedFactCount: 2, repairComplete: false, promotedSourceIds: [item.source.id] });
     const reopened = await item.reload();
     const promoted = reopened.listNodes().find((node) => node.title === 'Display and picture specifications');
@@ -260,7 +260,7 @@ describe('required activation holds across knowledge refresh catches', () => {
         return saved;
       };
       await expect(promoteRepairSources({ store, enrichSource: async () => { throw new Error('Synthetic ordinary enrichment failure'); } },
-        spaceId, gap, [source.id], task, Date.now() + 60_000)).rejects.toMatchObject({ reason: 'stale' });
+        spaceId, gap, [source.id], task, Number.POSITIVE_INFINITY)).rejects.toMatchObject({ reason: 'stale' });
       expect(recoveryTask!).toBeDefined(); expect(store.getRefinementTask(task.id)).toBe(recoveryTask!);
       expect(store.getRefinementTask(task.id)?.trace.at(-1)?.message).toBe('Repair source enrichment did not finish for one accepted source.');
       expect(store.listNodes().filter(node => node.kind === 'fact')).toEqual([]);

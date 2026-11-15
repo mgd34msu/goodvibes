@@ -39,7 +39,7 @@ const users = new UserAuthManager({ users: [{ username: 'fixture-admin', passwor
   bootstrapFilePath: join(root, 'unused-users.json'), bootstrapCredentialPath: join(root, 'unused-bootstrap.txt') });
 const lifetime = {};
 const helper = new DaemonControlPlaneHelper({ authToken: () => 'synthetic-unused-shared', gatewayMethods, pairingTokens: pairing, userAuth: users,
-  settingsLifetime: () => lifetime } as unknown as DaemonControlPlaneContext);
+  settingsLifetime: () => lifetime, trustProxyEnabled: () => false } as unknown as DaemonControlPlaneContext);
 const router = new DaemonHttpRouter({ configManager: config, runtimeStore: null, userAuth: users,
   authToken: () => token, requireAdmin: (req: Request) => helper.requireAdmin(req), requireAuthenticatedSession: () => null,
   extractAuthToken: () => token, describeAuthenticatedPrincipal: () => null, controlPlaneGateway: { recordApiRequest() {} },

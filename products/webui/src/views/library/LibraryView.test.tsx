@@ -12,6 +12,7 @@ let addGate: Promise<void> | null = null;
 let addFails = false;
 const searches: unknown[] = [];
 let memoryServed = true;
+let queuedCount = 1;
 
 mock.module('../../lib/goodvibes', () => ({
   runBrowserJudgment: () => Promise.reject(new Error('No semantic reading in this display fixture.')),
@@ -31,7 +32,7 @@ mock.module('../../lib/goodvibes', () => ({
           if (!memoryServed) return Promise.reject(Object.assign(new Error('Method not found'), { status: 404, code: 'METHOD_NOT_FOUND' }));
           return Promise.resolve(searchResult([fakeRecord()]));
         },
-        reviewQueue: () => Promise.resolve({ records: [fakeRecord({ id: 'r2', summary: 'Queued' })] }),
+        reviewQueue: () => Promise.resolve({ records: Array.from({ length: queuedCount }, (_, i) => fakeRecord({ id: `r${i + 2}`, summary: 'Queued' })) }),
         consolidation: {
           receipts: () => Promise.resolve({
             receipts: [],
@@ -57,6 +58,7 @@ afterEach(() => {
   addFails = false;
   searches.length = 0;
   memoryServed = true;
+  queuedCount = 1;
 });
 
 function setValue(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
@@ -72,6 +74,14 @@ describe('LibraryView', () => {
     await waitFor(() => (el.textContent ?? '').includes('The daemon is the single writer'));
     // One queued record, one pending proposal, one undecided candidate.
     await waitFor(() => [...el.querySelectorAll('[role="radio"]')].some((r) => r.textContent?.includes('3')));
+    unmount();
+  });
+
+  test('a full page of queued records makes the Review count a lower bound', async () => {
+    queuedCount = 50;
+    const { el, unmount } = renderInto(React.createElement(LibraryView, { tab: 'memory', onTabChange: () => {} }));
+    // 50 queued records, one pending proposal, one undecided candidate.
+    await waitFor(() => [...el.querySelectorAll('[role="radio"]')].some((r) => r.textContent?.includes('52+')));
     unmount();
   });
 

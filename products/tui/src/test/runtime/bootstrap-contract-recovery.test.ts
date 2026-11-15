@@ -40,14 +40,20 @@ test('TUI bootstrap returns during contract recovery and shutdown stops then dra
     const dispose = ctx.services.contractRunner.dispose;
     const spy = spyOn(ctx.services.contractRunner, 'dispose').mockImplementation(() => { dispose(); stopped(); });
     restoreDispose = () => spy.mockRestore();
+    const order: string[] = [];
+    const flush = spyOn(ctx.services.contractRunner, 'flushWorkPlan').mockImplementation(async () => { order.push('flush'); });
+    stops.unshift(() => { flush.mockRestore(); });
     let finished = false;
     const closing = ctx.shutdown({ messages: [] }).then(() => { finished = true; });
     await stopping;
     await Promise.resolve();
     expect(finished).toBe(false);
+    expect(order).toEqual([]);
+    order.push('recovery-released');
     releaseRecovery?.();
     await closing;
     expect(finished).toBe(true);
+    expect(order).toEqual(['recovery-released', 'flush']);
   } catch (error) { failure = { error }; throw error; }
   finally {
     clearTimeout(timeout); releaseRecovery?.();

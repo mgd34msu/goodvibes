@@ -1,6 +1,6 @@
 # CLI flags
 
-Most flags below are global (available regardless of the subcommand in use). Session-lifecycle flags are evaluated at TUI startup and are silently ignored for non-TUI commands. A few flags are specific to one command; those are listed separately in [Command-specific flags](#command-specific-flags).
+Most flags below are global (available regardless of the subcommand in use). `--continue`, `--resume` and `--fork` are evaluated at TUI startup. `run` restores the transcript for `--continue`, `--resume` and `--session` and fails with "No saved conversation is available to resume" when there is none; other commands ignore `--continue` and `--resume`, refuse `--session`, and `run` refuses `--fork`. A few flags are specific to one command; those are listed separately in [Command-specific flags](#command-specific-flags).
 
 ## Session lifecycle
 
@@ -43,11 +43,11 @@ goodvibes --fork current               # fork the session literally named "curre
 
 ### `--session <id>`, `-s <id>`
 
-Attach to a named session. Used by commands that operate on a specific session.
+Attach to a named session. Only `run` reads it (it restores that session's transcript before submitting the prompt and fails when the session does not exist). Any other command refuses it with an error, so use `--resume <id>` to reopen a session in the interactive TUI.
 
 ```sh
-goodvibes --session user-sess-1234
-goodvibes -s user-sess-1234
+goodvibes run --session user-sess-1234 "prompt"
+goodvibes --resume user-sess-1234
 ```
 
 ## Commit gate
@@ -60,6 +60,8 @@ Most CLI commands act immediately and never ask for confirmation, so this flag h
 goodvibes plugin bundles install <ref> --sha256 <pin>          # preview only
 goodvibes plugin bundles install <ref> --sha256 <pin> --yes    # commits the install
 ```
+
+A bundle reference may be a file path, an `https` URL or a git remote with a ref. The command refuses a URL that is not `https` or that names this machine or an internal network address (redirects are checked the same way), a bundle larger than 64 MiB, a fetch that takes longer than 60 seconds, and a git remote or ref that begins with `-` or uses a `name::address` helper transport. A refusal names the reason and happens before anything is fetched or checked against the pin.
 
 ### `--non-interactive`
 
@@ -77,14 +79,16 @@ Set the output encoding for `run` and other machine-readable commands. Three for
 
 | Format | What it prints |
 | --- | --- |
-| `text` (default) | The final assistant response (or the error) as plain text |
-| `json` | One pretty-printed JSON object at the end: `ok`, `response`, `error`, `stopReason`, `sessionId`, `model`, `provider`, and the event count |
-| `stream-json` | Newline-delimited JSON: one object per streaming delta as it arrives, then a final completed-or-error object |
+| `text` (default) | The final assistant response on stdout. Errors, and the status message of a run that never reached the model, go to stderr |
+| `json` | One JSON object on one line at the end (the [final frame](#final-frame)) |
+| `stream-json` | Newline-delimited JSON: the [stream frames](#stream-frames) as they happen, then the final frame |
 
 ```sh
 goodvibes run 'list files' --output json
 goodvibes -o stream-json run 'stream output'
 ```
+
+See [Headless `run`](#headless-run) for the frame shapes and exit codes.
 
 ### `--output-format <format>` (deprecated alias)
 
@@ -114,7 +118,7 @@ goodvibes --provider openai
 
 ### `--model <id>`, `-m <id>`
 
-Override the active model. When the model id includes a provider prefix (`provider:model` or `provider/model`), the provider is inferred automatically unless `--provider` is also set.
+Override the active model. When the model id starts with the id of a built-in or local provider and a colon (`openai:gpt-5.2`, `ollama:llama3:8b`), that provider is used unless `--provider` is also set. Any other colon belongs to the model id (`llama3:8b`) and the configured provider stays; name a provider that only your own config defines with `--provider`. A slash id such as `meta-llama/Llama-3.1-8B` is not split: the model registry resolves it, so pass `--provider` to name the provider explicitly.
 
 ```sh
 goodvibes --model openai:gpt-5.2
@@ -150,7 +154,7 @@ Disable the alternate screen buffer. Useful for terminals that do not support it
 
 ### `--daemon-home <path>`
 
-Override the daemon home directory (default `~/.goodvibes/daemon`).
+Override the daemon home directory (default `~/.goodvibes/daemon`). The flag wins over `GOODVIBES_DAEMON_HOME`; every command that reads the operator token, the daemon settings or the companion token uses the same directory, including `auth status` and `bundle export`.
 
 ### `--working-dir <path>`, `--cd <path>`, `-C <path>`
 
@@ -181,7 +185,7 @@ goodvibes --config log.level=debug --config feature.x=true
 
 ### `--enable <feature>`, `--disable <feature>`
 
-Enable or disable a named feature flag at startup. May be repeated.
+Enable or disable a named feature at startup. The value is a feature id (for example `output-schema-fingerprint`), not a settings key; an unknown id is refused and the error lists the known ids. A capability with no off switch (the `surfaces.*` features, `fetch-sanitization`) is refused with a message saying so. May be repeated.
 
 ## Prompt injection
 
@@ -195,6 +199,12 @@ goodvibes --prompt 'explain this file'
 goodvibes -p 'summarize the diff'
 ```
 
+Parser limits to know about:
+
+- A flag that takes a value refuses a value that begins with `-`. Use the long form with an equals sign: `--prompt='- item'`.
+- Unquoted words in a prompt that equal a command name or alias (`doctor`, `auth`, `task`) are read as that command. Quote the whole prompt.
+- The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
+
 ## Meta
 
 ### `--help`, `-h`
@@ -204,6 +214,22 @@ Print usage information and exit.
 ### `--version`, `-v`
 
 Print the version string and exit.
+
+## Protocol commands
+
+### `goodvibes acp`
+
+Runs GoodVibes as an [Agent Client Protocol](../../../packages/engine/docs/acp-agent.md) agent on stdin/stdout, for editors that launch an agent server (Zed and others). It takes no flags. Stdout carries only protocol frames; anything meant for a person (including a missing ACP library, exit `1`) is one line on stderr. It exits `0` when the editor closes stdin or the process receives SIGINT/SIGTERM, and `2` for an unexpected argument. `GOODVIBES_HOME` selects the home directory for the embedded sessions, as in the engine reference.
+
+Editor launch line (Zed `agent_servers` entry, or any ACP client that takes a command and arguments):
+
+```json
+{ "agent_servers": { "GoodVibes": { "command": "goodvibes", "args": ["acp"] } } }
+```
+
+Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only.
+
+To expose the operator surface to an MCP client instead, use `goodvibes-daemon mcp serve` (see the [daemon command reference](../../daemon/docs/commands-reference.md#mcp)).
 
 ## Argument terminator
 
@@ -216,6 +242,44 @@ goodvibes run -- --flag-for-subprocess
 ## Command-specific flags
 
 These apply to one command only, not globally.
+
+### `--timeout <duration>` (`run` only)
+
+Cancel the run when it takes longer than this. A bare number is seconds; `ms`, `s`, `m` and `h` suffixes are accepted (`90`, `90s`, `5m`, `1h`). The run is cancelled exactly as Ctrl-C would cancel it, then exits with code `124` and `stopReason` `timeout`.
+
+### `--max-turns <n>` (`run` only)
+
+Stop once the model has answered `n` times in this run's own turn loop and still asks for tools. Agents the run delegates to, and helper models, answer on their own and do not count against `n`; their cost still appears in `usage`. The run exits with code `1` and `stopReason` `max_turns`; tools the model asked for in its last response are not run.
+
+### `--answer-permissions` (`run` only)
+
+With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. Without the flag, a call that needs the owner is refused. Using it with another output format is a usage error (exit `2`).
+
+### `--omit-accumulated` (`run` only)
+
+With `--output stream-json`, leave `accumulated` (the whole response so far) out of `STREAM_DELTA` frames, so each frame carries only its new `content`. Without it, frames keep `accumulated`.
+
+```sh
+goodvibes run --output stream-json --omit-accumulated --timeout 10m --max-turns 20 'fix the failing test'
+```
+
+### `--intake-status`, `--intake-retry`, `--intake-resume`, `--intake-cancel` (`run` only)
+
+Inspect or recover an input that was captured for native daemon admission but whose outcome is not settled. They take no value and no prompt: recovery always reuses the exact saved input. Use exactly one.
+
+| Flag | Effect |
+| --- | --- |
+| `--intake-status` | Read-only. Prints the saved input's server state; exits `0` when the host has a record of it. |
+| `--intake-retry` | Request admission again for the same saved input. |
+| `--intake-resume` | Explicit recovery of an input the host reports as processing. |
+| `--intake-cancel` | Cancel the saved input (or its admitted work) on the host. |
+
+```sh
+goodvibes run --intake-status --output json
+goodvibes run --intake-retry
+```
+
+Messages that would name a slash command inside the TUI (`/work intake-status`) name these flags in `run` output instead.
 
 ### `--strict` (`doctor` only)
 
@@ -233,3 +297,65 @@ Set the new user's password inline, or read it from stdin (`--password-stdin`) i
 goodvibes auth add-user alice --password-stdin --role admin
 goodvibes auth rotate-password alice --password-stdin
 ```
+
+`auth` runs in its own short-lived process and writes the user store. A running daemon or TUI re-reads the user file at its next sign-in or session check, so a deleted user or rotated password takes effect there within a few seconds and ends that user's sessions, with no restart; a write the host makes meanwhile keeps the change instead of undoing it. Sessions live in memory in the running host: `auth sessions` lists only this process's (normally none), and `auth revoke-session` / `auth revoke-sessions` cannot end a running host's other sessions. Restart the host to end them all.
+
+## Headless `run`
+
+`goodvibes run` (alias `exec`, or `--prompt`/`--print` with no command) runs one turn without the terminal UI and exits.
+
+### Exit codes
+
+All programs in one table: [Exit codes](../../../docs/exit-codes.md).
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Completed. |
+| `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, or the native host is unavailable or refused the input. Nothing further is pending. |
+| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with a recovery flag. |
+| `3` | Outcome unknown: a native input may have taken effect on the host. Inspect with `run --intake-status` before retrying. |
+| `124` | `--timeout` reached; the run was cancelled. |
+| `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
+
+### Final frame
+
+`json` prints this object; `stream-json` prints it last with `type` set to `TURN_RESULT` (or `NATIVE_INTAKE_RESULT` when the run went through native intake).
+
+| Field | Always | Meaning |
+| --- | --- | --- |
+| `schemaVersion` | yes | Frame shape version, currently `1`. |
+| `ok` | yes | `true` exactly when the exit code is `0`. |
+| `response` | yes | The answer, or the native status message. |
+| `stopReason` | yes | Why the run ended, for example `completed`, `empty_response`, `max_turns`, `timeout`, `cancelled`, `native-unknown`, `native-unavailable`. |
+| `sessionId` | yes | The conversation session, or `null` when no model turn ran. |
+| `usage` | yes | `{ modelCalls, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsdCents? }` summed over the run, or `null` when no model turn ran. `costUsdCents` is present only when every response was priced. |
+| `error` | no | What went wrong. |
+| `model`, `provider`, `events` | no | Present when a model turn ran. |
+| `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
+| `cause` | no | With `kind`, a non-secret reason code: `journal_limit`, `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
+| `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`. |
+
+### Stream frames
+
+Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ignore types they do not know.
+
+| `type` | Fields | When |
+| --- | --- | --- |
+| `STREAM_DELTA` | `content`, `accumulated` (omitted with `--omit-accumulated`) | Each chunk of model output. |
+| `TOOL_EXECUTING` | `turnId`, `callId`, `tool` | A tool call starts. |
+| `TOOL_SUCCEEDED` | `turnId`, `callId`, `tool`, `durationMs` | It finished. |
+| `TOOL_FAILED` | `turnId`, `callId`, `tool`, `durationMs`, `error` | It failed. |
+| `TOOL_CANCELLED` | `turnId`, `callId`, `tool`, `reason` | It was cancelled. |
+| `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` | A tool call reached the permission gate. Sent when the gate reports its decision, so nothing waits behind it; `ownerPrompt` says whether the owner was asked. |
+| `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` | The gate decided it. `ownerPrompt` is `true` when the owner was asked, `false` when a rule, preset or remembered approval decided. |
+| `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` | With `--answer-permissions`: the owner is being asked; the run waits for a `PERMISSION_ANSWER` line on stdin. |
+| `AGENT_SPAWNING`, `AGENT_RUNNING` | `agentId`, `taskId`, `parentAgentId`, `contractId`, `contractRole` | A delegated agent starts. |
+| `AGENT_COMPLETED`, `AGENT_FAILED`, `AGENT_CANCELLED` | `agentId`, `taskId`; `durationMs` and `toolCallsMade`, `error` or `reason` | It ended. |
+| `CONTRACT_CREATED`, `CONTRACT_STATUS_CHANGED` | `contractId`; `sessionId`, `origin`, `ownerAgentId` or `from`, `to` | Delegated work was set up or moved. |
+| `CONTRACT_ESCALATED` | `contractId`, `escalationId`, `scope`, `targetId`, `reason`, `question` | The contract is waiting on its owner. |
+| `CONTRACT_PASSED`, `CONTRACT_FAILED`, `CONTRACT_CANCELLED` | `contractId`; `criteriaMet`, `criteriaJudged`, or `reason` and `failureKind` | It ended. |
+| `USAGE` | `turnId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsdCents` | Each model response. |
+
+Tool arguments are never included, and neither are agent task text, agent output or the contract's ask. Fields shown that are optional are omitted when unknown.
+
+`PERMISSION_REQUESTED` is sent for every tool call that reaches the permission gate, not only the ones that ask someone; `ownerPrompt` on it and on `PERMISSION_DECIDED` is `true` when the owner was asked and `false` when a rule, preset or remembered approval decided. The turn runs in the `run` process itself, so these frames are always the turn's own.

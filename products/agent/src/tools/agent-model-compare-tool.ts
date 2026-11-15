@@ -8,10 +8,10 @@ import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjec
 import { registerComparisonCandidate, runAdmittedComparisonCandidate } from './agent-model-compare-candidate.ts';
 import { createComparisonOperation } from './agent-model-compare-operation.ts';
 import { createZipArchive } from './artifact-archive.ts';
-import type { AgentModelCompareToolArgs, AgentModelCompareToolDeps, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
+import type { AgentModelCompareToolArgs, AgentModelCompareToolDeps, CompareCandidateResult, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { BLIND_LABELS, DEFAULT_CANDIDATE_COUNT, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './agent-model-compare-types.ts';
 import { buildRunPromptFromArtifact, formatPreview, formatReveal, formatReview, formatRunResult, formatSavedComparisonArtifacts, formatSavedHandoffArtifacts, loadComparisonFromArtifact, parseMode, rememberComparison, resolveComparisonForRead, resolveCurrentModel, runCandidate, saveComparisonArtifact, selectComparisonModels } from './agent-model-compare-run.ts';
-import { ensureSelectableWinnerModel, findCandidate, formatApplyPreview, formatApplyResult, formatComparisonAnalytics, formatComparisonSynthesis, formatJudgePreview, formatJudgmentResult, formatRouteDecisionPreview, formatRouteDecisionResult, loadJudgmentFromArtifact, loadSavedJudgments, parseRouteDecision, readComparisonAnalyticsFilters, saveComparisonJudgmentArtifact, saveRouteDecisionArtifact } from './agent-model-compare-judgment.ts';
+import { ensureSelectableWinnerModel, findCandidate, formatApplyPreview, formatApplyResult, formatComparisonAnalytics, formatComparisonSynthesis, formatJudgePreview, formatJudgmentResult, formatRouteDecisionPreview, formatRouteDecisionResult, loadJudgmentFromArtifact, loadSavedJudgments, parseRouteDecision, unreadableJudgmentsNote, readComparisonAnalyticsFilters, saveComparisonJudgmentArtifact, saveRouteDecisionArtifact } from './agent-model-compare-judgment.ts';
 import { comparisonExportMarkdown, comparisonHandoffMarkdown, formatSideBySideReview, judgmentExportMarkdown, loadHandoffRelatedArtifacts, saveComparisonExportArtifact, saveComparisonHandoffArtifact } from './agent-model-compare-export.ts';
 import { buildComparisonHandoffArchivePayload, findRouteDecisionArtifactIdsForHandoff, formatExportPreview, formatExportResult, formatHandoffArchivePreview, formatHandoffArchiveResult, formatHandoffDiff, formatHandoffPreview, formatHandoffResult, loadHandoffArchiveArtifacts, loadHandoffDiffArtifact, loadHandoffFromArtifact, saveComparisonHandoffArchiveArtifact } from './agent-model-compare-handoff.ts';
 import { clamp, failure, output, previewText, readBenchmarkKind, readBoolean, readComparisonTag, readModelRefs, readNumber, readOptionalBoolean, readString, readStringList } from './agent-model-compare-utils.ts';
@@ -23,7 +23,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
   return {
     definition: {
       name: 'agent_model_compare',
-      description: 'Blind compare prompts/artifacts, review, route decisions, handoff, diff.',
+      description: 'Blind-compare models on a prompt or artifact (run, reveal, review, sideBySide), save a judgment (judge), then apply the winner route or record a route decision (apply, routeDecision), and export, hand off, archive or diff reviews (export, handoff, handoffArchive, handoffDiff) or summarize saved judgments (analytics, synthesis).',
       parameters: {
         type: 'object',
         properties: {
@@ -43,7 +43,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           candidateCount: {
             type: 'number',
-            description: 'Number of candidates to auto-select when modelRefs is omitted. At least 2.',
+            description: 'Number of candidates to auto-select when modelRefs is omitted. 2 to 4; default 2.',
           },
           rubric: {
             type: 'string',
@@ -59,7 +59,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           reveal: {
             type: 'boolean',
-            description: 'If true, include model identities immediately after the blinded outputs.',
+            description: 'For run, review and side-by-side: include model identities with the outputs. For judge: save the winner model in the judgment; apply and routeDecision only accept a judgment saved with reveal:true, and a saved judgment cannot be changed, so judge again with reveal:true (a new judgment).',
           },
           saveArtifact: {
             type: 'boolean',
@@ -79,11 +79,11 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           comparisonId: {
             type: 'string',
-            description: 'Stored comparison id for mode reveal.',
+            description: 'Stored comparison id for reveal, review and judge (or pass a saved comparison artifactId).',
           },
           artifactId: {
             type: 'string',
-            description: 'Run source artifact, saved comparison, or judgment artifact id.',
+            description: 'Run source artifact, or the saved comparison or judgment artifact id for apply, routeDecision, export, handoff, handoffArchive, sideBySide and review.',
           },
           leftArtifactId: {
             type: 'string',
@@ -115,12 +115,12 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           decision: {
             type: 'string',
-            enum: ['left-unchanged', 'leave-unchanged', 'keep-current', 'no-change', 'applied-winner'],
-            description: 'Route-decision receipt choice for routeDecision mode.',
+            enum: ['left-unchanged', 'leave-unchanged', 'keep-current', 'no-change'],
+            description: 'routeDecision receipt choice; defaults to left-unchanged. To apply the winner use mode:"apply".',
           },
           limit: {
             type: 'number',
-            description: 'Max saved judgments to inspect.',
+            description: 'Max saved judgments for analytics and synthesis. 1 to 100; default 20.',
           },
           includeReasons: {
             type: 'boolean',
@@ -129,7 +129,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           relatedArtifactIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Related artifacts for reviewer view or handoff.',
+            description: 'Related artifact ids for sideBySide (optional) and handoff (required, at least one).',
           },
           previewBytes: {
             type: 'number',
@@ -257,28 +257,28 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
         if (mode === MODE_ANALYTICS) {
           const limit = clamp(readNumber(args.limit, 20), 1, 100);
           const filters = readComparisonAnalyticsFilters(args);
-          const judgments = await loadSavedJudgments(deps.artifactStore, limit, filters);
-          return output(formatComparisonAnalytics({
+          const { judgments, unreadable } = await loadSavedJudgments(deps.artifactStore, limit, filters);
+          return output(`${formatComparisonAnalytics({
             judgments,
             limit,
             includeReasons: readOptionalBoolean(args.includeReasons, true),
             filters,
             storeAvailable: Boolean(deps.artifactStore?.list && deps.artifactStore.readContent),
-          }));
+          })}${unreadableJudgmentsNote(unreadable)}`);
         }
 
         if (mode === MODE_SYNTHESIS) {
           const limit = clamp(readNumber(args.limit, 20), 1, 100);
           const filters = readComparisonAnalyticsFilters(args);
-          const judgments = await loadSavedJudgments(deps.artifactStore, limit, filters);
-          return output(await formatComparisonSynthesis({
+          const { judgments, unreadable } = await loadSavedJudgments(deps.artifactStore, limit, filters);
+          return output(`${await formatComparisonSynthesis({
             artifactStore: deps.artifactStore, request: rawArgs, readingOptions: { signal: options?.signal, assertCurrent: operation.assertCurrent, sourceOwner: operation.sourceOwner },
             judgments,
             limit,
             includeReasons: readOptionalBoolean(args.includeReasons, true),
             filters,
             storeAvailable: Boolean(deps.artifactStore?.list && deps.artifactStore.readContent),
-          }));
+          })}${unreadableJudgmentsNote(unreadable)}`);
         }
 
         if (mode === MODE_JUDGE) {
@@ -331,7 +331,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           const explicitUserRequest = readString(args.explicitUserRequest);
           if (!artifactId) return failure('apply mode requires a saved judgment artifactId.');
           if (!deps.applyModelRoute) {
-            return failure('Model route updates are unavailable in this runtime. Use settings action:"set" for provider.model if available.');
+            return failure('Model route updates are unavailable in this runtime, so no route was changed. Ask the user to change the model themselves.');
           }
           if (!deps.artifactStore?.readContent) {
             return failure('Saved judgment artifacts are unavailable because this runtime cannot read artifact content.');
@@ -339,7 +339,16 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           const judgment = await loadJudgmentFromArtifact(deps.artifactStore, artifactId);
           if (!judgment) return failure('Unknown judgment artifact. Pass a saved model comparison judgment artifactId.');
           if (!judgment.revealIncludedInJudgment || !judgment.winnerModel?.registryKey) {
-            return failure('Judgment artifact does not include a revealed winner model. Save or reveal the judgment before applying a route update.');
+            return failure('Judgment artifact does not include a revealed winner model. A saved judgment cannot be amended: call mode:"judge" again with reveal:true (this saves a new judgment), then apply that one.');
+          }
+          // The judgment file is plain data anyone could have written; the route is
+          // only changed to a model the original comparison itself shows as the winner.
+          const source = await resolveComparisonForRead({ artifactStore: deps.artifactStore, comparisons, comparisonId: judgment.comparisonId, artifactId: judgment.sourceArtifactId ?? '' });
+          if (!source) {
+            return failure(`The comparison ${judgment.comparisonId} this judgment names is not available, so its winner model cannot be verified and the route was not changed. Run the comparison again, judge it with reveal:true, then apply that judgment.`);
+          }
+          if (findCandidate(source, judgment.winnerBlindId)?.model.registryKey !== judgment.winnerModel.registryKey) {
+            return failure('The judgment names a winner model that does not match its comparison. Nothing was changed.');
           }
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
             return failure([
@@ -350,7 +359,10 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           }
           await ensureSelectableWinnerModel(deps.modelCatalog, judgment.winnerModel.registryKey);
           const result = await deps.applyModelRoute(judgment.winnerModel.registryKey);
-          await deps.modelCatalog.recordModelUsage?.(judgment.winnerModel.registryKey);
+          // The route has changed by now, so nothing below may turn this into a failure.
+          let usageError: string | null = null;
+          try { await deps.modelCatalog.recordModelUsage?.(judgment.winnerModel.registryKey); }
+          catch (error) { usageError = error instanceof Error ? error.message : String(error); }
           let receipt: SavedComparisonArtifact | null = null;
           let receiptError: string | null = null;
           try {
@@ -364,16 +376,16 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           } catch (error) {
             receiptError = error instanceof Error ? error.message : String(error);
           }
-          return output(formatApplyResult({ judgment, result, receipt, receiptError }));
+          return output(`${formatApplyResult({ judgment, result, receipt, receiptError, usageError })}`);
         }
 
         if (mode === MODE_ROUTE_DECISION) {
           const artifactId = readString(args.artifactId);
           const explicitUserRequest = readString(args.explicitUserRequest);
-          const decision = parseRouteDecision(args.decision);
+          const decision = args.decision === undefined || readString(args.decision) === '' ? 'left-unchanged' : parseRouteDecision(args.decision);
           if (!artifactId) return failure('routeDecision mode requires a saved judgment artifactId.');
           if (decision !== 'left-unchanged') {
-            return failure('routeDecision mode records leave-unchanged decisions. Use mode:"apply" to apply a revealed winner.');
+            return failure('routeDecision mode records leave-unchanged decisions: pass decision:"left-unchanged" or omit it. To apply a revealed winner use mode:"apply".');
           }
           if (!deps.artifactStore?.readContent || !deps.artifactStore.create) {
             return failure('Route-decision receipts are unavailable because this runtime cannot read and create artifact content.');
@@ -381,7 +393,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           const judgment = await loadJudgmentFromArtifact(deps.artifactStore, artifactId);
           if (!judgment) return failure('Unknown judgment artifact. Pass a saved model comparison judgment artifactId.');
           if (!judgment.revealIncludedInJudgment || !judgment.winnerModel?.registryKey) {
-            return failure('Judgment artifact does not include a revealed winner model. Save or reveal the judgment before recording a route decision.');
+            return failure('Judgment artifact does not include a revealed winner model. A saved judgment cannot be amended: call mode:"judge" again with reveal:true (this saves a new judgment), then record the route decision on that one.');
           }
           const currentModel = (await resolveCurrentModel(deps.modelCatalog))?.registryKey ?? null;
           if (!assertCurrentToolEffect(rawArgs, options, 'write')) {
@@ -615,7 +627,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
         const benchmarkKind = readBenchmarkKind(args.benchmarkKind);
         const taskType = readComparisonTag(args.taskType);
         const requestedDocumentId = readComparisonTag(args.documentId);
-        const candidateCount = Math.max(MIN_CANDIDATES, Math.trunc(readNumber(args.candidateCount, DEFAULT_CANDIDATE_COUNT)));
+        const candidateCount = clamp(Math.trunc(readNumber(args.candidateCount, DEFAULT_CANDIDATE_COUNT)), MIN_CANDIDATES, BLIND_LABELS.length);
         if (!promptInput && !sourceArtifactId) return failure('prompt or artifactId is required.');
         if (args.preview === true) return output(formatPreview(args, refs, candidateCount));
         if (!assertCurrentToolEffect(rawArgs, options, 'send')) {
@@ -634,13 +646,21 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
 
         const maxTokens = Math.max(0, Math.trunc(readNumber(args.maxTokens, DEFAULT_MAX_TOKENS)));
         const systemPrompt = readString(args.systemPrompt);
-        const models = await selectComparisonModels(deps.modelCatalog, refs, candidateCount);
+        const models = await selectComparisonModels(deps.modelCatalog, refs, candidateCount, sourceDeps.random);
+        if (models.length > BLIND_LABELS.length) return failure(`Compare at most ${BLIND_LABELS.length} models at a time; ${models.length} were requested.`);
         operation.assertSend();
         const pending = models.map((model, index) => runAdmittedComparisonCandidate(sourceDeps.toolRegistry, options,
           model, BLIND_LABELS[index] ?? String(index + 1), prompt, systemPrompt, maxTokens, operation.assertCurrent, rawArgs, sourceArtifactId));
         const settled = await Promise.allSettled(pending);
         operation.assertCurrent();
-        const results = settled.map(result => { if (result.status === 'rejected') throw result.reason; return result.value; });
+        // A candidate that was refused or dropped is recorded as failed so the
+        // outputs of the others, which were already sent and billed, are kept.
+        const results = settled.map((result, index): CompareCandidateResult => {
+          if (result.status === 'fulfilled') return result.value;
+          if (result.reason instanceof ToolInputProjectionError || options?.signal?.aborted) throw result.reason;
+          return { blindId: BLIND_LABELS[index] ?? String(index + 1), model: models[index]!, status: 'failed', content: '', latencyMs: 0,
+            error: result.reason instanceof Error ? result.reason.message : String(result.reason) };
+        });
         const reveal = readBoolean(args.reveal);
         const baseComparison: StoredComparison = {
           comparisonId: `cmp_${agentRecordNonce()}`,

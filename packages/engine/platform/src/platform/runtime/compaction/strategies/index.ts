@@ -1,13 +1,9 @@
 /**
  * strategies/index.ts
  *
- * Barrel re-export for all compaction strategy modules.
+ * Barrel re-export for the boundary commit and quality score modules.
  */
 
-export { runMicrocompact } from './microcompact.js';
-export { runCollapse } from './collapse.js';
-export { runAutocompact } from './autocompact.js';
-export { runReactive } from './reactive.js';
 export { createBoundaryCommit, validateBoundaryCommit } from './boundary-commit.js';
 export type { BoundaryCommitOptions } from './boundary-commit.js';
 export {

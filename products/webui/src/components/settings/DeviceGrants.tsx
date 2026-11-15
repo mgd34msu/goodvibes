@@ -62,6 +62,11 @@ export function DeviceGrants() {
     mutationFn: (grantId: string) => invokeMethod('devices.grants.revoke', { grantId }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: deviceGrantsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: deviceNodesQueryKey });
+    },
+    // A refused revoke leaves the grant in force; re-read so the list shows what the daemon honours.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: deviceGrantsQueryKey });
     },
   });
 
@@ -75,6 +80,7 @@ export function DeviceGrants() {
       tone: 'danger',
     });
     if (!ok) return;
+    revoke.reset();
     revoke.mutate(grant.grantId);
   }
 
@@ -145,6 +151,11 @@ export function DeviceGrants() {
       )}
     >
       {confirm.element}
+      {revoke.isError ? (
+        <div className="banner warning" role="alert">
+          Revoke failed, the grant is still in force: {formatError(revoke.error)}
+        </div>
+      ) : null}
       {housekeeping.isError ? (
         <div className="banner warning" role="alert">{formatError(housekeeping.error)}</div>
       ) : null}

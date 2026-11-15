@@ -439,6 +439,24 @@ describe('complete native read catalogs', () => {
     expect(original?.content.evidence).toEqual(expect.objectContaining({ usageWindows: expect.any(Array), routeRecords: expect.any(Array), issues: expect.any(Array) }));
   });
 
+  test('a provider key held only by the credential store counts as configured in the catalog', async () => {
+    const managers = createTestManagers();
+    await managers.providerRegistry.ready();
+    await managers.providerRegistry.modelDiscoverySettled();
+    const original = process.env.OPENAI_API_KEY; delete process.env.OPENAI_API_KEY;
+    try {
+      const openai = async (secretsManager?: { get(key: string): Promise<string | null> }) => {
+        const context = { provider: { providerRegistry: managers.providerRegistry }, platform: { ...managers, ...(secretsManager ? { secretsManager } : {}) } };
+        const catalog = await providerAccountSummary(context, { includeParameters: true }, options());
+        if (!Array.isArray(catalog.providers)) throw new Error('Expected the native provider cohort');
+        return (catalog.providers.find(raw => nativeId(raw) === 'openai') as { availableRoutes?: readonly string[] } | undefined)?.availableRoutes;
+      };
+      expect(await openai()).toEqual(['unconfigured']);
+      expect(await openai({ get: async key => (key === 'OPENAI_API_KEY' ? 'sk-stored' : null) })).toEqual(['api-key']);
+      expect(await openai({ get: async () => { throw new Error('locked'); } })).toEqual(['unconfigured']);
+    } finally { if (original === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = original; }
+  });
+
   test('provider configuration mutation during source screening retires the captured account owner', async () => {
     const managers = createTestManagers(), context = { provider: { providerRegistry: managers.providerRegistry }, platform: managers };
     await managers.providerRegistry.ready();

@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `549`
+- Methods: `572`
 - Events: `34`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -513,11 +513,11 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
 
 #### `approvals.approve`
 
-Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded.
+Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals only): the daemon filters the approval's own edit list to those hunk indices server-side, so every surface produces identical modified-edit args. Omitting selectedHunks approves the whole request (back-compat). An out-of-range index or a non-edit approval is rejected with a 400. rememberTier generalizes the decision (a generalizing tier persists a durable rule and sweeps queued asks it covers); modifiedArgs carries an argument-modifying approval, e.g. the typed answer to a command's terminal prompt, to the waiting call (selectedHunks supersedes it when both are present). The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).
 
 - Title: `Approve Approval`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/approvals/{approvalId}/approve`
 - Scopes: `write:approvals`
@@ -951,12 +951,6 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -1042,6 +1036,12 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
       ],
       "additionalProperties": false
     },
+    "applied": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "type": "string"
+    },
     "recorded": {
       "type": "object",
       "properties": {
@@ -1090,11 +1090,11 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
 
 #### `approvals.cancel`
 
-Cancel a pending approval.
+Cancel a pending approval. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state. A surface that raised the ask through approvals.raise and is leaving passes `release: true`: the ask is cancelled only when no other surface that raised the same ask is still waiting, otherwise it stays pending for them and the response reads `applied: false`. Pass the `holdId` that approvals.raise returned so a retried release is harmless instead of giving up another surface's hold.
 
 - Title: `Cancel Approval`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/approvals/{approvalId}/cancel`
 - Scopes: `write:approvals`
@@ -1116,6 +1116,12 @@ Cancel a pending approval.
     },
     "remember": {
       "type": "boolean"
+    },
+    "release": {
+      "type": "boolean"
+    },
+    "holdId": {
+      "type": "string"
     }
   },
   "required": [
@@ -1476,12 +1482,6 @@ Cancel a pending approval.
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -1567,6 +1567,12 @@ Cancel a pending approval.
       ],
       "additionalProperties": false
     },
+    "applied": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "type": "string"
+    },
     "recorded": {
       "type": "object",
       "properties": {
@@ -1615,11 +1621,11 @@ Cancel a pending approval.
 
 #### `approvals.claim`
 
-Claim a pending approval for operator handling.
+Claim a pending approval for operator handling. A claim is advisory: it shows who is handling the ask and does not stop another participant from deciding it. An approval that already ended is returned unchanged with `applied: false` and a `refusal`.
 
 - Title: `Claim Approval`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/approvals/{approvalId}/claim`
 - Scopes: `write:approvals`
@@ -1995,12 +2001,6 @@ Claim a pending approval for operator handling.
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -2086,6 +2086,12 @@ Claim a pending approval for operator handling.
       ],
       "additionalProperties": false
     },
+    "applied": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "type": "string"
+    },
     "recorded": {
       "type": "object",
       "properties": {
@@ -2134,11 +2140,11 @@ Claim a pending approval for operator handling.
 
 #### `approvals.deny`
 
-Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded.
+Deny a pending approval. rememberTier generalizes the denial (a generalizing tier persists a durable deny rule and sweeps queued asks it covers); reason is the user's free-text feedback, which rides the structured declined result so the model adapts instead of guessing. The response's recorded block reports what the broker actually recorded. An approval that already ended is returned unchanged with `applied: false` and a `refusal` naming its state (still 200, so a raced or retried decision does not fail).
 
 - Title: `Deny Approval`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/approvals/{approvalId}/deny`
 - Scopes: `write:approvals`
@@ -2540,12 +2546,6 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -2631,6 +2631,12 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
       ],
       "additionalProperties": false
     },
+    "applied": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "type": "string"
+    },
     "recorded": {
       "type": "object",
       "properties": {
@@ -2679,7 +2685,7 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
 
 #### `approvals.list`
 
-Return pending and historical approval records.
+Return pending and historical approval records, newest 50. Pass `approvalId` to read one record by id wherever it ranks; `approvals` then holds that record, or is empty when the id is unknown.
 
 - Title: `List Approvals`
 - Source: `builtin`
@@ -2696,7 +2702,11 @@ Return pending and historical approval records.
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "approvalId": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -3186,12 +3196,6 @@ Return pending and historical approval records.
               "approved"
             ],
             "additionalProperties": false
-          },
-          "fixSessionId": {
-            "type": "string"
-          },
-          "fixSessionError": {
-            "type": "string"
           },
           "expiresAt": {
             "type": "number"
@@ -3946,12 +3950,6 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -4042,6 +4040,9 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
     },
     "decided": {
       "type": "boolean"
+    },
+    "holdId": {
+      "type": "string"
     }
   },
   "required": [
@@ -4061,7 +4062,7 @@ Return the raw content bytes for a stored artifact.
 
 - Title: `Get Artifact Content`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`
 - HTTP: `GET /api/artifacts/{artifactId}/content`
 - Scopes: `read:artifacts`
@@ -4116,7 +4117,7 @@ Store a file or attachment artifact for later delivery, analysis, or knowledge i
 
 - Title: `Create Artifact`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/artifacts`
 - Scopes: `write:artifacts`
@@ -4333,7 +4334,7 @@ Return metadata for a stored artifact.
 
 - Title: `Get Artifact`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/artifacts/{artifactId}`
 - Scopes: `read:artifacts`
@@ -4452,7 +4453,7 @@ Return stored artifact metadata for files and attachments.
 
 - Title: `List Artifacts`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/artifacts`
 - Scopes: `read:artifacts`
@@ -5013,7 +5014,7 @@ Process automation jobs queued for the next heartbeat.
 
 - Title: `Run Automation Heartbeat`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/heartbeat`
 - Scopes: `write:automation`
@@ -6314,7 +6315,7 @@ Create a durable automation job.
 
 - Title: `Create Automation Job`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs`
 - Scopes: `write:automation`
@@ -6835,6 +6836,7 @@ Create a durable automation job.
         }
       },
       "required": [
+        "kind",
         "every"
       ],
       "additionalProperties": true
@@ -6853,6 +6855,7 @@ Create a durable automation job.
         }
       },
       "required": [
+        "kind",
         "at"
       ],
       "additionalProperties": true
@@ -7668,7 +7671,7 @@ Delete a durable automation job.
 
 - Title: `Delete Automation Job`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/automation/jobs/{jobId}`
 - Scopes: `write:automation`
@@ -7728,7 +7731,7 @@ Disable a durable automation job.
 
 - Title: `Disable Automation Job`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/disable`
 - Scopes: `write:automation`
@@ -7789,7 +7792,7 @@ Enable a durable automation job.
 
 - Title: `Enable Automation Job`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/enable`
 - Scopes: `write:automation`
@@ -7879,353 +7882,160 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "jobs": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "mutationRevision": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "labels": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "enabled",
-              "paused",
-              "error",
-              "archived"
-            ]
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "at"
-                    ]
-                  },
-                  "at": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "at"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "every"
-                    ]
-                  },
-                  "intervalMs": {
-                    "type": "number"
-                  },
-                  "anchorAt": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "intervalMs"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "cron"
-                    ]
-                  },
-                  "expression": {
-                    "type": "string"
-                  },
-                  "timezone": {
-                    "type": "string"
-                  },
-                  "staggerMs": {
-                    "type": "number"
-                  },
-                  "staggerPhase": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 4294967295
-                  }
-                },
-                "required": [
-                  "kind",
-                  "expression"
-                ],
-                "additionalProperties": false
-              }
-            ]
-          },
-          "execution": {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
             "type": "object",
             "properties": {
-              "prompt": {
+              "id": {
                 "type": "string"
               },
-              "template": {
+              "mutationRevision": {
                 "type": "string"
               },
-              "target": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "isolated",
-                      "current",
-                      "pinned",
-                      "background",
-                      "main",
-                      "session",
-                      "route"
-                    ]
-                  },
-                  "sessionId": {
-                    "type": "string"
-                  },
-                  "routeId": {
-                    "type": "string"
-                  },
-                  "threadId": {
-                    "type": "string"
-                  },
-                  "channelId": {
-                    "type": "string"
-                  },
-                  "surfaceKind": {
-                    "type": "string",
-                    "enum": [
-                      "tui",
-                      "web",
-                      "slack",
-                      "discord",
-                      "ntfy",
-                      "webhook",
-                      "homeassistant",
-                      "telegram",
-                      "google-chat",
-                      "signal",
-                      "whatsapp",
-                      "telephony",
-                      "imessage",
-                      "msteams",
-                      "bluebubbles",
-                      "mattermost",
-                      "matrix",
-                      "service"
-                    ]
-                  },
-                  "pinnedSessionId": {
-                    "type": "string"
-                  },
-                  "preserveThread": {
-                    "type": "boolean"
-                  },
-                  "createIfMissing": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "kind"
-                ],
-                "additionalProperties": false
-              },
-              "modelProvider": {
+              "name": {
                 "type": "string"
               },
-              "modelId": {
+              "description": {
                 "type": "string"
               },
-              "fallbackModels": {
+              "labels": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
               },
-              "routing": {
-                "type": "object",
-                "properties": {
-                  "providerSelection": {
-                    "type": "string",
-                    "enum": [
-                      "inherit-current",
-                      "concrete",
-                      "synthetic"
-                    ]
-                  },
-                  "providerFailurePolicy": {
-                    "type": "string",
-                    "enum": [
-                      "ordered-fallbacks",
-                      "fail"
-                    ]
-                  },
-                  "fallbackModels": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              },
-              "executionIntent": {
-                "type": "object",
-                "properties": {
-                  "riskClass": {
-                    "type": "string",
-                    "enum": [
-                      "safe",
-                      "elevated",
-                      "dangerous"
-                    ]
-                  },
-                  "requiresApproval": {
-                    "type": "boolean"
-                  },
-                  "networkPolicy": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "allow",
-                      "deny",
-                      "scoped"
-                    ]
-                  },
-                  "filesystemPolicy": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "workspace-write",
-                      "read-only",
-                      "isolated"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              "reasoningEffort": {
-                "type": "string",
-                "enum": [
-                  "none",
-                  "instant",
-                  "minimal",
-                  "low",
-                  "medium",
-                  "high",
-                  "xhigh",
-                  "max"
-                ]
-              },
-              "thinking": {
-                "type": "string"
-              },
-              "wakeMode": {
-                "type": "string",
-                "enum": [
-                  "next-heartbeat",
-                  "now"
-                ]
-              },
-              "timeoutMs": {
+              "createdAt": {
                 "type": "number"
               },
-              "maxAttempts": {
+              "updatedAt": {
                 "type": "number"
               },
-              "toolAllowlist": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "autoApprove": {
-                "type": "boolean"
-              },
-              "sandboxMode": {
+              "status": {
                 "type": "string",
                 "enum": [
-                  "inherit",
-                  "isolate",
-                  "off"
+                  "enabled",
+                  "paused",
+                  "error",
+                  "archived"
                 ]
               },
-              "allowUnsafeExternalContent": {
+              "enabled": {
                 "type": "boolean"
               },
-              "externalContentSource": {
+              "schedule": {
                 "anyOf": [
                   {
-                    "type": "string",
-                    "enum": [
-                      "gmail",
-                      "email",
-                      "webhook",
-                      "api",
-                      "browser",
-                      "channel_metadata",
-                      "web_search",
-                      "web_fetch",
-                      "slack",
-                      "discord",
-                      "ntfy",
-                      "unknown"
-                    ]
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "at"
+                        ]
+                      },
+                      "at": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "at"
+                    ],
+                    "additionalProperties": false
                   },
                   {
                     "type": "object",
                     "properties": {
                       "kind": {
+                        "type": "string",
+                        "enum": [
+                          "every"
+                        ]
+                      },
+                      "intervalMs": {
+                        "type": "number"
+                      },
+                      "anchorAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "intervalMs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "cron"
+                        ]
+                      },
+                      "expression": {
                         "type": "string"
                       },
-                      "id": {
+                      "timezone": {
                         "type": "string"
                       },
-                      "url": {
+                      "staggerMs": {
+                        "type": "number"
+                      },
+                      "staggerPhase": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4294967295
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "execution": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "isolated",
+                          "current",
+                          "pinned",
+                          "background",
+                          "main",
+                          "session",
+                          "route"
+                        ]
+                      },
+                      "sessionId": {
                         "type": "string"
                       },
                       "routeId": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "channelId": {
                         "type": "string"
                       },
                       "surfaceKind": {
@@ -8251,317 +8061,578 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                           "service"
                         ]
                       },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
+                      "pinnedSessionId": {
+                        "type": "string"
+                      },
+                      "preserveThread": {
+                        "type": "boolean"
+                      },
+                      "createIfMissing": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "kind"
                     ],
                     "additionalProperties": false
-                  }
-                ]
-              },
-              "lightContext": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "target"
-            ],
-            "additionalProperties": false
-          },
-          "delivery": {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "none",
-                  "webhook",
-                  "surface",
-                  "integration",
-                  "link"
-                ]
-              },
-              "targets": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "webhook",
-                        "surface",
-                        "integration",
-                        "link"
-                      ]
-                    },
-                    "surfaceKind": {
-                      "type": "string",
-                      "enum": [
-                        "tui",
-                        "web",
-                        "slack",
-                        "discord",
-                        "ntfy",
-                        "webhook",
-                        "homeassistant",
-                        "telegram",
-                        "google-chat",
-                        "signal",
-                        "whatsapp",
-                        "telephony",
-                        "imessage",
-                        "msteams",
-                        "bluebubbles",
-                        "mattermost",
-                        "matrix",
-                        "service"
-                      ]
-                    },
-                    "address": {
-                      "type": "string"
-                    },
-                    "routeId": {
-                      "type": "string"
-                    },
-                    "label": {
+                  },
+                  "modelProvider": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "kind"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "fallbackTargets": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "webhook",
-                        "surface",
-                        "integration",
-                        "link"
-                      ]
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
                     },
-                    "surfaceKind": {
-                      "type": "string",
-                      "enum": [
-                        "tui",
-                        "web",
-                        "slack",
-                        "discord",
-                        "ntfy",
-                        "webhook",
-                        "homeassistant",
-                        "telegram",
-                        "google-chat",
-                        "signal",
-                        "whatsapp",
-                        "telephony",
-                        "imessage",
-                        "msteams",
-                        "bluebubbles",
-                        "mattermost",
-                        "matrix",
-                        "service"
-                      ]
-                    },
-                    "address": {
-                      "type": "string"
-                    },
-                    "routeId": {
-                      "type": "string"
-                    },
-                    "label": {
-                      "type": "string"
-                    }
+                    "additionalProperties": false
                   },
-                  "required": [
-                    "kind"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "includeSummary": {
-                "type": "boolean"
-              },
-              "includeTranscript": {
-                "type": "boolean"
-              },
-              "includeLinks": {
-                "type": "boolean"
-              },
-              "replyToRouteId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "mode",
-              "targets",
-              "fallbackTargets",
-              "includeSummary",
-              "includeTranscript",
-              "includeLinks"
-            ],
-            "additionalProperties": false
-          },
-          "failure": {
-            "type": "object",
-            "properties": {
-              "action": {
-                "type": "string",
-                "enum": [
-                  "retry",
-                  "cooldown",
-                  "disable",
-                  "dead_letter"
-                ]
-              },
-              "maxConsecutiveFailures": {
-                "type": "number"
-              },
-              "cooldownMs": {
-                "type": "number"
-              },
-              "retryPolicy": {
-                "type": "object",
-                "properties": {
+                  "executionIntent": {
+                    "type": "object",
+                    "properties": {
+                      "riskClass": {
+                        "type": "string",
+                        "enum": [
+                          "safe",
+                          "elevated",
+                          "dangerous"
+                        ]
+                      },
+                      "requiresApproval": {
+                        "type": "boolean"
+                      },
+                      "networkPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "allow",
+                          "deny",
+                          "scoped"
+                        ]
+                      },
+                      "filesystemPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "workspace-write",
+                          "read-only",
+                          "isolated"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "instant",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "thinking": {
+                    "type": "string"
+                  },
+                  "wakeMode": {
+                    "type": "string",
+                    "enum": [
+                      "next-heartbeat",
+                      "now"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  },
                   "maxAttempts": {
                     "type": "number"
                   },
-                  "delayMs": {
-                    "type": "number"
+                  "toolAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   },
-                  "strategy": {
+                  "autoApprove": {
+                    "type": "boolean"
+                  },
+                  "sandboxMode": {
                     "type": "string",
                     "enum": [
-                      "fixed",
-                      "linear",
-                      "exponential"
+                      "inherit",
+                      "isolate",
+                      "off"
                     ]
                   },
-                  "maxDelayMs": {
-                    "type": "number"
+                  "allowUnsafeExternalContent": {
+                    "type": "boolean"
                   },
-                  "jitterMs": {
-                    "type": "number"
+                  "externalContentSource": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "gmail",
+                          "email",
+                          "webhook",
+                          "api",
+                          "browser",
+                          "channel_metadata",
+                          "web_search",
+                          "web_fetch",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "routeId": {
+                            "type": "string"
+                          },
+                          "surfaceKind": {
+                            "type": "string",
+                            "enum": [
+                              "tui",
+                              "web",
+                              "slack",
+                              "discord",
+                              "ntfy",
+                              "webhook",
+                              "homeassistant",
+                              "telegram",
+                              "google-chat",
+                              "signal",
+                              "whatsapp",
+                              "telephony",
+                              "imessage",
+                              "msteams",
+                              "bluebubbles",
+                              "mattermost",
+                              "matrix",
+                              "service"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "lightContext": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
-                  "maxAttempts",
-                  "delayMs",
-                  "strategy"
+                  "target"
                 ],
                 "additionalProperties": false
               },
-              "deadLetterRouteId": {
-                "type": "string"
+              "delivery": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "webhook",
+                      "surface",
+                      "integration",
+                      "link"
+                    ]
+                  },
+                  "targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "fallbackTargets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "includeSummary": {
+                    "type": "boolean"
+                  },
+                  "includeTranscript": {
+                    "type": "boolean"
+                  },
+                  "includeLinks": {
+                    "type": "boolean"
+                  },
+                  "replyToRouteId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "targets",
+                  "fallbackTargets",
+                  "includeSummary",
+                  "includeTranscript",
+                  "includeLinks"
+                ],
+                "additionalProperties": false
               },
-              "disableAfterFailures": {
-                "type": "boolean"
+              "failure": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "retry",
+                      "cooldown",
+                      "disable",
+                      "dead_letter"
+                    ]
+                  },
+                  "maxConsecutiveFailures": {
+                    "type": "number"
+                  },
+                  "cooldownMs": {
+                    "type": "number"
+                  },
+                  "retryPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "maxAttempts": {
+                        "type": "number"
+                      },
+                      "delayMs": {
+                        "type": "number"
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "fixed",
+                          "linear",
+                          "exponential"
+                        ]
+                      },
+                      "maxDelayMs": {
+                        "type": "number"
+                      },
+                      "jitterMs": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts",
+                      "delayMs",
+                      "strategy"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "deadLetterRouteId": {
+                    "type": "string"
+                  },
+                  "disableAfterFailures": {
+                    "type": "boolean"
+                  },
+                  "notifyRouteId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "maxConsecutiveFailures",
+                  "cooldownMs",
+                  "retryPolicy"
+                ],
+                "additionalProperties": false
               },
-              "notifyRouteId": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "action",
-              "maxConsecutiveFailures",
-              "cooldownMs",
-              "retryPolicy"
-            ],
-            "additionalProperties": false
-          },
-          "source": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
+              "source": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "schedule",
+                      "manual",
+                      "hook",
+                      "webhook",
+                      "surface",
+                      "watcher"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "routeId": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "label",
+                  "enabled",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
               },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "schedule",
-                  "manual",
-                  "hook",
-                  "webhook",
-                  "surface",
-                  "watcher"
-                ]
-              },
-              "label": {
-                "type": "string"
-              },
-              "surfaceKind": {
-                "type": "string",
-                "enum": [
-                  "tui",
-                  "web",
-                  "slack",
-                  "discord",
-                  "ntfy",
-                  "webhook",
-                  "homeassistant",
-                  "telegram",
-                  "google-chat",
-                  "signal",
-                  "whatsapp",
-                  "telephony",
-                  "imessage",
-                  "msteams",
-                  "bluebubbles",
-                  "mattermost",
-                  "matrix",
-                  "service"
-                ]
-              },
-              "routeId": {
-                "type": "string"
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "createdAt": {
+              "nextRunAt": {
                 "type": "number"
               },
-              "updatedAt": {
+              "lastRunAt": {
                 "type": "number"
               },
-              "lastSeenAt": {
+              "lastRunId": {
+                "type": "string"
+              },
+              "runCount": {
+                "type": "number"
+              },
+              "successCount": {
+                "type": "number"
+              },
+              "failureCount": {
+                "type": "number"
+              },
+              "pausedReason": {
+                "type": "string"
+              },
+              "deleteAfterRun": {
+                "type": "boolean"
+              },
+              "archivedAt": {
                 "type": "number"
               },
               "metadata": {
@@ -8594,113 +8665,864 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
             },
             "required": [
               "id",
-              "kind",
-              "label",
-              "enabled",
+              "mutationRevision",
+              "name",
+              "labels",
               "createdAt",
               "updatedAt",
-              "metadata"
+              "status",
+              "enabled",
+              "schedule",
+              "execution",
+              "delivery",
+              "failure",
+              "source",
+              "runCount",
+              "successCount",
+              "failureCount",
+              "deleteAfterRun"
             ],
             "additionalProperties": true
-          },
-          "nextRunAt": {
-            "type": "number"
-          },
-          "lastRunAt": {
-            "type": "number"
-          },
-          "lastRunId": {
-            "type": "string"
-          },
-          "runCount": {
-            "type": "number"
-          },
-          "successCount": {
-            "type": "number"
-          },
-          "failureCount": {
-            "type": "number"
-          },
-          "pausedReason": {
-            "type": "string"
-          },
-          "deleteAfterRun": {
-            "type": "boolean"
-          },
-          "archivedAt": {
-            "type": "number"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "array",
-                  "items": {}
-                }
-              ]
-            }
           }
         },
-        "required": [
-          "id",
-          "mutationRevision",
-          "name",
-          "labels",
-          "createdAt",
-          "updatedAt",
-          "status",
-          "enabled",
-          "schedule",
-          "execution",
-          "delivery",
-          "failure",
-          "source",
-          "runCount",
-          "successCount",
-          "failureCount",
-          "deleteAfterRun"
-        ],
-        "additionalProperties": true
-      }
+        "emptyState": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "additionalProperties": false
     },
-    "emptyState": {
+    {
       "type": "object",
       "properties": {
-        "title": {
-          "type": "string"
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "mutationRevision": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "paused",
+                  "error",
+                  "archived"
+                ]
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "schedule": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "at"
+                        ]
+                      },
+                      "at": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "every"
+                        ]
+                      },
+                      "intervalMs": {
+                        "type": "number"
+                      },
+                      "anchorAt": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "intervalMs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "cron"
+                        ]
+                      },
+                      "expression": {
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "staggerMs": {
+                        "type": "number"
+                      },
+                      "staggerPhase": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4294967295
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "execution": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "isolated",
+                          "current",
+                          "pinned",
+                          "background",
+                          "main",
+                          "session",
+                          "route"
+                        ]
+                      },
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "routeId": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "channelId": {
+                        "type": "string"
+                      },
+                      "surfaceKind": {
+                        "type": "string",
+                        "enum": [
+                          "tui",
+                          "web",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "webhook",
+                          "homeassistant",
+                          "telegram",
+                          "google-chat",
+                          "signal",
+                          "whatsapp",
+                          "telephony",
+                          "imessage",
+                          "msteams",
+                          "bluebubbles",
+                          "mattermost",
+                          "matrix",
+                          "service"
+                        ]
+                      },
+                      "pinnedSessionId": {
+                        "type": "string"
+                      },
+                      "preserveThread": {
+                        "type": "boolean"
+                      },
+                      "createIfMissing": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "modelProvider": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "executionIntent": {
+                    "type": "object",
+                    "properties": {
+                      "riskClass": {
+                        "type": "string",
+                        "enum": [
+                          "safe",
+                          "elevated",
+                          "dangerous"
+                        ]
+                      },
+                      "requiresApproval": {
+                        "type": "boolean"
+                      },
+                      "networkPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "allow",
+                          "deny",
+                          "scoped"
+                        ]
+                      },
+                      "filesystemPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "workspace-write",
+                          "read-only",
+                          "isolated"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "instant",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "thinking": {
+                    "type": "string"
+                  },
+                  "wakeMode": {
+                    "type": "string",
+                    "enum": [
+                      "next-heartbeat",
+                      "now"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  },
+                  "maxAttempts": {
+                    "type": "number"
+                  },
+                  "toolAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "autoApprove": {
+                    "type": "boolean"
+                  },
+                  "sandboxMode": {
+                    "type": "string",
+                    "enum": [
+                      "inherit",
+                      "isolate",
+                      "off"
+                    ]
+                  },
+                  "allowUnsafeExternalContent": {
+                    "type": "boolean"
+                  },
+                  "externalContentSource": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "gmail",
+                          "email",
+                          "webhook",
+                          "api",
+                          "browser",
+                          "channel_metadata",
+                          "web_search",
+                          "web_fetch",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "routeId": {
+                            "type": "string"
+                          },
+                          "surfaceKind": {
+                            "type": "string",
+                            "enum": [
+                              "tui",
+                              "web",
+                              "slack",
+                              "discord",
+                              "ntfy",
+                              "webhook",
+                              "homeassistant",
+                              "telegram",
+                              "google-chat",
+                              "signal",
+                              "whatsapp",
+                              "telephony",
+                              "imessage",
+                              "msteams",
+                              "bluebubbles",
+                              "mattermost",
+                              "matrix",
+                              "service"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "lightContext": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              "delivery": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "webhook",
+                      "surface",
+                      "integration",
+                      "link"
+                    ]
+                  },
+                  "targets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "fallbackTargets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "includeSummary": {
+                    "type": "boolean"
+                  },
+                  "includeTranscript": {
+                    "type": "boolean"
+                  },
+                  "includeLinks": {
+                    "type": "boolean"
+                  },
+                  "replyToRouteId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "targets",
+                  "fallbackTargets",
+                  "includeSummary",
+                  "includeTranscript",
+                  "includeLinks"
+                ],
+                "additionalProperties": false
+              },
+              "failure": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "retry",
+                      "cooldown",
+                      "disable",
+                      "dead_letter"
+                    ]
+                  },
+                  "maxConsecutiveFailures": {
+                    "type": "number"
+                  },
+                  "cooldownMs": {
+                    "type": "number"
+                  },
+                  "retryPolicy": {
+                    "type": "object",
+                    "properties": {
+                      "maxAttempts": {
+                        "type": "number"
+                      },
+                      "delayMs": {
+                        "type": "number"
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "fixed",
+                          "linear",
+                          "exponential"
+                        ]
+                      },
+                      "maxDelayMs": {
+                        "type": "number"
+                      },
+                      "jitterMs": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts",
+                      "delayMs",
+                      "strategy"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "deadLetterRouteId": {
+                    "type": "string"
+                  },
+                  "disableAfterFailures": {
+                    "type": "boolean"
+                  },
+                  "notifyRouteId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "maxConsecutiveFailures",
+                  "cooldownMs",
+                  "retryPolicy"
+                ],
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "schedule",
+                      "manual",
+                      "hook",
+                      "webhook",
+                      "surface",
+                      "watcher"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "routeId": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "label",
+                  "enabled",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
+              },
+              "nextRunAt": {
+                "type": "number"
+              },
+              "lastRunAt": {
+                "type": "number"
+              },
+              "lastRunId": {
+                "type": "string"
+              },
+              "runCount": {
+                "type": "number"
+              },
+              "successCount": {
+                "type": "number"
+              },
+              "failureCount": {
+                "type": "number"
+              },
+              "pausedReason": {
+                "type": "string"
+              },
+              "deleteAfterRun": {
+                "type": "boolean"
+              },
+              "archivedAt": {
+                "type": "number"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "id",
+              "mutationRevision",
+              "name",
+              "labels",
+              "createdAt",
+              "updatedAt",
+              "status",
+              "enabled",
+              "schedule",
+              "execution",
+              "delivery",
+              "failure",
+              "source",
+              "runCount",
+              "successCount",
+              "failureCount",
+              "deleteAfterRun"
+            ],
+            "additionalProperties": true
+          }
         },
-        "body": {
+        "hasMore": {
+          "type": "boolean"
+        },
+        "nextCursor": {
           "type": "string"
         }
       },
       "required": [
-        "title",
-        "body"
+        "items",
+        "hasMore"
       ],
       "additionalProperties": false
     }
-  },
-  "required": [
-    "jobs"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -8710,7 +9532,7 @@ Trigger an automation job immediately.
 
 - Title: `Run Automation Job Now`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/run`
 - Scopes: `write:automation`
@@ -8769,7 +9591,7 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
 
 - Title: `Update Automation Job`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `PATCH /api/automation/jobs/{jobId}`
 - Scopes: `write:automation`
@@ -9269,6 +10091,9 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
       }
     }
   },
+  "required": [
+    "jobId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -10080,7 +10905,7 @@ Cancel an active automation run.
 
 - Title: `Cancel Automation Run`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/runs/{runId}/cancel`
 - Scopes: `write:automation`
@@ -12209,93 +13034,26 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "runs": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "jobId": {
-            "type": "string"
-          },
-          "labels": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "queued",
-              "running",
-              "completed",
-              "failed",
-              "cancelled",
-              "missed"
-            ]
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "triggeredBy": {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
             "type": "object",
             "properties": {
               "id": {
                 "type": "string"
               },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "schedule",
-                  "manual",
-                  "hook",
-                  "webhook",
-                  "surface",
-                  "watcher"
-                ]
-              },
-              "label": {
+              "jobId": {
                 "type": "string"
               },
-              "surfaceKind": {
-                "type": "string",
-                "enum": [
-                  "tui",
-                  "web",
-                  "slack",
-                  "discord",
-                  "ntfy",
-                  "webhook",
-                  "homeassistant",
-                  "telegram",
-                  "google-chat",
-                  "signal",
-                  "whatsapp",
-                  "telephony",
-                  "imessage",
-                  "msteams",
-                  "bluebubbles",
-                  "mattermost",
-                  "matrix",
-                  "service"
-                ]
-              },
-              "routeId": {
-                "type": "string"
-              },
-              "enabled": {
-                "type": "boolean"
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               "createdAt": {
                 "type": "number"
@@ -12303,121 +13061,116 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
               "updatedAt": {
                 "type": "number"
               },
-              "lastSeenAt": {
-                "type": "number"
+              "status": {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "running",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "missed"
+                ]
               },
-              "metadata": {
+              "agentId": {
+                "type": "string"
+              },
+              "triggeredBy": {
                 "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "schedule",
+                      "manual",
+                      "hook",
+                      "webhook",
+                      "surface",
+                      "watcher"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "routeId": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
                     }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "id",
-              "kind",
-              "label",
-              "enabled",
-              "createdAt",
-              "updatedAt",
-              "metadata"
-            ],
-            "additionalProperties": true
-          },
-          "target": {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "isolated",
-                  "current",
-                  "pinned",
-                  "background",
-                  "main",
-                  "session",
-                  "route"
-                ]
-              },
-              "sessionId": {
-                "type": "string"
-              },
-              "routeId": {
-                "type": "string"
-              },
-              "threadId": {
-                "type": "string"
-              },
-              "channelId": {
-                "type": "string"
-              },
-              "surfaceKind": {
-                "type": "string",
-                "enum": [
-                  "tui",
-                  "web",
-                  "slack",
-                  "discord",
-                  "ntfy",
-                  "webhook",
-                  "homeassistant",
-                  "telegram",
-                  "google-chat",
-                  "signal",
-                  "whatsapp",
-                  "telephony",
-                  "imessage",
-                  "msteams",
-                  "bluebubbles",
-                  "mattermost",
-                  "matrix",
-                  "service"
-                ]
-              },
-              "pinnedSessionId": {
-                "type": "string"
-              },
-              "preserveThread": {
-                "type": "boolean"
-              },
-              "createIfMissing": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "kind"
-            ],
-            "additionalProperties": false
-          },
-          "execution": {
-            "type": "object",
-            "properties": {
-              "prompt": {
-                "type": "string"
-              },
-              "template": {
-                "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "label",
+                  "enabled",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
               },
               "target": {
                 "type": "object",
@@ -12484,161 +13237,40 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
                 ],
                 "additionalProperties": false
               },
-              "modelProvider": {
-                "type": "string"
-              },
-              "modelId": {
-                "type": "string"
-              },
-              "fallbackModels": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "routing": {
+              "execution": {
                 "type": "object",
                 "properties": {
-                  "providerSelection": {
-                    "type": "string",
-                    "enum": [
-                      "inherit-current",
-                      "concrete",
-                      "synthetic"
-                    ]
+                  "prompt": {
+                    "type": "string"
                   },
-                  "providerFailurePolicy": {
-                    "type": "string",
-                    "enum": [
-                      "ordered-fallbacks",
-                      "fail"
-                    ]
+                  "template": {
+                    "type": "string"
                   },
-                  "fallbackModels": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              },
-              "executionIntent": {
-                "type": "object",
-                "properties": {
-                  "riskClass": {
-                    "type": "string",
-                    "enum": [
-                      "safe",
-                      "elevated",
-                      "dangerous"
-                    ]
-                  },
-                  "requiresApproval": {
-                    "type": "boolean"
-                  },
-                  "networkPolicy": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "allow",
-                      "deny",
-                      "scoped"
-                    ]
-                  },
-                  "filesystemPolicy": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "workspace-write",
-                      "read-only",
-                      "isolated"
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              },
-              "reasoningEffort": {
-                "type": "string",
-                "enum": [
-                  "none",
-                  "instant",
-                  "minimal",
-                  "low",
-                  "medium",
-                  "high",
-                  "xhigh",
-                  "max"
-                ]
-              },
-              "thinking": {
-                "type": "string"
-              },
-              "wakeMode": {
-                "type": "string",
-                "enum": [
-                  "next-heartbeat",
-                  "now"
-                ]
-              },
-              "timeoutMs": {
-                "type": "number"
-              },
-              "maxAttempts": {
-                "type": "number"
-              },
-              "toolAllowlist": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "autoApprove": {
-                "type": "boolean"
-              },
-              "sandboxMode": {
-                "type": "string",
-                "enum": [
-                  "inherit",
-                  "isolate",
-                  "off"
-                ]
-              },
-              "allowUnsafeExternalContent": {
-                "type": "boolean"
-              },
-              "externalContentSource": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": [
-                      "gmail",
-                      "email",
-                      "webhook",
-                      "api",
-                      "browser",
-                      "channel_metadata",
-                      "web_search",
-                      "web_fetch",
-                      "slack",
-                      "discord",
-                      "ntfy",
-                      "unknown"
-                    ]
-                  },
-                  {
+                  "target": {
                     "type": "object",
                     "properties": {
                       "kind": {
-                        "type": "string"
+                        "type": "string",
+                        "enum": [
+                          "isolated",
+                          "current",
+                          "pinned",
+                          "background",
+                          "main",
+                          "session",
+                          "route"
+                        ]
                       },
-                      "id": {
-                        "type": "string"
-                      },
-                      "url": {
+                      "sessionId": {
                         "type": "string"
                       },
                       "routeId": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "channelId": {
                         "type": "string"
                       },
                       "surfaceKind": {
@@ -12664,178 +13296,657 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
                           "service"
                         ]
                       },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
+                      "pinnedSessionId": {
+                        "type": "string"
+                      },
+                      "preserveThread": {
+                        "type": "boolean"
+                      },
+                      "createIfMissing": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
                       "kind"
                     ],
                     "additionalProperties": false
+                  },
+                  "modelProvider": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "executionIntent": {
+                    "type": "object",
+                    "properties": {
+                      "riskClass": {
+                        "type": "string",
+                        "enum": [
+                          "safe",
+                          "elevated",
+                          "dangerous"
+                        ]
+                      },
+                      "requiresApproval": {
+                        "type": "boolean"
+                      },
+                      "networkPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "allow",
+                          "deny",
+                          "scoped"
+                        ]
+                      },
+                      "filesystemPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "workspace-write",
+                          "read-only",
+                          "isolated"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "instant",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "thinking": {
+                    "type": "string"
+                  },
+                  "wakeMode": {
+                    "type": "string",
+                    "enum": [
+                      "next-heartbeat",
+                      "now"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  },
+                  "maxAttempts": {
+                    "type": "number"
+                  },
+                  "toolAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "autoApprove": {
+                    "type": "boolean"
+                  },
+                  "sandboxMode": {
+                    "type": "string",
+                    "enum": [
+                      "inherit",
+                      "isolate",
+                      "off"
+                    ]
+                  },
+                  "allowUnsafeExternalContent": {
+                    "type": "boolean"
+                  },
+                  "externalContentSource": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "gmail",
+                          "email",
+                          "webhook",
+                          "api",
+                          "browser",
+                          "channel_metadata",
+                          "web_search",
+                          "web_fetch",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "routeId": {
+                            "type": "string"
+                          },
+                          "surfaceKind": {
+                            "type": "string",
+                            "enum": [
+                              "tui",
+                              "web",
+                              "slack",
+                              "discord",
+                              "ntfy",
+                              "webhook",
+                              "homeassistant",
+                              "telegram",
+                              "google-chat",
+                              "signal",
+                              "whatsapp",
+                              "telephony",
+                              "imessage",
+                              "msteams",
+                              "bluebubbles",
+                              "mattermost",
+                              "matrix",
+                              "service"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "lightContext": {
+                    "type": "boolean"
                   }
+                },
+                "required": [
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              "scheduleKind": {
+                "type": "string",
+                "enum": [
+                  "at",
+                  "every",
+                  "cron"
                 ]
               },
-              "lightContext": {
+              "queuedAt": {
+                "type": "number"
+              },
+              "startedAt": {
+                "type": "number"
+              },
+              "endedAt": {
+                "type": "number"
+              },
+              "durationMs": {
+                "type": "number"
+              },
+              "forceRun": {
                 "type": "boolean"
-              }
-            },
-            "required": [
-              "target"
-            ],
-            "additionalProperties": false
-          },
-          "scheduleKind": {
-            "type": "string",
-            "enum": [
-              "at",
-              "every",
-              "cron"
-            ]
-          },
-          "queuedAt": {
-            "type": "number"
-          },
-          "startedAt": {
-            "type": "number"
-          },
-          "endedAt": {
-            "type": "number"
-          },
-          "durationMs": {
-            "type": "number"
-          },
-          "forceRun": {
-            "type": "boolean"
-          },
-          "dueRun": {
-            "type": "boolean"
-          },
-          "attempt": {
-            "type": "number"
-          },
-          "sessionId": {
-            "type": "string"
-          },
-          "routeId": {
-            "type": "string"
-          },
-          "route": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
               },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "session",
-                  "thread",
-                  "channel",
-                  "message"
-                ]
+              "dueRun": {
+                "type": "boolean"
               },
-              "surfaceKind": {
-                "type": "string",
-                "enum": [
-                  "tui",
-                  "web",
-                  "slack",
-                  "discord",
-                  "ntfy",
-                  "webhook",
-                  "homeassistant",
-                  "telegram",
-                  "google-chat",
-                  "signal",
-                  "whatsapp",
-                  "telephony",
-                  "imessage",
-                  "msteams",
-                  "bluebubbles",
-                  "mattermost",
-                  "matrix",
-                  "service"
-                ]
-              },
-              "surfaceId": {
-                "type": "string"
-              },
-              "externalId": {
-                "type": "string"
-              },
-              "sessionPolicy": {
-                "type": "string",
-                "enum": [
-                  "create-or-bind",
-                  "continue-existing",
-                  "require-existing"
-                ]
-              },
-              "threadPolicy": {
-                "type": "string",
-                "enum": [
-                  "preserve",
-                  "replace",
-                  "detached"
-                ]
-              },
-              "deliveryGuarantee": {
-                "type": "string",
-                "enum": [
-                  "best-effort",
-                  "at-least-once"
-                ]
-              },
-              "threadId": {
-                "type": "string"
-              },
-              "channelId": {
-                "type": "string"
+              "attempt": {
+                "type": "number"
               },
               "sessionId": {
                 "type": "string"
               },
-              "jobId": {
+              "routeId": {
                 "type": "string"
               },
-              "runId": {
+              "route": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "thread",
+                      "channel",
+                      "message"
+                    ]
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "surfaceId": {
+                    "type": "string"
+                  },
+                  "externalId": {
+                    "type": "string"
+                  },
+                  "sessionPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "create-or-bind",
+                      "continue-existing",
+                      "require-existing"
+                    ]
+                  },
+                  "threadPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "preserve",
+                      "replace",
+                      "detached"
+                    ]
+                  },
+                  "deliveryGuarantee": {
+                    "type": "string",
+                    "enum": [
+                      "best-effort",
+                      "at-least-once"
+                    ]
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "channelId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "jobId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "surfaceKind",
+                  "surfaceId",
+                  "externalId",
+                  "lastSeenAt",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
+              },
+              "continuationMode": {
+                "type": "string",
+                "enum": [
+                  "spawn",
+                  "shared-session",
+                  "continued-live",
+                  "background"
+                ]
+              },
+              "executionIntent": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "spawn",
+                      "shared-session",
+                      "continued-live",
+                      "background"
+                    ]
+                  },
+                  "targetKind": {
+                    "type": "string",
+                    "enum": [
+                      "isolated",
+                      "current",
+                      "pinned",
+                      "background",
+                      "main",
+                      "session",
+                      "route"
+                    ]
+                  }
+                },
+                "required": [
+                  "mode",
+                  "targetKind"
+                ],
+                "additionalProperties": false
+              },
+              "deliveryIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "deliveryAttempts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "runId": {
+                      "type": "string"
+                    },
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "sending",
+                        "sent",
+                        "failed",
+                        "dead_lettered"
+                      ]
+                    },
+                    "startedAt": {
+                      "type": "number"
+                    },
+                    "endedAt": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "responseId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "runId",
+                    "jobId",
+                    "target",
+                    "status"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "modelId": {
                 "type": "string"
               },
-              "title": {
+              "providerId": {
                 "type": "string"
               },
-              "lastSeenAt": {
-                "type": "number"
+              "telemetry": {
+                "type": "object",
+                "properties": {
+                  "usage": {
+                    "type": "object",
+                    "properties": {
+                      "inputTokens": {
+                        "type": "number"
+                      },
+                      "outputTokens": {
+                        "type": "number"
+                      },
+                      "cacheReadTokens": {
+                        "type": "number"
+                      },
+                      "cacheWriteTokens": {
+                        "type": "number"
+                      },
+                      "reasoningTokens": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "inputTokens",
+                      "outputTokens",
+                      "cacheReadTokens",
+                      "cacheWriteTokens"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "reasoningSummaryPresent": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "local-agent",
+                      "shared-session",
+                      "remote-node",
+                      "remote-device"
+                    ]
+                  }
+                },
+                "required": [
+                  "usage"
+                ],
+                "additionalProperties": true
               },
-              "createdAt": {
-                "type": "number"
+              "result": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
               },
-              "updatedAt": {
-                "type": "number"
+              "error": {
+                "type": "string"
+              },
+              "cancelledReason": {
+                "type": "string"
               },
               "metadata": {
                 "type": "object",
@@ -12867,30 +13978,700 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
             },
             "required": [
               "id",
-              "kind",
-              "surfaceKind",
-              "surfaceId",
-              "externalId",
-              "lastSeenAt",
+              "jobId",
+              "labels",
               "createdAt",
               "updatedAt",
-              "metadata"
+              "status",
+              "triggeredBy",
+              "target",
+              "execution",
+              "queuedAt",
+              "forceRun",
+              "dueRun",
+              "attempt",
+              "deliveryIds"
             ],
             "additionalProperties": true
-          },
-          "continuationMode": {
-            "type": "string",
-            "enum": [
-              "spawn",
-              "shared-session",
-              "continued-live",
-              "background"
-            ]
-          },
-          "executionIntent": {
+          }
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
             "type": "object",
             "properties": {
-              "mode": {
+              "id": {
+                "type": "string"
+              },
+              "jobId": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "running",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "missed"
+                ]
+              },
+              "agentId": {
+                "type": "string"
+              },
+              "triggeredBy": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "schedule",
+                      "manual",
+                      "hook",
+                      "webhook",
+                      "surface",
+                      "watcher"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "routeId": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "label",
+                  "enabled",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
+              },
+              "target": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "isolated",
+                      "current",
+                      "pinned",
+                      "background",
+                      "main",
+                      "session",
+                      "route"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "routeId": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "channelId": {
+                    "type": "string"
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "pinnedSessionId": {
+                    "type": "string"
+                  },
+                  "preserveThread": {
+                    "type": "boolean"
+                  },
+                  "createIfMissing": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              "execution": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "isolated",
+                          "current",
+                          "pinned",
+                          "background",
+                          "main",
+                          "session",
+                          "route"
+                        ]
+                      },
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "routeId": {
+                        "type": "string"
+                      },
+                      "threadId": {
+                        "type": "string"
+                      },
+                      "channelId": {
+                        "type": "string"
+                      },
+                      "surfaceKind": {
+                        "type": "string",
+                        "enum": [
+                          "tui",
+                          "web",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "webhook",
+                          "homeassistant",
+                          "telegram",
+                          "google-chat",
+                          "signal",
+                          "whatsapp",
+                          "telephony",
+                          "imessage",
+                          "msteams",
+                          "bluebubbles",
+                          "mattermost",
+                          "matrix",
+                          "service"
+                        ]
+                      },
+                      "pinnedSessionId": {
+                        "type": "string"
+                      },
+                      "preserveThread": {
+                        "type": "boolean"
+                      },
+                      "createIfMissing": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "modelProvider": {
+                    "type": "string"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "fallbackModels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "routing": {
+                    "type": "object",
+                    "properties": {
+                      "providerSelection": {
+                        "type": "string",
+                        "enum": [
+                          "inherit-current",
+                          "concrete",
+                          "synthetic"
+                        ]
+                      },
+                      "providerFailurePolicy": {
+                        "type": "string",
+                        "enum": [
+                          "ordered-fallbacks",
+                          "fail"
+                        ]
+                      },
+                      "fallbackModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "executionIntent": {
+                    "type": "object",
+                    "properties": {
+                      "riskClass": {
+                        "type": "string",
+                        "enum": [
+                          "safe",
+                          "elevated",
+                          "dangerous"
+                        ]
+                      },
+                      "requiresApproval": {
+                        "type": "boolean"
+                      },
+                      "networkPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "allow",
+                          "deny",
+                          "scoped"
+                        ]
+                      },
+                      "filesystemPolicy": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "workspace-write",
+                          "read-only",
+                          "isolated"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "instant",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "thinking": {
+                    "type": "string"
+                  },
+                  "wakeMode": {
+                    "type": "string",
+                    "enum": [
+                      "next-heartbeat",
+                      "now"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  },
+                  "maxAttempts": {
+                    "type": "number"
+                  },
+                  "toolAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "autoApprove": {
+                    "type": "boolean"
+                  },
+                  "sandboxMode": {
+                    "type": "string",
+                    "enum": [
+                      "inherit",
+                      "isolate",
+                      "off"
+                    ]
+                  },
+                  "allowUnsafeExternalContent": {
+                    "type": "boolean"
+                  },
+                  "externalContentSource": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "gmail",
+                          "email",
+                          "webhook",
+                          "api",
+                          "browser",
+                          "channel_metadata",
+                          "web_search",
+                          "web_fetch",
+                          "slack",
+                          "discord",
+                          "ntfy",
+                          "unknown"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "routeId": {
+                            "type": "string"
+                          },
+                          "surfaceKind": {
+                            "type": "string",
+                            "enum": [
+                              "tui",
+                              "web",
+                              "slack",
+                              "discord",
+                              "ntfy",
+                              "webhook",
+                              "homeassistant",
+                              "telegram",
+                              "google-chat",
+                              "signal",
+                              "whatsapp",
+                              "telephony",
+                              "imessage",
+                              "msteams",
+                              "bluebubbles",
+                              "mattermost",
+                              "matrix",
+                              "service"
+                            ]
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "lightContext": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              "scheduleKind": {
+                "type": "string",
+                "enum": [
+                  "at",
+                  "every",
+                  "cron"
+                ]
+              },
+              "queuedAt": {
+                "type": "number"
+              },
+              "startedAt": {
+                "type": "number"
+              },
+              "endedAt": {
+                "type": "number"
+              },
+              "durationMs": {
+                "type": "number"
+              },
+              "forceRun": {
+                "type": "boolean"
+              },
+              "dueRun": {
+                "type": "boolean"
+              },
+              "attempt": {
+                "type": "number"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "routeId": {
+                "type": "string"
+              },
+              "route": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "thread",
+                      "channel",
+                      "message"
+                    ]
+                  },
+                  "surfaceKind": {
+                    "type": "string",
+                    "enum": [
+                      "tui",
+                      "web",
+                      "slack",
+                      "discord",
+                      "ntfy",
+                      "webhook",
+                      "homeassistant",
+                      "telegram",
+                      "google-chat",
+                      "signal",
+                      "whatsapp",
+                      "telephony",
+                      "imessage",
+                      "msteams",
+                      "bluebubbles",
+                      "mattermost",
+                      "matrix",
+                      "service"
+                    ]
+                  },
+                  "surfaceId": {
+                    "type": "string"
+                  },
+                  "externalId": {
+                    "type": "string"
+                  },
+                  "sessionPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "create-or-bind",
+                      "continue-existing",
+                      "require-existing"
+                    ]
+                  },
+                  "threadPolicy": {
+                    "type": "string",
+                    "enum": [
+                      "preserve",
+                      "replace",
+                      "detached"
+                    ]
+                  },
+                  "deliveryGuarantee": {
+                    "type": "string",
+                    "enum": [
+                      "best-effort",
+                      "at-least-once"
+                    ]
+                  },
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "channelId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "jobId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "lastSeenAt": {
+                    "type": "number"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "surfaceKind",
+                  "surfaceId",
+                  "externalId",
+                  "lastSeenAt",
+                  "createdAt",
+                  "updatedAt",
+                  "metadata"
+                ],
+                "additionalProperties": true
+              },
+              "continuationMode": {
                 "type": "string",
                 "enum": [
                   "spawn",
@@ -12899,173 +14680,140 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
                   "background"
                 ]
               },
-              "targetKind": {
-                "type": "string",
-                "enum": [
-                  "isolated",
-                  "current",
-                  "pinned",
-                  "background",
-                  "main",
-                  "session",
-                  "route"
-                ]
-              }
-            },
-            "required": [
-              "mode",
-              "targetKind"
-            ],
-            "additionalProperties": false
-          },
-          "deliveryIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "deliveryAttempts": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
+              "executionIntent": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "spawn",
+                      "shared-session",
+                      "continued-live",
+                      "background"
+                    ]
+                  },
+                  "targetKind": {
+                    "type": "string",
+                    "enum": [
+                      "isolated",
+                      "current",
+                      "pinned",
+                      "background",
+                      "main",
+                      "session",
+                      "route"
+                    ]
+                  }
                 },
-                "runId": {
+                "required": [
+                  "mode",
+                  "targetKind"
+                ],
+                "additionalProperties": false
+              },
+              "deliveryIds": {
+                "type": "array",
+                "items": {
                   "type": "string"
-                },
-                "jobId": {
-                  "type": "string"
-                },
-                "target": {
+                }
+              },
+              "deliveryAttempts": {
+                "type": "array",
+                "items": {
                   "type": "object",
                   "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "webhook",
-                        "surface",
-                        "integration",
-                        "link"
-                      ]
-                    },
-                    "surfaceKind": {
-                      "type": "string",
-                      "enum": [
-                        "tui",
-                        "web",
-                        "slack",
-                        "discord",
-                        "ntfy",
-                        "webhook",
-                        "homeassistant",
-                        "telegram",
-                        "google-chat",
-                        "signal",
-                        "whatsapp",
-                        "telephony",
-                        "imessage",
-                        "msteams",
-                        "bluebubbles",
-                        "mattermost",
-                        "matrix",
-                        "service"
-                      ]
-                    },
-                    "address": {
+                    "id": {
                       "type": "string"
                     },
-                    "routeId": {
+                    "runId": {
                       "type": "string"
                     },
-                    "label": {
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "webhook",
+                            "surface",
+                            "integration",
+                            "link"
+                          ]
+                        },
+                        "surfaceKind": {
+                          "type": "string",
+                          "enum": [
+                            "tui",
+                            "web",
+                            "slack",
+                            "discord",
+                            "ntfy",
+                            "webhook",
+                            "homeassistant",
+                            "telegram",
+                            "google-chat",
+                            "signal",
+                            "whatsapp",
+                            "telephony",
+                            "imessage",
+                            "msteams",
+                            "bluebubbles",
+                            "mattermost",
+                            "matrix",
+                            "service"
+                          ]
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "routeId": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "sending",
+                        "sent",
+                        "failed",
+                        "dead_lettered"
+                      ]
+                    },
+                    "startedAt": {
+                      "type": "number"
+                    },
+                    "endedAt": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "responseId": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "kind"
+                    "id",
+                    "runId",
+                    "jobId",
+                    "target",
+                    "status"
                   ],
-                  "additionalProperties": false
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "pending",
-                    "sending",
-                    "sent",
-                    "failed",
-                    "dead_lettered"
-                  ]
-                },
-                "startedAt": {
-                  "type": "number"
-                },
-                "endedAt": {
-                  "type": "number"
-                },
-                "error": {
-                  "type": "string"
-                },
-                "responseId": {
-                  "type": "string"
+                  "additionalProperties": true
                 }
-              },
-              "required": [
-                "id",
-                "runId",
-                "jobId",
-                "target",
-                "status"
-              ],
-              "additionalProperties": true
-            }
-          },
-          "modelId": {
-            "type": "string"
-          },
-          "providerId": {
-            "type": "string"
-          },
-          "telemetry": {
-            "type": "object",
-            "properties": {
-              "usage": {
-                "type": "object",
-                "properties": {
-                  "inputTokens": {
-                    "type": "number"
-                  },
-                  "outputTokens": {
-                    "type": "number"
-                  },
-                  "cacheReadTokens": {
-                    "type": "number"
-                  },
-                  "cacheWriteTokens": {
-                    "type": "number"
-                  },
-                  "reasoningTokens": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "inputTokens",
-                  "outputTokens",
-                  "cacheReadTokens",
-                  "cacheWriteTokens"
-                ],
-                "additionalProperties": false
-              },
-              "llmCallCount": {
-                "type": "number"
-              },
-              "toolCallCount": {
-                "type": "number"
-              },
-              "turnCount": {
-                "type": "number"
               },
               "modelId": {
                 "type": "string"
@@ -13073,106 +14821,160 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
               "providerId": {
                 "type": "string"
               },
-              "reasoningSummaryPresent": {
-                "type": "boolean"
+              "telemetry": {
+                "type": "object",
+                "properties": {
+                  "usage": {
+                    "type": "object",
+                    "properties": {
+                      "inputTokens": {
+                        "type": "number"
+                      },
+                      "outputTokens": {
+                        "type": "number"
+                      },
+                      "cacheReadTokens": {
+                        "type": "number"
+                      },
+                      "cacheWriteTokens": {
+                        "type": "number"
+                      },
+                      "reasoningTokens": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "inputTokens",
+                      "outputTokens",
+                      "cacheReadTokens",
+                      "cacheWriteTokens"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "llmCallCount": {
+                    "type": "number"
+                  },
+                  "toolCallCount": {
+                    "type": "number"
+                  },
+                  "turnCount": {
+                    "type": "number"
+                  },
+                  "modelId": {
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "reasoningSummaryPresent": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "local-agent",
+                      "shared-session",
+                      "remote-node",
+                      "remote-device"
+                    ]
+                  }
+                },
+                "required": [
+                  "usage"
+                ],
+                "additionalProperties": true
               },
-              "source": {
-                "type": "string",
-                "enum": [
-                  "local-agent",
-                  "shared-session",
-                  "remote-node",
-                  "remote-device"
+              "result": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
                 ]
+              },
+              "error": {
+                "type": "string"
+              },
+              "cancelledReason": {
+                "type": "string"
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                }
               }
             },
             "required": [
-              "usage"
+              "id",
+              "jobId",
+              "labels",
+              "createdAt",
+              "updatedAt",
+              "status",
+              "triggeredBy",
+              "target",
+              "execution",
+              "queuedAt",
+              "forceRun",
+              "dueRun",
+              "attempt",
+              "deliveryIds"
             ],
             "additionalProperties": true
-          },
-          "result": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "array",
-                "items": {}
-              }
-            ]
-          },
-          "error": {
-            "type": "string"
-          },
-          "cancelledReason": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "array",
-                  "items": {}
-                }
-              ]
-            }
           }
         },
-        "required": [
-          "id",
-          "jobId",
-          "labels",
-          "createdAt",
-          "updatedAt",
-          "status",
-          "triggeredBy",
-          "target",
-          "execution",
-          "queuedAt",
-          "forceRun",
-          "dueRun",
-          "attempt",
-          "deliveryIds"
-        ],
-        "additionalProperties": true
-      }
+        "hasMore": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "hasMore"
+      ],
+      "additionalProperties": false
     }
-  },
-  "required": [
-    "runs"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -13182,7 +14984,7 @@ Retry a completed or failed automation run.
 
 - Title: `Retry Automation Run`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/runs/{runId}/retry`
 - Scopes: `write:automation`
@@ -14181,7 +15983,7 @@ Create a schedule record.
 
 - Title: `Create Schedule`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules`
 - Scopes: `write:automation`
@@ -14634,6 +16436,7 @@ Create a schedule record.
         }
       },
       "required": [
+        "kind",
         "every"
       ],
       "additionalProperties": true
@@ -14652,6 +16455,7 @@ Create a schedule record.
         }
       },
       "required": [
+        "kind",
         "at"
       ],
       "additionalProperties": true
@@ -15467,7 +17271,7 @@ Delete a schedule record.
 
 - Title: `Delete Schedule`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/automation/schedules/{scheduleId}`
 - Scopes: `write:automation`
@@ -15527,7 +17331,7 @@ Disable a schedule record.
 
 - Title: `Disable Schedule`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/disable`
 - Scopes: `write:automation`
@@ -15588,7 +17392,7 @@ Enable a schedule record.
 
 - Title: `Enable Schedule`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/enable`
 - Scopes: `write:automation`
@@ -17444,7 +19248,7 @@ Trigger a schedule immediately.
 
 - Title: `Run Schedule Now`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/run`
 - Scopes: `write:automation`
@@ -17494,6 +19298,878 @@ Trigger a schedule immediately.
     "status"
   ],
   "additionalProperties": true
+}
+```
+
+### batch
+
+#### `batch.jobs.cancel`
+
+Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409, because provider batches cancel as a whole. Needs an admin.
+
+- Title: `Cancel Batch Job`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/batch/jobs/{jobId}/cancel`
+- Scopes: `write:batch`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "jobId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "jobId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "job": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "submitted",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "expired",
+            "dead_lettered"
+          ]
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "request": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "attempts": {
+          "type": "number"
+        },
+        "providerBatchId": {
+          "type": "string"
+        },
+        "providerBatchStatus": {
+          "type": "string"
+        },
+        "submittedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "result": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "request",
+        "attempts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "job"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `batch.jobs.create`
+
+Queue one chat request to run later as part of a provider batch, answered 202 with the queued job. A message or tool the provider could never accept is refused here with INVALID_BATCH_REQUEST rather than accepted with a job id. `flush: true` submits it right away instead of waiting for the next pass, and the response then carries the job as that pass left it. Refused with BATCH_DISABLED (409) while the mode is `off`, LIVE_REQUEST_NOT_ACCEPTED (400) for `executionMode: "live"`, and BATCH_REQUEST_TOO_LARGE (413) above the request size limit. Spends provider budget, so it needs an admin.
+
+- Title: `Create Batch Job`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/batch/jobs`
+- Scopes: `write:batch`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "systemPrompt": {
+          "type": "string"
+        },
+        "maxTokens": {
+          "type": "number"
+        },
+        "reasoningEffort": {
+          "type": "string"
+        },
+        "reasoningSummary": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "messages"
+      ],
+      "additionalProperties": true
+    },
+    "executionMode": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "daemon-api",
+            "cloudflare-worker",
+            "cloudflare-queue",
+            "automation",
+            "client"
+          ]
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "flush": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "request"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "job": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "submitted",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "expired",
+            "dead_lettered"
+          ]
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "request": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "attempts": {
+          "type": "number"
+        },
+        "providerBatchId": {
+          "type": "string"
+        },
+        "providerBatchStatus": {
+          "type": "string"
+        },
+        "submittedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "result": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "request",
+        "attempts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "job"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `batch.jobs.get`
+
+One batch job with its status and, once finished, its result or error. An unknown id is a 404 with code BATCH_JOB_NOT_FOUND.
+
+- Title: `Get Batch Job`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/batch/jobs/{jobId}`
+- Scopes: `read:batch`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "jobId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "jobId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "job": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "submitted",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "expired",
+            "dead_lettered"
+          ]
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "request": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "attempts": {
+          "type": "number"
+        },
+        "providerBatchId": {
+          "type": "string"
+        },
+        "providerBatchStatus": {
+          "type": "string"
+        },
+        "submittedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "result": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "request",
+        "attempts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "job"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `batch.jobs.list`
+
+Batch jobs, newest first. `limit` defaults to 100 and is capped at 1000.
+
+- Title: `List Batch Jobs`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/batch/jobs`
+- Scopes: `read:batch`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitted",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "expired",
+              "dead_lettered"
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "request": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "providerBatchId": {
+            "type": "string"
+          },
+          "providerBatchStatus": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "result": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "request",
+          "attempts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "jobs"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `batch.run`
+
+Run one submit-and-poll pass over the queue now instead of waiting for the timer. `force: true` submits queued jobs even before their delay has elapsed. Returns the counts for this pass, all zero when the mode is `off`. Spends provider budget, so it needs an admin.
+
+- Title: `Run Batch Pass`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/batch/tick`
+- Scopes: `write:batch`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "force": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "submittedProviderBatches": {
+      "type": "number"
+    },
+    "submittedJobs": {
+      "type": "number"
+    },
+    "polledProviderBatches": {
+      "type": "number"
+    },
+    "completedJobs": {
+      "type": "number"
+    },
+    "failedJobs": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "submittedProviderBatches",
+    "submittedJobs",
+    "polledProviderBatches",
+    "completedJobs",
+    "failedJobs"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `batch.runtime.get`
+
+The batch queue's current mode (`off`, `explicit` or `eligible-by-default`), what happens when a provider cannot batch (`fallback`), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
+
+- Title: `Batch Runtime`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/batch/runtime`
+- Scopes: `read:batch`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "explicit",
+        "eligible-by-default"
+      ]
+    },
+    "fallback": {
+      "type": "string",
+      "enum": [
+        "live",
+        "fail"
+      ]
+    },
+    "queueBackend": {
+      "type": "string",
+      "enum": [
+        "local",
+        "cloudflare"
+      ]
+    },
+    "cloudflare": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "freeTierMode": {
+          "type": "boolean"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "workerName": {
+          "type": "string"
+        },
+        "workerBaseUrl": {
+          "type": "string"
+        },
+        "daemonBaseUrl": {
+          "type": "string"
+        },
+        "queueName": {
+          "type": "string"
+        },
+        "deadLetterQueueName": {
+          "type": "string"
+        },
+        "maxQueueOpsPerDay": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "enabled",
+        "freeTierMode",
+        "accountId",
+        "workerName",
+        "workerBaseUrl",
+        "daemonBaseUrl",
+        "queueName",
+        "deadLetterQueueName",
+        "maxQueueOpsPerDay"
+      ],
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "tickIntervalMs": {
+          "type": "number"
+        },
+        "maxDelayMs": {
+          "type": "number"
+        },
+        "maxJobsPerProviderBatch": {
+          "type": "number"
+        },
+        "maxQueuePayloadBytes": {
+          "type": "number"
+        },
+        "maxQueueMessagesPerDay": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "tickIntervalMs",
+        "maxDelayMs",
+        "maxJobsPerProviderBatch",
+        "maxQueuePayloadBytes",
+        "maxQueueMessagesPerDay"
+      ],
+      "additionalProperties": false
+    },
+    "supportedProviders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "mode",
+    "fallback",
+    "queueBackend",
+    "cloudflare",
+    "limits",
+    "supportedProviders"
+  ],
+  "additionalProperties": false
 }
 ```
 
@@ -18455,7 +21131,7 @@ Choose option values in a select element resolved from the latest snapshot.
 
 #### `browser.sessions.attach`
 
-Connect to a browser already running at a remote debugging endpoint. The daemon can drive it but can never close it.
+Connect to a browser already running at a remote debugging endpoint on this machine (a bare port, localhost or a loopback address; a browser elsewhere is reached through a local port forward). The daemon can drive it but can never close it.
 
 - Title: `Attach To Running Browser`
 - Source: `builtin`
@@ -18464,7 +21140,7 @@ Connect to a browser already running at a remote debugging endpoint. The daemon 
 - HTTP: `POST /api/browser/sessions/attach`
 - Scopes: `write:browser`
 - Emits events: none
-- Dangerous: `no`
+- Dangerous: `yes`
 - Invokable: `yes`
 
 ##### Input schema
@@ -18500,16 +21176,44 @@ Connect to a browser already running at a remote debugging endpoint. The daemon 
           "type": "string"
         },
         "profileDirectory": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cdpEndpoint": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "executablePath": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "source": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "headless": {
           "type": "boolean"
@@ -18521,7 +21225,14 @@ Connect to a browser already running at a remote debugging endpoint. The daemon 
           "type": "number"
         },
         "activePageId": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "closableByAgent": {
           "type": "boolean"
@@ -18622,16 +21333,44 @@ End a browser the daemon started. A session attached to a browser the daemon did
           "type": "string"
         },
         "profileDirectory": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cdpEndpoint": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "executablePath": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "source": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "headless": {
           "type": "boolean"
@@ -18643,7 +21382,14 @@ End a browser the daemon started. A session attached to a browser the daemon did
           "type": "number"
         },
         "activePageId": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "closableByAgent": {
           "type": "boolean"
@@ -18714,16 +21460,44 @@ Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs
           "type": "string"
         },
         "profileDirectory": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cdpEndpoint": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "executablePath": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "source": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "headless": {
           "type": "boolean"
@@ -18735,7 +21509,14 @@ Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs
           "type": "number"
         },
         "activePageId": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "closableByAgent": {
           "type": "boolean"
@@ -18807,16 +21588,44 @@ Return every open browser session, including whether the daemon started it and m
             "type": "string"
           },
           "profileDirectory": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cdpEndpoint": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "executablePath": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "headless": {
             "type": "boolean"
@@ -18828,7 +21637,14 @@ Return every open browser session, including whether the daemon started it and m
             "type": "number"
           },
           "activePageId": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "closableByAgent": {
             "type": "boolean"
@@ -18900,16 +21716,44 @@ Disconnect from a session and leave the browser running. This is how an attached
           "type": "string"
         },
         "profileDirectory": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cdpEndpoint": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "executablePath": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "source": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "headless": {
           "type": "boolean"
@@ -18921,7 +21765,14 @@ Disconnect from a session and leave the browser running. This is how an attached
           "type": "number"
         },
         "activePageId": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "closableByAgent": {
           "type": "boolean"
@@ -19093,13 +21944,34 @@ Report whether a browser is available on this machine, where its binary came fro
       "type": "boolean"
     },
     "binarySource": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "executablePath": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "driverVersion": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "browsersPath": {
       "type": "string"
@@ -19122,16 +21994,44 @@ Report whether a browser is available on this machine, where its binary came fro
             "type": "string"
           },
           "profileDirectory": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cdpEndpoint": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "executablePath": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "headless": {
             "type": "boolean"
@@ -19143,7 +22043,14 @@ Report whether a browser is available on this machine, where its binary came fro
             "type": "number"
           },
           "activePageId": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "closableByAgent": {
             "type": "boolean"
@@ -19188,10 +22095,24 @@ Report whether a browser is available on this machine, where its binary came fro
       }
     },
     "problem": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "fix": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -19863,7 +22784,7 @@ Return the full event object including attendees, recurrence, and raw iCalendar 
 
 #### `calendar.events.list`
 
-Return calendar event summaries from the configured CalDAV calendar within an optional time window.
+Return calendar event summaries from the configured CalDAV calendar within an optional time window. With no from or to, lists events starting from 24 hours ago onward.
 
 - Title: `List Calendar Events`
 - Source: `builtin`
@@ -20097,6 +23018,12 @@ Run a lifecycle action on the default channel account for a surface.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
     "accountId": {
       "type": "string"
     },
@@ -20128,6 +23055,10 @@ Run a lifecycle action on the default channel account for a surface.
       }
     }
   },
+  "required": [
+    "surface",
+    "action"
+  ],
   "additionalProperties": true
 }
 ```
@@ -20398,6 +23329,12 @@ Run a lifecycle action on a specific channel account.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
     "accountId": {
       "type": "string"
     },
@@ -20429,6 +23366,11 @@ Run a lifecycle action on a specific channel account.
       }
     }
   },
+  "required": [
+    "surface",
+    "accountId",
+    "action"
+  ],
   "additionalProperties": true
 }
 ```
@@ -21218,6 +24160,12 @@ Run a channel-owned operator action.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
+    "actionId": {
+      "type": "string"
+    },
     "accountId": {
       "type": "string"
     },
@@ -21249,6 +24197,10 @@ Run a channel-owned operator action.
       }
     }
   },
+  "required": [
+    "surface",
+    "actionId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -21784,6 +24736,9 @@ Apply allowlist additions or removals for a channel surface.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
     "add": {
       "type": "array",
       "items": {
@@ -21836,6 +24791,9 @@ Apply allowlist additions or removals for a channel surface.
       }
     }
   },
+  "required": [
+    "surface"
+  ],
   "additionalProperties": true
 }
 ```
@@ -22205,6 +25163,9 @@ Resolve allowlist candidates into stable channel identities.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
     "add": {
       "type": "array",
       "items": {
@@ -22257,6 +25218,9 @@ Resolve allowlist candidates into stable channel identities.
       }
     }
   },
+  "required": [
+    "surface"
+  ],
   "additionalProperties": true
 }
 ```
@@ -22389,6 +25353,9 @@ Evaluate channel authorization and availability for a requested action.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
     "actionId": {
       "type": "string"
     },
@@ -22430,6 +25397,7 @@ Evaluate channel authorization and availability for a requested action.
     }
   },
   "required": [
+    "surface",
     "actionId"
   ],
   "additionalProperties": true
@@ -23863,6 +26831,25 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
               "pendingMessages"
             ],
             "additionalProperties": false
+          },
+          "skippedMessages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "uid": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "uid",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -24355,6 +27342,9 @@ Update ingress policy configuration for a channel surface.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
     "enabled": {
       "type": "boolean"
     },
@@ -24521,6 +27511,9 @@ Update ingress policy configuration for a channel surface.
       }
     }
   },
+  "required": [
+    "surface"
+  ],
   "additionalProperties": true
 }
 ```
@@ -25937,6 +28930,9 @@ Resolve a typed channel target for outbound delivery or routing.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
     "target": {
       "type": "string"
     },
@@ -26030,6 +29026,9 @@ Resolve a typed channel target for outbound delivery or routing.
       ],
       "additionalProperties": true
     }
+  ],
+  "required": [
+    "surface"
   ]
 }
 ```
@@ -26232,6 +29231,12 @@ Run a channel-owned operator tool.
 {
   "type": "object",
   "properties": {
+    "surface": {
+      "type": "string"
+    },
+    "toolId": {
+      "type": "string"
+    },
     "accountId": {
       "type": "string"
     },
@@ -26263,6 +29268,10 @@ Run a channel-owned operator tool.
       }
     }
   },
+  "required": [
+    "surface",
+    "toolId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -26577,6 +29586,279 @@ Return operator tools for a single channel surface.
 }
 ```
 
+#### `homeassistant.conversation.cancel`
+
+Stop the running turn of a Home Assistant chat session, named by sessionId or by a known messageId. The session stays open. A session that is not a Home Assistant chat session answers 404.
+
+- Title: `Cancel Home Assistant Conversation Turn`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/homeassistant/conversation/cancel`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ok"
+  ],
+  "additionalProperties": true
+}
+```
+
+#### `homeassistant.conversation.health`
+
+Report whether the Home Assistant surface is enabled and the conversation endpoints it serves.
+
+- Title: `Home Assistant Conversation Health`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/homeassistant/health`
+- Scopes: `read:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": {
+    "anyOf": [
+      {
+        "type": "string"
+      },
+      {
+        "type": "number"
+      },
+      {
+        "type": "boolean"
+      },
+      {
+        "type": "null"
+      },
+      {},
+      {
+        "type": "array",
+        "items": {}
+      }
+    ]
+  }
+}
+```
+
+#### `homeassistant.conversation.stream`
+
+Post one utterance and stream the reply as server-sent events: delta frames, then one final or error frame. A providerId or modelId of the caller's choosing needs an admin token.
+
+- Title: `Stream Home Assistant Conversation Message`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/homeassistant/conversation/stream`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "conversationId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "surfaceId": {
+      "type": "string"
+    },
+    "providerId": {
+      "type": "string"
+    },
+    "modelId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": {
+    "anyOf": [
+      {
+        "type": "string"
+      },
+      {
+        "type": "number"
+      },
+      {
+        "type": "boolean"
+      },
+      {
+        "type": "null"
+      },
+      {},
+      {
+        "type": "array",
+        "items": {}
+      }
+    ]
+  }
+}
+```
+
+#### `homeassistant.conversation.submit`
+
+Post one utterance to the isolated chat session of a Home Assistant conversation and wait for the reply (or return at once with wait false). A providerId or modelId of the caller's choosing needs an admin token. A tools list is refused.
+
+- Title: `Submit Home Assistant Conversation Message`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/homeassistant/conversation`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "conversationId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "surfaceId": {
+      "type": "string"
+    },
+    "providerId": {
+      "type": "string"
+    },
+    "modelId": {
+      "type": "string"
+    },
+    "wait": {
+      "type": "boolean"
+    },
+    "timeoutMs": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "conversationId": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ok",
+    "status"
+  ],
+  "additionalProperties": true
+}
+```
+
 ### checkin
 
 #### `checkin.config.get`
@@ -26643,7 +29925,7 @@ Return the proactive check-in configuration: enabled, cadence (cron), delivery c
 
 #### `checkin.config.set`
 
-Update the proactive check-in configuration. Absent fields are left unchanged. Enabling syncs the kind:checkin automation job onto the scheduler; disabling stops it.
+Update the proactive check-in configuration. Absent fields are left unchanged. Enabling syncs the kind:checkin automation job onto the scheduler; disabling stops it. The answer carries `schedule` (scheduled, not-needed, or failed with the reason), because the config is stored even when the scheduler could not install the job.
 
 - Title: `Update Check-in Config`
 - Source: `builtin`
@@ -26705,6 +29987,26 @@ Update the proactive check-in configuration. Absent fields are left unchanged. E
         "cadence",
         "deliveryChannel",
         "quietHours"
+      ],
+      "additionalProperties": false
+    },
+    "schedule": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "not-needed",
+            "failed"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
       ],
       "additionalProperties": false
     }
@@ -26977,6 +30279,9 @@ Trigger one check-in evaluation immediately (a manual run): assemble the briefin
       "type": "string"
     },
     "deliveryId": {
+      "type": "string"
+    },
+    "error": {
       "type": "string"
     }
   },
@@ -27343,6 +30648,22 @@ Return workspace checkpoints (whole-workspace filesystem snapshots), newest firs
         ],
         "additionalProperties": false
       }
+    },
+    "retentionFailure": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "at": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "error",
+        "at"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -27433,6 +30754,25 @@ DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-ba
               "items": {
                 "type": "string"
               }
+            },
+            "failedPaths": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -27517,12 +30857,6 @@ Read-only: preview what a checkpoints.restore of this checkpoint would change (l
   "properties": {
     "id": {
       "type": "string"
-    },
-    "paths": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
     }
   },
   "required": [
@@ -28069,6 +31403,9 @@ Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies t
         "id": {
           "type": "string"
         },
+        "continuationId": {
+          "type": "string"
+        },
         "repo": {
           "type": "string"
         },
@@ -28206,6 +31543,9 @@ Return every standing CI watch. Stored flags are not repair authority; productio
         "type": "object",
         "properties": {
           "id": {
+            "type": "string"
+          },
+          "continuationId": {
             "type": "string"
           },
           "repo": {
@@ -28400,9 +31740,6 @@ Poll a standing watch immediately: returns the per-job report, whether a complet
     "fixSessionError": {
       "type": "string"
     },
-    "fixSessionOffered": {
-      "type": "boolean"
-    },
     "retired": {
       "type": "boolean"
     }
@@ -28411,6 +31748,1262 @@ Poll a standing watch immediately: returns the per-job report, whether a complet
     "report",
     "notified",
     "fixSessionTriggered"
+  ],
+  "additionalProperties": false
+}
+```
+
+### cloudflare
+
+#### `cloudflare.credentials.verify`
+
+Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400) and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing.
+
+- Title: `Validate Cloudflare Credentials`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/validate`
+- Scopes: `read:cloudflare`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "type": "string"
+    },
+    "apiToken": {
+      "type": "string"
+    },
+    "apiTokenRef": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "account": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "tokenSource": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ok",
+    "tokenSource"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.disable`
+
+Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) so the daemon stops using the worker, and, when an API token and account are available, removes the worker's cron trigger (`disableCron`, default true) and optionally its workers.dev subdomain (`disableWorkerSubdomain`, default false). `remote` is `not-disabled` when any Cloudflare step failed or was skipped: the deployed worker may then keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account's other resources are left in place.
+
+- Title: `Disable Cloudflare Worker`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/disable`
+- Scopes: `write:cloudflare`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "type": "string"
+    },
+    "apiToken": {
+      "type": "string"
+    },
+    "apiTokenRef": {
+      "type": "string"
+    },
+    "workerName": {
+      "type": "string"
+    },
+    "disableWorkerSubdomain": {
+      "type": "boolean"
+    },
+    "disableCron": {
+      "type": "boolean"
+    },
+    "persistConfig": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "skipped",
+              "warning"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "remote": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "not-disabled"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "steps",
+    "remote"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.provision`
+
+Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel, Access application and service token, DNS records, KV, Durable Objects, R2, Secrets Store), answered 202 with one step per resource: `ok`, `skipped` or `warning`. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. Creates and changes billable resources in the Cloudflare account.
+
+- Title: `Provision Cloudflare Platform`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/provision`
+- Scopes: `write:cloudflare`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "type": "string"
+    },
+    "apiToken": {
+      "type": "string"
+    },
+    "apiTokenRef": {
+      "type": "string"
+    },
+    "components": {
+      "type": "object",
+      "properties": {
+        "workers": {
+          "type": "boolean"
+        },
+        "queues": {
+          "type": "boolean"
+        },
+        "zeroTrustTunnel": {
+          "type": "boolean"
+        },
+        "zeroTrustAccess": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "boolean"
+        },
+        "kv": {
+          "type": "boolean"
+        },
+        "durableObjects": {
+          "type": "boolean"
+        },
+        "secretsStore": {
+          "type": "boolean"
+        },
+        "r2": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "batchMode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "explicit",
+        "eligible-by-default"
+      ]
+    },
+    "workerName": {
+      "type": "string"
+    },
+    "workerSubdomain": {
+      "type": "string"
+    },
+    "workerHostname": {
+      "type": "string"
+    },
+    "workerBaseUrl": {
+      "type": "string"
+    },
+    "daemonBaseUrl": {
+      "type": "string"
+    },
+    "daemonHostname": {
+      "type": "string"
+    },
+    "zoneId": {
+      "type": "string"
+    },
+    "zoneName": {
+      "type": "string"
+    },
+    "queueName": {
+      "type": "string"
+    },
+    "deadLetterQueueName": {
+      "type": "string"
+    },
+    "tunnelName": {
+      "type": "string"
+    },
+    "tunnelId": {
+      "type": "string"
+    },
+    "tunnelServiceUrl": {
+      "type": "string"
+    },
+    "tunnelTokenRef": {
+      "type": "string"
+    },
+    "accessAppId": {
+      "type": "string"
+    },
+    "accessServiceTokenId": {
+      "type": "string"
+    },
+    "accessServiceTokenRef": {
+      "type": "string"
+    },
+    "kvNamespaceName": {
+      "type": "string"
+    },
+    "kvNamespaceId": {
+      "type": "string"
+    },
+    "durableObjectNamespaceName": {
+      "type": "string"
+    },
+    "durableObjectNamespaceId": {
+      "type": "string"
+    },
+    "r2BucketName": {
+      "type": "string"
+    },
+    "secretsStoreName": {
+      "type": "string"
+    },
+    "secretsStoreId": {
+      "type": "string"
+    },
+    "workerCron": {
+      "type": "string"
+    },
+    "operatorToken": {
+      "type": "string"
+    },
+    "operatorTokenRef": {
+      "type": "string"
+    },
+    "workerClientToken": {
+      "type": "string"
+    },
+    "workerClientTokenRef": {
+      "type": "string"
+    },
+    "storeApiToken": {
+      "type": "boolean"
+    },
+    "storeOperatorToken": {
+      "type": "boolean"
+    },
+    "storeWorkerClientToken": {
+      "type": "boolean"
+    },
+    "returnGeneratedSecrets": {
+      "type": "boolean"
+    },
+    "enableWorkersDev": {
+      "type": "boolean"
+    },
+    "queueJobPayloads": {
+      "type": "boolean"
+    },
+    "verify": {
+      "type": "boolean"
+    },
+    "persistConfig": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "dryRun": {
+      "type": "boolean"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "skipped",
+              "warning"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "account": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "worker": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "queues": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "tunnel": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "access": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "dns": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "kv": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "durableObjects": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "r2": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "secretsStore": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "workerHealth": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "number"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "daemonBatchProxy": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "number"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "ok",
+        "workerHealth"
+      ],
+      "additionalProperties": false
+    },
+    "generatedSecrets": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "ok",
+    "dryRun",
+    "steps"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.resources.list`
+
+List what the account already has for the selected components: accounts, zones, the workers.dev subdomain and, with `includeResources`, existing queues, KV namespaces, Durable Object namespaces, R2 buckets, Secrets Stores, tunnels and Access applications. Read-only against Cloudflare; sent as a POST so credentials and the component selection travel in the body.
+
+- Title: `Discover Cloudflare Resources`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/discover`
+- Scopes: `read:cloudflare`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "type": "string"
+    },
+    "apiToken": {
+      "type": "string"
+    },
+    "apiTokenRef": {
+      "type": "string"
+    },
+    "components": {
+      "type": "object",
+      "properties": {
+        "workers": {
+          "type": "boolean"
+        },
+        "queues": {
+          "type": "boolean"
+        },
+        "zeroTrustTunnel": {
+          "type": "boolean"
+        },
+        "zeroTrustAccess": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "boolean"
+        },
+        "kv": {
+          "type": "boolean"
+        },
+        "durableObjects": {
+          "type": "boolean"
+        },
+        "secretsStore": {
+          "type": "boolean"
+        },
+        "r2": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "zoneId": {
+      "type": "string"
+    },
+    "zoneName": {
+      "type": "string"
+    },
+    "includeResources": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "tokenSource": {
+      "type": "string"
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "selectedAccount": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "selectedZone": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "workerSubdomain": {
+      "type": "string"
+    },
+    "queues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "kvNamespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "durableObjectNamespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "r2Buckets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "secretsStores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "tunnels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "accessApplications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "ok",
+    "tokenSource",
+    "accounts",
+    "zones",
+    "warnings"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.status`
+
+Whether the Cloudflare control plane is enabled and ready, which of its settings and credentials are configured (booleans only, never values), the stored non-secret configuration, and the warnings that explain anything missing. `GET /api/cloudflare` returns the same document.
+
+- Title: `Cloudflare Status`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/cloudflare/status`
+- Scopes: `read:cloudflare`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "configured": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "config": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "enabled",
+    "ready",
+    "configured",
+    "config",
+    "warnings"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.token.create`
+
+Use a temporary bootstrap token (required, used once, never stored) to create a narrower operational token with the permissions `cloudflare.token.requirements.get` lists. With `storeApiToken` the operational token is saved as a `goodvibes://` secret and its reference is returned; the plaintext token comes back only when `returnGeneratedToken` is true. Answered 201. Creates a credential in the Cloudflare account.
+
+- Title: `Create Cloudflare Operational Token`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/token/create`
+- Scopes: `write:cloudflare`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "components": {
+      "type": "object",
+      "properties": {
+        "workers": {
+          "type": "boolean"
+        },
+        "queues": {
+          "type": "boolean"
+        },
+        "zeroTrustTunnel": {
+          "type": "boolean"
+        },
+        "zeroTrustAccess": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "boolean"
+        },
+        "kv": {
+          "type": "boolean"
+        },
+        "durableObjects": {
+          "type": "boolean"
+        },
+        "secretsStore": {
+          "type": "boolean"
+        },
+        "r2": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "includeBootstrap": {
+      "type": "boolean"
+    },
+    "accountId": {
+      "type": "string"
+    },
+    "zoneId": {
+      "type": "string"
+    },
+    "zoneName": {
+      "type": "string"
+    },
+    "bootstrapToken": {
+      "type": "string"
+    },
+    "tokenName": {
+      "type": "string"
+    },
+    "expiresOn": {
+      "type": "string"
+    },
+    "persistConfig": {
+      "type": "boolean"
+    },
+    "storeApiToken": {
+      "type": "boolean"
+    },
+    "returnGeneratedToken": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "bootstrapToken"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "tokenId": {
+      "type": "string"
+    },
+    "tokenName": {
+      "type": "string"
+    },
+    "tokenSource": {
+      "type": "string"
+    },
+    "apiTokenRef": {
+      "type": "string"
+    },
+    "generatedToken": {
+      "type": "string"
+    },
+    "accountId": {
+      "type": "string"
+    },
+    "zoneId": {
+      "type": "string"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "string"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "scope",
+          "permission",
+          "reason"
+        ],
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "ok",
+    "tokenName",
+    "tokenSource",
+    "accountId",
+    "permissions"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.token.requirements.get`
+
+The Cloudflare API permissions each selected component needs, and how to create the one-off bootstrap token that `cloudflare.token.create` uses. Components default to Workers and Queues. Reads nothing from Cloudflare and changes nothing. Sent as a POST so the component selection travels in the body.
+
+- Title: `Cloudflare Token Requirements`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/token/requirements`
+- Scopes: `read:cloudflare`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "components": {
+      "type": "object",
+      "properties": {
+        "workers": {
+          "type": "boolean"
+        },
+        "queues": {
+          "type": "boolean"
+        },
+        "zeroTrustTunnel": {
+          "type": "boolean"
+        },
+        "zeroTrustAccess": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "boolean"
+        },
+        "kv": {
+          "type": "boolean"
+        },
+        "durableObjects": {
+          "type": "boolean"
+        },
+        "secretsStore": {
+          "type": "boolean"
+        },
+        "r2": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "includeBootstrap": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "components": {
+      "type": "object",
+      "properties": {
+        "workers": {
+          "type": "boolean"
+        },
+        "queues": {
+          "type": "boolean"
+        },
+        "zeroTrustTunnel": {
+          "type": "boolean"
+        },
+        "zeroTrustAccess": {
+          "type": "boolean"
+        },
+        "dns": {
+          "type": "boolean"
+        },
+        "kv": {
+          "type": "boolean"
+        },
+        "durableObjects": {
+          "type": "boolean"
+        },
+        "secretsStore": {
+          "type": "boolean"
+        },
+        "r2": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workers",
+        "queues",
+        "zeroTrustTunnel",
+        "zeroTrustAccess",
+        "dns",
+        "kv",
+        "durableObjects",
+        "secretsStore",
+        "r2"
+      ],
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "string"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "scope",
+          "permission",
+          "reason"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "bootstrapToken": {
+      "type": "object",
+      "properties": {
+        "requiredForPlatformCreation": {
+          "type": "boolean"
+        },
+        "storeInGoodVibes": {
+          "type": "boolean"
+        },
+        "instructions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "requiredForPlatformCreation",
+        "storeInGoodVibes",
+        "instructions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "components",
+    "permissions",
+    "bootstrapToken"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `cloudflare.worker.verify`
+
+Check the deployed worker: its `/batch/health` route (`workerHealth`) and its `/api/batch/config` proxy to this daemon (`daemonBatchProxy`), each with `ok`, the HTTP status and any error; `ok` is true only when both pass. A stored worker client token is sent only to the configured `cloudflare.workerBaseUrl`; for any other URL pass `workerClientToken` in the request or the proxy check reports why it was not authenticated. The URL must be https and is required (CLOUDFLARE_WORKER_URL_REQUIRED, 400). Changes nothing.
+
+- Title: `Verify Cloudflare Worker`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/cloudflare/verify`
+- Scopes: `read:cloudflare`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "workerBaseUrl": {
+      "type": "string"
+    },
+    "workerClientToken": {
+      "type": "string"
+    },
+    "workerClientTokenRef": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "workerHealth": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "daemonBatchProxy": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "workerHealth"
   ],
   "additionalProperties": false
 }
@@ -28461,7 +33054,7 @@ Server-Sent Events stream of turn and agent events scoped to a single companion-
 
 #### `companion.chat.messages.create`
 
-Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`.
+Post a user message to a companion-chat session. Accepts either `body` or `content` in the payload; `body` wins when both are provided. Attachments reference artifacts created through `artifacts.create`. A message queued behind a running turn whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`. Optional `clientMessageId` (1-128 characters) makes the send safe to repeat: a second send with the same id returns the first message's id and starts no second turn, so a client whose response was lost can resend. The id is remembered while the session stays loaded in the daemon; a daemon restart forgets it.
 
 - Title: `Send Companion Chat Message`
 - Source: `builtin`
@@ -28481,6 +33074,11 @@ Post a user message to a companion-chat session. Accepts either `body` or `conte
   "properties": {
     "sessionId": {
       "type": "string"
+    },
+    "clientMessageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     },
     "body": {
       "type": "string"
@@ -28601,7 +33199,7 @@ Post a user message to a companion-chat session. Accepts either `body` or `conte
 
 #### `companion.chat.messages.edit`
 
-Edit a user message and branch the conversation from it. `messageId` (required) is the user message to edit; the edited text is passed as `body` or `content` (as message create accepts), with optional `attachments` referencing artifacts. The original message and everything after it are SUPERSEDED, retained as history, never deleted, a new user message carrying `revisionOf` back to the original is appended, and a fresh turn answers it. Returns the new message id and the superseded ids for honest lineage. Same closed/unknown-session refusals as companion.chat.messages.retry.
+Edit a user message and branch the conversation from it. `messageId` (required) is the user message to edit; the edited text is passed as `body` or `content` (as message create accepts), with optional `attachments` referencing artifacts. The original message and everything after it are SUPERSEDED, retained as history, never deleted, a new user message carrying `revisionOf` back to the original is appended, and a fresh turn answers it. Returns the new message id and the superseded ids for honest lineage. Same closed/unknown-session refusals as companion.chat.messages.retry, and the same 409 CHAT_TURN_BUSY while a reply, a message being prepared, or queued sends are in flight (nothing is superseded).
 
 - Title: `Edit Companion Chat Message And Branch`
 - Source: `builtin`
@@ -28919,7 +33517,8 @@ Return the message list for a companion-chat session.
             "type": "string",
             "enum": [
               "cancelled",
-              "queued"
+              "queued",
+              "unanswered"
             ]
           },
           "inReplyTo": {
@@ -28948,7 +33547,7 @@ Return the message list for a companion-chat session.
 
 #### `companion.chat.messages.retry`
 
-Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate.
+Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.
 
 - Title: `Regenerate Companion Chat Response`
 - Source: `builtin`
@@ -28966,10 +33565,16 @@ Regenerate an assistant response. Optional `messageId` targets a specific assist
 {
   "type": "object",
   "properties": {
+    "sessionId": {
+      "type": "string"
+    },
     "messageId": {
       "type": "string"
     }
   },
+  "required": [
+    "sessionId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -29008,7 +33613,7 @@ Regenerate an assistant response. Optional `messageId` targets a specific assist
 
 #### `companion.chat.messages.steer`
 
-Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is running. The message jumps to the front of the pending-turn queue; the active turn is cancelled through the same finalization path as companion.chat.turns.cancel (any non-empty partial reply is persisted with `deliveryState: "cancelled"` and the terminal `turn.cancelled` event reaches every subscriber), then the steered message's turn starts. Messages queued behind an active turn keep their places behind the steer. With no turn running this behaves as an ordinary send. Accepts the same payload as companion.chat.messages.create (`body`/`content`, `attachments`, `metadata`). Returns the new message id, `steered: true`, and `cancelledTurnId` when a turn was interrupted. Ordinary sends posted while a turn is running are QUEUED (transcript-visible immediately with `deliveryState: "queued"`, answered in order), steer is the explicit jump-the-line verb.
+Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is running. The message jumps to the front of the pending-turn queue; the active turn is cancelled through the same finalization path as companion.chat.turns.cancel (any non-empty partial reply is persisted with `deliveryState: "cancelled"` and the terminal `turn.cancelled` event reaches every subscriber), then the steered message's turn starts. Messages queued behind an active turn keep their places behind the steer. With no turn running this behaves as an ordinary send. Accepts the same payload as companion.chat.messages.create (`body`/`content`, `attachments`, `metadata`). Returns the new message id, `steered: true`, and `cancelledTurnId` when a turn was interrupted. Ordinary sends posted while a turn is running are QUEUED (transcript-visible immediately with `deliveryState: "queued"`, answered in order), steer is the explicit jump-the-line verb. A queued message whose turn can never run (the chat closed, the service shut down or the daemon restarted first) ends as `deliveryState: "unanswered"`, never silently dropped.
 
 - Title: `Steer Companion Chat (Interrupt And Send)`
 - Source: `builtin`
@@ -29028,6 +33633,11 @@ Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is 
   "properties": {
     "sessionId": {
       "type": "string"
+    },
+    "clientMessageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     },
     "body": {
       "type": "string"
@@ -29720,7 +34330,8 @@ Return a companion-chat session record together with its full message history.
             "type": "string",
             "enum": [
               "cancelled",
-              "queued"
+              "queued",
+              "unanswered"
             ]
           },
           "inReplyTo": {
@@ -30567,6 +35178,91 @@ Return the resolved GoodVibes config snapshot.
 }
 ```
 
+#### `config.reset`
+
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete) and a key the host does not know.
+
+- Title: `Reset Config Value`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /config/reset`
+- Scopes: `write:config`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "key"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "success": {
+      "type": "boolean"
+    },
+    "key": {
+      "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        {
+          "type": "array",
+          "items": {}
+        }
+      ]
+    },
+    "persistedTo": {
+      "type": "string"
+    },
+    "tier": {
+      "type": "string"
+    },
+    "daemonOwned": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "key"
+  ],
+  "additionalProperties": true
+}
+```
+
 #### `config.set`
 
 Set a config value through the daemon API.
@@ -31064,7 +35760,7 @@ Return the continuity integration snapshot.
 
 #### `contracts.cancel`
 
-Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id.
+Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NATIVE for native work (stop it through its own execution, or answer its open question with `cancel`); 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection.
 
 - Title: `Cancel a Contract`
 - Source: `builtin`
@@ -33368,6 +38064,33 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                     "worktree",
                     "shared"
                   ]
+                },
+                "selectedModel": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "registryKey": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "registryKey",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                },
+                "taskEvidence": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -33631,6 +38354,33 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                     "worktree",
                     "shared"
                   ]
+                },
+                "selectedModel": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "registryKey": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "registryKey",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                },
+                "taskEvidence": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -34300,6 +39050,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                 },
                 "severityDecisionId": {
                   "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -34499,6 +39252,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                         "type": "string"
                       },
                       "severityDecisionId": {
+                        "type": "string"
+                      },
+                      "rationale": {
                         "type": "string"
                       }
                     },
@@ -35309,6 +40065,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                         "type": "string"
                       },
                       "severityDecisionId": {
+                        "type": "string"
+                      },
+                      "rationale": {
                         "type": "string"
                       }
                     },
@@ -36596,6 +41355,9 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
                               "type": "string"
                             },
                             "severityDecisionId": {
+                              "type": "string"
+                            },
+                            "rationale": {
                               "type": "string"
                             }
                           },
@@ -38516,6 +43278,12 @@ One contract with its whole tree, running or ended. 404 with CONTRACT_NOT_FOUND 
             "items": {
               "type": "string"
             }
+          },
+          "failurePause": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "resolvedAt": {
             "type": "number"
@@ -41128,6 +45896,33 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "worktree",
                           "shared"
                         ]
+                      },
+                      "selectedModel": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "registryKey": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "provider",
+                          "registryKey",
+                          "displayName"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "taskEvidence": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -41391,6 +46186,33 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "worktree",
                           "shared"
                         ]
+                      },
+                      "selectedModel": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "registryKey": {
+                            "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "provider",
+                          "registryKey",
+                          "displayName"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "taskEvidence": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -42060,6 +46882,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       },
                       "severityDecisionId": {
                         "type": "string"
+                      },
+                      "rationale": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -42259,6 +47084,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                               "type": "string"
                             },
                             "severityDecisionId": {
+                              "type": "string"
+                            },
+                            "rationale": {
                               "type": "string"
                             }
                           },
@@ -43069,6 +47897,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                               "type": "string"
                             },
                             "severityDecisionId": {
+                              "type": "string"
+                            },
+                            "rationale": {
                               "type": "string"
                             }
                           },
@@ -44356,6 +49187,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                     "type": "string"
                                   },
                                   "severityDecisionId": {
+                                    "type": "string"
+                                  },
+                                  "rationale": {
                                     "type": "string"
                                   }
                                 },
@@ -46277,6 +51111,12 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                     "type": "string"
                   }
                 },
+                "failurePause": {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
+                },
                 "resolvedAt": {
                   "type": "number"
                 },
@@ -46637,7 +51477,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
 
 #### `contracts.reply`
 
-The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED when the contract has ended.
+The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A native work contract's failed-turn question is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.
 
 - Title: `Reply to a Contract Escalation`
 - Source: `builtin`
@@ -46726,7 +51566,7 @@ The owner's free-text reply to an open escalation of a contract, read by Jev as 
 
 #### `contracts.start`
 
-Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract.
+Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon's workspace, or differs from the hosted session's; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.
 
 - Title: `Start a Contract`
 - Source: `builtin`
@@ -48996,6 +53836,33 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "worktree",
                         "shared"
                       ]
+                    },
+                    "selectedModel": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "registryKey": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "registryKey",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "taskEvidence": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -49259,6 +54126,33 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "worktree",
                         "shared"
                       ]
+                    },
+                    "selectedModel": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "registryKey": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "provider",
+                        "registryKey",
+                        "displayName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "taskEvidence": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -49928,6 +54822,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     },
                     "severityDecisionId": {
                       "type": "string"
+                    },
+                    "rationale": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -50127,6 +55024,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                             "type": "string"
                           },
                           "severityDecisionId": {
+                            "type": "string"
+                          },
+                          "rationale": {
                             "type": "string"
                           }
                         },
@@ -50937,6 +55837,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                             "type": "string"
                           },
                           "severityDecisionId": {
+                            "type": "string"
+                          },
+                          "rationale": {
                             "type": "string"
                           }
                         },
@@ -52224,6 +57127,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                                   "type": "string"
                                 },
                                 "severityDecisionId": {
+                                  "type": "string"
+                                },
+                                "rationale": {
                                   "type": "string"
                                 }
                               },
@@ -54144,6 +59050,12 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "items": {
                   "type": "string"
                 }
+              },
+              "failurePause": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
               },
               "resolvedAt": {
                 "type": "number"
@@ -56688,7 +61600,7 @@ Return the current control-plane gateway snapshot.
 
 #### `control.status`
 
-Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=consume to also receive undelivered daemon receipts (update/crash/migration notices) and mark them delivered, exactly once across all consuming readers. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.
+Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. receipts=consume still receives and marks them delivered in one read, so each receipt goes to at most one consuming reader and a lost response is not replayed. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.
 
 - Title: `Daemon Status`
 - Source: `builtin`
@@ -56709,9 +61621,15 @@ Return daemon status and version. THREE version fields, because there are two ve
     "receipts": {
       "type": "string",
       "enum": [
-        "consume"
+        "consume",
+        "peek",
+        "ack"
       ],
-      "description": "Set to \"consume\" to receive undelivered daemon receipts and mark them delivered. Omit for a read that never consumes receipts."
+      "description": "Omit for a read that never touches receipts. \"peek\" returns undelivered daemon receipts without marking them; \"ack\" (with ids) marks exactly those delivered; \"consume\" returns and marks them delivered in one read."
+    },
+    "ids": {
+      "type": "string",
+      "description": "With receipts=ack: comma-separated receipt ids to mark delivered, as receipts=peek returned them (at most 200 per call)."
     }
   },
   "additionalProperties": false
@@ -56735,6 +61653,30 @@ Return daemon status and version. THREE version fields, because there are two ve
     },
     "platformVersion": {
       "type": "string"
+    },
+    "cluster": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        {
+          "type": "array",
+          "items": {}
+        }
+      ]
     },
     "receipts": {
       "type": "array",
@@ -56950,7 +61892,7 @@ Whether this daemon is registered with the relay, and what state its registratio
 
 #### `update.check`
 
-Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. On a daemon with no loop armed this returns the same status `update.status` would, with `offReason` saying why nothing ran.
+Run one update check immediately instead of waiting for the next interval, and return the status afterwards. This is the same tick the schedule runs, so an on-demand check and the hourly one cannot reach different conclusions. It never forces an install: a downloaded-and-verified release still waits for a moment when no work is in flight, which the returned `pendingVersion` reports. A check that fails is reported in `failedCheckCount` and `lastCheckFailure` rather than refused, the caller asked what the state is, and "the check failed" is the answer. `check` says what the call did: `ran` (a check ran now), `already-in-flight` (another check was still running, none was started, and the rest of the answer is as of now) or `loop-off` (no loop is armed, `offReason` says why, and nothing ran).
 
 - Title: `Check For An Update Now`
 - Source: `builtin`
@@ -57049,6 +61991,83 @@ Run one update check immediately instead of waiting for the next interval, and r
           "type": "null"
         }
       ]
+    },
+    "recoveryRequired": {
+      "type": "boolean",
+      "enum": [
+        true
+      ]
+    },
+    "transactionRecovery": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "update",
+                "rollback"
+              ]
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "claim",
+                "stage",
+                "admission",
+                "commit",
+                "cleanup"
+              ]
+            },
+            "committed": {
+              "type": "boolean"
+            },
+            "recoveryRequired": {
+              "type": "boolean"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "recoveryPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "recoveryErrors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "phase",
+            "committed",
+            "recoveryRequired",
+            "targets",
+            "recoveryPaths",
+            "recoveryErrors"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "check": {
+      "type": "string",
+      "enum": [
+        "ran",
+        "already-in-flight",
+        "loop-off"
+      ]
     }
   },
   "required": [
@@ -57061,7 +62080,8 @@ Run one update check immediately instead of waiting for the next interval, and r
     "failedCheckCount",
     "lastCheckFailure",
     "pendingVersion",
-    "rejectedVersion"
+    "rejectedVersion",
+    "check"
   ],
   "additionalProperties": false
 }
@@ -57069,7 +62089,7 @@ Run one update check immediately instead of waiting for the next interval, and r
 
 #### `update.status`
 
-Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight. `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled.
+Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release already downloaded and verified, waiting for a moment when no work is in flight. `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.
 
 - Title: `Self-Update Status`
 - Source: `builtin`
@@ -57163,6 +62183,75 @@ Whether this daemon is keeping itself current, and, when it is not, the reason i
       "anyOf": [
         {
           "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recoveryRequired": {
+      "type": "boolean",
+      "enum": [
+        true
+      ]
+    },
+    "transactionRecovery": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "update",
+                "rollback"
+              ]
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "claim",
+                "stage",
+                "admission",
+                "commit",
+                "cleanup"
+              ]
+            },
+            "committed": {
+              "type": "boolean"
+            },
+            "recoveryRequired": {
+              "type": "boolean"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "recoveryPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "recoveryErrors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "phase",
+            "committed",
+            "recoveryRequired",
+            "targets",
+            "recoveryPaths",
+            "recoveryErrors"
+          ],
+          "additionalProperties": false
         },
         {
           "type": "null"
@@ -57763,7 +62852,7 @@ Return delivery records and integration snapshot data.
 
 #### `email.draft.create`
 
-Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. Requires explicit confirmation.
+Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field.
 
 - Title: `Create Email Draft`
 - Source: `builtin`
@@ -58011,7 +63100,7 @@ Return every open verification expectation with its recipient, service domain, p
 
 #### `email.expectation.open`
 
-Register, in advance, that a verification message is expected at one address from one service domain, within a bounded window. Called by the workstream that already holds authority BEFORE it submits the signup or checkout form. Grants evidence-only authority: a matching message proves control of the address and can never start work, widen the expectation or extend its window.
+Register, in advance, that a verification message is expected at one address from one service domain, within a bounded window. Called by the workstream that already holds authority BEFORE it submits the signup or checkout form. Grants evidence-only authority: a matching message proves control of the address and can never start work, widen the expectation or extend its window. The answer carries `watching`: whether a mailbox is being read right now and, when not, why. Opening is not refused while nothing watches (a cluster standby legitimately does not), but a message cannot arrive then.
 
 - Title: `Open Verification Expectation`
 - Source: `builtin`
@@ -58086,6 +63175,22 @@ Register, in advance, that a verification message is expected at one address fro
     },
     "remainingMs": {
       "type": "number"
+    },
+    "watching": {
+      "type": "object",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "running",
+        "reason"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -58096,7 +63201,8 @@ Register, in advance, that a verification message is expected at one address fro
     "purpose",
     "openedAt",
     "expiresAt",
-    "authority"
+    "authority",
+    "watching"
   ],
   "additionalProperties": false
 }
@@ -58349,12 +63455,19 @@ Disclose the inbound-mail watcher: whether it is running and why, which source i
             },
             "summary": {
               "type": "string"
+            },
+            "failures": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
             "sweptAt",
             "trigger",
-            "summary"
+            "summary",
+            "failures"
           ],
           "additionalProperties": false
         }
@@ -59502,14 +64615,14 @@ Archive every root subtree whose nodes are all terminal (done/failed/killed/inte
 
 #### `fleet.attempts.judge`
 
-Run the optional judge model over a best-of-N group's candidates and PROPOSE a winner, with reasons. The output is explicitly model judgment (scoredBy:"model"), it never auto-picks unless the source item opted into auto-accept; a human still confirms via fleet.attempts.pick. An engine with no judge configured returns an honest 501.
+Run the optional judge model over a best-of-N group's candidates (a paid model call that also records the proposal on the group) and PROPOSE a winner, with reasons. The output is explicitly model judgment (scoredBy:"model"), it never auto-picks unless the source item opted into auto-accept; a human still confirms via fleet.attempts.pick. An engine with no judge configured returns an honest 501.
 
 - Title: `Propose a Best-of-N Winner (Model Judgment)`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `write:fleet`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -59919,7 +65032,7 @@ Return the best-of-N attempt groups whose siblings ran in isolated worktrees and
 
 #### `fleet.attempts.pick`
 
-Accept one attempt as the winner of its best-of-N group: its worktree branch is merged through the existing sequential integration lane and every losing sibling's worktree is cleaned. The winner must be a held (passed) candidate of a group whose siblings are all terminal, an unknown/not-ready group or an invalid winner is an honest 409, never a partial merge.
+Accept one attempt as the winner of its best-of-N group. Without `confirm: true` nothing is merged or cleaned: the call returns `applied: false` and `requiresConfirm: true` with the group's candidates as a preview, so check `applied` before reporting a winner as picked. With `confirm: true` its worktree branch is merged through the existing sequential integration lane and every losing sibling's worktree is cleaned. The winner must be a held (passed) candidate of a group whose siblings are all terminal, an unknown/not-ready group or an invalid winner is an honest 409, never a partial merge.
 
 - Title: `Pick a Best-of-N Winner`
 - Source: `builtin`
@@ -62010,6 +67123,9 @@ The MemoryGovernor snapshot: the current memory-pressure tier and budget, reside
         },
         "rateMbPerSec": {
           "type": "number"
+        },
+        "thresholdMbPerSec": {
+          "type": "number"
         }
       },
       "required": [
@@ -62209,6 +67325,15 @@ Turn the owner keep-awake toggle on or off: a daemon-held sleep inhibitor INDEPE
               "type": "null"
             }
           ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "off",
+            "held",
+            "held-partial",
+            "refused"
+          ]
         }
       },
       "required": [
@@ -62376,6 +67501,15 @@ The host sleep-ownership state: whether the automatic work inhibitor is held (an
               "type": "null"
             }
           ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "off",
+            "held",
+            "held-partial",
+            "refused"
+          ]
         }
       },
       "required": [
@@ -62403,7 +67537,7 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
 
 - Title: `Install the Managed Local-Voice Runtime`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/local/install`
 - Scopes: `write:config`
@@ -62656,6 +67790,29 @@ One-act setup: download + checksum-verify the piper TTS engine, a default voice,
             "required": [
               "key",
               "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "superseded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "previousValue": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "previousValue",
+              "value"
             ],
             "additionalProperties": false
           }
@@ -62975,7 +68132,7 @@ Download and checksum-verify the pinned wake-word classifier in both runtime for
 
 - Title: `Download the Wake-Word Models`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/wake/provision`
 - Scopes: `write:config`
@@ -67119,6 +72276,747 @@ Explicit paired-owner command for bounded in-memory original-source intake. Conf
 }
 ```
 
+#### `inbound.telegram.release`
+
+Stop routing this chat through delegated intake and return it to normal handling. Pass the configurationId, or the chatId (and threadId) when no configuration exists.
+
+- Title: `Telegram Delegated Intake release`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/inbound/telegram/release`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "configurationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "configurationId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "chatId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "chatId"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+##### Output schema
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "accountIdentity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "inputId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sourceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "sessionId",
+        "inputId",
+        "sourceId",
+        "sourceRevision",
+        "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "configurationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "expiresAt": {
+      "type": "number"
+    },
+    "pendingRetentionMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "processing": {
+      "type": "string"
+    },
+    "restart": {
+      "type": "string"
+    },
+    "route": {
+      "type": "string"
+    },
+    "execution": {
+      "type": "string",
+      "const": "not-started"
+    },
+    "approvalId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source": {
+      "type": "string"
+    },
+    "recovery": {
+      "type": "string"
+    },
+    "record": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "ref": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "inputId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "sourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "sourceRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "sessionId",
+            "inputId",
+            "sourceId",
+            "sourceRevision",
+            "requestId"
+          ],
+          "additionalProperties": false
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "external-original"
+            },
+            "accountId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "accountRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "routeId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "routeRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "accountId",
+            "accountRevision",
+            "routeId",
+            "routeRevision"
+          ],
+          "additionalProperties": false
+        },
+        "configurationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "ownerRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pairing-token"
+            },
+            "principalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "tokenId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "authorityRevision": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "scopes": {
+              "maxItems": 256,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "principalId",
+            "tokenId",
+            "authorityId",
+            "authorityRevision",
+            "scopes"
+          ],
+          "additionalProperties": false
+        },
+        "workspaceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "choices": {
+          "type": "object",
+          "properties": {
+            "processingPurpose": {
+              "type": "string",
+              "const": "accept-external-message-for-owner-review"
+            },
+            "sourceRetention": {
+              "type": "string",
+              "const": "memory-only-until-review-close-or-deadline"
+            },
+            "sourceRetentionMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "derivedRecord": {
+              "type": "string",
+              "const": "external-source-reference-only-v1"
+            },
+            "derivedRecordRetentionMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "execution": {
+              "type": "string",
+              "const": "none"
+            },
+            "ownerMayReadOriginal": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "processingPurpose",
+            "sourceRetention",
+            "sourceRetentionMs",
+            "derivedRecord",
+            "derivedRecordRetentionMs",
+            "execution",
+            "ownerMayReadOriginal"
+          ],
+          "additionalProperties": false
+        },
+        "acceptedAt": {
+          "type": "number"
+        },
+        "sourceExpiresAt": {
+          "type": "number"
+        },
+        "recordExpiresAt": {
+          "type": "number"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "accepted-for-review",
+            "cancelled"
+          ]
+        },
+        "execution": {
+          "type": "string",
+          "const": "not-started"
+        }
+      },
+      "required": [
+        "id",
+        "ref",
+        "origin",
+        "configurationId",
+        "ownerRevision",
+        "workspaceRevision",
+        "approvalId",
+        "choices",
+        "acceptedAt",
+        "sourceExpiresAt",
+        "recordExpiresAt",
+        "state",
+        "execution"
+      ],
+      "additionalProperties": false
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "ref": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "inputId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "sourceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "sourceRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "requestId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "sessionId",
+              "inputId",
+              "sourceId",
+              "sourceRevision",
+              "requestId"
+            ],
+            "additionalProperties": false
+          },
+          "origin": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "external-original"
+              },
+              "accountId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "accountRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "routeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "routeRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "kind",
+              "accountId",
+              "accountRevision",
+              "routeId",
+              "routeRevision"
+            ],
+            "additionalProperties": false
+          },
+          "configurationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "ownerRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "owner": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "pairing-token"
+              },
+              "principalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "tokenId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "authorityRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scopes": {
+                "maxItems": 256,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "principalId",
+              "tokenId",
+              "authorityId",
+              "authorityRevision",
+              "scopes"
+            ],
+            "additionalProperties": false
+          },
+          "workspaceRevision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "approvalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "choices": {
+            "type": "object",
+            "properties": {
+              "processingPurpose": {
+                "type": "string",
+                "const": "accept-external-message-for-owner-review"
+              },
+              "sourceRetention": {
+                "type": "string",
+                "const": "memory-only-until-review-close-or-deadline"
+              },
+              "sourceRetentionMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "derivedRecord": {
+                "type": "string",
+                "const": "external-source-reference-only-v1"
+              },
+              "derivedRecordRetentionMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "execution": {
+                "type": "string",
+                "const": "none"
+              },
+              "ownerMayReadOriginal": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "required": [
+              "processingPurpose",
+              "sourceRetention",
+              "sourceRetentionMs",
+              "derivedRecord",
+              "derivedRecordRetentionMs",
+              "execution",
+              "ownerMayReadOriginal"
+            ],
+            "additionalProperties": false
+          },
+          "acceptedAt": {
+            "type": "number"
+          },
+          "sourceExpiresAt": {
+            "type": "number"
+          },
+          "recordExpiresAt": {
+            "type": "number"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted-for-review",
+              "cancelled"
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "const": "not-started"
+          }
+        },
+        "required": [
+          "id",
+          "ref",
+          "origin",
+          "configurationId",
+          "ownerRevision",
+          "workspaceRevision",
+          "approvalId",
+          "choices",
+          "acceptedAt",
+          "sourceExpiresAt",
+          "recordExpiresAt",
+          "state",
+          "execution"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "inputId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "sourceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "sourceRevision": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "requestId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "sessionId",
+              "inputId",
+              "sourceId",
+              "sourceRevision",
+              "requestId"
+            ],
+            "additionalProperties": false
+          },
+          "approvalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "sourceExpiresAt": {
+            "type": "number"
+          },
+          "outcome": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "approvalId",
+          "sourceExpiresAt",
+          "outcome"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "original": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "unsupportedSources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "text",
+        "unsupportedSources"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+```
+
 #### `inbound.telegram.revoke`
 
 Explicit paired-owner command for bounded in-memory original-source intake. Configure chooses the pending source lifetime; decide approves one exact external message and metadata-only review receipt. No execution, standing processing grant, or owner-text capture.
@@ -68824,104 +74722,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
         "battery": {
           "type": "string",
           "enum": [
-            "webui.status.badge-tone"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "vocabulary": {
-              "type": "string",
-              "enum": [
-                "badge",
-                "library-dot"
-              ]
-            },
-            "source": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "catalog"
-                      ]
-                    },
-                    "labelId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "labelId"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "daemon"
-                      ]
-                    },
-                    "statusRef": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "statusRef"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            }
-          },
-          "required": [
-            "vocabulary",
-            "source"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
             "webui.palette.command-rank"
           ]
         },
@@ -69090,66 +74890,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
           },
           "required": [
             "subjectRef"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.pwa.install-platform"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "userAgent": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            "platform": {
-              "type": "string",
-              "maxLength": 128
-            },
-            "maxTouchPoints": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 256
-            }
-          },
-          "required": [
-            "userAgent",
-            "platform",
-            "maxTouchPoints"
           ],
           "additionalProperties": false
         }
@@ -70336,440 +76076,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "battery": {
               "type": "string",
               "enum": [
-                "webui.status.badge-tone"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "vocabulary": {
-                      "type": "string",
-                      "enum": [
-                        "badge"
-                      ]
-                    },
-                    "tone": {
-                      "type": "string",
-                      "enum": [
-                        "ok",
-                        "warning",
-                        "bad",
-                        "neutral"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "vocabulary",
-                    "tone"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "vocabulary": {
-                      "type": "string",
-                      "enum": [
-                        "library-dot"
-                      ]
-                    },
-                    "tone": {
-                      "type": "string",
-                      "enum": [
-                        "ok",
-                        "warn",
-                        "bad",
-                        "info",
-                        "idle"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "vocabulary",
-                    "tone"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.status.badge-tone"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
                 "webui.palette.command-rank"
               ]
             },
@@ -71394,401 +76700,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
               "type": "string",
               "enum": [
                 "webui.mail.reply-subject"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.pwa.install-platform"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "platform": {
-                  "type": "string",
-                  "enum": [
-                    "ios-share-menu",
-                    "other"
-                  ]
-                }
-              },
-              "required": [
-                "platform"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.pwa.install-platform"
               ]
             },
             "batteryVersion": {
@@ -78532,7 +83443,7 @@ Run source-backed Home Graph self-improvement for a space, source list, or speci
 
 #### `homeassistant.homeGraph.refinement.task.cancel`
 
-Mark a queued or active Home Graph refinement task as cancelled.
+Mark an open Home Graph refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused, and cancelling an already cancelled task returns it unchanged.
 
 - Title: `Cancel Home Graph Refinement Task`
 - Source: `builtin`
@@ -82693,6 +87604,9 @@ Accept, reject, or supersede a knowledge consolidation candidate.
 {
   "type": "object",
   "properties": {
+    "id": {
+      "type": "string"
+    },
     "decision": {
       "type": "string",
       "enum": [
@@ -82736,6 +87650,7 @@ Accept, reject, or supersede a knowledge consolidation candidate.
     }
   },
   "required": [
+    "id",
     "decision"
   ],
   "additionalProperties": true
@@ -85355,24 +90270,66 @@ Resolve a knowledge connector against inline input, inline content, or file-back
   "required": [
     "connectorId"
   ],
+  "additionalProperties": false,
   "anyOf": [
     {
+      "type": "object",
+      "properties": {
+        "input": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
+        }
+      },
       "required": [
         "input"
-      ]
+      ],
+      "additionalProperties": true
     },
     {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        }
+      },
       "required": [
         "content"
-      ]
+      ],
+      "additionalProperties": true
     },
     {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
       "required": [
         "path"
-      ]
+      ],
+      "additionalProperties": true
     }
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -87379,6 +92336,28 @@ Return recent knowledge job runs.
                       "attempted",
                       "not-evaluated"
                     ]
+                  },
+                  "recompileFailed": {
+                    "type": "number"
+                  },
+                  "recompileFailures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceId": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sourceId",
+                        "error"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -87915,6 +92894,9 @@ Queue or run a structured knowledge maintenance job.
 {
   "type": "object",
   "properties": {
+    "jobId": {
+      "type": "string"
+    },
     "mode": {
       "type": "string",
       "enum": [
@@ -87932,7 +92914,10 @@ Queue or run a structured knowledge maintenance job.
       "type": "number"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "required": [
+    "jobId"
+  ]
 }
 ```
 
@@ -88019,6 +93004,28 @@ Queue or run a structured knowledge maintenance job.
                     "attempted",
                     "not-evaluated"
                   ]
+                },
+                "recompileFailed": {
+                  "type": "number"
+                },
+                "recompileFailures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sourceId",
+                      "error"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -89257,142 +94264,300 @@ Return compiled knowledge nodes. Without ?limit/?cursor returns { nodes: [...] }
 
 ```json
 {
-  "type": "object",
-  "properties": {
-    "nodes": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "summary": {
-            "type": "string"
-          },
-          "aliases": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "status": {
-            "type": "string"
-          },
-          "confidence": {
-            "type": "number"
-          },
-          "sourceId": {
-            "type": "string"
-          },
-          "subject": {
-            "type": "string"
-          },
-          "subjectIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "targetHints": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  {
-                    "type": "array",
-                    "items": {}
-                  }
-                ]
-              }
-            }
-          },
-          "linkedObjectIds": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "metadata": {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
             "type": "object",
-            "additionalProperties": {
-              "anyOf": [
-                {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
                   "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": {}
-                },
-                {
-                  "type": "array",
-                  "items": {}
                 }
-              ]
-            }
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
+              },
+              "status": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "subjectIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetHints": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "linkedObjectIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                }
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "slug",
+              "title",
+              "aliases",
+              "status",
+              "confidence",
+              "metadata",
+              "createdAt",
+              "updatedAt"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "subjectIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetHints": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "linkedObjectIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                }
+              },
+              "createdAt": {
+                "type": "number"
+              },
+              "updatedAt": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "slug",
+              "title",
+              "aliases",
+              "status",
+              "confidence",
+              "metadata",
+              "createdAt",
+              "updatedAt"
+            ],
+            "additionalProperties": true
           }
         },
-        "required": [
-          "id",
-          "kind",
-          "slug",
-          "title",
-          "aliases",
-          "status",
-          "confidence",
-          "metadata",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": true
-      }
+        "hasMore": {
+          "type": "boolean"
+        },
+        "nextCursor": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "total": {
+          "type": "number"
+        },
+        "loaded": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "items",
+        "hasMore"
+      ],
+      "additionalProperties": false
     }
-  },
-  "required": [
-    "nodes"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 
@@ -90703,7 +95868,7 @@ Run source-backed semantic self-improvement for a space, source list, or specifi
 
 #### `knowledge.refinement.task.cancel`
 
-Mark a queued or active semantic refinement task as cancelled.
+Mark an open semantic refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused with 409, and cancelling an already cancelled task returns it unchanged.
 
 - Title: `Cancel Knowledge Refinement Task`
 - Source: `builtin`
@@ -91931,11 +97096,15 @@ Enable or disable a managed knowledge schedule.
 {
   "type": "object",
   "properties": {
+    "id": {
+      "type": "string"
+    },
     "enabled": {
       "type": "boolean"
     }
   },
   "required": [
+    "id",
     "enabled"
   ],
   "additionalProperties": true
@@ -93597,6 +98766,15 @@ Return ingested structured knowledge sources. Without ?limit/?cursor returns { s
         },
         "nextCursor": {
           "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "total": {
+          "type": "number"
+        },
+        "loaded": {
+          "type": "number"
         }
       },
       "required": [
@@ -99923,7 +105101,7 @@ Fetch one durable project-scoped work-plan task by id.
 
 #### `projectPlanning.workPlan.task.status`
 
-Validate and apply a project work-plan task status transition.
+Set a task's status and optional reason.
 
 - Title: `Set Project Work Plan Task Status`
 - Source: `builtin`
@@ -101897,7 +107075,24 @@ Return effective MCP config from global, external, and project sources. Environm
             "type": "string"
           },
           "command": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "args": {
             "type": "array",
@@ -101971,6 +107166,7 @@ Return effective MCP config from global, external, and project sources. Environm
         "required": [
           "name",
           "command",
+          "url",
           "args",
           "envKeys",
           "role",
@@ -102114,7 +107310,24 @@ Reload effective MCP config and reconnect added, removed, or changed servers wit
                 "type": "string"
               },
               "command": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "args": {
                 "type": "array",
@@ -102188,6 +107401,7 @@ Reload effective MCP config and reconnect added, removed, or changed servers wit
             "required": [
               "name",
               "command",
+              "url",
               "args",
               "envKeys",
               "role",
@@ -102255,6 +107469,38 @@ Return configured MCP servers, runtime security posture, and sandbox bindings.
           },
           "connected": {
             "type": "boolean"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "stdio",
+              "http"
+            ]
+          },
+          "protocolVersion": {
+            "type": "string"
+          },
+          "protocolEra": {
+            "type": "string",
+            "enum": [
+              "modern",
+              "legacy"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "starting",
+              "negotiating",
+              "ready",
+              "restart-wait",
+              "gave-up",
+              "closed"
+            ]
+          },
+          "lastError": {
+            "type": "string"
           }
         },
         "required": [
@@ -102440,7 +107686,24 @@ Remove a project/global MCP server config and disconnect it without daemon resta
                 "type": "string"
               },
               "command": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "args": {
                 "type": "array",
@@ -102514,6 +107777,7 @@ Remove a project/global MCP server config and disconnect it without daemon resta
             "required": [
               "name",
               "command",
+              "url",
               "args",
               "envKeys",
               "role",
@@ -102609,7 +107873,24 @@ Return effective MCP config with environment VALUES included, not just envKeys. 
             "type": "string"
           },
           "command": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "args": {
             "type": "array",
@@ -102688,6 +107969,7 @@ Return effective MCP config with environment VALUES included, not just envKeys. 
         "required": [
           "name",
           "command",
+          "url",
           "args",
           "envKeys",
           "env",
@@ -102745,6 +108027,9 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
         "command": {
           "type": "string"
         },
+        "url": {
+          "type": "string"
+        },
         "args": {
           "type": "array",
           "items": {
@@ -102796,10 +108081,35 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
         }
       },
       "required": [
-        "name",
-        "command"
+        "name"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": true
+        }
+      ]
     }
   },
   "required": [
@@ -102921,7 +108231,24 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
                 "type": "string"
               },
               "command": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "url": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "args": {
                 "type": "array",
@@ -102995,6 +108322,7 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
             "required": [
               "name",
               "command",
+              "url",
               "args",
               "envKeys",
               "role",
@@ -103097,7 +108425,7 @@ Analyze an artifact through a registered media provider.
 
 - Title: `Analyze Media Artifact`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/media/analyze`
 - Scopes: `write:media`
@@ -103363,7 +108691,7 @@ Generate a media artifact through a registered media provider.
 
 - Title: `Generate Media Artifact`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/media/generate`
 - Scopes: `write:media`
@@ -103649,7 +108977,7 @@ Transform an artifact through a registered media provider.
 
 - Title: `Transform Media Artifact`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/media/transform`
 - Scopes: `write:media`
@@ -103927,7 +109255,7 @@ Analyze an image, audio file, video artifact, or document through the unified mu
 
 - Title: `Run Multimodal Analysis`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/multimodal/analyze`
 - Scopes: `write:media`
@@ -104477,7 +109805,7 @@ Build a token-efficient packet from an existing multimodal analysis result.
 
 - Title: `Build Multimodal Packet`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/multimodal/packet`
 - Scopes: `read:media`
@@ -106212,7 +111540,7 @@ Add a memory record to the daemon-owned canonical store. The daemon is the singl
 
 - Title: `Add Memory Record`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records`
 - Scopes: `write:memory`
@@ -106453,7 +111781,7 @@ Permanently delete a memory record and its links from the canonical store. Delet
 
 - Title: `Delete Memory Record`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/memory/records/{id}`
 - Scopes: `write:memory`
@@ -106951,7 +112279,7 @@ Import a bundle into the canonical store as an id-keyed union: an id already pre
 
 - Title: `Import Memory Bundle`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/import`
 - Scopes: `write:memory`
@@ -107193,7 +112521,7 @@ Create a directed relation (e.g. "supersedes", "caused") from the path record to
 
 - Title: `Link Memory Records`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/links`
 - Scopes: `write:memory`
@@ -108098,7 +113426,7 @@ Edit a record's content fields (scope, summary, detail, tags) and its temporal v
 
 - Title: `Update Memory Record`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/update`
 - Scopes: `write:memory`
@@ -108294,7 +113622,7 @@ Update a record's review signal (reviewState, confidence, reviewer, staleReason)
 
 - Title: `Update Memory Record Review`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/review`
 - Scopes: `write:memory`
@@ -108778,7 +114106,7 @@ Record that the owner has one occurrence in hand, so nothing is pushed at them a
 
 #### `occasions.answer`
 
-Record yes, no or later for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. All three RESOLVE the open item and remove it; to say only "I have this in hand" without ending the question, use occasions.acknowledge instead.
+Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge).
 
 - Title: `Answer An Occasion Nudge`
 - Source: `builtin`
@@ -112087,7 +117415,7 @@ Request that a panel be opened in the current TUI session.
 
 - Title: `Open Panel`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/panels/open`
 - Scopes: `write:panels`
@@ -112426,7 +117754,7 @@ Store a card. The number, expiry, CVV and cardholder name go to the daemon secre
 
 #### `payments.cards.delete`
 
-Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. Deleting the default card leaves payments.defaultCardId empty, which refuses purchases until another card is chosen, the safe direction.
+Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.
 
 - Title: `Remove a Payment Card`
 - Source: `builtin`
@@ -112579,6 +117907,86 @@ Configured cards, as METADATA ONLY: id, label, brand, last four digits, whether 
   "required": [
     "cards",
     "defaultCardId"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `payments.checkout.approve`
+
+Record that a human approves one specific purchase, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the amount (the same string a later begin call passes as requestedMax). Mints a persisted, single-use approval bound to exactly those fields, expiring in five minutes; payments.checkout.begin consumes it and refuses without one. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses. The response never carries card material; this verb never touches a card at all. ws-only invoke verb with no REST binding.
+
+- Title: `Approve One Purchase`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:payments`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "confirm": {
+      "type": "boolean"
+    },
+    "merchantDomain": {
+      "type": "string"
+    },
+    "item": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "confirm",
+    "merchantDomain",
+    "item",
+    "amount"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "approved": {
+      "type": "boolean"
+    },
+    "action": {
+      "type": "string"
+    },
+    "merchantDomain": {
+      "type": "string"
+    },
+    "item": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "string"
+    },
+    "expiresAt": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "approved",
+    "action",
+    "merchantDomain",
+    "item",
+    "amount",
+    "expiresAt"
   ],
   "additionalProperties": false
 }
@@ -113646,6 +119054,26 @@ Read durable checkout operation status and actual live approval/veto windows. Op
         "additionalProperties": false
       },
       "maxItems": 356
+    },
+    "unreadable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "purchaseId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "purchaseId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 356
     }
   },
   "required": [
@@ -113658,7 +119086,7 @@ Read durable checkout operation status and actual live approval/veto windows. Op
 
 #### `payments.purchases.list`
 
-The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. A refund is recorded here for reconciliation and credits no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.
+The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. Refunds are not recorded yet: a returned order still reads as a purchase and `refundedAt` stays empty, so reconcile refunds against the card statement by hand. When refunds are recorded they will credit no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.
 
 - Title: `List Purchases`
 - Source: `builtin`
@@ -115167,6 +120595,32 @@ Return one mechanical field by id (e.g. commerce.shippingAddress). Answers prese
             },
             "said": {
               "type": "string"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "owner-direct",
+                "autonomous"
+              ]
+            },
+            "source": {
+              "type": "object",
+              "properties": {
+                "goal": {
+                  "type": "string"
+                },
+                "criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "goal",
+                "criteria"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -115264,6 +120718,32 @@ Return the People lines matching one name. Takes a NAME by design and has no enu
               },
               "said": {
                 "type": "string"
+              },
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "owner-direct",
+                  "autonomous"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "goal": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "goal",
+                  "criteria"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -115354,6 +120834,32 @@ Answer "where did you get that?" for one field: the surface, the date and the ow
             },
             "said": {
               "type": "string"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "owner-direct",
+                "autonomous"
+              ]
+            },
+            "source": {
+              "type": "object",
+              "properties": {
+                "goal": {
+                  "type": "string"
+                },
+                "criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "goal",
+                "criteria"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -115405,6 +120911,32 @@ Answer "where did you get that?" for one field: the surface, the date and the ow
               },
               "said": {
                 "type": "string"
+              },
+              "origin": {
+                "type": "string",
+                "enum": [
+                  "owner-direct",
+                  "autonomous"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "goal": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "goal",
+                  "criteria"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -115567,6 +121099,32 @@ Return the whole owner profile, by section, with each section's tier and every m
                     },
                     "said": {
                       "type": "string"
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "owner-direct",
+                        "autonomous"
+                      ]
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "goal": {
+                          "type": "string"
+                        },
+                        "criteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "goal",
+                        "criteria"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -115611,6 +121169,32 @@ Return the whole owner profile, by section, with each section's tier and every m
                     },
                     "said": {
                       "type": "string"
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [
+                        "owner-direct",
+                        "autonomous"
+                      ]
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "goal": {
+                          "type": "string"
+                        },
+                        "criteria": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "goal",
+                        "criteria"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -117689,7 +123273,7 @@ Permanently remove one of the authenticated operator's push subscriptions: the s
 
 #### `push.subscriptions.list`
 
-List the authenticated operator's registered push devices as redacted subscription views (id, endpoint origin + hash, timestamps, last delivery outcome). The capability URL and key material are never included.
+List the authenticated operator's registered push devices as redacted subscription views (id, deviceId when the record has one, endpoint origin, timestamps, last delivery outcome; two records on the same push service share an origin, so tell them apart by id or deviceId). The capability URL and key material are never included.
 
 - Title: `List Web Push Subscriptions`
 - Source: `builtin`
@@ -118141,7 +123725,7 @@ Return the most recent observed quota window for a provider, remaining, limit, r
 
 #### `stepup.challenge.mint`
 
-Issue a short-lived, single-use WebAuthn challenge bound to the calling session/rendezvous. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).
+Issue a short-lived, single-use WebAuthn challenge. The optional sessionId, rendezvousId, method and path bind it: a challenge minted with any of them is accepted only for a relay request that matches every one given (a different session, rendezvous, HTTP method or path is refused as challenge-unbound), while a challenge minted with none is accepted for any request. The values are recorded as the caller supplied them; they are not checked against the authenticated session. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).
 
 - Title: `Mint Step-up Challenge`
 - Source: `builtin`
@@ -118163,6 +123747,12 @@ Issue a short-lived, single-use WebAuthn challenge bound to the calling session/
       "type": "string"
     },
     "sessionId": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "path": {
       "type": "string"
     },
     "ttlMs": {
@@ -118198,6 +123788,70 @@ Issue a short-lived, single-use WebAuthn challenge bound to the calling session/
 }
 ```
 
+#### `stepup.credentials.list`
+
+List the registered step-up passkeys: credentialId, label, creation time and signature counter. Never returns key material. Admin/local-only.
+
+- Title: `List Step-up Credentials`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/stepup/credentials`
+- Scopes: `read:relay`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "credentials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "credentialId": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "signCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "credentialId",
+          "createdAt",
+          "signCount"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "credentials"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `stepup.credentials.register`
 
 Store a WebAuthn (passkey) credential for relay step-up, its credentialId, COSE public key, and starting signature counter, and set the deployment policy (relying-party id, allowed origins, user-verification requirement). Admin/local-only: registering a step-up credential is itself a sensitive act. Self-hosted deployments register the credential directly ('none' attestation).
@@ -118222,7 +123876,17 @@ Store a WebAuthn (passkey) credential for relay step-up, its credentialId, COSE 
       "type": "string"
     },
     "origin": {
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "credentialId": {
       "type": "string"
@@ -118287,6 +123951,58 @@ Store a WebAuthn (passkey) credential for relay step-up, its credentialId, COSE 
   },
   "required": [
     "credential"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `stepup.credentials.remove`
+
+Remove a registered step-up passkey so it can no longer confirm anything (a lost device). Answers 404 when no credential has that id. Admin/local-only. Mutating, so a relay call needs a step-up assertion. Removing the last passkey leaves no credential to confirm relay actions until a new one is registered.
+
+- Title: `Remove Step-up Credential`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/stepup/credentials/{credentialId}`
+- Scopes: `write:relay`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "credentialId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "credentialId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "credentialId": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "credentialId",
+    "removed"
   ],
   "additionalProperties": false
 }
@@ -118589,6 +124305,9 @@ Approve a pending remote pair request.
           }
         ]
       }
+    },
+    "confirmReplace": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -119138,6 +124857,9 @@ Reject a pending remote pair request.
           }
         ]
       }
+    },
+    "confirmReplace": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -122122,7 +127844,13 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
 
 ##### Input schema
 
-none
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
 
 ##### Output schema
 
@@ -122188,7 +127916,7 @@ The one-action https affordance: run `tailscale serve --bg <web port>` so tailsc
 
 - Title: `Set Up Tailscale Serve For The Daemon`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:control-plane`
@@ -122198,7 +127926,13 @@ The one-action https affordance: run `tailscale serve --bg <web port>` so tailsc
 
 ##### Input schema
 
-none
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
 
 ##### Output schema
 
@@ -122234,6 +127968,9 @@ none
       "additionalProperties": false
     },
     "publicBaseUrlUpdated": {
+      "type": "boolean"
+    },
+    "receiptRecorded": {
       "type": "boolean"
     }
   },
@@ -122790,7 +128527,7 @@ Which sessions have a surface offering their live conversation right now, how ea
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `write:sessions`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -122966,7 +128703,7 @@ Collect the conversation questions waiting for this host, how many messages a re
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `write:sessions`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -123547,7 +129284,7 @@ Return configured route bindings.
 
 - Title: `List Route Bindings`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/routes/bindings`
 - Scopes: `read:routes`
@@ -123795,6 +129532,9 @@ Update an existing route binding. (Renamed from routes.bindings.patch in the 1.0
       }
     }
   },
+  "required": [
+    "bindingId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -124255,7 +129995,7 @@ The camera and screen captures still inside their retention window, newest first
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/devices/artifacts`
-- Scopes: `read:remote`
+- Scopes: `write:remote`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -124359,7 +130099,7 @@ Return one retained capture's bytes, base64-encoded, for a caller that is not ru
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/devices/artifacts/{artifactId}`
-- Scopes: `read:remote`
+- Scopes: `write:remote`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -125267,11 +131007,11 @@ Return the process-wide runtime metrics snapshot: HTTP/LLM/auth/transport counte
 
 #### `scheduler.capacity`
 
-Return the current automation-scheduler capacity snapshot: total slots, in-use slots, queue depth, and age of the oldest queued run.
+Return the current automation-scheduler capacity snapshot: total slots, in-use slots, queue depth, and age of the oldest queued run. Requires an admin principal.
 
 - Title: `Scheduler Capacity`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/runtime/scheduler`
 - Scopes: `read:automation`
@@ -126272,7 +132012,7 @@ Return platform service installation and runtime posture.
 
 - Title: `Service Status`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/service/status`
 - Scopes: `read:services`
@@ -127259,6 +132999,12 @@ Return the aggregate workspace file changes a session made, joined over its sess
     "from": {
       "type": "string"
     },
+    "baseUnavailable": {
+      "type": "boolean"
+    },
+    "attributionApproximate": {
+      "type": "boolean"
+    },
     "to": {
       "type": "string"
     },
@@ -127300,7 +133046,7 @@ Mark a shared session as closed.
 
 - Title: `Close Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/close`
 - Scopes: `write:sessions`
@@ -127686,7 +133432,7 @@ Create a shared session for a surface, route, or web client.
 
 - Title: `Create Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions`
 - Scopes: `write:sessions`
@@ -127894,7 +133640,7 @@ Permanently remove a shared session record and its queued inputs/messages from t
 
 - Title: `Delete Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/sessions/{sessionId}`
 - Scopes: `write:sessions`
@@ -127946,7 +133692,7 @@ Remove a surface's participant and its route binding from a session so that surf
 
 - Title: `Detach Shared Session Participant`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/detach`
 - Scopes: `write:sessions`
@@ -128155,7 +133901,7 @@ Queue a deferred follow-up for a shared session so it runs after the current age
 
 - Title: `Queue Shared Session Follow-Up`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/follow-up`
 - Scopes: `write:sessions`
@@ -128169,6 +133915,9 @@ Queue a deferred follow-up for a shared session so it runs after the current age
 {
   "type": "object",
   "properties": {
+    "sessionId": {
+      "type": "string"
+    },
     "body": {
       "type": "string"
     },
@@ -128283,6 +134032,7 @@ Queue a deferred follow-up for a shared session so it runs after the current age
     }
   },
   "required": [
+    "sessionId",
     "body"
   ],
   "additionalProperties": true
@@ -129276,6 +135026,9 @@ Join a hosted session and receive its transcript so far, so a client that was ne
         ],
         "additionalProperties": false
       }
+    },
+    "historyAsOf": {
+      "type": "number"
     }
   },
   "required": [
@@ -129962,11 +135715,11 @@ Every session this daemon hosts, most recently updated first. Terminated session
 
 #### `sessions.inputs.cancel`
 
-Cancel a queued shared-session input before it is delivered or spawned.
+Cancel a queued shared-session input before it is delivered or spawned. An input already being answered (delivered/spawned) or already ended is refused with 409 `CANCEL_NOT_ALLOWED`, the input in its actual state, and no cancel event; an already-cancelled input answers 200.
 
 - Title: `Cancel Shared Session Input`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/inputs/{inputId}/cancel`
 - Scopes: `write:sessions`
@@ -130226,11 +135979,11 @@ Cancel a queued shared-session input before it is delivered or spawned.
 
 #### `sessions.inputs.deliver`
 
-A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; others are returned unchanged. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel.
+A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.
 
 - Title: `Mark Shared Session Input Delivered`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/inputs/{inputId}/deliver`
 - Scopes: `write:sessions`
@@ -130261,6 +136014,9 @@ A live registered surface reports that it collected a queued input (moves it to 
     },
     "status": {
       "type": "string"
+    },
+    "claim": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -131239,7 +136995,7 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
 
 - Title: `Post Shared Session Message`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/messages`
 - Scopes: `write:sessions`
@@ -131253,6 +137009,9 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
 {
   "type": "object",
   "properties": {
+    "sessionId": {
+      "type": "string"
+    },
     "body": {
       "type": "string"
     },
@@ -131370,6 +137129,7 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
     }
   },
   "required": [
+    "sessionId",
     "body"
   ],
   "additionalProperties": true
@@ -132268,11 +138028,11 @@ Return the effective session execution mode: safe-owner, safe-jev, yolo, or the 
 
 #### `sessions.permissionMode.set`
 
-Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.
+Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only: yolo runs every action without safety denials, and for a session with no hosted or channel mode of its own this also rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Only the daemon's live local runtime session is settable; any other session id is a 404 SESSION_NOT_LOCAL.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/permission-mode`
 - Scopes: `write:sessions`
@@ -132546,7 +138306,7 @@ Idempotently register (or heartbeat) a session keyed on a caller-supplied id, ca
 
 - Title: `Register Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/register`
 - Scopes: `write:sessions`
@@ -132826,7 +138586,7 @@ Reopen a previously closed shared session.
 
 - Title: `Reopen Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/reopen`
 - Scopes: `write:sessions`
@@ -133268,7 +139028,7 @@ Deliver a live steering message to the active agent for a shared session, option
 
 - Title: `Steer Shared Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/steer`
 - Scopes: `write:sessions`
@@ -133282,6 +139042,9 @@ Deliver a live steering message to the active agent for a shared session, option
 {
   "type": "object",
   "properties": {
+    "sessionId": {
+      "type": "string"
+    },
     "body": {
       "type": "string"
     },
@@ -133399,6 +139162,7 @@ Deliver a live steering message to the active agent for a shared session, option
     }
   },
   "required": [
+    "sessionId",
     "body"
   ],
   "additionalProperties": true
@@ -134041,7 +139805,7 @@ Return security-relevant settings, defaults, current state, and enablement trade
 
 - Title: `Security Settings Report`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/security-settings`
 - Scopes: `read:settings`
@@ -134144,7 +139908,7 @@ Return the settings integration snapshot.
 
 - Title: `Settings Snapshot`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/settings`
 - Scopes: `read:settings`
@@ -135011,7 +140775,7 @@ Cancel an in-flight runtime task.
 
 - Title: `Cancel Runtime Task`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/tasks/{taskId}/cancel`
 - Scopes: `write:tasks`
@@ -135218,7 +140982,7 @@ Submit a task to the daemon or a shared session.
 
 - Title: `Create Task`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /task`
 - Scopes: `write:tasks`
@@ -135755,6 +141519,9 @@ Return the integration snapshot for runtime tasks.
           "title": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -135769,8 +141536,17 @@ Return the integration snapshot for runtime tasks.
           "owner": {
             "type": "string"
           },
+          "cancellable": {
+            "type": "boolean"
+          },
           "parentTaskId": {
             "type": "string"
+          },
+          "childTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "queuedAt": {
             "type": "number"
@@ -135781,7 +141557,87 @@ Return the integration snapshot for runtime tasks.
           "endedAt": {
             "type": "number"
           },
+          "retryPolicy": {
+            "type": "object",
+            "properties": {
+              "maxAttempts": {
+                "type": "number"
+              },
+              "currentAttempt": {
+                "type": "number"
+              },
+              "delayMs": {
+                "type": "number"
+              },
+              "backoff": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "exponential"
+                ]
+              },
+              "retryOn": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "network",
+                    "timeout",
+                    "transient",
+                    "tool_error"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "maxAttempts",
+              "currentAttempt",
+              "delayMs",
+              "backoff",
+              "retryOn"
+            ],
+            "additionalProperties": false
+          },
+          "retryDelayMs": {
+            "type": "number"
+          },
+          "retryAt": {
+            "type": "number"
+          },
+          "exitCode": {
+            "type": "number"
+          },
           "error": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "turnId": {
             "type": "string"
           }
         },
@@ -135791,6 +141647,8 @@ Return the integration snapshot for runtime tasks.
           "title",
           "status",
           "owner",
+          "cancellable",
+          "childTaskIds",
           "queuedAt"
         ],
         "additionalProperties": false
@@ -135814,7 +141672,7 @@ Retry a runtime task through the task action endpoint.
 
 - Title: `Retry Runtime Task`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/tasks/{taskId}/retry`
 - Scopes: `write:tasks`
@@ -139116,7 +144974,7 @@ Open a realtime voice session through a registered voice provider.
 
 - Title: `Open Voice Realtime Session`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/realtime/session`
 - Scopes: `write:voice`
@@ -139366,7 +145224,7 @@ Transcribe an audio artifact through a registered voice provider.
 
 - Title: `Run Speech To Text`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/stt`
 - Scopes: `write:voice`
@@ -139565,7 +145423,7 @@ Synthesize audio through a registered voice provider.
 
 - Title: `Run Text To Speech`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/tts`
 - Scopes: `write:voice`
@@ -139740,7 +145598,7 @@ Synthesize audio as streamed bytes through a registered streaming voice provider
 
 - Title: `Stream Text To Speech`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`
 - HTTP: `POST /api/voice/tts/stream`
 - Scopes: `write:voice`
@@ -141187,6 +147045,9 @@ Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb 
       "type": "string"
     }
   },
+  "required": [
+    "watcherId"
+  ],
   "additionalProperties": true
 }
 ```
@@ -141413,7 +147274,7 @@ Execute a provider-backed web search and return normalized ranked results.
 
 - Title: `Run Web Search`
 - Source: `builtin`
-- Access: `authenticated`
+- Access: `admin`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/web-search/query`
 - Scopes: `write:web-search`
@@ -142276,6 +148137,19 @@ Persist cancellation for the selected existing attempt, including a pending init
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "evidence-over-capacity",
+                "artifact-access-restricted",
+                "artifact-budget-exceeded",
+                "review-not-genuine",
+                "changed-during-verification",
+                "cancelled",
+                "host-state",
+                "verification-failed"
+              ]
             }
           },
           "required": [
@@ -143206,6 +149080,19 @@ Explicitly resume an interrupted/refused intent with a fresh evaluation or recov
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "evidence-over-capacity",
+                "artifact-access-restricted",
+                "artifact-budget-exceeded",
+                "review-not-genuine",
+                "changed-during-verification",
+                "cancelled",
+                "host-state",
+                "verification-failed"
+              ]
             }
           },
           "required": [
@@ -144136,6 +150023,19 @@ Start one existing complete native work attempt using host-owned source and pair
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "evidence-over-capacity",
+                "artifact-access-restricted",
+                "artifact-budget-exceeded",
+                "review-not-genuine",
+                "changed-during-verification",
+                "cancelled",
+                "host-state",
+                "verification-failed"
+              ]
             }
           },
           "required": [
@@ -145066,6 +150966,19 @@ Inspect a bounded execution or admission-intent projection for an existing nativ
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "evidence-over-capacity",
+                "artifact-access-restricted",
+                "artifact-budget-exceeded",
+                "review-not-genuine",
+                "changed-during-verification",
+                "cancelled",
+                "host-state",
+                "verification-failed"
+              ]
             }
           },
           "required": [
@@ -146028,6 +151941,43 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                               "sessionId"
                             ],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "enum": [
+                                  4
+                                ]
+                              },
+                              "sourceId": {
+                                "type": "string",
+                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              },
+                              "sourceRevision": {
+                                "type": "string",
+                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              },
+                              "inputId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              }
+                            },
+                            "required": [
+                              "version",
+                              "sourceId",
+                              "sourceRevision",
+                              "inputId",
+                              "sessionId"
+                            ],
+                            "additionalProperties": false
                           }
                         ]
                       },
@@ -146857,6 +152807,43 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 "sessionId"
                               ],
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "version": {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                "sourceId": {
+                                  "type": "string",
+                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                },
+                                "sourceRevision": {
+                                  "type": "string",
+                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                },
+                                "inputId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "sessionId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "sourceId",
+                                "sourceRevision",
+                                "inputId",
+                                "sessionId"
+                              ],
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -147495,6 +153482,43 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                     "sourceRevision": {
                                       "type": "string",
                                       "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "inputId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "sessionId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    }
+                                  },
+                                  "required": [
+                                    "version",
+                                    "sourceId",
+                                    "sourceRevision",
+                                    "inputId",
+                                    "sessionId"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "enum": [
+                                        4
+                                      ]
+                                    },
+                                    "sourceId": {
+                                      "type": "string",
+                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                    },
+                                    "sourceRevision": {
+                                      "type": "string",
+                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                                     },
                                     "inputId": {
                                       "type": "string",
@@ -148317,6 +154341,43 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                       "sourceRevision": {
                                         "type": "string",
                                         "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "inputId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "sessionId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "sourceId",
+                                      "sourceRevision",
+                                      "inputId",
+                                      "sessionId"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "version": {
+                                        "type": "number",
+                                        "enum": [
+                                          4
+                                        ]
+                                      },
+                                      "sourceId": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      },
+                                      "sourceRevision": {
+                                        "type": "string",
+                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                                       },
                                       "inputId": {
                                         "type": "string",
@@ -150147,6 +156208,12 @@ Start the single initial semantic admission of captured conversation text. Repla
           "type": "string",
           "enum": [
             "required"
+          ]
+        },
+        "next": {
+          "type": "string",
+          "enum": [
+            "cancel-and-resubmit"
           ]
         }
       },
@@ -152250,6 +158317,12 @@ Persist a terminal intake cancellation before work admission. If admission alrea
           "type": "string",
           "enum": [
             "required"
+          ]
+        },
+        "next": {
+          "type": "string",
+          "enum": [
+            "cancel-and-resubmit"
           ]
         }
       },
@@ -154479,6 +160552,12 @@ Persist exact original conversation text and unsupported-source disclosures on t
           "enum": [
             "required"
           ]
+        },
+        "next": {
+          "type": "string",
+          "enum": [
+            "cancel-and-resubmit"
+          ]
         }
       },
       "required": [
@@ -156577,6 +162656,12 @@ Read the current conversation intake or immutable admitted-work receipt by origi
               "type": "string",
               "enum": [
                 "required"
+              ]
+            },
+            "next": {
+              "type": "string",
+              "enum": [
+                "cancel-and-resubmit"
               ]
             }
           },
@@ -158698,6 +164783,12 @@ Explicitly recover captured conversation admission with a fresh semantic operati
           "enum": [
             "required"
           ]
+        },
+        "next": {
+          "type": "string",
+          "enum": [
+            "cancel-and-resubmit"
+          ]
         }
       },
       "required": [
@@ -160354,6 +166445,43 @@ Read the selected host project ledger, without mutation authority or allowedActi
                           "sessionId"
                         ],
                         "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "type": "number",
+                            "enum": [
+                              4
+                            ]
+                          },
+                          "sourceId": {
+                            "type": "string",
+                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          },
+                          "sourceRevision": {
+                            "type": "string",
+                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          },
+                          "inputId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "sourceId",
+                          "sourceRevision",
+                          "inputId",
+                          "sessionId"
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -160928,6 +167056,37 @@ Look up an immutable native submission receipt by the original request ID on the
                     "sessionId"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        4
+                      ]
+                    },
+                    "sourceId": {
+                      "type": "string",
+                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                    },
+                    "sourceRevision": {
+                      "type": "string",
+                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "sourceId",
+                    "sourceRevision",
+                    "sessionId"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -161180,6 +167339,37 @@ Persist one bounded explicit-source goal and ordered criteria on the selected au
                 "sourceRevision": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "version",
+                "sourceId",
+                "sourceRevision",
+                "sessionId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "enum": [
+                    4
+                  ]
+                },
+                "sourceId": {
+                  "type": "string",
+                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                },
+                "sourceRevision": {
+                  "type": "string",
+                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
                 },
                 "sessionId": {
                   "type": "string",
@@ -163790,7 +169980,7 @@ Workspace swap lifecycle events (start, complete, refuse).
 
 #### `control.approval_update`
 
-Every approval record transition, pushed the moment the broker records it: an ask RAISED (status pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, expired, or updated in place (a started fix session stamped onto an accepted offer). The payload is the whole `approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the event and never needs a follow-up read to draw it. This is the channel that makes approvals.raise usable from a surface that is not in the daemon process: raise returns the pending record and the DECISION arrives here, so a client gets keystroke-fast prompt delivery instead of polling approvals.list on a timer. Domain-tagged `permissions` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened the stream with ?domains=… must include `permissions` to receive it; a client that opted into no domain narrowing receives it as before. The record is the daemon's, not the subscriber's: several surfaces see the same transition and the daemon remains the single source of the applied result, a surface renders what the record says rather than what it locally decided.
+Every approval record transition, pushed the moment the broker records it: an ask RAISED (status pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, or expired. The payload is the whole `approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the event and never needs a follow-up read to draw it. This is the channel that makes approvals.raise usable from a surface that is not in the daemon process: raise returns the pending record and the DECISION arrives here, so a client gets keystroke-fast prompt delivery instead of polling approvals.list on a timer. Domain-tagged `permissions` (gateway-scope-enforcement.ts EVENT_DOMAIN), so a client that opened the stream with ?domains=… must include `permissions` to receive it; a client that opted into no domain narrowing receives it as before. The record is the daemon's, not the subscriber's: several surfaces see the same transition and the daemon remains the single source of the applied result, a surface renders what the record says rather than what it locally decided.
 
 - Title: `Approval Record Update`
 - Source: `builtin`
@@ -164150,12 +170340,6 @@ Every approval record transition, pushed the moment the broker records it: an as
           ],
           "additionalProperties": false
         },
-        "fixSessionId": {
-          "type": "string"
-        },
-        "fixSessionError": {
-          "type": "string"
-        },
         "expiresAt": {
           "type": "number"
         },
@@ -164493,7 +170677,7 @@ Initial SSE/WebSocket handshake event emitted after a control-plane subscription
 
 #### `control.session_update`
 
-Shared-session lifecycle broadcast. Every session created / closed / deleted / reopened / agent-bound / agent-completed / message-appended / message-forwarded / route-attached and every input & follow-up lifecycle transition is published on the single `session-update` wire event; the specific lifecycle name is the discriminated `payload.event` field. Cross-surface invalidation mapping (webui/TUI): created ⇐ session-created; updated ⇐ session-message-appended / session-agent-completed / session-route-attached / session-reopened; steered ⇐ session-input-delivered / session-message-forwarded; closed ⇐ session-closed; deleted ⇐ session-deleted (a hard removal, the record is gone, not merely closed). Domain-tagged `session` (gateway-scope-enforcement.ts EVENT_DOMAIN), the same tag control.hosted_session_update carries: both are session lifecycle, so a client that narrows with ?domains=… must include `session` to receive EITHER of them, and one that opted into no narrowing receives both. It is dropped entirely when the control-plane-gateway flag is turned off (no phantom buffering).
+Shared-session lifecycle broadcast. Every session created / closed / deleted / reopened / agent-bound / agent-completed / message-appended / message-forwarded / route-attached and every input & follow-up lifecycle transition is published on the single `session-update` wire event; the specific lifecycle name is the discriminated `payload.event` field. Cross-surface invalidation mapping (webui/TUI): created ⇐ session-created; updated ⇐ session-permission-mode-changed / session-message-appended / session-agent-completed / session-route-attached / session-detached / session-reopened; steered ⇐ session-input-queued-for-surface / session-input-delivered / session-message-forwarded; closed ⇐ session-closed; deleted ⇐ session-deleted. A deleted session is a hard removal: the record is gone, not merely closed. Domain-tagged `session` (gateway-scope-enforcement.ts EVENT_DOMAIN), the same tag control.hosted_session_update carries: both are session lifecycle, so a client that narrows with ?domains=… must include `session` to receive EITHER of them, and one that opted into no narrowing receives both. It is dropped entirely when the control-plane-gateway flag is turned off (no phantom buffering).
 
 - Title: `Session Lifecycle Update`
 - Source: `builtin`

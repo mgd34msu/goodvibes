@@ -1,12 +1,16 @@
 import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadData, captureSecurityPluginFiles, retainSecurityReadData } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
+import { resolve, sep } from 'node:path';
 import {
+  discoverAllPlugins,
   discoverPlugins,
   getPluginDirectories,
+  getUserPluginDirectory,
   loadPlugin,
   unloadPlugin,
   PluginCleanupError,
+  type DiscoveredPlugin,
   type LoadedPlugin,
   type PluginLoaderDeps,
   type PluginPathOptions,
@@ -29,6 +33,14 @@ import { DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS, PluginClosedError, PluginInFlightTra
 interface PluginState {
   /** Map of plugin name → enabled boolean. */
   enabled: Record<string, boolean>;
+  /**
+   * Map of plugin name → directory the plugin was enabled from. An enabled
+   * flag belongs to that directory only: a same-named plugin in another
+   * search directory (a repository's `.goodvibes/plugins`) is not loaded
+   * under it. Absent for a plugin enabled before this was recorded; it is
+   * bound to the directory it is first found in.
+   */
+  enabledDirs: Record<string, string>;
   /** Map of plugin name → plugin-specific config. */
   config: Record<string, Record<string, unknown>>;
   /** Map of plugin name → trust record. */
@@ -69,7 +81,7 @@ export interface PluginManagerObserver {
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined;
 }
 
-const DEFAULT_STATE: PluginState = { enabled: {}, config: {}, trust: {}, quarantine: {} };
+const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {} };
 
 export interface PluginManagerOptions {
   readonly pathOptions: PluginPathOptions;
@@ -86,6 +98,21 @@ export interface PluginReloadSummary {
    * were still running when the quiesce timeout passed.
    */
   notDrained: string[];
+  /** Enabled plugins skipped because they are quarantined; lift the quarantine and reload to load them. */
+  quarantined?: string[] | undefined;
+  /** Plugins that were unloaded but whose cleanup callbacks threw; they were still reloaded. */
+  cleanupFailed?: string[] | undefined;
+}
+
+/** Result of a plugin lifecycle verb that persists operator state. */
+export interface PluginQuarantineResult {
+  ok: boolean;
+  error?: string;
+  /**
+   * Settles once any instance of the quarantined plugin, including one still
+   * starting when the quarantine was applied, has been unloaded.
+   */
+  unloading?: Promise<void> | undefined;
 }
 
 /** Mechanical progress evidence for a caller awaiting plugin shutdown. */
@@ -109,7 +136,9 @@ export function capturePluginSecurityReadSource(manager: PluginManager): () => v
 export class PluginManager {
   private readRevision = 0;
   private plugins = new Map<string, LoadedPlugin>();
-  private state: PluginState = { ...DEFAULT_STATE, enabled: {}, config: {}, trust: {}, quarantine: {} };
+  private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {} };
+  /** Lifecycle operations run one at a time, in the order they were asked for. */
+  private operationTail: Promise<unknown> = Promise.resolve();
   private deps: PluginLoaderDeps | undefined;
   private closed = false;
   private closePromise: Promise<void> | undefined;
@@ -224,9 +253,12 @@ export class PluginManager {
       }
     }
 
-    const record = this.trustStore.setTier(name, tier, { note });
-    this.state.trust[name] = record;
-    this.saveState();
+    // Build the record off to the side and publish it only once it is on disk,
+    // so a refused write leaves the live tier as it was.
+    const record = new PluginTrustStore().setTier(name, tier, { note });
+    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
+    this.trustStore.importRecords({ [name]: record });
     logger.info(`[plugins] ${name}: trust tier set to '${tier}'`);
     this.notifySubscribers();
     return { ok: true };
@@ -252,13 +284,14 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const result = this.trustStore.trustSigned(name, manifest, publicKey);
+    const result = new PluginTrustStore().trustSigned(name, manifest, publicKey);
     if (!result.ok) {
       return { ok: false, error: result.reason };
     }
 
-    this.state.trust[name] = result.record;
-    this.saveState();
+    const failure = this.commitState(() => { this.state.trust[name] = result.record; }, this.undoTrust(name));
+    if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
+    this.trustStore.importRecords({ [name]: result.record });
     this.notifySubscribers();
     return { ok: true, fingerprint: result.record.signatureFingerprint };
   }
@@ -287,7 +320,9 @@ export class PluginManager {
    * capabilities, Return the capability information for a plugin.
    *
    * Returns the full set: requested, granted (based on current trust tier),
-   * denied, and which capabilities are high-risk.
+   * denied, and which capabilities are high-risk. `blocked` reports what the
+   * trust tier withholds; plugins run in this process, so only quarantine
+   * (which stops the plugin loading) is enforced, not per-capability blocks.
    */
   capabilities(name: string): {
     ok: boolean;
@@ -324,7 +359,7 @@ export class PluginManager {
   quarantine(
     name: string,
     reason: string,
-  ): { ok: boolean; error?: string } {
+  ): PluginQuarantineResult {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -343,16 +378,34 @@ export class PluginManager {
       trustTier,
     );
 
-    const record = this.quarantineEngine.quarantine(name, capabilityManifest, reason);
+    const record = new PluginQuarantineEngine().quarantine(name, capabilityManifest, reason);
     if (!record) {
       return { ok: false, error: `Failed to quarantine '${name}'` };
     }
 
-    this.state.quarantine[name] = { ...record, revokedCapabilities: [...record.revokedCapabilities] };
-    this.saveState();
+    const stored = { ...record, revokedCapabilities: [...record.revokedCapabilities] };
+    const failure = this.commitState(() => { this.state.quarantine[name] = stored; }, this.undoQuarantine(name));
+    if (failure) return { ok: false, error: `Quarantine of '${name}' was not saved, ${failure}` };
+    this.quarantineEngine.importRecords({ [name]: stored });
     logger.warn(`[plugins] ${name}: quarantined, ${reason}`);
+
+    // Plugins run in this process, so quarantine means "not running". The
+    // unload joins the operation queue so a reload cannot start it again first.
+    // Whether an instance exists is decided inside the queued operation: an
+    // enable or reload that is still initialising has not stored its instance
+    // yet, and it must be unloaded once it has.
+    const unloading = this.ownOperation(async () => {
+      const loaded = this.plugins.get(name);
+      if (!loaded) return;
+      try {
+        await this.unload(loaded);
+      } finally {
+        this.plugins.delete(name);
+        this.notifySubscribers();
+      }
+    });
     this.notifySubscribers();
-    return { ok: true };
+    return { ok: true, unloading };
   }
 
   /**
@@ -363,12 +416,12 @@ export class PluginManager {
     if (!this.quarantineEngine.isQuarantined(name)) {
       return { ok: false, error: `Plugin '${name}' is not quarantined` };
     }
-    this.quarantineEngine.lift(name);
-    const record = this.quarantineEngine.getRecord(name);
-    if (record) {
-      this.state.quarantine[name] = { ...record, revokedCapabilities: [...record.revokedCapabilities] };
-    }
-    this.saveState();
+    const current = this.quarantineEngine.getRecord(name);
+    if (!current) return { ok: false, error: `Plugin '${name}' is not quarantined` };
+    const lifted = { ...current, revokedCapabilities: [...current.revokedCapabilities], lifted: true, liftedAt: Date.now() };
+    const failure = this.commitState(() => { this.state.quarantine[name] = lifted; }, this.undoQuarantine(name));
+    if (failure) return { ok: false, error: `Lifting the quarantine of '${name}' was not saved, ${failure}` };
+    this.quarantineEngine.importRecords({ [name]: lifted });
     logger.info(`[plugins] ${name}: quarantine lifted`);
     this.notifySubscribers();
     return { ok: true };
@@ -377,7 +430,9 @@ export class PluginManager {
   /** Enable a plugin by name. Loads it immediately if deps are available. */
   enable(name: string): Promise<{ ok: boolean; error?: string }> {
     return this.ownOperation(async () => {
-      if (this.isEnabled(name)) {
+      // A flag with no recorded directory is one the repository copy was refused
+      // under; enabling again is how the owner chooses a copy.
+      if (this.isEnabled(name) && (this.plugins.has(name) || this.state.enabledDirs[name] !== undefined)) {
         return { ok: false, error: `Plugin '${name}' is already enabled` };
       }
 
@@ -386,11 +441,18 @@ export class PluginManager {
         return { ok: false, error: this.notFoundError(name) };
       }
 
-      this.state.enabled[name] = true;
-      this.saveState();
+      if (this.quarantineEngine.isQuarantined(name)) {
+        return { ok: false, error: `Plugin '${name}' is quarantined and will not load; lift the quarantine first` };
+      }
+
+      const failure = this.commitState(() => {
+        this.state.enabled[name] = true;
+        this.state.enabledDirs[name] = resolve(discovered.pluginDir);
+      }, this.undoEnabled(name));
+      if (failure) return { ok: false, error: `Plugin '${name}' was not enabled, the change could not be saved: ${failure}` };
 
       if (this.deps) {
-        const loaded = await this.acquire(discovered, this.deps);
+        const { loaded } = await this.acquireOrFail(discovered, this.deps);
         if (loaded) {
           this.plugins.set(name, loaded);
           this.notifySubscribers();
@@ -400,6 +462,7 @@ export class PluginManager {
           if (this.closed) return { ok: false, error: 'Plugin manager closed during enable; enabled preference retained' };
           // Revert enable on load failure
           delete this.state.enabled[name];
+          delete this.state.enabledDirs[name];
           this.saveState();
           return { ok: false, error: `Plugin '${name}' failed to load, check logs` };
         }
@@ -416,15 +479,28 @@ export class PluginManager {
         return { ok: false, error: `Plugin '${name}' is not enabled` };
       }
 
+      // A cleanup callback that throws still leaves the plugin unloaded, so
+      // the plugin is disabled either way; the error is raised after the
+      // state is consistent.
+      let cleanupError: unknown;
       const loaded = this.plugins.get(name);
       if (loaded) {
-        await this.unload(loaded);
+        try {
+          await this.unload(loaded);
+        } catch (error) {
+          cleanupError = error;
+        }
         this.plugins.delete(name);
       }
 
       delete this.state.enabled[name];
-      this.saveState();
+      delete this.state.enabledDirs[name];
+      const failure = this.saveState();
       this.notifySubscribers();
+      if (cleanupError !== undefined) throw cleanupError;
+      // The plugin is stopped now, but a state file that was not written
+      // would enable it again at the next start; say so rather than report success.
+      if (failure !== undefined) return { ok: false, error: `Plugin '${name}' was stopped, but the change could not be saved and it will be enabled again on restart: ${failure}` };
       return { ok: true };
     });
   }
@@ -434,7 +510,8 @@ export class PluginManager {
    * loaded plugin is quiesced first: new calls into it are refused and the
    * calls already running get up to `quiesceTimeoutMs` to finish. A plugin
    * still busy at the timeout is not reloaded; it stays on its current
-   * instance and is reported in `notDrained`.
+   * instance and is reported in `notDrained`. A quarantined plugin is not
+   * loaded and is reported in `quarantined`.
    */
   reload(options: { readonly quiesceTimeoutMs?: number | undefined } = {}): Promise<PluginReloadSummary> {
     return this.ownOperation(async () => {
@@ -443,6 +520,8 @@ export class PluginManager {
       const loadedNames = names.filter((name) => this.plugins.has(name));
       let reloaded = 0;
       let failed = 0;
+      const cleanupFailed: string[] = [];
+      const quarantined: string[] = [];
 
       const drains = await Promise.all(loadedNames.map(async (name) => ({
         name,
@@ -458,26 +537,36 @@ export class PluginManager {
       }
 
       try {
-        // Deactivate every drained plugin
+        // Deactivate every drained plugin. One whose cleanup throws is already
+        // inactive, so it is dropped and the rest of the reload still runs.
         for (const name of names) {
           if (notDrained.has(name)) continue;
           const loaded = this.plugins.get(name);
           if (loaded) {
-            await this.unload(loaded);
+            try {
+              await this.unload(loaded);
+            } catch (error) {
+              cleanupFailed.push(name);
+              if (error instanceof PluginCleanupError) this.cleanupErrors.add(error);
+            }
             this.plugins.delete(name);
           }
         }
 
         // Reactivate with cache busting, append timestamp to force fresh import
         if (this.deps) {
-          const discovered = this.discoverPlugins();
           const cacheBust = Date.now();
-          for (const d of discovered) {
+          for (const d of this.enabledCandidates()) {
             if (this.closed) break;
-            if (!this.isEnabled(d.manifest.name) || notDrained.has(d.manifest.name)) continue;
+            if (notDrained.has(d.manifest.name)) continue;
+            if (this.quarantineEngine.isQuarantined(d.manifest.name)) {
+              quarantined.push(d.manifest.name);
+              logger.warn(`[plugins] ${d.manifest.name}: not loaded, plugin is quarantined`);
+              continue;
+            }
             // Pass cacheBust so loadPlugin appends ?t=<timestamp> to the import URL,
             // forcing Bun to bypass its module cache and re-execute the file.
-            const loaded = await this.acquire(d, this.deps, cacheBust);
+            const { loaded } = await this.acquireOrFail(d, this.deps, cacheBust);
             if (loaded) {
               this.plugins.set(d.manifest.name, loaded);
               reloaded++;
@@ -491,7 +580,13 @@ export class PluginManager {
       }
       failed += notDrained.size;
       this.notifySubscribers();
-      return { reloaded, failed, notDrained: [...notDrained] };
+      return {
+        reloaded,
+        failed,
+        notDrained: [...notDrained],
+        ...(quarantined.length > 0 ? { quarantined } : {}),
+        ...(cleanupFailed.length > 0 ? { cleanupFailed } : {}),
+      };
     });
   }
 
@@ -563,10 +658,14 @@ export class PluginManager {
   private ownOperation<T>(action: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new PluginClosedError('manager'));
     this.readRevision++;
-    const pending = Promise.resolve().then(() => {
+    // Operations await across loads and unloads; running them one at a time
+    // keeps a reload from loading a second instance of a plugin an enable is
+    // still starting.
+    const pending = this.operationTail.then(() => {
       if (this.closed) throw new PluginClosedError('manager');
       return action();
     });
+    this.operationTail = pending.then(() => undefined, () => undefined);
     this.operations.add(pending);
     void pending.then(
       () => this.operations.delete(pending),
@@ -589,6 +688,25 @@ export class PluginManager {
     return loaded;
   }
 
+  /**
+   * acquire for callers that carry on after one plugin fails: a load whose
+   * cleanup also threw is still a failed load, and the cleanup error stays on
+   * record for shutdown.
+   */
+  private async acquireOrFail(
+    discovered: DiscoveredPlugin,
+    deps: PluginLoaderDeps,
+    cacheBust?: number,
+  ): Promise<{ loaded: LoadedPlugin | null; cleanupError?: PluginCleanupError }> {
+    try {
+      return { loaded: await this.acquire(discovered, deps, cacheBust) };
+    } catch (error) {
+      if (!(error instanceof PluginCleanupError)) throw error;
+      this.cleanupErrors.add(error);
+      return { loaded: null, cleanupError: error };
+    }
+  }
+
   private unload(loaded: LoadedPlugin): Promise<void> {
     const prior = this.unloading.get(loaded);
     if (prior) return prior;
@@ -597,6 +715,9 @@ export class PluginManager {
         await unloadPlugin(loaded, { throwOnCleanupError: true });
       } finally {
         this.acquired.delete(loaded);
+        // A settled unload is not cached: the instance is inactive after it,
+        // so a repeat is a no-op instead of replaying this call's rejection.
+        this.unloading.delete(loaded);
       }
     });
     this.unloading.set(loaded, pending);
@@ -607,16 +728,75 @@ export class PluginManager {
 
   private async loadEnabledPlugins(): Promise<void> {
     if (!this.deps) return;
-    const discovered = this.discoverPlugins();
-    for (const d of discovered) {
+    let firstCleanupError: PluginCleanupError | undefined;
+    for (const d of this.enabledCandidates()) {
       if (this.closed) break;
-      if (!this.isEnabled(d.manifest.name)) continue;
-      const loaded = await this.acquire(d, this.deps);
+      if (this.quarantineEngine.isQuarantined(d.manifest.name)) {
+        logger.warn(`[plugins] ${d.manifest.name}: not loaded, plugin is quarantined`);
+        continue;
+      }
+      const { loaded, cleanupError } = await this.acquireOrFail(d, this.deps);
       if (loaded) {
         this.plugins.set(d.manifest.name, loaded);
       }
+      firstCleanupError ??= cleanupError;
     }
     this.notifySubscribers();
+    // The remaining plugins were still loaded; the lifetime owner is told.
+    if (firstCleanupError) throw firstCleanupError;
+  }
+
+  /**
+   * The discovered copy of each enabled plugin, in search order. An enabled
+   * flag belongs to the directory the plugin was enabled from, so a same-named
+   * plugin elsewhere (a repository's own `.goodvibes/plugins`) is not run
+   * under it. A plugin enabled before the directory was recorded is bound to
+   * the directory it is found in now.
+   */
+  private enabledCandidates(): DiscoveredPlugin[] {
+    const all = discoverAllPlugins(this.pathOptions);
+    const chosen: DiscoveredPlugin[] = [];
+    const seen = new Set<string>();
+    const refused = new Set<string>();
+    let adopted = false;
+    for (const candidate of all) {
+      const name = candidate.manifest.name;
+      if (seen.has(name) || !this.isEnabled(name)) continue;
+      const bound = this.state.enabledDirs[name];
+      if (bound === undefined) {
+        // An enable recorded before directories were kept never said which copy
+        // the owner meant. A copy inside the repository was not chosen by them,
+        // so it is not run until they enable it themselves.
+        if (this.isRepositoryCopy(candidate)) {
+          if (!refused.has(name)) logger.warn(`[plugins] ${name}: not loaded, the copy found in this repository was never enabled by you; enable it again to run it`);
+          refused.add(name);
+          continue;
+        }
+        this.state.enabledDirs[name] = resolve(candidate.pluginDir);
+        adopted = true;
+        seen.add(name);
+        chosen.push(candidate);
+        continue;
+      }
+      if (resolve(candidate.pluginDir) !== bound) continue;
+      seen.add(name);
+      chosen.push(candidate);
+    }
+    for (const name of Object.keys(this.state.enabled)) {
+      if (this.state.enabled[name] && !seen.has(name) && !refused.has(name) && all.some((p) => p.manifest.name === name)) {
+        logger.warn(`[plugins] ${name}: not loaded, it was enabled from '${this.state.enabledDirs[name]}' and that copy is no longer present; enable it again to use the copy found now`);
+      }
+    }
+    if (adopted) this.saveState();
+    return chosen;
+  }
+
+  /** True for a plugin under the working directory's own plugin folder rather than the user's. */
+  private isRepositoryCopy(candidate: DiscoveredPlugin): boolean {
+    const [repositoryRoot] = getPluginDirectories(this.pathOptions);
+    if (repositoryRoot === undefined || resolve(repositoryRoot) === resolve(getUserPluginDirectory(this.pathOptions))) return false;
+    const dir = resolve(candidate.pluginDir);
+    return dir === resolve(repositoryRoot) || dir.startsWith(`${resolve(repositoryRoot)}${sep}`);
   }
 
   private loadState(): void {
@@ -634,6 +814,7 @@ export class PluginManager {
       });
       if (parsed) {
         this.state.enabled = parsed.enabled ?? {};
+        this.state.enabledDirs = parsed.enabledDirs ?? {};
         this.state.config = parsed.config ?? {};
         this.state.trust = parsed.trust ?? {};
         this.state.quarantine = parsed.quarantine ?? {};
@@ -650,13 +831,44 @@ export class PluginManager {
     }
   }
 
-  private saveState(): void {
+  /** Writes the state file; returns the reason when it could not be written. */
+  private saveState(): string | undefined {
     this.readRevision++;
     try {
       writeJsonFileAtomic(this.stateFilePath, this.state, { trailingNewline: false });
+      return undefined;
     } catch (err) {
-      logger.warn(`[plugins] Could not save state: ${summarizeError(err)}`);
+      const reason = summarizeError(err);
+      logger.warn(`[plugins] Could not save state: ${reason}`);
+      return reason;
     }
+  }
+
+  /** Applies a state change and saves it; on a failed save the change is undone and the reason returned. */
+  private commitState(apply: () => void, undo: () => void): string | undefined {
+    apply();
+    const failure = this.saveState();
+    if (failure !== undefined) undo();
+    return failure;
+  }
+
+  private undoTrust(name: string): () => void {
+    const prior = this.state.trust[name];
+    return () => { if (prior) this.state.trust[name] = prior; else delete this.state.trust[name]; };
+  }
+
+  private undoQuarantine(name: string): () => void {
+    const prior = this.state.quarantine[name];
+    return () => { if (prior) this.state.quarantine[name] = prior; else delete this.state.quarantine[name]; };
+  }
+
+  private undoEnabled(name: string): () => void {
+    const priorEnabled = this.state.enabled[name];
+    const priorDir = this.state.enabledDirs[name];
+    return () => {
+      if (priorEnabled === undefined) delete this.state.enabled[name]; else this.state.enabled[name] = priorEnabled;
+      if (priorDir === undefined) delete this.state.enabledDirs[name]; else this.state.enabledDirs[name] = priorDir;
+    };
   }
 
   private discoverPlugins() {

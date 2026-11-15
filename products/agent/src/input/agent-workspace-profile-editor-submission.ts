@@ -1,6 +1,7 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 import type { AgentWorkspaceProfileEditorKind } from './agent-workspace-profile-editors.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -17,10 +18,6 @@ type AgentWorkspaceProfileEditorSubmissionResult =
     readonly status: string;
     readonly actionResult: AgentWorkspaceActionResult;
   };
-
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
 
 export function isAgentWorkspaceProfileEditorSubmissionKind(kind: string): kind is AgentWorkspaceProfileEditorKind {
   return kind === 'profile-template-export'

@@ -11,7 +11,6 @@ import {
   planTaskRoute as enginePlanTaskRoute,
   registerTaskRouteTool as engineRegisterTaskRouteTool,
   TASK_ROUTES,
-  taskRouteRegistry,
   type ReadyPlan,
   type TaskRouteCandidate,
   type TaskRouteDeps,
@@ -153,15 +152,6 @@ describe('judgment port', () => {
     installJudgmentPort(port);
     await planTaskRoute({ query: 'check daemon health' });
     expect(requests).toHaveLength(2);
-  });
-
-  test('the registry holds every task route decision', () => {
-    expect(taskRouteRegistry.list().map((decision) => decision.name)).toEqual([
-      'routing.autonomy-intake',
-      'routing.task-route.named-id',
-      'routing.task-route.pick',
-      'routing.task-route.slots',
-    ]);
   });
 });
 

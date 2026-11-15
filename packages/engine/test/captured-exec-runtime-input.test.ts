@@ -270,15 +270,22 @@ test.skipIf(!supported)('a Node host never binds its executable after optional r
   }
 });
 
+/** Lets work chained to an already-delivered late permission answer run: resolves after the held answer has resumed and the event loop has turned repeatedly. */
+async function drainAfterLateAnswer(resumed: Promise<void>): Promise<void> {
+  await resumed;
+  for (let turn = 0; turn < 50; turn++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
 for (const interruption of ['cancel', 'revoke'] as const)
   test.skipIf(!supported)(`${interruption} during direct runtime admission starts no command or late projection`, async () => {
     let nodePath = '';
     let release!: () => void;
     let reached!: () => void;
+    let resumed!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const waiting = new Promise<void>((resolve) => { reached = resolve; });
+    const answered = new Promise<void>((resolve) => { resumed = resolve; });
     const binding = await fixture(async (path) => {
-      if (path === nodePath) { reached(); await gate; }
+      if (path === nodePath) { reached(); await gate; resumed(); }
       return true;
     });
     const declaration = syntheticRuntime(binding);
@@ -297,7 +304,8 @@ for (const interruption of ['cancel', 'revoke'] as const)
       expect(result.stdout).toBe('');
       expect(started).toBe(0);
       release();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await drainAfterLateAnswer(answered);
+      expect(started).toBe(0);
       expect(existsSync(join(binding.root, 'late.txt'))).toBe(false);
       expect(readdirSync(tmpdir()).filter((name) => name.startsWith('goodvibes-captured-exec-') && !before.has(name))).toEqual([]);
     } finally { controller.abort(); release(); await pending; }
@@ -402,8 +410,10 @@ test.skipIf(!supported)('call-only cancellation cannot recreate a cleaned runtim
   let release!: () => void; let reached!: () => void;
   const waiting = new Promise<void>((resolve) => { reached = resolve; });
   const gate = new Promise<void>((resolve) => { release = resolve; });
+  let resumed!: () => void;
+  const answered = new Promise<void>((resolve) => { resumed = resolve; });
   const binding = await fixture(async (path) => {
-    if (armed && path === nodePath) { armed = false; reached(); await gate; }
+    if (armed && path === nodePath) { armed = false; reached(); await gate; resumed(); }
     return true;
   });
   const declaration = syntheticRuntime(binding); nodePath = declaration.nodeExecutable;
@@ -422,7 +432,7 @@ test.skipIf(!supported)('call-only cancellation cannot recreate a cleaned runtim
     expect(result.success).toBe(false); expect(result.stdout).toBe('');
     expect(existsSync(directory)).toBe(false);
     release();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await drainAfterLateAnswer(answered);
     expect(existsSync(directory)).toBe(false);
   } finally { cancel.abort(); release(); await pending; }
 });
@@ -523,8 +533,10 @@ test.skipIf(!supported)('call-only cancellation cannot recreate a cleaned depend
   let release!: () => void; let reached!: () => void;
   const waiting = new Promise<void>((resolve) => { reached = resolve; });
   const gate = new Promise<void>((resolve) => { release = resolve; });
+  let resumed!: () => void;
+  const answered = new Promise<void>((resolve) => { resumed = resolve; });
   const binding = await fixture(async (path) => {
-    if (armed && path === dependencyPath) { armed = false; reached(); await gate; }
+    if (armed && path === dependencyPath) { armed = false; reached(); await gate; resumed(); }
     return true;
   });
   const modules = join(binding.owner, 'node_modules');
@@ -545,7 +557,7 @@ test.skipIf(!supported)('call-only cancellation cannot recreate a cleaned depend
     expect(result.success).toBe(false); expect(result.stdout).toBe('');
     expect(existsSync(directory)).toBe(false);
     release();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await drainAfterLateAnswer(answered);
     expect(existsSync(directory)).toBe(false);
   } finally { cancel.abort(); release(); await pending; }
 });

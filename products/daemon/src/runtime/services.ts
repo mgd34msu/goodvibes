@@ -43,6 +43,10 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     observeNativeStartupPhase('handler-surfaces');
     const daemonHandlers = await createDaemonHandlerComposition({ ...handlerOptions, distributedRuntimeReady });
     scope.registry.add('daemon handler surfaces', daemonHandlers.close);
+    // Peers must be loaded before the device recovery sweep decides which
+    // grants belong to a departed node, and a failed load must stop the boot
+    // rather than leave every paired device looking gone.
+    await distributedRuntimeReady;
     observeNativeStartupPhase('contract-recovery');
     // Legacy recovery can await planning or execution. Serve the host while
     // that work runs, and abort/drain it before releasing its dependencies.
@@ -50,6 +54,7 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     scope.registry.add('contract recovery', async () => {
       services.contractRunner.dispose();
       await contractRecovery;
+      await services.contractRunner.flushWorkPlan?.();
     });
     let bootTasks: DaemonBootController | undefined;
     const runtime: RuntimeServices = { ...services, daemonHandlers, get bootTasks() { return bootTasks; }, close, dispose };

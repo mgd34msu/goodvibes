@@ -1,5 +1,5 @@
 /** Production UI, real browser transport, synthetic protocol replies; no providers or secrets. */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import type { BrowserJudgmentRequest } from "@goodvibes-jev/engine/daemon-api";
 import { installMockDaemon } from "./support/mock-daemon";
 import { nextFrames, openSettings } from "./support/app";
@@ -99,10 +99,12 @@ test("leaving a pending provider detail discards its reply before another provid
   await credentials(page);
   const requests: CredentialRequest[] = [];
   const release = Promise.withResolvers<undefined>();
+  const held: { request?: Request } = {};
   await page.route("**/api/judgment/batteries/run", async (route) => {
     const request = route.request().postDataJSON() as BrowserJudgmentRequest;
     if (request.battery !== "webui.credentials.provider-key") return route.fallback();
     const isOld = requests.length === 0;
+    if (isOld) held.request = route.request();
     requests.push(request);
     if (isOld) await release.promise;
     await route.fulfill({
@@ -120,6 +122,8 @@ test("leaving a pending provider detail discards its reply before another provid
     await page.getByRole("button", { name: /^anthropic:/i }).click();
     await expect.poll(() => requests.length).toBe(2);
     release.resolve(undefined);
+    // The stale reply has been delivered in full before the absence is asserted.
+    await (await held.request?.response())?.finished();
     await nextFrames(page);
     const panel = page.locator("#settings-section-models .credential-status");
     await expect(panel).toHaveCount(1);
@@ -139,7 +143,7 @@ for (const captured of ["prompt", "installed"] as const) {
     const requests: BrowserJudgmentRequest[] = [];
     await page.route("**/api/judgment/batteries/run", async (route) => {
       const request = route.request().postDataJSON() as BrowserJudgmentRequest;
-      if (request.battery !== "webui.pwa.install-platform") return route.fallback();
+      if ((request.battery as string) !== "webui.pwa.install-platform") return route.fallback();
       requests.push(request);
       await route.abort();
     });
@@ -176,32 +180,3 @@ for (const captured of ["prompt", "installed"] as const) {
     expect(requests).toHaveLength(0);
   });
 }
-
-test("mock review transport returns all candidates by explicit probability", async ({ page }) => {
-  await installMockDaemon(page, {
-    memoryReviewProbabilities: { "mem-fact-1": 0.1, "mem-review-1": 0, "mem-persona-1": 1 },
-  });
-  await page.goto("/?view=memory");
-  const result = await page.evaluate(async () => {
-    const response = await fetch("/api/memory/review-queue?limit=3");
-    return (await response.json()) as { records: { id: string }[] };
-  });
-  expect(result.records.map((record) => record.id)).toEqual([
-    "mem-persona-1",
-    "mem-fact-1",
-    "mem-review-1",
-  ]);
-});
-
-test("mock review transport fails closed if even an out-of-limit candidate lacks a probability", async ({
-  page,
-}) => {
-  await installMockDaemon(page, { memoryReviewProbabilities: { "mem-review-1": 1 } });
-  await page.goto("/?view=memory");
-  const result = await page.evaluate(async () => {
-    const response = await fetch("/api/memory/review-queue?limit=1");
-    return { status: response.status, body: (await response.json()) as unknown };
-  });
-  expect(result.status).toBe(503);
-  expect(result.body).not.toHaveProperty("records");
-});

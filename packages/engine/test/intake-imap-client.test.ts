@@ -26,7 +26,7 @@ async function opened(reply: (socket: MemorySocket, command: string) => void, ti
   const socket = new MemorySocket();
   socket.reply = command => reply(socket, command);
   const connector: ImapConnector = (_options, ready) => {
-    queueMicrotask(() => { ready(); setTimeout(() => socket.emit('data', '* OK fixture ready\r\n'), 0); });
+    queueMicrotask(() => { ready(); queueMicrotask(() => socket.emit('data', '* OK fixture ready\r\n')); });
     return socket;
   };
   const client = new ImapClient({ host: 'fixture.invalid', port: 993, user: 'fixture', password: DUMMY_PASSWORD, timeoutMs }, connector);
@@ -42,7 +42,7 @@ describe('intake IMAP protocol', () => {
       const tag = command.split(' ')[0];
       const prefix = `* 1 FETCH (BODY[HEADER.FIELDS (FROM SUBJECT)] {${Buffer.byteLength(header)}}\r\n${header} BODY[TEXT]<0> {${Buffer.byteLength(body)}}\r\n`;
       wire.emit('data', prefix + body.slice(0, 10));
-      setTimeout(() => wire.emit('data', `${body.slice(10)} UID 42 FLAGS ())\r\n${tag} OK complete\r\n`), 1);
+      setTimeout(() => wire.emit('data', `${body.slice(10)} UID 42 FLAGS ())\r\n${tag} OK complete\r\n`));
     });
     try {
       expect(await client.fetchEnvelopes([42])).toEqual([{ uid: 42, from: 'fixture@example.test', subject: 'café', date: 0, seen: false, bodyPreview: body }]);
@@ -76,7 +76,7 @@ describe('intake IMAP protocol', () => {
   test('refuses credential command separators before sending bytes', async () => {
     const socket = new MemorySocket();
     const connector: ImapConnector = (_options, ready) => {
-      queueMicrotask(() => { ready(); setTimeout(() => socket.emit('data', '* OK fixture ready\r\n'), 0); });
+      queueMicrotask(() => { ready(); queueMicrotask(() => socket.emit('data', '* OK fixture ready\r\n')); });
       return socket;
     };
     const client = new ImapClient({ host: 'fixture.invalid', port: 993, user: 'fixture\r\nA0002 LOGOUT', password: DUMMY_PASSWORD, timeoutMs: 5 }, connector);

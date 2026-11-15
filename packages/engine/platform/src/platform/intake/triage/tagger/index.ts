@@ -103,7 +103,8 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
         const decisions: string[] = [];
         if (options.provider !== 'email' && !discordForumOnly) for (const tag of tags) {
           if (Object.hasOwn(TAGS, tag)) { meanings.set(tag, tag as TriageProviderTag); continue; }
-          if (heldMeanings.has(tag) || heldMeanings.size + pendingMeanings.size >= 1024) throw new TriageTagMeaningHeld();
+          if (heldMeanings.has(tag)) throw new TriageTagMeaningHeld();
+          if (heldMeanings.size + pendingMeanings.size >= 1024) throw new TriageTagMeaningHeld('full');
           if (pendingMeanings.has(tag)) throw new Error('Triage tag interpretation is already pending');
           pendingMeanings.add(tag);
           try {

@@ -174,6 +174,29 @@ describe('Orchestrator', () => {
       expect(orch.isThinking).toBe(false);
     });
 
+    test('a throw while a turn starts leaves the orchestrator free and the same text accepted again', async () => {
+      let failRender = true;
+      const { orch } = await buildOrchestrator(() => { if (failRender) { failRender = false; throw new Error('render failed'); } });
+      await expect(orch.handleUserInput('hello')).rejects.toThrow('render failed');
+      expect(orch.isTurnActive).toBe(false);
+      // Not occupied and not refused as an in-flight duplicate: the same text starts a turn instead of being queued or dropped.
+      const submitted: string[] = [];
+      runtimeBus.on('TURN_SUBMITTED', (envelope) => { submitted.push(envelope.payload.type); });
+      await orch.handleUserInput('hello').catch(() => undefined);
+      expect(orch.messageQueue).toHaveLength(0);
+      await Promise.resolve();
+      expect(submitted).toEqual(['TURN_SUBMITTED']);
+    });
+
+    test.each(['safe-owner', 'safe-jev', 'yolo', 'plan'] as const)('the system prompt announces %s mode in one line', async (mode) => {
+      const { orch } = await buildOrchestrator();
+      const internals = orch as unknown as { permissionManager: { getMode(): string }; getSystemPrompt(): Promise<string> };
+      internals.permissionManager = { getMode: () => mode };
+      const lines = (await internals.getSystemPrompt()).split('\n').filter((line) => line.startsWith('Permission mode: '));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]!.length).toBeGreaterThan('Permission mode: '.length + 10);
+    });
+
     test('messageQueue starts empty', async () => {
       const { orch } = await buildOrchestrator();
       expect(orch.messageQueue).toHaveLength(0);
@@ -184,11 +207,6 @@ describe('Orchestrator', () => {
       expect(orch.usage.input).toBe(0);
       expect(orch.usage.output).toBe(0);
       expect(orch.lastRequestInputTokens).toBe(0);
-    });
-
-    test('abort() does not throw when not thinking', async () => {
-      const { orch } = await buildOrchestrator();
-      expect(() => orch.abort()).not.toThrow();
     });
 
     test('getSpinner() returns a non-empty string', async () => {
@@ -209,53 +227,151 @@ describe('Orchestrator', () => {
       expect(frames.size).toBeGreaterThan(1);
     });
 
-    test('dispose detaches replay listeners from the runtime bus', async () => {
-      const { orch } = await buildOrchestrator();
-      const busState = runtimeBus as unknown as {
-        _listeners: Map<string, Set<unknown>>;
+    test('dispose detaches every listener the orchestrator attached to the runtime bus', async () => {
+      const live = new Set<symbol>();
+      const attach = runtimeBus.on.bind(runtimeBus);
+      const tracked: RuntimeEventBus['on'] = (eventType, callback) => {
+        const detach = attach(eventType, callback);
+        const token = Symbol('listener');
+        live.add(token);
+        return () => { live.delete(token); detach(); };
       };
-      const before = busState._listeners.get('AGENT_COMPLETED')?.size ?? 0;
-      expect(before).toBeGreaterThan(0);
+      runtimeBus.on = tracked;
+      const { orch } = await buildOrchestrator();
+      expect(live.size).toBeGreaterThan(0);
 
       orch.dispose();
 
-      const after = busState._listeners.get('AGENT_COMPLETED')?.size ?? 0;
-      expect(after).toBe(0);
+      expect(live.size).toBe(0);
     });
   });
 
-  describe('handleUserInput - queue behavior', () => {
-    test('queues input when already thinking and emits render:request', async () => {
+  describe('turn lifecycle: queue and abort', () => {
+    const lifecycleModel = {
+      id: 'mock-model',
+      provider: 'mock',
+      registryKey: 'mock:mock-model',
+      displayName: 'Mock',
+      description: '',
+      capabilities: { toolCalling: true, codeEditing: false, reasoning: false, multimodal: false },
+      contextWindow: 8192,
+      selectable: true,
+    };
+    let savedStream: boolean;
+
+    beforeEach(() => {
+      savedStream = (configManager.get('display.stream') as boolean | undefined) ?? true;
+      configManager.set('display.stream', true);
+    });
+
+    afterEach(() => {
+      configManager.set('display.stream', savedStream);
+    });
+
+    /**
+     * A provider whose first call streams one delta and then holds until the
+     * test releases it or the turn's abort signal fires; every later call
+     * answers at once. `started` resolves once the first delta has been sent.
+     */
+    function heldFirstCallProvider() {
+      const calls: ChatRequest[] = [];
+      let release: () => void = () => {};
+      let markStarted: () => void = () => {};
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const provider: LLMProvider = {
+        name: 'mock',
+        models: ['mock-model'],
+        chat: async (params: ChatRequest): Promise<ChatResponse> => {
+          calls.push(params);
+          const reply = calls.length === 1 ? 'first answer' : `answer ${calls.length}`;
+          if (calls.length === 1) {
+            params.onDelta?.({ content: 'partial ' });
+            markStarted();
+            await new Promise<void>((resolve, reject) => {
+              void held.then(resolve);
+              params.signal?.addEventListener('abort', () => reject(new Error('aborted by user')), { once: true });
+            });
+          }
+          return { content: reply, toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'completed' };
+        },
+      };
+      return { provider, calls, started, release: () => release() };
+    }
+
+    async function withProvider(provider: LLMProvider, run: () => Promise<void>): Promise<void> {
+      const reg = testManagers.providerRegistry;
+      const origGet = reg.get.bind(reg);
+      const origGetForModel = reg.getForModel.bind(reg);
+      const origGetCurrentModel = reg.getCurrentModel.bind(reg);
+      reg.get = mock(() => provider);
+      reg.getForModel = mock(() => provider);
+      reg.getCurrentModel = mock(() => lifecycleModel);
+      try {
+        await run();
+      } finally {
+        reg.get = origGet;
+        reg.getForModel = origGetForModel;
+        reg.getCurrentModel = origGetCurrentModel;
+      }
+    }
+
+    test('input sent during a real in-flight turn is queued, then runs in order once the turn ends', async () => {
       let renderCount = 0;
-      const { orch } = await buildOrchestrator(() => { renderCount++; });
+      const { orch, cm } = await buildOrchestrator(() => { renderCount++; });
+      const held = heldFirstCallProvider();
+      await withProvider(held.provider, async () => {
+        const first = orch.handleUserInput('one');
+        await held.started;
+        expect(orch.isTurnActive).toBe(true);
 
-      // Manually set thinking state to simulate in-flight request
-      (orch as unknown as { isThinking: boolean }).isThinking = true;
+        const rendersBefore = renderCount;
+        void orch.handleUserInput('   '); // whitespace only is ignored
+        void orch.handleUserInput('two');
+        void orch.handleUserInput('three');
+        expect(orch.messageQueue.map(m => m.text)).toEqual(['two', 'three']);
+        expect(renderCount).toBeGreaterThan(rendersBefore);
+        expect(held.calls).toHaveLength(1);
 
-      // This should queue, not call LLM (which would fail without a valid provider)
-      orch.handleUserInput('queued message');
+        held.release();
+        await first;
+      });
 
-      expect(orch.messageQueue.map(m => m.text)).toContain('queued message');
-      expect(renderCount).toBeGreaterThan(0);
-    });
-
-    test('empty input string is ignored (does not queue)', async () => {
-      const { orch } = await buildOrchestrator();
-      (orch as unknown as { isThinking: boolean }).isThinking = true;
-
-      orch.handleUserInput('   '); // whitespace only
       expect(orch.messageQueue).toHaveLength(0);
+      expect(orch.isTurnActive).toBe(false);
+      expect(held.calls).toHaveLength(3);
+      const users = cm.getMessagesForLLM().filter(m => m.role === 'user').map(m => m.content);
+      expect(users).toEqual(['one', 'two', 'three']);
     });
 
-    test('multiple queued messages accumulate in order', async () => {
+    test('abort mid-stream frees the orchestrator, leaves no empty placeholder, and the queued message still runs', async () => {
+      const { orch, cm } = await buildOrchestrator();
+      const held = heldFirstCallProvider();
+      await withProvider(held.provider, async () => {
+        const first = orch.handleUserInput('one');
+        await held.started;
+        void orch.handleUserInput('two');
+        expect(orch.messageQueue.map(m => m.text)).toEqual(['two']);
+
+        orch.abort();
+        await first;
+      });
+
+      expect(orch.isTurnActive).toBe(false);
+      expect(orch.isThinking).toBe(false);
+      expect(orch.messageQueue).toHaveLength(0);
+      // The cancelled turn did not answer; the queued one did.
+      expect(held.calls).toHaveLength(2);
+      const messages = cm.getMessagesForLLM();
+      const assistants = messages.filter(m => m.role === 'assistant');
+      expect(assistants.map(m => m.content)).toEqual(['answer 2']);
+      expect(messages.some(m => m.role === 'assistant' && m.content === '')).toBe(false);
+    });
+
+    test('abort() does not throw when not thinking', async () => {
       const { orch } = await buildOrchestrator();
-      (orch as unknown as { isThinking: boolean }).isThinking = true;
-
-      orch.handleUserInput('first');
-      orch.handleUserInput('second');
-      orch.handleUserInput('third');
-
-      expect(orch.messageQueue.map(m => m.text)).toEqual(['first', 'second', 'third']);
+      expect(() => orch.abort()).not.toThrow();
+      expect(orch.isTurnActive).toBe(false);
     });
   });
 
@@ -629,8 +745,7 @@ describe('Orchestrator', () => {
   });
 
   describe('Hook firing', () => {
-    // executeToolCalls calls permissionManager.check() which blocks in 'prompt' mode.
-    // Set autoApprove=true so all tools are auto-approved during hook tests.
+    // Config autoApprove stays off; the test PermissionManager approves every check through its prompt callback.
     let savedAutoApprove: boolean;
 
     beforeEach(() => {
@@ -770,20 +885,25 @@ describe('Orchestrator', () => {
       expect(results[0].output).toBe('plain result');
     });
 
-    test('hook fire() failure does not block tool execution', async () => {
+    test('a failing Pre hook fails closed: the tool is not run and the error names the hook', async () => {
       const dispatcher = new HookDispatcher();
       dispatcher.fire = async (_event: HookEvent): Promise<HookResult> => {
         throw new Error('hook system exploded');
       };
 
-      registerSuccessTool('robusttool', 'still works');
+      const executeMock = mock(async () => ({ success: true, output: 'still works' }));
+      toolRegistry.register({
+        definition: { name: 'robusttool', description: 'robusttool', parameters: { type: 'object', properties: {} } },
+        execute: executeMock,
+      });
       const { orch } = await buildOrchestratorWithHooks(dispatcher);
       const internal = orch as unknown as OrchestratorInternal;
       const results = await internal.executeToolCalls('turn-6', [{ id: 'c6', name: 'robusttool', arguments: {} }], sourceOf);
 
-      // Tool should still execute and succeed despite hook failure
-      expect(results[0].success).toBe(true);
-      expect(results[0].output).toBe('still works');
+      expect(results[0].success).toBe(false);
+      expect(results[0].error).toContain('Pre hook failed');
+      expect(results[0].error).toContain('hook system exploded');
+      expect(executeMock).not.toHaveBeenCalled();
     });
   });
 
@@ -840,7 +960,7 @@ describe('Orchestrator', () => {
       }
     }
 
-    /** autoApprove must be on so permission checks don't block the turn loop. */
+    // Config autoApprove stays off; the test PermissionManager approves every check through its prompt callback.
     let savedAutoApprove: boolean;
 
     beforeEach(() => {

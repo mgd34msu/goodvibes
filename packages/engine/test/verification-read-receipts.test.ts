@@ -61,15 +61,15 @@ test('changed source bytes retain the failed integrity fact and cannot acquire s
   expect(JSON.stringify(original)).toBe(before);
 });
 
-// Regression source; execution remains deferred until all coding is finished.
 test.each([false, true])('fresh receipt projection needs no returned-text hashing (truncated: %s)', truncated => {
   const { input } = observedRead(truncated);
-  const sources = verificationSources(input), hash = spyOn(crypto, 'createHash');
+  const sources = verificationSources(input), hash = spyOn(crypto, 'createHash'), digest = spyOn(crypto.webcrypto.subtle, 'digest');
   try {
     const view = nativeReadReceipts(sources);
     expect(view.receipts).toHaveLength(1); expect(view.reads).toHaveLength(1);
     expect(hash).not.toHaveBeenCalled();
-  } finally { hash.mockRestore(); }
+    expect(digest).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); digest.mockRestore(); }
 });
 
 test('invalid observation offsets never become source coverage even with matching returned-text length', () => {
@@ -148,4 +148,32 @@ test('citation excerpts share equal observed bytes without duplicating empty exc
   const different = citedReadSources([first, repeated, otherRange, changed], 'src/client.ts:50-52');
   expect(different).toHaveLength(2);
   expect(JSON.parse(different[1]!.source.text).rows).toEqual(['   50 | changed implementation']);
+});
+
+test('a read whose observation travels beside its text is credited like one that carries it inline', () => {
+  const { input, result, file } = observedRead();
+  const { readObservation, resolvedPath, ...modelText } = file;
+  input.transcript[1] = { role: 'tool', callId: 'read-client', outcome: 'ok', content: JSON.stringify({ ...result, files: [modelText] }),
+    hostEvidence: { reads: [{ index: 0, path: file.path, readObservation, resolvedPath }] } } as never;
+  const view = nativeReadReceipts(verificationSources(input));
+  expect(view.reads).toHaveLength(1);
+  expect(view.reads[0]).toMatchObject({ path: 'src/client.ts', resolvedPath: '/project/src/client.ts' });
+  const receipt = JSON.parse(view.receipts[0]!.text);
+  expect(receipt.result.files[0].returnedLines).toEqual({ start: 21, end: 20 + readObservation.completeLines });
+});
+
+test('without its host evidence a text-only read gets no source-line coverage', () => {
+  const { input, result, file } = observedRead();
+  const { readObservation: _observation, resolvedPath: _resolved, ...modelText } = file;
+  input.transcript[1] = { role: 'tool', callId: 'read-client', outcome: 'ok', content: JSON.stringify({ ...result, files: [modelText] }) } as never;
+  expect(nativeReadReceipts(verificationSources(input)).reads).toHaveLength(0);
+});
+
+test('a path-like run longer than any real path is not cited, and an ordinary citation beside it still is', () => {
+  const { input } = observedRead();
+  const native = nativeReadReceipts(verificationSources(input));
+  const blob = 'x'.repeat(50_000);
+  expect(citedReadSources(native.reads, `${blob}/client.ts:50-52`)).toHaveLength(0);
+  expect(citedReadSources(native.reads, `${blob} then src/client.ts:50-52`)).toHaveLength(1);
+  expect(citedReadSources(native.reads, blob)).toHaveLength(0);
 });

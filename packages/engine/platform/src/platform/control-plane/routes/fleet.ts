@@ -125,14 +125,35 @@ function clampLimit(raw: unknown, fallback: number, max: number): number {
 /** Structural dep, only the read surface `fleet.*` needs. */
 export type FleetQueryOnlyRegistry = Pick<ProcessRegistry, 'query'>;
 
+/**
+ * A node as it leaves the daemon. `raw` is the source record. For a background
+ * process's stdout and command line, a foreign agent's arguments or an
+ * automation's prompt it can hold unredacted output, so it stays in-process.
+ * The terminal reads two things back from the wire and nothing else: the
+ * contract views behind contract, group and unit rows (they hold plan,
+ * criteria and unit state, no process output), and an agent's `contractRole`.
+ * Those are the only parts of `raw` that travel.
+ */
+const CONTRACT_RAW_KINDS: ReadonlySet<ProcessKind> = new Set<ProcessKind>(['contract', 'contract-group', 'contract-unit']);
+
+function toWireNode(node: ProcessNode): ProcessNode {
+  const { raw, ...wire } = node;
+  if (CONTRACT_RAW_KINDS.has(node.kind) && raw !== undefined) return { ...wire, raw };
+  if (node.kind === 'agent' && typeof raw === 'object' && raw !== null) {
+    const contractRole = (raw as { contractRole?: unknown }).contractRole;
+    if (contractRole !== undefined) return { ...wire, raw: { contractRole } };
+  }
+  return wire;
+}
+
 export function createFleetSnapshotHandler(registry: FleetQueryOnlyRegistry): GatewayMethodHandler {
   return (invocation) => {
     const filter = readFleetQueryFilter(readInvocationParams(invocation));
     const snapshot = registry.query(filter);
     const truncated = snapshot.nodes.length > FLEET_SNAPSHOT_NODE_CAP;
-    const nodes: readonly ProcessNode[] = truncated
+    const nodes = (truncated
       ? snapshot.nodes.slice(0, FLEET_SNAPSHOT_NODE_CAP)
-      : snapshot.nodes;
+      : snapshot.nodes).map(toWireNode);
     return {
       capturedAt: snapshot.capturedAt,
       nodes,
@@ -175,7 +196,7 @@ export function createFleetListHandler(registry: FleetQueryOnlyRegistry): Gatewa
       throw new GatewayVerbError(page.error, 'INVALID_CURSOR', 400);
     }
     return {
-      items: page.items,
+      items: page.items.map(toWireNode),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
       capturedAt: snapshot.capturedAt,
@@ -251,7 +272,7 @@ export function createFleetArchiveFinishedHandler(registry: FleetArchiveCapableR
 export function createFleetArchivedListHandler(registry: FleetArchiveCapableRegistry): GatewayMethodHandler {
   return () => {
     const snapshot = requireArchive(registry, 'listArchived')();
-    return { capturedAt: snapshot.capturedAt, nodes: snapshot.nodes };
+    return { capturedAt: snapshot.capturedAt, nodes: snapshot.nodes.map(toWireNode) };
   };
 }
 
@@ -338,6 +359,13 @@ export interface FleetConflictsDeps {
   readonly listWorkstreams: () => ReadonlyArray<{ readonly id: string; readonly items: readonly ConflictWorkItemSlice[] }>;
   readonly stampConflictSession: (itemId: string, sessionId: string) => boolean;
   /**
+   * Whether a previously stamped resolution session is still running. When it
+   * is, `fleet.conflicts.resolve` is refused (409) with that session's id instead of
+   * starting a second agent in the same kept tree. Absent, a stamp alone never blocks a
+   * retry (an abandoned session must stay replaceable).
+   */
+  readonly isSessionLive?: (sessionId: string) => boolean;
+  /**
    * Start the seeded resolution session INSIDE the kept tree (the CI
    * fix-session machinery): the seed carries the tree path, branch, and the
    * structured conflict list. Resolves to the REAL session id, or an honest error.
@@ -384,6 +412,9 @@ export function createFleetConflictsListHandler(deps: FleetConflictsDeps): Gatew
 }
 
 export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): GatewayMethodHandler {
+  // Held across the await so a double click or a retry after a slow response
+  // cannot start a second agent in the same worktree before the first is stamped.
+  const inFlight = new Set<string>();
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const itemId = typeof params.itemId === 'string' ? params.itemId.trim() : '';
@@ -392,21 +423,40 @@ export function createFleetConflictsResolveHandler(deps: FleetConflictsDeps): Ga
     if (!conflict) {
       throw new GatewayVerbError(`Item ${itemId} has no unresolved merge conflict`, 'FAILED_PRECONDITION', 409);
     }
-    const started = await deps.startResolutionSession({
-      workstreamId: conflict.workstreamId,
-      itemId: conflict.itemId,
-      title: conflict.title,
-      worktreePath: conflict.worktreePath,
-      branch: conflict.branch,
-      files: conflict.files,
-    });
-    if ('error' in started) {
-      throw new GatewayVerbError(`Resolution session did not start: ${started.error}`, 'FAILED_PRECONDITION', 409);
+    if (inFlight.has(itemId)) {
+      throw new GatewayVerbError(
+        `A resolution session for item ${itemId} is already starting. Read fleet.conflicts.list for its session id once it is stamped.`,
+        'FAILED_PRECONDITION',
+        409,
+      );
     }
-    // The REAL session id is stamped onto the item (the CI fix-flow stamping
-    // contract), so the conflict row names where the resolution is happening.
-    deps.stampConflictSession(itemId, started.sessionId);
-    return { itemId, sessionId: started.sessionId, worktreePath: conflict.worktreePath, files: conflict.files };
+    if (conflict.resolutionSessionId && deps.isSessionLive?.(conflict.resolutionSessionId)) {
+      throw new GatewayVerbError(
+        `Item ${itemId} is already being resolved in session ${conflict.resolutionSessionId}. Open that session, or wait for it to finish before resolving again.`,
+        'FAILED_PRECONDITION',
+        409,
+      );
+    }
+    inFlight.add(itemId);
+    try {
+      const started = await deps.startResolutionSession({
+        workstreamId: conflict.workstreamId,
+        itemId: conflict.itemId,
+        title: conflict.title,
+        worktreePath: conflict.worktreePath,
+        branch: conflict.branch,
+        files: conflict.files,
+      });
+      if ('error' in started) {
+        throw new GatewayVerbError(`Resolution session did not start: ${started.error}`, 'FAILED_PRECONDITION', 409);
+      }
+      // The REAL session id is stamped onto the item (the CI fix-flow stamping
+      // contract), so the conflict row names where the resolution is happening.
+      deps.stampConflictSession(itemId, started.sessionId);
+      return { itemId, sessionId: started.sessionId, worktreePath: conflict.worktreePath, files: conflict.files };
+    } finally {
+      inFlight.delete(itemId);
+    }
   };
 }
 

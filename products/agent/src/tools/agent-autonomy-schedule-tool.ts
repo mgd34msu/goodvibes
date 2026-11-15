@@ -22,7 +22,6 @@ export interface AgentAutonomyScheduleToolArgs {
   readonly deliveryChannel?: unknown;
   readonly deliveryRoute?: unknown;
   readonly deliveryWebhook?: unknown;
-  readonly deliveryLink?: unknown;
   readonly disabled?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
@@ -47,10 +46,13 @@ function readBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === 'yes';
 }
 
+// Model-written text goes in as `--flag=value`, so a value that is itself the
+// name of an option (a task that is just "--disabled") stays a value instead of
+// being read as the next flag.
 function addOptionalArg(args: string[], flag: string, value: unknown): void {
   const text = readOptionalString(value);
   if (!text) return;
-  args.push(flag, text);
+  args.push(`${flag}=${text}`);
 }
 
 function scheduleFlag(kind: AutonomyScheduleKind): string {
@@ -69,12 +71,9 @@ function buildAutonomyScheduleArgs(rawArgs: AgentAutonomyScheduleToolArgs): read
   if (!scheduleValue) throw new Error('scheduleValue is required.');
 
   const args = [
-    scheduleFlag(rawArgs.scheduleKind),
-    scheduleValue,
-    '--task',
-    task,
-    '--success-criteria',
-    successCriteria,
+    `${scheduleFlag(rawArgs.scheduleKind)}=${scheduleValue}`,
+    `--task=${task}`,
+    `--success-criteria=${successCriteria}`,
   ];
   addOptionalArg(args, '--timezone', rawArgs.timezone);
   addOptionalArg(args, '--name', rawArgs.name);
@@ -83,7 +82,6 @@ function buildAutonomyScheduleArgs(rawArgs: AgentAutonomyScheduleToolArgs): read
   addOptionalArg(args, '--delivery-channel', rawArgs.deliveryChannel);
   addOptionalArg(args, '--delivery-route', rawArgs.deliveryRoute);
   addOptionalArg(args, '--delivery-webhook', rawArgs.deliveryWebhook);
-  addOptionalArg(args, '--delivery-link', rawArgs.deliveryLink);
   if (readBoolean(rawArgs.disabled)) args.push('--disabled');
   addOptionalArg(args, '--explicit-user-request', rawArgs.explicitUserRequest);
   return args;
@@ -120,7 +118,7 @@ export function createAgentAutonomyScheduleTool(
           },
           timezone: {
             type: 'string',
-            description: 'Optional IANA timezone for cron/at schedules.',
+            description: 'Optional IANA timezone for cron schedules only.',
           },
           name: {
             type: 'string',
@@ -146,17 +144,13 @@ export function createAgentAutonomyScheduleTool(
             type: 'string',
             description: 'Optional http(s) webhook target.',
           },
-          deliveryLink: {
-            type: 'string',
-            description: 'Optional link delivery target.',
-          },
           disabled: {
             type: 'boolean',
             description: 'Create the schedule disabled.',
           },
           confirm: {
             type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
+            description: 'Accepted and ignored: it is not recorded and does not grant effect authority.',
           },
           explicitUserRequest: {
             type: 'string',

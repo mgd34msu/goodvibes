@@ -37,6 +37,14 @@ describe('compaction-receipt', () => {
     expect(block).toContain('Sections included: standing-instructions, recent-turns');
   });
 
+  test('an unscored compaction prints no quality score', () => {
+    const block = buildCompactionReceiptBlock(baseReceipt({ qualityGrade: '', qualityScore: 0 }));
+    expect(block).not.toContain('Quality:');
+    expect(block).not.toContain('0/100');
+    expect(block).toContain('no quality score');
+    expect(block).toContain('structured-handoff');
+  });
+
   test('applied receipt with no recorded sections says so plainly rather than hiding it', () => {
     const block = buildCompactionReceiptBlock(baseReceipt({ sectionsIncluded: [] }));
     expect(block).toContain('Sections included: none recorded');

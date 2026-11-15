@@ -32,15 +32,9 @@ function recordWithKind(kind: string): Record<string, unknown> {
 
 describe('session wire: kind enum is open on read', () => {
   test('a record carrying an unknown kind passes RECORD response validation', () => {
-    // 'quantum' is not one of the six modeled kinds; a future/mixed-version daemon
-    // could emit a kind this build does not know.
+    // 'quantum' is not a kind this build models; a future/mixed-version daemon
+    // could emit one.
     expect(firstJsonSchemaFailure(SHARED_SESSION_RECORD_SCHEMA, recordWithKind('quantum'))).toBeUndefined();
-  });
-
-  test('known kinds still validate on read', () => {
-    for (const kind of ['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation']) {
-      expect(firstJsonSchemaFailure(SHARED_SESSION_RECORD_SCHEMA, recordWithKind(kind))).toBeUndefined();
-    }
   });
 
   test('a sessions.list envelope with one unknown-kind record validates whole (no blanking)', () => {

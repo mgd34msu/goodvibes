@@ -4,6 +4,9 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { catalogEnvelope, catalogFilters } from './agent-harness-tool-utils.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { operatorMethodIsOutward, operatorMethodIsReadOnly } from './agent-operator-input-projector.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessOperatorMethodArgs {
   readonly methodId?: unknown;
@@ -13,10 +16,11 @@ export interface AgentHarnessOperatorMethodArgs {
   readonly limit?: unknown;
 }
 
+// The effect names are the ones agent_operator_method itself reports in a preview.
 type OperatorMethodEffect =
   | 'read-only-network'
-  | 'confirmed-connected-host-state'
-  | 'confirmed-admin-connected-host-state';
+  | 'admitted-connected-host-state'
+  | 'admitted-admin-connected-host-state';
 
 type OperatorMethodLookupSource = 'methodId' | 'target' | 'query';
 
@@ -60,7 +64,6 @@ interface OperatorMethodDescriptor {
   readonly access: string;
   readonly scopes: readonly string[];
   readonly available: boolean;
-  readonly parameters?: readonly Record<string, unknown>[];
   /** Full schema is protected evidence; display still uses its bounded projection. */
   readonly inputSchema?: Record<string, unknown>;
 }
@@ -99,16 +102,12 @@ type OperatorMethodResolution =
     }
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
-const READ_ONLY_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function operatorContractMethods(): readonly OperatorContractMethod[] {
@@ -121,31 +120,32 @@ function operatorContractMethods(): readonly OperatorContractMethod[] {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** One rule with the tool that runs the method, so the catalog cannot call a method read-only that the tool gates. */
 function methodIsReadOnly(method: OperatorContractMethod): boolean {
-  const httpMethod = method.http?.method?.toUpperCase();
-  if (httpMethod && READ_ONLY_HTTP_METHODS.has(httpMethod)) return true;
-  const scopes = method.scopes ?? [];
-  return scopes.length > 0 && scopes.every((scope) => scope.startsWith('read:'));
+  return operatorMethodIsReadOnly(method) && !operatorMethodIsOutward(method.id);
 }
 
 function methodEffect(method: OperatorContractMethod): OperatorMethodEffect {
   if (methodIsReadOnly(method)) return 'read-only-network';
   return method.access === 'admin'
-    ? 'confirmed-admin-connected-host-state'
-    : 'confirmed-connected-host-state';
+    ? 'admitted-admin-connected-host-state'
+    : 'admitted-connected-host-state';
 }
 
-function confirmationFor(effect: OperatorMethodEffect): string {
-  if (effect === 'read-only-network') return 'Read-only; confirmation is not required.';
-  if (effect === 'confirmed-admin-connected-host-state') {
-    return 'Admin route. Requires confirm:true and explicitUserRequest naming the requested change.';
+const ADMISSION_NOTE = `${EFFECT_ADMISSION_SENTENCE} dryRun previews the route without calling the daemon.`;
+
+function confirmationFor(effect: OperatorMethodEffect, method: OperatorContractMethod): string {
+  if (effect === 'read-only-network') {
+    return method.id === 'browser.screenshot'
+      ? 'Read-only by default. With a destination path it writes a file and needs recorded effect admission like any other write.'
+      : 'Read-only; confirmation is not required.';
   }
-  return 'Mutation route. Requires confirm:true and explicitUserRequest naming the requested change.';
+  return `${effect === 'admitted-admin-connected-host-state' ? 'Admin route.' : 'Mutation route.'} ${ADMISSION_NOTE}`;
 }
 
 function preferredToolFor(effect: OperatorMethodEffect): string {
   if (effect === 'read-only-network') return 'agent_operator_method';
-  return 'agent_operator_method with confirm:true and explicitUserRequest';
+  return 'agent_operator_method (needs recorded effect admission)';
 }
 
 function parametersFromInputSchema(method: OperatorContractMethod): readonly Record<string, unknown>[] {
@@ -180,17 +180,16 @@ function toDescriptor(method: OperatorContractMethod): OperatorMethodDescriptor 
     effect,
     owner: 'goodvibes-daemon',
     preferredModelTool: available ? preferredToolFor(effect) : UNAVAILABLE_MODEL_TOOL,
-    confirmation: available ? confirmationFor(effect) : UNAVAILABLE_CONFIRMATION,
+    confirmation: available ? confirmationFor(effect, method) : UNAVAILABLE_CONFIRMATION,
     boundary: available
       ? (effect === 'read-only-network'
         ? 'Reads the connected GoodVibes daemon operator route and returns a redacted response.'
-        : 'Runs a confirmed connected GoodVibes daemon operator route. The model must keep the action visible, reversible when possible, and tied to the user request.')
+        : 'Runs a connected GoodVibes daemon operator route under recorded effect admission. The model must keep the action visible, reversible when possible, and tied to the user request.')
       : UNAVAILABLE_BOUNDARY,
     category: method.category ?? 'uncategorized',
     access: method.access ?? 'authenticated',
     scopes: method.scopes ?? [],
     available,
-    parameters: available ? parametersFromInputSchema(method) : [],
     ...(method.inputSchema ? { inputSchema: method.inputSchema } : {}),
   };
 }
@@ -214,6 +213,16 @@ function methodSearchText(method: OperatorMethodDescriptor): string {
   ].join('\n');
 }
 
+/** Computed only for a described method, so one odd schema cannot break the whole catalog. */
+export function operatorMethodParameters(method: Pick<OperatorMethodDescriptor, 'id' | 'available' | 'inputSchema'>): { readonly parameters: readonly Record<string, unknown>[]; readonly parametersNote?: string } {
+  if (!method.available) return { parameters: [] };
+  try {
+    return { parameters: parametersFromInputSchema({ id: method.id, ...(method.inputSchema ? { inputSchema: method.inputSchema } : {}) }) };
+  } catch {
+    return { parameters: [], parametersNote: 'The input schema is outside the size limits for a parameter summary; read the method contract for its inputs.' };
+  }
+}
+
 function describeMethod(
   method: OperatorMethodDescriptor,
   options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
@@ -227,14 +236,14 @@ function describeMethod(
     owner: method.owner,
     route: method.route,
     available: method.available,
-    modelRoute: previewHarnessText(method.preferredModelTool),
+    modelRoute: method.preferredModelTool,
     scopes: method.scopes,
     confirmation: method.confirmation,
     ...(options.lookup ? { lookup: options.lookup } : {}),
     ...(options.includeParameters ? {
       preferredModelTool: method.preferredModelTool,
       boundary: method.boundary,
-      parameters: method.parameters ?? [],
+      ...operatorMethodParameters(method),
     } : {
       summary: previewHarnessText(method.boundary),
     }),
@@ -248,7 +257,7 @@ function describeCandidate(method: OperatorMethodDescriptor): Record<string, unk
     effect: method.effect,
     route: method.route,
     available: method.available,
-    modelRoute: previewHarnessText(method.preferredModelTool),
+    modelRoute: method.preferredModelTool,
   };
 }
 
@@ -273,12 +282,12 @@ export function operatorMethodCatalogStatus(): Record<string, unknown> {
     methods: methods.length,
     readOnlyMethods: methods.filter((method) => method.effect === 'read-only-network').length,
     confirmedMethods: methods.filter((method) => method.effect !== 'read-only-network').length,
-    adminMethods: methods.filter((method) => method.effect === 'confirmed-admin-connected-host-state').length,
+    adminMethods: methods.filter((method) => method.effect === 'admitted-admin-connected-host-state').length,
     unavailableMethods,
     categories,
     policy: unavailableMethods > 0
-      ? `Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest. ${unavailableMethods} cataloged method(s) are currently unavailable (no served route), check each method's "available" field before treating it as callable.`
-      : 'Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes require confirm:true and explicitUserRequest.',
+      ? `Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes: ${EFFECT_ADMISSION_SENTENCE} ${unavailableMethods} cataloged method(s) are currently unavailable (no served route), check each method's "available" field before treating it as callable.`
+      : `Full GoodVibes platform operator contract. Read-only routes can run through agent_operator_method; write/admin routes: ${EFFECT_ADMISSION_SENTENCE}`,
   };
 }
 

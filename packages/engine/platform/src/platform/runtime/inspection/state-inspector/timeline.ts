@@ -94,6 +94,9 @@ export class TimelineBuffer {
    */
   public append(event: Omit<TimelineEvent, 'seq'>): TimelineEvent {
     const wasLive = this.isLive;
+    // A full ring drops its oldest event on this append, which shifts every
+    // logical index down by one.
+    const evicts = this._totalAppended >= this._maxSize;
     const stored: TimelineEvent = { ...event, seq: this._nextSeq++ };
     this._ring[this._head] = stored;
     this._head = (this._head + 1) % this._maxSize;
@@ -102,6 +105,11 @@ export class TimelineBuffer {
     // Advance cursor only when live
     if (wasLive) {
       this._cursor = this.size; // stay at live
+    } else if (evicts) {
+      // Follow the pinned event as the indices shift. At index 0 the pinned
+      // event itself was the one dropped, so the oldest retained one is the
+      // nearest thing left to show.
+      this._cursor = Math.max(0, this._cursor - 1);
     }
     return stored;
   }

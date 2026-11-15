@@ -157,6 +157,8 @@ export class HostedSessionFeed {
 
   /** Say whether a live stream is open, and why not when it is not. */
   setStreaming(streaming: boolean, note: string | null = null): void {
+    // A dropped stream can no longer deliver the result of a tool it announced.
+    if (!streaming) this.settleRunningTools('the live stream closed');
     this.state = { ...this.state, streaming, streamNote: note };
     this.emit();
   }
@@ -225,6 +227,7 @@ export class HostedSessionFeed {
       }
       case 'TURN_ERROR': {
         this.settleStreamingRow();
+        this.settleRunningTools('the turn ended with an error');
         this.appendRow({
           kind: 'error',
           text: readString(event.payload, 'error') || 'the hosted turn ended with an error',
@@ -235,6 +238,7 @@ export class HostedSessionFeed {
       }
       case 'TURN_CANCEL': {
         this.settleStreamingRow();
+        this.settleRunningTools('the turn was cancelled');
         const reason = readString(event.payload, 'reason');
         this.appendRow({
           kind: 'system',
@@ -296,6 +300,7 @@ export class HostedSessionFeed {
     this.setRecord(update.session);
     if (update.event === 'hosted-session-terminated') {
       this.settleStreamingRow();
+      this.settleRunningTools('the session ended');
       const reason = update.session.terminatedReason ?? 'no reason recorded';
       this.note(`this hosted session ended: ${reason}${update.detail ? ` (${update.detail})` : ''}`);
     }
@@ -323,6 +328,26 @@ export class HostedSessionFeed {
     this.streamingRowIndex = null;
     this.state = { ...this.state, rows };
     this.emit();
+  }
+
+  /**
+   * Close every tool row still marked running when nothing will report its
+   * result any more, so a row never says "running" for a call that is over and
+   * `runningToolCalls` never offers to cancel it. Emits nothing; the caller's
+   * own state change does.
+   */
+  private settleRunningTools(why: string): void {
+    const hasStreamingTool = this.state.rows.some((row) => row.kind === 'tool' && row.streaming);
+    if (this.state.runningToolCalls.length === 0 && !hasStreamingTool) return;
+    this.state = {
+      ...this.state,
+      runningToolCalls: [],
+      rows: this.state.rows.map((row) => (
+        row.kind === 'tool' && row.streaming
+          ? { ...row, text: `${row.text.replace(/: running$/, '')}: ended without a result (${why})`, streaming: false }
+          : row
+      )),
+    };
   }
 
   private appendRow(row: HostedSessionRow): void {

@@ -88,6 +88,23 @@ function describeError(error: unknown): string {
 }
 
 /**
+ * Whether a failure from the connected host leaves open that the host already
+ * ran (and was billed for) the transcription: a timeout or abort after the
+ * audio was sent, a 5xx or 408 reply, or a connection dropped mid-exchange.
+ * Falling back then would transcribe, and bill, the same audio a second time.
+ * A refused connection, a 404, an auth failure or an unsupported method prove
+ * the host never started, and those still fall back.
+ */
+function hostMayHaveTranscribed(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { name, code, status, statusCode } = error as { name?: unknown; code?: unknown; status?: unknown; statusCode?: unknown };
+  if (name === 'TimeoutError' || name === 'AbortError') return true;
+  if (code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'UND_ERR_BODY_TIMEOUT' || code === 'UND_ERR_HEADERS_TIMEOUT') return true;
+  const http = typeof status === 'number' ? status : typeof statusCode === 'number' ? statusCode : undefined;
+  return http !== undefined && (http === 408 || http >= 500);
+}
+
+/**
  * Transcribe through the best available route, falling back with a stated
  * reason. The connected host is tried first whenever one exists.
  */
@@ -146,6 +163,10 @@ export async function transcribeThroughBestRoute(
         configSource: candidate.configSource,
         error: detail,
       });
+      if (candidate.route === 'connected-host' && hostMayHaveTranscribed(error)) {
+        attempts.push('Not retrying in this process: the connected host may already have transcribed this audio (and been billed for it); check the host, then try again.');
+        break;
+      }
     }
   }
   throw new SttRoutesExhaustedError(attempts);

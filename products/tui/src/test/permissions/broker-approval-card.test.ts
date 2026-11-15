@@ -3,7 +3,6 @@ import {
   handleBrokerApprovalChange,
   buildFixSessionAffordance,
   handleFixSessionAttachKey,
-  refreshFixSessionsFromApprovals,
   type BrokerApprovalCardBroker,
 } from '../../permissions/broker-approval-card.ts';
 import type { PendingPermissionState } from '../../shell/blocking-input.ts';
@@ -95,27 +94,7 @@ describe('broker-originated approval cards', () => {
     expect(renders).toBe(1);
   });
 
-  test('a record carrying a spawned fix-session id surfaces the jump/attach affordance', () => {
-    let pending: PendingPermissionState | null = null;
-    const started: string[] = [];
-    const broker = makeBroker({});
-
-    // The accepted ci:fix-session record is stamped with the spawned id and
-    // republished (status resolved, card already cleared).
-    handleBrokerApprovalChange({
-      approval: { id: 'ap-9', callId: 'call-9', status: 'approved', request: makeRequest('call-9'), fixSessionId: 'sess-abc' },
-      getPending: () => pending,
-      setPending: (next) => { pending = next; },
-      broker,
-      render: () => {},
-      onFixSessionStarted: (id) => { started.push(id); },
-      defer: (cb) => cb(),
-    });
-
-    expect(started).toEqual(['sess-abc']);
-  });
-
-  test('buildFixSessionAffordance arms the one-key jump once per id (no retype instruction); refresh path dedupes', () => {
+  test('buildFixSessionAffordance arms the one-key jump once per id (no retype instruction)', () => {
     const messages: string[] = [];
     const armed: string[] = [];
     const affordance = buildFixSessionAffordance({
@@ -131,14 +110,6 @@ describe('broker-originated approval cards', () => {
     expect(messages[0]).toContain('press j to jump');
     expect(messages[0]).not.toContain('/session resume');
     expect(messages[0]).not.toContain('sess-xyz');
-
-    // The listApprovals refresh path feeds the same de-duplicating affordance.
-    refreshFixSessionsFromApprovals(
-      () => [{ fixSessionId: 'sess-xyz' }, { fixSessionId: 'sess-new' }, {}],
-      affordance,
-    );
-    expect(messages).toHaveLength(2);
-    expect(armed).toEqual(['sess-xyz', 'sess-new']);
   });
 
   test('handleFixSessionAttachKey: the jump key attaches to the armed session; other keys fall through', () => {

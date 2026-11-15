@@ -51,10 +51,10 @@ describe('resolveWebBinding: the web endpoint truth', () => {
     for (const raw of [0, Number.NaN, 'not-a-port', '', undefined, -1, 99999]) {
       const binding = resolveWebBinding({ port: raw });
       expect(binding.port, `port ${String(raw)} must fall back`).toBe(3423);
-      if (raw !== undefined) expect(binding.recognized).toBe(raw === undefined);
+      expect(binding.recognized, `port ${String(raw)} recognized`).toBe(raw === undefined);
     }
     // undefined = simply unset, the documented default applies and stays honest.
-    expect(resolveWebBinding({}).port).toBe(3423);
+    expect(resolveWebBinding({})).toMatchObject({ port: 3423, recognized: true });
   });
 
   test('an unrecognized web hostMode is flagged and binds local', () => {

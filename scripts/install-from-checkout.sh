@@ -37,7 +37,7 @@ for command in git curl tar unzip sha256sum; do
   command -v "$command" >/dev/null || { echo "Install the prerequisite: $command" >&2; exit 1; }
 done
 getconf GNU_LIBC_VERSION >/dev/null 2>&1 || { echo 'A glibc Linux distribution is required (musl/Alpine is not supported).' >&2; exit 1; }
-[[ -f "$root/products/daemon/scripts/install-native.ts" ]] || { echo 'Run install.sh from a cloned goodvibes-jev repository.' >&2; exit 1; }
+[[ -f "$root/products/daemon/scripts/install-native.ts" ]] || { echo 'Run install-from-checkout.sh from a cloned goodvibes-jev repository (released binaries install with scripts/install.sh).' >&2; exit 1; }
 work=$(mktemp -d -t goodvibes-jev-bootstrap.XXXXXXXX)
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/bin"
@@ -48,6 +48,9 @@ verify() {
   [[ $hash =~ ^[a-fA-F0-9]{64}$ ]] || { echo "Missing or ambiguous checksum: $2" >&2; exit 1; }
   (cd "$work" && printf '%s  %s\n' "$hash" "$2" | sha256sum --check --status)
 }
+# The Bun and Node checksum lists come from the same hosts as their archives, so
+# they catch a corrupt download, not a compromised host. Both runtimes are only
+# used to build this checkout.
 # This is the compiler version required by the repository, not a Jev model pin.
 bun_version=1.3.14
 if command -v bun >/dev/null && [[ $(bun --version) == "$bun_version" ]]; then

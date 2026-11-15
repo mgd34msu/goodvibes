@@ -52,8 +52,14 @@ function normalizePersonalOpsAction(value: unknown): AgentPersonalOpsAction | nu
   return null;
 }
 
-function readAction(args: AgentPersonalOpsToolArgs): AgentPersonalOpsAction {
-  const explicit = normalizePersonalOpsAction(args.action) ?? normalizePersonalOpsAction(args.mode);
+const PERSONAL_OPS_ACTIONS = ['briefing', 'status', 'queue', 'intake', 'lane', 'read'] as const;
+
+/** Null when an action or mode was named but is not one of ours: a typo must not become a different read. */
+function readAction(args: AgentPersonalOpsToolArgs): AgentPersonalOpsAction | null {
+  const action = normalizePersonalOpsAction(args.action), mode = normalizePersonalOpsAction(args.mode);
+  // Both are checked: a recognised mode must not hide an action that is not ours (action:"delete" mode:"read").
+  if ((readString(args.action) && !action) || (readString(args.mode) && !mode)) return null;
+  const explicit = action ?? mode;
   if (explicit) return explicit;
   if (readString(args.recordId)) return 'read';
   if (readString(args.laneId)) return 'lane';
@@ -179,6 +185,9 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
       options?.signal?.throwIfAborted();
       const args = captureCatalogData(rawArgs);
       const action = readAction(args);
+      if (!action) {
+        return error(`Unknown Personal Ops action '${normalizePersonalOpsAction(args.action) ? readString(args.mode) : readString(args.action)}'. Use one of: ${PERSONAL_OPS_ACTIONS.join(', ')}. Nothing was read or changed.`);
+      }
 
       if (action === 'briefing') return forwardHarnessCatalogCall(harnessTool, rawArgs, briefingArgs(args), options);
       if (action === 'status') return forwardHarnessCatalogCall(harnessTool, rawArgs, statusArgs(args), options);
@@ -187,7 +196,7 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
       if (action === 'lane') return forwardHarnessCatalogCall(harnessTool, rawArgs, laneArgs(args), options);
       if (action === 'read') return forwardHarnessCatalogCall(harnessTool, rawArgs, readArgs(args), options);
 
-      return error('Unknown Personal Ops action. Use action:"briefing" for the user-first daily plan.');
+      return error(`Unknown Personal Ops action. Use one of: ${PERSONAL_OPS_ACTIONS.join(', ')}.`);
     },
   };
   return protectHarnessCatalogTool(tool, deps.toolRegistry, () => true, deps.commandContext);

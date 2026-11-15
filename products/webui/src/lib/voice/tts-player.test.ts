@@ -79,7 +79,13 @@ describe('TtsEngine', () => {
       schedule: fakeSchedule([ok(0, 'a'), skipped(1, 'b'), ok(2, 'c')]),
     });
     expect(sink.enqueued.map((b) => new TextDecoder().decode(b))).toEqual(['a', 'c']);
-    expect(engine.getState().error).toBeNull();
+    // The reply played with a gap, so the final state says so rather than reading as idle.
+    expect(engine.getState()).toEqual({
+      id: null,
+      phase: null,
+      skipped: 1,
+      error: '1 part of this reply could not be read aloud.',
+    });
   });
 
   test('an all-skipped reply ends in an honest error state, nothing played', async () => {

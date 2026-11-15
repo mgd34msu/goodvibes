@@ -18,7 +18,8 @@ const root = resolve(import.meta.dir, '../../..');
 const entrypoint = 'src/test/fixtures/planning-history-recovery.ts';
 const source = '  Original owner request\r\n界 e\u0301 😀\t  ';
 
-async function run(argv: string[], cwd: string, timeoutMs = 20_000) {
+// The timeout only kills a hung child; a run that finishes is judged on its output, never on how long it took.
+async function run(argv: string[], cwd: string, timeoutMs = 120_000) {
   const child = Bun.spawn(argv, { cwd, env: { ...process.env, HOME: cwd }, stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
   try {
@@ -27,10 +28,9 @@ async function run(argv: string[], cwd: string, timeoutMs = 20_000) {
   } finally { clearTimeout(timer); if (child.exitCode === null) { child.kill('SIGKILL'); await child.exited; } }
 }
 
-test('compiled TUI history → native ledger → process restart recovers the exact owner source once without changing saved approval', async () => {
+test('TUI history → native ledger → process restart recovers the exact owner source once without changing saved approval', async () => {
   const home = mkdtempSync(join(tmpdir(), 'tui-history-recovery-'));
   const dbPath = join(home, 'history.sqlite'); const journalPath = join(home, 'native.json.intake');
-  const binary = join(home, process.platform === 'win32' ? 'history-recovery.exe' : 'history-recovery');
   const prepared = prepareLegacyWorkLedgerMigration(historical);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   const works = projectLegacyImportWorks(prepared.manifest, 300);
@@ -69,9 +69,7 @@ test('compiled TUI history → native ledger → process restart recovers the ex
     try { for (const { source } of historical.sources) await store.replaceSourceRecord(source as KnowledgeSourceRecord); } finally { await store.close(); }
     const historicalBytes = readFileSync(dbPath);
     await pairNativeTestHost(home, server.url.origin, 'synthetic-history-recovery-token');
-    const platform = process.platform === 'win32' ? 'windows' : process.platform;
-    await run([process.execPath, 'scripts/compile.ts', entrypoint, '--compile', `--target=bun-${platform}-${process.arch}`, '--outfile', binary], root, 60_000);
-    const launch = async (mode: string) => JSON.parse(await run([binary, mode, home, server.url.origin, historical.projectId], home)) as {
+    const launch = async (mode: string) => JSON.parse(await run([process.execPath, join(root, entrypoint), mode, home, server.url.origin, historical.projectId], home)) as {
       mode: string; opened: string[]; output: string[]; dispatched: { text: string; requestId: string; inputId: string }[]; historicalUnchanged: boolean; judgmentReads: number;
     };
     const first = await launch('submit');

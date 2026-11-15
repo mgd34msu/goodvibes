@@ -8,6 +8,7 @@ import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isInsideProductWorktreeDirectory, markProductWorktree } from './product-worktree-marker.js';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 
@@ -310,21 +311,22 @@ export class GitService {
     const result: Array<{ hash: string; author: string; line: number; content: string }> = [];
 
     let currentHash = '';
-    let currentAuthor = '';
     let currentLine = 0;
+    // Porcelain states a commit's headers (author included) only the first time it appears.
+    const authors = new Map<string, string>();
 
     for (const line of lines) {
-      // Hash line: 40-char hex + original_line + final_line + num_lines
-      if (/^[0-9a-f]{40}\s/.test(line)) {
+      // Hash line: full commit id (40 hex, or 64 in a SHA-256 repository) + original_line + final_line + num_lines
+      if (/^[0-9a-f]{40,64}\s/.test(line)) {
         const parts = line.split(' ');
         currentHash = parts[0]!;
         currentLine = parseInt(parts[2]! ?? parts[1]!, 10);
       } else if (line.startsWith('author ')) {
-        currentAuthor = line.slice(7);
+        authors.set(currentHash, line.slice(7));
       } else if (line.startsWith('\t')) {
         result.push({
           hash: currentHash,
-          author: currentAuthor,
+          author: authors.get(currentHash) ?? '',
           line: currentLine,
           content: line.slice(1),
         });
@@ -551,6 +553,9 @@ export class GitService {
       await mutateWorktree(git, this.cwd, [...(checkout ? [] : ['-c', 'core.hooksPath=/dev/null']), 'worktree', 'add', ...(checkout ? [] : ['--no-checkout']), path, '-b', branch, ...(startPoint === undefined ? [] : [startPoint])], beforeMutation);
       // Capture before a borrowed post hook can change the new directories.
       worktreeCreations.set(this, captureWorktreeCreation(path, branch, this.cwd));
+      if (isInsideProductWorktreeDirectory(this.cwd, path) && !markProductWorktree(resolve(this.cwd, path))) {
+        logger.warn('git: could not record that the product created this worktree; it will not be removed automatically', { path });
+      }
       await this.firePost('worktreeAdd', { path, branch });
     } catch (err) {
       await this.fireFail('worktreeAdd', { path, branch, error: summarizeError(err) });

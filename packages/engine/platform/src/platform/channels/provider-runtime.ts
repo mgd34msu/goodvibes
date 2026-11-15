@@ -20,6 +20,7 @@ import {
   handleNtfySurfacePayload,
   handleSlackSurfacePayload,
 } from '../adapters/index.js';
+import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -62,12 +63,15 @@ interface ProviderRuntimeManagerDeps {
    * becomes something the owner hears about.
    *
    * These three surfaces need it MORE than the webhook ones, not less: Slack
-   * Socket Mode, the Discord gateway and the ntfy JSON stream have no ack, no
-   * cursor and no redelivery. Once the socket has handed an event over, the
-   * catch below is the last place it exists. Losing it quietly is structural
-   * here, so saying so is the only remedy available.
+   * Socket Mode and the Discord gateway have no ack, no cursor and no
+   * redelivery, and ntfy redelivers a failed message only a bounded number of
+   * times. Once an event is given up on, the catch is the last place it
+   * exists. Losing it quietly is structural here, so saying so is the only
+   * remedy available.
    */
   readonly ingressAlarm?: import('./ingress-alarm.js').ChannelIngressAlarm | undefined;
+  /** Posts a reply to a Slack `response_url`; defaults to an HTTPS POST. Injectable for tests. */
+  readonly postSlackResponse?: ((url: string, body: Record<string, unknown>) => Promise<void>) | undefined;
 }
 
 interface RuntimeState {
@@ -82,6 +86,40 @@ const DEFAULT_STATE: RuntimeState = {
   running: false,
   metadata: {},
 };
+
+/**
+ * How many times one ntfy message is handed back for redelivery before it is
+ * skipped. ntfy replays from the last message this node finished, so a failed
+ * message returns on the reconnect; a few tries cover a transient failure, and
+ * the bound keeps one bad message from holding its topic for as long as the
+ * server caches it.
+ */
+// 4004 bad token, 4010-4012 bad shard or API version, 4013/4014 intents: reconnecting
+// with the same credentials and settings is refused again.
+const DISCORD_PERMANENT_CLOSE_CODES: ReadonlySet<number> = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
+
+const NTFY_MESSAGE_ATTEMPTS = 3;
+/** Failed-message counts kept at once; the oldest are forgotten first. */
+const NTFY_MESSAGE_FAILURES_MAX = 256;
+/** Consecutive stream reconnects before the topic reports it is not reading. */
+const NTFY_RECONNECTS_BEFORE_DEGRADED = 3;
+
+async function postSlackResponseUrl(url: string, body: Record<string, unknown>): Promise<void> {
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`Slack response_url answered HTTP ${response.status}`);
+  await response.arrayBuffer();
+}
+
+/** A server failure (5xx) or a capacity refusal (429): the request was not started. Other 4xx answers are policy outcomes. */
+function isUnservedStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+const SLACK_NOT_STARTED_TEXT = 'I could not start that request right now. Please try again in a moment.';
 
 export class ChannelProviderRuntimeManager {
   private slackClient: SlackSocketModeClient | null = null;
@@ -107,7 +145,14 @@ export class ChannelProviderRuntimeManager {
    * express that; a map of independent streams can.
    */
   private readonly ntfyAborts = new Map<string, AbortController>();
-  private socketLostHandler: ((kind: 'slack' | 'discord', reason: string) => void) | null = null;
+  /**
+   * Why a topic is not being read, per topic. One status covers every topic,
+   * so a failure kept on that status was erased by the next topic's start.
+   */
+  private readonly ntfyTopicErrors = new Map<string, string>();
+  private readonly ntfyReconnects = new Map<string, number>();
+  private readonly ntfyMessageFailures = new Map<string, number>();
+  private socketLostHandler: ((kind: 'slack' | 'discord', reason: string, permanent?: boolean) => void) | null = null;
   private readonly state: Record<ProviderRuntimeSurface, RuntimeState> = {
     slack: { ...DEFAULT_STATE, metadata: {} },
     discord: { ...DEFAULT_STATE, metadata: {} },
@@ -115,58 +160,6 @@ export class ChannelProviderRuntimeManager {
   };
 
   constructor(private readonly deps: ProviderRuntimeManagerDeps) {}
-
-  /**
-   * Start every surface the operator switched on, and account for every one of
-   * them out loud.
-   *
-   * The previous shape skipped a surface whose precondition was unmet by simply
-   * not entering the branch, an enabled Slack with no app token, an enabled
-   * ntfy with no topic, and returned a result array the caller discards. The
-   * operator's config said "on", the runtime did nothing, and no line anywhere
-   * said why. An enabled surface that does not come up is now an ERROR naming
-   * the surface, the reason, and the setting to change.
-   */
-  async startConfigured(options: ProviderRuntimeStartOptions = {}): Promise<ProviderRuntimeActionResult[]> {
-    const results: ProviderRuntimeActionResult[] = [];
-    const attempt = async (
-      surface: ProviderRuntimeSurface,
-      precondition: () => Promise<string | null> | string | null,
-    ): Promise<void> => {
-      if (!this.deps.configManager.get(`surfaces.${surface}.enabled` as Parameters<ConfigManager['get']>[0])) return;
-      const missing = await precondition();
-      if (missing) {
-        this.markError(surface, missing);
-        this.reportInert(surface, missing);
-        return;
-      }
-      const result = await this.start(surface, options);
-      results.push(result);
-      if (!result.ok) this.reportInert(surface, result.message);
-    };
-
-    await attempt('slack', async () => (await this.resolveSlackAppToken())
-      ? null
-      : 'no Slack app-level token resolved; set surfaces.slack.appToken (a goodvibes://secrets/... reference is fine) or the SLACK_APP_TOKEN environment variable');
-    await attempt('discord', async () => (await this.resolveDiscordBotToken())
-      ? null
-      : 'no Discord bot token resolved; set surfaces.discord.botToken (a goodvibes://secrets/... reference is fine) or the DISCORD_BOT_TOKEN environment variable');
-    await attempt('ntfy', () => this.resolveNtfyTopics().length > 0
-      ? null
-      : 'no ntfy topic resolved; set surfaces.ntfy.agentTopic (and optionally chatTopic / remoteTopic)');
-    return results;
-  }
-
-  /**
-   * One inbound surface the operator enabled is not up. This is the single most
-   * expensive state the daemon can be in, the config reads correct, the
-   * process is healthy, and messages disappear, so it is stated at ERROR with
-   * the operator's next action in it, not left to a status endpoint nobody
-   * queries.
-   */
-  private reportInert(surface: ProviderRuntimeSurface, reason: string): void {
-    logger.error(`${surface} is enabled but is NOT receiving messages`, { surface, action: reason });
-  }
 
   async start(
     surface: ProviderRuntimeSurface,
@@ -195,6 +188,8 @@ export class ChannelProviderRuntimeManager {
       return this.result('discord', true, 'Discord Gateway runtime stopped.');
     }
     for (const topic of [...this.ntfyAborts.keys()]) this.abortNtfyTopic(topic);
+    this.ntfyTopicErrors.clear();
+    this.ntfyReconnects.clear();
     this.markStopped('ntfy');
     return this.result('ntfy', true, 'ntfy JSON stream runtime stopped.');
   }
@@ -238,7 +233,22 @@ export class ChannelProviderRuntimeManager {
     }
     const abort = new AbortController();
     this.ntfyAborts.set(topic, abort);
-    const ntfy = new NtfyIntegration(this.ntfyBaseUrl(), await this.resolveNtfyToken() ?? undefined);
+    let token: string | null;
+    try {
+      token = await this.resolveNtfyToken();
+    } catch (error) {
+      // Without this the topic stayed "already running" with no stream behind it.
+      if (this.ntfyAborts.get(topic) === abort) this.ntfyAborts.delete(topic);
+      const message = `the ntfy access token could not be resolved: ${summarizeError(error)}`;
+      this.failNtfyTopic(topic, message);
+      return this.result('ntfy', false, message);
+    }
+    if (abort.signal.aborted || this.ntfyAborts.get(topic) !== abort) {
+      return this.result('ntfy', false, 'ntfy topic subscription start was cancelled by stop().');
+    }
+    this.ntfyTopicErrors.delete(topic);
+    this.ntfyReconnects.delete(topic);
+    const ntfy = new NtfyIntegration(this.ntfyBaseUrl(), token ?? undefined);
     const replayFromMs = options.replayFromMs ?? null;
     const since = replayFromMs === null
       ? createNtfyLiveSubscriptionSince()
@@ -248,15 +258,16 @@ export class ChannelProviderRuntimeManager {
       since,
       replayCachedMessages: replayFromMs !== null,
     });
-    void ntfy.subscribeJsonStream(topic, (message) => this.handleNtfyMessage(message), {
+    void ntfy.subscribeJsonStream(topic, (message) => this.handleNtfyMessage(message, topic), {
       since,
       signal: abort.signal,
+      onReconnect: (error) => { this.noteNtfyReconnect(topic, error); },
     }).catch((error: unknown) => {
       if (abort.signal.aborted) return;
       const message = summarizeError(error);
-      this.ntfyAborts.delete(topic);
-      this.markError('ntfy', message);
-      logger.warn('ChannelProviderRuntimeManager: ntfy stream failed', { error: message });
+      if (this.ntfyAborts.get(topic) === abort) this.ntfyAborts.delete(topic);
+      this.failNtfyTopic(topic, message);
+      logger.warn('ChannelProviderRuntimeManager: ntfy stream failed', { topic, error: message });
     });
     return this.result('ntfy', true, 'ntfy JSON stream runtime started.');
   }
@@ -270,6 +281,8 @@ export class ChannelProviderRuntimeManager {
    */
   stopNtfyTopic(topic: string): ProviderRuntimeActionResult {
     this.abortNtfyTopic(topic);
+    this.ntfyTopicErrors.delete(topic);
+    this.ntfyReconnects.delete(topic);
     if (this.ntfyAborts.size === 0) this.markStopped('ntfy');
     else this.markStarted('ntfy', { topics: this.runningNtfyTopics() });
     return this.result('ntfy', true, 'ntfy topic subscription stopped.');
@@ -290,6 +303,10 @@ export class ChannelProviderRuntimeManager {
 
   status(surface: ProviderRuntimeSurface): ProviderRuntimeStatus {
     const state = this.state[surface]!;
+    const topicErrors = surface === 'ntfy' && this.ntfyTopicErrors.size > 0
+      ? [...this.ntfyTopicErrors].map(([topic, error]) => `${topic}: ${error}`).join('; ')
+      : undefined;
+    const lastError = state.lastError ?? topicErrors;
     return {
       surface,
       running: state.running,
@@ -297,7 +314,7 @@ export class ChannelProviderRuntimeManager {
       transport: surface === 'slack' ? 'socket-mode' : surface === 'discord' ? 'gateway' : 'json-stream',
       ...(state.lastStartedAt ? { lastStartedAt: state.lastStartedAt } : {}),
       ...(state.lastStoppedAt ? { lastStoppedAt: state.lastStoppedAt } : {}),
-      ...(state.lastError ? { lastError: state.lastError } : {}),
+      ...(lastError ? { lastError } : {}),
       metadata: { ...state.metadata },
     };
   }
@@ -343,7 +360,7 @@ export class ChannelProviderRuntimeManager {
       if (!connection.ok) {
         this.slackClient = null;
         const message = connection.error ?? 'Slack Socket Mode connection failed.';
-        this.markError('slack', message);
+        if (generation === this.slackGeneration) this.markError('slack', message);
         return this.result('slack', false, message);
       }
       this.markStarted('slack', { socketMode: true });
@@ -351,7 +368,8 @@ export class ChannelProviderRuntimeManager {
     } catch (error) {
       if (this.slackClient === client) this.slackClient = null;
       const message = summarizeError(error);
-      this.markError('slack', message);
+      // A start that stop() already cancelled must not repaint the newer state.
+      if (generation === this.slackGeneration) this.markError('slack', message);
       return this.result('slack', false, message);
     }
   }
@@ -381,7 +399,7 @@ export class ChannelProviderRuntimeManager {
       token: botToken,
       integration: discord,
       onDispatch: (dispatch) => this.handleDiscordDispatch(dispatch, discord),
-      onClosed: (reason) => this.reportSocketLost('discord', reason, client),
+      onClosed: (reason, code) => this.reportSocketLost('discord', reason, client, code !== undefined && DISCORD_PERMANENT_CLOSE_CODES.has(code)),
     });
     // Reachable by stop() from here on, not only after start() resolves.
     this.discordClient = client;
@@ -396,7 +414,7 @@ export class ChannelProviderRuntimeManager {
     } catch (error) {
       if (this.discordClient === client) this.discordClient = null;
       const message = summarizeError(error);
-      this.markError('discord', message);
+      if (generation === this.discordGeneration) this.markError('discord', message);
       return this.result('discord', false, message);
     }
   }
@@ -415,16 +433,35 @@ export class ChannelProviderRuntimeManager {
       this.markError('ntfy', 'ntfy topic is required for subscription runtime.');
       return this.result('ntfy', false, 'ntfy topic is required for subscription runtime.');
     }
+    const results: Array<{ topic: string; result: ProviderRuntimeActionResult }> = [];
     for (const topic of topics) {
-      await this.startNtfyTopic(topic, options);
+      results.push({ topic, result: await this.startNtfyTopic(topic, options) });
     }
-    return this.result('ntfy', true, 'ntfy JSON stream runtime started.');
+    const failed = results.filter(({ result }) => !result.ok);
+    if (failed.length === 0) return this.result('ntfy', true, 'ntfy JSON stream runtime started.');
+    // Say which topics are not being read; `ok` stays false so a caller never
+    // takes a partly started runtime for a running one.
+    const started = results.length - failed.length;
+    return this.result('ntfy', false,
+      `ntfy started for ${started} of ${results.length} topics. Not reading: ${failed.map(({ topic, result }) => `${topic} (${result.message})`).join('; ')}`);
   }
 
   private async handleSlackEnvelope(envelope: SlackSocketModeEnvelope, slack: SlackIntegration): Promise<void> {
     if (!envelope.payload || typeof envelope.payload !== 'object') return;
-    await handleSlackSurfacePayload(envelope.payload, this.deps.buildSurfaceAdapterContext(), slack)
-      .then(() => { this.deps.ingressAlarm?.recordSuccess('slack'); })
+    const payload = envelope.payload;
+    await handleSlackSurfacePayload(payload, this.deps.buildSurfaceAdapterContext(), slack)
+      .then(async (response) => {
+        // Socket Mode acknowledged this envelope before it was handled, so the
+        // adapter's answer has nowhere to travel. A refusal such as a spawn
+        // failure (5xx) or a capacity refusal (429) is a failure of this surface;
+        // a policy block (other 4xx) is an expected outcome, not one.
+        if (response instanceof Response && isUnservedStatus(response.status)) {
+          this.deps.ingressAlarm?.recordFailure('slack', `Slack request was refused (HTTP ${response.status})`);
+        } else {
+          this.deps.ingressAlarm?.recordSuccess('slack');
+        }
+        if (response instanceof Response) await this.answerSlackEnvelope(payload, response, slack);
+      })
       .catch((error: unknown) => {
         const detail = summarizeError(error);
         logger.error('ChannelProviderRuntimeManager: Slack Socket Mode payload failed', { error: detail });
@@ -432,9 +469,48 @@ export class ChannelProviderRuntimeManager {
       });
   }
 
+  /**
+   * Deliver what the adapter said back to the person who asked. Webhook mode
+   * sends the answer as the HTTP response; over Socket Mode that response is
+   * discarded, so a slash command or button is answered through its
+   * `response_url`, and a mention that could not be started is answered in its
+   * channel. Nothing here may fail the envelope: the action already happened.
+   */
+  private async answerSlackEnvelope(payload: Record<string, unknown>, response: Response, slack: SlackIntegration): Promise<void> {
+    try {
+      let body: { text?: unknown; response_type?: unknown } = {};
+      try { body = await response.clone().json() as typeof body; } catch { /* not a JSON answer */ }
+      const unserved = isUnservedStatus(response.status);
+      const text = typeof body.text === 'string' && body.text.trim()
+        ? body.text
+        : unserved ? SLACK_NOT_STARTED_TEXT : '';
+      const responseUrl = typeof payload.response_url === 'string' ? payload.response_url : '';
+      if (responseUrl) {
+        if (!text || !responseUrl.startsWith('https://hooks.slack.com/')) return;
+        const reply = { text, response_type: typeof body.response_type === 'string' ? body.response_type : 'ephemeral' };
+        await (this.deps.postSlackResponse ?? postSlackResponseUrl)(responseUrl, reply);
+        return;
+      }
+      const event = payload.event;
+      if (!unserved || !event || typeof event !== 'object') return;
+      const { channel } = event as { channel?: unknown };
+      if (typeof channel !== 'string' || !channel) return;
+      await slack.postMessage(channel, text);
+    } catch (error) {
+      logger.warn('ChannelProviderRuntimeManager: Slack answer could not be delivered', { error: summarizeError(error) });
+    }
+  }
+
   private async handleDiscordDispatch(dispatch: DiscordGatewayDispatch, discord: DiscordIntegration): Promise<void> {
     await handleDiscordGatewayDispatchPayload(dispatch, this.deps.buildSurfaceAdapterContext(), discord)
-      .then(() => { this.deps.ingressAlarm?.recordSuccess('discord'); })
+      .then((response) => {
+        // Same rule as Slack: the adapter's refusal to start the request is this surface failing, not succeeding.
+        if (response instanceof Response && isUnservedStatus(response.status)) {
+          this.deps.ingressAlarm?.recordFailure('discord', `Discord request was refused (HTTP ${response.status})`);
+        } else {
+          this.deps.ingressAlarm?.recordSuccess('discord');
+        }
+      })
       .catch((error: unknown) => {
         const detail = summarizeError(error);
         logger.error('ChannelProviderRuntimeManager: Discord Gateway dispatch failed', { eventType: dispatch.t, error: detail });
@@ -442,7 +518,13 @@ export class ChannelProviderRuntimeManager {
       });
   }
 
-  private async handleNtfyMessage(message: NtfyMessage): Promise<void> {
+  private async handleNtfyMessage(message: NtfyMessage, topic: string): Promise<void> {
+    // ntfy opens every subscription with an `open` event: the stream is reading.
+    if (message.event === 'open') {
+      this.ntfyReconnects.delete(topic);
+      this.ntfyTopicErrors.delete(topic);
+      return;
+    }
     if (message.event !== 'message') return;
     // WHICH MACHINE READ THIS MESSAGE.
     //
@@ -457,17 +539,59 @@ export class ChannelProviderRuntimeManager {
       topic: message.topic ?? '(none)',
       messageId: message.id ?? '(none)',
     });
-    await handleNtfySurfacePayload(message, this.deps.buildSurfaceAdapterContext())
-      .then((response) => {
-        if (!response.ok) throw new Error(`ntfy dispatch failed (HTTP ${response.status})`);
+    let detail: string;
+    let permanent = false;
+    try {
+      const response = await handleNtfySurfacePayload(message, this.deps.buildSurfaceAdapterContext());
+      if (response.ok) {
+        if (message.id) this.ntfyMessageFailures.delete(`${topic}\u0000${message.id}`);
         this.deps.ingressAlarm?.recordSuccess('ntfy');
-      })
-      .catch((error: unknown) => {
-        const detail = summarizeError(error);
-        logger.error('ChannelProviderRuntimeManager: ntfy message dispatch failed', { error: detail });
-        this.deps.ingressAlarm?.recordFailure('ntfy', detail);
-        throw error;
+        return;
+      }
+      detail = `ntfy dispatch failed (HTTP ${response.status})`;
+      // A refusal (policy, malformed, unknown) says the same thing every time.
+      permanent = response.status >= 400 && response.status < 500
+        && response.status !== 408 && response.status !== 409 && response.status !== 429;
+    } catch (error) {
+      detail = summarizeError(error);
+    }
+    const key = message.id ? `${topic}\u0000${message.id}` : null;
+    const attempt = key ? (this.ntfyMessageFailures.get(key) ?? 0) + 1 : NTFY_MESSAGE_ATTEMPTS;
+    if (key && !permanent && attempt < NTFY_MESSAGE_ATTEMPTS) {
+      // Throwing ends this stream; the reconnect resumes from the last message
+      // finished, so this one is delivered again.
+      this.ntfyMessageFailures.delete(key);
+      this.ntfyMessageFailures.set(key, attempt);
+      if (this.ntfyMessageFailures.size > NTFY_MESSAGE_FAILURES_MAX) {
+        const oldest = this.ntfyMessageFailures.keys().next().value;
+        if (oldest !== undefined) this.ntfyMessageFailures.delete(oldest);
+      }
+      logger.warn('ChannelProviderRuntimeManager: ntfy message dispatch failed; it will be delivered again', {
+        topic, messageId: message.id, attempt, of: NTFY_MESSAGE_ATTEMPTS, error: detail,
       });
+      throw new Error(detail);
+    }
+    if (key) this.ntfyMessageFailures.delete(key);
+    logger.error('ChannelProviderRuntimeManager: ntfy message dispatch failed; skipping it so the topic keeps moving', {
+      topic, messageId: message.id ?? '(none)', attempts: attempt, error: detail,
+    });
+    this.deps.ingressAlarm?.recordFailure('ntfy', detail);
+  }
+
+  /** A topic whose stream keeps dropping is not reading, whatever `running` says. */
+  private noteNtfyReconnect(topic: string, error: unknown): void {
+    const count = (this.ntfyReconnects.get(topic) ?? 0) + 1;
+    this.ntfyReconnects.set(topic, count);
+    if (count >= NTFY_RECONNECTS_BEFORE_DEGRADED) {
+      this.ntfyTopicErrors.set(topic, `the stream has dropped ${count} times in a row and is reconnecting: ${summarizeError(error)}`);
+    }
+  }
+
+  /** One topic's stream ended for good; the other topics keep their state. */
+  private failNtfyTopic(topic: string, message: string): void {
+    this.ntfyReconnects.delete(topic);
+    this.ntfyTopicErrors.set(topic, message);
+    if (this.ntfyAborts.size === 0) this.markError('ntfy', message);
   }
 
   private async resolveSlackBotToken(): Promise<string | null> {
@@ -500,7 +624,7 @@ export class ChannelProviderRuntimeManager {
   private async resolveNtfyToken(): Promise<string | null> {
     const serviceValue = await this.deps.serviceRegistry.resolveSecret('ntfy', 'primary');
     return serviceValue
-      || String(this.deps.configManager.get('surfaces.ntfy.token') || '')
+      || await this.resolveConfigSecret(this.deps.configManager.get('surfaces.ntfy.token'))
       || process.env.NTFY_ACCESS_TOKEN
       || null;
   }
@@ -578,7 +702,7 @@ export class ChannelProviderRuntimeManager {
    * surface, and it has to stand down rather than hold a workspace it is not
    * reading.
    */
-  setSocketLostHandler(handler: (kind: 'slack' | 'discord', reason: string) => void): void {
+  setSocketLostHandler(handler: (kind: 'slack' | 'discord', reason: string, permanent?: boolean) => void): void {
     this.socketLostHandler = handler;
   }
 
@@ -593,7 +717,13 @@ export class ChannelProviderRuntimeManager {
       );
     }
     if (surface === 'discord') {
-      return Boolean(this.deps.configManager.get('surfaces.discord.botToken') || process.env.DISCORD_BOT_TOKEN);
+      const discordService = this.deps.serviceRegistry.get('discord');
+      return Boolean(
+        this.deps.configManager.get('surfaces.discord.botToken')
+        || process.env.DISCORD_BOT_TOKEN
+        || discordService?.tokenKey
+        || discordService?.tokenRef,
+      );
     }
     return this.resolveNtfyTopics().length > 0;
   }
@@ -604,18 +734,21 @@ export class ChannelProviderRuntimeManager {
    * The state is marked stopped first so a `/status` read during the stand-down
    * says what is true: this node is not reading that surface.
    */
-  private reportSocketLost(kind: 'slack' | 'discord', reason: string, client?: SlackSocketModeClient | DiscordGatewayClient): void {
+  private reportSocketLost(kind: 'slack' | 'discord', reason: string, client?: SlackSocketModeClient | DiscordGatewayClient, permanent = false): void {
     // A stale client's late close must not unseat or mark-stopped a newer one.
     const current = kind === 'slack' ? this.slackClient : this.discordClient;
     if (client && current !== client) return;
     if (kind === 'slack') this.slackClient = null;
     else this.discordClient = null;
+    // A permanent loss (a rejected token, a missing intent) keeps its reason in
+    // the status, so /status says why this node is not reading the surface.
     this.markStopped(kind);
+    if (permanent) this.markError(kind, reason);
     logger.warn(`${kind} connection dropped; this node can no longer read that surface`, {
       surface: kind,
       reason,
     });
-    this.socketLostHandler?.(kind, reason);
+    this.socketLostHandler?.(kind, reason, permanent);
   }
 
   private markStarted(surface: ProviderRuntimeSurface, metadata: Record<string, unknown>): void {

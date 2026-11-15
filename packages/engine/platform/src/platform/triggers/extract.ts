@@ -14,6 +14,8 @@
 import type { TriggerExtract, TriggerObservation, TriggerValue } from './types.js';
 import { validateRegexSource } from './validation.js';
 
+const MAX_REGEX_INPUT_CHARS = 65_536;
+
 /** Deterministic string form used by change / transition / dedup comparisons. */
 export function stableText(value: TriggerValue): string {
   if (value === null) return 'null';
@@ -104,12 +106,16 @@ function findNext(path: string, from: number): number {
 
 function applySteps(input: TriggerValue, steps: readonly PathStep[]): TriggerValue {
   let current: TriggerValue = input;
-  for (const step of steps) {
+  for (const [position, step] of steps.entries()) {
     if (current === null || current === undefined) return null;
     if (step.kind === 'wildcard') {
-      if (Array.isArray(current)) return current as TriggerValue;
-      if (typeof current === 'object') return Object.values(current as Record<string, TriggerValue>);
-      return null;
+      let items: readonly TriggerValue[];
+      if (Array.isArray(current)) items = current as readonly TriggerValue[];
+      else if (typeof current === 'object') items = Object.values(current as Record<string, TriggerValue>);
+      else return null;
+      // The steps after `[*]` apply to every element, so `$.items[*].name` yields the names.
+      const rest = steps.slice(position + 1);
+      return rest.length === 0 ? items : items.map((item) => applySteps(item, rest));
     }
     if (step.kind === 'index') {
       if (!Array.isArray(current)) return null;
@@ -196,7 +202,9 @@ export function runExtract(extract: TriggerExtract, input: TriggerValue): Trigge
       return filter ? applyJqFilter(selected, filter) : selected;
     }
     case 'regex': {
-      const source = typeof input === 'string' ? input : stableText(input);
+      // The pattern runs synchronously on the daemon, so the text it scans is bounded.
+      const full = typeof input === 'string' ? input : stableText(input);
+      const source = full.length > MAX_REGEX_INPUT_CHARS ? full.slice(0, MAX_REGEX_INPUT_CHARS) : full;
       const regex = validateRegexSource(extract.pattern, 'extract', extract.flags);
       const match = regex.exec(source);
       if (!match) return null;

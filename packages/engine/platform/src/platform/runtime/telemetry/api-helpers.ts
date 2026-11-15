@@ -4,6 +4,7 @@ import { getCorrelationContext } from '../correlation.js';
 import type { PlatformErrorSource } from '../../types/errors.js';
 import type { NormalizedError } from '../../utils/error-display.js';
 import { redactStructuredData } from '../../utils/redaction.js';
+import { RUNTIME_EVENT_DOMAINS } from '@goodvibes-jev/engine/contracts';
 import type {
   AnyRuntimeEvent,
   RuntimeEventDomain,
@@ -75,33 +76,8 @@ const EMPTY_TRACE_DOCUMENT = { resourceSpans: [] };
 const EMPTY_LOG_DOCUMENT = { resourceLogs: [] };
 const EMPTY_METRIC_DOCUMENT = { resourceMetrics: [] };
 
-export const ALL_DOMAINS: readonly RuntimeEventDomain[] = [
-  'session',
-  'turn',
-  'providers',
-  'tools',
-  'tasks',
-  'agents',
-  'contracts',
-  'communication',
-  'planner',
-  'gate',
-  'plugins',
-  'mcp',
-  'transport',
-  'compaction',
-  'ui',
-  'ops',
-  'forensics',
-  'security',
-  'automation',
-  'routes',
-  'control-plane',
-  'deliveries',
-  'watchers',
-  'surfaces',
-  'knowledge',
-] as const;
+/** Every runtime event domain, from the one canonical list so a new domain is recorded without a second edit. */
+export const ALL_DOMAINS: readonly RuntimeEventDomain[] = RUNTIME_EVENT_DOMAINS;
 
 export function appendBounded<T>(target: T[], value: T, limit: number, evict?: (value: T) => void): void {
   target.push(value);
@@ -261,6 +237,9 @@ export function buildAttributes(
   // correlationCtx.run() scope carries the ambient IDs.
   const ctx = getCorrelationContext();
   return {
+    // The payload goes first so a payload field named like an envelope field
+    // (many carry `source` or `severity`) cannot replace the envelope's value.
+    ...payload,
     domain,
     eventType: envelope.type,
     source: envelope.source,
@@ -271,7 +250,6 @@ export function buildAttributes(
     ...(envelope.taskId ? { taskId: envelope.taskId } : {}),
     ...(ctx.requestId ? { requestId: ctx.requestId } : {}),
     ...(ctx.runId ? { runId: ctx.runId } : {}),
-    ...payload,
   };
 }
 
@@ -395,7 +373,8 @@ export function buildOtlpTraceDocumentFromSpans(spans: readonly ReadableSpan[]):
             spanId: span.spanContext.spanId,
             ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
             name: span.name,
-            kind: span.kind,
+            // OTLP numbers span kinds from 1 (0 is UNSPECIFIED); the in-process constants follow the OTel API, from 0.
+            kind: span.kind + 1,
             startTimeUnixNano: String(span.startTimeMs * NANOSECONDS_PER_MILLISECOND),
             endTimeUnixNano: String(span.endTimeMs * NANOSECONDS_PER_MILLISECOND),
             attributes: toOtlpAttributes(span.attributes),
@@ -511,7 +490,7 @@ export function buildOtlpMetricDocumentFromState(
     },
     {
       name: 'goodvibes.telemetry.spans.total',
-      description: 'Total synthesized spans retained by the GoodVibes telemetry API.',
+      description: 'Total spans recorded by the GoodVibes telemetry API since it started.',
       unit: '1',
       sum: {
         aggregationTemporality: AGGREGATION_TEMPORALITY_CUMULATIVE,

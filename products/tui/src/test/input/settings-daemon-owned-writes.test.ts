@@ -118,6 +118,8 @@ describe('a setting the daemon applies is written where the daemon reads it', ()
     const configManager = stubConfigManager();
     const daemonConfig = recordingDaemonWriter('reject');
     const reported: string[] = [];
+    let refusalReported: () => void = () => {};
+    const refusalSeen = new Promise<void>((resolve) => { refusalReported = resolve; });
     await withPublicErrorText(['the daemon is not reachable'], async () => {
       applySettingValue({
         key: 'watchers.enabled' as ConfigKey,
@@ -127,10 +129,10 @@ describe('a setting the daemon applies is written where the daemon reads it', ()
         onSettingApplied: null,
         refreshGroups: () => {},
         daemonConfig,
-        onAsyncError: (message) => { reported.push(message); },
+        onAsyncError: (message) => { reported.push(message); refusalReported(); },
       });
       // The daemon refusal arrives after the synchronous setting dispatch.
-      await new Promise((resolve) => { setTimeout(resolve, 0); });
+      await refusalSeen;
     }, {
       ordinaryFields: ['daemon'],
       credentialProjections: [{ phase: 'source', target: 'span-1', parts: [
@@ -151,11 +153,11 @@ describe('a setting the daemon applies is written where the daemon reads it', ()
 });
 
 describe('a credential the daemon spends is stored by the daemon, in one call', () => {
-  test('a daemon-scoped credential never touches this surface\'s own secret store', () => {
+  test('a daemon-scoped credential never touches this surface\'s own secret store', async () => {
     const configManager = stubConfigManager();
     const localWrites: string[] = [];
     const daemonWrites: [string, string][] = [];
-    setSecretBackedSettingValue({
+    await setSecretBackedSettingValue({
       key: 'surfaces.telegram.botToken' as ConfigKey,
       value: 'not-a-real-token',
       configManager,
@@ -177,10 +179,33 @@ describe('a credential the daemon spends is stored by the daemon, in one call', 
     expect(configManager.writes).toEqual([]);
   });
 
-  test('clearing a daemon-scoped credential clears it on the daemon', () => {
+  test('a token pasted with a trailing newline reaches the daemon trimmed, through the writer and the route', async () => {
+    const configManager = stubConfigManager();
+    const daemonWrites: [string, string][] = [];
+    const routed: [string, string][] = [];
+    const common = {
+      key: 'surfaces.telegram.botToken' as ConfigKey,
+      value: 'abc123\n',
+      configManager,
+      secretsManager: null,
+      setConfigValue: () => {},
+    };
+    await setSecretBackedSettingValue({
+      ...common,
+      daemonCredentials: { set: async (key: string, value: string) => { daemonWrites.push([key, value]); }, clear: async () => {} },
+    });
+    await setSecretBackedSettingValue({
+      ...common,
+      route: { applies: () => true, write: async (key, value) => { routed.push([key, value]); } },
+    });
+    expect(daemonWrites).toEqual([['surfaces.telegram.botToken', 'abc123']]);
+    expect(routed).toEqual([['surfaces.telegram.botToken', 'abc123']]);
+  });
+
+  test('clearing a daemon-scoped credential clears it on the daemon', async () => {
     const configManager = stubConfigManager();
     const cleared: string[] = [];
-    setSecretBackedSettingValue({
+    await setSecretBackedSettingValue({
       key: 'surfaces.telegram.botToken' as ConfigKey,
       value: '   ',
       configManager,

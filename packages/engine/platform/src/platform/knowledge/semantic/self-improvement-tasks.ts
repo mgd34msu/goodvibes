@@ -73,22 +73,25 @@ export async function updateRefinementTask(
   assertCurrent?.();
   const latest = store.getRefinementTask(task.id);
   if (latest && isTerminalRefinementState(latest.state)) return latest;
-  const nextRepairAttemptAt = readNumber(data.nextRepairAttemptAt) ?? task.nextRepairAttemptAt;
-  const metadata = refinementTaskMetadata(task, data, nextRepairAttemptAt);
+  // Build on the stored task, not the caller's copy: another writer's metadata,
+  // attempts and retry time since that copy was read must not be overwritten.
+  const base = latest ?? task;
+  const nextRepairAttemptAt = readNumber(data.nextRepairAttemptAt) ?? base.nextRepairAttemptAt;
+  const metadata = refinementTaskMetadata(base, data, nextRepairAttemptAt);
   const input = {
     id: task.id,
-    spaceId: task.spaceId,
-    subjectKind: task.subjectKind,
-    subjectId: task.subjectId,
-    subjectTitle: task.subjectTitle,
-    subjectType: task.subjectType,
-    gapId: task.gapId,
-    issueId: task.issueId,
+    spaceId: base.spaceId,
+    subjectKind: base.subjectKind,
+    subjectId: base.subjectId,
+    subjectTitle: base.subjectTitle,
+    subjectType: base.subjectType,
+    gapId: base.gapId,
+    issueId: base.issueId,
     state,
-    priority: task.priority,
-    trigger: task.trigger,
-    budget: task.budget,
-    attemptCount: state === 'searching' ? task.attemptCount + 1 : task.attemptCount,
+    priority: base.priority,
+    trigger: base.trigger,
+    budget: base.budget,
+    attemptCount: state === 'searching' ? base.attemptCount + 1 : base.attemptCount,
     ...(state === 'blocked' || state === 'failed' ? { blockedReason: message } : {}),
     ...(typeof nextRepairAttemptAt === 'number' ? { nextRepairAttemptAt } : {}),
     acceptedSourceIds: readStringArray(metadata.acceptedSourceIds),
@@ -133,6 +136,9 @@ function refinementTaskMetadata(
     ...(sourceAssessments.length > 0 ? { sourceAssessments } : {}),
     ...(typeof data.retryable === 'boolean' ? { retryable: data.retryable } : {}),
     ...(typeof data.deferred === 'boolean' ? { deferred: data.deferred } : {}),
+    // Each write states why it blocks; an earlier block's kind must not outlive it.
+    // `null`, not an absent key: the stored metadata is merged, and `undefined` does not survive a save.
+    ...(typeof data.blockedKind === 'string' ? { blockedKind: data.blockedKind } : 'blockedKind' in task.metadata ? { blockedKind: null } : {}),
     ...(typeof nextRepairAttemptAt === 'number' ? { nextRepairAttemptAt } : {}),
   };
 }

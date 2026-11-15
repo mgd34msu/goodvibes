@@ -7,9 +7,15 @@ import { walkDir, DirectoryWalk, WALK_SKIP_DIRS, type WalkDirOptions } from '../
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { currentProjectFilesEpoch } from '../../intelligence/project-files-epoch.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
 
-export type FindSearchOptions = JudgmentReadingOptions & WalkDirOptions & { allowOutsideProject?: boolean };
+export type FindSearchOptions = JudgmentReadingOptions & WalkDirOptions & {
+  allowOutsideProject?: boolean;
+  /** The owner's per-file read decision; modes that read file text drop a file it restricts. */
+  readAccessFilter?: ReadAccessFilter | undefined;
+};
 
 export type OutputFormat =
   | 'count_only'
@@ -113,6 +119,8 @@ export interface FindInput {
   queries: FindQuery[];
   output?: OutputOptions | undefined;
   parallel?: boolean | undefined;
+  /** Per-call deadline; defaults to DEFAULT_FIND_TIMEOUT_MS. */
+  timeout_ms?: number | undefined;
 }
 
 type CountResult = { count: number; file_count?: number; source?: string };
@@ -162,6 +170,18 @@ export function addFindWarning(diagnostics: FindDiagnostics | undefined, warning
   }
   const cappedWarning = `Additional find warnings suppressed after ${MAX_FIND_WARNINGS} entries.`;
   if (!diagnostics.warnings.includes(cappedWarning)) diagnostics.warnings.push(cappedWarning);
+}
+
+/** The warning a per-file scan adds when the time budget ends it before every file was searched. */
+export function addBudgetStopWarning(diagnostics: FindDiagnostics | undefined, searched: number, total: number, found: number, unit: string): void {
+  addFindWarning(diagnostics, `Stopped at the time budget: searched ${searched} of ${total} files and found ${found} ${unit} so far. `
+    + "Narrow 'path' or 'glob', or pass a larger timeout_ms, to search the rest.");
+}
+
+/** The warning a scan adds when the time budget ended the search for files before the walk finished. */
+export function addDiscoveryCutWarning(diagnostics: FindDiagnostics | undefined, found: number): void {
+  addFindWarning(diagnostics, `Stopped at the time budget while finding files: ${found} file(s) were found before it ended, so more exist that were not searched. `
+    + "Narrow 'path' or 'glob', or pass a larger timeout_ms, to search the rest.");
 }
 
 export function withFindWarnings<T extends Record<string, unknown>>(result: T, warnings: readonly string[]): T {
@@ -214,9 +234,19 @@ export async function isBinary(filePath: string, diagnostics?: FindDiagnostics):
   }
 }
 
+/** Tells the model a directory was left out and how to ask for it, instead of letting it look absent. */
+function reportSkippedWorktrees(diagnostics: FindDiagnostics | undefined, basePath: string): (path: string, entryCount: number | undefined) => void {
+  return (path, entryCount) => {
+    const shown = relative(basePath, path) || path;
+    const size = entryCount === undefined ? 'contents not counted' : `${entryCount} entries not searched`;
+    addFindWarning(diagnostics, `Skipped ${shown} (product worktrees, ${size}); pass path: '${shown}' to include it.`);
+  };
+}
+
 export async function collectTextFiles(dirPath: string, diagnostics?: FindDiagnostics, walkOptions: WalkDirOptions = {}): Promise<string[]> {
   const files: string[] = [];
   for await (const filePath of walkDir(dirPath, {
+    onSkippedProductWorktrees: reportSkippedWorktrees(diagnostics, dirPath),
     ...walkOptions, selectDirectory: directory => searchDirectorySelection(directory, walkOptions, diagnostics), beforeAttempt: () => {
       assertCapturedToolInvocationCurrent();
       walkOptions.beforeAttempt?.();
@@ -294,6 +324,7 @@ export async function collectGlobFiles(
   // Scan once for all explicit patterns. Directory meaning is settled before
   // descent, rather than filtering after Bun.Glob has already traversed it.
   for await (const file of walk.files({
+    onSkippedProductWorktrees: reportSkippedWorktrees(diagnostics, basePath),
     ...walkOptions, includeHidden, followSymlinks, maxFileSize: Number.POSITIVE_INFINITY,
     selectFile: selectedFile, selectDirectory: selectedDirectory,
     beforeAttempt: () => {
@@ -486,8 +517,27 @@ export async function collectFilesForSearch(
   return Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), walkOptions));
 }
 
+/**
+ * Files a mode that reads text may open. A file the owner's read rules restrict
+ * is never read or reported, and the result says how many were held back.
+ */
+export async function withholdRestrictedFiles(
+  files: string[],
+  diagnostics: FindDiagnostics,
+  readAccessFilter: ReadAccessFilter | undefined,
+): Promise<string[]> {
+  if (!readAccessFilter) return files;
+  const { allowed, restricted } = await partitionByReadAccess(files, (file) => file, readAccessFilter);
+  const note = accessRestrictedNote(restricted.length);
+  if (note) addFindWarning(diagnostics, note);
+  return allowed;
+}
+
 const SEARCH_CACHE_MAX = 50;
 const IMPORT_GRAPH_TTL = 30_000;
+/** Upper bound on the file text one service keeps for cached content searches. */
+const SEARCH_CACHE_MAX_CHARS = 64 * 1024 * 1024;
+const IMPORT_GRAPH_ROOTS_MAX = 8;
 
 function makeSearchCacheKey(key: CacheKey): string {
   return JSON.stringify([key.pattern, key.glob, key.path, key.flags]);
@@ -500,9 +550,10 @@ export interface ImportGraphLike {
 }
 
 export class FindRuntimeService {
-  private readonly searchCache = new Map<string, { value: CacheValue; accessedAt: number }>();
-  private importGraph: ImportGraphLike | null = null;
-  private importGraphBuiltAt = 0;
+  private readonly searchCache = new Map<string, { value: CacheValue; accessedAt: number; chars: number }>();
+  /** One graph per root: a graph built for one directory says nothing about another. */
+  private readonly importGraphs = new Map<string, { graph: ImportGraphLike; builtAt: number; epoch: number }>();
+  private readonly importGraphBuilds = new Map<string, { build: Promise<ImportGraphLike>; epoch: number }>();
 
   searchCacheGet(key: CacheKey): CacheValue | null {
     const cacheKey = makeSearchCacheKey(key);
@@ -514,7 +565,14 @@ export class FindRuntimeService {
 
   searchCacheSet(key: CacheKey, value: CacheValue): void {
     const cacheKey = makeSearchCacheKey(key);
-    if (this.searchCache.size >= SEARCH_CACHE_MAX && !this.searchCache.has(cacheKey)) {
+    let chars = 0;
+    for (const entry of value.matchedFiles.values()) chars += entry.content.length;
+    // A result this large would evict everything else and still not fit.
+    if (chars > SEARCH_CACHE_MAX_CHARS) { this.searchCache.delete(cacheKey); return; }
+    this.searchCache.delete(cacheKey);
+    let total = chars;
+    for (const entry of this.searchCache.values()) total += entry.chars;
+    while (this.searchCache.size > 0 && (this.searchCache.size >= SEARCH_CACHE_MAX || total > SEARCH_CACHE_MAX_CHARS)) {
       let oldestKey = '';
       let oldestTime = Infinity;
       for (const [candidateKey, candidateValue] of this.searchCache) {
@@ -523,9 +581,11 @@ export class FindRuntimeService {
           oldestKey = candidateKey;
         }
       }
-      if (oldestKey) this.searchCache.delete(oldestKey);
+      if (!oldestKey) break;
+      total -= this.searchCache.get(oldestKey)!.chars;
+      this.searchCache.delete(oldestKey);
     }
-    this.searchCache.set(cacheKey, { value, accessedAt: Date.now() });
+    this.searchCache.set(cacheKey, { value, accessedAt: Date.now(), chars });
   }
 
   async searchCacheIsValid(cached: CacheValue): Promise<boolean> {
@@ -538,11 +598,24 @@ export class FindRuntimeService {
     return true;
   }
 
+  /**
+   * The import graph for `projectRoot`, built once for concurrent callers and reused for a short
+   * time. A write by the edit or write tool since the graph was built makes it stale at once.
+   */
   async getImportGraph(projectRoot: string): Promise<ImportGraphLike> {
-    const now = Date.now();
-    if (this.importGraph !== null && now - this.importGraphBuiltAt <= IMPORT_GRAPH_TTL) {
-      return this.importGraph;
-    }
+    const epoch = currentProjectFilesEpoch();
+    const cached = this.importGraphs.get(projectRoot);
+    if (cached && cached.epoch === epoch && Date.now() - cached.builtAt <= IMPORT_GRAPH_TTL) return cached.graph;
+    const inFlight = this.importGraphBuilds.get(projectRoot);
+    if (inFlight && inFlight.epoch === epoch) return inFlight.build;
+    const build = this.buildImportGraph(projectRoot, epoch).finally(() => {
+      if (this.importGraphBuilds.get(projectRoot)?.build === build) this.importGraphBuilds.delete(projectRoot);
+    });
+    this.importGraphBuilds.set(projectRoot, { build, epoch });
+    return build;
+  }
+
+  private async buildImportGraph(projectRoot: string, epoch: number): Promise<ImportGraphLike> {
     const { ImportGraph } = await import('../../intelligence/import-graph.js');
     const graph = new ImportGraph() as ImportGraphLike & {
       build(projectRoot: string): Promise<void>;
@@ -552,17 +625,18 @@ export class FindRuntimeService {
     } catch (err) {
       const warning = `Import graph build failed; relationship results may be incomplete: ${summarizeError(err)}`;
       logger.warn('[find] Import graph build failed', { projectRoot, error: summarizeError(err) });
-      const degradedGraph = {
+      // A degraded graph answers this call only; the next call builds again.
+      return {
         findImports: (file: string) => graph.findImports(file),
         findDependents: (file: string) => graph.findDependents(file),
         getWarnings: () => [warning, ...(graph.getWarnings?.() ?? [])],
       } satisfies ImportGraphLike;
-      this.importGraph = degradedGraph;
-      this.importGraphBuiltAt = now;
-      return degradedGraph;
     }
-    this.importGraph = graph;
-    this.importGraphBuiltAt = now;
+    if (this.importGraphs.size >= IMPORT_GRAPH_ROOTS_MAX && !this.importGraphs.has(projectRoot)) {
+      const oldest = this.importGraphs.keys().next().value;
+      if (oldest !== undefined) this.importGraphs.delete(oldest);
+    }
+    this.importGraphs.set(projectRoot, { graph, builtAt: Date.now(), epoch });
     return graph;
   }
 }

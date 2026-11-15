@@ -197,7 +197,14 @@ export function PairingQrScanner({ onScanned, onCancel, bindings }: PairingQrSca
       if (isCancelled()) return;
       if (!pausedRef.current) {
         const element = videoRef.current;
-        const frame = element ? active.grabFrame(element) : null;
+        // A video in an odd state (the stream ended between frames) can make the
+        // canvas read throw; that is one missed frame, not the end of the scan.
+        let frame: ImageData | null = null;
+        try {
+          frame = element ? active.grabFrame(element) : null;
+        } catch {
+          frame = null;
+        }
         if (frame) {
           const text = await decodeFrame(decoder, frame);
           if (isCancelled()) return;

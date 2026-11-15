@@ -194,6 +194,9 @@ function parseSequence(cur: TokenCursor): ShellNode {
 
     const operator = t.value as '&&' | '||' | ';';
     consume(cur); // consume operator
+    // A command may end with `;` (or a newline, read as one): nothing follows, so there is no empty
+    // command to refuse. A dangling `&&` / `||` is a real syntax error and still parses to an empty node.
+    if (operator === ';' && isAtEnd(cur)) break;
     const right = parsePipe(cur);
     const node: SequenceNode = { kind: 'sequence', operator, left, right };
     left = node;

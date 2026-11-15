@@ -8,7 +8,7 @@
  * notifications.adaptiveSuppression, ...). There is no separate enablement
  * namespace: at boot the runtime derives each internal gate's state from its
  * bound settings key, and the live bridge keeps them in sync afterwards.
- * The internal gate registry (flags.ts) and its kill-switch manager survive as
+ * The internal gate registry (flags.ts) and its manager survive as
  * implementation detail only, surfaces render FEATURE_SETTINGS, never that
  * registry as a category of its own.
  *
@@ -19,7 +19,7 @@
  *             drives both the in-process instrumentation and remote export).
  * - constant: the capability has no separate off switch; its own domain keys
  *             (listed in its settings association) govern runtime activation
- *             directly and only the internal kill switch can force it off.
+ *             directly.
  */
 import type { ConfigKey } from '../../config/schema-types.js';
 import type { ConfigManager } from '../../config/manager.js';

@@ -144,7 +144,8 @@ for (const policy of ['readAccessFilter', 'registeredReadAssertion'] as const) {
       const callsAtCancellation = callbackCalls;
       released = true; hold.resolve();
       expect((await observed(latePolicyFinished.promise, 2_000)).state).toBe('settled');
-      await Bun.sleep(20);
+      await runtime.agentManager.join(record.id);
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
       expect(callbackCalls).toBe(callsAtCancellation);
       const finalResult = runtime.agentManager.getConversationSnapshot(record.id).find(message => message.role === 'tool' && message.callId === 'cancel-history');
       expect(JSON.stringify(finalResult)).not.toContain('REAL_HISTORY_CANCELLATION_RESULT');

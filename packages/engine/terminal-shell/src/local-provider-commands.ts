@@ -5,6 +5,7 @@ import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platfor
 import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { LiteralSecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
@@ -120,14 +121,6 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
             );
             return;
           }
-          if (apiKey) {
-            try {
-              await storeProviderKey(services.requireSecretsManager(context), name, apiKey);
-            } catch (error) {
-              context.print(`Could not store the key for '${name}': ${summarizeError(error)}`);
-              return;
-            }
-          }
           context.print(`Probing ${baseURL}/models ...`);
           let ids: string[] = [];
           const abort = new AbortController();
@@ -176,10 +169,26 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           };
           try {
             mkdirSync(directory, { recursive: true });
-            await writeFile(file, JSON.stringify(config, null, 2), 'utf-8');
+            // Exclusive create: a second add of the same name cannot overwrite the first.
+            await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', flag: 'wx' });
           } catch (error) {
-            context.print(`Error writing provider file: ${summarizeError(error)}`);
+            context.print(
+              (error as NodeJS.ErrnoException).code === 'EEXIST'
+                ? `Provider '${name}' already exists at ${file}\nRemove it first with: /provider remove ${name}${confirmationSuffix}`
+                : `Error writing provider file: ${summarizeError(error)}`,
+            );
             return;
+          }
+          // The key is stored last, so a failed write leaves no key without a provider; a failed
+          // store takes the provider file back out so the two never disagree.
+          if (apiKey) {
+            try {
+              await storeProviderKey(services.requireSecretsManager(context), name, apiKey);
+            } catch (error) {
+              await unlink(file).catch(() => undefined);
+              context.print(`Could not store the key for '${name}': ${summarizeError(error)}. The provider was not added.`);
+              return;
+            }
           }
           const modelLines = ids.length
             ? ids
@@ -248,11 +257,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
             context.print(`Unknown provider: ${provider}. Available: ${api.listProviderIds().join(', ')}`);
             return;
           }
-          const registryKey = requestedModel
-            ? requestedModel.includes(':')
-              ? requestedModel
-              : `${provider}:${requestedModel}`
-            : match.registryKey;
+          const registryKey = requestedModel ? formatProviderModel(provider, requestedModel) : match.registryKey;
           const selected = await api.selectModel(registryKey);
           policy.beforeSelection(context, selected.providerId, () => {
             context.session.runtime.model = selected.registryKey;

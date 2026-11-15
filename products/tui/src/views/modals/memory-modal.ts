@@ -1,4 +1,4 @@
-import { infoRow } from './modal-surface-helpers.ts';
+import { infoRow, runModalCommand } from './modal-surface-helpers.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -285,15 +285,14 @@ class MemoryModalSurface implements ConfigModalSurface {
     const review = (state: string, confidence: number, reason?: string): void => {
       const args = ['review', record.id, state, '--confidence', String(confidence), '--by', 'operator'];
       if (reason) args.push('--reason', reason);
-      void ctx.executeCommand?.('recall', args);
-      ctx.setStatus(`Dispatched /recall review ${record.id} ${state}.`);
+      runModalCommand(ctx, 'recall', args, `/recall review ${record.id} ${state}`, { afterSettle: () => { void this.refresh(); } });
     };
     switch (id) {
       case 'markReviewed': review('reviewed', Math.max(record.confidence, 85)); break;
       case 'markStale': review('stale', Math.min(record.confidence, 40), 'marked stale from the memory modal'); break;
       case 'markContradicted': review('contradicted', 0, 'marked contradicted from the memory modal'); break;
       case 'markFresh': review('fresh', Math.max(record.confidence, 60)); break;
-      case 'remove': void ctx.executeCommand?.('recall', ['remove', record.id]); ctx.setStatus(`Dispatched /recall remove ${record.id}.`); break;
+      case 'remove': runModalCommand(ctx, 'recall', ['remove', record.id], `/recall remove ${record.id}`, { afterSettle: () => { void this.refresh(); } }); break;
     }
   }
 

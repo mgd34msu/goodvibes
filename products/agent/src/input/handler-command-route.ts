@@ -5,8 +5,9 @@ import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
-import type { ClipboardPasteSource } from './handler-content-actions.ts';
+import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
+import { scheduleCommandArguments } from './commands/schedule-arguments.ts';
 import { activeTokens } from '../renderer/theme.ts';
 
 export type CommandModeRouteState = {
@@ -30,14 +31,54 @@ export type CommandModeRouteState = {
   clipboard?: ClipboardPasteSource;
 };
 
+/** The command context with clipboard paste bound to this route's prompt state, so /paste and run_keybinding paste edit the composer. */
+function withComposerBindings(context: CommandContext, state: CommandModeRouteState): CommandContext {
+  return {
+    ...context,
+    pasteFromClipboard: () => {
+      const result = handleClipboardPaste(
+        {
+          prompt: state.prompt,
+          cursorPos: state.cursorPos,
+          pasteRegistry: state.pasteRegistry,
+          nextPasteId: state.nextPasteId,
+          imageRegistry: state.imageRegistry,
+          nextImageId: state.nextImageId,
+          saveUndoState: state.saveUndoState,
+          ensureInputCursorVisible: state.ensureInputCursorVisible,
+          requestRender: state.requestRender,
+        },
+        context.workspace.shellPaths?.workingDirectory ?? state.projectRoot,
+        state.clipboard,
+      );
+      state.prompt = result.prompt;
+      state.cursorPos = result.cursorPos;
+      state.nextImageId = result.nextImageId;
+      state.nextPasteId = result.nextPasteId;
+      return result;
+    },
+  };
+}
+
 export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
   dismissSplash: false,
   passOriginalInput: false,
   passthroughKeys: ['left', 'right'],
   unknownCommand: (name) => `Unknown command /${name}. Type /help for available commands.`,
   commandError: (error) => summarizeCommandError(error),
-  prepare(context, _state, raw) {
+  prepare(context, state, raw) {
     const { name, args } = parseSlashCommand(raw);
-    return { name, args: [...args], context };
+    if (name === 'schedule' || name === 'sched') {
+      // A schedule command is refused when its quoting is incomplete or has an empty word,
+      // rather than closing the quote silently and shifting the words that follow.
+      const strict = scheduleCommandArguments(raw.slice(1));
+      if (!strict) {
+        context.print('Invalid schedule command quoting.');
+        state.requestRender();
+        return undefined;
+      }
+      return { name, args: strict, context: withComposerBindings(context, state) };
+    }
+    return { name, args: [...args], context: withComposerBindings(context, state) };
   },
 });

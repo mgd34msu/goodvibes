@@ -14,6 +14,22 @@ export function signalNativeProcessGroup(child, signal = 'SIGKILL') {
   catch (error) { if (error.code !== 'ESRCH') throw error; }
 }
 
+/** Children whose group was signalled at the moment their leader was reaped. */
+const signalledAtLeaderExit = new WeakSet();
+
+/**
+ * Spawn a command as its own process group and kill what it leaves behind the
+ * instant the leader exits. Once the leader is reaped and the group is empty its
+ * pid can be reused by an unrelated group leader, so a later signal to -pid
+ * could hit that group; signalling at exit keeps the window to nothing.
+ */
+export function spawnNativeProcessGroup(command, args, options) {
+  const child = spawn(command, args, { ...options, detached: true });
+  signalledAtLeaderExit.add(child);
+  child.once('exit', () => signalNativeProcessGroup(child));
+  return child;
+}
+
 export function assertNativeProcessGroupDrained(child) {
   if (child.pid !== undefined) assert(!groupExists(child.pid), 'Native command left an owned process group');
 }
@@ -25,7 +41,8 @@ export async function boundedNativeProcessClose(stopped, milliseconds, message) 
 }
 
 export async function drainNativeProcessGroup(child, stopped) {
-  signalNativeProcessGroup(child);
+  const leaderReaped = child.exitCode !== null || child.signalCode !== null;
+  if (!(leaderReaped && signalledAtLeaderExit.has(child))) signalNativeProcessGroup(child);
   await boundedNativeProcessClose(stopped.catch(() => {}), 2_000, 'Owned native close did not drain');
   const started = Date.now();
   while (child.pid && groupExists(child.pid) && Date.now() - started < 2_000) await new Promise(yes => setTimeout(yes, 20));
@@ -40,7 +57,7 @@ export async function runNativeBuildCommand(command, args, {
   assert(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'Native build requires a positive deadline');
   assert(Number.isSafeInteger(maxOutputBytes) && maxOutputBytes > 0, 'Native build requires a positive output limit');
   signal?.throwIfAborted();
-  const child = spawn(command, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnNativeProcessGroup(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let rejectExecution;
   const interrupted = new Promise((_yes, no) => { rejectExecution = no; });
   const closed = new Promise((yes, no) => {
@@ -90,7 +107,7 @@ export async function runNativeArchive(members, cwd, fd, signal) {
     && path.length > 0 && !path.startsWith('-') && !path.startsWith('/') && !path.includes('\\')
     && path.split('/').every(part => part.length > 0 && part !== '.' && part !== '..')), 'Native archive requires fixed relative members');
   signal?.throwIfAborted();
-  const child = spawn('tar', ['--format=ustar', '-czf', '-', ...members], { cwd, detached: true, stdio: ['ignore', fd, 'ignore'] });
+  const child = spawnNativeProcessGroup('tar', ['--format=ustar', '-czf', '-', ...members], { cwd, stdio: ['ignore', fd, 'ignore'] });
   const closed = new Promise((yes, no) => {
     child.once('error', no);
     child.once('close', (code, stoppedBy) => code === 0 && stoppedBy === null ? yes() : no(new Error('Native archive command failed')));

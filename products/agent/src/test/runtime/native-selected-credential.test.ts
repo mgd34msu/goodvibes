@@ -47,11 +47,16 @@ function fixture(baseUrl = 'http://127.0.0.1:3421') {
 const auth = (principalId: string) => ({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
   authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', admin: true,
   scopes: ['read:work-ledger', 'write:work-ledger', 'write:sessions'], roles: [] });
+const guarded = (violations: string[], handle: (request: Request) => Promise<Response>) => async (request: Request): Promise<Response> => {
+  // A failed assertion in a handler becomes an HTTP 500 the client may treat as an expected failure; keep it for the test body.
+  try { return await handle(request); } catch (error) { violations.push(error instanceof Error ? error.message : String(error)); throw error; }
+};
 function hostFixture() {
+  const violations: string[] = [];
   const requests: string[] = []; const captures: NativeConversationIntakeCaptureRequest[] = [];
   let principal = 'pairing:selected-owner'; let scopes: string[] | undefined;
   let onAuth: () => void | Promise<void> = () => {}; let onProject = () => {};
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: guarded(violations, async request => {
     expect(request.headers.get('authorization')).toBe(`Bearer ${secret.token}`);
     const path = new URL(request.url).pathname; requests.push(path);
     if (path === '/api/control-plane/auth') { const value = { ...auth(principal), ...(scopes ? { scopes } : {}) }; await onAuth(); return Response.json(value); }
@@ -72,11 +77,11 @@ function hostFixture() {
         currentAttempt: true, stale: false, state: 'admitting', recovery: 'pending' });
     }
     return Response.json({ error: 'Unexpected synthetic route' }, { status: 500 });
-  } });
+  }) });
   const f = fixture(server.url.origin);
   return { ...f, requests, captures, setPrincipal(value: string) { principal = value; },
     setScopes(value: string[]) { scopes = value; },
-    onAuth(callback: () => void | Promise<void>) { onAuth = callback; }, onProject(callback: () => void) { onProject = callback; }, close() { server.stop(true); } };
+    onAuth(callback: () => void | Promise<void>) { onAuth = callback; }, onProject(callback: () => void) { onProject = callback; }, close() { server.stop(true); expect(violations).toEqual([]); } };
 }
 const capture = { requestId: 'request', inputId: 'input', text: 'Original synthetic source', unsupportedSources: [] };
 const submission = { requestId: 'request', inputId: 'input', expectedRevision: 0, goal: 'Synthetic goal', criteria: ['Synthetic criterion'] };

@@ -7,12 +7,10 @@
  * ConfigManager.load honors any existing explicit `danger.daemon = false`
  * by rewriting it onto `daemon.enabled = false`, see
  * config-migrations.test.ts for that contract).
- *
- * See docs/decisions/2026-07-05-daemon-by-default.md.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { tmpdir } from 'os';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { resolveDaemonEnabled, type DaemonEnabledReader } from '../platform/src/platform/config/index.js';
@@ -40,8 +38,14 @@ describe('resolveDaemonEnabled', () => {
 });
 
 describe('schema + DEFAULT_CONFIG: daemon on by default, danger.daemon alias removed', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   function makeManager(diskConfig?: Record<string, unknown>): ConfigManager {
     const configDir = join(tmpdir(), `gv-daemon-default-${Date.now()}-${crypto.randomUUID()}`);
+    dirs.push(configDir);
     mkdirSync(configDir, { recursive: true });
     if (diskConfig) {
       writeFileSync(join(configDir, 'settings.json'), JSON.stringify(diskConfig), 'utf-8');

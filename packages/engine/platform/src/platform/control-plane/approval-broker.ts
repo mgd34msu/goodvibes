@@ -1,17 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
-import type { PermissionPromptDecision, PermissionPromptRequest, PermissionRequestHandler } from '../permissions/prompt.js';
+import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
 import { buildDurableRuleForDecision, matchDurableRulesAsync } from '../permissions/approval-rules.js';
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { resolveApprovalHunkSelection } from './approval-hunk-apply.js';
 import type { PendingApprovalEntry, RaisedApproval } from './approval-broker-raise.js';
-import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput } from './approval-broker-owner.js';
+import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput, type ApprovalActionOutcome } from './approval-broker-owner.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 import { approvalDispositionMatches, assertExplicitApprovalDisposition, ordinaryApprovalDecision, type SharedApprovalDecision } from './approval-disposition.js';
 
+/**
+ * `claimed` is advisory: it records who said they are handling an ask so other
+ * surfaces can show it, and gates nothing. Any participant may still approve,
+ * deny or cancel a claimed ask, and a later claim replaces `claimedBy`.
+ */
 export type SharedApprovalStatus = 'pending' | 'claimed' | 'approved' | 'denied' | 'cancelled' | 'expired';
 
 export interface SharedApprovalAuditRecord {
@@ -50,22 +55,6 @@ export interface SharedApprovalRecord {
    * deadline passed while the process was down. See `rearmRestoredTimers`.
    */
   readonly expiresAt?: number | undefined;
-  /**
-   * The REAL session an ACCEPTED ask spawned, when acceptance starts one
-   * (e.g. the CI fix-session a "fix this?" offer starts), always an id
-   * session attach/resume resolves, never a scheduling handle. Stamped at
-   * the moment the session exists via {@link ApprovalBroker.stampFixSession}
-   * and published as a record update, so the surface that accepted,
-   * attached right now, gets an in-process handle to jump to the session.
-   * Never present on denied records; mutually exclusive with fixSessionError.
-   */
-  readonly fixSessionId?: string | undefined;
-  /**
-   * The honest failure when an accepted ask's spawn did NOT produce an
-   * attachable session, recorded instead of a dead id. Mutually exclusive
-   * with fixSessionId; never present on denied records.
-   */
-  readonly fixSessionError?: string | undefined;
   readonly metadata: Record<string, unknown>;
   readonly audit: readonly SharedApprovalAuditRecord[];
 }
@@ -117,6 +106,7 @@ function sortApprovals(records: Iterable<SharedApprovalRecord>): SharedApprovalR
  * promise + resolver and must survive until resolved.
  */
 const MAX_APPROVAL_RECORDS = 500;
+const WITHHELD_ANSWER = WITHHELD_PROMPT_ANSWER;
 const TERMINAL_APPROVAL_STATUSES = new Set<SharedApprovalStatus>(['approved', 'denied', 'cancelled', 'expired']);
 
 const APPROVAL_STATUSES = new Set<SharedApprovalStatus>(['pending', 'claimed', 'approved', 'denied', 'cancelled', 'expired']);
@@ -143,6 +133,12 @@ function isStringArray(value: unknown): value is readonly string[] {
 
 function throwInvalidApprovalSnapshot(): never {
   throw new Error('Shared approval store snapshot is invalid.');
+}
+
+/** Name the record that failed, so an operator can repair or remove that one entry. */
+function describeInvalidApprovalRecord(value: unknown, index: number): string {
+  const id = isRecord(value) && typeof value['id'] === 'string' ? `'${value['id']}'` : `at position ${index}`;
+  return `Shared approval store snapshot is invalid: approval ${id} is malformed. Repair or remove that entry in the approvals store file; no approval can be read until then.`;
 }
 
 function validateOptionalString(value: unknown): void {
@@ -239,7 +235,10 @@ function validateApprovalRecord(value: unknown): void {
 function validateApprovalSnapshot(snapshot: SharedApprovalStoreSnapshot | null): SharedApprovalStoreSnapshot | null {
   if (!snapshot) return null;
   if (!isRecord(snapshot) || !Array.isArray(snapshot.approvals)) throwInvalidApprovalSnapshot();
-  for (const approval of snapshot.approvals) validateApprovalRecord(approval);
+  snapshot.approvals.forEach((approval, index) => {
+    try { validateApprovalRecord(approval); }
+    catch { throw new Error(describeInvalidApprovalRecord(approval, index)); }
+  });
   return snapshot;
 }
 
@@ -276,11 +275,20 @@ export class ApprovalBroker {
   private readonly approvals = new Map<string, SharedApprovalRecord>();
   private readonly pendingResolvers = new Map<string, PendingApprovalEntry>();
   readonly #ownerApprovals = new OwnerApprovalAuthority();
+  /**
+   * The text typed in answer to a command's terminal prompt is usually a
+   * password. It goes to the waiting command and nowhere else: the stored,
+   * published and returned record carries a marker instead, and this map (never
+   * persisted) holds the real text until the waiter has it.
+   */
+  readonly #withheldAnswers = new Map<string, string>();
   private readonly listeners = new Set<ApprovalListener>();
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
   private publisher: ApprovalPublisher | null = null;
   private loaded = false;
+  /** One load at a time: a second early caller must not clear a map the first already filled. */
+  private loading: Promise<void> | null = null;
 
   constructor(
     options: {
@@ -308,6 +316,15 @@ export class ApprovalBroker {
 
   async start(): Promise<void> {
     if (this.loaded) return;
+    this.loading ??= this.load().catch((error: unknown) => {
+      // A failed load is retried by the next caller rather than remembered.
+      this.loading = null;
+      throw error;
+    });
+    await this.loading;
+  }
+
+  private async load(): Promise<void> {
     const snapshot = validateApprovalSnapshot(await this.store.load());
     this.approvals.clear();
     for (const approval of snapshot?.approvals ?? []) {
@@ -335,6 +352,13 @@ export class ApprovalBroker {
    * There are no local resolvers to call for a restored record (the awaiting
    * caller died with the previous process), so this settles the RECORD, which
    * is what every surface reads.
+   *
+   * A record with no deadline that was raised IN this process is cancelled: its
+   * waiter died with the previous process, so an answer would reach nobody,
+   * and leaving it pending lets the next identical ask coalesce onto it and
+   * wait with no prompt at all. A record raised over the wire
+   * (`approvals.raise`) belongs to a caller in another process that may still
+   * be watching it, so it stays open for that caller.
    */
   private rearmRestoredTimers(): void {
     const now = Date.now();
@@ -342,7 +366,17 @@ export class ApprovalBroker {
       if (approval.status !== 'pending' && approval.status !== 'claimed') continue;
       if (this.pendingResolvers.has(approval.id)) continue;
       if (approval.expiresAt === undefined) {
-        this.pendingResolvers.set(approval.id, { resolvers: [], externallyOwned: true });
+        if (approval.metadata['raisedVia'] === 'approvals.raise') {
+          this.pendingResolvers.set(approval.id, { resolvers: [], externallyOwned: true });
+          continue;
+        }
+        void this.cancelApproval(approval.id, 'approval-broker', 'service', 'the process that asked restarted, so nothing is waiting for this answer')
+          .catch((error: unknown) => {
+            logger.warn('Restored approval cancellation failed', {
+              approvalId: approval.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
         continue;
       }
 
@@ -409,11 +443,15 @@ export class ApprovalBroker {
     return awaitPermission(async () => (await this.raiseApproval(ownedInput)).decision, signal);
   }
 
-  async claimApproval(approvalId: string, actor: string, actorSurface = 'web', note?: string): Promise<SharedApprovalRecord | null> {
+  async claimApproval(approvalId: string, actor: string, actorSurface = 'web', note?: string, outcome?: ApprovalActionOutcome): Promise<SharedApprovalRecord | null> {
+    if (outcome) outcome.applied = false;
     await this.start();
     const approval = this.approvals.get(approvalId);
     if (!approval) return null;
     if (approval.status !== 'pending' && approval.status !== 'claimed') return approval;
+    // Replacing the record while its owner decision is being written would make
+    // that decision look stale and turn it into a cancel; it settles in one write.
+    if (this.#ownerApprovals.isResolving(approvalId)) return approval;
     const updated: SharedApprovalRecord = {
       ...approval,
       status: 'claimed',
@@ -423,44 +461,7 @@ export class ApprovalBroker {
       audit: [...approval.audit, buildAudit('claimed', actor, actorSurface, note)],
     };
     this.approvals.set(approvalId, updated);
-    await this.persist();
-    this.publish(updated);
-    return updated;
-  }
-
-  /**
-   * Stamp the outcome of an ACCEPTED ask's spawn (e.g. the CI fix-session an
-   * accepted "fix this?" offer started) onto the resolved approval record for
-   * `callId`, and publish the update so already-attached subscribers see the
-   * record change live. This is deliberately the broker seam, not the receipts
-   * queue: receipts deliver at the NEXT attach, but the accepting surface is
-   * attached right now and needs an in-process handle to open the session.
-   *
-   * The success outcome carries the REAL spawned session id (attach/resume-
-   * resolvable, never a scheduling handle); the failure outcome records the
-   * honest error instead of a dead id. Returns the updated record, or null
-   * when no APPROVED record with that callId exists, a denied offer is
-   * never stamped.
-   */
-  async stampFixSession(
-    callId: string,
-    outcome: { readonly sessionId: string } | { readonly error: string },
-  ): Promise<SharedApprovalRecord | null> {
-    await this.start();
-    const existing = [...this.approvals.values()].find((approval) => approval.callId === callId);
-    if (!existing || existing.status !== 'approved') return null;
-    const patch: Pick<SharedApprovalRecord, 'fixSessionId' | 'fixSessionError'> = 'sessionId' in outcome
-      ? { fixSessionId: outcome.sessionId, fixSessionError: undefined }
-      : { fixSessionId: undefined, fixSessionError: outcome.error };
-    if (existing.fixSessionId === patch.fixSessionId && existing.fixSessionError === patch.fixSessionError) {
-      return existing;
-    }
-    const updated: SharedApprovalRecord = {
-      ...existing,
-      ...patch,
-      updatedAt: Date.now(),
-    };
-    this.approvals.set(updated.id, updated);
+    if (outcome) outcome.applied = true;
     await this.persist();
     this.publish(updated);
     return updated;
@@ -474,6 +475,7 @@ export class ApprovalBroker {
     const approved = input.approved;
     const disposition = input.disposition;
     assertExplicitApprovalDisposition(approved, disposition);
+    if (input.outcome) input.outcome.applied = false;
     if (disposition === 'amended' && (input.remember === true || input.rememberTier !== undefined)) {
       throw Object.assign(new Error('An amendment cannot create a remembered approval rule.'), { code: 'INVALID_ARGUMENT', status: 400 });
     }
@@ -507,6 +509,10 @@ export class ApprovalBroker {
       }
       modifiedArgs = resolution.modifiedArgs;
     }
+    if (approved && approval.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
+      this.#withheldAnswers.set(approvalId, modifiedArgs['answer']);
+      modifiedArgs = { ...modifiedArgs, answer: WITHHELD_ANSWER };
+    }
     const updated: SharedApprovalRecord = {
       ...approval,
       status: approved ? 'approved' : 'denied',
@@ -529,7 +535,13 @@ export class ApprovalBroker {
     if (this.pendingResolvers.get(approvalId)?.retired) {
       return this.cancelApproval(approvalId, 'approval-broker', 'service', 'all requesting consumers cancelled');
     }
-    assertOwnerCurrent?.();
+    try {
+      assertOwnerCurrent?.();
+    } catch (error) {
+      // The decision never started writing; the ask stays answerable.
+      this.#ownerApprovals.settle(approvalId);
+      throw error;
+    }
     if (!assertOwnerCurrent) this.approvals.set(approvalId, updated);
     try {
       // Keep an owner ask pending in memory while its write is in flight, so
@@ -537,15 +549,23 @@ export class ApprovalBroker {
       await this.persist(assertOwnerCurrent ? updated : undefined);
       assertOwnerCurrent?.();
     } catch (error) {
-      if (assertOwnerCurrent) {
-        await this.cancelApproval(approvalId, 'approval-broker', 'service', 'owner decision no longer current');
-        // A signal cancellation may already have queued its corrective write.
-        // Persist the current terminal snapshot before returning the failed owner answer.
-        await this.persist();
+      if (!assertOwnerCurrent) {
+        // The decision stays in memory and a later successful write commits it
+        // and settles its waiters, so say that rather than only "failed".
+        throw new Error(
+          `The ${approved ? 'approval' : 'denial'} of ${approvalId} could not be written (${error instanceof Error ? error.message : String(error)}). `
+          + 'It is held in memory and takes effect when the next write succeeds; cancel the ask to stop that.',
+          { cause: error },
+        );
       }
+      await this.cancelApproval(approvalId, 'approval-broker', 'service', 'owner decision no longer current');
+      // A signal cancellation may already have queued its corrective write.
+      // Persist the current terminal snapshot before returning the failed owner answer.
+      await this.persist();
       throw error;
     }
     if (assertOwnerCurrent) this.approvals.set(approvalId, updated);
+    if (input.outcome) input.outcome.applied = true;
     this.publish(updated);
 
     this.resolvePending(approvalId, updated.decision ?? { approved });
@@ -566,7 +586,13 @@ export class ApprovalBroker {
           if (candidate.id === approvalId) continue;
           if (candidate.status !== 'pending' && candidate.status !== 'claimed') continue;
           if (approved && candidate.requiresOwnerDecision) continue;
+          // A remembered rule belongs to the project it was made in, so it answers only that project's asks.
+          if (candidate.request.workingDirectory !== approval.request.workingDirectory) continue;
           if (this.pendingResolvers.get(candidate.id)?.retired) continue;
+          // A device grant is for one capability on one device; the tool-wide rule behind it must not answer other device asks.
+          if ((candidate.metadata['deviceCapability'] !== undefined || approval.metadata['deviceCapability'] !== undefined)
+            && (candidate.metadata['deviceNodeId'] !== approval.metadata['deviceNodeId']
+              || candidate.metadata['deviceCapability'] !== approval.metadata['deviceCapability'])) continue;
           const candidateCurrent = () => {
             assertOwnerCurrent?.();
             if (this.approvals.get(candidate.id) !== candidate || this.pendingResolvers.get(candidate.id)?.retired)
@@ -607,7 +633,11 @@ export class ApprovalBroker {
           this.publish(swept);
           this.resolvePending(candidate.id, swept.decision ?? { approved });
         }
-        await this.persist();
+        // The decision itself is already durable and reported applied; a failed
+        // write of the swept asks is retried by the next write, not an error here.
+        await this.persist().catch((error: unknown) => {
+          logger.warn('Remembered approval sweep not yet written', { approvalId, error: error instanceof Error ? error.message : String(error) });
+        });
       }
     }
     return updated;
@@ -616,9 +646,14 @@ export class ApprovalBroker {
   /** Resolve every waiter attached to an approval (coalesced asks share one record). */
   private resolvePending(approvalId: string, recorded: SharedApprovalDecision): void {
     this.#ownerApprovals.retire(approvalId);
+    const withheld = this.#withheldAnswers.get(approvalId);
+    this.#withheldAnswers.delete(approvalId);
     const pending = this.pendingResolvers.get(approvalId);
     if (!pending) return;
-    const decision = ordinaryApprovalDecision(recorded);
+    const ordinary = ordinaryApprovalDecision(recorded);
+    const decision = withheld !== undefined && ordinary.modifiedArgs !== undefined
+      ? { ...ordinary, modifiedArgs: { ...ordinary.modifiedArgs, answer: withheld } }
+      : ordinary;
     if (pending.timer) clearTimeout(pending.timer);
     if (recorded.disposition === 'cancelled' || recorded.disposition === 'expired') pending.promptController?.abort();
     for (const resolve of pending.resolvers) resolve(decision);
@@ -637,6 +672,10 @@ export class ApprovalBroker {
     await this.start();
     const approval = this.approvals.get(approvalId);
     if (!approval) return null;
+    if (this.#ownerApprovals.isResolving(approvalId)) {
+      logger.warn('Approval update not recorded while its owner decision is being written', { approvalId, actor: input.actor });
+      return approval;
+    }
     const updated: SharedApprovalRecord = {
       ...approval,
       updatedAt: Date.now(),
@@ -652,7 +691,8 @@ export class ApprovalBroker {
     return updated;
   }
 
-  async cancelApproval(approvalId: string, actor: string, actorSurface = 'web', note?: string): Promise<SharedApprovalRecord | null> {
+  async cancelApproval(approvalId: string, actor: string, actorSurface = 'web', note?: string, outcome?: ApprovalActionOutcome): Promise<SharedApprovalRecord | null> {
+    if (outcome) outcome.applied = false;
     await this.start();
     const approval = this.approvals.get(approvalId);
     if (!approval) return null;
@@ -669,10 +709,48 @@ export class ApprovalBroker {
       audit: [...approval.audit, buildAudit('cancelled', actor, actorSurface, note)],
     };
     this.approvals.set(approvalId, updated);
-    await this.persist();
+    if (outcome) outcome.applied = true;
+    try {
+      await this.persist();
+    } finally {
+      // Deny-direction: a waiter released before the write is durable can only
+      // refuse its tool call, so a failed write must not leave it hanging.
+      this.resolvePending(approvalId, updated.decision!);
+    }
     this.publish(updated);
-    this.resolvePending(approvalId, updated.decision!);
     return updated;
+  }
+
+  /**
+   * A surface that raised this ask over the wire gives up its claim on it.
+   * While another surface that raised the same ask is still waiting the record
+   * stays pending for it (returned unchanged, not applied); the last one to
+   * leave cancels it. Records without tracked holds cancel outright.
+   *
+   * `holdId` is the id `raiseApproval` returned to the surface that is
+   * leaving. With it, releasing twice is harmless: the second call finds the
+   * hold already gone and changes nothing. Without it the call gives up one
+   * anonymous hold, which a retry cannot tell from a second surface leaving.
+   */
+  async releaseApproval(approvalId: string, actor: string, actorSurface = 'web', note?: string, outcome?: ApprovalActionOutcome, holdId?: string): Promise<SharedApprovalRecord | null> {
+    if (outcome) outcome.applied = false;
+    await this.start();
+    const approval = this.approvals.get(approvalId);
+    if (!approval) return null;
+    const pending = this.pendingResolvers.get(approvalId);
+    if (pending && (approval.status === 'pending' || approval.status === 'claimed')) {
+      if (holdId !== undefined && pending.holdIds !== undefined) {
+        // A release names the hold it gives up, so a retry of the same release
+        // changes nothing instead of consuming a hold another surface owns.
+        if (!pending.holdIds.delete(holdId)) return approval;
+        pending.raiseHolds = Math.max(1, (pending.raiseHolds ?? 1) - 1);
+        if (pending.holdIds.size > 0) return approval;
+      } else if ((pending.raiseHolds ?? 1) > 1) {
+        pending.raiseHolds = (pending.raiseHolds ?? 1) - 1;
+        return approval;
+      }
+    }
+    return this.cancelApproval(approvalId, actor, actorSurface, note, outcome);
   }
 
   private async expireApproval(approvalId: string, note: string): Promise<void> {
@@ -689,9 +767,12 @@ export class ApprovalBroker {
       audit: [...approval.audit, buildAudit('expired', 'approval-broker', 'service', note)],
     };
     this.approvals.set(approvalId, updated);
-    await this.persist();
+    try {
+      await this.persist();
+    } finally {
+      this.resolvePending(approvalId, updated.decision!);
+    }
     this.publish(updated);
-    this.resolvePending(approvalId, updated.decision!);
   }
 
   /**
@@ -748,27 +829,38 @@ export class ApprovalBroker {
   }
 
   private publish(approval: SharedApprovalRecord): void {
-    this.publisher?.publishEvent('approval-update', {
-      approval,
-      createdAt: Date.now(),
-    });
-    this.publisher?.publishSurfaceMessage({
-      surface: 'web',
-      title: approval.status === 'pending' || approval.status === 'claimed' ? 'Approval required' : 'Approval resolved',
-      body: `${approval.request.tool}: ${approval.request.analysis.summary}`,
-      level: approval.status === 'approved'
-        ? 'success'
-        : approval.status === 'denied' || approval.status === 'expired'
-          ? 'warn'
-          : 'info',
-      metadata: {
-        approvalId: approval.id,
-        status: approval.status,
-        callId: approval.callId,
-        sessionId: approval.sessionId,
-        routeId: approval.routeId,
-      },
-    });
+    // The record is already durable and its waiters are settled by the caller.
+    // A publisher that refuses (the gateway feature is off, a stream closed
+    // under it) must not turn a recorded decision into an error for the asker.
+    try {
+      this.publisher?.publishEvent('approval-update', {
+        approval,
+        createdAt: Date.now(),
+      });
+    } catch (error) {
+      logger.warn('Approval update not published', { approvalId: approval.id, error: error instanceof Error ? error.message : String(error) });
+    }
+    try {
+      this.publisher?.publishSurfaceMessage({
+        surface: 'web',
+        title: approval.status === 'pending' || approval.status === 'claimed' ? 'Approval required' : 'Approval resolved',
+        body: `${approval.request.tool}: ${approval.request.analysis.summary}`,
+        level: approval.status === 'approved'
+          ? 'success'
+          : approval.status === 'denied' || approval.status === 'expired'
+            ? 'warn'
+            : 'info',
+        metadata: {
+          approvalId: approval.id,
+          status: approval.status,
+          callId: approval.callId,
+          sessionId: approval.sessionId,
+          routeId: approval.routeId,
+        },
+      });
+    } catch (error) {
+      logger.warn('Approval surface message not published', { approvalId: approval.id, error: error instanceof Error ? error.message : String(error) });
+    }
     for (const listener of this.listeners) {
       try {
         listener(approval);

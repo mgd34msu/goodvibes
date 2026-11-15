@@ -1,21 +1,16 @@
 /**
  * Compaction quality-score bridging.
  *
- * Reality check: the platform's `computeQualityScore()`
- * (platform/runtime/compaction/quality-score.ts) is only ever called from a
- * SEPARATE pipeline, `CompactionManager` (platform/runtime/compaction/manager.ts).
- * The TUI's actual `/compact` path never instantiates `CompactionManager`, it
- * goes through `platform/core/context-compaction.ts` via
- * `ConversationManager.compact()` (see `compactConversation()` in
- * runtime-services.ts), which has no scoring of its own. Adopting the whole
- * `CompactionManager` pipeline just to get the score would be a far bigger
- * change than this item calls for.
+ * The TUI's `/compact` path goes through `platform/core/context-compaction.ts`
+ * via `ConversationManager.compact()` (see `compactConversation()` in
+ * runtime-services.ts), which has no scoring of its own, and the platform's
+ * `CompactionManager` only runs the lifecycle around a compaction.
  *
- * Instead, this module calls `computeQualityScore()` directly and out-of-band,
+ * This module calls the platform's `computeQualityScore()`
+ * (platform/runtime/compaction/quality-score.ts) directly and out-of-band,
  * fed by the before/after message sets and token estimates
- * `compactConversation()` already holds. That's enough to close the gap:
- * quality scoring reaches `/compact` and `/compact-history` without adopting
- * `CompactionManager`.
+ * `compactConversation()` already holds, so quality scoring reaches `/compact`
+ * and `/compact-history`.
  *
  * Honesty note: the `strategy` value passed to `computeQualityScore()` is a
  * BORROWED rubric label describing what `compactConversation()`'s structured

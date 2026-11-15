@@ -1,6 +1,14 @@
 export const DEFAULT_MAX_REQUEST_BODY_BYTES = 1_000_000;
 
 /**
+ * The most of a refused body that is still read off the wire to keep the
+ * connection reusable. A sender past this is cancelled: draining without a
+ * bound would let a refused request cost as much bandwidth and connection time
+ * as an accepted one.
+ */
+export const MAX_REFUSED_BODY_DRAIN_BYTES = 8_000_000;
+
+/**
  * Reads and discards the remainder of a request body reader.
  *
  * Bun (and Node) keep-alive connection reuse depends on the previous
@@ -17,9 +25,15 @@ export const DEFAULT_MAX_REQUEST_BODY_BYTES = 1_000_000;
  */
 async function drainReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
   try {
+    let drained = 0;
     for (;;) {
-      const { done } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
+      drained += value?.byteLength ?? 0;
+      if (drained > MAX_REFUSED_BODY_DRAIN_BYTES) {
+        await reader.cancel();
+        break;
+      }
     }
   } catch {
     // Best-effort.

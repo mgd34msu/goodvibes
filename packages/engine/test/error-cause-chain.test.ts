@@ -12,15 +12,14 @@ import {
  * AppError constructor: (message: string, code: string, recoverable: boolean, options?: AppErrorOptions)
  */
 describe('error cause chain', () => {
-  test('NormalizedError interface fields are present on normalizeError output', async () => {
-    const err = new Error('base error');
-    const result = normalizeError(err);
-    expect('name' in result).toBe(true);
-    expect('message' in result).toBe(true);
-    expect('summary' in result).toBe(true);
-    expect('category' in result).toBe(true);
-    expect('source' in result).toBe(true);
-    expect('recoverable' in result).toBe(true);
+  test('normalizeError of a plain Error keeps its name and message and fills the classification fields', async () => {
+    const result = normalizeError(new TypeError('base error'));
+    expect(result.name).toBe('TypeError');
+    expect(result.message).toBe('base error');
+    expect(typeof result.summary).toBe('string');
+    expect(typeof result.category).toBe('string');
+    expect(typeof result.source).toBe('string');
+    expect(typeof result.recoverable).toBe('boolean');
   });
 
   test('normalizeError maps AppError with recoverable=true and statusCode', async () => {

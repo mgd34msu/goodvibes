@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe('provider streamed tool argument parsing', () => {
-  test('drops malformed OpenAI accumulated arguments instead of returning empty args', () => {
+  test('keeps a malformed OpenAI call with an argument error the model can repair', () => {
     const toolCalls = fromOpenAIToolCalls([
       {
         id: 'call-bad',
@@ -30,7 +30,9 @@ describe('provider streamed tool argument parsing', () => {
       },
     ]);
 
-    expect(toolCalls).toEqual([]);
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]).toMatchObject({ id: 'call-bad', name: 'read_file', arguments: {} });
+    expect(toolCalls[0]?.argumentError).toContain("Tool call 'read_file' was not run");
   });
 
   test('keeps valid OpenAI accumulated arguments', () => {
@@ -51,15 +53,17 @@ describe('provider streamed tool argument parsing', () => {
     ]);
   });
 
-  test('drops malformed text-delimited tool calls instead of returning empty args', () => {
+  test('keeps a malformed text-delimited call with an argument error', () => {
     const parsed = extractTextToolCalls(
       '<|toolcallbegin|>functions.read_file:0<|toolcallargumentbegin|>{"path":<|toolcallend|>',
     );
 
-    expect(parsed.toolCalls).toEqual([]);
+    expect(parsed.toolCalls).toHaveLength(1);
+    expect(parsed.toolCalls[0]).toMatchObject({ name: 'read_file', arguments: {} });
+    expect(parsed.toolCalls[0]?.argumentError).toContain("Tool call 'read_file' was not run");
   });
 
-  test('drops malformed Anthropic streamed input_json_delta arguments', async () => {
+  test('keeps a malformed Anthropic streamed input_json_delta call with an argument error', async () => {
     const originalFetch = globalThis.fetch;
     const sse = [
       'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":0}}}',
@@ -92,7 +96,9 @@ describe('provider streamed tool argument parsing', () => {
       });
 
       expect(response.stopReason).toBe('tool_call');
-      expect(response.toolCalls).toEqual([]);
+      expect(response.toolCalls).toHaveLength(1);
+      expect(response.toolCalls[0]).toMatchObject({ id: 'call-bad', name: 'read_file', arguments: {} });
+      expect(response.toolCalls[0]?.argumentError).toContain("Tool call 'read_file' was not run");
     } finally {
       globalThis.fetch = originalFetch;
     }

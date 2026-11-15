@@ -1,5 +1,5 @@
 import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
-import { createSessionSaveCommand, restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { createSessionSaveCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import { unlinkSync } from 'node:fs';
 import 'node:fs/promises';
@@ -10,8 +10,16 @@ import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platfo
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sessionCommand } from './session.ts';
+import { loadSavedSessionIntoLive } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 import { filterUserFacingSessions } from './session-picker-filter.ts';
+
+/** Loading replaces the live conversation, which a running turn is still appending to. */
+function refuseWhileGenerating(ctx: CommandContext, action: string): boolean {
+  if (!ctx.isGenerating?.()) return false;
+  ctx.print(`A turn is still running, so ${action} was not started and the conversation is unchanged. Stop it with Esc or let it finish, then retry.`);
+  return true;
+}
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.exportCommand);
@@ -30,20 +38,20 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
         return;
       }
+      if (refuseWhileGenerating(ctx, `/load ${args[0]}`)) return;
       const sessionManager = requireSessionManager(ctx);
       try {
-        const { meta, messages, agentRecords } = sessionManager.load(args[0]);
         const agentManager = ctx.ops.agentManager;
         if (!agentManager) {
           ctx.print('Agent manager is not available in this runtime.');
           return;
         }
-        restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
+        const { messageCount, agentRecords } = loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
         agentManager.clear();
         if (agentRecords.length > 0) agentManager.importState(agentRecords);
         ctx.renderRequest();
         ctx.print(
-          `Session loaded: ${args[0]} (${messages.length} messages)${agentRecords.length > 0 ? ` [${agentRecords.length} agent records restored]` : ''}`,
+          `Session loaded: ${args[0]} (${messageCount} messages)${agentRecords.length > 0 ? ` [${agentRecords.length} agent records restored]` : ''}`,
         );
       } catch (e) {
         ctx.print(`Failed to load session: ${summarizeError(e)}`);
@@ -81,6 +89,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         }
         return;
       }
+      if (ctx.isGenerating?.()) {
+        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /undo.');
+        return;
+      }
       const success = ctx.session.conversationManager.undo();
       if (success) {
         ctx.print('Last turn undone. Use /redo to restore. Tip: /undo file to revert a file write/edit.');
@@ -114,6 +126,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         } catch (err) {
           ctx.print(`File redo failed: ${summarizeError(err)}`);
         }
+        return;
+      }
+      if (ctx.isGenerating?.()) {
+        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /redo.');
         return;
       }
       const success = ctx.session.conversationManager.redo();
@@ -194,11 +210,11 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           return;
         }
         try {
-          templateManager.save(
+          const stored = templateManager.save(
             name,
             ctx.session.conversationManager.getLastUserMessage() || '# Template\n\nReplace this with your template content.\n',
           );
-          ctx.print(`Template saved: ${name}`);
+          ctx.print(`Template saved: ${stored}`);
         } catch (e) {
           ctx.print(`Failed to save template: ${summarizeError(e)}`);
         }
@@ -377,11 +393,11 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
           else ctx.renderRequest();
         });
     } else {
+      if (refuseWhileGenerating(ctx, `loading ${result.item.id}`)) return;
       try {
-        const { meta, messages } = sessionManager.load(result.item.id);
-        restoreConversationContent(ctx.session.conversationManager, messages as never[], meta.title);
+        const { messageCount } = loadSavedSessionIntoLive(ctx, sessionManager, result.item.id);
         ctx.renderRequest();
-        ctx.print(`Session loaded: ${result.item.id} (${messages.length} messages)`);
+        ctx.print(`Session loaded: ${result.item.id} (${messageCount} messages)`);
       } catch (e) {
         ctx.print(`Failed to load session: ${summarizeError(e)}`);
       }

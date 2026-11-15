@@ -27,7 +27,7 @@
  * push/suppress behavior agrees.
  */
 import { attachFleetEmitBridge } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
+import type { ProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
 import { hasFreshSurfaceParticipant, SURFACE_ROUTE_FRESHNESS_MS, type SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { RuntimeEventBus } from './index.js';
 
@@ -43,7 +43,8 @@ export interface FleetNeedsInputPushDeps {
  * push source registers for real instead of gracefully degrading to absent.
  */
 export function wireFleetNeedsInputPush(input: {
-  readonly registry: ArchivableProcessRegistry;
+  /** The unfiltered registry (`archivable.unfiltered`): archiving a node must not look like it ending to the bridge. */
+  readonly registry: ProcessRegistry;
   readonly runtimeBus: RuntimeEventBus;
   readonly sessionBroker: Pick<SharedSessionBroker, 'getSession'>;
 }): FleetNeedsInputPushDeps {

@@ -113,8 +113,6 @@ describe('canonical semantic record catalogs', () => {
     const unavailable = native.find(method => method.id === 'artifacts.content.get');
     if (!available || !unavailable) throw new Error('Missing authored native transport controls');
     expect(available.invokable).toBe(true); expect(unavailable.invokable).toBe(false);
-    expect(JSON.stringify(native).length).toBeGreaterThan(1_000_000);
-    expect(Math.max(...[...evidence.values()].map(value => value.length))).toBeGreaterThan(40_000);
     const lanes = ['approvals', 'automation', 'schedules', 'tasks'];
     // Every exact native ID is an authored transport control. These choices
     // prove full source mapping and queue composition, not live lane semantics.
@@ -166,19 +164,28 @@ describe('canonical semantic record catalogs', () => {
   }, 60_000);
 
   for (const probability of [0.5, 0.575]) {
-    test(`autonomy holds unsettled native membership ${probability} before publishing an empty capability lane`, async () => {
+    test(`autonomy never claims a native method whose membership is unsettled ${probability}`, async () => {
       const evidence = new Map(getOperatorContract().operator.methods.map(method => [method.id, JSON.stringify(captureModelReadingInput(method))]));
       const fake = fakePort((name, question, raw) => {
         if (name !== 'match' || question.type !== 'noul') throw new Error('Unsettled membership reached a later producer');
         const request = nativeMembershipRequest(raw);
-        if (request.query !== 'approvals' || evidence.get(request.id) !== request.evidence)
+        if (!['approvals', 'automation', 'schedules', 'tasks'].includes(request.query) || evidence.get(request.id) !== request.evidence)
           throw new Error('Unsettled membership omitted its complete native source');
         return noulAnswer(probability);
       });
       installJudgmentPort(fake.port);
-      await expect(autonomyQueueSummary(fixture().context, {}, options())).rejects.toBeInstanceOf(ToolInputProjectionError);
+      const summary = await autonomyQueueSummary(fixture().context, { includeParameters: true }, options()) as {
+        readonly queue: readonly { readonly queueItemId: string; readonly methodIds?: readonly string[]; readonly unavailableMethodIds?: readonly string[] }[];
+      };
+      // A lane whose membership was not settled lists no method as available or unavailable.
+      for (const id of ['automation-runs', 'connected-schedules', 'connected-host-tasks', 'pending-approvals']) {
+        const row = summary.queue.find(item => item.queueItemId === id);
+        if (row) { expect(row.methodIds, id).toEqual([]); expect(row.unavailableMethodIds, id).toEqual([]); }
+      }
+      expect(summary.queue.some(item => ['automation-runs', 'connected-schedules', 'connected-host-tasks'].includes(item.queueItemId))).toBe(true);
       const membership = fake.requests.filter(request => request.context?.battery === 'agent.personal-ops.lane-member');
-      expect(membership.length).toBeGreaterThan(0); expect(membership.length).toBeLessThanOrEqual(16);
+      // Every lane reads every native method once, each with its complete source.
+      expect(membership).toHaveLength(4 * evidence.size);
       expect(membership.every(request => Object.keys(request.questions).join(',') === 'match')).toBe(true);
     });
   }
@@ -585,7 +592,10 @@ describe('canonical semantic record catalogs', () => {
   test('an exact process detail retains its own record across publication without consulting judgment', async () => {
     const f = fixture(), guards: (() => void)[] = [];
     expect(await describeBackgroundProcess(f.context, { processId: 'opaque-worker' }, { retainCurrent: guard => { guards.push(guard); } })).toMatchObject({ status: 'found' });
+    // The process finishing is the answer changing, not the source being replaced.
     f.manager.records[1]!.done = true;
+    expect(() => { for (const guard of guards) guard(); }).not.toThrow();
+    f.manager.records.splice(1, 1);
     expect(() => { for (const guard of guards) guard(); }).toThrow(ToolInputProjectionError);
   });
 

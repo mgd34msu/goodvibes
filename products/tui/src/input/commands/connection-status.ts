@@ -18,23 +18,20 @@
  * daemon's requirement, not a guess here. If the daemon changes what it needs,
  * this surface follows, because it never encoded the rule.
  *
- * ## Why the in-process catalog and not the operator HTTP wire
+ * ## Why the gateway catalog and not the operator HTTP wire
  *
  * Every `email.*` / `calendar.*` descriptor the platform catalogs carries
  * `invokable: false`. On the generic HTTP/WS dispatch path that flag is checked
  * by `validateGatewayInvocation` BEFORE any handler lookup and answered with a
  * flat 400 `NOT_INVOKABLE`, so `platform.operator.invoke('email.inbox.list', …)`
- * cannot reach these verbs no matter what is configured, and a surface built on
- * it would be a dead button.
+ * cannot reach these verbs no matter what is configured.
  *
- * `GatewayMethodCatalog.invoke()` deliberately does NOT consult that flag: a
- * runtime that has registered a real handler is authoritative over whether its
- * own method works. This product registers those handlers into its own catalog
- * at composition time (`createDaemonHandlerComposition`, called by the shared
- * `createRuntimeServices` root that both the TUI and the daemon boot from), so
- * the in-process catalog is a live, correct route to the same code, the same
- * seam `/review` already uses for `checkpoints.*`. That is what these surfaces
- * call.
+ * `GatewayMethodCatalog.invoke()` deliberately does NOT consult that flag, and
+ * this product's catalog forwards these verbs to the daemon
+ * (`runtime/gateway-daemon-forward.ts`), which owns the handlers. So the
+ * catalog is a live route to the daemon's code, the same seam `/review` uses
+ * for `checkpoints.*`. A failed probe therefore means the daemon is
+ * unreachable or refused the call, not that a local handler is missing.
  *
  * Nothing here reads, holds, or renders a credential. The probe asks for one
  * item and discards it; only presence or absence of a failure reaches the UI.
@@ -192,7 +189,7 @@ export function describeConnectionProbe(
     surface,
     state: 'unreachable',
     detail: `${label} could not be checked: ${errorText(error)}`,
-    nextActions: ['Check that the runtime composed its daemon handlers: /doctor'],
+    nextActions: ['Check that the daemon is running and reachable: /doctor'],
   };
 }
 
@@ -221,6 +218,26 @@ export const READ_INVOCATION_CONTEXT = { context: { clientKind: 'tui' as const }
 export const EXPLICIT_WRITE_INVOCATION_CONTEXT = {
   context: { clientKind: 'tui' as const, metadata: { explicitUserRequest: true } },
 };
+
+/**
+ * Irreversible writes (a sent mail, a created event) carry no idempotency key
+ * on the wire, so a retry after a timeout the server had already accepted would
+ * do it twice. This remembers, per gateway, which exact writes this process has
+ * already attempted, whether or not the attempt reported success.
+ */
+const attemptedWrites = new WeakMap<object, Set<string>>();
+
+/** True when the write may proceed; false when this exact write was already attempted and `again` is not set. */
+export function claimIrreversibleWrite(gateway: object, fingerprint: string, again: boolean): boolean {
+  let seen = attemptedWrites.get(gateway);
+  if (!seen) {
+    seen = new Set();
+    attemptedWrites.set(gateway, seen);
+  }
+  if (seen.has(fingerprint) && !again) return false;
+  seen.add(fingerprint);
+  return true;
+}
 
 /**
  * Probe one surface against the in-process gateway catalog.

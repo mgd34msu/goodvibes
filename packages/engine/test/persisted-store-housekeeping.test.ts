@@ -263,12 +263,14 @@ describe('cross-process lock reclaims abandoned staging files', () => {
   test('an orphaned .gv-lock.new-* is reaped while an in-flight one survives', async () => {
     const dir = tempDir(`gv-lockstaging-${randomUUID()}-`);
     const lockPath = join(dir, '.gv-lock');
-    const staleMs = 400;
+    // Large enough that no scheduling stall can age the in-flight file past it;
+    // only the orphan is aged, through its mtime.
+    const staleMs = 10 * 60 * 1000;
 
     // The litter a process leaves when it dies between openSync(staging,'wx')
     // and linkSync(staging, lockPath).
     const orphan = join(dir, '.gv-lock.new-999999-deadbeefcafe');
-    writeAgedFile(orphan, '{"pid":999999}', 10 * 60 * 1000);
+    writeAgedFile(orphan, '{"pid":999999}', 2 * staleMs);
     // Another process's staging file, created microseconds ago and about to be
     // linked. Reaping this would be a genuine defect.
     const inFlight = join(dir, '.gv-lock.new-424242-0badc0ffee00');
@@ -283,10 +285,7 @@ describe('cross-process lock reclaims abandoned staging files', () => {
     }
 
     // Sweeping again is a no-op: the orphan is already gone and the in-flight
-    // file (still being refreshed by its owner) is still not old enough.
-    await new Promise((resolve) => setTimeout(resolve, staleMs + 100));
-    const now = Date.now() / 1000;
-    utimesSync(inFlight, now, now);
+    // file is still not old enough.
     const release2 = await acquireCrossProcessLock(lockPath, { staleMs, totalTimeoutMs: 5_000 });
     try {
       expect(existsSync(orphan)).toBe(false);
@@ -307,16 +306,23 @@ describe('cross-process lock reclaims abandoned staging files', () => {
 });
 
 describe('daemon receipts are bounded by age as well as count, and disclose a torn file', () => {
-  function memoryIo(initial: string | null): { io: ReceiptStoreIo; current(): string | null } {
+  function memoryIo(initial: string | null): { io: ReceiptStoreIo; current(): string | null; aside(): string | null } {
     let contents = initial;
+    let setAside: string | null = null;
     return {
       io: {
         read: () => contents,
         write: (_path, next) => {
           contents = next;
         },
+        quarantine: (path) => {
+          setAside = contents;
+          contents = null;
+          return `${path}.unreadable`;
+        },
       },
       current: () => contents,
+      aside: () => setAside,
     };
   }
 
@@ -365,8 +371,9 @@ describe('daemon receipts are bounded by age as well as count, and disclose a to
     expect(store.current()).toBe(before);
   });
 
-  test('a torn receipt file is disclosed rather than silently emptied', () => {
-    const store = memoryIo('[{"id":"half-written","text":"upda');
+  test('a torn receipt file is set aside intact, so the next record() cannot erase it', () => {
+    const torn = '[{"id":"half-written","text":"upda';
+    const store = memoryIo(torn);
     const warnSpy = spyOn(logger, 'warn') as Mock<typeof logger.warn>;
     const warnings: string[] = [];
     warnSpy.mockImplementation((message: string) => {
@@ -380,6 +387,10 @@ describe('daemon receipts are bounded by age as well as count, and disclose a to
     }
     expect(receipts.list()).toEqual([]);
     expect(warnings).toContain('[daemon-receipt] receipt file was unreadable, starting from an empty receipt history');
+
+    receipts.record('restarted after a crash');
+    expect(store.aside()).toBe(torn);
+    expect(parsedIds(store.current())).toHaveLength(1);
   });
 
   test('a zero-filled receipt file is torn, not empty', () => {

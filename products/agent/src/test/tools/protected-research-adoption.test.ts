@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
-import { ToolInputProjectionError, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ArtifactCreateInput, ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { bindAgentResearchSourceOwner, createAgentResearchReportProjector, prepareProtectedResearchReport } from '../../agent/protected-research-report.ts';
 import { createAgentResearchReportTool, registerAgentResearchReportTool } from '../../tools/agent-research-report-tool.ts';
@@ -168,16 +168,18 @@ test('numeric report fields are screened before generic schema repair', async ()
   expect(JSON.stringify(f.calls)).toContain('5551234567');
 });
 
-test('report-shaped arguments cannot reach repair through a misspelled route', async () => {
+test('report-shaped arguments with a misspelled route are screened, then refused as an unknown action without dispatch', async () => {
   const f = researchScreeningFixture({ spans: exactSensitiveSpans(['synthetic-private']) });
   const registry = new ToolRegistry(); bindAgentResearchSourceOwner(registry, f.owner);
   registerAgentResearchTool(registry, {} as CommandRegistry, { workspace: {}, platform: {} } as CommandContext);
   const input = { ...base, action: 'repotr', summary: 'synthetic-private' };
-  const refusal: unknown = await registry.projectCall('typo-report', 'research', input).then(
-    async call => { await registry.releaseProjected(call); return null; }, (error: unknown) => error);
-  expect(refusal).toBeInstanceOf(ToolInputProjectionError);
-  expect(JSON.stringify(refusal)).not.toContain('synthetic-private');
-  expect(f.calls).toEqual([]);
+  const result = await registry.execute('typo-report', 'research', input);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Unknown research action 'repotr'");
+  expect(result.error).toContain('Nothing was dispatched.');
+  expect(JSON.stringify(result)).not.toContain('synthetic-private');
+  // The report-shaped fields were still screened before anything could read them.
+  expect(f.calls.length).toBeGreaterThan(0);
 });
 
 test('prepared reuse checks the new operation after authority callbacks and freezes derived bindings', async () => {

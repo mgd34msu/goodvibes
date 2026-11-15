@@ -1,6 +1,6 @@
 import { captureMcpBackendMethods } from './call-currentness.js';
 import type { McpToolSchema } from './client.js';
-import type { McpToolCallOptions } from './client-types.js';
+import type { McpClientPhase, McpToolCallOptions } from './client-types.js';
 import type { RegisteredTool } from './registry.js';
 import type { McpConfigRoots, McpConfigScope, McpEffectiveConfig, McpServerConfig } from './config.js';
 import type { McpReloadResult } from './registry.js';
@@ -12,6 +12,10 @@ export interface McpServerRecord {
   readonly transport?: 'stdio' | 'http' | undefined;
   readonly protocolVersion?: string | undefined;
   readonly protocolEra?: 'modern' | 'legacy' | undefined;
+  /** Where the connection is: `restart-wait` comes back on its own, `gave-up` needs a configuration reload. */
+  readonly phase?: McpClientPhase | undefined;
+  /** Why the last connect, handshake or restart failed, when it did. */
+  readonly lastError?: string | undefined;
 }
 
 export interface McpServerSecurityRecord {

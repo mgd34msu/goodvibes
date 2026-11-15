@@ -192,13 +192,23 @@ export class SearchManager {
         const visibleMatches: SearchMatch[] = [];
         const lines = history.getAllLines();
         for (const [lineIdx, line] of lines.entries()) {
-            const text = line.map(c => c.char).join('').toLowerCase();
+            // Wide-glyph continuation cells carry an empty char, so a string index is not a cell column.
+            const cellOf: number[] = [];
+            let joined = '';
+            for (const [cell, c] of line.entries()) {
+                for (let k = 0; k < c.char.length; k++)
+                    cellOf.push(cell);
+                joined += c.char;
+            }
+            const text = joined.toLowerCase();
+            // Lowercasing can change the length (for example U+0130); the cell map no longer lines up then.
+            const aligned = text.length === joined.length;
             let col = 0;
             while (col <= text.length - lowerQuery.length) {
                 const idx = text.indexOf(lowerQuery, col);
                 if (idx === -1)
                     break;
-                visibleMatches.push({ line: lineIdx, col: idx, length: query.length });
+                visibleMatches.push({ line: lineIdx, col: aligned ? cellOf[idx] ?? idx : idx, length: query.length });
                 col = idx + 1;
             }
         }

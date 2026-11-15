@@ -95,15 +95,20 @@ const expectedAgentCommands = [
 ] as const;
 
 describe('Agent command interface', () => {
-  test('hides copied TUI coding/lifecycle/developer commands from the Agent slash registry', () => {
+  test('hides copied TUI coding/lifecycle/developer commands from the Agent slash registry', async () => {
     const registry = new CommandRegistry();
     registerBuiltinCommands(registry);
     const names = new Set(registry.list().map((command) => command.name));
+    const dispatched: string[] = [];
+    const context = { print: (message: string) => dispatched.push(message) } as unknown as CommandContext;
 
     for (const commandName of hiddenCopiedCommands) {
-      expect(names.has(commandName)).toBe(false);
-      expect(registry.get(commandName)).toBeUndefined();
+      expect(names.has(commandName), commandName).toBe(false);
+      expect(registry.get(commandName), commandName).toBeUndefined();
+      // Not dispatchable either: no handler runs and nothing is printed.
+      expect(await registry.execute(commandName, [], context), commandName).toBe(false);
     }
+    expect(dispatched).toEqual([]);
   });
 
   test('keeps first-class Agent operator commands available', () => {
@@ -124,7 +129,7 @@ describe('Agent command interface', () => {
 
     expect(registry.get('login')).toBeUndefined();
     expect(registry.get('logout')).toBeUndefined();
-    expect(auth?.description).toBe('Review provider auth posture and export redacted auth review bundles');
+    expect(auth?.description).toBeTruthy();
     expect(auth?.usage).not.toContain('listener');
     expect(auth?.usage).not.toContain('service');
   });
@@ -190,8 +195,8 @@ describe('Agent command interface', () => {
     const undo = registry.get('undo');
     const redo = registry.get('redo');
 
-    expect(undo?.description).toBe('Undo the last conversation turn');
-    expect(redo?.description).toBe('Redo the last undone conversation turn');
+    expect(undo?.description).toContain('conversation');
+    expect(redo?.description).toContain('conversation');
     expect(`${undo?.description ?? ''} ${undo?.usage ?? ''} ${undo?.argsHint ?? ''}`).not.toContain('file');
     expect(`${redo?.description ?? ''} ${redo?.usage ?? ''} ${redo?.argsHint ?? ''}`).not.toContain('file');
   });

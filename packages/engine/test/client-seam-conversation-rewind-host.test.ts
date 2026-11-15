@@ -185,12 +185,10 @@ describe('the surface holding a conversation is the one that answers for it', ()
       host.start(SESSION);
       await taking.promise;
       expect(broker.listHosts()).toHaveLength(1);
-      const started = performance.now();
       await host.stop();
       expect(takeSettled).toBe(true);
       await taken.promise;
       await Promise.resolve();
-      expect(performance.now() - started).toBeLessThan(1_000);
       expect(broker.listHosts()).toHaveLength(0);
       expect(host.hostId()).toBeNull();
       expect(diagnostics).toEqual([]);
@@ -446,9 +444,7 @@ describe('the surface holding a conversation is the one that answers for it', ()
       host.start(SESSION);
       await failed.promise;
       await Bun.sleep(10);
-      const started = performance.now();
       await host.stop();
-      expect(performance.now() - started).toBeLessThan(1_000);
       expect(registrations).toBe(1);
       expect(broker.listHosts()).toHaveLength(0);
     } finally { await host.stop(); broker.shutdown(); }

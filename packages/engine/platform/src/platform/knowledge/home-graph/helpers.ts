@@ -1,5 +1,6 @@
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import type { HomeGraphNodeIdentity } from './node-identity-plan.js';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { HomeGraphObjectIdentityError } from './identity-errors.js';
 import type {
   KnowledgeEdgeRecord,
@@ -62,6 +63,15 @@ export function resolveHomeGraphSpace(input: HomeGraphSpaceInput = {}): {
   const spaceId = input.knowledgeSpaceId
     ? normalizeKnowledgeSpaceId(input.knowledgeSpaceId)
     : homeAssistantKnowledgeSpaceId(installationId);
+  // Every Home Graph verb reads, writes or deletes whole spaces; a space that
+  // is not a Home Assistant space belongs to another surface (project
+  // planning, the default space) and must never be addressed through here.
+  if (!homeAssistantSpaceComponent(spaceId)) {
+    throw new GoodVibesError(
+      `Home Graph can only address Home Assistant spaces (homeassistant:<installation>); "${spaceId}" is not one. Pass installationId or a homeassistant: knowledgeSpaceId.`,
+      { category: 'bad_request', source: 'runtime', operation: 'homegraph.space', recoverable: true },
+    );
+  }
   return {
     spaceId,
     installationId: homeAssistantSpaceComponent(spaceId) ?? installationId,

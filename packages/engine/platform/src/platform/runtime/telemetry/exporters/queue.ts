@@ -143,18 +143,21 @@ export class ExportQueue {
   }
 
   /**
-   * Wait until no queued entries remain or drainTimeoutMs elapses.
+   * Wait until no queued entries remain and no batch is still being exported,
+   * or drainTimeoutMs elapses. A batch leaves the ring before its export
+   * runs, so an empty ring alone does not mean the last spans were sent.
    */
   async drain(): Promise<void> {
-    if (this._size === 0) return;
+    if (this._size === 0 && !this._draining) return;
 
     const deadline = Date.now() + this._config.drainTimeoutMs;
-    while (this._size > 0 && Date.now() < deadline) {
+    while ((this._size > 0 || this._draining) && Date.now() < deadline) {
       await sleep(10);
     }
-    if (this._size > 0) {
-      logger.warn('[ExportQueue] Drain timed out with queued batches remaining', {
+    if (this._size > 0 || this._draining) {
+      logger.warn('[ExportQueue] Drain timed out with batches still queued or exporting', {
         remainingBatches: this._size,
+        exporting: this._draining,
         drainTimeoutMs: this._config.drainTimeoutMs,
       });
     }
@@ -175,8 +178,9 @@ export class ExportQueue {
   private _startDrainLoop(): void {
     if (this._draining) return;
     this._draining = true;
+    // _drainLoop clears _draining in its own finally (and may already have
+    // restarted itself), so the failure handler must not touch the flag.
     void this._drainLoop().catch((error: unknown) => {
-      this._draining = false;
       logger.error('[ExportQueue] Drain loop failed outside batch processing', {
         error: summarizeError(error),
       });

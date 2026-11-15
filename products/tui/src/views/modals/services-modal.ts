@@ -75,7 +75,10 @@ class ServicesModalSurface implements ConfigModalSurface {
 
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
-    if (this.entries.length === 0 && !this.loading) void this.refresh();
+    // Every open re-inspects: a connection test from an earlier visit may predate a
+    // credential or base-URL change, so it is dropped before the first paint.
+    this.entries = this.entries.map((e) => ({ name: e.name, inspection: e.inspection }));
+    if (!this.loading) void this.refresh();
   }
 
   buildView(): ConfigModalView {
@@ -133,10 +136,13 @@ class ServicesModalSurface implements ConfigModalSurface {
     this.requestRender();
     try {
       const configs = this.registry.getAll();
+      const unreadable = this.registry.unreadableReason?.() ?? null;
+      if (unreadable) this.error = `Service list unusable: ${unreadable}`;
       const names = Object.keys(configs).sort((a, b) => a.localeCompare(b));
       const inspections = await Promise.all(names.map(async (name) => ({ name, inspection: await this.registry.inspect(name) })));
-      const prev = new Map(this.entries.map((e) => [e.name, e.lastTest] as const));
-      this.entries = inspections.map((e) => ({ ...e, lastTest: prev.get(e.name) }));
+      // A re-inspection drops earlier connection tests: the credential or base URL
+      // may have changed since, and a stale HEALTHY must not read as current.
+      this.entries = inspections;
     } catch (e) {
       this.error = `Refresh failed: ${summarizeError(e)}`;
     } finally {

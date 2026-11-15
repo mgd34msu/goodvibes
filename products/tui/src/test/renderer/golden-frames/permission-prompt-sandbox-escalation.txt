@@ -19,7 +19,7 @@
 |           Decision    generic                                                                      |
 |           Review      This command reaches outside the machine.                                    |
 |           Checklist   Confirm scope, target, and expected side effects before approving.           |
-|           Remembers   "Allow for session" remembers exec:curl https://example.com/data             |
+|           Remembers   "Allow for session" remembers every curl command                             |
 |           Args        {"command":"curl https://example.com/data"}                                  |
 |                                                                                                    |
 |            Allow once    Allow for session    Deny                        d hide details           |
@@ -3102,37 +3102,21 @@
 20 69 bg=#232438
 20 70 fg=#8e8ba3
 20 70 bg=#232438
-20 71 fg=#8e8ba3
 20 71 bg=#232438
-20 72 fg=#8e8ba3
 20 72 bg=#232438
-20 73 fg=#8e8ba3
 20 73 bg=#232438
-20 74 fg=#8e8ba3
 20 74 bg=#232438
-20 75 fg=#8e8ba3
 20 75 bg=#232438
-20 76 fg=#8e8ba3
 20 76 bg=#232438
-20 77 fg=#8e8ba3
 20 77 bg=#232438
-20 78 fg=#8e8ba3
 20 78 bg=#232438
-20 79 fg=#8e8ba3
 20 79 bg=#232438
-20 80 fg=#8e8ba3
 20 80 bg=#232438
-20 81 fg=#8e8ba3
 20 81 bg=#232438
-20 82 fg=#8e8ba3
 20 82 bg=#232438
-20 83 fg=#8e8ba3
 20 83 bg=#232438
-20 84 fg=#8e8ba3
 20 84 bg=#232438
-20 85 fg=#8e8ba3
 20 85 bg=#232438
-20 86 fg=#8e8ba3
 20 86 bg=#232438
 20 87 bg=#232438
 20 88 bg=#232438

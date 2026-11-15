@@ -90,6 +90,17 @@ function routeNaturalKey(input: Pick<UpsertRouteBindingInput, 'surfaceKind' | 's
   ]);
 }
 
+const DIFFED_BINDING_FIELDS = ['sessionPolicy', 'threadPolicy', 'deliveryGuarantee', 'threadId', 'channelId', 'sessionId', 'jobId', 'runId', 'title'] as const;
+
+/**
+ * The fields an upsert actually changed (`lastSeenAt` and `updatedAt` move on every touch and are not changes).
+ * `metadata` is not diffed: adapters put per-message values in it (update, event and message ids), so it differs on
+ * every inbound message and would make each one an update. The new metadata is still stored.
+ */
+function changedBindingFields(previous: AutomationRouteBinding, next: AutomationRouteBinding): string[] {
+  return DIFFED_BINDING_FIELDS.filter((field) => previous[field] !== next[field]);
+}
+
 export class RouteBindingManager {
   private readonly store: AutomationRouteStore;
   private readonly incarnations = new Map<string, string>();
@@ -98,6 +109,7 @@ export class RouteBindingManager {
   private runtimeBus: RuntimeEventBus | null = null;
   private readonly featureFlags: RouteBindingFeatureFlags | null;
   private loaded = false;
+  private starting: Promise<void> | undefined;
 
   constructor(config: {
     readonly store?: AutomationRouteStore | undefined;
@@ -155,6 +167,15 @@ export class RouteBindingManager {
   async start(): Promise<void> {
     if (!this.isEnabled()) return;
     if (this.loaded) return;
+    // One load for every caller that arrives before it finishes. A second load
+    // resolving later would clear the map and reload the old snapshot over a
+    // binding the first caller had already created.
+    this.starting ??= this.load();
+    try { await this.starting; }
+    finally { this.starting = undefined; }
+  }
+
+  private async load(): Promise<void> {
     const snapshot = await this.store.load();
     this.bindings.clear();
     for (const binding of snapshot.routes) {
@@ -162,6 +183,26 @@ export class RouteBindingManager {
       this.runtimeDispatch?.syncRouteBinding(binding, 'routes.load');
     }
     this.loaded = true;
+  }
+
+  /**
+   * Put `next` in the map (or remove the binding when `next` is undefined) and
+   * write it to disk. When the write fails the in-memory change is undone, so
+   * this process never routes by a binding that disk does not have: it would
+   * work until the next restart and then vanish. A newer change to the same
+   * binding made while the write was pending is left alone.
+   */
+  private async commit(bindingId: string, next: AutomationRouteBinding | undefined): Promise<void> {
+    const previous = this.bindings.get(bindingId);
+    if (next) this.bindings.set(bindingId, next); else this.bindings.delete(bindingId);
+    try {
+      await this.store.save(sortBindings(this.bindings.values()));
+    } catch (error) {
+      if (this.bindings.get(bindingId) === next) {
+        if (previous) this.bindings.set(bindingId, previous); else this.bindings.delete(bindingId);
+      }
+      throw error;
+    }
   }
 
   listBindings(): AutomationRouteBinding[] {
@@ -242,8 +283,7 @@ export class RouteBindingManager {
         ...(input.metadata ?? {}),
       },
     };
-    this.bindings.set(binding.id, binding);
-    await this.store.save(sortBindings(this.bindings.values()));
+    await this.commit(binding.id, binding);
     this.runtimeDispatch?.syncRouteBinding(binding, 'routes.upsert');
 
     const eventSurfaceKind = toEventSurfaceKind(binding.surfaceKind);
@@ -251,14 +291,17 @@ export class RouteBindingManager {
       const targetId = binding.sessionId ?? binding.runId ?? binding.jobId ?? binding.externalId;
       const targetKind = binding.sessionId ? 'session' : binding.runId ? 'run' : binding.jobId ? 'job' : 'message';
       if (previous) {
-        emitRouteBindingUpdated(this.runtimeBus, {
-          sessionId: binding.sessionId ?? 'routes',
-          source: 'route-binding-manager',
-          traceId: binding.id,
-        }, {
-          bindingId: binding.id,
-          changedFields: ['sessionPolicy', 'threadPolicy', 'deliveryGuarantee', 'threadId', 'channelId', 'sessionId', 'jobId', 'runId', 'metadata'],
-        });
+        // Every inbound message upserts its route, and usually only `lastSeenAt`
+        // moved. An UPDATED event names what really changed, and a touch alone is
+        // not one.
+        const changedFields = changedBindingFields(previous, binding);
+        if (changedFields.length > 0) {
+          emitRouteBindingUpdated(this.runtimeBus, {
+            sessionId: binding.sessionId ?? 'routes',
+            source: 'route-binding-manager',
+            traceId: binding.id,
+          }, { bindingId: binding.id, changedFields });
+        }
       } else {
         emitRouteBindingCreated(this.runtimeBus, {
           sessionId: binding.sessionId ?? 'routes',
@@ -292,8 +335,7 @@ export class RouteBindingManager {
         replyTargetId,
       },
     };
-    this.bindings.set(bindingId, updated);
-    await this.store.save(sortBindings(this.bindings.values()));
+    await this.commit(bindingId, updated);
     this.runtimeDispatch?.syncRouteBinding(updated, 'routes.reply-target');
     const eventSurfaceKind = toEventSurfaceKind(updated.surfaceKind);
     if (this.runtimeBus) {
@@ -335,8 +377,7 @@ export class RouteBindingManager {
         ...(patch.metadata ?? {}),
       },
     };
-    this.bindings.set(bindingId, updated);
-    await this.store.save(sortBindings(this.bindings.values()));
+    await this.commit(bindingId, updated);
     this.runtimeDispatch?.syncRouteBinding(updated, 'routes.patch');
 
     const eventSurfaceKind = toEventSurfaceKind(updated.surfaceKind);
@@ -367,9 +408,9 @@ export class RouteBindingManager {
     await this.start();
     const binding = this.bindings.get(bindingId);
     if (!binding) return false;
-    this.bindings.delete(bindingId);
+    await this.commit(bindingId, undefined);
     this.incarnations.delete(bindingId);
-    await this.store.save(sortBindings(this.bindings.values()));
+    this.runtimeDispatch?.removeRouteBinding(bindingId, 'routes.remove');
     const eventSurfaceKind = toEventSurfaceKind(binding.surfaceKind);
     if (this.runtimeBus) {
       emitRouteBindingRemoved(this.runtimeBus, {

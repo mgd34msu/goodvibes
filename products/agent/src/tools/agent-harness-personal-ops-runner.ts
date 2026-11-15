@@ -13,7 +13,9 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { personalOpsReadRunRoute, savedLabelsUntrusted } from './agent-harness-personal-ops-records.ts';
 import { PERSONAL_OPS_READ_CONTROL_FIELDS, type PersonalOpsConnectorSignal, type PersonalOpsConnectorTool, type PersonalOpsExecutionStep, type PersonalOpsIntakeCandidate, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsRoutePacket, type PersonalOpsWorkflow, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
+import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
 
 export function laneById(lanes: readonly PersonalOpsLane[], laneId: PersonalOpsLaneId): PersonalOpsLane {
   return lanes.find((lane) => lane.id === laneId)!;
@@ -85,6 +87,8 @@ export function connectorStep(options: {
   readonly signal?: PersonalOpsConnectorSignal;
   readonly includeParameters: boolean;
   readonly policy: string;
+  /** Overrides the default route, for a step whose action is not the connector's schema lookup. */
+  readonly modelRoute?: string;
 }): PersonalOpsExecutionStep {
   return {
     id: options.id,
@@ -92,7 +96,7 @@ export function connectorStep(options: {
     routeKind: options.routeKind,
     effect: options.tool.effect,
     requiresConfirmation: options.tool.effect === 'confirmed-effect',
-    modelRoute: toolModelRoute(options.tool),
+    modelRoute: options.modelRoute ?? toolModelRoute(options.tool),
     status: options.status,
     policy: options.policy,
     ...(options.signal ? { connectorId: options.signal.id, connectorStatus: options.signal.status } : {}),
@@ -147,6 +151,7 @@ export function workflowExecutionPlan(options: {
       tool: options.operation.tool,
       signal: options.operation.signal,
       includeParameters: options.includeParameters,
+      modelRoute: personalOpsReadRunRoute(options.lane.id, options.operation.tool.qualifiedName ?? `${options.operation.signal.id}:${options.operation.tool.name}`),
       policy: 'Run only the selected bounded read route, then summarize or draft in the Agent transcript without mutating the provider.',
     }));
   } else {
@@ -201,6 +206,7 @@ export function recordOperationSummary(record: PersonalOpsLiveRecord | null, inc
     ...(includeParameters && record.optionalFields ? { optionalFields: record.optionalFields.slice(0, 12) } : {}),
     ...(includeParameters && record.sampleInput ? { sampleInput: record.sampleInput } : {}),
     confirmationRequired: record.confirmationRequired === true,
+    ...savedLabelsUntrusted([record], ['label']),
   };
 }
 
@@ -338,6 +344,32 @@ export async function reviewRecordFieldValues(records: readonly Record<string, u
   return values;
 }
 
+/** One saved card's label with the id that names the same card, so the two never drift apart. */
+export interface ReviewRecordEntry {
+  readonly label: string;
+  readonly id: string;
+}
+
+/** Cards are de-duplicated on their id (their label when they have none), never on two separate lists. */
+export async function reviewRecordEntries(records: readonly Record<string, unknown>[], limit: number, options: CatalogRankingOptions = {}): Promise<readonly ReviewRecordEntry[]> {
+  const entries: ReviewRecordEntry[] = [];
+  const seen = new Set<string>();
+  const read = async (record: Record<string, unknown>, names: string): Promise<string> =>
+    previewHarnessText(await redactedPersonalOpsText(await stringField(record, `review record field serving one of: ${names}`, options), options), 120);
+  for (const record of records) {
+    const label = await read(record, 'label, subject, title, summary');
+    const id = await read(record, 'id');
+    const identity = id || label;
+    if (!identity) continue;
+    const key = `${id ? 'id' : 'label'}:${identity.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ label: label || id, id: identity });
+    if (entries.length >= limit) break;
+  }
+  return entries;
+}
+
 export async function savePersonalOpsReviewArtifact(options: {
   readonly context: CommandContext;
   readonly lane: PersonalOpsLane;
@@ -398,9 +430,11 @@ export async function savePersonalOpsReviewArtifact(options: {
   const safeTitle = previewHarnessText(await redactedPersonalOpsText(options.title || `${options.lane.label} review cards`, reading), 96)
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'personal-ops-review';
-  const reviewLabels = await reviewRecordFieldValues(options.reviewRecords, ['label', 'subject', 'title', 'summary'], 5, reading);
+  // Both lists come from the same entries, so reviewRecordIds[i] always names the card reviewLabels[i] shows.
+  const reviewEntries = await reviewRecordEntries(options.reviewRecords, 5, reading);
+  const reviewLabels = reviewEntries.map((entry) => entry.label);
+  const reviewRecordIds = reviewEntries.map((entry) => entry.id);
   const reviewKinds = await reviewRecordFieldValues(options.reviewRecords, ['kind'], 5, reading);
-  const reviewRecordIds = await reviewRecordFieldValues(options.reviewRecords, ['id'], 8, reading);
   const payload = {
     version: 1,
     createdAt,
@@ -444,7 +478,7 @@ export async function savePersonalOpsReviewArtifact(options: {
     filename: descriptor.filename ?? null,
     mimeType: descriptor.mimeType,
     sizeBytes: descriptor.sizeBytes,
-    modelRoute: `agent_artifacts show artifactId:"${descriptor.id}"`,
+    modelRoute: artifactShowRoute(descriptor.id),
     policy: 'Artifact contains redacted review cards for later review; provider mutations require separate current recorded effect admission.',
   };
 }
@@ -454,9 +488,20 @@ export function fieldInputValue(value: string, sample: unknown): unknown {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : value;
   }
-  if (typeof sample === 'boolean') return /^(1|true|yes|y)$/i.test(value.trim());
+  if (typeof sample === 'boolean') {
+    if (/^(1|true|yes|y)$/i.test(value.trim())) return true;
+    return /^(0|false|no|n)$/i.test(value.trim()) ? false : value;
+  }
   if (Array.isArray(sample)) return value.split(',').map((entry) => entry.trim()).filter(Boolean);
   return value;
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value === 'object') return Object.values(value as Record<string, unknown>).every(isJsonValue);
+  return false;
 }
 
 export function readInputFields(value: unknown, sampleInput?: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -465,11 +510,38 @@ export function readInputFields(value: unknown, sampleInput?: Readonly<Record<st
   for (const [key, entry] of Object.entries(value)) {
     if (PERSONAL_OPS_READ_CONTROL_FIELDS.has(key)) continue;
     if (entry === undefined || entry === null) continue;
-    const text = typeof entry === 'string' ? entry.trim() : String(entry).trim();
-    if (!text) continue;
-    fields[key] = fieldInputValue(text, sampleInput?.[key]);
+    const sample = sampleInput?.[key];
+    if (typeof entry === 'string') {
+      const text = entry.trim();
+      if (text) fields[key] = fieldInputValue(text, sample);
+      continue;
+    }
+    // Numbers, booleans, arrays and objects reach the connector as the JSON the caller wrote.
+    // Only a string-typed sample turns a scalar into text; String() would turn an object into "[object Object]".
+    if ((typeof entry === 'number' || typeof entry === 'boolean') && typeof sample === 'string') {
+      if (typeof entry === 'boolean' || Number.isFinite(entry)) fields[key] = String(entry);
+      continue;
+    }
+    if (isJsonValue(entry)) fields[key] = entry;
   }
   return fields;
+}
+
+export interface InvalidInputField {
+  readonly field: string;
+  readonly expected: 'number' | 'boolean' | 'list';
+}
+
+/** Fields whose value cannot take the type the connector's sample input shows, so the caller can say so before any call. */
+export function invalidInputFields(fields: Readonly<Record<string, unknown>>, sampleInput?: Readonly<Record<string, unknown>>): readonly InvalidInputField[] {
+  const invalid: InvalidInputField[] = [];
+  for (const [field, value] of Object.entries(fields)) {
+    const sample = sampleInput?.[field];
+    if (typeof sample === 'number' && typeof value !== 'number') invalid.push({ field, expected: 'number' });
+    else if (typeof sample === 'boolean' && typeof value !== 'boolean') invalid.push({ field, expected: 'boolean' });
+    else if (Array.isArray(sample) && !Array.isArray(value)) invalid.push({ field, expected: 'list' });
+  }
+  return invalid;
 }
 
 export function readRunControlString(fields: unknown, key: string): string {
@@ -491,10 +563,6 @@ export function readRunControlBoolean(fields: unknown, keys: readonly string[]):
 
 export function missingRequiredInputFields(record: PersonalOpsLiveRecord, fields: Readonly<Record<string, unknown>>): readonly string[] {
   return (record.requiredFields ?? []).filter((field) => !(field in fields) || fields[field] === '');
-}
-
-function personalOpsReadRunRoute(laneId: PersonalOpsLaneId, recordId: string): string {
-  return `personal_ops action:"read" laneId:"${laneId}" recordId:"${recordId}" fields:{...} confirm:true explicitUserRequest:"..."`;
 }
 
 export function executionRouteForRecord(record: PersonalOpsLiveRecord, laneId: PersonalOpsLaneId): string {
@@ -530,7 +598,7 @@ export function personalOpsReadNextRoutes(options: {
   readonly savedReviewArtifact: Record<string, unknown> | null;
 }): Record<string, PersonalOpsRoutePacket> {
   const artifactId = savedReviewArtifactId(options.savedReviewArtifact);
-  const artifactRoute = artifactId ? `agent_artifacts show artifactId:"${artifactId}" includeContent:true` : '';
+  const artifactRoute = artifactId ? artifactShowRoute(artifactId, true) : '';
   const localReviewRoute = artifactRoute || 'main Agent response';
   const routes: Record<string, PersonalOpsRoutePacket> = {
     lane: personalOpsRoutePacket({
@@ -589,7 +657,7 @@ export function personalOpsReadNextRoutes(options: {
       id: 'create-reminder-confirmed-boundary',
       label: 'Create reminder after review',
       effect: 'confirmed-effect',
-      modelRoute: 'schedule action:"remind" message:"..." at:"..." confirm:true explicitUserRequest:"..."',
+      modelRoute: 'schedule action:"remind" message:"..." at:"..."',
       requiresConfirmation: true,
       policy: 'Create one reminder only after the user reviews exact message text and timing.',
     });
@@ -635,6 +703,7 @@ export function summarizeRunRecord(record: PersonalOpsLiveRecord, lane: Personal
     ...(includeParameters && record.requiredFields ? { requiredFields: record.requiredFields } : {}),
     ...(includeParameters && record.optionalFields ? { optionalFields: record.optionalFields.slice(0, 12) } : {}),
     ...(includeParameters && record.sampleInput ? { sampleInput: record.sampleInput } : {}),
+    ...savedLabelsUntrusted([record], ['label']),
   };
 }
 

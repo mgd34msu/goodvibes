@@ -338,14 +338,21 @@ export function awaitCompanionReply(
   onTimeout: (messageId: string) => void,
 ): Promise<CompanionReplyWait> {
   let messageId = '';
+  let deadlinePassed = false;
   return new Promise<CompanionReplyWait>((resolve) => {
     const timeout = timeoutMs > 0 ? setTimeout(() => {
+      deadlinePassed = true;
       if (messageId) onTimeout(messageId);
       resolve({ messageId, timedOut: true, error: 'Timed out waiting for companion chat reply' });
     }, timeoutMs) : undefined;
     timeout?.unref?.();
     void post({ resolve, timeout })
-      .then((id) => { messageId = id; })
+      .then((id) => {
+        messageId = id;
+        // The deadline fired while the post was still in flight, so it had no id
+        // to drop; the registration made for this post would otherwise stay.
+        if (deadlinePassed) onTimeout(id);
+      })
       .catch((error: unknown) => {
         clearTimeout(timeout);
         resolve({
@@ -379,6 +386,8 @@ export function awaitCompanionReply(
 export interface CompanionPostMessageOptions {
   readonly attachments?: readonly CompanionChatMessageAttachmentInput[] | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
+  /** Sender-chosen id for this send; a repeat with the same id answers with the first message and starts no second turn. */
+  readonly clientMessageId?: string | undefined;
   /**
    * True ONLY from a transport that authenticated the OWNER, it starts a new
    * untrusted-content turn. A caller that cannot prove who is speaking leaves
@@ -386,6 +395,8 @@ export interface CompanionPostMessageOptions {
    * only works in one direction.
    */
   readonly ownerDirect?: boolean | undefined;
+  /** In-process tap for this turn's events, called when the turn runs (which may be after earlier queued turns). */
+  readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
 }
 
 export interface QueuedCompanionTurn {

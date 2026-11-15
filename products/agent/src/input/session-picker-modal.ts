@@ -1,3 +1,4 @@
+import { restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { SavedSessionPickerState } from '@goodvibes-jev/engine/terminal-shell/session-picker-state';
 /**
  * SessionPickerModal, state management for the /sessions picker modal.
@@ -11,6 +12,8 @@ import type { ConversationManager } from '../core/conversation';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readConversationMessageSnapshots } from '../core/conversation-message-snapshot.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
+import type { CommandContext } from './command-registry.ts';
+import { loadSavedSessionIntoLive } from './commands/session-load.ts';
 
 function sessionLoadedMessage(name: string, messageCount: number): string {
   return `Loaded session ${name} (${messageCount} messages)`;
@@ -49,19 +52,26 @@ export class SessionPickerModal extends SavedSessionPickerState {
   /** Replace the query; the selection returns to the first match. */
 
   /**
-   * Load the currently selected session into the given ConversationManager.
-   * Returns true on success, false on error.
+   * Load the currently selected session into the live conversation.
+   * Returns true on success, false on error or refusal; the live conversation is
+   * untouched in that case. With a command context the load switches the session
+   * identity like `/session resume` and refuses while a turn runs; without one only
+   * the conversation content is replaced.
    */
-  loadSelected(conversationManager: ConversationManager): boolean {
+  loadSelected(conversationManager: ConversationManager, context?: CommandContext): boolean {
     const session = this.getSelected();
     if (!session) return false;
 
     try {
-      const { meta, messages } = this.sessionManager.load(session.name);
-      conversationManager.resetAll();
-      conversationManager.fromJSON({ messages: readConversationMessageSnapshots(messages) });
-      if (meta.title) conversationManager.title = meta.title;
-      conversationManager.rebuildHistory();
+      if (context) {
+        const loaded = loadSavedSessionIntoLive(context, this.sessionManager, session.name);
+        this.statusMessage = sessionLoadedMessage(session.name, loaded.messageCount);
+        return true;
+      }
+      const { meta, messages, branches } = this.sessionManager.load(session.name);
+      // Read the saved messages before the live conversation is cleared so an invalid one leaves it intact.
+      const snapshots = readConversationMessageSnapshots(messages);
+      restoreConversationContent(conversationManager, snapshots as never[], meta.title, branches);
       this.statusMessage = sessionLoadedMessage(session.name, messages.length);
       return true;
     } catch (e) {

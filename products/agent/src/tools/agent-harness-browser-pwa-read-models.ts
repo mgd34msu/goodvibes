@@ -1,10 +1,13 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { readBrowserDeviceEvidence } from './agent-harness-browser-device-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
+import { types as nodeTypes } from 'node:util';
 
 export interface BrowserPwaRecordCertification {
   readonly schemaStatus: 'certified' | 'legacy';
@@ -65,6 +68,8 @@ export interface BrowserPwaReadModelSnapshot {
   readonly categoryRoutes: readonly BrowserPwaCategoryRouteRecord[];
   readonly firstRunReceipts: readonly BrowserPwaFirstRunReceiptRecord[];
   readonly sourceCounts: Readonly<Record<string, number>>;
+  /** Producers that threw or answered asynchronously; their records are NOT in this snapshot. */
+  readonly sourceErrors?: readonly string[];
 }
 
 interface SourceCandidate {
@@ -161,14 +166,8 @@ function stringArray(value: unknown): readonly string[] {
   return text ? text.split(',').map((entry) => entry.trim()).filter(Boolean).slice(0, 80) : [];
 }
 
-function redactText(value: string): string {
-  return value
-    .replace(/\b(bearer)\s+[a-z0-9._~+/=-]+/gi, '$1 <redacted>')
-    .replace(/\b(token|secret|password|api[_-]?key|authorization|credential)\s*[:=]\s*[^,\s;/]+/gi, '$1=<redacted>');
-}
-
 function safePreview(value: string, limit: number): string {
-  return previewHarnessText(redactText(value), limit);
+  return redactedHarnessPreview(value, limit);
 }
 
 function safeNullablePreview(value: string, limit: number): string | null {
@@ -179,6 +178,10 @@ function safeUrl(value: string): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
+    // Credentials and fragments can carry secrets; neither is needed to identify the page.
+    url.username = '';
+    url.password = '';
+    url.hash = '';
     for (const key of [...url.searchParams.keys()]) {
       if (/token|secret|password|authorization|credential|api[-_]?key/i.test(key)) url.searchParams.set(key, '<redacted>');
     }
@@ -203,6 +206,8 @@ function readyStatus(value: string): boolean {
     'success',
     'succeeded',
     'active',
+    'installed',
+    'registered',
     'available',
     'usable',
     'online',
@@ -278,6 +283,8 @@ function certification(input: {
   readonly hasCategories?: boolean;
   readonly hasMobileEvidence?: boolean | null;
   readonly hasPwaEvidence?: boolean | null;
+  /** Names of PWA runtime statuses the record published with a value that is not a ready one. */
+  readonly pwaNotReady?: readonly string[];
 }): BrowserPwaRecordCertification {
   const base = certificationBase(input.record, input.sourcePath);
   const missingSignals = [
@@ -295,6 +302,7 @@ function certification(input: {
     ...(input.hasPwaEvidence === null ? ['PWA readiness was not evaluated during Classic operation; publish explicit runtime status fields.'] : []),
     ...(input.hasMobileEvidence === false ? ['Mobile/touch control evidence is not published for this browser-native route.'] : []),
     ...(input.hasPwaEvidence === false ? ['PWA runtime evidence such as manifest, service-worker, install, or offline status is not published.'] : []),
+    ...(input.pwaNotReady ?? []).map((name) => `PWA ${name} status is published but not ready.`),
   ];
   return {
     schemaStatus: base.schemaStatus,
@@ -309,12 +317,22 @@ function certification(input: {
   };
 }
 
-function callMethod(source: Record<string, unknown>, method: string): unknown {
+function callMethod(source: Record<string, unknown>, method: string, path: string, problems: string[]): unknown {
   const fn = source[method];
   if (typeof fn !== 'function') return undefined;
   try {
-    return (fn as () => unknown).call(source);
-  } catch {
+    const value = (fn as () => unknown).call(source);
+    if (nodeTypes.isPromise(value) || (value !== null && typeof value === 'object' && typeof (value as { then?: unknown }).then === 'function')) {
+      // Swallow a later rejection; the producer is reported, not awaited.
+      void Promise.resolve(value).catch(() => {});
+      problems.push(`${path}.${method}() answered asynchronously, so its records were not read`);
+      return undefined;
+    }
+    return value;
+  } catch (error) {
+    problems.push(error instanceof ToolInputProjectionError
+      ? `${path}.${method}() was refused by the source guard (an asynchronous or non-plain answer is not read), so its records are missing`
+      : `${path}.${method}() threw: ${safePreview(error instanceof Error ? error.message : String(error), 120)}`);
     return undefined;
   }
 }
@@ -325,34 +343,39 @@ function collectFromSource(
   kind: 'daemon-read-model' | 'platform-read-model',
   wrapperKeys: readonly string[],
   methods: readonly string[],
+  problems: string[],
   visited = new WeakSet<object>(),
 ): readonly CollectedRecord[] {
   if (!source) return [];
   if (Array.isArray(source)) {
-    return source.flatMap((entry, index) => collectFromSource(entry, `${path}[${index}]`, kind, wrapperKeys, methods, visited));
+    return source.flatMap((entry, index) => collectFromSource(entry, `${path}[${index}]`, kind, wrapperKeys, methods, problems, visited));
   }
   if (source instanceof Map) {
-    return Array.from(source.entries()).flatMap(([key, value]) => collectFromSource(value, `${path}.${String(key)}`, kind, wrapperKeys, methods, visited));
+    return Array.from(source.entries()).flatMap(([key, value]) => collectFromSource(value, `${path}.${String(key)}`, kind, wrapperKeys, methods, problems, visited));
   }
   if (typeof source !== 'object') return [];
   if (visited.has(source)) return [];
   visited.add(source);
   const record = source as Record<string, unknown>;
+  const problemsBefore = problems.length;
   const fromSnapshots = SNAPSHOT_METHODS.flatMap((method) => {
-    const snapshot = callMethod(record, method);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited);
+    const snapshot = callMethod(record, method, path, problems);
+    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, problems, visited);
   });
   const fromMethods = methods.flatMap((method) => {
-    const snapshot = callMethod(record, method);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, visited);
+    const snapshot = callMethod(record, method, path, problems);
+    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, wrapperKeys, methods, problems, visited);
   });
   const fromWrappers = wrapperKeys.flatMap((key) => {
     if (!(key in record)) return [];
-    return collectFromSource(record[key], `${path}.${key}`, kind, wrapperKeys, methods, visited);
+    return collectFromSource(record[key], `${path}.${key}`, kind, wrapperKeys, methods, problems, visited);
   });
   if (fromSnapshots.length > 0 || fromMethods.length > 0 || fromWrappers.length > 0) {
     return [...fromSnapshots, ...fromMethods, ...fromWrappers];
   }
+  // A producer that failed or answered asynchronously is reported, not read as a record
+  // describing itself (its methods would make the whole snapshot invalid).
+  if (problems.length > problemsBefore) return [];
   return [{ path, kind, record }];
 }
 
@@ -394,15 +417,16 @@ function capabilityTokens(record: Record<string, unknown>): readonly string[] {
   ].map((entry) => safePreview(entry, 80)).filter(Boolean))].slice(0, 24);
 }
 
-function categoryIds(record: Record<string, unknown>, index: number): readonly string[] {
+/** The category ids a record published, with no position-based stand-in. */
+function publishedCategoryIds(record: Record<string, unknown>): readonly string[] {
   const ids = [
     ...stringArray(record.categoryIds),
     ...stringArray(readObject(record.route).categoryIds),
     ...stringArray(readObject(record.workspace).categoryIds),
     nestedString(record, 'categoryId'),
     nestedString(record, 'workspaceCategoryId'),
-  ].map((entry) => entry.trim()).filter(Boolean);
-  return [...new Set(ids.length > 0 ? ids : [`browser-category-${index}`])].slice(0, 80);
+  ].map((entry) => safePreview(entry, 80)).filter(Boolean);
+  return [...new Set(ids)].slice(0, 80);
 }
 
 async function evidenceBoolean(record: Record<string, unknown>, keys: readonly string[],
@@ -421,16 +445,17 @@ async function evidenceBoolean(record: Record<string, unknown>, keys: readonly s
 
 async function normalizeCategoryRoute(entry: CollectedRecord, index: number, options: CatalogRankingOptions): Promise<BrowserPwaCategoryRouteRecord | null> {
   const beganClassic = isClassicOperation();
-  const ids = categoryIds(entry.record, index);
+  const publishedIds = publishedCategoryIds(entry.record);
+  const ids = publishedIds.length > 0 ? publishedIds : [`browser-category-${index}`];
   const categoryId = ids[0] ?? `browser-category-${index}`;
-  const id = nestedString(entry.record, 'id')
+  const publishedId = nestedString(entry.record, 'id')
     || nestedString(entry.record, 'routeId')
-    || nestedString(entry.record, 'receiptId')
-    || `browser-category-route:${categoryId}:${index}`;
+    || nestedString(entry.record, 'receiptId');
+  const id = safePreview(publishedId || `browser-category-route:${categoryId}:${index}`, 120);
   const routes = routeMap(entry.record);
   const route = routeForRecord(entry.record, routes);
-  const status = nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown';
-  const routeForModel = modelRoute(entry.record, `computer action:"browser" categoryId:"${categoryId}" includeParameters:true`);
+  const status = safePreview(nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown', 80);
+  const routeForModel = safePreview(modelRoute(entry.record, `computer action:"browser" categoryId:"${categoryId}" includeParameters:true`), 240);
   const capabilities = capabilityTokens(entry.record);
   const mobileReady = await evidenceBoolean(entry.record, ['mobileReady', 'touchReady', 'responsive', 'mobileStatus'], 'mobile-touch', options);
   options.assertCurrent?.();
@@ -458,11 +483,11 @@ async function normalizeCategoryRoute(entry: CollectedRecord, index: number, opt
       record: entry.record,
       sourcePath: entry.path,
       kind: 'browser-native workspace category route',
-      durableId: id,
+      durableId: publishedId,
       status,
       modelRoute: routeForModel,
       hasRoute: Boolean(route || Object.keys(routes).length > 0),
-      hasCategories: ids.length > 0,
+      hasCategories: publishedIds.length > 0,
       hasMobileEvidence: mobileReady,
     }),
   };
@@ -470,27 +495,36 @@ async function normalizeCategoryRoute(entry: CollectedRecord, index: number, opt
 
 async function normalizeFirstRunReceipt(entry: CollectedRecord, index: number, options: CatalogRankingOptions): Promise<BrowserPwaFirstRunReceiptRecord | null> {
   const beganClassic = isClassicOperation();
-  const id = nestedString(entry.record, 'id')
+  const publishedId = nestedString(entry.record, 'id')
     || nestedString(entry.record, 'receiptId')
     || nestedString(entry.record, 'firstRunReceiptId')
     || nestedString(entry.record, 'durableReceiptId')
-    || nestedString(entry.record, 'eventId')
-    || `browser-pwa-first-run:${index}`;
+    || nestedString(entry.record, 'eventId');
+  const id = safePreview(publishedId || `browser-pwa-first-run:${index}`, 120);
   const routes = routeMap(entry.record);
-  const status = nestedString(entry.record, 'status')
+  const status = safePreview(nestedString(entry.record, 'status')
     || nestedString(entry.record, 'state')
     || nestedString(entry.record, 'receiptStatus')
     || nestedString(entry.record, 'result')
     || nestedString(entry.record, 'outcome')
-    || 'unknown';
-  const routeForModel = modelRoute(entry.record, 'computer action:"browser" includeParameters:true');
+    || 'unknown', 80);
+  const publishedRoute = modelRoute(entry.record, '');
+  const routeForModel = safePreview(publishedRoute || 'computer action:"browser" includeParameters:true', 240);
   const capabilities = capabilityTokens(entry.record);
   const manifestStatus = safeNullablePreview(nestedString(entry.record, 'manifestStatus'), 80);
   const serviceWorkerStatus = safeNullablePreview(nestedString(entry.record, 'serviceWorkerStatus'), 80);
   const installStatus = safeNullablePreview(nestedString(entry.record, 'installStatus'), 80);
   const offlineStatus = safeNullablePreview(nestedString(entry.record, 'offlineStatus'), 80);
-  const hasPwaEvidence = Boolean(manifestStatus || serviceWorkerStatus || installStatus || offlineStatus)
-    || await evidenceBoolean(entry.record, ['pwaReady', 'manifestReady', 'serviceWorkerReady', 'offlineReady', 'installReady'], 'pwa-runtime', options);
+  // A status string is evidence only when it says ready; "missing" or "failed"
+  // is a published statement that the capability does not work.
+  const pwaStatuses: readonly (readonly [string, string | null])[] = [
+    ['manifest', manifestStatus], ['service worker', serviceWorkerStatus], ['install', installStatus], ['offline', offlineStatus],
+  ];
+  const published = pwaStatuses.filter((entryStatus): entryStatus is readonly [string, string] => entryStatus[1] !== null);
+  const pwaNotReady = published.filter(([, value]) => !readyStatus(value)).map(([name]) => name);
+  const hasPwaEvidence = published.some(([, value]) => readyStatus(value)) ? true
+    : published.length > 0 ? undefined
+    : await evidenceBoolean(entry.record, ['pwaReady', 'manifestReady', 'serviceWorkerReady', 'offlineReady', 'installReady'], 'pwa-runtime', options);
   options.assertCurrent?.();
   return {
     ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
@@ -511,11 +545,12 @@ async function normalizeFirstRunReceipt(entry: CollectedRecord, index: number, o
       record: entry.record,
       sourcePath: entry.path,
       kind: 'browser/PWA first-run receipt',
-      durableId: id,
+      durableId: publishedId,
       status,
       modelRoute: routeForModel,
-      hasRoute: Boolean(Object.keys(routes).length > 0 || routeForModel),
-      hasPwaEvidence,
+      hasRoute: Boolean(Object.keys(routes).length > 0 || publishedRoute),
+      ...(hasPwaEvidence === undefined ? {} : { hasPwaEvidence }),
+      pwaNotReady,
     }),
   };
 }
@@ -607,13 +642,14 @@ async function ownedBrowserPwaReadModelSnapshot(context: CommandContext, options
   const beganClassic = isClassicOperation();
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const native = captureCatalogProducerSources(context, ["context.platform.readModels.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.workspaceRoutes", "context.platform.readModels.browserPwa.agentWorkspaceRoutes", "context.platform.readModels.webDashboard.categoryRoutes", "context.platform.readModels.webDashboard.workspaceRoutes", "context.platform.readModels.browserCockpit.categoryRoutes", "context.platform.readModels.pwa.workspaceRoutes", "context.platform.readModels.browser.categoryRoutes", "context.platform.readModels.browserPwaRoutes", "context.ops.browserPwa.categoryRoutes", "context.clients.operator.browserPwa.categoryRoutes", "context.clients.operatorApiClient.browserPwa.categoryRoutes", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.readModels.browserPwa.receipts", "context.platform.readModels.browserPwa.runtimeReceipts", "context.platform.readModels.webDashboard.firstRunReceipts", "context.platform.readModels.browserCockpit.firstRunReceipts", "context.platform.readModels.pwa.firstRunReceipts", "context.platform.readModels.firstRun.browserPwaReceipts", "context.ops.browserPwa.firstRunReceipts", "context.clients.operator.browserPwa.firstRunReceipts", "context.clients.operatorApiClient.browserPwa.firstRunReceipts"], ["getSnapshot", "snapshot", "toJSON", "listCategoryRoutes", "listWorkspaceRoutes", "listAgentWorkspaceRoutes", "listRoutes", "listFirstRunReceipts", "listReceipts", "listRuntimeReceipts", "listEvents", "list"]);
+  const problems: string[] = [];
   const categoryEntries = categorySources(native).flatMap((candidate) =>
-    collectFromSource(candidate.source, candidate.path, candidate.kind, CATEGORY_WRAPPER_KEYS, CATEGORY_METHODS)
+    collectFromSource(candidate.source, candidate.path, candidate.kind, CATEGORY_WRAPPER_KEYS, CATEGORY_METHODS, problems)
   );
   const receiptEntries = receiptSources(native).flatMap((candidate) =>
-    collectFromSource(candidate.source, candidate.path, candidate.kind, RECEIPT_WRAPPER_KEYS, RECEIPT_METHODS)
+    collectFromSource(candidate.source, candidate.path, candidate.kind, RECEIPT_WRAPPER_KEYS, RECEIPT_METHODS, problems)
   );
-  const caller = captureAsyncHarnessInput({ categoryEntries, receiptEntries, producerSource: native.evidence() }, options);
+  const caller = captureAsyncHarnessInput({ categoryEntries, receiptEntries, problems, producerSource: native.evidence() }, options);
   caller.options.retainCurrent(native.assertCurrent, 'agent.browser.native-source');
   caller.retainSourceCurrent();
   return withModelReadingSource(caller.args, caller.options, async (captured, current) => {
@@ -633,6 +669,7 @@ async function ownedBrowserPwaReadModelSnapshot(context: CommandContext, options
       ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
       categoryRoutes: dedupeById(categoryRoutes), firstRunReceipts: dedupeById(firstRunReceipts),
       sourceCounts: { ...sourceCounts(captured.categoryEntries), ...sourceCounts(captured.receiptEntries) },
+      ...(captured.problems.length > 0 ? { sourceErrors: captured.problems } : {}),
     };
     current.assertCurrent?.();
     return result;

@@ -131,14 +131,14 @@ test('read token, non-owner, scope attenuation, forged payload authority and sta
   host.revoke(); expect((await host.request('/api/work-ledger/legacy-import', request)).status).toBe(401);
   expect(readFileSync(host.file)).toEqual(bytes);
 });
-test('HTTP request cancellation and token revocation while storage waits prevent admission', async () => {
+test('HTTP request cancellation and token revocation while the import is in flight prevent admission', async () => {
   const host = await fixture(); const request = await host.prepared(); const bytes = readFileSync(host.file);
   const release = await acquireCrossProcessLock(`${host.file}.knowledge-lock`, { strictOwnership: true });
   const controller = new AbortController(); const waiting = host.request('/api/work-ledger/legacy-import', request, host.paired.token, controller.signal);
   controller.abort(); await release();
   expect(await (await waiting).json()).toMatchObject({ kind: 'rejected', code: 'cancelled' });
   const release2 = await acquireCrossProcessLock(`${host.file}.knowledge-lock`, { strictOwnership: true });
-  // Start at the authenticated catalog handler to prove live revocation AFTER entry.
+  // Start at the authenticated catalog handler, so a revoked token is refused by the live check, not by the REST edge.
   const entered = host.catalog.get('workLedger.importLegacy')!; expect(entered.metadata?.requiresFreshOperatorAuth).toBe(true);
   const pending = host.helper.invokeGatewayMethodCall({ authToken: host.paired.token, methodId: 'workLedger.importLegacy', body: request,
     context: host.helper.describeAuthenticatedPrincipal(host.paired.token)! });
@@ -211,4 +211,23 @@ test('legacy writes require paired generation and dedicated import scope, never 
   const allowed = await host.helper.invokeGatewayMethodCall({ authToken: host.paired.token, methodId: 'workLedger.importLegacy', body: command,
     context: { ...principal, scopes: ['write:work-ledger-import', 'read:knowledge'] } });
   expect(allowed.body).toMatchObject({ kind: 'accepted', replayed: false });
+});
+
+test('an owner whose authority lapses after the import was applied is told it was applied', async () => {
+  // Count how often the handler asks "still authorized?" over one full import; the
+  // last ask is the check made after the import is already durable.
+  const counting = await fixture(); let asks = 0;
+  const countingInvoke = counting.catalog.invoke.bind(counting.catalog);
+  counting.catalog.invoke = ((id: string, invocation: Parameters<typeof countingInvoke>[1]) => countingInvoke(id, id !== 'workLedger.importLegacy' ? invocation : { ...invocation,
+    isAuthorized: (...args: Parameters<NonNullable<typeof invocation.isAuthorized>>) => { asks += 1; return invocation.isAuthorized?.(...args) ?? false; } })) as typeof counting.catalog.invoke;
+  expect((await counting.request('/api/work-ledger/legacy-import', await counting.prepared())).status).toBe(200);
+  const lastAsk = asks;
+
+  const host = await fixture(); let seen = 0;
+  const invoke = host.catalog.invoke.bind(host.catalog);
+  host.catalog.invoke = ((id: string, invocation: Parameters<typeof invoke>[1]) => invoke(id, id !== 'workLedger.importLegacy' ? invocation : { ...invocation,
+    isAuthorized: (...args: Parameters<NonNullable<typeof invocation.isAuthorized>>) => { seen += 1; return seen === lastAsk ? false : invocation.isAuthorized?.(...args) ?? false; } })) as typeof host.catalog.invoke;
+  const response = await host.request('/api/work-ledger/legacy-import', await host.prepared());
+  expect(response.status).toBe(403);
+  expect(JSON.stringify(await response.json())).toContain('after the import was applied');
 });

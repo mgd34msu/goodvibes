@@ -13,6 +13,9 @@
  * fallback) instead of silently returning zero matches that read as "nothing
  * was ever stored."
  *
+ * The index-health check asks the same spine as the search, so the answer
+ * describes the index that is actually searched: the daemon's once adopted.
+ *
  * MEMORY-SPINE WIRING (platform 1.2.0 full-detach catalog). Every action below now
  * routes through `memorySpine`, local by default, or over the wire the moment
  * the agent has adopted a daemon (see services.ts's memorySpineClient).
@@ -20,12 +23,7 @@
  * 1.1.0 core verbs (get/add/updateReview/updateReview/delete/honestSearch);
  * `list` and `update` use the 1.2.0 extended verbs of the same name
  * (list/update); the SEMANTIC search path uses the 1.2.0 `searchSemantic`
- * extended verb. Only the index-health check (`registry.vectorStats()`) stays
- * on the raw local `registry`, vector-index diagnostics are maintenance a
- * store performs on its OWN index, so reporting them honestly means reading
- * this process's own index, not a wire-forwarded view of the daemon's (see the
- * CLI's identical ruling in memory-command-wire.ts). That is a deliberate,
- * stated scope limit, not an oversight.
+ * extended verb, and so does the index-health check (`vectorStats`).
  */
 import {
   HASHED_MEMORY_EMBEDDING_PROVIDER,
@@ -42,11 +40,14 @@ import { formatAgentRecordReference, formatAgentRecordReviewState } from '../age
 import {
   AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,
+  invalidAction,
   readOptionalConfidence,
+  readOptionalNumber,
   readString,
   readStringList,
   requireId,
   requireSummary,
+  requireUpdateFields,
 } from './agent-local-registry-args.ts';
 // `import type` is erased at compile time, so this does not create a runtime
 // circular dependency even though agent-local-registry-tool.ts imports
@@ -119,8 +120,22 @@ function renderMemorySearch(mode: string, query: string, lines: readonly string[
   return [`Agent-local memory search (${mode})`, `query ${query || '(all)'}`, ...lines].join('\n');
 }
 
+const SEARCH_LIMIT_DEFAULT = 10;
+const SEARCH_LIMIT_MAX = 50;
+
+function readRowLimit(value: unknown, fallback: number | undefined): number | undefined {
+  const parsed = readOptionalNumber(value);
+  if (parsed === undefined) return fallback;
+  return Math.max(1, Math.min(SEARCH_LIMIT_MAX, Math.trunc(parsed)));
+}
+
+/** A page that filled its limit may be partial; say so instead of reading as complete. */
+function limitNote(count: number, limit: number): readonly string[] {
+  return count >= limit ? [`Showing ${count} rows (limit ${limit}); more may match. Raise limit (at most ${SEARCH_LIMIT_MAX}) or narrow the query.`] : [];
+}
+
 export async function handleMemory(
-  registry: MemoryRegistry,
+  _registry: MemoryRegistry,
   memorySpine: MemoryAccess,
   action: AgentLocalRegistryAction,
   args: AgentLocalRegistryToolArgs,
@@ -135,36 +150,38 @@ export async function handleMemory(
   if (action === 'list') {
     // list() is a 1.2.0 extended verb, routes through the spine (no filter =
     // getAll semantics, matching the previous registry.getAll() call exactly).
-    const records = await run(() => memorySpine.list(undefined, options));
+    const all = await run(() => memorySpine.list(undefined, options));
+    const listLimit = readRowLimit(args.limit, undefined);
+    const records = listLimit === undefined ? all : all.slice(0, listLimit);
     return records.length === 0
       ? 'Agent-local memory\nNo Agent-local memory records.'
-      : ['Agent-local memory', ...records.map(formatMemory)].join('\n');
+      : ['Agent-local memory', ...records.map(formatMemory),
+        ...(records.length < all.length ? [`Showing ${records.length} of ${all.length} records (limit ${listLimit}).`] : [])].join('\n');
   }
   if (action === 'search') {
     const query = readString(args.query);
+    const limit = readRowLimit(args.limit, SEARCH_LIMIT_DEFAULT) ?? SEARCH_LIMIT_DEFAULT;
     const wantsLiteral = args.semantic === false;
     if (wantsLiteral) {
       // Literal search IS wire-covered, routes through the spine (honestSearch
       // with no `semantic` flag is exactly a literal scan; see
       // runHonestMemorySearch in the platform).
-      const { records } = await run(() => memorySpine.honestSearch({ query, limit: 10 }, undefined, options));
-      return renderMemorySearch('literal, explicitly requested', query, records.map(formatMemory));
+      const { records } = await run(() => memorySpine.honestSearch({ query, limit }, undefined, options));
+      return renderMemorySearch('literal, explicitly requested', query, [...records.map(formatMemory), ...limitNote(records.length, limit)]);
     }
     // SEMANTIC BY DEFAULT: natural-language recall must not depend on the query text
     // appearing as a literal substring in the stored summary/detail. Check index
     // health FIRST so an unavailable index degrades honestly instead of silently
     // returning zero matches that read as "nothing was ever stored." The health
-    // check itself stays on the raw local registry (vector-index diagnostics are
-    // this process's own, see the file-header note); the actual search, once the
-    // index is known healthy, is the 1.2.0 searchSemantic extended verb and
-    // routes through the spine.
-    const stats = registry.vectorStats();
+    // check and the search both go through the spine, so an adopted daemon's
+    // index is the one that is checked.
+    const stats = await run(() => memorySpine.vectorStats(options));
     const unavailable = describeMemoryIndexUnavailable(stats);
     if (unavailable) {
-      const { records } = await run(() => memorySpine.honestSearch({ query, limit: 10 }, undefined, options));
-      return renderMemorySearch(`literal fallback, ${unavailable}`, query, records.map(formatMemory));
+      const { records } = await run(() => memorySpine.honestSearch({ query, limit }, undefined, options));
+      return renderMemorySearch(`literal fallback, ${unavailable}`, query, [...records.map(formatMemory), ...limitNote(records.length, limit)]);
     }
-    const results = await run(() => memorySpine.searchSemantic({ query, limit: 10 }, options));
+    const results = await run(() => memorySpine.searchSemantic({ query, limit }, options));
     const consultedSemanticIndex = query.length > 0 && results.some((entry) => entry.similarity > 0);
     const caveat = describeMemoryIndexCaveat(stats);
     const mode = !consultedSemanticIndex && query.length > 0
@@ -172,7 +189,7 @@ export async function handleMemory(
       : caveat
         ? `semantic, ${caveat}`
         : 'semantic';
-    return renderMemorySearch(mode, query, results.map(formatMemoryMatch));
+    return renderMemorySearch(mode, query, [...results.map(formatMemoryMatch), ...limitNote(results.length, limit)]);
   }
   if (action === 'get') {
     const record = await run(() => memorySpine.get(requireId(args), options));
@@ -215,6 +232,10 @@ export async function handleMemory(
     const detail = readString(args.detail || args.body);
     const tags = args.tags === undefined ? undefined : [...readStringList(args.tags)];
     assertNoSecretLikeMemoryText([summary, detail, ...(tags ?? [])]);
+    requireUpdateFields('memory record', { summary, detail, tags, scope: args.scope }, [
+      ['cls', args.cls, 'a memory class cannot be changed; create a new record with the class and delete the old one.'],
+      ['confidence', args.confidence, 'use action:"review" with confidence to change it.'],
+    ]);
     const record = await run(() => memorySpine.update(requireId(args), {
       summary: summary || undefined,
       detail: detail || undefined,
@@ -259,5 +280,5 @@ export async function handleMemory(
       `  id ${id}`,
     ].join('\n');
   }
-  throw new Error(`Action ${action} is not valid for memory.`);
+  throw new Error(invalidAction(action, 'memory', 'memory'));
 }

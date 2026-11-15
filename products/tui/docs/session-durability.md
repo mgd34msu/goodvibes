@@ -67,14 +67,17 @@ line 0 is the header: { "version": 1, "sessionId": "...", "createdAt": <epochMs>
 line 1+ are records: { "type": "...", "seq": <n>, "ts": <epochMs>, "messages": [...] }
 ```
 
-Four record types appear in a journal, each written at a different durable moment:
+Two record types are written, each at a different durable moment:
 
 | Type | Written when |
 | --- | --- |
 | `user_message` | A turn is submitted, so the user's message survives a kill during the stream |
 | `assistant_turn` | The post-turn snapshot fails, so recovery can still reconstruct the turn |
-| `tool_results` | A batch of tool results lands |
-| `compaction` | Context compaction rewrites the conversation |
+
+The record format also names `tool_results` and `compaction`, but nothing writes them: a batch of
+tool results or a compaction does not add a journal record. A kill in the middle of a turn
+therefore restores the submitted user message plus the last recovery file or snapshot, not that
+turn's tool output.
 
 The `seq` field is monotonically increasing within each journal file (resets to 0 after rotation).
 The `ts` field is the wall-clock time (`Date.now()`) at the moment of the append.
@@ -97,8 +100,7 @@ remainder to `<path>.unrecognized` (the same quarantine convention used by `read
 ### Performance tradeoff
 
 `appendRecord()` performs one `appendFileSync` + one `fsyncSync` per call. This means one fsync
-per durable conversation event (user message submitted, assistant turn finalised, tool results
-batch, compaction). It does **not** fsync per streaming token. The streaming path never calls
+per journal record (user message submitted, assistant turn finalised after a failed snapshot). It does **not** fsync per streaming token. The streaming path never calls
 `appendRecord()`.
 
 At typical usage (2–6 events per minute), the write amplification is negligible on any modern
@@ -131,10 +133,11 @@ quarantined rather than partially trusted or crashed on (the same convention as 
 |---|---|---|
 | Recovery file | Every 60 s | Full snapshot |
 | SessionManager snapshot | Every completed turn | Full snapshot |
-| Transcript journal | Every durable event | User messages + completed turns |
+| Transcript journal | Each submitted turn, and a completed turn whose snapshot failed | User messages, and completed turns that were not snapshotted |
 
-A SIGKILL at any moment loses **at most the in-flight append** (one partial JSON line), never a
-full conversation turn. `--continue`/`--resume`/`--fork`, `/session resume`,
+A SIGKILL loses at most the in-flight journal append (one partial JSON line) and, for a turn that
+was still running, its work since the last recovery file (every 60 s) or snapshot: the submitted
+user message survives, the turn's tool results may not. A completed turn is never lost. `--continue`/`--resume`/`--fork`, `/session resume`,
 the startup recovery modal, and the in-TUI session browser are every resume path, and each routes
 through `resumeSessionCore`, which calls `replayJournalForSession`, so the gap is closed on
 whichever path the user takes.

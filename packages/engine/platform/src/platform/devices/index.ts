@@ -86,7 +86,7 @@ export type {
 } from './device-capture-artifacts.js';
 
 export { DeviceHousekeeper } from './device-housekeeping.js';
-export type { DeviceHousekeepingOptions, DeviceHousekeepingReport } from './device-housekeeping.js';
+export type { DeviceHousekeepingFailure, DeviceHousekeepingOptions, DeviceHousekeepingReport } from './device-housekeeping.js';
 
 export {
   DeviceCapabilityService,

@@ -57,31 +57,54 @@ function optionalString(value: unknown, field: string): string | undefined {
 
 export class ChannelProfileRegistry {
   private bindings: ChannelProfileBinding[] | null = null;
+  /** The first load, shared: two first calls must read the file once and see one array. */
+  private loading: Promise<ChannelProfileBinding[]> | null = null;
   /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
   constructor(private readonly store: ChannelProfileStore) {}
 
   /**
-   * Write the bindings as they stand at THIS call, after every write already
-   * queued has finished.
+   * Change the bindings: compute the new table from the current one, write it,
+   * and only then make it the live one.
    *
-   * `ChannelProfileStore.save` replaces the file atomically but says nothing
-   * about ORDER, and `bindings` is one live array `set` and `delete` both mutate
-   * in place. Unordered, a `set` could land after the `delete` that followed it
-   * and put the removed binding back on disk, and this binding is what decides
-   * the model and permission mode a channel-originated session runs under, so a
-   * deleted one returning means a channel keeps running under defaults its owner
-   * unbound.
+   * Mutations run one at a time, in call order. `ChannelProfileStore.save`
+   * replaces the file atomically but says nothing about ORDER, so unordered a
+   * `set` could land after the `delete` that followed it and put the removed
+   * binding back on disk. This binding decides the model and permission mode a
+   * channel-originated session runs under, so a deleted one returning means a
+   * channel keeps running under defaults its owner unbound. Memory changes only
+   * after the write succeeds: a write that failed (and was reported as failed)
+   * must not keep governing sessions until restart.
    */
-  private async persist(bindings: readonly ChannelProfileBinding[]): Promise<void> {
-    const snapshot = [...bindings];
-    await this.writes.run(() => this.store.save(snapshot));
+  private async mutate<T>(change: (current: readonly ChannelProfileBinding[]) => { next: ChannelProfileBinding[] | null; result: T }): Promise<T> {
+    let outcome: T | undefined;
+    await this.writes.run(async () => {
+      const current = await this.all();
+      const { next, result } = change(current);
+      if (next !== null) {
+        await this.store.save(next);
+        this.bindings = next;
+      }
+      outcome = result;
+    });
+    return outcome as T;
   }
 
-  private async all(): Promise<ChannelProfileBinding[]> {
-    if (this.bindings === null) this.bindings = await this.store.load();
-    return this.bindings;
+  private all(): Promise<ChannelProfileBinding[]> {
+    if (this.bindings !== null) return Promise.resolve(this.bindings);
+    this.loading ??= this.store.load().then(
+      (loaded) => {
+        this.bindings ??= loaded;
+        return this.bindings;
+      },
+      (error: unknown) => {
+        // A failed load is retried by the next call, not cached.
+        this.loading = null;
+        throw error;
+      },
+    );
+    return this.loading;
   }
 
   async list(): Promise<ChannelProfileBinding[]> {
@@ -110,22 +133,22 @@ export class ChannelProfileRegistry {
       updatedAt: Date.now(),
       ...(input.metadata ? { metadata: input.metadata } : {}),
     };
-    const bindings = await this.all();
-    const index = bindings.findIndex((b) => b.id === id);
-    if (index === -1) bindings.push(binding);
-    else bindings[index] = binding;
-    await this.persist(bindings);
-    return binding;
+    return this.mutate((current) => {
+      const next = current.filter((b) => b.id !== id);
+      const index = current.findIndex((b) => b.id === id);
+      // An update keeps the binding's place in the list.
+      if (index === -1) next.push(binding);
+      else next.splice(index, 0, binding);
+      return { next, result: binding };
+    });
   }
 
   async delete(surfaceKind: string, channelId?: string): Promise<boolean> {
     const id = channelProfileBindingId(requireSurfaceKind(surfaceKind), channelId);
-    const bindings = await this.all();
-    const index = bindings.findIndex((b) => b.id === id);
-    if (index === -1) return false;
-    bindings.splice(index, 1);
-    await this.persist(bindings);
-    return true;
+    return this.mutate((current) => {
+      if (!current.some((b) => b.id === id)) return { next: null, result: false };
+      return { next: current.filter((b) => b.id !== id), result: true };
+    });
   }
 
   /**

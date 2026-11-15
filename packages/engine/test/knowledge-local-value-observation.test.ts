@@ -1,5 +1,5 @@
-/** UNRUN native ingest/import local equality regressions; no model comparison. */
-import crypto from 'node:crypto';
+/** Native ingest/import local equality regressions; no model comparison. */
+import * as nodeCrypto from 'node:crypto';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,7 +53,7 @@ test('large and deep local records gain no arbitrary comparison cap or recursion
 });
 
 test('real native ingest guards repeat without SHA and reject a changed current source/extraction', async () => {
-  const f = await fixture(), guard = knowledgeIngestGuard(f.context, f.source.id), hashing = spyOn(crypto, 'createHash');
+  const f = await fixture(), guard = knowledgeIngestGuard(f.context, f.source.id), hashing = spyOn(nodeCrypto, 'createHash');
   try { for (let index = 0; index < 5; index++) guard(); expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0); }
   finally { hashing.mockRestore(); }
   await f.context.store.upsertSource({ ...f.source, metadata: { ...f.source.metadata, localValue: 'changed' } });
@@ -76,7 +76,7 @@ test('original attached artifact comparison handles fresh record objects and det
   const native = spyOn(f.context.artifactStore, 'getRecord').mockImplementation(id => { const value = read(id); return value ? { ...value, metadata: { ...value.metadata, originalFixtureVersion: version } } : value; });
   try {
     const uris = createKnowledgeIngestUriCanonicalizer(f.context); uris.reserveSource(f.source.id); uris.attachArtifact(artifact.id);
-    const hashing = spyOn(crypto, 'createHash');
+    const hashing = spyOn(nodeCrypto, 'createHash');
     try { uris.assertCurrent(); uris.assertCurrent(); expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0); }
     finally { hashing.mockRestore(); }
     version = 2; expect(() => uris.assertCurrent()).toThrow(KnowledgeUriCanonicalizationHeldError);

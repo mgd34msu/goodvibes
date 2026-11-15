@@ -105,7 +105,9 @@ export function reserveForResult(totalRows: number, usableRows: number): number 
  */
 export function maxResultScroll(totalRows: number, reserved: number): number {
   if (reserved <= 0 || totalRows <= reserved) return 0;
-  return Math.max(0, totalRows - reserved + 1);
+  // Never past the last row itself: with a single reserved row the marker's row
+  // is not available to pay for, and an offset equal to the row count shows nothing.
+  return Math.max(0, Math.min(totalRows - 1, totalRows - reserved + 1));
 }
 
 /** Clamp a requested scroll offset to what the content actually allows. */

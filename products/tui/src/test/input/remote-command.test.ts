@@ -335,7 +335,7 @@ describe('remote command', () => {
     expect(artifactId).toBeDefined();
 
     out.length = 0;
-    await remote!.handler(['rerun-local', artifactId!], ctx);
+    await registry.executeFromOwner('remote', ['rerun-local', artifactId!], ctx, `/remote rerun-local ${artifactId!}`);
     expect(out.join('\n')).toContain('Spawned local rerun agent');
   });
 
@@ -600,9 +600,23 @@ for (const pooled of [false, true]) test(`direct owner /remote ${pooled ? 'dispa
 
 test('remote dispatch from a model or source-less command cannot fabricate authority from task prose', async () => {
   resetTestRuntimeServices(); const registry = new CommandRegistry(); registerBuiltinCommands(registry);
-  const ctx = (await createRemoteCommandContext(createRuntimeStore(), []));
-  const spawn = mock(async () => 'should-not-spawn'); ctx.ops.acpManager = { spawn, cancel: async () => {} };
+  const out: string[] = [];
+  const ctx = (await createRemoteCommandContext(createRuntimeStore(), out));
+  const spawn = mock(async () => 'runner-direct'); ctx.ops.acpManager = { spawn, cancel: async () => {} };
+  const refusal = 'Remote dispatch requires the original directly entered command';
+
+  // Positive control: the same arguments entered directly by the owner do spawn,
+  // so the refusals below are about authority and not about the arguments.
+  await registry.executeFromOwner('remote', ['dispatch', 'read', 'the', 'project'], ctx, '/remote dispatch read the project');
+  expect(spawn).toHaveBeenCalledTimes(1);
+  expect(out.join('\n')).not.toContain(refusal);
+
+  out.length = 0;
   await registry.execute('remote', ['dispatch', 'read', 'the', 'project'], ctx);
+  expect(out.join('\n')).toContain(refusal);
+
+  out.length = 0;
   await registry.executeFromOwner('remote', ['dispatch', 'read', 'the', 'project'], { ...ctx, invokedByModel: true }, '/remote dispatch read the project');
-  expect(spawn).not.toHaveBeenCalled();
+  expect(out.join('\n')).toContain(refusal);
+  expect(spawn).toHaveBeenCalledTimes(1);
 });

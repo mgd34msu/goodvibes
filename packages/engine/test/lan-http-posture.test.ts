@@ -41,6 +41,21 @@ describe('transport: private-network http origins are a supported posture', () =
     }
   });
 
+  test('the insecure-transport override takes 1 or true and nothing else', () => {
+    const before = process.env.GOODVIBES_ALLOW_INSECURE_TRANSPORT;
+    try {
+      for (const on of ['1', 'true']) {
+        process.env.GOODVIBES_ALLOW_INSECURE_TRANSPORT = on;
+        expect(() => normalizeBaseUrl('http://example.com')).not.toThrow();
+      }
+      process.env.GOODVIBES_ALLOW_INSECURE_TRANSPORT = 'yes';
+      expect(() => normalizeBaseUrl('http://example.com')).toThrow(/insecure PUBLIC/i);
+    } finally {
+      if (before === undefined) delete process.env.GOODVIBES_ALLOW_INSECURE_TRANSPORT;
+      else process.env.GOODVIBES_ALLOW_INSECURE_TRANSPORT = before;
+    }
+  });
+
   test('works in a browser-like runtime: no process.env, LAN origin still accepted', () => {
     // Simulate a served browser bundle where globalThis.process does not exist.
     const g = globalThis as { process?: unknown };

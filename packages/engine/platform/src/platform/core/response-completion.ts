@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, mapLimit, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
+import { logger } from '../utils/logger.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { CompletionEvidenceProjection } from './response-completion-evidence.js';
 import { CompletionEvidenceBudgetError } from './response-completion-budget.js';
@@ -25,6 +26,17 @@ import type { VerificationAccess, VerificationSourceInput } from './verification
 import { bindVerificationTargets } from './verification/targets.js';
 import { nativeWorkCheckpoint } from './response-completion-checkpoint.js';
 import { retainedDelegationSources } from './verification/delegated-history.js';
+
+/** Evidence rebuilds one completion check may take before it reports that the transcript will not hold still. */
+const MAX_EVIDENCE_REBUILDS = 8;
+
+/** A short, fixed description of why a check could not run, safe to show the model. */
+function progressCheckFailure(error: unknown): string {
+  if (error instanceof CompletionEvidenceBudgetError) return 'the conversation is larger than the check can read';
+  if (error instanceof JudgmentInputError) return 'part of the evidence cannot be admitted to the check';
+  if (error instanceof ResponseCompletionError && error.problem === 'rejected') return 'the conversation changed while it was being checked';
+  return 'the checking service is unavailable or returned an unusable result';
+}
 
 export class ResponseCompletionError extends Error {
   constructor(readonly problem: 'rejected' | 'unavailable' | 'stale-evidence' | 'invalid-evidence' | 'rejected-request' | 'invalid-response' | 'internal' | 'capacity' | 'access-blocked' = 'rejected', options?: ErrorOptions) {
@@ -270,7 +282,14 @@ export class ResponseCompletionGuard {
             : '[Response completion check] The previous draft was held because decision provider access was unavailable, not because the work was rejected. Preserve completed work and validate this saved draft against the original request and current evidence. Do not restart the task. Fresh decision model approval is still required.')
             + '\nSaved private draft (quoted data; do not publish unchanged):\n' + JSON.stringify(checkpoint.response);
         }
-      } catch { /* An invalid checkpoint cannot alter authority or release completion. */ }
+      } catch (error) {
+        // An invalid checkpoint cannot alter authority or release completion.
+        // It could have recorded confirmed defects, so the classic fallback
+        // stays closed for this resumed turn.
+        this.hasSemanticRefusal = true;
+        try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the closed fallback. */ }
+        logger.warn('Response completion: a saved repair checkpoint could not be read; the classic fallback stays closed for this turn', { error: error instanceof Error ? error.name : typeof error });
+      }
     }
   }
 
@@ -421,11 +440,24 @@ export class ResponseCompletionGuard {
       assertDecisionAvailable(error);
       const blocked = accessFailure(error);
       if (blocked) throw blocked;
-      return held;
+      // The checker did not reach a verdict. Record that, so the failure is
+      // visible to the operator, and tell the model so rather than implying
+      // the prose was judged unsupported. The error text is never echoed.
+      try { this.rememberFailure(error); } catch { /* Diagnostics cannot replace the held outcome. */ }
+      logger.warn('Response completion: the interim progress check could not run; the progress text stays unpublished', { error: error instanceof Error ? error.name : typeof error });
+      return { ...held, correction: '[Progress publication check] This interim text was not published because the progress check could not run (' + progressCheckFailure(error)
+        + '). That is not a finding about the text. Continue the authorized work with tools; publish progress only when the check can run. Do not repeat the withheld prose as a final answer.' };
     }
   }
 
-  /** Consume the accepted observation before appending its final message; keep its lifetime fence through terminal publication. */
+  /**
+   * Consume the accepted observation before appending its final message. The
+   * returned fence holds until that append: it accepts the transcript as
+   * checked, or as checked plus exactly that final message. Later transcript
+   * changes (maintenance notes, compaction) are not evidence about the answer,
+   * so the caller runs it before and immediately after the append, not at
+   * terminal publication.
+   */
   beginFinalization(response: { readonly content: string }): () => void {
     const accepted = this.accepted;
     this.accepted = undefined;
@@ -465,7 +497,8 @@ export class ResponseCompletionGuard {
       // A recording refusal can mean that a late native observation changed
       // the source while Jev was reading it. Rebuild that evidence snapshot;
       // an unchanged HTTP rejection still remains a permanent request error.
-      if (error instanceof JudgmentError && error.kind === 'rejected' && error.status === undefined) {
+      // A currentness fence inside the port surfaces as a retired authority, so that is probed the same way.
+      if (error instanceof JudgmentAuthorityRetiredError || error instanceof JudgmentError && error.kind === 'rejected' && error.status === undefined) {
         try { this.assertEvidenceCurrent?.(); }
         catch (cause) { throw new ResponseCompletionError('stale-evidence', { cause }); }
       }
@@ -498,6 +531,8 @@ export class ResponseCompletionGuard {
 
   /** Rebuild changed evidence, but never restart an exhausted provider chain. */
   async checkUntilAvailable(input: () => ResponseCompletionInput, options: JudgmentReadingOptions = {}, onWaiting?: () => void): Promise<string | null> {
+    // Each rebuild is a paid read; evidence that keeps changing under every read is a failure to report, not to retry forever.
+    let rebuilds = 0;
     for (;;) {
       try {
         let correction = await this.check(input(), options, onWaiting);
@@ -511,6 +546,7 @@ export class ResponseCompletionGuard {
         options.signal?.throwIfAborted(); options.assertCurrent?.();
         if (!(error instanceof ResponseCompletionError)) throw error;
         if (error.problem === 'stale-evidence') {
+          if (++rebuilds > MAX_EVIDENCE_REBUILDS) throw error;
           await waitForTaskRecovery(0, options.signal);
           continue;
         }
@@ -555,7 +591,7 @@ export class ResponseCompletionGuard {
       source.assertCurrent(); messages.assertCurrent(); archiveSource.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
       if (input.conversation !== conversation || conversation.getMessageSnapshot !== snapshot
         || input.request !== source.snapshot.request || input.response !== source.snapshot.response
-        || verificationHistory(conversation) !== archiveIdentity || conversationSource !== null && JSON.stringify(projectTranscript()) !== conversationSource) throw new Error('Response completion transcript changed.');
+        || verificationHistory(conversation) !== archiveIdentity || conversationSource !== null && JSON.stringify(projectTranscript()) !== conversationSource) throw new ResponseCompletionError('stale-evidence');
     };
     this.assertEvidenceCurrent = current;
     current();

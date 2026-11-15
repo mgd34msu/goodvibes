@@ -43,6 +43,9 @@ interface CreateProviderContext {
 
 type EmbeddingFetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+/** Longest one embedding request may take when the caller gave no signal of its own. */
+const EMBEDDING_REQUEST_TIMEOUT_MS = 30_000;
+
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_OPENAI_MODEL = 'text-embedding-3-small';
 const DEFAULT_OPENAI_COMPATIBLE_BASE_URL = `${WELL_KNOWN_LOCAL_ENDPOINTS.lmStudio}/v1`;
@@ -82,7 +85,9 @@ function createHttpEmbeddingProvider(definition: ProviderDefinition, context: Cr
       if (!config.configured) {
         throw new Error(config.detail);
       }
-      const init = { ...definition.buildRequest(config, request), ...(request.signal ? { signal: request.signal } : {}), ...(request.beforeAttempt ? { redirect: 'error' as const } : {}) };
+      // Never follow a redirect (an Authorization or API-key header would go with it), and never wait forever on a server that does not answer.
+      const signal = request.signal ?? AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS);
+      const init = { ...definition.buildRequest(config, request), signal, redirect: 'error' as const };
       const dispatchCheck = request.beforeAttempt?.();
       if (dispatchCheck !== undefined) await dispatchCheck;
       request.signal?.throwIfAborted();
@@ -185,6 +190,7 @@ function createOpenAIEmbeddingDefinition(): ProviderDefinition {
       if (!vector) {
         throw new Error(`OpenAI embeddings response from ${config.endpoint} did not include a vector`);
       }
+      assertResponseLength(vector, request, config.endpoint);
       return {
         vector,
         dimensions: vector.length || request.dimensions,
@@ -279,6 +285,7 @@ function createOpenAICompatibleEmbeddingDefinition(): ProviderDefinition {
       if (!vector) {
         throw new Error(`OpenAI-compatible embeddings response from ${config.endpoint} did not include a vector`);
       }
+      assertResponseLength(vector, request, config.endpoint);
       return {
         vector,
         dimensions: vector.length || request.dimensions,
@@ -302,7 +309,7 @@ function createGeminiEmbeddingDefinition(): ProviderDefinition {
     local: false,
     resolveConfig(env, requestedDimensions) {
       const baseUrl = pickEnv(env, ['GEMINI_BASE_URL', 'GOOGLE_GEMINI_BASE_URL'], DEFAULT_GEMINI_BASE_URL);
-      const model = pickEnv(env, ['GEMINI_EMBEDDING_MODEL', 'GEMINI_MODEL'], DEFAULT_GEMINI_MODEL);
+      const model = pickEnv(env, ['GEMINI_EMBEDDING_MODEL'], DEFAULT_GEMINI_MODEL);
       const apiKey = pickEnv(env, ['GEMINI_API_KEY', 'GOOGLE_API_KEY'], '');
       const endpoint = joinUrl(baseUrl.value, `models/${encodeURIComponent(model.value)}:embedContent`);
       const configured = Boolean(apiKey.value);
@@ -368,6 +375,7 @@ function createGeminiEmbeddingDefinition(): ProviderDefinition {
       if (!vector) {
         throw new Error(`Gemini embeddings response from ${config.endpoint} did not include a vector`);
       }
+      assertResponseLength(vector, request, config.endpoint);
       return {
         vector,
         dimensions: vector.length || request.dimensions,
@@ -391,7 +399,7 @@ function createMistralEmbeddingDefinition(): ProviderDefinition {
     local: false,
     resolveConfig(env, requestedDimensions) {
       const baseUrl = pickEnv(env, ['MISTRAL_BASE_URL'], DEFAULT_MISTRAL_BASE_URL);
-      const model = pickEnv(env, ['MISTRAL_EMBEDDING_MODEL', 'MISTRAL_MODEL'], DEFAULT_MISTRAL_MODEL);
+      const model = pickEnv(env, ['MISTRAL_EMBEDDING_MODEL'], DEFAULT_MISTRAL_MODEL);
       const apiKey = pickEnv(env, ['MISTRAL_API_KEY'], '');
       const endpoint = joinUrl(baseUrl.value, 'embeddings');
       const configured = Boolean(apiKey.value);
@@ -448,6 +456,7 @@ function createMistralEmbeddingDefinition(): ProviderDefinition {
       if (!vector) {
         throw new Error(`Mistral embeddings response from ${config.endpoint} did not include a vector`);
       }
+      assertResponseLength(vector, request, config.endpoint);
       return {
         vector,
         dimensions: vector.length || request.dimensions,
@@ -471,7 +480,7 @@ function createOllamaEmbeddingDefinition(): ProviderDefinition {
     local: true,
     resolveConfig(env, requestedDimensions) {
       const baseUrl = pickEnv(env, ['OLLAMA_BASE_URL', 'OLLAMA_HOST'], DEFAULT_OLLAMA_BASE_URL);
-      const model = pickEnv(env, ['OLLAMA_EMBEDDING_MODEL', 'OLLAMA_MODEL'], DEFAULT_OLLAMA_MODEL);
+      const model = pickEnv(env, ['OLLAMA_EMBEDDING_MODEL'], DEFAULT_OLLAMA_MODEL);
       const endpoint = joinUrl(baseUrl.value, 'api/embed');
       const configured = Boolean(baseUrl.value && model.value);
       const state: MemoryEmbeddingProviderState = configured ? 'healthy' : 'unconfigured';
@@ -520,6 +529,7 @@ function createOllamaEmbeddingDefinition(): ProviderDefinition {
       if (!vector) {
         throw new Error(`Ollama embeddings response from ${config.endpoint} did not include a vector`);
       }
+      assertResponseLength(vector, request, config.endpoint);
       return {
         vector,
         dimensions: vector.length || request.dimensions,
@@ -544,8 +554,22 @@ function pickEnv(env: EnvMap, keys: readonly string[], fallback: string): { read
   return { value: fallback, source: 'default' };
 }
 
+/**
+ * A response shorter than the requested size cannot be used: padding it with
+ * zeros would index vectors that mean something else. A longer one is cut to
+ * the requested size, which is sound only for models trained for truncation;
+ * the registry doctor says so for providers that ignore the size parameter.
+ */
+function assertResponseLength(vector: readonly number[], request: MemoryEmbeddingRequest, endpoint: string): void {
+  if (vector.length < request.dimensions) {
+    throw new Error(`Embeddings response from ${endpoint} has ${vector.length} dimensions, fewer than the ${request.dimensions} the memory index stores. Use an embedding model that returns at least ${request.dimensions}.`);
+  }
+}
+
 function joinUrl(baseUrl: string, suffix: string): string {
-  const base = baseUrl.trim().replace(/\/+$/, '');
+  // A host written without a scheme (OLLAMA_HOST=127.0.0.1:11434) is plain http.
+  const trimmed = baseUrl.trim();
+  const base = (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`).replace(/\/+$/, '');
   const tail = suffix.trim().replace(/^\/+/, '');
   return `${base}/${tail}`;
 }

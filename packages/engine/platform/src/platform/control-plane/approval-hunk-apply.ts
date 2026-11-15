@@ -34,16 +34,28 @@ export interface EditHunkLike {
   readonly id?: string | undefined;
 }
 
-/** Runtime guard: is `value` shaped like an edit hunk? */
-function isEditHunkLike(value: unknown): value is EditHunkLike {
-  if (typeof value !== 'object' || value === null) return false;
+/**
+ * The text the edit tool will really match and write for one entry: a base64
+ * field wins over its plain twin (a plain '' beside base64 is allowed), as the
+ * executor reads it, so an approval shows the bytes that would be written.
+ */
+function effectiveText(candidate: Record<string, unknown>, plain: 'find' | 'replace'): string | null {
+  const encoded = candidate[`${plain}_base64`];
+  const direct = candidate[plain];
+  if (typeof encoded === 'string' && (plain === 'replace' || encoded !== '')) return Buffer.from(encoded, 'base64').toString('utf-8');
+  return typeof direct === 'string' ? direct : null;
+}
+
+/** An entry shaped like an edit hunk, with `find` and `replace` set to the effective text; null otherwise. */
+function toEditHunkLike(value: unknown): EditHunkLike | null {
+  if (typeof value !== 'object' || value === null) return null;
   const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate['path'] === 'string'
-    && typeof candidate['find'] === 'string'
-    && typeof candidate['replace'] === 'string'
-    && (candidate['id'] === undefined || typeof candidate['id'] === 'string')
-  );
+  if (typeof candidate['path'] !== 'string') return null;
+  if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return null;
+  const find = effectiveText(candidate, 'find');
+  const replace = effectiveText(candidate, 'replace');
+  if (find === null || replace === null) return null;
+  return { ...candidate, path: candidate['path'], find, replace } as EditHunkLike;
 }
 
 /**
@@ -56,8 +68,9 @@ export function readApprovalEditHunks(args: Record<string, unknown>): EditHunkLi
   if (!Array.isArray(edits) || edits.length === 0) return null;
   const items: EditHunkLike[] = [];
   for (const entry of edits) {
-    if (!isEditHunkLike(entry)) return null;
-    items.push(entry);
+    const hunk = toEditHunkLike(entry);
+    if (!hunk) return null;
+    items.push(hunk);
   }
   return items;
 }

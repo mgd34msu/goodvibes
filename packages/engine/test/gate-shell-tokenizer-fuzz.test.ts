@@ -6,8 +6,9 @@
  *  1. MAX_INPUT_LENGTH truncation prevents the tokenizer from processing
  *     arbitrarily long inputs.
  *  2. MAX_TOKEN_COUNT bail-out prevents unbounded token lists.
- *  3. The tokenizer always terminates in bounded wall-clock time across
- *     a corpus of pathological inputs.
+ *  3. The tokenizer returns for every input in a corpus of pathological
+ *     inputs (no elapsed-time budget is asserted: input is cut to
+ *     MAX_INPUT_LENGTH first, and a hang fails on the runner's per-test timeout).
  *  4. Output token count never exceeds MAX_TOKEN_COUNT regardless of input.
  */
 
@@ -121,34 +122,7 @@ const FUZZ_CORPUS: Array<[string, string]> = [
   ['very long single word (no spaces)', 'x'.repeat(MAX_INPUT_LENGTH)],
 ];
 
-// ---------------------------------------------------------------------------
-// Property: tokenizer always terminates (bounded wall-clock time)
-// ---------------------------------------------------------------------------
-
-/**
- * Maximum milliseconds allowed for any single tokenize() call.
- *
- * The property is termination: the failure this guards against is a tokenizer
- * that never comes back on a pathological input, not one that is a few hundred
- * milliseconds slower than usual. 500 ms was a number only an idle machine can
- * promise, a pathological input plus one descheduling crosses it while the
- * tokenizer is behaving perfectly. The bound is still far below any
- * non-terminating run.
- */
-const MAX_ALLOWED_MS = 5_000;
-
 describe('tokenizer fuzz and pathological guards', () => {
-  describe('property: always terminates within bounded time', () => {
-    for (const [label, input] of FUZZ_CORPUS) {
-      it(`terminates for: ${label}`, () => {
-        const start = performance.now();
-        tokenize(input);
-        const elapsed = performance.now() - start;
-        expect(elapsed).toBeLessThan(MAX_ALLOWED_MS);
-      });
-    }
-  });
-
   describe('property: output token count never exceeds MAX_TOKEN_COUNT', () => {
     for (const [label, input] of FUZZ_CORPUS) {
       it(`token count bounded for: ${label}`, () => {
@@ -181,13 +155,6 @@ describe('tokenizer fuzz and pathological guards', () => {
       const tokensLong = tokenize(base);
       const tokensTrunc = tokenize(truncated);
       expect(tokensLong).toEqual(tokensTrunc);
-    });
-
-    it('very long input terminates quickly', () => {
-      const input = 'a '.repeat(MAX_INPUT_LENGTH * 5);
-      const start = performance.now();
-      tokenize(input);
-      expect(performance.now() - start).toBeLessThan(MAX_ALLOWED_MS);
     });
   });
 
@@ -283,9 +250,7 @@ describe('tokenizer fuzz and pathological guards', () => {
   describe('emergency fallback: length truncation is always applied first', () => {
     it('null bytes inside long input do not cause hang', () => {
       const input = '\0'.repeat(MAX_INPUT_LENGTH * 3);
-      const start = performance.now();
       const tokens = tokenize(input);
-      expect(performance.now() - start).toBeLessThan(MAX_ALLOWED_MS);
       expect(tokens.length).toBeLessThanOrEqual(MAX_TOKEN_COUNT);
     });
 
@@ -293,17 +258,13 @@ describe('tokenizer fuzz and pathological guards', () => {
       // Mixing multibyte chars and operators forces many branch paths.
       const chunk = '\u4e2d\u6587 && \u0041 ; ';
       const input = chunk.repeat(Math.ceil((MAX_INPUT_LENGTH * 2) / chunk.length));
-      const start = performance.now();
       const tokens = tokenize(input);
-      expect(performance.now() - start).toBeLessThan(MAX_ALLOWED_MS);
       expect(tokens.length).toBeLessThanOrEqual(MAX_TOKEN_COUNT);
     });
 
     it('repeated escape sequences inside long input do not cause hang', () => {
       const input = '\\ '.repeat(MAX_INPUT_LENGTH);
-      const start = performance.now();
       const tokens = tokenize(input);
-      expect(performance.now() - start).toBeLessThan(MAX_ALLOWED_MS);
       expect(tokens.length).toBeLessThanOrEqual(MAX_TOKEN_COUNT);
     });
   });

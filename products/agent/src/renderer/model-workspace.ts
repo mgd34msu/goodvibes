@@ -394,6 +394,7 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
         { text: `Detected context: ${formatContext(model?.contextWindow)}`, style: { fg: t.textMuted } },
         { text: `Override: ${input}`, style: { fg: t.brand, bold: true } },
         { text: '' },
+        ...(picker.contextCapError ? [{ text: picker.contextCapError, style: { fg: t.error } }] : []),
         { text: MODEL_WORKSPACE_CONTEXT_CAP_INPUT_HELP, style: { fg: t.textFaint } },
       ],
       split.bottom,

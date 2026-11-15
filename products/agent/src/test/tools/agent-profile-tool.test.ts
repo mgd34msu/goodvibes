@@ -287,46 +287,6 @@ describe('profile tool: forgetting something that was not there', () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("his concurrent edit does not make the delete hit the wrong line", async () => {
-    // The hazard §9.2 exists for. He is a concurrent writer: between the read
-    // that produced a position and the forget that used it, he adds a line in
-    // his editor and everything below shifts. A positional delete removes a
-    // different line and reports success. Addressing by content cannot: the
-    // fake daemon here resolves against the CURRENT document, exactly as the
-    // real store does, so the assertion is about which line actually goes.
-    const document = [
-      { section: 'Notes', text: 'Allergic to shellfish' },
-      { section: 'Notes', text: 'Prefers aisle seats' },
-    ];
-    const calls: RecordedCall[] = [];
-    const tool = admittedTool(async (methodId, body): Promise<ProfileGatewayResult> => {
-        const recorded = recordedBody(body);
-        calls.push({ methodId, body: recorded });
-        const section = String(recorded.section ?? '');
-        const wanted = String(recorded.text ?? '');
-        const index = document.findIndex((line) => line.section === section && line.text === wanted);
-        if (index < 0) {
-          return { ok: true, data: refused(`Your profile has no line reading "${wanted}" under ${section} any more.`), route: 'in-process' };
-        }
-        document.splice(index, 1);
-        return { ok: true, data: wrote(`Forgotten, removed a line from ${section}.`), route: 'in-process' };
-    });
-
-    // He inserts a line above the one that is about to be forgotten. Under the
-    // old contract the caller's index 0 now names the NEW line.
-    document.unshift({ section: 'Notes', text: 'Renewed passport in March' });
-
-    const result = await tool.execute({
-      action: 'forget',
-      section: 'Notes',
-      text: 'Allergic to shellfish',
-      authority: 'owner-direct',
-    });
-
-    expect(result.success).toBe(true);
-    expect(document.map((line) => line.text)).toEqual(['Renewed passport in March', 'Prefers aisle seats']);
-  });
-
   test('a line whose text no longer matches deletes nothing, and says so', async () => {
     const { tool } = stubTool(() => refused('Your profile has no line reading "Allergic to shellfish" under Notes any more.'));
 

@@ -16,7 +16,7 @@ const source: NativeContractSource = { sourceId: 'work-1', sourceRevision: '1', 
 function plan() { return { ...oneUnitPlan(1), goal: source.goal, criteria: [{ id: 'c1', text: source.criteria[0]!, quote: source.criteria[0]! }] }; }
 function authority() { return { authorityId: 'host', authorityRevision: '1', scopeId: 'project', scopeRevision: '1' }; }
 const harnesses: Harness[] = []; const roots: string[] = [];
-afterEach(() => { for (const h of harnesses.splice(0).reverse()) h.dispose(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { try { await Promise.all(harnesses.splice(0).reverse().map(h => h.dispose())); } finally { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); } });
 function add(h: Harness) { harnesses.push(h); return h; }
 function root() { const value = makeRepo(); roots.push(value); return value; }
 function writeSnapshot(path: string, contract: Contract, schemaVersion: number) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify({ schemaVersion, writtenAt: Date.now(), contract })); }
@@ -157,3 +157,18 @@ test('a native-configured owner holds source-less historical records without act
   await expect(createContractIntake({ runner: h.runner, projectRoot: directory }).intake({ sessionId: contract.sessionId, text: 'Yes, approved' })).rejects.toThrow('source-bearing host admission');
   expect(h.runner.get(contract.id)?.escalations[0]!.reply).toBeUndefined(); expect(h.events.some(event => event.type === 'CONTRACT_OWNER_REPLIED')).toBe(false);
 });
+
+test('a historical native wait on a shape question plans again instead of aborting the restart', async () => {
+  const directory = root();
+  const contract = makeContract({ schemaVersion: 3, projectRoot: directory, nativeSource: source, goal: source.goal, criteria: nativeSourceCriteria(source), groups: [], units: [],
+    status: 'awaiting-owner', statusBeforeOwner: 'shaping', escalations: [{ id: 'old.e1', at: 10, scope: 'shape', targetId: 'shape', reason: 'writing-unclear', question: 'Historical shaping question', unmetCriterionIds: [] }] });
+  contract.shape = undefined;
+  writeSnapshot(contractPath(directory, contract.id), contract, 3);
+  let planned = 0;
+  const h = add(makeHarness({ root: directory, recordNative: true, scripts: {}, planner: { run: async () => { planned += 1; throw new Error('planning started again'); } } }));
+  const report = await h.runner.resumeAll();
+  await waitFor(() => terminal(h, contract.id), 'the contract to end after planning again');
+  expect(report.reaped).toEqual([]);
+  expect(planned).toBeGreaterThan(0);
+  expect(h.store.get(contract.id)!.error).toContain('planning started again');
+}, 20_000);

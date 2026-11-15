@@ -17,6 +17,7 @@ export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void
       const shellPaths = requireShellPaths(ctx);
       const guidanceOptions = {
         homeDirectory: shellPaths.homeDirectory,
+        surfaceRoot: 'tui',
       };
       if (sub === 'dismiss') {
         const id = args[1];
@@ -24,12 +25,18 @@ export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Usage: /guidance dismiss <id>');
           return;
         }
-        dismissGuidance(id, guidanceOptions);
+        if (!dismissGuidance(id, guidanceOptions)) {
+          ctx.print(`Could not save the dismissal of guidance item ${id}: the guidance store is busy or unreadable, so nothing was changed. Try again.`);
+          return;
+        }
         ctx.print(`Dismissed guidance item ${id}.`);
         return;
       }
       if (sub === 'reset') {
-        resetGuidance(args[1], guidanceOptions);
+        if (!resetGuidance(args[1], guidanceOptions)) {
+          ctx.print('Could not reset guidance: the guidance store is busy or unreadable, so nothing was changed. Try again.');
+          return;
+        }
         ctx.print(args[1] ? `Reset guidance item ${args[1]}.` : 'Reset all dismissed guidance items.');
         return;
       }

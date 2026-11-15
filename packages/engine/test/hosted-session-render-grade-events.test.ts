@@ -39,17 +39,26 @@ async function flushMicrotasks(): Promise<void> {
   for (let index = 0; index < 6; index += 1) await Promise.resolve();
 }
 
-/** Read up to `maxReads` SSE chunks, stopping early once `stopWhen` is satisfied. */
+/**
+ * Read up to `maxReads` SSE chunks, stopping early once `stopWhen` is satisfied.
+ * A chunk that never arrives fails with what was read so far instead of
+ * leaving the test to run into its own timeout.
+ */
 async function readStreamText(
   reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
   stopWhen: (text: string) => boolean,
   maxReads = 12,
+  deadlineMs = 3000,
 ): Promise<string> {
   if (!reader) return '';
   const decoder = new TextDecoder();
   let text = '';
   for (let index = 0; index < maxReads; index += 1) {
-    const { done, value } = await reader.read();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`event stream produced no further frame; received so far: ${text}`)), deadlineMs);
+    });
+    const { done, value } = await Promise.race([reader.read(), deadline]).finally(() => clearTimeout(timer));
     if (done) break;
     if (value) text += decoder.decode(value);
     if (stopWhen(text)) break;
@@ -224,6 +233,8 @@ describe('hosted-session event stream carries render-grade frames', () => {
     const reader = response.body?.getReader();
     await flushMicrotasks();
 
+    // A frame that names no session makes no claim about another one and is delivered.
+    bus.emit('turn', { type: 'STREAM_DELTA', ts: 0, source: 'daemon', payload: { type: 'STREAM_DELTA', turnId: 'daemon-wide', content: 'notice', accumulated: 'notice' } });
     // A second hosted session's turn must not land in this one's transcript.
     emitHostedTurn(bus, OTHER_SESSION_ID);
     // This session's own turn must.
@@ -233,7 +244,9 @@ describe('hosted-session event stream carries render-grade frames', () => {
     const body = await readStreamText(reader, (text) => text.includes('TURN_COMPLETED'));
     abort.abort();
 
-    const frames = parseFrames(body).filter((frame) => frame.sessionId !== undefined);
+    const all = parseFrames(body);
+    expect(all.filter((frame) => frame.sessionId === undefined).map((frame) => frame.type)).toEqual(['STREAM_DELTA']);
+    const frames = all.filter((frame) => frame.sessionId !== undefined);
     expect(frames.length).toBeGreaterThan(0);
     for (const frame of frames) {
       expect(frame.sessionId).toBe(HOSTED_SESSION_ID);

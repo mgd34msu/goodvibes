@@ -17,13 +17,15 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
  * 7. dead_code mode flags an unreferenced exported function (positive)
  * 8. dead_code mode does NOT flag a referenced exported function (negative)
  */
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import { describe, expect, spyOn, test, beforeEach, afterEach } from 'bun:test';
+import { chmodSync } from 'node:fs';
 import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runPermissions, runSecurity, runDeadCode, runEnvAudit, runTestFind } from '../platform/src/platform/tools/analyze/scan-modes.js';
+import { createAnalyzeTool } from '../platform/src/platform/tools/analyze/index.js';
+import { MAX_SCAN_MS } from '../platform/src/platform/tools/analyze/shared.js';
 import { scanBlocks, SCAN_BLOCK_LINES } from '../platform/src/platform/tools/analyze/scan-lines.js';
-import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 import { TEST_CANDIDATES_PER_READING } from '../platform/src/platform/tools/batteries/test-of-source.js';
 import { useToolReadings } from './_helpers/tool-readings.ts';
 
@@ -89,7 +91,8 @@ describe('runSecurity: security mode', () => {
 
     const secrets = result.secrets as { findings: Array<{ file: string; line: number; match: string; reading: string }>; count: number };
     expect(secrets.count).toBe(1);
-    expect(secrets.findings).toEqual([{ file: 'config.ts', line: 2, match: "const apiSecret = 'supersecretvalue123';", reading: 'real' }]);
+    // The report never repeats the flagged value.
+    expect(secrets.findings).toEqual([{ file: 'config.ts', line: 2, match: "const apiSecret = '[redacted]';", reading: 'real' }]);
     // One existence check finds line 2; the single line left cannot go to another existence check,
     // so the finding reading reads it directly (and dismisses it), beside line 2's finding reading.
     expect(readings.requests).toHaveLength(3);
@@ -117,12 +120,45 @@ describe('runSecurity: security mode', () => {
     expect(readings.requests).toHaveLength(3);
   });
 
-  test('a declared credential in any file holds the complete scan before any semantic dispatch', async () => {
+  test('a file holding a declared credential is refused and listed, and the other files are still scanned', async () => {
     await writeFixture(tmpDir, 'a-clean.ts', 'export const first = 1;\nexport const second = 2;\n');
     await writeFixture(tmpDir, 'z-private.ts', 'const password = "synthetic-private-value";\n');
-    await expect(runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir))
-      .rejects.toBeInstanceOf(JudgmentInputError);
-    expect(readings.requests).toHaveLength(0);
+    const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
+    const secrets = result.secrets as { findings: unknown[]; refused_files: Array<{ file: string }>; files_scanned: number };
+    expect(secrets.refused_files.map((entry) => entry.file)).toEqual(['z-private.ts']);
+    expect(secrets.files_scanned).toBe(1);
+    // The clean file was read; the refused file's text never reached a reading.
+    expect(readings.requests).toHaveLength(1);
+    expect(JSON.stringify(readings.requests)).not.toContain('synthetic-private-value');
+  });
+
+  // A process running as root can read a mode-000 file, so the refusal cannot be produced there.
+  test.skipIf(process.getuid?.() === 0)('a file that cannot be read is listed as unreadable, not dropped from the count', async () => {
+    await writeFixture(tmpDir, 'a-clean.ts', 'export const first = 1;\n');
+    const locked = await writeFixture(tmpDir, 'locked.ts', 'export const second = 2;\n');
+    chmodSync(locked, 0o000);
+    try {
+      const result = await runSecurity({ mode: 'security', projectRoot: tmpDir }, tmpDir);
+      const secrets = result.secrets as { files_scanned: number; unreadable_files?: string[] };
+      expect(secrets.unreadable_files).toEqual(['locked.ts']);
+      expect(secrets.files_scanned).toBe(1);
+      const permissions = result.permissions as { unreadable_files?: string[] };
+      expect(permissions.unreadable_files).toEqual(['locked.ts']);
+    } finally {
+      chmodSync(locked, 0o644);
+    }
+  });
+
+  test('a live-key shape in a flagged line is masked in the report', async () => {
+    await writeFixture(tmpDir, 'billing.ts', `export const CURRENCY = 'usd';\nexport const STRIPE_KEY = '${LIVE_KEY}';\nexport const TRIAL_DAYS = 14;\n`);
+    const result = await runSecurity({ mode: 'security', securityScope: 'secrets', projectRoot: tmpDir }, tmpDir);
+    expect(JSON.stringify(result)).not.toContain(LIVE_KEY);
+  });
+
+  test('security lists every dotenv file of the root, as env_audit does', async () => {
+    for (const name of ['.env', '.env.staging', '.env.test']) await writeFixture(tmpDir, name, 'A=1\n');
+    const result = await runSecurity({ mode: 'security', securityScope: 'env', projectRoot: tmpDir }, tmpDir);
+    expect((result.env as { files_found: string[] }).files_found).toEqual(['.env', '.env.staging', '.env.test']);
   });
 
   test('reports zero findings on clean code, reading each block once', async () => {
@@ -163,6 +199,20 @@ describe('runPermissions: permissions mode', () => {
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test('a scan that finished is not reported as stopped at the scan limit, however long the readings took', async () => {
+    await writeFixture(tmpDir, 'app.js', "app.post('/calc', (req, res) => res.send(eval(req.body.expr)));\n");
+    const real = Date.now.bind(Date);
+    let calls = 0;
+    // The first reading of the clock is the tool's start; every later one is past the scan limit.
+    const clock = spyOn(Date, 'now').mockImplementation(() => (calls++ === 0 ? real() : real() + MAX_SCAN_MS + 1_000));
+    try {
+      const result = await createAnalyzeTool({ chat: async () => '' } as never, null, tmpDir).execute({ mode: 'permissions' });
+      const out = JSON.parse(result.output!) as Record<string, unknown>;
+      expect(out.total).toBe(1);
+      expect(out.scan_note).toBeUndefined();
+    } finally { clock.mockRestore(); }
   });
 
   test('reports the calls Jev reads as risky with its severity, and dismisses lookalikes', async () => {

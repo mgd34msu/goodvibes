@@ -73,7 +73,8 @@ describe('auto-refresh reactive-401 error release', () => {
     let collected = false;
     for (let i = 0; i < 5 && !collected; i++) {
       gc();
-      await new Promise((r) => setTimeout(r, 10));
+      // A WeakRef target is held until the current job ends; yield one macrotask, not a duration.
+      await new Promise<void>((r) => setImmediate(r));
       collected = errRef!.deref() === undefined;
     }
     expect(collected).toBe(true);

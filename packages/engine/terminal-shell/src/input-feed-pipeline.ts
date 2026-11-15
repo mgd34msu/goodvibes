@@ -12,6 +12,10 @@ export interface FeedPipelineContext extends FeedContextMutableInit {
   readonly keybindingsManager: { matches(action: 'clear-cancel', token: KeyToken): boolean };
   readonly surfaceModals?: Pick<SurfaceModalHost, 'active' | 'handleToken'> | undefined;
   readonly getSessionView: () => SessionViewControls | null;
+  /** True while the composer collects a concealed value; command dispatch must not see that text. */
+  readonly isConcealedInput?: (() => boolean) | undefined;
+  /** The handler's own id counters; the route snapshots hold stale copies once a paste registers. */
+  readonly readPasteCounters?: (() => { readonly nextPasteId: number; readonly nextImageId: number }) | undefined;
   readonly getHistory: () => InfiniteBuffer;
   readonly getViewportHeight: () => number;
   readonly getScrollTop: () => number;
@@ -75,21 +79,21 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
       lineCount: history.getLineCount(),
       now: Date.now(),
     };
-    for (const token of tokens) {
+    const dispatch = (token: InputToken): void => {
       if (token.type === 'focus') {
         context.focusTracker.setFocused(token.action === 'in');
-        continue;
+        return;
       }
-      if (ports.pairing?.(context, token)) continue;
+      if (ports.pairing?.(context, token)) return;
       if (token.type === 'key' && context.keybindingsManager.matches('clear-cancel', token)) {
         context.handleCtrlC();
-        continue;
+        return;
       }
       if (context.surfaceModals?.active && (ports.surfaceModalTokens === 'all' || token.type === 'key' || token.type === 'text')) {
         if (token.type === 'key' && token.logicalName === 'escape') context.handleEscape();
         else context.surfaceModals.handleToken(token);
         context.requestRender();
-        continue;
+        return;
       }
       // Handler closures can update this same context while a route owns a
       // snapshot. Preserve those updates rather than restoring stale values.
@@ -114,7 +118,7 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
       if (!ports.guardModalWrites || context.prompt === before.prompt) context.prompt = modal.prompt;
       if (!ports.guardModalWrites || context.cursorPos === before.cursorPos) context.cursorPos = modal.cursorPos;
       context.nextImageId = modal.nextImageId;
-      if (modal.handled) continue;
+      if (modal.handled) return;
 
       const sessionView = context.getSessionView();
       const expandPastes = ports.expandPastes;
@@ -130,9 +134,9 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
       if (handleSessionViewToken(viewState, token)) {
         context.prompt = viewState.prompt;
         context.cursorPos = viewState.cursorPos;
-        continue;
+        return;
       }
-      if (!sessionView?.active && ports.workTree(context, token, env)) continue;
+      if (!sessionView?.active && ports.workTree(context, token, env)) return;
       if (token.type === 'key') {
         const prompt = context.prompt,
           cursorPos = context.cursorPos,
@@ -143,29 +147,32 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
           if (context.cursorPos === cursorPos) context.cursorPos = shortcut.cursorPos;
           if (context.commandMode === commandMode) context.commandMode = shortcut.commandMode;
           ports.afterShortcut?.(context);
-          continue;
+          return;
         }
       }
-      if (ports.beforeComposer?.(context, token, env)) continue;
+      if (ports.beforeComposer?.(context, token, env)) return;
       const indicator = ports.indicator(context, token, env);
       context.indicatorFocused = indicator.indicatorFocused;
-      if (indicator.handled) continue;
+      if (indicator.handled) return;
       const text = ports.text(context, token, env);
       if (text.handled) {
         context.prompt = text.prompt;
         context.cursorPos = text.cursorPos;
         context.commandMode = text.commandMode;
-        continue;
+        return;
       }
       if (token.type === 'key') {
-        const command = ports.command(context, token, env);
-        if (command.handled) {
+        // A concealed value is never a slash command, even when it starts with '/'.
+        const command = context.isConcealedInput?.()
+          ? undefined
+          : ports.command(context, token, env);
+        if (command?.handled) {
           context.commandMode = command.commandMode;
           context.prompt = command.prompt;
           context.cursorPos = command.cursorPos;
           context.nextPasteId = command.nextPasteId;
           context.nextImageId = command.nextImageId;
-          continue;
+          return;
         }
         const key = ports.key(context, token, env);
         if (key.handled) {
@@ -179,6 +186,18 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         const mouse = ports.mouse(context, token, env);
         context.mouseDownRow = mouse.mouseDownRow;
         context.mouseDownCol = mouse.mouseDownCol;
+      }
+    };
+    for (const token of tokens) {
+      const counters = context.readPasteCounters;
+      const hostBefore = counters?.();
+      dispatch(token);
+      // A paste registered through the host advances the host's counters while
+      // the routes only hold snapshots; adopt the host value when it moved.
+      const hostAfter = counters?.();
+      if (hostBefore && hostAfter) {
+        if (hostAfter.nextPasteId !== hostBefore.nextPasteId) context.nextPasteId = hostAfter.nextPasteId;
+        if (hostAfter.nextImageId !== hostBefore.nextImageId) context.nextImageId = hostAfter.nextImageId;
       }
     }
     context.requestRender();

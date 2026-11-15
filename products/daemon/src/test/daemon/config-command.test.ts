@@ -30,7 +30,7 @@ function fakeManager(initial: Record<string, unknown> = {}) {
       reset: (key?: string): void => {
         if (key === undefined) return;
         resets.push(key);
-        values.delete(key);
+        values.set(key, CONFIG_SCHEMA.find((entry) => entry.key === key)?.default);
       },
       getSchema: () => CONFIG_SCHEMA,
       getRaw: () => Object.fromEntries(values) as never,
@@ -60,6 +60,8 @@ describe('config list', () => {
     expect(text).toContain('controlPlane.port');
     expect(text).toContain('3421');
     expect(text).toContain('/home/x/.goodvibes/settings.json');
+    expect(text).not.toContain('says which');
+    expect(text).not.toContain('came from');
   });
 
   test('a credential-shaped key is printed as redacted, never in the clear', async () => {
@@ -146,13 +148,48 @@ describe('config set', () => {
     expect(writes).toEqual([]);
   });
 
-  test('the written value is real, and only the ECHO is redacted', async () => {
+  test('a credential key with no secret-store route is refused, never written as plain text', async () => {
     const secret = aSecretKey();
     const { manager, writes } = fakeManager();
     const result = (await runConfigCommand(['set', secret, 'sk-live-abcdefghijklmnop'], deps(manager)));
-    expect(writes).toEqual([{ key: secret, value: 'sk-live-abcdefghijklmnop' }]);
-    expect(result.lines.join('\n')).toContain(REDACTED_VALUE);
+    expect(result.exitCode).toBe(1);
+    expect(writes).toEqual([]);
+    expect(result.lines.join('\n')).toContain('goodvibes://secrets/');
     expect(result.lines.join('\n')).not.toContain('sk-live-abcdefghijklmnop');
+  });
+
+  test('a credential goes to the secret store and the settings file keeps only the reference', async () => {
+    const stored = new Map<string, string>();
+    const { manager, writes } = fakeManager();
+    const withStore = { ...deps(manager), openSecretStore: () => ({ set: async (key: string, value: string) => { stored.set(key, value); } }) };
+    const result = await runConfigCommand(['set', 'surfaces.telegram.botToken', 'sk-live-abcdefghijklmnop'], withStore);
+    expect(result.exitCode).toBe(0);
+    expect(writes).toHaveLength(1);
+    expect(String(writes[0]?.value)).toStartWith('goodvibes://secrets/');
+    expect(stored.get('GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN')).toBe('sk-live-abcdefghijklmnop');
+    expect(result.lines.join('\n')).not.toContain('sk-live-abcdefghijklmnop');
+  });
+
+  test('a secret store that fails leaves no reference behind and reports failure', async () => {
+    const { manager } = fakeManager({ 'surfaces.telegram.botToken': 'goodvibes://secrets/goodvibes/OLD' });
+    const failing = { ...deps(manager), openSecretStore: () => ({ set: async () => { throw new Error('store down'); } }) };
+    const result = await runConfigCommand(['set', 'surfaces.telegram.botToken', 'sk-live-abcdefghijklmnop'], failing);
+    expect(result.exitCode).toBe(1);
+    expect<unknown>(manager.get('surfaces.telegram.botToken')).toBe('goodvibes://secrets/goodvibes/OLD');
+  });
+
+  test('a secret reference is written as given', async () => {
+    const { manager, writes } = fakeManager();
+    const reference = 'goodvibes://secrets/goodvibes/MY_TOKEN';
+    const result = await runConfigCommand(['set', aSecretKey(), reference], deps(manager));
+    expect(result.exitCode).toBe(0);
+    expect(writes[0]?.value).toBe(reference);
+  });
+
+  test('the receipt does not send the operator to restart-service for a control-plane port', async () => {
+    const { manager } = fakeManager();
+    const result = await runConfigCommand(['set', 'controlPlane.port', '4321'], deps(manager));
+    expect(result.lines.join('\n')).not.toContain('restart-service');
   });
 
   test('a missing value is a usage refusal, never a write of empty', async () => {
@@ -179,6 +216,16 @@ describe('config unset', () => {
     expect(result.exitCode).toBe(0);
     expect(resets).toEqual(['controlPlane.port']);
     expect(result.lines.join('\n')).toContain('shipped default');
+  });
+
+  test('a value still set by another settings layer is not called the shipped default', async () => {
+    const { manager } = fakeManager({ 'controlPlane.port': 3999 });
+    // A project settings file outranks the global one, so the effective value survives the reset.
+    const layered = { ...manager, reset: (): void => undefined, get: (): never => 7777 as never };
+    const result = await runConfigCommand(['unset', 'controlPlane.port'], deps(layered));
+    expect(result.exitCode).toBe(0);
+    expect(result.lines.join('\n')).not.toContain('shipped default');
+    expect(result.lines.join('\n')).toContain('another settings layer');
   });
 
   test('an unknown key is refused rather than reset', async () => {

@@ -1,3 +1,4 @@
+import { startupNoticeWriter } from './notice-stream.ts';
 import {
   parseNativeShellCli,
   shellMetadataResult,
@@ -9,9 +10,11 @@ import {
 export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 import { runTuiHostCommand } from './host-pair-command.ts';
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
+import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readAuthPaths } from './management-utils.ts';
+import { join, resolve } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { TuiConfigManager } from '../config/host-settings.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -65,9 +68,10 @@ export async function prepareShellCliRuntime(
   // Product-owned host pairing is isolated from shared CLI/model dispatch.
   if (argv[0] === 'host') process.exit(await runTuiHostCommand(argv.slice(1), roots));
   const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
+  const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
-  if (cli.errors.length > 0) {
-    console.error(cli.errors.join('\n'));
+  if (errors.length > 0) {
+    console.error(errors.join('\n'));
     console.error('');
     console.error(renderGoodVibesHelp(binary));
     process.exit(2);
@@ -105,17 +109,23 @@ export async function prepareShellCliRuntime(
     roots,
     cli.flags.workingDir ?? (cli.command === 'tui' ? cli.commandArgs[0] : undefined),
   );
+  // One daemon home for the whole process: the flag wins over GOODVIBES_DAEMON_HOME,
+  // and every reader resolves it through resolveGoodVibesDaemonHome.
+  if (cli.flags.daemonHome) process.env['GOODVIBES_DAEMON_HOME'] = resolve(cli.flags.daemonHome);
   configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
   // Only prints the first time the rule is actually appended (not on every
   // launch), see ensureGoodvibesGitignore's return-value doc.
-  if (cli.command !== 'run' && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
-    console.log(
+  // `status` and `doctor` are diagnostics: they never edit the project's files.
+  const isDiagnostic = cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'onboarding' && cli.commandArgs[0] === 'status');
+  if (cli.command !== 'run' && !isDiagnostic && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
+    startupNoticeWriter(cli, { out: console.log, err: console.error })(
       "[goodvibes] added '.goodvibes/' to .gitignore: this directory holds transient TUI state (logs, session cache, exec output), not project source.",
     );
   }
+  // The migration runs for diagnostics too: they must read the current layout, and it only moves files into it.
   const daemonConfigMigration = runDaemonConfigMigration(bootstrapHomeDirectory);
   if (daemonConfigMigration?.migrated && daemonConfigMigration.marker.moved.length + daemonConfigMigration.marker.discarded.length > 0) {
-    (cli.command === 'run' ? console.error : console.log)(`[goodvibes] ${describeDaemonConfigMigration(daemonConfigMigration.marker)}`);
+    startupNoticeWriter(cli, { out: console.log, err: console.error })(`[goodvibes] ${describeDaemonConfigMigration(daemonConfigMigration.marker)}`);
   }
   const configManager = new TuiConfigManager({
     workingDir: bootstrapWorkingDir,
@@ -164,18 +174,16 @@ export async function prepareShellCliRuntime(
       await runNativeHeadlessCommand(
         { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory },
         native.mode,
+        native.run,
       ),
     );
   }
 
-  if (cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'onboarding' && cli.commandArgs[0] === 'status')) {
+  if (isDiagnostic) {
     const shellPaths = createShellPathService({
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
     });
-    const userStorePath = shellPaths.resolveUserPath('tui', 'auth-users.json');
-    const bootstrapCredentialPath = shellPaths.resolveUserPath('tui', 'auth-bootstrap.txt');
-    const operatorTokenPath = join(bootstrapHomeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
     const onboardingMarkers = readOnboardingCheckMarkers(shellPaths);
     const service = await buildCliServicePosture({
       configManager,
@@ -190,6 +198,7 @@ export async function prepareShellCliRuntime(
     const workspaceStatus: CliWorkspaceStatus = {
       trustLevel: trustView.level,
       trustGrandfathered: trustView.grandfathered,
+      trustFault: trustView.fault,
       registrationStatus: registrationEvaluation.status,
       registrationRoot: registrationEvaluation.root,
       registeredBy: registrationEvaluation.coveredBy,
@@ -224,14 +233,7 @@ export async function prepareShellCliRuntime(
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
       onboardingMarkers,
-      auth: {
-        userStorePath,
-        userStorePresent: existsSync(userStorePath),
-        bootstrapCredentialPath,
-        bootstrapCredentialPresent: existsSync(bootstrapCredentialPath),
-        operatorTokenPath,
-        operatorTokenPresent: existsSync(operatorTokenPath),
-      },
+      auth: readAuthPaths({ workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory }),
       service,
       install: runInstallSelfCheck({
         execPath: process.execPath,

@@ -24,10 +24,12 @@ import type { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/in
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeTestSurface } from '../helpers/session-surface.ts';
+import { holdTimers } from '../helpers/held-timers.ts';
 import { createCancelGeneration } from '../../core/turn-cancellation.ts';
 import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 
 const ASK = 'Migrate the billing tables to the new schema';
+const GRACE_MS = 61_234;
 
 type Bus = { on(type: string, h: (e: unknown) => void): () => void; emit(type: string, e: unknown): void };
 function bus(): Bus {
@@ -59,6 +61,7 @@ interface HarnessOptions {
   /** The failover chain; empty means the optimizer is off. */
   readonly chain?: Array<{ providerId: string; modelId: string }>;
   readonly handOff?: () => () => void;
+  /** Held, not real: fire it with `fireGrace()`. Must differ from any other timer delay. */
   readonly graceMs?: number;
   readonly synchronousRetry?: boolean;
   readonly retryMissing?: boolean;
@@ -78,6 +81,8 @@ function harness(opts: HarnessOptions = {}) {
   let capturedSignal: AbortSignal | undefined;
   const turns = bus(); const tools = bus(); const agents = bus(); const contracts = bus();
   let now = 1_000;
+  // A grace period is held and fired by the test, never raced against the wall clock.
+  const grace = opts.graceMs === undefined ? undefined : holdTimers(opts.graceMs);
   const tracker = new FocusTracker();
   tracker.setFocused(false);
   // These named-notice routing tests explicitly use the public content-enabled setting.
@@ -170,7 +175,8 @@ function harness(opts: HarnessOptions = {}) {
   return {
     desktop, terminal, webhook, bells, retries, turnWiring, streamWiring, cancelGeneration, abort,
     submittedAfterMemory: () => submittedAfterMemory, authority: () => capturedAuthority?.(), signal: () => capturedSignal,
-    close: () => { for (const unsub of [...streamWiring.unsubs, ...turnWiring.unsubs]) unsub(); },
+    fireGrace: () => { grace?.fire(); },
+    close: () => { for (const unsub of [...streamWiring.unsubs, ...turnWiring.unsubs]) unsub(); grace?.restore(); },
     advance: (ms: number) => { now += ms; },
     turn: (type: string, payload: Record<string, unknown>) => turns.emit(type, { type, ...payload }),
   };
@@ -330,15 +336,17 @@ describe('one notice per user turn across a provider failover', () => {
   });
 
   test('a retry that never starts still gets its failure told, after the grace period', async () => {
-    const h = harness({ chain: [{ providerId: 'anthropic', modelId: 'claude-sonnet' }, { providerId: 'openai', modelId: 'gpt-5' }], graceMs: 20 });
-    h.turn('TURN_SUBMITTED', { turnId: 't1', prompt: ASK });
-    h.advance(40_000);
-    h.turn('TURN_ERROR', { turnId: 't1', error: 'Provider returned HTTP 502', stopReason: 'provider_error' });
-    await flush();
-    expect(h.desktop).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(h.desktop).toEqual([{ title: ASK, body: 'Failed after 40s: Provider returned HTTP 502' }]);
-    expect(h.terminal).toHaveLength(1);
+    const h = harness({ chain: [{ providerId: 'anthropic', modelId: 'claude-sonnet' }, { providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS });
+    try {
+      h.turn('TURN_SUBMITTED', { turnId: 't1', prompt: ASK });
+      h.advance(40_000);
+      h.turn('TURN_ERROR', { turnId: 't1', error: 'Provider returned HTTP 502', stopReason: 'provider_error' });
+      await flush();
+      expect(h.desktop).toHaveLength(0);
+      h.fireGrace();
+      expect(h.desktop).toEqual([{ title: ASK, body: 'Failed after 40s: Provider returned HTTP 502' }]);
+      expect(h.terminal).toHaveLength(1);
+    } finally { h.close(); }
   });
 
   test('the next user turn after a finished failover is its own turn', async () => {
@@ -416,11 +424,11 @@ describe('async error reading shares the one-turn notice owner', () => {
     } finally { h.close(); read.restore(); }
   });
   test('the turn owner grace deadline revokes a still-pending retry', async () => {
-    const read = delayedReading(); const h = harness({ chain, graceMs: 5 });
+    const read = delayedReading(); const h = harness({ chain, graceMs: GRACE_MS });
     try {
       h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
-      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await new Promise(resolve => setTimeout(resolve, 20));
-      expect(h.desktop).toHaveLength(1); read.release(); await flush();
+      h.turn('TURN_ERROR', { turnId: 'first', error: 'first failed' }); await flush();
+      expect(h.desktop).toHaveLength(0); h.fireGrace(); expect(h.desktop).toHaveLength(1); read.release(); await flush();
       expect(h.retries).toEqual([]); expect(h.desktop).toHaveLength(1);
     } finally { h.close(); read.restore(); }
   });
@@ -430,7 +438,7 @@ test('an accepted failover cannot submit after terminal grace while memory prepa
   const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { throw new Error('Synthetic reading unavailable'); } });
   let release!: () => void;
   const memory = new Promise<void>(resolve => { release = resolve; });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: 10, memory });
+  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS, memory });
   try {
     h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
     h.turn('TURN_ERROR', { turnId: 'first', error: 'Synthetic provider error' });
@@ -438,7 +446,7 @@ test('an accepted failover cannot submit after terminal grace while memory prepa
     expect(h.retries).toHaveLength(1);
     expect(h.authority()).toBe(true);
     expect(h.submittedAfterMemory()).toBe(0);
-    await new Promise(resolve => setTimeout(resolve, 30));
+    h.fireGrace();
     expect(h.terminal).toHaveLength(1);
     expect(h.desktop).toHaveLength(1);
     expect(h.desktop[0]?.body).toContain('Failed');
@@ -453,7 +461,7 @@ test('the real cancel action revokes an accepted failover while memory preparati
   const previous = installJudgmentPort({ model: 'jev-1.13.0', async ask() { throw new Error('Synthetic reading unavailable'); } });
   let release!: () => void;
   const memory = new Promise<void>(resolve => { release = resolve; });
-  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: 5_000, memory });
+  const h = harness({ chain: [{ providerId: 'openai', modelId: 'gpt-5' }], graceMs: GRACE_MS, memory });
   try {
     h.turn('TURN_SUBMITTED', { turnId: 'first', prompt: ASK }); h.advance(40_000);
     h.turn('TURN_ERROR', { turnId: 'first', error: 'Synthetic provider error' });

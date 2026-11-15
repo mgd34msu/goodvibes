@@ -191,6 +191,11 @@ function parseSimpleYaml(yaml: string): RawFrontmatter {
   // Flush any trailing list
   if (collectingList) flushList();
 
+  // `tools: read` is a one-tool list written as a scalar; leaving it a string makes the file unusable.
+  if (typeof (result as { tools?: unknown }).tools === 'string') {
+    result.tools = ((result as { tools: unknown }).tools as string).split(',').map((tool) => tool.trim()).filter(Boolean);
+  }
+
   return result;
 }
 
@@ -277,7 +282,10 @@ export class ArchetypeLoader {
         const filePath = join(this.dir, file);
         const content = readFileSync(filePath, 'utf-8');
         const parsed = extractFrontmatter(content);
-        if (!parsed) continue;
+        if (!parsed) {
+          logger.warn('ArchetypeLoader: agent file skipped, it has no --- frontmatter block', { file });
+          continue;
+        }
 
         const fm = parseSimpleYaml(parsed.raw);
         const name = fm.name ?? file.replace(/\.md$/, '');
@@ -306,7 +314,15 @@ export class ArchetypeLoader {
           archetype.sections = extractMarkdownSections(parsed.body);
         }
 
-        archetype.validationIssues = validateArchetype(archetype);
+        const issues = validateArchetype(archetype);
+        const builtin = BUILT_IN_ARCHETYPES.find((candidate) => candidate.name === name);
+        if (builtin) {
+          issues.push(`replaces the built-in '${name}' archetype`);
+          const added = archetype.tools.filter((tool) => !builtin.tools.includes(tool));
+          if (added.length > 0) issues.push(`adds tools the built-in '${name}' archetype does not have: ${added.join(', ')}`);
+        }
+        if (issues.length > 0) logger.warn('ArchetypeLoader: agent file has issues', { file, issues });
+        archetype.validationIssues = issues;
 
         this.cache.set(name, archetype);
       } catch (err) {

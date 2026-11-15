@@ -2,7 +2,7 @@ import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platfo
 import { captureConfigSelectedScalars, type ConfigScalarSelection } from '@goodvibes-jev/engine/platform/platform/config';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { captureVoiceWakeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
-import { dirname } from 'node:path';
+import { dirname, relative } from 'node:path';
 import { VoiceProviderRegistry, captureVoiceProviderReadSource } from '@goodvibes-jev/engine/platform/platform/voice';
 import { MediaProviderRegistry, captureMediaProviderReadSource } from '@goodvibes-jev/engine/platform/platform/media';
 import { types as nodeTypes } from 'node:util';
@@ -21,6 +21,8 @@ import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { requireSettledScreeningReceipt } from './agent-harness-screening-result.ts';
 import type { ProviderApiLike, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import { contextWindowFor, modelRegistryKey } from './agent-harness-model-catalog.ts';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { RetainedGuards } from './agent-harness-retained-guards.ts';
 
 const scalarBindingGlobal = globalThis;
 const scalarBindingObject = Object;
@@ -334,11 +336,13 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
   const serialized = JSON.stringify(captured);
   if (typeof serialized !== 'string') throw new ToolInputProjectionError('held');
   const batches = screeningBatches(captured, serialized);
-  const retained = new Set<() => void>();
+  // One guard per key: a later reading of the same source replaces the earlier
+  // guard only after that guard still holds, so no check is dropped unproven.
+  const retained = new RetainedGuards();
   const retainCurrent = (guard: () => void, key?: string) => {
     assertOptions();
     if (typeof guard !== 'function' || nodeTypes.isProxy(guard)) throw new ToolInputProjectionError('held');
-    retained.add(guard);
+    retained.add(guard, key);
     assertSynchronous(originalRetain ? () => originalRetain(guard, key) : undefined);
     assertOptions();
   };
@@ -363,26 +367,44 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
   const release = (): Promise<void> => {
     if (releasing) return releasing;
     released = true; signal && Reflect.apply(removeNativeSignalListener, signal, ['abort', abort]);
-    releasing = Promise.resolve().then(async () => { await Promise.all(handles.map(handle => Promise.resolve().then(() => releaseHandle.call(owner, handle)))); });
+    // Every handle gets its release attempt, and a failed release is logged, never
+    // thrown: cleanup failing must not replace a reading that already succeeded
+    // or the error that ended it.
+    releasing = Promise.resolve().then(async () => {
+      const outcomes = await Promise.allSettled(handles.map(handle => Promise.resolve().then(() => releaseHandle.call(owner, handle))));
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') logger.warn('A protected model-reading source could not be released', { error: summarizeError(outcome.reason) });
+      }
+    });
     return releasing;
   };
   const abort = () => { void release().catch(() => {}); };
-  const assertPublicationCurrent = () => {
+  // What a borrowed callback could have changed: the options slots, the owner's
+  // methods, the serializer and the abort state. Checked around each foreign call.
+  const assertFence = () => {
     assertOptions(); assertOwnerMethods(); assertNoSerializer();
     if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== originalAssert || options.retainCurrent !== originalRetain) throw new ToolInputProjectionError('held');
-    checkSignal(); assertSynchronous(originalAssert);
-    for (const guard of retained.values()) assertSynchronous(guard);
-    assertOptions(); assertOwnerMethods(); checkSignal();
+    checkSignal();
+  };
+  const assertPublicationCurrent = () => {
+    assertFence(); assertSynchronous(originalAssert);
+    // Retained guards are this reader's own closures; the fence after the batch
+    // covers what they could have changed.
+    for (const guard of retained.values()) assertReadingRestriction(guard);
+    assertFence();
     assertSourceSnapshot(source);
   };
   const assertCurrent = () => {
     assertPublicationCurrent();
     if (released) throw new ToolInputProjectionError('held');
+    // The owner's projection is the only foreign call after the caller's check,
+    // so the caller is asked again only when a projection actually ran.
     for (const { receipt, parts } of receipts) {
       const projection = project.call(owner, receipt);
       if (projection.length !== parts.length || projection.some((part, index) => part !== parts[index])) throw new ToolInputProjectionError('held');
     }
-    assertSynchronous(originalAssert); assertOptions(); assertOwnerMethods(); checkSignal();
+    if (receipts.length) assertSynchronous(originalAssert);
+    assertFence();
   };
   try {
     signal && Reflect.apply(addNativeSignalListener, signal, ['abort', abort, { once: true }]);
@@ -625,6 +647,23 @@ function providerFactsList(value: unknown, expected?: { readonly identities: rea
   return { identities, facts, configuredMethods };
 }
 
+/** The newest saved benchmark artifacts the readers look at. */
+const BENCHMARK_ARTIFACT_WINDOW = 100;
+const BENCHMARK_ARTIFACT_PURPOSES = new Set(['agent-model-compare', 'agent-model-compare-judgment']);
+
+/**
+ * Benchmark comparisons and their judgments, newest first. The window applies after
+ * the filter: a saved benchmark older than the newest hundred unrelated artifacts is
+ * still found. Slots are read without invoking accessors, like every source read here.
+ */
+export function listBenchmarkArtifacts(store: ArtifactListLike | undefined): ReturnType<NonNullable<ArtifactListLike['list']>> {
+  const all = store?.list?.(Number.MAX_SAFE_INTEGER) ?? [];
+  return all.filter(artifact => {
+    const purpose = slot(slot(artifact, 'metadata'), 'purpose');
+    return typeof purpose === 'string' && BENCHMARK_ARTIFACT_PURPOSES.has(purpose.trim());
+  }).slice(0, BENCHMARK_ARTIFACT_WINDOW);
+}
+
 /** All asynchronous readers consume a single screened snapshot of the sources.
  * The synchronous cookbook remains a separate facts-only startup snapshot. */
 export async function withModelReadingContext<T>(context: CommandContext, invocation: unknown, options: ModelReadingOptions,
@@ -664,7 +703,7 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
   const registryModels = capture(typeof registryModelsMethod === 'function' ? registryModelsMethod.call(registry) : []);
   const providerSnapshot = providerFactsList(typeof providersMethod === 'function' ? providersMethod.call(registry) : []);
   const providers = providerSnapshot.facts;
-  const originalArtifacts = store?.list?.(100) ?? [];
+  const originalArtifacts = listBenchmarkArtifacts(store);
   const artifactSources = captureModelArtifactClockSources(originalArtifacts);
   const nativeArtifacts = artifactSources.native;
   tracked.push({ raw: originalArtifacts, assertCurrent: captureModelReadingSnapshotGuard(nativeArtifacts) });
@@ -699,7 +738,7 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
       if (current.identities.length !== providerSnapshot.identities.length || current.identities.some((provider, index) => provider !== providerSnapshot.identities[index])) throw new ToolInputProjectionError('held');
       assertProviders(current.facts);
     }
-    if (store?.list) assertArtifacts(store.list(100));
+    if (store?.list) assertArtifacts(listBenchmarkArtifacts(store));
     for (const entry of configGuards) entry.assertCurrent(readConfig(entry.key));
     for (const entry of readModelGuards) entry.assertCurrent(snapshotReadModel(path(context, entry.keys), false));
   };
@@ -1107,7 +1146,7 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
   // not semantic evidence or permission to publish the selected credential.
   if (paths !== null && typeof paths === 'object') {
     const home = slot(paths, 'homeDirectory'); if (typeof home !== 'string') held();
-    const file = connectedHostOperatorTokenPath(home), physical = captureAgentExportPath(home, file);
+    const file = connectedHostOperatorTokenPath(home), physical = captureAgentExportPath(relative(home, file).startsWith('..') ? nearestExistingDirectory(dirname(file)) : home, file);
     bindings.push(() => { physical.assertCurrent(); });
     type FileObservation = { readonly kind: 'file'; readonly stat: string; readonly bytes: Buffer } | { readonly kind: 'absent'; readonly ancestor: string; readonly stat: string };
     const read = (): FileObservation => {
@@ -1266,4 +1305,15 @@ export function catalogReadingOptions(context: CommandContext, registry: ToolReg
   if (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent)) throw new ToolInputProjectionError('held');
   assertSourceCurrent(); assertReadingRestriction(() => retainCurrent(assertSourceCurrent, 'agent.catalog.native-invocation-source')); assertSourceCurrent();
   return { signal, sourceOwner, retainCurrent, assertCurrent() { if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
+}
+
+// A daemon home override outside the home may not exist yet; the capture root must, so an absent token stays an observation.
+function nearestExistingDirectory(start: string): string {
+  let candidate = start;
+  while (!lstatSync(candidate, { throwIfNoEntry: false })) {
+    const parent = dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
+  }
+  return candidate;
 }

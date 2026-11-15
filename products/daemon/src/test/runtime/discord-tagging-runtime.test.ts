@@ -16,6 +16,26 @@ import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 const cleanups: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const account = { userId: '100000000000000001' }, channel = '100000000000000002';
+const snowflakeOf = (messageTime: number) => (BigInt(messageTime - 1_420_070_400_000) << 22n).toString();
+function luhnValid(digits: string): boolean {
+  let sum = 0;
+  for (let index = 0; index < digits.length; index += 1) {
+    let digit = Number(digits[digits.length - 1 - index]);
+    if (index % 2 === 1) { digit *= 2; if (digit > 9) digit -= 9; }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+}
+/**
+ * Recent message times whose Discord snowflake is also a Luhn-valid 19-digit
+ * number, the shape the card-number detector refuses. They stay inside the
+ * provider's 30-day seed window, which fixed historical timestamps would age out of.
+ */
+function cardShapedMessageTimes(count: number): number[] {
+  const times: number[] = [];
+  for (let time = Date.now() - 10_000; times.length < count; time -= 1) if (luhnValid(snowflakeOf(time))) times.push(time);
+  return times;
+}
 async function fixture(messageTime = Date.now() - 2_000, customForum = false) {
   const discovery = spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]);
   const benchmarks = spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue(undefined);
@@ -26,7 +46,7 @@ async function fixture(messageTime = Date.now() - 2_000, customForum = false) {
   const stored = new SecretsManager({ projectRoot: workspace, globalHome: home });
   await stored.set('GOODVIBES_SURFACES_DISCORD_BOT_TOKEN', 'synthetic-discord-token');
   let actualId = account.userId, allowed = true;
-  const id = (BigInt(messageTime - 1_420_070_400_000) << 22n).toString();
+  const id = snowflakeOf(messageTime);
   const providerCalls: string[] = [], screeningCalls: string[] = [];
   const remote = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname; providerCalls.push(path);
@@ -93,9 +113,9 @@ async function fixture(messageTime = Date.now() - 2_000, customForum = false) {
     async inbox() { const response = await daemon.fetch('/api/channels/inbox'); expect(response.status).toBe(200); return await response.json() as InboxListOutput; },
   };
 }
-// Real Discord snowflakes at these millisecond offsets also satisfy the PAN shape
-// detector. Preserve the timestamp calculation and exercise the true product boundary.
-test.each([undefined, 1_791_594_000_000, 1_791_594_000_003, 1_791_594_000_079])('explicit Discord tag handle preserves exact protocol target at time %s', async time => {
+// Real Discord snowflakes at some millisecond offsets also satisfy the PAN shape
+// detector. Exercise those through the true product boundary as well as an ordinary id.
+test.each([undefined, ...cardShapedMessageTimes(3)])('explicit Discord tag handle preserves exact protocol target at time %s', async time => {
   const f = await fixture(time), row = (await f.inbox()).items[0]!;
   expect(f.writes).toEqual([]); expect(f.admission).not.toHaveBeenCalled();
   await f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation);
@@ -107,21 +127,21 @@ test.each([undefined, 1_791_594_000_000, 1_791_594_000_003, 1_791_594_000_079])(
 });
 test('Discord configured denial produces no provider effect or human fallback', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!; f.daemon.services.configManager.set('permissions.mode', 'plan');
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow();
+  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('was not admitted');
   expect(f.human).not.toHaveBeenCalled(); expect(f.writes).toEqual([]);
 });
 test('Discord token replacement during admission withdraws the exact prepared credential', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!; let once = false;
   f.setHook(async () => { if (!once) { once = true; await f.daemon.services.secretsManager.set('GOODVIBES_SURFACES_DISCORD_BOT_TOKEN', 'synthetic-discord-other'); } });
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow(); expect(f.writes).toEqual([]);
+  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('permission request was cancelled'); expect(f.writes).toEqual([]);
 });
 test('Discord catalog authority cancellation during admission prevents the provider effect', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!; f.setHook(() => f.scope.abort());
-  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow(); expect(f.writes).toEqual([]);
+  await expect(f.handle.applyTags(row.id, ['GoodVibes/Priority'], f.operation)).rejects.toThrow('decision client failed internally'); expect(f.writes).toEqual([]);
 });
 test('Discord cannot tag a foreign channel row absent from its immutable owned mirror', async () => {
   const f = await fixture(), row = (await f.inbox()).items[0]!;
-  await expect(f.handle.applyTags(row.id.replace(channel, '100000000000000099'), ['GoodVibes/Priority'], f.operation)).rejects.toThrow();
+  await expect(f.handle.applyTags(row.id.replace(channel, '100000000000000099'), ['GoodVibes/Priority'], f.operation)).rejects.toThrow('Owned triage item unavailable');
   expect(f.admission).not.toHaveBeenCalled(); expect(f.writes).toEqual([]);
 });
 test('Discord tagged source closes before a stale handle can mutate anything', async () => {

@@ -9,7 +9,7 @@
  * goodvibes-whisper-cpp-<version>-<platform>.tar.gz containing
  * `whisper/whisper-cli`.
  *
- * Usage:  bun scripts/build-whisper-bundle.ts [--version 1.8.2] [--out DIR] [--tag voice-runtimes-v1]
+ * Usage:  bun scripts/build-whisper-bundle.ts [--version 1.8.2] [--out DIR] [--tag voice-runtimes-v1] [--source-sha256 HEX]
  *
  * Hosting convention: ALL voice engine assets live at ONE append-only GitHub
  * release tag (default `voice-runtimes-v1`), each with a `<asset>.sha256`
@@ -33,7 +33,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } fr
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { verifySourceArchive } from './source-archive-pin.ts';
 import { sweepStaleTmpDirs } from '../toolchain/src/test-runner/temp.ts';
+import { DAEMON_RELEASES_LATEST_URL } from '../platform/src/platform/config/schema-domain-update.ts';
 
 function arg(name: string, fallback: string): string {
   const idx = process.argv.indexOf(`--${name}`);
@@ -58,11 +60,19 @@ async function run(cmd: string[], cwd?: string): Promise<void> {
   if (code !== 0) throw new Error(`${cmd.join(' ')} failed (exit ${code})`);
 }
 
+/**
+ * sha256 of each pinned whisper.cpp source archive, keyed by version. A version
+ * with no entry is built only when its digest is given with --source-sha256,
+ * so a retagged or tampered upstream archive is never compiled into a shipped binary.
+ */
+const SOURCE_SHA256: Readonly<Record<string, string>> = {};
+
 const version = arg('version', '1.8.2');
 const outDir = resolve(arg('out', '.tmp/whisper-bundle'));
 // The single append-only release tag that hosts every voice engine asset.
 const tag = arg('tag', 'voice-runtimes-v1');
-const releaseRepo = arg('repo', 'mgd34msu/goodvibes');
+// `owner/name` of the repository the daemon's release feed names, so the voice assets are published where updates look.
+const releaseRepo = arg('repo', new URL(DAEMON_RELEASES_LATEST_URL).pathname.split('/').slice(1, 3).join('/'));
 const platform = platformKey();
 
 for (const tool of ['cmake', 'tar', 'curl', 'gzip']) {
@@ -88,7 +98,9 @@ const work = mkdtempSync(join(tmpdir(), 'gv-whisper-build-'));
 try {
   console.log(`[build-whisper-bundle] whisper.cpp v${version} for ${platform}`);
   const srcTar = join(work, 'src.tar.gz');
-  await run(['curl', '-sL', '-o', srcTar, `https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v${version}.tar.gz`]);
+  // -f makes an HTTP error (a mistyped --version) fail here instead of saving an error page for tar to choke on.
+  await run(['curl', '-fsSL', '-o', srcTar, `https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v${version}.tar.gz`]);
+  verifySourceArchive(srcTar, `whisper.cpp v${version}`, arg('source-sha256', SOURCE_SHA256[version] ?? ''));
   await run(['tar', '-xzf', srcTar, '-C', work]);
   const srcDir = join(work, `whisper.cpp-${version}`);
   if (!existsSync(srcDir)) throw new Error(`source directory missing after extract: ${srcDir}`);

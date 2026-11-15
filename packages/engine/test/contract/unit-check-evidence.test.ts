@@ -1,4 +1,3 @@
-/** Source-only regressions; runtime execution waits for the coding barrier. */
 import * as crypto from 'node:crypto';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { captureJudgmentPort, installJudgmentPort } from '@goodvibes-jev/engine/errors';

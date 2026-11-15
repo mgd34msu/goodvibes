@@ -372,7 +372,14 @@ export function splitList(value: string): string[] {
   return value.split(',').map((part) => part.trim()).filter(Boolean);
 }
 
-export function isAffirmative(value: string): boolean {
+/** Every confirm gate uses the one strict rule; a blank answer never confirms. */
+export { isAffirmative } from './agent-workspace-command-editor-engine.ts';
+
+/**
+ * Reads an "Enable now" style field, where blank means the default (on). This is the
+ * lax reading; never use it to confirm an action.
+ */
+export function isEnabledValue(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized === '' || normalized === 'yes' || normalized === 'y' || normalized === 'true' || normalized === 'enabled' || normalized === 'on';
 }

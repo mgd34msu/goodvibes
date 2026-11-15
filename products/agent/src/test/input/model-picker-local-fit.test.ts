@@ -84,10 +84,12 @@ describe('buildLocalFitRecommendations', () => {
   });
 
   test('uses process-level hardware profile when no override provided', () => {
+    // The two profiles must produce different recommendations, or the comparison below proves nothing.
+    expect(buildLocalFitRecommendations(TIGHT_PROFILE)).not.toEqual(buildLocalFitRecommendations(COMFORTABLE_PROFILE));
+    _setHardwareProfileForTest(TIGHT_PROFILE);
+    expect(buildLocalFitRecommendations()).toEqual(buildLocalFitRecommendations(TIGHT_PROFILE));
     _setHardwareProfileForTest(COMFORTABLE_PROFILE);
-    // Should not throw and should produce results based on injected profile
-    const recs = buildLocalFitRecommendations();
-    expect(recs.length).toBeGreaterThan(0);
+    expect(buildLocalFitRecommendations()).toEqual(buildLocalFitRecommendations(COMFORTABLE_PROFILE));
   });
 });
 

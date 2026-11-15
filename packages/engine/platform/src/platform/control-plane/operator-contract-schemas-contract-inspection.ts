@@ -89,6 +89,8 @@ const DURABLE_INPUT_SCHEMA = objectSchema({
   parentAgentId: STRING_SCHEMA,
   budget: objectSchema({ maxTokens: NUMBER_SCHEMA, maxCostUsd: NUMBER_SCHEMA }, []),
   isolation: enumSchema(['auto', 'worktree', 'shared']),
+  selectedModel: objectSchema({ id: STRING_SCHEMA, provider: STRING_SCHEMA, registryKey: STRING_SCHEMA, displayName: STRING_SCHEMA }, ['id', 'provider', 'registryKey', 'displayName']),
+  taskEvidence: STRING_SCHEMA,
 }, ['ask', 'sessionId', 'origin', 'projectRoot']);
 
 const DURABLE_ADMISSION_PROPERTIES = {

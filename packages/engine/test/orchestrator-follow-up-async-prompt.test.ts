@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { OrchestratorFollowUpRuntime } from '../platform/src/platform/core/orchestrator-follow-up-runtime.js';
 import type { ConversationFollowUpItem } from '../platform/src/platform/core/conversation-follow-ups.js';
+import { waitFor } from './_helpers/test-timeout.js';
 
 const runtimes: OrchestratorFollowUpRuntime[] = [];
 afterEach(() => { for (const runtime of runtimes.splice(0)) runtime.dispose(); });
@@ -70,8 +71,8 @@ test('an endlessly failing follow-up is retried a bounded number of times, then 
     retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 4 } });
   runtimes.push(runtime);
   runtime.enqueue({ key: 'stuck', summary: 'Review needs recovery' });
-  for (let i = 0; i < 100 && !failures.some(message => message.includes('abandoned')); i++) await new Promise(resolve => setTimeout(resolve, 5));
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await waitFor(() => failures.some(message => message.includes('abandoned')));
+  await flush();
   expect(calls).toBe(3);
   expect(failures.filter(message => message.includes('remains pending'))).toHaveLength(2);
   expect(failures.filter(message => message.includes('abandoned'))).toHaveLength(1);
@@ -87,7 +88,8 @@ test('a follow-up that succeeds after a failure resets its attempt count', async
     retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 4 } });
   runtimes.push(runtime);
   runtime.enqueue({ key: 'blip', summary: 'Recover' });
-  await new Promise(resolve => setTimeout(resolve, 60));
+  await waitFor(() => calls === 2);
+  await flush();
   expect(calls).toBe(2);
   expect(failures.filter(message => message.includes('abandoned'))).toEqual([]);
 });

@@ -46,8 +46,8 @@ interface TelemetryApiLike {
 
 /**
  * Ingest sink, receives parsed OTLP records forwarded by the POST receivers.
- * When null (no ingest sink wired), the route still accepts and acknowledges
- * payloads (to keep client exporters happy) but discards the data.
+ * When null (no ingest sink wired), the POST receivers answer 503
+ * TELEMETRY_UNAVAILABLE so an exporter never sees success for dropped data.
  */
 interface TelemetryIngestSink {
   /** Ingest a batch of log records from an OTLP ExportLogsServiceRequest. */
@@ -66,9 +66,8 @@ interface TelemetryRouteContext {
    * In production `DaemonHttpRouter` this is the `TelemetryApiService` instance
    * which stores ingested records in its bounded event buffer (default 500
    * records) and makes them observable via GET /api/v1/telemetry/events.
-   * Pass `null` only in test fixtures where ingestion is intentionally
-   * a no-op, the receivers still return 200 to keep OTLP exporters happy but
-   * discard the payload.
+   * Pass `null` when ingestion is not available; the receivers then answer
+   * 503 TELEMETRY_UNAVAILABLE after authenticating the caller.
    */
   readonly ingestSink: TelemetryIngestSink | null;
 }
@@ -270,6 +269,19 @@ function unavailable(): Response {
 
 function invalidCursor(error: unknown): Response {
   if (error instanceof Error && 'code' in error && error.code === 'TELEMETRY_RAW_DISABLED') return rawDisabled();
+  // Only a cursor the store could not read is the caller's fault. Any other
+  // failure is the daemon's, and telling the caller to drop its cursor would
+  // hide it.
+  if (!(error instanceof Error) || !error.message.startsWith('Invalid telemetry cursor')) {
+    return jsonErrorResponse({
+      error: 'Telemetry read failed. Retry shortly; if it keeps failing, check the daemon logs.',
+      code: 'TELEMETRY_READ_FAILED',
+      category: DaemonErrorCategory.SERVICE,
+      source: 'runtime',
+      recoverable: true,
+      status: 500,
+    }, { status: 500 });
+  }
   return jsonErrorResponse({
     error: error instanceof Error ? error.message : 'Invalid telemetry cursor',
     code: 'INVALID_CURSOR',
@@ -452,25 +464,31 @@ export function createDaemonTelemetryRouteHandlers(
     postTelemetryOtlpLogs: async (req) => {
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
+      const sink = context.ingestSink;
+      if (!sink) return unavailable();
       const bodyOrErr = await parseOtlpBody(req, 'logs');
       if (bodyOrErr instanceof Response) return bodyOrErr;
-      context.ingestSink?.ingestLogs(bodyOrErr);
+      sink.ingestLogs(bodyOrErr);
       return otlpIngestSuccess('logs');
     },
     postTelemetryOtlpTraces: async (req) => {
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
+      const sink = context.ingestSink;
+      if (!sink) return unavailable();
       const bodyOrErr = await parseOtlpBody(req, 'traces');
       if (bodyOrErr instanceof Response) return bodyOrErr;
-      context.ingestSink?.ingestTraces(bodyOrErr);
+      sink.ingestTraces(bodyOrErr);
       return otlpIngestSuccess('traces');
     },
     postTelemetryOtlpMetrics: async (req) => {
       const auth = authenticateTelemetryIngest(context, req);
       if (auth instanceof Response) return auth;
+      const sink = context.ingestSink;
+      if (!sink) return unavailable();
       const bodyOrErr = await parseOtlpBody(req, 'metrics');
       if (bodyOrErr instanceof Response) return bodyOrErr;
-      context.ingestSink?.ingestMetrics(bodyOrErr);
+      sink.ingestMetrics(bodyOrErr);
       return otlpIngestSuccess('metrics');
     },
   };

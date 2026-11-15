@@ -14,7 +14,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildErrorResponseBody } from '../daemon-api/src/error-response.js';
-import { GoodVibesError } from '../errors/dist/index.js';
+import { GoodVibesError } from '../errors/src/index.js';
 
 describe('error envelope hint provenance', () => {
   test('a gateway verb refusal with a 400 gets no borrowed LLM hint', () => {

@@ -80,7 +80,6 @@ test('excluded runtime outputs do not retire a running check and symlinked sourc
 });
 
 
-// Regression source intentionally unrun during the coding-first pass.
 test('tracked nested-directory deletions remain observable without restoring removed files', () => {
   execFileSync('git', ['init', directory], { stdio: 'pipe' });
   fs.mkdirSync(join(directory, 'removed', 'nested'), { recursive: true });

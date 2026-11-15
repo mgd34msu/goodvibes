@@ -36,17 +36,22 @@ function buildState() {
 describe('modal focus restoration', () => {
   test('records prompt focus when the first modal opens from copied panel focus', () => {
     const state = buildState();
+    // A stale return focus from an earlier modal must be overwritten, not kept.
+    state.modalReturnFocus = 'indicator';
     state.helpOverlayActive = true;
     modalOpened(state, 'help');
-    expect(state.modalReturnFocus).toBe('prompt');
+    expect<string>(state.modalReturnFocus).toBe('prompt');
   });
 
   test('returns to prompt focus when the last modal closes after copied panel focus', () => {
     const state = buildState();
+    state.modalReturnFocus = 'indicator';
     state.helpOverlayActive = true;
     modalOpened(state, 'help');
     const result = handleEscape(state);
+    expect(state.modalStack).toEqual([]);
     expect(result.indicatorFocused).toBe(false);
+    expect(result.modalReturnFocus).toBe('prompt');
   });
 
   test('restores indicator focus when the last modal closes', () => {

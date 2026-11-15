@@ -17,6 +17,7 @@
  *  - `deliver` carrying `answer` puts that answer in the session and on the
  *    channel.
  */
+import { setImmediate } from 'node:timers/promises';
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,20 +32,11 @@ import { startGatewayFixture } from '../helpers/gateway-route-fixture.js';
 import type { DaemonFixture } from '../../testing/daemon-fixture.js';
 
 import { makeOwnedTempDir as makeProjectTempDir } from '../helpers/owned-temp.js';
+import { waitFor } from '../helpers/wait.js';
 
 
 
 const TEST_TOKEN = 'test-secret-token-dispatched-reply';
-
-async function waitFor<T>(fn: () => T | undefined | null, timeoutMs = 5_000): Promise<T> {
-  const startedAt = Date.now();
-  for (;;) {
-    const value = fn();
-    if (value !== undefined && value !== null && value !== false) return value;
-    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for value');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
 
 let fixture: DaemonFixture;
 
@@ -216,6 +208,8 @@ describe('a conversation dispatched to a surface', () => {
 
     // Nothing ran, so nothing is bound and nothing is sent, the honest outcome
     // for a runner that declined the work or handed it somewhere else.
+    // Let any send scheduled by the delivery run before asserting its absence.
+    for (let turn = 0; turn < 10; turn++) await setImmediate();
     expect(runtimeServices.sessionBroker.getSession(sessionId)?.activeAgentId).toBeUndefined();
     expect(channelSends).toEqual([]);
   });

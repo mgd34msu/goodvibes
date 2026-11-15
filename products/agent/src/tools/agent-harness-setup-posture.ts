@@ -12,6 +12,7 @@ import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { clearSetupWizardCheckpoint, saveSetupWizardCheckpoint, setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
@@ -21,9 +22,10 @@ import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harn
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { AgentHarnessSetupArgs, SetupResolution } from './agent-harness-setup-posture-types.ts';
 import { buildSetupPlan } from './agent-harness-setup-plan.ts';
-import { buildSetupWizard, describeInstallSmokeCheck, installSmokeNextAction, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceHistory } from './agent-harness-setup-smoke.ts';
+import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceHistory } from './agent-harness-setup-smoke.ts';
 import { confirmedRepairCandidates, describeCandidate, describeHandoffCard, describeItem, describePlanItem, describeRepairCard, describeRepairDecision, describeServiceLifecycleDecision, nextSetupHandoffSummaries, planSummary, primarySetupRepairDecision, setupRepairTarget } from './agent-harness-setup-describe.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
 import { collectServicePosture, collectSnapshot, lookupFromArgs, quoteRouteValue, readLimit, readString, safeFileMode, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 
 function captureSetupCaller<T>(context: CommandContext, args: T, options: CatalogRankingOptions) {
@@ -99,7 +101,7 @@ export async function setupRepairSummary(context: CommandContext, rawArgs: Agent
     decision: describeRepairDecision(decision, includeParameters),
     nextAction: previewHarnessText(item.nextAction, includeParameters ? 220 : 140),
     userRoute: previewHarnessText(item.userRoute, includeParameters ? 160 : 120),
-    modelRoute: previewHarnessText(item.modelRoute, includeParameters ? 160 : 120),
+    modelRoute: item.modelRoute,
     alternatives,
     ...(confirmedCandidates.length > 0 ? {
       possibleConfirmedRepairs: confirmedCandidates.map((candidate) => describeRepairDecision(candidate, includeParameters)),
@@ -123,7 +125,7 @@ export async function setupRepairSummary(context: CommandContext, rawArgs: Agent
     policy: {
       effect: 'read-only-repair-decision',
       boundary: 'This route chooses the safest next setup repair route only. It never starts, installs, restarts, writes tokens, imports settings, or opens UI by itself.',
-      confirmation: 'Any returned confirmed-effect route still requires confirm:true and explicitUserRequest tied to the user request.',
+      confirmation: 'Any returned confirmed-effect route runs only under current recorded effect admission (a visible approval from the person). confirm:true and explicitUserRequest are context and grant nothing.',
       hostOwnership: 'GoodVibes Agent does not take ambient ownership of the GoodVibes host lifecycle. At boot it starts an installed-but-stopped host once through the platform service manager and reports it; beyond that, disconnected hosts use user-run bootstrap guidance, and reachable hosts use daemon receipts before lifecycle mutation.',
     },
   });
@@ -210,6 +212,11 @@ export async function setupPostureSummary(context: CommandContext, rawArgs: Agen
     capabilities: filtered.map((item) => describeItem(item, snapshot, { includeParameters })),
     returned: filtered.length,
     total: all.length,
+    readinessPlanReturned: filteredPlan.length,
+    readinessPlanTotal: plan.length,
+    ...(filteredPlan.length < plan.length || filtered.length < all.length
+      ? { note: `Partial view: ${filteredPlan.length} of ${plan.length} readiness items and ${filtered.length} of ${all.length} capabilities are shown (limit or query applied; limit is at most 500). A blocked item may be outside this page; call without query and limit to see all.` }
+      : {}),
     policy: 'Read-only setup/onboarding posture. Apply, import, auth, profile, channel, and setting mutations remain confirmation-gated through visible workspace, settings, slash-command, or first-class tool flows.',
   });
 }
@@ -394,7 +401,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
     };
   }
 
-  const daemonHomeDir = join(shellPaths.homeDirectory, '.goodvibes', 'daemon');
+  const daemonHomeDir = resolveGoodVibesDaemonHome(shellPaths.homeDirectory);
   const canonicalPath = connectedHostOperatorTokenPath(shellPaths.homeDirectory);
   try {
     const record = getOrCreateCompanionToken(GOODVIBES_AGENT_PAIRING_SURFACE, { daemonHomeDir });
@@ -407,7 +414,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
         explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
         error: after.error ? previewHarnessText(after.error, 160) : 'platform token provisioning completed but no usable connected-host token was readable.',
         token: {
-          path: after.path,
+          path: homeRelativePath(after.path, shellPaths.homeDirectory),
           present: after.present,
           usable: false,
           rawValueReturned: false,
@@ -428,8 +435,8 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
       setupItemId: 'connected-host-auth',
       explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
       token: {
-        path: after.path,
-        canonicalPath,
+        path: homeRelativePath(after.path, shellPaths.homeDirectory),
+        canonicalPath: homeRelativePath(canonicalPath, shellPaths.homeDirectory),
         present: true,
         usable: true,
         rawValueReturned: false,
@@ -467,7 +474,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
       explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
       error: previewHarnessText(error instanceof Error ? error.message : String(error), 160),
       token: {
-        path: canonicalPath,
+        path: homeRelativePath(canonicalPath, shellPaths.homeDirectory),
         present: before.present,
         usable: false,
         rawValueReturned: false,
@@ -528,19 +535,24 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
     ownership,
   });
   ownership.assertCurrent();
+  const result = installSmokeRunResult(smokePlan);
+  const ignoredFields = ignoredSetupSmokeEvidenceFields(args.fields);
   return {
-    status: 'executed',
+    // Nothing is executed here: the plan is read and a snapshot saved, so the
+    // top-level status names what the snapshot found.
+    status: result,
     mode: 'run_setup_smoke',
     setupItemId: 'install-smoke',
     capturedAt,
     smokeStatus: smokePlan.status,
-    result: installSmokeRunResult(smokePlan),
+    result,
     explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
     summary,
     blockedChecks,
     userRunChecks,
     checks: smokePlan.checks.map((check) => describeInstallSmokeCheck(check, includeParameters)),
     artifact,
+    ...(ignoredFields.length > 0 ? { ignoredFields, ignoredFieldsNote: `Only these evidence fields are saved: ${SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS.map((definition) => definition.id).join(', ')}.` } : {}),
     successCriteria: includeParameters ? smokePlan.successCriteria : smokePlan.successCriteria.map((entry) => previewHarnessText(entry, 120)),
     nextAction: installSmokeNextAction(smokePlan),
     routes: {

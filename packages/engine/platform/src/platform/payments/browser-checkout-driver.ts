@@ -98,7 +98,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import type { CardFieldKind } from './card-redaction.js';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from './checkout-page.js';
-import { captureOwnedJson } from '../gate/judgment-input.js';
+import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
@@ -158,7 +158,7 @@ export interface CheckoutBrowserEngine {
   type: (target: CheckoutEngineTarget, args: { readonly ref: string; readonly text: string }, ownership?: CheckoutControlOwnership) => Promise<Record<string, unknown>>;
   fillSecretBatch: (
     target: CheckoutEngineTarget,
-    args: { readonly fills: readonly { readonly ref: string; readonly value: string }[] },
+    args: { readonly fills: readonly { readonly ref: string; readonly value: string; readonly kind?: CardFieldKind | undefined }[] },
     ownership?: CheckoutControlOwnership,
   ) => Promise<Record<string, unknown>>;
   select: (target: CheckoutEngineTarget, args: { readonly ref: string; readonly values: readonly string[] }, ownership?: CheckoutControlOwnership) => Promise<Record<string, unknown>>;
@@ -326,7 +326,15 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const observed = await this.observeTerms(expected, ownership);
     if (!observed) return false;
     const { retained, engine, state, port, signal, current, assertActive } = observed;
-    const run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal });
+    let run: Awaited<ReturnType<typeof checkoutTerms.run>>;
+    try {
+      run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal });
+    } catch (error) {
+      // Live page text the reading will not take (a barcode or order number shaped like a card
+      // number) leaves the quote unestablished, the same answer as a page that does not match.
+      if (error instanceof JudgmentInputError) return false;
+      throw error;
+    }
     await current();
     const unchanged = run.readings.unchanged.outcome === 'act' && run.readings.unchanged.verdict === 'yes';
     run.recordAction(unchanged ? 'current quote matches the exact notified purchase' : 'refused changed or unestablished current quote');
@@ -340,8 +348,14 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const retained = captureOwnedJson(original) as unknown as typeof original;
     const observed = await this.observeTerms(retained.terms, ownership);
     if (!observed) return null;
-    const next = await readRepricedCheckout({ previous: retained.terms, reading: retained.reading, current: observed.state,
-      port: observed.port, signal: observed.signal, assertCurrent: observed.current });
+    let next: RawCheckoutReading | null;
+    try {
+      next = await readRepricedCheckout({ previous: retained.terms, reading: retained.reading, current: observed.state,
+        port: observed.port, signal: observed.signal, assertCurrent: observed.current });
+    } catch (error) {
+      if (error instanceof JudgmentInputError) return null;
+      throw error;
+    }
     await observed.current();
     return next;
   }
@@ -432,7 +446,7 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
       );
     }
     const result = await engine.fillSecretBatch(this.target, {
-      fills: fields.map((field) => ({ ref: field.target, value: field.value })),
+      fills: fields.map((field) => ({ ref: field.target, value: field.value, kind: field.kind })),
     }, owner);
     current();
     const filled = result['filled'];
@@ -538,7 +552,7 @@ function describePreClickFailure(name: string): string {
     case 'StaleElementError':
       return 'the page changed before the submit control could be found';
     case 'UntrustedEffectError':
-      return 'this turn read page content just before the submit, so it was withheld pending your review';
+      return 'content this daemon read since the purchase began (a mail or another browser page, not necessarily this order) could not be cleared against the order form, so the submit was withheld and no order was placed; approve the purchase again and begin it once nothing else is being read';
     default:
       return 'the submit could not be attempted';
   }
@@ -546,6 +560,8 @@ function describePreClickFailure(name: string): string {
 
 function asSubmitFailure(error: unknown): Error {
   if (error instanceof CheckoutQuoteChanged) return error;
+  // Raised by this module with a fixed message of its own; rewording it would name the wrong cause.
+  if (error instanceof CheckoutSubmitRefused) return error;
   if (error instanceof CheckoutDriverRefusal) {
     // This module's own guard messages (identity, armed state): they name a
     // field, a page or a missing guard, and never page-authored text. See this

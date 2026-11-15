@@ -193,7 +193,7 @@ async function runCapability(
   const problems = validateDeviceCapabilityInput(capabilityId, { ...capabilityInput, reason });
   if (problems.length > 0) {
     return fail(
-      `Missing or mistyped input for ${capabilityId}: ${problems.map((problem) => `${problem.field} (${problem.problem}, expected ${problem.expected})`).join('; ')}.`,
+      `Invalid input for ${capabilityId}: ${problems.map((problem) => `${problem.field} (${problem.problem}, expected ${problem.expected})`).join('; ')}.`,
     );
   }
 

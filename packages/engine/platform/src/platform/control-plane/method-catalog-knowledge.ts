@@ -1,5 +1,6 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { EMPTY_OBJECT_SCHEMA, STRING_SCHEMA, BOOLEAN_SCHEMA, NUMBER_SCHEMA, arraySchema, objectSchema, bodyEnvelopeSchema, methodDescriptor, runtimeEventId } from './method-catalog-shared.js';
+import { withPathParams } from './method-catalog-path-params.js';
 import { builtinGatewayHomeGraphMethodDescriptors } from './method-catalog-homegraph.js';
 import { GRAPHQL_VARIABLES_SCHEMA, JSON_RECORD_SCHEMA, METADATA_SCHEMA, STRING_LIST_SCHEMA } from './operator-contract-schemas-shared.js';
 import {
@@ -402,11 +403,12 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     access: 'admin',
     http: { method: 'POST', path: '/api/knowledge/candidates/{id}/decide' },
     inputSchema: bodyEnvelopeSchema({
+      id: STRING_SCHEMA,
       decision: KNOWLEDGE_CONSOLIDATION_DECISION_SCHEMA,
       decidedBy: STRING_SCHEMA,
       reason: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }, ['decision']),
+    }, ['id', 'decision']),
     outputSchema: KNOWLEDGE_CANDIDATE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -509,7 +511,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'knowledge.refinement.task.cancel',
     title: 'Cancel Knowledge Refinement Task',
-    description: 'Mark a queued or active semantic refinement task as cancelled.',
+    description: 'Mark an open semantic refinement task (any state except closed, suppressed or cancelled) as cancelled; a closed or suppressed task is refused with 409, and cancelling an already cancelled task returns it unchanged.',
     category: 'knowledge',
     access: 'admin',
     scopes: ['write:knowledge'],
@@ -575,8 +577,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     access: 'admin',
     http: { method: 'POST', path: '/api/knowledge/schedules/{id}/enabled' },
     inputSchema: bodyEnvelopeSchema({
+      id: STRING_SCHEMA,
       enabled: BOOLEAN_SCHEMA,
-    }, ['enabled']),
+    }, ['id', 'enabled']),
     outputSchema: KNOWLEDGE_SCHEDULE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -588,7 +591,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     access: 'admin',
     http: { method: 'POST', path: '/api/knowledge/jobs/{jobId}/run' },
     events: [runtimeEventId('knowledge')],
-    inputSchema: KNOWLEDGE_JOB_RUN_REQUEST_SCHEMA,
+    inputSchema: withPathParams(KNOWLEDGE_JOB_RUN_REQUEST_SCHEMA, ['jobId']),
     outputSchema: KNOWLEDGE_JOB_RUN_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -887,7 +890,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'projectPlanning.workPlan.task.status',
     title: 'Set Project Work Plan Task Status',
-    description: 'Validate and apply a project work-plan task status transition.',
+    description: 'Set a task\'s status and optional reason.',
     category: 'knowledge',
     access: 'admin',
     scopes: ['write:knowledge'],

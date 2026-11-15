@@ -469,6 +469,10 @@ export class ImapSession implements ImapConnection {
 
   private rejectAll(commandError: Error, readError: Error): void {
     for (const command of [...this.pending.values()]) {
+      // A command the server already finished keeps its result: the caller that
+      // has not collected it yet should get the answer, not a message claiming
+      // the tag never existed.
+      if (command.completion !== null) continue;
       const waiter = command.waiter;
       const continuation = command.continuationWaiter;
       command.waiter = null;
@@ -726,9 +730,22 @@ export class ImapSession implements ImapConnection {
     assertImapReadingCurrent(reading);
     const byteLength = Buffer.byteLength(payload, 'utf8');
     const tag = await this.sendCommand(`${commandPrefix} {${byteLength}}`);
-    await this.awaitContinuation(tag, { signal: reading.signal });
-    assertImapReadingCurrent(reading);
-    await this.write(`${payload}${CRLF}`);
+    try {
+      await this.awaitContinuation(tag, { signal: reading.signal });
+      assertImapReadingCurrent(reading);
+      await this.write(`${payload}${CRLF}`);
+    } catch (error) {
+      // Once the command is out and has not completed, the server is waiting
+      // to be given N bytes. Walking away without giving them (an abort, a
+      // timeout, a reading that went stale, a short write) leaves it parsing
+      // whatever this session sends next as the literal, so the stream can no
+      // longer be trusted. A server refusal in place of the `+` completed the
+      // command cleanly and leaves nothing outstanding.
+      if (this.pending.get(tag)?.completion === null) {
+        this.failStream(error instanceof Error ? error : new Error('IMAP literal was not sent'));
+      }
+      throw error;
+    }
     assertImapReadingCurrent(reading);
     return this.awaitTag(tag, { signal: reading.signal });
   }

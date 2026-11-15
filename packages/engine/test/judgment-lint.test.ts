@@ -139,6 +139,16 @@ describe('registered use', () => {
     ]);
   });
 
+  test('a request built in a const with a spread is flagged like the same literal passed inline', () => {
+    const inline = "async function a(port, base) { return port.ask({ ...base, questions: { q: noul('?') } }); }";
+    const viaConst = "async function a(port, base) { const request = { ...base, questions: { q: noul('?') } }; return port.ask(request); }";
+    const message = 'asks Jev with a request built inline, outside a registered decision';
+    expect(sourceFindings('z.ts', inline, registered).map((finding) => finding.message)).toEqual([message]);
+    expect(sourceFindings('z.ts', viaConst, registered).map((finding) => finding.message)).toEqual([message]);
+    const decorator = "function wrap(port) { return { ask(request) { const forwarded = { ...request, questions: { q: noul('?') } }; return port.ask(forwarded); } }; }";
+    expect(sourceFindings('z.ts', decorator, registered)).toEqual([]);
+  });
+
   const strictForwarder = `
     import { captureStrictJudgmentJson as capture } from '../platform/src/platform/gate/judgment-result.js';
     function decorate(inner) { return { ask(request) {
@@ -412,9 +422,21 @@ test('production registry decisions cannot pin a Jev version', async () => {
 
 
 test('source discovery includes executable JavaScript boundaries and excludes their test fixtures', () => {
-  const sources = judgmentSourceFiles();
-  expect(sources).toContain('products/daemon/scripts/boot-smoke-reading.mjs');
-  expect(sources).toContain('products/tui/scripts/postinstall.js');
-  expect(sources).toContain('products/webui/public/sw.js');
-  expect(sources).not.toContain('products/daemon/scripts/boot-smoke-reading.test.mjs');
+  const root = mkdtempSync(resolve(tmpdir(), 'judgment-sources-'));
+  try {
+    const files = [
+      'products/daemon/scripts/boot-smoke-reading.mjs', 'products/daemon/scripts/boot-smoke-reading.test.mjs',
+      'products/tui/scripts/postinstall.js', 'products/webui/public/sw.js', 'packages/engine/node_modules/dep/index.js',
+      'packages/engine/platform/src/a.ts', 'packages/engine/platform/src/a.test.ts', 'packages/engine/platform/src/types.d.ts',
+    ];
+    for (const file of files) {
+      mkdirSync(resolve(root, file, '..'), { recursive: true });
+      writeFileSync(resolve(root, file), '');
+    }
+    expect(judgmentSourceFiles(root)).toEqual([
+      'packages/engine/platform/src/a.ts', 'products/daemon/scripts/boot-smoke-reading.mjs',
+      'products/tui/scripts/postinstall.js', 'products/webui/public/sw.js',
+    ]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
+

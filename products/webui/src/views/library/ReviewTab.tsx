@@ -25,7 +25,8 @@ import {
   useConsolidationReceipts,
   useKnowledgeCandidates,
   useMemoryRecordMutations,
-  useReviewCount,
+  useReviewTally,
+  REVIEW_PAGE_LIMIT,
   useReviewQueue,
 } from './library-data';
 
@@ -42,7 +43,7 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
   const queue = useReviewQueue();
   const candidates = useKnowledgeCandidates();
   const receipts = useConsolidationReceipts();
-  const total = useReviewCount();
+  const { count: total, capped } = useReviewTally();
   const { remove, saveReview } = useMemoryRecordMutations();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [highlight, setHighlight] = useState<ReadonlySet<string>>(new Set());
@@ -60,6 +61,10 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
   }, [highlight]);
 
   const selectedRecord: MemoryRecord | undefined = selection?.kind === 'record' ? queueById.get(selection.id) : undefined;
+  // The mutations are shared by every row, so an error belongs to the record it was for.
+  const saveError = saveReview.error && saveReview.variables?.id === selectedRecord?.id ? saveReview.error : null;
+  const removeError = remove.error && remove.variables?.id === selectedRecord?.id ? remove.error : null;
+  const recordError = saveError ? formatError(saveError) : removeError ? formatError(removeError) : null;
   const selectedCandidate = useMemo(() => {
     if (selection?.kind !== 'candidate') return undefined;
     return candidateItems(candidates.data).map(parseCandidate).find((c) => c.id === selection.id);
@@ -109,6 +114,12 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
         <p className="lib-quiet">Nothing in the review queue matches this search.</p>
       )}
 
+      {capped && (
+        <p className="lib-quiet" role="note">
+          Showing the first {REVIEW_PAGE_LIMIT} queued records and candidates. More may be waiting: decide some and the next ones appear.
+        </p>
+      )}
+
       <ConsolidationRuns />
     </div>
   );
@@ -124,7 +135,7 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
         deleting={remove.isPending && remove.variables.id === selectedRecord.id}
         onSaveReview={(id, input) => saveReview.mutate({ id, input })}
         saving={saveReview.isPending && saveReview.variables.id === selectedRecord.id}
-        error={saveReview.error ? formatError(saveReview.error) : remove.error ? formatError(remove.error) : null}
+        error={recordError}
       />
     );
   } else if (selection?.kind === 'proposal') {

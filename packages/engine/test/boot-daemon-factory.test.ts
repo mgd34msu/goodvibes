@@ -64,8 +64,8 @@ describe('bootDaemon one-call factory', () => {
     expect(daemon.url).toBe(`http://127.0.0.1:${daemon.port}`);
   });
 
-  // Regression source UNRUN: the real one-call constructor must prepare a
-  // fresh project's saved identity before native work services are composed.
+  // The real one-call constructor must prepare a fresh project's saved
+  // identity before native work services are composed.
   test('fresh embedded boot registers one project visible to readonly preparation', async () => {
     const config = new ConfigManager({ workingDir: work, homeDir: home, surfaceRoot: 'goodvibes' });
     const first = await prepareConfiguredProjectContext(config, work);
@@ -221,13 +221,17 @@ describe('companion SSE requires auth', () => {
 describe('webui SSE compatibility (domain-scoped delivery)', () => {
   const WEBUI_DOMAINS = 'tasks,permissions,providers,knowledge,control-plane';
 
-  /** Read an operator SSE stream for `windowMs`, firing `onOpen` once the first
-   *  bytes arrive (by which point the server-side subscriptions are live), and
-   *  return the parsed `event:` names. */
+  /** Read an operator SSE stream, firing `onOpen` once the first bytes arrive
+   *  (by which point the server-side subscriptions are live), until `stopAt`
+   *  is delivered again after `onOpen`, and return the parsed `event:` names in arrival order. A
+   *  stream delivers in publication order, so everything published before
+   *  `stopAt` has either arrived by then or was filtered out. The abort at
+   *  `guardMs` only keeps a missing event from hanging the run. */
   async function readSse(
     domains: string,
-    windowMs: number,
+    stopAt: string,
     onOpen: () => Promise<void>,
+    guardMs = 30_000,
   ): Promise<string[]> {
     const ac = new AbortController();
     const res = await fetch(`${daemon.url}/api/control-plane/events?domains=${domains}`, {
@@ -238,11 +242,12 @@ describe('webui SSE compatibility (domain-scoped delivery)', () => {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     const events: string[] = [];
-    // Bound the stream read: an idle SSE stream only speaks again at the 15s
-    // heartbeat, so abort at the window to unblock a pending reader.read().
-    const timer = setTimeout(() => ac.abort(), windowMs);
+    // An idle SSE stream only speaks again at the 15s heartbeat, so abort at the
+    // guard to unblock a pending reader.read() if `stopAt` never arrives.
+    const timer = setTimeout(() => ac.abort(), guardMs);
     let buf = '';
     let opened = false;
+    let seenBeforeOpen = 0;
     try {
       for (;;) {
         const { done, value } = await reader.read();
@@ -254,13 +259,16 @@ describe('webui SSE compatibility (domain-scoped delivery)', () => {
           const m = rec.match(/event: (.+)/);
           if (m) events.push(m[1]!.trim());
         }
+        const seen = () => events.filter((name) => name === stopAt).length;
+        if (opened && seen() > seenBeforeOpen) break;
         if (!opened) {
           opened = true;
+          seenBeforeOpen = seen();
           await onOpen();
         }
       }
     } catch {
-      // aborted / closed, expected at window end
+      // aborted by the guard: the caller's assertions report the missing event
     } finally {
       clearTimeout(timer);
       ac.abort();
@@ -270,7 +278,7 @@ describe('webui SSE compatibility (domain-scoped delivery)', () => {
   }
 
   test('webui profile receives its subscribed domains but NOT session-update', async () => {
-    const events = await readSse(WEBUI_DOMAINS, 900, async () => {
+    const events = await readSse(WEBUI_DOMAINS, 'control-plane', async () => {
       // (a) publishEvent('session-update'), tagged `session`, absent from the webui domain set.
       await fetch(`${daemon.url}/api/sessions/register`, {
         method: 'POST',
@@ -288,15 +296,14 @@ describe('webui SSE compatibility (domain-scoped delivery)', () => {
         headers: { authorization: `Bearer ${TOKEN}` },
         signal: ac2.signal,
       }).catch(() => {});
-      // give the events a beat to propagate before the read window closes
-      await new Promise<void>((r) => setTimeout(r, 250));
       ac2.abort();
     });
 
-    // The fix: session-update is domain-filtered out despite admin bypassing scope.
-    expect(events).not.toContain('session-update');
     // Regression guard: the five subscribed domains still deliver (control-plane here).
     expect(events).toContain('control-plane');
+    // session-update was published before control-plane, so it would already be in the
+    // stream: it is domain-filtered out despite admin bypassing the scope gate.
+    expect(events).not.toContain('session-update');
   });
 });
 

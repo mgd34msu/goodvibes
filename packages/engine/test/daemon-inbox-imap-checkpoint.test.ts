@@ -29,6 +29,16 @@ async function open(dir = makeProjectTempDir('inbox-imap-checkpoint')) {
   return { store, dir };
 }
 
+/** How many currentness checks one undisturbed advancing commit makes; the last one is the final fence. */
+async function fencesPerCommit(): Promise<number> {
+  const { store } = await open();
+  await store.commitImapPoll('email', [], seed(), current);
+  let calls = 0;
+  await store.commitImapPoll('email', [item()], advance(), () => { calls += 1; });
+  expect(store.countItems()).toBe(1);
+  return calls;
+}
+
 // UID checkpoints and their durable rows are a distinct transactional path;
 // the existing timestamp cursor suite pins legacy Slack/Discord semantics.
 describe('durable IMAP inbox checkpoints', () => {
@@ -79,21 +89,25 @@ describe('durable IMAP inbox checkpoints', () => {
     expect(recovered.getCursor('slack')).toBe(800);
   });
 
-  test('final currentness revocation discards staged rows and checkpoint in memory and on disk', async () => {
-    const { store, dir } = await open();
-    await store.commitImapPoll('email', [], seed(), current);
-    let fences = 0;
-    await expect(store.commitImapPoll('email', [item()], advance(), () => {
-      fences += 1;
+  test('revocation at any currentness check, the final one included, discards staged rows and checkpoint in memory and on disk', async () => {
+    const checks = await fencesPerCommit();
+    expect(checks).toBeGreaterThan(1);
+    for (let revokeAt = 1; revokeAt <= checks; revokeAt += 1) {
+      const { store, dir } = await open();
+      await store.commitImapPoll('email', [], seed(), current);
+      let fences = 0;
+      await expect(store.commitImapPoll('email', [item()], advance(), () => {
+        fences += 1;
+        expect(store.getImapCheckpoint('email')).toEqual(baseline());
+        expect(store.countItems()).toBe(0);
+        if (fences === revokeAt) throw new Error('source revoked during write');
+      })).rejects.toThrow('source revoked');
+      expect(fences).toBe(revokeAt);
       expect(store.getImapCheckpoint('email')).toEqual(baseline());
-      expect(store.countItems()).toBe(0);
-      if (fences === 2) throw new Error('source revoked during write');
-    })).rejects.toThrow('source revoked');
-    expect(fences).toBe(2);
-    expect(store.getImapCheckpoint('email')).toEqual(baseline());
-    const { store: recovered } = await open(dir);
-    expect(recovered.getImapCheckpoint('email')).toEqual(baseline());
-    expect(recovered.countItems()).toBe(0);
+      const { store: recovered } = await open(dir);
+      expect(recovered.getImapCheckpoint('email')).toEqual(baseline());
+      expect(recovered.countItems()).toBe(0);
+    }
   });
 
   test('actual write failure leaves the checkpoint pending and permits a fresh retry', async () => {
@@ -128,9 +142,10 @@ describe('durable IMAP inbox checkpoints', () => {
   test('close reentered by the final fence drains staging without publishing a late checkpoint', async () => {
     const { store, dir } = await open();
     await store.commitImapPoll('email', [], seed(), current);
+    const finalFence = await fencesPerCommit();
     let fences = 0; let closing: Promise<void> | undefined;
     await expect(store.commitImapPoll('email', [item()], advance(), () => {
-      if (++fences === 2) closing = store.close();
+      if (++fences === finalFence) closing = store.close();
     })).rejects.toThrow('closed');
     await closing;
     const { store: recovered } = await open(dir);
@@ -142,9 +157,10 @@ describe('durable IMAP inbox checkpoints', () => {
     const { store, dir } = await open();
     store.upsertItems([{ ...item('expired', 'discord'), receivedAt: 1 }]);
     await store.commitImapPoll('email', [], seed(), current);
+    const checks = await fencesPerCommit();
     let fences = 0; let queued: Promise<void> | undefined;
     await store.commitImapPoll('email', [item()], advance(), () => {
-      if (++fences === 2) {
+      if (++fences === checks) {
         store.upsertItems([item('slack:new', 'slack')]);
         store.advanceCursor('slack', 900);
         store.pruneOlderThan(2);
@@ -152,7 +168,8 @@ describe('durable IMAP inbox checkpoints', () => {
       }
     });
     await queued;
-    expect(fences).toBe(4);
+    // The foreign mutation at the final check forces exactly one re-stage, so every check runs twice.
+    expect(fences).toBe(checks * 2);
     const { store: recovered } = await open(dir);
     expect(recovered.getImapCheckpoint('email')?.lastTerminalUid).toBe(103);
     expect(recovered.listItems({ limit: 10 }).map(row => row.id).sort()).toEqual(['email:7:101', 'slack:new']);

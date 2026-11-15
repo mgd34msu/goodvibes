@@ -43,6 +43,21 @@ async function until(predicate: () => boolean, label: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+/** The delays of every timer armed while `fire` runs: a closed watcher must arm none. */
+function timerDelaysArmedBy(fire: () => void): unknown[] {
+  const delays: unknown[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, ms?: number) => {
+    delays.push(ms);
+    return realSetTimeout(handler, ms);
+  }) as unknown as typeof setTimeout);
+  try {
+    fire();
+  } finally {
+    spy.mockRestore();
+  }
+  return delays;
+}
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 async function ready(count: number) { await until(() => callbacks.length >= count, 'native watcher readiness'); }
 function write(dir = root, name = 'native.json') { fs.writeFileSync(join(dir, name), '{}'); }
@@ -95,8 +110,7 @@ describe('custom provider watcher ownership', () => {
     handle.close(); callbacks[0]!('change', 'late.json');
     await flush(); expect(settled()).toBe(false);
     held.resolve(); await closing;
-    callbacks[0]!('change', 'after-drain.json');
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(timerDelaysArmedBy(() => callbacks[0]!('change', 'after-drain.json'))).toEqual([]);
     expect(calls).toBe(1);
   });
 
@@ -247,8 +261,9 @@ describe('daemon-owned ProviderRegistry watcher drain', () => {
     held.first.resolve(); await closing;
     expect(changed).toEqual([{ type: 'PROVIDERS_CHANGED', added: ['drain-native:held-model'], removed: [], updated: [] }, { type: 'PROVIDERS_CHANGED', added: [], removed: [], updated: [] }]);
     expect(registry.require('drain-native').models).toContain('held-model');
-    for (const callback of callbacks.slice(firstCount - 1)) callback('change', 'late.json');
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(timerDelaysArmedBy(() => {
+      for (const callback of callbacks.slice(firstCount - 1)) callback('change', 'late.json');
+    })).toEqual([]);
     expect(held.calls()).toBe(2); expect(changed).toHaveLength(2);
   });
 

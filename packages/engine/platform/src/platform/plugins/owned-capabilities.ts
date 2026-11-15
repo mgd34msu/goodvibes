@@ -24,7 +24,7 @@ const channelMethods = {
 } satisfies Modes<ChannelPlugin>;
 const deliveryMethods = { id: 'value', supportsGuardedDelivery: 'value', supportsPublication: 'value', canHandle: 'sync', deliver: 'async' } satisfies Modes<ChannelDeliveryStrategy>;
 const memoryMethods = { capturedInputAdmission: 'value', id: 'value', label: 'value', dimensions: 'value', deterministic: 'value', local: 'value', embedSync: 'sync', embed: 'async', status: 'either' } satisfies Modes<MemoryEmbeddingProvider>;
-const voiceMethods = { id: 'value', label: 'value', capabilities: 'value', billing: 'value', status: 'either', listVoices: 'either', synthesize: 'async', synthesizeStream: 'either', transcribe: 'async', openRealtimeSession: 'async', resetEngineFailureState: 'sync' } satisfies Modes<VoiceProvider>;
+const voiceMethods = { id: 'value', label: 'value', capabilities: 'value', billing: 'value', explicitSelectionOnly: 'value', status: 'either', listVoices: 'either', synthesize: 'async', synthesizeStream: 'either', transcribe: 'async', openRealtimeSession: 'async', resetEngineFailureState: 'sync' } satisfies Modes<VoiceProvider>;
 const mediaMethods = { id: 'value', label: 'value', capabilities: 'value', status: 'either', analyze: 'async', transform: 'async', generate: 'async' } satisfies Modes<MediaProvider>;
 const searchMethods = { id: 'value', label: 'value', capabilities: 'value', descriptor: 'sync', search: 'async' } satisfies Modes<WebSearchProvider>;
 const toolMethods = { definition: 'value', execute: 'async' } satisfies Modes<Tool>;
@@ -132,13 +132,16 @@ function holdResult(track: Track, call: () => unknown, transform: (value: unknow
   }
 }
 
-/** Each iterator stays admitted until done, error, return or throw completes. */
-function ownChunks<T>(chunks: AsyncIterable<T>, firstRelease: () => void, track: Track): AsyncIterable<T> {
-  let first = true;
+/**
+ * Each iterator stays admitted from the moment it is created until done,
+ * error, return or throw completes. A stream nobody starts holds nothing, so
+ * a dropped result can never keep the plugin from reloading or closing; a
+ * stream started after the plugin began quiescing is refused instead.
+ */
+function ownChunks<T>(chunks: AsyncIterable<T>, track: Track): AsyncIterable<T> {
   return {
     [Symbol.asyncIterator](): AsyncIterator<T> {
-      const release = first ? firstRelease : lease(track);
-      first = false;
+      const release = lease(track);
       let original: AsyncIterator<T>;
       try { original = chunks[Symbol.asyncIterator](); }
       catch (error) { release(); throw error; }
@@ -325,8 +328,11 @@ export function createOwnedPluginCapabilities(track: Track) {
     memory: (source: MemoryEmbeddingProvider): MemoryEmbeddingProvider => facade(source, memoryMethods, track),
     voice: (source: VoiceProvider): VoiceProvider => facade(source, voiceMethods, track, { streams: {
       synthesizeStream: (call) => holdResult(track, call, (value, release) => {
+        // The call is over once it returned a result; the stream is admitted
+        // separately, when iteration starts.
+        release();
         const result = value as VoiceSynthesisStreamResult;
-        return facade(result, streamFields, track, { replacements: { chunks: ownChunks(result.chunks, release, track) } });
+        return facade(result, streamFields, track, { replacements: { chunks: ownChunks(result.chunks, track) } });
       }),
     } }),
     media: (source: MediaProvider): MediaProvider => facade(source, mediaMethods, track),

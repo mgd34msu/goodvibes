@@ -38,7 +38,9 @@ test('local managed alias follows exact precedence and changes revision across A
  expect(before).toMatchObject({ state: 'resolved', value: 'one' }); expect(await manager.get('SYNTHETIC_ALIAS')).toBe('one');
  await manager.set('SYNTHETIC_LEAF', 'two', plain); await manager.set('SYNTHETIC_LEAF', 'one', plain);
  expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).not.toEqual(before);
- await manager.set('SYNTHETIC_LEAF', 'higher', { scope: 'project', medium: 'plaintext' });
+ await manager.set('SYNTHETIC_LEAF', 'checkout', { scope: 'project', medium: 'plaintext' });
+ expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).toMatchObject({ state: 'resolved', value: 'one' });
+ await manager.set('SYNTHETIC_LEAF', 'higher', { scope: 'daemon', medium: 'plaintext' });
  expect(manager.resolveLocalCredentialSnapshot('SYNTHETIC_ALIAS')).toMatchObject({ state: 'resolved', value: 'higher' });
 });
 test('local aliases refuse pending leaf writes before post-success notification', async () => {

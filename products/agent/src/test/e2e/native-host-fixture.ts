@@ -49,6 +49,10 @@ export async function startE2ENativeHost(home: E2EHome, options: { readonly poli
       return { daemon, env: { GOODVIBES_AGENT_RUNTIME_URL: daemon.baseUrl, GOODVIBES_CONNECTED_HOST_TOKEN: paired.token },
         async stop() { try { await daemon.stop(); } finally { restore(); } },
       };
-    } catch (error) { await daemon.stop(); throw error; }
+    } catch (error) {
+      // A failed stop must not replace the setup error that caused it.
+      try { await daemon.stop(); } catch { /* the original setup error is the one to report */ }
+      throw error;
+    }
   } catch (error) { restore(); throw error; }
 }

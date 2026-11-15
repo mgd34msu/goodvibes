@@ -164,15 +164,11 @@ export interface CheckpointGuardSettings {
  * Merge the user's `checkpoints.*` root-guard settings onto a base
  * WorkspaceCheckpointManager options object.
  *
- * NOTE: the pinned platform platform's WorkspaceCheckpointManager may predate these
- * root-guard options, an older constructor reads only
- * workspaceRoot/checkpointDir/runtimeBus/retention/now and silently ignores the
- * rest, making the guard keys INERT. They become effective the moment the platform
- * is upgraded to a build whose options type declares them (preferGitRoot,
- * allowBroadRoot, allowLargeFirstSnapshot, maxFirstSnapshotFiles,
- * autoRetention), no code change needed here. The return type intersects the
- * base with CheckpointGuardSettings so the extra keys flow through structurally
- * without an unsafe cast.
+ * The platform's WorkspaceCheckpointManager declares and reads these options
+ * (preferGitRoot, allowBroadRoot, allowLargeFirstSnapshot, maxFirstSnapshotFiles,
+ * autoRetention), so they take effect as merged here. The return type intersects
+ * the base with CheckpointGuardSettings so the extra keys flow through
+ * structurally without an unsafe cast.
  */
 export function withCheckpointGuardSettings<T extends object>(
   base: T,

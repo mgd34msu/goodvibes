@@ -42,6 +42,24 @@ describe('voice provider selection: local beside elevenlabs (STEP 5)', () => {
     return reg;
   }
 
+  test('the local provider registers beside elevenlabs and reads unconfigured when no engine is set', async () => {
+    const reg = registryWithLocal();
+    const ids = reg.list().map((descriptor) => descriptor.id);
+    expect(ids).toContain('local');
+    expect(ids).toContain('elevenlabs');
+
+    const local = reg.get('local')!;
+    expect(local.status).toBeDefined();
+    const status = await local.status!();
+    expect(status.configured).toBe(false);
+    expect(status.state).toBe('unconfigured');
+  });
+
+  test('no local provider registers when the host supplies no voice.local reader', () => {
+    const reg = new VoiceProviderRegistry();
+    ensureBuiltinVoiceProviders(reg);
+    expect(reg.list().map((descriptor) => descriptor.id)).not.toContain('local');
+  });
 });
 
 describe('local-voice setup offer: size-labeled one-act beside ElevenLabs (STEP 5)', () => {

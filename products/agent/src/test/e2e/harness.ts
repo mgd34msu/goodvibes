@@ -17,8 +17,10 @@ import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } f
 import { startE2EJudgments } from './judgment-fixture.ts';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { TerminalFrame } from './terminal-frame.ts';
+import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
+import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,10 +34,49 @@ const ARTIFACT_BY_PLATFORM: Record<string, string> = {
   'darwin-arm64': 'goodvibes-agent-macos-arm64',
 };
 
+/** The newest modification time (ms) of any file under `roots`, skipping directories named in `skip`. 0 when there is none. */
+export function newestSourceMtimeMs(roots: readonly string[], skip: ReadonlySet<string> = new Set()): number {
+  let newest = 0;
+  const visit = (path: string): void => {
+    let entries;
+    try { entries = readdirSync(path, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) { if (!skip.has(entry.name)) visit(child); }
+      else if (entry.isFile()) newest = Math.max(newest, statSync(child).mtimeMs);
+    }
+  };
+  for (const root of roots) visit(root);
+  return newest;
+}
+
+/** Throws when `binary` is older than the newest source it was built from. */
+export function assertBinaryFresh(binary: string, newestSourceMs: number): void {
+  const builtAt = statSync(binary).mtimeMs;
+  if (builtAt < newestSourceMs) {
+    throw new Error(`E2E: ${binary} was built ${new Date(builtAt).toISOString()}, before the newest source change ${new Date(newestSourceMs).toISOString()}. Run \`bun run build:binary\` again, or set GOODVIBES_E2E_BINARY.`);
+  }
+}
+
+/** The newest change under every source tree the Agent binary is compiled from. */
+export function newestBuildSourceMtimeMs(): number {
+  const engine = join(REPO_ROOT, '..', '..', 'packages', 'engine');
+  return newestSourceMtimeMs([join(REPO_ROOT, 'src'), join(engine, 'platform', 'src'), join(engine, 'terminal-shell', 'src'), ...['errors', 'operator-client', 'transport-core', 'transport-http', 'transport-realtime', 'daemon-api', 'contracts'].map((name) => join(engine, name, 'src')), join(engine, '..', 'judgment', 'src')], new Set(['test', 'node_modules']));
+}
+
+/** The platform's built Agent artifact (`bun run build:binary`), when one exists. */
+export function builtAgentBinary(): string | undefined {
+  const path = join(REPO_ROOT, 'dist', ARTIFACT_BY_PLATFORM[`${process.platform}-${process.arch}`] ?? 'goodvibes-agent-linux-x64');
+  return existsSync(path) ? path : undefined;
+}
+
+let sourceChecked = false;
 /**
  * The compiled binary under test: GOODVIBES_E2E_BINARY, else the platform
  * artifact (`bun run build:binary`), else the legacy native output.
- * Fails loudly when none has been built.
+ * Fails loudly when none has been built, or (for a dist/ binary, outside CI)
+ * when sources changed after it was built. An explicit GOODVIBES_E2E_BINARY is
+ * trusted: CI builds it from the same commit.
  */
 export function resolveBinary(): string {
   const fromEnv = process.env['GOODVIBES_E2E_BINARY'];
@@ -48,6 +89,10 @@ export function resolveBinary(): string {
   const found = candidates.find((candidate) => existsSync(candidate));
   if (!found) {
     throw new Error(`E2E: no built binary at ${candidates.join(' or ')}. Run \`bun run build:binary\` first, or set GOODVIBES_E2E_BINARY.`);
+  }
+  if (!fromEnv && !process.env['CI'] && !sourceChecked) {
+    assertBinaryFresh(found, newestBuildSourceMtimeMs());
+    sourceChecked = true;
   }
   return found;
 }
@@ -393,7 +438,7 @@ export function inputAreaVisible(screen: string): boolean {
 }
 
 /** The first-start question, as it is drawn: a modal titled with the question. */
-export const WORKSPACE_QUESTION = 'Register this workspace for automatic checkpoints?';
+export const WORKSPACE_QUESTION = WORKSPACE_REGISTRATION_QUESTION;
 
 /**
  * Wait for the first-start workspace question and answer it: Enter on the
@@ -401,19 +446,24 @@ export const WORKSPACE_QUESTION = 'Register this workspace for automatic checkpo
  * modal is gone and the input area is back.
  */
 export async function answerWorkspaceQuestion(session: AgentSession, answer: 'decline' | 'register'): Promise<string> {
-  const asked = await session.waitForScreen('the workspace question', (s) => screenText(s).includes(WORKSPACE_QUESTION), 30_000);
+  const asked = await session.waitForScreen('the workspace question', (s) => {
+    // The title paints before its options; an answer sent before both are on
+    // screen could land on a modal that has not yet taken its selection.
+    const text = screenText(s);
+    return text.includes(WORKSPACE_QUESTION) && text.includes('Not here');
+  }, 30_000);
   if (answer === 'register') session.key('Up');
   session.key('Enter');
   await session.waitForScreen('the question answered', (s) => !screenText(s).includes(WORKSPACE_QUESTION) && inputAreaVisible(s), 15_000);
   // First paint can precede stdin subscription. Prove the real composer echoes
   // unsent input before giving it the owner's first prompt, then clear it.
   await session.waitForScreen('live composer input', s => {
-    if (s.includes('┃  x')) return true;
+    if (s.includes(COMPOSER_ECHO)) return true;
     session.key('C-u'); session.type('x');
     return false;
   }, 10_000);
   session.key('C-u');
-  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes('┃  x') && !s.includes(WORKSPACE_QUESTION), 10_000);
+  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes(COMPOSER_ECHO) && !s.includes(WORKSPACE_QUESTION), 10_000);
   return asked;
 }
 

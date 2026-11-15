@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AMBIENT_DECLARATIONS } from './engine-package-lists.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -50,7 +51,6 @@ const RUNTIME_ASSETS: readonly string[] = ['platform/browser/browser-host.mjs'];
  * `platform/types/` (peer-deps, vendor-deps, wasm-files, pdfjs-dist) describe
  * the engine's own build inputs and are not shipped.
  */
-const AMBIENT_DECLARATIONS: readonly string[] = ['platform/types/sql-js.d.ts'];
 
 function ensureExists(path: string): void {
   if (!existsSync(path)) {

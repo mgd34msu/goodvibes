@@ -33,9 +33,12 @@ import { DAEMON_RELEASES_LATEST_URL } from '../../config/schema-domain-update.js
 /** The selected monorepo release feed for native daemon payloads. */
 export const DAEMON_REPO_RELEASES_LATEST_URL = DAEMON_RELEASES_LATEST_URL;
 
-/** Download root for an exact selected monorepo release tag. */
-export function daemonReleaseDownloadBaseUrl(tag: string): string {
-  return `https://github.com/mgd34msu/goodvibes/releases/download/${tag}`;
+/**
+ * Download root for an exact release tag, taken from the repository the feed
+ * names, so a tag resolved from one feed is never downloaded from another.
+ */
+export function daemonReleaseDownloadBaseUrl(tag: string, releasesLatestUrl: string = DAEMON_REPO_RELEASES_LATEST_URL): string {
+  return `${releasesLatestUrl.replace(/\/latest\/?$/, '')}/download/${tag}`;
 }
 
 /** First selected monorepo native cohort version for legacy adoption. */
@@ -238,7 +241,7 @@ export async function performDaemonHandover(
   try {
     await applyVerifiedUpdate({
       fetchImpl,
-      downloadBaseUrl: (options.downloadBaseUrl ?? daemonReleaseDownloadBaseUrl)(tag),
+      downloadBaseUrl: (options.downloadBaseUrl ?? ((resolved: string) => daemonReleaseDownloadBaseUrl(resolved, releasesLatestUrl)))(tag),
       targets,
       platform,
       daemonNative: { execPath: options.binaryPath, platform, arch, version: tag, allowLegacyBinary: true },

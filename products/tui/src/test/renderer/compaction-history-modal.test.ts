@@ -7,7 +7,8 @@
  *  3. Restore-unavailability notice is always present.
  *  4. History is listed most-recent-first.
  */
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, spyOn } from 'bun:test';
+import * as core from '@goodvibes-jev/engine/platform/platform/core';
 import {
   buildCompactionHistoryText,
   formatCompactionEvent,
@@ -24,14 +25,31 @@ import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/co
 
 describe('buildCompactionHistoryText', () => {
 
-  test('always includes restore unavailability notice', () => {
-    const result = buildCompactionHistoryText();
-    // Either the no-compactions branch or the with-events branch must include the restore note.
-    const hasGap =
-      result.includes('Restore') ||
-      result.includes('restore') ||
-      result.includes('no compactions');
-    expect(hasGap).toBe(true);
+  test('with no recorded compactions it says so and that restore is unavailable', () => {
+    const spy = spyOn(core, 'getCompactionEvents').mockReturnValue([]);
+    try {
+      const result = buildCompactionHistoryText();
+      expect(result).toContain('No compactions recorded this session');
+      expect(result).toContain('Restore is not available');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('with recorded compactions it lists them most recent first and ends with the restore-unavailable note', () => {
+    const older = makeEvent({ timestamp: 1_000, messagesBeforeCompaction: 11 });
+    const newer = makeEvent({ timestamp: 2_000, messagesBeforeCompaction: 22 });
+    const spy = spyOn(core, 'getCompactionEvents').mockReturnValue([older, newer]);
+    try {
+      const lines = buildCompactionHistoryText().split('\n');
+      expect(lines[0]).toContain('2 total');
+      expect(lines[1]).toContain('#2');
+      expect(lines[1]).toContain('22→');
+      expect(lines[2]).toContain('#1');
+      expect(lines[3]).toContain('Restore not available');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test('returns [Context] prefix', () => {

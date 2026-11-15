@@ -80,7 +80,7 @@ export const runLaunchdCommand: Command = (args, timeoutMs, signal) => managerCo
 
 /** Parse only launchctl's public tabular PID/exit-status/label listing. Never
  * retain a print dump, loaded environment, arguments, or other runtime values. */
-export const queryLaunchdJob: Query = async (serviceName, timeoutMs, signal) => {
+function launchdListReader(serviceName: string): { feed(data: string): void; finish(): LaunchdJobObservation } {
   let observation: LaunchdJobObservation = { loaded: false };
   let line = '', skipping = false;
   const consume = (value: string) => {
@@ -90,18 +90,35 @@ export const queryLaunchdJob: Query = async (serviceName, timeoutMs, signal) => 
       observation = { loaded: true, ...(pid !== undefined && Number.isSafeInteger(pid) && pid > 0 ? { pid } : {}) };
     }
   };
-  await managerCommand(['list'], timeoutMs, signal, data => {
-    for (const char of data) {
-      if (char === '\n') { if (!skipping) consume(line); line = ''; skipping = false; }
-      else if (!skipping) {
-        line += char;
-        // A selected tabular row contains only a PID, status and exact label.
-        if (line.length > serviceName.length + 64) { line = ''; skipping = true; }
+  return {
+    feed(data) {
+      for (const char of data) {
+        if (char === '\n') { if (!skipping) consume(line); line = ''; skipping = false; }
+        else if (!skipping) {
+          line += char;
+          // A selected tabular row contains only a PID, status and exact label.
+          if (line.length > serviceName.length + 64) { line = ''; skipping = true; }
+        }
       }
-    }
-  });
-  if (line && !skipping) consume(line);
-  return observation;
+    },
+    finish() {
+      if (line && !skipping) consume(line);
+      return observation;
+    },
+  };
+}
+
+/** The job named `serviceName` in the text of `launchctl list`, or `{ loaded: false }`. */
+export function parseLaunchdList(text: string, serviceName: string): LaunchdJobObservation {
+  const reader = launchdListReader(serviceName);
+  reader.feed(text);
+  return reader.finish();
+}
+
+export const queryLaunchdJob: Query = async (serviceName, timeoutMs, signal) => {
+  const reader = launchdListReader(serviceName);
+  await managerCommand(['list'], timeoutMs, signal, data => reader.feed(data));
+  return reader.finish();
 };
 async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   checkSignal(signal);

@@ -59,8 +59,8 @@ export { OCCASION_ACK_SOURCES, isOccasionAckSource } from './types.js';
 /** The narrow slice of the state store this path writes through. */
 export interface AcknowledgeStore {
   recordAnswer(entry: OccasionAcknowledgement): Promise<OccasionAcknowledgement>;
-  openItem(id: string): Promise<OpenItem | undefined>;
-  putOpenItem(item: OpenItem): Promise<OpenItem>;
+  /** Replace one open item from the stored one, in a single write. */
+  settleOpenItem(id: string, build: (existing: OpenItem | undefined) => OpenItem | null): Promise<OpenItem | null>;
 }
 
 export interface AcknowledgeInput {
@@ -113,28 +113,31 @@ export async function acknowledgeOccurrence(
   });
 
   const itemId = nudgeItemId(occasion.id, occurrence);
-  const existing = await store.openItem(itemId);
-  if (existing === undefined) {
-    // The owner acknowledged something that had not been raised yet, they got
-    // there first. The item is opened anyway, and opened quiet, so the pull can
-    // still show it and the sweep can never decide to introduce it to them.
-    await store.putOpenItem({
-      id: itemId,
-      kind: 'nudge',
-      occasionId: occasion.id,
-      occurrence,
-      openedAt: now,
-      lastRaisedAt: now,
-      raiseCount: 0,
-      servedBoundaries: [...RAISE_BOUNDARIES],
-      dueOn: occurrence,
-      expiresAfter: occurrence,
-    });
-    return { occasionId: occasion.id, occurrence, source: input.source, quietedExisting: false };
-  }
-
-  await store.putOpenItem({ ...existing, servedBoundaries: [...RAISE_BOUNDARIES] });
-  return { occasionId: occasion.id, occurrence, source: input.source, quietedExisting: true };
+  // Built from the stored item inside one write: a copy read earlier and put back
+  // later would overwrite a raise recorded in between.
+  let quietedExisting = false;
+  await store.settleOpenItem(itemId, (existing) => {
+    if (existing === undefined) {
+      // The owner acknowledged something that had not been raised yet, they got
+      // there first. The item is opened anyway, and opened quiet, so the pull can
+      // still show it and the sweep can never decide to introduce it to them.
+      return {
+        id: itemId,
+        kind: 'nudge',
+        occasionId: occasion.id,
+        occurrence,
+        openedAt: now,
+        lastRaisedAt: now,
+        raiseCount: 0,
+        servedBoundaries: [...RAISE_BOUNDARIES],
+        dueOn: occurrence,
+        expiresAfter: occurrence,
+      };
+    }
+    quietedExisting = true;
+    return { ...existing, servedBoundaries: [...RAISE_BOUNDARIES] };
+  });
+  return { occasionId: occasion.id, occurrence, source: input.source, quietedExisting };
 }
 
 /**

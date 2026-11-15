@@ -4,12 +4,13 @@
  * disk beside the catalog cache, so a daily catalog refresh reads only the
  * providers that are new or whose facts changed.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { mapLimit, type YesNoReading } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { catalogProviderAccess, type ProviderAccess } from './batteries/catalog.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 
@@ -68,6 +69,14 @@ interface StoredAccess {
   readonly access: ProviderAccess | null;
 }
 
+const ACCESS_VALUES: readonly unknown[] = ['metered', 'subscription', 'local', null];
+
+function isStoredAccess(value: unknown): value is StoredAccess {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry['fingerprint'] === 'string' && ACCESS_VALUES.includes(entry['access']);
+}
+
 export class ProviderAccessReadings {
   readonly #path: string | undefined;
   readonly #entries = new Map<string, StoredAccess>();
@@ -97,7 +106,7 @@ export class ProviderAccessReadings {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { version?: number; entries?: Record<string, StoredAccess> };
       if (parsed.version !== 1 || typeof parsed.entries !== 'object' || parsed.entries === null) return;
-      for (const [id, entry] of Object.entries(parsed.entries)) this.#entries.set(id, entry);
+      for (const [id, entry] of Object.entries(parsed.entries)) if (isStoredAccess(entry)) this.#entries.set(id, entry);
     } catch (error) {
       const message = summarizeError(error);
       if (!message.includes('ENOENT') && !message.includes('no such file')) logger.warn('[routing] Ignoring unreadable provider access file', { path, error: message });
@@ -108,9 +117,7 @@ export class ProviderAccessReadings {
     if (!this.#path) return;
     try {
       mkdirSync(dirname(this.#path), { recursive: true });
-      const tmp = `${this.#path}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ version: 1, entries: Object.fromEntries(this.#entries) }), 'utf-8');
-      renameSync(tmp, this.#path);
+      writeJsonFileAtomic(this.#path, { version: 1, entries: Object.fromEntries(this.#entries) }, { indent: null, trailingNewline: false });
     } catch (error) {
       logger.warn('[routing] Provider access file write failed', { path: this.#path, error: summarizeError(error) });
     }

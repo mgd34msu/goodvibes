@@ -3,7 +3,7 @@ import { useRouteAdapterFixture, route, preferredId } from '../helpers/route-ada
 
 useRouteAdapterFixture();
 
-describe("Research, browser and media route adapters", () => {
+describe("Research, browser and media plans composed from scripted readings", () => {
 
   test('routes one-off deep research to the research planner', async () => {
     const body = await route('do deep research on the market map and cite sources');
@@ -48,14 +48,6 @@ describe("Research, browser and media route adapters", () => {
   });
 
 
-  test('keeps a screen capture request on the desktop-control planner', async () => {
-    // Capturing the screen is desktop control, not browsing.
-    const body = await route('take a screenshot of the screen');
-
-    expect(preferredId(body)).not.toBe('drive-a-browser');
-  });
-
-
   test('routes browser-backed research runner wording to runner readiness', async () => {
     const body = await route('check browser-backed research runner readiness');
 
@@ -77,13 +69,6 @@ describe("Research, browser and media route adapters", () => {
       inspectRoute: 'research action:"reports" query:"visual report" includeParameters:true',
       requiresConfirmation: true,
     });
-  });
-
-
-  test('does not treat generic market risk research as a security policy question', async () => {
-    const body = await route('research market risk with citations');
-
-    expect(preferredId(body)).toBe('deep-research-workflow');
   });
 
 

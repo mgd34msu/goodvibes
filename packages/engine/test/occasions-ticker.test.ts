@@ -9,6 +9,7 @@
  * and not because a setting changed under it.
  */
 import { describe, expect, test } from 'bun:test';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 import { startOccasionSweepTicker, type TickerScheduler } from '../platform/src/platform/occasions/ticker.ts';
 
 interface FakeClock extends TickerScheduler {
@@ -60,8 +61,7 @@ describe('the sweep ticker', () => {
     expect(passes).toBe(0);
 
     clock.fire();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(passes).toBe(1);
     // And it re-armed, so the loop continues.
     expect(clock.pendingMs).toBe(60_000);
@@ -79,8 +79,7 @@ describe('the sweep ticker', () => {
     expect(clock.pendingMs).toBe(3_600_000);
     minutes = 5;
     clock.fire();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(clock.pendingMs).toBe(300_000);
     ticker.stop();
   });
@@ -99,14 +98,12 @@ describe('the sweep ticker', () => {
       onError: (error) => seen.push(error),
     });
     clock.fire();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(seen).toHaveLength(1);
     expect(clock.pendingMs).toBe(60_000);
 
     clock.fire();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(passes).toBe(2);
     expect(seen).toHaveLength(1);
     ticker.stop();
@@ -126,7 +123,7 @@ describe('the sweep ticker', () => {
     });
 
     clock.fire();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(started).toBe(1);
     expect(ticker.running).toBe(true);
     // Nothing is armed, so no second pass can start on top of this one and
@@ -135,8 +132,7 @@ describe('the sweep ticker', () => {
     expect(clock.pendingMs).toBeNull();
 
     (release as (() => void) | null)?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     expect(ticker.running).toBe(false);
     expect(started).toBe(1);
     // And the loop continues once the pass is done.
@@ -169,11 +165,10 @@ describe('the sweep ticker', () => {
       scheduler: clock,
     });
     clock.fire();
-    await Promise.resolve();
+    await eventLoopTurns();
     ticker.stop();
     (release as (() => void) | null)?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await eventLoopTurns();
     // The `finally` re-arm is refused once stopped, so nothing keeps ticking
     // after a dispose that raced a pass.
     expect(clock.pendingMs).toBeNull();

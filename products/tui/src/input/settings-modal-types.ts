@@ -67,7 +67,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
       'learning',
     ],
   },
-  { label: 'Advanced', categories: ['release', 'update', 'danger'] },
+  { label: 'Advanced', categories: ['update', 'danger'] },
 ];
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap((group) => group.categories);

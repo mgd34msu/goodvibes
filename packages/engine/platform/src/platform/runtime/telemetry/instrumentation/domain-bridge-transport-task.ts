@@ -2,7 +2,7 @@ import type { TaskEvent } from '../../../../events/tasks.js';
 import type { TransportEvent } from '../../../../events/transport.js';
 import { endTaskSpan, recordTaskPhase, startTaskSpan } from '../spans/task.js';
 import { endTransportSpan, recordTransportPhase, startTransportSpan } from '../spans/transport.js';
-import type { DomainBridgeAttachmentInput, Env, SpanMap } from './domain-bridge-shared.js';
+import { trackSpan, type DomainBridgeAttachmentInput, type Env, type SpanMap } from './domain-bridge-shared.js';
 
 export function attachTransportDomain(
   { bus, helpers }: DomainBridgeAttachmentInput,
@@ -18,7 +18,7 @@ export function attachTransportDomain(
           protocol: env.payload.protocol,
           traceId: env.traceId ?? '',
         });
-        transportSpans.set(env.payload.transportId, span);
+        trackSpan(transportSpans, env.payload.transportId, span);
       });
     }),
   );
@@ -122,7 +122,7 @@ export function attachTaskDomain(
           priority: env.payload.priority,
           traceId: env.traceId ?? '',
         });
-        taskSpans.set(env.payload.taskId, span);
+        trackSpan(taskSpans, env.payload.taskId, span);
       });
     }),
   );

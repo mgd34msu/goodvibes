@@ -1,4 +1,3 @@
-/** UNRUN: actual saved binding, native preparation and no-write inspection. */
 import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

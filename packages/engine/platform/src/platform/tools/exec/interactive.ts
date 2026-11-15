@@ -36,7 +36,8 @@ import { decisionOrClassic } from '../../runtime/decision-policy.js';
  * leaves no line to read. A prompt that is never answered (seam unwired,
  * surface ignored it, or the human walked away) ends in the normal timeout,
  * with the detected prompt text reported on the result (`pending_prompt`) so
- * the failure is diagnosable instead of a silent hang. PTY output merges
+ * the failure is diagnosable instead of a silent hang. A run with no timeout_ms
+ * is stopped once its prompt has stood unanswered for `unansweredPromptLimitMs`. PTY output merges
  * stderr into stdout by nature; interactive results carry the merged
  * transcript in `stdout` and note `pty: true`.
  */
@@ -45,6 +46,7 @@ import { spawnSync } from 'node:child_process';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { sleep } from '../../utils/concurrency.js';
+import { killProcessTree } from './process-tree.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { execPrompt, pendingPromptView } from '../batteries/exec-prompt.js';
@@ -124,6 +126,21 @@ export function buildPtyArgv(availability: PtyAvailability, command: string): st
   }
   // util-linux: -q quiet, -e return child exit code, -f flush per write, -c command
   return [availability.scriptPath, '-qefc', command, '/dev/null'];
+}
+
+// ── Missing-terminal diagnosis ───────────────────────────────────────────────
+
+const TERMINAL_REQUIRED = /no tty present|\/dev\/tty: No such device or address|cannot open \/dev\/tty|a terminal is required|sudo: a password is required/iu;
+
+/**
+ * A plain-language note when a piped (non-PTY) command failed because it needed
+ * a controlling terminal, else undefined. Piped foreground commands run in
+ * their own session with no terminal, which `sudo`, `ssh` and the like report
+ * only with a terse error that reads as a permissions or network failure.
+ */
+export function terminalRequiredNote(stderr: string): string | undefined {
+  if (!TERMINAL_REQUIRED.test(stderr)) return undefined;
+  return 'The command needs a terminal and this run has none (it ran with piped output). Rerun it with interactive: true so it gets a terminal and any password or confirmation prompt is put to the user, or use a non-interactive form such as sudo -n (fail instead of asking) or sudo -S (read the password from stdin).';
 }
 
 // ── Prompt readings (tools/batteries/exec-prompt.ts) ─────────────────────────
@@ -234,9 +251,16 @@ export interface ExecInteractionRuntime {
   readonly requestPromptAnswer?: ((ask: ExecPromptAsk, execution?: ExecPromptExecution) => Promise<ExecPromptAnswer>) | undefined;
   /** Quiet window before an unterminated last line is read as a possible prompt. Default 1200ms. */
   readonly quietWindowMs?: number | undefined;
+  /**
+   * How long a detected prompt may stand unanswered, with no new output, in a
+   * run that set no timeout_ms, before the run is stopped and reported with the
+   * prompt. Default 5 minutes. An explicit timeout_ms governs instead.
+   */
+  readonly unansweredPromptLimitMs?: number | undefined;
 }
 
 const DEFAULT_QUIET_WINDOW_MS = 1200;
+const DEFAULT_UNANSWERED_PROMPT_LIMIT_MS = 300_000;
 const QUIET_POLL_INTERVAL_MS = 150;
 
 /**
@@ -304,16 +328,22 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   let cancelled = false;
   let promptsAnswered = 0;
   let promptDeclined = false;
+  let promptsDropped = 0;
   let pendingPrompt: string | undefined;
+  // The transcript length when the prompt was read: output past it means the child went on, so the prompt no longer blocks it.
+  let pendingPromptAtLength = 0;
   /** Transcript length at the last brokered ask, re-ask only on NEW output. */
   let askedAtLength = -1;
   let askInFlight = false;
+  let stoppedForUnansweredPrompt = false;
 
   const kill = async (): Promise<void> => {
     lifetime.abort();
     try {
-      proc.kill('SIGTERM');
-      await sleep(200);
+      // Signalling the wrapper alone leaves anything it started (a `nohup`ed
+      // grandchild) running; the pty puts them in another session, so the
+      // whole tree is walked instead of a process group.
+      await killProcessTree(proc.pid);
       proc.kill('SIGKILL');
     } catch (err: unknown) {
       logger.debug('[ExecInteractive] kill failed (process may have exited)', { error: String(err) });
@@ -321,6 +351,8 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   };
 
   const killTimer = timeoutMs > 0 ? setTimeout(() => {
+    // A cancel that already started the kill owns the outcome.
+    if (cancelled) return;
     timedOut = true;
     void kill();
   }, timeoutMs) : undefined;
@@ -329,6 +361,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   const onAbort = (): void => {
     if (timedOut || cancelled) return;
     cancelled = true;
+    clearTimeout(killTimer);
     void kill();
   };
   if (signal) {
@@ -367,8 +400,10 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   const brokerPrompt = async (prompt: string): Promise<void> => {
     askInFlight = true;
     const expectedTranscript = transcript;
+    let outputArrived = false;
     const assertCurrent = () => {
       policySignal.throwIfAborted();
+      if (!exited && !timedOut && !cancelled && transcript !== expectedTranscript) outputArrived = true;
       if (exited || timedOut || cancelled || transcript !== expectedTranscript || pendingPromptLine(transcript) !== prompt) throw new Error('Terminal prompt changed before response');
     };
     let answer: ExecPromptAnswer | undefined;
@@ -395,6 +430,9 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
       }
     } catch (err: unknown) {
       if (policySignal.aborted) return;
+      // The quiet-window watcher reads the new tail and asks again; the result
+      // says an answer was lost so the caller is not left guessing.
+      if (outputArrived) promptsDropped += 1;
       logger.warn('[ExecInteractive] prompt-answer broker failed; prompt left pending', { error: summarizeError(err) });
     } finally {
       if (answer) discardExecPromptAnswer(answer);
@@ -410,7 +448,17 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   const watcher = (async (): Promise<void> => {
     while (!exited && !timedOut && !cancelled) {
       await sleep(QUIET_POLL_INTERVAL_MS);
-      if (exited || timedOut || cancelled || askInFlight || promptDeclined) continue;
+      if (exited || timedOut || cancelled || promptDeclined) continue;
+      // With no timeout_ms nothing else ends a prompt nobody answers.
+      if (pendingPrompt !== undefined && transcript.length !== pendingPromptAtLength) pendingPrompt = undefined;
+      if (timeoutMs === 0 && pendingPrompt !== undefined
+        && Date.now() - lastDataAt >= (interaction.unansweredPromptLimitMs ?? DEFAULT_UNANSWERED_PROMPT_LIMIT_MS)) {
+        stoppedForUnansweredPrompt = true;
+        timedOut = true;
+        void kill();
+        continue;
+      }
+      if (askInFlight) continue;
       if (Date.now() - lastDataAt < quietWindowMs) continue;
       if (transcript.length === readAtLength || pendingPromptLine(transcript) === null) continue;
       const readLength = transcript.length;
@@ -428,6 +476,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
       }
       if (!prompt || transcript.length !== readLength) continue;
       pendingPrompt = prompt;
+      pendingPromptAtLength = readLength;
       if (interaction.requestPromptAnswer && transcript.length !== askedAtLength) {
         askedAtLength = transcript.length;
         void brokerPrompt(prompt);
@@ -454,7 +503,9 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
     cmd: cmdStr,
     exit_code: timedOut || cancelled ? null : exitCode,
     stdout: transcript,
-    stderr: '',
+    stderr: stoppedForUnansweredPrompt
+      ? `Stopped: no timeout_ms was set and the prompt ${JSON.stringify(pendingPrompt)} stayed unanswered (${Math.round((interaction.unansweredPromptLimitMs ?? DEFAULT_UNANSWERED_PROMPT_LIMIT_MS) / 1000)}s with no new output). Answer it by passing input the command can read, or run it again with a timeout_ms.`
+      : '',
     success: !timedOut && !cancelled && !promptDeclined && exitCode === 0,
     duration_ms: duration,
     cwd,
@@ -462,6 +513,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
     ...(promptsAnswered > 0 ? { prompts_answered: promptsAnswered } : {}),
     ...(pendingPrompt !== undefined ? { pending_prompt: pendingPrompt } : {}),
     ...(promptDeclined ? { prompt_declined: true } : {}),
+    ...(promptsDropped > 0 ? { prompts_dropped: promptsDropped } : {}),
     ...(timedOut ? { timed_out: true } : {}),
     ...(cancelled ? { cancelled: true } : {}),
   };

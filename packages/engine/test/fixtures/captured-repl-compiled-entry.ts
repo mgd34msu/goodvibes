@@ -33,20 +33,25 @@ environment = 'null'
   writeFileSync(join(owner, 'second-preload.ts'), `globalThis.startupOrder.push('second');`);
   writeFileSync(join(owner, 'configured.fixture'), 'export const configuredType: string = "LOADER_OK";');
   writeFileSync(join(owner, 'launch-compiled.ts'), `
-    import { closeSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+    import { closeSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+    import { tmpdir } from 'node:os';
+    import { join } from 'node:path';
     import { spawnSync } from 'node:child_process';
+    // A private directory per run, so two runs sharing a /tmp cannot overwrite each other's output or compiled program.
+    const scratch = mkdtempSync(join(tmpdir(), 'compiled-program-'));
+    const outPath = join(scratch, 'out'), errPath = join(scratch, 'err'), sourcePath = join(scratch, 'source.ts'), programPath = join(scratch, 'nested-compiled-program');
     function execute(command, args, cwd = '/tmp') {
-      const stdout = openSync('/tmp/compiled-program-out', 'w');
-      const stderr = openSync('/tmp/compiled-program-err', 'w');
+      const stdout = openSync(outPath, 'w');
+      const stderr = openSync(errPath, 'w');
       let child;
-      try { child = spawnSync(command, args, { cwd, stdio: ['ignore', stdout, stderr], timeout: 5000 }); }
+      try { child = spawnSync(command, args, { cwd, stdio: ['ignore', stdout, stderr], timeout: 60_000 }); }
       finally { closeSync(stdout); closeSync(stderr); }
-      return { status: child.status, stdout: readFileSync('/tmp/compiled-program-out', 'utf8'), stderr: readFileSync('/tmp/compiled-program-err', 'utf8'), mode: process.env.BUN_BE_BUN ?? null, error: child.error?.message };
+      return { status: child.status, stdout: readFileSync(outPath, 'utf8'), stderr: readFileSync(errPath, 'utf8'), mode: process.env.BUN_BE_BUN ?? null, error: child.error?.message };
     }
-    writeFileSync('/tmp/compiled-program-source.ts', 'console.log("COMPILED_PROGRAM_OK");');
-    const built = execute(process.execPath, ['--config=/dev/null', 'build', '/tmp/compiled-program-source.ts', '--compile', '--outfile', '/tmp/nested-compiled-program']);
+    writeFileSync(sourcePath, 'console.log("COMPILED_PROGRAM_OK");');
+    const built = execute(process.execPath, ['--config=/dev/null', 'build', sourcePath, '--compile', '--outfile', programPath]);
     if (built.status !== 0) throw new Error('contained fixture compile failed: ' + JSON.stringify(built));
-    export function runCompiledProgram() { return execute('/tmp/nested-compiled-program', []); }
+    export function runCompiledProgram() { return execute(programPath, []); }
     export function runInterpreter() { return execute('bun', ['--no-env-file', '--print', 'JSON.stringify({answer:6*7,config:CAPTURED_CONFIG_VALUE,order:startupOrder})'], process.cwd()); }
     export const nested = runCompiledProgram();
   `);

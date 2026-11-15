@@ -103,9 +103,16 @@ test('Shift+Enter and IME keep the draft; plain Enter and the send button safely
   // the intentionally compact 34px control, as in the existing touch audit.
   if (testInfo.project.name === 'phone') await expectTappable(page, '.steer-composer__send');
   await input.fill(fixture.capture.input.body);
+  // Each step is awaited so the cleared draft is rendered before the next attempt:
+  // a send clears the draft and disables the button, so Enter and a second click
+  // have nothing to send and only the first reaches the daemon.
   await send.click();
-  await expect(state(page)).toHaveText('follow-up · queued');
+  await expect(input).toHaveValue('');
+  await expect(send).toBeDisabled();
   await input.press('Enter');
+  await send.click({ force: true });
+  await expect(state(page)).toHaveText('follow-up · queued');
+  await expect(receipt(page)).toHaveCount(1);
   await expect(send).toBeDisabled();
   expect(fixture.writes).toHaveLength(1);
   await expectNoHorizontalScroll(page);

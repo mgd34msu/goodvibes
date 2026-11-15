@@ -10,6 +10,8 @@ import {
 import type { AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { resolveChannelPrincipalAttribution, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
+import { renderForModel, untrustedFrom } from '../agent/untrusted-content.ts';
+import { clampReadLimit } from '../tools/agent-harness-read-helpers.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -49,7 +51,9 @@ interface DeliveryAttemptView {
   readonly modelRoute: string;
 }
 
-const DELIVERY_ATTENTION_STATUSES = new Set(['failed', 'dead_lettered', 'pending', 'sending']);
+// A delivery that is queued or on its way is working, not failing; only a terminal failure needs a person.
+const DELIVERY_ATTENTION_STATUSES = new Set(['failed', 'dead_lettered']);
+const DELIVERY_IN_PROGRESS_STATUSES = new Set(['pending', 'sending']);
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -76,9 +80,7 @@ function readRecordArray(record: JsonRecord, key: string): readonly JsonRecord[]
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(100, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 100);
 }
 
 function boundedText(value: string, max = 160): string {
@@ -126,7 +128,9 @@ function channelTriageReadiness(channels: readonly AgentWorkspaceChannelStatus[]
   const enabled = channels.filter((channel) => channel.enabled);
   const needsConfig = channels.filter((channel) => channel.setupState === 'needs-config');
   const needsTarget = channels.filter((channel) => channel.setupState === 'needs-target');
-  const attention = channels.filter((channel) => channel.enabled && channel.setupState !== 'ready');
+  // A channel with no default target still sends to an explicit target, so it is counted
+  // on its own line rather than as a blocker. An unreadable configuration is a blocker.
+  const attention = channels.filter((channel) => channel.setupState === 'unknown' || (channel.enabled && channel.setupState === 'needs-config'));
   return {
     totalChannels: channels.length,
     enabled: enabled.length,
@@ -180,7 +184,7 @@ function deliveryAttemptView(attempt: JsonRecord): DeliveryAttemptView {
     ...(responseId ? { responseId } : {}),
     inspectRoute: `/api/deliveries/${encodeURIComponent(id)}`,
     modelRoute: runId
-      ? `autonomy action:"queue" query:"${runId}"`
+      ? `autonomy action:"queue" query:${JSON.stringify(runId)}`
       : 'autonomy action:"queue"',
   };
 }
@@ -202,12 +206,14 @@ function deliveryTriage(result: ConnectedHostRouteResult, limit: number): Record
   const views = attempts.map(deliveryAttemptView);
   const attention = views.filter((attempt) => DELIVERY_ATTENTION_STATUSES.has(attempt.status));
   const retryCandidates = views.filter((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
+  const inProgress = views.filter((attempt) => DELIVERY_IN_PROGRESS_STATUSES.has(attempt.status));
   return {
     route: result.route,
     state: routeState(result, attempts.length === 0),
     totals: isRecord(root.totals) ? root.totals : null,
     totalAttempts: attempts.length,
     attentionCount: attention.length,
+    inProgressCount: inProgress.length,
     retryCandidateCount: retryCandidates.length,
     retryCandidates: retryCandidates.slice(0, limit),
     attempts: views.slice(0, limit),
@@ -215,19 +221,42 @@ function deliveryTriage(result: ConnectedHostRouteResult, limit: number): Record
   };
 }
 
+const surfaceMessageTexts = new WeakMap<object, { readonly title: string; readonly bodyPreview: string }>();
+
+/**
+ * The redacted title and body preview of a surface message view built here, for a
+ * caller that frames the text itself. Held off the view so it never serialises as
+ * bare fields beside the framed copy.
+ */
+export function readSurfaceMessageText(view: object): { readonly title: string; readonly bodyPreview: string } | undefined {
+  return surfaceMessageTexts.get(view);
+}
+
 function surfaceMessageView(message: JsonRecord): Record<string, unknown> {
-  return {
+  const surface = readString(message, 'surface', 'unknown');
+  const title = redactText(readString(message, 'title'), 100);
+  const bodyPreview = redactText(readString(message, 'body'), 180);
+  const createdAt = readNumber(message, 'createdAt');
+  const view: Record<string, unknown> = {
     id: readString(message, 'id', 'message'),
-    surface: readString(message, 'surface', 'unknown'),
-    createdAt: readNumber(message, 'createdAt') ?? null,
+    surface,
+    createdAt: createdAt ?? null,
     level: readString(message, 'level', 'info'),
-    title: redactText(readString(message, 'title'), 100),
-    bodyPreview: redactText(readString(message, 'body'), 180),
+    // The title and body were written by whoever sent the message. They only leave this
+    // function inside the untrusted-content frame, never as bare fields.
+    untrustedContent: renderForModel(untrustedFrom({
+      surfaceId: surface,
+      origin: readString(message, 'surfaceId', surface),
+      text: `title: ${title}\nbody: ${bodyPreview}`,
+      receivedAt: createdAt !== undefined && Number.isFinite(new Date(createdAt).getTime()) ? new Date(createdAt).toISOString() : 'unknown',
+    })),
     routeId: readString(message, 'routeId') || null,
     surfaceId: readString(message, 'surfaceId') || null,
     clientId: readString(message, 'clientId') || null,
     attachmentCount: Array.isArray(message.attachments) ? message.attachments.length : 0,
   };
+  surfaceMessageTexts.set(view, { title, bodyPreview });
+  return view;
 }
 
 function surfaceMessageTriage(result: ConnectedHostRouteResult, limit: number): Record<string, unknown> {
@@ -362,6 +391,7 @@ export async function buildAgentWorkspaceChannelTriage(
   const receipts = receiptTriage(context, limit);
   const routeFailures = routeFailureCount([deliveriesResult, messagesResult, bindingsResult]);
   const readinessAttention = typeof readiness.attention === 'number' ? readiness.attention : 0;
+  const needsTargetCount = typeof readiness.needsTarget === 'number' ? readiness.needsTarget : 0;
   const deliveryAttention = typeof deliveries.attentionCount === 'number' ? deliveries.attentionCount : 0;
   const status = triageStatus({ readinessAttention, deliveryAttention, routeFailures });
   const messageCount = typeof surfaceMessages.totalMessages === 'number' ? surfaceMessages.totalMessages : 0;
@@ -370,7 +400,7 @@ export async function buildAgentWorkspaceChannelTriage(
   return {
     mode: 'channel_triage',
     status,
-    summary: `${readinessAttention} channel setup blocker(s), ${deliveryAttention} delivery attention item(s), ${retryCount} retry candidate(s), ${messageCount} visible surface message(s), ${bindingCount} route binding(s).`,
+    summary: `${readinessAttention} channel setup blocker(s), ${needsTargetCount} channel(s) without a default target, ${deliveryAttention} delivery attention item(s), ${retryCount} retry candidate(s), ${messageCount} visible surface message(s), ${bindingCount} route binding(s).`,
     readiness,
     deliveries,
     surfaceMessages,
@@ -457,7 +487,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
     lines.push(`  state: ${messages.state}; total: ${messages.totalMessages}`);
     const visibleMessages = Array.isArray(messages.messages) ? messages.messages.filter(isRecord) : [];
     for (const message of visibleMessages.slice(0, 5)) {
-      lines.push(`  - ${readString(message, 'surface')}: ${readString(message, 'level')} ${readString(message, 'title')}${readString(message, 'routeId') ? ` route=${readString(message, 'routeId')}` : ''}`);
+      lines.push(`  - ${readString(message, 'surface')}: ${readString(message, 'level')} (message text withheld from this summary)${readString(message, 'routeId') ? ` route=${readString(message, 'routeId')}` : ''}`);
     }
     if (visibleMessages.length === 0) lines.push('  no visible control-plane surface messages reported');
   }

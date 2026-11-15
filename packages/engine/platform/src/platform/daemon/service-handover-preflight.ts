@@ -32,6 +32,8 @@ export interface PreparedServiceHandover {
   reserve(signal: AbortSignal): Promise<void>;
   cancel(): Promise<void>;
   assertCurrent(): void;
+  /** Settle everything that can refuse the handover while the runtime still serves; no-op when nothing is needed. */
+  prepare(signal?: AbortSignal): Promise<ServiceHandoverOutcome>;
   request(signal?: AbortSignal): ReturnType<AutoUpdateServiceActions['restartService']>;
 }
 
@@ -81,10 +83,33 @@ export function prepareServiceHandover(actions: AutoUpdateServiceActions): Prepa
       try { await reservationWork; } catch { /* The admission owner reports its original failure. */ }
       await reservation?.cancel();
     },
+    async prepare(signal?: AbortSignal) {
+      assertCurrent();
+      // Restarting a supervised daemon and a manager-owned reservation have nothing to settle early.
+      if (supervised || reservation || !actions.prepareAdoption) return { status: 'accepted' } as const;
+      let outcome: ServiceHandoverOutcome;
+      try { outcome = await actions.prepareAdoption(signal); }
+      catch (error) { return { status: 'failed', detail: error instanceof Error ? error.message : String(error) } as const; }
+      assertCurrent();
+      return outcome;
+    },
     request(signal?: AbortSignal) {
       assertCurrent();
       if (reserve && !reservation) throw new ServiceHandoverPreflightError('Service handover helper was not admitted before publication.');
       return reservation ? reservation.commit(signal) : operation.call(actions, signal);
     },
   });
+}
+
+/**
+ * `prepare` for callers that may hold no prepared handover (legacy embedders):
+ * nothing to settle is an accepted preparation. A thrown refusal is an outcome,
+ * never an exception into the stop path.
+ */
+export async function prepareHandoverBeforeStop(handover: PreparedServiceHandover | undefined, signal?: AbortSignal): Promise<ServiceHandoverOutcome> {
+  if (!handover) return { status: 'accepted' };
+  try { return await handover.prepare(signal); }
+  catch (error) {
+    return error instanceof ServiceHandoverPreflightError ? error.outcome : { status: 'failed', detail: error instanceof Error ? error.message : String(error) };
+  }
 }

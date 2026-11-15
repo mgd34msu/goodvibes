@@ -73,13 +73,24 @@ function gcloudInstalledRunner(deps: GoogleSetupActionDeps, state: GcloudState):
   };
 }
 
-function gcloudPath(state: GcloudState): string {
+/**
+ * Where gcloud is. The installed step records it, but a step that runs in a
+ * later process (a resumed flow skips the installed step as already done)
+ * finds `state.path` empty: look again, so a gcloud the installer put under
+ * the home directory is still found instead of falling back to a bare name
+ * that is not on PATH.
+ */
+async function gcloudPath(deps: GoogleSetupActionDeps, state: GcloudState): Promise<string> {
+  if (state.path === null) {
+    const detection = await detectGcloud(deps.commands, deps.homeDirectory);
+    if (detection.ok) state.path = detection.path;
+  }
   return state.path ?? 'gcloud';
 }
 
 function gcloudAuthRunner(deps: GoogleSetupActionDeps, state: GcloudState): GoogleStepRunner {
   return async () => {
-    const check = await checkAuthenticated(deps.commands, gcloudPath(state));
+    const check = await checkAuthenticated(deps.commands, await gcloudPath(deps, state));
     if (check.ok) {
       return alreadyDone(`gcloud is signed in as ${check.account}.`);
     }
@@ -95,7 +106,7 @@ function gcloudProjectRunner(deps: GoogleSetupActionDeps, state: GcloudState): G
   return async () => {
     // The prefix is what makes this idempotent: an existing goodvibes project
     // is reused rather than a second one piling up on every re-run.
-    const result = await selectOrCreateProject(deps.commands, gcloudPath(state), {
+    const result = await selectOrCreateProject(deps.commands, await gcloudPath(deps, state), {
       preferredPrefix: GOOGLE_PROJECT_PREFIX,
     });
     if (!result.ok) {
@@ -118,11 +129,11 @@ function apisEnabledRunner(deps: GoogleSetupActionDeps, state: GcloudState): Goo
         'Re-run the flow so the project step runs first.',
       );
     }
-    const already = await enabledServices(deps.commands, gcloudPath(state), projectId);
+    const already = await enabledServices(deps.commands, await gcloudPath(deps, state), projectId);
     if (already.ok && REQUIRED_SERVICES.every((service) => already.services.includes(service))) {
       return alreadyDone(`Already enabled: ${REQUIRED_SERVICES.join(', ')}.`);
     }
-    const result = await enableServices(deps.commands, gcloudPath(state), projectId, REQUIRED_SERVICES);
+    const result = await enableServices(deps.commands, await gcloudPath(deps, state), projectId, REQUIRED_SERVICES);
     if (!result.ok) {
       return failed('The required Google APIs could not be enabled.', result.problem, result.fix);
     }

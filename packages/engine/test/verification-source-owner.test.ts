@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { VerificationStore } from '../platform/src/platform/core/verification/store.js';
 import { issueVerificationSource, verificationSources, verificationWireSource } from '../platform/src/platform/core/verification/source.js';
@@ -193,10 +193,16 @@ test('compaction preserves reordered exact JSON records and distinguishes proper
   expect(verificationHistory(owner)[0]?.messages).toEqual(before);
 });
 
-test('a native provenance reference without its complete archived record holds recovery', () => {
+test('a native provenance reference without its complete archived record sets the journal aside and starts empty', () => {
   const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
   appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'broken-position', value: { histories: [], derived: [[0, 'message-missing-record']] } }) + '\n');
-  expect(() => new VerificationStore(f.root, f.session)).toThrow('missing archived message record');
+  const recovered = new VerificationStore(f.root, f.session);
+  expect(recovered.archive).toBeUndefined();
+  expect(recovered.setAsideNotice).toContain('missing archived message record');
+  const moved = readdirSync(dirname(f.path)).filter(name => name.includes('.jsonl.held-'));
+  expect(moved).toHaveLength(1);
+  expect(recovered.setAsideNotice).toContain(moved[0]!);
+  expect(existsSync(f.path)).toBe(false);
 });
 
 test('undo owns removed provenance, redo restores it, and new user input retires it', () => {
@@ -215,7 +221,8 @@ test('undo owns removed provenance, redo restores it, and new user input retires
   conversation.addUserMessage(feedback as string);
   expect(conversation.redo()).toBe(false);
   expect(f.store.archive?.messageRecords ?? []).toHaveLength(0);
-  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user', 'user']);
+  // Undo removed the host-made observation with its turn, so the retyped text is the only message left.
+  expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user']);
 });
 
 test('native message deletions remap surviving feedback and retire removed source records', () => {
@@ -256,11 +263,18 @@ test('native cancellation preserves feedback origin and a loaded conversation ca
   expect(verificationMessages(conversation, conversation.getMessageSnapshot()).map(message => message.role)).toEqual(['user']);
 });
 
-test('an inadmissible latest archive cannot silently fall back to earlier message provenance', () => {
+test('an inadmissible latest archive sets the journal aside instead of falling back to earlier message provenance', () => {
   const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
   appendFileSync(f.path, JSON.stringify({ kind: 'archive', key: 'unadmitted-position', value: { histories: [], derived: [[0, 'message-private-record']],
     messageRecords: [{ id: 'message-private-record', message: { role: 'user', content: 'password=synthetic-unadmitted-private-value' } }] } }) + '\n');
-  expect(() => new VerificationStore(f.root, f.session)).toThrow('unadmitted archived provenance');
+  const recovered = new VerificationStore(f.root, f.session);
+  expect(recovered.archive).toBeUndefined();
+  expect(recovered.setAsideNotice).toContain('unadmitted archived provenance');
+  expect(readdirSync(dirname(f.path)).filter(name => name.includes('.jsonl.held-'))).toHaveLength(1);
+  // The next turn writes a fresh journal beside the set-aside one.
+  recovered.rememberArchive({ histories: [], derived: [] });
+  expect(existsSync(f.path)).toBe(true);
+  expect(new VerificationStore(f.root, f.session).setAsideNotice).toBeUndefined();
 });
 
 test('repair checkpoints reuse original message records across draft edits and recover private observations without storing them', async () => {
@@ -356,11 +370,13 @@ test('immutable original IDs cannot be rebound, including after recovery of a st
   expect(restored.original(converted.id)).toHaveProperty('message');
 });
 
-test('a repair checkpoint with missing originals holds recovery instead of reviving earlier diagnostics', () => {
+test('a repair checkpoint with missing originals sets the journal aside instead of reviving earlier diagnostics', () => {
   const f = journal(); f.store.rememberArchive({ histories: [], derived: [] });
   appendFileSync(f.path, JSON.stringify({ kind: 'repair', key: 'main', value: { schemaVersion: 2, id: 'repair-incomplete', count: 1,
     requestSource: 'original-missing-request', sourceIds: ['original-missing-message'], review: null, response: 'Retained draft.', accessHeld: true } }) + '\n');
-  expect(() => new VerificationStore(f.root, f.session)).toThrow('missing repair checkpoint original');
+  const recovered = new VerificationStore(f.root, f.session);
+  expect(recovered.repairCheckpoint('main')).toBeUndefined();
+  expect(recovered.setAsideNotice).toContain('missing repair checkpoint original');
 });
 
 test('malformed restored findings cannot become current repair guidance', () => {

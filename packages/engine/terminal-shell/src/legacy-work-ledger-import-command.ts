@@ -48,6 +48,7 @@ export function registerLegacyImportCommands<T extends Context>(registry: Regist
           if (action !== 'status' && action !== 'cancel') context.print('Legacy import request pending. Waiting for the selected host; Jev retry and admission remain host-owned.');
           const entry = action === 'status' ? await session.status() : action === 'submit' ? await session.submit() : await session[action! as 'reconsider' | 'recover' | 'cancel' | 'restart'](args[2]!);
           lines.unshift(...entryLines(entry));
+          if (action === 'cancel' && entry?.state !== 'cancelled') lines.unshift(`Nothing was cancelled: cancel applies only to a pending import, and this one is ${entry?.state ?? 'not saved'}.`);
         }
         lines.push('Historical claims only; no execution or verification authority. Legacy sources are retained.');
         context.print(lines.join('\n'));

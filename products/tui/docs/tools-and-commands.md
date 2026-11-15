@@ -26,7 +26,7 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | `write` | Atomic writes, overwrite modes, and auto-heal pipelines |
 | `edit` | Structural code edits with validation and rollback |
 | `find` | Files, content, symbols, references, and structural search |
-| `repo_map` | A token-budgeted orientation map of an unfamiliar codebase |
+| `repo_map` | A ranked map of the repository's source files and their exports, with an optional token budget |
 
 ### Execution and analysis
 
@@ -50,7 +50,7 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | Tool | What it does |
 | --- | --- |
 | `agent` | In-process agent work |
-| `workflow` | WRFC and related execution flows |
+| `workflow` | Scheduled and multi-step execution flows |
 | `remote` | Distributed runtime control |
 | `channel` | Channel-aware runtime and delivery surfaces |
 | `control` and `state` | Product/runtime introspection |
@@ -113,10 +113,12 @@ Multi-mode search across files, content, symbols, references, and structural AST
 
 ### repo_map
 
-A model-invoked orientation tool, not passive always-on context injection. It returns a token-budgeted map of the repository: a per-directory source-file count plus the highest-centrality source files, ranked by import-graph centrality with file size as a tie-break, each with its top-level exported symbols. Call it to get oriented in an unfamiliar codebase before reading individual files.
+A model-invoked orientation tool, not passive always-on context injection. It returns a map of the repository: a per-directory source-file count plus the source files, ranked by import-graph centrality with file size as a tie-break, each with its top-level exported symbols. Call it to get oriented in an unfamiliar codebase before reading individual files.
 
 - Optional `path` argument scopes the map to a subdirectory; default is the whole project
-- Optional `budgetTokens` argument controls map size (default 2,000, clamped between 200 and 32,000); a lower budget returns fewer key files
+- Optional `budgetTokens` argument sets an approximate token budget for the symbol detail; omit it or pass 0 to list every indexed source file with its exports, which can be large on a big repository. Any positive value is used as given and the map stops at that size, naming how many files were omitted
+- Optional `detail` argument: `symbols` (default) is the ranked import graph with exported symbols; `structure` lists every source path grouped by directory without reading source bodies, for a first look at a large repository
+- Files the owner has denied reads for keep their path but are flagged `[access-restricted]` with their symbols withheld; files that could not be read are flagged `[unreadable]`, and what the scan skipped is listed under "Discovery warnings"
 - Read-only, safe to run in parallel with other tool calls
 - Covers TypeScript and JavaScript source files
 
@@ -178,7 +180,7 @@ In-process subagent management. See [Agent system](#agent-system) below for arch
 - Token budget estimation via `budget` mode
 - Execution plan introspection via `plan` mode
 - Batch spawning via `batch-spawn` mode
-- WRFC chain introspection via `wrfc-chains` and `wrfc-history` modes
+- contract introspection via `contracts` and `contract-history` modes
 - Cohort tracking via `cohort-status` and `cohort-report` modes
 
 ### state
@@ -196,7 +198,7 @@ Session state, persistent memory, telemetry, hooks, and output modes, all in one
 
 Workflow state machines, automation triggers, and scheduled tasks. See [Automation and scheduling](#automation-and-scheduling) below for the underlying contract model.
 
-- Named workflow definitions: `wrfc` (work-review-fix cycle), `fix_loop`, `test_then_fix`, `review_only`
+- Named workflow definitions: `contract` (starts a contract whose units are checked against acceptance criteria), `fix_loop`, `test_then_fix`, `review_only`
 - State machine with validated transitions: prevents invalid state changes
 - Automation triggers: fire shell commands when specific hook events occur, with optional JS conditions
 - Cron scheduler: full 5-field cron expressions with IANA timezone support, missed-run detection, per-task run history, and enable/disable control; persists to `.goodvibes/tui/schedules.json`
@@ -212,10 +214,10 @@ Structured execution and coordination beyond a single conversation turn.
 
 ### packet / query
 
-Durable planning and operator-communication artifacts.
+Durable planning and note-keeping artifacts.
 
-- `packet`: create, revise, publish, and list implementation packets / execution packets
-- `query`: track operator queries, answers, escalation targets, and closure state
+- `packet`: keep your own notes as implementation packets / execution packets (create, revise, publish, list); they are stored in a file and are not sent to or consumed by anything else
+- `query`: keep notes on questions, answers, and closure state (stored in a file; asking does not deliver the question to an operator)
 
 ### mcp / remote / control
 
@@ -279,7 +281,7 @@ Representative slash-command families, with a one-line summary of each:
 
 `/editor` (alias `/ed`) opens the current composer draft in your `$VISUAL`/`$EDITOR`, suspends the TUI while the editor runs, and loads the edited text back into the composer when you save and quit. Set `$EDITOR` (e.g. `export EDITOR=nvim`) for it to work.
 
-Composer capture markers: a line beginning with `#` saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`## ...` markdown headings are left alone and sent normally.) The existing `!# <text>` still pins to session memory and also sends the text as a prompt.
+Composer capture markers: a single line beginning with `#` saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`## ...` markdown headings and multi-line text that starts with `#` are left alone and sent normally.) The existing `!# <text>` still pins to session memory and also sends the text as a prompt.
 
 `/schedule add when "<natural language>" <prompt...>` accepts natural-language times parsed locally, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`. The command always echoes back the concrete interpretation (the resulting cron/interval/one-shot schedule) before the job is saved, so you can see exactly what was understood.
 
@@ -295,7 +297,7 @@ Composer capture markers: a line beginning with `#` saves the rest as a session-
 | `rename` | Rename the current or a named session |
 | `resume` | Reopen a saved session |
 | `fork` | Branch a session into a new one |
-| `save` | Save the current session |
+| `save [name] [--yes]` | Save the current session. Refuses to replace a different saved conversation that already uses the name; `--yes` replaces it deliberately |
 | `info` | Show the current session's details |
 | `export <id\|.> [format]` | Export a session (`.` is the current one) |
 | `search <query>` | Search saved sessions |
@@ -315,7 +317,7 @@ The orchestration subcommands manage a cross-session task DAG with cycle detecti
 
 Alias: `/sess`. Run `/session` with no arguments to see current session info.
 
-`/model` opens the fullscreen provider/model workspace. The left rail chooses the target route (`Main Chat`, `Helper Model`, `Tool LLM`, or `TTS LLM`), and the main table filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping. `/provider` opens the same workspace in provider-first mode so users can choose a provider and then a model for the active target.
+`/model` opens the fullscreen provider/model workspace. The left rail chooses the target route (`Main Chat`, `Helper Model`, `Tool LLM`, `TTS LLM`, or `Embeddings`), and the main table filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping. `/provider` opens the same workspace in provider-first mode so users can choose a provider and then a model for the active target.
 
 `/project-plan` (alias `/planning`) opens native work and recovery; `/project-plan panel` does the same. `/project-plan <goal>` submits the exact original terminal request through native conversation intake, with no historical planning fallback. `/project-plan history` opens saved historical records without readiness evaluation, suggested answers, approval controls, or a planning interview. Explicit `/project-plan answer` and `/project-plan approve` remain compatibility edits to saved records, guarded by their captured source revision; their output does not generate a next question or authorize native work. `/project-plan dismiss` archives historical execution/planning records and leaves native intake and recovery untouched. This is distinct from `/plan`, which only toggles the read-only permission plan mode (see [Keyboard shortcuts](#keyboard-shortcuts) below, `Shift+Tab`).
 
@@ -420,7 +422,7 @@ In a searchable modal, `/` focuses the filter, and any keystroke that no row hot
 |-----|--------|
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
 | `Ctrl+K` | Open the command palette (search and run any command) |
-| `Shift+Tab` | Cycle the session permission mode: normal → accept-edits → plan → auto. While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
+| `Shift+Tab` | Cycle the execution mode: safe-owner → safe-jev → yolo (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
 | `Alt+C` | Cancel the running tool call (the turn continues) |
 | `Alt+A` | Toggle keep-awake (the "sleep disabled" chip) |
@@ -471,11 +473,11 @@ Ask for it in conversation (`spawn an engineer agent to refactor src/utils.ts`),
 
 ### Git worktree isolation
 
-When an agent is spawned, it can be given its own git worktree. On completion, changes are merged back. On cancellation or error, the worktree is cleaned up.
+When an agent is spawned, it can be given its own git worktree. On completion, changes are merged back. On cancellation or error, a worktree with nothing unique in it is removed at once; one with uncommitted changes or unmerged commits is kept (see Worktree retention in the orchestration runtime doc), and `/worktree review` shows how old it is, how large, and why it is kept.
 
 ## Hook system
 
-Hooks fire on lifecycle events throughout a session. They are configured in `.goodvibes/hooks.json` (or a custom file set in `tools.hooksFile`).
+Hooks fire on lifecycle events throughout a session. They are configured in `hooks.json` in the project working directory (or a custom file set in `tools.hooksFile`, also resolved against the project working directory).
 
 ### Event path format
 
@@ -550,6 +552,8 @@ Wildcards are supported: `Pre:tool:*` matches all pre-tool events.
 }
 ```
 
+Hooks files other users can write (or that another user owns) are not loaded, because hook commands run with your privileges; reloading hooks replaces only what came from the file and keeps hooks added at runtime. An HTTP hook never follows a redirect.
+
 ### Hook chains
 
 Chains trigger an action only after a sequence of events occurs, with optional time windows and conditions:
@@ -587,12 +591,12 @@ A hook definition supports these properties:
 | `async` | Run in the background without blocking |
 | `once` | Run once, then auto-remove |
 | `description` | Documentation text |
-
-The `HookDefinition` type in `src/hooks/types.ts` is the authoritative field
-set and carries a small number of advanced, situational fields beyond this
-table.
 | `name` | Optional name for programmatic enable/disable/remove |
 | `enabled` | Whether the hook is active (default `true`) |
+
+The `HookDefinition` type in the engine's `platform/hooks/types.ts` is the authoritative field
+set and carries a small number of advanced, situational fields beyond this
+table.
 
 ## Automation and scheduling
 
@@ -600,7 +604,7 @@ Beyond individual hook definitions, GoodVibes treats hook points, workflow runs,
 
 - Hook-point contracts carry execution authority, mutation/injection permissions, timeout policy, and failure policy metadata: a hook point declares what it is allowed to do, not just what triggers it
 - Managed hooks support scaffold, chain, enable/disable, inspect, import/export, and simulation flows through `/hooks` and the `state` tool's hook management modes
-- Workflow state machines (`wrfc`, `fix_loop`, `test_then_fix`, `review_only`) drive validated transitions for multi-step review/fix cycles. See [Tool reference: workflow](#workflow) above
+- Workflow state machines (`fix_loop`, `test_then_fix`, `review_only`) drive validated transitions for multi-step review/fix cycles. See [Tool reference: workflow](#workflow) above
 - Cron-like scheduled agent tasks support timezone-aware schedules, missed-run tracking, run history, and manual trigger support, managed via `/schedule`
 
 Project planning and the persistent `/work-plan` checklist are a related but separate surface. See [Project planning](#project-planning) below and [Project planning](project-planning.md).
@@ -631,7 +635,9 @@ GoodVibes also reads MCP servers already configured for other tools, read-only: 
 }
 ```
 
-MCP tools appear in the tool registry as `mcp:<server-name>:<tool-name>`. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. A stdio server that exits unexpectedly is restarted, up to three attempts with a growing delay. The attempt count resets only after the restarted server completes protocol negotiation, so a server that keeps crashing before it negotiates is given up on and left disconnected.
+A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust.
+
+MCP tools appear in the tool registry as `mcp:<server-name>:<tool-name>`. Tool schemas load progressively: names and descriptions at startup, full parameter schemas on first use. A stdio server that exits unexpectedly is restarted, up to three attempts with a growing delay. The attempt count resets only after the restarted server completes protocol negotiation, so a server that keeps crashing before it negotiates is given up on and left disconnected. A stdio server that starts but never answers the handshake is given up on after 30 seconds (its process is stopped), so one silent server cannot hold up the others; configured servers connect a few at a time rather than one after another. A server whose output stream closes while its process keeps running is stopped and restarted the same way as a crash. The MCP server list reports each server's phase (`starting`, `negotiating`, `ready`, `restart-wait`, `gave-up`, `closed`) and its last error, and a tool call to a server that is not connected says which of these it is in and what to do next: wait for a restart, or fix the server and run `/mcp reload`.
 
 MCP tool calls respect the `permissions.tools.mcp` setting (default: `prompt`).
 
@@ -713,7 +719,7 @@ Many commands also have matching modals and control rooms. High-signal examples:
 - MCP trust and reconnect posture
 - approvals, policy, security, and diagnostics
 - tasks, orchestration, worktrees, and agents
-- WRFC chain state and constraint satisfaction
+- contract state and verification results
 - project planning readiness, decisions, project language, task graph, verification gates, and agent handoff metadata
 - persistent work-plan task tracking for ongoing local implementation work
 
@@ -756,24 +762,6 @@ Use `/compact` to compact manually at any time.
 `/knowledge ask <query>` asks the platform knowledge/wiki layer for a source-backed semantic answer. Use `--space <knowledgeSpaceId>` to target a specific space such as a Home Assistant graph, `--limit <n>` to bound evidence, and `--mode concise|standard|detailed` to select answer detail.
 
 The TUI displays the platform-returned answer text, sources, facts, linked objects, gaps, confidence, and synthesized state directly. It does not turn search results into local snippets.
-
-## WRFC constraint visibility
-
-Agents surfaces WRFC constraint state at every level of a running chain:
-
-- Each chain renders a constraint badge (`c:N/M`) colored by aggregate satisfaction status (green = all satisfied, grey = unverified, red = unsatisfied; yellow when some constraints are verified and some are still pending).
-- Expanding a chain shows each constraint with a status marker: `[SAT]` (satisfied), `[UNS CRIT]` / `[UNS MAJOR]` / `[UNS MINOR]` (unsatisfied, severity-tagged), or `[UNV]` (unverified). Inherited constraints are marked with a trailing ` *`.
-- Fix-attempt process-modal rows append `[Nc]` to indicate the number of constraints the fix is targeting.
-- The selected-chain summary line shows satisfied/total/inherited counts.
-- Controller-flagged synthetic issues (raised by the workflow controller rather than a reviewer) render above reviewer issues under a `[CRITICAL]` "Controller flags" header.
-- The agent-detail modal surfaces the `systemPromptAddendum` field from the agent record when it contains a WRFC engineer addendum, so the full constraint injection is visible without leaving the TUI.
-- When constraints are loaded, the system-message router emits a `WORKFLOW_CONSTRAINTS_ENUMERATED` operator-visible message. This is routed through the standard `ui.wrfcMessages` setting (`panel`, `conversation`, or `both`).
-
-There is no dedicated `/wrfc` command. Open the chain-status view in Agents (`F2`, `Ctrl+O` or `/agents`), where WRFC chains are one of the tracked process kinds alongside agents, workstreams, workflows, and scheduled or triggered work.
-
-Each chain row and the selected-chain summary also show elapsed time (active chains, since `createdAt`) or total duration (terminal chains, `createdAt` to `completedAt`). When an expanded chain's detail exceeds the per-chain line cap, the truncated tail is replaced with a `+N more` indicator instead of being silently dropped.
-
-The empty state points at the actual chain producer, `/teamwork create-mode <mode> <title>` (modes with `reviewMode: wrfc`; see `/teamwork modes`), rather than a `/wrfc run` command that does not exist.
 
 ## Live TTS commands
 
@@ -818,11 +806,11 @@ Some command families are especially important when you are running GoodVibes as
 - `/schedule` for cron-like and interval-based automation
 - `/hooks` for managed hook inspection and simulation
 - `/remote` for dispatching and recovering distributed work
-- `/sandbox` for isolation review and QEMU/bootstrap flows
+- `/sandbox` for isolation review and the live sandbox session
 
-There is no standalone `/wrfc` or `/workflow` command; WRFC chain state is visible in Agents (see [WRFC constraint visibility](#wrfc-constraint-visibility) below).
+There is no standalone `/workflow` command; contract and workflow state is visible in Agents (`F2`, `Ctrl+O` or `/agents`).
 
-For QEMU guest bootstrapping details, including the generated image script and guest runtime package list, see [QEMU sandbox bootstrapping](qemu-sandbox.md).
+For the exec sandbox and what REPL and MCP isolation currently is, see [Sandbox](sandbox.md).
 
 ## CLI session lifecycle flags
 

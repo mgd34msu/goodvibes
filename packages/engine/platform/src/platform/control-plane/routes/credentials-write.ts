@@ -108,7 +108,8 @@ export interface CredentialWriteAuditEntry {
   readonly configKey: string;
   readonly secretKey: string;
   readonly scope: SecretScope;
-  readonly outcome: 'stored' | 'cleared' | 'refused';
+  /** `absent`: a delete found nothing stored, which is a no-op and not a refusal. */
+  readonly outcome: 'stored' | 'cleared' | 'refused' | 'absent';
   /** The authenticated principal the daemon observed, when there was one. */
   readonly principalId?: string | undefined;
   readonly principalKind?: string | undefined;
@@ -197,6 +198,37 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
     const scope = resolveSecretWriteScope(secretKey);
     const audited = principalFields(invocation);
 
+    // What the store holds now, kept so a failed write can put it back: the
+    // write below replaces it in place, and a working credential must not be
+    // lost to a refused change.
+    let previous: string | null;
+    try {
+      previous = await deps.secrets.get(secretKey);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
+      throw new GatewayVerbError(
+        `${key} was not stored: the secret store could not be read before the write (${detail}). Nothing was changed.`,
+        'CREDENTIAL_STORE_UNAVAILABLE',
+        503,
+        'key',
+      );
+    }
+
+    // True when the store holds what it held before this call.
+    const restorePrevious = async (): Promise<boolean> => {
+      try {
+        if (previous === null) await deps.secrets.delete(secretKey, { scope });
+        else await deps.secrets.set(secretKey, previous, { scope });
+        return (await deps.secrets.get(secretKey)) === previous;
+      } catch {
+        return false;
+      }
+    };
+    const restoredSentence = (restored: boolean): string => restored
+      ? 'The setting and the stored credential were left exactly as they were'
+      : 'The stored credential could not be put back and may have changed, so check it before relying on it';
+
     try {
       // The scope is stated at the call site on purpose: it is the platform's
       // own answer for this key (resolveSecretWriteScope), so a reviewer can
@@ -205,17 +237,24 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
       await deps.secrets.set(secretKey, value, { scope });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      const restored = await restorePrevious();
       record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
       throw new GatewayVerbError(
-        `${key} was not stored: the secret store refused the write (${detail}). The setting was left exactly as it was.`,
+        `${key} was not stored: the secret store refused the write (${detail}). ${restoredSentence(restored)}.`,
         'CREDENTIAL_STORE_UNAVAILABLE',
         503,
         'key',
       );
     }
 
-    const readBack = await deps.secrets.get(secretKey);
+    let readBack: string | null;
+    try {
+      readBack = await deps.secrets.get(secretKey);
+    } catch {
+      readBack = null;
+    }
     if (readBack !== value) {
+      const restored = await restorePrevious();
       record(deps, {
         action: 'set',
         configKey: key,
@@ -227,7 +266,7 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
       });
       throw new GatewayVerbError(
         `${key} was not stored: the secret store did not read back what was just written to it. `
-        + 'The setting was left exactly as it was, because a config key pointing at a reference that '
+        + `${restoredSentence(restored)}, because a config key pointing at a reference that `
         + 'resolves to nothing reads as a configured-but-broken credential.',
         'CREDENTIAL_STORE_UNAVAILABLE',
         503,
@@ -236,7 +275,19 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
     }
 
     const reference = secretReferenceFor(secretKey);
-    deps.config.setDynamic(key, reference);
+    try {
+      deps.config.setDynamic(key, reference);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const restored = await restorePrevious();
+      record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
+      throw new GatewayVerbError(
+        `${key} was not stored: the setting could not be written (${detail}). ${restoredSentence(restored)}.`,
+        'CREDENTIAL_STORE_UNAVAILABLE',
+        503,
+        'key',
+      );
+    }
     record(deps, { action: 'set', configKey: key, secretKey, scope, outcome: 'stored', ...audited });
 
     return {
@@ -278,11 +329,56 @@ export function createCredentialDeleteHandler(deps: CredentialWriteDeps): Gatewa
     const secretKey = daemonSecretKeyFor(key);
     const scope = resolveSecretWriteScope(secretKey);
     const audited = principalFields(invocation);
-    const hadSecret = (await deps.secrets.get(secretKey)) !== null;
+    let hadSecret: boolean;
+    try {
+      hadSecret = (await deps.secrets.get(secretKey)) !== null;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      record(deps, { action: 'delete', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
+      throw new GatewayVerbError(
+        `${key} was not removed: the secret store could not be read before the delete (${detail}). The setting was left exactly as it was.`,
+        'CREDENTIAL_STORE_UNAVAILABLE',
+        503,
+        'key',
+      );
+    }
     const hadConfigValue = deps.config.get(key) !== undefined && deps.config.get(key) !== '';
 
-    await deps.secrets.delete(secretKey);
-    if (hadConfigValue) deps.config.setDynamic(key, '');
+    try {
+      await deps.secrets.delete(secretKey);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      record(deps, { action: 'delete', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
+      throw new GatewayVerbError(
+        `${key} was not removed: the secret store refused the delete (${detail}). The setting was left exactly as it was.`,
+        'CREDENTIAL_STORE_UNAVAILABLE',
+        503,
+        'key',
+      );
+    }
+    if (hadConfigValue) {
+      try {
+        deps.config.setDynamic(key, '');
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        record(deps, {
+          action: 'delete',
+          configKey: key,
+          secretKey,
+          scope,
+          outcome: 'refused',
+          ...audited,
+          detail: `the stored secret was removed but the setting could not be cleared: ${detail}`,
+        });
+        throw new GatewayVerbError(
+          `${key} was only partly removed: the stored secret is gone, but the setting could not be cleared (${detail}) `
+          + 'and still points at it, so it reads as a configured-but-broken credential. Clear the setting with config.set.',
+          'CREDENTIAL_STORE_UNAVAILABLE',
+          503,
+          'key',
+        );
+      }
+    }
 
     const cleared = hadSecret || hadConfigValue;
     record(deps, {
@@ -290,7 +386,7 @@ export function createCredentialDeleteHandler(deps: CredentialWriteDeps): Gatewa
       configKey: key,
       secretKey,
       scope,
-      outcome: cleared ? 'cleared' : 'refused',
+      outcome: cleared ? 'cleared' : 'absent',
       ...audited,
       ...(cleared ? {} : { detail: 'nothing was stored under this key' }),
     });

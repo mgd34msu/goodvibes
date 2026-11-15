@@ -154,7 +154,7 @@ describe('the ws verb call', () => {
     socket().onopen?.({});
     socket().onmessage?.({ data: JSON.stringify({ type: 'auth', ok: true }) });
     const call = JSON.parse(sent[1] as string) as { id: string };
-    socket().onmessage?.({ data: JSON.stringify({ type: 'response', id: call.id, ok: false, status: 404 }) });
+    socket().onmessage?.({ data: JSON.stringify({ type: 'response', id: call.id, ok: false, status: 404, body: { error: 'Unknown gateway method: sessions.hosted.kill', code: 'METHOD_NOT_FOUND' } }) });
 
     const outcome = await pending;
     expect(outcome.ok).toBe(false);

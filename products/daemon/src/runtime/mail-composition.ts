@@ -18,12 +18,14 @@
 
 import {
   withSurfaceEmailConfig,
+  configReaderWithOrigins,
   describeSurfaceEmailConfigProblem,
   describeSenderClaimNeutrally,
   EmailReplySubjectSourceOwner,
   type EmailServiceDeps,
   type SurfaceEmailConfigProblem,
 } from '@goodvibes-jev/engine/platform/platform/email';
+import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 
 /** The narrow slices this composition needs; the real managers satisfy them. */
@@ -54,7 +56,8 @@ export function composeMailDeps(input: MailCompositionInput): {
   readonly emailServiceDeps: EmailServiceDeps;
   readonly describeEmailConfigProblem: () => Promise<SurfaceEmailConfigProblem | null>;
 } {
-  const getConfig = (key: string): unknown => input.configManager.get(key);
+  // Carries whether a key was set, so an explicit port equal to its default is not taken for unset.
+  const getConfig = configReaderWithOrigins(input.configManager);
   let replySubjectSourceOwner: EmailReplySubjectSourceOwner | undefined;
   if (input.configManager.onDidInvalidate && input.secretsManager.onDidChange && input.registerDispose) {
     const owner = new EmailReplySubjectSourceOwner();
@@ -91,6 +94,10 @@ export function composeMailDeps(input: MailCompositionInput): {
     // raises display confidence only, and commandAuthority is the literal
     // 'none'.
     describeSenderClaim: describeSenderClaimNeutrally,
+    // Without a recorder the service reads strangers' mail into nothing and the
+    // outward-effect guard never sees the exposure. The process-wide ledger is
+    // the one the gateway composition and the browser engine already use.
+    recordUntrustedIngest: (ingest) => { getProcessUntrustedContentLedger().record(ingest); },
   });
   return {
     emailServiceDeps,

@@ -15,6 +15,7 @@
  * - the graph snapshot surfaces render (nodes, edges, states, pool state,
  *   stalled tells).
  */
+import { firstPhase } from './scheduler.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from './types.js';
 
 /** Fields shared by every edge-add outcome. */
@@ -55,10 +56,13 @@ function edgeTargets<N extends GraphNode>(workstream: DependencyGraph<N>, item: 
 /** DFS: would adding `from -> dependsOn -> to` close a cycle? Returns the path when yes. */
 export function wouldCreateCycle(workstream: DependencyGraph, fromItemId: string, toItemId: string): readonly string[] | null {
   // A cycle exists if `to` (the new blocker) can already reach `from` through dependsOn edges.
-  const start = workstream.items.find((i) => i.id === toItemId);
+  // The blocker may be a best-of-N source id: the walk then starts from every sibling of the group,
+  // the same resolution addDependencyEdge uses.
+  const direct = workstream.items.find((i) => i.id === toItemId);
+  const starts: readonly GraphNode[] = direct ? [direct] : workstream.items.filter((i) => i.attemptSourceId === toItemId);
   const target = fromItemId;
-  if (!start) return null;
-  const stack: Array<{ item: GraphNode; path: string[] }> = [{ item: start, path: [start.title] }];
+  if (starts.length === 0) return null;
+  const stack: Array<{ item: GraphNode; path: string[] }> = starts.map((start) => ({ item: start, path: [start.title] }));
   const seen = new Set<string>();
   while (stack.length > 0) {
     const { item, path } = stack.pop()!;
@@ -103,7 +107,7 @@ export function addDependencyEdge(
 
 /**
  * Integration-conflict serialization: when `conflicted` could not merge, every
- * LATER non-terminal item that shares any of its files gains a serialization
+ * LATER item still waiting at its first phase that shares any of its files gains a serialization
  * edge on the conflicted item, they wait for the resolution instead of piling
  * more merges onto a known-conflicted base region.
  */
@@ -116,10 +120,15 @@ export function addConflictSerializationEdges(
   const fileSet = new Set([...conflictFiles, ...(conflicted.files ?? []), ...conflicted.touchedPaths]);
   if (fileSet.size === 0) return 0;
   let added = 0;
+  const first = firstPhase(workstream);
   for (const other of workstream.items) {
     if (other.id === conflicted.id) continue;
     if (other.state === 'passed' || other.state === 'failed') continue;
     if (other.state === 'in-phase') continue; // already running, the lane will serialize its merge anyway
+    // Dependency gates only hold an item at its first phase before it is claimed (applyDependencyGates);
+    // an edge on any other item would look like protection and enforce nothing, so it is not added or counted.
+    if (!first || other.currentPhaseId !== first.id) continue;
+    if (other.state !== 'pending' && other.state !== 'awaiting-capacity' && other.state !== 'blocked-dependency') continue;
     const otherFiles = [...(other.files ?? []), ...other.touchedPaths];
     if (!otherFiles.some((file) => fileSet.has(file))) continue;
     const result = addDependencyEdge(

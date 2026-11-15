@@ -18,9 +18,10 @@
  * not observe sends whoever reads it to fix the wrong thing.
  */
 
-import type { AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
+import { readSurfaceMessageText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
+import { renderForModel, untrustedFrom } from './untrusted-content.ts';
 
 /** The daemon method that serves provider inbound feeds. */
 export const CHANNEL_INBOX_LIST_METHOD = 'channels.inbox.list';
@@ -154,10 +155,12 @@ export interface UnifiedInboxSummary {
  *  `auth_required`  , no operator token, or the daemon rejected the one there.
  *  `daemon_unreachable`, the call did not complete.
  *  `method_unavailable`, the daemon answered, and its answer was that it does
- *                      not serve this method. This is what the live platform
- *                      says today: `channels.inbox.list` is cataloged with
- *                      `invokable: false` and no route serves its advertised
- *                      path, so the call returns rather than hanging.
+ *                      not serve this method (a 404 or METHOD_NOT_FOUND, or the
+ *                      route-unavailable answer for a cataloged method it does not
+ *                      dispatch). A daemon serves `channels.inbox.list` only when
+ *                      it composes an inbox; one that answers 501 NOT_INVOKABLE
+ *                      is classified as a connected-host error and lands in
+ *                      `daemon_error` below, with its own detail.
  *  `daemon_error`   , it answered with something else.
  */
 export type InboundChannelFeedUnavailableReason =
@@ -249,13 +252,16 @@ function toDeliveryItem(raw: Record<string, unknown>): UnifiedInboxDeliveryItem 
 }
 
 function toSurfaceMessageItem(raw: Record<string, unknown>): UnifiedInboxSurfaceMessageItem {
+  // A triage built from a real feed carries its text only inside the untrusted frame,
+  // so the plain title and preview come from the side channel it keeps.
+  const text = readSurfaceMessageText(raw);
   return {
     kind: 'surface_message',
     id: readString(raw, 'id', 'message'),
     surface: readString(raw, 'surface', 'unknown'),
     level: readString(raw, 'level', 'info'),
-    title: readString(raw, 'title'),
-    bodyPreview: readString(raw, 'bodyPreview'),
+    title: text?.title ?? readString(raw, 'title'),
+    bodyPreview: text?.bodyPreview ?? readString(raw, 'bodyPreview'),
     routeId: readStringOrNull(raw, 'routeId'),
     surfaceId: readStringOrNull(raw, 'surfaceId'),
     clientId: readStringOrNull(raw, 'clientId'),
@@ -506,15 +512,89 @@ export function aggregateUnifiedInbox(
     policy: inboundChannelFeed.available
       ? 'Read-only unified inbox. Aggregates daemon-exposed delivery attempts, control-plane surface messages, route bindings, and provider inbound messages.'
       : 'Read-only unified inbox. Aggregates daemon-exposed delivery attempts, control-plane surface messages, and route bindings. '
-        + `The provider inbound feed is absent: ${inboundChannelFeed.detail}`,
+        + `The provider inbound feed is absent (${inboundChannelFeed.reason}); the daemon's own wording is in the inbox's formatted text.`,
   };
 }
 
 /**
- * Format a UnifiedInbox for human-readable output.
+ * The text in an inbox that someone outside the owner's control wrote: a
+ * delivery error echoed from a provider, a surface message's title, a
+ * route-binding sender name, and an inbound message's sender, subject and body.
+ * One list so the model-facing frame and the exposure record a caller makes for
+ * the ledger cover exactly the same text.
+ */
+function thirdPartyInboxLines(inbox: UnifiedInbox): readonly string[] {
+  const { deliveryItems, surfaceMessageItems, routeBindingItems, inboundMessageItems } = inbox;
+  const lines: string[] = [];
+
+  const sourceErrors = inbox.sources.filter((source) => source.error && source.name !== 'inbound_messages');
+  // The not-attempted detail is the product's own sentence; every other detail may be daemon text.
+  const feedDetail = inbox.inboundChannelFeed.available || inbox.inboundChannelFeed.reason === 'not_attempted'
+    ? ''
+    : inbox.inboundChannelFeed.detail;
+  if (sourceErrors.length > 0 || feedDetail) {
+    lines.push('Source Errors');
+    for (const source of sourceErrors) lines.push(`- ${source.name}: ${source.error}`);
+    if (feedDetail) lines.push(`- inbound channel feed: ${feedDetail}`);
+  }
+
+  if (deliveryItems.length > 0) {
+    lines.push('Delivery Attempts');
+    for (const item of deliveryItems.slice(0, 10)) {
+      const targetDesc = [item.target.surfaceKind, item.target.routeId, item.target.label].filter(Boolean).join('/');
+      lines.push(`- [${item.status}] ${item.id} target=${targetDesc || item.target.kind}${item.error ? ` err=${item.error}` : ''}`);
+    }
+  }
+
+  if (surfaceMessageItems.length > 0) {
+    lines.push('Surface Messages');
+    for (const item of surfaceMessageItems.slice(0, 10)) {
+      lines.push(`- [${item.level}] ${item.surface}: ${item.title}`);
+    }
+  }
+
+  if (routeBindingItems.length > 0) {
+    lines.push('Route Bindings');
+    for (const item of routeBindingItems.slice(0, 10)) {
+      lines.push(`- ${item.id}: ${item.surfaceKind} ${item.bindingKind} sender=${item.principalLabel}`);
+    }
+  }
+
+  if (inboundMessageItems.length > 0) {
+    lines.push('Inbound Messages');
+    for (const item of inboundMessageItems.slice(0, 10)) {
+      const heading = item.subject ?? item.bodyPreview.slice(0, 60);
+      lines.push(`- [${item.provider}${item.unread ? ' unread' : ''}] ${item.from}: ${heading}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Every piece of third-party text the inbox carries, structured items included
+ * (message bodies and previews as well as the lines `formatUnifiedInbox`
+ * shows). This is the text to record as an untrusted ingest when the inbox is
+ * handed to the model, so outward-effect gating sees that it was read.
+ */
+export function unifiedInboxThirdPartyText(inbox: UnifiedInbox): string {
+  return [
+    ...thirdPartyInboxLines(inbox),
+    ...inbox.surfaceMessageItems.map((item) => item.bodyPreview),
+    ...inbox.inboundMessageItems.flatMap((item) => [item.fromAddress ?? '', item.subject ?? '', item.bodyPreview]),
+    ...inbox.deliveryItems.map((item) => item.error ?? ''),
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * Format a UnifiedInbox for the model.
+ *
+ * Counts, source states and routes are the product's own words. The messages
+ * and errors under them were written by others, so they are emitted only inside
+ * the untrusted-content frame (see untrusted-content.ts), never in the open.
  */
 export function formatUnifiedInbox(inbox: UnifiedInbox): string {
-  const { summary, sources, deliveryItems, surfaceMessageItems, routeBindingItems, inboundMessageItems } = inbox;
+  const { summary, sources } = inbox;
   const feed = inbox.inboundChannelFeed;
   const lines: string[] = [
     'Unified Inbox',
@@ -523,45 +603,24 @@ export function formatUnifiedInbox(inbox: UnifiedInbox): string {
     `  attention: ${summary.attentionCount}  failures: ${summary.failureCount}`,
     `  inbound channel feed: ${feed.available
       ? `${feed.total} message(s)${feed.truncated ? ', truncated' : ''} via ${feed.methodId}`
-      : `unavailable (${feed.reason}), ${feed.detail}`}`,
+      : `unavailable (${feed.reason})`}`,
     `  policy: ${inbox.policy}`,
     '',
     '  Sources',
   ];
 
   for (const source of sources) {
-    const errorPart = source.error ? ` error=${source.error}` : '';
-    lines.push(`  ${source.name}: ${source.state} (${source.itemCount} items) route=${source.route}${errorPart}`);
+    lines.push(`  ${source.name}: ${source.state} (${source.itemCount} items) route=${source.route}`);
   }
 
-  if (deliveryItems.length > 0) {
-    lines.push('', '  Delivery Attempts');
-    for (const item of deliveryItems.slice(0, 10)) {
-      const targetDesc = [item.target.surfaceKind, item.target.routeId, item.target.label].filter(Boolean).join('/');
-      lines.push(`  - [${item.status}] ${item.id} target=${targetDesc || item.target.kind}${item.error ? ` err=${item.error}` : ''}`);
-    }
-  }
-
-  if (surfaceMessageItems.length > 0) {
-    lines.push('', '  Surface Messages');
-    for (const item of surfaceMessageItems.slice(0, 10)) {
-      lines.push(`  - [${item.level}] ${item.surface}: ${item.title}`);
-    }
-  }
-
-  if (routeBindingItems.length > 0) {
-    lines.push('', '  Route Bindings');
-    for (const item of routeBindingItems.slice(0, 10)) {
-      lines.push(`  - ${item.id}: ${item.surfaceKind} ${item.bindingKind} sender=${item.principalLabel}`);
-    }
-  }
-
-  if (inboundMessageItems.length > 0) {
-    lines.push('', '  Inbound Messages');
-    for (const item of inboundMessageItems.slice(0, 10)) {
-      const heading = item.subject ?? item.bodyPreview.slice(0, 60);
-      lines.push(`  - [${item.provider}${item.unread ? ' unread' : ''}] ${item.from}: ${heading}`);
-    }
+  const thirdParty = thirdPartyInboxLines(inbox);
+  if (thirdParty.length > 0) {
+    lines.push('', renderForModel(untrustedFrom({
+      surfaceId: 'channel-message',
+      origin: 'unified inbox: source and delivery errors, surface messages, route-binding senders and provider inbound messages',
+      text: thirdParty.join('\n'),
+      receivedAt: new Date().toISOString(),
+    })));
   }
 
   return lines.join('\n');

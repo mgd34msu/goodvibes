@@ -166,7 +166,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(searched.providers.map(provider => provider.id)).toEqual(['supermemory']);
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -328,7 +328,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         force: true,
       });
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -414,7 +414,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(posture.externalMemory.latestReceipts[0]?.certification?.publicationGuarantee).toContain('token=[REDACTED]');
       expect(posture.externalMemory.latestReceipts[0]?.certification?.receiptId).toBe('supermemory-sync-1');
       expect(posture.externalMemory.latestReceipts[0]?.certification?.missingSignals).toEqual([]);
-      expect(posture.externalMemory.latestReceipts[0]?.inspectRoute).toContain(`agent_artifacts show artifactId:"${receipt.id}"`);
+      expect(posture.externalMemory.latestReceipts[0]?.inspectRoute).toContain(`agent_artifacts mode:"show" artifactId:"${receipt.id}"`);
       expect(posture.externalMemory.contractChecklist.find((entry) => entry.id === 'sync-receipts')?.status).toBe('artifact-evidence-found');
       expect(posture.externalMemory.receiptContract.status).toBe('artifact-evidence-found');
       expect(posture.externalMemory.receiptContract.requiredFields).toContain('nextRoute');
@@ -452,7 +452,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }>(fixture, { mode: 'memory_provider', providerId: 'supermemory' });
       expect(provider.id).toBe('supermemory');
       expect(provider.status).toBe('receipt-evidence-found');
-      expect(provider.configured).toBe(true);
+      expect(provider.configured).toBe(false);
       expect(provider.latestReceipt).toMatchObject({
         artifactId: receipt.id,
         operation: 'sync',
@@ -477,7 +477,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(provider.setupGuide?.receiptContract.status).toBe('artifact-evidence-found');
       expect(JSON.stringify(provider)).not.toContain('memory-receipt-secret');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -640,7 +640,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(JSON.stringify(provider)).not.toContain('secret://supermemory-token');
       expect(JSON.stringify(provider)).not.toContain('memory-pub-secret');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

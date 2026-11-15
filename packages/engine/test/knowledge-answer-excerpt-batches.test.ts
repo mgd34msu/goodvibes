@@ -123,14 +123,19 @@ describe('complete-source excerpt batches', () => {
       await expect(prepared.read(new Set(entries.map((entry) => entry.source.id)))).rejects.toMatchObject({ reason });
     }
   });
-  test('a shared caller deadline aborts ignored-signal reads without starting a later source', async () => {
+  test('a shared caller abort stops ignored-signal reads without starting a later source', async () => {
     const { store, entries } = await fixture(['AC-7 has four inputs.', 'AC-7 does not support Bluetooth.']);
-    const fake = readings(); let active: AbortSignal | undefined, count = 0;
-    installJudgmentPort({ ...fake.port, async ask(request) { active = request.signal; count++; return new Promise(() => {}); } });
-    await expect(withAnswerVerificationBudget(async (signal) => {
+    const fake = readings(); let active: AbortSignal | undefined, count = 0; const entered = Promise.withResolvers<void>();
+    installJudgmentPort({ ...fake.port, async ask(request) { active = request.signal; count++; entered.resolve(); return new Promise(() => {}); } });
+    // The caller signal is fired once the first read is in flight; a short
+    // timer deadline could expire before that read starts on a loaded machine.
+    const caller = new AbortController();
+    const outcome = withAnswerVerificationBudget(async (signal) => {
       const prepared = prepareAnswerSourceExcerptBatches(store, query, entries, createSemanticWriteGuard(store, signal), signal); prepared.start();
       return prepared.read(new Set(entries.map((entry) => entry.source.id)));
-    }, 30)).rejects.toMatchObject({ reason: 'budget' });
+    }, undefined, caller.signal).catch((error: unknown) => error);
+    await entered.promise; caller.abort();
+    expect(await outcome).toMatchObject({ reason: 'aborted' });
     expect(count).toBe(1); expect(active?.aborted).toBe(true);
   });
   test('an empty source set retains the caller read-set guard without acquiring a port', async () => {

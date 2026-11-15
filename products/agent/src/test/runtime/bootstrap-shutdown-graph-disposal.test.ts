@@ -47,7 +47,6 @@ function makeDeps(order: string[], overrides: Partial<Deps> = {}): Deps {
     runtimeUnsubs: [],
     forensicsCollector: { dispose: noop },
     executionLedger: { dispose: noop },
-    disposeSessionWriteLedger: () => { order.push('write-ledger'); },
     deferredStartup: { drain: async () => undefined },
     agentExternalServices: { stop: async () => undefined },
     agentStatusIntervalRef: { value: null },
@@ -77,7 +76,6 @@ test('the graph is disposed last: after the shutdown that still needs its schedu
   // legitimately use the scheduler, orchestration registry and provider
   // registry that dispose() stops.
   expect(order.at(-1)).toBe('graph-dispose');
-  expect(order.indexOf('write-ledger')).toBeLessThan(order.indexOf('graph-dispose'));
 });
 
 test('the graph is disposed even when an earlier teardown step throws', async () => {
@@ -120,7 +118,7 @@ test('early close failure still reaches every later owned teardown', async () =>
     agentExternalServices: { stop: async () => { order.push('external-stop'); } },
   });
   await expect(createRuntimeShutdown(deps)(SESSION_DATA)).rejects.toBe(failure);
-  expect(order).toEqual(['close', 'spine-dispose', 'bootstrap-unsub', 'runtime-unsub', 'forensics', 'execution', 'write-ledger', 'drain', 'external-stop', 'schedule-manager', 'provider-registry', 'graph-dispose']);
+  expect(order).toEqual(['close', 'spine-dispose', 'bootstrap-unsub', 'runtime-unsub', 'forensics', 'execution', 'drain', 'external-stop', 'schedule-manager', 'provider-registry', 'graph-dispose']);
   expect(deps.bootstrapUnsubs).toHaveLength(0);
   expect(deps.runtimeUnsubs).toHaveLength(0);
 });

@@ -16,7 +16,7 @@
  * behavior, not a hand-rolled stand-in.
  */
 import { frameFromLayer } from '../helpers/surface-frame.ts';
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SharedSessionRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -138,24 +138,21 @@ describe('SessionPickerModal: cross-surface union (W3-T2)', () => {
     const { sessionManager, dir } = makeSessionManager();
     try {
       const wire = wireReader({ rows: [record('wire-1')] });
-      // Real Date.now() clock (default) with a staleAfterMs of 0: any time that
-      // elapses between the refresh settling and the crossSurfaceView read
-      // (guaranteed > 0ms, since both are separate async ticks) reads as aged,
-      // while `online` stays true, the exact "confirmed live, but old" state
-      // the note exists for. The renderer computes elapsed time off the real
-      // wall clock (lastSyncAt is a real epoch ms), so assert the note's SHAPE
-      // rather than an exact age to avoid timing flakiness.
+      // An injected clock moves past the freshness window while `online` stays
+      // true: the exact "confirmed live, but old" state the note exists for.
+      // The note's age comes from the renderer's own wall clock, so only its
+      // shape is asserted.
+      let clock = Date.now();
       const cache = new SessionUnionCache({
         local: localReader([]),
-        staleAfterMs: 0,
+        staleAfterMs: 60_000,
+        now: () => clock,
         scheduler: noopScheduler,
         log: silent,
       });
       cache.activate(wire);
       await cache.refresh();
-      // Guarantee real elapsed time > 0ms before reading crossSurfaceView so
-      // `aged` (now() - lastSyncAt > staleAfterMs) is deterministically true.
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      clock += 61_000;
 
       const modal = new SessionPickerModal(sessionManager, cache);
       modal.open();
@@ -289,8 +286,14 @@ describe('SessionPickerModal: cross-surface budget reservation (W3 Finding 1)', 
     return Array.from({ length: n }, (_, i) => record(`webui-${i + 1}`, { kind: 'webui', title: `webui-session-${i + 1}` }));
   }
 
+  const budgetDirs: string[] = [];
+  afterEach(() => {
+    while (budgetDirs.length > 0) rmSync(budgetDirs.pop()!, { recursive: true, force: true });
+  });
+
   function makeUnionModal(localCount: number, crossRecords: SharedSessionRecord[]): SessionPickerModal {
-    const { sessionManager } = makeSessionManager();
+    const { sessionManager, dir } = makeSessionManager();
+    budgetDirs.push(dir);
     const modal = new SessionPickerModal(sessionManager);
     modal.active = true;
     modal.sessions = fakeLocalSessions(localCount);
@@ -330,7 +333,8 @@ describe('SessionPickerModal: cross-surface budget reservation (W3 Finding 1)', 
   });
 
   test('local-only mode (no sessionBroker wired) gives the saved list the whole body: no reservation, every session visible', () => {
-    const { sessionManager } = makeSessionManager();
+    const { sessionManager, dir } = makeSessionManager();
+    budgetDirs.push(dir);
     const modal = new SessionPickerModal(sessionManager);
     modal.active = true;
     modal.sessions = fakeLocalSessions(10);

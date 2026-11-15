@@ -8,7 +8,7 @@ import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import type { AgentSetupWizardDurableReceipt } from '../agent/setup-wizard.ts';
 import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
-import { mergeSetupWizardDurableReceipts, setupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
+import { mergeSetupWizardDurableReceipts, readSetupWizardLiveDurableReceipts } from '../input/setup-wizard-live-receipts.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { urlHostForConfiguredHost } from '../config/connected-host-dial.ts';
 import {
@@ -23,7 +23,10 @@ import {
 /** This browser opens on THIS host, so a wildcard bind resolves to loopback. */
 const browserConnectHost = urlHostForConfiguredHost;
 
-const BROWSER_COCKPIT_EXPECTED_LANES = [
+/** The one list of setup-receipt read paths, so the captured sources and the viewed sources cannot drift apart. */
+const SETUP_RECEIPT_PATHS = ["context.platform.readModels.setup.receipts", "context.platform.readModels.setup.setupReceipts", "context.platform.readModels.setup.receiptEvents", "context.platform.readModels.setup.eventStream", "context.platform.readModels.setup", "context.platform.readModels.setupWizard.receipts", "context.platform.readModels.setupWizard.durableReceipts", "context.platform.readModels.setupWizard.receiptEvents", "context.platform.readModels.setupWizard.eventStream", "context.platform.readModels.setupReceipts", "context.platform.readModels.setupReceiptEvents", "context.platform.readModels.setupReceiptEventStream", "context.platform.readModels.durableSetupReceipts", "context.platform.readModels.firstRun.receipts", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.setupReceipts", "context.platform.setupReceiptEvents", "context.clients.operator.setupReceipts", "context.clients.operator.setupReceiptEvents"];
+
+export const BROWSER_COCKPIT_EXPECTED_LANES = [
   {
     id: 'chat-and-sessions',
     label: 'Chat and sessions',
@@ -45,7 +48,7 @@ const BROWSER_COCKPIT_EXPECTED_LANES = [
   {
     id: 'knowledge-and-memory',
     label: 'Knowledge and memory',
-    categoryIds: ['onboarding-context', 'knowledge', 'profiles', 'memory', 'notes', 'personas', 'skills', 'routines'],
+    categoryIds: ['onboarding-context', 'knowledge', 'profiles', 'owner-profile', 'memory', 'notes', 'personas', 'skills', 'routines'],
     userOutcome: 'Review and curate user context, project knowledge, memories, notes, personas, skills, and routines with browser-native forms.',
   },
   {
@@ -69,7 +72,7 @@ const BROWSER_COCKPIT_EXPECTED_LANES = [
 ] as const;
 
 function confirmedCategoryRoute(categoryId: string, label: string): string {
-  return `agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" categoryId:"${categoryId}" confirm:true explicitUserRequest:"Open the ${label} workspace."`;
+  return `agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" categoryId:"${categoryId}" explicitUserRequest:"Open the ${label} workspace."`;
 }
 
 function browserPwaSetupReceipts(artifacts: Parameters<typeof buildSetupWizardDurableReceipts>[0], live: readonly AgentSetupWizardDurableReceipt[]): readonly AgentSetupWizardDurableReceipt[] {
@@ -201,7 +204,7 @@ function browserCockpitMobileAffordances(
       id: 'open-browser-cockpit',
       label: 'Open browser cockpit',
       status: enabled ? 'ready' : 'blocked-by-web-setup',
-      modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"connected-browser-cockpit" confirm:true explicitUserRequest:"..."',
+      modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"connected-browser-cockpit" explicitUserRequest:"..."',
     },
     {
       id: 'inspect-web-endpoint',
@@ -254,6 +257,7 @@ function browserCockpitReceipts(
   includeDetails: boolean,
   browserPwa: BrowserPwaReadModelSnapshot,
   setupReceipts: readonly AgentSetupWizardDurableReceipt[],
+  setupReceiptsUnavailable: readonly string[],
 ): Record<string, unknown> {
   const marker = (() => {
     try {
@@ -263,7 +267,7 @@ function browserCockpitReceipts(
       return {
         status: completion.exists ? 'complete' : 'missing',
         exists: completion.exists,
-        path: completion.path,
+        scope: 'user',
         updatedAt: completion.payload?.updatedAt ?? null,
         source: completion.payload?.source ?? null,
         mode: completion.payload?.mode ?? null,
@@ -318,6 +322,7 @@ function browserCockpitReceipts(
             nextStep: 'Publish a connected-host browser/PWA completion receipt before using browser readiness as first-run closeout evidence.',
           },
       browserPwaSetupReceipts: setupReceipts.slice(0, 8),
+      ...(setupReceiptsUnavailable.length > 0 ? { setupReceiptsUnavailable: `receipts unavailable: ${setupReceiptsUnavailable.join(', ')}` } : {}),
     } : {}),
     setupCloseoutRoute: 'setup action:"status" includeParameters:true',
     policy: 'Agent reports its own user onboarding marker separately from the connected-host browser/PWA receipt contract so setup closeout does not overclaim browser readiness.',
@@ -331,10 +336,11 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   caller.retainSourceCurrent();
   const setupCurrent = captureSetupReadSource(context);
   caller.options.retainCurrent(setupCurrent, 'agent.cockpit.setup-native-source');
-  const setupSource = captureCatalogProducerSources(context, ["context.platform.readModels.setup.receipts", "context.platform.readModels.setup.setupReceipts", "context.platform.readModels.setup.receiptEvents", "context.platform.readModels.setup.eventStream", "context.platform.readModels.setup", "context.platform.readModels.setupWizard.receipts", "context.platform.readModels.setupWizard.durableReceipts", "context.platform.readModels.setupWizard.receiptEvents", "context.platform.readModels.setupWizard.eventStream", "context.platform.readModels.setupReceipts", "context.platform.readModels.setupReceiptEvents", "context.platform.readModels.setupReceiptEventStream", "context.platform.readModels.durableSetupReceipts", "context.platform.readModels.firstRun.receipts", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.setupReceipts", "context.platform.setupReceiptEvents", "context.clients.operator.setupReceipts", "context.clients.operator.setupReceiptEvents"], ["getSnapshot", "snapshot", "list", "listReceipts", "listEvents", "listReceiptEvents", "readEvents"], true);
+  const setupSource = captureCatalogProducerSources(context, SETUP_RECEIPT_PATHS, ["getSnapshot", "snapshot", "list", "listReceipts", "listEvents", "listReceiptEvents", "readEvents"], true);
   caller.options.retainCurrent(setupSource.assertCurrent, 'agent.cockpit.receipt-native-source');
-  const setupViews = ["context.platform.readModels.setup.receipts", "context.platform.readModels.setup.setupReceipts", "context.platform.readModels.setup.receiptEvents", "context.platform.readModels.setup.eventStream", "context.platform.readModels.setup", "context.platform.readModels.setupWizard.receipts", "context.platform.readModels.setupWizard.durableReceipts", "context.platform.readModels.setupWizard.receiptEvents", "context.platform.readModels.setupWizard.eventStream", "context.platform.readModels.setupReceipts", "context.platform.readModels.setupReceiptEvents", "context.platform.readModels.setupReceiptEventStream", "context.platform.readModels.durableSetupReceipts", "context.platform.readModels.firstRun.receipts", "context.platform.readModels.browserPwa.firstRunReceipts", "context.platform.setupReceipts", "context.platform.setupReceiptEvents", "context.clients.operator.setupReceipts", "context.clients.operator.setupReceiptEvents"].map(path => ({ path, source: setupSource.source(path) }));
-  const liveReceipts = setupWizardLiveDurableReceipts(context, setupViews);
+  const setupViews = SETUP_RECEIPT_PATHS.map(path => ({ path, source: setupSource.source(path) }));
+  const live = readSetupWizardLiveDurableReceipts(context, setupViews);
+  const liveReceipts = live.receipts;
   caller.assertCurrent();
   const store = context.platform.artifactStore;
   const artifactMethods = store ? captureCatalogMethods(store, ['list']) : () => {};
@@ -342,7 +348,7 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   const artifactList = store?.list;
   artifactMethods();
   if (store && typeof artifactList !== 'function') throw new ToolInputProjectionError('unavailable');
-  const readArtifacts = (): ReturnType<NonNullable<typeof artifactList>> => artifactList ? Reflect.apply(artifactList, store, [100]) : [];
+  const readArtifacts = (): ReturnType<NonNullable<typeof artifactList>> => artifactList ? Reflect.apply(artifactList, store, [Number.MAX_SAFE_INTEGER]) : [];
   const artifacts = readArtifacts();
   artifactMethods(); caller.assertCurrent();
   const artifactSource = captureCatalogSnapshot(artifacts);
@@ -356,16 +362,19 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   let enabled = false;
   let binding = { hostMode: 'local', configuredHost: '127.0.0.1', host: '127.0.0.1', port: 3423 };
   let publicBaseUrl = '';
+  let configFailure: string | undefined;
   if (configManager) {
     try {
       enabled = configManager.get('web.enabled') === true;
       binding = resolveRuntimeEndpointBinding(configManager, 'web');
       publicBaseUrl = String(configManager.get('web.publicBaseUrl') ?? '').trim();
-    } catch {
+    } catch (error) {
+      // A config that cannot be read is not the same as a web endpoint that is switched off.
+      configFailure = error instanceof Error ? error.message : 'The web endpoint configuration could not be read.';
       enabled = false;
     }
   }
-  const url = publicBaseUrl || `http://${browserConnectHost(binding.host)}:${binding.port}`;
+  const url = configFailure ? '' : publicBaseUrl || `http://${browserConnectHost(binding.host)}:${binding.port}`;
   const browserPwa = await browserPwaReadModelSnapshot(context, caller.options);
   caller.assertCurrent();
   const nativeCategoryRoutesPublished = enabled && AGENT_WORKSPACE_CATEGORIES.every((category) =>
@@ -374,7 +383,8 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
   const browserFirstRunCertified = certifiedBrowserPwaFirstRunReceipts(browserPwa).length > 0;
   const result = {
     enabled,
-    readiness: enabled ? nativeCategoryRoutesPublished && browserFirstRunCertified ? 'browser-native-ready' : 'ready' : 'setup-needed',
+    ...(configFailure ? { status: 'unavailable', reason: configFailure } : {}),
+    readiness: configFailure ? 'unavailable' : enabled ? nativeCategoryRoutesPublished && browserFirstRunCertified ? 'browser-native-ready' : 'ready' : 'setup-needed',
     url,
     source: publicBaseUrl ? 'web.publicBaseUrl' : 'web endpoint binding',
     endpoint: {
@@ -382,9 +392,12 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
       binding,
       settings: ['web.enabled', 'web.hostMode', 'web.host', 'web.port', 'web.publicBaseUrl'],
     },
-    workspaceCoverage: browserCockpitWorkspaceCoverage(enabled, options.includeWorkspaceCoverage === true, browserPwa),
-    mobile: browserCockpitMobileAffordances(enabled, options.includeWorkspaceCoverage === true, browserPwa, nativeCategoryRoutesPublished),
-    receipts: browserCockpitReceipts(context, enabled, options.includeWorkspaceCoverage === true, browserPwa, setupReceipts),
+    // Coverage, mobile and receipt sections are all derived from "enabled"; with an unreadable configuration they would say "disabled", so they are left out.
+    ...(configFailure ? {} : {
+      workspaceCoverage: browserCockpitWorkspaceCoverage(enabled, options.includeWorkspaceCoverage === true, browserPwa),
+      mobile: browserCockpitMobileAffordances(enabled, options.includeWorkspaceCoverage === true, browserPwa, nativeCategoryRoutesPublished),
+      receipts: browserCockpitReceipts(context, enabled, options.includeWorkspaceCoverage === true, browserPwa, setupReceipts, live.unavailable),
+    }),
     setupRoutes: {
       inspectEndpoint: 'host action:"service" endpointId:"web" includeParameters:true',
       servicePosture: 'host action:"services" includeParameters:true',

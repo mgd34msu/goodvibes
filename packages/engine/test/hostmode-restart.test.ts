@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, test, mock } from 'bun:test';
-import { createHostModeRestartWatcher } from '../platform/src/platform/daemon/host-mode-watcher.js';
+import { createHostModeRestartWatcher, RestartController } from '../platform/src/platform/daemon/host-mode-watcher.js';
 import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -417,5 +417,90 @@ describe('createHostModeRestartWatcher: getIsRunning gate and multi-key subscrip
     cm.set('httpListener.host', '10.0.0.2');
     cm.set('httpListener.hostMode', 'local');
     expect(onRestart).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe('RestartController: the one restart cycle both listeners share', () => {
+  function controller(options: { running?: boolean; passes?: Array<() => Promise<void>> } = {}) {
+    let running = options.running ?? true;
+    const passes = options.passes ?? [];
+    const errors: unknown[] = [];
+    let ran = 0;
+    const cycle = new RestartController({
+      isRunning: () => running,
+      run: async () => { ran++; await (passes.shift() ?? (async () => {}))(); },
+      onError: (error) => errors.push(error),
+    });
+    return { cycle, errors, setRunning: (value: boolean) => { running = value; }, ran: () => ran };
+  }
+
+  test('a change queued mid-pass starts exactly one more pass, and the settled promise is never left published', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { cycle, ran } = controller({ passes: [() => gate.promise] });
+    cycle.request();
+    const first = cycle.pending;
+    expect(first).not.toBeNull();
+    cycle.request(); cycle.request();
+    expect(cycle.dirty).toBe(true);
+    gate.resolve();
+    await first;
+    // The queued pass was published before the first one settled.
+    const second = cycle.pending;
+    expect(second).not.toBe(first);
+    await second;
+    expect(ran()).toBe(2);
+    expect(cycle.pending).toBeNull(); expect(cycle.dirty).toBe(false); expect(cycle.restarting).toBe(false);
+  });
+
+  test('a queued change that a pass already consumed does not start another pass', async () => {
+    let cycleRef!: RestartController;
+    const { cycle, ran } = controller({ passes: [async () => { cycleRef.request(); expect(cycleRef.takeDirty()).toBe(true); }] });
+    cycleRef = cycle;
+    cycle.request();
+    await cycle.pending;
+    expect(ran()).toBe(1);
+  });
+
+  test('a failing pass is reported, settles its waiters, and a listener left down stays restartable', async () => {
+    const { cycle, errors, setRunning, ran } = controller({ passes: [async () => { throw new Error('bind refused'); }] });
+    cycle.request();
+    setRunning(false);
+    await cycle.pending;
+    expect(errors).toHaveLength(1);
+    expect(cycle.pending).toBeNull();
+    // Nothing is bound and the owner has not said it is down: changes are ignored.
+    expect(cycle.active).toBe(false);
+    cycle.request();
+    expect(ran()).toBe(1);
+    cycle.setDown(true);
+    expect(cycle.active).toBe(true);
+    cycle.request();
+    await cycle.pending;
+    expect(ran()).toBe(2);
+  });
+
+  test('a fenced cycle admits nothing, drops a queued change, and keeps the in-flight pass awaitable', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { cycle, ran } = controller({ passes: [() => gate.promise] });
+    cycle.request();
+    cycle.request();
+    cycle.fence();
+    expect(cycle.dirty).toBe(false);
+    const inFlight = cycle.pending;
+    expect(inFlight).not.toBeNull();
+    gate.resolve();
+    await inFlight;
+    cycle.request();
+    expect(ran()).toBe(1); expect(cycle.pending).toBeNull(); expect(cycle.closed).toBe(true);
+  });
+
+  test('an intentional stop forgets a queued change and a down listener', () => {
+    const { cycle, setRunning } = controller({ running: false });
+    cycle.setDown(true);
+    cycle.reset();
+    expect(cycle.active).toBe(false);
+    setRunning(false);
+    cycle.request();
+    expect(cycle.pending).toBeNull();
   });
 });

@@ -24,10 +24,13 @@ export function useDebouncedValue<T>(value: T, delayMs = 250): T {
   return settled;
 }
 
+/** The most rows one request for the review queue or the candidate list returns. */
+export const REVIEW_PAGE_LIMIT = 50;
+
 export function useReviewQueue() {
   return useQuery({
     queryKey: queryKeys.memoryReviewQueue,
-    queryFn: () => platformClient.operator.memory.reviewQueue({ limit: 50 }),
+    queryFn: () => platformClient.operator.memory.reviewQueue({ limit: REVIEW_PAGE_LIMIT }),
   });
 }
 
@@ -41,7 +44,7 @@ export function useConsolidationReceipts() {
 export function useKnowledgeCandidates() {
   return useQuery({
     queryKey: queryKeys.knowledgeCandidates,
-    queryFn: () => invokeMethod('knowledge.candidates.list', { limit: 50 }),
+    queryFn: () => invokeMethod('knowledge.candidates.list', { limit: REVIEW_PAGE_LIMIT }),
   });
 }
 
@@ -86,16 +89,21 @@ export function includesText(haystack: readonly (string | undefined)[], needle: 
 
 /**
  * How many rows the Review tab holds: queued records, pending consolidation
- * proposals and undecided knowledge candidates. The tab label shows exactly this,
- * so the number always equals the rows a person finds there.
+ * proposals and undecided knowledge candidates. The tab label shows exactly this.
+ * Neither list reports a total, so a source that returned a full page may have more
+ * behind it: `capped` is then true and the number is a lower bound ("50+").
  */
-export function useReviewCount(): number {
+export function useReviewTally(): { count: number; capped: boolean } {
   const queue = useReviewQueue();
   const receipts = useConsolidationReceipts();
   const candidates = useKnowledgeCandidates();
   const queued = queue.data?.records.length ?? 0;
   const proposals = receipts.data?.pendingProposals.length ?? 0;
-  const undecided = candidateItems(candidates.data)
+  const candidateRows = candidateItems(candidates.data);
+  const undecided = candidateRows
     .filter((c) => isUndecidedCandidate(firstString(c, ['status']) || 'unknown')).length;
-  return queued + proposals + undecided;
+  return {
+    count: queued + proposals + undecided,
+    capped: queued >= REVIEW_PAGE_LIMIT || candidateRows.length >= REVIEW_PAGE_LIMIT,
+  };
 }

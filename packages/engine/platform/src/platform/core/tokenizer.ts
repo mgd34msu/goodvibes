@@ -14,6 +14,20 @@ function isPrintableCodePoint(code: number): boolean {
     && !(code >= 57344 && code <= 63743);
 }
 
+const PASTE_START = '\x1b[200~';
+const PASTE_END = '\x1b[201~';
+/** A paste larger than this is dropped whole: partial paste text is never emitted as input. */
+const MAX_PASTE_CHARS = 8 * 1024 * 1024;
+
+/** Length of the longest suffix of `text` that is a proper prefix of the paste end marker. */
+function partialPasteEndLength(text: string): number {
+  const max = Math.min(PASTE_END.length - 1, text.length);
+  for (let len = max; len > 0; len--) {
+    if (PASTE_END.startsWith(text.slice(text.length - len))) return len;
+  }
+  return 0;
+}
+
 /**
  * InputTokenizer - Optimized for Tmux and CSI-u input modes.
  */
@@ -21,40 +35,56 @@ export class InputTokenizer {
   private buffer = '';
   private isPasting = false;
   private pasteContent = '';
+  private pasteOverflowed = false;
+
+  private appendPaste(text: string): void {
+    if (this.pasteOverflowed) return;
+    if (this.pasteContent.length + text.length > MAX_PASTE_CHARS) {
+      logger.warn('[InputTokenizer] paste exceeded the size limit and was dropped', { limit: MAX_PASTE_CHARS });
+      this.pasteContent = '';
+      this.pasteOverflowed = true;
+      return;
+    }
+    this.pasteContent += text;
+  }
 
   public feed(data: string): InputToken[] {
     this.buffer += data;
     const tokens: InputToken[] = [];
 
-    if (this.buffer.length > 1024 * 100) { // Increased safety for large pastes
+    // A paste has its own cap below; this guards stray non-paste input.
+    if (!this.isPasting && !this.buffer.startsWith(PASTE_START) && this.buffer.length > 1024 * 100) {
       this.buffer = '';
       return [];
     }
 
     while (this.buffer.length > 0) {
       // 1. Bracketed Paste Handling
-      if (this.buffer.startsWith('\x1b[200~')) {
+      if (!this.isPasting && this.buffer.startsWith(PASTE_START)) {
         this.isPasting = true;
         this.pasteContent = '';
-        this.buffer = this.buffer.slice(6);
+        this.pasteOverflowed = false;
+        this.buffer = this.buffer.slice(PASTE_START.length);
         continue;
       }
 
       if (this.isPasting) {
-        const endIdx = this.buffer.indexOf('\x1b[201~');
+        const endIdx = this.buffer.indexOf(PASTE_END);
         if (endIdx !== -1) {
-          this.pasteContent += this.buffer.slice(0, endIdx);
-          tokens.push({ type: 'text', value: this.pasteContent });
+          this.appendPaste(this.buffer.slice(0, endIdx));
+          if (!this.pasteOverflowed) tokens.push({ type: 'text', value: this.pasteContent });
           this.isPasting = false;
           this.pasteContent = '';
-          this.buffer = this.buffer.slice(endIdx + 6);
+          this.pasteOverflowed = false;
+          this.buffer = this.buffer.slice(endIdx + PASTE_END.length);
           continue;
-        } else {
-          // Still pasting, wait for more data
-          this.pasteContent += this.buffer;
-          this.buffer = '';
-          break;
         }
+        // The end marker may be split across reads: hold back a possible
+        // marker prefix and take the rest as paste text.
+        const keep = partialPasteEndLength(this.buffer);
+        this.appendPaste(this.buffer.slice(0, this.buffer.length - keep));
+        this.buffer = this.buffer.slice(this.buffer.length - keep);
+        break;
       }
 
       // 2. Escape Sequences

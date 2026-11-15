@@ -10,6 +10,8 @@
 
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { rmSync } from 'node:fs';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { join } from 'node:path';
 
 /** File name of the detached-daemon runtime record within the daemon home dir. */
@@ -51,6 +53,8 @@ export interface DetachedDaemonRuntimeHint {
   readonly host: string;
   readonly port: number;
   readonly pid?: number | undefined;
+  /** When the daemon recorded itself; with the pid it tells one daemon's record from the next. */
+  readonly startedAt?: string | undefined;
 }
 
 /** Is this pid a process that still exists? Injectable so a test needs no real pid. */
@@ -99,7 +103,10 @@ export interface DetachedDaemonReapReceipt {
  * and leave a receipt saying so.
  *
  * Best-effort and idempotent: two processes can reap the same record
- * concurrently and neither throws. Removing the record is the point, while it
+ * concurrently and neither throws. The record is removed only while the file
+ * still holds the one that was judged stale: a daemon that started and wrote
+ * its own record while the caller was probing keeps it (null is returned and
+ * nothing is removed). Removing the record is the point, while it
  * sits there, every endpoint discovery keeps preferring an address nothing
  * answers at, which is exactly the failure this reaping exists to end.
  */
@@ -114,6 +121,14 @@ export function reapDetachedDaemonRuntime(
     record,
   };
   try {
+    const onDisk = readDetachedDaemonRuntime(runtimeDir);
+    if (onDisk !== null && !sameDaemonRecord(onDisk, record)) {
+      logger.info('[detached-daemon] runtime record was replaced while it was judged stale; leaving the new record', {
+        stalePid: record.pid,
+        currentPid: onDisk.pid,
+      });
+      return null;
+    }
     rmSync(detachedDaemonRuntimePath(runtimeDir), { force: true });
   } catch {
     return null;
@@ -125,6 +140,13 @@ export function reapDetachedDaemonRuntime(
     // not be written must not turn a successful reap into a failure.
   }
   return receipt;
+}
+
+/** Whether two records describe the same daemon launch: same address, pid and (when both say) start time. */
+function sameDaemonRecord(current: DetachedDaemonRuntimeHint, stale: DetachedDaemonRuntimeHint): boolean {
+  if (current.host !== stale.host || current.port !== stale.port || current.pid !== stale.pid) return false;
+  if (current.startedAt && stale.startedAt) return current.startedAt === stale.startedAt;
+  return true;
 }
 
 /** Read the last reaping receipt, or null when nothing has been reaped. */
@@ -153,7 +175,12 @@ export function recordDetachedDaemonRuntime(
   try {
     writeJsonFileAtomic(path, record);
     return path;
-  } catch {
+  } catch (error) {
+    // A daemon with no record is not discoverable by other surfaces; say so.
+    logger.warn('[detached-daemon] could not write the runtime record; other surfaces will not discover this daemon from it', {
+      path,
+      error: summarizeError(error),
+    });
     return null;
   }
 }

@@ -145,9 +145,12 @@ window was destroyed by the next machine write, with a success receipt and no
 error.
 
 So the rule is: **a write must verify the file has not changed underneath it
-between the projection it edited and the rename.** Compare mtime and content
-against disk immediately before the rename; on a mismatch, re-read and replay
-the edit against the new content, or refuse and say why. Never clobber. The
+between the projection it edited and the rename.** Compare mtime and size
+against disk before the edit is applied, and again after the temp file is written,
+immediately before the rename; on a mismatch before the temp write, re-read and
+replay the edit against the new content, and on a mismatch at the rename, refuse
+and say why. Never clobber. Only the instant between that last comparison and the
+rename remains open. The
 window is small, roughly the debounce with `fs.watch`, up to
 `profile.reloadThrottleMs` on the poll fallback, and unbounded if the watcher
 errored, but "small" is not a property anyone should rely on for the file that
@@ -186,22 +189,22 @@ pronouns: they/them
 
 email: alex.rivera@example.com
 phone: +1 517 555 0134
-- Prefers Telegram for anything urgent, agent, 2026-07-27, "ping me on telegram if it's urgent"
+- Prefers Telegram for anything urgent — agent, 2026-07-27, "ping me on telegram if it's urgent"
 
 ## Location
 
 timezone: America/Detroit
 city: Lansing, MI
-- Home is the blue house on the corner of Elm, tui, 2026-07-20, "we're the blue house on the corner of Elm"
+- Home is the blue house on the corner of Elm — tui, 2026-07-20, "we're the blue house on the corner of Elm"
 
 ## Commerce
 
-shipping address: 200 Office Way, Lansing, MI 48933, US, tui, 2026-07-27, "ship it to my office instead"
+shipping address: 200 Office Way, Lansing, MI 48933, US — tui, 2026-07-27, "ship it to my office instead"
 billing address: 401 Home St, Lansing, MI 48933, US
 currency: USD
 shipping tier: standard
 
-<!-- was: shipping address: 401 Home St, Lansing, MI 48933, US, tui, 2026-07-20, "ship to 401 Home St" (superseded 2026-07-27) -->
+<!-- was: shipping address: 401 Home St, Lansing, MI 48933, US — tui, 2026-07-20, "ship to 401 Home St" (superseded 2026-07-27) -->
 
 ## Preferences
 
@@ -216,24 +219,24 @@ quiet hours: 22:00-07:00
 
 ## Style
 
-- Keep replies short unless I ask for detail, tui, 2026-07-26, "keep it short unless I ask"
+- Keep replies short unless I ask for detail — tui, 2026-07-26, "keep it short unless I ask"
 
 ## People
 
-- Sarah, sister, sarah@example.com, tui, 2026-07-27, "my sister Sarah, sarah@example.com"
+- Sarah, sister, sarah@example.com — tui, 2026-07-27, "my sister Sarah, sarah@example.com"
 - Dave from work, handles the Pellux contracts
 
 ## Places
 
-- Gym: the Y on Michigan Ave, agent, 2026-07-27, "I go to the Y on Michigan Ave"
+- Gym: the Y on Michigan Ave — agent, 2026-07-27, "I go to the Y on Michigan Ave"
 
 ## Work
 
-- Runs Pellux, founder, tui, 2026-07-27, "I run Pellux"
+- Runs Pellux, founder — tui, 2026-07-27, "I run Pellux"
 
 ## Notes
 
-- Allergic to shellfish, tui, 2026-07-27, "I'm allergic to shellfish"
+- Allergic to shellfish — tui, 2026-07-27, "I'm allergic to shellfish"
 ```
 
 ### 4.2 Provenance rendering
@@ -241,14 +244,24 @@ quiet hours: 22:00-07:00
 A learned line carries a compact suffix at end of line:
 
 ```
-, <surface>, <YYYY-MM-DD>, "<what the owner said>"
+ — <surface>, <YYYY-MM-DD>, "<what the owner said>"
 ```
 
-Em dash, surface, date, verbatim quote. It is recognised only when the whole
-shape matches at end of line, so an em dash in the owner's own prose is prose.
+Space, em dash, space, then surface, date, verbatim quote. It is recognised only
+when the whole shape matches at end of line, so an em dash in the owner's own
+prose is prose.
 Where a line somehow carries two suffixes, the **rightmost** valid one wins and the
 older one stays as ordinary visible text, the newest provenance is the true
 one, and nothing is silently destroyed to reach that answer.
+
+A line recorded under a recorded delegation (see §7, "Autonomous delegation")
+carries the delegation's goal and criteria in place of a quote:
+
+```
+ — <surface>, <YYYY-MM-DD>, autonomous {"goal":"<goal>","criteria":["<criterion>"]}
+```
+
+It is parsed back into the same provenance shape, with an empty `said`.
 
 Verified against real strings: `- They said, and I quote, that it was fine`
 stays prose; a malformed date, an unknown surface name, and a line ending in a
@@ -585,13 +598,14 @@ conversational turn's authority is decided from the channel it arrived on:
 - **A channel listed in `profile.ownerChannels`.** The owner has named this
   channel, in settings, as one that reaches them privately. A message on it is
   treated as the owner speaking, and authority is `owner-direct`.
-- **`profile.ownerChannels` is empty (the shipped default).** The channels
-  fall back to `occasions.nudgeChannel`, the channels the system already
-  pushes the owner's private occasion reminders to. A channel trusted to carry
-  a birthday reminder outward is a channel the owner has already claimed as
-  their own, so reading their own words back off it is the same conversation
-  in the other direction. This is why the Telegram case above now works
-  without anyone touching a setting.
+- **`profile.ownerChannels` is empty (the shipped default).** A
+  conversational turn gets no capture authority from any channel. The system's
+  own occasion-reminder destination (`occasions.nudgeChannel`) is not an owner
+  grant: it names where reminders are sent, and a tool that reads and writes
+  personal data needs the owner to have said, in `profile.ownerChannels`, that
+  messages on a channel are theirs. The refusal names that setting. (The
+  resolver itself still accepts a nudge-channel fallback for callers that pass
+  one; the conversational turn does not.)
 - **Any other channel, or a routed turn whose surface did not come through.**
   Authority stays `channel-message`, refused exactly as before. A turn that
   arrived over a route but could not say which one is refused rather than
@@ -604,6 +618,12 @@ happen to remember", matching how the shipped `occasions.nudgeChannel`
 default already behaves. Every refusal from this path says which setting to
 change (`profile.ownerChannels`) and why, so a legitimate channel the owner
 wants recognised is one settings edit away rather than a silent gap.
+
+The same decision gates `fetch`. A conversational turn can read project files
+(`read`, `find`) on any routed channel, and a message from a channel the owner
+has not declared theirs is untrusted text, so such a turn is not given a tool
+that can send requests to addresses it chooses. Listing the channel in
+`profile.ownerChannels` gives the turn both `profile` and `fetch`.
 
 This decision is made once per conversational turn, before the write gate in
 this section ever runs. It only ever *promotes* a channel turn to
@@ -639,8 +659,9 @@ from either:
    any earlier turn.
 
 Pass 1 does **not** use `taintSourcesThisTurn()`. An earlier version did, and it
-was measured wrong: the gateway starts a new turn as the first statement of
-`invokeGatewayMethodCall`, before dispatch, so a `profile.set` call that
+was measured wrong: the gateway starts a new turn in
+`invokeGatewayMethodCall` once the call is admitted (known method, current principal, scopes accepted) and before
+the handler runs, so a `profile.set` call that
 declared `explicitUserRequest: true` moved the watermark past a page the agent
 had just read, and the same write that was correctly refused with the page in
 the window was allowed straight after. `taintSourcesSinceLastTurnBoundary()` is
@@ -714,10 +735,32 @@ can be weighed rather than re-derived.
 
 ### Layer 3: a verbatim quote must exist
 
-An autonomous write must carry a non-empty `said`. A fact learned from a page has
-no owner utterance to quote, so the requirement is itself a filter, and it is
-what makes §8's "where did you get that" answerable. (A settings-UI edit carries
-`"(edited in settings)"`; a hand edit carries none and says so.)
+A write made on the owner's own authority must carry a non-empty `said`. A fact
+learned from a page has no owner utterance to quote, so the requirement is itself
+a filter, and it is what makes §8's "where did you get that" answerable. (A
+settings-UI edit carries `"(edited in settings)"`; a hand edit carries none and
+says so.) The one exception is the delegated path below, which is held to a
+recorded goal instead of a quote.
+
+### Autonomous delegation
+
+There is a fourth authority, `autonomous`, for a write the runtime makes while
+carrying out a task the owner delegated. It is not a claim a caller can make: it
+is accepted only when the invocation carries a recorded delegation that the
+runtime itself captured (a tool call running under a recorded autonomy source, or
+a native call admitted for the paired owner), and a request that merely says
+`autonomous` without one is refused at layer 1. For this path:
+
+- Layer 1 is satisfied by the recorded delegation instead of
+  `owner-direct` surface authority.
+- Layer 2 still runs in full. The delegation's goal and criteria are added to the
+  sources the value is checked against, so a value lifted from untrusted content
+  is refused as before.
+- Layer 3 does not apply, because there is no owner utterance. The line records
+  the delegation's goal and criteria instead, with an empty `said` (see the
+  suffix in §4.2).
+- `forget` and `undo` accept the same recorded delegation and pass no other
+  layer, exactly as for the owner (layer 1 is their whole gate).
 
 ### What this does not claim
 
@@ -733,10 +776,15 @@ produced the line and delete it.
 
 ### 8.1 Per line, always
 
-Every learned line carries surface, date and the owner's verbatim words. No write
-path omits it (§7 layer 3). A line without a suffix is one the owner wrote or
-edited by hand, and that is reported as such rather than dressed up as a recorded
-source.
+Every learned line carries surface, date and a recorded source: the owner's
+verbatim words, or, for a write made under a recorded delegation (§7), the
+delegation's goal and criteria. No write path omits a source. A line without a
+suffix is one the owner wrote or edited by hand, and that is reported as such
+rather than dressed up as a recorded source.
+
+For a delegated write, "where did you get that" answers with the goal and
+criteria the runtime was working to, and the provenance carries `origin:
+autonomous` and that `source`; it does not carry a quote, because there is none.
 
 This is the load-bearing safeguard. Autonomous writes without it are
 undebuggable: the owner cannot tell why the machine thinks their office is
@@ -1014,8 +1062,8 @@ declared input for that method. That catches this class today without touching a
 published signature.
 
 **Typing the parameter is necessary and not sufficient, and exactly which forms
-it misses was got wrong twice before it was measured.** Compiled against this
-repo's TypeScript 5.9.3 with a `profile.forget`-shaped input, seeding a retired
+it misses was got wrong twice before it was measured.** Compiled with the
+repo's TypeScript compiler (the results can differ between compiler versions) with a `profile.forget`-shaped input, seeding a retired
 `lineIndex`:
 
 | how the stale field arrives | bare annotation | **raw `invoke` call site** | a wrapper (one signature) | a contract-derived key guard |
@@ -1075,38 +1123,6 @@ a known id can never fall through to the loose overload. That is a breaking
 change to a published platform surface affecting every operator method, and it should
 be decided across the platform rather than by whichever feature happened to trip
 over it.
-
-#### The two exports gates, and which one survives the merge
-
-Three lanes independently built a gate for the same defect, a module that
-exists but is not declared in the `exports` map, so no consumer of the published
-package can import it. Two survive: `check-exports-coverage.ts` here and
-`check-subpath-declared.ts` on the payments branches. They ask the identical
-question and will collide on merge.
-
-**Ruling: one file survives, under the payments branches' name.**
-`check-subpath-declared.ts` says what it checks; `check-exports-coverage.ts`
-does not. But the implementation kept is this one, because it is a strict
-superset: it carries an `INTENTIONALLY_INTERNAL` allowlist that forces a
-*reason* rather than silence, a non-vacuity tripwire so a scan that finds
-nothing fails instead of passing, and a declared-but-not-shipped check for the
-nastier inverse, an entry that resolves in the map and fails at import time
-while the map itself looks right. It is also wired into `validate`, not only
-exposed as a script. The other file's top-level-only rationale is better argued
-than mine and its header reasoning should be carried across.
-
-Worth recording: both implementations independently found the **same six**
-daemon-owned modules as legitimately internal (`channel-profiles`,
-`channel-sync`, `checkin`, `ci-watch`, `principals`, `push`, still exactly
-that list today). Two people reaching the same
-allowlist without conferring is the strongest evidence available that the
-allowlist is right and not just convenient.
-
-As of this pass, neither file has actually been deleted: `check-exports-coverage.ts`
-and `check-subpath-declared.ts` both still exist, wired to `exports:check` and
-`subpath:declared:check` respectively, so the ruling above is a decision made
-and not yet carried out. Nothing here should assume the merge already
-happened.
 
 ### 11.2 Open tier vs closed tier, the outbound rule
 
@@ -1181,19 +1197,22 @@ settings in the TUI, the agent and the webui.
 
 | Key | Default | Reasoning |
 |---|---|---|
-| `profile.enabled` | `true` | The feature was asked for as shipped behaviour. Off by default ships it dark, and flags ship as features. |
+| `profile.enabled` | `true` | The feature was asked for as shipped behaviour. Off by default ships it dark, and flags ship as features. Read when the daemon starts: a change applies after a restart. |
 | `profile.autonomousWrites` | `true` | The explicit learning ruling. Off leaves reads and manual edits working, the honest "I'll curate this myself" mode. |
 | `profile.discloseWrites` | `true` | The condition attached to the learning ruling. Editable because the receipts may prove noisy, but only the owner turns them off, knowingly. |
 | `profile.injectOpenTier` | `true` | Otherwise the agent still guesses a metro area, which is the failure that started this. |
 | `profile.discloseClosedTierReads` | `true` | Using the owner's address on an order should be visible. |
 | `profile.consumerFallback` | `true` | Whether unset consumer config keys fall back to the profile (§13). On, because a profile nothing reads is a diary. |
-| `profile.reloadThrottleMs` | `2000` | Only used where `fs.watch` is unavailable; under human edit-then-check latency and off the read path. |
-| `profile.path` | `""` | Empty means §3's default path; an override for a non-default daemon home. |
+| `profile.reloadThrottleMs` | `2000` | Only used where `fs.watch` is unavailable; under human edit-then-check latency and off the read path. Read when the daemon starts: a change applies after a restart. |
+| `profile.path` | `""` | Empty means §3's default path; an override for a non-default daemon home. Read when the daemon starts: a change applies after a restart. |
 | `profile.conversationalCapture` | `true` | Let an ordinary conversation record a fact as the owner says it, a trip, a birthday, a preference, a person, instead of only recording it in response to an explicit save. Off leaves every read and every hand edit exactly as before; it only stops this writing path, and a turn that would have recorded something says so instead of staying quiet. |
-| `profile.ownerChannels` | `""` | Which channels count as the owner speaking, for §7's channel-authority rule. Comma-separated, same `surfaceKind` or `surfaceKind:address` grammar as `occasions.nudgeChannel`. Empty means it inherits `occasions.nudgeChannel`, the channels already trusted to carry the owner's own reminders. |
+| `profile.ownerChannels` | `""` | Which channels count as the owner speaking, for §7's channel-authority rule. Comma-separated, same `surfaceKind` or `surfaceKind:address` grammar as `occasions.nudgeChannel`. Empty means no channel counts as the owner on a conversational turn; `occasions.nudgeChannel` is a reminder destination, not an owner grant. |
 
 `profile.enabled = false` means the file is not loaded and every verb answers
-"profile is disabled", a stated state, not an empty profile.
+"profile is disabled", a stated state, not an empty profile. `profile.enabled`,
+`profile.path` and `profile.reloadThrottleMs` are read once, when the daemon
+starts, so changing one takes effect after a restart; the other `profile.*`
+settings in this table apply immediately.
 
 ### 12.1 Registering the section in each surface
 
@@ -1298,7 +1317,7 @@ Each test is verified to fail without its fix, and both counts are reported.
 |---|---|---|
 | 1 | untrusted authority refused | `profile.set`/`append` with `web-page`, `email`, `channel-message`, `document` authority is refused; the file is byte-identical after |
 | 2 | untrusted derivation refused | a page is ingested into the ledger, then an `owner-direct`-claimed write whose value appears in that page is refused, naming the origin and excerpt |
-| 3 | no propose path | no exported API accepts a non-`owner-direct` authority for any write or staging operation |
+| 3 | no propose path | no exported API stages a proposal for later approval; the only non-`owner-direct` write authority is `autonomous`, and it is refused unless the invocation carries a runtime-recorded delegation |
 | 4 | provenance recorded | a written line round-trips surface, date and verbatim through the file |
 | 5 | provenance retrievable | `profile.provenance` returns the suffix plus every `<!-- was: -->` predecessor |
 | 6 | disclosure fires | an autonomous write returns a non-empty one-line disclosure naming the field |

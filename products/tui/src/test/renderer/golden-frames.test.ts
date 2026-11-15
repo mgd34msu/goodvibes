@@ -13,7 +13,7 @@
 //                                   by golden-frames-neon.test.ts, which sets
 //                                   GOODVIBES_GOLDEN_THEME and imports this file
 //
-// Snapshot format (see snapshotEncode / snapshotDiff below):
+// Snapshot format (see helpers/golden-snapshot.ts):
 //   A human-readable text block:
 //     Line 1:  # GV_GOLDEN surface=<name> width=<W> height=<H>
 //     Lines 2..H+1:  |<chars padded to W>|
@@ -40,8 +40,8 @@
 //     excluded from goldens (its own test suite covers output assertions).
 // ---------------------------------------------------------------------------
 
-import { describe, test, expect } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, test, expect } from 'bun:test';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShellFooter } from '../../renderer/shell-surface.ts';
 import { centerViewportContent } from '../../renderer/conversation-layout.ts';
@@ -98,7 +98,7 @@ import { ConfigModal } from '../../input/config-modal.ts';
 import { renderConfigModal } from '../../renderer/config-modal.ts';
 import type { ConfigModalView } from '../../input/config-modal-types.ts';
 import { statusGlyph, toneStyle, pad, postureLine, kv } from '../../views/modals/modal-surface-helpers.ts';
-import { activeTokens, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
+import { activeThemeMode, activeTokens, getActiveThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 import { PermissionPromptUI } from '../../permissions/prompt.ts';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { resolveApprovalRequester } from '../../permissions/hunk-selection.ts';
@@ -117,6 +117,7 @@ import { createEmptyLine as emptyLine, type Cell, type Line } from '@goodvibes-j
 import { makeTestSurface } from '../helpers/session-surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { frameFromLayer, frameFromLayers } from '../helpers/surface-frame.ts';
+import { assertGoldenIn, encodeGolden } from '../helpers/golden-snapshot.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -125,202 +126,35 @@ import { frameFromLayer, frameFromLayers } from '../helpers/surface-frame.ts';
 // The theme every surface renders under; golden-frames-neon.test.ts sets this
 // before importing the file to produce the goodvibes-neon set.
 const GOLDEN_THEME = process.env['GOODVIBES_GOLDEN_THEME'] ?? 'goodvibes';
+/** The theme this evaluation of the file rendered under; the neon wrapper checks it to prove the file ran afresh. */
+export const goldenTheme = GOLDEN_THEME;
+const previousThemeName = getActiveThemeName();
+const previousThemeMode = activeThemeMode();
 setActiveThemeName(GOLDEN_THEME);
+afterAll(() => {
+  setActiveThemeName(previousThemeName);
+  setActiveThemeMode(previousThemeMode);
+});
 const GOLDENS_DIR = new URL(
   GOLDEN_THEME === 'goodvibes' ? './golden-frames/' : `./golden-frames-${GOLDEN_THEME}/`,
   import.meta.url,
 ).pathname;
-const UPDATE = process.env['GOODVIBES_UPDATE_GOLDENS'] === '1';
 
 // Fixed terminal dimensions for all golden surfaces.
 const W = 100;
 const H = 24;
 
 // ---------------------------------------------------------------------------
-// Snapshot encoding
+// Snapshot encoding and comparison
 // ---------------------------------------------------------------------------
+// The format (and its comparison) lives in helpers/golden-snapshot.ts, which
+// every golden test shares.
 
-/**
- * Encode a Line[] into the golden snapshot text format.
- *
- * Format:
- *   # GV_GOLDEN surface=<name> width=<W> height=<H>
- *   |<W chars per line>|
- *   ...repeated H lines (or fewer if surface is shorter)...
- *   @STYLES
- *   <row> <col> fg=<v>         (only if non-empty)
- *   <row> <col> bg=<v>         (only if non-empty)
- *   <row> <col> bold=1         (only if true)
- *   <row> <col> dim=1          (only if true)
- *   <row> <col> underline=1    (only if true)
- *   <row> <col> italic=1       (only if true)
- *   <row> <col> strikethrough=1 (only if true)
- *
- * Multiple attributes on the same cell are emitted as separate records
- * (one per attribute) to keep diffing line-oriented.
- */
-function snapshotEncode(surface: string, lines: Line[]): string {
-  const height = lines.length;
-  const width = lines[0]?.length ?? 0;
+const snapshotEncode = encodeGolden;
 
-  const textBlock: string[] = [];
-  const styleBlock: string[] = [];
-
-  for (let row = 0; row < height; row++) {
-    const line = lines[row]!;
-    // Text layer, join chars and pad to width
-    const chars = line.map((c) => (c.char === '' ? ' ' : c.char)).join('');
-    textBlock.push(`|${chars}|`);
-
-    // Style layer, emit only non-default values
-    for (let col = 0; col < line.length; col++) {
-      const c = line[col] as Cell;
-      if (c.fg)            styleBlock.push(`${row} ${col} fg=${c.fg}`);
-      if (c.bg)            styleBlock.push(`${row} ${col} bg=${c.bg}`);
-      if (c.bold)          styleBlock.push(`${row} ${col} bold=1`);
-      if (c.dim)           styleBlock.push(`${row} ${col} dim=1`);
-      if (c.underline)     styleBlock.push(`${row} ${col} underline=1`);
-      if (c.italic)        styleBlock.push(`${row} ${col} italic=1`);
-      if (c.strikethrough) styleBlock.push(`${row} ${col} strikethrough=1`);
-    }
-  }
-
-  const header = `# GV_GOLDEN surface=${surface} width=${width} height=${height}`;
-  return [
-    header,
-    ...textBlock,
-    '@STYLES',
-    ...styleBlock,
-    '',
-  ].join('\n');
-}
-
-/**
- * Parse snapshot back to { header, textLines, styleLines }.
- * Returns null if the file is missing or malformed.
- */
-function snapshotParse(raw: string): {
-  surface: string;
-  width: number;
-  height: number;
-  textLines: string[];
-  styleLines: string[];
-} | null {
-  const lines = raw.split('\n');
-  if (!lines[0]?.startsWith('# GV_GOLDEN')) return null;
-
-  const headerMatch = lines[0].match(/surface=(\S+) width=(\d+) height=(\d+)/);
-  if (!headerMatch) return null;
-
-  const surface = headerMatch[1]!;
-  const width = parseInt(headerMatch[2]!, 10);
-  const height = parseInt(headerMatch[3]!, 10);
-
-  const textLines: string[] = [];
-  const styleLines: string[] = [];
-  let inStyles = false;
-
-  for (let i = 1; i < lines.length; i++) {
-    const l = lines[i]!;
-    if (l === '@STYLES') { inStyles = true; continue; }
-    if (!inStyles) {
-      if (l.startsWith('|')) textLines.push(l);
-    } else {
-      if (l.trim()) styleLines.push(l.trim());
-    }
-  }
-
-  return { surface, width, height, textLines, styleLines };
-}
-
-/**
- * Produce a readable diff between two snapshots.
- * Returns null if they match.
- */
-function snapshotDiff(
-  name: string,
-  expectedRaw: string,
-  actualRaw: string,
-): string | null {
-  if (expectedRaw === actualRaw) return null;
-
-  const exp = snapshotParse(expectedRaw);
-  const act = snapshotParse(actualRaw);
-
-  if (!exp || !act) {
-    return `[${name}] snapshot parse failed\n--- expected ---\n${expectedRaw}\n--- actual ---\n${actualRaw}`;
-  }
-
-  const diffLines: string[] = [`[${name}] golden-frame mismatch:`];
-
-  // Text diff
-  const maxTextRows = Math.max(exp.textLines.length, act.textLines.length);
-  for (let i = 0; i < maxTextRows; i++) {
-    const e = exp.textLines[i] ?? '<missing>';
-    const a = act.textLines[i] ?? '<missing>';
-    if (e !== a) {
-      diffLines.push(`  TEXT row ${i}:`);
-      diffLines.push(`    expected: ${e}`);
-      diffLines.push(`    actual:   ${a}`);
-    }
-  }
-
-  // Style diff, find lines present in one but not the other
-  const expStyleSet = new Set(exp.styleLines);
-  const actStyleSet = new Set(act.styleLines);
-  for (const s of expStyleSet) {
-    if (!actStyleSet.has(s)) diffLines.push(`  STYLE removed: ${s}`);
-  }
-  for (const s of actStyleSet) {
-    if (!expStyleSet.has(s)) diffLines.push(`  STYLE added:   ${s}`);
-  }
-
-  return diffLines.join('\n');
-}
-
-/**
- * Read the golden file for a surface, or return null if missing.
- */
-function readGolden(name: string): string | null {
-  const p = join(GOLDENS_DIR, `${name}.txt`);
-  return existsSync(p) ? readFileSync(p, 'utf-8') : null;
-}
-
-/**
- * Write the golden file for a surface.
- */
-function writeGolden(name: string, content: string): void {
-  mkdirSync(GOLDENS_DIR, { recursive: true });
-  writeFileSync(join(GOLDENS_DIR, `${name}.txt`), content, 'utf-8');
-}
-
-/**
- * Core comparison: render → encode → compare/update.
- * Returns the encoded snapshot (for determinism double-check).
- */
+/** Render → encode → compare/update. Returns the encoded snapshot (for determinism double-checks). */
 function assertGolden(surface: string, lines: Line[]): string {
-  const actual = snapshotEncode(surface, lines);
-
-  if (UPDATE) {
-    writeGolden(surface, actual);
-    return actual;
-  }
-
-  const expected = readGolden(surface);
-  if (expected === null) {
-    throw new Error(
-      `[${surface}] golden file missing. Run with GOODVIBES_UPDATE_GOLDENS=1 to generate.`,
-    );
-  }
-
-  const diff = snapshotDiff(surface, expected, actual);
-  if (diff !== null) {
-    throw new Error(
-      `${diff}\n\nRun with GOODVIBES_UPDATE_GOLDENS=1 to regenerate.`,
-    );
-  }
-
-  return actual;
+  return assertGoldenIn(GOLDENS_DIR, surface, lines);
 }
 
 // ---------------------------------------------------------------------------
@@ -442,44 +276,6 @@ describe('golden-frames', () => {
     });
 
   });
-
-  describe('mismatch detection', () => {
-    test('snapshotDiff detects text change', () => {
-      const lines = renderShellFooterSurface();
-      const original = snapshotEncode('shell-footer', lines);
-
-      // Mutate the first char of the first text row in a copy
-      const mutated = original.replace(
-        /^\|(.)/m,
-        (_, second: string) => `|${second === ' ' ? 'X' : ' '}`,
-      );
-
-      const diff = snapshotDiff('shell-footer', original, mutated);
-      expect(diff).not.toBeNull();
-      expect(diff).toContain('TEXT row');
-    });
-
-    test('snapshotDiff detects style change', () => {
-      const lines = renderShellFooterSurface();
-      const original = snapshotEncode('shell-footer', lines);
-
-      // Append a spurious style record
-      const mutated = original.replace(
-        '@STYLES',
-        '@STYLES\n0 0 fg=#deadff',
-      );
-
-      const diff = snapshotDiff('shell-footer', original, mutated);
-      expect(diff).not.toBeNull();
-      expect(diff).toContain('STYLE added');
-    });
-
-    test('snapshotDiff returns null for identical snapshots', () => {
-      const lines = renderShellFooterSurface();
-      const snap = snapshotEncode('shell-footer', lines);
-      expect(snapshotDiff('shell-footer', snap, snap)).toBeNull();
-    });
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -511,12 +307,10 @@ describe('golden-frames', () => {
 //     (formatTimestamp in the session/profile pickers), the affected tests
 //     pin process.env.TZ='UTC' for the duration of the render so the golden
 //     bytes don't depend on the host machine's timezone.
-//   - The tree-sitter code-block golden schedules a real background parse on
-//     code-block.ts's shared SyntaxHighlighter singleton and polls for cache
-//     population; if the tree-sitter WASM grammar is unavailable in the
-//     environment it skips gracefully, mirroring the existing skipIf
-//     convention in src/test/intelligence/tree-sitter.test.ts. The
-//     regex-fallback golden uses a fence language (yaml) that
+//   - The tree-sitter code-block golden draws the placeholder, settles the
+//     background parse on code-block.ts's shared SyntaxHighlighter singleton,
+//     and pins the real highlighting; a grammar that fails to load fails the
+//     test. The regex-fallback golden uses a fence language (yaml) that
 //     syntax-highlighter.ts's FENCE_TO_LANG_ID never claims, so it never
 //     schedules a parse and is unconditionally deterministic.
 // ---------------------------------------------------------------------------
@@ -609,8 +403,7 @@ describe('golden-frames : splash (constraint 4)', () => {
       '・', // ideographic middle dot separator
     ];
     for (const width of [60, 100, 140]) {
-      const raw = readGolden(`splash-${width}`);
-      expect(raw).not.toBeNull();
+      const raw = readFileSync(join(GOLDENS_DIR, `splash-${width}.txt`), 'utf-8');
       for (const glyph of REQUIRED_GLYPHS) {
         expect(raw).toContain(glyph);
       }
@@ -655,19 +448,10 @@ describe('golden-frames : conversation: fenced code block (regex-fallback path)'
 // Fenced code block, real tree-sitter path. code-block.ts owns a
 // module-private shared SyntaxHighlighter singleton; the first call to
 // renderCodeBlock for a given (lang, code) schedules a background WASM parse
-// and synchronously returns the regex-fallback tokens. This test polls for
-// the cache to populate (bounded) and pins the tree-sitter-highlighted
-// result. The code snippet carries a unique marker comment so its cache key
-// can never collide with a snippet warmed by another test file sharing this
-// process. Skips gracefully (matching src/test/intelligence/tree-sitter.test.ts's
-// convention) when the grammar WASM isn't present in this environment.
-function wasmAvailable(): boolean {
-  return existsSync(join(process.cwd(), 'node_modules', 'web-tree-sitter', 'web-tree-sitter.wasm'));
-}
-function tsGrammarAvailable(): boolean {
-  return existsSync(join(process.cwd(), 'node_modules', 'tree-sitter-typescript', 'tree-sitter-typescript.wasm'));
-}
-
+// and synchronously returns the regex-fallback tokens. The test settles that
+// parse and pins the tree-sitter-highlighted result. The code snippet carries
+// a unique marker comment so its cache key can never collide with a snippet
+// warmed by another test file sharing this process.
 const CODE_BLOCK_TREE_SITTER_LINES = [
   '// GV_GOLDEN_TREE_SITTER_FIXTURE unique marker — see golden-frames.test.ts',
   'export function goldenFixtureAdd(a: number, b: number): number {',
@@ -676,30 +460,15 @@ const CODE_BLOCK_TREE_SITTER_LINES = [
 ];
 
 describe('golden-frames : conversation: fenced code block (tree-sitter path)', () => {
-  test.skipIf(!wasmAvailable() || !tsGrammarAvailable())(
-    'matches committed golden snapshot once the background parse lands',
-    async () => {
-      const before = renderCodeBlock(CODE_BLOCK_TREE_SITTER_LINES, 'ts', NORMAL_W);
-      const beforeText = snapshotEncode('code-block-tree-sitter', before);
-      let afterText = beforeText;
-      let after = before;
-      for (let i = 0; i < 100; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        after = renderCodeBlock(CODE_BLOCK_TREE_SITTER_LINES, 'ts', NORMAL_W);
-        afterText = snapshotEncode('code-block-tree-sitter', after);
-        if (afterText !== beforeText) break;
-      }
-      if (afterText === beforeText) {
-        // Background parse never completed in this environment (e.g. WASM
-        // init failed), nothing to pin here. The regex-fallback golden
-        // above still covers the fallback path unconditionally.
-        return;
-      }
-      expect(after.length).toBeGreaterThan(0);
-      assertGolden('code-block-tree-sitter', after);
-    },
-    10_000,
-  );
+  test('matches committed golden snapshot once the background parse lands', async () => {
+    const before = renderCodeBlock(CODE_BLOCK_TREE_SITTER_LINES, 'ts', NORMAL_W);
+    const beforeText = snapshotEncode('code-block-tree-sitter', before);
+    await settleSyntaxHighlighting();
+    const after = renderCodeBlock(CODE_BLOCK_TREE_SITTER_LINES, 'ts', NORMAL_W);
+    // A parse that never lands would leave the placeholder colours and pass the golden check below only by accident.
+    expect(snapshotEncode('code-block-tree-sitter', after)).not.toBe(beforeText);
+    assertGolden('code-block-tree-sitter', after);
+  }, 10_000);
 });
 
 // Thinking block, renderThinkingBlock is the completed-content renderer

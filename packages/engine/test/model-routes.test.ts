@@ -311,6 +311,38 @@ describe('GET /api/models', () => {
     }
   });
 
+  test('a stored name the provider does not accept does not make a provider that described its own routes configured', async () => {
+    const m1 = makeModel('amazon-bedrock', 'claude-sonnet-4-6');
+    const { context } = makeContext({
+      models: [m1],
+      currentModel: m1,
+      configuredIds: [],
+      runtimeByProvider: {
+        'amazon-bedrock': {
+          auth: {
+            mode: 'api-key',
+            configured: false,
+            routes: [{ route: 'api-key', label: 'Bearer token', configured: false, usable: false, freshness: 'unconfigured' }],
+          },
+        },
+      },
+    });
+    const stored = new Set(['AWS_ACCESS_KEY_ID', 'AWS_PROFILE']);
+    const withSecrets: ModelRouteContext = { ...context, secretsManager: { get: async (key: string) => (stored.has(key) ? 'stored' : null) } };
+    const names = ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'];
+    const saved = names.map((name) => [name, process.env[name]] as const);
+    for (const name of names) delete process.env[name];
+    try {
+      const res = await dispatchModelRoutes(makeRequest('GET', 'http://localhost/api/models'), withSecrets);
+      const body = await res!.json() as { providers: Array<Record<string, unknown>> };
+      const bedrock = body.providers.find((p) => p['id'] === 'amazon-bedrock');
+      expect(bedrock?.['configured']).toBe(false);
+      expect(bedrock?.['configuredVia']).toBeUndefined();
+    } finally {
+      for (const [name, value] of saved) if (value !== undefined) process.env[name] = value;
+    }
+  });
+
   test('does not treat stale registry configuredIds as configured when runtime auth routes are unusable', async () => {
     const m1 = makeModel('openai', 'gpt-5.5');
     const { context } = makeContext({

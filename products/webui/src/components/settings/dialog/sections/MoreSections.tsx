@@ -29,7 +29,7 @@ import { PairingTokensSettings } from '../../PairingTokensSettings';
 import { PowerSettings } from '../../PowerSettings';
 import { TailscaleSettings } from '../../TailscaleSettings';
 import { PrincipalsView } from '../../../../views/principals/PrincipalsView';
-import { ConfigGroupList, RawConfigEditor, useConfigSettings } from '../ConfigSettings';
+import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { ReadableValue, SettingRow, SettingsBlock } from '../parts';
 import { groupsForSection, type SettingsSectionId } from '../sections';
 import { CheckInSettings } from '../../../../views/checkin/CheckInView';
@@ -203,7 +203,6 @@ export function AllSettingsSection() {
     <>
       <TriggerRecoverySettings />
       <SectionConfig id="all" emptyText="Every setting the daemon reports has a home in another section." />
-      <RawConfigEditor />
     </>
   );
 }

@@ -42,9 +42,8 @@ function isLoopbackHost(host: string | null | undefined): boolean {
   );
 }
 
-function isRemoteBind(hostMode: string, host: string | null | undefined, allowRemote = false): boolean {
+function isRemoteBind(hostMode: string, host: string | null | undefined): boolean {
   if (hostMode === 'network') return true;
-  if (hostMode === 'local') return allowRemote;
   if (hostMode === 'custom') return !isLoopbackHost(host);
   return false;
 }
@@ -55,7 +54,6 @@ function hasRemoteDeviceAccess(snapshot: OnboardingSnapshotState): boolean {
       isRemoteBind(
         snapshot.bindSettings.controlPlane.hostMode,
         snapshot.bindSettings.controlPlane.host,
-        snapshot.bindSettings.controlPlane.allowRemote,
       )) ||
     (snapshot.bindSettings.web.enabled && isRemoteBind(snapshot.bindSettings.web.hostMode, snapshot.bindSettings.web.host))
   );

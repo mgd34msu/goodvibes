@@ -128,10 +128,16 @@ test('lock-wait cancellation and live auth revocation leave no import; known rec
   const abort = new AbortController(); const waiting = host.service.execute(request, host.actor, { signal: abort.signal });
   abort.abort(); await release();
   expect(await waiting).toMatchObject({ kind: 'rejected', code: 'cancelled' }); expect(fs.readFileSync(host.file)).toEqual(bytes);
-  let allowed = true;
+  let allowed = true; let authorizationChecks = 0;
   const release2 = await acquireCrossProcessLock(`${host.file}.knowledge-lock`, { strictOwnership: true });
-  const revoked = host.service.execute(request, host.actor, { isAuthorized: () => allowed }); allowed = false; await release2();
+  const revoked = host.service.execute(request, host.actor, { isAuthorized: () => { authorizationChecks += 1; return allowed; } });
+  // Let every queued microtask run while the lock is held: the only authorization
+  // check is the one after the lock is won, so none may have happened yet.
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(authorizationChecks).toBe(0);
+  allowed = false; await release2();
   expect(await revoked).toMatchObject({ kind: 'rejected', code: 'forbidden' }); expect(fs.readFileSync(host.file)).toEqual(bytes);
+  expect(authorizationChecks).toBe(1);
   expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'accepted', replayed: false });
   expect(await host.service.execute(request, host.actor, { signal: abort.signal })).toMatchObject({ kind: 'accepted', replayed: true });
 });

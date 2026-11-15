@@ -203,3 +203,25 @@ test('Router runtime authentication metadata follows the actual General target w
   expect(f.router.describeRuntime().auth?.configured).toBe(true);
   expect(f.fake.requests).toHaveLength(0);
 });
+
+test('a second caller of one turn is not failed by the first caller\'s abort', async () => {
+  const f = fixture();
+  const first = new AbortController();
+  const context = { sessionId: 'session', turnId: 'shared-turn' };
+  const messages: ChatRequest['messages'] = [{ role: 'user', content: 'Implement reload' }];
+  const aborted = f.router.prepare({ messages, context, signal: first.signal });
+  const second = f.router.prepare({ messages, context, signal: new AbortController().signal });
+  first.abort();
+  await expect(aborted).rejects.toThrow();
+  const prepared = await second;
+  expect(prepared.model.id).toBe('coding');
+});
+
+test('selected diff files come from file headers only, never from hunk lines or /dev/null', () => {
+  const diff = [
+    'diff --git a/q.sql b/q.sql', '--- a/q.sql', '+++ b/q.sql', '@@ -1,3 +1,3 @@',
+    ' keep', '--- note', '+++ added', ' tail',
+    'diff --git a/new.ts b/new.ts', '--- /dev/null', '+++ b/new.ts', '@@ -0,0 +1 @@', '+x',
+  ].join('\n');
+  expect(selectedRoutingFiles(diff)).toEqual(['a/q.sql', 'b/q.sql', 'b/new.ts']);
+});

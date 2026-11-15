@@ -21,9 +21,25 @@ import type { PermissionAttribution, PermissionPromptRequest, RememberTier } fro
 /** Structural shape of one EditItem, read defensively, see module doc. */
 export interface EditItemLike {
   readonly path: string;
-  readonly find: string;
-  readonly replace: string;
+  readonly find?: string | undefined;
+  readonly replace?: string | undefined;
+  readonly find_base64?: string | undefined;
+  readonly replace_base64?: string | undefined;
   readonly id?: string | undefined;
+}
+
+/**
+ * The find and replace text the edit tool will use for one item: a base64 field
+ * wins over its plain twin (a present `replace_base64` of '' is an empty
+ * replacement), exactly as the executor reads it, so the card shows the bytes
+ * that would be written.
+ */
+export function editItemText(item: EditItemLike): { readonly find: string; readonly replace: string } {
+  const decode = (value: string): string => Buffer.from(value, 'base64').toString('utf-8');
+  return {
+    find: item.find_base64 ? decode(item.find_base64) : (item.find ?? ''),
+    replace: item.replace_base64 !== undefined ? decode(item.replace_base64) : (item.replace ?? ''),
+  };
 }
 
 export interface HunkSelectionState {
@@ -69,11 +85,13 @@ export interface HunkKeyResult {
 function isEditItemLike(value: unknown): value is EditItemLike {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
+  const optionalString = (key: string): boolean => candidate[key] === undefined || typeof candidate[key] === 'string';
   return (
     typeof candidate['path'] === 'string' &&
-    typeof candidate['find'] === 'string' &&
-    typeof candidate['replace'] === 'string' &&
-    (candidate['id'] === undefined || typeof candidate['id'] === 'string')
+    (typeof candidate['find'] === 'string' || typeof candidate['find_base64'] === 'string') &&
+    (typeof candidate['replace'] === 'string' || typeof candidate['replace_base64'] === 'string') &&
+    optionalString('find') && optionalString('replace') && optionalString('find_base64') && optionalString('replace_base64') &&
+    optionalString('id')
   );
 }
 

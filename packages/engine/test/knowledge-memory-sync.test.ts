@@ -23,8 +23,10 @@ const scopeReadings = useKnowledgeAnswerReadings();
 const disposables = trackDisposables();
 
 const tmpRoots: string[] = [];
+const stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -56,6 +58,7 @@ describe('knowledge memory sync', () => {
     });
 
     const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    stores.push(store);
     const service = disposables.add(new KnowledgeService(
       store,
       new ArtifactStore({ rootDir: join(root, 'artifacts') }),
@@ -86,6 +89,7 @@ describe('knowledge memory sync', () => {
     memoryRegistry.delete(memory.id);
     await syncKnowledgeMemoryNodes(store, memoryRegistry);
     const reopened = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+    stores.push(reopened);
     await reopened.init();
     expect(reopened.getNode(`memory-${memory.id}`)).toBeNull();
     expect(reopened.listNodeRevisions(`memory-${memory.id}`)).toEqual([]);

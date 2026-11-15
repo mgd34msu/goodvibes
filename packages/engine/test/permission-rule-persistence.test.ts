@@ -36,18 +36,18 @@ function manager(store: UserPermissionRuleStore, handler: PermissionRequestHandl
 }
 
 describe('remembered permission persistence', () => {
-  test('a real rename failure never becomes a live grant or a later persisted success', async () => {
+  test('a failing write never becomes a live grant or a later persisted success', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'gv-permission-persistence-'));
     const path = join(dir, 'rules.json');
     try {
       const store = new UserPermissionRuleStore(path);
       await store.init();
-      // A directory at the target lets the temp write/fsync succeed and makes
-      // the actual atomic rename fail. All files belong to this test.
+      // A directory at the target makes the write fail (the file is re-read
+      // under the lock before it is replaced). All files belong to this test.
       mkdirSync(path);
       const permissions = manager(store, async () => { throw new Error('No implicit prompt'); });
       const error = await store.add(record('first')).then(() => null, (cause: unknown) => cause);
-      expect(error).toMatchObject({ code: 'EISDIR', syscall: 'rename' });
+      expect((error as Error).message).toContain('EISDIR');
       expect(await permissions.checkDetailed('exec', args(command))).toMatchObject({
         approved: true, persisted: false, sourceLayer: 'stakes_preset',
       });

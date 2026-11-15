@@ -156,7 +156,16 @@ export type TurnEvent =
    */
   | { type: 'TURN_COMPLETED'; turnId: string; response: string; stopReason: Extract<TurnStopReason, 'completed' | 'empty_response'>; metadata?: TurnCompletedMetadata | undefined }
   /** Turn failed with an error. */
-  | { type: 'TURN_ERROR'; turnId: string; error: string; stopReason: Exclude<TurnStopReason, 'completed' | 'empty_response' | 'cancelled'> }
+  | {
+    type: 'TURN_ERROR';
+    turnId: string;
+    error: string;
+    stopReason: Exclude<TurnStopReason, 'completed' | 'empty_response' | 'cancelled'>;
+    /** HTTP status of a provider failure, when it had one; lets a reader tell 401 and 429 from the wording alone. */
+    status?: number | undefined;
+    /** Machine code of the failure (a connection errno such as ECONNREFUSED), when it had one. */
+    code?: string | undefined;
+  }
   /** Turn was cancelled by the user or system. */
   | { type: 'TURN_CANCEL'; turnId: string; reason?: string; stopReason: Extract<TurnStopReason, 'cancelled'> };
 

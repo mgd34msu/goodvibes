@@ -1,6 +1,6 @@
-import { timingSafeEqual, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { SurfaceAdapterContext } from '../types.js';
-import { parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
+import { constantTimeEquals, declaredMention, parseJsonRecord, readString, readTextBodyWithinLimit } from '../helpers.js';
 import {
   HOME_ASSISTANT_SURFACE,
   resolveHomeAssistantWebhookSecret,
@@ -17,11 +17,13 @@ export async function handleHomeAssistantSurfaceWebhook(
     return Response.json({ error: 'Home Assistant ingress is not configured' }, { status: 503 });
   }
 
-  const rawBody = await readTextBodyWithinLimit(req);
-  if (rawBody instanceof Response) return rawBody;
+  // The secret travels in a header, so an unauthenticated caller is refused
+  // before its body is read.
   if (!isAuthorizedHomeAssistantRequest(req, secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const rawBody = await readTextBodyWithinLimit(req);
+  if (rawBody instanceof Response) return rawBody;
 
   const contentType = req.headers.get('content-type') ?? '';
   const body = contentType.includes('application/json') || rawBody.trim().startsWith('{')
@@ -60,7 +62,8 @@ export async function handleHomeAssistantSurfaceWebhook(
     conversationKind,
     hasAnyMention: typeof body.hasAnyMention === 'boolean' ? body.hasAnyMention : true,
     text,
-    mentioned: typeof body.mentioned === 'boolean' ? body.mentioned : true,
+    // Every Home Assistant request is addressed to the assistant by construction.
+    mentioned: declaredMention(body, true),
     metadata: body,
   });
   if (!policy.allowed) {
@@ -88,7 +91,7 @@ export async function handleHomeAssistantSurfaceWebhook(
     const currentSecret = await resolveHomeAssistantWebhookSecret(context);
     assertSourceCurrentSync();
     if (!context.configManager.get('surfaces.homeassistant.enabled') || !currentSecret
-      || !safeEqual(currentSecret, secret) || !isAuthorizedHomeAssistantRequest(req, currentSecret)) {
+      || !constantTimeEquals(currentSecret, secret) || !isAuthorizedHomeAssistantRequest(req, currentSecret)) {
       credentialAbort.abort();
       throw new Error('Home Assistant source authorization changed');
     }
@@ -109,6 +112,9 @@ export async function handleHomeAssistantSurfaceWebhook(
 
   if (!text.trim()) {
     await context.routeBindings.start();
+    // A credential rotated or disabled while the request was waiting must not
+    // still store the conversation.
+    await assertSourceCurrent();
     const binding = await context.routeBindings.upsertBinding({
       kind: threadId ? 'thread' : 'channel',
       surfaceKind: HOME_ASSISTANT_SURFACE,
@@ -140,9 +146,19 @@ export async function handleHomeAssistantSurfaceWebhook(
   }
 
   const routing = readRouting(body);
+  if (routing?.tools?.length) {
+    // The list is not applied to the chat session (every daemon tool stays
+    // available to the model), so accepting it would claim a restriction that
+    // does not exist.
+    return Response.json({
+      error: 'The tools list is not supported on the Home Assistant webhook: the conversation keeps every daemon tool and the list would not restrict it. Remove the tools field.',
+      field: 'tools',
+    }, { status: 400 });
+  }
   if (!context.postHomeAssistantChatMessage) {
     return Response.json({ error: 'Home Assistant remote chat is unavailable in this runtime' }, { status: 503 });
   }
+  await assertSourceCurrent();
   const result = await context.postHomeAssistantChatMessage({
     body: text,
     messageId,
@@ -155,7 +171,6 @@ export async function handleHomeAssistantSurfaceWebhook(
     title: readString(body.title) ?? 'Home Assistant',
     ...(routing?.providerId ? { providerId: routing.providerId } : {}),
     ...(routing?.modelId ? { modelId: routing.modelId } : {}),
-    ...(routing?.tools?.length ? { tools: routing.tools } : {}),
     context: {
       ...body,
       source: 'homeassistant',
@@ -186,13 +201,7 @@ function isAuthorizedHomeAssistantRequest(req: Request, secret: string): boolean
     req.headers.get('x-goodvibes-webhook-secret'),
     req.headers.get('authorization')?.replace(/^Bearer\s+/i, ''),
   ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-  return candidates.some((candidate) => safeEqual(candidate, secret));
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
+  return candidates.some((candidate) => constantTimeEquals(candidate, secret));
 }
 
 function conversationKindForHomeAssistant(
@@ -219,10 +228,6 @@ function readRouting(body: Record<string, unknown>): {
     ...(modelId ? { modelId } : {}),
     ...(tools.length ? { tools } : {}),
   };
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function readStringList(value: unknown): string[] {

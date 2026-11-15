@@ -326,8 +326,12 @@ export function validateOccasionState(
 export interface OccasionSweepInput {
   readonly today: IsoDate;
   readonly now: number;
-  /** Ids still declared in the profile. State for anything else is orphaned. */
-  readonly declaredOccasionIds: ReadonlySet<string>;
+  /**
+   * Ids still declared in the profile. State for anything else is orphaned.
+   * Absent means the caller cannot vouch for the declarations (the profile is
+   * not loaded), so the orphan rules are skipped and only time-based expiry runs.
+   */
+  readonly declaredOccasionIds?: ReadonlySet<string> | undefined;
   /** How long gift history is kept, in years. */
   readonly giftHistoryYears: number;
 }
@@ -425,10 +429,15 @@ export class OccasionStateStore {
   }
 
   private async state(readOnly = false, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
-    if (this.loading) return this.loading;
-    if (this.snapshot !== null) return this.snapshot;
-    this.loading = this.loadState(readOnly, assertCurrent);
-    try { return await this.loading; } finally { this.loading = undefined; }
+    assertCurrent();
+    if (this.snapshot !== null && !this.loading) return this.snapshot;
+    // The first load is shared by every caller that arrives while it runs, so it
+    // is not fenced by any one caller: that caller giving up would otherwise fail
+    // the others. Each caller applies its own fence after the wait.
+    const loading = this.loading ?? (this.loading = this.loadState(readOnly).finally(() => { this.loading = undefined; }));
+    const snapshot = await loading;
+    assertCurrent();
+    return snapshot;
   }
 
   private async loadState(readOnly = false, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionStateSnapshot> {
@@ -568,6 +577,11 @@ export class OccasionStateStore {
    */
   async recordAnswer(entry: OccasionAcknowledgement, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionAcknowledgement> {
     assertCurrent();
+    // A stored acknowledgement must be a real date: a free-form occurrence would
+    // be read back as a malformed record and refuse every later pending read.
+    if (entry.occurrence.trim() !== entry.occurrence || !isIsoDate(entry.occurrence)) {
+      throw new RangeError('An occurrence must be an ISO date (YYYY-MM-DD).');
+    }
     const owned = this.admissionOwner.own('acknowledgements', [entry])[0]!;
     return this.change(snapshot => {
       const kept = snapshot.acknowledgements.filter(
@@ -644,6 +658,25 @@ export class OccasionStateStore {
   }
 
   /**
+   * Create or change one open item inside a single write, so the item it builds
+   * from is the one that is replaced and a concurrent change is not overwritten
+   * by a stale copy. `build` receives the stored item, if any; returning null
+   * leaves the store untouched.
+   */
+  async settleOpenItem(id: string, build: (existing: OpenItem | undefined) => OpenItem | null, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OpenItem | null> {
+    assertCurrent();
+    return this.change(snapshot => {
+      const item = build(snapshot.openItems.find((entry) => entry.id === id));
+      if (item === null) return null;
+      const kept = snapshot.openItems.filter((existing) => existing.id !== id);
+      kept.push(item);
+      if (kept.length > MAX_OPEN_ITEMS) kept.splice(0, kept.length - MAX_OPEN_ITEMS);
+      snapshot.openItems = kept;
+      return item;
+    }, assertCurrent, { publish: value => value !== null });
+  }
+
+  /**
    * Remove an open item because it is RESOLVED.
    *
    * No tombstone and no resolved flag: a resolved item is gone, matching the
@@ -675,6 +708,23 @@ export class OccasionStateStore {
         && entry.occurrence === occurrence
         && entry.completedAt === undefined,
     );
+  }
+
+  /**
+   * Change one stored interview inside a single write. Two answers that arrive
+   * together each build from the interview the other left, so neither is lost.
+   * Returns undefined, and writes nothing, when the interview is gone or `update`
+   * declines it by returning null.
+   */
+  async updateInterview(id: string, update: (current: Interview) => Interview | null, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<Interview | undefined> {
+    return this.change(snapshot => {
+      const current = snapshot.interviews.find((entry) => entry.id === id);
+      if (current === undefined) return undefined;
+      const next = update(current);
+      if (next === null) return undefined;
+      snapshot.interviews = snapshot.interviews.map((entry) => (entry.id === id ? next : entry));
+      return next;
+    }, assertCurrent, { publish: value => value !== undefined });
   }
 
   async putInterview(interview: Interview, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<Interview> {
@@ -763,7 +813,8 @@ export class OccasionStateStore {
    */
   async sweep(input: OccasionSweepInput, assertCurrent: () => void = UNRESTRICTED_OPERATION): Promise<OccasionSweepReport> {
     return this.change(snapshot => {
-      const declared = input.declaredOccasionIds;
+      const declaredIds = input.declaredOccasionIds;
+      const isOrphan = (occasionId: string): boolean => declaredIds !== undefined && !declaredIds.has(occasionId);
       const giftCutoff = addDays(input.today, -Math.max(1, Math.round(input.giftHistoryYears * 365)));
 
       let expiredAcknowledgements = 0;
@@ -774,7 +825,7 @@ export class OccasionStateStore {
       let staleMirrors = 0;
 
       snapshot.acknowledgements = snapshot.acknowledgements.filter((entry) => {
-        if (!declared.has(entry.occasionId)) { orphanedRecords += 1; return false; }
+        if (isOrphan(entry.occasionId)) { orphanedRecords += 1; return false; }
         if (entry.expiresAfter !== undefined && entry.expiresAfter < input.today) {
           expiredAcknowledgements += 1;
           return false;
@@ -783,20 +834,20 @@ export class OccasionStateStore {
       });
 
       snapshot.gifts = snapshot.gifts.filter((entry) => {
-        if (!declared.has(entry.occasionId)) { orphanedRecords += 1; return false; }
+        if (isOrphan(entry.occasionId)) { orphanedRecords += 1; return false; }
         if (entry.occurrence < giftCutoff) { agedGiftRecords += 1; return false; }
         return true;
       });
 
       snapshot.openItems = snapshot.openItems.filter((entry) => {
-        if (!declared.has(entry.occasionId)) { orphanedRecords += 1; return false; }
+        if (isOrphan(entry.occasionId)) { orphanedRecords += 1; return false; }
         const expiry = entry.expiresAfter ?? (entry.occurrence.length > 0 ? entry.occurrence : undefined);
         if (expiry !== undefined && expiry < input.today) { expiredOpenItems += 1; return false; }
         return true;
       });
 
       snapshot.interviews = snapshot.interviews.filter((entry) => {
-        if (!declared.has(entry.occasionId)) { droppedInterviews += 1; return false; }
+        if (isOrphan(entry.occasionId)) { droppedInterviews += 1; return false; }
         if (entry.occurrence < input.today && entry.completedAt === undefined) {
           droppedInterviews += 1;
           return false;
@@ -805,7 +856,7 @@ export class OccasionStateStore {
       });
 
       snapshot.mirrors = snapshot.mirrors.filter((entry) => {
-        if (!declared.has(entry.occasionId)) { staleMirrors += 1; return false; }
+        if (isOrphan(entry.occasionId)) { staleMirrors += 1; return false; }
         // A mirror for an occurrence that has passed has nothing left to keep
         // idempotent. Dropping it is not a deletion in the calendar: the mirror
         // is not the record, and the calendar entry is the calendar's to keep.

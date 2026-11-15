@@ -35,7 +35,7 @@
  */
 
 import { createRelayClient, type RelayClient } from '@goodvibes-jev/engine/transport-realtime';
-import { getStoredRelayPairing, type RelayPairingPayload } from './relay-pairing';
+import { clearStoredRelayPairing, getStoredRelayPairing, type RelayPairingPayload } from './relay-pairing';
 import { STEP_UP_ASSERTION_HEADER } from './stepup';
 import { resolveStepUp } from './stepup-prompter';
 import { invalidateClientLifetime } from './client-lifetime';
@@ -105,6 +105,18 @@ export function closeRelayClient(): void {
   if (client) client.close();
   client = null;
   clientForPairingKey = null;
+}
+
+/**
+ * Unpair this device from its relay daemon: forget the pairing, close the relay socket and
+ * return to the direct route. Doing only some of these leaves `activeRoute === 'relay'` with
+ * no pairing (requests fall back to a direct fetch until the next health pass) or a live
+ * socket to a daemon the operator meant to leave.
+ */
+export function unpairRelay(): void {
+  clearStoredRelayPairing();
+  closeRelayClient();
+  setActiveRoute('direct');
 }
 
 /**

@@ -81,7 +81,7 @@ describe('resetSelected', () => {
       hasConfigManager: true,
       selected: entry,
       secretsManager: null,
-      setValue: (key, value) => calls.push([key, value]),
+      setValue: (key, value) => { calls.push([key, value]); },
     });
     expect(result).toEqual({ key: 'display.stream', value: true });
     expect(calls).toEqual([['display.stream', true]]);
@@ -203,7 +203,7 @@ describe('handleResetConfirmKey', () => {
       hasConfigManager: true,
       currentItems: () => [entry1, entry2],
       groups: new Map(),
-      setValue: (key, value) => calls.push([key, value]),
+      setValue: (key, value) => { calls.push([key, value]); },
       setResetCategoryConfirm: (v) => { catConfirm = v; },
       setResetAllConfirm: () => {},
     });
@@ -233,7 +233,7 @@ describe('handleResetConfirmKey', () => {
       hasConfigManager: true,
       currentItems: () => [],
       groups,
-      setValue: (key, value) => calls.push([key, value]),
+      setValue: (key, value) => { calls.push([key, value]); },
       setResetCategoryConfirm: () => {},
       setResetAllConfirm: (v) => { allConfirm = v; },
     });
@@ -299,4 +299,118 @@ describe('handleResetConfirmKey', () => {
     });
     expect(result).toBe('absorbed');
   });
+});
+
+// ---------------------------------------------------------------------------
+// Secret, host and unavailable rows
+// ---------------------------------------------------------------------------
+
+const SECRET_KEY = 'surfaces.signal.token';
+
+function makeHostEntry(key: string, defaultValue: boolean, currentValue: boolean): SettingEntry {
+  return {
+    kind: 'host',
+    setting: { key, label: key, description: '', default: defaultValue },
+    currentValue,
+    isDefault: currentValue === defaultValue,
+  } as unknown as SettingEntry;
+}
+
+function makeUnavailableEntry(key: string): SettingEntry {
+  return { ...makeEntry(key, true, false), metadataUnavailable: 'schema unavailable' } as SettingEntry;
+}
+
+describe('resetSelected: secret, host and unavailable rows', () => {
+  const base = { editingMode: false, hasConfigManager: true, secretsManager: null } as const;
+
+  test('a secret-backed key is handed to resetSecrets and never written through setValue', () => {
+    const written: Array<[ConfigKey, unknown]> = [];
+    const secrets: Array<ReadonlyArray<{ key: ConfigKey; value: unknown }>> = [];
+    const result = resetSelected({
+      ...base,
+      selected: makeEntry(SECRET_KEY, '', 'goodvibes://secrets/goodvibes/x'),
+      setValue: (key, value) => { written.push([key, value]); },
+      resetSecrets: (entries) => { secrets.push(entries); },
+    });
+    expect(result).toBeNull();
+    expect(written).toEqual([]);
+    expect(secrets).toEqual([[{ key: SECRET_KEY as ConfigKey, value: '' }]]);
+  });
+
+  test('a host row is reset through setHostValue and not through setValue', () => {
+    const written: Array<[ConfigKey, unknown]> = [];
+    const host: Array<[string, boolean]> = [];
+    const result = resetSelected({
+      ...base,
+      selected: makeHostEntry('host.flag', true, false),
+      setValue: (key, value) => { written.push([key, value]); },
+      setHostValue: (key, value) => { host.push([key, value]); },
+    });
+    expect(result).toEqual({ key: 'host.flag', value: true });
+    expect(host).toEqual([['host.flag', true]]);
+    expect(written).toEqual([]);
+  });
+
+  test('a refused host write is not reported as reset', () => {
+    const result = resetSelected({
+      ...base,
+      selected: makeHostEntry('host.flag', true, false),
+      setValue: () => {},
+      setHostValue: () => false,
+    });
+    expect(result).toBeNull();
+  });
+
+  test('a row whose metadata is unavailable is skipped', () => {
+    const written: Array<[ConfigKey, unknown]> = [];
+    const result = resetSelected({
+      ...base,
+      selected: makeUnavailableEntry('display.stream'),
+      setValue: (key, value) => { written.push([key, value]); },
+    });
+    expect(result).toBeNull();
+    expect(written).toEqual([]);
+  });
+});
+
+describe('handleResetConfirmKey: secret, host and unavailable rows', () => {
+  const items = (): SettingEntry[] => [
+    makeEntry('display.stream', true, false),
+    makeEntry(SECRET_KEY, '', 'goodvibes://secrets/goodvibes/x'),
+    makeHostEntry('host.flag', true, false),
+    makeUnavailableEntry('display.theme'),
+  ];
+
+  function confirm(mode: 'category' | 'all') {
+    const written: Array<[ConfigKey, unknown]> = [];
+    const host: Array<[string, boolean]> = [];
+    const secrets: Array<ReadonlyArray<{ key: ConfigKey; value: unknown }>> = [];
+    const result = handleResetConfirmKey({
+      key: 'y',
+      resetCategoryConfirm: mode === 'category' ? { subject: 'display' } : null,
+      resetAllConfirm: mode === 'all' ? { subject: 'all' } : null,
+      hasConfigManager: true,
+      currentItems: items,
+      groups: new Map([['display', items()]]),
+      setValue: (key, value) => { written.push([key, value]); },
+      setHostValue: (key, value) => { host.push([key, value]); },
+      resetSecrets: (entries) => { secrets.push(entries); },
+      setResetCategoryConfirm: () => {},
+      setResetAllConfirm: () => {},
+    });
+    return { written, host, secrets, result };
+  }
+
+  for (const mode of ['category', 'all'] as const) {
+    test(`reset ${mode}: the secret goes to resetSecrets, never setValue; host rows use setHostValue; unavailable rows are skipped`, () => {
+      const { written, host, secrets, result } = confirm(mode);
+      expect(written).toEqual([['display.stream', true]]);
+      expect(host).toEqual([['host.flag', true]]);
+      expect(secrets).toEqual([[{ key: SECRET_KEY as ConfigKey, value: '' }]]);
+      expect(result).toEqual({
+        result: 'confirmed',
+        entries: [{ key: 'display.stream', value: true }, { key: 'host.flag', value: true }],
+      });
+    });
+  }
 });

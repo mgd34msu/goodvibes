@@ -33,16 +33,8 @@ test('tree connectors offer canonical choices and retain saved values after brow
     await expect(select).toHaveText('ascii');
     await expectNoHorizontalScroll(page);
 
-    const advanced = dialog.locator('.settings-advanced');
-    await advanced.getByPlaceholder('settings.path').fill('display.treeGlyphs');
-    await advanced.getByPlaceholder('JSON or text').fill('"invented-style"');
-    await advanced.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(advanced.getByRole('alert')).toContainText('display.treeGlyphs');
-    await expect(select).toHaveText('ascii');
-    expect(host.manager.get('display.treeGlyphs')).toBe('ascii');
     expect(host.requests.filter(request => request.method === 'POST')).toEqual([
       { method: 'POST', body: { key: 'display.treeGlyphs', value: 'ascii' }, status: 200 },
-      { method: 'POST', body: { key: 'display.treeGlyphs', value: 'invented-style' }, status: 400 },
     ]);
   } finally {
     try { await page.unroute('**/config'); } finally { host.cleanup(); }

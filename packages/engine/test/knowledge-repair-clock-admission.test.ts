@@ -65,7 +65,7 @@ test('actual repair and suppression writers retain owned colliding clocks and nu
   expect(() => prepareKnowledgeRecordAdmission(reopened, 'node', loaded).assertCurrent()).not.toThrow();
 });
 
-for (const status of ['searched_no_sources', 'failed', 'deferred']) test(`generated ${status} retry survives actual classification and reopening`, async () => {
+for (const status of ['searched_no_sources', 'failed', 'deferred'] as const) test(`generated ${status} retry survives actual classification and reopening`, async () => {
   const now = collision - SELF_IMPROVEMENT_RETRY_DELAY_MS;
   clock = spyOn(Date, 'now').mockReturnValue(now);
   const { store, gap, root } = await fixture();

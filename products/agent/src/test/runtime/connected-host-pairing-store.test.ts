@@ -1,8 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
-  chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, linkSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -12,6 +11,7 @@ import {
   AGENT_HOST_PAIRING_MAX_BYTES, AGENT_HOST_PAIRING_MAX_RECORDS, AGENT_HOST_PAIRING_UNAVAILABLE_REASON,
   agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, completeAgentHostPairing, readAgentHostPairing,
 } from '../../runtime/connected-host-pairing-store.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 const host = 'https://fixture.example:4443';
 const otherHost = 'https://other.example:4443';
@@ -19,7 +19,7 @@ const attempt = { attemptId: 'fixture-attempt', name: 'Synthetic Agent', started
 const secret = { token: 'fixture-secret-not-a-real-credential', tokenId: 'fixture-token-id', name: attempt.name, createdAt: attempt.startedAt + 1 };
 const unavailable = { status: 'unavailable', reason: AGENT_HOST_PAIRING_UNAVAILABLE_REASON } as const;
 async function fixture(run: (home: string, path: string) => Promise<void>): Promise<void> {
-  const home = mkdtempSync(join(tmpdir(), 'agent-host-pairing-'));
+  const home = makeProjectTempDir('agent-host-pairing');
   try { await run(home, agentHostPairingStorePath(home)); }
   finally { rmSync(home, { recursive: true, force: true }); }
 }

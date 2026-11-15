@@ -187,5 +187,7 @@ export interface DaemonIntegrationRouteContext {
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly providerRuntime: ProviderRuntimeSnapshotServiceLike;
   readonly requireAdmin: (req: Request) => Response | null;
+  /** The credential's own identity; a memory review is recorded under it, never under a name the body claims. Absent: reviews carry no reviewer. */
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string } | null) | undefined;
   readonly userAuth: UserAuthManagerLike;
 }

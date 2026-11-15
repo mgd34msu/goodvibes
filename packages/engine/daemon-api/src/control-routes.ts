@@ -33,7 +33,7 @@ interface ControlPlaneGatewayLike {
   ): Response | Promise<Response>;
 }
 
-interface ControlRouteContext {
+export interface ControlRouteContext {
   readonly authToken: string | null;
   /**
    * The PLATFORM build this daemon is composed from, the platform's own version.
@@ -71,6 +71,8 @@ interface ControlRouteContext {
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
       readonly clientKind?: string | undefined;
+      /** Self-asserted by the caller through {@link EXPLICIT_USER_REQUEST_HEADER}; a consumer that acts on it must not treat it as proof a person asked. */
+      readonly explicitUserRequest?: boolean | undefined;
     };
     /**
      * How many synthesized dispatches already produced this call. Passed on so
@@ -92,6 +94,13 @@ interface ControlRouteContext {
    * version poll) neither receives nor consumes receipts.
    */
   readonly collectReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
+  /**
+   * The same receipts, left undelivered. `?receipts=peek` returns them so a
+   * reader whose response is lost can ask again; the reader then names what it
+   * received with `?receipts=ack&ids=<id>,<id>` ({@link acknowledgeReceipts}).
+   */
+  readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
+  readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;
   /**
    * Which node on the local network currently consumes inbound channel
    * messages, and how it got there.
@@ -159,9 +168,52 @@ function readExplicitUserRequest(req: Request): boolean | undefined {
   return raw.trim().toLowerCase() === 'true' ? true : false;
 }
 
+const MAX_IDEMPOTENCY_KEY_LENGTH = 255;
+const MAX_ACKNOWLEDGED_RECEIPTS = 200;
+const MAX_REMEMBERED_CONTRACT_STARTS = 1000;
+
 export function createDaemonControlRouteHandlers(
   context: ControlRouteContext,
 ): DaemonControlRouteHandlers {
+  // A client retrying a dispatch whose answer it never saw sends the same
+  // Idempotency-Key; the retry gets the first contract instead of starting a
+  // second one. Only a started contract is remembered, so a refused or failed
+  // dispatch can be retried. Held in memory, bounded: a daemon restart forgets
+  // keys, and a retry that crosses a restart starts a new contract.
+  const contractStarts = new Map<string, { readonly fingerprint: string; readonly result: Promise<{ readonly status: number; readonly body: unknown }> }>();
+  const replayableContractStart = async (
+    scopedKey: string,
+    fingerprint: string,
+    dispatch: () => Promise<{ readonly status: number; readonly body: unknown }>,
+  ): Promise<Response> => {
+    const known = contractStarts.get(scopedKey);
+    if (known) {
+      if (known.fingerprint !== fingerprint) {
+        return jsonErrorResponse({
+          error: 'This Idempotency-Key was already used for a different contract request; use a new key for a different request.',
+          code: 'IDEMPOTENCY_KEY_REUSED',
+        }, { status: 409 });
+      }
+      const first = await known.result.catch(() => null);
+      if (first) return Response.json(first.body, { status: first.status, headers: { 'Idempotent-Replayed': 'true' } });
+      // The first attempt failed and removed itself; this one is a fresh try.
+      return replayableContractStart(scopedKey, fingerprint, dispatch);
+    }
+    const result = dispatch();
+    contractStarts.set(scopedKey, { fingerprint, result });
+    if (contractStarts.size > MAX_REMEMBERED_CONTRACT_STARTS) {
+      const oldest = contractStarts.keys().next().value;
+      if (oldest !== undefined) contractStarts.delete(oldest);
+    }
+    try {
+      const response = await result;
+      if (response.status >= 300) contractStarts.delete(scopedKey);
+      return Response.json(response.body, { status: response.status });
+    } catch (error) {
+      contractStarts.delete(scopedKey);
+      throw error;
+    }
+  };
   return {
     postLogin: (req) => context.login
       ? context.login(req)
@@ -174,7 +226,20 @@ export function createDaemonControlRouteHandlers(
       // delivered, exactly once). Every other /status read is
       // receipt-neutral, so an identity probe or keepalive that parses only
       // status/version can never eat a receipt before a rendering surface.
-      const consumeReceipts = new URL(req.url).searchParams.get('receipts') === 'consume';
+      const searchParams = new URL(req.url).searchParams;
+      const receiptsMode = searchParams.get('receipts');
+      const consumeReceipts = receiptsMode === 'consume';
+      const peekReceipts = receiptsMode === 'peek' && context.peekReceipts !== undefined;
+      if (receiptsMode === 'ack' && context.acknowledgeReceipts) {
+        // A reader confirms what it received; only then are those receipts
+        // delivered, so a response lost in transit is offered again.
+        const ids = searchParams.getAll('ids')
+          .flatMap((value) => value.split(','))
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+          .slice(0, MAX_ACKNOWLEDGED_RECEIPTS);
+        if (ids.length > 0) context.acknowledgeReceipts(ids);
+      }
       const floorHeader = context.clientCompatibilityFloor && context.clientCompatibilityFloorHeader
         ? { [context.clientCompatibilityFloorHeader]: context.clientCompatibilityFloor }
         : undefined;
@@ -191,6 +256,7 @@ export function createDaemonControlRouteHandlers(
         buildVersion: buildVersion ?? context.version,
         platformVersion: context.version,
         ...(consumeReceipts && context.collectReceipts ? { receipts: context.collectReceipts() } : {}),
+        ...(peekReceipts && context.peekReceipts ? { receipts: context.peekReceipts() } : {}),
         ...(context.collectClusterStatus ? { cluster: context.collectClusterStatus() } : {}),
       }, floorHeader ? { headers: floorHeader } : undefined);
     },
@@ -322,27 +388,27 @@ export function createDaemonControlRouteHandlers(
       const bodyRecord = parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
         ? parsedBody
         : {};
-      const query: Record<string, unknown> = { ...params };
-      for (const [key, value] of new URL(req.url).searchParams) query[key] = value;
-      // An expected-turn request names an exact URL target. Reject conflicting
-      // duplicates rather than allowing the JSON/query merge to retarget it.
-      if (methodId === 'sessions.turns.cancel' &&
-          ((bodyRecord.sessionId !== undefined && bodyRecord.sessionId !== params.sessionId) || query.sessionId !== params.sessionId)) {
-        return jsonErrorResponse({ error: 'sessionId must match the route target', code: 'INVALID_ARGUMENT' }, { status: 400 });
-      }
-      if (methodId.startsWith('automation.jobs.') || methodId.startsWith('automation.schedules.')) {
-        for (const key of ['jobId', 'scheduleId']) {
-          if (params[key] !== undefined && ((bodyRecord[key] !== undefined && bodyRecord[key] !== params[key]) || query[key] !== params[key])) {
-            return jsonErrorResponse({ error: `${key} must match the route target`, code: 'INVALID_ARGUMENT' }, { status: 400 });
-          }
+      // The URL names the target. A body field or query parameter that repeats a
+      // path parameter with a different value would retarget the call while the
+      // access log, proxy rules and audit trail name the URL's resource, so
+      // refuse it for every verb and let the path value win.
+      const searchParams = new URL(req.url).searchParams;
+      for (const [key, expected] of Object.entries(params)) {
+        const inBody = bodyRecord[key];
+        const inQuery = searchParams.getAll(key);
+        if ((inBody !== undefined && inBody !== expected) || inQuery.some((value) => value !== expected)) {
+          return jsonErrorResponse({ error: `${key} must match the route target`, code: 'INVALID_ARGUMENT' }, { status: 400 });
         }
       }
-      const response = await context.invokeGatewayMethodCall({
+      const query: Record<string, unknown> = {};
+      for (const [key, value] of searchParams) query[key] = value;
+      Object.assign(query, params);
+      const dispatch = () => context.invokeGatewayMethodCall({
         authToken: context.extractAuthToken(req),
         signal: req.signal,
         methodId,
         query,
-        body: { ...params, ...bodyRecord },
+        body: { ...bodyRecord, ...params },
         // Carry the depth forward. This route IS the far side of a synthesized
         // dispatch, so a marked request arriving here is the loop itself.
         synthesizedDepth: readSynthesizedDispatchDepth(req),
@@ -357,6 +423,16 @@ export function createDaemonControlRouteHandlers(
             : { explicitUserRequest: readExplicitUserRequest(req) }),
         },
       });
+      if (methodId === 'contracts.start') {
+        const idempotencyKey = req.headers.get('idempotency-key')?.trim();
+        if (idempotencyKey) {
+          if (idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            return jsonErrorResponse({ error: `Idempotency-Key must be at most ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`, code: 'INVALID_ARGUMENT' }, { status: 400 });
+          }
+          return replayableContractStart(`${principal?.principalId ?? ''}\u0000${idempotencyKey}`, JSON.stringify(bodyRecord), dispatch);
+        }
+      }
+      const response = await dispatch();
       return Response.json(response.body, { status: response.status });
     },
     createControlPlaneEventStream: (req) => {

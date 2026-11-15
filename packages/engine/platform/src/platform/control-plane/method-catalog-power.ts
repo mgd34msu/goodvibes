@@ -35,6 +35,9 @@ const POWER_STATE_SCHEMA = objectSchema({
     grantedClasses: { type: 'array', items: INHIBIT_CLASS_SCHEMA },
     deniedClasses: { type: 'array', items: INHIBIT_CLASS_SCHEMA },
     note: NULLABLE_STRING_SCHEMA,
+    // What the toggle is actually doing: `refused` is on without holding, so a
+    // client never has to infer it from enabled/held/note.
+    state: { type: 'string', enum: ['off', 'held', 'held-partial', 'refused'] },
   }, ['enabled', 'held', 'grantedClasses', 'deniedClasses', 'note']),
 }, ['platform', 'work', 'keepAwake']);
 

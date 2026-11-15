@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   evaluateInstallSelfCheck,
   repairCommandForInstallKind,
@@ -36,12 +38,23 @@ function baseInput(overrides: Partial<InstallSelfCheckInput> = {}): InstallSelfC
 }
 
 describe('repairCommandForInstallKind', () => {
-  test('a standalone binary install is repaired by the installer one-liner', () => {
-    expect(repairCommandForInstallKind('binary')).toBe('curl -fsSL https://goodvibes.sh/install.sh | sh');
+  const repoRoot = join(import.meta.dir, '../../../../..');
+  const tuiPackage = JSON.parse(readFileSync(join(repoRoot, 'products/tui/package.json'), 'utf8')) as {
+    name: string; scripts: Record<string, string>;
+  };
+
+  test('a standalone binary install is repaired by the documented installer one-liner', () => {
+    const command = repairCommandForInstallKind('binary');
+    // The command a user is told to paste is the one the install guide gives.
+    expect(readFileSync(join(repoRoot, 'docs/installation.md'), 'utf8')).toContain(command);
   });
 
-  test('a private workspace package install directs the owner to rebuild locally', () => {
-    expect(repairCommandForInstallKind('bun-global-package')).toBe('bun run --filter @goodvibes-jev/tui build');
+  test('a private workspace package install directs the owner to rebuild with a script that exists', () => {
+    const command = repairCommandForInstallKind('bun-global-package');
+    const match = /^bun run --filter (\S+) (\S+)$/.exec(command);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe(tuiPackage.name);
+    expect(tuiPackage.scripts[match![2]!]).toBeDefined();
   });
 });
 

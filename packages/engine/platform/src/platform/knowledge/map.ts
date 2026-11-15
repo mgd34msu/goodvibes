@@ -145,7 +145,10 @@ export function renderKnowledgeMap(
     height,
     nodeCount: mapNodes.length,
     edgeCount: visibleEdges.length,
-    totalNodeCount: filtered.sources.length + filtered.nodes.length + filtered.issues.length,
+    // Only the categories this map can render, so "N of M" never counts nodes that are unreachable.
+    totalNodeCount: filtered.nodes.length
+      + (options.includeSources === false ? 0 : filtered.sources.length)
+      + (options.includeIssues ? filtered.issues.length : 0),
     totalEdgeCount: filteredEdges.length,
     facets: buildKnowledgeMapFacets(filtered),
     nodes: mapNodes,

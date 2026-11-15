@@ -6,6 +6,7 @@ import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSub
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ProviderAccountRecord, ProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
 import { buildProviderAccountSnapshot } from '../runtime/provider-account-snapshot.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 const nativeDateRoot = globalThis;
 const nativeOwnDescriptor = Object.getOwnPropertyDescriptor;
 const initialDateDescriptor = nativeOwnDescriptor(nativeDateRoot, 'Date');
@@ -13,7 +14,9 @@ const nativeDate: DateConstructor | undefined = initialDateDescriptor && 'value'
 
 type ProviderCatalogContext = {
   readonly provider: Pick<CommandContext['provider'], 'providerRegistry'>;
-  readonly platform: Pick<CommandContext['platform'], 'configManager' | 'serviceRegistry' | 'subscriptionManager'>;
+  /** Only key presence is read from the credential store, so only `get` is required of it. */
+  readonly platform: Pick<CommandContext['platform'], 'configManager' | 'serviceRegistry' | 'subscriptionManager'>
+    & { readonly secretsManager?: { get(key: string): Promise<string | null> } | undefined };
 };
 import { previewHarnessText } from './agent-harness-text.ts';
 
@@ -37,9 +40,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnType<typeof captureCatalogReadRequest<AgentHarnessProviderAccountArgs>>): Promise<ProviderAccountSnapshot> {
@@ -47,7 +48,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
     const services = context.platform.serviceRegistry, subscriptions = context.platform.subscriptionManager;
     if (!services || !subscriptions) throw new ToolInputProjectionError('unavailable');
     return buildProviderAccountSnapshot({ providerModels: context.provider.providerRegistry, services, subscriptions,
-      environment: { hasEnvironmentVariable: name => Boolean(process.env[name]) } });
+      environment: { hasEnvironmentVariable: name => Boolean(process.env[name]) }, secrets: context.platform.secretsManager });
   }
   const assertContext = captureCatalogMethods(context, ['platform', 'provider']);
   const platform = context.platform, provider = context.provider;
@@ -88,6 +89,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
   };
   const expirations: { readonly expiresAt: number | undefined; readonly phase: ReturnType<typeof expirationPhase> }[] = [];
   const environmentPresence = new Map<string, boolean>();
+  const keyNames = new Set<string>();
   const inspectionGuards: (() => void)[] = [];
   const assertOwner = () => {
     assertContext(); assertPlatform(); assertProvider(); assertModels(); assertModelOwner(); modelOwner.assertCurrent(); assertServices(); assertSubscriptions(); assertManager(); assertProcess();
@@ -126,7 +128,21 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
     }
     const normalized = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     if (normalized) { keys.add(`${normalized}_API_KEY`); keys.add(`${normalized}_KEY`); }
-    for (const key of keys) environmentPresence.set(key, Boolean(environment[key]));
+    for (const key of keys) {
+      environmentPresence.set(key, Boolean(environment[key]));
+      keyNames.add(key);
+    }
+  }
+  // Stored keys are read here, once, and only whether each exists is kept; the
+  // snapshot builder then asks about presence and never sees a value. An
+  // unreadable store reads as absent, as in the builder.
+  const storedPresence = new Map<string, boolean>();
+  const secretStore = platform.secretsManager;
+  if (secretStore) {
+    for (const key of keyNames) {
+      if (environmentPresence.get(key)) continue;
+      try { storedPresence.set(key, (await secretStore.get(key)) !== null); } catch { storedPresence.set(key, false); }
+    }
   }
   const assertSources = () => {
     assertOwner(); modelSnapshot.assertCurrent(listModels.call(models)); serviceSnapshot.assertCurrent(getAll.call(services));
@@ -142,6 +158,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
       getAll() { current(); const value = getAll.call(services); current(); return value; },
       async inspect(name) { current(); const value = await inspect.call(services, name);
         const saved = captureCatalogSnapshot(value); inspectionGuards.push(() => saved.assertCurrent(value)); current(); return value; },
+      unreadableReason() { current(); return services.unreadableReason(); },
     },
     subscriptions: {
       list() { current(); const value = list.call(subscriptions); current(); return value; },
@@ -151,6 +168,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
     },
     environment: { hasEnvironmentVariable(name) { current(); const present = environmentPresence.get(name);
       if (present === undefined) throw new ToolInputProjectionError('held'); current(); return present; } },
+    secrets: { async get(key) { current(); return storedPresence.get(key) ? '' : null; } },
   });
   const saved = captureCatalogSnapshot(snapshot);
   current();

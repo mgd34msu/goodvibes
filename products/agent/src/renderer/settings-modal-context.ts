@@ -80,7 +80,6 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
     'Calendar connections the daemon reads and writes: the Google or Microsoft OAuth client, or the private ICS feed address for read-only access. Secret fields hold references into the secret store, never the values themselves.',
   google:
     "The Google OAuth connection record: the Cloud project id, the consent screen's publishing status, and the refresh-token reference the mail and calendar services share.",
-  release: 'Update-channel preference.',
   update:
     'Connected-host self-update posture: whether the daemon checks for, verifies, and swaps in new releases on its own, how often it checks, and where releases are resolved from. The daemon applies these itself; the Agent only edits the shared keys.',
   pricing:
@@ -115,6 +114,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
 
 export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'behavior.hitlMode': {
+    off: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['off'],
     quiet: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['quiet'],
     balanced: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.hitlMode']['balanced'],
     operator: 'Surface more operational detail for users actively supervising agents, tools, connected-host posture, and automation.',

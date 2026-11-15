@@ -6,6 +6,8 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 
+const WORKSPACE_ACTION_WORDS = ['status', 'actions', 'action', 'run', 'surfaces', 'surface', 'open', 'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding', 'commands', 'command', 'run_command', 'cli_commands', 'cli_command'] as const;
+
 type AgentWorkspaceToolAction =
   | 'status'
   | 'actions'
@@ -91,9 +93,13 @@ function normalizeWorkspaceAction(value: unknown): AgentWorkspaceToolAction | nu
   return null;
 }
 
-function readAction(args: AgentWorkspaceToolArgs): AgentWorkspaceToolAction {
-  const explicit = normalizeWorkspaceAction(args.action) ?? normalizeWorkspaceAction(args.mode);
-  if (explicit) return explicit;
+/**
+ * The action, inferred from the fields only when none was named. A word that was
+ * sent but is not an action gives null: inferring one (a misspelled `run` read
+ * as an inspection) would report something other than what was asked.
+ */
+function readAction(args: AgentWorkspaceToolArgs): AgentWorkspaceToolAction | null {
+  if (readString(args.action) || readString(args.mode)) return normalizeWorkspaceAction(args.action) ?? normalizeWorkspaceAction(args.mode);
   if (readString(args.surfaceId)) return 'surface';
   if (readString(args.actionId) || readString(args.workspaceActionId)) return 'action';
   if (readString(args.command) || readString(args.commandName)) return 'command';
@@ -201,6 +207,7 @@ function isWorkspaceReport(args: Record<string, unknown>): boolean {
 function isWorkspaceCatalogQuery(input: Record<string, unknown>): boolean {
   const routing = catalogRoutingInput(input);
   const action = readAction(routing);
+  if (!action) return false;
   if (['shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding', 'cli_commands', 'cli_command'].includes(action)) captureModelReadingInput(input);
   return ['shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding', 'cli_commands', 'cli_command', 'commands', 'command', 'run_command'].includes(action)
     && [routing.query, routing.target].some((value) => typeof value === 'string' && value.trim().length > 0);
@@ -222,8 +229,8 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'actions', 'action', 'run', 'surfaces', 'surface', 'open', 'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding', 'commands', 'command', 'run_command', 'cli_commands', 'cli_command'],
-            description: 'Inspect catalogs, open UI, or run approved workspace actions.',
+            enum: [...WORKSPACE_ACTION_WORDS],
+            description: 'Inspect catalogs, open UI, or run workspace actions. run, open, run_keybinding, set_keybinding, reset_keybinding and run_command need a current recorded effect admission; confirm and explicitUserRequest do not grant it.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Generic action, surface, or keybinding id.' },
@@ -245,8 +252,8 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
           value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }], description: 'Keybinding value such as Ctrl+G.' },
           includeParameters: { type: 'boolean', description: 'Include detailed schemas or route metadata.' },
           limit: { type: 'number', description: 'Maximum rows returned for catalog actions.' },
-          confirm: { type: 'boolean', description: 'Required true for UI opens and side-effecting actions.' },
-          explicitUserRequest: { type: 'string', description: 'User request authorizing confirmed workspace effects.' },
+          confirm: { type: 'boolean', description: 'Optional context; never grants authority. Opens and effects run only with a current recorded effect admission.' },
+          explicitUserRequest: { type: 'string', description: 'Optional request context; never grants authority.' },
         },
         additionalProperties: false,
       },
@@ -257,6 +264,7 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
       const dispatch = (input: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, input, options);
       const args = captureModelReadingInput(rawArgs);
       const action = readAction(args);
+      if (!action) return error(`Unknown workspace action "${readString(args.action) || readString(args.mode)}". Use one of: ${WORKSPACE_ACTION_WORDS.join(', ')}.`);
 
       if (action === 'status') return dispatch(compactArgs({ mode: 'workspace', target: args.target, query: args.query, includeParameters: args.includeParameters }));
       if (action === 'actions') return dispatch({ mode: 'workspace_actions', ...workspaceDiscoveryArgs(args) });
@@ -277,7 +285,7 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
       if (action === 'cli_commands') return dispatch(compactArgs({ mode: 'cli_commands', target: args.target, query: args.query, limit: args.limit, includeParameters: args.includeParameters }));
       if (action === 'cli_command') return dispatch(commandArgs('cli_command', args));
 
-      return error('Unknown workspace action. Use action:"status" or action:"actions" to inspect the workspace.');
+      return error(`Unknown workspace action. Use one of: ${WORKSPACE_ACTION_WORDS.join(', ')}.`);
     },
   };
   return protectHarnessCatalogTool(protectAgentHarnessResearchTool(tool, deps.toolRegistry, isWorkspaceReport), deps.toolRegistry, isWorkspaceCatalogQuery, deps.commandContext);

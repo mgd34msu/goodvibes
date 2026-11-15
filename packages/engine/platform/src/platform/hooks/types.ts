@@ -66,7 +66,7 @@ export interface HookDefinition {
   headers?: Record<string, string> | undefined;
   /** For prompt/agent hooks: LLM model to use */
   model?: string | undefined;
-  /** Timeout in seconds (default: 30 for command/prompt/http, 60 for agent) */
+  /** Timeout in seconds (default: 30 for command/prompt/http/ts, 60 for agent; 0 means no deadline) */
   timeout?: number | undefined;
   /** Custom status message shown while hook runs */
   statusMessage?: string | undefined;

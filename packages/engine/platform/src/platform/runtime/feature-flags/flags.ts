@@ -7,8 +7,7 @@
  * the 2026-07-11 rulings worksheet; a disabled entry is a chosen default on a
  * configurable feature, never unreachable capability.
  *
- * This module is implementation detail: the emergency kill-switch plumbing
- * keys off these ids, but no surface renders this registry as its own
+ * This module is implementation detail: no surface renders this registry as its own
  * category, consumers render FEATURE_SETTINGS (domain, option shapes,
  * descriptions) from feature-settings.ts.
  *
@@ -94,6 +93,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 4,
     runtimeToggleable: false,
+    notOperable: {
+      reason: 'no-runtime-wiring',
+      detail: 'No GoodVibes product starts the structured plugin lifecycle yet, so this setting changes nothing. Plugins load through the standard plugin manager.',
+    },
   },
   {
     id: 'mcp-lifecycle',
@@ -103,6 +106,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 4,
     runtimeToggleable: false,
+    notOperable: {
+      reason: 'no-runtime-wiring',
+      detail: 'No GoodVibes product starts the structured MCP lifecycle yet, so this setting changes nothing. MCP servers connect through the standard MCP registry.',
+    },
   },
   {
     id: 'otel-foundation',
@@ -146,8 +153,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Policy Signing',
     description:
       'Enables HMAC-SHA256 signature validation on policy bundle load. '
-      + 'When enabled, managed mode rejects bundles with invalid or missing signatures. '
-      + 'In non-managed mode, unsigned bundles are permitted with a warning status.',
+      + 'When enabled, a bundle that is unsigned, altered or signed with another key is refused, '
+      + 'and so is every bundle when no signing key is set (GOODVIBES_POLICY_SIGNING_KEY, hex, at least 16 bytes).',
     defaultState: 'disabled',
     tier: 7,
     runtimeToggleable: false,
@@ -204,11 +211,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'runtime-tools-budget-enforcement',
     name: 'Runtime Budget Enforcement',
     description:
-      'Enables per-phase runtime budget enforcement for tool execution pipelines. '
-      + 'Checks wall-clock time (BUDGET_EXCEEDED_MS), token consumption '
-      + '(BUDGET_EXCEEDED_TOKENS), and cost (BUDGET_EXCEEDED_COST) limits at phase '
-      + 'entry and exit. Terminates the pipeline immediately on hard budget breach '
-      + 'and emits a typed diagnostic event. Disable to revert to unlimited execution.',
+      'Fails a tool call that finishes over its wall-clock (BUDGET_EXCEEDED_MS), token '
+      + '(BUDGET_EXCEEDED_TOKENS) or cost (BUDGET_EXCEEDED_COST) limit (runtime.toolBudget.*). '
+      + 'The check runs when the tool returns, so its action may have taken effect. '
+      + 'Disable to report over-limit calls as successful.',
     defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,
@@ -220,10 +226,11 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables the pluggable spill backend system for overflow content. '
       + 'When enabled, spillBackend can be set to file|ledger|diagnostics via config. '
-      + 'When disabled, overflow content uses the file spill backend.',
+      + 'When disabled, overflow content uses the file spill backend. '
+      + 'The spill handler reads the gate and the backend once when the runtime starts, so a change takes effect after a restart.',
     defaultState: 'disabled',
     tier: 8,
-    runtimeToggleable: true,
+    runtimeToggleable: false,
   },
 
   {
@@ -248,8 +255,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'explanations that are strictly more specific than the baseline. '
       + 'Default-on: the AST path is safe to default because a parser failure '
       + 'falls back automatically to the baseline flat segmentation matcher '
-      + '(never a hard error, never a blanket allow), and the frozen '
-      + 'catastrophic block is enforced identically in both modes. Disable at '
+      + '(never a hard error, never a blanket allow), and the '
+      + 'permission gate reads the catastrophic case before the call in both modes. Disable at '
       + 'runtime to force the baseline flat segmentation mode for every command.',
     defaultState: 'enabled',
     tier: 8,
@@ -742,8 +749,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'writable, the rest of the filesystem read-only, /tmp isolated, and network disabled unless '
       + 'a command is on sandbox.egressAllowlist. When active, boundary-safe commands that would '
       + 'otherwise prompt can auto-allow, and commands needing host access (network, host-privilege '
-      + 'escalation, package installs) surface as named escalation asks. The frozen catastrophic '
-      + 'command block stays in force identically inside the boundary. On by default where the '
+      + 'escalation, package installs) surface as named escalation asks. The permission '
+      + 'gate reads the catastrophic case before the call, inside the boundary as outside it. On by default where the '
       + 'host probe passes (Linux with bubblewrap available); the first auto-allow announces '
       + 'once that commands now run contained and escalations will ask. When bubblewrap is '
       + 'absent (or on non-Linux hosts) the feature reports honestly unavailable and the exec '

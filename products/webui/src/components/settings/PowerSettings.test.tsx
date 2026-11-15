@@ -66,6 +66,7 @@ describe('PowerSettings', () => {
     const { el, unmount } = render();
     cleanup = unmount;
     expect(el.querySelector('button[role="switch"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Loading power state"][aria-busy="true"]')).not.toBeNull();
   });
 
   test('error state renders no toggle', () => {
@@ -73,6 +74,7 @@ describe('PowerSettings', () => {
     const { el, unmount } = render();
     cleanup = unmount;
     expect(el.querySelector('button[role="switch"]')).toBeNull();
+    expect(el.textContent).toContain('Power state unavailable');
   });
 
   test('OFF state: toggle unchecked', () => {
@@ -82,7 +84,15 @@ describe('PowerSettings', () => {
     const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement | null;
     expect(toggle).not.toBeNull();
     expect(toggle?.getAttribute('aria-checked')).toBe('false');
+  });
 
+  test('the ruled shape: exactly one switch, no timer or AC-only controls', () => {
+    mockStatus = { isPending: false, isError: false, data: NOT_HELD_STATE, refetch: () => {} };
+    const { el, unmount } = render();
+    cleanup = unmount;
+    expect(el.querySelectorAll('button[role="switch"]')).toHaveLength(1);
+    expect(el.querySelectorAll('input, select, textarea')).toHaveLength(0);
+    expect(el.textContent).not.toMatch(/\bAC\b|battery|for \d+ ?(m|min|h)\b/i);
   });
 
   test('ON state: toggle checked, granted and denied classes shown', () => {
@@ -115,6 +125,20 @@ describe('PowerSettings', () => {
     const { el, unmount } = render();
     cleanup = unmount;
     expect(el.textContent).toContain(note);
+  });
+
+  test('keep-awake on but refused by the OS shows the refusal note and no "Sleep disabled" state', () => {
+    const note = 'keep-awake is on, but the OS refused the sleep inhibitor, so this host can still sleep; it retries on wake and whenever keep-awake is turned on again';
+    mockStatus = {
+      isPending: false,
+      isError: false,
+      data: { ...NOT_HELD_STATE, keepAwake: { enabled: true, held: false, grantedClasses: [], deniedClasses: [], note } },
+      refetch: () => {},
+    };
+    const { el, unmount } = render();
+    cleanup = unmount;
+    expect(el.textContent).toContain(note);
+    expect(el.textContent).not.toContain('Sleep disabled');
   });
 
   test('work inhibitor held renders "held because X" verbatim from work.reasons', () => {

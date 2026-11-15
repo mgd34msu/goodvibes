@@ -106,8 +106,15 @@ export function takeRelayPairingCorruptionNotice(): { readonly id: string; reado
   return notice;
 }
 
+/**
+ * A pairing storage refused to keep (private mode, full quota). It still serves this
+ * session, so a scan that cannot be saved is not a scan that silently does nothing.
+ */
+let sessionPairing: RelayPairingPayload | null = null;
+
 /** Read the stored relay pairing, or null if none is stored or it fails to parse. */
 export function getStoredRelayPairing(): RelayPairingPayload | null {
+  if (sessionPairing !== null) return sessionPairing;
   if (!hasStorage()) return null;
   try {
     const raw = window.localStorage.getItem(RELAY_PAIRING_STORAGE_KEY);
@@ -146,18 +153,67 @@ export function getStoredRelayPairing(): RelayPairingPayload | null {
   }
 }
 
+/** What an operator needs to see before a scanned relay pairing is stored. */
+export interface RelayPairingConfirmation {
+  /** The relay's host, as the operator would recognise it. */
+  readonly relayHost: string;
+  /** A short, comparable form of the daemon's pinned public key. */
+  readonly fingerprint: string;
+  /** True when storing would replace a different pairing already on this device. */
+  readonly replacesExisting: boolean;
+}
+
+/**
+ * Describe a decoded pairing for an explicit confirm step. A relay pairing routes this
+ * browser's requests, bearer token included, to whichever daemon holds the pinned key, so
+ * a scanned or linked payload must be shown and confirmed rather than stored on arrival.
+ */
+export function describeRelayPairingForConfirmation(
+  payload: RelayPairingPayload,
+  existing: RelayPairingPayload | null = getStoredRelayPairing(),
+): RelayPairingConfirmation {
+  let relayHost = payload.relayUrl;
+  try {
+    relayHost = new URL(payload.relayUrl).host || payload.relayUrl;
+  } catch {
+    // Not a parseable URL: show it verbatim so the operator can see what it is.
+  }
+  const key = payload.daemonPublicKey;
+  const fingerprint = key.length > 20 ? `${key.slice(0, 10)}…${key.slice(-10)}` : key;
+  const replacesExisting = existing !== null
+    && (existing.relayUrl !== payload.relayUrl
+      || existing.rid !== payload.rid
+      || existing.daemonPublicKey !== payload.daemonPublicKey);
+  return { relayHost, fingerprint, replacesExisting };
+}
+
 /** Persist a relay pairing payload for this device. */
 export function storeRelayPairing(payload: RelayPairingPayload): void {
-  if (!hasStorage()) return;
+  if (!hasStorage()) {
+    sessionPairing = payload;
+    invalidateClientLifetime();
+    return;
+  }
   const serialized = JSON.stringify(payload);
-  if (window.localStorage.getItem(RELAY_PAIRING_STORAGE_KEY) === serialized) return;
-  window.localStorage.setItem(RELAY_PAIRING_STORAGE_KEY, serialized);
+  try {
+    if (sessionPairing === null && window.localStorage.getItem(RELAY_PAIRING_STORAGE_KEY) === serialized) return;
+    window.localStorage.setItem(RELAY_PAIRING_STORAGE_KEY, serialized);
+    sessionPairing = null;
+  } catch {
+    sessionPairing = payload;
+  }
   invalidateClientLifetime();
 }
 
 /** Clear the stored relay pairing, this device no longer has a relay route to any daemon. */
 export function clearStoredRelayPairing(): void {
-  if (!hasStorage()) return;
-  window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
+  sessionPairing = null;
+  if (hasStorage()) {
+    try {
+      window.localStorage.removeItem(RELAY_PAIRING_STORAGE_KEY);
+    } catch {
+      // Storage is unusable; the in-memory pairing is already gone, which is all that remains to clear.
+    }
+  }
   invalidateClientLifetime();
 }

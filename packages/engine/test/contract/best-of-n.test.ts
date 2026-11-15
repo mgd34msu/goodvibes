@@ -29,9 +29,10 @@ import type { AnswerContext } from './plan-support.js';
 import { eventsOf, makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness } from './runner-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 function use(h: Harness): Harness {
@@ -149,7 +150,10 @@ describe('best-of-N on the contract runner', () => {
     expect(undecided[0]!.record.reasons).toStartWith('none chosen with confidence 0.90');
     const done = h.store.get(contract.id)!;
     expect(done.units[0]!.attemptSelection?.pickedId).toBeUndefined();
-    expect(git(h.root, 'show', `${done.branch!}:src/csv.ts`)).toBe('');
+    expect(done.branch).toBeDefined();
+    const listed = spawnSync('git', ['-C', h.root, 'ls-tree', '-r', '--name-only', done.branch!], { encoding: 'utf-8' });
+    expect(listed.status).toBe(0);
+    expect(listed.stdout).not.toContain('src/csv.ts');
   });
 
   test('a failed attempt is never a candidate, and does not fail the contract while another attempt passes', async () => {

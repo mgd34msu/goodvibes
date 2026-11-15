@@ -336,6 +336,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
         configGet,
         webhookNotifier: webhookNotifier ?? null,
         sessionId: runtime.sessionId,
+        getSessionId: () => runtime.sessionId,
         getTurnName: () => lastTurnName,
         notifyDesktop,
       })
@@ -346,6 +347,8 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   // attempt: its failure is withheld while the retry is on its way, and the
   // retry's TURN_SUBMITTED continues it (same start time, tally and name).
   let failoverRetryPending = false;
+  // Set while auto-saves keep failing, so one failure streak warns once, not on every turn.
+  let autoSaveFailureShown = false;
   let turnGeneration = 0;
   let activeTurnId: string | undefined;
   let activeTurnSessionId: string | undefined;
@@ -601,6 +604,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
           .catch((err: unknown) => logger.debug('hook fire error', { error: summarizeError(err) }));
         // Snapshot succeeded, rotate the journal (gap-filler no longer needed).
         transcriptJournal.rotate();
+        autoSaveFailureShown = false;
       } catch (e) {
         // Snapshot failed, append the turn to the journal so recovery can
         // reconstruct it. Best-effort; never crash the TUI.
@@ -611,6 +615,10 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
           /* best-effort */
         }
         logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) });
+        if (!autoSaveFailureShown) {
+          autoSaveFailureShown = true;
+          systemMessageRouter.high(`[Warning] This session could not be saved (${summarizeError(e)}). /session save retries, and --continue may not include this turn.`);
+        }
       }
       // Record this turn's rewind anchor: pair the turnId (shared with the
       // workspace checkpoint the turn engine snapshots for this same turn) with

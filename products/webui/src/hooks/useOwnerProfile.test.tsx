@@ -223,8 +223,12 @@ describe('every profile write states its authority', () => {
  * declare is a rejection, not a harmless extra.
  */
 describe('the request bodies conform to the declared contract input', () => {
+  interface PropertySchema {
+    type?: string;
+    enum?: readonly unknown[];
+  }
   interface JsonSchema {
-    properties?: Record<string, unknown>;
+    properties?: Record<string, PropertySchema>;
     required?: readonly string[];
     additionalProperties?: boolean;
   }
@@ -237,10 +241,20 @@ describe('the request bodies conform to the declared contract input', () => {
 
   function assertConforms(methodId: string, body: unknown): void {
     const schema = inputSchemaFor(methodId);
-    const declared = new Set(Object.keys(schema.properties ?? {}));
-    const sent = Object.keys(body as Record<string, unknown>);
+    const properties = schema.properties ?? {};
+    const sentBody = body as Record<string, unknown>;
+    const sent = Object.keys(sentBody);
     for (const key of sent) {
-      expect(declared.has(key), `${methodId} sends "${key}", which its input schema does not declare`).toBe(true);
+      const property = properties[key];
+      expect(property !== undefined, `${methodId} sends "${key}", which its input schema does not declare`).toBe(true);
+      const value = sentBody[key];
+      if (property?.type !== undefined) {
+        const sentType: string = typeof value;
+        expect(sentType, `${methodId} sends "${key}" as ${sentType}, declared ${property.type}`).toBe(property.type);
+      }
+      if (property?.enum !== undefined) {
+        expect(property.enum.includes(value), `${methodId} sends "${key}" outside its declared enum`).toBe(true);
+      }
     }
     for (const key of schema.required ?? []) {
       expect(sent.includes(key), `${methodId} omits required "${key}"`).toBe(true);

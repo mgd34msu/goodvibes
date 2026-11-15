@@ -476,6 +476,12 @@ export interface PollLoopResult {
    * unrelated days.
    */
   readonly completedDrains: number;
+  /**
+   * Messages the last drain delivered before the loop ended. A pass that
+   * delivered some and then failed on one made progress, so the caller must
+   * not count it as a stalled mailbox.
+   */
+  readonly delivered: number;
 }
 
 /**
@@ -503,6 +509,7 @@ export async function runPollLoop(deps: MailboxDeltaDeps): Promise<PollLoopResul
     unreadableFetch: false,
     passes,
     completedDrains,
+    delivered: 0,
   });
   for (;;) {
     if (deps.signal.aborted) return stopped();
@@ -519,6 +526,7 @@ export async function runPollLoop(deps: MailboxDeltaDeps): Promise<PollLoopResul
         unreadableFetch: report.unreadableFetch,
         passes,
         completedDrains,
+        delivered: report.delivered,
       };
     }
     if (report.outcome === 'delivery-failed') {
@@ -530,6 +538,7 @@ export async function runPollLoop(deps: MailboxDeltaDeps): Promise<PollLoopResul
         unreadableFetch: false,
         passes,
         completedDrains,
+        delivered: report.delivered,
       };
     }
     if (report.outcome === 'aborted' || deps.signal.aborted) return stopped();

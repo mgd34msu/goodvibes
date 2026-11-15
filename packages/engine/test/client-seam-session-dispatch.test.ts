@@ -36,14 +36,17 @@ function fakeInputs(inputs: QueuedInput[]): { delivered: string[]; client: Sessi
   };
 }
 
-const tick = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 15); });
+// The interval is far longer than any test, so only `pollNow()` drives a poll: it
+// resolves after the whole drain-run-acknowledge pass, and a "nothing happened"
+// assertion is made after the pass really ran rather than after a guessed delay.
+const NEVER_BY_ITSELF = 3_600_000;
 
 describe('inbound continuation dispatch over the adopted daemon', () => {
   test('nothing is dispatched before a daemon is adopted', async () => {
     const ran: string[] = [];
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ task }) => { ran.push(task); return { agentId: 'a1' } as never; });
-    await tick();
+    await dispatch.pollNow();
     // Holding a runner with no wire is the honest offline posture, not a
     // missing dependency: this surface simply has nowhere to be dispatched from.
     expect(ran).toEqual([]);
@@ -53,10 +56,10 @@ describe('inbound continuation dispatch over the adopted daemon', () => {
   test('a submitted message reaches the runner and is acknowledged after it runs', async () => {
     const ran: string[] = [];
     const wire = fakeInputs([{ id: 'i1', intent: 'submit', body: 'do the thing' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ task }) => { ran.push(task); return { agentId: 'a1' } as never; });
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     expect(ran).toEqual(['do the thing']);
     expect(wire.delivered).toEqual(['i1']);
     dispatch.stop();
@@ -65,10 +68,10 @@ describe('inbound continuation dispatch over the adopted daemon', () => {
   test('a steer is left for the live-turn poller, not started as a new run', async () => {
     const ran: string[] = [];
     const wire = fakeInputs([{ id: 'i1', intent: 'steer', body: 'actually, stop' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ task }) => { ran.push(task); return { agentId: 'a1' } as never; });
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     // A steer belongs to the turn already in flight (the inbound steer poller
     // injects it). Starting a second run for it would answer the same message
     // twice, from two agents, into one conversation.
@@ -79,10 +82,10 @@ describe('inbound continuation dispatch over the adopted daemon', () => {
 
   test('a runner that throws leaves the input queued rather than consuming it', async () => {
     const wire = fakeInputs([{ id: 'i1', intent: 'submit', body: 'do the thing' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(() => { throw new Error('spawn refused'); });
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     // Acknowledged-but-unanswered is the worst outcome available: the sender
     // sees delivered and waits forever. A transient failure must retry.
     expect(wire.delivered).toEqual([]);
@@ -92,13 +95,13 @@ describe('inbound continuation dispatch over the adopted daemon', () => {
   test('detaching stops dispatch but keeps the runner for a re-adopted daemon', async () => {
     const ran: string[] = [];
     const wire = fakeInputs([{ id: 'i1', intent: 'submit', body: 'first' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ task }) => { ran.push(task); return { agentId: 'a1' } as never; });
     dispatch.deactivate('daemon went away');
-    await tick();
+    await dispatch.pollNow();
     expect(ran).toEqual([]);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     expect(ran).toEqual(['first']);
     dispatch.stop();
   });
@@ -115,10 +118,10 @@ describe('inbound continuation dispatch over the adopted daemon', () => {
         ({ inputs: (bySession[sessionId] ?? []).filter((i) => !delivered.includes(i.id)) }) as never,
       deliverInput: async (_sessionId: string, inputId: string) => { delivered.push(inputId); },
     };
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1', 's2'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1', 's2'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ task }) => { ran.push(task); return { agentId: 'a1' } as never; });
     dispatch.activate(client);
-    await tick();
+    await dispatch.pollNow();
     // A surface running two sessions must answer for both; draining only the
     // first would strand every message posted into the second.
     expect(ran.sort()).toEqual(['first', 'second']);
@@ -151,10 +154,10 @@ describe('the reply half: what the surface reports back about the run it started
 
   test('with no way to read outcomes, the agent is still named so the reply binds', async () => {
     const wire = recordingWire([{ id: 'i1', intent: 'submit', body: 'do the thing' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(() => ({ agentId: 'a1' }) as never);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     // One acknowledgement, carrying the pairing. Without the agent id the
     // daemon has nothing to route the answer to, which is precisely how a
     // channel message dispatched here used to be answered into nothing.
@@ -167,24 +170,24 @@ describe('the reply half: what the surface reports back about the run it started
     let outcome: SurfaceAgentOutcome = { status: 'running' };
     const dispatch = createWireSessionDispatch({
       hostedSessionIds: () => ['s1'],
-      intervalMs: 5,
+      intervalMs: NEVER_BY_ITSELF,
       readAgentOutcome: () => outcome,
     });
     dispatch.setContinuationRunner(() => ({ agentId: 'a1' }) as never);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     // Collected, and the agent named, but not finished, so nothing claims an
     // answer that does not exist yet.
     expect(wire.calls).toEqual([{ inputId: 'i1', options: { agentId: 'a1' } }]);
 
     outcome = { status: 'completed', answer: 'the thing is done' };
-    await tick();
+    await dispatch.pollNow();
     expect(wire.calls[1]).toEqual({
       inputId: 'i1',
       options: { consumed: true, agentId: 'a1', answer: 'the thing is done', status: 'completed' },
     });
     // Reported once: a second tick must not re-answer the same message.
-    await tick();
+    await dispatch.pollNow();
     expect(wire.calls).toHaveLength(2);
     dispatch.stop();
   });
@@ -194,14 +197,14 @@ describe('the reply half: what the surface reports back about the run it started
     let outcome: SurfaceAgentOutcome = { status: 'running' };
     const dispatch = createWireSessionDispatch({
       hostedSessionIds: () => ['s1'],
-      intervalMs: 5,
+      intervalMs: NEVER_BY_ITSELF,
       readAgentOutcome: () => outcome,
     });
     dispatch.setContinuationRunner(() => ({ agentId: 'a1' }) as never);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     outcome = { status: 'failed', answer: 'the provider rejected the request' };
-    await tick();
+    await dispatch.pollNow();
     expect(wire.calls[1]?.options).toEqual({
       consumed: true,
       agentId: 'a1',
@@ -216,15 +219,15 @@ describe('the reply half: what the surface reports back about the run it started
     let known = true;
     const dispatch = createWireSessionDispatch({
       hostedSessionIds: () => ['s1'],
-      intervalMs: 5,
+      intervalMs: NEVER_BY_ITSELF,
       readAgentOutcome: () => (known ? { status: 'running' } : null),
       log: { debug: () => {}, info: () => {}, warn: () => {} },
     });
     dispatch.setContinuationRunner(() => ({ agentId: 'a1' }) as never);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     known = false;
-    await tick();
+    await dispatch.pollNow();
     // The daemon must not hold the input open on account of a run that vanished
     // from this process, and must not be told an answer exists.
     expect(wire.calls[1]?.options).toEqual({ consumed: true, agentId: 'a1' });
@@ -235,7 +238,7 @@ describe('the reply half: what the surface reports back about the run it started
     const wire = recordingWire([{ id: 'i1', intent: 'submit', body: 'do the thing' }]);
     const dispatch = createWireSessionDispatch({
       hostedSessionIds: () => ['s1'],
-      intervalMs: 5,
+      intervalMs: NEVER_BY_ITSELF,
       readAgentOutcome: () => ({ status: 'completed', answer: 'never asked' }),
     });
     // What a conversation handed to daemon hosting, or refused by a build-floor
@@ -243,7 +246,7 @@ describe('the reply half: what the surface reports back about the run it started
     // does not exist.
     dispatch.setContinuationRunner(() => null);
     dispatch.activate(wire.client);
-    await tick();
+    await dispatch.pollNow();
     expect(wire.calls).toEqual([{ inputId: 'i1', options: { consumed: true } }]);
     dispatch.stop();
   });
@@ -264,40 +267,43 @@ describe('the reply half: what the surface reports back about the run it started
 describe('explicit native continuation dispositions', () => {
   test.each(['held', 'unknown'] as const)('%s never consumes or binds a broker input', async disposition => {
     const wire = fakeInputs([{ id: 'held', intent: 'submit', body: 'ignored' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(() => ({ disposition, reason: 'recovery required' }));
-    dispatch.activate(wire.client); await tick(); dispatch.stop(); expect(wire.delivered).toEqual([]);
+    dispatch.activate(wire.client); await dispatch.pollNow(); dispatch.stop(); expect(wire.delivered).toEqual([]);
   });
   test('verified transfer consumes the exact input without inventing a local runner', async () => {
     const wire = fakeInputs([{ id: 'transferred', intent: 'submit', body: 'ignored' }]);
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(() => ({ disposition: 'transferred', requestId: 'same-original-request' }));
-    dispatch.activate(wire.client); await tick(); dispatch.stop(); expect(wire.delivered).toEqual(['transferred']);
+    dispatch.activate(wire.client); await dispatch.pollNow(); dispatch.stop(); expect(wire.delivered).toEqual(['transferred']);
   });
   test('a held newest tail cannot starve an older eligible input', async () => {
     const rows = Array.from({ length: 21 }, (_, index) => ({ id: `i${index}`, intent: 'submit', body: 'ignored' }));
     const delivered: string[] = [];
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
     dispatch.setContinuationRunner(({ input }) => input.id === 'i0' ? { disposition: 'transferred', requestId: 'original' } : { disposition: 'held', reason: 'no source' });
     dispatch.activate({ listInputs: async (_session, options) => ({ inputs: rows.filter(row => !delivered.includes(row.id)).slice(-(options.limit ?? 100)) }) as never,
       deliverInput: async (_session, id) => { delivered.push(id); } });
-    await tick(); dispatch.stop(); expect(delivered).toEqual(['i0']);
+    await dispatch.pollNow(); dispatch.stop(); expect(delivered).toEqual(['i0']);
   });
   test('detaching while a continuation is pending never acknowledges into the old connection', async () => {
     const wire = fakeInputs([{ id: 'i', intent: 'submit', body: 'ignored' }]);
     let finish!: () => void;
-    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
-    dispatch.setContinuationRunner(async () => { await new Promise<void>(resolve => { finish = resolve; }); return { disposition: 'transferred', requestId: 'same' }; });
-    dispatch.activate(wire.client); while (!finish) await Bun.sleep(1);
-    dispatch.deactivate('host changed'); finish(); await tick(); dispatch.stop(); expect(wire.delivered).toEqual([]);
+    let entered!: () => void;
+    const runnerEntered = new Promise<void>(resolve => { entered = resolve; });
+    const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
+    dispatch.setContinuationRunner(async () => { entered(); await new Promise<void>(resolve => { finish = resolve; }); return { disposition: 'transferred', requestId: 'same' }; });
+    dispatch.activate(wire.client);
+    const pending = dispatch.pollNow(); await runnerEntered;
+    dispatch.deactivate('host changed'); finish(); await pending; dispatch.stop(); expect(wire.delivered).toEqual([]);
   });
 });
 
 test('an explicit started disposition with no real runner stays unconsumed', async () => {
   const wire = fakeInputs([{ id: 'i', intent: 'submit', body: 'ignored' }]);
-  const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: 5 });
+  const dispatch = createWireSessionDispatch({ hostedSessionIds: () => ['s1'], intervalMs: NEVER_BY_ITSELF });
   dispatch.setContinuationRunner(() => ({ disposition: 'started', agentId: ' ' }));
-  dispatch.activate(wire.client); await tick(); dispatch.stop(); expect(wire.delivered).toEqual([]);
+  dispatch.activate(wire.client); await dispatch.pollNow(); dispatch.stop(); expect(wire.delivered).toEqual([]);
 });
 
 // Public embedders have historically extended this interface. Keep it extendable.

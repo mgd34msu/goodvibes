@@ -29,6 +29,7 @@ function fixture(verdict: boolean | 'unsure' = true) {
   const effects: string[] = [], guard = new CardMaterialRedactor();
   let revision = 1, active = true, url = 'https://www.bestbuy.com/checkout';
   let beforeAnswer = async () => {}, beforeDispatch = async () => {};
+  let pageText = 'Cable x1 USD $10.00. Tax $1.00. Standard selected, free. One-off total USD $11.00.';
   const fake = paymentsPort({ currentTerms: () => verdict });
   const previous = installJudgmentPort({ ...fake.port, async ask(request) { await beforeAnswer(); return fake.port.ask(request); } });
   restores.push(() => { installJudgmentPort(previous); });
@@ -42,7 +43,7 @@ function fixture(verdict: boolean | 'unsure' = true) {
     async observeCheckoutTerms(_target, owner, submitTarget) {
       owner.assertCurrent(); const original = revision;
       return { state: { url, submitControl: { ref: submitTarget, selector: '#place', frameChain: [], name: 'Place order', role: 'button', submits: true },
-        documents: [{ frameChain: [], checkout: { text: 'Cable x1 USD $10.00. Tax $1.00. Standard selected, free. One-off total USD $11.00.' } }] },
+        documents: [{ frameChain: [], checkout: { text: pageText } }] },
         async assertCurrent() { owner.assertCurrent(); if (revision !== original) throw new StaleElementError('Current quote changed', 'Read the current quote again.'); } };
     },
     async click(_target, _args, owner) {
@@ -57,6 +58,7 @@ function fixture(verdict: boolean | 'unsure' = true) {
     const work = driver.verifyTerms(expected, { assertCurrent: current }); pending.push(work); void work.catch(() => {}); return work;
   };
   return { driver, engine, expected, effects, requests: fake.requests, verify,
+    setPageText: (value: string) => { pageText = value; },
     change: () => { revision++; }, revoke: () => { active = false; }, redirect: (value: string) => { url = value; },
     beforeAnswer: (callback: () => Promise<void>) => { beforeAnswer = callback; },
     beforeDispatch: (callback: () => Promise<void>) => { beforeDispatch = callback; } };
@@ -82,6 +84,15 @@ test('a verified quote cannot be consumed by another submit control', async () =
 test.each([false, 'unsure'] as const)('a %s quote reading cannot reach the submit actuator', async verdict => {
   const f = fixture(verdict);
   expect(await f.verify()).toBe(false);
+  await expect(f.driver.submitOrder('place')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+  expect(f.effects).toEqual([]);
+});
+
+test('live checkout text holding a card-shaped number leaves the quote unestablished instead of throwing', async () => {
+  const f = fixture();
+  f.setPageText('Cable x1 USD $10.00. Tax $1.00. Order barcode 4111111111111111. One-off total USD $11.00.');
+  expect(await f.verify()).toBe(false);
+  expect(await f.driver.readCurrentQuote?.({ terms: f.expected, reading: { lines: [{ label: 'Cable', quantity: '1', unitPrice: 'USD 10.00' }], tax: 'USD 1.00', fees: [], shippingOptions: [], statedTotal: 'USD 11.00', currency: 'USD', orderSummaryText: 'Cable' } }, { assertCurrent: () => {} })).toBeNull();
   await expect(f.driver.submitOrder('place')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
   expect(f.effects).toEqual([]);
 });

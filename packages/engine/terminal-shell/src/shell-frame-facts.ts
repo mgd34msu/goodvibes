@@ -17,7 +17,7 @@ export function readShellFrameFacts<PromptInfo>(
 /** Capture original spoken input before the product's normal transformation and admission path. */
 export function createShellSubmissionPorts(
   submit: (text: string, content?: ContentPart[], options?: ProductInputContext) => void,
-  stop: () => void,
+  stop: () => boolean | void,
   paste: () => { readonly pasted: boolean },
 ) {
   return {

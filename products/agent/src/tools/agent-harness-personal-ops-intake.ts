@@ -2,6 +2,8 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import type { Ranked } from '@goodvibes-jev/judgment';
 import { laneById, liveRecordById, operationSummary, recordOperationSummary, workflowById, workflowExecutionPlan, workflowMissingFields } from './agent-harness-personal-ops-runner.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsIntakeCandidate, PersonalOpsLane, PersonalOpsLiveRecord, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
 
 /** Structural effect/capability scoping precedes canonical semantic ranking. */
 export async function selectConnectorTool(
@@ -232,11 +234,11 @@ export async function buildPersonalOpsIntakeCandidates(
       why: 'The request asks GoodVibes to remind, notify, ping, or follow up with the user.',
       includeParameters,
       requiresConfirmation: true,
-      missingFields: ['title', 'scheduleKind', 'scheduleValue', 'explicitUserRequest'],
-      userQuestion: 'What exact reminder title and time should GoodVibes use?',
-      safetyBoundary: 'Reminder creation requires confirm:true and explicitUserRequest; vague follow-up ideas stay as notes or work-plan items.',
+      missingFields: ['message', 'scheduleKind', 'scheduleValue'],
+      userQuestion: 'What should the reminder say, and when should it fire?',
+      safetyBoundary: `Reminder creation: ${EFFECT_ADMISSION_SENTENCE} Vague follow-up ideas stay as notes or work-plan items.`,
       nextSteps: [
-        'Collect the reminder title, exact timing, timezone/cadence, and delivery scope.',
+        'Collect the reminder message, exact timing, timezone/cadence, and delivery scope.',
         'Inspect delivery channel readiness when the reminder must reach the user outside the terminal.',
         'Create exactly one reminder through the confirmed route.',
       ],
@@ -276,7 +278,7 @@ export async function buildPersonalOpsIntakeCandidates(
       status: 'ready' as const,
       confidence: 'medium' as const,
       why: 'The request asks to capture or note working context.',
-      modelRoute: 'agent_local_registry domain:"notes" action:"create"',
+      modelRoute: NOTE_CAPTURE_ROUTE,
       inspectRoutes: ['personal_ops action:"lane" laneId:"notes"'],
       requiresConfirmation: false,
       safetyBoundary: 'Notes are Agent-local scratchpad records; promotion to memory or Knowledge stays separate and reviewed.',

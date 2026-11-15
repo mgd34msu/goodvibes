@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,15 +6,27 @@ import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/c
 import { createSessionSurface } from '../platform/src/platform/runtime/session-surface.js';
 
 function runGit(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd });
+  // Ignore the developer's own git configuration (commit signing, hooks, templates).
+  const result = Bun.spawnSync(['git', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], {
+    cwd,
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+  });
   if (result.exitCode !== 0) {
     throw new Error(Buffer.from(result.stderr).toString('utf8'));
   }
   return Buffer.from(result.stdout).toString('utf8');
 }
 
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 function tempWorkspace(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(root);
+  return root;
 }
 
 describe('WorkspaceCheckpointManager', () => {

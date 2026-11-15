@@ -71,6 +71,13 @@ export interface GoogleApiFailure {
   readonly reason?: 'grant-invalid' | 'missing-scopes' | 'api-disabled' | 'unclassified' | undefined;
   readonly problem: string;
   readonly fix: string;
+  /**
+   * Set when the call never got an answer from Google (`unreachable`: the
+   * request itself failed in transit, so it may or may not have arrived) or
+   * the access token could not be obtained (`token-refresh`: nothing was
+   * sent). Both carry `status: null`, but they are not a bad request.
+   */
+  readonly transport?: 'unreachable' | 'token-refresh';
 }
 
 export type GoogleApiResult<T> = { readonly ok: true; readonly value: T } | GoogleApiFailure;
@@ -214,6 +221,10 @@ export interface CalendarEventRecord {
    * towards recording rather than towards silence.
    */
   readonly organizerIsSelf?: boolean;
+  /** Invitee addresses, when Google lists any. Claimed by whoever wrote the event. */
+  readonly attendees?: readonly string[];
+  /** Raw `RRULE:`/`EXDATE:` lines of a recurring event's master, when read as a series. */
+  readonly recurrence?: readonly string[];
 }
 
 export interface SendMailInput {
@@ -230,7 +241,20 @@ export interface CreateEventInput {
   readonly location?: string;
   readonly description?: string;
   readonly calendarId?: string;
+  /** Invitee addresses. Google lists them on the event. */
+  readonly attendees?: readonly string[];
+  /** Ask Google to email the attendees. Off by default: only a caller that was confirmed to invite people sets it. */
+  readonly notifyAttendees?: boolean;
+  /** IANA zone for a `start`/`end` that carries no offset. Google refuses an offset-less time without one. */
+  readonly timeZone?: string;
+  /** Raw recurrence lines, e.g. `RRULE:FREQ=WEEKLY;BYDAY=MO`. */
+  readonly recurrence?: readonly string[];
+  /** The source calendar's UID, kept as a private property so an import can recognise an event it already made. */
+  readonly sourceUid?: string;
 }
+
+/** The private extended property an imported event's source UID is kept under. */
+export const GOOGLE_EVENT_SOURCE_UID_PROPERTY = 'icsUid';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -353,7 +377,7 @@ export class GoogleApiClient {
       return {
         ok: false,
         status: null,
-        ...(tokenOutcome.failure === 'grant-invalid' ? { reason: 'grant-invalid' as const } : {}),
+        ...(tokenOutcome.failure === 'grant-invalid' ? { reason: 'grant-invalid' as const } : { transport: 'token-refresh' as const }),
         problem: tokenOutcome.problem,
         fix: tokenOutcome.fix,
       };
@@ -373,6 +397,7 @@ export class GoogleApiClient {
       return {
         ok: false,
         status: null,
+        transport: 'unreachable',
         problem: `Could not reach Google: ${error instanceof Error ? error.message : String(error)}`,
         fix: 'Check network connectivity and try again.',
       };
@@ -468,6 +493,15 @@ export class GoogleApiClient {
       if (id.length === 0) continue;
       const detail = await this.fetchMessage(id, 'metadata');
       if (detail.ok) summaries.push(detail.value);
+      // A message deleted between the list and the read is genuinely gone. Any
+      // other failure means this list is incomplete, and a shorter list
+      // reported as the whole inbox is worse than an error.
+      else if (detail.status !== 404) {
+        return {
+          ...detail,
+          problem: `Read ${summaries.length} of ${ids.length} listed messages before one could not be read. ${detail.problem}`,
+        };
+      }
     }
     return { ok: true, value: summaries };
   }
@@ -666,7 +700,16 @@ export class GoogleApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ raw }),
     });
-    if (!result.ok) return result;
+    if (!result.ok) {
+      if (result.transport === 'unreachable') {
+        return {
+          ...result,
+          problem: `${result.problem} The message may or may not have been sent: the connection failed after the request left.`,
+          fix: 'Check the Sent folder before sending again; retrying blindly can deliver it twice.',
+        };
+      }
+      return result;
+    }
     const record = isRecord(result.value) ? result.value : {};
     return { ok: true, value: { id: readString(record.id), threadId: readString(record.threadId) } };
   }
@@ -676,7 +719,7 @@ export class GoogleApiClient {
   // -------------------------------------------------------------------------
 
   async listEvents(
-    options: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number } = {},
+    options: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number; sourceUid?: string } = {},
   ): Promise<GoogleApiResult<readonly CalendarEventRecord[]>> {
     const calendarId = options.calendarId ?? 'primary';
     const params = new URLSearchParams({
@@ -686,6 +729,7 @@ export class GoogleApiClient {
     });
     if (options.timeMin !== undefined) params.set('timeMin', options.timeMin);
     if (options.timeMax !== undefined) params.set('timeMax', options.timeMax);
+    if (options.sourceUid !== undefined) params.set('privateExtendedProperty', `${GOOGLE_EVENT_SOURCE_UID_PROPERTY}=${options.sourceUid}`);
 
     const result = await this.request(
       `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
@@ -712,15 +756,23 @@ export class GoogleApiClient {
     }
     const calendarId = input.calendarId ?? 'primary';
     const allDay = !input.start.includes('T');
+    const zone = input.timeZone === undefined || allDay ? {} : { timeZone: input.timeZone };
+    const attendees = (input.attendees ?? []).map((email) => email.trim()).filter((email) => email.length > 0);
     const body = {
       summary: input.summary,
       ...(input.location === undefined ? {} : { location: input.location }),
       ...(input.description === undefined ? {} : { description: input.description }),
-      start: allDay ? { date: input.start } : { dateTime: input.start },
-      end: allDay ? { date: input.end } : { dateTime: input.end },
+      start: allDay ? { date: input.start } : { dateTime: input.start, ...zone },
+      end: allDay ? { date: input.end } : { dateTime: input.end, ...zone },
+      ...(attendees.length === 0 ? {} : { attendees: attendees.map((email) => ({ email })) }),
+      ...(input.recurrence === undefined || input.recurrence.length === 0 ? {} : { recurrence: input.recurrence }),
+      ...(input.sourceUid === undefined
+        ? {}
+        : { extendedProperties: { private: { [GOOGLE_EVENT_SOURCE_UID_PROPERTY]: input.sourceUid } } }),
     };
+    const query = attendees.length > 0 && input.notifyAttendees === true ? '?sendUpdates=all' : '';
 
-    const result = await this.request(`${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events`, {
+    const result = await this.request(`${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events${query}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -751,7 +803,19 @@ function toCalendarEvent(value: unknown): CalendarEventRecord | null {
     description: readString(value.description),
     htmlLink: readString(value.htmlLink),
     ...organizerOf(value.organizer),
+    ...attendeesOf(value.attendees),
+    ...(Array.isArray(value.recurrence) && value.recurrence.some((line) => typeof line === 'string')
+      ? { recurrence: value.recurrence.filter((line): line is string => typeof line === 'string') }
+      : {}),
   };
+}
+
+function attendeesOf(value: unknown): { attendees?: readonly string[] } {
+  if (!Array.isArray(value)) return {};
+  const emails = value
+    .map((entry) => (isRecord(entry) ? readString(entry.email).trim() : ''))
+    .filter((email) => email.length > 0);
+  return emails.length > 0 ? { attendees: emails } : {};
 }
 
 /**

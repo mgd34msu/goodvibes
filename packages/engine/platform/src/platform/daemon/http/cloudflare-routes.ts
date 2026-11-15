@@ -16,6 +16,24 @@ export interface DaemonCloudflareRouteContext extends CloudflareControlPlaneOpti
   readonly parseOptionalJsonBody: (req: Request) => Promise<Record<string, unknown> | null | Response>;
 }
 
+/**
+ * The paths this sub-router serves.
+ * Read by the capability-route reconcile, which cannot see a sub-router that is
+ * dispatched ahead of the shared route table. `{param}` is one path segment.
+ */
+export const CLOUDFLARE_ROUTES: readonly { readonly method: string; readonly path: string }[] = [
+  { method: 'GET', path: '/api/cloudflare' },
+  { method: 'GET', path: '/api/cloudflare/status' },
+  { method: 'GET', path: '/api/cloudflare/token/requirements' },
+  { method: 'POST', path: '/api/cloudflare/token/requirements' },
+  { method: 'POST', path: '/api/cloudflare/token/create' },
+  { method: 'POST', path: '/api/cloudflare/discover' },
+  { method: 'POST', path: '/api/cloudflare/validate' },
+  { method: 'POST', path: '/api/cloudflare/provision' },
+  { method: 'POST', path: '/api/cloudflare/verify' },
+  { method: 'POST', path: '/api/cloudflare/disable' },
+];
+
 export async function dispatchCloudflareRoutes(
   req: Request,
   context: DaemonCloudflareRouteContext,
@@ -25,6 +43,7 @@ export async function dispatchCloudflareRoutes(
   if (!pathname.startsWith('/api/cloudflare')) return null;
 
   const manager = new CloudflareControlPlaneManager(context);
+  const bodies = objectBodies(context);
 
   if ((pathname === '/api/cloudflare' || pathname === '/api/cloudflare/status') && req.method === 'GET') {
     return handleCloudflareError(async () => Response.json(await manager.describeStatus()));
@@ -36,48 +55,69 @@ export async function dispatchCloudflareRoutes(
   }
 
   if (pathname === '/api/cloudflare/token/requirements' && req.method === 'POST') {
-    const bodyOrErr = await context.parseOptionalJsonBody(req);
+    const bodyOrErr = await bodies.optionalJson(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(manager.tokenRequirements(parseTokenRequirementsInput(bodyOrErr ?? {}))));
   }
 
   if (pathname === '/api/cloudflare/token/create' && req.method === 'POST') {
-    const bodyOrErr = await context.parseJsonBody(req);
+    const bodyOrErr = await bodies.json(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.createOperationalToken(parseOperationalTokenInput(bodyOrErr)), { status: 201 }));
   }
 
   if (pathname === '/api/cloudflare/discover' && req.method === 'POST') {
-    const bodyOrErr = await context.parseOptionalJsonBody(req);
+    const bodyOrErr = await bodies.optionalJson(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.discover(parseDiscoverInput(bodyOrErr ?? {}))));
   }
 
   if (pathname === '/api/cloudflare/validate' && req.method === 'POST') {
-    const bodyOrErr = await context.parseOptionalJsonBody(req);
+    const bodyOrErr = await bodies.optionalJson(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.validate(parseValidateInput(bodyOrErr ?? {}))));
   }
 
   if (pathname === '/api/cloudflare/provision' && req.method === 'POST') {
-    const bodyOrErr = await context.parseJsonBody(req);
+    const bodyOrErr = await bodies.json(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.provision(parseProvisionInput(bodyOrErr)), { status: 202 }));
   }
 
   if (pathname === '/api/cloudflare/verify' && req.method === 'POST') {
-    const bodyOrErr = await context.parseOptionalJsonBody(req);
+    const bodyOrErr = await bodies.optionalJson(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.verify(parseVerifyInput(bodyOrErr ?? {}))));
   }
 
   if (pathname === '/api/cloudflare/disable' && req.method === 'POST') {
-    const bodyOrErr = await context.parseOptionalJsonBody(req);
+    const bodyOrErr = await bodies.optionalJson(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleCloudflareError(async () => Response.json(await manager.disable(parseDisableInput(bodyOrErr ?? {}))));
   }
 
   return null;
+}
+
+/** A body of `null`, a number or a string parses as JSON but has no fields to read; refuse it as a 400 before it can throw. */
+function objectBodies(context: DaemonCloudflareRouteContext): {
+  readonly json: (req: Request) => Promise<Record<string, unknown> | Response>;
+  readonly optionalJson: (req: Request) => Promise<Record<string, unknown> | null | Response>;
+} {
+  const notObject = () => Response.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+  const isObject = (body: unknown): body is Record<string, unknown> => typeof body === 'object' && body !== null && !Array.isArray(body);
+  return {
+    json: async (req) => {
+      const body: unknown = await context.parseJsonBody(req);
+      if (body instanceof Response) return body;
+      return isObject(body) ? body : notObject();
+    },
+    optionalJson: async (req) => {
+      const body: unknown = await context.parseOptionalJsonBody(req);
+      if (body instanceof Response || body === null) return body;
+      return isObject(body) ? body : notObject();
+    },
+  };
 }
 
 async function handleCloudflareError(run: () => Promise<Response>): Promise<Response> {

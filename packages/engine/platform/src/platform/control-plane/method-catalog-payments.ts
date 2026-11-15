@@ -25,7 +25,7 @@
  *
  * Handlers: routes/payments.ts.
  */
-import { methodDescriptor } from './method-catalog-shared.js';
+import { BOOLEAN_SCHEMA, STRING_SCHEMA, methodDescriptor, objectSchema } from './method-catalog-shared.js';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { PAYMENT_PURCHASE_RECONCILE_HTTP } from '../payments/operation-view.js';
 import {
@@ -115,13 +115,38 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.cards.delete',
     title: 'Remove a Payment Card',
     description:
-      'Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. Deleting the default card leaves payments.defaultCardId empty, which refuses purchases until another card is chosen, the safe direction.',
+      'Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.',
     category: 'payments',
     scopes: ['write:payments'],
     access: 'admin',
     http: { method: 'DELETE', path: '/api/payments/cards/{id}' },
     inputSchema: PAYMENTS_CARDS_DELETE_INPUT_SCHEMA,
     outputSchema: PAYMENTS_CARDS_DELETE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'payments.checkout.approve',
+    title: 'Approve One Purchase',
+    description:
+      'Record that a human approves one specific purchase, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the amount (the same string a later begin call passes as requestedMax). Mints a persisted, single-use approval bound to exactly those fields, expiring in five minutes; payments.checkout.begin consumes it and refuses without one. Requires confirm: true and the explicit-user-request context, the same confirmation gate every destructive verb on this daemon uses. The response never carries card material; this verb never touches a card at all. ws-only invoke verb with no REST binding.',
+    category: 'payments',
+    scopes: ['write:payments'],
+    access: 'admin',
+    transport: ['ws'],
+    dangerous: true,
+    inputSchema: objectSchema({
+      confirm: BOOLEAN_SCHEMA,
+      merchantDomain: STRING_SCHEMA,
+      item: STRING_SCHEMA,
+      amount: STRING_SCHEMA,
+    }, ['confirm', 'merchantDomain', 'item', 'amount']),
+    outputSchema: objectSchema({
+      approved: BOOLEAN_SCHEMA,
+      action: STRING_SCHEMA,
+      merchantDomain: STRING_SCHEMA,
+      item: STRING_SCHEMA,
+      amount: STRING_SCHEMA,
+      expiresAt: STRING_SCHEMA,
+    }, ['approved', 'action', 'merchantDomain', 'item', 'amount', 'expiresAt']),
   }),
   methodDescriptor({
     id: 'payments.checkout.begin',
@@ -151,7 +176,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.purchases.list',
     title: 'List Purchases',
     description:
-      'The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. A refund is recorded here for reconciliation and credits no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.',
+      'The purchase audit ledger: what was bought, from which merchant registrable domain, how much (item, tax, fees and delivery separately), which budget pool each part drew on, which delivery tier was requested and which was actually used, whether the shipping ladder stepped it down, which window ran and how it ended, which command-authority channel answered, and the outcome. Reconcilable against a card statement. Never contains a card number, expiry or CVV. Refunds are not recorded yet: a returned order still reads as a purchase and `refundedAt` stays empty, so reconcile refunds against the card statement by hand. When refunds are recorded they will credit no pool, a refund on day five refilling day five would be permission to buy again that nobody granted.',
     category: 'payments',
     scopes: ['read:payments'],
     http: { method: 'GET', path: '/api/payments/purchases' },

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertEmittedBuildCurrent } from './emitted-build.js';
 import { makeOwnedTempDir } from './owned-temp.js';
 
 export function companionCliFixture() {
@@ -27,6 +28,7 @@ export function companionCliFixture() {
     Object.assign(env, options.env);
     // Test launcher selection only; the production CLI has no reveal flag/env.
     env.GOODVIBES_TEST_PAIRING_OUTPUT = options.pairingOutput ? '1' : '0';
+    assertEmittedBuildCurrent();
     const entry = options.composed
       ? new URL('./daemon-cli-child.ts', import.meta.url)
       : new URL('../../../dist/cli/entrypoint.js', import.meta.url);
@@ -80,12 +82,26 @@ export function companionCliFixture() {
   return { root, home, cwd, daemonHome, envDaemonHome, defaultDaemonHome, launch, oneShot };
 }
 
-/** Bind ephemeral leases together so the optional listener receives a distinct port. */
+// A port a test hands to a child process is released before the child binds it, so
+// it must be one nothing else is likely to take in between. The kernel hands
+// ephemeral ports (32768 and up on Linux, 49152 and up elsewhere) to every
+// outgoing connection, and parallel test files lease from the same pool, so
+// leases come from below that range, in a slice chosen by the process id.
+const LEASE_RANGE_START = 20_000;
+const LEASE_SLICES = 240;
+const LEASE_SLICE_SIZE = 50;
+let leaseCursor = 0;
+
+/** Distinct loopback ports that were free a moment ago, from this process's own slice of the pool. */
 export async function availableLoopbackPorts(count: number): Promise<number[]> {
+  const sliceStart = LEASE_RANGE_START + (process.pid % LEASE_SLICES) * LEASE_SLICE_SIZE;
   const leases: Bun.Server<undefined>[] = [];
   try {
-    for (let index = 0; index < count; index++) {
-      leases.push(Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('lease') }));
+    for (let attempt = 0; leases.length < count; attempt++) {
+      if (attempt >= LEASE_SLICE_SIZE) throw new Error(`No free loopback port among ${LEASE_SLICE_SIZE} candidates from ${sliceStart}`);
+      const port = sliceStart + (leaseCursor++ % LEASE_SLICE_SIZE);
+      try { leases.push(Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response('lease') })); }
+      catch (error) { if ((error as { code?: unknown }).code !== 'EADDRINUSE') throw error; }
     }
     return leases.map((lease) => lease.port!);
   } finally { await Promise.all(leases.map((lease) => lease.stop(true))); }

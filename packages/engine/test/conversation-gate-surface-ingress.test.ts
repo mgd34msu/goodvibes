@@ -136,6 +136,7 @@ function buildHarness(
       submitMessage: async (input: { body: string }) => ({
         mode: 'spawn',
         session,
+        input: { id: 'input-1' },
         task: `Respond to this message: ${input.body}`,
         routeBinding: binding,
       }),
@@ -224,7 +225,8 @@ describe('conversation gate at the surface spawn boundary', () => {
     expect((await response.json() as Record<string, unknown>).outcome).toBe('work-intent-unsettled');
     expect(harness.spawns).toHaveLength(0);
     expect(harness.proposals.listPending()).toHaveLength(0);
-    expect(harness.notices).toHaveLength(0);
+    // The sender is told to resend, once, so the message does not vanish.
+    expect(harness.notices.map((notice) => notice.text)).toEqual([expect.stringContaining('send it again')]);
   });
 
   test('a gate configuration changed during the reading cannot publish or start work', async () => {

@@ -133,7 +133,7 @@ Home Graph answers are designed to be responsive. If evidence is weak, Ask shoul
 
 ### Refinement and reindex
 
-The TUI daemon composes the platform Home Graph service with the platform web-backed semantic gap repairer. Refinement tasks can search for candidate repair sources, ingest accepted sources, promote subject-linked facts, refresh generated pages, and continue the platform refinement state machine.
+The daemon composes the platform Home Graph service with the platform web-backed semantic gap repairer. Refinement tasks can search for candidate repair sources, ingest accepted sources, promote subject-linked facts, refresh generated pages, and continue the platform refinement state machine.
 
 Operational expectations:
 

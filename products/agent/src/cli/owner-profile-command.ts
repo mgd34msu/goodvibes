@@ -36,21 +36,25 @@ import type { CliCommandRuntime } from './management.ts';
 
 const READ_USAGE = 'Usage: goodvibes-agent owner-profile read';
 const GET_USAGE = 'Usage: goodvibes-agent owner-profile get <fieldId>';
-const PERSON_USAGE = 'Usage: goodvibes-agent owner-profile person <name> --named-by "<your words this turn>"';
+const PERSON_USAGE = 'Usage: goodvibes-agent owner-profile person <name>';
 const PROVENANCE_USAGE = 'Usage: goodvibes-agent owner-profile provenance <fieldId>';
 const SET_USAGE = 'Usage: goodvibes-agent owner-profile set <fieldId> <value> [--said "<your words>"] --yes';
+const NOTE_USAGE = 'Usage: goodvibes-agent owner-profile note --section <section> --text "<the line>" [--said "<your words>"] --yes';
+const UNDO_USAGE = 'Usage: goodvibes-agent owner-profile undo <fieldId> --yes';
 const FORGET_USAGE = [
   'Usage: goodvibes-agent owner-profile forget <fieldId> --yes',
   '       goodvibes-agent owner-profile forget --section <section> --text "<the line, as it reads>" --yes',
 ].join('\n');
 const STATUS_USAGE = 'Usage: goodvibes-agent owner-profile status';
 const OWNER_PROFILE_USAGE = [
-  'Usage: goodvibes-agent owner-profile [read|get <fieldId>|person <name>|provenance <fieldId>|set <fieldId> <value> --yes|forget <fieldId> --yes|status]',
+  'Usage: goodvibes-agent owner-profile [read|get <fieldId>|person <name>|provenance <fieldId>|set <fieldId> <value> --yes|note --section <section> --text <line> --yes|undo <fieldId> --yes|forget <fieldId> --yes|status]',
   READ_USAGE,
   GET_USAGE,
   PERSON_USAGE,
   PROVENANCE_USAGE,
   SET_USAGE,
+  NOTE_USAGE,
+  UNDO_USAGE,
   FORGET_USAGE,
   STATUS_USAGE,
 ].join('\n');
@@ -212,7 +216,7 @@ async function handleGet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvok
 }
 
 async function handlePerson(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
-  const parsed = parseOperatorCommandArgs(args, ['named-by']);
+  const parsed = parseOperatorCommandArgs(args);
   const name = parsed.positionals.join(' ').trim();
   if (!name) return usageFailure(runtime, PERSON_USAGE);
   const result = await invoke(PROFILE_METHOD_IDS.person, { name });
@@ -263,6 +267,47 @@ async function handleSet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvok
     output: jsonOrText(runtime, response, response.disclosure || `Noted, saved ${fieldId} to your profile.`),
     exitCode: 0,
   };
+}
+
+/** A prose line is added to a section in his own words, the CLI counterpart of the TUI `/profile note`. */
+async function handleNote(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
+  const parsed = parseOperatorCommandArgs(args, ['section', 'text', 'said']);
+  const section = operatorFlagValue(parsed, 'section');
+  const text = operatorFlagValue(parsed, 'text');
+  if (!section || !text) return usageFailure(runtime, NOTE_USAGE);
+  if (!parsed.yes) return { output: `Refusing to add a line to ${section} without --yes.`, exitCode: 2 };
+  const result = await invoke(PROFILE_METHOD_IDS.append, {
+    section,
+    text,
+    surface: PROFILE_RECORDING_SURFACE,
+    said: operatorFlagValue(parsed, 'said') ?? CLI_EDIT_SAID,
+    authority: 'owner-direct',
+  });
+  if (!result.ok) return { output: jsonOrText(runtime, result, result.error ?? 'Profile note failed.'), exitCode: 1 };
+  const response = narrowProfileWrite(result.data);
+  if (!response) return { output: jsonOrText(runtime, result, PROFILE_RESPONSE_UNREADABLE), exitCode: 1 };
+  if (!response.ok) {
+    const failure = [`Not done: the line was not added to ${section}.`, `  reason: ${response.reason ?? 'no reason given'}`].join('\n');
+    return { output: jsonOrText(runtime, response, failure), exitCode: 1 };
+  }
+  return { output: jsonOrText(runtime, response, response.disclosure || `Noted, added a line to ${section} in your profile.`), exitCode: 0 };
+}
+
+/** Puts back the value a field held before its last change. */
+async function handleUndo(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
+  const parsed = parseOperatorCommandArgs(args);
+  const fieldId = parsed.positionals[0];
+  if (!fieldId) return usageFailure(runtime, UNDO_USAGE);
+  if (!parsed.yes) return { output: `Refusing to undo ${fieldId} without --yes.`, exitCode: 2 };
+  const result = await invoke(PROFILE_METHOD_IDS.undo, { fieldId, authority: 'owner-direct' });
+  if (!result.ok) return { output: jsonOrText(runtime, result, result.error ?? 'Profile undo failed.'), exitCode: 1 };
+  const response = narrowProfileWrite(result.data);
+  if (!response) return { output: jsonOrText(runtime, result, PROFILE_RESPONSE_UNREADABLE), exitCode: 1 };
+  if (!response.ok) {
+    const failure = [`Not done: ${fieldId} was not restored.`, `  reason: ${response.reason ?? 'no reason given'}`].join('\n');
+    return { output: jsonOrText(runtime, response, failure), exitCode: 1 };
+  }
+  return { output: jsonOrText(runtime, response, response.disclosure || `Put back the previous ${fieldId} in your profile.`), exitCode: 0 };
 }
 
 /**
@@ -332,8 +377,8 @@ export interface OwnerProfileCommandOptions {
    * Whether this command's output will land somewhere a model can read it.
    *
    * True for the `/owner-profile` slash command and the workspace card, whose
-   * output goes into the session transcript. False for the top-level CLI, whose
-   * output goes to his terminal and nowhere else.
+   * output goes into the session transcript. For the top-level CLI it is true
+   * unless stdout is a terminal, because captured output may be a model's tool result.
    *
    * **Defaults to true**, a caller that has not thought about it gets the
    * containment rather than the exposure. Every caller can answer this
@@ -371,6 +416,11 @@ export async function handleOwnerProfileCommand(
       return handleProvenance(runtime, invoke, rest);
     case 'set':
       return handleSet(runtime, invoke, rest);
+    case 'note':
+    case 'append':
+      return handleNote(runtime, invoke, rest);
+    case 'undo':
+      return handleUndo(runtime, invoke, rest);
     case 'forget':
     case 'delete':
     case 'remove':

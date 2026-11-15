@@ -9,8 +9,7 @@
  * ```ts
  * import { createCompactionManager } from '../runtime/compaction/index.js';
  *
- * const manager = createCompactionManager({ sessionId, bus, flags, contextWindow });
- * const result = await manager.compact({ messages, tokenCount, trigger: 'auto' });
+ * const manager = createCompactionManager({ sessionId, bus, contextWindow });
  * ```
  *
  * A compaction the session performs itself runs through
@@ -30,10 +29,6 @@ export type {
   StrategyInput,
   StrategyOutput,
   BoundaryCommit,
-  CompactionLifecycleResult,
-  RepairAction,
-  RepairSeverity,
-  ResumeRepairResult,
 } from './types.js';
 
 export type { BoundaryCommitOptions } from './strategies/boundary-commit.js';
@@ -44,20 +39,12 @@ export {
   applyTransition,
   isTerminal,
   isCompacting,
-  selectStrategy,
   strategyToState,
 } from './lifecycle.js';
 
-export type { TransitionResult, StrategySelectionParams } from './lifecycle.js';
-
-export { runResumeRepair } from './resume-repair.js';
-export type { ResumeRepairOptions } from './resume-repair.js';
+export type { TransitionResult } from './lifecycle.js';
 
 export {
-  runMicrocompact,
-  runCollapse,
-  runAutocompact,
-  runReactive,
   createBoundaryCommit,
   validateBoundaryCommit,
   computeQualityScore,

@@ -24,6 +24,7 @@ import { PostalAddressHeldError } from './postal-address.js';
 
 import { configKeyScope, describeConfigOwnership, type ConfigScope } from './config-ownership.js';
 import { readDotPath } from './shared-config-tier.js';
+import { CONFIG_SCHEMA } from './schema.js';
 import {
   DaemonConfigUnreachableError,
   discoverDaemonEndpoint,
@@ -172,7 +173,7 @@ export async function loadDaemonConfigSnapshot(deps: DaemonConfigRouterDeps): Pr
       // not answer, a recycled pid, or a daemon that died without cleaning up.
       if (endpoint.source !== 'running-daemon record') break;
       reapedRecord = { endpoint, error: detail };
-      reapUnansweringRuntimeRecord(deps, endpoint.baseUrl);
+      reapUnansweringRuntimeRecord(deps, endpoint.baseUrl, endpoint.runtimeRecord);
     }
   }
   // Nothing answered anywhere, and a record said a daemon should be running:
@@ -339,6 +340,20 @@ function daemonEntry(
   reason: string,
 ): EffectiveConfigEntry {
   const hit = readDotPath(config ?? {}, key);
+  // A key the schema gives a default to is always in a current daemon's snapshot.
+  // Its absence means this daemon predates the key, and no value is not a value:
+  // reporting `ok` with nothing would show the setting as customised.
+  if (config !== null && !hit.present && CONFIG_SCHEMA.some((setting) => setting.key === key && setting.default !== undefined)) {
+    return {
+      key,
+      scope: 'daemon',
+      source: 'daemon',
+      status: 'unavailable',
+      store: endpoint.baseUrl,
+      reason,
+      error: `The daemon at ${endpoint.baseUrl} does not know this key, so its value is unknown; it is likely older than this client.`,
+    };
+  }
   return {
     key,
     scope: 'daemon',

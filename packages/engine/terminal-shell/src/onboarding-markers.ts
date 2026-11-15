@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { atomicWriteFileSync, readVersioned } from '@goodvibes-jev/engine/platform/platform/config';
+import { atomicWriteFileSync, readVersioned, setAsideNewerVersionFile } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingCheckMarkersState, OnboardingStateScope, WriteOnboardingCheckMarkerOptions, } from './onboarding-state-types.js';
 const ONBOARDING_CHECK_MARKER_FILE = 'onboarding-checked.json';
@@ -100,6 +100,8 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
             ...(options.mode ? { mode: options.mode } : {}),
             ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
         };
+        // A file from a newer release is moved aside, not overwritten, so downgrading never destroys its state.
+        setAsideNewerVersionFile(path, 1);
         atomicWriteFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, { mkdirp: true });
         return readOnboardingMarker(shellPaths, scope, fileName);
     }

@@ -36,6 +36,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SessionSurface } from '../runtime/session-surface.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 
 /** One recorded turn boundary, the rewind coordinator's per-turn anchor. */
@@ -53,6 +55,14 @@ export interface TurnAnchor {
 /** Hard cap so a very long session cannot grow this registry without bound. */
 const MAX_ANCHORS_PER_SESSION = 500;
 
+/**
+ * Sessions whose anchors are held at once. A long-lived daemon hosts many
+ * sessions and nothing tells this registry when one ends, so the session
+ * recorded to least recently is let go past this bound; its anchors reload from
+ * the sidecar on resume.
+ */
+const MAX_TRACKED_SESSIONS = 256;
+
 const registry = new Map<string, TurnAnchor[]>();
 
 /** Trim a user prompt to a single compact line for the picker. */
@@ -66,10 +76,18 @@ export function summarizeTurnLabel(text: string | null | undefined, max = 72): s
  * Record a completed turn's anchor. Idempotent per turnId: a repeated turnId
  * updates the existing entry in place (the checkpoint engine can re-snapshot a
  * turn) rather than duplicating it.
+ *
+ * In one linear history no turn ends with fewer messages than the turn
+ * before it. A new turn that ends below an earlier anchor's count means the
+ * history was cut back (a rewind, an undo, a compaction) since that
+ * anchor was recorded, so those earlier anchors no longer name a boundary in
+ * this conversation and are dropped.
  */
 export function recordTurnAnchor(sessionId: string, anchor: TurnAnchor): void {
   if (!sessionId || !anchor.turnId) return;
-  const list = registry.get(sessionId) ?? [];
+  const list = (registry.get(sessionId) ?? []).filter(
+    (a) => a.turnId === anchor.turnId || a.messageCount <= anchor.messageCount,
+  );
   const existingIndex = list.findIndex((a) => a.turnId === anchor.turnId);
   if (existingIndex >= 0) {
     list[existingIndex] = anchor;
@@ -77,7 +95,15 @@ export function recordTurnAnchor(sessionId: string, anchor: TurnAnchor): void {
     list.push(anchor);
     if (list.length > MAX_ANCHORS_PER_SESSION) list.splice(0, list.length - MAX_ANCHORS_PER_SESSION);
   }
+  // Re-inserting moves the session to the newest position, so the oldest entry
+  // is the session recorded to least recently.
+  registry.delete(sessionId);
   registry.set(sessionId, list);
+  while (registry.size > MAX_TRACKED_SESSIONS) {
+    const oldest = registry.keys().next().value;
+    if (oldest === undefined) break;
+    registry.delete(oldest);
+  }
 }
 
 /** All recorded anchors for a session, oldest first (chronological). */
@@ -88,6 +114,35 @@ export function getTurnAnchors(sessionId: string): readonly TurnAnchor[] {
 /** Resolve an anchor by exact turnId, or null when this run never recorded it. */
 export function resolveTurnAnchor(sessionId: string, turnId: string): TurnAnchor | null {
   return registry.get(sessionId)?.find((a) => a.turnId === turnId) ?? null;
+}
+
+/**
+ * Drop the anchors recorded after `turnId`, the turns a conversation rewind to
+ * that turn removed, and return them (an undo of the rewind can give them
+ * back with {@link restoreDiscardedTurnAnchors}). Nothing changes when
+ * `turnId` was never recorded. With a `surface` the sidecar is rewritten at
+ * once, so a resume before the next turn completes does not bring the dropped
+ * anchors back.
+ */
+export function discardTurnAnchorsAfter(sessionId: string, turnId: string, surface?: SessionSurface): readonly TurnAnchor[] {
+  const list = registry.get(sessionId);
+  const index = list?.findIndex((a) => a.turnId === turnId) ?? -1;
+  if (!list || index < 0) return [];
+  const discarded = list.splice(index + 1);
+  if (surface && discarded.length > 0) persistTurnAnchors(sessionId, surface);
+  return discarded;
+}
+
+/**
+ * Put back anchors {@link discardTurnAnchorsAfter} returned, when the
+ * conversation rewind that dropped them was undone. Anchors already recorded
+ * for those turns are left as they are.
+ */
+export function restoreDiscardedTurnAnchors(sessionId: string, anchors: readonly TurnAnchor[], surface?: SessionSurface): void {
+  for (const anchor of anchors) {
+    if (resolveTurnAnchor(sessionId, anchor.turnId) === null) recordTurnAnchor(sessionId, anchor);
+  }
+  if (surface && anchors.length > 0) persistTurnAnchors(sessionId, surface);
 }
 
 /** Drop a session's anchors. Exposed for tests and session reset. */
@@ -129,21 +184,25 @@ function isTurnAnchor(value: unknown): value is TurnAnchor {
  * Write the current in-memory anchors for a session to its sidecar so they
  * survive a resume. Best-effort and atomic (temp file + rename): a failed or
  * torn write must never break the turn that triggered it. Called after each
- * `recordTurnAnchor` at TURN_COMPLETED.
+ * `recordTurnAnchor` at TURN_COMPLETED. Returns false when the write failed
+ * (the cause is logged), so a caller can say the rewind point was not saved.
  */
-export function persistTurnAnchors(sessionId: string, surface: SessionSurface): void {
+export function persistTurnAnchors(sessionId: string, surface: SessionSurface): boolean {
   const path = anchorSidecarPath(sessionId, surface);
-  if (!path) return;
+  if (!path) return true;
   const list = registry.get(sessionId) ?? [];
-  if (list.length === 0) return; // nothing to mirror yet
+  if (list.length === 0) return true; // nothing to mirror yet
   try {
     mkdirSync(surface.sessionsDir, { recursive: true });
     const payload = JSON.stringify({ version: ANCHOR_SIDECAR_VERSION, sessionId, anchors: list });
     const tmp = `${path}${ANCHOR_SIDECAR_TMP_MARKER}${process.pid}`;
     writeFileSync(tmp, payload);
     renameSync(tmp, path);
-  } catch {
-    /* best-effort; a rewind-anchor persist miss must never break the turn */
+    return true;
+  } catch (error) {
+    // Best-effort: a persist miss must never break the turn.
+    logger.warn('rewind turn-anchor sidecar could not be written', { sessionId, error: summarizeError(error) });
+    return false;
   }
 }
 

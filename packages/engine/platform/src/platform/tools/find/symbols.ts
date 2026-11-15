@@ -15,6 +15,9 @@ import {
   readTextFile,
   withFindWarnings,
   addFindWarning,
+  addBudgetStopWarning,
+  addDiscoveryCutWarning,
+  withholdRestrictedFiles,
 } from './shared.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
@@ -45,6 +48,13 @@ async function scanSymbolsQuery(
   const basePath = validatedPath;
   const kindFilter = query.kinds ? new Set(query.kinds) : null;
   const diagnostics = createFindDiagnostics();
+  // `output` is shared by every query of a call, so options meant for another mode are named rather than silently dropped.
+  if (output.format !== undefined && !['signatures', 'full', 'count_only', 'files_only'].includes(output.format)) {
+    addFindWarning(diagnostics, `Output format '${output.format}' does not apply to symbols mode; the plain symbol list was returned (symbols mode formats: signatures, full, count_only, files_only).`);
+  }
+  if (output.context_before !== undefined || output.context_after !== undefined) {
+    addFindWarning(diagnostics, 'context_before and context_after apply to content mode only and have no effect in symbols mode.');
+  }
 
   const linePatterns: Array<{
     kind: SymbolKind;
@@ -63,7 +73,9 @@ async function scanSymbolsQuery(
   ];
 
   const activePatterns = kindFilter ? linePatterns.filter((p) => kindFilter.has(p.kind)) : linePatterns;
-  const files = await collectTextFiles(basePath, diagnostics, walkOptions);
+  const discovered = await collectTextFiles(basePath, diagnostics, walkOptions);
+  if (options.shouldContinue?.() === false) addDiscoveryCutWarning(diagnostics, discovered.length);
+  const files = await withholdRestrictedFiles(discovered, diagnostics, options.readAccessFilter);
   const symbols: SymbolResult[] = [];
 
   await using queryRegex = query.query
@@ -73,28 +85,37 @@ async function scanSymbolsQuery(
   let treeSitterFiles = 0;
   let regexFallbackFiles = 0;
 
-  for (const file of files) {
+  for (const [fileIndex, file] of files.entries()) {
+    current();
+    if (options.shouldContinue?.() === false) {
+      addBudgetStopWarning(diagnostics, fileIndex, files.length, symbols.length, 'symbol(s)');
+      break;
+    }
 
     const content = await readTextFile(file, diagnostics);
     if (content === null) continue;
 
-    let usedTreeSitter = false;
+    // Only the parser call is guarded: a cancellation or a failing query regex below must end
+    // the call, not be mistaken for a parser failure and retried through the regex path.
+    let tsSymbols: Awaited<ReturnType<typeof ci.getSymbols>> = [];
     try {
-      const tsSymbols = await ci.getSymbols(file, content);
-      if (tsSymbols.length > 0) {
-        usedTreeSitter = true;
-        treeSitterFiles++;
-        for (const sym of tsSymbols) {
-
-          const kind = toSymbolKind(sym.kind);
-          if (kindFilter && !kindFilter.has(kind)) continue;
-          if (query.exported_only && !query.include_private && !sym.exported) continue;
-          if (queryRegex && !await queryRegex.test(sym.name)) continue;
-          symbols.push({ name: sym.name, kind, file, line: sym.line, exported: sym.exported });
-        }
-      }
+      tsSymbols = await ci.getSymbols(file, content);
     } catch (err) {
+      current();
       addFindWarning(diagnostics, `Tree-sitter symbol extraction failed for '${file}'; used regex fallback: ${summarizeError(err)}`);
+    }
+
+    let usedTreeSitter = false;
+    if (tsSymbols.length > 0) {
+      usedTreeSitter = true;
+      treeSitterFiles++;
+      for (const sym of tsSymbols) {
+        const kind = toSymbolKind(sym.kind);
+        if (kindFilter && !kindFilter.has(kind)) continue;
+        if (query.exported_only && !query.include_private && !sym.exported) continue;
+        if (queryRegex && !await queryRegex.test(sym.name)) continue;
+        symbols.push({ name: sym.name, kind, file, line: sym.line, exported: sym.exported });
+      }
     }
 
     if (usedTreeSitter) continue;

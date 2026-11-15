@@ -63,12 +63,22 @@ export function completeFetchBodyStructure(frames: readonly ImapFetchFrame[], ui
   return structure;
 }
 
-/** Complete UID SEARCH snapshot. A malformed reply cannot mean an empty inbox. */
+/**
+ * Complete UID SEARCH snapshot. A malformed reply cannot mean an empty inbox.
+ * A server may legally interleave other untagged status lines (`* 5 EXISTS`,
+ * `* FLAGS (...)`, `* 3 FETCH (...)` from another client, `* VANISHED`)
+ * before the tagged OK; those are not the answer and are ignored, but
+ * exactly one `* SEARCH` line must be present.
+ */
 export function completeSearchUids(frames: readonly ImapFetchFrame[]): readonly number[] {
   const failure = (): never => { throw new Error('IMAP UID SEARCH response was incomplete or unsupported'); };
-  if (frames.length !== 2 || frames.some(frame => frame.literal !== undefined)
-    || !/^\S+ OK\b/.test(frames[1]?.syntax ?? '')) return failure();
-  const response = frames[0]?.syntax ?? '';
+  const tagged = frames.at(-1);
+  if (frames.length < 2 || frames.some(frame => frame.literal !== undefined)
+    || !/^\S+ OK\b/.test(tagged?.syntax ?? '')) return failure();
+  const answers = frames.slice(0, -1).map(frame => frame.syntax).filter(line => /^\* SEARCH(?: |$)/i.test(line));
+  const others = frames.slice(0, -1).filter(frame => !/^\* SEARCH(?: |$)/i.test(frame.syntax));
+  if (answers.length !== 1 || others.some(frame => !/^\* /.test(frame.syntax))) return failure();
+  const response = answers[0]!;
   if (!/^\* SEARCH(?: [1-9][0-9]{0,9})*$/.test(response)) return failure();
   const tokens = response.length === 8 ? [] : response.slice(9).split(' ');
   const uids = parseSearchNumbers([response]);

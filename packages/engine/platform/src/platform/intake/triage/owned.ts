@@ -238,9 +238,13 @@ async function createTriagedSource(
     void (async () => {
       const outcomes = await Promise.allSettled([retiring, ...active]);
       // Scoring refusals are operation outcomes, not failed retirement.
-      await store?.close();
+      let storeFailure: unknown;
+      try { await store?.close(); } catch (error) { storeFailure = error; }
+      // A source that did not retire may still hold its mirror open, so its locks stay held.
       if (outcomes[0]?.status === 'rejected') throw new Error('Triaged inbox source did not retire');
+      // The source is closed: a failed receipt-store close is reported but must not strand the account's locks.
       releaseLock();
+      if (storeFailure !== undefined) throw new Error('Triaged inbox receipt store did not close', { cause: storeFailure });
     })().then(resolve, reject);
     return closing;
   };

@@ -79,7 +79,7 @@ for (const mode of ['partial', 'none'] as const) {
   test(`captured ${mode} validator exception retains exact-byte undo and redo for both edits`, async () => {
     const f = await fixture(); let validators = 0;
     const result = await f.edit(async () => { validators++; throw new Error('Synthetic validator exception'); }).execute({ edits, validate: { after: ['build'] }, transaction: { mode } });
-    expect(result.success).toBe(false); expect(result.error).toBe('Unexpected error: Synthetic validator exception'); expect(validators).toBe(1);
+    expect(result.success).toBe(false); expect(result.error).toContain('Synthetic validator exception'); expect(result.error).toContain('edits remain applied to:'); expect(validators).toBe(1);
     roundTrip(f, edited);
   });
   test(`captured ${mode} terminal repair judgment records an earlier repair and the unhealed sibling`, async () => {
@@ -99,6 +99,7 @@ function preserveHistory(f: Awaited<ReturnType<typeof fixture>>): () => void {
   const path = join(f.owner, 'history.txt');
   f.undo.snapshot({ path, beforeContent: 'before', afterContent: 'intermediate', tool: 'write' });
   f.undo.snapshot({ path, beforeContent: 'intermediate', afterContent: 'after', tool: 'write' });
+  writeFileSync(path, 'after');
   f.undo.undo();
   const previous = f.undo.peekUndo();
   return () => {

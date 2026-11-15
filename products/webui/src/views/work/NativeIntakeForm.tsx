@@ -7,7 +7,10 @@ import {
   type NativeIntakeResult,
   type NativeIntakeSession,
 } from "../../lib/native-intake";
-import type { NativeIntakeBrowserRecord } from "../../lib/native-intake-journal";
+import {
+  NativeIntakeBrowserJournalError,
+  type NativeIntakeBrowserRecord,
+} from "../../lib/native-intake-journal";
 import { formatError } from "../../lib/errors";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import { NativeExecutionStatus } from "./NativeExecutionStatus";
@@ -53,6 +56,9 @@ function ScopedNativeIntakeForm({
   const [text, setText] = useState("");
   const [sources, setSources] = useState<NativeConversationIntakeUnsupportedSource[]>([]);
   const [records, setRecords] = useState<NativeIntakeBrowserRecord[]>([]);
+  // Originals saved under other sessions or selected changes: shown only after a full
+  // journal refuses a save, because they count toward its capacity but not this form's list.
+  const [otherRecords, setOtherRecords] = useState<NativeIntakeBrowserRecord[]>([]);
   const [selected, setSelected] = useState<NativeIntakeBrowserRecord>();
   const [result, setResult] = useState<NativeIntakeResult>();
   const [turn, setTurn] = useState<NativeTurnObservation>();
@@ -296,23 +302,33 @@ function ScopedNativeIntakeForm({
       return;
     void run("Submitting", async (connected, signal, current) => {
       let original: NativeIntakeBrowserRecord | undefined;
-      const found = await connected.submit(
-        { text, unsupportedSources: sources },
-        (record) => {
-          original = record;
-          if (!current()) return;
-          setSelected(record);
-          setResult(undefined);
-          setTurn(undefined);
-          setTurnError(undefined);
-          setExecution(undefined);
-          setExecutionError(undefined);
-          setRecords((saved) => [...saved, record]);
-          setText("");
-          setSources([]);
-        },
-        signal
-      );
+      let found: NativeIntakeResult;
+      try {
+        found = await connected.submit(
+          { text, unsupportedSources: sources },
+          (record) => {
+            original = record;
+            if (!current()) return;
+            setSelected(record);
+            setResult(undefined);
+            setTurn(undefined);
+            setTurnError(undefined);
+            setExecution(undefined);
+            setExecutionError(undefined);
+            setRecords((saved) => [...saved, record]);
+            setOtherRecords([]);
+            setText("");
+            setSources([]);
+          },
+          signal
+        );
+      } catch (cause) {
+        if (cause instanceof NativeIntakeBrowserJournalError && cause.code === "capacity") {
+          const others = await connected.listOtherScopes().catch(() => []);
+          if (current()) setOtherRecords(others);
+        }
+        throw cause;
+      }
       if (original) await continueWork(connected, original, found, signal, current);
     });
   };
@@ -343,6 +359,31 @@ function ScopedNativeIntakeForm({
       (connected, signal, current) => observeTurn(connected, selected, method, signal, current),
       method === "cancel"
     );
+  };
+  const release = (record: NativeIntakeBrowserRecord) => {
+    if (busyRef.current) return;
+    void run("Releasing", async (connected, signal, current) => {
+      const outcome = await connected.release(record, signal);
+      if (!current()) return;
+      if (outcome.released) {
+        const keep = (saved: NativeIntakeBrowserRecord[]) =>
+          saved.filter((item) => item.command.inputId !== record.command.inputId);
+        setRecords(keep);
+        setOtherRecords(keep);
+        if (selected?.command.inputId === record.command.inputId) {
+          setSelected(undefined);
+          setResult(undefined);
+          setTurn(undefined);
+          setTurnError(undefined);
+          setExecution(undefined);
+          setExecutionError(undefined);
+        }
+      } else {
+        setError(
+          `Not released: the host has not finished this request. ${nativeIntakeDescription(outcome.result)} The saved original is kept.`
+        );
+      }
+    });
   };
   const newRequest = () => {
     // Detach only. The saved immutable input and host execution are untouched.
@@ -654,6 +695,33 @@ function ScopedNativeIntakeForm({
           )}
         </>
       )}
+      {otherRecords.length > 0 && (
+        <DetailSection title="Saved requests from other sessions">
+          <p className="dv-muted">
+            This browser's journal is full. These originals were saved under other sessions or
+            selected changes; release any the host has finished to make room.
+          </p>
+          <ul className="native-intake__saved">
+            {[...otherRecords]
+              .sort((a, b) => b.createdAt - a.createdAt)
+              .map((record) => (
+                <li key={record.command.inputId}>
+                  <span>
+                    {record.command.text.slice(0, 80)}
+                    {record.command.text.length > 80 ? "…" : ""}
+                  </span>
+                  <Button
+                    disabled={Boolean(busy)}
+                    onClick={() => release(record)}
+                    aria-label={`Release input ${record.command.inputId}`}
+                  >
+                    Release
+                  </Button>
+                </li>
+              ))}
+          </ul>
+        </DetailSection>
+      )}
       {records.length > 0 && (
         <DetailSection title="Saved requests">
           <ul className="native-intake__saved">
@@ -668,6 +736,13 @@ function ScopedNativeIntakeForm({
                   >
                     {record.command.text.slice(0, 80)}
                     {record.command.text.length > 80 ? "…" : ""}
+                  </Button>
+                  <Button
+                    disabled={Boolean(busy)}
+                    onClick={() => release(record)}
+                    aria-label={`Release input ${record.command.inputId}`}
+                  >
+                    Release
                   </Button>
                 </li>
               ))}

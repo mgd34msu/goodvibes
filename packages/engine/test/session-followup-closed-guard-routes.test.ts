@@ -19,6 +19,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createDaemonRuntimeSessionRouteHandlers } from '../daemon-api/src/runtime-session-routes.js';
 import type { DaemonRuntimeRouteContext } from '../daemon-api/src/runtime-route-types.js';
+import { makeSessionRouteContext } from './_helpers/session-route-context.ts';
 
 function makeRequest(url: string, body: unknown): Request {
   return new Request(url, {
@@ -32,55 +33,7 @@ function makeContext(broker: {
   readonly submitMessage?: (input: unknown) => Promise<unknown>;
   readonly followUpMessage?: (input: unknown) => Promise<unknown>;
 }): DaemonRuntimeRouteContext {
-  return {
-    parseJsonBody: async (req: Request) => {
-      try {
-        return await req.json();
-      } catch {
-        return new Response('Bad JSON', { status: 400 });
-      }
-    },
-    parseOptionalJsonBody: async () => null,
-    recordApiResponse: (_req: unknown, _path: unknown, response: Response) => response,
-    requireAdmin: () => null,
-    sessionBroker: {
-      start: async () => {},
-      steerMessage: async () => { throw new Error('not expected'); },
-      submitMessage: broker.submitMessage ?? (async () => { throw new Error('not expected'); }),
-      followUpMessage: broker.followUpMessage ?? (async () => { throw new Error('not expected'); }),
-      bindAgent: async () => {},
-      createSession: async (input: { id?: string }) => ({ id: input.id ?? randomUUID() }),
-      getSession: () => null,
-      getMessages: () => [],
-      getInputs: () => [],
-      closeSession: async () => null,
-      reopenSession: async () => null,
-      cancelInput: async () => null,
-      completeAgent: async () => {},
-      appendCompanionMessage: async () => null,
-    },
-    agentManager: { getStatus: () => null, cancel: () => {} },
-    automationManager: {
-      listJobs: () => [], listRuns: () => [], getRun: () => null,
-      triggerHeartbeat: async () => null, cancelRun: async () => null, retryRun: async () => ({}),
-      createJob: async () => ({ id: randomUUID() }), updateJob: async () => null, removeJob: async () => {},
-      setEnabled: async () => null, runNow: async () => ({ id: randomUUID(), status: 'running' }),
-    },
-    normalizeAtSchedule: (at: unknown) => at,
-    normalizeEverySchedule: (interval: unknown) => interval,
-    normalizeCronSchedule: (expr: unknown) => expr,
-    routeBindings: { start: async () => {}, getBinding: () => undefined },
-    trySpawnAgent: () => ({ id: randomUUID(), status: 'running', task: 'test-task', tools: [], startedAt: Date.now() }),
-    queueSurfaceReplyFromBinding: () => {},
-    surfaceDeliveryEnabled: () => false,
-    syncSpawnedAgentTask: () => {},
-    syncFinishedAgentTask: () => {},
-    configManager: { get: () => undefined },
-    runtimeStore: null,
-    runtimeDispatch: null,
-    publishConversationFollowup: () => {},
-    openSessionEventStream: () => new Response('stream', { status: 200 }),
-  } as unknown as DaemonRuntimeRouteContext;
+  return makeSessionRouteContext(broker);
 }
 
 function closedError(): never {

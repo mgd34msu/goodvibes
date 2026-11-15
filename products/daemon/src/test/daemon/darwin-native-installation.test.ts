@@ -93,12 +93,13 @@ test('published previous four-member evidence verifies all companions without ex
   const vector = f.installed[1]! + '.previous'; writeFileSync(vector, 'altered previous vector');
   expect(() => inspectDarwinDaemonInstallation(f.execPath, f.arch, '.previous', realUpdateFileIo)).toThrow('payload');
 });
-test('historical program-only readers remain parseable but cannot certify complete Darwin rollback', () => {
+test('historical program-only readers are refused and cannot certify complete Darwin rollback', () => {
   const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-old-profile'));
   const historical = { ...f.artifact, files: f.artifact.files.slice(0, 1) };
-  expect(parseClientReaderArtifact(historical).files).toHaveLength(1);
+  expect(() => parseClientReaderArtifact(historical)).toThrow('runtime target');
+  expect(parseClientReaderArtifact(f.artifact).files.length).toBeGreaterThan(1);
   writeFileSync(f.execPath + '.readers.json', JSON.stringify(historical));
-  expect(() => inspectDarwinDaemonInstallation(f.execPath, f.arch, '', realUpdateFileIo)).toThrow('reader artifact');
+  expect(() => inspectDarwinDaemonInstallation(f.execPath, f.arch, '', realUpdateFileIo)).toThrow('runtime target');
 });
 test('removing a companion cannot quietly disable native update eligibility or data floors', () => {
   const f = darwinInstallationFixture(makeOwnedTempDir('darwin-native-missing'));

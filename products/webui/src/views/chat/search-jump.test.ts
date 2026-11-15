@@ -9,7 +9,7 @@
  * results legitimately carry messageId '' and must never arm a jump.
  */
 import { describe, expect, test } from 'bun:test';
-import { resolveScrollTarget, isScrollTargetReady, findMessageElement } from './search-jump';
+import { resolveScrollTarget, isScrollTargetReady, isScrollTargetStale, findMessageElement } from './search-jump';
 import type { LineageNode } from './lineage';
 import type { ChatMessage } from './types';
 
@@ -61,12 +61,18 @@ describe('isScrollTargetReady: the async-load guard', () => {
 });
 
 describe('findMessageElement: the DOM lookup', () => {
+  // Mirrors MessageList: the scroll container holds a column wrapper, and the
+  // message articles are that wrapper's children, not the container's.
   function buildContainer(ids: string[]): HTMLDivElement {
     const container = document.createElement('div');
+    container.className = 'messages';
+    const column = document.createElement('div');
+    column.className = 'chat-column';
+    container.appendChild(column);
     for (const id of ids) {
       const article = document.createElement('article');
       article.setAttribute('data-message-id', id);
-      container.appendChild(article);
+      column.appendChild(article);
     }
     return container;
   }
@@ -76,15 +82,50 @@ describe('findMessageElement: the DOM lookup', () => {
     expect(findMessageElement(undefined, 'msg-1')).toBeUndefined();
   });
 
-  test('returns undefined when no child matches the message id', () => {
+  test('returns undefined when no message matches the id', () => {
     const container = buildContainer(['msg-1', 'msg-2']);
     expect(findMessageElement(container, 'msg-3')).toBeUndefined();
   });
 
-  test('returns the matching child element', () => {
+  test('returns the matching article nested under the column wrapper', () => {
     const container = buildContainer(['msg-1', 'msg-2', 'msg-3']);
     const found = findMessageElement(container, 'msg-2');
-    expect(found).toBeDefined();
     expect(found?.getAttribute('data-message-id')).toBe('msg-2');
+  });
+
+  test('finds ids that need selector escaping', () => {
+    const container = buildContainer(['a"b', 'c:d']);
+    expect(findMessageElement(container, 'a"b')?.getAttribute('data-message-id')).toBe('a"b');
+    expect(findMessageElement(container, 'c:d')?.getAttribute('data-message-id')).toBe('c:d');
+  });
+});
+
+describe('isScrollTargetStale: a target that can never be reached is dropped', () => {
+  const nodes = [node('msg-1')];
+  const target = { sessionId: 'session-1', messageId: 'msg-1' };
+
+  test('no target is never stale', () => {
+    expect(isScrollTargetStale(null, 'session-1', true, true, nodes)).toBe(false);
+  });
+
+  test('waiting for the session switch is not stale until the target session has been shown', () => {
+    expect(isScrollTargetStale(target, 'session-2', false, false, nodes)).toBe(false);
+  });
+
+  test('stale once the operator leaves the target session', () => {
+    expect(isScrollTargetStale(target, 'session-2', true, true, nodes)).toBe(true);
+  });
+
+  test('not stale while the target session is still loading', () => {
+    expect(isScrollTargetStale({ ...target, messageId: 'msg-9' }, 'session-1', true, false, nodes)).toBe(false);
+  });
+
+  test('stale when the session loaded and the message is only retained history', () => {
+    const withHistory = [node('msg-1', [{ id: 'msg-old', role: 'user', content: 'old' } as ChatMessage])];
+    expect(isScrollTargetStale({ ...target, messageId: 'msg-old' }, 'session-1', true, true, withHistory)).toBe(true);
+  });
+
+  test('not stale once the message is present', () => {
+    expect(isScrollTargetStale(target, 'session-1', true, true, nodes)).toBe(false);
   });
 });

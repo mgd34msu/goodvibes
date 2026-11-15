@@ -36,7 +36,11 @@ export interface AgentGraphOptions {
   readonly workingDirectory: string;
 }
 
-/** The agent graph a conversation loop runs on. */
+/**
+ * The agent graph a conversation loop runs on. The daemon-grade graph with a contract runner is
+ * agent-graph-composition.ts; both must wire the same links (message bus, conversation sink,
+ * cancellation source), so a change to one belongs in the other.
+ */
 export interface AgentGraph {
   readonly archetypeLoader: ArchetypeLoader;
   readonly agentMessageBus: AgentMessageBus;

@@ -76,17 +76,6 @@ describe('ConversationManager - title', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Token budget warnings
-// NOTE: These tests verify runtime event envelope shape only, they do not test the
-// actual Orchestrator.runTurn() path, which requires a mock provider and full
-// initialization. The cooldown bracket logic (lastWarningBracket) cannot be
-// unit-tested here without substantially refactoring Orchestrator dependencies.
-// ---------------------------------------------------------------------------
-describe('Token budget warning', () => {
-
-});
-
-// ---------------------------------------------------------------------------
 // Conversation export format
 // ---------------------------------------------------------------------------
 describe('Conversation export format', () => {

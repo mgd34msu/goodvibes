@@ -37,29 +37,15 @@ import type { MessageLineCache } from '../core/conversation-line-cache.ts';
 import type { ConversationRenderContext } from '../core/conversation-rendering.ts';
 import { renderConversationEventLine, renderConversationNotice } from '../renderer/conversation-surface.ts';
 import { buildViewLine, DEFAULT_VIEW_PALETTE, type ViewPalette } from './polish.ts';
+import { toneColor } from './fleet-format.ts';
 import { formatElapsed } from '../utils/format-elapsed.ts';
 import { truncateDisplay } from '../utils/terminal-width.ts';
 import {
   fleetKindTag,
   fleetStateGlyph,
   fleetStateTone,
-  type FleetStateTone,
   type FleetTreeRow,
 } from './fleet-read-model.ts';
-
-/** Duplicated from src/input/agents-modal.ts's private helper (same tiny mapping) rather than
- *  cross-importing, src/input/agents-modal.ts imports THIS module to render tab content, so
- *  importing back would form a cycle. See src/input/agents-modal.ts's own toneColor for the
- *  canonical copy; keep both in sync if the tone set ever changes. */
-function toneColor(tone: FleetStateTone, palette: ViewPalette): string {
-  switch (tone) {
-    case 'active': return palette.info ?? DEFAULT_VIEW_PALETTE.info;
-    case 'success': return palette.good ?? DEFAULT_VIEW_PALETTE.good;
-    case 'failure': return palette.bad ?? DEFAULT_VIEW_PALETTE.bad;
-    case 'warn': return palette.warn ?? DEFAULT_VIEW_PALETTE.warn;
-    case 'muted': return palette.dim;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Agent transcript (live/frozen split)

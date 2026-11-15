@@ -125,6 +125,19 @@ function admittedTool(paths: ShellPaths) {
 }
 
 describe('agent_reminder_schedule tool', () => {
+  test('a link delivery target is not part of the schema, because nothing delivers to one', async () => {
+    const paths = shellPaths();
+    const tool = admittedTool(paths);
+    const result = await tool.execute({
+      message: 'Review open approvals',
+      scheduleKind: 'every',
+      scheduleValue: '1d',
+      deliveryLink: 'https://example.com/x',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('$.deliveryLink');
+  });
+
   test('holds an unadmitted caller without calling the connected host', async () => {
     const paths = shellPaths();
     const tool = createAgentReminderScheduleTool(paths, configManager(paths), new ToolRegistry());

@@ -106,6 +106,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     title: 'Open Panel',
     description: 'Request that a panel be opened in the current TUI session.',
     category: 'panels',
+    access: 'admin',
     scopes: ['write:panels'],
     http: { method: 'POST', path: '/api/panels/open' },
     inputSchema: bodyEnvelopeSchema({
@@ -171,6 +172,17 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     inputSchema: bodyEnvelopeSchema({
       key: STRING_SCHEMA,
     }, ['key']),
+    outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'config.reset',
+    title: 'Reset Config Value',
+    description: 'Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete) and a key the host does not know.',
+    category: 'config',
+    scopes: ['write:config'],
+    access: 'admin',
+    http: { method: 'POST', path: '/config/reset' },
+    inputSchema: objectSchema({ key: STRING_SCHEMA }, ['key']),
     outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
   }),
 ];

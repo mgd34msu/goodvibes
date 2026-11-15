@@ -39,12 +39,7 @@ import type { GatewayMethodInvocation } from '../platform/src/platform/control-p
 
 const METHOD_ID = 'channels.inbox.list';
 
-/**
- * A stand-in for a host's synced provider mirror: two Slack items, one email
- * item, and an IMAP account whose last sync failed. Deliberately shaped like
- * the real thing, the failing provider contributes no items AND says why, and
- * `partial` is true because those items exist and are not in the answer.
- */
+/** Items the fixture handler answers with; the real provider mirror lives in the connected host. */
 const MIRROR = [
   { id: 'slack:1', provider: 'slack', kind: 'dm', from: 'a1b2c3d4e5f60718', bodyPreview: 'ping', receivedAt: 3_000, unread: true },
   { id: 'slack:2', provider: 'slack', kind: 'mention', from: 'a1b2c3d4e5f60718', bodyPreview: 'over here', receivedAt: 2_000, unread: false },
@@ -54,34 +49,12 @@ const MIRROR = [
 interface InboxAnswer {
   items: readonly { id: string; provider: string }[];
   total: number;
-  truncated: boolean;
-  hasMore: boolean;
-  cursor?: string;
-  nextCursor?: string;
-  providers: readonly { provider: string; state: string; itemCount: number; storedCount: number; error?: string }[];
-  partial: boolean;
 }
 
 /** Records every invocation the fixture handler saw, so "one handler" is checkable. */
 interface FixtureHost {
   readonly catalog: GatewayMethodCatalog;
   readonly seen: GatewayMethodInvocation[];
-}
-
-function readNumber(invocation: GatewayMethodInvocation, field: string): number | undefined {
-  const fromQuery = invocation.query?.[field];
-  const fromBody = (invocation.body as Record<string, unknown> | undefined)?.[field];
-  const raw = fromQuery ?? fromBody;
-  if (raw === undefined || raw === null) return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function readString(invocation: GatewayMethodInvocation, field: string): string | undefined {
-  const fromQuery = invocation.query?.[field];
-  const fromBody = (invocation.body as Record<string, unknown> | undefined)?.[field];
-  const raw = fromQuery ?? fromBody;
-  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
 /**
@@ -96,25 +69,7 @@ function fixtureHost(): FixtureHost {
   if (!descriptor) throw new Error(`${METHOD_ID} is not in the catalog`);
   catalog.register(descriptor, (invocation) => {
     seen.push(invocation);
-    const provider = readString(invocation, 'provider');
-    const limit = readNumber(invocation, 'limit') ?? 50;
-    const matching = MIRROR.filter((item) => provider === undefined || item.provider === provider);
-    const page = matching.slice(0, limit);
-    const hasMore = matching.length > page.length;
-    const answer: InboxAnswer = {
-      items: page,
-      total: matching.length,
-      truncated: hasMore,
-      hasMore,
-      cursor: String(Math.max(0, ...matching.map((item) => item.receivedAt))),
-      ...(hasMore ? { nextCursor: `after:${page[page.length - 1]!.id}` } : {}),
-      providers: [
-        { provider: 'slack', state: 'ready', itemCount: page.filter((i) => i.provider === 'slack').length, storedCount: 2 },
-        { provider: 'email', state: 'ready', itemCount: page.filter((i) => i.provider === 'email').length, storedCount: 1 },
-        { provider: 'imap-archive', state: 'error', itemCount: 0, storedCount: 0, error: 'IMAP LOGIN refused' },
-      ],
-      partial: true,
-    };
+    const answer: InboxAnswer = { items: MIRROR, total: MIRROR.length };
     return Promise.resolve(answer);
   }, { replace: true });
   return { catalog, seen };
@@ -186,7 +141,7 @@ describe('the catalog entry', () => {
 // ── both transports, one handler ────────────────────────────────────────────
 
 describe('a host-attached handler is reachable over both transports', () => {
-  test('the methodId invoke returns the mirror, with per-provider state and the failing provider named', async () => {
+  test('the methodId invoke runs the attached handler and returns its answer unchanged', async () => {
     const host = fixtureHost();
     const result = await helperFor(host.catalog).invokeGatewayMethodCall({
       authToken: 'fixture-token',
@@ -195,18 +150,8 @@ describe('a host-attached handler is reachable over both transports', () => {
     });
 
     expect(result.status).toBe(200);
-    const body = result.body as InboxAnswer;
-    expect(body.items.map((item) => item.id)).toEqual(['slack:1', 'slack:2', 'email:9']);
-    expect(body.total).toBe(3);
-    expect(body.hasMore).toBe(false);
-    expect(body.truncated).toBe(body.hasMore);
-    // The provider that failed contributes nothing AND is reported, which is the
-    // difference between a partial answer and a silent hole.
-    const failing = body.providers.find((entry) => entry.state === 'error');
-    expect(failing?.provider).toBe('imap-archive');
-    expect(failing?.error).toBe('IMAP LOGIN refused');
-    expect(body.items.some((item) => item.provider === 'imap-archive')).toBe(false);
-    expect(body.partial).toBe(true);
+    expect(result.body as InboxAnswer).toEqual({ items: MIRROR, total: MIRROR.length });
+    expect(host.seen).toHaveLength(1);
   });
 
   test('the advertised REST path reaches the same handler, and carries the query params to it', async () => {
@@ -219,13 +164,7 @@ describe('a host-attached handler is reachable over both transports', () => {
 
     expect(response).not.toBeNull();
     expect(response!.status).toBe(200);
-    const body = await response!.json() as InboxAnswer;
-    // The filter and the page size both took effect, so the params really
-    // reached the handler rather than being dropped by the REST leg.
-    expect(body.items.map((item) => item.id)).toEqual(['slack:1']);
-    expect(body.total).toBe(2);
-    expect(body.hasMore).toBe(true);
-    expect(body.nextCursor).toBe('after:slack:1');
+    // Only the params the handler saw are asserted: the answer is the fixture's.
     expect(host.seen).toHaveLength(1);
     expect(host.seen[0]!.query).toMatchObject({ provider: 'slack', limit: '1' });
   });

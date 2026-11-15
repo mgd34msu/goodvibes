@@ -91,8 +91,16 @@ export class MicArbiter {
         + 'detection; a second one is refused rather than opened.',
       );
     }
-    const stream = await this.#opener(request, handlers);
+    // Reserve before the await: a second call arriving while the opener is still
+    // pending must see the device as taken, not pass the same check.
     this.#openStreams += 1;
+    let stream: AudioCaptureStream;
+    try {
+      stream = await this.#opener(request, handlers);
+    } catch (error) {
+      this.#openStreams = Math.max(0, this.#openStreams - 1);
+      throw error;
+    }
     let released = false;
     const release = () => {
       if (released) return;

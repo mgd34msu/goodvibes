@@ -15,7 +15,7 @@ let previous: ReturnType<typeof installJudgmentPort>;
 const readingLifetimes: ScheduleReadingLifetime[] = [];
 beforeEach(() => { previous = installJudgmentPort(recordedPlanningGoalPort(new Map([
   [original, .99], ['request', .99], ['different source', .99], ['replacement', .99],
-  ['Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]', .99],
+  ['Use !@a.ts @https://example.test/ref [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]', .99],
 ])).port); });
 afterEach(() => { for (const lifetime of readingLifetimes.splice(0)) lifetime.dispose(); installJudgmentPort(previous); });
 function fixture() {
@@ -42,8 +42,11 @@ function fixture() {
   };
   return { ...native, registry, context, output, dispatched, submit, renders: () => renders };
 }
+// One macrotask turn runs every pending microtask first, so an in-memory async
+// chain advances until it blocks; no wall-clock time is involved.
+const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 async function settled(f: ReturnType<typeof fixture>) {
-  for (let count = 0; count < 100 && !f.renders(); count++) await Bun.sleep(1);
+  for (let count = 0; count < 1000 && !f.renders(); count++) await turn();
   expect(f.renders()).toBeGreaterThan(0);
 }
 for (const alias of ['project-plan', 'planning']) for (const fallback of [false, true]) {
@@ -59,7 +62,7 @@ for (const alias of ['project-plan', 'planning']) for (const fallback of [false,
     expect(f.captures[0]?.text).toBe(original);
   });
   test(`terminal ${alias} ${fallback} reports unsupported folded paste and source references without expansion`, async () => {
-    const f = fixture(); f.setOutcome('blocked'); const raw = 'Use !@a.ts @folder [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]';
+    const f = fixture(); f.setOutcome('blocked'); const raw = 'Use !@a.ts @https://example.test/ref [TEXT: p1, 9 lines] [IMAGE: img1, clip, 2KB]';
     f.submit(`/${alias} ${raw}`, fallback); await settled(f);
     expect(f.captures[0]?.text).toBe(raw); expect(f.captures[0]?.unsupportedSources.map(ref => ref.kind)).toEqual(['context', 'image', 'file', 'context']);
     expect(f.dispatched).toEqual([]); expect(f.calls).not.toContain('execution-start');
@@ -94,7 +97,7 @@ test('missing native dispatch fails before capture; empty request never starts',
   const g = fixture(); await g.registry.executeFromOwner('project-plan', [''], g.context, '/project-plan ');
   expect(g.captures).toEqual([]); expect(g.output.join('\n')).toContain('Usage:');
 });
-async function flush() { for (let count = 0; count < 80; count++) await Promise.resolve(); }
+async function flush() { await turn(); }
 test('pending terminal resubmission does not allocate or capture a second source', async () => {
   const f = fixture(); const admit = f.client.admit; let release!: () => void;
   f.client.admit = async (...args) => { await new Promise<void>(resolve => { release = resolve; }); return admit(...args); };

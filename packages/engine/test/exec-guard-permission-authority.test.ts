@@ -32,7 +32,7 @@ describe('exec guard: parsing is independent of Jev', () => {
     expect((await guardExecCommand('dd if=/dev/zero of=/dev/sda')).allowed).toBe(true);
   });
 
-  test('the guard reuses the gate\'s reading of the same command instead of asking again', async () => {
+  test('the gate reads the command as catastrophic while the guard still allows it: the gate owns the block', async () => {
     const reading = await readToolCall({ toolName: 'exec', args: { command: 'rm -rf /' }, askObfuscated: true });
     expect(reading.boundary.catastrophic).toBe('yes');
     expect((await guardExecCommand('rm -rf /')).allowed).toBe(true);

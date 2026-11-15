@@ -1,6 +1,7 @@
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 import { summarizeError } from './error-display.js';
+import { envFlag } from './env-flag.js';
 import { logger } from './logger.js';
 
 /**
@@ -38,7 +39,7 @@ export interface NotifyOptions {
  *
  * Suppressed when either:
  *   - `NODE_ENV === 'test'` (set automatically by `bun test`), or
- *   - `GOODVIBES_SUPPRESS_NOTIFY` is set to a truthy value (explicit
+ *   - `GOODVIBES_SUPPRESS_NOTIFY` is set to `1` or `true` (explicit
  *     override for harnesses that don't run under NODE_ENV=test).
  *
  * `options.force: true` bypasses suppression entirely, the one sanctioned
@@ -47,9 +48,7 @@ export interface NotifyOptions {
 export function isNotifySuppressed(force?: boolean): boolean {
   if (force) return false;
   if (process.env.NODE_ENV === 'test') return true;
-  const override = process.env.GOODVIBES_SUPPRESS_NOTIFY;
-  if (override && override !== '0' && override.toLowerCase() !== 'false') return true;
-  return false;
+  return envFlag(process.env.GOODVIBES_SUPPRESS_NOTIFY);
 }
 
 function trimNotificationOutput(value: string): string | undefined {

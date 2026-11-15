@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import type {
   SandboxBackendAvailability,
@@ -80,19 +80,34 @@ export function executeSandboxCommand(
     readonly timeoutMs?: number | undefined;
     readonly input?: string | undefined;
   } = {},
-): SandboxCommandResult {
+): Promise<SandboxCommandResult> {
   const baseEnv = options.inheritHostEnv === false ? {} : process.env;
-  const result = spawnSync(command, [...args], {
-    cwd: options.cwd ?? launchPlan.workspaceRoot,
-    env: { ...baseEnv, ...options.env },
-    encoding: 'utf-8',
-    timeout: options.timeoutMs ?? 5000,
-    input: options.input,
-    windowsHide: true,
-  });
-  return Object.freeze({
-    status: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+  // Asynchronous so a slow command does not freeze the caller's event loop (the terminal UI).
+  return new Promise((resolveResult) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (status: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult(Object.freeze({ status, stdout, stderr }));
+    };
+    const child = spawn(command, [...args], {
+      cwd: options.cwd ?? launchPlan.workspaceRoot,
+      env: { ...baseEnv, ...options.env },
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    // A timed-out command is killed and reported with no exit status, as the synchronous form did.
+    const timer = setTimeout(() => { child.kill('SIGKILL'); finish(null); }, options.timeoutMs ?? 5000);
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.stdin.on('error', () => { /* the command exited before reading its input */ });
+    child.on('error', (error) => { stderr = stderr || error.message; finish(null); });
+    child.on('close', (code) => finish(code));
+    child.stdin.end(options.input);
   });
 }

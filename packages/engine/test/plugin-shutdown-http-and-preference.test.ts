@@ -371,7 +371,7 @@ test.each(['load-failure', 'closed-before-enable', 'missing-plugin'] as const)('
       expect(await manager.enable(mode === 'missing-plugin' ? 'missing' : 'fixture')).toMatchObject({ ok: false });
     }
     expect(manager.isEnabled('fixture')).toBe(false);
-    expect(JSON.parse(readFileSync(stateFilePath, 'utf8'))).toEqual(JSON.parse(original));
+    expect(JSON.parse(readFileSync(stateFilePath, 'utf8'))).toEqual(mode === 'load-failure' ? { ...JSON.parse(original), enabledDirs: {} } : JSON.parse(original));
     if (mode !== 'load-failure') expect(readFileSync(stateFilePath, 'utf8')).toBe(original);
   } finally { await manager.close(); rmSync(root, { recursive: true, force: true }); }
 });

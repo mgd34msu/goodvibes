@@ -19,6 +19,7 @@ import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/too
 
 import type { KeybindingsManager } from './keybindings.ts';
 import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -51,6 +52,8 @@ export interface CommandRuntimeState extends TerminalCommandRuntimeState {}
  */
 export interface CommandUiActions extends TerminalCommandUiActions<import('./model-picker.ts').ModelPickerTarget> {
   nativeConversationIntake?: NativeConversationIntakeActions;
+  /** Set by the interactive shell: lets go of the daemon-hosted session when the local conversation is cleared or replaced. */
+  abandonHostedSession?: () => void;
   dispatchNativeIntakeTurn?: (state: NativeConversationIntakeState) => Promise<void>;
   submitInput?: (
     text: string,
@@ -139,6 +142,8 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly writeLastSessionPointer?: (sessionId: string) => void;
   /** Reload a resumed session's persisted rewind anchors. Bound at bootstrap to the runtime's SessionSurface; returns how many were restored. */
   readonly restoreTurnAnchors?: (sessionId: string) => number;
+  /** Tell the runtime bus (and so the SessionResumed hook) that this process finished resuming a session. Called once the resume happened, never for a refused one. */
+  readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   /**
    * The runtime's declare-once session-storage handle: the directory the
    * session files and their sidecars (rewind anchors, work-tree view) live in.
@@ -225,6 +230,12 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
     readonly providerApi?: ProviderApi;
     readonly agentKnowledgeApi?: KnowledgeApi;
     readonly promptContextReceipts?: AgentPromptContextReceiptStore;
+    /**
+     * The cross-surface memory spine: local when offline, over the wire when a
+     * daemon is adopted. `/memory` and the prompt inspector read through it so
+     * they never show a divergent local copy.
+     */
+    readonly memorySpine?: MemorySpineClient;
     readonly hookApi?: HookApi;
     readonly mcpApi?: McpApi;
     readonly opsApi?: OpsApi;

@@ -1,7 +1,6 @@
 /** Real runner records must survive the complete GET/LIST REST path and its closed inspection schemas. */
 import { expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { exportAndCompareFixture } from '../_helpers/webui-fixture-parity.ts';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts/generated/foundation-client-types';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -42,10 +41,9 @@ function nativePlan() {
 /** Optional consumer fixtures come from real HTTP JSON. The TEST prefix survives guarded test isolation. */
 function exportFixture(label: string, get: unknown, list: unknown): void {
   const directory = process.env['GOODVIBES_TEST_CONTRACT_INSPECTION_FIXTURE_DIR'];
-  if (!directory) return;
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, `${label}-get.json`), `${JSON.stringify(get, null, 2)}\n`);
-  writeFileSync(join(directory, `${label}-list.json`), `${JSON.stringify(list, null, 2)}\n`);
+  const fixtures = new URL('../../../../products/webui/e2e/support/fixtures/contract-inspection/', import.meta.url);
+  exportAndCompareFixture(directory, `${label}-get.json`, `${JSON.stringify(get, null, 2)}\n`, fixtures);
+  exportAndCompareFixture(directory, `${label}-list.json`, `${JSON.stringify(list, null, 2)}\n`, fixtures);
 }
 
 /** Wire reports can be partial even though the richer authoring model requires all claims. */
@@ -88,7 +86,9 @@ async function inspectOverHttp(h: Harness, id: string, label: string): Promise<C
   const expected: unknown = JSON.parse(JSON.stringify(h.runner.get(id)));
   // Compare the complete response before validation: no adapter may hide drift by dropping fields.
   expect(serialized).toEqual(expected);
-  expect(serializedList).toEqual({ contracts: [expected] });
+  // A list summary leaves out the captured file manifest that a get returns.
+  const { inputSnapshot: _manifest, ...summary } = expected as Record<string, unknown>;
+  expect(serializedList).toEqual({ contracts: [summary] });
   assertContractInspection(serialized);
   expect(firstJsonSchemaFailure(CONTRACTS_LIST_OUTPUT_SCHEMA, serializedList)).toBeUndefined();
   exportFixture(label, serialized, serializedList);
@@ -323,7 +323,7 @@ test('real shared transport failover progress survives native GET/LIST while a b
       return Response.json({ model: DEFAULT_MODEL, answers: result.answers, usage: { input_tokens: 1, output_tokens: 1 } });
     },
   });
-  installJudgmentPort(withDecisionLog(real, log));
+  const previousPort = installJudgmentPort(withDecisionLog(real, log));
   const id = (await startContract(h, { nativeSource: source, isolation: 'shared' })).contract.id;
   try {
     await waitFor(
@@ -366,5 +366,6 @@ test('real shared transport failover progress survives native GET/LIST while a b
   } finally {
     await clean(h, id);
     backup.resolve(Response.json({}, { status: 503 }));
+    installJudgmentPort(previousPort);
   }
 }, 25_000);

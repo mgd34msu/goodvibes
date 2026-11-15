@@ -42,6 +42,24 @@ export const systemResolver: HostResolver = async (hostname) => lookup(hostname,
 const bareHost = (url: URL): string => url.hostname.replace(/^\[|\]$/g, '');
 
 /**
+ * Throws `Request blocked: ...` for any URL that is not http: or https:. The
+ * request is sent by a runtime that also opens file: URLs, ignoring the host,
+ * so the scheme is checked on the parsed URL for the first request and for
+ * every redirect target.
+ */
+export function assertHttpScheme(url: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    throw new Error('Request blocked: not a valid URL. Nothing was sent; pass an absolute http(s) URL.');
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error(`Request blocked: the ${protocol} scheme is not fetchable. Nothing was sent; fetch only reads http(s) URLs (use the read tool for local files).`);
+  }
+}
+
+/**
  * Resolves the URL's host and checks every answer. Returns the checked
  * addresses the request may use, in resolver order; throws
  * `Request blocked: ...` when any answer is in a refused range or the host
@@ -57,6 +75,7 @@ export async function resolveCheckedAddresses(
     readonly diagnosticMode?: 'default' | 'opaque-url';
   },
 ): Promise<readonly ResolvedAddress[]> {
+  assertHttpScheme(url);
   const parsed = new URL(url);
   const host = bareHost(parsed);
   const writtenTrust = classifyHostTrustTier(host, options.trustTierConfig);
@@ -95,7 +114,9 @@ export async function resolveCheckedAddresses(
 
 /**
  * Sends the request to a checked address, trying the next one when a
- * connection cannot be made (an HTTP response of any status is final). The URL carries the address; the
+ * connection cannot be made (an HTTP response of any status is final). A
+ * request that is not GET, HEAD or OPTIONS is tried on the next address only
+ * after a refused or unreachable connection, never after a reset. The URL carries the address; the
  * Host header carries the written host and port; for https the TLS server name
  * and the certificate check use the written host, so the certificate must be
  * valid for the name the caller asked for.
@@ -122,10 +143,23 @@ export async function pinnedFetch(
       return await runDeliveryPublication(lifetime, () => fetchAddress(url, init, host, address, diagnosticMode));
     } catch (error) {
       if (init.signal?.aborted) throw error;
+      // A request with side effects is repeated against another address only
+      // when the failed attempt provably never reached a server: after the
+      // body is sent a reset says nothing about whether it was processed.
+      if (!isRepeatable(init.method) && !isConnectRefusal(error)) throw error;
       lastError = error;
     }
   }
   throw lastError;
+}
+
+const REPEATABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const isRepeatable = (method: string | undefined): boolean => REPEATABLE_METHODS.has((method ?? 'GET').toUpperCase());
+
+const CONNECT_REFUSAL_CODES = new Set(['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'ConnectionRefused', 'FailedToOpenSocket']);
+function isConnectRefusal(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && CONNECT_REFUSAL_CODES.has(code);
 }
 
 async function fetchAddress(url: string, init: RequestInit, host: string, address: ResolvedAddress, diagnosticMode: 'default' | 'opaque-url'): Promise<Response> {

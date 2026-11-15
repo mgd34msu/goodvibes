@@ -6,8 +6,9 @@
  * carry-over, config resolution, and the worktrees.setup.run rerun verb over a
  * real GatewayMethodCatalog.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -20,8 +21,23 @@ import {
   registerWorktreeSetupGatewayMethods,
 } from '../platform/src/platform/control-plane/routes/worktree-setup.ts';
 import type { WorktreeSetupResult } from '../platform/src/platform/runtime/worktree/setup.ts';
+import type { WorktreeStatusRecord } from '../platform/src/platform/runtime/worktree/registry.ts';
 
 const ctx = { context: { admin: true } } as const;
+
+function linkedRow(path: string): WorktreeStatusRecord {
+  return { path, branch: 'wt', head: 'abc', kind: 'agent', state: 'active', updatedAt: 0 };
+}
+const tempDirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const okRunner: WorktreeCommandRunner = async () => ({ exitCode: 0, output: 'ok' });
 
 describe('runWorktreeSetup', () => {
@@ -54,8 +70,8 @@ describe('runWorktreeSetup', () => {
   });
 
   test('carries over untracked files matching the globs and ignores non-matching ones', async () => {
-    const src = mkdtempSync(join(tmpdir(), 'wt-src-'));
-    const wt = mkdtempSync(join(tmpdir(), 'wt-dst-'));
+    const src = tempDir('wt-src-');
+    const wt = tempDir('wt-dst-');
     writeFileSync(join(src, '.env'), 'SECRET=1\n');
     mkdirSync(join(src, 'config'), { recursive: true });
     writeFileSync(join(src, 'config', 'local.json'), '{"x":1}\n');
@@ -73,6 +89,35 @@ describe('runWorktreeSetup', () => {
     expect(existsSync(join(wt, 'notes.txt'))).toBe(false);
     const carryStep = result.steps.find((s) => s.kind === 'carry-over');
     expect(carryStep?.output.split('\n').sort()).toEqual(['.env', 'config/local.json']);
+  });
+});
+
+describe('runWorktreeSetup default untracked-file lister', () => {
+  function git(cwd: string, ...args: string[]): void {
+    const run = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (run.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${run.stderr}`);
+  }
+
+  test('carries over an ignored .env from a real git repository', async () => {
+    const src = tempDir('wt-src-');
+    const wt = tempDir('wt-dst-');
+    git(src, 'init', '-q');
+    writeFileSync(join(src, '.gitignore'), '.env\n');
+    writeFileSync(join(src, '.env'), 'SECRET=1\n');
+    const result = await runWorktreeSetup(wt, src, { commands: [], carryOverGlobs: ['.env'] });
+    expect(result.state).toBe('succeeded');
+    expect(readFileSync(join(wt, '.env'), 'utf-8')).toBe('SECRET=1\n');
+  });
+
+  test('fails, instead of succeeding with nothing copied, when the source is not a git repository', async () => {
+    const src = tempDir('wt-src-');
+    const wt = tempDir('wt-dst-');
+    writeFileSync(join(src, '.env'), 'SECRET=1\n');
+    const result = await runWorktreeSetup(wt, src, { commands: [], carryOverGlobs: ['.env'] });
+    expect(result.state).toBe('failed');
+    expect(result.error).toContain('carry-over of untracked files failed');
+    expect(result.steps.find((s) => s.kind === 'carry-over')?.ok).toBe(false);
+    expect(existsSync(join(wt, '.env'))).toBe(false);
   });
 });
 
@@ -96,6 +141,7 @@ describe('worktrees.setup.run gateway verb', () => {
       registry: {
         recordSetup: (path, setup) => { recorded.push({ path, setup }); },
         discard: async () => { throw new Error('not expected'); },
+        list: async () => [linkedRow('/wt/agent-1')],
       },
       sourceRoot: '/src',
       resolveConfig: () => ({ commands: [], carryOverGlobs: [] }),
@@ -112,10 +158,53 @@ describe('worktrees.setup.run gateway verb', () => {
   test('a missing path is an honest 400', async () => {
     const catalog = new GatewayMethodCatalog();
     registerWorktreeSetupGatewayMethods(catalog, {
-      registry: { recordSetup: () => {}, discard: async () => { throw new Error('not expected'); } },
+      registry: { recordSetup: () => {}, discard: async () => { throw new Error('not expected'); }, list: async () => [] },
       sourceRoot: '/src',
       resolveConfig: () => ({ commands: [], carryOverGlobs: [] }),
     });
     await expect(catalog.invoke('worktrees.setup.run', { ...ctx, body: {} })).rejects.toThrow(/path/);
+  });
+});
+
+describe('worktrees.setup.run and worktrees.discard only act on a linked worktree', () => {
+  function register(listed: readonly string[], calls: { setupRuns: string[]; discards: string[]; recorded: string[] }, sourceRoot: string): GatewayMethodCatalog {
+    const catalog = new GatewayMethodCatalog();
+    registerWorktreeSetupGatewayMethods(catalog, {
+      registry: {
+        recordSetup: (path) => { calls.recorded.push(path); },
+        discard: async (path) => { calls.discards.push(path); return { path, ok: true, discardedAt: 0, detail: 'ok' }; },
+        list: async () => listed.map(linkedRow),
+      },
+      sourceRoot,
+      resolveConfig: () => ({ commands: ['marker'], carryOverGlobs: [] }),
+    });
+    return catalog;
+  }
+
+  test('discard refuses the main checkout without touching git', async () => {
+    const main = tempDir('wt-main-');
+    const calls = { setupRuns: [], discards: [], recorded: [] } as { setupRuns: string[]; discards: string[]; recorded: string[] };
+    const catalog = register([main, join(main, '.goodvibes', '.worktrees', 'agent-1')], calls, main);
+    await expect(catalog.invoke('worktrees.discard', { ...ctx, body: { path: main } })).rejects.toMatchObject({ status: 404, field: 'path' });
+    expect(calls.discards).toEqual([]);
+  });
+
+  test('setup refuses a directory that is not a worktree and records nothing', async () => {
+    const main = tempDir('wt-main-');
+    const other = tempDir('wt-other-');
+    const calls = { setupRuns: [], discards: [], recorded: [] } as { setupRuns: string[]; discards: string[]; recorded: string[] };
+    const catalog = register([main], calls, main);
+    await expect(catalog.invoke('worktrees.setup.run', { ...ctx, body: { path: other } })).rejects.toMatchObject({ status: 404, field: 'path' });
+    expect(calls.recorded).toEqual([]);
+  });
+
+  test('a relative path resolves against the source root and then discards that worktree', async () => {
+    const main = tempDir('wt-main-');
+    const linked = join(main, '.goodvibes', '.worktrees', 'agent-1');
+    mkdirSync(linked, { recursive: true });
+    const calls = { setupRuns: [], discards: [], recorded: [] } as { setupRuns: string[]; discards: string[]; recorded: string[] };
+    const catalog = register([main, linked], calls, main);
+    await catalog.invoke('worktrees.discard', { ...ctx, body: { path: '.goodvibes/.worktrees/agent-1' } });
+    expect(calls.discards.map((path) => path.endsWith('agent-1'))).toEqual([true]);
   });
 });

@@ -18,7 +18,7 @@
 
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from './setup-plan.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
-import { adoptGmailMcpCredentials, type GoogleFilePort } from './credential-adoption.js';
+import { adoptGmailMcpCredentials, gmailMcpLayout, type GoogleFilePort } from './credential-adoption.js';
 
 /**
  * Credentials that already exist on this machine.
@@ -69,6 +69,19 @@ export async function adoptExistingGoogleCredentials(deps: {
 }): Promise<GoogleAdoptionOutcome> {
   const credentials = adoptGmailMcpCredentials(deps.files, deps.homeDirectory);
   if (credentials === null) {
+    // Present but not usable is a different fact from absent: an unreadable
+    // file (permissions) or an incomplete one reads as nothing at all.
+    const clientFile = gmailMcpLayout(deps.homeDirectory).clientFile;
+    if (deps.files.exists(clientFile)) {
+      return {
+        adopted: false,
+        detail:
+          `Found ${clientFile}, but it could not be used: the file could not be read, or it, or the token file beside it, `
+          + 'does not hold a client id, a client secret and a refresh token. Check the file permissions and contents.',
+        scopes: [],
+        location: null,
+      };
+    }
     return {
       adopted: false,
       detail: `No adoptable Google credentials were found under ${deps.homeDirectory}/.gmail-mcp.`,

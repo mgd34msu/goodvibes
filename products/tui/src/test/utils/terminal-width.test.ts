@@ -93,9 +93,7 @@ describe('bracket-text-without-ESC over-strip guard', () => {
   test('truncateDisplay is unaffected by ESC-less bracket text', () => {
     const truncated = truncateDisplay('[31mhi', 4);
     // Must truncate to at most 4 display chars; all chars are printable
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(4);
-    // The truncated result must be shorter than the original 6-char string
-    expect(getDisplayWidth(truncated)).toBeLessThan(6);
+    expect(truncated).toBe('[31…');
   });
 });
 
@@ -103,7 +101,9 @@ describe('terminal width helpers', () => {
   test('truncateDisplay respects wide characters', () => {
     const text = 'abc界\u{1F642}xyz';
     const truncated = truncateDisplay(text, 6);
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(6);
+    // 'abc' (3) + 界 (2) + ellipsis (1); the emoji would overshoot.
+    expect(truncated).toBe('abc界…');
+    expect(getDisplayWidth(truncated)).toBe(6);
   });
 
   test('padDisplayEnd pads to display width, not string length', () => {
@@ -115,6 +115,7 @@ describe('terminal width helpers', () => {
   test('fitDisplay truncates and pads to exact display width', () => {
     const text = 'very-wide\u{1F642}value';
     const fitted = fitDisplay(text, 8);
+    expect(fitted).toBe('very-wi…');
     expect(getDisplayWidth(fitted)).toBe(8);
   });
 });
@@ -124,12 +125,10 @@ describe('truncateDisplay: ANSI-safe slice boundaries', () => {
     // Bold red 'hello world' styled, then reset, truncate to 5
     const styled = '\x1b[1;31m' + 'hello world' + '\x1b[0m';
     const truncated = truncateDisplay(styled, 5);
-    // Display width must be <= 5
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(5);
-    // The result must not contain a partial escape sequence:
-    // If any ESC appears, it must be followed by a valid ANSI sequence final byte
-    const hasPartialEsc = /\x1b(?![\[\]]|[0-9;]*[A-Za-z]|\])/u.test(truncated);
-    expect(hasPartialEsc).toBe(false);
+    // The opening sequence is kept whole, four letters and an ellipsis fit in 5,
+    // and the styling is closed because the original reset was cut away.
+    expect(truncated).toBe('\x1b[1;31mhell…\x1b[0m');
+    expect(getDisplayWidth(truncated)).toBe(5);
   });
 
   test('truncation at wide char boundary does not overshoot', () => {
@@ -137,9 +136,7 @@ describe('truncateDisplay: ANSI-safe slice boundaries', () => {
     const text = 'AB中文';
     const truncated = truncateDisplay(text, 3);
     // Ellipsis takes 1, so 'AB' + ellipsis = 3 display width fits
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(3);
-    // Must not include the wide char that would overshoot
-    expect(truncated).not.toContain('中');
+    expect(truncated).toBe('AB…');
   });
 
   test('truncation stops exactly at wide-char boundary, never mid-char', () => {
@@ -147,19 +144,21 @@ describe('truncateDisplay: ANSI-safe slice boundaries', () => {
     const text = '一丁丂七'; // four CJK, 8 display width
     const truncated = truncateDisplay(text, 5);
     // With ellipsis (1 wide), we can fit at most 2 CJK (4) + ellipsis (1) = 5
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(5);
+    expect(truncated).toBe('一丁…');
+    expect(getDisplayWidth(truncated)).toBe(5);
   });
 
   test('truncateDisplay with no ellipsis (empty string) still stays within bounds', () => {
     const text = '界界界'; // 3 CJK = 6 display width
     const truncated = truncateDisplay(text, 4, '');
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(4);
+    expect(truncated).toBe('界界');
   });
 
   test('truncateDisplay on ANSI-styled wide chars stays within bounds', () => {
     const styled = '\x1b[32m中文\x1b[0m'; // green + 2 CJK + reset = 4 display
     const truncated = truncateDisplay(styled, 3);
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(3);
+    expect(truncated).toBe('\x1b[32m中…\x1b[0m');
+    expect(getDisplayWidth(truncated)).toBe(3);
   });
 });
 
@@ -218,21 +217,20 @@ describe('truncateDisplay: ZWJ sequence handling (code-point-safe, not grapheme-
     expect(getDisplayWidth(family)).toBe(8);
   });
 
-  test('truncateDisplay result does not end with a bare ZWJ when family is split', () => {
-    // When a ZWJ family is truncated mid-sequence the implementation may leave a
-    // trailing ZWJ. This test documents the known limitation: we assert width
-    // correctness only, not grapheme-cluster integrity.
+  test('truncateDisplay never leaves a bare ZWJ before the ellipsis when a family is split', () => {
     const family = '👨‍👩‍👧‍👦x';
     const truncated = truncateDisplay(family, 4);
-    // Width constraint must always be respected
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(4);
+    // Only the man fits beside the ellipsis; his trailing joiner is dropped.
+    expect(truncated).toBe('👨…');
+    expect(truncated.includes('\u200d')).toBe(false);
+    expect(getDisplayWidth(truncated)).toBe(3);
   });
 
   test('truncateDisplay of plain text followed by ZWJ family respects width', () => {
-    // 'AB' (2) + ZWJ family (8) + 'Z' (1) = 11; truncate to 4
+    // 'AB' (2) + ZWJ family (8) + 'Z' (1) = 11; truncate to 4: the man would need 2 + 2 + 1.
     const text = 'AB👨‍👩‍👧‍👦Z';
     const truncated = truncateDisplay(text, 4);
-    expect(getDisplayWidth(truncated)).toBeLessThanOrEqual(4);
+    expect(truncated).toBe('AB…');
   });
 });
 

@@ -10,10 +10,12 @@
  *   - no raw hex literal remains in the renderer's theme and syntax files
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { TONE_TOKENS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import {
+  activeThemeMode,
   activeTokens,
+  getActiveThemeName,
   listThemeChoices,
   resolveTheme,
   resolveUiTones,
@@ -22,9 +24,18 @@ import {
   type ThemeTokens,
 } from '../../renderer/theme.ts';
 
+const previousName = getActiveThemeName();
+const previousMode = activeThemeMode();
+
+// Every test starts from the default theme; what was active before the file is put back at the end.
 afterEach(() => {
   setActiveThemeName('goodvibes');
   setActiveThemeMode('dark');
+});
+
+afterAll(() => {
+  setActiveThemeName(previousName);
+  setActiveThemeMode(previousMode);
 });
 
 const TOKEN_KEYS: (keyof ThemeTokens)[] = [

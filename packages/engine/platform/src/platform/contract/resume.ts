@@ -22,6 +22,9 @@
  *   `queued` and resumes from its step when a slot opens. A contract waiting on
  *   its owner keeps the slot it had.
  *
+ * A contract another live process already runs is skipped; a process that died
+ * left its claim behind and the next one takes it over.
+ *
  * Every choice here is code over recorded statuses; nothing is judged. The
  * checks the resumed units get are ordinary unit checks (check.ts).
  */
@@ -65,6 +68,10 @@ export interface ResumeReport {
 const WORK_STATUSES: ReadonlySet<ContractStatus> = new Set(['running', 'fixing', 'judging']);
 /** Unit statuses whose work item was in its phase: after a restart its phase waits for the runner before spawning. */
 const IN_PHASE_UNITS: ReadonlySet<ContractUnit['status']> = new Set(['running', 'checking', 'held', 'nudged', 'fixing', 'awaiting-owner']);
+/** Unit statuses whose check already passed: after a restart their phase only settles, it never spawns. */
+const CHECKED_UNITS: ReadonlySet<ContractUnit['status']> = new Set(['held-merge', 'passed']);
+/** Unit statuses whose agent works in its item's phase: they cannot resume once that item ended without them. */
+const WORKING_UNITS: ReadonlySet<ContractUnit['status']> = new Set(['running', 'checking', 'held', 'nudged']);
 /** Unit statuses checked again with trigger `resume`. */
 const RECHECKED_UNITS: ReadonlySet<ContractUnit['status']> = new Set(['held', 'checking', 'nudged']);
 
@@ -132,6 +139,8 @@ export interface ContractResumeDeps {
   readonly store: ContractStore;
   /** Whether this runner already runs the contract. */
   readonly isLive: (contractId: string) => boolean;
+  /** Takes this process's claim on the contract; false when another live process holds it. */
+  readonly claim?: ((contractId: string) => boolean) | undefined;
   /** Makes a loaded contract a run of this runner (not yet holding a slot). */
   readonly adopt: (contract: Contract) => ContractRun;
   /** Whether an active-contract slot is free. */
@@ -141,6 +150,8 @@ export interface ContractResumeDeps {
   /** Puts the run at the back of the queue. */
   readonly enqueue: (run: ContractRun) => void;
   readonly fail: (run: ContractRun, kind: ContractFailureKind, reason: string, membersSettled?: boolean) => void;
+  /** Fails one unit and, with it, the contract (a failed attempt of a best-of-N unit fails alone). */
+  readonly failUnit: (run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string) => void;
   readonly groups: GroupRunner;
   readonly checks: UnitCheckLoop;
   readonly steps: ContractStepsWithReplies;
@@ -217,11 +228,27 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
           continue;
         }
       }
+      // A contract another live process runs is its to continue; two runners over one contract would both drive it.
+      if (deps.claim !== undefined && !deps.claim(contractId)) {
+        deps.store.hold(contract);
+        skipped.push(contractId);
+        logger.info('contract runner: contract is run by another process, left to it', { contractId });
+        continue;
+      }
       if (pendingRepair) reopenFailedRepairPlanning(contract);
       const run = deps.adopt(contract);
       if (pendingRepair) run.decide('resumed', contract.id, 'Recovered a historical repair-planner input refusal with card-shaped observational output. Resume the same unstarted repair round with projected command observations; original request screening and fresh plan, unit and final checks remain required.');
       if (pendingRepair) deps.store.put(contract);
-      prepareResume(run);
+      try {
+        prepareResume(run);
+      } catch (error) {
+        // One contract whose saved state cannot be migrated must not stop the others from resuming.
+        const reason = `contract ${contract.id} could not resume: ${error instanceof Error ? error.message : String(error)}`;
+        run.decide('reaped', contract.id, reason);
+        deps.fail(run, 'zombie', reason, true);
+        reaped.push({ contractId, reason });
+        continue;
+      }
       const zombie = findZombieCause(contract);
       if (zombie !== null) {
         const reason = `contract ${contract.id} could not resume: ${zombie}`;
@@ -237,6 +264,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       ...pending.filter((run) => run.contract.status === 'awaiting-owner'),
       ...pending.filter((run) => run.contract.status !== 'awaiting-owner').sort((a, b) => a.contract.createdAt - b.contract.createdAt),
     ];
+    const continuations: Promise<void>[] = [];
     for (const run of ordered) {
       const step = resumeStepOf(run.contract);
       if (step !== 'await-owner' && !deps.hasSlot()) {
@@ -251,9 +279,14 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
       }
       deps.takeSlot(run);
       resumed.push({ contractId: run.id, step });
-      if (run.contract.nativeSource === undefined) await run.work.run(() => continueResumed(run));
-      else void run.work.run(() => continueResumed(run));
+      // Continuing can run a whole shaping, planning or work step (model calls). Start it without waiting, so the contracts
+      // after this one get their slot and their resume now; the report still waits for all of them below.
+      const continuing = run.work.run(() => continueResumed(run));
+      if (run.contract.nativeSource === undefined) continuations.push(continuing);
+      else void continuing;
     }
+    // Legacy continuations settle here as before (the host drains recovery through this call); each ends its own contract on failure.
+    await Promise.all(continuations);
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });
     return { resumed, queued, reaped, skipped, ...(heldForPolicy.length ? { heldForPolicy } : {}) };
   }
@@ -290,13 +323,16 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     contract.nativeWaiting = undefined;
     const state = nativeDecisionState(contract);
     if (contract.status !== 'awaiting-owner') return;
+    // A failure pause is not a historical approval wait: it stays open so the owner can still retry or cancel.
+    if (contract.escalations.some(item => item.resolvedAt === undefined && item.failurePause === true)) return;
     const old = contract.escalations.filter(item => item.resolvedAt === undefined);
     const plan = old.find(item => item.scope === 'plan');
     if (plan !== undefined) {
       state.plannerOutputs.plan ??= plan.question;
       state.spent.plan = Math.max(state.spent.plan ?? 0, contract.decisions.filter(item => item.action === 'planned').length);
     }
-    const next = old.some(item => item.scope === 'shape') ? 'shaping' : old.some(item => item.scope === 'plan') ? 'planning' : contract.statusBeforeOwner ?? 'running';
+    // awaiting-owner cannot return to shaping; the plan step shapes again when no shape was settled.
+    const next = old.some(item => item.scope === 'shape' || item.scope === 'plan') ? 'planning' : contract.statusBeforeOwner ?? 'running';
     run.moveContract(next); contract.statusBeforeOwner = undefined;
     for (const unit of contract.units) if (unit.status === 'awaiting-owner') run.moveUnit(unit, 'checking');
     for (const group of contract.groups) if (group.status === 'awaiting-owner') run.moveGroup(group, 'judging');
@@ -308,13 +344,14 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     return withConfiguredDecisionModelPolicy(() => continueOwnedResumed(run));
   }
   async function continueOwnedResumed(run: ContractRun): Promise<void> {
-    run.abort.signal.throwIfAborted();
-    requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary Classic tools');
     const { contract } = run;
     const step = resumeStepOf(contract);
     const from = resumeStatus(contract);
-    contract.resumeFrom = undefined;
     try {
+      // Inside the try: a refusal here must end the contract (and free its slot), not reject unseen.
+      run.abort.signal.throwIfAborted();
+      requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary Classic tools');
+      contract.resumeFrom = undefined;
       if (contract.inputSnapshot !== undefined) await assertContractInputView(contract.inputSnapshot, run.abort.signal);
       await awaitNativeResumeConditions(contract, run.env.native, run.abort.signal);
       switch (step) {
@@ -327,8 +364,11 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
           return;
         case 'plan':
           run.decide('resumed', contract.id, `resumed after a restart in ${from}: planning starts again from the beginning`);
-          if (contract.shape === undefined) await deps.activate(run);
-          else await deps.plan(run);
+          if (contract.shape === undefined) {
+            // Shaping can only start from a queued contract, and a record saved without its shape was left in planning.
+            if (contract.status === 'planning') run.moveContract('queued');
+            await deps.activate(run);
+          } else await deps.plan(run);
           return;
         case 'commit':
           run.decide('resumed', contract.id, 'resumed after a restart while committing: the commit runs again');
@@ -391,20 +431,34 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         run.sharedTreeReleases.set(group.id, release);
       }
     }
-    // Before the engine can claim anything: every unit whose item was in its phase waits for the runner.
+    // Before the engine can claim anything: every unit whose item was in its phase waits for the runner,
+    // and a unit whose check passed before the restart settles its phase without a fresh agent.
     for (const unit of run.allUnits()) {
-      if (!IN_PHASE_UNITS.has(unit.status) || unit.attemptUnits !== undefined) continue;
-      const runtime = run.runtime(unit);
-      runtime.preSpawn = 'wait';
-      runtime.agentLost = true;
+      if (unit.attemptUnits !== undefined) continue;
+      if (IN_PHASE_UNITS.has(unit.status)) {
+        const runtime = run.runtime(unit);
+        runtime.preSpawn = 'wait';
+        runtime.agentLost = true;
+      } else if (CHECKED_UNITS.has(unit.status)) {
+        run.runtime(unit).preSpawn = { kind: 'settled', outcome: 'completed' };
+      }
     }
     deps.groups.resumeEngine(run);
     for (const unit of run.allUnits()) {
-      if (isTerminalUnitStatus(unit.status)) continue;
       const runtime = run.runtime(unit);
       const item = engineItem(run, unit.id);
       // An item that already left its phase (a unit's work merged for a planned fix) runs no phase to wait on.
-      if (runtime.preSpawn === 'wait' && (item === undefined || item.state === 'passed' || item.state === 'failed' || item.state === 'held-merge')) runtime.preSpawn = null;
+      const leftPhase = item === undefined || item.state === 'passed' || item.state === 'failed' || item.state === 'held-merge';
+      if (leftPhase && runtime.preSpawn !== null && runtime.preSpawn !== 'wait' && CHECKED_UNITS.has(unit.status)) runtime.preSpawn = null;
+      if (isTerminalUnitStatus(unit.status)) continue;
+      if (leftPhase && WORKING_UNITS.has(unit.status) && unit.attemptUnits === undefined && (item === undefined || item.state === 'failed')) {
+        // The two checkpoints disagree after a crash: the unit's work item ended without it, so nothing would ever run or settle it.
+        runtime.preSpawn = null;
+        deps.failUnit(run, unit, 'other', `unit ${unit.id} could not resume: its work item ${item === undefined ? 'is missing from the workstream snapshot' : `failed${item.failureReason === undefined ? '' : ` (${item.failureReason})`}`}`);
+        if (run.terminal) return;
+        continue;
+      }
+      if (runtime.preSpawn === 'wait' && leftPhase) runtime.preSpawn = null;
       runtime.cwd = item?.worktreePath ?? contract.worktreePath ?? contract.projectRoot;
       selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
       if (unit.attemptUnits !== undefined) {

@@ -36,6 +36,7 @@ import {
   type GoogleFetchPort,
   type GoogleLoopbackListenerFactory,
 } from './oauth-loopback.js';
+import { safeConfigString } from './config-access.js';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, OAUTH_SCOPES } from './setup-plan.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
@@ -59,6 +60,12 @@ export interface GoogleClientRegistration {
   readonly ok: true;
   /** The last characters of the client id. Never the secret, in any form. */
   readonly clientIdTail: string;
+  /**
+   * True when a different client was registered over a connected one: the old
+   * refresh token belonged to the old client and cannot work with the new one,
+   * so it was cleared and a new consent is needed.
+   */
+  readonly consentRequired?: true;
 }
 
 export interface GoogleClientRegistrationFailed {
@@ -99,10 +106,25 @@ export async function storeClientCredentials(
   deps: { readonly config: GoogleConfigPort; readonly secrets: GoogleSecretPort },
   credentials: GoogleClientCredentials,
 ): Promise<GoogleClientRegistration> {
+  const previousClientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
+  // The secret first: if the store refuses it, the configured client is
+  // untouched, instead of an id whose secret belongs to another client.
+  await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
   deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientId, credentials.clientId);
   deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, GOOGLE_CONFIG_KEYS.oauthClientSecretRef);
-  await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
-  return { ok: true, clientIdTail: clientIdTail(credentials.clientId) };
+  // A refresh token is tied to the client that requested it. Left in place
+  // beside a different client it would be paired with it, fail with
+  // `invalid_grant` on first use, and the status would still say connected.
+  let consentRequired = false;
+  if (previousClientId !== null && previousClientId !== credentials.clientId) {
+    const staleToken = await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+    if (typeof staleToken === 'string' && staleToken.trim().length > 0) {
+      if (typeof deps.secrets.delete === 'function') await deps.secrets.delete(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+      else await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, '');
+      consentRequired = true;
+    }
+  }
+  return { ok: true, clientIdTail: clientIdTail(credentials.clientId), ...(consentRequired ? { consentRequired: true as const } : {}) };
 }
 
 /** How the consent ended. Safe to display; never carries a token. */

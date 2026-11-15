@@ -44,8 +44,21 @@ export interface PolicyPanelSnapshot {
   lastSimulationSummary: PolicySimulationSummary | null;
   /** Most recent proactive policy preflight review. */
   lastPreflightReview: PolicyPreflightReview | null;
+  /** Why the configured policy bundle failed to load (so it is not enforced), or null when it loaded or none is configured. */
+  configuredBundleFailure?: string | null;
   /** ISO 8601 timestamp of when this snapshot was captured. */
   capturedAt: string;
+}
+
+/**
+ * A value, or a function returning the current value. A getter is read at
+ * every snapshot, so the panel shows the audit, lint and simulation data as
+ * they are now rather than as they were when the panel was built.
+ */
+export type PolicyPanelSource<T> = T | (() => T);
+
+function readSource<T>(source: PolicyPanelSource<T>): T {
+  return typeof source === 'function' ? (source as () => T)() : (source as T);
 }
 
 /**
@@ -72,19 +85,19 @@ export class PolicyPanel {
   private readonly _registry: PolicyRegistry;
   private readonly _divergencePanel: DivergencePanel | null;
   private readonly _config: ComponentConfig;
-  private readonly _recentPermissionAudit: readonly PermissionAuditEntry[];
-  private readonly _lintFindings: readonly PolicyLintFinding[];
-  private readonly _lastSimulationSummary: PolicySimulationSummary | null;
-  private readonly _lastPreflightReview: PolicyPreflightReview | null;
+  private readonly _recentPermissionAudit: PolicyPanelSource<readonly PermissionAuditEntry[]>;
+  private readonly _lintFindings: PolicyPanelSource<readonly PolicyLintFinding[]>;
+  private readonly _lastSimulationSummary: PolicyPanelSource<PolicySimulationSummary | null>;
+  private readonly _lastPreflightReview: PolicyPanelSource<PolicyPreflightReview | null>;
   private readonly _subscribers = new Set<() => void>();
 
   constructor(
     registry: PolicyRegistry,
     divergencePanel: DivergencePanel | null = null,
-    recentPermissionAudit: readonly PermissionAuditEntry[] = [],
-    lintFindings: readonly PolicyLintFinding[] = [],
-    lastSimulationSummary: PolicySimulationSummary | null = null,
-    lastPreflightReview: PolicyPreflightReview | null = null,
+    recentPermissionAudit: PolicyPanelSource<readonly PermissionAuditEntry[]> = [],
+    lintFindings: PolicyPanelSource<readonly PolicyLintFinding[]> = [],
+    lastSimulationSummary: PolicyPanelSource<PolicySimulationSummary | null> = null,
+    lastPreflightReview: PolicyPanelSource<PolicyPreflightReview | null> = null,
     config: ComponentConfig = DEFAULT_COMPONENT_CONFIG,
   ) {
     this._registry = registry;
@@ -142,10 +155,10 @@ export class PolicyPanel {
       history,
       diff,
       divergence,
-      recentPermissionAudit: this._recentPermissionAudit.slice(0, this._config.bufferLimit),
-      lintFindings: this._lintFindings.slice(0, this._config.bufferLimit),
-      lastSimulationSummary: this._lastSimulationSummary,
-      lastPreflightReview: this._lastPreflightReview,
+      recentPermissionAudit: readSource(this._recentPermissionAudit).slice(0, this._config.bufferLimit),
+      lintFindings: readSource(this._lintFindings).slice(0, this._config.bufferLimit),
+      lastSimulationSummary: readSource(this._lastSimulationSummary),
+      lastPreflightReview: readSource(this._lastPreflightReview),
       capturedAt: new Date().toISOString(),
     };
   }

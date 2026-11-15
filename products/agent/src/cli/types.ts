@@ -68,6 +68,11 @@ export interface GoodVibesCliFlags {
   readonly fork: boolean;
   readonly rawOutput: boolean;
   readonly acceptRawOutputRisk: boolean;
+  /** `run` limits: declared so help and completions list them; `extractHeadlessRunFlags` consumes them before this parser runs. */
+  readonly timeout?: string | undefined;
+  readonly maxTurns?: string | undefined;
+  readonly omitAccumulated?: boolean | undefined;
+  readonly answerPermissions?: boolean | undefined;
 }
 
 export interface GoodVibesCliParseResult {

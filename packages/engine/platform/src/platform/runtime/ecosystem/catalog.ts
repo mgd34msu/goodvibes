@@ -1,9 +1,9 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { VERSION } from '../../version.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { decisionOrClassic, requireDecisionFeature } from '../decision-policy.js';
+import { decisionOrClassic, isClassicOperation } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { catalogSearch, catalogSearchEntryView } from './batteries/catalog-search.js';
@@ -100,6 +100,34 @@ export interface EcosystemInstallBackup {
   readonly targetPath: string;
   readonly receipt: EcosystemInstallReceipt;
   readonly reason: 'update' | 'uninstall' | 'replace';
+}
+
+const ENTRY_KINDS: readonly EcosystemEntryKind[] = ['plugin', 'skill', 'hook-pack', 'policy-pack'];
+
+/**
+ * An entry id becomes a directory name under the install root and part of
+ * receipt and backup file names, so it must be one plain path segment: it
+ * starts with a letter or digit (which rules out `.` and `..`) and holds only
+ * letters, digits, dot, underscore and hyphen.
+ */
+const ENTRY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isSafeEcosystemEntryId(id: unknown): id is string {
+  return typeof id === 'string' && id.length <= 128 && ENTRY_ID_PATTERN.test(id);
+}
+
+function unsafeIdMessage(kind: EcosystemEntryKind, id: string): string {
+  return `Curated ${kind} entry id ${JSON.stringify(id)} is not allowed: ids start with a letter or digit and contain only letters, digits, '.', '_' and '-'.`;
+}
+
+/** True when `path` is strictly inside `root`; the root itself is not. */
+function isInside(root: string, path: string): boolean {
+  const base = resolve(root);
+  return resolve(path).startsWith(base.endsWith(sep) ? base : `${base}${sep}`);
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function resolveCatalogRoot(
@@ -327,6 +355,8 @@ export function loadEcosystemCatalog(
   for (const path of catalogPaths(kind, options)) {
     for (const entry of readCatalogFile(path)) {
       if (entry.kind !== kind) continue;
+      // An unsafe id stays in the file but is never offered, so it cannot be installed.
+      if (!isSafeEcosystemEntryId(entry.id)) continue;
       if (seen.has(entry.id)) continue;
       seen.add(entry.id);
       entries.push(entry);
@@ -455,8 +485,11 @@ export async function reviewEcosystemCatalogEntry(
   options: EcosystemCatalogPathOptions,
   run: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemCatalogReview> {
-  requireDecisionFeature('semantic ecosystem trust-note review; native catalog source and compatibility inspection remain available');
   const source = reviewEcosystemCatalogSource(entry, options);
+  // Classic reads no trust note: the source and compatibility review stands on its own.
+  if (isClassicOperation()) {
+    return { ...source, riskLevel: source.sourceKind === 'remote' ? 'medium' : 'low' };
+  }
   const trustNotes = entry.trustNotes?.trim();
   let cautioned = false;
   if (source.sourceKind !== 'remote' && trustNotes) {
@@ -481,6 +514,7 @@ export function installEcosystemCatalogEntry(
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user'; skipBackup?: boolean },
 ): { ok: true; receipt: EcosystemInstallReceipt } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
+  if (!isSafeEcosystemEntryId(entryId)) return { ok: false, error: unsafeIdMessage(kind, String(entryId)) };
   const entry = loadEcosystemCatalog(kind, options).find((candidate) => candidate.id === entryId);
   if (!entry) return { ok: false, error: `Unknown curated ${kind} entry: ${entryId}` };
   const review = reviewEcosystemCatalogSource(entry, options);
@@ -491,38 +525,65 @@ export function installEcosystemCatalogEntry(
     return { ok: false, error: `Curated ${kind} source path does not exist: ${review.sourcePath}` };
   }
 
-  const targetPath = join(installedRoot(kind, options, scope), entry.id);
-  const previousReceipt = loadReceipt(receiptPath(kind, entry.id, options, scope));
-  if (previousReceipt && !options.skipBackup) {
-    createBackupFromReceipt(previousReceipt, 'replace', options);
-  }
-  mkdirSync(installedRoot(kind, options, scope), { recursive: true });
-  rmSync(targetPath, { recursive: true, force: true });
-  cpSync(review.sourcePath, targetPath, { recursive: true });
+  const root = installedRoot(kind, options, scope);
+  const targetPath = join(root, entry.id);
+  if (!isInside(root, targetPath)) return { ok: false, error: unsafeIdMessage(kind, entryId) };
+  const stagingPath = join(root, `.${entry.id}.staging-${process.pid}`);
+  const displacedPath = join(root, `.${entry.id}.replaced-${process.pid}`);
+  let displaced = false;
+  try {
+    const previousReceipt = loadReceipt(receiptPath(kind, entry.id, options, scope));
+    if (previousReceipt && !options.skipBackup) {
+      createBackupFromReceipt(previousReceipt, 'replace', options);
+    }
+    mkdirSync(root, { recursive: true });
+    // Copy first and swap after: a failed copy leaves the installed copy untouched.
+    rmSync(stagingPath, { recursive: true, force: true });
+    cpSync(review.sourcePath, stagingPath, { recursive: true });
+    rmSync(displacedPath, { recursive: true, force: true });
+    if (existsSync(targetPath)) {
+      renameSync(targetPath, displacedPath);
+      displaced = true;
+    }
+    renameSync(stagingPath, targetPath);
 
-  const receipt: EcosystemInstallReceipt = {
-    version: 1,
-    id: `${kind}:${entry.id}`,
-    kind,
-    installedAt: Date.now(),
-    scope,
-    entry,
-    sourcePath: review.sourcePath,
-    targetPath,
-    provenanceSummary: entry.provenance ?? entry.source,
-    runtimeFit: {
-      appVersion: VERSION,
-      status: review.runtimeFit.status,
-      reasons: review.runtimeFit.reasons,
-    },
-    compatibility: {
-      appVersion: VERSION,
-      status: review.runtimeFit.status,
-      reasons: review.runtimeFit.reasons,
-    },
-  };
-  writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt);
-  return { ok: true, receipt };
+    const receipt: EcosystemInstallReceipt = {
+      version: 1,
+      id: `${kind}:${entry.id}`,
+      kind,
+      installedAt: Date.now(),
+      scope,
+      entry,
+      sourcePath: review.sourcePath,
+      targetPath,
+      provenanceSummary: entry.provenance ?? entry.source,
+      runtimeFit: {
+        appVersion: VERSION,
+        status: review.runtimeFit.status,
+        reasons: review.runtimeFit.reasons,
+      },
+      compatibility: {
+        appVersion: VERSION,
+        status: review.runtimeFit.status,
+        reasons: review.runtimeFit.reasons,
+      },
+    };
+    writeJsonFileAtomic(receiptPath(kind, entry.id, options, scope), receipt);
+    if (displaced) rmSync(displacedPath, { recursive: true, force: true });
+    return { ok: true, receipt };
+  } catch (error) {
+    rmSync(stagingPath, { recursive: true, force: true });
+    if (displaced) {
+      try {
+        rmSync(targetPath, { recursive: true, force: true });
+        renameSync(displacedPath, targetPath);
+      } catch {
+        // The displaced copy stays on disk beside the target; the message names it.
+        return { ok: false, error: `Installing ${kind} ${entryId} failed (${errorText(error)}) and the previous copy could not be put back; it is at ${displacedPath}.` };
+      }
+    }
+    return { ok: false, error: `Installing ${kind} ${entryId} failed: ${errorText(error)}. The previous install, if any, was left in place.` };
+  }
 }
 
 export function inspectInstalledEcosystemEntry(
@@ -544,11 +605,20 @@ export function uninstallEcosystemCatalogEntry(
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user' },
 ): { ok: true; removedPath: string } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
+  if (!isSafeEcosystemEntryId(entryId)) return { ok: false, error: unsafeIdMessage(kind, String(entryId)) };
   const receipt = loadReceipt(receiptPath(kind, entryId, options, scope));
   if (!receipt) return { ok: false, error: `No installed ${kind} receipt found for ${entryId} in ${scope} scope.` };
-  createBackupFromReceipt(receipt, 'uninstall', options);
-  rmSync(receipt.targetPath, { recursive: true, force: true });
-  rmSync(receiptPath(kind, entryId, options, scope), { force: true });
+  const root = installedRoot(kind, options, scope);
+  if (typeof receipt.targetPath !== 'string' || !isInside(root, receipt.targetPath)) {
+    return { ok: false, error: `The ${kind} receipt for ${entryId} points outside ${root}; nothing was removed. Delete the receipt by hand if it is stale.` };
+  }
+  try {
+    createBackupFromReceipt(receipt, 'uninstall', options);
+    rmSync(receipt.targetPath, { recursive: true, force: true });
+    rmSync(receiptPath(kind, entryId, options, scope), { force: true });
+  } catch (error) {
+    return { ok: false, error: `Uninstalling ${kind} ${entryId} failed: ${errorText(error)}` };
+  }
   return { ok: true, removedPath: receipt.targetPath };
 }
 
@@ -558,11 +628,16 @@ export function updateInstalledEcosystemEntry(
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user' },
 ): { ok: true; receipt: EcosystemInstallReceipt; previousReceipt: EcosystemInstallReceipt } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
+  if (!isSafeEcosystemEntryId(entryId)) return { ok: false, error: unsafeIdMessage(kind, String(entryId)) };
   const previousReceipt = loadReceipt(receiptPath(kind, entryId, options, scope));
   if (!previousReceipt) {
     return { ok: false, error: `No installed ${kind} receipt found for ${entryId} in ${scope} scope.` };
   }
-  createBackupFromReceipt(previousReceipt, 'update', options);
+  try {
+    createBackupFromReceipt(previousReceipt, 'update', options);
+  } catch (error) {
+    return { ok: false, error: `Backing up ${kind} ${entryId} before the update failed: ${errorText(error)}` };
+  }
 
   const installed = installEcosystemCatalogEntry(kind, entryId, { ...options, scope, skipBackup: true });
   if (!installed.ok) return installed;
@@ -591,6 +666,7 @@ export function rollbackInstalledEcosystemEntry(
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user'; backupId?: string },
 ): { ok: true; receipt: EcosystemInstallReceipt; restoredFrom: EcosystemInstallBackup } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
+  if (!isSafeEcosystemEntryId(entryId)) return { ok: false, error: unsafeIdMessage(kind, String(entryId)) };
   const backups = listEcosystemInstallBackups(kind, entryId, { ...options, scope });
   const backup = options.backupId
     ? backups.find((candidate) => candidate.id === options.backupId)
@@ -598,10 +674,19 @@ export function rollbackInstalledEcosystemEntry(
   if (!backup) {
     return { ok: false, error: `No rollback backup found for ${kind} ${entryId} in ${scope} scope.` };
   }
-  mkdirSync(dirname(backup.targetPath), { recursive: true });
-  rmSync(backup.targetPath, { recursive: true, force: true });
-  cpSync(backup.archivedTargetPath, backup.targetPath, { recursive: true });
-  writeJsonFileAtomic(receiptPath(kind, entryId, options, scope), backup.receipt);
+  const root = installedRoot(kind, options, scope);
+  if (typeof backup.targetPath !== 'string' || !isInside(root, backup.targetPath)
+    || typeof backup.archivedTargetPath !== 'string' || !isInside(backupRoot(options, scope), backup.archivedTargetPath)) {
+    return { ok: false, error: `The ${kind} backup for ${entryId} points outside ${root}; nothing was restored.` };
+  }
+  try {
+    mkdirSync(dirname(backup.targetPath), { recursive: true });
+    rmSync(backup.targetPath, { recursive: true, force: true });
+    cpSync(backup.archivedTargetPath, backup.targetPath, { recursive: true });
+    writeJsonFileAtomic(receiptPath(kind, entryId, options, scope), backup.receipt);
+  } catch (error) {
+    return { ok: false, error: `Rolling back ${kind} ${entryId} failed: ${errorText(error)}. The archived copy is still at ${backup.archivedTargetPath}.` };
+  }
   return { ok: true, receipt: backup.receipt, restoredFrom: backup };
 }
 
@@ -650,40 +735,76 @@ export function exportEcosystemCatalogBundle(
 
 export function inspectEcosystemCatalogBundle(bundle: EcosystemCatalogBundle): EcosystemCatalogBundleSummary {
   const counts: Record<EcosystemEntryKind, number> = { plugin: 0, skill: 0, 'hook-pack': 0, 'policy-pack': 0 };
-  for (const entry of bundle.entries) {
-    counts[entry.kind] += 1;
+  // A bundle read from disk is untrusted: tolerate a non-array `entries`.
+  const entries: readonly EcosystemCatalogEntry[] = Array.isArray(bundle?.entries) ? bundle.entries : [];
+  for (const entry of entries) {
+    if (entry && ENTRY_KINDS.includes(entry.kind)) counts[entry.kind] += 1;
   }
   return {
-    exportedAt: bundle.exportedAt,
-    scope: bundle.scope,
+    exportedAt: bundle?.exportedAt,
+    scope: bundle?.scope,
     counts,
   };
 }
 
+function entryProblem(entry: unknown): string | null {
+  if (!entry || typeof entry !== 'object') return 'not an object';
+  const candidate = entry as Partial<Record<keyof EcosystemCatalogEntry, unknown>>;
+  if (!ENTRY_KINDS.includes(candidate.kind as EcosystemEntryKind)) return `unknown kind ${JSON.stringify(candidate.kind)}`;
+  if (!isSafeEcosystemEntryId(candidate.id)) return `unsafe or missing id ${JSON.stringify(candidate.id)}`;
+  if (typeof candidate.name !== 'string' || typeof candidate.source !== 'string') return 'missing name or source';
+  return null;
+}
+
+/**
+ * Merge a bundle into the curated catalogs by (kind, id): bundle entries
+ * replace entries with the same id, every other existing entry is kept.
+ * Entries that fail validation are skipped and listed in `rejected`; a bundle
+ * with no entries array imports nothing and says why in `error`.
+ */
 export function importEcosystemCatalogBundle(
   bundle: EcosystemCatalogBundle,
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user' },
-): { imported: number; pathByKind: Partial<Record<EcosystemEntryKind, string>> } {
-  const scope = options.scope ?? bundle.scope;
+): {
+  imported: number;
+  pathByKind: Partial<Record<EcosystemEntryKind, string>>;
+  rejected: readonly { readonly id: string; readonly reason: string }[];
+  error?: string;
+} {
+  const scope = options.scope ?? (bundle?.scope === 'user' ? 'user' : 'project');
+  if (!Array.isArray(bundle?.entries)) {
+    return { imported: 0, pathByKind: {}, rejected: [], error: 'The bundle has no entries array; nothing was imported.' };
+  }
   const byKind: Record<EcosystemEntryKind, EcosystemCatalogEntry[]> = {
     plugin: [],
     skill: [],
     'hook-pack': [],
     'policy-pack': [],
   };
-  for (const entry of bundle.entries) {
-    byKind[entry.kind].push(entry);
+  const rejected: { id: string; reason: string }[] = [];
+  for (const entry of bundle.entries as readonly unknown[]) {
+    const problem = entryProblem(entry);
+    if (problem) {
+      const id = (entry as { id?: unknown } | null)?.id;
+      rejected.push({ id: typeof id === 'string' ? id : '(no id)', reason: problem });
+      continue;
+    }
+    const valid = entry as EcosystemCatalogEntry;
+    byKind[valid.kind].push({ ...valid, tags: Array.isArray(valid.tags) ? valid.tags : [], summary: typeof valid.summary === 'string' ? valid.summary : '' });
   }
   const pathByKind: Partial<Record<EcosystemEntryKind, string>> = {};
   let imported = 0;
-  for (const kind of ['plugin', 'skill', 'hook-pack', 'policy-pack'] as const) {
+  for (const kind of ENTRY_KINDS) {
     if (byKind[kind].length === 0) continue;
     const path = catalogPath(kind, options, scope);
-    writeJsonFileAtomic(path, { version: 1, entries: byKind[kind].sort((a, b) => a.name.localeCompare(b.name)) });
+    const incoming = new Set(byKind[kind].map((entry) => entry.id));
+    const kept = readCatalogDocument(path).entries.filter((entry) => entry.kind !== kind || !incoming.has(entry.id));
+    const merged = [...kept, ...byKind[kind]].sort((a, b) => a.name.localeCompare(b.name));
+    writeJsonFileAtomic(path, { version: 1, entries: merged });
     pathByKind[kind] = path;
     imported += byKind[kind].length;
   }
-  return { imported, pathByKind };
+  return { imported, pathByKind, rejected };
 }
 
 export function upsertEcosystemCatalogEntry(
@@ -691,6 +812,7 @@ export function upsertEcosystemCatalogEntry(
   options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user' },
 ): { ok: true; path: string; entry: EcosystemCatalogEntry } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
+  if (!isSafeEcosystemEntryId(entry.id)) return { ok: false, error: unsafeIdMessage(entry.kind, String(entry.id)) };
   const path = catalogPath(entry.kind, options, scope);
   const document = readCatalogDocument(path);
   const nextEntries = document.entries.filter((candidate) => candidate.id !== entry.id || candidate.kind !== entry.kind);

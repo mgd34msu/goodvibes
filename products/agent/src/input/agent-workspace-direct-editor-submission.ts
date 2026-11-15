@@ -40,6 +40,26 @@ const GOOGLE_EDITOR_KINDS = new Set([
   'google-client-manual',
 ]);
 
+/**
+ * Hosts with a direct submission still running. The editor stays open until the
+ * action finishes, so a second Enter would start the action again (a duplicate
+ * subscription, a second connection test, a second consent link).
+ */
+const submissionsInFlight = new WeakSet<object>();
+
+function runExclusive(host: DirectEditorHost, requestRender: (() => void) | undefined, run: () => Promise<void>): void {
+  if (submissionsInFlight.has(host)) {
+    host.status = 'Still working on the previous submit. Wait for it to finish.';
+    requestRender?.();
+    return;
+  }
+  submissionsInFlight.add(host);
+  void run().finally(() => {
+    submissionsInFlight.delete(host);
+    requestRender?.();
+  });
+}
+
 /** Returns true when this editor kind was handled directly (caller should return without further dispatch). */
 export function trySubmitDirectHostActionEditor(
   host: DirectEditorHost,
@@ -49,11 +69,11 @@ export function trySubmitDirectHostActionEditor(
   requestRender?: () => void,
 ): boolean {
   if (editor.kind === 'subscription-login-start') {
-    void submitAgentWorkspaceSubscriptionLoginStartEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceSubscriptionLoginStartEditor(host, editor, context, readField));
     return true;
   }
   if (editor.kind === 'subscription-login-finish') {
-    void submitAgentWorkspaceSubscriptionLoginFinishEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceSubscriptionLoginFinishEditor(host, editor, context, readField));
     return true;
   }
   if (editor.kind === 'subscription-logout') {
@@ -62,19 +82,19 @@ export function trySubmitDirectHostActionEditor(
     return true;
   }
   if (editor.kind === 'email-connect-wizard') {
-    void submitAgentWorkspaceEmailConnectWizardEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceEmailConnectWizardEditor(host, editor, context, readField));
     return true;
   }
   if (editor.kind === 'calendar-subscribe-wizard') {
-    void submitAgentWorkspaceCalendarSubscribeWizardEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceCalendarSubscribeWizardEditor(host, editor, context, readField));
     return true;
   }
   if (editor.kind === 'calendar-oauth-google' || editor.kind === 'calendar-oauth-outlook') {
-    void submitAgentWorkspaceCalendarOAuthEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceCalendarOAuthEditor(host, editor, context, readField));
     return true;
   }
   if (GOOGLE_EDITOR_KINDS.has(editor.kind)) {
-    void submitAgentWorkspaceGoogleSetupEditor(host, editor, context, readField).finally(() => requestRender?.());
+    runExclusive(host, requestRender, () => submitAgentWorkspaceGoogleSetupEditor(host, editor, context, readField));
     return true;
   }
   return false;

@@ -112,7 +112,9 @@ export async function shutdownRuntime(
   };
 
   fireHook('end');
-  fireHook('save');
+  // `save` tells subscribers (backup and sync scripts) the session is on disk,
+  // which is false when the write above failed.
+  if (!shutdownError) fireHook('save');
 
   try {
     scheduleManager?.destroy();

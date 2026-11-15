@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createAgentRuntimeProfile, setAgentRuntimeProfileSelection } from '../../agent/runtime-profile.ts';
+import { parseCliFlags } from '../../cli-flags.ts';
 import { resolveShellEntrypointOwnership } from '../../cli/entrypoint.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -12,6 +13,12 @@ function makeRoots() {
 }
 
 describe('shell entrypoint profile ownership', () => {
+  test('--working-dir wins over the default working directory the environment supplies', () => {
+    const roots = { ...makeRoots(), defaultWorkingDirectory: '/from/env' };
+    expect(resolveShellEntrypointOwnership(roots, parseCliFlags(['--working-dir=/from/flag']).workingDir).workingDirectory).toBe('/from/flag');
+    expect(resolveShellEntrypointOwnership(roots, parseCliFlags([]).workingDir).workingDirectory).toBe('/from/env');
+  });
+
   test('uses selected default profile for plain launches', () => {
     const roots = makeRoots();
     const profile = createAgentRuntimeProfile(roots.homeDirectory, 'Research Desk', { templateId: 'research' });

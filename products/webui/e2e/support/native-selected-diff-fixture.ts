@@ -19,6 +19,7 @@ import {
 import { nativeWorkExecutionSnapshotSchema } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client";
 import { installMockDaemon } from "./mock-daemon";
 import { sessionRecord, STEERABLE_SESSION } from "./seed";
+import { installRecordedIds } from "./recorded-ids";
 
 export interface DiffWire {
   methodId: string;
@@ -355,23 +356,10 @@ export async function installSelectedDiffDaemon(
     authorization?: string;
   }[] = [];
   const failures: string[] = [];
-  await page.addInitScript(
-    (ids: string[]) => {
-      localStorage.setItem("goodvibes.webui.hosted.clientId", "selected-diff-proof-client");
-      localStorage.setItem("goodvibes.webui.push.deviceId", "selected-diff-proof-device");
-      const random = crypto.randomUUID.bind(crypto);
-      Object.defineProperty(crypto, "randomUUID", {
-        configurable: true,
-        value: () => {
-          const index = Number(sessionStorage.getItem("selected-diff-proof-id") ?? 0);
-          if (index >= ids.length) return random();
-          sessionStorage.setItem("selected-diff-proof-id", String(index + 1));
-          return ids[index];
-        },
-      });
-    },
-    cases.flatMap((name) => [capture[name].command.requestId, capture[name].command.inputId])
-  );
+  await page.addInitScript(installRecordedIds, {
+    ids: cases.flatMap((name) => [capture[name].command.requestId, capture[name].command.inputId]),
+    storageKey: "selected-diff-proof-id",
+  });
   await page.route("**/api/control-plane/auth", (route) => reply(route, capture.auth));
   await page.route("**/api/work-ledger/project", (route) => reply(route, capture.project));
   for (const wire of [capture.session.diff, capture.workspace.diff, capture.checkpoints]) {

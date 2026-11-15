@@ -92,6 +92,12 @@ export interface LoadCustomProvidersOptions {
    */
   ingestContextWindows?: boolean | undefined;
   contextIngestion?: Pick<LocalContextIngestionService, 'ingestProviderContextWindows'> | undefined;
+  /**
+   * Provider names a file must not take over (the built-in providers). A file
+   * that names one is skipped with a warning instead of replacing the provider
+   * and its credentials path.
+   */
+  reservedNames?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -136,6 +142,22 @@ function validateCustomProvider(data: unknown): { valid: boolean; errors: string
     errors.push('"baseURL" must be a non-empty string');
   }
 
+  for (const field of ['apiKey', 'apiKeyEnv']) {
+    if (obj[field] !== undefined && typeof obj[field] !== 'string') {
+      errors.push(`"${field}", when given, must be a string`);
+    }
+  }
+
+  if (obj['defaultHeaders'] !== undefined) {
+    const headers = obj['defaultHeaders'];
+    if (
+      typeof headers !== 'object' || headers === null || Array.isArray(headers)
+      || !Object.values(headers).every((value) => typeof value === 'string')
+    ) {
+      errors.push('"defaultHeaders", when given, must be an object of string values');
+    }
+  }
+
   if (obj['reasoningFormat'] !== undefined) {
     if (!['mercury', 'openrouter', 'llamacpp', 'none'].includes(obj['reasoningFormat'] as string)) {
       errors.push('"reasoningFormat" must be "mercury", "openrouter", "llamacpp", or "none"');
@@ -170,6 +192,15 @@ function validateCustomProvider(data: unknown): { valid: boolean; errors: string
             errors.push(`models[${i}]: capabilities.${cap} must be a boolean`);
           }
         }
+      }
+      if (
+        model['reasoningEffort'] !== undefined
+        && (!Array.isArray(model['reasoningEffort']) || !model['reasoningEffort'].every((level) => typeof level === 'string'))
+      ) {
+        errors.push(`models[${i}]: "reasoningEffort", when given, must be an array of strings`);
+      }
+      if (model['tier'] !== undefined && !['free', 'standard', 'premium'].includes(model['tier'] as string)) {
+        errors.push(`models[${i}]: "tier", when given, must be "free", "standard", or "premium"`);
       }
       if (model['pricing'] !== undefined) {
         const pricing = model['pricing'];
@@ -245,7 +276,8 @@ export async function loadCustomProviders(
   }
 
   // Collect valid entries; skip invalid ones with warnings.
-  const validConfigs: Array<{ cfg: CustomProviderConfig; provider: LLMProvider; apiKey: string }> = [];
+  const validConfigs: Array<{ cfg: CustomProviderConfig; provider: LLMProvider; apiKey: string; filename: string }> = [];
+  const nameOwners = new Map<string, string>();
 
   for (const filename of entries) {
     const filepath = path.join(providersDir, filename);
@@ -283,6 +315,20 @@ export async function loadCustomProviders(
 
     const cfg = parsed as CustomProviderConfig;
 
+    if (options.reservedNames?.has(cfg.name)) {
+      warnings.push(
+        `[custom-loader] Skipping '${filename}': '${cfg.name}' is a built-in provider name. Rename the provider in the file to add it alongside the built-in one.`,
+      );
+      continue;
+    }
+    const firstOwner = nameOwners.get(cfg.name);
+    if (firstOwner !== undefined) {
+      warnings.push(
+        `[custom-loader] Skipping '${filename}': provider '${cfg.name}' is already defined by '${firstOwner}'. Rename one of them.`,
+      );
+      continue;
+    }
+
     const apiKey = resolveApiKey(cfg);
     const modelIds = cfg.models.map((m) => m.id);
 
@@ -317,7 +363,8 @@ export async function loadCustomProviders(
       continue;
     }
 
-    validConfigs.push({ cfg, provider, apiKey });
+    nameOwners.set(cfg.name, filename);
+    validConfigs.push({ cfg, provider, apiKey, filename });
   }
 
   // Runs only when options.ingestContextWindows is true.
@@ -353,35 +400,41 @@ export async function loadCustomProviders(
   }
 
   for (let i = 0; i < validConfigs.length; i++) {
-    const { cfg, provider } = validConfigs[i]!;
+    const { cfg, provider, filename } = validConfigs[i]!;
     const apiContextMap = ingestionResults[i]! ?? null;
 
-    const modelDefs: ModelDefinition[] = cfg.models.map((m) => {
-      const apiContextLength = apiContextMap?.get(m.id) ?? null;
-      const resolved = resolveContextWindow(m.id, apiContextLength, m.contextWindow ?? 0);
-      return {
-        id: m.id,
-        provider: cfg.name,
-        registryKey: `${cfg.name}:${m.id}`,
-        displayName: m.displayName,
-        description: m.description ?? '',
-        contextWindow: resolved.tokens,
-        contextWindowProvenance: resolved.provenance,
-        ...(resolved.provenance === 'configured_cap' ? { contextWindowOrigin: { kind: 'provider_file' as const } } : {}),
-        selectable: m.selectable ?? true,
-        capabilities: {
-          toolCalling: m.capabilities.toolCalling,
-          codeEditing: m.capabilities.codeEditing,
-          reasoning: m.capabilities.reasoning,
-          multimodal: m.capabilities.multimodal,
-        },
-        ...(m.reasoningEffort
-          ? { reasoningEffort: reasoningEffortSpecFromLevels(m.reasoningEffort) }
-          : {}),
-        ...(m.tier ? { tier: m.tier } : {}),
-        ...(m.pricing ? { pricing: m.pricing } : {}),
-      };
-    });
+    let modelDefs: ModelDefinition[];
+    try {
+      modelDefs = cfg.models.map((m) => {
+        const apiContextLength = apiContextMap?.get(m.id) ?? null;
+        const resolved = resolveContextWindow(m.id, apiContextLength, m.contextWindow ?? 0);
+        return {
+          id: m.id,
+          provider: cfg.name,
+          registryKey: `${cfg.name}:${m.id}`,
+          displayName: m.displayName,
+          description: m.description ?? '',
+          contextWindow: resolved.tokens,
+          contextWindowProvenance: resolved.provenance,
+          ...(resolved.provenance === 'configured_cap' ? { contextWindowOrigin: { kind: 'provider_file' as const } } : {}),
+          selectable: m.selectable ?? true,
+          capabilities: {
+            toolCalling: m.capabilities.toolCalling,
+            codeEditing: m.capabilities.codeEditing,
+            reasoning: m.capabilities.reasoning,
+            multimodal: m.capabilities.multimodal,
+          },
+          ...(m.reasoningEffort
+            ? { reasoningEffort: reasoningEffortSpecFromLevels(m.reasoningEffort) }
+            : {}),
+          ...(m.tier ? { tier: m.tier } : {}),
+          ...(m.pricing ? { pricing: m.pricing } : {}),
+        };
+      });
+    } catch (err) {
+      warnings.push(`[custom-loader] Skipping '${filename}': could not build its models: ${summarizeError(err)}`);
+      continue;
+    }
 
     providers.push({ config: cfg, provider });
     models.push(...modelDefs);

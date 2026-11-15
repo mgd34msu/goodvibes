@@ -13,6 +13,16 @@ export interface OwnerApprovalGuard {
   readonly validateDecision?: ((decision: PermissionPromptDecision) => void) | undefined;
 }
 
+/**
+ * Filled in by the broker call that was given it: `applied` is true only when
+ * that very call moved the record. A call that found the approval already
+ * decided, or lost a race to another caller using the same actor name, reads
+ * false.
+ */
+export interface ApprovalActionOutcome {
+  applied?: boolean | undefined;
+}
+
 export interface ResolveSharedApprovalInput {
   readonly approved: boolean;
   readonly disposition?: ExplicitApprovalDisposition | undefined;
@@ -24,6 +34,7 @@ export interface ResolveSharedApprovalInput {
   readonly actor: string;
   readonly actorSurface?: string | undefined;
   readonly note?: string | undefined;
+  readonly outcome?: ApprovalActionOutcome | undefined;
 }
 
 export interface ResolveOwnerApprovalInput {
@@ -55,7 +66,7 @@ type OwnerApprovalDeps = RaiseApprovalDeps & {
 };
 
 function invalidOwnerDecision(): never {
-  throw Object.assign(new Error('This approval requires its exact current owner decision.'), {
+  throw Object.assign(new Error('This approval requires its exact current owner decision. Deny and cancel are allowed here; approve it with the paired-owner decision command.'), {
     code: 'INVALID_ARGUMENT', status: 400,
   });
 }
@@ -156,4 +167,13 @@ export class OwnerApprovalAuthority {
   }
 
   retire(approvalId: string): void { this.#capabilities.delete(approvalId); }
+
+  /** An owner decision that failed before its write began leaves the ask answerable again. */
+  settle(approvalId: string): void {
+    const capability = this.#capabilities.get(approvalId);
+    if (capability) capability.resolving = false;
+  }
+
+  /** True while an exact owner decision for this ask is between its check and its durable write. */
+  isResolving(approvalId: string): boolean { return this.#capabilities.get(approvalId)?.resolving === true; }
 }

@@ -22,7 +22,7 @@ and a thin CLI (`bin` entry):
 - **verification-ledger.** Totals math and JSON and Markdown rendering of a
   repo-collected verification inventory.
 - **post-build-smoke.** Boots a compiled binary and checks its version protocol and emitted module initialization.
-- **package-install-check.** Static `npm pack` tarball plus bin-shim policy check.
+- **package-install-check.** Static `npm pack` tarball policy check, plus a check of each bin shim listed under `publish.bins` (present, executable, expected shebang).
 - **publish-package.** Idempotent `npm publish` plus a propagation poll.
 - **changelog-gate.** Asserts CHANGELOG carries a section for a version.
 - **sha256sums.** Generate or verify a `SHA256SUMS` manifest over release assets.

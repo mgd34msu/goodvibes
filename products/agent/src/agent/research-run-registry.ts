@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
 
 export type AgentResearchRunStatus = 'planned' | 'running' | 'paused' | 'blocked' | 'cancelled' | 'completed' | 'failed';
 /**
@@ -251,15 +251,17 @@ function parseRun(value: unknown): AgentResearchRunRecord | null {
   };
 }
 
-function parseStore(raw: string): ResearchRunStoreFile {
+function parseStore(raw: string, forWrite = false): ResearchRunStoreFile {
   const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) return { version: STORE_VERSION, runs: [] };
-  return {
-    version: STORE_VERSION,
-    runs: Array.isArray(parsed.runs)
-      ? parsed.runs.map(parseRun).filter((entry): entry is AgentResearchRunRecord => entry !== null)
-      : [],
-  };
+  if (!isRecord(parsed)) {
+    if (forWrite) assertStoreRewritable(parsed, 'runs', 0, STORE_VERSION);
+    return { version: STORE_VERSION, runs: [] };
+  }
+  const runs = Array.isArray(parsed.runs)
+    ? parsed.runs.map(parseRun).filter((entry): entry is AgentResearchRunRecord => entry !== null)
+    : [];
+  if (forWrite) assertStoreRewritable(parsed, 'runs', runs.length, STORE_VERSION);
+  return { version: STORE_VERSION, runs };
 }
 
 function formatStore(store: ResearchRunStoreFile): string {
@@ -363,42 +365,46 @@ export class AgentResearchRunRegistry {
   }
 
   public create(input: AgentResearchRunCreateInput): AgentResearchRunRecord {
-    const store = this.readStore();
-    const title = normalizeText(input.title);
-    const question = normalizeText(input.question);
-    const goal = input.goal?.trim() || question;
-    const plan = normalizeList(input.plan);
-    const nextSteps = normalizeList(input.nextSteps);
-    const sourceIds = normalizeList(input.sourceIds);
-    const note = input.note?.trim();
-    if (!title) throw new Error('title is required.');
-    if (!question) throw new Error('question is required.');
-    if (!goal) throw new Error('goal is required.');
-    assertRunContentSafe([title, question, goal, ...plan, ...nextSteps, ...sourceIds, note ?? '']);
-    const id = this.uniqueId(store.runs, title);
-    const timestamp = nowIso();
-    const run: AgentResearchRunRecord = {
-      id,
-      title,
-      question,
-      goal,
-      status: 'planned',
-      phase: 'planning',
-      progress: 0,
-      plan,
-      nextSteps,
-      sourceIds,
-      checkpoints: [],
-      ...(note ? { note } : {}),
-      provenance: input.provenance?.trim() || 'agent-research-runs',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    this.writeStore({ version: STORE_VERSION, runs: [...store.runs, run] });
-    return run;
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const title = normalizeText(input.title);
+      const question = normalizeText(input.question);
+      const goal = input.goal?.trim() || question;
+      const plan = normalizeList(input.plan);
+      const nextSteps = normalizeList(input.nextSteps);
+      const sourceIds = normalizeList(input.sourceIds);
+      const note = input.note?.trim();
+      if (!title) throw new Error('title is required.');
+      if (!question) throw new Error('question is required.');
+      if (!goal) throw new Error('goal is required.');
+      assertRunContentSafe([title, question, goal, ...plan, ...nextSteps, ...sourceIds, note ?? '']);
+      const id = this.uniqueId(store.runs, title);
+      const timestamp = nowIso();
+      const run: AgentResearchRunRecord = {
+        id,
+        title,
+        question,
+        goal,
+        status: 'planned',
+        phase: 'planning',
+        progress: 0,
+        plan,
+        nextSteps,
+        sourceIds,
+        checkpoints: [],
+        ...(note ? { note } : {}),
+        provenance: input.provenance?.trim() || 'agent-research-runs',
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      this.writeStore({ version: STORE_VERSION, runs: [...store.runs, run] });
+      return run;
+    });
   }
 
   public start(id: string, note?: string): AgentResearchRunRecord {
+    const finalNote = note?.trim();
+    if (finalNote) assertRunContentSafe([finalNote]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'start');
       if (run.status === 'paused' || run.status === 'blocked') {
@@ -410,7 +416,7 @@ export class AgentResearchRunRegistry {
         ...run,
         status: 'running',
         progress: Math.max(run.progress, run.status === 'planned' ? 1 : run.progress),
-        ...(note?.trim() ? { note: note.trim() } : {}),
+        ...(finalNote ? { note: finalNote } : {}),
         startedAt: run.startedAt ?? timestamp,
         updatedAt: timestamp,
       };
@@ -418,6 +424,8 @@ export class AgentResearchRunRegistry {
   }
 
   public resume(id: string, note?: string): AgentResearchRunRecord {
+    const finalNote = note?.trim();
+    if (finalNote) assertRunContentSafe([finalNote]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'resume');
       if (run.status === 'planned') {
@@ -428,7 +436,7 @@ export class AgentResearchRunRegistry {
       return {
         ...run,
         status: 'running',
-        ...(note?.trim() ? { note: note.trim() } : {}),
+        ...(finalNote ? { note: finalNote } : {}),
         startedAt: run.startedAt ?? timestamp,
         updatedAt: timestamp,
       };
@@ -475,9 +483,11 @@ export class AgentResearchRunRegistry {
     if (!note) throw new Error('checkpoint note is required.');
     const nextSteps = normalizeList(input.nextSteps);
     const sourceIds = normalizeList(input.sourceIds);
-    const finalStatus = input.status && input.status !== 'cancelled' && input.status !== 'completed' && input.status !== 'failed'
-      ? input.status
-      : undefined;
+    if (input.status === 'cancelled' || input.status === 'completed' || input.status === 'failed') {
+      const route = input.status === 'cancelled' ? 'cancel' : input.status === 'completed' ? 'complete' : 'fail';
+      throw new Error(`A checkpoint cannot set status ${input.status}; the run would stay as it is. Use ${route} to end a research run.`);
+    }
+    const finalStatus = input.status;
     assertRunContentSafe([note, ...nextSteps, ...sourceIds]);
     return this.update(id, (run) => {
       this.assertMutable(run, 'checkpoint');
@@ -554,11 +564,13 @@ export class AgentResearchRunRegistry {
   }
 
   public delete(id: string): AgentResearchRunRecord {
-    const store = this.readStore();
-    const run = this.find(store.runs, id);
-    if (!run) throw new Error(`Research run ${id} not found.`);
-    this.writeStore({ version: STORE_VERSION, runs: store.runs.filter((entry) => entry.id !== run.id) });
-    return run;
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const run = this.find(store.runs, id);
+      if (!run) throw new Error(`Research run ${id} not found.`);
+      this.writeStore({ version: STORE_VERSION, runs: store.runs.filter((entry) => entry.id !== run.id) });
+      return run;
+    });
   }
 
   private assertMutable(run: AgentResearchRunRecord, action: string): void {
@@ -573,15 +585,17 @@ export class AgentResearchRunRegistry {
   }
 
   private update(id: string, updater: (run: AgentResearchRunRecord) => AgentResearchRunRecord): AgentResearchRunRecord {
-    const store = this.readStore();
-    const existing = this.find(store.runs, id);
-    if (!existing) throw new Error(`Research run ${id} not found.`);
-    const updated = updater(existing);
-    this.writeStore({
-      version: STORE_VERSION,
-      runs: store.runs.map((run) => run.id === existing.id ? updated : run),
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.find(store.runs, id);
+      if (!existing) throw new Error(`Research run ${id} not found.`);
+      const updated = updater(existing);
+      this.writeStore({
+        version: STORE_VERSION,
+        runs: store.runs.map((run) => run.id === existing.id ? updated : run),
+      });
+      return updated;
     });
-    return updated;
   }
 
   private find(runs: readonly AgentResearchRunRecord[], idOrTitle: string): AgentResearchRunRecord | null {
@@ -604,12 +618,14 @@ export class AgentResearchRunRegistry {
     throw new Error(`Could not allocate id for research run ${title}.`);
   }
 
-  private readStore(): ResearchRunStoreFile {
+  private readStore(forWrite = false): ResearchRunStoreFile {
     if (!existsSync(this.storePath)) return { version: STORE_VERSION, runs: [] };
+    // An unreadable file is an error, never an empty ledger: every save
+    // rewrites the whole file, so reading it as empty would erase the history.
     try {
-      return parseStore(readFileSync(this.storePath, 'utf8'));
-    } catch {
-      return { version: STORE_VERSION, runs: [] };
+      return parseStore(readFileSync(this.storePath, 'utf8'), forWrite);
+    } catch (error) {
+      throw new Error(`Could not read Agent research run store: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -60,6 +60,14 @@ function ignoredPaths(cwd: string, paths: readonly string[]): Promise<readonly s
   });
 }
 
+/** A merge of an agent's branch conflicted: the worktree and branch are intact and the base tree was restored. */
+export class AgentWorktreeMergeConflictError extends Error {
+  constructor(readonly branch: string, readonly worktreePath: string, readonly conflicts: readonly string[]) {
+    super(`Merging ${branch} conflicted${conflicts.length > 0 ? ` in ${conflicts.join(', ')}` : ''}. The agent's worktree (${worktreePath}) and branch were kept and the base branch was restored; resolve the conflict by hand or discard the worktree.`);
+    this.name = 'AgentWorktreeMergeConflictError';
+  }
+}
+
 /**
  * AgentWorktree, Manages git worktree lifecycle for spawned agents.
  *
@@ -94,7 +102,8 @@ export class AgentWorktree {
 
   /**
    * Merge the agent's branch back into the current branch and remove the worktree.
-   * Returns true if a merge was performed, false if no changes were found.
+   * Returns true if a merge was performed, false if no changes were found. A conflicting merge throws
+   * AgentWorktreeMergeConflictError and leaves the worktree and branch in place.
    */
   async merge(agentId: string): Promise<boolean> {
     const worktreePath = this._worktreePath(agentId);
@@ -110,23 +119,29 @@ export class AgentWorktree {
     const hasChanges = await this._hasChanges(worktreePath, branch);
     if (!hasChanges) {
       logger.debug('AgentWorktree.merge: no changes, skipping merge', { agentId });
-      if (existsSync(worktreePath)) {
-        await this._removeWorktree(worktreePath);
-      }
-      await this._deleteBranch(branch);
+      // No commits to merge does not mean nothing to lose: uncommitted work in the tree is the only copy.
+      await this._releaseIfNothingUnique(worktreePath, branch);
       return false;
     }
 
-    // Remove worktree first (required before merging the branch)
-    if (existsSync(worktreePath)) {
-      await this._removeWorktree(worktreePath);
+    // The branch ref holds the commits whether or not its worktree exists, so merge first: a conflict then
+    // leaves the worktree and branch exactly as they were, and the caller is told which files conflict.
+    const merged = await this.git.merge(branch);
+    if (!merged.success) {
+      // Put the base tree back the way it was; the agent's work stays on its branch and in its worktree.
+      await (await createSimpleGit({ baseDir: this.git.getCwd() })).raw(['merge', '--abort'])
+        .catch((error: unknown) => logger.warn('AgentWorktree.merge: merge --abort did not complete after conflict', { branch, error: summarizeError(error) }));
+      throw new AgentWorktreeMergeConflictError(branch, worktreePath, merged.conflicts ?? []);
     }
 
-    // Merge the branch
-    await this.git.merge(branch);
-
-    // Clean up the agent branch
-    await this._deleteBranch(branch);
+    // Merged: release the worktree and branch without force. A tree with changes still in it, or a branch that is
+    // somehow not merged, stays and is reported rather than being thrown away.
+    try {
+      if (existsSync(worktreePath)) await this.git.worktreeRemove(worktreePath);
+      await this._deleteBranch(branch);
+    } catch (error) {
+      logger.warn('AgentWorktree.merge: merged, but the worktree could not be removed without force, so it and its branch were kept', { worktreePath, branch, error: summarizeError(error) });
+    }
 
     logger.debug('AgentWorktree.merge: complete', { agentId });
     return true;
@@ -339,7 +354,11 @@ export class AgentWorktree {
   }
 
   /**
-   * Remove the worktree without merging (cancel/error path).
+   * Release the worktree without merging (cancel/error path). A worktree that
+   * holds the only copy of anything is kept, with its branch: uncommitted changes
+   * (tracked or untracked, ignored files aside), commits the base branch does not
+   * have, or git state that cannot be read. Only a tree with nothing unique is
+   * removed, and never by force.
    */
   async cleanup(agentId: string): Promise<void> {
     const worktreePath = this._worktreePath(agentId);
@@ -347,13 +366,7 @@ export class AgentWorktree {
 
     logger.debug('AgentWorktree.cleanup', { agentId, worktreePath });
 
-    if (existsSync(worktreePath)) {
-      await this._removeWorktree(worktreePath);
-    }
-
-    await this._deleteBranch(branch).catch(() => {
-      // Branch may not exist if create() never completed
-    });
+    await this._releaseIfNothingUnique(worktreePath, branch);
   }
 
   // ---------------------------------------------------------------------------
@@ -398,31 +411,56 @@ export class AgentWorktree {
   }
 
   /**
-   * Force-remove a worktree directory.
+   * Why this agent's work cannot be thrown away, or null when nothing in it is unique:
+   * its tree has uncommitted changes, it (or its branch) holds commits the base does not,
+   * or git cannot say. A missing directory has no uncommitted changes to lose.
    */
-  private async _removeWorktree(worktreePath: string): Promise<void> {
+  private async _uniqueWork(worktreePath: string, branch: string): Promise<string | null> {
     try {
-      await this.git.worktreeRemove(worktreePath);
-    } catch (err) {
-      // Try with --force flag via raw if normal remove fails
-      logger.debug('AgentWorktree._removeWorktree: first attempt failed, retrying with --force', { worktreePath, error: summarizeError(err) });
-      try {
-        const wgit = await createSimpleGit({ baseDir: this.git.getCwd() });
-        await wgit.raw(['worktree', 'remove', '--force', worktreePath]);
-      } catch (err) {
-        logger.error('AgentWorktree._removeWorktree failed', { worktreePath, error: summarizeError(err) });
-        throw err;
+      const root = await createSimpleGit({ baseDir: this.git.getCwd() });
+      const base = (await root.raw(['rev-parse', 'HEAD'])).trim();
+      const ahead = async (git: Awaited<ReturnType<typeof createSimpleGit>>, tip: string): Promise<number> => {
+        const count = parseInt((await git.raw(['rev-list', '--count', `${base}..${tip}`])).trim(), 10);
+        if (!Number.isFinite(count)) throw new Error('commit count unreadable');
+        return count;
+      };
+      if (existsSync(worktreePath)) {
+        const tree = await createSimpleGit({ baseDir: worktreePath });
+        // --ignored: `git worktree remove` deletes ignored files (.env, local databases, build output) and no commit holds them.
+        if ((await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim().length > 0) return 'it has uncommitted changes or ignored files';
+        if (await ahead(tree, 'HEAD') > 0) return 'it has commits the base branch does not have';
       }
+      if (await this._branchExists(branch) && await ahead(root, branch) > 0) return `branch ${branch} has commits the base branch does not have`;
+      return null;
+    } catch (error) {
+      return `its git state could not be read (${summarizeError(error)})`;
+    }
+  }
+
+  /** Removes the worktree and its branch unless something in them is unique; never forces either. */
+  private async _releaseIfNothingUnique(worktreePath: string, branch: string): Promise<void> {
+    const unique = await this._uniqueWork(worktreePath, branch);
+    if (unique !== null) {
+      logger.warn('AgentWorktree: kept the worktree and branch because they hold work that exists nowhere else', { worktreePath, branch, reason: unique });
+      return;
+    }
+    try {
+      if (existsSync(worktreePath)) await this.git.worktreeRemove(worktreePath);
+      // -d: a branch the base does not contain survives, even if it appeared since the check.
+      const root = await createSimpleGit({ baseDir: this.git.getCwd() });
+      await root.raw(['branch', '-d', branch]).catch(() => { /* no branch: create() never completed */ });
+    } catch (error) {
+      logger.warn('AgentWorktree: the worktree could not be removed without force, so it was kept', { worktreePath, branch, error: summarizeError(error) });
     }
   }
 
   /**
-   * Delete a branch (no-op if it doesn't exist).
+   * Delete a merged branch (no-op if it doesn't exist). `-d`, so a branch the base lacks survives.
    */
   private async _deleteBranch(branch: string): Promise<void> {
     try {
       const wgit = await createSimpleGit({ baseDir: this.git.getCwd() });
-      await wgit.raw(['branch', '-D', branch]);
+      await wgit.raw(['branch', '-d', branch]);
     } catch (err) {
       logger.warn('AgentWorktree._deleteBranch failed during cleanup', { branch, error: summarizeError(err) });
     }
@@ -462,7 +500,7 @@ export type IntegrationOutcome =
  *                 sequential integration lane can proceed to the next item.
  *   remove()   , remove the worktree dir and delete `branch` (post-merge, or
  *                 a clean tree after fail/kill).
- *   keepInPlace()/branchHasCommits(), inspection helpers for KEPT worktrees.
+ *   keepInPlace()/uniqueCommitCount(), inspection helpers for KEPT worktrees.
  *
  * Location: worktrees live under `<root>/.goodvibes/.worktrees/`, the same
  * gitignored bookkeeping area AgentWorktree and WorktreeRegistry already use,
@@ -550,15 +588,15 @@ export class IsolatedWorktree {
     }
   }
 
-  /** True when the item branch carries at least one commit beyond the base branch. */
-  async branchHasCommits(): Promise<boolean> {
+  /** How many commits the item branch carries beyond base, or null when git cannot say (callers must then keep the branch). */
+  async uniqueCommitCount(): Promise<number | null> {
     try {
       const wgit = await createSimpleGit({ baseDir: this.rootGit.getCwd() });
       const count = parseInt((await wgit.raw(['rev-list', '--count', `${this.baseBranch}..${this.branch}`])).trim(), 10);
-      return Number.isFinite(count) && count > 0;
+      return Number.isFinite(count) ? count : null;
     } catch (error) {
-      logger.warn('IsolatedWorktree.branchHasCommits: rev-list failed, treating as no commits', { branch: this.branch, error: summarizeError(error) });
-      return false;
+      logger.warn('IsolatedWorktree.uniqueCommitCount: rev-list failed', { branch: this.branch, error: summarizeError(error) });
+      return null;
     }
   }
 
@@ -566,14 +604,20 @@ export class IsolatedWorktree {
    * Merge the item branch into the base branch in the ROOT tree. Returns an
    * honest {@link IntegrationOutcome}: `merged` (with the merge commit hash),
    * `conflict` (with the conflicting files, the merge is aborted so the root
-   * is restored and the lane can continue), or `empty` (no commits to merge).
+   * is restored and the lane can continue), or `empty` (no commits to merge). Throws when git cannot count the
+   * commits, so an unreadable branch is never reported as empty.
    * Never auto-resolves a conflict.
    */
   async integrate(beforeMutation?: () => void): Promise<IntegrationOutcome> {
     beforeMutation?.();
-    const hasCommits = await this.branchHasCommits();
+    const unique = await this.uniqueCommitCount();
     beforeMutation?.();
-    if (!hasCommits) {
+    if (unique === null) {
+      // git could not compare the branches (base ref moved, transient failure):
+      // reporting "empty" would mark unmerged work as merged.
+      throw new Error(`cannot tell whether branch ${this.branch} has commits beyond ${this.baseBranch}; leaving it unmerged`);
+    }
+    if (unique === 0) {
       logger.debug('IsolatedWorktree.integrate: branch has no commits beyond base, nothing to merge', { branch: this.branch });
       return { status: 'empty' };
     }
@@ -629,9 +673,11 @@ export class IsolatedWorktree {
     try {
       const wgit = await createSimpleGit({ baseDir: this.rootGit.getCwd() });
       beforeRepositoryWrite?.();
-      await wgit.raw(['branch', '-D', this.branch]);
+      // `-d` refuses a branch whose commits are not in the current branch, so a
+      // commit that exists nowhere else is never dropped by this path.
+      await wgit.raw(['branch', '-d', this.branch]);
     } catch (err) {
-      logger.warn('IsolatedWorktree.remove: branch delete did not complete', { branch: this.branch, error: summarizeError(err) });
+      logger.warn('IsolatedWorktree.remove: branch kept (it has commits not merged into the current branch, or deleting it failed)', { branch: this.branch, error: summarizeError(err) });
     }
   }
 

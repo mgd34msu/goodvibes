@@ -88,7 +88,13 @@ export function VoiceSettings() {
   const voices = useMemo(() => readVoices(voicesQuery.data), [voicesQuery.data]);
 
   const setKey = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) => invokeMethod('config.set', { key, value }),
+    mutationFn: async ({ key, value, clearVoice }: { key: string; value: string; clearVoice?: boolean }) => {
+      // A voice id belongs to its provider. It is cleared first, so a failure between the
+      // two writes leaves the old provider on its default voice, never a new provider
+      // holding an id it cannot use.
+      if (clearVoice) await invokeMethod('config.set', { key: 'tts.voice', value: '' });
+      return invokeMethod('config.set', { key, value });
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['voice', 'config'] });
     },
@@ -136,7 +142,7 @@ export function VoiceSettings() {
                   className="voice-settings-provider"
                   value={selectedProvider}
                   disabled={setKey.isPending}
-                  onChange={(next) => setKey.mutate({ key: 'tts.provider', value: next })}
+                  onChange={(next) => setKey.mutate({ key: 'tts.provider', value: next, clearVoice: next !== selectedProvider && config.voice !== '' })}
                   options={ttsProviders.map((p) => ({ value: p.id, label: p.label }))}
                 />
               </div>

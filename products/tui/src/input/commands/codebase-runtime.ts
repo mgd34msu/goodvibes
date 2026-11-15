@@ -50,13 +50,17 @@ function renderAutoInjectionState(flagEnabled: boolean, settingEnabled: boolean)
 }
 
 /** Honest last-reindex activity line (tool-site incremental reindex). */
-function renderReindexActivity(activity: CodeIndexReindexActivity | null, now: number): string {
-  if (!activity) return '  last reindex: none this session (writes/edits reindex touched files once the index is built)';
+function renderReindexActivity(activity: CodeIndexReindexActivity | null, now: number, autoStart: boolean): string {
+  if (!activity) {
+    return autoStart
+      ? '  last reindex: none this session (writes/edits reindex touched files once the index is built)'
+      : '  last reindex: off: edits do not update the index (storage.codeIndexEnabled is off; run /codebase build again or turn it on)';
+  }
   const agoSec = Math.max(0, Math.round((now - activity.at) / 1000));
   const detail = activity.status === 'error'
     ? `error: ${activity.error ?? 'unknown'}`
     : activity.status === 'skipped'
-      ? `skipped (${activity.mode ?? 'empty'})`
+      ? `skipped (${activity.reason ?? activity.mode ?? 'empty'})`
       : `indexed (${activity.mode ?? 'symbols'})`;
   return `  last reindex: ${activity.path}; ${detail}, ${agoSec}s ago`;
 }
@@ -84,7 +88,7 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
   );
   // Passive code auto-injection state (flag + setting) and the last tool-site reindex.
   lines.push(renderAutoInjectionState(extras.flagEnabled, autoStart));
-  lines.push(renderReindexActivity(extras.reindexActivity, extras.now ?? Date.now()));
+  lines.push(renderReindexActivity(extras.reindexActivity, extras.now ?? Date.now(), autoStart));
   if ([CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES].every(limit => limit === Infinity)) {
     lines.push('  limits: no file count or byte limits');
   } else {
@@ -109,6 +113,7 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
       `  last build: ${b.filesIndexed} indexed, ${b.filesUnchanged} unchanged, ${b.filesRemoved} removed,`
       + ` ${b.chunksIndexed} chunk(s) embedded (${b.chunksUnchanged} unchanged), ${b.durationMs}ms`,
     );
+    if (b.filesFailed) lines.push(`  build failures: ${b.filesFailed} file(s) not indexed; first error: ${b.firstFailure ?? 'unknown'}`);
     const skip = b.skip;
     const skipParts: string[] = [];
     if (skip.tooLarge) skipParts.push(`${skip.tooLarge} too large`);
@@ -124,6 +129,8 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
   }
 
   if (stats.error) lines.push(`  error: ${stats.error}`);
+  if (stats.lastBuildError) lines.push(`  last build error: ${stats.lastBuildError}`);
+  if (stats.lastSearchError) lines.push(`  last search error: ${stats.lastSearchError}`);
 
   const degradation = stats.semanticRetrievalAvailable ? null : describeDegradationFallback(stats);
   if (degradation) lines.push(`  ${degradation}`);
@@ -221,9 +228,11 @@ export function registerCodebaseRuntimeCommands(registry: CommandRegistry): void
         if (results.length === 0) {
           const stats = store.stats();
           ctx.print(
-            stats.indexedChunks === 0
-              ? 'No results: the code index is empty. Run /codebase build first.'
-              : 'No matching chunks found.',
+            stats.lastSearchError
+              ? `Search failed: ${stats.lastSearchError}`
+              : stats.indexedChunks === 0
+                ? 'No results: the code index is empty. Run /codebase build first.'
+                : 'No matching chunks found.',
           );
           return;
         }

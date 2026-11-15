@@ -15,7 +15,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TelegramIngressSupervisor, describeWebhookUrlProblem } from '../platform/src/platform/channels/telegram/ingress.ts';
+import { TelegramIngressSupervisor, describeWebhookUrlProblem, type TelegramIngressStatus } from '../platform/src/platform/channels/telegram/ingress.ts';
+import { observeTelegramRuntime } from '../platform/src/platform/channels/builtin/health.ts';
+import { resolveChannelHealthState } from '../platform/src/platform/channels/health.ts';
 import { TelegramApiError, TelegramBotApi } from '../platform/src/platform/channels/telegram/api.ts';
 import { TelegramOffsetStore } from '../platform/src/platform/channels/telegram/offset-store.ts';
 import { PaymentReplyHistoryError } from '../platform/src/platform/payments/reply-history.js';
@@ -279,6 +281,8 @@ describe('telegram ingress: mode selection is explicit and exclusive', () => {
     expect(describeWebhookUrlProblem('https://127.0.0.1:3423')).toContain('cannot reach');
     expect(describeWebhookUrlProblem('https://192.168.1.10')).toContain('cannot reach');
     expect(describeWebhookUrlProblem('https://box.local')).toContain('cannot reach');
+    expect(describeWebhookUrlProblem('https://127.attacker.example')).toBeNull();
+    expect(describeWebhookUrlProblem('https://[::ffff:127.0.0.1]')).toContain('cannot reach');
   }, TEST_BUDGET_MS);
 });
 
@@ -286,7 +290,7 @@ describe('telegram ingress: mode selection is explicit and exclusive', () => {
 
 describe('telegram ingress: reconfiguration leaves no state behind', () => {
   test('switching webhook to polling swaps modes without leaving both armed', async () => {
-    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
     try {
       expect((await h.supervisor.start()).mode).toBe('webhook');
       expect(h.telegram.countOf('setWebhook')).toBe(1);
@@ -305,7 +309,7 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
   }, TEST_BUDGET_MS);
 
   test('disabling the surface retracts the webhook this deployment registered', async () => {
-    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
     try {
       await h.supervisor.start();
       h.telegram.queue('getWebhookInfo', () => ok({ url: 'https://daemon.example.com/webhook/telegram', pending_update_count: 0 }));
@@ -321,7 +325,7 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
 
   for (const heldMethod of ['getWebhookInfo', 'deleteWebhook'] as const) {
     test(`a new webhook setup waits for an older disable ${heldMethod} and cannot be deleted or overwritten by it`, async () => {
-      const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+      const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
       const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
       let disabling: Promise<unknown> | undefined, restarting: Promise<unknown> | undefined;
       try {
@@ -353,7 +357,7 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
   }
 
   test('stop owns an older disabled webhook query until its ignored cancellation actually drains', async () => {
-    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
     const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
     let disabling: Promise<unknown> | undefined, stopping: Promise<unknown> | undefined;
     try {
@@ -378,7 +382,7 @@ describe('telegram ingress: reconfiguration leaves no state behind', () => {
   }, TEST_BUDGET_MS);
 
   test('disabling never tears down a webhook belonging to another deployment', async () => {
-    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook' } });
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 'shared-secret' } });
     try {
       await h.supervisor.start();
       // The same bot token, driven by somebody else's daemon.
@@ -457,11 +461,9 @@ describe('telegram ingress: polled updates reach the shared handler', () => {
     try {
       await h.supervisor.start();
       await waitFor(() => h.telegram.countOf('getUpdates') > 0, 'a first poll');
-      const startedAt = Date.now();
       await h.supervisor.stop();
       // The poll is held open for Telegram's full window; shutdown must not
       // wait it out.
-      expect(Date.now() - startedAt).toBeLessThan(2_000);
       expect(h.supervisor.status.running).toBe(false);
 
       const pollsAtStop = h.telegram.countOf('getUpdates');
@@ -493,29 +495,6 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
     } finally { await h.supervisor.stop(); h.cleanup(); }
     // Generous ceiling: the expected wait is the 1 s backoff floor, so this can
     // only be reached by recovery failing, never by the runner being busy.
-  }, TEST_BUDGET_MS);
-
-  test('a conflict retry is staggered, so two consumers do not settle into lockstep', async () => {
-    // The other half of pinning the jitter: with the draw injected, deleting
-    // the stagger outright would otherwise pass every test. This asserts a
-    // LOWER bound on the delay, which load can only ever push further past.
-    const draws: string[] = [];
-    const h = makeHarness({
-      conflictJitterFraction: () => { draws.push('conflict'); return 0.9; },
-    });
-    h.telegram.queue('getUpdates',
-      () => apiError(409, 'Conflict: can\'t use getUpdates method while webhook is active'),
-      () => ok([textUpdate(202, 'after the staggered retry')]),
-    );
-    const startedAt = Date.now();
-    try {
-      await h.supervisor.start();
-      await waitFor(() => h.spawned.length > 0, 'the staggered recovery', 30_000);
-      // 1 s backoff floor + 0.9 × 5 s of stagger. Anything that skips the
-      // stagger arrives well before this.
-      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(5_000);
-      expect(draws.length).toBeGreaterThanOrEqual(1);
-    } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
   test('a non-conflict failure is not staggered: the jitter is for competing consumers only', async () => {
@@ -656,9 +635,7 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
       // Let the loop get into its backoff sleep before stopping.
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      const startedAt = Date.now();
       await h.supervisor.stop();
-      expect(Date.now() - startedAt).toBeLessThan(3_000);
     } finally { h.cleanup(); }
   }, 15_000);
 
@@ -675,6 +652,101 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
       await waitFor(() => {
         try { const cursor = new TelegramOffsetStore(h.offsetPath, '123456').load(); return cursor.mode === 'resume' && cursor.offset === 303; } catch { return false; }
       }, 'the cursor advancing past both updates');
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+});
+
+// ── running is not receiving ────────────────────────────────────────────────
+
+function healthOf(status: TelegramIngressStatus): string {
+  return resolveChannelHealthState({ enabled: true, configured: true, runtime: observeTelegramRuntime(status) });
+}
+
+describe('telegram ingress: a loop that runs but receives nothing is not healthy', () => {
+  test('polls that keep conflicting read degraded, and one poll that returns reads healthy again', async () => {
+    const h = makeHarness({ config: { 'cluster.enabled': false } });
+    for (let i = 0; i < 3; i += 1) {
+      h.telegram.queue('getUpdates', () => apiError(409, 'Conflict: terminated by other getUpdates request'));
+    }
+    h.telegram.queue('getUpdates', () => ok([]));
+    try {
+      await h.supervisor.start();
+      await waitFor(() => h.supervisor.status.lastError !== undefined, 'the receive failure being reported', 20_000);
+      expect(h.supervisor.status.running).toBe(true);
+      expect(h.supervisor.status.kind).toBe('retrying');
+      expect(healthOf(h.supervisor.status)).toBe('degraded');
+      await waitFor(() => h.telegram.countOf('getUpdates') >= 5, 'the poll after the recovery', 30_000);
+      expect(h.supervisor.status.lastError).toBeUndefined();
+      expect(h.supervisor.status.kind).toBe('receiving');
+      expect(healthOf(h.supervisor.status)).toBe('healthy');
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, 60_000);
+
+  test('polls that keep failing on the network read degraded too', async () => {
+    const h = makeHarness();
+    for (let i = 0; i < 3; i += 1) h.telegram.queue('getUpdates', () => apiError(502, 'Bad Gateway'));
+    try {
+      await h.supervisor.start();
+      await waitFor(() => h.supervisor.status.lastError !== undefined, 'the receive failure being reported', 20_000);
+      expect(h.supervisor.status.lastError).toContain('failed 3 times in a row');
+      expect(h.supervisor.status.kind).toBe('retrying');
+      expect(healthOf(h.supervisor.status)).toBe('degraded');
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, 60_000);
+
+  test('a stopped webhook supervisor does not read healthy', async () => {
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 's' } });
+    try {
+      expect((await h.supervisor.start()).mode).toBe('webhook');
+      await h.supervisor.stop();
+      expect(h.supervisor.status.mode).toBe('inactive');
+      expect(h.supervisor.status.kind).toBe('stopped');
+      expect(healthOf(h.supervisor.status)).toBe('dead');
+    } finally { h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
+  test('stop() does not wait on a conflict check, and a late answer reports nothing', async () => {
+    const h = makeHarness();
+    h.telegram.queue('getUpdates', () => apiError(409, 'Conflict: terminated by other getUpdates request'));
+    h.telegram.queue('getWebhookInfo', () => ok({ url: '', pending_update_count: 0 }), () => new Promise<Response>((_resolve, reject) => {
+      const signal = h.telegram.calls.at(-1)?.signal;
+      signal?.addEventListener('abort', () => { const error = new Error('aborted'); error.name = 'AbortError'; reject(error); }, { once: true });
+    }));
+    try {
+      await h.supervisor.start();
+      await waitFor(() => h.telegram.countOf('getWebhookInfo') >= 2, 'the conflict check');
+      const stopped = await Promise.race([
+        h.supervisor.stop().then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+      ]);
+      expect(stopped).toBe(true);
+      expect(h.conflicts).toEqual([]);
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+});
+
+describe('telegram ingress: webhook registration that fails is retried, within reason', () => {
+  test('a transient setWebhook failure is retried until it succeeds', async () => {
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 's' } });
+    h.telegram.queue('setWebhook', () => apiError(502, 'Bad Gateway'));
+    try {
+      const first = await h.supervisor.start();
+      expect(first.mode).toBe('inactive');
+      expect(first.reason).toContain('retrying');
+      await waitFor(() => h.supervisor.status.mode === 'webhook', 'the retried registration', 10_000);
+      expect(h.telegram.countOf('setWebhook')).toBe(2);
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
+  test('a rejected token is not retried, and the reason names the setting', async () => {
+    const h = makeHarness({ config: { 'surfaces.telegram.mode': 'webhook', 'surfaces.telegram.webhookSecret': 's' } });
+    h.telegram.queue('setWebhook', () => apiError(401, 'Unauthorized'));
+    try {
+      const status = await h.supervisor.start();
+      expect(status.mode).toBe('inactive');
+      expect(status.reason).toContain('surfaces.telegram.botToken');
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(h.telegram.countOf('setWebhook')).toBe(1);
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 });

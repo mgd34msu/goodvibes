@@ -131,6 +131,22 @@ describe('audit adapter', () => {
     ]);
   });
 
+  test('a bare id is refused instead of answered with the readiness list', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const tool = createAgentAuditTool({
+      commandRegistry: {} as CommandRegistry,
+      commandContext: fakeContext(),
+      toolRegistry: new ToolRegistry(),
+      harnessTool: fakeHarness(calls),
+    });
+
+    const result = await tool.execute({ id: 'gate-3' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('action:"item"');
+    expect(calls).toEqual([]);
+  });
+
   test('reads implicit audit intent from the complete protected query', async () => {
     const calls: Record<string, unknown>[] = [];
     const registry = new ToolRegistry(); bindAgentResearchSourceOwner(registry, ordinaryResearchOwner());

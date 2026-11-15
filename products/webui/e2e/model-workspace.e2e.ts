@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
   await expect(settings.getByTestId('current-model')).toBeVisible();
 });
 
-test.describe('phone: the dialog is a full-width bottom sheet (MOBILE-ADAPT)', () => {
+test.describe('phone: the dialog is a full-width bottom sheet', () => {
   test.beforeEach(async ({ page: _page }, testInfo) => only(testInfo, PHONE));
 
   test('the panel is a tall bottom sheet instead of floating as a centered card', async ({ page }) => {

@@ -13,7 +13,7 @@
  *    injected fake service (no real network, port, or browser anywhere in this file).
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CalendarConnector } from '@goodvibes-jev/engine/platform/platform/calendar';
@@ -103,12 +103,13 @@ function wizardContext(root: string, secrets: CalendarSecretSlice): CommandConte
   } as CommandContext;
 }
 
+/** Everything written under the workspace's state directory; the client id is daemon-owned, so it lands outside the TUI settings file. */
 function persistedSettings(root: string): string {
-  const candidates = [
-    join(root, '.goodvibes', 'global-tui', 'settings.json'),
-    join(root, '.goodvibes', 'global-tui', 'user-settings.json'),
-  ];
-  return candidates.filter((f) => existsSync(f)).map((f) => readFileSync(f, 'utf-8')).join('');
+  const read = (dir: string): string => readdirSync(dir, { withFileTypes: true })
+    .map((entry) => entry.isDirectory() ? read(join(dir, entry.name)) : readFileSync(join(dir, entry.name), 'utf-8'))
+    .join('\n');
+  const stateDir = join(root, '.goodvibes');
+  return existsSync(stateDir) ? read(stateDir) : '';
 }
 
 function host(): AgentWorkspaceCalendarOAuthEditorHost {
@@ -161,6 +162,8 @@ describe('calendar OAuth advanced-credentials wizard', () => {
     expect(cm.get(CALENDAR_OAUTH_CLIENT_ID_KEYS.google)).toBe('my-desktop-client.apps.googleusercontent.com');
     // the raw secret reached the secret store, NOT settings.json / status / result
     expect([...secrets.store.values()]).toContain(RAW_SECRET);
+    // The client id must be on disk, or the absence check for the secret below proves nothing.
+    expect(persistedSettings(root)).toContain('my-desktop-client.apps.googleusercontent.com');
     expect(persistedSettings(root)).not.toContain(RAW_SECRET);
     expect(h.status).not.toContain(RAW_SECRET);
     expect(JSON.stringify(h.lastActionResult)).not.toContain(RAW_SECRET);
@@ -401,5 +404,23 @@ describe('calendar OAuth service permission reading', () => {
       await expect(service.listEvents(window, { signal: controller.signal })).rejects.toThrow();
       expect(calls).toBe(1);
     } finally { installJudgmentPort(previous); }
+  });
+});
+
+describe('CalendarOAuthService loopback connect', () => {
+  test('a browser opener that throws does not abandon the sign-in or leak its listener', async () => {
+    let closed = 0;
+    const connector = {
+      beginConnectAuthCode: async () => ({
+        start: { authorizationUrl: 'https://auth.invalid/authorize', verifier: 'verifier', redirectUri: 'http://127.0.0.1:1/cb' },
+        waiter: { waitForCode: async () => ({ code: 'code' }), close: () => { closed++; } },
+      }),
+      completeConnectAuthCode: async () => ({ provider: 'google', accountId: 'synthetic' }),
+      listAccounts: async () => [],
+    } as unknown as CalendarConnector;
+    const service = new CalendarOAuthService({ config: mapConfig({ 'calendar.google.clientId': 'user-supplied-id' }), secrets: memorySecrets(), connector });
+    const result = await service.connectLoopback('google', { openUrl: () => { throw new Error('no browser'); } });
+    expect(result.ok).toBe(true);
+    expect(closed).toBe(1);
   });
 });

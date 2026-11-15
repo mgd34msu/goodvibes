@@ -14,7 +14,10 @@ import { channelDraftWireReference, createChannelDraftWireReference, isHistorica
 // drafts are visible across surfaces. The agent's local file remains the source
 // of truth; this store is a sync mirror. Conflict resolution (most-recent
 // updatedAt wins) is the integrator's concern, this store performs a plain
-// upsert and records the supplied/derived updatedAt.
+// upsert and records the supplied/derived updatedAt. The one rule enforced here
+// is that a save never replaces a newer row with an older one (DRAFT_STALE), and
+// that a draft recorded as sent stays sent (DRAFT_ALREADY_SENT), so another
+// surface cannot send it again by saving an earlier copy.
 //
 // SECURITY POSTURE:
 //   - The plaintext message body is NEVER persisted. It is encrypted at rest
@@ -33,10 +36,14 @@ export function redactWebhook(value?: string | null): string | undefined {
 
 export type DraftStatus = 'draft' | 'queued' | 'sent' | 'failed';
 
-/** Statuses callers are permitted to write via save(). */
-export const WRITABLE_DRAFT_STATUSES: readonly DraftStatus[] = ['draft', 'queued'];
+/**
+ * Statuses callers are permitted to write via save(). The surface that sends a
+ * draft records the outcome by saving it as `sent` (with `sentResponseId`) or
+ * `failed` (with `sendError`), which is how every other surface learns it.
+ */
+export const WRITABLE_DRAFT_STATUSES: readonly DraftStatus[] = ['draft', 'queued', 'sent', 'failed'];
 
-/** All known statuses (writable + terminal states set by the send pipeline). */
+/** All known statuses. */
 export const ALL_DRAFT_STATUSES: readonly DraftStatus[] = [
   'draft',
   'queued',
@@ -80,11 +87,16 @@ export interface DraftSaveInput {
   link?: string;
   tags?: string[];
   status?: DraftStatus;
+  /** Provider response id of the send; kept only for a `sent` draft. */
+  sentResponseId?: string;
+  /** Why the send failed; kept only for a `failed` draft. */
+  sendError?: string;
   createdAt?: string;
   /**
    * Caller-supplied last-modified timestamp (ISO-8601). When provided it is
    * persisted verbatim, enabling the sync contract's 'most recent updatedAt
-   * wins' conflict model; when omitted the store stamps updatedAt = now().
+   * wins' conflict model; when omitted the store stamps updatedAt = now(). A
+   * value older than the stored row's is refused as DRAFT_STALE.
    */
   updatedAt?: string;
 }
@@ -295,22 +307,22 @@ export class DraftSyncStore {
    * every caller-supplied field is a complete snapshot, NOT a partial patch.
    * The ON CONFLICT UPDATE SET clause assigns each column from the incoming row,
    * so an OMITTED optional field is CLEARED on update (webhookEnc/tags/title/
-   * channel/route/link → NULL). The ONLY exceptions are sentResponseId/
-   * sendError, which are owned by the send pipeline and survive a save().
+   * channel/route/link → NULL). That includes sentResponseId/sendError, which
+   * belong to the `sent`/`failed` snapshot they came with.
    */
-  async upsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<DraftSaveResult> {
+  async upsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication, persist = false): Promise<DraftSaveResult> {
     this.requireInit();
     // A caller can mutate its object while encryption awaits a credential.
     // Own one snapshot, including tags, before yielding to the cipher.
     const snapshot: DraftSaveInput = { ...input, ...(input.tags ? { tags: [...input.tags] } : {}) };
     // The same ID may be saved concurrently. Creation detection and write-back
     // run in admission order, preserving the first creation metadata.
-    const pending = this.upsertTail.then(() => this.performUpsert(snapshot, assertCurrent, withPublication));
+    const pending = this.upsertTail.then(() => this.performUpsert(snapshot, assertCurrent, withPublication, persist));
     this.upsertTail = pending.then(() => {}, () => {});
     return this.track(pending);
   }
 
-  private async performUpsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication): Promise<DraftSaveResult> {
+  private async performUpsert(input: DraftSaveInput, assertCurrent?: () => void, withPublication?: MutationPublication, persist = false): Promise<DraftSaveResult> {
     const encryptionChecks: Array<() => void> = [];
     const current = assertCurrent ? () => { assertCurrent(); for (const check of encryptionChecks) check(); } : undefined;
     const retainEncryption = (check: () => void) => { encryptionChecks.push(check); };
@@ -338,6 +350,20 @@ export class DraftSyncStore {
     const createdAt = existing?.createdAt ?? input.createdAt ?? timestamp;
     const updatedAt = input.updatedAt ?? timestamp;
     const status = normalizeStatus(input.status);
+    if (existing && input.updatedAt !== undefined && Date.parse(existing.updatedAt) > Date.parse(input.updatedAt)) {
+      throw new HandlerError(
+        `Draft was changed on another surface at ${existing.updatedAt}; this save is from ${input.updatedAt} and was not applied. Reload the draft and apply the edit again.`,
+        'DRAFT_STALE',
+        409,
+      );
+    }
+    if (existing?.status === 'sent' && status !== 'sent') {
+      throw new HandlerError(
+        'Draft was already sent and cannot be saved as unsent; save a new draft to send it again.',
+        'DRAFT_ALREADY_SENT',
+        409,
+      );
+    }
     const version = normalizeVersion(input.version);
 
     const bodyEnc = await this.cipher.encrypt(input.message, assertCurrent, retainEncryption);
@@ -368,7 +394,9 @@ export class DraftSyncStore {
          route = excluded.route,
          webhookEnc = excluded.webhookEnc,
          link = excluded.link,
-         tags = excluded.tags`,
+         tags = excluded.tags,
+         sentResponseId = excluded.sentResponseId,
+         sendError = excluded.sendError`,
       [
         id,
         wireReference,
@@ -384,17 +412,20 @@ export class DraftSyncStore {
         webhookEnc,
         nullable(input.link),
         tagsJson,
-        // sentResponseId / sendError are owned by the send pipeline, not save().
-        // On update they are preserved (omitted from UPDATE SET); on insert NULL.
-        null,
-        null,
+        status === 'sent' ? nullable(input.sentResponseId) : null,
+        status === 'failed' ? nullable(input.sendError) : null,
       ],
     );
 
       const row = target.get<DraftRow>('SELECT * FROM drafts WHERE id = ?', [id]);
       return { draft: toRecord(row ?? this.fallbackRow(id, wireReference, version, createdAt, updatedAt, status, webhookEnc, input)), created };
     };
-    const result = current ? await this.store.persistTransaction(write, current, withPublication) : write(this.store);
+    // `persist` stages and publishes the write as one unit, so a save that fails
+    // leaves the mirror, which other readers see live, as it was. Without it the
+    // row is changed in memory only and the caller saves.
+    const result = current || persist
+      ? await this.store.persistTransaction(write, current ?? (() => {}), withPublication)
+      : write(this.store);
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
     return result;
   }
@@ -555,8 +586,8 @@ export class DraftSyncStore {
         input.tags !== undefined && input.tags.length > 0
           ? JSON.stringify(input.tags)
           : null,
-      sentResponseId: null,
-      sendError: null,
+      sentResponseId: status === 'sent' ? nullable(input.sentResponseId) : null,
+      sendError: status === 'failed' ? nullable(input.sendError) : null,
     };
   }
 }

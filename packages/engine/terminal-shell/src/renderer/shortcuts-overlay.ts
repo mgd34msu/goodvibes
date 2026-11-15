@@ -2,19 +2,17 @@ import type { OverlayFilter } from '../overlay-filter.js';
 import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import { NARROW_MODAL_BREAKPOINT, beginModal, finishModal, searchRow, scrollCountText, standardModalWidth, wrapLines, MODAL_MARK_INSET, type KitHint, type SurfaceCanvas, type SurfaceLayer } from './surface-kit.js';
+import { filterTitledGroups } from './help-groups.js';
 import { drawTextBlock } from './surface-kit-extra.js';
 export interface ShortcutGroup { readonly title: string; readonly items: ReadonlyArray<readonly [key: string, action: string]> }
 function filterGroups(groups: readonly ShortcutGroup[], query: string): ShortcutGroup[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return groups.filter((g) => g.items.length > 0);
-  return groups
-    .map((g) => ({
-      title: g.title,
-      items: g.title.toLowerCase().includes(q)
-        ? g.items
-        : g.items.filter(([key, action]) => key.toLowerCase().includes(q) || action.toLowerCase().includes(q)),
-    }))
-    .filter((g) => g.items.length > 0);
+  return filterTitledGroups(
+    groups,
+    query,
+    (g) => g.items,
+    (g, items) => ({ title: g.title, items }),
+    ([key, action], q) => key.toLowerCase().includes(q) || action.toLowerCase().includes(q),
+  );
 }
 
 /** One drawn row of one column. */

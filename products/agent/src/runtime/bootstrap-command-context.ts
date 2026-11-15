@@ -4,6 +4,7 @@ import type { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/co
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OpsApi } from '@/runtime/index.ts';
@@ -117,6 +118,7 @@ export type CreateBootstrapCommandContextOptions = {
   operatorClient?: OperatorClient;
   peerClient?: PeerClient;
   agentKnowledgeApi?: KnowledgeApi;
+  memorySpine?: MemorySpineClient;
   promptContextReceipts?: AgentPromptContextReceiptStore;
   hookApi?: HookApi;
   mcpApi?: McpApi;
@@ -132,6 +134,7 @@ export type CreateBootstrapCommandContextOptions = {
   componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   writeLastSessionPointer?: (sessionId: string) => void;
   restoreTurnAnchors?: (sessionId: string) => number;
+  announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   surface?: import('@/runtime/index.ts').SessionSurface;
   hydrateSessionUsage?: () => void;
 };
@@ -200,6 +203,7 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'operatorClient',
       'peerClient',
       'agentKnowledgeApi',
+      'memorySpine',
       'promptContextReceipts',
       'hookApi',
       'mcpApi',
@@ -214,6 +218,7 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'memoryConsolidationScheduler',
       'writeLastSessionPointer',
       'restoreTurnAnchors',
+      'announceSessionResumed',
       'surface',
       'hydrateSessionUsage',
     ],

@@ -1,8 +1,9 @@
-import type { WebSearchProvider, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
+import type { WebSearchProvider, WebSearchProviderCall, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
 import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  resolveBaseUrl,
   resultFromRecord,
   type SearchProviderContext,
 } from './shared.js';
@@ -40,9 +41,9 @@ export function createSearxngSearchProvider(context: SearchProviderContext): Web
         baseUrlEnvCandidates: SEARXNG_ENV_KEYS,
       }, { env, serviceRegistry });
     },
-    async search(request: WebSearchRequest): Promise<WebSearchProviderResponse> {
+    async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(25, request.maxResults ?? 10));
-      const baseUrl = (env.SEARXNG_BASE_URL ?? serviceRegistry.get(SEARXNG_SERVICE_NAME)?.baseUrl ?? '').trim().replace(/\/+$/, '');
+      const baseUrl = resolveBaseUrl(serviceRegistry, env, SEARXNG_ENV_KEYS, SEARXNG_SERVICE_NAME) ?? '';
       if (!baseUrl) {
         throw new Error('SearXNG requires SEARXNG_BASE_URL or a searxng service entry with baseUrl.');
       }
@@ -57,7 +58,7 @@ export function createSearxngSearchProvider(context: SearchProviderContext): Web
         },
         headers: { Accept: 'application/json' },
         service: serviceRegistry.get(SEARXNG_SERVICE_NAME) ? SEARXNG_SERVICE_NAME : undefined,
-        fetcher: context.fetcher,
+        fetcher: context.fetcher ?? call?.fetcher,
       });
       const results = Array.isArray(payload.results)
         ? payload.results

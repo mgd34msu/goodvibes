@@ -10,6 +10,7 @@
  * through {@link AdmissionHost} and owns nothing persistent of its own except
  * the single in-flight request this node is waiting on.
  */
+import { createHash } from 'node:crypto';
 import { deriveJoinVerifier, generateNodeKeyMaterial, type NodeKeyMaterial } from './group-crypto.js';
 import {
   checkIdentityClassMessage,
@@ -36,7 +37,21 @@ import {
   type GroupStateDocument,
 } from './group-state.js';
 import type { GroupKeyMaterial } from './group-store.js';
+import { readUnverifiedEnvelope } from './protocol-envelope.js';
 import type { ClusterClock, ClusterLogger } from './types.js';
+
+/** Refusals one member will send in a window; past it, further ones are dropped. */
+const MAX_REFUSALS_PER_WINDOW = 16;
+const REFUSAL_WINDOW_MS = 10_000;
+
+/**
+ * A digest of the whole datagram. The sig field alone can be copied from a
+ * broadcast request onto an altered one, so a refusal is bound to the exact
+ * bytes asked about: any change to the request changes the digest.
+ */
+function requestSignature(raw: string): string | null {
+  return readUnverifiedEnvelope(raw) ? createHash('sha256').update(raw).digest('hex') : null;
+}
 
 /** What the admission service borrows from the runtime. */
 export interface AdmissionHost {
@@ -91,6 +106,12 @@ interface PendingAdmission {
   readonly settle: (result: AdmissionOutcome) => void;
   cancelDeadline?: () => void;
   /**
+   * The signature on the request this machine sent. A refusal must echo it, so a
+   * refusal produced by someone else's forged request in this machine's name
+   * cannot be mistaken for the group's answer to this one.
+   */
+  requestSig?: string | null;
+  /**
    * Replies addressed to this machine that arrived and could not be
    * authenticated. Counted so the timeout can tell "the group is not there"
    * from "the group is there and no longer knows me".
@@ -103,8 +124,22 @@ export class GroupAdmissionService {
   private active = true;
   private revision = 0;
   private readonly work = new Set<Promise<void>>();
+  private refusalWindowStart = 0;
+  private refusalsInWindow = 0;
 
   constructor(private readonly host: AdmissionHost) {}
+
+  /** Refusals are unauthenticated-triggered traffic; cap what one member emits. */
+  private allowRefusal(): boolean {
+    const now = this.host.clock.now();
+    if (now - this.refusalWindowStart >= REFUSAL_WINDOW_MS || now < this.refusalWindowStart) {
+      this.refusalWindowStart = now;
+      this.refusalsInWindow = 0;
+    }
+    if (this.refusalsInWindow >= MAX_REFUSALS_PER_WINDOW) return false;
+    this.refusalsInWindow += 1;
+    return true;
+  }
 
   /** Fail an in-flight request, on shutdown, or when its deadline passes. */
   expire(now: number, reason: string): void {
@@ -179,6 +214,7 @@ export class GroupAdmissionService {
     if (checked.envelope.nodeId === this.host.nodeId) return;
     const body = parseJoinRequestBody(checked.envelope.body);
     if (!body) return;
+    const requestSig = requestSignature(raw);
 
     const decision = decideAdmission(
       state,
@@ -198,6 +234,7 @@ export class GroupAdmissionService {
       await this.refuse(
         checked.envelope.nodeId,
         decision.reason === 'identity-did-not-match' ? 'join-key-did-not-match' : decision.reason,
+        requestSig,
       );
       return;
     }
@@ -216,6 +253,7 @@ export class GroupAdmissionService {
       await this.refuse(
         checked.envelope.nodeId,
         admitted.refused === 'group-is-full' ? 'group-is-full' : 'removed-from-the-group',
+        requestSig,
       );
       return;
     }
@@ -270,7 +308,7 @@ export class GroupAdmissionService {
       // waiting out its full timeout and then reporting that nobody answered,
       // a healthy-looking daemon, permanently out of the group, with nothing
       // anywhere naming the reason or the fix.
-      await this.refuseRejoin(peeked.nodeId, reason);
+      await this.refuseRejoin(peeked.nodeId, reason, requestSignature(raw));
       return;
     }
     const body = parseRejoinRequestBody(peeked.body);
@@ -294,9 +332,11 @@ export class GroupAdmissionService {
     });
   }
 
-  private async refuse(nodeId: string, reason: AdmissionRefusal): Promise<void> {
+  private async refuse(nodeId: string, reason: AdmissionRefusal, requestSig: string | null): Promise<void> {
     const material = this.host.material();
-    if (!material) return;
+    // Without the request's signature the refusal could not be tied to it, and
+    // an answer the asker cannot tie to its own request is only noise.
+    if (!material || !requestSig || !this.allowRefusal()) return;
     await this.host.send(encodeJoinClassMessage(
       {
         type: GROUP_MESSAGE_TYPES.joinRefuse,
@@ -304,7 +344,7 @@ export class GroupAdmissionService {
         nodeVersion: this.host.version,
         seq: this.host.nextSeq(),
         ts: this.host.clock.now(),
-        body: { forNodeId: nodeId, reason, detail: describeRefusal(reason) },
+        body: { forNodeId: nodeId, forRequest: requestSig, reason, detail: describeRefusal(reason) },
       },
       material.groupId,
       material.joinVerifier,
@@ -322,10 +362,16 @@ export class GroupAdmissionService {
    * It carries no secret and grants nothing. The worst a forged one can do is
    * make a machine give up early and tell its operator to run `cluster join`,
    * and a forgery cannot even do that: it is dropped unless it verifies.
+   *
+   * It also echoes the signature of the request it answers. A genuine member
+   * will answer ANY datagram claiming to be this node, and the answer is
+   * signed with its real key, so without the echo anything on the network
+   * could make a healthy machine believe it had been removed by sending a
+   * request in its name. The asker only obeys a refusal to the request it sent.
    */
-  private async refuseRejoin(nodeId: string, reason: AdmissionRefusal | 'not-on-the-roster'): Promise<void> {
+  private async refuseRejoin(nodeId: string, reason: AdmissionRefusal | 'not-on-the-roster', requestSig: string | null): Promise<void> {
     const material = this.host.material();
-    if (!material) return;
+    if (!material || !requestSig || !this.allowRefusal()) return;
     await this.host.send(encodeIdentityClassMessage(
       {
         type: GROUP_MESSAGE_TYPES.rejoinRefuse,
@@ -335,6 +381,7 @@ export class GroupAdmissionService {
         ts: this.host.clock.now(),
         body: {
           forNodeId: nodeId,
+          forRequest: requestSig,
           reason,
           detail: reason === 'not-on-the-roster'
             ? 'this machine is not on the group roster'
@@ -423,14 +470,16 @@ export class GroupAdmissionService {
       }
       if (this.pending !== pending || !this.active) return;
       pending.joinVerifier = joinVerifier;
-      await this.host.send(encodeJoinClassMessage({
+      const raw = encodeJoinClassMessage({
         type: GROUP_MESSAGE_TYPES.join,
         nodeId: this.host.nodeId,
         nodeVersion: this.host.version,
         seq: this.host.nextSeq(),
         ts: this.host.clock.now(),
         body: { displayName: this.host.nodeDisplayName, identityKey: node.identity.publicKey, agreementKey: node.agreement.publicKey },
-      }, groupId, joinVerifier));
+      }, groupId, joinVerifier);
+      pending.requestSig = requestSignature(raw);
+      await this.host.send(raw);
     });
   }
 
@@ -447,8 +496,8 @@ export class GroupAdmissionService {
     if (!this.active || this.pending) return Promise.resolve(this.unavailable());
     const material = this.host.material();
     if (!material) return Promise.resolve({ ok: false, failure: 'not-sent', reason: 'this machine is not in a group' });
-    return this.await('rejoin', material.groupId, material.joinVerifier, material.node, timeoutMs, () => this.host.send(
-      encodeIdentityClassMessage(
+    return this.await('rejoin', material.groupId, material.joinVerifier, material.node, timeoutMs, (pending) => {
+      const raw = encodeIdentityClassMessage(
         {
           type: GROUP_MESSAGE_TYPES.rejoin,
           nodeId: this.host.nodeId,
@@ -464,8 +513,10 @@ export class GroupAdmissionService {
         },
         material.groupId,
         material.node.identity,
-      ),
-    ));
+      );
+      pending.requestSig = requestSignature(raw);
+      return this.host.send(raw);
+    });
   }
 
   private onJoinReply(raw: string, type: string): void {
@@ -476,6 +527,9 @@ export class GroupAdmissionService {
     if (checked.envelope.body['forNodeId'] !== this.host.nodeId) return;
 
     if (type === GROUP_MESSAGE_TYPES.joinRefuse) {
+      // A refusal to some other request in this machine's name is not the
+      // group's answer to this one.
+      if (!pending.requestSig || checked.envelope.body['forRequest'] !== pending.requestSig) return;
       const detail = checked.envelope.body['detail'];
       // An explicit refusal from the group: it heard us and said no.
       this.settle({
@@ -557,7 +611,8 @@ export class GroupAdmissionService {
     const peeked = peekIdentityClassMessage(raw);
     if (!peeked || peeked.body['forNodeId'] !== this.host.nodeId || peeked.groupId !== pending.groupId
       || peeked.type !== GROUP_MESSAGE_TYPES.rejoinRefuse) return;
-    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId, pending.groupId)) {
+    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId, pending.groupId)
+      || !pending.requestSig || peeked.body['forRequest'] !== pending.requestSig) {
       pending.unauthenticatedReplies += 1;
       return;
     }

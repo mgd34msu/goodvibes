@@ -362,26 +362,10 @@ describe('reading the store\'s email, and telling him about it', () => {
 
     const message = renderConfirmationReport({
       facts: {
-        merchantDomain: record.merchantDomain,
         item: unsafeOwnerSuppliedTextForTests(record.item),
-        itemMinorUnits: record.itemMinorUnits,
-        taxMinorUnits: record.taxMinorUnits,
-        feesMinorUnits: record.feesMinorUnits,
-        shippingMinorUnits: record.shippingMinorUnits,
         totalMinorUnits: record.totalMinorUnits,
         currency: record.currency as CurrencyCode,
         cardLast4: record.cardLast4,
-        shippingTier: 'normal',
-        stepDown: null,
-        poolsAfter: new BudgetLedger().snapshot(
-          {
-            dailyItemMinorUnits: 500_000, dailyOverageMinorUnits: 100_000,
-            perPurchaseCeiling: { enabled: false, minorUnits: 0 },
-            overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 },
-          },
-          Date.now(),
-          'UTC',
-        ),
       },
       confirmation: facts,
       senderDomain: 'bestbuy.com',

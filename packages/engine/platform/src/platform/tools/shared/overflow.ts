@@ -12,6 +12,7 @@ import { outputBlockView, outputKeep } from '../batteries/output-keep.js';
 
 export const DEFAULT_MAX_CHARS = 50_000;
 const OVERFLOW_DIR = '.goodvibes/.overflow';
+const OVERFLOW_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 // ─── Retention Policy ───────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ const OVERFLOW_DIR = '.goodvibes/.overflow';
  * wins. Prune candidates are deleted oldest-first.
  */
 export interface RetentionPolicyConfig {
-  /** Maximum age of a spill entry in milliseconds. Default: 1 hour. */
+  /** Maximum age of a spill entry in milliseconds. Default: 7 days. */
   maxAgeMs?: number | undefined;
   /** Maximum number of retained entries. Default: unlimited. */
   maxCount?: number | undefined;
@@ -31,7 +32,7 @@ export interface RetentionPolicyConfig {
 }
 
 const DEFAULT_RETENTION: Required<RetentionPolicyConfig> = {
-  maxAgeMs: Infinity, // Retain full output unless the owner configures cleanup.
+  maxAgeMs: 7 * 24 * 60 * 60 * 1000, // Full outputs can hold secrets a command printed; they do not stay on disk indefinitely.
   maxCount: Infinity,
   maxSizeBytes: Infinity,
 };
@@ -126,7 +127,8 @@ export class FileBackend implements SpillBackend {
       if (!this.ensureDir()) return null;
       target = this._safePath(filename);
       if (!target) return null;
-      writeFileSync(target, content, 'utf-8');
+      // Full command output can contain secrets, so only the owner may read it.
+      writeFileSync(target, content, { encoding: 'utf-8', mode: 0o600 });
       return {
         id: filename,
         filename,
@@ -165,6 +167,8 @@ export class FileBackend implements SpillBackend {
     try {
       files = readdirSync(this.overflowDir);
     } catch (error) {
+      // No spill directory yet means nothing to prune.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       logger.warn('OverflowHandler: failed to read overflow directory during cleanup', {
         path: this.overflowDir,
         error: summarizeError(error),
@@ -482,6 +486,16 @@ export class OverflowHandler {
     }
     this.backend = backend ?? createSpillBackend(spillBackend, config.baseDir);
     this.retention = { ...DEFAULT_RETENTION, ...config.retention };
+    // Outputs of earlier sessions are pruned when the runtime starts; `handle` repeats it for long sessions.
+    this.pruneExpired();
+  }
+
+  private lastCleanupAt = 0;
+
+  private pruneExpired(): void {
+    this.lastCleanupAt = Date.now();
+    try { this.cleanup(); }
+    catch (error) { logger.warn('OverflowHandler: cleanup failed', { error: summarizeError(error) }); }
   }
 
   private sanitizeLabel(label: string): string {
@@ -518,6 +532,7 @@ export class OverflowHandler {
     const label = this.sanitizeLabel(options.label ?? 'output');
     const filename = `${Date.now()}-${crypto.randomUUID()}-${label}.txt`;
 
+    if (Date.now() - this.lastCleanupAt >= OVERFLOW_CLEANUP_INTERVAL_MS) this.pruneExpired();
     let entry: SpillEntry | null;
     try {
       entry = this.backend.write(filename, content);

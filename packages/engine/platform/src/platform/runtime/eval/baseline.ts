@@ -11,7 +11,8 @@ import type { EvalBaseline, EvalSuiteResult, BaselineSuiteSummary } from './type
 import { isAbsolute, relative, resolve } from 'node:path';
 
 function resolveBaselinePath(filePath: string, projectRoot: string): string {
-  const resolved = resolve(filePath);
+  // A relative path is relative to the project root, not to wherever the process was started.
+  const resolved = resolve(projectRoot, filePath);
   const fromRoot = relative(resolve(projectRoot), resolved);
   // Inside the root when the relative path neither climbs out nor switches drive.
   if (fromRoot === '..' || fromRoot.startsWith('../') || fromRoot.startsWith('..\\') || isAbsolute(fromRoot)) {
@@ -71,7 +72,9 @@ export function deserialiseBaseline(json: string): EvalBaseline {
     parsed === null ||
     typeof (parsed as Record<string, unknown>).label !== 'string' ||
     typeof (parsed as Record<string, unknown>).capturedAt !== 'number' ||
-    typeof (parsed as Record<string, unknown>).suites !== 'object'
+    typeof (parsed as Record<string, unknown>).suites !== 'object' ||
+    (parsed as Record<string, unknown>).suites === null ||
+    Array.isArray((parsed as Record<string, unknown>).suites)
   ) {
     throw new Error('Invalid baseline format: missing required fields (label, capturedAt, suites).');
   }

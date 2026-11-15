@@ -1,5 +1,5 @@
 /**
- * Tests for src/core/alert-gating.ts
+ * Tests for platform/runtime/alert-gating.ts
  *
  * Covers:
  * - readBooleanConfig: default/absent/invalid handling

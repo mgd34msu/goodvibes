@@ -311,13 +311,18 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
       ...(captured.source !== undefined ? { source: captured.source } : {}),
       ...(captured.recoverable !== undefined ? { recoverable: captured.recoverable } : {}),
       ...(captured.status !== undefined ? { status: captured.status } : {}),
+      // Both are caller-facing: a retry wait the client must honor and the id support asks for.
+      ...(captured.retryAfterMs !== undefined ? { retryAfterMs: captured.retryAfterMs } : {}),
+      ...(captured.requestId !== undefined ? { requestId: captured.requestId } : {}),
     };
     return safe;
   }
   if (error instanceof GoodVibesError || isStructuredErrorLike(error)) {
-    const status = error instanceof GoodVibesError
+    // An error without a status of its own is answered with the caller's status,
+    // so its category and wording are judged against that status too.
+    const status = (error instanceof GoodVibesError
       ? error.status
-      : error.status ?? error.statusCode;
+      : error.status ?? error.statusCode) ?? options.status;
     const provider = error.provider;
     const message = error.message;
     const providerCode = error.providerCode;
@@ -426,7 +431,7 @@ interface Wording {
 function wordingOf(error: unknown, options: JsonErrorResponseOptions): Wording | undefined {
   if (isStructuredDaemonErrorBody(error)) return undefined;
   if (error instanceof GoodVibesError || isStructuredErrorLike(error)) {
-    const status = error instanceof GoodVibesError ? error.status : error.status ?? error.statusCode;
+    const status = (error instanceof GoodVibesError ? error.status : error.status ?? error.statusCode) ?? options.status;
     const code = error.code ?? error.providerCode;
     const fixed = fixedCategory(normalizeCategory(error.category), status, code, error.message);
     const fromProvider = isProviderAttributed({
@@ -475,10 +480,19 @@ export async function readErrorResponseBody(
 ): Promise<StructuredDaemonErrorBody> {
   const wording = wordingOf(error, options);
   if (wording === undefined || !wording.open) return buildErrorResponseBody(error, options);
-  const failure = await readFailure(
-    { message: wording.message, status: wording.status, code: wording.code, errorName: wording.errorName },
-    options.site ?? 'daemon.error-response',
-  );
+  let failure: FailureConclusions;
+  try {
+    failure = await readFailure(
+      { message: wording.message, status: wording.status, code: wording.code, errorName: wording.errorName },
+      options.site ?? 'daemon.error-response',
+    );
+  } catch {
+    // Answering an error is the one path that must not throw: with no usable
+    // decision model the body is built from structure alone (the same body an
+    // error with a known status gets), so the caller still receives its status
+    // and message instead of a rejected response.
+    return buildErrorResponseBody(error, options);
+  }
   return buildErrorResponseBody(error, { ...options, failure });
 }
 
@@ -506,6 +520,57 @@ export async function readJsonErrorResponse(
   options: JsonErrorResponseOptions & { readonly site?: string | undefined } = {},
 ): Promise<Response> {
   return responseFor(await readErrorResponseBody(error, options), options);
+}
+
+const CLIENT_STATUS_BY_CATEGORY: Readonly<Record<string, number>> = {
+  bad_request: 400,
+  authentication: 401,
+  authorization: 403,
+  permission: 403,
+  not_found: 404,
+  rate_limit: 429,
+};
+
+function ownStatusOf(error: unknown): number | undefined {
+  if (error === null || typeof error !== 'object') return undefined;
+  const { status, statusCode } = error as { readonly status?: unknown; readonly statusCode?: unknown };
+  for (const candidate of [status, statusCode]) {
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 400 && candidate <= 599) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * The HTTP status for a failure thrown by a service the route called (as
+ * opposed to a request the route could already see was malformed): the
+ * error's own 4xx/5xx status, 503 for an error that says it is retryable, the
+ * client status its own category names, and otherwise `fallback` (500 unless a
+ * route's service is known to refuse with statusless errors). A fixed 400 or
+ * 404 at such a call site told clients that a full disk or a provider outage
+ * was a mistake in their request.
+ */
+export function serviceFailureStatus(error: unknown, fallback = 500): number {
+  const own = ownStatusOf(error);
+  if (own !== undefined) return own;
+  if (error !== null && typeof error === 'object') {
+    if ((error as { readonly retryable?: unknown }).retryable === true) return 503;
+    const category = (error as { readonly category?: unknown }).category;
+    if (typeof category === 'string' && Object.hasOwn(CLIENT_STATUS_BY_CATEGORY, category)) return CLIENT_STATUS_BY_CATEGORY[category]!;
+  }
+  return fallback;
+}
+
+/**
+ * {@link readJsonErrorResponse} for a caught service failure, with its status from
+ * {@link serviceFailureStatus}. `fallbackStatus` is for a service that refuses a
+ * request with errors that carry no status; everything that does carry one keeps it.
+ */
+export function readServiceErrorResponse(
+  error: unknown,
+  options: Omit<JsonErrorResponseOptions, 'status'> & { readonly site?: string | undefined; readonly fallbackStatus?: number | undefined } = {},
+): Promise<Response> {
+  const { fallbackStatus, ...rest } = options;
+  return readJsonErrorResponse(error, { ...rest, status: serviceFailureStatus(error, fallbackStatus) });
 }
 
 function responseFor(body: StructuredDaemonErrorBody, options: JsonErrorResponseOptions): Response {

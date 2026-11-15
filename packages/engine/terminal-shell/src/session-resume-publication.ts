@@ -33,12 +33,29 @@ export function publishResumedSession(
     readonly hookError: string;
   },
 ): void {
+  // Each step is independent: one that fails must not skip the others, and the
+  // person is told which shared state did not follow the resume.
+  const warn = (what: string, error: unknown): void => {
+    logger.warn(`session resume: ${what}`, { error: summarizeError(error) });
+    options.conversation.log(`Resumed, but ${what}: ${summarizeError(error)}`, { fg: activeTokens().warning });
+    options.requestRender();
+  };
   options.onSessionIdChanged?.(sessionId);
-  options.writeLastSessionPointer(sessionId);
-  void options.sharedSessionBroker.reopenSession(sessionId).catch((err) => {
-    logger.debug('session broker reopen session failed', { err });
-  });
-  policy.reopen();
+  try {
+    options.writeLastSessionPointer(sessionId);
+  } catch (error) {
+    warn('the last-session pointer was not saved', error);
+  }
+  try {
+    void options.sharedSessionBroker.reopenSession(sessionId).catch((error: unknown) => warn('the shared session was not reopened', error));
+  } catch (error) {
+    warn('the shared session was not reopened', error);
+  }
+  try {
+    policy.reopen();
+  } catch (error) {
+    warn('the session state was not reopened', error);
+  }
   options.conversation.log(`Resumed session: ${sessionId}`, { fg: activeTokens().secondary });
   const returnContextMode = getReturnContextMode(options.configManager);
   if (returnContextMode !== 'off' && meta.returnContext) {
@@ -66,5 +83,8 @@ export function publishResumedSession(
       timestamp: Date.now(),
       payload: { sessionId },
     })
-    .catch((error: unknown) => logger.debug(policy.hookError, { path: 'Lifecycle:session:load', error: summarizeError(error) }));
+    .catch((error: unknown) => {
+      logger.debug(policy.hookError, { path: 'Lifecycle:session:load', error: summarizeError(error) });
+      warn('the session load hook failed', error);
+    });
 }

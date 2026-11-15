@@ -1,7 +1,5 @@
 /** Real retained-hold files and canonical native publication, not version labels alone. */
-import { afterEach, expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
-import * as nativeFs from 'node:fs';
+import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -218,42 +216,38 @@ for (const profile of ['old-version', 'same-version-unknown', 'same-version-miss
       if (!bytes) throw new Error('Unexpected fixture download');
       return { ok: true, status: 200, url, headers: { get: () => null }, text: async () => { if (name === 'SHA256SUMS.txt') readsAtManifest = installedReads; return bytes.toString(); }, arrayBuffer: async () => Uint8Array.from(bytes).buffer };
     };
-    const hash = profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin' ? spyOn(crypto, 'createHash') : undefined;
-    try {
-    const apply = applyVerifiedUpdate({ targets, io, fetchImpl, downloadBaseUrl: `https://fixture.invalid/v${candidateVersion}`, platform: 'linux',
-      daemonNative: { execPath, platform: 'linux', arch: 'x64', version: candidateVersion } });
-    if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
-      await expect(apply).rejects.toThrow('reader artifact checksum'); expect(checked).toBe(false);
-      expect(candidateFetches).toBe(0); expect(readsAtManifest).toBeGreaterThan(0);
-      // This borrowed adapter cannot certify bytes from its metadata alone.
-      // After the manifest-body await, custody rechecks each original member
-      // once before interpreting that response. These are source-order reads,
-      // not receipt-first installed-integrity admission or reader-floor reads.
-      expect(installedReadPaths.slice(readsAtManifest)).toEqual(targets.map(target => target.path));
-      expect(installedReads).toBe(readsAtManifest + targets.length);
-      expect(hash).not.toHaveBeenCalled();
-      for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
-      expect(memory.mutations).toEqual([]);
-    } else if (profile === 'foreign-reader-profile') {
-      await expect(apply).rejects.toThrow('reader artifact does not match'); expect(checked).toBe(false);
-      for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
-      expect(memory.mutations).toEqual([]);
-    } else if (hasRequirement && profile !== 'same-version-capable') {
-      await expect(apply).rejects.toBeInstanceOf(UpdateTransactionError); expect(checked).toBe(true);
-      for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
-      expect(memory.mutations.filter(operation => operation.startsWith('rename:'))).toEqual([]);
-    } else {
-      await apply; expect(checked).toBe(hasRequirement);
-      for (const [path, bytes] of Object.entries(candidate.installation(execPath))) {
-        const actual = memory.files.get(path);
-        if (!actual) throw new Error(`Missing actual installed fixture member: ${path}`);
-        // Installation receipts are rendered locally; payload bytes remain
-        // exact release bytes and the complete parsed receipt must agree.
-        if (path === '/native-reader-fixture/daemon-installation.json') expect(JSON.parse(actual.toString())).toEqual(JSON.parse(bytes.toString()));
-        else expect(actual).toEqual(bytes);
-      }
+  const apply = applyVerifiedUpdate({ targets, io, fetchImpl, downloadBaseUrl: `https://fixture.invalid/v${candidateVersion}`, platform: 'linux',
+    daemonNative: { execPath, platform: 'linux', arch: 'x64', version: candidateVersion } });
+  if (profile === 'malformed-reader-pin' || profile === 'ambiguous-reader-pin') {
+    await expect(apply).rejects.toThrow('reader artifact checksum'); expect(checked).toBe(false);
+    expect(candidateFetches).toBe(0); expect(readsAtManifest).toBeGreaterThan(0);
+    // This borrowed adapter cannot certify bytes from its metadata alone.
+    // After the manifest-body await, custody rechecks each original member
+    // once before interpreting that response. These are source-order reads,
+    // not receipt-first installed-integrity admission or reader-floor reads.
+    expect(installedReadPaths.slice(readsAtManifest)).toEqual(targets.map(target => target.path));
+    expect(installedReads).toBe(readsAtManifest + targets.length);
+    for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
+    expect(memory.mutations).toEqual([]);
+  } else if (profile === 'foreign-reader-profile') {
+    await expect(apply).rejects.toThrow('reader artifact does not match'); expect(checked).toBe(false);
+    for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
+    expect(memory.mutations).toEqual([]);
+  } else if (hasRequirement && profile !== 'same-version-capable') {
+    await expect(apply).rejects.toBeInstanceOf(UpdateTransactionError); expect(checked).toBe(true);
+    for (const [path, bytes] of Object.entries(previous.installation(execPath))) expect(memory.files.get(path)).toEqual(bytes);
+    expect(memory.mutations.filter(operation => operation.startsWith('rename:'))).toEqual([]);
+  } else {
+    await apply; expect(checked).toBe(hasRequirement);
+    for (const [path, bytes] of Object.entries(candidate.installation(execPath))) {
+      const actual = memory.files.get(path);
+      if (!actual) throw new Error(`Missing actual installed fixture member: ${path}`);
+      // Installation receipts are rendered locally; payload bytes remain
+      // exact release bytes and the complete parsed receipt must agree.
+      if (path === '/native-reader-fixture/daemon-installation.json') expect(JSON.parse(actual.toString())).toEqual(JSON.parse(bytes.toString()));
+      else expect(actual).toEqual(bytes);
     }
-    } finally { hash?.mockRestore(); }
+    }
   });
 }
 
@@ -285,17 +279,42 @@ test('native stat-only source retention rejects invalid reader manifests before 
   };
   const apply = () => applyVerifiedUpdate({ targets, io: realUpdateFileIo, fetchImpl, downloadBaseUrl: 'https://fixture.invalid/current', platform: 'linux',
     daemonNative: { execPath, platform: 'linux', arch: 'x64', version: '3.1.2' } });
-  const hash = spyOn(crypto, 'createHash'), reads = spyOn(nativeFs, 'readFileSync');
-  try {
-    for (const bad of [candidate.checksumManifest + originalLine + '\n', candidate.checksumManifest.replace(originalLine, 'not-a-digest  ' + readerAsset)]) {
-      manifest = bad; await expect(apply()).rejects.toThrow('reader artifact checksum');
-      expect(hash).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); expect(bodyFetches).toBe(0);
-    }
-    manifest = candidate.checksumManifest; replaceDuringManifest = true;
-    await expect(apply()).rejects.toThrow('installation changed during preparation');
-    expect(hash).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); expect(bodyFetches).toBe(0);
-    replaceDuringManifest = false;
-    await apply(); expect(hash).toHaveBeenCalled(); expect(reads).toHaveBeenCalled(); expect(bodyFetches).toBeGreaterThan(0);
-    expect(readFileSync(execPath)).toEqual(candidate.members[0]!.bytes);
-  } finally { hash.mockRestore(); reads.mockRestore(); }
+  for (const bad of [candidate.checksumManifest + originalLine + '\n', candidate.checksumManifest.replace(originalLine, 'not-a-digest  ' + readerAsset)]) {
+    manifest = bad; await expect(apply()).rejects.toThrow('reader artifact checksum');
+    expect(bodyFetches).toBe(0);
+  }
+  manifest = candidate.checksumManifest; replaceDuringManifest = true;
+  await expect(apply()).rejects.toThrow('installation changed during preparation');
+  expect(bodyFetches).toBe(0);
+  replaceDuringManifest = false;
+  await apply(); expect(bodyFetches).toBeGreaterThan(0);
+  expect(readFileSync(execPath)).toEqual(candidate.members[0]!.bytes);
+});
+
+test('a refused new format leaves the requirement file alone and later declarations still work', () => {
+  const prefix = mkdtempSync(join(tmpdir(), 'native-data-reader-')); roots.push(prefix);
+  const execPath = join(prefix, 'goodvibes-daemon');
+  let refuse = true;
+  const publisher: AdmittedNativeDataPublisher = { execPath, version: '3.3.0', assertCurrent: () => {},
+    readerCohort: formats => (refuse && formats.includes('native-conversation-settled-v1') ? ('mixed' as unknown as () => void) : () => {}) };
+  const owner = createNativeDataWriteOwner(publisher);
+  const file = join(prefix, NATIVE_READER_REQUIREMENT_FILE);
+  owner.declare('knowledge-schema-v17');
+  const before = readFileSync(file, 'utf8');
+  expect(() => owner.declare('native-conversation-settled-v1')).toThrow(NativeDataCompatibilityError);
+  expect(readFileSync(file, 'utf8')).toBe(before);
+  owner.declare('knowledge-schema-v17');
+  owner.declare('payment-retained-holds-v2');
+  expect(JSON.parse(readFileSync(file, 'utf8')).formats).toEqual(['knowledge-schema-v17', 'payment-retained-holds-v2']);
+  refuse = false;
+  owner.declare('native-conversation-settled-v1');
+  expect(JSON.parse(readFileSync(file, 'utf8')).formats).toContain('native-conversation-settled-v1');
+});
+
+test('a requirement file that cannot be read still retires the writer after a refusal elsewhere', () => {
+  const f = fixture(); f.owner.declare('payment-retained-holds-v2');
+  writeFileSync(f.file, '{');
+  expect(() => f.owner.declare('payment-retained-holds-v2')).toThrow(NativeDataCompatibilityError);
+  writeFileSync(f.file, requirement());
+  expect(() => f.owner.declare('payment-retained-holds-v2')).toThrow(NativeDataCompatibilityError);
 });

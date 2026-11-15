@@ -15,20 +15,24 @@ export function createAskPageRecovery(store: KnowledgeStore, spaceId: string, as
     const extraction = store.getExtractionBySourceId(source.id);
     return { source, extraction, extractionVersion: JSON.stringify(extraction), version: JSON.stringify([source, extraction]) };
   });
-  const devicesAndSourcesCurrent = (exceptSourceId?: string) => {
+  // Guards run after every write, so they compare record identity only; the full content
+  // comparison (catches in-place mutation) is reserved for the settle points.
+  const devicesAndSourcesCurrent = (exceptSourceId?: string, deep = false) => {
     if (signal?.aborted) throw new Held('aborted');
     assertRequest();
     try { owner?.assertCurrent(); } catch { throw new Held('stale'); }
-    for (const { node, version } of subjects) if (store.getNode(node.id) !== node || JSON.stringify(store.getNode(node.id)) !== version) throw new Held('stale');
+    for (const { node, version } of subjects) if (store.getNode(node.id) !== node || (deep && JSON.stringify(store.getNode(node.id)) !== version)) throw new Held('stale');
     for (const { source, extraction, version } of rows) {
       if (source.id === exceptSourceId) continue;
       const current = store.getSource(source.id), currentExtraction = store.getExtractionBySourceId(source.id);
-      if (current !== source || currentExtraction !== extraction || JSON.stringify([current, currentExtraction]) !== version) throw new Held('stale');
+      if (current !== source || currentExtraction !== extraction || (deep && JSON.stringify([current, currentExtraction]) !== version)) throw new Held('stale');
     }
   };
   const facts = () => store.listNodesInSpace(spaceId).filter((node) => node.kind === 'fact' || node.metadata.semanticKind === 'fact');
   return {
     assertCurrent: () => devicesAndSourcesCurrent(),
+    /** Full content comparison; call once when the work settles, not per write. */
+    assertUnchanged: () => devicesAndSourcesCurrent(undefined, true),
     acknowledgeSourceWritten(source: KnowledgeSourceRecord) {
       devicesAndSourcesCurrent(source.id);
       if (store.getSource(source.id) !== source) throw new Held('stale');
@@ -40,13 +44,13 @@ export function createAskPageRecovery(store: KnowledgeStore, spaceId: string, as
       devicesAndSourcesCurrent();
     },
     async run<T>(operation: () => Promise<T>): Promise<T> {
-      devicesAndSourcesCurrent();
+      devicesAndSourcesCurrent(undefined, true);
       const previous = new Map(facts().map((fact) => [fact.id, { fact, version: JSON.stringify(fact) }]));
       const edges = store.listEdges();
-      try { const value = await operation(); devicesAndSourcesCurrent(); return value; }
+      try { const value = await operation(); devicesAndSourcesCurrent(undefined, true); return value; }
       catch (error) {
         if (!(error instanceof KnowledgeFactReadSetStaleError) || !owner) throw error;
-        devicesAndSourcesCurrent();
+        devicesAndSourcesCurrent(undefined, true);
         const old = previous.get(error.factId), current = store.getNode(error.factId);
         const relevant = (edge: (typeof edges)[number]) => (edge.relation === 'supports_fact' && edge.toId === error.factId)
           || (edge.relation === 'describes' && edge.fromId === error.factId);
@@ -56,7 +60,7 @@ export function createAskPageRecovery(store: KnowledgeStore, spaceId: string, as
         if (!factChanged && !edgesChanged) throw error;
         // The second operation owns an entirely new data read-set and judgments.
         // Its failure escapes; it cannot become an unbounded retry loop.
-        const value = await operation(); devicesAndSourcesCurrent(); return value;
+        const value = await operation(); devicesAndSourcesCurrent(undefined, true); return value;
       }
     },
   };

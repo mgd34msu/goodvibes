@@ -2,7 +2,8 @@
  * recovery-decisions-housekeeping.test.ts, the reaping half of the removal
  * ledger: that its bounds are actually applied to DISK (not merely filtered on
  * read), that every discard is disclosed rather than silent, and that a torn or
- * concurrently-written ledger is never mistaken for an empty one.
+ * concurrently-written ledger is never mistaken for an empty one, and that two
+ * terminals recording removals together lose neither.
  *
  * The defect this covers: the ledger's 200-record cap and 90-day TTL were both
  * correct, but expired records were only filtered in memory on read and only
@@ -12,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SessionSurface } from '@/runtime/index.ts';
 import {
@@ -269,10 +270,46 @@ describe('the ledger write survives being interrupted', () => {
     expect(existsSync(`${path}.${process.pid}.tmp`)).toBe(false);
   });
 
+  test('a write that fails part-way leaves the existing ledger exactly as it was', () => {
+    const now = Date.now();
+    recordRecoveryRemoval(surface, 'sess-before', now);
+    const path = recoveryDecisionsPathFor(surface);
+    const before = readFileSync(path, 'utf-8');
+    // The temp name is taken by a directory, so the write cannot even start.
+    const blocker = `${path}.${process.pid}.tmp`;
+    mkdirSync(blocker);
+
+    recordRecoveryRemoval(surface, 'sess-lost', now);
+
+    expect(readFileSync(path, 'utf-8')).toBe(before);
+    expect(readRecoveryRemovals(surface, now).map((entry) => entry.sessionId)).toEqual(['sess-before']);
+    rmSync(blocker, { recursive: true, force: true });
+    // Nothing is stuck: the next removal is recorded normally.
+    recordRecoveryRemoval(surface, 'sess-after', now);
+    expect(readRecoveryRemovals(surface, now).map((entry) => entry.sessionId)).toEqual(['sess-before', 'sess-after']);
+  });
+
   test('the ledger keeps owner-only permissions after an atomic replace', () => {
     const path = recoveryDecisionsPathFor(surface);
     recordRecoveryRemoval(surface, 'sess-perm-1', Date.now());
     recordRecoveryRemoval(surface, 'sess-perm-2', Date.now());
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
+});
+
+describe('two terminals answering Remove at the same moment', () => {
+  test('every removal either of them recorded is still in the ledger', async () => {
+    const writer = join(import.meta.dir, 'recovery-decisions-writer.ts');
+    const each = 40;
+    const spawnWriter = (prefix: string) => Bun.spawn([process.execPath, writer, tmpDir, prefix, String(each)], {
+      cwd: process.cwd(), env: process.env, stdout: 'ignore', stderr: 'pipe',
+    });
+    const children = [spawnWriter('terminal-a'), spawnWriter('terminal-b')];
+    const exits = await Promise.all(children.map((child) => child.exited));
+    expect(exits).toEqual([0, 0]);
+
+    const ids = new Set(readRecoveryRemovals(surface).map((entry) => entry.sessionId));
+    const expected = ['terminal-a', 'terminal-b'].flatMap((prefix) => Array.from({ length: each }, (_, n) => `${prefix}-${n}`));
+    expect(expected.filter((id) => !ids.has(id))).toEqual([]);
+  }, 60_000);
 });

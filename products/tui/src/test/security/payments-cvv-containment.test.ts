@@ -43,7 +43,7 @@ import { buildGoodVibesSecretKey, buildGoodVibesSecretRef, defaultSecretBackedSc
 import type { SecretScope } from '../../config/secrets.ts';
 import { setSecretBackedSettingValue } from '../../input/settings-modal-secrets.ts';
 import { PAYMENTS_CARD_CVV_CONFIG_KEY, PAYMENTS_CVV_HANDLING_CONFIG_KEY } from '../../input/payments-config.ts';
-import { runPaymentsCommand, startCardEntryFlow, CARD_ENTRY_SURFACE, CARD_SECRET_FIELDS } from '../../input/commands/payment-card-intake.ts';
+import { runPaymentsCommand, startCardEntryFlow, CARD_ENTRY_SURFACE, CARD_ENTRY_FIELDS } from '../../input/commands/payment-card-intake.ts';
 import { mayEnterCardDetails, mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { handlePromptKeyToken, type KeyRouteState } from '../../input/handler-feed-routes.ts';
@@ -260,22 +260,6 @@ describe('payments CVV containment', () => {
       expect(texts).toContain('•'.repeat(FAKE_CVV.length) + '█');
     });
 
-    test('the settings modal mid-edit buffer for the CVV is masked to bullets of the same length, not the plaintext', () => {
-      selectCvvEntry();
-      modal.editingMode = true;
-      modal.editBuffer = FAKE_CVV;
-      // The in-memory editBuffer necessarily holds the plaintext while editing
-      // (there is no way to edit a value without holding it somewhere), what
-      // must never happen is that value reaching a render. This asserts the
-      // render path specifically, the same invariant the row assertion above
-      // proves, pinned here under its own name because it is the exact surface
-      // named in the containment brief.
-      const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
-      const texts = linesToText(lines).join('\n');
-      expect(texts).not.toContain(modal.editBuffer);
-      expect(texts).toContain('•'.repeat(modal.editBuffer.length));
-    });
-
     test('the CVV never renders at rest either, once stored', async () => {
       await persistSecretBackedConfigValue(cm, secrets, PAYMENTS_CARD_CVV_CONFIG_KEY, FAKE_CVV, { scope: 'daemon' });
       // The modal snapshots entries at open(); re-open to pick up the
@@ -367,57 +351,39 @@ describe('payments CVV containment', () => {
     return { ctx, printed };
   }
 
-  test('the /payments card transcript never prints the raw CVV (or any other card secret field)', async () => {
+  test('the /payments card transcript never prints any typed card field, and with no daemon selected nothing is stored locally', async () => {
     const { ctx, printed } = makeCommandCtx();
-    const fakeValues: Record<string, string> = {
-      'payments.cardNumber': FAKE_CARD_NUMBER,
-      'payments.cardExpiry': FAKE_EXPIRY,
-      'payments.cardCvv': FAKE_CVV,
-      'payments.cardholderName': FAKE_CARDHOLDER,
-    };
-
-    // Advance each field by its real persistence completion, never a timer.
-    let submissions = 0;
+    const typed = ['groceries card', '', FAKE_CARD_NUMBER, '09/29', FAKE_CVV, FAKE_CARDHOLDER];
     const offered: Array<{ onSubmit: (v: string) => void | Promise<void> }> = [];
     const ctxWithChain = {
       ...ctx,
       beginConcealedInput: (request: { onSubmit: (v: string) => void | Promise<void> }) => offered.push(request),
     } as unknown as CommandContext;
     runPaymentsCommand(['card'], ctxWithChain);
-    for (const field of CARD_SECRET_FIELDS) {
+    for (let i = 0; i < CARD_ENTRY_FIELDS.length; i += 1) {
       const request = offered.shift();
       expect(request).toBeDefined();
-      await request!.onSubmit(fakeValues[field.key as string] ?? '');
-      submissions++;
+      await request!.onSubmit(typed[i]!);
     }
 
-    expect(submissions).toBe(CARD_SECRET_FIELDS.length);
     const transcript = printed.join('\n');
-    for (const value of Object.values(fakeValues)) {
-      expect(transcript).not.toContain(value);
-    }
-    expect(transcript).toContain('stored securely (hidden)');
-
-    // Functional correctness alongside containment: the four references landed
-    // in the real ConfigManager (daemon tier), and each secret resolves to the
-    // fake plaintext at daemon scope.
-    for (const field of CARD_SECRET_FIELDS) {
-      const configValue = cm.get(field.key);
-      expect(typeof configValue).toBe('string');
-      expect(isSecretReferenceValue(configValue as string)).toBe(true);
-      const secretKey = buildGoodVibesSecretKey(field.key);
-      expect(await secrets.get(secretKey)).toBe(fakeValues[field.key as string]);
+    for (const value of [FAKE_CARD_NUMBER, FAKE_CVV, FAKE_CARDHOLDER]) expect(transcript).not.toContain(value);
+    // The test context has no selected paired daemon: the card is refused as unsent, not parked in this machine's config or secret store.
+    expect(transcript).toContain('Nothing was sent');
+    for (const key of ['payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName'] as const) {
+      expect(String(cm.get(key as never) ?? '')).toBe('');
+      expect(await secrets.get(buildGoodVibesSecretKey(key))).toBeNull();
     }
   });
 
-  test('/payments status never prints the raw CVV, only set/not-set', async () => {
+  test('/payments status reads cards from the daemon and prints no stored card value', async () => {
     await persistSecretBackedConfigValue(cm, secrets, PAYMENTS_CARD_CVV_CONFIG_KEY, FAKE_CVV, { scope: 'daemon' });
     const { ctx, printed } = makeCommandCtx();
-    runPaymentsCommand(['status'], ctx);
+    await runPaymentsCommand(['status'], ctx);
     const transcript = printed.join('\n');
     expect(transcript).not.toContain(FAKE_CVV);
-    expect(transcript).toContain('CVV');
-    expect(transcript).toContain('set');
+    expect(transcript).toContain('could not be read');
+    expect(transcript).toContain('No paired daemon is selected');
   });
 
   // -------------------------------------------------------------------------
@@ -450,7 +416,7 @@ describe('payments CVV containment', () => {
       expect(transcript).toBe(describeCardEntryRefusal('telegram'));
       expect(transcript).toContain("can't take card details over telegram");
       // No card field prompt text ever printed.
-      for (const field of CARD_SECRET_FIELDS) {
+      for (const field of CARD_ENTRY_FIELDS) {
         expect(transcript).not.toContain(`Enter ${field.label}`);
       }
     });

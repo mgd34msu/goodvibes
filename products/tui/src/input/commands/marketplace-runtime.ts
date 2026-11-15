@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
   exportEcosystemCatalogBundle,
   importEcosystemCatalogBundle,
@@ -32,6 +32,14 @@ function resolveMarketplaceEntry(
 function formatCompatibility(review: Awaited<ReturnType<typeof reviewEcosystemCatalogEntry>>): string {
   if (review.compatibility.reasons.length === 0) return 'compatible with current runtime';
   return review.compatibility.reasons.join('; ');
+}
+
+/** An omitted scope means the project; any other word that is not a scope is refused, never read as the project. */
+export function parseScope(token: string | undefined, ctx: CommandContext): 'project' | 'user' | null {
+  if (token === undefined || token === 'project') return 'project';
+  if (token === 'user') return 'user';
+  ctx.print(`Unknown scope "${token}": use project or user. For rollback the order is <kind> <id> [project|user] [backupId]. Nothing was changed.`);
+  return null;
 }
 
 export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): void {
@@ -117,7 +125,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       if (sub === 'bundle') {
         const mode = args[1];
         const target = args[2];
-        const scope = args[3] === 'user' ? 'user' : 'project';
+        const scope = mode === 'inspect' ? 'project' : parseScope(args[3], ctx);
+        if (!scope) return;
         if ((mode === 'export' || mode === 'inspect' || mode === 'import') && !target) {
           ctx.print(`Usage: /marketplace bundle ${mode} <path>${mode === 'export' || mode === 'import' ? ' [project|user]' : ''}`);
           return;
@@ -130,25 +139,44 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
           ctx.print(`Marketplace bundle exported to ${targetPath}`);
           return;
         }
-        if (mode === 'inspect') {
-          const bundle = JSON.parse(readFileSync(shellPaths.resolveWorkspacePath(target!), 'utf-8')) as EcosystemCatalogBundle;
-          const summary = inspectEcosystemCatalogBundle(bundle);
-          ctx.print([
-            'Marketplace Bundle Review',
-            `  exportedAt: ${new Date(summary.exportedAt).toISOString()}`,
-            `  scope: ${summary.scope}`,
-            `  plugins: ${summary.counts.plugin}`,
-            `  skills: ${summary.counts.skill}`,
-          ].join('\n'));
-          return;
-        }
-        if (mode === 'import') {
-          const bundle = JSON.parse(readFileSync(shellPaths.resolveWorkspacePath(target!), 'utf-8')) as EcosystemCatalogBundle;
+        if (mode === 'inspect' || mode === 'import') {
+          const bundlePath = shellPaths.resolveWorkspacePath(target!);
+          let bundle: EcosystemCatalogBundle;
+          try {
+            bundle = JSON.parse(readFileSync(bundlePath, 'utf-8')) as EcosystemCatalogBundle;
+          } catch (error) {
+            ctx.print(`Marketplace bundle ${mode} failed: could not read ${bundlePath} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`);
+            return;
+          }
+          if (mode === 'inspect') {
+            const summary = inspectEcosystemCatalogBundle(bundle);
+            // Date rejects values outside +-8.64e15 ms, so a bundle's number can pass isFinite and still not be a date.
+            const exportedDate = typeof summary.exportedAt === 'number' ? new Date(summary.exportedAt) : undefined;
+            const exportedAt = exportedDate !== undefined && !Number.isNaN(exportedDate.getTime())
+              ? exportedDate.toISOString()
+              : 'unknown';
+            ctx.print([
+              'Marketplace Bundle Review',
+              `  exportedAt: ${exportedAt}`,
+              `  scope: ${summary.scope}`,
+              `  plugins: ${summary.counts.plugin}`,
+              `  skills: ${summary.counts.skill}`,
+              `  hook packs: ${summary.counts['hook-pack']}`,
+              `  policy packs: ${summary.counts['policy-pack']}`,
+            ].join('\n'));
+            return;
+          }
           const result = importEcosystemCatalogBundle(bundle, { ...ecosystemPaths, scope });
+          if (result.error) {
+            ctx.print(`Marketplace bundle import failed: ${result.error}`);
+            return;
+          }
           ctx.print([
-            `Marketplace bundle imported from ${shellPaths.resolveWorkspacePath(target!)}`,
+            `Marketplace bundle imported from ${bundlePath}`,
+            `  merged into existing entries by kind and id; ${result.rejected.length} rejected`,
             `  entries: ${result.imported}`,
             ...Object.entries(result.pathByKind).map(([kind, path]) => `  ${kind}: ${path}`),
+            ...result.rejected.map((entry) => `  rejected ${entry.id}: ${entry.reason}`),
           ].join('\n'));
           return;
         }
@@ -218,7 +246,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
         return;
       }
       if (sub === 'receipt') {
-        const scope = args[3] === 'user' ? 'user' : 'project';
+        const scope = parseScope(args[3], ctx);
+        if (!scope) return;
         const result = inspectInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope });
         if (!result.ok) {
           ctx.print(`Error: ${result.error}`);
@@ -237,7 +266,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
         return;
       }
       if (sub === 'history') {
-        const scope = args[3] === 'user' ? 'user' : 'project';
+        const scope = parseScope(args[3], ctx);
+        if (!scope) return;
         const backups = listEcosystemInstallBackups(kind!, entryId!, { ...ecosystemPaths, scope });
         ctx.print(backups.length > 0
           ? [
@@ -248,7 +278,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
         return;
       }
       if (sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'uninstall') {
-        const scope = args[3] === 'user' ? 'user' : 'project';
+        const scope = parseScope(args[3], ctx);
+        if (!scope) return;
         if (sub === 'install') {
           const result = installEcosystemCatalogEntry(kind!, entryId!, { ...ecosystemPaths, scope });
           if (!result.ok) {

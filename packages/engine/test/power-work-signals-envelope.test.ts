@@ -66,7 +66,7 @@ function fakeManager() {
 
 /** RuntimeEventBus.emit() dispatches via queueMicrotask; let those settle. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 100; i += 1) await Promise.resolve();
 }
 
 describe('bindPowerWorkSignals over a REAL RuntimeEventBus + REAL envelopes', () => {

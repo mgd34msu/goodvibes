@@ -37,9 +37,6 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [Channels, remote runtime, and API](channels-remote-and-api.md)
   Omnichannel surfaces, reply routing, remote peers, node-host contracts, and the daemon/control-plane HTTP + streaming surfaces.
 
-- Contract runtime ownership
-  Canonical runner, persistence and agent-tool boundaries, with focused verification.
-
 - [Session durability](session-durability.md)
   Two-layer durability, combining post-turn snapshots plus periodic recovery files with the fsync-per-record transcript journal replayed at every resume seam.
 
@@ -49,26 +46,17 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [CLI flags](cli-flags.md)
   Global flags reference covering session lifecycle (`--continue`, `--resume`, `--fork`), the `-y`/`--non-interactive` commit gate for plugin bundle installs, output format consolidation, the `--host` alias, and all other startup and command-specific flags.
 
-- Architecture
-  Source layout, the import-direction rules `bun run architecture:check` enforces, and the operator API bridge that answers `panels.list` / `panels.open` with the modal views.
-
 - [Commands reference](commands-reference.md)
   The generated, categorized list of every slash command, its arguments, and its description. It is the same list `?` renders in the product.
 
 - [Windows support](windows.md)
-  WSL2 as the supported path today, what the native Windows beta binary can and cannot do yet, and the POSIX-assumption blockers ahead of promotion.
+  Running GoodVibes on Windows through WSL2; native Windows binaries are not provided.
 
 - [Tools and commands](tools-and-commands.md)
   Built-in tool families and a per-tool reference, slash-command families, the full keyboard-binding reference, the agent/archetype and hook systems, MCP and plugin extensibility, and the operator, diagnostics, and workflow surfaces that tie them together.
 
-- [QEMU sandbox bootstrapping](qemu-sandbox.md)
-  Sandbox isolation modes, host prerequisites, generated QEMU setup bundle files, Debian cloud-image bootstrapping, guest runtime installs, validation, and troubleshooting.
-
-- Release and publishing
-  Release validation, GitHub CD, compiled binary releases, npm distribution, and the GitHub Packages mirror.
-
-- Testing and validation
-  What runs while you work, on every push, and before a release; the test layers; the end-to-end tests against the built binary.
+- [Sandbox](sandbox.md)
+  The per-command exec sandbox, its writable-path and egress lists, and what REPL and MCP isolation currently is (host execution; the QEMU backend is retired).
 
 - [Changelog](../CHANGELOG.md)
   Current release history. Older per-version release-note files remain under `docs/releases/` for historical releases, but `CHANGELOG.md` is the canonical current stream.

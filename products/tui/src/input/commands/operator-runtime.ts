@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
   createContextInspectionCommand,
   createErrorNavigationCommands,
@@ -8,7 +10,7 @@ import { ToolContractVerifier } from '@/runtime/index.ts';
 import type { ReplaySnapshotInput } from '@/runtime/index.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import { registerLegacyPanelCommand } from './legacy-panel-command.ts';
-import { requireOpsApi, requireProfileManager, requireReplayEngine } from './runtime-services.ts';
+import { requireOpsApi, requireProfileManager, requireReplayEngine, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
@@ -187,7 +189,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     name: 'forensics',
     aliases: ['foren'],
     description: 'Failure Forensics: view, inspect, and export auto-classified failure reports',
-    usage: '[latest | show <id> | export <id>]',
+    usage: '[latest | show <id> | export <id> [path] [--overwrite]]',
     argsHint: '[latest|show|export]',
     handler(args, ctx) {
       const sub = args[0];
@@ -254,7 +256,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'export') {
         const id = args[1];
         if (!id) {
-          ctx.print('Usage: /forensics export <id>');
+          ctx.print('Usage: /forensics export <id> [path] [--overwrite]');
           return;
         }
         if (!ctx.extensions.forensicsRegistry) {
@@ -268,6 +270,19 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           ctx.print(`[Forensics] No report found with id "${id}".`);
           return;
         }
+        // Same convention as /incident export: a path writes a file and never replaces one silently.
+        const pathArg = args.slice(2).find((word) => !word.startsWith('--'));
+        if (pathArg) {
+          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(pathArg);
+          if (existsSync(targetPath) && !args.includes('--overwrite')) {
+            ctx.print(`[Forensics] ${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
+            return;
+          }
+          mkdirSync(dirname(targetPath), { recursive: true });
+          writeFileSync(targetPath, `${json}\n`, 'utf-8');
+          ctx.print(`[Forensics] Exported incident bundle ${id} (with the replay snapshot) to ${targetPath}`);
+          return;
+        }
         ctx.print(`[Forensics] Incident bundle ${id}:\n${json}`);
         return;
       }
@@ -276,7 +291,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           '  /forensics             — open Agents on forensics\n' +
           '  /forensics latest      — print the most recent failure report summary\n' +
           '  /forensics show <id>   — show full JSON for a specific report\n' +
-          '  /forensics export <id> — export incident bundle JSON to the conversation',
+          '  /forensics export <id> [path] — print the incident bundle JSON (with the replay snapshot) here, or write it to a file; /incident export <id> <path> writes the bundle without the replay snapshot',
       );
     },
   });

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { assertProvisionCurrent, ownProvisionLifetime, programNotInstalled, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { spawn } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
@@ -34,6 +34,24 @@ const DRIVER_PACKAGE = ['playwright', 'core'].join('-');
  * and would otherwise install whatever npm happened to consider latest.
  */
 export const DRIVER_VERSION = '1.62.0';
+
+/**
+ * The registry's integrity value for the tarball of {@link DRIVER_VERSION}
+ * (the one in the lockfile). The driver is executed after it is downloaded, so
+ * the bytes must be the published ones before anything is extracted.
+ */
+export const DRIVER_INTEGRITY = 'sha512-nsNRyq0r2zsG8AcRHWknc9QRA5XCueC7gWMrs+Gx2tlZn9hcl8zudfh00lhJPY1DE7NmZ6bDsT9g2yey8mXljA==';
+
+/** The downloaded bytes are not the published package; no other route may supply the driver after this. */
+class DriverIntegrityError extends Error {}
+
+/** Throws unless the downloaded archive is the published driver tarball. */
+export function verifyDriverArchive(archive: Uint8Array): void {
+  const actual = `sha512-${createHash('sha512').update(archive).digest('base64')}`;
+  if (actual !== DRIVER_INTEGRITY) {
+    throw new DriverIntegrityError(`the downloaded driver package does not match the published ${DRIVER_PACKAGE}@${DRIVER_VERSION} checksum`);
+  }
+}
 
 const requireFromEngine = createRequire(import.meta.url);
 
@@ -338,6 +356,7 @@ async function downloadDriverPackage(targetRoot: string, lifetime: BrowserProvis
     }
     const archive = Buffer.from(await response.arrayBuffer());
     assertProvisionCurrent(lifetime);
+    verifyDriverArchive(archive);
     rmSync(staging, { recursive: true, force: true });
     // npm tarballs put everything under `package/`; dropping that component
     // lands the driver's own files directly in the directory that gets moved.
@@ -368,6 +387,7 @@ async function downloadDriverPackage(targetRoot: string, lifetime: BrowserProvis
     assertProvisionCurrent(lifetime);
     rmSync(staging, { recursive: true, force: true });
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof DriverIntegrityError) throw error;
     return { code: 1, stdout: '', stderr: `${url}: ${message}`, timedOut: false, spawnError: null };
   }
 }
@@ -397,7 +417,17 @@ async function installDriverPackage(targetRoot: string, lifetime: BrowserProvisi
   assertProvisionCurrent(lifetime);
   mkdirSync(targetRoot, { recursive: true });
   const specifier = `${DRIVER_PACKAGE}@${DRIVER_VERSION}`;
-  const download = await downloadDriverPackage(targetRoot, lifetime);
+  let download: CommandOutcome;
+  try {
+    download = await downloadDriverPackage(targetRoot, lifetime);
+  } catch (error) {
+    // A package manager would fetch the same version through the same registry or proxy
+    // and install it unchecked, so a checksum mismatch ends the install here.
+    if (error instanceof DriverIntegrityError) {
+      return { code: 1, stdout: '', stderr: `${error.message}; nothing was installed`, timedOut: false, spawnError: null };
+    }
+    throw error;
+  }
   if (download.code === 0) return download;
   const reasons: string[] = [`registry download: ${download.stderr.trim() || 'failed'}`];
   const attempts: readonly (readonly [string, readonly string[]])[] = [

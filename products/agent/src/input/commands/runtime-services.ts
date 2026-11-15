@@ -75,8 +75,9 @@ export function requireMemoryGovernor(context: CommandContext) {
   return requireContextValue(context.platform.memoryGovernor, 'platform.memoryGovernor');
 }
 
-export async function compactConversation(context: CommandContext): Promise<void> {
-  await context.session.conversationManager.compact(
+/** The compaction receipt, or undefined when nothing was compacted. */
+export async function compactConversation(context: CommandContext) {
+  return await context.session.conversationManager.compact(
     context.provider.providerRegistry,
     context.session.runtime.model,
     'manual',

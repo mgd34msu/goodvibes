@@ -4,7 +4,7 @@
  * Pre-compact: shows an honest estimate of what compaction will do
  * (message count and token estimate before → after). The platform has no dry-run
  * API; we derive the after-estimate from the DEFAULT_COMPACTION_CONFIG
- * totalCeiling (6500 tokens), clearly labelled as an ESTIMATE.
+ * totalCeiling, clearly labelled as an ESTIMATE.
  *
  * Post-compact: shows a before/after notice using the CompactionEvent
  * data returned by compactMessages(), which contains the real
@@ -19,16 +19,12 @@
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { computeContextUsage } from '../core/context-usage.ts';
 import { formatQualityScoreLine } from './compaction-quality.ts';
-import type { CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
+import { DEFAULT_COMPACTION_CONFIG, type CompactionEvent } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ProviderMessage } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { CompactionQualityScore } from './compaction-quality.ts';
 
-/**
- * Default compaction totalCeiling from context-compaction DEFAULT_COMPACTION_CONFIG.
- * Kept local so we don't take a runtime dependency on the internal config object.
- * Used only for the pre-compact ESTIMATE; the real figure comes from CompactionEvent.
- */
-const COMPACTION_OUTPUT_CEILING_ESTIMATE = 6500;
+/** The engine's default compaction ceiling. Used only for the pre-compact ESTIMATE; the real figure comes from CompactionEvent. */
+const COMPACTION_OUTPUT_CEILING_ESTIMATE = DEFAULT_COMPACTION_CONFIG.totalCeiling;
 
 export interface CompactionPreviewOptions {
   /** Messages currently in the conversation. */

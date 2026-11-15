@@ -1,22 +1,20 @@
 /**
- * platform/profiles/ smoke test.
- * Verifies that profile data conversion functions work correctly.
+ * Profile data conversion: a config snapshot survives the trip into profile
+ * data and back, field for field.
  */
 import { describe, expect, test } from 'bun:test';
+import { configSnapshotToProfileData, profileDataToConfigSnapshot } from '../platform/src/platform/profiles/index.js';
 
-describe('platform/profiles: smoke', () => {
-  test('configSnapshotToProfileData returns an object for empty snapshot', async () => {
-    const { configSnapshotToProfileData } = await import('../platform/src/platform/profiles/index.js');
-    const result = configSnapshotToProfileData({});
-    expect(result).not.toBeNull(); // presence-only: configSnapshotToProfileData returns object
+describe('platform/profiles: round trip', () => {
+  test('a snapshot with profile settings comes back with the same values', () => {
+    const snapshot = { 'display.stream': false, 'behavior.saveHistory': true };
+    const profileData = configSnapshotToProfileData(snapshot);
+    expect(profileData).toEqual({ display: { stream: false }, behavior: { saveHistory: true } });
+    expect(profileDataToConfigSnapshot(profileData)).toEqual(snapshot);
   });
 
-  test('profileDataToConfigSnapshot round-trips through configSnapshotToProfileData', async () => {
-    const { configSnapshotToProfileData, profileDataToConfigSnapshot } = await import('../platform/src/platform/profiles/index.js');
-    const snapshot = {};
-    const profileData = configSnapshotToProfileData(snapshot);
-    const backToSnapshot = profileDataToConfigSnapshot(profileData);
-    // Round-trip must produce an object (not null/undefined)
-    expect(backToSnapshot).not.toBeNull(); // presence-only: round-trip returns object
+  test('an empty snapshot produces empty profile data', () => {
+    expect(configSnapshotToProfileData({})).toEqual({});
+    expect(profileDataToConfigSnapshot({})).toEqual({});
   });
 });

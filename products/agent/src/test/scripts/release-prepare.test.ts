@@ -134,7 +134,7 @@ describe('retained standalone release boundary', () => {
       expect(String(failure)).toContain('project surfaces failed (exit 1)');
       expect(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version).toBe('2.1.1');
       expect(String(failure)).toContain('already bumped 2.1.0 -> 2.1.1');
-      expect(String(failure)).toContain('bun run release:prepare --no-bump --no-install --no-live');
+      expect(String(failure)).toContain('bun scripts/release-prepare.ts --no-bump --no-install --no-live');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

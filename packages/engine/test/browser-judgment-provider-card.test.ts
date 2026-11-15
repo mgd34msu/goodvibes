@@ -8,11 +8,11 @@ const CARD = 'webui.settings.card-material-key';
 const PROVIDER = 'webui.models.catalog-provider-match';
 function fixture(battery: typeof CARD | typeof PROVIDER, options: { providerId?: string; probability?: number; barrier?: Promise<void>; hidden?: string; names?: readonly { key: string; description: string }[] } = {}) {
   const owner: AuthenticatedPrincipal = { principalId: 'fixture-owner', principalKind: 'user', admin: true, scopes: ['write:judgment'] };
-  const calls: unknown[] = [];
+  const calls: unknown[] = []; const entered = Promise.withResolvers<void>();
   const log = new SqliteDecisionLog(':memory:');
   const lifetime = new AbortController(); let epoch = 0; let allowed = true;
   const port: JudgmentPort = { model: 'jev-1.13.0', async ask(input) {
-    calls.push(input.state); await options.barrier;
+    calls.push(input.state); entered.resolve(); await options.barrier;
     return { model: 'jev-1.13.0', requestedModel: 'jev-1.13.0', usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
       answers: { [battery === CARD ? 'material' : 'matches']: { type: 'noul', noul: options.probability ?? (battery === CARD ? 0.001 : 0.999) } } } as never;
   } };
@@ -25,7 +25,7 @@ function fixture(battery: typeof CARD | typeof PROVIDER, options: { providerId?:
   });
   const request = (keys = [battery === CARD ? 'custom.label' : 'inceptionlabs']) => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: 1,
     input: { keys, ...(battery === PROVIDER ? { providerId: options.providerId ?? 'custom-adapter' } : {}) } });
-  return { calls, owner, lifetime, request, change() { epoch++; }, deny() { allowed = false; },
+  return { calls, entered: entered.promise, owner, lifetime, request, change() { epoch++; }, deny() { allowed = false; },
     run: (input: unknown = request(), signal = new AbortController().signal) => service.execute(input, owner, signal, () => owner),
     async close() { await service.close(); log[Symbol.dispose](); },
   };
@@ -47,8 +47,8 @@ for (const battery of [CARD, PROVIDER] as const) {
   });
   test(`${battery}: invented IDs and caller values are refused before provider dispatch`, async () => {
     const f = fixture(battery); try {
-      await expect(f.run(f.request(['invented']))).rejects.toBeDefined();
-      const request = f.request(); await expect(f.run({ ...request, input: { ...request.input, value: 'never-transmit' } })).rejects.toBeDefined();
+      await expect(f.run(f.request(['invented']))).rejects.toMatchObject({ code: battery === CARD ? 'JUDGMENT_REFERENCE_HELD' : 'JUDGMENT_INPUT_HELD' });
+      const request = f.request(); await expect(f.run({ ...request, input: { ...request.input, value: 'never-transmit' } })).rejects.toMatchObject({ code: 'JUDGMENT_INVALID_INPUT' });
       expect(f.calls).toEqual([]);
     } finally { await f.close(); }
   });
@@ -56,7 +56,7 @@ for (const battery of [CARD, PROVIDER] as const) {
     const barrier = Promise.withResolvers<void>(); const f = fixture(battery, { barrier: barrier.promise }); const abort = new AbortController();
     try {
       const result = f.run(f.request(), abort.signal).then(() => 'published', () => 'held');
-      for (let i = 0; i < 100 && !f.calls.length; i++) await Bun.sleep(1);
+      await f.entered;
       expect(f.calls).toHaveLength(1);
       if (kind === 'source') f.change();
       if (kind === 'actor') Object.assign(f.owner, { principalId: 'replacement-owner' });

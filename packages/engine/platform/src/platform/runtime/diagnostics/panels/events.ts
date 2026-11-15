@@ -15,6 +15,7 @@ import {
   type DiagnosticFilter,
   type ComponentConfig,
   DEFAULT_COMPONENT_CONFIG,
+  applyFilter,
   appendBounded,
 } from '../types.js';
 import { summarizeError } from '../../../utils/error-display.js';
@@ -122,40 +123,7 @@ export class EventsPanel {
    *   and limit.
    */
   public getSnapshot(filter?: DiagnosticFilter): EventEntry[] {
-    let result = [...this._buffer];
-
-    if (filter) {
-      if (filter.domains && filter.domains.length > 0) {
-        const domainSet = new Set(filter.domains);
-        result = result.filter((e) => domainSet.has(e.domain));
-      }
-      if (filter.traceId !== undefined) {
-        result = result.filter((e) => e.traceId === filter.traceId);
-      }
-      if (filter.sessionId !== undefined) {
-        result = result.filter((e) => e.sessionId === filter.sessionId);
-      }
-      if (filter.turnId !== undefined) {
-        result = result.filter((e) => e.turnId === filter.turnId);
-      }
-      if (filter.taskId !== undefined) {
-        result = result.filter((e) => e.taskId === filter.taskId);
-      }
-      if (filter.since !== undefined) {
-        const since = filter.since;
-        result = result.filter((e) => e.ts >= since);
-      }
-      if (filter.until !== undefined) {
-        const until = filter.until;
-        result = result.filter((e) => e.ts <= until);
-      }
-    }
-
-    // Most recent first
-    result.reverse();
-
-    const limit = filter?.limit ?? this._config.bufferLimit;
-    return result.slice(0, limit);
+    return applyFilter(this._buffer, filter, (e) => e.ts, this._config.bufferLimit);
   }
 
   /**

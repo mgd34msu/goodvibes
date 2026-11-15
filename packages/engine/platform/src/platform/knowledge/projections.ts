@@ -9,6 +9,7 @@ import {
   materializeGeneratedKnowledgeProjection,
 } from './generated-projections.js';
 import {
+  getExplicitKnowledgeSpaceId,
   resolveKnowledgeSpaceScope,
   type KnowledgeSpaceScopeInput,
 } from './spaces.js';
@@ -384,7 +385,8 @@ export class KnowledgeProjectionService {
     scope.retainEdges(scope.selection.edges);
     const extractionCount = this.scopedExtractions(scope).length;
     const connectors = this.getConnectors();
-    const runs = this.store.listJobRuns(5);
+    const allRuns = this.jobRunsInScope(scope);
+    const runs = allRuns.slice(0, 5);
     const content = joinSections(
       `# ${target.title}`,
       'Structured knowledge is canonical in SQL. This markdown page is a derived projection for clients, exports, and future wiki-style surfaces.',
@@ -395,14 +397,14 @@ export class KnowledgeProjectionService {
         `- edges: ${edgeCount}`,
         `- issues: ${allIssues.length}`,
         `- extractions: ${extractionCount}`,
-        `- job runs: ${this.store.listJobRuns(Number.MAX_SAFE_INTEGER).length}`,
+        `- job runs (shared across spaces unless tagged to one): ${allRuns.length}`,
       ].join('\n'),
       [
         '## Connectors',
         buildBulletList(connectors.map((connector) => `\`${connector.id}\` - ${connector.description}`)),
       ].join('\n'),
       [
-        '## Recent Job Runs',
+        '## Recent Job Runs (shared across spaces unless tagged to one)',
         buildBulletList(runs.map((run) => `\`${run.jobId}\` - ${run.status} (${formatDateTime(run.completedAt ?? run.startedAt ?? run.requestedAt) ?? 'n/a'})`)),
       ].join('\n'),
       [
@@ -905,6 +907,15 @@ export class KnowledgeProjectionService {
       return Boolean(issue && this.issueInScope(issue, scope));
     }
     return true;
+  }
+
+  /** Jobs are store-wide; only a run explicitly tagged to another space is left out of this space's page. */
+  private jobRunsInScope(scope: PreparedProjectionScope) {
+    const spaceId = resolveKnowledgeSpaceScope(scope);
+    return this.store.listJobRuns(Number.MAX_SAFE_INTEGER).filter((run) => {
+      const explicit = getExplicitKnowledgeSpaceId(run);
+      return spaceId === null || explicit === null || explicit === spaceId;
+    });
   }
 
   private scopedSources(scope: PreparedProjectionScope, limit = Number.MAX_SAFE_INTEGER): KnowledgeSourceRecord[] {

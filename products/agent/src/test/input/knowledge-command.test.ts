@@ -146,6 +146,7 @@ describe('knowledgeCommand', () => {
   let configManager: ConfigManager;
   let restoreJudgment: (() => void) | undefined;
   let previousJudgment: JudgmentPort | undefined;
+  const disposers: Array<() => void> = [];
 
   function installKnowledgeSourceReadings(title: string) {
     const rejected: string[] = [];
@@ -174,6 +175,7 @@ describe('knowledgeCommand', () => {
   });
 
   afterEach(() => {
+    for (const dispose of disposers.splice(0)) dispose();
     restoreJudgment?.();
     restoreJudgment = undefined;
     installJudgmentPort(previousJudgment);
@@ -204,7 +206,7 @@ describe('knowledgeCommand', () => {
     { command: ['list', '--kind', 'issues'], expected: 'Replay the Agent recovery queue.' },
     { command: ['queue'], expected: 'Replay the Agent recovery queue.' },
     { command: ['status'], expected: 'sources: 1' },
-    { command: ['map'], expected: 'nodes: 2 of 3' },
+    { command: ['map'], expected: '  nodes: 2\n  edges: 1' },
   ])('awaits real scoped Agent records for $command', async ({ command, expected }) => {
     const fixture = await scopedFixture();
     const previous = installJudgmentPort(fixture.readings.port);
@@ -348,6 +350,7 @@ describe('knowledgeCommand', () => {
     });
     await memoryStore.init();
     const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
+    disposers.push(() => { knowledgeService.dispose(); knowledgeStore.close(); });
 
     await knowledgeCommand.handler(
       ['ingest-url', `${baseUrl}/docs`, '--tags', 'example,docs'],
@@ -362,7 +365,10 @@ describe('knowledgeCommand', () => {
       makeKnowledgeCommandContext(root, printed, knowledgeService, memoryRegistry),
     );
 
-    expect(printed.join('\n')).toContain('Ingested');
+    const blockedOutput = printed.join('\n');
+    expect(blockedOutput).toContain('Ingest failed');
+    expect(blockedOutput).toContain('Artifact URI blocked by SSRF policy');
+    expect(blockedOutput).not.toContain('Ingested');
 
     const sources = knowledgeStore.listSources(10);
     expect(sources).toHaveLength(1);
@@ -402,6 +408,7 @@ describe('knowledgeCommand', () => {
     });
     await memoryStore.init();
     const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
+    disposers.push(() => { knowledgeService.dispose(); knowledgeStore.close(); });
     const filePath = join(root, 'agent-guide.md');
     const text = '# Agent Guide\n\nUse Agent Knowledge for product-owned references.\n';
     const readings = installKnowledgeSourceReadings('Agent Guide');
@@ -430,8 +437,9 @@ describe('knowledgeCommand', () => {
     expect(sources[0]?.status).toBe('indexed');
     expect(knowledgeStore.getExtractionBySourceId(sources[0]!.id)?.excerpt).toBe(text.trim());
     // Optional semantic enrichment is outside this extraction fixture and
-    // remains fail-closed rather than inventing facts for the document.
-    expect(readings.rejected.filter(name => name !== 'wanted')).toEqual([]);
+    // remains fail-closed rather than inventing facts for the document: the
+    // extraction-value gate is asked, refused, and nothing further is read.
+    expect(readings.rejected.filter(name => name !== 'wanted' && name !== 'extractionValue')).toEqual([]);
     expect(readings.requests.some(request => Object.hasOwn(request.questions, 'kind'))).toBe(false);
   });
 
@@ -448,6 +456,7 @@ describe('knowledgeCommand', () => {
     });
     await memoryStore.init();
     const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
+    disposers.push(() => { knowledgeService.dispose(); knowledgeStore.close(); });
     const text = '# Reviewed Export\n\nPromote this artifact into Agent Knowledge.\n';
     const readings = installKnowledgeSourceReadings('Reviewed Export');
     const artifact = await artifactStore.create({
@@ -478,8 +487,9 @@ describe('knowledgeCommand', () => {
     expect(sources[0]?.status).toBe('indexed');
     expect(knowledgeStore.getExtractionBySourceId(sources[0]!.id)?.excerpt).toBe(text.trim());
     // Optional semantic enrichment is outside this extraction fixture and
-    // remains fail-closed rather than inventing facts for the document.
-    expect(readings.rejected.filter(name => name !== 'wanted')).toEqual([]);
+    // remains fail-closed rather than inventing facts for the document: the
+    // extraction-value gate is asked, refused, and nothing further is read.
+    expect(readings.rejected.filter(name => name !== 'wanted' && name !== 'extractionValue')).toEqual([]);
     expect(sources[0]?.metadata).toMatchObject({
       knowledgeIntent: {
         ingestMode: 'artifact',
@@ -700,6 +710,7 @@ describe('knowledgeCommand', () => {
       metadata: {},
     });
     const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
+    disposers.push(() => { knowledgeService.dispose(); knowledgeStore.close(); });
 
     await knowledgeCommand.handler(
       ['review-issue', 'issue-1', 'resolve', '--reviewer', 'test'],
@@ -730,6 +741,7 @@ describe('knowledgeCommand', () => {
     });
     await memoryStore.init();
     const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
+    disposers.push(() => { knowledgeService.dispose(); knowledgeStore.close(); });
 
     await knowledgeCommand.handler(
       ['map', 'setup', '--limit', '25'],

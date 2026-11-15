@@ -94,6 +94,7 @@ describe('automation.schedules.* (renamed from bare schedules.*)', () => {
   test('automation.schedules.list is invokable and returns an empty collection to start', async () => {
     const result = await invokeVerb('automation.schedules.list');
     expect(result.status).toBe(200);
+    expect(result.json).toEqual({ jobs: [], runs: [] });
   });
 
   test('a full schedule lifecycle round-trips: create -> list -> disable -> enable -> run -> delete', async () => {

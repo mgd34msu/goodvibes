@@ -317,10 +317,12 @@ describe('DaemonCardStore: failure paths carry no material', () => {
   test('material stranded with no row is still sweepable by id', async () => {
     // The other half of the same guarantee: remove() clears material even when
     // there is no row, so nothing a crash strands is permanently unreachable.
+    // Only for an id of the shape this store generates: see the spelling test.
     const store = makeStore();
-    await secrets.set(cardSecretKey('card-orphan', 'number'), SENTINEL_NUMBER);
-    await secrets.set(cardSecretKey('card-orphan', 'cvv'), SENTINEL_CVV);
-    const result = await store.remove('card-orphan');
+    const orphan = newCardId();
+    await secrets.set(cardSecretKey(orphan, 'number'), SENTINEL_NUMBER);
+    await secrets.set(cardSecretKey(orphan, 'cvv'), SENTINEL_CVV);
+    const result = await store.remove(orphan);
     expect(result).toEqual({ deleted: false, secretsCleared: 2 });
     expect([...secrets.values.keys()]).toEqual([]);
   });

@@ -34,29 +34,20 @@
  * arithmetic here is on integers parsed directly out of the decimal string.
  *
  * The minor-unit half is currency-exponent-aware: NOT every currency has 2
- * decimal digits. Mirrors the platform's `platform/payments/message.ts` exponent
- * table exactly (its ZERO_DECIMAL / THREE_DECIMAL sets), not imported
- * directly, because that module's `exponentFor` is a private helper (only the
- * DISPLAY formatter `formatMinorUnits`, which returns a currency-prefixed,
- * comma-grouped string, is exported, not suitable as a bare, re-parseable
- * input value). Getting this wrong is a real bug, not a cosmetic one: assuming
- * 2 decimals for a JPY issuer cap would turn a typed "5000" into 500000 minor
- * units, fifty times the intended amount, since JPY has no minor unit at
- * all.
+ * decimal digits. The exponent table is the engine's (`minorUnitExponent` from
+ * the browser-safe payments entry point), so the two cannot drift. Getting this
+ * wrong is a real bug, not a cosmetic one: assuming 2 decimals for a JPY issuer
+ * cap would turn a typed "5000" into 500000 minor units, fifty times the
+ * intended amount, since JPY has no minor unit at all.
  */
+
+import { minorUnitExponent as engineMinorUnitExponent } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 
 export class InvalidMoneyInputError extends Error {}
 
-/** Minor units per major unit, by ISO-4217 code, mirrors the platform's table exactly. */
-const THREE_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
-const ZERO_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'XPF']);
-
 /** How many fraction digits `currency`'s minor unit represents (0, 2, or 3). Defaults to 2. */
 export function minorUnitExponent(currency: string): number {
-  const code = currency.trim().toUpperCase();
-  if (ZERO_DECIMAL_CURRENCIES.has(code)) return 0;
-  if (THREE_DECIMAL_CURRENCIES.has(code)) return 3;
-  return 2;
+  return engineMinorUnitExponent(currency.trim().toUpperCase());
 }
 
 function majorUnitPattern(exponent: number): RegExp {

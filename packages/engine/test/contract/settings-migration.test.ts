@@ -4,8 +4,8 @@
  * is removed with a receipt saying what replaced it, and ConfigManager.load
  * applies it once, rewriting the file.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../../platform/src/platform/config/manager.js';
@@ -38,9 +38,13 @@ function everyWrfcKey(): Record<string, unknown> {
   };
 }
 
+const tempDirs: string[] = [];
+afterEach(() => { for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
 function tempDir(label: string): string {
   const dir = join(tmpdir(), `gv-${label}-${Date.now()}-${crypto.randomUUID()}`);
   mkdirSync(dir, { recursive: true });
+  tempDirs.push(dir);
   return dir;
 }
 

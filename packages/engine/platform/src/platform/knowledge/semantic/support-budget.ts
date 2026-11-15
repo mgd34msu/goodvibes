@@ -1,4 +1,5 @@
 import { KnowledgeGeneratedFactSupportHeldError } from './verification/types.js';
+import { timerBudgetMs } from './self-improvement-budget.js';
 
 const expiredBudgets = new WeakSet<object>();
 const hasExpiredBudget = expiredBudgets.has.bind(expiredBudgets);
@@ -14,7 +15,8 @@ export async function withSupportBudget<T>(
   run: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent?: AbortSignal,
 ): Promise<T> {
   if (parent?.aborted) throw new KnowledgeGeneratedFactSupportHeldError('aborted');
-  if ((!Number.isFinite(timeoutMs) && timeoutMs !== Infinity) || timeoutMs < 0 || (Number.isFinite(timeoutMs) && timeoutMs > 2_147_483_647)) throw new KnowledgeGeneratedFactSupportHeldError('budget');
+  if ((!Number.isFinite(timeoutMs) && timeoutMs !== Infinity) || timeoutMs < 0) throw new KnowledgeGeneratedFactSupportHeldError('budget');
+  timeoutMs = timerBudgetMs(timeoutMs);
   const controller = new AbortController();
   let rejectStop: (error: KnowledgeGeneratedFactSupportHeldError) => void = () => {};
   const stopped = new Promise<never>((_resolve, reject) => { rejectStop = reject; });

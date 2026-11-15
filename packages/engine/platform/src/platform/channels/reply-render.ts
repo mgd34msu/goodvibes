@@ -276,20 +276,71 @@ function progressStatusLine(explicitText: string, policy: ChannelRenderPolicy): 
   return channelStatusLine(explicitText, Math.min(MAX_PROGRESS_STATUS_CHARS, policy.maxChunkChars));
 }
 
+/**
+ * The final answer as the reader should see it, untrimmed, or null when the
+ * explicit text leaves nothing to show.
+ *
+ * The final body is the explicit text, so it never passes through `eventLine`;
+ * the reasoning policy has to be applied to it here or a suppressed surface
+ * receives the model's reasoning as the answer.
+ */
+function visibleFinalBody(explicitText: string, policy: ChannelRenderPolicy): string | null {
+  if (explicitText.trim().length === 0) return null;
+  const visible = assistantTextForVisibility(explicitText, policy.reasoningVisibility);
+  if (visible.trim().length === 0) return null;
+  return renderWithoutCompletionReport(visible);
+}
+
+/**
+ * Cut `text` into pieces of at most `limit` characters, preferring to break at a
+ * blank line, then a line break, then a space, so a long answer arrives as a
+ * few readable messages instead of one cut off mid-sentence. No character is
+ * dropped except the whitespace at the breaks.
+ */
+export function splitIntoChunks(text: string, limit: number): string[] {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  const size = Math.max(1, limit);
+  const chunks: string[] = [];
+  let rest = normalized;
+  while (rest.length > size) {
+    const window = rest.slice(0, size + 1);
+    let cut = window.lastIndexOf('\n\n');
+    if (cut < size / 2) cut = window.lastIndexOf('\n');
+    if (cut < size / 2) cut = window.lastIndexOf(' ');
+    if (cut < size / 2) cut = size;
+    chunks.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest.length > 0) chunks.push(rest);
+  return chunks.filter((chunk) => chunk.length > 0);
+}
+
+/**
+ * The message bodies a final reply is delivered as, in order. A text surface
+ * gets the whole answer split at `maxChunkChars`; a JSON surface, and any final
+ * whose body is built from events rather than an answer, gets the single body
+ * `buildRenderedText` produces.
+ */
+export function buildRenderedFinalParts(
+  explicitText: string,
+  events: readonly ChannelRenderEvent[],
+  policy: ChannelRenderPolicy,
+): string[] {
+  const visible = visibleFinalBody(explicitText, policy);
+  if (visible !== null && policy.format !== 'json') return splitIntoChunks(visible, policy.maxChunkChars);
+  const single = buildRenderedText(explicitText, events, policy, 'final');
+  return single ? [single] : [];
+}
+
 export function buildRenderedText(
   explicitText: string,
   events: readonly ChannelRenderEvent[],
   policy: ChannelRenderPolicy,
   phase: ChannelRenderPhase,
 ): string {
-  if (phase === 'final' && explicitText.trim().length > 0) {
-    // The final body is the explicit text, so it never passes through
-    // `eventLine`, the reasoning policy has to be applied to it here or a
-    // suppressed surface receives the model's reasoning as the answer.
-    const visible = assistantTextForVisibility(explicitText, policy.reasoningVisibility);
-    if (visible.trim().length > 0) {
-      return trimText(renderWithoutCompletionReport(visible), policy.maxChunkChars);
-    }
+  if (phase === 'final') {
+    const visible = visibleFinalBody(explicitText, policy);
+    if (visible !== null) return trimText(visible, policy.maxChunkChars);
   }
   // A partial answer is not progress. Streaming `assistant_text` fragments into
   // progress notifications is what made each notification a superset of the one
@@ -328,6 +379,8 @@ function baseMetadata(envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], An
   };
 }
 
+let renderEventSequence = 0;
+
 function renderEvent(
   kind: ChannelRenderEvent['kind'],
   phase: ChannelRenderPhase,
@@ -335,7 +388,11 @@ function renderEvent(
   extras: Partial<ChannelRenderEvent> = {},
 ): ChannelRenderEvent {
   return {
-    id: `${envelope.traceId}:${kind}:${envelope.ts}`,
+    // A trace id is shared by every event a context emits and the clock has
+    // millisecond resolution, so neither identifies one event. The sequence does;
+    // without it a second `status` in the same millisecond reads as already
+    // delivered and is dropped from the reply.
+    id: `${envelope.traceId ?? 'untraced'}:${kind}:${envelope.ts}:${++renderEventSequence}`,
     kind,
     phase,
     ts: envelope.ts,
@@ -449,7 +506,11 @@ export function normalizeChannelRenderEventFromRuntime(
         model: `${payload.from} -> ${payload.to}`,
       })];
     case 'COMPACTION_RECEIPT':
+      // A skipped or failed compaction is a fact about the machine, not about the
+      // owner's request; `error` is owner-facing by kind, so the audience is
+      // stamped to keep it off the owner's channel.
       return [renderEvent(payload.outcome === 'applied' ? 'compaction' : 'error', 'progress', envelope, {
+        ...(payload.outcome === 'applied' ? {} : { audience: 'operator' as const }),
         text: `compaction ${payload.outcome}: ${payload.tokensBefore}->${payload.tokensAfter} tokens, quality ${payload.qualityGrade}${payload.detail ? `, ${payload.detail}` : ''}`,
       })];
     case 'COMPACTION_CHECK':
@@ -463,6 +524,7 @@ export function normalizeChannelRenderEventFromRuntime(
     case 'COMPACTION_QUALITY_SCORE':
     case 'COMPACTION_STRATEGY_SWITCH':
       return [renderEvent(payload.type === 'COMPACTION_FAILED' ? 'error' : 'compaction', 'progress', envelope, {
+        ...(payload.type === 'COMPACTION_FAILED' ? { audience: 'operator' as const } : {}),
         text: payload.type.replace(/^COMPACTION_/, '').toLowerCase().replace(/_/g, ' '),
       })];
     // The contract family is OWNER-facing, deliberately and by exception.

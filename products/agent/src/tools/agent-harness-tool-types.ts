@@ -97,4 +97,6 @@ export interface AgentHarnessToolDeps {
   readonly commandRegistry: CommandRegistry;
   readonly commandContext: CommandContext;
   readonly toolRegistry: ToolRegistry;
+  /** Package root holding `release/`; defaults to this Agent installation. */
+  readonly releaseRoot?: string;
 }

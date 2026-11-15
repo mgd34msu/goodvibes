@@ -19,6 +19,8 @@ export interface RewindReceiptInput {
   readonly turnId: string | null;
   readonly files: {
     readonly restored: boolean;
+    /** Set when a workspace checkpoint matched; with restored=false it means the restore was only partly applied. */
+    readonly checkpointId?: string | null;
     readonly restoredFileCount: number;
     readonly removedFileCount: number;
     readonly safetyCheckpointId: string | null;
@@ -55,6 +57,11 @@ export function buildRewindReceiptBlock(receipt: RewindReceiptInput): string {
       lines.push(
         `  Files: restored ${plural(receipt.files.restoredFileCount, 'file')}, ` +
         `removed ${plural(receipt.files.removedFileCount, 'file')}.`,
+      );
+    } else if (receipt.files.checkpointId != null || receipt.files.restoredFileCount > 0 || receipt.files.removedFileCount > 0) {
+      lines.push(
+        `  Files: partly restored (${plural(receipt.files.restoredFileCount, 'file')} restored, ` +
+        `${plural(receipt.files.removedFileCount, 'file')} removed); see notes below for the paths that failed.`,
       );
     } else {
       lines.push('  Files: not restored; no workspace checkpoint matched this anchor.');

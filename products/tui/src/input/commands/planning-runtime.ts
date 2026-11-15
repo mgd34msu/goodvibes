@@ -1,7 +1,7 @@
 import { directOwnerPlanningInput, type CommandRegistry } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
-import { togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
+import { isPlanMode, togglePlanMode, permissionModeLabel, type PermissionModeValue } from '../../core/permission-mode.ts';
 import { parsePlanningActionTarget } from './planning-action-target.ts';
 import { readPlanningGoal } from '@goodvibes-jev/engine/platform/platform/agents';
 import { beginCommandReading } from './command-reading-lifetime.ts';
@@ -214,8 +214,10 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         reading.assertCurrent(); submission.assertCurrent();
         submission.finish();
         enteredNativeIntake = true;
-        await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
+        const state = await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
           notify: line => ctx.print(line), dispatch: ctx.dispatchNativeIntakeTurn });
+        // Refused because another input is still being admitted: nothing was sent.
+        if (state?.status === 'pending') ctx.restoreDraft?.(`/project-plan ${source.text}`);
         ctx.renderRequest();
       } catch {
         if (!submission?.signal.aborted) ctx.print(enteredNativeIntake
@@ -230,6 +232,16 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
   // moved to /project-plan (alias /planning). The change goes through the platform
   // config surface (permissions.mode), the same value the PermissionManager
   // reads and Shift+Tab cycles, so plan mode is one concept across surfaces.
+  // The mode the session was in when /plan turned plan mode on, so leaving
+  // plan mode puts the user's chosen permission posture back. Plan mode entered
+  // elsewhere (Shift+Tab) has no remembered mode and exits to safe-owner.
+  let modeBeforePlan: PermissionModeValue | undefined;
+  let stopWatchingMode: (() => void) | undefined;
+  const forgetModeBeforePlan = (): void => {
+    modeBeforePlan = undefined;
+    stopWatchingMode?.();
+    stopWatchingMode = undefined;
+  };
   registry.register({
     name: 'plan',
     description: 'Enter or exit plan mode, a read-only planning posture where writes, commands, and network calls are blocked',
@@ -239,14 +251,32 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
       const configManager = ctx.platform.configManager;
       const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
       const sub = (args[0] ?? 'toggle').toLowerCase();
-      const next: PermissionModeValue =
-        sub === 'on' || sub === 'enter' ? 'plan'
-        : sub === 'off' || sub === 'exit' ? 'safe-owner'
-        : togglePlanMode(current);
-      configManager.set('permissions.mode', next);
-      ctx.print(next === 'plan'
-        ? '[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).'
-        : `[Permissions] Plan mode OFF; mode: ${permissionModeLabel(next)}.`);
+      const inPlan = isPlanMode(current);
+      const wantsOn = sub === 'on' || sub === 'enter' || (sub !== 'off' && sub !== 'exit' && !inPlan);
+      if (wantsOn) {
+        if (inPlan) {
+          ctx.print('[Permissions] Plan mode is already ON; nothing changed.');
+          return;
+        }
+        stopWatchingMode?.();
+        modeBeforePlan = current;
+        configManager.set('permissions.mode', 'plan');
+        // Leaving plan mode any other way (Shift+Tab) ends the remembered posture, so a later
+        // re-entry by another route cannot restore a stale, possibly more permissive mode.
+        stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
+          if (!isPlanMode(next as PermissionModeValue)) forgetModeBeforePlan();
+        });
+        ctx.print('[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).');
+        return;
+      }
+      if (!inPlan) {
+        ctx.print(`[Permissions] Plan mode is not on; mode stays ${permissionModeLabel(current ?? 'safe-owner')}. Use /plan on to enter it.`);
+        return;
+      }
+      const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
+      forgetModeBeforePlan();
+      configManager.set('permissions.mode', restored);
+      ctx.print(`[Permissions] Plan mode OFF; mode: ${permissionModeLabel(restored)}.`);
     },
   });
 }

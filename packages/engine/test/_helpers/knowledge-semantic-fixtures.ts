@@ -8,12 +8,22 @@ import { KnowledgeStore } from '../../platform/src/platform/knowledge/store.js';
 import { waitFor as _canonicalWaitFor } from './test-timeout.js';
 
 const tmpRoots: string[] = [];
+const tmpStores: KnowledgeStore[] = [];
 
-afterEach(() => {
-  for (const root of tmpRoots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+/**
+ * Call once at the top level of each test file that uses `createStores`.
+ * `bun test` caches modules across files, so a hook registered at import time
+ * would bind to the first importing file only and later files would leak their
+ * temp directories.
+ */
+export function useStoreCleanup(): void {
+  afterEach(async () => {
+    for (const store of tmpStores.splice(0)) await store.close();
+    for (const root of tmpRoots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 export class FakeKnowledgeLlm implements KnowledgeSemanticLlm {
   async completeJson(input: { readonly purpose: string; readonly signal?: AbortSignal | undefined }): Promise<unknown | null> {
@@ -284,8 +294,10 @@ export class SlowKnowledgeLlm implements KnowledgeSemanticLlm {
 export function createStores(): { readonly store: KnowledgeStore; readonly artifactStore: ArtifactStore } {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-semantic-'));
   tmpRoots.push(root);
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  tmpStores.push(store);
   return {
-    store: new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }),
+    store,
     artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }),
   };
 }

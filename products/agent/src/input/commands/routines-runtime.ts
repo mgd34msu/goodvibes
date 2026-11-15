@@ -6,6 +6,9 @@ import {
   buildRoutineSchedulePreview,
   promoteRoutineToConnectedSchedule,
   resolveAgentConnectedHostConnection,
+  routinePromotionBlockers,
+  routineScheduleName,
+  type RoutineSchedulePromotionPreview,
 } from '../../agent/routine-schedule-promotion.ts';
 import { parseRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-args.ts';
 import {
@@ -17,6 +20,7 @@ import {
   formatRoutineScheduleSuccess,
 } from '../../agent/routine-schedule-format.ts';
 import {
+  fetchLiveSchedules,
   reconcileRoutineScheduleReceipts,
   RoutineScheduleReceiptStore,
 } from '../../agent/routine-schedule-receipts.ts';
@@ -202,6 +206,73 @@ async function importDiscoveredRoutine(args: readonly string[], ctx: CommandCont
   ctx.print(formatRoutineReceipt('Imported Agent routine', routine, [`  enabled ${routine.enabled ? 'yes' : 'no'}`]));
 }
 
+function latestAttemptFor(
+  receipts: RoutineScheduleReceiptStore,
+  baseUrl: string,
+  preview: RoutineSchedulePromotionPreview,
+) {
+  // The receipt records the name the schedule was created under, which falls back to the routine's name.
+  const scheduleName = routineScheduleName(preview);
+  let latest: ReturnType<RoutineScheduleReceiptStore['get']> = null;
+  for (const receipt of receipts.snapshot().receipts) {
+    if (receipt.routineId !== preview.routineId || receipt.scheduleName !== scheduleName || receipt.connectedHostBaseUrl !== baseUrl) continue;
+    if (!latest || receipt.createdAt > latest.createdAt) latest = receipt;
+  }
+  return latest;
+}
+
+/** Print the schedule preview, or, with --yes, create the connected schedule and record the receipt. */
+export async function runRoutineSchedulePromotion(
+  ctx: CommandContext,
+  routine: AgentRoutineRecord,
+  parsed: ReturnType<typeof parseRoutineSchedulePromotionArgs>,
+): Promise<void> {
+  const preview = buildRoutineSchedulePreview(routine, parsed);
+  const blockers = routinePromotionBlockers(routine);
+  const readinessLines = blockers.length === 0
+    ? []
+    : ['', `Not ready to promote ${routine.id}:`, ...blockers.map((blocker) => `  ${blocker}`)];
+  if (!parsed.yes) {
+    ctx.print([formatRoutineSchedulePreview(preview), ...readinessLines].join('\n'));
+    return;
+  }
+  if (blockers.length > 0) {
+    ctx.print([`Refusing to promote ${routine.id}: no schedule was created.`, ...blockers.map((blocker) => `  ${blocker}`)].join('\n'));
+    return;
+  }
+  const shellPaths = requireShellPaths(ctx);
+  const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
+  // A failure that does not say whether the host acted (dropped connection, timeout, host error) may
+  // have left the schedule created, and a blind retry would create a second recurring one. Ask the
+  // host first and let the earlier attempt's outcome decide.
+  const receipts = receiptStoreFromContext(ctx);
+  const scheduleName = routineScheduleName(preview);
+  const earlier = latestAttemptFor(receipts, connection.baseUrl, preview);
+  const earlierAmbiguous = earlier?.status === 'failed' && (earlier.failureKind === 'connected_host_unavailable' || earlier.failureKind === 'connected_host_error');
+  // A repeat of a promotion that succeeded would create a second schedule with the same name.
+  if (earlier && (earlier.status === 'created' || earlierAmbiguous)) {
+    const live = await fetchLiveSchedules(connection);
+    const existing = live.ok ? live.schedules.find((schedule) => schedule.name === scheduleName) : undefined;
+    if (!live.ok || existing) {
+      const origin = earlier.status === 'created' ? 'from the earlier promotion' : 'most likely from the earlier attempt';
+      ctx.print(existing
+        ? `A schedule named "${scheduleName}" (id ${existing.id}) already exists on the connected host, ${origin} (receipt ${earlier.id}). Nothing was created. Run /schedule reconcile to review it, or promote with a different --name to create another.`
+        : `An earlier promotion of this routine (receipt ${earlier.id}) ${earlier.status === 'created' ? 'created a schedule' : 'failed without a known outcome'}, and the connected host's schedules could not be read to check (${live.error ?? 'no detail'}). Nothing was created. Retry once the host is reachable.`);
+      return;
+    }
+  }
+  const result = await promoteRoutineToConnectedSchedule(connection, preview);
+  // The host's answer is what the owner needs first; a receipt that cannot be written must not hide it
+  // (a retry would create a second schedule).
+  let receiptLine: string;
+  try {
+    receiptLine = `receipt: ${receipts.append(connection, preview, result).id}`;
+  } catch (error) {
+    receiptLine = `receipt not recorded: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  ctx.print(`${result.ok ? formatRoutineScheduleSuccess(result) : formatRoutineScheduleFailure(result)}\n  ${receiptLine}`);
+}
+
 async function promoteRoutine(args: readonly string[], routineRegistry: AgentRoutineRegistry, ctx: CommandContext): Promise<void> {
   const parsed = parseRoutineSchedulePromotionArgs(args);
   if (parsed.errors.length > 0) {
@@ -216,16 +287,7 @@ async function promoteRoutine(args: readonly string[], routineRegistry: AgentRou
     ctx.print(`Unknown Agent routine: ${parsed.routineId ?? ''}`);
     return;
   }
-  const preview = buildRoutineSchedulePreview(routine, parsed);
-  if (!parsed.yes) {
-    ctx.print(formatRoutineSchedulePreview(preview));
-    return;
-  }
-  const shellPaths = requireShellPaths(ctx);
-  const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
-  const result = await promoteRoutineToConnectedSchedule(connection, preview);
-  const receipt = receiptStoreFromContext(ctx).append(connection, preview, result);
-  ctx.print(result.ok ? `${formatRoutineScheduleSuccess(result)}\n  receipt: ${receipt.id}` : `${formatRoutineScheduleFailure(result)}\n  receipt: ${receipt.id}`);
+  await runRoutineSchedulePromotion(ctx, routine, parsed);
 }
 
 export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: CommandContext): Promise<void> {
@@ -317,6 +379,10 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
         return;
       }
       const parsed = parseRoutineArgs(args.slice(2));
+      const existing = routineRegistry.get(id);
+      // A flag that is not given keeps what the routine already requires of that kind.
+      const keptRequirements = (kind: 'env' | 'command'): readonly string[] =>
+        (existing?.requirements ?? []).filter((requirement) => requirement.kind === kind).map((requirement) => requirement.name);
       const updated = routineRegistry.update(id, {
         name: parsed.flags.get('name'),
         description: parsed.flags.get('description'),
@@ -325,8 +391,10 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
         tags: parsed.flags.has('tags') ? splitList(parsed.flags.get('tags')) : undefined,
         requirements: parsed.flags.has('requires-env') || parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
           ? buildAgentSkillRequirements({
-            env: splitList(parsed.flags.get('requires-env')),
-            commands: splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands')),
+            env: parsed.flags.has('requires-env') ? splitList(parsed.flags.get('requires-env')) : keptRequirements('env'),
+            commands: parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
+              ? splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands'))
+              : keptRequirements('command'),
           })
           : undefined,
         provenance: 'Command',
@@ -338,6 +406,10 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       const id = args[1];
       if (!id) {
         ctx.print(`Usage: /routines ${sub} <id>`);
+        return;
+      }
+      if (sub === 'enable' && ctx.invokedByModel === true && routineRegistry.get(id)?.reviewState !== 'reviewed') {
+        ctx.print(`Refused: Agent routine ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed routine.`);
         return;
       }
       const routine = routineRegistry.setEnabled(id, sub === 'enable');
@@ -367,6 +439,10 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       const id = args[1];
       if (!id) {
         ctx.print('Usage: /routines review <id>');
+        return;
+      }
+      if (ctx.invokedByModel === true) {
+        ctx.print('Refused: marking a routine reviewed is the owner\'s decision that its steps may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use.');
         return;
       }
       const routine = routineRegistry.markReviewed(id);

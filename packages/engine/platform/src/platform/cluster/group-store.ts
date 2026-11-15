@@ -20,7 +20,6 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import {
   generateGroupKey,
   generateGroupSigningKeyPair,
@@ -434,6 +433,12 @@ export function rotateGroupKeyMaterial(
   nodeId: string,
   now: number,
   graceMs: number,
+  /**
+   * A replacement join key and its verifier, for a revocation. The key a
+   * removed machine still holds on its disk must stop being a way back in, so
+   * a revocation hands every remaining member a new one with the new group key.
+   */
+  join?: { readonly joinKey: string; readonly joinVerifier: string },
 ): GroupKeyMaterial {
   const generation = material.currentGeneration + 1;
   const minted: GroupKeyRecord = {
@@ -445,6 +450,7 @@ export function rotateGroupKeyMaterial(
   const swept = sweepKeyHistory([...material.keys, minted], generation, now);
   return {
     ...material,
+    ...(join ? { joinKey: join.joinKey, joinVerifier: join.joinVerifier } : {}),
     keys: swept.keys,
     currentGeneration: generation,
     previousAcceptedUntil: cause === 'scheduled' ? Math.trunc(now + graceMs) : 0,
@@ -559,38 +565,4 @@ export function loadReplicaDocument<T>(
     }
   }
   return null;
-}
-
-/** Persist the replicated settings document. Never throws: it re-converges by gossip. */
-export function saveReplicaDocument(
-  stateDirectory: string,
-  document: unknown,
-  logger?: ClusterLogger,
-): void {
-  const filePath = join(stateDirectory, GROUP_REPLICA_FILENAME);
-  try {
-    writeFileAtomic(filePath, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600, cleanupStaleTemps: false });
-  } catch (error) {
-    logger?.warn('cluster: the replicated settings could not be written; they will be re-sent by the group', {
-      filePath,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/** Persist the roster. Failure is logged, never thrown: it re-converges by gossip. */
-export function saveGroupState(
-  stateDirectory: string,
-  state: GroupStateDocument,
-  logger?: ClusterLogger,
-): void {
-  const filePath = join(stateDirectory, GROUP_STATE_FILENAME);
-  try {
-    writeFileAtomic(filePath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, cleanupStaleTemps: false });
-  } catch (error) {
-    logger?.warn('cluster: the roster could not be written; it will be rebuilt from the group on the next gossip', {
-      filePath,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }

@@ -12,7 +12,9 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
+import type { VoiceKeySupersede } from '../../voice/provisioning/config-preconfigure.js';
 import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
 
 /** One-act install outcome served by voice.local.install. */
@@ -35,6 +37,8 @@ export interface VoiceLocalInstallResult {
   readonly configured: {
     readonly set: ReadonlyArray<{ readonly key: string; readonly value: string }>;
     readonly skipped: ReadonlyArray<{ readonly key: string; readonly reason: string }>;
+    /** Keys taken over from an install this one replaces; absent from a service that predates the field. */
+    readonly superseded?: readonly VoiceKeySupersede[];
   };
 }
 
@@ -70,7 +74,7 @@ export function createVoiceInstallHandler(service: VoiceSetupGatewayService): Ga
     signal: invocation.signal,
     assertCurrent: () => {
       if (invocation.signal?.aborted || invocation.isAuthorized?.(['write:config']) === false) {
-        throw new Error('The voice install request is no longer authorized.');
+        throw new GatewayVerbError('The voice install request is no longer authorized: its write:config authority was revoked or the request was cancelled. Nothing further was changed; send it again with current authority.', 'FORBIDDEN', 403);
       }
     },
   });
@@ -99,7 +103,7 @@ function readOptionalCount(value: unknown, field: string): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`voice.wake.model.get: ${field} must be a non-negative number (got ${JSON.stringify(value)})`);
+    throw new GatewayVerbError(`voice.wake.model.get: ${field} must be a non-negative number (got ${JSON.stringify(value)})`, 'INVALID_ARGUMENT', 400, field);
   }
   return Math.trunc(parsed);
 }
@@ -115,7 +119,7 @@ export function createWakeModelHandler(service: VoiceSetupGatewayService): Gatew
     const component = typeof params['component'] === 'string' ? params['component'] : '';
     const known = ['classifier', 'tflite', 'embedding', 'notice', 'embedding-notice', 'vad', 'vad-notice'];
     if (!known.includes(component)) {
-      throw new Error(`voice.wake.model.get: component must be one of ${known.join(', ')} (got "${component}")`);
+      throw new GatewayVerbError(`voice.wake.model.get: component must be one of ${known.join(', ')} (got "${component}")`, 'INVALID_ARGUMENT', 400, 'component');
     }
     return service.wakeModelChunk({
       component,

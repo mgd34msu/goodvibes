@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { join, dirname, sep } from 'path';
 import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 
 /**
@@ -36,6 +37,18 @@ interface DiskFormat {
   tree: TreeDir;
 }
 
+/** Reads an index file; null when none exists or it is in an older format. Throws, naming the file, when it cannot be read. */
+function readIndexFile(indexPath: string): { readonly createdAt: string | undefined; readonly files: Map<string, number> } | null {
+  if (!existsSync(indexPath)) return null;
+  try {
+    const disk = JSON.parse(readFileSync(indexPath, 'utf-8')) as DiskFormat;
+    // An index in an older format is ignored, as if absent; it is rebuilt.
+    return disk.version === 4 && disk.tree ? { createdAt: disk.created_at, files: flattenTree(disk.tree) } : null;
+  } catch (err) {
+    throw new Error(`ProjectIndex load failed for ${indexPath}: ${summarizeError(err)}`);
+  }
+}
+
 /**
  * ProjectIndex, In-memory project file index with token counts.
  *
@@ -51,7 +64,6 @@ export class ProjectIndex {
   private files: Map<string, number> = new Map(); // path -> tokens
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private createdAt: string = new Date().toISOString();
-  private loaded = false;
   private disposed = false;
   private closing: Promise<void> | undefined;
 
@@ -71,21 +83,11 @@ export class ProjectIndex {
    */
   async load(): Promise<void> {
     this.assertOpen();
-    if (!existsSync(this.indexPath)) {
-      this.loaded = true;
-      return;
-    }
-    try {
-      const raw = readFileSync(this.indexPath, 'utf-8');
-      const disk = JSON.parse(raw) as DiskFormat;
-      if (disk.version === 4 && disk.tree) {
-        this.createdAt = disk.created_at ?? this.createdAt;
-        this.files = flattenTree(disk.tree);
-      }
-      this.loaded = true;
+    const read = readIndexFile(this.indexPath);
+    if (read) {
+      this.createdAt = read.createdAt ?? this.createdAt;
+      this.files = read.files;
       logger.debug('ProjectIndex: loaded', { files: this.files.size });
-    } catch (err) {
-      throw new Error(`ProjectIndex load failed for ${this.indexPath}: ${summarizeError(err)}`);
     }
   }
 
@@ -217,9 +219,11 @@ export class ProjectIndex {
   /**
    * Re-root the project index to a new base directory.
    *
-   * Flushes any pending writes to the current location, then resets all in-memory
-   * state and re-points the index path to the new directory. A fresh load is
-   * performed to pick up any existing index at the new location.
+   * Flushes any pending writes to the current location, reads any existing
+   * index at the new location, and only then re-points this index. When the
+   * new index cannot be read the index stays on the old directory with its
+   * entries intact, so a failed swap does not leave it emptied and aimed at a
+   * file its next flush would overwrite.
    *
    * @param newBaseDir - Absolute path to the new project root.
    */
@@ -231,14 +235,13 @@ export class ProjectIndex {
     }
     await this.forceFlush();
     this.assertOpen();
+    const indexPath = join(newBaseDir, '.goodvibes', 'project-index.json');
+    const read = readIndexFile(indexPath);
     this.projectRoot = newBaseDir;
     this.baseDir = newBaseDir;
-    this.indexPath = join(newBaseDir, '.goodvibes', 'project-index.json');
-    this.files = new Map();
-    this.loaded = false;
-    this.createdAt = new Date().toISOString();
-    // Load the existing index at the new location. A no-op if none exists yet.
-    await this.load();
+    this.indexPath = indexPath;
+    this.files = read?.files ?? new Map();
+    this.createdAt = read?.createdAt ?? new Date().toISOString();
   }
 
   private scheduleFlush(): void {
@@ -281,9 +284,7 @@ export class ProjectIndex {
       },
       tree,
     };
-    const tmpPath = `${this.indexPath}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(disk) + '\n', 'utf-8');
-    renameSync(tmpPath, this.indexPath);
+    writeJsonFileAtomic(this.indexPath, disk, { indent: null, durable: false });
   }
 }
 

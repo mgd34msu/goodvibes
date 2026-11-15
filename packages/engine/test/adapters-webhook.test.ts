@@ -39,6 +39,7 @@ function makeWebhookContext(overrides: Partial<Record<string, unknown>> = {}) {
             mode: 'spawn',
             task: { prompt: 'hello webhook' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },
@@ -121,6 +122,32 @@ describe('webhook adapter: contract surface', () => {
       text: 'hello webhook',
       mentioned: true,
     });
+  });
+
+  test('a message queued behind an agent that is still starting is acknowledged and starts no second agent', async () => {
+    const { context, calls } = makeWebhookContext({
+      sessionBroker: {
+        submitMessage: async (input: unknown) => {
+          calls.push({ kind: 'submitMessage', input });
+          return {
+            mode: 'queued-follow-up',
+            session: { id: 'session-1' },
+            input: { id: 'input-2' },
+          };
+        },
+        bindAgent: async () => { calls.push({ kind: 'bindAgent', input: null }); },
+      },
+    });
+    const res = await handleGenericWebhookSurface(new Request('http://localhost/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goodvibes-webhook-secret': 'webhook-secret' },
+      body: JSON.stringify({ message: 'second message' }),
+    }), context);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ acknowledged: true, queued: true, sessionId: 'session-1' });
+    expect(calls.map((call) => call.kind)).not.toContain('trySpawnAgent');
+    expect(calls.map((call) => call.kind)).not.toContain('bindAgent');
   });
 
   test('reports skipped callback delivery when webhook egress is disabled', async () => {

@@ -300,6 +300,41 @@ function isClassified(key: string): boolean {
   return findCredentialScopeDeclaration(key) !== null;
 }
 
+/**
+ * Judge a passthrough identifier by the local `const` that minted it.
+ *
+ * `const key = \`PREFIX_${id}\`; secrets.set(key, v)` mints the name in this
+ * file, so no other site will classify it. A literal prefix must be covered by
+ * a registry prefix declaration; a template with no literal prefix cannot be
+ * classified at all. An identifier with no local initializer (a wrapper
+ * parameter) stays a passthrough: the minting site is elsewhere and is checked
+ * there. Returns the problem, or null when there is none.
+ */
+function mintedKeyProblem(source: string, args: string, callIndex: number): string | null {
+  const name = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,|$)/.exec(args)?.[1];
+  if (name === undefined) return null;
+  // The nearest declaration above the call; a parameter of the same name in between shadows it.
+  const declarationPattern = new RegExp(`(?:const|let)\\s+${name.replace(/\$/g, '\\$')}\\s*(?::\\s*string)?\\s*=\\s*([^;\\n]+)`, 'g');
+  let initializer: string | undefined;
+  let declaredAt = -1;
+  for (let found = declarationPattern.exec(source); found !== null && found.index < callIndex; found = declarationPattern.exec(source)) {
+    initializer = found[1]!.trim();
+    declaredAt = found.index;
+  }
+  if (initializer === undefined) return null;
+  const shadow = new RegExp(`[(,]\\s*${name.replace(/\$/g, '\\$')}\\s*[:,)?]|\\b${name.replace(/\$/g, '\\$')}\\s*=>`);
+  if (shadow.test(source.slice(declaredAt, callIndex))) return null;
+  const template = /^`([^`$]*)\$\{/.exec(initializer);
+  if (template === null) return null;
+  const literal = template[1]!;
+  if (literal === '') {
+    return `"${name}" is built from a template with no literal prefix and states no scope, give the key a literal prefix and declare it in credential-scope-registry.ts, or pass an explicit scope`;
+  }
+  const declaration = findCredentialScopeDeclaration(`${literal}x`);
+  if (declaration?.match === 'prefix' && literal.startsWith(declaration.key)) return null;
+  return `"${name}" is minted here as \`${literal}\${...}\` and no prefix declaration covers it, declare the prefix in credential-scope-registry.ts, or pass an explicit scope`;
+}
+
 function checkFile(path: string, constants: ReadonlyMap<string, string>): Finding[] {
   const source = withoutComments(readFileSync(path, 'utf-8'));
   // A `Map` called `store` also has `.set(`. The alias is kept because real
@@ -335,7 +370,11 @@ function checkFile(path: string, constants: ReadonlyMap<string, string>): Findin
     if (key === null) {
       const callee = calledFunction(args);
       if (callee !== null && (DERIVING_FUNCTIONS.has(callee) || PREFIX_MINTERS.has(callee))) continue;
-      if (isPassthroughIdentifier(args)) continue;
+      if (isPassthroughIdentifier(args)) {
+        const problem = mintedKeyProblem(source, args, match.index);
+        if (problem !== null) findings.push({ file: path, line, snippet, reason: problem });
+        continue;
+      }
       // A computed key with no stated scope, minted right here. This is the
       // per-subscription calendar-feed shape: nobody could classify it and
       // nobody did.

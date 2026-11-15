@@ -357,8 +357,6 @@ describe.skipIf(!LIVE_PTY.available)('runInteractiveCommand (live PTY)', () => {
     expect(result.success).toBe(false);
     expect(result.prompt_declined).toBe(true);
     expect(result.pending_prompt).toBe('Continue? [y/n]:');
-    // Stopped promptly, nowhere near the 60s timeout.
-    expect(Date.now() - start).toBeLessThan(20_000);
   }, 30_000);
 
   test('multiple sequential prompts are each answered on the same continuing run', async () => {

@@ -9,7 +9,7 @@
  * rules, orphan reconciliation, per-worktree dirty-guard) against a REAL git
  * repository.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -179,8 +179,17 @@ function enginePhase(capacity = 1): PhaseSpec {
   return { role: 'engineer', capacity, kind: 'engineer', gate: { scope: 'scoped', gates: [] } };
 }
 
+// Roots and engines are released after every test, so a failed assertion neither leaks a git repo
+// or a running engine nor leaves a stale `root` for the next test.
+const roots: string[] = [];
+const engines: Array<ReturnType<typeof createOrchestrationEngine>> = [];
+afterEach(() => {
+  for (const engine of engines.splice(0)) engine.dispose();
+  for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function makeEngine(root: string, h: WtHarness, overrides: Partial<OrchestrationEngineDeps> = {}) {
-  return createOrchestrationEngine({
+  const engine = createOrchestrationEngine({
     agentManager: h.agentManager,
     configManager: makeFakeConfigManager(),
     runtimeBus: h.bus,
@@ -189,12 +198,15 @@ function makeEngine(root: string, h: WtHarness, overrides: Partial<Orchestration
     skipClaimVerification: true,
     ...overrides,
   });
+  engines.push(engine);
+  return engine;
 }
 
 let root: string;
 
 function freshRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), 'wt-isolation-'));
+  roots.push(dir);
   initRepo(dir);
   return dir;
 }
@@ -273,8 +285,6 @@ describe('WorktreeIsolationManager: claim-time creation + concurrent non-conflic
     // Branches are cleaned up on the root repo.
     const branches = runGit(root, ['branch', '--list', 'ws/*']);
     expect(branches.trim()).toBe('');
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 
   test('a genuine conflict keeps the losing worktree + branch, records blockedReason, and lets the lane continue', async () => {
@@ -362,8 +372,6 @@ describe('WorktreeIsolationManager: claim-time creation + concurrent non-conflic
     expect(existsSync(keptPath)).toBe(false);
     // Honest refusal on a non-conflicted item.
     expect(await engine.retryItemIntegration('item-first')).toBe('not-conflicted');
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -411,8 +419,6 @@ describe('WorktreeIsolationManager: shared isolation (default) stays fully untou
       expect(runGit(root, ['branch', '--list', 'ws/*']).trim()).toBe('');
       expect(existsSync(join(root, '.goodvibes', '.worktrees'))).toBe(false);
       expect(events.some((e) => e.type.startsWith('item-worktree') || e.type === 'item-merged' || e.type === 'item-merge-conflict')).toBe(false);
-
-      rmSync(root, { recursive: true, force: true });
     } finally {
       installJudgmentPort(previous);
     }
@@ -444,7 +450,6 @@ describe('WorktreeIsolationManager: fail/kill cleanup rules', () => {
       expect(events.some((event) => event.type === 'item-worktree-removed')).toBe(false);
     } finally {
       engine.dispose();
-      rmSync(root, { recursive: true, force: true });
     }
   }, WAIT_TEST_TIMEOUT_MS);
 
@@ -486,8 +491,6 @@ describe('WorktreeIsolationManager: fail/kill cleanup rules', () => {
     expect(clean.state).toBe('failed');
     expect(clean.worktreeKept).toBeFalsy();
     expect(clean.worktreePath).toBeUndefined();
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 
   test('a failed agent (not killed) triggers the same clean-worktree removal rule', async () => {
@@ -511,8 +514,6 @@ describe('WorktreeIsolationManager: fail/kill cleanup rules', () => {
 
     expect(item.worktreePath).toBeUndefined();
     expect(item.worktreeKept).toBeFalsy();
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -563,8 +564,63 @@ describe('WorktreeIsolationManager: orphan reconciliation (adopt-or-report)', ()
 
     // A name-only historical orphan is not proof of original acquisition.
     expect(existsSync(canonicalPath)).toBe(true);
+  }, WAIT_TEST_TIMEOUT_MS);
+});
 
-    rmSync(root, { recursive: true, force: true });
+describe('WorktreeIsolationManager: every integration reports an outcome', () => {
+  test('an empty branch whose worktree cannot be removed still reads merged and releases its dependent', async () => {
+    const { IsolatedWorktree } = await import('../platform/src/platform/agents/worktree.js');
+    const remove = IsolatedWorktree.prototype.remove;
+    IsolatedWorktree.prototype.remove = async function () { throw new Error('the worktree directory is locked'); };
+    try {
+      root = freshRoot();
+      const h = makeWtHarness();
+      const events: OrchestrationEvent[] = [];
+      const offPhase: PhaseSpec = { role: 'engineer', capacity: 1, kind: 'engineer', gate: { scope: 'off', gates: [] } };
+      const engine = makeEngine(root, h);
+      engine.on((e) => events.push(e));
+      const items: WorkItemSpec[] = [{ id: 'item-noop', title: 'noop', task: 't' },
+        { id: 'item-next', title: 'dependent', task: 'Continue after the read-only result.', dependsOn: ['item-noop'] }];
+      const ws = engine.createWorkstream({ id: 'ws-kept', title: 'kept', phases: [offPhase], items, isolation: 'worktree', releasePolicy: 'reviewed-and-merged' });
+      engine.start(ws.id);
+      await waitForAgents(ws, h, 1);
+      h.completeAgent(h.spawnedIds[0]!, engineerReportOutput({}));
+      await waitUntil(() => events.some((e) => e.type === 'item-worktree-kept' && e.itemId === 'item-noop'), { label: 'item-noop worktree kept' });
+      expect(ws.items[0]!.mergeState).toBe('merged');
+      await waitForAgents(ws, h, 2);
+      expect(events.some(event => event.type === 'item-dependency-cleared' && event.itemId === 'item-next')).toBe(true);
+      h.completeAgent(h.spawnedIds[1]!, engineerReportOutput({}));
+      await waitUntil(() => ws.items[1]!.mergeState === 'merged', { label: 'dependent integrated' });
+      engine.dispose(); await engine.join();
+    } finally {
+      IsolatedWorktree.prototype.remove = remove;
+    }
+  }, WAIT_TEST_TIMEOUT_MS);
+
+  test('an integration that throws reports a merge conflict instead of ending silently', async () => {
+    const { IsolatedWorktree } = await import('../platform/src/platform/agents/worktree.js');
+    const integrate = IsolatedWorktree.prototype.integrate;
+    IsolatedWorktree.prototype.integrate = async function () { throw new Error('git merge could not start'); };
+    try {
+      root = freshRoot();
+      const h = makeWtHarness();
+      const events: OrchestrationEvent[] = [];
+      const offPhase: PhaseSpec = { role: 'engineer', capacity: 1, kind: 'engineer', gate: { scope: 'off', gates: [] } };
+      const engine = makeEngine(root, h);
+      engine.on((e) => events.push(e));
+      const ws = engine.createWorkstream({ id: 'ws-throw', title: 'throws', phases: [offPhase], items: [{ id: 'item-x', title: 'x', task: 't' }], isolation: 'worktree', releasePolicy: 'reviewed-and-merged' });
+      engine.start(ws.id);
+      await waitForAgents(ws, h, 1);
+      h.completeAgent(h.spawnedIds[0]!, engineerReportOutput({}));
+      await waitUntil(() => events.some((e) => e.type === 'item-merge-conflict' && e.itemId === 'item-x'), { label: 'item-x merge conflict' });
+      const conflict = events.find((e): e is Extract<OrchestrationEvent, { type: 'item-merge-conflict' }> => e.type === 'item-merge-conflict')!;
+      expect(conflict.files).toEqual([]);
+      expect(ws.items[0]!.mergeState).toBe('conflict');
+      expect(ws.items[0]!.blockedReason).toContain('git merge could not start');
+      engine.dispose(); await engine.join();
+    } finally {
+      IsolatedWorktree.prototype.integrate = integrate;
+    }
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -603,8 +659,6 @@ describe('WorktreeIsolationManager: empty integration (no commits beyond base)',
     await waitUntil(() => events.some(event => event.type === 'item-worktree-removed' && event.itemId === 'item-next'), { label: 'dependent no-op integration' });
     expect(ws.items[1]!.state).toBe('passed');
     engine.dispose(); await engine.join();
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -623,8 +677,6 @@ describe('WorktreeIsolationManager: per-worktree dirty-guard', () => {
 
     const snapshot = snapshotDirtyTree(item.worktreePath!);
     expect(snapshot.size).toBe(0);
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -703,7 +755,6 @@ describe('WorktreeIsolationManager: bounded kept-worktree cap, oldest-first evic
       }
     } finally {
       engine.dispose();
-      rmSync(root, { recursive: true, force: true });
     }
   }, WAIT_TEST_TIMEOUT_MS);
 
@@ -733,8 +784,6 @@ describe('WorktreeIsolationManager: bounded kept-worktree cap, oldest-first evic
     expect(runGit(root, ['show', 'ws/x/y:committed.txt'])).toBe('committed-work EDITED\n');
     expect(runGit(root, ['show', 'ws/x/y:untracked.txt'])).toBe('untracked-work\n');
     expect(runGit(root, ['show', 'ws/x/y~1:committed.txt'])).toBe('committed-work\n');
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 
   test('evict() on an already-clean kept worktree removes only the directory and keeps the branch', async () => {
@@ -749,7 +798,6 @@ describe('WorktreeIsolationManager: bounded kept-worktree cap, oldest-first evic
     expect(preservedCommit).toBeNull();
     expect(existsSync(wtPath)).toBe(false);
     expect(runGit(root, ['branch', '--list', 'ws/c/d']).trim()).not.toBe('');
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });
 
@@ -777,7 +825,5 @@ describe('WorktreeIsolationManager: cold-start setup hook', () => {
     expect(solo.worktreePath).toBeDefined();
     await waitUntil(() => setupPaths.length === 1, { label: 'worktree setup ran once' });
     expect(setupPaths[0]).toBe(solo.worktreePath);
-
-    rmSync(root, { recursive: true, force: true });
   }, WAIT_TEST_TIMEOUT_MS);
 });

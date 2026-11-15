@@ -1,43 +1,122 @@
 import { mayOfferCardEntryFlow, describeCardEntryRefusal } from '@goodvibes-jev/engine/platform/platform/payments';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import {
-  PAYMENTS_CARD_NUMBER_CONFIG_KEY,
-  PAYMENTS_CARD_EXPIRY_CONFIG_KEY,
-  PAYMENTS_CARD_CVV_CONFIG_KEY,
-  PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY,
-} from './payments-settings.js';
+import type { OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { ConcealedInputRequest } from './concealed-input.js';
+import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
+import { RetainedOperatorConnection } from './retained-operator-connection.js';
+import type { PaymentWindowCommandPolicy } from './payment-window-command.js';
+import { stripDangerousAnsi } from './ansi-sanitize.js';
+
+export type CardFieldId = 'label' | 'kind' | 'number' | 'expiry' | 'cvv' | 'cardholderName';
 export interface CardField {
-  readonly key: ConfigKey;
+  readonly key: CardFieldId;
   readonly label: string;
   readonly placeholder: string;
 }
-export const CARD_SECRET_FIELDS: readonly CardField[] = [
-  { key: PAYMENTS_CARD_NUMBER_CONFIG_KEY, label: 'Card number', placeholder: '4242424242424242' },
-  { key: PAYMENTS_CARD_EXPIRY_CONFIG_KEY, label: 'Expiry (MM/YY)', placeholder: '12/34' },
-  { key: PAYMENTS_CARD_CVV_CONFIG_KEY, label: 'CVV', placeholder: '123' },
-  { key: PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY, label: 'Cardholder name', placeholder: 'as printed on the card' },
+/** Prompt order. Every answer goes through the concealed prompt, the label and kind included, so one rule covers the whole card. */
+export const CARD_ENTRY_FIELDS: readonly CardField[] = [
+  { key: 'label', label: 'Card label', placeholder: 'groceries virtual card' },
+  { key: 'kind', label: 'Card kind (virtual or real; blank for virtual)', placeholder: 'virtual' },
+  { key: 'number', label: 'Card number', placeholder: '4242424242424242' },
+  { key: 'expiry', label: 'Expiry (MM/YY)', placeholder: '12/34' },
+  { key: 'cvv', label: 'CVV', placeholder: '123' },
+  { key: 'cardholderName', label: 'Cardholder name', placeholder: 'as printed on the card' },
 ];
+
+/** The `payments.cards.create` input. */
+export interface CardCreateInput {
+  readonly label: string;
+  readonly kind: 'virtual' | 'real';
+  readonly number: string;
+  readonly expiryMonth: number;
+  readonly expiryYear: number;
+  readonly cvv: string;
+  readonly cardholderName: string;
+  readonly issuerCapMinorUnits: null;
+}
+
+/** What the host returns for a stored card: metadata only, never the number, expiry, CVV or name. */
+export interface CardSummary {
+  readonly id: string;
+  readonly label: string;
+  readonly brand: string;
+  readonly last4: string;
+  readonly kind: 'virtual' | 'real';
+  readonly expiryMonth: number;
+  readonly expiryYear: number;
+  readonly issuerCapMinorUnits: number | null;
+  readonly materialComplete: boolean;
+}
+
+/** One field's problem in words. It never contains the value, because a rejected card number is still a card number. */
+function cardFieldProblem(key: CardFieldId, raw: string): string | null {
+  const text = raw.trim();
+  switch (key) {
+    case 'label': return text.length === 0 ? 'A label is required so you can tell cards apart.' : null;
+    case 'kind': return text.length === 0 || /^(virtual|real)$/i.test(text) ? null : "The kind is 'virtual' or 'real'.";
+    case 'number': {
+      const digits = text.replace(/[\s-]/g, '');
+      return /^\d{13,19}$/.test(digits) ? null : 'A card number is 13 to 19 digits.';
+    }
+    case 'expiry': return parseCardExpiry(text) === null ? 'Expiry must look like MM/YY, for example 09/29.' : null;
+    case 'cvv': return /^\d{3,4}$/.test(text) ? null : 'The security code is 3 or 4 digits.';
+    case 'cardholderName': return text.length === 0 ? 'Enter the name as printed on the card.' : null;
+  }
+}
+
+/** "MM/YY" or "MM/YYYY"; a two-digit year means 20YY. */
+export function parseCardExpiry(text: string): { month: number; year: number } | null {
+  const match = /^\s*(\d{1,2})\s*[/-]\s*(\d{2}|\d{4})\s*$/.exec(text);
+  if (!match) return null;
+  const month = Number(match[1]);
+  if (month < 1 || month > 12) return null;
+  const year = match[2]!.length === 2 ? 2000 + Number(match[2]) : Number(match[2]);
+  return { month, year };
+}
+
+/** Turn the six answers into the host input. Returns the first problem instead (never the value) when one is invalid or missing. */
+export function buildCardCreateInput(values: Readonly<Partial<Record<CardFieldId, string>>>): CardCreateInput | { readonly problem: string; readonly field: CardFieldId } {
+  for (const field of CARD_ENTRY_FIELDS) {
+    const problem = cardFieldProblem(field.key, values[field.key] ?? '');
+    if (problem !== null) return { problem, field: field.key };
+  }
+  const expiry = parseCardExpiry(values.expiry ?? '');
+  if (expiry === null) return { problem: 'Expiry must look like MM/YY, for example 09/29.', field: 'expiry' };
+  return {
+    label: (values.label ?? '').trim(),
+    kind: (values.kind ?? '').trim().toLowerCase() === 'real' ? 'real' : 'virtual',
+    number: (values.number ?? '').replace(/[\s-]/g, ''),
+    expiryMonth: expiry.month,
+    expiryYear: expiry.year,
+    cvv: (values.cvv ?? '').trim(),
+    cardholderName: (values.cardholderName ?? '').trim(),
+    issuerCapMinorUnits: null,
+  };
+}
+
 export interface CardPromptContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
   readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
+  /** True when a model, not the person at the keyboard, ran the command. */
+  readonly invokedByModel?: boolean | undefined;
 }
-/** Plaintext exists only in the owned concealed submission and the supplied secret writer. */
-export function createCardFieldPrompter<Context extends CardPromptContext>(
-  write: (context: Context, field: CardField, value: string) => Promise<unknown>,
+
+/**
+ * Ask for every card field through concealed input, then send the whole card
+ * to the host in one request. The answers live only in this flow's local
+ * object: nothing is written to config, the transcript or a log, and Esc
+ * before the last answer discards them.
+ */
+export function createCardEntryPrompter<Context extends CardPromptContext>(
+  create: (context: Context, card: CardCreateInput) => Promise<CardSummary>,
   presentation: {
-    readonly completed: string;
     readonly prompt: (field: CardField) => string;
+    readonly stored: (card: CardSummary) => string;
   },
 ) {
-  function promptCardFields(ctx: Context, fields: readonly CardField[], index: number): void {
-    if (index >= fields.length) {
-      ctx.print(presentation.completed);
-      ctx.renderRequest();
-      return;
-    }
-    const field = fields[index]!;
+  function ask(ctx: Context, fields: readonly CardField[], index: number, values: Partial<Record<CardFieldId, string>>): void {
+    const field = fields[index];
+    if (!field) return;
     if (!ctx.beginConcealedInput) {
       ctx.print('[payments] Concealed input is unavailable on this surface; card entry requires it and cannot fall back to plaintext.');
       return;
@@ -46,40 +125,141 @@ export function createCardFieldPrompter<Context extends CardPromptContext>(
     let cancelled = false;
     let finished = false;
     let submitted = false;
+    const last = index === fields.length - 1;
     ctx.beginConcealedInput({
       label: field.label,
       onSubmit: async (value) => {
         if (submitted || cancelled) return;
         submitted = true;
-        if (value.length === 0) {
+        const problem = cardFieldProblem(field.key, value);
+        if (problem !== null) {
           finished = true;
-          ctx.print(`[payments] ${field.label} left unset.`);
-          promptCardFields(ctx, fields, index + 1);
+          ctx.print(`[payments] ${problem} Nothing has been sent.`);
+          ask(ctx, fields, index, values);
+          return;
+        }
+        values[field.key] = value;
+        if (!last) {
+          finished = true;
+          ask(ctx, fields, index + 1, values);
+          return;
+        }
+        const card = buildCardCreateInput(values);
+        for (const key of Object.keys(values) as CardFieldId[]) delete values[key];
+        if ('problem' in card) {
+          finished = true;
+          ctx.print(`[payments] ${card.problem} Nothing has been sent.`);
           return;
         }
         try {
-          await write(ctx, field, value);
+          const stored = await create(ctx, card);
           if (cancelled) return;
-          ctx.print(`[payments] ${field.label} stored securely (hidden).`);
-        } catch {
+          ctx.print(presentation.stored(stored));
+        } catch (error: unknown) {
           if (cancelled) return;
-          // Store failures may quote the input. Only the field label is safe.
-          ctx.print(`[payments] Failed to store ${field.label}. Try again.`);
-          finished = true;
-          promptCardFields(ctx, fields, index);
-          return;
+          // The message is chosen by the host client, never the host's own text, which could quote the request.
+          // A CardHostError is raised before the request leaves this process.
+          ctx.print(`[payments] ${describeCardFailure(error)}${error instanceof CardHostError ? ' Nothing was sent.' : ''}`);
         }
         finished = true;
-        promptCardFields(ctx, fields, index + 1);
+        ctx.renderRequest();
       },
       onCancel: () => {
         if (finished || cancelled) return;
         cancelled = true;
-        ctx.print('[payments] Stopped. Re-run /payments card to finish the remaining fields.');
+        ctx.print(
+          submitted
+            ? '[payments] Stopped. The card was already being sent and may have been stored; /payments status shows the cards the host has.'
+            : '[payments] Stopped. Nothing was sent and the answers so far were discarded. Re-run /payments card to start again.',
+        );
       },
     });
   }
-  return promptCardFields;
+  return function promptCardFields(ctx: Context, fields: readonly CardField[], index: number): void {
+    if (index === 0) ask(ctx, fields, 0, {});
+  };
+}
+
+/** Fixed text for a failed host call; a daemon message is never passed through. */
+export function describeCardFailure(error: unknown): string {
+  return error instanceof CardHostError
+    ? error.message
+    : 'The daemon did not confirm the request. Check the selected host, its pairing and the payments scope, and run /payments status to see which cards it holds before trying again.';
+}
+
+/** A refusal whose text is safe to print: written here, never copied from the host's response. */
+export class CardHostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CardHostError';
+  }
+}
+
+/** Host selection comes from the product, the same policy the purchase-window command uses. */
+export type PaymentCardHostPolicy<Context> = Omit<PaymentWindowCommandPolicy<Context>, 'isOwner'>;
+
+/** Add, list and remove cards on the selected paired daemon. A fresh connection per call; none is kept. */
+export function createPaymentCardHost<Context>(policy: PaymentCardHostPolicy<Context>) {
+  async function withHost<T>(
+    context: Context,
+    scope: 'read:payments' | 'write:payments',
+    work: (operator: OperatorApiClient, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const lifetime = new AbortController();
+    let connection: RetainedOperatorConnection;
+    try {
+      connection = new RetainedOperatorConnection({
+        owner: () => policy.owner(context), home: () => policy.home(context),
+        read: observation => policy.read(context, observation), files: policy.files,
+        environment: policy.environment, fetchImpl: policy.fetchImpl, signal: lifetime.signal,
+      });
+    } catch {
+      throw new CardHostError('No paired daemon is selected, or its credential changed. Check the selected host and pairing, then run the command again.');
+    }
+    try {
+      const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
+      if (!isPairedOperatorPrincipal(auth, [scope], connection.expectedPrincipalId)) {
+        throw new CardHostError(`The selected daemon does not give this terminal a paired administrative credential with ${scope}.`);
+      }
+      return await connection.run(work);
+    } finally {
+      lifetime.abort();
+      await connection.close();
+    }
+  }
+  return {
+    async create(context: Context, card: CardCreateInput): Promise<CardSummary> {
+      const result = await withHost(context, 'write:payments', (operator, signal) => operator.invoke('payments.cards.create', card, { signal }));
+      return result.card;
+    },
+    async list(context: Context): Promise<{ readonly cards: readonly CardSummary[]; readonly defaultCardId: string }> {
+      const result = await withHost(context, 'read:payments', (operator, signal) => operator.invoke('payments.cards.list', {}, { signal }));
+      return { cards: result.cards, defaultCardId: result.defaultCardId };
+    },
+    async remove(context: Context, id: string): Promise<{ readonly deleted: boolean }> {
+      const result = await withHost(context, 'write:payments', (operator, signal) => operator.invoke('payments.cards.delete', { id }, { signal }));
+      return { deleted: result.deleted };
+    },
+  };
+}
+
+/** One card in words: metadata the host returned, with terminal control sequences removed. */
+export function describeCard(card: CardSummary): string {
+  const month = String(card.expiryMonth).padStart(2, '0');
+  const cap = card.issuerCapMinorUnits === null ? '' : `, issuer cap ${card.issuerCapMinorUnits} minor units`;
+  const note = card.materialComplete ? '' : ' (incomplete: a stored field is missing, add the card again)';
+  return stripDangerousAnsi(`${card.label} - ${card.kind} ${card.brand} ending ${card.last4}, expires ${month}/${card.expiryYear}${cap}${note}`);
+}
+
+/** Status lines for the cards the host holds: metadata only, nothing that could rebuild a card. */
+export function renderCardList(list: { readonly cards: readonly CardSummary[]; readonly defaultCardId: string }): string[] {
+  const lines = ['Payment cards on the selected daemon:'];
+  if (list.cards.length === 0) lines.push('  none. Run /payments card to add one.');
+  for (const card of list.cards) lines.push(`  ${card.id === list.defaultCardId ? '*' : ' '} ${describeCard(card)} [id ${stripDangerousAnsi(card.id)}]`);
+  lines.push('');
+  lines.push('Run /payments card to add a card (masked input, chained prompts, sent to the daemon in one request).');
+  if (list.cards.length > 0) lines.push('Run /payments card remove <id> to delete one from the daemon; it asks you to repeat the command with "confirm".');
+  return lines;
 }
 
 /** Never ask for card material until the deterministic entry-surface check passes. */
@@ -87,14 +267,22 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   readonly surface: string;
   readonly announcement: string;
   readonly promptFields: (context: Context, fields: readonly CardField[], index: number) => void;
-  readonly status: (context: Context) => string[];
+  readonly status: (context: Context) => string[] | Promise<string[]>;
   readonly address?: ((context: Context, kind: 'billing' | 'shipping') => void) | undefined;
   readonly pending?: ((context: Context) => Promise<void>) | undefined;
+  /** Delete one card from the selected daemon; present on surfaces that can reach a host. */
+  readonly remove?: ((context: Context, id: string) => Promise<{ readonly deleted: boolean }>) | undefined;
   readonly description: string;
   readonly usage: string;
   readonly argsHint: string;
 }) {
+  const refuseModelEntry = (context: Context): boolean => {
+    if (context.invokedByModel !== true) return false;
+    context.print('[payments] Card and address details are typed only by the person at the keyboard. A model-run command cannot start that entry; ask the owner to run /payments card or /payments address themselves.');
+    return true;
+  };
   function startCardEntryFlow(context: Context, surface: string = policy.surface): void {
+    if (refuseModelEntry(context)) return;
     if (!mayOfferCardEntryFlow(surface)) {
       context.print(describeCardEntryRefusal(surface));
       return;
@@ -104,14 +292,50 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
       return;
     }
     context.print(policy.announcement);
-    policy.promptFields(context, CARD_SECRET_FIELDS, 0);
+    policy.promptFields(context, CARD_ENTRY_FIELDS, 0);
+  }
+  async function removeCard(
+    rest: readonly string[],
+    context: Context,
+    remove: (context: Context, id: string) => Promise<{ readonly deleted: boolean }>,
+  ): Promise<void> {
+    const id = rest[0] ?? '';
+    if (id.length === 0) {
+      context.print('Usage: /payments card remove <id> confirm. /payments status lists each card with its id.');
+      return;
+    }
+    // Deleting is permanent and a model must not be able to spend or destroy the owner's cards.
+    if (context.invokedByModel === true) {
+      context.print('[payments] Removing a card is done only by the person at the keyboard. Ask the owner to run /payments card remove <id> themselves.');
+      return;
+    }
+    if ((rest[1] ?? '').toLowerCase() !== 'confirm') {
+      context.print(`[payments] Nothing was removed. This permanently deletes card ${stripDangerousAnsi(id)} (number, expiry, security code and name) from the selected daemon and cannot be undone. To go ahead run: /payments card remove ${stripDangerousAnsi(id)} confirm`);
+      return;
+    }
+    try {
+      const result = await remove(context, id);
+      context.print(result.deleted
+        ? `[payments] Card ${stripDangerousAnsi(id)} was deleted from the selected daemon. Cancel it with the issuer too if it should stop working everywhere.`
+        : `[payments] The daemon reported no card with id ${stripDangerousAnsi(id)}; nothing was removed. /payments status lists the cards it holds.`);
+    } catch (error: unknown) {
+      context.print(`[payments] ${describeCardFailure(error)}`);
+    }
+    context.renderRequest();
   }
   function runPaymentsCommand(args: readonly string[], context: Context): void | Promise<void> {
     const sub = (args[0] ?? '').toLowerCase();
     if (sub === 'pending' && policy.pending) return policy.pending(context);
     if (!sub || sub === 'status') {
-      context.print(policy.status(context).join('\n'));
-      return;
+      const lines = policy.status(context);
+      if (Array.isArray(lines)) {
+        context.print(lines.join('\n'));
+        return;
+      }
+      return lines.then((resolved) => { context.print(resolved.join('\n')); });
+    }
+    if (sub === 'card' && (args[1] ?? '').toLowerCase() === 'remove' && policy.remove) {
+      return removeCard(args.slice(2), context, policy.remove);
     }
     if (sub === 'card') {
       startCardEntryFlow(context);
@@ -123,6 +347,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
         context.print('Usage: /payments address <billing|shipping>');
         return;
       }
+      if (refuseModelEntry(context)) return;
       policy.address(context, kind);
       return;
     }
@@ -138,12 +363,4 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
     });
   }
   return { startCardEntryFlow, runPaymentsCommand, registerPaymentCardCommands };
-}
-
-export function cardFieldConfigured(
-  manager: Pick<import('@goodvibes-jev/engine/platform/platform/config').ConfigManager, 'get'>,
-  field: CardField,
-): boolean {
-  const value: unknown = manager.get(field.key);
-  return typeof value === 'string' && value.trim().length > 0;
 }

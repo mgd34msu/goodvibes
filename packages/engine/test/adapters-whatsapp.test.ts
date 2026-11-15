@@ -42,6 +42,7 @@ function makeWhatsAppContext(overrides: Partial<Record<string, unknown>> = {}) {
             mode: 'spawn',
             task: { prompt: 'hello whatsapp' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },

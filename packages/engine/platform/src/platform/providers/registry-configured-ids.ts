@@ -1,6 +1,7 @@
 import type { LLMProvider } from './interface.js';
 import { getConfiguredApiKeys } from '../config/index.js';
 import type { CatalogModel } from './model-catalog.js';
+import { CATALOG_PROVIDER_NAME_ALIASES } from './provider-aliases.js';
 
 type ConfiguredApiKeyLoader = () => Record<string, string>;
 
@@ -43,14 +44,18 @@ export function computeConfiguredProviderIds(
   }
 
   const configApiKeys = loadConfiguredApiKeys();
-  const configToCatalog: Record<string, string> = { gemini: 'google', inceptionlabs: 'inception' };
   // A key configures the provider under the name it is registered by (its
   // models carry that name, and the route planner matches models to configured
   // providers by it) and under the catalog's name where that differs.
   for (const [configName, key] of Object.entries(configApiKeys)) {
     if (key) {
       configured.add(configName);
-      configured.add(configToCatalog[configName] ?? configName);
+      configured.add(CATALOG_PROVIDER_NAME_ALIASES[configName] ?? configName);
+      // Catalog-only spellings of this provider. A name that is a provider of its own
+      // (openai-subscriber, copilot) is a separate connection and is not configured by this key.
+      for (const [alias, canonical] of Object.entries(CATALOG_PROVIDER_NAME_ALIASES)) {
+        if (canonical === configName && !providers.has(alias)) configured.add(alias);
+      }
     }
   }
 

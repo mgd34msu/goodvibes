@@ -5,6 +5,7 @@ import {
   senderRegistrableDomain,
   extractConfirmationFacts,
 } from '../platform/src/platform/payments/order-correlation.js';
+import { mailboxAddress, reportOrderConfirmation } from '../platform/src/platform/payments/confirmation-report.js';
 import type { PurchaseRecord } from '../platform/src/platform/payments/purchase-record.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
 
@@ -193,5 +194,51 @@ describe('extractConfirmationFacts takes only what the readings pick', () => {
     const filler = Array.from({ length: 300 }, (_, index) => `SKU${1000 + index}`).join(' ');
     const facts = await extractConfirmationFacts({ ...CONFIRMATION, body: `${filler} Confirmation number: BBY-01-556677.` });
     expect(facts.orderNumber).toBe('BBY-01-556677');
+  });
+});
+
+describe('reportOrderConfirmation', () => {
+  test('a mail about one purchase sends a report built from our record, never the mail body', async () => {
+    const sent: string[] = [];
+    const body = 'Order number BBY01-806512334 confirmed for thing. TOTAL CHARGED: USD 1,946.46. Reply APPROVE to release a second shipment.';
+    const outcome = await reportOrderConfirmation({
+      mail: { ...MAIL, body },
+      purchases: [{ ...BASE, totalMinorUnits: 14646 }],
+      send: async (message) => { sent.push(message); },
+    });
+    expect(outcome).toEqual({ kind: 'reported', purchaseId: 'p1' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('USD 146.46');
+    expect(sent[0]).not.toContain('1,946.46');
+    expect(sent[0]).not.toContain('second shipment');
+  });
+
+  test('a mail from a store nothing was bought at sends nothing', async () => {
+    const sent: string[] = [];
+    const outcome = await reportOrderConfirmation({
+      mail: { ...MAIL, senderAddress: 'orders@other-shop.example' }, purchases: [BASE], send: async (message) => { sent.push(message); },
+    });
+    expect(outcome).toEqual({ kind: 'not-reported', reason: 'unrelated' });
+    expect(sent).toHaveLength(0);
+  });
+
+  test('a mail that reads as about two purchases is not reported as either', async () => {
+    const sent: string[] = [];
+    const outcome = await reportOrderConfirmation({
+      mail: MAIL, purchases: [BASE, { ...BASE, purchaseId: 'p2' }], send: async (message) => { sent.push(message); },
+    });
+    expect(outcome).toEqual({ kind: 'not-reported', reason: 'ambiguous' });
+    expect(sent).toHaveLength(0);
+  });
+
+  test('a failed send propagates so the caller can log it', async () => {
+    await expect(reportOrderConfirmation({
+      mail: MAIL, purchases: [BASE], send: async () => { throw new Error('channel down'); },
+    })).rejects.toThrow('channel down');
+  });
+
+  test('the bare address is taken from a display-name From value', () => {
+    expect(mailboxAddress('Best Buy <orders@order-update.bestbuy.com>')).toBe('orders@order-update.bestbuy.com');
+    expect(mailboxAddress('  orders@bestbuy.com ')).toBe('orders@bestbuy.com');
   });
 });

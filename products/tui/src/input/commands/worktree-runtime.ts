@@ -1,5 +1,5 @@
 import { getPersistedWorktreeMeta, reviewWorktreeAttachments, summarizeWorktreeOwnership } from '@/runtime/index.ts';
-import type { ManagedWorktreeMeta } from '@/runtime/index.ts';
+import type { ManagedWorktreeMeta, WorktreeRegistry } from '@/runtime/index.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { openCommandView, requireShellPaths } from './runtime-services.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
@@ -26,6 +26,21 @@ export function formatSetupDetail(setup: ManagedWorktreeMeta['setup']): string[]
         ]
       : []),
   ];
+}
+
+type KeptWorktreeInfo = Awaited<ReturnType<WorktreeRegistry['describeKept']>>[number];
+
+/** Retention view of the product's own worktrees (age, size, why kept); empty when it cannot be read. */
+async function describeKeptWorktrees(runtime: WorktreeRegistry): Promise<KeptWorktreeInfo[]> {
+  try {
+    return await runtime.describeKept();
+  } catch {
+    return [];
+  }
+}
+
+async function describeKeptWorktree(runtime: WorktreeRegistry, path: string): Promise<KeptWorktreeInfo | undefined> {
+  return (await describeKeptWorktrees(runtime)).find((info) => info.path === path);
 }
 
 export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void {
@@ -65,6 +80,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           record.sessionId ? `/worktree session ${record.sessionId}` : null,
           record.taskId ? `/worktree task ${record.taskId}` : null,
         ].filter((value): value is string => Boolean(value));
+        const kept = await describeKeptWorktree(runtime, record.path);
         ctx.print([
           'Worktree Inspect',
           `  path: ${record.path}`,
@@ -76,6 +92,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           `  updated: ${new Date(record.updatedAt).toLocaleString()}`,
           ...formatSetupDetail(record.setup),
           ...(nextSteps.length > 0 ? ['  next:', ...nextSteps.map((step) => `    ${step}`)] : ['  next: /worktree review']),
+          ...(kept ? [`  kept: ${kept.summary}`] : []),
         ].join('\n'));
         return;
       }
@@ -113,7 +130,13 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           ctx.print('Usage: /worktree attach <path> <session|task> <id>');
           return;
         }
-        runtime.attach(path, targetKind === 'session' ? { sessionId: targetId } : { taskId: targetId });
+        try {
+          runtime.attach(path, targetKind === 'session' ? { sessionId: targetId } : { taskId: targetId });
+        } catch (error) {
+          // The registry refuses a path no worktree exists at; say so instead of a generic failure or a success line.
+          ctx.print(`Not attached: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
         ctx.print(`Attached ${path} to ${targetKind} ${targetId}.`);
         return;
       }
@@ -201,6 +224,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
       }
       const rows = await runtime.list();
       const summary = summarizeWorktreeOwnership(rows);
+      const keptInfo = new Map((await describeKeptWorktrees(runtime)).map((info) => [info.path, info]));
       ctx.print(rows.length > 0
         ? [
             'Worktree Review',
@@ -209,8 +233,9 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
             `  session attached: ${summary.sessionAttached}  task attached: ${summary.taskAttached}`,
             `  agent owned: ${summary.agentOwned}  orchestrator owned: ${summary.orchestratorOwned}  manual: ${summary.manualOwned}`,
             ...rows.map((row) => (
-              `  ${row.kind.padEnd(12)} ${row.state.padEnd(15)} ${row.branch.padEnd(22)} session=${(row.sessionId ?? '-').padEnd(12)} task=${(row.taskId ?? '-').padEnd(12)} ${row.path}${formatSetupTag(row.setup)}`
+              `  ${row.kind.padEnd(12)} ${row.state.padEnd(15)} ${row.branch.padEnd(22)} session=${(row.sessionId ?? '-').padEnd(12)} task=${(row.taskId ?? '-').padEnd(12)} ${row.path}${formatSetupTag(row.setup)}${keptInfo.has(row.path) ? `\n      ${keptInfo.get(row.path)!.summary}` : ''}`
             )),
+            ...(keptInfo.size > 0 ? ['  Discard one you no longer need with /worktree discard <path>; the branch and any uncommitted state are preserved on it.'] : []),
           ].join('\n')
         : 'Worktree Review\n  No worktrees discovered.');
     },

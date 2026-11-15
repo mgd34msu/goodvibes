@@ -23,6 +23,21 @@ export function resolveBundlePath(pathArg: string, shellPaths: Pick<ShellPathSer
 }
 
 /**
+ * The bundle path for a model-run command stays inside the workspace: a model
+ * (or text that persuaded it) must not choose where a file is written or read.
+ * An owner-typed command may name any path. Undefined means refused.
+ */
+export function resolveConfinedBundlePath(
+  pathArg: string,
+  shellPaths: Pick<ShellPathService, 'resolveWorkspacePath' | 'isWithinWorkingDirectory'>,
+  invokedByModel: boolean | undefined,
+): string | undefined {
+  const resolved = resolveBundlePath(pathArg, shellPaths);
+  if (invokedByModel === true && !shellPaths.isWithinWorkingDirectory(resolved)) return undefined;
+  return resolved;
+}
+
+/**
  * Compact inline label for a record's temporal validity window, appended
  * wherever `/recall` lists records, so an out-of-window record is visibly
  * `[pending]`/`[expired]` rather than silently indistinguishable from an

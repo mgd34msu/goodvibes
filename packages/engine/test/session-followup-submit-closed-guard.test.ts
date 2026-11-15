@@ -70,17 +70,16 @@ describe('follow-up to a closed session is rejected before any mutation', () => 
     expect(broker.getInputs('s-closed-followup')).toHaveLength(0);
   });
 
-  test('follow-up to a MISSING session id still auto-creates (unchanged)', async () => {
+  test('follow-up to a MISSING session id is refused as not found and creates nothing', async () => {
     const broker = makeBroker();
-    const submission = await broker.followUpMessage({
+    await expect(broker.followUpMessage({
       sessionId: 'does-not-exist-yet',
       surfaceKind: 'web',
       surfaceId: 'surface:web',
       body: 'first message ever',
-    });
-    expect(submission.created).toBe(true);
-    expect(submission.session.status).toBe('active');
-    expect(broker.getMessages(submission.session.id)).toHaveLength(1);
+    })).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND', status: 404 });
+    expect(broker.getSession('does-not-exist-yet')).toBeNull();
+    expect(broker.listSessions()).toEqual([]);
   });
 
   test('a reopened session accepts follow-ups again', async () => {

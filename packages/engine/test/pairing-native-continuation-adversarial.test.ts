@@ -181,9 +181,9 @@ describe('adversarial acceptance requirements', () => {
   test('duplicate issuance cannot create independently consumable successor permissions', () => {
     const item = fixture(); const original = item.issue();
     item.manager.consumeNativeContinuation(original, successorA, current);
-    let duplicate: ReturnType<typeof item.issue> | undefined;
-    try { duplicate = item.issue(); } catch { /* Refusal is also valid. */ }
-    if (duplicate) expect(() => item.manager.consumeNativeContinuation(duplicate!, successorB, current)).toThrow();
+    // Issuing again hands back the same grant, which is already consumed by successor A.
+    expect(item.issue()).toEqual(original);
+    expect(() => item.manager.consumeNativeContinuation(item.issue(), successorB, current)).toThrow();
   });
 
   test('changed credential incarnation behind the same public ID cannot retain a grant', () => {

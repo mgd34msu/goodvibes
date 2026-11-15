@@ -7,6 +7,8 @@
  * here.
  */
 
+import type { AgentLocalRegistryAction, AgentLocalRegistryDomain } from './agent-local-registry-tool.ts';
+
 export interface AgentLocalRegistryToolArgs {
   readonly domain?: unknown;
   readonly action?: unknown;
@@ -33,6 +35,7 @@ export interface AgentLocalRegistryToolArgs {
   readonly tags?: unknown;
   readonly reason?: unknown;
   readonly enabled?: unknown;
+  readonly limit?: unknown;
   readonly activate?: unknown;
   readonly provenance?: unknown;
   readonly confirm?: unknown;
@@ -48,6 +51,31 @@ export function readString(value: unknown): string {
 export function readAffirmative(value: unknown): boolean {
   const normalized = readString(value).toLowerCase();
   return value === true || (typeof value === 'string' && (normalized === '' || normalized === 'yes' || normalized === 'y' || normalized === 'true' || normalized === 'on'));
+}
+
+/** Activation is explicit: an empty string is not a yes. */
+export function readActivation(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (value === true) return true;
+  if (value === false) return false;
+  const normalized = readString(value).toLowerCase();
+  if (['yes', 'y', 'true', 'on'].includes(normalized)) return true;
+  if (['no', 'n', 'false', 'off'].includes(normalized)) return false;
+  throw new Error('activate must be true or false.');
+}
+
+/** `update` that carries nothing changeable must not read as a success. */
+export function requireUpdateFields(
+  noun: string,
+  changes: Record<string, unknown>,
+  unsupported: readonly (readonly [field: string, value: unknown, hint: string])[] = [],
+): void {
+  for (const [field, value, hint] of unsupported) {
+    if (value !== undefined) throw new Error(`update cannot change ${field} on a ${noun}: ${hint}`);
+  }
+  if (!Object.values(changes).some((value) => value !== undefined && !(typeof value === 'string' && value.trim() === ''))) {
+    throw new Error(`update changed nothing: pass at least one field to change on the ${noun}.`);
+  }
 }
 
 export function readStringList(value: unknown): readonly string[] {
@@ -70,6 +98,20 @@ export function readOptionalConfidence(value: unknown): number | undefined {
   if (confidence === undefined) return undefined;
   if (confidence < 0 || confidence > 100) throw new Error('confidence must be between 0 and 100.');
   return confidence;
+}
+
+/** Which actions each domain accepts, so a refusal can name them. */
+export const DOMAIN_ACTIONS: Readonly<Record<AgentLocalRegistryDomain, readonly AgentLocalRegistryAction[]>> = {
+  memory: ['list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'],
+  note: ['list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'],
+  persona: ['list', 'search', 'get', 'create', 'update', 'use', 'clear_active', 'review', 'stale', 'delete'],
+  skill: ['list', 'search', 'get', 'create', 'update', 'enable', 'disable', 'review', 'stale', 'delete'],
+  skill_bundle: ['list', 'search', 'get', 'create', 'update', 'enable', 'disable', 'review', 'stale', 'delete'],
+  routine: ['list', 'search', 'get', 'create', 'update', 'enable', 'disable', 'start', 'review', 'stale', 'delete'],
+};
+
+export function invalidAction(action: AgentLocalRegistryAction, plural: string, domain: AgentLocalRegistryDomain): string {
+  return `Action ${action} is not valid for ${plural}. Valid actions for domain ${domain}: ${DOMAIN_ACTIONS[domain].join(', ')}.`;
 }
 
 export function registryError(message: string): { readonly success: false; readonly error: string } {

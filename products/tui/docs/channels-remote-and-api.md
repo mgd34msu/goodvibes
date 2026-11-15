@@ -103,6 +103,8 @@ Streaming TTS is exposed at `POST /api/voice/tts/stream` and returns raw binary 
 
 The remote runtime is a distributed peer system. A peer joins through a pair request with challenge verification and receives a scoped peer token, then heartbeats while connected. Work moves through pull, claim, lease, and complete steps, with direct remote invoke alongside, and peers can be disconnected, revoked, or have their tokens rotated. Node hosts additionally expose an inspectable contract describing what they will run.
 
+Work has a bounded life. Queued work with a `timeoutMs` expires that long after it was queued, and work whose lease lapses more than five times expires instead of being requeued again. A heartbeat renews the leases of the work a peer holds, and a peer silent for 90 seconds is listed as disconnected. A settled work item (completed, failed, cancelled or expired) is final: a later report for it is answered `409` with code `REMOTE_WORK_SETTLED` and the stored record. Approving a pair request that was rejected or expired is also `409`, verifying a settled request is `410`, and invoking a revoked peer is `409`; each response names the state it refused from.
+
 Key remote API paths:
 
 | Path | Purpose |

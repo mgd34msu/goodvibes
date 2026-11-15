@@ -124,7 +124,10 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier '
       + 'inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how '
       + 'many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection '
-      + 'without stopping the service.',
+      + 'without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.',
+    validate: (v) => typeof v === 'string'
+      && v.split(',').map((id) => id.trim()).filter((id) => id.length > 0).every((id) => /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(id)),
+    validationHint: 'comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators)',
   },
   {
     key: 'voice.wake.threshold',

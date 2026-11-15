@@ -59,6 +59,8 @@ interface BackgroundRunState {
 interface BackgroundOwner {
   readonly state: Map<string, BackgroundRunState>;
   readonly signal: AbortSignal;
+  /** The caller's own signal (the key in `owners`); absent for the scheduler-owned state. */
+  readonly callerSignal?: AbortSignal | undefined;
 }
 
 export interface BackgroundSelfImproveSchedulerDeps {
@@ -89,7 +91,7 @@ export class BackgroundSelfImproveScheduler {
   /** Drop settled state entries (not pending, backoff expired) and bound the map. */
   private prune(owner: BackgroundOwner, now: number): void {
     for (const [key, state] of owner.state) {
-      if (!state.pending && state.zeroGapUntil <= now) owner.state.delete(key);
+      if (!state.pending && state.zeroGapUntil <= now && !state.pendingInput) owner.state.delete(key);
     }
     if (owner.state.size > MAX_BACKGROUND_STATE_ENTRIES) {
       for (const [key, state] of owner.state) {
@@ -99,16 +101,35 @@ export class BackgroundSelfImproveScheduler {
     }
   }
 
+  /** A caller whose runs have all settled keeps no owner: a long-lived signal must not pin one per request. */
+  private releaseIdleOwner(owner: BackgroundOwner): void {
+    if (owner.callerSignal && owner.state.size === 0 && this.owners.get(owner.callerSignal) === owner) this.owners.delete(owner.callerSignal);
+  }
+
+  /**
+   * A run that found no gaps (or failed) leaves backoff state behind, so its owner
+   * cannot be freed when it settles; nothing revisits that owner once the backoff
+   * lapses. Sweep every caller-keyed owner on each new request instead.
+   */
+  private sweepIdleOwners(now: number): void {
+    for (const owner of [...this.owners.values()]) {
+      if (!owner.callerSignal) continue;
+      this.prune(owner, now);
+      this.releaseIdleOwner(owner);
+    }
+  }
+
   queue(input: KnowledgeSemanticSelfImproveInput, delayMs = 0): void {
     const originalSignal = input.signal;
     if (this.shutdown.signal.aborted || originalSignal?.aborted || !this.deps.enabled()) return;
+    this.sweepIdleOwners(this.deps.now());
     let owner = this.owners.get(originalSignal);
     if (!owner) {
       // Only this originating caller and this scheduler's own lifetime are
       // combined. Independent callers never share cancellation or backoff.
       const signal = originalSignal ? AbortSignal.any([originalSignal, this.shutdown.signal]) : this.shutdown.signal;
       if (signal.aborted) return;
-      owner = { state: originalSignal ? new Map() : this.state, signal };
+      owner = { state: originalSignal ? new Map() : this.state, signal, callerSignal: originalSignal };
       const retained = owner;
       signal.addEventListener('abort', () => {
         retained.state.clear();
@@ -185,8 +206,11 @@ export class BackgroundSelfImproveScheduler {
     // minDelayMs, even when the caller passes delayMs=0.
     const flooredDelayMs = Math.max(minDelayMs, Math.max(0, delayMs));
     const scheduledState: BackgroundRunState = owner.state.get(key) ?? { pending: false, zeroGapUntil: 0 };
+    // Gap evidence kept from a run the governor refused rides with this one.
+    const carried = scheduledState.pending ? undefined : scheduledState.pendingInput;
     scheduledState.pending = true;
     scheduledState.pendingInput = effectiveInput;
+    if (carried) this.mergePending(scheduledState, carried);
     owner.state.set(key, scheduledState);
     let consumed = false;
     const fire = (): void => {
@@ -208,7 +232,9 @@ export class BackgroundSelfImproveScheduler {
         });
         if (st) {
           st.pending = false;
-          st.pendingInput = undefined;
+          // Release the slot, but keep concrete gap ids for this scope's next
+          // trigger; otherwise the evidence is lost unless something repeats it.
+          if (!st.pendingInput?.gapIds?.length) st.pendingInput = undefined;
         }
         return;
       }
@@ -220,7 +246,7 @@ export class BackgroundSelfImproveScheduler {
       // completion re-queues it through the full guard set instead of wiping
       // it, and a zero-gap RESULT must not park the scope over that fresh
       // evidence (the run that just finished never looked at it).
-      const settle = (result: { candidateGaps?: number | undefined } | null): void => {
+      const settle = (result: { candidateGaps?: number | undefined } | null, failed = false): void => {
         if (owner.signal.aborted || owner.state.get(key) !== scheduledState) return;
         const next = scheduledState;
         next.pending = false;
@@ -234,8 +260,12 @@ export class BackgroundSelfImproveScheduler {
         }
         // Zero candidate gaps ⇒ back off; a run that found nothing must not
         // keep rescheduling itself. New-gap evidence clears the window.
-        next.zeroGapUntil = result !== null && (result.candidateGaps ?? 0) === 0 ? this.deps.now() + backoffMs : 0;
+        // A failed run backs off the same way, so a persistent failure is not
+        // retried on every trigger; new gap evidence still clears the window.
+        next.zeroGapUntil = failed || (result !== null && (result.candidateGaps ?? 0) === 0) ? this.deps.now() + backoffMs : 0;
         owner.state.set(key, next);
+        this.prune(owner, this.deps.now());
+        this.releaseIdleOwner(owner);
       };
       const joined = Promise.withResolvers<void>();
       this.active.add(joined.promise);
@@ -246,7 +276,7 @@ export class BackgroundSelfImproveScheduler {
         .then((result) => settle(result))
         .catch((error: unknown) => {
           drainOwned(error);
-          settle(null);
+          settle(null, true);
           if (!owner.signal.aborted) logger.warn('Knowledge semantic background self-improvement failed', {
             error: error instanceof Error ? error.message : String(error),
             knowledgeSpaceId: input.knowledgeSpaceId,

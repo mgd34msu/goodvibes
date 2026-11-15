@@ -140,6 +140,8 @@ export function createSpineAdoptionSync(
   const log = options.log ?? logger;
   const timing = options.activation ?? 'adopt-on-status';
   let activeForBaseUrl: string | null = null;
+  // The wire bundle captured this token, so a refreshed one needs a new bundle.
+  let activeToken: string | null = null;
   let memoryActiveForBaseUrl: string | null = null;
 
   const detach = (reason: string): void => {
@@ -152,6 +154,7 @@ export function createSpineAdoptionSync(
       options.sessionInboundInputs.deactivate(reason);
       options.onDetached?.(reason);
       activeForBaseUrl = null;
+      activeToken = null;
     }
     options.sessionUnionCache.deactivate(reason);
   };
@@ -172,20 +175,30 @@ export function createSpineAdoptionSync(
     }
 
     const baseUrl = signal.baseUrl;
-    if (activeForBaseUrl === baseUrl) return; // already wired to this exact adopted daemon
-    if (activeForBaseUrl !== null) detach(`the adopted daemon moved to ${baseUrl}`);
+    if (activeForBaseUrl === baseUrl && activeToken === sharedDaemonToken) return; // already wired to this exact adopted daemon
+    if (activeForBaseUrl !== null) {
+      detach(activeForBaseUrl === baseUrl ? 'the daemon credential was refreshed' : `the adopted daemon moved to ${baseUrl}`);
+    }
 
     const wire = options.connect(baseUrl, sharedDaemonToken);
-    if (options.memorySpine && wire.memoryTransport) {
-      options.memorySpine.activate(wire.memoryTransport);
-      memoryActiveForBaseUrl = baseUrl;
-      log.info(`[bootstrap] memory spine: adopted daemon at ${baseUrl}, routing memory ops over the wire`);
-    }
-    options.sessionSpine.activate(wire.sessionTransport);
-    options.sessionInboundInputs.activate(wire.inboundInputs);
-    options.onAdopted?.(wire.inboundInputs);
-    options.sessionUnionCache.activate(wire.sessionList);
+    // Recorded before the first activation, so a step that throws is still
+    // undone by the next detach instead of leaving half a mirror nobody owns.
     activeForBaseUrl = baseUrl;
+    activeToken = sharedDaemonToken;
+    try {
+      if (options.memorySpine && wire.memoryTransport) {
+        options.memorySpine.activate(wire.memoryTransport);
+        memoryActiveForBaseUrl = baseUrl;
+        log.info(`[bootstrap] memory spine: adopted daemon at ${baseUrl}, routing memory ops over the wire`);
+      }
+      options.sessionSpine.activate(wire.sessionTransport);
+      options.sessionInboundInputs.activate(wire.inboundInputs);
+      options.onAdopted?.(wire.inboundInputs);
+      options.sessionUnionCache.activate(wire.sessionList);
+    } catch (error) {
+      detach('wiring the adopted daemon failed');
+      throw error;
+    }
     log.info(`[bootstrap] session spine: adopted daemon at ${baseUrl}, mirroring session identity`);
 
     // One-time, marker-guarded import of this project's own pre-spine sessions.

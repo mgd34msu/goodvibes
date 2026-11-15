@@ -1,4 +1,4 @@
-// Deliberately per-repo test, byte-identical to the sibling product's copy by design: the module it exercises is this repo's own and has diverged from the sibling's, so the two copies prove different code and neither can stand in for the other.
+// Deliberately a per-repo test: the module it exercises is this repo's own, so the sibling product's tests do not stand in for it.
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { SelectionModal } from '../../input/selection-modal.ts';
 import type { SelectionItem } from '../../input/selection-modal.ts';
@@ -131,13 +131,22 @@ describe('SelectionModal', () => {
       expect(ids).not.toContain('banana');
     });
 
-    test('clamps selectedIndex when filtered list shrinks', () => {
-      const items = mkItems(10);
-      modal.open('Test', items);
+    test('a query that shrinks the list moves the selection onto the best remaining match', () => {
+      modal.open('Test', mkItems(10));
       modal.selectedIndex = 8;
-      // Filter to only items matching "Item 0"
-      modal.setQuery('Item 0');
-      expect(modal.selectedIndex).toBeLessThan(modal.filteredItems.length || 1);
+      modal.setQuery('Item 3');
+      expect(modal.filteredItems.map((item) => item.id)).toContain('item-3');
+      expect(modal.selectedIndex).toBe(0);
+      expect(modal.getSelected()).toBe(modal.filteredItems[0]!);
+    });
+
+    test('a query matching nothing leaves no selection', () => {
+      modal.open('Test', mkItems(10));
+      modal.selectedIndex = 8;
+      modal.setQuery('zzzz-no-such-item');
+      expect(modal.filteredItems).toHaveLength(0);
+      expect(modal.selectedIndex).toBe(0);
+      expect(modal.getSelected()).toBeNull();
     });
 
     test('empty query restores all items', () => {

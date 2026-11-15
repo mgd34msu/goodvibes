@@ -72,13 +72,23 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   ).toBe(0);
 }
 
-/** Assert a located element's rendered box clears the 44px touch-target floor. */
+/** Assert every visible element matching the selector renders a box that clears the 44px touch-target floor. */
 export async function expectTappable(page: Page, selector: string, label = selector): Promise<void> {
-  const box = await page.locator(selector).first().boundingBox();
-  expect(box, `${label} has no rendered box`).not.toBeNull();
-  if (!box) return;
-  expect(box.width, `${label} width ${box.width} < 44`).toBeGreaterThanOrEqual(43.5);
-  expect(box.height, `${label} height ${box.height} < 44`).toBeGreaterThanOrEqual(43.5);
+  // locator.all() does not wait, so wait for the first match to render before measuring.
+  await page.locator(selector).first().waitFor({ state: 'visible' });
+  const matches = await page.locator(selector).all();
+  expect(matches.length, `${label} matched no element`).toBeGreaterThan(0);
+  let measured = 0;
+  for (const [index, match] of matches.entries()) {
+    if (!(await match.isVisible())) continue;
+    const box = await match.boundingBox();
+    expect(box, `${label} #${index} has no rendered box`).not.toBeNull();
+    if (!box) continue;
+    measured += 1;
+    expect(box.width, `${label} #${index} width ${box.width} < 44`).toBeGreaterThanOrEqual(43.5);
+    expect(box.height, `${label} #${index} height ${box.height} < 44`).toBeGreaterThanOrEqual(43.5);
+  }
+  expect(measured, `${label} has no visible element`).toBeGreaterThan(0);
 }
 
 /**

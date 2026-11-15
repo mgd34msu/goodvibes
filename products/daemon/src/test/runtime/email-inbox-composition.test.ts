@@ -23,6 +23,7 @@ import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '
 import { composeMailDeps } from '../../runtime/mail-composition.js';
 import { createRuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { settleTurns } from '../helpers/turns.js';
 
 // No real mail transport, stored credential, hosted model, or built dist entry is used.
 // Only the mail socket is synthetic: the service, source owner, HTTP route, and SQLite are real.
@@ -34,6 +35,8 @@ const html = `<p>Alternate ${sensitive} section.</p>`;
 const redacted = 'Contact [redacted], keep the build notes.';
 const sender = 'sender@synthetic.invalid';
 let hosts: DaemonHost[];
+// A host whose close is itself the behaviour under test and is expected to reject.
+let expectedCloseFailures: Set<DaemonHost>;
 let cleanups: Array<() => void | Promise<void>>;
 let releases: Array<() => void>;
 let restores: Array<() => void>;
@@ -48,15 +51,17 @@ async function until(predicate: () => boolean) {
   while (!predicate()) { if (Date.now() > deadline) throw new Error('Synthetic email fixture did not reach expected state'); await pause(); }
 }
 beforeEach(() => {
-  hosts = []; cleanups = []; releases = []; restores = [];
+  hosts = []; cleanups = []; releases = []; restores = []; expectedCloseFailures = new Set();
   keep(spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]));
   keep(spyOn(BenchmarkStore.prototype, 'refreshBenchmarks').mockResolvedValue());
 });
 afterEach(async () => {
   for (const release of releases) release();
-  for (const host of hosts) await host.close().catch(() => {});
+  const unexpected: unknown[] = [];
+  for (const host of hosts) await host.close().catch((error: unknown) => { if (!expectedCloseFailures.has(host)) unexpected.push(error); });
   for (const cleanup of cleanups.reverse()) await cleanup();
   for (const restore of restores.reverse()) restore();
+  if (unexpected.length > 0) throw new AggregateError(unexpected, 'A host this test did not expect to fail rejected its close');
 });
 
 class MailSocket extends SnapshotSocket {
@@ -351,12 +356,23 @@ for (const phase of ['screening', 'commit'] as const) for (const mutation of ['a
   });
 }
 
-test.each(['search', 'body', 'unsupported'] as const)('malformed or unsupported %s source remains pending without screening or persistence', async malformed => {
+test.each(['search', 'body'] as const)('malformed %s source remains pending without screening or persistence', async malformed => {
   const f = fixture(); await f.host.start(); const before = stored(f.storePath); f.provider.setMalformed(malformed);
   await f.poll(); expect(stored(f.storePath)).toEqual(before); expect(f.provider.sourceParts).toEqual([]);
-  f.provider.setMalformed(); expect(await f.inbox()).toMatchObject({ total: 0, partial: true, providers: [{ state: 'error' }] });
+  f.provider.setMalformed();
+  // A malformed search or body answer is a failed read, reported as a provider error.
+  expect(await f.inbox()).toMatchObject({ total: 0, partial: true, providers: [{ state: 'error' }] });
   await f.poll(); expect((await f.inbox()).total).toBe(2);
 });
+
+test('a message of an unsupported content type is suppressed terminally without screening or publishing, so later mail is not held back', async () => {
+  const f = fixture(); await f.host.start(); const before = stored(f.storePath); f.provider.setMalformed('unsupported');
+  await f.poll(); expect(f.provider.sourceParts).toEqual([]);
+  expect(stored(f.storePath)).toMatchObject({ items: [], checkpoint: { uidValidity: 7, lastTerminalUid: 43 } });
+  expect(before.checkpoint?.lastTerminalUid).toBeNull();
+  expect(await f.inbox()).toMatchObject({ total: 0 });
+});
+
 
 test('account mismatch blocks old mirror reads and polling before more credentials or source work', async () => {
   const f = fixture(); await f.host.start(); await f.poll(); const before = stored(f.storePath);
@@ -412,8 +428,8 @@ test.each(['credential', 'transport', 'source'] as const)('shutdown drains held 
   const pending = f.poll(); void pending.catch(() => {});
   await until(() => mode === 'credential' ? f.provider.secretReads > reads : mode === 'transport' ? f.provider.sockets.length > sockets : f.provider.sourceParts.length > 0);
   const closing = f.host.close(), done = settled(closing); expect(f.host.close()).toBe(closing);
-  if (mode !== 'source') { await pause(); expect(done()).toBe(false); expect(existsSync(`${f.storePath}.owner.lock`)).toBe(true); held.resolve(); }
-  await pending.catch(() => {}); await closing; held.resolve(); await pause();
+  if (mode !== 'source') { await settleTurns(); expect(done()).toBe(false); expect(existsSync(`${f.storePath}.owner.lock`)).toBe(true); held.resolve(); }
+  await pending.catch(() => {}); await closing; held.resolve(); await settleTurns();
   expect(stored(f.storePath)).toEqual(before); expect(existsSync(`${f.storePath}.owner.lock`)).toBe(false); expect(f.provider.changes.size).toBe(0);
   expect(f.retirements.map(value => value.kind).sort()).toEqual(['provider', 'store']); expect(f.retirements.every(value => value.leaseHeld)).toBe(true);
   expect(f.provider.sockets.every(socket => socket.closed)).toBe(true); await expect(f.control.start()).rejects.toThrow('stopped');

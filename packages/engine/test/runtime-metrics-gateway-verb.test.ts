@@ -44,11 +44,14 @@ describe('runtime.metrics.get gateway registration', () => {
   });
 
   test('it round-trips through catalog.invoke with the real live snapshot', async () => {
-    httpRequestsTotal.add(1, { status_class: '2xx' });
+    // The daemon listener records every request under method + status_class.
+    httpRequestsTotal.add(1, { method: 'GET', status_class: '2xx' });
+    httpRequestsTotal.add(2, { method: 'POST', status_class: '2xx' });
+    httpRequestsTotal.add(1, { method: 'GET', status_class: '4xx' });
     const catalog = makeCatalog();
     const got = await catalog.invoke('runtime.metrics.get', { context: {} }) as RuntimeMetricsSnapshot;
     expect(got).toEqual(snapshotMetrics());
-    expect(got.counters.http.requests.total['2xx']).toBeGreaterThanOrEqual(1);
+    expect(got.counters.http.requests.total).toEqual({ '2xx': 3, '4xx': 1, '5xx': 0 });
     expect(got.toolFormat).toEqual({ byModel: {}, byClass: {} });
   });
 
@@ -125,7 +128,7 @@ describe('runtime.metrics.get scope enforcement (generic invoke gate)', () => {
   });
 
   test('invokeGatewayMethodCall end-to-end: an authorized invoke (read:telemetry) returns the live snapshot', async () => {
-    httpRequestsTotal.add(1, { status_class: '2xx' });
+    httpRequestsTotal.add(1, { method: 'GET', status_class: '2xx' });
     const catalog = new GatewayMethodCatalog();
     registerRuntimeMetricsGatewayMethods(catalog);
     const helper = helperWithCatalog(catalog);
@@ -138,5 +141,6 @@ describe('runtime.metrics.get scope enforcement (generic invoke gate)', () => {
     expect(result.status).toBe(200);
     expect(result.ok).toBe(true);
     expect(result.body).toEqual(snapshotMetrics());
+    expect((result.body as RuntimeMetricsSnapshot).counters.http.requests.total['2xx']).toBe(1);
   });
 });

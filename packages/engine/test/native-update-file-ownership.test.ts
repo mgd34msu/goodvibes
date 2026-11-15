@@ -36,7 +36,7 @@ test('equal-byte native replacement and directory replacement retire their origi
   expect(() => afterFileReplacement()).toThrow('changed');
 });
 
-const permissionsTest = process.platform !== 'win32' && process.getuid?.() !== 0 ? test : test.skip;
+const permissionsTest = test.skipIf(process.platform === 'win32' || process.getuid?.() === 0);
 permissionsTest('native retention observes revisions without reopening binary contents', () => {
   const f = fixture(); chmodSync(f.path, 0);
   try {

@@ -107,6 +107,18 @@ export class McpSchemaFreshnessTracker {
     record.lastFetchError = error;
     record.consecutiveFailures += 1;
 
+    // Quarantine is left only through approveQuarantine or markFresh. A failure
+    // recorded while quarantined must not flip freshness to `fetch_failed`, which
+    // would read as "not quarantined" and silently re-open the server.
+    if (record.freshness === 'quarantined') {
+      logger.warn('McpSchemaFreshnessTracker: failure recorded while quarantined', {
+        serverName,
+        error,
+        consecutiveFailures: record.consecutiveFailures,
+      });
+      return;
+    }
+
     if (record.consecutiveFailures >= this.quarantineThreshold) {
       // Auto-quarantine after threshold exceeded
       this._applyQuarantine(record, 'stale_threshold',

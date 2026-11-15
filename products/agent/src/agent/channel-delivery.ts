@@ -165,33 +165,36 @@ export async function deliverAgentChannelMessage(
   assertCurrent();
   const preview = buildAgentChannelDeliveryPreview(input);
 
-  // Card material never leaves this program toward a remote channel. This is
-  // the single outbound funnel (see channelDeliveriesInFlight above), so one
-  // check here covers every send: a model composing a message, a routine, a
-  // person answering a prompt in the wrong place.
-  //
-  // It refuses BEFORE router.deliver, so nothing reaches a provider, and it
-  // throws rather than returning a result, so no caller can treat a refusal as
-  // a successful send. The thrown message is the platform's refusal wording and
-  // contains no part of what was refused, see agent/payments-channel-guard.ts.
-  const refusal = await screenOutboundForCardMaterial({
-    surface: resolveDeliverySurfaceName(preview.target),
-    message: preview.message,
-    title: preview.title,
-  }, options);
-  if (refusal) throw new CardMaterialRefusedError(refusal);
-  assertCurrent();
-
+  // Counted from here, not from router.deliver: the screening below can await
+  // a model, and a send waiting inside it has already left the conversation. A
+  // self-update that checked the counter in that window would restart the
+  // process under it. Decremented on every path, refusal and throw included, so
+  // a leaked counter cannot pin the agent "busy" forever.
   inFlightDeliveries += 1;
   let responseId: string | undefined;
   try {
+    // Card material never leaves this program toward a remote channel. This is
+    // the single outbound funnel (see channelDeliveriesInFlight above), so one
+    // check here covers every send: a model composing a message, a routine, a
+    // person answering a prompt in the wrong place.
+    //
+    // It refuses BEFORE router.deliver, so nothing reaches a provider, and it
+    // throws rather than returning a result, so no caller can treat a refusal as
+    // a successful send. The thrown message is the platform's refusal wording and
+    // contains no part of what was refused, see agent/payments-channel-guard.ts.
+    const refusal = await screenOutboundForCardMaterial({
+      surface: resolveDeliverySurfaceName(preview.target),
+      message: preview.message,
+      title: preview.title,
+    }, options);
+    if (refusal) throw new CardMaterialRefusedError(refusal);
+    assertCurrent();
+
     responseId = await router.deliver({ ...preview.request,
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.assertCurrent ? { assertCurrent } : {}),
     } as ChannelDeliveryRequest);
   } finally {
-    // Decremented on the failure path too: a delivery that threw is finished,
-    // and a leaked counter would pin the agent "busy" forever.
     inFlightDeliveries = Math.max(0, inFlightDeliveries - 1);
   }
   return {
@@ -199,8 +202,18 @@ export async function deliverAgentChannelMessage(
     message: preview.message,
     title: preview.title,
     target: preview.target,
-    strategyCount: router.listStrategies().length,
+    strategyCount: strategyCountOf(router),
   };
+}
+
+// Display-only. The provider has already accepted the message by now, so a throw
+// here would make callers treat a delivered message as failed and resend it.
+function strategyCountOf(router: Pick<ChannelDeliveryRouter, 'listStrategies'>): number {
+  try {
+    return router.listStrategies().length;
+  } catch {
+    return 0;
+  }
 }
 
 function formatTarget(target: AgentChannelDeliveryTarget): string {

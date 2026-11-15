@@ -34,17 +34,51 @@ export const emailStyleToneReading = defineBattery({
     { name: 'neutral acknowledgement', state: { bodies: ['Thank you for your time.'] }, expect: { tone: 'neutral' } },
   ],
 });
+/** How much original text each boundary item carries on either side of its split. */
+const SENTENCE_CONTEXT_CHARS = 160;
+/** Serialized budget for one sentence-boundary request, the document included. */
+const SENTENCE_REQUEST_BUDGET_CHARS = 80_000;
+const SENTENCE_ITEM_OVERHEAD_CHARS = 128;
+
+/** A cut that never leaves half of a surrogate pair, which is not valid JSON text. */
+function spanOf(document: string, start: number, end: number): string {
+  let from = Math.max(0, start), to = Math.min(document.length, end);
+  if (from > 0 && from < document.length && /[\uDC00-\uDFFF]/.test(document[from] ?? '')) from += 1;
+  if (to > 0 && to < document.length && /[\uD800-\uDBFF]/.test(document[to - 1] ?? '')) to -= 1;
+  return document.slice(from, Math.max(from, to));
+}
+
+/**
+ * One batch of boundary items. The complete document rides in the first item;
+ * every item carries only the text around its own split, so a batch costs the
+ * document once plus a fixed amount per position instead of the document once
+ * per position.
+ */
 function sentenceBoundaryItems(document: string, positions: readonly number[]): JsonValue[] {
-  // The full source is retained. Refuse an oversized batch before constructing
-  // repeated exact boundary spans; no late sentence is silently dropped.
-  if ((document.length + 128) * positions.length + document.length > 80_000) throw new StyleReplyReadingError();
   return positions.map((position, index) => ({ ...(index === 0 ? { document } : {}), position,
-    before: document.slice(0, position), after: document.slice(position) }));
+    before: spanOf(document, position - SENTENCE_CONTEXT_CHARS, position),
+    after: spanOf(document, position, position + SENTENCE_CONTEXT_CHARS) }));
+}
+
+/**
+ * Every candidate position, in request-sized batches. Counts add across
+ * batches, so splitting loses no sentence; a document too large to be sent
+ * even with one position is refused rather than shortened.
+ */
+function sentenceBoundaryBatches(document: string, positions: readonly number[]): JsonValue[][] {
+  const perItem = SENTENCE_CONTEXT_CHARS * 2 + SENTENCE_ITEM_OVERHEAD_CHARS;
+  const perBatch = Math.floor((SENTENCE_REQUEST_BUDGET_CHARS - document.length) / perItem);
+  if (perBatch < 1) throw new StyleReplyReadingError();
+  const batches: JsonValue[][] = [];
+  for (let start = 0; start < positions.length; start += perBatch) {
+    batches.push(sentenceBoundaryItems(document, positions.slice(start, start + perBatch)));
+  }
+  return batches;
 }
 export const emailStyleSentenceReading = defineCounter({
-  name: 'email.style.sentence-boundary', version: 2, accuracyFloor: 0.95,
+  name: 'email.style.sentence-boundary', version: 3, accuracyFloor: 0.95,
   description: 'Read sentence boundaries individually; code adds the settled yeses.',
-  condition: evidence + 'The complete document is items[0].document. Does the boundary between item.before and item.after end a complete sentence in that document? Code supplies these exact original spans split at item.position, an exclusive UTF-16 offset. Read those spans instead of estimating character counts. Classify only the current split: an abbreviation earlier in item.before does not disqualify a later complete sentence ending. When item.after is empty and item.before ends in a complete statement with its final punctuation, count that ending; the document may begin with an abbreviated title or contain decimal values. Count each sentence once, after its final non-whitespace character. Abbreviations, decimal punctuation and earlier characters in a punctuation cluster are not separate endings. Greetings, closing phrases and signature fragments are not full sentences. A complete unpunctuated sentence may end at the document end. Read the complete context; the positions are structural candidates, not inferred sentences.',
+  condition: evidence + 'The complete document is items[0].document. Does the boundary between item.before and item.after end a complete sentence in that document? Code supplies item.before, the original text ending at item.position (an exclusive UTF-16 offset), and item.after, the original text starting there, each cut to at most 160 characters from the split; find the split in the complete document when the nearby text is not enough. Read those spans instead of estimating character counts. Classify only the current split: an abbreviation earlier in item.before does not disqualify a later complete sentence ending. When item.after is empty and item.before ends in a complete statement with its final punctuation, count that ending; the document may begin with an abbreviated title or contain decimal values. Count each sentence once, after its final non-whitespace character. Abbreviations, decimal punctuation and earlier characters in a punctuation cluster are not separate endings. Greetings, closing phrases and signature fragments are not full sentences. A complete unpunctuated sentence may end at the document end. Read the complete context; the positions are structural candidates, not inferred sentences.',
   band: STAKES_BANDS.high.yesNo,
   fixtures: [
     { name: 'abbreviation and actual sentence', items: sentenceBoundaryItems('Dr. Lee arrived.', [3, 16]), expect: 1 },
@@ -208,8 +242,9 @@ export async function withEmailStyleSource<T, R>(
   });
 }
 
-export async function readStyleFrequency(bodies: readonly string[], candidates: readonly string[], fallback: string, purpose: 'phrase' | 'greeting' | 'signOff', readings: StyleReplyReadings): Promise<string> {
-  let best = fallback, bestCount = 0;
+/** The offered candidate the corpus uses most, or null when no candidate is actually used. */
+export async function readStyleFrequencyOrNone(bodies: readonly string[], candidates: readonly string[], purpose: 'phrase' | 'greeting' | 'signOff', readings: StyleReplyReadings): Promise<string | null> {
+  let best: string | null = null, bestCount = 0;
   for (const candidate of candidates) {
     readings.assertCurrent();
     const items = bodies.map(body => ({ body, candidate, purpose }));
@@ -219,6 +254,9 @@ export async function readStyleFrequency(bodies: readonly string[], candidates: 
     if (result.count > bestCount) { best = candidate; bestCount = result.count; }
   }
   return best;
+}
+export async function readStyleFrequency(bodies: readonly string[], candidates: readonly string[], fallback: string, purpose: 'phrase' | 'greeting' | 'signOff', readings: StyleReplyReadings): Promise<string> {
+  return await readStyleFrequencyOrNone(bodies, candidates, purpose, readings) ?? fallback;
 }
 export async function readStyleTone(bodies: readonly string[], readings: StyleReplyReadings): Promise<'formal' | 'casual' | 'neutral'> {
   const result = await emailStyleToneReading.run(readings.port, { bodies: [...bodies] }, { signal: readings.signal, site: 'email.style.tone' });
@@ -238,11 +276,14 @@ export async function readStyleSentenceCount(document: string, readings: StyleRe
     if (/\p{Punctuation}/u.test(character)) positions.add(offset);
   }
   positions.add(document.trimEnd().length);
-  const items = sentenceBoundaryItems(document, [...positions].sort((a, b) => a - b));
-  const result = await emailStyleSentenceReading.count(readings.port, items, { signal: readings.signal, site: 'email.style.sentence-boundary' });
-  readings.assertCurrent();
-  if (result.readings.some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new StyleReplyReadingError();
-  return result.count;
+  let total = 0;
+  for (const items of sentenceBoundaryBatches(document, [...positions].sort((a, b) => a - b))) {
+    const result = await emailStyleSentenceReading.count(readings.port, items, { signal: readings.signal, site: 'email.style.sentence-boundary' });
+    readings.assertCurrent();
+    if (result.readings.some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new StyleReplyReadingError();
+    total += result.count;
+  }
+  return total;
 }
 export async function readStyleSenderName(from: string, readings: StyleReplyReadings): Promise<string> {
   const tokens = [...from.matchAll(/[\p{Letter}\p{Mark}\p{Number}'-]+/gu)];

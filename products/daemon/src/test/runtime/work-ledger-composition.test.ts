@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { setImmediate } from 'node:timers/promises';
 import {
-  createEmptyWorkLedgerState, type WorkLedgerActor, type WorkLedgerDecision,
+  createEmptyWorkLedgerState, createLocalWorkLedgerReadBinding, type WorkLedgerActor, type WorkLedgerDecision,
   type WorkLedgerState, type WorkLedgerStorage,
 } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { createNativeWorkLedgerOwner } from '../../runtime/work-ledger-composition.js';
@@ -168,4 +168,55 @@ test('reverse acquisition drain keeps backing store alive through adapter shutdo
   expect(fx.events).not.toContain('knowledge.close');
   adapterDrain.resolve(); await closing;
   expect(fx.events.slice(-2)).toEqual(['storage.close', 'knowledge.close']);
+});
+
+test('an unreadable ledger reaches a read-client subscriber through the native owner, including one that subscribes late', async () => {
+  let notify: ((reason: string) => void) | undefined;
+  const fx = fixture({
+    async read(): Promise<WorkLedgerState> { throw new Error('ledger row is corrupt'); },
+    subscribe(listener: (state: WorkLedgerState) => void, onUnavailable?: (reason: string) => void) {
+      fx.listeners.add(listener); notify = onUnavailable;
+      return () => { fx.listeners.delete(listener); };
+    },
+  });
+  const binding = createLocalWorkLedgerReadBinding({
+    available: true, projectId, actorId: 'reader', service: fx.owner.service, authority: fx.owner.authority,
+  });
+  if (!binding.available) throw new Error('binding unavailable');
+  const early: string[] = []; const late: string[] = [];
+  binding.client.subscribe(() => {}, reason => early.push(reason));
+  await setImmediate();
+  expect(notify).toBeDefined();
+  notify?.('ledger row is corrupt');
+  await setImmediate();
+  expect(early).toEqual(['ledger row is corrupt']);
+  binding.client.subscribe(() => {}, reason => late.push(reason));
+  await setImmediate();
+  expect(late).toEqual(['ledger row is corrupt']);
+  await fx.owner.close();
+});
+
+test('a ledger that recovers at the same revision is not reported unavailable to a late subscriber', async () => {
+  let notify: ((reason: string) => void) | undefined;
+  const fx = fixture({
+    subscribe(listener: (state: WorkLedgerState) => void, onUnavailable?: (reason: string) => void) {
+      fx.listeners.add(listener); notify = onUnavailable;
+      return () => { fx.listeners.delete(listener); };
+    },
+  });
+  const binding = createLocalWorkLedgerReadBinding({
+    available: true, projectId, actorId: 'reader', service: fx.owner.service, authority: fx.owner.authority,
+  });
+  if (!binding.available) throw new Error('binding unavailable');
+  const early: string[] = []; const late: string[] = [];
+  binding.client.subscribe(() => {}, reason => early.push(reason));
+  await setImmediate();
+  notify?.('database is locked');
+  await setImmediate();
+  expect(early).toEqual(['database is locked']);
+  // Recovery delivers no state: the storage read succeeds again (the fixture's read is healthy).
+  binding.client.subscribe(() => {}, reason => late.push(reason));
+  await setImmediate();
+  expect(late).toEqual([]);
+  await fx.owner.close();
 });

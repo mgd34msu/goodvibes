@@ -82,9 +82,25 @@ export function assertRuntimeTaskArray(tasks: unknown, endpoint: string): readon
   if (!Array.isArray(tasks)) {
     throw new Error(`[${endpoint}] Expected "tasks" to be an array`);
   }
+  // The fields every consumer reads without a guard: the contract schema requires the same set.
+  const required: ReadonlyArray<readonly [string, (value: unknown) => boolean]> = [
+    ['id', (value) => typeof value === 'string'],
+    ['kind', (value) => typeof value === 'string'],
+    ['title', (value) => typeof value === 'string'],
+    ['status', (value) => typeof value === 'string'],
+    ['owner', (value) => typeof value === 'string'],
+    ['cancellable', (value) => typeof value === 'boolean'],
+    ['childTaskIds', (value) => Array.isArray(value)],
+    ['queuedAt', (value) => typeof value === 'number'],
+  ];
   for (const task of tasks) {
-    if (task === null || typeof task !== 'object' || typeof (task as Record<string, unknown>).id !== 'string') {
-      throw new Error(`[${endpoint}] Task entry missing required "id" field`);
+    if (task === null || typeof task !== 'object') {
+      throw new Error(`[${endpoint}] Task entry must be an object`);
+    }
+    for (const [field, valid] of required) {
+      if (!valid((task as Record<string, unknown>)[field])) {
+        throw new Error(`[${endpoint}] Task entry missing required "${field}" field`);
+      }
     }
   }
   return tasks as readonly RuntimeTask[];

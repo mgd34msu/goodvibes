@@ -12,7 +12,8 @@ import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
 import { pairNativeTestHost, replaceNativeTestCredential } from '../../helpers/native-host-pairing.ts';
 import { tuiHostPairingStorePath } from '../../../runtime/tui-host-credential-store.ts';
-const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+// Yields one macrotask so loopback I/O can progress; readiness is always awaited by condition, never by elapsed time.
+const tick = () => new Promise<void>(resolve => { setTimeout(resolve, 0); });
 async function setup(handler: (request: Request) => Response | Promise<Response>) {
   const home = mkdtempSync(join(tmpdir(), 'native-tui-host-'));
   const server = Bun.serve({ port: 0, fetch: handler });
@@ -41,23 +42,17 @@ for (const heldHistory of [false, true]) test(`passive empty-input host discover
     return new Response('missing', { status: 404 });
   });
   const model = new NativeWorkLedgerModel(f.host.readSelection);
-  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     expect(await f.host.discoverProject()).toBe(true); const selection = f.host.readSelection(); expect(selection.available).toBe(true);
     const ready = new Promise<void>(resolve => { model.open(() => { if (model.snapshot) resolve(); }); });
-    await Promise.race([
-      (async () => {
-        if (heldHistory) {
-          await historyRequest; await tick(); await tick();
-          // Elapsed timer ticks cannot establish readiness before history settles.
-          expect(model.snapshot).toBeNull(); releaseHistory();
-        }
-        await ready;
-      })(),
-      new Promise<never>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error(`Native ledger did not become ready: ${model.reason}`)), 4000); }),
-    ]);
+    if (heldHistory) {
+      await historyRequest; await tick(); await tick();
+      // Yielded turns cannot establish readiness before history settles.
+      expect(model.snapshot).toBeNull(); releaseHistory();
+    }
+    await ready;
     expect(model.snapshot?.projectId).toBe('daemon-owned-project'); expect(paths.some(p => p.includes('/history'))).toBe(true);
-  } finally { if (deadline) clearTimeout(deadline); releaseHistory(); model.close(); f.close(); }
+  } finally { releaseHistory(); model.close(); f.close(); }
 });
 test('discovery scope denial stays unavailable; explicit project override needs no discovery', async () => {
   let calls = 0; const f = await setup(() => { calls++; return new Response('denied', { status: 403 }); });
@@ -136,7 +131,7 @@ test('production native modal executes exact authenticated wire actions and rend
     return Response.json({ kind: 'execution', ...body, currentRevision: body.expectedRevision, currentAttempt: true, stale: false, state: 'launch-claimed', recovery: 'required', receipt: { contractId: 'native-contract', ownerAgentId: 'native-owner' }, progress: null });
   });
   const modal = new ConfigModal(); const surface = createNativeWorkLedgerModalSurface(f.host.readSelection);
-  const wait = async (condition: () => boolean) => { const deadline = Date.now() + 4000; while (!condition()) { if (Date.now() > deadline) throw new Error('Native action did not settle'); await tick(); } };
+  const wait = async (condition: () => boolean) => { while (!condition()) await tick(); };
   const text = () => surface.buildView().tabs[0]!.rows.map(row => row.label).join('\n');
   try {
     await f.host.discoverProject(); modal.open(surface); await wait(() => text().includes('Control native-work')); modal.moveDown();

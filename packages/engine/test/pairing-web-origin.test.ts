@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { resolvePairingWebOrigin, ensurePublicBaseUrl, isHttpOnLan } from '../platform/src/platform/pairing/web-origin.ts';
+import { describeOriginPosture, isLoopbackHost } from '../platform/src/platform/pairing/origin-posture.ts';
+import { isOffHostBind } from '../platform/src/platform/utils/reachable-base-url.ts';
 import type { StableHostInputs } from '../platform/src/platform/pairing/stable-host.ts';
 import type { ConfigKey, ConfigManager } from '../platform/src/platform/config/index.ts';
 
@@ -41,6 +43,14 @@ describe('resolvePairingWebOrigin', () => {
       'controlPlane.webui.serve': true, 'controlPlane.hostMode': 'network', 'controlPlane.port': 4567 });
     expect(resolvePairingWebOrigin(cfg, stableProbe).origin).toBe('http://workshop.local:4567');
     expect(resolvePairingWebOrigin(cfg, stableProbe, { host: '::1', port: 5678 }).origin).toBe('http://[::1]:5678');
+    expect(cfg.writes).toEqual([]);
+  });
+
+  test('the shipped placeholder public URL is derived from the stable host when not bundled', () => {
+    const cfg = fakeConfig({ 'web.publicBaseUrl': 'http://127.0.0.1:3423', 'web.hostMode': 'network', 'web.port': 3141,
+      'controlPlane.webui.serve': false });
+    expect(resolvePairingWebOrigin(cfg, stableProbe)).toMatchObject({ origin: 'http://workshop.local:3141', fromPublicBaseUrl: false });
+    expect(ensurePublicBaseUrl(cfg, stableProbe).origin).toBe('http://workshop.local:3141');
     expect(cfg.writes).toEqual([]);
   });
 
@@ -135,4 +145,28 @@ test('persistence accepts a settled bundled binding including its observed HTTPS
   const resolved = ensurePublicBaseUrl(cfg, stableProbe, { host: '0.0.0.0', port: 4567, scheme: 'https' });
   expect(resolved.origin).toBe('https://workshop.local:4567');
   expect(cfg.writes).toEqual([['web.publicBaseUrl', 'https://workshop.local:4567']]);
+});
+
+describe('isLoopbackHost', () => {
+  test.each([
+    ['localhost', true], ['app.localhost', true], ['127.0.0.1', true], ['127.1.2.3', true],
+    ['::1', true], ['[::1]', true], ['::ffff:127.0.0.1', true], ['[::ffff:7f00:1]', true],
+    ['127.example.com', false], ['128.0.0.1', false], ['::ffff:10.0.0.1', false], ['::2', false],
+    ['192.168.1.5', false], ['workshop.local', false],
+  ] as const)('%s is loopback: %s', (host, expected) => {
+    expect(isLoopbackHost(host)).toBe(expected);
+  });
+
+  test('a control-plane bind to a DNS name that starts with 127. is off-host; real loopback binds are not', () => {
+    expect(isOffHostBind('127.example.com')).toBe(true);
+    expect(isOffHostBind('127.0.0.2')).toBe(false);
+    expect(isOffHostBind('[::1]')).toBe(false);
+    expect(isOffHostBind('::ffff:127.0.0.1')).toBe(false);
+  });
+
+  test('a DNS name that starts with 127. is not a secure context and counts as http on the LAN', () => {
+    expect(describeOriginPosture('http://127.example.com').secureContext).toBe(false);
+    expect(isHttpOnLan('http://127.example.com')).toBe(true);
+    expect(describeOriginPosture('http://127.0.0.1:3423').secureContext).toBe(true);
+  });
 });

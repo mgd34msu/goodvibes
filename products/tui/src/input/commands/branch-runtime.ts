@@ -9,6 +9,10 @@ export function registerBranchRuntimeCommands(registry: CommandRegistry): void {
     argsHint: '[name]',
     handler(args, ctx) {
       const name = args[0];
+      if (name !== undefined && ctx.session.conversationManager.hasBranch(name)) {
+        ctx.print(`Branch "${name}" already exists; it was not replaced. Pick another name or switch to it with /branch ${name}.`);
+        return;
+      }
       const branchName = ctx.session.conversationManager.forkBranch(name);
       const msgCount = ctx.session.conversationManager.getMessageCount();
       ctx.print(`Forked conversation as "${branchName}" (${msgCount} message${msgCount === 1 ? '' : 's'}).`);
@@ -38,6 +42,10 @@ export function registerBranchRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
       const name = args[0];
+      if (ctx.isGenerating?.()) {
+        ctx.print(`A turn is still running. Stop it with Esc or let it finish, then /branch ${name}.`);
+        return;
+      }
       const ok = ctx.session.conversationManager.switchBranch(name);
       if (!ok) {
         ctx.print(`Branch "${name}" not found. Use /fork [name] to create one, or /branch to list.`);
@@ -58,6 +66,14 @@ export function registerBranchRuntimeCommands(registry: CommandRegistry): void {
       const name = args[0];
       if (!name) {
         ctx.print('Usage: /merge <branch-name>\nSee /branch for available branches.');
+        return;
+      }
+      if (ctx.isGenerating?.()) {
+        ctx.print(`A turn is still running. Stop it with Esc or let it finish, then /merge ${name}.`);
+        return;
+      }
+      if (ctx.session.conversationManager.checkBranchMerge(name) === 'diverged') {
+        ctx.print(`Branch "${name}" and the current conversation both changed after the fork, so it was not merged. Switch to it with /branch ${name} to continue from there.`);
         return;
       }
       const ok = ctx.session.conversationManager.mergeBranch(name);

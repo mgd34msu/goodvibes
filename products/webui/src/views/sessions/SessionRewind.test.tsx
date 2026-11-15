@@ -188,6 +188,96 @@ describe('SessionRewind', () => {
     unmount();
   });
 
+  test('after the file restore is undone the undo button is disabled, so the checkpoint is not restored twice', async () => {
+    const { container, unmount } = render();
+    await settle();
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(3);
+    click(container.querySelector('.session-rewind__undo-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(3);
+
+    expect((container.querySelector('.session-rewind__undo-btn') as HTMLButtonElement).disabled).toBe(true);
+    click(container.querySelector('.session-rewind__undo-btn'));
+    await settle(2);
+    expect(container.querySelector('.gv-confirm')).toBeNull();
+    expect(restoreCalls).toHaveLength(1);
+    unmount();
+  });
+
+  test('a plan without a confirmation token cannot be applied and says why', async () => {
+    planResult = { ...(planResult as object), token: undefined };
+    const { container, unmount } = render();
+    await settle();
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+
+    expect((container.querySelector('.session-rewind__apply-btn') as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toContain('carries no confirmation token');
+    expect(applyCalls).toHaveLength(0);
+    unmount();
+  });
+
+  async function applyRewind(container: HTMLElement) {
+    await settle();
+    click(container.querySelector('.session-rewind__preview-btn'));
+    await settle(3);
+    click(container.querySelector('.session-rewind__apply-btn'));
+    await settle(2);
+    click(container.querySelector('.gv-confirm__confirm'));
+    await settle(3);
+  }
+
+  test('a conversation-only receipt names the snapshot, says this page cannot restore it, and offers no file undo', async () => {
+    applyResult = {
+      receipt: {
+        sessionId: 's-1', turnId: 't-2', scope: 'conversation', appliedAt: 1,
+        files: null,
+        conversation: { rewound: true, droppedMessages: 1, undoSnapshotId: 'snap-7' },
+        undo: { files: null, conversation: { undoSnapshotId: 'snap-7' } },
+        warnings: [],
+      },
+      refused: false, refusal: null,
+    };
+    const { container, unmount } = render();
+    await applyRewind(container);
+
+    const receiptText = container.querySelector('.session-rewind__receipt')?.textContent ?? '';
+    expect(receiptText).toContain('dropped 1 message');
+    expect(receiptText).toContain('snap-7');
+    expect(receiptText).toContain("can't restore a conversation");
+    expect(receiptText).toContain('No file undo point');
+    expect(container.querySelector('.session-rewind__undo-btn')).toBeNull();
+    unmount();
+  });
+
+  test('a receipt where nothing was rewound says so instead of claiming a change', async () => {
+    applyResult = {
+      receipt: {
+        sessionId: 's-1', turnId: 't-2', scope: 'both', appliedAt: 1,
+        files: { restored: false, checkpointId: 'wcp-9', safetyCheckpointId: null, restoredFileCount: 0, removedFileCount: 0 },
+        conversation: { rewound: false, droppedMessages: 0, undoSnapshotId: null },
+        undo: { files: null, conversation: null },
+        warnings: [],
+      },
+      refused: false, refusal: null,
+    };
+    const { container, unmount } = render();
+    await applyRewind(container);
+
+    const receiptText = container.querySelector('.session-rewind__receipt')?.textContent ?? '';
+    expect(receiptText).toContain('Files: not restored');
+    expect(receiptText).toContain('Conversation: not rewound');
+    expect(receiptText).not.toContain('dropped');
+    expect(container.querySelector('.session-rewind__undo-btn')).toBeNull();
+    unmount();
+  });
+
   test('while an apply is in flight the preview, scope, anchor and rewind controls are locked', async () => {
     let release!: () => void;
     applyGate = new Promise<void>((resolve) => { release = resolve; });

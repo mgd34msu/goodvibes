@@ -19,6 +19,7 @@
 import { describe, test, expect } from 'bun:test';
 import { ConversationManager } from '../../core/conversation.ts';
 import { transcriptUnits } from '../../core/work-tree-model.ts';
+import { createTestConfigManager } from '../helpers/test-managers.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 
@@ -176,7 +177,7 @@ describe('cache-vs-cold equivalence', () => {
     assertCacheMatchesCold(cm);
   });
 
-  test('collapse / expand toggle invalidates only the toggled block', () => {
+  test('collapse / expand toggle changes the frame and still matches a cold rebuild', () => {
     const cm = new ConversationManager(() => 100);
     cm.addUserMessage('run the tool');
     cm.addToolResults([{ callId: 'tool-1', success: true, output: LONG_TOOL_OUTPUT }]);
@@ -186,8 +187,11 @@ describe('cache-vs-cold equivalence', () => {
     const toolBlock = cm.getBlockRegistry().find((b) => b.type === 'tool');
     expect(toolBlock).toBeDefined();
 
+    const collapsed = serializeLines(cm.getDisplayBlocks());
+
     // Toggle it expanded.
     cm.toggleCollapseAtLine(toolBlock!.startLine);
+    expect(serializeLines(cm.getDisplayBlocks())).not.toBe(collapsed);
     assertCacheMatchesCold(cm);
 
     // Toggle it collapsed again.
@@ -413,11 +417,20 @@ describe('cache-vs-cold equivalence', () => {
   });
 
   test('config change (line numbers) invalidates cached messages', () => {
-    // Two managers with different config produce different output; the cache key
-    // includes config so a manager cannot serve a stale pre-config-change frame.
-    const cm = new ConversationManager(() => 100);
+    // The cache key includes display config, so toggling line numbers on one
+    // manager must not serve the pre-change frame.
+    const config = createTestConfigManager();
+    config.set('display.lineNumbers', 'off');
+    const cm = new ConversationManager(() => 100, config);
     cm.addAssistantMessage(`some content\n\n${CODE_FENCE}`);
-    cm.getDisplayBlocks();
+    const before = serializeLines(cm.getDisplayBlocks());
+    assertCacheMatchesCold(cm);
+
+    config.set('display.lineNumbers', 'code');
+    // A rebuild without a message mutation, as a theme refresh or resize triggers: only the cache key can tell the entries are stale.
+    cm.invalidateRenderedLines();
+    const after = serializeLines(cm.getDisplayBlocks());
+    expect(after).not.toBe(before);
     assertCacheMatchesCold(cm);
   });
 });

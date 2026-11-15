@@ -20,10 +20,12 @@
  *
  * Run it against a built daemon binary:
  *   bun run scripts/hosted-handoff-proof.ts [path/to/goodvibes-daemon-<os>-<arch>]
- * Default: ~/Projects/goodvibes-daemon/dist/goodvibes-daemon-<os>-<arch>.
+ * Default: products/daemon/native/goodvibes-daemon-<linux|macos>-<arch> in this
+ * repository, built beside its `.bun` companion files; the proof stops at once if
+ * it is not there.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SharedApprovalRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -33,17 +35,16 @@ import { createHostedConversationHandoff } from '../src/runtime/client/hosted-ha
 import { createApprovalsView } from '../src/runtime/client/approvals-view.ts';
 
 function defaultBinary(): string {
-  const names: Record<string, string> = {
-    'linux-x64': 'goodvibes-daemon-linux-x64',
-    'linux-arm64': 'goodvibes-daemon-linux-arm64',
-    'darwin-x64': 'goodvibes-daemon-macos-x64',
-    'darwin-arm64': 'goodvibes-daemon-macos-arm64',
-  };
-  const name = names[`${process.platform}-${process.arch}`] ?? 'goodvibes-daemon-linux-x64';
-  return join(homedir(), 'Projects', 'goodvibes-daemon', 'dist', name);
+  // The built asset is named for the OS as the release names it: macos, not darwin.
+  const os = process.platform === 'darwin' ? 'macos' : process.platform;
+  return join(import.meta.dir, '..', '..', 'daemon', 'native', `goodvibes-daemon-${os}-${process.arch}`);
 }
 
 const BINARY = process.argv[2] ?? defaultBinary();
+if (!existsSync(BINARY)) {
+  console.error(`hosted-handoff-proof: no daemon binary at ${BINARY}. Build products/daemon first, or pass the path to a compiled goodvibes-daemon as the first argument.`);
+  process.exit(2);
+}
 const DAEMON_PORT = 47871;
 const STUB_PORT = 47872;
 const TOKEN = 'hosted-handoff-proof-token';
@@ -153,6 +154,7 @@ interface HostedSessionRow {
   readonly messageCount: number;
 }
 
+let approvalsToStop: { stop(): void } | undefined;
 try {
   const up = await waitForDaemon();
   check('the compiled daemon binary boots on an isolated home and answers /status', up, `port ${DAEMON_PORT}`);
@@ -257,6 +259,7 @@ try {
       });
     },
   });
+  approvalsToStop = approvals;
   approvals.start();
   for (let attempt = 0; attempt < 40 && !approvals.snapshot().liveUpdates; attempt += 1) await Bun.sleep(250);
   check('the approvals panel opened the control.approval_update stream',
@@ -291,12 +294,14 @@ try {
     if (!cleared) await Bun.sleep(250);
   }
   check('a decision made elsewhere clears the row just as fast', cleared, `pending ${approvals.snapshot().approvals.length}`);
-  approvals.stop();
 } catch (error) {
   // A proof that stopped early is a failed proof, not a short one, record it
   // so the tally and the kept-home decision below both tell the truth.
   check('the proof ran to the end', false, error instanceof Error ? error.message : String(error));
 } finally {
+  // Stopped here, not at the end of the try: a check that throws mid-way must
+  // still close the approvals stream, or the process never exits.
+  approvalsToStop?.stop();
   daemon.kill('SIGTERM');
   await daemon.exited.catch(() => undefined);
   stub.stop(true);

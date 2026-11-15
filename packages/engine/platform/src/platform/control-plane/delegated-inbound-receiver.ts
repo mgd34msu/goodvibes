@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
+import { readJsonFileOrQuarantine } from '../utils/atomic-json-store.js';
+import { logger } from '../utils/logger.js';
 import { sameNativeInboundSourceRef, type NativeInboundSourceRef, type NativeInboundResolvedSource } from './native-inbound-source.js';
-import type { NativeInboundAcceptance, NativeInboundReceiver } from './native-inbound-handoff.js';
+import { NativeInboundReceiverRefusal, type NativeInboundAcceptance, type NativeInboundReceiver } from './native-inbound-handoff.js';
 import { delegatedReviewRecordSchema, type DelegatedInboundChoices, type DelegatedReviewOwner } from './delegated-inbound-wire.js';
 export interface DelegatedReviewRecord {
   readonly id: string; readonly ref: NativeInboundSourceRef; readonly origin: NativeInboundResolvedSource['origin'];
@@ -24,26 +26,51 @@ export class DelegatedInboundReviewReceiver {
   private readonly records = new Map<string, DelegatedReviewRecord>();
   private readonly durable = new Set<string>();
   private readonly originals = new Map<string, { source: NativeInboundResolvedSource; assertCurrent: () => void; cleanup: () => void }>();
-  private loading?: Promise<void>;
+  private loading: Promise<void> | undefined;
   private cleanupFailed = false;
   private closed = false;
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  constructor(path: string, private readonly beforeOwnerWrite?: () => void) { this.store = new PersistentStore<Snapshot>(path); }
+  constructor(private readonly path: string, private readonly beforeOwnerWrite?: () => void) { this.store = new PersistentStore<Snapshot>(path); }
   private start(): Promise<void> {
-    return this.loading ??= (async () => {
-    const saved = await this.store.load();
+    // A failed load is retried by the next caller instead of disabling the receiver until restart.
+    return this.loading ??= this.load().catch((error: unknown) => { this.loading = undefined; throw error; });
+  }
+  private async load(): Promise<void> {
+    // A file that cannot be read as a queue is set aside whole (and disclosed by
+    // the quarantine helper) and the queue starts empty: saved rows grant no
+    // replay, so an empty queue loses nothing a restart would have kept.
+    // The quarantining read is synchronous. Yield first so a close() issued
+    // right after start still lands before any retention timer is armed.
+    await Promise.resolve();
+    const saved = this.path === ':memory:' ? await this.store.load() : readJsonFileOrQuarantine<Snapshot>(this.path, {
+      label: 'delegated review queue',
+      recovery: 'The review queue starts empty; requests that were waiting must be sent again.',
+      validate: (value) => {
+        if (value === null || typeof value !== 'object' || Array.isArray(value) || !Array.isArray((value as { records?: unknown }).records)) {
+          throw new Error('not a review queue');
+        }
+        return value as Snapshot;
+      },
+    });
+    // Parse every row before adopting any. A row that fails its schema is
+    // dropped on its own: its neighbours are unaffected, and nothing is guessed.
+    const loaded: DelegatedReviewRecord[] = [];
+    let droppedRows = 0;
     if (saved) for (const value of saved.records) {
-      const { owner, ...fields } = delegatedReviewRecordSchema.parse(value);
+      const parsed = delegatedReviewRecordSchema.safeParse(value);
+      if (!parsed.success) { droppedRows += 1; continue; }
+      const { owner, ...fields } = parsed.data;
       const record: DelegatedReviewRecord = { ...fields, ...(owner === undefined ? {} : { owner }) };
       Object.freeze(record.ref); Object.freeze(record.origin); Object.freeze(record.choices);
       if (record.owner) { Object.freeze(record.owner.scopes); Object.freeze(record.owner); }
       Object.freeze(record);
-      // Old original proof is never reconstructed; persisted rows are metadata only.
-      if (record.recordExpiresAt > Date.now()) { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
+      loaded.push(record);
     }
+    if (droppedRows > 0) logger.warn('Delegated review queue rows failed validation and were dropped', { droppedRows, kept: loaded.length });
+    // Old original proof is never reconstructed; persisted rows are metadata only.
+    for (const record of loaded) if (record.recordExpiresAt > Date.now()) { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
     for (const record of this.records.values()) this.armExpiry(record);
     if (saved) await this.persist();
-    })();
   }
   private armExpiry(record: DelegatedReviewRecord): void {
     if (this.closed) return;
@@ -78,10 +105,10 @@ export class DelegatedInboundReviewReceiver {
     return {
       accept: async (source, options): Promise<NativeInboundAcceptance> => {
         await this.start(); await this.expire(); options.signal.throwIfAborted(); options.assertCurrent();
-        if (this.closed) throw new Error('Delegated review receiver is closed');
-        if (this.records.size >= 500) throw new Error('Review queue is full');
+        if (this.closed) throw new NativeInboundReceiverRefusal('Delegated review receiver is closed');
+        if (this.records.size >= 500) throw new NativeInboundReceiverRefusal('Review queue is full');
         if (this.records.has(source.ref.requestId)) throw new Error('Existing request requires read-only recovery');
-        if (grant.sourceExpiresAt <= Date.now()) throw new Error('Original source expired');
+        if (grant.sourceExpiresAt <= Date.now()) throw new NativeInboundReceiverRefusal('Original source expired');
         const record: DelegatedReviewRecord = Object.freeze({ id: `external-review-${randomUUID()}`, ref: source.ref, origin: source.origin,
           configurationId: grant.configurationId, ownerRevision: grant.ownerRevision, owner: grant.owner, workspaceRevision: grant.workspaceRevision,
           approvalId: grant.approvalId, choices: grant.choices, acceptedAt: Date.now(), sourceExpiresAt: grant.sourceExpiresAt,
@@ -92,12 +119,21 @@ export class DelegatedInboundReviewReceiver {
         this.originals.set(source.ref.requestId, { source, assertCurrent: options.assertCurrent, cleanup });
         options.signal.addEventListener('abort', release, { once: true });
         this.records.set(source.ref.requestId, record); this.armExpiry(record);
+        let written = false;
         try {
-          await this.persist(); this.durable.add(source.ref.requestId); options.signal.throwIfAborted(); options.assertCurrent();
+          await this.persist(); written = true; this.durable.add(source.ref.requestId); options.signal.throwIfAborted(); options.assertCurrent();
         } catch (error) {
           // A failed write/guard cannot leave an original retained in a receiver
           // whose ownership handoff never completed. Saved metadata grants no replay.
-          this.release(source.ref); throw error;
+          this.release(source.ref);
+          // A row whose write failed was never durable; dropping it lets the
+          // owner retry instead of every retry reading as an existing request.
+          if (!written && this.records.get(source.ref.requestId) === record) {
+            this.records.delete(source.ref.requestId);
+            const timer = this.expiryTimers.get(source.ref.requestId); if (timer) clearTimeout(timer);
+            this.expiryTimers.delete(source.ref.requestId);
+          }
+          throw error;
         }
         return { ref: source.ref, disposition: 'transferred' };
       },

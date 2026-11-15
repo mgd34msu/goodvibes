@@ -74,3 +74,29 @@ describe('CardMaterialRedactor redacts every mask an input can plausibly reforma
     expect(guard.redact('s', 'p', text)).toBe(text);
   });
 });
+
+describe('a short card secret is matched as its own token, not inside prices', () => {
+  function cvvGuard(): CardMaterialRedactor {
+    const guard = new CardMaterialRedactor();
+    guard.arm('s', 'p', [{ kind: 'cvv', value: '123' }, { kind: 'number', value: PAN }]);
+    return guard;
+  }
+  test.each([
+    'Total $41.23',
+    'Total 1,123.00 USD',
+    'Cable 1.23 Tax 1\n10.00\n13.23',
+    'Total $123.00',
+    'Order 51234',
+  ])('keeps %p readable', (text) => {
+    expect(cvvGuard().redact('s', 'p', text)).toBe(text);
+  });
+  test('still removes the code where a page echoes it', () => {
+    const guard = cvvGuard();
+    expect(guard.redact('s', 'p', 'Security code: 123.')).toBe(`Security code: ${REDACTED_MARKER}.`);
+    expect(guard.redact('s', 'p', 'cvv=123&total=41.23')).toBe(`cvv=${REDACTED_MARKER}&total=41.23`);
+  });
+  test('still removes the card number in any spelling next to a price', () => {
+    expect(cvvGuard().redact('s', 'p', 'Card 4539 5787 6362 1486 total $41.23'))
+      .toBe(`Card ${REDACTED_MARKER} total $41.23`);
+  });
+});

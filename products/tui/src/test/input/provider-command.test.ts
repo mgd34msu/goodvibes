@@ -145,7 +145,7 @@ describe('/provider-opt', () => {
 
     await providerCommand.handler(['optimizer', 'maybe'], context);
 
-    expect(output.join('\n')).toContain('Usage: /provider optimizer on|off');
+    expect(output.join('\n')).toContain('Usage: /provider-opt optimizer on|off');
   });
 
   test('route auto when optimizer is off records mode and explains it is off', async () => {
@@ -160,6 +160,6 @@ describe('/provider-opt', () => {
     expect(context.provider.providerOptimizer?.mode).toBe('auto');
     // Honest UX: explains the optimizer is off
     expect(joined).toContain('Optimizer is off');
-    expect(joined).toContain('/provider optimizer on');
+    expect(joined).toContain('/provider-opt optimizer on');
   });
 });

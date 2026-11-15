@@ -6,7 +6,7 @@ import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import { ensurePublicBaseUrl } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { PairingLimitReachedError, availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
 import { createServicesModalSurface } from './modals/services-modal.ts';
@@ -217,7 +217,9 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps): Pairi
       offers: handoff.offers,
       posture: handoff.posture,
     };
-  } catch {
+  } catch (error) {
+    // The device cap is a real, nameable refusal; the modal shows its message.
+    if (error instanceof PairingLimitReachedError) throw error;
     return null;
   }
 }

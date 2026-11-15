@@ -32,8 +32,12 @@ export interface DaemonProcessHandle {
   /** Resolves undefined when shutdown wins before startup can be admitted. */
   readonly ready: Promise<unknown>;
   readonly finished: Promise<DaemonProcessExitCode>;
-  /** Synchronously fences startup and returns the same promise on every call. */
-  shutdown(): Promise<DaemonProcessExitCode>;
+  /**
+   * Synchronously fences startup and returns the same promise on every call.
+   * `failed` makes the eventual exit status 1 even when startup and close
+   * both succeed (the host ended for a reason that is itself a failure).
+   */
+  shutdown(failed?: boolean): Promise<DaemonProcessExitCode>;
 }
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 15_000;
@@ -66,6 +70,7 @@ export function runDaemonProcess(
   let closeStarted = false;
   let closeSettled = false;
   let closeFailed = false;
+  let shutdownFailed = false;
   let terminal = false;
   let deadline: unknown;
   let deadlineSet = false;
@@ -87,7 +92,7 @@ export function runDaemonProcess(
 
   function finishIfDrained(): void {
     if (shutdownRequested && startupSettled && closeSettled) {
-      finish(startupFailed || closeFailed ? 1 : 0);
+      finish(startupFailed || closeFailed || shutdownFailed ? 1 : 0);
     }
   }
 
@@ -117,7 +122,8 @@ export function runDaemonProcess(
     );
   }
 
-  function shutdown(): Promise<DaemonProcessExitCode> {
+  function shutdown(failed = false): Promise<DaemonProcessExitCode> {
+    if (failed && !terminal) shutdownFailed = true;
     if (shutdownRequested || terminal) return finished;
     shutdownRequested = true;
     deadline = timers.setTimeout(() => {

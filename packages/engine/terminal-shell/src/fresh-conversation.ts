@@ -23,12 +23,18 @@ import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/run
 export interface FreshConversationContext {
   readonly session: {
     readonly conversationManager: TerminalConversationManager;
-    readonly sessionManager?: Pick<SessionManager, 'save'> | null | undefined;
+    readonly sessionManager?: (Pick<SessionManager, 'save'> & Partial<Pick<SessionManager, 'delete'>>) | null | undefined;
     readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string; systemPrompt: string };
     readonly hydrateSessionUsage?: (() => void) | undefined;
   };
   readonly reloadSystemPrompt?: (() => string) | undefined;
   readonly cancelPendingRecovery?: (() => void) | undefined;
+  /**
+   * Runs once the local conversation is reset. A host that routes turns to a
+   * daemon-held session uses it to let go of that session, so the next message
+   * starts a fresh one instead of continuing the conversation that was cleared.
+   */
+  readonly abandonHostedSession?: (() => void) | undefined;
 }
 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
@@ -51,8 +57,13 @@ function hasConversation(ctx: FreshConversationContext): boolean {
  */
 export function startFreshConversation(ctx: FreshConversationContext, surface?: SessionSurface | null): FreshConversationResult {
   const conversation = ctx.session.conversationManager;
+  const keep = hasConversation(ctx);
+  if (keep && !ctx.session.sessionManager) {
+    throw new Error('This session has no session store, so the conversation cannot be saved first. Nothing was cleared; /export it or start a new session instead.');
+  }
   let savedAs: string | null = null;
-  if (hasConversation(ctx) && ctx.session.sessionManager) {
+  const sessionManager = ctx.session.sessionManager;
+  if (keep && sessionManager) {
     const id = `user-${randomBytes(4).toString('hex')}`;
     const exported = conversation.toJSON() as { messages?: unknown[] };
     const meta: SessionMeta = {
@@ -64,13 +75,19 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
       // The user asked for this conversation to be set aside; it is not turn machinery.
       saveSource: 'user',
     };
-    ctx.session.sessionManager.save(id, (exported.messages ?? []) as Parameters<SessionManager['save']>[1], meta);
-    if (surface) {
-      // The saved copy keeps its view (folds, failed/cancelled turn headers)
-      // and its rewind anchors, which describe exactly that transcript.
-      saveWorkTreeFolds(surface.sessionsDir, id, conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
-      for (const anchor of getTurnAnchors(ctx.session.runtime.sessionId)) recordTurnAnchor(id, anchor);
-      persistTurnAnchors(id, surface);
+    sessionManager.save(id, (exported.messages ?? []) as Parameters<SessionManager['save']>[1], meta, undefined, undefined, conversation.branchState());
+    try {
+      if (surface) {
+        // The saved copy keeps its view (folds, failed/cancelled turn headers)
+        // and its rewind anchors, which describe exactly that transcript.
+        saveWorkTreeFolds(surface.sessionsDir, id, conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
+        for (const anchor of getTurnAnchors(ctx.session.runtime.sessionId)) recordTurnAnchor(id, anchor);
+        persistTurnAnchors(id, surface);
+      }
+    } catch (error) {
+      // The live conversation is untouched, so a half-written copy would only be a stray duplicate.
+      try { sessionManager.delete?.(id); } catch { /* the copy is harmless if it cannot be removed */ }
+      throw error;
     }
     savedAs = id;
   }
@@ -78,16 +95,29 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
   const liveId = ctx.session.runtime.sessionId;
   // Close the durable snapshot boundary before changing memory. A crash or
   // immediate resume must see the same empty conversation as the screen.
-  ctx.session.sessionManager?.save(liveId, [], {
+  const liveMessages = (conversation.toJSON() as { messages?: unknown[] }).messages ?? [];
+  const liveBranches = conversation.branchState();
+  const liveMeta: SessionMeta = {
+    title: conversation.title, model: ctx.session.runtime.model, provider: ctx.session.runtime.provider,
+    timestamp: Date.now(), titleSource: conversation.getTitleSource(), saveSource: 'auto',
+  };
+  sessionManager?.save(liveId, [], {
     title: '', model: ctx.session.runtime.model, provider: ctx.session.runtime.provider,
     timestamp: Date.now(), saveSource: 'auto',
   });
-  ctx.cancelPendingRecovery?.();
-  if (surface) {
-    openTranscriptJournal(journalPathFor(surface, liveId), liveId).rotate();
-    removeRecoveryPoint(surface, liveId);
+  try {
+    ctx.cancelPendingRecovery?.();
+    if (surface) {
+      openTranscriptJournal(journalPathFor(surface, liveId), liveId).rotate();
+      removeRecoveryPoint(surface, liveId);
+    }
+  } catch (error) {
+    // Memory still holds the conversation, so disk must not say it is empty.
+    try { sessionManager?.save(liveId, liveMessages as Parameters<SessionManager['save']>[1], liveMeta, undefined, undefined, liveBranches); } catch { /* the next autosave rewrites it */ }
+    throw error;
   }
   conversation.resetAll();
+  ctx.abandonHostedSession?.();
   if (ctx.reloadSystemPrompt) ctx.session.runtime.systemPrompt = ctx.reloadSystemPrompt();
   // Rewind anchors and the view sidecar point into the old transcript.
   clearTurnAnchors(liveId);

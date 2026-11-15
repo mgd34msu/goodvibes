@@ -14,8 +14,8 @@
  * result-kind folding (a durable reject does NOT enqueue+retry-forever; a transient
  * offline DOES queue).
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -37,27 +37,6 @@ const silent = { debug: () => {}, info: () => {} };
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 5; i += 1) await new Promise<void>((r) => setTimeout(r, 0));
 };
-
-/**
- * Poll until `predicate` holds, then return.
- *
- * Replaces "sleep a fixed 70 ms and then assert a keepalive beat has landed".
- * The keepalive's cadence is 15 ms here, so on an idle machine 70 ms is four
- * beats of headroom, but the beat has to travel through the adapter and be
- * recorded, and how long that takes on a machine running the rest of this suite
- * concurrently is not something a fixed sleep can know. The poll returns on the
- * first beat, so a fast host is no slower than before, and the ceiling is large
- * enough that only a keepalive that never fires at all fails it.
- */
-async function waitUntil(predicate: () => boolean, what: string, budgetMs = 30_000): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`waitUntil: ${what} never became true, waited ${budgetMs}ms`);
-    }
-    await new Promise<void>((r) => setTimeout(r, 5));
-  }
-}
 
 interface CapturedCall {
   readonly kind: 'register' | 'close';
@@ -295,34 +274,49 @@ for (const makeAdapter of adapters) {
       client.dispose();
     });
 
-    test('45s keepalive re-heartbeats on its own cadence with NO activity, and dispose() stops it', async () => {
-      const fix = makeAdapter();
-      const client = new SessionSpineClient({ participant: fix.participant, transport: fix.transport, heartbeatMinIntervalMs: 15, log: silent });
-      client.register({ sessionId: 'keepalive-1', project: '/p', title: 'T' });
-      await settle();
-      expect(client.keepaliveSessionId).toBe('keepalive-1');
-      const afterRegister = fix.calls.filter((c) => c.kind === 'register').length;
+    test('keepalive re-heartbeats with NO activity every 45s by default, and dispose() stops it', async () => {
+      let clock = 1_000_000;
+      const captured: Array<{ run: () => void; ms: number | undefined; handle: object }> = [];
+      const cleared: object[] = [];
+      const setIntervalSpy = spyOn(globalThis, 'setInterval').mockImplementation(((run: () => void, ms?: number) => {
+        const handle = { unref: () => handle };
+        captured.push({ run, ms, handle });
+        return handle;
+      }) as unknown as typeof setInterval);
+      const clearIntervalSpy = spyOn(globalThis, 'clearInterval').mockImplementation(((handle: object) => {
+        cleared.push(handle);
+      }) as unknown as typeof clearInterval);
+      try {
+        const fix = makeAdapter();
+        const client = new SessionSpineClient({ participant: fix.participant, transport: fix.transport, now: () => clock, log: silent });
+        client.register({ sessionId: 'keepalive-1', project: '/p', title: 'T' });
+        await settle();
+        expect(client.keepaliveSessionId).toBe('keepalive-1');
+        expect(captured).toHaveLength(1);
+        expect(captured[0]!.ms).toBe(45_000);
+        const afterRegister = fix.calls.filter((c) => c.kind === 'register').length;
 
-      await waitUntil(
-        () => fix.calls.filter((c) => c.kind === 'register').length > afterRegister,
-        'the keepalive timer produces a further heartbeat with no activity',
-      );
-      await settle();
-      const afterIdle = fix.calls.filter((c) => c.kind === 'register').length;
-      expect(afterIdle).toBeGreaterThan(afterRegister);
-      expect(fix.calls.every((c) => c.sessionId === 'keepalive-1')).toBe(true);
+        // With no activity the tick itself reaches the wire; the next one a full
+        // window later does too, but a tick inside the window is coalesced.
+        captured[0]!.run();
+        await settle();
+        expect(fix.calls.filter((c) => c.kind === 'register').length).toBe(afterRegister + 1);
+        clock += 45_000;
+        captured[0]!.run();
+        await settle();
+        expect(fix.calls.filter((c) => c.kind === 'register').length).toBe(afterRegister + 2);
+        clock += 44_000;
+        captured[0]!.run();
+        await settle();
+        expect(fix.calls.filter((c) => c.kind === 'register').length).toBe(afterRegister + 2);
+        expect(fix.calls.every((c) => c.sessionId === 'keepalive-1')).toBe(true);
 
-      client.dispose();
-      // Settle first so a beat already in flight when dispose() ran is recorded
-      // BEFORE the baseline is taken, otherwise a busy machine could make a
-      // pre-dispose beat look like a post-dispose one.
-      await settle();
-      const afterDispose = fix.calls.length;
-      // A genuine negative: there is no condition to poll for, so this waits out
-      // several keepalive periods (15 ms cadence) and asserts nothing arrived.
-      // Load only ever produces FEWER beats, so this direction is not fragile.
-      await new Promise((r) => setTimeout(r, 200));
-      expect(fix.calls.length).toBe(afterDispose);
+        client.dispose();
+        expect(cleared).toContain(captured[0]!.handle);
+      } finally {
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
     });
 
     test('reopen sends reopen:true and omits title; create includes title', async () => {
@@ -521,7 +515,7 @@ describe('SessionSpineClient: mirroredSessionIds (the true shared identity for a
 describe('foldLegacySpineStore', () => {
   let root: string;
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'goodvibes-platform-spine-fold-')); });
-  afterEach(() => { /* best-effort */ });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   test('reads the store, folds records, and writes a migration marker', () => {
     const storePath = join(root, 'sessions.json');

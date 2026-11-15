@@ -84,7 +84,7 @@ test('surface close aborts and drains an ignored-signal seed before closing stor
   try {
     await entered.promise;
     const closing = registration.close(); let closed = false; void closing.then(() => { closed = true; });
-    expect(signal?.aborted).toBe(true); await Promise.resolve(); expect(closed).toBe(false);
+    expect(signal?.aborted).toBe(true); await new Promise<void>((resolve) => setTimeout(resolve, 0)); expect(closed).toBe(false);
     release.resolve(); await closing;
     await expect(registration.ready).rejects.toMatchObject({ code: 'INBOX_SURFACE_STOPPED' });
     expect(closed).toBe(true);
@@ -197,7 +197,7 @@ test('default gated start waits for the admitted initial seed to complete', asyn
   const starting = control.start().then(() => { started = true; });
   void starting.catch(() => {});
   try {
-    await entered.promise; await Promise.resolve();
+    await entered.promise; await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(started).toBe(false);
     release.resolve(); await starting;
     expect(started).toBe(true);
@@ -225,7 +225,7 @@ test.each(['stop', 'close'] as const)('admission-only start resolves while seed 
     expect(await invoke(ctx)).toMatchObject({ items: [], total: 0 });
     let retired = false;
     const retiring = (retirement === 'stop' ? control.stop() : registration.close()).then(() => { retired = true; });
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(signal?.aborted).toBe(true); expect(retired).toBe(false);
     release.resolve(); await retiring;
     expect(retired).toBe(true); expect(polls).toBe(1);

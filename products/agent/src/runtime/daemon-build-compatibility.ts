@@ -21,17 +21,18 @@
  *
  * ON THE FLOOR VALUE
  *
- * `AGENT_DAEMON_BUILD_FLOOR` is '1.28.0'. The platform is explicit that the floor
+ * `AGENT_DAEMON_BUILD_FLOOR` is '3.1.2'. The platform is explicit that the floor
  * belongs to the consumer, not the platform: "the TUI, the agent and the web
  * UI need different daemon behaviors at different times, and a single
  * platform-wide constant would either over-refuse for one of them or under-refuse
  * for another. Each consumer passes its own and states, in its own release
  * notes, what it raised the floor for."
  *
- * This is a breaking change: the daemon is its own product, with its own
- * repository, package and release line, separate from the embedded topology
- * this Agent built and shipped alongside itself before that split. A daemon
- * build below 1.28.0 belongs to that earlier topology.
+ * The daemon shares this repository's release line. 3.1.2 is the oldest build
+ * that serves every verb this Agent depends on: the hosted-session verbs its
+ * conversation turns are routed through, `approvals.raise`, the conversation
+ * rewind verbs and `sessions.permissionMode.set`. 3.1.1 and earlier answer
+ * those with a 404 that reads as a broken feature; 3.1.2 and later serve them.
  *
  * The floor REFUSES, it does not merely warn. A daemon below it is not adopted:
  * `judgeForAdoption` is asked before the memory spine activates, and a
@@ -59,7 +60,7 @@ export { evaluateDaemonStatusCompatibility };
  * The oldest daemon build this Agent will work against, or undefined for "this
  * client is not asking for anything". See the note above before changing it.
  */
-export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '1.28.0';
+export const AGENT_DAEMON_BUILD_FLOOR: string | undefined = '3.1.2';
 
 export interface DaemonBuildGuardOptions {
   /** The floor this client declares. Undefined means it declares none. */
@@ -198,4 +199,26 @@ export async function readDaemonStatusPayload(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * The adoption gate. Asked on the adoption edge, before anything routes over
+ * the wire, so a daemon below the floor is refused rather than half-used.
+ *
+ * Nothing read means nothing known: the answer is adopt, and a daemon that is
+ * not answering is left to the reachability handling that owns that question.
+ * Its own plain `/status` read, never the receipt-consuming one, because that
+ * read has a side effect and must not be what decides adoption.
+ */
+export function createDaemonAdoptionGate(deps: {
+  readonly resolveConnection: () => DaemonStatusConnection;
+  readonly readStatus: (connection: DaemonStatusConnection) => Promise<unknown | null>;
+  readonly guard: Pick<DaemonBuildGuard, 'judgeForAdoption'>;
+}): () => Promise<boolean> {
+  return async () => {
+    const connection = deps.resolveConnection();
+    const status = await deps.readStatus(connection);
+    if (status === null) return true;
+    return deps.guard.judgeForAdoption(status, connection.baseUrl).status !== 'daemon-update-required';
+  };
 }

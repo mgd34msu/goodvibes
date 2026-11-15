@@ -24,6 +24,7 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
   readonly decisionLog: Pick<DecisionLog, 'get'>;
   readonly cancelForeground?: (contractId: string) => Promise<void>;
   readonly joinForeground?: (contractId: string) => Promise<void>;
+  readonly releaseForeground?: (contractId: string) => void;
   readonly readAccessFilter: NonNullable<DaemonContractCompositionOptions['readAccessFilter']>;
 }) {
   const continuationOwner = options.continuationScopeOwner;
@@ -36,7 +37,8 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
     ...(continuationPolicy ? { continuationPolicy } : {}),
     verification: { settings: () => checkSettings(readContractConfig(options.configManager)), readAccessFilter: options.readAccessFilter },
     ...(options.cancelForeground ? { cancelForeground: options.cancelForeground } : {}),
-    ...(options.joinForeground ? { joinForeground: options.joinForeground } : {}) });
+    ...(options.joinForeground ? { joinForeground: options.joinForeground } : {}),
+    ...(options.releaseForeground ? { releaseForeground: options.releaseForeground } : {}) });
   try {
     const contracts = createDaemonContractServices({ ...options, nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(), projectRoot: realpathSync(options.projectRoot), nativeOwner: execution.nativeOwner });
     execution.attachRunner(contracts.runner);

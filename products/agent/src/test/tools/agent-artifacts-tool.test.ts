@@ -1,6 +1,6 @@
 import { admittedToolWorkspace, executeAdmitted } from '../helpers/admitted-tool.ts';
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -64,6 +64,43 @@ class ArtifactBrowserTestStore implements Partial<Pick<ArtifactStore, 'get' | 'l
   }
 }
 
+test('a list filter finds an artifact older than the newest hundred', async () => {
+  const root = makeProjectTempDir('goodvibes-agent-artifact-list-window');
+  try {
+    const store = new ArtifactBrowserTestStore();
+    store.add({ id: 'artifact-oldest', createdAt: 1, metadata: { purpose: 'quarterly-report' } });
+    for (let index = 0; index < 150; index++) store.add({ id: `artifact-${index}`, createdAt: 1000 + index, metadata: { purpose: 'scratch' } });
+    const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
+
+    const listed = await executeAdmitted(tool, { mode: 'list', purpose: 'quarterly-report' });
+
+    expect(listed.success).toBe(true);
+    expect(listed.output).toContain('artifact-oldest');
+    expect(listed.output).toContain('returned 1/1');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('list and show tell the model that artifact names and metadata are untrusted', async () => {
+  const root = makeProjectTempDir('goodvibes-agent-artifact-untrusted-notice');
+  try {
+    const store = new ArtifactBrowserTestStore();
+    store.add({ id: 'artifact-fetched', createdAt: 1, metadata: { purpose: 'fetched-page' } });
+    const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
+
+    const listed = await executeAdmitted(tool, { mode: 'list' });
+    const shown = await executeAdmitted(tool, { mode: 'show', artifactId: 'artifact-fetched' });
+
+    for (const result of [listed, shown]) {
+      expect(result.success).toBe(true);
+      expect(result.output?.startsWith('Untrusted artifact content follows')).toBe(true);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('artifact metadata withholds unknown roles and checks declared text without transmitting recovery material', async () => {
   const material = 'synthetic violet lantern recovery material';
   const description = 'An ordinary sample artifact.';
@@ -121,6 +158,10 @@ for (const mode of ['show', 'list']) for (const invalidation of ['source', 'abor
       expect(result.output).toBeUndefined();
     } finally { release(); installJudgmentPort(previous); }
   });
+
+function readdirSyncOrEmpty(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir) : [];
+}
 
 function unzipLocalEntries(buffer: Buffer): Map<string, Buffer> {
   const entries = new Map<string, Buffer>();
@@ -394,6 +435,72 @@ describe('agent_artifacts tool', () => {
       });
       expect(overwritten.success).toBe(true);
       expect(overwritten.output).toContain('overwrite yes');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a reused package directory names the files the new manifest does not describe', async () => {
+    const root = makeProjectTempDir('goodvibes-agent-artifact-package-leftover');
+    try {
+      const store = new ArtifactBrowserTestStore();
+      store.add({ id: 'artifact-one', filename: 'one.txt', text: 'one' });
+      store.add({ id: 'artifact-two', filename: 'two.txt', text: 'two' });
+      const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
+      const base = { mode: 'package', destinationPath: 'exports/pkg', confirm: true, explicitUserRequest: 'Export the package.' };
+
+      const first = await executeAdmitted(tool, { ...base, artifactIds: ['artifact-one'] });
+      expect(first.success).toBe(true);
+      expect(first.output).not.toContain('from an earlier package');
+      const second = await executeAdmitted(tool, { ...base, artifactIds: ['artifact-two'], overwrite: true });
+      expect(second.success).toBe(true);
+      expect(second.output).toContain('from an earlier package');
+      expect(second.output).toContain('one.txt');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a package that fails part way removes what it created and keeps the caller\'s own', async () => {
+    const root = makeProjectTempDir('goodvibes-agent-artifact-package-partial');
+    try {
+      const store = new ArtifactBrowserTestStore();
+      store.add({ id: 'artifact-one', filename: 'one.txt', text: 'one' });
+      const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
+      const destination = join(root, 'exports', 'pkg');
+      mkdirSync(join(destination, 'manifest.json'), { recursive: true });
+      writeFileSync(join(destination, 'manifest.json', 'keep.txt'), 'the caller\'s own file');
+
+      // artifacts/one.txt is written first; the manifest write then fails because a directory sits there.
+      const failed = await executeAdmitted(tool, {
+        mode: 'package', artifactIds: ['artifact-one'], destinationPath: 'exports/pkg', overwrite: true,
+        confirm: true, explicitUserRequest: 'Export the package.',
+      });
+      expect(failed.success).toBe(false);
+      expect(readdirSync(destination)).toEqual(['manifest.json']);
+      expect(readFileSync(join(destination, 'manifest.json', 'keep.txt'), 'utf-8')).toBe('the caller\'s own file');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a package into a new directory that goes stale after the first file leaves no directory behind', async () => {
+    const root = makeProjectTempDir('goodvibes-agent-artifact-package-fresh');
+    try {
+      const store = new ArtifactBrowserTestStore();
+      const record = store.add({ id: 'artifact-one', filename: 'one.txt', text: 'one' });
+      const destination = join(root, 'exports', 'pkg');
+      const artifactDir = join(destination, 'artifacts');
+      // The source changes once its first copy exists, so the next currency check refuses.
+      store.get = (id: string) => (id !== record.id ? null : readdirSyncOrEmpty(artifactDir).length > 0 ? { ...record, metadata: { changed: true } } : record);
+      const tool = admittedToolWorkspace(createAgentArtifactsTool(store, { projectRoot: root }), root);
+
+      const failed = await executeAdmitted(tool, {
+        mode: 'package', artifactIds: ['artifact-one'], destinationPath: 'exports/pkg',
+        confirm: true, explicitUserRequest: 'Export the package.',
+      });
+      expect(failed.success).toBe(false);
+      expect(existsSync(destination)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -234,13 +234,9 @@ describe('NotificationRouter: adaptive suppression', () => {
   describe('feature flag gate (adaptiveSuppression = false)', () => {
     test('burst events are NOT collapsed when adaptive suppression is off', () => {
       router = legacyRouter(60_000); // huge batch window so batch-policy also silent
-      // Fire 20 events, without adaptive suppression, only BatchPolicy applies
       const decisions = fireBurst(router, 'tools', 'info', 5, undefined, BASE_TS);
-      // First event is never batched; subsequent ones enter batch window
+      // The first event of a group is never batched.
       expect(decisions[0]!.reasonCode).toBe('allowed');
-      // Batch window is huge so all are "allowed" (first in group starts fresh)
-      // Actually batchPolicy fires on 2nd within window
-      // Let's verify the reasonCode is NOT burst_collapsed
       for (const d of decisions) {
         expect(d.reasonCode).not.toBe('burst_collapsed');
       }
@@ -298,16 +294,16 @@ describe('NotificationRouter: adaptive suppression', () => {
       }
     });
 
-    test('milestone-tagged events always surface regardless of burst', () => {
+    test('milestone-tagged events are exempt from burst collapsing', () => {
       router = adaptiveRouter();
       const decisions = fireBurst(router, 'tools', 'info', 20, 'milestone', BASE_TS);
+      expect(decisions[0]!.reasonCode).toBe('allowed');
       for (const d of decisions) {
-        // milestone tag bypasses mode-context suppression; burst key may still activate
-        // (BurstPolicy uses domain:level regardless of tag, so burst can still trigger)
-        // Milestones are exempt from mode-context but NOT from burst detection
-        // (burst detection is tag-agnostic to keep implementation simple)
-        expect(['allowed', 'burst_collapsed', 'batch_window_collapsed']).toContain(d.reasonCode);
+        expect(d.reasonCode).not.toBe('burst_collapsed');
       }
+      // The same burst without the tag does collapse, so the exemption is the tag's doing.
+      const untagged = fireBurst(adaptiveRouter(), 'tools', 'info', 20, undefined, BASE_TS);
+      expect(untagged[3]!.reasonCode).toBe('burst_collapsed');
     });
 
     test('burst groups across different domains are independent', () => {

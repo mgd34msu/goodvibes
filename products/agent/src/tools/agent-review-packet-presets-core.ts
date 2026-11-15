@@ -100,12 +100,21 @@ export interface ReviewPacketFreshnessSuperseded {
   readonly reason: string;
 }
 
+export interface ReviewPacketFreshnessDependent {
+  readonly role: ReviewPacketArtifactRole;
+  readonly label: string;
+  readonly id: string;
+  readonly reason: string;
+}
+
 export interface ReviewPacketFreshnessAudit {
   readonly available: boolean;
   readonly scannedArtifacts: number;
   readonly status: 'current' | 'needs-review' | 'unchecked';
   readonly missing: readonly ReviewPacketFreshnessMissing[];
   readonly superseded: readonly ReviewPacketFreshnessSuperseded[];
+  /** References that were not replaced but describe an artifact that was (a judgment of the old comparison). */
+  readonly dependentOnReplaced: readonly ReviewPacketFreshnessDependent[];
   readonly recommendedPacket: ReviewPacketPresetPacket;
 }
 
@@ -149,7 +158,10 @@ export function readStringList(value: unknown): readonly string[] {
     if (!entry || seen.has(entry)) continue;
     seen.add(entry);
     result.push(entry);
-    if (result.length >= MAX_RELATED_ARTIFACTS) break;
+  }
+  // Cutting the list would drop evidence without a word, so an over-long one is refused.
+  if (result.length > MAX_RELATED_ARTIFACTS) {
+    throw new Error(`relatedArtifactIds accepts at most ${MAX_RELATED_ARTIFACTS} distinct ids; ${result.length} were given. Nothing was saved. Save the packet with the ${MAX_RELATED_ARTIFACTS} that matter most, or split it into two presets.`);
   }
   return result;
 }
@@ -352,8 +364,19 @@ export function artifactPurpose(artifact: ArtifactDescriptor): string {
   return readMetadataString(artifact.metadata, 'purpose');
 }
 
+/** Blind-comparison artifacts saved before `purpose` was recorded are recognised by their filename prefix, as the compare tool does. */
+const LEGACY_FILENAME_PREFIX: Readonly<Record<string, string>> = {
+  [PURPOSE_MODEL_COMPARE]: 'blind-model-comparison-cmp_',
+  [PURPOSE_MODEL_COMPARE_JUDGMENT]: 'blind-model-comparison-judgment-',
+  [PURPOSE_MODEL_COMPARE_HANDOFF]: 'blind-model-comparison-handoff-',
+  [PURPOSE_MODEL_COMPARE_ROUTE_DECISION]: 'blind-model-comparison-route-decision-',
+};
+
 export function hasPurpose(artifact: ArtifactDescriptor, purpose: string): boolean {
-  return artifactPurpose(artifact) === purpose;
+  const recorded = artifactPurpose(artifact);
+  if (recorded) return recorded === purpose;
+  const legacyPrefix = LEGACY_FILENAME_PREFIX[purpose];
+  return legacyPrefix !== undefined && (artifact.filename ?? '').startsWith(legacyPrefix);
 }
 
 export function isRevealedJudgmentArtifact(artifact: ArtifactDescriptor): boolean {
@@ -597,6 +620,46 @@ export function applyFreshnessReplacements(
   };
 }
 
+/**
+ * Each role is replaced on its own, so a newer comparison can be paired with the old judgment, handoff or
+ * archive that are about the previous one. Those stay in the packet but are reported, never counted as repaired.
+ */
+function dependentsOfReplaced(
+  packet: ReviewPacketPresetPacket,
+  store: AgentReviewPacketPresetArtifactStore | undefined,
+  index: ReadonlyMap<string, ArtifactDescriptor>,
+  roleReplacements: ReadonlyMap<ReviewPacketArtifactRole, string>,
+): readonly ReviewPacketFreshnessDependent[] {
+  const found: ReviewPacketFreshnessDependent[] = [];
+  const comparisonReplaced = roleReplacements.has('comparison');
+  const judgmentReplaced = roleReplacements.has('judgment') || roleReplacements.has('revealedJudgment');
+  const oldComparison = artifactFromIndex(store, index, packet.comparisonArtifactId);
+  const ownComparisonId = oldComparison ? readMetadataString(oldComparison.metadata, 'comparisonId') : '';
+  const oldComparisonId = ownComparisonId || packetComparisonId(packet, store, index);
+  const oldJudgmentIds = new Set([packet.judgmentArtifactId, packet.revealedJudgmentArtifactId].filter((id): id is string => Boolean(id)));
+  const check = (role: ReviewPacketArtifactRole, label: string, id: string | undefined): void => {
+    if (!id || roleReplacements.has(role)) return;
+    const artifact = artifactFromIndex(store, index, id);
+    if (!artifact) return;
+    const describes = readMetadataString(artifact.metadata, 'comparisonId');
+    if (comparisonReplaced && oldComparisonId && describes === oldComparisonId) {
+      found.push({ role, label, id, reason: `describes the replaced comparison ${oldComparisonId}` });
+    } else if (!comparisonReplaced && ownComparisonId && describes && describes !== ownComparisonId) {
+      // A packet already refreshed (or assembled by hand) can still pair a comparison with another one's judgment.
+      found.push({ role, label, id, reason: `describes comparison ${describes}, not the packet's ${ownComparisonId}` });
+    } else if (judgmentReplaced && role !== 'judgment' && role !== 'revealedJudgment'
+      && oldJudgmentIds.has(readMetadataString(artifact.metadata, 'judgmentArtifactId'))) {
+      found.push({ role, label, id, reason: 'describes the replaced judgment' });
+    }
+  };
+  check('judgment', 'judgment', packet.judgmentArtifactId);
+  check('revealedJudgment', 'revealed judgment', packet.revealedJudgmentArtifactId);
+  check('routeDecision', 'route decision', packet.routeDecisionArtifactId);
+  check('handoff', 'reviewer handoff', packet.handoffArtifactId);
+  check('handoffArchive', 'handoff archive', packet.handoffArchiveArtifactId);
+  return found;
+}
+
 export function auditPresetFreshness(input: {
   readonly packet: ReviewPacketPresetPacket;
   readonly descriptor: ArtifactDescriptor;
@@ -610,6 +673,7 @@ export function auditPresetFreshness(input: {
       status: 'unchecked',
       missing: [],
       superseded: [],
+      dependentOnReplaced: [],
       recommendedPacket: input.packet,
     };
   }
@@ -664,12 +728,14 @@ export function auditPresetFreshness(input: {
     }
   }
 
+  const dependentOnReplaced = dependentsOfReplaced(input.packet, input.store, index, roleReplacements);
   return {
     available: true,
     scannedArtifacts: allArtifacts.length,
-    status: missing.length > 0 || superseded.length > 0 ? 'needs-review' : 'current',
+    status: missing.length > 0 || superseded.length > 0 || dependentOnReplaced.length > 0 ? 'needs-review' : 'current',
     missing,
     superseded,
+    dependentOnReplaced,
     recommendedPacket: applyFreshnessReplacements(input.packet, replacements, roleReplacements),
   };
 }

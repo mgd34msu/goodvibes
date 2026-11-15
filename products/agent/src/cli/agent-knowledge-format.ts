@@ -46,6 +46,7 @@ export function formatAgentKnowledgeFailureKind(kind: string): string {
   if (kind === 'connected_host_incompatible') return 'connected host incompatible';
   if (kind === 'connected_host_route_unavailable') return 'connected host route unavailable';
   if (kind === 'connected_host_error') return 'connected host error';
+  if (kind === 'not_found') return 'not found';
   if (kind === 'scope_contamination') return 'scope contamination';
   return kind.replace(/[_-]+/g, ' ');
 }
@@ -144,7 +145,10 @@ export function formatStatus(data: unknown): string {
 
 export function formatEntityList(data: unknown, kind: 'sources' | 'nodes' | 'issues', limit: number): string {
   const record = isRecord(data) ? data : {};
-  const values = readArray(record, kind);
+  // A request with `limit` makes the host answer the paginated envelope
+  // `{ items, nextCursor, hasMore }` for sources and nodes; issues keep `{ issues }`.
+  const keyed = readArray(record, kind);
+  const values = keyed.length > 0 || kind === 'issues' ? keyed : readArray(record, 'items');
   if (values.length === 0) {
     return [
       `Agent Knowledge ${kind}`,
@@ -165,11 +169,13 @@ export function formatEntityList(data: unknown, kind: 'sources' | 'nodes' | 'iss
   const reportedTotal = typeof record.total === 'number' && Number.isFinite(record.total)
     ? record.total
     : null;
-  const header = reportedTotal !== null && reportedTotal > shown.length
+  const header = record.hasMore === true
+    ? `Agent Knowledge ${kind} (${shown.length}, limit ${limit}, partial; the host has more records, raise --limit for the rest)`
+    : reportedTotal !== null && reportedTotal > shown.length
     ? `Agent Knowledge ${kind} (${shown.length} of ${reportedTotal}, limit ${limit}, partial; raise --limit for the rest)`
     : shown.length < values.length
       ? `Agent Knowledge ${kind} (${shown.length} of ${values.length} received, limit ${limit}, partial; raise --limit for the rest)`
-      : shown.length === limit
+      : shown.length === limit && record.hasMore !== false
         ? `Agent Knowledge ${kind} (${shown.length}, limit ${limit}, page is full, so more records may exist; raise --limit to check)`
         : `Agent Knowledge ${kind} (${shown.length}, limit ${limit})`;
   return [
@@ -222,16 +228,23 @@ export function formatItem(data: unknown, id: string): string {
 
 export function formatMap(data: unknown): string {
   const record = isRecord(data) ? data : {};
-  const sources = readArray(record, 'sources');
-  const nodes = readArray(record, 'nodes');
+  // The map service returns one `nodes` array that holds source, node and issue
+  // entries, each tagged with `recordKind`.
+  const entries = readArray(record, 'nodes');
+  const countKind = (kind: string): number => entries.filter((entry) => isRecord(entry) && entry.recordKind === kind).length;
   const edges = readArray(record, 'edges');
-  const issues = readArray(record, 'issues');
+  const totalNodes = readNumber(record, 'totalNodeCount');
+  const totalEdges = readNumber(record, 'totalEdgeCount');
+  const of = (shown: number, total: number | null | undefined): string => (
+    total !== null && total !== undefined && total > shown ? `${shown} of ${total} (partial; raise --limit for the rest)` : String(shown)
+  );
   return [
     'Agent Knowledge map',
-    `  sources: ${sources.length}`,
-    `  nodes: ${nodes.length}`,
-    `  edges: ${edges.length}`,
-    `  issues: ${issues.length}`,
+    `  entries: ${of(entries.length, totalNodes)}`,
+    `  sources: ${countKind('source')}`,
+    `  nodes: ${countKind('node')}`,
+    `  issues: ${countKind('issue')}`,
+    `  edges: ${of(edges.length, totalEdges)}`,
     '  route /api/goodvibes-agent/knowledge/map',
   ].join('\n');
 }
@@ -377,11 +390,26 @@ export function formatBatchIngest(data: unknown, label: string): string {
   ].join('\n');
 }
 
+/** One line per source the host could not recompile during a reindex. */
+export function reindexFailures(record: JsonRecord): string[] {
+  return readArray(record, 'recompileFailures').map((entry) => {
+    if (!isRecord(entry)) return cleanInline(entry);
+    const sourceId = readString(entry, 'sourceId') ?? '(unknown source)';
+    const error = readString(entry, 'error');
+    return error ? `${sourceId}: ${cleanInline(error)}` : sourceId;
+  });
+}
+
 export function formatReindex(data: unknown): string {
   const record = isRecord(data) ? data : {};
   const status = isRecord(record.status) ? record.status : {};
+  const failures = reindexFailures(record);
   return [
-    'Agent Knowledge reindex complete',
+    failures.length > 0
+      ? `Agent Knowledge reindex finished with ${failures.length} source(s) not recompiled`
+      : 'Agent Knowledge reindex complete',
+    ...failures.slice(0, 20).map((failure) => `  - ${failure}`),
+    ...(failures.length > 20 ? [`  ... ${failures.length - 20} more`] : []),
     `  sources ${readNumber(status, 'sourceCount') ?? 'unknown'}`,
     `  nodes ${readNumber(status, 'nodeCount') ?? 'unknown'}`,
     `  edges ${readNumber(status, 'edgeCount') ?? 'unknown'}`,

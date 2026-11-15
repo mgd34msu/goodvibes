@@ -14,13 +14,16 @@
  * configured threshold (`permissions.divergenceThreshold`): arithmetic
  * against an owner setting, kept as code.
  */
+import { readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
+import { isAbortError } from '../../contract/run-context.js';
 import type { DeepReadonly } from '../../config/manager.js';
 import type { GoodVibesConfig } from '../../config/schema-types.js';
 import {
+  buildDefaultPolicySimulationScenarios,
   buildPolicyPreflightReview,
   createPermissionSimulator,
-  createUnsignedBundle,
   lintPolicyConfig,
   runPolicySimulationScenarios,
 } from '../../runtime/permissions/index.js';
@@ -29,7 +32,8 @@ import type { PolicyBundlePayload } from '../../runtime/permissions/policy-loade
 import type { PolicyBundleVersion, PolicyRegistry } from '../../runtime/permissions/policy-registry.js';
 import type { PolicyRuntimeState } from '../../runtime/permissions/policy-runtime.js';
 import type { PolicyPreflightServer } from '../../runtime/permissions/preflight.js';
-import type { DivergenceStats, PermissionsConfig, PolicyRule } from '../../runtime/permissions/types.js';
+import type { SignedPolicyBundle } from '../../runtime/permissions/policy-signer.js';
+import type { DivergenceStats, PermissionsConfig } from '../../runtime/permissions/types.js';
 
 /** One MCP server's security record, as the MCP registry lists it. */
 export interface PolicyMcpServerSecurity {
@@ -87,29 +91,63 @@ function bundleSummary(
   return `${label}: ${version.bundle.bundleId} (${ts}${issuer}) [${version.rules.length} rules, ${version.state}]`;
 }
 
+const MAX_BUNDLE_FILE_BYTES = 1024 * 1024;
+
+/**
+ * Reads a bundle file exactly as exported: `{ bundleId, issuedAt, payload: { version, rules }, signature?, issuer? }`.
+ * Nothing is synthesised, so what is promoted later is what the file held, and a signed
+ * bundle keeps its signature for the registry to verify.
+ */
+function readBundleFile(path: string, workingDirectory: string): SignedPolicyBundle<PolicyBundlePayload> {
+  const resolved = resolve(workingDirectory, path);
+  let text: string;
+  try {
+    if (statSync(resolved).size > MAX_BUNDLE_FILE_BYTES) throw new Error(`is larger than ${MAX_BUNDLE_FILE_BYTES} bytes`);
+    text = readFileSync(resolved, 'utf-8');
+  } catch (error) {
+    throw new Error(`Could not read ${resolved}: ${summarizeError(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${resolved} is not valid JSON.`);
+  }
+  const bundle = isPlainObject(parsed) ? parsed : null;
+  const payload = bundle !== null && isPlainObject(bundle['payload']) ? bundle['payload'] : null;
+  if (bundle === null || payload === null
+    || typeof bundle['bundleId'] !== 'string' || bundle['bundleId'].length === 0
+    || typeof bundle['issuedAt'] !== 'string'
+    || typeof payload['version'] !== 'number' || !Array.isArray(payload['rules'])
+    || (bundle['signature'] !== undefined && typeof bundle['signature'] !== 'string')
+    || (bundle['issuer'] !== undefined && typeof bundle['issuer'] !== 'string')) {
+    throw new Error(`${resolved} is not a policy bundle: expected { bundleId, issuedAt, payload: { version, rules: [...] } } with an optional signature and issuer.`);
+  }
+  const rules: unknown[] = payload['rules'];
+  const malformed = rules.findIndex((rule) => !isPlainObject(rule) || typeof rule['id'] !== 'string' || typeof rule['type'] !== 'string' || typeof rule['effect'] !== 'string');
+  if (malformed >= 0) throw new Error(`${resolved} is not a policy bundle: rule ${malformed + 1} needs a string id, type and effect.`);
+  return parsed as SignedPolicyBundle<PolicyBundlePayload>;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function handleLoad(args: string[], context: PolicyCommandContext): Promise<void> {
   const registry = getRegistry(context);
   const policyState = getPolicyState(context);
-  const bundleId = args[0] ?? `policy-candidate-${Date.now()}`;
-  const ruleCount = Math.max(0, parseInt(args[1] ?? '0', 10));
-  const rules: PolicyRule[] = [];
-  for (let i = 0; i < ruleCount; i++) {
-    rules.push({
-      type: 'prefix',
-      id: `${bundleId}-rule-${i}`,
-      description: `Demo rule ${i}`,
-      origin: 'user',
-      effect: 'allow',
-      toolPattern: '*',
-      commandPrefixes: [],
-    });
+  const file = args[0];
+  if (!file) {
+    context.print('[policy] Nothing was loaded: name the bundle file to load, `/policy load <bundle-file>`.');
+    return;
   }
-  const payload: PolicyBundlePayload = {
-    version: 1,
-    rules,
-    description: `Loaded via /policy load at ${new Date().toISOString()}`,
-  };
-  const bundle = createUnsignedBundle(bundleId, payload);
+  let bundle: SignedPolicyBundle<PolicyBundlePayload>;
+  try {
+    bundle = readBundleFile(file, context.workingDirectory());
+  } catch (error) {
+    context.print(`[policy] Load failed, the current and candidate bundles are unchanged: ${summarizeError(error)}`);
+    return;
+  }
   const result = registry.loadCandidate(bundle);
   if (!result.ok) {
     context.print(`[policy] Load failed: ${result.error ?? 'unknown error'}`);
@@ -131,11 +169,16 @@ async function handleSimulate(args: string[], context: PolicyCommandContext): Pr
   const candidate = registry.getCandidate();
   const current = registry.getCurrent();
   if (!candidate) {
-    context.print('[policy] No candidate bundle loaded. Run `/policy load <bundle-id>` first.');
+    context.print('[policy] No candidate bundle loaded. Run `/policy load <bundle-file>` first.');
     return;
   }
+  // Read the owner's threshold before the candidate leaves "loaded", so a
+  // failing config getter cannot strand it in "simulating".
+  // The divergence gate's threshold is the owner's setting, not a number fixed here.
+  const threshold = context.config().permissions.divergenceThreshold;
   if (!registry.markSimulating()) {
-    context.print(`[policy] Cannot start simulation: candidate is in "${candidate.state}" state. Only a freshly loaded ("loaded") candidate can be simulated.`);
+    const reason = registry.describeCandidateRefusal('simulating') ?? `Candidate is in "${candidate.state}" state`;
+    context.print(`[policy] Cannot start simulation: ${reason}.`);
     return;
   }
   const currentConfig: PermissionsConfig = {
@@ -156,20 +199,45 @@ async function handleSimulate(args: string[], context: PolicyCommandContext): Pr
   };
   const modeArg = args[0];
   const simulationMode = modeArg === 'enforce' ? 'enforce' : modeArg === 'silent' ? 'simulation-only' : 'warn-on-divergence';
-  // The divergence gate's threshold is the owner's setting, not a number fixed here.
-  const threshold = context.config().permissions.divergenceThreshold;
-  const simulator = createPermissionSimulator(currentConfig, candidateConfig, simulationMode, { divergenceThreshold: threshold });
-  const dashboard = new DivergenceDashboard(simulator, simulationMode, { threshold });
+  const scenarios = buildDefaultPolicySimulationScenarios();
+  const simulator = createPermissionSimulator(currentConfig, candidateConfig, simulationMode, {
+    divergenceThreshold: threshold,
+    maxDivergenceRecords: context.config().permissions.maxDivergenceRecords,
+  });
+  // The scenario run is the whole evidence set, so the gate judges it rather
+  // than reporting "insufficient data" (which passes by default) for a run
+  // smaller than the live-traffic minimum.
+  const dashboard = new DivergenceDashboard(simulator, simulationMode, { threshold, minEvaluationsForGate: scenarios.length });
   policyState.setDashboard(dashboard);
   context.print(`[policy] Simulation started in "${simulationMode}" mode. Evaluations will be tracked against candidate bundle "${candidate.bundle.bundleId}".`);
   context.print('[policy] Use `/policy diff` to compare rules. When ready, run `/policy promote` to enforce (requires gate passing).');
-  const report = simulator.getDivergenceReport();
-  const gateResult = dashboard.checkEnforceGate();
-  const scenarioSummary = await runPolicySimulationScenarios(simulator);
-  if (registry.getCandidate() !== candidateForSim || registry.getCurrent() !== current || policyState.getDashboard() !== dashboard) {
-    context.print('[policy] Simulation finished after the active policy changed; its results were not applied.');
+  const stillCurrent = (): boolean => registry.getCandidate() === candidateForSim && registry.getCurrent() === current && policyState.getDashboard() === dashboard;
+  let scenarioSummary: Awaited<ReturnType<typeof runPolicySimulationScenarios>>;
+  try {
+    scenarioSummary = await runPolicySimulationScenarios(simulator, scenarios);
+  } catch (error) {
+    if (registry.getCandidate() === candidateForSim) {
+      registry.abandonSimulation();
+      policyState.notify();
+    }
+    // A stopped run is the caller's cancellation, not a simulation failure.
+    if (isAbortError(error)) throw error;
+    context.print(`[policy] Simulation failed: ${summarizeError(error)}. The candidate is back in "loaded" state; run \`/policy simulate\` again.`);
     return;
   }
+  if (!stillCurrent()) {
+    if (registry.getCandidate() === candidateForSim) {
+      registry.abandonSimulation();
+      policyState.notify();
+      context.print('[policy] Simulation finished after the active policy changed; its results were not applied. Run `/policy simulate` again.');
+    } else {
+      context.print('[policy] Simulation finished after the active policy changed; its results were not applied.');
+    }
+    return;
+  }
+  // Read the evidence after the run, so the gate judges what was simulated.
+  const report = simulator.getDivergenceReport();
+  const gateResult = dashboard.checkEnforceGate();
   registry.attachSimulationReport(report, gateResult);
   policyState.recordSimulationSummary(scenarioSummary);
   const candidate2 = registry.getCandidate();
@@ -334,6 +402,10 @@ async function handleStatus(_args: string[], context: PolicyCommandContext): Pro
   const current = registry.getCurrent();
   const candidate = registry.getCandidate();
   const history = registry.getHistory();
+  const bundleFailure = policyState.getConfiguredBundleFailure();
+  if (bundleFailure !== null) {
+    context.print(`[policy] The configured policy bundle did not load: ${bundleFailure}. Fix the bundle file and restart or run \`/policy load\`; until then it is not enforced.`);
+  }
   if (!current && !candidate) {
     context.print('[policy] No policy bundles loaded. Use `/policy load` to begin.');
     return;
@@ -354,7 +426,7 @@ export function renderPolicyUsage(): string {
   return [
     'Usage: /policy <subcommand>',
     '  /policy                        — open the policy/governance modal',
-    '  load <bundle-id> [rule-count]  — Load a candidate bundle',
+    '  load <bundle-file>            — Load a candidate bundle from a JSON file',
     '  simulate [mode]               — Run simulation (silent|warn|enforce)',
     '  diff                          — Show rule diff (current vs candidate)',
     '  lint                          — Lint active and candidate bundles',

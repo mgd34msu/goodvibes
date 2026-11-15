@@ -58,13 +58,25 @@ export function createOnboardingApplyPipeline<
         return { ok: false, applied, skipped, errors };
       }
     }
-    const okay = await verifyOnboardingWithRollback(
-      () => ports.verify(deps, { ...request, operations }),
-      () => ports.rollback(rollbacks),
-      applied,
-      errors,
-      ports.verificationFailureKind,
-    );
+    let okay: boolean;
+    try {
+      okay = await verifyOnboardingWithRollback(
+        () => ports.verify(deps, { ...request, operations }),
+        () => ports.rollback(rollbacks),
+        applied,
+        errors,
+        ports.verificationFailureKind,
+      );
+    } catch (error) {
+      // A verifier that throws (locked keychain, unreadable store) proves nothing was confirmed, so the writes are undone like a failed readback.
+      const failures = await ports.rollback(rollbacks);
+      applied.length = 0;
+      errors.push({
+        kind: ports.verificationFailureKind('config:verify'),
+        message: [`verify: ${ports.describeError(error)}`, ...failures.map((failure) => 'rollback: ' + failure)].join('; '),
+      });
+      return { ok: false, applied, skipped, errors };
+    }
     return { ok: okay && errors.length === 0, applied, skipped, errors };
   }
   return { applyOnboardingRequest };

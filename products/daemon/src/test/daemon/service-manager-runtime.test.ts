@@ -2,6 +2,7 @@
  * Reconstructed after executor replacement; see the bounded source-proof audit.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -103,28 +104,44 @@ describe('canonical service lifecycle and product command composition', () => {
     expect(readFileSync(otherCanonical, 'utf8')).toBe('Unrelated selected-tree definition');
   });
 
-  test('real manual child install/start/status/restart/stop preserves pid and log path', () => {
+  test('manual install/start/status/restart/stop replaces the process on restart and keeps the log path', () => {
     const value = config('manual');
     const logPath = join(root, '.goodvibes', surfaceRoot, 'service', 'manual.log');
     value.set('service.logPath', logPath);
+    // In-memory process table: no child is started, so nothing depends on how fast one starts or exits.
+    const alive = new Set<number>();
+    let nextPid = 7000;
     const service = new PlatformServiceManager(value, {
       workingDirectory: root, homeDirectory: root, surfaceRoot,
       definitionOverride: { name: 'test-daemon', description: 'test daemon', workingDirectory: root,
         command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], env: {}, restartOnFailure: false },
+      processControl: {
+        spawn: () => {
+          const pid = nextPid++;
+          alive.add(pid);
+          return Object.assign(new ChildProcess(), { pid });
+        },
+        isRunning: (pid) => alive.has(pid),
+        startTime: (pid) => `start-${pid}`,
+        signal: (pid) => { alive.delete(pid); },
+        pause: () => {},
+      },
     });
     try {
       expect(service.install().logPath).toBe(logPath);
       const started = service.start();
       expect(started.running).toBe(true);
-      expect(typeof started.pid).toBe('number');
+      expect(started.pid).toBe(7000);
       expect(started.logPath).toBe(logPath);
       const restarted = service.restart();
       expect(restarted.running).toBe(true);
-      expect(typeof restarted.pid).toBe('number');
-      expect(restarted.pid).not.toBe(started.pid);
-      expect(service.status().pid).toBe(restarted.pid);
+      expect(restarted.pid).toBe(7001);
+      expect(alive.has(7000)).toBe(false);
+      expect(restarted.logPath).toBe(logPath);
+      expect(service.status().pid).toBe(7001);
       expect(service.status().running).toBe(true);
       expect(service.stop().running).toBe(false);
+      expect(alive.has(7001)).toBe(false);
     } finally { service.stop(); service.uninstall(); }
   });
 
@@ -145,6 +162,7 @@ describe('canonical service lifecycle and product command composition', () => {
     const statusQueries = calls.filter(c => c.args.includes('is-active'));
     for (const call of calls.filter(c => c.command === 'loginctl')) expect(['show-user', 'enable-linger']).toContain(call.args[0]!);
     expect(calls.filter(c => !c.args.includes('is-active') && !c.args.includes('--version') && c.command !== 'loginctl')).toEqual([
+      { command: 'systemctl', args: ['--user', 'daemon-reload'] },
       { command: 'systemctl', args: ['--user', 'enable', '--now', 'gv-ops.service'] },
       { command: 'systemctl', args: ['--user', 'stop', 'gv-ops.service'] },
       { command: 'systemctl', args: ['--user', 'restart', 'gv-ops.service'] },
@@ -170,8 +188,11 @@ describe('canonical service lifecycle and product command composition', () => {
     const windows = manager(config('windows', 'GoodVibesTask'), windowsCalls);
     expect(windows.install().contents).toContain('schtasks /Create /SC ONLOGON /TN "GoodVibesTask"');
     windows.start(); windows.stop(); windows.restart();
-    expect(windowsCalls).toEqual([
+    expect(windowsCalls.filter(c => c.args[0] !== '/Query')).toEqual([
+      { command: 'schtasks', args: ['/Create', '/SC', 'ONLOGON', '/TN', 'GoodVibesTask', '/TR', expect.any(String), '/F'] },
       { command: 'schtasks', args: ['/Run', '/TN', 'GoodVibesTask'] },
+      { command: 'schtasks', args: ['/End', '/TN', 'GoodVibesTask'] },
+      // A restart ends the running task before starting it again.
       { command: 'schtasks', args: ['/End', '/TN', 'GoodVibesTask'] },
       { command: 'schtasks', args: ['/Run', '/TN', 'GoodVibesTask'] },
     ]);

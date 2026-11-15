@@ -33,6 +33,7 @@ export interface AgentKnowledgeFailure {
     | 'connected_host_incompatible'
     | 'connected_host_route_unavailable'
     | 'connected_host_error'
+    | 'not_found'
     | 'scope_contamination';
   readonly error: string;
   readonly baseUrl: string;
@@ -71,11 +72,11 @@ export function resolveConnectedHostConnection(runtime: AgentKnowledgeConnection
 }
 
 // Only this transport records HTTP status; arbitrary error prose is not protocol evidence.
-const knowledgeHttpStatuses = new WeakMap<Error, { readonly status: number; readonly assertCurrent?: () => void }>();
+const knowledgeHttpStatuses = new WeakMap<Error, { readonly status: number; readonly body?: string; readonly assertCurrent?: () => void }>();
 const knowledgeTransportFailures = new WeakMap<Error, () => void>();
-function knowledgeHttpError(response: Response, assertCurrent?: () => void): Error {
+function knowledgeHttpError(response: Response, assertCurrent?: () => void, body?: string): Error {
   const error = new Error(`Agent Knowledge HTTP request failed (${response.status}).`);
-  knowledgeHttpStatuses.set(error, { status: response.status, assertCurrent });
+  knowledgeHttpStatuses.set(error, { status: response.status, body, assertCurrent });
   return error;
 }
 
@@ -153,6 +154,11 @@ export async function classifyKnowledgeError(error: unknown, connection: AgentKn
     && typeof nativeStatus.value === 'number' && Number.isInteger(nativeStatus.value) ? nativeStatus.value : undefined);
   if (status === 401 || status === 403) {
     return { ok: false, kind: 'auth_required', error: message, baseUrl: request.baseUrl, route };
+  }
+  // The host answers 404 `Unknown knowledge item|connector` for an id it does not
+  // hold; a missing route has no such body, so the two stay distinguishable.
+  if (status === 404 && receipt?.body !== undefined && /unknown knowledge (item|connector)/i.test(receipt.body)) {
+    return { ok: false, kind: 'not_found', error: 'No Agent Knowledge record with that id exists on the connected host.', baseUrl: request.baseUrl, route };
   }
   if (status === 404) {
     const connectedHost = await fetchConnectedHostStatus(connection, options);
@@ -412,7 +418,7 @@ export async function getAgentKnowledgeJson<TData>(
   if (text.trim()) {
     try { parsed = JSON.parse(text); } catch { parsed = text; }
   }
-  if (!response.ok) throw knowledgeHttpError(response, assertCurrent);
+  if (!response.ok) throw knowledgeHttpError(response, assertCurrent, text);
   const data = normalizeAgentKnowledgeData(parsed as TData);
   assertCurrent(); return data;
 }
@@ -448,6 +454,11 @@ export async function runKnowledgeCall<TData>(
   runtime: AgentKnowledgeConnectionRuntime,
   method: ConnectedHostCallMethod,
   call: (connection: AgentKnowledgeConnection) => Promise<TData>,
+  // The contamination scan reads the whole returned value. It belongs on
+  // Agent Knowledge reads only: a call that echoes the user's own text (a
+  // delegated task) must not be failed by a word in that text after the host
+  // already accepted the work.
+  options: { readonly scanScope?: boolean } = {},
 ): Promise<AgentKnowledgeResult<TData>> {
   const connection = resolveConnectedHostConnection(runtime);
   if (!connection.token) {
@@ -461,6 +472,7 @@ export async function runKnowledgeCall<TData>(
   }
   try {
     const data = await call(connection);
+    if (options.scanScope === false) return { ok: true, kind: method.kind, route: method.route, data };
     return validateAgentKnowledgeData(data, connection, method);
   } catch (error) {
     return classifyKnowledgeError(error, connection, method.route);

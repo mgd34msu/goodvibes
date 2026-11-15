@@ -18,6 +18,13 @@
  * `additionalProperties: false`): the goal is to reject provable type/shape
  * mismatches, not to tighten every loose handler that historically tolerated
  * extra fields. It reports the first violation it finds.
+ *
+ * Keywords enforced: type (a single name or a list), enum, const, the string,
+ * number, array and object bounds, required, dependentRequired, and the
+ * combinators anyOf, oneOf, allOf and not. Keywords NOT enforced here, though
+ * the generated client validates them: `$ref`, `format`, `additionalProperties`
+ * and `patternProperties`. A schema that relies on one of those for a safety
+ * rule must have its handler check it too.
  */
 
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
@@ -52,6 +59,8 @@ export function classifyInputSchema(schema: Record<string, unknown> | undefined)
   if (schema === undefined) return 'untyped';
   if (isGenericObjectSchema(schema)) return 'generic';
   if (schema.type === 'object' && Object.hasOwn(schema, 'properties')) return 'validated';
+  // A root that is only a choice between shapes (a oneOf or allOf over objects) is checked too.
+  if (schema.type === undefined && (Array.isArray(schema.oneOf) || Array.isArray(schema.allOf))) return 'validated';
   return 'untyped';
 }
 
@@ -61,6 +70,33 @@ function schemaLabel(path: string): string {
 
 function childPath(path: string, key: string): string {
   return path === '' ? key : `${path}.${key}`;
+}
+
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  try { return canonicalJson(a as EntryType) === canonicalJson(b as EntryType); }
+  catch { return a === b; }
+}
+
+/** `allOf` (every branch), `oneOf` (exactly one) and `not` (no match). */
+function validateCombinators(value: unknown, schema: Record<string, unknown>, path: string): string | null {
+  const branches = (key: 'allOf' | 'oneOf'): Record<string, unknown>[] =>
+    Array.isArray(schema[key]) ? (schema[key] as unknown[]).filter((branch): branch is Record<string, unknown> => !!branch && typeof branch === 'object' && !Array.isArray(branch)) : [];
+  for (const branch of branches('allOf')) {
+    const detail = validateValue(value, branch, path);
+    if (detail) return detail;
+  }
+  const alternatives = branches('oneOf');
+  if (alternatives.length > 0) {
+    const matching = alternatives.filter((branch) => validateValue(value, branch, path) === null).length;
+    if (matching === 0) return `${schemaLabel(path)} did not match any of the allowed shapes`;
+    if (matching > 1) return `${schemaLabel(path)} matched more than one of the allowed shapes`;
+  }
+  const forbidden = schema.not;
+  if (forbidden && typeof forbidden === 'object' && !Array.isArray(forbidden)
+    && validateValue(value, forbidden as Record<string, unknown>, path) === null) {
+    return `${schemaLabel(path)} is not allowed to take this form`;
+  }
+  return null;
 }
 
 /**
@@ -96,8 +132,21 @@ function validateBase(value: unknown, schema: Record<string, unknown>, path: str
   if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
     return `${schemaLabel(path)} must be one of ${JSON.stringify(schema.enum)}`;
   }
+  if (Object.hasOwn(schema, 'const') && !sameJsonValue(value, schema.const)) {
+    return `${schemaLabel(path)} must be ${JSON.stringify(schema.const)}`;
+  }
+  const combinator = validateCombinators(value, schema, path);
+  if (combinator) return combinator;
 
   const type = schema.type;
+  if (Array.isArray(type)) {
+    const names = type.filter((name): name is string => typeof name === 'string');
+    const shape = Object.fromEntries(Object.entries(schema).filter(([key]) => !['oneOf', 'allOf', 'not', 'const', 'enum', 'anyOf'].includes(key)));
+    if (names.length > 0 && names.every((name) => validateBase(value, { ...shape, type: name }, path) !== null)) {
+      return `${schemaLabel(path)} must be of type ${names.join(' or ')}`;
+    }
+    return null;
+  }
   if (typeof type !== 'string') return null; // no type constraint → accept
 
   switch (type) {

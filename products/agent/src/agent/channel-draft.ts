@@ -32,7 +32,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { channelDraftWireReference, createChannelDraftWireReference, historicalChannelDraftWireReference, isNativeDraftWireReference, matchesHistoricalDraftWireReference } from '@goodvibes-jev/engine/platform/platform/channels';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -41,6 +41,9 @@ import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 
 export const CHANNEL_DRAFTS_LIST_METHOD = 'channels.drafts.list';
+export const CHANNEL_DRAFTS_GET_METHOD = 'channels.drafts.get';
+/** The most drafts one `channels.drafts.list` call accepts; a larger limit is refused by the daemon. */
+const DAEMON_DRAFT_LIST_MAX = 200;
 export const CHANNEL_DRAFTS_SAVE_METHOD = 'channels.drafts.save';
 export const CHANNEL_DRAFTS_DELETE_METHOD = 'channels.drafts.delete';
 
@@ -93,8 +96,14 @@ export interface ChannelDraft {
   readonly channel?: string;
   /** Named route id. */
   readonly route?: string;
-  /** Webhook URL (stored redacted-safe, callers must redact before persisting). */
+  /**
+   * A webhook URL written before webhook URLs moved to the secret store. It is
+   * read so such a draft can still be sent, and moves into the secret store the
+   * next time the draft is saved or sent with one available. Never written for a new draft.
+   */
   readonly webhook?: string;
+  /** Secret-store key holding this draft's webhook URL, a bearer secret that is never written to the draft file. */
+  readonly webhookSecretKey?: string;
   /** Link address. */
   readonly link?: string;
   /** Optional tags for grouping drafts. */
@@ -109,6 +118,20 @@ export interface ChannelDraft {
   readonly syncError?: string;
   /** Where this view of the draft came from. Never persisted. */
   readonly origin?: 'local' | 'daemon';
+  /** The daemon never returns a draft's text, so a row only it holds has none to show. Never persisted. */
+  readonly bodyUnavailable?: true;
+}
+
+/** The secret store a draft's webhook URL lives in; the shell's SecretsManager satisfies it. */
+export interface ChannelDraftWebhookSecrets {
+  readonly get: (key: string) => Promise<string | null>;
+  readonly set: (key: string, value: string) => Promise<void>;
+  readonly delete?: (key: string) => Promise<void>;
+}
+
+/** Store options for the writers that may touch a draft's webhook secret. */
+export interface ChannelDraftStoreOptions extends ChannelStoreEffectOptions {
+  readonly webhookSecrets?: ChannelDraftWebhookSecrets;
 }
 
 export interface ChannelDraftSnapshot {
@@ -211,6 +234,7 @@ function parseDraft(value: unknown): ChannelDraft | null {
     ...( readOptString(value.channel) ? { channel: readOptString(value.channel) } : {}),
     ...( readOptString(value.route) ? { route: readOptString(value.route) } : {}),
     ...( readOptString(value.webhook) ? { webhook: readOptString(value.webhook) } : {}),
+    ...( readOptString(value.webhookSecretKey) ? { webhookSecretKey: readOptString(value.webhookSecretKey) } : {}),
     ...( readOptString(value.link) ? { link: readOptString(value.link) } : {}),
     ...(parseTags(value.tags) ? { tags: parseTags(value.tags) } : {}),
     ...( readOptString(value.sentResponseId) ? { sentResponseId: readOptString(value.sentResponseId) } : {}),
@@ -225,7 +249,7 @@ function parseDraft(value: unknown): ChannelDraft | null {
 
 /** Strip the fields that describe a VIEW rather than the draft itself. */
 function persistableDraft(draft: ChannelDraft): ChannelDraft {
-  const { origin: _origin, ...rest } = draft;
+  const { origin: _origin, bodyUnavailable: _bodyUnavailable, ...rest } = draft;
   return rest;
 }
 
@@ -301,6 +325,14 @@ const NOT_ATTEMPTED: ChannelDraftSyncOutcome = {
 };
 
 /**
+ * The daemon refuses a webhook URL (it is a bearer secret); it takes
+ * `[redacted]` for it. The real value lives only in the secret store, where
+ * delivery reads it. A `sent` or `failed` draft is offered with its outcome so
+ * the other surfaces learn it.
+ */
+const REDACTED_WEBHOOK = '[redacted]';
+
+/**
  * Offer a draft to the daemon's store, so other surfaces can see it.
  *
  * Manual callers use the native confirmation protocol. The admitted model
@@ -312,12 +344,16 @@ async function offerDraftToDaemon(
   options: ChannelStoreEffectOptions & { readonly historicalId?: string } = {},
 ): Promise<ChannelDraftSyncOutcome> {
   if (!invoke) return NOT_ATTEMPTED;
-  const { daemonSyncState: _state, syncError: _error, origin: _origin, ...wire } = draft;
+  const { daemonSyncState: _state, syncError: _error, origin: _origin, bodyUnavailable: _body, webhookSecretKey, ...wire } = draft;
+  const wireBody = {
+    ...wire,
+    ...(wire.webhook === undefined && webhookSecretKey === undefined ? {} : { webhook: REDACTED_WEBHOOK }),
+  };
   const offeredId = options.historicalId === undefined
     ? draft.wireReference ?? draft.id : historicalChannelDraftWireReference(options.historicalId);
   const result = await invoke(
     CHANNEL_DRAFTS_SAVE_METHOD,
-    { ...wire, id: offeredId, confirm: true },
+    { ...wireBody, id: offeredId, confirm: true },
     { signal: options.signal, assertCurrent: options.assertCurrent, explicitUserRequest: options.explicitUserRequest ?? true },
   );
   if (!result.ok) return { synced: false, kind: result.kind, error: result.error };
@@ -327,6 +363,45 @@ async function offerDraftToDaemon(
     : options.historicalId === undefined ? draft.wireReference : offeredId;
   const wireReference = canonical === undefined ? undefined : channelDraftWireReference(draft.id, canonical);
   return { synced: true, ...(wireReference === undefined ? {} : { wireReference }) };
+}
+
+function keepOrSet(input: string | undefined, existing: string | undefined): string | undefined {
+  return input === undefined ? existing : input.trim() || undefined;
+}
+
+/**
+ * Where a draft's webhook URL lives after a save. A URL is a bearer secret, so
+ * a new one goes to the secret store and the draft file holds only the key; a
+ * shell with no secret store refuses it rather than write the URL to the file.
+ * A URL an older version wrote into the file is kept readable, and moves to the
+ * secret store the first time a store is available.
+ */
+async function resolveDraftWebhook(
+  id: string,
+  supplied: string | undefined,
+  existing: ChannelDraft | null,
+  secrets: ChannelDraftWebhookSecrets | undefined,
+): Promise<{ readonly secretKey?: string; readonly legacy?: string; /** A stored secret to delete once the draft no longer points at it. */ readonly discardKey?: string }> {
+  const given = supplied?.trim();
+  if (supplied !== undefined && !given) {
+    // An explicit empty value removes the webhook.
+    // Deleted by the caller after the draft is written: until then the stored
+    // draft still points at it, and an abort must not leave it dangling.
+    return existing?.webhookSecretKey ? { discardKey: existing.webhookSecretKey } : {};
+  }
+  const value = given || (secrets ? existing?.webhook : undefined);
+  if (!value) {
+    return {
+      ...(existing?.webhookSecretKey ? { secretKey: existing.webhookSecretKey } : {}),
+      ...(existing?.webhook ? { legacy: existing.webhook } : {}),
+    };
+  }
+  if (!secrets) {
+    throw new Error('A webhook URL is a bearer secret and is not written to the draft file, and this shell has no secret store to hold it, so the draft was not saved. Save the draft with a channel or route target instead.');
+  }
+  const secretKey = existing?.webhookSecretKey ?? `GOODVIBES_CHANNEL_DRAFT_WEBHOOK_${id.replace(/[^a-zA-Z0-9]+/g, '_').toUpperCase()}`;
+  await secrets.set(secretKey, value);
+  return { secretKey };
 }
 
 function withDraftSyncOutcome(draft: ChannelDraft, outcome: ChannelDraftSyncOutcome): ChannelDraft {
@@ -361,7 +436,7 @@ export async function saveDraft(
     readonly tags?: readonly string[];
     readonly status?: ChannelDraftStatus;
   },
-  options: ChannelStoreEffectOptions = {},
+  options: ChannelDraftStoreOptions = {},
 ): Promise<ChannelDraftSaveResult> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const message = input.message.trim();
@@ -375,21 +450,45 @@ export async function saveDraft(
   const existingIndex = input.id ? matchingDraftIndex(snapshot.drafts, input.id) : -1;
   const existing = existingIndex >= 0 ? snapshot.drafts[existingIndex] : null;
 
+  // `sent` is final: saveDraft may set most statuses, but it must not undo one.
+  if (existing?.status === 'sent' && input.status !== undefined && input.status !== 'sent') {
+    const move = channelDraftLifecycle.check(existing.status, input.status);
+    if (!move.ok) throw new Error(`Draft ${existing.id}: ${move.reason}.`);
+  }
+
   const id = existing?.id ?? generateDraftId();
+  const status = input.status ?? existing?.status ?? 'draft';
+  // Delivery targets are exclusive: supplying one replaces whichever was stored,
+  // otherwise a retargeted draft would hold two and refuse to send.
+  const supplies = (value: string | undefined): boolean => Boolean(value?.trim());
+  const retargeting = supplies(input.channel) || supplies(input.route) || supplies(input.webhook) || supplies(input.link);
+  const targetInput = (value: string | undefined): string | undefined => (retargeting && !supplies(value) ? '' : value);
+  const webhook = await resolveDraftWebhook(id, targetInput(input.webhook), existing, options.webhookSecrets);
+  // A field the caller leaves out keeps its stored value, so re-saving only the
+  // text (as a retry hint or a model edit does) cannot strip a draft of its target.
+  // An empty string clears the field.
+  const title = keepOrSet(input.title, existing?.title);
+  const channel = keepOrSet(targetInput(input.channel), existing?.channel);
+  const route = keepOrSet(targetInput(input.route), existing?.route);
+  const link = keepOrSet(targetInput(input.link), existing?.link);
+  const tags = input.tags === undefined ? existing?.tags : input.tags.length > 0 ? input.tags : undefined;
   const drafted: ChannelDraft = {
     version: DRAFT_VERSION,
     id,
     wireReference: existing?.wireReference ?? createChannelDraftWireReference(id),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    status: input.status ?? existing?.status ?? 'draft',
+    status,
     message,
-    ...(input.title?.trim() ? { title: input.title.trim() } : {}),
-    ...(input.channel?.trim() ? { channel: input.channel.trim() } : {}),
-    ...(input.route?.trim() ? { route: input.route.trim() } : {}),
-    ...(input.webhook?.trim() ? { webhook: input.webhook.trim() } : {}),
-    ...(input.link?.trim() ? { link: input.link.trim() } : {}),
-    ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+    ...(title ? { title } : {}),
+    ...(channel ? { channel } : {}),
+    ...(route ? { route } : {}),
+    ...(webhook.legacy ? { webhook: webhook.legacy } : {}),
+    ...(webhook.secretKey ? { webhookSecretKey: webhook.secretKey } : {}),
+    ...(link ? { link } : {}),
+    ...(tags && tags.length > 0 ? { tags } : {}),
+    ...(status === 'sent' && existing?.sentResponseId ? { sentResponseId: existing.sentResponseId } : {}),
+    ...(status === 'failed' && existing?.sendError ? { sendError: existing.sendError } : {}),
   };
 
   const daemon = await offerDraftToDaemon(options.invoke, drafted, { ...options, assertCurrent,
@@ -397,16 +496,29 @@ export async function saveDraft(
   assertCurrent();
   const draft = withDraftSyncOutcome(drafted, daemon);
 
-  let updatedDrafts: readonly ChannelDraft[];
-  if (existingIndex >= 0) {
-    updatedDrafts = snapshot.drafts.map((d, i) => (i === existingIndex ? draft : d));
-  } else {
-    // Prepend new draft (most recent first)
-    updatedDrafts = [draft, ...snapshot.drafts];
+  // The daemon call above can take a while, and other writers use the file in
+  // the meantime (a draft marked sent, saved or deleted). Merge this one draft
+  // into the file as it is now rather than writing back the snapshot from before
+  // the await, which would undo their changes.
+  const stored = runStoreFileUpdateSync(path, () => {
+    const fresh = writableDraftSnapshot(shellPaths);
+    const freshIndex = fresh.drafts.findIndex((d) => d.id === id);
+    const current = freshIndex >= 0 ? fresh.drafts[freshIndex]! : null;
+    // A delivery recorded during the await is a fact; this save must not undo it.
+    const merged: ChannelDraft = current?.status === 'sent' && draft.status !== 'sent'
+      ? { ...draft, status: 'sent', ...(current.sentResponseId ? { sentResponseId: current.sentResponseId } : {}) }
+      : draft;
+    const updatedDrafts = freshIndex >= 0
+      ? fresh.drafts.map((d, i) => (i === freshIndex ? merged : d))
+      // Prepend new draft (most recent first)
+      : [merged, ...fresh.drafts];
+    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    return merged;
+  });
+  if (webhook.discardKey && webhook.discardKey !== stored.webhookSecretKey) {
+    try { await options.webhookSecrets?.delete?.(webhook.discardKey); } catch { /* the draft no longer references it; a leftover secret is harmless */ }
   }
-
-  writeDrafts(path, updatedDrafts, assertCurrent, options);
-  return { draft, path, daemon };
+  return { draft: stored, path, daemon };
 }
 
 /**
@@ -419,10 +531,10 @@ export async function saveDraft(
 export async function fetchDaemonDrafts(
   invoke: DaemonOperatorInvoke,
   options: { readonly status?: ChannelDraftStatus; readonly limit?: number } = {},
-): Promise<{ readonly drafts: readonly ChannelDraft[] } | { readonly error: string; readonly kind: DaemonInvokeFailureKind }> {
+): Promise<{ readonly drafts: readonly ChannelDraft[]; /** How many drafts the daemon holds for this filter, which can exceed `drafts`. */ readonly total: number } | { readonly error: string; readonly kind: DaemonInvokeFailureKind }> {
   const result = await invoke(CHANNEL_DRAFTS_LIST_METHOD, {
     ...(options.status ? { status: options.status } : {}),
-    ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
+    ...(typeof options.limit === 'number' ? { limit: Math.min(Math.max(1, Math.floor(options.limit)), DAEMON_DRAFT_LIST_MAX) } : {}),
   });
   if (!result.ok) return { error: result.error, kind: result.kind };
   if (!isRecord(result.body) || !Array.isArray(result.body.drafts)) {
@@ -432,16 +544,35 @@ export async function fetchDaemonDrafts(
     .map(parseDraft)
     .filter((d): d is ChannelDraft => d !== null)
     .map((d) => ({ ...d, daemonSyncState: 'synced' as const, origin: 'daemon' as const }));
-  return { drafts };
+  const reported = isRecord(result.body) ? result.body.total : undefined;
+  return { drafts, total: typeof reported === 'number' && Number.isFinite(reported) ? Math.max(reported, drafts.length) : drafts.length };
+}
+
+/**
+ * One draft the daemon holds, looked up by id or wire reference, whatever the
+ * size of its list. `null` means the daemon answered that it has no such draft.
+ */
+export async function fetchDaemonDraft(
+  invoke: DaemonOperatorInvoke,
+  draftId: string,
+): Promise<{ readonly draft: ChannelDraft | null } | { readonly error: string; readonly kind: DaemonInvokeFailureKind }> {
+  const result = await invoke(CHANNEL_DRAFTS_GET_METHOD, { draftId });
+  if (!result.ok) return { error: result.error, kind: result.kind };
+  if (!isRecord(result.body) || result.body.notFound === true) return { draft: null };
+  const parsed = parseDraft(result.body);
+  return { draft: parsed ? { ...parsed, daemonSyncState: 'synced' as const, origin: 'daemon' as const } : null };
 }
 
 /**
  * One list from two stores.
  *
- * The daemon's copy wins for an id both hold, it is the store of record, and
- * it is what the other surfaces are looking at. A draft only the local mirror
- * has is kept and shown as pending, because that is exactly the draft an
- * operator would otherwise think they had lost.
+ * The daemon never returns a draft's text (it answers `[redacted]`) and may not
+ * have learned a delivery outcome yet, so for an id both stores hold, this
+ * mirror's text, status and delivery outcome are the true ones: only the daemon's identity,
+ * update time and sync state are taken from it. A draft only the daemon has is
+ * listed with `bodyUnavailable`, since its text cannot be read back through this
+ * API. A draft only the local mirror has is kept and shown as pending, because
+ * that is exactly the draft an operator would otherwise think they had lost.
  */
 export function mergeDraftViews(
   daemonDrafts: readonly ChannelDraft[],
@@ -449,7 +580,20 @@ export function mergeDraftViews(
 ): readonly ChannelDraft[] {
   const byId = new Map<string, ChannelDraft>();
   for (const draft of localDrafts) byId.set(draft.wireReference ?? draft.id, { ...draft, origin: 'local' });
-  for (const draft of daemonDrafts) byId.set(draft.wireReference ?? draft.id, draft);
+  for (const draft of daemonDrafts) {
+    const key = draft.wireReference ?? draft.id;
+    const local = byId.get(key);
+    if (local) {
+      byId.set(key, {
+        ...local,
+        ...(draft.wireReference === undefined ? {} : { wireReference: draft.wireReference }),
+        updatedAt: draft.updatedAt > local.updatedAt ? draft.updatedAt : local.updatedAt,
+        daemonSyncState: 'synced',
+      });
+    } else {
+      byId.set(key, { ...draft, bodyUnavailable: true });
+    }
+  }
   return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
@@ -496,7 +640,7 @@ export function getDraft(shellPaths: ShellPaths, draftId: string): ChannelDraft 
 export async function deleteDraft(
   shellPaths: ShellPaths,
   draftId: string,
-  options: { readonly invoke?: DaemonOperatorInvoke } = {},
+  options: { readonly invoke?: DaemonOperatorInvoke; readonly webhookSecrets?: ChannelDraftWebhookSecrets } = {},
 ): Promise<ChannelDraftDeleteResult> {
   const initial = writableDraftSnapshot(shellPaths);
   const selected = initial.drafts[matchingDraftIndex(initial.drafts, draftId)];
@@ -514,13 +658,20 @@ export async function deleteDraft(
       })()
     : NOT_ATTEMPTED;
 
-  const snapshot = writableDraftSnapshot(shellPaths);
-  const before = snapshot.drafts.length;
-  const selectedIndex = matchingDraftIndex(snapshot.drafts, draftId);
-  const updated = snapshot.drafts.filter((_d, index) => index !== selectedIndex);
-  if (updated.length === before) return { deleted: false, daemon };
-  writeDrafts(channelDraftFilePath(shellPaths), updated);
-  return { deleted: true, daemon };
+  const path = channelDraftFilePath(shellPaths);
+  const deleted = runStoreFileUpdateSync(path, () => {
+    const snapshot = writableDraftSnapshot(shellPaths);
+    const before = snapshot.drafts.length;
+    const selectedIndex = matchingDraftIndex(snapshot.drafts, draftId);
+    const updated = snapshot.drafts.filter((_d, index) => index !== selectedIndex);
+    if (updated.length === before) return false;
+    writeDrafts(path, updated);
+    return true;
+  });
+  // The webhook URL goes with the draft; a store that will not delete it leaves a secret
+  // nothing refers to, which is better than failing a delete the operator asked for.
+  if (deleted && selected?.webhookSecretKey) await options.webhookSecrets?.delete?.(selected.webhookSecretKey).catch(() => undefined);
+  return { deleted, daemon };
 }
 
 export interface ChannelDraftSyncReport {
@@ -530,35 +681,58 @@ export interface ChannelDraftSyncReport {
 }
 
 /**
- * Offer every draft the daemon does not hold.
+ * Offer the drafts the daemon does not hold, or only `draftId` when given.
  *
- * The retry for drafts composed while the daemon was unreachable, and the
- * migration for drafts written before the daemon held this store, the same
- * operation either way: a draft the daemon does not have, offered to it.
+ * The retry for drafts composed while the daemon was unreachable, a delivery
+ * outcome the daemon has not heard yet, and the migration for drafts written
+ * before the daemon held this store: a draft the daemon does not have in its
+ * current state, offered to it. A `sent` or `failed` draft is offered with its
+ * outcome. `channel_draft_send` calls this for the draft it just settled; the
+ * other pending drafts are re-offered by saving them again. This is the store
+ * syncing itself, not a person asking, so the explicit-user-request claim is not made.
  */
 export async function syncChannelDrafts(
   shellPaths: ShellPaths,
   invoke: DaemonOperatorInvoke,
+  options: ChannelStoreEffectOptions & { readonly draftId?: string } = {},
 ): Promise<ChannelDraftSyncReport> {
   const snapshot = writableDraftSnapshot(shellPaths);
-  const pending = snapshot.drafts.filter((draft) => draft.daemonSyncState !== 'synced');
+  const only = options.draftId === undefined ? -1 : matchingDraftIndex(snapshot.drafts, options.draftId);
+  const pending = snapshot.drafts.filter((draft, index) => draft.daemonSyncState !== 'synced' && (options.draftId === undefined || index === only));
   if (pending.length === 0) return { attempted: 0, synced: 0, refused: 0 };
 
-  const updatedById = new Map<string, ChannelDraft>();
+  const updatedById = new Map<string, { readonly offered: ChannelDraft; readonly outcome: ChannelDraftSyncOutcome }>();
   let synced = 0;
   let refused = 0;
   for (const draft of pending) {
-    const outcome = await offerDraftToDaemon(invoke, draft, draft.wireReference === undefined ? { historicalId: draft.id } : {});
-    updatedById.set(draft.id, withDraftSyncOutcome(draft, outcome));
+    const outcome = await offerDraftToDaemon(invoke, draft, {
+      explicitUserRequest: false,
+      signal: options.signal,
+      assertCurrent: options.assertCurrent,
+      ...(draft.wireReference === undefined ? { historicalId: draft.id } : {}),
+    });
+    updatedById.set(draft.id, { offered: draft, outcome });
     if (outcome.synced) synced += 1;
     else refused += 1;
   }
-  writeDrafts(
-    channelDraftFilePath(shellPaths),
-    snapshot.drafts.map((draft) => updatedById.get(draft.id) ?? draft),
-  );
+  // Apply each outcome to the file as it is after the awaits. A draft that was
+  // deleted, or saved again with other content, while the daemon was answering
+  // is left as its writer left it: the outcome describes the copy that was offered.
+  const path = channelDraftFilePath(shellPaths);
+  runStoreFileUpdateSync(path, () => {
+    const fresh = writableDraftSnapshot(shellPaths);
+    writeDrafts(path, fresh.drafts.map((draft) => {
+      const result = updatedById.get(draft.id);
+      return result && result.offered.updatedAt === draft.updatedAt && result.offered.status === draft.status
+        ? withDraftSyncOutcome(draft, result.outcome)
+        : draft;
+    }), options.assertCurrent, options);
+  });
   return { attempted: pending.length, synced, refused };
 }
+
+/** Draft ids being promoted to 'queued' in this process; see queueDraftToSend. */
+const queueingDraftIds = new Set<string>();
 
 /**
  * Promote a draft to 'queued' status and return an AgentChannelDeliveryInput
@@ -573,7 +747,7 @@ export async function syncChannelDrafts(
 export async function queueDraftToSend(
   shellPaths: ShellPaths,
   draftId: string,
-  options: ChannelStoreEffectOptions = {},
+  options: ChannelDraftStoreOptions = {},
 ): Promise<ChannelDraftQueueResult> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const draft = getDraft(shellPaths, draftId);
@@ -590,20 +764,49 @@ export async function queueDraftToSend(
       : `Draft ${draftId}: ${move.reason}.`);
   }
 
+  // The status check above and the 'queued' write below are separated by the
+  // daemon call, so a second overlapping call would pass the same check and
+  // deliver the draft twice. Claim the draft here, with no await between the
+  // check and the claim.
+  if (queueingDraftIds.has(draft.id)) throw new Error(`Draft ${draftId} is already being queued for delivery.`);
+  queueingDraftIds.add(draft.id);
+  try {
+    return await promoteDraftToQueued(shellPaths, draft, draftId, options);
+  } finally {
+    queueingDraftIds.delete(draft.id);
+  }
+}
+
+async function promoteDraftToQueued(
+  shellPaths: ShellPaths,
+  draft: ChannelDraft,
+  draftId: string,
+  options: ChannelDraftStoreOptions,
+): Promise<ChannelDraftQueueResult> {
+  let webhook = draft.webhook;
+  if (!webhook && draft.webhookSecretKey) {
+    webhook = (await options.webhookSecrets?.get(draft.webhookSecretKey)) ?? undefined;
+    if (!webhook) {
+      throw new Error(`Draft ${draftId} sends to a webhook whose URL is kept in the secret store (${draft.webhookSecretKey}) and it could not be read, so nothing was sent. Save the draft again with its webhook to restore it.`);
+    }
+  }
   const deliveryInput: AgentChannelDeliveryInput = {
     message: draft.message,
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.channel ? { channel: draft.channel } : {}),
     ...(draft.route ? { route: draft.route } : {}),
-    ...(draft.webhook ? { webhook: draft.webhook } : {}),
+    ...(webhook ? { webhook } : {}),
     ...(draft.link ? { link: draft.link } : {}),
   };
 
+  // The webhook is not passed back in: the save keeps the stored one, and the
+  // URL stays out of the draft file.
+  const { webhook: _webhook, ...saveFields } = deliveryInput;
   const queuedDraft = (await saveDraft(
     shellPaths,
     {
       id: draft.id,
-      ...deliveryInput,
+      ...saveFields,
       ...(draft.title ? { title: draft.title } : {}),
       ...(draft.tags ? { tags: draft.tags } : {}),
       status: 'queued',
@@ -623,22 +826,26 @@ export function markDraftSent(
   responseId?: string,
   options: ChannelStoreEffectOptions = {},
 ): ChannelDraft {
-  const assertCurrent = retainChannelStoreSource(channelDraftFilePath(shellPaths), options);
-  const snapshot = writableDraftSnapshot(shellPaths);
-  const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
-  if (!existing) throw new Error(`Draft not found: ${draftId}`);
-  const move = channelDraftLifecycle.check(existing.status, 'sent');
-  if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
-  const now = new Date().toISOString();
-  const patched: ChannelDraft = {
-    ...existing,
-    updatedAt: now,
-    status: 'sent',
-    ...(responseId ? { sentResponseId: responseId } : {}),
-  };
-  const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
-  writeDrafts(channelDraftFilePath(shellPaths), updatedDrafts, assertCurrent, options);
-  return patched;
+  const path = channelDraftFilePath(shellPaths);
+  const assertCurrent = retainChannelStoreSource(path, options);
+  return runStoreFileUpdateSync(path, () => {
+    const snapshot = writableDraftSnapshot(shellPaths);
+    const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
+    if (!existing) throw new Error(`Draft not found: ${draftId}`);
+    const move = channelDraftLifecycle.check(existing.status, 'sent');
+    if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
+    const now = new Date().toISOString();
+    const patched: ChannelDraft = {
+      ...existing,
+      updatedAt: now,
+      status: 'sent',
+      daemonSyncState: 'pending',
+      ...(responseId ? { sentResponseId: responseId } : {}),
+    };
+    const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
+    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    return patched;
+  });
 }
 
 /**
@@ -650,22 +857,26 @@ export function markDraftFailed(
   error: string,
   options: ChannelStoreEffectOptions = {},
 ): ChannelDraft {
-  const assertCurrent = retainChannelStoreSource(channelDraftFilePath(shellPaths), options);
-  const snapshot = writableDraftSnapshot(shellPaths);
-  const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
-  if (!existing) throw new Error(`Draft not found: ${draftId}`);
-  const move = channelDraftLifecycle.check(existing.status, 'failed');
-  if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
-  const now = new Date().toISOString();
-  const patched: ChannelDraft = {
-    ...existing,
-    updatedAt: now,
-    status: 'failed',
-    sendError: error,
-  };
-  const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
-  writeDrafts(channelDraftFilePath(shellPaths), updatedDrafts, assertCurrent, options);
-  return patched;
+  const path = channelDraftFilePath(shellPaths);
+  const assertCurrent = retainChannelStoreSource(path, options);
+  return runStoreFileUpdateSync(path, () => {
+    const snapshot = writableDraftSnapshot(shellPaths);
+    const existing = snapshot.drafts[matchingDraftIndex(snapshot.drafts, draftId)];
+    if (!existing) throw new Error(`Draft not found: ${draftId}`);
+    const move = channelDraftLifecycle.check(existing.status, 'failed');
+    if (!move.ok) throw new Error(`Draft ${draftId}: ${move.reason}.`);
+    const now = new Date().toISOString();
+    const patched: ChannelDraft = {
+      ...existing,
+      updatedAt: now,
+      status: 'failed',
+      daemonSyncState: 'pending',
+      sendError: error,
+    };
+    const updatedDrafts = snapshot.drafts.map((d) => (d.id === existing.id ? patched : d));
+    writeDrafts(path, updatedDrafts, assertCurrent, options);
+    return patched;
+  });
 }
 
 /** Format a single draft for human-readable display. */
@@ -674,7 +885,7 @@ export function formatChannelDraft(draft: ChannelDraft): string {
     ? `channel=${draft.channel}`
     : draft.route
       ? `route=${draft.route}`
-      : draft.webhook
+      : draft.webhook || draft.webhookSecretKey
         ? 'webhook=[redacted]'
         : draft.link
           ? `link=${draft.link}`
@@ -708,8 +919,9 @@ export function formatChannelDraftList(snapshot: ChannelDraftSnapshot): string {
     lines.push('  no drafts');
   } else {
     for (const draft of snapshot.drafts) {
-      const targetPart = draft.channel ?? draft.route ?? (draft.webhook ? 'webhook=[redacted]' : null) ?? draft.link ?? 'no-target';
-      lines.push(`  [${draft.status}] ${draft.id}  target=${targetPart}  ${draft.message.slice(0, 60)}${draft.message.length > 60 ? '...' : ''}`);
+      const targetPart = draft.channel ?? draft.route ?? (draft.webhook || draft.webhookSecretKey ? 'webhook=[redacted]' : null) ?? draft.link ?? 'no-target';
+      const preview = draft.bodyUnavailable ? '(text held on the daemon, not readable here)' : `${draft.message.slice(0, 60)}${draft.message.length > 60 ? '...' : ''}`;
+      lines.push(`  [${draft.status}] ${draft.id}  target=${targetPart}  ${preview}`);
     }
   }
   return lines.join('\n');

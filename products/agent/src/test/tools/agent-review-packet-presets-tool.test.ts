@@ -257,6 +257,24 @@ describe('agent_review_packet_presets tool', () => {
     expect(shown.output).toContain('inspectArchive agent_artifacts mode:"show" artifactId:"archive-new"');
   });
 
+  test('a list that filled the store window says older presets were not searched', async () => {
+    const artifacts = artifactStore();
+    for (let index = 0; index < 600; index += 1) {
+      artifacts.addArtifact({ id: `other-${index}`, createdAt: index, purpose: 'unrelated' });
+    }
+    const tool = createAgentReviewPacketPresetsTool(artifacts.store);
+    const listed = await tool.execute({ mode: 'list' });
+    expect(listed.success).toBe(true);
+    expect(listed.output).toContain('searched the newest 500 artifacts only');
+  });
+
+  test('a list of a small store makes no claim about a search window', async () => {
+    const artifacts = artifactStore();
+    artifacts.addArtifact({ id: 'other-1', createdAt: 1, purpose: 'unrelated' });
+    const listed = await createAgentReviewPacketPresetsTool(artifacts.store).execute({ mode: 'list' });
+    expect(listed.output).not.toContain('searched the newest');
+  });
+
   test('reports missing preset artifact ids and recommends replacements when metadata is sufficient', async () => {
     const artifacts = artifactStore();
     artifacts.addArtifact({

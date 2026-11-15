@@ -4,11 +4,6 @@ import { createAgentWorkspaceEditorFromTable } from './agent-workspace-command-e
 
 export type AgentWorkspaceOperationsCommandEditorKind = Extract<
   AgentWorkspaceEditorKind,
-  | 'plan-seed'
-  | 'plan-show'
-  | 'plan-approve'
-  | 'plan-override'
-  | 'plan-clear'
   | 'health-repair'
   | 'approval-review'
   | 'approval-approve'
@@ -26,12 +21,7 @@ export type AgentWorkspaceOperationsCommandEditorKind = Extract<
 >;
 
 export function isAgentWorkspaceOperationsCommandEditorKind(kind: AgentWorkspaceEditorKind): kind is AgentWorkspaceOperationsCommandEditorKind {
-  return kind === 'plan-seed'
-    || kind === 'plan-show'
-    || kind === 'plan-approve'
-    || kind === 'plan-override'
-    || kind === 'plan-clear'
-    || kind === 'health-repair'
+  return kind === 'health-repair'
     || kind === 'approval-review'
     || kind === 'approval-approve'
     || kind === 'approval-deny'
@@ -107,15 +97,6 @@ function receiptSpec(kind: AgentWorkspaceOperationsCommandEditorKind): AgentWork
 }
 
 const OPERATIONS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceOperationsCommandEditorKind, AgentWorkspaceEditorSpecEntry<AgentWorkspaceOperationsCommandEditorKind>>> = {
-  'plan-seed': {
-    mode: 'create',
-    title: 'Seed Planning Goal',
-    selectedFieldIndex: 0,
-    message: 'Seed Agent planning state from a concrete goal. This stays in the main Agent planning flow and does not create coding-role Agent jobs.',
-    fields: [
-      { id: 'goal', label: 'Planning goal', value: '', required: true, multiline: true, hint: 'Describe the goal or operating plan to evaluate. Ctrl-J inserts a new line.' },
-    ],
-  },
   'health-repair': {
     mode: 'create',
     title: 'Show Health Repair Guidance',
@@ -160,45 +141,8 @@ const OPERATIONS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceOperationsC
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /schedule edit with --yes.' },
     ],
   },
-  'plan-approve': {
-    mode: 'update',
-    title: 'Approve Planning State',
-    selectedFieldIndex: 0,
-    message: 'Approve the current Agent planning state for execution. This changes planning state and requires typed confirmation.',
-    fields: [
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /plan approve with --yes.' },
-    ],
-  },
-  'plan-override': {
-    mode: 'update',
-    title: 'Override Planning Strategy',
-    selectedFieldIndex: 0,
-    message: 'Override the planner strategy through the runtime route. This changes planner state and requires typed confirmation.',
-    fields: [
-      { id: 'strategy', label: 'Strategy', value: 'serial', required: true, multiline: false, hint: 'Planner strategy, such as serial.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /plan override with --yes.' },
-    ],
-  },
-  'plan-clear': {
-    mode: 'delete',
-    title: 'Clear Planning State',
-    selectedFieldIndex: 0,
-    message: 'Clear planner state. This is destructive and requires typed confirmation.',
-    fields: [
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /plan clear with --yes.' },
-    ],
-  },
   'routine-receipt': receiptSpec,
   'schedule-receipt': receiptSpec,
-  'plan-show': {
-    mode: 'create',
-    title: 'Show Saved Plan',
-    selectedFieldIndex: 0,
-    message: 'Show one saved execution plan by id or prefix without approving or starting execution.',
-    fields: [
-      { id: 'planId', label: 'Plan id', value: '', required: true, multiline: false, hint: 'Plan id or unique prefix from Saved plans.' },
-    ],
-  },
 };
 
 export function createAgentWorkspaceOperationsCommandEditor(kind: AgentWorkspaceOperationsCommandEditorKind): AgentWorkspaceLocalEditor {

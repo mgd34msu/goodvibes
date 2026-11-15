@@ -32,7 +32,7 @@ test('valid JSON with a quarantined credential cannot silently use a synthetic e
     expect(JSON.parse(child.stdout)).toEqual({
       exitCode: 2, stdout: [],
       stderr: ['Configured credentials were withheld: surfaces.ntfy.token. Nothing was sent.'],
-      secretLookups: 0, serviceLookups: 0, fetches: 0, stacks: 0, hasSyntheticEnvironmentToken: true,
+      secretLookups: 0, serviceLookups: 0, fetches: 0, stacks: 0,
     });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 20_000);

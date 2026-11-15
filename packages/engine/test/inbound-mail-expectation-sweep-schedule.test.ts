@@ -3,7 +3,7 @@
  * Inspect the stored file: list() filters expired records without proving a sweep ran.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,6 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  setSystemTime();
   for (const registry of registries.splice(0)) registry.stopSweeping();
   for (const timer of ownedTimers.splice(0)) clearInterval(timer);
   await Promise.allSettled([...pendingSweeps]);
@@ -46,18 +47,25 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+interface ArmedInterval {
+  readonly callback: () => void;
+  readonly ms: number | undefined;
+}
+
 /** Capture only timers armed synchronously by this operation; keep native timers. */
-function captureTimers<T>(operation: () => T): { value: T; timers: ReturnType<typeof setInterval>[] } {
+function captureTimers<T>(operation: () => T): { value: T; timers: ReturnType<typeof setInterval>[]; intervals: ArmedInterval[] } {
   const timers: ReturnType<typeof setInterval>[] = [];
+  const intervals: ArmedInterval[] = [];
   const nativeSetInterval = globalThis.setInterval;
   const observer = spyOn(globalThis, 'setInterval').mockImplementation(((...args: Parameters<typeof setInterval>) => {
     const timer = nativeSetInterval(...args);
+    intervals.push({ callback: args[0] as () => void, ms: args[1] });
     timers.push(timer);
     ownedTimers.push(timer);
     return timer;
   }) as typeof setInterval);
   try {
-    return { value: operation(), timers };
+    return { value: operation(), timers, intervals };
   } finally {
     observer.mockRestore();
   }
@@ -69,20 +77,11 @@ function newDir(prefix: string): string {
   return dir;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
-
-/** Retry an observable result, not a guess about timer or filesystem speed. */
-async function waitFor(assertion: () => void, timeoutMs = 5_000): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (performance.now() >= deadline) throw error;
-    }
-    await sleep(10);
-  }
+/** Fire an armed interval by hand and wait for the sweep it started to finish. */
+async function fire(interval: ArmedInterval | undefined): Promise<void> {
+  expect(interval).toBeDefined();
+  interval?.callback();
+  await Promise.allSettled([...pendingSweeps]);
 }
 
 describe('the sweep interval is derived from the window it is sweeping', () => {
@@ -133,11 +132,15 @@ describe('a scheduled sweep reports an expiry with nobody calling sweep()', () =
     // The window elapses on the registry's own clock; the test never advances
     // real time by fifteen minutes and never calls `sweep()`.
     nowMs += 16 * 60_000;
-    registry.startSweeping(10);
-    await waitFor(() => expect(reports.length).toBe(1));
+    const { intervals } = captureTimers(() => registry.startSweeping(10));
+    expect(intervals).toHaveLength(1);
+    expect(intervals[0]?.ms).toBe(10);
+    // Fired by hand: the timer's own tick is what is under test, not its speed.
+    await fire(intervals[0]);
+    expect(reports.length).toBe(1);
     expect(reports[0]?.reason).toBe('window-elapsed');
     expect(reports[0]?.recipientAddress).toBe('signup-a1@alias.test');
-  }, 10_000);
+  });
 
   test('a second startSweeping clears each previous native timer and stop clears the last', () => {
     const store = new PersistedExpectationStore(join(newDir('gv-sweep-rearm-'), 'expectations.json'));
@@ -174,6 +177,7 @@ describe('a scheduled sweep reports an expiry with nobody calling sweep()', () =
 function composeRig(overrides: Readonly<Record<string, unknown>> = {}): {
   readonly handlers: Map<string, GatewayMethodHandler>;
   readonly expectationsPath: string;
+  readonly intervals: readonly ArmedInterval[];
 } {
   const root = newDir('gv-sweep-compose-');
   const values: Record<string, unknown> = {
@@ -182,15 +186,14 @@ function composeRig(overrides: Readonly<Record<string, unknown>> = {}): {
     'surfaces.email.inbound.source': 'imap',
     'surfaces.email.inbound.notice.mode': 'none',
     'surfaces.email.inbound.notice.route': 'default',
-    // One minute, so the derived cadence sits on its 5 s floor and the test is
-    // seconds rather than half a minute.
+    // One minute, so the derived cadence sits on its 5 s floor.
     'surfaces.email.inbound.expectationWindowMinutes': 1,
     'surfaces.email.imap.host': 'imap.example.test',
     'surfaces.email.user': 'watched@example.test',
     ...overrides,
   };
   const handlers = new Map<string, GatewayMethodHandler>();
-  const { value: supervisor } = captureTimers(() => composeInboundMail({
+  const { value: supervisor, intervals } = captureTimers(() => composeInboundMail({
     configManager: { get: (key: string) => values[key] } as never,
     secretsManager: { get: async () => null } as never,
     shellPaths: { resolveUserPath: (_scope: string, name: string) => join(root, name) } as never,
@@ -216,7 +219,7 @@ function composeRig(overrides: Readonly<Record<string, unknown>> = {}): {
     }),
   }));
   expect(supervisor).not.toBeNull();
-  return { handlers, expectationsPath: join(root, 'email-inbound-expectations.json') };
+  return { handlers, expectationsPath: join(root, 'email-inbound-expectations.json'), intervals };
 }
 
 describe('composeInboundMail arms the sweep in the daemon itself', () => {
@@ -226,9 +229,8 @@ describe('composeInboundMail arms the sweep in the daemon itself', () => {
       const rig = composeRig();
 
       // The path a signup workstream takes. `windowMs` is the book's own
-      // minimum, so the window genuinely elapses in real time, the registry
-      // built by `composeInboundMail` uses the real clock and there is nothing
-      // to advance.
+      // minimum; the registry built by `composeInboundMail` reads the system
+      // clock, which this test moves instead of waiting.
       const opened = await rig.handlers.get('email.expectation.open')!({
         methodId: 'email.expectation.open',
         body: {
@@ -244,13 +246,13 @@ describe('composeInboundMail arms the sweep in the daemon itself', () => {
       // assumption about one.
       expect(readFileSync(rig.expectationsPath, 'utf8')).toContain('signup-a1@alias.test');
 
-      // Observe the actual persisted result, allowing busy CI time to finish
-      // the native 5 s tick and its asynchronous write. The supervisor is never
-      // started, so recovery cannot reap it; housekeeping is six hours away.
-      await waitFor(() => {
-        expect(readFileSync(rig.expectationsPath, 'utf8')).not.toContain('signup-a1@alias.test');
-      }, 15_000);
+      // The composed registry armed a sweep at the cadence derived from the
+      // one-minute window. The supervisor is never started, so recovery cannot
+      // reap it; housekeeping is six hours away.
+      const sweepTick = rig.intervals.find((interval) => interval.ms === expectationSweepIntervalMs(60_000));
+      setSystemTime(new Date(Date.now() + 2 * MIN_VERIFICATION_WINDOW_MS));
+      await fire(sweepTick);
+      expect(readFileSync(rig.expectationsPath, 'utf8')).not.toContain('signup-a1@alias.test');
     },
-    20_000,
   );
 });

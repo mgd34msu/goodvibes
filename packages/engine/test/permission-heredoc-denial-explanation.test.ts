@@ -32,15 +32,16 @@ describe('denial explanation: first line survives a multi-line command', () => {
     expect(firstLine.startsWith('Command denied: "')).toBe(true);
     expect(firstLine.endsWith('"')).toBe(true);
     expect(firstLine).toContain('NODE_PATH=/tmp node');
-    // The whole command is named on that one line, terminator included.
-    expect(firstLine).toContain('NODE');
+    // The whole command is named on that one line, terminator included: the
+    // line ends with the terminator itself, not with the NODE in NODE_PATH.
+    expect(firstLine.endsWith(' NODE"')).toBe(true);
   });
 
   test('the segment analysis is still reachable after the header', () => {
     const explanation = buildDenialExplanation(HEREDOC, evaluate(HEREDOC).segments);
     expect(explanation).toContain('Segment analysis');
     expect(explanation).toContain('reason:');
-    expect(explanation).toContain('reason:');
+    expect(explanation).toContain('0 of 1 segment denied.');
   });
 
   test('a multi-line denial names each segment with its reason', () => {

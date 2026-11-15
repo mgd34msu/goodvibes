@@ -23,7 +23,20 @@ import { BoundedTransitionLog } from './transition-log.js';
 import { TimelineBuffer } from './timeline.js';
 import type { InspectableDomain } from '../../diagnostics/panels/state-inspector.js';
 import { serializeSafe } from './serialize.js';
+import { maskCredentials } from '../../diagnostics/credential-mask.js';
 import { summarizeError } from '../../../utils/error-display.js';
+
+/**
+ * Serialize a domain's state with credential-shaped spans masked. When masking
+ * is unavailable the state is replaced by a placeholder, never shown raw.
+ */
+function serializeMasked(rawState: unknown): Record<string, unknown> {
+  try {
+    return maskCredentials(serializeSafe(rawState) as Record<string, unknown>);
+  } catch {
+    return { omitted: 'state not shown: it could not be masked' };
+  }
+}
 
 // ── Domain state cache ────────────────────────────────────────────────────────
 
@@ -126,7 +139,7 @@ export class StateInspectorProvider {
       domain: domain.name,
       revision: domain.getRevision(),
       lastUpdatedAt: domain.getLastUpdatedAt(),
-      state: serializeSafe(domain.getState()) as Record<string, unknown>,
+      state: serializeMasked(domain.getState()),
     }));
 
     return {
@@ -161,13 +174,14 @@ export class StateInspectorProvider {
         const fromRevision = cached?.revision ?? 0;
         const rawState = domain.getState();
 
-        // Attempt to extract 'source' from the domain state
+        const serializedState = serializeMasked(rawState);
+
+        // Attempt to extract 'source' from the masked domain state
         const source =
-          typeof (rawState as Record<string, unknown>)['source'] === 'string'
-            ? (rawState as Record<string, unknown>)['source'] as string
+          typeof serializedState['source'] === 'string'
+            ? serializedState['source']
             : 'unknown';
 
-        const serializedState = serializeSafe(rawState) as Record<string, unknown>;
         const entry = this._transitionLog.append({
           domain: domain.name,
           fromRevision,

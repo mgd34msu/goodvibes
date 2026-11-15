@@ -42,8 +42,14 @@ export type DraftEditResult = { readonly spec: CreateWorkstreamInput } | { reado
  */
 export function resolveItemIndex(items: readonly WorkItemSpec[], ref: string): number | undefined {
   const trimmed = ref.trim();
+  // An empty reference is a prefix of every id; it names nothing.
+  if (trimmed.length === 0) return undefined;
   const ordinal = Number(trimmed);
-  if (Number.isInteger(ordinal) && ordinal >= 1 && ordinal <= items.length) return ordinal - 1;
+  if (Number.isInteger(ordinal) && ordinal >= 1 && ordinal <= items.length) {
+    // An id equal to the typed number on a different item makes the handle ambiguous.
+    const exactElsewhere = items.some((item, index) => item.id === trimmed && index !== ordinal - 1);
+    return exactElsewhere ? undefined : ordinal - 1;
+  }
   const matches = items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => item.id !== undefined && item.id.startsWith(trimmed));
@@ -51,7 +57,7 @@ export function resolveItemIndex(items: readonly WorkItemSpec[], ref: string): n
 }
 
 function unresolvedError(items: readonly WorkItemSpec[], ref: string): string {
-  return `No draft item matches "${ref}". Use a number from 1 to ${items.length}, or an item id.`;
+  return `No single draft item matches "${ref}" (an empty reference, or a number that is also another item's id, is ambiguous). Use a number from 1 to ${items.length}, or an item id.`;
 }
 
 /** Rewrite one item's brief (its `task`). Empty/whitespace briefs are refused. */

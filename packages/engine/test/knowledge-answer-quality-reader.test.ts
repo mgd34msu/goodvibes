@@ -7,6 +7,7 @@ import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input
 import { verifyKnowledgeAnswer, KnowledgeAnswerQualityHeldError, type AnswerVerificationInput } from '../platform/src/platform/knowledge/semantic/answer-verification/reader.js';
 import { answerCandidateQuality, answerEvidenceSufficiency, answerCandidatePreference } from '../platform/src/platform/knowledge/semantic/answer-verification/batteries.js';
 import { registry } from '../platform/src/platform/knowledge/semantic/answer-verification/judgment-registry.js';
+import { settleAll } from './_helpers/event-loop-turns.ts';
 
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
@@ -102,10 +103,12 @@ describe('answer fidelity, sufficiency and confidence readings', () => {
     } }); await held(verifyKnowledgeAnswer(input()), 'malformed');
   });
   test('deadline bounds a port that ignores cancellation and prevents preference calls', async () => {
-    const fake = readings(); const released = Promise.withResolvers<void>();
-    installJudgmentPort({ ...fake.port, async ask(request) { await released.promise; return fake.port.ask(request); } });
+    const fake = readings(); const released = Promise.withResolvers<void>(); const asks: Promise<unknown>[] = [];
+    installJudgmentPort({ ...fake.port, ask(request) {
+      const ask = (async () => { await released.promise; return fake.port.ask(request); })(); asks.push(ask); return ask;
+    } });
     await held(verifyKnowledgeAnswer(input(), { timeoutMs: 5 }), 'budget'); released.resolve();
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    await settleAll(() => asks);
     expect(fake.requests.some((request) => 'preferred' in request.questions)).toBe(false);
   });
   test('pre-aborted verification acquires no port', async () => {
@@ -133,17 +136,36 @@ describe('answer fidelity, sufficiency and confidence readings', () => {
     expect(new Set(result.quality.decisionIds).size).toBe(4);
   });
 
+  const batteries = [answerCandidateQuality, answerEvidenceSufficiency, answerCandidatePreference];
+  /** One check is reported per labelled item of every fixture. */
+  const expectedCheckCount = (battery: (typeof batteries)[number]) =>
+    battery.fixtures.reduce((total, fixture) => total + Object.keys(fixture.expect).length, 0);
+  /** A port that answers each fixture with its labelled answer, or with the opposite one when `invert` is set. */
+  const labelledPort = (battery: (typeof batteries)[number], invert: boolean) => fakePort((name, question, state) => {
+    const fixture = battery.fixtures.find((fixture) => JSON.stringify(fixture.state) === JSON.stringify(state));
+    if (!fixture) throw new Error('Unknown labelled fixture');
+    const expected = (fixture.expect as Record<string, string>)[name]!;
+    if (question.type === 'choice') {
+      const other = Object.keys(question.criteria).find((option) => option !== expected) ?? expected;
+      return choiceAnswer(question, invert ? other : expected, 0.99);
+    }
+    return noulAnswer((expected === 'yes') !== invert ? 0.99 : 0.01);
+  });
+
   test('labelled positive, partial, conflicting and unsupported fixtures exercise registered gate plumbing', async () => {
-    for (const battery of [answerCandidateQuality, answerEvidenceSufficiency, answerCandidatePreference]) {
-      const port = fakePort((name, question, state) => {
-        const fixture = battery.fixtures.find((fixture) => JSON.stringify(fixture.state) === JSON.stringify(state));
-        if (!fixture) throw new Error('Unknown labelled fixture');
-        const expected = (fixture.expect as Record<string, string>)[name];
-        return question.type === 'choice' ? choiceAnswer(question, expected!, 0.99) : noulAnswer(expected === 'yes' ? 0.99 : 0.01);
-      });
-      const checks = await battery.checkFixtures(port.port);
+    for (const battery of batteries) {
+      expect(battery.fixtures.length).toBeGreaterThan(0);
+      const checks = await battery.checkFixtures(labelledPort(battery, false).port);
+      expect(checks).toHaveLength(expectedCheckCount(battery));
       expect(checks.every((check) => check.correct)).toBe(true);
     }
   });
 
+  test('the fixture grading marks a port that answers the opposite of every label incorrect', async () => {
+    for (const battery of batteries) {
+      const checks = await battery.checkFixtures(labelledPort(battery, true).port);
+      expect(checks).toHaveLength(expectedCheckCount(battery));
+      expect(checks.some((check) => check.correct)).toBe(false);
+    }
+  });
 });

@@ -12,7 +12,7 @@ disables daemon service registration for the CI account.
 ## Usage
 
 Select an available published suite tag for both the action reference and the
-`version` input. The examples below use the 3.1.2 suite version; check the
+`version` input. The examples below use the 3.3.0 suite version; check the
 [published releases](https://github.com/mgd34msu/goodvibes/releases) for available
 downloads. A full commit SHA can pin the action code independently of the
 release selected by `version`.
@@ -20,17 +20,17 @@ release selected by `version`.
 Install and print the version:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.1.2
+- uses: mgd34msu/goodvibes/products/tui@v3.3.0
   with:
-    version: v3.1.2
+    version: v3.3.0
 ```
 
 Run a health check:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.1.2
+- uses: mgd34msu/goodvibes/products/tui@v3.3.0
   with:
-    version: v3.1.2
+    version: v3.3.0
     command: doctor
     args: --json
 ```
@@ -38,9 +38,9 @@ Run a health check:
 Run a non-interactive prompt (needs a provider credential in the job env):
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.1.2
+- uses: mgd34msu/goodvibes/products/tui@v3.3.0
   with:
-    version: v3.1.2
+    version: v3.3.0
     prompt: "summarize the changes in this workspace"
     output: json
     working-directory: .
@@ -52,7 +52,7 @@ Run a non-interactive prompt (needs a provider credential in the job env):
 
 | input | default | description |
 | --- | --- | --- |
-| `version` | `latest` | Published suite release tag (for example `v3.1.2`) or `latest`. |
+| `version` | `latest` | Published suite release tag (for example `v3.3.0`) or `latest`. |
 | `prompt` | `""` | Non-interactive prompt for `goodvibes run`. Needs a provider credential. |
 | `command` | `""` | A subcommand to run instead (e.g. `doctor`, `status`). Ignored when `prompt` is set. |
 | `args` | `""` | Extra arguments appended after the command. |

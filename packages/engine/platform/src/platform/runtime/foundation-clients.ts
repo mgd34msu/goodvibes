@@ -1,5 +1,5 @@
 import { listHookPointContracts } from '../hooks/index.js';
-import type { HookApi } from '../hooks/hook-api.js';
+import { createHookApiDispatcher, type HookApi } from '../hooks/hook-api.js';
 import type { KnowledgeApi } from '../knowledge/knowledge-api.js';
 import type { McpApi } from '../mcp/mcp-api.js';
 import type { ProviderApi } from '../providers/provider-api.js';
@@ -94,10 +94,7 @@ export function createRuntimeFoundationClients(
     providerApi: createRuntimeProviderApi(runtimeServices),
     knowledgeApi: createRuntimeKnowledgeApi(runtimeServices),
     hookApi: createRuntimeHookApi({
-      dispatcher: {
-        listHooks: () => runtimeServices.hookDispatcher.listHooks(),
-        listChains: () => runtimeServices.hookWorkbench.listManagedChains(),
-      },
+      dispatcher: createHookApiDispatcher(runtimeServices.hookDispatcher),
       workbench: runtimeServices.hookWorkbench,
       listContracts: () => listHookPointContracts(),
     }),

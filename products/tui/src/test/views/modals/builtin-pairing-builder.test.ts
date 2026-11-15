@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { PairingLimitReachedError } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { buildPairingConnectionInfo } from '../../../views/builtin-modals.ts';
 import type { ResolvedBuiltinViewDeps } from '../../../views/view-deps.ts';
 import { createPairingModalSurface } from '../../../views/modals/pairing-modal.ts';
@@ -6,7 +7,7 @@ import { ConfigModal } from '../../../input/config-modal.ts';
 import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
 
-function fixture(throws = false) {
+function fixture(throws: boolean | Error = false) {
   let minted = 0;
   const deps = {
     configManager: {
@@ -15,7 +16,7 @@ function fixture(throws = false) {
     },
     uiServices: { platform: { pairingTokens: {
       mint: ({ name }: { name: string }) => {
-        if (throws) throw new Error('fixture unavailable');
+        if (throws) throw throws instanceof Error ? throws : new Error('fixture unavailable');
         minted++;
         return { id: 'fixture-device', name, token: 'fixture-pairing-secret', createdAt: 1 };
       },
@@ -46,4 +47,9 @@ test('real builtin pairing builder still degrades when its actual token source f
   const f = fixture(true);
   expect(buildPairingConnectionInfo(f.deps)).toBeNull();
   expect(f.minted()).toBe(0);
+});
+
+test('a device-cap refusal reaches the caller with its message instead of collapsing to null', () => {
+  const f = fixture(new PairingLimitReachedError(2, 2));
+  expect(() => buildPairingConnectionInfo(f.deps)).toThrow('device.nodes.maxPaired is 2');
 });

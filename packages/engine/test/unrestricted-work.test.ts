@@ -31,7 +31,7 @@ test('file content filtering runs before pagination', async () => {
   const root = mkdtempSync(join(tmpdir(), 'find-files-pages-')); roots.push(root);
   for (let i = 0; i < 125; i++) writeFileSync(join(root, `${String(i).padStart(3, '0')}.txt`), i === 124 ? 'wanted' : 'ordinary');
   const result = await executeFilesQuery({ id: 'late', mode: 'files', patterns: ['*.txt'], has_content: 'wanted' }, {}, root);
-  expect(result.count).toBe(1); expect(result.files).toEqual([join(root, '124.txt')]);
+  expect(result.count).toBe(1); expect(result.files).toEqual(['124.txt']);
 });
 test('large Unicode WebSocket messages round-trip and partial messages cannot cross connections', () => {
   const payload = { type: 'response', body: '🌻\\"\n'.repeat(300_000) };

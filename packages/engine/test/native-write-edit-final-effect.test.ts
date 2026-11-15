@@ -1,3 +1,4 @@
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -85,9 +86,9 @@ for (const name of ['write', 'edit'] as const) for (const copied of ['args', 'op
 test('notebook final publication checks current policy after read preparation', async () => {
   const original = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [{ cell_type: 'code', source: ['before'], metadata: {}, outputs: [], execution_count: null }], metadata: {} });
   writeFileSync(join(root, 'owned.ipynb'), original);
-  const cache = new FileStateCache(); const lookup = cache.lookup.bind(cache);
+  const cache = new FileStateCache(); const peek = cache.peek.bind(cache);
   let pending: Promise<void> | undefined;
-  const spy = spyOn(cache, 'lookup').mockImplementation(path => { pending ??= trust.setLevel('restricted'); return lookup(path); });
+  const spy = spyOn(cache, 'peek').mockImplementation(path => { pending ??= trust.setLevel('restricted'); return peek(path); });
   try {
     const result = await run(createEditTool(cache, { cwd: root }), { notebook_operations: { path: 'owned.ipynb', operations: [{ op: 'replace', cell: 0, source: 'after' }] } });
     expect(result[0]!.success).toBe(false); expect(readFileSync(join(root, 'owned.ipynb'), 'utf8')).toBe(original);
@@ -144,6 +145,13 @@ for (const alias of ['symlink', 'hardlink'] as const) for (const name of ['write
   const args = name === 'write' ? { ...writeArgs(), transaction: { mode: 'atomic' } } : { edits: [{ path: 'owned.txt', find: 'before', replace: 'forbidden' }], transaction: { mode: 'atomic' } };
   const result = await run(tool, args);
   expect(result[0]!.success).toBe(false); expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('before');
+  // A file that reads fine but is a link must not be reported as missing or unreadable.
+  if (name === 'edit') {
+    const text = JSON.stringify(result[0]);
+    expect(text).toContain('Cannot edit');
+    expect(text).toContain('Nothing was changed');
+    expect(text).not.toContain('File not found');
+  }
   expect(alias === 'symlink' ? lstatSync(join(root, 'owned.txt')).isSymbolicLink() : lstatSync(join(root, 'owned.txt')).nlink === 2).toBe(true);
   const legacy = await createEditTool(new FileStateCache(), { cwd: root }).execute({ edits: [{ path: 'owned.txt', find: 'before', replace: 'legacy supported' }] });
   expect(legacy.success).toBe(true); expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('legacy supported');
@@ -161,7 +169,7 @@ test('native pending repair provider is interrupted and late resolution cannot p
     const settled = await Promise.race([result, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('repair did not stop promptly')), 1500))]);
     expect(settled[0]!.success).toBe(false); expect(readFileSync(join(root, 'repair.ts'), 'utf8')).toBe('export const before = 1;\n');
     const entries = services.judgment.decisionLog.query().length;
-    release('export const late = 2;\n'); await Bun.sleep(30);
+    release('export const late = 2;\n'); await eventLoopTurns();
     expect(readFileSync(join(root, 'repair.ts'), 'utf8')).toBe('export const before = 1;\n'); expect(services.judgment.decisionLog.query().length).toBe(entries);
   } finally { release?.(''); which.mockRestore(); }
 });
@@ -185,7 +193,7 @@ test('native pending repair judgment cannot record or attach a late answer after
     await started; await trust.setLevel('restricted');
     const settled = await Promise.race([result, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('judgment did not stop promptly')), 1500))]);
     expect(settled[0]!.success).toBe(false); const before = JSON.stringify(services.judgment.decisionLog.query());
-    release(); await Bun.sleep(30);
+    release(); await eventLoopTurns();
     expect(JSON.stringify(services.judgment.decisionLog.query())).toBe(before); expect(readFileSync(join(root, 'repair.ts'), 'utf8')).toBe('export const before = 1;\n');
   } finally { release?.(); installJudgmentPort(previous); which.mockRestore(); }
 });

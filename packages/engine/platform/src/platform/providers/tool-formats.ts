@@ -55,15 +55,10 @@ export function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
 export function fromOpenAIToolCalls(calls: OpenAIToolCall[]): ToolCall[] {
   const toolCalls: ToolCall[] = [];
   for (const c of calls) {
-    const parsedArguments = parseToolCallArguments(c.function.arguments, {
-      toolName: c.function.name,
-      callId: c.id,
-    });
-    if (parsedArguments === undefined) continue;
     toolCalls.push({
       id: c.id,
       name: c.function.name,
-      arguments: parsedArguments,
+      ...toolCallArgumentFields(c.function.arguments, { toolName: c.function.name, callId: c.id }),
     });
   }
   return toolCalls;
@@ -393,6 +388,9 @@ export function extractTextToolCalls(content: string): {
     /<\|tool_?call_?begin\|>functions\.([^:]+):\d+<\|tool_?call_?argument_?begin\|>(.*?)<\|tool_?call_?end\|>/gs;
 
   const toolCalls: ToolCall[] = [];
+  // Ids must be unique across responses: the ledger and the conversation
+  // reducer key records on the call id, and a bare index restarts at 0 every turn.
+  const responseTag = crypto.randomUUID().slice(0, 8);
   // Build cleaned content in a single pass by collecting match spans,
   // avoiding a second regex execution over the same string.
   const segments: string[] = [];
@@ -408,18 +406,11 @@ export function extractTextToolCalls(content: string): {
 
     const toolName = match[1]!;
     const rawArgs = match[2]!;
-    const parsedArguments = parseToolCallArguments(rawArgs, {
-      toolName,
-      callId: `text-call-${index}`,
-    });
-    if (parsedArguments === undefined) {
-      index++;
-      continue;
-    }
+    const callId = `text-call-${responseTag}-${index}`;
     toolCalls.push({
-      id: `text-call-${index}`,
+      id: callId,
       name: toolName,
-      arguments: parsedArguments,
+      ...toolCallArgumentFields(rawArgs, { toolName, callId }),
     });
     index++;
   }
@@ -453,20 +444,52 @@ export function normalizeAnthropicModel(model: string): string {
 // Shared helper
 // ---------------------------------------------------------------------------
 
-export function parseToolCallArguments(
-  raw: string,
-  context: ToolArgumentParseContext = {},
-): Record<string, unknown> | undefined {
-  if (raw.trim().length === 0) return {};
+type ReadArguments = { readonly ok: true; readonly value: Record<string, unknown> } | { readonly ok: false; readonly reason: string };
+
+function readToolCallArguments(raw: string, context: ToolArgumentParseContext): ReadArguments {
+  if (raw.trim().length === 0) return { ok: true, value: {} };
   try {
-    return JSON.parse(raw) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(raw);
+    // A model that writes `null` for a no-argument call means "no arguments".
+    if (parsed === null) return { ok: true, value: {} };
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      logger.warn('tool-formats: tool arguments are not a JSON object', {
+        provider: context.provider,
+        toolName: context.toolName,
+        callId: context.callId,
+      });
+      return { ok: false, reason: 'the arguments are not a JSON object' };
+    }
+    return { ok: true, value: parsed as Record<string, unknown> };
   } catch (err) {
-    logger.warn('tool-formats: failed to parse JSON tool arguments; dropping malformed tool call', {
+    logger.warn('tool-formats: failed to parse JSON tool arguments', {
       error: summarizeError(err),
       provider: context.provider,
       toolName: context.toolName,
       callId: context.callId,
     });
-    return undefined;
+    return { ok: false, reason: `the arguments are not valid JSON (${summarizeError(err)})` };
   }
+}
+
+/** The arguments of a call, or undefined when they cannot be read. */
+export function parseToolCallArguments(
+  raw: string,
+  context: ToolArgumentParseContext = {},
+): Record<string, unknown> | undefined {
+  const read = readToolCallArguments(raw, context);
+  return read.ok ? read.value : undefined;
+}
+
+/**
+ * The fields of a call built from raw argument text. Arguments that cannot be read give empty
+ * arguments and an `argumentError`, so the call is answered with that error and the model can
+ * repair it, rather than vanishing and ending the turn as if nothing had been asked.
+ */
+export function toolCallArgumentFields(
+  raw: string,
+  context: ToolArgumentParseContext = {},
+): Pick<ToolCall, 'arguments' | 'argumentError'> {
+  const read = readToolCallArguments(raw, context);
+  return read.ok ? { arguments: read.value } : { arguments: {}, argumentError: `Tool call '${context.toolName ?? 'unknown'}' was not run: ${read.reason}. Send the call again with a JSON object of arguments.` };
 }

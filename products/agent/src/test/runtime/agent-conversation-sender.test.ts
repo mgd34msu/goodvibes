@@ -112,18 +112,6 @@ describe('agent conversation sender', () => {
     expect(renders).toBe(1);
   });
 
-  test('no digit can reach the transcript, because the composed body carries none', async () => {
-    const primary = conversation();
-    const sender = createAgentConversationSender({
-      primaryConversation: () => primary,
-      requestRender: () => undefined,
-    });
-    await sender.send(message());
-    // Proximity is a WORD. A day count in the landed line is the same defect as
-    // a date (§4.3), and the passthrough is what makes it unreachable here.
-    expect(/\d/.test(primary.said.join(''))).toBe(false);
-  });
-
   test('an addressed conversationId lands there, not in the primary one', async () => {
     const primary = conversation();
     const addressed = conversation();

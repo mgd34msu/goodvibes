@@ -360,18 +360,15 @@ async function extractDocx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
   const file = zip.file('word/document.xml');
   if (!file) return extractTextLike(buffer, 'docx', 'docx-fallback');
   const xml = await file.async('string');
-  const paragraphs = uniqueStrings(
-    Array.from(xml.matchAll(/<w:p[\s\S]*?<\/w:p>/g), (match) => {
-      const text = Array.from(match[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g), (part) => decodeHtmlEntities(part[1] ?? '')).join('');
-      return text;
-    }),
-    48,
-  );
+  const paragraphXml = Array.from(xml.matchAll(/<w:p[\s>][\s\S]*?<\/w:p>/g), (match) => match[0]);
+  const paragraphText = (paragraph: string): string => Array.from(
+    paragraph.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g), (part) => decodeHtmlEntities(part[1] ?? ''),
+  ).join('');
+  const paragraphs = uniqueStrings(paragraphXml.map(paragraphText), 48);
+  // Test each paragraph on its own: a pattern that starts at the first `<w:p`
+  // and looks ahead for a heading style would swallow every paragraph before it.
   const headings = uniqueStrings(
-    Array.from(xml.matchAll(/<w:p[\s\S]*?<w:pStyle[^>]*w:val="Heading[0-9]+"[\s\S]*?<\/w:p>/g), (match) => {
-      const text = Array.from(match[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g), (part) => decodeHtmlEntities(part[1] ?? '')).join('');
-      return text;
-    }),
+    paragraphXml.filter((paragraph) => /<w:pStyle[^>]*w:val="Heading[0-9]+"/.test(paragraph)).map(paragraphText),
     12,
   );
   const text = paragraphs.join('\n\n');
@@ -416,9 +413,12 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
     const xml = await zip.file(sheetPath)?.async('string');
     if (!xml) continue;
     const rows = Array.from(xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g), (rowMatch) => {
-      return Array.from((rowMatch[1] ?? '').matchAll(/<c[^>]*?(?:\st="([^"]+)")?[^>]*>([\s\S]*?)<\/c>/g), (cellMatch) => {
-        const type = cellMatch[1] ?? '';
-        const body = cellMatch[2]! ?? '';
+      // Attributes are read from the tag itself: `t` is rarely the first one
+      // (`<c r="A1" s="1" t="s">`), and a self-closing styled blank cell must
+      // not swallow the next cell's value.
+      return Array.from((rowMatch[1] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g), (cellMatch) => {
+        const type = (cellMatch[1] ?? '').match(/\bt="([^"]*)"/)?.[1] ?? '';
+        const body = cellMatch[2] ?? '';
         const raw = body.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1]
           ?? body.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1]
           ?? '';

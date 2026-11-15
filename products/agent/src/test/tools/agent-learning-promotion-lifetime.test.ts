@@ -17,7 +17,7 @@ import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../../agent/skill-registry.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent, readSkillDraftLedger, type SkillDraftRunResult } from '../../agent/skill-draft-runner.ts';
-import { runAutoPromoter, assertAutoPromoteResultCurrent, type AutoPromoteResult } from '../../tools/agent-harness-learning-auto-promote.ts';
+import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites, type AutoPromoteResult } from '../../tools/agent-harness-learning-auto-promote.ts';
 import { harnessCatalogInvocationAuthority } from '../../tools/agent-harness-catalog-ingress.ts';
 import type { CatalogRankingOptions } from '../../tools/agent-harness-catalog-ranking.ts';
 import type { LearningCuratorNativeContext } from '../../tools/agent-harness-learning-curator-source.ts';
@@ -32,7 +32,7 @@ function barrier() {
 
 type Inspect = (result: SkillDraftRunResult | AutoPromoteResult, options: CatalogRankingOptions) => void;
 
-async function fixture(settings: { readonly target?: string; readonly gradeConfidence?: number; readonly suspend?: boolean; readonly priorEffects?: Parameters<typeof AgentSkillRegistry.fromShellPaths>[1] } = {}) {
+async function fixture(settings: { readonly target?: string; readonly gradeConfidence?: number; readonly suspend?: boolean; readonly daemonMemory?: boolean; readonly duplicatePersonas?: boolean; readonly priorEffects?: Parameters<typeof AgentSkillRegistry.fromShellPaths>[1] } = {}) {
   const root = makeProjectTempDir('learning-promotion-lifetime');
   const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, 'config') });
@@ -43,7 +43,11 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
   const context: LearningCuratorNativeContext = { workspace: { shellPaths: paths }, clients: { agentKnowledgeApi: { memory } } };
   const skills = AgentSkillRegistry.fromShellPaths(paths, settings.priorEffects);
   const notes = AgentNoteRegistry.fromShellPaths(paths);
-  for (const title of ['Archive recovery', 'Release review', 'Backup check']) {
+  if (settings.duplicatePersonas) {
+    const personas = AgentPersonaRegistry.fromShellPaths(paths);
+    for (const [name, body] of [['Release reviewer', 'First wording.'], ['Release reviewers', 'Second wording.'], ['Reviewer of releases', 'Third wording.']] as const)
+      personas.create({ name, description: 'Reviews a release.', body, source: 'user' });
+  } else for (const title of ['Archive recovery', 'Release review', 'Backup check']) {
     const note = notes.create({ title, body: `Complete synthetic steps for ${title}.`, tags: ['ordinary'] });
     notes.markReviewed(note.id);
   }
@@ -51,6 +55,12 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
   const rawReads = new Set<Promise<unknown>>();
   let suspended = false;
   const scripted = fakePort((wireName, question) => {
+    // Every pair of records reads as the same entity and the first one survives; the call's own admission readings are unchanged.
+    if (settings.duplicatePersonas && !/^(effect|risk|edge)__/.test(wireName)) {
+      if (question.type === 'score') return scoreAnswer(question, 2, 0.9999);
+      if (question.type === 'noul') return noulAnswer(wireName.startsWith('item_') ? 0.0001 : 0.9999);
+      return choiceAnswer(question, '0', 0.9999);
+    }
     const name = wireName.replace(/^(effect|risk|edge)__/, '');
     if (question.type === 'score') return scoreAnswer(question, name === 'link' ? 0 : 3, settings.gradeConfidence ?? 0.9999);
     if (question.type === 'noul') return noulAnswer(name === 'mutates' ? 0.999 : 0.001);
@@ -80,6 +90,7 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
   const permissions = new PermissionManager(undefined, createPermissionConfigReader(config), new PolicyRuntimeState());
   const registry = new ToolRegistry(permissions);
   bindAgentResearchSourceOwner(registry, owner);
+  const stops: unknown[] = [];
   let inspect: Inspect | undefined, beforeCurrent: (() => void) | undefined, sequence = 0, admissions = 0;
   const pending = new Set<Promise<unknown>>();
   const controllers = new Set<AbortController>();
@@ -101,7 +112,9 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
         assertSkillDraftRunResultCurrent(result, context, options); assertCurrent();
         return { success: true, output };
       }
-      const result = await runAutoPromoter(context, skills, memory, options);
+      let result: AutoPromoteResult;
+      try { result = await runAutoPromoter(context, skills, memory, options, settings.daemonMemory === true); }
+      catch (stopped) { stops.push(stopped); throw stopped; }
       inspect?.(result, options);
       const output = JSON.stringify(result);
       assertAutoPromoteResultCurrent(result, context, options); assertCurrent();
@@ -124,7 +137,7 @@ async function fixture(settings: { readonly target?: string; readonly gradeConfi
     pending.add(work); void work.then(() => pending.delete(work), () => pending.delete(work));
     return work;
   }
-  return { root, paths, store, memory, skills, notes, context, tool, log, run, entered, released,
+  return { root, paths, store, memory, skills, notes, context, tool, log, run, entered, released, stops,
     admissions: () => admissions, inspect(callback: Inspect) { inspect = callback; },
     beforeCurrent(callback: () => void) { beforeCurrent = callback; },
     async drainReadings() { await Promise.allSettled([...rawReads]); },
@@ -191,6 +204,19 @@ test('abort during a noncooperating captured reading refuses without writes or a
     await h.drainReadings();
     expect(recordedActions(h.log)).toEqual(actions);
   } finally { h.released.release(); await pending.catch(() => {}); await h.close(); }
+});
+
+test('a stop after the first draft is created leaves every created draft listed in the ledger', async () => {
+  const controller = new AbortController();
+  let published = 0;
+  const h = await fixture({ priorEffects: { onEffect(effect) { if (effect === true && ++published === 1) controller.abort(new Error('The original caller stopped')); } } });
+  try {
+    await expect(h.run('skill', controller)).rejects.toBeDefined();
+    const created = h.skills.list();
+    // The stop came after the first create and before the third, so the pass was cut short with at least one draft durable.
+    expect(created.length).toBeGreaterThan(0); expect(created.length).toBeLessThan(3);
+    expect(readSkillDraftLedger(h.skills).map(entry => entry.skillId)).toEqual(created.map(record => record.id));
+  } finally { await h.close(); }
 });
 
 test.each(['source', 'ledger'] as const)('a concurrent %s write during grading is not adopted or overwritten', async change => {
@@ -265,8 +291,23 @@ test.each(['memory', 'persona', 'routine'] as const)('an authentic reviewed-note
       const rows = AgentRoutineRegistry.fromShellPaths(h.paths).list();
       expect(rows).toHaveLength(3);
       expect(rows.every(record => record.steps.startsWith('Complete synthetic steps for '))).toBe(true);
+      // A routine made from note or session text stays off until its owner enables it.
+      expect(rows.every(record => record.enabled === false)).toBe(true);
     }
     expect(h.notes.list()).toHaveLength(3);
+  } finally { await h.close(); }
+});
+
+test('with a daemon serving memory, a memory proposal is skipped with the reason and nothing is written locally', async () => {
+  const h = await fixture({ target: 'memory', daemonMemory: true });
+  try {
+    const result = await h.run('auto');
+    expect(result.success).toBe(true);
+    const report = JSON.parse(result.output ?? '{}') as { readonly promoted: number; readonly skipped: number; readonly log: readonly string[] };
+    expect(report.promoted).toBe(0);
+    expect(report.skipped).toBe(3);
+    expect(report.log.every(line => line.includes('served by the connected daemon'))).toBe(true);
+    expect(h.memory.getAll()).toHaveLength(0);
   } finally { await h.close(); }
 });
 
@@ -316,5 +357,33 @@ test('an uncertain original grade cannot write a memory or silently substitute d
     expectNoOwnedWrites(h);
     expect(AgentPersonaRegistry.fromShellPaths(h.paths).list()).toHaveLength(0);
     expect(AgentRoutineRegistry.fromShellPaths(h.paths).list()).toHaveLength(0);
+  } finally { await h.close(); }
+});
+
+test('a stop after the first duplicate is staged reports that write instead of hiding it behind a refusal', async () => {
+  const h = await fixture({ duplicatePersonas: true });
+  try {
+    const personas = () => AgentPersonaRegistry.fromShellPaths(h.paths);
+    const staged = () => personas().list().filter(record => record.reviewState === 'stale').length;
+    h.beforeCurrent(() => { if (staged() === 1) throw new ToolInputProjectionError('held'); });
+    await expect(h.run('auto')).rejects.toBeDefined();
+    // The group had two duplicates to stage; the stop came after the first became durable.
+    expect(staged()).toBe(1);
+    const reported = completedPromotionWrites(h.stops[0]);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('consolidated duplicate persona:');
+    expect((h.stops[0] as Error).message).toContain('Writes already made before it stopped');
+  } finally { await h.close(); }
+});
+
+test.each(['persona', 'routine'] as const)('a stop after the first %s promotion is durable reports that write', async target => {
+  const h = await fixture({ target });
+  try {
+    const count = () => (target === 'persona' ? AgentPersonaRegistry.fromShellPaths(h.paths).list() : AgentRoutineRegistry.fromShellPaths(h.paths).list()).length;
+    h.beforeCurrent(() => { if (count() === 1) throw new ToolInputProjectionError('held'); });
+    await expect(h.run('auto')).rejects.toBeDefined();
+    expect(count()).toBe(1);
+    const reported = completedPromotionWrites(h.stops[0]);
+    expect(reported.join(' ')).toContain(`wrote ${target} for`);
   } finally { await h.close(); }
 });

@@ -72,6 +72,7 @@ describe('HunkCommentSheet', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('src/foo.ts');
     expect(text).toContain('checkpoint "turn abc" · 2 minutes ago');
+    expect(container.querySelector('.hunk-sheet__lines')?.textContent).toBe('new 40–43 · old 40–42');
     // excerpt reconstructs the added line with its marker
     expect(container.querySelector('.hunk-sheet__excerpt')?.textContent).toContain('+const c = 3;');
     unmount();

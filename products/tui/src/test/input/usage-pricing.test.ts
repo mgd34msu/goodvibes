@@ -52,9 +52,13 @@ function makeModal(options: { model: string; usage?: { input: number; output: nu
   const type = (value: string): void => { for (const ch of value) host.handleToken({ type: 'text', value: ch }); };
   const key = (name: string): void => { host.handleToken({ type: 'key', name, logicalName: name, ctrl: false, shift: false, meta: false } as InputToken); };
   const completeTurn = async (): Promise<void> => {
+    // The bus delivers each listener in its own microtask, in subscription order, so a listener added after the
+    // tracker's runs after it: waiting on it means the tracker has recorded the turn.
+    const delivered = new Promise<void>((resolve) => {
+      const unsubscribe = events.turns.on('TURN_COMPLETED', () => { unsubscribe(); resolve(); });
+    });
     bus.emit('turn', createEventEnvelope('TURN_COMPLETED', { type: 'TURN_COMPLETED', turnId: 'turn-1', response: '', stopReason: 'completed' }, TEST_ENV_CTX));
-    await Promise.resolve();
-    await Promise.resolve();
+    await delivered;
   };
   return { tracker, modal, host, text, type, key, config, completeTurn };
 }

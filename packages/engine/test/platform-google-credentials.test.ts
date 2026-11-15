@@ -115,12 +115,40 @@ describe('adopting credentials from an existing gmail-mcp install', () => {
     ).toBeNull();
   });
 
-  test('adoption never writes: the file port it is given exposes no write method', () => {
-    // Enforced by construction: GoogleFilePort has only exists() and
-    // readText(). The credentials belong to a tool that is still using them,
-    // so rewriting or rotating them would break it.
-    const port = filePortFrom(gmailMcpFiles());
-    expect(Object.keys(port).sort()).toEqual(['exists', 'readText']);
+  test('adoption only ever calls exists and readText on the port, on every layout', () => {
+    // The credentials belong to a tool that is still using them, so rewriting or
+    // rotating them would break it. The port is wrapped so that touching any
+    // other member (a write, rename or delete added to the interface later and
+    // called from adoption) throws instead of passing unnoticed.
+    const layout = gmailMcpLayout(HOME);
+    const strictPort = (files: Readonly<Record<string, string>>): { readonly port: GoogleFilePort; readonly touched: string[] } => {
+      const inner = filePortFrom(files);
+      const touched: string[] = [];
+      const port = new Proxy(inner, {
+        get(target, property, receiver) {
+          if (property !== 'exists' && property !== 'readText') {
+            throw new Error(`adoption reached for ${String(property)} on the file port`);
+          }
+          touched.push(property);
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      return { port, touched };
+    };
+
+    const partial = gmailMcpFiles();
+    delete partial[layout.tokenFiles[0] ?? ''];
+    const layouts: readonly Readonly<Record<string, string>>[] = [
+      gmailMcpFiles(),
+      partial,
+      { [layout.clientFile]: '{ not json' },
+      {},
+    ];
+    for (const files of layouts) {
+      const { port, touched } = strictPort(files);
+      expect(() => adoptGmailMcpCredentials(port, HOME)).not.toThrow();
+      expect(touched.length).toBeGreaterThan(0);
+    }
   });
 });
 

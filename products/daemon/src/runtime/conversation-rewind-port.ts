@@ -36,10 +36,16 @@
 import type {
   RewindAnchor,
   RewindConversationOutcome,
-  RewindConversationPort,
   RewindConversationPreview,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
-import { resolveTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
+import {
+  createConversationRewindPort as createSharedConversationRewindPort,
+  createConversationRewindScope,
+  type ConversationRewindPort,
+  type RewindConversation,
+} from '@goodvibes-jev/engine/terminal-shell/conversation-rewind-port';
+
+export type { ConversationRewindPort };
 
 /** Whatever a conversation is serialized as by the process that owns it. */
 type ConversationJson = unknown;
@@ -57,83 +63,38 @@ export interface RewindableConversation {
   removeMessagesAfter(count: number): void;
 }
 
-/** The port plus the reversal accessors an undo/redo surface needs. */
-export interface ConversationRewindPort extends RewindConversationPort {
-  /** Restore the pre-truncation conversation (the /undo direction). */
-  restoreBefore(undoSnapshotId: string): boolean;
-  /** Restore the post-truncation conversation (the /redo direction). */
-  restoreAfter(undoSnapshotId: string): boolean;
-}
-
-/** One truncation's captured state, the target conversation and its snapshots. */
-interface SnapshotPair {
-  readonly conv: RewindableConversation;
-  readonly before: ConversationJson;
-  readonly after: ConversationJson;
-}
-
 /** What this port says when it holds no conversation for the session asked about. */
 const NO_LIVE_CONVERSATION =
   'this daemon holds no live conversation for that session, so it cannot count or drop its messages';
 
 /**
- * Build a conversation rewind port. `resolveConversation` maps an anchor's
- * sessionId to the live conversation: the daemon looks the session up in the
- * registry below. A null resolution is reported as unavailable with the reason
- *, never as a count, because "nobody here is holding those messages" and
- * "there are no messages to drop" are different facts and only one of them is
- * true.
+ * The shared terminal port counts and truncates a conversation with the undo
+ * guard and a bounded snapshot history; this daemon only differs where nobody
+ * holds the conversation. The shared port answers a missing conversation with
+ * "nothing to drop", which here would read as a real zero, so that case is
+ * reported as unavailable with the reason instead.
  */
 export function createConversationRewindPort(
   resolveConversation: (sessionId: string) => RewindableConversation | null,
 ): ConversationRewindPort {
-  const snapshots = new Map<string, SnapshotPair>();
-
-  function keepFor(anchor: RewindAnchor): { conv: RewindableConversation | null; keep: number; total: number } {
-    const conv = resolveConversation(anchor.sessionId);
-    if (!conv) return { conv: null, keep: 0, total: 0 };
-    const total = conv.getMessageCount();
-    const rec = anchor.turnId ? resolveTurnAnchor(anchor.sessionId, anchor.turnId) : null;
-    const keep = rec ? Math.min(rec.messageCount, total) : total;
-    return { conv, keep, total };
-  }
-
-  function restore(snapshot: SnapshotPair | undefined, which: 'before' | 'after'): boolean {
-    if (!snapshot) return false;
-    snapshot.conv.fromJSON(snapshot[which]);
-    snapshot.conv.rebuildHistory();
-    return true;
-  }
-
+  // The shared type pins the JSON shape to the terminal conversation class;
+  // the daemon port is written against any structural conversation, and it only
+  // ever hands a conversation's own JSON back to that conversation.
+  const resolveShared = resolveConversation as unknown as (sessionId: string) => RewindConversation | null;
+  const shared = createSharedConversationRewindPort(resolveShared);
   return {
+    ...shared,
     async preview(anchor: RewindAnchor): Promise<RewindConversationPreview> {
-      const { conv, keep, total } = keepFor(anchor);
-      if (!conv) {
+      if (!resolveConversation(anchor.sessionId)) {
         return { messagesToDrop: 0, messagesRemaining: 0, available: false, unavailableReason: NO_LIVE_CONVERSATION };
       }
-      return { messagesToDrop: Math.max(0, total - keep), messagesRemaining: keep };
+      return shared.preview(anchor);
     },
-
     async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
-      const { conv, keep, total } = keepFor(anchor);
-      const undoSnapshotId = `rwc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-      if (!conv) {
+      if (!resolveConversation(anchor.sessionId)) {
         return { droppedMessages: 0, undoSnapshotId: '', available: false, unavailableReason: NO_LIVE_CONVERSATION };
       }
-      const before = conv.toJSON();
-      conv.removeMessagesAfter(keep);
-      conv.rebuildHistory();
-      const after = conv.toJSON();
-      snapshots.set(undoSnapshotId, { conv, before, after });
-      return { droppedMessages: Math.max(0, total - keep), undoSnapshotId };
-    },
-
-    restoreBefore(undoSnapshotId: string): boolean {
-      return restore(snapshots.get(undoSnapshotId), 'before');
-    },
-
-    restoreAfter(undoSnapshotId: string): boolean {
-      return restore(snapshots.get(undoSnapshotId), 'after');
+      return shared.rewind(anchor);
     },
   };
 }
@@ -148,16 +109,16 @@ export function createConversationRewindPort(
 // reason, rather than as a count.
 // ---------------------------------------------------------------------------
 
-const liveConversations = new Map<string, RewindableConversation>();
+const scope = createConversationRewindScope<RewindConversation>();
 
 /** Register a session's live conversation so the daemon rewind verbs can serve it. */
 export function registerSessionConversation(sessionId: string, conversation: RewindableConversation): void {
-  if (sessionId) liveConversations.set(sessionId, conversation);
+  scope.registerSessionConversation(sessionId, conversation as unknown as RewindConversation);
 }
 
 /** Drop a session's conversation registration. */
 export function unregisterSessionConversation(sessionId: string): void {
-  liveConversations.delete(sessionId);
+  scope.unregisterSessionConversation(sessionId);
 }
 
 /**
@@ -167,5 +128,5 @@ export function unregisterSessionConversation(sessionId: string): void {
  * live in this process.
  */
 export function createSessionConversationRewindPort(): ConversationRewindPort {
-  return createConversationRewindPort((sessionId) => liveConversations.get(sessionId) ?? null);
+  return createConversationRewindPort((sessionId) => scope.findSessionConversation(sessionId));
 }

@@ -11,17 +11,20 @@ import { registerPlanningRuntimeCommands } from '../../input/commands/planning-r
 import { judgmentInputCardProblem } from '@goodvibes-jev/engine/platform/platform/gate';
 
 const roots: string[] = [];
+const stores: KnowledgeStore[] = [];
 let previous: ReturnType<typeof installJudgmentPort>;
 beforeEach(() => { previous = installJudgmentPort(fakePort(name => noulAnswer(name === 'scope' || name === 'approval' ? 0.99 : 0.01)).port); });
-afterEach(() => {
+afterEach(async () => {
   installJudgmentPort(previous);
+  // Close every opened sqlite handle before its directory is removed.
+  for (const store of stores.splice(0)) await store.close();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'planning-record-command-')); roots.push(root);
   const path = join(root, 'planning.sqlite');
-  const store = new KnowledgeStore({ dbPath: path });
+  const store = new KnowledgeStore({ dbPath: path }); stores.push(store);
   const service = new ProjectPlanningService(store);
   const authored: ProjectPlanningStateUpsertInput['state'] = {
     goal: '  Inspect retries\nwithout widening scope  ', scope: 'Only retry helpers', knownContext: ['Keep requests local'],
@@ -43,7 +46,7 @@ async function fixture() {
 }
 
 async function reopened(path: string) {
-  const store = new KnowledgeStore({ dbPath: path }); await store.init();
+  const store = new KnowledgeStore({ dbPath: path }); stores.push(store); await store.init();
   return { sources: store.listSources(1000).sort((a, b) => a.id.localeCompare(b.id)), state: await new ProjectPlanningService(store).getState({ projectId: 'fixture' }) };
 }
 

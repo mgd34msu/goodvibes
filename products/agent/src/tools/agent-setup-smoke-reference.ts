@@ -7,7 +7,7 @@ import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platfor
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
-import { MAX_SETUP_SMOKE_FIELD_CHARS, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, redactSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
+import { SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, redactSetupSmokeEvidence, redactSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
 import type { SetupSmokeArtifactStore, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
 
 type ExecutionOptions = Parameters<Tool['execute']>[1];
@@ -85,7 +85,8 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
       const cleared = redactSetupSmokeEvidenceFull(raw.trim());
       if (containsIssuerCredential(cleared)) throw new ToolInputProjectionError('held');
       safeFields[definition.id] = `native-smoke:${definition.id}`;
-      if (cleared) evidence.push(Object.freeze({ ...definition, value: cleared.slice(0, MAX_SETUP_SMOKE_FIELD_CHARS) }));
+      // The saved value says when it was cut; the parts shown to the approver stay complete.
+      if (cleared) evidence.push(Object.freeze({ ...definition, value: redactSetupSmokeEvidence(raw.trim()) }));
       return { id: definition.id, label: definition.label, parts: evidenceParts(cleared) };
     });
     const safeArgs = { ...request.args, fields: safeFields, nativeReferenceSubjects: {
@@ -141,7 +142,13 @@ export function resolveSetupSmokeNativeEvidence(args: Record<string, unknown>, o
   assertCurrent();
   if (!capture) {
     // No selected output requires no private source and cannot save references.
-    if (args.fields && Object.keys(args.fields as object).length) throw new ToolInputProjectionError('held');
+    if (args.fields && Object.keys(args.fields as object).length) {
+      // Fields that name no known evidence id, or carry a non-string value, are the
+      // caller's mistake, not a hold by the host; say so.
+      const given = args.fields as Readonly<Record<string, unknown>>;
+      const usable = SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS.some(field => typeof given[field.id] === 'string');
+      throw new ToolInputProjectionError(usable ? 'held' : 'invalid');
+    }
     return { fields: [], assertCurrent, createArtifact: undefined };
   }
   return { fields: capture.evidence, assertCurrent, createArtifact: capture.create && capture.store

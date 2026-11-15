@@ -192,6 +192,7 @@ async function runHappyPath(
   socket.feed('* OK [UIDVALIDITY 7] selected mailbox');
   socket.feed(`${socket.tagFor(1)} OK SELECT completed`);
   await Promise.resolve();
+  socket.feed('* 1 FETCH (FLAGS (GoodVibes_Spam))');
   socket.feed(`${socket.tagFor(2)} OK STORE completed`);
   await Promise.resolve();
   respondLogout(socket);
@@ -272,6 +273,7 @@ describe('imapStoreFlagOverTls data pump (mock socket)', () => {
         s.feed('* OK [UIDVALIDITY 7] selected mailbox');
         s.feed(`${s.tagFor(1)} OK SELECT ok`);
         await Promise.resolve();
+        s.feed('* 5 FETCH (FLAGS (GoodVibes_Spam))');
         s.feed(`${s.tagFor(2)} OK STORE ok`);
         await Promise.resolve();
         s.feed(`${s.tagFor(3)} OK LOGOUT ok`);

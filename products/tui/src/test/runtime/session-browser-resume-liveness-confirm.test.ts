@@ -12,7 +12,7 @@
  * or own-process marker never asks anything and never blocks.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { SessionSurface } from '@/runtime/index.ts';
 import {
   buildLiveResumeConfirmItems,
@@ -22,7 +22,8 @@ import {
 } from '../../runtime/session-resume-liveness-confirm.ts';
 import { createResumeSessionHandler } from '../../runtime/bootstrap-hook-bridge.ts';
 import { ConversationManager } from '../../core/conversation.ts';
-import { writeLivenessMarker, LIVENESS_STALE_AFTER_MS } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { writeLivenessMarker, livenessMarkerPathFor, LIVENESS_STALE_AFTER_MS } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { ConfirmOptions } from '../../input/confirm-dialog.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
@@ -61,20 +62,30 @@ describe('confirmLiveResume: when it asks at all', () => {
     expect(op.asked()).toBe(0);
   });
 
-  test('a stale marker never asks and never blocks; best-effort, not a lock', async () => {
+  test('a marker older than the staleness window never asks and never blocks; best-effort, not a lock', async () => {
+    // A live pid that is not this process, so only the age can make it not live.
     writeLivenessMarker(surface, 'sess-stale', process.pid);
-    // Rewrite the marker as older than the staleness window by writing it,
-    // then asserting through a check whose clock has moved past the cutoff:
-    // confirmLiveResume uses the module's own staleness rule, so a marker
-    // older than LIVENESS_STALE_AFTER_MS is simply not live.
+    const markerPath = livenessMarkerPathFor(surface, 'sess-stale');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf-8')) as { updatedAt: number };
+    marker.updatedAt = Date.now() - LIVENESS_STALE_AFTER_MS - 60_000;
+    writeFileSync(markerPath, JSON.stringify(marker));
     const op = operator('cancel');
-    const stale = makeTestSurface(tmpDir);
-    // A pid that is not running stands in for the other stale case the same
-    // rule covers; both resolve to { live: false }.
-    writeLivenessMarker(stale, 'sess-dead', 2_147_483_000);
-    expect(await confirmLiveResume('sess-dead', { surface: stale, openSelection: () => op.open })).toBe(true);
+    expect(await confirmLiveResume('sess-stale', { surface, openSelection: () => op.open, selfPid: 999_999 })).toBe(true);
     expect(op.asked()).toBe(0);
-    expect(LIVENESS_STALE_AFTER_MS).toBeGreaterThan(0);
+  });
+
+  test('a fresh marker for the same live pid does ask, so the stale case above is decided by age alone', async () => {
+    writeLivenessMarker(surface, 'sess-fresh', process.pid);
+    const op = operator('cancel');
+    expect(await confirmLiveResume('sess-fresh', { surface, openSelection: () => op.open, selfPid: 999_999 })).toBe(false);
+    expect(op.asked()).toBe(1);
+  });
+
+  test('a marker whose process is gone never asks', async () => {
+    writeLivenessMarker(surface, 'sess-dead', 2_147_483_000);
+    const op = operator('cancel');
+    expect(await confirmLiveResume('sess-dead', { surface, openSelection: () => op.open })).toBe(true);
+    expect(op.asked()).toBe(0);
   });
 
   test('no selection surface (headless): proceeds as the seam always did rather than silently refusing', async () => {
@@ -84,6 +95,36 @@ describe('confirmLiveResume: when it asks at all', () => {
 });
 
 describe('confirmLiveResume: the question and its answers', () => {
+  test('the shell confirm dialog is preferred: its answer is the result and the selection list is not consulted', async () => {
+    writeLivenessMarker(surface, 'sess-other', process.pid);
+    const op = operator('resume');
+    const asked: ConfirmOptions[] = [];
+    const confirm = (answer: boolean) => () => async (options: ConfirmOptions): Promise<boolean> => { asked.push(options); return answer; };
+
+    expect(await confirmLiveResume('sess-other', { surface, openSelection: () => op.open, confirm: confirm(true), selfPid: 999_999 })).toBe(true);
+    expect(await confirmLiveResume('sess-other', { surface, openSelection: () => op.open, confirm: confirm(false), selfPid: 999_999 })).toBe(false);
+    expect(op.asked()).toBe(0);
+    expect(asked).toHaveLength(2);
+    expect(asked[0]!.title).toBe(`${LIVE_RESUME_CONFIRM_TITLE}?`);
+    expect(asked[0]!.body).toContain(`pid ${process.pid}`);
+    expect(asked[0]!.confirmLabel).toBe('Resume anyway');
+    expect(asked[0]!.tone).toBe('warning');
+  });
+
+  test('the shell confirm dialog is not asked when there is nothing to warn about', async () => {
+    let asks = 0;
+    const confirm = () => async (): Promise<boolean> => { asks++; return false; };
+    expect(await confirmLiveResume('sess-none', { surface, openSelection: () => undefined, confirm, selfPid: 999_999 })).toBe(true);
+    expect(asks).toBe(0);
+  });
+
+  test('a confirm hook that has no dialog yet falls back to the selection list', async () => {
+    writeLivenessMarker(surface, 'sess-other', process.pid);
+    const op = operator('cancel');
+    expect(await confirmLiveResume('sess-other', { surface, openSelection: () => op.open, confirm: () => undefined, selfPid: 999_999 })).toBe(false);
+    expect(op.asked()).toBe(1);
+  });
+
   test('a live marker from a DIFFERENT pid asks, naming that pid where it cannot be clipped', async () => {
     writeLivenessMarker(surface, 'sess-other', process.pid);
     const op = operator('resume');

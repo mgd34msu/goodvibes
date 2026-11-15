@@ -40,4 +40,6 @@ export interface WorkstreamDraft {
   provenance: WorkstreamDraftProvenance;
   approved: boolean;
   readonly createdAt: number;
+  /** Set to false only while the draft's last change could not be written to disk, so it is held in memory only until the next successful save. Never persisted. */
+  journaled?: false;
 }

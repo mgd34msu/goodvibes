@@ -23,6 +23,7 @@ import {
   type SequenceNode,
   type SubshellNode,
 } from '../platform/src/platform/runtime/permissions/normalization/index.ts';
+import { commandBaseNames } from '../platform/src/platform/runtime/permissions/sandbox-policy.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -183,12 +184,22 @@ describe('parseCommandAST: mixed pipes and sequences', () => {
 describe('parseCommandAST: subshell expressions', () => {
   it('parses backtick subshell as subshell node', () => {
     const ast = parseCommandAST('echo `date`');
-    // The backtick token causes parseAtom to return a SubshellNode
-    // (the echo portion is lost, conservative approach)
-    // We validate the subshell is parsed
+    // A substitution that is an argument stays in the command's token list, so the
+    // command keeps its name and the substitution text stays visible to classifiers.
     const nodes = collectCommandNodes(ast);
-    // Should have at least one node (the subshell inner or echo)
-    expect(nodes.length).toBeGreaterThanOrEqual(0);
+    expect(nodes.map((node) => node.command)).toEqual(['echo']);
+    expect(nodes[0]!.tokens.filter((t) => t.type === 'subshell').map((t) => t.value)).toEqual(['`date`']);
+  });
+
+  it('a standalone $(...) exposes the command inside it', () => {
+    const ast = parseCommandAST('$(rm -rf x)');
+    expect(ast.kind).toBe('subshell');
+    expect(collectCommandNodes(ast).map((node) => node.command)).toEqual(['rm']);
+  });
+
+  it('a substitution that is an argument keeps its inner command visible to the egress name check', () => {
+    expect(commandBaseNames('echo $(rm -rf x)').sort()).toEqual(['echo', 'rm']);
+    expect(commandBaseNames('echo `rm -rf x`').sort()).toEqual(['echo', 'rm']);
   });
 
   it('backtick subshell node has inner parsed content', () => {
@@ -201,13 +212,10 @@ describe('parseCommandAST: subshell expressions', () => {
     expect(innerNodes.map((node) => node.command)).toEqual(['ls']);
   });
 
-  it('handles nested subshell $(cmd): tokenizer extracts as subshell token', () => {
-    // The tokenizer may not handle $(...) perfectly in all positions;
-    // we verify no crash and some structure is produced.
-    const ast = parseCommandAST('echo $(date +%s)');
-    expect(ast).toEqual(expect.objectContaining({
-      kind: expect.any(String),
-    }));
+  it('an argument $(cmd) is one subshell token on the command', () => {
+    const nodes = collectCommandNodes(parseCommandAST('echo $(date +%s)'));
+    expect(nodes.map((node) => node.command)).toEqual(['echo']);
+    expect(nodes[0]!.tokens.filter((t) => t.type === 'subshell').map((t) => t.value)).toEqual(['$(date +%s)']);
   });
 });
 
@@ -229,6 +237,9 @@ describe('parseCommandAST: redirects', () => {
   it('parses command with append redirect', () => {
     const ast = parseCommandAST('date >> /tmp/log.txt');
     expect(ast.kind).toBe('command');
+    const node = ast as CommandNode;
+    expect(node.command).toBe('date');
+    expect(node.tokens.find((t) => t.type === 'redirect')).toEqual(expect.objectContaining({ type: 'redirect', value: '>>' }));
   });
 
   it('parses command with stderr redirect', () => {

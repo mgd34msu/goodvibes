@@ -118,3 +118,58 @@ export function permissionOutcomeFor(
   }
   return { outcome: { outcome: 'cancelled' } };
 }
+
+/**
+ * The text of an `agent_message_chunk` session update, or '' for any other
+ * update. ACP sends `content` as ONE ContentBlock; an array of blocks is
+ * tolerated so a lenient agent does not lose its text.
+ */
+export function messageChunkText(update: { sessionUpdate?: unknown; content?: unknown }): string {
+  if (update.sessionUpdate !== 'agent_message_chunk') return '';
+  const blocks: unknown[] = Array.isArray(update.content) ? update.content : [update.content];
+  return blocks
+    .filter((block): block is { type: string; text?: string } => !!block && typeof block === 'object' && (block as { type?: unknown }).type === 'text')
+    .map((block) => block.text ?? '')
+    .join('');
+}
+
+/** Bound for the spawn, initialize and session/new handshake of an ACP child. */
+export const ACP_HANDSHAKE_TIMEOUT_MS = 15_000;
+
+/** Reject with a labelled error when `promise` has not settled within `ms`. */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => rejectPromise(new Error(`${label} timed out after ${ms}ms`)), ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    promise.then(
+      (value) => { clearTimeout(timer); resolvePromise(value); },
+      (error) => { clearTimeout(timer); rejectPromise(error); },
+    );
+  });
+}
+
+/**
+ * Read a child's piped stderr to the end, keeping only the last `maxChars`.
+ * An unread pipe fills the OS buffer and blocks the child on its next stderr
+ * write; the retained tail also explains a failed handshake.
+ */
+export function drainStderrTail(stream: unknown, maxChars = 2000): { tail(): string } {
+  let tail = '';
+  const readable = stream as ReadableStream<Uint8Array> | null | undefined;
+  if (readable && typeof readable.getReader === 'function') {
+    const decoder = new TextDecoder();
+    const reader = readable.getReader();
+    void (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          tail = (tail + decoder.decode(value, { stream: true })).slice(-maxChars);
+        }
+      } catch {
+        // The child is gone; whatever was read stays as the tail.
+      }
+    })();
+  }
+  return { tail: () => tail.trim() };
+}

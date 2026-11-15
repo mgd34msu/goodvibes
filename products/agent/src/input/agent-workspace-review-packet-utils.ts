@@ -1,4 +1,5 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from '../tools/agent-review-packet-presets-core.ts';
 import type { AgentWorkspaceRecentReviewerHandoffArtifact, AgentWorkspaceReviewPacketPresetLineage } from './agent-workspace-types.ts';
 import { readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 
@@ -60,7 +61,7 @@ export function isReviewerHandoffArchiveArtifact(artifact: ArtifactDescriptor): 
 }
 
 export function isModelCompareRouteDecisionArtifact(artifact: ArtifactDescriptor): boolean {
-  return readArtifactMetadataString(artifact.metadata, 'purpose') === 'agent-model-compare-route-decision';
+  return hasPurpose(artifact, PURPOSE_MODEL_COMPARE_ROUTE_DECISION);
 }
 
 export function isReviewPacketPresetArtifact(artifact: ArtifactDescriptor): boolean {
@@ -101,7 +102,9 @@ export function latestMatchingArtifact(
 
 export function reviewPacketPresetFreshness(
   preset: ArtifactDescriptor,
-  artifacts: readonly ArtifactDescriptor[],
+  listedArtifacts: readonly ArtifactDescriptor[],
+  /** Looks one artifact up outside the listed window, so a reference older than the list is not reported missing. */
+  resolveArtifact?: (artifactId: string) => ArtifactDescriptor | null,
 ): { readonly missingCount: number; readonly newerCount: number; readonly summary: string; readonly status: 'info' | 'attention' } {
   const metadata = preset.metadata;
   const primaryIds = [
@@ -115,6 +118,11 @@ export function reviewPacketPresetFreshness(
   ].filter(Boolean);
   const relatedIds = readArtifactMetadataStringList(metadata, 'relatedArtifactIds');
   const referencedIds = uniqueStrings([...primaryIds, ...relatedIds], 40);
+  const listedIds = new Set(listedArtifacts.map((artifact) => artifact.id));
+  const resolvedOutsideList = resolveArtifact
+    ? referencedIds.filter((artifactId) => !listedIds.has(artifactId)).flatMap((artifactId) => resolveArtifact(artifactId) ?? [])
+    : [];
+  const artifacts = resolvedOutsideList.length > 0 ? [...listedArtifacts, ...resolvedOutsideList] : listedArtifacts;
   const missingCount = referencedIds.filter((artifactId) => !artifactById(artifacts, artifactId)).length;
   const documentId = readArtifactMetadataString(metadata, 'documentId')
     || firstArtifactMetadataString(artifacts, primaryIds, ['documentId', 'sourceDocumentId']);

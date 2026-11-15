@@ -16,21 +16,21 @@
       }
     },
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254185,\"lastActivityAt\":1791214254185,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184}],\"metadata\":{\"surfaceManaged\":true}},\"reopened\":false}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681111,\"lastActivityAt\":1794643681111,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111}],\"metadata\":{\"surfaceManaged\":true}},\"reopened\":false}"
   },
   "initialSession": {
     "methodId": "sessions.get",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254185,\"lastActivityAt\":1791214254185,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681111,\"lastActivityAt\":1794643681111,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[]}"
   },
   "initialMessages": {
     "methodId": "sessions.messages.list",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle/messages",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254185,\"lastActivityAt\":1791214254185,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681111,\"lastActivityAt\":1794643681111,\"messageCount\":0,\"pendingInputCount\":0,\"routeIds\":[],\"surfaceKinds\":[\"tui\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[],\"total\":0,\"offset\":0,\"hasMore\":false}"
   },
   "post": {
     "methodId": "sessions.followUp",
@@ -40,61 +40,61 @@
       "body": "Queue a cleanup pass for later"
     },
     "status": 202,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254190,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254190,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"message\":{\"id\":\"smsg-db042e3d\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254188,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}},\"input\":{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"queued\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254190,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}},\"mode\":\"queued-for-surface\",\"agentId\":null}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681114,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681114,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"message\":{\"id\":\"smsg-e0ba45a7\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}},\"input\":{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"queued\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681114,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}},\"mode\":\"queued-for-surface\",\"agentId\":null}"
   },
   "queued": {
     "methodId": "sessions.inputs.list",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle/inputs",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254190,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254190,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"queued\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254190,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681114,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681114,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"queued\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681114,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
   },
   "messages": {
     "methodId": "sessions.messages.list",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle/messages",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254190,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254190,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[{\"id\":\"smsg-db042e3d\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254188,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}}]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681114,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681114,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[{\"id\":\"smsg-e0ba45a7\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}}],\"total\":1,\"offset\":0,\"hasMore\":false}"
   },
   "sessionAfterPost": {
     "methodId": "sessions.get",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254190,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254190,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[{\"id\":\"smsg-db042e3d\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254188,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}}]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681114,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681114,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"messages\":[{\"id\":\"smsg-e0ba45a7\",\"sessionId\":\"s-tui-idle\",\"role\":\"user\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{\"sessionIntent\":\"follow-up\"}}]}"
   },
   "delivery": {
     "methodId": "sessions.inputs.deliver",
     "method": "POST",
-    "path": "/api/sessions/s-tui-idle/inputs/sin-b14f2f7b/deliver",
+    "path": "/api/sessions/s-tui-idle/inputs/sin-a88febb2/deliver",
     "requestBody": {
       "consumed": false
     },
     "status": 200,
-    "body": "{\"input\":{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"delivered\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254193,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}}"
+    "body": "{\"input\":{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"delivered\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681125,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}}"
   },
   "delivered": {
     "methodId": "sessions.inputs.list",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle/inputs",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254193,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254193,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"delivered\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254193,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681125,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681125,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"delivered\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681125,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
   },
   "terminalWrite": {
     "methodId": "sessions.inputs.deliver",
     "method": "POST",
-    "path": "/api/sessions/s-tui-idle/inputs/sin-b14f2f7b/deliver",
+    "path": "/api/sessions/s-tui-idle/inputs/sin-a88febb2/deliver",
     "requestBody": {
       "consumed": true
     },
     "status": 200,
-    "body": "{\"input\":{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"completed\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254194,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}}"
+    "body": "{\"input\":{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"completed\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681127,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}}"
   },
   "terminal": {
     "methodId": "sessions.inputs.list",
     "method": "GET",
     "path": "/api/sessions/s-tui-idle/inputs",
     "status": 200,
-    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1791214254185,\"updatedAt\":1791214254194,\"lastMessageAt\":1791214254188,\"lastActivityAt\":1791214254194,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1791214254184},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1791214254187}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-b14f2f7b\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"completed\",\"correlationId\":\"session-input:sin-b14f2f7b\",\"causationId\":\"smsg-db042e3d\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1791214254190,\"updatedAt\":1791214254194,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
+    "body": "{\"session\":{\"id\":\"s-tui-idle\",\"kind\":\"tui\",\"project\":\"goodvibes-tui\",\"title\":\"Earlier TUI coding pass\",\"status\":\"active\",\"createdAt\":1794643681111,\"updatedAt\":1794643681127,\"lastMessageAt\":1794643681114,\"lastActivityAt\":1794643681127,\"messageCount\":1,\"pendingInputCount\":1,\"routeIds\":[],\"surfaceKinds\":[\"tui\",\"web\"],\"participants\":[{\"surfaceKind\":\"tui\",\"surfaceId\":\"surface:tui:receipt-proof\",\"lastSeenAt\":1794643681111},{\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"lastSeenAt\":1794643681113}],\"metadata\":{\"surfaceManaged\":true}},\"inputs\":[{\"id\":\"sin-a88febb2\",\"sessionId\":\"s-tui-idle\",\"intent\":\"follow-up\",\"state\":\"completed\",\"correlationId\":\"session-input:sin-a88febb2\",\"causationId\":\"smsg-e0ba45a7\",\"body\":\"Queue a cleanup pass for later\",\"createdAt\":1794643681114,\"updatedAt\":1794643681127,\"surfaceKind\":\"web\",\"surfaceId\":\"surface:web\",\"metadata\":{}}]}"
   }
 }

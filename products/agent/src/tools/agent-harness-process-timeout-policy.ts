@@ -28,16 +28,38 @@ function readField(args: AgentHarnessBackgroundProcessArgs, id: string): string 
   return fieldMap(args.fields)[id] ?? '';
 }
 
+function describeReceived(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value.length > 40 ? `${value.slice(0, 37)}...` : value);
+  return Array.isArray(value) ? 'a list' : typeof value === 'object' && value !== null ? 'an object' : String(value);
+}
+
+/** An absent value takes the fallback; one that was given but is not a number is refused, so a deadline the caller asked for is never silently dropped. */
 function readNumber(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
+  if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) return fallback;
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) {
+    throw new RangeError(`timeoutMs must be a number of milliseconds such as 30000 for 30 seconds; received ${describeReceived(value)}. Omit it to use the default.`);
+  }
   return Math.trunc(parsed);
 }
 
 export function clampTimeout(value: unknown, fallback: number): number {
   const timeout = readNumber(value, fallback);
-  if (timeout < 0 || timeout > MAX_BACKGROUND_TIMEOUT_MS) throw new RangeError('timeoutMs exceeds the runtime timer range');
+  if (timeout < 0) throw new RangeError('timeoutMs must be 0 or greater');
+  if (timeout > MAX_BACKGROUND_TIMEOUT_MS) throw new RangeError('timeoutMs exceeds the runtime timer range');
   return timeout;
+}
+
+/** The longest one wait call blocks a turn; a caller that needs longer waits again. */
+export const MAX_WAIT_TIMEOUT_MS = 600_000;
+
+/**
+ * A wait has its own reading of the shared timeout field. For a start, 0 means no automatic
+ * deadline; for a wait, 0 means look once and return the current status.
+ */
+export function clampWaitTimeout(value: unknown, fallback: number): { readonly timeoutMs: number; readonly capped: boolean } {
+  const timeout = clampTimeout(value, fallback);
+  return timeout > MAX_WAIT_TIMEOUT_MS ? { timeoutMs: MAX_WAIT_TIMEOUT_MS, capped: true } : { timeoutMs: timeout, capped: false };
 }
 
 /** How a started process is treated when its timeout expires. */
@@ -80,9 +102,11 @@ export function resolveKillOnTimeout(
 ): boolean {
   const explicit = args.killOnTimeout ?? readField(args, 'killOnTimeout');
   if (typeof explicit === 'boolean') return explicit;
-  if (explicit === 'true') return true;
-  if (explicit === 'false') return false;
-  return processClass === 'command';
+  if (explicit === undefined || explicit === null || explicit === '') return processClass === 'command';
+  const text = typeof explicit === 'string' ? explicit.trim().toLowerCase() : '';
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  throw new RangeError(`killOnTimeout must be true or false; received ${describeReceived(explicit)}. Omit it to use the default for this process class.`);
 }
 
 export function processStatus(entry: BackgroundProcess): 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' {

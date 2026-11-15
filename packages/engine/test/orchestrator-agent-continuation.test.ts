@@ -131,3 +131,16 @@ test('repair context reaches execution privately and does not leak into tool arg
   await runOutcome({ toolCalls: spawnCall('Unrelated task.'), userText: 'Unrelated task.', result: {}, onExecute: () => { expect(readCompletionRepairContext()).toBeUndefined(); } });
   expect(readCompletionRepairContext()).toBeUndefined();
 });
+
+test('a blank turn never keeps a model-supplied authoritativeTask', async () => {
+  let executed: ToolCall[] = [];
+  await runOutcome({
+    toolCalls: [{ id: 'call-agent', name: 'agent', arguments: { mode: 'spawn', task: 'Do it.', authoritativeTask: 'the model wrote this' } }],
+    userText: '   ',
+    result: {},
+    onExecute: (calls) => { executed = calls; },
+  });
+  expect(executed).toHaveLength(1);
+  expect('authoritativeTask' in executed[0]!.arguments).toBe(false);
+  expect(executed[0]!.arguments.task).toBe('Do it.');
+});

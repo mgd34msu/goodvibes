@@ -27,12 +27,12 @@
  * another machine is reached by the network-adopt path, which writes that
  * daemon's bearer into the same file, so this resolution covers both.
  */
-import { join } from 'node:path';
-import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/platform';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -63,7 +63,7 @@ export type OperatorRpc = OperatorRpcUnavailable | OperatorRpcAvailable;
  * `controlPlane.baseUrl`: that key had no writers and so drifted from the bind
  * on port, scheme, and host at once.
  */
-export function resolveControlPlaneBaseUrl(configManager: ConfigManager): string | null {
+export function resolveControlPlaneBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
   const explicit = String(configManager.get('controlPlane.publicBaseUrl' as never) ?? '').trim();
   if (explicit) return explicit.replace(/\/+$/, '');
   const host = String(configManager.get('controlPlane.host') ?? '').trim();
@@ -79,7 +79,7 @@ export function resolveControlPlaneBaseUrl(configManager: ConfigManager): string
 
 /** The daemon's own state directory, where the shared bearer token lives. */
 export function resolveDaemonStateDirectory(homeDirectory: string): string {
-  return join(homeDirectory, '.goodvibes', 'daemon');
+  return resolveGoodVibesDaemonHome(homeDirectory);
 }
 
 /**
@@ -90,6 +90,8 @@ export function resolveDaemonStateDirectory(homeDirectory: string): string {
 export function resolveOperatorRpc(deps: {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
+  /** Injectable fetch for tests; defaults to the global fetch. */
+  readonly fetch?: typeof fetch | undefined;
 }): OperatorRpc {
   const { configManager } = deps;
   // A refusal is a VALUE here, never a throw, that is the whole contract of
@@ -111,9 +113,19 @@ export function resolveOperatorRpc(deps: {
   // shell paths are not wired (a disabled-daemon path) must still get the honest
   // unavailable reason above, never a "shell paths not wired" throw.
   const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
-  const token = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
-  const platformClient = createGoodVibesPlatform({ baseUrl, authToken: token });
-  return { available: true, platformClient };
+  let token: string;
+  try {
+    token = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
+  } catch (error) {
+    // An unwritable state directory or a token file that cannot be replaced is a
+    // refusal like the others: the caller prints a line, nothing crashes.
+    return {
+      available: false,
+      reason: `the daemon's access token could not be read or created (${error instanceof Error ? error.message : String(error)}): check that ${resolveDaemonStateDirectory(homeDirectory)} is writable, then retry.`,
+    };
+  }
+  const platformClient = createGoodVibesPlatform({ baseUrl, authToken: token, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+  return { available: true, platformClient: withGatewayRouteForWsOnlyVerbs(platformClient, baseUrl, token, deps.fetch ?? fetch) };
 }
 
 /**
@@ -128,6 +140,9 @@ export function describeOperatorRpcError(error: unknown): string {
     }
     if (error.status === 401 || error.status === 403) {
       return `the connected daemon rejected the request (${error.status}): ${error.message}`;
+    }
+    if (error.code === 'CONTRACT_MISMATCH') {
+      return `this terminal and the connected daemon disagree about an operator verb (${error.message}). Update whichever is older, then retry.`;
     }
     return `operator request failed${error.status ? ` (${error.status})` : ''}: ${error.message}`;
   }
@@ -151,14 +166,13 @@ export function describeOperatorRpcError(error: unknown): string {
  * binding: it IS the binding for a ws-declared verb reached over HTTP.
  */
 async function invokeGatewayMethodOverHttp<T>(
-  rpc: OperatorRpcAvailable,
+  fetchImpl: typeof fetch,
   baseUrl: string,
   authToken: string,
   methodId: string,
   input: unknown,
 ): Promise<T> {
-  void rpc;
-  const response = await fetch(`${baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
+  const response = await fetchImpl(`${baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
     // The envelope the route requires: `body` must be PRESENT even when empty,
@@ -185,6 +199,41 @@ async function invokeGatewayMethodOverHttp<T>(
   return payload as T;
 }
 
+/**
+ * True when the contract gives this verb a REST binding. An id the contract does
+ * not know reads as bound, so the typed client reports it as the unknown method
+ * it is instead of this layer sending it to the daemon.
+ */
+function hasHttpBinding(client: GoodVibesPlatform, methodId: string): boolean {
+  if (!isOperatorMethodId(methodId)) return true;
+  try {
+    return client.operator.getOperation(methodId).http !== undefined;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Every consumer of `platformClient.operator.invoke` reaches ws-only verbs
+ * (`cost.attribution.get`, `acp.*`, `fleet.*`, `worktrees.*`, `tailscale.*`...)
+ * through this wrapper. The decision is made from the descriptor, never from a
+ * failed call, so an HTTP-bound verb that fails for a real reason is never
+ * repeated and a mutation is never sent twice.
+ */
+function withGatewayRouteForWsOnlyVerbs(
+  client: GoodVibesPlatform,
+  baseUrl: string,
+  authToken: string,
+  fetchImpl: typeof fetch,
+): GoodVibesPlatform {
+  const typedInvoke = client.operator.invoke;
+  const invoke = ((methodId: string, ...rest: unknown[]) => {
+    if (hasHttpBinding(client, methodId)) return (typedInvoke as (id: string, ...args: unknown[]) => Promise<unknown>)(methodId, ...rest);
+    return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, authToken, methodId, rest[0]);
+  }) as typeof typedInvoke;
+  return { ...client, operator: { ...client.operator, invoke } };
+}
+
 export function createDaemonVerbCaller(deps: {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
@@ -194,20 +243,7 @@ export function createDaemonVerbCaller(deps: {
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
       const rpc = resolveOperatorRpc(deps);
       if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);
-      try {
-        return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
-      } catch (error) {
-        // A CONTRACT_MISMATCH here means exactly one thing: this verb declares
-        // no HTTP route. That is a routing fact, not a failure of the call, so
-        // it falls through to the generic gateway route rather than surfacing
-        // as "the daemon refused" to a user who did nothing wrong.
-        if (!(error instanceof GoodVibesError) || error.code !== 'CONTRACT_MISMATCH') throw error;
-        const baseUrl = resolveControlPlaneBaseUrl(deps.configManager);
-        if (!baseUrl) throw error;
-        const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
-        const token = getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
-        return await invokeGatewayMethodOverHttp<T>(rpc, baseUrl, token, methodId, input);
-      }
+      return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
     },
   };
 }

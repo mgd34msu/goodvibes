@@ -277,9 +277,3 @@ describe('addUserMessage with ContentPart[]', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Orchestrator capability check strips images for non-multimodal models
-// ---------------------------------------------------------------------------
-
-describe('Orchestrator capability check for non-multimodal models', () => {
-});

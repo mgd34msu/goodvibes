@@ -75,7 +75,8 @@ export class ForensicsRegistry {
     // Evict oldest if at capacity
     if (this._reports.length >= this._limit) {
       const evicted = this._reports.shift();
-      if (evicted) this._byId.delete(evicted.id);
+      // A newer report may now own this id; only drop the entry that is the evicted one.
+      if (evicted && this._byId.get(evicted.id) === evicted) this._byId.delete(evicted.id);
     }
     this._reports.push(report);
     this._byId.set(report.id, report);

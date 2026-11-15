@@ -50,7 +50,7 @@ function harness() {
     const result = await admit(...args); await beforeDecision?.(); return result;
   };
   const host: ExternalPermissionHost = { port: services.judgment.port, permissionManager: services.permissionManager, config, signal: lifetime.signal };
-  const catalog = new GatewayMethodCatalog(); let humanAsks = 0; let starts = 0; let created = 0;
+  const catalog = new GatewayMethodCatalog(); let starts = 0; let created = 0;
   let observer: ((tool: string, args: Record<string, unknown>, success: boolean) => void) | undefined;
   let ownerCurrent = true; let rejectedOwnerChecks = 0; let goal = 'Repair CI for the authorized fixture/project branch.';
   const operation = { sourceOf: () => ({ goal, criteria: ['Only fix the existing project scope'] }), signal: lifetime.signal,
@@ -58,7 +58,6 @@ function harness() {
   const deps: CiWatchCompositionDeps = {
     shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }), surfaceRoot: 'tui', configManager: config,
     ciAutonomousHost: () => host, workingDirectory: root, onCiAutoWatch: value => { observer = value; },
-    requestApproval: async () => { humanAsks++; return { approved: false }; },
     automationManager: { createJob: async () => { created++; beforeCreate?.(); return { id: 'fixture-job' }; },
       runNow: async () => { starts++; return { id: 'fixture-run', status: 'running', sessionId: 'fixture-session' }; } } as unknown as CiWatchCompositionDeps['automationManager'],
   };
@@ -83,7 +82,7 @@ function harness() {
     },
     endSource() { ownerCurrent = false; }, recompose() { composeCiWatchGatewayVerbs(catalog, deps); },
     create: (owned = true, triggerFixSession = false) => owned ? withExternalOperationSource(operation, () => invoke('ci.watches.create', { repo: 'fixture/project', ref: 'main', deliveryChannel: 'web', triggerFixSession })) : invoke('ci.watches.create', { repo: 'fixture/project', ref: 'main', deliveryChannel: 'web', triggerFixSession }),
-    counts: () => ({ humanAsks, starts, created }), duringCreate(value: () => void) { beforeCreate = value; },
+    counts: () => ({ starts, created }), duringCreate(value: () => void) { beforeCreate = value; },
     rejectedOwnerChecks: () => rejectedOwnerChecks,
     reject() {
       config.set('permissions.mode', 'custom'); config.set('permissions.tools.agent', 'deny');
@@ -96,18 +95,18 @@ function harness() {
 test('actual CI composition admits default red watch without human offer', async () => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } };
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionTriggered: true, fixSessionId: 'fixture-session' });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 1, created: 1 });
+  expect(h.counts()).toEqual({ starts: 1, created: 1 });
   expect(h.requests.some(request => 'disposition' in request.questions)).toBe(false);
 });
 test.each([false, true])('missing owner refuses including opt-in %s', async trigger => {
   const h = harness(); const { watch } = await h.create(false, trigger) as { watch: { id: string } };
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionTriggered: false, fixSessionError: 'CI repair has no current original-source admission owner' });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('explicit owner policy refusal never falls back to a human offer', async () => {
   const h = harness(); h.reject(); const { watch } = await h.create() as { watch: { id: string } };
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionError: 'CI repair denied by owner policy (config_deny)' });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test.each(['source', 'cancel', 'delete', 'policy'] as const)('%s invalidation during pending admission prevents work', async kind => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } };
@@ -117,17 +116,17 @@ test.each(['source', 'cancel', 'delete', 'policy'] as const)('%s invalidation du
     if (kind === 'policy') h.config.set('permissions.tools.agent', 'deny');
   });
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionTriggered: false });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('concurrent manual/poll work and repeated checks cannot duplicate repair', async () => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } };
   await Promise.all(Array.from({ length: 8 }, () => h.invoke('ci.watches.run', { watchId: watch.id })));
-  await h.invoke('ci.watches.run', { watchId: watch.id }); expect(h.counts()).toEqual({ humanAsks: 0, starts: 1, created: 1 });
+  await h.invoke('ci.watches.run', { watchId: watch.id }); expect(h.counts()).toEqual({ starts: 1, created: 1 });
 });
 test('restart cannot restore authority from saved watch', async () => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } }; h.recompose();
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionError: 'CI repair has no current original-source admission owner' });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('changed exact CI head/run/jobs cannot claim old repair', async () => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } };
@@ -137,17 +136,17 @@ test('changed exact CI head/run/jobs cannot claim old repair', async () => {
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionTriggered: false, fixSessionError: expect.any(String),
     report: { jobs: [{ headSha: 'aabbcc', runId: '51', jobId: '61' }] } });
   expect(readFileSync(join(h.root, 'gh.refreshed'), 'utf8')).toBe('refreshed');
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('explicit policy denial survives an act-capable Jev', async () => {
   const h = harness(); h.reject();
   const { watch } = await h.create(true, true) as { watch: { id: string } };
   expect(await h.invoke('ci.watches.run', { watchId: watch.id })).toMatchObject({ fixSessionError: 'CI repair denied by owner policy (config_deny)' });
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('self-minted source remains usable after triggering tool scope closes', async () => {
   const h = harness(); const watchId = await h.push(); expect(h.counts().starts).toBe(0);
-  await h.invoke('ci.watches.run', { watchId }); expect(h.counts()).toEqual({ humanAsks: 0, starts: 1, created: 1 });
+  await h.invoke('ci.watches.run', { watchId }); expect(h.counts()).toEqual({ starts: 1, created: 1 });
 });
 test('completed native-style source owner cannot be revived from copied goal', async () => {
   const h = harness(); const watchId = await h.push(); const goal = h.operation.sourceOf().goal;
@@ -165,15 +164,15 @@ test('completed native-style source owner cannot be revived from copied goal', a
       { battery: 'engine.redaction.credential', questions: ['lineHasCredential', 'spanIsCredential'] },
     ]).toContainEqual({ battery, questions: Object.keys(request.questions) });
   }
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 0 });
+  expect(h.counts()).toEqual({ starts: 0, created: 0 });
 });
 test('policy change while creating disabled job prevents runNow', async () => {
   const h = harness(); const { watch } = await h.create() as { watch: { id: string } };
   h.duringCreate(() => h.config.set('permissions.tools.agent', 'deny'));
-  await h.invoke('ci.watches.run', { watchId: watch.id }); expect(h.counts()).toEqual({ humanAsks: 0, starts: 0, created: 1 });
+  await h.invoke('ci.watches.run', { watchId: watch.id }); expect(h.counts()).toEqual({ starts: 0, created: 1 });
 });
 test('two watches of exact same failed jobs claim only one repair', async () => {
   const h = harness(); const first = await h.create() as { watch: { id: string } }; const second = await h.create() as { watch: { id: string } };
   await Promise.all([first, second].map(({ watch }) => h.invoke('ci.watches.run', { watchId: watch.id })));
-  expect(h.counts()).toEqual({ humanAsks: 0, starts: 1, created: 1 });
+  expect(h.counts()).toEqual({ starts: 1, created: 1 });
 });

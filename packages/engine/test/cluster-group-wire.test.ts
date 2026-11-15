@@ -163,7 +163,7 @@ describe('the envelope', () => {
 
 describe('the merged wire format: group fields and surface fields together', () => {
   /** A router over an in-memory socket, with the far side wired back to itself. */
-  function loopback(): {
+  function loopback(onGenerationNotHeld?: () => void, ring: ClusterKeyring = keyring()): {
     readonly router: GroupWireRouter;
     readonly sent: string[];
     readonly delivered: string[];
@@ -179,12 +179,13 @@ describe('the merged wire format: group fields and surface fields together', () 
     };
     const router = new GroupWireRouter({
       inner,
-      keyring: keyring(),
+      keyring: ring,
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-      now: () => 999_999,
+      now: () => 1_700_000_000,
       onGroupMessage: () => {},
       onOutOfBandMessage: () => {},
       onForeignBeacon: () => {},
+      ...(onGenerationNotHeld ? { onGenerationNotHeld } : {}),
     });
     return { router, sent, delivered, transport: router.electionTransport('1.2.3') };
   }
@@ -244,6 +245,31 @@ describe('the merged wire format: group fields and surface fields together', () 
       }
       expect(rig.sent).toEqual([]); expect(rig.router.counters.droppedMalformed).toBe(2);
     } finally { await rig.transport.stop(); }
+  });
+
+  test('a datagram claiming a key generation this machine does not hold prompts a catch-up and is still dropped', async () => {
+    let prompts = 0;
+    const rig = loopback(() => { prompts += 1; });
+    const received: string[] = [];
+    await rig.transport.start((raw) => received.push(raw));
+    await rig.transport.send(electionDatagram('').raw);
+    const ahead = { ...(JSON.parse(rig.sent[0]!) as Record<string, unknown>), keyGen: 9 };
+    (rig.router as unknown as { receive(raw: string): void }).receive(JSON.stringify(ahead));
+    expect(prompts).toBe(1);
+    expect(received).toHaveLength(0);
+    expect(rig.router.counters.droppedOldGeneration).toBe(1);
+  });
+
+  test('a datagram from a sender behind this machine\'s key generation does not prompt a catch-up', async () => {
+    let prompts = 0;
+    // Generation 1 is held but no longer accepted: the sender is stale, this machine is not missing anything.
+    const rig = loopback(() => { prompts += 1; }, keyring({ acceptedGenerations: () => [2] }));
+    await rig.transport.start(() => {});
+    await rig.transport.send(electionDatagram('').raw);
+    const behind = { ...(JSON.parse(rig.sent[0]!) as Record<string, unknown>), keyGen: 1 };
+    (rig.router as unknown as { receive(raw: string): void }).receive(JSON.stringify(behind));
+    expect(rig.router.counters.droppedOldGeneration).toBe(1);
+    expect(prompts).toBe(0);
   });
 
   test('the election gets back the exact message it sent', async () => {

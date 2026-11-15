@@ -1,4 +1,5 @@
-import { validatedReadContent } from '../../tools/read/observation.js';
+import { readBodyWithHostEvidence, validatedReadContent } from '../../tools/read/observation.js';
+import type { ToolResult } from '../../types/tools.js';
 import { issueVerificationSource, verificationExecutionGroups } from './source.js';
 import type { VerificationSource, VerificationSourceOwner } from './types.js';
 
@@ -62,7 +63,8 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
     try {
       message = JSON.parse(group.map(source => source.text).join(''));
       if (!object(message) || message.role !== 'tool' || message.callId !== group[0]!.execution!.callId || typeof message.content !== 'string') continue;
-      result = JSON.parse(message.content);
+      // The read's observations travel beside its text on the stored message; a result stored before that carries them in the text.
+      result = readBodyWithHostEvidence({ output: message.content, hostEvidence: message.hostEvidence as ToolResult['hostEvidence'] });
     } catch { continue; }
     if (!object(result) || typeof result.success !== 'boolean' || !Array.isArray(result.files) || !result.files.length) continue;
     let valid = true;
@@ -130,12 +132,17 @@ export function nativeReadReceipts(sources: readonly VerificationSource[], own: 
   return { observations, receipts, reads, ledgers };
 }
 
+const MAX_CITATION_RUN = /[\p{L}\p{N}_.\/-]{513,}/gu;
+
 /** Quote only previously observed source rows. An answer citation selects a
  * verification target, never authorizes a file read or establishes its truth. */
 export function citedReadSources(reads: readonly NativeRead[], response: string, maxCharacters = 48_000,
   own: VerificationSourceOwner = issueVerificationSource): ReadLedgerPage[] {
   const seenCitations = new Set<string>();
-  const citations = [...response.matchAll(/((?:\/?[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[A-Za-z][A-Za-z0-9]{0,9})(?::(\d+)(?:[-–—](\d+))?|#L(\d+)(?:-L(\d+))?)/gu)]
+  // The citation pattern backtracks quadratically over one unbroken run of path characters, so a base64 or
+  // hash dump of tens of thousands of characters would stall the process. No real path is that long.
+  const scannable = response.replace(MAX_CITATION_RUN, ' ');
+  const citations = [...scannable.matchAll(/((?:\/?[\p{L}\p{N}_.-]+\/)*[\p{L}\p{N}_.-]+\.[A-Za-z][A-Za-z0-9]{0,9})(?::(\d+)(?:[-–—](\d+))?|#L(\d+)(?:-L(\d+))?)/gu)]
     .map(match => ({ path: match[1]!, start: Number(match[2] ?? match[4]), end: Number(match[3] ?? match[5] ?? match[2] ?? match[4]) }))
     .filter(citation => {
       if (!Number.isSafeInteger(citation.start) || citation.start <= 0 || !Number.isSafeInteger(citation.end) || citation.end < citation.start) return false;

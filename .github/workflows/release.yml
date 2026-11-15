@@ -78,7 +78,7 @@ jobs:
           RELEASE_MODE: ${{ github.event.inputs.mode }}
           CANDIDATE_SOURCE: ${{ github.event.inputs.source }}
         run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo 'A version tag label is required.' >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "A stable version tag label vN.N.N is required (got '$RELEASE_TAG'); prerelease and build-metadata tags are not published because every installed daemon follows the latest release." >&2; exit 1; }
           if [ "${RELEASE_MODE:-}" = candidate ]; then
             [[ "${CANDIDATE_SOURCE:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'Candidate mode requires a full commit SHA.' >&2; exit 1; }
             source_ref="$CANDIDATE_SOURCE"
@@ -109,8 +109,8 @@ jobs:
           if [ "$RELEASE_MODE" = candidate ]; then test "$(git rev-parse HEAD)" = "$CANDIDATE_SOURCE"; fi
           GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # The release being upgraded from is the nearest earlier version tag in
-      # this release's own history; empty for the first release.
+      # The release being upgraded from is the nearest earlier STABLE version tag in
+      # this release's own history; none for the first release, which is warned about.
       - name: Resolve the previous published release
         id: previous
         env:
@@ -118,11 +118,27 @@ jobs:
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null; then base="refs/tags/$RELEASE_TAG^"; else base=HEAD; fi
-          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$base" 2>/dev/null || true)
-          if [ -n "$previous" ] && [ "$previous" != "$RELEASE_TAG" ]; then
-            echo "tag=$previous" >> "$GITHUB_OUTPUT"
-            echo "source=$(git rev-parse "$previous^{commit}")" >> "$GITHUB_OUTPUT"
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/scripts/resolve_previous_release.py" "$RELEASE_TAG" "$base"
+
+  # Publication needs a green CI on the exact commit being released: CI's final
+  # `CI ok` job fails when any other CI job does.
+  ci-green:
+    needs: [verify-tag-version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Candidate mode publishes nothing and may name any commit, so it is not held to CI.
+      - name: Require a passing CI run on the release commit
+        if: github.event.inputs.mode != 'candidate'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.verify-tag-version.outputs.sha }}
+        run: python3 .github/scripts/require_green_ci.py "$GITHUB_REPOSITORY" "$RELEASE_SHA"
 
   # A manual dispatch defaults to dry-run. Only an explicit release-mode
   # dispatch or a tag push may reach the publish job below.
@@ -146,6 +162,12 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "22"
+      # dist/ is not committed: without a build the staged tarball would hold no
+      # compiled output and the preview would pass on a package that cannot work.
+      - name: Build release packages
+        run: bun run build
+      - name: Check the packed contents (export targets exist, no stray files)
+        run: bun run pack:check
       - name: Release dry run (pack + publish preview, no registry write)
         run: bun run release:dry-run
 
@@ -222,7 +244,7 @@ jobs:
     if: >-
       (github.event_name == 'push' ||
        (github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'release' || github.event.inputs.mode == 'candidate')))
-    needs: [verify-tag-version]
+    needs: [verify-tag-version, ci-green]
     permissions:
       contents: write
       actions: read

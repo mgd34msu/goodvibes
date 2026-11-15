@@ -5,7 +5,11 @@ import type { TriageInput, TriageReceiptScope } from '../../platform/src/platfor
 import { makeProjectTempDir } from './project-temp.ts';
 
 const mirrors: InboxCursorStore[] = [];
-afterEach(async () => { for (const mirror of mirrors.splice(0).reverse()) await mirror.close(); });
+
+/** Call once at the top level of each test file that uses `triageSource` (a hook registered at import time would bind to the first importing file only). */
+export function useTriageSourceCleanup(): void {
+  afterEach(async () => { for (const mirror of mirrors.splice(0).reverse()) await mirror.close(); });
+}
 
 export async function triageSource(items: readonly TriageInput[], scope: TriageReceiptScope = { providerId: 'synthetic', accountScopeId: 'original-unit-account' }) {
   const directory = makeProjectTempDir('triage-native-input-');

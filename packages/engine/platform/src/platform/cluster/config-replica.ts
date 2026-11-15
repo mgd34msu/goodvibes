@@ -69,8 +69,20 @@ export const CONFIG_TOMBSTONE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1_000;
 /** A single replicated value, serialized. Comfortably past any real setting. */
 export const MAX_REPLICATED_VALUE_BYTES = 16 * 1024;
 
+/**
+ * How far past its own revision a copy accepts one incoming document. A real
+ * group moves a handful of revisions at a time, and a huge number is a way to
+ * make one entry beat every later write: the counter is a float, and the next
+ * legitimate revision rounds back onto the same value.
+ */
+export const MAX_REVISION_ADVANCE = 100_000;
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isRevision(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && Number.isSafeInteger(Math.trunc(value));
 }
 
 /** True when a value is small enough and plain enough to replicate. */
@@ -89,7 +101,7 @@ function readEntry(value: unknown): ConfigReplicaEntry | null {
   if (typeof value !== 'object' || value === null) return null;
   const candidate = value as Record<string, unknown>;
   if (typeof candidate['path'] !== 'string' || candidate['path'].length === 0) return null;
-  if (!isFiniteNumber(candidate['revision']) || candidate['revision'] < 0) return null;
+  if (!isRevision(candidate['revision'])) return null;
   if (typeof candidate['origin'] !== 'string') return null;
   if (!isReplicableValue(candidate['value'])) return null;
   return {
@@ -106,7 +118,7 @@ function readTombstone(value: unknown): ConfigReplicaTombstone | null {
   if (typeof value !== 'object' || value === null) return null;
   const candidate = value as Record<string, unknown>;
   if (typeof candidate['path'] !== 'string' || candidate['path'].length === 0) return null;
-  if (!isFiniteNumber(candidate['revision']) || candidate['revision'] < 0) return null;
+  if (!isRevision(candidate['revision'])) return null;
   if (typeof candidate['origin'] !== 'string') return null;
   return {
     path: candidate['path'],
@@ -143,10 +155,12 @@ export function readConfigReplicaDocument(
   const tombstones = (Array.isArray(candidate['tombstones']) ? candidate['tombstones'] : [])
     .map(readTombstone)
     .filter((entry): entry is ConfigReplicaTombstone => entry !== null && keep(entry.path));
+  const revision = isFiniteNumber(candidate['revision']) ? Math.max(0, Math.trunc(candidate['revision'])) : 0;
+  if (!Number.isSafeInteger(revision)) return null;
   return normalize({
     version: 1,
     groupId: candidate['groupId'],
-    revision: isFiniteNumber(candidate['revision']) ? Math.max(0, Math.trunc(candidate['revision'])) : 0,
+    revision,
     entries,
     tombstones,
   });
@@ -165,7 +179,10 @@ function normalize(document: ConfigReplicaDocument): ConfigReplicaDocument {
   const tombstones = new Map<string, ConfigReplicaTombstone>();
   for (const tombstone of document.tombstones) {
     const existing = tombstones.get(tombstone.path);
-    if (!existing || tombstone.revision > existing.revision) tombstones.set(tombstone.path, tombstone);
+    // Equal revisions are settled by origin, like entries, so two copies that
+    // saw the same two deletions in a different order keep the same one.
+    if (!existing || tombstone.revision > existing.revision
+      || (tombstone.revision === existing.revision && tombstone.origin < existing.origin)) tombstones.set(tombstone.path, tombstone);
   }
   // A deletion at or above an entry's revision removes it. Equal resolves to
   // DELETED, see the header: only a two-master partition produces a tie, and
@@ -282,7 +299,11 @@ export function sweepConfigReplica(
   now: number,
 ): ConfigReplicaSweepResult {
   const cutoff = now - CONFIG_TOMBSTONE_MAX_AGE_MS;
-  const fresh = document.tombstones.filter((entry) => entry.at >= cutoff);
+  // `at` comes from the node that deleted the setting. One that sent none reads
+  // as 0, and treating that as ancient would drop the deletion at the first
+  // sweep and let a partitioned copy bring the setting back. An unknown age is
+  // kept, and is the first thing the cap below removes.
+  const fresh = document.tombstones.filter((entry) => entry.at <= 0 || entry.at >= cutoff);
   const kept = fresh.length <= MAX_REPLICATED_TOMBSTONES
     ? fresh
     : [...fresh].sort((a, b) => b.at - a.at).slice(0, MAX_REPLICATED_TOMBSTONES);

@@ -73,7 +73,7 @@ function llm(value: KnowledgeSemanticExtraction, prompts: string[] = []): Knowle
 }
 
 describe('generated fact support persistence boundaries', () => {
-  // UNRUN actual SQL reopen: earlier metadata remains data, not a native proof.
+  // Actual SQL reopen: earlier metadata remains data, not a native proof.
   test('fresh v2 fact metadata reads back without decorative hashes and retains surviving earlier receipts', async () => {
     const f = await fixture(); readings(); const first = await prepareSourceLinkedRepairProfileFacts([f.input]), [fact] = await first.write();
     const current = fact!.metadata.generatedFactSupport as { version: number; receipts: readonly Record<string, unknown>[] };

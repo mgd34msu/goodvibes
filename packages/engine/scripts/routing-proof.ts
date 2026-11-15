@@ -110,7 +110,11 @@ console.log('Task routes (the hoisted agent route planner; model providers named
 const taskDeps = { namedIds: { modelProvider: () => modelProviderNamedIds(registry) } };
 for (const query of ['take a screenshot of the screen', 'remind me tomorrow to stretch', 'is my ZenMux API key still working?']) {
   const plan = await planTaskRoute({ query }, taskDeps);
-  if (plan.status !== 'ready') { failures += 1; continue; }
+  if (plan.status !== 'ready') {
+    failures += 1;
+    console.log(`  "${query}" -> FAILED: the plan is ${plan.status}${plan.status === 'uncertain' ? `; ${plan.nextAction}` : `; ${plan.usage}`}`);
+    continue;
+  }
   console.log(`  "${query}" -> ${plan.preferred.id} (${plan.preferred.confidence}), confirmation ${plan.preferred.requiresConfirmation ? 'required' : 'not required'}; ${plan.preferred.modelRoute}`);
 }
 console.log('\nUser error lines (the hoisted TUI formatter):');

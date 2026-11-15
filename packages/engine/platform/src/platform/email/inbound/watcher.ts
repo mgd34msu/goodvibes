@@ -56,6 +56,7 @@ import {
   verdictForOpenConnection,
 } from './capability.js';
 import { runIdleLoop, type IdleWakeSummary } from './idle-watcher.js';
+import { InboundNoticeTransportError } from './intake.js';
 import { anySignal } from './any-signal.js';
 import { resolveMailboxStartPosition } from './mailbox-position.js';
 import { drainMailboxDelta, runPollLoop, type MailboxDeltaReport } from './poll-loop.js';
@@ -114,6 +115,8 @@ export class InboundMailboxWatcher {
 
   private shutdown = new AbortController();
   private runner: Promise<void> | null = null;
+  /** Bumped by every start() and stop(), so a start deferred behind an unwinding loop can tell it was cancelled. */
+  private startToken = 0;
   private recheckWake: AbortController | null = null;
   private cursor: MailboxCursor | null = null;
   private mode: 'idle' | 'polling' | 'inactive' = 'inactive';
@@ -127,6 +130,8 @@ export class InboundMailboxWatcher {
   private localFailures = 0;
   /** Drains ending in an unreadable answer in a row, with none completed in between. */
   private unreadableDrains = 0;
+  /** Uncoded FETCH refusals in a row, so a bare mid-session `NO` is retried before it is called terminal. */
+  private uncodedFetchRefusals = 0;
 
   constructor(deps: InboundMailboxWatcherDeps) {
     this.deps = deps;
@@ -170,9 +175,20 @@ export class InboundMailboxWatcher {
    * it is running.
    */
   start(): void {
-    if (this.runner !== null) return;
-    if (this.shutdown.signal.aborted) this.shutdown = new AbortController();
-    const runner: Promise<void> = this.run().finally(() => {
+    if (this.runner !== null && !this.shutdown.signal.aborted) return;
+    // A start that follows a stop while the old loop is still unwinding must not
+    // replace the shutdown signal that loop is reading: the old loop would see
+    // the fresh, un-aborted one and carry on beside the new one. It waits for
+    // the old loop to finish, then begins on a signal of its own, unless a
+    // later stop() cancelled it in the meantime.
+    const unwinding = this.runner;
+    const token = ++this.startToken;
+    const runner: Promise<void> = (async () => {
+      if (unwinding !== null) await unwinding.catch(() => undefined);
+      if (token !== this.startToken) return;
+      if (this.shutdown.signal.aborted) this.shutdown = new AbortController();
+      await this.run();
+    })().finally(() => {
       if (this.runner === runner) this.runner = null;
     });
     this.runner = runner;
@@ -180,10 +196,10 @@ export class InboundMailboxWatcher {
 
   /** Stop watching and wait for the loop to unwind. Safe to call twice. */
   async stop(): Promise<void> {
+    this.startToken += 1;
     this.shutdown.abort();
     this.recheckWake?.abort();
     const runner = this.runner;
-    this.runner = null;
     if (runner !== null) await runner;
     this.mode = 'inactive';
   }
@@ -388,6 +404,10 @@ export class InboundMailboxWatcher {
     // be a second answer to the same question.
     const idle = await resolveIdleSupport(connection.reader);
     const useIdle = this.settings.mode !== 'poll' && idle.supported;
+    // Before the verdict is recorded, not after: recording it reaches the
+    // supervisor synchronously, and the supervisor reads the latency off this
+    // field. Set afterwards, a server with no IDLE was reported as push.
+    this.mode = useIdle ? 'idle' : 'polling';
     // `bodyCapability` is what the connect-time probe demonstrated about
     // reading message CONTENT, and it is passed here rather than dropped
     // because dropping it is what made the whole check inert: a connection
@@ -408,7 +428,6 @@ export class InboundMailboxWatcher {
     // drain. `authRetried` does clear here, because a server that accepted
     // this sign-in HAS disproved the thing that flag remembers.
     this.authRetried = false;
-    this.mode = useIdle ? 'idle' : 'polling';
 
     // Everything that arrived while we were disconnected is above the cursor.
     // This runs before either loop, which is the whole of "a reconnect never
@@ -446,12 +465,15 @@ export class InboundMailboxWatcher {
     if (result.outcome === 'idle-refused') {
       // The server advertised IDLE and then refused it. Reconnecting would
       // find the same refusal, so this falls back on the SAME connection.
-      this.tracker.record(capabilityVerdict('polling-idle-refused', 'The mail command failed; server details withheld.'));
       this.mode = 'polling';
+      this.tracker.record(capabilityVerdict('polling-idle-refused', 'The mail command failed; server details withheld.'));
       await this.holdPollLoop(connection);
       return;
     }
-    if (result.outcome === 'stopped') return;
+    if (result.outcome === 'stopped') {
+      await this.reconnectIfLost();
+      return;
+    }
     // 'connection-lost' and 'reissue-stalled' both mean: this socket is done.
     // A stalled re-issue is the liveness probe failing, which is the only way
     // a silently-dead connection is ever distinguishable from a quiet one.
@@ -482,11 +504,14 @@ export class InboundMailboxWatcher {
     // connection works; without this the consecutive counters would carry
     // across those hours as though nothing in between had succeeded.
     if (result.completedDrains > 0) this.noteDrainCompleted();
-    if (result.outcome === 'stopped') return;
+    if (result.outcome === 'stopped') {
+      await this.reconnectIfLost();
+      return;
+    }
     await this.handleDrainFailure({
       outcome: result.outcome === 'read-failed' ? 'read-failed' : 'delivery-failed',
       found: 0,
-      delivered: 0,
+      delivered: result.delivered,
       vanished: 0,
       cursor: result.cursor,
       error: result.error,
@@ -540,6 +565,7 @@ export class InboundMailboxWatcher {
     this.connectBackoff.reset();
     this.localFailures = 0;
     this.unreadableDrains = 0;
+    this.uncodedFetchRefusals = 0;
   }
 
   private async drain(
@@ -548,7 +574,10 @@ export class InboundMailboxWatcher {
   ): Promise<'continue' | 'stop'> {
     const report = await this.drainOnce(connection, via);
     if (report.outcome === 'complete') return 'continue';
-    if (report.outcome === 'aborted') return 'stop';
+    if (report.outcome === 'aborted') {
+      await this.reconnectIfLost();
+      return 'stop';
+    }
     await this.handleDrainFailure(report, connection);
     return 'stop';
   }
@@ -570,9 +599,39 @@ export class InboundMailboxWatcher {
     } };
   }
 
+  /**
+   * A loop that ended as "stopped" when nobody stopped it.
+   *
+   * The connection's own signal also fires when the socket closes, so a server
+   * that drops the connection during a drain or between polls looks exactly
+   * like a deliberate stop to the loops below. Only the watcher's shutdown and
+   * the source's lifetime are stops; anything else is a lost connection, and a
+   * lost connection is backed off and reported like any other, not answered
+   * with an immediate fresh login while the verdict goes on saying healthy.
+   */
+  private async reconnectIfLost(): Promise<void> {
+    if (this.shutdown.signal.aborted || this.deps.reading?.signal?.aborted) return;
+    this.tracker.record(capabilityVerdict('reconnecting',
+      'The mail server closed the connection; server details withheld.'));
+    await this.pauseBeforeReconnect('reconnecting');
+  }
+
   private async handleDrainFailure(report: MailboxDeltaReport, connection: MailboxConnection): Promise<void> {
     if (report.outcome === 'delivery-failed') {
-      await this.sleep(this.deliveryBackoff.next());
+      // A notice route that is down is already latched in the notice health
+      // and clears on its own, so it keeps retrying on the delivery backoff.
+      if (report.error instanceof InboundNoticeTransportError) {
+        await this.sleep(this.deliveryBackoff.next());
+        return;
+      }
+      // Anything else (a record store that cannot be written, a deterministic
+      // throw for one message) holds the cursor below that message, and every
+      // later message behind it, for as long as it lasts. It is counted like
+      // any other local failure, so the verdict leaves healthy and the owner is
+      // told at the ceiling. A pass that got other messages through is not
+      // consecutive with the one before it.
+      if (report.delivered > 0) this.localFailures = 0;
+      await this.handleUnexpectedFailure(report.error);
       return;
     }
     if (report.outcome === 'read-failed' && report.unreadableFetch) {
@@ -580,14 +639,20 @@ export class InboundMailboxWatcher {
       return;
     }
     const reading = this.readingOptions(connection);
+    const phase = report.phase ?? 'fetch';
     const result = await classifyReadFailure(
       report.error,
-      report.phase ?? 'fetch',
+      phase,
       reading,
+      { consecutive: this.uncodedFetchRefusals, giveUpAfter: MAX_CONSECUTIVE_UNREADABLE_DRAINS },
     );
     assertImapReadingCurrent(reading);
     result.assertCurrent?.();
     const { verdict, terminal, notice } = result;
+    this.uncodedFetchRefusals = phase === 'fetch'
+      && (verdict.reason === 'reconnecting' || verdict.reason === 'fetch-refused')
+      ? this.uncodedFetchRefusals + 1
+      : 0;
     if (terminal) {
       this.reportTerminal(verdict, notice);
       return;
@@ -634,8 +699,16 @@ export class InboundMailboxWatcher {
   // -------------------------------------------------------------------------
 
   private async handleOpenFailure(error: unknown): Promise<void> {
-    const result = classifyOpenFailure(error);
-    result.assertCurrent?.();
+    // Guarded like `handleUnexpectedFailure`: a reading that is no longer
+    // current must not reject out of `run()`, where nothing would report it.
+    let result: OpenFailureVerdict;
+    try {
+      result = classifyOpenFailure(error);
+      result.assertCurrent?.();
+    } catch {
+      if (this.shutdown.signal.aborted) return;
+      result = { verdict: capabilityVerdict('reconnecting', new ImapReadingError().message), terminal: false, notice: null };
+    }
     const { verdict, terminal, notice } = result;
 
     // A rejected credential is retried EXACTLY ONCE, to absorb an OAuth token

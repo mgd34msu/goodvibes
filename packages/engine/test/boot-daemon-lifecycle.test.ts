@@ -1,5 +1,4 @@
 /** Public factory lifecycle regressions using real constructor-owned graphs.
- * Source authored only; execution is deferred until source naming freezes.
  * Instance spies model the factory's start/stop outcome boundaries, while the
  * original server teardown always drains the actual isolated runtime owners. */
 import { expect, spyOn, test } from 'bun:test';

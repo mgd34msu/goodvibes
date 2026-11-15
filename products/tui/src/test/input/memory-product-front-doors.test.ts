@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
@@ -94,6 +94,7 @@ describe('memory product front-door scope isolation', () => {
       surfaceRoot: 'tui',
       configDir: join(dir, '.goodvibes', 'tui'),
       workingDir: dir,
+      homeDir: dir,
     });
     store = new MemoryStore(join(dir, 'memory.sqlite'), {
       embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
@@ -221,6 +222,28 @@ describe('memory product front-door scope isolation', () => {
     expect(teamMemory?.description).not.toContain('All subcommands are filtered to scope=team');
     // Must explicitly scope the claim to queue and export.
     expect(teamMemory?.description).toContain('queue and export subcommands are filtered to scope=team');
+  });
+
+  test('/team-memory export and /session-memory export write only their own scope', async () => {
+    await registry.add({ cls: 'decision', summary: 'Session-only decision', scope: 'session' });
+    await registry.add({ cls: 'decision', summary: 'Team-only decision', scope: 'team' });
+    await registry.add({ cls: 'fact', summary: 'Project fact Z', scope: 'project' });
+
+    const commandRegistry = new CommandRegistry();
+    registerBuiltinCommands(commandRegistry);
+    const ctx = makeContext(registry, printed, dir);
+    const summariesIn = (path: string): string[] => {
+      const bundle = JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ summary: string }> };
+      return bundle.records.map((record) => record.summary).sort();
+    };
+
+    const teamPath = join(dir, 'team-export.json');
+    await commandRegistry.get('team-memory')!.handler(['export', teamPath], ctx);
+    expect(summariesIn(teamPath)).toEqual(['Team-only decision']);
+
+    const sessionPath = join(dir, 'session-export.json');
+    await commandRegistry.get('session-memory')!.handler(['export', sessionPath], ctx);
+    expect(summariesIn(sessionPath)).toEqual(['Session-only decision']);
   });
 
   test('/memory-sync and /handoff are honest: export delegates with explicit scope', async () => {

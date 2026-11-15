@@ -1,4 +1,4 @@
-/** UNRUN browser operator gestures; native manager/catalog behavior is covered
+/** Native manager/catalog behavior is covered
  * by engine/test/trigger-operator-migration.test.ts with actual saved state. */
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React from 'react';

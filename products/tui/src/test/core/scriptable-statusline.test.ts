@@ -51,11 +51,6 @@ describe('sanitizeStatuslineOutput', () => {
   });
 });
 
-async function flush(): Promise<void> {
-  // Let the coalescing async run() settle.
-  await new Promise((resolve) => setTimeout(resolve, 5));
-}
-
 describe('createScriptableStatusline', () => {
   test('is null when no command is configured', async () => {
     const statusline = createScriptableStatusline({
@@ -64,7 +59,7 @@ describe('createScriptableStatusline', () => {
       turns: makeTurns(),
       readSettings: settingsOf({}),
     });
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBeNull();
   });
 
@@ -77,7 +72,7 @@ describe('createScriptableStatusline', () => {
       runner,
       readSettings: settingsOf({ command: 'echo hi' }),
     });
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBe('branch main | clean');
   });
 
@@ -92,10 +87,10 @@ describe('createScriptableStatusline', () => {
       runner,
       readSettings: settingsOf({ command: 'x' }),
     });
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBe('run 1');
     turns.emit('TURN_COMPLETED');
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBe('run 2');
   });
 
@@ -113,11 +108,11 @@ describe('createScriptableStatusline', () => {
       runner,
       readSettings: settingsOf({ command: 'x' }),
     });
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBe('good');
     ok = false;
     turns.emit('TURN_ERROR');
-    await flush();
+    await statusline.settled();
     expect(statusline.current()).toBeNull();
   });
 
@@ -125,13 +120,18 @@ describe('createScriptableStatusline', () => {
     let running = 0;
     let maxConcurrent = 0;
     let total = 0;
+    const releases: Array<() => void> = [];
+    let trailingStarted!: () => void;
+    const trailingRun = new Promise<void>((resolve) => { trailingStarted = resolve; });
     const runner: StatuslineCommandRunner = async () => {
       running += 1;
       total += 1;
+      const mine = total;
+      if (mine === 2) trailingStarted();
       maxConcurrent = Math.max(maxConcurrent, running);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => { releases.push(resolve); });
       running -= 1;
-      return `n${total}`;
+      return `n${mine}`;
     };
     const turns = makeTurns();
     const statusline = createScriptableStatusline({
@@ -141,12 +141,18 @@ describe('createScriptableStatusline', () => {
       runner,
       readSettings: settingsOf({ command: 'x' }),
     });
-    // Priming run is now in flight; fire several boundary refreshes on top of it.
+    // The priming run is in flight and held; fire several boundary refreshes on top of it.
     turns.emit('TURN_COMPLETED');
     turns.emit('TURN_COMPLETED');
     turns.emit('TURN_COMPLETED');
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(total).toBe(1);
+    releases[0]!(); // the priming run finishes; exactly one trailing run starts
+    await trailingRun;
+    expect(total).toBe(2);
+    releases[1]!();
+    await statusline.settled();
     expect(maxConcurrent).toBe(1); // never overlapped
-    expect(total).toBeLessThanOrEqual(2); // priming + one coalesced trailing run
+    expect(total).toBe(2); // priming + one coalesced trailing run
+    expect(statusline.current()).toBe('n2');
   });
 });

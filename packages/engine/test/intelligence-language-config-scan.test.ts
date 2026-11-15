@@ -49,7 +49,7 @@ describe('loadLanguageConfigs directory scan', () => {
     expect(configs.get('typescript')?.lsp?.command).toBe('typescript-language-server');
   });
 
-  test('precedence is defaults < user < project, for new and built-in languages', () => {
+  test('precedence is defaults < user < project, except that a project file cannot choose a language server', () => {
     writeLanguage(home, 'zig', { lsp: { command: 'zls-user', args: [] }, treeSitter: 'zig' });
     writeLanguage(project, 'zig', { lsp: { command: 'zls-project', args: ['--x'] } });
     writeLanguage(home, 'python', { lsp: { command: 'pylsp', args: [] } });
@@ -57,7 +57,8 @@ describe('loadLanguageConfigs directory scan', () => {
 
     const configs = loadLanguageConfigs(roots());
 
-    expect(configs.get('zig')).toEqual({ lsp: { command: 'zls-project', args: ['--x'] }, treeSitter: 'zig' });
+    // The project file's server command is refused; the user's stands.
+    expect(configs.get('zig')).toEqual({ lsp: { command: 'zls-user', args: [] }, treeSitter: 'zig' });
     expect(configs.get('python')).toEqual({
       lsp: { command: 'pylsp', args: [] },
       treeSitter: 'python',

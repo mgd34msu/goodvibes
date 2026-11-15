@@ -103,6 +103,13 @@ export interface HostedSessionSpineIntakeOptions {
 }
 
 const DEFAULT_INTAKE_INTERVAL_MS = 750;
+/**
+ * How often an unchanged session is registered again. The broker treats a
+ * participant as fresh for two minutes, so this keeps a wide margin while not
+ * turning every collecting tick into a snapshot write and a broadcast per
+ * session. A changed title or workspace registers at the next tick.
+ */
+const HEARTBEAT_INTERVAL_MS = 30_000;
 const HOSTED_PARTICIPANT_SURFACE_ID = 'daemon:hosted-sessions';
 
 /**
@@ -124,6 +131,8 @@ interface PendingDelivery {
   /** The broker's input identity, retained through queued delivery and retry. */
   readonly correlationId?: string | undefined;
   readonly attempts: number;
+  /** Failed attempts to classify the current failure; bounded like delivery attempts. */
+  readonly readingFailures?: number | undefined;
   readonly failure?: { readonly error: unknown; readonly detail: string; readonly blocked?: boolean; readonly reading?: FailureReadOptions } | undefined;
 }
 
@@ -160,6 +169,14 @@ export class HostedSessionSpineIntake {
   private readonly inFlight = new Set<string>();
   /** One delivery lane per session with work outstanding. */
   private readonly lanes = new Map<string, SessionDeliveryLane>();
+  /** What each session's last successful registration said, and when. */
+  private readonly lastRegistered = new Map<string, { readonly at: number; readonly title: string; readonly project: string }>();
+  /**
+   * Inputs whose turn ran but whose consumed mark has not reached the spine. The
+   * spine still lists them as queued, so they are not collected again; the mark
+   * is retried on each tick until it lands or the session closes.
+   */
+  private readonly unconsumed = new Map<string, { readonly sessionId: string; readonly inputId: string }>();
 
   private readonly failureReading: FailureReadOptions | undefined;
   constructor(private readonly options: HostedSessionSpineIntakeOptions) {
@@ -184,10 +201,38 @@ export class HostedSessionSpineIntake {
     }
   }
 
-  /** Permanently stop registration admission for a terminated session. */
+  /**
+   * Permanently stop registration admission for a terminated session. Inputs
+   * it collected and still owed a delivery retry are failed on the spine with
+   * the reason, never left looking collected and in progress.
+   */
   fence(sessionId: string): void {
     this.fenced.add(sessionId);
     this.sessionLifetimes.get(sessionId)?.abort();
+    for (const [key, entry] of this.unconsumed) if (entry.sessionId === sessionId) this.unconsumed.delete(key);
+    this.lastRegistered.delete(sessionId);
+    const spine = this.options.spine;
+    for (const pending of [...this.pending.values()]) {
+      if (pending.sessionId !== sessionId || this.inFlight.has(pendingKey(pending.sessionId, pending.inputId))) continue;
+      if (spine) void this.abandon(spine, pending);
+      else this.pending.delete(pendingKey(pending.sessionId, pending.inputId));
+    }
+  }
+
+  /**
+   * This collected input can no longer be delivered. A terminated session's
+   * input is failed on the spine with that reason. A stopping intake writes
+   * nothing: the daemon is going down with the broker, and the broker's boot
+   * reconciliation cancels inputs left collected.
+   */
+  private async abandon(spine: HostedSessionSpine, pending: PendingDelivery): Promise<void> {
+    this.pending.delete(pendingKey(pending.sessionId, pending.inputId));
+    if (!this.fenced.has(pending.sessionId)) return;
+    logger.warn('[hosted-sessions] a collected input was not delivered before its session ended; marked failed', {
+      sessionId: pending.sessionId, inputId: pending.inputId,
+    });
+    await spine.failInput?.(pending.sessionId, pending.inputId,
+      'The hosted session ended before this message was delivered; it was not answered. Send it again on a live session.').catch(() => undefined);
   }
 
   /** Put (or refresh) this session on the shared spine. Never throws. */
@@ -241,6 +286,7 @@ export class HostedSessionSpineIntake {
           lastSeenAt: this.options.now(),
         },
       });
+      this.lastRegistered.set(record.id, { at: this.options.now(), title: record.title, project: record.workspaceRoot });
     } catch (error) {
       logger.warn('[hosted-sessions] registering a hosted session on the shared spine failed; it runs but is not in the union list', {
         sessionId: record.id,
@@ -268,6 +314,22 @@ export class HostedSessionSpineIntake {
         error: summarizeError(error),
       });
     }
+    // The session is fenced, drained and closed: its abort controller and callback owner serve nothing now.
+    this.sessionLifetimes.delete(sessionId);
+    this.callbackOwners.delete(sessionId);
+    this.lastRegistered.delete(sessionId);
+  }
+
+  /**
+   * Drop the fence of a session the manager no longer holds. The fence is what
+   * refuses a late registration, so call this only once nothing can register
+   * the id again; an id is never reused.
+   */
+  forget(sessionId: string): void {
+    this.fenced.delete(sessionId);
+    this.sessionLifetimes.delete(sessionId);
+    this.callbackOwners.delete(sessionId);
+    this.lastRegistered.delete(sessionId);
   }
 
   /**
@@ -299,11 +361,14 @@ export class HostedSessionSpineIntake {
       for (const pending of [...this.pending.values()]) {
         this.enqueueDelivery(spine, pending);
       }
+      await this.retryConsumedMarks(spine);
       for (const record of this.options.liveSessions()) {
-        await this.register(record);
+        await this.heartbeat(record);
         if (this.stopped || this.fenced.has(record.id)) continue;
         for (const input of spine.getInputsSince(record.id, { state: 'queued' })) {
           if (!input.body.trim()) continue;
+          // Its turn already ran; only the consumed mark is outstanding.
+          if (this.unconsumed.has(pendingKey(record.id, input.id))) continue;
           const delivery: PendingDelivery = {
             sessionId: record.id,
             inputId: input.id,
@@ -311,7 +376,15 @@ export class HostedSessionSpineIntake {
             correlationId: input.correlationId,
             attempts: 0,
           };
-          await spine.markInputDelivered(record.id, delivery.inputId).catch(() => undefined);
+          // Without the collected mark the input is still queued on the spine, so
+          // delivering now would answer it again on the next tick.
+          try { await spine.markInputDelivered(record.id, delivery.inputId); }
+          catch (error) {
+            logger.warn('[hosted-sessions] a queued input could not be marked collected; it stays queued and is retried next tick', {
+              sessionId: record.id, inputId: input.id, error: summarizeError(error),
+            });
+            continue;
+          }
           this.enqueueDelivery(spine, delivery);
         }
       }
@@ -325,6 +398,35 @@ export class HostedSessionSpineIntake {
       });
     } finally {
       this.scheduling = false;
+    }
+  }
+
+  /**
+   * Register one session as this tick's heartbeat, without letting a broker
+   * call that never settles hold the pass. A registration still outstanding
+   * from an earlier tick is left to finish rather than stacked; a new one is
+   * given one interval, then the pass moves on and it finishes on its own.
+   */
+  private async heartbeat(record: HostedSessionRecord): Promise<void> {
+    if ((this.registrations.get(record.id)?.size ?? 0) > 0) return;
+    const last = this.lastRegistered.get(record.id);
+    if (last && last.title === record.title && last.project === record.workspaceRoot
+      && this.options.now() - last.at < HEARTBEAT_INTERVAL_MS) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.options.intervalMs ?? DEFAULT_INTAKE_INTERVAL_MS);
+      (timer as unknown as { unref?: () => void }).unref?.();
+    });
+    try { await Promise.race([this.register(record), bound]); }
+    finally { clearTimeout(timer); }
+  }
+
+  private async retryConsumedMarks(spine: HostedSessionSpine): Promise<void> {
+    for (const [key, entry] of [...this.unconsumed]) {
+      try {
+        await spine.markInputDelivered(entry.sessionId, entry.inputId, { consumed: true });
+        this.unconsumed.delete(key);
+      } catch { /* retried next tick */ }
     }
   }
 
@@ -351,7 +453,10 @@ export class HostedSessionSpineIntake {
     const key = pendingKey(pending.sessionId, pending.inputId);
     // Already queued or already being delivered: a tick that fires while a slow
     // turn is in flight must not hand the same message over a second time.
-    if (this.stopped || this.fenced.has(pending.sessionId) || this.inFlight.has(key)) return;
+    if (this.inFlight.has(key)) return;
+    // Collected after its session was fenced: it can never be delivered now.
+    if (this.fenced.has(pending.sessionId)) { void this.abandon(spine, pending); return; }
+    if (this.stopped) return;
     this.inFlight.add(key);
     const lane = this.lanes.get(pending.sessionId) ?? { queue: [], worker: null };
     this.lanes.set(pending.sessionId, lane);
@@ -416,19 +521,29 @@ export class HostedSessionSpineIntake {
       this.lifetime.signal.throwIfAborted();
       if (this.fenced.has(pending.sessionId)) throw new Error('Hosted delivery owner closed');
     };
-    assertCurrent();
+    if (this.stopped || this.fenced.has(pending.sessionId)) { await this.abandon(spine, pending); return; }
     // A failed reading may be retried, but never by resending the input before
     // its actual delivery failure has been classified.
     if (pending.failure) {
-      await this.resolveFailure(spine, pending, assertCurrent);
+      await this.classifyFailure(spine, pending, assertCurrent);
       return;
     }
     try {
       await this.options.deliver(pending.sessionId, pending.body, pending.correlationId);
       this.pending.delete(key);
       // A successfully completed turn stays delivered during shutdown drain.
-      await spine.markInputDelivered(pending.sessionId, pending.inputId, { consumed: true }).catch(() => undefined);
+      try { await spine.markInputDelivered(pending.sessionId, pending.inputId, { consumed: true }); }
+      catch (error) {
+        if (!this.fenced.has(pending.sessionId)) {
+          this.unconsumed.set(key, { sessionId: pending.sessionId, inputId: pending.inputId });
+          logger.warn('[hosted-sessions] a delivered input could not be marked consumed; the mark is retried and the input is not delivered again', {
+            sessionId: pending.sessionId, inputId: pending.inputId, error: summarizeError(error),
+          });
+        }
+      }
     } catch (error) {
+      // Its session or this intake closed while it waited: no retry can reach it.
+      if (this.stopped || this.fenced.has(pending.sessionId)) { await this.abandon(spine, pending); return; }
       // Keep the input collected even if the evidence is unsafe to read. It must
       // never be retried merely because privacy admission failed.
       const blocked: PendingDelivery = { ...pending, attempts: pending.attempts + 1,
@@ -438,7 +553,35 @@ export class HostedSessionSpineIntake {
       const failed: PendingDelivery = { ...blocked,
         failure: { error: captured, detail: summarizeError(captured), ...(this.failureReading ? { reading: this.failureReading } : {}) } };
       this.pending.set(key, failed);
-      await this.resolveFailure(spine, failed, assertCurrent);
+      await this.classifyFailure(spine, failed, assertCurrent);
+    }
+  }
+
+  /**
+   * Classify a delivery failure, bounding the classification itself. A reader
+   * that keeps failing must not keep the input collected forever with nobody
+   * told: after the same ceiling as delivery attempts it is failed and the
+   * owner alerted.
+   */
+  private async classifyFailure(spine: HostedSessionSpine, pending: PendingDelivery, assertCurrent: () => void): Promise<void> {
+    try {
+      await this.resolveFailure(spine, pending, assertCurrent);
+    } catch (error) {
+      if (this.stopped || this.fenced.has(pending.sessionId)) { await this.abandon(spine, pending); return; }
+      const key = pendingKey(pending.sessionId, pending.inputId);
+      const current = this.pending.get(key) ?? pending;
+      const readingFailures = (current.readingFailures ?? 0) + 1;
+      if (readingFailures < (this.options.maxDeliveryAttempts ?? DEFAULT_MAX_DELIVERY_ATTEMPTS)) {
+        this.pending.set(key, { ...current, readingFailures });
+        throw error;
+      }
+      this.pending.delete(key);
+      const detail = `${current.failure?.detail ?? 'Delivery failed.'} Its failure could not be classified after ${readingFailures} attempts, so it is not retried.`;
+      logger.error('[hosted-sessions] a collected input failed and its failure could not be classified; it is now marked failed', {
+        sessionId: pending.sessionId, inputId: pending.inputId, attempts: current.attempts, readingFailures,
+      });
+      await spine.failInput?.(pending.sessionId, pending.inputId, detail).catch(() => undefined);
+      this.alertOwner(current, current.attempts, detail);
     }
   }
 

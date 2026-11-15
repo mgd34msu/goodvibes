@@ -182,8 +182,51 @@ export function serializeSkill(skill: Skill): string {
     lines.push(`${key}: ${serializeFrontmatterValue(value)}`);
   }
   lines.push('---', '');
-  const body = skill.body.length > 0 ? `${skill.body}\n` : '';
+  // The parser drops one blank line after the closing fence, so a body that itself starts
+  // with a line break gets one extra separator to survive the round trip.
+  const separator = /^\r?\n/.test(skill.body) ? '\n' : '';
+  const body = skill.body.length > 0 ? `${separator}${skill.body}\n` : '';
   return `${lines.join('\n')}${body}`;
+}
+
+/**
+ * Why a description or metadata set cannot be written to frontmatter and read back
+ * unchanged, or undefined when it can. The parser is line based and unquotes values,
+ * so a line break, a quoted or bracketed value, or a key containing a colon would
+ * come back as something else (or as another key such as `name`).
+ */
+export function skillContentProblem(
+  description: string | undefined,
+  metadata: Readonly<Record<string, SkillFrontmatterValue>> | undefined,
+): string | undefined {
+  const valueProblem = (label: string, value: SkillFrontmatterValue): string | undefined => {
+    const parts = typeof value === 'string' ? [value] : value;
+    if (typeof value !== 'string' && !Array.isArray(value)) return `${label} must be a string or a list of strings`;
+    if (parts.some((part) => typeof part !== 'string')) return `${label} must be a string or a list of strings`;
+    if (parts.some((part) => /[\r\n]/.test(part))) return `${label} must be a single line (no line breaks)`;
+    const back = parseFrontmatterValue(serializeFrontmatterValue(value));
+    const same = typeof value === 'string'
+      ? back === value
+      : Array.isArray(back) && back.length === value.length && back.every((item, index) => item === value[index]);
+    return same
+      ? undefined
+      : `${label} would not read back unchanged: avoid surrounding quotes, leading or trailing spaces, [..] brackets, commas inside list items, and empty list items`;
+  };
+  if (description !== undefined) {
+    const problem = valueProblem('description', description);
+    if (problem) return problem;
+  }
+  for (const [key, value] of Object.entries(metadata ?? {})) {
+    if (key.length === 0 || key !== key.trim() || /[:\r\n]/.test(key) || key.startsWith('#')) {
+      return `metadata key "${key}" must be non-empty, have no surrounding spaces, no ":" or line break, and not start with "#"`;
+    }
+    if (key === 'name' || key === 'description') {
+      return `metadata key "${key}" is reserved; set it through the skill's own field`;
+    }
+    const problem = valueProblem(`metadata "${key}"`, value);
+    if (problem) return problem;
+  }
+  return undefined;
 }
 
 /** Project a full skill down to its index line (drops the body). */

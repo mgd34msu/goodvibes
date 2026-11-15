@@ -108,6 +108,11 @@ function createInstance(
       }
 
       if (action === 'list') {
+        // Trips, dates and confirmation details are the owner's private data: a turn that cannot
+        // write as the owner (an unlisted channel, a forwarded message) cannot read them either.
+        if (!authority.canCapture) {
+          return refused(`${authority.reason} The owner's dates and plans were not read.`);
+        }
         const [dates, plans] = await Promise.all([
           port.occasions.list(),
           Promise.resolve(port.occasions.listPlans()),
@@ -155,10 +160,23 @@ function createInstance(
             + 'was changed.',
           );
         }
+        // An occurrence the model supplies must be one this occasion actually has; anything else would
+        // record a mute for a date that never fires while the real reminder keeps going.
+        const occurrence = text(input.occurrence);
+        if (occurrence.length > 0) {
+          const view = (await port.occasions.list()).occasions.find((entry) => entry.occasion.id === occasionId);
+          const next = view?.nextOccurrence ?? null;
+          if (!ISO_DATE.test(occurrence) || next !== occurrence) {
+            return refused(
+              `'${occurrence}' is not an upcoming date of that occasion${next ? `; its next occurrence is ${next} (YYYY-MM-DD)` : ''}. `
+              + 'Omit `occurrence` to acknowledge the upcoming one. Nothing was changed.',
+            );
+          }
+        }
         const outcome = await port.occasions.acknowledge({
           occasionId,
           source: 'conversation',
-          ...(ISO_DATE.test(text(input.occurrence)) ? { occurrence: text(input.occurrence) } : {}),
+          ...(occurrence.length > 0 ? { occurrence } : {}),
         });
         if (!outcome.ok) {
           return refused(outcome.reason ?? 'That occasion was not acknowledged.');

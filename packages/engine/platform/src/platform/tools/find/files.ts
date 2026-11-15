@@ -91,8 +91,8 @@ async function scanFilesQuery(
   const scannedFiles = await collectGlobFiles(basePath, patterns, includeHidden, followSymlinks, diagnostics, walk, walkOptions);
   const matchedFiles = new Set<string>();
   for (const file of scannedFiles) {
-    const rel = relative(basePath, file);
-    if (gitignoreMatcher && gitignoreMatcher(rel)) continue;
+    // Ignore rules are written relative to the directory holding the .gitignore.
+    if (gitignoreMatcher && gitignoreMatcher(relative(ignoreRoot, file))) continue;
     const excluded = compiledExcludes.some((excl) => matchesGlob(excl, file, basePath));
     if (excluded) continue;
     matchedFiles.add(file);
@@ -168,6 +168,12 @@ async function scanFilesQuery(
   const restrictedNote = accessRestrictedNote(restrictedPaths.size);
   if (restrictedNote) addFindWarning(diagnostics, restrictedNote);
   const isRestricted = (p: string): boolean => restrictedPaths.has(p);
+  // Paths under the project root are listed relative to it (stated once as
+  // `root`), as content mode does; a path outside it stays absolute.
+  const shown = (p: string): string => {
+    const rel = relative(projectRoot, p);
+    return rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel) ? rel : p;
+  };
 
   const sortBy = query.sort_by ?? 'name';
   const sortOrder = query.sort_order ?? 'asc';
@@ -181,19 +187,24 @@ async function scanFilesQuery(
   });
 
   const format = output.format ?? 'files_only';
+  if (format === 'matches' || format === 'context' || format === 'locations' || format === 'signatures' || format === 'full') {
+    // `output` is shared by every query of a call, so a format meant for another
+    // mode still gets the plain file list, with the substitution stated.
+    addFindWarning(diagnostics, `Output format '${format}' does not apply to files mode; the plain file list was returned (files mode formats: count_only, files_only, with_stats, with_preview).`);
+  }
   if (format === 'count_only') {
     hasContentRegex?.assertCurrent();
     return withFindWarnings(makeCountResult(entries.length), diagnostics.warnings);
   }
   if (format === 'with_stats') {
     const result = entries.map((e) => ({
-      file: e.path,
+      file: shown(e.path),
       size: e.size,
       modified: e.mtimeMs !== undefined ? new Date(e.mtimeMs).toISOString() : undefined,
       ...(isRestricted(e.path) ? { access_restricted: true } : {}),
     }));
     hasContentRegex?.assertCurrent();
-    return withFindWarnings({ files: result, count: result.length }, diagnostics.warnings);
+    return withFindWarnings({ root: projectRoot, files: result, count: result.length }, diagnostics.warnings);
   }
   if (format === 'with_preview') {
     const previewLines = output.preview_lines ?? 3;
@@ -201,7 +212,7 @@ async function scanFilesQuery(
     for (const entry of entries) {
       if (isRestricted(entry.path)) {
         // Withhold content: show the path, an empty preview, and the flag.
-        result.push({ file: entry.path, preview: [], access_restricted: true });
+        result.push({ file: shown(entry.path), preview: [], access_restricted: true });
         continue;
       }
       let preview: string[] = [];
@@ -213,14 +224,14 @@ async function scanFilesQuery(
       } catch (err) {
         addFindWarning(diagnostics, `Could not read '${entry.path}' for preview: ${summarizeError(err)}`);
       }
-      result.push({ file: entry.path, preview });
+      result.push({ file: shown(entry.path), preview });
     }
     hasContentRegex?.assertCurrent();
-    return withFindWarnings({ files: result, count: result.length }, diagnostics.warnings);
+    return withFindWarnings({ root: projectRoot, files: result, count: result.length }, diagnostics.warnings);
   }
 
-  const filesResult = makeFilesResult(entries.map((e) => e.path), entries.length);
-  const accessRestrictedFiles = entries.map((e) => e.path).filter(isRestricted);
+  const filesResult = { root: projectRoot, ...makeFilesResult(entries.map((e) => shown(e.path)), entries.length) };
+  const accessRestrictedFiles = entries.map((e) => e.path).filter(isRestricted).map(shown);
   hasContentRegex?.assertCurrent();
   return withFindWarnings(
     accessRestrictedFiles.length > 0

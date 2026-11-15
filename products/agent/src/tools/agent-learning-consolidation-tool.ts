@@ -5,11 +5,12 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import { createLocalMemoryAccess, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, WRITE_MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
+import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, WRITE_MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
 import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
@@ -108,18 +109,19 @@ function memoryRecordFromSnapshot(snapshot: Record<string, unknown>): MemoryReco
   };
 }
 
-function restoreReviewState(
+async function restoreReviewState(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   id: string,
   snapshot: Record<string, unknown>,
-): void {
+): Promise<void> {
   const reviewState = stringField(snapshot, 'reviewState') ?? 'fresh';
   const staleReason = stringField(snapshot, 'staleReason') ?? 'Restored by learning curator rollback.';
   if (domain === 'memory') {
     const confidence = typeof snapshot.confidence === 'number' ? snapshot.confidence : undefined;
-    memoryRegistry.review(id, { state: reviewState === 'stale' || reviewState === 'reviewed' || reviewState === 'contradicted' ? reviewState : 'fresh', confidence, staleReason, reviewedBy: 'agent' });
+    const reviewed = await memory.updateReview(id, { state: reviewState === 'stale' || reviewState === 'reviewed' || reviewState === 'contradicted' ? reviewState : 'fresh', confidence, staleReason, reviewedBy: 'agent' });
+    if (!reviewed) throw new Error(`Unknown Agent-local memory ${id}`);
     return;
   }
   if (reviewState === 'reviewed') {
@@ -161,29 +163,40 @@ function restoreReviewState(
   }
 }
 
-function restoreSurvivor(
+async function restoreSurvivor(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   receipt: LearningConsolidationReceipt,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const snapshot = receipt.beforeSurvivor;
   if (!snapshot) throw new Error(`Receipt ${receipt.id} has no survivor snapshot.`);
+  if (!receipt.afterSurvivor) {
+    // Without the survivor as the merge left it there is no way to tell whether it was edited since, and restoring the old fields would discard those edits.
+    throw new Error(`Rollback refused: receipt ${receipt.id} is a merge recorded without the survivor's post-merge state, so it cannot be checked for later edits to ${receipt.survivorId}. Nothing was restored; compare the receipt's beforeSurvivor with the current record and edit it by hand if the old fields are wanted.`);
+  }
+  // Restoring the old fields over a survivor that was edited after the merge would silently discard those edits.
+  const fields = receipt.domain === 'memory' ? ['detail', 'tags'] : ['description', 'tags', 'triggers'];
+  const current = cloneRecord(await getRecord(shellPaths, memory, receipt.domain, receipt.survivorId));
+  const changed = fields.filter((field) => JSON.stringify(current[field] ?? null) !== JSON.stringify(receipt.afterSurvivor?.[field] ?? null));
+  if (changed.length > 0) {
+    throw new Error(`Rollback refused: survivor ${receipt.survivorId} was changed after the merge (${changed.join(', ')}), so restoring it would discard those edits. Nothing was restored.`);
+  }
   if (receipt.domain === 'memory') {
-    const record = memoryRegistry.update(receipt.survivorId, {
+    const record = await memory.update(receipt.survivorId, {
       detail: stringField(snapshot, 'detail') ?? '',
       tags: arrayField(snapshot, 'tags'),
     });
     if (!record) throw new Error(`Unknown Agent-local memory ${receipt.survivorId}`);
-    restoreReviewState(shellPaths, memoryRegistry, receipt.domain, receipt.survivorId, snapshot);
-    return cloneRecord(memoryRegistry.get(receipt.survivorId));
+    await restoreReviewState(shellPaths, memory, receipt.domain, receipt.survivorId, snapshot);
+    return cloneRecord(await memory.get(receipt.survivorId));
   }
-  updateSurvivor(shellPaths, memoryRegistry, receipt.domain, receipt.survivorId, {
+  await updateSurvivor(shellPaths, memory, receipt.domain, receipt.survivorId, {
     description: stringField(snapshot, 'description') ?? '',
     tags: arrayField(snapshot, 'tags'),
     triggers: arrayField(snapshot, 'triggers'),
   });
-  restoreReviewState(shellPaths, memoryRegistry, receipt.domain, receipt.survivorId, snapshot);
-  return cloneRecord(getRecord(shellPaths, memoryRegistry, receipt.domain, receipt.survivorId));
+  await restoreReviewState(shellPaths, memory, receipt.domain, receipt.survivorId, snapshot);
+  return cloneRecord(await getRecord(shellPaths, memory, receipt.domain, receipt.survivorId));
 }
 
 function recreateArguments(receipt: LearningConsolidationReceipt, snapshot: Record<string, unknown>): Record<string, unknown> {
@@ -241,8 +254,8 @@ function recreateArguments(receipt: LearningConsolidationReceipt, snapshot: Reco
   };
 }
 
-function currentLocalIds(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, domain: AgentLearningConsolidationDomain): Set<string> {
-  if (domain === 'memory') return new Set(memoryRegistry.getAll().map((record) => record.id));
+async function currentLocalIds(shellPaths: ShellPathService, memory: ConsolidationMemory, domain: AgentLearningConsolidationDomain): Promise<Set<string>> {
+  if (domain === 'memory') return new Set((await memory.list()).map((record) => record.id));
   if (domain === 'persona') return new Set(AgentPersonaRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
   if (domain === 'skill') return new Set(AgentSkillRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
   return new Set(AgentRoutineRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
@@ -255,13 +268,13 @@ function currentLocalNames(shellPaths: ShellPathService, domain: AgentLearningCo
   return new Set(AgentRoutineRegistry.fromShellPaths(shellPaths).list().map((record) => record.name.toLowerCase()));
 }
 
-function recreateGuidance(
+async function recreateGuidance(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   receipt: LearningConsolidationReceipt,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
   if (receipt.phase !== 'delete') return null;
-  const occupiedIds = currentLocalIds(shellPaths, memoryRegistry, receipt.domain);
+  const occupiedIds = await currentLocalIds(shellPaths, memory, receipt.domain);
   const occupiedNames = currentLocalNames(shellPaths, receipt.domain);
   const records = receipt.beforeDuplicates.map((snapshot) => {
     const previousId = stringField(snapshot, 'id') ?? '(unknown)';
@@ -308,11 +321,11 @@ function recreateGuidance(
   };
 }
 
-function receiptSummary(
+async function receiptSummary(
   receipt: LearningConsolidationReceipt,
-  context?: { readonly shellPaths: ShellPathService; readonly memoryRegistry: MemoryRegistry },
-): Record<string, unknown> {
-  const deleteRecovery = context ? recreateGuidance(context.shellPaths, context.memoryRegistry, receipt) : null;
+  context?: { readonly shellPaths: ShellPathService; readonly memory: ConsolidationMemory },
+): Promise<Record<string, unknown>> {
+  const deleteRecovery = context ? await recreateGuidance(context.shellPaths, context.memory, receipt) : null;
   return {
     receiptId: receipt.id,
     createdAt: receipt.createdAt,
@@ -347,11 +360,6 @@ function previewCandidate(candidate: LearningCandidate): Record<string, unknown>
     updateFields: plan.updateFields ?? null,
     phases: [
       {
-        id: 'merge',
-        route: `agent_learning_consolidation mode:"merge" candidateId:"${candidate.id}" `,
-        effect: 'Update the survivor with merged visible fields and write a rollback receipt.',
-      },
-      {
         id: 'stale',
         route: `agent_learning_consolidation mode:"stale" candidateId:"${candidate.id}" `,
         effect: 'Mark duplicates stale before deletion and write a rollback receipt.',
@@ -367,57 +375,43 @@ function previewCandidate(candidate: LearningCandidate): Record<string, unknown>
   };
 }
 
-function applyMerge(
-  shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
-  candidate: LearningCandidate,
-  explicitUserRequest: string,
-  beforeWrite: () => void,
-): Record<string, unknown> {
-  const domain = domainForCandidate(candidate);
-  const plan = candidate.consolidation;
-  if (!plan?.updateFields) throw new Error(`Candidate ${candidate.id} has no survivor merge fields.`);
-  const beforeSurvivor = cloneRecord(getRecord(shellPaths, memoryRegistry, domain, plan.survivorId));
-  beforeWrite();
-  const afterSurvivor = updateSurvivor(shellPaths, memoryRegistry, domain, plan.survivorId, plan.updateFields);
-  const receipt: LearningConsolidationReceipt = {
-    id: receiptId(candidate, 'merge'),
-    createdAt: new Date().toISOString(),
-    domain,
-    candidateId: candidate.id,
-    phase: 'merge',
-    explicitUserRequest,
-    survivorId: plan.survivorId,
-    duplicateIds: plan.duplicateIds,
-    beforeSurvivor,
-    beforeDuplicates: [],
-  };
-  beforeWrite();
-  writeReceipt(shellPaths, receipt);
-  return {
-    status: 'applied',
-    phase: 'merge',
-    candidateId: candidate.id,
-    judgmentDecisionIds: candidate.judgmentDecisionIds,
-    survivorId: plan.survivorId,
-    receipt: receiptSummary(receipt),
-    afterSurvivor,
-    next: 'Inspect the survivor, then run the stale phase only if the merged fields are correct.',
-  };
+/**
+ * A failure after a phase began changing records. It is returned to the agent as a result, not rethrown as a
+ * host hold, because the agent must be told what already changed and where the earlier state is kept.
+ */
+class PartWayError extends Error {}
+
+function causeText(cause: unknown): string {
+  if (cause instanceof ToolInputProjectionError) return `the host stopped the call (${cause.problem}).`;
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return /[.!?]$/.test(reason) ? reason : `${reason}.`;
 }
 
-function applyStale(
+/** A phase that failed after its receipt was written: say what is already changed and where the old state is. */
+function stoppedPhase(phase: string, receiptId: string, cause: unknown, changedIds: readonly string[]): Error {
+  // Nothing changed yet: a host hold is reported as itself.
+  if (cause instanceof ToolInputProjectionError && changedIds.length === 0) return cause;
+  const changed = changedIds.length > 0 ? `Already changed: ${changedIds.join(', ')}.` : 'No record was changed.';
+  return new PartWayError(`${phase} stopped part-way: ${causeText(cause)} ${changed} Receipt ${receiptId} was written first and holds the earlier state; inspect the records before retrying.`);
+}
+
+function stoppedRecreate(deleteReceiptId: string, cause: unknown, recreatedIds: readonly string[]): Error {
+  if (cause instanceof ToolInputProjectionError && recreatedIds.length === 0) return cause;
+  return new PartWayError(`Recreate stopped part-way: ${causeText(cause)} Already recreated: ${recreatedIds.join(', ') || 'none'}. The delete receipt ${deleteReceiptId} is unchanged and still lists every record; inspect current records before retrying.`);
+}
+
+async function applyStale(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   candidate: LearningCandidate,
   explicitUserRequest: string,
   beforeWrite: () => void,
-): Record<string, unknown> {
+  record: (receipt: LearningConsolidationReceipt) => void,
+): Promise<Record<string, unknown>> {
   const domain = domainForCandidate(candidate);
   const plan = candidate.consolidation;
   if (!plan) throw new Error(`Candidate ${candidate.id} is not a duplicate consolidation candidate.`);
-  const beforeDuplicates = plan.duplicateIds.map((id) => cloneRecord(getRecord(shellPaths, memoryRegistry, domain, id)));
-  const afterDuplicates = plan.duplicateIds.map((id) => { beforeWrite(); return markDuplicateStale(shellPaths, memoryRegistry, domain, id, plan.survivorId); });
+  const beforeDuplicates = await Promise.all(plan.duplicateIds.map(async (id) => cloneRecord(await getRecord(shellPaths, memory, domain, id))));
   const receipt: LearningConsolidationReceipt = {
     id: receiptId(candidate, 'stale'),
     createdAt: new Date().toISOString(),
@@ -429,8 +423,16 @@ function applyStale(
     duplicateIds: plan.duplicateIds,
     beforeDuplicates,
   };
-  beforeWrite();
-  writeReceipt(shellPaths, receipt);
+  record(receipt);
+  const afterDuplicates: Record<string, unknown>[] = [];
+  const staled: string[] = [];
+  try {
+    for (const id of plan.duplicateIds) {
+      beforeWrite();
+      afterDuplicates.push(await markDuplicateStale(shellPaths, memory, domain, id, plan.survivorId));
+      staled.push(id);
+    }
+  } catch (error) { throw stoppedPhase('stale', receipt.id, error, staled); }
   return {
     status: 'applied',
     phase: 'stale',
@@ -438,23 +440,24 @@ function applyStale(
     judgmentDecisionIds: candidate.judgmentDecisionIds,
     survivorId: plan.survivorId,
     duplicateIds: plan.duplicateIds,
-    receipt: receiptSummary(receipt),
+    receipt: await receiptSummary(receipt),
     afterDuplicates,
     next: 'Re-run the curator and delete only after current recorded effect admission approves deleting the stale duplicates.',
   };
 }
 
-function applyDelete(
+async function applyDelete(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   candidate: LearningCandidate,
   explicitUserRequest: string,
   beforeWrite: () => void,
-): Record<string, unknown> {
+  record: (receipt: LearningConsolidationReceipt) => void,
+): Promise<Record<string, unknown>> {
   const domain = domainForCandidate(candidate);
   const plan = candidate.consolidation;
   if (!plan) throw new Error(`Candidate ${candidate.id} is not a duplicate consolidation candidate.`);
-  const beforeDuplicates = plan.duplicateIds.map((id) => cloneRecord(getRecord(shellPaths, memoryRegistry, domain, id)));
+  const beforeDuplicates = await Promise.all(plan.duplicateIds.map(async (id) => cloneRecord(await getRecord(shellPaths, memory, domain, id))));
   const unstaled = beforeDuplicates.filter((record) => record.reviewState !== 'stale').map((record) => String(record.id ?? '(unknown)'));
   if (unstaled.length > 0) {
     throw new Error(`Delete refused. Stage duplicates stale first: ${unstaled.join(', ')}.`);
@@ -470,7 +473,6 @@ function applyDelete(
       throw new Error(`Delete refused. Duplicate skill records are still referenced by bundles: ${references.join(', ')}. Inspect or update bundles before deleting.`);
     }
   }
-  for (const id of plan.duplicateIds) { beforeWrite(); deleteDuplicate(shellPaths, memoryRegistry, domain, id); }
   const receipt: LearningConsolidationReceipt = {
     id: receiptId(candidate, 'delete'),
     createdAt: new Date().toISOString(),
@@ -483,8 +485,12 @@ function applyDelete(
     duplicateIds: plan.duplicateIds,
     beforeDuplicates,
   };
-  beforeWrite();
-  writeReceipt(shellPaths, receipt);
+  // The snapshots in this receipt are the only copy of the records, so it exists before the first delete.
+  record(receipt);
+  const deleted: string[] = [];
+  try {
+    for (const id of plan.duplicateIds) { beforeWrite(); await deleteDuplicate(shellPaths, memory, domain, id); deleted.push(id); }
+  } catch (error) { throw stoppedPhase('delete', receipt.id, error, deleted); }
   return {
     status: 'applied',
     phase: 'delete',
@@ -492,24 +498,25 @@ function applyDelete(
     judgmentDecisionIds: candidate.judgmentDecisionIds,
     survivorId: plan.survivorId,
     deletedDuplicateIds: plan.duplicateIds,
-    receipt: receiptSummary(receipt, { shellPaths, memoryRegistry }),
-    recreateGuidance: recreateGuidance(shellPaths, memoryRegistry, receipt),
+    receipt: await receiptSummary(receipt, { shellPaths, memory }),
+    recreateGuidance: await recreateGuidance(shellPaths, memory, receipt),
     next: 'Deletion is intentionally last. The receipt stores deleted record snapshots and exposes a separate admitted recreate route when exact ids are still safe.',
   };
 }
 
 async function applyRecreate(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   args: AgentLearningConsolidationToolArgs,
   explicitUserRequest: string,
   beforeWrite: () => void,
+  record: (receipt: LearningConsolidationReceipt) => void,
 ): Promise<Record<string, unknown>> {
   const deleteReceipt = findDeleteReceipt(shellPaths, args);
   if (deleteReceipt.phase !== 'delete') {
     throw new Error(`Recreate requires a delete receipt. Receipt ${deleteReceipt.id} is phase ${deleteReceipt.phase}.`);
   }
-  const guidance = recreateGuidance(shellPaths, memoryRegistry, deleteReceipt) as {
+  const guidance = await recreateGuidance(shellPaths, memory, deleteReceipt) as {
     readonly records?: readonly {
       readonly previousId?: string;
       readonly expectedId?: string;
@@ -524,7 +531,8 @@ async function applyRecreate(
 
   if (deleteReceipt.domain === 'memory') {
     const memoryRecords = deleteReceipt.beforeDuplicates.map(memoryRecordFromSnapshot);
-    const conflicts = memoryRecords.filter((record) => memoryRegistry.get(record.id)).map((record) => record.id);
+    const present = await Promise.all(memoryRecords.map(async (record) => await memory.get(record.id) !== null));
+    const conflicts = memoryRecords.filter((_record, index) => present[index]).map((record) => record.id);
     if (conflicts.length > 0) throw new Error(`Exact-id recreate refused. Current memory records already use: ${conflicts.join(', ')}.`);
     const bundle: MemoryBundle = {
       schemaVersion: 'v1',
@@ -536,9 +544,109 @@ async function applyRecreate(
       links: [],
     };
     beforeWrite();
-    const importResult = await memoryRegistry.importBundle(bundle);
+    const importResult = await memory.importBundle(bundle);
+    if (importResult.importedRecords !== memoryRecords.length) {
+      throw new Error(`Recreate imported ${importResult.importedRecords} of ${memoryRecords.length} memory records, so it is not reported as applied. The delete receipt ${deleteReceipt.id} is unchanged; inspect current memory records before retrying.`);
+    }
+    const recreatedIds = memoryRecords.map((entry) => entry.id);
+    let receipt: LearningConsolidationReceipt;
+    try {
+      beforeWrite();
+      receipt = {
+        id: receiptIdFromReceipt(deleteReceipt, 'recreate'),
+        createdAt: new Date().toISOString(),
+        domain: deleteReceipt.domain,
+        candidateId: deleteReceipt.candidateId,
+        judgmentDecisionIds: deleteReceipt.judgmentDecisionIds,
+        phase: 'recreate',
+        explicitUserRequest,
+        survivorId: deleteReceipt.survivorId,
+        duplicateIds: deleteReceipt.duplicateIds,
+        beforeDuplicates: deleteReceipt.beforeDuplicates,
+      };
+      record(receipt);
+    } catch (error) { throw stoppedRecreate(deleteReceipt.id, error, recreatedIds); }
+    return {
+      status: 'applied',
+      phase: 'recreate',
+      recreatedFromReceiptId: deleteReceipt.id,
+      recreatedIds: memoryRecords.map((entry) => entry.id),
+      exactIdsPreserved: true,
+      importResult,
+      receipt: await receiptSummary(receipt, { shellPaths, memory }),
+      next: 'Inspect recreated memory records, then re-run the learning curator before applying another consolidation phase.',
+    };
+  }
+
+  const recreated: Record<string, unknown>[] = [];
+  // Recorded as soon as the registry created the record, so a stop before the review state is restored still names it.
+  const createdIds: string[] = [];
+  try {
+    for (const snapshot of deleteReceipt.beforeDuplicates) {
+      const previousId = stringField(snapshot, 'id');
+      if (!previousId) throw new Error('Delete receipt snapshot is missing id.');
+      if (deleteReceipt.domain === 'persona') {
+        const registry = AgentPersonaRegistry.fromShellPaths(shellPaths);
+        beforeWrite();
+        const created = registry.create({
+          name: stringField(snapshot, 'name') ?? '',
+          description: stringField(snapshot, 'description') ?? '',
+          body: stringField(snapshot, 'body') ?? '',
+          tags: arrayField(snapshot, 'tags'),
+          triggers: arrayField(snapshot, 'triggers'),
+          source: localRecordSource(snapshot),
+          provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
+        });
+        createdIds.push(created.id);
+        if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
+        if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); await restoreReviewState(shellPaths, memory, deleteReceipt.domain, created.id, snapshot); }
+        recreated.push(cloneRecord(await getRecord(shellPaths, memory, deleteReceipt.domain, created.id)));
+      } else if (deleteReceipt.domain === 'skill') {
+        const registry = AgentSkillRegistry.fromShellPaths(shellPaths);
+        beforeWrite();
+        const created = registry.create({
+          name: stringField(snapshot, 'name') ?? '',
+          description: stringField(snapshot, 'description') ?? '',
+          procedure: stringField(snapshot, 'procedure') ?? '',
+          tags: arrayField(snapshot, 'tags'),
+          triggers: arrayField(snapshot, 'triggers'),
+          requirements: requirementsFromSnapshot(snapshot),
+          enabled: booleanField(snapshot, 'enabled') === true,
+          source: localRecordSource(snapshot),
+          provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
+        });
+        createdIds.push(created.id);
+        if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
+        if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); await restoreReviewState(shellPaths, memory, deleteReceipt.domain, created.id, snapshot); }
+        recreated.push(cloneRecord(await getRecord(shellPaths, memory, deleteReceipt.domain, created.id)));
+      } else {
+        const registry = AgentRoutineRegistry.fromShellPaths(shellPaths);
+        beforeWrite();
+        const created = registry.create({
+          name: stringField(snapshot, 'name') ?? '',
+          description: stringField(snapshot, 'description') ?? '',
+          steps: stringField(snapshot, 'steps') ?? '',
+          tags: arrayField(snapshot, 'tags'),
+          triggers: arrayField(snapshot, 'triggers'),
+          requirements: requirementsFromSnapshot(snapshot),
+          enabled: booleanField(snapshot, 'enabled') === true,
+          source: localRecordSource(snapshot),
+          provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
+        });
+        createdIds.push(created.id);
+        if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
+        if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); await restoreReviewState(shellPaths, memory, deleteReceipt.domain, created.id, snapshot); }
+        recreated.push(cloneRecord(await getRecord(shellPaths, memory, deleteReceipt.domain, created.id)));
+      }
+    }
+  } catch (error) {
+    throw stoppedRecreate(deleteReceipt.id, error, createdIds);
+  }
+
+  let receipt: LearningConsolidationReceipt;
+  try {
     beforeWrite();
-    const receipt: LearningConsolidationReceipt = {
+    receipt = {
       id: receiptIdFromReceipt(deleteReceipt, 'recreate'),
       createdAt: new Date().toISOString(),
       domain: deleteReceipt.domain,
@@ -550,90 +658,8 @@ async function applyRecreate(
       duplicateIds: deleteReceipt.duplicateIds,
       beforeDuplicates: deleteReceipt.beforeDuplicates,
     };
-    beforeWrite();
-  writeReceipt(shellPaths, receipt);
-    return {
-      status: 'applied',
-      phase: 'recreate',
-      recreatedFromReceiptId: deleteReceipt.id,
-      recreatedIds: memoryRecords.map((record) => record.id),
-      exactIdsPreserved: importResult.importedRecords === memoryRecords.length,
-      importResult,
-      receipt: receiptSummary(receipt, { shellPaths, memoryRegistry }),
-      next: 'Inspect recreated memory records, then re-run the learning curator before applying another consolidation phase.',
-    };
-  }
-
-  const recreated: Record<string, unknown>[] = [];
-  for (const snapshot of deleteReceipt.beforeDuplicates) {
-    const previousId = stringField(snapshot, 'id');
-    if (!previousId) throw new Error('Delete receipt snapshot is missing id.');
-    if (deleteReceipt.domain === 'persona') {
-      const registry = AgentPersonaRegistry.fromShellPaths(shellPaths);
-      beforeWrite();
-      const created = registry.create({
-        name: stringField(snapshot, 'name') ?? '',
-        description: stringField(snapshot, 'description') ?? '',
-        body: stringField(snapshot, 'body') ?? '',
-        tags: arrayField(snapshot, 'tags'),
-        triggers: arrayField(snapshot, 'triggers'),
-        source: localRecordSource(snapshot),
-        provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
-      });
-      if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
-      if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); restoreReviewState(shellPaths, memoryRegistry, deleteReceipt.domain, created.id, snapshot); }
-      recreated.push(cloneRecord(getRecord(shellPaths, memoryRegistry, deleteReceipt.domain, created.id)));
-    } else if (deleteReceipt.domain === 'skill') {
-      const registry = AgentSkillRegistry.fromShellPaths(shellPaths);
-      beforeWrite();
-      const created = registry.create({
-        name: stringField(snapshot, 'name') ?? '',
-        description: stringField(snapshot, 'description') ?? '',
-        procedure: stringField(snapshot, 'procedure') ?? '',
-        tags: arrayField(snapshot, 'tags'),
-        triggers: arrayField(snapshot, 'triggers'),
-        requirements: requirementsFromSnapshot(snapshot),
-        enabled: booleanField(snapshot, 'enabled') === true,
-        source: localRecordSource(snapshot),
-        provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
-      });
-      if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
-      if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); restoreReviewState(shellPaths, memoryRegistry, deleteReceipt.domain, created.id, snapshot); }
-      recreated.push(cloneRecord(getRecord(shellPaths, memoryRegistry, deleteReceipt.domain, created.id)));
-    } else {
-      const registry = AgentRoutineRegistry.fromShellPaths(shellPaths);
-      beforeWrite();
-      const created = registry.create({
-        name: stringField(snapshot, 'name') ?? '',
-        description: stringField(snapshot, 'description') ?? '',
-        steps: stringField(snapshot, 'steps') ?? '',
-        tags: arrayField(snapshot, 'tags'),
-        triggers: arrayField(snapshot, 'triggers'),
-        requirements: requirementsFromSnapshot(snapshot),
-        enabled: booleanField(snapshot, 'enabled') === true,
-        source: localRecordSource(snapshot),
-        provenance: stringField(snapshot, 'provenance') ?? `recreated-from-learning-consolidation:${deleteReceipt.id}`,
-      });
-      if (created.id !== previousId) throw new Error(`Exact-id recreate failed for ${previousId}; created ${created.id}.`);
-      if (stringField(snapshot, 'reviewState') !== 'fresh') { beforeWrite(); restoreReviewState(shellPaths, memoryRegistry, deleteReceipt.domain, created.id, snapshot); }
-      recreated.push(cloneRecord(getRecord(shellPaths, memoryRegistry, deleteReceipt.domain, created.id)));
-    }
-  }
-
-  const receipt: LearningConsolidationReceipt = {
-    id: receiptIdFromReceipt(deleteReceipt, 'recreate'),
-    createdAt: new Date().toISOString(),
-    domain: deleteReceipt.domain,
-    candidateId: deleteReceipt.candidateId,
-      judgmentDecisionIds: deleteReceipt.judgmentDecisionIds,
-    phase: 'recreate',
-    explicitUserRequest,
-    survivorId: deleteReceipt.survivorId,
-    duplicateIds: deleteReceipt.duplicateIds,
-    beforeDuplicates: deleteReceipt.beforeDuplicates,
-  };
-  beforeWrite();
-  writeReceipt(shellPaths, receipt);
+    record(receipt);
+  } catch (error) { throw stoppedRecreate(deleteReceipt.id, error, createdIds); }
   return {
     status: 'applied',
     phase: 'recreate',
@@ -641,7 +667,7 @@ async function applyRecreate(
     recreatedIds: recreated.map((record) => stringField(record, 'id')).filter(Boolean),
     exactIdsPreserved: true,
     recreatedRecords: recreated,
-    receipt: receiptSummary(receipt, { shellPaths, memoryRegistry }),
+    receipt: await receiptSummary(receipt, { shellPaths, memory }),
     next: 'Inspect recreated records, then re-run the learning curator before applying another consolidation phase.',
   };
 }
@@ -652,8 +678,13 @@ function findReceipt(shellPaths: ShellPathService, args: AgentLearningConsolidat
   const receipts = readReceiptFile(shellPaths).receipts;
   const receipt = receiptIdArg
     ? receipts.find((entry) => entry.id === receiptIdArg)
-    : receipts.find((entry) => entry.candidateId === candidateId && entry.phase !== 'delete' && entry.phase !== 'recreate');
+    : receipts.find((entry) => entry.candidateId === candidateId && (entry.phase === 'merge' || entry.phase === 'stale') && !receipts.some((later) => later.phase === 'rollback' && later.rollbackOf === entry.id));
   if (!receipt) throw new Error(receiptIdArg ? `Unknown learning consolidation receipt ${receiptIdArg}` : 'rollback requires receiptId or candidateId with a non-delete receipt.');
+  if (receipt.phase === 'recreate' || receipt.phase === 'rollback') {
+    throw new Error(`Receipt ${receipt.id} is a ${receipt.phase} receipt; only merge and stale receipts can be rolled back.`);
+  }
+  const alreadyRolledBack = receipts.find((entry) => entry.phase === 'rollback' && entry.rollbackOf === receipt.id);
+  if (alreadyRolledBack) throw new Error(`Receipt ${receipt.id} was already rolled back by ${alreadyRolledBack.id}.`);
   return receipt;
 }
 
@@ -668,47 +699,71 @@ function findDeleteReceipt(shellPaths: ShellPathService, args: AgentLearningCons
   return receipt;
 }
 
-function applyRollback(
+async function applyRollback(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   args: AgentLearningConsolidationToolArgs,
+  explicitUserRequest: string,
   beforeWrite: () => void,
-): Record<string, unknown> {
+  record: (receipt: LearningConsolidationReceipt) => void,
+): Promise<Record<string, unknown>> {
   const receipt = findReceipt(shellPaths, args);
+  const recordRollback = (): Record<string, unknown> => {
+    // Audit trail and the guard against rolling the same receipt back twice. The restore has already happened.
+    try {
+      record({ id: receiptIdFromReceipt(receipt, 'rollback'), createdAt: new Date().toISOString(), domain: receipt.domain, candidateId: receipt.candidateId,
+        phase: 'rollback', explicitUserRequest, survivorId: receipt.survivorId, duplicateIds: receipt.duplicateIds, rollbackOf: receipt.id, beforeDuplicates: [] });
+      return {};
+    } catch (error) {
+      return { auditNote: `The rollback was applied but its receipt could not be written: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  };
   if (receipt.phase === 'delete') {
     throw new Error(`Receipt ${receipt.id} is from a delete phase. Automatic rollback is unavailable after delete; use agent_learning_consolidation mode:"recreate" receiptId:"${receipt.id}"  to recreate deleted records only when the user asks and exact ids are still safe.`);
   }
   if (receipt.phase === 'merge') {
     beforeWrite();
+    const restoredSurvivor = await restoreSurvivor(shellPaths, memory, receipt);
     return {
       status: 'applied',
       phase: 'rollback',
-      rollbackOf: receiptSummary(receipt),
-      restoredSurvivor: restoreSurvivor(shellPaths, memoryRegistry, receipt),
+      rollbackOf: await receiptSummary(receipt),
+      restoredSurvivor,
+      ...recordRollback(),
       next: 'Re-run the learning curator and inspect the candidate before applying another consolidation phase.',
     };
   }
-  for (const snapshot of receipt.beforeDuplicates) {
-    const id = stringField(snapshot, 'id');
-    if (!id) continue;
+  // Check every record before restoring any, so a missing one cannot leave a half-restored set.
+  const restorable = receipt.beforeDuplicates.flatMap((snapshot) => { const id = stringField(snapshot, 'id'); return id ? [{ id, snapshot }] : []; });
+  const gone = await Promise.all(restorable.map(async ({ id }) => { try { await getRecord(shellPaths, memory, receipt.domain, id); return false; } catch { return true; } }));
+  const missing = restorable.filter((_entry, index) => gone[index]).map(({ id }) => id);
+  if (missing.length > 0) throw new Error(`Rollback refused: ${missing.join(', ')} no longer exist (deleted since). Nothing was restored; use mode:"recreate" with the delete receipt if one exists.`);
+  for (const { id, snapshot } of restorable) {
     beforeWrite();
-    restoreReviewState(shellPaths, memoryRegistry, receipt.domain, id, snapshot);
+    await restoreReviewState(shellPaths, memory, receipt.domain, id, snapshot);
   }
   return {
     status: 'applied',
     phase: 'rollback',
-    rollbackOf: receiptSummary(receipt),
-    restoredDuplicateIds: receipt.beforeDuplicates.map((snapshot) => stringField(snapshot, 'id')).filter(Boolean),
+    rollbackOf: await receiptSummary(receipt),
+    restoredDuplicateIds: restorable.map(({ id }) => id),
+    ...recordRollback(),
     next: 'Re-run the learning curator and inspect the candidate before applying another consolidation phase.',
   };
 }
 
 function isConsolidationCandidateCall(args: Record<string, unknown>): boolean {
   const mode = readMode(captureCatalogData(args).mode);
-  return mode === 'preview' || mode === 'merge' || mode === 'stale' || mode === 'delete';
+  return mode === 'preview' || mode === 'stale' || mode === 'delete';
 }
 
-export function createAgentLearningConsolidationTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, registry?: ToolRegistry): Tool {
+/**
+ * `memorySpine` is the process's memory access: once a daemon is adopted it is the
+ * single writer of the shared store, so consolidation reads and changes records
+ * through it. Without one, the local registry is used directly.
+ */
+export function createAgentLearningConsolidationTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, registry?: ToolRegistry, memorySpine?: MemoryAccess): Tool {
+  const memory: ConsolidationMemory = memorySpine ?? createLocalMemoryAccess(memoryRegistry);
   const tool: Tool = {
     definition: {
       name: 'agent_learning_consolidation',
@@ -719,7 +774,7 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
           mode: {
             type: 'string',
             enum: [...MODES],
-            description: 'preview, merge, stale, delete, rollback, recreate, or receipts.',
+            description: 'preview, stale, delete, rollback, recreate, or receipts.',
           },
           candidateId: {
             type: 'string',
@@ -791,15 +846,23 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
       try {
         assertAuthorityCurrent();
         const mode = readMode(args.mode);
+        // readMode falls back to preview; an unrecognised value must not quietly become a read.
+        if (args.mode !== undefined && args.mode !== null && String(args.mode).trim() !== '' && !(typeof args.mode === 'string' && MODES.includes(args.mode as typeof mode))) {
+          return failure(`Unknown mode ${JSON.stringify(String(args.mode)).slice(0, 40)}. Valid values ${MODES.join(', ')}.`);
+        }
         const receiptSource = () => lstatSync(receiptPath(shellPaths), { throwIfNoEntry: false }) ? readFileSync(receiptPath(shellPaths), 'utf8') : null;
-        const receiptsJson = receiptSource();
+        let receiptsJson = receiptSource();
         const assertReceiptsCurrent = () => {
           if (receiptSource() !== receiptsJson) throw new ToolInputProjectionError('stale');
         };
         const beforeWrite = () => {
           assertAuthorityCurrent(); assertReceiptsCurrent();
-          if (mode !== 'merge' && mode !== 'stale' && mode !== 'delete' && mode !== 'rollback' && mode !== 'recreate') throw new ToolInputProjectionError('held');
+          if (mode !== 'stale' && mode !== 'delete' && mode !== 'rollback' && mode !== 'recreate') throw new ToolInputProjectionError('held');
           requireConfirmedWrite(rawArgs, mode, options);
+        };
+        // Writing a receipt changes the file this call watches for outside edits, so the baseline moves with it.
+        const record = (receipt: LearningConsolidationReceipt) => {
+          beforeWrite(); writeReceipt(shellPaths, receipt); receiptsJson = receiptSource();
         };
         if (mode === 'receipts') {
           // `total` and the note exist because the default page is 20 and the
@@ -809,25 +872,24 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
           const page = stored.slice(0, readLimit(args.limit, 20));
           return output({
             status: 'receipts',
-            path: receiptPath(shellPaths),
-            receipts: page.map((receipt) => receiptSummary(receipt, { shellPaths, memoryRegistry })),
+            receipts: await Promise.all(page.map((receipt) => receiptSummary(receipt, { shellPaths, memory }))),
             returned: page.length,
             total: stored.length,
             ...(page.length < stored.length
-              ? { note: `Showing the ${page.length} newest of ${stored.length} receipts; raise limit to see older ones.` }
+              ? { note: `Showing the ${page.length} newest of ${stored.length} receipts; raise limit (at most 100) to see older ones.` }
               : {}),
           });
         }
         if (mode === 'rollback') {
-          requireConfirmedWrite(rawArgs, mode, options);
-          return output(applyRollback(shellPaths, memoryRegistry, args, beforeWrite));
+          const explicitUserRequest = requireConfirmedWrite(rawArgs, mode, options);
+          return output(await applyRollback(shellPaths, memory, args, explicitUserRequest, beforeWrite, record));
         }
         if (mode === 'recreate') {
           const explicitUserRequest = requireConfirmedWrite(rawArgs, mode, options);
-          return output(await applyRecreate(shellPaths, memoryRegistry, args, explicitUserRequest, beforeWrite));
+          return output(await applyRecreate(shellPaths, memory, args, explicitUserRequest, beforeWrite, record));
         }
         const candidateGuards = new Map<string | (() => void), () => void>();
-        const candidate = await resolveCandidate(shellPaths, memoryRegistry, args, {
+        const candidate = await resolveCandidate(shellPaths, memory, args, {
           signal, sourceOwner, assertCurrent: () => { assertAuthorityCurrent(); assertReceiptsCurrent(); },
           retainCurrent(guard, key) { if (!candidateGuards.has(key ?? guard)) candidateGuards.set(key ?? guard, guard); },
         });
@@ -838,12 +900,13 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
         for (const guard of candidateGuards.values()) guard();
         if (mode === 'preview') return output(previewCandidate(candidate));
         if (!WRITE_MODES.has(mode)) return failure(`Unknown mode. Valid values ${MODES.join(', ')}.`);
-        if (mode !== 'merge' && mode !== 'stale' && mode !== 'delete') throw new ToolInputProjectionError('held');
+        if (mode !== 'stale' && mode !== 'delete') throw new ToolInputProjectionError('held');
         const explicitUserRequest = requireConfirmedWrite(rawArgs, mode, options);
-        if (mode === 'merge') return output(applyMerge(shellPaths, memoryRegistry, candidate, explicitUserRequest, beforeWrite));
-        if (mode === 'stale') return output(applyStale(shellPaths, memoryRegistry, candidate, explicitUserRequest, beforeWrite));
-        return output(applyDelete(shellPaths, memoryRegistry, candidate, explicitUserRequest, beforeWrite));
+        if (mode === 'stale') return output(await applyStale(shellPaths, memory, candidate, explicitUserRequest, beforeWrite, record));
+        return output(await applyDelete(shellPaths, memory, candidate, explicitUserRequest, beforeWrite, record));
       } catch (error) {
+        // Records already changed: the account of what changed matters more than which check failed.
+        if (error instanceof PartWayError) return failure(error.message);
         assertAuthorityCurrent();
         if (error instanceof ToolInputProjectionError) throw error;
         return failure(error instanceof Error ? error.message : String(error));
@@ -857,6 +920,7 @@ export function registerAgentLearningConsolidationTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   memoryRegistry: MemoryRegistry,
+  memorySpine?: MemoryAccess,
 ): void {
-  registry.register(createAgentLearningConsolidationTool(shellPaths, memoryRegistry, registry), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isConsolidationCandidateCall) });
+  registry.register(createAgentLearningConsolidationTool(shellPaths, memoryRegistry, registry, memorySpine), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isConsolidationCandidateCall) });
 }

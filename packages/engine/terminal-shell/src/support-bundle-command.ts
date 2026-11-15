@@ -1,4 +1,5 @@
 import { retainCliConfig } from './cli-config-owner.js';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -26,9 +27,12 @@ export interface SupportBundleRuntime {
     readonly binary: string;
     readonly flags: {
       readonly outputFormat?: string | undefined;
+      readonly yes?: boolean | undefined;
     };
   };
 }
+/** Version `export` writes and `import` accepts. */
+const BUNDLE_VERSION = 2;
 type ProviderSnapshot = Awaited<ReturnType<typeof listProviderRuntimeSnapshots>>[number];
 export function createSupportBundleCommand<
   Runtime extends SupportBundleRuntime,
@@ -185,7 +189,7 @@ export function createSupportBundleCommand<
           const service = await bindings.servicePosture(runtime, { ...reading, logTailBytes: 8192 });
           const bundle = {
             ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
-            version: 2,
+            version: BUNDLE_VERSION,
             type: policy.bundleType,
             capturedAt: Date.now(),
             package: {
@@ -246,14 +250,29 @@ export function createSupportBundleCommand<
       );
     }
     if (sub === 'import') {
-      const path = rest[0];
-      if (!path) return { output: `Usage: ${policy.commandBase(runtime)} import <path>`, exitCode: 2 };
+      const apply = runtime.cli.flags.yes === true || rest.includes('--yes');
+      const path = rest.find((token) => token !== '--yes');
+      if (!path) return { output: `Usage: ${policy.commandBase(runtime)} import <path> [--yes]`, exitCode: 2 };
       const sourcePath = shellPaths.resolveWorkspacePath(path);
       const parsed = readJsonFile(sourcePath);
       if (!parsed.ok) return { output: `Invalid bundle JSON${policy.invalidJsonSeparator}${parsed.error}`, exitCode: 1 };
+      const bundleType = parsed.value['type'];
+      if (bundleType !== policy.bundleType) {
+        return {
+          output: `${sourcePath} is a "${String(bundleType ?? 'unknown')}" bundle; this command imports "${policy.bundleType}" bundles. Nothing was changed.`,
+          exitCode: 1,
+        };
+      }
+      if (parsed.value['version'] !== BUNDLE_VERSION) {
+        return {
+          output: `${sourcePath} is bundle version ${String(parsed.value['version'] ?? 'unknown')}; this command imports version ${BUNDLE_VERSION}. Nothing was changed.`,
+          exitCode: 1,
+        };
+      }
       const config = parsed.value['config'];
       if (!config || typeof config !== 'object') return { output: 'Bundle has no config object to import.', exitCode: 1 };
-      let count = 0;
+      const pending: { key: ConfigKey; value: unknown }[] = [];
+      const failed: { key: string; message: string }[] = [];
       let skippedRedacted = 0;
       for (const setting of bindings.schema) {
         const value = getNestedValue(config, setting.key);
@@ -262,15 +281,56 @@ export function createSupportBundleCommand<
           skippedRedacted++;
           continue;
         }
-        bindings.applySetting(runtime, setting.key, value);
-        count++;
+        // Check every value before changing any, so a bad key cannot leave a half-imported configuration.
+        try {
+          runtime.configManager.validateDynamic(setting.key, value);
+          pending.push({ key: setting.key, value });
+        } catch (error) {
+          failed.push({ key: setting.key, message: summarizeError(error) });
+        }
+      }
+      const redactedNote = skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : '';
+      if (failed.length > 0) {
+        return {
+          output: [
+            `Bundle not imported: ${failed.length} value${failed.length === 1 ? '' : 's'} cannot be applied. Nothing was changed.`,
+            ...failed.map((entry) => `  ${entry.key}: ${entry.message}`),
+          ].join('\n'),
+          exitCode: 1,
+        };
+      }
+      const count = pending.length;
+      if (!apply) {
+        return {
+          output: [
+            `Refusing to import ${count} config value${count === 1 ? '' : 's'} without --yes. Nothing was changed.${redactedNote}`,
+            ...pending.map((entry) => `  would set ${entry.key}`),
+            `Usage: ${policy.commandBase(runtime)} import <path> --yes`,
+          ].join('\n'),
+          exitCode: 2,
+        };
+      }
+      const applied: string[] = [];
+      try {
+        for (const entry of pending) {
+          bindings.applySetting(runtime, entry.key, entry.value);
+          applied.push(entry.key);
+        }
+      } catch (error) {
+        return {
+          output: [
+            `Bundle import stopped after ${applied.length} of ${count} value${count === 1 ? '' : 's'}: ${summarizeError(error)}`,
+            ...applied.map((key) => `  applied ${key}`),
+          ].join('\n'),
+          exitCode: 1,
+        };
       }
       return {
-        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied.${skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : ''}`,
+        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied.${redactedNote}`,
         exitCode: 0,
       };
     }
-    return { output: `Usage: ${policy.commandBase(runtime)} export [path]|inspect <path>|import <path>`, exitCode: 2 };
+    return { output: `Usage: ${policy.commandBase(runtime)} export [path]|inspect <path>|import <path> [--yes]`, exitCode: 2 };
   }
   return handleBundleCommand;
 }

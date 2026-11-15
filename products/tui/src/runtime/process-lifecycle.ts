@@ -19,14 +19,25 @@
  * `unsubs` registry is shared by reference and drained on exit.
  */
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { flushActivityLogSync, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { createTerminalLifecycle, TERMINAL_ESCAPES } from '@goodvibes-jev/engine/terminal-shell';
 import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from '../core/format-user-error.ts';
 import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
-import { buildPersistedSessionContext, deleteRecoveryFile } from '@/runtime/index.ts';
+import { buildPersistedSessionContext, deleteRecoveryFile, writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { removeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import {
+  appendCrashRecord,
+  buildCrashRecord,
+  buildPersistedSessionContextFromFacts,
+  CRASH_LOG_FILENAME,
+  removeLivenessMarker,
+} from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
+import { VERSION } from '../version.ts';
 import type { BootstrapContext } from './bootstrap.ts';
+import { ShutdownReleaseError } from './bootstrap-shutdown.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { ConversationMessageSnapshot } from '../core/conversation.ts';
 
@@ -76,7 +87,7 @@ export interface ProcessLifecycleDeps {
   /** Late-bound: the terminal output guard is installed after this factory runs. */
   readonly getTerminalOutputGuard: () => { readonly dispose: () => void };
   readonly getPromptContentWidth: () => number;
-  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContext>[2];
+  readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
   /** Teardown registry shared with main(); drained on exit. */
   readonly unsubs: ReadonlyArray<() => void | Promise<void>>;
   readonly getRecoveryInterval: () => ReturnType<typeof setInterval> | null;
@@ -96,6 +107,10 @@ export interface ProcessLifecycleDeps {
    * "absent" rather than taking the exit path down.
    */
   readonly recoverySnapshotExists?: (surface: SessionSurface, sessionId: string) => boolean;
+  /** Overridable for tests; defaults to `<home>/.goodvibes/tui/crashes.jsonl`. */
+  readonly crashLogPath?: string;
+  /** Overridable for tests; defaults to a descriptor write the output guard cannot intercept. */
+  readonly writeStderr?: (line: string) => void;
 }
 
 export interface ProcessLifecycleHandlers {
@@ -151,12 +166,33 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     try { cleanup(); } catch (error) { reportCleanupError(phase, error); }
   };
 
+  const resolveCrashLogPath = (): string =>
+    deps.crashLogPath ?? join(ctx.services.homeDirectory, '.goodvibes', GOODVIBES_TUI_SURFACE_ROOT, CRASH_LOG_FILENAME);
+  // The durable trace of a fault: a record in the bounded crash log that support
+  // tooling reads. Synchronous and best-effort, it must never cost the exit or
+  // the notices that follow it.
+  const recordCrash = (kind: 'uncaughtException' | 'unhandledRejection', thrown: unknown): string | null => {
+    try {
+      const record = buildCrashRecord(kind, thrown, {
+        version: VERSION,
+        surface: GOODVIBES_TUI_SURFACE_ROOT,
+        sessionId: ctx.runtime?.sessionId ?? null,
+      });
+      const path = resolveCrashLogPath();
+      return appendCrashRecord(path, record) ? path : null;
+    } catch (error) {
+      reportCleanupError('crash record', error);
+      return null;
+    }
+  };
+
   const sigintHandler = (): void => getInput().feed('\x03');
   const rejectionNotices = createErrorNoticeOwner(deps.errorNoticeTimeoutMs);
   let noticesClosed = false;
   let _unhandledRejectionCount = 0;
   let _unhandledRejectionWindowStart = Date.now();
   const unhandledRejectionHandler = (reason: unknown): void => {
+    recordCrash('unhandledRejection', reason);
     if (noticesClosed) return;
     const now = Date.now();
     if (now - _unhandledRejectionWindowStart > 10000) {
@@ -267,18 +303,39 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
       .finally(() => { clearTimeout(deadline); process.exit(code); });
   };
 
+  // Signals and crashes never reach ctx.shutdown, and a graceful shutdown can
+  // lose its deadline: write the recovery snapshot first, synchronously, so the
+  // next launch can restore the in-flight turn. writeRecoveryFile never throws
+  // and skips an empty conversation.
+  const writeExitRecoverySnapshot = (): void => bestEffort('exit recovery snapshot', () => {
+    const snapshot = ctx.conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
+    const persisted = buildPersistedSessionContextFromFacts(snapshot.messages, ctx.conversation.getTitleSource(), buildSessionContinuityHints());
+    writeRecoveryFile({ ...snapshot, ...persisted }, ctx.runtime.sessionId, ctx.conversation.title ?? '', { surface: ctx.services.surface });
+  });
+
   const uncaughtExceptionHandler = (err: Error): void => {
+    const crashLog = recordCrash('uncaughtException', err);
     restoreTerminal();
+    writeExitRecoverySnapshot();
     bestEffort('uncaughtException logging', () => logger.error('uncaughtException: terminal restored, exiting', { error: summarizeError(err), stack: err.stack }));
     // The line naming the crash is the only record of it. process.exit does not
     // drain the activity log's buffer, so it goes to disk here rather than
     // relying on the exit hook that also runs, the crash log is worth stating
     // the intent for at the site that produces it.
     bestEffort('activity log flush', flushActivityLogSync);
+    // The terminal is back on the user's own screen, so these lines survive the
+    // exit instead of vanishing with the alternate screen. A descriptor write is
+    // out of the full-screen output guard's reach.
+    bestEffort('crash stderr', () => {
+      const writeStderr = deps.writeStderr ?? writeFatalLine;
+      writeStderr(`goodvibes crashed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+      if (crashLog) writeStderr(`crash record written to ${crashLog}`);
+    });
     exitAfterRelease(1);
   };
   const terminationSignalHandler = (signal: NodeJS.Signals): void => {
     restoreTerminal();
+    writeExitRecoverySnapshot();
     bestEffort('termination signal logging', () => logger.error(`Received ${signal}: terminal restored, exiting`, {}));
     bestEffort('activity log flush', flushActivityLogSync);
     exitAfterRelease(signal === 'SIGHUP' ? 129 : 143);
@@ -286,6 +343,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   const exitListener = (): void => { restoreTerminal(); void releaseSession(); };
 
   const performExit = async (): Promise<void> => {
+    writeExitRecoverySnapshot();
     // Start each owner in order, attach rejection handlers immediately, and let
     // asynchronous drains finish together after the synchronous terminal hand-back.
     const drains: Promise<void>[] = [];
@@ -330,7 +388,14 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
       }
       // A late metadata result must not start new shutdown work after exit.
       if (!beforeDeadline) return;
-      await ctx.shutdown({ ...snapshot, ...persisted });
+      try {
+        await ctx.shutdown({ ...snapshot, ...persisted });
+      } catch (error) {
+        // The session was saved; only releasing another owner failed. Say so in
+        // the log, but do not treat the save as incomplete or keep recovery.
+        if (!(error instanceof ShutdownReleaseError)) throw error;
+        reportCleanupError('resource release', error);
+      }
       shutdownOk = beforeDeadline;
     });
     try {

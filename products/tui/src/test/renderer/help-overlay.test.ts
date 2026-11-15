@@ -113,10 +113,10 @@ describe('renderHelpOverlay', () => {
     expect(texts).toContain('PageUp');
   });
 
-  test('includes ? toggle shortcut', () => {
+  test('lists ? as the shortcut that opens the command browser', () => {
     const lines = renderHelpOverlay(W, TALL_VIEWPORT, KEYBINDINGS, undefined, 0);
     const texts = linesToText(lines).join('\n');
-    expect(texts).toContain('?');
+    expect(texts).toMatch(/Open the command browser.*\?\s+or\s+\/help/);
   });
 
   test('renders command list when commands provided', () => {

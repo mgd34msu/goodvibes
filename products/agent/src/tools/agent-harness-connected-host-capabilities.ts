@@ -18,6 +18,16 @@ import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-p
 import { previewHarnessText } from './agent-harness-text.ts';
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 import { operatorBriefingRoutes } from './agent-operator-briefing-tool.ts';
+import { OPERATOR_ACTION_IDS } from '../agent/operator-actions.ts';
+import { SOURCE_KINDS } from './agent-knowledge-ingest-tool.ts';
+import { harnessDisplayPath } from './agent-harness-display-path.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+
+/**
+ * The one statement of who manages connected-host lifecycle and listeners,
+ * shared by every catalog that describes it so none can contradict another.
+ */
+export const CONNECTED_HOST_LIFECYCLE_STATEMENT = `Connected-host lifecycle and listener changes (start, stop, restart, install, upgrade, expose or mutate a listener) are daemon operations. The package CLI mirror blocks those tokens; Agent reaches the supported daemon service methods only through agent_operator_method. ${EFFECT_ADMISSION_SENTENCE}`;
 
 export type ConnectedHostCapabilityResolution =
   | { readonly status: 'found'; readonly detail: Record<string, unknown> }
@@ -51,7 +61,8 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
       routeFamilies: 'host action:"capabilities" includeParameters:true',
       operate: connectedHostCapabilityModelRoute(capability),
     },
-    available: capability.modelTools.every((toolName) => toolIsAvailable(toolRegistry, toolName)),
+    // modelTools are alternatives (the route text joins them with "or"), so one registered tool makes the capability reachable.
+    available: capability.modelTools.some((toolName) => toolIsAvailable(toolRegistry, toolName)),
   });
   return [
     withAvailability({
@@ -64,28 +75,15 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
     }),
     withAvailability({
       id: 'operator-actions',
-      effect: 'confirmed-connected-host-state',
+      effect: 'admitted-connected-host-state',
       modelTools: ['agent_operator_action'],
       workspaceCategories: ['automation', 'host'],
-      allowedActions: [
-        'approvals.approve',
-        'approvals.deny',
-        'approvals.cancel',
-        'automation.jobs.run',
-        'automation.jobs.disable',
-        'automation.jobs.enable',
-        'automation.runs.cancel',
-        'automation.runs.retry',
-        'automation.schedules.delete',
-        'automation.schedules.disable',
-        'automation.schedules.enable',
-        'automation.schedules.run',
-      ],
+      allowedActions: OPERATOR_ACTION_IDS,
       purpose: 'Perform one explicit allowlisted approval, automation, run, or schedule action.',
     }),
     withAvailability({
       id: 'schedule-edit',
-      effect: 'confirmed-connected-host-state',
+      effect: 'admitted-connected-host-state',
       modelTools: ['schedule', 'agent_schedule_edit'],
       workspaceCategories: ['automation', 'personal-ops'],
       slashCommandFamilies: ['schedule'],
@@ -119,14 +117,14 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
       modelTools: ['agent_knowledge_ingest'],
       workspaceCategories: ['knowledge', 'research'],
       slashCommandFamilies: ['knowledge'],
-      sourceKinds: ['url', 'file', 'urls_file', 'bookmarks_file', 'browser_history', 'connector'],
+      sourceKinds: SOURCE_KINDS,
       purpose: 'Ingest explicit user-approved sources into isolated Agent Knowledge.',
     }),
     withAvailability({
       id: 'channels',
       effect: 'confirmed-external-delivery',
       modelTools: ['agent_channel_send'],
-      workspaceCategories: ['channels'],
+      workspaceCategories: ['onboarding-channels'],
       slashCommandFamilies: ['channels', 'channel'],
       targetKinds: ['channel', 'route', 'webhook', 'link'],
       purpose: 'Send one explicit message through a configured Agent delivery target.',
@@ -135,13 +133,13 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
       id: 'notifications',
       effect: 'confirmed-external-delivery',
       modelTools: ['agent_notify'],
-      workspaceCategories: ['channels'],
+      workspaceCategories: ['onboarding-channels'],
       slashCommandFamilies: ['notify'],
       purpose: 'Send one explicit notification using configured notification routes.',
     }),
     withAvailability({
       id: 'reminders-and-schedules',
-      effect: 'confirmed-connected-host-state',
+      effect: 'admitted-connected-host-state',
       modelTools: ['schedule', 'agent_autonomy_schedule', 'agent_reminder_schedule'],
       workspaceCategories: ['automation', 'routines'],
       slashCommandFamilies: ['schedule', 'reminder'],
@@ -152,7 +150,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
       id: 'voice-media',
       effect: 'provider-network-and-artifacts',
       modelTools: ['agent_media_generate'],
-      workspaceCategories: ['voice-media', 'artifacts'],
+      workspaceCategories: ['onboarding-voice-media', 'documents'],
       slashCommandFamilies: ['media', 'image'],
       purpose: 'Generate media through configured Agent media providers and normal artifact storage.',
     }),
@@ -322,9 +320,9 @@ export function connectedHostSummary(
   return {
     baseUrl: connection.baseUrl,
     operatorToken: connection.token ? 'configured' : 'missing',
-    tokenPath: connection.tokenPath,
+    tokenPath: harnessDisplayPath(connection.tokenPath, homeDirectory),
     ownership: 'goodvibes-daemon',
-    lifecycle: 'GoodVibes Agent can inspect daemon posture and use confirmed operator methods for supported service lifecycle/listener changes.',
+    lifecycle: CONNECTED_HOST_LIFECYCLE_STATEMENT,
     modes: {
       servicePosture: agentHarnessModes('service_posture', 'service_endpoint'),
       operatorMethods: agentHarnessModes('operator_methods', 'operator_method'),
@@ -340,7 +338,7 @@ export function connectedHostSummary(
       servicePosture: 'host action:"services"',
       daemonAliases: 'agent_harness mode:"daemon" or mode:"daemon_status"',
       daemonStatusAlias: 'agent_harness mode:"daemon_status"',
-      lifecycle: 'use setup or agent_operator_method with confirm:true and explicitUserRequest for supported daemon service methods.',
+      lifecycle: `use setup or agent_operator_method for supported daemon service methods. ${EFFECT_ADMISSION_SENTENCE}`,
     },
     counts: {
       routeFamilies: routeFamilies.length,
@@ -367,7 +365,7 @@ export function blockedConnectedHostCapabilities(): readonly Record<string, unkn
         inspectCapability: 'host action:"capability"',
         liveStatus: 'host action:"status"',
         endpointPosture: 'host action:"services"',
-        operate: 'agent_operator_method with confirm:true and explicitUserRequest when the daemon contract exposes the method',
+        operate: `agent_operator_method when the daemon contract exposes the method. ${EFFECT_ADMISSION_SENTENCE}`,
       },
       reason: 'Lifecycle changes are powerful daemon operations. They are available only through explicit setup or confirmed operator methods, never as ambient background side effects.',
     },
@@ -406,7 +404,7 @@ export function blockedConnectedHostCapabilities(): readonly Record<string, unkn
         inspectCapability: 'host action:"capability"',
         allowedActions: 'agent_operator_action for simple allowlisted mutations or agent_operator_method for exact confirmed daemon contract methods',
         liveStatus: 'host action:"status"',
-        operate: 'agent_operator_method with confirm:true and explicitUserRequest',
+        operate: `agent_operator_method. ${EFFECT_ADMISSION_SENTENCE}`,
       },
       reason: 'Daemon mutations must resolve to a documented platform operator method and carry explicit user authorization.',
     },

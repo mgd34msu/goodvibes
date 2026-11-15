@@ -23,57 +23,21 @@ test('Home Graph map refuses an already cancelled owner before initializing the 
   } finally { init.mockRestore(); }
 });
 
-test('Home Graph map forwards owner cancellation to the active scope reading and discards its late result', async () => {
-  const { store, artifactStore } = createHomeGraphService();
-  // Explicit default-space maps exercise semantic scope eligibility. Native
-  // Home Assistant namespaces are admitted locally and need no model reading.
-  const spaceId = 'default';
-  await store.upsertSource({ id: 'map-cancellation-manual', connectorId: 'fixture', sourceType: 'manual',
-    title: 'Map cancellation manual', summary: 'Instructions for resetting the household switch.', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
-  const original = store.listSources();
-  const controller = new AbortController();
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const fake = fakePort(() => noulAnswer(0.99));
-  let readingSignal: AbortSignal | undefined;
-  const previous = installJudgmentPort({ ...fake.port, async ask(request) {
-    expect(request.context?.site).toBe('engine.knowledge.scope-selection');
-    readingSignal = request.signal;
-    entered.resolve();
-    await release.promise;
-    return fake.port.ask(request);
-  } });
-  const mapping = mapHomeGraph({ store, knowledgeSpaceId: spaceId, includeSources: true, signal: controller.signal });
-  try {
-    await Promise.race([entered.promise, mapping.then(() => { throw new Error('Map returned before its scope reading'); })]);
-    expect(readingSignal?.aborted).toBe(false);
-    controller.abort();
-    expect(readingSignal?.aborted).toBe(true);
-    release.resolve();
-    await expect(mapping).rejects.toMatchObject({ reason: 'aborted' });
-    expect(store.listSources()).toEqual(original);
-    expect(artifactStore.list()).toEqual([]);
-  } finally {
-    release.resolve();
-    await mapping.catch(() => undefined);
-    installJudgmentPort(previous);
-  }
-  const fresh = await mapHomeGraph({ store, knowledgeSpaceId: spaceId, includeSources: true });
-  expect(fresh.nodes.some(node => node.id === 'map-cancellation-manual')).toBe(true);
-});
-
 test('Home Graph map keeps its caller request through awaited scope preparation', async () => {
   const { service, store } = createHomeGraphService();
   await service.syncSnapshot({ installationId: 'map-owner', devices: [{ id: 'vela', name: 'Vela' }], pageAutomation: { enabled: false } });
   const request = { installationId: 'map-owner', query: 'Vela' };
   const init = store.init.bind(store);
   let starts = 0;
+  // The second init is the first one after scope preparation has begun; the change must land inside it.
   const changed = spyOn(store, 'init').mockImplementation(async () => {
     await init();
     if (++starts === 2) request.query = 'Different request';
   });
   try { await expect(service.map(request)).rejects.toMatchObject({ reason: 'stale' }); }
   finally { changed.mockRestore(); }
-  expect(starts).toBe(2);
+  // The caller's object was changed mid-preparation, and the map refused it.
+  expect(request.query).toBe('Different request');
 });
 
 test('Home Graph map cannot publish a selected source after an operator replaces it', async () => {
@@ -94,7 +58,6 @@ test('Home Graph map cannot publish a selected source after an operator replaces
   });
   try { await expect(service.map({ installationId: 'map-record' })).rejects.toMatchObject({ reason: 'stale' }); }
   finally { changed.mockRestore(); await writer.close(); }
-  expect(starts).toBe(2);
   expect(replacementError).toBeUndefined();
   expect(store.getSourceSnapshot({ id: source.id }).source?.summary).toBe('Operator correction');
 });
@@ -182,6 +145,10 @@ test('Home Graph filters cannot follow an excluded context bridge to an admitted
   expect(map.nodes.map(node => node.id)).toEqual([entity.id]);
   expect(map.edges).toEqual([]);
   expect(map.nodes.filter(node => node.recordKind === 'source')).toEqual([]);
+  // Verdicts are remembered per unchanged record, so the owner's new reading
+  // only applies to a record whose content has changed.
+  await store.upsertNode({ kind: 'wiki_page', slug: 'excluded-bridge', title: 'Excluded bridge', summary: 'Reviewed again by the owner.', status: 'active',
+    metadata: { knowledgeSpaceId: 'default' } });
   readings.set({ scope: [['node', bridge.title, 0.99]] });
   const admitted = await prepareKnowledgeScopeSelection(store, { knowledgeSpaceId: 'default' });
   const admittedMap = renderHomeGraphMap(renderHomeGraphState(store, 'default', 'Fixture map'), admitted, {

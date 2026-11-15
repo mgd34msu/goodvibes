@@ -7,6 +7,7 @@ import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-inp
 import { autonomousSourceEvidence, captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalPermissionHost } from '../../permissions/external-request.js';
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
+import { logAdmissionFailure } from './admission-failure.js';
 import type { WorkspaceTrustManager } from '../workspace-trust.js';
 import type { ExecPromptAsk, ExecPromptAnswer, ExecPromptExecution } from '../../tools/exec/interactive.js';
 
@@ -84,6 +85,6 @@ export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: Exec
     answers.set(answer, { claim() { assertCurrent(); owned.claim(); }, close() { if (!closed) { closed = true; owned.close(); unsubscribe(); } } });
     transferred = true;
     return answer;
-  } catch { return { answered: false }; }
+  } catch (error) { logAdmissionFailure('terminal prompt', error); return { answered: false }; }
   finally { if (!transferred) { admission?.close(); unsubscribe(); } }
 }

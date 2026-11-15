@@ -138,7 +138,7 @@ describe('settings workspace: in-product feature documentation', () => {
   }
 
   test('a startup-gated change shows the complete pending-restart sentence at the point of change (80×24)', () => {
-    const feature = FEATURE_SETTINGS.find((candidate) => candidate.id === 'mcp-lifecycle')!;
+    const feature = FEATURE_SETTINGS.find((candidate) => candidate.id === 'policy-signing')!;
     selectFeatureHeader(feature);
     modal.toggleSelectedFlag();
 
@@ -155,17 +155,21 @@ describe('settings workspace: in-product feature documentation', () => {
     // A capability whose platform half ships but whose surface half does not reads
     // as disabled even with its settings key set to true, and the written reason
     // for that MUST render, or the user sees a switch that flipped and a state
-    // that did not, with no explanation. The set is empty today, wake-word
-    // detection was the last such capability and lost the marker when this
-    // terminal started capturing audio, and the loop is what keeps the rule in
-    // force for the next one.
-    const inoperable = FEATURE_SETTINGS.filter((candidate) => candidate.operable === false);
-    for (const feature of inoperable) {
+    // that did not, with no explanation. No shipped capability is declared
+    // inoperable today (wake-word detection was the last), so the registry entry
+    // is declared so for the duration of the test.
+    const feature = FEATURE_SETTINGS.find((candidate) => candidate.id === 'policy-signing')!;
+    const detail = 'The surface half of this capability is not built yet, so nothing happens when it is switched on.';
+    const original = { operable: feature.operable, inoperableDetail: feature.inoperableDetail };
+    try {
       selectFeatureHeader(feature);
+      expect(squash(fullDocText(80))).not.toContain(squash('Not available in this build:'));
+      Object.assign(feature, { operable: false, inoperableDetail: detail });
       const text = fullDocText(80);
-      expect(squash(text)).toContain(squash('Not available in this build:'));
-      expect(squash(text)).toContain(squash(feature.inoperableDetail!));
+      expect(squash(text)).toContain(squash(`Not available in this build: ${detail}`));
       expect(squash(text)).toContain(squash('State: disabled'));
+    } finally {
+      Object.assign(feature, original);
     }
   });
 

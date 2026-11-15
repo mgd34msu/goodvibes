@@ -1,7 +1,7 @@
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
 import { createInboundMailSourceFactory, type InboundMailSourceFactoryDeps } from '../platform/src/platform/email/inbound/source-factory.js';
@@ -24,8 +24,10 @@ class Wire extends EventEmitter {
   }
   destroy(): this { if (!this.closed) { this.closed = true; this.emit('close'); } return this; }
 }
-const clock: WatcherClock = { now: () => 0, sleep: async (_ms, signal) => {
+const clock: WatcherClock = { now: () => 0, sleep: async (ms, signal) => {
   if (signal?.aborted) return;
+  // A reconnect backoff passes at once; the poll interval waits to be aborted.
+  if (ms < 60_000) return;
   await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }));
 } };
 function cursorPort() {
@@ -66,7 +68,25 @@ function harness(holdFirstLogin = false) {
     values['surfaces.email.user'] = 'b@example.test'; values['surfaces.email.imap.host'] = 'host-b.example.test';
     values['surfaces.email.inbound.accounts'] = ['b']; configGeneration++;
     for (const listener of [...configListeners]) listener();
-  }, rotateCredential: () => { secretGeneration++; for (const listener of [...secretListeners]) listener(); } };
+  }, rotateCredential: () => { secretGeneration++; for (const listener of [...secretListeners]) listener(); },
+  // The real ConfigManager announces a new incarnation BEFORE it applies the
+  // value, so listeners fire first here too.
+  setConfig: (key: string, value: unknown) => {
+    configGeneration++; for (const listener of [...configListeners]) listener();
+    values[key] = value;
+  } };
+}
+
+function realSupervisor(h: ReturnType<typeof harness>) {
+  const factory = createInboundMailSourceFactory(h.deps); let created = 0;
+  const supervisor = new InboundMailSupervisor({
+    config: { get: h.deps.getConfig }, account: 'a', mailbox: 'INBOX', reviveDelayMs: 0,
+    sources: { create: async (input: Parameters<typeof factory.create>[0]) => { created++; return factory.create(input); } },
+    selectionFacts: async () => ({ googleAdopted: false, mailAccountIsGmail: false }),
+    cursors: h.deps.cursors, records: {}, expectations: { hydrate: async () => {} }, expectationPolicy: {},
+    housekeeper: { runRecoverySweep: async () => {} }, handle: async () => {},
+  } as unknown as InboundMailSupervisorDeps);
+  return { supervisor, created: () => created };
 }
 
 describe('actual IMAP source lifetime', () => {
@@ -82,7 +102,8 @@ describe('actual IMAP source lifetime', () => {
     h.changeAccount(); await running;
     expect(source!.retired).toBe(true);
     source!.recheckNow?.();
-    expect(await factory.create({ kind: 'imap', account: 'a', mailbox: 'INBOX', sink: emptySink(), observer: {} })).toBeNull();
+    await expect(factory.create({ kind: 'imap', account: 'a', mailbox: 'INBOX', sink: emptySink(), observer: {} }))
+      .rejects.toThrow(/restart the daemon/);
     expect(h.wires).toHaveLength(2);
     const replacement = await createInboundMailSourceFactory(h.deps).create({ kind: 'imap', account: 'b', mailbox: 'INBOX', sink: emptySink(), observer: {} });
     try {
@@ -91,6 +112,46 @@ describe('actual IMAP source lifetime', () => {
       expect(h.wires[2]!.commands.find(command => command.includes(' LOGIN '))).toContain('b@example.test');
       expect(h.wires.slice(0, 2).every(wire => wire.commands.every(command => !command.includes('b@example.test')))).toBe(true);
     } finally { await replacement!.stop(); await source!.stop(); }
+  });
+
+  test('a corrected IMAP host is picked up live by the real factory and supervisor', async () => {
+    const h = harness(); const { supervisor, created } = realSupervisor(h);
+    try {
+      await supervisor.start();
+      await waitFor(() => h.wires[0]?.commands.some(command => command.includes(' SEARCH ')) === true, 'first drain');
+      h.setConfig('surfaces.email.imap.host', 'host-corrected.example.test'); supervisor.recheckNow();
+      await waitFor(() => created() === 2 && h.wires.length === 2 && supervisor.status.running, 'rebuilt source on the corrected host');
+      expect(h.wires[0]!.closed).toBe(true);
+    } finally { await supervisor.stop(); }
+  });
+
+  test('a different mailbox user says a restart is needed instead of blaming the source setting', async () => {
+    const h = harness(); const { supervisor } = realSupervisor(h);
+    try {
+      await supervisor.start();
+      await waitFor(() => h.wires[0]?.commands.some(command => command.includes(' SEARCH ')) === true, 'first drain');
+      h.setConfig('surfaces.email.user', 'someone-else@example.test'); supervisor.recheckNow();
+      await waitFor(() => !supervisor.status.running, 'the old source to stand down');
+      expect(supervisor.status.reason).toContain('restart the daemon');
+      expect(supervisor.status.reason).not.toContain('surfaces.email.inbound.source explicitly');
+      expect(h.wires.every(wire => wire.commands.every(command => !command.includes('someone-else')))).toBe(true);
+    } finally { await supervisor.stop(); }
+  });
+
+  test('a config write that changes nothing about mail leaves the source alone', async () => {
+    const h = harness(); const { supervisor, created } = realSupervisor(h);
+    try {
+      await supervisor.start();
+      await waitFor(() => h.wires[0]?.commands.some(command => command.includes(' SEARCH ')) === true, 'first drain');
+      // A rebuild is always requested through `start()`, and `recheckNow()` decides synchronously,
+      // so the absence of that call is settled the moment `recheckNow()` returns, with no waiting.
+      const restarts = spyOn(supervisor, 'start');
+      h.setConfig('ui.theme', 'dark'); supervisor.recheckNow();
+      expect(restarts).not.toHaveBeenCalled();
+      for (let turn = 0; turn < 5; turn++) await new Promise<void>(resolve => { setImmediate(resolve); });
+      expect(created()).toBe(1); expect(h.wires).toHaveLength(1); expect(h.wires[0]!.closed).toBe(false);
+      expect(supervisor.status.running).toBe(true);
+    } finally { await supervisor.stop(); }
   });
 
   test('real supervisor rebuilds a retired source after same-account credential rotation', async () => {

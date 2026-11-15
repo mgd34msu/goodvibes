@@ -19,6 +19,12 @@ export interface AgentActivityEntry {
   readonly activity?: ProcessActivity | undefined;
   /** Epoch ms of the last observed bus event for this agent. */
   readonly at: number;
+  /**
+   * True only while the last event was a tool call starting. Any later event
+   * (progress, streaming, a new model call) clears it, so silence after a tool
+   * is judged like any other silence.
+   */
+  readonly toolInFlight?: boolean | undefined;
 }
 
 /** Assembly context the agent adapter needs to derive state and edges. */
@@ -128,12 +134,13 @@ function deriveAgentState(
   // degrade to the coarse state, never crash). Baseline is the last observed
   // event, or startedAt when the agent predates the registry.
   //
-  // executing-tool is exempt: AGENT_AWAITING_TOOL stamps activity.at once at
-  // tool start and no further 'agents' event fires until the tool returns, so
+  // A tool call in flight is exempt: AGENT_AWAITING_TOOL stamps activity.at once
+  // at tool start and no further 'agents' event fires until the tool returns, so
   // a long-running tool call (build, test suite, bash) would otherwise be
-  // misread as silence and falsely flip a working agent to 'stalled'. Only
-  // thinking/streaming (and other non-tool) silence may stall.
-  if (ctx.liveness && entry?.state !== 'executing-tool') {
+  // misread as silence and falsely flip a working agent to 'stalled'. A progress
+  // line also reads as 'executing-tool' but says nothing about a tool running,
+  // so silence after one may stall.
+  if (ctx.liveness && !entry?.toolInFlight) {
     const lastActivityAt = entry?.at ?? record.startedAt;
     if (ctx.now - lastActivityAt > ctx.stalledThresholdMs) return 'stalled';
   }

@@ -34,11 +34,13 @@ const readers = [
 
 for (const reader of readers) for (const scenario of ['approximate', 'missing mass', 'nonmaximal'] as const) {
   test(`${reader.name} shares canonical Choice admission: ${scenario}`, async () => {
+    let choicesServed = 0;
     const fake = fakePort((name, question) => {
       if (question.type !== 'choice') return noulAnswer(['manual', 'integrationDocumentation'].includes(name) ? 0.01 : 0.99);
       const choice = ['reject', 'source_for', 'official-vendor', 'supported'].find(key => Object.hasOwn(question.criteria, key));
       if (!choice) throw new Error('Unexpected choice fixture');
       const other = Object.keys(question.criteria).find(key => key !== choice);
+      choicesServed++;
       const probabilities = Object.fromEntries(Object.keys(question.criteria).map(key => [key,
         key === choice ? (scenario === 'nonmaximal' ? 0.1 : scenario === 'missing mass' ? 0.9 : 0.99)
           : scenario === 'nonmaximal' && key === other ? 0.89 : 0]));
@@ -47,5 +49,8 @@ for (const reader of readers) for (const scenario of ['approximate', 'missing ma
     installJudgmentPort(fake.port);
     if (scenario === 'approximate') await reader.read();
     else await expect(reader.read()).rejects.toMatchObject({ reason: 'malformed' });
+    // Every other answer in the fake is valid, so the refusal can only come from
+    // the reader having been served the damaged choice distribution.
+    expect(choicesServed).toBeGreaterThan(0);
   });
 }

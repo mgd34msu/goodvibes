@@ -1,6 +1,7 @@
 import { createRecallQueryCommands } from '@goodvibes-jev/engine/terminal-shell/recall-query';
 import type { CommandContext } from '../command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { formatAgentRecordReference, formatAgentRecordReferences } from '../../agent/record-labels.ts';
 
 export function getMemoryApi(context: CommandContext): MemoryApi | null {
@@ -13,9 +14,20 @@ export function getMemoryApi(context: CommandContext): MemoryApi | null {
   return memoryApi;
 }
 
+/**
+ * The cross-surface memory spine, when the runtime wired it into the command clients: local when
+ * embedded, over the wire once a host is adopted. The model's tools and vibe import write through
+ * it, so these commands must read and write the same store instead of a divergent local copy.
+ */
+export function getMemorySpine(context: CommandContext): MemorySpineClient | null {
+  return context.clients?.memorySpine ?? null;
+}
+
 export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList } =
   createRecallQueryCommands<CommandContext>(
     (context) => {
+      const spine = getMemorySpine(context);
+      if (spine) return spine;
       const memory = getMemoryApi(context);
       return memory
         ? {

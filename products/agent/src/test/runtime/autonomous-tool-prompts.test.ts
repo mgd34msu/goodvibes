@@ -1,8 +1,7 @@
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -12,11 +11,13 @@ import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 // Product-owned semantic fixture; real public admission/registry/PTY APIs carry
 // authority. No private source setter, permit constructor or engine test import.
-test('actual agent graph public terminal control preserves Jev ownership and lifetime', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agent-owned-terminal-'));
+// Needs a POSIX shell, a controlling terminal device and a PATH-resolved sandbox adapter.
+test.skipIf(process.platform === 'win32')('actual agent graph public terminal control preserves Jev ownership and lifetime', async () => {
+  const root = makeProjectTempDir('agent-owned-terminal');
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, 'config') });
   configManager.set('sandbox.enabled', false); // Explicit temporary fixture, no product containment policy change.
   seedProviderMetadataCacheFixture({ configManager, workingDirectory: root, homeDirectory: root, surfaceRoot: 'agent' });

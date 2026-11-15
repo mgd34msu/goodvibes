@@ -29,11 +29,14 @@ export class TerminalHostPairingController<
   Result extends {
     readonly host?: string | undefined;
     readonly confirmation?: string | undefined;
+    /** What typing the confirmation does; defaults to creating the administrative credential. */
+    readonly confirmationPrompt?: string | undefined;
   },
 > {
   private operation: Operation<Result> | null = null;
   private disposed = false;
   private discardUntilBoundary = false;
+  private inFlight: Promise<void> = Promise.resolve();
   constructor(
     private readonly policy: {
       readonly home: () => string;
@@ -59,6 +62,14 @@ export class TerminalHostPairingController<
   ) {}
   get active(): boolean {
     return this.operation !== null;
+  }
+  /**
+   * Resolves once the applying work already started has finished handling its
+   * reply, whether it was current, cancelled or disposed: after it resolves no
+   * further UI write can come from that reply.
+   */
+  settled(): Promise<void> {
+    return this.inFlight;
   }
   get ownsInput(): boolean {
     return this.active || this.discardUntilBoundary;
@@ -121,7 +132,7 @@ export class TerminalHostPairingController<
     operation.value = '';
     operation.invalidInput = false;
     this.ui.setPrompt('');
-    this.ui.print(`Type ${preview.result.confirmation} to create this host-bound administrative credential, or press Enter to cancel.`);
+    this.ui.print(`Type ${preview.result.confirmation} to ${preview.result.confirmationPrompt ?? 'create this host-bound administrative credential'}, or press Enter to cancel.`);
   }
   /** Called for each token ahead of ordinary composer/modal/model routing. */
   handleToken(token: InputToken): boolean {
@@ -181,7 +192,7 @@ export class TerminalHostPairingController<
         const confirm = operation.confirm;
         operation.confirm = undefined;
         operation.phase = 'applying';
-        if (confirm) void this.apply(operation, confirm, answer);
+        if (confirm) this.inFlight = this.apply(operation, confirm, answer);
       }
       return true;
     } else if (token.type === 'key' && !token.ctrl && !token.meta && (token.logicalName.length === 1 || token.logicalName === 'space')) {

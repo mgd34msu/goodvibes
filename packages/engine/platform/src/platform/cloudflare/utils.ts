@@ -310,11 +310,18 @@ export async function collectSingleAccount(
   }
 }
 
-export async function collectAsync<T>(iterable: AsyncIterable<T>, limit = 250): Promise<readonly T[]> {
+/**
+ * Collect at most `limit` items. `onTruncated` runs when the source had more, so
+ * a caller that reports the list to a person can say it is partial.
+ */
+export async function collectAsync<T>(iterable: AsyncIterable<T>, limit = 250, onTruncated?: () => void): Promise<readonly T[]> {
   const items: T[] = [];
   for await (const item of iterable) {
+    if (items.length >= limit) {
+      onTruncated?.();
+      break;
+    }
     items.push(item);
-    if (items.length >= limit) break;
   }
   return items;
 }

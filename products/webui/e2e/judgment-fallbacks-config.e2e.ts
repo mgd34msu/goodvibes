@@ -66,20 +66,9 @@ test("fallback-reference arrays save and reload without exposing inline credenti
     expect(host.requests.filter((request) => request.method === "POST")).toHaveLength(1);
     expect(host.manager.get("judgment.fallbacks")).toEqual(replacement);
 
-    // The escape hatch reaches genuine server validation rather than admitting
-    // an inline credential through a second write path.
-    await openSettings(page, "all");
-    await dialog.getByRole("navigation", { name: "Sections in General", exact: true }).getByRole("button", { name: "Advanced", exact: true }).click();
-    const advanced = dialog.locator(".settings-advanced");
-    await advanced.getByPlaceholder("settings.path").fill("judgment.fallbacks");
-    await advanced.getByPlaceholder("JSON or text").fill(JSON.stringify(malformed));
-    await advanced.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(advanced.getByRole("alert")).toContainText("judgment.fallbacks");
-    expect(host.manager.get("judgment.fallbacks")).toEqual(replacement);
     expect(host.persisted()).toMatchObject({ judgment: { fallbacks: replacement } });
     expect(host.requests.filter((request) => request.method === "POST")).toEqual([
       { method: "POST", body: { key: "judgment.fallbacks", value: replacement }, status: 200 },
-      { method: "POST", body: { key: "judgment.fallbacks", value: malformed }, status: 400 },
     ]);
     for (const request of daemon.requests.filter(
       (request) => request.path === "/api/judgment/batteries/run"

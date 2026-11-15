@@ -64,6 +64,15 @@ export class ProtectedPaymentRequestError extends Error {
   override readonly name = 'ProtectedPaymentRequestError';
   constructor() { super('The original protected checkout request could not be confirmed. Inspect this purchase status before retrying.'); }
 }
+/**
+ * A refusal that says nothing about the store's files: the owner that asked is
+ * no longer current, or the request it brought is not acceptable. It leaves the
+ * store usable for every other purchase. Anything else that goes wrong while a
+ * file is read or written makes the store refuse all further work, because the
+ * evidence there can no longer be trusted.
+ */
+class RefusedRequestError extends ProtectedPaymentRequestError {}
+const TRANSIENT_IO: ReadonlySet<string> = new Set(['ENOSPC', 'EMFILE', 'ENFILE', 'EAGAIN', 'EINTR', 'ENOMEM']);
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
 const MAX_ENVELOPE_BYTES = 2 * MAX_REQUEST_BYTES + 1_024;
 const absent = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
@@ -77,8 +86,13 @@ function optionalFields(row: Record<string, unknown>, keys: readonly string[]): 
   return Object.freeze(copy);
 }
 function current(check: () => void): void {
-  const result: unknown = check();
-  if (result !== undefined) { drainOwned(result); throw new ProtectedPaymentRequestError(); }
+  let result: unknown;
+  try { result = check(); } catch { throw new RefusedRequestError(); }
+  if (result !== undefined) { drainOwned(result); throw new RefusedRequestError(); }
+}
+/** Pure validation of what a caller supplied: no file is touched, so no failure here can mean damage. */
+function refuse<T>(validate: () => T): T {
+  try { return validate(); } catch { throw new RefusedRequestError(); }
 }
 function own(value: unknown): ProtectedPaymentRequest {
   const row = captureOwnedJson(value);
@@ -153,6 +167,7 @@ function own(value: unknown): ProtectedPaymentRequest {
 export class ProtectedPaymentRequests implements PaymentRequestStore {
   private key: { bytes: Buffer; file: FileObservation; owner: ImportFileObservation } | undefined;
   private failed = false;
+  private readonly transient = new WeakSet<ProtectedPaymentRequestError>();
   private readonly records = new Map<string, { operationId: string; physical: string }>();
   constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void,
     private readonly beforeReplyHistory?: () => void, private readonly beforeReplyReceiveCoverage?: () => void,
@@ -166,8 +181,26 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     const entry = lstatSync(this.directory);
     if (!entry.isDirectory() || entry.isSymbolicLink() || (entry.mode & 0o077) !== 0) throw new ProtectedPaymentRequestError();
   }
+  /** A key or directory that cannot be trusted stops the whole store; only the stale-owner check is a plain refusal. */
   private keyBytes(create: boolean, check: () => void): Buffer {
     if (this.failed) throw new ProtectedPaymentRequestError();
+    try { return this.loadKey(create, check); }
+    catch (error) {
+      throw this.fault(error);
+    }
+  }
+  /** What a caught error means for the store: a refusal stays a refusal, anything else stops it. */
+  private fault(error: unknown): ProtectedPaymentRequestError {
+    if (error instanceof RefusedRequestError || (error instanceof ProtectedPaymentRequestError && this.transient.has(error))) return error;
+    // Running out of descriptors or disk while reading says nothing about the
+    // file: this call fails and the next one may succeed. The marker keeps an
+    // outer catch from latching the store over the same, already judged error.
+    if (object(error) && typeof error['code'] === 'string' && TRANSIENT_IO.has(error['code'])) {
+      const transient = new ProtectedPaymentRequestError(); this.transient.add(transient); return transient;
+    }
+    this.failed = true; return new ProtectedPaymentRequestError();
+  }
+  private loadKey(create: boolean, check: () => void): Buffer {
     current(check);
     if (create) mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     this.safeDirectory();
@@ -224,9 +257,15 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     return request;
   }
   async retain(value: ProtectedPaymentRequest, check: () => void): Promise<void> {
-    let staged: string | undefined;
-    try {
+    // Nothing is on disk yet, so a request this store will not accept (or an
+    // owner that is no longer current) is refused without stopping the store.
+    const { request, plaintext } = refuse(() => {
       current(check); const request = own(value), plaintext = JSON.stringify(request);
+      if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new Error();
+      return { request, plaintext };
+    });
+    let staged: string | undefined, published = false;
+    try {
       this.declareMultiRecipientCheckpoint(request.window); current(check);
       if (request.replyHistory) {
         if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
@@ -234,21 +273,26 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
         if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
         current(check);
       }
-      if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new ProtectedPaymentRequestError();
       const path = this.path(request.purchaseId), key = this.keyBytes(true, check);
       try { lstatSync(path); throw new ProtectedPaymentRequestError(); } catch (error) { if (!absent(error)) throw error; }
       staged = join(this.directory, `.new-${crypto.randomUUID()}`);
       writeFileAtomic(staged, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, durable: true, cleanupStaleTemps: false });
       current(check); this.keyBytes(false, check);
-      linkSync(staged, path); unlinkSync(staged); staged = undefined;
+      linkSync(staged, path); published = true; unlinkSync(staged); staged = undefined;
       confirmFileDurable(path); current(check);
       if (!isDeepStrictEqual(this.readOwned(request.purchaseId, request.operationId, check), request)) throw new ProtectedPaymentRequestError();
-    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    } catch (error) {
+      // Only a record that may now exist needs the store stopped. Before the
+      // link there is nothing to doubt, so a full disk or a refusal while
+      // staging fails this one purchase and leaves the rest able to start.
+      if (!published) throw error instanceof RefusedRequestError ? error : new ProtectedPaymentRequestError();
+      this.failed = true; throw new ProtectedPaymentRequestError();
+    }
     finally { if (staged) { try { unlinkSync(staged); } catch { /* Unpublished ciphertext grants no execution. */ } } }
   }
   async read(id: string, operationId: string, check: () => void): Promise<ProtectedPaymentRequest> {
     try { return this.readOwned(id, operationId, check); }
-    catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    catch (error) { throw this.fault(error); }
   }
   private replaceOwned(next: ProtectedPaymentRequest, file: FileObservation, check: () => void, declare: () => unknown): void {
     const id = next.purchaseId, operationId = next.operationId, path = this.path(id), plaintext = JSON.stringify(next);
@@ -259,11 +303,27 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       const observed = readFileObservation(path);
       if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
     };
-    before(); const declared = declare();
-    if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
-    before(); atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
-    current(check); this.keyBytes(false, check); this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
-    if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+    try {
+      before(); const declared = declare();
+      if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+      before(); atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
+    } catch (error) {
+      if (error instanceof RefusedRequestError) throw error;
+      // A failed write (full disk, no free descriptors) that left the file as
+      // it was has damaged nothing: this purchase's update fails, the store
+      // keeps serving the others. A file that changed or cannot be re-read
+      // stops the store.
+      let unchanged = false;
+      try { const observed = readFileObservation(path); unchanged = observed.physical === file.physical && observed.bytes.equals(file.bytes); } catch { /* Unverifiable counts as changed. */ }
+      if (unchanged) throw new RefusedRequestError();
+      throw error;
+    }
+    // The new bytes are published: from here a stale owner cannot be treated as
+    // a plain refusal, the store has to stop until someone inspects the file.
+    try {
+      current(check); this.keyBytes(false, check); this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
+      if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+    } catch (error) { this.failed = true; throw error instanceof RefusedRequestError ? new ProtectedPaymentRequestError() : error; }
   }
 
   private declareMultiRecipientCheckpoint(window: CheckoutWindowCheckpoint | undefined): void {
@@ -299,22 +359,25 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   async recordReceiveCoverage(id: string, operationId: string, binding: PaymentReplyHistoryBinding, value: PaymentReplyReceiveCoverage, check: () => void): Promise<void> {
     // A receiver retired before storage starts has not damaged its file. Keep
     // the original store usable for the executor's bookkeeping-only cleanup.
-    try { current(check); } catch { throw new ProtectedPaymentRequestError(); }
+    try { current(check); } catch { throw new RefusedRequestError(); }
     try {
       if (!this.supportsReplyReceiveCoverage) throw new ProtectedPaymentRequestError();
       const original = this.readOwned(id, operationId, check), file = readFileObservation(this.path(id));
-      if (!original.window || !original.replyHistory || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new ProtectedPaymentRequestError();
-      const coverage = capturePaymentReplyReceiveCoverage(value, binding), history = original.replyHistory, window = history.windows.at(-1);
-      if (!window || !isDeepStrictEqual(window.binding, binding)) throw new ProtectedPaymentRequestError();
-      const cutoff = window.receiveSpans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs;
-      if (coverage.throughMs !== cutoff) throw new ProtectedPaymentRequestError();
-      const previous = window.receiveCoverage?.find(entry => isDeepStrictEqual(entry.receipt, coverage.receipt));
-      if (previous) { current(check); return; }
-      const next = own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1),
-        { ...window, receiveCoverage: [...(window.receiveCoverage ?? []), coverage] }] } });
+      const next = refuse(() => {
+        if (!original.window || !original.replyHistory || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new Error();
+        const coverage = capturePaymentReplyReceiveCoverage(value, binding), history = original.replyHistory, window = history.windows.at(-1);
+        if (!window || !isDeepStrictEqual(window.binding, binding)) throw new Error();
+        const cutoff = window.receiveSpans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs;
+        if (coverage.throughMs !== cutoff) throw new Error();
+        const previous = window.receiveCoverage?.find(entry => isDeepStrictEqual(entry.receipt, coverage.receipt));
+        if (previous) return null;
+        return own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1),
+          { ...window, receiveCoverage: [...(window.receiveCoverage ?? []), coverage] }] } });
+      });
+      if (next === null) { current(check); return; }
       const nextHistory = next.replyHistory; if (!nextHistory) throw new ProtectedPaymentRequestError();
       this.replaceOwned(next, file, check, () => this.declareHistory(nextHistory));
-    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    } catch (error) { throw this.fault(error); }
   }
 
   /** Native ingress must await this before confirming its provider cursor.
@@ -325,20 +388,26 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     try {
       if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
       current(check); const original = this.readOwned(id, operationId, check), file = readFileObservation(this.path(id));
-      const entry = capturePaymentReplyHistoryEntry(value);
-      if (!original.window || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new ProtectedPaymentRequestError();
-      const history = original.replyHistory ?? { version: 1 as const, windows: [{ startedAtMs: entry.receivedAtMs, binding, entries: [] }] };
-      const window = history.windows.at(-1);
-      if (!window || !isDeepStrictEqual(window.binding, binding)) throw new ProtectedPaymentRequestError();
-      const identity = historyEntryIdentity(entry), previous = window.entries.find(candidate => historyEntryIdentity(candidate) === identity);
-      if (previous) {
-        if (!isDeepStrictEqual({ ...entry, receivedAtMs: previous.receivedAtMs }, previous)) throw new ProtectedPaymentRequestError();
-        current(check); return;
-      }
-      const next = own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1), { ...window, entries: [...window.entries, entry] }] } });
+      // A message this purchase's archive will not take (a changed duplicate,
+      // or one past the archive's size cap) is refused for this purchase only;
+      // the caller does not confirm its cursor, so nothing is silently lost.
+      const next = refuse(() => {
+        const entry = capturePaymentReplyHistoryEntry(value);
+        if (!original.window || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new Error();
+        const history = original.replyHistory ?? { version: 1 as const, windows: [{ startedAtMs: entry.receivedAtMs, binding, entries: [] }] };
+        const window = history.windows.at(-1);
+        if (!window || !isDeepStrictEqual(window.binding, binding)) throw new Error();
+        const identity = historyEntryIdentity(entry), previous = window.entries.find(candidate => historyEntryIdentity(candidate) === identity);
+        if (previous) {
+          if (!isDeepStrictEqual({ ...entry, receivedAtMs: previous.receivedAtMs }, previous)) throw new Error();
+          return null;
+        }
+        return own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1), { ...window, entries: [...window.entries, entry] }] } });
+      });
+      if (next === null) { current(check); return; }
       const nextHistory = next.replyHistory; if (!nextHistory) throw new ProtectedPaymentRequestError();
       this.replaceOwned(next, file, check, () => this.declareHistory(nextHistory));
-    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    } catch (error) { throw this.fault(error); }
   }
   /** Refresh the same encrypted request under its execution lease. Original
    * identity, intent, paired grant, configuration and source evidence survive;
@@ -348,37 +417,40 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     try {
       current(check);
       const original = this.readOwned(id, operationId, check), path = this.path(id), file = readFileObservation(path);
-      const selected = captureCheckoutWindowCheckpoint(window);
-      if (original.window && selected.record.updatedAtMs < original.window.record.updatedAtMs) throw new ProtectedPaymentRequestError();
-      const recovery = browser === null ? null : captureBrowserCheckoutRecovery(browser);
-      const previousPage = original.window?.record ?? original.input;
-      // Reconnection allocates new local IDs, while the actual native page
-      // must remain the one independently restored by the host. Serialized
-      // identity alone grants nothing; the caller still owns the real lease.
-      if ((selected.record.sessionId !== previousPage.sessionId || selected.record.pageId !== previousPage.pageId)
-        && (!recovery || !original.host.browser || !isDeepStrictEqual(recovery.connection, original.host.browser))) throw new ProtectedPaymentRequestError();
-      if (selected.terms && selected.terms.submitTarget !== original.input.controls.placeOrderTarget) throw new ProtectedPaymentRequestError();
-      const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
-      if (original.replyHistory && !this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
-      const binding = this.beforeReplyHistory ? paymentReplyHistoryBinding(selected) : undefined;
-      const spans = binding && receiveSpans?.length ? capturePaymentReplyReceiveSpans(receiveSpans, binding, id) : undefined;
-      const carriedCoverage = binding ? original.replyHistory?.windows.at(-1)?.receiveCoverage?.filter(coverage =>
-        binding.receipts.some(receipt => isDeepStrictEqual(receipt, coverage.receipt))
-        && coverage.throughMs === (spans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs)) : undefined;
-      const replyHistory = binding ? isDeepStrictEqual(original.replyHistory?.windows.at(-1)?.binding, binding) ? original.replyHistory
-        : { version: 1, windows: [...(original.replyHistory?.windows ?? []), {
-          startedAtMs: spans ? Math.min(selected.record.updatedAtMs, ...spans.map(span => span.selector.sinceMs)) : selected.record.updatedAtMs,
-          binding, entries: [], ...(spans ? { receiveSpans: spans } : {}), ...(carriedCoverage?.length ? { receiveCoverage: carriedCoverage } : {}) }] } : undefined;
-      const { replyHistory: _oldHistory, ...retained } = original;
-      const next = own({ ...retained, window: selected, ...(replyHistory ? { replyHistory } : {}),
-        host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
+      const { selected, next } = refuse(() => {
+        const selected = captureCheckoutWindowCheckpoint(window);
+        if (original.window && selected.record.updatedAtMs < original.window.record.updatedAtMs) throw new Error();
+        const recovery = browser === null ? null : captureBrowserCheckoutRecovery(browser);
+        const previousPage = original.window?.record ?? original.input;
+        // Reconnection allocates new local IDs, while the actual native page
+        // must remain the one independently restored by the host. Serialized
+        // identity alone grants nothing; the caller still owns the real lease.
+        if ((selected.record.sessionId !== previousPage.sessionId || selected.record.pageId !== previousPage.pageId)
+          && (!recovery || !original.host.browser || !isDeepStrictEqual(recovery.connection, original.host.browser))) throw new Error();
+        if (selected.terms && selected.terms.submitTarget !== original.input.controls.placeOrderTarget) throw new Error();
+        const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
+        if (original.replyHistory && !this.beforeReplyHistory) throw new Error();
+        const binding = this.beforeReplyHistory ? paymentReplyHistoryBinding(selected) : undefined;
+        const spans = binding && receiveSpans?.length ? capturePaymentReplyReceiveSpans(receiveSpans, binding, id) : undefined;
+        const carriedCoverage = binding ? original.replyHistory?.windows.at(-1)?.receiveCoverage?.filter(coverage =>
+          binding.receipts.some(receipt => isDeepStrictEqual(receipt, coverage.receipt))
+          && coverage.throughMs === (spans?.find(span => isDeepStrictEqual(span.receipt, coverage.receipt))?.deadlineMs ?? binding.deadlineMs)) : undefined;
+        const replyHistory = binding ? isDeepStrictEqual(original.replyHistory?.windows.at(-1)?.binding, binding) ? original.replyHistory
+          : { version: 1, windows: [...(original.replyHistory?.windows ?? []), {
+            startedAtMs: spans ? Math.min(selected.record.updatedAtMs, ...spans.map(span => span.selector.sinceMs)) : selected.record.updatedAtMs,
+            binding, entries: [], ...(spans ? { receiveSpans: spans } : {}), ...(carriedCoverage?.length ? { receiveCoverage: carriedCoverage } : {}) }] } : undefined;
+        const { replyHistory: _oldHistory, ...retained } = original;
+        const next = own({ ...retained, window: selected, ...(replyHistory ? { replyHistory } : {}),
+          host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
+        return { selected, next };
+      });
       this.replaceOwned(next, file, check, () => {
         this.declareMultiRecipientCheckpoint(selected);
         const declared: unknown = this.beforeCheckpoint?.(selected.terms === undefined ? 1 : 2);
         if (declared !== undefined) return declared;
         return next.replyHistory ? this.declareHistory(next.replyHistory) : undefined;
       });
-    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    } catch (error) { throw this.fault(error); }
   }
   async remove(id: string, operationId: string, check: () => void): Promise<void> {
     try {
@@ -391,8 +463,10 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       assertImportFileCurrent(join(this.directory, '.key'), this.key.owner);
       if (fileObservationIdentity(path) !== owned.physical) throw new ProtectedPaymentRequestError();
       unlinkSync(path);
-      const fd = openSync(this.directory, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
-      current(check); this.records.delete(id);
-    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+      try {
+        const fd = openSync(this.directory, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+        current(check); this.records.delete(id);
+      } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+    } catch (error) { throw this.fault(error); }
   }
 }

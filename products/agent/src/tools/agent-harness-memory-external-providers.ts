@@ -5,7 +5,7 @@ import { memoryExternalProviderLiveCertification, memoryExternalProviderReceiptC
 import type { MemoryExternalProviderCertification } from './agent-harness-memory-provider-certification.ts';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelArtifactClockSource, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
+import { capturePersonalOpsSnapshot, protectPersonalOpsData, protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
 import { readPersonalOpsBoolean, readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, readMemoryCredentialState, readMemoryLiveStatus, readMemoryPublicText, readMemoryReceiptMember, readMemoryRouteRole, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
 import { findCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -197,12 +197,17 @@ function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
 }
 
-function readTimestamp(value: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+export function readTimestamp(value: unknown): string | null {
+  // A number outside the Date range makes toISOString throw; one provider's bad field must not fail the whole posture.
+  const iso = (epoch: number): string | null => {
+    const date = new Date(epoch);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  };
+  if (typeof value === 'number' && Number.isFinite(value)) return iso(value);
   const raw = readString(value);
   if (!raw) return null;
   const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  return Number.isFinite(parsed) ? iso(parsed) : null;
 }
 
 function sanitizeExternalProviderText(value: unknown, limit = 160): string | null {
@@ -299,12 +304,12 @@ async function publishedOperations(record: Record<string, unknown>, options: Cat
 }
 
 /** Complete producer capture precedes every semantic read; held sources never fall back to word rules. */
-async function protectExternalMemoryData(value: unknown, options: CatalogRankingOptions, schema: PersonalOpsNativeSchema): Promise<unknown> {
+async function protectExternalMemoryData(value: unknown, options: CatalogRankingOptions, schema: PersonalOpsNativeSchema, native = true): Promise<unknown> {
   const capture = capturePersonalOpsSnapshot(value);
   const assertSource = () => { options.signal?.throwIfAborted(); capture.assertCurrent(value); };
   options.retainCurrent?.(assertSource);
   const current = { ...options, assertCurrent: () => { assertMemoryCurrent(options); assertSource(); } };
-  const protectedValue = await protectPersonalOpsData(capture.captured, current, schema);
+  const protectedValue = native ? await protectPersonalOpsData(capture.captured, current, schema) : await protectPersonalOpsResult(capture.captured, current);
   const visit = async (entry: unknown): Promise<unknown> => {
     current.assertCurrent();
     if (typeof entry === 'string') return findCredentialCandidates(entry).length ? readMemoryPublicText(entry, current) : entry;
@@ -699,7 +704,16 @@ async function describeExternalMemoryReceiptArtifact(value: unknown, options: Ca
   // This source was acquired from ArtifactStore.list with a retained complete
   // descriptor guard. Only its declared native clocks receive ISO projection.
   const clockSource = captureModelArtifactClockSource({ ...original, createdAt: original.createdAt, expiresAt: original.expiresAt });
-  const artifact = readRecord(await protectExternalMemoryData(clockSource.reading, options, 'memory-receipt')), metadata = readRecord(artifact.metadata);
+  // An artifact of any other purpose is only probed for receipt membership: its metadata is
+  // arbitrary, so a flag or count the native schema does not declare is not a producer fact.
+  // Such a source falls back to observational protection instead of holding the whole listing.
+  const nativeReceipt = EXTERNAL_MEMORY_RECEIPT_PURPOSES.has(readString(readRecord(original.metadata).purpose));
+  const protectedArtifact = nativeReceipt ? await protectExternalMemoryData(clockSource.reading, options, 'memory-receipt')
+    : await protectExternalMemoryData(clockSource.reading, options, 'memory-receipt').catch(error => {
+      if (error instanceof ToolInputProjectionError && error.problem === 'held') return protectExternalMemoryData(clockSource.reading, options, 'memory-receipt', false);
+      throw error;
+    });
+  const artifact = readRecord(protectedArtifact), metadata = readRecord(artifact.metadata);
   if (readString(artifact.id) !== nativeArtifactId) throw new ToolInputProjectionError('held');
   if (!await isExternalMemoryReceiptArtifact(artifact, options)) return null;
   const nativeProviderId = readExternalMemoryReceiptProviderId(readRecord(original.metadata));
@@ -718,16 +732,21 @@ async function describeExternalMemoryReceiptArtifact(value: unknown, options: Ca
     createdAt: readReceiptCreatedAt(original, metadata), sourceCount: readNumber(metadata.sourceCount ?? metadata.recordCount ?? metadata.itemCount),
     redaction: readString(metadata.redaction) || readString(metadata.redactionPolicy) || null,
     failureReason: readString(metadata.failureReason) || readString(metadata.error) || null, nextRoute,
-    inspectRoute: `agent_artifacts show artifactId:${JSON.stringify(nativeArtifactId)} includeContent:false`,
+    inspectRoute: `agent_artifacts mode:"show" artifactId:${JSON.stringify(nativeArtifactId)} includeContent:false`,
     correlationId: readString(metadata.correlationId) || readString(metadata.runId) || null, certification,
   };
 }
 
-export async function externalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions = {}): Promise<readonly MemoryExternalProviderReceiptEvidence[]> {
+/** Receipt evidence read from the newest saved artifacts; `windowFull` is true when the store returned a full page, so older receipts may exist unread. */
+export type MemoryExternalProviderReceiptEvidenceList = readonly MemoryExternalProviderReceiptEvidence[] & { readonly windowFull?: boolean };
+
+const RECEIPT_ARTIFACT_WINDOW = 100;
+
+export async function externalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions = {}): Promise<MemoryExternalProviderReceiptEvidenceList> {
   return withConfiguredDecisionModelPolicy(() => ownedExternalMemoryReceiptEvidence(context, originalOptions));
 }
 
-async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions): Promise<readonly MemoryExternalProviderReceiptEvidence[]> {
+async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOptions: CatalogRankingOptions): Promise<MemoryExternalProviderReceiptEvidenceList> {
   const options = retainMemoryReadingOptions(originalOptions);
   const acquired = acquireSource(context, ['platform', 'artifactStore'], options);
   if (acquired.source === null || acquired.source === undefined) return [];
@@ -739,12 +758,12 @@ async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOpti
   if (typeof method !== 'function') throw new ToolInputProjectionError('held');
   const callCurrent = captureCatalogMethods(method, ['call']); options.retainCurrent?.(callCurrent);
   acquired.assertCurrent(); storeCurrent(); callCurrent();
-  const value: unknown = method.call(acquired.source, 100);
+  const value: unknown = method.call(acquired.source, RECEIPT_ARTIFACT_WINDOW);
   acquired.assertCurrent(); storeCurrent();
   const capture = capturePersonalOpsSnapshot(value);
   if (!Array.isArray(capture.captured)) throw new ToolInputProjectionError('held');
   const assertArtifactRestriction = () => { acquired.assertSource(); storeCurrent(); callCurrent(); capture.assertCurrent(value);
-    const fresh: unknown = method.call(acquired.source, 100); acquired.assertSource(); storeCurrent(); callCurrent(); capture.assertCurrent(fresh); };
+    const fresh: unknown = method.call(acquired.source, RECEIPT_ARTIFACT_WINDOW); acquired.assertSource(); storeCurrent(); callCurrent(); capture.assertCurrent(fresh); };
   const assertCurrent = () => { assertMemoryCurrent(options); assertArtifactRestriction(); };
   options.retainCurrent?.(assertArtifactRestriction, 'agent.memory.artifacts');
   const reading = { ...options, assertCurrent };
@@ -754,10 +773,11 @@ async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOpti
     if (receipt) result.push(receipt);
   }
   assertCurrent();
-  return result.sort((left, right) => {
+  const sorted = result.sort((left, right) => {
     const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0, rightTime = right.createdAt ? Date.parse(right.createdAt) : 0;
     return rightTime !== leftTime ? rightTime - leftTime : right.artifactId.localeCompare(left.artifactId);
   });
+  return Object.assign(sorted, { windowFull: capture.captured.length >= RECEIPT_ARTIFACT_WINDOW });
 }
 
 export function receiptEvidenceForProvider(

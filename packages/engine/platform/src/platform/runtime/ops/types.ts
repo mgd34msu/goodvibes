@@ -23,6 +23,12 @@ export interface DiagnosticCheckResult {
   readonly context?: Record<string, string | number | boolean> | undefined;
   /** Severity when the check fails. */
   readonly severity: DiagnosticSeverity;
+  /**
+   * False when the check could not look at the live state it needs. Then
+   * `passed` says nothing about the system: treat the result as "unknown", not
+   * as a failure. Omitted means the check was evaluated.
+   */
+  readonly evaluated?: boolean | undefined;
 }
 
 /**

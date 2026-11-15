@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { isolatedTestEnvironment } from '../helpers/isolated-test-environment.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -8,6 +8,8 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 async function invoke(args: string[]) {
   const root = makeProjectTempDir('gv-tui-main-entry');
   const cwd = join(root, 'workspace'); mkdirSync(cwd);
+  // A git workspace: without .git the .gitignore step is a no-op and could not show the diagnostic gate.
+  mkdirSync(join(cwd, '.git'));
   const env = isolatedTestEnvironment(process.env, join(root, 'isolated'));
   const child = Bun.spawn([
     process.execPath, '--no-env-file', '--preload', resolve(import.meta.dir, '../../../../../packages/engine/toolchain/src/test-runner/test-network-preload.ts'),
@@ -16,7 +18,7 @@ async function invoke(args: string[]) {
   const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
   try {
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, cwd };
   } finally { clearTimeout(timer); if (child.exitCode === null) child.kill('SIGKILL'); }
 }
 
@@ -35,5 +37,14 @@ describe('actual source entrypoint', () => {
     expect(result.stdout.trim().split('\n')).toHaveLength(1);
     expect(result.stdout).toMatch(/goodvibes.*\d+\.\d+\.\d+/);
     expect(result.stderr).toBe('');
+  }, 15_000);
+  test('status is a diagnostic and does not add a .gitignore to the workspace', async () => {
+    const result = await invoke(['status']);
+    expect(result.stdout).not.toContain("added '.goodvibes/' to .gitignore");
+    expect(existsSync(join(result.cwd, '.gitignore'))).toBe(false);
+  }, 15_000);
+  test('a non-diagnostic command in a git workspace does add the .gitignore rule', async () => {
+    const result = await invoke(['sessions', 'list']);
+    expect(existsSync(join(result.cwd, '.gitignore'))).toBe(true);
   }, 15_000);
 });

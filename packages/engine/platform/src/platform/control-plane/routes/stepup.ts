@@ -11,12 +11,14 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
-import type {
-  StepUpService,
-  UserVerificationRequirement,
+import {
+  StepUpChallengeLimitError,
+  StepUpValidationError,
+  type StepUpService,
+  type UserVerificationRequirement,
 } from '../../relay/step-up-service.js';
 
-export type StepUpGatewayService = Pick<StepUpService, 'registerCredential' | 'mintChallenge'>;
+export type StepUpGatewayService = Pick<StepUpService, 'registerCredential' | 'mintChallenge' | 'listCredentials' | 'removeCredential'>;
 
 function requireString(params: Record<string, unknown>, key: string): string {
   const value = params[key];
@@ -59,7 +61,8 @@ function createRegisterHandler(service: StepUpGatewayService): GatewayMethodHand
       return { credential };
     } catch (error) {
       if (error instanceof GatewayVerbError) throw error;
-      throw new GatewayVerbError(error instanceof Error ? error.message : 'registration failed', 'INVALID_ARGUMENT', 400);
+      if (error instanceof StepUpValidationError) throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
+      throw error;
     }
   };
 }
@@ -71,11 +74,33 @@ function createMintHandler(service: StepUpGatewayService): GatewayMethodHandler 
     if (ttlRaw !== undefined && (typeof ttlRaw !== 'number' || !Number.isFinite(ttlRaw))) {
       throw new GatewayVerbError('ttlMs must be a number', 'INVALID_ARGUMENT', 400, 'ttlMs');
     }
-    return service.mintChallenge({
-      ...(typeof params['rendezvousId'] === 'string' ? { rendezvousId: params['rendezvousId'] } : {}),
-      ...(typeof params['sessionId'] === 'string' ? { sessionId: params['sessionId'] } : {}),
-      ...(typeof ttlRaw === 'number' ? { ttlMs: ttlRaw } : {}),
-    });
+    try {
+      return service.mintChallenge({
+        ...(typeof params['rendezvousId'] === 'string' ? { rendezvousId: params['rendezvousId'] } : {}),
+        ...(typeof params['sessionId'] === 'string' ? { sessionId: params['sessionId'] } : {}),
+        ...(typeof params['method'] === 'string' ? { method: params['method'] } : {}),
+        ...(typeof params['path'] === 'string' ? { path: params['path'] } : {}),
+        ...(typeof ttlRaw === 'number' ? { ttlMs: ttlRaw } : {}),
+        ...(invocation.context.principalId ? { principalId: invocation.context.principalId } : {}),
+      });
+    } catch (error) {
+      if (error instanceof StepUpChallengeLimitError) throw new GatewayVerbError(error.message, 'STEP_UP_CHALLENGES_FULL', 429);
+      throw error;
+    }
+  };
+}
+
+function createListHandler(service: StepUpGatewayService): GatewayMethodHandler {
+  return async () => ({ credentials: await service.listCredentials() });
+}
+
+function createRemoveHandler(service: StepUpGatewayService): GatewayMethodHandler {
+  return async (invocation) => {
+    const credentialId = requireString(readInvocationParams(invocation), 'credentialId');
+    if (!(await service.removeCredential(credentialId))) {
+      throw new GatewayVerbError(`No step-up credential with id "${credentialId}", see stepup.credentials.list`, 'NOT_FOUND', 404, 'credentialId');
+    }
+    return { credentialId, removed: true };
   };
 }
 
@@ -85,5 +110,7 @@ export function registerStepUpGatewayMethods(catalog: GatewayMethodCatalog, serv
     if (descriptor) catalog.register(descriptor, handler, { replace: true });
   };
   attach('stepup.credentials.register', createRegisterHandler(service));
+  attach('stepup.credentials.list', createListHandler(service));
+  attach('stepup.credentials.remove', createRemoveHandler(service));
   attach('stepup.challenge.mint', createMintHandler(service));
 }

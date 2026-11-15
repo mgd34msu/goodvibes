@@ -20,6 +20,14 @@ async function until(check: () => boolean): Promise<void> {
     await Bun.sleep(2);
   }
 }
+/**
+ * Yield to the event loop's I/O phase a fixed number of turns. Used only AFTER
+ * a positive signal (a counted dispatch) so a "has not settled" check gives the
+ * loopback socket real chances to deliver, without depending on elapsed time.
+ */
+async function turns(count = 50): Promise<void> {
+  for (let i = 0; i < count; i++) await new Promise<void>((done) => setImmediate(done));
+}
 async function fixture(dispatch: RelayDaemonRegistrationOptions['dispatch'], options: Partial<RelayDaemonRegistrationOptions> = {}) {
   const registered = gate<void>();
   const reg = createRelayDaemonRegistration({
@@ -115,7 +123,8 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
   });
 
   test('delayed daemon encryption cannot reorder simultaneous responses', async () => {
-    const f = await fixture(async () => new Response('ordered answer'));
+    let dispatched = 0;
+    const f = await fixture(async () => { dispatched++; return new Response('ordered answer'); });
     const sealing = gate<void>(); const release = gate<void>();
     const original = RelaySecureChannel.prototype.seal;
     let responses = 0; let secondSettled = false;
@@ -132,7 +141,7 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
       await sealing.promise;
       const second = f.client.fetch(url, request()).then(async (response) => { secondSettled = true; return response.text(); });
       void second.catch(() => {});
-      await Bun.sleep(20);
+      await until(() => dispatched === 2); await turns();
       expect(secondSettled).toBe(false);
       release.resolve();
       expect(await Promise.all([first, second])).toEqual(['ordered answer', 'ordered answer']);
@@ -141,7 +150,8 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
   });
 
   test('delayed client decryption cannot let another frame overtake its counter validation', async () => {
-    const f = await fixture(async () => new Response('ordered open'));
+    let dispatched = 0;
+    const f = await fixture(async () => { dispatched++; return new Response('ordered open'); });
     const opening = gate<void>(); const release = gate<void>();
     const original = RelaySecureChannel.prototype.open;
     let clientChannel: RelaySecureChannel | undefined;
@@ -161,7 +171,7 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
       await opening.promise;
       const second = f.client.fetch(url, request()).then((response) => response.text());
       void second.catch(() => {});
-      await Bun.sleep(20);
+      await until(() => dispatched === 2); await turns();
       expect(opens).toBe(1);
       release.resolve();
       expect(await Promise.all([first, second])).toEqual(['ordered open', 'ordered open']);
@@ -171,9 +181,10 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
 
   test('stream and unary responses share the same daemon encrypted-send order', async () => {
     const subscribed = gate<void>(); let source!: ReadableStreamDefaultController<Uint8Array>;
+    let unaryDispatched = 0;
     const f = await fixture(async (req) => req.method === 'GET'
       ? new Response(new ReadableStream<Uint8Array>({ start(controller) { source = controller; subscribed.resolve(); } }), { headers: { 'content-type': 'text/event-stream' } })
-      : new Response('ordered unary'));
+      : (unaryDispatched++, new Response('ordered unary')));
     const sealing = gate<void>(); const release = gate<void>();
     const original = RelaySecureChannel.prototype.seal;
     const seal = spyOn(RelaySecureChannel.prototype, 'seal').mockImplementation(async function (this: RelaySecureChannel, frame) {
@@ -190,7 +201,8 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
       let settled = false;
       const unary = f.client.fetch(url, request()).then(async (response) => { settled = true; return response.text(); });
       void unary.catch(() => {});
-      await Bun.sleep(20); expect(settled).toBe(false);
+      await until(() => unaryDispatched === 1); await turns();
+      expect(settled).toBe(false);
       release.resolve();
       expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: ordered\n\n');
       expect(await unary).toBe('ordered unary'); expect(f.client.ready).toBe(true);
@@ -228,7 +240,7 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
       const before = daemonSends;
       release.resolve();
       await Promise.all(pending);
-      await Bun.sleep(5);
+      await turns();
       expect(daemonSends).toBe(before);
     } finally { waiting.resolve(new Response('cleanup')); release.resolve(); seal.mockRestore(); f.close(); }
   });
@@ -249,7 +261,7 @@ describe('relay judgment request ownership (loopback and synthetic answers only)
       await sealing.promise;
       for (let i = 0; i < 4 && f.client.ready; i++) {
         pending.push(f.client.fetch(url, request()).catch((error: unknown) => error));
-        await Bun.sleep(5);
+        await turns(5);
       }
       await until(() => !f.client.ready);
       expect(f.reg.stats().droppedRequests).toBe(4);

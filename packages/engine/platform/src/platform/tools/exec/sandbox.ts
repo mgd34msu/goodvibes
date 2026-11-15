@@ -16,22 +16,25 @@
  * non-Linux host) → the feature reports unavailable with a stated reason and the
  * caller runs the byte-for-byte-unchanged non-sandboxed exec path. When bwrap is
  * present but a host-level probe cannot confirm that `--unshare-net` yields a
- * real, empty network namespace (e.g. unprivileged user namespaces disabled),
- * the plan says network isolation is `unknown` rather than claiming containment.
+ * real, empty network namespace (e.g. a container without CAP_NET_ADMIN), the
+ * sandbox is reported unavailable: every boundary run adds `--unshare-net`, so
+ * offering it would turn each command into a bwrap error.
  *
- * NOT a permission decision and NOT the frozen catastrophic block. The
- * unconditional catastrophic block (rm -rf /, dd to a device, mkfs, fork bomb …)
- * is enforced elsewhere and stays in force identically INSIDE the sandbox, a
- * boundary is not a licence for a catastrophic command.
+ * NOT a permission decision and NOT the catastrophic block. The catastrophic
+ * reading (rm -rf /, dd to a device, mkfs, fork bomb …) belongs to the
+ * permission gate, which reads it before a command reaches this module and
+ * applies it the same INSIDE the sandbox: a boundary is not a licence for a
+ * catastrophic command.
  */
 
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { type CommandNeeds } from '../../runtime/permissions/normalization/index.js';
 import { spawnSync } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
-import { normalizeCommand } from '../../runtime/permissions/normalization/index.js';
-import { decideSandboxedExec } from '../../runtime/permissions/sandbox-policy.js';
+import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { consumeGateEscalationApproval, decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
 import { DEFAULT_CONTROL_PLANE_PORT } from '../../config/control-plane-base-url.js';
 import type { ExecCommandResult } from './schema.js';
 
@@ -51,6 +54,11 @@ export interface ExecSandboxConfig {
    * /tmp) is writable.
    */
   readonly workspaceWritable: readonly string[];
+  /**
+   * The port the daemon listens on (`controlPlane.port`), named in the
+   * isolation note so it matches the refused connection. Absent → the default port.
+   */
+  readonly daemonPort?: number | undefined;
 }
 
 /** The honest, host-probed availability of the exec sandbox backend. */
@@ -120,14 +128,23 @@ export function detectSandboxAvailability(probe: SandboxHostProbe): SandboxAvail
       networkIsolationGuaranteed: false,
     };
   }
+  if (!probe.netUnshareWorks) {
+    return {
+      available: false,
+      backend: 'none',
+      bwrapPath: probe.bwrapPath,
+      reason:
+        `per-command exec sandbox unavailable: bubblewrap works (${probe.bwrapPath}) but cannot create a network namespace ` +
+        `(--unshare-net failed), which every sandboxed command needs; the host may lack CAP_NET_ADMIN`,
+      networkIsolationGuaranteed: false,
+    };
+  }
   return {
     available: true,
     backend: 'bubblewrap',
     bwrapPath: probe.bwrapPath,
-    reason: probe.netUnshareWorks
-      ? `bubblewrap sandbox available (${probe.bwrapPath}); network isolation confirmed`
-      : `bubblewrap sandbox available (${probe.bwrapPath}); network isolation NOT confirmed on this host`,
-    networkIsolationGuaranteed: probe.netUnshareWorks,
+    reason: `bubblewrap sandbox available (${probe.bwrapPath}); network isolation confirmed`,
+    networkIsolationGuaranteed: true,
   };
 }
 
@@ -216,6 +233,8 @@ export interface ExecSandboxPlan {
    * absent is read as "not masked", which is the claim-nothing default.
    */
   readonly homeMasked?: boolean | undefined;
+  /** The daemon port the context note names; absent → the default port. */
+  readonly daemonPort?: number | undefined;
   /** Present when the sandbox was requested but the host cannot provide it. */
   readonly unavailableReason?: string | undefined;
 }
@@ -232,23 +251,6 @@ export interface ResolveSandboxPlanInput {
   readonly homeDir?: string | undefined;
   /** What host access the command needs, read by Jev (readCommandNeeds). */
   readonly needs: CommandNeeds;
-}
-
-/** The base command names of a shell command, for matching the owner's egress allowlist. */
-function commandBaseNames(command: string): string[] {
-  try {
-    const normalized = normalizeCommand(command);
-    return normalized.segments.map((seg) => seg.command).filter((c) => c.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-/** Whether any of the command's base names is on the egress allowlist (or `*`). */
-function egressAllowed(command: string, egressAllowlist: readonly string[]): boolean {
-  if (egressAllowlist.includes('*')) return true;
-  const bases = new Set(commandBaseNames(command));
-  return egressAllowlist.some((name) => bases.has(name));
 }
 
 const NOT_SANDBOXED_ARGV: string[] = [];
@@ -285,6 +287,8 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
     };
   }
 
+  // The owner's list names whole commands: network is shared only when every
+  // command in the line is listed, so a listed word cannot carry another program.
   const networkEnabled = input.needs.needsNetwork === true && egressAllowed(input.command, input.config.egressAllowlist);
 
   const escalationsGranted: string[] = [];
@@ -321,7 +325,10 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
   const boundary =
     `bubblewrap: workspace ${input.workspaceDir} writable, system read-only, /tmp isolated, ${networkSummary}`;
 
-  return { sandboxed: true, argvPrefix, boundary, network, escalationsGranted, homeMasked: input.homeDir !== undefined };
+  return {
+    sandboxed: true, argvPrefix, boundary, network, escalationsGranted, homeMasked: input.homeDir !== undefined,
+    ...(input.config.daemonPort === undefined ? {} : { daemonPort: input.config.daemonPort }),
+  };
 }
 
 /** A host-owned, exact-plan admission; never an instruction to widen containment. */
@@ -362,7 +369,8 @@ export interface ExecSandboxRuntime {
    * escalation) through the approval broker before the command runs. Wired at
    * the composition root to the sandbox-escalation seam. Returns true when
    * approved. When absent, escalations are not asked (today's behavior); the
-   * frozen catastrophic block is enforced independently regardless.
+   * permission gate's catastrophic reading is made before the runtime runs
+   * and is unaffected.
    */
   /**
    * Invoked each time a command actually runs inside the boundary. Wired at
@@ -388,7 +396,12 @@ export async function resolveRuntimeSandboxPlan(
 ): Promise<ExecSandboxPlan | null> {
   if (!sandbox) return null;
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const needs = { needsNetwork: egressAllowed(command, sandbox.config.egressAllowlist), needsPrivilege: false };
+  // The network is opened only for a command Jev reads as needing it AND whose
+  // every command the owner listed (resolveExecSandboxPlan ANDs the two). The
+  // allowlist alone never opens it: `*` or a listed `git` must not give a
+  // command that needs no network the host network. A Classic fallback reads
+  // no need (null), so the network stays closed.
+  const needs = await readCommandNeeds(command, workspaceDir, options);
   return resolveExecSandboxPlan({
     needs,
     config: sandbox.config,
@@ -406,10 +419,9 @@ export async function resolveRuntimeSandboxPlan(
  * `requestEscalation` seam BEFORE the command runs. Returns the named
  * escalations when the ask was DENIED (the caller then denies the command), or
  * a live admission to claim immediately before spawning, or null for no ask /
- * legacy direct approval. The frozen
- * catastrophic block is enforced independently (guardExecCommand) and is
- * untouched here, this only ever gates the host-access escalation, never the
- * command class.
+ * legacy direct approval. The permission gate's catastrophic reading is made
+ * before this runs and is untouched here; this only ever gates the host-access
+ * escalation, never the command class.
  */
 export async function brokerSandboxEscalation(
   sandbox: ExecSandboxRuntime | null,
@@ -434,12 +446,16 @@ export async function brokerSandboxEscalation(
   };
   const decision = decideSandboxedExec({
     command,
-    needs: { needsNetwork: egressAllowed(command, sandbox.config.egressAllowlist), needsPrivilege: false },
+    // The plan already holds the grant (Jev's need AND the owner's allowlist); ask only when it opened the network.
+    needs: { needsNetwork: plan.network === 'enabled', needsPrivilege: false },
     sandboxActive: true,
     egressAllowlist: sandbox.config.egressAllowlist,
     baseEffectWhenNotSandboxed: 'ask',
   });
   if (decision.effect !== 'ask' || decision.escalations.length === 0) return reportContainedRun();
+  // The owner already answered this exact question on the approval card for this command. An autonomous
+  // run keeps its own admission, which a reused answer cannot stand in for.
+  if (!currentExternalOperationSource() && consumeGateEscalationApproval(command)) return reportContainedRun();
   assertCurrent();
   const approved = await sandbox.requestEscalation(Object.freeze({
     command,
@@ -491,7 +507,7 @@ export function buildSandboxNote(plan: ExecSandboxPlan): string {
     );
   } else {
     parts.push(
-      `separate network namespace, so host localhost services are unreachable from here, the goodvibes daemon on 127.0.0.1:${DEFAULT_CONTROL_PLANE_PORT} refuses connections inside the boundary even while it is running on the host, so read daemon and settings state with the built-in goodvibes_context tool (mode "summary" for runtime and daemon state, "config_get" for a setting) and change settings with the built-in goodvibes_settings tool, both of which run outside this boundary, rather than retrying curl or systemctl in here (add the command to sandbox.egressAllowlist to share the host network instead)`,
+      `separate network namespace, so host localhost services are unreachable from here, the goodvibes daemon on 127.0.0.1:${plan.daemonPort ?? DEFAULT_CONTROL_PLANE_PORT} refuses connections inside the boundary even while it is running on the host, so read daemon and settings state with the built-in goodvibes_context tool (mode "summary" for runtime and daemon state, "config_get" for a setting) and change settings with the built-in goodvibes_settings tool, both of which run outside this boundary, rather than retrying curl or systemctl in here (a command that needs the host network has to be on sandbox.egressAllowlist, a list only the owner edits, and goodvibes_settings cannot change it, so tell the owner which command needs it instead of trying to add it yourself)`,
     );
   }
   parts.push(
@@ -529,20 +545,36 @@ export function attachSandboxMeta(result: ExecCommandResult, plan: ExecSandboxPl
  * without spawning. This is the wiring production uses; unit tests exercise
  * detection with fabricated probes instead of spawning.
  */
-export function probeSandboxHost(): SandboxHostProbe {
+export function probeSandboxHost(env: NodeJS.ProcessEnv = process.env): SandboxHostProbe {
   const platform = process.platform;
   if (platform !== 'linux') {
     return { platform, bwrapPath: null, bwrapWorks: false, netUnshareWorks: false };
   }
-  const resolved = spawnSync('sh', ['-c', 'command -v bwrap'], { encoding: 'utf8', timeout: 5000 });
+  const resolved = spawnSync('sh', ['-c', 'command -v bwrap'], { encoding: 'utf8', timeout: 5000, env });
   const bwrapPath = resolved.status === 0 ? resolved.stdout.trim() || null : null;
   if (!bwrapPath) {
     return { platform, bwrapPath: null, bwrapWorks: false, netUnshareWorks: false };
   }
-  const base = ['--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev'];
-  const trivial = spawnSync(bwrapPath, [...base, '/bin/true'], { timeout: 5000 });
-  const bwrapWorks = trivial.status === 0;
-  const net = spawnSync(bwrapPath, [...base, '--unshare-net', '/bin/true'], { timeout: 5000 });
-  const netUnshareWorks = net.status === 0;
+  // Probe with the argv a real run uses, so a host where its namespaces, tmpfs or
+  // binds fail is reported unavailable instead of failing every command later.
+  let workspace: string;
+  try {
+    workspace = mkdtempSync(join(tmpdir(), 'gv-bwrap-probe-'));
+  } catch {
+    // No usable temp directory means the probe cannot run; report unavailable rather than throw at startup.
+    return { platform, bwrapPath, bwrapWorks: false, netUnshareWorks: false };
+  }
+  let bwrapWorks = false;
+  let netUnshareWorks = false;
+  try {
+    const attempt = (networkEnabled: boolean): boolean => {
+      const [command, ...args] = buildBwrapArgv({ bwrapPath, workspaceDir: workspace, cwd: workspace, writableExtras: [], networkEnabled });
+      return spawnSync(command!, [...args, '/bin/true'], { timeout: 5000, env }).status === 0;
+    };
+    bwrapWorks = attempt(true);
+    netUnshareWorks = attempt(false);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
   return { platform, bwrapPath, bwrapWorks, netUnshareWorks };
 }

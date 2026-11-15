@@ -1,6 +1,6 @@
 import * as webhookHttp from '@goodvibes-jev/engine/platform/platform/utils';
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CONFIG_SCHEMA, ConfigManager, SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -193,13 +193,27 @@ function captureFrame(modal: SettingsModal, name: string, width: number): string
   return text;
 }
 
+/**
+ * A policy path that cannot be read as a file. A directory fails the read for every user, root included,
+ * where a mode-0 file would still be readable when the suite runs as root.
+ */
+function makeUnreadable(policyPath: string): void {
+  rmSync(policyPath, { force: true });
+  mkdirSync(policyPath);
+}
+/** Puts the original policy text back where `makeUnreadable` put a directory. */
+function restoreReadable(policyPath: string, raw: string): void {
+  if (statSync(policyPath).isDirectory()) rmSync(policyPath, { recursive: true });
+  writeFileSync(policyPath, raw);
+}
+
 for (const mode of ['malformed', 'unreadable'] as const) test(`host metadata stays honestly unavailable for ${mode} policy through open, action, and reopen`, () => {
   const { config, handle, modal, options, open } = fixture();
   handle.set(false);
   const policyPath = join(options.configDir, 'settings-sync.json');
   const raw = mode === 'malformed' ? '{synthetic-private-policy-content' : JSON.stringify(defaultStore());
   writeFileSync(policyPath, raw);
-  if (mode === 'unreadable') chmodSync(policyPath, 0);
+  if (mode === 'unreadable') makeUnreadable(policyPath);
   const settingsBefore = readFileSync(config.getConfigPath(), 'utf8');
   const namesBefore = readdirSync(options.configDir).sort();
   try {
@@ -224,7 +238,7 @@ for (const mode of ['malformed', 'unreadable'] as const) test(`host metadata sta
     modal.close(); open();
     expect(modal.getSelected()?.metadataUnavailable).toBeDefined();
   } finally {
-    if (existsSync(policyPath)) chmodSync(policyPath, 0o600);
+    restoreReadable(policyPath, raw);
   }
   expect(readFileSync(policyPath, 'utf8')).toBe(raw);
   expect(readdirSync(options.configDir).sort()).toEqual(namesBefore);
@@ -387,7 +401,7 @@ for (const mode of ['malformed', 'unreadable'] as const) test(`builtin rows rema
   const policyPath = join(options.configDir, 'settings-sync.json');
   const raw = mode === 'malformed' ? '{broken-policy' : JSON.stringify(defaultStore());
   writeFileSync(policyPath, raw);
-  if (mode === 'unreadable') chmodSync(policyPath, 0);
+  if (mode === 'unreadable') makeUnreadable(policyPath);
   const namesBefore = readdirSync(options.configDir).sort();
   const settingsBefore = readFileSync(config.getConfigPath(), 'utf8');
   try {
@@ -412,7 +426,7 @@ for (const mode of ['malformed', 'unreadable'] as const) test(`builtin rows rema
     expect(readFileSync(config.getConfigPath(), 'utf8')).toBe(settingsBefore);
     expect(readdirSync(options.configDir).sort()).toEqual(namesBefore);
   } finally {
-    if (existsSync(policyPath)) chmodSync(policyPath, 0o600);
+    restoreReadable(policyPath, raw);
   }
   expect(readFileSync(policyPath, 'utf8')).toBe(raw);
   writeFileSync(policyPath, JSON.stringify(defaultStore()));

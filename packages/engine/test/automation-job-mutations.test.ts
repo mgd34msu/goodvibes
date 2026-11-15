@@ -73,7 +73,8 @@ test.each(['abort', 'revoke', 'stop', 'patch', 'options', 'publication'] as cons
   try {
     await expect(f.manager.updateJob(job.id, patch, options)).rejects.toThrow();
     expect(readFileSync(f.path)).toEqual(bytes);
-    expect(f.manager.getJob(job.id)).toEqual(job);
+    // A refused stage re-reads the store, so the record is compared as persisted (no undefined fields).
+    expect(f.manager.getJob(job.id)).toEqual(JSON.parse(JSON.stringify(job)));
     expect((await fs.readdir(f.directory)).filter(name => name.includes('.tmp.'))).toEqual([]);
   } finally { persist.mockRestore(); }
 });

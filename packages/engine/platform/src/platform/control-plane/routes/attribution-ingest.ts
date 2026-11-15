@@ -15,12 +15,17 @@ import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { CostAttributionService } from '../../runtime/cost/attribution.js';
 import type { QuotaWindowTracker } from '../../runtime/cost/quota-window.js';
 
+/** What is currently bound to each bus, so binding again replaces it instead of recording every event twice. */
+const bound = new WeakMap<object, () => void>();
+
+/** Returns the function that removes the subscriptions this call made. */
 export function bindCostAttributionIngest(
   bus: Pick<RuntimeEventBus, 'onDomain'>,
   costAttribution: Pick<CostAttributionService, 'record'>,
   quotaWindow: Pick<QuotaWindowTracker, 'record'>,
-): void {
-  bus.onDomain('providers', (envelope) => {
+): () => void {
+  bound.get(bus)?.();
+  const offProviders = bus.onDomain('providers', (envelope) => {
     const event = envelope.payload;
     if (event.type === 'PROVIDER_VOICE_USAGE') {
       costAttribution.record({
@@ -35,7 +40,7 @@ export function bindCostAttributionIngest(
       });
     }
   });
-  bus.onDomain('turn', (envelope) => {
+  const offTurn = bus.onDomain('turn', (envelope) => {
     const event = envelope.payload;
     if (event.type === 'LLM_RESPONSE_RECEIVED') {
       costAttribution.record({
@@ -76,4 +81,11 @@ export function bindCostAttributionIngest(
       }).catch(() => { /* Unsettled diagnostics do not establish a quota cooldown. */ });
     }
   });
+  const unbind = (): void => {
+    offProviders();
+    offTurn();
+    if (bound.get(bus) === unbind) bound.delete(bus);
+  };
+  bound.set(bus, unbind);
+  return unbind;
 }

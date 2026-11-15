@@ -1,26 +1,27 @@
 /**
  * auth-flow-e2e.test.ts
  *
- * End-to-end auth flow fixture: boots a fake Bun.serve HTTP server that emulates
- * the operator endpoint's auth flow, then drives the real `createGoodVibesAuthClient`
- * + `createOperatorApiClient` against it.
+ * Boots a fake Bun.serve HTTP server that emulates the daemon's auth endpoints
+ * at the paths the operator contract declares, then drives the real
+ * `createOperatorApiClient` + `createGoodVibesAuthClient` against it, so a wrong
+ * path, method or response shape in the client fails here.
  *
  * Auth flow modelled:
- *   POST /api/control/auth/login   → set session cookie; return { token, authenticated, ... }
- *   GET  /api/control/auth/current → read cookie or bearer; return auth snapshot
- *   POST /api/control/auth/revoke  → clear session; return 200
- *   any subsequent request         → 401
+ *   POST   /login                       -> create a session; return { token, authenticated, username, expiresAt }
+ *   GET    /api/control-plane/auth      -> bearer or cookie; return the auth snapshot
+ *   DELETE /api/local-auth/sessions/:id -> revoke sessions (no operator client method exists, raw fetch)
+ *   any other request                   -> 401 without valid auth
  *
  * Covers:
- *   1. Session-cookie-only mode: login → current → revoke → subsequent 401
- *   2. Shared-token-only mode:   bearer token accepted, session ops rejected
- *   3. Both-configured fallthrough: session-cookie validated even when sharedToken is set
+ *   1. Session mode: login through the auth client persists the token, current
+ *      authenticates with it, revoke makes it anonymous and protected calls 401
+ *   2. Shared-token mode: bearer token accepted, unknown bearer anonymous
+ *   3. Both configured: session and shared token both resolve
  */
 
 import { describe, expect, test, afterEach } from 'bun:test';
 import { createGoodVibesAuthClient, createMemoryTokenStore } from '../../platform/src/auth.js';
 import { createOperatorApiClient } from '../../operator-client/src/client.js';
-import type { OperatorApiClient } from '../../operator-client/src/client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,8 +100,8 @@ function buildFakeOperatorServer(opts: {
     fetch(req: Request): Response {
       const url = new URL(req.url);
 
-      // POST /api/control/auth/login
-      if (req.method === 'POST' && url.pathname === '/api/control/auth/login') {
+      // POST /login
+      if (req.method === 'POST' && url.pathname === '/login') {
         const token = makeSessionToken();
         const expiresAt = Date.now() + 60_000;
         const session: FakeServerSession = { token, username: 'alice', expiresAt };
@@ -124,8 +125,8 @@ function buildFakeOperatorServer(opts: {
         );
       }
 
-      // GET /api/control/auth/current
-      if (req.method === 'GET' && url.pathname === '/api/control/auth/current') {
+      // GET /api/control-plane/auth
+      if (req.method === 'GET' && url.pathname === '/api/control-plane/auth') {
         const auth = resolveAuth(req);
         if (!auth) {
           return new Response(
@@ -161,8 +162,8 @@ function buildFakeOperatorServer(opts: {
         );
       }
 
-      // POST /api/control/auth/revoke
-      if (req.method === 'POST' && url.pathname === '/api/control/auth/revoke') {
+      // DELETE /api/local-auth/sessions/:id
+      if (req.method === 'DELETE' && url.pathname.startsWith('/api/local-auth/sessions/')) {
         const auth = resolveAuth(req);
         if (!auth || auth.kind !== 'session') {
           return new Response(JSON.stringify({ error: 'not authenticated' }), {
@@ -209,40 +210,11 @@ function buildFakeOperatorServer(opts: {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build a stub OperatorApiClient that routes to our fake server.
- *
- * We compose with a real `createOperatorApiClient` so the real HTTP transport +
- * contract resolution path is exercised. The cookie jar is managed via the
- * `credentials: 'include'` fetch behaviour, our test manually threads the
- * cookie in headers because Bun's fetch does not maintain a cookie jar across
- * requests.
- */
-function makeOperatorForServer(baseUrl: string, sessionToken?: string): OperatorApiClient {
-  const headers: Record<string, string> = {};
-  if (sessionToken) {
-    headers['cookie'] = `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}`;
-  }
-  return createOperatorApiClient({ baseUrl, headers });
+function operatorFor(baseUrl: string, authToken?: string | null) {
+  return createOperatorApiClient({ baseUrl, ...(authToken ? { authToken } : {}) });
 }
 
-/**
- * Wire a stub OperatorApiClient whose `control.auth.login` and `control.auth.current`
- * delegate to the fake server via fetch, with cookie threading.
- *
- * We use a minimal mock approach because `createOperatorApiClient` doesn't provide a
- * handle to the token emitted by login. This helper gives us full control to
- * thread the session cookie from login → subsequent calls.
- */
-function makeFakeOperatorApiClient(
-  baseUrl: string,
-  authToken?: string,
-): OperatorApiClient {
-  return createOperatorApiClient({
-    baseUrl,
-    ...(authToken ? { authToken } : {}),
-  });
-}
+const CREDENTIALS = { username: 'alice', password: 'secret' };
 
 // Cleanup registry
 const serversToStop: Array<{ stop: () => void }> = [];
@@ -257,75 +229,58 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 1.1: Session-cookie-only mode
+// Test 1.1: Session mode
 // ---------------------------------------------------------------------------
 
-describe('auth-flow-e2e: session-cookie-only mode', () => {
-  test('login → current returns authenticated, revoke → subsequent returns 401', async () => {
+describe('auth-flow-e2e: session mode', () => {
+  test('login persists the token, current authenticates, revoke makes it anonymous and protected calls 401', async () => {
     const srv = buildFakeOperatorServer({ sharedTokenEnabled: false, sessionEnabled: true });
     serversToStop.push(srv);
 
-    // Step 1: login via a custom fetch to capture the Set-Cookie
-    const loginRes = await fetch(`${srv.baseUrl}/api/control/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice', password: 'secret' }),
-    });
-    expect(loginRes.status).toBe(200);
-    const loginBody = await loginRes.json() as { token: string; authenticated: boolean };
-    expect(loginBody.authenticated).toBe(true);
-    const sessionToken = loginBody.token;
-    expect(sessionToken).toMatch(/^[A-Za-z0-9_-]+$/);
-
-    // Step 2: authenticate to createGoodVibesAuthClient using the session token
-    // Thread the cookie manually (Bun fetch has no cookie jar across origins)
-    const tokenStore = createMemoryTokenStore(sessionToken);
-    // Drive via raw fetch to confirm cookie-based auth works
-    const currentRes = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}` },
-    });
-    expect(currentRes.status).toBe(200);
-    const currentBody = await currentRes.json() as {
-      authenticated: boolean;
-      authMode: string;
-      sessionCookiePresent: boolean;
-      principalId: string;
-    };
-    expect(currentBody.authenticated).toBe(true);
-    expect(currentBody.authMode).toBe('session');
-    expect(currentBody.sessionCookiePresent).toBe(true);
-    expect(currentBody.principalId).toBe('alice');
-
-    // createGoodVibesAuthClient via operator platform (bearer-based token flow)
-    const operator = makeFakeOperatorApiClient(srv.baseUrl, sessionToken);
-    const authClient = createGoodVibesAuthClient(operator, tokenStore);
+    const tokenStore = createMemoryTokenStore();
+    const authClient = createGoodVibesAuthClient(operatorFor(srv.baseUrl), tokenStore);
     expect(authClient.writable).toBe(true);
-    expect(await authClient.getToken()).toBe(sessionToken);
 
-    // Step 3: revoke
-    const revokeRes = await fetch(`${srv.baseUrl}/api/control/auth/revoke`, {
-      method: 'POST',
-      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}` },
+    const login = await authClient.login(CREDENTIALS);
+    expect(login.authenticated).toBe(true);
+    expect(login.username).toBe('alice');
+    const sessionToken = await authClient.getToken();
+    expect(sessionToken).toBe(login.token);
+    expect(srv.getSessions().has(login.token)).toBe(true);
+
+    const authed = createGoodVibesAuthClient(operatorFor(srv.baseUrl, sessionToken), tokenStore);
+    const current = await authed.current();
+    expect(current.authenticated).toBe(true);
+    expect(current.authMode).toBe('session');
+    expect(current.principalId).toBe('alice');
+    expect(authed.permissionResolver(current).hasRole('viewer')).toBe(true);
+
+    const revokeRes = await fetch(`${srv.baseUrl}/api/local-auth/sessions/${login.token}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${login.token}` },
     });
     expect(revokeRes.status).toBe(200);
 
-    // Step 4: subsequent request with replaced cookie -> 401
-    const afterRevokeRes = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}` },
-    });
-    expect(afterRevokeRes.status).toBe(200); // current always 200, but authMode changes
-    const afterRevokeBody = await afterRevokeRes.json() as { authenticated: boolean; authMode: string };
-    expect(afterRevokeBody.authenticated).toBe(false);
-    expect(afterRevokeBody.authMode).toBe('anonymous');
+    const afterRevoke = await authed.current();
+    expect(afterRevoke.authenticated).toBe(false);
+    expect(afterRevoke.authMode).toBe('anonymous');
 
-    // Any other endpoint after revoke → 401
     const protectedRes = await fetch(`${srv.baseUrl}/api/protected`, {
-      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(sessionToken)}` },
+      headers: { authorization: `Bearer ${login.token}` },
     });
     expect(protectedRes.status).toBe(401);
 
-    // After revoke: clearToken on the authClient empties local store
     await authClient.clearToken();
+    expect(await authClient.getToken()).toBeNull();
+  });
+
+  test('login with persistToken false leaves the token store empty', async () => {
+    const srv = buildFakeOperatorServer({ sharedTokenEnabled: false, sessionEnabled: true });
+    serversToStop.push(srv);
+
+    const authClient = createGoodVibesAuthClient(operatorFor(srv.baseUrl), createMemoryTokenStore());
+    const login = await authClient.login(CREDENTIALS, { persistToken: false });
+    expect(login.token.length).toBeGreaterThan(0);
     expect(await authClient.getToken()).toBeNull();
   });
 });
@@ -335,96 +290,47 @@ describe('auth-flow-e2e: session-cookie-only mode', () => {
 // ---------------------------------------------------------------------------
 
 describe('auth-flow-e2e: shared-token-only mode', () => {
-  test('shared token bearer is accepted; session login still creates a session', async () => {
+  test('shared token bearer is accepted as a token principal', async () => {
     const srv = buildFakeOperatorServer({ sharedTokenEnabled: true, sessionEnabled: true });
     serversToStop.push(srv);
 
-    // Shared token bearer → current returns shared-token authMode
-    const currentRes = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { Authorization: `Bearer ${SHARED_TOKEN}` },
-    });
-    expect(currentRes.status).toBe(200);
-    const body = await currentRes.json() as { authenticated: boolean; authMode: string; principalKind: string };
-    expect(body.authenticated).toBe(true);
-    expect(body.authMode).toBe('shared-token');
-    expect(body.principalKind).toBe('token');
-
-    // createGoodVibesAuthClient with shared-token operator
-    const operator = makeFakeOperatorApiClient(srv.baseUrl, SHARED_TOKEN);
-    const authClient = createGoodVibesAuthClient(operator, null);
+    const authClient = createGoodVibesAuthClient(operatorFor(srv.baseUrl, SHARED_TOKEN), null);
     expect(authClient.writable).toBe(false);
+    const current = await authClient.current();
+    expect(current.authenticated).toBe(true);
+    expect(current.authMode).toBe('shared-token');
+    expect(current.principalKind).toBe('token');
   });
 
-  test('unknown bearer token → current returns anonymous', async () => {
+  test('unknown bearer token resolves to anonymous', async () => {
     const srv = buildFakeOperatorServer({ sharedTokenEnabled: true, sessionEnabled: false });
     serversToStop.push(srv);
 
-    const res = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { Authorization: 'Bearer wrong-token' },
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json() as { authenticated: boolean };
-    expect(body.authenticated).toBe(false);
+    const authClient = createGoodVibesAuthClient(operatorFor(srv.baseUrl, 'wrong-token'), null);
+    const current = await authClient.current();
+    expect(current.authenticated).toBe(false);
+    expect(current.authMode).toBe('anonymous');
   });
 });
 
 // ---------------------------------------------------------------------------
 // Test 1.3: Both-configured fallthrough
-// (sharedToken configured; session cookie still authenticated)
+// (sharedToken configured; session token still authenticated)
 // ---------------------------------------------------------------------------
 
 describe('auth-flow-e2e: both-configured fallthrough', () => {
-  test('session cookie validates even when sharedToken is configured', async () => {
+  test('session token validates even when sharedToken is configured', async () => {
     const srv = buildFakeOperatorServer({ sharedTokenEnabled: true, sessionEnabled: true });
     serversToStop.push(srv);
 
-    // Login to get a session token
-    const loginRes = await fetch(`${srv.baseUrl}/api/control/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice', password: 'secret' }),
-    });
-    const { token } = await loginRes.json() as { token: string };
+    const login = await createGoodVibesAuthClient(operatorFor(srv.baseUrl), null).login(CREDENTIALS);
 
-    // Session cookie auth works alongside shared token config
-    const currentRes = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` },
-    });
-    const body = await currentRes.json() as { authenticated: boolean; authMode: string };
-    expect(body.authenticated).toBe(true);
-    expect(body.authMode).toBe('session');
+    const sessionCurrent = await createGoodVibesAuthClient(operatorFor(srv.baseUrl, login.token), null).current();
+    expect(sessionCurrent.authenticated).toBe(true);
+    expect(sessionCurrent.authMode).toBe('session');
 
-    // Shared token also still works independently
-    const sharedRes = await fetch(`${srv.baseUrl}/api/control/auth/current`, {
-      headers: { Authorization: `Bearer ${SHARED_TOKEN}` },
-    });
-    const sharedBody = await sharedRes.json() as { authenticated: boolean; authMode: string };
-    expect(sharedBody.authenticated).toBe(true);
-    expect(sharedBody.authMode).toBe('shared-token');
-
-    // createGoodVibesAuthClient with session token
-    const tokenStore = createMemoryTokenStore(token);
-    const operator = makeFakeOperatorApiClient(srv.baseUrl, token);
-    const authClient = createGoodVibesAuthClient(operator, tokenStore);
-    expect(authClient.writable).toBe(true);
-
-    // permissionResolver works on a captured snapshot
-    const snap = {
-      authenticated: true,
-      authMode: 'session' as const,
-      tokenPresent: true,
-      authorizationHeaderPresent: true,
-      sessionCookiePresent: false,
-      principalId: 'alice',
-      principalKind: 'user' as const,
-      admin: false,
-      scopes: ['read'],
-      roles: ['viewer'],
-    };
-    const resolver = authClient.permissionResolver(snap);
-    expect(resolver.authenticated).toBe(true);
-    expect(resolver.hasRole('viewer')).toBe(true);
-    expect(resolver.hasScope('read')).toBe(true);
-    expect(resolver.hasRole('admin')).toBe(false);
+    const sharedCurrent = await createGoodVibesAuthClient(operatorFor(srv.baseUrl, SHARED_TOKEN), null).current();
+    expect(sharedCurrent.authenticated).toBe(true);
+    expect(sharedCurrent.authMode).toBe('shared-token');
   });
 });

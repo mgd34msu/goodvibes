@@ -7,6 +7,7 @@ import { registerHostRuntimeEvents, runtimeEventKey, runtimeEventOfNotice } from
 import type { ContractEvent } from '../platform/src/events/contract.js';
 import { SAMPLES, ALL_CONTRACT_EVENTS } from './contract/event-samples.js';
 import { declaredNoticePresentation } from '../platform/src/platform/runtime/runtime-event-notices.js';
+import { waitFor } from './_helpers/test-timeout.ts';
 
 test('native cancellation presentation requires its typed producer and exact line', () => {
   expect(declaredNoticePresentation('[Response cancelled]', { type: 'TURN_CANCEL' }))
@@ -40,7 +41,7 @@ async function contractNotice(event: ContractEvent) {
   const fixture = harness();
   try {
     emitContractEvent(fixture.bus, 'notice-session', event);
-    await Promise.resolve();
+    await waitFor(() => fixture.lines.length > 0);
     expect(fixture.lines).toHaveLength(1);
     const notice = runtimeEventOfNotice(fixture.lines[0]!);
     expect(notice?.type).toBe(event.type);
@@ -56,7 +57,7 @@ describe('runtime event notices', () => {
       const payload = { type, agentId: 'agent-export-report', durationMs: 51_000, error: 'quota refused\ntry again' };
       try {
         fixture.bus.emit('agents', createEventEnvelope(type, payload, eventContext));
-        await Promise.resolve();
+        await waitFor(() => fixture.lines.length > 0);
         expect(fixture.lines).toHaveLength(1);
         const notice = runtimeEventOfNotice(fixture.lines[0]!);
         expect(notice?.type).toBe(type);
@@ -132,7 +133,8 @@ describe('runtime event notices', () => {
     const fixture = harness();
     try {
       emitContractEvent(fixture.bus, 'notice-session', { ...SAMPLES.CONTRACT_CHECKED, result: 'recorded' });
-      await Promise.resolve();
+      // A macrotask turn runs every pending promise continuation, so a notice the bus was going to deliver has been delivered.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(fixture.lines).toHaveLength(0);
     } finally { fixture.stop(); }
     for (const line of ['', 'Compaction finished', '[Contract] custom prose', '[Contract] ctr-a invented -> imaginary', '[WRFC] ✓ Chain wrfc-1 PASSED — all gates clear', '[Agents] Cohort work complete', '[Agents] 2 running:\nagent-1']) {

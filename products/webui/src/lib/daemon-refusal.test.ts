@@ -87,7 +87,7 @@ describe('complete refusal response contract', () => {
     const invalid: unknown[] = [
       null, [], 'settled',
       { ...valid, protocolVersion: 2 }, { ...valid, batteryVersion: 2 },
-      { ...valid, requestId: crypto.randomUUID() }, { ...valid, battery: 'webui.status.badge-tone' },
+      { ...valid, requestId: crypto.randomUUID() }, { ...valid, battery: 'webui.mail.reply-subject' },
       { ...valid, status: 'held' }, { ...valid, outcome: 'confirm' }, { ...valid, extra: 'untrusted' },
       { ...valid, value: { ...valid.value, session_closed: 'yes' } },
       { ...valid, value: { ...valid.value, extra: true } },

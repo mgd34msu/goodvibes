@@ -21,7 +21,7 @@ import { channelReadinessCatalogStatus, describeHarnessChannel, describeHarnessC
 import { blockedHarnessCliCommandTokens, describeHarnessCliCommand, listHarnessCliCommands, totalHarnessCliCommands } from './agent-harness-cli-metadata.ts';
 import { describeHarnessCommand, searchHarnessCommands } from './agent-harness-command-catalog.ts';
 import { describeLearningCandidate, learningCuratorCatalogStatus, learningCuratorSummary } from './agent-harness-learning-curator.ts';
-import { runAutoPromoter, assertAutoPromoteResultCurrent } from './agent-harness-learning-auto-promote.ts';
+import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites } from './agent-harness-learning-auto-promote.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
 import { delegationPostureCatalogStatus, delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
@@ -62,37 +62,51 @@ import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from './agent
 import { runCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
 import type { AgentHarnessToolArgs, AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
-import { catalogEnvelope, catalogFilters, error, output, readLimit, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
+import { catalogEnvelope, catalogFilters, effectOutput, error, output, readLimit, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
-import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
+import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
 import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorContext, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActions, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
 import { buildAssistantCockpitFromSummaries } from '../agent/assistant-cockpit.ts';
-import { remoteCatalogStatus, remotePairApproveHandoff, remotePairRejectHandoff, remotePairRequestsSummary, remotePeersInvokeHandoff, remotePeersSummary, remoteSnapshotSummary, remoteWorkCancelHandoff, remoteWorkSummary } from './agent-harness-remote.ts';
+import { remoteCatalogStatus, remotePairApproveHandoff, remotePairRejectHandoff, remotePairRequestsSummary, remotePeersInvokeHandoff, remoteMissingInput, remotePeersSummary, remoteSnapshotSummary, remoteWorkCancelHandoff, remoteWorkSummary } from './agent-harness-remote.ts';
 import { channelDraftSaveHandoff, channelDraftSendHandoff, channelDraftsSummary, channelRoutingAssignHandoff, channelRoutingRemoveHandoff, channelRoutingSummary, unifiedInboxSummary } from './agent-harness-comms.ts';
+
+/**
+ * A summary section that could not be read is reported as unavailable with its
+ * reason. A source that changed while the summary was assembled, and an abort,
+ * are the call's own retry-able outcomes and reach the caller as such, held
+ * included: a held source is one whose guard saw it change. A section whose
+ * redaction refuses a value reports that itself, before it reaches here.
+ */
+function unavailableSection<T>(err: unknown, section: T): T {
+  if (err instanceof Error && err.name === 'AbortError') throw err;
+  if (err instanceof ToolInputProjectionError && (err.problem === 'held' || err.problem === 'stale' || err.problem === 'cancelled' || err.problem === 'released')) throw err;
+  return section;
+}
 
 function isMode(value: unknown): value is AgentHarnessMode {
   return typeof value === 'string' && AGENT_HARNESS_MODES.includes(value as AgentHarnessMode);
 }
 
-function harnessModeIdsByKind(kind: AgentHarnessModeGuideKind): readonly AgentHarnessMode[] {
-  return HARNESS_MODE_DESCRIPTORS
+function harnessModeIdsByKind(descriptors: ReturnType<typeof installedModeDescriptors>, kind: AgentHarnessModeGuideKind): readonly AgentHarnessMode[] {
+  return descriptors
     .filter((descriptor) => descriptor.kind === kind)
     .map((descriptor) => descriptor.id);
 }
 
 type AgentHarnessModeGuideKind = typeof HARNESS_MODE_DESCRIPTORS[number]['kind'];
 
-function compactHarnessModeGuide(): Record<string, unknown> {
+/** Lists only the modes this installation can answer; the same descriptors feed the summary count. */
+export function compactHarnessModeGuide(descriptors: ReturnType<typeof installedModeDescriptors> = installedModeDescriptors()): Record<string, unknown> {
   return {
     start: ['summary', 'modes', 'mode'],
-    discover: harnessModeIdsByKind('discover'),
-    inspect: harnessModeIdsByKind('inspect'),
-    effects: harnessModeIdsByKind('effect'),
-    aliases: harnessModeIdsByKind('alias'),
+    discover: harnessModeIdsByKind(descriptors, 'discover'),
+    inspect: harnessModeIdsByKind(descriptors, 'inspect'),
+    effects: harnessModeIdsByKind(descriptors, 'effect'),
+    aliases: harnessModeIdsByKind(descriptors, 'alias'),
     pattern: 'Use query|target for search and exact ids for inspect modes. Settings set/reset and migrated harness effects use current recorded effect-owner admission; independent routes retain their documented requirements.',
   };
 }
@@ -187,7 +201,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (resolved.status === 'ambiguous') return error(`Ambiguous policy explanation target ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
         return error(resolved.usage);
       }
-      if (dispatchMode === 'run_background_process') return output(await runBackgroundProcessAction(deps.commandContext, args, processClassificationOptions(deps.commandContext, deps.toolRegistry, signal, () => { assertCurrentToolExecution(rawArgs, options); }), rawArgs, options));
+      if (dispatchMode === 'run_background_process') return effectOutput(await runBackgroundProcessAction(deps.commandContext, args, processClassificationOptions(deps.commandContext, deps.toolRegistry, signal, () => { assertCurrentToolExecution(rawArgs, options); }), rawArgs, options));
       if (dispatchMode === 'model_routing' || dispatchMode === 'model_route') {
         // Independent read-only observations keep their own source checks;
         // join the complete set before exposing the combined catalog.
@@ -253,39 +267,40 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (!harnessCatalogInvocationAuthority(rawArgs, options, 'write')) throw new ToolInputProjectionError('held');
         assertLearningCatalogCurrent();
       } });
-      if (dispatchMode === 'settings' || dispatchMode === 'get_setting') {
-        const originalJson = JSON.stringify(captureCatalogData(rawArgs));
-        const config = deps.commandContext.platform.configManager;
-        const incarnation = config.getConfigurationIncarnation();
-        const reading = { ...catalogOptions, retainCurrent: retainHarnessCatalogCurrent(rawArgs), assertCurrent: () => {
-          catalogOptions.assertCurrent();
-          if (JSON.stringify(captureCatalogData(rawArgs)) !== originalJson || deps.commandContext.platform.configManager !== config || config.getConfigurationIncarnation() !== incarnation) throw new Error('Settings source changed.');
-        } };
-        if (dispatchMode === 'settings') {
-          const page = await harnessSettingsCatalog(config, args, reading); reading.assertCurrent(); return output(page);
+      try {
+        if (dispatchMode === 'settings' || dispatchMode === 'get_setting') {
+          const originalJson = JSON.stringify(captureCatalogData(rawArgs));
+          const config = deps.commandContext.platform.configManager;
+          const incarnation = config.getConfigurationIncarnation();
+          const reading = { ...catalogOptions, retainCurrent: retainHarnessCatalogCurrent(rawArgs), assertCurrent: () => {
+            catalogOptions.assertCurrent();
+            if (JSON.stringify(captureCatalogData(rawArgs)) !== originalJson || deps.commandContext.platform.configManager !== config || config.getConfigurationIncarnation() !== incarnation) throw new Error('Settings source changed.');
+          } };
+          if (dispatchMode === 'settings') {
+            const page = await harnessSettingsCatalog(config, args, reading); reading.assertCurrent(); return output(page);
+          }
+          const setting = await resolveEffectiveHarnessSetting(config, settingLookupArgs(args), {}, reading);
+          reading.assertCurrent();
+          if (setting?.status === 'found') return output(setting.setting);
+          if (setting?.status === 'ambiguous') return error(`Ambiguous setting ${setting.input}. Candidates: ${JSON.stringify(setting.candidates)}`);
+          return error(`Unknown setting ${readString(args.key || args.target || args.query) || '<missing>'}. Use mode:"settings" to inspect available settings.`);
         }
-        const setting = await resolveEffectiveHarnessSetting(config, settingLookupArgs(args), {}, reading);
-        reading.assertCurrent();
-        if (setting?.status === 'found') return output(setting.setting);
-        if (setting?.status === 'ambiguous') return error(`Ambiguous setting ${setting.input}. Candidates: ${JSON.stringify(setting.candidates)}`);
-        return error(`Unknown setting ${readString(args.key || args.target || args.query) || '<missing>'}. Use mode:"settings" to inspect available settings.`);
-      }
-      if (dispatchMode === 'personal_ops_queue') {
-        const queue = await personalOpsQueueSummary(deps.commandContext, args, catalogOptions);
-        for (const guard of publicationGuards ?? []) { guard(); retainPublicationCurrent(guard); }
-        assertCatalogExecution();
-        return output(queue);
-      }
-      if (dispatchMode === 'personal_ops_intake') return publishCatalog(output(await personalOpsIntakeSummary(deps.commandContext, args, catalogOptions)));
-      if (dispatchMode === 'personal_ops_lane') {
-        const resolved = await describePersonalOpsLane(deps.commandContext, args, catalogOptions);
-        if (resolved.status === 'found') return publishCatalog(output(resolved.lane));
-        if (resolved.status === 'deferred') return publishCatalog(output(resolved));
-        if (resolved.status === 'selection_required') return publishCatalog(output(resolved));
-        if (resolved.status === 'ambiguous') return publishCatalog(error(`Ambiguous Personal Ops lane ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`));
-        return publishCatalog(error(resolved.usage));
-      }
-      if (dispatchMode === 'run_personal_ops_read') return output(await runPersonalOpsRead(deps.commandContext, args, args.laneId === 'inbox' && args.recordId === 'inbox-style-reply-draft' ? catalogOptions : effectCatalogOptions, rawArgs, options));
+        if (dispatchMode === 'personal_ops_queue') {
+          const queue = await personalOpsQueueSummary(deps.commandContext, args, catalogOptions);
+          for (const guard of publicationGuards ?? []) { guard(); retainPublicationCurrent(guard); }
+          assertCatalogExecution();
+          return output(queue);
+        }
+        if (dispatchMode === 'personal_ops_intake') return publishCatalog(output(await personalOpsIntakeSummary(deps.commandContext, args, catalogOptions)));
+        if (dispatchMode === 'personal_ops_lane') {
+          const resolved = await describePersonalOpsLane(deps.commandContext, args, catalogOptions);
+          if (resolved.status === 'found') return publishCatalog(output(resolved.lane));
+          if (resolved.status === 'deferred') return publishCatalog(output(resolved));
+          if (resolved.status === 'selection_required') return publishCatalog(output(resolved));
+          if (resolved.status === 'ambiguous') return publishCatalog(error(`Ambiguous Personal Ops lane ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`));
+          return publishCatalog(error(resolved.usage));
+        }
+        if (dispatchMode === 'run_personal_ops_read') return output(await runPersonalOpsRead(deps.commandContext, args, args.laneId === 'inbox' && args.recordId === 'inbox-style-reply-draft' ? catalogOptions : effectCatalogOptions, rawArgs, options));
         if (dispatchMode === 'modes') return output(await listHarnessModes(args, catalogOptions));
         if (dispatchMode === 'mode') {
           const mode = await describeHarnessMode(args, catalogOptions);
@@ -323,17 +338,16 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           if (resolved.status === 'ambiguous') return error(`Ambiguous operator method ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
           return error(resolved.usage);
         }
-      try {
         if (dispatchMode === 'summary') {
           const channelReadiness = channelReadinessCatalogStatus(deps.commandContext);
           const notificationTargets = notificationTargetCatalogStatus(deps.commandContext);
-          const providerAccounts = await providerAccountCatalogStatus(deps.commandContext).catch((err) => ({
+          const providerAccounts = await providerAccountCatalogStatus(deps.commandContext).catch((err) => unavailableSection(err, {
             modes: ['provider_accounts', 'provider_account'],
             status: 'unavailable',
             error: formatHarnessError(err),
           }));
           const mcpServers = mcpServerCatalogStatus(deps.commandContext);
-          const setupPosture = await setupPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => ({
+          const setupPosture = await setupPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => unavailableSection(err, {
             modes: ['setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke'],
             status: 'unavailable',
             error: formatHarnessError(err),
@@ -341,7 +355,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const projectContext = projectContextCatalogStatus(deps.commandContext);
           const promptContext = await promptContextCatalogStatus(deps.commandContext, signal);
           const agentOrchestration = agentOrchestrationCatalogStatus(deps.commandContext, deps.toolRegistry);
-          const modelRouting = await modelRoutingCatalogStatus(deps.commandContext).catch((err) => ({
+          const modelRouting = await modelRoutingCatalogStatus(deps.commandContext).catch((err) => unavailableSection(err, {
             modes: ['model_routing', 'model_route'],
             status: 'unavailable',
             error: formatHarnessError(err),
@@ -351,7 +365,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const executionHistory = executionHistoryCatalogStatus(deps.commandContext);
           const fileRecovery = fileRecoveryCatalogStatus(deps.commandContext);
           const personalOps = personalOpsCatalogStatus(deps.commandContext);
-          const memoryPosture = await memoryPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => ({
+          const memoryPosture = await memoryPostureCatalogStatus(deps.commandContext, catalogOptions).catch((err) => unavailableSection(err, {
             modes: ['memory_posture', 'memory_provider'],
             status: 'unavailable',
             error: formatHarnessError(err),
@@ -369,11 +383,11 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const supportBundles = supportBundleCatalogStatus();
           const mediaPosture = await mediaPostureCatalogStatus(deps.commandContext, catalogOptions);
           const sessions = sessionCatalogStatus(deps.commandContext);
-          const releaseEvidence = await releaseEvidenceBundleStatus(catalogOptions).catch(() => ({
-            status: 'unavailable', error: 'Release evidence could not be read.',
+          const releaseEvidence = await releaseEvidenceBundleStatus(catalogOptions, deps.releaseRoot).catch((err) => unavailableSection(err, {
+            status: 'unavailable', error: `Release evidence could not be read: ${formatHarnessError(err)}`,
           }));
-          const releaseReadiness = await releaseReadinessInventoryStatus(catalogOptions).catch(() => ({
-            status: 'unavailable', error: 'Release readiness could not be read.',
+          const releaseReadiness = await releaseReadinessInventoryStatus(catalogOptions, deps.releaseRoot).catch((err) => unavailableSection(err, {
+            status: 'unavailable', error: `Release readiness could not be read: ${formatHarnessError(err)}`,
           }));
           const operatorMethods = operatorMethodCatalogStatus();
           const servicePosture = servicePostureCatalogStatus();
@@ -397,7 +411,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
               documentOps,
               securityPosture,
             }),
-            harnessModes: HARNESS_MODE_DESCRIPTORS.length,
+            harnessModes: installedModeDescriptors().length,
             cliCommands: totalHarnessCliCommands(),
             blockedCliCommandTokens: blockedHarnessCliCommandTokens(),
             uiSurfaces: totalHarnessUiSurfaces(),
@@ -470,7 +484,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'open_ui_surface') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'UI surface routing');
           if (confirmationError) return error(confirmationError);
-          return output(await openHarnessUiSurface(deps.commandContext, args, { ...effectCatalogOptions, assertCurrent: () => { effectCatalogOptions.assertCurrent(); const confirmationError = requireConfirmedAction(rawArgs, options, 'UI surface routing'); if (confirmationError) throw new Error(confirmationError); } }));
+          return effectOutput(await openHarnessUiSurface(deps.commandContext, args, { ...effectCatalogOptions, assertCurrent: () => { effectCatalogOptions.assertCurrent(); const confirmationError = requireConfirmedAction(rawArgs, options, 'UI surface routing'); if (confirmationError) throw new Error(confirmationError); } }));
         }
         if (dispatchMode === 'shortcuts') return output(await listHarnessShortcuts(deps.commandContext, args, catalogOptions));
         if (dispatchMode === 'keybindings') return output(await listHarnessKeybindings(deps.commandContext, args, catalogOptions));
@@ -480,15 +494,15 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         }
         if (dispatchMode === 'set_keybinding') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding mutation');
-          return confirmationError ? error(confirmationError) : output(await setHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
+          return confirmationError ? error(confirmationError) : effectOutput(await setHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
         }
         if (dispatchMode === 'reset_keybinding') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding reset');
-          return confirmationError ? error(confirmationError) : output(await resetHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
+          return confirmationError ? error(confirmationError) : effectOutput(await resetHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
         }
         if (dispatchMode === 'run_keybinding') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding action');
-          return confirmationError ? error(confirmationError) : output(await runHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
+          return confirmationError ? error(confirmationError) : effectOutput(await runHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
         }
         if (dispatchMode === 'channels') return output(listHarnessChannels(deps.commandContext, args));
         if (dispatchMode === 'channel') {
@@ -540,12 +554,12 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'mark_setup_checkpoint') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup wizard checkpoint save');
           if (confirmationError) return error(confirmationError);
-          return output(await markSetupCheckpoint(deps.commandContext, rawArgs, options));
+          return effectOutput(await markSetupCheckpoint(deps.commandContext, rawArgs, options));
         }
         if (dispatchMode === 'clear_setup_checkpoint') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup wizard checkpoint clear');
           if (confirmationError) return error(confirmationError);
-          return output(clearSetupCheckpoint(deps.commandContext, rawArgs, options));
+          return effectOutput(clearSetupCheckpoint(deps.commandContext, rawArgs, options));
         }
         if (dispatchMode === 'project_context') return output(await projectContextSummary(deps.commandContext, args, catalogOptions));
         if (dispatchMode === 'project_context_file') {
@@ -569,7 +583,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           if (setupItemId && setupItemId !== 'connected-host-auth') {
             return error('provision_connected_host_token supports setupItemId:"connected-host-auth" only.');
           }
-          return output(provisionConnectedHostOperatorToken(deps.commandContext, args));
+          return effectOutput(provisionConnectedHostOperatorToken(deps.commandContext, args));
         }
         if (dispatchMode === 'run_setup_smoke') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Setup smoke');
@@ -579,11 +593,12 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const ownership = resolveSetupSmokeNativeEvidence(rawArgs, options, deps.commandContext);
           const result = await runSetupInstallSmoke(deps.commandContext, args, ownership, signal);
           ownership.assertCurrent();
-          return output(result);
+          // The evidence snapshot is the effect: a blocked plan is still a saved result.
+          return result.status === 'missing_smoke_plan' ? effectOutput(result) : output(result);
         }
         if (dispatchMode === 'run_local_model_smoke') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Local model smoke');
-          return confirmationError ? error(confirmationError) : output(await runLocalModelServerSmoke(deps.commandContext, args, catalogOptions));
+          return confirmationError ? error(confirmationError) : effectOutput(await runLocalModelServerSmoke(deps.commandContext, args, catalogOptions));
         }
         if (dispatchMode === 'execution_posture') return output(await executionPostureSummary(deps.commandContext, deps.toolRegistry, args, catalogOptions));
         if (dispatchMode === 'browser_control_route') return output(await browserControlRouteSummary(deps.commandContext, deps.toolRegistry, args, catalogOptions));
@@ -610,7 +625,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'file_recovery') return output(fileRecoverySummary(deps.commandContext, args));
         if (dispatchMode === 'run_file_recovery') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'File recovery');
-          return confirmationError ? error(confirmationError) : output(runFileRecovery(deps.commandContext, rawArgs, options));
+          return confirmationError ? error(confirmationError) : effectOutput(runFileRecovery(deps.commandContext, rawArgs, options));
         }
         if (dispatchMode === 'personal_ops_briefing') return publishCatalog(output(await personalOpsBriefingSummary(deps.commandContext, args, catalogOptions)));
         if (dispatchMode === 'personal_ops') return publishCatalog(output(await personalOpsSummary(deps.commandContext, args, catalogOptions)));
@@ -625,7 +640,7 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'memory_refinement') return output(memoryRefinementSummary(deps.commandContext, args));
         if (dispatchMode === 'run_memory_refinement') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Agent Knowledge semantic refinement');
-          return confirmationError ? error(confirmationError) : output(await runMemoryRefinement(deps.commandContext, args));
+          return confirmationError ? error(confirmationError) : effectOutput(await runMemoryRefinement(deps.commandContext, args));
         }
         if (dispatchMode === 'autonomy_intake') return output(await autonomyIntakeSummary(deps.commandContext, args, catalogOptions));
         if (dispatchMode === 'autonomy_queue') return output(await autonomyQueueSummary(deps.commandContext, args, catalogOptions));
@@ -643,7 +658,15 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const memoryApi = deps.commandContext.clients?.agentKnowledgeApi?.memory;
           if (!memoryApi) return error('learning_auto_promote requires an active memory registry.');
           const skillRegistry = AgentSkillRegistry.fromShellPaths(shellPaths);
-          const result = await runAutoPromoter(deps.commandContext, skillRegistry, memoryApi, learningEffectOptions);
+          let result: Awaited<ReturnType<typeof runAutoPromoter>>;
+          try {
+            result = await runAutoPromoter(deps.commandContext, skillRegistry, memoryApi, learningEffectOptions, deps.commandContext.clients?.memorySpine?.active === true);
+          } catch (stopped) {
+            // A cancelled call stays a throw; a pass cut short by anything else reports what it already wrote.
+            const written = completedPromotionWrites(stopped);
+            if (signal?.aborted || written.length === 0) throw stopped;
+            return error(`Learning promotion stopped part-way: ${stopped instanceof Error ? stopped.message : String(stopped)} The writes listed are kept (${written.length}); run learning_curator to see what remains.`);
+          }
           const rendered = output({
             ...result,
             message: result.promoted > 0
@@ -765,17 +788,17 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           };
           return protectAgentHarnessResearchTool(workspaceActionTool, deps.toolRegistry).execute(rawArgs, options);
         }
-        if (dispatchMode === 'release_evidence') return publishCatalog(output(await releaseEvidenceSummary(args, catalogOptions)));
+        if (dispatchMode === 'release_evidence') return publishCatalog(output(await releaseEvidenceSummary(args, catalogOptions, deps.releaseRoot)));
         if (dispatchMode === 'release_evidence_artifact') {
-          const resolved = await describeHarnessReleaseEvidenceArtifact(args, catalogOptions);
+          const resolved = await describeHarnessReleaseEvidenceArtifact(args, catalogOptions, deps.releaseRoot);
           if (resolved.status === 'found') return publishCatalog(output(resolved));
           if (resolved.status === 'ambiguous') return publishCatalog(error(`Ambiguous release evidence artifact ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`));
           if (resolved.status === 'missing_lookup') return publishCatalog(error(resolved.usage ?? 'release_evidence_artifact requires artifactId, target, or query.'));
           return publishCatalog(error(`Unknown release evidence artifact ${readString(args.artifactId || args.target || args.query) || '<missing>'}. Use mode:"release_evidence" to inspect available artifacts.`));
         }
-        if (dispatchMode === 'release_readiness') return publishCatalog(output(await releaseReadinessSummary(args, catalogOptions)));
+        if (dispatchMode === 'release_readiness') return publishCatalog(output(await releaseReadinessSummary(args, catalogOptions, deps.releaseRoot)));
         if (dispatchMode === 'release_readiness_item') {
-          const resolved = await describeHarnessReleaseReadinessItem(args, catalogOptions);
+          const resolved = await describeHarnessReleaseReadinessItem(args, catalogOptions, deps.releaseRoot);
           if (resolved.status === 'found') return publishCatalog(output(resolved));
           if (resolved.status === 'ambiguous') return publishCatalog(error(`Ambiguous release readiness item ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`));
           if (resolved.status === 'unavailable') return publishCatalog(output(resolved));
@@ -830,21 +853,29 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'remote_work') return output(remoteWorkSummary(args));
         if (dispatchMode === 'remote_pair_requests') return output(remotePairRequestsSummary(args));
         if (dispatchMode === 'remote_pair_approve') {
+          const missingInput = remoteMissingInput('remote_pair_approve', args);
+          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote pair request approval');
           if (confirmationError) return error(confirmationError);
           return output(remotePairApproveHandoff(args));
         }
         if (dispatchMode === 'remote_pair_reject') {
+          const missingInput = remoteMissingInput('remote_pair_reject', args);
+          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote pair request rejection');
           if (confirmationError) return error(confirmationError);
           return output(remotePairRejectHandoff(args));
         }
         if (dispatchMode === 'remote_peers_invoke') {
+          const missingInput = remoteMissingInput('remote_peers_invoke', args);
+          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote peer command invocation');
           if (confirmationError) return error(confirmationError);
           return output(remotePeersInvokeHandoff(args));
         }
         if (dispatchMode === 'remote_work_cancel') {
+          const missingInput = remoteMissingInput('remote_work_cancel', args);
+          if (missingInput) return error(`${missingInput.error} ${missingInput.next}`);
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Remote work cancellation');
           if (confirmationError) return error(confirmationError);
           return output(remoteWorkCancelHandoff(args));
@@ -863,14 +894,13 @@ export function createAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return typeof result === 'string' ? error(result) : output(result);
         }
         if (dispatchMode === 'channel_routing_remove') {
-          const result = channelRoutingRemoveHandoff(deps.commandContext, rawArgs, options);
+          const result = await channelRoutingRemoveHandoff(deps.commandContext, rawArgs, options);
           return typeof result === 'string' ? error(result) : output(result);
         }
         return error(`Unhandled agent_harness mode: ${dispatchMode}`);
       } catch (err) {
         signal?.throwIfAborted();
         if (err instanceof ToolInputProjectionError) throw err;
-        if (dispatchMode === 'sessions') return error('Session transcript observation was canceled or superseded. Try again.');
         return error(formatHarnessError(err));
       }
     },

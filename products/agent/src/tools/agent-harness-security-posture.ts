@@ -1,12 +1,13 @@
 import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { buildMcpAttackPathReview, captureUiSecurityReadSource } from '@/runtime/index.ts';
 import { capturePolicyRuntimeReadSource } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessSecurityArgs {
   readonly query?: unknown;
@@ -92,9 +93,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,6 +132,17 @@ function safeText(value: unknown, fallback = 'n/a'): string {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return fallback;
+}
+
+const UNTRUSTED_TEXT_LIMIT = 240;
+
+// Text an MCP server supplied about itself is shown bounded and labelled, so it cannot read as a trusted instruction.
+function untrustedText(value: unknown, fallback = 'n/a'): string {
+  return previewHarnessText(safeText(value, fallback), UNTRUSTED_TEXT_LIMIT);
+}
+
+function slashArgument(value: string): string {
+  return /^[A-Za-z0-9._:@-]+$/.test(value) ? value : JSON.stringify(value);
 }
 
 function severityRank(severity: SecurityFindingSeverity): number {
@@ -246,13 +256,20 @@ function buildPolicyFindings(policySnapshot: unknown): readonly SecurityFinding[
   ];
 }
 
-function buildMcpFindings(securitySnapshot: Record<string, unknown> | null): readonly SecurityFinding[] {
+function mcpAttackPathFindings(securitySnapshot: Record<string, unknown> | null): readonly Record<string, unknown>[] {
+  if (isRecord(securitySnapshot?.attackPathReview)) return readRecordArray(securitySnapshot.attackPathReview.findings);
+  // The snapshot is untyped read-model data; the review builder reads only the fields it needs from each entry.
+  type ReviewInput = Parameters<typeof buildMcpAttackPathReview>[0];
+  const review = buildMcpAttackPathReview({
+    servers: readRecordArray(securitySnapshot?.mcpServers) as unknown as ReviewInput['servers'],
+    recentDecisions: readArray(securitySnapshot?.recentMcpDecisions) as unknown as ReviewInput['recentDecisions'],
+  });
+  return readRecordArray(review.findings);
+}
+
+function buildMcpFindings(securitySnapshot: Record<string, unknown> | null, attackPathFindings = mcpAttackPathFindings(securitySnapshot)): readonly SecurityFinding[] {
   const mcpServers = readRecordArray(securitySnapshot?.mcpServers);
-  const recentMcpDecisions = readArray(securitySnapshot?.recentMcpDecisions);
-  const attackPathReview = isRecord(securitySnapshot?.attackPathReview)
-    ? securitySnapshot.attackPathReview
-    : buildMcpAttackPathReview({ servers: mcpServers as never, recentDecisions: recentMcpDecisions as never });
-  const attackFindings = readRecordArray(attackPathReview.findings).map((finding, index): SecurityFinding => {
+  const attackFindings = attackPathFindings.map((finding, index): SecurityFinding => {
     const serverName = safeText(finding.serverName, `server-${index + 1}`);
     const severityRaw = safeText(finding.severity, 'warn').toLowerCase();
     const severity: SecurityFindingSeverity = severityRaw === 'critical' || severityRaw === 'high' || severityRaw === 'blocker' ? 'blocker' : severityRaw === 'info' ? 'info' : 'warn';
@@ -261,12 +278,13 @@ function buildMcpFindings(securitySnapshot: Record<string, unknown> | null): rea
       source: 'mcp',
       severity,
       title: `MCP attack path ${serverName}`,
-      summary: safeText(finding.reason, 'MCP attack-path finding'),
+      summary: untrustedText(finding.reason, 'MCP attack-path finding'),
       route: '/security attack-paths',
       detail: {
         serverName,
-        route: safeText(finding.route),
-        reason: safeText(finding.reason),
+        route: untrustedText(finding.route),
+        reason: untrustedText(finding.reason),
+        untrustedFields: ['serverName', 'route', 'reason'],
         severity: severityRaw,
       },
     };
@@ -280,14 +298,15 @@ function buildMcpFindings(securitySnapshot: Record<string, unknown> | null): rea
         source: 'mcp',
         severity: 'blocker',
         title: `MCP quarantined ${serverName}`,
-        summary: safeText(server.quarantineReason, 'Server schema is quarantined.'),
-        route: `/mcp repair ${serverName}`,
+        summary: `Server schema is quarantined. Reason reported by the server (unverified text): ${untrustedText(server.quarantineReason, 'none given')}`,
+        route: `/mcp repair ${slashArgument(serverName)}`,
         detail: {
           serverName,
           trustMode: safeText(server.trustMode),
           role: safeText(server.role),
-          quarantineReason: safeText(server.quarantineReason),
-          quarantineDetail: safeText(server.quarantineDetail),
+          quarantineReason: untrustedText(server.quarantineReason),
+          quarantineDetail: untrustedText(server.quarantineDetail),
+          untrustedFields: ['serverName', 'quarantineReason', 'quarantineDetail'],
         },
       });
     }
@@ -298,7 +317,7 @@ function buildMcpFindings(securitySnapshot: Record<string, unknown> | null): rea
         severity: 'warn',
         title: `MCP elevated trust ${serverName}`,
         summary: 'Server is configured with allow-all trust.',
-        route: `/mcp review ${serverName}`,
+        route: `/mcp review ${slashArgument(serverName)}`,
         detail: {
           serverName,
           trustMode: 'allow-all',
@@ -357,16 +376,28 @@ function buildIncidentFindings(securitySnapshot: Record<string, unknown> | null)
   });
 }
 
-function readSecuritySnapshot(context: CommandContext): Record<string, unknown> | null {
+interface SecuritySnapshotReading {
+  readonly snapshot: Record<string, unknown> | null;
+  /** Why there is no snapshot: the read model is absent, or reading it threw. */
+  readonly reason?: string;
+}
+
+function readSecuritySnapshotReading(context: CommandContext): SecuritySnapshotReading {
+  const model = context.platform.readModels?.security;
+  if (!model) return { snapshot: null, reason: 'No security read model is attached to this Agent context.' };
   try {
-    const snapshot = context.platform.readModels?.security.getSnapshot();
-    return isRecord(snapshot) ? snapshot : null;
-  } catch {
-    return null;
+    const snapshot: unknown = model.getSnapshot();
+    return isRecord(snapshot) ? { snapshot } : { snapshot: null, reason: 'The security read model returned no snapshot.' };
+  } catch (error) {
+    return { snapshot: null, reason: `Reading the security read model failed: ${previewHarnessText(error instanceof Error ? error.message : String(error), 160)}` };
   }
 }
 
-function buildSecurityFindings(context: CommandContext, securitySnapshot = readSecuritySnapshot(context),
+function readSecuritySnapshot(context: CommandContext): Record<string, unknown> | null {
+  return readSecuritySnapshotReading(context).snapshot;
+}
+
+export function buildSecurityFindings(context: CommandContext, securitySnapshot = readSecuritySnapshot(context),
   policySnapshot: unknown = context.extensions.policyRuntimeState?.getSnapshot()): readonly SecurityFinding[] {
   return [
     ...buildTokenFindings(securitySnapshot),
@@ -382,10 +413,11 @@ function countByString(records: readonly Record<string, unknown>[], key: string,
 }
 
 export function securityPostureCatalogStatus(context: CommandContext): Record<string, unknown> {
-  const securitySnapshot = readSecuritySnapshot(context);
+  const { snapshot: securitySnapshot, reason } = readSecuritySnapshotReading(context);
   return {
     modes: ['security_posture', 'security_finding'],
     status: securitySnapshot ? 'available' : 'unavailable',
+    ...(!securitySnapshot && reason ? { unavailableReason: reason } : {}),
     findings: securitySnapshot ? buildSecurityFindings(context).length : 0,
     readOnly: true,
   };
@@ -411,22 +443,60 @@ function captureSecurityRequest(context: CommandContext, args: AgentHarnessSecur
   return { request, ...captured };
 }
 
+/** The counted sections of the security summary, derived only from the snapshot and the findings built from it. */
+export function securitySnapshotSummary(securitySnapshot: Record<string, unknown>, findings: readonly SecurityFinding[]) {
+  const audit = isRecord(securitySnapshot.audit) ? securitySnapshot.audit : {};
+  const policy = isRecord(securitySnapshot.policy) ? securitySnapshot.policy : {};
+  const auditResults = readRecordArray(audit.results);
+  const mcpServers = readRecordArray(securitySnapshot.mcpServers);
+  const plugins = readRecordArray(securitySnapshot.plugins);
+  return {
+    tokens: {
+      total: typeof audit.totalTokens === 'number' ? audit.totalTokens : auditResults.length,
+      blocked: auditResults.length > 0 ? auditResults.filter((result) => result.blocked === true).length : readArray(audit.blocked).length,
+      scopeViolations: readArray(audit.scopeViolations).length,
+      rotationWarnings: readArray(audit.rotationWarnings).length,
+      rotationOverdue: auditResults.length > 0
+        ? auditResults.filter((result) => isRecord(result.rotation) && result.rotation.outcome === 'overdue').length
+        : readArray(audit.rotationOverdue).length,
+    },
+    policy: {
+      preflightStatus: safeText(policy.preflightStatus),
+      preflightIssueCount: typeof policy.preflightIssueCount === 'number' ? policy.preflightIssueCount : 0,
+      lintFindings: typeof policy.lintFindingCount === 'number' ? policy.lintFindingCount : 0,
+      deniedPermissions: typeof securitySnapshot.deniedPermissions === 'number' ? securitySnapshot.deniedPermissions : 0,
+    },
+    mcp: {
+      servers: mcpServers.length,
+      quarantined: countByString(mcpServers, 'schemaFreshness', 'quarantined'),
+      elevated: countByString(mcpServers, 'trustMode', 'allow-all'),
+      attackPathFindings: findings.filter((finding) => finding.findingId.startsWith('mcp-attack-')).length,
+    },
+    plugins: {
+      total: plugins.length,
+      quarantined: plugins.filter((plugin) => plugin.quarantined === true).length,
+      untrusted: countByString(plugins, 'trustTier', 'untrusted'),
+    },
+  };
+}
+
 export async function securityPostureSummary(context: CommandContext, args: AgentHarnessSecurityArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const { request, securitySnapshot, policySnapshot } = captureSecurityRequest(context, args, options);
   args = request.input;
   if (!securitySnapshot) {
+    const { reason } = readSecuritySnapshotReading(context);
+    // Policy lint findings come from their own snapshot and stay useful without the security read model.
+    const policyFindings = buildPolicyFindings(policySnapshot);
+    const returnedFindings = policyFindings.slice(0, readLimit(args.limit, 100));
     return {
       status: 'unavailable',
-      findings: [],
-      returned: 0,
-      total: 0,
-      policy: 'Security read models are unavailable in this Agent context.',
+      ...(reason ? { unavailableReason: reason } : {}),
+      findings: returnedFindings.map((finding) => describeFinding(finding, args.includeParameters === true)),
+      returned: returnedFindings.length,
+      total: policyFindings.length,
+      policy: 'Security read models are unavailable in this Agent context; only policy findings, if any, are listed.',
     };
   }
-  const audit = isRecord(securitySnapshot.audit) ? securitySnapshot.audit : {};
-  const policy = isRecord(securitySnapshot.policy) ? securitySnapshot.policy : {};
-  const mcpServers = readRecordArray(securitySnapshot.mcpServers);
-  const plugins = readRecordArray(securitySnapshot.plugins);
   const subscriptions = context.platform.subscriptionManager;
   const services = context.platform.serviceRegistry;
   const query = readString(args.query);
@@ -435,50 +505,30 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
   request.assertCurrent();
   const filtered = ranked.slice(0, readLimit(args.limit, 100));
   let secretRefCount: number | null = null;
+  let secretRefsError: string | null = null;
   if (args.includeParameters === true && context.platform.secretsManager) {
     try {
       request.assertCurrent();
       secretRefCount = (await context.platform.secretsManager.list()).length;
       request.assertCurrent();
-    } catch {
+    } catch (error) {
       request.assertCurrent();
       secretRefCount = null;
+      secretRefsError = previewHarnessText(error instanceof Error ? error.message : String(error), 160);
     }
   }
   request.assertCurrent();
   return {
     status: 'available',
     summary: {
-      tokens: {
-        total: typeof audit.totalTokens === 'number' ? audit.totalTokens : readRecordArray(audit.results).length,
-        blocked: readArray(audit.blocked).length,
-        scopeViolations: readArray(audit.scopeViolations).length,
-        rotationWarnings: readArray(audit.rotationWarnings).length,
-        rotationOverdue: readArray(audit.rotationOverdue).length,
-      },
-      policy: {
-        preflightStatus: safeText(policy.preflightStatus),
-        preflightIssueCount: typeof policy.preflightIssueCount === 'number' ? policy.preflightIssueCount : 0,
-        lintFindings: typeof policy.lintFindingCount === 'number' ? policy.lintFindingCount : 0,
-        deniedPermissions: typeof securitySnapshot.deniedPermissions === 'number' ? securitySnapshot.deniedPermissions : 0,
-      },
-      mcp: {
-        servers: mcpServers.length,
-        quarantined: countByString(mcpServers, 'schemaFreshness', 'quarantined'),
-        elevated: countByString(mcpServers, 'trustMode', 'allow-all'),
-        attackPathFindings: readRecordArray(isRecord(securitySnapshot.attackPathReview) ? securitySnapshot.attackPathReview.findings : []).length,
-      },
-      plugins: {
-        total: plugins.length,
-        quarantined: plugins.filter((plugin) => plugin.quarantined === true).length,
-        untrusted: countByString(plugins, 'trustTier', 'untrusted'),
-      },
+      ...securitySnapshotSummary(securitySnapshot, findings),
       auth: {
         builtInProviders: listBuiltinSubscriptionProviders().length,
         activeSubscriptions: subscriptions?.list().length ?? 0,
         pendingSubscriptions: subscriptions?.listPending().length ?? 0,
         configuredServices: services ? Object.keys(services.getAll()).length : 0,
         ...(secretRefCount !== null ? { secretRefs: secretRefCount } : {}),
+        ...(secretRefsError !== null ? { secretRefsError } : {}),
       },
     },
     findings: filtered.map((finding) => describeFinding(finding, args.includeParameters === true)),
@@ -553,7 +603,7 @@ export async function supportBundleSummary(args: AgentHarnessSecurityArgs, optio
         ...(route.importCommand ? { importCommand: route.importCommand } : {}),
         workspaceActionIds: route.workspaceActionIds,
         parameters: {
-          bundlePath: 'Workspace-relative path for support_bundle inspection.',
+          bundlePath: 'Path inside the workspace for support_bundle inspection; paths outside it are refused.',
           confirm: 'Required for export/import routes through run_workspace_action or run_command.',
         },
       } : {
@@ -568,10 +618,35 @@ export async function supportBundleSummary(args: AgentHarnessSecurityArgs, optio
   };
 }
 
-function resolveBundlePath(context: CommandContext, args: AgentHarnessSecurityArgs): string {
-  const raw = readString(args.bundlePath) || readString(args.target) || readString(args.query);
-  if (!raw) return '';
-  return context.workspace.shellPaths?.resolveWorkspacePath(raw) ?? raw;
+const SUPPORT_BUNDLE_MAX_BYTES = 8 * 1024 * 1024;
+
+type BundlePathResolution =
+  | { readonly status: 'ok'; readonly path: string }
+  | { readonly status: 'refused'; readonly usage: string };
+
+function resolveBundlePath(context: CommandContext, args: AgentHarnessSecurityArgs): BundlePathResolution {
+  const raw = readString(args.bundlePath) || readString(args.target);
+  if (!raw) {
+    return {
+      status: 'refused',
+      usage: 'support_bundle requires bundlePath or target holding a workspace-relative bundle path. Use mode:"support_bundles" to inspect bundle routes.',
+    };
+  }
+  const shellPaths = context.workspace.shellPaths;
+  const outside = `Bundle path ${previewHarnessText(raw, 120)} is outside the workspace. support_bundle only reads files inside the workspace; export the bundle into the workspace (for example with the bundle export route from mode:"support_bundles") and pass that path.`;
+  if (!shellPaths || !shellPaths.isWithinWorkingDirectory(raw)) return { status: 'refused', usage: outside };
+  const path = shellPaths.resolveWorkspacePath(raw);
+  try {
+    // A symlink inside the workspace must not lead to a file outside it.
+    const root = realpathSync(shellPaths.workingDirectory);
+    if (existsSync(path)) {
+      const real = realpathSync(path);
+      if (real !== root && !real.startsWith(root.endsWith('/') ? root : `${root}/`)) return { status: 'refused', usage: outside };
+    }
+  } catch {
+    return { status: 'refused', usage: outside };
+  }
+  return { status: 'ok', path };
 }
 
 function summarizeBundleType(bundle: Record<string, unknown>): string {
@@ -626,13 +701,9 @@ function summarizeSupportBundle(path: string, bundle: Record<string, unknown>): 
 }
 
 export function describeHarnessSupportBundle(context: CommandContext, args: AgentHarnessSecurityArgs): SupportBundleResolution {
-  const path = resolveBundlePath(context, args);
-  if (!path) {
-    return {
-      status: 'missing_lookup',
-      usage: 'support_bundle requires bundlePath, target, or query containing a workspace-relative bundle path. Use mode:"support_bundles" to inspect bundle routes.',
-    };
-  }
+  const resolution = resolveBundlePath(context, args);
+  if (resolution.status === 'refused') return { status: 'missing_lookup', usage: resolution.usage };
+  const path = resolution.path;
   if (!existsSync(path)) {
     return {
       status: 'missing_lookup',
@@ -641,17 +712,32 @@ export function describeHarnessSupportBundle(context: CommandContext, args: Agen
   }
   let parsed: unknown;
   try {
+    const stats = statSync(path);
+    // A FIFO or device reports size 0 and would block the synchronous read.
+    if (!stats.isFile()) {
+      return {
+        status: 'missing_lookup',
+        usage: `${path} is not a regular file and was not read. Pass the path of an exported support bundle JSON file.`,
+      };
+    }
+    if (stats.size > SUPPORT_BUNDLE_MAX_BYTES) {
+      return {
+        status: 'missing_lookup',
+        usage: `Bundle file ${path} is larger than ${SUPPORT_BUNDLE_MAX_BYTES / (1024 * 1024)} MiB and was not read. Inspect it with the slash-command route from mode:"support_bundles".`,
+      };
+    }
     parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-  } catch (error) {
+  } catch {
+    // The parser message quotes the start of the file, so it is not repeated.
     return {
       status: 'missing_lookup',
-      usage: `Invalid bundle JSON at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      usage: `${path} is not a valid support bundle: it is not parseable JSON.`,
     };
   }
   if (!isRecord(parsed)) {
     return {
       status: 'missing_lookup',
-      usage: `Invalid bundle JSON at ${path}: expected a JSON object.`,
+      usage: `${path} is not a valid support bundle: expected a JSON object.`,
     };
   }
   return {

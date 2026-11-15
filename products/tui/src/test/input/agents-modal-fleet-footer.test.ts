@@ -124,7 +124,9 @@ describe('Agents modal cost header from the public registry', () => {
 describe('Agents modal compact header preserves the qualified amount', () => {
   test.each([80, 100])('running, waiting and session-cost facts keep known fleet visible at %s columns', width => {
     const f = fixture({ agents: [agent('priced', { model: 'known', usage }), agent('missing-1'), agent('missing-2')],
-      hosted: [{ ...hosted(), state: 'awaiting-approval' }], prices: { known: 0.931 }, sessionCost: () => 1.25 });
+      hosted: [{ ...hosted(), state: 'prompting' }],
+      contracts: [contractFixture({ status: 'awaiting-owner', escalations: [{ id: 'question-1', at: 1, scope: 'deliverable', targetId: 'contract-1', reason: 'unsettled', question: 'Apply?', unmetCriterionIds: [] }] })],
+      prices: { known: 0.931 }, sessionCost: () => 1.25 });
     const output = f.rendered(width, 30);
     expect(output).toContain('4 running');
     expect(output).toContain('1 waiting on you');

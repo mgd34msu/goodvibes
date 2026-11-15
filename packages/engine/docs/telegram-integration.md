@@ -287,15 +287,34 @@ config file actually gets read" above), the daemon never saw it either.
 
 **`409 Conflict: can't use getUpdates method while webhook is active`.**
 A webhook is registered for this bot, so polling cannot run. The daemon clears it
-automatically and retries. If it cannot clear it after several attempts it stops
-with a message saying so rather than retrying forever. That usually means a
+automatically and retries. If it cannot clear it after several attempts, the
+channel status turns `degraded` with a reason that says so, and polling keeps
+retrying so it resumes by itself once the webhook is gone. That usually means a
 second process (another daemon, or an old deployment) is re-registering the
 webhook against the same bot token. One bot token supports exactly one ingress.
+
+**Status says `degraded` while polling is running.**
+Polling is alive but nothing is arriving: the last three polls failed (network,
+Telegram errors, or another process polling the same token), or polling is
+blocked by a conflict. The reason names which. One poll that succeeds returns
+the status to `healthy`. The ingress status also carries a `kind` that says what
+it is doing about receiving: `receiving`, `blocked`, `retrying`, `stopped` (stopped
+on this node, on purpose) or `inactive` (cannot receive; the reason says what to
+fix).
+
+**Webhook registration failed.**
+A network failure, a Telegram server error or a rate limit is retried with a
+growing delay, up to six attempts, and the status says it is retrying. A
+rejected token or any other refusal is not retried; fix the setting it names
+and restart the Telegram surface.
 
 **`401 Unauthorized`.**
 The token is wrong, revoked, or has stray whitespace. The daemon stops polling
 immediately instead of retrying, because retrying cannot fix it. Get a fresh
-token from BotFather with `/token`.
+token from BotFather with `/token`. Saving the corrected token, in settings or
+in the secret store, restarts ingress; no daemon restart is needed. When the new
+token belongs to a different bot, the daemon looks up that bot's username and
+replaces the old one in `surfaces.telegram.botUsername`.
 
 **The bot ignores me in a group.**
 Either address it explicitly (`/goodvibes …` or `@yourbot …`), or turn off

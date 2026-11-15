@@ -237,7 +237,7 @@ export async function startDaemonFixture(options: DaemonFixtureOptions): Promise
         return fetch(`${baseUrl}${path}`, init);
       },
       invoke<T>(methodId: string, body: Record<string, unknown> = {}): Promise<T> {
-        return services.gatewayMethods.invoke(methodId, { methodId, body } as never) as Promise<T>;
+        return services.gatewayMethods.invoke(methodId, { body, context: {} }) as Promise<T>;
       },
       stop,
     };

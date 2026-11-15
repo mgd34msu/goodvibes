@@ -102,20 +102,42 @@ credential**: whoever holds one can reach the daemon through the relay.
 - **WebAuthn step-up on mutating relay calls.** Reaching the daemon off-LAN is
   higher-risk than a call on the trusted LAN, so an operator can require that
   *state-changing* operator calls arriving via relay carry a recent WebAuthn
-  (passkey) step-up assertion (`relay.requireStepUpForMutations`). Which methods
-  are mutating comes straight from the operator catalog (read-only methods carry
-  `read:<domain>` scope + a GET binding; mutating ones carry `write:<domain>` +
-  POST/PUT/PATCH/DELETE). The ceremony is now **real and bundled** (no external
+  (passkey) step-up assertion (`relay.requireStepUpForMutations`). The gate
+  judges the HTTP verb of the tunneled request: every request other than GET,
+  HEAD and OPTIONS counts as mutating, whatever scope its method carries, so a
+  read-scope method that is bound to POST also needs the assertion over the
+  relay. The setting is read on every request, so turning it on or off applies
+  to the next relayed call without a restart. The ceremony is now **real and bundled** (no external
   WebAuthn library):
   - **Register** a passkey with the admin/local-only `stepup.credentials.register`
     verb: it stores the credential (`credentialId`, COSE public key, starting
     signature counter) in the daemon's secret store and records the deployment
     policy (relying-party id, allowed origins, user-verification requirement).
+    `stepup.credentials.list` (`GET /api/stepup/credentials`) shows the
+    registered passkeys without key material, and `stepup.credentials.remove`
+    (`DELETE /api/stepup/credentials/<credentialId>`, admin only, answers 404
+    for an unknown id) removes one, for a lost device.
   - **Mint** a short-lived, single-use challenge with `stepup.challenge.mint`
-    (bound to the calling session/rendezvous; freshness window `ttlMs`, clamped
-    5s–300s, default 120s). This one verb is exempt from the gate. It is the
-    prerequisite for producing an assertion, so requiring one would deadlock.
-    Credential registration is **not** exempt.
+    (`POST /api/stepup/challenge`; freshness window `ttlMs`, clamped 5s–300s,
+    default 120s; at most 256 challenges wait at once, a further mint is
+    refused until one is used or expires). Pass `sessionId`, `rendezvousId`,
+    `method` and/or `path` to bind the challenge: it is then accepted only
+    for a relayed call to that session (`/api/sessions/<id>/...`), through
+    that rendezvous, with that HTTP method and on that path, and a challenge
+    minted without any of them is accepted for any call. This one verb is exempt from the gate. It is the prerequisite for
+    producing an assertion, so requiring one would deadlock. Credential
+    registration (`POST /api/stepup/credentials`) is **not** exempt.
+    One relying-party id and origin policy covers every credential: a
+    registration for a different relying-party id is refused while credentials
+    exist for the first, and further origins for the same relying party are
+    added to the allowed ones.
+  - **Present** the assertion on the mutating relayed request in the
+    `x-goodvibes-stepup-assertion` header: the base64url encoding of the JSON
+    object `{credentialId, authenticatorData, clientDataJSON, signature}`
+    (each field base64url, as `navigator.credentials.get` returns them). A
+    request without a verifiable assertion is answered `401` with
+    `{"error":"step-up-required"}` and a `www-authenticate: WebAuthn` header;
+    mint a new challenge and try again.
   - **Verify.** The daemon's `StepUpAssertionVerifier` (node/Web Crypto only)
     checks, in order:
     1. `clientDataJSON` type is `webauthn.get`, its challenge is a
@@ -169,14 +191,28 @@ All three must agree before the daemon opens an outbound registration; with no U
 configured, or with either gate switched off, the relay path is byte-for-byte inert
 and the daemon stays LAN-only.
 
+The registration itself is opened when the daemon starts, so enabling relay
+access, or changing `relay.url` or `relay.rendezvousId`, takes effect at the next
+daemon start. Turning `relay.enabled` or the `relay-connect` feature off applies
+at once to traffic: a request that arrives over an already-open registration is
+answered `503` (`relay-disabled`) until the daemon is restarted.
+
 Run your own relay with the bundled server:
 
 ```
-GOODVIBES_RELAY_PORT=8787 bun run --bun @goodvibes-jev/engine/daemon-api/relay-server-entry
+GOODVIBES_RELAY_PORT=8787 bun node_modules/@goodvibes-jev/engine/daemon-api/dist/relay-server-entry.js
 ```
 
+`GOODVIBES_RELAY_PORT` sets the port (default 8787). `GOODVIBES_RELAY_HOST` sets
+the interface to bind; leave it unset to listen on all interfaces, or set it to
+`127.0.0.1` when a reverse proxy on the same machine terminates TLS. The relay
+limits handshake attempts per client address, so behind a proxy all clients
+share the proxy's allowance.
+
 Put it behind TLS (`wss://`) at the edge, point `relay.url` at it, pair a surface
-with the daemon's QR, and you have reachability that no operator, not even you,
+with the daemon's QR (`relay.pairing.mint`, an admin verb that returns nothing
+until the daemon has registered; `relay.reachability.get` reports the
+registration status), and you have reachability that no operator, not even you,
 running the relay, can read.
 
 ## Live event streaming over the relay

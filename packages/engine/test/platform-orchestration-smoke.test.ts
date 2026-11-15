@@ -1,7 +1,5 @@
 /**
- * Coverage-gap smoke test, platform/runtime/orchestration
- * Verifies that the spawn-policy module loads and exports expected symbols.
- * Closes coverage gap: platform/runtime/orchestration
+ * Spawn policy decisions: which cap refuses a spawn and what it reports.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -21,7 +19,8 @@ describe('platform/runtime/orchestration: spawn-policy smoke', () => {
       overrides: { recursionEnabled: false },
     });
     expect(result.allowed).toBe(false);
-    expect(typeof result.reason).toBe('string');
+    expect(result.reason).toContain('orchestration.recursionEnabled=false');
+    expect(result.boundCap).toEqual({ key: 'orchestration.recursionEnabled', value: false });
   });
 
   test('evaluateOrchestrationSpawn allows manual-batch mode regardless of recursion flag', () => {
@@ -52,5 +51,7 @@ describe('platform/runtime/orchestration: spawn-policy smoke', () => {
     });
     expect(result.allowed).toBe(false);
     expect(result.availableSlots).toBe(0);
+    expect(result.boundCap).toEqual({ key: 'fleet.maxSize', value: 5 });
+    expect(result.reason).toContain('5/5');
   });
 });

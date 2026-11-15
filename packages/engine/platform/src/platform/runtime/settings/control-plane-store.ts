@@ -8,6 +8,8 @@ import type { JsonValue } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { settingsRisk, type SettingsRisk } from './batteries/settings-risk.js';
 import { decisionOrClassic } from '../decision-policy.js';
+import { ConfigError } from '../../types/errors.js';
+import { withSyncFileLock } from '../../config/sync-file-lock.js';
 import { defaultStore, getSettingsControlPath, migrateStore } from './host-setting-policy-read.js';
 export { defaultStore } from './host-setting-policy-read.js';
 
@@ -70,6 +72,8 @@ export interface StagedManagedBundle {
   readonly changeCount: number;
   readonly risk: 'low' | 'medium' | 'high' | 'unassessed';
   readonly changes: readonly ManagedBundleChange[];
+  /** Bundle keys that are not settings this build manages (misspelled, removed, host-owned); they were not staged. */
+  readonly ignoredKeys?: readonly string[] | undefined;
 }
 
 export interface ManagedRollbackRecord {
@@ -77,8 +81,14 @@ export interface ManagedRollbackRecord {
   readonly profileName: string;
   readonly path: string;
   readonly appliedAt: number;
+  /** Keys whose live value the apply changed; rollback writes `previousValues` back for these. */
   readonly restoredKeys: readonly ConfigKey[];
   readonly previousValues: Readonly<Partial<Record<ConfigKey, unknown>>>;
+  /** Every key the apply locked, changed or not; rollback releases these. Absent in records written before it existed (then `restoredKeys`). */
+  readonly appliedKeys?: readonly ConfigKey[] | undefined;
+  /** Managed layers and locks the apply replaced, put back by rollback. */
+  readonly replacedLayers?: ReadonlyArray<SettingsLayerRecord> | undefined;
+  readonly replacedLocks?: ReadonlyArray<ManagedSettingLock> | undefined;
 }
 
 export interface SettingsControlPlaneStore {
@@ -147,18 +157,46 @@ export function getConfigControlPlaneDir(configManager: ConfigManager): string {
   return configManager.getControlPlaneConfigDir();
 }
 
+function readStoreFile(configDir: string): SettingsControlPlaneStore {
+  return (
+    readJsonFileOrQuarantine<SettingsControlPlaneStore>(getSettingsControlPath(configDir), {
+      label: 'runtime/settings-control-plane',
+      recovery: 'The settings control-plane history starts empty: recorded events and failures are gone, and every managed lock is released until the control plane reapplies it.',
+      validate: (parsed) => migrateStore(parsed),
+    }) ?? defaultStore()
+  );
+}
+
+/** For read-only views: a store that cannot be read shows as empty. Never use it ahead of a write. */
 export function readStore(configDir: string): SettingsControlPlaneStore {
   try {
-    return (
-      readJsonFileOrQuarantine<SettingsControlPlaneStore>(getSettingsControlPath(configDir), {
-        label: 'runtime/settings-control-plane',
-        recovery: 'The settings control-plane history starts empty: recorded events and failures are gone, and every managed lock is released until the control plane reapplies it.',
-        validate: (parsed) => migrateStore(parsed),
-      }) ?? defaultStore()
-    );
+    return readStoreFile(configDir);
   } catch {
     return defaultStore();
   }
+}
+
+/**
+ * For read-modify-write. A missing file, or one that was corrupt and has been
+ * quarantined, is an empty store. Any other read failure (permissions, the file
+ * replaced mid-read) throws: writing back an empty store would erase every
+ * managed lock in the real file.
+ */
+export function readStoreForWrite(configDir: string): SettingsControlPlaneStore {
+  try {
+    return readStoreFile(configDir);
+  } catch (error) {
+    throw new ConfigError(`The settings control-plane file ${getSettingsControlPath(configDir)} could not be read (${error instanceof Error ? error.message : String(error)}). Managed locks are not changed; fix the file's permissions or remove it, then retry.`);
+  }
+}
+
+/**
+ * Hold the cross-process lock on settings-sync.json across a synchronous
+ * read-modify-write. The daemon and the terminal products share this file; without
+ * it each reads the old store and the later write drops the other's lock or event.
+ */
+export function withStoreLock<T>(configDir: string, operation: () => T): T {
+  return withSyncFileLock(getSettingsControlPath(configDir), operation);
 }
 
 export function writeStore(store: SettingsControlPlaneStore, configDir: string): void {

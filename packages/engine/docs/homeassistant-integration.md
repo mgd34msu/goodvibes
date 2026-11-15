@@ -96,14 +96,14 @@ config flow setup. The most useful endpoints are:
 | `POST /api/homeassistant/home-graph/facts/review` | Accept, reject, resolve, edit, or forget a graph issue/source/node. |
 | `GET /api/homeassistant/home-graph/refinement/tasks` | List durable Home Graph refinement tasks and traces. |
 | `GET /api/homeassistant/home-graph/refinement/tasks/{id}` | Inspect one refinement task. |
-| `POST /api/homeassistant/home-graph/refinement/run` | Run source-backed gap refinement for the HA knowledge space. Accepts `limit`, `maxRunMs`, `gapIds`, `sourceIds`, and `force`; broad limits are capped by the platform and reported in the result. |
-| `POST /api/homeassistant/home-graph/refinement/tasks/{id}/cancel` | Cancel a queued or active refinement task. |
+| `POST /api/homeassistant/home-graph/refinement/run` | Run source-backed gap refinement for the HA knowledge space. Accepts `limit`, `maxRunMs`, `gapIds`, `sourceIds`, and `force`; with no `limit` every candidate gap is processed, so pass `limit` (1 to 500) and `maxRunMs` to bound a foreground call; the result reports what was selected and processed. |
+| `POST /api/homeassistant/home-graph/refinement/tasks/{id}/cancel` | Cancel an open refinement task; a closed or suppressed task is refused. |
 | `GET /api/homeassistant/home-graph/sources` | Browse source inventory and provenance for the HA space. |
 | `GET /api/homeassistant/home-graph/browse` | Browse namespace-filtered nodes, edges, sources, and issues. |
 | `GET`/`POST /api/homeassistant/home-graph/map` | Return a visual node/edge map as JSON layout data plus SVG, or SVG directly with `format=svg`. |
 | `POST /api/homeassistant/home-graph/export` | Export the HA knowledge space. |
 | `POST /api/homeassistant/home-graph/import` | Import a HA knowledge space export. |
-| `POST /api/homeassistant/home-graph/reset` | Admin-only reset for one HA knowledge space. Pass `dryRun: true` to preview delete counts without changing storage. Export first if the current graph may be needed for diagnosis. Reset clears graph rows and deletes artifacts for the selected HA space by default; pass `preserveArtifacts: true` only for a records-only reset. |
+| `POST /api/homeassistant/home-graph/reset` | Admin-only reset for one HA knowledge space; `installationId` or `knowledgeSpaceId` is required unless `dryRun` is true. Pass `dryRun: true` to preview delete counts without changing storage. Export first if the current graph may be needed for diagnosis. Reset clears graph rows and deletes artifacts for the selected HA space by default; pass `preserveArtifacts: true` only for a records-only reset. |
 
 All daemon API calls require normal daemon authentication. The inbound webhook
 below additionally requires the Home Assistant webhook secret because webhook
@@ -282,6 +282,12 @@ If a source matches before typed facts have been extracted, the platform still
 returns synthesized prose that describes the currently indexed evidence and
 the remaining gap instead of dumping raw snippet bullets.
 
+Answering can also repair stale extractions, regenerate device pages and queue
+enrichment, which are writes. A caller without the admin role gets the answer
+with those writes switched off (`readOnly`); an admin's `ask` behaves as above.
+`POST /api/homeassistant/home-graph/export` returns the whole space and needs
+the admin role.
+
 #### Gap repair and self-improvement
 
 When a concrete Home Assistant object is identified but the current evidence is
@@ -398,7 +404,7 @@ tasks, rebuild it through platform routes instead of editing the SQLite database
 First call `POST /api/homeassistant/home-graph/export` and save the JSON for
 diagnosis. Then call the admin-only
 `POST /api/homeassistant/home-graph/reset` route with `installationId` or
-`knowledgeSpaceId`. Use `dryRun: true` first to get the exact delete counts
+`knowledgeSpaceId` (required; a reset never guesses its target, only a `dryRun` may omit it). Only `homeassistant:` spaces are accepted by any Home Graph route; any other `knowledgeSpaceId` is refused. Use `dryRun: true` first to get the exact delete counts
 without mutating the graph; the response includes `dryRun: true` and the same
 `deleted` summary shape as the real reset, plus artifact candidate counts.
 
@@ -558,20 +564,19 @@ refinement progress from reindex duration or issue totals.
 | --- | --- |
 | `empty` | The space has no sources and no nodes yet |
 | `repairing` | At least one refinement task is actively running |
-| `needs_review` | No task is running but at least one task waits on human review |
-| `needs_sources` | No tasks are pending but open issues remain, typically missing manuals or sources |
+| `needs_sources` | No refinement task is running but open issues remain, typically missing manuals or sources (see the retired `needs_review` state in `knowledge.md`) |
 | `ready` | Nothing is running, waiting, or open |
 
 The refinement run response includes `candidateGaps`, `processedGaps`,
 `requestedLimit`, `effectiveLimit`, `truncated`, and `budgetExhausted`; Home
-Assistant panels should show those fields when a broad run is capped or when a
+Assistant panels should show those fields when a run is limited or when a
 short foreground budget leaves additional repair work for a later run.
 
 Stale active tasks left behind by an interrupted daemon process are recovered
 as blocked-and-retriable the next time refinement runs for that Home Graph
-space. The foreground cap is currently 24 gaps per run; panels should offer
-repeated or scheduled runs instead of sending one unbounded request for the
-whole house.
+space. There is no default cap on gaps per run: panels should send `limit` and
+`maxRunMs` and offer repeated or scheduled runs, because a request with neither
+processes every gap in the house in one call.
 
 Historical `No semantic gap repairer is configured` tasks are also reopened
 when the daemon starts running with a configured repairer, so the Refine tab
@@ -658,7 +663,8 @@ suppression metadata separately from the generated issue row. Later sync or
 quality refreshes keep the saved issue ID and do not reopen that issue unless
 relevant device or related-entity evidence changes. Reordering related entities,
 refreshing a model, or adding administrative annotations does not erase an
-existing review. Deleting and recreating a related entity with the same relevant
+existing review. The recorded reviewer is the authenticated caller; a
+`reviewer` in the body is kept only as `claimedReviewer`. Deleting and recreating a related entity with the same relevant
 facts preserves the review. For known quality issues, semantic review values
 can also update the underlying node facts:
 
@@ -748,7 +754,7 @@ refinement and maintenance methods cover repair, reindex, reset, and status.
 | `homeassistant.homeGraph.refinement.run` | Run source-backed self-improvement for a space, source list, or specific gaps |
 | `homeassistant.homeGraph.refinement.tasks.list` | Return durable refinement tasks with states, traces, and blocked reasons |
 | `homeassistant.homeGraph.refinement.task.get` | Return one refinement task and its trace |
-| `homeassistant.homeGraph.refinement.task.cancel` | Mark a queued or active refinement task as cancelled |
+| `homeassistant.homeGraph.refinement.task.cancel` | Mark an open refinement task as cancelled (closed or suppressed tasks are refused) |
 | `homeassistant.homeGraph.reindex` | Re-extract stored artifacts with missing or sparse extraction records |
 | `homeassistant.homeGraph.reset` | Clear one Home Graph space after callers export any backup they need |
 | `homeassistant.homeGraph.status` | Return space status including the readiness state described above |
@@ -809,17 +815,47 @@ cancelled, or the wait timeout is reached:
 ```
 
 `message`, `prompt`, `text`, `body`, or `task` can carry the prompt text.
-`providerId`, `modelId`, and `tools` are optional; if omitted, daemon/session
-defaults apply. Home Assistant normally does not expose provider/model
-selection, so the daemon resolves the active/default routing. The isolated chat
-session receives a Home Assistant system prompt and the daemon tool registry,
-including `homeassistant_*` tools when the HA URL and access token are
-configured.
+`providerId` and `modelId` are optional; if omitted, daemon/session defaults
+apply. Choosing a provider or model in the request needs an admin token. Posting,
+streaming and cancelling need the `write:sessions` scope, and the health route
+needs `read:sessions`. Home Assistant normally does not expose provider/model selection, so the
+daemon resolves the active/default routing. The isolated chat session receives
+a Home Assistant system prompt and the full daemon tool registry, including
+`homeassistant_*` tools when the HA URL and access token are configured. A
+`tools` list in the request is refused with `400` and nothing is posted: it
+could not narrow that registry, and a caller must not assume a read-only turn.
+
+Other optional fields: `threadId`, `surfaceId` (or `instanceId`), `areaId` and
+`entityId`, `userId` and `displayName`, `context` (an object passed to the chat
+as Home Assistant context), `wait` (default `true`; `false` returns `202`
+without waiting for the reply), `timeoutMs` (the wait cap), and
+`remoteSessionTtlMs`. The session TTL is clamped to between 1 minute and 24
+hours, so a smaller configured value is raised to 60 seconds.
+
+To ground a turn in the Home Graph, send `grounding: { knowledgeSpaceId,
+installationId }` (or the same two ids at the top level, camelCase or
+snake_case). The turn then consults that knowledge space before answering.
+Grounding applies to this route only; the webhook below never grounds a turn.
 
 `POST /api/homeassistant/conversation` returns the final response directly and
-does not also publish a `goodvibes_message` event by default. Set
-`"publishEvent": true` only when the Home Assistant integration also wants the
-normal event-bus delivery for that same turn.
+never publishes a `goodvibes_message` event for the turn; a `publishEvent` field
+in the body is ignored. An automation that listens for `goodvibes_message` is
+fed by the webhook below, which always publishes the reply.
+
+`messageId` is the correlation key. Repeating a `messageId` for the same
+conversation does not post the utterance again: while the first request is still
+waiting the repeat shares its outcome, and afterwards it is answered from the
+chat transcript (`running` while the turn is still going, `completed` with the
+reply, `cancelled`, or `failed`), with `"duplicate": true`. The daemon keeps this
+correlation in memory, so it is forgotten on restart. Every response also carries
+`chatMessageId`, the companion chat's id for the posted message, which is how a
+`wait: false` caller finds the reply in the companion chat API.
+
+Statuses and HTTP codes: `completed` 200; `running` and `timeout` 202 (the turn
+keeps going, retry with the same `messageId`); `cancelled` 409 (the turn was
+stopped by a cancel); `failed` 500; `rejected` carries the status of the refusal
+(400 for a bad request, 429 for a rate limit, 409 for a closed or busy session),
+and 503 when the surface is disabled.
 
 The daemon creates Home Assistant conversations as isolated remote-chat
 sessions, not shared TUI sessions. It reuses the isolated chat session for the
@@ -835,9 +871,16 @@ For an SSE transport, use:
 POST /api/homeassistant/conversation/stream
 ```
 
-The response is `text/event-stream` with one `final` or `error` event.
+The response is `text/event-stream`. While the model is writing it sends any
+number of `delta` events, then exactly one terminal `final` or `error` event.
+Each `delta` carries `{ ok, delta, text, turnId, conversationId, messageId }`
+where `delta` is the new fragment and `text` is the cumulative text so far
+(`conversationId` and `messageId` appear when the request supplied them);
+consumers that ignore `delta` still see one terminal frame.
 `final.data.assistant.text` and `final.data.assistant.speechText` carry the
-text Home Assistant should return from a `ConversationEntity`.
+text Home Assistant should return from a `ConversationEntity`. A cancelled turn
+ends with an `error` frame whose `status` is `cancelled`. When the client
+closes the stream, the daemon cancels the turn that was answering it.
 
 To cancel a running turn:
 
@@ -849,7 +892,10 @@ POST /api/homeassistant/conversation/cancel
 ```
 
 The cancel endpoint also accepts a `messageId` while the daemon still has the
-message-to-session correlation in memory.
+message-to-session correlation in memory; cancelling by `messageId` stops only
+that message's turn and succeeds without doing anything when a newer turn now
+holds the session. It only accepts chat sessions that Home Assistant
+conversations created; any other session id is a `404`.
 
 ### Home Assistant to GoodVibes webhook
 
@@ -882,15 +928,16 @@ Canonical prompt body:
   "displayName": "Home Assistant",
   "messageId": "ha-msg-123",
   "providerId": "openai",
-  "modelId": "openai:gpt-5.5",
-  "tools": ["homeassistant_state", "homeassistant_call_service"]
+  "modelId": "openai:gpt-5.5"
 }
 ```
 
-`message`, `prompt`, `text`, or `task` can carry the prompt text. `providerId`,
-`modelId`, and `tools` are optional; if omitted, daemon/session defaults apply.
-When supplied, `modelId` should be the provider-qualified registry key from
-`GET /api/models`.
+`message`, `prompt`, `text`, or `task` can carry the prompt text. `providerId`
+and `modelId` are optional; if omitted, daemon/session defaults apply. When
+supplied, `modelId` should be the provider-qualified registry key from
+`GET /api/models`. The webhook refuses a request that carries a `tools` list
+with `400`, because the list would not restrict the conversation (see the
+conversation route above).
 The adapter creates or updates a route binding with
 `surfaceKind: "homeassistant"`, posts the prompt through an isolated
 remote-chat session, and publishes the final reply through the Home Assistant
@@ -899,15 +946,28 @@ session.
 
 For Assist conversation agents, use `/api/homeassistant/conversation` so Home
 Assistant can return the assistant reply directly in the conversation call. The
-webhook returns an acknowledgement and delivers the final response through the
-configured `goodvibes_message` event.
+webhook holds the request open until the turn ends (at most 120 seconds; a
+per-request `timeoutMs` is ignored) and then answers with `delivered`, `error`,
+`sessionId` and `assistantMessageId`, not the reply text. The reply text is
+delivered through the configured `goodvibes_message` event. A Home Assistant
+service call that waits for the webhook can therefore time out on Home
+Assistant's side while the turn is still running.
 
-Control commands are supported through the same webhook:
+Control commands are supported through the same webhook. They address an
+automation run, an agent, or a shared-broker session by its id, and only an id the
+daemon already knows is read as a command; `cancel` stops runs and agents, and
+`status` also reports shared sessions:
 
 ```text
-status <session-id>
-cancel <session-id>
+status <run-id | agent-id | session-id>
+cancel <run-id | agent-id>
+retry <run-id | agent-id>
 ```
+
+The `sessionId` returned for a Home Assistant conversation is a chat session, not
+one of those ids, so `cancel <that id>` is sent to the model as an ordinary message.
+To stop a running conversation turn, call `POST /api/homeassistant/conversation/cancel`
+with that `sessionId`.
 
 ### GoodVibes to Home Assistant
 
@@ -939,10 +999,12 @@ The event payload is JSON and includes:
   "speechText": "Assistant reply",
   "metadata": {
     "threadId": "thread-1",
-    "channelId": "area.kitchen",
+    "channelId": "kitchen",
     "inboundMessageId": "ha-msg-123",
     "conversationId": "home",
-    "attachments": []
+    "userId": "ha-user-id",
+    "displayName": "Home Assistant",
+    "homeAssistantContext": {}
   }
 }
 ```

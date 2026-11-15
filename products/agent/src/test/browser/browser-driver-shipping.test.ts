@@ -29,10 +29,11 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
+import { createRequire } from 'node:module';
 import { gzipSync } from 'node:zlib';
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { extractTarGzTree, readTarGzEntries } from '../../runtime/tar-archive.ts';
+import { dirname, join } from 'node:path';
+import { extractTarGzTree } from '../../runtime/tar-archive.ts';
 import { DRIVER_REQUIRED_FILES, findDriverDirectory } from '@goodvibes-jev/engine/platform/platform/browser';
 import { runCapabilityProbe, emptyProbeContext } from '../../capabilities/capability-probe-runner.ts';
 import { browserControlDeclaration } from '../../capabilities/builtin-capabilities.ts';
@@ -102,12 +103,16 @@ function driverArchive(): Buffer {
 }
 
 describe('the driver archive this release ships', () => {
-  test('carries every entry the update path refuses to install without', () => {
-    const archive = driverArchive();
-    const names = [...readTarGzEntries(archive)].map((entry) => entry.path);
+  test('the driver the release script packages holds every entry the update path requires', () => {
+    // The release script copies the resolved playwright-core directory whole, so
+    // the entries the update path refuses to install without have to exist there.
+    const engineRequire = createRequire(join(import.meta.dir, '..', '..', '..', '..', '..', 'packages', 'engine', 'package.json'));
+    const driverDirectory = dirname(engineRequire.resolve('playwright-core/package.json'));
     for (const required of BROWSER_DRIVER_REQUIRED_ENTRIES) {
-      expect(names, `${required} must be in the published archive`).toContain(required);
+      const inside = required.slice(BROWSER_DRIVER_DIR_NAME.length + 1);
+      expect(existsSync(join(driverDirectory, inside)), `${required} must exist in the packaged driver`).toBe(true);
     }
+    expect(findDriverDirectory(undefined, [driverDirectory])).toBe(driverDirectory);
   });
 
   test('the required entries are exactly the files the platform resolver demands', () => {
@@ -132,7 +137,8 @@ describe('the driver archive this release ships', () => {
   test('an archive entry that would escape the destination is refused, not sanitised', () => {
     const destination = scratch('gv-escape');
     const hostile = buildTarGz([{ path: '../escaped.js', data: 'nope' }]);
-    expect(() => extractTarGzTree(hostile, destination, { stripComponents: 0 })).toThrow();
+    expect(() => extractTarGzTree(hostile, destination, { stripComponents: 0 })).toThrow('archive entry ../escaped.js escapes the destination directory');
+    expect(existsSync(join(destination, '..', 'escaped.js'))).toBe(false);
   });
 });
 

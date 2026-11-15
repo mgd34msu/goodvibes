@@ -44,12 +44,19 @@ type MessageOptions = {
 };
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
+/** Sender id of the operator's own steering messages. */
+const OPERATOR_SENDER_ID = 'operator';
+/** Identities the bus itself provides; never removed with an agent. */
+const BUILT_IN_IDENTITIES: ReadonlySet<string> = new Set(['orchestrator', OPERATOR_SENDER_ID]);
+
+const UNREGISTERED_SENDER_REASON = 'the sender is not a registered agent; register it before it sends';
 
 export class AgentMessageBus {
   private messages = new Map<string, AgentMessage[]>();
   private subscriptions = new Map<string, Set<MessageCallback>>();
   private identities = new Map<string, AgentCommunicationMetadata>([
     ['orchestrator', { agentId: 'orchestrator', role: 'orchestrator' }],
+    [OPERATOR_SENDER_ID, { agentId: OPERATOR_SENDER_ID, role: 'orchestrator' }],
   ]);
   private runtimeBus: RuntimeEventBus | null = null;
 
@@ -74,6 +81,28 @@ export class AgentMessageBus {
     });
   }
 
+  /**
+   * Forget a finished agent: its identity (so the map does not grow with every
+   * spawn) and the messages still waiting for it. Subscriptions are released by
+   * the unsubscribe function `subscribe` returned.
+   */
+  unregisterAgent(agentId: string): void {
+    if (BUILT_IN_IDENTITIES.has(agentId)) return;
+    this.identities.delete(agentId);
+    this.messages.delete(agentId);
+  }
+
+  /**
+   * A broadcast stamped with a contract (or, failing that, a cohort) reaches only
+   * members of it; an unscoped one, from a coordinator outside any contract, reaches everyone.
+   */
+  private receivesBroadcast(message: AgentMessage, recipientId: string): boolean {
+    const recipient = this.identities.get(recipientId);
+    if (message.contractId !== undefined) return recipient?.contractId === message.contractId;
+    if (message.cohort !== undefined) return recipient?.cohort === message.cohort;
+    return true;
+  }
+
   private resolveOptions(ttlOrOptions: number | MessageOptions | undefined): Required<Pick<MessageOptions, 'ttlMs' | 'kind' | 'scope'>> & Omit<MessageOptions, 'ttlMs' | 'kind' | 'scope'> {
     if (typeof ttlOrOptions === 'number') {
       return { ttlMs: ttlOrOptions, kind: 'directive', scope: 'direct' };
@@ -95,7 +124,11 @@ export class AgentMessageBus {
     const fromMeta = this.identities.get(fromId);
     const toMeta = this.identities.get(toId);
 
-    if (fromMeta && toMeta) {
+    if (!fromMeta) {
+      this.emitBlocked(crypto.randomUUID(), fromId, toId, content, options, UNREGISTERED_SENDER_REASON, undefined, toMeta);
+      return false;
+    }
+    if (toMeta) {
       const decision = evaluateCommunicationRoute({
         from: fromMeta,
         to: toMeta,
@@ -126,7 +159,6 @@ export class AgentMessageBus {
     this.store(toId, message);
     this.deliver(toId, message);
     this.emitSent(message);
-    this.emitDelivered(message);
     return true;
   }
 
@@ -134,18 +166,20 @@ export class AgentMessageBus {
     this.cleanup();
     const options = this.resolveOptions(ttlOrOptions);
     const fromMeta = this.identities.get(fromId);
-    if (fromMeta) {
-      const decision = evaluateCommunicationRoute({
-        from: fromMeta,
-        to: { agentId: '*', role: 'general', ...(fromMeta.cohort !== undefined ? { cohort: fromMeta.cohort } : {}) },
-        kind: options.kind!,
-        scope: 'broadcast',
-      });
-      if (!decision.allowed) {
-        const blockedId = crypto.randomUUID();
-        this.emitBlocked(blockedId, fromId, '*', content, { ...options, scope: 'broadcast' }, decision.reason ?? 'broadcast blocked by policy', fromMeta);
-        return false;
-      }
+    if (!fromMeta) {
+      this.emitBlocked(crypto.randomUUID(), fromId, '*', content, { ...options, scope: 'broadcast' }, UNREGISTERED_SENDER_REASON);
+      return false;
+    }
+    const decision = evaluateCommunicationRoute({
+      from: fromMeta,
+      to: { agentId: '*', role: 'general', ...(fromMeta.cohort !== undefined ? { cohort: fromMeta.cohort } : {}) },
+      kind: options.kind!,
+      scope: 'broadcast',
+    });
+    if (!decision.allowed) {
+      const blockedId = crypto.randomUUID();
+      this.emitBlocked(blockedId, fromId, '*', content, { ...options, scope: 'broadcast' }, decision.reason ?? 'broadcast blocked by policy', fromMeta);
+      return false;
     }
 
     const message: AgentMessage = {
@@ -165,7 +199,8 @@ export class AgentMessageBus {
 
     this.store('*', message);
 
-    for (const callbacks of this.subscriptions.values()) {
+    for (const [recipientId, callbacks] of this.subscriptions) {
+      if (!this.receivesBroadcast(message, recipientId)) continue;
       for (const callback of callbacks) {
         try {
           callback(message);
@@ -177,7 +212,6 @@ export class AgentMessageBus {
       }
     }
     this.emitSent(message);
-    this.emitDelivered(message);
     return true;
   }
 
@@ -204,7 +238,7 @@ export class AgentMessageBus {
       (message) => now - message.timestamp < message.ttlMs,
     );
     const broadcasts = (this.messages.get('*') ?? []).filter(
-      (message) => now - message.timestamp < message.ttlMs,
+      (message) => now - message.timestamp < message.ttlMs && this.receivesBroadcast(message, agentId),
     );
     return [...direct, ...broadcasts].sort((a, b) => a.timestamp - b.timestamp);
   }
@@ -224,6 +258,15 @@ export class AgentMessageBus {
       ...(message.contractId !== undefined ? { contractId: message.contractId } : {}),
       ...(message.parentAgentId !== undefined ? { parentAgentId: message.parentAgentId } : {}),
     });
+  }
+
+  /**
+   * The recipient took a stored message into a turn. `delivered` is emitted here, not when the
+   * message was queued: a message waiting for a long turn to end has been sent, not delivered.
+   */
+  markDelivered(agentId: string, messageId: string): void {
+    const message = [...(this.messages.get(agentId) ?? []), ...(this.messages.get('*') ?? [])].find((candidate) => candidate.id === messageId);
+    if (message) this.emitDelivered(message);
   }
 
   private emitDelivered(message: AgentMessage): void {

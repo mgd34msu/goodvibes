@@ -296,6 +296,33 @@ describe('OwnerProfileSettings', () => {
     expect(shipping?.textContent).toContain('ship it to my office instead');
   });
 
+  test('each section carries its tier chip and note; only People carries the containment note and no link or copy control', () => {
+    mockDocument = successQuery(LOADED);
+    const { el, unmount } = render();
+    cleanup = unmount;
+
+    const section = (heading: string) => el.querySelector(`[data-testid="profile-section-${heading}"]`);
+    const chipText = (heading: string) => section(heading)?.querySelector('.owner-profile__section-head .gv-chip')?.textContent;
+    expect(chipText('Contact')).toBe('Closed');
+    expect(chipText('Preferences')).toBe('Open');
+    expect(chipText('People')).toBe('Closed');
+    expect(section('Preferences')?.getAttribute('data-tier')).toBe('open');
+    expect(section('Contact')?.getAttribute('data-tier')).toBe('closed');
+    expect(section('Preferences')?.querySelector('.owner-profile__note')?.textContent).toContain('Open: this is in the agent');
+    expect(section('Contact')?.querySelector('.owner-profile__note')?.textContent).toContain('Closed: never put in the agent');
+
+    const people = section('People');
+    expect(people?.querySelector('.owner-profile__containment[role="note"]')?.textContent).toContain('facts about other people');
+    expect(people?.getAttribute('data-third-party')).toBe('true');
+    expect(people?.querySelector('a, [data-copy], [aria-label*="Copy" i]')).toBeNull();
+    const peopleButtons = Array.from(people?.querySelectorAll('button') ?? []).map((b) => (b.textContent ?? '').trim());
+    expect(peopleButtons.some((label) => /copy|export|share/i.test(label))).toBe(false);
+
+    for (const other of ['Contact', 'Preferences', 'Commerce']) {
+      expect(section(other)?.querySelector('.owner-profile__containment')).toBeNull();
+    }
+  });
+
   test('an invalid mechanical value is shown as written, with its reason', () => {
     mockDocument = successQuery<ProfileDocument>({
       state: 'loaded',

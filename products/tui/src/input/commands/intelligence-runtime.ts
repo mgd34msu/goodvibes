@@ -46,7 +46,121 @@ function ensureExistingFile(pathArg: string | undefined, ctx: CommandContext): s
   return targetPath;
 }
 
-export function registerIntelligenceRuntimeCommands(registry: CommandRegistry): void {
+type IntelligenceFacade = Pick<
+  CodeIntelligence,
+  'initialize' | 'dispose' | 'getDocumentSymbols' | 'getOutline' | 'hasTreeSitter' | 'getDefinition' | 'getReferences' | 'getHover'
+>;
+
+type IntelligenceState = ReturnType<ReturnType<typeof requireReadModels>['intelligence']['getSnapshot']>;
+
+async function handleIntelligenceQuery(
+  sub: 'symbols' | 'outline' | 'definition' | 'references' | 'hover',
+  args: string[],
+  ctx: CommandContext,
+  intelligence: IntelligenceFacade,
+  state: IntelligenceState,
+): Promise<void> {
+  if (sub === 'symbols' || sub === 'outline') {
+    const targetPath = ensureExistingFile(args[1], ctx);
+    if (!targetPath) return;
+    const content = readFileSync(targetPath, 'utf-8');
+    if (sub === 'symbols') {
+      const symbols = await intelligence.getDocumentSymbols(targetPath, content);
+      const entries = symbols.slice(0, 12).map((symbol) => ('selectionRange' in symbol ? formatDocumentSymbol(symbol) : formatTreeSitterSymbol(symbol)));
+      ctx.print([
+        `Intelligence Symbols: ${targetPath}`,
+        `  source: ${state.symbolSearchStatus === 'ready' ? 'LSP/tree-sitter' : 'best-effort tree-sitter/LSP fallback'}`,
+        `  status: ${state.symbolSearchStatus}`,
+        `  results: ${symbols.length}`,
+        ...(entries.length > 0 ? entries : ['  No symbols available for this file.']),
+        '  next: /health intelligence',
+      ].join('\n'));
+      return;
+    }
+
+    const outline = await intelligence.getOutline(targetPath, content);
+    ctx.print([
+      `Intelligence Outline: ${targetPath}`,
+      `  source: tree-sitter outline extraction`,
+      `  language ready: ${intelligence.hasTreeSitter(targetPath) ? 'yes' : 'no'}`,
+      `  results: ${outline.length}`,
+      ...(outline.slice(0, 12).map((entry) => `  ${entry.signature || entry.name}  line ${entry.line}`)),
+      ...(outline.length === 0 ? ['  No outline entries available for this file.'] : []),
+      '  next: /intelligence symbols ' + targetPath,
+    ].join('\n'));
+    return;
+  }
+
+  if (sub === 'definition' || sub === 'references' || sub === 'hover') {
+    const targetPath = ensureExistingFile(args[1], ctx);
+    if (!targetPath) return;
+    const position = parsePosition(args[2], args[3]);
+    if (!position) {
+      ctx.print(`Intelligence ${sub[0]!.toUpperCase()}${sub.slice(1)}\n  Usage: /intelligence ${sub} <file> <line> <column>`);
+      return;
+    }
+
+    if (sub === 'definition') {
+      const definition = await intelligence.getDefinition(targetPath, position.line, position.column);
+      ctx.print([
+        `Intelligence Definition: ${targetPath}:${position.line + 1}:${position.column + 1}`,
+        `  status: ${state.hoverStatus === 'ready' || state.symbolSearchStatus === 'ready' ? 'available' : 'best-effort'}`,
+        ...(definition
+          ? [
+              `  target: ${definition.uri}`,
+              `  line: ${definition.range.start.line + 1}`,
+              `  column: ${definition.range.start.character + 1}`,
+              '  next: open the target file or use /intelligence references on the same symbol',
+            ]
+          : ['  No definition was returned for that position (the language server may be missing or not ready for this file type).', '  next: /health intelligence']),
+      ].join('\n'));
+      return;
+    }
+
+    if (sub === 'references') {
+      const references = await intelligence.getReferences(targetPath, position.line, position.column);
+      ctx.print([
+        `Intelligence References: ${targetPath}:${position.line + 1}:${position.column + 1}`,
+        `  status: ${state.symbolSearchStatus}`,
+        `  results: ${references.length}`,
+        ...(references.slice(0, 12).map((reference) => `  ${reference.uri}  ${reference.range.start.line + 1}:${reference.range.start.character + 1}`)),
+        ...(references.length === 0 ? ['  No references were returned for that position.'] : []),
+        '  next: /intelligence definition ' + `${targetPath} ${position.line + 1} ${position.column + 1}`,
+      ].join('\n'));
+      return;
+    }
+
+    const hover = await intelligence.getHover(targetPath, position.line, position.column);
+    const hoverLines = typeof hover?.contents === 'string'
+      ? hover.contents.split('\n')
+      : Array.isArray(hover?.contents)
+        ? hover.contents.flatMap((entry) => typeof entry === 'string' ? entry : entry.value.split('\n'))
+        : hover?.contents && 'value' in hover.contents
+          ? hover.contents.value.split('\n')
+          : [];
+    ctx.print([
+      `Intelligence Hover: ${targetPath}:${position.line + 1}:${position.column + 1}`,
+      `  status: ${state.hoverStatus}`,
+      ...(hoverLines.length > 0 ? hoverLines.slice(0, 8).map((line) => `  ${line}`) : ['  No hover information was returned for that position.']),
+      '  next: /health intelligence',
+    ].join('\n'));
+    return;
+  }
+}
+
+export interface IntelligenceRuntimeOptions {
+  /** Builds the facade one command call uses. Defaults to a workspace-aware CodeIntelligence. */
+  readonly createIntelligence?: (ctx: CommandContext) => IntelligenceFacade;
+}
+
+function createWorkspaceIntelligence(ctx: CommandContext): IntelligenceFacade {
+  // Without shell paths the facade has no language-server service at all, so
+  // definition, references and hover could never return anything.
+  return new CodeIntelligence({ shellPaths: requireShellPaths(ctx) });
+}
+
+export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, options: IntelligenceRuntimeOptions = {}): void {
+  const createIntelligence = options.createIntelligence ?? createWorkspaceIntelligence;
   registry.register({
     name: 'intelligence',
     aliases: ['intel'],
@@ -66,98 +180,22 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry): 
         return;
       }
 
-      const intelligence = new CodeIntelligence();
       const state = requireReadModels(ctx).intelligence.getSnapshot();
-
-      if (sub === 'symbols' || sub === 'outline') {
-        const targetPath = ensureExistingFile(args[1], ctx);
-        if (!targetPath) return;
-        const content = readFileSync(targetPath, 'utf-8');
-        if (sub === 'symbols') {
-          const symbols = await intelligence.getDocumentSymbols(targetPath, content);
-          const entries = symbols.slice(0, 12).map((symbol) => ('selectionRange' in symbol ? formatDocumentSymbol(symbol) : formatTreeSitterSymbol(symbol)));
-          ctx.print([
-            `Intelligence Symbols: ${targetPath}`,
-            `  source: ${state.symbolSearchStatus === 'ready' ? 'LSP/tree-sitter' : 'best-effort tree-sitter/LSP fallback'}`,
-            `  status: ${state.symbolSearchStatus}`,
-            `  results: ${symbols.length}`,
-            ...(entries.length > 0 ? entries : ['  No symbols available for this file.']),
-            '  next: /health intelligence',
-          ].join('\n'));
-          return;
+      if (sub === 'symbols' || sub === 'outline' || sub === 'definition' || sub === 'references' || sub === 'hover') {
+        const intelligence = createIntelligence(ctx);
+        // Language servers started for this call are shut down with it.
+        try {
+          await intelligence.initialize();
+          await handleIntelligenceQuery(sub, args, ctx, intelligence, state);
+        } finally {
+          await intelligence.dispose();
         }
-
-        const outline = await intelligence.getOutline(targetPath, content);
-        ctx.print([
-          `Intelligence Outline: ${targetPath}`,
-          `  source: tree-sitter outline extraction`,
-          `  language ready: ${intelligence.hasTreeSitter(targetPath) ? 'yes' : 'no'}`,
-          `  results: ${outline.length}`,
-          ...(outline.slice(0, 12).map((entry) => `  ${entry.signature || entry.name}  line ${entry.line}`)),
-          ...(outline.length === 0 ? ['  No outline entries available for this file.'] : []),
-          '  next: /intelligence symbols ' + targetPath,
-        ].join('\n'));
-        return;
-      }
-
-      if (sub === 'definition' || sub === 'references' || sub === 'hover') {
-        const targetPath = ensureExistingFile(args[1], ctx);
-        if (!targetPath) return;
-        const position = parsePosition(args[2], args[3]);
-        if (!position) {
-          ctx.print(`Intelligence ${sub[0]!.toUpperCase()}${sub.slice(1)}\n  Usage: /intelligence ${sub} <file> <line> <column>`);
-          return;
-        }
-
-        if (sub === 'definition') {
-          const definition = await intelligence.getDefinition(targetPath, position.line, position.column);
-          ctx.print([
-            `Intelligence Definition: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-            `  status: ${state.hoverStatus === 'ready' || state.symbolSearchStatus === 'ready' ? 'available' : 'best-effort'}`,
-            ...(definition
-              ? [
-                  `  target: ${definition.uri}`,
-                  `  line: ${definition.range.start.line + 1}`,
-                  `  column: ${definition.range.start.character + 1}`,
-                  '  next: open the target file or use /intelligence references on the same symbol',
-                ]
-              : ['  No definition was returned for that position.', '  next: /health intelligence']),
-          ].join('\n'));
-          return;
-        }
-
-        if (sub === 'references') {
-          const references = await intelligence.getReferences(targetPath, position.line, position.column);
-          ctx.print([
-            `Intelligence References: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-            `  status: ${state.symbolSearchStatus}`,
-            `  results: ${references.length}`,
-            ...(references.slice(0, 12).map((reference) => `  ${reference.uri}  ${reference.range.start.line + 1}:${reference.range.start.character + 1}`)),
-            ...(references.length === 0 ? ['  No references were returned for that position.'] : []),
-            '  next: /intelligence definition ' + `${targetPath} ${position.line + 1} ${position.column + 1}`,
-          ].join('\n'));
-          return;
-        }
-
-        const hover = await intelligence.getHover(targetPath, position.line, position.column);
-        const hoverLines = typeof hover?.contents === 'string'
-          ? hover.contents.split('\n')
-          : Array.isArray(hover?.contents)
-            ? hover.contents.flatMap((entry) => typeof entry === 'string' ? entry : entry.value.split('\n'))
-            : hover?.contents && 'value' in hover.contents
-              ? hover.contents.value.split('\n')
-              : [];
-        ctx.print([
-          `Intelligence Hover: ${targetPath}:${position.line + 1}:${position.column + 1}`,
-          `  status: ${state.hoverStatus}`,
-          ...(hoverLines.length > 0 ? hoverLines.slice(0, 8).map((line) => `  ${line}`) : ['  No hover information was returned for that position.']),
-          '  next: /health intelligence',
-        ].join('\n'));
         return;
       }
 
       if (sub === 'diagnostics') {
-        const file = args[1];
+        // Tracked diagnostics are keyed by absolute path, like every other subcommand's target.
+        const file = args[1] ? resolveTargetPath(args[1], ctx) : undefined;
         const entries = [...state.diagnostics.entries()]
           .map(([filePath, diagnostics]) => ({
             filePath,
@@ -170,7 +208,9 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry): 
           ? entries.find((entry) => entry.filePath === file)
           : entries[0];
         if (!selected) {
-          ctx.print('Intelligence Diagnostics\n  No diagnostics are currently tracked.');
+          ctx.print(file
+            ? `Intelligence Diagnostics\n  No diagnostics are currently tracked for ${file}.`
+            : 'Intelligence Diagnostics\n  No diagnostics are currently tracked.');
           return;
         }
         ctx.print([

@@ -29,13 +29,15 @@
  * a CLIENT graph. It says nothing about what the daemon-grade view actually
  * constructed, which is what this file covers.
  */
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 describe('binding-rollover wiring is reachable on this fork\'s composed graph', () => {
   let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
   let view: ReturnType<typeof services.asDaemonGradeView>;
-  beforeAll(async () => {
+  // The helper closes every owned graph before each test, so the graph is acquired
+  // per test; a describe-level beforeAll would hand each test a disposed graph.
+  beforeEach(async () => {
     services = await getTestRuntimeServices();
     view = services.asDaemonGradeView();
   });

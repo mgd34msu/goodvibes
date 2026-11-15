@@ -72,6 +72,8 @@ export interface FleetSnapshot {
    * not a store. Empty when nothing is waiting on the operator.
    */
   readonly blockedNodeIds: readonly string[];
+  /** Set when the daemon capped its fleet answer: `shown` of `total` daemon rows are here, so the rollups above are partial. */
+  readonly daemonPartial?: { readonly shown: number; readonly total: number };
   readonly capturedAt: number;
 }
 

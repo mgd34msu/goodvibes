@@ -30,13 +30,17 @@ export function getNodeRuntimeBoundaryStatus(
   const processRef = runtime.process;
   const nodeVersion = processRef?.versions?.node;
   const runtimeName = processRef?.release?.name ?? (nodeVersion ? 'node' : 'unknown');
+  // Bun also reports versions.node and release.name 'node', and counts as Node-like on
+  // purpose: the daemon and terminal run on it. What this refuses is a browser, worker,
+  // Expo or React Native global, which has no such process.
+  const nodeLike = typeof nodeVersion === 'string' && nodeVersion.trim().length > 0 && runtimeName === 'node';
   return {
-    // Bun 1.x sets process.versions.node for compat; `release.name === 'node'` disambiguates.
-    nodeLike: typeof nodeVersion === 'string' && nodeVersion.trim().length > 0 && runtimeName === 'node',
+    nodeLike,
     runtimeName,
     ...(nodeVersion ? { nodeVersion } : {}),
     hasProcess: typeof processRef === 'object' && processRef !== null,
-    hasFilesystemAssumption: typeof nodeVersion === 'string' && nodeVersion.trim().length > 0 && runtimeName === 'node',
+    // Every Node-like runtime here has a filesystem; the field is kept separate so a runtime without one can say so.
+    hasFilesystemAssumption: nodeLike,
   };
 }
 

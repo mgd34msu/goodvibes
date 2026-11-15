@@ -28,16 +28,14 @@ import { prepareSystemMessagePresentation } from '@goodvibes-jev/engine/platform
 
 import type { McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
+import { captureCommandPrint, capturedOutputReportsFailure, firstFailureLine } from './workspace-command-output.ts';
 import type { CommandContext } from './command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
 
 export type McpWorkspaceMode = PlatformMcpWorkspaceMode<'reload-confirm'>;
 
 export type McpWorkspaceFormField = PlatformMcpWorkspaceFormField<'confirm'>;
-
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
 
 function serverConfigToForm(server?: McpServerConfig): McpWorkspaceForm {
   return { ...makeForm(server), confirm: '' };
@@ -175,9 +173,11 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       for (const path of server.allowedPaths ?? []) args.push('--path', path);
       for (const host of server.allowedHosts ?? []) args.push('--host', host);
       args.push('--yes');
-      this.mode = 'browse';
-      this.editingServerName = null;
-      await this.dispatchMcpCommand(args, `MCP server ${server.name} add/update`);
+      // The form stays open until the command reports success, so a failed save can be corrected.
+      if (await this.dispatchMcpCommand(args, `MCP server ${server.name} add/update`)) {
+        this.mode = 'browse';
+        this.editingServerName = null;
+      }
     } catch (error) {
       this.lastError = summarizeError(error);
       this.status = `MCP server save failed before dispatch: ${this.lastError}`;
@@ -195,30 +195,43 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     await this.dispatchMcpCommand(['remove', name, '--scope', scope, '--yes'], `MCP server ${name} removal`);
   }
 
-  private async dispatchMcpCommand(args: readonly string[], summary: string): Promise<void> {
+  /** Runs `/mcp` and reports what it did. Returns true only when the command ran and did not report a failure. */
+  private async dispatchMcpCommand(args: readonly string[], summary: string): Promise<boolean> {
     const context = this.context;
     if (!context?.executeCommand) {
       this.status = `${summary} blocked: command dispatch is unavailable in this workspace.`;
       this.lastError = 'Command dispatch is unavailable.';
       context?.renderRequest();
-      return;
+      return false;
     }
     this.status = `${summary} dispatched from MCP workspace.`;
     this.lastError = null;
     context.renderRequest();
+    const executeCommand = context.executeCommand;
+    const outcome = await captureCommandPrint(context, () => executeCommand('mcp', [...args]));
+    // What the command printed still belongs in the transcript.
+    for (const line of outcome.lines) context.print(line);
     try {
-      const handled = await context.executeCommand('mcp', [...args]);
-      if (!handled) {
+      if (!outcome.ok) {
+        this.lastError = summarizeError(outcome.error);
+        this.status = `${summary} failed: ${this.lastError}`;
+        return false;
+      }
+      if (!outcome.value) {
         this.status = `${summary} failed: the command router did not handle /mcp.`;
         this.lastError = 'Command router did not handle /mcp.';
-        context.renderRequest();
-        return;
+        return false;
       }
       this.refreshSnapshot();
+      // /mcp reports most failures by printing and returning, not by throwing.
+      if (capturedOutputReportsFailure(outcome.lines)) {
+        const reported = firstFailureLine(outcome.lines);
+        this.lastError = reported;
+        this.status = `${summary} failed: ${reported}`;
+        return false;
+      }
       this.status = `${summary} completed through MCP workspace.`;
-    } catch (error) {
-      this.lastError = summarizeError(error);
-      this.status = `${summary} failed: ${this.lastError}`;
+      return true;
     } finally {
       context.renderRequest();
     }

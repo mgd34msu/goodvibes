@@ -34,7 +34,7 @@ export async function renderBuiltinChannelEvent(
     ...(request.sessionId ? { sessionId: request.sessionId } : {}),
     status: renderStatus(request),
     includeLinks: request.phase !== 'progress',
-    ...(binding ? { binding: toDeliveryRouteBinding(binding) } : {}),
+    ...(binding ? { binding: surface === 'webhook' ? withoutCallbackUrl(toDeliveryRouteBinding(binding)) : toDeliveryRouteBinding(binding) } : {}),
     metadata: {
       phase: request.phase,
       pending: request.pending ?? {},
@@ -85,13 +85,16 @@ export function listBuiltinAgentTools(
   return context.listTools(surface).map((descriptor): Tool => ({
     definition: {
       name: descriptor.name,
-      description: descriptor.description,
+      description: descriptor.metadata.dangerous === true
+        ? `${descriptor.description} This changes who can reach the agent or acts on an external system: call it only when the owner asked for exactly this.`
+        : descriptor.description,
       parameters: descriptor.inputSchema ?? {
         type: 'object',
         additionalProperties: true,
       },
       sideEffects: ['network', 'state'],
       concurrency: 'serial',
+      ...(descriptor.metadata.dangerous === true ? { dangerous: true } : {}),
     },
     execute: async (args) => {
       const result = await context.runTool(surface, descriptor.id, args);
@@ -117,7 +120,6 @@ function buildDeliveryTarget(
   const pending = request.pending ?? {};
   const address = surface === 'webhook'
     ? readPendingString(pending, 'callbackUrl')
-      ?? readMetadataString(binding?.metadata, 'callbackUrl')
     : readPendingString(pending, 'targetAddress')
       ?? readPendingString(pending, 'responseUrl')
       ?? readPendingString(pending, 'channelId')
@@ -151,6 +153,16 @@ function toDeliveryRouteBinding(binding: AutomationRouteBinding): ChannelDeliver
   };
 }
 
+/**
+ * A webhook reply answers its own request. The shared binding holds whichever callback the last
+ * request left, so a reply without its own must not inherit it (automation and approval
+ * deliveries still read the binding).
+ */
+function withoutCallbackUrl(binding: ChannelDeliveryRouteBinding): ChannelDeliveryRouteBinding {
+  const { callbackUrl: _callbackUrl, ...metadata } = binding.metadata;
+  return { ...binding, metadata };
+}
+
 function renderStatus(request: ChannelRenderRequest): string {
   if (request.events.some((event) => event.kind === 'error')) return 'failed';
   if (request.phase === 'final') return 'completed';
@@ -171,11 +183,5 @@ function formatApprovalMessage(approval: SharedApprovalRecord): string {
 
 function readPendingString(pending: Record<string, unknown>, key: string): string | undefined {
   const value = pending[key]!;
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function readMetadataString(metadata: Record<string, unknown> | undefined, key: string): string | undefined {
-  if (!metadata) return undefined;
-  const value = metadata[key]!;
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }

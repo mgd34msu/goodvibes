@@ -1,4 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,6 +26,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s preserves required ex
   const launches = spyOn(process, 'spawn').mockImplementation(async cmd => ({ cmd, exit_code: 0, stdout: 'intercepted', stderr: '', success: true, process_id: 'never-launched' }));
   const sandbox: ExecSandboxRuntime = { config: { enabled: true, egressAllowlist: [], workspaceWritable: [] },
     availability: { available: true, backend: 'bubblewrap', bwrapPath: '/usr/bin/bwrap', reason: 'fixture backend', networkIsolationGuaranteed: true }, featureEnabled: true };
+  const previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
   try {
     await withMode(mode, async () => {
       expect(await resolveRuntimeSandboxPlan(sandbox, 'synthetic-command', directory, directory)).toMatchObject({ sandboxed: true, network: 'disabled' });
@@ -36,7 +39,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s preserves required ex
       }
       expect(launches).not.toHaveBeenCalled();
     });
-  } finally { launches.mockRestore(); await process.close(); }
+  } finally { installJudgmentPort(previousPort); launches.mockRestore(); await process.close(); }
 });
 
 test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s keeps declared secret-reference storage format for raw and prepared settings', async mode => {
@@ -54,6 +57,17 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s keeps declared secret
     const reference = 'goodvibes://secrets/telegram/bot';
     expect(await tool.execute({ mode: 'set', key, value: reference, confirm: true })).toMatchObject({ success: true });
     expect(config.get(key)).toBe(reference);
+  });
+});
+
+test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s holds a number or an object written to a secret-bearing key, and passes a secret reference', async mode => {
+  const config = new ConfigManager({ configDir: root(), surfaceRoot: 'daemon' });
+  const projector = createAgentSettingsInputProjector(config, { hostsDaemon: true });
+  const project = (value: unknown) => projector.project({ callId: 'settings-shape', name: 'goodvibes_settings', args: { mode: 'set', key: 'surfaces.telegram.botToken', value, confirm: true }, assertCurrent() {} });
+  await withMode(mode, async () => {
+    await expect(project({ a: 1 })).rejects.toThrow('held');
+    await expect(project(7)).rejects.toThrow('held');
+    await expect(project('goodvibes://secrets/telegram/bot')).resolves.toBeDefined();
   });
 });
 

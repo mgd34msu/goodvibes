@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
@@ -90,6 +89,10 @@ test('short native lease release never removes a substituted symlink to its orig
 });
 
 
+// Release runs in `finally` blocks, so the async release never throws: a lost
+// lock is logged and the substituted entry is left for its current holder.
+// The short synchronous lease throws because its caller asserts ownership
+// before committing.
 test('async native lease release also retains a substituted symlink to its original inode', async () => {
   const f = fixture(), path = join(f.directory, 'async-lock'), retained = path + '.retained';
   const release = await acquireCrossProcessLock(path, { strictOwnership: true });

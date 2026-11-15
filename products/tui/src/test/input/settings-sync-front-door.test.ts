@@ -6,11 +6,12 @@
  * working via `/settings-sync report`.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import type { CommandContext } from '../../input/command-registry.ts';
+import { setManagedSettingLock } from '@goodvibes-jev/engine/platform/platform/runtime/settings';
 import { registerSettingsSyncRuntimeCommands } from '../../input/commands/settings-sync-runtime.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -91,5 +92,18 @@ describe('/settings-sync front door (item 3)', () => {
     await cmd.handler(['staged'], ctx);
     expect(opened).toEqual([]);
     expect(printed[0]).toContain('No staged managed settings bundle is available.');
+  });
+
+  test('/settings-sync pull names the settings a managed lock kept from being applied', async () => {
+    const cmd = getCommand();
+    const { ctx, printed } = makeContext();
+    const configDir = join(root, '.goodvibes', 'tui');
+    setManagedSettingLock('conversationGate.mode', 'ops', 'policy', configDir);
+    (ctx as unknown as { workspace: { shellPaths: { resolveWorkspacePath(path: string): string } } }).workspace.shellPaths = { resolveWorkspacePath: (path: string) => path } as never;
+    const bundlePath = join(root, 'pull.json');
+    writeFileSync(bundlePath, JSON.stringify({ version: 1, exportedAt: 0, source: 'settings-sync', settings: { 'conversationGate.mode': 'off', 'display.showThinking': false } }));
+    await cmd.handler(['pull', bundlePath], ctx);
+    expect(printed.join('\n')).toContain('1 skipped because managed locks own them: conversationGate.mode');
+    expect(configManager.get('conversationGate.mode')).not.toBe('off');
   });
 });

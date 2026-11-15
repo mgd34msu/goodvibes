@@ -99,7 +99,8 @@ describe('vim-style quit shortcuts', () => {
       requestRender: () => { renderCount++; },
     }, enterKey());
 
-    await Promise.resolve();
+    // A turn of the event loop runs every pending microtask, however many awaits the command path chains.
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
 
     expect(result.handled).toBe(true);
     expect(result.prompt).toBe('');

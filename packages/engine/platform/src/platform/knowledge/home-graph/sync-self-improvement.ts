@@ -3,7 +3,7 @@ import { logger } from '../../utils/logger.js';
 import { sleep, yieldEvery } from '../cooperative.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
-import { edgeIsActive, readHomeAssistantMetadataString } from './helpers.js';
+import { edgeIsActive, homeAssistantSpaceComponent, readHomeAssistantMetadataString } from './helpers.js';
 import { refreshHomeGraphDevicePassport } from './generated-pages.js';
 import { isHomeGraphPageFactCandidate } from './page-quality.js';
 import { readHomeGraphSearchState } from './search.js';
@@ -51,7 +51,7 @@ export async function runHomeGraphSyncSelfImprovementPump(
       signal,
     }, { stopWhenPaused: true });
     if (signal.aborted) return;
-    if ((result.acceptedSourceIds?.length ?? 0) > 0 || (result.promotedFactCount ?? 0) > 0 || result.closedGaps > 0) {
+    if ((result.acceptedSourceIds?.length ?? 0) > 0) {
       await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
     }
     if (!shouldContinueHomeGraphSyncSelfImprovement(result)) return;
@@ -74,7 +74,7 @@ export async function enrichHomeGraphSpaceSources(
   const result = await runtime.semanticService.selfImprove({ knowledgeSpaceId: spaceId, reason: 'reindex', ...(signal ? { signal } : {}) }, { stopWhenPaused: true });
   signal?.throwIfAborted();
   const installationId = readHomeGraphInstallationIdFromSpace(spaceId);
-  if (installationId && ((result.acceptedSourceIds?.length ?? 0) > 0 || (result.promotedFactCount ?? 0) > 0 || result.closedGaps > 0)) {
+  if (installationId && (result.acceptedSourceIds?.length ?? 0) > 0) {
     await refreshHomeGraphDevicePagesForSourceIds(runtime, spaceId, installationId, result.acceptedSourceIds ?? [], signal);
     signal?.throwIfAborted();
   }
@@ -139,6 +139,9 @@ export async function refreshHomeGraphDevicePagesForSourceIds(
 ): Promise<void> {
   if (signal?.aborted) return;
   const wanted = new Set(sourceIds.filter(Boolean));
+  // Without named sources there is no way to tell which devices changed, and
+  // refreshing every device with a candidate fact costs a judgment pass each.
+  if (wanted.size === 0) return;
   const state = readHomeGraphState(runtime.store, spaceId);
   if (signal?.aborted) return;
   const nodesById = new Map(state.nodes.map((node) => [node.id, node]));
@@ -146,20 +149,15 @@ export async function refreshHomeGraphDevicePagesForSourceIds(
   const deviceNodeIds = new Set<string>();
   for (const edge of state.edges) {
     if (!edgeIsActive(edge)) continue;
-    if (wanted.size > 0 && edge.fromKind === 'source' && edge.toKind === 'node' && wanted.has(edge.fromId)) {
+    if (edge.fromKind === 'source' && edge.toKind === 'node' && wanted.has(edge.fromId)) {
       const node = nodesById.get(edge.toId);
       if (node?.kind === 'ha_device') deviceNodeIds.add(node.id);
       if (node?.kind === 'fact') factIds.add(node.id);
     }
-    if (wanted.size > 0 && edge.fromKind === 'node' && edge.toKind === 'source' && wanted.has(edge.toId)) {
+    if (edge.fromKind === 'node' && edge.toKind === 'source' && wanted.has(edge.toId)) {
       const node = nodesById.get(edge.fromId);
       if (node?.kind === 'ha_device') deviceNodeIds.add(node.id);
       if (node?.kind === 'fact') factIds.add(node.id);
-    }
-    if (wanted.size === 0 && edge.fromKind === 'node' && edge.toKind === 'node' && edge.relation === 'describes') {
-      const fact = nodesById.get(edge.fromId);
-      const device = nodesById.get(edge.toId);
-      if (fact && device?.kind === 'ha_device' && isHomeGraphPageFactCandidate(fact)) deviceNodeIds.add(device.id);
     }
   }
   for (const edge of state.edges) {
@@ -225,6 +223,5 @@ export function shouldContinueHomeGraphSyncSelfImprovement(result: {
 }
 
 export function readHomeGraphInstallationIdFromSpace(spaceId: string): string | undefined {
-  const match = /^homeassistant:(.+)$/i.exec(spaceId);
-  return match?.[1] && match[1].trim() ? match[1].trim() : undefined;
+  return homeAssistantSpaceComponent(spaceId);
 }

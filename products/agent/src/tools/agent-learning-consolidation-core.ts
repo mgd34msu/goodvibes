@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { writeStoreJson } from '@/utils/store-file.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -16,10 +17,13 @@ import {
 } from './agent-harness-learning-curator.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
-export type AgentLearningConsolidationMode = 'preview' | 'merge' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';
+export type AgentLearningConsolidationMode = 'preview' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';
 export type AgentLearningConsolidationDomain = 'memory' | 'persona' | 'skill' | 'routine';
-export type AgentLearningConsolidationWriteMode = 'merge' | 'stale' | 'delete' | 'rollback' | 'recreate';
+export type AgentLearningConsolidationWriteMode = 'stale' | 'delete' | 'rollback' | 'recreate';
+/** A stored receipt can also come from the merge phase, which no longer runs but whose receipts can still be rolled back. */
+export type AgentLearningConsolidationReceiptPhase = AgentLearningConsolidationWriteMode | 'merge';
 
 export interface AgentLearningConsolidationToolArgs {
   readonly mode?: unknown;
@@ -37,21 +41,27 @@ export interface LearningConsolidationReceipt {
   readonly createdAt: string;
   readonly domain: AgentLearningConsolidationDomain;
   readonly candidateId: string;
-  readonly phase: AgentLearningConsolidationWriteMode;
+  readonly phase: AgentLearningConsolidationReceiptPhase;
   readonly explicitUserRequest: string;
   readonly survivorId: string;
   readonly duplicateIds: readonly string[];
   readonly beforeSurvivor?: Record<string, unknown>;
+  /** Merge only: the survivor as the merge left it, so a rollback can tell whether it was edited since. */
+  readonly afterSurvivor?: Record<string, unknown>;
+  /** Rollback receipts: the receipt that was rolled back. */
+  readonly rollbackOf?: string;
   readonly beforeDuplicates: readonly Record<string, unknown>[];
 }
 
 export interface LearningConsolidationReceiptFile {
   readonly version: 1;
   readonly receipts: readonly LearningConsolidationReceipt[];
+  /** Entries this build does not recognise, kept verbatim so a rewrite never erases them. */
+  readonly preserved?: readonly unknown[];
 }
 
-export const MODES: readonly AgentLearningConsolidationMode[] = ['preview', 'merge', 'stale', 'delete', 'rollback', 'recreate', 'receipts'];
-export const WRITE_MODES = new Set<AgentLearningConsolidationMode>(['merge', 'stale', 'delete', 'rollback', 'recreate']);
+export const MODES: readonly AgentLearningConsolidationMode[] = ['preview', 'stale', 'delete', 'rollback', 'recreate', 'receipts'];
+export const WRITE_MODES = new Set<AgentLearningConsolidationMode>(['stale', 'delete', 'rollback', 'recreate']);
 export const RECEIPT_LIMIT = 100;
 export const MEMORY_CLASSES = new Set(['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership']);
 export const MEMORY_SCOPES = new Set(['session', 'project', 'team']);
@@ -68,9 +78,7 @@ export function readMode(value: unknown): AgentLearningConsolidationMode {
 }
 
 export function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(RECEIPT_LIMIT, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, RECEIPT_LIMIT);
 }
 
 function slugifyForDomain(value: string, fallback: AgentLearningConsolidationDomain): string {
@@ -137,44 +145,78 @@ function parseReceipt(value: unknown): LearningConsolidationReceipt | null {
   const beforeSurvivor = typeof record.beforeSurvivor === 'object' && record.beforeSurvivor !== null && !Array.isArray(record.beforeSurvivor)
     ? record.beforeSurvivor as Record<string, unknown>
     : undefined;
+  const afterSurvivor = typeof record.afterSurvivor === 'object' && record.afterSurvivor !== null && !Array.isArray(record.afterSurvivor)
+    ? record.afterSurvivor as Record<string, unknown>
+    : undefined;
+  const rollbackOf = readString(record.rollbackOf);
   return {
     id,
     createdAt,
     domain,
     candidateId,
-    phase: phase as AgentLearningConsolidationWriteMode,
+    phase: phase as AgentLearningConsolidationReceiptPhase,
     explicitUserRequest,
     survivorId,
     duplicateIds,
     ...(beforeSurvivor ? { beforeSurvivor } : {}),
+    ...(afterSurvivor ? { afterSurvivor } : {}),
+    ...(rollbackOf ? { rollbackOf } : {}),
     beforeDuplicates,
     ...(Array.isArray(record.judgmentDecisionIds) ? { judgmentDecisionIds: record.judgmentDecisionIds.filter((id): id is string => typeof id === 'string') } : {}),
   };
 }
 
+/**
+ * A missing file is an empty history. A file that exists but cannot be read is
+ * an error, never an empty history: the next write would replace it, erasing
+ * every receipt (delete receipts hold the only copy of deleted records).
+ */
 export function readReceiptFile(shellPaths: ShellPathService): LearningConsolidationReceiptFile {
   const path = receiptPath(shellPaths);
   if (!existsSync(path)) return { version: 1, receipts: [] };
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { version: 1, receipts: [] };
-    const receipts = Array.isArray((parsed as Record<string, unknown>).receipts)
-      ? ((parsed as Record<string, unknown>).receipts as unknown[]).map(parseReceipt).filter((entry): entry is LearningConsolidationReceipt => entry !== null)
-      : [];
-    return { version: 1, receipts };
-  } catch {
-    return { version: 1, receipts: [] };
+  const unreadable = (why: string) => new Error(`The learning consolidation receipts file is unreadable (${why}). It was left unchanged; repair or move it so recorded history is not lost.`);
+  let parsed: unknown;
+  try { parsed = JSON.parse(readFileSync(path, 'utf-8')); }
+  catch { throw unreadable('not valid JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw unreadable('not a receipts object');
+  const entries = (parsed as Record<string, unknown>).receipts;
+  if (entries === undefined) return { version: 1, receipts: [] };
+  if (!Array.isArray(entries)) throw unreadable('receipts is not a list');
+  const receipts: LearningConsolidationReceipt[] = [];
+  const preserved: unknown[] = [];
+  for (const entry of entries as unknown[]) {
+    const receipt = parseReceipt(entry);
+    if (receipt) receipts.push(receipt); else preserved.push(entry);
   }
+  return { version: 1, receipts, ...(preserved.length > 0 ? { preserved } : {}) };
+}
+
+/**
+ * The newest RECEIPT_LIMIT receipts, plus every delete receipt older than that
+ * which has not been recreated: it is the only copy of the deleted records.
+ */
+function retainReceipts(newestFirst: readonly LearningConsolidationReceipt[]): LearningConsolidationReceipt[] {
+  // Candidate ids repeat when the same duplicate is staged again, so a recreate only answers the deletes recorded before it.
+  const newestRecreate = new Map<string, number>();
+  newestFirst.forEach((entry, index) => { if (entry.phase === 'recreate' && !newestRecreate.has(entry.candidateId)) newestRecreate.set(entry.candidateId, index); });
+  return [
+    ...newestFirst.slice(0, RECEIPT_LIMIT),
+    ...newestFirst.slice(RECEIPT_LIMIT).filter((entry, offset) => {
+      if (entry.phase !== 'delete') return false;
+      const recreatedAt = newestRecreate.get(entry.candidateId);
+      return recreatedAt === undefined || recreatedAt > offset + RECEIPT_LIMIT;
+    }),
+  ];
 }
 
 export function writeReceipt(shellPaths: ShellPathService, receipt: LearningConsolidationReceipt): void {
   const path = receiptPath(shellPaths);
-  const current = readReceiptFile(shellPaths).receipts;
-  const next: LearningConsolidationReceiptFile = {
+  const current = readReceiptFile(shellPaths);
+  writeStoreJson(path, {
     version: 1,
-    receipts: [receipt, ...current.filter((entry) => entry.id !== receipt.id)].slice(0, RECEIPT_LIMIT),
-  };
-  writeStoreJson(path, next);
+    // Unrecognised entries stay in the same list, after the readable ones, so the next read finds them again.
+    receipts: [...retainReceipts([receipt, ...current.receipts.filter((entry) => entry.id !== receipt.id)]), ...(current.preserved ?? [])],
+  });
 }
 
 export function receiptId(candidate: LearningCandidate, phase: AgentLearningConsolidationWriteMode): string {
@@ -187,21 +229,33 @@ export function receiptIdFromReceipt(receipt: LearningConsolidationReceipt, phas
   return `lcon-${phase}-${Date.now().toString(36)}-${slug}`;
 }
 
-function minimalContext(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry): CommandContext {
+/**
+ * The memory verbs consolidation uses. Handed the process's memory spine so an
+ * adopted daemon, which is the single writer of the shared store, is the one
+ * that reads and changes the records; the local store is not touched then.
+ */
+export type ConsolidationMemory = Pick<MemoryAccess, 'get' | 'update' | 'updateReview' | 'delete' | 'list' | 'importBundle'>;
+
+/**
+ * The candidate reader is synchronous, so it is given the records read through
+ * the spine just now, not the boot-time local image.
+ */
+async function minimalContext(shellPaths: ShellPathService, memory: ConsolidationMemory): Promise<CommandContext> {
+  const records = await memory.list();
   return {
     workspace: { shellPaths },
-    clients: { agentKnowledgeApi: { memory: memoryRegistry } },
+    clients: { agentKnowledgeApi: { memory: { getAll: () => records, get: (id: string) => records.find((record) => record.id === id) ?? null } } },
   } as unknown as CommandContext;
 }
 
 export async function resolveCandidate(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   args: AgentLearningConsolidationToolArgs,
   options: CatalogRankingOptions = {},
 ): Promise<LearningCandidate> {
   const input = readString(args.candidateId) || readString(args.query);
-  const resolved = await resolveLearningConsolidationCandidate(minimalContext(shellPaths, memoryRegistry), input, options);
+  const resolved = await resolveLearningConsolidationCandidate(await minimalContext(shellPaths, memory), input, options);
   if (resolved.status === 'found') return resolved.candidate;
   if (resolved.status === 'ambiguous') {
     throw new Error(`Ambiguous learning consolidation candidate ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
@@ -219,14 +273,14 @@ export function cloneRecord(record: unknown): Record<string, unknown> {
   return JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
 }
 
-export function getRecord(
+export async function getRecord(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   id: string,
-): MemoryRecord | AgentPersonaRecord | AgentSkillRecord | AgentRoutineRecord {
+): Promise<MemoryRecord | AgentPersonaRecord | AgentSkillRecord | AgentRoutineRecord> {
   if (domain === 'memory') {
-    const record = memoryRegistry.get(id);
+    const record = await memory.get(id);
     if (!record) throw new Error(`Unknown Agent-local memory ${id}`);
     return record;
   }
@@ -245,15 +299,15 @@ export function getRecord(
   return record;
 }
 
-export function updateSurvivor(
+export async function updateSurvivor(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   survivorId: string,
   fields: LearningConsolidationFields,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (domain === 'memory') {
-    const record = memoryRegistry.update(survivorId, {
+    const record = await memory.update(survivorId, {
       ...(fields.detail === undefined ? {} : { detail: fields.detail }),
       ...(fields.tags === undefined ? {} : { tags: [...fields.tags] }),
     });
@@ -287,17 +341,17 @@ export function updateSurvivor(
   return cloneRecord(record);
 }
 
-export function markDuplicateStale(
+export async function markDuplicateStale(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   duplicateId: string,
   survivorId: string,
   judgmentDecisionIds: readonly string[] = [],
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const reason = `Duplicate of ${survivorId}; staged by learning curator consolidation. Jev decisions=${judgmentDecisionIds.join(',')}`;
   if (domain === 'memory') {
-    const record = memoryRegistry.review(duplicateId, { state: 'stale', staleReason: reason, reviewedBy: 'agent' });
+    const record = await memory.updateReview(duplicateId, { state: 'stale', staleReason: reason, reviewedBy: 'agent' });
     if (!record) throw new Error(`Unknown Agent-local memory ${duplicateId}`);
     return cloneRecord(record);
   }
@@ -306,14 +360,14 @@ export function markDuplicateStale(
   return cloneRecord(AgentRoutineRegistry.fromShellPaths(shellPaths).markStale(duplicateId, reason));
 }
 
-export function deleteDuplicate(
+export async function deleteDuplicate(
   shellPaths: ShellPathService,
-  memoryRegistry: MemoryRegistry,
+  memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   duplicateId: string,
-): void {
+): Promise<void> {
   if (domain === 'memory') {
-    if (!memoryRegistry.delete(duplicateId)) throw new Error(`Unknown Agent-local memory ${duplicateId}`);
+    if (!await memory.delete(duplicateId)) throw new Error(`Unknown Agent-local memory ${duplicateId}`);
     return;
   }
   if (domain === 'persona') {

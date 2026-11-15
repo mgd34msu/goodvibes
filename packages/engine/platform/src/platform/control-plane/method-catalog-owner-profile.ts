@@ -62,6 +62,10 @@ export const PROFILE_PROVENANCE_SCHEMA = objectSchema({
   surface: STRING_SCHEMA,
   date: STRING_SCHEMA,
   said: STRING_SCHEMA,
+  // Absent on a line the owner said directly. An autonomous line carries no
+  // quote (`said` is empty) and names the goal and criteria it was written for.
+  origin: { type: 'string', enum: ['owner-direct', 'autonomous'] },
+  source: objectSchema({ goal: STRING_SCHEMA, criteria: arraySchema(STRING_SCHEMA) }, ['goal', 'criteria']),
 }, ['surface', 'date', 'said']);
 
 /**

@@ -365,12 +365,12 @@ describe('what stays refused', () => {
     expect(message).toContain('body');
     // The quoted excerpt must be text that is genuinely in the message that was
     // read, so the owner can go and look at it.
-    const quoted = /The text in question is "([^"]+)"/.exec(message)?.[1] ?? '';
+    const quoted = /quoted as data and not as an instruction: "([^"]+)"/.exec(message)?.[1] ?? '';
     expect(send.success).toBe(false);
     expect(sent).toHaveLength(0);
     expect(quoted.length).toBeGreaterThan(0);
     // The evidence renderer caps long excerpts with a display ellipsis.
-    const sourceExcerpt = quoted.replace(/…$/, '');
+    const sourceExcerpt = quoted.replace(/(…|\.\.\.)$/, '');
     expect(sourceExcerpt.length).toBeGreaterThan(0);
     expect(STRANGER_BODY.toLowerCase()).toContain(sourceExcerpt.toLowerCase());
   });
@@ -422,7 +422,9 @@ describe('what stays refused', () => {
     // it, so the retry refused again, and had anything implemented it, a
     // security boundary would have been cleared by three words of chat text,
     // which content able to steer the conversation could have produced.
+    expect(send.success).toBe(false);
     const message = `${send.error ?? ''}`.toLowerCase();
+    expect(message.length).toBeGreaterThan(0);
     expect(message).not.toContain('send it now');
     expect(message).not.toContain("reply '");
     expect(message).not.toContain('reply "');

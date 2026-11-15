@@ -5,6 +5,8 @@
  * once, a one-line receipt rides the announce-once queue, and an unwritable
  * file keeps the in-memory result (idempotent re-run next start).
  */
+import { readFileSync } from 'node:fs';
+import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import {
   migrateControlPlaneBaseUrlRemoval,
@@ -22,7 +24,9 @@ import { migrateLegacyDaemonReleaseFeed } from './schema-domain-update.js';
 import { isFrozenDefaultDump, stripFrozenDefaults } from './settings-io.js';
 import {
   PAYMENTS_BUDGET_AMOUNTS_READER_FLOOR,
+  SETTINGS_FLOOR_MARKER_KEY,
   raiseSettingsReaderFloor,
+  readSettingsReaderFloor,
 } from './settings-reader-floor.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -69,13 +73,47 @@ export interface MigrationOwnership {
 /** The default for a pass over a file the loading process owns outright. */
 export const OWNS_FILE: MigrationOwnership = { ownsFile: true };
 
-function persistMigratedFile(sourcePath: string, config: Record<string, unknown>, label: string): void {
+/**
+ * Rewrite a migrated settings file; false when it could not be written, so the
+ * caller files no receipt for a change that did not happen.
+ *
+ * The reader-floor marker is stripped from the object before any pass sees it,
+ * so every rewrite carries forward the marker already on disk (and raises it to
+ * `raiseFloorTo` when this pass needs a higher one). Dropping it would reopen
+ * the window in which an older reader meets a migrated file with nothing
+ * saying which version can read it.
+ */
+function persistMigratedFile(
+  sourcePath: string,
+  config: Record<string, unknown>,
+  label: string,
+  raiseFloorTo?: { readonly version: string; readonly setBy: string },
+): boolean {
   try {
+    const persisted: Record<string, unknown> = { ...config };
+    const onDisk = readFloorMarkerOnDisk(sourcePath);
+    if (onDisk !== undefined) persisted[SETTINGS_FLOOR_MARKER_KEY] = onDisk;
+    if (raiseFloorTo) raiseSettingsReaderFloor(persisted, raiseFloorTo.version, raiseFloorTo.setBy);
     // Atomic: a migration rewrites the whole settings file, and a torn one
     // would leave the reader a file that parses as neither shape.
-    writeJsonFileAtomic(sourcePath, config);
+    writeJsonFileAtomic(sourcePath, persisted);
+    // The reload that ran this pass already holds the result; do not let the
+    // watcher report this write back as an external edit.
+    acknowledgeConfigFileWrite(sourcePath);
+    return true;
   } catch (err) {
     logger.warn(`${label} could not be persisted to ${sourcePath}: ${summarizeError(err)}`);
+    return false;
+  }
+}
+
+function readFloorMarkerOnDisk(sourcePath: string): unknown {
+  try {
+    const parsed = JSON.parse(readFileSync(sourcePath, 'utf-8')) as unknown;
+    if (readSettingsReaderFloor(parsed) === null) return undefined;
+    return (parsed as Record<string, unknown>)[SETTINGS_FLOOR_MARKER_KEY];
+  } catch {
+    return undefined;
   }
 }
 
@@ -101,7 +139,7 @@ export function applyLegacySettingsMigrationPass(
   const result = migrateLegacyFeatureToggles(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'Settings migration');
+  if (!persistMigratedFile(sourcePath, result.config, 'Settings migration')) return result.config;
   const keyList = result.changedKeys.length > 0 ? result.changedKeys.join(', ') : 'no value changes';
   const receiptText = `Settings migrated: legacy featureFlags entries now live on their domain settings keys (${keyList}) in ${sourcePath}.`;
   logger.info(receiptText);
@@ -126,7 +164,7 @@ export function applyFleetMaxSizeMigrationPass(
   const result = migrateFleetMaxSizeRename(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'fleet.maxSize migration');
+  if (!persistMigratedFile(sourcePath, result.config, 'fleet.maxSize migration')) return result.config;
   const receiptText = `Setting renamed: orchestration.maxActiveAgents is now fleet.maxSize ("Maximum fleet size"); your value (${result.movedValue}) moved with it (${sourcePath}).`;
   logger.info(receiptText);
   try {
@@ -147,7 +185,7 @@ export function applyControlPlaneBaseUrlMigrationPass(
   const result = migrateControlPlaneBaseUrlRemoval(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'controlPlane.baseUrl removal');
+  if (!persistMigratedFile(sourcePath, result.config, 'controlPlane.baseUrl removal')) return result.config;
   const quoted = result.removedValue ? ` (it was ${result.removedValue})` : '';
   const receiptText =
     `Setting removed: controlPlane.baseUrl${quoted} is gone from ${sourcePath}. `
@@ -174,12 +212,7 @@ export function applyDefaultStripMigrationPass(
   const { config: stripped, changed } = stripFrozenDefaults(parsed);
   if (!changed) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return stripped;
-  try {
-    writeJsonFileAtomic(sourcePath, stripped);
-  } catch (err) {
-    logger.warn(`Settings default-strip could not be persisted to ${sourcePath}: ${summarizeError(err)}`);
-    return stripped;
-  }
+  if (!persistMigratedFile(sourcePath, stripped, 'Settings default-strip')) return stripped;
   const receiptText = `Settings tidied: previously-frozen default values were removed from ${sourcePath}; only your explicit settings remain on disk.`;
   logger.info(receiptText);
   try {
@@ -200,7 +233,7 @@ export function applyDaemonEmbedInProcessMigrationPass(
   const result = migrateDaemonEmbedInProcessRemoval(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'daemon.embedInProcess removal');
+  if (!persistMigratedFile(sourcePath, result.config, 'daemon.embedInProcess removal')) return result.config;
   const quoted = result.removedValue === undefined ? '' : ` (it was ${String(result.removedValue)})`;
   const receiptText =
     `Setting removed: daemon.embedInProcess${quoted} is gone from ${sourcePath}. `
@@ -251,7 +284,7 @@ export function applyDaemonConnectedHostSplitMigrationPass(
     );
     return result.config;
   }
-  persistMigratedFile(sourcePath, result.config, 'daemon connected-host split');
+  if (!persistMigratedFile(sourcePath, result.config, 'daemon connected-host split')) return result.config;
   const receiptText =
     `Setting added: daemon.connectedHost.enabled is now true in ${sourcePath}. `
     + 'Your daemon.enabled is false and is unchanged, it still means this surface does not adopt a '
@@ -313,25 +346,24 @@ export function applyPaymentsBudgetMigrationPass(
   // ONE write, carrying both the rename and the version that explains it. A
   // separate floor-raising write would leave a window in which the file holds
   // the new names and nothing saying which reader can understand them, and that
-  // window is exactly when an older daemon reloads.
-  //
-  // The marker rides a COPY. ingestSettingsFile strips the floor BEFORE it calls
-  // a migration and then screens whatever that migration returns, so a marker
-  // left on the returned object would be reported as a setting this build does
-  // not know, the very sentence this change exists to stop producing.
-  const persisted = raiseSettingsReaderFloor(
-    { ...result.config },
-    PAYMENTS_BUDGET_AMOUNTS_READER_FLOOR,
-    'payments-budget-amounts-migration',
-  ).raw;
-  persistMigratedFile(sourcePath, persisted, 'payments budget migration');
-  const moved = result.moves
-    .map((move) => `${move.from} ${move.oldValue} is now ${move.to} ${move.newValue}`)
-    .join('; ');
+  // window is exactly when an older daemon reloads. The marker rides only the
+  // write: ingestSettingsFile strips it BEFORE a migration runs and screens what
+  // the migration returns, so a marker on the returned object would be reported
+  // as a setting this build does not know.
+  if (!persistMigratedFile(sourcePath, result.config, 'payments budget migration', {
+    version: PAYMENTS_BUDGET_AMOUNTS_READER_FLOOR,
+    setBy: 'payments-budget-amounts-migration',
+  })) return result.config;
+  const moved = [
+    ...result.moves.map((move) => `${move.from} ${move.oldValue} is now ${move.to} ${move.newValue}`),
+    ...(result.dropped ?? []).map((drop) => (drop.reason === 'new-name-already-set'
+      ? `${drop.from} ${JSON.stringify(drop.oldValue)} was removed, the new setting was already set and is kept`
+      : `${drop.from} ${JSON.stringify(drop.oldValue)} was removed, it was not a usable amount so that limit uses its default`)),
+  ].join('; ');
   const receiptText =
     `Settings renamed: your payment limits now hold the amount you would say out loud, `
     + `so you enter 100 for a hundred and 19.99 for nineteen ninety-nine. `
-    + `${moved} (${sourcePath}). Your limits are unchanged, only how they are written.`;
+    + `${moved} (${sourcePath}). Limits that were converted are unchanged, only how they are written.`;
   logger.info(receiptText);
   try {
     receipt(`settings-migration-payments-budget-amounts:${sourcePath}`, receiptText);
@@ -375,7 +407,7 @@ export function applyOccasionsFinalStretchMigrationPass(
     );
     return result.config;
   }
-  persistMigratedFile(sourcePath, result.config, 'occasions.finalStretchDays removal');
+  if (!persistMigratedFile(sourcePath, result.config, 'occasions.finalStretchDays removal')) return result.config;
   const quoted = result.removedValue === undefined ? '' : ` (it was ${String(result.removedValue)})`;
   const receiptText =
     `Setting removed: occasions.finalStretchDays${quoted} is gone from ${sourcePath}. `
@@ -414,7 +446,7 @@ export function applyContractSettingsMigrationPass(
   const result = migrateWrfcSettings(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'contract settings migration');
+  if (!persistMigratedFile(sourcePath, result.config, 'contract settings migration')) return result.config;
   if (result.moves.length > 0) {
     const moved = result.moves
       .map((move) => (move.moved
@@ -465,7 +497,7 @@ export function applySandboxQemuMigrationPass(
   const result = migrateSandboxQemuRemoval(parsed);
   if (!result.migrated) return parsed;
   if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
-  persistMigratedFile(sourcePath, result.config, 'QEMU sandbox settings removal');
+  if (!persistMigratedFile(sourcePath, result.config, 'QEMU sandbox settings removal')) return result.config;
   const changes: string[] = [];
   if (result.removedKeys.length > 0) changes.push(`${result.removedKeys.join(', ')} removed`);
   if (result.rewroteVmBackend) changes.push('sandbox.vmBackend changed from "qemu" to "local"');

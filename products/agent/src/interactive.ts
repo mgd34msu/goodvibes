@@ -7,13 +7,14 @@ import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import { captureNativeConversationInput, type ProductInputContext } from './runtime/native-conversation-input.ts';
-import { routeNativeConversationInput, dispatchNativeConversationTurn } from './runtime/native-conversation-ingress.ts';
+import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
 import { resolveConnectedHostConnection as resolveNativeLedgerHost } from './runtime/client/daemon-verbs.ts';
 import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
-import { runUnsubscribes, settleInteractiveExit, withShutdownDeadline } from './shell/exit-completion.ts';
+import { runExitSequence } from './shell/exit-sequence.ts';
+import { pruneStaleModalStack } from './input/handler-modal-stack.ts';
 import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
 import './renderer/compositor.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
@@ -35,7 +36,7 @@ import './input/command-registry.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { ShellPassthrough, SHELL_USAGE_HINT } from './input/shell-passthrough.ts';
+import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT, withShellContext } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
@@ -43,7 +44,7 @@ import { buildConversationViewport, centerViewportContent } from './renderer/con
 import { applyConversationOverlays, buildConversationLayers } from './renderer/conversation-overlays.ts';
 import { buildActivityAgentRows, type ActivityView } from './renderer/activity-modal.ts';
 import { ActivityModal } from './input/activity-modal.ts';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { envFlag, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
@@ -53,6 +54,7 @@ import './tools/agent-harness-model-routing.ts';
 import './tools/agent-harness-setup-model-helpers.ts';
 import { consumeRecovery, removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
+import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import { createWorkspaceRegistrationQuestion } from './shell/workspace-registration-question.ts';
 import { getTerminalSize } from './shell/terminal-size.ts';
@@ -62,7 +64,7 @@ import { deriveComposerState } from './core/composer-state.ts';
 import { describePowerStatus } from './renderer/power-status.ts';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
-import { createTerminalLifecycle } from '@goodvibes-jev/engine/terminal-shell';
+import { createTerminalLifecycle, installTerminalExitGuards } from '@goodvibes-jev/engine/terminal-shell';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
@@ -91,6 +93,9 @@ import { SessionViews } from './shell/session-views.ts';
 // Escape bytes and enter/exit sequencing live in renderer/terminal-escapes.ts (re-exported from @goodvibes-jev/engine/terminal-shell) so this file never holds its own drifting copy.
 
 let releaseFailedStartupSession: (() => Promise<void>) | undefined;
+// Set once the terminal lifecycle exists, so a startup failure after terminal
+// entry hands the screen back before its explanation is printed.
+let restoreTerminalAfterFailedStartup: (() => void) | undefined;
 
 async function main() {
   const stdout = process.stdout;
@@ -214,6 +219,7 @@ async function main() {
       messages: conversationMessagesAsSessionRecords(messages),
       timestamp: Date.now(),
       title: conversation.title,
+      ...conversation.branchState(),
       ...persisted,
     };
   };
@@ -233,9 +239,16 @@ async function main() {
       if (next) setupPairing?.cancelForTakeover();
       pendingPermission = next;
     },
+    onResolveFailed: (error) => systemMessageRouter.high(
+      `[Approval] Your answer was not recorded: ${summarizeError(error)}. The request is still waiting; answer it again.`,
+    ),
   });
 
   let streamTokenSpeed = 0;
+  // A turn occupies the orchestrator from admission to finalization, which
+  // starts before and can outlast isThinking (abort clears it while the turn
+  // still settles); input submitted then is queued, so the shell shows busy.
+  const mainTurnBusy = (): boolean => orchestrator.isTurnActive;
 
   const thinkingClock = new ThinkingStallClock(); // thinking-indicator stall clock
 
@@ -268,10 +281,11 @@ async function main() {
     const activeAgents = uiServices.readModels.agents.getSnapshot().active;
     return {
       now: {
-        busy: orchestrator.isThinking,
+        busy: mainTurnBusy(),
         label: remoteConversation.hostedToolPreview() ?? sessionSnapshot.streamToolPreview?.trim() ?? undefined,
         agents: buildActivityAgentRows(activeAgents, ctx.services.fleetUnion.nodes()),
         processes: processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length,
+        daemonPartial: ctx.services.fleetUnion.partial() ?? undefined,
       },
       needsYou: pendingPermission ? ['Approval needed, answer the prompt on screen.'] : [],
       comingUp: [...autonomy.comingUpItems()],
@@ -296,7 +310,7 @@ async function main() {
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     steer: (id, text) => ctx.services.processRegistry.steer(id, text),
     killAgent: (id) => ctx.services.processRegistry.kill(id, { cascade: true }),
-    mainBusy: () => orchestrator.isThinking,
+    mainBusy: mainTurnBusy,
     mainModel: () => providerRegistry.getCurrentModel().id,
     promptText: () => input.prompt,
     requestRender: () => render(),
@@ -339,6 +353,7 @@ async function main() {
   );
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.close());
+  unsubs.push(() => shellPassthrough.cancelRunning());
   unsubs.push(() => input.settingsModal.close());
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
   const workTreeWiring = wireWorkTree({
@@ -349,7 +364,7 @@ async function main() {
     onContractsChanged: (listener) => ctx.services.runtimeBus.onDomain('contracts', listener),
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     pendingCallId: () => pendingPermission?.callId,
-    turnActive: () => orchestrator.isThinking,
+    turnActive: mainTurnBusy,
     sessionsDir: ctx.services.surface.sessionsDir,
     sessionId: () => runtime.sessionId,
     requestRender: () => render(),
@@ -360,6 +375,11 @@ async function main() {
     () => ctx.services.contextAccountingHolder.getSource()?.getCompactionState().isCompacting === true,
   );
   unsubs.push(...throbberSource.unsubs); // the throbber's running call and compaction clock
+  // A provider reconnect reads as "retrying n/m" in the throbber instead of a generic stall.
+  unsubs.push(uiServices.events.turns.on('STREAM_RETRY', (event) => {
+    thinkingClock.noteReconnect(event.attempt, event.maxAttempts);
+    render();
+  }));
   let recoveryInterval: ReturnType<typeof setInterval> | null = null;
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // sessionId of the offered recovery snapshot, or null when none is pending.
@@ -381,6 +401,18 @@ async function main() {
     },
     discardCompositorState: () => compositor.resetDiff(),
   });
+  // The final safety net: any exit, including a failed startup after terminal
+  // entry, leaves the alt screen, mouse and keyboard modes. Restore is
+  // idempotent and writes nothing for a terminal that was never entered. The
+  // paint window closes first so no late frame follows the restore write.
+  const terminalGuards = installTerminalExitGuards(terminalLifecycle, {
+    restore: () => {
+      paintWindow.close();
+      terminalLifecycle.restoreTerminal();
+    },
+  });
+  const handBackTerminal = terminalGuards.handBack;
+  restoreTerminalAfterFailedStartup = handBackTerminal;
 
   const sigintHandler = (): void => input.feed('\x03');
   const processFaults = createProcessFaultHandlers({
@@ -388,7 +420,10 @@ async function main() {
     render: () => render(),
     shellPaths: ctx.services.shellPaths,
     activeSessionId: () => runtime.sessionId,
-    exit: (code) => exitApp(() => code),
+    // Hand the screen back first so the crash lines land on the user's own
+    // screen instead of the alternate one that exit then discards.
+    restoreTerminal: handBackTerminal,
+    exit: (code) => exitApp(undefined, code),
   });
   const resizeHandler = (): void => {
     input.setContentWidth(getPromptContentWidth());
@@ -399,71 +434,43 @@ async function main() {
   let exiting = false;
   // `handOver` replaces the process AFTER the orderly teardown below and exits
   // with its code, how a periodic self-update restarts onto its new binary.
-  const exitApp = (handOver?: () => number): void => {
+  // `exitCode` is the code for a plain exit (1 after a crash).
+  const exitApp = (handOver?: () => number, exitCode = 0): void => {
     // Reentrancy guard: a second /exit or keypress during the bounded
-    // spoken-audio drain below must not re-run teardown.
+    // spoken-audio drain must not re-run teardown.
     if (exiting) return;
     exiting = true;
-    const herdrRelease = closeHerdr();
-    let exitCompletion = settleInteractiveExit(Promise.resolve(), Promise.resolve(), herdrRelease);
-    let shutdownIncomplete = false;
-    try {
-      setupPairing?.dispose();
-      // Gate render() before anything else so no late frame follows the terminal-restore write below.
-      paintWindow.close();
-      // Exit lets the spoken audio the user is already hearing finish inside a
-      // short bounded window (capped inside stopForExit) instead of killing the
-      // player mid-drain; queued-but-unplayed speech is dropped. Deliberate
-      // interrupts (Ctrl+C, /tts stop) still cut instantly via spokenTurns.stop().
-      let spokenOutputDrain: Promise<void> = Promise.resolve();
-      try {
-        spokenOutputDrain = Promise.resolve(stopSpokenOutputForExit?.()).then(() => undefined);
-      } catch (error) {
-        spokenOutputDrain = Promise.reject(error);
-      }
-      // One throwing unsubscribe must not skip autonomy.stop() or the session-saving ctx.shutdown below.
-      runUnsubscribes(unsubs, (error) => logger.warn('Unsubscribe failed during exitApp', { error: summarizeError(error) }));
-      // Persist last-seen before shutdown so the next launch can compute the digest.
-      const autonomyDrain = autonomy.stop();
-      const snapshot = buildCurrentSessionSnapshot();
-      // Bounded so a hung owner cannot hold the process open. The session is
-      // saved near the end of ctx.shutdown, so the recovery snapshot is removed
-      // only once that shutdown has finished: if the deadline wins, the snapshot
-      // stays and the next launch can restore from it.
-      const runtimeShutdown = withShutdownDeadline(autonomyDrain.then(() => ctx.shutdown(snapshot)))
-        .then(() => {
-          // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
-          removeRecoveryPoint(ctx.services.surface, runtime.sessionId);
-        }, (error: unknown) => { shutdownIncomplete = true; throw error; });
-      exitCompletion = settleInteractiveExit(runtimeShutdown, spokenOutputDrain, herdrRelease);
-      if (recoveryInterval !== null) {
-        clearInterval(recoveryInterval);
-        recoveryInterval = null;
-      }
-      stdin.removeAllListeners('data');
-      stdout.removeListener('resize', resizeHandler);
-      process.removeListener('SIGINT', sigintHandler);
-      process.removeListener('SIGTERM', terminalClosed);
-      process.removeListener('SIGHUP', terminalClosed);
-      stdin.removeListener('end', terminalClosed);
-      stdin.removeListener('close', terminalClosed);
-      processFaults.dispose();
-    } catch (error) {
-      exitCompletion = exitCompletion.then((failures) => [...failures, error]);
-    } finally {
-      try { terminalLifecycle.restoreTerminal(); } catch (error) {
-        exitCompletion = exitCompletion.then((failures) => [...failures, error]);
-      }
-    }
-    // The terminal is restored immediately. Process exit and executable
-    // handover wait for runtime ownership release and the bounded audio drain.
-    void exitCompletion.then((failures) => {
-      for (const error of failures) logger.warn('Owned cleanup failed during exitApp', { error: summarizeError(error) });
-      // A handover replaces this process while it may still hold its session and
-      // services; after an unfinished shutdown, exit and let the next launch recover.
-      if (handOver && shutdownIncomplete) logger.warn('Restart onto the updated program skipped: shutdown did not finish. Start it again to continue from the saved recovery point.');
-      process.exit(handOver && !shutdownIncomplete ? handOver() : 0);
-    });
+    runExitSequence<SessionSnapshot>({
+      closeHerdr,
+      disposePairing: () => setupPairing?.dispose(),
+      closePaintWindow: () => paintWindow.close(),
+      stopSpokenOutput: () => stopSpokenOutputForExit?.(),
+      unsubs,
+      stopAutonomy: () => autonomy.stop(),
+      detachHostedSession: () => remoteConversation.detachHostedSession(),
+      buildSnapshot: buildCurrentSessionSnapshot,
+      buildMessagesSnapshot: () => ({ messages: conversationMessagesAsSessionRecords(conversation.getMessageSnapshot()), timestamp: Date.now(), title: conversation.title, ...conversation.branchState() }),
+      shutdown: (saved) => ctx.shutdown(saved),
+      // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
+      removeRecoveryPoint: () => removeRecoveryPoint(ctx.services.surface, runtime.sessionId),
+      detach: () => {
+        if (recoveryInterval !== null) {
+          clearInterval(recoveryInterval);
+          recoveryInterval = null;
+        }
+        stdin.removeAllListeners('data');
+        stdout.removeListener('resize', resizeHandler);
+        process.removeListener('SIGINT', sigintHandler);
+        // SIGTERM and SIGHUP keep their listener until the process exits: exitApp ignores a repeat, and with no listener left the power watcher's reaper would re-raise the signal and kill the process before the session is saved and the Herdr pane released.
+        stdin.removeListener('end', terminalClosed);
+        stdin.removeListener('close', terminalClosed);
+        processFaults.dispose();
+      },
+      restoreTerminal: () => terminalLifecycle.restoreTerminal(),
+      warn: (message, error) => logger.warn(message, { error: summarizeError(error) }),
+      warnPlain: (message) => logger.warn(message),
+      exit: (code) => process.exit(code),
+    }, handOver, exitCode);
   };
 
   const terminalClosed = (): void => exitApp();
@@ -507,11 +514,30 @@ async function main() {
     }),
   );
   // Where a turn runs, see shell/remote-conversation-wiring.ts.
+  // A refused, unsent prompt goes back into an empty composer; text typed since is never overwritten.
+  const restoreDraft = (text: string): void => {
+    if (input.prompt.length > 0 || text.length === 0) return;
+    input.prompt = text;
+    input.cursorPos = text.length;
+    input.syncFeedContextMutableFields();
+    render();
+  };
+  // Shell output taken for a message that has not been admitted yet. If the message is refused
+  // the output goes back to the buffer, so the retry still carries it.
+  const shellContextHold = new ShellContextHold(shellPassthrough);
   const remoteConversation = installRemoteConversationRouting(ctx, {
     render: () => render(),
     notify: (message) => systemMessageRouter.userAction(message),
+    restoreDraft: (text) => restoreDraft(text),
   });
   unsubs.push(() => remoteConversation.dispose());
+  // A cleared or replaced conversation must not keep steering into the hosted session of the one it left.
+  commandContext.abandonHostedSession = () => remoteConversation.resetHostedSession();
+  // Explicit recovery (/work intake-*) reports its results to the hosted owner,
+  // so a settled input stops blocking execution-mode changes.
+  if (commandContext.nativeConversationIntake) {
+    commandContext.nativeConversationIntake = remoteConversation.observeIntake(commandContext.nativeConversationIntake);
+  }
 
   const dispatchNativeTurn = async (state: NativeConversationIntakeState, spokenOutput = false): Promise<void> => {
     if (state.hostedTurn && commandContext.nativeConversationIntake) {
@@ -520,12 +546,20 @@ async function main() {
     }
     if (!isNativeConversationTurnReady(state)) return;
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
-    if (spokenOutput) spokenTurns.submitNextTurn(state.result.text);
+    const spokenArm = spokenOutput ? spokenTurns.armNextTurn(state.result.text) : null;
     try {
       await dispatchNativeConversationTurn(state, orchestrator, inputOptions);
-    } catch {
+    } catch (error) {
+      // No turn was submitted, so nothing will consume the arm; left in place it
+      // would swallow the next stop key and speak a later identical prompt.
+      spokenArm?.disarm();
+      // A turn that provably never started gives its claim back so /work intake-retry can run it.
       systemMessageRouter.userAction(
-        'Native turn dispatch requires recovery. Its durable claim was preserved; no legacy fallback was started.',
+        await describeFailedNativeDispatch(
+          state,
+          error,
+          'Native turn dispatch requires recovery. Its durable claim was preserved; no legacy fallback was started.',
+        ),
       );
       render();
     }
@@ -534,6 +568,10 @@ async function main() {
 
   const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
     setupPairing?.cancelForTakeover();
+    // Acting here after another surface took the session over is what moves the conversation back for rewinds.
+    if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
+      systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
+    }
     const original = options.source ?? { text, unsupportedSources: [{ kind: 'context' as const, label: 'derived-input' }] };
     input.clearModalStack();
     transcript.toBottom(); // Re-lock on user input
@@ -575,22 +613,38 @@ async function main() {
     }
     if (processedText || content) {
       void (async () => {
-        const outgoing = shellPassthrough.consumeContext(processedText);
-        const unsupportedSources = [...original.unsupportedSources];
-        if (outgoing !== processedText) unsupportedSources.push({ kind: 'context', label: 'shell-context' });
-        if (processedText !== text) unsupportedSources.push({ kind: 'context', label: 'composer-derived-text' });
-        if (content?.some((part) => part.type !== 'text')) unsupportedSources.push({ kind: 'image', label: 'attached-content' });
-        const source = { text: original.text, unsupportedSources };
-        if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake)) return;
-        await routeNativeConversationInput({
-          intake: commandContext.nativeConversationIntake,
-          source,
-          notify: (message) => {
-            systemMessageRouter.userAction(message);
-            render();
-          },
-          dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput),
-        });
+        const shellContext = shellContextHold.take();
+        const outgoing = withShellContext(shellContext.blocks, processedText);
+        try {
+          const unsupportedSources = [...original.unsupportedSources];
+          if (outgoing !== processedText) unsupportedSources.push({ kind: 'context', label: 'shell-context' });
+          if (processedText !== text) unsupportedSources.push({ kind: 'context', label: 'composer-derived-text' });
+          if (content?.some((part) => part.type !== 'text')) unsupportedSources.push({ kind: 'image', label: 'attached-content' });
+          const source = { text: original.text, unsupportedSources };
+          if (await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake, shellContext.restore)) return;
+          const state = await routeNativeConversationInput({
+            intake: commandContext.nativeConversationIntake,
+            source,
+            notify: (message) => {
+              systemMessageRouter.userAction(message);
+              render();
+            },
+            dispatch: (state) => dispatchNativeTurn(state, options.spokenOutput),
+          });
+          // Refused (another input still being admitted, no intake, input not acceptable): nothing was sent.
+          if (state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') {
+            shellContext.restore();
+            restoreDraft(source.text);
+          }
+        } catch (error) {
+          // Routing failed before the input was admitted: give back the draft and the shell output.
+          shellContext.restore();
+          restoreDraft(original.text);
+          systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`);
+          render();
+        } finally {
+          shellContext.release();
+        }
       })();
     } else {
       render();
@@ -602,6 +656,7 @@ async function main() {
     // A hosted turn sets the same isThinking the local path does, but its
     // waiting state is owned here, not by orchestrator.abort().
     cancelConversationGeneration(orchestrator, remoteConversation);
+    shellPassthrough.cancelRunning();
   };
 
   const { jumpToBookmark, scrollToLine } = createTranscriptNavigators({
@@ -731,18 +786,21 @@ async function main() {
         input.syncFeedContextMutableFields();
         render();
       },
-      canPresent: () =>
-        !exiting &&
-        pendingPermission === null &&
-        recoveryPending === null &&
-        !daemonRepairPrompt?.pending() &&
-        !input.concealedInput &&
-        !input.plainLineInput &&
-        !input.surfaceModals.active &&
-        input.modalStack.length === 0 &&
-        !input.searchManager.active &&
-        !input.historySearch.active &&
-        !sessionViews.active,
+      // A modal that closed itself leaves a stale stack name that would refuse pairing with nothing on screen.
+      canPresent: () => {
+        pruneStaleModalStack(input);
+        return !exiting &&
+          pendingPermission === null &&
+          recoveryPending === null &&
+          !daemonRepairPrompt?.pending() &&
+          !input.concealedInput &&
+          !input.plainLineInput &&
+          !input.surfaceModals.active &&
+          input.modalStack.length === 0 &&
+          !input.searchManager.active &&
+          !input.historySearch.active &&
+          !sessionViews.active;
+      },
       executeOwnerCommand: (line) => {
         const parsed = parseSlashCommand(line);
         void commandRegistry.executeFromOwner(parsed.name, [...parsed.args], commandContext).catch(() => {
@@ -914,7 +972,7 @@ async function main() {
       composerPendingRisk: composerState.pendingRisk,
       voiceCapture: voiceCaptureStatus(),
       throbber,
-      turnRunning: orchestrator.isThinking,
+      turnRunning: mainTurnBusy(),
       backToBottom,
     }).lines;
 
@@ -1053,10 +1111,17 @@ async function main() {
     render,
   });
 
-  stdin.setRawMode(true);
-  stdin.resume();
-  stdin.setEncoding('utf8'); // one line, as in the TUI's identical boot statement
-  paintWindow.open();
+  // Crash capture before raw mode and terminal entry, as in the TUI: a throw
+  // anywhere from here on restores the terminal before its record is printed.
+  terminalGuards.startTerminalSession({
+    registerFaults: () => processFaults.register(),
+    enableRawMode: () => stdin.setRawMode(true),
+    prepareInput: () => {
+      stdin.resume();
+      stdin.setEncoding('utf8');
+    },
+    enter: () => paintWindow.open(),
+  });
 
   // Theme + forced dark/light before first paint; auto (TTY) probes + repaints once if light; the palette feeds `system`.
   const themeProbe = installStartupThemeProbe({
@@ -1098,6 +1163,13 @@ async function main() {
       render,
       // Keyed to the OFFERED snapshot's sessionId (recoveryPending) so a
       // second, unrelated recovery snapshot on disk is never touched.
+      applyRecovery: buildAgentRecoveryApply({
+        surface: ctx.services.surface,
+        sessionManager: ctx.services.sessionManager,
+        runtime,
+        conversation,
+        hydrateSessionUsage: commandContext.session?.hydrateSessionUsage,
+      }),
       consumeRecovery: () => consumeRecovery(ctx.services.surface, recoveryPending ?? undefined).snapshot,
       removeRecoveryPoint: () => {
         removeRecoveryPoint(ctx.services.surface, recoveryPending ?? undefined);
@@ -1121,7 +1193,6 @@ async function main() {
   process.on('SIGHUP', terminalClosed);
   stdin.on('end', terminalClosed);
   stdin.on('close', terminalClosed);
-  processFaults.register();
   stdout.on('resize', resizeHandler);
 
   conversation.rebuildHistory();
@@ -1151,12 +1222,15 @@ async function main() {
   render();
 }
 main().catch(async (err: unknown) => {
+  // Leave the alternate screen and input modes first, so the explanation below
+  // lands on the user's own screen and their shell is usable afterwards.
+  try { restoreTerminalAfterFailedStartup?.(); } catch { /* best effort before the fatal report */ }
   await releaseFailedStartupSession?.();
   reportFatalStartupError(
     err,
     {
       binary: 'goodvibes-agent',
-      debug: process.env['GOODVIBES_AGENT_DEBUG'] === '1',
+      debug: envFlag(process.env['GOODVIBES_AGENT_DEBUG']),
     },
     {
       logError: (message, context) => logger.error(message, context),

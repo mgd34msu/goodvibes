@@ -28,6 +28,8 @@ export interface ApplyValueResult {
   readonly effectMessage: string | null;
   /** Whether the value actually changed (false = no-op). */
   readonly changed: boolean;
+  /** True when the write was refused or threw; the value is unchanged and effectMessage says why. */
+  readonly failed?: boolean;
 }
 
 export type SettingAppliedCallback = (change: {
@@ -53,6 +55,8 @@ export type SettingAppliedCallback = (change: {
 export interface DaemonOwnedConfigWriter {
   ownsKey(key: string): boolean;
   set(key: string, value: unknown): Promise<void>;
+  /** Removes the daemon's explicit value so the key reads as its default; absent keeps a reset as a write of the default. */
+  reset?(key: string): Promise<void>;
 }
 
 export function applySettingValue({
@@ -64,6 +68,7 @@ export function applySettingValue({
   refreshGroups,
   daemonConfig,
   onAsyncError,
+  reset,
 }: {
   key: ConfigKey;
   value: unknown;
@@ -76,11 +81,19 @@ export function applySettingValue({
   daemonConfig?: DaemonOwnedConfigWriter | null | undefined;
   /** Renders a refused daemon write, so a failed save is never silent. */
   onAsyncError?: ((message: string) => void) | undefined;
+  /**
+   * `value` is the key's schema default and the write is a reset: a schema key
+   * is removed from the settings files (so it reads "default" again and follows
+   * later default changes) instead of being persisted as an explicit value.
+   * A daemon-owned key is also removed on the daemon when the writer can
+   * reset; without that it keeps the write of the default.
+   */
+  reset?: boolean | undefined;
 }): ApplyValueResult {
   refreshSettingsPolicyAvailability(groups, configManager);
   const unavailable = [...groups.values()].flat().find(entry => entry.setting.key === key && entry.metadataUnavailable);
   if (unavailable) {
-    return { restartDomain: null, effectMessage: `Save failed: ${unavailable.metadataUnavailable}`, changed: false };
+    return { restartDomain: null, effectMessage: `Save failed: ${unavailable.metadataUnavailable}`, changed: false, failed: true };
   }
   // Defensive: a handful of TUI-local synthetic keys (see worktree-setup-config.ts)
   // live under a config section CONFIG_SCHEMA/DEFAULT_CONFIG has never populated
@@ -100,20 +113,62 @@ export function applySettingValue({
   // we detect restart-triggering keys by sub-key name heuristic below.
   const isRestartKey = ['host', 'port', 'hostMode', 'enabled'].includes(key.split('.')[1] ?? '');
 
+  const syncEntries = (): void => {
+    // Update every entry carrying this key: cross-listed rows (the network
+    // combined view) and feature-unit headers that share one enablement key
+    // (e.g. both compaction features read behavior.compactionStrategy).
+    for (const entries of groups.values()) {
+      for (const entry of entries) {
+        if (entry.setting.key !== key) continue;
+        const display = readConfigSettingForDisplay(() => configManager.get(key));
+        entry.currentValue = display.value;
+        entry.valueUnavailable = display.held;
+        entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
+        refreshHostSettingEntry(entry, configManager);
+      }
+    }
+  };
+
   const daemonOwned = daemonConfig?.ownsKey(key) === true;
+  // permissions.mode keeps the write: setting it also clears the legacy auto-approve override, which reset() would leave on.
+  const removable = reset === true && key !== 'permissions.mode' && configManager.getSchema().some((setting) => setting.key === key);
   try {
     if (daemonOwned && daemonConfig) {
       // The daemon's store is the one that counts for this key. The local
       // manager is still written so this session's own reads and the rows
       // below reflect the edit immediately; the daemon's copy is what the
-      // daemon acts on, and a refusal from it is surfaced rather than
-      // swallowed, the local value would then be the lie.
-      void daemonConfig.set(key, value).catch((error) => {
+      // daemon acts on. A refusal from it puts the previous local value back
+      // (unless the row was edited again meanwhile) so the row never shows a
+      // value the daemon does not have, and the failure is surfaced.
+      const removeOnDaemon = removable && daemonConfig.reset !== undefined;
+      void (removeOnDaemon ? daemonConfig.reset!(key) : daemonConfig.set(key, value)).catch((error) => {
         logger.error('SettingsModal: the daemon refused a daemon-owned config write', { key, error: summarizeError(error) });
-        onAsyncError?.(`That setting is applied by the daemon and saving it there failed: ${summarizeError(error)}`);
+        let restored = false;
+        if (previousValue !== undefined) {
+          try {
+            const live = postalConfigKey(key) ? configManager.getStored(key) : configManager.get(key);
+            if (deepEqual(live, value)) {
+              configManager.setDynamic(key, previousValue);
+              syncEntries();
+              onSettingApplied?.({ key, previousValue: value, value: previousValue });
+              refreshGroups();
+              restored = true;
+            }
+          } catch (restoreError) {
+            logger.error('SettingsModal: could not restore the previous value after a refused daemon write', { key, error: summarizeError(restoreError) });
+          }
+        }
+        onAsyncError?.(`That setting is applied by the daemon and saving it there failed${restored ? ' (previous value restored)' : ''}: ${summarizeError(error)}`);
       });
     }
-    configManager.setDynamic(key, value);
+    if (removable && (!daemonOwned || daemonConfig?.reset !== undefined)) {
+      // reset() does not consult managed-policy locks; the dynamic setter's
+      // preflight does, so a locked key is refused here exactly as a write is.
+      configManager.validateDynamic(key, value);
+      configManager.reset(key);
+    } else {
+      configManager.setDynamic(key, value);
+    }
   } catch (e) {
     logger.error('SettingsModal: failed to set config value', { key, error: summarizeError(e) });
     for (const entries of groups.values()) for (const entry of entries) refreshHostSettingEntry(entry, configManager);
@@ -121,22 +176,11 @@ export function applySettingValue({
       restartDomain: null,
       effectMessage: `Save failed: ${summarizeError(e)}`,
       changed: false,
+      failed: true,
     };
   }
 
-  // Update every entry carrying this key: cross-listed rows (the network
-  // combined view) and feature-unit headers that share one enablement key
-  // (e.g. both compaction features read behavior.compactionStrategy).
-  for (const entries of groups.values()) {
-    for (const entry of entries) {
-      if (entry.setting.key !== key) continue;
-      const display = readConfigSettingForDisplay(() => configManager.get(key));
-      entry.currentValue = display.value;
-      entry.valueUnavailable = display.held;
-      entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
-      refreshHostSettingEntry(entry, configManager);
-    }
-  }
+  syncEntries();
 
   // Determine restart domain
   let restartDomain: 'control-plane' | 'http-listener' | 'web' | null = null;
@@ -186,7 +230,7 @@ export function applyHostSettingValue({ key, value, configManager, groups, onSet
     return { restartDomain: null, effectMessage: result?.message ?? null, changed };
   } catch (error) {
     refresh();
-    return { restartDomain: null, effectMessage: `Save failed: ${summarizeError(error)}`, changed: false };
+    return { restartDomain: null, effectMessage: `Save failed: ${summarizeError(error)}`, changed: false, failed: true };
   }
 }
 

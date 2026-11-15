@@ -37,6 +37,7 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
     category: 'remote-access',
     scopes: ['read:control-plane'],
     transport: ['ws'],
+    inputSchema: objectSchema({}, []),
     outputSchema: objectSchema({
       available: BOOLEAN_SCHEMA,
       loggedIn: BOOLEAN_SCHEMA,
@@ -52,10 +53,16 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
     description: 'The one-action https affordance: run `tailscale serve --bg <web port>` so tailscale fronts the daemon\'s web surface at its https MagicDNS URL. This is the ONLY state-changing tailscale command the daemon ever runs, and only from this explicit user-initiated verb. The attempt is recorded with an honest receipt either way; on success web.publicBaseUrl is updated to the https URL from the same resolution. The daemon never mints certificates, TLS is terminated by tailscale.',
     category: 'remote-access',
     scopes: ['write:control-plane'],
+    // Runs a host command and rewrites web.publicBaseUrl, which changes every
+    // pairing and link URL the daemon emits: admin, like config.set. The empty
+    // input schema makes the dispatch gate validate (and reject) a stray body.
+    access: 'admin',
     transport: ['ws'],
+    inputSchema: objectSchema({}, []),
     outputSchema: objectSchema({
       receipt: TAILSCALE_SERVE_RECEIPT_SCHEMA,
       publicBaseUrlUpdated: BOOLEAN_SCHEMA,
+      receiptRecorded: BOOLEAN_SCHEMA,
     }, ['receipt', 'publicBaseUrlUpdated']),
   }),
 ];

@@ -22,6 +22,7 @@ import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { type RuntimeServices } from '../../runtime/services.ts';
+import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -130,7 +131,8 @@ describe('live holder identity readiness', () => {
   });
 });
 
-describe('a second agent booted onto a live agent\'s home', () => {
+// Another process's identity is only readable from /proc, so a live holder is only provable on Linux.
+describe.skipIf(process.platform !== 'linux')('a second agent booted onto a live agent\'s home', () => {
   test('is refused at boot, and the refusal names the pid that holds it', async () => {
     const home = makeProjectTempDir('agent-home-claim');
     const holder = await liveForeignProcess();
@@ -160,5 +162,40 @@ describe('a second agent booted onto a live agent\'s home', () => {
     const record = JSON.parse(readFileSync(claimPath, 'utf-8')) as { pid: number };
     expect(record.pid).toBe(process.pid);
     expect(services.shellPaths.homeDirectory).toBe(home);
+  });
+});
+
+describe.skipIf(process.platform !== 'linux')('one-shot commands against a home a live agent holds', () => {
+  async function runCli(home: string, args: readonly string[]): Promise<{ readonly exitCode: number; readonly output: string }> {
+    const workingDirectory = join(home, 'work');
+    mkdirSync(workingDirectory, { recursive: true });
+    const lines: string[] = [];
+    const originalLog = console.log;
+    try {
+      console.log = (value?: unknown) => { lines.push(String(value)); };
+      const result = await handleGoodVibesCliCommand({
+        cli: parseGoodVibesCli(args),
+        configManager: new ConfigManager({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, configDir: join(home, 'config'), workingDir: workingDirectory, homeDir: home }),
+        workingDirectory,
+        homeDirectory: home,
+      });
+      return { exitCode: result.exitCode, output: lines.join('\n') };
+    } finally {
+      console.log = originalLog;
+    }
+  }
+
+  test('a listing answers, and a command that writes the shared stores is refused naming the holder', async () => {
+    const home = makeProjectTempDir('agent-home-readonly');
+    const holder = await liveForeignProcess();
+    writeClaim(home, holder);
+
+    const listing = await runCli(home, ['sessions', 'list']);
+    expect(listing.exitCode).toBe(0);
+    expect(listing.output).toContain('GoodVibes sessions');
+
+    const pick = await runCli(home, ['fleet', 'attempts', 'pick', 'group-1', 'item-1', '--yes']);
+    expect(pick.exitCode).not.toBe(0);
+    expect(pick.output).toContain('already owned by a live process');
   });
 });

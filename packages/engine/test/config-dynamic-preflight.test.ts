@@ -59,3 +59,12 @@ test('unreadable policy is rejected without recovery, quarantine, or file change
   expect(readFileSync(path, 'utf8')).toBe('{ malformed policy');
   expect(readdirSync(f.configDir)).toEqual(files);
 });
+
+test('a reset of a key under a managed lock is refused and the value stays', () => {
+  const f = fixture();
+  const key = 'watchers.pollIntervalMs' as ConfigKey;
+  f.manager.setDynamic(key, 5_000);
+  setManagedSettingLock(key, 'test-policy', 'locked', f.configDir);
+  expect(() => f.manager.reset(key)).toThrow('locked');
+  expect(f.manager.get(key)).toBe(5_000);
+});

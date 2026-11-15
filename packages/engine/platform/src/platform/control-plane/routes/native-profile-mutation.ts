@@ -50,7 +50,7 @@ export function profileMutationOptions(invocation: GatewayMethodInvocation, scop
   const signal = invocation.signal && retained?.signal ? AbortSignal.any([invocation.signal, retained.signal]) : invocation.signal ?? retained?.signal;
   return { ...retained, signal, delegation: profileDelegationForInvocation(invocation), assertCurrent: () => {
     signal?.throwIfAborted();
-    if (invocation.isAuthorized?.(scopes) === false) throw new Error('Profile request is no longer authorized.');
+    if (invocation.isAuthorized?.(scopes) !== true) throw new Error('Profile request is no longer authorized.');
     retained?.assertCurrent?.();
   } };
 }

@@ -14,8 +14,44 @@ export interface KnowledgeMutationPorts {
   readonly allow: (verb: KnowledgeMutationVerb, subject: string | undefined, usage: string) => boolean;
   readonly describeError: (error: unknown) => string;
 }
+/** One shared report for every ingest verb: a stored source whose crawl failed is a failure, not an ingest. */
+export function printKnowledgeIngestResult(
+  print: (text: string) => void,
+  source: { readonly id: string; readonly status: string; readonly canonicalUri?: string | undefined; readonly sourceUri?: string | undefined; readonly crawlError?: string | undefined },
+  fallbackSubject: string,
+): void {
+  const subject = source.canonicalUri ?? source.sourceUri ?? fallbackSubject;
+  if (source.status === 'failed') {
+    print(`[knowledge] Ingest failed ${source.id} ${subject}`);
+    print(`  reason: ${source.crawlError ?? 'no reason recorded'}`);
+    print('  the source is stored with status failed; no content was added to knowledge');
+    return;
+  }
+  print(`[knowledge] Ingested ${source.id} ${subject}`);
+}
+
 /** Parsing and mutation dispatch share code; supplied ports retain product authority and exact segment. */
 export async function handleKnowledgeMutationCommand(
+  sub: string,
+  rest: string[],
+  print: (text: string) => void,
+  ports: KnowledgeMutationPorts,
+  presentation: {
+    readonly fieldSeparator: string;
+    readonly reviewer: string;
+    readonly confirmationSuffix: string;
+    readonly sourceLabel: string;
+  },
+): Promise<boolean> {
+  try {
+    return await dispatchKnowledgeMutation(sub, rest, print, ports, presentation);
+  } catch (error) {
+    // Every verb reports a failure the same way instead of some printing and some throwing.
+    print(`[knowledge] ${ports.describeError(error)}`);
+    return true;
+  }
+}
+async function dispatchKnowledgeMutation(
   sub: string,
   rest: string[],
   print: (text: string) => void,
@@ -47,7 +83,7 @@ export async function handleKnowledgeMutationCommand(
         sourceType: 'url',
         connectorId: 'url',
       });
-      print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? url}`);
+      printKnowledgeIngestResult(print, result.source, url);
       if (result.source.summary) print(`  ${result.source.summary}`);
       if (result.artifactId) print(`  artifact${presentation.fieldSeparator}${result.artifactId}`);
       break;
@@ -129,13 +165,17 @@ export async function handleKnowledgeMutationCommand(
     case 'reindex': {
       if (!ports.allow('reindex', undefined, '/knowledge reindex')) return true;
       const result = await ports.reindex();
+      const failures = result.recompileFailures ?? [];
       print(
         [
-          '[knowledge] Reindex complete',
+          failures.length > 0
+            ? `[knowledge] Reindex finished with ${failures.length} source${failures.length === 1 ? '' : 's'} not recompiled`
+            : '[knowledge] Reindex complete',
           `  sources${presentation.fieldSeparator}${result.status.sourceCount}`,
           `  nodes${presentation.fieldSeparator}${result.status.nodeCount}`,
           `  edges${presentation.fieldSeparator}${result.status.edgeCount}`,
           `  issues${presentation.fieldSeparator}${result.status.issueCount}`,
+          ...failures.map((failure) => `  not recompiled${presentation.fieldSeparator}${failure.sourceId} - ${failure.error}`),
         ].join('\n'),
       );
       break;
@@ -143,6 +183,10 @@ export async function handleKnowledgeMutationCommand(
     case 'consolidate': {
       if (!ports.allow('consolidate', undefined, '/knowledge consolidate [light|deep]')) return true;
       const mode = (positionalArgs(rest)[0] ?? 'light').toLowerCase();
+      if (mode !== 'light' && mode !== 'deep') {
+        print(`[knowledge] Unknown consolidation mode "${mode}". Usage: /knowledge consolidate [light|deep]. Nothing was run.`);
+        return true;
+      }
       const jobId = mode === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation';
       const run = await ports.run(jobId, { mode: 'inline' });
       print(`[knowledge] Consolidation run ${run.id} finished with status ${run.status}.`);

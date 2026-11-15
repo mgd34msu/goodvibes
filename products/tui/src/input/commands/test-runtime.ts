@@ -109,13 +109,51 @@ export function shQuote(value: string): string {
 async function pumpStream(
   stream: ReadableStream<Uint8Array> | undefined,
   onChunk: (text: string) => void,
+  signal: AbortSignal,
 ): Promise<void> {
   if (!stream) return;
   const decoder = new TextDecoder();
-  for await (const chunk of stream) {
-    onChunk(decoder.decode(chunk, { stream: true }));
+  const reader = stream.getReader();
+  // A grandchild that escaped the process group keeps the pipe open; cancelling
+  // the reader lets the run settle instead of waiting for it to exit.
+  const cancel = (): void => { void reader.cancel().catch(() => {}); };
+  if (signal.aborted) cancel();
+  else signal.addEventListener('abort', cancel, { once: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      onChunk(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    signal.removeEventListener('abort', cancel);
   }
 }
+
+/**
+ * Kill the whole test process tree. The shell runs in its own process group
+ * (POSIX), so the group signal reaches the runner's per-file children too;
+ * Windows has no process groups, so only the shell itself is killed there.
+ */
+function killTestTree(proc: { pid: number; kill: (signal?: number | NodeJS.Signals) => void }): void {
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+      return;
+    } catch {
+      // group already gone; fall through to the single-process kill
+    }
+  }
+  try {
+    proc.kill();
+  } catch {
+    // already exited
+  }
+}
+
+// Output already written by a killed tree is drained for this long before the
+// readers are cancelled, so a process that escaped the group cannot hold the run.
+const KILLED_DRAIN_GRACE_MS = 250;
 
 export function registerTestRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -157,12 +195,21 @@ export async function runTestCommand(
   ctx.print(`Running: ${command}`);
 
   const startedAt = Date.now();
-  const proc = Bun.spawn(['/bin/sh', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const proc = Bun.spawn(['/bin/sh', '-c', command], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    detached: process.platform !== 'win32',
+  });
 
   let timedOut = false;
+  const pumpAbort = new AbortController();
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill();
+    killTestTree(proc);
+    drainTimer = setTimeout(() => pumpAbort.abort(), KILLED_DRAIN_GRACE_MS);
+    drainTimer.unref?.();
   }, timeoutMs);
   timer.unref?.();
 
@@ -191,11 +238,17 @@ export async function runTestCommand(
   try {
     [exitCode] = await Promise.all([
       proc.exited,
-      pumpStream(proc.stdout, appendChunk),
-      pumpStream(proc.stderr, appendChunk),
+      pumpStream(proc.stdout, appendChunk, pumpAbort.signal),
+      pumpStream(proc.stderr, appendChunk, pumpAbort.signal),
     ]);
+  } catch (error) {
+    // A failed pump must not leave the test tree running unattended.
+    killTestTree(proc);
+    pumpAbort.abort();
+    throw error;
   } finally {
     clearTimeout(timer);
+    if (drainTimer) clearTimeout(drainTimer);
     clearInterval(flushTimer);
   }
 

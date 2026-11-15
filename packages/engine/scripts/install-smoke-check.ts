@@ -162,7 +162,7 @@ try {
   await unavailable.ask({ state: requestState, questions: requestQuestions });
   effects++;
 } catch (error) {
-  if (!(error instanceof judgmentRoot.JudgmentError) || error.kind !== 'unavailable' || !error.message.includes('No decision models are currently available')) throw error;
+  if (!(error instanceof judgmentRoot.JudgmentError) || error.kind !== 'unavailable' || !error.message.includes('The decision models are rate limited; retry in about')) throw error;
 }
 if (outageAttempts !== profiles.length || effects !== 0) throw new Error('packaged outage did not halt after exhausting configured decision models');
 let refusalAttempts = 0;
@@ -249,7 +249,7 @@ if (typeof Bun !== 'undefined') {
   const { LspService } = await import('${PUBLIC_PACKAGE_NAME}/platform/intelligence');
   const lsp = new LspService({
     workingDirectory: process.cwd(),
-    resolveProjectPath: (...parts) => join(process.cwd(), ...parts),
+    resolveUserPath: (...parts) => join(process.cwd(), ...parts),
   });
   try {
     lsp.registerServer('bash', { command: 'bash-language-server', args: ['start'] });

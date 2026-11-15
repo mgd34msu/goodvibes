@@ -4,7 +4,8 @@ import { withNativeCatalog, rankResearchRecords } from './agent-harness-research
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { RELEASE_EVIDENCE_ORIGIN, RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
 
 const RELEASE_EVIDENCE_ARTIFACTS = [
   {
@@ -95,18 +96,12 @@ export type ReleaseEvidenceArtifactResolution =
     readonly usage?: string;
   };
 
-function packageRoot(): string {
-  return join(import.meta.dir, '..', '..');
-}
-
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(100, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 100);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,14 +141,14 @@ function evidenceLookupFromArgs(args: ReleaseEvidenceArgs): ReleaseEvidenceLooku
   return query ? { source: 'query', input: query } : null;
 }
 
-function loadArtifact(artifact: ReleaseEvidenceArtifact): ReleaseEvidenceArtifactLoadResult {
-  const absolutePath = join(packageRoot(), artifact.path);
+function loadArtifact(root: string, artifact: ReleaseEvidenceArtifact): ReleaseEvidenceArtifactLoadResult {
+  const absolutePath = join(root, artifact.path);
   if (!existsSync(absolutePath)) {
     return {
       status: 'missing',
       artifact,
       absolutePath,
-      reason: `${artifact.path} is not present in this Agent installation.`,
+      reason: `${artifact.path} is not present in this Agent installation. ${RELEASE_EVIDENCE_ORIGIN}`,
     };
   }
   try {
@@ -252,6 +247,26 @@ function summarizeMarkdownArtifact(artifactId: ReleaseEvidenceArtifactId, source
   return { title: firstHeading(source) };
 }
 
+// A single lookup returns the artifact itself, but never more than this much of it.
+export const EVIDENCE_CONTENT_LIMIT = 20_000;
+
+/** Text content cut to the limit, with the cut and the full length stated. */
+export function boundEvidenceText(source: string): Record<string, unknown> {
+  return source.length <= EVIDENCE_CONTENT_LIMIT
+    ? { content: source }
+    : { content: source.slice(0, EVIDENCE_CONTENT_LIMIT), contentTruncated: true, contentChars: source.length };
+}
+
+function boundedEvidenceContent(loaded: Extract<ReleaseEvidenceArtifactLoadResult, { readonly status: 'available' }>): Record<string, unknown> {
+  if (loaded.artifact.kind === 'json') {
+    const serialized = JSON.stringify(loaded.parsed) ?? '';
+    return serialized.length <= EVIDENCE_CONTENT_LIMIT
+      ? { data: loaded.parsed }
+      : { dataOmitted: `The parsed JSON is ${serialized.length} characters, over the ${EVIDENCE_CONTENT_LIMIT} character limit; read ${loaded.artifact.path} in the checkout, or use the summary.` };
+  }
+  return boundEvidenceText(loaded.source ?? '');
+}
+
 function summarizeLoadedArtifact(
   loaded: ReleaseEvidenceArtifactLoadResult,
   options: { readonly includeSource?: boolean } = {},
@@ -281,13 +296,9 @@ function summarizeLoadedArtifact(
       listArtifacts: 'audit action:"evidence"',
       inspectArtifact: `audit action:"artifact" artifactId:"${loaded.artifact.id}"`,
       lowerLevelArtifact: `agent_harness mode:"release_evidence_artifact" artifactId:"${loaded.artifact.id}" includeParameters:true`,
-      includeContent: 'Pass includeParameters:true only when release audit requires artifact content.',
+      includeContent: `A single-artifact lookup includes its content, bounded to ${EVIDENCE_CONTENT_LIMIT} characters (contentTruncated or dataOmitted says when it was cut). Lists include content only with includeParameters:true.`,
     },
-    ...(options.includeSource
-      ? loaded.artifact.kind === 'json'
-        ? { data: loaded.parsed }
-        : { content: loaded.source }
-      : {}),
+    ...(options.includeSource ? boundedEvidenceContent(loaded) : {}),
   };
 }
 
@@ -304,19 +315,19 @@ function evidenceBundleStatus(loaded: readonly ReleaseEvidenceArtifactLoadResult
   };
 }
 
-function releaseArtifactReader(): () => readonly ReleaseEvidenceArtifactLoadResult[] {
+function releaseArtifactReader(root: string): () => readonly ReleaseEvidenceArtifactLoadResult[] {
   let original: readonly ReleaseEvidenceArtifactLoadResult[] | undefined;
-  return () => original ??= captureCatalogData(RELEASE_EVIDENCE_ARTIFACTS.map(loadArtifact));
+  return () => original ??= captureCatalogData(RELEASE_EVIDENCE_ARTIFACTS.map(artifact => loadArtifact(root, artifact)));
 }
 
-export async function releaseEvidenceBundleStatus(options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return withNativeCatalog({}, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(packageRoot(), artifact.path)),
-    releaseArtifactReader(), async (_args, loaded) => evidenceBundleStatus(loaded));
+export async function releaseEvidenceBundleStatus(options: CatalogRankingOptions = {}, root: string = RELEASE_PACKAGE_ROOT): Promise<Record<string, unknown>> {
+  return withNativeCatalog({}, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(root, artifact.path)),
+    releaseArtifactReader(root), async (_args, loaded) => evidenceBundleStatus(loaded));
 }
 
-export async function releaseEvidenceSummary(rawArgs: ReleaseEvidenceArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return withNativeCatalog(rawArgs, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(packageRoot(), artifact.path)),
-    releaseArtifactReader(), async (args, allLoaded, options) => {
+export async function releaseEvidenceSummary(rawArgs: ReleaseEvidenceArgs, options: CatalogRankingOptions = {}, root: string = RELEASE_PACKAGE_ROOT): Promise<Record<string, unknown>> {
+  return withNativeCatalog(rawArgs, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(root, artifact.path)),
+    releaseArtifactReader(root), async (args, allLoaded, options) => {
   const query = readString(args.query || args.target);
   const selected = await rankResearchRecords(allLoaded, query, loaded => ({ id: loaded.artifact.id, description: loaded.artifact.description, evidence: loaded }), options, 'agent.release.evidence');
   const limit = readLimit(args.limit, 100);
@@ -346,9 +357,9 @@ function capturedArtifact(loaded: readonly ReleaseEvidenceArtifactLoadResult[], 
   return original;
 }
 
-export async function describeHarnessReleaseEvidenceArtifact(rawArgs: ReleaseEvidenceArgs, options: CatalogRankingOptions = {}): Promise<ReleaseEvidenceArtifactResolution> {
-  return withNativeCatalog(rawArgs, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(packageRoot(), artifact.path)),
-    releaseArtifactReader(), async (args, allLoaded, options) => {
+export async function describeHarnessReleaseEvidenceArtifact(rawArgs: ReleaseEvidenceArgs, options: CatalogRankingOptions = {}, root: string = RELEASE_PACKAGE_ROOT): Promise<ReleaseEvidenceArtifactResolution> {
+  return withNativeCatalog(rawArgs, options, RELEASE_EVIDENCE_ARTIFACTS.map(artifact => join(root, artifact.path)),
+    releaseArtifactReader(root), async (args, allLoaded, options) => {
   const lookup = evidenceLookupFromArgs(args);
   if (!lookup) {
     return {

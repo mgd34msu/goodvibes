@@ -57,14 +57,6 @@ export const SHARED_APPROVAL_RECORD_SCHEMA = objectSchema({
   resolvedAt: NUMBER_SCHEMA,
   resolvedBy: STRING_SCHEMA,
   decision: SHARED_APPROVAL_DECISION_SCHEMA,
-  // The REAL session an ACCEPTED ask spawned (attach/resume-resolvable,
-  // never a scheduling handle), stamped at the moment the session exists and
-  // published as a record update so an attached surface can open it live.
-  // Never present on denied records; mutually exclusive with fixSessionError.
-  fixSessionId: STRING_SCHEMA,
-  // The honest failure when an accepted ask's spawn produced no attachable
-  // session, recorded instead of a dead id.
-  fixSessionError: STRING_SCHEMA,
   // When a raise carried `timeoutMs`, the moment the ask expires if nobody has
   // answered (approval-broker-raise.ts stamps it). Declared here because the
   // record schema is closed: without it, `approvals.list` fails RESPONSE
@@ -92,6 +84,17 @@ export const APPROVAL_ACTION_INPUT_SCHEMA = objectSchema({
   approvalId: STRING_SCHEMA,
   note: STRING_SCHEMA,
   remember: BOOLEAN_SCHEMA,
+}, ['approvalId'], { additionalProperties: false });
+
+// approvals.cancel adds `release`: a surface that raised the ask giving up its
+// own claim on it. The record is cancelled only when no other surface that
+// raised the same ask is still waiting.
+export const APPROVAL_CANCEL_INPUT_SCHEMA = objectSchema({
+  approvalId: STRING_SCHEMA,
+  note: STRING_SCHEMA,
+  remember: BOOLEAN_SCHEMA,
+  release: BOOLEAN_SCHEMA,
+  holdId: STRING_SCHEMA,
 }, ['approvalId'], { additionalProperties: false });
 
 // approvals.deny carries the full decision reach: rememberTier ("always deny
@@ -136,8 +139,13 @@ export const APPROVAL_RECORDED_DECISION_SCHEMA = objectSchema({
   modifiedArgsDelivered: BOOLEAN_SCHEMA,
 }, ['approved', 'rememberTier', 'reasonStored', 'modifiedArgsDelivered'], { additionalProperties: false });
 
+// `applied` is false when the approval had already ended (or was settled by
+// someone else) and this call changed nothing; the response is still 200 so a
+// raced decision or a retried write-back does not fail, and `refusal` says why.
 export const APPROVAL_ACTION_OUTPUT_SCHEMA = objectSchema({
   approval: SHARED_APPROVAL_RECORD_SCHEMA,
+  applied: BOOLEAN_SCHEMA,
+  refusal: STRING_SCHEMA,
   recorded: APPROVAL_RECORDED_DECISION_SCHEMA,
 }, ['approval']);
 
@@ -166,4 +174,6 @@ export const APPROVAL_RAISE_OUTPUT_SCHEMA = objectSchema({
   approval: SHARED_APPROVAL_RECORD_SCHEMA,
   coalesced: BOOLEAN_SCHEMA,
   decided: BOOLEAN_SCHEMA,
+  // Pass back on approvals.cancel with `release: true` so a retried release does not give up another surface's hold.
+  holdId: STRING_SCHEMA,
 }, ['approval', 'coalesced', 'decided'], { additionalProperties: false });

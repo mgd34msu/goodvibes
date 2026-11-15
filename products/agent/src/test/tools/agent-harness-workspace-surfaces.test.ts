@@ -276,7 +276,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           confirm: true,
           explicitUserRequest: 'Open a picker.',
         });
-        expect(ambiguousSurface.success).toBe(true);
+        expect(ambiguousSurface.success).toBe(false);
+        expect(ambiguousSurface.error).toContain('unknown_ui_surface');
         expect(ambiguousSurface.output).toContain('"status": "unknown_ui_surface"');
         expect(ambiguousSurface.output).toContain('model-picker');
         expect(fixture.openedSurfaces).toEqual([{ id: 'settings', detail: 'provider.model' }]);
@@ -501,7 +502,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
 
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -656,7 +657,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(output).not.toContain('browser-install-secret');
       expect(output).not.toContain('browser-first-run-publication-secret');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -752,7 +753,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(runDismiss.output).toContain('"route": "dismissAgentWorkspace"');
         expect(dismissFixture.openedSurfaces).toEqual([{ id: 'agent-workspace-dismissed', result: true }]);
       } finally {
-        dismissFixture.cleanup();
+        await dismissFixture.cleanup();
       }
 
       const surfaceCount = fixture.openedSurfaces.length;
@@ -762,7 +763,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         confirm: true,
         explicitUserRequest: 'Undo the last prompt edit.',
       });
-      expect(unsupportedRun.success).toBe(true);
+      expect(unsupportedRun.success).toBe(false);
+      expect(unsupportedRun.error).toContain('unsupported_keybinding_action');
       expect(unsupportedRun.output).toContain('"status": "unsupported_keybinding_action"');
       expect(unsupportedRun.output).toContain('"preferredMode": "direct-user-interaction"');
       expect(fixture.openedSurfaces.length).toBe(surfaceCount);
@@ -805,7 +807,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(reset.output).toContain('"customized": false');
       expect(fixture.keybindingsManager.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -824,7 +826,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       const restored = await fixture.admittedTool.execute({ mode: 'reset_keybinding', actionId: 'search' });
       expect(restored.success).toBe(true);
       expect(fixture.keybindingsManager.matches('search', { logicalName: 'f', ctrl: true })).toBe(true);
-    } finally { fixture.cleanup(); }
+    } finally { await fixture.cleanup(); }
   });
 
 
@@ -890,7 +892,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(existsSync(keybindingPath) ? readFileSync(keybindingPath) : null).toEqual(keybindingBefore);
       } finally { installJudgmentPort(previous); }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -996,7 +998,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(missing.success).toBe(false);
       expect(missing.error).toContain('Unknown connected-host capability');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1057,7 +1059,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(requests.map((request) => request.authorization)).toEqual(Array(4).fill(`Bearer ${token}`));
     } finally {
       globalThis.fetch = originalFetch;
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1071,7 +1073,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(action.output).toContain('"editorKind": "learned-behavior"');
       expect(action.output).toContain('Ctrl-J inserts a new line.');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1099,7 +1101,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(compare.output).toContain('"id": "artifactId"');
       expect(compare.output).toContain('Optional saved text artifact id');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1167,7 +1169,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         command: '/agent-profile create <name> [--template <template>] --yes',
       });
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1189,7 +1191,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(result.output!.includes('agent_local_registry') || result.output!.includes('agent_knowledge_ingest'), action.id).toBe(true);
       }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -1204,7 +1206,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       });
       expect(preview.success).toBe(true);
       expect(describeCommandPolicy('brief').effect).toBe('read-only');
-      expect(preview.output).toContain('Command /brief completed.');
+      expect(preview.output).toContain('Command /brief ran and printed:');
       expect(preview.output).toContain('briefing output');
       expect(fixture.printed).toEqual([]);
 
@@ -1215,10 +1217,10 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         explicitUserRequest: 'Show the briefing.',
       });
       expect(executed.success).toBe(true);
-      expect(executed.output).toContain('Command /brief completed.');
+      expect(executed.output).toContain('Command /brief ran and printed:');
       expect(executed.output).toContain('briefing output');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

@@ -171,7 +171,8 @@ test.each(['revoke', 'physical replacement'] as const)('prepared native job perm
   try { expect((await f.call(f.patch())).ok).toBe(false); } finally { persist.mockRestore(); }
   expect(prepared).toBe(true);
   if (kind === 'revoke') { expect(revoked).toBe(true); expect(f.pairing.authenticate(f.paired.token)).toBeNull(); }
-  expect(readFileSync(f.path)).toEqual(before); expect(f.manager.getJob(f.selected.id)).toEqual(f.selected);
+  // A replaced file is reloaded from disk, where absent optional fields are missing rather than undefined, so compare the persisted form.
+  expect(readFileSync(f.path)).toEqual(before); expect(JSON.parse(JSON.stringify(f.manager.getJob(f.selected.id)))).toEqual(JSON.parse(JSON.stringify(f.selected)));
   expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
 });
 

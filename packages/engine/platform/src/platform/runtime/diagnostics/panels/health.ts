@@ -38,7 +38,7 @@ const PLAYBOOK_NAMES: ReadonlyMap<string, string> = new Map([
  * Subscribes to health aggregator updates and maintains a current
  * HealthDashboardData snapshot for the panel to render.
  */
-/** Warn threshold: 20% above the SLO target triggers a 'warn' status. */
+/** Warn threshold: a p95 above target / 1.2 (about 83% of the target) but within it is 'warn'; above the target is 'violated'. */
 const SLO_WARN_FACTOR = 1.2;
 
 /** SLO budget metadata needed for row construction, keyed by metric name. */

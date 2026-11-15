@@ -58,6 +58,9 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
   }
 
   useEffect(() => {
+    // A new stream starts unconnected and without the last stream's error.
+    setConnected(false);
+    setError(null);
     if (!enabled || !sessionId) return undefined;
     let disposed = false;
     let close: (() => void) | null = null;
@@ -107,6 +110,7 @@ export function useCompactionReceipts(sessionId: string, enabled: boolean): Comp
       })
       .catch((_err: unknown) => {
         if (disposed) return;
+        setConnected(false);
         setError(STREAM_ERROR_MESSAGE);
       });
 

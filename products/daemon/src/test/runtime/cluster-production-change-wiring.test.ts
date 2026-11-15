@@ -1,4 +1,3 @@
-/** UNRUN: actual daemon composition, ConfigManager and encrypted SecretsManager. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

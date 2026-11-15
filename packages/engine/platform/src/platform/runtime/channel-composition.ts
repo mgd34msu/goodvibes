@@ -27,8 +27,8 @@ export function createChannelComposition(options: {
     runtimeBus: options.runtimeBus,
     featureFlags: options.featureFlags,
   });
-  const surfaceRegistry = new SurfaceRegistry(options.configManager, options.runtimeStore);
-  const channelPlugins = new ChannelPluginRegistry();
+  const surfaceRegistry = new SurfaceRegistry(options.configManager, options.runtimeStore, options.featureFlags);
+  const channelPlugins = new ChannelPluginRegistry({ featureFlags: options.featureFlags });
   surfaceRegistry.attachPluginRegistry(channelPlugins);
   return { routeBindings, surfaceRegistry, channelPlugins };
 }

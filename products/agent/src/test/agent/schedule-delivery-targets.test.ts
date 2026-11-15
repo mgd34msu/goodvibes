@@ -11,6 +11,7 @@ import { parseRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-
 import {
   DELIVERY_SURFACE_KINDS,
   isRoutineScheduleDeliverySurfaceKind,
+  normalizeProviderModel,
   parseChannelDeliveryTarget,
   validateDeliveryTargets,
 } from '../../agent/schedule-delivery-targets.ts';
@@ -20,7 +21,8 @@ describe('the delivery-surface list has exactly one definition', () => {
     // A type error here (not a runtime failure) is the point: adding a member
     // to the list widens the type automatically.
     const everyKind: readonly (typeof DELIVERY_SURFACE_KINDS)[number][] = DELIVERY_SURFACE_KINDS;
-    expect(everyKind).toHaveLength(DELIVERY_SURFACE_KINDS.length);
+    expect(everyKind.length).toBeGreaterThan(0);
+    expect(new Set(everyKind).size).toBe(everyKind.length);
     for (const kind of DELIVERY_SURFACE_KINDS) {
       expect(isRoutineScheduleDeliverySurfaceKind(kind)).toBe(true);
     }
@@ -88,5 +90,19 @@ describe('validateDeliveryTargets', () => {
     const target = parseChannelDeliveryTarget('slack');
     expect(typeof target).not.toBe('string');
     expect(validateDeliveryTargets([target as Exclude<typeof target, string>], 'reminder command')).toBeNull();
+  });
+});
+
+describe('normalizeProviderModel', () => {
+  test('a bare model without a provider keeps the model whole and names no provider', () => {
+    expect(normalizeProviderModel(undefined, 'gpt-5')).toEqual({ model: 'gpt-5' });
+  });
+
+  test('a provider:model value names its provider when none is given', () => {
+    expect(normalizeProviderModel(undefined, 'openai:gpt-5')).toEqual({ provider: 'openai', model: 'gpt-5' });
+  });
+
+  test('an explicit provider is kept with a bare model', () => {
+    expect(normalizeProviderModel('openai', 'gpt-5')).toEqual({ provider: 'openai', model: 'gpt-5' });
   });
 });

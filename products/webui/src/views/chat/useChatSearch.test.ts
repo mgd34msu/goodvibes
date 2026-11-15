@@ -49,12 +49,16 @@ interface ListStub {
   callCounts: Map<string, number>;
   /** Set to true to make all calls reject. */
   shouldFail: boolean;
+  /** When set for a sessionId, its next list() call waits on this promise, so a test
+   *  can hold a fetch in flight past the debounce. Consumed by that one call. */
+  gates: Map<string, Promise<void>>;
 }
 
 const stub: ListStub = {
   responses: new Map(),
   callCounts: new Map(),
   shouldFail: false,
+  gates: new Map(),
 };
 
 /** A single recorded sessions.search call's input. */
@@ -97,6 +101,11 @@ mock.module('../../lib/goodvibes', () => ({
           list: async (sessionId: string): Promise<unknown> => {
             stub.callCounts.set(sessionId, (stub.callCounts.get(sessionId) ?? 0) + 1);
             if (stub.shouldFail) throw new Error('network error');
+            const gate = stub.gates.get(sessionId);
+            if (gate) {
+              stub.gates.delete(sessionId);
+              await gate;
+            }
             const msgs = stub.responses.get(sessionId) ?? [];
             // companionMessagesFromListResponse reads .items on the response
             return { items: msgs };
@@ -165,6 +174,7 @@ type SearchState = ReturnType<typeof useChatSearch>;
 const EMPTY_STATE: SearchState = {
   results: [],
   isSearching: false,
+  unreadableSessions: 0,
   sessionResults: [],
   sessionSearchState: 'idle',
   includeClosed: false,
@@ -257,6 +267,7 @@ beforeEach(() => {
   stub.responses = new Map();
   stub.callCounts = new Map();
   stub.shouldFail = false;
+  stub.gates = new Map();
   resetSessionSearchStub();
 });
 
@@ -337,6 +348,36 @@ describe('useChatSearch: abort on rapid retype (no stale results)', () => {
     handle.unmount();
   });
 
+  test('a response still in flight for the superseded query never overwrites the newer results', async () => {
+    const slow = makeSession('s3slow', 'Slow session', []);
+    const fast = makeSession('s3fast', 'Fast session', []);
+    seedMessages('s3slow', [{ id: 'm3s', messageId: 'm3s', content: 'alpha slow', createdAt: 1_000 }]);
+    seedMessages('s3fast', [{ id: 'm3f', messageId: 'm3f', content: 'beta fast', createdAt: 2_000 }]);
+
+    let release: () => void = () => {};
+    stub.gates.set('s3slow', new Promise<void>((resolve) => { release = resolve; }));
+
+    // 'alpha' starts its fetch after the debounce and stays open on the gate.
+    const handle = mountHook('alpha', [slow, fast]);
+    await elapse(350);
+    expect(stub.callCounts.get('s3slow')).toBe(1);
+    expect(handle.state.isSearching).toBe(true);
+
+    handle.setQuery('beta');
+    await elapse(350);
+    expect(handle.state.results.map((r) => r.snippet).some((t) => t.includes('beta'))).toBe(true);
+
+    // The old fetch finally lands; its (aborted) pass must not replace 'beta' results.
+    release();
+    await elapse(50);
+    const snippets = handle.state.results.map((r) => r.snippet);
+    expect(snippets.some((t) => t.includes('alpha'))).toBe(false);
+    expect(snippets.some((t) => t.includes('beta'))).toBe(true);
+    expect(handle.state.isSearching).toBe(false);
+
+    handle.unmount();
+  });
+
   test('empty query after typing clears results immediately', async () => {
     const session = makeSession('s4', 'Session 4', []);
     seedMessages('s4', [{ id: 'm4', messageId: 'm4', content: 'clear me', createdAt: 1_000 }]);
@@ -376,29 +417,25 @@ describe('useChatSearch: cache hit and cache invalidation', () => {
     handle.unmount();
   });
 
-  test('cache invalidation: changing sessions identity clears cached messages and re-fetches', async () => {
-    const session1 = makeSession('s6', 'Session 6', []);
+  test('cache invalidation: changing the session list drops cached messages and re-fetches them', async () => {
+    const s6 = makeSession('s6', 'Session 6', []);
     seedMessages('s6', [{ id: 'm6', messageId: 'm6', content: 'stale content', createdAt: 1_000 }]);
 
-    const handle = mountHook('stale', [session1]);
+    const handle = mountHook('content', [s6]);
     await elapse(450);
 
     expect(stub.callCounts.get('s6')).toBe(1);
+    expect(handle.state.results.map((r) => r.snippet)).toEqual([expect.stringContaining('stale content')]);
 
-    // Invalidate by changing sessions identity (new array reference with different id set).
-    const session2 = makeSession('s6-v2', 'Session 6 v2', []);
-    seedMessages('s6-v2', [{ id: 'm6b', messageId: 'm6b', content: 'fresh content stale', createdAt: 2_000 }]);
-
-    handle.setSessions([session2]);
-    await elapse(10); // cache reset happens synchronously during render
-
-    // Re-run query with new sessions
-    handle.setQuery('stale ');
-    handle.setQuery('stale'); // trigger re-render with same effective query to restart effect
+    // The same chat now holds different text, and the list gains a chat (new id set).
+    seedMessages('s6', [{ id: 'm6', messageId: 'm6', content: 'fresh content', createdAt: 2_000 }]);
+    handle.setSessions([s6, makeSession('s6b', 'Session 6b', [])]);
     await elapse(450);
 
-    // s6-v2 should have been fetched (new session in cache)
-    expect(stub.callCounts.get('s6-v2')).toBeGreaterThanOrEqual(1);
+    expect(stub.callCounts.get('s6')).toBe(2);
+    const snippets = handle.state.results.map((r) => r.snippet);
+    expect(snippets.some((t) => t.includes('fresh content'))).toBe(true);
+    expect(snippets.some((t) => t.includes('stale content'))).toBe(false);
 
     handle.unmount();
   });
@@ -731,6 +768,43 @@ describe('useChatSearch: a stale load-more failure', () => {
     expect(handle.state.sessionSearchState).toBe('ready');
     expect(handle.state.sessionResults.map((r) => r.sessionId)).toEqual(['fresh-p1']);
 
+    handle.unmount();
+  });
+});
+
+describe('useChatSearch: chats that cannot be searched', () => {
+  test('a chat whose messages fail to load is counted, not silently skipped', async () => {
+    seedMessages('ok-1', [{ id: 'm1', messageId: 'm1', content: 'needle here', createdAt: 1_000 }]);
+    const handle = mountHook('needle', [makeSession('ok-1', 'Fine', []), makeSession('bad-1', 'Broken', [])]);
+    // Every read fails here, so both chats are unreadable.
+    stub.shouldFail = true;
+    await elapse(450);
+    stub.shouldFail = false;
+    expect(handle.state.unreadableSessions).toBe(2);
+    expect(handle.state.results).toEqual([]);
+
+    handle.setQuery('needle ');
+    await elapse(450);
+    expect(handle.state.unreadableSessions).toBe(0);
+    expect(handle.state.results.length).toBe(1);
+    handle.unmount();
+  });
+
+  test('a chat with newer activity is read again instead of served from the cache', async () => {
+    seedMessages('s-new', [{ id: 'm1', messageId: 'm1', content: 'first note', createdAt: 1_000 }]);
+    const handle = mountHook('note', [{ id: 's-new', sessionId: 's-new', title: 'Chat', updatedAt: 1 }]);
+    await elapse(450);
+    expect(stub.callCounts.get('s-new')).toBe(1);
+    expect(handle.state.results.length).toBe(1);
+
+    seedMessages('s-new', [
+      { id: 'm1', messageId: 'm1', content: 'first note', createdAt: 1_000 },
+      { id: 'm2', messageId: 'm2', content: 'second note', createdAt: 2_000 },
+    ]);
+    handle.setSessions([{ id: 's-new', sessionId: 's-new', title: 'Chat', updatedAt: 2 }]);
+    await elapse(450);
+    expect(stub.callCounts.get('s-new')).toBe(2);
+    expect(handle.state.results.length).toBe(2);
     handle.unmount();
   });
 });

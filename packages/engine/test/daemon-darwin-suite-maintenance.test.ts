@@ -1,5 +1,5 @@
 /** Darwin-shaped native files exercise production maintenance without
- * executing a Mach-O program or loading SQLite. Regression source UNRUN. */
+ * executing a Mach-O program or loading SQLite. */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -8,6 +8,7 @@ import {
 import {
   ConfigurationError,
   GoodVibesError,
+  createHttpStatusError,
   isStructuredDaemonErrorBody,
 } from '@goodvibes-jev/engine/errors';
 import {
@@ -15,7 +16,7 @@ import {
   normalizeStreamReconnectPolicy,
   getStreamReconnectDelay,
 } from '@goodvibes-jev/engine/transport-http';
-import { normalizeBaseUrl } from '@goodvibes-jev/engine/transport-http';
+import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import {
   describeUnknownTransportError,
   injectTraceparentAsync,
@@ -30,6 +31,8 @@ import {
   type RemoteDomainEventsOptions,
   type SerializedEventEnvelope,
 } from './domain-events.js';
+import { buildGate } from './event-source-connector.js';
+import { readTurnLifecycleFrame } from './turn-lifecycle-gate.js';
 
 export type SerializedRuntimeEnvelope<TEvent extends RuntimeEventRecord = RuntimeEventRecord> =
   SerializedEventEnvelope<TEvent>;
@@ -96,6 +99,10 @@ function getSocketOpenState(WebSocketImpl: typeof WebSocket): number {
   return typeof WebSocketImpl.OPEN === 'number' ? WebSocketImpl.OPEN : 1;
 }
 
+function text0(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
 function isSocketOpen(socket: WebSocket, WebSocketImpl: typeof WebSocket): boolean {
   return socket.readyState === getSocketOpenState(WebSocketImpl);
 }
@@ -151,16 +158,25 @@ export function createWebSocketRemoteError(
 ): WebSocketTransportError {
   if (isStructuredDaemonErrorBody(body)) {
     const overrides: Parameters<typeof buildWsErrorOpts>[1] = {};
-    const effectiveHint = body.hint ?? options.hint;
+    const effectiveHint = text0(body.hint) ?? options.hint;
     if (effectiveHint !== undefined) overrides.hint = effectiveHint;
     if (options.cause !== undefined) overrides.cause = options.cause;
-    if (body.category !== undefined) overrides.category = body.category as import('@goodvibes-jev/engine/errors').ErrorCategory;
-    if (body.recoverable !== undefined) overrides.recoverable = body.recoverable;
-    if (body.status !== undefined) overrides.status = body.status;
-    if (body.requestId !== undefined) overrides.requestId = body.requestId;
-    if (body.provider !== undefined) overrides.provider = body.provider;
-    if (body.operation !== undefined) overrides.operation = body.operation;
-    if (body.phase !== undefined) overrides.phase = body.phase;
+    // The frame comes off the wire: keep only fields of the declared type. The
+    // HTTP reader already drops a category outside the wire set, so a category
+    // is kept only when it survives there unchanged.
+    const wireStatus = typeof body.status === 'number' && Number.isFinite(body.status) ? body.status : undefined;
+    const readCategory = createHttpStatusError(wireStatus ?? 500, '', 'WS', body).category;
+    if (typeof body.category === 'string' && readCategory === body.category) overrides.category = readCategory;
+    if (typeof body.recoverable === 'boolean') overrides.recoverable = body.recoverable;
+    if (wireStatus !== undefined) overrides.status = wireStatus;
+    const requestId = text0(body.requestId);
+    if (requestId !== undefined) overrides.requestId = requestId;
+    const provider = text0(body.provider);
+    if (provider !== undefined) overrides.provider = provider;
+    const operation = text0(body.operation);
+    if (operation !== undefined) overrides.operation = operation;
+    const phase = text0(body.phase);
+    if (phase !== undefined) overrides.phase = phase;
     // Use the caller-supplied code (or 'WS_REMOTE_ERROR') as the canonical transport code.
     // The server's body.code is not used as the WebSocketTransportError code because
     // Symbol.hasInstance enforces a canonical-code allowlist; arbitrary server codes
@@ -277,10 +293,12 @@ export function buildWebSocketUrl(
   baseUrl: string,
   domains: readonly RuntimeEventDomain[],
 ): string {
-  // protocol validation and error messaging here mirrors normalizeBaseUrl in
-  // transport-http/src/paths.ts. These two code paths enforce the same rule with
-  // different error messages. If the supported protocol set ever changes, update both.
-  const url = new URL('/api/control-plane/ws', normalizeBaseUrl(baseUrl));
+  // buildUrl runs normalizeBaseUrl, the one rule for which hosts may use plain
+  // http/ws (loopback, private-network and .local hosts, or the explicit
+  // GOODVIBES_ALLOW_INSECURE_TRANSPORT override) and for keeping a base path
+  // prefix. The WebSocket carries the bearer token, so it follows that same
+  // rule rather than a narrower one of its own.
+  const url = new URL(buildUrl(baseUrl, '/api/control-plane/ws'));
   if (url.protocol === 'http:') {
     url.protocol = 'ws:';
   } else if (url.protocol === 'https:') {
@@ -291,27 +309,11 @@ export function buildWebSocketUrl(
       hint: 'Runtime event WebSocket clients require http, https, ws, or wss base URLs.',
     });
   }
-  assertWebSocketAuthTransportIsSafe(url);
   url.searchParams.set('clientKind', 'web');
   if (domains.length > 0) {
     url.searchParams.set('domains', domains.join(','));
   }
   return url.toString();
-}
-
-function assertWebSocketAuthTransportIsSafe(url: URL): void {
-  if (url.protocol !== 'ws:') return;
-  const host = url.hostname.toLowerCase();
-  const isLoopback = host === 'localhost'
-    || host === '127.0.0.1'
-    || host === '::1'
-    || host.startsWith('127.');
-  if (!isLoopback) {
-    throw new ConfigurationError('Refusing to send GoodVibes WebSocket authentication over insecure ws:// transport. Use https:// or wss://.', {
-      source: 'transport',
-      hint: 'Use https:// or wss:// for non-loopback WebSocket runtime event connections.',
-    });
-  }
 }
 
 export function createWebSocketConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(
@@ -321,7 +323,10 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
   options: RuntimeEventConnectorOptions = {},
 ): DomainEventConnector<RuntimeEventDomain, TEvent> {
   const { observer } = options;
-  return async (domain, onEnvelope) => {
+  // One gate per connector, not per connection: it must outlive a reconnect, whose
+  // replay of recent traffic is what it exists to filter.
+  const gate = buildGate(options.turnScope);
+  return async (domain, onEnvelope, onEnded) => {
     const url = buildWebSocketUrl(baseUrl, [domain]);
     const reconnect = options.reconnect;
     const enabled = reconnect?.enabled ?? false;
@@ -354,8 +359,15 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       options.onConnectionStateChange?.(state);
       options.onTransportEvent?.({ type: 'TRANSPORT_CONNECTION_STATE', transportId, state });
     };
+    // The connection is over and will not recover without a new connect: say so on the
+    // state channel and tell the feed, so a later on() opens a fresh one.
+    const terminate = (state: 'failed' | 'disconnected'): void => {
+      emitConnectionState(state);
+      onEnded?.();
+    };
     // Retain pending logical messages across reconnects. Native writes use backpressure.
     const outboundQueue: string[] = [];
+
     const assembler = new WebSocketMessageAssembler();
     let connectionAbort = new AbortController();
     let flushing = false;
@@ -393,11 +405,18 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       socket = null;
     };
 
-    const scheduleReconnect = (reason = 'connection closed') => {
-      if (!enabled || stopped) return;
+    // `unrecoverableAs` is the state to end in when no reconnect is coming: 'failed' where
+    // retrying the same thing cannot help (refused credentials, a socket that cannot be
+    // made), 'disconnected' for a plain drop with reconnect switched off.
+    const scheduleReconnect = (reason = 'connection closed', unrecoverableAs: 'failed' | 'disconnected' = 'disconnected') => {
+      if (stopped) return;
+      if (!enabled) {
+        terminate(unrecoverableAs);
+        return;
+      }
       const nextAttempt = reconnectAttempt + 1;
       if (nextAttempt > reconnectPolicy.maxAttempts) {
-        emitConnectionState('failed');
+        terminate('failed');
         return;
       }
       reconnectAttempt = nextAttempt;
@@ -424,15 +443,17 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       emitConnectionState('reconnecting');
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        void connect().catch((error) => {
-          const connectionError = transportErrorFromUnknown(error, 'WebSocket runtime event reconnect failed');
-          invokeTransportObserver(() => observer?.onError?.(connectionError), observer?.onObserverError);
-          options.onError?.(connectionError);
-          scheduleReconnect();
-        });
+        void connect().catch(handleConnectFailure);
       }, delayMs) as TimeoutHandle;
       // Do not keep Node/Bun processes alive solely to wait for a reconnect.
       reconnectTimer.unref?.();
+    };
+
+    const handleConnectFailure = (error: unknown): void => {
+      const connectionError = transportErrorFromUnknown(error, 'WebSocket runtime event connection failed');
+      invokeTransportObserver(() => observer?.onError?.(connectionError), observer?.onObserverError);
+      options.onError?.(connectionError);
+      scheduleReconnect('could not open the socket', 'failed');
     };
 
     const flushOutboundQueue = (openedSocket: WebSocket): void => {
@@ -472,6 +493,9 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
             { code: 'ENGINE_AUTH_TOKEN_MISSING', source: 'config' },
           ));
           closeSocket();
+          // The resolver may have a token by the next attempt (after a login), so retry within
+          // the reconnect budget; with reconnect off this is the end of the connection.
+          scheduleReconnect('auth token unavailable', 'failed');
           return;
         }
         if (!openedSocket || stopped || socket !== openedSocket) return;
@@ -514,7 +538,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         invokeTransportObserver(() => observer?.onError?.(sendError), observer?.onObserverError);
         options.onError?.(sendError);
         closeSocket();
-        scheduleReconnect();
+        scheduleReconnect('send failed', 'failed');
       }
     };
 
@@ -525,7 +549,24 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         }
         const decoded = assembler.accept(JSON.parse(event.data));
         if (decoded === undefined) return;
-        const frame = decoded as { type?: string; event?: string; payload?: unknown; ok?: boolean };
+        const frame = decoded as { type?: string; event?: string; payload?: unknown; ok?: boolean; error?: unknown };
+        if (frame.type === 'auth' && frame.ok === false) {
+          // The daemon refuses the credential but leaves the socket open. Nothing will ever
+          // authenticate it, and the same token fails again on a reconnect, so end here and
+          // say why instead of sitting 'connected' with every queued frame stuck.
+          const reason = typeof frame.error === 'string' && frame.error.trim() ? frame.error.trim() : 'no reason given';
+          const authError = new WebSocketTransportError(`The daemon refused the WebSocket authentication: ${reason}`, {
+            code: 'WS_REMOTE_ERROR',
+            category: 'authentication',
+            recoverable: false,
+            hint: 'Check the auth token, or request a new one, then open a new connection.',
+          });
+          invokeTransportObserver(() => observer?.onError?.(authError), observer?.onObserverError);
+          options.onError?.(authError);
+          closeSocket();
+          terminate('failed');
+          return;
+        }
         if (frame.type === 'auth' && frame.ok === true && socket) { authenticated = true; flushOutboundQueue(socket); }
         if (!hasReceivedMessage) {
           hasReceivedMessage = true;
@@ -542,14 +583,21 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
             });
           }
           const wsPayload = parsedPayload.data as SerializedRuntimeEnvelope<TEvent>;
+          // A reconnect replays the domain's recent traffic, terminal turn frames included.
+          if (gate) {
+            const turnFrame = readTurnLifecycleFrame(wsPayload.sessionId, wsPayload.payload);
+            if (turnFrame && !gate.accepts(turnFrame)) return;
+          }
           onEnvelope(wsPayload);
           // Notify observer of inbound WS event.
           invokeTransportObserver(() => {
             observer?.onTransportActivity?.({ direction: 'recv', url, kind: 'ws' });
-            if (wsPayload.payload) {
-              (observer as { onEvent?: (e: unknown) => void } | undefined)?.onEvent?.(wsPayload.payload);
-            }
           }, observer?.onObserverError);
+          if (wsPayload.payload) {
+            invokeTransportObserver(() => {
+              (observer as { onEvent?: (e: unknown) => void } | undefined)?.onEvent?.(wsPayload.payload);
+            }, observer?.onObserverError);
+          }
         }
       } catch (error) {
         const malformed = new GoodVibesError(`Malformed WebSocket runtime event frame: ${transportErrorFromUnknown(error, 'parse error').message}`, {
@@ -603,7 +651,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         // to 'disconnected' emitted directly here in onClose, and will NOT see
         // 'reconnecting' following a clean close.
         closeSocket();
-        emitConnectionState('disconnected');
+        terminate('disconnected');
       }
     };
 
@@ -617,6 +665,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       if (stopped) return;
       closeSocket();
       emitConnectionState('connecting');
+      // A runtime may throw here (a blocked port, a bad scheme); the callers report that.
       const nextSocket = new WebSocketImpl(url);
       socket = nextSocket;
       connectionAbort = new AbortController();
@@ -626,10 +675,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       nextSocket.addEventListener('error', onError);
     };
 
-    // connect() is async but new WebSocket() does not throw synchronously;
-    // transport-level failures surface through onError/onClose. The try/catch
-    // here was dead code. Remove it and rely entirely on those event handlers.
-    void connect();
+    void connect().catch(handleConnectFailure);
     return () => {
       stopped = true;
       if (reconnectTimer) {
@@ -642,7 +688,6 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       // reset the outbound buffer on disposal so a future reconnect
       // releases queued messages when the connector is explicitly disposed.
       outboundQueue.length = 0;
-
     };
   };
 }

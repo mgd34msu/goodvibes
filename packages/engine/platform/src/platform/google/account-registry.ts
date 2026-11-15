@@ -23,8 +23,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { normalizeDomain, normalizeEmailAddress } from './signup-address.js';
 
 // ──────────────────────────────────────────────────────────────────
@@ -78,6 +79,8 @@ export interface AgentAccountSnapshot {
   readonly accounts: readonly AgentAccountRecord[];
   /** Records dropped by the last read because they failed validation. */
   readonly droppedOnRead: number;
+  /** Set when the file exists but could not be read or understood; `accounts` is then empty, not the true list. */
+  readonly unreadable?: string;
 }
 
 export interface AccountStoreFile {
@@ -88,12 +91,14 @@ export interface AccountStoreFile {
 /** Additional owner restriction, never an admission grant. */
 export interface AgentAccountWriteGuard {
   readonly assertCurrent: () => void;
-  readonly didWrite?: (stage: 'parent' | 'temporary' | 'store', content: string) => void;
+  readonly didWrite?: (stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) => void;
 }
 
 export interface ParsedStore {
   readonly store: AccountStoreFile;
   readonly dropped: number;
+  /** Why an existing file could not be read; absent for a missing or readable file. */
+  readonly unreadable?: string;
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -180,10 +185,10 @@ function parseStore(raw: string, containsSecretLikeText: SecretLikeTextPredicate
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
+    return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0, unreadable: 'the file is not valid JSON' };
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.accounts)) {
-    return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
+    return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0, unreadable: 'the file is not an account store' };
   }
   const entries = parsed.accounts;
   const accounts = entries
@@ -357,7 +362,7 @@ export class AgentAccountRegistry {
   public snapshot(): AgentAccountSnapshot {
     const parsed = this.readStore();
     const accounts = [...parsed.store.accounts].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return { path: this.storePath, accounts, droppedOnRead: parsed.dropped };
+    return { path: this.storePath, accounts, droppedOnRead: parsed.dropped, ...(parsed.unreadable === undefined ? {} : { unreadable: parsed.unreadable }) };
   }
 
   public list(): readonly AgentAccountRecord[] {
@@ -375,23 +380,23 @@ export class AgentAccountRegistry {
 
   /** Record an account the agent just created. Call this before storing the credential. */
   public record(input: AgentAccountCreateInput, guard?: AgentAccountWriteGuard): AgentAccountRecord {
-    const parsed = this.readStore();
-    const fields = validateAccountCreateFields(input);
-    if (accountSafetyFields(fields).some((text) => this.containsSecretLikeText(text))) {
-      throw new Error('The account registry cannot store secret-looking values. Store the secret in the secret store and record only its key name.');
-    }
-    const account = buildAccountRecord(fields, input, parsed.store.accounts);
-    this.writeStore({ ...parsed.store, accounts: [...parsed.store.accounts, account] }, guard);
-    return account;
+    return this.mutate((parsed) => {
+      const fields = validateAccountCreateFields(input);
+      if (accountSafetyFields(fields).some((text) => this.containsSecretLikeText(text))) {
+        throw new Error('The account registry cannot store secret-looking values. Store the secret in the secret store and record only its key name.');
+      }
+      const account = buildAccountRecord(fields, input, parsed.store.accounts);
+      return { value: account, accounts: [...parsed.store.accounts, account] };
+    }, guard);
   }
 
   public forget(id: string, guard?: AgentAccountWriteGuard): AgentAccountRecord {
-    const parsed = this.readStore();
     const lookup = id.trim().toLowerCase();
-    const existing = parsed.store.accounts.find((account) => account.id === lookup);
-    if (!existing) throw new Error(`Unknown account record ${id}`);
-    this.writeStore({ ...parsed.store, accounts: parsed.store.accounts.filter((account) => account.id !== existing.id) }, guard);
-    return existing;
+    return this.mutate((parsed) => {
+      const existing = parsed.store.accounts.find((account) => account.id === lookup);
+      if (!existing) throw new Error(`Unknown account record ${id}`);
+      return { value: existing, accounts: parsed.store.accounts.filter((account) => account.id !== existing.id) };
+    }, guard);
   }
 
   /**
@@ -401,31 +406,69 @@ export class AgentAccountRegistry {
    * malformed and duplicate entries that a hand edit may have introduced.
    */
   public sweep(input: AgentAccountSweepInput = {}, guard?: AgentAccountWriteGuard): AgentAccountSweepResult {
-    const parsed = this.readStore();
-    const { kept, removed } = sweepAccountRecords(parsed.store.accounts, input);
-    this.writeStore({ ...parsed.store, accounts: kept }, guard);
-    return { removed, remaining: kept.length };
+    return this.mutate((parsed) => {
+      const { kept, removed } = sweepAccountRecords(parsed.store.accounts, input);
+      return { value: { removed, remaining: kept.length }, accounts: kept };
+    }, guard);
   }
+
   /**
    * Divergence from `calendar-registry.ts`: that registry throws when the store cannot be
-   * read. This one must not. A corrupt accounts file would otherwise take down every
+   * read. Reading must not: a corrupt accounts file would otherwise take down every
    * caller that just wants to enumerate what the agent signed up for, which is exactly
-   * when enumeration matters most. Unreadable content yields an empty, still-writable
-   * store; malformed records are dropped individually and counted in `droppedOnRead`.
+   * when enumeration matters most. An unreadable file reads as empty and says so in
+   * `unreadable`; malformed records are dropped individually and counted in `droppedOnRead`.
+   * Writing is the opposite: a view that is empty only because the file could not be read
+   * must never be written back, so {@link mutate} refuses.
    */
   private readStore(): ParsedStore {
     if (!existsSync(this.storePath)) return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
     try {
       return parseStore(readFileSync(this.storePath, 'utf-8'), this.containsSecretLikeText);
     } catch {
-      return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
+      return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0, unreadable: 'the file could not be read' };
     }
   }
 
-  private writeStore(store: AccountStoreFile, guard?: AgentAccountWriteGuard): void {
+  /**
+   * One read-modify-write under a cross-process lock. The lock is a single attempt: another
+   * process mid-update makes this call fail with a retryable message rather than wait,
+   * and nothing is written. An unreadable file is never replaced.
+   */
+  private mutate<T>(
+    change: (parsed: ParsedStore) => { readonly value: T; readonly accounts: readonly AgentAccountRecord[] },
+    guard?: AgentAccountWriteGuard,
+  ): T {
+    const release = tryAcquireCrossProcessLock(`${this.storePath}.lock`);
+    if (release === null) {
+      throw new Error('Another process is updating the account registry. Nothing was changed; retry in a moment.');
+    }
+    try {
+      // The lock file and its staging files touch the store's directory; the guard
+      // is told so that its fence follows this owner's own change and nothing else.
+      guard?.didWrite?.('lock', '');
+      const parsed = this.readStore();
+      if (parsed.unreadable !== undefined) {
+        throw new Error(`The account registry at ${this.storePath} was not changed because ${parsed.unreadable}. Repair or move the file, then retry.`);
+      }
+      const { value, accounts } = change(parsed);
+      this.writeStore({ ...parsed.store, accounts }, guard, parsed.dropped > 0);
+      return value;
+    } finally {
+      release();
+      guard?.didWrite?.('unlock', '');
+    }
+  }
+
+  private writeStore(store: AccountStoreFile, guard?: AgentAccountWriteGuard, keepPreviousCopy = false): void {
     const content = formatStore(store);
     guard?.assertCurrent();
     mkdirSync(dirname(this.storePath), { recursive: true });
+    // Entries skipped on read (stricter content check, hand edit) would be lost by this
+    // rewrite, so the file as it was stays beside the store.
+    if (keepPreviousCopy && existsSync(this.storePath)) {
+      copyFileSync(this.storePath, `${this.storePath}.dropped-${Date.now()}.bak`);
+    }
     guard?.didWrite?.('parent', content);
     const tmpPath = `${this.storePath}.${randomUUID()}.tmp`;
     let ownsTemporary = false;

@@ -1,5 +1,5 @@
 /**
- * Architecture check, run in CI via `bun run architecture:check`.
+ * Architecture check. Run it by hand from products/agent with `bun scripts/check-architecture.ts`; no package script or CI job runs it.
  *
  * Runtime dependency structure only:
  *   1. Import-cycle detection, Tarjan SCC over the src/ runtime import graph

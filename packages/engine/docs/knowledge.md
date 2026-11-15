@@ -14,7 +14,12 @@ again after upgrading. Resume an import whose outcome is unknown with its origin
 request ID and command so the durable receipt can resolve it without duplication.
 The store snapshots older schemas before migration and refuses schema downgrades.
 Concurrent saves compare the exact originally accepted database bytes and refuse
-stale writes without discarding pending local work. File replacement with
+stale writes. When another process (a terminal next to its daemon, for example)
+saved first, the refused write is not saved: the store reloads the current file,
+drops the unsaved write from memory, and reports a retryable
+`KnowledgeStoreConflictError`; retrying the operation applies it to the current
+data. A write inside a batch is not discarded while the batch runs; the reload
+happens once the batch's own save is refused. File replacement with
 identical bytes is accepted; replacement of the store's original containing
 directory requires reopening the store. A reported indeterminate save may already
 be visible: resume the original request instead of restoring an older image.
@@ -220,8 +225,8 @@ so the graph can explain why automatic source evidence was trusted.
 Self-improvement is a durable workflow, not just a side effect. Each detected
 repair opportunity is represented by a `KnowledgeRefinementTask` with a stable
 id, knowledge space, subject, gap id, state, trigger, retry budget, attempt
-count, blocked reason, metadata, and trace. The task moves through a thirteen
-state lifecycle; the active states mirror the repair pipeline's phases and the
+count, blocked reason, metadata, and trace. The task moves through an eleven
+state lifecycle (two more states, marked retired below, exist only for older rows); the active states mirror the repair pipeline's phases and the
 terminal states record exactly why a task stopped.
 
 | State | What it means |
@@ -230,13 +235,13 @@ terminal states record exactly why a task stopped.
 | `queued` | The gap classified as repairable and waits for a background refinement run |
 | `searching` | The run is querying for source-backed repair evidence; each entry into this state counts an attempt |
 | `evaluating` | Candidate sources are being graded for confidence and relevance |
-| `extracting` | Accepted sources are being ingested and extracted |
+| `extracting` | Retired, never written; kept for older rows and clients |
 | `applying` | Accepted repair sources are being linked into the graph |
 | `verified` | The accepted sources were semantically enriched after apply |
 | `closed` | Repair finished; sources were accepted and linked to the gap |
 | `blocked` | Repair cannot proceed and the reason is recorded, such as no repairer configured or the run budget exhausted; recovery sweeps revisit blocked tasks |
 | `suppressed` | Classification judged the gap not applicable, so the pipeline will not retry it |
-| `needs_review` | The outcome awaits a human review decision |
+| `needs_review` | Retired, never written; there is no human review lane for refinement tasks |
 | `cancelled` | A client cancelled the task through the cancel route |
 | `failed` | An attempt ended in an error, with the reason stored on the task |
 
@@ -258,15 +263,15 @@ Run results also include operational guardrails:
 
 - `candidateGaps` is the number of matching gaps found
 - `requestedLimit` is the caller's requested batch size
-- `effectiveLimit` is the platform cap applied to the run
+- `effectiveLimit` is the number of gaps selected for the run: the requested `limit`, or every candidate gap when `limit` is omitted
 - `processedGaps` is the count actually attempted
 - `truncated` is true when more work remains after this foreground batch
 - `budgetExhausted` is true when the configured run window expired
 
-`POST /api/knowledge/refinement/run` accepts `maxRunMs` for shorter foreground
-runs, but the platform still caps broad requests internally. Clients should repeat
-or schedule refinement runs instead of using one unbounded call for an entire
-large knowledge space. The foreground cap is currently 24 gaps per run.
+`POST /api/knowledge/refinement/run` accepts `limit` (1 to 500) and `maxRunMs`.
+The platform applies no default cap: a request with neither processes every
+candidate gap in one call. Pass `limit` and `maxRunMs` to keep a foreground
+call short, and repeat or schedule runs while `truncated` is true.
 
 If a host previously ran refinement before wiring a semantic gap repairer,
 historical `No semantic gap repairer is configured` task records are reopened
@@ -441,11 +446,21 @@ are two durable review lanes:
   `knowledge.issue.review`, records accept/reject/resolve/reopen/edit/forget
   decisions for deterministic knowledge issues. The decision can include a
   semantic `value.fact` object that the platform applies to the linked source or
-  node as reviewed facts.
+  node as reviewed facts. `forget` marks the linked source and node stale even
+  without facts, and the `refresh-stale` job leaves a forgotten source alone
+  unless its id is passed explicitly.
 - consolidation review: `POST /api/knowledge/candidates/{id}/decide`, exposed
   as `knowledge.candidate.decide`, accepts, rejects, or supersedes generated
   memory-promotion/review/source-refresh candidates. Accepted memory-promotion
-  candidates are written into reviewed memory with provenance.
+  candidates are written into reviewed memory with provenance; an optional
+  `memoryClass` or `scope` must be a known memory class or scope, or the request
+  is refused before anything is written. A source-refresh or memory-review
+  candidate cannot be accepted, because accepting performs no refresh or review:
+  run the `refresh-stale` job or review the memory, then reject or supersede the
+  candidate. An accepted or
+  superseded candidate is final: rejecting it afterwards is refused with its
+  current state, and a promotion is undone by forgetting the memory through
+  memory review. A rejected candidate can still be accepted.
 
 Generated issue refreshes preserve resolved review state. If a deterministic
 lint or quality pass emits the same issue id again, the platform keeps the resolved
@@ -485,7 +500,7 @@ The platform-owned `HomeGraphService` supports:
 - generated Home Graph page listing with markdown content for panels and
   editors
 - visual knowledge-base maps from Home Graph nodes, sources, and edges
-- packet generation with field inclusion/exclusion profiles
+- packet generation with sharing profiles (`guest`, `pet-sitter`, `emergency`, `contractor`, `network-admin`, each limited to the sections it may show) and `includeFields`/`excludeFields` over the sections devices, rooms, maintenance, troubleshooting, network, sources and issues; unknown profiles or field names are refused
 - issue listing and review actions
 - durable semantic review decisions for generated issues
 - base knowledge refinement task listing and on-demand runs over
@@ -878,7 +893,7 @@ value and maps to one concrete maintenance routine.
 | --- | --- |
 | `lint` | Scan the store for integrity issues and report them |
 | `reindex` | Rebuild the search index over sources, nodes, and edges |
-| `refresh-stale` | Re-fetch sources whose content has gone stale |
+| `refresh-stale` | Re-fetch sources whose content has gone stale; a source that already has indexed content stays indexed when its re-fetch fails, with `crawlError` and `metadata.lastCrawlFailedAt` recorded |
 | `refresh-bookmarks` | Re-fetch bookmark-backed sources |
 | `sync-browser-history` | Pull new browser-history entries into the store |
 | `rebuild-projections` | Re-materialize the overview and bundle projections |
@@ -892,14 +907,22 @@ Each job and schedule has an id of the form
 `knowledge-sync-browser-history`), and `knowledge.jobs.run()` takes that id, not
 the bare kind.
 
-A job run that is still `queued` or `running` more than six hours after it was
-requested, and that the starting process did not start itself, is recorded as
-`failed` with an "interrupted" error when the knowledge service initializes.
+Runs still in flight when the knowledge service shuts down are recorded as
+`failed` with an "interrupted" error before the store closes. Each run records
+the process that owns it; a `queued` or `running` run whose owning process has
+exited is recorded the same way when the schedule owner starts or runs its next
+scheduled job. A run with no recorded owner (written by an older version) is
+settled once it is more than six hours old.
 
 Jobs can run inline or in the background. Schedules are persisted and can be
 created, enabled, disabled, listed, and deleted through the knowledge API. New
 stores get bootstrap schedules for daily light consolidation, weekly deep
-consolidation, and hourly semantic self-improvement.
+consolidation, and hourly semantic self-improvement. When several processes
+open the same store file (for example the terminal and the daemon, which share
+`~/.goodvibes/tui/`), only one of them runs scheduled jobs: it holds a
+`<store file>.schedule-owner` lock file for its lifetime, and another process
+takes over once that process has exited. A schedule runs once per due time and
+stays armed for its next occurrence even when a run fails.
 
 ## Consolidation and reviewed memory
 
@@ -961,3 +984,12 @@ skipped candidates. `deletedArtifacts` counts confirmed original removals;
 `preservedArtifacts` counts candidates this reset did not remove. Another family
 can preserve a shared artifact even when the artifact has no knowledge-space
 metadata. A dry run or `preserveArtifacts` request skips artifact removal.
+
+## Recovery, cancellation and closed stores
+
+- A knowledge store whose publication outcome could not be confirmed no longer refuses writes until restart: the next operation adopts the published image from disk and continues. While a batch still holds unsaved rows the reload waits and the write is refused with the fence named.
+- Cancelling a refinement task that is already `closed` or `suppressed` is refused with the task's state ("Nothing was changed"); the daemon route answers 409 with code `KNOWLEDGE_REFINEMENT_TASK_REFUSED`. Cancelling an already cancelled task stays idempotent.
+- A repair abandoned by its caller keeps its task active until the next run settles it; Home Graph readiness stops counting an active task as repairing once it has been untouched for 10 minutes.
+- `extracting` and `needs_review` refinement states are retired. They stay in the type for older rows and clients but nothing moves a task into them, and readiness never reports `needs_review` (`needsReviewTaskCount` is always 0).
+- Work that was admitted before a store closed reports "KnowledgeStore is closed". Reads after close still return the last loaded records.
+- Refused native intake, execution intent and execution record moves name the current state, the proposed state and the legal moves.

@@ -12,7 +12,7 @@ import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts
 import { parseSkillStandardMarkdown } from '../../agent/skill-standard.ts';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../../agent/record-labels.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { parseAgentLocalLibraryArgs, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
+import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
 const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;
@@ -25,6 +25,13 @@ function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];
   return value.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
+
+function existingRequirementNames(registry: AgentSkillRegistry, id: string, kind: 'env' | 'command'): readonly string[] {
+  return (registry.get(id)?.requirements ?? []).filter((requirement) => requirement.kind === kind).map((requirement) => requirement.name);
+}
+
+const MODEL_REVIEW_REFUSAL = 'Refused: marking a skill reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. '
+  + 'This came from the model running a command, which is the route content that was just read would use.';
 
 function registryFromContext(ctx: CommandContext): AgentSkillRegistry {
   return AgentSkillRegistry.fromShellPaths(requireShellPaths(ctx));
@@ -320,6 +327,10 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
       ctx.print(`Usage: /skills bundle ${sub} <id>`);
       return;
     }
+    if (sub === 'enable' && ctx.invokedByModel === true && skillRegistry.getBundle(id)?.reviewState !== 'reviewed') {
+      ctx.print(`Refused: Agent skill bundle ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed bundle.`);
+      return;
+    }
     const bundle = skillRegistry.setBundleEnabled(id, sub === 'enable');
     ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill bundle`, bundle));
     return;
@@ -328,6 +339,10 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
     const id = args[1];
     if (!id) {
       ctx.print('Usage: /skills bundle review <id>');
+      return;
+    }
+    if (ctx.invokedByModel === true) {
+      ctx.print(MODEL_REVIEW_REFUSAL.replace('a skill reviewed', 'a skill bundle reviewed'));
       return;
     }
     const bundle = skillRegistry.markBundleReviewed(id);
@@ -397,14 +412,16 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         ].join('\n'));
         return;
       }
-      const content = readFileSync(filePath, 'utf-8');
+      const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
+      if (sourcePath === null) return;
+      const content = readFileSync(sourcePath, 'utf-8');
       const parseResult = parseSkillStandardMarkdown(content);
       if ('error' in parseResult) {
         ctx.print(`Skill standard import rejected: ${parseResult.error}`);
         return;
       }
       const skill = skillRegistry.importFromStandard(content);
-      ctx.print(formatSkillReceipt('Imported shared skill', skill, [`  source ${filePath}`, `  review-state ${skill.reviewState}`]));
+      ctx.print(formatSkillReceipt('Imported shared skill', skill, [`  source ${sourcePath}`, `  review-state ${skill.reviewState}`]));
       return;
     }
     if (sub === 'export-standard') {
@@ -412,7 +429,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const skillId = parsed.rest[0];
       const destDir = parsed.rest[1];
       if (!skillId || !destDir) {
-        ctx.print('Usage: /skills export-standard <id> <dest-directory> --yes');
+        ctx.print('Usage: /skills export-standard <id> <dest-directory> [--overwrite] --yes');
         return;
       }
       if (!parsed.yes) {
@@ -429,7 +446,9 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         ].join('\n'));
         return;
       }
-      const written = skillRegistry.exportToStandard(skillId, destDir);
+      const targetDir = resolveCommandFilePath(ctx, destDir, 'write');
+      if (targetDir === null) return;
+      const written = skillRegistry.exportToStandard(skillId, targetDir, parsed.flags.get('overwrite') === 'true');
       ctx.print(`Exported skill to ${written}`);
       return;
     }
@@ -495,10 +514,13 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         procedure: parsed.flags.get('procedure'),
         triggers: parsed.flags.has('triggers') ? splitList(parsed.flags.get('triggers')) : undefined,
         tags: parsed.flags.has('tags') ? splitList(parsed.flags.get('tags')) : undefined,
+        // A flag for one kind must not erase the other kind the skill already has.
         requirements: parsed.flags.has('requires-env') || parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
           ? buildAgentSkillRequirements({
-            env: splitList(parsed.flags.get('requires-env')),
-            commands: splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands')),
+            env: parsed.flags.has('requires-env') ? splitList(parsed.flags.get('requires-env')) : existingRequirementNames(skillRegistry, id, 'env'),
+            commands: parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
+              ? splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands'))
+              : existingRequirementNames(skillRegistry, id, 'command'),
           })
           : undefined,
         provenance: 'Command',
@@ -512,6 +534,10 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         ctx.print(`Usage: /skills ${sub} <id>`);
         return;
       }
+      if (sub === 'enable' && ctx.invokedByModel === true && skillRegistry.get(id)?.reviewState !== 'reviewed') {
+        ctx.print(`Refused: Agent skill ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed skill.`);
+        return;
+      }
       const skill = skillRegistry.setEnabled(id, sub === 'enable');
       ctx.print(formatSkillReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent skill`, skill));
       return;
@@ -520,6 +546,10 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const id = args[1];
       if (!id) {
         ctx.print('Usage: /skills review <id>');
+        return;
+      }
+      if (ctx.invokedByModel === true) {
+        ctx.print(MODEL_REVIEW_REFUSAL);
         return;
       }
       const skill = skillRegistry.markReviewed(id);

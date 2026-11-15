@@ -12,7 +12,7 @@
  * - Default storage root: ~/.goodvibes/companion-chat/sessions/
  */
 
-import { readdirSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { prepareAtomicPublicationDirectory, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +24,15 @@ import { summarizeError } from '../utils/error-display.js';
 // ---------------------------------------------------------------------------
 // On-disk shape
 // ---------------------------------------------------------------------------
+
+/** A saved chat file that could not be loaded and was set aside, with why. */
+export interface RejectedChatFile {
+  /** File name as found in the sessions directory. */
+  readonly file: string;
+  readonly reason: string;
+  /** Where the file now lives; absent when it could not be moved. */
+  readonly movedTo?: string | undefined;
+}
 
 export interface PersistedChatSession {
   readonly meta: CompanionChatSession;
@@ -53,6 +62,10 @@ export function defaultSessionsDir(homeDirectory?: string): string {
 export class CompanionChatPersistence {
   private readonly sessionsDir: string;
   private directoryOwner: ReturnType<typeof prepareAtomicPublicationDirectory> | undefined;
+  #rejected: RejectedChatFile[] = [];
+
+  /** Files the most recent loadAll() set aside because their content is unusable. */
+  rejectedOnLoad(): readonly RejectedChatFile[] { return this.#rejected; }
 
   constructor(sessionsDir?: string) {
     this.sessionsDir = sessionsDir ?? defaultSessionsDir();
@@ -72,6 +85,8 @@ export class CompanionChatPersistence {
   /** Load all persisted sessions from disk. Returns an empty array on directory failure. */
   async loadAll(): Promise<PersistedChatSession[]> {
     const results: PersistedChatSession[] = [];
+    const rejected: RejectedChatFile[] = [];
+    this.#rejected = rejected;
     let entries: string[];
 
     try {
@@ -92,9 +107,21 @@ export class CompanionChatPersistence {
           this.directoryOwner!.assertCurrent();
           const raw = await fs.readFile(filePath, 'utf-8');
           this.directoryOwner!.assertCurrent();
-          const parsed = JSON.parse(raw) as unknown;
-          if (isPersistedChatSession(parsed) && safeSessionId(parsed.meta.id) && filename === `${parsed.meta.id}.json`) {
+          let parsed: unknown;
+          try { parsed = JSON.parse(raw) as unknown; }
+          catch (parseError) { rejected.push(this.setAside(filename, `not valid JSON (${summarizeError(parseError)})`)); return; }
+          if (!isPersistedChatSession(parsed)) {
+            // A file that parses but is not a chat this build understands (torn,
+            // hand-edited, or written by a newer build) is moved aside, never
+            // deleted: left under its own name, a later save of the same id would
+            // overwrite it, and it would vanish from every listing unexplained.
+            rejected.push(this.setAside(filename, 'content is not a saved chat this version understands'));
+          } else if (safeSessionId(parsed.meta.id) && filename === `${parsed.meta.id}.json`) {
             results.push(parsed);
+          } else {
+            // A well-formed chat under another name is not ours to rename: it is
+            // reported and left exactly where it is.
+            rejected.push({ file: filename, reason: 'file name does not match the chat id inside it' });
           }
         } catch (err) {
           logger.warn('CompanionChatPersistence: failed to load session', {
@@ -107,6 +134,22 @@ export class CompanionChatPersistence {
 
     this.directoryOwner!.assertCurrent();
     return results;
+  }
+
+  /** Rename an unusable chat file to `<name>.rejected` (a numbered name if that is taken). */
+  private setAside(filename: string, reason: string): RejectedChatFile {
+    try {
+      this.directoryOwner!.assertCurrent();
+      const dir = this.directoryOwner!.canonical;
+      let target = join(dir, `${filename}.rejected`);
+      for (let n = 2; existsSync(target); n++) target = join(dir, `${filename}.rejected.${n}`);
+      renameSync(join(dir, filename), target);
+      logger.warn('CompanionChatPersistence: set aside an unusable saved chat', { file: filename, movedTo: target, reason });
+      return { file: filename, reason, movedTo: target };
+    } catch (err) {
+      logger.warn('CompanionChatPersistence: could not set aside an unusable saved chat', { file: filename, reason, error: summarizeError(err) });
+      return { file: filename, reason };
+    }
   }
 
   /** One native synchronous publication lets metadata commit its in-memory

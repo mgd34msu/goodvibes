@@ -74,6 +74,12 @@ export interface CalendarEvent {
   readonly end?: EventDateTime;
   /** Present when the VEVENT carried an RRULE. */
   readonly recurrence?: RecurrenceInfo;
+  /** ATTENDEE addresses as the feed CLAIMED them, `mailto:` stripped. Present only when the VEVENT listed any. */
+  readonly attendees?: readonly string[];
+  /** True when the VEVENT carried RECURRENCE-ID: it replaces one occurrence of the series with the same UID rather than being an event of its own. */
+  readonly isOverride?: true;
+  /** True when the series changes which occurrences exist (EXDATE, RDATE, or a RECURRENCE-ID override elsewhere in the feed), so its RRULE alone would be wrong. */
+  readonly hasSeriesExceptions?: true;
 }
 
 /** A non-fatal problem encountered while parsing, tied to the source when known. */

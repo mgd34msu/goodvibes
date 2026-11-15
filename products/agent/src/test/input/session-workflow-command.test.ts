@@ -33,6 +33,7 @@ function makeRealSessionManagerContext(overrides: {
         title: overrides.title ?? 'My Session',
         getMessageSnapshot: () => [{ role: 'user', content: 'hello' }],
         getTitleSource: () => 'user',
+        branchState: () => ({ branches: {}, currentBranch: 'main' }),
         resetAll: () => {},
         fromJSON: () => {},
         rebuildHistory: () => {},

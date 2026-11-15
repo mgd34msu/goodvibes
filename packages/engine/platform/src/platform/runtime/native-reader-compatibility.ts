@@ -14,7 +14,7 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 /** Installation metadata support, separate from application-data write floors. */
 export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
-export type NativeDataFormat = 'optional-review-binding-v1' | 'companion-chat-effort-v1' | 'inbox-triage-account-bindings-v1' | 'payment-multi-recipient-checkpoints-v1' | 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1' | 'knowledge-schema-v12' | 'configuration-policy-epochs-v2' | 'contract-review-observations-v1' | 'device-capture-observations-v2' | 'inbox-triage-model-receipts-v2' | 'inbox-triage-failed-bindings-v3' | 'contract-tree-baselines-v2' | 'contract-tree-baselines-v3' | 'session-recovery-opaque-paths-v1' | 'worktree-opaque-identities-v1' | 'native-conversation-captures-v2' | 'trigger-snapshots-v2' | 'trigger-platform-tool-kind-v1' | 'native-explicit-sources-v3' | 'native-execution-bindings-v2' | 'native-ci-continuations-v2' | 'contract-answer-claim-scopes-v2' | 'project-default-bindings-v1' | 'knowledge-schema-v13' | 'native-settlements-v2' | 'knowledge-schema-v14' | 'native-historical-import-manifests-v2' | 'terminal-import-journals-v2' | 'knowledge-semantic-identities-v1' | 'knowledge-semantic-source-revisions-v2' | 'knowledge-schema-v15' | 'contract-opaque-identities-v1' | 'knowledge-schema-v16' | 'homegraph-object-identities-v1' | 'knowledge-schema-v17' | 'contract-optional-check-digests-v1' | 'homegraph-quality-identities-v1' | 'pairing-native-source-bindings-v2' | 'inbox-triage-source-revisions-v1' | 'configuration-policy-snapshots-v3' | 'configuration-private-policy-snapshots-v1' | 'contract-input-index-observations-v1' | 'homegraph-quality-revisions-v1' | 'native-explicit-source-revisions-v4' | 'native-historical-import-revisions-v3';
+export type NativeDataFormat = 'optional-review-binding-v1' | 'companion-chat-effort-v1' | 'inbox-triage-account-bindings-v1' | 'payment-multi-recipient-checkpoints-v1' | 'payment-retained-holds-v2' | 'telegram-account-cursors-v2' | 'payment-window-checkpoints-v1' | 'payment-window-checkpoints-v2' | 'payment-reply-history-v1' | 'payment-reply-coverage-v1' | 'payment-operation-reconciliation-v2' | 'delegated-review-owner-v2' | 'discord-inbox-identities-v1' | 'telegram-payment-spans-v3' | 'payment-receive-spans-v1' | 'account-inbox-identities-v1' | 'inbox-triage-identities-v1' | 'knowledge-schema-v12' | 'configuration-policy-epochs-v2' | 'contract-review-observations-v1' | 'device-capture-observations-v2' | 'inbox-triage-model-receipts-v2' | 'inbox-triage-failed-bindings-v3' | 'contract-tree-baselines-v2' | 'contract-tree-baselines-v3' | 'session-recovery-opaque-paths-v1' | 'worktree-opaque-identities-v1' | 'native-conversation-captures-v2' | 'trigger-snapshots-v2' | 'trigger-platform-tool-kind-v1' | 'native-explicit-sources-v3' | 'native-execution-bindings-v2' | 'native-ci-continuations-v2' | 'contract-answer-claim-scopes-v2' | 'project-default-bindings-v1' | 'knowledge-schema-v13' | 'native-settlements-v2' | 'knowledge-schema-v14' | 'native-historical-import-manifests-v2' | 'terminal-import-journals-v2' | 'knowledge-semantic-identities-v1' | 'knowledge-semantic-source-revisions-v2' | 'knowledge-schema-v15' | 'contract-opaque-identities-v1' | 'knowledge-schema-v16' | 'homegraph-object-identities-v1' | 'knowledge-schema-v17' | 'contract-optional-check-digests-v1' | 'homegraph-quality-identities-v1' | 'pairing-native-source-bindings-v2' | 'inbox-triage-source-revisions-v1' | 'configuration-policy-snapshots-v3' | 'configuration-private-policy-snapshots-v1' | 'contract-input-index-observations-v1' | 'homegraph-quality-revisions-v1' | 'native-explicit-source-revisions-v4' | 'native-historical-import-revisions-v3' | 'native-conversation-settled-v1';
 const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'optional-review-binding-v1': '3.1.2',
   'companion-chat-effort-v1': '3.1.2',
@@ -40,6 +40,8 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'homegraph-quality-revisions-v1': '3.1.2',
   'native-explicit-source-revisions-v4': '3.1.2',
   'native-historical-import-revisions-v3': '3.1.2',
+  // The 3.2.0 reader rejects a native conversation capture carrying `settled`, and its startup check of that table then refuses the whole store.
+  'native-conversation-settled-v1': '3.3.0',
   'configuration-policy-snapshots-v3': '3.1.2',
   'configuration-private-policy-snapshots-v1': '3.1.2',
   'contract-input-index-observations-v1': '3.1.2',
@@ -201,7 +203,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
     if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
   };
   return Object.freeze({ declare(format: NativeDataFormat): void {
-    let release: (() => void) | null = null;
+    let release: (() => void) | null = null, published = false;
     try {
       if (failed) throw new NativeDataCompatibilityError('unavailable');
       if (!Object.hasOwn(requirements, format)) throw new Error();
@@ -245,6 +247,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
           const now = read(path);
           if (now.observed?.physical !== previous.observed?.physical || (now.observed !== null && !now.observed.bytes.equals(previous.observed?.bytes ?? Buffer.alloc(0)))) throw new Error();
         } });
+        published = true;
         if (!readFileObservation(path).bytes.equals(Buffer.from(contents))) throw new Error();
         observedFile = true;
         current(); assertCohort();
@@ -254,7 +257,14 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       // fresh execution grant. Final accounting may use it while the host
       // drains after cancellation; no new requirement is published there.
     } catch (error) {
-      if (!(error instanceof NativeDataCompatibilityError && error.kind === 'busy')) failed = true;
+      // A refusal made before anything was written (a lock held too long, a
+      // running version below the floor, a reader cohort that cannot confirm the
+      // new format) leaves the requirement file exactly as it was, so it must not
+      // stop later declarations of formats it already holds. Anything else leaves
+      // the file in an unknown state and fails closed.
+      const refusedBeforeWrite = !published && error instanceof NativeDataCompatibilityError
+        && (error.kind === 'busy' || error.kind === 'incompatible' || error.kind === 'unconfirmed-reader' || error.kind === 'mixed-readers');
+      if (!refusedBeforeWrite) failed = true;
       throw error instanceof NativeDataCompatibilityError ? error : new NativeDataCompatibilityError('unavailable');
     } finally {
       try { release?.(); } catch { failed = true; throw new NativeDataCompatibilityError('unavailable'); }

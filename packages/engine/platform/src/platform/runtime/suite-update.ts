@@ -11,7 +11,7 @@ import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS,
 import { assertStagedClientReaderCompatible } from './client-reader-update.js';
 import { captureUpdateFileIo, hasNativeUpdateObservations, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
 import { NativeDirectoryUpdateError, prepareNativeDirectoryRollback, prepareNativeUpdateDirectory, retainNativeUpdateTree, type NativeUpdateDirectory } from './update-directories.js';
-import { resolveSuiteUpdatePlan, type SuiteProgram, type SuiteUpdatePlan } from './suite-update-plan.js';
+import { resolveSuiteUpdatePlan, SeparatelyManagedWebuiError, type SuiteProgram, type SuiteUpdatePlan } from './suite-update-plan.js';
 import { inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, resolveDaemonNativeTargets } from './daemon-native-cohort.js';
 import { assertNativeReaderCompatible, nativeReaderCapabilities } from './native-reader-compatibility.js';
 import { parseClientReaderArtifact } from './client-reader-artifact.js';
@@ -78,7 +78,15 @@ export function installedSuiteNeedsRepair(options: {
   const io = captureUpdateFileIo(options.io ?? realUpdateFileIo);
   if (!hasNativeUpdateObservations(io, io.readFile, io.observe)) return false;
   try {
-    const plan = resolveSuiteUpdatePlan({ ...options, io }), formats = nativeReaderCapabilities(plan.version).formats;
+    // A separately managed WebUI is refused by the update itself, with its own message; it is
+    // not something repair can fix, so the other products are still checked without it.
+    const plan = (() => {
+      try { return resolveSuiteUpdatePlan({ ...options, io }); }
+      catch (error) {
+        if (!(error instanceof SeparatelyManagedWebuiError)) throw error;
+        return resolveSuiteUpdatePlan({ ...options, webuiDirectory: undefined, io });
+      }
+    })(), formats = nativeReaderCapabilities(plan.version).formats;
     for (const file of plan.files) if (io.observe?.(file.path)?.mode !== (file.executable ? 0o755 : 0o644)) return true;
     for (const program of plan.programs) {
       const profile = program.readerKind === 'linux-daemon' ? join(plan.root, 'daemon-installation.json') : program.path + '.readers.json';

@@ -32,8 +32,11 @@ export interface WatcherDomainState {
   readonly watcherIds: string[];
   readonly activeWatcherIds: string[];
   readonly failedWatcherIds: string[];
+  /** Watchers now in `running` or `starting` (a current count, not a lifetime total like the task and agent totals). */
   readonly totalStarted: number;
+  /** Watchers now `stopped` (current count). */
   readonly totalStopped: number;
+  /** Watchers now `failed` (current count). */
   readonly totalFailed: number;
   readonly totalHeartbeats: number;
   readonly totalDegraded: number;

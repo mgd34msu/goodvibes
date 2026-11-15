@@ -34,7 +34,12 @@ function freeze(value: object): void {
 freeze(triageTagMeaning);
 
 export class TriageTagMeaningHeld extends Error {
-  constructor() { super('Triage tag meaning is unsettled'); this.name = 'TriageTagMeaningHeld'; }
+  constructor(reason: 'unsettled' | 'full' = 'unsettled') {
+    super(reason === 'full'
+      ? 'Triage tag meaning is unsettled: too many custom tag names are on hold for this account. Use the built-in tags, or reconnect the account to clear the holds.'
+      : 'Triage tag meaning is unsettled for this name and is not asked again, so the answer cannot be sampled into a lucky one. Use a clearer or different tag name, or reconnect the account to ask again.');
+    this.name = 'TriageTagMeaningHeld';
+  }
 }
 
 /** All raw names face complete structural/privacy capture before trim or bounds. */

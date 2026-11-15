@@ -3,18 +3,32 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import type { ModelProviderHealthSignal } from './agent-harness-model-routing-types.ts';
 import { readBoolean, readFiniteNumber, readRecord, readString, safeIso } from './agent-harness-model-routing-utils.ts';
 
+const PROVIDER_HEALTH_SNAPSHOT_METHODS = ['getSnapshot', 'snapshot', 'list', 'listProviders', 'listRoutes', 'listHealth'] as const;
+
+/** A source whose first snapshot method answers asynchronously cannot be read here. */
+class AsyncProviderHealthSource extends Error {
+  constructor(method: string) {
+    super(`${method}() answers asynchronously; only synchronous provider-health snapshots are read`);
+  }
+}
+
 function readPotentialProviderHealthSnapshot(source: unknown): unknown {
   if (!source || typeof source !== 'object') return null;
   const record = source as Record<string, unknown>;
-  const directSnapshot = ['getSnapshot', 'snapshot', 'list', 'listProviders', 'listRoutes', 'listHealth']
-    .map((method) => {
-      const fn = record[method];
-      if (typeof fn !== 'function') return null;
-      const result = (fn as () => unknown).call(record);
-      return result instanceof Promise ? null : result;
-    })
-    .find((result) => result !== null);
-  return directSnapshot ?? record.snapshot ?? record.data ?? record.state ?? source;
+  // The first published method decides, the same rule snapshotReadModel follows,
+  // so a later method that throws cannot fail a source that already answered.
+  for (const method of PROVIDER_HEALTH_SNAPSHOT_METHODS) {
+    const fn = record[method];
+    if (typeof fn !== 'function') continue;
+    const result = (fn as () => unknown).call(record);
+    if (result instanceof Promise) {
+      // Nobody awaits it; keep its rejection from surfacing as unhandled.
+      result.catch(() => {});
+      throw new AsyncProviderHealthSource(method);
+    }
+    if (result !== null) return result;
+  }
+  return record.snapshot ?? record.data ?? record.state ?? source;
 }
 
 const PROVIDER_HEALTH_SECRET_PATTERNS: readonly [RegExp, string][] = [
@@ -155,8 +169,13 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
     { path: 'context.clients.operator.providerHealth', source: operator.providerHealth },
   ];
 
+  // The first source that holds no matching record is remembered, not final: a
+  // later source may still carry it.
+  let firstEmpty: ModelProviderHealthSignal | undefined;
+  const searchedPaths: string[] = [];
   for (const entry of sourceEntries) {
     if (entry.source === undefined || entry.source === null) continue;
+    searchedPaths.push(entry.path);
     try {
       const snapshot = readPotentialProviderHealthSnapshot(entry.source);
       const candidates = providerHealthCandidatesFromSnapshot(snapshot);
@@ -165,7 +184,7 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
         : undefined)
         ?? candidates.find((item) => providerHealthCandidateMatchesProvider(item, providerId));
       if (!candidate) {
-        return {
+        firstEmpty ??= {
           ...base,
           status: 'read-model-empty',
           daemonPublication: {
@@ -181,6 +200,7 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
           missingSignals: [`No daemon-published provider-health record matched provider "${providerId}" in ${entry.path}.`],
           policy,
         };
+        continue;
       }
 
       const stats = providerHealthRecordStats(candidate);
@@ -216,7 +236,9 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
         agentConsumption: {
           status: 'consumed',
           readModelPath: entry.path,
-          evidence: 'Agent consumed the published provider-health record for exact model-route readiness.',
+          evidence: providerHealthCandidateRouteId(candidate) === modelRouteId
+            ? 'Agent consumed the published provider-health record for exact model-route readiness.'
+            : 'Agent consumed a published provider-health record matched by provider id only; it is not specific to this model route.',
         },
         sourceRecordId: readString(candidate.recordId) || readString(candidate.id) || providerHealthCandidateRouteId(candidate) || providerHealthCandidateProviderId(candidate),
         ...(providerHealthCandidateRouteId(candidate) ? { modelRouteId: providerHealthCandidateRouteId(candidate) } : {}),
@@ -245,6 +267,7 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
         policy,
       };
     } catch (error) {
+      // Sources after a failing one are not consulted: the failure is reported, never read as absence.
       return {
         ...base,
         status: 'read-model-error',
@@ -262,6 +285,16 @@ export function readProviderHealthSignal(context: CommandContext, providerId: st
         policy,
       };
     }
+  }
+
+  if (firstEmpty) {
+    return searchedPaths.length > 1 ? {
+      ...firstEmpty,
+      agentConsumption: {
+        ...firstEmpty.agentConsumption,
+        evidence: `No provider-health record matched provider "${providerId}" in any of ${searchedPaths.length} published read models (${searchedPaths.join(', ')}).`,
+      },
+    } : firstEmpty;
   }
 
   return {

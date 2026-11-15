@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { acceptanceFailureRecord, assertPreviousReleaseInputs, markAcceptanceCheckpoint, readPreviousReleaseCohort,
   runPreviousReleaseUpgradeSteps, verifyCompiledSuiteRollback, type NativeLifecycleHost, type PreviousReleaseUpgradeSteps } from './accept-published-suite.mjs';
-import { recordDaemonAutoRollback, recordDaemonCleanShutdown, recordDaemonStart, recordDaemonStartAttempt } from '../packages/engine/platform/src/platform/daemon/lifecycle-marker.ts';
+import { recordDaemonAutoRollback, recordDaemonCleanShutdown, recordDaemonStart, recordDaemonStartAttempt, type ProcessIdentityProbe } from '../packages/engine/platform/src/platform/daemon/lifecycle-marker.ts';
 import { describeLocalDaemonState } from '../products/daemon/src/daemon/local-daemon-state.ts';
 
 const roots: string[] = [];
@@ -113,7 +113,9 @@ function rollbackFixture(target: string) {
   const controlPlaneConfigDir = join(data, 'tui'), marker = join(controlPlaneConfigDir, 'control-plane', 'daemon-lifecycle.json');
   mkdirSync(dirname(marker), { recursive: true }); let clock = 1_000_000;
   const now = () => clock++;
-  recordDaemonStart(marker, { version: '3.1.3', pid: 101, now });
+  // The pids here are invented; the host's own process table must not decide whether a marker's owner is alive.
+  const processIdentity: ProcessIdentityProbe = { isAlive: () => false, startTime: () => null };
+  recordDaemonStart(marker, { version: '3.1.3', pid: 101, now, processIdentity });
   const host: NativeLifecycleHost = { root, bin, data, daemon: join(bin, 'goodvibes-daemon'),
     checkpoint(check) { events.push(check); }, async setting() { return 3; },
     async invoke(command, args) {
@@ -122,20 +124,20 @@ function rollbackFixture(target: string) {
         expect(stopped).toBe(true); expect(started).toBe(false); const writer = readFileSync(args[0]!, 'utf8');
         expect(writer).toContain('recordDaemonStartAttempt'); expect(writer).toContain('for(let i=0;i<3;i++)');
         expect(writer).toContain('"3.1.3"');
-        for (let i = 0; i < 3; i++) recordDaemonStartAttempt(marker, { version: '3.1.3', now });
+        for (let i = 0; i < 3; i++) recordDaemonStartAttempt(marker, { version: '3.1.3', now, processIdentity });
         events.push('seed'); return '';
       }
       if (args[0] === '--version') return `${command.split('/').at(-1)} 3.1.2`;
       return JSON.stringify({ ok: true, data: { identity: { version: '3.1.2' },
         local: describeLocalDaemonState({ isLocal: true, controlPlaneConfigDir, now }) } });
     }, async servicePid() { return started ? 102 : 101; }, async stopService() {
-      recordDaemonCleanShutdown(marker, { version: '3.1.3', now }); stopped = true; events.push('stop');
+      recordDaemonCleanShutdown(marker, { version: '3.1.3', now, processIdentity }); stopped = true; events.push('stop');
     },
     async startService() {
-      expect(events).toContain('seed'); expect(recordDaemonStartAttempt(marker, { version: '3.1.3', now }).failedStarts).toBe(3);
-      recordDaemonAutoRollback(marker, { rejectedVersion: '3.1.3', now });
-      recordDaemonStartAttempt(marker, { version: '3.1.2', now });
-      recordDaemonStart(marker, { version: '3.1.2', pid: 102, now });
+      expect(events).toContain('seed'); expect(recordDaemonStartAttempt(marker, { version: '3.1.3', now, processIdentity }).failedStarts).toBe(3);
+      recordDaemonAutoRollback(marker, { rejectedVersion: '3.1.3', now, processIdentity });
+      recordDaemonStartAttempt(marker, { version: '3.1.2', now, processIdentity });
+      recordDaemonStart(marker, { version: '3.1.2', pid: 102, now, processIdentity });
       started = true; events.push('start-native');
     }, async restartService() { throw new Error('Unowned restart'); },
     async verifyCohort(version, selected) { expect(started).toBe(true); expect(version).toBe('3.1.2'); expect(selected).toBe(readers); events.push('cohort'); },
@@ -184,13 +186,4 @@ test('readiness mismatch exposes only a finite release state and checkpoints cle
   expect(acceptanceFailureRecord(evidence, new Error('private output'))).toMatchObject({ observedRelease: 'previous' });
   expect(JSON.stringify(acceptanceFailureRecord({ ...evidence, observedRelease: 'private output' as 'previous' }, new Error()))).not.toContain('private output');
   markAcceptanceCheckpoint(evidence, 'next'); expect(evidence.observedRelease).toBeUndefined();
-});
-
-test('the historical Mac native verifier reuses the shared compiled rollback without changing its real fixture versions', () => {
-  const verifier = readFileSync(join(import.meta.dir, 'verify-macos-update-rollback.mjs'), 'utf8');
-  expect(verifier).toContain('verifyCompiledSuiteRollback({ host, target, source: fixtureSource, sourceRoot: futureCheckout,');
-  expect(verifier).toContain("previousVersion: '3.1.2', currentVersion: '3.1.3', previousReaders: baseline.readers");
-  expect(verifier).toContain('webuiDirectory: bundle, verifyPreserved: preserve');
-  expect(verifier).not.toContain('recordDaemonStartAttempt');
-  expect(verifier).not.toContain('rollbackSuiteUpdate(');
 });

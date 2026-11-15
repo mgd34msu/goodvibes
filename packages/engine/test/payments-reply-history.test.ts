@@ -82,6 +82,14 @@ test('a full archive refuses another message instead of evicting an earlier owne
   expect(saved.replyHistory?.windows[0]?.entries).toEqual(entries);
 });
 
+test('the message past the archive cap is refused and the next purchase is still retained', async () => {
+  const f = await fixture();
+  for (let index = 0; index < 256; index++) await f.append({ ...f.entry, messageId: String(100 + index), updateId: String(200 + index) });
+  await expect(f.append({ ...f.entry, messageId: '999', updateId: '998' })).rejects.toThrow();
+  await new ProtectedPaymentRequests(f.directory).retain(protectedPaymentRequest('next'), () => {});
+  await f.store.retain(protectedPaymentRequest('after'), () => {});
+});
+
 test('native reply history declares its actual reader format before publishing encrypted data', async () => {
   const f = await fixture(), execPath = join(f.root, 'goodvibes-daemon');
   const native = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} }), bytes = readFileSync(f.path);

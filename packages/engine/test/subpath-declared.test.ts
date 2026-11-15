@@ -15,28 +15,16 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { INTENTIONALLY_INTERNAL } from '../scripts/engine-package-lists.ts';
+import { platformExportsMap } from './_helpers/platform-exports.js';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
 const PACKAGE_DIR = join(REPO_ROOT, 'platform');
 const PLATFORM_DIR = join(PACKAGE_DIR, 'src', 'platform');
 
-/**
- * The platform's subpaths, keyed as the old platform package declared them (./platform/x):
- * they are the engine manifest's ./platform/* exports, each naming its source module
- * under the workspace source condition.
- */
-function exportsMap(): Record<string, unknown> {
-  const manifest = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
-    exports?: Record<string, unknown>;
-  };
-  return Object.fromEntries(
-    Object.entries(manifest.exports ?? {})
-      .filter(([key]) => key.startsWith('./platform/'))
-      .map(([key, value]) => [`.${key.slice('./platform'.length)}`, value]),
-  );
-}
+const exportsMap = platformExportsMap;
 
 describe('every shipped capability is importable from the published package', () => {
   test('the check passes: no NEW undeclared top-level capability', () => {
@@ -84,9 +72,7 @@ describe('every shipped capability is importable from the published package', ()
   test('the known-undeclared list is honest about what it covers', () => {
     // Every deliberately internal entry must identify a real capability.
     // A nonexistent module would silently widen the exemption.
-    const source = readFileSync(join(REPO_ROOT, 'scripts', 'check-subpath-declared.ts'), 'utf8');
-    const block = /const KNOWN_UNDECLARED: readonly string\[\] = \[([\s\S]*?)\];/.exec(source)?.[1] ?? '';
-    const listed = [...block.matchAll(/'\.\/platform\/([^']+)'/g)].map((match) => match[1] ?? '');
+    const listed = Object.keys(INTENTIONALLY_INTERNAL);
     expect(listed.length).toBeGreaterThan(0);
     for (const name of listed) {
       expect(existsSync(join(PLATFORM_DIR, name, 'index.ts'))).toBe(true);

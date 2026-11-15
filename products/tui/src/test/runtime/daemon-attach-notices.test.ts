@@ -65,32 +65,44 @@ describe('consumeDaemonAttachNotices', () => {
 });
 
 /**
- * A stub external daemon: its /status?receipts=consume endpoint serves the
- * daemon-side receipts shape ({ receipts: [{id,text,at}] }) once, then nothing,
- * exactly-once, mirroring the daemon's own consume-and-mark-delivered store. It
- * requires the shared bearer, so a request with the wrong/missing token 401s.
+ * A stub external daemon. `?receipts=peek` serves the undelivered receipts
+ * without marking them; `?receipts=ack&ids=` marks exactly those delivered;
+ * `?receipts=consume` (the only delivery a `legacyConsumeOnly` daemon has)
+ * serves and marks in one read. It requires the shared bearer, so a request
+ * with the wrong/missing token 401s.
  */
 function stubExternalDaemon(options: {
   readonly token: string;
   readonly receipts: DaemonReceiptLike[];
   readonly version?: string;
   readonly clientFloor?: string;
+  readonly legacyConsumeOnly?: boolean;
+  readonly requests?: string[];
 }): typeof fetch {
-  let served = false;
+  const delivered = new Set<string>();
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
+    options.requests?.push(url);
     const auth = new Headers(init?.headers).get('Authorization');
     if (auth !== `Bearer ${options.token}`) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
     const headers = options.clientFloor ? { 'X-Goodvibes-Client-Floor': options.clientFloor } : undefined;
     const version = options.version ?? '9.9.9';
-    if (!url.includes('/status?receipts=consume')) {
-      return new Response(JSON.stringify({ status: 'running', version }), { status: 200, ...(headers ? { headers } : {}) });
+    const query = new URL(url).searchParams;
+    const mode = query.get('receipts');
+    const undelivered = options.receipts.filter((receipt) => !delivered.has(receipt.id));
+    if (mode === 'ack' && !options.legacyConsumeOnly) {
+      for (const id of (query.get('ids') ?? '').split(',')) delivered.add(id);
     }
-    const receipts = served ? [] : options.receipts;
-    served = true;
-    return new Response(JSON.stringify({ status: 'running', version, receipts }), { status: 200, ...(headers ? { headers } : {}) });
+    if (mode === 'peek' && !options.legacyConsumeOnly) {
+      return new Response(JSON.stringify({ status: 'running', version, receipts: undelivered }), { status: 200, ...(headers ? { headers } : {}) });
+    }
+    if (mode === 'consume') {
+      for (const receipt of undelivered) delivered.add(receipt.id);
+      return new Response(JSON.stringify({ status: 'running', version, receipts: undelivered }), { status: 200, ...(headers ? { headers } : {}) });
+    }
+    return new Response(JSON.stringify({ status: 'running', version }), { status: 200, ...(headers ? { headers } : {}) });
   }) as typeof fetch;
 }
 
@@ -136,7 +148,7 @@ describe('readExternalDaemonAttach', () => {
     const floorsOnly = await readExternalDaemonAttach(source);
     expect(floorsOnly.answered).toBe(true);
     expect(floorsOnly.notices).toEqual([]);
-    // The daemon still holds it, so the consuming read is the one that sees it.
+    // The daemon still holds it, so the reading that renders is the one that sees it.
     expect((await readExternalDaemonAttach({ ...source, consumeReceipts: true })).notices)
       .toEqual(['updated to 1.28.0']);
   });
@@ -195,5 +207,47 @@ describe('readExternalDaemonAttach', () => {
       fetchImpl,
     });
     expect(read).toMatchObject({ answered: false, notices: [], clientFloor: undefined });
+  });
+
+  test('a response lost before the receipts were parsed leaves them for the next attach', async () => {
+    const inner = stubExternalDaemon({ token: 'shared-bearer', receipts: [{ id: 'r1', text: 'updated to 1.30.0', at: 1 }] });
+    let calls = 0;
+    const flaky = Object.assign(
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls += 1;
+        // The daemon handles the request (and under a consuming read marks the
+        // receipts delivered) but the response never reaches the client.
+        const response = await inner(input, init);
+        if (calls === 1) throw new Error('ECONNRESET');
+        return response;
+      }) as typeof fetch,
+      { preconnect: () => {} },
+    );
+    const source = { baseUrl: 'http://127.0.0.1:3421', authToken: 'shared-bearer', consumeReceipts: true, fetchImpl: flaky };
+    expect((await readExternalDaemonAttach(source)).answered).toBe(false);
+    expect((await readExternalDaemonAttach(source)).notices).toEqual(['updated to 1.30.0']);
+  });
+
+  test('a daemon that predates peek is read with the consume flag', async () => {
+    const fetchImpl = stubExternalDaemon({
+      token: 'shared-bearer',
+      receipts: [{ id: 'r1', text: 'restarted', at: 1 }],
+      legacyConsumeOnly: true,
+    });
+    const source = { baseUrl: 'http://127.0.0.1:3421', authToken: 'shared-bearer', consumeReceipts: true, fetchImpl };
+    expect((await readExternalDaemonAttach(source)).notices).toEqual(['restarted']);
+    expect((await readExternalDaemonAttach(source)).notices).toEqual([]);
+  });
+
+  test('more receipts than one acknowledge accepts are acknowledged in batches, so none repeat', async () => {
+    const receipts = Array.from({ length: 250 }, (_, index) => ({ id: `r${index}`, text: `notice ${index}`, at: index }));
+    const requests: string[] = [];
+    const fetchImpl = stubExternalDaemon({ token: 'shared-bearer', receipts, requests });
+    const source = { baseUrl: 'http://127.0.0.1:3421', authToken: 'shared-bearer', consumeReceipts: true, fetchImpl };
+    expect((await readExternalDaemonAttach(source)).notices).toHaveLength(250);
+    const acks = requests.filter((url) => url.includes('receipts=ack'));
+    expect(acks.length).toBeGreaterThan(1);
+    for (const url of acks) expect((new URL(url).searchParams.get('ids') ?? '').split(',').length).toBeLessThanOrEqual(200);
+    expect((await readExternalDaemonAttach(source)).notices).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-/** Released v3.1.1 bootstrap compatibility fixture; authored and UNRUN.
+/** Released v3.1.1 bootstrap compatibility fixture.
  * The independent HMAC below deliberately reproduces that released wire/KDF
  * representation, rather than using the implementation under verification.
  */

@@ -1,4 +1,3 @@
-/** Native setting acceptance matches the actual transport boundary. UNRUN. */
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

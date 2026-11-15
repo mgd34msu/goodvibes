@@ -80,7 +80,15 @@ export function resolveInitialTheme(): Theme {
   return 'dark';
 }
 
+/**
+ * The last choice storage refused to keep (private mode, full quota). Readers prefer it, so
+ * the change-event handlers that re-read preferences keep the choice for this session
+ * instead of reverting to the stale stored value.
+ */
+let unpersisted: ThemePreferences | null = null;
+
 export function readThemePreferences(): ThemePreferences {
+  if (unpersisted !== null) return unpersisted;
   if (!storageAvailable()) return DEFAULT_THEME_PREFERENCES;
   try {
     const stored = window.localStorage.getItem(THEME_PREFERENCES_KEY);
@@ -97,7 +105,13 @@ export function readThemePreferences(): ThemePreferences {
 
 export function writeThemePreferences(next: ThemePreferences): ThemePreferences {
   if (storageAvailable()) {
-    window.localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify(next));
+    try {
+      window.localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify(next));
+      unpersisted = null;
+    } catch {
+      // The choice still applies for this session, it just is not remembered.
+      unpersisted = next;
+    }
     window.dispatchEvent(new CustomEvent(THEME_PREFERENCES_EVENT, { detail: next }));
   }
   return next;

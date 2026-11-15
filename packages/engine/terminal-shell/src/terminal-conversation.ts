@@ -135,7 +135,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
      * Message index at the time of the last clearDisplay() call.
      * rebuildHistory() renders only messages at or after this index, so the
      * display stays blank for messages added before the clear while LLM history
-     * is fully preserved. Persists until resetAll(). rebuildHistory() never resets this value.
+     * is fully preserved. Persists until the messages are replaced (resetAll, replaceMessagesForLLM, fromJSON). rebuildHistory() never resets this value.
      */
     private _displayFromMessageIndex = 0;
     public suppressSplash: boolean = false;
@@ -158,18 +158,20 @@ export class TerminalConversationManager extends PlatformConversationManager {
                     throw new JudgmentAuthorityRetiredError();
             } };
     }
-    private publishSystemNotice(index: number, restored: boolean): void {
+    /** `known` is a snapshot the caller already took, so a bulk restore deep-copies the history once, not once per message. */
+    private publishSystemNotice(index: number, restored: boolean, known?: ReturnType<PlatformConversationManager['getMessageSnapshot']>): void {
         const sink = this.noticeSink;
-        const message = this.getMessageSnapshot()[index];
-        if (!sink || !message || message.role !== 'system')
+        if (!sink)
+            return;
+        const message = (known ?? this.getMessageSnapshot())[index];
+        if (!message || message.role !== 'system')
             return;
         const lifetime = this.noticeLifetime;
         const eventType = message.runtimeEvent?.type;
         const occurrenceId = message.runtimeEvent?.occurrenceId;
         const assertCurrent = () => {
-            const retained = this.getMessageSnapshot().some(current => current.role === 'system'
-                && current.content === message.content && current.runtimeEvent?.type === eventType
-                && current.runtimeEvent?.occurrenceId === occurrenceId);
+            const retained = this.hasSystemMessage(current => current.content === message.content
+                && current.runtimeEvent?.type === eventType && current.runtimeEvent?.occurrenceId === occurrenceId);
             if (lifetime.signal.aborted || this.noticeLifetime !== lifetime || this.noticeSink !== sink || !retained)
                 throw new JudgmentAuthorityRetiredError();
         };
@@ -260,7 +262,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         // undo() splices the tail of this.messages, freeing indices that ARE reused
         // by subsequent adds. Without this delete, a recycled index could carry a
         // stale kind (e.g. 'operational') and silently mis-classify the new message.
-        const nextIndex = this.getMessageSnapshot().length;
+        const nextIndex = this.getMessageCount();
         this.messageKindRegistry.delete(nextIndex);
         super.addSystemMessage(content, runtimeEvent);
         this.markDirty();
@@ -277,7 +279,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
      * notice sink shows it, the transcript does not.
      */
     public addTypedSystemMessage(content: string, kind: SystemMessageKind, runtimeEvent?: RuntimeEventProvenance | undefined): void {
-        const nextIndex = this.getMessageSnapshot().length;
+        const nextIndex = this.getMessageCount();
         this.messageKindRegistry.set(nextIndex, kind);
         super.addSystemMessage(content, runtimeEvent);
         this.markDirty();
@@ -292,7 +294,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
             // at or after the new message count so a recycled index cannot carry a stale
             // kind from the evicted turn (e.g. 'operational' mis-classifying a bare add
             // as non-navigable, or 'wrfc' wrongly making an operational message navigable).
-            const postUndoCount = this.getMessageSnapshot().length;
+            const postUndoCount = this.getMessageCount();
             for (const key of this.messageKindRegistry.keys()) {
                 if (key >= postUndoCount)
                     this.messageKindRegistry.delete(key);
@@ -412,6 +414,23 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.lineCache.clear();
         this.lastRenderedWidth = 0;
         this.dirty = true;
+        this.messageKindRegistry = new Map();
+        this.dropIndexKeyedView(true);
+    }
+    /**
+     * Fold decisions, turn endings, the display start and message kinds are all keyed by message
+     * index. When the messages are replaced wholesale those indices name other messages, so the
+     * old entries would land on the wrong turn.
+     */
+    private dropIndexKeyedView(persist: boolean): void {
+        for (const key of [...this.collapseState.keys()])
+            if (isWorkTreeFoldKey(key))
+                this.collapseState.delete(key);
+        this.workTree.reset();
+        // A resume replaces messages before the session id moves on, so only a same-session replace may save.
+        if (persist)
+            this.workTree.notifyFoldChange();
+        this._displayFromMessageIndex = 0;
     }
     /**
      * switchBranch - Replace the active messages with the stored branch snapshot.
@@ -422,6 +441,9 @@ export class TerminalConversationManager extends PlatformConversationManager {
         if (result) {
             this.retireNoticePublications();
             this.replacementGeneration++;
+            // The other branch's turns sit at these indices now; folds, outcomes and kinds keyed to the old ones must not follow.
+            this.messageKindRegistry = new Map();
+            this.dropIndexKeyedView(true);
             this.markDirty();
         }
         return result;
@@ -429,7 +451,8 @@ export class TerminalConversationManager extends PlatformConversationManager {
     /**
      * mergeBranch - Append all messages from the named branch that come after
      * the fork point.
-     * Returns true on success, false if the branch does not exist.
+     * Returns true on success, false if the branch does not exist or the two
+     * histories diverged (see checkBranchMerge to tell which).
      */
     public override mergeBranch(name: string): boolean {
         const result = super.mergeBranch(name);
@@ -450,10 +473,15 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.retireNoticePublications();
         this.replacementGeneration++;
         super.fromJSON(data);
+        this.messageKindRegistry = new Map();
+        this.dropIndexKeyedView(false);
         this.usageHydrator?.();
         // A restored session's notices go back into the history (not toasted).
-        for (let index = 0; index < this.getMessageCount(); index++)
-            this.publishSystemNotice(index, true);
+        if (this.noticeSink) {
+            const restored = this.getMessageSnapshot();
+            for (let index = 0; index < restored.length; index++)
+                this.publishSystemNotice(index, true, restored);
+        }
         // Output printed over the conversation this one replaces is not about it.
         this.displayOnly.drop();
         this.history.clear();
@@ -661,11 +689,13 @@ export class TerminalConversationManager extends PlatformConversationManager {
         filePath: string;
         original: string;
         updated: string;
+        unsupported?: string;
     } | null {
         const nearest = this.findNearestBlock(lineIndex, 'diff');
         if (!nearest || !nearest.filePath)
             return null;
-        return { filePath: nearest.filePath, original: nearest.diffOriginal ?? '', updated: nearest.diffUpdated ?? '' };
+        const diff = { filePath: nearest.filePath, original: nearest.diffOriginal ?? '', updated: nearest.diffUpdated ?? '' };
+        return nearest.unsupported === undefined ? diff : { ...diff, unsupported: nearest.unsupported };
     }
     /**
      * toggleCollapseAtLine - Toggle the collapse state of the nearest block to the given line.

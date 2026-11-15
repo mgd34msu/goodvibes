@@ -3,7 +3,7 @@ import {
   decideByPreset, effectivePermissionMode, GATE_PRESETS, GATE_STAKES,
   isPlanMode, nextPermissionMode, normalizePermissionMode, parsePermissionMode,
   PERMISSION_MODE_CYCLE, permissionModeLabel, permissionModeTone, presetForMode,
-  SESSION_GATE_PRESET_NAMES, togglePlanMode,
+  retiredPermissionModeNotice, SESSION_GATE_PRESET_NAMES, togglePlanMode,
 } from '../platform/src/platform/gate/presets.ts';
 
 describe('shared execution modes', () => {
@@ -28,6 +28,17 @@ describe('shared execution modes', () => {
     expect(presetForMode(saved)).toBe(GATE_PRESETS[canonical]);
     expect(permissionModeLabel(saved)).toBe(canonical);
     expect(nextPermissionMode(saved)).toBe(nextPermissionMode(canonical));
+  });
+
+  test('a retired saved mode says it now runs as safe-owner, and current or unknown values need no notice', () => {
+    for (const saved of ['prompt', 'normal', 'accept-edits', 'custom']) {
+      const notice = retiredPermissionModeNotice(saved);
+      expect(notice).toContain(`"${saved}"`);
+      expect(notice).toContain(normalizePermissionMode(saved));
+    }
+    for (const saved of ['safe-owner', 'yolo', 'auto', 'allow-all', 'nonsense', undefined]) {
+      expect(retiredPermissionModeNotice(saved)).toBeUndefined();
+    }
   });
 
   test('unrecognized mutations remain distinguishable from an absent saved mode', () => {

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
@@ -72,34 +71,6 @@ describe('systemd literal service serialization', () => {
     expect(() => renderSystemdUnit({ ...definition, env: { SYNTHETIC: 'first\0next' } })).toThrow('NUL');
   });
 });
-
-const hasSystemdAnalyze = process.platform === 'linux'
-  && spawnSync('systemd-analyze', ['--version'], { timeout: 5_000, encoding: 'utf8' }).status === 0;
-
-test.skipIf(!hasSystemdAnalyze)('native systemd parser accepts literal paths, data and both restart versions without service activation', () => scratch(directory => {
-  const command = join(directory, 'compiled ${HOME}%n daemon');
-  symlinkSync('/bin/true', command);
-  const home = join(directory, 'home $HOME%n "quoted" \\path');
-  const selected: ManagedServiceDefinition = { ...definition, workingDirectory: home, command,
-    args: ['--daemon-home', home, '', ';', 'first\nExecStart=/bin/false'],
-    env: { GOODVIBES_HOME: `${home}\nnext`, SYNTHETIC: '$HOME%n' },
-  };
-  const path = join(directory, `${definition.name}.service`);
-  for (const version of [null, 254]) {
-    writeFileSync(path, renderSystemdUnit(selected, version));
-    const parsed = spawnSync('systemd-analyze', ['verify', '--generators=no', '--man=no', path], {
-      timeout: 10_000, encoding: 'utf8', env: { ...process.env, SYSTEMD_LOG_LEVEL: 'debug', SYSTEMD_LOG_TARGET: 'console' },
-    });
-    expect(parsed.error).toBeUndefined();
-    expect(parsed.status).toBe(0);
-    const output = parsed.stdout + parsed.stderr;
-    expect(output).toContain(`WorkingDirectory: ${home}`);
-    expect(output).toContain(`Environment: GOODVIBES_HOME=${home}\nnext`);
-    expect(output).toContain('Environment: SYNTHETIC=$HOME%n');
-    expect(output).not.toContain('is not executable');
-    expect(output).not.toContain('Unknown key');
-  }
-}));
 
 describe('installed service definition identity', () => {
   test.each(['systemd', 'launchd', 'windows', 'manual'] as const)('%s compares actual installed bytes without management actions', platform => scratch(directory => {

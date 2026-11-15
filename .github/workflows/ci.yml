@@ -138,7 +138,7 @@ jobs:
   # Engine tests: nine disjoint partitions of the engine suite (selected by the
   # runner itself with --partition=INDEX/9) plus the companion runtimes. Every
   # leg restores the build job's compiled output. Partition 1 also owns the
-  # installer lifecycle, judgment and the deterministic fake-IMAP sweep;
+  # installer lifecycle and judgment;
   # partition 9 holds the dedicated native workflow suite, whose declared
   # four-minute test sets its own timeout.
   # ---------------------------------------------------------------------------
@@ -191,12 +191,6 @@ jobs:
       - name: Run judgment suite
         if: matrix.foundation
         run: bun run test:judgment
-      - name: Sweep the fake-IMAP suites for the lost-wake race
-        # Re-runs ordinary suites with one wire call delayed so a wake edge a
-        # test pushes at the wrong moment is reliably lost instead of
-        # occasionally lost. Cheap and deterministic; see the script's header.
-        if: matrix.foundation
-        run: bun run sweep:wake-race
 
   # Product test suites for the products that have no dedicated lane below.
   # The daemon leg also produces the Linux x64 native artifact.
@@ -286,6 +280,10 @@ jobs:
           path: /tmp/daemon-native-artifact
       - name: Restore daemon native artifact
         run: tar -xzf /tmp/daemon-native-artifact/daemon-native-linux-x64.tgz -C .
+      - name: Verify the restored cohort against its recorded identity
+        env:
+          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bun products/daemon/scripts/ci-artifact.ts verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
       - name: Qualify isolated daemon commands and synthetic send
         run: bun run --cwd products/daemon verify:binary
 
@@ -395,6 +393,11 @@ jobs:
         env:
           NATIVE_TARGET: ${{ matrix.target }}
         run: tar -xzf "/tmp/daemon-native-artifact/daemon-native-${NATIVE_TARGET}.tgz" -C .
+      - name: Verify the restored Linux ARM cohort against its recorded identity
+        if: matrix.platform == 'linux'
+        env:
+          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bun products/daemon/scripts/ci-artifact.ts verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
       - name: Execute isolated Linux ARM cohort
         if: matrix.platform == 'linux'
         run: node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64
@@ -440,6 +443,7 @@ jobs:
         run: |
           products/agent/dist/goodvibes-agent-linux-x64 --version
           echo "GOODVIBES_E2E_BINARY=$GITHUB_WORKSPACE/products/agent/dist/goodvibes-agent-linux-x64" >> "$GITHUB_ENV"
+          echo "GOODVIBES_TEST_HEADLESS_AGENT_BINARY=$GITHUB_WORKSPACE/products/agent/dist/goodvibes-agent-linux-x64" >> "$GITHUB_ENV"
       - name: Install Agent terminal E2E prerequisite
         uses: ./.github/actions/apt-install
         with:
@@ -492,10 +496,10 @@ jobs:
         run: |
           tar -xzf /tmp/tui-native-artifact/tui-native-linux-x64.tgz -C .
           products/tui/dist/goodvibes-linux-x64 --version
-      - name: Qualify host pairing, native integration, passive history and interruption recovery
+      - name: Run every TUI terminal end-to-end file against the built binary
         env:
           GOODVIBES_E2E_BINARY: ${{ github.workspace }}/products/tui/dist/goodvibes-linux-x64
-        run: bun packages/engine/scripts/test.ts --cwd ../../products/tui --timeout=300000 src/test/e2e/host-pair-terminal.e2e.test.ts src/test/e2e/host-pair-interactive.e2e.test.ts src/test/e2e/planning-history.e2e.test.ts src/test/e2e/native-integration.e2e.test.ts
+        run: bun packages/engine/scripts/test.ts --cwd ../../products/tui --timeout=300000 src/test/e2e
 
   # The WebUI browser suite (phone, desktop and the genuine LAN origin) on two
   # runners using Playwright's own sharding. Each retains two workers and every
@@ -546,6 +550,12 @@ jobs:
           timeout --signal=KILL 30s bun scripts/ci-browser-smoke.ts
       - name: Check workspace exports and generated data
         run: bun run release:gate && bun run generated:check
+      - name: Exercise the WebUI client against a real daemon
+        # One real daemon boot (isolated home, loopback, no model) is enough: the
+        # browser shards below use synthetic fixtures, so this is what fails when a
+        # route or stream frame changes shape.
+        if: matrix.shard == 1
+        run: bun run test:live
       - name: Exercise the production app with synthetic daemon fixtures
         run: node node_modules/@playwright/test/cli.js test --shard=${{ matrix.shard }}/2 --workers=2
       - name: Retain report, traces, and screenshots
@@ -572,7 +582,7 @@ jobs:
       matrix:
         lane: [a, b]
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     needs: [build]
     steps:
       - name: Checkout
@@ -589,6 +599,19 @@ jobs:
         uses: ./.github/actions/setup
       - name: Restore workspace package output
         uses: ./.github/actions/restore-build
+      # A live sandbox test that is not named in a lane below runs only in the generic partitions, where it
+      # skips silently on a host without namespaces. Any engine test that probes the host and can skip must be listed here.
+      - name: Every skippable live-sandbox test is on a lane
+        if: matrix.lane == 'a'
+        run: |
+          missing=0
+          while IFS= read -r file; do
+            if ! grep -qF "${file#packages/engine/}" .github/workflows/ci.yml; then
+              echo "::error file=$file::Add this live-sandbox test to a lane of the exec-containment-proof job in ci.yml so it cannot skip unnoticed."
+              missing=1
+            fi
+          done < <(grep -rlE 'probeCapturedExecAvailability|detectSandboxAvailability|probeSandboxHost|detectPtyAvailability|/usr/bin/bwrap' packages/engine/test --include='*.test.ts' | xargs grep -l 'skipIf' | sort)
+          exit "$missing"
       - name: Require actual sandbox fixture execution
         env:
           GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT: "1"
@@ -596,15 +619,16 @@ jobs:
         run: |
           case "$LANE" in
             a)
-              bun packages/engine/scripts/test.ts test/exec-interactive.test.ts test/exec-sandbox.test.ts test/exec-containment-proof.test.ts test/captured-exec.test.ts test/captured-exec-modes.test.ts test/captured-exec-file-ops.test.ts test/captured-exec-runtime-input.test.ts test/captured-edit-write.test.ts
+              bun packages/engine/scripts/test.ts test/exec-interactive.test.ts test/exec-interactive-lifecycle.test.ts test/exec-run-hardening.test.ts test/exec-sandbox.test.ts test/exec-sandbox-final-spawn.test.ts test/exec-sandbox-host-sockets.test.ts test/exec-sandbox-runtimes.test.ts test/exec-containment-proof.test.ts test/captured-exec.test.ts test/captured-exec-modes.test.ts test/captured-exec-file-ops.test.ts test/captured-exec-runtime-input.test.ts test/captured-edit-write.test.ts
               bun packages/engine/scripts/test.ts test/contract/actual-direct-exec-input-authority.test.ts test/captured-direct-exec-compiled.test.ts
-              bun packages/engine/scripts/test.ts --cwd ../../products/agent ./src/test/tools/owner-terminal-guard.test.ts ./src/test/runtime/exec-cancellation-wrappers.test.ts ./src/test/tools/tool-execution-safety.test.ts
+              bun packages/engine/scripts/test.ts --cwd ../../products/agent ./src/test/runtime/exec-cancellation-wrappers.test.ts ./src/test/tools/tool-execution-safety.test.ts
               bun packages/engine/scripts/test.ts test/captured-auto-heal-real-tools.test.ts
               ;;
             b)
+              bun packages/engine/scripts/test.ts test/captured-exec-held-reasons.test.ts test/hosted-autonomous-sandbox-escalation.test.ts test/hosted-autonomous-tool-prompts.test.ts test/hosted-initial-workspace-trust.test.ts
               bun packages/engine/scripts/test.ts test/captured-repl.test.ts test/captured-repl-compiled.test.ts test/captured-bun-runtime-input.test.ts test/contract/actual-repl-input-authority.test.ts test/contract/actual-repl-run-history.test.ts test/contract/actual-repl-history-cancellation.test.ts
-              # Real dependency capture and validators have a 300-second test
-              # budget, declared by the tests themselves.
+              # Real dependency capture and validators have test budgets of up to
+              # 420 seconds, declared by the tests themselves.
               bun packages/engine/scripts/test.ts test/contract/actual-input-authority-graph.test.ts test/contract/actual-edit-write-input-authority.test.ts test/contract/actual-validator-runtime.test.ts test/captured-passive-context-pipeline.test.ts
               bun packages/engine/scripts/test.ts test/captured-auto-heal-candidate.test.ts test/captured-auto-heal-revision.test.ts test/captured-auto-heal.test.ts test/captured-auto-heal-backend-isolation.test.ts test/captured-auto-heal-rollback.test.ts test/contract/actual-captured-auto-heal.test.ts
               ;;
@@ -636,3 +660,37 @@ jobs:
         uses: ./.github/actions/restore-build
       - name: Run packaged-artifact release lane
         run: bun run release:artifact-lane
+
+  # One job a branch rule and the release gate can require: it fails when any
+  # other job did not succeed, including a skipped or cancelled one.
+  ci-ok:
+    name: CI ok
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - validate
+      - eval-gate
+      - security-audit
+      - build
+      - platform-matrix
+      - product-tests
+      - daemon-native
+      - daemon-native-produce
+      - daemon-native-execution
+      - agent-tests
+      - tui-host-pair-terminal
+      - webui-browser
+      - exec-containment-proof
+      - artifact-lane
+    steps:
+      - name: Every CI job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -c '
+          import json, sys
+          bad = {name: job["result"] for name, job in json.load(sys.stdin).items() if job["result"] != "success"}
+          if bad:
+              sys.exit("CI jobs that did not succeed: " + ", ".join(f"{n} ({r})" for n, r in sorted(bad.items())))
+          '

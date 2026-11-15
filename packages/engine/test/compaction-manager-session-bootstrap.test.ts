@@ -154,8 +154,7 @@ test('a session bootstrap creates the CompactionManager and a compaction in the 
 });
 
 test('a failed session compaction reports COMPACTION_FAILED through the manager and rethrows', async () => {
-  const flags = services.featureFlags;
-  const manager = new CompactionManager({ sessionId: 's-fail', bus: runtimeBus, flags, contextWindow: () => 1000 });
+  const manager = new CompactionManager({ sessionId: 's-fail', bus: runtimeBus, contextWindow: () => 1000 });
   const types: string[] = [];
   const off = runtimeBus.onDomain('compaction', (env) => { types.push(env.payload.type); });
 

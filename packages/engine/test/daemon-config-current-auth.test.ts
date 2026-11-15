@@ -27,10 +27,10 @@ function fixture(kind: AuthKind, payload: Record<string, unknown> | Response = {
   const users = new UserAuthManager({ bootstrapFilePath: join(root, 'unused-users.json'),
     bootstrapCredentialPath: join(root, 'unused-bootstrap.txt'),
     users: [{ username: 'synthetic-admin', passwordHash: 'unused-synthetic-hash', roles: admin ? ['admin'] : ['viewer'] },
-      { username: 'synthetic-spare', passwordHash: 'unused-synthetic-hash', roles: ['viewer'] }] });
+      { username: 'synthetic-spare', passwordHash: 'unused-synthetic-hash', roles: ['admin'] }] });
   const session = users.createSession('synthetic-admin');
   const helper = new DaemonControlPlaneHelper({ pairingTokens: pairing, userAuth: users,
-    authToken: () => shared } as unknown as DaemonControlPlaneContext);
+    authToken: () => shared, trustProxyEnabled: () => false } as unknown as DaemonControlPlaneContext);
   const token = kind === 'paired' ? paired!.token : kind === 'shared' ? shared : session.token;
   const request = new Request('http://synthetic.invalid/config', { method: 'POST', headers:
     kind === 'cookie' ? { cookie: `goodvibes_session=${token}` } : { authorization: `Bearer ${token}` } });

@@ -144,15 +144,12 @@ describe('handleSearchModeToken: highlight application and clearing', () => {
     expect(sm.getMatchesOnLine(1)).toHaveLength(1);
   });
 
-  test('Esc clears search state completely (active=false, matches empty)', () => {
+  test('Esc closes the search (active=false)', () => {
     sm.search('hello', buf);
     const state = makeState(sm);
     const handled = handleSearchModeToken(state, keyToken('escape'), buf, false);
     expect(handled).toBe(true);
     expect(sm.active).toBe(false);
-    // After close, matches list is not cleared by close(), that is correct;
-    // the compositor guards on active before rendering highlights.
-    // But query is no longer driving highlights since active=false.
   });
 
   test('backspace removes last character from query and re-searches', () => {
@@ -223,7 +220,7 @@ describe('handleSearchModeToken: zero-match state', () => {
   });
 });
 
-describe('handleSearchModeToken: golden-frame non-bleed', () => {
+describe('handleSearchModeToken: inactive search does not take input', () => {
   test('inactive manager: all tokens return false (no bleed into normal input)', () => {
     const sm = new SearchManager();
     const buf = bufferFromLines(['hello']);

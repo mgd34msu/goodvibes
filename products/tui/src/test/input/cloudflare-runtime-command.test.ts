@@ -121,6 +121,32 @@ describe('Cloudflare runtime commands', () => {
     expect(new Headers(requests[0]?.init?.headers).get('Authorization')).toMatch(/^Bearer /);
   });
 
+  test('/cloudflare provision does not report ok: yes when the run returned warnings', async () => {
+    const registry = new CommandRegistry();
+    registerCloudflareRuntimeCommands(registry);
+    const out: string[] = [];
+    const base = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const href = typeof url === 'string' || url instanceof URL ? String(url) : url.url;
+      if (href.endsWith('/api/cloudflare/provision')) {
+        return Response.json({
+          ok: true,
+          dryRun: false,
+          steps: [{ name: 'dns', status: 'warning', message: 'hostname outside the zone' }],
+          warnings: ['hostname outside the zone'],
+        }, { status: 202 });
+      }
+      return base(url, init);
+    }) as typeof fetch;
+
+    await registry.execute('cloudflare', ['provision', '--account', 'acc-1'], makeContext({ out }));
+
+    const text = out.join('\n');
+    expect(text).toContain('ok: partial (1 warning)');
+    expect(text).toContain('warning: hostname outside the zone');
+    expect(text).not.toContain('ok: yes');
+  });
+
   test('/cloudflare provision sends batch mode and resource fields to the daemon route', async () => {
     const registry = new CommandRegistry();
     registerCloudflareRuntimeCommands(registry);

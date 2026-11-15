@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
@@ -593,48 +592,50 @@ describe('status() running detection: systemd/launchd query through the injected
   }));
 });
 
-// --- Real launchd probe: darwin-only, honestly branch-gated INSIDE the test    ---
-// --- body (this repo's test-skip:check forbids the skip/todo test modifiers;   ---
-// --- the sanctioned pattern is an in-body guard, cf. test/dist-freshness.test.ts). ---
-// --- On any non-macOS host the test still runs and asserts the detection       ---
-// --- result itself, logging the named reason, it never fabricates a pass for  ---
-// --- darwin behavior it cannot observe. Host-safety: even the darwin branch    ---
-// --- constructs the manager with a tempdir homeDirectory/workingDirectory and  ---
-// --- exercises only read-only status() (existsSync checks), it never touches  ---
-// --- a real ~/Library/LaunchAgents entry or invokes a real launchctl mutation. ---
-function detectRealLaunchctl(): { available: boolean; reason: string } {
-  if (process.platform !== 'darwin') {
-    return { available: false, reason: `not running on macOS (process.platform=${process.platform})` };
-  }
-  const probe = spawnSync('launchctl', ['list'], { encoding: 'utf-8' });
-  if (probe.error) return { available: false, reason: `launchctl binary not available: ${probe.error.message}` };
-  return { available: true, reason: 'launchctl reachable on darwin' };
-}
-
-describe('real launchd probe (read-only structure check, darwin-only: honest gap on non-macOS CI)', () => {
-  test('on darwin, status() resolves the launchd platform against the real host; elsewhere, the unavailability is detected and named (no fabricated darwin pass)', () => {
-    const realLaunchctl = detectRealLaunchctl();
-    if (!realLaunchctl.available) {
-      // Not a silent pass: assert the detection is coherent and surface the reason.
-      console.log(`[service-manager.test] real launchd probe not run: ${realLaunchctl.reason}`);
-      expect(realLaunchctl.reason.length).toBeGreaterThan(0);
-      expect(process.platform === 'darwin' || realLaunchctl.reason.includes('not running on macOS')).toBe(true);
-      return;
-    }
-    withTempDir((dir) => {
-      const configManager = launchdConfig(dir, 'goodvibes-real-probe');
-      const def = definition({ name: 'goodvibes-real-probe', workingDirectory: dir });
-      const manager = new PlatformServiceManager(configManager, {
-        workingDirectory: dir,
-        homeDirectory: dir,
-        definitionOverride: def,
-        featureFlags: flags(['service-management']),
-      });
-
-      const status = manager.status();
-      expect(status.platform).toBe('launchd');
-      expect(status.path).toContain('Library/LaunchAgents');
-      expect(status.installed).toBe(false);
+describe('systemd and windows start/stop/restart dispatch (injected actionRunner)', () => {
+  function dispatchOf(platform: 'systemd' | 'windows', dir: string, verb: 'start' | 'stop' | 'restart', failing: readonly string[] = []) {
+    const configManager = testConfigManager(join(dir, 'config'));
+    configManager.set('service.platform', platform);
+    configManager.set('service.serviceName', 'goodvibes-dispatch');
+    const calls: string[][] = [];
+    const manager = new PlatformServiceManager(configManager, {
+      workingDirectory: dir,
+      homeDirectory: dir,
+      definitionOverride: definition({ name: 'goodvibes-dispatch', workingDirectory: dir }),
+      actionRunner: (command, args) => {
+        calls.push([command, ...args]);
+        return failing.includes(args[0] ?? '') ? { status: 1, stderr: 'refused' } : { status: 0, stdout: 'active\n' };
+      },
+      featureFlags: flags(['service-management']),
     });
-  });
+    const result = manager[verb]();
+    // status() ends every dispatch with its own live query; only the verbs are asserted.
+    return { result, verbs: calls.filter(([, ...args]) => args[1] !== 'is-active') };
+  }
+
+  test('systemd start enables and starts, stop and restart name the verb on the unit', () => withTempDir((dir) => {
+    expect(dispatchOf('systemd', dir, 'start').verbs).toEqual([['systemctl', '--user', 'enable', '--now', 'goodvibes-dispatch.service']]);
+    expect(dispatchOf('systemd', dir, 'stop').verbs).toEqual([['systemctl', '--user', 'stop', 'goodvibes-dispatch.service']]);
+    expect(dispatchOf('systemd', dir, 'restart').verbs).toEqual([['systemctl', '--user', 'restart', 'goodvibes-dispatch.service']]);
+  }));
+
+  test('windows start runs the task, stop ends it, restart ends it then runs it', () => withTempDir((dir) => {
+    expect(dispatchOf('windows', dir, 'start').verbs).toEqual([['schtasks', '/Run', '/TN', 'goodvibes-dispatch']]);
+    expect(dispatchOf('windows', dir, 'stop').verbs).toEqual([['schtasks', '/End', '/TN', 'goodvibes-dispatch']]);
+    expect(dispatchOf('windows', dir, 'restart').verbs).toEqual([
+      ['schtasks', '/End', '/TN', 'goodvibes-dispatch'],
+      ['schtasks', '/Run', '/TN', 'goodvibes-dispatch'],
+    ]);
+  }));
+
+  test('windows restart still runs the task when the end step fails (nothing was running), and reports a failing run', () => withTempDir((dir) => {
+    const noTaskRunning = dispatchOf('windows', dir, 'restart', ['/End']);
+    expect(noTaskRunning.verbs.map(([, verb]) => verb)).toEqual(['/End', '/Run']);
+    expect(noTaskRunning.result.actionError).toBeUndefined();
+    expect(dispatchOf('windows', dir, 'restart', ['/Run']).result.actionError).toBe('refused');
+  }));
+
+  test('a failing systemd verb is reported as actionError', () => withTempDir((dir) => {
+    expect(dispatchOf('systemd', dir, 'restart', ['--user']).result.actionError).toBe('refused');
+  }));
 });

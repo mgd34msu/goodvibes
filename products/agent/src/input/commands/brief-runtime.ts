@@ -9,7 +9,14 @@ function countReady<T extends { readonly status: string }>(items: readonly T[], 
   return items.filter((item) => item.status === status).length;
 }
 
-function workPlanCounts(ctx: CommandContext): { readonly total: number; readonly counts: StatusCounts } {
+type WorkPlanReading = { readonly total: number; readonly counts: StatusCounts } | { readonly unavailable: string };
+type JobsReading = { readonly jobs: readonly AutomationJob[] } | { readonly unavailable: string };
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function workPlanCounts(ctx: CommandContext): WorkPlanReading {
   const counts = Object.fromEntries(WORK_PLAN_STATUSES.map((status) => [status, 0])) as StatusCounts;
   try {
     const items = ctx.workspace?.workPlanStore?.listItems?.() ?? [];
@@ -17,16 +24,16 @@ function workPlanCounts(ctx: CommandContext): { readonly total: number; readonly
       counts[item.status] += 1;
     }
     return { total: items.length, counts };
-  } catch {
-    return { total: 0, counts };
+  } catch (error) {
+    return { unavailable: reason(error) };
   }
 }
 
-function automationJobs(ctx: CommandContext): readonly AutomationJob[] {
+function automationJobs(ctx: CommandContext): JobsReading {
   try {
-    return ctx.ops?.automationManager?.listJobs?.() ?? [];
-  } catch {
-    return [];
+    return { jobs: ctx.ops?.automationManager?.listJobs?.() ?? [] };
+  } catch (error) {
+    return { unavailable: reason(error) };
   }
 }
 
@@ -38,7 +45,9 @@ function countSetupGaps(items: readonly { readonly missingRequirementCount?: num
   return items.filter((item) => (item.missingRequirementCount ?? 0) > 0).length;
 }
 
-function formatWorkPlanLine(total: number, counts: StatusCounts): string {
+function formatWorkPlanLine(reading: WorkPlanReading): string {
+  if ('unavailable' in reading) return `  work plan unavailable: ${reading.unavailable}`;
+  const { total, counts } = reading;
   if (total === 0) return '  work plan empty';
   const active = counts.pending + counts.in_progress + counts.blocked;
   return [
@@ -59,7 +68,8 @@ function formatWarnings(warnings: readonly string[]): readonly string[] {
 export function formatAgentOperatorBriefing(ctx: CommandContext): string {
   const snapshot = buildAgentWorkspaceRuntimeSnapshot(ctx);
   const workPlan = workPlanCounts(ctx);
-  const jobs = automationJobs(ctx);
+  const jobReading = automationJobs(ctx);
+  const jobs = 'jobs' in jobReading ? jobReading.jobs : [];
   const enabledJobs = jobs.filter((job) => job.enabled).length;
   const setupReady = countReady(snapshot.setupChecklist, 'ready');
   const setupRecommended = countReady(snapshot.setupChecklist, 'recommended');
@@ -132,8 +142,8 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
     `  routines: ${snapshot.enabledRoutineCount}/${snapshot.localRoutineCount} enabled; setup gaps ${routineSetupGaps}`,
     `  channels: ${readyChannels}/${snapshot.channels.length} ready; ${enabledChannels} enabled; setup gaps ${channelSetupGaps}`,
     `  voice/media: ${snapshot.voiceProviderCount} voice, ${snapshot.mediaProviderCount} media; browser tools ${snapshot.voiceMediaReadiness.browserToolState}`,
-    formatWorkPlanLine(workPlan.total, workPlan.counts),
-    `  schedules ${enabledJobs}/${jobs.length} visible jobs enabled`,
+    formatWorkPlanLine(workPlan),
+    'unavailable' in jobReading ? `  schedules unavailable: ${jobReading.unavailable}` : `  schedules ${enabledJobs}/${jobs.length} visible jobs enabled`,
     '',
     'Next Actions',
     ...nextActions.map((line) => `  - ${line}`),

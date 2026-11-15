@@ -68,8 +68,45 @@ const ALL_PROJECTS: readonly Project[] = [...PROJECTS, {
   label: 'product workspace typechecks', command: 'bun', args: ['run', 'products:typecheck'],
 }];
 
+// Scoped iteration: `--project <name>` checks one project WITHOUT `--force`, so a
+// second run after a small edit only rebuilds what changed. It is for the edit
+// loop. The forced run above stays the default and is what CI runs: an
+// incremental `tsc -b` trusts input mtimes (see the comment on `--force`), so it
+// can print nothing for a tree whose mtimes were restored, and a scoped pass is
+// not evidence for a merge.
+const SCOPED_PROJECTS: Readonly<Record<string, Project>> = {
+  judgment: { label: 'tsc -b packages/judgment', command: 'bunx', args: ['tsc', '-b', 'packages/judgment', '--pretty', 'false'] },
+  'judgment-tests': { label: 'tsc -b packages/judgment/tsconfig.tests.json', command: 'bunx', args: ['tsc', '-b', 'packages/judgment/tsconfig.tests.json', '--pretty', 'false'] },
+  engine: { label: 'tsc -b packages/engine', command: 'bunx', args: ['tsc', '-b', 'packages/engine', '--pretty', 'false'] },
+  'engine-tests': { label: 'tsc -b packages/engine/tsconfig.tests.json (test/ and scripts/)', command: 'bunx', args: ['tsc', '-b', 'packages/engine/tsconfig.tests.json', '--pretty', 'false'] },
+  'type-tests': PROJECTS[2]!,
+  'integration-tests': PROJECTS[0]!,
+  ...Object.fromEntries(['agent', 'tui', 'daemon', 'webui'].map((name): [string, Project] => [name, {
+    label: `product ${name}`, command: 'bun', args: ['packages/engine/scripts/product-workspaces.ts', 'typecheck', name],
+  }])),
+};
+
+function scopedSelection(argv: readonly string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === '--project') return argv[i + 1] ?? '';
+    if (arg.startsWith('--project=')) return arg.slice('--project='.length);
+  }
+  return undefined;
+}
+
+const scoped = scopedSelection(process.argv.slice(2));
+if (scoped !== undefined && !Object.hasOwn(SCOPED_PROJECTS, scoped)) {
+  console.error(`[typecheck] unknown project "${scoped}". Use one of: ${Object.keys(SCOPED_PROJECTS).join(', ')}. Without --project the whole forced run executes.`);
+  process.exit(2);
+}
+const SELECTED_PROJECTS: readonly Project[] = scoped === undefined ? ALL_PROJECTS : [SCOPED_PROJECTS[scoped]!];
+if (scoped !== undefined) {
+  console.log(`[typecheck] scoped run of "${scoped}", incremental (no --force). Not a substitute for the full run CI performs.`);
+}
+
 const results: CommandResult[] = [];
-for (const project of ALL_PROJECTS) {
+for (const project of SELECTED_PROJECTS) {
   console.log(`[typecheck] ${project.label} ...`);
   const run = spawnSync(project.command, [...project.args], {
     cwd: REPO_ROOT,

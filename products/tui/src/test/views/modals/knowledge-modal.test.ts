@@ -41,6 +41,19 @@ describe('knowledge modal surface', () => {
     expect(review.rows.map((r) => r.id)).toEqual(['issue:issue-1']); // resolved issue excluded
   });
 
+  test('schedules from an async API are awaited before the header and rows render', async () => {
+    const deps = fixedDeps();
+    const surface = createKnowledgeModalSurface({
+      knowledgeApi: { ...deps.knowledgeApi, jobs: { schedules: { list: async () => [{ id: 'sched-1', label: 'Nightly reindex', enabled: true }] } } },
+    });
+    open(surface);
+    await surface.whenLoaded();
+    const browse = tabText(surface.buildView(), 'browse');
+    expect(browse).toContain('schedules 1');
+    expect(browse).not.toContain('schedules undefined');
+    expect(browse).toContain('Nightly reindex');
+  });
+
   test('review actions route to /knowledge review-issue, gated to the Review tab + issue rows', () => {
     const surface = createKnowledgeModalSurface(fixedDeps());
     open(surface);

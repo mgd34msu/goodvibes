@@ -4,7 +4,7 @@ import { makeHarness, oneUnitPlan, startContract, waitFor } from './runner-suppo
 import { terminal } from './steps-support.js';
 import type { NativeContractSource } from '../../platform/src/platform/contract/types.js';
 const source: NativeContractSource = { sourceId: 'quality-work', sourceRevision: '1', inputRevision: '1', criteriaId: 'criteria', criteriaRevision: '1', goal: 'Deliver the parser', criteria: ['Preserve parser behavior'] };
-test('review: a likely clean quality reading passes without repeated judgment or owner input', async () => {
+test('a likely clean quality reading passes without repeated judgment or owner input', async () => {
   let qualityReads = 0;
   const h = makeHarness({ recordNative: true, contract: { maxFixRounds: 0, evidenceNudgeLimit: 2 },
     plan: { ...oneUnitPlan(1), goal: source.goal, criteria: [{ id: 'c1', text: source.criteria[0]!, quote: source.criteria[0]! }] },

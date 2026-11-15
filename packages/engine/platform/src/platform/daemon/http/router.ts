@@ -1,12 +1,17 @@
+import { answerDaemonChallenge, DAEMON_PROOF_HEADER } from '../identity-proof.js';
 import { createServingSettingsPrecondition } from './settings-precondition.js';
 import { createServingSettingsImportPrecondition } from './settings-import-precondition.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '../../config/control-plane-base-url.js';
 import { createBrowserJudgmentHttpHandler, type BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
 import type { ServiceRegistry } from '../../config/service-registry.js';
-import { isValidConfigKey } from '../../config/schema.js';
+import { CONFIG_SCHEMA, isValidConfigKey } from '../../config/schema.js';
+import { coerceSchemaValue } from '../../config/manager-bootstrap.js';
+import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { DECISION_MODEL_POLICY_HEADER, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { DecisionModelPolicyChangedError, withDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
@@ -21,7 +26,7 @@ import {
   type UpdateAutomationJobInput,
 } from '../../automation/index.js';
 import type { ApprovalBroker, ControlPlaneGateway, SharedSessionBroker } from '../../control-plane/index.js';
-import type { GatewayMethodCatalog } from '../../control-plane/index.js';
+import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../../control-plane/index.js';
 import { buildOperatorContract } from '../../control-plane/operator-contract.js';
 import { CLIENT_COMPATIBILITY_FLOOR, CLIENT_COMPATIBILITY_FLOOR_HEADER } from '../../control-plane/client-compatibility.js';
 import { openScopedSessionEventStream } from './session-event-stream.js';
@@ -47,6 +52,9 @@ import type { DomainDispatch, RuntimeStore } from '../../runtime/store/index.js'
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { DaemonBatchManager } from '../../batch/index.js';
 import { emitCompanionMessageReceived } from '../../runtime/emitters/session.js';
+import { createAuthFailureAudit, type AuthFailureAudit } from '../auth-failure-audit.js';
+import { emitAuthFailed, emitAuthSucceeded, emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
+import { extractForwardedClientIp } from '../../runtime/network/index.js';
 import { correlationCtx } from '../../runtime/correlation.js';
 import { TelemetryApiService } from '../../runtime/telemetry/api.js';
 import { inspectInboundTls, inspectOutboundTls } from '../../runtime/network/index.js';
@@ -81,14 +89,17 @@ import {
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext } from '../../adapters/index.js';
 import type { PlatformServiceManager } from '../service-manager.js';
 import type { JsonRecord } from '../helpers.js';
-import { jsonErrorResponse } from './error-response.js';
+import { jsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { attachBrowserJudgmentError, browserJudgmentErrorMethod } from './browser-judgment-error.js';
 import { AppError } from '../../types/errors.js';
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
+import { buildMissingScopeBody } from '../http-policy.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
+import { gateGatewayBinding } from './gateway-binding-gate.js';
+import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
 import { HomeAssistantConversationRoutes } from './homeassistant-routes.js';
@@ -170,6 +181,10 @@ interface DaemonHttpRouterContext {
     admin: boolean;
     scopes: readonly string[];
   } | null;
+  readonly validateGatewayInvocation: (
+    descriptor: GatewayMethodDescriptor,
+    context?: { readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | undefined; readonly scopes?: readonly string[] | undefined; readonly admin?: boolean | undefined },
+  ) => { status: number; ok: false; body: Record<string, unknown> } | null;
   readonly invokeGatewayMethodCall: (input: {
     readonly authToken: string;
     readonly methodId: string;
@@ -182,6 +197,8 @@ interface DaemonHttpRouterContext {
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
       readonly clientKind?: string | undefined;
+      /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
+      readonly connectionId?: string | undefined;
     };
   }) => Promise<{ status: number; ok: boolean; body: unknown }>;
   readonly queueSurfaceReplyFromBinding: (
@@ -217,6 +234,17 @@ interface DaemonHttpRouterContext {
   ) => import('../../tools/agent/index.js').AgentRecord | Response;
 }
 
+/** The id (never the secret value) of the token a successful pair verification issued. */
+async function pairedTokenId(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.clone().json();
+    const token = typeof body === 'object' && body !== null ? (body as { token?: { id?: unknown } }).token : undefined;
+    return typeof token?.id === 'string' ? token.id : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export class DaemonHttpRouter {
   /** Stateful owner references must survive per-request handler reconstruction. */
   private readonly settingsPrecondition: ReturnType<typeof createServingSettingsPrecondition> | undefined;
@@ -237,7 +265,10 @@ export class DaemonHttpRouter {
   /** Wire the LAN group verbs (`/api/cluster/*`), see cluster-group-routes.ts. */
   setClusterGroupVerbs(verbs: ClusterGroupVerbs): void { this.clusterGroupVerbs = verbs; }
 
+  private readonly authFailures: AuthFailureAudit;
+
   constructor(private readonly context: DaemonHttpRouterContext) {
+    this.authFailures = createAuthFailureAudit(context.runtimeBus);
     const settingsConfigOwner = context.configManager;
     const settingsAuthorityOwner = context.settingsAuthority;
     const importAuthorityOwner = context.settingsImportAuthority;
@@ -301,7 +332,22 @@ export class DaemonHttpRouter {
         };
         const principal = currentPrincipal();
         const method = this.context.browserJudgment?.issueErrorReference ? browserJudgmentErrorMethod(req, this.context.gatewayMethods) : undefined;
-        const original = asset ?? await this.dispatchAuthedRequest(req);
+        const original = asset ?? await this.dispatchAuthedRequest(req).catch((error: unknown) => {
+          if (error instanceof DecisionModelPolicyChangedError) throw error;
+          // A route that throws must still answer: a bare rejection reaches the
+          // listener as a dropped connection with nothing for the caller to act on.
+          logger.error('[daemon-http] request handler failed', { method: req.method, path: new URL(req.url).pathname, error: summarizeError(error) });
+          const status = serviceFailureStatus(error, 500);
+          // An error the daemon raised on purpose names itself; anything else may carry a path or a query, so it gets a fixed sentence.
+          const classified = typeof error === 'object' && error !== null && typeof (error as { readonly category?: unknown }).category === 'string';
+          return classified
+            ? jsonErrorResponse(error, { status })
+            : Response.json({
+              error: 'The daemon could not complete this request.',
+              code: 'INTERNAL_ERROR',
+              guidance: status === 503 ? 'Retry shortly.' : 'The failure is in the daemon log; retrying the same request is unlikely to help.',
+            }, { status });
+        });
         const response = asset ? original : await attachBrowserJudgmentError(req, original, {
           service: this.context.browserJudgment, methods: this.context.gatewayMethods, method, principal, currentPrincipal,
         });
@@ -325,7 +371,8 @@ export class DaemonHttpRouter {
     if (preAuth) return preAuth;
 
     if (!this.context.checkAuth(req)) {
-      return jsonErrorResponse(
+      this.authFailures.record(this.clientIpOf(req), 'control-plane-router');
+      const refusal = jsonErrorResponse(
         new AppError('Authentication required', 'AUTH_REQUIRED', false, {
           category: 'authentication',
           source: 'runtime',
@@ -333,7 +380,14 @@ export class DaemonHttpRouter {
         }),
         { status: 401 },
       );
+      // Lets a starting host confirm this is the daemon before it sends the token.
+      const proof = answerDaemonChallenge(req, this.context.authToken());
+      if (proof) refusal.headers.set(DAEMON_PROOF_HEADER, proof);
+      return refusal;
     }
+
+    const gateRefusal = gateGatewayBinding(req, this.context);
+    if (gateRefusal) return gateRefusal;
 
     const apiResponse = await this.dispatchApiRoutes(req);
     if (apiResponse) return apiResponse;
@@ -361,16 +415,23 @@ export class DaemonHttpRouter {
     }
 
     if (url.pathname === '/api/remote/pair/request' && req.method === 'POST') {
-      return handleRemotePairRequest({
+      const response = await handleRemotePairRequest({
         parseJsonBody: (request) => this.parseJsonBody(request),
         distributedRuntime: this.context.distributedRuntime,
       }, req);
+      if (response.ok) emitCompanionPairRequested(this.context.runtimeBus, this.securityContext(req, 'pair-request'), { clientIp: this.clientIpOf(req) });
+      return response;
     }
     if (url.pathname === '/api/remote/pair/verify' && req.method === 'POST') {
-      return handleRemotePairVerify({
+      const response = await handleRemotePairVerify({
         parseJsonBody: (request) => this.parseJsonBody(request),
         distributedRuntime: this.context.distributedRuntime,
       }, req);
+      if (response.ok) {
+        const tokenId = await pairedTokenId(response);
+        emitCompanionPairVerified(this.context.runtimeBus, this.securityContext(req, 'pair-verify'), { tokenId, clientIp: this.clientIpOf(req) });
+      }
+      return response;
     }
     if (url.pathname === '/api/remote/heartbeat' && req.method === 'POST') {
       return handleRemotePeerHeartbeat({
@@ -399,6 +460,15 @@ export class DaemonHttpRouter {
       return this.handleGitHubWebhook(req);
     }
     if (url.pathname.startsWith('/webhook/')) {
+      const inboundPlugin = this.context.channelPlugins.getByPath(url.pathname);
+      if (inboundPlugin && !isSurfaceIngressEnabled(this.context.configManager, inboundPlugin.surface)) {
+        // Refused before any adapter reads the body or authorizes the sender.
+        return Response.json({
+          error: `The ${inboundPlugin.surface} surface is turned off`,
+          code: 'SURFACE_DISABLED',
+          guidance: `Set surfaces.${inboundPlugin.surface}.enabled to true to accept messages from it again.`,
+        }, { status: 503 });
+      }
       const pluginResponse = await this.context.channelPlugins.handleInbound(url.pathname, req);
       if (pluginResponse) return pluginResponse;
     }
@@ -414,6 +484,24 @@ export class DaemonHttpRouter {
     return null;
   }
 
+  /**
+   * Null when the caller holds `scope` (the admin token holds every scope), the
+   * 403 naming the missing scope otherwise. A request with no recognised
+   * principal holds none.
+   */
+  private requireCallerScope(req: Request, scope: string): Response | null {
+    const token = this.context.extractAuthToken(req);
+    const principal = token ? this.context.describeAuthenticatedPrincipal(token) : null;
+    if (principal?.admin) return null;
+    const body = buildMissingScopeBody('this request', [scope], principal?.scopes);
+    return body ? Response.json(body, { status: 403 }) : null;
+  }
+
+  /** Reads stay open to any authenticated caller; every other verb needs an admin. */
+  private requireAdminForMutation(req: Request): Response | null {
+    return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' ? null : this.context.requireAdmin(req);
+  }
+
   async dispatchApiRoutes(req: Request): Promise<Response | null> {
     const url = new URL(req.url);
     const openAICompatibleEnabled = this.getConfigValue('controlPlane.openaiCompatible.enabled') !== false;
@@ -423,11 +511,16 @@ export class DaemonHttpRouter {
         providerRegistry: this.context.providerRegistry,
         parseJsonBody: (request: Request) => this.parseJsonBody(request),
         recordApiResponse: (request, path, routeResponse) => this.recordApiResponse(request, path, routeResponse),
+        // Chat completions spend provider money; only listing models stays open.
+        requireAdmin: (request) => this.context.requireAdmin(request),
       }, typeof pathPrefix === 'string' && pathPrefix.trim() ? pathPrefix : '/v1');
       if (response) return response;
     }
 
     if (url.pathname.startsWith('/api/batch')) {
+      // Creating, ticking or cancelling a batch spends provider money; listing does not.
+      const batchError = this.requireAdminForMutation(req);
+      if (batchError) return batchError;
       if (!this.context.batchManager) {
         return Response.json({ error: 'Batch manager is not available', code: 'BATCH_MANAGER_UNAVAILABLE' }, { status: 503 });
       }
@@ -480,6 +573,9 @@ export class DaemonHttpRouter {
     // Model catalog + model-switching routes. Provider runtime metadata is owned
     // by the operator contract under /api/providers.
     if (url.pathname === '/api/models' || url.pathname.startsWith('/api/models/')) {
+      // Switching the model rewrites the daemon-wide setting, which the settings routes already keep to admins.
+      const modelError = this.requireAdminForMutation(req);
+      if (modelError) return modelError;
       const providerResponse = await dispatchModelRoutes(req, {
         providerRegistry: this.context.providerRegistry,
         configManager: this.context.configManager,
@@ -498,9 +594,14 @@ export class DaemonHttpRouter {
         parseJsonBody: (request: Request) => this.parseJsonBody(request),
         parseOptionalJsonBody: (request: Request) => this.parseOptionalJsonBody(request),
         resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
+        requireAdmin: (request) => this.context.requireAdmin(request),
+        requireScope: (request, scope) => this.requireCallerScope(request, scope),
         openSessionEventStream: (request: Request, sessionId: string) => {
-          chatManager.registerSubscriber(sessionId, `companion-chat:${sessionId}`);
-          return openScopedSessionEventStream(gateway, request, { clientPrefix: 'companion-chat', sessionId });
+          // Turn events are published to the registered client, so it must be this connection's own id.
+          return openScopedSessionEventStream(gateway, request, {
+            clientPrefix: 'companion-chat', sessionId,
+            onClientId: (clientId) => chatManager.registerSubscriber(sessionId, clientId),
+          });
         },
       });
       if (companionResponse) return companionResponse;
@@ -543,6 +644,10 @@ export class DaemonHttpRouter {
           getUsageSnapshot: (providerId) => getProviderUsageSnapshot(this.context.providerRegistry, providerId),
         },
         requireAdmin: (request) => this.context.requireAdmin(request),
+        resolveAuthenticatedPrincipal: (request) => {
+          const token = this.context.extractAuthToken(request);
+          return token ? this.context.describeAuthenticatedPrincipal(token) : null;
+        },
         userAuth: this.context.userAuth,
       }),
       ...createDaemonTelemetryRouteHandlers({
@@ -581,6 +686,8 @@ export class DaemonHttpRouter {
           inspectInboundTls: (surface) => inspectInboundTls(this.context.configManager, surface),
           inspectOutboundTls: () => inspectOutboundTls(this.context.configManager),
           isValidConfigKey,
+          isSecretBearingConfigKey,
+          coerceConfigValue: (key, value) => coerceSchemaValue(key, CONFIG_SCHEMA.find((setting) => setting.key === key), value),
           parseJsonBody: (request) => this.parseJsonBody(request),
           parseOptionalJsonBody: (request) => this.parseOptionalJsonBody(request),
           platformServiceManager: this.context.platformServiceManager,
@@ -606,6 +713,7 @@ export class DaemonHttpRouter {
           listRuns: () => this.context.automationManager.listRuns(),
           getRun: (runId) => this.context.automationManager.getRun(runId) ?? null,
           triggerHeartbeat: (input) => this.context.automationManager.triggerHeartbeat(input),
+          listHeartbeatWakes: () => this.context.automationManager.listHeartbeatWakes(),
           cancelRun: (runId, reason) => this.context.automationManager.cancelRun(runId, reason),
           retryRun: (runId) => this.context.automationManager.retryRun(runId),
           createJob: (input: CreateAutomationJobInput) => this.context.automationManager.createJob(input),
@@ -753,6 +861,8 @@ export class DaemonHttpRouter {
         routeBindings: this.context.routeBindings,
         chatManager,
         parseJsonBody: (request) => this.parseJsonBody(request),
+        requireScope: (request, scope) => this.requireCallerScope(request, scope),
+        requireAdmin: (request) => this.context.requireAdmin(request),
         resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
         homeGraph: this.context.homeGraphService,
       });
@@ -768,6 +878,10 @@ export class DaemonHttpRouter {
         parseJsonBody: (request) => this.parseJsonBody(request),
         parseOptionalJsonBody: (request) => this.parseOptionalJsonBody(request),
         requireAdmin: (request) => this.context.requireAdmin(request),
+        callerId: (request) => {
+          const token = this.context.extractAuthToken(request);
+          return (token ? this.context.describeAuthenticatedPrincipal(token) : null)?.principalId;
+        },
       });
     }
     return this.homeGraphRoutes;
@@ -830,6 +944,14 @@ export class DaemonHttpRouter {
     return response;
   }
 
+  private clientIpOf(req: Request): string {
+    return extractForwardedClientIp(req, Boolean(this.context.configManager.get('controlPlane.trustProxy'))) ?? 'unknown';
+  }
+
+  private securityContext(req: Request, kind: string) {
+    return { sessionId: 'system', traceId: `${kind}:${req.headers.get('x-request-id') ?? crypto.randomUUID()}`, source: 'control-plane-router' } as const;
+  }
+
   private async handleLogin(req: Request): Promise<Response> {
     const body = await this.parseJsonBody(req);
     if (body instanceof Response) return body;
@@ -839,6 +961,8 @@ export class DaemonHttpRouter {
     const authResult = this.context.userAuth.authenticate(username, password);
 
     if (!authResult.ok) {
+      emitAuthFailed(this.context.runtimeBus, this.securityContext(req, 'auth'),
+        { usernameAttempted: '', clientIp: this.clientIpOf(req), reason: authResult.lockedUntilMs ? 'rate_limited' : 'invalid_credentials' });
       if (authResult.lockedUntilMs) {
         const retryAfterSeconds = Math.ceil((authResult.lockedUntilMs - Date.now()) / 1_000);
         return Response.json(
@@ -851,6 +975,8 @@ export class DaemonHttpRouter {
 
     const { user } = authResult;
     const session = this.context.userAuth.createSession(user.username);
+    emitAuthSucceeded(this.context.runtimeBus, this.securityContext(req, 'auth'),
+      { username: user.username, sessionId: session.id, clientIp: this.clientIpOf(req), method: 'password' });
 
     // Auto-retire the bootstrap credential file ONLY after the first
     // NON-bootstrap login (mirrors http-listener.ts handleLogin behaviour).

@@ -1,4 +1,4 @@
-import { CLOUDFLARE_COMPONENT_IDS, DEFAULT_CLOUDFLARE_COMPONENT_SELECTION } from '../../runtime/cloudflare-control-plane.ts';
+import { CLOUDFLARE_COMPONENT_IDS } from '../../runtime/cloudflare-control-plane.ts';
 import { normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardFieldDefinition, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
@@ -9,6 +9,7 @@ import {
   CLOUDFLARE_YES_NO_OPTIONS,
   cloudflareComponentFieldId,
   cloudflareComponentLabel,
+  defaultCloudflareComponentSelected,
   getCloudflareBatchMode,
   getCloudflareComponentSelection,
   getCloudflareSetupSource,
@@ -64,9 +65,7 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
         id: cloudflareComponentFieldId(component),
         label: `${cloudflareComponentLabel(component)}${advanced ? ' (advanced)' : ''}`,
         hint: cloudflareComponentHint(component),
-        defaultValue: config?.enabled === true
-          ? component === 'workers' || component === 'queues'
-          : DEFAULT_CLOUDFLARE_COMPONENT_SELECTION[component],
+        defaultValue: defaultCloudflareComponentSelected(config?.enabled === true, component),
       });
     }
 
@@ -478,6 +477,10 @@ export function buildCloudflareStep(controller: OnboardingWizardControllerLike):
       `Provision on final apply: ${enabled ? controller.getStringFieldValue('cloudflare.provision-on-apply', 'no') : 'no'}`,
       ...(enabled && components.zeroTrustTunnel
         ? ['trustProxy: enabled for control plane and HTTP listener; trustCloudflare: ON for the HTTP listener (see notice)']
+        : []),
+      // Apply never turns these off by itself: they may have been set for a proxy this wizard knows nothing about.
+      ...(!(enabled && components.zeroTrustTunnel) && (config?.tunnelId || config?.tunnelTokenRef)
+        ? ['A Cloudflare tunnel from an earlier setup is still configured: Apply leaves controlPlane.trustProxy, httpListener.trustProxy and httpListener.trustCloudflare as they are. If the tunnel is gone, turn them off in /settings, otherwise a client can spoof X-Forwarded-For.']
         : []),
     ],
     fields,

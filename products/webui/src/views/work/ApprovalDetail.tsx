@@ -9,11 +9,11 @@
  * index array only; the daemon computes the modified edit), remember tiers
  * rendered verbatim from the ask, the exec-prompt answer path, claim and cancel
  * for a pending ask, the decision trail and the fix session an accepted CI
- * offer started. A claimed ask is not actionable here (two surfaces must never
- * both resolve one approval); a resolved one is history.
+ * offer started. A claim is advisory: the broker lets any participant still
+ * approve, deny or withdraw a claimed ask, so it stays actionable here (with
+ * the claimant shown); a resolved one is history.
  */
 import { useMemo, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
 import type { ApprovalRecord } from '../../lib/goodvibes';
 import {
   attributionLabel,
@@ -73,12 +73,12 @@ export interface ApprovalDetailProps {
   record: ApprovalRecord;
   actions: ApprovalActions;
   onClose?: () => void;
-  onOpenSession?: (sessionId: string) => void;
 }
 
-export function ApprovalDetail({ record, actions, onClose, onOpenSession }: ApprovalDetailProps) {
+export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps) {
   const hunks = useMemo(() => readApprovalEditHunks(record), [record]);
-  const actionable = isActionableApproval(record);
+  const claimed = record.status === 'claimed';
+  const actionable = isActionableApproval(record) || claimed;
   const terminal = isTerminalApprovalStatus(record.status);
   const partialLabel = useMemo(() => partialApprovalLabel(record), [record]);
   const auditEntries = useMemo(() => auditTrail(record), [record]);
@@ -117,9 +117,6 @@ export function ApprovalDetail({ record, actions, onClose, onOpenSession }: Appr
     return next;
   });
 
-  const fixSessionId = record.status === 'approved' ? record.fixSessionId : undefined;
-  const fixSessionError = record.status === 'approved' ? record.fixSessionError : undefined;
-
   const statusWord = terminal ? sentenceCase(statusLabel(record.status)) : record.status === 'claimed' ? 'Claimed' : execPrompt ? 'Waiting for your answer' : 'Waiting for approval';
 
   const footer = actionable ? (
@@ -130,9 +127,11 @@ export function ApprovalDetail({ record, actions, onClose, onOpenSession }: Appr
         </Button>
         <Button disabled={busy} onClick={deny}>{denying ? 'Stopping…' : 'Stop command'}</Button>
         <span className="work-footer__spacer" />
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Lock this approval to your surface">
-          {claiming ? 'Claiming…' : 'Claim'}
-        </Button>
+        {!claimed && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Mark this approval as yours; others can still answer it">
+            {claiming ? 'Claiming…' : 'Claim'}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate(record.id)} title="Withdraw without a decision">
           {cancelling ? 'Cancelling…' : 'Withdraw'}
         </Button>
@@ -153,9 +152,11 @@ export function ApprovalDetail({ record, actions, onClose, onOpenSession }: Appr
         )}
         <Button disabled={busy} onClick={deny}>{denying ? 'Denying…' : 'Deny'}</Button>
         <span className="work-footer__spacer" />
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Lock this approval to your surface">
-          {claiming ? 'Claiming…' : 'Claim'}
-        </Button>
+        {!claimed && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Mark this approval as yours; others can still answer it">
+            {claiming ? 'Claiming…' : 'Claim'}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate(record.id)} title="Withdraw without a decision">
           {cancelling ? 'Cancelling…' : 'Withdraw'}
         </Button>
@@ -222,7 +223,7 @@ export function ApprovalDetail({ record, actions, onClose, onOpenSession }: Appr
       />
 
       {record.status === 'claimed' && (
-        <p className="dv-notice" role="note">Claimed by {record.claimedBy ?? 'another surface'}, not actionable here.</p>
+        <p className="dv-notice" role="note">Claimed by {record.claimedBy ?? 'another surface'}. A claim is advisory, so you can still answer it here.</p>
       )}
 
       {terminal && (
@@ -233,17 +234,6 @@ export function ApprovalDetail({ record, actions, onClose, onOpenSession }: Appr
           {partialLabel ? `, ${partialLabel}` : ''}
           {record.decision?.reason ? `, reason: ${record.decision.reason}` : ''}
         </p>
-      )}
-
-      {fixSessionId && onOpenSession && (
-        <div>
-          <Button icon={<ExternalLink aria-hidden="true" />} onClick={() => onOpenSession(fixSessionId)} title="Open the fix session this acceptance started">
-            Open fix session
-          </Button>
-        </div>
-      )}
-      {fixSessionError && (
-        <p className="dv-notice dv-notice--bad" role="note">The fix session could not start; {fixSessionError}</p>
       )}
 
       {actionable && !execPrompt && hunks && (

@@ -197,6 +197,27 @@ describe('the daemon serves browser.* with no surface attached', () => {
     }
   });
 
+  test('attaching to a debugging port on another machine is refused before the daemon connects to it', async () => {
+    const calls: RecordedCall[] = [];
+    const catalog = servedCatalog(fakeBrowser(calls));
+    for (const cdpEndpoint of ['http://10.0.0.5:9222', 'ws://example.com/devtools/browser/x', 'internal-host:9222', 'http://localhost@10.0.0.5:9222']) {
+      try {
+        await invoke(catalog, 'browser.sessions.attach', { cdpEndpoint });
+        throw new Error(`expected ${cdpEndpoint} to be refused`);
+      } catch (error) {
+        expect(isGatewayVerbError(error)).toBe(true);
+        if (!isGatewayVerbError(error)) return;
+        expect(error.status).toBe(403);
+        expect(error.message).toContain('loopback');
+      }
+    }
+    expect(calls).toHaveLength(0);
+    for (const cdpEndpoint of ['9222', 'localhost:9222', 'http://127.0.0.1:9222', 'http://[::1]:9222', 'ws://127.0.0.1:9222/devtools/browser/x']) {
+      await invoke(catalog, 'browser.sessions.attach', { cdpEndpoint });
+    }
+    expect(calls).toHaveLength(5);
+  });
+
   test('a ref the page has moved under answers 409 rather than a generic failure', async () => {
     const catalog = servedCatalog(fakeBrowser([], {
       click: async () => {
@@ -252,11 +273,16 @@ describe('the daemon composition', () => {
 
   test('builds no engine until a verb asks, so shutdown on an unused daemon is a no-op', async () => {
     // A daemon that never browsed must not resolve a driver in order to tear
-    // one down. If this constructed an engine it would touch the filesystem
-    // for the managed driver root; instead it returns immediately.
-    const service = createDaemonBrowserGatewayService({ homeDirectory: '/nonexistent-home-for-this-test' });
+    // one down. The untrusted-content port is read only while an engine is being
+    // built, so reading it at all would mean shutdown constructed one.
+    let engineBuilds = 0;
+    const service = createDaemonBrowserGatewayService({
+      homeDirectory: '/nonexistent-home-for-this-test',
+      get browserUntrusted() { engineBuilds++; return undefined; },
+    });
     expect(service).not.toBeNull();
     await service!.shutdown();
+    expect(engineBuilds).toBe(0);
   });
 });
 

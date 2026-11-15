@@ -48,6 +48,7 @@ import {
   type InboundNoticeRefusalState,
 } from './notice-health.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { logger } from '../../utils/logger.js';
 import { describeSourceLatency, type InboundMailSource } from './source.js';
 import {
   selectInboundMailSource,
@@ -136,6 +137,8 @@ export interface InboundMailSupervisorDeps {
   /** Config account id and mailbox this supervisor watches. */
   readonly account: string;
   readonly mailbox: string;
+  /** Further accounts the owner listed that this supervisor does not watch; named in `status.reason` so they are not silently ignored. */
+  readonly ignoredAccounts?: readonly string[] | undefined;
   readonly sources: InboundMailSourceFactory;
   /**
    * The facts `selectInboundMailSource` needs and this module cannot know: is a
@@ -171,9 +174,51 @@ export interface InboundMailSupervisorDeps {
    * behaves exactly as before. The composition root passes the same instance it
    * gives the intake.
    */
-  readonly noticeHealth?: Pick<InboundNoticeHealth, 'get'> | undefined;
+  readonly noticeHealth?: (Pick<InboundNoticeHealth, 'get'> & Partial<Pick<InboundNoticeHealth, 'clear'>>) | undefined;
   readonly observer?: InboundMailObserver | undefined;
   readonly now?: (() => number) | undefined;
+  /**
+   * How long `recheckNow()` waits before rebuilding a supervisor that has no
+   * source running. Every config write asks for a recheck, and a settings page
+   * writes several keys at once; one start per burst, not one per key.
+   */
+  readonly reviveDelayMs?: number | undefined;
+  /**
+   * How long `stop()` waits for a start that is still in flight (a recovery
+   * sweep, a Google lookup) before it returns anyway. The late start still
+   * finds the mailbox no longer wanted and releases whatever it builds, so the
+   * wait only keeps a slow network call from holding a shutdown or a cluster
+   * handoff up.
+   */
+  readonly startUnwindBoundMs?: number | undefined;
+  /** Timer seam for the unwind bound; resolves after `ms` or when aborted. */
+  readonly sleep?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
+}
+
+const DEFAULT_REVIVE_DELAY_MS = 1_000;
+const DEFAULT_START_UNWIND_BOUND_MS = 15_000;
+
+function realSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
+}
+
+/**
+ * A source factory's answer when the mailbox it was built for is no longer the
+ * one configured. Thrown rather than answered with `null`: `null` means "this
+ * build cannot construct that source", whose remedy is a different setting,
+ * and the remedy here is a restart.
+ */
+export class InboundMailboxIdentityChangedError extends Error {
+  constructor() {
+    super('The mailbox user, folder or inbound account list changed while the daemon was running '
+      + '(surfaces.email.user, surfaces.email.imap.mailbox or surfaces.email.inbound.accounts). Those '
+      + 'decide which mailbox this watcher owns, its saved position and its cluster surface, so they '
+      + 'take effect only after a restart: restart the daemon to watch the new mailbox.');
+    this.name = 'InboundMailboxIdentityChangedError';
+  }
 }
 
 /** Never started, and honest about it. */
@@ -190,6 +235,12 @@ export class InboundMailSupervisor {
   private source: InboundMailSource | null = null;
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
+  /**
+   * The held source's run loop returned or threw without being asked to stop.
+   * Such a source can no longer act on `recheckNow()`, so a settings change
+   * rebuilds it instead of delegating.
+   */
+  private loopEnded = false;
   private currentStatus: InboundMailSupervisorStatus = NOT_STARTED;
   private selection: InboundSourceSelection | null = null;
   private verdict: InboundCapabilityVerdict | null = null;
@@ -197,6 +248,15 @@ export class InboundMailSupervisor {
   private starting: Promise<InboundMailSupervisorStatus> | null = null;
   private restartRequested = false;
   private wantsRunning = false;
+  /** The in-flight start a `stop()` cancelled; a later `start()` must not join it. */
+  private cancelledStart: Promise<InboundMailSupervisorStatus> | null = null;
+  private reviveTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The settings that decide whether and which source runs, as of the last
+   * start. A source that is running does not re-read these, so a change to
+   * them is a rebuild rather than a re-probe.
+   */
+  private startedWith: string | null = null;
   /** Start-time steps that failed without stopping the watcher. Carried into `status`. */
   private degradations: readonly string[] = [];
 
@@ -225,6 +285,15 @@ export class InboundMailSupervisor {
   }
 
   private noticeRefusal(): InboundNoticeRefusalState | null {
+    // An owner who switched notices off is not being refused anything, and a
+    // refusal latched before the switch would otherwise stay `degraded` until
+    // a notice was delivered, which with notices off is never.
+    if (this.deps.config.get('surfaces.email.inbound.notice.mode') === 'none') {
+      // Dropped, not merely hidden: switching notices back on must not revive a
+      // refusal from before the switch that no pass has re-observed.
+      this.deps.noticeHealth?.clear?.('notices were switched off');
+      return null;
+    }
     return this.deps.noticeHealth?.get() ?? null;
   }
 
@@ -250,22 +319,72 @@ export class InboundMailSupervisor {
    */
   async start(): Promise<InboundMailSupervisorStatus> {
     this.wantsRunning = true;
-    if (this.starting !== null) return this.starting;
+    this.clearReviveTimer();
+    if (this.starting !== null) {
+      // Joining a start that a stop has already cancelled would hand this
+      // caller that start's "stopped" while it asked for a running mailbox.
+      if (this.starting !== this.cancelledStart) return this.starting;
+      await this.starting.catch(() => undefined);
+      return this.start();
+    }
     this.starting = this.runStart();
     try {
       return await this.starting;
     } finally {
       this.starting = null;
+      this.cancelledStart = null;
       if (this.restartRequested && this.wantsRunning) {
+        // Something changed while this start was in flight. Look again at
+        // what is actually there now: a retired source is rebuilt, a running
+        // one re-probes, and an unchanged one is left alone, rather than a
+        // second full start for every config write that landed mid-start.
         this.restartRequested = false;
-        this.rebuildRetiredSource();
+        this.recheckNow();
       }
     }
   }
 
+  /**
+   * The start itself, with any throw turned into a status.
+   *
+   * A throw here used to reject out of the cluster gate, which only logs it,
+   * and left `status` saying whatever it said before. Now the source is
+   * released, the owner is told why, and the next settings change or
+   * credential write tries again through `recheckNow()`.
+   */
   private async runStart(): Promise<InboundMailSupervisorStatus> {
+    try {
+      return await this.runStartSteps();
+    } catch (error) {
+      await this.releaseSource();
+      if (!this.wantsRunning) return this.settle('inactive', 'stopped');
+      const restart = error instanceof InboundMailboxIdentityChangedError;
+      // The raw error can carry a filesystem path or a provider message; it goes to the log, not to status or the owner notice.
+      if (!restart) logger.error('Inbound mail could not start', { error: summarizeError(error) });
+      const detail = restart ? error.message : 'Inbound mail could not start; failure details withheld, see the daemon log.';
+      const fix = restart ? '' : 'It is tried again when inbound mail settings or the mail credential change.';
+      this.announceTerminal({
+        account: this.deps.account,
+        mailbox: this.deps.mailbox,
+        reason: 'watcher-stopped-unexpectedly',
+        detail,
+        fix,
+        at: new Date(this.now()).toISOString(),
+        notice: null,
+      });
+      return this.settle('inactive', fix === '' ? detail : `${detail} ${fix}`);
+    }
+  }
+
+  private async runStartSteps(): Promise<InboundMailSupervisorStatus> {
     await this.releaseSource();
+    // What the previous run concluded says nothing about this one; left in
+    // place it contradicts the status of a switched-off or refused start.
+    this.verdict = null;
+    this.selection = null;
+    this.terminal = null;
     if (!this.wantsRunning) return this.settle('inactive', 'stopped');
+    this.startedWith = this.startInputs();
     // Cleared per start: a sweep that failed last time and worked this time
     // must not go on being appended to every status sentence.
     this.degradations = [];
@@ -291,17 +410,25 @@ export class InboundMailSupervisor {
     try {
       await this.deps.housekeeper.runRecoverySweep();
     } catch (error) {
+      logger.error('Inbound mail recovery sweep failed', { error: summarizeError(error) });
       degradations.push(
-        `The recovery sweep of the inbound stores did not run (${summarizeError(error)}); `
+        'The recovery sweep of the inbound stores did not run (details are in the daemon log); '
         + 'the watcher started anyway and the stores keep whatever they held.');
     }
     try {
       await this.deps.expectations.hydrate();
     } catch (error) {
+      logger.error('Inbound mail expectations could not be restored', { error: summarizeError(error) });
       degradations.push(
-        `Open expectations could not be restored (${summarizeError(error)}); a verification `
+        'Open expectations could not be restored (details are in the daemon log); a verification '
         + 'opened before this restart cannot be matched, and the workstream waiting on it '
         + 'will report that no mail arrived.');
+    }
+    const ignored = this.deps.ignoredAccounts ?? [];
+    if (ignored.length > 0) {
+      degradations.push(
+        `Only ${this.deps.account} is watched; the other account${ignored.length === 1 ? '' : 's'} in surfaces.email.inbound.accounts `
+        + `(${ignored.join(', ')}) ${ignored.length === 1 ? 'is' : 'are'} ignored. Remove ${ignored.length === 1 ? 'it' : 'them'} from the list or watch ${ignored.length === 1 ? 'it' : 'them'} from another node.`);
     }
     this.degradations = degradations;
 
@@ -342,6 +469,7 @@ export class InboundMailSupervisor {
 
     if (!this.wantsRunning) { await source.stop(); return this.settle('inactive', 'stopped'); }
     this.source = source;
+    this.loopEnded = false;
     const abort = new AbortController();
     this.abort = abort;
     const verdict = await source.start(abort.signal);
@@ -350,14 +478,16 @@ export class InboundMailSupervisor {
       return this.settle('inactive', source.retired ? 'The mail source was retired during startup.' : 'stopped');
     }
     this.verdict = verdict;
+    this.loop = this.watch(source, abort);
     if (verdict.state === 'insufficient') {
-      // §3.4b: an insufficient mailbox does not run, and the connection is
-      // released rather than held through the re-check wait.
-      await this.releaseSource();
+      // §3.4b: an insufficient mailbox does not run. The source is still held,
+      // because its own timed re-check (and `recheckNow()`) is the only way
+      // back that does not need a restart, and the observer's recovery arm
+      // below turns a later healthy verdict into `running`. Holding the source
+      // holds no connection: the watcher closes before it waits.
       return this.settle('inactive', `${verdict.detail}${verdict.fix ? ` ${verdict.fix}` : ''}`);
     }
 
-    this.loop = this.watch(source, abort);
     return this.settle(
       source.latency.kind === 'push' ? 'idle' : 'polling',
       `${selection.detail} ${describeSourceLatency(source.latency)}`,
@@ -388,23 +518,41 @@ export class InboundMailSupervisor {
   private watch(source: InboundMailSource, abort: AbortController): Promise<void> {
     return source.run(abort.signal).then(
       () => {
-        if (source.retired && this.abort === abort && !abort.signal.aborted) {
-          this.settle('inactive', 'The mail source was retired after an account or credential change.');
-          return;
-        }
+        if (this.settleRetired(source, abort)) return;
         this.settleLoopEnd(abort, null);
       },
-      (error: unknown) => { this.settleLoopEnd(abort, error); },
+      (error: unknown) => {
+        if (this.settleRetired(source, abort)) return;
+        this.settleLoopEnd(abort, error);
+      },
     );
+  }
+
+  /**
+   * A source retired by a settings or credential change ends its loop; that
+   * is a rebuild, not a death. Rebuilt from here rather than left to the next
+   * `recheckNow()`, because the retirement is decided after the change is
+   * applied and the recheck the change triggered may already have run.
+   */
+  private settleRetired(source: InboundMailSource, abort: AbortController): boolean {
+    if (!source.retired || this.abort !== abort || abort.signal.aborted) return false;
+    this.settle('inactive', 'The mail source was retired after an account or credential change.');
+    if (this.wantsRunning) this.rebuildRetiredSource();
+    return true;
   }
 
   private settleLoopEnd(abort: AbortController, error: unknown): void {
     if (this.abort !== abort) return;
     if (abort.signal.aborted) return;
+    this.loopEnded = true;
     const verdict = error === null
       ? capabilityVerdict('watcher-stopped-unexpectedly',
         'The mail source returned from its run loop without being asked to stop.')
-      : capabilityVerdict('watcher-stopped-unexpectedly', summarizeError(error));
+      : capabilityVerdict('watcher-stopped-unexpectedly', 'The mail source stopped after an error; failure details withheld.');
+    // The status verb and the owner notice are model-visible and may leave the
+    // machine, so the raw text (it can carry local paths) goes to the log only,
+    // the same rule the reconnect path applies.
+    if (error !== null) logger.error('Inbound mail run loop ended with an error', { error: summarizeError(error) });
     this.verdict = verdict;
     this.announceTerminal({
       account: this.deps.account,
@@ -448,15 +596,62 @@ export class InboundMailSupervisor {
    * reconnecting in a loop while somebody is still typing. The reconnect the
    * watcher was going to make anyway is simply made now.
    *
-   * A no-op when nothing is running, and a no-op on a source that declares no
-   * `recheckNow`. Both are honest answers to "look again", not swallowed
-   * failures: whether there is anything to look again AT is the source's own
-   * business, see `InboundMailSource.recheckNow`.
+   * The exceptions are the cases where a re-probe cannot help: a retired
+   * source, or a change to whether and which source runs, is rebuilt; and a
+   * supervisor this node is meant to run that has no source at all is started
+   * again, debounced. A no-op when this node is not meant to be running.
    */
   recheckNow(): void {
-    if (this.starting !== null && this.wantsRunning) { this.restartRequested = true; return; }
-    if (this.source?.retired && this.wantsRunning) this.rebuildRetiredSource();
-    else this.source?.recheckNow?.();
+    if (!this.wantsRunning) return;
+    if (this.starting !== null) { this.restartRequested = true; return; }
+    const source = this.source;
+    if (source !== null && (source.retired || this.loopEnded || this.startInputs() !== this.startedWith)) {
+      this.rebuildRetiredSource();
+      return;
+    }
+    if (source?.recheckNow) { source.recheckNow(); return; }
+    if (source !== null && this.currentStatus.running) return;
+    // Nothing is running to look again: switched off, a refused selection, a
+    // source the factory could not build, or a start that threw. Each of
+    // those settles with no source, and without this the owner who fixed the
+    // cause waited for a daemon restart.
+    this.scheduleRevive();
+  }
+
+  private scheduleRevive(): void {
+    if (this.reviveTimer !== null) return;
+    const timer = setTimeout(() => {
+      if (this.reviveTimer !== timer) return;
+      this.reviveTimer = null;
+      if (this.wantsRunning && this.starting === null) this.rebuildRetiredSource();
+    }, this.deps.reviveDelayMs ?? DEFAULT_REVIVE_DELAY_MS);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.reviveTimer = timer;
+  }
+
+  private clearReviveTimer(): void {
+    if (this.reviveTimer === null) return;
+    clearTimeout(this.reviveTimer);
+    this.reviveTimer = null;
+  }
+
+  /** The settings a running source does not re-read, see `startedWith`. */
+  private startInputs(): string {
+    return JSON.stringify([
+      this.deps.config.get('surfaces.email.inbound.enabled'),
+      this.deps.config.get('surfaces.email.inbound.source'),
+      // Which mailbox the source is bound to for its whole life. A source that
+      // polls on its own (Gmail) never re-reads these, so a change has to
+      // reach the factory's identity check to be answered with a restart
+      // instruction rather than ignored.
+      this.deps.config.get('surfaces.email.user'),
+      this.deps.config.get('surfaces.email.imap.mailbox'),
+      this.deps.config.get('surfaces.email.inbound.accounts'),
+      // Not part of the mailbox identity, but it decides which source an auto
+      // install selects: a non-Google host turns a Gmail mailbox into IMAP.
+      this.deps.config.get('surfaces.email.imap.host'),
+      this.deps.config.get('surfaces.email.imapHost'),
+    ]);
   }
 
   private rebuildRetiredSource(): void {
@@ -474,9 +669,29 @@ export class InboundMailSupervisor {
   async stop(): Promise<void> {
     this.wantsRunning = false;
     this.restartRequested = false;
+    this.clearReviveTimer();
+    const starting = this.starting;
+    if (starting !== null) this.cancelledStart = starting;
     await this.releaseSource();
+    // A start in flight may be about to build a source and open a socket; the
+    // successor node must not be told to start until that has unwound too.
+    if (starting !== null) await this.awaitStartUnwind(starting);
     if (this.currentStatus.running) {
       this.settle('inactive', 'stopped');
+    }
+  }
+
+  private async awaitStartUnwind(starting: Promise<InboundMailSupervisorStatus>): Promise<void> {
+    const give = new AbortController();
+    const bound = this.deps.startUnwindBoundMs ?? DEFAULT_START_UNWIND_BOUND_MS;
+    const timeout = (this.deps.sleep ?? realSleep)(bound, give.signal).then(() => 'late' as const);
+    const outcome = await Promise.race([starting.then(() => 'done' as const, () => 'done' as const), timeout]);
+    give.abort();
+    if (outcome === 'late') {
+      logger.warn('Inbound mail stop did not wait for a start that is still in flight; it releases what it builds when it finishes', {
+        surface: 'email-inbound',
+        waitedMs: bound,
+      });
     }
   }
 
@@ -487,6 +702,7 @@ export class InboundMailSupervisor {
     this.source = null;
     this.loop = null;
     this.abort = null;
+    this.loopEnded = false;
     if (source !== null) await source.stop().catch(() => undefined);
     if (loop !== null) await loop;
   }

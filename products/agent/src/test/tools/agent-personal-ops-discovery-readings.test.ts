@@ -147,9 +147,9 @@ describe('Classic Personal Ops native facts and discovery', () => {
     const privacy = researchScreeningFixture(); const current = { sourceOwner: privacy.owner };
     const fake = fakePort(() => { throw new Error('Classic must not ask'); }); installJudgmentPort(fake.port);
     await withDecisionModelPolicy(() => 'Classic - Off', async () => {
-      const entry = { id: 'inbox.native', description: 'Explicit inbox catalog registration', invokable: false };
+      const entry = { id: 'email.inbox.native', description: 'Explicit inbox catalog registration', invokable: false };
       expect(await personalOpsLaneMembers([entry], 'inbox', item => ({ ...item, evidence: item }), current)).toEqual([entry]);
-      expect(partitionInvokableMethods([entry])).toEqual({ available: [], unavailable: ['inbox.native'] });
+      expect(partitionInvokableMethods([entry])).toEqual({ available: [], unavailable: ['email.inbox.native'] });
       expect(await readPersonalOpsTool(contract(), current)).toBeNull();
       expect(await readPersonalOpsSampleField({ contract: contract(), field: 'preview', lane: 'inbox', effect: 'confirmed-effect', inputSchema: {} }, current)).toBe('<preview>');
       expect(await readPersonalOpsBoolean({ parameter: 'unread', value: 'publisher says unread', record: {} }, current)).toBeNull();

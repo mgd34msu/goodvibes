@@ -106,19 +106,25 @@ describe('creating and joining a group', () => {
     const { world: w, first, groupId, joinKey } = await makeGroupOfOne();
     await first.runtime.stop();
     const second = await addGroupNode(w, 'node-b');
-    const pending = second.runtime.requestJoin({ groupId, joinKey, joinSalt: deriveJoinSalt(groupId), timeoutMs: 60_000 });
     // The join verifier is derived before the request is sent and waited on;
-    // stop only once the request is actually pending.
-    const admissions = (second.runtime as unknown as { readonly admissions: { readonly pending: unknown } }).admissions;
-    for (let tries = 0; admissions.pending === null && tries < 200; tries += 1) await new Promise((done) => setTimeout(done, 10));
-    expect(admissions.pending).not.toBeNull();
-    await second.runtime.stop();
-    const outcome = await pending;
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) {
-      expect(outcome.failure).toBe('abandoned');
-      expect(outcome.reason).toContain('shut down');
-    }
+    // stop only once the request has actually gone out.
+    const dispatched = Promise.withResolvers<void>();
+    const send = second.transport.send.bind(second.transport);
+    const sending = spyOn(second.transport, 'send').mockImplementation(async raw => {
+      await send(raw);
+      if ((JSON.parse(raw) as { type: string }).type === GROUP_MESSAGE_TYPES.join) dispatched.resolve();
+    });
+    try {
+      const pending = second.runtime.requestJoin({ groupId, joinKey, joinSalt: deriveJoinSalt(groupId), timeoutMs: 60_000 });
+      await dispatched.promise;
+      await second.runtime.stop();
+      const outcome = await pending;
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(outcome.failure).toBe('abandoned');
+        expect(outcome.reason).toContain('shut down');
+      }
+    } finally { sending.mockRestore(); }
   });
 
   test('the wrong join key is refused with a message that names the fix', async () => {
@@ -796,7 +802,7 @@ describe('status', () => {
   });
 });
 
-// Authored and UNRUN: stop must own preparation before its first asynchronous
+// Stop must own preparation before its first asynchronous
 // scrypt completion, rather than waiting until a JOIN happens to reach the bus.
 test('runtime stop immediately cancels a reserved JOIN and drains every late preparation', async () => {
   const created = createGroupWorld(); world = created;

@@ -7,6 +7,13 @@ import { sleep } from './concurrency.js';
 export interface RetryConfig {
   /** Host-owned admission fence. A failure is final even if its error looks retryable. */
   beforeAttempt?: (() => void | Promise<void>) | undefined;
+  /**
+   * Host-owned veto asked after a retryable failure. Return false once the
+   * attempt has already delivered output a consumer cannot take back (a streamed
+   * delta, a sent HTTP chunk): the error is then final, because a second attempt
+   * would deliver the answer again after the first one's text.
+   */
+  canRetry?: (() => boolean) | undefined;
   maxRetries: number;
   initialDelayMs: number;
   maxDelayMs: number;
@@ -71,6 +78,24 @@ export function isRetryableError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * The longest wait a provider's own Retry-After is honoured for. A longer wait
+ * is not slept through: the turn would look hung, so the error is surfaced with
+ * its structured wait and the caller decides.
+ */
+const MAX_HONOURED_RETRY_AFTER_MS = 60_000;
+
+function retryAfterOf(err: unknown): number | undefined {
+  if (!(err instanceof AppError)) return undefined;
+  const wait = err.retryAfterMs;
+  return typeof wait === 'number' && Number.isFinite(wait) && wait > 0 ? wait : undefined;
+}
+
+/** A spent account does not recover by retrying; the wait only delays the explanation. */
+function isBillingFailure(err: unknown): boolean {
+  return err instanceof AppError && (err.category === 'billing' || err.statusCode === 402);
+}
+
 function computeDelay(attempt: number, initialDelayMs: number, maxDelayMs: number): number {
   // Exponential backoff: initialDelay * 2^attempt, with jitter
   const exponential = initialDelayMs * Math.pow(2, attempt);
@@ -108,7 +133,12 @@ export async function withRetry<T>(
         break;
       }
 
-      if (!isRetryableError(err)) {
+      if (!isRetryableError(err) || isBillingFailure(err) || cfg.canRetry?.() === false) {
+        throw lastError;
+      }
+
+      const retryAfterMs = retryAfterOf(err);
+      if (retryAfterMs !== undefined && retryAfterMs > MAX_HONOURED_RETRY_AFTER_MS) {
         throw lastError;
       }
 
@@ -118,7 +148,8 @@ export async function withRetry<T>(
         throw lastError;
       }
 
-      const delayMs = computeDelay(attempt, cfg.initialDelayMs, cfg.maxDelayMs);
+      const backoffMs = computeDelay(attempt, cfg.initialDelayMs, cfg.maxDelayMs);
+      const delayMs = retryAfterMs === undefined ? backoffMs : Math.max(backoffMs, retryAfterMs);
       onRetry?.(attempt + 1, cfg.maxRetries, delayMs, lastError);
       await sleep(delayMs, cfg.signal ? { signal: cfg.signal } : {});
       // sleep() resolves early on abort, so the wait ending is not by itself

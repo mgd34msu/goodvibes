@@ -14,6 +14,7 @@ import {
   uninstallEcosystemCatalogEntry,
 } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
+import { parseScope } from './marketplace-runtime.ts';
 
 export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -91,7 +92,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           `  quarantined: ${status.quarantined ? 'yes' : 'no'}`,
           `  requestedCapabilities: ${capabilities?.requested.length ?? 0}`,
           `  highRiskCapabilities: ${capabilities?.highRisk.length ?? 0}`,
-          `  blockedCapabilities: ${capabilities?.blocked.length ?? 0}`,
+          `  highRiskAboveTier: ${capabilities?.blocked.length ?? 0}`,
           `  signedFingerprint: ${trust?.signatureFingerprint ?? 'n/a'}`,
           `  quarantineReason: ${quarantine?.reason ?? 'n/a'}`,
         ].join('\n'));
@@ -225,10 +226,11 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const entryId = args[1];
         const scopeArg = args[2];
         if (!entryId) {
-          ctx.print('Usage: /plugin install <catalog-id> [project|user]');
+          ctx.print('Usage: /plugin install <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = scopeArg === 'user' ? 'user' : 'project';
+        const scope = parseScope(scopeArg, ctx);
+        if (scope === null) return;
         const result = installEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok
           ? `Installed curated plugin ${entryId} into ${result.receipt.targetPath}`
@@ -239,10 +241,11 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const entryId = args[1];
         const scopeArg = args[2];
         if (!entryId) {
-          ctx.print('Usage: /plugin update <catalog-id> [project|user]');
+          ctx.print('Usage: /plugin update <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = scopeArg === 'user' ? 'user' : 'project';
+        const scope = parseScope(scopeArg, ctx);
+        if (scope === null) return;
         const result = updateInstalledEcosystemEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok
           ? `Updated curated plugin ${entryId} in ${result.receipt.targetPath}`
@@ -253,10 +256,11 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const entryId = args[1];
         const scopeArg = args[2];
         if (!entryId) {
-          ctx.print('Usage: /plugin uninstall <catalog-id> [project|user]');
+          ctx.print('Usage: /plugin uninstall <catalog-id> [project|user] (default: project)');
           return;
         }
-        const scope = scopeArg === 'user' ? 'user' : 'project';
+        const scope = parseScope(scopeArg, ctx);
+        if (scope === null) return;
         const result = uninstallEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
         ctx.print(result.ok
           ? `Uninstalled curated plugin ${entryId} from ${result.removedPath}`
@@ -287,7 +291,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const name = args[1];
         const rawTier = args[2];
         if (!name || !rawTier) {
-          ctx.print('Usage: /plugin trust <name> <untrusted|limited|trusted> [note]');
+          ctx.print('Usage: /plugin trust <name> <untrusted|limited|trusted> [--override] [note]');
           return;
         }
         if (rawTier !== 'untrusted' && rawTier !== 'limited' && rawTier !== 'trusted') {
@@ -295,18 +299,29 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
         const tier = rawTier as 'untrusted' | 'limited' | 'trusted';
-        const note = args.slice(3).join(' ') || undefined;
+        const override = args.slice(3).includes('--override');
+        const userNote = args.slice(3).filter((word) => word !== '--override').join(' ');
+        let note = userNote || undefined;
         if (tier === 'trusted') {
           const sigResult = pluginManager.trustSigned(name);
           if (sigResult.ok) {
-            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}.\nReload the plugin to apply updated capability grants.`);
+            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}.\nThe tier is recorded; it is not enforced per capability.`);
             return;
           }
-          ctx.print(`Warning: Signature validation failed (${sigResult.error}).\nGranting 'trusted' tier by operator override. High-risk capabilities will be available on next reload.`);
+          if (!override) {
+            ctx.print(
+              `Refused: signature validation failed for plugin '${name}' (${sigResult.error}). Its trust tier is unchanged.\n`
+              + `To grant 'trusted' anyway, run: /plugin trust ${name} trusted --override [note]\n`
+              + 'The tier is a record of your trust and is not enforced per capability.',
+            );
+            return;
+          }
+          note = `operator override after failed signature check (${sigResult.error})${userNote ? `; ${userNote}` : ''}`;
+          ctx.print(`Warning: Signature validation failed (${sigResult.error}).\nGranting 'trusted' tier by explicit --override. The tier is a record of your trust and is not enforced per capability.`);
         }
         const result = pluginManager.trust(name, tier, note);
         ctx.print(result.ok
-          ? `Plugin '${name}' trust tier set to '${tier}'.${tier === 'trusted' ? '\nReload the plugin to apply high-risk capability grants.' : ''}`
+          ? `Plugin '${name}' trust tier set to '${tier}'.${tier === 'trusted' ? '\nThe tier is a record of your trust and is not enforced per capability.' : ''}`
           : `Error: ${result.error}`);
         return;
       }
@@ -336,15 +351,16 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         else {
           for (const cap of info.requested) {
             const tag = info.blocked.includes(cap)
-              ? '[BLOCKED - requires trusted tier]'
-              : info.highRisk.includes(cap) ? '[high-risk, granted]' : '[safe]';
+              ? '[high-risk, above trust tier]'
+              : info.highRisk.includes(cap) ? '[high-risk]' : '[safe]';
             lines.push(`  ${cap.padEnd(32)} ${tag}`);
           }
         }
         if (info.blocked.length > 0) {
           lines.push('');
-          lines.push(`${info.blocked.length} high-risk capability/capabilities blocked by trust tier '${info.tier}'.`);
-          lines.push(`Use /plugin trust ${name} trusted to escalate.`);
+          lines.push(`${info.blocked.length} high-risk capability/capabilities requested by a plugin below the trusted tier '${info.tier}'.`);
+          lines.push('Plugins run inside this process, so the tier is a record of your trust and is not enforced per capability; only quarantine stops a plugin from loading.');
+          lines.push(`Use /plugin trust ${name} trusted to record trust, or /plugin quarantine ${name} to stop it loading.`);
         }
         ctx.print(lines.join('\n'));
         return;
@@ -363,9 +379,17 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         }
         const reason = args.slice(2).join(' ') || 'quarantined by operator';
         const result = pluginManager.quarantine(name, reason);
-        ctx.print(result.ok
-          ? `Plugin '${name}' quarantined.\nReason: ${reason}\nHigh-risk capabilities revoked. Reload to fully apply. Use /plugin quarantine <name> lift to restore.`
-          : `Error: ${result.error}`);
+        if (!result.ok) {
+          ctx.print(`Error: ${result.error}`);
+          return;
+        }
+        try {
+          await result.unloading;
+        } catch (error) {
+          ctx.print(`Plugin '${name}' quarantined and will not load again, but stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
+        ctx.print(`Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /plugin quarantine ${name} lift and then /plugin reload.`);
         return;
       }
 
@@ -375,9 +399,9 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         + '  enable <name>              — enable a plugin\n'
         + '  disable <name>             — disable a plugin\n'
         + '  reload                     — reload all enabled plugins\n'
-        + '  trust <name> <tier> [note] — set trust tier (untrusted|limited|trusted)\n'
+        + '  trust <name> <tier> [--override] [note] — set trust tier (untrusted|limited|trusted); the trusted tier needs a valid signature or --override\n'
         + '  verify <name>              — inspect a plugin manifest signature\n'
-        + '  capabilities <name>        — show capability grants and blocks\n'
+        + '  capabilities <name>        — show requested capabilities and trust tier\n'
         + '  browse [query]             — browse curated local-first plugin catalog entries\n'
         + '  installed                  — list curated catalog installs with provenance receipts\n'
         + '  catalog-review <id>        — review source, provenance, and risk for a curated plugin\n'
@@ -386,7 +410,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         + '  install-hint <catalog-id>  — show install guidance for a curated plugin entry\n'
         + '  install <catalog-id> [scope]   — install a local-path curated plugin into project|user scope\n'
         + '  uninstall <catalog-id> [scope] — remove a curated plugin install receipt and target path\n'
-        + '  quarantine <name> [reason] — quarantine a plugin (revoke high-risk caps)\n'
+        + '  quarantine <name> [reason] — quarantine a plugin (stop it and block it from loading)\n'
         + '  quarantine <name> lift     — lift quarantine from a plugin'
       );
     },

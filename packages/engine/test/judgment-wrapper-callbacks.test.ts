@@ -6,8 +6,9 @@ import { browserControlIdentity, browserCredentialPage, BrowserControlIdentityWo
 import { nativeContractPort } from '../platform/src/platform/contract/native-decisions.js';
 import { nativeSourceCriteria } from '../platform/src/platform/contract/native-source.js';
 import { makeContract } from './contract/fixtures.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
-const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const tick = () => eventLoopTurns();
 const identity = { recorded: { name: 'Send message' }, current: { name: 'Submit message' } };
 
 for (const mode of ['returned-work', 'retired-after-answer', 'valid'] as const) test(`actual browser wrapper preserves native recording guard: ${mode}`, async () => {

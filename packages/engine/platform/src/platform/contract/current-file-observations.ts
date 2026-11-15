@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, type BigIntStats } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
@@ -119,6 +119,10 @@ export function currentFileMatchesSavedDigest(value: unknown, digest: string): b
   } catch { return false; }
 }
 
+function canonicalRoot(cwd: string): string {
+  try { return realpathSync(resolve(cwd)); } catch { return resolve(cwd); }
+}
+
 /** Actual file identity observations shared by native checks and repair context. */
 export function currentFileObservations(cwd: string, paths: readonly string[], options: {
   readonly includeText?: boolean;
@@ -128,7 +132,8 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
   /** Actual contract/check owner, never a source identity supplied by a model. */
   readonly owner?: object;
 } = {}): JsonValue[] {
-  const root = resolve(cwd);
+  // A project below a symlinked directory (/tmp, a linked home) is still the same tree; the ancestor check below needs the canonical root.
+  const root = canonicalRoot(cwd);
   return [...new Set(paths)].flatMap<JsonValue>(path => {
     const parts = path.split('/');
     if (isAbsolute(path) || path.includes('\\') || parts.some(part => ['', '.', '..', '.git', '.goodvibes'].includes(part))) return [];

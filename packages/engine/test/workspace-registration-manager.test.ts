@@ -112,6 +112,19 @@ describe('WorkspaceRegistrationManager', () => {
     expect(evaluation.offerRegister).toBe(false);
   });
 
+  it('every root the store refuses is one the manager does not offer to register', async () => {
+    const stateDir = join(home, '.goodvibes');
+    mkdirSync(stateDir, { recursive: true });
+    for (const root of [home, stateDir, '/']) {
+      const mgr = new WorkspaceRegistrationManager({ shellPaths: makeShellPaths(home, root), store: memoryStore(home) });
+      const evaluation = await mgr.evaluate();
+      const outcome = await mgr.register();
+      expect(outcome.registered).toBe(false);
+      expect(evaluation.broad).toBe(true);
+      expect(evaluation.offerRegister).toBe(false);
+    }
+  });
+
   it('describe() reports honest posture for each status', async () => {
     const project = join(home, 'projects', 'app');
     mkdirSync(project, { recursive: true });

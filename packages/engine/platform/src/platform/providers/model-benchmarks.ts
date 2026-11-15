@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { TTL_24H_MS, isTtlCacheStale, validateTtlCacheEnvelope } from './json-ttl-cache.js';
 import { instrumentedFetch, fetchWithTimeout } from '../utils/fetch-with-timeout.js';
@@ -180,10 +181,6 @@ export class BenchmarkStore {
     return join(this.dir, 'benchmarks.json');
   }
 
-  private getTmpPath(): string {
-    return `${this.getCachePath()}.tmp`;
-  }
-
   onRefreshed(callback: () => void): () => void {
     this.refreshCallbacks.add(callback);
     return () => {
@@ -311,8 +308,7 @@ export class BenchmarkStore {
   private saveCache(cache: BenchmarksCache): void {
     try {
       mkdirSync(this.dir, { recursive: true });
-      writeFileSync(this.getTmpPath(), JSON.stringify(cache, null, 2), 'utf-8');
-      renameSync(this.getTmpPath(), this.getCachePath());
+      writeJsonFileAtomic(this.getCachePath(), cache);
     } catch (err) {
       logger.warn('[model-benchmarks] Cache write failed', { error: summarizeError(err) });
     }

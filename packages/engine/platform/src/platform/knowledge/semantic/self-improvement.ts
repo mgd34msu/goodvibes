@@ -14,12 +14,19 @@ import type {
   KnowledgeSemanticSelfImproveInput,
   KnowledgeSemanticSelfImproveResult,
 } from './types.js';
-import { recoverNoRepairerTasks, recoverStaleActiveTasks } from './self-improvement-recovery.js';
-import { sourceKnowledgeSpace, uniqueStrings } from './utils.js';
-import { runWithRepairBudget } from './self-improvement-budget.js';
+import { NO_REPAIRER_BLOCK, NO_REPAIRER_REASON, recoverNoRepairerTasks, recoverStaleActiveTasks } from './self-improvement-recovery.js';
+import { readString, sourceKnowledgeSpace, uniqueStrings } from './utils.js';
+import { ACTIVE_REFINEMENT_STATES } from '../types.js';
+import { KnowledgeStoreConflictError } from '../store-conflict.js';
+import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
+import { SemanticIdentityHeldError } from '../store-semantic-fact-selector.js';
+import { runWithRepairBudget, timerBudgetMs } from './self-improvement-budget.js';
 import { captureRepairFailureReader, type RepairFailureConclusion } from './self-improvement-failure.js';
 import { captureRepairFailureWrites, KnowledgeRepairFailureWriteStaleError } from './self-improvement-failure-writes.js';
 import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
+import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
+import { isTerminalRefinementState } from '../store-lifecycle-authority.js';
 import { updateRefinementTask, upsertRefinementTaskForGap } from './self-improvement-tasks.js';
 import { promoteRepairSources } from './self-improvement-promotion.js';
 import { discoverIntrinsicGaps } from './self-improvement-intrinsic-gaps.js';
@@ -41,7 +48,11 @@ import { captureGapRepairLifecycle } from './self-improvement-lifecycle.js';
 interface SelfImproveContext {
   readonly store: KnowledgeStore;
   readonly gapRepairer?: KnowledgeSemanticGapRepairer | null | undefined;
+  /** The service's repairer right now; a repair started under another one is retired. */
+  readonly currentGapRepairer?: (() => KnowledgeSemanticGapRepairer | null | undefined) | undefined;
   readonly activeGapRepairs: Set<string>;
+  /** Called after a gap's repair leaves `activeGapRepairs`, so a waiter wakes without polling. */
+  readonly repairSettled?: (() => void) | undefined;
   readonly objectProfiles?: readonly KnowledgeObjectProfilePolicy[] | undefined;
   readonly enrichSource?: (sourceId: string, options: { readonly force?: boolean; readonly knowledgeSpaceId?: string; readonly signal?: AbortSignal; readonly shouldStop?: (() => boolean) | undefined }) => Promise<unknown>;
   /**
@@ -114,7 +125,8 @@ export async function runKnowledgeSemanticSelfImprovement(
   const gapIdFilter = input.gapIds?.length ? new Set(input.gapIds) : null;
   const spaceId = resolveSelfImproveSpace(context.store, input);
   const objectProfiles = [...BASE_OBJECT_PROFILES, ...(input.objectProfiles ?? context.objectProfiles ?? [])];
-  await recoverStaleActiveTasks(context.store, spaceId);
+  // A repair this process is still running is not stale, however long its step takes.
+  await recoverStaleActiveTasks(context.store, spaceId, (task) => task.gapId !== undefined && context.activeGapRepairs.has(`${spaceId}:${task.gapId}`));
   if (context.gapRepairer) {
     await recoverNoRepairerTasks(context.store, spaceId);
   }
@@ -136,7 +148,7 @@ export async function runKnowledgeSemanticSelfImprovement(
     // Governor pause stop lands INSIDE a space-scoped run too: the per-gap
     // boundary is the run's natural yield point, same as signal abort.
     if (input.signal?.aborted || context.shouldStop?.()) {
-      markRunBudgetExhausted(state);
+      state.truncated = true;
       break;
     }
     if (Date.now() - plan.startedAt >= plan.maxRunMs) {
@@ -144,76 +156,132 @@ export async function runKnowledgeSemanticSelfImprovement(
       break;
     }
     state.processedGaps += 1;
-    const gapContext = await buildGapContext(context.store, spaceId, gap, objectProfiles,
-      { signal: input.signal, shouldStop: context.shouldStop });
-    const lifecycleStopped = captureGapRepairLifecycle(context.store, gap);
-    // A missing usefulness reader must not rewrite an existing task merely to
-    // discover that its previous repaired-fact decision cannot be revalidated.
-    const classification = await classifyGap(gapContext, input.force === true, objectProfiles, context.store,
-      { signal: input.signal, shouldStop: context.shouldStop });
-    classification.assertCurrent?.();
-    const task = await upsertRefinementTaskForGap(context.store, spaceId, gapContext, plan.trigger, 'detected', 'Gap was detected for semantic refinement.', {}, classification.assertCurrent);
-    state.taskIds.push(task.id);
-    const shouldStop = () => input.signal?.aborted === true || context.shouldStop?.() === true || lifecycleStopped(task.id);
-    if (shouldStop()) { state.skippedGaps += 1; continue; }
-    if (classification.action === 'suppress') {
-      await updateRefinementTask(context.store, task, 'suppressed', classification.reason ?? 'Gap was classified as not applicable.', {}, classification.assertCurrent);
-      await suppressGap(context.store, gap, classification.reason, spaceId, classification.assertCurrent);
-      state.suppressedGaps += 1;
-      continue;
-    }
-    if (classification.action === 'skip') {
-      if (classification.status === 'repaired' || classification.status === 'already_repaired') {
-        state.closedGaps += 1;
-        await updateRefinementTask(context.store, task, 'closed', classification.reason ?? 'Gap is already repaired.', {}, classification.assertCurrent);
-        continue;
-      }
-      if (classification.status === 'active') {
+    try {
+      // The run's remaining time bounds every judgment reading, so a hung model
+      // port ends this gap at the run deadline instead of stalling the run.
+      const readingBudget = { signal: input.signal, shouldStop: context.shouldStop, ...(Number.isFinite(plan.maxRunMs)
+        ? { timeoutMs: Math.max(1, plan.startedAt + plan.maxRunMs - Date.now()) } : {}) };
+      const gapContext = await buildGapContext(context.store, spaceId, gap, objectProfiles, readingBudget);
+      const lifecycleStopped = captureGapRepairLifecycle(context.store, gap);
+      // A missing usefulness reader must not rewrite an existing task merely to
+      // discover that its previous repaired-fact decision cannot be revalidated.
+      const classification = await classifyGap(gapContext, input.force === true, objectProfiles, context.store, readingBudget);
+      classification.assertCurrent?.();
+      const task = await upsertRefinementTaskForGap(context.store, spaceId, gapContext, plan.trigger, 'detected', 'Gap was detected for semantic refinement.', {}, classification.assertCurrent);
+      state.taskIds.push(task.id);
+      const shouldStop = () => input.signal?.aborted === true || context.shouldStop?.() === true || lifecycleStopped(task.id);
+      if (isTerminalRefinementState(task.state)) {
+        // A suppress decision writes its task first. A run that stopped between
+        // the two writes left the gap active under a final task: finish the gap.
+        if (task.state === 'suppressed' && classification.action === 'suppress' && !input.signal?.aborted && !context.shouldStop?.()) {
+          await suppressGap(context.store, gap, classification.reason, spaceId, classification.assertCurrent);
+          state.suppressedGaps += 1;
+          continue;
+        }
         state.skippedGaps += 1;
-        await updateRefinementTask(context.store, task, 'queued', classification.reason ?? 'Gap repair is already active.', {}, classification.assertCurrent);
+        // The task id belongs to the gap, so a final task cannot be reopened.
+        if (classification.action === 'repair') {
+          state.errors.push({ gapId: gap.id, error: `Gap needs repair again, but its refinement task ${task.id} is ${task.state} and final; it was not repaired.` });
+        }
         continue;
       }
-      state.blockedGaps += 1;
-      await updateRefinementTask(context.store, task, 'blocked', classification.reason ?? 'Gap is not currently repairable.', {}, classification.assertCurrent);
-      if (classification.markAttempt) {
-        await markGapRepairAttempt(context.store, gap, spaceId, {
-          status: classification.status ?? 'skipped',
-          reason: classification.reason,
-          assertCurrent: classification.assertCurrent,
-        });
+      if (shouldStop()) { state.skippedGaps += 1; continue; }
+      if (classification.action === 'suppress') {
+        await updateRefinementTask(context.store, task, 'suppressed', classification.reason ?? 'Gap was classified as not applicable.', {}, classification.assertCurrent);
+        await suppressGap(context.store, gap, classification.reason, spaceId, classification.assertCurrent);
+        state.suppressedGaps += 1;
+        continue;
       }
-      continue;
+      if (classification.action === 'skip') {
+        if (classification.status === 'repaired' || classification.status === 'already_repaired') {
+          state.closedGaps += 1;
+          await updateRefinementTask(context.store, task, 'closed', classification.reason ?? 'Gap is already repaired.', {}, classification.assertCurrent);
+          continue;
+        }
+        state.blockedGaps += 1;
+        await updateRefinementTask(context.store, task, 'blocked', classification.reason ?? 'Gap is not currently repairable.', {}, classification.assertCurrent);
+        // The blocked task records the skip. Rewriting the gap each run would
+        // append a node revision per run and, for a gap waiting out its retry
+        // window, replace the failure status that window belongs to.
+        const status = classification.status === 'needs_context' ? 'needs_context' : 'skipped';
+        if (classification.markAttempt && classification.status !== 'retry_wait' && readString(gap.metadata.repairStatus) !== status) {
+          await markGapRepairAttempt(context.store, gap, spaceId, {
+            status,
+            reason: classification.reason,
+            assertCurrent: classification.assertCurrent,
+          });
+        }
+        continue;
+      }
+      if (input.deferRepair === true && context.gapRepairer) {
+        state.queuedTasks += 1;
+        await updateRefinementTask(context.store, task, 'queued', 'Gap repair was queued for background refinement.', {
+          deferred: true,
+        }, classification.assertCurrent);
+        continue;
+      }
+      if (!context.gapRepairer) {
+        await markNoRepairer(context.store, spaceId, gap, task, classification.assertCurrent);
+        state.blockedGaps += 1;
+        continue;
+      }
+      classification.assertCurrent?.();
+      const repair = await repairCandidateGap({
+        context,
+        input,
+        spaceId,
+        objectProfiles,
+        gap,
+        gapContext,
+        task,
+        startedAt: plan.startedAt,
+        maxRunMs: plan.maxRunMs,
+        shouldStop,
+      });
+      applyRepairOutcome(state, repair);
+      // A caller's cancellation authorizes no further writes; a governor pause
+      // is this run's own stop, so it settles what it left behind.
+      if (!input.signal?.aborted && context.shouldStop?.()) await settleStoppedTask(context.store, task.id, 'background knowledge work is paused for memory pressure');
+    } catch (error) {
+      // One gap whose saved identity, graph or model reading is held must not
+      // stop every later gap; they are processed in the same order each run.
+      if (input.signal?.aborted || !isSelfImproveHold(error)) throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      // A hold writes nothing, so the gap keeps its state and is read again next run.
+      state.errors.push({ gapId: gap.id, error: reason });
+      state.skippedGaps += 1;
     }
-    if (input.deferRepair === true && context.gapRepairer) {
-      state.queuedTasks += 1;
-      await updateRefinementTask(context.store, task, 'queued', 'Gap repair was queued for background refinement.', {
-        deferred: true,
-      }, classification.assertCurrent);
-      continue;
-    }
-    if (!context.gapRepairer) {
-      await markNoRepairer(context.store, spaceId, gap, task, classification.assertCurrent);
-      state.blockedGaps += 1;
-      continue;
-    }
-    classification.assertCurrent?.();
-    const repair = await repairCandidateGap({
-      context,
-      input,
-      spaceId,
-      objectProfiles,
-      gap,
-      gapContext,
-      task,
-      startedAt: plan.startedAt,
-      maxRunMs: plan.maxRunMs,
-      shouldStop,
-    });
-    applyRepairOutcome(state, repair);
     await yieldToEventLoop();
   }
 
   return buildSelfImproveResult(plan, state, createdGaps);
+}
+
+/**
+ * A hold stops the one gap or space it happened in; the run reports it and
+ * moves on. Anything else (a store fault, a bug) still stops the run.
+ */
+export function isSelfImproveHold(error: unknown): boolean {
+  // No decision model at all holds every gap the same way; that stops the run.
+  if (error instanceof DecisionModelsDisabledError || error instanceof JudgmentPortMissingError
+    || (error instanceof Error && (error as { reason?: unknown }).reason === 'unconfigured')) return false;
+  return error instanceof SemanticIdentityHeldError
+    || (error instanceof KnowledgeStoreConflictError && error.reloaded)
+    || (error instanceof KnowledgeScopeSelectionHeldError && error.reason === 'stale')
+    || (isKnowledgeSourceQualityFailure(error) && !(error instanceof KnowledgeNodeActivationHeldError && error.reason === 'aborted'));
+}
+
+/**
+ * A repair that returned early because the run was paused leaves its task in
+ * whatever step it reached; nothing is working on it any more, so it must not
+ * keep reading as in progress. Stops caused by another writer changing the
+ * task or gap, or by the caller cancelling, are left as they are (the next
+ * run's stale-task recovery settles those).
+ */
+async function settleStoppedTask(store: KnowledgeStore, taskId: string, why: string): Promise<void> {
+  const current = store.getRefinementTask(taskId);
+  if (!current || !(ACTIVE_REFINEMENT_STATES.has(current.state) || current.state === 'verified')) return;
+  await updateRefinementTask(store, current, 'blocked', `Repair stopped because ${why}; it can be retried.`, { stopped: why, retryable: true });
 }
 
 function createSelfImproveRunPlan(
@@ -221,6 +289,8 @@ function createSelfImproveRunPlan(
   input: KnowledgeSemanticSelfImproveInput,
 ): SelfImproveRunPlan {
   const requestedLimit = input.limit !== undefined && input.limit > 0 ? Math.floor(input.limit) : candidates.length;
+  // No platform cap: a caller that omits `limit` asks for every candidate. A
+  // zero or negative limit reads as omitted (background producers rely on it).
   const cappedLimit = requestedLimit;
   const gaps = candidates.slice(0, cappedLimit);
   return {
@@ -229,7 +299,7 @@ function createSelfImproveRunPlan(
     requestedLimit,
     cappedLimit,
     effectiveLimit: gaps.length,
-    maxRunMs: input.maxRunMs !== undefined && input.maxRunMs > 0 ? input.maxRunMs : Infinity,
+    maxRunMs: input.maxRunMs !== undefined && input.maxRunMs > 0 ? timerBudgetMs(input.maxRunMs) : Infinity,
     startedAt: Date.now(),
     trigger: input.reason ?? 'manual',
   };
@@ -257,6 +327,7 @@ function createSelfImproveRunState(plan: SelfImproveRunPlan): SelfImproveRunStat
   };
 }
 
+/** Only the run's own time budget (or a repair's report of it) exhausts it; a stop or pause only truncates. */
 function markRunBudgetExhausted(state: SelfImproveRunState): void {
   state.truncated = true;
   state.budgetExhausted = true;
@@ -286,11 +357,13 @@ async function markNoRepairer(
   task: KnowledgeRefinementTaskRecord,
   assertCurrent?: () => void,
 ): Promise<void> {
-  await updateRefinementTask(store, task, 'blocked', 'No semantic gap repairer is configured.', {}, assertCurrent);
+  await updateRefinementTask(store, task, 'blocked', NO_REPAIRER_REASON, { blockedKind: NO_REPAIRER_BLOCK }, assertCurrent);
+  // Already recorded: rewriting it each run would only append node revisions.
+  if (readString(gap.metadata.repairStatus) === NO_REPAIRER_BLOCK) return;
   await markGapRepairAttempt(store, gap, spaceId, {
     assertCurrent,
-    status: 'no_repairer',
-    reason: 'No semantic gap repairer is configured.',
+    status: NO_REPAIRER_BLOCK,
+    reason: NO_REPAIRER_REASON,
   });
 }
 
@@ -347,7 +420,7 @@ function emptySelfImproveResult(
     requestedLimit: 0,
     effectiveLimit: 0,
     truncated: true,
-    budgetExhausted: true,
+    budgetExhausted: false,
     taskIds: [],
     ingestedSourceIds: [],
     acceptedSourceIds: [],
@@ -399,6 +472,7 @@ async function repairCandidateGap(options: {
     return await persistGapRepairFailure(context, gap, failureTask, spaceId, reason, failure);
   } finally {
     context.activeGapRepairs.delete(repairKey);
+    context.repairSettled?.();
   }
 }
 
@@ -461,6 +535,7 @@ async function executeGapRepair(options: {
   let task = await updateRefinementTask(context.store, options.task, 'searching', 'Searching for source-backed repair evidence.', { query: gap.title });
   if (options.shouldStop()) return emptyRepairOutcome({ skippedGaps: 1 });
   const remainingMs = Math.max(0, startedAt + maxRunMs - Date.now());
+  const repairerRetired = () => context.currentGapRepairer !== undefined && context.currentGapRepairer() !== gapRepairer;
   const result = await runGapRepairerWithBudget({
     input,
     spaceId,
@@ -469,9 +544,10 @@ async function executeGapRepair(options: {
     gapRepairer,
     remainingMs,
     store: context.store,
-    assertCurrent: () => { if (options.shouldStop() || context.gapRepairer !== gapRepairer) throw new Error('Gap repair caller retired'); },
+    assertCurrent: () => { if (options.shouldStop() || repairerRetired()) throw new Error('Gap repair caller retired'); },
   });
-  if (options.shouldStop()) return emptyRepairOutcome({ skippedGaps: 1 });
+  // A repairer replaced or removed mid-run no longer speaks for this service: its answer is not recorded.
+  if (options.shouldStop() || repairerRetired()) return emptyRepairOutcome({ skippedGaps: 1 });
   const assessment = await recordGapRepairAssessment(context.store, task, gap, result);
   task = assessment.task;
   if (options.shouldStop()) return emptyRepairOutcome({ skippedGaps: 1 });

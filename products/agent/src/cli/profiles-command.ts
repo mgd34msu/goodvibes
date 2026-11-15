@@ -30,10 +30,20 @@ function hasYes(args: readonly string[]): boolean {
   return args.includes('--yes');
 }
 
+const VALUED_FLAGS: readonly string[] = [
+  '--template', '--starter', '--template-id', '--starter-id', '--name', '--profile-name',
+  '--description', '--persona', '--skills', '--routines',
+];
+
+// A flag's value is not a positional: `--template starter name` must not shift the name argument.
 function commandValues(args: readonly string[]): readonly string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index]!;
+    if (VALUED_FLAGS.includes(token)) {
+      index += 1;
+      continue;
+    }
     if (!token.startsWith('--')) values.push(token);
   }
   return values;
@@ -109,7 +119,7 @@ function renderProfilesResult(result: AgentRuntimeProfileCommandResult): string 
       `Agent starter template exported: ${result.data.template.id}`,
       `  path ${result.data.path}`,
       result.data.template.vibeIncluded ? '  vibe included' : '',
-      '  edit the JSON, then import it with goodvibes-agent profiles templates import <path> --yes',
+      '  edit the JSON, then import it with goodvibes-agent profiles templates import <path> [--replace] --yes',
     ].filter(Boolean).join('\n');
   }
   if (result.kind === 'agent.profiles.template.import' && result.data?.template) {
@@ -304,7 +314,7 @@ export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Pr
           const result: AgentRuntimeProfileCommandResult = {
             ok: false,
             kind: 'agent.profiles.error',
-            error: 'Usage: goodvibes-agent profiles templates import <path> --yes',
+            error: 'Usage: goodvibes-agent profiles templates import <path> [--replace] --yes',
           };
           return {
             output: renderProfilesOutput(result, runtime.cli.flags.outputFormat),
@@ -322,7 +332,7 @@ export async function handleProfilesCommand(runtime: ProfilesCommandRuntime): Pr
             exitCode: 2,
           };
         }
-        const template = importAgentRuntimeProfileTemplate(runtime.homeDirectory, templateId);
+        const template = importAgentRuntimeProfileTemplate(runtime.homeDirectory, templateId, { replace: rawRest.includes('--replace') });
         const result: AgentRuntimeProfileCommandResult = {
           ok: true,
           kind: 'agent.profiles.template.import',

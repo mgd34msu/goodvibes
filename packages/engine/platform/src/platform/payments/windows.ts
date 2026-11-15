@@ -199,7 +199,9 @@ export function advanceVeto(state: VetoState, event: VetoEvent): VetoState {
     case 'undeliverable':
       return 'proceeding-undelivered';
     case 'acknowledge':
-      return 'proceeding-acknowledged';
+      // Like an approval, an acknowledgement answers a notice that went out.
+      // (An objection is honoured from any state: cancelling is the safe edge.)
+      return state === 'open' ? 'proceeding-acknowledged' : state;
     case 'object':
       return 'cancelled';
     case 'deadline':

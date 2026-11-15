@@ -46,7 +46,9 @@ import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { ChannelDeliveryRouter } from '../../channels/delivery-router.js';
 import type { OwnerProfileStore } from '../../owner-profile/index.js';
 import { OccasionStateStore } from '../../occasions/state-store.js';
-import { OccasionsService } from '../../occasions/service.js';
+import { OccasionsService, type OccasionCalendarMirror } from '../../occasions/service.js';
+import { addDays } from '../../occasions/dates.js';
+import type { CalendarGatewayService } from './calendar.js';
 import { nudgeDeliveryText } from '../../occasions/destinations.js';
 import { readOccasionsPolicy } from '../../occasions/policy.js';
 import { startOccasionSweepTicker } from '../../occasions/ticker.js';
@@ -69,6 +71,29 @@ export interface OccasionsCompositionDeps {
   readonly statePath: string;
   /** Where a nudge is delivered. Absent ⇒ pull-only, through `occasions.pending`. */
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
+  /** Where `occasions.calendarMirror` writes. Absent, the setting has no effect and the sweep mirrors nothing. */
+  readonly calendar?: OccasionCalendarMirror | undefined;
+}
+
+/**
+ * Mirror an occasion as one all-day event on the connected calendar. Only the
+ * title is written, never the person or the profile's own wording of the line.
+ * An occurrence that already has an external id is not written again.
+ */
+export function createOccasionCalendarMirror(
+  calendar: Pick<CalendarGatewayService, 'createEvent'>,
+): OccasionCalendarMirror {
+  return {
+    mirror: async ({ occasion, occurrence, existingExternalId }) => {
+      if (existingExternalId !== undefined) return existingExternalId;
+      const created = await calendar.createEvent({
+        title: occasion.title,
+        start: occurrence,
+        end: addDays(occurrence, 1),
+      });
+      return created.eventId;
+    },
+  };
 }
 
 export interface OccasionsComposition {
@@ -111,6 +136,7 @@ export function composeOccasions(
       forget: (input, options) => profile.forget(input, options),
     },
     state,
+    ...(deps.calendar === undefined ? {} : { calendar: deps.calendar }),
     // Read live, per call, so every `occasions.*` setting is a real toggle
     // rather than a restart-only one. The keys are string-addressed because the
     // ConfigKey union is shrink-only and this narrows to it at the boundary.
@@ -222,7 +248,9 @@ export interface OccasionsInstallDeps {
   /** Surface root the state file resolves under; required, never defaulted (control-plane-store-paths.ts). */
   readonly surfaceRoot: string;
   readonly channelDeliveryRouter?: Pick<ChannelDeliveryRouter, 'deliver'> | undefined;
-  readonly disposal?: { add(label: string, dispose: () => void): void } | undefined;
+  /** The connected calendar, when there is one to mirror into. */
+  readonly calendarGateway?: Pick<CalendarGatewayService, 'createEvent'> | undefined;
+  readonly disposal?: { add(label: string, dispose: () => void | Promise<void>): void } | undefined;
 }
 
 /**
@@ -246,6 +274,9 @@ export function installOccasions(
     ...(deps.channelDeliveryRouter === undefined
       ? {}
       : { channelDeliveryRouter: deps.channelDeliveryRouter }),
+    ...(deps.calendarGateway === undefined
+      ? {}
+      : { calendar: createOccasionCalendarMirror(deps.calendarGateway) }),
   });
   deps.disposal?.add('occasions', () => composition.dispose());
   return composition;

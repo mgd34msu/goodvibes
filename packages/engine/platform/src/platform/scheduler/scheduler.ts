@@ -132,6 +132,17 @@ interface TaskSchedulerConfig {
     readonly model?: string | undefined;
     readonly template?: string | undefined;
   }) => string;
+  /**
+   * Resolves with how an agent returned by `spawnTask` ended. When given, run
+   * history moves from `running` to `completed` or `failed`; without it the
+   * scheduler cannot know and history keeps `running`.
+   */
+  readonly awaitRun?: (agentId: string) => Promise<TaskRunOutcome>;
+}
+
+export interface TaskRunOutcome {
+  readonly status: 'completed' | 'failed';
+  readonly error?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,14 +373,13 @@ function computeNextRun(expr: string, from: Date, timezone?: string): Date {
   while (cur < limit) {
     const { month, dom, dow, hour, minute } = getCalendarParts(cur.getTime(), timezone);
 
+    // Month, day and hour mismatches all step to the next hour boundary by
+    // absolute time and re-read the calendar parts. Rebuilding a Date from
+    // local fields instead lands on the first occurrence of a repeated
+    // fall-back hour, which is the instant we started from, so the scan would
+    // never advance.
     if (!fieldMatches(fields.month, month)) {
-      // Process-local month boundaries are not boundaries in the requested
-      // timezone. Step to its next hour and re-read calendar parts instead.
-      if (timezone) { cur = new Date(cur.getTime() + (60 - minute) * 60_000); continue; }
-      // Advance to start of next month, always advance by wall-clock ms to
-      // respect DST; add 32 days and floor to day 1 of the resulting month.
-      cur = new Date(cur.getTime() + 32 * 24 * 60 * 60 * 1000);
-      cur = new Date(cur.getFullYear(), cur.getMonth(), 1, 0, 0, 0, 0);
+      cur = new Date(cur.getTime() + (60 - minute) * 60_000);
       continue;
     }
 
@@ -385,20 +395,8 @@ function computeNextRun(expr: string, from: Date, timezone?: string): Date {
         : dowIsAny
           ? domMatch
           : domMatch || dowMatch;
-    if (!dayMatch) {
-      if (timezone) { cur = new Date(cur.getTime() + (60 - minute) * 60_000); continue; }
-      // Advance to next day
-      cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
-      cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate(), 0, 0, 0, 0);
-      continue;
-    }
-
-    if (!fieldMatches(fields.hour, hour)) {
-      // Respect fractional-hour timezone offsets and DST, not process hours.
-      if (timezone) { cur = new Date(cur.getTime() + (60 - minute) * 60_000); continue; }
-      // Advance to next hour
-      cur = new Date(cur.getTime() + 60 * 60 * 1000);
-      cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate(), cur.getHours(), 0, 0, 0);
+    if (!dayMatch || !fieldMatches(fields.hour, hour)) {
+      cur = new Date(cur.getTime() + (60 - minute) * 60_000);
       continue;
     }
 
@@ -428,6 +426,15 @@ function validateTimezone(tz: string): void {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
   } catch {
     throw new Error(`Invalid timezone: "${tz}". Use an IANA name like "America/New_York" or "Europe/London".`);
+  }
+}
+
+/** The IANA zone this process runs in, or undefined when the runtime cannot name one. */
+function localTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -489,13 +496,20 @@ export class TaskScheduler {
     readonly model?: string | undefined;
     readonly template?: string | undefined;
   }) => string) | undefined;
+  private readonly awaitRun: ((agentId: string) => Promise<TaskRunOutcome>) | undefined;
   private running = false;
+  /** Writes started by add/remove/setEnabled/stop that have not settled yet. */
+  private readonly inflightSaves = new Set<Promise<void>>();
+  /** The error of the most recent save, cleared by the next save that succeeds. */
+  private saveFailure: { readonly error: unknown } | null = null;
+  /** The cron minute each task's timer last fired for, so an early wake-up cannot fire it twice. */
+  private readonly firedMinutes = new Map<string, number>();
   /** Debounce handle for coalescing rapid successive save() calls. */
   private _saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly writes = new StoreWriteQueue(); // ordered whole-store writes; see StoreWriteQueue
 
   constructor(config: string | TaskSchedulerConfig) {
-    const resolvedConfig = typeof config === 'string'
+    const resolvedConfig: TaskSchedulerConfig = typeof config === 'string'
       ? { storePath: config }
       : config;
     if (!resolvedConfig.storePath) {
@@ -503,6 +517,7 @@ export class TaskScheduler {
     }
     this.store = new PersistentStore<StoreData>(resolvedConfig.storePath);
     this.spawnTask = resolvedConfig.spawnTask;
+    this.awaitRun = resolvedConfig.awaitRun;
   }
 
   // -------------------------------------------------------------------------
@@ -522,14 +537,38 @@ export class TaskScheduler {
     logger.info('TaskScheduler started', { taskCount: this.tasks.size });
   }
 
-  /** Stop all timers. */
-  stop(): void {
+  /**
+   * Stop all timers and write out any history the debounce had not saved yet.
+   * Timers stop before the first await; the returned promise settles once the
+   * final write has finished, and a failed write is logged rather than thrown.
+   */
+  async stop(): Promise<void> {
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }
     this.timers.clear();
     this.running = false;
+    if (this._saveDebounceTimer !== null) {
+      clearTimeout(this._saveDebounceTimer);
+      this._saveDebounceTimer = null;
+      this.saveTracked();
+    }
+    await this.settleSaves().catch(() => undefined);
     logger.info('TaskScheduler stopped');
+  }
+
+  /**
+   * Resolve once every write started so far has finished; reject if the latest
+   * one failed. `add`, `remove` and `setEnabled` return as soon as the change
+   * is in memory, so a caller that must know the change reached disk awaits
+   * this afterwards.
+   */
+  async whenPersisted(): Promise<void> {
+    await this.settleSaves();
+    if (this.saveFailure) {
+      const { error } = this.saveFailure;
+      throw new Error(`TaskScheduler could not save its schedules: ${summarizeError(error)}`, { cause: error });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -538,19 +577,22 @@ export class TaskScheduler {
 
   /** Add a new scheduled task. Returns the created task with generated ID. */
   add(input: Omit<ScheduledTask, 'id' | 'runCount' | 'createdAt' | 'missedRuns'>): ScheduledTask {
+    // A cron with no zone would be read in whatever zone the daemon happens to
+    // run under at each fire, so pin the creator's zone now.
+    const timezone = input.timezone || localTimeZone();
     // Validate the cron expression eagerly
     parseCron(input.cron);
-    // Validate timezone if provided
-    if (input.timezone) {
-      validateTimezone(input.timezone);
+    if (timezone) {
+      validateTimezone(timezone);
     }
 
     const id = `sched-${crypto.randomUUID().slice(0, 8)}`;
     const now = Date.now();
-    const nextRun = computeNextRun(input.cron, new Date(now), input.timezone).getTime();
+    const nextRun = computeNextRun(input.cron, new Date(now), timezone).getTime();
 
     const task: ScheduledTask = {
       ...input,
+      ...(timezone ? { timezone } : {}),
       id,
       runCount: 0,
       missedRuns: 0,
@@ -559,7 +601,7 @@ export class TaskScheduler {
     };
 
     this.tasks.set(id, task);
-    void this.save().catch((err) => logger.warn('TaskScheduler: save failed', { error: summarizeError(err) }));
+    this.saveTracked();
 
     if (task.enabled && this.running) {
       this.scheduleNext(task);
@@ -573,7 +615,7 @@ export class TaskScheduler {
     if (!this.tasks.has(taskId)) return false;
     this.cancelTimer(taskId);
     this.tasks.delete(taskId);
-    void this.save().catch((err) => logger.warn('TaskScheduler: save failed', { error: summarizeError(err) }));
+    this.saveTracked();
     return true;
   }
 
@@ -589,7 +631,7 @@ export class TaskScheduler {
     } else {
       this.cancelTimer(taskId);
     }
-    void this.save().catch((err) => logger.warn('TaskScheduler: save failed', { error: summarizeError(err) }));
+    this.saveTracked();
     return true;
   }
 
@@ -647,7 +689,11 @@ export class TaskScheduler {
 
     let nextDate: Date;
     try {
-      nextDate = computeNextRun(task.cron, new Date(), task.timezone);
+      // A timer that wakes a moment before its minute would otherwise compute
+      // the same minute again and fire the task twice.
+      const firedMinute = this.firedMinutes.get(task.id);
+      const nowMs = Date.now();
+      nextDate = computeNextRun(task.cron, new Date(firedMinute === undefined ? nowMs : Math.max(nowMs, firedMinute)), task.timezone);
     } catch (err) {
       logger.error('TaskScheduler: invalid cron, task not scheduled', { taskId: task.id, error: summarizeError(err) });
       return;
@@ -665,6 +711,7 @@ export class TaskScheduler {
 
     const timer = setTimeout(() => {
       if (!task.enabled) return;
+      if (task.nextRun !== undefined) this.firedMinutes.set(task.id, task.nextRun);
       this.executeTask(task)
         .catch((err) => {
           logger.error('TaskScheduler: task execution failed', { taskId: task.id, error: summarizeError(err) });
@@ -734,8 +781,26 @@ export class TaskScheduler {
     };
     this.pushHistory(runRecord);
     this.scheduleSave();
+    this.trackRun(runRecord);
 
     return agentId;
+  }
+
+  /** Move a run from `running` to its final state when the owner reports how the agent ended. */
+  private trackRun(record: TaskRunRecord): void {
+    const awaitRun = this.awaitRun;
+    if (!awaitRun) return;
+    void awaitRun(record.agentId).then(
+      (outcome) => this.settleRun(record, outcome),
+      (err) => this.settleRun(record, { status: 'failed', error: summarizeError(err) }),
+    );
+  }
+
+  private settleRun(record: TaskRunRecord, outcome: TaskRunOutcome): void {
+    if (record.status !== 'running') return;
+    record.status = outcome.status;
+    if (outcome.error !== undefined) record.error = outcome.error;
+    this.scheduleSave();
   }
 
   /**
@@ -772,6 +837,25 @@ export class TaskScheduler {
     await this.writes.run(() => this.store.persist(snapshot));
   }
 
+  /** Start a write and remember whether it failed, so `whenPersisted` can say so. */
+  private saveTracked(): void {
+    const write = this.save().then(
+      () => { this.saveFailure = null; },
+      (err: unknown) => {
+        this.saveFailure = { error: err };
+        logger.warn('TaskScheduler: save failed', { error: summarizeError(err) });
+      },
+    );
+    this.inflightSaves.add(write);
+    void write.finally(() => this.inflightSaves.delete(write));
+  }
+
+  private async settleSaves(): Promise<void> {
+    while (this.inflightSaves.size > 0) {
+      await Promise.all([...this.inflightSaves]);
+    }
+  }
+
   /**
    * Debounced save: coalesces multiple rapid calls into a single disk write
    * that fires SAVE_DEBOUNCE_MS after the last call.
@@ -780,7 +864,7 @@ export class TaskScheduler {
     if (this._saveDebounceTimer !== null) return;
     this._saveDebounceTimer = setTimeout(() => {
       this._saveDebounceTimer = null;
-      void this.save().catch((err) => logger.warn('TaskScheduler: save failed', { error: summarizeError(err) }));
+      this.saveTracked();
     }, SAVE_DEBOUNCE_MS);
     (this._saveDebounceTimer as unknown as { unref?: () => void }).unref?.();
   }
@@ -790,6 +874,7 @@ export class TaskScheduler {
     if (!data) return;
 
     const now = Date.now();
+    const missedRecords: TaskRunRecord[] = [];
 
     if (Array.isArray(data.tasks)) {
       for (const t of data.tasks) {
@@ -819,11 +904,12 @@ export class TaskScheduler {
         }
 
         // Detect if a run was missed during the gap (lastRun → now)
-        if (t.lastRun) {
+        // A disabled task is not expected to run, so it cannot have missed one.
+        if (t.enabled && t.lastRun) {
           const expectedNext = computeNextRun(t.cron, new Date(t.lastRun), t.timezone);
           if (expectedNext.getTime() < now) {
             logger.warn('[Scheduler] Missed run detected', { taskId: t.id, missedAt: expectedNext.toISOString() });
-            this.pushHistory({
+            missedRecords.push({
               taskId: t.id,
               startedAt: expectedNext.getTime(),
               agentId: '',
@@ -846,6 +932,27 @@ export class TaskScheduler {
           bucket.splice(0, bucket.length - MAX_HISTORY_PER_TASK);
         }
         this.historyByTask.set(record.taskId, bucket);
+      }
+    }
+
+    // Added after the saved history so the cap evicts the oldest real run
+    // rather than this record, and skipped when an earlier start already
+    // recorded the same missed run.
+    for (const missed of missedRecords) {
+      const bucket = this.historyByTask.get(missed.taskId) ?? [];
+      if (bucket.some((r) => r.startedAt === missed.startedAt)) continue;
+      this.pushHistory(missed);
+    }
+
+    // With a run tracker configured, a run still marked running was started by
+    // a process that no longer exists, so nobody will report its end.
+    if (this.awaitRun) {
+      for (const bucket of this.historyByTask.values()) {
+        for (const record of bucket) {
+          if (record.status !== 'running') continue;
+          record.status = 'failed';
+          record.error = 'The scheduler stopped before this run reported how it ended.';
+        }
       }
     }
   }

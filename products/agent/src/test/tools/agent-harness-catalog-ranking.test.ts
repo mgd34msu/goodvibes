@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import * as operatorContracts from '@goodvibes-jev/engine/platform/contracts';
-import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { ToolRegistry, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { PermissionManager, type PermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
@@ -165,9 +165,11 @@ describe('P11 actual catalog consumers', () => {
 
   test('missing or failing hosted readers remain failures at actual callers', async () => {
     const f = fixture();
-    await expect(f.workspace.execute({ action: 'commands', query: 'search inbox' })).rejects.toBeInstanceOf(JudgmentPortMissingError);
+    const missing = await f.workspace.execute({ action: 'commands', query: 'search inbox' });
+    expect(missing.success).toBe(false); expect(missing.error).toContain('No judgment port is installed');
     installJudgmentPort({ model: 'fixture', ask: async () => { throw new Error('synthetic reader unavailable'); } });
-    await expect(f.harness.execute({ mode: 'tools', query: 'search inbox' })).rejects.toThrow('synthetic reader unavailable');
+    const failing = await f.harness.execute({ mode: 'tools', query: 'search inbox' });
+    expect(failing.success).toBe(false); expect(failing.error).toContain('synthetic reader unavailable');
   });
 
   test.each(['harness', 'host', 'workspace'] as const)('%s protects full original nonprojected invocation fields before any hosted reader', async kind => {
@@ -353,7 +355,8 @@ test.each(['source', 'owner', 'cancel'] as const)('workspace action publication 
 test('malformed hosted judgment never becomes a lexical selection or command effect', async () => {
   const f = fixture();
   installJudgmentPort({ model: 'fixture', ask: async () => ({ answers: {} }) as never });
-  await expect(f.workspace.execute({ action: 'run_command', query: 'search inbox', confirm: true, explicitUserRequest: 'Run it' })).rejects.toThrow();
+  const result = await f.workspace.execute({ action: 'run_command', query: 'search inbox', confirm: true, explicitUserRequest: 'Run it' });
+  expect(result.success).toBe(false); expect(result.error).toContain('Judgment response admission malformed');
   expect(f.executed).toEqual([]);
 });
 

@@ -1,4 +1,4 @@
-/** Regression source only. Execution is deferred until coding is complete. */
+/** Artifact storage ownership regressions. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

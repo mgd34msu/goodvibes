@@ -1,163 +1,18 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
 import { recallCommand } from '../../input/commands/memory.ts';
-import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { MemoryAddOptions, MemoryBundle } from '@goodvibes-jev/engine/platform/platform/state';
+import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createMemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { ForensicsRegistry } from '@/runtime/index.ts';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { memoryReadingsPort } from '../helpers/memory-readings.ts';
-
-function makeRegistry(): MemoryRegistry {
-  const links: Array<{ fromId: string; toId: string; relation: string; createdAt: number }> = [];
-  const records: Array<{
-    id: string;
-    scope: string;
-    cls: string;
-    summary: string;
-    detail?: string;
-    tags: string[];
-    provenance: Array<{ kind: string; ref: string }>;
-    createdAt: number;
-    updatedAt: number;
-  }> = [];
-  return {
-    add: async (opts: MemoryAddOptions) => {
-      const record = {
-        id: `mem-${records.length + 1}`,
-        scope: opts.scope ?? 'project',
-        cls: opts.cls,
-        summary: opts.summary,
-        detail: opts.detail,
-        tags: opts.tags ?? [],
-        provenance: opts.provenance ?? [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        reviewState: opts.review?.state ?? 'fresh',
-        confidence: opts.review?.confidence ?? 60,
-        staleReason: opts.review?.staleReason,
-      };
-      records.push(record);
-      return record as never;
-    },
-    search: (filter?: { scope?: string; cls?: string; query?: string }) => {
-      return records.filter((record) => (
-        (!filter?.scope || record.scope === filter.scope)
-        && (!filter?.cls || record.cls === filter.cls)
-        && (!filter?.query || `${record.summary} ${record.detail ?? ''}`.toLowerCase().includes(filter.query.toLowerCase()))
-      )) as never;
-    },
-    searchSemantic: () => [] as never,
-    vectorStats: () => ({
-      backend: 'sqlite-vec',
-      enabled: true,
-      available: true,
-      dimensions: 1536,
-      indexedRecords: records.length,
-      path: ':memory:',
-    }),
-    rebuildVectors: () => ({
-      backend: 'sqlite-vec',
-      enabled: true,
-      available: true,
-      dimensions: 1536,
-      indexedRecords: records.length,
-      path: ':memory:',
-    }),
-    rebuildVectorsAsync: async () => ({
-      backend: 'sqlite-vec',
-      enabled: true,
-      available: true,
-      dimensions: 1536,
-      indexedRecords: records.length,
-      path: ':memory:',
-    }),
-    doctor: async () => ({
-      vector: {
-        backend: 'sqlite-vec',
-        enabled: true,
-        available: true,
-        dimensions: 1536,
-        indexedRecords: records.length,
-        path: ':memory:',
-      },
-      embeddings: {
-        configured: true,
-        activeProviderId: 'hashed-local',
-        defaultProviderId: 'hashed-local',
-        registeredProviders: [],
-        warnings: [],
-      },
-      checkedAt: Date.now(),
-    }) as never,
-    reviewQueue: (limit = 10) => records.slice(0, limit) as never,
-    update: (id: string, patch: { scope?: string; summary?: string; detail?: string; tags?: string[] }) => {
-      const record = records.find((entry) => entry.id === id);
-      if (!record) return null;
-      if (patch.scope !== undefined) record.scope = patch.scope;
-      if (patch.summary !== undefined) record.summary = patch.summary;
-      if (patch.detail !== undefined) record.detail = patch.detail;
-      if (patch.tags !== undefined) record.tags = patch.tags;
-      record.updatedAt = Date.now();
-      return record as never;
-    },
-    get: (id: string) => records.find((entry) => entry.id === id) as never,
-    link: async (fromId: string, toId: string, relation: string) => {
-      const from = records.find((entry) => entry.id === fromId);
-      const to = records.find((entry) => entry.id === toId);
-      if (!from || !to) return null;
-      const link = { fromId, toId, relation, createdAt: Date.now() };
-      links.push(link);
-      return link as never;
-    },
-    linksFor: (id: string) => links.filter((link) => link.fromId === id || link.toId === id) as never,
-    delete: (id: string) => {
-      const index = records.findIndex((entry) => entry.id === id);
-      if (index === -1) return false;
-      records.splice(index, 1);
-      return true;
-    },
-    review: (id: string, patch: { state?: string; confidence?: number; staleReason?: string }) => {
-      const record = records.find((entry) => entry.id === id);
-      if (!record) return null;
-      if (patch.state !== undefined) (record as { reviewState?: string }).reviewState = patch.state;
-      if (patch.confidence !== undefined) (record as { confidence?: number }).confidence = patch.confidence;
-      if (patch.staleReason !== undefined) (record as { staleReason?: string }).staleReason = patch.staleReason;
-      record.updatedAt = Date.now();
-      return record as never;
-    },
-    exportBundle: (filter?: { scope?: string }) => {
-      const selected = filter?.scope ? records.filter((record) => record.scope === filter.scope) : records;
-      return {
-        schemaVersion: 'v1',
-        exportedAt: Date.now(),
-        scope: (filter?.scope ?? 'all') as 'all',
-        recordCount: selected.length,
-        linkCount: 0,
-        records: selected as never,
-        links: [],
-      } as never;
-    },
-    importBundle: async (bundle: MemoryBundle) => {
-      for (const record of bundle.records as Array<typeof records[number]>) {
-        if (records.find((entry) => entry.id === record.id) === undefined) {
-          records.push({ ...record });
-        }
-      }
-      return {
-        importedRecords: bundle.records.length,
-        skippedRecords: 0,
-        importedLinks: bundle.links.length,
-      } as never;
-    },
-    getAll: () => records as never,
-  } as unknown as MemoryRegistry;
-}
+import { nativeMemoryWorkPrivacy } from '../helpers/native-memory-work-readings.ts';
 
 function makeRecallCommandContext(
   printed: string[],
@@ -217,8 +72,21 @@ describe('recallCommand', () => {
   let printed: string[];
   let forensicsRegistry: ForensicsRegistry;
   let policyRuntimeState: PolicyRuntimeState;
+  // The real registry over a real store: promote, review and export are judged by what the registry did, not by a stand-in.
+  let dir: string;
+  let store: MemoryStore;
+  let memoryRegistry: MemoryRegistry;
+  let previousJudgment: ReturnType<typeof installJudgmentPort>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    dir = makeProjectTempDir('gv-recall-command');
+    const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(dir, '.goodvibes', 'tui'), workingDir: dir });
+    store = new MemoryStore(join(dir, 'memory.sqlite'), {
+      embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager }),
+    });
+    await store.init();
+    memoryRegistry = new MemoryRegistry(store);
+    previousJudgment = installJudgmentPort(nativeMemoryWorkPrivacy(memoryReadingsPort().port).port);
     printed = [];
     policyRuntimeState = new PolicyRuntimeState();
     forensicsRegistry = new ForensicsRegistry();
@@ -242,15 +110,21 @@ describe('recallCommand', () => {
     });
   });
 
+  afterEach(() => {
+    installJudgmentPort(previousJudgment);
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test('refuses a generic default knowledge memory client', async () => {
     const context = {
       ...makeRecallCommandContext(printed, {
-        memoryRegistry: makeRegistry(),
+        memoryRegistry,
         forensicsRegistry,
       }),
       clients: {
         knowledgeApi: {
-          memory: createMemoryApi(makeRegistry()),
+          memory: createMemoryApi(memoryRegistry),
         },
       },
     } as unknown as CommandContext;
@@ -264,11 +138,12 @@ describe('recallCommand', () => {
 
   test('captures the latest incident into memory', async () => {
     await recallCommand.handler(['capture', 'incident', 'latest'], makeRecallCommandContext(printed, {
-      memoryRegistry: makeRegistry(),
+      memoryRegistry,
       forensicsRegistry,
     }));
 
     expect(printed.join('\n')).toContain('Captured incident incident-1 into memory');
+    expect(memoryRegistry.getAll()).toHaveLength(1);
   });
 
   test('captures the latest policy preflight review into memory', async () => {
@@ -288,18 +163,19 @@ describe('recallCommand', () => {
     });
 
     await recallCommand.handler(['capture', 'policy'], makeRecallCommandContext(printed, {
-      memoryRegistry: makeRegistry(),
+      memoryRegistry,
       forensicsRegistry,
       policyRuntimeState,
       mcpRegistry: { listServerSecurity: () => [] } as never,
     }));
 
     expect(printed.join('\n')).toContain('Captured policy preflight into memory');
+    expect(memoryRegistry.getAll()).toHaveLength(1);
   });
 
   test('captures MCP security posture into memory', async () => {
     await recallCommand.handler(['capture', 'mcp', 'ops'], makeRecallCommandContext(printed, {
-      memoryRegistry: makeRegistry(),
+      memoryRegistry,
       forensicsRegistry,
       mcpRegistry: {
         listServerSecurity: () => [{
@@ -317,27 +193,29 @@ describe('recallCommand', () => {
     }));
 
     expect(printed.join('\n')).toContain('Captured MCP server ops into memory');
+    expect(memoryRegistry.getAll()).toHaveLength(1);
   });
 
   test('promotes a record to team scope and exports a handoff bundle', async () => {
-    const registry = makeRegistry();
-    await registry.add({ cls: 'decision', summary: 'Share this', scope: 'project' });
+    const shared = await memoryRegistry.add({ cls: 'decision', summary: 'Share this', scope: 'project' });
+    const id = shared.id;
 
-    await recallCommand.handler(['promote', 'mem-1', 'team'], makeRecallCommandContext(printed, {
-      memoryRegistry: registry,
+    await recallCommand.handler(['promote', id, 'team'], makeRecallCommandContext(printed, {
+      memoryRegistry,
       forensicsRegistry,
     }));
 
-    expect(printed.join('\n')).toContain('Refusing to promote durable memory record mem-1 to team scope without --yes');
-    expect(registry.get('mem-1')?.scope).toBe('project');
+    expect(printed.join('\n')).toContain(`Refusing to promote durable memory record ${id} to team scope without --yes`);
+    expect(memoryRegistry.get(id)?.scope).toBe('project');
 
     printed.length = 0;
-    await recallCommand.handler(['promote', 'mem-1', 'team', '--yes'], makeRecallCommandContext(printed, {
-      memoryRegistry: registry,
+    await recallCommand.handler(['promote', id, 'team', '--yes'], makeRecallCommandContext(printed, {
+      memoryRegistry,
       forensicsRegistry,
     }));
 
-    expect(printed.join('\n')).toContain('Promoted mem-1 to team scope');
+    expect(printed.join('\n')).toContain(`Promoted ${id} to team scope`);
+    expect(memoryRegistry.get(id)?.scope).toBe('team');
 
     const dir = makeProjectTempDir('gv-memory-handoff');
     const bundlePath = join(dir, 'team-handoff.json');
@@ -347,7 +225,7 @@ describe('recallCommand', () => {
     });
     printed.length = 0;
     await recallCommand.handler(['handoff-export', bundlePath, '--scope', 'team'], makeRecallCommandContext(printed, {
-      memoryRegistry: registry,
+      memoryRegistry,
       forensicsRegistry,
       shellPaths,
     }));
@@ -356,18 +234,19 @@ describe('recallCommand', () => {
 
     printed.length = 0;
     await recallCommand.handler(['handoff-export', bundlePath, '--scope', 'team', '--yes'], makeRecallCommandContext(printed, {
-      memoryRegistry: registry,
+      memoryRegistry,
       forensicsRegistry,
       shellPaths,
     }));
     expect(printed.join('\n')).toContain('Exported team handoff bundle');
     expect(existsSync(bundlePath)).toBe(true);
-    expect(readFileSync(bundlePath, 'utf-8')).toContain('"scope": "team"');
+    const bundle = JSON.parse(readFileSync(bundlePath, 'utf-8')) as { scope: string; records: Array<{ id: string; scope: string }> };
+    expect(bundle.scope).toBe('team');
+    expect(bundle.records.map((record) => [record.id, record.scope])).toEqual([[id, 'team']]);
   });
 
   test('explains reviewed knowledge injection for a task and supports stale shortcuts', async () => {
-    const registry = makeRegistry();
-    await registry.add({
+    const runbook = await memoryRegistry.add({
       cls: 'runbook',
       summary: 'Deploy tasks should quarantine risky MCP schemas first.',
       tags: ['deploy', 'mcp'],
@@ -378,10 +257,10 @@ describe('recallCommand', () => {
       expect(record.summary).toBe('Deploy tasks should quarantine risky MCP schemas first.');
       return { relevant: 0.99, taskMatch: 0.99, scopeMatch: 0.01 };
     } });
-    const previous = installJudgmentPort(port);
+    const previous = installJudgmentPort(nativeMemoryWorkPrivacy(port).port);
     try {
       await recallCommand.handler(['explain', 'deploy', 'the', 'release'], makeRecallCommandContext(printed, {
-        memoryRegistry: registry,
+        memoryRegistry,
         forensicsRegistry,
       }));
 
@@ -390,14 +269,14 @@ describe('recallCommand', () => {
       expect(requests.length).toBeGreaterThan(0);
 
       printed.length = 0;
-      await recallCommand.handler(['stale', 'mem-1', 'operator', 'revalidation', 'needed'], makeRecallCommandContext(printed, {
-        memoryRegistry: registry,
+      await recallCommand.handler(['stale', runbook.id, 'operator', 'revalidation', 'needed'], makeRecallCommandContext(printed, {
+        memoryRegistry,
         forensicsRegistry,
       }));
 
-      expect(printed.join('\n')).toContain('Reviewed mem-1: stale');
-      expect(registry.get('mem-1')?.reviewState).toBe('stale');
-      expect(registry.get('mem-1')?.staleReason).toContain('operator revalidation needed');
+      expect(printed.join('\n')).toContain(`Reviewed ${runbook.id}: stale`);
+      expect(memoryRegistry.get(runbook.id)?.reviewState).toBe('stale');
+      expect(memoryRegistry.get(runbook.id)?.staleReason).toContain('operator revalidation needed');
     } finally { installJudgmentPort(previous); }
   });
 });

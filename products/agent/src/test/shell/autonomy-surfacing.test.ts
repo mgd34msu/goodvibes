@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { join } from 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
-import { createAutonomySurfacing, buildCalendarEventsLister } from '../../shell/autonomy-surfacing.ts';
+import { createAutonomySurfacing, buildCalendarEventsLister, buildSkillDraftProposer } from '../../shell/autonomy-surfacing.ts';
 import { LastSeenStore } from '../../core/last-seen-store.ts';
 import type { AutomationRunOutcome } from '../../agent/automation-runs-source.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -56,9 +57,9 @@ describe('announceAwayDigest: onAwayDigest wiring', () => {
     });
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    // announceAwayDigest is async (void + inner async IIFE), wait one event-loop turn
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    // announceAwayDigest is a void call over an async pass; whenIdle() waits for that pass.
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
     expect(draftLine).toBeDefined();
@@ -72,8 +73,8 @@ describe('announceAwayDigest: onAwayDigest wiring', () => {
     });
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const draftLine = feedPushes.find((p) => p.text.includes('drafted'));
     expect(draftLine).toBeDefined();
@@ -87,8 +88,8 @@ describe('announceAwayDigest: onAwayDigest wiring', () => {
     });
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
     expect(draftLine).toBeUndefined();
@@ -99,25 +100,30 @@ describe('announceAwayDigest: onAwayDigest wiring', () => {
     // No onAwayDigest provided
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const draftLine = feedPushes.find((p) => p.text.includes('drafted') && p.text.includes('skill'));
     expect(draftLine).toBeUndefined();
   });
 
-  test('throwing onAwayDigest does not propagate error (silent catch)', async () => {
+  test('throwing onAwayDigest adds no feed line and is logged', async () => {
+    const debug = spyOn(logger, 'debug').mockImplementation(() => {});
     const { options, feedPushes } = makeOptions({
       onAwayDigest: async () => { throw new Error('proposer exploded'); },
     });
     const autonomy = createAutonomySurfacing(options);
     // Should not throw
     expect(() => autonomy.announceAwayDigest()).not.toThrow();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
-    const draftLine = feedPushes.find((p) => p.text.includes('drafted'));
-    expect(draftLine).toBeUndefined();
+    try {
+      const draftLine = feedPushes.find((p) => p.text.includes('drafted'));
+      expect(draftLine).toBeUndefined();
+      expect(debug.mock.calls.some(([message, meta]) => String(message).includes('skill-draft hook failed')
+        && (meta as { error?: string } | undefined)?.error === 'proposer exploded')).toBe(true);
+    } finally { debug.mockRestore(); }
   });
 });
 
@@ -149,8 +155,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
 
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const failLine = feedPushes.find((p) => p.text.includes('scheduled run failed'));
     expect(failLine).toBeDefined();
@@ -168,8 +174,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
 
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const missedLine = feedPushes.find((p) => p.text.includes('missed while asleep'));
     expect(missedLine).toBeDefined();
@@ -190,12 +196,40 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
 
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const joined = feedPushes.map((p) => p.text).join('\n');
     expect(joined).toContain('Overnight sync');
     expect(joined).toContain('Morning brief');
+  });
+
+  test('a configured host that did not answer is reported, not read as nothing having failed', async () => {
+    const { options, feedPushes } = makeOptions({
+      listAutomationRunsSince: async () => ({ runs: [], deliveries: [], unavailable: 'the connected host did not answer', unavailableKind: 'no_answer' as const }),
+    });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
+
+    const autonomy = createAutonomySurfacing(options);
+    autonomy.announceAwayDigest();
+    await autonomy.whenIdle();
+    await autonomy.stop();
+
+    expect(feedPushes.some((p) => p.text.includes('Could not check for failed or missed scheduled runs: the connected host did not answer'))).toBe(true);
+  });
+
+  test('no host configured stays silent, as before', async () => {
+    const { options, feedPushes } = makeOptions({
+      listAutomationRunsSince: async () => ({ runs: [], deliveries: [], unavailable: 'no connected-host operator token', unavailableKind: 'not_configured' as const }),
+    });
+    LastSeenStore.fromShellPaths(options.shellPaths).save(Date.now() - 3_600_000);
+
+    const autonomy = createAutonomySurfacing(options);
+    autonomy.announceAwayDigest();
+    await autonomy.whenIdle();
+    await autonomy.stop();
+
+    expect(feedPushes).toEqual([]);
   });
 
   test('the local automation manager is never consulted for the digest, even when it would throw', async () => {
@@ -216,8 +250,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
     // would silently produce zero feed lines, so a rendered line here proves
     // the local manager path was never exercised.
     expect(() => autonomy.announceAwayDigest()).not.toThrow();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const failLine = feedPushes.find((p) => p.text.includes('scheduled run failed'));
     expect(failLine).toBeDefined();
@@ -235,8 +269,8 @@ describe('announceAwayDigest: connected-host run outcomes', () => {
 
     const autonomy = createAutonomySurfacing(options);
     autonomy.announceAwayDigest();
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    autonomy.stop();
+    await autonomy.whenIdle();
+    await autonomy.stop();
 
     const firedLine = feedPushes.find((p) => p.text.includes('reminder fired'));
     expect(firedLine).toBeDefined();
@@ -267,7 +301,8 @@ describe('comingUpItems: defensive copy', () => {
 
     // Force a cache fill
     autonomy.refreshComingUp();
-    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    // The refresh runs on a microtask; a macrotask turn guarantees it finished.
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     const first = autonomy.comingUpItems();
     expect(first.length).toBeGreaterThan(0);
@@ -353,6 +388,9 @@ describe('buildCalendarEventsLister: timezone and sort correctness', () => {
     try {
       // Set TZ before constructing Date values; bun re-reads TZ mid-process.
       process.env.TZ = 'America/New_York';
+      // Without a non-UTC zone in effect the ordering below holds for the buggy
+      // parse too, so fail loudly instead of passing vacuously.
+      expect(new Date('2099-06-15T00:00:00').getTimezoneOffset()).not.toBe(0);
 
       const events = [
         // D-1 evening: 21:00 local on June 14, no tz suffix (local interpretation).
@@ -404,5 +442,22 @@ describe('buildCalendarEventsLister: timezone and sort correctness', () => {
     expect(day1).toBeDefined();
     expect(day2).toBeDefined();
     expect(day1!.start).toBeLessThan(day2!.start);
+  });
+});
+
+describe('buildSkillDraftProposer: live runtime shape', () => {
+  test('builds against a runtime whose session id is an accessor, as the native runtime exposes it', () => {
+    const runtime = { get sessionId() { return 'session-1'; } };
+    const registry = {
+      list: () => [{ definition: { name: 'agent_harness' } }],
+      prepareCall: () => {}, projectCall: () => {}, executePrepared: () => {}, assertPrepared: () => {}, releaseProjected: () => {},
+    };
+    const manager = {
+      prepareAutonomousOwner: () => {}, autonomousPreparation: () => {}, projectAutonomousChoices: () => {},
+      releaseAutonomousChoices: () => {}, admitAutonomous: () => {},
+    };
+    const services = { permissionManager: manager, configManager: { getConfigurationIncarnation: () => 1 } };
+    const commandContext = { session: { runtime }, workspace: {}, clients: {} };
+    expect(typeof buildSkillDraftProposer(registry as never, { services, commandContext, toolRegistry: registry } as never)).toBe('function');
   });
 });

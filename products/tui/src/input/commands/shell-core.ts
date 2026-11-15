@@ -5,7 +5,7 @@ import type { SelectionItem } from '../selection-modal.ts';
 import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
 import { executeWriteQuit } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import { compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
+import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
 import {
   buildCompactionPreview,
   buildCompactionAfterNotice,
@@ -177,7 +177,14 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
       // Pre-compact preview: honest estimate, clearly labelled.
       const preview = buildCompactionPreview({ messages, contextWindow, pinnedMemoryCount, trigger: 'manual' });
       ctx.print(preview);
-      const result = await compactConversation(ctx);
+      let result: Awaited<ReturnType<typeof compactConversation>>;
+      try {
+        result = await compactConversation(ctx);
+      } catch (error) {
+        if (!(error instanceof CompactBusyError)) throw error;
+        ctx.print(error.message);
+        return;
+      }
       if (result) {
         // Post-compact notice: uses real CompactionEvent figures, plus an
         // out-of-band quality-score grade line when one was computed ().

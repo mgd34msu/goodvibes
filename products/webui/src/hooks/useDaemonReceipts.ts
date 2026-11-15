@@ -8,14 +8,15 @@ import { takeRelayPairingCorruptionNotice } from '../lib/relay-pairing';
  *
  * The daemon holds a small queue of one-line receipts (a crash restart, a
  * self-update, a migration) and hands them over, marking them delivered, only
- * when control.status is called with { receipts: 'consume' }. This hook fires
- * that consuming call on the ATTACH EDGE (the transition into connected +
+ * once control.status is called with { receipts: 'peek' } and then
+ * { receipts: 'ack', ids } for the ones shown (a daemon that predates peek is
+ * read with 'consume'). This hook fires that read on the ATTACH EDGE (the transition into connected +
  * signed-in), never on the recurring health poll, so plain status reads stay
  * receipt-neutral and each receipt surfaces exactly once.
  *
  * Belt-and-suspenders: every id ever surfaced is remembered, so a dismissed
  * receipt, or one seen on a prior connect, never re-appears even if a
- * reconnect re-consumes. A failed consume marks nothing delivered daemon-side,
+ * reconnect re-reads. A failed read marks nothing delivered daemon-side,
  * so it is retried on the next attach edge.
  *
  * ALSO carries any pending LOCAL notice (relay-pairing.ts's
@@ -70,13 +71,30 @@ export function useDaemonReceipts(connected: boolean, signedIn: boolean): Daemon
     // setState on an unmounted component is a no-op in React 18+.
     void (async () => {
       try {
-        const result = await platformClient.operator.control.status({ receipts: 'consume' });
+        // peek leaves the receipts with the daemon until the ack, so a response
+        // lost in transit offers them again on the next attach.
+        let result = await platformClient.operator.control.status({ receipts: 'peek' });
+        let peeked = true;
+        if (!Array.isArray((result as { receipts?: unknown }).receipts)) {
+          // A daemon that predates peek ignores it; consume is its only delivery.
+          result = await platformClient.operator.control.status({ receipts: 'consume' });
+          peeked = false;
+        }
         const raw = (result as { receipts?: unknown }).receipts;
         const incoming = Array.isArray(raw) ? raw.filter(isDaemonReceipt) : [];
         const fresh = incoming.filter((receipt) => !seenIdsRef.current.has(receipt.id));
-        if (fresh.length === 0) return;
         for (const receipt of fresh) seenIdsRef.current.add(receipt.id);
-        setReceipts((current) => [...current, ...fresh]);
+        if (fresh.length > 0) setReceipts((current) => [...current, ...fresh]);
+        if (peeked) {
+          // Acknowledge after they are surfaced; a failed ack only means the
+          // daemon offers them again, and seenIds keeps them from repeating.
+          const ids = incoming.map((receipt) => receipt.id);
+          try {
+            for (let index = 0; index < ids.length; index += 100) {
+              await platformClient.operator.control.status({ receipts: 'ack', ids: ids.slice(index, index + 100).join(',') });
+            }
+          } catch { /* offered again on the next attach */ }
+        }
       } catch {
         // Nothing was marked delivered on a thrown call; allow the next attach
         // edge to retry rather than silently dropping the queue.

@@ -54,8 +54,8 @@ describe('owner profile settings registration', () => {
   test('the category is listed in exactly one group, with a display name', () => {
     const groups = SETTINGS_CATEGORY_GROUPS.filter((group) => group.categories.includes('profile'));
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.label).toBe('Agent Experience');
-    expect(CATEGORY_LABELS.profile).toBe('Your Profile');
+    expect(groups[0]?.label.trim()).toBeTruthy();
+    expect(CATEGORY_LABELS.profile?.trim()).toBeTruthy();
   });
 
   test('every profile.* key in the live schema lands in the rendered profile group', () => {

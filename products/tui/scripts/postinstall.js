@@ -2,7 +2,7 @@
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isPrivateWorkspaceSource } from '../src/cli/workspace-source.ts';
-import { homedir } from 'node:os';
+import { resolveGoodVibesHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHECKSUM_MANIFEST_NAME, parseChecksumFile, requireChecksum, resolveArtifactNames, sha256, verifyChecksum } from '../src/runtime/release-artifacts.ts';
@@ -18,7 +18,8 @@ const PLATFORM_PACKAGE_NAMES = {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
-const home = homedir();
+// The runtime's own tree root: GOODVIBES_HOME when set, else the login home.
+const home = resolveGoodVibesHome();
 const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'));
 const noDownload = process.argv.includes('--no-download') || process.env.GOODVIBES_SKIP_BINARY_DOWNLOAD === '1';
 
@@ -321,4 +322,4 @@ if (import.meta.main) {
   await main();
 }
 
-export { verifyChecksum, requireChecksum, parseChecksumFile, sha256, resolveArtifactNames, CHECKSUM_MANIFEST_NAME, installWakeWordModel };
+export { home as provisioningHome, verifyChecksum, requireChecksum, parseChecksumFile, sha256, resolveArtifactNames, CHECKSUM_MANIFEST_NAME, installWakeWordModel };

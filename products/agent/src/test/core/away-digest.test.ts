@@ -83,6 +83,12 @@ describe('buildAwayDigest', () => {
     expect(result!.lines[0]).toContain('1 approval is waiting');
   });
 
+  test('a host that did not answer is reported even when nothing else happened', () => {
+    const result = buildAwayDigest({ ...baseInput, runsUnavailableReason: 'the connected host did not answer' });
+    expect(result).not.toBeNull();
+    expect(result!.lines).toEqual(['Could not check for failed or missed scheduled runs: the connected host did not answer']);
+  });
+
   test('multiple pending approvals', () => {
     const result = buildAwayDigest({ ...baseInput, pendingApprovals: 3 });
     expect(result!.lines[0]).toContain('3 approvals are waiting');
@@ -132,7 +138,7 @@ describe('buildAwayDigest', () => {
     });
     const joined = result!.lines.join('\n');
     expect(joined).toContain('Market Research');
-    expect(result!.lines[0]).toContain('Research task finished');
+    expect(result!.lines[0]).toContain('A task finished');
   });
 
   test('multiple completed tasks', () => {
@@ -230,24 +236,43 @@ describe('buildAwayDigest', () => {
     expect(result!.lines[0]).toContain('1 message delivered');
   });
 
-  test('clamped to MAX_LINES (5)', () => {
-    const result = buildAwayDigest({
-      lastSeenAt: Date.now() - 3_600_000,
-      pendingApprovals: 2,
-      tasks: [
-        { title: 'Task A', status: 'done' },
-        { title: 'Task B', status: 'failed' },
-      ],
-      schedules: [
-        { name: 'Brief A', lastRunAt: Date.now() - 10_000, runCount: 1 },
-        { name: 'Brief B', lastRunAt: Date.now() - 20_000, runCount: 1 },
-      ],
-      deliveries: [
-        { label: 'ntfy: message' },
-        { label: 'ntfy: message 2' },
-      ],
-    });
-    expect(result!.lines.length).toBeLessThanOrEqual(5);
+  // One line per category, in urgency order: approvals, finished tasks, tasks needing attention,
+  // failed runs, missed runs, reminders, deliveries.
+  const everyCategory: AwayDigestInput = {
+    lastSeenAt: Date.now() - 3_600_000,
+    pendingApprovals: 2,
+    tasks: [
+      { title: 'Task A', status: 'done' },
+      { title: 'Task B', status: 'done' },
+      { title: 'Task C', status: 'failed' },
+    ],
+    failedRuns: [{ name: 'Overnight sync' }, { name: 'Nightly backup' }],
+    missedRuns: [{ name: 'Morning brief' }, { name: 'Weekly digest' }],
+    schedules: [
+      { name: 'Brief A', runCount: 1 },
+      { name: 'Brief B', runCount: 1 },
+    ],
+    deliveries: [{ label: 'ntfy: message' }, { label: 'ntfy: message 2' }],
+  };
+
+  test('seven lines are clamped to five: the first four stay and the rest are counted, not dropped silently', () => {
+    const result = buildAwayDigest(everyCategory);
+    expect(result!.lines).toEqual([
+      '2 approvals are waiting for you',
+      '2 tasks finished since you were away',
+      'A task needs attention: Task C',
+      '2 scheduled runs failed since you were away',
+      'and 3 more in Activity',
+    ]);
+  });
+
+  test('the unreadable-approvals qualifier survives the clamp as the last line', () => {
+    const result = buildAwayDigest({ ...everyCategory, approvalsUnavailableReason: 'host unreachable' });
+    expect(result!.lines).toHaveLength(5);
+    expect(result!.lines[0]).toBe('2 approvals are waiting for you');
+    expect(result!.lines[3]).toBe('and 4 more in Activity');
+    expect(result!.lines.at(-1)).toContain('could not be read');
+    expect(result!.lines.at(-1)).toContain('host unreachable');
   });
 
   test('headline is always "While you were away"', () => {

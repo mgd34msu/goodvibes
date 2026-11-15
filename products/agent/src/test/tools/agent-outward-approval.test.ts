@@ -160,7 +160,8 @@ describe('model refusal and separate native approval records', () => {
     const refused = await run(tool, TAINTED_SEND);
     expect(refused.success).toBe(false);
     expect(refused.error ?? '').not.toContain('/google approve');
-    expect(refused.error ?? '').not.toContain('Tell the owner');
+    // The way forward is the owner's own instruction, never a gesture the model could type.
+    expect(refused.error ?? '').toContain('Tell the owner');
   });
 
   test('typing the gesture clears the gate, and the send then goes', async () => {

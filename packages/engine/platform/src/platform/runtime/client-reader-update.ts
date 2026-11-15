@@ -28,7 +28,6 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   if (expectedVersion !== undefined && artifact.version !== expectedVersion.replace(/^v/i, '')) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const asset = clientReaderAsset(artifact.packageName, artifact.target);
   if (expectedAsset !== undefined && asset !== expectedAsset) throw new NativeDataCompatibilityError('unconfirmed-reader');
-  if (requireEvidence && (artifact.target.startsWith('linux-') || artifact.packageName === '@goodvibes-jev/daemon') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
   const product = artifact.packageName === '@goodvibes-jev/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes-jev/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');

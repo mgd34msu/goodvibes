@@ -16,7 +16,7 @@
 |     Agent Runtime    9      collapseThreshold                         30       |
 |     Notifications   14      theme                              goodvibes       |
 |     Permissions     21      themeMode                               auto       |
-|              52 more ↓                                                         |
+|              51 more ↓                                                         |
 |                                                                                |
 |      ↑↓  move    ⏎  change    ←→  category    pgup pgdn  docs                  |
 |      ctrl+r  reset                                                5 more ↓     |

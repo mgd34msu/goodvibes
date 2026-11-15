@@ -32,6 +32,8 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const UNKNOWN_SESSIONS_ACTION = 'Unknown sessions action. Use one of: list, search, status, get.';
+
 function normalizeSessionsAction(value: unknown): AgentSessionsAction | null {
   const action = readString(value).toLowerCase().replace(/-/g, '_');
   if (!action) return null;
@@ -41,8 +43,8 @@ function normalizeSessionsAction(value: unknown): AgentSessionsAction | null {
 }
 
 function readAction(args: AgentSessionsToolArgs): AgentSessionsAction | null {
-  const explicit = normalizeSessionsAction(args.action) ?? normalizeSessionsAction(args.mode);
-  if (explicit) return explicit;
+  // A word that was sent but is not an action is refused (null), not replaced by an inferred one.
+  if (readString(args.action) || readString(args.mode)) return normalizeSessionsAction(args.action) ?? normalizeSessionsAction(args.mode);
   if (readString(args.sessionId) || readString(args.id)) return 'get';
   return 'list';
 }
@@ -107,10 +109,10 @@ export function createAgentSessionsTool(deps: AgentSessionsToolDeps): Tool {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSessionsToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
-      if (!action) return error('Unknown sessions action. Use action:"list" or action:"get".');
+      if (!action) return error(UNKNOWN_SESSIONS_ACTION);
       if (action === 'list') return forward(listArgs(args));
       if (action === 'get') return forward(getArgs(args));
-      return error('Unknown sessions action. Use action:"list" or action:"get".');
+      return error(UNKNOWN_SESSIONS_ACTION);
     },
   };
 }

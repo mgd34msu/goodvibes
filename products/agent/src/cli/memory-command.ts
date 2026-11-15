@@ -220,7 +220,23 @@ function memoryDbPath(runtime: CliCommandRuntime): string {
   return resolveCanonicalMemoryDbPath(runtime.homeDirectory);
 }
 
-async function withMemory<T>(runtime: CliCommandRuntime, fn: (context: MemoryContext) => Promise<T> | T): Promise<T> {
+// Subcommands that only read. They never save: a save is the step that refuses
+// when another process (the daemon) wrote the file in the meantime, and a read
+// that already produced its answer must not be turned into an error by it.
+const READ_ONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  'list', 'ls', 'search', 'find', 'show', 'get', 'queue', 'export', 'handoff-export', 'share',
+]);
+
+function isReadOnlySubcommand(normalized: string, rest: readonly string[]): boolean {
+  if (normalized === 'vector' || normalized === 'vectors') return (rest[0] ?? 'status').toLowerCase() !== 'rebuild';
+  return READ_ONLY_SUBCOMMANDS.has(normalized);
+}
+
+export async function withMemory<T>(
+  runtime: CliCommandRuntime,
+  fn: (context: MemoryContext) => Promise<T> | T,
+  options: { readonly save: boolean } = { save: true },
+): Promise<T> {
   const path = memoryDbPath(runtime);
   const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager: runtime.configManager });
   const store = new MemoryStore(path, { embeddingRegistry });
@@ -229,8 +245,11 @@ async function withMemory<T>(runtime: CliCommandRuntime, fn: (context: MemoryCon
   try {
     return await fn({ registry, store, path });
   } finally {
-    await store.save();
-    store.close();
+    try {
+      if (options.save) await store.save();
+    } finally {
+      store.close();
+    }
   }
 }
 
@@ -302,6 +321,23 @@ export function filterFromOptions(options: ParsedOptions, defaultLimit: number):
   if (scope !== undefined) filter.scope = scope;
   if (cls !== undefined) filter.cls = cls;
   if (tags !== undefined) filter.tags = [...tags];
+  return filter;
+}
+
+/**
+ * A handoff bundle moves records between machines, so it carries all of the
+ * selected ones. The 200 cap exists to keep `list` and `search` readable; an
+ * explicit `--limit` still narrows an export, but nothing is cut silently.
+ */
+export function exportFilterFromOptions(options: ParsedOptions): MemorySearchFilter {
+  const filter = filterFromOptions(options, 200);
+  delete filter.limit;
+  const requested = optionValue(options, 'limit');
+  if (requested !== undefined) {
+    const parsed = Number.parseInt(requested, 10);
+    if (!Number.isInteger(parsed) || parsed < 1) throw new Error('--limit must be a positive integer.');
+    filter.limit = parsed;
+  }
   return filter;
 }
 
@@ -443,7 +479,8 @@ function renderBundleInspection(path: string, bundle: MemoryBundle): string {
 }
 
 function errorOutput(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
-  const message = error instanceof Error ? error.message : String(error);
+  const changedOnDisk = error instanceof Error && error.name === 'MemoryStoreChangedOnDiskError';
+  const message = (error instanceof Error ? error.message : String(error)) + (changedOnDisk ? ' Rerun the command.' : '');
   const exitCode = message.startsWith('Usage:') || message.startsWith('Invalid ') || message.startsWith('--') ? 2 : 1;
   return failure(runtime, 'agent.memory.error', message, exitCode);
 }
@@ -658,7 +695,7 @@ async function handleExport(runtime: CliCommandRuntime, context: MemoryContext, 
     );
   if (!hasFlag(options, 'yes'))
     return failure(runtime, 'confirmation_required', `Refusing to export Agent memory bundle to ${pathArg} without --yes.`, 2);
-  const filter = filterFromOptions(options, 200);
+  const filter = exportFilterFromOptions(options);
   const path = resolvePath(runtime, pathArg);
   const bundle = context.registry.exportBundle(filter);
   writeBundle(path, bundle);
@@ -758,7 +795,7 @@ export async function handleMemoryCommand(runtime: CliCommandRuntime): Promise<C
   try {
     const [sub = 'list', ...rest] = runtime.cli.commandArgs;
     const normalized = sub.toLowerCase();
-    if (normalized === 'handoff-inspect' || normalized === 'inspect') return handleInspect(runtime, rest);
+    if (normalized === 'handoff-inspect' || normalized === 'inspect') return await handleInspect(runtime, rest);
     // Wire-first: try the memory spine when a daemon is reachable and the
     // subcommand has a wire-covered equivalent, see the CLI ruling in
     // memory-command-wire.ts. Falls through (null) to the unchanged local-direct
@@ -781,7 +818,7 @@ export async function handleMemoryCommand(runtime: CliCommandRuntime): Promise<C
       if (normalized === 'import' || normalized === 'handoff-import') return handleImport(runtime, context, rest);
       if (normalized === 'vector' || normalized === 'vectors') return handleVector(runtime, context, rest);
       return failure(runtime, 'invalid_memory_command', usage(), 2);
-    });
+    }, { save: !isReadOnlySubcommand(normalized, rest) });
   } catch (error) {
     return errorOutput(runtime, error);
   }

@@ -96,13 +96,38 @@ function alreadyExists(label: string, pageUrl: string): AppPasswordNeedsHuman {
   };
 }
 
-/** Google renders the password in four groups of four letters, e.g. "abcd efgh ijkl mnop". */
-const RAW_PASSWORD_PATTERN = /\b([A-Za-z]{4})[\s-]([A-Za-z]{4})[\s-]([A-Za-z]{4})[\s-]([A-Za-z]{4})\b/;
+/**
+ * Google renders the password in four groups of four letters, e.g. "abcd efgh ijkl mnop".
+ * The lookahead makes every word start a candidate window, so a run of prose
+ * words ending just before the password cannot swallow its first group.
+ */
+const RAW_PASSWORD_PATTERN = /\b(?=([A-Za-z]{4})[\s-]([A-Za-z]{4})[\s-]([A-Za-z]{4})[\s-]([A-Za-z]{4})\b)/g;
 
-function extractPassword(text: string): string | null {
-  const match = RAW_PASSWORD_PATTERN.exec(text);
-  if (!match) return null;
-  return `${match[1]}${match[2]}${match[3]}${match[4]}`;
+interface PasswordCandidate {
+  readonly words: readonly string[];
+  readonly password: string;
+}
+
+function passwordCandidates(text: string): PasswordCandidate[] {
+  return [...text.matchAll(RAW_PASSWORD_PATTERN)].map((match) => {
+    const words = [match[1], match[2], match[3], match[4]].map((word) => (word ?? '').toLowerCase());
+    return { words, password: words.join('') };
+  });
+}
+
+/**
+ * The first four-by-four-letter group made only of words that were NOT on the
+ * page before "Create" was clicked: ordinary prose can look like one ("Name
+ * that will help with"), and only text the click brought in can be the new
+ * password.
+ */
+function extractPassword(text: string, wordsBefore: ReadonlySet<string>): string | null {
+  const found = passwordCandidates(text).find((candidate) => candidate.words.every((word) => !wordsBefore.has(word)));
+  return found === undefined ? null : found.password;
+}
+
+function wordsOnPage(text: string): ReadonlySet<string> {
+  return new Set((text.toLowerCase().match(/[a-z]+/g) ?? []));
 }
 
 const WAIT_ATTEMPTS = 5;
@@ -154,13 +179,14 @@ export async function createAppPassword(
     elements = await browser.snapshot();
     const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
     if (!createButtonLookup.found) return { kind: 'failed', reason: 'create-form-not-found', problem: createButtonLookup.message, fix: 'Review the app-password form by hand.' };
+    const textBeforeCreate = wordsOnPage(await browser.readText());
     await consumeGoogleElement(browser, createButtonLookup.element);
 
     let passwordText: string | null = null;
     for (let attempt = 0; attempt < WAIT_ATTEMPTS && !passwordText; attempt += 1) {
       if (attempt > 0) await delay(WAIT_DELAY_MS);
       const text = await browser.readText();
-      passwordText = extractPassword(text);
+      passwordText = extractPassword(text, textBeforeCreate);
     }
 
     if (!passwordText) {

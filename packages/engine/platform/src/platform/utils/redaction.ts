@@ -12,6 +12,13 @@ const fieldKinds = new FieldKindReader();
 const profileRoles = new ProfileDistinctiveReader();
 const settledText = new Map<string, { readonly value: string; readonly assertCurrent: () => void }>();
 const pendingText = new Set<string>();
+/**
+ * Most background readings the synchronous redactor keeps in flight. It is a
+ * cache warmer for callers that cannot await: past this, a new text is masked
+ * locally and not read, so a loop over many distinct messages cannot start one
+ * concurrent model request each.
+ */
+const MAX_BACKGROUND_REDACTIONS = 4;
 
 /**
  * Issuer-reserved credential formats: GitHub, GitLab, Slack and AWS reserve
@@ -384,6 +391,12 @@ function applyPatterns(
  * For text that is LEAVING the machine, session exports, telemetry. Both
  * halves are wanted there: the reader is not the owner, so the owner's username
  * is not theirs to have.
+ *
+ * Synchronous, so it cannot wait for a semantic reading. The first call for a
+ * text returns only the redaction markers (or `[REDACTED]`) and starts a bounded
+ * background reading; once that settles, later calls for the same text return the
+ * cleared text. Use {@link redactSensitiveDataAsync} where the answer must not
+ * depend on call order.
  */
 export function redactSensitiveData(text: string): string {
   if (text.length === 0) return text;
@@ -393,7 +406,7 @@ export function redactSensitiveData(text: string): string {
     try { settled.assertCurrent(); return settled.value; }
     catch { settledText.delete(text); }
   }
-  if (!pendingText.has(text)) {
+  if (!pendingText.has(text) && pendingText.size < MAX_BACKGROUND_REDACTIONS) {
     pendingText.add(text);
     void redactSensitiveDataAsync(text).finally(() => { pendingText.delete(text); });
   }
@@ -544,6 +557,17 @@ function redactClassicText(text: string, secrets: readonly string[] = []): strin
     .map(span => ({ ...span, replacement: span.marker })));
   source.assertCurrent();
   return judgmentInputProblem(result) === undefined ? result : '[REDACTED]';
+}
+
+/**
+ * Deterministic local masking for a message that is shown or stored when no
+ * semantic reading ran (no judgment port, classic mode, or a message the port
+ * must not see). Keeps the message readable and masks credential material; it
+ * never starts a background reading. A failure to mask yields `[REDACTED]`.
+ */
+export function redactDiagnosticText(text: string): string {
+  if (text.length === 0) return text;
+  try { return redactClassicText(text); } catch { return '[REDACTED]'; }
 }
 
 function redactClassicStructure(value: unknown, options: StructuredRedactionOptions): unknown {

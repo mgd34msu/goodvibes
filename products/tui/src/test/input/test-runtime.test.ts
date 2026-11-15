@@ -22,7 +22,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CommandContext } from '../../input/command-registry.ts';
 import {
@@ -193,6 +193,35 @@ describe('(e) timeout path', () => {
     // persist the same way the pass/fail summary does.
     expect(systemMessages).toHaveLength(1);
     expect(systemMessages[0]).toMatch(/timed out/i);
+  }), 10_000);
+});
+
+describe('(e2) timeout kills the whole process tree', () => {
+  test('returns promptly and leaves no background child running', withTmpDir(async (dir) => {
+    const pidFile = join(dir, 'child.pid');
+    writePackageJson(dir, `sleep 30 & echo $! > '${pidFile}'; wait`);
+    const { ctx, printed } = makeCtx(dir);
+
+    // Without a group kill the backgrounded sleep keeps the output pipes open and
+    // this call outlives the test's own 10 s limit.
+    await runTestCommand([], ctx, 1500);
+
+    expect(printed.some((line) => /timed out after/.test(line))).toBe(true);
+    const childPid = Number(readFileSync(pidFile, 'utf8').trim());
+    expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+    // A SIGKILLed child can stay a zombie until its parent reaps it, so wait for it to disappear.
+    const isAlive = (): boolean => {
+      try {
+        process.kill(childPid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let attempt = 0; attempt < 100 && isAlive(); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(isAlive()).toBe(false);
   }), 10_000);
 });
 

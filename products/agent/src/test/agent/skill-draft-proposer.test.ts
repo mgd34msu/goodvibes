@@ -142,17 +142,18 @@ describe('proposeSkillDrafts: dedup vs previously proposed names', () => {
 
 describe('proposeSkillDrafts: within-pass dedup', () => {
   test('two candidates that resolve to the same slug yield only one proposal', () => {
+    // The lower-priority candidate is listed first, so first-wins would pick it.
     const candidates = [
-      makeCandidate({
-        id: 'c-1',
-        priority: 90,
-        proposalFields: { description: 'Summarize the week' },
-      }),
       makeCandidate({
         id: 'c-2',
         priority: 80,
         // Same slug when slugified: "summarize-the-week"
         proposalFields: { description: 'Summarize The Week' },
+      }),
+      makeCandidate({
+        id: 'c-1',
+        priority: 90,
+        proposalFields: { description: 'Summarize the week' },
       }),
     ];
     const result = proposeSkillDrafts(makeInput({ candidates }));
@@ -223,8 +224,22 @@ describe('proposeSkillDrafts: empty guards', () => {
 // Payload shape
 // ---------------------------------------------------------------------------
 
+describe('proposeSkillDrafts: names compared as slugs', () => {
+  test('an existing multi-word skill blocks a candidate that slugs to the same name', () => {
+    const candidates = [makeCandidate({ id: 'c-1', proposalFields: { description: 'my skill' } })];
+    const result = proposeSkillDrafts(makeInput({ candidates, existingSkillNames: new Set(['my skill']) }));
+    expect(result).toHaveLength(0);
+  });
+
+  test('a previously proposed multi-word name blocks the same candidate label', () => {
+    const candidates = [makeCandidate({ id: 'c-1', proposalFields: { description: 'Weekly Review' } })];
+    const result = proposeSkillDrafts(makeInput({ candidates, previouslyProposedNames: new Set(['weekly review']) }));
+    expect(result).toHaveLength(0);
+  });
+});
+
 describe('proposeSkillDrafts: payload shape', () => {
-  test('emitted payload has enabled:true (autonomous), source:agent, candidate-specific provenance', () => {
+  test('emitted payload is a disabled draft with source:agent and candidate-specific provenance', () => {
     const candidates = [
       makeCandidate({
         id: 'c-1',
@@ -234,7 +249,7 @@ describe('proposeSkillDrafts: payload shape', () => {
     const result = proposeSkillDrafts(makeInput({ candidates }));
     expect(result).toHaveLength(1);
     const payload = result[0]!;
-    expect(payload.enabled).toBe(true);
+    expect(payload.enabled).toBe(false);
     expect(payload.source).toBe('agent');
     expect(payload.provenance).toBe('learning-curator-auto-promote:c-1');
   });

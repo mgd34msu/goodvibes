@@ -54,6 +54,11 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+/** Let every already-resolved promise chain run; no wall-clock wait. */
+async function drain() {
+  for (let turn = 0; turn < 10; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  flushSync(() => {});
+}
 async function settle(check: () => boolean) {
   for (let tries = 0; tries < 200; tries++) {
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -174,7 +179,7 @@ for (const message of [
     const h = render();
     await settle(() => h.el.textContent?.includes(message) === true);
     expect(h.el.querySelector("textarea")).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     expect(invoke).toHaveBeenCalledTimes(1);
     invoke.mockResolvedValue(native());
     flushSync(() => h.el.querySelector("button")!.click());
@@ -193,7 +198,7 @@ test("late discovery cannot change a newer session selection", async () => {
   await settle(() => Boolean(h.el.querySelector('[data-native-session="native-b"]')));
   expect(signal?.aborted).toBe(true);
   pending.resolve({ kind: "legacy" });
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await drain();
   flushSync(() => {});
   expect(h.el.querySelector("textarea")).toBeNull();
   expect(h.el.querySelector('[data-native-session="native-b"]')).not.toBeNull();
@@ -214,7 +219,7 @@ for (const change of ["account", "relay", "unmount"] as const)
     if (change === "unmount") h.unmount();
     await settle(() => signal?.aborted === true);
     pending.resolve({ kind: "legacy" });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(h.el.querySelector("textarea")).toBeNull();
     expect(send).not.toHaveBeenCalled();

@@ -28,6 +28,29 @@ export async function readHostPairingResponse(response: Response): Promise<unkno
     } finally { reader.releaseLock(); }
 }
 
+export interface MintedHostPairingToken {
+    readonly id: string;
+    readonly token: string;
+    readonly name: string;
+    readonly createdAt: number;
+}
+
+/**
+ * The one predicate a migration response must satisfy before anything is stored.
+ * `createdAt` follows the credential stores' own rule (a positive safe integer),
+ * so a value a store would refuse is refused before any write is attempted.
+ */
+export function parseMintedPairingToken(payload: unknown, name: string): MintedHostPairingToken | null {
+    const minted = payload && typeof payload === 'object' && 'token' in payload ? payload.token : null;
+    if (!minted || typeof minted !== 'object') return null;
+    const { id, token, name: mintedName, createdAt } = minted as Record<string, unknown>;
+    if (typeof id !== 'string' || !/^pair-[0-9a-f-]{36}$/i.test(id)) return null;
+    if (typeof token !== 'string' || !/^gvp_[A-Za-z0-9_-]{32}$/.test(token)) return null;
+    if (mintedName !== name) return null;
+    if (typeof createdAt !== 'number' || !Number.isSafeInteger(createdAt) || createdAt <= 0) return null;
+    return { id, token, name, createdAt };
+}
+
 /** Live paired operator authority, with operation-specific scopes. authMode
  * alone also describes shared bootstrap credentials and cannot prove pairing. */
 export function isPairedOperatorPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, scopes: readonly string[], expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & {

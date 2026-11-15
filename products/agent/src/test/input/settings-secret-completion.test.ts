@@ -68,22 +68,26 @@ for (const entrypoint of ['modal', 'persist'] as const) {
       expect(stored).toBe(true);
     });
 
-    test('clears config only after deferred deletion succeeds', async () => {
+    // Both paths unpublish the reference first and delete the value after, so a
+    // failed config write can never leave a reference that resolves to nothing.
+    test('clears the saved reference and the stored value', async () => {
       const f = fixture('');
-      expect(f.changes).toEqual([]);
+      expect(f.changes).toEqual(['']);
       f.storage.resolve();
       await f.completion;
       expect(f.changes).toEqual(['']);
     });
 
-    test('rejected deletion preserves the saved reference', async () => {
+    test('a rejected deletion is reported', async () => {
       const f = fixture('');
       f.storage.reject(new Error('delete rejected'));
       if (entrypoint === 'modal') {
-        expect(await f.completion).toBe(false);
-        expect(f.errors[0]).toMatch(/failed/i);
-      } else await expect(f.completion).rejects.toThrow('delete rejected');
-      expect(f.changes).toEqual([]);
+        expect(await f.completion).toBe(true);
+        expect(f.errors[0]).toMatch(/could not be removed/i);
+      } else {
+        await expect(f.completion).rejects.toThrow(/could not be removed/i);
+      }
+      expect(f.changes).toEqual(['']);
     });
   });
 }

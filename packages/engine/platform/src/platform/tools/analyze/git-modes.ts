@@ -9,7 +9,10 @@ import {
   isBreakingUpgrade,
   loadDependencyVersions,
   parseDiffStats,
+  unquoteGitPath,
   parseSemver,
+  hasVersion,
+  isOutdated,
   readJsonFile,
   truncateDiffAtBoundary,
   validateGitRefs,
@@ -27,8 +30,12 @@ const EXPORT_BREAK_SITE = 'tools.analyze.export-break';
 /** Changed exports read at once during a breaking-change check. */
 const EXPORT_READ_CONCURRENCY = 8;
 
-// 1.2 s, warm `git status` cache response budget; keeps the semantic-diff summary probe non-blocking
-const GIT_PROBE_TIMEOUT_MS = 1200;
+/** How long the semantic-diff summary waits for the helper model; a slower reply is abandoned and the summary is built from the readings. */
+export const SEMANTIC_DIFF_LLM_TIMEOUT_MS = 30_000;
+/** Most characters of a diff the diff mode returns. */
+const DIFF_OUTPUT_CHARS = 10_000;
+/** Registry lookups in flight at once during an upgrade survey. */
+const UPGRADE_FETCH_CONCURRENCY = 8;
 
 type SemanticDiffRisk = SemanticDiffSummary['risk'];
 
@@ -93,21 +100,70 @@ function parseSemanticDiffProse(reply: string): { summary?: string; impact?: str
   }
 }
 
-async function trySemanticDiffLlm(
+export async function trySemanticDiffLlm(
   toolLLM: Pick<ToolLLM, 'chat'>,
   prompt: string,
+  timeoutMs = SEMANTIC_DIFF_LLM_TIMEOUT_MS,
 ): Promise<string> {
+  // The request is aborted at the deadline, so an abandoned call stops spending tokens.
+  const abort = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      toolLLM.chat(prompt),
+      toolLLM.chat(prompt, { signal: abort.signal }),
       new Promise<string>((resolve) => {
-        const timer = setTimeout(() => resolve(''), GIT_PROBE_TIMEOUT_MS);
+        timer = setTimeout(() => { abort.abort(); resolve(''); }, timeoutMs);
         timer.unref?.();
       }),
     ]);
   } catch {
     return '';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/** The old and new path of a `diff --git` header line, or undefined for any other line. */
+function diffHeaderPaths(line: string): { oldPath: string; newPath: string } | undefined {
+  if (!line.startsWith('diff --git ')) return undefined;
+  if (!line.includes('"')) {
+    const plain = line.match(/^diff --git a\/(.*) b\/(.*)$/);
+    return plain ? { oldPath: plain[1]!, newPath: plain[2]! } : undefined;
+  }
+  // Git quotes a name with non-ASCII or special characters in the header.
+  const quoted = line.match(/^diff --git ("a\/(?:[^"\\]|\\.)*"|a\/\S*) ("b\/(?:[^"\\]|\\.)*"|b\/.*)$/);
+  return quoted
+    ? { oldPath: unquoteGitPath(quoted[1]!).replace(/^a\//, ''), newPath: unquoteGitPath(quoted[2]!).replace(/^b\//, '') }
+    : undefined;
+}
+
+/** The files a diff text touches, from its `diff --git` headers (both sides, so a rename counts under either name). */
+function diffPaths(diff: string): Set<string> {
+  const paths = new Set<string>();
+  for (const line of diff.split('\n')) {
+    const header = diffHeaderPaths(line);
+    if (header) { paths.add(header.oldPath); paths.add(header.newPath); }
+  }
+  return paths;
+}
+
+/**
+ * Narrow a `--stat` to the files of an already narrowed diff. Git's stat takes no path list in
+ * every reader, so a request for specific files would otherwise list the whole range beside a
+ * diff of only those files. Without `files` the stat is returned as is.
+ */
+export function narrowStatToDiff(statOutput: string, diff: string, files: readonly string[] | undefined): string {
+  if (!files || files.length === 0) return statOutput;
+  const paths = diffPaths(diff);
+  const kept = statOutput.split('\n').filter((line) => {
+    const row = parseDiffStats(line)[0];
+    if (!row) return false;
+    // Git shortens a long name to `.../tail` in a stat row.
+    const name = row.file.replace(/^\.\.\./, '');
+    return [...paths].some((path) => path === name || path.endsWith(name));
+  });
+  if (kept.length === 0) return '';
+  return `${kept.join('\n')}\n ${kept.length} file${kept.length === 1 ? '' : 's'} changed\n`;
 }
 
 export async function runDiff(
@@ -124,43 +180,112 @@ export async function runDiff(
 
   let statOutput: string;
   try {
-    statOutput = await git.diffStat(before, after);
+    statOutput = await git.diffStat(before, after, input.files);
   } catch (err) {
     if (git.comparisonInputs) throw err;
     return { error: `git diff failed: ${summarizeError(err)}`, before, after };
   }
 
   let fullDiff: string;
+  let diffError: string | undefined;
   try {
     fullDiff = await git.diffBetween(before, after, input.files);
   } catch (err) {
     if (git.comparisonInputs) throw err;
     fullDiff = '';
+    diffError = `git diff failed after the stat succeeded: ${summarizeError(err)}`;
   }
+  if (diffError === undefined) statOutput = narrowStatToDiff(statOutput, fullDiff, input.files);
 
+  const truncated = fullDiff.length > DIFF_OUTPUT_CHARS;
   return {
     before,
     after,
     ...(git.comparisonInputs ? { comparison_inputs: git.comparisonInputs } : {}),
     stat: statOutput.trim(),
     files: parseDiffStats(statOutput),
-    diff: fullDiff.slice(0, 10000),
+    diff: truncated ? truncateDiffAtBoundary(fullDiff, DIFF_OUTPUT_CHARS) : fullDiff,
+    ...(truncated ? { diff_truncated: true } : {}),
+    ...(diffError !== undefined ? { diff_error: diffError } : {}),
   };
 }
 
-function extractSignaturesFromDiff(diff: string): {
-  before: Map<string, string>;
-  after: Map<string, string>;
+/** One exported declaration seen on a side of the diff. */
+export interface DiffSignature {
+  readonly file: string;
+  readonly name: string;
+  readonly sig: string;
+}
+
+const EXPORT_DECLARATION = /^([+-])\s*export\s+(?:(?:async|default|declare)\s+)*(?:function\*?|class|const|let|var|type|interface|enum)\s+(\w+)(.*)/;
+const EXPORT_LIST = /^([+-])\s*export\s+(type\s+)?\{([^}]*)\}(?:\s*from\s*(['"][^'"]+['"]))?/;
+const EXPORT_LIST_OPEN = /^[+-]\s*export\s+(?:type\s+)?\{[^}]*$/;
+const EXPORT_DEFAULT_ANONYMOUS = /^([+-])\s*export\s+default\s+(?:async\s+)?(?:function\*?\s*\(|class\s*(?:\{|extends\b))/;
+const EXPORT_STAR = /^([+-])\s*export\s+\*(?:\s+as\s+(\w+))?\s*from\s*(['"][^'"]+['"])/;
+const EXPORT_DEFAULT_EXPR = /^([+-])\s*export\s+default\s+(?!(?:async\s+)?(?:function|class)\b)(.+?);?\s*$/;
+
+/**
+ * The exported declarations the diff removes and adds, keyed by file and name: the same name
+ * exported from two files is two exports, so removing one while adding the other is a removal.
+ */
+export function extractSignaturesFromDiff(diff: string): {
+  before: Map<string, DiffSignature>;
+  after: Map<string, DiffSignature>;
 } {
-  const before = new Map<string, string>();
-  const after = new Map<string, string>();
+  const before = new Map<string, DiffSignature>();
+  const after = new Map<string, DiffSignature>();
+  const record = (marker: string, file: string, name: string, sig: string): void => {
+    (marker === '-' ? before : after).set(`${file}\0${name}`, { file, name, sig });
+  };
 
   const lines = diff.split('\n');
-  const exportLinePattern =
-    /^([+-])\s*export\s+(?:(?:async|default|declare)\s+)*(?:function\*?|class|const|let|var|type|interface|enum)\s+(\w+)(.*)/;
-
+  let file = '';
   for (let i = 0; i < lines.length; i++) {
-    const m = (lines[i] ?? '').match(exportLinePattern);
+    const line = lines[i] ?? '';
+    const header = diffHeaderPaths(line);
+    if (header) { file = header.newPath; continue; }
+
+    let listText = line;
+    if (EXPORT_LIST_OPEN.test(line)) {
+      // A multi-line `export {` list: join through the closing brace so its names are seen.
+      const marker = line[0]!;
+      for (let j = i + 1; j < lines.length; j++) {
+        const contLine = lines[j] ?? '';
+        if (!contLine.startsWith(marker) && !contLine.startsWith(' ')) break;
+        listText += ' ' + contLine.slice(1).trim();
+        if (contLine.includes('}')) break;
+      }
+    }
+    const list = listText.match(EXPORT_LIST);
+    if (list) {
+      const marker = list[1]!;
+      for (const specifier of (list[3] ?? '').split(',').map((part) => part.trim()).filter(Boolean)) {
+        const exported = specifier.split(/\s+as\s+/).pop()!.trim();
+        record(marker, file, exported, `${exported} = {${specifier}}${list[4] ? ` from ${list[4]}` : ''}`);
+      }
+      continue;
+    }
+    const star = line.match(EXPORT_STAR);
+    if (star) {
+      const name = star[2] ?? `* from ${star[3]}`;
+      record(star[1]!, file, name, `* from ${star[3]}`);
+      continue;
+    }
+    const defaultExpr = line.match(EXPORT_DEFAULT_EXPR);
+    if (defaultExpr) {
+      record(defaultExpr[1]!, file, 'default', `default ${defaultExpr[2]}`);
+      continue;
+    }
+
+    const anonymous = line.match(EXPORT_DEFAULT_ANONYMOUS);
+    if (anonymous) {
+      const head = line.slice(1).trim();
+      const brace = head.indexOf('{');
+      record(anonymous[1]!, file, 'default', brace >= 0 ? head.slice(0, brace).trimEnd() : head.replace(/;.*$/, '').trimEnd());
+      continue;
+    }
+
+    const m = line.match(EXPORT_DECLARATION);
     if (!m) continue;
 
     const marker = (m[1] ?? '+') as '-' | '+'; // regex group 1 is always present when m matches
@@ -171,9 +296,7 @@ function extractSignaturesFromDiff(diff: string): {
       for (let j = i + 1; j < lines.length; j++) {
         const contLine = lines[j] ?? '';
         if (!contLine.startsWith(marker) && !contLine.startsWith(' ')) break;
-        const stripped = contLine.startsWith(marker)
-          ? contLine.slice(1)
-          : contLine.slice(1);
+        const stripped = contLine.slice(1);
         rest += ' ' + stripped.trim();
         if (stripped.includes('{') || stripped.includes(';')) break;
       }
@@ -181,12 +304,7 @@ function extractSignaturesFromDiff(diff: string): {
 
     const braceIdx = rest?.indexOf('{') ?? -1;
     const sig = `${name}${braceIdx >= 0 ? (rest ?? '').slice(0, braceIdx).trimEnd() : (rest ?? '').replace(/;.*$/, '').trimEnd()}`;
-
-    if (marker === '-') {
-      before.set(name, sig);
-    } else {
-      after.set(name, sig);
-    }
+    record(marker, file, name, sig);
   }
 
   return { before, after };
@@ -219,20 +337,20 @@ async function runDecisionBreaking(input: AnalyzeInput, projectRoot: string): Pr
   }
 
   const { before: beforeSigs, after: afterSigs } = extractSignaturesFromDiff(fullDiff);
-  const breaking_changes: Array<{ name: string; before: string; after: string; reason: string; reading?: 'uncertain' }> = [];
-  const additions: Array<{ name: string; signature: string }> = [];
-  const safe_modifications: Array<{ name: string; before: string; after: string }> = [];
-  const changed: Array<{ name: string; before: string; after: string }> = [];
+  const breaking_changes: Array<{ file: string; name: string; before: string; after: string; reason: string; reading?: 'uncertain' }> = [];
+  const additions: Array<{ file: string; name: string; signature: string }> = [];
+  const safe_modifications: Array<{ file: string; name: string; before: string; after: string }> = [];
+  const changed: Array<{ file: string; name: string; before: string; after: string }> = [];
 
-  for (const [name, sig] of beforeSigs) {
-    const newSig = afterSigs.get(name);
+  for (const [key, { file, name, sig }] of beforeSigs) {
+    const newSig = afterSigs.get(key)?.sig;
     if (newSig === undefined) {
-      // The name is gone from the diff, so every caller that names it must change.
-      breaking_changes.push({ name, before: sig, after: '(removed)', reason: 'export removed' });
+      // The name is gone from this file, so every caller that imports it from here must change.
+      breaking_changes.push({ file, name, before: sig, after: '(removed)', reason: 'export removed' });
     } else if (sig === newSig) {
-      safe_modifications.push({ name, before: sig, after: newSig });
+      safe_modifications.push({ file, name, before: sig, after: newSig });
     } else {
-      changed.push({ name, before: sig, after: newSig });
+      changed.push({ file, name, before: sig, after: newSig });
     }
   }
 
@@ -251,9 +369,9 @@ async function runDecisionBreaking(input: AnalyzeInput, projectRoot: string): Pr
     else breaking_changes.push({ ...change, reason: 'callers may have to change', reading: 'uncertain' });
   });
 
-  for (const [name, sig] of afterSigs) {
-    if (!beforeSigs.has(name)) {
-      additions.push({ name, signature: sig });
+  for (const [key, { file, name, sig }] of afterSigs) {
+    if (!beforeSigs.has(key)) {
+      additions.push({ file, name, signature: sig });
     }
   }
 
@@ -292,7 +410,7 @@ async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string,
   let statOutput: string;
   try {
     fullDiff = await git.diffBetween(before, after, input.files);
-    statOutput = await git.diffStat(before, after);
+    statOutput = narrowStatToDiff(await git.diffStat(before, after, input.files), fullDiff, input.files);
   } catch (err) {
     if (git.comparisonInputs) throw err;
     return { error: `git diff failed: ${summarizeError(err)}`, before, after };
@@ -383,45 +501,61 @@ export async function runUpgrade(
     }
   }
 
-  const BATCH_SIZE = 20;
-  const batch = packageNames.slice(0, BATCH_SIZE);
-  const results: Array<{ name: string; current: string; latest: string; breaking: boolean }> = [];
-
+  type UpgradeRow = { name: string; current: string; latest: string; breaking: boolean };
+  const projectScope = await ownScope(projectRoot);
   const invocationSignal = capturedAnalyzeSignal();
-  await Promise.all(
-    batch.map(async (name) => {
-      const current = currentVersions[name]! ?? 'unknown';
-      await assertCapturedToolAccessCurrent();
-      try {
-        const res = await instrumentedFetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/latest`, {
-          signal: invocationSignal ? AbortSignal.any([invocationSignal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
-          headers: { Accept: 'application/json' },
-        });
-        if (!res.ok) {
-          results.push({ name, current, latest: 'unknown', breaking: false });
-          return;
-        }
-        const data = await res.json() as { version?: string };
-        const latest = data.version ?? 'unknown';
-        const breaking = current !== 'unknown' && latest !== 'unknown'
-          ? isBreakingUpgrade(current, latest)
-          : false;
-        results.push({ name, current, latest, breaking });
-      } catch {
-        results.push({ name, current, latest: 'fetch_failed', breaking: false });
-      }
-    }),
-  );
+  // Every package is checked, a few at a time. A spec the registry does not own (a workspace
+  // link, a git URL, an alias) and a package of the project's own scope are never sent to the
+  // public registry: the lookup would disclose the name and could answer with an unrelated package.
+  const results: UpgradeRow[] = await mapWithConcurrency(packageNames, UPGRADE_FETCH_CONCURRENCY, async (name): Promise<UpgradeRow> => {
+    const current = currentVersions[name] ?? 'unknown';
+    await assertCapturedToolAccessCurrent();
+    if (!isRegistrySpec(current) || (projectScope !== null && name.startsWith(`${projectScope}/`))) {
+      return { name, current, latest: NOT_FROM_REGISTRY, breaking: false };
+    }
+    try {
+      const res = await instrumentedFetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/latest`, {
+        signal: invocationSignal ? AbortSignal.any([invocationSignal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return { name, current, latest: 'unknown', breaking: false };
+      const data = await res.json() as { version?: string };
+      const latest = data.version ?? 'unknown';
+      const breaking = hasVersion(current) && latest !== 'unknown' ? isBreakingUpgrade(current, latest) : false;
+      return { name, current, latest, breaking };
+    } catch {
+      return { name, current, latest: 'fetch_failed', breaking: false };
+    }
+  });
 
   results.sort((a, b) => {
     if (a.breaking !== b.breaking) return a.breaking ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
 
+  const notFromRegistry = results.filter((r) => r.latest === NOT_FROM_REGISTRY).length;
   return {
     packages: results,
     total: results.length,
-    outdated: results.filter((r) => r.latest !== 'unknown' && r.latest !== r.current && r.latest !== 'fetch_failed').length,
+    outdated: results.filter((r) => isOutdated(r.current, r.latest)).length,
     breaking: results.filter((r) => r.breaking).length,
+    ...(notFromRegistry > 0 ? { not_from_registry: notFromRegistry, note: `${notFromRegistry} dependencies were not looked up: workspace, git, file, alias and own-scope specs are not registry versions.` } : {}),
   };
+}
+
+const NOT_FROM_REGISTRY = 'not_from_registry';
+
+/** A spec the public registry can answer for: a semver range or a dist-tag, not a link, URL, alias or workspace form. */
+function isRegistrySpec(spec: string): boolean {
+  if (spec === 'unknown') return true;
+  return !/^(?:workspace|catalog|file|link|portal|patch|npm|git|git\+\w+|github|gitlab|bitbucket|https?):/.test(spec) && !spec.includes('/');
+}
+
+/** The scope (`@scope`) of the project's own package name, if it has one. */
+async function ownScope(projectRoot: string): Promise<string | null> {
+  const pkgPath = join(projectRoot, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  const pkg = await readJsonFile(pkgPath);
+  const name = typeof pkg?.name === 'string' ? pkg.name : '';
+  return name.startsWith('@') && name.includes('/') ? name.slice(0, name.indexOf('/')) : null;
 }

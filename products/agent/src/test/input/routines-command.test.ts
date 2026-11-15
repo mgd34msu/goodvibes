@@ -228,6 +228,29 @@ describe('/routines command', () => {
     expect(text).toContain('Disabled Agent routine inbox-sweep');
   });
 
+  test('a model-run command cannot mark a routine reviewed or enable an unreviewed one', async () => {
+    const { registry, out, ctx } = commandHarness();
+    await registry.execute('routines', [
+      'create', '--name', 'Inbox Sweep', '--description', 'Summarize inbound messages.', '--steps', 'Read and summarize.',
+    ], ctx);
+    const modelCtx = { ...ctx, invokedByModel: true } as CommandContext;
+    out.length = 0;
+    await registry.execute('routines', ['review', 'inbox-sweep'], modelCtx);
+    await registry.execute('routines', ['enable', 'inbox-sweep'], modelCtx);
+    const refused = out.join('\n');
+    expect(refused).toContain('Refused: marking a routine reviewed');
+    expect(refused).toContain('has not been reviewed');
+    out.length = 0;
+    await registry.execute('routines', ['show', 'inbox-sweep'], ctx);
+    expect(out.join('\n')).not.toMatch(/Enabled Agent routine/);
+    out.length = 0;
+    await registry.execute('routines', ['review', 'inbox-sweep'], ctx);
+    expect(out.join('\n')).toContain('Reviewed Agent routine');
+    out.length = 0;
+    await registry.execute('routines', ['enable', 'inbox-sweep'], modelCtx);
+    expect(out.join('\n')).toContain('Enabled Agent routine inbox-sweep');
+  });
+
   test('requires explicit delete confirmation and rejects secret-looking steps', async () => {
     const { registry, out, ctx } = commandHarness();
 
@@ -320,7 +343,8 @@ describe('/routines command', () => {
       expect(text).toContain('isolated Agent Knowledge only');
       expect(text).toContain('confirmationRoutes');
       expect(text).toContain('workspace action:"run" actionId:"schedule-promote-routine"');
-      expect(text).toContain('/schedule promote-routine "inbox-sweep" --cron "0 9 * * *" --timezone "America/Chicago" --yes');
+      expect(text).toContain('/schedule promote-routine "inbox-sweep" --cron "0 9 * * *" --timezone "America/Chicago"');
+      expect(text).toContain('--yes');
       expect(calls).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
@@ -343,6 +367,9 @@ describe('/routines command', () => {
 
     try {
       await registry.execute('routines', ['create', '--name', 'Inbox Sweep', '--description', 'Review messages.', '--steps', 'Summarize inbound messages and ask before replies.'], ctx);
+      // A routine is promoted to an unattended schedule only once it is enabled and reviewed.
+      await registry.execute('routines', ['enable', 'inbox-sweep'], ctx);
+      await registry.execute('routines', ['review', 'inbox-sweep'], ctx);
       await registry.execute('schedule', [
         'promote-routine',
         'inbox-sweep',
@@ -408,6 +435,36 @@ describe('/routines command', () => {
       expect(requests.map((request) => `${request.method} ${request.url}`)).toContain(
         'GET http://127.0.0.1:3421/api/automation/schedules',
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('promoting the same routine twice from the slash command refuses the repeat instead of creating a second schedule', async () => {
+    const { registry, out, ctx } = commandHarness();
+    const requests: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async (_input, init) => {
+      const method = init?.method ?? 'GET';
+      requests.push(method);
+      return method === 'GET' ? schedulesListResponse() : scheduleResponse();
+    });
+
+    try {
+      await registry.execute('routines', ['create', '--name', 'Inbox Sweep', '--description', 'Review messages.', '--steps', 'Summarize inbound messages and ask before replies.'], ctx);
+      await registry.execute('routines', ['enable', 'inbox-sweep'], ctx);
+      await registry.execute('routines', ['review', 'inbox-sweep'], ctx);
+      const promote = ['promote', 'inbox-sweep', '--cron', '0 9 * * *', '--yes'];
+      await registry.execute('routines', promote, ctx);
+      expect(requests).toEqual(['POST']);
+      out.length = 0;
+
+      await registry.execute('routines', promote, ctx);
+
+      expect(requests).toEqual(['POST', 'GET']);
+      const text = out.join('\n');
+      expect(text).toContain('already exists on the connected host');
+      expect(text).toContain('Nothing was created');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -498,10 +555,11 @@ describe('/routines command', () => {
         '--yes',
       ], ctx);
 
-      expect(requests).toHaveLength(1);
-      expect(requests[0]!.url).toBe('http://127.0.0.1:3421/api/automation/schedules');
-      expect(requests[0]!.method).toBe('POST');
-      const payload = JSON.parse(requests[0]!.body) as {
+      // The host is asked for its schedules first, so a retried create finds the earlier one; one POST creates.
+      const creates = requests.filter((request) => request.method === 'POST');
+      expect(creates).toHaveLength(1);
+      expect(creates[0]!.url).toBe('http://127.0.0.1:3421/api/automation/schedules');
+      const payload = JSON.parse(creates[0]!.body) as {
         readonly prompt?: string;
         readonly kind?: string;
         readonly every?: string;
@@ -735,6 +793,25 @@ describe('/routines command', () => {
       const text = out.join('\n');
       expect(text).toContain('outcome failed');
       expect(text).not.toContain('outcome missed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('schedule list says when the run outcomes could not be checked', async () => {
+    const { registry, out, ctx } = commandHarness();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch(async (input) => {
+      const url = inputUrl(input);
+      if (url.includes('/api/automation/runs')) throw new Error('connection reset');
+      return schedulesListResponse();
+    });
+
+    try {
+      await registry.execute('schedule', ['list'], ctx);
+      const text = out.join('\n');
+      expect(text).toContain('sched-1');
+      expect(text).toContain('Could not check recent run outcomes');
     } finally {
       globalThis.fetch = originalFetch;
     }

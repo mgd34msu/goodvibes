@@ -32,12 +32,28 @@ export interface HookWorkbenchApi {
   simulate(eventPath: string, payload?: Record<string, unknown>): HookSimulationResult;
   inspect(path: string): HookConfigInspection;
   export(path: string): Promise<string>;
-  import(path: string, strategy?: 'merge' | 'replace'): Promise<void>;
+  /** Resolves with each bundle entry that was left out, with its reason; empty when everything was taken. */
+  import(path: string, strategy?: 'merge' | 'replace'): Promise<readonly string[]>;
 }
 
 export interface HookApiDispatcher {
   listHooks(): Array<{ pattern: string; hook: HookDefinition }>;
   listChains(): HookChain[];
+}
+
+/**
+ * Adapts the live dispatcher to the hook API's dispatcher view. The chains
+ * listed are the ones the dispatcher is running, which include chains added at
+ * runtime, not only the managed file's.
+ */
+export function createHookApiDispatcher(dispatcher: {
+  listHooks(): Array<{ pattern: string; hook: HookDefinition }>;
+  getChains(): HookChain[];
+}): HookApiDispatcher {
+  return {
+    listHooks: () => dispatcher.listHooks(),
+    listChains: () => dispatcher.getChains(),
+  };
 }
 
 export interface HookApiWorkbenchRuntime {
@@ -47,6 +63,7 @@ export interface HookApiWorkbenchRuntime {
   listRecentActions(limit?: number): HookAuthoringAction[];
   loadManagedConfig(path?: string): void;
   loadAndApplyManagedHooks(path?: string): Promise<void>;
+  assertHooksFileTrusted(path?: string): void;
   scaffoldHook(name: string, match: string, type: HookType): HookDefinition;
   scaffoldChain(name: string, matches: readonly string[]): HookChain;
   removeManagedEntry(name: string): boolean;
@@ -55,6 +72,7 @@ export interface HookApiWorkbenchRuntime {
   inspectManagedConfig(path: string): HookConfigInspection;
   exportManagedConfig(path: string): Promise<string>;
   importManagedConfig(path: string, strategy?: 'merge' | 'replace'): void;
+  getLastImportRejections(): readonly string[];
   saveManagedConfig(path?: string): Promise<void>;
 }
 
@@ -86,6 +104,15 @@ export interface CreateHookApiOptions {
 export const HOOK_CONTRACT_SEARCH_SITE = 'hooks.contract-search';
 
 export function createHookApi(options: CreateHookApiOptions): HookApi {
+  // Each authoring verb reads the file, changes it and writes it back, so two
+  // overlapping verbs would each start from the same file and the later write
+  // would drop the earlier change. They run one at a time.
+  let queue: Promise<unknown> = Promise.resolve();
+  const serialized = <T>(verb: () => Promise<T>): Promise<T> => {
+    const run = queue.then(verb, verb);
+    queue = run.catch(() => undefined);
+    return run;
+  };
   return {
     async contracts(filter?: string): Promise<readonly HookContractRecord[]> {
       const contracts = options.listContracts();
@@ -144,41 +171,53 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
         options.workbench.loadManagedConfig(path);
       },
       reload(path?: string): Promise<void> {
-        return options.workbench.loadAndApplyManagedHooks(path);
+        return serialized(() => options.workbench.loadAndApplyManagedHooks(path));
       },
-      async scaffoldHook(name: string, match: string, type: HookType): Promise<HookDefinition> {
-        options.workbench.loadManagedConfig();
-        const hook = options.workbench.scaffoldHook(name, match, type);
-        await options.workbench.saveManagedConfig();
-        await options.workbench.loadAndApplyManagedHooks();
-        return hook;
+      scaffoldHook(name: string, match: string, type: HookType): Promise<HookDefinition> {
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          options.workbench.assertHooksFileTrusted();
+          const hook = options.workbench.scaffoldHook(name, match, type);
+          await options.workbench.saveManagedConfig();
+          await options.workbench.loadAndApplyManagedHooks();
+          return hook;
+        });
       },
-      async scaffoldChain(name: string, matches: readonly string[]): Promise<HookChain> {
-        options.workbench.loadManagedConfig();
-        const chain = options.workbench.scaffoldChain(name, matches);
-        await options.workbench.saveManagedConfig();
-        await options.workbench.loadAndApplyManagedHooks();
-        return chain;
+      scaffoldChain(name: string, matches: readonly string[]): Promise<HookChain> {
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          options.workbench.assertHooksFileTrusted();
+          const chain = options.workbench.scaffoldChain(name, matches);
+          await options.workbench.saveManagedConfig();
+          await options.workbench.loadAndApplyManagedHooks();
+          return chain;
+        });
       },
-      async remove(name: string): Promise<boolean> {
-        options.workbench.loadManagedConfig();
-        const removed = options.workbench.removeManagedEntry(name);
-        if (!removed) {
-          return false;
-        }
-        await options.workbench.saveManagedConfig();
-        await options.workbench.loadAndApplyManagedHooks();
-        return true;
+      remove(name: string): Promise<boolean> {
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          options.workbench.assertHooksFileTrusted();
+          const removed = options.workbench.removeManagedEntry(name);
+          if (!removed) {
+            return false;
+          }
+          await options.workbench.saveManagedConfig();
+          await options.workbench.loadAndApplyManagedHooks();
+          return true;
+        });
       },
-      async toggle(name: string, enabled: boolean): Promise<boolean> {
-        options.workbench.loadManagedConfig();
-        const changed = options.workbench.toggleManagedHook(name, enabled);
-        if (!changed) {
-          return false;
-        }
-        await options.workbench.saveManagedConfig();
-        await options.workbench.loadAndApplyManagedHooks();
-        return true;
+      toggle(name: string, enabled: boolean): Promise<boolean> {
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          options.workbench.assertHooksFileTrusted();
+          const changed = options.workbench.toggleManagedHook(name, enabled);
+          if (!changed) {
+            return false;
+          }
+          await options.workbench.saveManagedConfig();
+          await options.workbench.loadAndApplyManagedHooks();
+          return true;
+        });
       },
       simulate(eventPath: string, payload: Record<string, unknown> = {}): HookSimulationResult {
         options.workbench.loadManagedConfig();
@@ -188,14 +227,22 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
         return options.workbench.inspectManagedConfig(path);
       },
       export(path: string): Promise<string> {
-        options.workbench.loadManagedConfig();
-        return options.workbench.exportManagedConfig(path);
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          return options.workbench.exportManagedConfig(path);
+        });
       },
-      async import(path: string, strategy: 'merge' | 'replace' = 'merge'): Promise<void> {
-        options.workbench.loadManagedConfig();
-        options.workbench.importManagedConfig(path, strategy);
-        await options.workbench.saveManagedConfig();
-        await options.workbench.loadAndApplyManagedHooks();
+      import(path: string, strategy: 'merge' | 'replace' = 'merge'): Promise<readonly string[]> {
+        return serialized(async () => {
+          options.workbench.loadManagedConfig();
+          options.workbench.assertHooksFileTrusted();
+          options.workbench.importManagedConfig(path, strategy);
+          // Read before the reload below, which starts from a cleared workbench.
+          const rejected = [...options.workbench.getLastImportRejections()];
+          await options.workbench.saveManagedConfig();
+          await options.workbench.loadAndApplyManagedHooks();
+          return rejected;
+        });
       },
     },
   };

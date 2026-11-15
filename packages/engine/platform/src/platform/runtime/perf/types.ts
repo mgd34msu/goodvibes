@@ -56,7 +56,7 @@ export interface BudgetViolation {
   exceededBy: number;
   /** Number of consecutive samples that have violated this budget. */
   consecutiveViolations: number;
-  /** Warning message when the metric was not found in the snapshot. */
+  /** Retained for readers of older reports; the monitor no longer sets it (see PerfReport.missing). */
   warning?: string | undefined;
 }
 
@@ -70,6 +70,8 @@ export interface PerfReport {
   metrics: PerfMetric[];
   /** Violations where consecutiveViolations exceeds tolerance. */
   violations: BudgetViolation[];
+  /** Budget metrics the snapshot did not supply. They were not measured, so they are neither violations nor passes. */
+  missing?: string[] | undefined;
   /** True if all budgets passed (no active violations). */
   passed: boolean;
 }

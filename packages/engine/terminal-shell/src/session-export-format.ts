@@ -1,3 +1,4 @@
+import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/sessions';
 /** Transcript formatting is shared independently of product redaction and source-lifetime policy. */
 export function formatSessionExport<Message>(
   sessionId: string,
@@ -35,7 +36,7 @@ export function formatSessionExport<Message>(
   }
   return lines.join('\n');
 }
-export function resolveSessionExportRequest<Session extends { readonly name: string }>(
+export function resolveSessionExportRequest<Session extends { readonly name: string; readonly title: string }>(
   args: readonly string[],
   currentId: string,
   list: () => readonly Session[],
@@ -48,6 +49,14 @@ export function resolveSessionExportRequest<Session extends { readonly name: str
   }
   const format = (args[2] || 'markdown').toLowerCase();
   const sessionId = target === '.' ? currentId : target;
-  const found = list().find((session) => session.name === sessionId || session.name.startsWith(sessionId));
+  // The current session is matched by its exact id only: a prefix or title
+  // match could pick another session's transcript for `.`.
+  const sessions = list();
+  const candidates = target === '.' ? sessions.filter((session) => session.name === sessionId) : findSessionCandidates(sessions, sessionId);
+  if (candidates.length > 1) {
+    print(`Ambiguous session: ${sessionId}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
+    return undefined;
+  }
+  const found = candidates[0];
   return { target, format, sessionId, found };
 }

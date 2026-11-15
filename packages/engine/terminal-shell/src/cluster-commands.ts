@@ -14,6 +14,7 @@
  *
  * Every failure exits non-zero with a plain-language message naming the fix.
  */
+import { Writable } from 'node:stream';
 import { createInterface } from 'node:readline/promises';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type {
@@ -37,6 +38,7 @@ import { clusterJoinGroup } from './batteries/cluster-join-group.js';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import {
   describeAge,
+  printableName,
   renderCreated,
   renderDiscovered,
   renderFailure,
@@ -191,6 +193,8 @@ export interface RunClusterCommandInput {
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
   /** Injected in tests; the real one reads stdin. */
   readonly prompt?: ((question: string) => Promise<string>) | undefined;
+  /** Like `prompt`, for a secret: the real one does not echo what is typed. Defaults to `prompt` when that is injected. */
+  readonly promptSecret?: ((question: string) => Promise<string>) | undefined;
 }
 
 function failure(error: string, fix: string, json: boolean): ClusterCommandResult {
@@ -211,12 +215,36 @@ function success(data: unknown, lines: readonly string[], json: boolean, rawOutp
 }
 
 /** Ask a question on stdin. Only ever called when stdin is a terminal. */
-async function askOnStdin(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+async function askOnStdin(question: string, toStderr = false): Promise<string> {
+  // With --json the answer goes to stdout as one JSON document, so the questions go to stderr.
+  const rl = createInterface({ input: process.stdin, output: toStderr ? process.stderr : process.stdout });
   try {
     return (await rl.question(question)).trim();
   } finally {
     rl.close();
+  }
+}
+
+/** Ask for a secret without echoing it to the screen or leaving it in the scrollback. */
+async function askSecretOnStdin(question: string, toStderr = false): Promise<string> {
+  (toStderr ? process.stderr : process.stdout).write(question);
+  const swallow = new Writable({ write: (_chunk, _encoding, done) => done() });
+  const rl = createInterface({ input: process.stdin, output: swallow, terminal: true });
+  try {
+    return (await rl.question('')).trim();
+  } finally {
+    rl.close();
+    (toStderr ? process.stderr : process.stdout).write('\n');
+  }
+}
+
+/** What a verb is about to do that cannot be undone, or null for one that can be repeated safely. */
+function describeIrreversible(parsed: ParsedClusterCommand): string | null {
+  switch (parsed.subcommand) {
+    case 'leave': return 'this removes this machine from its group';
+    case 'forget': return `this removes ${parsed.positional ?? 'that machine'} from the group and replaces the group key immediately`;
+    case 'rotate': return parsed.now ? 'this stops accepting the old group key immediately, so any machine that has not picked up the new one is cut off' : null;
+    default: return null;
   }
 }
 
@@ -249,6 +277,21 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
   const isTerminal = input.isTerminal ?? Boolean(process.stdout.isTTY);
   const call = <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
     callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl ?? fetch);
+
+  const irreversible = describeIrreversible(parsed);
+  if (irreversible !== null && !parsed.yes) {
+    // Only a person at a terminal can be asked; a script, a --json run or a slash command must say --yes.
+    const answer = isTerminal && !parsed.json
+      ? (await (input.prompt ?? askOnStdin)(`${irreversible}. Type yes to continue: `)).toLowerCase()
+      : '';
+    if (answer !== 'yes') {
+      return failure(
+        `cluster ${parsed.subcommand} was not run: ${irreversible}, and it was not confirmed`,
+        `nothing was changed. Run it again with --yes to confirm: cluster ${parsed.subcommand}${parsed.positional ? ` ${parsed.positional}` : ''}${parsed.now ? ' --now' : ''} --yes`,
+        parsed.json,
+      );
+    }
+  }
 
   switch (parsed.subcommand) {
     case 'status': {
@@ -349,7 +392,8 @@ async function runJoin(
         parsed.json,
       );
     }
-    const ask = input.prompt ?? askOnStdin;
+    const ask = input.prompt ?? ((question: string) => askOnStdin(question, parsed.json));
+    const askSecret = input.promptSecret ?? input.prompt ?? ((question: string) => askSecretOnStdin(question, parsed.json));
 
     if (groupId === null) {
       const found = await call<readonly DiscoveredGroup[]>('/api/cluster/groups');
@@ -363,7 +407,7 @@ async function runJoin(
         );
       }
       const listing = renderDiscovered(found.data, now);
-      for (const line of listing) process.stdout.write(`${line}\n`);
+      for (const line of listing) (parsed.json ? process.stderr : process.stdout).write(`${line}\n`);
       const answer = await ask('\nwhich group? (name or id, blank to cancel): ');
       if (answer.length === 0) return { lines: ['cancelled'], exitCode: 130 };
       const chosen = found.data.find((group) => group.groupId === answer)
@@ -376,7 +420,7 @@ async function runJoin(
     }
 
     if (joinKey === null) {
-      joinKey = await ask('join key (run `cluster key` on a machine already in the group): ');
+      joinKey = await askSecret('join key (run `cluster key` on a machine already in the group): ');
       if (joinKey.length === 0) return { lines: ['cancelled'], exitCode: 130 };
     }
   }
@@ -402,7 +446,7 @@ function uniqueIdPrefix(groups: readonly DiscoveredGroup[], answer: string): Dis
  */
 async function readJoinGroup(answer: string, groups: readonly DiscoveredGroup[], now: number): Promise<DiscoveredGroup | undefined> {
   return decisionOrClassic(() => readDecisionJoinGroup(answer, groups, now), () => {
-    const matches = groups.filter(group => group.groupId === answer || group.displayName === answer);
+    const matches = groups.filter(group => group.groupId === answer || group.displayName === answer || printableName(group.displayName) === answer);
     return matches.length === 1 ? matches[0] : undefined;
   });
 }
@@ -411,7 +455,7 @@ async function readDecisionJoinGroup(answer: string, groups: readonly Discovered
     id: group.groupId,
     content: {
       groupId: group.groupId,
-      displayName: group.displayName,
+      displayName: printableName(group.displayName),
       machines: group.nodeCount,
       version: group.version,
       seen: describeAge(group.lastSeenAt, now),

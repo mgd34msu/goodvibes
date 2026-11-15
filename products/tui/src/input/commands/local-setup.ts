@@ -1,16 +1,18 @@
 import { dirname, join } from 'path';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandRegistry } from '../command-registry.ts';
-import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { listHookPointContracts } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
+  applySetupTransferChanges,
   buildSetupTransferBundle,
   createSetupLink,
   exportSetupTransferBundle,
   inspectSetupTransferBundle,
   parseSetupLink,
+  planSetupTransferImport,
+  revertSetupTransferChanges,
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
@@ -23,7 +25,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
     name: 'setup',
     aliases: ['startup'],
     description: 'Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up',
-    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir>|export <path>|transfer <export|inspect|import> <path>|link <surface> [target]|open-link <uri>]',
+    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import [--yes]> <path>|link <surface> [target]|open-link <uri>]',
     async handler(args, ctx) {
       const sub = args[0] ?? 'review';
       let shellPaths: ReturnType<typeof requireShellPaths> | null = null;
@@ -133,6 +135,11 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           ctx.print('Usage: /setup support-bundle <dir>');
           return;
         }
+        const plannedDir = getShellPaths().resolveWorkspacePath(dirArg);
+        if (existsSync(join(plannedDir, 'startup-review.json')) && !args.includes('--overwrite')) {
+          ctx.print(`${plannedDir} already holds a support bundle; nothing was written. Choose another directory or add --overwrite.`);
+          return;
+        }
         const targetDir = exportSetupSupportBundle(dirArg, snapshot, ctx);
         writeFileSync(join(targetDir, 'remote-summary.json'), JSON.stringify({
           runners: ctx.ops.remoteRuntime?.listContracts() ?? [],
@@ -155,6 +162,10 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
           return;
         }
         const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
+        if (existsSync(targetPath) && !args.includes('--overwrite')) {
+          ctx.print(`${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
+          return;
+        }
         mkdirSync(dirname(targetPath), { recursive: true });
         writeFileSync(targetPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf-8');
         ctx.print(`Exported startup review to ${targetPath}`);
@@ -163,13 +174,17 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
 
       if (sub === 'transfer') {
         const mode = args[1]?.toLowerCase();
-        const pathArg = args[2];
+        const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
         if (!mode || !pathArg) {
-          ctx.print('Usage: /setup transfer <export|inspect|import> <path>');
+          ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import [--yes]> <path>');
           return;
         }
         const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
         if (mode === 'export') {
+          if (existsSync(targetPath) && !args.includes('--overwrite')) {
+            ctx.print(`${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
+            return;
+          }
           const snapshot = await getSnapshot();
           const bundle = buildSetupTransferBundle(ctx, snapshot);
           ctx.print(`Exported setup transfer bundle to ${exportSetupTransferBundle(ctx, pathArg, bundle)}`);
@@ -186,31 +201,61 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         }
         if (mode === 'import') {
           try {
-            const bundle = JSON.parse(readFileSync(targetPath, 'utf-8')) as SetupTransferBundle;
-            for (const entry of CONFIG_SCHEMA) {
-              if (Object.prototype.hasOwnProperty.call(bundle.config, entry.key)) {
-                ctx.platform.configManager.setDynamic(entry.key, (bundle.config as Record<string, unknown>)[entry.key]);
+            const plan = planSetupTransferImport(ctx.platform.configManager, JSON.parse(readFileSync(targetPath, 'utf-8')));
+            if (!plan.ok) {
+              ctx.print(`Setup transfer bundle not imported: ${plan.reason}`);
+              return;
+            }
+            const { bundle, changes, ignoredKeys } = plan;
+            const replacedFiles = [
+              bundle.services ? 'services.json' : undefined,
+              bundle.ecosystem?.plugins ? 'ecosystem/plugins.json' : undefined,
+              bundle.ecosystem?.skills ? 'ecosystem/skills.json' : undefined,
+            ].filter((name): name is string => name !== undefined);
+            if (!args.includes('--yes')) {
+              ctx.print([
+                `Setup transfer import from ${targetPath}: nothing was changed yet.`,
+                `  settings that would change: ${changes.length}${changes.length > 0 ? ` (${changes.slice(0, 12).map((change) => change.key).join(', ')}${changes.length > 12 ? ', ...' : ''})` : ''}`,
+                `  files that would be replaced: ${replacedFiles.length > 0 ? replacedFiles.join(', ') : 'none'}`,
+                ...(ignoredKeys.length > 0 ? [`  unknown settings that would be skipped: ${ignoredKeys.join(', ')}`] : []),
+                '  Review the list, then run /setup transfer import <path> --yes to apply it.',
+              ].join('\n'));
+              return;
+            }
+            applySetupTransferChanges(ctx.platform.configManager, changes);
+            const fileWrites: Array<{ path: string; body: unknown }> = [];
+            if (bundle.services) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'services.json'), body: bundle.services });
+            if (bundle.ecosystem?.plugins) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'plugins.json'), body: bundle.ecosystem.plugins });
+            if (bundle.ecosystem?.skills) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'skills.json'), body: bundle.ecosystem.skills });
+            // Remember each file's previous contents so a failed write can put every replaced file back, not only the settings.
+            const replaced: Array<{ path: string; previous: string | null }> = [];
+            try {
+              for (const write of fileWrites) {
+                const previous = existsSync(write.path) ? readFileSync(write.path, 'utf-8') : null;
+                atomicWriteFileSync(write.path, JSON.stringify(write.body, null, 2) + '\n', { mkdirp: true });
+                replaced.push({ path: write.path, previous });
               }
+            } catch (error) {
+              revertSetupTransferChanges(ctx.platform.configManager, changes);
+              const notRestored: string[] = [];
+              for (const entry of replaced.reverse()) {
+                try {
+                  if (entry.previous === null) rmSync(entry.path, { force: true });
+                  else atomicWriteFileSync(entry.path, entry.previous, { mkdirp: true });
+                } catch {
+                  notRestored.push(entry.path);
+                }
+              }
+              ctx.print(`Failed to import setup transfer bundle: ${summarizeError(error)}. Settings were restored${notRestored.length > 0 ? `; these files could not be put back and still hold the imported contents: ${notRestored.join(', ')}` : ' and any files already replaced were put back'}.`);
+              return;
             }
-            if (bundle.services) {
-              const servicesPath = getShellPaths().resolveProjectPath('tui', 'services.json');
-              atomicWriteFileSync(servicesPath, JSON.stringify(bundle.services, null, 2) + '\n', { mkdirp: true });
-            }
-            if (bundle.ecosystem?.plugins) {
-              const pluginsPath = getShellPaths().resolveProjectPath('tui', 'ecosystem', 'plugins.json');
-              atomicWriteFileSync(pluginsPath, JSON.stringify(bundle.ecosystem.plugins, null, 2) + '\n', { mkdirp: true });
-            }
-            if (bundle.ecosystem?.skills) {
-              const skillsPath = getShellPaths().resolveProjectPath('tui', 'ecosystem', 'skills.json');
-              atomicWriteFileSync(skillsPath, JSON.stringify(bundle.ecosystem.skills, null, 2) + '\n', { mkdirp: true });
-            }
-            ctx.print(`Imported setup transfer bundle from ${targetPath}`);
+            ctx.print(`Imported setup transfer bundle from ${targetPath}: ${changes.length} setting(s) changed, ${replacedFiles.length} file(s) replaced${ignoredKeys.length > 0 ? `, ${ignoredKeys.length} unknown setting(s) skipped (${ignoredKeys.join(', ')})` : ''}.`);
           } catch (error) {
-            ctx.print(`Failed to import setup transfer bundle: ${summarizeError(error)}`);
+            ctx.print(`Failed to import setup transfer bundle (settings written before the failure were restored): ${summarizeError(error)}`);
           }
           return;
         }
-        ctx.print('Usage: /setup transfer <export|inspect|import> <path>');
+        ctx.print('Usage: /setup transfer <export [--overwrite]|inspect|import [--yes]> <path>');
         return;
       }
 
@@ -260,7 +305,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         return;
       }
 
-      ctx.print('Usage: /setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir>|export <path>|transfer <export|inspect|import> <path>|link <surface> [target]|open-link <uri>]');
+      ctx.print('Usage: /setup [review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import [--yes]> <path>|link <surface> [target]|open-link <uri>]');
     },
   });
 }

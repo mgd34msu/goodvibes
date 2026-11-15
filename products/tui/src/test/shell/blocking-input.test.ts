@@ -2,53 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleBlockingShellInput, type PendingPermissionState } from '../../shell/blocking-input.ts';
 
-/** Default journal-replay stubs: no journal file exists, so replay is a no-op. */
-const JOURNAL_STUBS = {
-  homeDirectory: '/tmp/test-home',
-  sessionId: 'test-session',
-  persistSnapshot: () => {},
-} as const;
-
-interface FromJSONCall {
-  messages: Array<Record<string, unknown>>;
-  title?: string;
-  titleSource?: string;
-}
-
-function makeConversation() {
-  const calls: FromJSONCall[] = [];
-  /** Derived array pushed to on every fromJSON call. Safe to destructure. */
-  const restored: Array<Record<string, unknown>>[] = [];
-  return {
-    calls,
-    restored,
-    conversation: {
-      fromJSON: (data: FromJSONCall) => {
-        calls.push(data);
-        restored.push(data.messages);
-      },
-    },
-  };
-}
-
-function makeRouter() {
-  const messages: string[] = [];
-  const lowMessages: string[] = [];
-  return {
-    messages,
-    lowMessages,
-    router: {
-      high: (text: string) => messages.push(text),
-      low: (text: string) => lowMessages.push(text),
-    },
-  };
-}
-
 describe('shell/blocking-input', () => {
   test('approves pending permission on y', () => {
     const resolved: Array<[boolean, boolean | undefined]> = [];
-    const { conversation } = makeConversation();
-    const { router } = makeRouter();
     let rendered = 0;
     let aborted = 0;
 
@@ -77,8 +33,6 @@ describe('shell/blocking-input', () => {
 
   test('escape drops focus only: passes through to input, keeps the card pending, never denies', () => {
     const resolved: Array<[boolean, boolean | undefined]> = [];
-    const { conversation } = makeConversation();
-    const { router } = makeRouter();
     let aborted = 0;
 
     const pendingPermission = {
@@ -107,8 +61,6 @@ describe('shell/blocking-input', () => {
   });
 
   test('mouse events pass through to input while a card is up; arrows and PageUp/PageDown are card keys', () => {
-    const { conversation } = makeConversation();
-    const { router } = makeRouter();
 
     const pendingPermission = {
       id: 'perm-scroll',
@@ -139,13 +91,9 @@ describe('shell/blocking-input', () => {
       expect(result.handled).toBe(true);
       expect(result.pendingPermission).not.toBeNull();
     }
-    void conversation;
-    void router;
   });
 
   test('answer keys still act while a card is up (passthrough does not swallow y/n)', () => {
-    const { conversation } = makeConversation();
-    const { router } = makeRouter();
     const resolved: Array<[boolean, boolean | undefined]> = [];
     const pendingPermission = {
       id: 'perm-answer',
@@ -205,8 +153,6 @@ describe('shell/blocking-input', () => {
     }
 
     test('j/k move the cursor without resolving', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
       const { pendingPermission, resolveCalls } = makeHunkPending();
       let rendered = 0;
 
@@ -225,8 +171,6 @@ describe('shell/blocking-input', () => {
     });
 
     test('space toggles the cursor row without resolving', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
       const { pendingPermission, resolveCalls } = makeHunkPending();
 
       const result = handleBlockingShellInput({
@@ -242,8 +186,6 @@ describe('shell/blocking-input', () => {
     });
 
     test('enter resolves once with approved=true and a modifiedArgs payload matching the current selection', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
       const { pendingPermission, resolveCalls } = makeHunkPending({ selected: [0, 2] });
       let rendered = 0;
 
@@ -269,9 +211,7 @@ describe('shell/blocking-input', () => {
       expect(rendered).toBe(1);
     });
 
-    test('n resolves approved=false and calls abortTurn(), same as the non-hunk deny path', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
+    test('n resolves approved=false without aborting the turn, same as the plain card', () => {
       const { pendingPermission, resolveCalls } = makeHunkPending();
       let aborted = 0;
 
@@ -284,12 +224,10 @@ describe('shell/blocking-input', () => {
 
       expect(result.pendingPermission).toBeNull();
       expect(resolveCalls).toEqual([[false, false, undefined]]);
-      expect(aborted).toBe(1);
+      expect(aborted).toBe(0);
     });
 
-    test('esc resolves approved=false and calls abortTurn(), same as the non-hunk deny path', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
+    test('esc resolves approved=false without aborting the turn, same as the plain card', () => {
       const { pendingPermission, resolveCalls } = makeHunkPending();
       let aborted = 0;
 
@@ -302,12 +240,10 @@ describe('shell/blocking-input', () => {
 
       expect(result.pendingPermission).toBeNull();
       expect(resolveCalls).toEqual([[false, false, undefined]]);
-      expect(aborted).toBe(1);
+      expect(aborted).toBe(0);
     });
 
     test('a re-selects all hunks in hunk mode instead of the outer "allow always (session)" behavior', () => {
-      const { conversation } = makeConversation();
-      const { router } = makeRouter();
       const { pendingPermission, resolveCalls } = makeHunkPending({ selected: [1] });
 
       const result = handleBlockingShellInput({

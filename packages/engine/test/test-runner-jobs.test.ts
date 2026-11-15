@@ -10,7 +10,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function fixture(files: Record<string, string>): { root: string; run: (args: string[]) => { code: number | null; output: string } } {
   const root = mkdtempSync(join(tmpdir(), 'runner-jobs-')); roots.push(root);
   mkdirSync(join(root, 'scripts')); mkdirSync(join(root, 'app'));
-  for (const file of ['test.ts', 'test-discovery.ts', 'test-partitions.ts']) copyFileSync(resolve(import.meta.dir, '../scripts', file), join(root, 'scripts', file));
+  for (const file of ['test.ts', 'dist-freshness.ts', 'test-discovery.ts', 'test-partitions.ts']) copyFileSync(resolve(import.meta.dir, '../scripts', file), join(root, 'scripts', file));
   cpSync(resolve(import.meta.dir, '../toolchain/src/test-runner'), join(root, 'toolchain/src/test-runner'), { recursive: true });
   for (const [name, body] of Object.entries(files)) {
     mkdirSync(join(root, 'app', name, '..'), { recursive: true });
@@ -47,4 +47,14 @@ test('space-separated flag values are not mistaken for test files, and an unmatc
   expect(spaced.code, spaced.output).toBe(0);
   expect(spaced.output).toContain('Test files: 1, failed: 0');
   expect(run(['--jobs=2', 'nothing-matches']).code).not.toBe(0);
+});
+
+test('a path relative to the current directory runs that file, and an unmatched path names the directory searched', () => {
+  const { run } = fixture({ 'src/a.test.ts': 'expect(1).toBe(1);' });
+  const fromRoot = run(['app/src/a.test.ts']);
+  expect(fromRoot.code, fromRoot.output).toBe(0);
+  expect(fromRoot.output).toContain('1 pass');
+  const missing = run(['src/none.test.ts']);
+  expect(missing.code).not.toBe(0);
+  expect(missing.output).toMatch(/Test path\(s\) not found under \S+\/app: src\/none\.test\.ts/);
 });

@@ -562,6 +562,16 @@ describe('renderAgentWorkspace', () => {
     expect(output).not.toContain('goodvibes-agent-test-token');
   });
 
+  test('lanes the workspace has no data for read Not measured, never Ready', () => {
+    const workspace = new AgentWorkspace();
+    workspace.open(liveCommandContext(), () => undefined);
+
+    const output = text(renderAgentWorkspace(workspace, 132, 60));
+
+    expect(output).toContain('Not measured: Work in this project');
+    expect(output).not.toContain('Ready: Work in this project');
+  });
+
   test('renders real onboarding actions in the Start workspace', () => {
     const workspace = new AgentWorkspace();
     workspace.open(liveCommandContext(), () => undefined);
@@ -571,7 +581,7 @@ describe('renderAgentWorkspace', () => {
 
     expect(output).toContain('Selected: Use a local model (no sign-in)');
     expect(output).toContain('Onboarding');
-    expect(output).toContain('of 13 done');
+    expect(output).toContain(`of ${workspace.runtimeSnapshot?.setupChecklist.length} done`);
     expect(output).toContain('Chat: openai-subscriber / GPT-5.5.');
     expect(output).toContain('Local: 1 personas, 1 skills, 1 routines, 1 memories.');
     expect(output).toContain('Next: Connected host (recommended)');
@@ -690,7 +700,7 @@ describe('renderAgentWorkspace', () => {
     const output = text(renderAgentWorkspace(workspace, 132, 62));
 
     expect(output).toContain('Onboarding');
-    expect(output).toContain('of 13 done');
+    expect(output).toContain(`of ${workspace.runtimeSnapshot?.setupChecklist.length} done`);
     expect(output).not.toContain('Step history:');
     expect(output).not.toContain('Receipt gaps:');
     expect(output).not.toContain('durable setup receipt');
@@ -707,6 +717,22 @@ describe('renderAgentWorkspace', () => {
     expect(output).toContain('Save resume point');
     expect(output).toContain('Clear saved resume point');
     expect(output).not.toContain('Setup checkpoint:');
+  });
+
+  test('Personal Ops reports email and calendar as configured when the snapshot says so, not a fixed setup warning', () => {
+    const workspace = new AgentWorkspace();
+    workspace.open(liveCommandContext({ includePersonalOpsNote: true }), () => undefined);
+    workspace.selectedCategoryIndex = workspace.categories.findIndex((category) => category.id === 'personal-ops');
+    workspace.runtimeSnapshot = {
+      ...workspace.runtimeSnapshot!,
+      emailConnectStatus: { connected: true, username: 'me@example.test', imapHost: 'imap.example.test', errors: [] },
+      calendarOAuthConfigStatus: { google: true, microsoft: false },
+    };
+
+    const output = text(renderAgentWorkspace(workspace, 132, 72));
+
+    expect(output).toContain('Email/calendar: email connected; calendar sign-in configured.');
+    expect(output).not.toContain('connector setup needed');
   });
 
   test('renders Personal Ops as one daily operations surface', () => {
@@ -1281,12 +1307,14 @@ describe('renderAgentWorkspace', () => {
     workspace.selectedActionIndex = workspace.actions.findIndex((action) => action.id === 'voice-enable');
     workspace.activateSelected();
     const voiceOutput = text(renderAgentWorkspace(workspace, 132, 54));
-    expect(voiceOutput).toContain('Enable Voice Interaction');
+    expect(voiceOutput).toContain('Enable Always-Speak');
     expect(voiceOutput).toContain('Confirm *');
   });
 
   test('renders discovered behavior files as context onboarding actions', () => {
     const root = makeProjectTempDir('goodvibes-agent-workspace-discovery');
+    // The workspace is its own repository, so discovery never walks up into the checkout this test runs inside.
+    mkdirSync(join(root, '.git'), { recursive: true });
     mkdirSync(join(root, '.goodvibes', 'agent', 'personas'), { recursive: true });
     mkdirSync(join(root, '.goodvibes', 'agent', 'skills', 'daily-brief'), { recursive: true });
     mkdirSync(join(root, '.goodvibes', 'agent', 'routines'), { recursive: true });
@@ -2178,10 +2206,7 @@ describe('renderAgentWorkspace', () => {
     const output = text(renderAgentWorkspace(workspace, 132, 60));
 
     for (const [label, pattern] of jargonPatterns) {
-      expect(output).not.toMatch(pattern);
-      if (output.match(pattern)) {
-        throw new Error(`Jargon guard failed for "${label}": pattern ${pattern} matched in setup output`);
-      }
+      expect(output, `jargon guard: ${label}`).not.toMatch(pattern);
     }
   });
 

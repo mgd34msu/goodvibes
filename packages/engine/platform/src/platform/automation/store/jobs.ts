@@ -88,7 +88,9 @@ export class AutomationJobStore {
 
   private async loadSnapshot(): Promise<AutomationJobsSnapshot> {
     const before = this.fileIdentity();
-    if (this.initialized && before !== this.identity) throw new AutomationJobMutationStaleError();
+    // The file was changed by someone else since this store last wrote or read
+    // it: this read becomes the new baseline instead of failing every later call.
+    const rebaseline = this.initialized && before !== this.identity;
     const snapshot = validateSnapshot(await this.store.load());
     if (this.fileIdentity() !== before) throw new AutomationJobMutationStaleError();
     // A store row without a writer revision gets one owned by this load. Keep
@@ -103,9 +105,9 @@ export class AutomationJobStore {
       }
       return job.mutationRevision ? job : ownedAutomationJob(job, prior?.mutationRevision);
     });
-    if (!this.initialized) {
+    if (!this.initialized || rebaseline) {
       this.committed = new Map(snapshot.jobs.map(job => [job.id, structuredClone(job)]));
-      if (!this.requestedInitialized) this.requested = new Map(this.committed);
+      if (!this.initialized && !this.requestedInitialized) this.requested = new Map(this.committed);
       this.identity = before;
       this.initialized = true;
     }
@@ -137,7 +139,9 @@ export class AutomationJobStore {
     }
     for (const id of previous.keys()) if (!next.has(id)) changes.set(id, null);
     await this.writes.run(async () => {
-      if (!this.initialized) await this.load();
+      // An external change is absorbed here: this whole-snapshot save carries
+      // no revision to compare, so its changes merge onto the file as found.
+      if (!this.initialized || this.fileIdentity() !== this.identity) await this.load();
       for (const id of this.failed) changes.set(id, next.get(id) ?? null);
       if (!changes.size) return;
       const merged = new Map(this.committed);
@@ -172,6 +176,13 @@ export class AutomationJobStore {
     await this.writes.run(async () => {
       current();
       if (!this.initialized) await this.load();
+      else if (this.fileIdentity() !== this.identity) {
+        // Someone else changed the file after the caller read its revision:
+        // this commit fails, and the store now describes the file as it is so
+        // the caller's next attempt starts from it.
+        await this.load();
+        throw new AutomationJobMutationStaleError();
+      }
       const selected = this.committed.get(jobId);
       if ((selected ? automationJobRevision(selected) : null) !== expectedMutationRevision) throw new AutomationJobMutationStaleError();
       const merged = new Map(this.committed);

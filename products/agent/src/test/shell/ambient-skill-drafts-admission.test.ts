@@ -89,7 +89,7 @@ test('configured plan mode ambient admission makes no draft or ledger effect', a
   finally { await f.close(); }
 });
 
-test.each(['configuration', 'host', 'session'])('original ambient $s retirement prevents a pending draft', async kind => {
+test.each(['configuration', 'host', 'session'])('original ambient %s retirement prevents a pending draft', async kind => {
   const f = fixture({ suspend: true }); const work = f.propose(f.controller.signal);
   try {
     await f.entered;

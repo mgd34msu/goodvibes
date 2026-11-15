@@ -1,0 +1,413 @@
+{
+  ".": [
+    {
+      "name": "AuthTokenSource",
+      "kind": "type",
+      "text": "export type AuthTokenSource = string | null | undefined | AuthTokenResolver; ;; via AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>;"
+    },
+    {
+      "name": "BackpressureInfo",
+      "kind": "interface",
+      "required": [
+        "droppedCount",
+        "queueBytes",
+        "queueLength",
+        "reason"
+      ],
+      "text": "export interface BackpressureInfo { readonly droppedCount: number; readonly queueLength: number; readonly queueBytes: number; readonly reason: 'message_too_large' | 'queue_full'; }"
+    },
+    {
+      "name": "ConnectionState",
+      "kind": "type",
+      "text": "export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';"
+    },
+    {
+      "name": "ConnectorTransportEvent",
+      "kind": "type",
+      "text": "export type ConnectorTransportEvent = { type: 'TRANSPORT_CONNECTION_STATE'; transportId: string; state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed'; } | { type: 'TRANSPORT_RECONNECT_ATTEMPT'; transportId: string; attempt: number; maxAttempts: number; delayMs: number; reason: string; } | { type: 'TRANSPORT_BACKPRESSURE'; transportId: string; droppedCount: number; queueLength: number; queueBytes: number; reason: 'message_too_large' | 'queue_full'; };"
+    },
+    {
+      "name": "DEFAULT_WS_MAX_ATTEMPTS",
+      "kind": "const",
+      "text": "DEFAULT_WS_MAX_ATTEMPTS = 10"
+    },
+    {
+      "name": "DomainEventConnector",
+      "kind": "type",
+      "text": "export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: () => void) => void | Promise<() => void>; ;; via EventLike = export type EventLike = { readonly type: string; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "DomainEvents",
+      "kind": "type",
+      "text": "export type DomainEvents<TDomain extends string, TEvent extends EventLike = EventLike> = RuntimeEventFeeds<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; }; ;; RuntimeEventFeeds = export type RuntimeEventFeeds<TDomain extends string, TEvent extends EventLike = EventLike> = { readonly domains: readonly TDomain[]; domain(domain: TDomain): RuntimeEventFeed<TEvent>; } & { readonly [K in TDomain]: RuntimeEventFeed<TEvent>; };"
+    },
+    {
+      "name": "ReconnectAttemptInfo",
+      "kind": "interface",
+      "required": [
+        "attempt",
+        "delayMs",
+        "maxAttempts",
+        "reason"
+      ],
+      "text": "export interface ReconnectAttemptInfo { readonly attempt: number; readonly maxAttempts: number; readonly delayMs: number; readonly reason: string; }"
+    },
+    {
+      "name": "RelayClient",
+      "kind": "interface",
+      "required": [
+        "close",
+        "connect",
+        "fetch",
+        "ready"
+      ],
+      "text": "export interface RelayClient { readonly fetch: FetchLike; connect(): Promise<void>; close(): void; readonly ready: boolean; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "RelayClientOptions",
+      "kind": "interface",
+      "required": [
+        "pairing"
+      ],
+      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
+    },
+    {
+      "name": "RelayWebSocketLike",
+      "kind": "interface",
+      "required": [
+        "addEventListener",
+        "binaryType",
+        "close",
+        "send"
+      ],
+      "text": "export interface RelayWebSocketLike { binaryType: string; send(data: string | Uint8Array | ArrayBuffer): void; close(code?: number, reason?: string): void; addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: unknown) => void): void; } ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
+      "name": "RemoteDomainEventsOptions",
+      "kind": "interface",
+      "text": "export interface RemoteDomainEventsOptions<TDomain extends string = string> { readonly onConnectionError?: ((error: Error, domain: TDomain) => void) | undefined; } ;; via Error = interface Error { name: string; message: string; stack?: string; }"
+    },
+    {
+      "name": "RemoteRuntimeEvents",
+      "kind": "type",
+      "text": "export type RemoteRuntimeEvents<TEvent extends RuntimeEventRecord = RuntimeEventRecord> = DomainEvents<RuntimeEventDomain, TEvent>; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "RemoteRuntimeEventsOptions",
+      "kind": "interface",
+      "text": "export interface RemoteRuntimeEventsOptions { readonly onError?: ((error: Error, domain: RuntimeEventDomain) => void) | undefined; readonly observer?: TransportObserver | undefined; } ;; via Error = interface Error { name: string; message: string; stack?: string; } ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; TransportObserver = export interface TransportObserver { onObserverError?(err: Error): void; onError?(err: Error): void; onTransportActivity?(activity: TransportActivityInfo): void; }"
+    },
+    {
+      "name": "RuntimeEventConnectorOptions",
+      "kind": "interface",
+      "text": "export interface RuntimeEventConnectorOptions { readonly reconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onOpen?: (() => void) | undefined; readonly onReconnect?: ((attempt: number, delayMs: number) => void) | undefined; readonly onReconnectAttempt?: ((info: ReconnectAttemptInfo) => void) | undefined; readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined; readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined; readonly onTransportEvent?: ((event: ConnectorTransportEvent) => void) | undefined; readonly observer?: TransportObserver | undefined; readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined; readonly turnScope?: RuntimeEventTurnScope | undefined; } ;; via StreamReconnectPolicy = export interface StreamReconnectPolicy extends BackoffPolicy { readonly enabled?: boolean | undefined; } ;; TransportObserver = export interface TransportObserver { onObserverError?(err: Error): void; onError?(err: Error): void; onTransportActivity?(activity: TransportActivityInfo): void; }"
+    },
+    {
+      "name": "RuntimeEventTurnScope",
+      "kind": "type",
+      "text": "export type RuntimeEventTurnScope = 'session-current' | 'off' | { readonly turnId: string; };"
+    },
+    {
+      "name": "SerializedEventEnvelope",
+      "kind": "interface",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "text": "export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> { readonly type: string; readonly ts?: number | undefined; readonly traceId?: string | undefined; readonly sessionId?: string | undefined; readonly source?: string | undefined; readonly payload: TEvent; } ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "SerializedRuntimeEnvelope",
+      "kind": "type",
+      "text": "export type SerializedRuntimeEnvelope<TEvent extends RuntimeEventRecord = RuntimeEventRecord> = SerializedEventEnvelope<TEvent>; ;; via RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "TERMINAL_TURN_EVENT_TYPES",
+      "kind": "const",
+      "text": "TERMINAL_TURN_EVENT_TYPES: readonly string[]"
+    },
+    {
+      "name": "TURN_START_EVENT_TYPE",
+      "kind": "const",
+      "text": "TURN_START_EVENT_TYPE = \"TURN_SUBMITTED\""
+    },
+    {
+      "name": "TurnLifecycleFrame",
+      "kind": "interface",
+      "required": [
+        "type"
+      ],
+      "text": "export interface TurnLifecycleFrame { readonly sessionId?: string | undefined; readonly type: string; readonly turnId?: string | undefined; }"
+    },
+    {
+      "name": "TurnLifecycleGate",
+      "kind": "interface",
+      "required": [
+        "accepts",
+        "boundTurnId",
+        "reset"
+      ],
+      "text": "export interface TurnLifecycleGate { accepts(frame: TurnLifecycleFrame): boolean; boundTurnId(sessionId?: string | undefined): string | undefined; reset(): void; }"
+    },
+    {
+      "name": "TurnLifecycleGateOptions",
+      "kind": "interface",
+      "text": "export interface TurnLifecycleGateOptions { readonly turnId?: string | undefined; readonly maxTrackedSessions?: number | undefined; }"
+    },
+    {
+      "name": "WebSocketTransportError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "constructor"
+      ],
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+    },
+    {
+      "name": "buildEventSourceUrl",
+      "kind": "function",
+      "text": "export declare function buildEventSourceUrl(baseUrl: string, domain: RuntimeEventDomain): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+    },
+    {
+      "name": "buildWebSocketUrl",
+      "kind": "function",
+      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[]): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+    },
+    {
+      "name": "createEventSourceConnector",
+      "kind": "function",
+      "text": "export declare function createEventSourceConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(baseUrl: string, token: AuthTokenSource, fetchImpl: FetchLike, options?: RuntimeEventConnectorOptions): DomainEventConnector<RuntimeEventDomain, TEvent>; ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createRelayClient",
+      "kind": "function",
+      "text": "export declare function createRelayClient(options: RelayClientOptions): RelayClient;"
+    },
+    {
+      "name": "createRemoteDomainEvents",
+      "kind": "function",
+      "text": "export declare function createRemoteDomainEvents<TDomain extends string, TEvent extends EventLike = EventLike>(domains: readonly TDomain[], connect: DomainEventConnector<TDomain, TEvent>, options?: RemoteDomainEventsOptions<TDomain>): DomainEvents<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "createRemoteRuntimeEvents",
+      "kind": "function",
+      "text": "export declare function createRemoteRuntimeEvents<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(connect: DomainEventConnector<RuntimeEventDomain, TEvent>, options?: RemoteRuntimeEventsOptions): RemoteRuntimeEvents<TEvent>; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createTurnLifecycleGate",
+      "kind": "function",
+      "text": "export declare function createTurnLifecycleGate(options?: TurnLifecycleGateOptions): TurnLifecycleGate;"
+    },
+    {
+      "name": "createWebSocketConnector",
+      "kind": "function",
+      "text": "export declare function createWebSocketConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(baseUrl: string, token: AuthTokenSource, WebSocketImpl: typeof WebSocket, options?: RuntimeEventConnectorOptions): DomainEventConnector<RuntimeEventDomain, TEvent>; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createWebSocketRemoteError",
+      "kind": "function",
+      "text": "export declare function createWebSocketRemoteError(fallbackMessage: string, body: unknown, options?: { readonly code?: string; readonly hint?: string; readonly cause?: unknown; }): WebSocketTransportError;"
+    },
+    {
+      "name": "forSession",
+      "kind": "function",
+      "text": "export declare function forSession<TDomain extends string, TEvent extends EventLike = EventLike>(events: DomainEvents<TDomain, TEvent>, sessionId: string): DomainEvents<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "forSessionRuntime",
+      "kind": "function",
+      "text": "export declare function forSession<TDomain extends string, TEvent extends EventLike = EventLike>(events: DomainEvents<TDomain, TEvent>, sessionId: string): DomainEvents<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "readTurnLifecycleFrame",
+      "kind": "function",
+      "text": "export declare function readTurnLifecycleFrame(envelopeSessionId: string | undefined, payload: unknown): TurnLifecycleFrame | null;"
+    }
+  ],
+  "./domain-events": [
+    {
+      "name": "DomainEventConnector",
+      "kind": "type",
+      "text": "export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: () => void) => void | Promise<() => void>; ;; via EventLike = export type EventLike = { readonly type: string; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "DomainEvents",
+      "kind": "type",
+      "text": "export type DomainEvents<TDomain extends string, TEvent extends EventLike = EventLike> = RuntimeEventFeeds<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; }; ;; RuntimeEventFeeds = export type RuntimeEventFeeds<TDomain extends string, TEvent extends EventLike = EventLike> = { readonly domains: readonly TDomain[]; domain(domain: TDomain): RuntimeEventFeed<TEvent>; } & { readonly [K in TDomain]: RuntimeEventFeed<TEvent>; };"
+    },
+    {
+      "name": "RemoteDomainEventsOptions",
+      "kind": "interface",
+      "text": "export interface RemoteDomainEventsOptions<TDomain extends string = string> { readonly onConnectionError?: ((error: Error, domain: TDomain) => void) | undefined; } ;; via Error = interface Error { name: string; message: string; stack?: string; }"
+    },
+    {
+      "name": "SerializedEventEnvelope",
+      "kind": "interface",
+      "required": [
+        "payload",
+        "type"
+      ],
+      "text": "export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> { readonly type: string; readonly ts?: number | undefined; readonly traceId?: string | undefined; readonly sessionId?: string | undefined; readonly source?: string | undefined; readonly payload: TEvent; } ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "createRemoteDomainEvents",
+      "kind": "function",
+      "text": "export declare function createRemoteDomainEvents<TDomain extends string, TEvent extends EventLike = EventLike>(domains: readonly TDomain[], connect: DomainEventConnector<TDomain, TEvent>, options?: RemoteDomainEventsOptions<TDomain>): DomainEvents<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; };"
+    },
+    {
+      "name": "forSession",
+      "kind": "function",
+      "text": "export declare function forSession<TDomain extends string, TEvent extends EventLike = EventLike>(events: DomainEvents<TDomain, TEvent>, sessionId: string): DomainEvents<TDomain, TEvent>; ;; via EventLike = export type EventLike = { readonly type: string; };"
+    }
+  ],
+  "./relay-transport": [
+    {
+      "name": "RelayClient",
+      "kind": "interface",
+      "required": [
+        "close",
+        "connect",
+        "fetch",
+        "ready"
+      ],
+      "text": "export interface RelayClient { readonly fetch: FetchLike; connect(): Promise<void>; close(): void; readonly ready: boolean; } ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "RelayClientOptions",
+      "kind": "interface",
+      "required": [
+        "pairing"
+      ],
+      "text": "export interface RelayClientOptions { readonly pairing: RelayPairingPayload | string; readonly webSocketImpl?: (url: string) => RelayWebSocketLike; readonly connectTimeoutMs?: number; readonly requestTimeoutMs?: number; } ;; via RelayPairingPayload = export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
+    },
+    {
+      "name": "RelayWebSocketLike",
+      "kind": "interface",
+      "required": [
+        "addEventListener",
+        "binaryType",
+        "close",
+        "send"
+      ],
+      "text": "export interface RelayWebSocketLike { binaryType: string; send(data: string | Uint8Array | ArrayBuffer): void; close(code?: number, reason?: string): void; addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: unknown) => void): void; } ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
+      "name": "createRelayClient",
+      "kind": "function",
+      "text": "export declare function createRelayClient(options: RelayClientOptions): RelayClient;"
+    }
+  ],
+  "./runtime-events": [
+    {
+      "name": "AuthTokenSource",
+      "kind": "type",
+      "text": "export type AuthTokenSource = string | null | undefined | AuthTokenResolver; ;; via AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>;"
+    },
+    {
+      "name": "BackpressureInfo",
+      "kind": "interface",
+      "required": [
+        "droppedCount",
+        "queueBytes",
+        "queueLength",
+        "reason"
+      ],
+      "text": "export interface BackpressureInfo { readonly droppedCount: number; readonly queueLength: number; readonly queueBytes: number; readonly reason: 'message_too_large' | 'queue_full'; }"
+    },
+    {
+      "name": "ConnectionState",
+      "kind": "type",
+      "text": "export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';"
+    },
+    {
+      "name": "ConnectorTransportEvent",
+      "kind": "type",
+      "text": "export type ConnectorTransportEvent = { type: 'TRANSPORT_CONNECTION_STATE'; transportId: string; state: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed'; } | { type: 'TRANSPORT_RECONNECT_ATTEMPT'; transportId: string; attempt: number; maxAttempts: number; delayMs: number; reason: string; } | { type: 'TRANSPORT_BACKPRESSURE'; transportId: string; droppedCount: number; queueLength: number; queueBytes: number; reason: 'message_too_large' | 'queue_full'; };"
+    },
+    {
+      "name": "DEFAULT_WS_MAX_ATTEMPTS",
+      "kind": "const",
+      "text": "DEFAULT_WS_MAX_ATTEMPTS = 10"
+    },
+    {
+      "name": "ReconnectAttemptInfo",
+      "kind": "interface",
+      "required": [
+        "attempt",
+        "delayMs",
+        "maxAttempts",
+        "reason"
+      ],
+      "text": "export interface ReconnectAttemptInfo { readonly attempt: number; readonly maxAttempts: number; readonly delayMs: number; readonly reason: string; }"
+    },
+    {
+      "name": "RemoteRuntimeEvents",
+      "kind": "type",
+      "text": "export type RemoteRuntimeEvents<TEvent extends RuntimeEventRecord = RuntimeEventRecord> = DomainEvents<RuntimeEventDomain, TEvent>; ;; via DomainEvents = export type DomainEvents<TDomain extends string, TEvent extends EventLike = EventLike> = RuntimeEventFeeds<TDomain, TEvent>; ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "RemoteRuntimeEventsOptions",
+      "kind": "interface",
+      "text": "export interface RemoteRuntimeEventsOptions { readonly onError?: ((error: Error, domain: RuntimeEventDomain) => void) | undefined; readonly observer?: TransportObserver | undefined; } ;; via Error = interface Error { name: string; message: string; stack?: string; } ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; TransportObserver = export interface TransportObserver { onObserverError?(err: Error): void; onError?(err: Error): void; onTransportActivity?(activity: TransportActivityInfo): void; }"
+    },
+    {
+      "name": "RuntimeEventConnectorOptions",
+      "kind": "interface",
+      "text": "export interface RuntimeEventConnectorOptions { readonly reconnect?: StreamReconnectPolicy | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onOpen?: (() => void) | undefined; readonly onReconnect?: ((attempt: number, delayMs: number) => void) | undefined; readonly onReconnectAttempt?: ((info: ReconnectAttemptInfo) => void) | undefined; readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined; readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined; readonly onTransportEvent?: ((event: ConnectorTransportEvent) => void) | undefined; readonly observer?: TransportObserver | undefined; readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined; readonly turnScope?: RuntimeEventTurnScope | undefined; } ;; via StreamReconnectPolicy = export interface StreamReconnectPolicy extends BackoffPolicy { readonly enabled?: boolean | undefined; } ;; TransportObserver = export interface TransportObserver { onObserverError?(err: Error): void; onError?(err: Error): void; onTransportActivity?(activity: TransportActivityInfo): void; }"
+    },
+    {
+      "name": "RuntimeEventTurnScope",
+      "kind": "type",
+      "text": "export type RuntimeEventTurnScope = 'session-current' | 'off' | { readonly turnId: string; };"
+    },
+    {
+      "name": "SerializedRuntimeEnvelope",
+      "kind": "type",
+      "text": "export type SerializedRuntimeEnvelope<TEvent extends RuntimeEventRecord = RuntimeEventRecord> = SerializedEventEnvelope<TEvent>; ;; via RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; }; ;; SerializedEventEnvelope = export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> { readonly type: string; readonly ts?: number | undefined; readonly traceId?: string | undefined; readonly sessionId?: string | undefined; readonly source?: string | undefined; readonly payload: TEvent; }"
+    },
+    {
+      "name": "WebSocketTransportError",
+      "kind": "class",
+      "publicMembers": [
+        "[Symbol.hasInstance]",
+        "constructor"
+      ],
+      "text": "export declare class WebSocketTransportError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options: { readonly cause?: unknown; readonly hint?: string; readonly code: string; readonly category?: import('@goodvibes-jev/engine/errors').ErrorCategory | undefined; readonly recoverable?: boolean | undefined; readonly status?: number | undefined; readonly requestId?: string | undefined; readonly provider?: string | undefined; readonly operation?: string | undefined; readonly phase?: string | undefined; }); }"
+    },
+    {
+      "name": "buildEventSourceUrl",
+      "kind": "function",
+      "text": "export declare function buildEventSourceUrl(baseUrl: string, domain: RuntimeEventDomain): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+    },
+    {
+      "name": "buildWebSocketUrl",
+      "kind": "function",
+      "text": "export declare function buildWebSocketUrl(baseUrl: string, domains: readonly RuntimeEventDomain[]): string; ;; via RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number];"
+    },
+    {
+      "name": "createEventSourceConnector",
+      "kind": "function",
+      "text": "export declare function createEventSourceConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(baseUrl: string, token: AuthTokenSource, fetchImpl: FetchLike, options?: RuntimeEventConnectorOptions): DomainEventConnector<RuntimeEventDomain, TEvent>; ;; via DomainEventConnector = export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: () => void) => void | Promise<() => void>; ;; FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createRemoteRuntimeEvents",
+      "kind": "function",
+      "text": "export declare function createRemoteRuntimeEvents<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(connect: DomainEventConnector<RuntimeEventDomain, TEvent>, options?: RemoteRuntimeEventsOptions): RemoteRuntimeEvents<TEvent>; ;; via DomainEventConnector = export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: () => void) => void | Promise<() => void>; ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createWebSocketConnector",
+      "kind": "function",
+      "text": "export declare function createWebSocketConnector<TEvent extends RuntimeEventRecord = RuntimeEventRecord>(baseUrl: string, token: AuthTokenSource, WebSocketImpl: typeof WebSocket, options?: RuntimeEventConnectorOptions): DomainEventConnector<RuntimeEventDomain, TEvent>; ;; via DomainEventConnector = export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void, onEnded?: () => void) => void | Promise<() => void>; ;; RuntimeEventDomain = export type RuntimeEventDomain = typeof RUNTIME_EVENT_DOMAINS[number]; ;; RuntimeEventRecord = export type RuntimeEventRecord = { readonly type: string; };"
+    },
+    {
+      "name": "createWebSocketRemoteError",
+      "kind": "function",
+      "text": "export declare function createWebSocketRemoteError(fallbackMessage: string, body: unknown, options?: { readonly code?: string; readonly hint?: string; readonly cause?: unknown; }): WebSocketTransportError;"
+    },
+    {
+      "name": "forSessionRuntime",
+      "kind": "function",
+      "text": "export declare function forSession<TDomain extends string, TEvent extends EventLike = EventLike>(events: DomainEvents<TDomain, TEvent>, sessionId: string): DomainEvents<TDomain, TEvent>; ;; via DomainEvents = export type DomainEvents<TDomain extends string, TEvent extends EventLike = EventLike> = RuntimeEventFeeds<TDomain, TEvent>; ;; EventLike = export type EventLike = { readonly type: string; };"
+    }
+  ]
+}

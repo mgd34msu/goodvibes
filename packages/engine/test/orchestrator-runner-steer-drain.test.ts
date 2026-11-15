@@ -227,6 +227,45 @@ describe('orchestrator-runner: steer drain', () => {
     registry.dispose();
   });
 
+  test('a directive is reported delivered when its turn has run, not when it was queued', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'directive-delivered-'));
+    const messageBus = new AgentMessageBus();
+    const runtimeBus = new RuntimeEventBus();
+    messageBus.setRuntimeBus(runtimeBus);
+    const delivered: string[] = [];
+    const sent: string[] = [];
+    runtimeBus.onDomain('communication', (envelope) => {
+      if (envelope.payload.type === 'COMMUNICATION_DELIVERED') delivered.push(envelope.payload.messageId);
+      if (envelope.payload.type === 'COMMUNICATION_SENT') sent.push(envelope.payload.messageId);
+    });
+
+    const record = makeRecord({ id: 'ag-directive-delivered' });
+    let chatCallCount = 0;
+    let deliveredBeforeItsTurn = -1;
+    const provider: LLMProvider = {
+      name: 'fake',
+      models: ['fake-model'],
+      async chat(): Promise<ChatResponse> {
+        chatCallCount += 1;
+        if (chatCallCount === 1) {
+          expect(messageBus.send('orchestrator', record.id, 'stop, change of plan', { kind: 'directive' })).toBe(true);
+          return { content: '', toolCalls: [{ id: 'call-1', name: 'nonexistent_tool', arguments: {} }], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'tool_call' };
+        }
+        // Turn 2's call: the directive is in this turn's messages, but the turn has not completed.
+        await flushMicrotasks();
+        deliveredBeforeItsTurn = delivered.length;
+        return { content: 'done', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'completed' };
+      },
+    };
+
+    await runAgentTask(makeContext({ workingDirectory: tmpDir, runtimeBus, messageBus, provider }), record);
+    await flushMicrotasks();
+
+    expect(sent).toHaveLength(1);
+    expect(deliveredBeforeItsTurn).toBe(0);
+    expect(delivered).toEqual(sent);
+  });
+
   test('a steer drained into a turn whose chat call then fails never emits consumed', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'chain-state-steer-fail-'));
     const messageBus = new AgentMessageBus();

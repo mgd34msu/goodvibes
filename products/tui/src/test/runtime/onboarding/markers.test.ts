@@ -122,7 +122,7 @@ describe('onboarding markers', () => {
     expect(existsSync(`${markerPath}.unrecognized`)).toBe(true);
   });
 
-  test('unknown future version marker is quarantined', () => {
+  test('a marker written by a newer version is left in place and reads as no marker', () => {
     const markerDir = join(tmpDir, 'user', 'tui');
     mkdirSync(markerDir, { recursive: true });
     const markerPath = join(markerDir, 'onboarding-checked.json');
@@ -130,6 +130,8 @@ describe('onboarding markers', () => {
 
     const result = readOnboardingCheckMarker(shellPaths, 'user');
     expect(result.payload).toBeNull();
-    expect(existsSync(`${markerPath}.unrecognized`)).toBe(true);
+    // The newer process still needs its marker; this reader just cannot use it.
+    expect(existsSync(markerPath)).toBe(true);
+    expect(existsSync(`${markerPath}.unrecognized`)).toBe(false);
   });
 });

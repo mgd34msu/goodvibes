@@ -165,6 +165,76 @@ function redactSetupReceiptText(value: string): string {
   return SETUP_RECEIPT_SECRET_PATTERNS.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), value);
 }
 
+function redactedFirstMetadataString(metadata: Readonly<Record<string, unknown>>, keys: readonly string[]): string {
+  return redactSetupReceiptText(firstMetadataString(metadata, keys));
+}
+
+/**
+ * A route the model is told to call next must look like a tool call (a tool
+ * name, an optional subcommand, then `key:value` arguments), never prose. A
+ * receipt is data from a connected host or an artifact, so text it carries is not
+ * accepted as an instruction; anything else falls back to the generated route.
+ */
+const TOOL_ROUTE_PATTERN = /^[a-z][a-z0-9_]*(?: [a-z][a-z0-9_-]*)?(?: [A-Za-z][A-Za-z0-9]*:(?:"[^"\\\n]{0,200}"|true|false|-?\d+))+$/;
+
+/**
+ * The tools a receipt may point the model at, each with the only verbs it may
+ * name. A well-formed route is still an instruction written by whoever produced
+ * the receipt, so it must be a read: no other tool, no effectful mode, no
+ * `confirm`.
+ */
+const READ_ONLY_ROUTE_VERBS: Readonly<Record<string, ReadonlySet<string>>> = {
+  setup: new Set(['item', 'checkpoint', 'status', 'smoke']),
+  agent_artifacts: new Set(['show', 'list', 'get']),
+  agent_harness: new Set(['setup_checkpoint', 'setup_status']),
+};
+
+/** The arguments a read route may carry besides its one verb key (`action` or `mode`). */
+const READ_ONLY_ROUTE_ARGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  setup: new Set(['setupItemId', 'includeParameters', 'limit']),
+  agent_artifacts: new Set(['artifactId', 'includeContent', 'limit']),
+  agent_harness: new Set(['limit']),
+};
+
+const ROUTE_ARG_PATTERN = /([A-Za-z][A-Za-z0-9]*):("[^"\\\n]{0,200}"|true|false|-?\d+)(?: |$)/y;
+
+/**
+ * Every argument is read, not just the first: exactly one verb key naming a
+ * read, no repeated key, nothing outside the tool's allowlist, and no
+ * `confirm` or `explicitUserRequest` in any letter case.
+ */
+function isReadOnlyToolRoute(value: string): boolean {
+  const space = value.indexOf(' ');
+  const tool = space < 0 ? value : value.slice(0, space);
+  const verbs = READ_ONLY_ROUTE_VERBS[tool];
+  const allowed = READ_ONLY_ROUTE_ARGS[tool];
+  if (!verbs || !allowed || space < 0) return false;
+  const seen = new Set<string>();
+  let verb = '';
+  let index = space + 1;
+  while (index < value.length) {
+    ROUTE_ARG_PATTERN.lastIndex = index;
+    const match = ROUTE_ARG_PATTERN.exec(value);
+    if (!match) return false;
+    const key = match[1] ?? '';
+    const lower = key.toLowerCase();
+    if (seen.has(lower) || lower === 'confirm' || lower === 'explicituserrequest') return false;
+    seen.add(lower);
+    if (key === 'action' || key === 'mode') {
+      if (verb) return false;
+      verb = (match[2] ?? '').match(/^"([a-z_]+)"$/)?.[1] ?? '';
+    } else if (!allowed.has(key)) {
+      return false;
+    }
+    index = ROUTE_ARG_PATTERN.lastIndex;
+  }
+  return verbs.has(verb);
+}
+
+function toolRouteOrNull(value: string): string | null {
+  return value.length <= 400 && TOOL_ROUTE_PATTERN.test(value) && isReadOnlyToolRoute(value) ? value : null;
+}
+
 function redactedMetadataString(metadata: Readonly<Record<string, unknown>>, key: string): string {
   const value = metadataString(metadata, key);
   return value ? redactSetupReceiptText(value) : '';
@@ -196,25 +266,25 @@ function buildSetupWizardDurableReceipt(input: SetupReceiptInput): AgentSetupWiz
   const recordedAt = receiptRecordedAt(input);
   if (!recordedAt) return null;
   const status = normalizeStatus(firstMetadataString(input.metadata, ['receiptStatus', 'status', 'result', 'outcome', 'state']));
-  const receiptId = firstMetadataString(input.metadata, ['receiptId', 'durableReceiptId', 'eventId', 'id']) || input.id;
-  const inspectRoute = firstMetadataString(input.metadata, ['inspectRoute', 'modelRoute', 'route'])
+  const receiptId = redactedFirstMetadataString(input.metadata, ['receiptId', 'durableReceiptId', 'eventId', 'id']) || input.id;
+  const inspectRoute = toolRouteOrNull(firstMetadataString(input.metadata, ['inspectRoute', 'modelRoute', 'route']))
     || input.inspectRoute
-    || `setup action:"item" setupItemId:"${stepId}" includeParameters:true`;
+    || `setup action:"item" setupItemId:${JSON.stringify(stepId)} includeParameters:true`;
   const schemaStatus = normalizeSchemaStatus(input.metadata);
-  const schemaVersion = firstMetadataString(input.metadata, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
+  const schemaVersion = redactedFirstMetadataString(input.metadata, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
   const publicationGuarantee = redactedMetadataString(input.metadata, 'publicationGuarantee')
     || redactedMetadataString(input.metadata, 'hostPublicationGuarantee')
     || redactedMetadataString(input.metadata, 'firstRunPublicationGuarantee');
-  const eventCursor = firstMetadataString(input.metadata, ['eventCursor', 'cursor', 'streamCursor']);
+  const eventCursor = redactedFirstMetadataString(input.metadata, ['eventCursor', 'cursor', 'streamCursor']);
   const eventSequence = metadataNumber(input.metadata, 'eventSequence')
     ?? metadataNumber(input.metadata, 'sequence')
     ?? metadataNumber(input.metadata, 'streamSequence')
     ?? metadataNumber(input.metadata, 'offset');
-  const publisher = firstMetadataString(input.metadata, ['publisher', 'publisherId', 'daemonId', 'hostId']);
+  const publisher = redactedFirstMetadataString(input.metadata, ['publisher', 'publisherId', 'daemonId', 'hostId']);
   const provenance = receiptProvenance(input.metadata);
   return {
     stepId,
-    stepLabel: metadataString(input.metadata, 'stepLabel') || STEP_LABELS[stepId],
+    stepLabel: redactedMetadataString(input.metadata, 'stepLabel') || STEP_LABELS[stepId],
     status,
     receiptId,
     recordedAt,
@@ -241,7 +311,7 @@ export function buildSetupWizardDurableReceipts(
       filename: artifact.filename,
       createdAt: artifact.createdAt,
       metadata: artifact.metadata,
-      inspectRoute: `agent_artifacts show artifactId:"${artifact.id}" includeContent:false`,
+      inspectRoute: `agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:false`,
       source: metadataString(artifact.metadata, 'source') || metadataString(artifact.metadata, 'purpose') || undefined,
     });
     return receipt ? [receipt] : [];
@@ -296,7 +366,7 @@ export function buildSetupWizardDurableReceiptsFromReadModel(
   snapshot: unknown,
   source: string,
 ): readonly AgentSetupWizardDurableReceipt[] {
-  return recordsFromSetupReadModelSnapshot(snapshot).flatMap((value) => {
+  return recordsFromSetupReadModelSnapshot(snapshot).flatMap((value, index) => {
     const record = readRecord(value);
     if (Object.keys(record).length === 0) return [];
     const metadata = {
@@ -304,35 +374,27 @@ export function buildSetupWizardDurableReceiptsFromReadModel(
       ...record,
     };
     const receipt = buildSetupWizardDurableReceipt({
-      id: firstMetadataString(metadata, ['id', 'receiptId', 'durableReceiptId', 'eventId']) || source,
+      // A record with no id of its own gets one from its position, so records of one source stay distinct instead of collapsing onto the source name.
+      id: firstMetadataString(metadata, ['id', 'receiptId', 'durableReceiptId', 'eventId']) || `${source}#${metadataNumber(metadata, 'eventSequence') ?? index}`,
       filename: metadataString(metadata, 'filename') || null,
       createdAt: metadata.createdAt,
       metadata,
-      inspectRoute: metadataString(metadata, 'inspectRoute') || null,
+      inspectRoute: toolRouteOrNull(metadataString(metadata, 'inspectRoute')),
       source,
     });
     return receipt ? [receipt] : [];
   });
 }
 
-function receiptRank(receipt: AgentSetupWizardDurableReceipt): number {
-  if (receipt.status === 'ready') return 3;
-  if (receipt.status === 'blocked') return 2;
-  if (receipt.status === 'failed') return 1;
-  return 0;
-}
-
+/** The newer record wins. A tie goes to the one that says the step is not done, so equal timestamps never read as ready. */
 function preferReceipt(
   current: AgentSetupWizardDurableReceipt,
   candidate: AgentSetupWizardDurableReceipt,
 ): AgentSetupWizardDurableReceipt {
-  const rankDelta = receiptRank(candidate) - receiptRank(current);
-  if (rankDelta > 0) return candidate;
-  if (rankDelta < 0) return current;
   const currentTime = Date.parse(current.recordedAt);
   const candidateTime = Date.parse(candidate.recordedAt);
-  if (candidateTime > currentTime) return candidate;
-  return current;
+  if (candidateTime !== currentTime) return candidateTime > currentTime ? candidate : current;
+  return current.status === 'ready' && candidate.status !== 'ready' ? candidate : current;
 }
 
 export function mergeSetupWizardDurableReceipts(

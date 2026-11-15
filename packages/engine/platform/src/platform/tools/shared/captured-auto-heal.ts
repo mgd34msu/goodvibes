@@ -82,7 +82,7 @@ export async function healToolFile(
     // Exact project-local binaries only. No PATH discovery, npm resolution,
     // project configuration, network, or publication of the command's writes.
     const command = stage === 'formatter'
-      ? `if [ -x ./node_modules/.bin/prettier ]; then ./node_modules/.bin/prettier --no-config --no-editorconfig --ignore-path /dev/null --write --log-level silent -- ${fileArg}; elif [ -x ./node_modules/.bin/biome ]; then printf '%s' '{"root":true,"formatter":{"enabled":true},"linter":{"enabled":false},"assist":{"enabled":false},"vcs":{"enabled":false}}' > /tmp/biome.json; ./node_modules/.bin/biome format --config-path=/tmp/biome.json --write -- ${fileArg}; else exit 127; fi`
+      ? `if [ -x ./node_modules/.bin/prettier ]; then ./node_modules/.bin/prettier --no-config --no-editorconfig --ignore-path /dev/null --write --log-level silent -- ${fileArg}; else exit 127; fi`
       : `if [ -x ./node_modules/.bin/eslint ]; then ./node_modules/.bin/eslint --no-config-lookup --no-ignore --no-cache --fix --rule 'no-extra-semi:error' -- ${fileArg}; else exit 127; fi`;
     let transformed: string | undefined;
     const result = await runCapturedCommand(binding, command, {}, binding.root, 30_000, signal, 'disabled', {}, {

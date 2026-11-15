@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { AgentManager, type AgentRecord } from '../platform/src/platform/tools/agent/manager.js';
+import { currentTurnSurfaceId, withTurnSurfaceId } from '../platform/src/platform/security/turn-boundary.js';
 import type { ConfigManager } from '../platform/src/platform/config/manager.js';
 
 function makeManager(runAgent: (record: AgentRecord) => Promise<void>) {
@@ -60,6 +61,11 @@ describe('AgentManager.wakeWithSteer', () => {
     const completed = manager.spawn({ mode: 'spawn', task: 't', template: 'general', outsideContract: true });
     completed.status = 'completed';
     expect(manager.wakeWithSteer(completed.id, 'steer').woke).toBe(false);
+    const cancelled = manager.spawn({ mode: 'spawn', task: 't', template: 'general', outsideContract: true });
+    cancelled.status = 'cancelled';
+    expect(manager.wakeWithSteer(cancelled.id, 'steer').woke).toBe(false);
+    expect(manager.wakeWithSteer(cancelled.id, 'steer', { allowCompleted: true }).woke).toBe(false);
+    expect(cancelled.status).toBe('cancelled');
     expect(manager.wakeWithSteer('nope', 'steer')).toEqual({ woke: false, reason: 'unknown-agent' });
   });
 
@@ -86,5 +92,23 @@ describe('AgentManager.wakeWithSteer', () => {
     const manager = makeManager(async () => {});
     const record = spawnAndFail(manager);
     expect(manager.wakeWithSteer(record.id, '   ').woke).toBe(false);
+  });
+
+  test('a wake runs under the surface the agent was started for, not the waker\'s', async () => {
+    const seen: Array<string | undefined> = [];
+    const manager = makeManager(async () => { seen.push(currentTurnSurfaceId()); });
+    const channelAgent = withTurnSurfaceId('email', () => spawnAndFail(manager));
+    const ownerAgent = spawnAndFail(manager);
+    await manager.join(channelAgent.id);
+    await manager.join(ownerAgent.id);
+    seen.length = 0;
+
+    // Waking from an owner turn must not hand the channel agent the owner's authority,
+    // and waking from a channel turn must not narrow an owner-started agent.
+    withTurnSurfaceId(undefined, () => manager.wakeWithSteer(channelAgent.id, 'continue'));
+    await manager.join(channelAgent.id);
+    withTurnSurfaceId('telegram', () => manager.wakeWithSteer(ownerAgent.id, 'continue'));
+    await manager.join(ownerAgent.id);
+    expect(seen).toEqual(['email', undefined]);
   });
 });

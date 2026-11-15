@@ -152,6 +152,8 @@ export interface ModelRouteContext {
   readonly runtimeBus: RuntimeEventBus;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly secretsManager?: Pick<SecretsManager, 'get'> | null | undefined;
+  /** Admin gate for the route that changes the model for every surface. Reads stay open to any authenticated caller. */
+  readonly requireAdmin?: ((req: Request) => Response | null) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +188,7 @@ function getConfiguredViaFromLocalSignals(
   providerId: string,
   envVars: string[],
   secretKeys?: ReadonlySet<string>,
+  routesAuthoritative = false,
 ): ConfiguredVia | undefined {
   // Tier 1: env var present
   const hasEnvKey = envVars.some((v) => {
@@ -194,8 +197,11 @@ function getConfiguredViaFromLocalSignals(
   });
   if (hasEnvKey) return 'env';
 
-  // Tier 2: SecretsManager has a stored value for any of the provider's env var names
-  if (secretKeys && envVars.some((v) => secretKeys.has(v))) return 'secrets';
+  // Tier 2: SecretsManager has a stored value for any of the provider's env var names.
+  // Skipped when the provider described its own routes: it knows which stored names it
+  // accepts (a Bedrock provider takes a stored bearer token, not a stored AWS key name),
+  // and those routes already decided above whether a stored secret is usable.
+  if (!routesAuthoritative && secretKeys && envVars.some((v) => secretKeys.has(v))) return 'secrets';
 
   // Tier 3: detect anonymous providers (no env vars required by design)
   const catalogDef = BUILTIN_COMPAT_PROVIDERS.find((d) => d.id === providerId);
@@ -284,7 +290,7 @@ async function resolveProviderConfiguredStatus(
   const runtime = await describeAuthRoutes(providerRegistry, providerId);
   const { routes } = runtime;
   const runtimeVia = getConfiguredViaFromRuntimeRoutes(routes);
-  const configuredViaFromLocalSignals = getConfiguredViaFromLocalSignals(providerId, envVars, secretKeys);
+  const configuredViaFromLocalSignals = getConfiguredViaFromLocalSignals(providerId, envVars, secretKeys, runtime.metadataAvailable);
   const registryVia = !runtime.metadataAvailable && !runtime.metadataFailed
     ? getConfiguredViaFromRegistry(providerId, providerRegistry)
     : undefined;
@@ -472,6 +478,9 @@ async function handlePatchCurrentModel(
   context: ModelRouteContext,
 ): Promise<Response> {
   const { providerRegistry, configManager } = context;
+
+  const adminError = context.requireAdmin?.(req) ?? null;
+  if (adminError) return adminError;
 
   const bodyOrErr = await context.parseJsonBody(req);
   if (bodyOrErr instanceof Response) return bodyOrErr;

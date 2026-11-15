@@ -116,6 +116,9 @@ export function isPromptActiveMemory(
 export function describeMemoryIndexUnavailable(stats: MemoryVectorStats): string | null {
   if (!stats.enabled) return 'the semantic memory index is disabled for this store';
   if (!stats.available) return `the semantic memory index is unavailable${stats.error ? `: ${stats.error}` : ''}`;
+  // A recorded error means the last embed or write failed: the index may be
+  // missing records or unable to embed the query, so zero matches is not "nothing matches".
+  if (stats.error) return `the semantic memory index is failing: ${stats.error}`;
   if (stats.indexedRecords === 0) return 'the semantic memory index has no indexed records yet';
   return null;
 }

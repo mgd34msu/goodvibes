@@ -4,13 +4,6 @@ import { ConversationManager } from '../../core/conversation';
 import { appendConversationMessages, isNavigableSystemContent, type ConversationRenderContext } from '../../core/conversation-rendering.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 
-type ConversationManagerTestAccess = {
-  messages: Array<{ role: string; content: string; reasoningContent?: string }>;
-  dirty: boolean;
-  _configManager: {
-    get(key: string): unknown;
-  };
-};
 import { BlockActionsMenu } from '../../renderer/block-actions.ts';
 
 describe('ConversationManager.getDiffAtLine', () => {
@@ -81,7 +74,8 @@ describe('BlockActionsMenu', () => {
     expect(ids).toContain('copy');
     expect(ids).toContain('bookmark');
     expect(ids).toContain('toggle');
-    expect(ids).toContain('rerun');
+    // Re-running a tool is not an Agent action, so the menu never offers it.
+    expect(ids).not.toContain('rerun');
     expect(ids).not.toContain('apply');
   });
 
@@ -112,7 +106,7 @@ describe('BlockActionsMenu', () => {
     menu.open({ blockIndex: 0, type: 'tool', startLine: 0, lineCount: 5, rawContent: 'result', collapseKey: 'k0' });
     expect(menu.getActionForKey('c')?.id).toBe('copy');
     expect(menu.getActionForKey('b')?.id).toBe('bookmark');
-    expect(menu.getActionForKey('r')?.id).toBe('rerun');
+    expect(menu.getActionForKey('r')).toBeNull();
     expect(menu.getActionForKey('x')).toBeNull();
   });
 
@@ -170,18 +164,14 @@ describe('code block collapse', () => {
   test('thinking blocks are registered', () => {
     const bigThinking = Array.from({ length: 35 }, (_, i) => `thought ${i}`).join('\n');
     const cm2 = new ConversationManager(() => 80);
-    const testAccess = cm2 as unknown as ConversationManagerTestAccess;
-    // Simulate config that shows thinking
-    // Force thinking display by patching, just check thinking block registers via direct addAssistantMessage with reasoningContent
-    cm2.addUserMessage('think');
-    // addAssistantMessage signature supports opts
-    testAccess.messages.push({ role: 'assistant', content: 'done', reasoningContent: bigThinking });
-    testAccess.dirty = true;
-    testAccess._configManager = {
+    // Showing thinking is a display setting; the reasoning text rides on the assistant message.
+    cm2.setConfigManager({
       get: (k: string) => k === 'display.showThinking'
         ? true
         : (k === 'display.collapseThreshold' ? 30 : false),
-    };
+    } as unknown as Parameters<typeof cm2.setConfigManager>[0]);
+    cm2.addUserMessage('think');
+    cm2.addAssistantMessage('done', { reasoningContent: bigThinking });
     cm2.getDisplayBlocks();
 
     const registry = cm2.getBlockRegistry();

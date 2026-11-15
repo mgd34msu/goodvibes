@@ -14,14 +14,14 @@ import { pairingModalGoldenSurface } from '../../../views/modals/pairing-modal.t
 import { planningModalGoldenSurface } from '../../helpers/planning-modal-fixture.ts';
 
 // ---------------------------------------------------------------------------
-// Group-B config-modal-surface registration completeness (port).
-// The 12 ported ConfigModalSurfaces must all exist under their '-modal' names
+// Config-modal-surface registration completeness.
+// The 12 ConfigModalSurfaces must all exist under their '-modal' names
 // with the required host contract. The view→modal redirects (including the
 // 'sessions' -> 'sessionPicker' fold) are asserted end-to-end against a live
 // modal host in src/test/release-gates/operator-surfaces-gate.test.ts.
 // ---------------------------------------------------------------------------
 
-/** The 12 group-B surfaces this WO owns, by their canonical registered name. */
+/** The 12 ecosystem surfaces, by their canonical registered name. */
 const EXPECTED_SURFACE_NAMES = [
   'marketplace-modal', 'plugins-modal', 'skills-modal', 'hooks-modal',
   'security-modal', 'policy-modal', 'knowledge-modal', 'memory-modal',

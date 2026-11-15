@@ -1,8 +1,11 @@
 import { createRecallCaptureCommands } from '@goodvibes-jev/engine/terminal-shell/recall-capture';
 import type { CommandContext } from '../command-registry.ts';
 import { formatAgentRecordReferences } from '../../agent/record-labels.ts';
-import { getMemoryApi } from './recall-query.ts';
-export const { handleRecallAdd, handleRecallCapture } = createRecallCaptureCommands<CommandContext>(getMemoryApi, {
+import { getMemoryApi, getMemorySpine } from './recall-query.ts';
+
+// The spine writes the store a connected host owns; the local registry is only the embedded fallback.
+const getMemoryWriter = (context: CommandContext) => getMemorySpine(context) ?? getMemoryApi(context);
+export const { handleRecallAdd, handleRecallCapture } = createRecallCaptureCommands<CommandContext>(getMemoryWriter, {
   tag: '[memory]',
   command: 'memory',
   validValuesLabel: 'Valid values',

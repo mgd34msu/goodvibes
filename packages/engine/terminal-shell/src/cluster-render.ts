@@ -8,6 +8,7 @@
  * CLI, a TUI's `/cluster`, and a web UI render the same answers each in their
  * own way.
  */
+import { stripDangerousAnsi } from './ansi-sanitize.js';
 import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type {
   RotateKeyResult,
@@ -19,6 +20,16 @@ import type {
   JoinKeyResult,
   NodesResult,
 } from '@goodvibes-jev/engine/platform/platform/cluster';
+
+/**
+ * A name another machine chose, made safe to print: escape sequences and control characters
+ * are removed and the length is bounded, so a hostile advertisement cannot write to the
+ * operator's terminal or clipboard or blow up the table width.
+ */
+export function printableName(value: string, max = 64): string {
+  const plain = stripDangerousAnsi(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+}
 
 /** How long ago, in words. Never a raw timestamp, nobody reads epoch millis. */
 export function describeAge(at: number, now: number): string {
@@ -124,12 +135,12 @@ export function renderNodes(result: NodesResult, now: number): string[] {
   if (result.members.length === 0) {
     lines.push('no machines in this group yet');
   } else {
-    const width = Math.max(...result.members.map((member) => member.displayName.length), 12);
+    const width = Math.max(...result.members.map((member) => printableName(member.displayName).length), 12);
     lines.push(`${pad('MACHINE', width)}  ${pad('NODE ID', 38)}  LAST SEEN`);
     for (const member of result.members) {
       const suffix = member.isThisMachine ? '  (this machine)' : '';
       lines.push(
-        `${pad(member.displayName, width)}  ${pad(member.nodeId, 38)}  ${describeAge(member.lastSeenAt, now)}${suffix}`,
+        `${pad(printableName(member.displayName), width)}  ${pad(member.nodeId, 38)}  ${describeAge(member.lastSeenAt, now)}${suffix}`,
       );
     }
   }
@@ -170,7 +181,7 @@ export function renderJoined(result: JoinGroupResult): string[] {
 /** `cluster forget`. */
 export function renderForgotten(result: ForgetNodeResult): string[] {
   return [
-    `removed ${result.displayName} (${result.nodeId}) from the group`,
+    `removed ${printableName(result.displayName)} (${result.nodeId}) from the group`,
     `the group key was replaced immediately, so that machine's copy no longer works.`,
     `${result.memberCount} machine${result.memberCount === 1 ? '' : 's'} remain${result.memberCount === 1 ? 's' : ''}.`,
   ];
@@ -187,12 +198,12 @@ export function renderDiscovered(groups: readonly DiscoveredGroup[], now: number
       'multicast. You can also join by id directly: cluster join --group <id> --key <key>',
     ];
   }
-  const width = Math.max(...groups.map((group) => group.displayName.length), 10);
+  const width = Math.max(...groups.map((group) => printableName(group.displayName).length), 10);
   const lines = [`${pad('GROUP', width)}  ${pad('ID', 18)}  MACHINES  VERSION  SEEN`];
   for (const group of groups) {
     lines.push(
-      `${pad(group.displayName, width)}  ${pad(group.groupId, 18)}  ${pad(String(group.nodeCount), 8)}  `
-        + `${pad(group.version, 7)}  ${describeAge(group.lastSeenAt, now)}`,
+      `${pad(printableName(group.displayName), width)}  ${pad(printableName(group.groupId, 18), 18)}  ${pad(String(group.nodeCount), 8)}  `
+        + `${pad(printableName(group.version, 7), 7)}  ${describeAge(group.lastSeenAt, now)}`,
     );
   }
   return lines;

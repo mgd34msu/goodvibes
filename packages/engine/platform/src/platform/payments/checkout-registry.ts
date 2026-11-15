@@ -44,6 +44,7 @@ import type { ChannelDelivery } from './windows.js';
 import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 import type { CurrencyCode, MinorUnits, OwnerSuppliedText, ShippingStepDown, ShippingTier } from './types.js';
 import { isDeepStrictEqual } from 'node:util';
+import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export type CheckoutPhase =
   | 'deciding'
@@ -51,6 +52,21 @@ export type CheckoutPhase =
   | 'arming-payment'
   | 'submit-pending'
   | 'submitted';
+
+/**
+ * Phases only move forward. Moving `submit-pending` back to an earlier phase
+ * would rewrite the journal to "not submitted", and a restart would then
+ * release the hold and tell the owner nothing was charged for an order that
+ * may have reached the merchant. A repriced quote closes its record and opens
+ * a new one instead of moving backwards.
+ */
+export const checkoutPhaseLifecycle = defineLifecycle<CheckoutPhase>('checkout', {
+  'deciding': ['awaiting-window', 'arming-payment'],
+  'awaiting-window': ['awaiting-window', 'arming-payment'],
+  'arming-payment': ['submit-pending'],
+  'submit-pending': ['submitted'],
+  'submitted': [],
+});
 
 /** What a restart can conclude about a checkout it found mid-flight. */
 export type InterruptedVerdict = 'not-submitted' | 'possibly-submitted' | 'submitted';
@@ -140,6 +156,14 @@ export class CheckoutRegistryError extends Error {
   }
 }
 
+/** Another checkout already owns the page; nothing was held for this one. */
+export class CheckoutPageClaimedError extends CheckoutRegistryError {
+  constructor() {
+    super('This browser page already belongs to a checkout.', 'Finish the original purchase before starting another on this page.');
+    this.name = 'CheckoutPageClaimedError';
+  }
+}
+
 /** Retain owned records: neither a caller nor a journal may later retarget a
  * purchase/page or mutate the budget and window evidence visible to a fill. */
 function ownCheckout(record: InFlightCheckout): InFlightCheckout {
@@ -182,9 +206,7 @@ export class CheckoutRegistry {
 
   /** Page ownership is separate from money held for a particular quote. */
   claimPage(sessionId: string, pageId: string): CheckoutPageClaim {
-    if (this.#byPage.get(sessionId)?.has(pageId) || this.#pageOwners.get(sessionId)?.has(pageId)) {
-      throw new CheckoutRegistryError('This browser page already belongs to a checkout.', 'Finish the original purchase before starting another on this page.');
-    }
+    if (this.#byPage.get(sessionId)?.has(pageId) || this.#pageOwners.get(sessionId)?.has(pageId)) throw new CheckoutPageClaimedError();
     const pages = this.#pageOwners.get(sessionId) ?? new Map<string, CheckoutPageClaim>();
     const claim: CheckoutPageClaim = Object.freeze({
       assertCurrent: () => {
@@ -305,6 +327,9 @@ export class CheckoutRegistry {
     const pages = this.#byPage.get(record.sessionId);
     if (pages === undefined || pages.get(record.pageId) !== record) throw new CheckoutRegistryError(
       'The purchase page owner is unavailable.', 'Inspect the purchase before trying again.');
+    // Refused before the journal write, so the durable phase is untouched.
+    const move = checkoutPhaseLifecycle.check(record.phase, phase);
+    if (!move.ok) throw new CheckoutRegistryError(`Purchase ${purchaseId}: ${move.reason}.`, 'Inspect the purchase; its recorded phase was kept.');
     const next = ownCheckout({ ...record, ...patch,
       purchaseId: record.purchaseId, sessionId: record.sessionId, pageId: record.pageId,
       phase, updatedAtMs: nowMs });
@@ -326,6 +351,17 @@ export class CheckoutRegistry {
       await this.journal.remove(purchaseId);
       if (record !== undefined) this.forget(record);
     } finally { this.#writing.delete(purchaseId); }
+  }
+
+  /** Drop this process's view of a checkout whose journal record another
+   * owner (an owner's merchant-history reconciliation) durably removed, so its
+   * page can take a new checkout. A record still in the journal is kept. */
+  async forgetRemoved(purchaseId: string): Promise<void> {
+    if (this.#writing.has(purchaseId)) return;
+    const records = await this.journal.list();
+    if (records.some(entry => entry.purchaseId === purchaseId) || this.#writing.has(purchaseId)) return;
+    const record = this.#byPurchase.get(purchaseId);
+    if (record !== undefined) this.forget(record);
   }
 
   /** Journal entries already owned by this process, including pending durable

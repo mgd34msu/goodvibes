@@ -1,11 +1,11 @@
-import { handleKnowledgeMutationCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
+import { handleKnowledgeMutationCommand, printKnowledgeIngestResult } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
 import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
 import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { readFlag, readStringListFlag, readPositiveIntFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
-import { toBrowserKinds, toBrowserSourceKinds } from './knowledge-browser-flags.ts';
+import { parseBrowserImportScope } from './knowledge-browser-flags.ts';
 import { formatKnowledgeMap, renderKnowledgeAskResult } from './knowledge-format.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -52,22 +52,6 @@ function printScopeFlagRejection(context: CommandContext, flag: string): void {
   );
 }
 
-function readFirstStringListFlag(args: string[], names: readonly string[]): string[] {
-  for (const name of names) {
-    const values = readStringListFlag(args, name);
-    if (values.length > 0) return values;
-  }
-  return [];
-}
-
-function readSinceMsFlag(args: string[]): number | undefined {
-  const raw = readFlag(args, '--since-days');
-  if (!raw) return undefined;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return Date.now() - parsed * 24 * 60 * 60 * 1000;
-}
-
 function parseConnectorInputFlag(args: string[]): unknown {
   const value = readFlag(args, '--input');
   if (!value) return undefined;
@@ -93,7 +77,15 @@ function retainKnowledgeCommand(
     sessionId = runtime.sessionId;
   const conversation = session.conversationManager,
     getSnapshot = conversation.getMessageSnapshot;
-  const messages = typeof getSnapshot === 'function' ? JSON.stringify(getSnapshot.call(conversation)) : undefined;
+  // Length plus the newest message: conversations grow by appending, and this
+  // runs on every print, so it must not serialize the whole transcript.
+  const fingerprint = (): string | undefined => {
+    if (typeof getSnapshot !== 'function') return undefined;
+    const snapshot: unknown = getSnapshot.call(conversation);
+    if (!Array.isArray(snapshot)) return JSON.stringify(snapshot);
+    return `${snapshot.length}:${snapshot.length === 0 ? '' : JSON.stringify(snapshot[snapshot.length - 1])}`;
+  };
+  const messages = fingerprint();
   const clients = context.clients,
     extensions = context.extensions,
     output = context.print,
@@ -105,6 +97,10 @@ function retainKnowledgeCommand(
   const callerCurrent = supplied?.assertCurrent,
     shouldStop = supplied?.shouldStop;
   const operations: (() => void)[] = [];
+  // Calls that write. Once one has been issued, a result that is lost to a stale
+  // guard still leaves a write that may have applied.
+  const writeKeys = new Set<PropertyKey>(['url', 'bookmarksFile', 'urlsFile', 'review', 'reindex', 'run', 'artifact', 'browserHistory', 'connectorInput']);
+  let writeIssued = false;
   const changed = () => new Error('Agent Knowledge command is no longer current.');
   const assertCurrent = () => {
     signal?.throwIfAborted();
@@ -131,7 +127,7 @@ function retainKnowledgeCommand(
       runtime.sessionId !== sessionId ||
       session.conversationManager !== conversation ||
       conversation.getMessageSnapshot !== getSnapshot ||
-      (typeof getSnapshot === 'function' && JSON.stringify(getSnapshot.call(conversation)) !== messages) ||
+      fingerprint() !== messages ||
       context.clients !== clients ||
       clients?.agentKnowledgeApi !== knowledge ||
       context.extensions !== extensions ||
@@ -152,12 +148,18 @@ function retainKnowledgeCommand(
       assertCurrent();
       output.call(context, text);
     },
+    /** Says a lost result may have been a write; uses the captured output because the guard that failed may be the context itself. */
+    reportSuperseded(): void {
+      if (!writeIssued) return;
+      output.call(context, '[knowledge] The command was superseded before it finished (the conversation or session changed). The write it started may already have been applied: check /knowledge status or /knowledge list before running it again.');
+    },
     retain<Owner extends object, Key extends keyof Owner>(owner: Owner, key: Key, getOwner: () => Owner | undefined) {
       const method = owner[key];
       operations.push(() => {
         if (getOwner() !== owner || owner[key] !== method) throw changed();
       });
       assertCurrent();
+      if (writeKeys.has(key)) writeIssued = true;
       return { owner, method, options, assertCurrent };
     },
   };
@@ -378,7 +380,7 @@ export const knowledgeCommand: SlashCommand = {
             connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-file',
           });
           ingest.assertCurrent();
-          print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? path}`);
+          printKnowledgeIngestResult(print, result.source, path);
           if (result.source.summary) print(`  ${result.source.summary}`);
           if (result.artifactId) print(`  artifact: ${result.artifactId}`);
           break;
@@ -408,7 +410,7 @@ export const knowledgeCommand: SlashCommand = {
             connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-artifact-browser',
           });
           ingest.assertCurrent();
-          print(`[knowledge] Ingested ${result.source.id} ${result.source.canonicalUri ?? result.source.sourceUri ?? artifactId}`);
+          printKnowledgeIngestResult(print, result.source, artifactId);
           if (result.source.summary) print(`  ${result.source.summary}`);
           if (result.artifactId) print(`  artifact: ${result.artifactId}`);
           break;
@@ -424,13 +426,18 @@ export const knowledgeCommand: SlashCommand = {
             );
             return;
           }
+          const scope = parseBrowserImportScope(rest, Date.now());
+          if (!scope.ok) {
+            print(`[knowledge] ${scope.message}`);
+            return;
+          }
           const ingest = command.retain(knowledge.ingest, 'browserHistory', () => knowledge.ingest);
           const result = await ingest.method.call(ingest.owner, {
-            browsers: toBrowserKinds(readFirstStringListFlag(rest, ['--browsers', '--browser'])),
-            sourceKinds: toBrowserSourceKinds(readFirstStringListFlag(rest, ['--sources', '--source-kinds', '--source-kind'])),
+            browsers: scope.scope.browsers,
+            sourceKinds: scope.scope.sourceKinds,
             homeOverride: readFlag(rest, '--home'),
-            limit: readPositiveIntFlag(rest, '--limit', 250),
-            sinceMs: readSinceMsFlag(rest),
+            limit: scope.scope.limit,
+            sinceMs: scope.scope.sinceMs,
             connectorId: 'goodvibes-agent-browser-history',
             sessionId: context.session.runtime.sessionId,
           });
@@ -597,6 +604,7 @@ export const knowledgeCommand: SlashCommand = {
       try {
         command.assertCurrent();
       } catch {
+        command.reportSuperseded();
         return;
       }
       print(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);

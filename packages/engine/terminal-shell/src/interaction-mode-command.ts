@@ -43,6 +43,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         }
         const newMode = sub as 'quiet' | 'balanced' | 'operator';
         mgr.setHITLMode(newMode);
+        let saveFailure: string | null = null;
         try {
           ctx.platform.configManager.setDynamic(
             'behavior.hitlMode' as import('@goodvibes-jev/engine/platform/platform/config').ConfigKey,
@@ -50,9 +51,12 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
           );
         } catch (e) {
           logger.warn('[/mode] Failed to persist mode', { error: summarizeError(e) });
+          saveFailure = summarizeError(e);
         }
         const preset = mgr.getHITLPreset();
-        ctx.print(`HITL mode set to: ${preset.name}\n${preset.description}`);
+        ctx.print(saveFailure === null
+          ? `HITL mode set to: ${preset.name}\n${preset.description}`
+          : `HITL mode set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`);
         ctx.renderRequest();
         return;
       }

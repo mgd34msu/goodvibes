@@ -274,7 +274,7 @@ function deferred() {
 }
 
 async function settleLifecycle(): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, 0));
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
 }
 
 test('concurrent creates recheck the session cap after a held floor and release refused leases', async () => {
@@ -694,6 +694,7 @@ test('a steer queued on the spine reaches the hosted loop, and the participant s
     surfaceRoot: 'goodvibes', configDir: join(root, 'cfg'), workingDir: root, homeDir: root,
   });
   const submitted: string[] = [];
+  let clock = Date.now();
   const manager = new HostedSessionManager({
     floorFactory: ({ workspaceRoot }): HostedWorkspaceFloor => {
       const services = createClientRuntimeServices({
@@ -711,6 +712,8 @@ test('a steer queued on the spine reaches the hosted loop, and the participant s
     spine,
     isWorkspaceUsable: () => true,
     intakeIntervalMs: 10,
+    // An unchanged session is registered again once per heartbeat interval, so the clock moves as the test waits.
+    now: () => clock,
   });
   await manager.init();
   const created = await manager.create({ workspaceRoot: workspace, clientId: 'a' });
@@ -731,13 +734,14 @@ test('a steer queued on the spine reaches the hosted loop, and the participant s
     attempt < 250 && (submitted.length === 0 || !delivered.includes(steerKey) || !consumed.includes(steerKey));
     attempt += 1
   ) {
+    clock += 31_000;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   expect(submitted).toEqual(['steer this hosted session']);
   expect(delivered).toContain(`${created.id}:input-1`);
   expect(consumed).toContain(`${created.id}:input-1`);
-  // Registered at create, and re-registered on every tick since.
+  // Registered at create, and re-registered once the heartbeat interval has passed.
   expect(registrations.filter((entry) => entry.sessionId === created.id).length).toBeGreaterThan(1);
   await manager.dispose();
 });
@@ -849,5 +853,54 @@ test('a per-attachment leaseMs is honored, and clamped to the floor', async () =
   expect(manager.get(created.id)?.attachedClients).not.toContain('short');
   // The default-lease attachment is untouched by the short one lapsing.
   expect(manager.get(created.id)?.attachedClients).toContain('a');
+  await manager.dispose();
+});
+
+test('a client id attached by one principal cannot be detached or taken over by another', async () => {
+  const manager = buildManager({ detachPolicy: 'survive' });
+  await manager.init();
+  const created = await manager.create({ workspaceRoot: workspace, clientId: 'shared-name', principalId: 'alice' });
+  await expect(manager.detach(created.id, 'shared-name', 'mallory')).rejects.toMatchObject({ name: 'HostedSessionClientOwnerError' });
+  await expect(manager.detach(created.id, 'shared-name')).rejects.toMatchObject({ name: 'HostedSessionClientOwnerError' });
+  await expect(manager.attach(created.id, 'shared-name', { principalId: 'mallory' })).rejects.toMatchObject({ name: 'HostedSessionClientOwnerError' });
+  expect(manager.get(created.id)?.attachedClients).toEqual(['shared-name']);
+  // The owner can renew and then leave.
+  await manager.attach(created.id, 'shared-name', { principalId: 'alice' });
+  const detached = await manager.detach(created.id, 'shared-name', 'alice');
+  expect(detached.attachedClients).toEqual([]);
+  await manager.dispose();
+});
+
+test('an attachment made without an identified caller can be detached by anyone', async () => {
+  const manager = buildManager({ detachPolicy: 'survive' });
+  await manager.init();
+  const created = await manager.create({ workspaceRoot: workspace, clientId: 'anon' });
+  const detached = await manager.detach(created.id, 'anon', 'alice');
+  expect(detached.attachedClients).toEqual([]);
+  await manager.dispose();
+});
+
+// The daemon replays its newest buffered frames to every new event stream, so a
+// client needs a boundary from the daemon to tell replayed frames from new ones.
+
+test('an attach of an idle session carries the daemon clock the history was read at', async () => {
+  let clock = 5_000;
+  const manager = buildManager({ detachPolicy: 'survive', now: () => clock });
+  await manager.init();
+  const created = await manager.create({ workspaceRoot: workspace, clientId: 'a' });
+  clock = 7_250;
+  const attachment = await manager.attach(created.id, 'b');
+  expect(attachment.historyAsOf).toBe(7_250);
+  await manager.dispose();
+});
+
+test('an attach during a running turn promises no boundary, so no replayed frame is dropped', async () => {
+  const manager = buildManager({ detachPolicy: 'survive' });
+  await manager.init();
+  const created = await manager.create({ workspaceRoot: workspace, clientId: 'a' });
+  const internals = manager as unknown as { sessions: Map<string, { runtime: { isRunning: () => boolean } | null }> };
+  internals.sessions.get(created.id)!.runtime!.isRunning = () => true;
+  const attachment = await manager.attach(created.id, 'b');
+  expect(attachment.historyAsOf).toBeUndefined();
   await manager.dispose();
 });

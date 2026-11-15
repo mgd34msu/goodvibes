@@ -428,7 +428,7 @@ export const builtinGatewayOccasionsMethodDescriptors: readonly GatewayMethodDes
     id: 'occasions.answer',
     metadata: { requiresFreshOperatorAuth: true },
     title: 'Answer An Occasion Nudge',
-    description: 'Record yes, no or later for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. All three RESOLVE the open item and remove it; to say only "I have this in hand" without ending the question, use occasions.acknowledge instead.',
+    description: 'Record yes, no, later or acknowledged for one occurrence. A no goes silent for the rest of this cycle and expires with the date, so next year asks fresh carrying no memory of the refusal. A later is NOT a decline, it comes back roughly halfway to the date. A yes on a gift-giving occasion opens the short interview and returns its first question. A yes or a no RESOLVES the open item and removes it. A later keeps the item open and moves it to its return date with its pushes available again. An answer of acknowledged leaves the item standing and quiet (the same as occasions.acknowledge).',
     category: 'occasions',
     scopes: ['write:occasions'],
     http: { method: 'POST', path: '/api/occasions/answer' },

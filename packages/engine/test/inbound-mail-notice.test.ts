@@ -420,7 +420,7 @@ describe('the delivery address is shown, but its local part is attacker-chosen (
   test('a verified delivered-to address renders on plain text', async () => {
     const evidence = deliveredRecipientFromAliasMailbox('owner+gv-github-com-k3n9x2p4@example.com');
     const notice = await renderInboundMailNotice(baseInput({ deliveredTo: evidence }));
-    expect(renderNoticeAsPlainText(notice)).toContain('owner+gv-github-com-k3n9x2p4@​example.com');
+    expect(renderNoticeAsPlainText(notice)).toContain(`owner+gv-github-com-k3n9x2p4@${Z}example.com`);
   });
 
   test('no delivery evidence renders an honest statement, not a blank or a forged address', async () => {

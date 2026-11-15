@@ -1,5 +1,6 @@
 import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
@@ -61,6 +62,8 @@ export interface CliWorkspaceStatus {
   /** TUI-local trust decision; 'undecided' when no choice is persisted yet. */
   readonly trustLevel: 'trusted' | 'restricted' | 'undecided';
   readonly trustGrandfathered: boolean;
+  /** Why the saved trust record could not be read; absent when it is fine or never existed. */
+  readonly trustFault?: string | undefined;
   /** Coverage verdict from the shared workspace registry. */
   readonly registrationStatus: 'covered' | 'declined' | 'unknown';
   /** Normalized working directory resolved against the registry. */
@@ -111,6 +114,9 @@ export interface CliStatusSnapshot {
   readonly auth: {
     readonly permissionMode: unknown;
     readonly permissionLabel: string;
+    readonly autoApprove: boolean;
+    readonly automaticApprovals: boolean;
+    readonly bypassesPrompts: boolean;
     readonly permissionDetail: string;
     readonly secretPolicy: unknown;
     readonly secretPolicyLabel: string;
@@ -183,6 +189,7 @@ function renderWorkspaceSection(workspace: CliWorkspaceStatus | null): string[] 
   return [
     'Workspace:',
     `  trust: ${workspace.trustLevel}${workspace.trustGrandfathered ? ' (grandfathered)' : ''}`,
+    ...(workspace.trustFault ? [`  trust record: damaged, autonomous work stays restricted until a level is chosen (${workspace.trustFault})`] : []),
     `  registration: ${registrationLine(workspace)}`,
     `  root: ${workspace.registrationRoot}`,
     '',
@@ -432,7 +439,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
 
   if (config.get('behavior.autoApprove') === true) {
     findings.push({
-      id: 'auto-approve-permissions',
+      id: 'auto-approve-enabled',
       area: 'security',
       severity: 'risk',
       summary: 'Broad automatic approvals are enabled.',
@@ -544,6 +551,9 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
   const common = captureCliStatusFacts(config, options.onboardingMarkers?.effective, options.service, getProviderIdFromModel);
 
   const findings = buildCliDoctorFindings(options);
+  const approvalPreset = presetForMode(
+    effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true),
+  );
   return {
     title: options.doctor ? 'GoodVibes doctor' : 'GoodVibes status',
     workingDirectory: options.workingDirectory,
@@ -558,6 +568,9 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
     auth: {
       ...common.auth,
       permissionLabel: describeConfiguredPermissions(config).label,
+      autoApprove: config.get('behavior.autoApprove') === true,
+      automaticApprovals: approvalPreset.name === 'yolo',
+      bypassesPrompts: approvalPreset.name === 'yolo' || approvalPreset.name === 'safe-jev',
       permissionDetail: describeConfiguredPermissions(config).detail,
       localUsers: options.auth ?? null,
     },
@@ -606,6 +619,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
     'Auth:',
     `  permissions: ${describeConfiguredPermissions(config).label} (${String(config.get('permissions.mode'))})`,
     `    ${describeConfiguredPermissions(config).detail}`,
+    `  autoApprove: ${yesNo(snapshot.auth.autoApprove)} (behavior.autoApprove)`,
     `  secretPolicy: ${secretPolicyLabel(config.get('storage.secretPolicy'))} (${String(config.get('storage.secretPolicy'))})`,
     options.auth
       ? `  localUsers: ${options.auth.userStorePresent ? 'present' : 'missing'} (${options.auth.userStorePath})`

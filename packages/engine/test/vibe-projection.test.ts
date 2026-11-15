@@ -225,17 +225,26 @@ for (const kind of ['rejected', 'invalid-response', 'invalid-request', 'aborted'
   test(`Preferred persona ${kind} is not converted into a literal import`, async () => {
     const fake = fakePort(() => { throw new JudgmentError(kind, 'Synthetic terminal failure'); }); installJudgmentPort(fake.port);
     await withDecisionModelPolicy(() => 'Preferred', async () => {
-      await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.')).rejects.toThrow();
+      const error: unknown = await vibeBodyToConstraintOptions('# Persona\n- Owner rule.').then(() => undefined, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(JudgmentError);
+      expect((error as JudgmentError).kind).toBe(kind);
     });
   });
 }
 
-test('Classic persona import retains cancellation and whole-document secret admission', async () => {
+test('Classic persona import retains cancellation', async () => {
   const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
   await withDecisionModelPolicy(() => 'Classic - Off', async () => {
     const controller = new AbortController(); controller.abort();
-    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.', {}, { signal: controller.signal })).rejects.toThrow();
-    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.\npassword=synthetic-private-secret')).rejects.toThrow();
+    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.', {}, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fake.requests).toHaveLength(0);
+  });
+});
+
+test('Classic persona import refuses whole-document secret material before any judgment', async () => {
+  const fake = fakePort(() => { throw new Error('Classic cannot ask'); }); installJudgmentPort(fake.port);
+  await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+    await expect(vibeBodyToConstraintOptions('# Persona\n- Owner rule.\npassword=synthetic-private-secret')).rejects.toMatchObject({ name: 'JudgmentInputError', message: expect.stringContaining('credential') });
     expect(fake.requests).toHaveLength(0);
   });
 });

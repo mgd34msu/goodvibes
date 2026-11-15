@@ -8,12 +8,12 @@ import {
   type DaemonOperatorRouteHandlers,
   type DaemonSystemRouteContext,
 } from '@goodvibes-jev/engine/daemon-api';
-import { ConfigManager, isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigManager, isSecretBearingConfigKey, isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { makeProjectTempDir } from '../../scripts/helpers/project-temp';
+import { E2E_OPERATOR_TOKEN } from './seed';
 
-export const TERMINAL_THEME_TOKEN = 'e2e-operator-token';
 
 // The error reader has a process-wide composition port. Serialize fixture
 // dispatches across ALL hosts so overlapping requests cannot restore another
@@ -72,7 +72,8 @@ export function createTerminalThemeHost(savedTheme?: string) {
       },
     },
     isValidConfigKey,
-    requireAdmin: (request: Request) => request.headers.get('authorization') === `Bearer ${TERMINAL_THEME_TOKEN}`
+    isSecretBearingConfigKey,
+    requireAdmin: (request: Request) => request.headers.get('authorization') === `Bearer ${E2E_OPERATOR_TOKEN}`
       && (request.method === 'GET' || allowWrites)
       ? null : Response.json({ error: 'Admin role required' }, { status: 403 }),
     parseJsonBody: async (request: Request) => {
@@ -133,7 +134,7 @@ export type TerminalThemeHost = ReturnType<typeof createTerminalThemeHost>;
 export function themeConfigRequest(method: 'GET' | 'POST', body?: unknown): Request {
   return new Request('http://terminal-theme-fixture/config', {
     method,
-    headers: { authorization: `Bearer ${TERMINAL_THEME_TOKEN}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${E2E_OPERATOR_TOKEN}`, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }

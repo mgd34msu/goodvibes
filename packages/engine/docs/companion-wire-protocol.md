@@ -24,9 +24,9 @@ Connect to:
 /api/control-plane/ws?domains=<comma-joined-domains>&clientKind=web
 ```
 
-`http`/`https` base URLs are upgraded to `ws`/`wss`. `clientKind=web` is always set; `domains` is omitted when no domains are requested.
+`http`/`https` base URLs are upgraded to `ws`/`wss`. Plain `ws://` is accepted only for loopback, private-network (10/8, 172.16/12, 192.168/16) and `.local` hosts; any other host needs `https://` or `wss://`. `clientKind=web` is always set; `domains` is omitted when no domains are requested.
 
-Send an auth frame as the first message, then receive runtime-event frames for the subscribed domains:
+The upgrade request itself must be authenticated: send the same `Authorization: Bearer <token>` header (or an already-authenticated cookie session) used on every other route. Without it the daemon refuses the handshake with 401 and never reads any frame. After the upgrade, send an auth frame as the first message to attach or rotate the token and to set the subscribed domains, then receive runtime-event frames for the subscribed domains:
 
 ```json
 { "type": "auth", "token": "<bearer-token>", "domains": ["<domain>"] }

@@ -28,6 +28,16 @@ const MAX_DATAGRAM_BYTES = 4_096;
 const MESSAGE_TYPES = new Set(['PROBE', 'CLAIM', 'HEARTBEAT', 'RESIGN']);
 
 /**
+ * How far a datagram's timestamp may be from the receiver's clock.
+ *
+ * A signature proves who sent a datagram, not when, so without this a captured
+ * CLAIM or HEARTBEAT could be replayed into a node that has just restarted and
+ * has no previous sequence number to compare against. Wide enough for two
+ * machines that are not running NTP, the same allowance admission requests get.
+ */
+export const MAX_DATAGRAM_SKEW_MS = 5 * 60 * 1_000;
+
+/**
  * The bytes a signature covers.
  *
  * Field order is fixed here rather than taken from JSON.stringify of the whole
@@ -73,8 +83,11 @@ export interface ClusterDecodeResult {
  * When `secret` is set the signature is required and compared in constant
  * time. When it is empty a `sig` field is simply ignored, a cluster that has
  * not been given a secret has no basis on which to judge one.
+ *
+ * When `now` (the receiver's clock, in ms) is given, a datagram whose `ts` is
+ * further than {@link MAX_DATAGRAM_SKEW_MS} from it is rejected.
  */
-export function decodeMessage(raw: string, secret: string): ClusterDecodeResult {
+export function decodeMessage(raw: string, secret: string, now?: number): ClusterDecodeResult {
   if (raw.length > MAX_DATAGRAM_BYTES) {
     return { message: null, rejected: 'datagram exceeds the size limit' };
   }
@@ -91,6 +104,9 @@ export function decodeMessage(raw: string, secret: string): ClusterDecodeResult 
   const validated = validateFields(candidate);
   if (!validated.message) return validated;
   const message = validated.message;
+  if (now !== undefined && Math.abs(now - message.ts) > MAX_DATAGRAM_SKEW_MS) {
+    return { message: null, rejected: 'datagram timestamp is too far from this machine\'s clock' };
+  }
 
   if (!secret) return { message, rejected: null };
 

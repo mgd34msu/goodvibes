@@ -67,8 +67,12 @@ for (const relativePath of [...requiredDocs, ...requiredExamples]) {
 // A status must precede the design body, so proposed behavior cannot silently
 // become a release claim. Reuse this docs lane rather than adding another script.
 const designDirectory = resolve(ENGINE_ROOT, '../../.goodvibes/dev/docs/design');
-for (const file of existsSync(designDirectory) ? readdirSync(designDirectory).filter(name => name.endsWith('.md')) : []) {
+const designDirectoryPresent = existsSync(designDirectory);
+for (const file of designDirectoryPresent ? readdirSync(designDirectory).filter(name => name.endsWith('.md')) : []) {
   const preamble = readFileSync(resolve(designDirectory, file), 'utf8').split('\n').slice(0, 10).join('\n');
   if (!/^\*{0,2}Status:/m.test(preamble)) throw new Error(`Design doc needs an explicit status preamble: ${file}`);
 }
-console.log('docs/examples completeness and design status check passed');
+// The design directory is local state, absent in CI and fresh checkouts; say so rather than claim a check that did not run.
+console.log(designDirectoryPresent
+  ? 'docs/examples completeness and design status check passed'
+  : 'docs/examples completeness check passed; design status check skipped (no design directory)');

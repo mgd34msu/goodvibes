@@ -19,7 +19,7 @@ import {
   type ContractInputAuthority,
 } from '../../platform/src/platform/contract/input-authority.js';
 /** Real contract -> planner/member -> AgentManager -> AgentOrchestrator -> tools -> scripted provider. */
-import { expect, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync, readFileSync, rmSync, mkdirSync, copyFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -38,6 +38,14 @@ import { installJudgmentPort } from '../../errors/src/index.js';
 import { makeRepo, oneUnitPlan, runnerPort, waitFor } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
 
+// Each install registers its own undo the moment it happens, so a setup failure cannot leak a runtime, port or directory into later tests.
+const cleanups: Array<() => void> = [];
+afterEach(() => {
+  const errors: unknown[] = [];
+  for (const cleanup of cleanups.splice(0).reverse()) try { cleanup(); } catch (error) { errors.push(error); }
+  if (errors.length) throw new AggregateError(errors, 'fixture cleanup failed');
+});
+
 const capturedExecAvailable = (await probeCapturedExecAvailability()).available;
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !capturedExecAvailable)
   throw new Error('required captured runner execution backend is unavailable');
@@ -47,6 +55,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
     `actual contract input authority through all construction handoffs (${mode})`,
     async () => {
       const root = makeRepo();
+      cleanups.push(() => rmSync(root, { recursive: true, force: true }));
       writeFileSync(join(root, '.gitignore'), '.goodvibes/\nnode_modules/\n');
       const dependencyRoot = join(root, 'node_modules', 'typescript');
       mkdirSync(dependencyRoot, { recursive: true });
@@ -96,6 +105,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
         providerRegistryFactory: createLaunchTolerantProviderRegistry,
         requestApproval: async () => ({ approved: true }),
       });
+      cleanups.push(() => runtime.dispose());
       // Finish the runtime's startup scan before this fixture replaces its runner.
       await resumeContracts(runtime.contractRunner, root);
       const previous = installJudgmentPort(
@@ -103,6 +113,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           context.name.replace(/^(effect|risk|edge)__/, '') === 'family' ? choiceAnswer(context.question, 'file-mutation', 0.99) : undefined,
         ).port, runtime.judgment.decisionLog),
       );
+      cleanups.push(() => { installJudgmentPort(previous); });
       await runtime.userPermissionRuleStore.add({
         rule: {
           id: 'deny-original-private',
@@ -132,6 +143,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
         }),
         enableVectorIndex: false,
       });
+      cleanups.push(() => memoryStore.close());
       await memoryStore.init();
       const memoryRegistry = new MemoryRegistry(memoryStore);
       const getAllMemory = memoryRegistry.getAll.bind(memoryRegistry);
@@ -404,6 +416,7 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           readAccessFilter: async (path) => (await runtime.permissionManager.readAccess(path)) === 'allow',
         });
       let runner = buildRunner();
+      cleanups.push(() => { runner.dispose(); store.dispose(); });
       let observedRetainedCompletion = false;
       const bindRunner = () => {
         runtime.agentManager.setContractRunner(runner);
@@ -471,8 +484,11 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           defaultWorkingDirectory: otherView,
           overflowHandler: new OverflowHandler({ baseDir: otherView }),
         });
+        // The foreign process lives until the test removes this file, so how long the run takes cannot end it early.
+        const holdFile = join(otherView, 'other-owner-hold');
+        writeFileSync(holdFile, '');
         const started = await otherTool.execute({
-          commands: [{ cmd: 'sleep 45; echo OTHER_OWNER_DONE', background: true, timeout_ms: 60000 }],
+          commands: [{ cmd: 'while [ -e other-owner-hold ]; do sleep 0.2; done; echo OTHER_OWNER_DONE', background: true }],
         });
         expect(started.success).toBe(true);
         const otherId = (JSON.parse(started.output ?? '{}') as { process_id: string }).process_id;
@@ -646,6 +662,8 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
         expect(spawnSync('git', ['-C', root, 'rev-parse', 'HEAD']).stdout.toString()).toBe(ownerHead);
         if (mode === 'normal' || mode === 'resume')
           expect(readFileSync(join(workspacePackage, 'index.ts'), 'utf8')).toContain('const value: number = 999;');
+        if (mode === 'apply-dirty')
+          expect(readFileSync(join(workspacePackage, 'index.ts'), 'utf8')).toBe("export const compilerInput = 'const value: number = 1;';\n");
         if (mode === 'until-dirty') {
           expect(observedRetainedCompletion).toBe(true);
           expect(readFileSync(join(root, 'retained-proof.txt'), 'utf8')).toContain('CAPTURED_BUILD_TEST_OK');
@@ -662,12 +680,6 @@ for (const mode of ['normal', 'revoke-map', 'resume', 'apply-dirty', 'until-dirt
           await runtime.processManager.stopOwnedBoundaries(otherExecution.authority);
           rmSync(otherExecution.owner, { recursive: true, force: true });
         }
-        runner.dispose();
-        store.dispose();
-        runtime.dispose();
-        memoryStore.close();
-        installJudgmentPort(previous);
-        rmSync(root, { recursive: true, force: true });
       }
     },
     120_000,

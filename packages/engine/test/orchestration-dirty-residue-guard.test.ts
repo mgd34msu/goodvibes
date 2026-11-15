@@ -5,7 +5,7 @@
  * (dirty-guard.ts, against a real scratch git repo) and the actual
  * phase-runner wiring (runPhase -> commitPhaseWork).
  */
-import { describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +31,26 @@ function runGit(cwd: string, args: string[]): string {
   return Buffer.from(result.stdout).toString('utf8');
 }
 
+// Every root made here is removed after the test, pass or fail.
+const tempRoots: string[] = [];
+afterEach(() => {
+  for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function tempRoot(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(root);
+  return root;
+}
+
+/** A repo whose commits never depend on the host's git identity. */
+function initRepo(cwd: string): void {
+  runGit(cwd, ['init']);
+  runGit(cwd, ['config', 'user.name', 'test']);
+  runGit(cwd, ['config', 'user.email', 'test@example.invalid']);
+  runGit(cwd, ['config', 'commit.gpgsign', 'false']);
+}
+
 function commitCount(cwd: string): number {
   const result = Bun.spawnSync(['git', 'rev-list', '--count', 'HEAD'], { cwd });
   if (result.exitCode !== 0) return 0;
@@ -43,8 +63,8 @@ function commitCount(cwd: string): number {
 
 describe('dirty-guard: snapshotDirtyTree', () => {
   test('captures dirty tracked + untracked paths with private original bytes, excluding .goodvibes', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-snapshot-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-snapshot-');
+    initRepo(root);
     writeFileSync(join(root, 'tracked.ts'), 'export const a = 1;\n');
     runGit(root, ['add', 'tracked.ts']);
     runGit(root, ['-c', 'user.email=a@b.c', '-c', 'user.name=test', 'commit', '-m', 'seed']);
@@ -62,15 +82,15 @@ describe('dirty-guard: snapshotDirtyTree', () => {
   });
 
   test('retains an unavailable snapshot without authorizing a later commit outside Git', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-nogit-'));
+    const root = tempRoot('dirty-guard-nogit-');
     const snapshot = snapshotDirtyTree(root);
     expect(snapshot.size).toBe(0);
     expect(() => excludeUntouchedLaunchResidue(root, ['owner-file'], snapshot)).toThrow('snapshot is unavailable');
   });
 
   test('keys non-ASCII paths by their RAW name (via `-z`), not git\'s C-quoted form, so native reads select the real file', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-unicode-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-unicode-');
+    initRepo(root);
     // Both names are C-quoted by git's default porcelain (core.quotePath=true):
     // café.txt -> "caf\303\251.txt". Under the old newline parser the snapshot
     // keyed on the quoted string, so residue with such a name silently bypassed
@@ -96,8 +116,8 @@ describe('dirty-guard: snapshotDirtyTree', () => {
   });
 
   test('`-z` rename record: keeps the destination and consumes the non-ASCII origin field', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-rename-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-rename-');
+    initRepo(root);
     writeFileSync(join(root, 'café.txt'), 'x\n');
     runGit(root, ['add', 'café.txt']);
     runGit(root, ['-c', 'user.email=a@b.c', '-c', 'user.name=test', 'commit', '-m', 'seed']);
@@ -116,8 +136,8 @@ describe('dirty-guard: snapshotDirtyTree', () => {
 
 describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
   test('a path dirty at launch and never modified afterward is excluded; a genuinely new path is included', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-exclude-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-exclude-');
+    initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
     expect(launchSnapshot.has('residue.ts')).toBe(true);
@@ -131,8 +151,8 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
   });
 
   test('a path dirty at launch that this run actually modifies is included', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-modified-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-modified-');
+    initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
 
@@ -144,8 +164,8 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
   });
 
   test('a path absent from the launch snapshot is always included, even if it later becomes dirty', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-fresh-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-fresh-');
+    initRepo(root);
     const launchSnapshot = snapshotDirtyTree(root); // nothing dirty yet
 
     writeFileSync(join(root, 'new.ts'), 'export const isNew = true;\n');
@@ -156,8 +176,8 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
   });
 
   test('every candidate untouched since launch partitions to an empty included set', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dirty-guard-allexcluded-'));
-    runGit(root, ['init']);
+    const root = tempRoot('dirty-guard-allexcluded-');
+    initRepo(root);
     writeFileSync(join(root, 'residue-a.ts'), 'export const a = 1;\n');
     writeFileSync(join(root, 'residue-b.ts'), 'export const b = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
@@ -199,8 +219,8 @@ function makeItem(touchedPaths: string[]): WorkItem {
 
 describe('phase-runner: dirty-residue guard wiring', () => {
   test('excludes untouched launch-dirty residue from a scoped commit; commits only the genuinely new path', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'phase-runner-dirty-exclude-'));
-    runGit(root, ['init']);
+    const root = tempRoot('phase-runner-dirty-exclude-');
+    initRepo(root);
     // Residue left behind by a "previously killed run", already dirty before this engine launches.
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     // Taken BEFORE any of this "run"'s own writes, matching real engine-launch
@@ -245,8 +265,8 @@ describe('phase-runner: dirty-residue guard wiring', () => {
   });
 
   test('includes a pre-dirty path that this run actually modifies', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'phase-runner-dirty-include-'));
-    runGit(root, ['init']);
+    const root = tempRoot('phase-runner-dirty-include-');
+    initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     // Taken BEFORE any of this "run"'s own writes, matching real engine-launch
     // timing: snapshotDirtyTree is synchronous (see dirty-guard.ts), so this
@@ -281,8 +301,8 @@ describe('phase-runner: dirty-residue guard wiring', () => {
   });
 
   test('skips the commit entirely with an honest recorded note when every candidate path is untouched residue', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'phase-runner-dirty-skip-'));
-    runGit(root, ['init']);
+    const root = tempRoot('phase-runner-dirty-skip-');
+    initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     // Taken BEFORE any of this "run"'s own writes, matching real engine-launch
     // timing: snapshotDirtyTree is synchronous (see dirty-guard.ts), so this
@@ -315,8 +335,8 @@ describe('phase-runner: dirty-residue guard wiring', () => {
   });
 
   test('without a launchDirtySnapshot dep, behavior is unchanged: every candidate path commits (graceful degrade)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'phase-runner-dirty-degrade-'));
-    runGit(root, ['init']);
+    const root = tempRoot('phase-runner-dirty-degrade-');
+    initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     // No launchDirtySnapshot passed at all.
 
@@ -349,8 +369,8 @@ describe('phase-runner: dirty-residue guard wiring', () => {
 // The actual phase runner must pass its original root to the final Git commit
 // callback; a path resolved afresh after the phase is not that original source.
 test('phase-runner passes the retained alias root guard through the Git commit assertion seam', async () => {
-  const physical = mkdtempSync(join(tmpdir(), 'phase-root-physical-')), foreign = mkdtempSync(join(tmpdir(), 'phase-root-foreign-')), alias = physical + '.alias';
-  symlinkSync(physical, alias, 'dir'); runGit(alias, ['init']);
+  const physical = tempRoot('phase-root-physical-'), foreign = tempRoot('phase-root-foreign-'), alias = physical + '.alias';
+  symlinkSync(physical, alias, 'dir'); initRepo(alias);
   const launchDirtySnapshot = snapshotDirtyTree(alias), h = createOrchestrationHarness(), worktree = new AgentWorktree(alias);
   let callback: (() => void) | undefined;
   const commit = spyOn(worktree, 'commitWorkingTree').mockImplementation(async (_message, _paths, beforeCommit) => {
@@ -365,6 +385,6 @@ test('phase-runner passes the retained alias root guard through the Git commit a
     h.completeAgent(h.spawnedRecords.at(-1)!.id, engineerReportOutput({ filesCreated: ['feature.ts'] }));
     await outcomePromise; expect(typeof callback).toBe('function');
     unlinkSync(alias); symlinkSync(foreign, alias, 'dir');
-    expect(() => callback?.()).toThrow();
+    expect(() => callback?.()).toThrow(/Dirty snapshot root (alias|target|physical root) changed/);
   } finally { commit.mockRestore(); rmSync(alias, { force: true }); rmSync(physical, { recursive: true, force: true }); rmSync(foreign, { recursive: true, force: true }); }
 });

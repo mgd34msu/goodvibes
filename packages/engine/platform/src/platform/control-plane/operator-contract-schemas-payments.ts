@@ -139,9 +139,12 @@ const PAYMENT_OPERATION_SCHEMA = objectSchema({
   outcome: nullableSchema(STRING_SCHEMA), totalMinorUnits: nullableSchema({ type: 'integer', minimum: 0 }),
   currency: nullableSchema({ type: 'string', pattern: '^[A-Z]{3}$' }),
 }, ['purchaseId', 'operationId', 'state', 'phase', 'createdAtMs', 'updatedAtMs', 'outcome', 'totalMinorUnits', 'currency']);
+/** A purchase whose status record could not be read. Present only when one exists. */
+const PAYMENT_UNREADABLE_OPERATION_SCHEMA = objectSchema({ purchaseId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['purchaseId', 'reason']);
 export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({
   windows: { ...arraySchema(PAYMENT_WINDOW_SCHEMA), maxItems: 256 },
   operations: { ...arraySchema(PAYMENT_OPERATION_SCHEMA), maxItems: 356 },
+  unreadable: { ...arraySchema(PAYMENT_UNREADABLE_OPERATION_SCHEMA), maxItems: 356 },
 }, ['windows', 'operations']);
 export const PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA = objectSchema({
   purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA,

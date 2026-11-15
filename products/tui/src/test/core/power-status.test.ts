@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
+import { KEEP_AWAKE_NOT_HELD, LID_SWITCH_HONEST_SPLIT } from '@goodvibes-jev/engine/platform/platform/power';
 import {
   IDLE_POWER_STATE,
   SLEEP_DISABLED_CHIP,
   powerStatusLines,
   powerSurfaceFromEvent,
   hasLidSplitNote,
+  keepAwakeHolding,
   type PowerSurfaceState,
 } from '../../core/power-status.ts';
 
@@ -21,6 +22,14 @@ describe('powerStatusLines (STEP 3)', () => {
     const lines = powerStatusLines(state);
     expect(lines[0]).toContain(SLEEP_DISABLED_CHIP);
     expect(lines[0]).toContain('will not idle-sleep');
+  });
+
+  test('keep-awake on but refused by the OS: no "will not idle-sleep" claim, the refusal is shown', () => {
+    const state: PowerSurfaceState = { keepAwake: true, inhibited: false, workReasons: [], note: KEEP_AWAKE_NOT_HELD };
+    const lines = powerStatusLines(state);
+    expect(lines.join('\n')).not.toContain('will not idle-sleep');
+    expect(lines).toEqual([KEEP_AWAKE_NOT_HELD]);
+    expect(keepAwakeHolding(state)).toBe(false);
   });
 
   test('"held because X" renders one honest line per work-inhibition reason', () => {

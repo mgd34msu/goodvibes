@@ -100,6 +100,23 @@ describe('readings to verdicts at the band edges (4.5)', () => {
     expect(outcome.nudge?.criterionIds).toContain('u1.c1');
   });
 
+  test('the nudge says why each listed criterion still reads unmet, and the reading keeps that reason', async () => {
+    const outcome = await check({ criteria: [UNMET, MET], gap: { choice: 'partial', confidence: 0.95 } });
+    expect(outcome.check.result).toBe('nudge');
+    expect(outcome.nudge?.text).toContain('Why: only part of it is shown; the rest is missing.');
+    expect(outcome.readings.get('u1.c1')?.rationale).toBe('only part of it is shown; the rest is missing.');
+    // A criterion the check read as met is not explained.
+    expect(outcome.readings.get('u1.c2')?.rationale).toBeUndefined();
+  });
+
+  test('a reason that cannot be settled leaves the criterion listed without one, and the nudge still goes out', async () => {
+    const outcome = await check({ criteria: [UNMET, MET], gap: { choice: 'contradicted', confidence: 0.4 } });
+    expect(outcome.check.result).toBe('nudge');
+    expect(outcome.nudge?.criterionIds).toContain('u1.c1');
+    expect(outcome.nudge?.text).not.toContain('Why:');
+    expect(outcome.readings.get('u1.c1')?.rationale).toBeUndefined();
+  });
+
   test('a leaning unmet criterion remains correction work without a confirmed regression', async () => {
     const unit = twoCriterionUnit();
     const first = await check({}, { unit });
@@ -448,8 +465,9 @@ describe('the check record and applying it', () => {
     expect(outcome.check.quality.placeholder).toEqual({ verdict: 'no', outcome: 'act' });
     expect(outcome.check.claims?.kind).toBe('files_verified');
     expect(outcome.check).not.toHaveProperty('evidenceDigest');
-    expect(outcome.readings.get('u1.c2')).toEqual({ checkId: 'u1.k1', at: 2_000, probabilityUnmet: UNMET, verdict: 'unmet', outcome: 'act', decisionId: undefined });
-    expect(outcome.usage).toEqual({ calls: 2, inputTokens: 2, outputTokens: 2 });
+    expect(outcome.readings.get('u1.c2')).toEqual({ checkId: 'u1.k1', at: 2_000, probabilityUnmet: UNMET, verdict: 'unmet', outcome: 'act', decisionId: undefined, rationale: expect.any(String) });
+    // The judge, the quality battery and one reason for the one unmet criterion the nudge lists.
+    expect(outcome.usage).toEqual({ calls: 3, inputTokens: 3, outputTokens: 3 });
   });
 
   test('excluded and met-by-structure criteria are never judged', async () => {
@@ -590,7 +608,7 @@ test('only native unshown holds retain a restart commitment; only the native jud
     if (ordinary.discarded) throw new Error('Synthetic live check unexpectedly discarded');
     expect(ordinary.check.problems).toContain('unshown'); expect(ordinary.check).not.toHaveProperty('evidenceDigest');
     expect(port.requests.every(request => request.inputBinding === undefined)).toBe(true);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
+    expect(hashing.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && value === serialized)).toHaveLength(0);
     port.requests.length = 0;
     const actual = await runUnitCheck({ native: { contract: native, services: undefined }, contract: native, unit,
       trigger: 'completion', evidence: current, settings: SETTINGS, now: 2, checkPort: port.port });
@@ -623,7 +641,9 @@ test('native unit quality omits an unused digest while an independent explicit a
   const recorded = withDecisionLog(fake.port, log);
   const input = { native: { contract: native, services: undefined }, contract: native, unit,
     trigger: 'completion' as const, evidence: current, settings: SETTINGS, now: 1 };
-  const hashing = spyOn(Bun.CryptoHasher, 'hash');
+  // The native judge hashes its state with extra guidance fields, so the state is found by the unit's own goal text.
+  const goal = JSON.stringify(judgeState(unit, current).goal), hashing = spyOn(Bun.CryptoHasher, 'hash');
+  const judgedHashes = () => hashing.mock.calls.filter(([algorithm, value]) => algorithm === 'sha256' && typeof value === 'string' && value.includes(`"goal":${goal}`)).length;
   try {
     const ordinary = await runUnitCheck({ ...input, checkPort: recorded });
     if (ordinary.discarded) throw new Error('Original native unit check was discarded');
@@ -633,7 +653,7 @@ test('native unit quality omits an unused digest while an independent explicit a
     expect(judge?.stateHash).toMatch(/^[a-f0-9]{64}$/);
     expect(quality?.status).toBe('answered'); expect(quality?.context.site).toBe('contract.check.unit-quality');
     expect(quality).not.toHaveProperty('stateHash');
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    expect(judgedHashes()).toBe(1);
 
     // The real settlement adapter owns this same explicit request at its
     // independent capture seam. The generic unit checker must preserve it.
@@ -647,6 +667,6 @@ test('native unit quality omits an unused digest while an independent explicit a
     expect(saved).toHaveLength(2);
     expect(saved.every(entry => entry?.status === 'answered' && typeof entry.stateHash === 'string')).toBe(true);
     expect(saved[0]?.stateHash).not.toBe(saved[1]?.stateHash);
-    expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(3);
+    expect(judgedHashes()).toBe(3);
   } finally { hashing.mockRestore(); }
 });

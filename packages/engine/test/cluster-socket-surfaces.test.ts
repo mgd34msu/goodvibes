@@ -145,6 +145,25 @@ describe('socket surfaces: the identity must be real', () => {
     expect(rig.registered).toHaveLength(2);
   });
 
+  test('a socket the provider refused for good withdraws, says why once, and does not retry', async () => {
+    const rig = harness({ identities: ['T0ACME999'] });
+    await rig.supervisor.begin();
+
+    rig.supervisor.onSocketLost('the Discord gateway connection closed (code 4014)', true);
+    expect(rig.withdrawn).toEqual([providerSurface('slack', 'T0ACME999')]);
+    expect(rig.inert).toHaveLength(1);
+    expect(rig.inert[0]!.action).toContain('code 4014');
+    // No timer was set: the same refusal would come back every minute.
+    expect(rig.delays).toEqual([]);
+    await rig.retry();
+    expect(rig.registered).toHaveLength(1);
+    expect(rig.hasRetry()).toBe(false);
+
+    // A configuration reload is the way back: it contests the surface again.
+    await rig.supervisor.refresh();
+    expect(rig.registered).toHaveLength(2);
+  });
+
   test('a socket lost while the daemon is shutting down does not re-register', async () => {
     let running = true;
     const rig = harness({ identities: ['T0ACME999'], running: () => running });

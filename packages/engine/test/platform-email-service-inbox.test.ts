@@ -239,6 +239,14 @@ describe(`EmailService.listInbox: ${shape.name}`, () => {
     expect(result.messages.map((message) => message.unread)).toEqual([false, false, true]);
   });
 
+  test('a zero, negative or non-numeric limit still returns a page, never the unbounded tail', async () => {
+    fake = await startFakeImap();
+    const { service } = buildService(fake.port);
+    expect((await service.listInbox({ unreadOnly: false, limit: 0 })).messages).toHaveLength(1);
+    expect((await service.listInbox({ unreadOnly: false, limit: -5 })).messages).toHaveLength(1);
+    expect((await service.listInbox({ unreadOnly: false, limit: Number.NaN })).messages).toHaveLength(3);
+  });
+
   test('total counts the match, not the page', async () => {
     fake = await startFakeImap();
     const { service } = buildService(fake.port);
@@ -267,6 +275,20 @@ describe(`EmailService.listInbox: ${shape.name}`, () => {
     expect(summaries[0]?.subject).toBe('First');
     expect(fake.commands.some((line) => line.includes('SEARCH UNSEEN'))).toBe(true);
     expect(fake.commands.some((line) => line.includes('SEARCH ALL'))).toBe(false);
+  });
+
+  test('checkInbox leaves every message unread: examine only, no STORE, only BODY.PEEK fetches', async () => {
+    fake = await startFakeImap();
+    const { service } = buildService(fake.port);
+    await service.checkInbox(5);
+
+    expect(fake.commands.some((line) => /\bEXAMINE\b/.test(line))).toBe(true);
+    // SELECT opens read-write and a plain BODY[] fetch sets \Seen as a side effect.
+    expect(fake.commands.filter((line) => /\bSELECT\b/.test(line))).toEqual([]);
+    expect(fake.commands.filter((line) => /\b(STORE|COPY|EXPUNGE)\b/.test(line) || line.includes('\\Seen'))).toEqual([]);
+    const fetches = fake.commands.filter((line) => /\bFETCH\b/.test(line));
+    expect(fetches.length).toBeGreaterThan(0);
+    expect(fetches.filter((line) => /\bBODY\[/.test(line))).toEqual([]);
   });
 });
 

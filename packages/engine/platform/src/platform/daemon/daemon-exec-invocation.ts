@@ -70,7 +70,10 @@ export function resolveDaemonExecInvocation(
   if (isCompiledBinaryInvocation(signals)) {
     // The binary itself, with the exact args that launched this daemon, no
     // reconstructed source-file path.
-    return { command: signals.execPath, args: [...signals.argv.slice(1)], fromCompiledBinary: true };
+    // A compiled binary's argv[1] can be its embedded entry, which is not an argument anyone passed.
+    const entry = signals.argv[1];
+    const embedded = entry !== undefined && EMBEDDED_MARKERS.some((marker) => entry.includes(marker));
+    return { command: signals.execPath, args: [...signals.argv.slice(embedded ? 2 : 1)], fromCompiledBinary: true };
   }
   return {
     command: signals.execPath,

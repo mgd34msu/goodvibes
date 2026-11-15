@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { closeSync, existsSync, mkdirSync, openSync, utimesSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../../helpers/project-temp.ts';
 import {
@@ -7,6 +7,7 @@ import {
   writeOnboardingAcknowledgementState,
 } from '@/runtime/onboarding/state.ts';
 import type { OnboardingShellPaths } from '@/runtime/onboarding/types.ts';
+import { createOnboardingStateStorage } from '@goodvibes-jev/engine/terminal-shell/onboarding-state';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ describe('onboarding state', () => {
     expect(existsSync(`${statePath}.unrecognized`)).toBe(true);
   });
 
-  test('unknown future version is quarantined and read returns null payload', () => {
+  test('a file written by a newer version is left in place and read returns null payload', () => {
     const stateDir = join(tmpDir, 'project', 'tui');
     mkdirSync(stateDir, { recursive: true });
     const statePath = join(stateDir, 'onboarding-state.json');
@@ -126,36 +127,32 @@ describe('onboarding state', () => {
 
     const result = readOnboardingRuntimeState(shellPaths, 'project');
     expect(result.payload).toBeNull();
-    expect(existsSync(`${statePath}.unrecognized`)).toBe(true);
+    expect(result.exists).toBe(true);
+    // The newer process still needs its file; this reader just cannot use it.
+    expect(existsSync(statePath)).toBe(true);
+    expect(existsSync(`${statePath}.unrecognized`)).toBe(false);
   });
 
-  // ── concurrent RMW simulation ───────────────────────────────────────────
+  // ── merging successive writes ───────────────────────────────────────────
   //
-  // Simulates two interleaved RMW sequences by running two writes to different
-  // targets without any mocking. Both acknowledgements must survive because the
-  // lockfile serialises the RMW window. We sequence them synchronously in a
-  // single process (daemon and TUI are both synchronous at the RMW point), so
-  // a genuine concurrent test would require two child processes. Instead, we
-  // verify the merge property: neither write clobbers the other's key.
+  // These run one write after another in one process, so they prove the merge
+  // (a write keeps the keys already in the file), not exclusion. Exclusion
+  // between writers is the lock tests below.
 
-  test('concurrent RMW simulation: both acks survive sequential interleaved writes', () => {
-    // Simulate process A (daemon) writing 'providers'
+  test('a write to another target keeps the acknowledgement already stored', () => {
     writeOnboardingAcknowledgementState(shellPaths, {
       target: 'providers', acknowledged: true, source: 'daemon',
     });
-
-    // Simulate process B (TUI) writing 'auth' immediately after
     writeOnboardingAcknowledgementState(shellPaths, {
       target: 'auth', acknowledged: true, source: 'tui',
     });
 
-    // Both acks must be present in the final file.
     const result = readOnboardingRuntimeState(shellPaths);
     expect(result.payload!.acknowledgements['providers']).toBe(true);
     expect(result.payload!.acknowledgements['auth']).toBe(true);
   });
 
-  test('concurrent RMW simulation: later write wins on same target', () => {
+  test('a later write wins on the same target', () => {
     writeOnboardingAcknowledgementState(shellPaths, {
       target: 'providers', acknowledged: true, source: 'first',
     });
@@ -196,23 +193,43 @@ describe('onboarding state', () => {
     expect(existsSync(lockPath)).toBe(false);
   });
 
-  test('write succeeds (degraded path) when a fresh lockfile blocks all retries', () => {
-    // Pre-place a fresh lockfile to simulate another process holding the lock
-    // for longer than the retry budget. The writer must fall through to the
-    // degraded path and still complete the write.
+  test('a lock that stays held is waited for, then the write proceeds and leaves the holder\'s lock alone', () => {
     const stateDir = join(tmpDir, 'project', 'tui');
     mkdirSync(stateDir, { recursive: true });
     const lockPath = join(stateDir, 'onboarding-state.json.lock');
-    // Use 'w' (not 'wx') so this succeeds even if file exists.
-    const fd = openSync(lockPath, 'w');
-    closeSync(fd);
+    writeFileSync(lockPath, 'another-process-token');
+    let sleeps = 0;
+    // A clock that never advances keeps the holder's lock fresh, so the wait
+    // runs out without any real time passing.
+    const storage = createOnboardingStateStorage('tui', { now: () => 0, sleep: () => { sleeps += 1; } });
 
-    // Write should still complete (degraded path, atomic write fires without lock).
-    writeOnboardingAcknowledgementState(shellPaths, {
+    const record = storage.writeOnboardingAcknowledgementState(shellPaths, {
       target: 'auth', acknowledged: true, source: 'degraded-path-test',
     });
 
-    const result = readOnboardingRuntimeState(shellPaths);
-    expect(result.payload!.acknowledgements['auth']).toBe(true);
+    // It waited between attempts rather than spinning through them.
+    expect(sleeps).toBeGreaterThan(1);
+    expect(record.payload!.acknowledgements['auth']).toBe(true);
+    expect(readFileSync(lockPath, 'utf8')).toBe('another-process-token');
+  });
+
+  test('a lock another writer took over while this one worked is not removed on release', () => {
+    const stateDir = join(tmpDir, 'project', 'tui');
+    const lockPath = join(stateDir, 'onboarding-state.json.lock');
+    // The workspace root is read inside the locked read-modify-write, which is
+    // where a slow writer finds its stale lock replaced by a new owner's.
+    const takenOver: OnboardingShellPaths = {
+      ...shellPaths,
+      get workingDirectory(): string {
+        writeFileSync(lockPath, 'the-new-owner');
+        return tmpDir;
+      },
+    };
+
+    writeOnboardingAcknowledgementState(takenOver, {
+      target: 'providers', acknowledged: true, source: 'slow-writer',
+    });
+
+    expect(readFileSync(lockPath, 'utf8')).toBe('the-new-owner');
   });
 });

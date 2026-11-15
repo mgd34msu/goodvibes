@@ -8,7 +8,7 @@
  * the protected splash gradient under every theme and mode.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import {
   generateSystemTheme,
   getBundledTheme,
@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import {
+  activeThemeMode,
   activeTokens,
   activeUiTones,
   getActiveThemeName,
@@ -44,10 +45,19 @@ import { BORDERS } from '../../renderer/layout.ts';
 import { addConversationSplashScreen } from '../../core/conversation-rendering.ts';
 import { SPLASH_GRADIENT } from '../../utils/splash-lines.ts';
 
+const previousName = getActiveThemeName();
+const previousMode = activeThemeMode();
+
+// Every test starts from the default theme; what was active before the file is put back at the end.
 afterEach(() => {
   resetTerminalPaletteForTests();
   setActiveThemeName('goodvibes');
   setActiveThemeMode('dark');
+});
+
+afterAll(() => {
+  setActiveThemeName(previousName);
+  setActiveThemeMode(previousMode);
 });
 
 function bundledTokens(name: string, mode: 'dark' | 'light') {

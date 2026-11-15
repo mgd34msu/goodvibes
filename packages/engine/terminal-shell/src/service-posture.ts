@@ -53,12 +53,18 @@ async function readOwnedServiceLogPosture(path: string | undefined, tailBytes: n
     }
     const raw = Buffer.alloc(length);
     const fd = openSync(path, 'r');
+    let read: number;
     try {
-      readSync(fd, raw, 0, length, Math.max(0, stat.size - length));
+      read = readSync(fd, raw, 0, length, Math.max(0, stat.size - length));
     } finally {
       closeSync(fd);
     }
-    captured = { stat, text: raw.toString('utf-8') };
+    // A file truncated since the stat returns fewer bytes than asked; the rest
+    // of the buffer is zero padding, not log text.
+    let start = 0;
+    // The tail begins mid-file, possibly inside a multi-byte character.
+    if (stat.size > length) while (start < read && (raw[start]! & 0xc0) === 0x80) start++;
+    captured = { stat, text: raw.subarray(start, read).toString('utf-8') };
   } catch {
     return {
       path,
@@ -68,19 +74,34 @@ async function readOwnedServiceLogPosture(path: string | undefined, tailBytes: n
       readError: 'Service log could not be read.',
     };
   }
-  const assertCurrent = () => {
+  const ownersCurrent = () => {
     options.signal?.throwIfAborted();
     options.assertCurrent?.();
-    const current = statSync(path);
+  };
+  // The service keeps appending while a model-backed redaction runs, so growth
+  // is expected. A different file (rotation) or a shorter one (truncation) means
+  // the captured bytes no longer describe the log.
+  const logReplaced = (): boolean => {
+    let current: Stats;
+    try {
+      current = statSync(path);
+    } catch {
+      return true; // removed or unreadable: not the file that was captured
+    }
     const original = captured.stat;
-    if (
-      current.dev !== original.dev ||
-      current.ino !== original.ino ||
-      current.size !== original.size ||
-      current.mtimeMs !== original.mtimeMs ||
-      current.ctimeMs !== original.ctimeMs
-    )
-      throw new Error('Service log changed during redaction.');
+    return current.dev !== original.dev || current.ino !== original.ino || current.size < original.size;
+  };
+  const changed: CliServiceLogPosture = {
+    path,
+    exists: true,
+    size: captured.stat.size,
+    modifiedAt: captured.stat.mtimeMs,
+    readError: 'Service log changed while it was read.',
+  };
+  class LogReplaced extends Error {}
+  const assertCurrent = () => {
+    ownersCurrent();
+    if (logReplaced()) throw new LogReplaced('Service log changed during redaction.');
   };
   let tail: string;
   try {
@@ -88,13 +109,15 @@ async function readOwnedServiceLogPosture(path: string | undefined, tailBytes: n
       captureOwner?.();
       return redactText(captured.text, { ...options, assertCurrent });
     }, () => redactText(captured.text, { ...options, assertCurrent }));
-  } catch {
-    // Withhold the captured bytes when redaction is unavailable. Revocation,
-    // cancellation and a changed file still prevent the entire publication.
-    assertCurrent();
+  } catch (error) {
+    // Cancellation and revoked ownership still prevent the entire publication.
+    ownersCurrent();
+    if (error instanceof LogReplaced || logReplaced()) return changed;
+    // Withhold the captured bytes when redaction is unavailable.
     return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, readError: 'Service log could not be read safely.' };
   }
-  assertCurrent();
+  ownersCurrent();
+  if (logReplaced()) return changed;
   return { path, exists: true, size: captured.stat.size, modifiedAt: captured.stat.mtimeMs, tail,
     ...(isClassicOperation() ? { provenance: 'classic' as const } : {}) };
 }

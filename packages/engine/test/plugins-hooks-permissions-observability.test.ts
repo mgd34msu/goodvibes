@@ -202,7 +202,8 @@ describe('plugins/hooks/permissions observability', () => {
       });
 
       const result = await dispatcher.fire(hookEvent());
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // The dispatch is a detached promise whose rejection handler only needs microtasks to run.
+      for (let i = 0; i < 20; i += 1) await Promise.resolve();
 
       expect(result).toEqual({ ok: true });
       expect(warningMessages(warnSpy).some((message) => message.includes('trigger dispatch failed'))).toBe(true);

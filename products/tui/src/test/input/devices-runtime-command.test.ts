@@ -83,13 +83,28 @@ describe('/devices command', () => {
     expect(text).toContain('new phone');
   });
 
-  test('revoke-shared retires the legacy token', async () => {
+  test('revoke-shared asks for --yes and leaves the legacy token alone without it', async () => {
     const tokens = fakePairingTokens(SAMPLE);
     const text = await run(tokens, ['revoke-shared']);
+    expect(text).toContain('--yes');
+    expect(tokens.isLegacyRevoked()).toBe(false);
+  });
+
+  test('revoke-shared --yes retires the legacy token', async () => {
+    const tokens = fakePairingTokens(SAMPLE);
+    const text = await run(tokens, ['revoke-shared', '--yes']);
     expect(text).toContain('Revoked the legacy shared token');
     expect(tokens.isLegacyRevoked()).toBe(true);
-    const again = await run(tokens, ['revoke-shared']);
+    const again = await run(tokens, ['revoke-shared', '--yes']);
     expect(again).toContain('already revoked');
+  });
+
+  test('rename does not claim success when the token vanished after the list was read', async () => {
+    const tokens = fakePairingTokens(SAMPLE);
+    tokens.rename = () => false;
+    const text = await run(tokens, ['rename', 'aaaa', 'work']);
+    expect(text).not.toContain('Renamed');
+    expect(text).toContain('nothing was renamed');
   });
 
   test('degrades honestly when no pairing service is wired', async () => {

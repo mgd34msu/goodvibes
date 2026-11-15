@@ -158,13 +158,54 @@ export function truncateDisplay(text: string, width: number, ellipsis = '…'): 
 
   let result = '';
   let currentWidth = 0;
-  for (const char of text) {
+  let keptEscape = false;
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '\x1b') {
+      // An escape sequence is zero width and must never be cut in half, so it is
+      // copied whole; the cut point is only ever a visible character boundary.
+      const end = escapeSequenceEnd(text, i);
+      result += text.slice(i, end);
+      keptEscape = true;
+      i = end;
+      continue;
+    }
+    const code = text.codePointAt(i)!;
+    const char = String.fromCodePoint(code);
     const charWidth = getDisplayWidth(char);
     if (currentWidth + charWidth + ellipsisWidth > width) break;
     result += char;
     currentWidth += charWidth;
+    i += char.length;
   }
-  return result + ellipsis;
+  // A joiner left dangling by the cut would fuse onto the ellipsis.
+  result = result.replace(/\u200d+$/u, '');
+  // Styling opened before the cut would otherwise run on past the ellipsis, because the closing sequence was cut away.
+  return result + ellipsis + (keptEscape ? '\x1b[0m' : '');
+}
+
+/** Index just past the escape sequence that starts at `start` (same grammar as stripAnsi). */
+function escapeSequenceEnd(text: string, start: number): number {
+  let i = start;
+  const next = text[i + 1];
+  if (next === '[') {
+    i += 2;
+    while (i < text.length) {
+      const c = text.charCodeAt(i);
+      i++;
+      if (c >= 0x40 && c <= 0x7e) break;
+    }
+  } else if (next === ']') {
+    i += 2;
+    while (i < text.length) {
+      if (text[i] === '\x07') { i++; break; }
+      if (text[i] === '\x1b' && text[i + 1] === '\\') { i += 2; break; }
+      i++;
+    }
+  } else {
+    i += next !== undefined ? 2 : 1;
+  }
+  return i;
 }
 
 /** A single footer/status-line segment plus its survival priority. */

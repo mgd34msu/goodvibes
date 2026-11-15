@@ -38,7 +38,9 @@ export function bookmarkFileSlug(label: string): string {
 
 /** Whether a saved file name is the one saveToFile writes for this label. */
 export function isSavedFileForLabel(fileName: string, label: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/.test(fileName) && fileName.slice(20) === `${bookmarkFileSlug(label)}.txt`;
+  // A second save of the same label in one second carries a counter suffix.
+  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-/.test(fileName)
+    && new RegExp(`^${bookmarkFileSlug(label)}(-\\d+)?\\.txt$`).test(fileName.slice(20));
 }
 
 export class BookmarkManager {
@@ -95,11 +97,19 @@ export class BookmarkManager {
   public saveToFile(content: string, label: string): string {
     mkdirSync(this.saveDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `${timestamp}-${bookmarkFileSlug(label)}.txt`;
-    const filePath = join(this.saveDir, filename);
-    writeFileSync(filePath, content, 'utf-8');
-    logger.debug('BookmarkManager: saved block content', { filePath });
-    return filePath;
+    const base = `${timestamp}-${bookmarkFileSlug(label)}`;
+    // Same label (or same slug) in the same second: never overwrite the earlier block.
+    for (let n = 0; ; n += 1) {
+      const filePath = join(this.saveDir, `${base}${n === 0 ? '' : `-${n}`}.txt`);
+      try {
+        writeFileSync(filePath, content, { encoding: 'utf-8', flag: 'wx' });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
+        throw err;
+      }
+      logger.debug('BookmarkManager: saved block content', { filePath });
+      return filePath;
+    }
   }
 
   /**

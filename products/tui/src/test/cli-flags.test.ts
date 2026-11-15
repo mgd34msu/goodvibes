@@ -7,7 +7,9 @@ import { publicErrorTextAnswer } from './helpers/user-error-reading.ts';
 import type { Questions } from '@goodvibes-jev/judgment';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONFIG_SCHEMA, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveShellRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
+import { createServer, type AddressInfo } from 'node:net';
+import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isFeatureConfigEnabled } from '@goodvibes-jev/engine/terminal-shell';
 import {
   applyRuntimeConfigDefault,
@@ -69,60 +71,10 @@ describe('parseCliFlags', () => {
     expect(flags.workingDir).toBe('/home/workspace');
   });
 
-  // ---------------------------------------------------------------------------
-  // Env var precedence (flags win, env is fallback)
-  // ---------------------------------------------------------------------------
-  // parseCliFlags itself does not read env vars, it only returns parsed flag
-  // values. The caller (daemon/cli.ts main()) is responsible for setting env
-  // vars from the returned flags and then calling resolveDaemonCliOwnership()
-  // which reads the env vars with ?? fallback. These tests confirm the flag
-  // parser returns correct values so the caller can honour the precedence:
-  //   flag > GOODVIBES_DAEMON_HOME env > homedir()
-  //   flag > GOODVIBES_WORKING_DIR env > process.cwd()
-
-  test('env GOODVIBES_DAEMON_HOME is the fallback when flag absent', () => {
-    // The parser returns undefined when the flag is absent; the caller reads
-    // process.env['GOODVIBES_DAEMON_HOME'] as the fallback instead.
-    const flags = parseCliFlags([]);
-    expect(flags.daemonHome).toBeUndefined();
-  });
-
-  test('env GOODVIBES_WORKING_DIR is the fallback when flag absent', () => {
-    const flags = parseCliFlags([]);
-    expect(flags.workingDir).toBeUndefined();
-  });
-
-  test('flag overrides env for daemon-home; flag present, env set', () => {
-    // Verify the flag value takes precedence: parser returns the flag value,
-    // the caller writes it to env before resolveDaemonCliOwnership() is called.
-    const savedEnv = process.env['GOODVIBES_DAEMON_HOME'];
-    try {
-      process.env['GOODVIBES_DAEMON_HOME'] = '/from/env';
-      const flags = parseCliFlags(['--daemon-home=/from/flag']);
-      // Flag value returned; caller will overwrite the env var with this.
-      expect(flags.daemonHome).toBe('/from/flag');
-    } finally {
-      if (savedEnv === undefined) {
-        delete process.env['GOODVIBES_DAEMON_HOME'];
-      } else {
-        process.env['GOODVIBES_DAEMON_HOME'] = savedEnv;
-      }
-    }
-  });
-
-  test('flag overrides env for working-dir; flag present, env set', () => {
-    const savedEnv = process.env['GOODVIBES_WORKING_DIR'];
-    try {
-      process.env['GOODVIBES_WORKING_DIR'] = '/from/env';
-      const flags = parseCliFlags(['--working-dir=/from/flag']);
-      expect(flags.workingDir).toBe('/from/flag');
-    } finally {
-      if (savedEnv === undefined) {
-        delete process.env['GOODVIBES_WORKING_DIR'];
-      } else {
-        process.env['GOODVIBES_WORKING_DIR'] = savedEnv;
-      }
-    }
+  test('--working-dir wins over the default working directory the environment supplies', () => {
+    const roots = { defaultWorkingDirectory: '/from/env', homeDirectory: '/home/user' };
+    expect(resolveShellRoots(roots, parseCliFlags(['--working-dir=/from/flag']).workingDir).workingDirectory).toBe('/from/flag');
+    expect(resolveShellRoots(roots, parseCliFlags([]).workingDir).workingDirectory).toBe('/from/env');
   });
 
   // ---------------------------------------------------------------------------
@@ -164,9 +116,9 @@ describe('parseCliFlags', () => {
   });
 
   test('infers provider from provider:model format in --model', () => {
-    const flags = parseCliFlags(['--model', 'inception:mercury-2']);
-    expect(flags.model).toBe('inception:mercury-2');
-    expect(flags.provider).toBe('inception');
+    const flags = parseCliFlags(['--model', 'inceptionlabs:mercury-2']);
+    expect(flags.model).toBe('inceptionlabs:mercury-2');
+    expect(flags.provider).toBe('inceptionlabs');
   });
 
   test('returns all undefined when no flags are provided', () => {
@@ -324,7 +276,6 @@ describe('parseCliFlags', () => {
     expect(configManager.get('web.host')).toBe('0.0.0.0');
     expect(configManager.get('controlPlane.enabled')).toBe(true);
     expect(configManager.get('controlPlane.hostMode')).toBe('network');
-    expect(configManager.get('controlPlane.allowRemote')).toBe(true);
     expect(configManager.get('daemon.enabled')).toBe(true);
     expect(configManager.get('service.enabled')).toBe(true);
     expect(configManager.get('service.autostart')).toBe(true);
@@ -362,7 +313,6 @@ describe('parseCliFlags', () => {
     expect(configManager.get('web.host')).toBe('127.0.0.1');
     expect(configManager.get('web.port')).toBe(4568);
     expect(configManager.get('controlPlane.hostMode')).toBe('local');
-    expect(configManager.get('controlPlane.allowRemote')).toBe(false);
   });
 
   test('external surface enable commands turn on listener service posture', async () => {
@@ -458,6 +408,48 @@ describe('parseCliFlags', () => {
     expect(parsed.readinessIssues.some((issue) => issue.includes('Slack is enabled but missing'))).toBe(true);
   });
 
+  test('surfaces check judges the web surface by the control plane that serves it, not by web.port', async () => {
+    const root = makeProjectTempDir('goodvibes-cli-surfaces-web-probe');
+    const listener = createServer();
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+    try {
+      const configManager = new ConfigManager({
+        surfaceRoot: 'tui',
+        configDir: join(root, '.goodvibes', 'tui'),
+        workingDir: root,
+      });
+      configManager.setDynamic('controlPlane.enabled', true);
+      configManager.setDynamic('controlPlane.hostMode', 'custom');
+      configManager.setDynamic('controlPlane.host', '127.0.0.1');
+      configManager.setDynamic('controlPlane.port', (listener.address() as AddressInfo).port);
+      configManager.setDynamic('web.enabled', true);
+      // Nothing listens here, as in a stock install.
+      configManager.setDynamic('web.hostMode', 'custom');
+      configManager.setDynamic('web.host', '127.0.0.1');
+      configManager.setDynamic('web.port', 1);
+
+      const json = await captureGoodVibesCliCommand(['surfaces', 'check', '--json'], configManager, root);
+      const parsed = JSON.parse(json.output) as { readinessIssues: string[]; web: { reachable?: boolean } };
+      expect(parsed.web.reachable).toBe(true);
+      expect(parsed.readinessIssues.filter((issue) => issue.startsWith('Web surface'))).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  });
+
+  test('surfaces check raises no web surface issue on a default config', async () => {
+    const root = makeProjectTempDir('goodvibes-cli-surfaces-default-web');
+    const configManager = new ConfigManager({
+      surfaceRoot: 'tui',
+      configDir: join(root, '.goodvibes', 'tui'),
+      workingDir: root,
+    });
+
+    const json = await captureGoodVibesCliCommand(['surfaces', 'check', '--json'], configManager, root);
+    const parsed = JSON.parse(json.output) as { readinessIssues: string[] };
+    expect(parsed.readinessIssues.filter((issue) => issue.toLowerCase().includes('web'))).toEqual([]);
+  });
+
   test('surfaces check reports disabled feature gates for configured surfaces', async () => {
     const root = makeProjectTempDir('goodvibes-cli-surfaces-feature-gates');
     const configManager = new ConfigManager({
@@ -533,88 +525,13 @@ describe('parseCliFlags', () => {
   });
 
   test('bundle export redacts secret config values and import skips redacted sentinels', async () => {
-    // Container paths of declared settings are synthetic config structure, not credential leaves.
-    const containers = new Set(
-      CONFIG_SCHEMA.flatMap((setting) => {
-        const parts = setting.key.split('.');
-        return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('.'));
-      }),
-    );
     const secretPaths = new Set(['surfaces.slack.signingSecret', 'surfaces.slack.botToken']);
-    const ordinaryPaths = new Set([
-      'judgment.volumeMonitor.enabled',
-      'judgment.volumeMonitor.intervalMs',
-      'judgment.volumeMonitor.windowMs',
-      'judgment.volumeMonitor.limit',
-      'judgment.volumeMonitor.budgets',
-      'provider.decisionRouter.initialContextChars',
-      'provider.decisionRouter.expandedContextChars',
-      'provider.decisionRouter.categories',
-      'provider.decisionRouter.categories.lookup-navigation',
-      'provider.decisionRouter.categories.lookup-navigation.label',
-      'provider.decisionRouter.categories.lookup-navigation.description',
-      'provider.decisionRouter.categories.lookup-navigation.target',
-      'provider.decisionRouter.categories.coding-implementation',
-      'provider.decisionRouter.categories.coding-implementation.label',
-      'provider.decisionRouter.categories.coding-implementation.description',
-      'provider.decisionRouter.categories.coding-implementation.target',
-      'provider.decisionRouter.categories.analysis-decisions',
-      'provider.decisionRouter.categories.analysis-decisions.label',
-      'provider.decisionRouter.categories.analysis-decisions.description',
-      'provider.decisionRouter.categories.analysis-decisions.target',
-      'provider.decisionRouter.categories.documentation-writing',
-      'provider.decisionRouter.categories.documentation-writing.label',
-      'provider.decisionRouter.categories.documentation-writing.description',
-      'provider.decisionRouter.categories.documentation-writing.target',
-      'provider.decisionRouter.categories.summarization-extraction',
-      'provider.decisionRouter.categories.summarization-extraction.label',
-      'provider.decisionRouter.categories.summarization-extraction.description',
-      'provider.decisionRouter.categories.summarization-extraction.target',
-      'provider.decisionRouter.categories.general',
-      'provider.decisionRouter.categories.general.label',
-      'provider.decisionRouter.categories.general.description',
-      'provider.decisionRouter.categories.general.target',
-      'provider.decisionRouter.categories.debugging-diagnosis',
-      'provider.decisionRouter.categories.debugging-diagnosis.label',
-      'provider.decisionRouter.categories.debugging-diagnosis.description',
-      'provider.decisionRouter.categories.debugging-diagnosis.target',
-      'provider.decisionRouter.categories.review-verification',
-      'provider.decisionRouter.categories.review-verification.label',
-      'provider.decisionRouter.categories.review-verification.description',
-      'provider.decisionRouter.categories.review-verification.target',
-      'provider.decisionRouter.categories.research',
-      'provider.decisionRouter.categories.research.label',
-      'provider.decisionRouter.categories.research.description',
-      'provider.decisionRouter.categories.research.target',
-      'provider.decisionRouter.categories.data-analysis',
-      'provider.decisionRouter.categories.data-analysis.label',
-      'provider.decisionRouter.categories.data-analysis.description',
-      'provider.decisionRouter.categories.data-analysis.target',
-      'surfaces.slack.defaultChannel',
-      'service.logPath',
-      'sandbox.egressAllowlist',
-      'sandbox.workspaceWritable',
-      'notifications.webhookUrls',
-      'cluster.peers',
-      'contract.gates',
-      ...Array.from({ length: 3 }, (_, index) =>
-        ['', '.name', '.command', '.enabled'].map((suffix) => `contract.gates.${index}${suffix}`),
-      ).flat(),
-      'worktree',
-      'worktree.setup',
-      'worktree.setup.commands',
-      'worktree.setup.carryOverGlobs',
-      'conversationGate.gatedSurfaces',
-      ...Array.from({ length: 14 }, (_, index) => `conversationGate.gatedSurfaces.${index}`),
-    ]);
+    // Only the two slack secrets read as credentials; every other config leaf, whatever the schema
+    // later gains, reads as ordinary. The export assertions below prove which values get redacted.
     const readingFor = (name: string, key: string | undefined): number => {
-      if (name === 'credential' && key !== undefined) {
-        if (secretPaths.has(key)) return 0.99;
-        if (containers.has(key) || ordinaryPaths.has(key)) return 0.01;
-      }
+      if (name === 'credential' && key !== undefined) return secretPaths.has(key) ? 0.99 : 0.01;
       throw new Error(`Unexpected redaction fixture question: ${name} / ${key}`);
     };
-    expect(() => readingFor('credential', 'surfaces.slack.unlistedValue')).toThrow();
     expect(() => readingFor('unlisted-question', 'provider')).toThrow();
     const publicFields = new Set([
       'config',
@@ -626,8 +543,18 @@ describe('parseCliFlags', () => {
       'diagnostics',
       'service',
       'issues',
+      'version',
+      'type',
+      'capturedAt',
+      'package',
+      'name',
+      'roots',
+      'workingDirectory',
+      'homeDirectory',
+      'secrets',
+      'onboarding',
     ]);
-    const publicLines = ['goodvibes-alerts', 'surfaces.slack.signingSecret', 'surfaces.slack.botToken'];
+    const publicLines = ['goodvibes-alerts', 'surfaces.slack.signingSecret', 'surfaces.slack.botToken', 'goodvibes.support'];
     const fake = fakePort((name, question, state) => {
       const diagnostic = publicErrorTextAnswer(publicLines, name, question, state);
       if (diagnostic !== undefined) return diagnostic;
@@ -684,7 +611,7 @@ describe('parseCliFlags', () => {
         workingDir: importRoot,
       });
       const imported = await captureGoodVibesCliCommand(
-        ['bundle', 'import', join(root, 'support-bundle.json')],
+        ['bundle', 'import', join(root, 'support-bundle.json'), '--yes'],
         importedConfig,
         importRoot,
       );

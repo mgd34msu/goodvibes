@@ -1,4 +1,4 @@
-import type { ProfileProjection } from '../platform/src/platform/owner-profile/types.ts';
+import type { ProfileProjection, ProfileProvenance } from '../platform/src/platform/owner-profile/types.ts';
 /**
  * owner-profile-writer.test.ts
  *
@@ -10,17 +10,19 @@ import type { ProfileProjection } from '../platform/src/platform/owner-profile/t
  * by re-serializing the entire model.
  */
 import { afterEach, describe, expect, test, beforeEach } from 'bun:test';
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { OwnerProfileStore } from '../platform/src/platform/owner-profile/store.ts';
 import { parseProfileDocument } from '../platform/src/platform/owner-profile/document.ts';
 import {
+  appendProse,
   persistProfileText,
   setField,
   type ProfilePersistIo,
 } from '../platform/src/platform/owner-profile/writer.ts';
 import { useSecurityReadings } from './helpers/security-readings.ts';
+import { waitFor } from './_helpers/test-timeout.ts';
 import { resetProcessUntrustedContentLedgerForTests } from '../platform/src/platform/security/untrusted-content.ts';
 
 useSecurityReadings();
@@ -386,48 +388,71 @@ describe('§14.17: an interrupted write leaves the previous complete file', () =
   });
 });
 
+describe('persistence keeps the profile private and in place', () => {
+  test('an existing file keeps its permissions and a new one is owner-only', async () => {
+    const path = tempProfile('original\n');
+    chmodSync(path, 0o640);
+    await persistProfileText(path, 'one\n');
+    expect(statSync(path).mode & 0o777).toBe(0o640);
+    const fresh = join(dirs[dirs.length - 1] ?? '', 'new-profile.md');
+    await persistProfileText(fresh, 'two\n');
+    expect(statSync(fresh).mode & 0o777).toBe(0o600);
+  });
+
+  test('a symlinked profile stays a symlink and its target is updated', async () => {
+    const path = tempProfile('original\n');
+    const link = join(dirs[dirs.length - 1] ?? '', 'linked.md');
+    symlinkSync(path, link);
+    await persistProfileText(link, 'replacement\n');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(path, 'utf-8')).toBe('replacement\n');
+  });
+
+  test('a temp copy left by a process that no longer exists is removed on the next write', async () => {
+    const path = tempProfile('original\n');
+    const stale = `${path}.tmp.2147483646.00000000-0000-0000-0000-000000000000`;
+    const mine = `${path}.tmp.${process.pid}.00000000-0000-0000-0000-000000000001`;
+    writeFileSync(stale, 'old copy', 'utf-8');
+    writeFileSync(mine, 'in flight', 'utf-8');
+    await persistProfileText(path, 'next\n');
+    const names = readdirSync(dirs[dirs.length - 1] ?? '');
+    expect(names).not.toContain(basename(stale));
+    expect(names).toContain(basename(mine));
+  });
+});
+
 describe('the watch survives the inode replacement an atomic write causes', () => {
   test('an external edit after two atomic writes is still observed', async () => {
     const path = tempProfile(['## Location', '', 'timezone: America/Detroit', ''].join('\n'));
     const store = new OwnerProfileStore({ path, reloadThrottleMs: 25 });
     await store.load();
     store.watch();
+    try {
+      // Two atomic writes: each replaces the file's inode via rename().
+      await store.set({ ...OWNER, fieldId: 'location.city', value: 'Lansing, MI', date: '2026-07-26' });
+      await store.set({ ...OWNER, fieldId: 'location.city', value: 'Detroit, MI', date: '2026-07-27' });
+      expect(store.get('location.city')?.value).toBe('Detroit, MI');
 
-    // Two atomic writes: each replaces the file's inode via rename().
-    await store.set({ ...OWNER, fieldId: 'location.city', value: 'Lansing, MI', date: '2026-07-26' });
-    await store.set({ ...OWNER, fieldId: 'location.city', value: 'Detroit, MI', date: '2026-07-27' });
-    expect(store.get('location.city')?.value).toBe('Detroit, MI');
-
-    // Let the watcher settle. Without this the reload queued by the second
-    // write's own rename event fires AFTER the hand edit below and picks it up
-    // incidentally, which would make this case pass against a file-level watch
-    // for the wrong reason.
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
-    // Now he edits the file by hand. A file-level watch is bound to an inode
-    // that the two renames above replaced, so it is blind to this; a
-    // directory-level watch filtered by filename sees it.
-    writeFileSync(
-      path,
-      ['## Location', '', 'timezone: America/Detroit', 'city: Ann Arbor, Michigan, edited by hand', ''].join('\n'),
-      'utf-8',
-    );
-
-    const seen = await waitFor(() => store.get('location.city')?.value === 'Ann Arbor, Michigan, edited by hand');
-    store.unwatch();
-    expect(seen).toBe(true);
+      // A file-level watch is bound to an inode that the two renames above
+      // replaced, so it is blind to everything below; a directory-level watch
+      // filtered by filename sees it. The reload queued by the renames' own
+      // events may pick up the first edit incidentally, so a second, different
+      // edit made after the first was seen is what shows the watch is alive.
+      const handEdit = (city: string): void => writeFileSync(
+        path,
+        ['## Location', '', 'timezone: America/Detroit', `city: ${city}`, ''].join('\n'),
+        'utf-8',
+      );
+      handEdit('Ann Arbor, Michigan, edited by hand');
+      await waitFor(() => store.get('location.city')?.value === 'Ann Arbor, Michigan, edited by hand');
+      handEdit('Flint, Michigan, edited again');
+      await waitFor(() => store.get('location.city')?.value === 'Flint, Michigan, edited again');
+    } finally {
+      store.unwatch();
+    }
+    expect(store.get('location.city')?.value).toBe('Flint, Michigan, edited again');
   });
 });
-
-/** Poll a predicate until it holds or the budget runs out. */
-async function waitFor(predicate: () => boolean, budgetMs = 5000): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return predicate();
-}
 
 describe('placement and caps', () => {
   test('a write to a missing section appends the canonical heading at the end', async () => {
@@ -460,7 +485,7 @@ describe('placement and caps', () => {
     expect(readFileSync(path, 'utf-8')).toContain('Shipping Address: 200 Office Way — tui');
   });
 
-  test('a machine write caps the line and collapses newlines in the value', () => {
+  test('a machine write shortens the quote to fit the line cap and collapses newlines in the value', () => {
     const projection = parseProfileDocument({
       path: '/x',
       text: ['## Notes', '', '- something', ''].join('\n'),
@@ -468,7 +493,7 @@ describe('placement and caps', () => {
     });
     const result = setField(projection, {
       fieldId: 'location.homeAddress',
-      value: `${'a'.repeat(5000)}\nsecond line`,
+      value: `${'a'.repeat(1900)}\nsecond line`,
       provenance: { surface: 'tui', date: '2026-07-27', said: 'x'.repeat(3000) },
     });
     expect(result.ok).toBe(true);
@@ -476,6 +501,19 @@ describe('placement and caps', () => {
     expect(written).toBeDefined();
     expect(written?.length).toBeLessThanOrEqual(4096);
     expect(written).not.toContain('\n');
+    expect(written).toContain('second line');
+  });
+
+  test('a value over the limit is refused rather than saved cut, for a field and for prose', () => {
+    const projection = parseProfileDocument({ path: '/x', text: ['## Notes', '', '- something', ''].join('\n'), exists: true });
+    const provenance: ProfileProvenance = { surface: 'tui', date: '2026-07-27', said: 'save it' };
+    const field = setField(projection, { fieldId: 'location.homeAddress', value: 'a'.repeat(2500), provenance });
+    expect(field.ok).toBe(false);
+    expect(field.reason).toContain('2000');
+    expect(field.lines).toEqual(projection.rawLines);
+    const note = appendProse(projection, { section: 'Notes', text: 'b'.repeat(2500), provenance });
+    expect(note.ok).toBe(false);
+    expect(note.reason).toContain('nothing was saved');
   });
 
   test('a prose bullet is appended to its section with provenance', async () => {
@@ -583,7 +621,7 @@ for (const outcome of ['success', 'failure', 'same-content'] as const) {
   });
 }
 
-test('independent own-write claims survive one concurrent completion', async () => {
+test('a queued write still holds reads uncurrent when the write ahead of it completes', async () => {
   const original = '# Owner profile\n## Identity\nname: Avery Chen\n';
   const path = tempProfile(original);
   const entered = [writeGate(), writeGate()], release = [writeGate(), writeGate()]; let index = 0;
@@ -597,9 +635,11 @@ test('independent own-write claims survive one concurrent completion', async () 
   const writeSame = () => store['commit']((projection: ProfileProjection) => ({ ok: true, reason: null, lines: projection.rawLines, changes: [] }));
   const first = writeSame(), second = writeSame();
   try {
-    await Promise.all(entered.map(gate => gate.promise));
+    // Writes in one process run one after the other: the second begins only once the first has finished.
+    await entered[0]!.promise;
     release[0]!.resolve(); expect((await first).ok).toBe(true);
     expect(() => before.assertCurrent()).toThrow(); expect(() => store.captureRead().assertCurrent()).toThrow();
+    await entered[1]!.promise;
     release[1]!.resolve(); expect((await second).ok).toBe(true);
     store.captureRead().assertCurrent(); expect(readFileSync(path, 'utf8')).toBe(original);
   } finally { for (const gate of release) gate.resolve(); await Promise.all([first, second]); }

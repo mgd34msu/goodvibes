@@ -44,7 +44,7 @@ export interface DeviceCapabilityWorkResult {
 /** Why a request payload was rejected before it reached the device. */
 export interface DeviceCapabilityInputProblem {
   readonly field: string;
-  readonly problem: 'missing' | 'wrong-type';
+  readonly problem: 'missing' | 'wrong-type' | 'unsupported-value';
   readonly expected: string;
 }
 
@@ -68,6 +68,12 @@ export function validateDeviceCapabilityInput(
     }
     if (typeof value !== field.type) {
       problems.push({ field: field.name, problem: 'wrong-type', expected: field.type });
+      continue;
+    }
+    // The one place the "http(s) URL" the catalog promises is enforced, so the
+    // `phone` tool's run action, the control-plane verb and the node all agree.
+    if (descriptor.id === 'device.command.open_url' && field.name === 'url' && !/^https?:\/\/\S/i.test((value as string).trim())) {
+      problems.push({ field: field.name, problem: 'unsupported-value', expected: 'an http or https URL' });
     }
   }
   return problems;

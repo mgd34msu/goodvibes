@@ -186,6 +186,17 @@ export function preconfigureLocalVoiceKeys(deps: VoicePreconfigDeps): VoicePreco
       && current !== prior[key]
       && !insideManagedRoot(current);
     const supersedes = foreign(binaryKey, currentBinary) || foreign(modelKey, currentModel);
+    // An engine the user chose themselves, with no foreign path to replace it:
+    // filling the empty binary and model rows from the managed install would
+    // pair that engine with another engine's binary and model.
+    const currentEngine = (deps.getConfig(engineKey) ?? '').trim();
+    if (!supersedes && currentEngine.length > 0 && currentEngine !== prior[engineKey] && currentEngine !== engine) {
+      const reason = `${engineKey} is set to a user value (${currentEngine}); the managed ${engine} install was not applied to this engine family`;
+      skipped.push({ key: engineKey, reason: `already set to a user value (${currentEngine})` });
+      skipped.push({ key: binaryKey, reason });
+      skipped.push({ key: modelKey, reason });
+      return;
+    }
     apply(engineKey, engine, 'engine', supersedes);
     apply(binaryKey, binary, 'path', supersedes);
     apply(modelKey, modelPath, 'path', supersedes);

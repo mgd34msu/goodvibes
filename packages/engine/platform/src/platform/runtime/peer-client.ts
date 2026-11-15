@@ -164,15 +164,25 @@ export interface PeerClient {
   getNodeHostContract(): DistributedNodeHostContract;
 }
 
-function countRequests(requests: readonly DistributedRuntimePairRequest[]): PeerClientPairingSnapshot {
+/** Reads past the manager's list defaults: its `limit` is a plain slice, so this means "all". */
+const ALL = Number.MAX_SAFE_INTEGER;
+/** How many pair requests, peers and work items a snapshot lists; counts and per-peer snapshots cover every one. */
+const SNAPSHOT_PAIR_REQUESTS = 250;
+const SNAPSHOT_PEERS = 500;
+const SNAPSHOT_WORK = 500;
+
+function countRequests(
+  requests: readonly DistributedRuntimePairRequest[],
+  all: readonly DistributedRuntimePairRequest[] = requests,
+): PeerClientPairingSnapshot {
   return {
     requests,
-    total: requests.length,
-    pending: requests.filter((request) => request.status === 'pending').length,
-    approved: requests.filter((request) => request.status === 'approved').length,
-    verified: requests.filter((request) => request.status === 'verified').length,
-    rejected: requests.filter((request) => request.status === 'rejected').length,
-    expired: requests.filter((request) => request.status === 'expired').length,
+    total: all.length,
+    pending: all.filter((request) => request.status === 'pending').length,
+    approved: all.filter((request) => request.status === 'approved').length,
+    verified: all.filter((request) => request.status === 'verified').length,
+    rejected: all.filter((request) => request.status === 'rejected').length,
+    expired: all.filter((request) => request.status === 'expired').length,
   };
 }
 
@@ -206,67 +216,69 @@ function buildAcpSnapshot(store: RuntimeStore): PeerClientAcpSnapshot {
   };
 }
 
-function buildPeerSnapshot(deps: PeerClientDependencies, peerId: string): PeerClientPeerSnapshot | null {
+/** One complete read of everything a peer snapshot draws on. */
+interface PeerListing {
+  readonly peers: readonly DistributedPeerRecord[];
+  readonly pairRequests: readonly DistributedRuntimePairRequest[];
+  readonly work: readonly DistributedPendingWork[];
+  readonly contracts: readonly RemoteRunnerContract[];
+  readonly artifacts: readonly RemoteExecutionArtifact[];
+  readonly sessions: readonly RemoteSessionStateSnapshot[];
+}
+
+function readPeerListing(deps: PeerClientDependencies): PeerListing {
   deps.remoteRunnerRegistry.ensureContractsFromStore(deps.runtimeStore);
-  const peers = deps.distributedRuntime.listPeers(undefined, 500);
-  const peer = peers.find((entry) => entry.id === peerId) ?? null;
-  const runnerContract = deps.remoteRunnerRegistry.getContract(peerId);
-  const pairRequests = deps.distributedRuntime
-    .listPairRequests(250)
-    .filter((request) => request.peerId === peerId || request.requestedId === peerId);
-  const pendingWork = deps.distributedRuntime.listWork(250, peerId);
-  const artifacts = deps.remoteRunnerRegistry.listArtifacts().filter((artifact) => artifact.runnerId === peerId);
-  const sessions = deps.remoteSupervisor.getSnapshot(deps.runtimeStore).sessions;
-  const session = sessions.find((entry) => entry.runnerId === peerId) ?? null;
-  if (!peer && !runnerContract && !session && pairRequests.length === 0 && pendingWork.length === 0 && artifacts.length === 0) {
-    return null;
-  }
   return {
-    peerId,
-    peer,
-    session,
-    runnerContract: runnerContract ?? null,
-    pairRequests,
-    pendingWork,
-    artifacts,
+    peers: deps.distributedRuntime.listPeers(undefined, ALL),
+    pairRequests: deps.distributedRuntime.listPairRequests(ALL),
+    work: deps.distributedRuntime.listWork(ALL),
+    contracts: deps.remoteRunnerRegistry.listContracts(),
+    artifacts: deps.remoteRunnerRegistry.listArtifacts(),
+    sessions: deps.remoteSupervisor.getSnapshot(deps.runtimeStore).sessions,
   };
 }
 
-function buildPeerSnapshots(deps: PeerClientDependencies): readonly PeerClientPeerSnapshot[] {
-  deps.remoteRunnerRegistry.ensureContractsFromStore(deps.runtimeStore);
-  const pairingRequests = deps.distributedRuntime.listPairRequests(250);
-  const peers = deps.distributedRuntime.listPeers(undefined, 500);
-  const work = deps.distributedRuntime.listWork(500);
-  const contracts = deps.remoteRunnerRegistry.listContracts();
-  const sessions = deps.remoteSupervisor.getSnapshot(deps.runtimeStore).sessions;
-  const peerIds = collectPeerIds(peers, contracts, sessions, pairingRequests, work);
+function peerSnapshotFrom(listing: PeerListing, peerId: string): PeerClientPeerSnapshot | null {
+  const peer = listing.peers.find((entry) => entry.id === peerId) ?? null;
+  const runnerContract = listing.contracts.find((entry) => entry.runnerId === peerId) ?? null;
+  const pairRequests = listing.pairRequests.filter((request) => request.peerId === peerId || request.requestedId === peerId);
+  const pendingWork = listing.work.filter((item) => item.peerId === peerId);
+  const artifacts = listing.artifacts.filter((artifact) => artifact.runnerId === peerId);
+  const session = listing.sessions.find((entry) => entry.runnerId === peerId) ?? null;
+  if (!peer && !runnerContract && !session && pairRequests.length === 0 && pendingWork.length === 0 && artifacts.length === 0) {
+    return null;
+  }
+  return { peerId, peer, session, runnerContract, pairRequests, pendingWork, artifacts };
+}
+
+function buildPeerSnapshot(deps: PeerClientDependencies, peerId: string): PeerClientPeerSnapshot | null {
+  return peerSnapshotFrom(readPeerListing(deps), peerId);
+}
+
+function buildPeerSnapshots(listing: PeerListing): readonly PeerClientPeerSnapshot[] {
+  const peerIds = collectPeerIds(listing.peers, listing.contracts, listing.sessions, listing.pairRequests, listing.work);
   const snapshots = peerIds
-    .map((peerId) => buildPeerSnapshot(deps, peerId))
+    .map((peerId) => peerSnapshotFrom(listing, peerId))
     .filter((snapshot): snapshot is PeerClientPeerSnapshot => snapshot !== null);
   return Object.freeze(snapshots);
 }
 
 function buildSnapshot(deps: PeerClientDependencies): PeerClientSnapshot {
-  deps.remoteRunnerRegistry.ensureContractsFromStore(deps.runtimeStore);
-  const pairingRequests = deps.distributedRuntime.listPairRequests(250);
-  const peers = deps.distributedRuntime.listPeers(undefined, 500);
-  const work = deps.distributedRuntime.listWork(500);
+  const listing = readPeerListing(deps);
   const pools = deps.remoteRunnerRegistry.listPools();
-  const contracts = deps.remoteRunnerRegistry.listContracts();
-  const artifacts = deps.remoteRunnerRegistry.listArtifacts();
   const supervisor = deps.remoteSupervisor.getSnapshot(deps.runtimeStore);
   return Object.freeze({
     capturedAt: Date.now(),
     nodeHostContract: deps.distributedRuntime.getNodeHostContract(),
     acp: buildAcpSnapshot(deps.runtimeStore),
-    pairing: countRequests(pairingRequests),
-    peers,
-    peerSnapshots: buildPeerSnapshots(deps),
-    work,
+    pairing: countRequests(listing.pairRequests.slice(0, SNAPSHOT_PAIR_REQUESTS), listing.pairRequests),
+    peers: listing.peers.slice(0, SNAPSHOT_PEERS),
+    peerSnapshots: buildPeerSnapshots(listing),
+    work: listing.work.slice(0, SNAPSHOT_WORK),
     runners: {
       pools,
-      contracts,
-      artifacts,
+      contracts: listing.contracts,
+      artifacts: listing.artifacts,
     },
     supervisor,
   });
@@ -297,7 +309,7 @@ export function createPeerClient(deps: PeerClientDependencies): PeerClient {
         return resolved.distributedRuntime.listPeers(kind, limit);
       },
       get(peerId: string): DistributedPeerRecord | null {
-        return resolved.distributedRuntime.listPeers(undefined, 500).find((peer) => peer.id === peerId) ?? null;
+        return resolved.distributedRuntime.listPeers(undefined, ALL).find((peer) => peer.id === peerId) ?? null;
       },
       getSnapshot(peerId: string): PeerClientPeerSnapshot | null {
         return buildPeerSnapshot(resolved, peerId);

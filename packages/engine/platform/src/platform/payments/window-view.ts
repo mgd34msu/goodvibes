@@ -5,6 +5,14 @@ export type PaymentAnswer = 'approve' | 'deny' | 'acknowledge' | 'object';
 export interface PaymentPurchaseStatus {
   readonly windows: readonly PaymentWindowView[];
   readonly operations: readonly PaymentOperationView[];
+  /** Purchases whose status record could not be read; their evidence still has to be inspected. Empty when every record read. */
+  readonly unreadable: readonly PaymentUnreadableOperation[];
+}
+
+/** One purchase the daemon could not read a status record for, with what to do about it. */
+export interface PaymentUnreadableOperation {
+  readonly purchaseId: string;
+  readonly reason: string;
 }
 
 /** Owner-facing notice, never card material or a mutable waiter/capability. */
@@ -35,9 +43,18 @@ function reference(value: unknown): string {
 
 /** Shared browser/terminal decoder: no stores, native runtime or model calls. */
 export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
-  const response = object(value, ['windows', 'operations']);
+  // `unreadable` is sent only when a record could not be read.
+  const response = value !== null && typeof value === 'object' && !Array.isArray(value) && 'unreadable' in value
+    ? object(value, ['windows', 'operations', 'unreadable']) : object(value, ['windows', 'operations']);
   const windows = response['windows'];
   const operations = response['operations'];
+  const unreadable = response['unreadable'] ?? [];
+  if (!Array.isArray(unreadable) || unreadable.length > 356) return failure();
+  const capturedUnreadable = unreadable.map((entry: unknown): PaymentUnreadableOperation => {
+    const row = object(entry, ['purchaseId', 'reason']);
+    if (typeof row['reason'] !== 'string' || row['reason'].length > 1024) return failure();
+    return Object.freeze({ purchaseId: reference(row['purchaseId']), reason: row['reason'] });
+  });
   if (!Array.isArray(windows) || windows.length > 256 || !Array.isArray(operations) || operations.length > 356) return failure();
   const purchaseIds = new Set<string>(), operationIds = new Set<string>();
   const capturedOperations = operations.map((entry: unknown) => {
@@ -47,7 +64,7 @@ export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
     return operation;
   });
   const ids = new Set<string>(), windowIds = new Set<string>();
-  return Object.freeze({ operations: Object.freeze(capturedOperations), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
+  return Object.freeze({ operations: Object.freeze(capturedOperations), unreadable: Object.freeze(capturedUnreadable), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
     const row = object(entry, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
     const purchaseId = reference(row['purchaseId']), windowId = reference(row['windowId']);
     if (ids.has(purchaseId) || windowIds.has(windowId)) return failure();

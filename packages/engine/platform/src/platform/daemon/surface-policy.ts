@@ -1,4 +1,5 @@
 import type { ConfigManager } from '../config/manager.js';
+import type { ConfigKey } from '../config/schema.js';
 
 type SurfaceDeliveryTarget =
   | 'slack'
@@ -17,10 +18,39 @@ type SurfaceDeliveryTarget =
   | 'mattermost'
   | 'matrix';
 
+const SURFACE_CONFIG_SEGMENT: Readonly<Partial<Record<SurfaceDeliveryTarget, string>>> = { 'google-chat': 'googleChat' };
+
+/**
+ * `enabled=false` that the owner actually chose (not the schema default) wins
+ * over any credential or environment variable that happens to be present.
+ */
+function explicitlyDisabled(configManager: ConfigManager, surface: SurfaceDeliveryTarget): boolean {
+  const key = `surfaces.${SURFACE_CONFIG_SEGMENT[surface] ?? surface}.enabled` as ConfigKey;
+  if (configManager.get(key) !== false) return false;
+  if (typeof configManager.describeConfigKeySource !== 'function') return false;
+  const source = configManager.describeConfigKeySource(key);
+  return !(source.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default'));
+}
+
+const CONFIGURED_SURFACES: ReadonlySet<string> = new Set<SurfaceDeliveryTarget>([
+  'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat', 'signal', 'whatsapp',
+  'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix',
+]);
+
+/**
+ * Whether inbound traffic for a surface may proceed. Credentials alone keep it
+ * on (many installs run credential-only), but an owner who turned the surface
+ * off in settings is obeyed: the same rule delivery applies, in one place.
+ */
+export function isSurfaceIngressEnabled(configManager: ConfigManager, surface: string): boolean {
+  return !CONFIGURED_SURFACES.has(surface) || !explicitlyDisabled(configManager, surface as SurfaceDeliveryTarget);
+}
+
 export function isSurfaceDeliveryEnabled(
   configManager: ConfigManager,
   surface: SurfaceDeliveryTarget,
 ): boolean {
+  if (explicitlyDisabled(configManager, surface)) return false;
   if (surface === 'slack') {
     return Boolean(configManager.get('surfaces.slack.enabled') || process.env.SLACK_BOT_TOKEN || process.env.SLACK_APP_TOKEN || process.env.SLACK_WEBHOOK_URL);
   }
@@ -54,7 +84,7 @@ export function isSurfaceDeliveryEnabled(
     return Boolean(surfaces.signal.enabled || surfaces.signal.bridgeUrl || surfaces.signal.account || process.env.SIGNAL_BRIDGE_TOKEN);
   }
   if (surface === 'whatsapp') {
-    return Boolean(surfaces.whatsapp.enabled || surfaces.whatsapp.accessToken || surfaces.whatsapp.phoneNumberId || process.env.WHATSAPP_ACCESS_TOKEN);
+    return Boolean(surfaces.whatsapp.enabled || surfaces.whatsapp.accessToken || surfaces.whatsapp.phoneNumberId || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_BRIDGE_URL || process.env.WHATSAPP_BRIDGE_TOKEN);
   }
   if (surface === 'telephony') {
     return Boolean(

@@ -53,8 +53,11 @@ describe('artifact kind', () => {
 
 describe('remote artifact host check', () => {
   test('a public-only fetch refuses a loopback host', async () => {
-    const store = new ArtifactStore({ rootDir: mkdtempSync(join(tmpdir(), 'artifact-host-')) });
-    await expect(store.create({ uri: 'http://127.0.0.1:9/secret', fetchMode: 'public-only' })).rejects.toThrow(/blocked by SSRF policy/);
-    await expect(store.create({ uri: 'http://localhost:9/secret' })).rejects.toThrow(/blocked by SSRF policy/);
+    const rootDir = mkdtempSync(join(tmpdir(), 'artifact-host-'));
+    try {
+      const store = new ArtifactStore({ rootDir });
+      await expect(store.create({ uri: 'http://127.0.0.1:9/secret', fetchMode: 'public-only' })).rejects.toThrow(/blocked by SSRF policy/);
+      await expect(store.create({ uri: 'http://localhost:9/secret' })).rejects.toThrow(/blocked by SSRF policy/);
+    } finally { rmSync(rootDir, { recursive: true, force: true }); }
   });
 });

@@ -1,8 +1,9 @@
-import type { WebSearchInstantAnswer, WebSearchProvider, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
+import type { WebSearchInstantAnswer, WebSearchProvider, WebSearchProviderCall, WebSearchProviderResponse, WebSearchRequest } from '../types.js';
 import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  resolveBaseUrl,
   resultFromRecord,
   withInlineBearer,
   type SearchProviderContext,
@@ -41,9 +42,9 @@ export function createTavilySearchProvider(context: SearchProviderContext): WebS
         defaultBaseUrl: TAVILY_DEFAULT_BASE_URL,
       }, { env, serviceRegistry });
     },
-    async search(request: WebSearchRequest): Promise<WebSearchProviderResponse> {
+    async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
-      const baseUrl = (serviceRegistry.get(TAVILY_SERVICE_NAME)?.baseUrl ?? TAVILY_DEFAULT_BASE_URL).replace(/\/+$/, '');
+      const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, TAVILY_SERVICE_NAME, TAVILY_DEFAULT_BASE_URL)!;
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/search`,
         method: 'POST',
@@ -58,7 +59,7 @@ export function createTavilySearchProvider(context: SearchProviderContext): WebS
         },
         service: serviceRegistry.get(TAVILY_SERVICE_NAME) ? TAVILY_SERVICE_NAME : undefined,
         auth: serviceRegistry.get(TAVILY_SERVICE_NAME) ? undefined : withInlineBearer(env, TAVILY_ENV_KEYS),
-        fetcher: context.fetcher,
+        fetcher: context.fetcher ?? call?.fetcher,
       });
       const results = Array.isArray(payload.results)
         ? payload.results

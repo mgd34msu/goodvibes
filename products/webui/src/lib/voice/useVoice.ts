@@ -29,6 +29,7 @@ import {
   utteranceToAudioArtifact,
   type AudioCaptureFailureReason,
   type CapturedUtterance,
+  type UtteranceAudioArtifact,
 } from '@goodvibes-jev/engine/platform/platform/voice/capture';
 import { client as platformClient } from '../goodvibes';
 import { asRecord } from '../object';
@@ -223,7 +224,14 @@ export async function transcribeUtterance(
   utterance: CapturedUtterance,
   providerId?: string,
 ): Promise<string> {
-  const artifact = utteranceToAudioArtifact(utterance);
+  return transcribeArtifact(utteranceToAudioArtifact(utterance), providerId);
+}
+
+/** The one artifact-to-`voice.stt` mapping, for callers that already hold the encoded audio. */
+export async function transcribeArtifact(
+  artifact: UtteranceAudioArtifact,
+  providerId?: string,
+): Promise<string> {
   const result = await platformClient.operator.voice.stt({
     audio: {
       mimeType: artifact.mimeType,

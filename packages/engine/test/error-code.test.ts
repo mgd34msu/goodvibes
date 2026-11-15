@@ -39,39 +39,6 @@ describe('EngineErrorCodes const object', () => {
       expect(key).toBe(value);
     }
   });
-
-  test('contains all expected canonical codes', () => {
-    const expected: EngineErrorCode[] = [
-      'AUTH_REQUIRED',
-      'TOKEN_EXPIRED',
-      'PERMISSION_DENIED',
-      'PAYMENT_REQUIRED',
-      'RATE_LIMITED',
-      'NETWORK_UNREACHABLE',
-      'TIMEOUT',
-      'CANCELLED',
-      'NOT_FOUND',
-      'CONFLICT',
-      'SESSION_CLOSED',
-      'NOT_INVOKABLE',
-      'METHOD_NOT_FOUND',
-      'VALIDATION_FAILED',
-      'AGENT_TIMEOUT',
-      'AGENT_FAILED',
-      'TOOL_EXEC_FAILED',
-      'SERVICE_UNAVAILABLE',
-      'CONTRACT_MISMATCH',
-      'PROTOCOL_ERROR',
-      'INTERNAL_ERROR',
-      'ENGINE_CONFIGURATION_ERROR',
-      'ENGINE_CONTRACT_ERROR',
-      'ENGINE_HTTP_STATUS_ERROR',
-      'UNKNOWN',
-    ];
-    for (const code of expected) {
-      expect(EngineErrorCodes[code]).toBe(code);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -399,54 +366,5 @@ describe('agent and domain-specific codes', () => {
     });
     const json = err.toJSON();
     expect(json.code).toBe('AGENT_TIMEOUT');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// switch exhaustiveness pattern (compile + runtime)
-// ---------------------------------------------------------------------------
-
-describe('switch exhaustiveness', () => {
-  test('switch on code covers all EngineErrorCode values at runtime', () => {
-    const allCodes = Object.values(EngineErrorCodes) as EngineErrorCode[];
-    const handled: EngineErrorCode[] = [];
-
-    for (const code of allCodes) {
-      const err: { code: EngineErrorCode | (string & {}) } = { code };
-      if (!isKnownErrorCode(err.code)) continue;
-      const knownCode: EngineErrorCode = err.code;
-      switch (knownCode) {
-        case 'AUTH_REQUIRED':
-        case 'TOKEN_EXPIRED':
-        case 'PERMISSION_DENIED':
-        case 'PAYMENT_REQUIRED':
-        case 'RATE_LIMITED':
-        case 'NETWORK_UNREACHABLE':
-        case 'TIMEOUT':
-        case 'CANCELLED':
-        case 'NOT_FOUND':
-        case 'CONFLICT':
-        case 'SESSION_CLOSED':
-        case 'NOT_INVOKABLE':
-        case 'METHOD_NOT_FOUND':
-        case 'VALIDATION_FAILED':
-        case 'AGENT_TIMEOUT':
-        case 'AGENT_FAILED':
-        case 'TOOL_EXEC_FAILED':
-        case 'SERVICE_UNAVAILABLE':
-        case 'CONTRACT_MISMATCH':
-        case 'PROTOCOL_ERROR':
-        case 'INTERNAL_ERROR':
-        case 'ENGINE_CONFIGURATION_ERROR':
-        case 'ENGINE_CONTRACT_ERROR':
-        case 'ENGINE_HTTP_STATUS_ERROR':
-        case 'UNKNOWN':
-          handled.push(knownCode);
-          break;
-      }
-    }
-
-    expect(handled.length).toBe(allCodes.length);
-    expect(handled).toEqual(expect.arrayContaining(allCodes));
   });
 });

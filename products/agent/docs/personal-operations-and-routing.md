@@ -1,103 +1,50 @@
 # Personal operations and task routing
 
-The public `gateJudgmentRegistry` supplies the existing
-`engine.tools.registry-rank` battery. Agent supplies typed, descriptive operation
-catalog data; it does not copy the battery, bands, or a lexical substitute.
-`rankHarnessCatalog` uses the installed runtime port and returns its banded
-readings, probabilities, and decision ids. Positive, negative, and uncertain
-candidate dispositions are recorded. Reuse this canonical candidate reader rather than installing another semantic owner.
+`personal_ops` forwards to `agent_harness`, which picks one of ten personal
+operations (including the two calendar and the two task variants) by ranking
+the operation catalog with the shared `engine.tools.registry-rank` judgment.
+Candidate order and confidence come from those readings. Agent adds no keyword
+intent, preference weights or default task fallback. A ranking never grants
+effect permission and never replaces connector discovery or redaction.
 
-- `agent-harness-personal-ops-intake.ts` ranks the complete
-  ten-operation catalog, including the two calendar variants and the two task
-  variants. Connector selection uses the operation purpose and the canonical
-  rerank after structural effect/capability scoping. Keyword intent, token
-  preference weights, fabricated confidence priorities, and the default task
-  fallback are removed. Candidate order and confidence derive from readings.
-- `agent-harness-personal-ops.ts` uses canonical query ranking
-  for queue and lane lookup. An exact lane id remains deterministic; an empty
-  queue query retains the existing readiness ordering.
-- `resolveRunRecord` ranks non-exact requests only to return
-  suggestions. Even a positive low-stakes reading cannot authorize a provider
-  read. It returns `selection_required` / `exact_record_identity_required` so the
-  caller can retry with an exact record identity. A missing explicit record id
-  never falls back to another record. Uncertain readings return `deferred`.
-- The actual `personal_ops` facade forwards Tool.execute options to
-  `agent_harness`; the harness awaits the canonical caller and carries its
-  signal. The PersonalOps MCP adapter forwards that signal in the existing
-  optional third `McpApi.callTool` argument.
-  Exact execution retains existing effect, readiness, required-field, and
-  confirmation checks. MCP remains the canonical permission/admission owner.
-  Source API/session identity is rechecked immediately before dispatch.
+## Choosing a record or lane
 
-## Privacy and current ownership
+- A free-text queue or lane query is ranked. An exact lane id stays
+  deterministic, and an empty queue query keeps the readiness ordering.
+- A request that names a record without an exact identity returns suggestions
+  only: `selection_required` with `exact_record_identity_required`. Retry with
+  the exact record id. A missing explicit record id never falls back to another
+  record, and even a confident low-stakes reading cannot authorize a provider read.
+- An uncertain reading returns `deferred` with a machine-readable reason. No
+  clarification or approval loop is added.
+- Exact execution keeps the existing effect, readiness, required-field and
+  confirmation checks. MCP stays the permission owner, and the source session is
+  rechecked immediately before dispatch. Cancelling the tool call reaches the
+  MCP call.
 
-`agent-harness-catalog-ranking.ts` descriptor-captures complete input before any
-600-character display projection. The existing runtime-bound
-`ProtectedSourceOwner` locally screens the complete query, identity, and
-catalog description. Private DTO metadata is descriptor-safely cloned but is not
-sent to screening or ranking; PAN-shaped receipt identities in such unrelated
-metadata are not misclassified as outbound payment material. The same bytes in
-a transmitted query, id, or description still pass the complete canonical
-privacy floor, with no generic identity exemption. Only current projected values
-reach registry-rank.
-Opaque ordinal candidate ids prevent source identity from bypassing screening
-through the decision log. Missing/uncertain local screening holds the operation;
-there is no hosted screening fallback, endpoint discovery, or new authorization.
+## Privacy
 
-The installed judgment port identity, model, and ask binding; protected source
-receipts; caller source/session identity; and cancellation are fenced across
-awaits, wire attempts, and log retention. Released source handles cannot publish
-late readings. Temporary unavailability remains owned by the canonical transport.
-Uncertain intake returns a machine-readable deferred reason, without adding a
-human permission/clarification loop. Existing missing-operation fields and
-explicit effect confirmations remain unchanged.
+The query, identity and catalog description are screened locally before they
+are displayed or ranked; the display projection is capped at 600 characters.
+Credential-like or other protected material is refused before any local or
+hosted request. When local screening is missing or unsettled the operation is
+held; there is no hosted screening fallback. Private metadata is not sent to
+ranking. Candidate ids are opaque so source identity cannot reach the decision
+log. If the authority, judgment binding or session changes mid-request, the
+operation is refused rather than dispatched late.
 
-`agent-personal-ops-ingress.ts` registers before generic registry readers and
-repair. It preserves an invocation only when the full local-screened JSON is
-unchanged; protected changes hold rather than rewrite execution intent. Harness
-registration composes this with the existing research projector and delegates
-unrelated requests to that original owner. PersonalOps status/briefing retain
-ordinary behavior without a screening owner. Repair cannot enter a newly
-protected mode from an unprotected projection.
+Status and briefing work as usual when no screening owner is installed.
 
-## Personal-operation validation
+## Task-route planning
 
-- contradictory keywords, canonical probability ordering and negative/uncertain
-  outcomes; complete decision receipts;
-- actual `personal_ops` to `agent_harness` calls and both registered
-  `ToolRegistry.execute` paths;
-- deterministic credential refusal before local or hosted requests, including
-  protected material beyond the display cap; complete PII screening; no getter
-  execution; missing/unsettled screening with zero catalog requests;
-- cancellation during local screening and after judgment starts; authority and
-  judgment binding replacement; stale projected invocation refusal;
-- exact record identity versus suggestion-only semantic lookup, existing
-  confirmation/effect boundaries, cancellation reaching the MCP facade, and
-  session replacement during schema discovery preventing another dispatch;
-- unmodified research projector behavior, ordinary status/briefing without a
-  source owner, and existing full harness scenarios.
+Route tools plan only; they never dispatch a returned route. A plan is one of:
 
-Synthetic screening services are explicit loopback fixtures. Their test process
-has proxy variables removed so the engine's direct-route containment rule can
-be exercised; no production proxy behavior is changed. These are contract and
-boundary receipts, not live PII/classification quality proof.
+- ready: matches carry an actionable yes from the ranking, with the original
+  decision ids in `judgment`;
+- uncertain: an unresolved required reading yields an `uncertain` plan with no
+  preferred route, ordinary matches or executable recommendation.
 
-Keep connector lane/capability discovery, placeholder generation, result-field
-interpretation and redaction under their actual semantic owners. A catalog-rank
-reading does not establish any of these independent meanings or grant effect
-permission. Shared `agent.task-route.catalog` remains the route planner's owner.
-
-## Task-route uncertainty
-
-The adapter passes the public `Ranked` readings with their original decision IDs. Engine composition preserves selector, slot, named-target and catalog evidence in `judgment`. An unresolved required reading produces a discriminated `uncertain` plan without `preferred`, ordinary matches or executable recommendations. Ready catalog matches require an actionable yes, and ready alternatives omit non-actionable fits while retaining those readings in diagnostics. Missing catalogs remain optional; a supplied catalog's failure propagates instead of becoming a successful empty result. A live named-ID listing change during a pending pass rejects publication. Cancellation is checked before readings and before publication.
-
-Consume the shared judgment outcome and retry owners without adding product-local outcome types, retry loops or human approval/escalation workflows. Existing route effect boundaries remain unchanged. These route tools plan only; they do not dispatch returned routes.
-
-Validate local scripted answers through actual public patterns and SQLite decision
-logging, including 0.5/0.57 catalog uncertainty, uncertain effect slots, weak
-selector fallback, a changing live named-channel target and registered Agent
-composition. Registered tools preserve catalog/selection decision-log evidence
-and perform zero downstream dispatches for uncertain plans. Keep unavailable
-provider, supplied-catalog failure, pre-abort, pending-abort and late-result cases.
-These tools plan; they do not dispatch returned routes. Synthetic results do not
-establish live-provider classification quality.
+A catalog that is not supplied is optional; a supplied catalog that fails
+returns the failure, not an empty result. If a named channel's live listing
+changes while a plan is pending, the plan is rejected. Cancellation is honoured
+before readings and before publication.

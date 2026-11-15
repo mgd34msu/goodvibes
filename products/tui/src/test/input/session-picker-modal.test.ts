@@ -42,17 +42,6 @@ describe('SessionPickerModal', () => {
     expect(modal.active).toBe(false);
   });
 
-  test('open() on empty dir shows empty sessions', () => {
-    // Override the internal SessionManager by testing with no sessions
-    modal = new SessionPickerModal(sm);
-    // The modal uses getSessionManager() which points to cwd, so just test the interface
-    modal.active = true;
-    modal.sessions = [];
-    modal.selectedIndex = 0;
-    expect(modal.sessions.length).toBe(0);
-    expect(modal.getSelected()).toBeNull();
-  });
-
   test('navigation wraps around (moveUp from 0 → last)', () => {
     modal = new SessionPickerModal(sm);
     modal.sessions = [
@@ -159,7 +148,7 @@ describe('SessionPickerModal', () => {
       expect(handleSessionPickerToken(state, enter)).toBe(true);
       const first = modal.pendingResume;
       expect(first).not.toBeNull();
-      await Promise.resolve();
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
       expect(entered).toEqual(['beta']);
       expect(modal.active).toBe(false);
       expect(dismissals).toBe(1);

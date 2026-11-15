@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { AgentPersonaRegistry, assertNoSecretLikeText } from './persona-registry.ts';
 import { AgentRoutineRegistry } from './routine-registry.ts';
@@ -177,7 +178,13 @@ export function readAgentRuntimeProfileSelection(baseHomeDirectory: string): Age
       path,
       exists: existsSync(resolution.homeDirectory),
     };
-  } catch {
+  } catch (error) {
+    // Falling back to the default home is right, but not silently: the owner
+    // chose a profile and is about to be working in a different one.
+    logger.warn('Agent runtime profile selection could not be read; using the default home', {
+      path,
+      error: summarizeError(error),
+    });
     return null;
   }
 }
@@ -470,8 +477,30 @@ function parseStarterTemplate(raw: unknown, source: AgentRuntimeProfileTemplateS
 function readLocalTemplate(path: string): AgentRuntimeProfileStarterTemplate | null {
   try {
     return parseStarterTemplate(JSON.parse(readFileSync(path, 'utf-8')), 'local', path);
-  } catch {
+  } catch (error) {
+    logger.warn('Agent starter template file could not be read and is left out of the template list', {
+      path,
+      error: summarizeError(error),
+    });
     return null;
+  }
+}
+
+/** Why a local template file that exists cannot be used, or null when there is none or it is fine. */
+function localTemplateProblem(baseHomeDirectory: string, id: string): string | null {
+  const path = join(getAgentRuntimeProfileTemplatesRoot(baseHomeDirectory), `${id}.json`);
+  if (!existsSync(path)) return null;
+  try {
+    parseStarterTemplate(JSON.parse(readFileSync(path, 'utf-8')), 'local', path);
+    return null;
+  } catch (error) {
+    return `${path} could not be read as a starter template: ${summarizeError(error)}`;
+  }
+}
+
+function assertNotBuiltinTemplateId(id: string, action: string): void {
+  if (STARTER_TEMPLATES.some((template) => template.id === id)) {
+    throw new Error(`Cannot ${action} a starter template named ${id}: that is a built-in template and always takes precedence. Choose a different id.`);
   }
 }
 
@@ -491,6 +520,8 @@ function resolveAgentRuntimeProfileTemplate(templateId: AgentRuntimeProfileTempl
   if (builtin) return builtin;
   const local = baseHomeDirectory ? listLocalTemplates(baseHomeDirectory).find((template) => template.id === id) : undefined;
   if (local) return local;
+  const problem = baseHomeDirectory ? localTemplateProblem(baseHomeDirectory, id) : null;
+  if (problem) throw new Error(`Agent starter profile template ${templateId} is unusable: ${problem}`);
   const suffix = baseHomeDirectory ? ' Use profiles templates to list starters.' : '';
   throw new Error(`Unknown Agent starter profile template ${templateId}.${suffix}`);
 }
@@ -534,13 +565,21 @@ export function exportAgentRuntimeProfileTemplate(
   return { ...summarizeTemplate(template), path: target };
 }
 
-export function importAgentRuntimeProfileTemplate(baseHomeDirectory: string, sourcePath: string): AgentRuntimeProfileTemplateSummary {
+export function importAgentRuntimeProfileTemplate(
+  baseHomeDirectory: string,
+  sourcePath: string,
+  options: { readonly replace?: boolean } = {},
+): AgentRuntimeProfileTemplateSummary {
   const source = sourcePath.trim();
   if (!source) throw new Error('Template import path is required.');
   const parsed = parseStarterTemplate(JSON.parse(readFileSync(source, 'utf-8')), 'local');
+  assertNotBuiltinTemplateId(parsed.id, 'import');
   const root = getAgentRuntimeProfileTemplatesRoot(baseHomeDirectory);
   mkdirSync(root, { recursive: true });
   const target = join(root, `${parsed.id}.json`);
+  if (existsSync(target) && options.replace !== true) {
+    throw new Error(`Agent starter template ${parsed.id} already exists at ${target}; importing would overwrite it. Pass --replace to overwrite it, or delete that file first.`);
+  }
   writeFileSync(target, `${JSON.stringify(templateFilePayload({ ...parsed, source: 'local', path: target }), null, 2)}\n`, 'utf-8');
   return summarizeTemplate({ ...parsed, source: 'local', path: target });
 }
@@ -550,6 +589,7 @@ export async function createAgentRuntimeProfileTemplateFromDiscovered(
   options: CreateAgentRuntimeProfileTemplateFromDiscoveredOptions,
 ): Promise<AgentRuntimeProfileTemplateSummary> {
   const id = assertValidAgentRuntimeProfileId(options.id);
+  assertNotBuiltinTemplateId(id, 'create');
   const [personas, skills, routines] = await Promise.all([
     discoverPersonas(shellPaths),
     discoverSkills(shellPaths),
@@ -596,6 +636,8 @@ export async function createAgentRuntimeProfileFromDiscovered(
     throw new Error(`Agent profile already exists: ${resolution.id}`);
   }
   const templateId = assertValidAgentRuntimeProfileId(options.templateId ?? profileId);
+  const templatePath = join(getAgentRuntimeProfileTemplatesRoot(shellPaths.homeDirectory), `${templateId}.json`);
+  const templateExisted = existsSync(templatePath);
   const template = await createAgentRuntimeProfileTemplateFromDiscovered(shellPaths, {
     id: templateId,
     name: options.name,
@@ -606,7 +648,15 @@ export async function createAgentRuntimeProfileFromDiscovered(
     includeVibe: options.includeVibe,
     replace: options.replace,
   });
-  const profile = createAgentRuntimeProfile(shellPaths.homeDirectory, profileId, { templateId: template.id });
+  let profile: AgentRuntimeProfileInfo;
+  try {
+    profile = createAgentRuntimeProfile(shellPaths.homeDirectory, profileId, { templateId: template.id });
+  } catch (error) {
+    // The template was written only to build this profile; leaving a file the
+    // owner never asked to keep would also block a retry under the same id.
+    if (!templateExisted) rmSync(templatePath, { force: true });
+    throw error;
+  }
   return { profile, template };
 }
 
@@ -701,20 +751,31 @@ export function createAgentRuntimeProfile(baseHomeDirectory: string, profileName
   if (existsSync(resolution.homeDirectory)) {
     throw new Error(`Agent profile already exists: ${resolution.id}`);
   }
+  // An unknown or unusable template is refused before anything exists on disk.
+  if (options.templateId) resolveAgentRuntimeProfileTemplate(options.templateId, baseHomeDirectory);
   mkdirSync(resolution.homeDirectory, { recursive: true });
   const createdAt = new Date().toISOString();
-  const appliedTemplate = options.templateId
-    ? applyAgentRuntimeProfileTemplate(resolution.homeDirectory, options.templateId, baseHomeDirectory)
-    : undefined;
-  writeFileSync(
-    join(resolution.homeDirectory, PROFILE_CREATED_FILE),
-    `${JSON.stringify({
-      id: resolution.id,
-      createdAt,
-      starterTemplate: appliedTemplate,
-    }, null, 2)}\n`,
-    'utf-8',
-  );
+  let appliedTemplate: AgentRuntimeProfileTemplateApplication | undefined;
+  try {
+    appliedTemplate = options.templateId
+      ? applyAgentRuntimeProfileTemplate(resolution.homeDirectory, options.templateId, baseHomeDirectory)
+      : undefined;
+    writeFileSync(
+      join(resolution.homeDirectory, PROFILE_CREATED_FILE),
+      `${JSON.stringify({
+        id: resolution.id,
+        createdAt,
+        starterTemplate: appliedTemplate,
+      }, null, 2)}\n`,
+      'utf-8',
+    );
+  } catch (error) {
+    // The directory did not exist before this call, so removing it restores that
+    // state: a half-built profile would be listed, selectable, and would block
+    // the retry under the same name.
+    rmSync(resolution.homeDirectory, { recursive: true, force: true });
+    throw error;
+  }
   return {
     ...resolution,
     createdAt,

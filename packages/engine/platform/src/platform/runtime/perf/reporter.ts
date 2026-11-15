@@ -96,18 +96,19 @@ export function formatReport(report: PerfReport): string {
     lines.push('');
     lines.push('Violations:');
     for (const v of report.violations) {
-      if (v.warning) {
-        lines.push(`  ${v.budget.name}: WARNING, ${v.warning}`);
-      } else {
-        lines.push(
-          `  ${v.budget.name}: actual=${formatValue(v.actual, v.budget.unit)} ` +
-            `budget=${formatValue(v.budget.threshold, v.budget.unit)} ` +
-            `exceeded_by=${formatValue(v.exceededBy, v.budget.unit)} ` +
-            `consecutive=${v.consecutiveViolations}/${v.budget.tolerance}`,
-        );
-      }
+      lines.push(
+        `  ${v.budget.name}: actual=${formatValue(v.actual, v.budget.unit)} ` +
+          `budget=${formatValue(v.budget.threshold, v.budget.unit)} ` +
+          `exceeded_by=${formatValue(v.exceededBy, v.budget.unit)} ` +
+          `consecutive=${v.consecutiveViolations}/${v.budget.tolerance}`,
+      );
       lines.push(`    ${v.budget.description}`);
     }
+  }
+
+  if (report.missing && report.missing.length > 0) {
+    lines.push('');
+    lines.push(`Not measured (no value supplied): ${report.missing.join(', ')}`);
   }
 
   lines.push('');

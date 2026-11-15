@@ -105,7 +105,7 @@ describe('Agent support bundle retained canonical redaction', () => {
       expect([...exportedReferences]).toEqual(references);
       const importRoot = makeProjectTempDir('agent-bundle-reference-import');
       const importedConfig = new ConfigManager({ surfaceRoot: 'agent', workingDir: importRoot, homeDir: importRoot });
-      const imported = await handleBundleCommand({ cli: parseGoodVibesCli(['bundle', 'import', f.path]), configManager: importedConfig,
+      const imported = await handleBundleCommand({ cli: parseGoodVibesCli(['bundle', 'import', f.path, '--yes']), configManager: importedConfig,
         workingDirectory: importRoot, homeDirectory: importRoot });
       expect(imported.exitCode).toBe(0);
       expect([...captureStructuredCredentialReferenceConfigValue('judgment.fallbacks', importedConfig.get('judgment.fallbacks'))]).toEqual(references);

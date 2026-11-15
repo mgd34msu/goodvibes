@@ -20,7 +20,7 @@ Export the current session to a local file and optionally share it.
 
 | Flag       | Description |
 |------------|-------------|
-| `--redact` | Redact API keys, tokens, and personal home-directory paths from the output |
+| `--redact` | Redact API keys, tokens, and this account's home-directory path and login name from the output |
 | `--upload` | Upload the export as a secret GitHub Gist and print the share link |
 | `--copy`   | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
 | `--open`   | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
@@ -61,7 +61,15 @@ a redacted export still shows what kind of value was removed:
 | `glpat-` GitLab tokens | `[REDACTED_GITLAB_TOKEN]` |
 | `xoxb-` and `xoxp-` Slack tokens | `[REDACTED_SLACK_TOKEN]` |
 | `AKIA*` AWS access key ids | `[REDACTED_AWS_KEY]` |
-| Home-directory paths under `/home/`, `/Users/`, and `C:\Users\` | The same path with the username as `[REDACTED]` |
+| The running account's own home directory (for example `/home/<you>`) | The same path with the last segment as `[REDACTED]` |
+| The running account's login name, anywhere in text | `[REDACTED]` |
+
+Only the account that is running the session is matched. A path or user name from
+someone else (a pasted colleague log, a transcript from another machine, another
+user's `/home/<name>/...` or `C:\Users\<name>\...`) is not recognised and stays in
+the export, so read a redacted export before you upload it. Home-path and login-name
+redaction applies only when the account identity is registered, which the
+interactive session does on start.
 
 Tool-call arguments and reasoning content are also redacted. The original
 conversation is never modified.
@@ -71,6 +79,27 @@ conversation is never modified.
 Gist upload creates a **secret** (unlisted) Gist. It is not indexed by GitHub search
 and is not shown on your profile. However, **anyone with the URL can view it**. Do not
 upload sessions containing secrets without first using `--redact`.
+
+## Option checking
+
+Any word that starts with `--` and is not one of the four options is refused before
+anything is written or uploaded (a mistyped `--reddact` would otherwise become the
+output file name and upload an unredacted export). To use a path that starts with `--`,
+write it as `./--name`. More than one path is also refused.
+
+## Upload receipt and unconfirmed uploads
+
+After every upload the command writes a small receipt file next to the export,
+named `<export path>.gist-<id>.json` (readable only by you), and prints
+`Upload receipt: <path>`. It records whether GitHub accepted the gist and, if so, its
+URL. If the receipt cannot be written, a warning is added to the notifications feed
+instead.
+
+If GitHub's answer is lost or not OK, the command prints
+`Upload unconfirmed: ... GitHub may have received it; check before retrying.` The
+gist may exist even though no link was returned. Check your gists at
+`gist.github.com` before running `/share` again, otherwise you can create a duplicate
+secret gist with the same content. The local export is kept either way.
 
 ## Token resolution for --upload
 
@@ -88,7 +117,7 @@ If neither is available the upload is skipped and guidance is printed. The token
 When no path is given, exports go to:
 
 ```
-~/goodvibes-exports/session-<YYYY-MM-DDTHH-MM-SS>.<ext>
+~/goodvibes-exports/session-<YYYY-MM-DDTHH-MM-SS-mmm>.<ext>
 ```
 
 The directory is created automatically.

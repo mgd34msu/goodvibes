@@ -1,7 +1,7 @@
 import { isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
-import { createPreferredSettingsProjector, executeAdmittedPreferredSettings } from './agent-settings-admission.ts';
+import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, settingsThrownFailure } from './agent-settings-admission.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
@@ -30,7 +30,6 @@ interface AgentSettingsToolArgs {
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
   readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
 }
 
 interface AgentSettingsToolDeps {
@@ -64,9 +63,15 @@ function normalizeSettingsAction(value: unknown): AgentSettingsAction | null {
   return null;
 }
 
-function readAction(args: AgentSettingsToolArgs): AgentSettingsAction {
-  const explicit = normalizeSettingsAction(args.action) ?? normalizeSettingsAction(args.mode);
-  if (explicit) return explicit;
+const SETTINGS_ACTION_WORDS = ['list', 'get', 'set', 'reset', 'import', 'preview_import'] as const;
+
+/**
+ * The action, inferred from the fields only when none was named. A word that was
+ * sent but is not an action gives null: reading it as `get` or `list` would
+ * answer a different question than the one asked.
+ */
+function readAction(args: AgentSettingsToolArgs): AgentSettingsAction | null {
+  if (readString(args.action) || readString(args.mode)) return normalizeSettingsAction(args.action) ?? normalizeSettingsAction(args.mode);
   if (readString(args.key) || readString(args.setting)) return 'get';
   return 'list';
 }
@@ -82,7 +87,6 @@ function settingKey(args: AgentSettingsToolArgs): string {
 function confirmedArgs(args: AgentSettingsToolArgs): Record<string, unknown> {
   return compactArgs({
     confirm: args.confirm,
-    explicitUserRequest: args.explicitUserRequest,
   });
 }
 
@@ -137,8 +141,8 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: ['list', 'get', 'set', 'reset', 'import'],
-            description: 'Read settings or apply exact settings changes and captured imports through recorded admission.',
+            enum: ['list', 'get', 'set', 'reset', 'import', 'preview_import'],
+            description: 'list/get read; set/reset change one setting and import applies the captured import, each through recorded admission; preview_import only shows what import would apply.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
           key: { type: 'string', description: 'Exact setting key.' },
@@ -152,7 +156,6 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
           includeParameters: { type: 'boolean', description: 'Include full setting metadata.' },
           limit: { type: 'number', description: 'Maximum settings to return.' },
           confirm: { type: 'boolean', description: 'Optional legacy context; never grants settings or import authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request context; settings authority comes from the live source and recorded admission.' },
         },
         additionalProperties: false,
       },
@@ -162,20 +165,21 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
     execute: async (rawArgs: unknown, options) => {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSettingsToolArgs;
       const action = readAction(args);
+      if (!action) return error(`Unknown settings action "${readString(args.action) || readString(args.mode)}". Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
 
       if (action === 'list') return forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, settingsListArgs(args), options);
       if (action === 'get') return forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, settingsLookupArgs('get_setting', args), options);
       if (action === 'set' || action === 'reset') {
         try { return await executeAdmittedPreferredSettings(rawArgs as Record<string, unknown>, options); }
-        catch { return error('Settings mutation requires a current recorded effect-owner admission.'); }
+        catch (thrown) { return settingsThrownFailure('mutation', thrown); }
       }
       if (action === 'import') {
         if (!isAgentSettingsImportMutation('settings', rawArgs as Record<string, unknown>)) return settingsImportTool.execute({ action: 'preview' }, options);
         try { return await executeAdmittedAgentSettingsImport(deps.commandContext, rawArgs as Record<string, unknown>, options); }
-        catch { return error('Settings import requires a current recorded effect-owner admission.'); }
+        catch (thrown) { return settingsThrownFailure('import', thrown); }
       }
 
-      return error('Unknown settings action. Use action:"list" to inspect settings.');
+      return error(`Unknown settings action. Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
     },
   }, deps.toolRegistry, input => isSettingsQuery(input, deps.commandContext), deps.commandContext);
 }

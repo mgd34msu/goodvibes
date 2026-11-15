@@ -41,7 +41,7 @@ describe('Cursor mapping through word-wrap', () => {
     // End of first segment
     const info11 = (() => { input.cursorPos = 11; return input.getWrappedPromptInfo(w); })();
     expect(info11.cursorWrappedLine).toBe(0);
-    // col should be at end of first segment
+    expect(info11.cursorCol).toBe(11);
 
     // Start of second segment
     const info12 = (() => { input.cursorPos = 12; return input.getWrappedPromptInfo(w); })();
@@ -49,30 +49,22 @@ describe('Cursor mapping through word-wrap', () => {
     expect(info12.cursorCol).toBe(0);
   });
 
-  test('backspace at each position deletes correct character', () => {
+  test('backspace at each position deletes the character before the cursor and keeps the cursor mapped', () => {
     const original = 'abc def ghi jkl';
-    const w = 8;
+    input.setContentWidth(8);
 
     for (let pos = 1; pos <= original.length; pos++) {
       input.prompt = original;
       input.cursorPos = pos;
 
-      const charBefore = original[pos - 1];
-      const expectedAfter = original.slice(0, pos - 1) + original.slice(pos);
+      input.feed('\x7f');
 
-      // Simulate backspace
-      input.prompt = input.prompt.slice(0, input.cursorPos - 1) + input.prompt.slice(input.cursorPos);
-      input.cursorPos--;
-
-      expect(input.prompt).toBe(expectedAfter);
+      expect(input.prompt).toBe(original.slice(0, pos - 1) + original.slice(pos));
       expect(input.cursorPos).toBe(pos - 1);
 
-      // Verify cursor mapping is still valid
-      const info = input.getWrappedPromptInfo(w);
-      // Cursor should be within a valid segment
-      const seg = info.segments[info.cursorWrappedLine];
-      expect(seg).toBeDefined();
-      expect(info.cursorCol).toBeGreaterThanOrEqual(0);
+      const info = input.getWrappedPromptInfo(8);
+      const seg = info.segments[info.cursorWrappedLine]!;
+      expect(info.cursorCol).toBe(input.cursorPos - seg.rawStart);
       expect(info.cursorCol).toBeLessThanOrEqual(seg.length);
     }
   });
@@ -105,51 +97,50 @@ describe('Cursor mapping through word-wrap', () => {
     expect(info.cursorCol).toBeLessThanOrEqual(seg.length);
   });
 
-  test('navigate up/down preserves column in wrapped text', () => {
-    input.prompt = 'abcdef ghijkl mnopqr stuvwx';
-    const w = 14;
-    // Wraps to: ["abcdef ghijkl", "mnopqr stuvwx"]
+  test('up/down arrows keep the column across wrapped lines', () => {
+    input.setContentWidth(14);
+    input.prompt = 'abcdef ghijkl mnopqr stuvwx'; // wraps to "abcdef ghijkl " / "mnopqr stuvwx"
+    input.cursorPos = 7;
 
-    input.cursorPos = 7; // 'g' in "ghijkl"
-    const infoBefore = input.getWrappedPromptInfo(w);
-    const lineBefore = infoBefore.cursorWrappedLine;
-    const colBefore = infoBefore.cursorCol;
+    input.feed('\x1b[B');
+    expect(input.cursorPos).toBe(21);
+    const down = input.getWrappedPromptInfo(14);
+    expect(down.cursorWrappedLine).toBe(1);
+    expect(down.cursorCol).toBe(7);
 
-    // Simulate moveCursorVertical(1), we test via the public method indirectly
-    // by checking segment mapping consistency
-    const targetLine = lineBefore + 1;
-    if (targetLine < infoBefore.segments.length) {
-      const targetSeg = infoBefore.segments[targetLine];
-      const newCol = Math.min(colBefore, targetSeg.length);
-      input.cursorPos = targetSeg.rawStart + newCol;
-
-      const infoAfter = input.getWrappedPromptInfo(w);
-      expect(infoAfter.cursorWrappedLine).toBe(targetLine);
-      expect(infoAfter.cursorCol).toBe(newCol);
-    }
+    input.feed('\x1b[A');
+    expect(input.cursorPos).toBe(7);
+    const up = input.getWrappedPromptInfo(14);
+    expect(up.cursorWrappedLine).toBe(0);
+    expect(up.cursorCol).toBe(7);
   });
 
-  test('pasted text cursor position after multiple operations', () => {
-    // Simulate pasting 3 short lines then navigating
+  test('moving onto a shorter wrapped line clamps the column to that line', () => {
+    input.setContentWidth(14);
+    input.prompt = 'abcdef ghijkl mn'; // "abcdef ghijkl " / "mn"
+    input.cursorPos = 10;
+
+    input.feed('\x1b[B');
+    expect(input.cursorPos).toBe(16);
+    expect(input.getWrappedPromptInfo(14).cursorCol).toBe(2);
+
+    input.feed('\x1b[A');
+    expect(input.cursorPos).toBe(2);
+  });
+
+  test('pasted multi-line text: backspace mid-line edits that line and the cursor stays on it', () => {
     input.prompt = 'first line\nsecond line\nthird line';
-    input.cursorPos = input.prompt.length; // end
-    const w = 20;
+    input.cursorPos = 16; // after "secon", before "d"
+    const before = input.getWrappedPromptInfo(20);
+    expect(before.wrappedLines[before.cursorWrappedLine]).toBe('second line');
+    expect(before.cursorCol).toBe(5);
 
-    // Navigate to start of "second"
-    input.cursorPos = 11; // start of "second line"
-    const info1 = input.getWrappedPromptInfo(w);
-    expect(info1.wrappedLines[info1.cursorWrappedLine]).toBe('second line');
-    expect(info1.cursorCol).toBe(0);
+    input.feed('\x7f');
 
-    // Navigate right to 's','e','c','o','n','d' (pos 17 = 'd')
-    input.cursorPos = 16;
-    const info2 = input.getWrappedPromptInfo(w);
-    expect(info2.cursorCol).toBe(5); // 5 chars into "second line"
-
-    // Backspace should remove 'n' at pos 15
-    const before = input.prompt;
-    input.prompt = input.prompt.slice(0, 15) + input.prompt.slice(16);
-    input.cursorPos = 15;
-    expect(input.prompt).toBe('first line\nsecoд line\nthird line'.replace('д', 'n').slice(0, 15) + before.slice(16));
+    expect(input.prompt).toBe('first line\nsecod line\nthird line');
+    expect(input.cursorPos).toBe(15);
+    const after = input.getWrappedPromptInfo(20);
+    expect(after.wrappedLines[after.cursorWrappedLine]).toBe('secod line');
+    expect(after.cursorCol).toBe(4);
   });
 });

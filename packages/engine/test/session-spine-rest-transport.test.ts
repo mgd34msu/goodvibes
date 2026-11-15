@@ -169,6 +169,10 @@ describe('createSessionSpineRestTransport', () => {
   });
 });
 
+// A macrotask turn runs after every pending promise continuation, so the
+// register has settled however deep the mocked fetch awaits.
+const settle = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0); });
+
 describe('SessionSpineClient result-kind fold through the real hoisted transport', () => {
   test('a network failure folds to offline: queued for replay', async () => {
     installFetch(() => { throw new Error('ECONNREFUSED'); });
@@ -178,7 +182,7 @@ describe('SessionSpineClient result-kind fold through the real hoisted transport
       log: { debug: () => {}, info: () => {} },
     });
     client.register({ sessionId: 'fold-1', project: '/p' });
-    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    await settle();
     expect(client.status()).toBe('offline');
     expect(client.pendingOps).toBe(1);
     client.dispose();
@@ -192,8 +196,11 @@ describe('SessionSpineClient result-kind fold through the real hoisted transport
       log: { debug: () => {}, info: () => {} },
     });
     client.register({ sessionId: 'fold-2', project: '/p' });
-    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    await settle();
+    expect(requests).toHaveLength(1);
     expect(client.pendingOps).toBe(0);
+    // A rejection leaves reachability unknown; an 'ok' fold would read online.
+    expect(client.status()).toBe('unknown');
     client.dispose();
   });
 });
@@ -218,14 +225,40 @@ describe('createSessionSpineRestProbe', () => {
 });
 
 describe('createSessionSpineReceiptConsumer', () => {
-  test('parses the receipts array from a ?receipts=consume read', async () => {
+  test('reads receipts without consuming them, then acknowledges the ids it parsed', async () => {
+    const seen: string[] = [];
     installFetch((url) => {
-      expect(url).toContain('receipts=consume');
+      seen.push(String(url));
       return new Response(JSON.stringify({ receipts: [{ id: 'r1', text: 'updated from 1.0 to 2.0', at: 123 }] }), { status: 200 });
     });
     const consume = createSessionSpineReceiptConsumer({ resolveConnection: () => CONNECTION });
     const receipts = await consume();
     expect(receipts).toEqual([{ id: 'r1', text: 'updated from 1.0 to 2.0', at: 123 }]);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toContain('receipts=peek');
+    expect(seen[1]).toContain('receipts=ack');
+    expect(seen[1]).toContain('ids=r1');
+  });
+
+  test('a response that never arrives acknowledges nothing, so the daemon still holds the receipt', async () => {
+    const seen: string[] = [];
+    installFetch((url) => { seen.push(String(url)); throw new Error('ECONNRESET'); });
+    const consume = createSessionSpineReceiptConsumer({ resolveConnection: () => CONNECTION });
+    expect(await consume()).toEqual([]);
+    expect(seen.every((entry) => !entry.includes('receipts=ack'))).toBe(true);
+  });
+
+  test('a daemon that predates peek is read with the consume flag', async () => {
+    const seen: string[] = [];
+    installFetch((url) => {
+      seen.push(String(url));
+      return String(url).includes('receipts=consume')
+        ? new Response(JSON.stringify({ receipts: [{ id: 'r9', text: 'restarted', at: 5 }] }), { status: 200 })
+        : new Response(JSON.stringify({ status: 'running' }), { status: 200 });
+    });
+    const consume = createSessionSpineReceiptConsumer({ resolveConnection: () => CONNECTION });
+    expect(await consume()).toEqual([{ id: 'r9', text: 'restarted', at: 5 }]);
+    expect(seen.map((entry) => entry.includes('consume'))).toEqual([false, true]);
   });
 
   test('returns [] on a non-2xx or malformed body rather than throwing', async () => {

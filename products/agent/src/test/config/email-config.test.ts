@@ -125,10 +125,8 @@ describe('email set command path: user-facing setter via persistSecretBackedConf
     }
     // The raw password must never appear in any settings file
     expect(settingsContent).not.toContain(rawPassword);
-    // The goodvibes:// ref must be present
-    if (settingsContent.length > 0) {
-      expect(settingsContent).toContain('goodvibes://');
-    }
+    // The goodvibes:// ref must be present in at least one of them: an empty probe means the ref went somewhere not listed.
+    expect(settingsContent).toContain(storedRef);
 
     // (c) SecretsManager received the raw value under the expected key
     // Key shape is GOODVIBES_<SECTION>_<CAMEL_TO_UPPER_SNAKE> per buildGoodVibesSecretKey

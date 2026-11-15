@@ -103,7 +103,7 @@ describe('first channel turn capability and capture boundaries', () => {
     };
     await gateSurfaceSpawn(deps, { surface: 'telegram', channelId: OWNER_CHAT, text: 'Hello' }, { mode: 'spawn', task: 'Hello' }, undefined, 'session-1');
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.tools).toEqual(['read', 'find', 'fetch']);
+    expect(calls[0]?.tools).toEqual(['read', 'find']);
     expect(calls[0]?.outsideContract).toBe(true);
     expect(calls[0]?.captureAuthority?.canCapture).toBe(false);
     expect(calls[0]?.context).toContain('not available on this turn');

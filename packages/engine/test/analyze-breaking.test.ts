@@ -70,11 +70,11 @@ describe('runBreaking', () => {
     const result = await runBreaking({ mode: 'breaking' }, repo);
 
     expect(result.breaking_changes).toEqual([
-      { name: 'removed', before: 'removed(): void', after: '(removed)', reason: 'export removed' },
-      { name: 'sendWelcome', before: 'sendWelcome(to: string): void', after: 'sendWelcome(to: string, locale: string): void', reason: 'callers must change' },
-      { name: 'loadUser', before: 'loadUser(id: string): string', after: 'loadUser(id: string): string | undefined', reason: 'callers may have to change', reading: 'uncertain' },
+      { file: 'api.ts', name: 'removed', before: 'removed(): void', after: '(removed)', reason: 'export removed' },
+      { file: 'api.ts', name: 'sendWelcome', before: 'sendWelcome(to: string): void', after: 'sendWelcome(to: string, locale: string): void', reason: 'callers must change' },
+      { file: 'api.ts', name: 'loadUser', before: 'loadUser(id: string): string', after: 'loadUser(id: string): string | undefined', reason: 'callers may have to change', reading: 'uncertain' },
     ]);
-    expect(result.safe_modifications).toEqual([{ name: 'search', before: 'search(query: string): string[]', after: 'search(query: string, limit?: number): string[]' }]);
+    expect(result.safe_modifications).toEqual([{ file: 'api.ts', name: 'search', before: 'search(query: string): string[]', after: 'search(query: string, limit?: number): string[]' }]);
     // One reading per changed export; the removed export asks nothing.
     const asked = readings.requests.map((request) => (request.state as { name: string }).name).sort();
     expect(asked).toEqual(['loadUser', 'search', 'sendWelcome']);

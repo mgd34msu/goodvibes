@@ -73,10 +73,28 @@ export interface DevicePostureServices {
   readonly devicePosture: DevicePostureRuntime;
 }
 
+/**
+ * The runtime lists 200 peers unless asked for more, and the grant ownership
+ * check reads that list: a paired device past the 200th would look like a
+ * departed node and have its grants reaped. Ask for every peer.
+ */
+const ALL_PEERS = Number.MAX_SAFE_INTEGER;
+
+function listingEveryPeer(source: DevicePeerTransport): DevicePeerTransport {
+  // Resolved on every call: the transport's methods are the live ones.
+  return {
+    listPeers: (kind) => (source.listPeers as (kind?: string, limit?: number) => ReturnType<DevicePeerTransport['listPeers']>).call(source, kind, ALL_PEERS),
+    invokePeer: (input) => source.invokePeer(input),
+    ...(source.peerRevision ? { peerRevision: (nodeId: string) => source.peerRevision!(nodeId) } : {}),
+    ...(source.peerMutationPending ? { peerMutationPending: (nodeId: string) => source.peerMutationPending!(nodeId) } : {}),
+    ...(source.cancelWork ? { cancelWork: (workId: string, input?: Parameters<NonNullable<DevicePeerTransport['cancelWork']>>[1]) => source.cancelWork!(workId, input) } : {}),
+  };
+}
+
 /** Build the device posture runtime and bind the device verbs to it. */
 export function createDevicePostureServices(options: DevicePostureCompositionOptions): DevicePostureServices {
   const devicePosture = createDevicePostureRuntime({
-    transport: options.distributedRuntime,
+    transport: listingEveryPeer(options.distributedRuntime),
     approvals: options.approvals,
     config: options.configManager,
     nativeDataWriter: options.configManager.getNativeDataWriter?.(),

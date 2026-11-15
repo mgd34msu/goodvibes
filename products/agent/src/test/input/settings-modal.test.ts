@@ -59,10 +59,10 @@ function makeTmpDir(): string {
 }
 
 function createConfigManager(root: string): ConfigManager {
-  return new ConfigManager({ surfaceRoot: 'tui',
+  return new ConfigManager({ surfaceRoot: 'agent',
     workingDir: root,
     homeDir: root,
-    configDir: join(root, '.goodvibes', 'global-tui'),
+    configDir: join(root, '.goodvibes', 'global-agent'),
   });
 }
 
@@ -88,8 +88,8 @@ describe('SettingsModal', () => {
     cm = createConfigManager(tmpDir);
     ffm = createFeatureFlagManager();
     modal = new SettingsModal();
-    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'tui', 'subscriptions.json'));
-    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'tui', 'services.json'), {
+    subscriptionManager = new SubscriptionManager(join(tmpDir, '.goodvibes', 'agent', 'subscriptions.json'));
+    serviceRegistry = new ServiceRegistry(join(tmpDir, '.goodvibes', 'agent', 'services.json'), {
       secretsManager: new SecretsManager({ projectRoot: tmpDir, globalHome: tmpDir, configManager: cm }),
       subscriptionManager,
     });
@@ -107,7 +107,7 @@ describe('SettingsModal', () => {
       ],
       setServerTrustMode: () => {},
     } as unknown as McpRegistry;
-    mkdirSync(join(tmpDir, '.goodvibes', 'tui'), { recursive: true });
+    mkdirSync(join(tmpDir, '.goodvibes', 'agent'), { recursive: true });
   });
 
   test('Judgment call-volume alerts are discoverable, editable and persisted through the actual settings modal', () => {
@@ -246,6 +246,31 @@ describe('SettingsModal', () => {
     }
   });
 
+  test('open() files well-known keys under their hand-written category', () => {
+    modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
+    const placement: Record<string, readonly string[]> = {
+      display: ['display.stream', 'display.lineNumbers'],
+      behavior: ['behavior.autoCompactThreshold'],
+      permissions: ['permissions.mode'],
+      provider: ['provider.model', 'provider.reasoningEffort'],
+      payments: ['payments.enabled', 'payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName'],
+      daemon: ['daemon.timezone'],
+      network: ['network.outboundTls.mode'],
+      // Roots with no category of their own are listed under the category that adopts them.
+      notifications: ['push.vapidSubject'],
+      fleet: ['cluster.enabled', 'fleet.maxSize'],
+      cluster: ['cluster.enabled'],
+    };
+    for (const [category, keys] of Object.entries(placement)) {
+      const present = (modal.groups.get(category as (typeof SETTINGS_CATEGORIES)[number])?.map((entry) => String(entry.setting.key)) ?? []);
+      for (const key of keys) expect(present).toContain(key);
+    }
+    // A key is filed under its own first segment, not under a neighbouring category.
+    const display = modal.groups.get('display')?.map((entry) => String(entry.setting.key)) ?? [];
+    expect(display.every((key) => key.startsWith('display.'))).toBe(true);
+    expect(modal.groups.get('provider')?.map((entry) => String(entry.setting.key))).not.toContain('display.stream');
+  });
+
   test('open() routes every shared config schema key into the workspace', () => {
     modal.open(cm, ffm, subscriptionManager, serviceRegistry, mcpRegistry);
     const visibleKeys = new Set<string>();
@@ -277,14 +302,10 @@ describe('SettingsModal', () => {
       expect(isAgentHiddenSettingKey(key)).toBe(false);
       expect(visibleKeys.has(key)).toBe(true);
     }
-    // Only internal plumbing stays hidden. Hazardous-but-real settings are shown
-    // and gated at write time instead, so the owner can see and confirm them.
-    for (const key of [
-      'ui.wrfcMessages',
-    ]) {
-      expect(isAgentHiddenSettingKey(key)).toBe(true);
-      expect(visibleKeys.has(key)).toBe(false);
-    }
+    // Hazardous-but-real settings are shown instead, with the write decided by the recorded admission, so
+    // the owner can see and confirm them.
+    expect(isAgentHiddenSettingKey('ui.contractMessages')).toBe(false);
+    expect(visibleKeys.has('ui.contractMessages')).toBe(true);
   });
 
   test('relay.* settings are visible AND writable, because they route to their owner', () => {
@@ -678,7 +699,7 @@ describe('SettingsModal', () => {
     expect(modal.lastSettingEffectMessage).toBeNull();
   });
 
-  test('clearing a secret keeps its reference until deletion completes', async () => {
+  test('clearing a secret unpublishes its reference before the stored value is deleted', async () => {
     let finish!: () => void;
     const cleared = new Promise<void>((resolve) => { finish = resolve; });
     const reference = buildGoodVibesSecretRef(buildGoodVibesSecretKey('surfaces.ntfy.token'));
@@ -690,7 +711,7 @@ describe('SettingsModal', () => {
     modal.activateSelected();
     modal.editBuffer = '';
     expect(modal.commitEdit()).toBe(true);
-    expect(cm.get('surfaces.ntfy.token')).toBe(reference);
+    expect(cm.get('surfaces.ntfy.token')).toBe('');
     const completion = modal.pendingSecretWrite;
     finish();
     expect(await completion).toBe(true);
@@ -753,7 +774,7 @@ describe('SettingsModal', () => {
   });
 
   for (const rejects of [false, true]) {
-    test(`selected secret reset waits for deletion and reports ${rejects ? 'failure' : 'completion'}`, async () => {
+    test(`selected secret reset unpublishes the reference, then waits for deletion and reports ${rejects ? 'the leftover value' : 'completion'}`, async () => {
       let finish!: () => void;
       let fail!: (error: Error) => void;
       const removed = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
@@ -769,19 +790,21 @@ describe('SettingsModal', () => {
       expect(modal.resetSelected()).toBeNull();
       const completion = modal.pendingSecretWrite;
       expect(completion).not.toBeNull();
-      expect(cm.get('surfaces.ntfy.token')).toBe(reference);
-      expect(applied).toBe(0);
+      expect(cm.get('surfaces.ntfy.token')).toBe('');
+      expect(applied).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(deletes).toBe(1);
       expect(modal.resetSelected()).toBeNull();
       expect(deletes).toBe(1);
       if (rejects) fail(new Error('deletion failed with synthetic-hidden-token'));
       else finish();
-      expect(await completion).toBe(!rejects);
-      expect(cm.get('surfaces.ntfy.token')).toBe(rejects ? reference : '');
-      expect(applied).toBe(rejects ? 0 : 1);
+      expect(await completion).toBe(true);
+      expect(cm.get('surfaces.ntfy.token')).toBe('');
+      expect(applied).toBe(1);
       expect(modal.pendingSecretWrite).toBeNull();
       expect(modal.lastSettingEffectMessage).not.toContain('synthetic-hidden-token');
-      if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/failed/i);
+      if (rejects) expect(modal.lastSettingEffectMessage).toMatch(/could not be removed/i);
+      else expect(modal.lastSettingEffectMessage).not.toMatch(/could not be removed/i);
     });
   }
 

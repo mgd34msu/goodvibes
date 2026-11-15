@@ -100,7 +100,7 @@ describe('channel replies use settled meaning instead of leading words', () => {
       const ask = await h.ask();
       const command = `/approve ${ask.approval.id}`;
       const response = await h.send(command);
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(200);
       expect(await response.text()).toContain('approval-reply-consumed');
       expect((await ask.decision).approved).toBe(true);
       expect(h.broker.getApproval(ask.approval.id)?.decision).toMatchObject({ approved: true, disposition: 'approved', reason: 'Explicit owner command during Classic operation.' });
@@ -120,7 +120,7 @@ describe('channel replies use settled meaning instead of leading words', () => {
     const ask = await h.ask();
     readings.set({ reply: choice });
     const response = await h.send(text);
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(await response.text()).toContain('approval-reply-consumed');
     expect(h.submitted).toEqual([]);
     expect(h.bindingsCreated).toBe(0);
@@ -290,7 +290,7 @@ describe('authorization and failures are fail closed', () => {
     const ask = await h.ask();
     readings.set({ reply: 'approve' });
     const response = await h.send('approve', 'U-STRANGER');
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(await response.text()).toContain('user-not-allowlisted');
     expect(h.broker.getApproval(ask.approval.id)?.status).toBe('pending');
     expect(readings.requests).toHaveLength(0);
@@ -456,7 +456,7 @@ describe('approval judgment never receives protected input', () => {
     await h.ask('export_data', 'Export customer data');
     const beforeAudit = h.policy.listAudit();
     const response = await h.send(`Approve the deployment in room 4021. Use password=${SECRET}`);
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     const body = await response.text();
     expect(body).toContain('judgment-input-refused:credential-material');
     expect(body).not.toContain(SECRET);
@@ -475,7 +475,7 @@ describe('approval judgment never receives protected input', () => {
     const beforeAudit = h.policy.listAudit();
     const text = `No, use card 4111111111111111 07/29 with password=${SECRET}`;
     const response = await h.send(text);
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(await response.text()).toContain('card-shapes-refused:pan');
     expect(h.notices).toHaveLength(1);
     expect(h.notices[0]).toContain('Approving or vetoing');

@@ -27,7 +27,8 @@
  * The gate runs its readings before the policy evaluator, so the evaluator no
  * longer carries a safety layer of its own.
  */
-import { readCatastrophic, shellCommandsIn, type CatastrophicReadingOptions } from '../../gate/reading.js';
+import { readCatastrophic, type CatastrophicReadingOptions } from '../../gate/reading.js';
+import { execShellCommands } from './exec-command-text.js';
 import type { DecisionReason, EvaluationStep } from './types.js';
 
 export interface SafetyCheckResult {
@@ -55,7 +56,7 @@ function pathArgs(args: Record<string, unknown>): string[] {
 /**
  * Runs the safety check for one call: a NUL byte in any path argument, then
  * the catastrophic reading of every shell command it carries (the `command`,
- * `cmd` or `commands` arguments, whatever the tool is called: which tools run
+ * `cmd` or `commands` arguments, `cmd_base64` read as the exec tool reads it, whatever the tool is called: which tools run
  * shell commands is not a closed set the engine defines, so the arguments
  * decide, not a list of tool names). A command whose
  * reading is uncertain is blocked here, because nothing in this check can ask
@@ -70,7 +71,7 @@ export async function runSafetyChecks(args: Record<string, unknown>, options: Sa
   if (nul !== undefined) {
     return { blocked: true, reason: 'SAFETY_DENY_PATH_ESCAPE', detail: 'a path argument contains a NUL byte, so the path named is not the path that would be opened', steps };
   }
-  for (const command of shellCommandsIn(args)) {
+  for (const command of execShellCommands(args)) {
     const { verdict } = await readCatastrophic(command, 'engine.gate.safety-check', signal, context);
     const blocked = verdict !== 'no';
     steps.push({ layer: 'safety', check: 'catastrophic', matched: blocked, detail: `Jev reading: ${verdict}` });

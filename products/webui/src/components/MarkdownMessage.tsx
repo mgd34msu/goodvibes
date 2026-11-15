@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
 import { highlightCode, normalizeLanguage } from '../lib/highlight';
 import { useWebUiPreferences } from '../lib/ui-preferences';
+import { useOptionalToast } from '../lib/toast';
 import { IconButton } from './ui/IconButton';
 import '../styles/components/markdown.css';
 
@@ -49,6 +50,7 @@ interface CodeBlockProps {
 
 function CodeBlock({ children, lineNumbers, source, content, start, end }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const toastCtx = useOptionalToast();
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
@@ -74,7 +76,16 @@ function CodeBlock({ children, lineNumbers, source, content, start, end }: CodeB
 
   async function copyCode() {
     if (!code) return;
-    await navigator.clipboard?.writeText(code);
+    if (!navigator.clipboard) {
+      toastCtx?.toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      toastCtx?.toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
+      return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1300);
   }

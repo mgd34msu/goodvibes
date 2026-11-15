@@ -104,6 +104,10 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
     execute: async (rawArgs, options) => {
       const dispatch = (input: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, input, options);
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentHostToolArgs;
+      const requestedVerb = readString(args.action) || readString(args.mode);
+      if (requestedVerb && !normalizeHostAction(args.action) && !normalizeHostAction(args.mode)) {
+        return { success: false, error: `Unknown host action "${requestedVerb}". The host tool only reads: use action status, capabilities, capability, services, service, methods or method. It cannot restart or change the connected host.` };
+      }
       const action = readAction(args);
 
       if (action === 'status') {

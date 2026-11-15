@@ -97,6 +97,9 @@ import { summarizeError } from '../../utils/error-display.js';
 import type { PersistedExpectationStore } from './expectation-store.js';
 import type { InboundCapabilityReason, InboundCapabilityVerdict } from './ports.js';
 
+/** How many reported expectation ids the registry remembers to avoid reporting one twice. */
+const MAX_REMEMBERED_REPORTS = 256;
+
 /**
  * How often the registry re-checks for expectations that have run out, given
  * the default window in force.
@@ -308,6 +311,12 @@ export class InboundExpectationRegistry {
   private readonly authorityProbe: SurfaceAuthorityProbe;
   /** The periodic sweep, once armed. Null while nothing is scheduled. */
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Ids whose ending has been reported, so a path that finds the same ending a
+   * second time (a rebuilt supervisor re-hydrating, a write that failed and was
+   * retried) does not tell the owner twice. Bounded: the oldest are forgotten.
+   */
+  private readonly reportedIds = new Set<string>();
 
   constructor(options: InboundExpectationRegistryOptions) {
     this.authorityProbe = options.authority ?? { surfaceHasCommandAuthority };
@@ -320,6 +329,9 @@ export class InboundExpectationRegistry {
     this.view = {
       matchCandidate: async (...args) => {
         const match = this.book.matchCandidate(...args);
+        // The book drops an elapsed expectation when a late message names it.
+        // That is the only record of the ending, so it is reported here.
+        if (match.kind === 'expired') this.report([describeExpiry(match.expectation)]);
         // Written through UNCONDITIONALLY rather than only for the kinds
         // believed to mutate. Predicting which ones do would couple this line
         // to the order of the book's internal early returns, and a wrong
@@ -388,6 +400,9 @@ export class InboundExpectationRegistry {
     for (const survivor of sweep.survivors) {
       if (this.book.hydrateExpectation(survivor, now) !== null) restored += 1;
     }
+    // Windows that ran out while the daemon was down. The store reaped those
+    // rows (here or in an earlier recovery sweep) and kept them for this.
+    this.report(this.store.takeExpired().map(describeExpiry));
     // The file may have held records the book refused (expired mid-restart,
     // over cap, malformed). Persist what is actually live so disk and memory
     // agree from the first moment rather than at the first mutation.
@@ -441,8 +456,19 @@ export class InboundExpectationRegistry {
       ...(input.kind === undefined ? {} : { kind: input.kind }),
       ...(windowMs === undefined ? {} : { windowMs }),
     };
+    // The book reaps elapsed expectations as it opens one; do that first, here,
+    // so each of them is reported rather than dropped without a word.
+    const lapsed = this.book.sweepExpired(request.now);
+    this.report(lapsed.map(describeExpiry));
     const expectation = this.book.openExpectation(request);
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error) {
+      // Not durable means not promised: an expectation that the caller was told
+      // failed must not stay live and match mail.
+      this.book.closeExpectation(expectation.id);
+      throw error;
+    }
     return expectation;
   }
 
@@ -505,8 +531,14 @@ export class InboundExpectationRegistry {
     const now = this.now();
     const expired = this.book.sweepExpired(now);
     const reports = expired.map((expectation) => describeExpiry(expectation));
-    if (expired.length > 0) await this.persist();
-    this.report(reports);
+    // Reported even when the write fails: the records already left memory, so
+    // this is the only moment the outcome can be told, and a full disk is
+    // exactly when nobody must be left waiting in silence.
+    try {
+      if (expired.length > 0) await this.persist();
+    } finally {
+      this.report(reports);
+    }
     return reports;
   }
 
@@ -589,8 +621,11 @@ export class InboundExpectationRegistry {
     if (open.length === 0) return [];
     const reports = open.map((expectation) => describeCapabilityLoss(expectation, verdict));
     for (const expectation of open) this.book.closeExpectation(expectation.id);
-    await this.persist();
-    this.report(reports);
+    try {
+      await this.persist();
+    } finally {
+      this.report(reports);
+    }
     return reports;
   }
 
@@ -606,6 +641,12 @@ export class InboundExpectationRegistry {
   /** Emit each report, never letting one broken route strand the rest. */
   private report(reports: readonly ExpectationExpiryReport[]): void {
     for (const report of reports) {
+      if (this.reportedIds.has(report.id)) continue;
+      this.reportedIds.add(report.id);
+      if (this.reportedIds.size > MAX_REMEMBERED_REPORTS) {
+        const oldest = this.reportedIds.values().next();
+        if (!oldest.done) this.reportedIds.delete(oldest.value);
+      }
       try {
         this.onExpired?.(report);
       } catch {

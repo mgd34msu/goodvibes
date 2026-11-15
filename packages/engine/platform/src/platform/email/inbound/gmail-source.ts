@@ -77,6 +77,7 @@ import type { MailboxCursorStore } from './cursor-store.js';
 import { DEFAULT_INBOUND_WATCHER_SETTINGS } from './ports.js';
 import type {
   GmailInboundMessage,
+  InboundCapabilityReason,
   InboundCapabilityVerdict,
   InboundMailNote,
   InboundMailObserver,
@@ -97,7 +98,27 @@ import {
   type GmailHistoryDelta,
   type HistoryDeltaDeps,
   type HistoryDeltaUnavailable,
+  isPermanentFetchProblem,
 } from '../../google/history-delta.js';
+
+/**
+ * How long 403s with no named cause may go on, unbroken, before they are read
+ * as a refused grant. A per-user rate limit lasts minutes at the 5 s expecting
+ * interval, so a count of polls would give up on it within seconds; unbounded
+ * would let a revoked scope retry for ever as if it were a rate limit.
+ */
+const MAX_UNEXPLAINED_FORBIDDEN_MS = 10 * 60_000;
+
+/** Refusals of the same delta by the sink, in a row, before the verdict says so. */
+const MAX_CONSECUTIVE_DELIVERY_FAILURES = 3;
+
+/**
+ * Passes in a row in which Google answers one message with a permanent client
+ * error (a malformed id, not a credential or a rate limit) before it is treated
+ * as gone. Without a bound that one message holds the history position, and all
+ * mail behind it, for ever.
+ */
+const MAX_PERMANENT_UNREADABLE_PASSES = 5;
 
 /**
  * "Is somebody waiting on a message right now?"
@@ -185,7 +206,14 @@ export class GmailMailSource implements InboundMailSource {
   private readonly capabilityRecheckMs: number;
   private readonly capabilityPolicy: InboundCapabilityPolicy;
   private readonly halt = new AbortController();
+  private recheckWake: AbortController | null = null;
   private terminal: InboundMailTerminalFailure | null = null;
+  /** When the current unbroken run of 403s with no named cause began, see `transientVerdict`. */
+  private unexplainedForbiddenSince: number | null = null;
+  /** Deliveries in a row the sink refused, with no complete delta in between. */
+  private deliveryFailures = 0;
+  /** Consecutive passes in which each message id was permanently unreadable. */
+  private readonly permanentUnreadable = new Map<string, number>();
 
   constructor(deps: GmailMailSourceDeps) {
     this.deps = deps;
@@ -267,7 +295,15 @@ export class GmailMailSource implements InboundMailSource {
     const combined = anySignal([signal, this.halt.signal]);
     try {
       while (!combined.signal.aborted) {
-        await this.deps.clock.sleep(this.waitMs(), combined.signal);
+        const wake = new AbortController();
+        this.recheckWake = wake;
+        const wait = anySignal([combined.signal, wake.signal]);
+        try {
+          await this.sleepUntilDue(wait.signal);
+        } finally {
+          wait.dispose();
+          if (this.recheckWake === wake) this.recheckWake = null;
+        }
         if (combined.signal.aborted) return;
         try {
           await this.pollOnce(combined.signal);
@@ -275,6 +311,7 @@ export class GmailMailSource implements InboundMailSource {
           // A store write or an injected dependency that threw. Not a
           // capability verdict, nothing about the grant is known to have
           // changed, so it is degraded, disclosed, and tried again.
+          this.unexplainedForbiddenSince = null;
           this.record(capabilityVerdict('reconnecting', errorText(error)));
           this.note('delivery-failed', `The Gmail poll did not complete: ${errorText(error)}`);
         }
@@ -282,6 +319,18 @@ export class GmailMailSource implements InboundMailSource {
     } finally {
       combined.dispose();
     }
+  }
+
+  /**
+   * Re-ask about a refused grant now rather than after `capabilityRecheckMs`.
+   *
+   * Only while refused. Every config write asks for a recheck, and a working
+   * source answering each one with a Google call would turn a settings page
+   * into a request burst for no new information.
+   */
+  recheckNow(): void {
+    if (this.tracker.state !== 'insufficient') return;
+    this.recheckWake?.abort();
   }
 
   /** Stop polling. Safe to call twice, and safe to call before `start`. */
@@ -296,6 +345,33 @@ export class GmailMailSource implements InboundMailSource {
 
   private waitMs(): number {
     return this.tracker.state === 'insufficient' ? this.capabilityRecheckMs : this.intervalMs;
+  }
+
+  /**
+   * Wait out the interval in force, asking again at every `pollExpectingMs`
+   * whether it has changed.
+   *
+   * A single sleep of `waitMs()` is fixed when it starts, so an expectation
+   * opening during a long idle sleep (up to an hour by configuration) would
+   * not be polled for until that sleep ended, past the expectation's own
+   * window, while `latency` already reported the short interval. Slicing costs
+   * a timer per slice and no request: Google is only asked when the whole
+   * interval in force has elapsed. A refused grant is not sliced, nothing
+   * about it changes when an expectation opens.
+   */
+  private async sleepUntilDue(signal: AbortSignal): Promise<void> {
+    const startedAt = this.deps.clock.now();
+    // Only ever shortened: an expectation closing mid-wait is no reason to
+    // make the poll that was already due wait longer.
+    const planned = this.waitMs();
+    while (!signal.aborted) {
+      const remaining = Math.min(planned, this.waitMs()) - (this.deps.clock.now() - startedAt);
+      if (remaining <= 0) return;
+      const slice = this.tracker.state === 'insufficient'
+        ? remaining
+        : Math.min(remaining, this.pollExpectingMs);
+      await this.deps.clock.sleep(slice, signal);
+    }
   }
 
   private async pollOnce(signal: AbortSignal): Promise<InboundCapabilityVerdict> {
@@ -322,7 +398,7 @@ export class GmailMailSource implements InboundMailSource {
       if (result.unavailable === 'resync-required') return this.establish(true);
       return this.refuse(result);
     }
-    return this.record(this.transientVerdict(result));
+    return this.recordFailure(result);
   }
 
   /**
@@ -336,11 +412,12 @@ export class GmailMailSource implements InboundMailSource {
    */
   private async establish(afterExpiry: boolean): Promise<InboundCapabilityVerdict> {
     const fresh = await this.deps.currentHistoryId();
-    if (!fresh.ok) return this.record(this.transientVerdict(fresh));
+    if (!fresh.ok) return this.recordFailure(fresh);
     if (!isHistoryId(fresh.value)) {
       // Refused rather than persisted: the store would reject it anyway, and
       // an invalid position written and dropped on the next load looks exactly
       // like having a position while having none.
+      this.unexplainedForbiddenSince = null;
       return this.record(capabilityVerdict(
         'server-unavailable',
         `Google answered with ${JSON.stringify(fresh.value)} where a decimal historyId was expected, `
@@ -419,6 +496,8 @@ export class GmailMailSource implements InboundMailSource {
       try {
         await this.deps.sink.deliver(message);
       } catch (error) {
+        // Google answered, so any run of unexplained 403s is over.
+        this.unexplainedForbiddenSince = null;
         this.note('delivery-failed',
           `Message ${message.resourceId} was not processed, so the history position stays where it `
           + `was and the whole delta will be fetched again: ${errorText(error)}`);
@@ -426,11 +505,21 @@ export class GmailMailSource implements InboundMailSource {
         // and stretching the interval because a sink refused would make that
         // number untrue, the sink's problem is not a reason to notice the
         // NEXT message later.
-        return this.verdict;
+        this.deliveryFailures += 1;
+        if (this.deliveryFailures < MAX_CONSECUTIVE_DELIVERY_FAILURES) return this.verdict;
+        // The same message refusing every pass holds the cursor, and everything
+        // behind it, in place under a verdict that would otherwise stay green.
+        return this.record(capabilityVerdict(
+          'reconnecting',
+          `Message ${message.resourceId} has been refused ${String(this.deliveryFailures)} times in a `
+          + `row, so mail behind it in this label is not being handed on: ${errorText(error)}`,
+        ));
       }
     }
+    this.deliveryFailures = 0;
 
-    if (delta.unreadable.length > 0) {
+    const held = this.heldUnreadable(delta);
+    if (held.length > 0) {
       // Messages this delta named and Google would not hand over. NOT messages
       // that are gone, `collectHistoryDelta` has already separated those out
       // and dropped them. These are still in the mailbox, and Gmail's history
@@ -443,8 +532,8 @@ export class GmailMailSource implements InboundMailSource {
       // again on the next pass, the same choice the delivery-failure path
       // above makes, for the same reason, with dedup absorbing the duplicates
       // among whatever DID come back this time.
-      this.note('fetch-unreadable', this.unreadableDetail(delta));
-      return this.record(this.transientVerdict(this.firstUnreadableFailure(delta)));
+      this.note('fetch-unreadable', this.unreadableDetail({ ...delta, unreadable: held }));
+      return this.recordFailure(this.firstUnreadableFailure({ ...delta, unreadable: held }));
     }
 
     await this.deps.cursors.advanceGmail(
@@ -498,6 +587,39 @@ export class GmailMailSource implements InboundMailSource {
    * a note that omitted it would read like a total outage during a single
    * rate-limited fetch.
    */
+  /**
+   * The unreadable entries that still hold the position. An entry Google has
+   * answered with a permanent client error for MAX_PERMANENT_UNREADABLE_PASSES
+   * passes in a row is given up on, with a note naming it; every transient
+   * answer resets that id's count and never counts toward it.
+   */
+  private heldUnreadable(delta: GmailHistoryDelta): GmailHistoryDelta['unreadable'] {
+    const seen = new Set(delta.unreadable.map((problem) => problem.id));
+    for (const id of [...this.permanentUnreadable.keys()]) {
+      if (!seen.has(id)) this.permanentUnreadable.delete(id);
+    }
+    const held: Array<GmailHistoryDelta['unreadable'][number]> = [];
+    for (const problem of delta.unreadable) {
+      if (!isPermanentFetchProblem(problem)) {
+        this.permanentUnreadable.delete(problem.id);
+        held.push(problem);
+        continue;
+      }
+      const passes = (this.permanentUnreadable.get(problem.id) ?? 0) + 1;
+      if (passes < MAX_PERMANENT_UNREADABLE_PASSES) {
+        this.permanentUnreadable.set(problem.id, passes);
+        held.push(problem);
+        continue;
+      }
+      this.permanentUnreadable.delete(problem.id);
+      this.note('fetch-unreadable',
+        `Message ${problem.id} was refused by Google with HTTP ${String(problem.status)} on `
+        + `${String(passes)} passes in a row (${problem.detail}), so it is treated as gone and the `
+        + `history position moves past it to ${delta.historyId}.`);
+    }
+    return held;
+  }
+
   private unreadableDetail(delta: GmailHistoryDelta): string {
     const reasons = [...new Set(delta.unreadable.map((problem) => problem.detail))].join('; ');
     const ids = delta.unreadable.map((problem) => problem.id).join(', ');
@@ -572,8 +694,37 @@ export class GmailMailSource implements InboundMailSource {
       detail: `${result.problem} ${policy.statusSentence}`,
       fix: result.fix,
     };
-    // The tracker's own answer to "was this a transition", so the owner is told
-    // once per transition and not once per probe.
+    this.latchInsufficient(verdict, reason, result.fix);
+    return verdict;
+  }
+
+  /**
+   * Record a failed Google call, announcing it to the owner when it means the
+   * grant cannot work.
+   *
+   * `refuse` is not the only way to an `insufficient` verdict: a token Google
+   * rejects mid-poll gets there too, and without the terminal failure the
+   * owner is told nothing, since the announcer reacts to that alone.
+   */
+  private recordFailure(failure: GoogleApiFailure): InboundCapabilityVerdict {
+    const verdict = this.transientVerdict(failure);
+    if (verdict.state !== 'insufficient') return this.record(verdict);
+    this.latchInsufficient(verdict, verdict.reason, verdict.fix);
+    return verdict;
+  }
+
+  /**
+   * Record an `insufficient` verdict and, on the transition, hand the owner the
+   * terminal failure.
+   *
+   * The tracker's own answer to "was this a transition" decides, so the owner is
+   * told once per transition and not once per probe.
+   */
+  private latchInsufficient(
+    verdict: InboundCapabilityVerdict,
+    reason: InboundCapabilityReason,
+    fix: string,
+  ): void {
     const announced = this.tracker.record(verdict);
     const failure: InboundMailTerminalFailure = {
       account: this.deps.account,
@@ -584,7 +735,7 @@ export class GmailMailSource implements InboundMailSource {
       // stops, so a sentence that reached only the status line would reach
       // them in the place they are not looking.
       detail: verdict.detail,
-      fix: result.fix,
+      fix,
       at: new Date(this.deps.clock.now()).toISOString(),
       // No `EmailCapabilityFailureNotice`: that record is minted by the IMAP
       // error types, and inventing one here would claim a provenance this
@@ -599,7 +750,6 @@ export class GmailMailSource implements InboundMailSource {
         // A notification route that throws must not become a second failure.
       }
     }
-    return verdict;
   }
 
   /**
@@ -608,9 +758,30 @@ export class GmailMailSource implements InboundMailSource {
    * A refused credential is `insufficient`, nothing clears it but a new grant.
    * A rate limit or a server fault is `degraded`: it is "not yet", not
    * "cannot", and the delta is still above the cursor when it clears.
+   *
+   * A 403 is ambiguous: Google sends it for a missing scope or a disabled API,
+   * which only a new grant fixes, and also for a per-user rate limit, which
+   * clears by itself. Only the first two causes are taken as a refusal, a
+   * 403 whose cause was not established is polled again, and
+   * an unbroken run of them lasting `MAX_UNEXPLAINED_FORBIDDEN_MS` is taken as a
+   * real refusal so a revoked scope cannot retry for ever. Any other failure
+   * ends the run. A grant Google reports as dead
+   * (`grant-invalid`) is a refusal whatever the status, including the `null`
+   * status of a token that could not be obtained at all.
    */
   private transientVerdict(failure: GoogleApiFailure): InboundCapabilityVerdict {
-    if (failure.status === 401 || failure.status === 403) {
+    let rejected = failure.reason === 'grant-invalid'
+      || failure.reason === 'missing-scopes'
+      || failure.reason === 'api-disabled'
+      || failure.status === 401;
+    if (!rejected && failure.status === 403) {
+      const now = this.deps.clock.now();
+      this.unexplainedForbiddenSince ??= now;
+      rejected = now - this.unexplainedForbiddenSince >= MAX_UNEXPLAINED_FORBIDDEN_MS;
+    } else {
+      this.unexplainedForbiddenSince = null;
+    }
+    if (rejected) {
       return {
         state: stateForReason('credentials-rejected'),
         reason: 'credentials-rejected',
@@ -618,7 +789,8 @@ export class GmailMailSource implements InboundMailSource {
         fix: failure.fix,
       };
     }
-    if (failure.status === 429 || (failure.status !== null && failure.status >= 500)) {
+    if (failure.status === 403 || failure.status === 429
+      || (failure.status !== null && failure.status >= 500)) {
       return capabilityVerdict('server-unavailable', failure.problem);
     }
     return capabilityVerdict('reconnecting', failure.problem);
@@ -685,6 +857,13 @@ export class GmailMailSource implements InboundMailSource {
   /** Record a verdict and return it, so call sites read as one expression. */
   private record(verdict: InboundCapabilityVerdict): InboundCapabilityVerdict {
     this.tracker.record(verdict);
+    // A terminal failure describes the verdict that latched it. Once anything
+    // but `insufficient` is recorded, the grant works again and the old
+    // failure would be stale data on the status surface.
+    if (verdict.state !== 'insufficient') this.terminal = null;
+    if (verdict.reason === 'polling-configured' || verdict.reason === 'gmail-metadata-notice-only') {
+      this.unexplainedForbiddenSince = null;
+    }
     return verdict;
   }
 

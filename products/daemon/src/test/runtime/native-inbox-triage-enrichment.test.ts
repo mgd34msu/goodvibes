@@ -20,6 +20,7 @@ import { createDiscordDaemonInboxSourceFactory } from '../../runtime/discord-inb
 import { createEmailDaemonInboxFactory, createEmailDaemonInboxSourceFactory } from '../../runtime/email-inbox-composition.js';
 import { createSlackDaemonInboxFactory, createSlackDaemonInboxSourceFactory } from '../../runtime/slack-inbox-composition.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { settleTurns } from '../helpers/turns.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -242,7 +243,7 @@ for (const provider of providers) {
     const f = await fixture(provider, { held });
     const scoring = f.owned.runInboxTriage(); void scoring.catch(() => {}); await held.entered.promise;
     f.revoke(); let closed = false; const closing = f.close().then(() => { closed = true; });
-    await new Promise(resolve => setTimeout(resolve, 5)); expect(closed).toBe(false);
+    await settleTurns(); expect(closed).toBe(false);
     expect(existsSync(`${f.mirror}.owner.lock`)).toBe(true);
     held.release.resolve(); await expect(scoring).rejects.toThrow(); await closing;
     expect(existsSync(`${f.mirror}.owner.lock`)).toBe(false);
@@ -272,7 +273,7 @@ for (const provider of providers) {
     const f = await fixture(provider, { clustered: true, metadataHeld, deferReady: true });
     await metadataHeld.entered.promise;
     let closed = false; const closing = f.close().then(() => { closed = true; });
-    await new Promise(resolve => setTimeout(resolve, 5)); expect(closed).toBe(false);
+    await settleTurns(); expect(closed).toBe(false);
     expect(f.providerClosed()).toBe(true); expect(existsSync(`${f.mirror}.owner.lock`)).toBe(true);
     metadataHeld.release.resolve(); await closing;
     expect(f.enrollments()).toBe(0); expect(f.polls()).toBe(0); expect(f.fake.requests).toHaveLength(0);

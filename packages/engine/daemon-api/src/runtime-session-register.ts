@@ -1,9 +1,9 @@
 import type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isJsonRecord } from './route-helpers.js';
-import { toSharedSessionRecordResponse, SHARED_SESSION_KINDS, type SharedSessionRecordResponse } from './runtime-session-routes.js';
+import { toSharedSessionRecordResponse, SHARED_SESSION_KINDS, type SharedSessionKind } from './runtime-session-routes.js';
 
-type RegisterKind = SharedSessionRecordResponse['kind'];
+type RegisterKind = SharedSessionKind;
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;

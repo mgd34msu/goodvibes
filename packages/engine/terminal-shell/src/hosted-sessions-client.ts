@@ -42,6 +42,8 @@ export type { CreateHostedSessionInput, HostedDetachPolicy, HostedSessionHistory
 export interface HostedSessionAttachment {
   readonly session: HostedSessionRecord;
   readonly history: readonly HostedSessionHistoryMessage[];
+  /** The daemon's clock when the history was read; absent while a turn is running. */
+  readonly historyAsOf?: number | undefined;
 }
 /**
  * How this terminal names itself to the daemon when it attaches.
@@ -125,7 +127,7 @@ export function createHostedSessionsClient(
     },
     async attach(sessionId): Promise<HostedSessionAttachment> {
       const result = await verbs.invoke<HostedSessionAttachment>('sessions.hosted.attach', { sessionId, clientId });
-      return { session: result.session, history: result.history ?? [] };
+      return { session: result.session, history: result.history ?? [], ...(typeof result.historyAsOf === 'number' ? { historyAsOf: result.historyAsOf } : {}) };
     },
     async detach(sessionId): Promise<HostedSessionRecord> {
       const result = await verbs.invoke<{

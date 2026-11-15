@@ -47,6 +47,7 @@ import {
   deleteReplicaEntry,
   findReplicaEntry,
   isReplicableValue,
+  MAX_REVISION_ADVANCE,
   mergeConfigReplica,
   putReplicaEntry,
   readConfigReplicaDocument,
@@ -129,15 +130,39 @@ export interface ConfigReplicationStatus {
   readonly tombstones: number;
   readonly lastAppliedFrom: string | null;
   readonly lastAppliedAt: number | null;
+  /** Edits made here that the responsible machine has not yet confirmed. */
   readonly pendingProposals: number;
+  /**
+   * True while this machine knows it missed a change and has asked for the full
+   * state again. Its revision matches the group's during this time, so the
+   * revision alone cannot show it.
+   */
+  readonly awaitingSync: boolean;
+  /** Credentials the group says exist but whose value has not arrived here. */
+  readonly credentialsMissing: number;
 }
+
+/** How often a machine that holds a credential marker without its value asks again. */
+const SECRET_REREQUEST_MS = 60_000;
+/** A proposal the master never acknowledges is resent this many times, then reported and dropped. */
+const MAX_PROPOSAL_RETRIES = 5;
+
+/** An unconfirmed proposal is not resent sooner than this, however often effects are retried. */
+const PROPOSAL_RESEND_MS = 10_000;
+
+interface PendingProposal { readonly kind: 'set' | 'secret' | 'delete'; readonly secret: boolean; readonly attempts: number; readonly sentAt: number }
 
 export class ConfigReplicationService {
   private document: ConfigReplicaDocument;
   private readonly snapshots = new ConfigSnapshotTransfers();
   private lastAppliedFrom: string | null = null;
   private lastAppliedAt: number | null = null;
-  private pendingProposals = 0;
+  private readonly proposals = new Map<string, PendingProposal>();
+  private retryingProposals = false;
+  /** Highest revision known to exist while this copy is missing part of it; null when nothing is missing. */
+  private resyncUntil: number | null = null;
+  private readonly missingSecrets = new Set<string>();
+  private lastMissingSecretRequestAt: number | null = null;
   private readonly pendingSets = new Map<string, PendingReplicaEffect>();
   private readonly pendingDeletes = new Map<string, PendingReplicaEffect>();
   private pendingPersistence: (() => void) | null = null;
@@ -151,6 +176,7 @@ export class ConfigReplicationService {
   adopt(document: ConfigReplicaDocument): void {
     this.snapshots.clear();
     this.pendingSets.clear(); this.pendingDeletes.clear(); this.pendingPersistence = null;
+    this.proposals.clear(); this.resyncUntil = null; this.missingSecrets.clear();
     this.document = this.publicDocument(document);
   }
 
@@ -168,7 +194,9 @@ export class ConfigReplicationService {
       tombstones: this.document.tombstones.length,
       lastAppliedFrom: this.lastAppliedFrom,
       lastAppliedAt: this.lastAppliedAt,
-      pendingProposals: this.pendingProposals,
+      pendingProposals: this.proposals.size,
+      awaitingSync: this.resyncUntil !== null,
+      credentialsMissing: this.missingSecrets.size,
     };
   }
 
@@ -286,7 +314,7 @@ export class ConfigReplicationService {
     // Not the master, so this is a proposal rather than a change. The master
     // issues the revision and broadcasts it back; that is what keeps a single
     // writer in the normal case.
-    this.pendingProposals += 1;
+    this.registerProposal(path, 'set', false);
     assertCurrent();
     await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.propose, { path, value, secret: false });
     assertCurrent();
@@ -307,13 +335,62 @@ export class ConfigReplicationService {
     if (value === null) { if (!seed) await this.publishDelete(configPath, true, assertCurrent, false); return; }
     if (seed && this.document.tombstones.some(entry => entry.path === configPath)) return;
     if (!this.host.isMaster()) {
-      this.pendingProposals += 1;
+      this.registerProposal(configPath, 'secret', true);
       await this.sendSealed(CONFIG_MESSAGE_TYPES.propose, configPath, value, assertCurrent);
       assertCurrent();
       return;
     }
     await this.publishSecret(configPath, value, assertCurrent);
     assertCurrent();
+  }
+
+  /**
+   * Remember an edit sent to the master until the group confirms it. Tracked per
+   * path so one unrelated incoming change cannot make a lost proposal look
+   * delivered.
+   */
+  private registerProposal(path: string, kind: PendingProposal['kind'], secret: boolean): void {
+    const attempts = this.retryingProposals ? (this.proposals.get(path)?.attempts ?? 0) + 1 : 0;
+    this.proposals.set(path, { kind, secret, attempts, sentAt: this.host.now() });
+  }
+
+  /** Forget the proposals the merged document now confirms. */
+  private acknowledgeProposals(merged: ConfigReplicaDocument): void {
+    for (const [path, proposal] of this.proposals) {
+      if (proposal.kind === 'delete') {
+        if (selectedDeletion(merged, path)) this.proposals.delete(path);
+        continue;
+      }
+      const entry = findReplicaEntry(merged, path);
+      if (proposal.kind === 'secret') {
+        if (entry?.secret) this.proposals.delete(path);
+      } else if (entry && !entry.secret && JSON.stringify(entry.value) === JSON.stringify(this.host.config()?.get(path))) {
+        this.proposals.delete(path);
+      }
+    }
+  }
+
+  /** Send again each edit the master has not confirmed; give up, loudly, after a few tries. */
+  private async resendProposals(): Promise<void> {
+    if (this.host.isMaster()) { this.proposals.clear(); return; }
+    this.retryingProposals = true;
+    try {
+      for (const [path, proposal] of [...this.proposals]) {
+        if (this.proposals.get(path) !== proposal || this.host.now() - proposal.sentAt < PROPOSAL_RESEND_MS) continue;
+        if (proposal.attempts >= MAX_PROPOSAL_RETRIES) {
+          this.proposals.delete(path);
+          this.host.logger.warn('cluster: the group never confirmed a setting changed on this machine; it stays local only', { path });
+          continue;
+        }
+        try {
+          if (proposal.kind === 'delete') await this.announceLocalDelete(path, proposal.secret);
+          else if (proposal.kind === 'secret') await this.announceLocalSecret(path);
+          else await this.announceLocalChange(path);
+        } catch (error) {
+          this.host.logger.debug('cluster: resending an unconfirmed setting failed', { path, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    } finally { this.retryingProposals = false; }
   }
 
   /** Delete a setting across the group. */
@@ -325,7 +402,7 @@ export class ConfigReplicationService {
   private async publishDelete(path: string, secret: boolean, assertCurrent: () => void, applyLocal: boolean): Promise<void> {
     assertCurrent();
     if (!this.host.isMaster()) {
-      this.pendingProposals += 1;
+      this.registerProposal(path, 'delete', secret);
       await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.propose, { path, secret, delete: true }); return;
     }
     const secrets = this.host.secrets();
@@ -439,6 +516,7 @@ export class ConfigReplicationService {
   /** Ask the group for everything. Sent by a machine that has just joined. */
   async requestSnapshot(): Promise<void> {
     const assertCurrent = this.host.captureAuthority(); assertCurrent();
+    this.lastMissingSecretRequestAt = this.host.now();
     await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.request, {});
     assertCurrent();
   }
@@ -484,16 +562,23 @@ export class ConfigReplicationService {
     if (!secrets || !member) return;
     for (const entry of this.document.entries.filter((candidate) => candidate.secret)) {
       assertCurrent();
-      const value = await this.effectiveSecret(entry.path, assertCurrent);
-      assertCurrent();
-      if (findReplicaEntry(this.document, entry.path) !== entry) throw new Error('Original replicated secret entry changed');
-      if (value === null) continue;
-      await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
-        secretPath: entry.path,
-        origin: entry.origin,
-        revision: entry.revision,
-        sealed: { [member.nodeId]: sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT) },
-      });
+      // One credential that cannot be sent must not stop the ones after it.
+      try {
+        const value = await this.effectiveSecret(entry.path, assertCurrent);
+        assertCurrent();
+        if (findReplicaEntry(this.document, entry.path) !== entry) throw new Error('Original replicated secret entry changed');
+        if (value === null) continue;
+        await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
+          secretPath: entry.path,
+          origin: entry.origin,
+          revision: entry.revision,
+          sealed: { [member.nodeId]: sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT) },
+        });
+      } catch (error) {
+        // Losing authority (membership changed, shutdown) still ends the whole pass.
+        assertCurrent();
+        this.host.logger.warn('cluster: a credential could not be sent to a joining machine and was skipped', { path: entry.path, to: member.nodeId, error: error instanceof Error ? error.message : String(error) });
+      }
       assertCurrent();
     }
   }
@@ -508,8 +593,10 @@ export class ConfigReplicationService {
     const incoming = readConfigReplicaDocument(value, isReplicatedConfigPath);
     if (!incoming || incoming.groupId !== this.document.groupId || incoming.revision !== complete.revision) return;
     const current = () => { complete.assertCurrent(); assertCurrent(); };
+    if (!this.withinRevisionBound(incoming.revision, envelope.nodeId)) return;
     await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), envelope.nodeId, current);
     current();
+    this.noteSnapshotApplied(incoming.revision);
   }
 
   private async onSnapshot(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
@@ -522,9 +609,39 @@ export class ConfigReplicationService {
       });
       return;
     }
+    if (!this.withinRevisionBound(incoming.revision, envelope.nodeId)) return;
     const merged = mergeConfigReplica(this.document, this.publicDocument(incoming));
     await this.applyDocument(merged, envelope.nodeId, assertCurrent);
     assertCurrent();
+    this.noteSnapshotApplied(incoming.revision);
+  }
+
+  /** A document claiming a revision far beyond this copy's own is not applied. */
+  private withinRevisionBound(revision: number, from: string): boolean {
+    if (revision <= this.document.revision + MAX_REVISION_ADVANCE) return true;
+    this.host.logger.warn('cluster: ignored replicated settings claiming an implausible revision', { from, revision, local: this.document.revision });
+    return false;
+  }
+
+  /** A full snapshot at or past the revision known to exist closes a detected gap. */
+  private noteSnapshotApplied(revision: number): void {
+    if (this.resyncUntil !== null && revision >= this.resyncUntil) this.resyncUntil = null;
+  }
+
+  /**
+   * Revisions are issued one at a time, so an incoming change that starts more
+   * than one past this copy's revision means something in between never
+   * arrived. The revision counter alone cannot show that: merging raises it to
+   * the newest value seen, which would make both machines report the same
+   * revision while one is missing a setting.
+   */
+  private noteGap(before: number, incoming: ConfigReplicaDocument): boolean {
+    // A copy with nothing yet is already asking for everything (`needsSnapshot`).
+    if (this.host.isMaster() || before === 0) return false;
+    const revisions = [...incoming.entries.map((entry) => entry.revision), ...incoming.tombstones.map((entry) => entry.revision)];
+    if (revisions.length === 0 || Math.min(...revisions) <= before + 1) return false;
+    this.resyncUntil = Math.max(this.resyncUntil ?? 0, ...revisions);
+    return true;
   }
 
   private async onDelta(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
@@ -546,8 +663,21 @@ export class ConfigReplicationService {
       isReplicatedConfigPath,
     );
     if (!incoming) return;
-    await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), envelope.nodeId, assertCurrent);
+    // A delta carries the sender's own changes; one naming another node as the
+    // author is not something the sender can vouch for.
+    const before = this.document.revision;
+    const own = { ...incoming, revision: before,
+      entries: incoming.entries.filter((entry) => entry.origin === envelope.nodeId),
+      tombstones: incoming.tombstones.filter((entry) => entry.origin === envelope.nodeId) };
+    if (own.entries.length !== incoming.entries.length || own.tombstones.length !== incoming.tombstones.length) {
+      this.host.logger.warn('cluster: ignored replicated changes the sender did not originate', { from: envelope.nodeId });
+    }
+    if (own.entries.length === 0 && own.tombstones.length === 0) return;
+    if (!this.withinRevisionBound(Math.max(...own.entries.map((entry) => entry.revision), ...own.tombstones.map((entry) => entry.revision)), envelope.nodeId)) return;
+    const gap = this.noteGap(before, own);
+    await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(own)), envelope.nodeId, assertCurrent);
     assertCurrent();
+    if (gap) await this.requestSnapshot();
   }
 
   /**
@@ -621,6 +751,7 @@ export class ConfigReplicationService {
     await this.mutateSecret(path, assertCurrent, async () => {
       const revision = envelope.body['revision'];
       if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision <= 0) return;
+      if (!this.withinRevisionBound(revision, envelope.nodeId)) return;
       const suppliedOrigin = envelope.body['origin'], existing = findReplicaEntry(this.document, path);
       if (suppliedOrigin !== undefined && (typeof suppliedOrigin !== 'string' || suppliedOrigin.length === 0 || suppliedOrigin.length > 256)) return;
       const origin = typeof suppliedOrigin === 'string' ? suppliedOrigin : existing?.secret && existing.revision === revision ? existing.origin : envelope.nodeId;
@@ -640,7 +771,14 @@ export class ConfigReplicationService {
       // delete/write still owns the final store state; never resurrect metadata.
       const merged = admitted(); if (!merged) return;
       if (isSecretBearingConfigKey(path)) { assertCurrent(); this.host.config()?.set(path, canonicalReplicatedSecretRef(path)); assertCurrent(); }
-      this.document = merged; this.host.persist(merged); assertCurrent(); this.logApplied(path, envelope.nodeId, true);
+      // Applying this raises the revision to the secret's own, which would hide
+      // a change that was missed in between; note it before it is lost.
+      const gap = this.noteGap(this.document.revision, incoming);
+      this.missingSecrets.delete(path);
+      this.document = merged;
+      this.host.persist(merged); assertCurrent(); this.logApplied(path, envelope.nodeId, true);
+      this.acknowledgeProposals(merged);
+      if (gap) await this.requestSnapshot();
     });
   }
 
@@ -661,7 +799,7 @@ export class ConfigReplicationService {
     }
     this.pendingPersistence = assertCurrent; assertCurrent(); this.host.persist(merged); assertCurrent(); this.pendingPersistence = null;
     await this.retryPendingEffects(); assertCurrent();
-    this.lastAppliedFrom = from; this.lastAppliedAt = this.host.now(); this.pendingProposals = 0;
+    this.lastAppliedFrom = from; this.lastAppliedAt = this.host.now(); this.acknowledgeProposals(merged);
   }
 
   /** A genuine successful local edit retires an older failed remote effect. */
@@ -693,14 +831,38 @@ export class ConfigReplicationService {
           if (!secrets || (isSecretBearingConfigKey(path) && !config.reset)) throw new Error('Replicated credential deletion is unavailable');
           await this.mutateSecret(path, current, async () => { current(); config.reset?.(path); current(); await secrets.delete(replicatedSecretKeyFor(path)); current(); });
         }
-        else config.reset?.(path);
+        else if (config.reset) config.reset(path);
         current(); if (this.pendingDeletes.get(path) === effect) this.pendingDeletes.delete(path);
-        this.host.logger.info('cluster: a setting was deleted by another machine in the group', { path, origin: effect.origin });
+        if (effect.secret || config.reset) this.host.logger.info('cluster: a setting was deleted by another machine in the group', { path, origin: effect.origin });
+        else this.host.logger.warn('cluster: another machine in the group deleted a setting, but this machine\'s configuration store cannot reset it; the local value is unchanged', { path, origin: effect.origin });
       } catch {
         try { current(); } catch { if (this.pendingDeletes.get(path) === effect) this.pendingDeletes.delete(path); continue; }
         this.host.logger.warn('cluster: a replicated deletion was not confirmed and is awaiting retry', { path, origin: effect.origin });
       }
     }
+    await this.refreshMissingSecrets(secrets);
+    await this.resendProposals();
+  }
+
+  /**
+   * Note the credentials the group says exist that this machine does not hold.
+   *
+   * The document carries only the fact that a credential exists; its value
+   * travels separately and once. A machine that has the first without the
+   * second looks complete in `cluster status` and cannot serve the surface.
+   */
+  private async refreshMissingSecrets(secrets: ReplicatedSecretStore | null): Promise<void> {
+    if (this.host.isMaster() || !secrets) { this.missingSecrets.clear(); return; }
+    const present = new Set<string>();
+    for (const entry of this.document.entries) {
+      if (!entry.secret) continue;
+      present.add(entry.path);
+      try {
+        if (await secrets.get(replicatedSecretKeyFor(entry.path)) === null) this.missingSecrets.add(entry.path);
+        else this.missingSecrets.delete(entry.path);
+      } catch { /* unreadable store: leave the earlier reading */ }
+    }
+    for (const path of this.missingSecrets) if (!present.has(path)) this.missingSecrets.delete(path);
   }
 
   /**
@@ -743,7 +905,11 @@ export class ConfigReplicationService {
    * arrives.
    */
   get needsSnapshot(): boolean {
-    return !this.host.isMaster() && this.document.revision === 0;
+    if (this.host.isMaster()) return false;
+    if (this.document.revision === 0 || this.resyncUntil !== null) return true;
+    if (this.missingSecrets.size === 0) return false;
+    // A credential the master cannot send would otherwise be asked for on every pass.
+    return this.lastMissingSecretRequestAt === null || this.host.now() - this.lastMissingSecretRequestAt >= SECRET_REREQUEST_MS;
   }
 
   /**

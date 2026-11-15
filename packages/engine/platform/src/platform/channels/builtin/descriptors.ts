@@ -234,8 +234,8 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       id: 'account-action',
       surface,
       label: 'Run account lifecycle action',
-      description: 'Execute a safe channel-account lifecycle action such as inspect, retest, start, stop, login, or logout.',
-      dangerous: false,
+      description: 'Execute a channel-account lifecycle action such as inspect, retest, start, stop, login, or logout.',
+      dangerous: true,
       inputSchema: {
         type: 'object',
         properties: {
@@ -306,7 +306,7 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       surface,
       label: 'Edit allowlist',
       description: 'Apply allowlist additions or removals at the surface or scoped group/channel level.',
-      dangerous: false,
+      dangerous: true,
       inputSchema: {
         type: 'object',
         properties: {
@@ -359,7 +359,19 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
     : actions;
 }
 
+/**
+ * Every tool whose action is marked dangerous says so in its metadata, so an
+ * agent tool bridge can tell the model (and any approval prompt) that the call
+ * changes who may reach the agent or acts on something outside the chat.
+ */
 export function listBuiltinTools(surface: ChannelSurface): ChannelToolDescriptor[] {
+  const dangerousActions = new Set(listBuiltinOperatorActions(surface).filter((entry) => entry.dangerous).map((entry) => entry.id));
+  return listUnflaggedBuiltinTools(surface).map((tool) => tool.actionIds.some((id) => dangerousActions.has(id))
+    ? { ...tool, metadata: { ...tool.metadata, dangerous: true } }
+    : tool);
+}
+
+function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescriptor[] {
   const tools = [
     {
       id: `${surface}:account`,
@@ -501,7 +513,7 @@ export function listBuiltinTools(surface: ChannelSurface): ChannelToolDescriptor
       id: `${surface}:account_action`,
       surface,
       name: `${surface}_account_action`,
-      description: `Run a safe account lifecycle action for the ${surface} surface.`,
+      description: `Run an account lifecycle action (start, stop, login, logout) for the ${surface} surface.`,
       actionIds: ['account-action'],
       inputSchema: {
         type: 'object',

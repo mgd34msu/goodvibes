@@ -1,4 +1,4 @@
-import { makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
+import { useTestWebhookNotifications, makeTestWebhookNotifier, settleTestWebhookNotifications } from '../helpers/notification-transport.ts';
 /**
  * Notifications name the work (owner ruling 2026-09-29).
  *
@@ -20,6 +20,8 @@ import { wrapRequestPermissionWithAlert } from '../../core/approval-alert.ts';
 import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeTestSurface } from '../helpers/session-surface.ts';
+
+useTestWebhookNotifications();
 
 const ASK = 'Refactor the authentication middleware so expired sessions redirect to the login page instead of throwing a 500 error';
 const NAME_60 = 'Refactor the authentication middleware so expired sessions…';

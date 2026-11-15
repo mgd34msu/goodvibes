@@ -10,8 +10,13 @@
  *
  * WHICH FILE A WRITE LANDS IN is not decided here. `ConfigManager.set()` routes
  * a daemon-owned key to the daemon's own settings store and a shared key to the
- * shared one; this command reports where it landed rather than choosing, so the
- * routing stays in one place and this command cannot disagree with the daemon.
+ * shared one, so the routing stays in one place and this command cannot
+ * disagree with the daemon. The receipt does not name the file.
+ *
+ * A CREDENTIAL IS NEVER WRITTEN INTO A SETTINGS FILE. `ConfigManager.set()` has
+ * no secret routing, so a declared credential key given a literal value is
+ * stored in the secret store and the settings file receives only a
+ * `goodvibes://secrets/` reference; a key with no secret-store route refuses.
  *
  * READS ARE REDACTED. Every value printed goes through the terminal shell's
  * cli-redaction
@@ -22,8 +27,8 @@
  * visible on purpose: it is a pointer, not a secret, and hiding it would make
  * the indirection impossible to verify.
  */
-import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { ConfigError } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigError, isDeclaredSecretBearingConfigKey, isSecretRefInput } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   REDACTED_VALUE,
   isSensitiveConfigPath,
@@ -31,6 +36,7 @@ import {
   redactConfig,
 } from '@goodvibes-jev/engine/terminal-shell';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
+import { isSecretConfigKey, persistSecretBackedConfigValue, type SecretBackedSecretStore } from '../config/secret-config.js';
 
 export const CONFIG_SUBCOMMANDS = ['list', 'get', 'set', 'unset'] as const;
 export type ConfigSubcommand = (typeof CONFIG_SUBCOMMANDS)[number];
@@ -49,6 +55,12 @@ export interface ConfigCommandDeps {
   readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'getSchema' | 'getRaw' | 'reset' | 'getConfigPath'>;
   readonly json: boolean;
   readonly binary?: string | undefined;
+  /**
+   * Opens the secret store a credential value is written to. Built on demand so
+   * commands that never write a credential do not touch it. Without it, a
+   * credential value is refused rather than stored in a settings file.
+   */
+  readonly openSecretStore?: (() => SecretBackedSecretStore) | undefined;
 }
 
 function usage(binary: string): string[] {
@@ -206,7 +218,7 @@ async function listResult(deps: ConfigCommandDeps): Promise<ConfigCommandResult>
       ...await Promise.all(rows.map(async (row) => `  ${row.key.padEnd(width)}  ${await renderConfigValue(row.key, row.value)}`)),
       '',
       `settings file: ${deps.configManager.getConfigPath()}`,
-      'a daemon-owned key is written to the daemon\'s own settings store instead; `config set` says which.',
+      'a daemon-owned key is stored in the daemon\'s own settings file instead of this one.',
     ],
   };
 }
@@ -244,8 +256,15 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
   if (preparation.kind === 'refused') return preparation.result;
   try { preparation.assertCurrent(); }
   catch { return failure(`could not prepare safe output for ${key}; settings were not changed.`, deps); }
+  const credentialText = typeof value === 'string' && isDeclaredSecretBearingConfigKey(key) && !isSecretRefInput(value.trim()) ? value : undefined;
+  const storedInSecretStore = credentialText !== undefined && isSecretConfigKey(key) && deps.openSecretStore !== undefined;
+  // A cleared credential holds no secret, so clearing stays an ordinary write.
+  if (credentialText !== undefined && !storedInSecretStore && credentialText.trim().length > 0) {
+    return failure(`${key} holds a credential, and \`config set\` will not write it into a settings file. Set it to a secret reference (goodvibes://secrets/...) instead. Settings were not changed.`, deps);
+  }
   try {
-    deps.configManager.set(key, value as never);
+    if (credentialText !== undefined && storedInSecretStore) await writeCredential(deps, key, credentialText);
+    else deps.configManager.set(key, value as never);
   } catch (error) {
     return writeFailure(key, error, deps);
   }
@@ -263,10 +282,26 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
     exitCode: 0,
     lines: [
       `${key} = ${printable}`,
-      '  written to disk. A running daemon picks most keys up live; the ones that only apply',
-      '  when it binds a port need a restart:  goodvibes-daemon restart-service',
+      ...(storedInSecretStore && credentialText?.trim() ? ['  the credential is in the secret store; the settings file holds only the reference above.'] : []),
+      '  written to disk. A running daemon applies most keys live, including a changed control-plane',
+      '  host or port; a key that is only read when the daemon starts applies the next time it starts.',
     ],
   };
+}
+
+/** The reference goes to settings and the value to the secret store. */
+async function writeCredential(deps: ConfigCommandDeps, key: ConfigKey, value: string): Promise<void> {
+  const previous = deps.configManager.get(key);
+  try {
+    await persistSecretBackedConfigValue(
+      { get: (k) => deps.configManager.get(k), setDynamic: (k, v) => { deps.configManager.set(k, v as never); } },
+      deps.openSecretStore!(), key, value,
+    );
+  } catch (error) {
+    // The reference may already be written; leave no pointer to a secret that was never stored.
+    try { deps.configManager.set(key, previous as never); } catch { /* the original error is the one to report */ }
+    throw error;
+  }
 }
 
 async function unsetResult(deps: ConfigCommandDeps, key: string): Promise<ConfigCommandResult> {
@@ -292,9 +327,13 @@ async function unsetResult(deps: ConfigCommandDeps, key: string): Promise<Config
       }, null, 2)],
     };
   }
+  // `reset` removes only the global, daemon and shared value; a project value can still win.
+  const atDefault = JSON.stringify(readValue(deps, key) ?? null) === JSON.stringify(schemaFor(deps, key)?.default ?? null);
   return {
     exitCode: 0,
-    lines: [`${key} = ${printable}  (back to its shipped default)`],
+    lines: [atDefault
+      ? `${key} = ${printable}  (back to its shipped default)`
+      : `${key} = ${printable}  (another settings layer, such as a project settings file, still sets a different value)`],
   };
 }
 

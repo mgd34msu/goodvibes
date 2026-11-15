@@ -20,25 +20,34 @@ const DISPLAY_KEYS: ConfigKey[] = [
   'display.showTokenSpeed',
   'display.showToolPreview',
 ] as const;
-/** Known behavior setting keys (subset of ConfigKey that maps to behavior.*). */
+/**
+ * Known behavior setting keys (subset of ConfigKey that maps to behavior.*).
+ * Approval behaviour (`autoApprove`, `hitlMode`) is deliberately absent: a
+ * profile from another host must not change what runs without asking.
+ */
 const BEHAVIOR_KEYS: ConfigKey[] = [
-  'behavior.autoApprove',
   'behavior.autoCompactThreshold',
   'behavior.saveHistory',
   'behavior.notifyOnComplete',
 ] as const;
+interface ProfileApplyOutcome {
+  readonly applied: string[];
+  readonly failed: string[];
+}
 /**
  * Apply a profile data category to the config manager.
  * Iterates only known/valid keys rather than open-ended Object.entries.
  */
-function applyProfileCategory(cm: ConfigManager, data: object, keys: ConfigKey[]): void {
+function applyProfileCategory(cm: ConfigManager, data: object, keys: ConfigKey[], outcome: ProfileApplyOutcome): void {
   for (const key of keys) {
     const field = key.split('.')[1];
     if (field && Object.prototype.hasOwnProperty.call(data, field)) {
       try {
         cm.setDynamic(key, Reflect.get(data, field));
+        outcome.applied.push(key);
       } catch (e) {
         logger.debug('applyProfileCategory: key set failed', { key, error: summarizeError(e) });
+        outcome.failed.push(key);
       }
     }
   }
@@ -130,7 +139,8 @@ export class ProfilePickerModal {
   }
   /**
    * Load the selected profile into configManager.
-   * Returns true on success, false on error.
+   * Returns true only when every setting the profile carries was applied;
+   * a setting the config rejects is named in the status message and returns false.
    */
   loadSelected(configManager: ConfigManager): boolean {
     const profile = this.getSelected();
@@ -142,30 +152,42 @@ export class ProfilePickerModal {
         this.statusMessage = refusal;
         return false;
       }
+      const outcome: ProfileApplyOutcome = { applied: [], failed: [] };
       // Apply display settings using validated key list
       if (data.display) {
-        applyProfileCategory(configManager, data.display, DISPLAY_KEYS);
+        applyProfileCategory(configManager, data.display, DISPLAY_KEYS, outcome);
       }
       // Apply provider settings (model + reasoningEffort only)
       if (data.provider) {
         if (data.provider.model !== undefined) {
           try {
             configManager.set('provider.model', data.provider.model);
+            outcome.applied.push('provider.model');
           } catch (e) {
+            outcome.failed.push('provider.model');
             logger.debug('profile: model set failed', { error: summarizeError(e) });
           }
         }
         if (data.provider.reasoningEffort !== undefined) {
           try {
             configManager.set('provider.reasoningEffort', data.provider.reasoningEffort);
+            outcome.applied.push('provider.reasoningEffort');
           } catch (e) {
+            outcome.failed.push('provider.reasoningEffort');
             logger.debug('profile: reasoningEffort set failed', { error: summarizeError(e) });
           }
         }
       }
       // Apply behavior settings using validated key list
       if (data.behavior) {
-        applyProfileCategory(configManager, data.behavior, BEHAVIOR_KEYS);
+        applyProfileCategory(configManager, data.behavior, BEHAVIOR_KEYS, outcome);
+      }
+      if (outcome.failed.length > 0) {
+        // Nothing applied means nothing to persist; a partial load keeps what did apply.
+        if (outcome.applied.length > 0) configManager.save();
+        this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name} (partial: could not apply ${outcome.failed.join(', ')})`;
+        if (outcome.applied.length === 0) this.statusMessage = `${this.policy.errorPrefix ?? 'Error: '}profile ${profile.name} was not loaded; the config rejected ${outcome.failed.join(', ')}`;
+        return false;
       }
       configManager.save();
       this.statusMessage = `${this.policy.loadedPrefix ?? 'Loaded profile: '}${profile.name}`;
@@ -234,13 +256,14 @@ export class ProfilePickerModal {
     }
     try {
       const all = configManager.getAll();
+      const { autoApprove: _autoApprove, hitlMode: _hitlMode, ...behavior } = all.behavior;
       const data: ProfileData = {
         display: { ...all.display },
         provider: {
           model: all.provider.model,
           reasoningEffort: all.provider.reasoningEffort,
         },
-        behavior: { ...all.behavior },
+        behavior,
       };
       this.profileManager.save(name, data);
       // Reload list

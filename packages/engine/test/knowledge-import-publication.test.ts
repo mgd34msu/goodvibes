@@ -1,3 +1,4 @@
+import { waitFor } from './_helpers/test-timeout.js';
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { afterEach, expect, spyOn, test } from 'bun:test';
@@ -85,12 +86,15 @@ test('a same-handle winner during persistence admission is retained without publ
   const started = new Promise<void>(resolve => { entered = resolve; });
   const pause = new Promise<void>(resolve => { release = resolve; });
   const interception = spyOn(persistence, 'lock').mockImplementationOnce(async () => { entered(); await pause; return lock(); });
+  // The winner's save is admitted to the handle's queue when save() is called.
+  const winnerQueued = Promise.withResolvers<void>(), sqlite = sqliteOf(store), save = sqlite.save.bind(sqlite);
+  const saveWatch = spyOn(sqlite, 'save').mockImplementation(() => { winnerQueued.resolve(); return save(); });
   let committed = 0;
   const imported = store.applyPreparedIngest(input, graph, {}, () => { committed++; }).then(() => undefined, (error: unknown) => error);
   try {
     await started;
     const winner = store.upsertSource({ ...source('local-winner'), title: 'Current local writer' });
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await winnerQueued.promise;
     release();
     expect(await imported).toBeInstanceOf(Error);
     await winner;
@@ -100,10 +104,10 @@ test('a same-handle winner during persistence admission is retained without publ
     const reopened = await open(store.storagePath);
     expect(reopened.getSource('local-winner')?.title).toBe('Current local writer');
     expect(reopened.getSource('generated')).toBeNull();
-  } finally { release(); interception.mockRestore(); }
+  } finally { release(); saveWatch.mockRestore(); interception.mockRestore(); }
 });
 
-test('visible indeterminate publication retains its exact SQL/cache references, withholds callback and fences later writes', async () => {
+test('visible indeterminate publication retains its exact SQL/cache references, withholds callback, then recovers by adopting the published image on the next write', async () => {
   const store = await fixture(), io = nativeFs;
   const rename = io.renameSync, fsync = io.fsyncSync;
   let renamed = false, committed = 0;
@@ -121,9 +125,11 @@ test('visible indeterminate publication retains its exact SQL/cache references, 
   const visible = readFileSync(store.storagePath), reopened = await open(store.storagePath);
   expect(cacheState(store)).toEqual(cacheState(reopened));
   expect(reopened.getSource('generated')?.artifactId).toBe('generated-artifact');
-  await expect(store.upsertSource(source('must-not-write'))).rejects.toThrow('cache fenced');
-  expect(readFileSync(store.storagePath)).toEqual(visible);
-  expect(store.getSource('must-not-write')).toBeNull();
+  expect(store.isReady).toBe(true);
+  await store.upsertSource(source('after-recovery'));
+  expect(readFileSync(store.storagePath)).not.toEqual(visible);
+  expect(store.getSource('generated')?.artifactId).toBe('generated-artifact');
+  expect((await open(store.storagePath)).getSource('after-recovery')).not.toBeNull();
 });
 
 test('successful import publishes complete exact records and callback only after real persistence, including a batch prefix', async () => {
@@ -178,7 +184,7 @@ test('Classic import rejects a retired native guard before publishing any staged
   });
 });
 
-/** UNRUN: completion observers cannot revoke an acknowledged native import. */
+/** Completion observers cannot revoke an acknowledged native import. */
 import { logger } from '../platform/src/platform/utils/logger.js';
 
 test('throwing postcommit notification retains the real receipt and native rows across reopen', async () => {
@@ -214,8 +220,7 @@ test('returned async observer is drained without delaying or rejecting the commi
     expect(store.getSource('generated')).toBe(receipt.sources[0]);
     expect((await open(store.storagePath)).getSource('generated')?.artifactId).toBe('generated-artifact');
     release.resolve();
-    await new Promise<void>(resolve => setImmediate(resolve));
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await waitFor(() => warnings.length > 0);
     expect(settled).toBe(true); expect(seen).toEqual([]);
     expect(JSON.stringify(warnings)).toContain('asynchronous completion notification');
     expect(JSON.stringify(warnings)).not.toContain('SYNTHETIC_PRIVATE_LATE_NOTIFICATION');
@@ -231,4 +236,10 @@ test('ordinary primitive notification returns do not produce a spurious warning'
     expect(store.getSource('generated')).toBe(receipt.sources[0]);
     expect(JSON.stringify(warnings)).not.toContain('notification');
   } finally { warn.mockRestore(); }
+});
+
+test('a write that was admitted before the store closed reports the store as closed, not as uninitialized', async () => {
+  const store = await fixture(), init = store.init.bind(store);
+  store.init = async () => { await init(); await store.close(); };
+  await expect(store.upsertSource(source('late-write'))).rejects.toThrow('KnowledgeStore is closed');
 });

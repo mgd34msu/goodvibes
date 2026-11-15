@@ -8,7 +8,7 @@
 // Update path:
 //   GOODVIBES_UPDATE_GOLDENS=1 bun test src/test/renderer/golden-frames-work-tree-neon.test.ts
 
-import { afterAll } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { activeThemeMode, getActiveThemeName, setActiveThemeMode, setActiveThemeName } from '../../renderer/theme.ts';
 
 const previousTheme = process.env['GOODVIBES_GOLDEN_THEME'];
@@ -22,6 +22,12 @@ afterAll(() => {
 });
 
 process.env['GOODVIBES_GOLDEN_THEME'] = 'goodvibes-neon';
-await import('./golden-frames-work-tree.test.ts');
+const suite = await import('./golden-frames-work-tree.test.ts');
+
+// A module that was already loaded in this process is not evaluated again, so it would register
+// nothing here and the wrapper would pass with no frame compared.
+test('the golden suite was evaluated under goodvibes-neon', () => {
+  expect(suite.goldenTheme).toBe('goodvibes-neon');
+});
 
 export {};

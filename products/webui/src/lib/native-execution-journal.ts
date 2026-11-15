@@ -20,6 +20,8 @@ export interface NativeExecutionBrowserJournal {
   save(record: NativeExecutionBrowserRecord): Promise<void>;
   /** Confirm the exact retained target before a mutation. This never removes it. */
   confirm(record: NativeExecutionBrowserRecord): Promise<void>;
+  /** Retire one exact target, only once the daemon reports its execution settled (see `release` in native-intake.ts). */
+  remove(record: NativeExecutionBrowserRecord): Promise<void>;
 }
 
 export const NATIVE_EXECUTION_BROWSER_JOURNAL_DATABASE = "goodvibes.native-execution.v1";
@@ -42,7 +44,9 @@ export class NativeExecutionBrowserJournalError extends Error {
       | "capacity"
   ) {
     super(
-      `Native execution target journal: ${code}. The exact target must be durably retained before execution changes.`
+      code === "capacity"
+        ? `Native execution target journal: capacity. This browser keeps at most ${NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_RECORDS} execution targets. Release a request the daemon reports as finished to make room; unfinished targets are never discarded.`
+        : `Native execution target journal: ${code}. The exact target must be durably retained before execution changes.`
     );
     this.name = "NativeExecutionBrowserJournalError";
   }
@@ -144,18 +148,24 @@ function encodedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
+/**
+ * A record that fails the current strict shape (damaged, or written by another build) is
+ * skipped, never allowed to make every other retained target unreadable or to block
+ * saving a new one. It stays in the store untouched.
+ */
 function readRecords(values: unknown[]): NativeExecutionBrowserRecord[] {
-  if (values.length > NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_RECORDS)
-    throw new NativeExecutionBrowserJournalError("capacity");
-  let records: NativeExecutionBrowserRecord[];
-  try {
-    records = values.map(recordSnapshot);
-  } catch {
-    throw new NativeExecutionBrowserJournalError("corrupt");
+  const records: NativeExecutionBrowserRecord[] = [];
+  for (const value of values) {
+    try {
+      records.push(recordSnapshot(value));
+    } catch {
+      // Skipped, see above.
+    }
   }
   if (
+    records.length > NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_RECORDS ||
     records.reduce((total, record) => total + encodedBytes(record), 0) >
-    NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_BYTES
+      NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_BYTES
   ) {
     throw new NativeExecutionBrowserJournalError("capacity");
   }
@@ -290,10 +300,7 @@ export function createNativeExecutionBrowserJournal(
             fail(new NativeExecutionBrowserJournalError("corrupt"));
             return;
           }
-          const read: IDBRequest<unknown[]> = store.getAll(
-            undefined,
-            NATIVE_EXECUTION_BROWSER_JOURNAL_MAX_RECORDS + 1
-          );
+          const read: IDBRequest<unknown[]> = store.getAll();
           read.onsuccess = () => {
             try {
               result = operate(readRecords(read.result), store);
@@ -348,6 +355,22 @@ export function createNativeExecutionBrowserJournal(
         }
         // add (never put) also enforces immutable input identity at the database boundary.
         store.add(snapshot);
+      });
+    },
+    async remove(record) {
+      const snapshot = recordSnapshot(record);
+      await transaction((records, store) => {
+        const existing = records.find(
+          (item) => sameBinding(item.binding, snapshot.binding) && item.inputId === snapshot.inputId
+        );
+        if (!existing) throw new NativeExecutionBrowserJournalError("missing");
+        // Only the exact target that was shown may be retired.
+        if (JSON.stringify(existing) !== JSON.stringify(snapshot))
+          throw new NativeExecutionBrowserJournalError("conflict");
+        store.delete([
+          ...BINDING_KEYS.map((key) => snapshot.binding[key as keyof NativeIntakeBrowserBinding]),
+          snapshot.inputId,
+        ]);
       });
     },
     async confirm(record) {

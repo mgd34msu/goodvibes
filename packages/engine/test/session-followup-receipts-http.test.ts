@@ -1,8 +1,9 @@
 /** Real session HTTP bytes for the WebUI's input-receipt lifecycle proof. */
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { exportAndCompareFixture } from './_helpers/webui-fixture-parity.ts';
 import { firstJsonSchemaFailure } from '@goodvibes-jev/engine/transport-http';
 import operatorContract from '@goodvibes-jev/engine/contracts/operator-contract.json' with { type: 'json' };
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/contracts';
@@ -60,7 +61,9 @@ function serveSessions(spawnResponse?: ReturnType<DaemonRuntimeRouteContext['try
   };
 }
 
-test('surfaceless follow-up can return a bare 429 after the broker has queued the input', async () => {
+const FIXTURES = new URL('../../../products/webui/e2e/support/fixtures/session-followup/', import.meta.url);
+
+test('surfaceless follow-up refused with a bare 429 ends its input with the reason', async () => {
   const refusal = { error: 'Daemon agent capacity exceeded', code: 'CAPACITY_EXCEEDED' };
   const fixture = serveSessions(Response.json(refusal, { status: 429 }));
   try {
@@ -75,28 +78,27 @@ test('surfaceless follow-up can return a bare 429 after the broker has queued th
     expect(JSON.parse(bytes).input).toBeUndefined();
     const queued = await capture(fixture.baseUrl, 'sessions.inputs.list', '/api/sessions/s-capacity/inputs');
     expect(queued.value.inputs).toHaveLength(1);
-    expect(queued.value.inputs[0]).toMatchObject({ sessionId: 's-capacity', state: 'queued', intent: 'follow-up', body: BODY });
+    // Nothing would ever start it, so it ends with the refusal instead of
+    // keeping the session busy forever.
+    expect(queued.value.inputs[0]).toMatchObject({ sessionId: 's-capacity', state: 'failed', intent: 'follow-up', body: BODY });
+    expect(queued.value.inputs[0]?.error).toContain('Daemon agent capacity exceeded');
     expect(fixture.spawnCount).toBe(1);
-    // A later spawn claims the oldest queued input, not necessarily the new
-    // follow-up named in this POST response. The list is authoritative for id B.
+    // A later spawn claims exactly the follow-up named in its own POST response.
     fixture.setSpawnResponse({ id: 'agent-capacity-recovered', status: 'running', task: 'Second follow-up', tools: [], startedAt: Date.now() });
     const second = await capture(fixture.baseUrl, 'sessions.followUp', path, { body: 'Second follow-up after capacity returns' });
     expect(second.wire.status).toBe(202);
     expect(second.value.input.state).toBe('spawned');
     const afterSpawn = await capture(fixture.baseUrl, 'sessions.inputs.list', '/api/sessions/s-capacity/inputs');
     expect(afterSpawn.value.inputs).toHaveLength(2);
-    expect(afterSpawn.value.inputs.find(input => input.id === queued.value.inputs[0]?.id)).toMatchObject({ state: 'spawned', activeAgentId: 'agent-capacity-recovered' });
-    expect(afterSpawn.value.inputs.find(input => input.id === second.value.input.id)).toMatchObject({ state: 'queued' });
+    expect(afterSpawn.value.inputs.find(input => input.id === queued.value.inputs[0]?.id)).toMatchObject({ state: 'failed' });
+    expect(afterSpawn.value.inputs.find(input => input.id === second.value.input.id)).toMatchObject({ state: 'spawned', activeAgentId: 'agent-capacity-recovered' });
     expect(fixture.spawnCount).toBe(2);
     const directory = process.env.GOODVIBES_TEST_SESSION_FOLLOWUP_FIXTURE_DIR;
-    if (directory) {
-      mkdirSync(directory, { recursive: true });
-      writeFileSync(join(directory, 'capacity.json'), JSON.stringify({
+    exportAndCompareFixture(directory, 'capacity.json', JSON.stringify({
         source: 'packages/engine/test/session-followup-receipts-http.test.ts',
         post: { methodId: 'sessions.followUp', method: 'POST', path, requestBody: { body: BODY }, status: response.status, body: bytes },
         queued: queued.wire, second: second.wire, afterSpawn: afterSpawn.wire,
-      }, null, 2) + '\n');
-    }
+      }, null, 2) + '\n', FIXTURES);
   } finally { await fixture.stop(); }
 });
 
@@ -177,17 +179,14 @@ for (const outcome of ['completed', 'failed', 'cancelled'] as const) {
       expect(fixture.broker.getInputsSince(SESSION_ID, { state: 'queued' })).toEqual([]);
       expect(fixture.spawnCount).toBe(0);
       const directory = process.env.GOODVIBES_TEST_SESSION_FOLLOWUP_FIXTURE_DIR;
-      if (directory) {
-        mkdirSync(directory, { recursive: true });
-        writeFileSync(join(directory, `${outcome}.json`), JSON.stringify({
+      exportAndCompareFixture(directory, `${outcome}.json`, JSON.stringify({
           source: 'packages/engine/test/session-followup-receipts-http.test.ts', outcome,
           registration: registration.wire, initialSession: initialSession.wire, initialMessages: initialMessages.wire,
           post: post.wire, queued: queued.wire, messages: messages.wire, sessionAfterPost: sessionAfterPost.wire,
           ...(delivery && delivered ? { delivery: delivery.wire, delivered: delivered.wire } : {}),
           ...(terminalWrite ? { terminalWrite: terminalWrite.wire } : { terminalMutation: { method: 'SharedSessionBroker.failInput', error: FAILURE } }),
           terminal: terminal.wire,
-        }, null, 2) + '\n');
-      }
+        }, null, 2) + '\n', FIXTURES);
     } finally { await fixture.stop(); }
   });
 }

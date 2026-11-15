@@ -24,11 +24,11 @@ const spaceId = 'homeassistant:profile-readings';
 const display = 'Display and picture specifications', ports = 'Input and output ports';
 const first = 'AC-7 resolution: 4K.', last = 'AC-7 has four HDMI inputs.';
 const text = `${first}\n\n${last}`;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 const extractionValues: Array<ExtractionValueFixtures[number]> = [];
 beforeEach(() => { extractionValues.length = 0; previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 type State = { category?: { title: string }; candidate?: { text?: string }; text?: string; fact?: { title: string; value?: unknown; evidence?: unknown } };
 function readings(mode: 'yes' | 'uncertain' | 'unsupported' = 'yes', values: readonly (readonly [string, string])[] = [[display, first], [ports, last]]) {
   const fake = fakePort((name, question, state) => {
@@ -61,7 +61,7 @@ function readings(mode: 'yes' | 'uncertain' | 'unsupported' = 'yes', values: rea
 }
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-profile-readings-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const observed = { id: 'device-ac-seven', kind: 'ha_device' as const, slug: 'ac-seven', title: 'AC-7', status: 'active' as const,
     metadata: { knowledgeSpaceId: spaceId, model: 'AC-7', manufacturer: 'Synthetic', entityKind: 'device' } };
   const device = await upsertObservedKnowledgeNode(store, observed, 'home-assistant-snapshot', observed, () => observed);
@@ -127,7 +127,7 @@ describe('repair profile complete-pass write boundaries', () => {
       const item = await fixture(); readings(); const [fact] = await write(item);
       await reviewKnowledgeNodeRecord(item.store, { id: fact!.id, decision, reviewer: 'fixture-operator' });
       const reviewed = item.store.getNode(fact!.id)!;
-      try { await write(item); } catch (error) { expect(String(error)).toContain('operator review'); }
+      await expect(write(item)).rejects.toThrow(/operator review/);
       const current = item.store.getNode(fact!.id)!;
       expect(current.status).toBe(decision === 'accept' ? 'active' : 'stale');
       expect(current.metadata.review).toEqual(reviewed.metadata.review);

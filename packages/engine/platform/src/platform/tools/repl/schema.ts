@@ -9,7 +9,7 @@ export const REPL_TOOL_SCHEMA: ToolDefinition = {
       mode: { type: 'string', enum: ['eval', 'history'] },
       runtime: { type: 'string', enum: ['javascript', 'typescript', 'python', 'sql', 'graphql'] },
       expression: { type: 'string' },
-      timeout_ms: { type: 'integer', minimum: 0, description: 'Optional execution timeout. Omitted or 0 waits for completion or cancellation.' },
+      timeout_ms: { type: 'integer', minimum: 0, description: 'Optional execution timeout in ms. Omitted: 120000 for a captured eval. 0 waits for completion or cancellation.' },
       offset: { type: 'integer', minimum: 0, description: 'History page offset. Default: 0.' },
       limit: { type: 'integer', minimum: 0, description: 'Optional history page size. Omitted returns the full retained history.' },
       bindings: { type: 'object', additionalProperties: true },

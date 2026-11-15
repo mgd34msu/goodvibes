@@ -121,9 +121,9 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   },
   // `danger` sits with the other listener/binding categories because that is
   // what it is: danger.httpListener opens an inbound webhook listener. It is
-  // rendered like any other setting rather than hidden, the write is gated by
-  // the narrow confirmation list in src/tools/agent-settings-write-policy.ts,
-  // which can name the key and state the hazard. A hidden key cannot.
+  // rendered like any other setting rather than hidden: the write is decided at
+  // the settings tool by the recorded admission for its exact effect, and a
+  // hidden key could not be shown or explained.
   // `cluster` belongs here rather than being hidden. The Agent composes no
   // inbound channel consumer of its own, a guard test holds that, so it is
   // never a candidate in an election. But every cluster.* key is DAEMON-owned
@@ -140,7 +140,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
     label: 'Advanced Runtime',
     categories: ['orchestration', 'fleet', 'planner', 'runtime', 'sandbox', 'batch', 'cloudflare', 'contract', 'memory'],
   },
-  { label: 'Advanced', categories: ['flags', 'release'] },
+  { label: 'Advanced', categories: ['flags'] },
 ];
 
 export const SETTINGS_CATEGORIES: SettingsCategory[] = SETTINGS_CATEGORY_GROUPS.flatMap((group) => group.categories);

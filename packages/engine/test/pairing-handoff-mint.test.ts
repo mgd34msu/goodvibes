@@ -96,7 +96,7 @@ describe('availablePairingOffers', () => {
 
 describe('defaultPairingTokenName', () => {
   test('date-stamped, human-distinguishable', () => {
-    expect(defaultPairingTokenName(new Date('2026-07-13T09:41:00Z'))).toBe('paired device (2026-07-13 09:41)');
+    expect(defaultPairingTokenName(new Date('2026-07-13T09:41:00Z'))).toBe('paired device (2026-07-13 09:41 UTC)');
   });
 });
 

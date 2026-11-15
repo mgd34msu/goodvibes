@@ -7,19 +7,54 @@
  * @odata.nextLink; failures are named degraded states via CalendarApiError.
  */
 
-import { authedRequest } from './calendar-api-shared.js';
+import { authedRequest, CalendarApiError } from './calendar-api-shared.js';
 import { normalizeGraphEvent } from './merged-calendar-model.js';
 import type { EventDateTime } from './types.js';
 import type { CalendarRequestOptions, HttpFetch, MergedCalendarEvent, NewCalendarEvent, ProviderCalendar } from './oauth-types.js';
 
 const BASE = 'https://graph.microsoft.com/v1.0';
 const UTC_PREFER = { Prefer: 'outlook.timezone="UTC"' } as const;
+const GRAPH_ORIGIN = 'https://graph.microsoft.com';
+/** A calendar with more pages than this is not being paged, it is looping. */
+const MAX_PAGES = 100;
+
+/**
+ * The next page URL from a response, or undefined at the end. The bearer token
+ * goes to whatever URL this returns, so it must stay on Graph, and the page
+ * count is bounded so a self-referencing link cannot loop forever.
+ */
+function nextGraphPage(link: unknown, pagesFetched: number): string | undefined {
+  if (typeof link !== 'string' || link.length === 0) return undefined;
+  let origin: string | undefined;
+  try {
+    origin = new URL(link).origin;
+  } catch {
+    origin = undefined;
+  }
+  if (origin !== GRAPH_ORIGIN) {
+    throw new CalendarApiError({
+      kind: 'provider-error',
+      status: 200,
+      detail: 'Microsoft Graph returned a next-page link that is not on graph.microsoft.com; it was not followed.',
+    });
+  }
+  if (pagesFetched >= MAX_PAGES) {
+    throw new CalendarApiError({
+      kind: 'provider-error',
+      status: 200,
+      detail: `Microsoft Graph kept returning next-page links after ${String(MAX_PAGES)} pages; stopped.`,
+    });
+  }
+  return link;
+}
 
 /** List the user's calendars; write access comes from canEdit. */
 export async function listGraphCalendars(fetchImpl: HttpFetch, token: string, options: CalendarRequestOptions = {}): Promise<ProviderCalendar[]> {
   const out: ProviderCalendar[] = [];
   let next: string | undefined = `${BASE}/me/calendars?$select=id,name,canEdit,isDefaultCalendar&$top=100`;
+  let pages = 0;
   while (next) {
+    pages += 1;
     const body = (await authedRequest(fetchImpl, 'microsoft', { url: next, method: 'GET', token }, options)) as {
       value?: unknown[];
       '@odata.nextLink'?: unknown;
@@ -35,7 +70,7 @@ export async function listGraphCalendars(fetchImpl: HttpFetch, token: string, op
         canWrite: item.canEdit === true,
       });
     }
-    next = typeof body['@odata.nextLink'] === 'string' ? body['@odata.nextLink'] : undefined;
+    next = nextGraphPage(body['@odata.nextLink'], pages);
   }
   return out;
 }
@@ -61,11 +96,13 @@ export async function listGraphEvents(
   const first = new URL(`${BASE}/me/calendars/${encodeURIComponent(query.calendarId)}/calendarView`);
   first.searchParams.set('startDateTime', query.start);
   first.searchParams.set('endDateTime', query.end);
-  first.searchParams.set('$select', 'id,iCalUId,subject,bodyPreview,location,start,end,isAllDay');
+  first.searchParams.set('$select', 'id,iCalUId,subject,bodyPreview,location,start,end,isAllDay,organizer,isOrganizer,isCancelled');
   first.searchParams.set('$orderby', 'start/dateTime');
   first.searchParams.set('$top', String(query.pageSize ?? 100));
   let next: string | undefined = first.toString();
+  let pages = 0;
   while (next) {
+    pages += 1;
     const body = (await authedRequest(fetchImpl, 'microsoft', {
       url: next,
       method: 'GET',
@@ -76,7 +113,7 @@ export async function listGraphEvents(
       const event = normalizeGraphEvent(raw, query.calendarId, query.calendarLabel);
       if (event) out.push(event);
     }
-    next = typeof body['@odata.nextLink'] === 'string' ? body['@odata.nextLink'] : undefined;
+    next = nextGraphPage(body['@odata.nextLink'], pages);
   }
   return out;
 }

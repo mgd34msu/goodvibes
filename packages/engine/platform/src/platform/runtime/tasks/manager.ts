@@ -242,7 +242,7 @@ export class UnifiedTaskManager implements TaskManager {
         };
         const resolvedDelay =
           backoff === 'exponential'
-            ? delayMs * Math.pow(2, currentAttempt - 1)
+            ? delayMs * Math.pow(2, Math.max(0, currentAttempt - 1))
             : delayMs;
 
         const requeued = this._applyTransition(task, 'queued', {
@@ -324,32 +324,36 @@ export class UnifiedTaskManager implements TaskManager {
 
   public getTask(taskId: string): RuntimeTask | undefined {
     if (!this._isEnabled()) return undefined;
-    return this._registry.get(taskId);
+    return this._current(taskId);
   }
 
   public getTasksByKind(kind: TaskKind): RuntimeTask[] {
     if (!this._isEnabled()) return [];
+    this._refreshRegistry();
     return this._registry.getByKind(kind);
   }
 
   public getRunningTasks(): RuntimeTask[] {
     if (!this._isEnabled()) return [];
+    this._refreshRegistry();
     return this._registry.getRunning();
   }
 
   public getRunningCount(kind: TaskKind): number {
     if (!this._isEnabled()) return 0;
+    this._refreshRegistry();
     return this._registry.getByKind(kind).filter((t) => t.status === 'running').length;
   }
 
   public getChildTasks(parentTaskId: string): RuntimeTask[] {
     if (!this._isEnabled()) return [];
+    this._refreshRegistry();
     return this._registry.getChildren(parentTaskId);
   }
 
   public getTaskStatus(taskId: string): TaskLifecycleState | undefined {
     if (!this._isEnabled()) return undefined;
-    return this._registry.get(taskId)?.status;
+    return this._current(taskId)?.status;
   }
 
   public retryTask(taskId: string): RuntimeTask {
@@ -377,11 +381,34 @@ export class UnifiedTaskManager implements TaskManager {
    * Returns a task or throws TaskNotFoundError.
    */
   private _requireTask(taskId: string): RuntimeTask {
-    const task = this._registry.get(taskId);
+    const task = this._current(taskId);
     if (!task) {
       throw new TaskNotFoundError(taskId);
     }
     return task;
+  }
+
+  /**
+   * The task as the store holds it. The store is what every other writer (the
+   * ops control plane, adapters, agent sync) changes, so a transition judged
+   * from the registry copy could overwrite a cancel it never saw. The registry
+   * is refreshed from it, and a task the store no longer holds (it evicts the
+   * oldest ended ones) is dropped from the registry instead of answering from a
+   * stale, possibly still-running copy. createTask syncs to the store before any read.
+   */
+  private _current(taskId: string): RuntimeTask | undefined {
+    const stored = this._store.getState().tasks.tasks.get(taskId);
+    if (stored === undefined) {
+      this._registry.deregister(taskId);
+      return undefined;
+    }
+    this._registry.register(stored);
+    return stored;
+  }
+
+  /** Bring every registered task up to the store's version before a read. */
+  private _refreshRegistry(): void {
+    for (const id of [...this._registry.snapshot().keys()]) this._current(id);
   }
 
   /**
@@ -404,9 +431,12 @@ export class UnifiedTaskManager implements TaskManager {
     to: TaskLifecycleState,
     patch: Partial<RuntimeTask>
   ): RuntimeTask {
-    const updated: RuntimeTask = { ...task, status: to, ...patch };
-    this._registry.register(updated);
-    this._syncTaskToStore(updated);
+    this._dispatch.transitionRuntimeTask(task.id, to, patch, 'task-manager');
+    const updated = this._current(task.id);
+    // The store refuses a move its table does not allow; say so rather than report a transition that did not happen.
+    if (updated === undefined || updated.status !== to) {
+      throw new TaskTransitionError(task.id, updated?.status ?? task.status, to);
+    }
     return updated;
   }
 
@@ -414,7 +444,7 @@ export class UnifiedTaskManager implements TaskManager {
    * Adds a child task ID to a parent task's childTaskIds array.
    */
   private _patchChildIds(parentId: string, childId: string): void {
-    const parent = this._registry.get(parentId);
+    const parent = this._current(parentId);
     if (!parent) return;
     const updated: RuntimeTask = {
       ...parent,

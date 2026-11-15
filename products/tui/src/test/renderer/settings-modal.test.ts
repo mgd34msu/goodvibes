@@ -282,16 +282,20 @@ describe('renderSettingsModal', () => {
 
   test('changing category shows different settings', () => {
     modal.nextCategory();
+    expect(modal.currentCategory).toBe('ui');
+    const uiCount = modal.currentItems.length;
+    expect(uiCount).toBeGreaterThan(0);
     const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
     const texts = linesToText(lines).join('\n');
-    expect(texts).toMatch(/UI +4/);
+    expect(texts).toMatch(new RegExp(`UI +${uiCount}\\b`));
   });
 
   test('mcp category renders server trust editing surface', () => {
     while (modal.currentCategory !== 'mcp') modal.nextCategory();
     const lines = frameFromLayer(renderSettingsModal(modal, W), W, 24);
     const texts = linesToText(lines).join('\n');
-    expect(texts).toMatch(/MCP +1/);
+    expect(modal.mcpEntries.length).toBeGreaterThan(0);
+    expect(texts).toMatch(new RegExp(`MCP +${modal.mcpEntries.length}\\b`));
     expect(texts).toContain('docs-server');
     expect(texts).toContain('ask-on-risk');
   });

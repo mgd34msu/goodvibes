@@ -11,6 +11,7 @@ import {
   NUMBER_SCHEMA,
   STRING_SCHEMA,
   arraySchema,
+  exhaustiveStringEnumSchema,
   objectSchema,
 } from './method-catalog-shared.js';
 import {
@@ -19,9 +20,11 @@ import {
   nullableSchema,
 } from './operator-contract-schemas-shared.js';
 import { SHARED_SESSION_KIND_READ_SCHEMA, SHARED_SESSION_RECORD_SCHEMA } from './operator-contract-schemas-runtime.js';
+import type { ProcessKind, ProcessState } from '../runtime/fleet/types.js';
 import { CHECKPOINT_DIFF_REVISION_PATTERN } from '../workspace/checkpoint/diff-observation-contract.js';
 
-const PROCESS_KIND_SCHEMA = enumSchema([
+// Spelled out for the published schema; a ProcessKind/ProcessState added without an entry here fails to compile.
+const PROCESS_KIND_SCHEMA = exhaustiveStringEnumSchema<ProcessKind>()([
   'agent',
   'contract',
   'contract-group',
@@ -35,7 +38,7 @@ const PROCESS_KIND_SCHEMA = enumSchema([
   'observed-external',
   'code-index',
 ]);
-const PROCESS_STATE_SCHEMA = enumSchema([
+const PROCESS_STATE_SCHEMA = exhaustiveStringEnumSchema<ProcessState>()([
   'thinking',
   'executing-tool',
   'awaiting-approval',
@@ -253,6 +256,10 @@ export const CHECKPOINTS_LIST_INPUT_SCHEMA = objectSchema({
 
 export const CHECKPOINTS_LIST_OUTPUT_SCHEMA = objectSchema({
   checkpoints: arraySchema(WORKSPACE_CHECKPOINT_SCHEMA),
+  retentionFailure: objectSchema({
+    error: STRING_SCHEMA,
+    at: NUMBER_SCHEMA,
+  }, ['error', 'at']),
 }, ['checkpoints']);
 
 export const CHECKPOINTS_CREATE_INPUT_SCHEMA = objectSchema({
@@ -293,6 +300,7 @@ export const CHECKPOINT_RESTORE_RESULT_SCHEMA = objectSchema({
   safetyCheckpointId: nullableSchema(STRING_SCHEMA),
   restoredFiles: STRING_LIST_SCHEMA,
   removedFiles: STRING_LIST_SCHEMA,
+  failedPaths: arraySchema(objectSchema({ path: STRING_SCHEMA, reason: STRING_SCHEMA }, ['path', 'reason'])),
 }, ['checkpointId', 'safetyCheckpointId', 'restoredFiles', 'removedFiles']);
 
 /**
@@ -331,9 +339,12 @@ export const CHECKPOINT_RESTORE_PREVIEW_SCHEMA = objectSchema({
   stat: STRING_SCHEMA,
 }, ['checkpointId', 'label', 'affectedPathCount', 'affectedPathSample', 'stat']);
 
+// No `paths`: the preview always describes the whole-tree restore, and its token
+// is bound to the checkpoint id alone, so a scoped preview would describe an
+// action the token does not confirm. A scoped restore is requested on
+// checkpoints.restore itself.
 export const CHECKPOINTS_RESTORE_PREVIEW_INPUT_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
-  paths: STRING_LIST_SCHEMA,
 }, ['id']);
 
 export const CHECKPOINTS_RESTORE_PREVIEW_OUTPUT_SCHEMA = objectSchema({
@@ -586,6 +597,8 @@ export const SESSIONS_CHANGES_GET_OUTPUT_SCHEMA = objectSchema({
   checkpointCount: NUMBER_SCHEMA,
   checkpointIds: STRING_LIST_SCHEMA,
   from: STRING_SCHEMA,
+  baseUnavailable: BOOLEAN_SCHEMA,
+  attributionApproximate: BOOLEAN_SCHEMA,
   to: STRING_SCHEMA,
   files: STRING_LIST_SCHEMA,
   nativeRevision: { type: 'string', maxLength: 200, pattern: CHECKPOINT_DIFF_REVISION_PATTERN },

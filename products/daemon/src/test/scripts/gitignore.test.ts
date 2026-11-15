@@ -58,11 +58,3 @@ test('actual root and daemon ignore rules protect secrets, runtime and local out
   for (const file of protectedFiles) expect(ignored.has(file), `must protect ${file}`).toBe(true);
   for (const file of visibleFiles) expect(ignored.has(file), `must retain source visibility: ${file}`).toBe(false);
 });
-
-test('the pre-port product rules demonstrably leaked secrets and suppressed intended resource exceptions', () => {
-  const ignored = ignoredFiles('/native/\n/.tmp/\n', ['.env', 'credentials.enc', '.goodvibes/skills/example/SKILL.md', '.goodvibes/eval/baseline.json']);
-  expect(ignored.has('.env')).toBe(false);
-  expect(ignored.has('credentials.enc')).toBe(false);
-  expect(ignored.has('.goodvibes/skills/example/SKILL.md')).toBe(true);
-  expect(ignored.has('.goodvibes/eval/baseline.json')).toBe(true);
-});

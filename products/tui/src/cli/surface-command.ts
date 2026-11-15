@@ -1,4 +1,4 @@
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   GOODVIBES_NTFY_AGENT_TOPIC,
   GOODVIBES_NTFY_CHAT_TOPIC,
@@ -8,7 +8,7 @@ import {
 import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from './network-posture.ts';
-import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import type { CliCommandRuntime, RuntimeEndpointId } from '@goodvibes-jev/engine/terminal-shell';
 import {
   applyTargetEndpointFlagsOrDefault,
   enableEndpointLanDefault,
@@ -36,6 +36,27 @@ export const SURFACE_CONFIGS = [
   ['matrix', 'Matrix', ['surfaces.matrix.homeserverUrl', 'surfaces.matrix.accessToken', 'surfaces.matrix.userId']],
 ] as const;
 
+const ENDPOINT_LABELS: Readonly<Record<RuntimeEndpointId, string>> = {
+  controlPlane: 'control-plane',
+  web: 'web',
+  httpListener: 'http-listener',
+};
+
+/** Every key an enable can write, so a refused flag can put them all back. */
+const SURFACE_ENABLE_KEYS: readonly string[] = [
+  ...(['web', 'controlPlane', 'httpListener'] as const).flatMap((endpoint) => [`${endpoint}.hostMode`, `${endpoint}.host`, `${endpoint}.port`]),
+];
+
+function snapshotConfig(config: ConfigManager, keys: readonly string[]): ReadonlyMap<string, unknown> {
+  return new Map(keys.map((key) => [key, config.get(key as ConfigKey)]));
+}
+
+function restoreConfig(config: ConfigManager, snapshot: ReadonlyMap<string, unknown>): void {
+  for (const [key, value] of snapshot) {
+    if (value !== undefined) config.setDynamic(key as ConfigKey, value);
+  }
+}
+
 export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   const config = runtime.configManager;
   const [sub = 'list', ...rest] = runtime.cli.commandArgs;
@@ -43,52 +64,80 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   if (sub === 'enable' || sub === 'disable') {
     if (!target) return { output: `Usage: goodvibes surfaces ${sub} <web|listener|control-plane|surfaceId>`, exitCode: 2 };
     const enabled = sub === 'enable';
+    // A refused flag leaves nothing half-applied: the endpoint step runs before the enable
+    // writes, and whatever it set before failing is put back.
+    const before = snapshotConfig(config, SURFACE_ENABLE_KEYS);
+    const refuse = (message: string): { readonly output: string; readonly exitCode: number } => {
+      restoreConfig(config, before);
+      return { output: message, exitCode: 2 };
+    };
+    /** Endpoints this command moved off their previous binding, for the success line. */
+    const reached: RuntimeEndpointId[] = [];
     if (target === 'web') {
-      runtime.configManager.setDynamic('web.enabled', enabled);
       if (enabled) {
-        enableFeatureFlags(runtime.configManager, getServerSurfaceFeatureFlags({ serverBacked: true, web: true }));
-        runtime.configManager.setDynamic('daemon.enabled', true);
-        runtime.configManager.setDynamic('controlPlane.enabled', true);
         const webError = applyTargetEndpointFlagsOrDefault(runtime, 'web');
-        if (webError) return { output: webError, exitCode: 2 };
-        const webBinding = resolveRuntimeEndpointBinding(runtime.configManager, 'web');
+        if (webError) return refuse(webError);
+        reached.push('web');
+        const webBinding = resolveRuntimeEndpointBinding(config, 'web');
         if (runtime.cli.flags.hostname !== undefined && webBinding.hostMode === 'local') {
-          runtime.configManager.setDynamic('controlPlane.hostMode', 'local');
-          runtime.configManager.setDynamic('controlPlane.host', '127.0.0.1');
-          runtime.configManager.setDynamic('controlPlane.allowRemote', false);
+          config.setDynamic('controlPlane.hostMode', 'local');
+          config.setDynamic('controlPlane.host', '127.0.0.1');
         } else {
-          enableEndpointLanDefault(runtime.configManager, 'controlPlane');
+          enableEndpointLanDefault(config, 'controlPlane');
         }
+        reached.push('controlPlane');
+        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, web: true }));
+        config.setDynamic('daemon.enabled', true);
+        config.setDynamic('controlPlane.enabled', true);
       }
+      config.setDynamic('web.enabled', enabled);
     }
     else if (target === 'listener' || target === 'http-listener') {
-      runtime.configManager.setDynamic('danger.httpListener', enabled);
       if (enabled) {
         const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
-        if (listenerError) return { output: listenerError, exitCode: 2 };
+        if (listenerError) return refuse(listenerError);
+        reached.push('httpListener');
       }
+      config.setDynamic('danger.httpListener', enabled);
     }
     else if (target === 'control-plane' || target === 'controlPlane') {
-      runtime.configManager.setDynamic('controlPlane.enabled', enabled);
-      runtime.configManager.setDynamic('daemon.enabled', enabled);
       if (enabled) {
         const controlPlaneError = applyTargetEndpointFlagsOrDefault(runtime, 'controlPlane');
-        if (controlPlaneError) return { output: controlPlaneError, exitCode: 2 };
+        if (controlPlaneError) return refuse(controlPlaneError);
+        reached.push('controlPlane');
       }
+      config.setDynamic('controlPlane.enabled', enabled);
+      config.setDynamic('daemon.enabled', enabled);
     }
     else if (SURFACE_CONFIGS.some(([id]) => id === target)) {
-      runtime.configManager.setDynamic(`surfaces.${target}.enabled` as ConfigKey, enabled);
       if (enabled) {
-        enableFeatureFlags(runtime.configManager, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [target] }));
-        runtime.configManager.setDynamic('danger.httpListener', true);
-        enableEndpointLanDefault(runtime.configManager, 'httpListener');
+        // An external surface receives its traffic on the HTTP listener, so enabling one opens that listener.
+        const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
+        if (listenerError) return refuse(listenerError);
+        reached.push('httpListener');
+        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [target] }));
+        config.setDynamic('danger.httpListener', true);
       }
+      config.setDynamic(`surfaces.${target}.enabled` as ConfigKey, enabled);
     }
     else return { output: `Unknown surface: ${target}`, exitCode: 1 };
     if (enabled) {
-      enableServicePosture(runtime.configManager);
+      enableServicePosture(config);
     }
-    return { output: `Surface ${enabled ? 'enabled' : 'disabled'}: ${target}`, exitCode: 0 };
+    const lines = [`Surface ${enabled ? 'enabled' : 'disabled'}: ${target}`];
+    if (enabled) {
+      for (const endpoint of reached) {
+        const binding = resolveRuntimeEndpointBinding(config, endpoint);
+        const posture = classifyBindPosture(binding);
+        lines.push(`  ${ENDPOINT_LABELS[endpoint]}: ${formatRuntimeEndpointBinding(binding)} (${posture.label})`);
+        if (posture.networkFacing) {
+          lines.push(`  ${ENDPOINT_LABELS[endpoint]} is reachable from other machines on the network. Pass --hostname 127.0.0.1 to keep it on this machine.`);
+        }
+      }
+    } else {
+      lines.push('  Its network settings are left as they are; run `goodvibes surfaces list` to see them.');
+    }
+    return { output: lines.join('\n'), exitCode: 0 };
   }
   if (sub !== 'list' && sub !== 'status' && sub !== 'check' && sub !== 'show') {
     return { output: 'Usage: goodvibes surfaces [list|check|show <surfaceId>|enable <surfaceId>|disable <surfaceId>]', exitCode: 2 };
@@ -99,15 +148,15 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   const includeProbe = sub === 'check';
   const targetExternalSurface = target && SURFACE_CONFIGS.some(([id]) => id === target);
   const shouldProbeControlPlane = includeProbe && !target;
-  const shouldProbeWeb = includeProbe && !target;
   const shouldProbeListener = includeProbe && (!target || targetExternalSurface);
-  const [controlPlaneReachable, webReachable, listenerReachable] = includeProbe
+  // Nothing listens on web.host:web.port; the control-plane listener serves the web bundle, so it is the one probed.
+  const [controlPlaneReachable, listenerReachable] = includeProbe
     ? await Promise.all([
       shouldProbeControlPlane && controlPlane.recognized ? probeTcp(controlPlane.host, controlPlane.port) : Promise.resolve(undefined),
-      shouldProbeWeb && web.recognized ? probeTcp(web.host, web.port) : Promise.resolve(undefined),
       shouldProbeListener && httpListener.recognized ? probeTcp(httpListener.host, httpListener.port) : Promise.resolve(undefined),
     ])
-    : [undefined, undefined, undefined];
+    : [undefined, undefined];
+  const webReachable = web.recognized ? controlPlaneReachable : undefined;
   const externalSurfaces = SURFACE_CONFIGS.map(([id, label, requiredKeys]) => {
     const enabled = config.get(`surfaces.${id}.enabled` as ConfigKey);
     const missing = requiredKeys.filter((key) => !isPresentConfigValue(config.get(key as ConfigKey)));
@@ -136,9 +185,6 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
   }
   if (shouldProbeControlPlane && controlPlane.recognized && config.get('controlPlane.enabled') === true && !controlPlaneReachable) {
     readinessIssues.push(`Control plane is enabled but not reachable on ${controlPlane.host}:${controlPlane.port}.`);
-  }
-  if (shouldProbeWeb && web.recognized && config.get('web.enabled') === true && !webReachable) {
-    readinessIssues.push(`Web surface is enabled but not reachable on ${web.host}:${web.port}.`);
   }
   if (shouldProbeListener && httpListener.recognized && config.get('danger.httpListener') === true && !listenerReachable) {
     readinessIssues.push(`HTTP listener is enabled but not reachable on ${httpListener.host}:${httpListener.port}.`);

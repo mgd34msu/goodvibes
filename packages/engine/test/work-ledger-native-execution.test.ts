@@ -54,6 +54,7 @@ function publicationFault(path: string, phase: 'before-publication' | 'after-ren
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePort?: (port: JudgmentPort) => JudgmentPort; register?: boolean;
+  host?: Partial<Parameters<typeof createNativeWorkExecutionHost>[0]>;
   wrapRunner?: (runner: Harness['runner']) => Parameters<ReturnType<typeof createNativeWorkExecutionHost>['attachRunner']>[0] } = {},
 ) {
   const root = makeRepo(); mkdirSync(join(root, '.goodvibes'), { recursive: true });
@@ -110,7 +111,7 @@ async function fixture(options: { harness?: Partial<HarnessOptions>; decoratePor
   const fake = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
   const port = options.decoratePort?.(withDecisionLog(fake.port, log)) ?? withDecisionLog(fake.port, log);
   const storage = await store.openNativeWorkExecutionStorage('project');
-  const hostOptions = { projectId: 'project', projectRoot: root, sessionId: 'native-fixture', storage, scopes, port, decisionLog: log };
+  const hostOptions = { projectId: 'project', projectRoot: root, sessionId: 'native-fixture', storage, scopes, port, decisionLog: log, ...options.host };
   const host = createNativeWorkExecutionHost(hostOptions);
   const plan = oneUnitPlan(2);
   plan.goal = work.goal;
@@ -288,6 +289,16 @@ test('cancel persists native cancellation and drains the actual running unit', a
   await expect(f.host.resume(f.key, f.authority)).rejects.toMatchObject({ code: 'stale' });
 });
 
+test('a launch-claimed execution record cannot be moved back to prepared', async () => {
+  const f = await fixture();
+  await f.host.start(f.target, f.authority);
+  const claimed = f.storage.current(f.key).record!;
+  expect(claimed.state).toBe('launch-claimed');
+  await expect(f.storage.transaction(f.key, () => ({ next: { ...claimed, state: 'prepared' }, value: null })))
+    .rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('cannot become prepared') });
+  expect(f.storage.current(f.key).record?.state).toBe('launch-claimed');
+});
+
 test('replacement native host inspects exact replay but refuses unreconciled launch-claimed resume', async () => {
   const f = await fixture({ harness: { scripts: { u1: () => [{ text: 'waiting', stop: { kind: 'hang' } }] } } });
   const started = await f.host.start(f.target, f.authority);
@@ -453,6 +464,11 @@ for (const failure of ['before-publication', 'after-rename'] as const) {
     try { await expect(f.host.start(f.target, f.authority)).rejects.toThrow(); }
     finally { fault.restore(); }
     expect(fault.failed).toBe(true);
+    // The fault is the Nth publication, so which write it hit is pinned by what the
+    // store durably holds: a refused claim leaves the record prepared, a claim that
+    // reached disk before the failure leaves it launch-claimed. A fault that landed on
+    // an earlier write would leave no record, or a prepared one in the second case.
+    expect(f.storage.current(f.key).record?.state).toBe(failure === 'before-publication' ? 'prepared' : 'launch-claimed');
     expect(f.harness.agentsOf('u1')).toHaveLength(0);
     for (const contract of f.harness.runner.list({ includeTerminal: true })) {
       await f.harness.runner.join(contract.id);
@@ -582,7 +598,8 @@ test('native wire rejects shared/user authority, scope loss, identity injection 
     status: 403,
   });
   await expect(
-    wire.platformClient().invoke('workLedger.execution.start', { projectId: 'project', ...wire.identity, source: { goal: 'injected' } }),
+    // Deliberately outside the method's input type: the host must refuse it.
+    wire.platformClient().invoke('workLedger.execution.start', { projectId: 'project', ...wire.identity, source: { goal: 'injected' } } as never),
   ).rejects.toMatchObject({ status: 400 });
   const principal = f.helper.describeAuthenticatedPrincipal(f.paired.token)!;
   for (const scopes of [['read:work-ledger'], ['write:fleet'], ['read:events', 'read:fleet']]) {
@@ -1557,4 +1574,22 @@ test('captured continuation survives native execution, planning and final source
   const request = f.storage.currentByAttempt(receipt.attemptId).record!.request;
   expect(request.input.nativeSource?.continuation).toEqual(continuation);
   expect(executionStates.some((state) => state.includes(messages[0]!.content))).toBe(true);
+});
+
+test('a cancellation the runner refuses lifts the foreground fence it put on the contract', async () => {
+  const fenced: string[] = [], released: string[] = [];
+  let refuse = false;
+  const f = await fixture({
+    harness: { scripts: { u1: () => [{ text: 'Live contract', stop: { kind: 'hang' } }] } },
+    host: { cancelForeground: async id => { fenced.push(id); }, releaseForeground: id => { released.push(id); } },
+    wrapRunner: runner => ({ startDurable: request => runner.startDurable(request), resumeDurable: key => runner.resumeDurable(key), get: id => runner.get(id), list: filter => runner.list(filter),
+      cancel: (id, reason) => { if (refuse) throw new Error('Synthetic refused cancellation'); return runner.cancel(id, reason); }, join: id => runner.join(id),
+      ...(runner.inspectDurable ? { inspectDurable: runner.inspectDurable.bind(runner) } : {}), ...(runner.joinDurable ? { joinDurable: runner.joinDurable.bind(runner) } : {}) }) });
+  const started = await f.host.start(f.target, f.authority);
+  refuse = true;
+  await expect(f.host.cancel(started.admission.key, f.authority, 'Owner stop')).rejects.toThrow('Synthetic refused cancellation');
+  expect(fenced).toContain(started.admission.contractId);
+  expect(released).toContain(started.admission.contractId);
+  refuse = false;
+  await f.host.cancel(started.admission.key, f.authority, 'Owner stop');
 });

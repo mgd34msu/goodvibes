@@ -33,6 +33,7 @@ async function loadProviderAccountSnapshot(ctx: CommandContext) {
     environment: {
       hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
     },
+    secrets: ctx.platform.secretsManager,
   });
 }
 
@@ -86,15 +87,22 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
   ].join('\n');
 }
 
+const HEALTH_USAGE = '[review|setup|approvals|host|provider|accounts|auth|settings|remote|mcp|memory|continuity|maintenance|repair [domain]]';
+const HEALTH_SUBCOMMANDS = new Set(['review', 'open', 'panel', 'setup', 'approvals', 'host', 'services', 'provider', 'accounts', 'auth', 'settings', 'remote', 'mcp', 'memory', 'continuity', 'maintenance', 'repair']);
+
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'health',
     aliases: ['doctor'],
     description: 'Health workspace for startup posture, connected host readiness, provider health, and Agent continuity',
     hidden: true,
-    usage: '[review|setup|approvals|host|provider|accounts|auth|settings|remote|mcp|memory|continuity|maintenance|repair [domain]]',
+    usage: HEALTH_USAGE,
     async handler(args, ctx) {
       const sub = (args[0] ?? 'review').toLowerCase();
+      if (!HEALTH_SUBCOMMANDS.has(sub)) {
+        ctx.print(`Unknown /health subcommand ${args[0]}. Usage: /health ${HEALTH_USAGE}`);
+        return;
+      }
       try {
         if (sub === 'open' || sub === 'panel') {
           ctx.print('Open Agent Workspace -> Home for the workspace view, or run /health review for the compact command output.');
@@ -312,8 +320,9 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
 
         if (sub === 'maintenance') {
           const session = readModels.session.getSnapshot();
-          const providerApi = requireProviderApi(ctx);
-          const currentModel = await providerApi.getCurrentModel().catch(() => null); // best-effort: null handled as unknown context window
+          // The known window, resolved as the footer meter and /context resolve it, so every
+          // diagnostics surface shows the same usage and remaining tokens.
+          const providerRegistry = requireProvider(ctx).providerRegistry;
           const llmMessages =
             typeof ctx.session.conversationManager.getMessagesForLLM === 'function'
               ? ctx.session.conversationManager.getMessagesForLLM()
@@ -321,7 +330,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           const maintenance = evaluateSessionMaintenance({
             configManager: ctx.platform.configManager,
             currentTokens: estimateConversationTokens(llmMessages),
-            contextWindow: currentModel?.contextWindow ?? 0,
+            contextWindow: providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0, // 0: unknown window, no usage percentage
             messageCount: llmMessages.length,
             sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
             session: session.session,
@@ -400,13 +409,12 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         }
 
         const session = readModels.session.getSnapshot();
-        const providerApi = requireProviderApi(ctx);
-        const currentModel = await providerApi.getCurrentModel().catch(() => null); // best-effort: null handled as unknown context window
+        const providerRegistry = requireProvider(ctx).providerRegistry;
         const llmMessages =
           typeof ctx.session.conversationManager.getMessagesForLLM === 'function'
             ? ctx.session.conversationManager.getMessagesForLLM()
             : [];
-        const contextWindow = currentModel?.contextWindow ?? 0;
+        const contextWindow = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0; // 0: unknown window, no usage percentage
         const maintenance = evaluateSessionMaintenance({
           configManager: ctx.platform.configManager,
           currentTokens: estimateConversationTokens(llmMessages),

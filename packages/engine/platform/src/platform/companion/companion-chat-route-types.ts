@@ -19,6 +19,25 @@ export interface CompanionChatRouteContext {
   /** Resolve the current provider/model when session creation omits an explicit route. */
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string; reasoningEffort?: string | null | undefined } | null) | undefined;
   /**
+   * Returns null when the request carries the daemon's own authority (shared
+   * token, paired device, admin user) and the refusal Response otherwise. Only
+   * such a caller may have its chat messages attested as typed by the owner.
+   * Omitted: every authenticated caller is treated as the owner.
+   */
+  readonly requireAdmin?: ((req: Request) => Response | null) | undefined;
+  /**
+   * Returns null when the caller holds the scope (an admin holds every scope)
+   * and the refusal Response, naming the missing scope, otherwise. Used to
+   * require `read:artifacts` before a message may attach an artifact.
+   * Omitted: no scope check here.
+   */
+  readonly requireScope?: ((req: Request, scope: string) => Response | null) | undefined;
+  /**
+   * Stable identity of the authenticated caller for the per-client message cap
+   * (a token id). Omitted: derived from the request's credential headers.
+   */
+  readonly resolveClientId?: ((req: Request) => string | undefined) | undefined;
+  /**
    * Open an SSE event stream scoped to a session.
    * Callers must call chatManager.registerSubscriber(sessionId, clientId)
    * before returning the Response so that event routing is set up.

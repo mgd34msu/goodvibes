@@ -2,7 +2,6 @@ import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { ntfySurface, surfaceIdFor, surfaceLabel } from '../platform/src/platform/cluster/surface-id.js';
 
-// Regression source UNRUN until the remaining coding work is finished.
 test('repeated election and status lookups reuse an original surface wire identity without retaining plaintext cache keys', () => {
   const surface = ntfySurface('https://ntfy.test/', 'private-consumer-topic');
   const expected = crypto.createHash('sha256').update('goodvibes/cluster/surface/v1').update('\0')

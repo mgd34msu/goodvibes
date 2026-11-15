@@ -20,7 +20,7 @@
  *     text in config/schema.ts, the same on every install).
  * A failed reading throws, and the tool reports it as its error.
  */
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { isValidConfigKey } from '../../config/schema.js';
@@ -42,8 +42,26 @@ export async function isCredentialConfigKey(key: string): Promise<boolean> {
   return holdsCredential(key, configKeyDescription(key), KEY_SITE);
 }
 
+/**
+ * Readings already made, by key and value: a full config dump asks once per distinct value, not once per call.
+ * A reading made while decision models were off is a different answer from one made with them on, so the
+ * operation is part of the key. A hit makes no new reading, so there is no run to record an action on.
+ */
+const valueReadings = new Map<string, boolean>();
+const VALUE_READINGS_MAX = 500;
+
 /** Whether a stored value is shown as it is: only a no that acts clears it. */
 async function valueMayShow(key: string, value: string): Promise<boolean> {
+  const cacheKey = `${decisionModelPolicyState().operation}\u0000${key}\u0000${value}`;
+  const known = valueReadings.get(cacheKey);
+  if (known !== undefined) return known;
+  const shown = await readValueMayShow(key, value);
+  if (valueReadings.size >= VALUE_READINGS_MAX) valueReadings.delete(valueReadings.keys().next().value!);
+  valueReadings.set(cacheKey, shown);
+  return shown;
+}
+
+async function readValueMayShow(key: string, value: string): Promise<boolean> {
   return decisionOrClassic(async () => {
     const state = credentialValueState(key, configKeyDescription(key), value);
     const owner = captureJudgmentPort(VALUE_SITE, { prepareResultCapture: prepareJudgmentResult });
@@ -95,7 +113,8 @@ export async function redactObjectByPath(prefix: string, value: unknown): Promis
   if (isStructuredCredentialReferenceConfigKey(prefix)) return redactConfigValue(prefix, value);
   if (!value || typeof value !== 'object') return value;
   try { value = captureOwnedJson(value); } catch { return redacted(value); }
-  if (Array.isArray(value)) return Promise.all(value.map((entry, index) => redactObjectByPath(`${prefix}.${index}`, entry)));
+  // Each element is redacted as a value of its own path, so a string entry gets the same key and reading checks as any value.
+  if (Array.isArray(value)) return Promise.all(value.map((entry, index) => redactConfigValue(`${prefix}.${index}`, entry)));
   const entries = await Promise.all(
     Object.entries(value as Record<string, unknown>).map(async ([key, entry]) => [key, await redactConfigValue(`${prefix}.${key}`, entry)] as const),
   );

@@ -45,7 +45,9 @@ interface HarnessOptions {
 function harness(options: HarnessOptions = {}) {
   const notices: string[] = [];
   const opened: Array<{ device: string; exclude: readonly string[] | undefined; backend: string }> = [];
-  const timers: Array<{ run: () => void; ms: number }> = [];
+  const timers: Array<{ run: () => void; ms: number; live: boolean }> = [];
+  // Resolved by openCapture, so a test awaits the reopen it triggered instead of sleeping for it.
+  const openWaiters: Array<{ count: number; resolve: () => void }> = [];
   const managedRoot = options.managedRoot ?? makeProjectTempDir('gv-wake-truth');
   const order = ['pw-record', 'parecord', 'arecord'];
   let emitFrame: (() => void) | null = null;
@@ -66,6 +68,7 @@ function harness(options: HarnessOptions = {}) {
       const excluded = new Set(request.excludeBackends ?? []);
       const backend = order.find((candidate) => !excluded.has(candidate as never)) ?? 'pw-record';
       opened.push({ device: request.device, exclude: request.excludeBackends, backend });
+      for (const waiter of openWaiters) if (opened.length >= waiter.count) waiter.resolve();
       if (!(options.silentBackends ?? []).includes(backend)) {
         emitFrame = () => handlers.onFrame(new Float32Array(request.frameSamples));
       }
@@ -88,8 +91,8 @@ function harness(options: HarnessOptions = {}) {
       run: async () => ({}),
       release: async () => {},
     }) as never,
-    setTimeout: (handler, ms) => { timers.push({ run: handler, ms }); return timers.length; },
-    clearTimeout: () => {},
+    setTimeout: (handler, ms) => { timers.push({ run: handler, ms, live: true }); return timers.length; },
+    clearTimeout: (id) => { const timer = timers[Number(id) - 1]; if (timer) timer.live = false; },
   };
 
   const runtime = wireWakeRuntime(deps);
@@ -97,7 +100,20 @@ function harness(options: HarnessOptions = {}) {
     runtime,
     notices,
     opened,
-    timers,
+    /** Timers the runtime has scheduled and not cancelled or fired, oldest first. */
+    pendingTimers: () => timers.filter((timer) => timer.live),
+    /** Fires the oldest pending timer. */
+    fireNextTimer: () => {
+      const timer = timers.find((candidate) => candidate.live);
+      if (!timer) throw new Error('no timer is pending');
+      timer.live = false;
+      timer.run();
+    },
+    /** Resolves once the capture has been opened `count` times in total. */
+    whenOpened: (count: number) => new Promise<void>((resolve) => {
+      if (opened.length >= count) resolve();
+      else openWaiters.push({ count, resolve });
+    }),
     managedRoot,
     pushFrame: () => emitFrame?.(),
   };
@@ -153,14 +169,14 @@ describe('a recorder that captures nothing is not chosen again', () => {
     expect(wake.opened[0]?.backend).toBe('pw-record');
     expect(wake.opened[0]?.exclude).toBeUndefined();
 
-    // The first-frame watchdog fires, then the supervisor's restart.
-    const firstFrame = wake.timers.find((timer) => timer.ms === 5_000);
-    expect(firstFrame).toBeDefined();
-    firstFrame!.run();
-    const restart = wake.timers.find((timer) => timer.ms > 0 && timer.ms < 5_000);
-    expect(restart).toBeDefined();
-    restart!.run();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The only timer pending on an open stream that has delivered nothing is the first-frame watchdog.
+    expect(wake.pendingTimers()).toHaveLength(1);
+    wake.fireNextTimer();
+    // Firing it schedules the supervisor's restart, which is again the only pending timer.
+    expect(wake.pendingTimers()).toHaveLength(1);
+    const reopened = wake.whenOpened(2);
+    wake.fireNextTimer();
+    await reopened;
 
     // Reopened WITHOUT the recorder that produced silence.
     expect(wake.opened).toHaveLength(2);
@@ -172,7 +188,8 @@ describe('a recorder that captures nothing is not chosen again', () => {
   test('the silence and the rotation are written to the voice diagnostics', async () => {
     const wake = harness({ silentBackends: ['pw-record'] });
     await wake.runtime.refresh();
-    wake.timers.find((timer) => timer.ms === 5_000)!.run();
+    expect(wake.pendingTimers()).toHaveLength(1);
+    wake.fireNextTimer();
 
     const entries = readVoiceDiagnostics(wake.managedRoot);
     const capture = entries.find((entry) => entry.operation === 'wake-capture');

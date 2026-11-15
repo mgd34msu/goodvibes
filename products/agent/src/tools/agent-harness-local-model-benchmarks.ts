@@ -7,6 +7,7 @@ import { localBenchmarkPrompt, localBenchmarkPromptPolicy, routingRegistry } fro
 import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { hasPurpose, PURPOSE_MODEL_COMPARE_JUDGMENT } from './agent-review-packet-presets-core.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { localStackFor } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';
@@ -26,7 +27,7 @@ export function isLocalModelBenchmarkArtifact(artifact: ArtifactDescriptor): boo
 }
 
 export function isModelCompareJudgmentArtifact(artifact: ArtifactDescriptor): boolean {
-  return readString(artifact.metadata.purpose) === 'agent-model-compare-judgment';
+  return hasPurpose(artifact, PURPOSE_MODEL_COMPARE_JUDGMENT);
 }
 
 export function benchmarkCreatedAt(artifact: ArtifactDescriptor): string | null {
@@ -74,9 +75,9 @@ export function describeLocalBenchmarkJudgment(artifact: ArtifactDescriptor, win
     winnerStack,
     promptPreview: previewHarnessText(readString(artifact.metadata.promptPreview) || 'local model benchmark judgment', 120),
     analyticsRoute: 'agent_model_compare analytics benchmarkKind:"local-model-route" includeReasons:true',
-    exportRoute: `agent_model_compare export artifactId:"${artifact.id}" confirm:true explicitUserRequest:"Export this local benchmark judgment."`,
+    exportRoute: `agent_model_compare export artifactId:"${artifact.id}" explicitUserRequest:"<the user request, in their own words>"`,
     applyRoute: winnerModel
-      ? `agent_model_compare apply artifactId:"${artifact.id}" confirm:true explicitUserRequest:"Apply this revealed local benchmark winner."`
+      ? `agent_model_compare apply artifactId:"${artifact.id}" explicitUserRequest:"<the user request, in their own words>"`
       : null,
   };
 }
@@ -135,9 +136,12 @@ export function localBenchmarkRouteLatencies(artifacts: readonly ArtifactDescrip
 export function localBenchmarkRouteLatencyMap(context: BenchmarkArtifactContext): ReadonlyMap<string, LocalModelBenchmarkRouteLatency> {
   const store = context.platform.artifactStore ?? null;
   if (!store?.list) return new Map();
-  const artifacts = store.list(100).filter(isLocalModelBenchmarkArtifact);
+  const artifacts = store.list(ARTIFACT_WINDOW).filter(isLocalModelBenchmarkArtifact);
   return new Map(localBenchmarkRouteLatencies(artifacts).map((entry) => [entry.registryKey, entry]));
 }
+
+/** How many of the newest saved artifacts a benchmark read looks at. */
+const ARTIFACT_WINDOW = 100;
 
 export function localBenchmarkEvidence(
   comparisons: readonly ArtifactDescriptor[],
@@ -177,8 +181,8 @@ export function localBenchmarkEvidence(
       reviewRoute: sourceArtifactId
         ? `agent_model_compare review artifactId:"${sourceArtifactId}"`
         : 'agent_model_compare review',
-      exportRoute: `agent_model_compare export artifactId:"${judgment.id}" confirm:true explicitUserRequest:"Export this local benchmark judgment."`,
-      applyRoute: `agent_model_compare apply artifactId:"${judgment.id}" confirm:true explicitUserRequest:"Apply this revealed local benchmark winner."`,
+      exportRoute: `agent_model_compare export artifactId:"${judgment.id}" explicitUserRequest:"<the user request, in their own words>"`,
+      applyRoute: `agent_model_compare apply artifactId:"${judgment.id}" explicitUserRequest:"<the user request, in their own words>"`,
     });
   }
   const winnerStacks = [...new Set(winnerModels.map((winner) => winner.stack).filter((stack): stack is string => Boolean(stack)))].sort((a, b) => a.localeCompare(b));
@@ -222,6 +226,8 @@ export interface LocalModelBenchmarkSnapshot {
   readonly provenance?: 'classic';
   readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly storeAvailable: boolean;
+  /** True when the store returned a full page, so older artifacts may exist that were never read. */
+  readonly windowFull?: boolean;
   readonly comparisons: readonly ArtifactDescriptor[];
   readonly judgments: readonly ArtifactDescriptor[];
   readonly stacks: readonly { readonly artifactId: string; readonly stack: string | null }[];
@@ -242,12 +248,12 @@ export function localModelBenchmarkSnapshot(context: BenchmarkArtifactContext): 
   if (!store?.list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [],
     ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
   };
-  const allArtifacts = store.list(100);
+  const allArtifacts = store.list(ARTIFACT_WINDOW);
   const comparisons = allArtifacts.filter(isLocalModelBenchmarkArtifact);
   const ids = new Set(comparisons.map(artifact => artifact.id));
   const judgments = allArtifacts.filter(artifact => isModelCompareJudgmentArtifact(artifact)
     && ids.has(readString(artifact.metadata.sourceArtifactId)));
-  return { storeAvailable: true, comparisons, judgments, stacks: [], membership: [],
+  return { storeAvailable: true, windowFull: allArtifacts.length >= ARTIFACT_WINDOW, comparisons, judgments, stacks: [], membership: [],
     ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
   };
 }
@@ -260,18 +266,24 @@ export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnap
   if (!snapshot.storeAvailable) return {
     ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment } : {}),
     status: 'unavailable', count: 0, reason: 'Artifact history is unavailable in this runtime.',
-    saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" confirm:true explicitUserRequest:"..."',
+    saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"',
     evidence: localBenchmarkEvidence([], [], false),
   };
   const artifacts = snapshot.comparisons.slice(0, includeParameters ? 10 : 3);
   const judgments = snapshot.judgments.slice(0, includeParameters ? 10 : 3);
   const stacks = new Map(snapshot.stacks.map(entry => [entry.artifactId, entry.stack]));
   const unknown = snapshot.membership.filter(entry => entry.outcome === 'not-evaluated').length;
-  const evidence = localBenchmarkEvidence(artifacts, judgments, true, stacks);
+  // Counts and the winner come from everything that was read; only the listed entries are shortened.
+  const fullEvidence = localBenchmarkEvidence(snapshot.comparisons, snapshot.judgments, true, stacks);
+  const windowNote = snapshot.windowFull
+    ? ` Only the newest ${ARTIFACT_WINDOW} saved artifacts were searched; an older benchmark would not appear here.`
+    : '';
+  const evidence = windowNote ? { ...fullEvidence, summary: fullEvidence.summary + windowNote } : fullEvidence;
   return {
     ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment,
       interpretationNotice: 'Classic credits exact benchmark tags and source links. Unmarked membership and undeclared model stacks are not interpreted.' } : {}),
     status: artifacts.length > 0 ? 'history-found' : unknown ? 'unassessed-history' : 'no-history', count: artifacts.length,
+    total: snapshot.comparisons.length, totalJudgments: snapshot.judgments.length, truncated: snapshot.windowFull === true,
     artifacts: artifacts.map(describeLocalBenchmarkArtifact),
     judgments: judgments.map(artifact => describeLocalBenchmarkJudgment(artifact, stacks.get(artifact.id) ?? null)),
     evidence: unknown ? { ...evidence, summary: (artifacts.length ? evidence.summary + ' ' : 'No benchmark membership was established from the native tags or links. ')
@@ -285,7 +297,7 @@ export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnap
         : `Review saved local benchmark ${artifacts[0]!.id}, then save a revealed judgment before recommending any default-model change.`
       : 'Run the setupPlan benchmark prompt and save the comparison artifact before recommending any default-model change.',
     analyticsRoute: 'agent_model_compare analytics benchmarkKind:"local-model-route" includeReasons:true',
-    saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" confirm:true explicitUserRequest:"..."',
+    saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"',
     policy: 'Benchmark history is read-only evidence. Unmarked artifacts need a settled complete-source membership reading; held readings credit no evidence. Route changes still require a separate revealed judgment and confirmed apply/update action.',
   };
 }
@@ -382,7 +394,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   const store = context.platform.artifactStore ?? null;
   const assertStoreSlots = store ? captureCatalogMethods(store, ['list', 'readContent']) : () => {};
   const list = store?.list, readContent = store?.readContent;
-  const originalArtifacts = list?.call(store, 100) ?? [];
+  const originalArtifacts = list?.call(store, ARTIFACT_WINDOW) ?? [];
   const artifactSources = captureModelArtifactClockSources(originalArtifacts);
   captureModelReadingInput(artifactSources.reading);
   const allArtifacts = artifactSources.native;
@@ -398,7 +410,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   };
   const assertNativeCurrent = () => {
     assertNativeBindings();
-    if (list) assertArtifacts(list.call(store, 100));
+    if (list) assertArtifacts(list.call(store, ARTIFACT_WINDOW));
     for (const guard of contentGuards) guard();
     assertNativeBindings();
   };
@@ -470,7 +482,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   // Every descriptor is the detached native snapshot already screened through
   // its typed clock projection. Keep raw epochs for native consumers without
   // reclassifying those producer clocks as borrowed payment material.
-  const result: LocalModelBenchmarkSnapshot = Object.freeze({ storeAvailable: true,
+  const result: LocalModelBenchmarkSnapshot = Object.freeze({ storeAvailable: true, windowFull: originalArtifacts.length >= ARTIFACT_WINDOW,
     ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
     comparisons: Object.freeze(comparisons), judgments: Object.freeze(judgments),
     stacks: captureModelReadingInput(stacks), membership: captureModelReadingInput(membership) });
@@ -500,9 +512,9 @@ export function localModelBenchmarkPlan(recipe: LocalModelRecipe): LocalModelBen
       'whether the model handled project-specific nouns without hallucinating',
       'whether the route supports the needed context window and tool workflow',
     ],
-    workspaceActionRoute: 'agent_harness mode:"run_workspace_action" actionId:"account-run-local-model-benchmark" confirm:true fields.confirm:"yes" fields.modelRefs:"<local-route>,<baseline-route>" explicitUserRequest:"Compare this local model route before making it default."',
-    compareRoute: `agent_model_compare run prompt:"local model benchmark: ${recipe.label}" benchmarkKind:"local-model-route" taskType:"local-model-route" confirm:true explicitUserRequest:"Compare this local model route before making it default."`,
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" confirm:true explicitUserRequest:"Refresh model catalog, benchmarks, and token limits after local model setup."',
+    workspaceActionRoute: 'agent_harness mode:"run_workspace_action" actionId:"account-run-local-model-benchmark" fields.confirm:"yes" fields.modelRefs:"<local-route>,<baseline-route>" explicitUserRequest:"<the user request, in their own words>"',
+    compareRoute: `agent_model_compare run prompt:"local model benchmark: ${recipe.label}" benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"`,
+    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     notes: [
       'Use the workspace action when the user wants a form with benchmark defaults; use compareRoute when the model already has exact modelRefs.',
       'Run the same prompt against the local route and a baseline route before selecting a winner.',

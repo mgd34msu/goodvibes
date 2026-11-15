@@ -5,10 +5,13 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.ts';
 import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import type { ExternalPermissionHost } from '../platform/src/platform/permissions/external-request.ts';
 
 let log: SqliteDecisionLog;
 let restore: ReturnType<typeof installJudgmentPort>;
+// A policy another file left configured would turn these decision-model operations into Classic ones that ask a human.
+let retirePolicy: () => void;
 let selected = 'act';
 let factSelection = 'revise_0';
 let beforeRead: ((request: { context?: { site?: string } | undefined }) => Promise<void>) | undefined;
@@ -38,7 +41,7 @@ beforeEach(() => {
     }).port.ask(request);
     return gate().port.ask(request);
   } }, log);
-  restore = installJudgmentPort(port);
+  restore = installJudgmentPort(port); retirePolicy = configureDecisionModelPolicy(() => 'Default - On');
   const config: PermissionConfigReader = {
     isAutoApproveEnabled: () => false, getWorkingDirectory: () => '/synthetic/project',
     getSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} } }),
@@ -47,7 +50,7 @@ beforeEach(() => {
   host = { port, workspaceTrust: null, permissionManager: new PermissionManager(async () => { humans++; throw new Error('No human'); }, config, new PolicyRuntimeState()),
     signal: new AbortController().signal, config: { onDidInvalidate(listener) { invalidations.add(listener); return () => { invalidations.delete(listener); }; } } };
 });
-afterEach(() => { installJudgmentPort(restore); log[Symbol.dispose](); forgetGateReadings(); });
+afterEach(() => { retirePolicy(); installJudgmentPort(restore); log[Symbol.dispose](); forgetGateReadings(); });
 
 
 import { McpRegistry } from '../platform/src/platform/mcp/registry.ts';
@@ -75,7 +78,7 @@ function fixture(mrtr = false) {
   } } };
   const registry = new McpRegistry({ hookDispatcher: { fire: async event => { if (event.phase === 'Pre') await hook?.(); return { ok: true }; } }, sandboxSessions: {} as never });
   registry.setPermissionHost(host);
-  const internal = registry as unknown as { clients: Map<string, McpClient>; permissions: McpPermissionManager };
+  const internal = registry as unknown as { clients: Map<string, McpClient>; permissions: McpPermissionManager; freshness: { isQuarantined(name: string): boolean } };
   internal.clients.set('synthetic', client); internal.permissions.registerServer('synthetic');
   const api = createRuntimeMcpApi(registry);
   return { registry, internal, client, access, wire, api, call: (args = { name: 'Alice' }, signal?: AbortSignal) => withExternalOperationSource(operation(), () => api.callTool!('mcp:synthetic:write', args, { signal })) };
@@ -147,7 +150,6 @@ for (const question of ['capability', 'family', 'outward', 'cardDetails']) test(
 for (const mode of ['blocked', 'capability', 'path', 'host']) test(`${mode} restriction never reaches autonomous disposition`, async () => {
   const f = fixture();
   if (mode === 'blocked') f.registry.setServerTrustMode('synthetic', 'blocked');
-  if (mode === 'role') f.registry.setServerRole('synthetic', 'docs');
   if (mode === 'capability') f.internal.permissions.registerServer('synthetic', 'standard', { allowedCapabilities: ['read_fs'] });
   if (mode === 'path') { pathValue = true; f.internal.permissions.registerServer('synthetic', 'standard', { allowedPaths: ['/elsewhere'] }); }
   if (mode === 'host') { hostValue = true; f.internal.permissions.registerServer('synthetic', 'standard', { allowedHosts: ['allowed.invalid'] }); }
@@ -176,7 +178,8 @@ for (const change of ['cancel', 'reconnect', 'quarantine']) test(`${change} duri
 });
 test('revocation after first MRTR dispatch prevents the continuation write', async () => {
   const f = fixture(true); afterWire = () => { if (f.wire.length === 1) f.registry.setServerTrustMode('synthetic', 'blocked'); };
-  await expect(f.call()).rejects.toThrow(); expect(f.wire).toHaveLength(1);
+  // The revoked request is cancelled on the wire; only requests (messages with an id) count as writes.
+  await expect(f.call()).rejects.toThrow(); expect(f.wire.filter(message => message.id !== undefined)).toHaveLength(1);
 });
 test('late schema resolution after cancellation cannot dispatch; unavailable safety classification holds an ordinary MCP tool', async () => {
   const f = fixture(); const controller = new AbortController();
@@ -209,4 +212,17 @@ test('changing native provenance after capture cannot reuse the original MCP aut
   f.client.getToolSchema = async (...args) => { observed = true; source.selectedDiffContext.provenance.latestCheckpointId = 'new-checkpoint'; return schema(...args); };
   await expect(withExternalOperationSource({ ...operation(), sourceOf: () => source }, () => f.api.callTool!('mcp:synthetic:write', {}))).rejects.toThrow();
   expect(observed).toBe(true); expect(f.wire).toHaveLength(0);
+});
+test('a refused admission claim never counts toward quarantining a healthy server', async () => {
+  const f = fixture();
+  const manager = host.permissionManager;
+  const admit = manager.admitAutonomous.bind(manager);
+  // The source was replayed or revoked between admission and the claim at send time.
+  manager.admitAutonomous = async (...args) => {
+    const admission = await admit(...args);
+    return Object.assign(Object.create(Object.getPrototypeOf(admission)), admission, { claim() { throw new Error('Autonomous tool source was already claimed'); } });
+  };
+  for (let i = 0; i < 3; i++) await expect(f.call()).rejects.toThrow('already claimed');
+  expect(f.wire).toHaveLength(0);
+  expect(f.internal.freshness.isQuarantined('synthetic')).toBe(false);
 });

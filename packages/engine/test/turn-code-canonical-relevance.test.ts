@@ -1,7 +1,7 @@
 /** Offline proofs through the real passive injection caller and canonical rerank owner. */
 import { afterEach, expect, test } from 'bun:test';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort, bindJudgmentPortAuthority } from '../errors/src/index.js';
+import { installJudgmentPort, bindJudgmentPortAuthority, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '../errors/src/index.js';
 import { buildPerTurnKnowledgeInjection, type TurnCodeIndexSource } from '../platform/src/platform/agents/turn-knowledge-injection.js';
 import { rankCodeInjectionSnapshots } from '../platform/src/platform/state/code-injection-ranking.js';
 import type { CodeContextResult } from '../platform/src/platform/state/code-index-types.js';
@@ -55,14 +55,14 @@ test('missing rank capability cannot resurrect vector confidence', async () => {
 for (const [name, probability] of [['unsettled', 0.5], ['malformed', Number.NaN]] as const) {
   test(`${name} reading holds injection without vector fallback`, async () => {
     use(fakePort(() => noulAnswer(probability)).port);
-    await expect(run(source([irrelevant]))).rejects.toThrow();
+    await expect(run(source([irrelevant]))).rejects.toThrow(`Code injection relevance ${name}`);
   });
 }
-test('unavailable port holds injection', async () => { use(undefined); await expect(run(source([irrelevant]))).rejects.toThrow(); });
+test('unavailable port holds injection', async () => { use(undefined); await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentPortMissingError); });
 test('port replacement during a reading invalidates authority', async () => {
   const replacement = fakePort(() => noulAnswer(0.99)).port;
   use(fakePort(() => { installJudgmentPort(replacement); return noulAnswer(0.99); }).port);
-  await expect(run(source([irrelevant]))).rejects.toThrow();
+  await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
 });
 test('generation change during a reading invalidates consumption', async () => {
   let stale = false;
@@ -91,13 +91,13 @@ test('restoring the same port after another installation cannot revive its readi
   const fake = fakePort(() => noulAnswer(0.99)); use(fake.port);
   const reading = await source([irrelevant]).rankForInjection!('retry', [irrelevant]);
   installJudgmentPort(fakePort(() => noulAnswer(0.99)).port); installJudgmentPort(fake.port);
-  await expect(reading.assertCurrent()).rejects.toThrow();
+  await expect(reading.assertCurrent()).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
 });
 test('retiring a source authority holds a pending noncooperating port', async () => {
   const owner = new AbortController(); const fake = fakePort(() => noulAnswer(0.99));
   const port = { ...fake.port, ask: async () => { owner.abort(); return new Promise<never>(() => {}); } };
   bindJudgmentPortAuthority(port, () => ({ identity: {}, signal: owner.signal, assertCurrent() {} })); use(port);
-  await expect(run(source([irrelevant]))).rejects.toThrow();
+  await expect(run(source([irrelevant]))).rejects.toBeInstanceOf(JudgmentAuthorityRetiredError);
 });
 
 import { createCanonicalLiveCodeSource } from './_helpers/code-injection-readings.js';

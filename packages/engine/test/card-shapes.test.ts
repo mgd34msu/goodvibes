@@ -20,7 +20,6 @@ import {
   passesLuhn,
   redactCardShapes,
   renderCardShapeRefusal,
-  type CardShapeFinding,
 } from '../platform/src/platform/security/card-shapes.ts';
 
 /** Published test PANs. None of these is a real card. */
@@ -177,17 +176,6 @@ describe('the result cannot carry the digits', () => {
     const findings = await detectCardShapes(`card ${VISA} cvv 123 expiry 07/29`);
     expect(JSON.stringify(findings)).not.toContain(VISA);
     expect(JSON.stringify(findings)).not.toContain('4111');
-  });
-
-  test('the compile-time guard in card-shapes.ts is the type-level assertion', async () => {
-    // The real assertion is the @ts-expect-error trio and the keyof guard at
-    // the bottom of card-shapes.ts, which fail `tsc` the moment a value-bearing
-    // field is added, a runtime test cannot observe a field that does not
-    // exist. This case pins the exact key set the type is allowed to have, so
-    // an addition shows up here as well as in the build.
-    const finding: CardShapeFinding = { kind: 'pan', startIndex: 0, length: 16 };
-    const allowed: ReadonlyArray<keyof CardShapeFinding> = ['kind', 'startIndex', 'length'];
-    expect(Object.keys(finding).every((key) => (allowed as readonly string[]).includes(key))).toBe(true);
   });
 });
 

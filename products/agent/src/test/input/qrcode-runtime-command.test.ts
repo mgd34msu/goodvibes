@@ -129,3 +129,23 @@ describe('qrcode runtime command', () => {
     expect(text).not.toContain('existing-connected-host-token');
   });
 });
+
+describe('qrcode runtime command model invocation', () => {
+  test('a model-invoked command prints no token and no pairing block', async () => {
+    const registry = new CommandRegistry();
+    registerQrcodeRuntimeCommands(registry);
+    const root = makeProjectTempDir('goodvibes-agent-qrcode-model');
+    const tokenDir = join(root, '.goodvibes', 'daemon');
+    mkdirSync(tokenDir, { recursive: true });
+    writeFileSync(join(tokenDir, 'operator-tokens.json'), JSON.stringify({ token: 'model-visible-host-token' }));
+    const out: string[] = [];
+    const ctx = { ...makeContext(out, root), invokedByModel: true } as CommandContext;
+
+    await registry.get('qrcode')!.handler(['--show-token', '--yes'], ctx);
+
+    const text = out.join('\n');
+    expect(text).toContain('refused when a model runs it');
+    expect(text).not.toContain('model-visible-host-token');
+    expect(text).not.toContain('Scan to connect');
+  });
+});

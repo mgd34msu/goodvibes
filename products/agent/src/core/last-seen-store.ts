@@ -9,10 +9,10 @@
  *   { version: 1, lastSeenAt: <epoch-ms> }
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { writeStoreJson } from '@/utils/store-file.ts';
 
 interface LastSeenFile {
   readonly version: 1;
@@ -68,9 +68,10 @@ export class LastSeenStore {
    */
   public save(at: number = Date.now()): void {
     try {
-      mkdirSync(dirname(this.storePath), { recursive: true });
+      // Atomic: a kill during the shutdown write must leave the previous
+      // timestamp, not a torn file that reads as a first run and hides the digest.
       const data: LastSeenFile = { version: 1, lastSeenAt: at };
-      writeFileSync(this.storePath, JSON.stringify(data, null, 2), 'utf-8');
+      writeStoreJson(this.storePath, data);
     } catch {
       // Silently ignore, last-seen is a best-effort hint, not critical state.
     }

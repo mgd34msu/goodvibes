@@ -50,10 +50,30 @@ export const RENDER_GRADE_SESSION_DOMAINS: readonly RuntimeEventDomain[] = [...D
 /** How a control-plane stream writes one event to its client. */
 type ScopedSend = (event: string, payload: unknown, id?: string) => void;
 
+/**
+ * The session a serialized frame is about: a top-level `sessionId`, else the
+ * record an approval frame wraps (`approval.sessionId`), else a surface
+ * message's `metadata.sessionId`. Undefined when the frame names none.
+ */
+export function frameSessionId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const record = payload as { sessionId?: unknown; approval?: unknown; metadata?: unknown };
+  if (typeof record.sessionId === 'string') return record.sessionId;
+  for (const nested of [record.approval, record.metadata]) {
+    if (nested && typeof nested === 'object') {
+      const id = (nested as { sessionId?: unknown }).sessionId;
+      if (typeof id === 'string') return id;
+    }
+  }
+  return undefined;
+}
+
 /** Live delivery and replay, filtered to one session by the same rule. */
 export interface ScopedSessionDelivery {
   /** Whether a frame stamped with `envelopeSessionId` belongs on this stream. */
   mayDeliver(envelopeSessionId: string | undefined): boolean;
+  /** `mayDeliver` applied to an already-serialized frame payload. */
+  mayDeliverPayload(payload: unknown): boolean;
   /** The same decision applied to replayed traffic, which is already serialized. */
   wrapSend(send: ScopedSend): ScopedSend;
 }
@@ -85,17 +105,14 @@ export function createScopedSessionDelivery(scopedSessionId: string | undefined)
     || envelopeSessionId === scopedSessionId;
   return {
     mayDeliver,
+    mayDeliverPayload: (payload) => mayDeliver(frameSessionId(payload)),
     // Replay goes through the SAME rule as live delivery: a reconnect that
     // re-sent another session's frames would put back exactly what the live
     // filter exists to keep out.
     wrapSend: (send) => (scopedSessionId === undefined
       ? send
       : (event, payload, id): void => {
-        const serialized = payload as { sessionId?: unknown } | null;
-        const envelopeSessionId = serialized && typeof serialized.sessionId === 'string'
-          ? serialized.sessionId
-          : undefined;
-        if (!mayDeliver(envelopeSessionId)) return;
+        if (!mayDeliver(frameSessionId(payload))) return;
         send(event, payload, id);
       }),
   };
@@ -104,6 +121,8 @@ export function createScopedSessionDelivery(scopedSessionId: string | undefined)
 export interface ControlPlaneEventReplayScope {
   readonly clientKind?: string | undefined;
   readonly clientId?: string | undefined;
+  /** Matches any client whose id starts with this, for events published before the owner's stream (and its id) exists. */
+  readonly clientIdPrefix?: string | undefined;
   readonly routeId?: string | undefined;
   readonly surfaceId?: string | undefined;
   readonly domains?: readonly RuntimeEventDomain[] | undefined;
@@ -164,6 +183,7 @@ export function hasReplayScope(scope: ControlPlaneEventReplayScope): boolean {
   return Boolean(
     scope.clientKind
     || scope.clientId
+    || scope.clientIdPrefix
     || scope.routeId
     || scope.surfaceId
     || (scope.domains && scope.domains.length > 0),
@@ -183,6 +203,7 @@ export function canReplayEventToClient(
   const clientKind = options.clientKind ?? 'web';
   if (scope.clientKind && scope.clientKind !== clientKind) return false;
   if (scope.clientId && scope.clientId !== options.clientId) return false;
+  if (scope.clientIdPrefix && !options.clientId?.startsWith(scope.clientIdPrefix)) return false;
   if (scope.routeId && scope.routeId !== options.routeId) return false;
   if (scope.surfaceId && scope.surfaceId !== options.surfaceId) return false;
   if (scope.domains?.length && !scope.domains.some((domain) => domains.includes(domain))) return false;
@@ -235,15 +256,18 @@ export function replayRecentTraffic(
   options: ControlPlaneReplayClientOptions,
   replayDomains: ReadonlySet<RuntimeEventDomain> | null,
   sinceId?: string,
+  /** The stream's own session rule, so the catch-up window is cut from frames it may receive. */
+  acceptPayload?: (payload: unknown) => boolean,
 ): ControlPlaneReplayOutcome {
-  const resolution = resolveReplayWindow(recentEvents, sinceId);
-  for (const recentEvent of resolution.window) {
-    if (!canReplayEventToClient(recentEvent, options)) continue;
-    if (!clientMayReceiveEventDomain(replayDomains, recentEvent.event)) continue;
+  const mayReceive = (recentEvent: ScopedControlPlaneRecentEvent): boolean => {
+    if (!canReplayEventToClient(recentEvent, options)) return false;
+    if (!clientMayReceiveEventDomain(replayDomains, recentEvent.event)) return false;
     const requiredScope = CHANNEL_REQUIRED_SCOPE[recentEvent.event];
-    if (requiredScope && !clientMaySeeScopedChannel({ kind: options.clientKind ?? 'web', scopes: options.scopes, admin: options.admin }, requiredScope)) continue;
-    send(recentEvent.event, recentEvent.payload, recentEvent.id);
-  }
+    if (requiredScope && !clientMaySeeScopedChannel({ kind: options.clientKind ?? 'web', scopes: options.scopes, admin: options.admin }, requiredScope)) return false;
+    return acceptPayload === undefined || acceptPayload(recentEvent.payload);
+  };
+  const resolution = resolveReplayWindow(recentEvents, sinceId, mayReceive);
+  for (const recentEvent of resolution.window) send(recentEvent.event, recentEvent.payload, recentEvent.id);
   return resolution.outcome;
 }
 
@@ -289,12 +313,43 @@ export function resolveReplayResume(
   return { resume: 'resumed', sinceId, replayed: sinceIndex };
 }
 
+const CATCH_UP_WINDOW = 20;
+const TURN_END_FRAMES: ReadonlySet<string> = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
+
 function resolveReplayWindow(
   recentEvents: readonly ScopedControlPlaneRecentEvent[],
   sinceId: string | undefined,
+  mayReceive: (event: ScopedControlPlaneRecentEvent) => boolean,
 ): { readonly window: ScopedControlPlaneRecentEvent[]; readonly outcome: ControlPlaneReplayOutcome } {
   const outcome = resolveReplayResume(recentEvents, sinceId);
-  if (outcome.resume === 'none') return { window: recentEvents.slice(0, 20).reverse(), outcome };
   if (outcome.resume === 'unresolved') return { window: [], outcome };
-  return { window: recentEvents.slice(0, outcome.replayed).reverse(), outcome };
+  if (outcome.resume === 'resumed') {
+    return { window: recentEvents.slice(0, outcome.replayed).filter(mayReceive).reverse(), outcome };
+  }
+  // The newest entries this client may receive: cutting the window first and
+  // filtering after would leave a one-session stream with few or none of its
+  // own frames whenever other sessions were busier.
+  const window: ScopedControlPlaneRecentEvent[] = [];
+  const included = new Set<string>();
+  for (const event of recentEvents) {
+    if (!mayReceive(event)) continue;
+    window.push(event);
+    included.add(event.id);
+    if (window.length >= CATCH_UP_WINDOW) break;
+  }
+  // A turn still running whose start fell out of the window is replayed from
+  // its start: a consumer that gets only the deltas never saw the turn begin
+  // and drops it. A turn that already ended is not, since its start without
+  // its end would leave a consumer waiting on a turn that is over.
+  const decided = new Set<string>();
+  const openStarts: ScopedControlPlaneRecentEvent[] = [];
+  for (const event of recentEvents) {
+    const type = (event.payload as { type?: unknown } | null)?.type;
+    if (type !== 'TURN_SUBMITTED' && !TURN_END_FRAMES.has(type as string)) continue;
+    const session = frameSessionId(event.payload) ?? '';
+    if (decided.has(session) || !mayReceive(event)) continue;
+    decided.add(session);
+    if (type === 'TURN_SUBMITTED' && !included.has(event.id)) openStarts.push(event);
+  }
+  return { window: [...openStarts.reverse(), ...window.reverse()], outcome };
 }

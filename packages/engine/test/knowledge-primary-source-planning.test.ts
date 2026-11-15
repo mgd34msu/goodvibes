@@ -17,8 +17,10 @@ import type { KnowledgeStore } from '../platform/src/platform/knowledge/store.js
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../platform/src/platform/knowledge/types.js';
 import { historicalSemanticFactId } from './_helpers/historical-semantic-identity.js';
 import type { KnowledgeSemanticFactInput, KnowledgeSemanticLlm } from '../platform/src/platform/knowledge/semantic/types.js';
-import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
+import { createStores, useStoreCleanup } from './_helpers/knowledge-semantic-fixtures.js';
 import { repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
+
+useStoreCleanup();
 
 const spaceId = 'primary-plan-space';
 let previous: JudgmentPort | undefined;
@@ -140,6 +142,27 @@ describe('primary source persistence preplanning', () => {
     expect(store.getNode(old.id)?.metadata.sourceIds).toEqual([a.id, b.id]);
     const oldSupport = store.listEdges().find((edge) => edge.fromId === source.id && edge.toId === old.id && edge.relation === 'supports_fact');
     expect(oldSupport?.metadata.deleted).toBe(true);
+  });
+
+  test('a supersession stopped between the support edge and the fact rewrite is finished by the next run', async () => {
+    const { store, subject, source, a, b } = await fixture();
+    const old = await seedFact(store, subject, claim('Old shared claim'), [source, a, b]);
+    readings((_purpose, title) => title === 'b' ? 0.98 : 0.9);
+    const realUpsert = store.upsertPreparedNode.bind(store);
+    let failOnce = true;
+    store.upsertPreparedNode = (async (...args: Parameters<typeof realUpsert>) => {
+      const supportDeactivated = store.listEdges().some((edge) => edge.fromId === source.id && edge.toId === old.id && edge.relation === 'supports_fact' && edge.metadata.deleted === true);
+      if (failOnce && supportDeactivated) { failOnce = false; throw new Error('stopped before the fact rewrite'); }
+      return realUpsert(...args);
+    }) as typeof store.upsertPreparedNode;
+    await expect(enrich(store, source, [claim('New unique claim')])).rejects.toThrow('stopped before the fact rewrite');
+    const stranded = store.listEdges().find((edge) => edge.fromId === source.id && edge.toId === old.id && edge.relation === 'supports_fact');
+    expect(stranded?.metadata.deleted).toBe(true);
+    expect(store.getNode(old.id)?.metadata.sourceIds).toEqual([source.id, a.id, b.id]);
+
+    await enrich(store, source, [claim('New unique claim')]);
+    expect(store.getNode(old.id)?.metadata.sourceIds).toEqual([a.id, b.id]);
+    expect(store.getNode(old.id)?.sourceId).toBe(b.id);
   });
 
   test('foreign-space source content never reaches the model; each question includes its claim and subject', async () => {

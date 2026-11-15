@@ -78,6 +78,46 @@ Ingress applies request-size limits, signature/token checks where configured,
 channel policy, conversation-kind mapping, route binding, and surface-specific
 reply setup before handing work to the daemon.
 
+Chat adapters (Slack, Matrix, Mattermost, Signal, iMessage, BlueBubbles, Google
+Chat, Microsoft Teams, GitHub) handle one provider message once: a redelivery
+with the same provider message id (a Slack retry, the `message` and
+`app_mention` events for one mention, a repeated GitHub delivery id) is
+acknowledged as `duplicate-delivery` and starts no second agent. The record is
+held in memory for ten minutes. A delivery that was refused or failed before
+work started can be retried.
+
+`requireMention` in a channel policy is judged from what the payload shows: a
+Teams `mention` entity for the bot, Matrix `m.mentions`, Google Chat
+annotations, Slack's own mention markup, a Mattermost outgoing-webhook trigger
+word, or a bridge's explicit `mentioned` boolean. Signal, iMessage, BlueBubbles,
+ntfy and Home Assistant payloads carry no mention information of their own, so
+with `requireMention` on, a message from them is refused (`mention-required`)
+unless the bridge sets `mentioned: true`.
+
+A message names a command only when its first word is written as one (`/status`,
+`!status`, or `/status@yourbot`). `allowedCommands` limits those commands, and
+`allowTextCommandsWithoutMention` lets only an allowed command past
+`requireMention`; ordinary conversation is never held to the command list and
+never counts as a command.
+
+An answer longer than a surface's message size is sent as several messages in
+order, split at paragraph, line or word breaks, so nothing is cut off. Surfaces
+that take JSON (webhook, Home Assistant) receive the whole answer in one body.
+Over Slack Socket Mode a slash command or button is answered through its
+`response_url`, and a mention that could not be started is answered in its
+channel, because the socket acknowledges the event before it is handled.
+
+Slash commands and interactive components (Slack, Discord) answer a
+policy-refused request with HTTP 200 and an ephemeral message that names the
+reason, because the providers show a reply only when it arrives with 200. A
+slash command's one-shot reply credential (Slack `response_url`, Discord
+interaction token) is not stored on the channel's route binding; the reply to
+that command carries it.
+
+A GitHub automation webhook acts only on issues and pull requests whose author
+is the repository's `OWNER`, a `MEMBER` or a `COLLABORATOR`; an event from any
+other author is acknowledged as `untrusted-author` and starts no agent.
+
 ## Conversation kinds
 
 Channel conversation kinds are:
@@ -141,11 +181,24 @@ or Home Assistant service target before dispatching work.
 - ntfy has configurable chat, agent, and remote-chat topics. Chat-to-TUI routes
   into the active shared session; agent topics submit agent work; remote-chat
   topics use daemon-owned remote chat and inherit the daemon/TUI provider/model.
+  A message the daemon fails to process is delivered again a few times; if it
+  still fails, it is skipped so the messages behind it keep flowing, and the
+  owner is told it was skipped. A topic whose stream keeps dropping, or that
+  the server refuses, reports `degraded` or `dead` with the reason.
 - Home Assistant uses signed ingress, isolated remote sessions, Assist
   submit-and-wait conversation routes, event-bus delivery, setup manifest
   discovery, REST-backed tools, and an inactivity TTL for remote sessions.
 - Slack uses bot and app-level tokens, Socket Mode runtime, final delivery with
-  bot-token resolution, and service-backed secret refs.
+  bot-token resolution, and service-backed secret refs. A Slack or Discord start
+  is reported as running only once the socket has actually opened; a socket that
+  fails or does not open within 30 seconds is a failed start, handled like a
+  dropped connection.
+- A surface switched on, or given a credential, while the daemon runs is picked
+  up without a restart: Telegram, ntfy topics, Slack and Discord register to be
+  read as soon as the setting or the stored credential changes, and are
+  withdrawn again when switched off, when a topic is renamed, or when the
+  Telegram token belongs to a different bot. Clustered nodes contest a new
+  surface like any other.
 - Discord supports interactions, gateway dispatch, commands, and component
   responses.
 - Telephony supports bridge-backed SMS/voice delivery or direct Twilio SMS/voice

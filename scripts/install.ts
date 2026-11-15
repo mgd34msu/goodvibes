@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { parseDecisionModelPolicy, type DecisionModelPolicy } from '../packages/engine/errors/src/decision-policy.js';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, releaseHeldLocks, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, pendingPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, releaseHeldLocks, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -64,11 +64,6 @@ export function wrapper(options: Options, name: typeof COMMANDS[number], arch = 
   const product = name === 'goodvibes' ? 'tui' : name === 'goodvibes-agent' ? 'agent' : 'daemon';
   return `${header}if [ -f ${quote(join(options.dataDir, 'environment'))} ]; then\n  set -a\n  . ${quote(join(options.dataDir, 'environment'))}\n  set +a\nfi\n${pinRelease}export GOODVIBES_HOME=${quote(options.dataDir)}\nexport GOODVIBES_DAEMON_HOME=${quote(join(options.dataDir, '.goodvibes/daemon'))}\nexport TYPESAFE_DEFAULT_MODEL=jev-latest\nexport PATH="$goodvibes_release/runtime:$PATH"\nexec "$goodvibes_release/${product}/${name}-linux-${arch}" "$@"\n`;
 }
-function switchRelease(prefix: string, release: string): void {
-  const temporary = join(prefix, `current-${process.pid}`);
-  symlinkSync(`releases/${release}`, temporary);
-  try { renameSync(temporary, join(prefix, 'current')); } finally { rmSync(temporary, { force: true }); }
-}
 export async function assertPortFree(port: number): Promise<void> {
   await new Promise<void>((yes, no) => {
     const server = createServer();
@@ -76,9 +71,11 @@ export async function assertPortFree(port: number): Promise<void> {
     server.listen(port, '127.0.0.1', () => server.close(error => error ? no(error) : yes()));
   });
 }
-async function ready(options: Options, html: string, execute: Run): Promise<void> {
-  const deadline = Date.now() + 90_000;
-  while (Date.now() < deadline) {
+export interface ReadyTiming { now: () => number; sleep: (milliseconds: number) => Promise<void>; timeoutMs: number }
+const REAL_TIMING: ReadyTiming = { now: Date.now, sleep: milliseconds => Bun.sleep(milliseconds), timeoutMs: 90_000 };
+export async function ready(options: Options, html: string, execute: Run, timing: ReadyTiming = REAL_TIMING): Promise<void> {
+  const deadline = timing.now() + timing.timeoutMs;
+  while (timing.now() < deadline) {
     const state = execute('systemctl', ['--user', 'show', SERVICE, '--property=ActiveState', '--value'], { capture: true });
     if (state === 'failed' || state === 'inactive') throw new Error(`Daemon stopped during startup. Inspect: journalctl --user -u ${SERVICE}`);
     if (state === 'active') {
@@ -87,20 +84,21 @@ async function ready(options: Options, html: string, execute: Run): Promise<void
         if (response.ok && await response.text() === html) {
           const tokenPath = join(options.dataDir, '.goodvibes/daemon/operator-tokens.json');
           const tokenFile = JSON.parse(readFileSync(tokenPath, 'utf8')) as { token?: unknown };
-          if (typeof tokenFile.token !== 'string') continue;
-          const health = await fetch(`http://127.0.0.1:${options.port}/api/health`, {
-            headers: { Authorization: `Bearer ${tokenFile.token}` }, signal: AbortSignal.timeout(1500), redirect: 'error',
-          });
-          const value = await health.json() as { network?: { controlPlane?: { ready?: boolean } } };
-          if (health.ok && value.network?.controlPlane?.ready === true) return;
+          if (typeof tokenFile.token === 'string') {
+            const health = await fetch(`http://127.0.0.1:${options.port}/api/health`, {
+              headers: { Authorization: `Bearer ${tokenFile.token}` }, signal: AbortSignal.timeout(1500), redirect: 'error',
+            });
+            const value = await health.json() as { network?: { controlPlane?: { ready?: boolean } } };
+            if (health.ok && value.network?.controlPlane?.ready === true) return;
+          }
         }
       } catch { /* Listener may still be starting. */ }
     }
-    await Bun.sleep(500);
+    await timing.sleep(500);
   }
-  throw new Error(`Daemon/WebUI did not become ready in 90 seconds. Inspect: journalctl --user -u ${SERVICE}`);
+  throw new Error(`Daemon/WebUI did not become ready in ${Math.round(timing.timeoutMs / 1000)} seconds. Inspect: journalctl --user -u ${SERVICE}`);
 }
-async function build(root: string, execute: Run): Promise<string> {
+export async function build(root: string, execute: Run): Promise<string> {
   const git = (...args: string[]) => execute('git', args, { cwd: root, capture: true });
   const commit = git('rev-parse', 'HEAD');
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Install from a Git checkout with an exact commit.');
@@ -117,7 +115,7 @@ async function build(root: string, execute: Run): Promise<string> {
   execute('bun', ['scripts/ci-artifact.ts', 'record', commit, commit], { cwd: join(root, 'products/daemon') });
   return commit;
 }
-async function stage(root: string, release: string, options: Options, commit: string, execute: Run): Promise<void> {
+export async function stage(root: string, release: string, options: Options, commit: string, execute: Run): Promise<void> {
   const target = `linux-${process.arch}`;
   execute('bun', ['scripts/install-native.ts', 'install', '--artifact-root', join(root, 'products/daemon'), '--prefix', join(release, 'daemon'),
     '--source-commit', commit, '--head-commit', commit], { cwd: join(root, 'products/daemon') });
@@ -161,19 +159,20 @@ export const PAIRING_DEFERRED_EXIT = 75;
 /** Recovery for the install currently in flight; the failure path and the signal path both run exactly this. */
 let activeRecovery: (() => void) | undefined;
 /** Roll the interrupted install back, release every lock, and return the conventional exit code (128 + signal). */
-export function interruptInstall(signal: 'SIGINT' | 'SIGTERM'): number {
+export function interruptInstall(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): number {
   const recover = activeRecovery; activeRecovery = undefined;
   try { recover?.(); }
   catch (error) {
     console.error(`Install interrupted and automatic recovery was incomplete; inspect ${SERVICE} before retrying. ${error instanceof Error ? error.message : String(error)}`);
   }
   releaseHeldLocks();
-  return signal === 'SIGINT' ? 130 : 143;
+  return signal === 'SIGINT' ? 130 : signal === 'SIGHUP' ? 129 : 143;
 }
 export async function install(options: Options, hooks: InstallHooks = {}): Promise<void> {
   const execute = hooks.execute ?? run;
   await withLock(options.prefix, () => withLock(options.dataDir, async () => {
     const old = readInstallation(options.prefix);
+    if (old) recoverInterruptedUpdate(old);
     preflight(options, old, execute);
     const commit = await (hooks.build ?? build)(ROOT, execute);
     // Check again after a potentially long build, before touching live files.
@@ -195,8 +194,9 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     const previousWrappers = new Map(COMMANDS.map(name => [name, old && present(join(options.prefix, 'commands', name)) ? readFileSync(join(options.prefix, 'commands', name), 'utf8') : undefined]));
     // One recovery, used by both a failure and an interrupt. It runs at most once.
     let recovered = false;
+    let committed = false;
     const recover = (): void => {
-      if (recovered) return;
+      if (recovered || committed) return;
       recovered = true;
       // Do not delete binaries that a failed service stop might still be using.
       if (serviceAttempted) {
@@ -217,6 +217,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
           if (contents !== undefined) atomicWrite(path, contents);
           else rmSync(path, { force: true });
         }
+        rmSync(pendingPath(options.prefix), { force: true });
       }
       if (metadataTouched) {
         for (const [path, contents] of previousMetadata) {
@@ -259,12 +260,19 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       metadataTouched = true;
       atomicWrite(dataOwner(options), JSON.stringify({ package: PACKAGE, id, dataDir: options.dataDir, prefix: options.prefix }) + '\n');
       const environment = join(options.dataDir, 'environment'); plainPath(environment);
-      if (!present(environment)) {
+      if (present(environment)) {
+        const key = process.env.TYPESAFE_API_KEY;
+        if (key && !/^\s*(export\s+)?TYPESAFE_API_KEY=/m.test(readFileSync(environment, 'utf8'))) {
+          console.warn(`TYPESAFE_API_KEY is set in this shell but ${environment} already exists and has no key, so the file was kept unchanged. Add the key there to authenticate Jev.`);
+        }
+      } else {
         // TYPESAFE_API_KEY is classified daemon-needed by credential-scope-registry.ts.
         const key = process.env.TYPESAFE_API_KEY;
         if (key?.includes('\n') || key?.includes('\r') || key?.includes('\0')) throw new Error('TYPESAFE_API_KEY must be a single line.');
         atomicWrite(environment, '# Private shell environment for GoodVibes Jev.\n' + (key ? `TYPESAFE_API_KEY=${quote(key)}\n` : '# TYPESAFE_API_KEY=your-key\n'));
       }
+      // If the process is killed before the receipt below is saved, this names the release to discard on the next run.
+      if (old) atomicWrite(pendingPath(options.prefix), `${releaseName}\n`);
       switchRelease(options.prefix, releaseName); published = true;
       const wrappers: Record<string, string> = {};
       mkdirSync(options.binDir, { recursive: true });
@@ -318,14 +326,19 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       const receipt: Installation = { ...installedOptions, schema: 2, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
         service: options.service, unit, wrappers };
       atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
-      // Keep the previous release until all publication and readiness checks pass.
-      if (old) {
+      // The receipt names the new release from here on; a rollback now would leave it pointing at a deleted one.
+      committed = true; activeRecovery = undefined;
+      rmSync(pendingPath(options.prefix), { force: true });
+      // Keep every earlier release until all publication and readiness checks pass, then drop the ones nothing runs from.
+      // A release kept for a running terminal on one update is reconsidered on the next.
+      for (const earlier of readdirSync(join(options.prefix, 'releases'))) {
+        if (earlier === releaseName) continue;
+        const path = join(options.prefix, 'releases', earlier);
         try {
-          const previousRelease = join(options.prefix, 'releases', old.release);
-          if ((hooks.isReleaseInUse ?? isReleaseInUse)(previousRelease)) console.log('Previous release retained for a running terminal or agent. Reopen it to use the update.');
-          else rmSync(previousRelease, { recursive: true, force: true });
+          if ((hooks.isReleaseInUse ?? isReleaseInUse)(path)) console.log('A previous release is retained for a running terminal or agent. Reopen it to use the update.');
+          else rmSync(path, { recursive: true, force: true });
         }
-        catch { console.warn(`Update succeeded; an unused previous release remains at ${join(options.prefix, 'releases', old.release)}.`); }
+        catch { console.warn(`Update succeeded; an unused previous release remains at ${path}.`); }
       }
       console.log(`Installed GoodVibes Jev (${commit.slice(0, 12)}). Commands: ${options.binDir}`);
       if (options.service) console.log(`Workspace: ${options.workspace ?? ROOT}`);
@@ -347,7 +360,7 @@ if (import.meta.main) {
   try {
     if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch)) throw new Error('Supported hosts: Linux x64/arm64.');
     if (process.getuid?.() === 0) throw new Error('Run as your regular user, without sudo.');
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { process.exit(interruptInstall(signal)); });
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(signal, () => { process.exit(interruptInstall(signal)); });
     await install(parseOptions(process.argv.slice(2)));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

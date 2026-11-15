@@ -10,6 +10,7 @@
 
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { retainOwnedJson } from '../gate/judgment-input.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
@@ -29,6 +30,8 @@ import {
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
+  assertValidMemoryBundle,
+  assertValidMemoryFields,
   clampConfidence,
   compareByTrust,
   createSchema,
@@ -302,6 +305,38 @@ export interface MemoryDoctorReport {
 
 export { MemoryRegistry } from './memory-registry.js';
 
+/**
+ * A write was refused because the memory file on disk is no longer the image
+ * this process loaded: another process (the daemon, another surface, the
+ * memory CLI) saved it since. Writing would put the old image back over that
+ * process's records, so nothing was written. Retryable: the store reloads the
+ * file, and the same call succeeds once it has.
+ */
+export class MemoryStoreChangedOnDiskError extends Error {
+  readonly retryable = true;
+  constructor(readonly path: string, phase: 'reloaded' | 'reloading' | 'save') {
+    super(phase === 'save'
+      ? `Memory file ${path} changed on disk after this change was made; it was not saved, so the other process's records are intact. This process reloads the file before its next write.`
+      : `Memory file ${path} was changed by another process since this process loaded it; nothing was written. ${phase === 'reloaded' ? 'The store has reloaded the file' : 'The store is reloading the file'}; retry the operation.`);
+    this.name = 'MemoryStoreChangedOnDiskError';
+  }
+}
+
+/** Identity of the file as last loaded or saved here; any other process's save changes it. */
+function memoryFileIdentity(path: string): string {
+  try {
+    const info = statSync(path, { bigint: true });
+    return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    throw error;
+  }
+}
+
+function isFileBackedPath(path: string | null): path is string {
+  return Boolean(path) && path !== ':memory:' && !/^file:.*(?:^|[?&])mode=memory(?:&|$)/.test(path!);
+}
+
 // ── MemoryStore ───────────────────────────────────────────────────────────────
 
 export class MemoryStore {
@@ -313,9 +348,15 @@ export class MemoryStore {
   private mutationRevision = 0;
   private backendEpoch = 0;
   private readonly operations = new WeakMap<MemoryOperationOptions, { revision: number }>();
+  /** File identity as this process last loaded or saved it; undefined while loading or for an in-memory store. */
+  private diskIdentity: string | undefined;
+  private saveAdmitted = false;
+  private reloading: Promise<void> | null = null;
+  /** Writes applied to the image whose save failed and has not been followed by a successful one. */
+  private unsavedChanges = 0;
 
   constructor(dbPath: string | undefined, options: MemoryStoreOptions) {
-    this.sqlite = new SQLiteStore(dbPath);
+    this.sqlite = this.openBackend(dbPath);
     this.embeddingRegistry = options.embeddingRegistry;
     this.vectorIndex = options.enableVectorIndex === false
       ? null
@@ -331,10 +372,9 @@ export class MemoryStore {
   async init(): Promise<void> {
     if (this.ready) return;
     this.backendEpoch++;
-    await this.sqlite.init(createSchema as Parameters<SQLiteStore['init']>[0], {
-      storeName: 'memory store', schemaVersion: MEMORY_SCHEMA_VERSION,
-      validateCurrentSchema: validateMemoryRowRevisions,
-    });
+    this.diskIdentity = undefined;
+    await this.initBackend(this.sqlite);
+    this.diskIdentity = this.currentDiskIdentity(this.sqlite);
     this.ready = true;
     await this.vectorIndex?.init();
     this.rebuildVectorIndex();
@@ -362,13 +402,18 @@ export class MemoryStore {
     };
   }
 
-  private captureOperation(options?: MemoryOperationOptions): MemoryOperationOptions {
+  /**
+   * A write binds to the mutation revision: any other write in between makes
+   * it refuse. A read binds only to the backend incarnation, so a search that
+   * awaits ranking still answers when an unrelated write lands meanwhile.
+   */
+  private captureOperation(options?: MemoryOperationOptions, mode: 'write' | 'read' = 'write'): MemoryOperationOptions {
     if (options && this.operations.has(options)) return options;
     const lifecycle = captureMemoryOperation(options), scope = this.captureOperationScope();
     const state = { revision: this.mutationRevision };
     const operation = captureMemoryOperation({ signal: lifecycle.signal, assertCurrent: () => {
       assertMemoryOperationCurrent(lifecycle); scope();
-      if (this.mutationRevision !== state.revision) throw new Error('Memory operation source changed');
+      if (mode === 'write' && this.mutationRevision !== state.revision) throw new Error('Memory operation source changed');
     } });
     this.operations.set(operation, state);
     return operation;
@@ -376,9 +421,12 @@ export class MemoryStore {
 
   /** Add a new memory record. Returns the created record. */
   async add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
+    // Checked without yielding, so an unchanged file keeps the write synchronous.
+    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
+    assertValidMemoryFields(opts);
 
     const now = Date.now();
     const id = `mem_${now.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
@@ -428,7 +476,7 @@ export class MemoryStore {
     );
 
     this.vectorIndex?.upsert(record, operation);
-    this.persist(operation);
+    await this.persistNow(operation);
     assertMemoryOperationCurrent(operation);
     logger.info('MemoryStore: record added', { id, cls: opts.cls });
     return record;
@@ -522,8 +570,16 @@ export class MemoryStore {
           } finally { publishing = false; }
         });
         store.vectorIndex?.upsert(written, operation);
-        await store.save(operation);
-        assertMemoryOperationCurrent(operation);
+        // The row is published. Only the caller's lifecycle can still retire
+        // the result; an unrelated write landing during the save cannot, or
+        // the caller would retry a row that already exists into a duplicate.
+        const published = store.captureOperation({ signal, assertCurrent: () => {
+          assertBindings(); scope(); assertBindings(); assertMemoryOperationCurrent(lifecycle);
+          if (commitLifecycle) assertMemoryOperationCurrent(commitLifecycle);
+          assertBindings();
+        } }, 'read');
+        await store.save(published);
+        assertMemoryOperationCurrent(published);
         logger.info('MemoryStore: prepared record added', { id: written.id, cls: written.cls });
         return { ...canonical, tags: [...canonical.tags], provenance: canonical.provenance.map(link => ({ ...link })) };
       },
@@ -533,7 +589,7 @@ export class MemoryStore {
 
   /** Retrieve a single record by ID. */
   get(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return null;
 
@@ -553,7 +609,7 @@ export class MemoryStore {
    * query, the `engine.state.memory-search` rerank orders what retrieval found.
    */
   async search(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     if (filter.semantic) {
@@ -571,7 +627,7 @@ export class MemoryStore {
    * compareByTrust order. Bulk reads (getAll, review queue, export) use it.
    */
   retrieve(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemoryRecord[] {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
 
@@ -658,7 +714,7 @@ export class MemoryStore {
    * nothing. `score` is the similarity on a 0 to 100 scale.
    */
   semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemorySemanticSearchResult[] {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     const query = filter.query?.trim();
@@ -680,7 +736,7 @@ export class MemoryStore {
 
   /** Semantic search: the vector index builds the shortlist, the rerank orders it (memory-search-ranking.ts). */
   async searchSemantic(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     return awaitMemoryOperation(() => rankSemanticSearch(this, filter, operation), operation);
@@ -688,7 +744,7 @@ export class MemoryStore {
 
   /** Records to review: the least trusted records, ordered by the memory-review-priority reading. */
   async reviewQueue(limit = 10, scope?: MemoryScope, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     const leastTrustedFirst = this.retrieve(scope ? { scope } : {}, operation).reverse();
     return awaitMemoryOperation(() => rankReviewQueue(leastTrustedFirst.slice(0, Math.max(limit * 4, 25)), limit, operation), operation);
@@ -696,7 +752,7 @@ export class MemoryStore {
 
   /** Exports the records the filter selects; a query here filters, it does not rank. */
   exportBundle(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemoryBundle {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     const records = this.retrieve(filter, operation);
     const recordIds = new Set(records.map((record) => record.id));
@@ -724,60 +780,106 @@ export class MemoryStore {
     };
   }
 
+  /**
+   * Import a bundle. The whole bundle is checked first (shape, sizes, counts),
+   * so a malformed or oversized file imports nothing, and a failure while
+   * writing removes the rows already inserted, so an import is all or nothing.
+   *
+   * Imported text is outside this store's own review: a record arrives
+   * unreviewed (`fresh`) at no more than the baseline confidence, whatever the
+   * bundle claims, so a bundle cannot place itself above the recall floors.
+   * `stale` and `contradicted` flags are kept, they only make a record less
+   * trusted.
+   */
   async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
+    // Checked without yielding, so an unchanged file keeps the write synchronous.
+    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
+    assertValidMemoryBundle(bundle);
 
     let importedRecords = 0;
     let skippedRecords = 0;
     let importedLinks = 0;
+    const insertedIds: string[] = [];
+    const insertedLinks: Array<readonly [string, string, string]> = [];
 
-    for (const record of bundle.records) {
-      if (this.get(record.id)) {
-        skippedRecords++;
-        continue;
+    try {
+      for (const record of bundle.records) {
+        if (this.get(record.id)) {
+          skippedRecords++;
+          continue;
+        }
+        const state = normalizeReviewState(record.reviewState);
+        const flagged = state === 'stale' || state === 'contradicted';
+        this.runMutation(
+          `INSERT INTO memory_records
+             (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            record.id,
+            normalizeScope(record.scope),
+            record.cls,
+            record.summary,
+            record.detail ?? null,
+            JSON.stringify(record.tags ?? []),
+            JSON.stringify(record.provenance ?? []),
+            flagged ? state : 'fresh',
+            flagged ? clampConfidence(record.confidence) : Math.min(clampConfidence(record.confidence), FRESH_MEMORY_CONFIDENCE),
+            flagged ? record.reviewedAt ?? null : null,
+            flagged ? record.reviewedBy ?? null : null,
+            flagged ? record.staleReason ?? null : null,
+            record.createdAt,
+            record.updatedAt,
+            record.validFrom ?? null,
+            record.validUntil ?? null,
+          ],
+          operation,
+        );
+        insertedIds.push(record.id);
+        importedRecords++;
+        // Index the row as stored (normalised), not the bundle's raw values.
+        const stored = this.get(record.id, operation);
+        if (stored) this.vectorIndex?.upsert(stored, operation);
       }
-      this.runMutation(
-        `INSERT INTO memory_records
-           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          record.id,
-          normalizeScope(record.scope),
-          record.cls,
-          record.summary,
-          record.detail ?? null,
-          JSON.stringify(record.tags),
-          JSON.stringify(record.provenance),
-          normalizeReviewState(record.reviewState),
-          clampConfidence(record.confidence),
-          record.reviewedAt ?? null,
-          record.reviewedBy ?? null,
-          record.staleReason ?? null,
-          record.createdAt,
-          record.updatedAt,
-          record.validFrom ?? null,
-          record.validUntil ?? null,
-        ],
-        operation,
-      );
-      importedRecords++;
-      this.vectorIndex?.upsert(record, operation);
+
+      for (const link of bundle.links) {
+        if (!this.get(link.fromId) || !this.get(link.toId)) continue;
+        const existed = (this.sqlite.exec(
+          'SELECT 1 FROM memory_links WHERE from_id = ? AND to_id = ? AND relation = ? LIMIT 1',
+          [link.fromId, link.toId, link.relation],
+        )[0]?.values.length ?? 0) > 0;
+        this.runMutation(
+          `INSERT OR REPLACE INTO memory_links (from_id, to_id, relation, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [link.fromId, link.toId, link.relation, link.createdAt],
+          operation,
+        );
+        if (!existed) insertedLinks.push([link.fromId, link.toId, link.relation]);
+        importedLinks++;
+      }
+    } catch (error) {
+      try {
+        for (const [fromId, toId, relation] of insertedLinks) {
+          this.runMutation('DELETE FROM memory_links WHERE from_id = ? AND to_id = ? AND relation = ?', [fromId, toId, relation], operation);
+        }
+        for (const id of insertedIds) {
+          this.runMutation('DELETE FROM memory_links WHERE from_id = ? OR to_id = ?', [id, id], operation);
+          this.runMutation('DELETE FROM memory_records WHERE id = ?', [id], operation);
+          this.vectorIndex?.delete(id, operation);
+        }
+      } catch (rollbackError) {
+        logger.error('MemoryStore: bundle import failed and could not be fully undone', {
+          importedRecords, importedLinks, error: summarizeError(error), rollbackError: summarizeError(rollbackError),
+        });
+        void this.saveImage().catch((err: unknown) => logger.warn('MemoryStore: autosave failed', { error: summarizeError(err) }));
+        throw new Error(`MemoryStore: bundle import failed (${summarizeError(error)}) and could not be fully undone; ${importedRecords} record(s) and ${importedLinks} link(s) may remain.`, { cause: error });
+      }
+      throw error;
     }
 
-    for (const link of bundle.links) {
-      if (!this.get(link.fromId) || !this.get(link.toId)) continue;
-      this.runMutation(
-        `INSERT OR REPLACE INTO memory_links (from_id, to_id, relation, created_at)
-         VALUES (?, ?, ?, ?)`,
-        [link.fromId, link.toId, link.relation, link.createdAt],
-        operation,
-      );
-      importedLinks++;
-    }
-
-    this.persist(operation);
+    await this.persistNow(operation);
     assertMemoryOperationCurrent(operation);
     logger.info('MemoryStore: bundle imported', { importedRecords, skippedRecords, importedLinks });
     return { importedRecords, skippedRecords, importedLinks };
@@ -785,6 +887,8 @@ export class MemoryStore {
 
   /** Create a directed link between two records. */
   async link(fromId: string, toId: string, relation: string, options?: MemoryOperationOptions): Promise<MemoryLink | null> {
+    // Checked without yielding, so an unchanged file keeps the write synchronous.
+    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return null;
@@ -818,13 +922,13 @@ export class MemoryStore {
       return null;
     }
 
-    this.persist(operation);
+    await this.persistNow(operation);
     return { fromId, toId, relation, createdAt: now };
   }
 
   /** Get all links where this record is either source or target. */
   linksFor(id: string, options?: MemoryOperationOptions): MemoryLink[] {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
 
@@ -868,6 +972,7 @@ export class MemoryStore {
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return null;
+    assertValidMemoryFields({ scope: patch.scope, cls: patch.cls, summary: patch.summary, detail: patch.detail, tags: patch.tags }, 'memory update');
 
     const existing = this.get(id);
     if (!existing) {
@@ -917,10 +1022,13 @@ export class MemoryStore {
     const now = Date.now();
     const reviewState = patch.state ?? existing.reviewState;
     const confidence = clampConfidence(patch.confidence ?? existing.confidence);
-    const reviewedAt = now;
-    const reviewedBy = patch.reviewedBy ?? existing.reviewedBy;
+    // A record back in `fresh` is unreviewed, the same as after a content edit
+    // (see update()), so it carries no reviewer stamp.
+    const unreviewed = reviewState === 'fresh';
+    const reviewedAt = unreviewed ? undefined : now;
+    const reviewedBy = unreviewed ? undefined : patch.reviewedBy ?? existing.reviewedBy;
     const staleReason = reviewState === 'stale' || reviewState === 'contradicted'
-      ? (patch.staleReason ?? existing.staleReason ?? 'marked by operator')
+      ? (patch.staleReason ?? existing.staleReason ?? `marked ${reviewState} by ${reviewedBy ?? 'operator'}`)
       : undefined;
 
     this.runMutation(
@@ -930,7 +1038,7 @@ export class MemoryStore {
       [
         reviewState,
         confidence,
-        reviewedAt,
+        reviewedAt ?? null,
         reviewedBy ?? null,
         staleReason ?? null,
         now,
@@ -1005,7 +1113,7 @@ export class MemoryStore {
   }
 
   vectorStats(options?: MemoryOperationOptions): MemoryVectorStats {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     return this.vectorIndex?.stats() ?? {
       backend: 'sqlite-vec',
@@ -1021,7 +1129,7 @@ export class MemoryStore {
   }
 
   async doctor(options?: MemoryOperationOptions): Promise<MemoryDoctorReport> {
-    const operation = this.captureOperation(options);
+    const operation = this.captureOperation(options, 'read');
     assertMemoryOperationCurrent(operation);
     return {
       vector: this.vectorStats(),
@@ -1033,11 +1141,53 @@ export class MemoryStore {
   async save(options?: MemoryOperationOptions): Promise<boolean> {
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
-    return awaitMemoryOperation(() => this.sqlite.save(), operation);
+    return awaitMemoryOperation(() => this.saveImage(), operation);
+  }
+
+  /**
+   * Reload the file when another process saved it since this process loaded
+   * it, so later reads see that process's records and later writes do not
+   * erase them. The current image keeps serving reads until the new one is
+   * loaded; writes are refused meanwhile. A no-op when the file is unchanged.
+   */
+  reloadIfChanged(): Promise<void> {
+    if (this.reloading) return this.reloading;
+    const sqlite = this.sqlite, path = sqlite.databasePath;
+    if (!this.ready || this.diskIdentity === undefined || !isFileBackedPath(path)
+      || this.currentDiskIdentity(sqlite) === this.diskIdentity) return Promise.resolve();
+    const epoch = this.backendEpoch;
+    const reload = (async () => {
+      const next = this.openBackend(path);
+      try {
+        await this.initBackend(next);
+      } catch (error) {
+        next.close();
+        throw error;
+      }
+      // A close or re-root while loading owns the store now; drop this image.
+      if (this.sqlite !== sqlite || this.backendEpoch !== epoch || !this.ready) {
+        next.close();
+        return;
+      }
+      if (this.unsavedChanges > 0) {
+        logger.warn('MemoryStore: reloading the changed memory file drops changes that were never saved', { path, unsavedChanges: this.unsavedChanges });
+        this.unsavedChanges = 0;
+      }
+      this.backendEpoch++;
+      this.sqlite = next;
+      this.diskIdentity = this.currentDiskIdentity(next);
+      ownerMapSet(ownedMemoryStores, this, { sqlite: this.sqlite, vector: this.vectorIndex, embeddings: this.embeddingRegistry });
+      sqlite.close();
+      this.rebuildVectorIndex();
+      logger.info('MemoryStore: reloaded the memory file after another process saved it', { path });
+    })().finally(() => { this.reloading = null; });
+    this.reloading = reload;
+    return reload;
   }
 
   close(): void {
     this.backendEpoch++;
+    this.diskIdentity = undefined;
     this.sqlite.close();
     this.vectorIndex?.close();
     this.ready = false;
@@ -1059,7 +1209,8 @@ export class MemoryStore {
     this.vectorIndex?.close();
     this.ready = false;
     this.rebuildVectorIndexPromise = null;
-    this.sqlite = new SQLiteStore(newDbPath);
+    this.diskIdentity = undefined;
+    this.sqlite = this.openBackend(newDbPath);
     this.vectorIndex = new SqliteVecMemoryIndex(
       resolveMemoryVectorDbPath(newDbPath),
       undefined,
@@ -1071,6 +1222,75 @@ export class MemoryStore {
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
+
+  private openBackend(dbPath: string | undefined): SQLiteStore {
+    const store: SQLiteStore = new SQLiteStore(dbPath, { beforePersist: () => this.admitSave(store) });
+    return store;
+  }
+
+  private initBackend(sqlite: SQLiteStore): Promise<void> {
+    return sqlite.init(createSchema as Parameters<SQLiteStore['init']>[0], {
+      storeName: 'memory store', schemaVersion: MEMORY_SCHEMA_VERSION,
+      validateCurrentSchema: validateMemoryRowRevisions,
+    });
+  }
+
+  private currentDiskIdentity(sqlite: SQLiteStore): string | undefined {
+    const path = sqlite.databasePath;
+    return isFileBackedPath(path) ? memoryFileIdentity(path) : undefined;
+  }
+
+  /** Whether the file on disk is no longer the image this process holds. */
+  private imageIsStale(): boolean {
+    if (this.diskIdentity === undefined) return false;
+    return this.reloading !== null || this.currentDiskIdentity(this.sqlite) !== this.diskIdentity;
+  }
+
+  /** Called synchronously by SQLiteStore right before it writes the file. */
+  private admitSave(sqlite: SQLiteStore): void {
+    // Saves made while loading (a schema stamp) and saves of a retired image
+    // are not this store's current image; they need no identity check.
+    if (sqlite !== this.sqlite || this.diskIdentity === undefined) return;
+    if (this.currentDiskIdentity(sqlite) !== this.diskIdentity) {
+      throw new MemoryStoreChangedOnDiskError(sqlite.databasePath ?? '', 'save');
+    }
+    this.saveAdmitted = true;
+  }
+
+  /** Save the image and adopt the identity of the file this process just wrote. */
+  private saveImage(): Promise<boolean> {
+    const sqlite = this.sqlite;
+    this.saveAdmitted = false;
+    // A non-coordinated SQLiteStore writes synchronously inside save(), so
+    // the file stat right after is this process's own write.
+    const pending = sqlite.save();
+    if (this.saveAdmitted && sqlite === this.sqlite) this.diskIdentity = this.currentDiskIdentity(sqlite);
+    this.saveAdmitted = false;
+    return pending;
+  }
+
+  /** Async writes: when the image is stale, finish reloading first, then refuse so the caller retries on the fresh image. */
+  private async refuseStaleImage(): Promise<void> {
+    if (!this.imageIsStale()) return;
+    const path = this.sqlite.databasePath ?? '';
+    try {
+      await this.reloadIfChanged();
+    } catch (error) {
+      logger.warn('MemoryStore: reloading the changed memory file failed', { path, error: summarizeError(error) });
+      throw new MemoryStoreChangedOnDiskError(path, 'reloading');
+    }
+    throw new MemoryStoreChangedOnDiskError(path, 'reloaded');
+  }
+
+  /** Synchronous writes cannot wait for the reload: start it and refuse. */
+  private refuseStaleImageSync(): void {
+    if (!this.imageIsStale()) return;
+    const path = this.sqlite.databasePath ?? '';
+    void this.reloadIfChanged().catch((error: unknown) => {
+      logger.warn('MemoryStore: reloading the changed memory file failed', { path, error: summarizeError(error) });
+    });
+    throw new MemoryStoreChangedOnDiskError(path, 'reloading');
+  }
 
   private captureVectorSourceRevision(record: MemoryRecord): MemoryVectorSourceRevision {
     const sqlite = this.sqlite, epoch = this.backendEpoch;
@@ -1097,6 +1317,7 @@ export class MemoryStore {
   }
 
   private createAddRecord(opts: MemoryAddOptions): MemoryRecord {
+    assertValidMemoryFields(opts);
     const now = Date.now();
     const id = `mem_${now.toString(36)}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
 
@@ -1140,6 +1361,7 @@ export class MemoryStore {
 
   private runMutation(sql: Parameters<SQLiteStore['run']>[0], params: Parameters<SQLiteStore['run']>[1], operation: MemoryOperationOptions, onPublished?: () => void): void {
     assertMemoryOperationCurrent(operation);
+    this.refuseStaleImageSync();
     const state = this.operations.get(operation);
     if (!state) throw new Error('Memory operation is not owned by this store');
     const revision = ++this.mutationRevision;
@@ -1156,12 +1378,38 @@ export class MemoryStore {
     }
   }
 
+  /**
+   * Save in the background, for the synchronous writes (update, review,
+   * delete) that cannot wait. A failed save is counted: the change is in this
+   * process's image only, and the next successful save writes it, but a reload
+   * of a changed file would drop it, which is logged when it happens.
+   */
   private persist(operation: MemoryOperationOptions): void {
     assertMemoryOperationCurrent(operation);
-    void this.save(operation).catch((err) => {
+    void this.save(operation).then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
       try { assertMemoryOperationCurrent(operation); } catch { return; }
-      logger.warn('MemoryStore: autosave failed', { error: summarizeError(err) });
+      this.unsavedChanges += 1;
+      logger.warn('MemoryStore: autosave failed', { error: summarizeError(err), unsavedChanges: this.unsavedChanges });
     });
+  }
+
+  /**
+   * Save and wait, for the async writes (add, import, link): a save that did
+   * not happen is reported to the caller instead of returning the record as
+   * remembered. A refusal because another process saved the file keeps its own
+   * error, which already says to retry.
+   */
+  private async persistNow(operation: MemoryOperationOptions): Promise<void> {
+    assertMemoryOperationCurrent(operation);
+    try {
+      await this.save(operation);
+      this.unsavedChanges = 0;
+    } catch (err) {
+      assertMemoryOperationCurrent(operation);
+      this.unsavedChanges += 1;
+      if (err instanceof MemoryStoreChangedOnDiskError) throw err;
+      throw new Error(`MemoryStore: the change was applied in memory but could not be saved to disk, so it may be lost when the store reloads: ${summarizeError(err)}`, { cause: err });
+    }
   }
 }
 

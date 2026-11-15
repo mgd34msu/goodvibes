@@ -229,9 +229,11 @@ export interface HomeGraphStatus {
   readonly extractionCount: number;
   readonly lastSnapshotAt?: number | undefined;
   readonly readiness: {
+    /** `needs_review` is deprecated and never reported; it stays in the type for older clients. */
     readonly state: 'ready' | 'repairing' | 'needs_review' | 'needs_sources' | 'empty';
     readonly openIssueCount: number;
     readonly activeRefinementTaskCount: number;
+    /** @deprecated Always 0; no task enters `needs_review`. */
     readonly needsReviewTaskCount: number;
   };
   readonly capabilities: readonly string[];
@@ -351,6 +353,8 @@ export interface HomeGraphAskInput extends HomeGraphSpaceInput {
   readonly includeConfidence?: boolean | undefined;
   readonly includeLinkedObjects?: boolean | undefined;
   readonly timeoutMs?: number | undefined;
+  /** Answer from what is stored: no extraction repair, no device page refresh, no queued enrichment. Set for a caller that may not write. */
+  readonly readOnly?: boolean | undefined;
 }
 
 export interface HomeGraphAskResult {
@@ -556,9 +560,12 @@ export interface HomeGraphReviewInput extends HomeGraphSpaceInput {
   readonly issueId?: string | undefined;
   readonly nodeId?: string | undefined;
   readonly sourceId?: string | undefined;
-  readonly action: 'accept' | 'reject' | 'resolve' | 'edit' | 'forget';
+  readonly action: 'accept' | 'reject' | 'resolve' | 'reopen' | 'edit' | 'forget';
   readonly value?: Record<string, unknown> | undefined;
+  /** Who made the decision. The daemon sets it from the authenticated caller; a body value cannot choose it. */
   readonly reviewer?: string | undefined;
+  /** The reviewer name the request body asked to be recorded, kept beside the authenticated one. */
+  readonly claimedReviewer?: string | undefined;
 }
 
 export interface HomeGraphExport {

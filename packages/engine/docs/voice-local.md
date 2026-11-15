@@ -53,7 +53,7 @@ curl -sL -o ggml-tiny.en.bin \
 
 # 3. Point the platform at them (settings.json / config set):
 #   voice.local.ttsEngine    = "piper"
-#   voice.local.ttsBinary    = "~/.local/opt/piper/piper"           (absolute path)
+#   voice.local.ttsBinary    = "~/.local/opt/piper/piper"           (a leading ~/ is expanded)
 #   voice.local.ttsModelPath = "~/.local/opt/piper-voices/en_US-lessac-low.onnx"
 #   voice.local.sttEngine    = "whisper-cpp"
 #   voice.local.sttBinary    = "~/.local/opt/whisper.cpp/build/bin/whisper-cli"
@@ -90,11 +90,14 @@ STT per the sources above.
 
 `voice.local.install` provisions the STT engine (whisper.cpp) from a
 goodvibes-built, checksum-pinned bundle. Those bundles are hosted at ONE
-pinned GitHub release tag, **`voice-runtimes-v1`**, in the existing
-[`mgd34msu/goodvibes-sdk` artifact storage](https://github.com/mgd34msu/goodvibes-sdk/releases/tag/voice-runtimes-v1).
-That release contains the verified deployed bytes and checksum sidecars. The
-source/package rename does not relocate those assets; future publication targets
-`mgd34msu/goodvibes`.
+pinned GitHub release tag, **`voice-runtimes-v1`**. Provisioning tries the
+`mgd34msu/goodvibes` release first and falls back to the former
+[`mgd34msu/goodvibes-sdk` release](https://github.com/mgd34msu/goodvibes-sdk/releases/tag/voice-runtimes-v1),
+which holds the same bytes and checksum sidecars. Every origin is checked
+against the same pinned size and sha256. Before a release, run
+`bun packages/engine/scripts/check-voice-runtime-urls.ts` (add
+`--require-all-origins` once the canonical release carries every asset) to
+confirm each pinned URL is served.
 
 Stability contract (relied on by the pinned manifest and every referencing
 script):
@@ -123,12 +126,16 @@ uploaded to the same tag.
 
 ## Cost honesty
 
-- **ElevenLabs (premium route)**. Every synthesis/transcription through the
-  voice service records billable units (characters for TTS, seconds for STT)
-  into cost attribution under a voice-scoped model key
-  (`elevenlabs:voice-tts:characters`). It reports honestly UNPRICED until the
-  one-key manual price names your plan's rate:
-  `pricing.modelPrices["elevenlabs:voice-tts:characters"] = { "input": <USD per 1M characters> }`,
-  after which sessions show real dollars with `user` pricing provenance.
+- **Every provider except local (ElevenLabs, OpenAI, and the rest)**. Every
+  synthesis/transcription through the voice service records billable units
+  (characters for text-to-speech, seconds for speech-to-text) into cost
+  attribution under a voice-scoped model key,
+  `<provider>:voice-<tts|stt>:<characters|seconds>`, for example
+  `elevenlabs:voice-tts:characters` or `elevenlabs:voice-stt:seconds`. Each
+  reports honestly UNPRICED until the one-key manual price for that exact key
+  names your plan's rate:
+  `pricing.modelPrices["elevenlabs:voice-tts:characters"] = { "input": <USD per 1M units> }`,
+  after which sessions show real dollars with `user` pricing provenance. Speech
+  in and speech out are separate keys, so price each one you use.
 - **Local**. No billing dimension at all. Local calls record nothing. The
   cost surfaces show an honest absence, never a fake $0.00.

@@ -11,6 +11,7 @@ import { createUnavailablePowerSeam } from '@goodvibes-jev/engine/platform/platf
 import { fetchDaemonPowerState, forwardKeepAwakeToDaemon, installKeepAwakeRemoteForward } from '../../runtime/power-keepawake-remote.ts';
 import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { waitFor } from '../helpers/wait-for.ts';
 
 function spyConfig() {
   const getKeys: string[] = [];
@@ -104,7 +105,7 @@ describe('keep-awake survives the TUI closing; embedded topology', () => {
       // ...and the NEXT composition (the next TUI start on this
       // config) re-applies it at start, the toggle outlives the process.
       const second = wireIdlePowerAndLiveTurn(stubDeps);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await waitFor(() => second.powerManager.getState().keepAwake.enabled);
       expect(second.powerManager.getState().keepAwake.enabled).toBe(true);
       second.memoryConsolidationScheduler.stop();
     } finally {

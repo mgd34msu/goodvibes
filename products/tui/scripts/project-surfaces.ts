@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isPinnedWorkspaceVersion } from '@goodvibes-jev/engine/toolchain';
 import { getPeerContract } from '@goodvibes-jev/engine/platform/contracts';
 import { GatewayMethodCatalog, buildOperatorContract } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { getKnowledgeGraphqlSchemaText, renderKnowledgeSchemaSql } from '@goodvibes-jev/engine/platform/platform/knowledge';
@@ -37,18 +38,31 @@ function writeTextArtifact(outputDir: string, name: string, value: string): void
   writeFileSync(join(outputDir, name), value.endsWith('\n') ? value : `${value}\n`, 'utf8');
 }
 
+function readRequiredExactSemver(value: unknown, label: string): string {
+  if (!isPinnedWorkspaceVersion(value)) {
+    throw new Error(`${label} must be a pinned semantic version, such as 3.0.0 or 3.0.0-dev.0.`);
+  }
+  return value;
+}
+
 export function syncVersionSurfaces(root = ROOT): string {
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const version = pkg.version;
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    readonly version?: unknown;
+  };
+  const version = readRequiredExactSemver(pkg.version, 'package.json version');
 
   const versionTsPath = join(root, 'src', 'version.ts');
-  try {
+  if (existsSync(versionTsPath)) {
     let versionTs = readFileSync(versionTsPath, 'utf8');
-    versionTs = versionTs.replace(/let _version = '[^']*'/, `let _version = '${version}'`);
+    const versionFallbackPattern = /let _version = '[^']*'/;
+    if (!versionFallbackPattern.test(versionTs)) {
+      throw new Error('src/version.ts is missing the _version fallback literal.');
+    }
+    versionTs = versionTs.replace(versionFallbackPattern, `let _version = '${version}'`);
     writeFileSync(versionTsPath, versionTs);
-    console.log(`prebuild: src/version.ts fallback → ${version}`);
-  } catch {
-    console.log('prebuild: src/version.ts; not found, skipping');
+    console.log(`prebuild: src/version.ts fallback -> ${version}`);
+  } else {
+    console.log('prebuild: src/version.ts - not found, skipping');
   }
 
   return version;
@@ -72,8 +86,8 @@ export function syncFoundationArtifacts(root = ROOT): void {
 
 /**
  * Generate docs/commands-reference.md from the live slash-command registry.
- * Rewritten by every prebuild and by release:prepare, so the committed file is
- * current at each version bump without a drift check on every push.
+ * Rewritten by `scripts/prebuild.ts` (run it by hand) and by `bun run docs:commands`.
+ * Nothing runs it on a plain build, so rerun it after changing a command.
  */
 export function syncCommandReference(root = ROOT): void {
   const markdown = renderCommandReferenceMarkdown(categorizeBuiltinCommands());

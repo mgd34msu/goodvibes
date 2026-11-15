@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DaemonLifecycleRuntime } from '../platform/src/platform/daemon/facade-lifecycle.js';
-import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/dist/index.js';
+import { createDaemonRuntimeAutomationRouteHandlers } from '../daemon-api/src/index.js';
 import {
   FeatureAnnouncementStore,
   featureAnnouncementsPath,

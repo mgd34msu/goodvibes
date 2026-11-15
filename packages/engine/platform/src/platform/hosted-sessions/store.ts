@@ -31,7 +31,7 @@ import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 
 import { promises as fs } from 'node:fs';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { HostedSessionRecord } from './types.js';
@@ -108,6 +108,12 @@ export function describeInvalidPersistedHostedSession(value: unknown): string | 
   if (typeof record['createdAt'] !== 'number' || typeof record['updatedAt'] !== 'number') {
     return 'the record has no usable timestamps';
   }
+  if (typeof record['title'] !== 'string') return 'the session title is missing or not text';
+  const detachPolicy = record['detachPolicy'];
+  if (detachPolicy !== null && detachPolicy !== 'kill' && detachPolicy !== 'survive') return 'the detach policy is missing or unknown';
+  const attached = record['attachedClients'];
+  if (!Array.isArray(attached) || !attached.every((client) => typeof client === 'string')) return 'the attached client list is missing or not a list of ids';
+  if (!Number.isFinite(record['turnCount']) || !Number.isFinite(record['messageCount'])) return 'the turn or message count is missing or not a number';
   return null;
 }
 
@@ -200,9 +206,11 @@ export class HostedSessionStore {
     // Bound the directory. Terminated sessions go first (they are history),
     // then the least recently updated, never a session that is still live in
     // this process, because load runs before any session is composed.
-    if (restored.length > this.limits.maxSessions) {
+    // A cap below one is a misconfiguration, never "keep none": it must not delete every persisted session.
+    const cap = this.limits.maxSessions;
+    if (cap >= 1 && restored.length > cap) {
       const ordered = [...restored].sort((a, b) => rankForEviction(a.record) - rankForEviction(b.record));
-      const overflow = ordered.slice(0, ordered.length - this.limits.maxSessions);
+      const overflow = ordered.slice(0, ordered.length - Math.floor(cap));
       for (const session of overflow) {
         evicted.push(session.record.id);
         await this.delete(session.record.id);
@@ -269,6 +277,12 @@ export class HostedSessionStore {
     const kept = boundMessages(messages, this.limits.maxMessagesPerSession);
     if (kept.length === messages.length) return conversation;
     return { ...conversation, messages: kept };
+  }
+
+  /** Whether a session's file is on disk. A name that is not a plain session id is never present. */
+  has(sessionId: string): boolean {
+    if (sessionId === '' || sessionId !== basename(sessionId)) return false;
+    return existsSync(this.fileFor(sessionId));
   }
 
   /** Remove one session's file. Absent is success. */

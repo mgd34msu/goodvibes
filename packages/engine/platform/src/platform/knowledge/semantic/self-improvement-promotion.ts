@@ -173,7 +173,7 @@ async function promoteRepairSourcesWithinBudget(
       await promote([sourceId]);
       await linkSubjects([sourceId]);
       if (await reachedRepairTarget()) break;
-      await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS));
+      await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS), { signal, shouldStop: context.shouldStop });
       await promote([sourceId]);
       await linkSubjects([sourceId]);
       if (await reachedRepairTarget()) break;
@@ -186,7 +186,7 @@ async function promoteRepairSourcesWithinBudget(
       } catch (error) {
         // Earlier settled promotion/link passes stand; this hold must not start a fallback pass.
         if (isKnowledgeSourceQualityFailure(error) || error instanceof KnowledgeGeneratedFactSupportHeldError) throw error;
-        await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS));
+        await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS), { signal, shouldStop: context.shouldStop });
         await promote([sourceId]);
         await linkSubjects([sourceId]);
         const recoveryUsefulness = await countUsable(processedSourceIds);
@@ -201,7 +201,7 @@ async function promoteRepairSourcesWithinBudget(
         if (deadlineAt - Date.now() < 1_000) break;
         continue;
       }
-      await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS));
+      await waitForRepairSourceText(context.store, sourceId, Math.min(deadlineAt, Date.now() + REPAIR_SOURCE_TEXT_WAIT_MS), { signal, shouldStop: context.shouldStop });
       await promote([sourceId]);
       await linkSubjects([sourceId]);
       if (await reachedRepairTarget()) break;
@@ -250,19 +250,22 @@ async function promoteRepairSourcesWithinBudget(
   return { promotedFactCount: usableFactCount, repairComplete, promotedSourceIds: promotionSourceIds };
 }
 
-async function waitForRepairSourceText(
+/** Returns as soon as the source has text, the deadline is near, or the run is cancelled or paused. */
+export async function waitForRepairSourceText(
   store: KnowledgeStore,
   sourceId: string,
   deadlineAt: number,
+  stop: { readonly signal?: AbortSignal | undefined; readonly shouldStop?: (() => boolean) | undefined } = {},
 ): Promise<void> {
   while (deadlineAt - Date.now() >= 1_000) {
+    if (stop.signal?.aborted || stop.shouldStop?.()) return;
     const source = store.getSource(sourceId);
     if (!source) return;
     const extraction = store.getExtractionBySourceId(source.id);
     if (extractedSemanticText(extraction).length > 0) return;
     if (!sourceRequiresExtractedEvidence(source) && sourceSemanticText(source, extraction).length > 0) return;
     await yieldToEventLoop();
-    await sleep(100);
+    await sleep(100, stop.signal ? { signal: stop.signal } : {});
   }
 }
 
@@ -377,6 +380,9 @@ async function promoteRepairEvidenceFacts(
   guard.assertCurrent(); reader.assertCurrent();
   if (quality.facts.length !== proposals.length) throw new KnowledgeRepairFactUsefulnessHeldError('not-useful');
   assertUsefulCurrent = quality.assertCurrent;
+  // `batch` only defers the save; it does not roll back. A stop between the fact
+  // and its edges is healed by `repairPromotedFactIsSupported`, which keeps such a
+  // fact from counting until the next pass writes its support edge.
   await store.batch(async () => {
     prepared.assertCurrent();
     await prepared.write({ nodeWritten: (fact) => { quality.acknowledgeWritten(fact); rememberGenerated?.(fact); },
@@ -871,6 +877,7 @@ async function countUsableRepairFacts(
   const candidates = [...graph.nodesById.values()]
     .filter((node) => node.kind === 'fact' && node.status === 'active')
     .filter((node) => getKnowledgeSpaceId(node) === spaceId)
+    .filter((node) => repairPromotedFactIsSupported(node, sourceIdsByFactId))
     .filter((node) => factSourceIds(node, sourceIdsByFactId).some((sourceId) => sources.has(sourceId)))
     .filter(isRepairFactKind)
     .filter((node) => {
@@ -883,6 +890,15 @@ async function countUsableRepairFacts(
     });
   const prepared = await prepareRepairUsefulness({ store, spaceId, gap, subjects, candidates, guard, reader });
   return { ...prepared, facts: Object.freeze(candidates.filter(prepared.accepts)) };
+}
+
+/**
+ * A promoted fact is written before its support edge and `store.batch` does not
+ * roll back, so a stop in between leaves a fact that names its source only in
+ * metadata. Counting it would end the repair with the edge never written.
+ */
+export function repairPromotedFactIsSupported(fact: KnowledgeNodeRecord, sourceIdsByFactId: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+  return readString(fact.metadata.extractor) !== 'repair-promotion' || sourceIdsByFactId.has(fact.id);
 }
 
 function factSourceIds(
@@ -899,22 +915,4 @@ function factSourceIds(
 
 function isRepairFactKind(node: KnowledgeNodeRecord): boolean {
   return ['feature', 'capability', 'specification', 'compatibility', 'configuration'].includes(readString(node.metadata.factKind) ?? '');
-}
-
-function readTargetHints(value: unknown): readonly Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)));
-}
-
-function uniqueTargetHints(values: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
-  const seen = new Set<string>();
-  const result: Record<string, unknown>[] = [];
-  for (const value of values) {
-    const id = readString(value.id);
-    const key = id ?? JSON.stringify(value);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(value);
-  }
-  return result;
 }

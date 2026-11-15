@@ -4,7 +4,7 @@
  * when the daemon will not answer.
  *
  * Everything here is asserted against a recorded verb caller rather than a live
- * daemon, the live proof is the adopt e2e, which drives the real binary. What
+ * daemon, the live proof is the adopt e2e, which drives a real daemon. What
  * this file protects is the wire shape (verb ids, required fields, the clientId
  * this terminal attaches under) and the honesty rules: a refused stream is a
  * value, an unread roster is not an empty one, and the detach sentence comes
@@ -25,6 +25,7 @@ import {
 } from '../../runtime/client/hosted-roster.ts';
 import {
   hostedSessionStreamUrl,
+  HOSTED_SESSION_LIFECYCLE_WIRE_EVENT,
   readHostedLifecycleNotice,
   readHostedStreamEnvelope,
   watchHostedSession,
@@ -127,6 +128,17 @@ describe('hosted sessions client', () => {
     expect(cancelled).toBe(true);
   });
 
+  test('attach keeps the daemon-supplied historyAsOf and leaves it absent when the daemon sent none', async () => {
+    const withBoundary = createHostedSessionsClient(recordingVerbs({
+      'sessions.hosted.attach': { session: makeRecord(), history: [{ role: 'user', content: 'hi' }], historyAsOf: 7250 },
+    }, []));
+    expect((await withBoundary.attach('hosted-1')).historyAsOf).toBe(7250);
+    const without = createHostedSessionsClient(recordingVerbs({
+      'sessions.hosted.attach': { session: makeRecord(), history: [] },
+    }, []));
+    expect('historyAsOf' in await without.attach('hosted-1')).toBe(false);
+  });
+
   test('attach returns the backfilled transcript, and an absent history is an empty one, never a throw', async () => {
     const calls: RecordedCall[] = [];
     const client = createHostedSessionsClient(recordingVerbs({
@@ -206,6 +218,10 @@ describe('hosted session stream', () => {
     expect(url.searchParams.get('domains')).toBe('turn,tools,session');
   });
 
+  test('the subscription keeps a base path prefix', () => {
+    expect(new URL(hostedSessionStreamUrl('https://host.example/goodvibes')).pathname).toBe('/goodvibes/api/control-plane/events');
+  });
+
   test('a serialized runtime envelope is read with its session stamp; anything else is discarded', () => {
     expect(readHostedStreamEnvelope('turn', {
       type: 'STREAM_DELTA', ts: 5, sessionId: 'hosted-1', payload: { accumulated: 'hi' },
@@ -226,23 +242,53 @@ describe('hosted session stream', () => {
   });
 
   test('frames for another session never reach the subscriber', async () => {
-    const seen: string[] = [];
-    // Drive the reader + the same id guard `watchHostedSession` applies, rather
-    // than standing up an HTTP server for what is a pure predicate.
-    const deliver = (payload: unknown): void => {
-      const event = readHostedStreamEnvelope('turn', payload);
-      if (event && event.sessionId === 'hosted-1') seen.push(event.type);
-    };
-    deliver({ type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: {} });
-    deliver({ type: 'STREAM_DELTA', sessionId: 'hosted-other', payload: {} });
-    expect(seen).toEqual(['STREAM_DELTA']);
+    const frame = (event: string, data: unknown): string => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    // Frames of two sessions on one stream, then a closing marker for ours. The
+    // body stays open (the daemon's stream never ends), and the marker is how
+    // the test knows every earlier frame has been through the guard.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          frame('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-other', payload: {} })
+          + frame('turn', { type: 'STREAM_DELTA', sessionId: 'hosted-1', payload: {} })
+          + frame('tools', { type: 'TOOL_CALL', sessionId: 'hosted-other', payload: {} })
+          + frame(HOSTED_SESSION_LIFECYCLE_WIRE_EVENT, { event: 'hosted-session-terminated', session: { id: 'hosted-other' }, createdAt: 1 })
+          + frame(HOSTED_SESSION_LIFECYCLE_WIRE_EVENT, { event: 'hosted-session-terminated', session: { id: 'hosted-1' }, createdAt: 2 })
+          + frame('turn', { type: 'LAST_FRAME', sessionId: 'hosted-1', payload: {} }),
+        ));
+      },
+    });
+    const fetchImpl = (async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
 
+    const events: Array<{ type: string; sessionId: string }> = [];
+    const lifecycle: string[] = [];
+    const sawLastFrame = Promise.withResolvers<void>();
+    const subscription = await watchHostedSession({
+      baseUrl: 'http://127.0.0.1:1',
+      sessionId: 'hosted-1',
+      onEvent: (event) => {
+        events.push({ type: event.type, sessionId: event.sessionId });
+        if (event.type === 'LAST_FRAME') sawLastFrame.resolve();
+      },
+      onLifecycle: (notice) => { lifecycle.push(notice.session.id); },
+      fetchImpl,
+    });
+    expect(subscription).not.toBeNull();
+    await sawLastFrame.promise;
+    subscription?.close();
+
+    expect(events).toEqual([
+      { type: 'STREAM_DELTA', sessionId: 'hosted-1' },
+      { type: 'LAST_FRAME', sessionId: 'hosted-1' },
+    ]);
+    expect(lifecycle).toEqual(['hosted-1']);
+  });
+
+  test('a stream that cannot be opened is null, not a throw: an approval or a steer must still reach the session over its verbs', async () => {
     const fetchImpl = (async () => {
       throw new Error('nothing is listening on this port');
     }) as unknown as typeof fetch;
 
-    // And a stream that cannot be opened is null, not a throw: an approval or a
-    // steer must still reach the session over its verbs.
     const subscription = await watchHostedSession({
       baseUrl: 'http://127.0.0.1:1',
       sessionId: 'hosted-1',

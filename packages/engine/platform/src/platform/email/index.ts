@@ -173,6 +173,7 @@ export {
 
 export {
   SmtpClient,
+  SmtpDeliveryUnconfirmedError,
   validateSmtpAddress,
   validateSmtpSubject,
   SMTP_DEFAULT_TIMEOUT_MS,
@@ -242,9 +243,10 @@ export {
   createSurfaceEmailConfigReader,
   createSurfaceEmailInboxConfigReader,
   createSurfaceEmailSecretReader,
+  configReaderWithOrigins,
 } from './surface-config.js';
 
-export type { SurfaceEmailConfigProblem } from './surface-config.js';
+export type { SurfaceEmailConfigProblem, ConfigReaderWithOrigins, ConfigOriginSource } from './surface-config.js';
 
 export { EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 export type { EmailInboxBatchInput, EmailInboxBatchMessage, EmailInboxBatchRead } from './email-inbox-batch.js';

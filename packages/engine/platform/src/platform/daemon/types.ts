@@ -1,5 +1,5 @@
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
-import type { ChannelSurface } from '../channels/index.js';
+import type { ChannelSurface, ChannelIngressPolicyInput, ChannelPolicyDecision } from '../channels/index.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { UserAuthManager } from '../security/user-auth.js';
@@ -179,7 +179,14 @@ export interface PendingSurfaceReply {
   readonly callbackCorrelationId?: string | undefined;
   readonly targetAddress?: string | undefined;
   readonly threadId?: string | undefined;
-  [key: string]: unknown;
+  readonly agentTask?: string | undefined;
+  readonly contractId?: string | undefined;
+  readonly rootAgentId?: string | undefined;
+  readonly surfaceId?: string | undefined;
+  readonly externalId?: string | undefined;
+  readonly conversationId?: string | undefined;
+  readonly messageId?: string | undefined;
+  readonly replyToMessageId?: string | undefined;
   lastProgressAt?: number | undefined;
   lastProgress?: string | undefined;
 }
@@ -255,7 +262,7 @@ export interface DaemonRouteContext {
   readonly pendingSurfaceReplies: Map<string, PendingSurfaceReply>;
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   readonly buildGenericWebhookAdapterContext: () => GenericWebhookAdapterContext;
-  readonly authorizeSurfaceIngress: (input: unknown) => Promise<unknown>;
+  readonly authorizeSurfaceIngress: (input: ChannelIngressPolicyInput) => Promise<ChannelPolicyDecision>;
   readonly extractAuthToken: (req: Request) => string;
   readonly checkAuth: (req: Request) => boolean;
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
@@ -272,7 +279,7 @@ export interface DaemonRouteContext {
   readonly queueWebhookReply: (input: { readonly agentId: string; readonly task: string; readonly sessionId?: string; readonly routeId?: string; readonly callbackUrl?: string; readonly callbackCorrelationId?: string; readonly callbackSignature?: PendingSurfaceReply['callbackSignature']; }) => void;
   readonly parseSurfaceControlCommand: (text: string, options?: import('@goodvibes-jev/judgment/decisions').CallOptions) => Promise<{ readonly action: 'status' | 'cancel' | 'retry'; readonly id: string } | null>;
   readonly performSurfaceControlCommand: (command: { readonly action: 'status' | 'cancel' | 'retry'; readonly id: string }) => Promise<string>;
-  readonly performInteractiveSurfaceAction: (actionId: string, surface: 'slack' | 'discord', req: Request) => Promise<string>;
+  readonly performInteractiveSurfaceAction: (actionId: string, surface: 'slack' | 'discord', req: Request, userId?: string | undefined) => Promise<string>;
   readonly trySpawnAgent: (input: {
     mode: 'spawn';
     task: string;

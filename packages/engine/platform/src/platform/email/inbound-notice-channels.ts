@@ -160,7 +160,7 @@ function defangUrlForms(text: string): string {
     // the domain half of an email address, and mangling ordinary text is how a
     // defanger gets turned off. The residual is a link with no path, which
     // carries no token.
-    .replace(/\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)(?=[/?])/gi,
+    .replace(/\b([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)(?=[/?]|:\d+[/?])/gi,
       (host) => `${host}​`);
 }
 
@@ -313,7 +313,11 @@ const NOTICE_ESCAPERS: Readonly<Record<NoticeChannel, (text: string) => string>>
  * invent.
  */
 export function renderNoticeForChannel(notice: StructuredNotice, channel: string): string {
-  const escaper = (NOTICE_ESCAPERS as Readonly<Record<string, (text: string) => string>>)[channel];
+  // An own-property lookup: a channel string like `constructor` must reach the
+  // fallback, not an inherited function that would then be called as an escaper.
+  const escaper = Object.hasOwn(NOTICE_ESCAPERS, channel)
+    ? (NOTICE_ESCAPERS as Readonly<Record<string, (text: string) => string>>)[channel]
+    : undefined;
   if (!escaper) return renderNoticeAsPlainText(notice);
   // URL defanging runs on EVERY channel, composed here rather than repeated
   // inside each escaper.
@@ -380,7 +384,9 @@ const NOTICE_CHANNEL_BY_SURFACE: Readonly<Record<string, NoticeChannel>> = {
  * neutralized notice, never an error and never a raw one.
  */
 export function noticeChannelForSurface(surfaceKind: string): string {
-  return NOTICE_CHANNEL_BY_SURFACE[surfaceKind] ?? 'plain';
+  return Object.hasOwn(NOTICE_CHANNEL_BY_SURFACE, surfaceKind)
+    ? NOTICE_CHANNEL_BY_SURFACE[surfaceKind] ?? 'plain'
+    : 'plain';
 }
 
 /**

@@ -43,7 +43,7 @@ function fixture(change?: 'target' | 'context' | 'document') {
     });
     module.exports = { chromium: { async connectOverCDP(endpoint) {
       if (endpoint !== ${JSON.stringify(endpoint)}) throw new Error('Wrong endpoint');
-      record('connected-original-endpoint'); return { contexts() { return contexts; } };
+      record('connected-original-endpoint'); return { contexts() { return contexts; }, on() {} };
     } } };
   `);
   const io: BrowserProvisionIo = {

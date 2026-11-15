@@ -190,6 +190,37 @@ describe('a running daemon owns its keys in both directions', () => {
     expect(read.source).toBe('http://127.0.0.1:3421');
   });
 
+  test('a key the daemon does not list is labelled as this host\'s own value, not the daemon\'s', async () => {
+    const h = home();
+    const configManager = new ConfigManager({ homeDir: h, surfaceRoot: 'agent' });
+    const options = {
+      hostsDaemon: false,
+      daemonHomeDir: h,
+      readRuntimeRecord: () => runningDaemon,
+      fetchImpl: (async () => new Response(
+        JSON.stringify({ surfaces: { telegram: { botUsername: 'goodvibes_agent_bot' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch,
+    };
+
+    const single = await readRoutedConfigValue(configManager, 'surfaces.telegram.defaultChatId', options);
+    expect(single.available).toBe(true);
+    if (!single.available) throw new Error('unreachable');
+    expect(single.readFrom).toBe('file');
+    expect(single.source).toBe(configManager.getConfigPath());
+
+    const [listed, reported] = await readRoutedConfigValues(
+      configManager,
+      ['surfaces.telegram.defaultChatId', 'surfaces.telegram.botUsername'],
+      options,
+    );
+    if (!listed!.available || !reported!.available) throw new Error('unreachable');
+    expect(listed!.readFrom).toBe('file');
+    expect(listed!.source).toBe(configManager.getConfigPath());
+    expect(reported!.readFrom).toBe('daemon');
+    expect(reported!.source).toBe('http://127.0.0.1:3421');
+  });
+
   test('an unreachable daemon is reported as unavailable, never as a default', async () => {
     const h = home();
     const configManager = new ConfigManager({ homeDir: h, surfaceRoot: 'agent' });

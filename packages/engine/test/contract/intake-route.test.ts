@@ -118,6 +118,21 @@ describe('turn intake', () => {
     if (outcome.kind === 'replied') expect(describeIntake(outcome)).toContain('read as approve: approved');
   });
 
+  test('a reply to a failed-turn question is described as retrying or cancelled, never as an amendment', async () => {
+    routePort('contract', 0.99, []);
+    const contracts = waitingContracts();
+    const open = contracts[0]!.escalations.find((entry) => entry.resolvedAt === undefined)!;
+    Object.assign(open, { failurePause: true });
+    for (const [action, expected] of [['amended', 'retry: the turn is retrying'], ['stopped', 'cancel: the contract is cancelled']] as const) {
+      const { runner } = fakeRunner(contracts);
+      const outcome = await createContractIntake({ runner: { ...runner, reply: async (_contractId, escalationId) => ({ escalationId, reading: 'amend', outcome: 'act', action }) }, projectRoot: '/repo' })
+        .intake({ text: 'retry', sessionId: 's1' });
+      if (outcome.kind !== 'replied') throw new Error('the turn should have been the reply');
+      expect(describeIntake(outcome)).toContain(expected);
+      expect(describeIntake(outcome)).not.toContain('read as');
+    }
+  });
+
   test('a turn read at act as unrelated to the open escalation goes to the request route and can start work', async () => {
     const asked: string[] = [];
     routePort('contract', 0.97, asked, 0.03);

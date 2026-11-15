@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { logger } from '../utils/logger.js';
 import type { SubmitSharedSessionMessageInput } from './session-types.js';
-import type { SharedSessionInputIntent, SharedSessionInputRecord, SharedSessionSurfaceReplyBinding } from './session-intents.js';
-import { isDelegatedSessionInput } from './session-intents.js';
+import type { SharedSessionInputIntent, SharedSessionInputRecord, SharedSessionInputState, SharedSessionSurfaceReplyBinding } from './session-intents.js';
+import { isDelegatedSessionInput, sharedSessionInputLifecycle } from './session-intents.js';
 import type { SharedSessionRecord } from './session-types.js';
-import { countPendingSessionInputs, sortInputs } from './session-broker-state.js';
-import { bindSharedSessionAgent } from './session-broker-sessions.js';
+import { BOOT_RECONCILE_CANCEL_REASON, countPendingSessionInputs, sortInputs } from './session-broker-state.js';
+import { bindSharedSessionAgent, hasFreshSurfaceParticipant, isSurfaceManagedSession, SURFACE_ROUTE_FRESHNESS_MS } from './session-broker-sessions.js';
 
 export interface SharedSessionInputStore {
   readonly sessions: Map<string, SharedSessionRecord>;
@@ -66,9 +67,17 @@ export function recordSharedSessionInput(
   };
   const bucket = store.inputs.get(input.sessionId) ?? [];
   bucket.push(entry);
-  const sorted = sortInputs(bucket);
-  if (sorted.length > input.maxPersistedInputs) {
-    sorted.splice(0, sorted.length - input.maxPersistedInputs);
+  let sorted = sortInputs(bucket);
+  let excess = sorted.length - input.maxPersistedInputs;
+  if (excess > 0) {
+    // Only finished rows are history to drop; a queued, delivered or spawned row is a message still owed an answer.
+    sorted = sorted.filter((candidate) => {
+      if (excess > 0 && countPendingSessionInputs([candidate]) === 0) {
+        excess -= 1;
+        return false;
+      }
+      return true;
+    });
   }
   store.inputs.set(input.sessionId, sorted);
   refreshPendingInputCount(store, input.sessionId);
@@ -93,20 +102,121 @@ export function updateSharedSessionInput(
   return updated;
 }
 
+/** The outcome of one checked move: the moved row, or the unchanged row and why it did not move. */
+export type SessionInputMove =
+  | { readonly ok: true; readonly input: SharedSessionInputRecord; readonly from: SharedSessionInputState }
+  | { readonly ok: false; readonly input: SharedSessionInputRecord; readonly reason: string; readonly allowed: readonly SharedSessionInputState[] };
+
+/**
+ * Move one input to `to` only when its lifecycle allows it; a refused move
+ * leaves the row exactly as it was and says why. Null when the input is unknown.
+ */
+export function moveSharedSessionInput(
+  store: SharedSessionInputStore,
+  sessionId: string,
+  inputId: string,
+  to: SharedSessionInputState,
+  patch: Partial<Pick<SharedSessionInputRecord, 'activeAgentId' | 'error'>> = {},
+): SessionInputMove | null {
+  const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+  if (!current) return null;
+  const check = sharedSessionInputLifecycle.check(current.state, to);
+  if (!check.ok) return { ok: false, input: current, reason: check.reason, allowed: check.allowed };
+  const moved = updateSharedSessionInput(store, sessionId, inputId, (entry) => ({ ...entry, ...patch, state: to, updatedAt: Date.now() }))!;
+  return { ok: true, input: moved, from: current.state };
+}
+
+/**
+ * The hot-path form of a checked move: a refused move is logged and the row is
+ * returned exactly as it was, so a writer that raced another outcome never
+ * throws and never rewrites a final state.
+ */
+export function moveSharedSessionInputOrKeep(
+  store: SharedSessionInputStore,
+  sessionId: string,
+  inputId: string,
+  to: SharedSessionInputState,
+  patch: Partial<Pick<SharedSessionInputRecord, 'activeAgentId' | 'error'>> = {},
+): SharedSessionInputRecord | null {
+  const moved = moveSharedSessionInput(store, sessionId, inputId, to, patch);
+  if (!moved) return null;
+  if (!moved.ok) logger.warn('A session input kept its state', { sessionId, inputId, reason: moved.reason });
+  return moved.input;
+}
+
+/**
+ * Cancel every queued input a deliberate session close leaves behind, so a
+ * closed session does not count as busy and nothing later starts work for it.
+ * Delegated rows are left to the host flow that owns their source.
+ */
+export function cancelQueuedSessionInputs(
+  store: SharedSessionInputStore,
+  sessionId: string,
+  reason: string,
+): SharedSessionInputRecord[] {
+  const queued = (store.inputs.get(sessionId) ?? []).filter((entry) => entry.state === 'queued' && !isDelegatedSessionInput(entry));
+  const cancelled: SharedSessionInputRecord[] = [];
+  for (const entry of queued) {
+    const moved = moveSharedSessionInput(store, sessionId, entry.id, 'cancelled', { error: reason });
+    if (moved?.ok) cancelled.push(moved.input);
+  }
+  return cancelled;
+}
+
+/**
+ * Fail the queued inputs no surface is left to collect. A steer or follow-up
+ * is queued for a surface only while one other than its sender is heartbeating;
+ * once none has been seen within the same freshness window that routed it, the
+ * row would stay queued and keep the daemon busy. A row younger than the
+ * window is still within the time its surface was promised, so it stays
+ * (a surface that deliberately detaches passes `minAgeMs: 0`).
+ * Sessions an agent is answering, closed sessions, daemon-run sessions and
+ * delegated rows belong to other owners and are left alone.
+ */
+export function retireAbandonedSurfaceInputs(
+  store: SharedSessionInputStore,
+  now: number,
+  options: { readonly freshnessMs?: number | undefined; readonly minAgeMs?: number | undefined; readonly sessionId?: string | undefined } = {},
+): SharedSessionInputRecord[] {
+  const freshnessMs = options.freshnessMs ?? SURFACE_ROUTE_FRESHNESS_MS;
+  const minAgeMs = options.minAgeMs ?? freshnessMs;
+  const retired: SharedSessionInputRecord[] = [];
+  for (const [sessionId, bucket] of store.inputs.entries()) {
+    if (options.sessionId !== undefined && options.sessionId !== sessionId) continue;
+    const session = store.sessions.get(sessionId);
+    if (!session || session.status !== 'active' || session.activeAgentId || !isSurfaceManagedSession(session)) continue;
+    for (const entry of bucket.filter((candidate) => candidate.state === 'queued' && !isDelegatedSessionInput(candidate))) {
+      if (entry.intent !== 'steer' && entry.intent !== 'follow-up') continue;
+      if (now - entry.createdAt < minAgeMs) continue;
+      if (hasFreshSurfaceParticipant(session, now, freshnessMs, { surfaceId: entry.surfaceId })) continue;
+      const moved = moveSharedSessionInput(store, sessionId, entry.id, 'failed', {
+        error: 'No surface collected this input: every surface that was attached to the session has stopped heartbeating. Send it again once a surface is connected.',
+      });
+      if (moved?.ok) retired.push(moved.input);
+    }
+  }
+  return retired;
+}
+
+/**
+ * Claim the input an agent was started for. With `inputId` exactly that row is
+ * claimed, and only while it is still queued, so a leftover older row is never
+ * answered (or its reply routed) in place of the one this agent is for. Without
+ * an id the oldest queued row is claimed, the behaviour callers that do not
+ * know their input still rely on.
+ */
 export function claimNextQueuedSessionInput(
   store: SharedSessionInputStore,
   sessionId: string,
   agentId: string,
+  inputId?: string,
 ): SharedSessionInputRecord | null {
   const bucket = store.inputs.get(sessionId) ?? [];
-  const next = bucket.find((entry) => entry.state === 'queued' && !isDelegatedSessionInput(entry));
+  const next = inputId === undefined
+    ? bucket.find((entry) => entry.state === 'queued' && !isDelegatedSessionInput(entry))
+    : bucket.find((entry) => entry.id === inputId && entry.state === 'queued' && !isDelegatedSessionInput(entry));
   if (!next) return null;
-  const result = updateSharedSessionInput(store, sessionId, next.id, (entry) => ({
-    ...entry,
-    state: 'spawned',
-    activeAgentId: agentId,
-    updatedAt: Date.now(),
-  }));
+  const result = moveSharedSessionInputOrKeep(store, sessionId, next.id, 'spawned', { activeAgentId: agentId });
   touchSharedSession(store, sessionId);
   return result;
 }
@@ -131,27 +241,44 @@ export function filterSessionInputsSince(
   return filtered.slice(-Math.max(1, options.limit ?? 100));
 }
 
+/** A surface's delivery report, and whether it was applied to the row. */
+export interface SurfaceInputDeliveryOutcome {
+  readonly input: SharedSessionInputRecord;
+  /** True when the row was queued/delivered and the report advanced or re-confirmed it. */
+  readonly applied: boolean;
+}
+
 /**
  * Surface delivery marking: advance a queued/delivered input as a live surface
  * collects it (`consumed:false` → 'delivered') or finishes acting on it
- * (`consumed:true` → 'completed'). Only queued/delivered inputs advance; anything
- * else is returned unchanged. Returns null when the input is unknown.
+ * (`consumed:true` → 'completed'). A repeat report on a delivered row is
+ * applied again (re-announcing is idempotent). Any other row is returned
+ * unchanged and not applied. Returns null when the input is unknown.
+ *
+ * One recovery is allowed past a final state: a daemon restart cancels
+ * `delivered` rows because it cannot know whether their answerer survived. A
+ * surface in another process may have, and its `consumed:true` report is the
+ * proof, so that row completes instead of reading "cancelled" after it was answered.
  */
 export function markSurfaceInputDelivered(
   store: SharedSessionInputStore,
   sessionId: string,
   inputId: string,
   consumed: boolean,
-): SharedSessionInputRecord | null {
-  if (store.inputs.get(sessionId)?.some(entry => entry.id === inputId && isDelegatedSessionInput(entry))) return null;
-  return updateSharedSessionInput(store, sessionId, inputId, (entry) => {
-    if (consumed) {
-      if (entry.state !== 'queued' && entry.state !== 'delivered') return entry;
-      return { ...entry, state: 'completed', updatedAt: Date.now() };
-    }
-    if (entry.state !== 'queued') return entry;
-    return { ...entry, state: 'delivered', updatedAt: Date.now() };
-  });
+): SurfaceInputDeliveryOutcome | null {
+  const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+  if (!current || isDelegatedSessionInput(current)) return null;
+  if (consumed && current.state === 'cancelled' && current.error === BOOT_RECONCILE_CANCEL_REASON) {
+    const revived = updateSharedSessionInput(store, sessionId, inputId, (entry) => {
+      const { error: _restartReason, ...rest } = entry;
+      return { ...rest, state: 'completed', updatedAt: Date.now() };
+    })!;
+    return { input: revived, applied: true };
+  }
+  if (!consumed && current.state === 'delivered') return { input: current, applied: true };
+  const moved = moveSharedSessionInput(store, sessionId, inputId, consumed ? 'completed' : 'delivered');
+  if (!moved) return null;
+  return { input: moved.input, applied: moved.ok };
 }
 
 /**
@@ -172,7 +299,7 @@ export function applySurfaceInputDelivery(
   store: SharedSessionInputStore,
   sessionId: string,
   inputId: string,
-  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined },
+  options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined },
   hooks: {
     readonly publish: (event: string, payload: unknown) => void;
     readonly publishInput: (event: string, input: SharedSessionInputRecord, extra: Record<string, unknown>) => void;
@@ -180,8 +307,17 @@ export function applySurfaceInputDelivery(
   },
 ): SharedSessionInputRecord | null {
   const consumed = options.consumed === true;
-  const updated = markSurfaceInputDelivered(store, sessionId, inputId, consumed);
-  if (!updated) return null;
+  const outcome = markSurfaceInputDelivered(store, sessionId, inputId, consumed);
+  if (!outcome) return null;
+  // A report on a row that already ended (cancelled, answered by a daemon
+  // agent, failed) changes nothing: no agent binding, no reply announcement,
+  // no lifecycle event, so nothing is routed or shown for a move that did not happen.
+  if (!outcome.applied) return outcome.input;
+  // A claim restarts the clock of an input that was already delivered with no
+  // agent, so the next claimant waits out the lease again instead of taking it too.
+  const updated = options.claim && !consumed
+    ? updateSharedSessionInput(store, sessionId, inputId, (entry) => ({ ...entry, updatedAt: Date.now() })) ?? outcome.input
+    : outcome.input;
   const agentId = options.agentId?.trim();
   let record = updated;
   if (agentId) {
@@ -218,25 +354,13 @@ export function finalizeAgentSessionInputs(
   const bucket = store.inputs.get(sessionId);
   if (!bucket) return [];
   touchSharedSession(store, sessionId);
-  let changed = false;
   const updatedInputs: SharedSessionInputRecord[] = [];
-  for (let index = 0; index < bucket.length; index += 1) {
-    const entry = bucket[index]!;
-    if (isDelegatedSessionInput(entry)) continue;
-    if (entry.activeAgentId !== agentId) continue;
-    if (entry.state !== 'delivered' && entry.state !== 'spawned') continue;
-    bucket[index] = {
-      ...entry,
-      state: nextState,
-      updatedAt: Date.now(),
-      ...(error ? { error } : {}),
-    };
-    updatedInputs.push(bucket[index]!);
-    changed = true;
-  }
-  if (changed) {
-    store.inputs.set(sessionId, bucket);
-    refreshPendingInputCount(store, sessionId);
+  const owned = bucket.filter((entry) => !isDelegatedSessionInput(entry)
+    && entry.activeAgentId === agentId && (entry.state === 'delivered' || entry.state === 'spawned'));
+  for (const entry of owned) {
+    const moved = moveSharedSessionInput(store, sessionId, entry.id, nextState, error ? { error } : {});
+    if (moved?.ok) updatedInputs.push(moved.input);
+    else if (moved) logger.warn('A session input kept its state', { sessionId, inputId: entry.id, reason: moved.reason });
   }
   return updatedInputs;
 }

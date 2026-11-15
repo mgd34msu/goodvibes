@@ -16,8 +16,11 @@ import {
   readFirstEnv,
   resolveAudioInput,
   trimToUndefined,
+  signalInit,
+  voiceFetch,
+  voiceStreamFetch,
 } from './shared.js';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+
 import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 
@@ -230,7 +233,7 @@ export function createElevenLabsProvider(): VoiceProvider {
       const apiKey = readFirstEnv(envVars);
       if (!apiKey) return [];
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://api.elevenlabs.io');
-      const response = await instrumentedFetch(`${baseUrl}/v1/voices`, {
+      const response = await voiceFetch(`${baseUrl}/v1/voices`, {
         headers: { 'xi-api-key': apiKey },
       });
       if (!response.ok) throw new Error(`ElevenLabs voices failed: HTTP ${response.status}`);
@@ -253,7 +256,8 @@ export function createElevenLabsProvider(): VoiceProvider {
       if (!apiKey) throw new Error('ElevenLabs API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://api.elevenlabs.io');
       const voiceId = request.voiceId?.trim() || DEFAULT_ELEVENLABS_VOICE;
-      const response = await instrumentedFetch(`${baseUrl}/v1/text-to-speech/${voiceId}`, {
+      const response = await voiceFetch(`${baseUrl}/v1/text-to-speech/${voiceId}`, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           'xi-api-key': apiKey,
@@ -314,16 +318,15 @@ export function createElevenLabsProvider(): VoiceProvider {
         },
         ...(languageCode ? { language_code: languageCode } : {}),
       };
-      const response = await instrumentedFetch(url, {
+      const response = await voiceStreamFetch(url, {
         method: 'POST',
         headers: {
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
           Accept: mimeType,
         },
-        ...(request.signal !== undefined ? { signal: request.signal } : {}),
         body: JSON.stringify(body),
-      } as RequestInit);
+      }, request.signal);
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         throw new Error(`ElevenLabs streaming synthesis failed: HTTP ${response.status}${errorText ? `: ${errorText}` : ''}`);
@@ -363,7 +366,7 @@ export function createElevenLabsProvider(): VoiceProvider {
       if (canUseSourceUrl) {
         form.append('source_url', uri);
       } else {
-        const { buffer, mimeType } = await resolveAudioInput(request.audio);
+        const { buffer, mimeType } = await resolveAudioInput(request.audio, request.signal);
         form.append(
           'file',
           new Blob([Buffer.from(buffer)], { type: mimeType || 'application/octet-stream' }),
@@ -435,7 +438,8 @@ export function createElevenLabsProvider(): VoiceProvider {
       if (metadata?.['webhookMetadata'] !== undefined) {
         form.append('webhook_metadata', JSON.stringify(metadata['webhookMetadata']));
       }
-      const response = await instrumentedFetch(url, {
+      const response = await voiceFetch(url, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           'xi-api-key': apiKey,
@@ -521,7 +525,7 @@ export function createElevenLabsProvider(): VoiceProvider {
         const value = normalizeBooleanString(metadata['enableLogging']);
         if (value) websocketUrl.searchParams.set('enable_logging', value);
       }
-      const tokenResponse = await instrumentedFetch(`${baseUrl}/v1/single-use-token/realtime_scribe`, {
+      const tokenResponse = await voiceFetch(`${baseUrl}/v1/single-use-token/realtime_scribe`, {
         method: 'POST',
         headers: {
           'xi-api-key': apiKey,

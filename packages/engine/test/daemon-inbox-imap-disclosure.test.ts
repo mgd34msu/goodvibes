@@ -51,3 +51,15 @@ test('canonical provider schema makes both additive mailbox records optional', (
   expect(properties.mailboxHistory).toMatchObject({ required: ['uidValidity', 'kind', 'lowerBoundUid', 'skippedOlderMessages'] });
   expect(properties.mailboxProgress).toMatchObject({ required: ['uidValidity', 'pendingMessages'] });
 });
+
+test('a resumed mailbox no longer says polling is paused while it waits for its first poll', async () => {
+  const f = await fixture({ kind: 'complete', lowerBoundUid: 1, skippedOlderMessages: 0 });
+  await f.poller.pollOnce();
+  await f.poller.stopProvider('email');
+  expect((await f.inbox()).providers[0]!.error).toContain('paused');
+  f.poller.startProvider('email');
+  const resumed = (await f.inbox()).providers[0]!;
+  expect(resumed.error ?? '').not.toContain('paused');
+  expect(resumed.error).toContain('resumed');
+  expect(resumed.mailboxProgress).toBeUndefined();
+});

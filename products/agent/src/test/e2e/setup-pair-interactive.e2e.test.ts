@@ -28,7 +28,7 @@ type Hold = 'preview' | 'revalidation' | 'migration' | 'verification';
 type Cancel = 'Ctrl-C' | 'Escape' | 'Ctrl-D' | 'exit' | 'replacement';
 
 import { TerminalFrame } from './terminal-frame.ts';
-import { observeOwnedWorkspaceDecline, ownerWorkspaceStartupReadiness } from '../helpers/owner-workspace-startup.ts';
+import { COMPOSER_ECHO, observeOwnedWorkspaceDecline, ownerWorkspaceStartupReadiness } from '../helpers/owner-workspace-startup.ts';
 
 function deferred() {
   let release!: () => void;
@@ -207,7 +207,7 @@ async function fixture(environmentOverride = false) {
         throw new Error(diagnostic.length > 12_000 ? `${diagnostic.slice(0, 12_000)}\n[diagnostic truncated]` : diagnostic);
       }
       const cleared = session.mark(); session.write('\x15');
-      await session.find('empty live owner composer', text => text.includes('Ask anything, or type / for commands') && !text.includes('┃  x') && !text.includes(WORKSPACE_QUESTION), cleared);
+      await session.find('empty live owner composer', text => text.includes('Ask anything, or type / for commands') && !text.includes(COMPOSER_ECHO) && !text.includes(WORKSPACE_QUESTION), cleared);
       workspaceAnswered = true;
       return session;
     }
@@ -397,14 +397,12 @@ describe('compiled interactive owner pairing', () => {
     } finally { await f.stop(); }
   }, 45_000);
 
-  test('80-column confirmation remains visible after toast expiry and resize; disclosure is scrollable', async () => {
+  test('80-column confirmation remains visible after resize; disclosure is scrollable', async () => {
     const f = await fixture();
     try {
       const session = await f.launch(80, 24);
       const phrase = await session.prompt(session.command(APPLY));
-      // This deliberately exceeds the old five-second toast lifetime. A resize
-      // then requests a fresh frame: old bytes cannot satisfy this assertion.
-      await Bun.sleep(5_500);
+      // A resize requests a fresh frame: old bytes cannot satisfy this assertion.
       let since = session.mark(); session.resize(81, 24);
       await session.find('confirmation survives delayed redraw', text => text.includes(phrase), since);
       since = session.mark(); session.resize(80, 24);
@@ -413,14 +411,17 @@ describe('compiled interactive owner pairing', () => {
       const disclosures = [f.host, 'persistent administrative', 'fleet execution', 'only in this Agent home', 'legacy shared token remains active', 'no credential is revoked'];
       let reviewed = session.screen();
       for (let page = 0; page < 8 && !disclosures.every(part => normalize(reviewed).includes(part)); page++) {
+        const sinceKey = session.mark();
         session.write('\x1b[5~');
-        await Bun.sleep(60);
+        await waitFor('page-up redraw', () => session.mark() > sinceKey, 10_000, 15);
         reviewed += `\n${session.screen()}`;
       }
       for (const disclosure of disclosures) expect(normalize(reviewed)).toContain(disclosure);
       expect(f.migrations()).toBe(0);
       for (let page = 0; page < 8 && !session.screen().includes(phrase); page++) {
-        session.write('\x1b[6~'); await Bun.sleep(60);
+        const sinceKey = session.mark();
+        session.write('\x1b[6~');
+        await waitFor('page-down redraw', () => session.mark() > sinceKey, 10_000, 15);
       }
       expect(session.screen()).toContain(phrase);
       since = session.mark(); session.write(`${phrase}\r`);

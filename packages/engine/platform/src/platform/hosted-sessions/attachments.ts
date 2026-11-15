@@ -54,20 +54,43 @@ export function clampAttachmentLease(requestedMs: number | undefined, fallbackMs
 /** One hosted session's attachments, each with the moment its lease runs out. */
 export class HostedSessionAttachments {
   private readonly leases = new Map<string, number>();
+  /** The principal that first attached each client id, when the caller was identified. */
+  private readonly owners = new Map<string, string>();
 
   /** Attach or renew. Returns when the lease now runs out. */
-  renew(clientId: string, at: number, leaseMs: number): number {
+  renew(clientId: string, at: number, leaseMs: number, principalId?: string): number {
     const expiresAt = at + clampAttachmentLease(leaseMs, HOSTED_ATTACHMENT_DEFAULT_LEASE_MS);
     this.leases.set(clientId, expiresAt);
+    if (principalId !== undefined && !this.owners.has(clientId)) this.owners.set(clientId, principalId);
     return expiresAt;
   }
 
+  /**
+   * Whether an attachment was made by a principal other than `principalId`.
+   * An attachment made without an identified caller has no owner to protect.
+   */
+  ownedByAnother(clientId: string, principalId: string | undefined): boolean {
+    const owner = this.owners.get(clientId);
+    return owner !== undefined && owner !== principalId;
+  }
+
+  /**
+   * Whether the session has identified owners and `principalId` is none of them.
+   * A session nobody identified themselves on has no owner to protect.
+   */
+  ownedByOthers(principalId: string | undefined): boolean {
+    if (this.owners.size === 0) return false;
+    return principalId === undefined || ![...this.owners.values()].includes(principalId);
+  }
+
   delete(clientId: string): boolean {
+    this.owners.delete(clientId);
     return this.leases.delete(clientId);
   }
 
   clear(): void {
     this.leases.clear();
+    this.owners.clear();
   }
 
   get size(): number {
@@ -101,6 +124,7 @@ export class HostedSessionAttachments {
         continue;
       }
       this.leases.delete(clientId);
+      this.owners.delete(clientId);
       expired.push(clientId);
     }
     return expired;

@@ -81,4 +81,5 @@ const report = await calibrate(port, registry.list(), {
 await Bun.write(outPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(formatReport(report));
 console.log(`\nreport: ${outPath}\ndecision log: ${logPath}`);
-process.exit(report.passed ? 0 : 1);
+// Leave through the exit code so the module finishes and `using log` closes the database.
+process.exitCode = report.passed ? 0 : 1;

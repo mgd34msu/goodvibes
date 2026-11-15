@@ -10,6 +10,7 @@ export interface RegisteredBrowserJudgmentBattery {
   readonly resolve: (input: unknown, context: BrowserJudgmentResolveContext) => Promise<BrowserJudgmentResolvedInput<unknown>>;
   readonly run: (port: JudgmentPort, state: unknown, options: { readonly signal: AbortSignal }) => Promise<unknown>;
   readonly project: (result: unknown) => BrowserJudgmentProjection<BrowserJudgmentValueMap[BrowserJudgmentBatteryId]>;
+  readonly record: (result: unknown, projection: BrowserJudgmentProjection<BrowserJudgmentValueMap[BrowserJudgmentBatteryId]>) => void;
 }
 
 /** Explicit compile-time installation. Calibration's BatteryRegistry is not an HTTP allowlist. */
@@ -26,6 +27,7 @@ export class BrowserJudgmentRegistry {
       resolve: (input: unknown, context: BrowserJudgmentResolveContext) => battery.resolve(input as BrowserJudgmentInputMap[K], context),
       run: (port: JudgmentPort, state: unknown, options: { readonly signal: AbortSignal }) => battery.run(port, state as S, options),
       project: (result: unknown) => battery.project(result as R),
+      record: (result: unknown, projection: BrowserJudgmentProjection<BrowserJudgmentValueMap[BrowserJudgmentBatteryId]>) => battery.record?.(result as R, projection as BrowserJudgmentProjection<BrowserJudgmentValueMap[K]>),
     }));
   }
   get(id: BrowserJudgmentBatteryId): RegisteredBrowserJudgmentBattery | undefined { return this.#entries.get(id); }

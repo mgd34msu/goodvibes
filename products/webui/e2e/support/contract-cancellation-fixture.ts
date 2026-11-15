@@ -23,8 +23,13 @@ export function loadCancellationCapture(name: 'live' | 'retained') {
   const resultBody = read('cancel');
   const result: unknown = JSON.parse(resultBody);
   const schema = operatorContract.operator.methods.find(entry => entry.id === 'contracts.cancel')?.outputSchema;
-  if (!schema || firstJsonSchemaFailure(schema, result)) throw new Error(`Invalid captured ${name} cancellation`);
-  return { name, before: inspect('before'), after: inspect('after'), resultBody };
+  // A retained record the runner is not running is refused with a 409 error body, not {cancelled:false}.
+  const refusal = name === 'retained';
+  if (refusal) {
+    const body = result as { code?: unknown; status?: unknown } | null;
+    if (body?.code !== 'CONTRACT_NOT_RUNNING' || body.status !== 409) throw new Error(`Invalid captured ${name} cancellation`);
+  } else if (!schema || firstJsonSchemaFailure(schema, result)) throw new Error(`Invalid captured ${name} cancellation`);
+  return { name, before: inspect('before'), after: inspect('after'), resultBody, resultStatus: refusal ? 409 : 200 };
 }
 
 export const LIVE_CANCELLATION = loadCancellationCapture('live');
@@ -49,7 +54,7 @@ export async function installCancellationDaemon(page: Page, capture: Cancellatio
     if (options.response === 'disconnected') return route.abort('connectionreset');
     if (options.response === 'malformed') return route.fulfill({ json: { cancelled: 'true' } });
     if (options.response === 'server-error') return route.fulfill({ status: 503, json: { error: 'Cancellation response was interrupted.' } });
-    return route.fulfill({ contentType: 'application/json', body: capture.resultBody });
+    return route.fulfill({ status: capture.resultStatus, contentType: 'application/json', body: capture.resultBody });
   }
 
   await page.route('**/api/contracts**', async route => {

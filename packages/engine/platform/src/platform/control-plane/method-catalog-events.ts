@@ -57,6 +57,13 @@ export const SESSION_UPDATE_INTENT_MAP = {
   deleted: ['session-deleted'],
 } as const satisfies Record<string, readonly (typeof SESSION_UPDATE_WIRE_EVENTS)[number][]>;
 
+/** The intent mapping as prose, built from the map so the description cannot drift from it. */
+function intentMappingText(): string {
+  return Object.entries(SESSION_UPDATE_INTENT_MAP)
+    .map(([intent, events]) => `${intent} \u21d0 ${events.join(' / ')}`)
+    .join('; ');
+}
+
 /**
  * The lifecycle names carried in a `hosted-session-update` frame's
  * `payload.event`. Kept beside the descriptor so a subscriber switches on a
@@ -149,8 +156,8 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
     title: 'Approval Record Update',
     description:
       'Every approval record transition, pushed the moment the broker records it: an ask RAISED (status '
-      + 'pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, expired, '
-      + 'or updated in place (a started fix session stamped onto an accepted offer). The payload is the whole '
+      + 'pending, this is the prompt arriving), claimed by a surface, approved, denied, cancelled, or '
+      + 'expired. The payload is the whole '
       + '`approval` record plus the `createdAt` of the notice, so a subscriber renders the prompt from the '
       + 'event and never needs a follow-up read to draw it. '
       + 'This is the channel that makes approvals.raise usable from a surface that is not in the daemon '
@@ -214,10 +221,7 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       + 'and every input & follow-up lifecycle transition is published on the single '
       + '`session-update` wire event; the specific lifecycle name is the discriminated '
       + '`payload.event` field. Cross-surface invalidation mapping (webui/TUI): '
-      + 'created ⇐ session-created; updated ⇐ session-message-appended / session-agent-completed / '
-      + 'session-route-attached / session-reopened; steered ⇐ session-input-delivered / '
-      + 'session-message-forwarded; closed ⇐ session-closed; deleted ⇐ session-deleted (a hard '
-      + 'removal, the record is gone, not merely closed). '
+      + `${intentMappingText()}. A deleted session is a hard removal: the record is gone, not merely closed. `
       + 'Domain-tagged `session` (gateway-scope-enforcement.ts EVENT_DOMAIN), the same tag '
       + 'control.hosted_session_update carries: both are session lifecycle, so a client that '
       + 'narrows with ?domains=… must include `session` to receive EITHER of them, and one that '

@@ -95,7 +95,7 @@ describe('vim-style quit shortcuts', () => {
       requestRender: () => { renderCount++; },
     }, enterKey());
 
-    await Promise.resolve();
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
 
     expect(result.handled).toBe(true);
     expect(result.prompt).toBe('');

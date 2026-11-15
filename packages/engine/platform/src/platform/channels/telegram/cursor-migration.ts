@@ -10,6 +10,9 @@ interface Preparation {
   readonly handle: TelegramLegacyCursorHandle;
   readonly current: () => void;
 }
+class IdentityReadError extends Error {
+  constructor(cause: unknown) { super('bot identity could not be read', { cause }); }
+}
 /** One serving ingress owns the verified bot, exact cursor file preparation
  * and preview lifetime. No bearer, raw cursor bytes or file path enter views. */
 export class TelegramCursorMigration {
@@ -26,13 +29,16 @@ export class TelegramCursorMigration {
   }) { this.deps = Object.freeze({ ...deps, identity: deps.identity.bind(deps), beforeWrite: deps.beforeWrite?.bind(deps), now: deps.now?.bind(deps) }); }
   private current(): void { this.abort.signal.throwIfAborted(); if (this.closing) throw new TelegramOffsetStoreError('unavailable'); }
   preview(): Promise<TelegramCursorPreview> {
-    this.current();
+    try { this.current(); } catch (error) { return Promise.reject(error); }
     const sequence = ++this.sequence;
     this.preparation = undefined;
     return this.work.run(async () => {
       const current = () => { this.current(); if (sequence !== this.sequence) throw new TelegramOffsetStoreError('unavailable'); };
       try {
-        current(); const identity = await this.deps.identity({ signal: this.abort.signal, assertCurrent: current });
+        current();
+        // A failed identity read (network, rejected token) says nothing about the saved cursor.
+        const identity = await this.deps.identity({ signal: this.abort.signal, assertCurrent: current })
+          .catch((error: unknown) => { current(); throw new IdentityReadError(error); });
         const assertIdentity = identity.assertCurrent.bind(identity);
         current(); assertIdentity();
         const store = new TelegramOffsetStore(this.deps.filePath, identity.id, this.deps.beforeWrite);
@@ -45,11 +51,11 @@ export class TelegramCursorMigration {
         this.preparation = { view, store, handle: prepared.handle, current: () => { current(); assertIdentity();
           const at = (this.deps.now ?? Date.now)(); if (!Number.isSafeInteger(at) || at < now || at >= view.expiresAtMs) throw new TelegramOffsetStoreError('unavailable'); } };
         return view;
-      } catch { throw new TelegramOffsetStoreError('unavailable'); }
+      } catch (error) { throw new TelegramOffsetStoreError(error instanceof IdentityReadError ? 'identity-unavailable' : 'unavailable'); }
     });
   }
   commit(input: { readonly previewId: string; readonly confirm: true }): Promise<{ readonly accountId: string; readonly offset: number }> {
-    this.current();
+    try { this.current(); } catch (error) { return Promise.reject(error); }
     const prepared = this.preparation;
     if (!prepared || input.confirm !== true || input.previewId !== prepared.view.previewId) return Promise.reject(new TelegramOffsetStoreError('invalid-request'));
     // Consume before entering any publication callback, including reentry.

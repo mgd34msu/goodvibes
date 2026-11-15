@@ -97,8 +97,19 @@ export interface PermissionDomainState {
   mode: PermissionMode;
   /** The canonical execution mode, or the separate planning posture. */
   preset: GatePresetName;
-  /** Whether the user is currently being prompted for a permission decision. */
+  /**
+   * Set while the gate reports a request without a decision. Gate events are
+   * emitted after the permission check resolves, so this is not a live
+   * "prompt open" signal; read pending approvals from the approval broker
+   * (`listApprovals()` entries that are `pending` or `claimed`) for that.
+   */
   awaitingDecision: boolean;
+  /**
+   * Calls the gate has reported on without yet emitting their decision. Parallel
+   * tool calls interleave their gate events, so `awaitingDecision` is derived
+   * from this list rather than from whichever event came last.
+   */
+  inFlightCallIds?: readonly string[] | undefined;
   /** Current state of the decision state machine (while a decision is in flight). */
   decisionMachineState?: PermissionDecisionMachineState | undefined;
 
@@ -135,6 +146,7 @@ export function createInitialPermissionsState(): PermissionDomainState {
     mode: 'safe-owner',
     preset: 'safe-owner',
     awaitingDecision: false,
+    inFlightCallIds: [],
     decisionMachineState: undefined,
     sessionApprovals: new Map(),
     approvalCount: 0,

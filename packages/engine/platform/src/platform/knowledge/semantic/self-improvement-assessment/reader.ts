@@ -8,11 +8,9 @@ import { freezeSupport } from '../verification/projection.js';
 import { selfImprovementGapContext, selfImprovementEvidenceCoverage } from './battery.js';
 import { KnowledgeSelfImprovementAssessmentHeldError as Held, SELF_IMPROVEMENT_ASSESSMENT_LIMITS as LIMITS,
   type SelfImprovementAssessmentInput, type SelfImprovementAssessmentOptions, type SelfImprovementAssessment } from './types.js';
+import { isOptionalText as optionalText, isRecord as record, isStringArray as strings } from '../reader-validation.js';
 export * from './types.js';
 
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function strings(value: unknown): value is readonly string[] { return Array.isArray(value) && value.every(item => typeof item === 'string'); }
-function optionalText(value: unknown): boolean { return value === undefined || typeof value === 'string'; }
 function snapshotInput(input: SelfImprovementAssessmentInput) {
   const retained = retainStrictJudgmentJson(input, reason => new Held(reason));
   const value = retained.snapshot;

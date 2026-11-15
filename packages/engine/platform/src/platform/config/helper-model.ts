@@ -49,7 +49,11 @@ export interface HelperChatOptions {
   systemPrompt?: string | undefined;
   /** If true, return null when no dedicated helper route is available. */
   helperOnly?: boolean | undefined;
+  /** Give up on a provider that does not answer. Defaults to two minutes; 0 disables the bound. */
+  timeoutMs?: number | undefined;
 }
+
+const DEFAULT_HELPER_TIMEOUT_MS = 120_000;
 
 /** Token usage tracking for helper model calls. */
 export interface HelperUsage {
@@ -213,12 +217,36 @@ export class HelperModel {
         throw new HelperModelUnavailableError('No helper model route is configured.');
       }
 
-      const response = await resolved.provider.chat({
+      // The signal asks the provider to stop; the race frees the caller even when a provider ignores it.
+      const timeoutMs = options.timeoutMs ?? DEFAULT_HELPER_TIMEOUT_MS;
+      const controller = new AbortController();
+      const request = resolved.provider.chat({
         model: resolved.modelId,
         messages: [{ role: 'user', content: prompt }],
         ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
         systemPrompt: options.systemPrompt,
+        signal: controller.signal,
       });
+      // Armed only after chat() returned, so a synchronous throw leaves no timer behind.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = timeoutMs > 0
+        ? new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const error = new Error(`Helper model request for ${task} timed out after ${timeoutMs} ms`);
+              controller.abort(error);
+              reject(error);
+            }, timeoutMs);
+            timer.unref?.();
+          })
+        : undefined;
+      let response: Awaited<typeof request>;
+      try {
+        response = await (timedOut ? Promise.race([request, timedOut]) : request);
+      } finally {
+        clearTimeout(timer);
+        // A late rejection of the abandoned request must not become an unhandled rejection.
+        request.catch(() => undefined);
+      }
 
       // Track usage
       this._usage.inputTokens += response.usage?.inputTokens ?? 0;

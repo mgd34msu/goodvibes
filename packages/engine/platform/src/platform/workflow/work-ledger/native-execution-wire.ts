@@ -38,7 +38,9 @@ export const nativeWorkExecutionExecutionSnapshotSchema = strictObject({
   receipt: strictObject({ contractId: id, ownerAgentId: id }).nullable(),
   /** Optional for older hosts; current hosts always report availability explicitly. */
   integration: contractIntegrationInspectionSchema.optional(),
-  settlement: strictObject({ state: enumSchema(['pending', 'required', 'failed', 'published']), evidenceId: id.optional(), reportSequence: count.optional(), evidenceSequence: count.optional() }).optional(),
+  settlement: strictObject({ state: enumSchema(['pending', 'required', 'failed', 'published']), evidenceId: id.optional(), reportSequence: count.optional(), evidenceSequence: count.optional(),
+    /** Why a failed settlement failed: a fixed code, never raw error text. Absent from older hosts. */
+    reason: enumSchema(['evidence-over-capacity', 'artifact-access-restricted', 'artifact-budget-exceeded', 'review-not-genuine', 'changed-during-verification', 'cancelled', 'host-state', 'verification-failed']).optional() }).optional(),
   progress: strictObject({
     status: enumSchema(CONTRACT_STATUSES),
     sessionMode: boolean(),

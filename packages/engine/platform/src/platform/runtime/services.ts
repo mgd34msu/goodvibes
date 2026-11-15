@@ -3,6 +3,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
+import { resolveSecretInput } from '../config/secret-refs.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
@@ -56,7 +57,8 @@ import { MemoryConsolidationScheduler } from '../state/memory-consolidation-sche
 import { PowerManager, wireRuntimePower, createUnavailablePowerSeam, type PowerPlatformSeam } from '../power/index.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
 import { AppendOnlyRetentionScheduler, runStartupAppendOnlySweep } from './retention/append-only-registry.js';
-import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers } from './disposal.js';
+import { createTokenAuditBusEmitter } from './token-audit-events.js';
+import { createAsyncDisposalScope, createRuntimeStopRequests, registerRuntimePollers, type AsyncDisposalScope } from './disposal.js';
 import { composeJudgment, type JudgmentServices } from './judgment-services.js';
 import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api';
 import { resolveMemoryVectorDbPath } from '../state/memory-vector-store.js';
@@ -69,6 +71,8 @@ import { IntegrationHelperService } from './integration/helpers.js';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '../voice/index.js';
 import { createVoiceSetupService } from './voice-setup.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
+import { createConfiguredFetchDeps } from '../tools/fetch/index.js';
+import type { LocalhostFetchApproval } from './permissions/localhost-fetch-approval.js';
 import { MemoryEmbeddingProviderRegistry } from '../state/memory-embeddings.js';
 import { HookActivityTracker } from '../hooks/activity.js';
 import { HookDispatcher, createHookWorkbench, type HookWorkbench } from '../hooks/index.js';
@@ -78,6 +82,7 @@ import { ProfileManager } from '../profiles/manager.js';
 import { SessionManager } from '../sessions/manager.js';
 import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
 import { ApiTokenAuditor } from '../security/token-audit.js';
+import { startPairingTokenAudit } from './pairing-token-audit.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { PairingTokenManager } from '../pairing/pairing-token-store.js';
 import { AcpHostService } from '../acp/host.js';
@@ -116,11 +121,15 @@ import { IdempotencyStore } from './idempotency/index.js';
 import { OverflowHandler } from '../tools/shared/overflow.js';
 import type { ToolLLM } from '../config/tool-llm.js';
 import { ComponentHealthMonitor } from './perf/component-health-monitor.js';
+import { createWiredHealthSystem } from './health/index.js';
+import { bindHealthDomainEvents } from './health/domain-events.js';
+import type { RuntimeHealthAggregator } from './health/aggregator.js';
 import { WorktreeRegistry } from './worktree/registry.js';
 import { SandboxSessionRegistry } from './sandbox/session-registry.js';
 import { createShellPathService, type ShellPathService } from './shell-paths.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
-import { resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
+import { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
+import { releaseComposedTelemetry } from './telemetry/index.js';
 import { createProviderStack } from './provider-stack.js';
 import { createAgentGraph } from './agent-graph.js';
 import type { PolicyRuntimeState } from './permissions/policy-runtime.js';
@@ -144,6 +153,7 @@ import { composeContractRunner, resumeContracts } from './contract-composition.j
 import { createContractOperatorService, type ContractOperatorService } from '../contract/operator-service.js';
 import type { SessionSnapshot } from './session-persistence-scope.js';
 import { makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
+import { rollBack as rollBackStore } from './code-index-services.js';
 import {
   CacheRegistry,
   PauseController,
@@ -293,6 +303,8 @@ export interface RuntimeServices {
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
   readonly componentHealthMonitor: ComponentHealthMonitor;
+  /** Per-domain runtime health, kept current from the runtime event bus; pass it to a diagnostics provider. */
+  readonly healthAggregator: RuntimeHealthAggregator;
   readonly worktreeRegistry: WorktreeRegistry;
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   readonly webhookNotifier: WebhookNotifier;
@@ -337,8 +349,8 @@ export interface RuntimeServices {
   readonly fileUndoManager: FileUndoManager;
   readonly workspaceCheckpointManager: WorkspaceCheckpointManager;
   readonly integrationHelpers: IntegrationHelperService;
-  /** Re-root path-bound services to a new working directory (WorkspaceSwapManager). MemoryStore + ProjectIndex re-root in-process; others warn and keep their path until restart. @throws INVALID_PATH on failure. */
-  rerootStores(newWorkingDir: string): Promise<void>;
+  /** Re-root path-bound services to a new working directory (WorkspaceSwapManager). MemoryStore + ProjectIndex re-root in-process; others warn and keep their path until restart. Reports the subsystems that keep the old root until restart; throwing fails the swap with REROOT_FAILED. */
+  rerootStores(newWorkingDir: string): Promise<void | { readonly requiresRestart: readonly string[] }>;
   /**
    * Stop every poller this graph started (config watch, fleet tick, memory
    * governor, watcher registry, cross-session sweep, orchestration writer, push
@@ -357,15 +369,39 @@ export {
   bindProviderOptimizerFeatureFlag,
 } from './provider-optimizer-wiring.js';
 
+/**
+ * Compose the platform's own embedded runtime graph. No product ships this root:
+ * the terminal, agent and daemon products each build their own graph, with
+ * workspace trust and a home-scoped memory store. This one has no workspace-trust
+ * gate (external and autonomous execution decline here), keeps memory in a
+ * per-project file, and is what the engine's standalone `daemon/cli.ts` and the
+ * engine tests compose. A trust, approval or memory behaviour proven only through
+ * this graph is not proven for a shipped product; assert it from the product's
+ * own composition.
+ */
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
   assertConfiguredProjectContextReady(options.configManager, options.workingDir, REGULAR_KNOWLEDGE_DB_FILE);
   const disposalScope = createAsyncDisposalScope('RuntimeServices');
+  // A constructor that throws part-way would otherwise leave every timer, watch and
+  // store handle already started with no owner to stop it.
+  try {
+    return composeRuntimeServices(options, disposalScope);
+  } catch (error) {
+    disposalScope.dispose();
+    throw error;
+  }
+}
+
+function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: AsyncDisposalScope): RuntimeServices {
   const workingDirectory = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'RuntimeServicesOptions surfaceRoot');
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const configManager = options.configManager;
   const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: options.featureFlags });
+  disposalScope.registry.add('feature flag settings bridge', () => disposeRuntimeFeatureFlags(featureFlags));
+  // Registered first so it closes last: the tracer sends the spans its exporters still hold after every other teardown has ended its own.
+  disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
   const runtimeDispatch = createDomainDispatch(options.runtimeStore);
   const gatewayMethods = new GatewayMethodCatalog();
   const panelManager = options.panelManager ?? createNoopPanelManager();
@@ -438,6 +474,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     storePath: shellPaths.resolveProjectPath(surfaceRoot, 'watchers.json'),
     featureFlags,
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')), // read per restore
+    resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
   });
   watcherRegistry.attachRuntime({ runtimeStore: options.runtimeStore, runtimeBus: options.runtimeBus });
   // The agent graph in its one working order, shared with the pure-client
@@ -526,6 +563,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const memoryStore = new MemoryStore(memoryDbPath, {
     embeddingRegistry: memoryEmbeddingRegistry,
   });
+  // Registered at construction: the scope unwinds newest-first, so the store closes
+  // after every scheduler registered later has stopped.
+  disposalScope.registry.add('memory store', () => memoryStore.close());
   const memoryRegistry = new MemoryRegistry(memoryStore);
   const judgment = composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: disposalScope.registry });
   // Repo source-tree code index (Stage A), shares memoryEmbeddingRegistry so
@@ -547,6 +587,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const admitExpensiveWork = (label: string): { allowed: boolean; reason?: string | undefined } =>
     admitExpensiveWorkRef.current?.(label) ?? { allowed: true };
   const codeIndexStore = new CodeIndexStore(workingDirectory, codeIndexDbPath, memoryEmbeddingRegistry);
+  disposalScope.registry.add('code index store', () => codeIndexStore.close());
+  /** Where the workspace stores live now; a failed swap returns them here. */
+  let storesRootedAt = workingDirectory;
   // init never rejects; it is async because a failed extension load is read
   // by Jev (sqlite-vec-loader.ts). The build starts once the store is open.
   void codeIndexStore.init().then(() => {
@@ -557,7 +600,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const codeInjectionSettingEnabled = (): boolean => options.autoStartCodeIndex === true;
   const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
     target: codeIndexStore,
-    workingDirectory,
+    workingDirectory: () => storesRootedAt,
     // Honor governor backpressure: a paused code-index reindex job stops
     // scheduling new work until the governor resumes it, and the critical
     // memory tier refuses new reindex work outright.
@@ -568,6 +611,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     stores: [{ name: 'memory store', dbPath: memoryDbPath }, { name: 'memory vector index', dbPath: resolveMemoryVectorDbPath(memoryDbPath) }, { name: 'code index store', dbPath: codeIndexDbPath }],
   });
   storeSnapshotScheduler.start();
+  // Each timer is registered where it starts so a later construction failure stops it;
+  // registerRuntimePollers below names them again, and a second stop is a no-op.
+  disposalScope.registry.add('store snapshot scheduler', () => storeSnapshotScheduler.stop());
   // Start-time janitor: one retention pass over every registered append-only
   // store (best-effort). Every root the composition knows is passed, omitting
   // logDir/telemetryDir/homeDirectory would silently skip the activity-log,
@@ -591,10 +637,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     configGet: appendOnlyRetentionConfigGet,
   });
   appendOnlyRetentionScheduler.start();
+  disposalScope.registry.add('append-only retention scheduler', () => appendOnlyRetentionScheduler.stop());
   // External config edits apply LIVE through the same subscribe() pipeline an
   // in-process set() uses, a hand-edited settings file needs no restart. The
   // underlying file watchers are unref'd, so this never pins the event loop.
   const stopConfigWatch = configManager.watchConfigFiles(); // handle kept: dropping it is what left a 250ms poll running forever
+  disposalScope.registry.add('config file watch', stopConfigWatch);
   // Memory consolidation runs HERE, this runtime is the memory store's single
   // writer. Idle trigger (no busy broker sessions) + slow schedule fallback;
   // reversible outcomes only, receipts retained, learning.consolidation.* tunes it.
@@ -620,6 +668,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     },
   });
   memoryConsolidationScheduler.start();
+  disposalScope.registry.add('memory consolidation scheduler', () => memoryConsolidationScheduler.stop());
   const deliveryManager = new AutomationDeliveryManager({
     configManager,
     secretsManager,
@@ -660,9 +709,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), family: 'wiki' });
   disposalScope.registry.add('knowledge store', () => knowledgeStore.close());
-  const agentKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
+  const agentKnowledgeStore = KnowledgeStore.forFamily({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
   disposalScope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
-  const homeGraphKnowledgeStore = new KnowledgeStore({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
+  const homeGraphKnowledgeStore = KnowledgeStore.forFamily({ nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(), configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
   disposalScope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
   configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, {
@@ -724,10 +773,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     env: process.env,
     serviceRegistry,
   });
-  const webSearchService = new WebSearchService(webSearchProviders, {
-    serviceRegistry,
-    featureFlags,
-  });
+  // The approval handlers are built further down; a loopback search evidence fetch reads them when it happens.
+  let localhostFetchApprovalForSearch: LocalhostFetchApproval | undefined;
+  const webSearchService = new WebSearchService(webSearchProviders, createConfiguredFetchDeps({
+    serviceRegistry, featureFlags, configManager, localhostFetchApprovalSource: () => localhostFetchApprovalForSearch,
+  }));
   knowledgeSemanticService.setGapRepairer(createWebKnowledgeGapRepairer({
     searchService: webSearchService,
     ingestService: knowledgeService,
@@ -751,7 +801,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
   });
   const workflow = createWorkflowServices();
-  hookDispatcher.setTriggerManager(workflow.triggerManager);
+  disposalScope.registry.add('trigger dispatch', hookDispatcher.setTriggerManager(workflow.triggerManager, featureFlags));
   const channelPolicy = new ChannelPolicyManager({
     storePath: shellPaths.resolveProjectPath(surfaceRoot, 'channels', 'policies.json'),
   });
@@ -778,8 +828,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       configManager.get('security.tokenAudit.rotationCadenceDays') * 24 * 60 * 60 * 1000,
     defaultRotationWarningThresholdMs:
       configManager.get('security.tokenAudit.rotationWarningDays') * 24 * 60 * 60 * 1000,
-  });
+  }, { emitter: createTokenAuditBusEmitter(options.runtimeBus) });
+  disposalScope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
   const componentHealthMonitor = new ComponentHealthMonitor();
+  const healthSystem = createWiredHealthSystem(options.runtimeBus);
+  disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
   const worktreeRegistry = new WorktreeRegistry(workingDirectory, { surfaceRoot });
   const webhookNotifier = new WebhookNotifier();
   const replayEngine = new DeterministicReplayEngine(workingDirectory);
@@ -807,7 +860,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   });
   const processManager = new ProcessManager();
   const modeManager = new ModeManager({ featureFlags });
-  const fileUndoManager = new FileUndoManager();
+  const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
   const workspaceCheckpointManager = new WorkspaceCheckpointManager({
     workspaceRoot: workingDirectory,
     runtimeBus: options.runtimeBus,
@@ -878,6 +931,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     featureFlags,
     announcementStore,
   });
+  localhostFetchApprovalForSearch = localhostFetchApproval;
   // Late-bound CI auto-watch observer (filled by registerGatewayVerbGroups below).
   let ciAutoWatchObserver: ((toolName: string, args: Record<string, unknown>, success: boolean) => void) | null = null;
   // The contract runner, over the project's work plan and execution plans; its
@@ -1013,7 +1067,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
   });
 
-  const processRegistry = withFleetArchive(createProcessRegistry({
+  const baseProcessRegistry = createProcessRegistry({
     agentManager,
     contractRunner,
     processManager,
@@ -1032,10 +1086,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     codeIndexService: codeIndexStore,
     acpHost,
     observedAgents,
-  }));
+  });
+  const processRegistry = withFleetArchive(baseProcessRegistry);
 
   // Surface fleet lifecycle deltas on the runtime bus `fleet` domain (gateway fans it out; no polling). sessionPresence gates needs-input push suppression. Both subscriptions live for the registry's lifetime.
-  attachFleetEmitBridge({ registry: processRegistry, bus: options.runtimeBus });
+  // The bridge watches the unfiltered registry: archiving hides a node from the view, it does not make the node new when it is unarchived.
+  attachFleetEmitBridge({ registry: baseProcessRegistry, bus: options.runtimeBus });
   // Key-level config changes on the runtime bus `config` domain, so a client whose settings live in the daemon gets live notices instead of polling; secret-bearing keys travel by name only (runtime/config/emit-bridge.ts).
   disposalScope.registry.add('config event bridge', attachConfigEmitBridge({ config: { subscribe: (key, cb) => configManager.subscribe(key as never, cb as never) }, bus: options.runtimeBus }));
   const isAttached = (sessionId: string): boolean => {
@@ -1093,7 +1149,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     resetLocalEngineFailureState: () => voiceProviders.get('local')?.resetEngineFailureState?.(),
     admitExpensiveWork: (label) => admitExpensiveWork(label),
   });
-  registerGatewayVerbGroups(gatewayMethods, { triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager, approvalBroker, requestApproval: (input) => approvalBroker.requestApproval(input), stampFixSessionOnApproval: (offerCallId, outcome) => approvalBroker.stampFixSession(offerCallId, outcome), watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus: options.runtimeBus, sessionPresence: { isAttached }, configManager, runtimeStore: options.runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker, channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry, pairingTokens, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup, credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, disposal: disposalScope.registry, personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; } }); // see routes/register-gateway-verb-groups.ts
+  registerGatewayVerbGroups(gatewayMethods, { triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager, approvalBroker, watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus: options.runtimeBus, sessionPresence: { isAttached }, configManager, runtimeStore: options.runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker, channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry, pairingTokens, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup, credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, disposal: disposalScope.registry, personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; } }); // see routes/register-gateway-verb-groups.ts
   disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   // Teardown for every poller started above. RuntimePollerOwners is all-required,
   // so a poller added to this graph later cannot compile without being named here.
@@ -1174,6 +1230,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     mcpRegistry,
     tokenAuditor,
     componentHealthMonitor,
+    healthAggregator: healthSystem.aggregator,
     worktreeRegistry,
     sandboxSessionRegistry,
     webhookNotifier,
@@ -1214,16 +1271,39 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     integrationHelpers,
     dispose: (): void => { stopRequests.request(); disposalScope.dispose(); },
     close: (): Promise<void> => { stopRequests.request(); return disposalScope.close(); },
-    async rerootStores(newWorkingDir: string): Promise<void> {
-      const newMemoryDbPath = join(newWorkingDir, '.goodvibes', surfaceRoot, 'memory.sqlite');
-      await memoryStore.reroot(newMemoryDbPath);
-
-      // Re-root the code index alongside memory. Otherwise it keeps
-      // pointing at the old tree after a workspace swap.
-      const newCodeIndexDbPath = join(newWorkingDir, '.goodvibes', surfaceRoot, 'code-index.sqlite');
-      await codeIndexStore.reroot(newWorkingDir, newCodeIndexDbPath);
-
-      await projectIndex.reroot(newWorkingDir);
+    async rerootStores(newWorkingDir: string): Promise<{ readonly requiresRestart: readonly string[] }> {
+      const previousDir = storesRootedAt;
+      const memoryPath = (dir: string): string => join(dir, '.goodvibes', surfaceRoot, 'memory.sqlite');
+      const codeIndexPath = (dir: string): string => join(dir, '.goodvibes', surfaceRoot, 'code-index.sqlite');
+      const indexStats = codeIndexStore.stats();
+      const codeIndexWasBuilt = codeIndexStore.isBuilding() || indexStats.lastBuild !== null || indexStats.indexedChunks > 0;
+      // A failure part-way returns every store already moved, so a swap that
+      // reports failure leaves nothing reading or writing the other tree.
+      const moved: Array<{ readonly name: string; readonly restore: () => Promise<unknown> }> = [];
+      try {
+        await memoryStore.reroot(memoryPath(newWorkingDir));
+        moved.push({ name: 'memory store', restore: () => memoryStore.reroot(memoryPath(previousDir)) });
+        // Re-root the code index alongside memory. Otherwise it keeps
+        // pointing at the old tree after a workspace swap.
+        await codeIndexStore.reroot(newWorkingDir, codeIndexPath(newWorkingDir));
+        moved.push({ name: 'code index', restore: () => codeIndexStore.reroot(previousDir, codeIndexPath(previousDir)) });
+        await projectIndex.reroot(newWorkingDir);
+      } catch (error) {
+        let failure: unknown = error;
+        for (const store of moved.reverse()) {
+          try {
+            await rollBackStore(store.name, store.restore, failure);
+          } catch (combined) {
+            failure = combined;
+          }
+        }
+        if (codeIndexWasBuilt) codeIndexStore.scheduleBuild();
+        throw failure;
+      }
+      storesRootedAt = newWorkingDir;
+      // reroot() leaves the build decision to the caller; an index that was
+      // in use is rebuilt rather than left silently empty.
+      if (codeIndexWasBuilt || options.autoStartCodeIndex) codeIndexStore.scheduleBuild();
 
       // Subsystems that cannot be live-rerooted emit a warn log.
       // They continue operating at their current root path until the next process restart,
@@ -1245,10 +1325,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         'replayEngine (workingDirectory fixed at init)',
         'planManager (workingDirectory fixed at init)',
         'workspaceCheckpointManager (side git GIT_DIR fixed at init)',
+        'externalPermissionHost (workspaceRoot fixed at init)',
+        'remoteRunnerRegistry (workingDirectory fixed at init)',
+        'worktreeRegistry (repository root fixed at init)',
+        'projectPlanningService (work plan store fixed at init)',
       ];
       for (const name of cannotReroot) {
         logger.warn('[rerootStores] subsystem requires restart to reroot', { subsystem: name, newWorkingDir });
       }
+      return { requiresRestart: cannotReroot.map(name => name.replace(/ \(.*$/, '')) };
     },
   };
 }

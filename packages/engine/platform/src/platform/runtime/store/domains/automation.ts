@@ -24,6 +24,16 @@ export interface AutomationDomainState {
   readonly totalFailed: number;
   readonly totalCancelled: number;
   readonly totalDeadLettered: number;
+  /** What ended runs dropped from `runs` (the registry is bounded) contributed to the totals above, so the totals keep counting them. */
+  readonly retiredRuns?: RetiredRunCounts | undefined;
+}
+
+export interface RetiredRunCounts {
+  readonly runs: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly cancelled: number;
+  readonly deadLettered: number;
 }
 
 export function createInitialAutomationState(): AutomationDomainState {

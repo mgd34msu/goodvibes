@@ -88,7 +88,7 @@ describe('native read receipts retain original publishers and clocks', () => {
   test('actual native flag change and restore cannot preserve a token read receipt', () => {
     const flags = createFeatureFlagManager(), auditor = new ApiTokenAuditor({ managed: true, featureFlags: flags });
     const current = captureTokenAuditReadSource(auditor), original = flags.getState('token-scope-rotation-audit');
-    flags.kill('token-scope-rotation-audit', 'Synthetic source retirement control'); flags.disable('token-scope-rotation-audit');
+    flags.loadFromConfig({ flags: { 'token-scope-rotation-audit': 'killed' } }); flags.disable('token-scope-rotation-audit');
     if (original === 'enabled') flags.enable('token-scope-rotation-audit');
     expect(current).toThrow(SecurityReadSourceRetiredError);
   });
@@ -258,10 +258,13 @@ describe('native read receipts retain original publishers and clocks', () => {
     const { port } = gateReadingsPort([['', { capability: 'metadata', family: 'generic', mutates: false, kind: 'read' }]]);
     const permission = await manager.evaluateToolCall('fixture', 'list', {}, { port });
     expect(permission).toMatchObject({ allowed: true, verdict: 'allow', profileMode: 'ask-on-risk' });
-    expect(manager.listRecentDecisions()).toEqual([]);
-    expect(current).not.toThrow();
+    expect(manager.listRecentDecisions()).toHaveLength(1);
+    // The evaluation recorded a decision, so a receipt taken before it no longer covers the history.
+    expect(current).toThrow(SecurityReadSourceRetiredError);
+    const afterDecision = captureMcpDecisionHistoryReadSource(manager);
+    expect(afterDecision).not.toThrow();
     manager.listRecentDecisions = () => [];
-    expect(current).toThrow(SecurityReadSourceRetiredError); expect(issuers).toBe(0);
+    expect(afterDecision).toThrow(SecurityReadSourceRetiredError); expect(issuers).toBe(0);
   });
 
   test('actual provider registration restore retires the native registry receipt', () => {

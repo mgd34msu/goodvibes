@@ -66,12 +66,13 @@ app, not the card the owner's rent comes out of.
 
 So the design supports both, prefers one:
 
-- `payments.cards[].kind: 'virtual' | 'real'`
+- a card's `kind`: `'virtual' | 'real'`
 - A virtual card records `issuerCapMinorUnits` as a **declared** fact, the
   daemon cannot verify it, so it is shown to the owner as "you told us this"
   and never treated as an enforcement layer of ours.
-- Configuring a `real` card surfaces the recommendation once, records the
-  acknowledgement, and proceeds. It is not blocked.
+- Configuring a `real` card is allowed and is not blocked. The recommendation
+  to use a virtual card is stated in the `payments.cards.create` description;
+  nothing is shown at the point of choice and no acknowledgement is recorded.
 
 ---
 
@@ -85,19 +86,25 @@ Encrypted at rest with AES-256-GCM under a random 32-byte keyfile
 (`~/.goodvibes/secrets.key`, 0600 in a 0700 directory), never a key derived from
 hostname or username.
 
-Secret key names are **derived, never hand-picked**, via
-`daemonSecretKeyFor(configPath)` in
-`packages/engine/platform/src/platform/config/daemon-secret-keys.ts`. Adding `payments.` to
-`DAEMON_OWNED_CONFIG_PREFIXES` (`config/config-ownership.ts`) makes
-`resolveSecretWriteScope` force every payment secret into the daemon tier
-regardless of what scope a caller asks for:
+Secret key names are **derived, never hand-picked**. The card store builds each
+one as `GOODVIBES_PAYMENTS_CARD_<ID>_<FIELD>` (`cardSecretKey` in
+`packages/engine/platform/src/platform/payments/host/card-store.ts`), passing the
+card id and the field name through `normalizeSecretKeyPart`
+(`config/daemon-secret-keys.ts`) like every other daemon secret key, and writes
+them to the daemon secret tier. There is one key per field and no
+`payments.cards.*` config path:
 
-| Config path | Derived secret key |
+| Field | Derived secret key |
 |---|---|
-| `payments.cards.<cardId>.pan` | `GOODVIBES_PAYMENTS_CARDS_<CARDID>_PAN` |
-| `payments.cards.<cardId>.expiry` | `GOODVIBES_PAYMENTS_CARDS_<CARDID>_EXPIRY` |
-| `payments.cards.<cardId>.cvv` | `GOODVIBES_PAYMENTS_CARDS_<CARDID>_CVV` |
-| `payments.cards.<cardId>.cardholderName` | `GOODVIBES_PAYMENTS_CARDS_<CARDID>_CARDHOLDERNAME` |
+| `number` | `GOODVIBES_PAYMENTS_CARD_<ID>_NUMBER` |
+| `expiryMonth` | `GOODVIBES_PAYMENTS_CARD_<ID>_EXPIRY_MONTH` |
+| `expiryYear` | `GOODVIBES_PAYMENTS_CARD_<ID>_EXPIRY_YEAR` |
+| `cvv` | `GOODVIBES_PAYMENTS_CARD_<ID>_CVV` |
+| `cardholderName` | `GOODVIBES_PAYMENTS_CARD_<ID>_CARDHOLDER_NAME` |
+
+`<ID>` is the card id (`card-` and twelve hex digits) upper-cased with
+punctuation turned into `_`. The CVV is not written at all while
+`payments.cvvHandling` is `prompt`.
 
 **These are write-only across every wire.** There is no operator method that
 returns them, no log line that contains them, and no error message that echoes
@@ -183,8 +190,11 @@ interface PaymentsConfig {
 }
 ```
 
-Card metadata (`payments.cards[]`: id, label, brand, last4, kind, issuer cap)
-lives in config; card material lives in secrets. The two are joined by `cardId`.
+Card metadata (id, label, brand, last4, kind, expiry, issuer cap, `addedAt`)
+lives in a plain JSON file, `payments-cards.json`, owned by the daemon and not in
+config; card material lives in secrets. The two are joined by `cardId`. A card
+file that exists but cannot be read, or that was written by a different version,
+is refused rather than treated as empty.
 
 **Every money default is `0`, and `enabled` defaults to `false`.** The rule for
 defaults in this domain: each one takes the safest available value, and only an
@@ -212,9 +222,15 @@ All payment state resolves through the formalized surface-root mechanism in
 |---|---|
 | Settings | daemon tier `~/.goodvibes/daemon/settings.json` |
 | Card material | daemon secret store `~/.goodvibes/daemon/secrets.enc` |
-| Spend ledger | `~/.goodvibes/daemon/payments/spend.jsonl` |
-| Audit ledger | `~/.goodvibes/daemon/payments/audit.jsonl` |
-| Pending windows | `~/.goodvibes/daemon/payments/pending.json` |
+| Saved cards (metadata; the card numbers are in the secret store) | `~/.goodvibes/tui/control-plane/payments-cards.json` |
+| Purchase ledger | `~/.goodvibes/tui/control-plane/payments-purchases.json` |
+| Budget pools and holds | `~/.goodvibes/tui/control-plane/payments-budget.json` |
+| Owner approvals | `~/.goodvibes/tui/control-plane/payments-approvals.json` |
+| In-flight checkout journal | `~/.goodvibes/tui/control-plane/payments-checkout-journal.json` |
+| Operation records | directory `~/.goodvibes/tui/control-plane/payments-operations/` |
+| Protected checkout requests and reply windows (back up with its `.key`) | directory `~/.goodvibes/tui/control-plane/payments-requests/` |
+
+The daemon's surface root is `tui`, so these sit under `~/.goodvibes/tui/`.
 
 ---
 
@@ -241,13 +257,6 @@ Validated with the predicate already proven in `scheduler.ts`:
 try { Intl.DateTimeFormat(undefined, { timeZone: tz }); } catch { /* reject */ }
 ```
 
-Currently inlined directly in the `daemon.timezone` key's `validate` callback
-in `config/schema-domain-daemon-location.ts`, duplicating the same check
-`day.ts`'s `isValidTimezone` also runs independently, rather than the single
-reusable `schema-shared.ts` validator this section once called for. That is a
-small piece of unfinished cleanup, not a behavioral gap: both copies reject the
-same inputs today.
-
 Surfaced in the config UI as a timezone picker, not a free-text field.
 
 ### 4.2 The day key
@@ -270,7 +279,7 @@ Every spend record stores its UTC timestamp. Today's totals are **recomputed**
 from those timestamps under the current zone rather than carried as a running
 counter. Without that, changing the timezone would roll the day over and hand
 back a fresh budget, a trivial way around the limit, reachable by anything that
-can write daemon config. Timezone changes are recorded in the audit ledger.
+can write daemon config.
 
 ---
 
@@ -318,7 +327,7 @@ interface BudgetReservation {
 }
 ```
 
-Taken when the decision order reaches step 3, held across the window, and either
+Taken when the decision order reaches step 5, held across the window, and either
 **committed** (charge succeeded) or **released** (vetoed, denied, refused,
 charge failed, expired). An approved above-budget purchase is reserved the same
 way: `admitApprovedItemOverdraw()` widens the daily limit by exactly the
@@ -334,9 +343,11 @@ SPEND does not replicate: it lives in the payments spend ledger, which is not
 config, so a second node acting would start from a clean daily budget and could
 spend the day twice.
 
-Until the ledger itself replicates, `checkPaymentGates` refuses on any node that
-is not the elected payments leader, and `isPaymentsLeader` is a required input
-with no default so a caller cannot omit it into a pass.
+Until the ledger itself replicates, `checkPaymentGates` refuses on any daemon that
+is part of a cluster (there is no election; payments run only on a single,
+unclustered daemon), and the refusal tells the owner to turn clustering off on
+the machine that should buy. `isPaymentsLeader` is a required input with no
+default so a caller cannot omit it into a pass.
 
 Reservations persist across restart. A checkout sets `retainUntilSettled`, so
 neither the four-hour temporary-reservation TTL nor a day rollover releases its
@@ -352,7 +363,7 @@ daily reset; pending charges cannot acquire a fresh allowance at midnight.
 instead of evicting a purchase. Reservation and spend records are detached and
 immutable when the ledger admits them.
 
-The daemon writes budget schema 2. Existing schema-1 reservations upgrade to
+The daemon writes budget schema 2, and schema 3 once an owner reconciliation has been recorded (it reads 1, 2 and 3; an older build may refuse a schema-3 file). Existing schema-1 reservations upgrade to
 checkout-held records before accounting becomes available, because those files
 cannot establish that an old hold is safe to expire. Unsupported, unreadable or
 malformed accounting disables payment budget operations while preserving the
@@ -377,7 +388,7 @@ document exists so they cannot again without someone noticing.
     0a. payments.enabled is on                                          → REFUSE
     0b. ORIGIN: did CONTENT initiate this purchase?                     → REFUSE
         (absolute, no approval path; §9.1)
-    0c. LEADER: is this node the one elected to serve payments?         → REFUSE
+    0c. LEADER: is this daemon unclustered (the only one that may buy)? → REFUSE
         (§5.1; required, never defaulted)
     0d. a usable card is configured                                    → REFUSE
     0e. a shipping address is configured                                → REFUSE
@@ -448,8 +459,8 @@ document exists so they cannot again without someone noticing.
 
 6.  THE ONE NOTIFICATION, sent once, here, because this is the first point
     both halves of what the owner needs to see are known: what was chosen and
-    what it will actually cost. Same content either way; the grade from step
-    0d decides only what SILENCE means.
+    what it will actually cost. Same content either way; the recourse grade
+    from step 0 decides only what SILENCE means.
 
     VETO  (within budget, recourse established), silence PROCEEDS
     ├─ silence for windows.vetoMinutes  →  PROCEED
@@ -668,8 +679,13 @@ export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram';
 ```
 
 Email is not a member, so routing a payment prompt to it is a compile error.
-Config-supplied channel names are parsed into this union and unknown values are
-**rejected, not ignored**. A test asserts `'email'` never parses.
+Setting `payments.notifyChannels` to a name outside this union is
+**rejected, not ignored** (the setting's validator refuses it). The validator is
+narrower than the union: only `telegram` is accepted, because no delivery
+strategy yet carries a notice to `tui` or `agent-terminal`. A test asserts
+`'email'` never parses. A value that reached the config file some other way, such
+as a hand edit, is skipped with a logged warning and that channel is not notified;
+with no channel left an in-budget purchase proceeds without a notice.
 
 ### 8.2.2 Answering is not entering, and these must never be merged
 
@@ -766,7 +782,7 @@ retry here: a purchase notice that failed to send is information the window
 needs right away, and a retry loop would push the decision past the point
 where the total it is asking about is still valid. **Undeliverable means every
 configured command-authority channel's single attempt failed**, and that is
-the condition step 4a's window branches on.
+the condition step 6's window branches on.
 
 The native daemon reserves reception for the exact purchase before it starts
 sending. An owner reply received during delivery or the delivery-report journal
@@ -939,7 +955,9 @@ is released, so another checkout cannot take over the page during price reading.
 Its new notice shows the new amount and has a new window ID, even
 when the price decreased. An old operator window ID cannot answer it. The new
 budget result and the original requested maximum determine whether it requires
-approval or a veto window. There
+approval or a veto window. A purchase adopts at most three replacement quotes;
+if the price is still moving after that, it stops with `total-changed` and
+nothing submitted rather than sending the owner notice after notice. There
 is no retry after a click may have reached the merchant; that outcome retains
 the protected hold and requires reconciliation.
 
@@ -1117,6 +1135,43 @@ purchase record is verified on the ledger; the submit flush is ordered after
 the record write for exactly this reason, and a journal entry whose record
 is missing is kept and reported honestly rather than declared recorded.
 
+A submit refused before any click reached the merchant (a typed pre-click
+refusal, the untrusted-effect guard, a stale control, or a stop that landed
+while `submit-pending` was being written) releases the hold and closes the
+journal record, and its status reads `refused` (or `cancelled` for an owner
+stop) rather than `uncertain`; it stays that way across restart. An error once
+the click may have been attempted still reads `uncertain` and keeps the journal
+record, hold and original request for reconciliation.
+
+Status names who ended a purchase. An owner stop records `cancelled` and
+releases the hold and the continuation. A graceful daemon stop or restart while
+a purchase waits on its approval or veto window, once that window's checkpoint
+is durably saved, settles nothing: the operation, journal record, budget hold,
+protected request and continuation stay exactly as a crash leaves them, and the
+next boot resumes or settles the window by the same recovery (§8.6.1), which
+re-checks the approval or veto state and the deadline (an approval window that
+expired unanswered is denied and submits nothing). The stop waits for a
+checkpoint write already under way before it aborts the purchase. If the window
+was not durably saved when the stop landed, or the card was already being
+armed, the stop records `interrupted` with outcome `refused:daemon-stopped`,
+releases the hold and retires the continuation, and the purchase does not
+resume: start it again if you still want it. Other
+refusals name their own cause: `card-fill-failed`, `owner-changed` (the stored
+address, payment settings, pairing or page changed), `notice-unavailable`,
+`budget-held` (another purchase holds the budget), `refused:page-in-use`
+(another checkout still owns that browser page), and `refused:reply-unsettled`
+(a reply arrived before the deadline but was still being read when the window
+closed; it is neither used nor treated as silence, unless the channel itself
+dated the reply before the deadline, in which case its reading is finished and
+the answer is used), `refused:window-unavailable` (the reply window could not
+be opened or was replaced), and `refused:owner-changed` also when the stored
+address could not be verified because the purchase owner changed. Stopping or reconciling a
+purchase that cannot take that action is refused with its current state.
+
+`payments.checkout.fillCard` is refused while the daemon itself is running the
+purchase on that page: the daemon types the card when its purchase reaches the
+payment stage, and a second fill could race it.
+
 Payment composition shutdown stops checkout admission and aborts its original
 owners before releasing handlers. It awaits admitted card/address preflight,
 browser actions, recovery I/O and accepted reply readings. A dependency that
@@ -1180,10 +1235,13 @@ execution lease before reconciliation can begin.
 
 The finding is saved durably before accounting changes. A repeated request with
 the same finding resumes bookkeeping; a conflicting finding refuses. A confirmed
-order commits only its original retained hold. A no-order finding releases only
+order commits only its original retained hold; a confirmed-order finding with neither
+a hold nor a spend left is refused, because recording it would leave the budget
+uncharged. A no-order finding releases only
 an original unspent hold; it does not credit an already committed spend or
 invent a refund. Accounting and its once-only settlement receipt share one
-durable budget write, and the receipt survives daily spend pruning. The crash
+durable budget write, and the receipt survives daily spend pruning (it is dropped
+after 90 days). The crash
 journal closes only after that write is confirmed. An interrupted reconciliation
 keeps its saved finding and resumes bookkeeping on the next payment-host start;
 the owner can also refresh and repeat that same finding.
@@ -1203,6 +1261,9 @@ history; when no receipt exists, no tax/shipping breakdown or merchant receipt
 is fabricated. Final operation status says `owner-confirmed-purchased` or
 `owner-confirmed-not-purchased`. A missing local receipt alone never means an
 order failed, and reconciliation does not authorize submitting it again.
+Once reconciled, the original browser page can take a new checkout without a
+daemon restart. A refused reconciliation names the reason, for example a
+different finding already saved or no submission evidence to reconcile.
 
 Card material on a page that outlived the process is the composition's to
 clear: recovery calls a composition-supplied cleanup hook for checkouts
@@ -1227,7 +1288,11 @@ recipients or treat a stored backfill flag as a history capability. A failed or
 cancelled restoration releases the original pre-submit hold only while the
 original journal and reservation still match; uncertain evidence remains held
 for inspection. Other interrupted records continue through the conservative
-sweep.
+sweep. A window that cannot be restored (for example, its hold or protected
+request is gone) is recorded as `interrupted` with
+`refused:recovery-unavailable` and settled by that sweep; it does not stop
+recovery of the other windows or new purchases. Until boot recovery has
+finished, new purchases are refused with a message naming boot recovery.
 
 Native authorized Telegram owner replies are retained in the original encrypted
 checkout request before the provider cursor is confirmed. Replies remain bound
@@ -1302,15 +1367,16 @@ So the rule is keyed on whether the notification arrived:
 
 | On restart | Rule |
 |---|---|
-| Notification **was delivered**, window expired during downtime | **The expiry stands.** Before charging, **backfill each live channel** for messages received while we were down and honour any objection found there. No objection → proceed. **Do not re-notify**, it was already seen. |
+| Notification **was delivered**, window expired during downtime | **The expiry stands.** Do not re-notify, it was already seen. *Conservative sweep:* the purchase cannot resume after a restart, so it settles refused with nothing charged, and the owner is told to start it again. *Eligible native Telegram polling window (restored under original authority, below):* **backfill each live channel** for messages received while we were down and honour any objection found there; with covered silence the original deadline and the veto-proceeds or approval-denies rule apply. |
 | Notification **was never delivered** | §6 governs unchanged: in-budget proceeds, above-budget refuses, and the shipping ladder is attempted before any overage refusal. |
-| Channel **cannot be backfilled** for the downtime span | **Re-open the window on that channel only.** For that channel we cannot distinguish silence from an objection we dropped, and only that channel is ambiguous. |
+| Channel **cannot be backfilled** for the downtime span | The window is **re-opened on that channel only** where the original poller is restored (an uncovered recipient gets a new acknowledged notice and deadline). The conservative sweep only reports that channel as un-reread: it re-opens nothing. For that channel we cannot distinguish silence from an objection we dropped, and only that channel is ambiguous. |
 
 Backfill uses each channel's existing history read. A channel that supports it
 (Telegram) is queried for the downtime span before the reservation commits; a
-channel with no readable history is treated as un-backfillable and re-opened.
-The audit record names which channels were backfilled, which were re-opened, and
-what was found.
+channel with no readable history is treated as un-backfillable (re-opened where
+the original poller is restored, reported by the sweep otherwise). The audit
+record names which channels were backfilled, which were re-opened, and what was
+found.
 
 The same reasoning applies to the approval gate, and lands in the same place by a
 different route: an approval that expired resolves **denied** regardless, so a
@@ -1471,15 +1537,16 @@ off to check a list. When it goes to approval it reads as a checkpoint, not an
 accusation about the seller: buying there may be exactly what was wanted, and all
 we are saying is that we ask rather than assume.
 
-**Where "use judgement" lives: it is at runtime, made by a model, over exactly
+**Where "use judgement" lives: it is at runtime, made by Jev, over exactly
 one input.** An earlier version of this capability shipped a hardcoded
 allowlist of retailer domains, and that was rejected outright: the requirement
 was retailers *matching the profile*, not a list of retailers, and a list fails
 closed on every established retailer nobody thought to enumerate. The recourse
-standard in §9.1.1 replaces that fixed-list rule. What ships instead is `createModelMerchantJudge`
-(`platform/payments/merchant-judge-model.ts`), a helper-model call made through
-`MerchantJudgePort`, invoked from `classifyMerchant` for every domain the owner
-has not already added or excluded.
+standard in §9.1.1 replaces that fixed-list rule. What ships instead is `createJevMerchantJudge`
+(`platform/payments/merchant-judge-model.ts`), two Jev readings (`qualifies` and
+`recourse`, in `batteries/merchant.ts`) made through `MerchantJudgePort`,
+invoked from `classifyMerchant` for every domain the owner has not already
+added or excluded.
 
 The safety argument does not rest on avoiding runtime inference. It rests on
 what reaches the judge. `MerchantJudgeInput` has **exactly one field**,
@@ -1502,25 +1569,31 @@ window, so a cache would buy nothing measurable and would cost a second
 source of truth that can disagree with the judge and rot exactly as the old
 allowlist would have.
 
-**Every failure mode resolves to not-major.** A disabled helper, no route
-configured, a timeout, a malformed answer, prose where JSON was asked for, or
-a verdict word the parser does not recognise, all produce
-`{ qualifies: false, confident: false }`, which turns into an approval window
-where silence denies. That direction is deliberate: being unable to judge a
-legitimate small retailer costs the owner one question answered in a second;
-treating an unjudgeable domain as established costs a silent purchase from a
-storefront nobody vouched for. A model outage must never make spending more
-automatic.
+**Anything not confidently qualifying resolves to not-major.** The judgement
+is confident only when both readings act, and it qualifies only when
+`qualifies` is a yes and the recourse kind names some recourse; a yes with no
+recourse is a contradiction and reads as not confident. A reading that does not
+act produces `{ qualifies: false, confident: false }`, which turns into an
+approval window where silence denies. That direction is deliberate: being unable
+to judge a legitimate small retailer costs the owner one question answered in a
+second; treating an unjudgeable domain as established costs a silent purchase
+from a storefront nobody vouched for. A model outage must never make spending
+more automatic.
 
-The judge returns a free-text `recourse` phrase in its own words, for example
-"established electronics retailer with a returns process" or "marketplace
-with buyer protection", rendered to the owner so the notification names the
-recourse rather than a verdict, and an optional `marketplace` classification,
-one of `'none'`, `'buyer-protection'` (the Etsy case, major outright once the
-marketplace policy allows it) or `'per-seller'` (the eBay case, gated further
-by the listing check below). There is no fixed enum of qualifier categories
-beyond that: the specific phrasing is the model's, not a tag picked from a
-closed list.
+When decision models are off (Classic operation) the judge does not guess: it
+refuses with a decision-features-disabled error, so a checkout that needs a
+merchant judgement does not proceed until decision models are on, or the owner
+has listed the domain themselves in `payments.majorRetailersAdditional`.
+
+The judge returns a `recourse` phrase that comes from a fixed table keyed by the
+recourse reading's closed answer set (an established retailer with a returns
+process, a marketplace whose buyer protection covers the purchase, a marketplace
+where recourse depends on the individual seller, or no recourse identified).
+That phrase is what the owner reads, so the notification names the recourse
+rather than a verdict. The same answer yields the marketplace classification:
+`'none'`, `'buyer-protection'` (the Etsy case, major outright once the
+marketplace policy allows it) or `'per-seller'` (the eBay case, gated further by
+the listing check below). The model never writes text that reaches the owner.
 
 **Default is not-major.** Anything the judge does not confidently qualify asks
 the owner. There is no benefit of the doubt, because the fallback is not
@@ -1530,12 +1603,21 @@ get it back.
 
 **The list is owner-editable and nothing learns its way onto it.**
 `payments.majorRetailersAdditional` and `payments.majorRetailersExcluded` take
-comma-separated registrable domains. No page, agent or inference adds an entry, a page that could argue itself onto the list could buy from itself unattended.
+comma-separated registrable domains. No page, agent or inference adds an entry, a page that could argue itself onto the list could buy from itself unattended. A domain the owner adds is trusted as the merchant,
+but not as a sale format: an auction, a Best Offer or a listing not confirmed as
+fixed-price on an owner-added marketplace is still refused (§9.1.1), because there is
+no final total to show before paying. The seller-reputation bar is the owner's to waive.
 
 **Recourse must survive the checkout.** Matching is on the validated registrable
 domain **that takes the card**. If an established retailer hands off to a payment
 page on an unrelated registrable domain, the protection the qualification rested
 on may not follow it, that is not-major, and the notification says why.
+
+*Not wired yet.* The storefront the purchase started on is not passed to the
+merchant classification today, so a hand-off from a storefront to a payment page
+on another domain is not flagged as not-major, and the marketplace policy
+described above is not applied to a live purchase. The classification judges
+the domain that takes the card, as it does for any merchant.
 
 #### eBay is per-listing, not per-domain
 
@@ -1545,6 +1627,12 @@ not from buying.
 
 ebay.com is necessary and not sufficient. Two conditions, both required, in
 `payments/marketplace-listing.ts`:
+
+*Not wired yet.* No purchase carries the listing figures today: the checkout
+begin input has no storefront, sale-type or listing fields, so the two
+conditions below are not applied to a live purchase and every eBay purchase
+asks for the owner's yes. The module and its tests describe what applying them
+will do.
 
 **1. Fixed price only. Auctions are refused structurally, not by policy toggle.**
 The flow is: know the final total → notify the owner → run the window → pay. An
@@ -1716,10 +1804,9 @@ removed, which is why both are in the set rather than relying on one.
 
 ### 9.4 The audit ledger
 
-Append-only JSONL following the existing
-`platform/runtime/telemetry/exporters/local-ledger.ts` pattern, `appendFileSync`,
-size-based rotation, retention through `at-rest-persistence.ts` and the
-`atRest.*` config.
+A versioned JSON file, `payments-purchases.json` in the control-plane directory
+(§3.3), rewritten under a cross-process lock on each change. It has no rotation
+and no retention: rows stay until the file is removed.
 
 Every purchase records what, where, how much, and which pool it drew on, in a
 flat row reconcilable against a card statement. The real interface,
@@ -1743,7 +1830,7 @@ interface PurchaseRecord {
   outcome: string;             // e.g. 'purchased', 'submitted-unverified', or a refusal code
   refusalReason: string | null;
   merchantOrderId: string | null;
-  refundedAt: string | null;   // set later, when a refund correlates to this row; see §9.7.3
+  refundedAt: string | null;   // never set today: refunds are not recorded yet; see §9.7.3
   merchantRecognised: boolean; // the §9.1.1 verdict, so the ledger can reconstruct why one
                                 // purchase asked and another did not
   merchantQualifier: string | null;
@@ -1781,20 +1868,42 @@ is invoice-shaped, arrives at the owner's real address, and authorizes
 nothing by existing. So correlation needs no registration, no interception and
 no expiry, only a lookup against purchase records already being written.
 
+When the daemon polls the owner's mailbox, each message that passed source
+screening is read against the purchase ledger (`reportOrderConfirmation`,
+`platform/payments/confirmation-report.ts`). When it ties to exactly one
+purchase, the owner receives `renderConfirmationReport` through the payment
+notifier, on the channels in `payments.notifyChannels`. A mail about no
+purchase, or about two, sends nothing: the general inbound path still records
+it. Messages are read one at a time, and a poll that offers a message again
+does not produce a second report. A failure to read or send is logged without
+the mail text and never fails the mailbox poll. With no purchases recorded the
+mail is not read at all, and with Classic operation selected nothing is
+correlated.
+
 Matching runs on **our own record**, never on the mail's claims. The sender's
 registrable domain is compared against the registrable domain computed from
 the validated checkout URL, so `order-update.example.com` matches a purchase
 at `www.example.com`, a different registrable domain never does, and a
-message claiming a merchant we never bought from correlates to nothing.
+message claiming a merchant we never bought from correlates to nothing. Mail
+that arrived before the purchase never correlates to it.
+
+Whether a same-merchant mail is about a given purchase (its confirmation,
+receipt, shipping or delivery update) is a semantic reading by Jev
+(`engine.payments.order-mail`) over the mail and our record of that purchase.
+There is no time window: a shipping notice the next day correlates when the
+reading says it is about the purchase, and a promotion from the same shop does
+not. The reading needs decision models; with Classic operation selected
+`correlatePurchaseMail` refuses with a decision-features-disabled error and
+nothing is correlated.
 
 Only `'purchased'` and `'submitted-unverified'` outcomes are eligible, because
 both mean the submit actually reached the driver. `'submitted-unverified'` is
-included deliberately, since a confirmation email inside the correlation
-window is the strongest available signal that an unverified submission went
+included deliberately, since a confirmation email that the reading ties to the
+purchase is the strongest available signal that an unverified submission went
 through. A match never rewrites the stored record; it only recognises it.
-Two purchases at the same merchant on the same day within the window,
-`CONFIRMATION_WINDOW_MS`, six hours, produce an `'ambiguous'` result rather
-than a guess, and the caller reports that ambiguity rather than picking one.
+A mail the reading says is about two purchases at the same merchant produces an
+`'ambiguous'` result rather than a guess, and the caller reports that ambiguity
+rather than picking one.
 `renderConfirmationReport` (`platform/payments/message.ts`) renders the
 follow-up from these structured, neutralized fields alone, never the email
 body.
@@ -1858,8 +1967,9 @@ That last row is the one that makes this decision safe to live with, so it is a
 real test over real payloads rather than a smoke test.
 
 **`payments.cvvHandling` still ships as a real setting**, defaulting to
-`'stored'`. The alternative value `'prompt'` stores nothing and asks on every
-purchase. Choosing it **disables unattended purchasing**, and the surface says so
+`'stored'`. The alternative value `'prompt'` stores nothing, and there is not yet
+a place to type the code at purchase time, so every purchase is refused with
+a message naming `payments.cvvHandling`. Choosing it **disables purchasing for the card**, and the surface says so
 at the moment of selection, `CVV_PROMPT_TRADEOFF_WARNING` in
 `platform/payments/index.ts` is the shared string every surface renders, because
 a trade-off that large belongs in front of whoever flips the switch, not buried
@@ -1901,7 +2011,7 @@ Two distinct outcomes follow a submit attempt:
   `'submit-not-attempted'`.
 - **Genuine ambiguity**, any other failure while awaiting the merchant's
   response to a submit that may have reached them: the reservation stays
-  reserved, nothing is retried, and the outcome is `'challenge-abandoned'`
+  reserved, nothing is retried, and the outcome is `'submit-outcome-unknown'`
   with a message telling the owner to check their order history at that
   merchant by hand.
 
@@ -1910,6 +2020,16 @@ one-time code, the reservation stays held and the flow returns the challenge
 to the caller with `step` naming what is blocking in this code's own words,
 never merchant text. No automated attempt is made at solving it: a CAPTCHA is
 not solved, an OTP is not guessed, a 3-D Secure frame is not clicked through.
+
+**What this daemon can and cannot read back.** Order confirmation and challenge
+detection come from an optional `describeSubmission` reading of the page the
+submit lands on. The daemon does not supply one yet, so today every submission
+it makes returns no order id, no challenge and `verified: false`: the record is
+`'submitted-unverified'` and the budget is committed, including when the merchant
+put up a 3-D Secure or CAPTCHA step instead of an order. The pause described
+above is part of the driver and the flow, but this daemon cannot raise it. Treat
+every purchase as unconfirmed until the owner checks the merchant's order
+history and reconciles it.
 
 **When a submit runs its course with no challenge, the outcome is still one
 of two things, not a single "it worked."** If the merchant's own response
@@ -1963,8 +2083,13 @@ manual purchase, a false accept costs a recurring charge nobody is watching.
 
 ### 9.7.3 Money coming back does not credit a pool
 
-Refunds, cancellations and chargebacks are **recorded in the audit ledger and do
-not credit any pool.**
+Refunds, cancellations and chargebacks **do not credit any pool.**
+
+*Not recorded yet.* No operation records a refund against a purchase: the ledger's
+`refundedAt` stays empty and the purchase list does not show a returned order as
+such. Statement reconciliation has to account for refunds by hand until a
+refund-recording operation exists. The rule below is what that operation must
+do, not something the daemon does today.
 
 Crediting would be surprising in the direction that spends money: a refund
 landing on day 5 for something bought on day 1 would silently hand back day 5's
@@ -1972,9 +2097,9 @@ budget, so a returned item becomes permission to buy another one that day
 without the owner deciding that. The pools are a rate limit on outward spending,
 not a running balance of net worth.
 
-They are still recorded, with the original `purchaseId`, because the ledger's job
+They are to be recorded, with the original `purchaseId`, because the ledger's job
 is to reconcile against a card statement and a statement contains refunds. A
-purchase whose money came back is marked as such and shown that way in the
+purchase whose money came back is then marked as such and shown that way in the
 purchase list.
 
 ---
@@ -1991,10 +2116,10 @@ verb.
 | `payments.budget.status` | `read:payments` | Today's pools, remaining, `dayKey`, timezone, reservation count, whether this node may spend. | yes |
 | `payments.cards.list` | `read:payments` | Metadata only: id, label, brand, last4, kind, expiry, declared issuer cap, `materialComplete`. | yes |
 | `payments.cards.create` | admin, `write:payments` | Accepts card material; **returns metadata only**. | yes |
-| `payments.cards.delete` | admin, `write:payments` | Deletes config metadata and every derived secret, reporting how many were cleared. | yes |
+| `payments.cards.delete` | admin, `write:payments` | Deletes the card's metadata row and every derived secret, reporting how many were cleared. | yes |
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
 | `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request and prior purchase approval | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. | yes |
-| `payments.checkout.fillCard` | command-authority principal | Types the stored card into an already-open checkout page. | yes |
+| `payments.checkout.fillCard` | admin, `write:payments` | Types the stored card into an already-open checkout page. | yes |
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
 | `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
 | `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID. | yes |
@@ -2018,7 +2143,10 @@ and travel the existing `config.get`/`config.set` path, which is what makes a
 value entered in any surface apply to the daemon (§10.1).
 
 `payments.purchase.status` accepts an optional `purchaseId` and returns
-`{ windows: [...], operations: [...] }`. Every window contains `purchaseId`,
+`{ windows: [...], operations: [...] }`, plus `unreadable: [{ purchaseId, reason }]`
+only when a status record could not be read: the readable rows are still
+returned, and each unreadable record is named so its payment evidence can be
+inspected (asking for that one purchase by ID refuses with the same reason). Every window contains `purchaseId`,
 `windowId`, `kind`, `notice` and `deadlineMs`. Every operation contains its
 `purchaseId`, immutable `operationId`, state, last durable phase, creation/update
 times, outcome and parsed total/currency when known. The unfiltered response
@@ -2074,7 +2202,7 @@ tier is `~/.goodvibes/daemon/settings.json`, the same file the daemon process
 reads. That is why adding `'payments.'` to `DAEMON_OWNED_CONFIG_PREFIXES` is
 what makes a setting entered in the TUI apply to the daemon, with no RPC
 involved. The webui, having no filesystem, does go over the wire, `invokeOperator('config.set', { key, value })` in
-`goodvibes-webui/src/lib/goodvibes.ts`.
+`products/webui/src/lib/goodvibes.ts`.
 
 Only the new `payments.*` verbs (purchases, budget status, approve/deny/cancel)
 are operator methods, and each needs a `DIRECT_TRANSPORT_COVERAGE` decision in
@@ -2084,7 +2212,7 @@ are operator methods, and each needs a `DIRECT_TRANSPORT_COVERAGE` decision in
 ### 10.2 Settings rows come for free; card entry does not
 
 `buildSettingGroups()` in
-`goodvibes-tui/src/input/settings-modal-data.ts` walks `CONFIG_SCHEMA` and builds
+`products/tui/src/input/settings-modal-data.ts` walks `CONFIG_SCHEMA` and builds
 a row for every key automatically, deriving the category from the first path
 segment. So every scalar in `PaymentsConfig` gets a TUI row and a webui row with
 no per-field UI code, and the daemon-owned note is appended automatically by
@@ -2092,22 +2220,26 @@ no per-field UI code, and the daemon-owned note is appended automatically by
 
 Card material must **not** use that path. The settings modal's inline editor
 echoes the raw edit buffer on screen, `currentSettingValue()` in
-`goodvibes-tui/src/renderer/settings-modal.ts` does not special-case a secret key
+`products/tui/src/renderer/settings-modal.ts` does not special-case a secret key
 while it is being edited, so `maskSecretValue()` only masks a value at rest.
 Card entry therefore routes through the concealed-input composer
-(`goodvibes-tui/src/input/concealed-input.ts`, `maskConcealedText`,
+(`products/tui/src/input/concealed-input.ts`, `maskConcealedText`,
 `beginConcealedInputFor`), following `input/provider-key-intake.ts`, which
 already prompts "input is masked", keeps the plaintext out of input history and
 the transcript, and hands it once to `secretsManager.set(...)`. The webui
 equivalent already exists: the write-only `<input type="password">` branch in
-`goodvibes-webui/src/components/settings/SettingsField.tsx`, where the stored
+`products/webui/src/components/settings/SettingsField.tsx`, where the stored
 value is never round-tripped back into the field.
 
 The TUI-side glue that turns a typed value into a `goodvibes://secrets/...`
 reference plus a secret-store write is
-`goodvibes-tui/src/config/secret-config.ts` (`buildSecretBackedConfigUpdate`,
-`SECRET_CONFIG_KEYS`) and `input/settings-modal-secrets.ts`. The card keys are
-added to `SECRET_CONFIG_KEYS`.
+`products/tui/src/config/secret-config.ts` (`buildSecretBackedConfigUpdate`,
+which re-exports the platform's secret-backed config helpers) and
+`input/settings-modal-secrets.ts`. Card entry itself is
+`products/tui/src/input/commands/payment-card-intake.ts` (`/payments card`),
+which collects the card through concealed prompts and sends it to the selected
+daemon in one `payments.cards.create` request; the card never touches the
+terminal's own config or secret store.
 
 ### 10.3 Purchase windows in the product UI
 
@@ -2226,9 +2358,13 @@ suggestions:
 15. A serialized audit record contains **no card material**.
 16. A challenge pause never retries payment and never completes an order.
 17. A payment approval whose deadline passes **while the daemon is down**
-    resolves denied, not pending, the `ApprovalBroker` re-arm gap in §8.6.
-18. A veto window that elapsed entirely while the daemon was down re-opens
-    rather than auto-proceeding.
+    resolves denied, not pending: the interrupted purchase settles refused
+    (§8.6.1).
+18. A veto window that elapsed entirely while the daemon was down never
+    charges by itself after the restart: the conservative sweep settles the
+    purchase refused and tells the owner to start it again. Only an eligible
+    native Telegram polling window restored under §8.6.1 proceeds on its
+    covered silence or re-opens for its uncovered recipients.
 19. `'email'` never parses into `CommandAuthorityChannel`, and no payment prompt
     reaches an email path.
 20. Card material entered at a surface never appears in input history, the
@@ -2258,9 +2394,11 @@ code.
    (§8.6.1).** Silence means the owner had the chance to object and did not;
    whether our process was alive has nothing to do with it. A notification that
    was delivered and then expired stands, with a backfill for objections we might
-   have missed and no re-notification. Only an un-backfillable channel re-opens.
+   have missed and no re-notification. Only an un-backfillable channel re-opens,
+   and only where the original native Telegram poller is restored; the
+   conservative sweep settles every other interrupted purchase refused.
 4. **Exhausted overage pool refuses rather than escalating to an approval
-   (§6 step 2).** The ruling is explicit. Recorded so it is not re-opened by
+   (§6 step 4b).** The ruling is explicit. Recorded so it is not re-opened by
    accident.
 5. **Money defaults are 0 and `enabled` is false (§3.2).** Derived from the
    safest-default rule. A freshly configured capability refuses everything until
@@ -2331,8 +2469,6 @@ code.
 - `platform/channels/delivery-router.ts`,
   `platform/automation/delivery-manager.ts`, delivery and undeliverable
   detection
-- `platform/automation/schedules.ts`, the one-shot `{ kind: 'at' }` job the veto
-  window runs on
 - `platform/google/{types,console-flow,setup-flow}.ts`, the pause-and-hand-over
   pattern §9.6 adapts
 - `platform/config/{secrets.ts,daemon-secret-keys.ts,config-ownership.ts,credential-status.ts}`

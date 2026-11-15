@@ -29,7 +29,7 @@ export const findSchema: ToolDefinition = {
             mode: {
               type: 'string',
               enum: ['files', 'content', 'symbols', 'references', 'structural'],
-              description: 'Search mode: files (glob), content (grep), symbols (regex extraction), references (find all references via LSP with grep fallback), structural (AST pattern matching via ast-grep).',
+              description: 'Search mode: files (glob), content (grep), symbols (regex extraction), references (references from the language server when the host has one attached, otherwise a word match on the symbol name; fallback_reason says which), structural (AST pattern matching via ast-grep).',
             },
             // files mode
             patterns: {
@@ -105,7 +105,7 @@ export const findSchema: ToolDefinition = {
             },
             path: {
               type: 'string',
-              description: 'Directory to search (modes: content, symbols). Defaults to project root.',
+              description: 'Directory to search (modes: files, content, symbols, references, structural). Defaults to project root.',
             },
             case_sensitive: {
               type: 'boolean',
@@ -117,7 +117,7 @@ export const findSchema: ToolDefinition = {
             },
             multiline: {
               type: 'boolean',
-              description: 'Enable multiline regex (mode: content). Default: false.',
+              description: 'No effect: content mode matches each line on its own, so a pattern cannot span lines (the call warns when this is set). Search for one line of the text instead.',
             },
             negate: {
               type: 'boolean',
@@ -149,18 +149,18 @@ export const findSchema: ToolDefinition = {
             },
             line: {
               type: 'integer',
-              minimum: 0,
-              description: 'Zero-based line number of the symbol (mode: references).',
+              minimum: 1,
+              description: 'One-based line number of the symbol, as find results report lines (mode: references).',
             },
             column: {
               type: 'integer',
               minimum: 0,
-              description: 'Zero-based column offset of the symbol (mode: references).',
+              description: 'Zero-based column offset of the symbol on that line (mode: references). Used only by a language server.',
             },
             // symbols mode
             query: {
               type: 'string',
-              description: 'Symbol name pattern to filter by (modes: content context, symbols).',
+              description: 'Symbol name pattern to filter by (mode: symbols).',
             },
             kinds: {
               type: 'array',
@@ -205,6 +205,7 @@ export const findSchema: ToolDefinition = {
             enum: ['count_only', 'files_only', 'locations', 'matches', 'context', 'with_stats', 'with_preview', 'signatures', 'full'],
             description:
               'Progressive disclosure format. count_only < files_only < locations < matches < context. ' +
+              'The format is shared by every query of the call; a format that does not belong to a query\'s mode is replaced by the nearest one for that mode and the result warns. ' +
               'with_stats returns file size and modified date per file (mode: files). ' +
               'with_preview returns first N lines of each file (mode: files, controlled by preview_lines). ' +
               'signatures: include full function/method signature with params+return type (mode: symbols). ' +
@@ -241,8 +242,8 @@ export const findSchema: ToolDefinition = {
           },
           max_results: {
             type: 'integer',
-            minimum: 0,
-            description: 'Results per page. Default: 100. Searches all eligible files and reports the full count and next_offset.',
+            minimum: 1,
+            description: 'Results per page, at least 1. Default: 100. Searches all eligible files and reports the full count and next_offset.',
           },
           max_per_item: {
             type: 'integer',
@@ -251,13 +252,14 @@ export const findSchema: ToolDefinition = {
           },
           max_total_matches: {
             type: 'integer',
-            minimum: 0,
+            minimum: 1,
             description: 'Matches per page across all files. Default: 100. Does not stop the search scan.',
           },
           max_tokens: {
             type: 'integer',
             minimum: 0,
-            description: 'Approximate token budget for the response.',
+            description: 'Approximate token budget for each query\'s page of results (about 4 characters per token). '
+              + 'A page that would exceed it is shortened; continue with next_offset. Default: about 10,000 tokens.',
           },
           max_line_length: {
             type: 'integer',
@@ -269,6 +271,12 @@ export const findSchema: ToolDefinition = {
       parallel: {
         type: 'boolean',
         description: 'Execute queries concurrently. Default: true.',
+      },
+      timeout_ms: {
+        type: 'integer',
+        minimum: 1,
+        description: 'Deadline for the whole call. A query still running then returns timed_out with no results '
+          + 'while finished queries keep theirs. Default: 60000.',
       },
     },
     required: ['queries'],

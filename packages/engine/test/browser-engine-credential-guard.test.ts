@@ -147,6 +147,7 @@ interface PageFixtureOptions {
   readonly onContextClose?: () => Promise<void>;
   readonly screenshotDirectory?: string;
   readonly recordSessionWrite?: (path: string) => void;
+  readonly ownerOrigin?: string;
 }
 function pageState(url: string, title: string, elements: readonly RawElement[]) {
   return { url, documents: [{ frameChain: [], url, title, controls: elements.map(element => ({ documentUrl: url,
@@ -169,7 +170,7 @@ function fakePage(url: string, elements: readonly RawElement[], options: PageFix
       count: async () => (matches ? 1 : 0),
       nth: () => locator,
       first: () => locator,
-      evaluate: async () => ({ ...liveControlDescriptor({ tag: element?.tag ?? '', name: element?.name ?? '', submits: element?.submits ?? false, disabled: element?.disabled ?? false }, url), type: element?.control?.type ?? '' }),
+      evaluate: async (read?: unknown) => options.ownerOrigin !== undefined && String(read).includes('location.origin') ? options.ownerOrigin : ({ ...liveControlDescriptor({ tag: element?.tag ?? '', name: element?.name ?? '', submits: element?.submits ?? false, disabled: element?.disabled ?? false }, url), type: element?.control?.type ?? '' }),
       click: async (actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('click', actionOptions, () => { options.effects?.push('click'); }),
       fill: async (text: string, actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('fill', actionOptions, () => { entered.set(selector, text); options.effects?.push('fill'); }),
       press: async (_key: string, actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('press', actionOptions, () => { options.effects?.push('press'); }),
@@ -234,7 +235,7 @@ async function buildEngine(url: string, elements: readonly RawElement[], options
     loadDriver: (() => ({
       chromium: {
         launchPersistentContext: async () => context,
-        connectOverCDP: async () => ({ contexts: () => [context] }),
+        connectOverCDP: async () => ({ contexts: () => [context], on: () => undefined }),
       },
     })) as unknown as NonNullable<ConstructorParameters<typeof BrowserSessionManager>[0]['loadDriver']>,
   });
@@ -466,6 +467,47 @@ describe('current native credential-page purpose', () => {
     await engine.click({}, { ref: 'e2' });
     expect(effects).toEqual(['fill', 'click']); expect(pages.requests).toHaveLength(1);
     expect(JSON.stringify(pages.requests)).not.toContain('4242424242424242');
+  });
+  test.each([
+    ['a field the page did not mark as a payment field', 'text', '', false],
+    ['a checkbox even when marked as a payment field', 'checkbox', 'cc-number', false],
+    ['a text field marked as a payment field', 'text', 'cc-number', true],
+  ])('card number goes into only a payment text field: %s', async (_label, type, autocomplete, accepted) => {
+    const guard = new CardMaterialRedactor(), effects: string[] = [];
+    const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), name: 'Payment field', role: type === 'checkbox' ? 'checkbox' : 'textbox', control: { ...attributes(type), autocomplete } }];
+    const engine = await buildEngine('https://merchant.example/checkout', rows, { title: 'Review order', guard, effects,
+      arm: (sessionId, pageId) => guard.arm(sessionId, pageId, [{ kind: 'number', value: '4242424242424242' }]) });
+    await engine.snapshot({});
+    const result = await engine.fillSecretBatch({}, { fills: [{ ref: 'e1', value: '4242424242424242', kind: 'number' }] });
+    expect(result).toMatchObject(accepted ? { filled: ['e1'], failedRef: null } : { filled: [], failedRef: 'e1' });
+    expect(effects).toEqual(accepted ? ['fill'] : []);
+  });
+  test.each([
+    ['a foreign origin', 'https://ads.example', false],
+    ['the merchant origin', 'https://merchant.example', true],
+  ])('card number in a framed control from %s', async (_label, ownerOrigin, accepted) => {
+    const guard = new CardMaterialRedactor(), effects: string[] = [];
+    const url = 'https://merchant.example/checkout';
+    const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), name: 'Payment field', role: 'textbox', control: { ...attributes('text'), autocomplete: 'cc-number' } }];
+    const engine = await buildEngine(url, rows, { title: 'Review order', guard, effects, ownerOrigin,
+      preparePage: page => {
+        const framed = page as unknown as { mainFrame(): { evaluate: (fn: unknown, arg?: unknown) => Promise<unknown> }; locator: unknown; frames: () => unknown[]; frameLocator: unknown };
+        const main = framed.mainFrame(), collect = main.evaluate;
+        const child = { url: () => url, parentFrame: () => main, evaluate: collect, __frameChain: ['frame-1'] };
+        main.evaluate = async (fn, arg) => {
+          const result = await collect(fn, arg);
+          return Array.isArray(result) ? [] : { ...(result as object), elements: [] };
+        };
+        framed.frames = () => [main, child];
+        framed.frameLocator = () => ({ locator: framed.locator });
+        const state = pageState(url, 'Review order', rows), only = state.documents[0]!;
+        expectedPages.set(JSON.stringify({ ...state, documents: [{ ...only, controls: [] }, { ...only, frameChain: ['frame-1'] }] }), 0.01);
+      },
+      arm: (sessionId, pageId) => guard.arm(sessionId, pageId, [{ kind: 'number', value: '4242424242424242' }]) });
+    await engine.snapshot({});
+    const result = await engine.fillSecretBatch({}, { fills: [{ ref: 'e1', value: '4242424242424242', kind: 'number' }] });
+    expect(result).toMatchObject(accepted ? { filled: ['e1'], failedRef: null } : { filled: [], failedRef: 'e1' });
+    expect(effects).toEqual(accepted ? ['fill'] : []);
   });
   test('private metadata after the display limit is refused before any reader', async () => {
     const effects: string[] = [];
@@ -889,10 +931,10 @@ describe('supported native action driver', () => {
       if (name !== 'playwright-core') throw new Error('Unexpected native driver module');
       moduleLoads++;
       return { chromium: { connectOverCDP: async () => {
-        nativeConnections++; return { contexts: () => [{ pages: () => [], on: () => {} }] };
+        nativeConnections++; return { contexts: () => [{ pages: () => [], on: () => {} }], on: () => {} };
       } } };
     });
-    protocol.receive({ id: 1, command: 'attach', params: { endpoint: 'http://127.0.0.1:9222' } });
+    protocol.receive({ id: 1, command: 'attach', params: { endpoint: 'http://127.0.0.1:9222', driverVersion: DRIVER_VERSION } });
     const result: unknown = JSON.parse(await response);
     expect<unknown>(result).toMatchObject({ id: 1, ok: version === DRIVER_VERSION });
     expect(nativeConnections).toBe(version === DRIVER_VERSION ? 1 : 0);
@@ -1011,6 +1053,22 @@ test('native checkout observation redacts live card echoes without replacing sna
   await observation.assertCurrent();
   body = 'Cable x1 USD 20.00. Total USD 21.00';
   await expect(observation.assertCurrent()).rejects.toThrow('changed');
+});
+
+test('the payments flow reading its own checkout terms does not count as page content read this turn', async () => {
+  let ingests = 0;
+  class CountingPort extends NoopUntrustedContentPort {
+    override recordIngest(): void { ingests++; }
+  }
+  const guard = new CardMaterialRedactor();
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard, untrusted: new CountingPort(),
+    checkout: () => ({ text: 'Cable x1 USD 10.00. Total USD 11.00', selections: [], quantities: [] }) });
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  await engine.observeCheckoutTerms({ sessionId, pageId }, { assertCurrent() {} });
+  expect(ingests).toBe(0);
+  await engine.snapshot({ sessionId, pageId });
+  expect(ingests).toBe(1);
 });
 
 test.each(['oversized', 'accessor'] as const)('native checkout evidence refuses %s content before model transmission', async kind => {
@@ -1170,7 +1228,9 @@ for (const operation of ['navigate', 'snapshot', 'readText', 'back', 'forward', 
         expect(await result).toBeInstanceOf(BrowserSessionError);
         await observedRetirement;
         expect(ingests).toBe(before);
-        expect(() => engine.assertSnapshotCurrent(sessionId, pageId, originalSnapshotId)).not.toThrow();
+        // Closing the session drops its snapshots; shutdown leaves them. Either way no late read publishes one.
+        const current = expect(() => engine.assertSnapshotCurrent(sessionId, pageId, originalSnapshotId));
+        if (retirement === 'close') current.toThrow(); else current.not.toThrow();
       } finally { await pending.drain(); await result; await retiring?.catch(() => undefined); }
     });
 
@@ -1376,4 +1436,22 @@ test('snapshot card-field classification retains page cancellation and stops adm
     pending.release(); expect(await result).toBeInstanceOf(Error);
     expect(signals).toHaveLength(8);
   } finally { await pending.drain(); await result; }
+});
+
+test('releasing a session forgets its snapshots and disarms its card material', async () => {
+  const real = new CardMaterialRedactor();
+  const disarmedSessions: string[] = [];
+  const guard = {
+    hasLiveMaterial: (s: string, p: string) => real.hasLiveMaterial(s, p),
+    redact: (s: string, p: string, text: string) => real.redact(s, p, text),
+    disarm: (s: string, p: string) => real.disarm(s, p),
+    disarmSession: (s: string) => { disarmedSessions.push(s); real.disarmSession(s); },
+  };
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard });
+  const snapshot = await engine.snapshot({});
+  const sessionId = snapshot.sessionId as string, pageId = snapshot.pageId as string, snapshotId = snapshot.snapshotId as string;
+  expect(() => engine.assertSnapshotCurrent(sessionId, pageId, snapshotId)).not.toThrow();
+  engine.release(sessionId);
+  expect(() => engine.assertSnapshotCurrent(sessionId, pageId, snapshotId)).toThrow('no longer current');
+  expect(disarmedSessions).toEqual([sessionId]);
 });

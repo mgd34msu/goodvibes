@@ -16,4 +16,9 @@ describe('tool label selection', () => {
   ])('humanizes the unregistered tool ID %s', (id, label) => {
     expect(friendlyToolLabel(id)).toBe(label);
   });
+
+  test.each(['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__'])('a tool named like the object member %s still gets a string label', (name) => {
+    expect(typeof friendlyToolLabel(`x__${name}`)).toBe('string');
+    expect(typeof friendlyToolLabel(name)).toBe('string');
+  });
 });

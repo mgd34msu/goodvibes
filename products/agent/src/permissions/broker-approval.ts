@@ -59,6 +59,8 @@ export interface BrokerApprovalChangeParams {
   readonly render: () => void;
   /** Defers the open (default queueMicrotask); injectable so tests run it synchronously. */
   readonly defer?: (callback: () => void) => void;
+  /** Told when answering the broker failed, so the owner can be shown why the card came back. */
+  readonly onResolveFailed?: (error: unknown) => void;
 }
 
 const isActiveStatus = (status: string): boolean => status === 'pending' || status === 'claimed';
@@ -86,7 +88,7 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
     if (getPending()) return; // a local card (or another broker card) is already up
     const current = broker.getApproval(approval.id);
     if (!current || !isActiveStatus(current.status)) return;
-    setPending({
+    const card: PendingPermissionState = {
       ...current.request,
       resolve: (approved: boolean, remember = false) => {
         void broker.resolveApproval(approval.id, {
@@ -94,9 +96,20 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           remember,
           actor: 'agent',
           actorSurface: 'agent',
-        }).catch(() => {});
+        }).catch((error: unknown) => {
+          // The key press already cleared the card. If the broker still holds the ask open
+          // (the answer was not recorded), bring the card back so the ask is not left
+          // pending with nothing on screen; an ask that is already resolved needs nothing.
+          const latest = broker.getApproval(approval.id);
+          if (latest && isActiveStatus(latest.status) && !getPending()) {
+            setPending(card);
+            render();
+          }
+          params.onResolveFailed?.(error);
+        });
       },
-    } as PendingPermissionState);
+    } as PendingPermissionState;
+    setPending(card);
     render();
   });
 }

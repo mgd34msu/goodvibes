@@ -75,7 +75,7 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
       sessionId: 'synthetic-close-session', model: 'synthetic-model', provider: 'synthetic-provider', conversationTitle: () => 'Product shutdown proof',
       sessionSpineClient: services.sessionSpineClient, takeMemorySpineTimer: () => null,
       bootstrapUnsubs: [], runtimeUnsubs: [], forensicsCollector: { dispose() {} }, executionLedger: services.executionLedger,
-      disposeSessionWriteLedger: services.disposeSessionWriteLedger, deferredStartup: { async drain() {} },
+      deferredStartup: { async drain() {} },
       agentExternalServices: { async stop() {} }, agentStatusIntervalRef: { value: null },
       scheduleManager: services.workflow.scheduleManager, hookDispatcher: services.hookDispatcher,
       providerRegistry: services.providerRegistry, sessionOrchestration: services.sessionOrchestration,

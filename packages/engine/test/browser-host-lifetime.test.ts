@@ -3,7 +3,7 @@ import { getEventListeners } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BrowserHostClient, BrowserHostError } from '../platform/src/platform/browser/browser-host-client.js';
+import { BrowserHostClient, BrowserHostError, remoteContext } from '../platform/src/platform/browser/browser-host-client.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
 /** Real owned subprocesses; no system browser or user profile is opened. */
@@ -27,6 +27,8 @@ function fixture(options: { readonly ready?: boolean; readonly ignoreTerm?: bool
     createInterface({ input: process.stdin }).on('line', line => {
       const message = JSON.parse(line);
       if (message.command === 'hold') writeFileSync(paths.admitted, 'admitted');
+      if (message.command === 'exit') process.exit(0);
+      if (message.command === 'disconnect') process.stdout.write(JSON.stringify({ event: 'disconnected' }) + '\\n');
     });
     writeFileSync(paths.started, String(process.pid));
     ${options.ready === false ? '' : 'process.stdout.write(JSON.stringify({ id: 0, ok: true, result: { ready: true } }) + "\\n");'}
@@ -133,3 +135,34 @@ test('a helper ignoring SIGTERM is killed before close reports successful draina
     expect(existsSync(owned.paths.stopped)).toBe(false);
   } finally { await owned.cleanup(); }
 }, 15_000);
+
+test('a helper that exits is reported gone, and its attached context reads as closed', async () => {
+  const owned = fixture();
+  try {
+    await owned.client.start();
+    const context = remoteContext(owned.client, []) as unknown as { on(event: string, listener: () => void): void; isClosed(): boolean };
+    let closed = 0;
+    context.on('close', () => { closed += 1; });
+    expect(context.isClosed()).toBe(false);
+    expect(owned.client.gone).toBe(false);
+    await owned.client.call('exit').catch(() => undefined);
+    await owned.wait(owned.paths.stopped);
+    await withTestTimeout(new Promise<void>(resolve => { owned.client.onGone(resolve); }), 5_000, 'the helper exit was not reported');
+    expect(owned.client.gone).toBe(true);
+    expect(context.isClosed()).toBe(true);
+    expect(closed).toBe(1);
+  } finally { await owned.cleanup(); }
+});
+
+test('a helper that reports its browser disconnected is gone while the helper still runs', async () => {
+  const owned = fixture();
+  try {
+    await owned.client.start();
+    const gone = new Promise<void>(resolve => { owned.client.onGone(resolve); });
+    void owned.client.call('disconnect').catch(() => undefined);
+    await withTestTimeout(gone, 5_000, 'the disconnect was not reported');
+    expect(owned.client.gone).toBe(true);
+    // A listener added afterwards is still told.
+    await withTestTimeout(new Promise<void>(resolve => { owned.client.onGone(resolve); }), 5_000, 'a late listener was not told');
+  } finally { await owned.cleanup(); }
+});

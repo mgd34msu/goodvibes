@@ -38,14 +38,15 @@ test('a tar round trip preserves the exact source, binary, library and executabl
   const hash = spyOn(crypto, 'createHash');
   try {
     const verified = await retainVerifiedDaemonCiArtifact(restored, source);
-    expect(hash).toHaveBeenCalledTimes(5);
+    const hashedByRetain = hash.mock.calls.length;
+    expect(hashedByRetain).toBeGreaterThan(0); // retaining verifies the payload
     verified.retained.assertCurrent(); verified.retained.assertCurrent();
     const binary = verified.retained.files[0]!, original = binary.bytes;
     binary.bytes.fill(0); expect(binary.bytes).toEqual(original);
-    expect(hash).toHaveBeenCalledTimes(5);
+    expect(hash.mock.calls.length).toBe(hashedByRetain); // the retained bytes are pinned, not re-hashed
     expect(Object.hasOwn(verified.retained.files.at(-1)!, 'sha256')).toBe(false);
     await expect(verifyDaemonCiArtifact(restored, source)).resolves.toBeUndefined();
-    expect(hash).toHaveBeenCalledTimes(10); // independent cold consumer
+    expect(hash.mock.calls.length).toBeGreaterThan(hashedByRetain); // independent cold consumer verifies again
   } finally { hash.mockRestore(); }
 }));
 
@@ -197,4 +198,18 @@ test('a trusted release coordinator can verify recorded evidence without claimin
   await expect(readVerifiedDaemonCiArtifact(root, { ...source, headCommit: 'd'.repeat(40) }, { readerEvidence: 'recorded-ci' })).rejects.toThrow('differs');
   writeFileSync(join(root, 'native/goodvibes-daemon-linux-x64.bun.LICENSE.md'), 'foreign notices');
   await expect(readVerifiedDaemonCiArtifact(root, source, { readerEvidence: 'recorded-ci' })).rejects.toThrow('differs');
+}));
+
+test('the reader inspection signals its group once, at the leader\'s exit, and the final drain never signals a possibly reused pid', () => fixture(async root => {
+  const kills: Array<[number, unknown]> = [], fromDrain: boolean[] = [];
+  const real = process.kill.bind(process);
+  const spy = spyOn(process, 'kill').mockImplementation(((target: number, signal?: string | number) => {
+    // Only group signals are observed; a group probe reports the group already gone.
+    if (target < 0 && signal !== undefined && signal !== 0) { kills.push([target, signal]); fromDrain.push(/drainNativeProcessGroup/.test(new Error().stack ?? '')); return true; }
+    if (target < 0 && signal === 0) { const error = new Error('gone') as NodeJS.ErrnoException; error.code = 'ESRCH'; throw error; }
+    return real(target, signal as never);
+  }) as typeof process.kill);
+  try { await recordDaemonCiArtifact(root, source); } finally { spy.mockRestore(); }
+  expect(kills.map(([, signal]) => signal)).toEqual(['SIGKILL']);
+  expect(fromDrain).toEqual([false]);
 }));

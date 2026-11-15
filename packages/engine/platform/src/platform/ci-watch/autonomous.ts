@@ -39,8 +39,11 @@ export async function startAdmittedCiRepair(host: ExternalPermissionHost | undef
   const operation = input.operation;
   const assertCurrent = () => { input.signal.throwIfAborted(); input.assertCurrent(); operation.assertCurrent(); };
   assertCurrent();
-  if (!input.brief.jobs?.length || input.brief.jobs.some(job => !job.headSha || !job.runId || !job.jobId)) {
-    return { error: 'CI repair needs exact commit, run, and job identities for its failure evidence' };
+  if (!input.brief.jobs?.length) return { error: 'CI repair needs the failing jobs with exact commit, run, and job identities, and the brief names none' };
+  const unidentified = input.brief.jobs.filter(job => !job.headSha || !job.runId || !job.jobId).map(job => job.name);
+  if (unidentified.length > 0) {
+    // Only GitHub Actions jobs carry a run and job identity; a failing check from another app cannot be repaired from its logs.
+    return { error: `CI repair needs exact commit, run, and job identities for every failing job, and ${unidentified.join(', ')} ${unidentified.length === 1 ? 'has' : 'have'} none (not a GitHub Actions job). Fix ${unidentified.length === 1 ? 'that check' : 'those checks'} in its own system, then the repair can be offered for the remaining failures.` };
   }
   const invalidation = new AbortController();
   const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());

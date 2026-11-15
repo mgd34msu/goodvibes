@@ -1,4 +1,3 @@
-/** Regression source intentionally UNRUN during the coding-first pass. */
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,8 +32,7 @@ test.each(['file:///workspace/main.ts', 'file:///workspace/$bunfs-demo/src/main.
   expect(existsSync(f.requirement)).toBe(false);
 });
 
-test('Linux admission refuses a selected path that is not the OS loaded image', () => {
-  if (process.platform !== 'linux') return;
+test.skipIf(process.platform !== 'linux')('Linux admission refuses a selected path that is not the OS loaded image', () => {
   const f = fixture();
   expect(() => admitInstalledClientDataWriter({ moduleUrl: 'file:///$bunfs/root/main.js', execPath: f.execPath, compiledVersion: '3.1.2', platform: 'linux' })).toThrow('loaded');
 });

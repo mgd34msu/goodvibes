@@ -183,7 +183,7 @@ export function createTelegramSourceAccountOwner(isPaymentSpanTerminal?: (purcha
     const span = selector ? session.options.receiveProgress.restore?.(selector) : session.options.receiveProgress.retain(purchaseId, sinceMs);
     if (!span || typeof span.waitFor !== 'function') { drainOwned(span); return null; }
     const wait = span.waitFor.bind(span), retainedSelector = span.selector;
-    if (!live(session)) return null;
+    if (!live(session)) { drainOwned(span); return null; }
     return Object.freeze({ ...(retainedSelector ? { selector: retainedSelector } : {}),
       waitFor: async (handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope) => {
         const originalScope = Object.freeze({ conversationId: scope.conversationId, threadId: scope.threadId });

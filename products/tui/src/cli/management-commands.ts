@@ -135,10 +135,9 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // Mint through the canonical hand-off verb ON THE DAEMON: the deep link
     // pairs a device to the daemon-hosted web app, and the offer set (push,
     // relay, passkey) is the daemon's to filter to what it can satisfy. The
-    // local `services.gatewayMethods` catalog is deliberately empty in this
-    // surface (see runtime/services.ts), so invoking it answered
-    // "no internal handler" for every verb; the daemon verb caller is the
-    // canonical route and refuses honestly when no daemon is reachable.
+    // local `services.gatewayMethods` catalog only forwards invokable
+    // built-ins (runtime/gateway-daemon-forward.ts); the daemon verb caller is
+    // the direct route for this one and refuses honestly when no daemon is reachable.
     const result = await services.daemonVerbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
       name,
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
@@ -170,7 +169,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     lines.push(...(await renderPairingTailscaleLines(services)));
     lines.push('', qr);
     return lines.join('\n');
-  });
+  }, { modelData: 'skip' });
 }
 
 interface TailscaleGetResult {
@@ -217,7 +216,7 @@ export async function renderRemote(runtime: CliCommandRuntime, label: 'remote' |
         `  private-host remote fetch: ${yesNo(value.remoteFetchPrivateHosts)}`,
       ].join('\n'),
     );
-  });
+  }, { modelData: 'skip' });
 }
 
 export function renderWeb(runtime: CliCommandRuntime): string {

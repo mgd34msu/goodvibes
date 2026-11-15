@@ -514,6 +514,18 @@ describe('actual stateful catalog callers', () => {
     expect(f.opened).toEqual([]);
   });
 
+  test('a surface that opened is reported as opened even when its source changes right afterwards', async () => {
+    const f = fixture();
+    Object.assign(f.context, { openHelpOverlay: () => {
+      f.opened.push('help-overlay');
+      Object.assign(f.context, { openHelpOverlay: () => { f.opened.push('replaced'); } });
+    } });
+    const result = await openHarnessUiSurface(f.context, { surfaceId: 'help-overlay' }, f.options);
+    expect(result).toMatchObject({ status: 'opened', surface: 'help-overlay' });
+    expect(String(result.descriptorUnavailable)).toContain('Do not call open_ui_surface again');
+    expect(f.opened).toEqual(['help-overlay']);
+  });
+
   test('deferred UI choice cannot invoke a replaced native opener', async () => {
     const f = fixture(), entered = deferred<void>(), release = deferred<void>(), query = 'Configure visual preferences';
     const fake = catalogPort(query, 'settings', id => id === 'settings' ? .999 : .001, async () => { entered.resolve(undefined); await release.promise; });

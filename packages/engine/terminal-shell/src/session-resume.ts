@@ -26,11 +26,12 @@
  * writeLastSessionPointer, all bootstrap-hook-bridge-only, pre-existing
  * asymmetries out of this module's scope).
  */
-import type { SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalConversationManager as ConversationManager } from './terminal-conversation.js';
 import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { restoreWorkTreeFolds } from './work-tree-wiring.js';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { replayJournalForSession, type ReplayIntoConversationResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export interface SessionResumeRuntime {
   sessionId: string;
@@ -62,12 +63,20 @@ export interface SessionResumeDeps {
     | undefined;
   readonly hydrateSessionUsage?: (() => void) | undefined;
   readonly canResume?: (() => boolean) | undefined;
+  /**
+   * Runs once the resume can no longer be refused, immediately before the
+   * transcript is replaced: the place for side effects that must not happen
+   * when the resume is refused (revoking a pending offer, for example).
+   */
+  readonly beforeRestore?: (() => void) | undefined;
 }
 export interface SessionResumeOutcome {
   readonly meta: SessionMeta;
   readonly resumedMessageCount: number;
   readonly restoredAnchorCount: number;
   readonly journalReplay: ReplayIntoConversationResult;
+  /** Steps after the transcript was committed that failed; the resume itself stands. */
+  readonly warnings?: readonly string[] | undefined;
 }
 /**
  * The canonical resume sequence: load, reset + restore the conversation,
@@ -83,7 +92,7 @@ export interface SessionResumeOutcome {
 export async function resumeSessionCore(sessionId: string, deps: SessionResumeDeps): Promise<SessionResumeOutcome> {
   const sourceSessionId = deps.runtime.sessionId;
   if (deps.canResume?.() === false) throw new Error('A turn is still running. Wait before resuming a session.');
-  const { meta, messages } = deps.sessionManager.load(sessionId);
+  const { meta, messages, branches } = deps.sessionManager.load(sessionId);
   let model = meta.model;
   let provider = meta.provider;
   if (model && deps.selectModel) {
@@ -100,43 +109,64 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
   if (deps.runtime.sessionId !== sourceSessionId || deps.canResume?.() === false) {
     throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
   }
-  restoreSessionConversation(sessionId, { meta, messages }, deps.conversation, deps.runtime, deps.surface);
+  deps.beforeRestore?.();
+  restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
+  // The transcript and its identity are committed above, so the model and
+  // provider move with them; the sidecar steps below are recoveries that must
+  // not leave the new transcript running on the old model.
+  if (provider) deps.runtime.provider = provider;
+  if (model) deps.runtime.model = model;
+  const warnings: string[] = [];
+  const attempt = <Result>(what: string, run: () => Result, fallback: (message: string) => Result): Result => {
+    try {
+      return run();
+    } catch (error) {
+      logger.warn(`session resume: ${what} failed`, { sessionId, error: summarizeError(error) });
+      const message = summarizeError(error);
+      warnings.push(`${what} failed: ${message}`);
+      return fallback(message);
+    }
+  };
   // Restore this session's message-anchored rewind anchors from its sidecar
   // so /rewind works identically before and after the resume, the in-memory
   // registry is process-local, so a fresh process starts with none for the
   // loaded session.
-  const restoredAnchorCount = restoreTurnAnchors(sessionId, deps.surface);
+  const restoredAnchorCount = attempt('restoring rewind anchors', () => restoreTurnAnchors(sessionId, deps.surface), () => 0);
   // Journal replay: recover turns that post-date the loaded snapshot.
-  const journalReplay = replayJournalForSession({
-    surface: deps.surface,
-    sessionId,
-    snapshotTimestamp: meta.timestamp ?? 0,
-    conversation: deps.conversation,
-    persistSnapshot: (replayedMessages) => {
-      deps.sessionManager.save(sessionId, replayedMessages as never[], {
-        title: deps.conversation.title || meta.title,
-        model: meta.model,
-        provider: meta.provider,
-        timestamp: Date.now(),
-        titleSource: meta.titleSource,
-        returnContext: meta.returnContext,
-        // Machinery: this write exists only to durably close the journal gap
-        // the replay just filled. The user's own save/fork/rename acts stamp
-        // 'user' at their own call sites (session-workflow.ts).
-        saveSource: 'auto',
-      });
-    },
-  });
+  const journalReplay = attempt(
+    'replaying the transcript journal',
+    () =>
+      replayJournalForSession({
+        surface: deps.surface,
+        sessionId,
+        snapshotTimestamp: meta.timestamp ?? 0,
+        conversation: deps.conversation,
+        persistSnapshot: (replayedMessages) => {
+          deps.sessionManager.save(sessionId, replayedMessages as never[], {
+            title: deps.conversation.title || meta.title,
+            model: meta.model,
+            provider: meta.provider,
+            timestamp: Date.now(),
+            titleSource: meta.titleSource,
+            returnContext: meta.returnContext,
+            // Machinery: this write exists only to durably close the journal gap
+            // the replay just filled. The user's own save/fork/rename acts stamp
+            // 'user' at their own call sites (session-workflow.ts).
+            saveSource: 'auto',
+          }, undefined, undefined, deps.conversation.branchState());
+        },
+      }),
+    (failed): ReplayIntoConversationResult => ({ replayed: 0, hadCorruptTail: false, failed }),
+  );
   // Hydrate the footer's token counters from the resumed (+ journal-replayed)
   // history now, before the caller renders.
-  deps.hydrateSessionUsage?.();
-  if (provider) deps.runtime.provider = provider;
-  if (model) deps.runtime.model = model;
+  attempt('restoring footer usage', () => deps.hydrateSessionUsage?.(), () => undefined);
   return {
     meta,
     resumedMessageCount: deps.conversation.getMessageCount(),
     restoredAnchorCount,
     journalReplay,
+    ...(warnings.length ? { warnings } : {}),
   };
 }
 import { rmSync } from 'node:fs';
@@ -144,12 +174,14 @@ import { join } from 'node:path';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
 import { readConversationMessageSnapshots } from './conversation-message-snapshot.js';
+import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 /** Restore both resume entry points from the same clean conversation boundary. */
 export function restoreLoadedSession(
   sessionId: string,
   loaded: {
     messages: readonly object[];
     meta: SessionMeta;
+    branches?: SessionBranches | undefined;
   },
   deps: {
     conversation: ConversationManager;
@@ -181,11 +213,24 @@ export function copySessionSidecars(
   else persistTurnAnchors(destination, surface);
   saveWorkTreeFolds(surface.sessionsDir, destination, conversation.workTree.foldState(), conversation.workTree.turnOutcomes());
 }
+/** A damaged side branch is left out and reported; it must not stop the session's own transcript from resuming. */
+export function readSavedBranches(sessionId: string, saved: SessionBranches): Record<string, ConversationMessageSnapshot[]> {
+  const restored: Record<string, ConversationMessageSnapshot[]> = {};
+  for (const [name, messages] of Object.entries(saved.branches)) {
+    try {
+      restored[name] = readConversationMessageSnapshots(messages);
+    } catch (error) {
+      logger.warn('session resume: a saved branch could not be read and was left out', { sessionId, branch: name, error: summarizeError(error) });
+    }
+  }
+  return restored;
+}
 function restoreSessionConversation(
   sessionId: string,
   loaded: {
     readonly messages: readonly object[];
     readonly meta: SessionMeta;
+    readonly branches?: SessionBranches | undefined;
   },
   conversation: ConversationManager,
   runtime: Pick<SessionResumeRuntime, 'sessionId'>,
@@ -196,6 +241,7 @@ function restoreSessionConversation(
     messages: readConversationMessageSnapshots(loaded.messages),
     title: loaded.meta.title,
     titleSource: loaded.meta.titleSource,
+    ...(loaded.branches ? { branches: readSavedBranches(sessionId, loaded.branches), currentBranch: loaded.branches.currentBranch } : {}),
   });
   if (surface) restoreWorkTreeFolds(conversation, surface.sessionsDir, sessionId);
   conversation.rebuildHistory();

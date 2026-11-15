@@ -7,6 +7,7 @@ import { describe, it, expect } from 'bun:test';
 import { CommandRegistry } from '../../input/command-registry.ts';
 import { registerBuiltinCommands, categorizeBuiltinCommands } from '../../input/commands.ts';
 import { KeybindingsManager } from '../../input/keybindings.ts';
+import { buildPaletteEntries } from '../../input/command-palette.ts';
 
 function makeRegistry(): CommandRegistry {
   const registry = new CommandRegistry();
@@ -28,24 +29,16 @@ describe('command palette', () => {
     expect(entry?.category).toBe('Shell & Session');
   });
 
-  it('every registered command can be turned into a categorized palette item', () => {
-    // Mirror the opener's item-building (shell/ui-openers.ts openCommandPalette)
-    // to lock the contract: every command in the live registry yields exactly
-    // one palette item with a non-empty label and a category, proving the
-    // palette is registry-derived, not a curated subset.
+  it('every registered command becomes exactly one categorized palette entry', () => {
     const registry = makeRegistry();
     const categoryByName = new Map(categorizeBuiltinCommands().map((e) => [e.command.name, e.category]));
-    const items = registry.getAll().map((cmd) => ({
-      id: cmd.name,
-      label: `/${cmd.name}`,
-      category: categoryByName.get(cmd.name) ?? 'Other',
-    }));
-    expect(items.length).toBe(registry.getAll().length);
-    expect(items.length).toBeGreaterThan(100);
-    for (const item of items) {
-      expect(item.label.startsWith('/')).toBe(true);
-      expect(item.category.length).toBeGreaterThan(0);
-      expect(item.category).not.toBe('Other'); // every command must have a real category
+    const commands = registry.getAll();
+    const entries = buildPaletteEntries(commands, categoryByName);
+    expect(entries.map((e) => e.id).sort()).toEqual(commands.map((c) => c.name).sort());
+    expect(entries.length).toBeGreaterThan(100);
+    for (const entry of entries) {
+      expect(entry.title.length).toBeGreaterThan(0);
+      expect(entry.category).not.toBe('Other'); // every command must have a real category
     }
   });
 

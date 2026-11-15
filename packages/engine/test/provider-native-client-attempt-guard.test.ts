@@ -54,7 +54,7 @@ for (const kind of ['openai', 'anthropic'] as const) {
     const f = fixture(kind); let retries = 0; let fences = 0;
     try {
       const result = await f.provider.chat({ ...f.request, beforeAttempt() { fences++; }, onRetry() { retries++; } });
-      expect(result.content).toBe('Done.'); expect(f.engineRetries).toEqual(['0', '0']); expect(retries).toBe(1); expect(fences).toBe(4);
+      expect(result.content).toBe('Done.'); expect(f.engineRetries).toEqual(['0', '0']); expect(retries).toBe(1); expect(fences).toBe(kind === 'anthropic' ? 6 : 4);
     } finally { f.close(); }
   }, 10_000);
 

@@ -87,12 +87,17 @@ function restoredRegistry(agoMs: number, recoveryWindowMinutes: number): Watcher
   return registry;
 }
 
+/** Let queued promise work finish: setImmediate runs after every pending microtask, so this never depends on elapsed time. */
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 3; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+};
+
 /** Restore, let the catch-up microtask settle, and report the watcher. */
 async function restoreAndSettle(registry: WatcherRegistry): Promise<WatcherRecord> {
   registry.list();
-  // The catch-up run is fire-and-forget; one turn of the loop is enough for a
+  // The catch-up run is fire-and-forget; a few turns of the loop are enough for a
   // synchronous run strategy to have written its checkpoint back.
-  await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle();
   const watchers = registry.list();
   expect(watchers).toHaveLength(1);
   return watchers[0]!;

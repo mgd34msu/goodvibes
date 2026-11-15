@@ -19,15 +19,8 @@ import { useToolReadings } from './_helpers/tool-readings.ts';
 // the fake port reads none as one.
 useToolReadings();
 
-async function until(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error('condition not met in time');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
-function makeAgentManager(bus: RuntimeEventBus): AgentManager {
+/** `finished` is called once the stub executor has written the record's final state. */
+function makeAgentManager(bus: RuntimeEventBus, finished: () => void = () => {}): AgentManager {
   const manager = new AgentManager({
     // `get` is generic over `ConfigKey` with a per-key conditional return type
     // (`ConfigValue<K>`). Typing the stub's own signature that way makes the
@@ -43,7 +36,7 @@ function makeAgentManager(bus: RuntimeEventBus): AgentManager {
       async runAgent(record) {
         // Mirrors orchestrator-runner: mutate the exact AgentRecord in place.
         record.status = 'running';
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await Promise.resolve();
         record.usage = {
           inputTokens: 500,
           outputTokens: 120,
@@ -56,6 +49,7 @@ function makeAgentManager(bus: RuntimeEventBus): AgentManager {
         record.toolCallCount = 3;
         record.status = 'completed';
         record.completedAt = Date.now();
+        finished();
       },
     },
   });
@@ -66,7 +60,8 @@ function makeAgentManager(bus: RuntimeEventBus): AgentManager {
 describe('fleet registry: live managers integration', () => {
   test('real AgentManager + ProcessManager + workflow services flow through query/kill', async () => {
     const bus = new RuntimeEventBus();
-    const agentManager = makeAgentManager(bus);
+    const agentFinished = Promise.withResolvers<void>();
+    const agentManager = makeAgentManager(bus, agentFinished.resolve);
     const processManager = new ProcessManager();
     const workflow = createWorkflowServices();
 
@@ -92,7 +87,8 @@ describe('fleet registry: live managers integration', () => {
       });
       const agentId = spawned.id;
       expect(registry.getNode(agentId)).not.toBeNull();
-      await until(() => registry.getNode(agentId)?.state === 'done');
+      await agentFinished.promise;
+      expect(registry.getNode(agentId)?.state).toBe('done');
       const agentNode = registry.getNode(agentId);
       expect(agentNode?.usage?.inputTokens).toBe(500);
       expect(agentNode?.usage?.toolCallCount).toBe(3);
@@ -103,7 +99,8 @@ describe('fleet registry: live managers integration', () => {
       const bg = await processManager.spawn('echo fleet-hello', undefined, undefined);
       const bgId = bg.process_id;
       if (!bgId) throw new Error('spawn did not return a process_id');
-      await until(() => registry.getNode(bgId)?.state === 'done');
+      await processManager.captureProcessLifetime(bg).completion;
+      expect(registry.getNode(bgId)?.state).toBe('done');
       expect(registry.getNode(bgId)?.currentActivity?.text).toBe('fleet-hello');
 
       // Workflow FSM + trigger + schedule from the real managers.
@@ -144,10 +141,11 @@ describe('fleet registry: live managers integration', () => {
     }
   });
 
-  test('subscribe over live managers delivers a changed snapshot within a tick', async () => {
+  test('subscribe over live managers delivers a changed snapshot on the next tick', async () => {
     const bus = new RuntimeEventBus();
     const agentManager = makeAgentManager(bus);
     const workflow = createWorkflowServices();
+    let tick: () => void = () => {};
     const registry = createProcessRegistry({
       agentManager,
       contractRunner: { list: () => [], cancel: () => false },
@@ -159,13 +157,17 @@ describe('fleet registry: live managers integration', () => {
         scheduleManager: workflow.scheduleManager,
       },
       runtimeBus: bus,
-      tickIntervalMs: 25,
+      timers: {
+        setInterval: (callback) => { tick = callback; return {}; },
+        clearInterval: () => { tick = () => {}; },
+      },
     });
     try {
       const snapshots: number[] = [];
       registry.subscribe((snapshot) => snapshots.push(snapshot.nodes.length));
       agentManager.spawn({ mode: 'spawn', task: 'tick probe', outsideContract: true });
-      await until(() => snapshots.length > 0);
+      expect(snapshots).toEqual([]);
+      tick();
       expect(snapshots[snapshots.length - 1]).toBe(1);
     } finally {
       registry.dispose();

@@ -2,8 +2,7 @@
  * Tests for renderSessionPickerModal (a kit modal with an always-live search row).
  */
 import { describe, test, expect } from 'bun:test';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { SessionPickerModal } from '../../input/session-picker-modal.ts';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { renderSessionPickerModal } from '../../renderer/session-picker-modal.ts';
@@ -15,7 +14,7 @@ const H = 30;
 const NOW = 1700100000000 + 3_600_000;
 // Never materialized on disk: SessionManager's constructor only reads, and this
 // suite only renders modal state.
-const sessionManager = new SessionManager(join(tmpdir(), 'gv-renderer-session-picker'), { surfaceRoot: 'tui' });
+const sessionManager = new SessionManager(makeProjectTempDir('gv-renderer-session-picker'), { surfaceRoot: 'tui' });
 
 function makeModal(overrides: Partial<SessionPickerModal> = {}): SessionPickerModal {
   const modal = new SessionPickerModal(sessionManager);

@@ -16,6 +16,7 @@ import {
   type NativeHostedTurnRequest,
 } from "@goodvibes-jev/engine/platform/platform/hosted-sessions/native-turn-client";
 import { installMockDaemon } from "./mock-daemon";
+import { installRecordedIds } from "./recorded-ids";
 
 export type NativeHostedTurnCaptureName = "completed" | "cancelled";
 export type NativeHostedTurnOperation = "capture" | "admit" | "get" | "status" | "start" | "cancel";
@@ -144,16 +145,9 @@ export async function installNativeHostedTurnDaemon(
   let admitted = false;
   const reply = (route: Route, wire: WireResponse) =>
     route.fulfill({ status: wire.status, contentType: "application/json", body: wire.body });
-  await page.addInitScript(({ requestId, inputId }) => {
-    localStorage.setItem("goodvibes.webui.hosted.clientId", "native-hosted-turn-proof-client");
-    localStorage.setItem("goodvibes.webui.push.deviceId", "native-hosted-turn-proof-device");
-    const original = crypto.randomUUID.bind(crypto);
-    const ids = [requestId, inputId];
-    Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => ids.shift() ?? original(),
-    });
-  }, capture.input);
+  await page.addInitScript(installRecordedIds, {
+    ids: [capture.input.requestId, capture.input.inputId],
+  });
   await page.route("**/api/control-plane/auth", (route) => reply(route, capture.auth));
   await page.route("**/api/work-ledger/project", (route) => reply(route, capture.project));
   await page.route("**/api/work-ledger/{intake,turn}/**", async (route) => {

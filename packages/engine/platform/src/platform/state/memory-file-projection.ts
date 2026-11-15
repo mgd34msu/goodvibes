@@ -13,9 +13,18 @@
  * Temporal validity (validFrom/validUntil) is projected into each file's
  * front-matter and its live status is labelled, an expired record is shown as
  * `status: expired`, not silently dropped from the projection.
+ *
+ * `sync` records what it wrote in `.projection-manifest.json` (record id to a
+ * hash of the file it wrote). That manifest is how an unreviewed edit or a
+ * deletion is told apart from a record the store gained since the last sync:
+ * `sync` keeps a file the user changed, `diffProjectionToProposals` proposes a
+ * delete only for an id the manifest says was projected. The `cls`,
+ * `confidence`, `reviewState` and `status` front-matter lines are read-only:
+ * the memory update verbs cannot change them, so an edit there is not a proposal.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import type { MemoryClass, MemoryRecord, MemoryScope, MemoryTemporalStatus } from './memory-store.js';
@@ -50,7 +59,8 @@ export interface MemoryProjectionGit {
   /** Initialize a repository whose root is exactly `dir`. */
   init(dir: string): void;
   add(dir: string): void;
-  commit(dir: string, message: string): void;
+  /** Returns false when the tree was unchanged and nothing was committed. */
+  commit(dir: string, message: string): void | boolean;
 }
 
 function samePath(left: string, right: string): boolean {
@@ -93,13 +103,13 @@ export function createMemoryProjectionGit(): MemoryProjectionGit {
         throw new Error(`memory projection git add failed for ${dir}: ${result.stderr || result.stdout}`);
       }
     },
-    commit(dir: string, message: string): void {
+    commit(dir: string, message: string): boolean {
       // `diff --cached --quiet` exits 0 when nothing is staged and 1 when
       // something is: an unchanged tree skips the commit, and any commit
       // failure after that is a failure (git's messages are localized, so
       // they are never matched).
       const staged = run(['-C', dir, 'diff', '--cached', '--quiet']);
-      if (staged.status === 0) return;
+      if (staged.status === 0) return false;
       if (staged.status !== 1) {
         throw new Error(`memory projection git diff failed for ${dir}: ${staged.stderr || staged.stdout}`);
       }
@@ -112,6 +122,7 @@ export function createMemoryProjectionGit(): MemoryProjectionGit {
       if (!result.ok) {
         throw new Error(`memory projection git commit failed for ${dir}: ${result.stderr || result.stdout}`);
       }
+      return true;
     },
   };
 }
@@ -122,6 +133,9 @@ export interface MemoryProjectionFile {
   readonly path: string;
   readonly scope?: MemoryScope | undefined;
   readonly cls?: MemoryClass | undefined;
+  /** Read-only line as written in the file; parsed so a changed value is noticed, never proposed. */
+  readonly confidence?: number | undefined;
+  readonly reviewState?: string | undefined;
   readonly summary: string;
   readonly detail?: string | undefined;
   readonly tags: readonly string[];
@@ -132,7 +146,41 @@ export interface MemoryProjectionFile {
 export interface MemoryProjectionWriteReport {
   readonly dir: string;
   readonly written: readonly string[];
+  /** Ids whose file was left as it is: the user edited or deleted it and has not reviewed that yet. */
+  readonly kept?: readonly string[] | undefined;
   readonly committed: boolean;
+}
+
+const MANIFEST_NAME = '.projection-manifest.json';
+
+type ProjectionManifest = Readonly<Record<string, string>>;
+
+function contentHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function readManifest(dir: string): ProjectionManifest | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(dir, MANIFEST_NAME), 'utf-8'));
+    const files = typeof parsed === 'object' && parsed !== null ? (parsed as { files?: unknown }).files : undefined;
+    if (typeof files !== 'object' || files === null) return null;
+    const out: Record<string, string> = {};
+    for (const [id, hash] of Object.entries(files)) if (typeof hash === 'string') out[id] = hash;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The ids the last `sync` projected, or null when this directory has no
+ * manifest (it predates it, or was never synced). Pass it to
+ * `diffProjectionToProposals` as `projectedIds` so a deleted file is proposed
+ * as a deletion only for a record that had one.
+ */
+export function readProjectedMemoryIds(dir: string): ReadonlySet<string> | null {
+  const manifest = readManifest(dir);
+  return manifest ? new Set(Object.keys(manifest)) : null;
 }
 
 function selectStandingRecords(records: readonly MemoryRecord[], options: MemoryProjectionOptions): MemoryRecord[] {
@@ -146,6 +194,28 @@ function toIso(ms: number | undefined): string | undefined {
   return ms === undefined ? undefined : new Date(ms).toISOString();
 }
 
+/** The file holds a summary on one `# ` line, so a multi-line summary is compared and written collapsed. */
+function normalizeSummary(summary: string): string {
+  return summary.replace(/\s*\n\s*/g, ' ').trim();
+}
+
+/** Tags are written comma-separated; a tag the comma format cannot carry exactly switches the line to a JSON array. */
+function formatTags(tags: readonly string[]): string {
+  const plain = tags.join(', ');
+  const lossy = tags.some((tag) => tag === '' || tag !== tag.trim() || /[,\n]/.test(tag)) || plain.startsWith('[');
+  return lossy ? JSON.stringify(tags) : plain;
+}
+
+function parseTags(value: string): string[] {
+  if (value.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed) && parsed.every((tag) => typeof tag === 'string')) return parsed;
+    } catch { /* an edited line that is not valid JSON falls back to the comma form */ }
+  }
+  return value.split(',').map((tag) => tag.trim()).filter(Boolean);
+}
+
 /** Render one record as a markdown file body (front-matter + content). */
 export function projectMemoryRecordToMarkdown(record: MemoryRecord, now: number = Date.now()): string {
   const status = memoryRecordTemporalStatus(record, now);
@@ -153,7 +223,7 @@ export function projectMemoryRecordToMarkdown(record: MemoryRecord, now: number 
   lines.push(`id: ${record.id}`);
   lines.push(`scope: ${record.scope}`);
   lines.push(`cls: ${record.cls}`);
-  lines.push(`tags: ${record.tags.join(', ')}`);
+  lines.push(`tags: ${formatTags(record.tags)}`);
   lines.push(`confidence: ${record.confidence}`);
   lines.push(`reviewState: ${record.reviewState}`);
   const validFrom = toIso(record.validFrom);
@@ -165,7 +235,7 @@ export function projectMemoryRecordToMarkdown(record: MemoryRecord, now: number 
   lines.push(`status: ${status}`);
   lines.push('---');
   lines.push('');
-  lines.push(`# ${record.summary}`);
+  lines.push(`# ${normalizeSummary(record.summary)}`);
   if (record.detail?.trim()) {
     lines.push('');
     lines.push(record.detail.trim());
@@ -181,9 +251,13 @@ function recordFileName(id: string): string {
 
 /**
  * Project standing records to `<dir>/<id>.md`. Writes one file per in-scope
- * record. When a git seam is supplied, stages + commits the directory so the
- * projection is durable and diffable. Never deletes existing files (a store
- * deletion is surfaced as a proposal on the next diff, not a silent unlink).
+ * record, except one the user has changed since the last sync (an edit or a
+ * deletion that has not been reviewed): that file is kept as it is and its id
+ * is reported in `kept`, so a correction is never overwritten before it can
+ * become a proposal. When a git seam is supplied, stages + commits the
+ * directory so the projection is durable and diffable. Never deletes existing
+ * files (a store deletion is surfaced as a proposal on the next diff, not a
+ * silent unlink).
  */
 export function projectMemoryToFiles(
   records: readonly MemoryRecord[],
@@ -193,12 +267,48 @@ export function projectMemoryToFiles(
   const now = options.now ?? Date.now();
   mkdirSync(dir, { recursive: true });
   const standing = selectStandingRecords(records, options);
+  const previous: ProjectionManifest = readManifest(dir) ?? {};
+  const next: Record<string, string> = {};
   const written: string[] = [];
+  const kept: string[] = [];
   for (const record of standing) {
     const path = join(dir, recordFileName(record.id));
-    writeFileSync(path, projectMemoryRecordToMarkdown(record, now), 'utf-8');
+    const markdown = projectMemoryRecordToMarkdown(record, now);
+    const lastHash = previous[record.id];
+    if (lastHash !== undefined && !existsSync(path)) {
+      // Projected before, and the file is gone: the user deleted it. Writing it
+      // back would undo that before `review` can propose the deletion.
+      next[record.id] = lastHash;
+      kept.push(record.id);
+      continue;
+    }
+    if (existsSync(path)) {
+      const onDisk = readFileSync(path, 'utf-8');
+      const changedSinceSync = lastHash === undefined || contentHash(onDisk) !== lastHash;
+      const parsed = parseProjectedMemoryFile(path, onDisk);
+      // A file edited so it no longer parses (front-matter or id line removed) or
+      // whose read-only `cls`, `confidence` or `reviewState` line was changed is
+      // still the user's edit: keep it (the read-only lines have no proposal, so
+      // the user reverts them by hand). With no manifest entry nobody is known to
+      // have edited the file, so a stale read-only line there is just stale and
+      // gets refreshed.
+      const unreviewedEdit = parsed === null
+        || diffProjectionToProposals([record], [parsed], options).length > 0
+        || (lastHash !== undefined && (
+          (parsed.cls !== undefined && parsed.cls !== record.cls)
+          || (parsed.confidence !== undefined && parsed.confidence !== record.confidence)
+          || (parsed.reviewState !== undefined && parsed.reviewState !== record.reviewState)));
+      if (changedSinceSync && unreviewedEdit) {
+        if (lastHash !== undefined) next[record.id] = lastHash;
+        kept.push(record.id);
+        continue;
+      }
+    }
+    writeFileSync(path, markdown, 'utf-8');
+    next[record.id] = contentHash(markdown);
     written.push(path);
   }
+  writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify({ version: 1, files: next }, null, 2)}\n`, 'utf-8');
   let committed = false;
   if (options.git) {
     // Ownership gate: the projection only ever commits to a repository whose
@@ -211,10 +321,9 @@ export function projectMemoryToFiles(
       options.git.init(dir);
     }
     options.git.add(dir);
-    options.git.commit(dir, `memory projection: ${written.length} record(s)`);
-    committed = true;
+    committed = options.git.commit(dir, `memory projection: ${written.length} record(s)`) !== false;
   }
-  return { dir, written, committed };
+  return { dir, written, ...(kept.length > 0 ? { kept } : {}), committed };
 }
 
 /** Parse one projected markdown file. Returns null when it has no `id` front-matter key. */
@@ -237,7 +346,7 @@ export function parseProjectedMemoryFile(path: string, content: string): MemoryP
   const summary = headingIdx >= 0 ? bodyLines[headingIdx]!.slice(2).trim() : (bodyLines[0]?.trim() ?? '');
   const detailText = headingIdx >= 0 ? bodyLines.slice(headingIdx + 1).join('\n').trim() : bodyLines.slice(1).join('\n').trim();
 
-  const tags = (front.tags ?? '').split(',').map((tag) => tag.trim()).filter(Boolean);
+  const tags = parseTags(front.tags ?? '');
   const parseTime = (value: string | undefined): number | undefined => {
     if (!value) return undefined;
     const ms = Date.parse(value);
@@ -249,6 +358,8 @@ export function parseProjectedMemoryFile(path: string, content: string): MemoryP
     path,
     ...(front.scope === 'session' || front.scope === 'project' || front.scope === 'team' ? { scope: front.scope } : {}),
     ...(front.cls ? { cls: front.cls as MemoryClass } : {}),
+    ...(front.confidence && Number.isFinite(Number(front.confidence)) ? { confidence: Number(front.confidence) } : {}),
+    ...(front.reviewState ? { reviewState: front.reviewState } : {}),
     summary,
     ...(detailText ? { detail: detailText } : {}),
     tags,
@@ -326,17 +437,29 @@ export function getMemoryProjection(
   return { entry: toProjectionEntry(record, now), markdown: projectMemoryRecordToMarkdown(record, now) };
 }
 
-/** Read + parse every `*.md` in the projection directory. */
-export function readProjectedMemoryFiles(dir: string): MemoryProjectionFile[] {
-  if (!existsSync(dir)) return [];
+/** The parsed files of a projection directory, carrying which ids the last sync projected. */
+export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
+  /** From the directory's manifest; null when it has none. Read by `diffProjectionToProposals`. */
+  readonly projectedIds?: ReadonlySet<string> | null;
+};
+
+/**
+ * Read + parse every `*.md` in the projection directory. The result also
+ * carries the ids the last sync projected (as a non-enumerable `projectedIds`),
+ * so `diffProjectionToProposals(records, readProjectedMemoryFiles(dir))` can tell
+ * a deleted file from a record the store gained since.
+ */
+export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
   const files: MemoryProjectionFile[] = [];
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.md')) continue;
-    const path = join(dir, name);
-    const parsed = parseProjectedMemoryFile(path, readFileSync(path, 'utf-8'));
-    if (parsed) files.push(parsed);
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.md')) continue;
+      const path = join(dir, name);
+      const parsed = parseProjectedMemoryFile(path, readFileSync(path, 'utf-8'));
+      if (parsed) files.push(parsed);
+    }
   }
-  return files;
+  return Object.defineProperty(files, 'projectedIds', { value: readProjectedMemoryIds(dir), enumerable: false });
 }
 
 export type MemoryProjectionProposalKind = 'update' | 'delete';
@@ -374,22 +497,28 @@ function sameTags(a: readonly string[], b: readonly string[]): boolean {
  * Diff the current record set against the projected files and produce proposals.
  * PURE, no I/O. An edited file whose fields differ from its record yields an
  * `update` proposal; an in-scope record with NO file yields a `delete` proposal
- * (the user removed the file); a file with no matching record is ignored (its
- * record is already gone). Nothing here mutates the store.
+ * only when `projectedIds` (see `readProjectedMemoryIds`; the files read by
+ * `readProjectedMemoryFiles` carry it) says it was projected, because a record
+ * the store gained after the last sync has no file either and is not a
+ * deletion; without `projectedIds` no delete is proposed. A file with
+ * no matching record is ignored (its record is already gone). Nothing here
+ * mutates the store.
  */
 export function diffProjectionToProposals(
   records: readonly MemoryRecord[],
   files: readonly MemoryProjectionFile[],
-  options: MemoryProjectionOptions = {},
+  options: MemoryProjectionOptions & { readonly projectedIds?: ReadonlySet<string> | null | undefined } = {},
 ): MemoryProjectionProposal[] {
   const scopes = new Set(options.scopes ?? DEFAULT_PROJECTION_SCOPES);
   const filesById = new Map(files.map((file) => [file.id, file]));
+  const projectedIds = options.projectedIds !== undefined ? options.projectedIds : (files as ProjectedMemoryFiles).projectedIds;
   const proposals: MemoryProjectionProposal[] = [];
 
   for (const record of records) {
     if (!scopes.has(record.scope)) continue;
     const file = filesById.get(record.id);
     if (!file) {
+      if (!projectedIds?.has(record.id)) continue;
       proposals.push({
         kind: 'delete',
         id: record.id,
@@ -407,9 +536,11 @@ export function diffProjectionToProposals(
       validFrom?: number | null;
       validUntil?: number | null;
     } = {};
-    if (file.summary && file.summary !== record.summary) { changedFields.push('summary'); desired.summary = file.summary; }
-    const fileDetail = file.detail ?? '';
-    if (fileDetail !== (record.detail ?? '')) { changedFields.push('detail'); desired.detail = fileDetail; }
+    if (file.summary && normalizeSummary(file.summary) !== normalizeSummary(record.summary)) { changedFields.push('summary'); desired.summary = file.summary; }
+    // The file holds the trimmed detail, so compare trimmed on both sides.
+    // Line endings are not content: a CRLF detail must not read as edited after a sync.
+    const fileDetail = (file.detail ?? '').replace(/\r\n/g, '\n').trim();
+    if (fileDetail !== (record.detail ?? '').replace(/\r\n/g, '\n').trim()) { changedFields.push('detail'); desired.detail = fileDetail; }
     if (!sameTags(file.tags, record.tags)) { changedFields.push('tags'); desired.tags = [...file.tags]; }
     if (file.scope && file.scope !== record.scope) { changedFields.push('scope'); desired.scope = file.scope; }
     if ((file.validFrom ?? undefined) !== (record.validFrom ?? undefined)) {

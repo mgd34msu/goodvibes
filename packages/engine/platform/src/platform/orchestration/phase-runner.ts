@@ -209,6 +209,13 @@ function observeAgentTermination(runtimeBus: RuntimeEventBus, agentManager: Phas
       const onAbort = notify;
       removeAbort = () => signal.removeEventListener('abort', onAbort);
       notify();
+      // An execution that drained with its record ended but no terminal event
+      // published would otherwise hold this phase forever.
+      void agentManager.join?.(agentId).then(() => setTimeout(() => {
+        const status = agentManager.getStatus(agentId)?.status;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled') terminal.set(agentId, terminal.get(agentId) ?? status);
+        notify?.();
+      }, 0).unref?.());
     }),
     dispose: () => {
       unsubscribe();
@@ -648,7 +655,9 @@ async function runPhaseWithSignal(
       item.transportRetryCount += 1;
       await worktree.cleanup(record.id).catch(() => undefined);
       await sleep(getContractTransportRetryDelayMs(deps.configManager));
-      return runPhase(workstream, item, phase, priorReports, deps);
+      // The failed attempt spent tokens too; the caller folds only the returned usage into the item.
+      const retried = await runPhase(workstream, item, phase, priorReports, deps);
+      return { ...retried, result: { ...retried.result, usage: mergeUsage(usage, retried.result.usage) } };
     }
     await worktree.cleanup(record.id).catch(() => undefined);
     return {

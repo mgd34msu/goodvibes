@@ -1,14 +1,22 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useDaemonHealth } from './useDaemonHealth';
+import * as actualGoodvibes from '../lib/goodvibes';
 import { client as platformClient } from '../lib/goodvibes';
 import { invalidateClientLifetime, RELAY_PAIRING_STORAGE_KEY } from '../lib/client-lifetime';
 import { closeRelayClient, setActiveRoute } from '../lib/relay-connection';
 import { activityPhrase } from '../components/shell/AccountMenu';
 import { nativeRequestPrimitives } from '../test-setup';
+
+// The platform client and its transport stay real; only the reconnect backoff the
+// hook requests is shortened, so the reconnect test does not wait out a real second.
+mock.module('../lib/goodvibes', () => ({
+  ...actualGoodvibes,
+  DEFAULT_SSE_RECONNECT: { ...actualGoodvibes.DEFAULT_SSE_RECONNECT, baseDelayMs: 5, maxDelayMs: 20 },
+}));
+const { useDaemonHealth } = await import('./useDaemonHealth');
 
 const cleanups: (() => void | Promise<void>)[] = [];
 const nativeResponse = nativeRequestPrimitives.Response;

@@ -232,7 +232,12 @@ function buildNoopStrategy(): CacheStrategy {
 }
 
 /**
- * CacheHitTracker, tracks cache hit rate over a sliding window of turns.
+ * CacheHitTracker, cumulative cache hit totals and the hit rate derived from them.
+ *
+ * Totals accumulate for the life of the tracker (no window, no decay) and the
+ * registry shares one tracker across every provider, so the rate is the pooled
+ * rate for the whole process, which is what the session-wide cache metrics report.
+ * Call `reset()` to start a fresh count.
  */
 export class CacheHitTracker {
   private metrics: CacheHitMetrics = {

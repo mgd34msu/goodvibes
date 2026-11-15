@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { instrumentedFetch, fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { TTL_24H_MS, isTtlCacheStale, validateTtlCacheEnvelope } from './json-ttl-cache.js';
@@ -83,7 +84,6 @@ function loadModelListCache(cachePath: string): ModelListCacheFile | null {
 function saveModelListCache(models: readonly string[], cachePath: string, unclassifiedModels: readonly string[] = []): void {
   try {
     fs.mkdirSync(dirname(cachePath), { recursive: true });
-    const tmpPath = `${cachePath}.tmp`;
     const payload: ModelListCacheFile = {
       version: 1,
       fetchedAt: Date.now(),
@@ -91,8 +91,8 @@ function saveModelListCache(models: readonly string[], cachePath: string, unclas
       models: [...models],
       ...(unclassifiedModels.length ? { unclassifiedModels: [...unclassifiedModels] } : {}),
     };
-    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, cachePath);
+    // A unique temporary file per write: the TUI and the daemon may refresh the same cache at once.
+    writeJsonFileAtomic(cachePath, payload);
   } catch (err) {
     logger.warn('[provider-models] Model list cache write failed', { cachePath, error: summarizeError(err) });
   }
@@ -312,9 +312,13 @@ export async function fetchModelIdsFromListing(
  * Model resource names there ("accounts/fireworks/models/<id>") are exactly
  * the ids the chat surface accepts.
  */
+/** Pagination stops here so a runaway listing cannot grow without bound; the cut is logged. */
+const FIREWORKS_MODEL_LIMIT = 5000;
+
 export async function fetchFireworksModelIds(apiKey: string): Promise<string[]> {
   const ids: string[] = [];
   let pageToken = '';
+  let truncated = false;
   do {
     const url = `https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=200${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
     const res = await fetchWithTimeout(url, {
@@ -328,7 +332,14 @@ export async function fetchFireworksModelIds(apiKey: string): Promise<string[]> 
       if (typeof model.name === 'string' && model.name.length > 0) ids.push(model.name);
     }
     pageToken = typeof body.nextPageToken === 'string' ? body.nextPageToken : '';
-  } while (pageToken && ids.length < 5000);
+    if (pageToken && ids.length >= FIREWORKS_MODEL_LIMIT) {
+      truncated = true;
+      break;
+    }
+  } while (pageToken);
+  if (truncated) {
+    logger.warn('[provider-models] Fireworks model listing truncated', { limit: FIREWORKS_MODEL_LIMIT, listed: ids.length });
+  }
   return ids;
 }
 

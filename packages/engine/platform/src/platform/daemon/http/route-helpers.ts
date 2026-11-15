@@ -1,3 +1,5 @@
+import { readServiceErrorResponse } from './error-response.js';
+
 export type {
   BoundedIntegerOptions,
   ChannelConversationKind,
@@ -14,6 +16,36 @@ export {
   readOptionalBoundedInteger,
   scopeMatches,
 } from '@goodvibes-jev/engine/daemon-api';
+
+/** A body the shared parser already answered (400 invalid JSON, 413 too large); it is returned to the client as is. */
+export class RejectedBody extends Error {
+  constructor(readonly response: Response) {
+    super('Request body rejected');
+    this.name = 'RejectedBody';
+  }
+}
+
+export function requireParsedBody<T>(body: T | Response): T {
+  if (body instanceof Response) throw new RejectedBody(body);
+  return body;
+}
+
+/**
+ * The response for a failure inside a route class: a rejected body keeps its own
+ * status and message, a service error keeps the status it carries, and a service
+ * refusal that names none stays a 400 (these services reject bad input with plain errors).
+ */
+export function routeFailureResponse(error: unknown): Promise<Response> {
+  if (error instanceof RejectedBody) return Promise.resolve(error.response);
+  return readServiceErrorResponse(error, { fallbackStatus: isSystemFault(error) ? 500 : 400 });
+}
+
+/** A filesystem or network fault (ENOSPC, EACCES, ECONNRESET): the server's problem, never a mistake in the request. */
+function isSystemFault(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === 'string' && /^E[A-Z0-9]+$/.test(code);
+}
 
 export function toSerializableJson(value: unknown, stack = new Map<object, string>(), path = '$'): unknown {
   if (!value || typeof value !== 'object') return value;
@@ -36,4 +68,13 @@ export function toSerializableJson(value: unknown, stack = new Map<object, strin
 
 export function serializableJsonResponse(body: unknown, init?: ResponseInit): Response {
   return Response.json(toSerializableJson(body), init);
+}
+
+/** Decode one path segment; a malformed percent escape yields null so the route can answer 400 instead of throwing. */
+export function decodePathSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }

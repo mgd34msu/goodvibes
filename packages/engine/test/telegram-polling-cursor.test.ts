@@ -126,7 +126,7 @@ test('a replacement receiver cannot overtake an original getUpdates that ignores
   const handle = await first.accounts.reader.acquire(); if (!handle) throw new Error('Missing original private source');
   let drained = false; const closing = first.supervisor.stop().then(() => { drained = true; });
   let secondStopDrained = false; const secondStop = first.supervisor.stop().then(() => { secondStopDrained = true; });
-  await Promise.resolve(); expect(drained).toBe(false); expect(secondStopDrained).toBe(false); expect(() => first.accounts.reader.assertCurrent(handle)).toThrow();
+  await new Promise<void>(resolve => setImmediate(resolve)); expect(drained).toBe(false); expect(secondStopDrained).toBe(false); expect(() => first.accounts.reader.assertCurrent(handle)).toThrow();
   const second = receiver(f.path); await second.supervisor.start(); await second.conflict.promise;
   expect(second.calls).toEqual([]); expect(await second.accounts.reader.acquire()).toBeNull();
   first.calls[0]?.finish([update]); await closing; await secondStop;

@@ -30,15 +30,11 @@ export function roundToPrecision(value: number, precision: number): number {
 type AdjustableSetting = Pick<ConfigSetting, 'type' | 'enumValues' | 'validate'> & { readonly key: string };
 export function getNumericAdjustmentMeta(setting: AdjustableSetting): {
   step: number;
-  min?: number | undefined;
-  max?: number | undefined;
   precision: number;
 } {
-  if (setting.key === 'tts.speed') {
-    // Speed multiplier, 0.1 increments across the schema's own supported range
-    // (see the key's numRange in the platform config schema).
-    return { step: 0.1, min: 0.25, max: 4, precision: 1 };
-  }
+  // The supported range lives only in the schema's `validate`; the step size is
+  // all this surface adds. A speed multiplier moves in 0.1 increments.
+  if (setting.key === 'tts.speed') return { step: 0.1, precision: 1 };
   return { step: 1, precision: 0 };
 }
 /**
@@ -50,8 +46,11 @@ export function getNumericAdjustmentMeta(setting: AdjustableSetting): {
  * currency symbol or thousands grouping on the write path itself.
  */
 export function parseNumberEditBuffer(buffer: string): number | null {
+  // Number('') and Number('  ') are 0, which would commit an emptied field as a
+  // real value; Infinity does not survive a JSON round trip.
+  if (buffer.trim() === '') return null;
   const parsed = Number(buffer);
-  return Number.isNaN(parsed) ? null : parsed;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function cycleSettingChoice<Value>(values: readonly Value[], current: Value, direction: 'left' | 'right'): Value | undefined {
@@ -73,7 +72,6 @@ export function adjustedSettingValue(
   if (!Number.isFinite(number)) return undefined;
   const adjustment = getNumericAdjustmentMeta(setting);
   const delta = adjustment.step * step;
-  const rounded = roundToPrecision(number + (direction === 'right' ? delta : -delta), adjustment.precision);
-  const value = Math.min(adjustment.max ?? rounded, Math.max(adjustment.min ?? rounded, rounded));
+  const value = roundToPrecision(number + (direction === 'right' ? delta : -delta), adjustment.precision);
   return setting.validate && !setting.validate(value) ? undefined : { value };
 }

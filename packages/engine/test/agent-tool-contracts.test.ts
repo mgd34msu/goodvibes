@@ -1,10 +1,9 @@
 /**
- * The agent tool and AgentManager.spawn hand work to the contract runner
- * (docs/design/contract-runner.md section 10.3): spawn and batch-spawn start a
- * contract unless the work is outside every contract, a contract leaf cannot
- * spawn, a manager spawn that is not outside every contract becomes a
- * contract's owner through startForOwner, and the contracts and
- * contract-history modes read the runner. The workflow tool's `contract`
+ * The agent tool and AgentManager.spawn hand work to the contract runner:
+ * spawn and batch-spawn start a contract unless the work is outside every
+ * contract, a contract leaf cannot spawn, a manager spawn that is not outside
+ * every contract becomes a contract's owner through startForOwner, and the
+ * contracts and contract-history modes read the runner. The workflow tool's `contract`
  * definition starts a contract the same way.
  *
  * Drives the real AgentManager, agent tool, workflow tool and RuntimeEventBus;
@@ -535,7 +534,7 @@ describe('agent tool contracts and contract-history modes', () => {
     const result = await tool.execute({ mode: 'contracts' });
 
     expect(result.success).toBe(true);
-    expect(runner.listFilters).toEqual([{ sessionId: SESSION_ID, includeTerminal: true }]);
+    expect(runner.listFilters).toEqual([{ sessionId: SESSION_ID, includeTerminal: true, includeInputSnapshot: false }]);
     const output = JSON.parse(result.output!) as { count: number; contracts: unknown[] };
     expect(output.count).toBe(1);
     expect(output.contracts[0]).toEqual({
@@ -558,7 +557,7 @@ describe('agent tool contracts and contract-history modes', () => {
 
     const result = await tool.execute({ mode: 'contracts', includeTerminal: false, detail: 'full' });
 
-    expect(runner.listFilters).toEqual([{ sessionId: SESSION_ID, includeTerminal: false }]);
+    expect(runner.listFilters).toEqual([{ sessionId: SESSION_ID, includeTerminal: false, includeInputSnapshot: true }]);
     const output = JSON.parse(result.output!) as { contracts: ContractView[] };
     expect(output.contracts[0]).toEqual(JSON.parse(JSON.stringify(contract)));
   });

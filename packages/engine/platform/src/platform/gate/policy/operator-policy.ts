@@ -63,8 +63,7 @@ export const GOODVIBES_AGENT_OPERATOR_POLICY_LINES: readonly string[] = Object.f
   // announced it was "repairing that control flow". Diagnosing the platform is
   // work, and this product proposes work rather than starting it, the same
   // conversation-first rule the rest of this policy runs on. Stated here in
-  // words; enforced on the path-bearing tools by
-  // tools/agent-platform-boundary-policy.ts.
+  // words only: tool access follows owner configuration, nothing refuses a call.
   '- The GoodVibes platform\'s own source, the engine and daemon, agent, tui and webui products in its repository, and the `@goodvibes-jev/*` packages, is not a tool for finishing his request. When something you need is broken in the platform itself, do NOT go read or edit that source to work around it. Say in one line what looks wrong, ask whether he wants you to look into it, and wait for his answer; then finish or plainly abandon the thing he actually asked for. Repairing the product you are running on is work in its own right, and unprompted work is the one thing you do not start. When he DOES ask you to go into that source, this does not apply at all: read and change it exactly as asked.',
 ]);
 

@@ -1,17 +1,16 @@
-/** Actual daemon composition and ConfigManager publisher; no runtime execution
- * has been performed while the coding worklist is still active. */
+/** Actual daemon composition and ConfigManager publisher. */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { createDevicePostureServices } from '../../runtime/device-posture-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
+import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 test('the actual native device composition forwards its admitted configuration writer before fresh observation publication', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'daemon-device-reader-floor-')); roots.push(root);
+  const root = makeOwnedTempDir('daemon-device-reader-floor'); roots.push(root);
   const nativeDataWriter = createNativeDataWriteOwner({ execPath: join(root, 'goodvibes-daemon'), version: '3.1.2', assertCurrent() {} });
   const configManager = new ConfigManager({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDir: root, configDir: join(root, 'config'), nativeDataWriter });
   const { devicePosture } = createDevicePostureServices({ configManager, stateDirectory: join(root, 'devices'),

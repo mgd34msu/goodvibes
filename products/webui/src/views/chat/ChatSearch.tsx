@@ -76,6 +76,7 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
   const {
     results,
     isSearching,
+    unreadableSessions,
     sessionResults,
     sessionSearchState,
     includeClosed,
@@ -321,6 +322,12 @@ export function ChatSearch({ sessions, onSelect, className, onClose }: ChatSearc
           description={`No messages match "${query}" in the loaded sessions.`}
           className="chat-search__empty"
         />
+      )}
+
+      {hasQuery && !isSearching && unreadableSessions > 0 && (
+        <p className="chat-search__section-caption" role="status">
+          {unreadableSessions === 1 ? '1 chat' : `${String(unreadableSessions)} chats`} could not be searched, so these results may be incomplete.
+        </p>
       )}
 
       {showResults && (

@@ -26,6 +26,33 @@
  * re-restarting into the exact release that just crash looped, every hour,
  * forever.
  *
+ * The marker also remembers the last version that reached fully-started on
+ * this host (`lastStartedVersion`). A build that has already come up here was
+ * not broken by an update, so a later run of failed starts (a port in use, a
+ * typo in the bind host) is environmental and must not swap the binary.
+ *
+ * "Failed start" means any boot that exited before the composing host finished
+ * its startup, whatever the reason; the counter cannot tell a bad build from a
+ * bad environment, which is why the rollback consults `lastStartedVersion`.
+ *
+ * Ownership: a `running` marker names the process that wrote it (`pid` plus the
+ * process start time, so a pid reused by an unrelated program is not mistaken
+ * for the owner). While that process is provably alive, the marker is its
+ * alone: a second daemon sharing the home (another port) neither counts its
+ * boots into the owner's streak, nor reads the owner's `running` as a crash,
+ * nor overwrites or clears the owner's record when it stops. An owner whose
+ * start time cannot be compared is NOT treated as live, so the crash-loop
+ * guard is never switched off by a pid that merely exists.
+ *
+ * An orderly stop whose cleanup reported errors is its own outcome
+ * (`cleanupErrors`): it is not a crash, and it is not a spotless stop. It is
+ * recorded as `clean-shutdown` plus that flag, so a build that predates the
+ * flag still reads an ordinary clean shutdown and never quarantines the file.
+ *
+ * `rejectedVersion` and `lastStartedVersion` are durable: every writer below
+ * carries them through `durableFields`, so no rewrite can silently drop the
+ * guard either one provides.
+ *
  * Persisted-state hygiene: every field is validated by content on read (a
  * hand-edited, truncated, or foreign file degrades to "no marker", never to a
  * fabricated crash or a fabricated rollback), the counter is bounded, version
@@ -38,6 +65,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, writeFileAtomic, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
+import { processStartTime } from '../config/process-start-time.js';
 
 export interface LifecycleMarkerIo {
   read(path: string): string | null;
@@ -104,6 +132,10 @@ export interface LifecycleMarker {
   readonly state: 'running' | 'clean-shutdown';
   readonly at: number;
   readonly pid?: number | undefined;
+  /** `processStartTime(pid)` when the marker was written; with `pid` it identifies the owning process. */
+  readonly startTime?: string | undefined;
+  /** The orderly stop that wrote this marker reported cleanup errors. Only on `clean-shutdown`. */
+  readonly cleanupErrors?: true | undefined;
   /** Consecutive start attempts that never reached a fully-started daemon. */
   readonly failedStarts: number;
   /** When the current failed-start streak began, what bounds "rapid". */
@@ -125,6 +157,12 @@ export interface LifecycleMarker {
    * over, every check interval. Cleared once that version starts successfully.
    */
   readonly rejectedVersion?: string | undefined;
+  /**
+   * The last artifact version that reached a fully-started daemon on this
+   * host. Failed starts of that same version are environmental, not a bad
+   * update, and never trigger the automatic rollback.
+   */
+  readonly lastStartedVersion?: string | undefined;
 }
 
 /** A count field is trusted only when it is a finite, non-negative number; always clamped. */
@@ -154,6 +192,11 @@ function readVersion(value: unknown): string | undefined {
   return trimmed;
 }
 
+/** A start-time token is trusted only when it is the short, plain text `processStartTime` produces. */
+function readStartTime(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64 && /^[A-Za-z0-9: ]+$/.test(value) ? value : undefined;
+}
+
 function parseMarker(raw: string | null): LifecycleMarker | null {
   if (!raw) return null;
   try {
@@ -165,15 +208,20 @@ function parseMarker(raw: string | null): LifecycleMarker | null {
     const autoRollbackAt = readTimestamp(parsed.autoRollbackAt);
     const version = readVersion(parsed.version);
     const rejectedVersion = readVersion(parsed.rejectedVersion);
+    const lastStartedVersion = readVersion(parsed.lastStartedVersion);
+    const startTime = readStartTime(parsed.startTime);
     return {
       state: parsed.state,
       at: parsed.at,
       pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      ...(startTime !== undefined ? { startTime } : {}),
+      ...(parsed.cleanupErrors === true && parsed.state === 'clean-shutdown' ? { cleanupErrors: true as const } : {}),
       failedStarts: readCount(parsed.failedStarts),
       ...(streakStartedAt !== undefined ? { streakStartedAt } : {}),
       ...(autoRollbackAt !== undefined ? { autoRollbackAt } : {}),
       ...(version !== undefined ? { version } : {}),
       ...(rejectedVersion !== undefined ? { rejectedVersion } : {}),
+      ...(lastStartedVersion !== undefined ? { lastStartedVersion } : {}),
     };
   } catch {
     return null;
@@ -198,11 +246,50 @@ function writeMarker(io: LifecycleMarkerIo, markerPath: string, marker: Lifecycl
   io.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
 }
 
+/**
+ * The fields every rewrite must carry forward unless it deliberately changes
+ * them. Each writer rebuilds the marker field by field, so a field forgotten
+ * by one writer is a guard that silently switches off after that write.
+ */
+function durableFields(previous: LifecycleMarker | null): Pick<LifecycleMarker, 'rejectedVersion' | 'lastStartedVersion'> {
+  return {
+    ...(previous?.rejectedVersion !== undefined ? { rejectedVersion: previous.rejectedVersion } : {}),
+    ...(previous?.lastStartedVersion !== undefined ? { lastStartedVersion: previous.lastStartedVersion } : {}),
+  };
+}
+
+/**
+ * Every writer builds its marker through here: the durable fields are carried
+ * from `previous` and `patch` states only what that writer deliberately sets,
+ * so a field one writer forgets can no longer silently switch a guard off.
+ * Absent (`undefined`) patch values are not written.
+ */
+function rewriteMarker(
+  io: LifecycleMarkerIo,
+  markerPath: string,
+  previous: LifecycleMarker | null,
+  patch: Pick<LifecycleMarker, 'state' | 'at' | 'failedStarts'> & Partial<LifecycleMarker>,
+  /** Durable fields this writer deliberately clears. */
+  drop: readonly ('rejectedVersion' | 'lastStartedVersion')[] = [],
+): void {
+  const fields: Record<string, unknown> = { ...durableFields(previous) };
+  for (const key of drop) delete fields[key];
+  for (const [key, value] of Object.entries(patch)) if (value !== undefined) fields[key] = value;
+  writeMarker(io, markerPath, fields as unknown as LifecycleMarker);
+}
+
 export interface StartupMarkerResult {
   /** True when the previous daemon exited without an orderly shutdown. */
   readonly crashed: boolean;
+  /** The previous orderly stop reported cleanup errors (and so was neither a crash nor a spotless stop). */
+  readonly previousStopHadCleanupErrors: boolean;
   /** The previous marker, when one existed and parsed. */
   readonly previous: LifecycleMarker | null;
+  /**
+   * A DIFFERENT, provably live daemon owns the marker. This process then
+   * recorded nothing: it is not the one the marker describes.
+   */
+  readonly foreignOwner: { readonly pid: number } | null;
 }
 
 export interface StartAttemptResult extends StartupMarkerResult {
@@ -216,10 +303,56 @@ export interface StartAttemptResult extends StartupMarkerResult {
   readonly autoRollbackAt: number | undefined;
 }
 
+/** How the marker tells a live owner from a dead one. Injectable so tests need no real processes. */
+export interface ProcessIdentityProbe {
+  /** Whether a process with this pid exists right now. */
+  isAlive(pid: number): boolean;
+  /** `processStartTime` for the pid, or null when it cannot be read. */
+  startTime(pid: number): string | null;
+}
+
+/** The kernel's state letter from `/proc/<pid>/stat`, or null when it cannot be read. */
+function readProcessState(pid: number): string | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.charAt(stat.lastIndexOf(')') + 2) || null;
+  } catch { return null; }
+}
+
+/** A zombie (`Z`) or dead (`X`) process still answers `kill(pid, 0)` but is no longer running anything. */
+export function createProcessIdentityProbe(readState: (pid: number) => string | null): ProcessIdentityProbe {
+  return {
+    isAlive: (pid) => {
+      try { process.kill(pid, 0); }
+      catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+      const state = readState(pid);
+      return state !== 'Z' && state !== 'X';
+    },
+    startTime: processStartTime,
+  };
+}
+
+export const realProcessIdentityProbe: ProcessIdentityProbe = createProcessIdentityProbe(readProcessState);
+
+/**
+ * The live process that owns a `running` marker, if it is not `selfPid`. It
+ * must be alive AND still have the start time recorded in the marker; a
+ * marker without a start time, or a platform that cannot read one, proves
+ * nothing, so the answer is then "no live owner" and the boot is counted.
+ */
+function liveForeignOwner(previous: LifecycleMarker | null, selfPid: number, probe: ProcessIdentityProbe): { readonly pid: number } | null {
+  if (previous?.state !== 'running' || previous.pid === undefined || previous.pid === selfPid || previous.startTime === undefined) return null;
+  if (!probe.isAlive(previous.pid)) return null;
+  return probe.startTime(previous.pid) === previous.startTime ? { pid: previous.pid } : null;
+}
+
 export interface MarkerCallOptions {
   io?: LifecycleMarkerIo;
   now?: () => number;
   pid?: number;
+  /** Seam for the owner liveness check; defaults to the real process table. */
+  processIdentity?: ProcessIdentityProbe;
   /**
    * The running artifact's version. Scopes the failed-start streak to the build
    * it accuses: a marker left by a DIFFERENT version is another build's record,
@@ -246,6 +379,14 @@ export function recordDaemonStartAttempt(
   const previous = readMarkerAt(io, markerPath);
   const windowMs = Math.max(1_000, options.windowMs ?? DEFAULT_CRASH_LOOP_WINDOW_MS);
 
+  // Another live daemon owns this marker (two daemons on one home). This boot
+  // is not part of its history: counting it would let a second `serve` that
+  // fails to bind roll the healthy daemon's binary back underneath it.
+  const foreignOwner = liveForeignOwner(previous, options.pid ?? process.pid, options.processIdentity ?? realProcessIdentityProbe);
+  if (foreignOwner) {
+    return { failedStarts: 0, autoRollbackAt: previous?.autoRollbackAt, crashed: false, previousStopHadCleanupErrors: false, previous, foreignOwner };
+  }
+
   const version = readVersion(options.version);
   // A streak accuses the build that recorded it. When the binary on disk has
   // changed since, an update swapped it, a rollback restored it, the owner
@@ -266,22 +407,25 @@ export function recordDaemonStartAttempt(
   const failedStarts = streakIsRapid ? previous.failedStarts : 0;
   const carriedVersion = version ?? previous?.version;
 
-  writeMarker(io, markerPath, {
+  rewriteMarker(io, markerPath, previous, {
     state: previous?.state ?? 'clean-shutdown',
     at: previous?.at ?? now,
-    ...(previous?.pid !== undefined ? { pid: previous.pid } : {}),
+    pid: previous?.pid,
+    startTime: previous?.startTime,
+    cleanupErrors: previous?.cleanupErrors,
     failedStarts: Math.min(MAX_TRACKED_FAILED_STARTS, failedStarts + 1),
     streakStartedAt: streakIsRapid && streakStartedAt !== undefined ? streakStartedAt : now,
-    ...(previous?.autoRollbackAt !== undefined ? { autoRollbackAt: previous.autoRollbackAt } : {}),
-    ...(carriedVersion !== undefined ? { version: carriedVersion } : {}),
-    ...(previous?.rejectedVersion !== undefined ? { rejectedVersion: previous.rejectedVersion } : {}),
+    autoRollbackAt: previous?.autoRollbackAt,
+    version: carriedVersion,
   });
 
   return {
     failedStarts,
     autoRollbackAt: previous?.autoRollbackAt,
     crashed: previous?.state === 'running',
+    previousStopHadCleanupErrors: previous?.cleanupErrors === true,
     previous,
+    foreignOwner: null,
   };
 }
 
@@ -297,6 +441,12 @@ export function recordDaemonStart(markerPath: string, options: MarkerCallOptions
   const io = options.io ?? realLifecycleMarkerIo;
   const now = options.now ?? Date.now;
   const previous = readMarkerAt(io, markerPath);
+  const pid = options.pid ?? process.pid;
+  const probe = options.processIdentity ?? realProcessIdentityProbe;
+  // A live daemon that is not this one still owns the marker: it neither
+  // crashed (it is running) nor hands its record to a second process.
+  const foreignOwner = liveForeignOwner(previous, pid, probe);
+  if (foreignOwner) return { crashed: false, previousStopHadCleanupErrors: false, previous, foreignOwner };
   const version = readVersion(options.version) ?? previous?.version;
   // A rejected version outlives the boot that rejected it, the whole point is
   // that the self-update loop, running on the RESTORED build moments from now,
@@ -308,29 +458,38 @@ export function recordDaemonStart(markerPath: string, options: MarkerCallOptions
     previous?.rejectedVersion !== undefined && previous.rejectedVersion !== version
       ? previous.rejectedVersion
       : undefined;
-  writeMarker(io, markerPath, {
+  rewriteMarker(io, markerPath, previous, {
     state: 'running',
     at: now(),
-    pid: options.pid ?? process.pid,
+    pid,
+    startTime: probe.startTime(pid) ?? undefined,
     failedStarts: 0,
-    ...(version !== undefined ? { version } : {}),
-    ...(rejectedVersion !== undefined ? { rejectedVersion } : {}),
-  });
-  return { crashed: previous?.state === 'running', previous };
+    version,
+    rejectedVersion,
+    lastStartedVersion: version ?? previous?.lastStartedVersion,
+  }, rejectedVersion === undefined ? ['rejectedVersion'] : []);
+  return { crashed: previous?.state === 'running', previousStopHadCleanupErrors: previous?.cleanupErrors === true, previous, foreignOwner: null };
 }
 
-/** Called on orderly shutdown: stamps the marker `clean-shutdown` and clears the failed-start streak. */
-export function recordDaemonCleanShutdown(markerPath: string, options: MarkerCallOptions = {}): void {
+/**
+ * Called on orderly shutdown: stamps the marker `clean-shutdown` and clears the
+ * failed-start streak. `cleanupErrors` records that the stop finished but some
+ * resource did not close cleanly; the next boot says so instead of reporting a
+ * crash. A marker owned by another live daemon is left alone: this process is
+ * not the one it describes.
+ */
+export function recordDaemonCleanShutdown(markerPath: string, options: MarkerCallOptions & { cleanupErrors?: boolean } = {}): void {
   const io = options.io ?? realLifecycleMarkerIo;
   const now = options.now ?? Date.now;
   const previous = readMarkerAt(io, markerPath);
+  if (liveForeignOwner(previous, options.pid ?? process.pid, options.processIdentity ?? realProcessIdentityProbe)) return;
   const version = readVersion(options.version) ?? previous?.version;
-  writeMarker(io, markerPath, {
+  rewriteMarker(io, markerPath, previous, {
     state: 'clean-shutdown',
     at: now(),
     failedStarts: 0,
-    ...(version !== undefined ? { version } : {}),
-    ...(previous?.rejectedVersion !== undefined ? { rejectedVersion: previous.rejectedVersion } : {}),
+    version,
+    ...(options.cleanupErrors ? { cleanupErrors: true as const } : {}),
   });
 }
 
@@ -353,16 +512,62 @@ export function recordDaemonAutoRollback(
   const now = (options.now ?? Date.now)();
   const previous = readMarkerAt(io, markerPath);
   const rejectedVersion = readVersion(options.rejectedVersion) ?? previous?.rejectedVersion;
-  writeMarker(io, markerPath, {
+  // The restored build is about to run, and it is a DIFFERENT version from
+  // the one that just failed. Leaving the failing version stamped here would
+  // make the restored binary's first boot look like a continuation of its
+  // streak; naming the rejected one separately keeps both facts.
+  rewriteMarker(io, markerPath, previous, {
     state: previous?.state ?? 'clean-shutdown',
     at: previous?.at ?? now,
-    ...(previous?.pid !== undefined ? { pid: previous.pid } : {}),
+    pid: previous?.pid,
+    startTime: previous?.startTime,
+    cleanupErrors: previous?.cleanupErrors,
     failedStarts: 0,
     autoRollbackAt: now,
-    // The restored build is about to run, and it is a DIFFERENT version from
-    // the one that just failed. Leaving the failing version stamped here would
-    // make the restored binary's first boot look like a continuation of its
-    // streak; naming the rejected one separately keeps both facts.
-    ...(rejectedVersion !== undefined ? { rejectedVersion } : {}),
+    rejectedVersion,
   });
+}
+
+/** Rewrite the marker unchanged except for its rejected version (`undefined` removes it). */
+function rewriteRejection(io: LifecycleMarkerIo, markerPath: string, previous: LifecycleMarker | null, now: number, rejectedVersion: string | undefined): void {
+  rewriteMarker(io, markerPath, previous, {
+    state: previous?.state ?? 'clean-shutdown',
+    at: previous?.at ?? now,
+    pid: previous?.pid,
+    startTime: previous?.startTime,
+    cleanupErrors: previous?.cleanupErrors,
+    failedStarts: previous?.failedStarts ?? 0,
+    streakStartedAt: previous?.streakStartedAt,
+    autoRollbackAt: previous?.autoRollbackAt,
+    version: previous?.version,
+    rejectedVersion,
+  }, rejectedVersion === undefined ? ['rejectedVersion'] : []);
+}
+
+/**
+ * Called just before an automatic rollback exchanges the installed files:
+ * records the build being rolled away from as rejected, leaving every other
+ * field as it was. Throws when the marker cannot be written, so the caller can
+ * refuse the rollback while nothing has changed. Returns the rejection that
+ * stood before, for `withdrawDaemonRejection`.
+ */
+export function recordDaemonRejection(markerPath: string, options: MarkerCallOptions & { rejectedVersion: string }): string | undefined {
+  const io = options.io ?? realLifecycleMarkerIo;
+  const previous = readMarkerAt(io, markerPath);
+  const rejectedVersion = readVersion(options.rejectedVersion);
+  if (rejectedVersion === undefined) return previous?.rejectedVersion;
+  rewriteRejection(io, markerPath, previous, (options.now ?? Date.now)(), rejectedVersion);
+  return previous?.rejectedVersion;
+}
+
+/**
+ * Undo `recordDaemonRejection` after the exchange it announced did not happen:
+ * the build is still the one running, so it is not a rejected release. Only a
+ * rejection equal to `rejectedVersion` is touched.
+ */
+export function withdrawDaemonRejection(markerPath: string, options: MarkerCallOptions & { rejectedVersion: string; restore: string | undefined }): void {
+  const io = options.io ?? realLifecycleMarkerIo;
+  const previous = readMarkerAt(io, markerPath);
+  if (previous === null || previous.rejectedVersion !== readVersion(options.rejectedVersion)) return;
+  rewriteRejection(io, markerPath, previous, (options.now ?? Date.now)(), readVersion(options.restore));
 }

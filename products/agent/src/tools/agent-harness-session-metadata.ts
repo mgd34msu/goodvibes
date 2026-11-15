@@ -1,6 +1,8 @@
 import { captureTranscriptSource, readTranscriptIndex } from '../input/commands/transcript-reading.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { homeRelativePath } from './agent-harness-tool-utils.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessSessionArgs {
   readonly sessionId?: unknown;
@@ -43,9 +45,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function readSessionLookup(args: AgentHarnessSessionArgs): { readonly source: 'sessionId' | 'target' | 'query'; readonly input: string } | null {
@@ -67,7 +67,6 @@ function sessionSearchText(session: SessionInfoLike): string {
     session.title,
     session.model,
     session.provider,
-    session.filePath,
   ].join('\n').toLowerCase();
 }
 
@@ -108,6 +107,7 @@ function describeSession(
     readonly includeParameters?: boolean;
     readonly search?: { readonly matchCount: number; readonly snippets: readonly string[] };
     readonly lookup?: Record<string, unknown>;
+    readonly home?: string | undefined;
   },
 ): Record<string, unknown> {
   const posture = returnContextSummary(session);
@@ -129,7 +129,7 @@ function describeSession(
       },
     } : {}),
     ...(options.includeParameters ? {
-      filePath: session.filePath,
+      filePath: homeRelativePath(session.filePath, options.home),
       modelRoutes: {
         inspectSessions: 'sessions action:"list"',
         inspectSession: 'sessions action:"get"',
@@ -193,9 +193,9 @@ function bookmarkSummary(context: CommandContext, includeParameters = false): Re
     modelRoute: bookmarkModelRoute(),
     ...(includeParameters ? {
       modelRoutes: {
-        visibleBookmarkPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"bookmarks" confirm:true explicitUserRequest:"..."',
+        visibleBookmarkPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"bookmarks" explicitUserRequest:"..."',
         command: '/bookmarks',
-        importIntoKnowledge: 'agent_knowledge_ingest sourceKind:"bookmarks_file" confirm:true explicitUserRequest:"..."',
+        importIntoKnowledge: 'agent_knowledge_ingest sourceKind:"bookmarks_file"',
       },
     } : {}),
   };
@@ -245,12 +245,14 @@ export async function sessionSummary(context: CommandContext, args: AgentHarness
       const search = searchByName.get(session.name);
       return describeSession(session, {
         currentSessionId,
+        home: context.workspace.shellPaths?.homeDirectory,
         includeParameters: args.includeParameters === true,
         ...(search ? { search: { matchCount: search.matchCount, snippets: search.snippets } } : {}),
       });
     }),
     returned: limited.length,
     total: sessions.length,
+    ...(limited.length < sessions.length ? { note: `Showing ${limited.length} of ${sessions.length} matching sessions; raise limit (at most 500) or narrow query to see the rest.` } : {}),
     savedSessions: manager.list().length,
     policy: 'Read-only session and bookmark posture. Save, resume, rename, fork, export, delete, bookmark toggles, and bookmark file writes remain visible workspace or slash-command flows.',
   };
@@ -272,14 +274,14 @@ export function describeHarnessSession(context: CommandContext, args: AgentHarne
     };
   }
   const sessions = manager.list();
-  const currentSessionId = context.session.runtime.sessionId;
+  const currentSessionId = context.session.runtime?.sessionId ?? '';
   const exact = sessions.find((session) => session.name === lookup.input);
-  if (exact) return { status: 'found', session: describeSession(exact, { currentSessionId, includeParameters: true, lookup: { ...lookup, resolvedBy: 'id' } }) };
+  if (exact) return { status: 'found', session: describeSession(exact, { currentSessionId, home: context.workspace.shellPaths?.homeDirectory, includeParameters: true, lookup: { ...lookup, resolvedBy: 'id' } }) };
   const normalized = lookup.input.toLowerCase();
   const insensitive = sessions.find((session) => session.name.toLowerCase() === normalized);
-  if (insensitive) return { status: 'found', session: describeSession(insensitive, { currentSessionId, includeParameters: true, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } }) };
+  if (insensitive) return { status: 'found', session: describeSession(insensitive, { currentSessionId, home: context.workspace.shellPaths?.homeDirectory, includeParameters: true, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } }) };
   const prefix = sessions.filter((session) => session.name.toLowerCase().startsWith(normalized));
-  if (prefix.length === 1) return { status: 'found', session: describeSession(prefix[0]!, { currentSessionId, includeParameters: true, lookup: { ...lookup, resolvedBy: 'prefix' } }) };
+  if (prefix.length === 1) return { status: 'found', session: describeSession(prefix[0]!, { currentSessionId, home: context.workspace.shellPaths?.homeDirectory, includeParameters: true, lookup: { ...lookup, resolvedBy: 'prefix' } }) };
   if (prefix.length > 1) {
     return {
       status: 'ambiguous',
@@ -288,7 +290,7 @@ export function describeHarnessSession(context: CommandContext, args: AgentHarne
     };
   }
   const searched = sessions.filter((session) => sessionSearchText(session).includes(normalized));
-  if (searched.length === 1) return { status: 'found', session: describeSession(searched[0]!, { currentSessionId, includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }) };
+  if (searched.length === 1) return { status: 'found', session: describeSession(searched[0]!, { currentSessionId, home: context.workspace.shellPaths?.homeDirectory, includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }) };
   if (searched.length > 1) {
     return {
       status: 'ambiguous',
@@ -296,8 +298,18 @@ export function describeHarnessSession(context: CommandContext, args: AgentHarne
       candidates: searched.slice(0, 8).map((session) => describeSessionCandidate(session, currentSessionId)),
     };
   }
+  // `sessions query` searches transcript content; resolve the same query that way last.
+  const byContent = manager.search(lookup.input).map((result) => result.session);
+  if (byContent.length === 1) return { status: 'found', session: describeSession(byContent[0]!, { currentSessionId, home: context.workspace.shellPaths?.homeDirectory, includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }) };
+  if (byContent.length > 1) {
+    return {
+      status: 'ambiguous',
+      input: lookup.input,
+      candidates: byContent.slice(0, 8).map((session) => describeSessionCandidate(session, currentSessionId)),
+    };
+  }
   return {
     status: 'missing_lookup',
-    usage: `Unknown session ${lookup.input}. Use mode:"sessions" to inspect saved session ids.`,
+    usage: `Unknown session ${lookup.input}. It matches no session id, title, model or transcript text. Pass the sessionId returned by mode:"sessions".`,
   };
 }

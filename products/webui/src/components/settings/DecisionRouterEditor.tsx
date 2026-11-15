@@ -189,6 +189,7 @@ export function DecisionRouterEditor({
       <Field label="Initial routing context (characters)">
         <Input
           aria-label="Initial routing context (characters)"
+          disabled={draft.saving}
           type="number"
           min={512}
           max={32000}
@@ -203,6 +204,7 @@ export function DecisionRouterEditor({
       <Field label="Expanded routing context (characters)">
         <Input
           aria-label="Expanded routing context (characters)"
+          disabled={draft.saving}
           type="number"
           min={512}
           max={65536}

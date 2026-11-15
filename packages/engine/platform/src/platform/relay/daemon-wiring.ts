@@ -18,34 +18,72 @@ import {
   type StepUpAssertionVerifier,
 } from './step-up-policy.js';
 
+/** What the gate reads on every request, so a setting changed while the daemon runs applies to the next call. */
+export interface StepUpGateState {
+  /** Whether relay reachability is currently allowed at all. */
+  relayEnabled(): boolean;
+  /** Whether mutating relay calls currently need a step-up assertion. */
+  requireStepUp(): boolean;
+  /** The rendezvous id of the live relay registration, when there is one. */
+  rendezvousId(): string | null;
+}
+
+/** The session a request path addresses (`/api/sessions/<id>/...`), when it names one. */
+function sessionIdOfPath(pathname: string): string | undefined {
+  const match = /^\/api\/sessions\/([^/]+)/.exec(pathname);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return match[1];
+  }
+}
+
 /**
- * Wrap a dispatch so mutating relay calls are gated by the WebAuthn step-up
- * policy. When the requirement is off this returns the dispatch untouched (zero
- * overhead). When on, it fails closed unless the verifier genuinely
- * confirms a fresh assertion carried in the step-up header.
+ * Wrap a dispatch so relayed calls follow the current relay settings: a call
+ * that arrives over the relay after relay access was turned off is refused, and
+ * mutating relay calls are gated by the WebAuthn step-up policy while the
+ * requirement is on. Both are read per request, so neither needs a restart. The
+ * step-up gate fails closed unless the verifier genuinely confirms a fresh
+ * assertion carried in the step-up header.
  */
-function wrapDispatchWithStepUp(
+export function wrapDispatchWithStepUp(
   dispatch: (req: Request) => Promise<Response | null>,
-  requireStepUp: boolean,
+  gate: StepUpGateState,
   verifier: StepUpAssertionVerifier,
 ): (req: Request) => Promise<Response | null> {
-  if (!requireStepUp) return dispatch;
   return async (req) => {
     const viaRelay = isRelayTunneledRequest(req);
+    if (!viaRelay) return dispatch(req);
+    if (!gate.relayEnabled()) {
+      return new Response(JSON.stringify({
+        error: 'relay-disabled',
+        message: 'Relay access is turned off on this daemon (relay.enabled or the relay-connect flag).',
+      }), { status: 503, headers: { 'content-type': 'application/json' } });
+    }
+    if (!gate.requireStepUp()) return dispatch(req);
     const mutating = isMutatingMethod(req.method);
+    const pathname = new URL(req.url).pathname;
     // Bootstrap exemption: minting a step-up challenge is the prerequisite for
     // producing an assertion, so it cannot itself require one, otherwise a relay
     // client could never obtain a challenge (a deadlock). It creates only an
     // ephemeral, single-use challenge and returns no privileged data. Credential
     // registration is deliberately NOT exempt: it is an admin/local-only
     // bootstrap that a mutating-relay caller must not be able to perform.
-    if (viaRelay && mutating && new URL(req.url).pathname === STEP_UP_CHALLENGE_MINT_PATH) {
+    if (mutating && pathname === STEP_UP_CHALLENGE_MINT_PATH) {
       return dispatch(req);
     }
-    if (viaRelay && mutating) {
+    if (mutating) {
       const assertion = req.headers.get(STEP_UP_ASSERTION_HEADER);
+      const rendezvousId = gate.rendezvousId() ?? undefined;
+      const sessionId = sessionIdOfPath(pathname);
       const verified = assertion
-        ? await verifier(assertion, { method: req.method, path: new URL(req.url).pathname })
+        ? await verifier(assertion, {
+          method: req.method,
+          path: pathname,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(rendezvousId !== undefined ? { rendezvousId } : {}),
+        })
         : false;
       const decision = evaluateStepUp({ viaRelay, mutating, requireStepUp: true, assertionVerified: verified });
       if (!decision.allow) {
@@ -79,14 +117,21 @@ export function buildDaemonRelayReachability(
   logger: { info(m: string, f?: Record<string, unknown>): void; warn(m: string, f?: Record<string, unknown>): void },
   verifyStepUp: StepUpAssertionVerifier,
 ): RelayReachability {
-  return createRelayReachability({
-    config: {
+  const gate: StepUpGateState = {
+    relayEnabled: () => reachability.isEnabled(),
+    requireStepUp: () => configManager.get('relay.requireStepUpForMutations'),
+    rendezvousId: () => reachability.rendezvousId,
+  };
+  const reachability: RelayReachability = createRelayReachability({
+    // Read when needed, not once here, so a changed setting applies on the next
+    // reconcile or request instead of waiting for a daemon restart.
+    config: () => ({
       enabled: configManager.get('relay.enabled'),
       url: configManager.get('relay.url'),
       rendezvousId: configManager.get('relay.rendezvousId'),
       label: configManager.get('relay.label'),
-    },
-    featureFlagEnabled: isFeatureGateEnabled(featureFlags, 'relay-connect'),
+    }),
+    featureFlagEnabled: () => isFeatureGateEnabled(featureFlags, 'relay-connect'),
     identityStore: {
       load: async () => {
         const raw = await secrets.get(IDENTITY_SECRET_KEY);
@@ -96,7 +141,7 @@ export function buildDaemonRelayReachability(
         await secrets.set(IDENTITY_SECRET_KEY, JSON.stringify(identity));
       },
     },
-    dispatch: wrapDispatchWithStepUp(dispatch, configManager.get('relay.requireStepUpForMutations'), verifyStepUp),
+    dispatch: wrapDispatchWithStepUp(dispatch, gate, verifyStepUp),
     onRendezvousId: (rid) => configManager.set('relay.rendezvousId', rid),
     logger: {
       info: (m, f) => logger.info(`relay: ${m}`, f),
@@ -104,4 +149,5 @@ export function buildDaemonRelayReachability(
       error: (m, f) => logger.warn(`relay: ${m}`, f),
     },
   });
+  return reachability;
 }

@@ -28,6 +28,7 @@ import { builtinGatewayCostMethodDescriptors } from '../platform/src/platform/co
 import { builtinGatewayPermissionRuleMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-permission-rules.ts';
 import { builtinGatewayControlMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-control.ts';
 import { builtinGatewayEmailMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-email.ts';
+import { builtinGatewayHomeAssistantMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-homeassistant.ts';
 import { builtinGatewayPaymentsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-payments.ts';
 import { builtinGatewayOwnerProfileMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-owner-profile.ts';
 import { builtinGatewayOccasionsMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-occasions.ts';
@@ -35,6 +36,8 @@ import { builtinGatewayCalendarMethodDescriptors } from '../platform/src/platfor
 import { builtinGatewayBrowserMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-browser.ts';
 import { builtinGatewayRuntimeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-runtime.ts';
 import { builtinGatewayModelMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-models.ts';
+import { builtinGatewayBatchMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-batch.ts';
+import { builtinGatewayCloudflareMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-cloudflare.ts';
 import { builtinGatewayUpdateMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-update.ts';
 import { builtinGatewayRelayMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-relay.ts';
 import { builtinGatewayKnowledgeMethodDescriptors } from '../platform/src/platform/control-plane/method-catalog-knowledge.ts';
@@ -67,6 +70,7 @@ export const ALL_GATEWAY_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] 
   ...builtinGatewayControlMethodDescriptors,
   ...builtinBrowserJudgmentMethodDescriptors,
   ...builtinGatewayChannelMethodDescriptors,
+  ...builtinGatewayHomeAssistantMethodDescriptors,
   ...builtinTriggerSupervisorMethodDescriptors,
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
@@ -77,6 +81,8 @@ export const ALL_GATEWAY_METHOD_DESCRIPTORS: readonly GatewayMethodDescriptor[] 
   ...builtinGatewayBrowserMethodDescriptors,
   ...builtinGatewayRuntimeMethodDescriptors,
   ...builtinGatewayModelMethodDescriptors,
+  ...builtinGatewayBatchMethodDescriptors,
+  ...builtinGatewayCloudflareMethodDescriptors,
   ...builtinGatewayUpdateMethodDescriptors,
   ...builtinGatewayRelayMethodDescriptors,
   ...builtinGatewayKnowledgeMethodDescriptors,

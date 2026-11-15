@@ -164,3 +164,57 @@ describe('companion token atomic publication', () => {
     expect(fs.readdirSync(root)).toEqual(['operator-tokens.json.unrecognized']);
   });
 });
+
+describe('companion token concurrent and transient access', () => {
+  test('a transient read error leaves the stored token in place and is raised, not rotated', () => {
+    const { root, file } = fixture();
+    const bytes = JSON.stringify(previousRecord, null, 2);
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    const actualRead = fs.readFileSync;
+    const read = spyOn(fs, 'readFileSync').mockImplementation(((path: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (path === file) throw Object.assign(new Error('too many open files'), { code: 'EMFILE' });
+      return (actualRead as (...args: unknown[]) => unknown)(path, ...rest);
+    }) as typeof fs.readFileSync);
+    try {
+      expect(() => getOrCreateCompanionToken({ daemonHomeDir: root })).toThrow('too many open files');
+    } finally { read.mockRestore(); }
+    expect(fs.readFileSync(file, 'utf8')).toBe(bytes);
+    expect(fs.readdirSync(root)).toEqual(['operator-tokens.json']);
+  });
+
+  test('a token published after an unreadable read is adopted, not quarantined and rotated', () => {
+    const { root, file } = fixture();
+    fs.writeFileSync(file, '', { mode: 0o600 });
+    const actualRead = fs.readFileSync;
+    let reads = 0;
+    const read = spyOn(fs, 'readFileSync').mockImplementation(((path: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      if (path === file && reads++ === 0) {
+        // The stale view this process holds; the other process publishes right after it.
+        fs.writeFileSync(file, JSON.stringify(previousRecord), { mode: 0o600 });
+        return '';
+      }
+      return (actualRead as (...args: unknown[]) => unknown)(path, ...rest);
+    }) as typeof fs.readFileSync);
+    let result: ReturnType<typeof getOrCreateCompanionToken>;
+    try { result = getOrCreateCompanionToken({ daemonHomeDir: root }); }
+    finally { read.mockRestore(); }
+    expect(result).toEqual(previousRecord);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(previousRecord);
+    expect(fs.readdirSync(root)).toEqual(['operator-tokens.json']);
+  });
+
+  test('a first mint that loses the race returns the token already on disk', () => {
+    const { root, file } = fixture();
+    const actualLink = fs.linkSync;
+    const link = spyOn(fs, 'linkSync').mockImplementation((existing, target) => {
+      fs.writeFileSync(file, JSON.stringify(previousRecord), { mode: 0o600 });
+      actualLink(existing, target);
+    });
+    let result: ReturnType<typeof getOrCreateCompanionToken>;
+    try { result = getOrCreateCompanionToken({ daemonHomeDir: root }); }
+    finally { link.mockRestore(); }
+    expect(result).toEqual(previousRecord);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(previousRecord);
+    expect(fs.readdirSync(root)).toEqual(['operator-tokens.json']);
+  });
+});

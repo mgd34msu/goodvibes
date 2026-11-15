@@ -49,9 +49,14 @@ export interface ReviewerReadinessChecklist {
     readonly savedComparisons: number;
     readonly unrevealedComparisons: number;
     readonly hiddenJudgments: number;
+    /** Revealed judgments, whether or not a route decision was recorded for them. */
     readonly revealedJudgments: number;
+    /** Revealed judgments that still lack an apply or leave-unchanged route decision. */
+    readonly judgmentsAwaitingRouteDecision: number;
     readonly handoffsMissingRelatedArtifacts: number;
   };
+  /** Stores that could not be read in full; the counts above do not include what was not read. */
+  readonly readProblems?: readonly string[];
   readonly checks: readonly ReviewerReadinessCheck[];
   readonly policy: string;
 }

@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import type { GoodVibesConfig } from '../platform/src/platform/config/schema-types.ts';
@@ -57,7 +60,9 @@ describe('public policy owner preserves completed mutations and stale-read guard
       const unsubscribe = f.state.subscribe(() => { notifications += 1; });
       f.state.refreshLint = async () => { throw new Error('Synthetic lint unavailable'); };
       try {
-        await f.run(verb === 'load' ? ['load', 'second'] : verb === 'promote' ? ['promote', '--force'] : ['rollback']);
+        const bundlePath = join(mkdtempSync(join(tmpdir(), 'policy-bundle-')), 'second.json');
+        writeFileSync(bundlePath, JSON.stringify({ bundleId: 'second', issuedAt: '2026-01-01T00:00:00.000Z', payload: { version: 1, rules: [] } }));
+        await f.run(verb === 'load' ? ['load', bundlePath] : verb === 'promote' ? ['promote', '--force'] : ['rollback']);
         if (verb === 'load') expect(f.state.getRegistry().getCandidate()?.bundle.bundleId).toBe('second');
         else expect(f.state.getRegistry().getCurrent()?.bundle.bundleId).toBe(verb === 'promote' ? 'second' : 'first');
         expect(notifications).toBeGreaterThan(0);

@@ -52,9 +52,11 @@ type SharedSessionMessageInput = {
   readonly metadata?: Record<string, unknown> | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
 };
+export type SharedSessionKind = 'tui' | 'agent' | 'webui' | 'companion-task' | 'companion-chat' | 'automation' | 'channel' | 'acp' | 'hosted';
 export type SharedSessionRecordResponse = {
   readonly id: string;
-  readonly kind: 'tui' | 'agent' | 'webui' | 'companion-task' | 'companion-chat' | 'automation' | 'channel' | 'acp' | 'hosted';
+  /** A known kind, or any other string a newer producer registered (a read never blanks a record over its kind). */
+  readonly kind: SharedSessionKind | (string & {});
   readonly project: string;
   readonly title: string;
   readonly status: 'active' | 'closed';
@@ -65,6 +67,8 @@ export type SharedSessionRecordResponse = {
   readonly lastActivityAt: number;
   readonly messageCount: number;
   readonly retainedMessageCount?: number | undefined; // retained bodies when < messageCount
+  readonly channelPermissionMode?: string | undefined;
+  readonly channelPermissionModeRevision?: number | undefined;
   readonly pendingInputCount: number;
   readonly routeIds: readonly string[];
   readonly surfaceKinds: readonly string[];
@@ -87,7 +91,7 @@ type SharedSessionParticipantResponse = {
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
 const MAX_SESSION_TOOL_NAMES = 64;
-export const SHARED_SESSION_KINDS = new Set<SharedSessionRecordResponse['kind']>(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
+export const SHARED_SESSION_KINDS = new Set<SharedSessionKind>(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
 const SHARED_SESSION_STATUSES = new Set<SharedSessionRecordResponse['status']>(['active', 'closed']);
 
 function readBoundedLimit(url: URL, key = 'limit'): number {
@@ -101,7 +105,13 @@ async function callOrSessionClosed<T>(fn: () => Promise<T>): Promise<T | Respons
   try {
     return await fn();
   } catch (err: unknown) {
-    const closed = err as { code?: string; status?: number };
+    const closed = err as { code?: string; status?: number; retryAfterMs?: number; message?: string };
+    if (closed.code === 'SESSION_NOT_FOUND') {
+      return jsonErrorResponse({ error: closed.message ?? 'Unknown shared session', code: 'SESSION_NOT_FOUND' }, { status: closed.status ?? 404 });
+    }
+    if (closed.code === 'WORKSPACE_BUSY') {
+      return jsonErrorResponse({ error: closed.message ?? 'A workspace swap is in progress', code: 'WORKSPACE_BUSY', ...(typeof closed.retryAfterMs === 'number' ? { retryAfterMs: closed.retryAfterMs } : {}) }, { status: closed.status ?? 409 });
+    }
     if (closed.code !== EngineErrorCodes.SESSION_CLOSED) throw err;
     return jsonErrorResponse({ error: 'Session is closed', code: EngineErrorCodes.SESSION_CLOSED }, { status: closed.status ?? 409 });
   }
@@ -131,6 +141,8 @@ export function toSharedSessionRecordResponse(
   const lastError = readNonEmptyString(record.lastError);
   const messageCount = Math.max(readFiniteNumber(record.messageCount) ?? 0, options.messageCount ?? 0);
   const retained = readFiniteNumber(record.retainedMessageCount);
+  const permissionMode = readNonEmptyString(record.channelPermissionMode);
+  const permissionRevision = readFiniteNumber(record.channelPermissionModeRevision);
   return {
     id,
     kind,
@@ -144,6 +156,8 @@ export function toSharedSessionRecordResponse(
     lastActivityAt,
     messageCount,
     ...(retained !== undefined && retained < messageCount ? { retainedMessageCount: retained } : {}),
+    ...(permissionMode ? { channelPermissionMode: permissionMode } : {}),
+    ...(permissionRevision !== undefined && Number.isInteger(permissionRevision) && permissionRevision >= 0 ? { channelPermissionModeRevision: permissionRevision } : {}),
     pendingInputCount: Math.max(readFiniteNumber(record.pendingInputCount) ?? 0, options.pendingInputCount ?? 0),
     routeIds: readStringArray(record.routeIds),
     surfaceKinds: readStringArray(record.surfaceKinds),
@@ -156,9 +170,7 @@ export function toSharedSessionRecordResponse(
 }
 
 function readSessionKind(value: unknown): SharedSessionRecordResponse['kind'] {
-  return typeof value === 'string' && SHARED_SESSION_KINDS.has(value as SharedSessionRecordResponse['kind'])
-    ? value as SharedSessionRecordResponse['kind']
-    : 'tui';
+  return readNonEmptyString(value) ?? 'tui';
 }
 
 function readSessionStatus(value: unknown): SharedSessionRecordResponse['status'] | undefined {
@@ -339,8 +351,12 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
       ...(submission.input.routing?.providerId ? { provider: submission.input.routing.providerId } : {}),
       ...(submission.input.routing?.executionIntent ? { executionIntent: submission.input.routing.executionIntent } : {}),
     }, 'DaemonServer.handlePostTask.sharedSession', submission.session.id);
-    if (sessionSpawn instanceof Response) return sessionSpawn;
-    await context.sessionBroker.bindAgent(submission.session.id, sessionSpawn.id);
+    if (sessionSpawn instanceof Response) {
+      await releaseUnstartedInput(context, submission.session.id, submission.input.id, sessionSpawn);
+      return sessionSpawn;
+    }
+    const unbound = await bindSpawnedAgent(context, submission.session.id, sessionSpawn.id, submission.input.id);
+    if (unbound) return unbound;
     context.queueSurfaceReplyFromBinding(submission.routeBinding, {
       agentId: sessionSpawn.id,
       task: input.task,
@@ -448,6 +464,19 @@ function readPositiveInt(value: string | null): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+/**
+ * How long an input a surface claimed stays that surface's before another may
+ * take it. It is the time a surface has to start the work and name its agent;
+ * past it the claimant is presumed gone, and the message must not wait forever.
+ */
+const SURFACE_CLAIM_LEASE_MS = 2 * 60_000;
+
+class InputNotClaimableError extends Error {
+  constructor(readonly state: string) {
+    super(`input is ${state}`);
+  }
+}
+
 const SURFACE_ANSWER_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 function readSurfaceAnswerStatus(value: unknown): 'completed' | 'failed' | 'cancelled' | undefined {
@@ -473,12 +502,47 @@ async function handleDeliverSharedSessionInput(
   const consumed = body?.consumed === true;
   const agentId = typeof body?.agentId === 'string' && body.agentId.trim() ? body.agentId.trim() : undefined;
   const answer = typeof body?.answer === 'string' ? body.answer : undefined;
-  const input = await context.sessionBroker.markInputDelivered(sessionId, inputId, {
-    consumed,
-    ...(agentId ? { agentId } : {}),
-  });
+  const claim = body?.claim === true && !consumed;
+  let input: unknown | null;
+  try {
+    input = await context.sessionBroker.markInputDelivered(sessionId, inputId, {
+      consumed,
+      ...(agentId ? { agentId } : {}),
+      ...(claim ? {
+        claim,
+        // Checked and applied with no await between, so two surfaces racing for
+        // one input cannot both pass.
+        beforeApply: () => {
+          const current = readSessionInput(context, sessionId, inputId);
+          if (!isJsonRecord(current)) return;
+          const unbound = typeof current.activeAgentId !== 'string' || current.activeAgentId.length === 0;
+          const idleMs = typeof current.updatedAt === 'number' ? Date.now() - current.updatedAt : 0;
+          if (current.state === 'queued' || (current.state === 'delivered' && unbound && idleMs >= SURFACE_CLAIM_LEASE_MS)) return;
+          throw new InputNotClaimableError(typeof current.state === 'string' ? current.state : 'unknown');
+        },
+      } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof InputNotClaimableError)) throw error;
+    return Response.json({
+      error: `Cannot claim input: it is ${error.state}, so another surface already holds it or it has ended. Leave it to that surface; nothing was changed.`,
+      code: 'INPUT_NOT_CLAIMABLE',
+      input: readSessionInput(context, sessionId, inputId),
+    }, { status: 409 });
+  }
   if (!input) {
     return jsonErrorResponse({ error: 'Unknown shared session input' }, { status: 404 });
+  }
+  // The broker returns a row it did not move unchanged; a report on an input
+  // that already ended is refused here, and its answer is not forwarded.
+  const target = consumed ? 'completed' : 'delivered';
+  const state = isJsonRecord(input) && typeof input.state === 'string' ? input.state : 'unknown';
+  if (state !== target) {
+    return Response.json({
+      error: `Cannot mark input ${target}: it is ${state}. Only a queued or delivered input can be ${target === 'completed' ? 'completed' : 'delivered'} by a surface; nothing was changed.`,
+      code: 'INPUT_NOT_DELIVERABLE',
+      input,
+    }, { status: 409 });
   }
   if (agentId && answer !== undefined) {
     const status = readSurfaceAnswerStatus(body?.status);
@@ -525,7 +589,9 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
   // kind='message', companion main-chat send. Delegates to dedicated handler to avoid
   // inline duplication of session-resolution with submitMessage().
   if (kind === 'message') {
-    return handleCompanionMessageKind(context, sessionId, req, input);
+    const clientMessageId = readClientMessageId(body.messageId);
+    if (clientMessageId instanceof Response) return clientMessageId;
+    return handleCompanionMessageKind(context, sessionId, req, input, clientMessageId);
   }
 
   const submission = await callOrSessionClosed(() => context.sessionBroker.submitMessage(input));
@@ -543,6 +609,7 @@ async function handleCompanionMessageKind(
   sessionId: string,
   req: Request,
   input: SharedSessionMessageInput,
+  clientMessageId?: string,
 ): Promise<Response> {
   const session = context.sessionBroker.getSession(sessionId);
   if (!session) {
@@ -551,7 +618,59 @@ async function handleCompanionMessageKind(
   if (session.status === 'closed') {
     return jsonErrorResponse({ error: 'Session is closed', code: EngineErrorCodes.SESSION_CLOSED }, { status: 409 });
   }
-  const messageId = `companion-${randomUUID()}`;
+  const messageId = clientMessageId ?? `companion-${randomUUID()}`;
+  const answer = (): Response => context.recordApiResponse(req, `/api/sessions/${sessionId}/messages`, Response.json({
+    messageId,
+    routedTo: 'conversation',
+    sessionId,
+  }, { status: 202 }));
+  // A client that names its message can retry after a timeout without adding a
+  // second turn: a message already stored (or still being stored) under that id
+  // is answered as accepted and not appended again.
+  const inFlightKey = clientMessageId ? `${sessionId}\u0000${clientMessageId}` : null;
+  if (inFlightKey) {
+    if (companionMessagesInFlight.has(inFlightKey) || hasStoredCompanionMessage(context, sessionId, clientMessageId!)) return answer();
+    companionMessagesInFlight.add(inFlightKey);
+  }
+  try {
+    return await appendAndPublishCompanionMessage(context, sessionId, input, messageId, answer);
+  } finally {
+    if (inFlightKey) companionMessagesInFlight.delete(inFlightKey);
+  }
+}
+
+/** Client-chosen message ids being stored right now, so two concurrent retries cannot both append. */
+const companionMessagesInFlight = new Set<string>();
+const MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
+const CLIENT_MESSAGE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+const DEDUPE_LOOKBACK_MESSAGES = 200;
+
+function readClientMessageId(value: unknown): string | undefined | Response {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_CLIENT_MESSAGE_ID_LENGTH || !CLIENT_MESSAGE_ID_PATTERN.test(value)) {
+    return jsonErrorResponse(
+      { error: `messageId must be 1 to ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters of letters, digits, '.', '_', ':' or '-'.`, code: 'INVALID_MESSAGE_ID' },
+      { status: 400 },
+    );
+  }
+  return value;
+}
+
+function hasStoredCompanionMessage(context: DaemonRuntimeRouteContext, sessionId: string, messageId: string): boolean {
+  return context.sessionBroker.getMessages(sessionId, DEDUPE_LOOKBACK_MESSAGES).some((entry) => {
+    if (!isJsonRecord(entry)) return false;
+    const metadata = entry.metadata;
+    return isJsonRecord(metadata) && metadata.messageId === messageId;
+  });
+}
+
+async function appendAndPublishCompanionMessage(
+  context: DaemonRuntimeRouteContext,
+  sessionId: string,
+  input: SharedSessionMessageInput,
+  messageId: string,
+  answer: () => Response,
+): Promise<Response> {
   const timestamp = Date.now();
   const metadata = buildCompanionMessageMetadata(input);
   // Persist the companion message to the session log so GET /api/sessions/:id/messages
@@ -573,11 +692,7 @@ async function handleCompanionMessageKind(
     ...(metadata ? { metadata } : {}),
   });
   // { routedTo: 'conversation' } signals the companion app the message was persisted.
-  return context.recordApiResponse(req, `/api/sessions/${sessionId}/messages`, Response.json({
-    messageId,
-    routedTo: 'conversation',
-    sessionId,
-  }, { status: 202 }));
+  return answer();
 }
 
 function buildCompanionMessageMetadata(input: SharedSessionMessageInput): Record<string, unknown> | undefined {
@@ -656,8 +771,15 @@ async function handleCancelSharedSessionInput(context: DaemonRuntimeRouteContext
     // Use Response.json directly so the `input` field is preserved in the
     // response body. jsonErrorResponse strips unknown fields via its structured
     // error serializer, which would remove `input`.
+    const running = inputRecord.state === 'delivered' || inputRecord.state === 'spawned';
     return Response.json(
-      { error: `Cannot cancel input in state '${inputRecord.state}'`, code: 'CANCEL_NOT_ALLOWED', input },
+      {
+        error: `Cannot cancel input in state '${inputRecord.state}': only a queued input can be cancelled. ${running
+          ? 'It is already being answered; stop the agent or turn answering it instead.'
+          : 'It has already ended; nothing was changed.'}`,
+        code: 'CANCEL_NOT_ALLOWED',
+        input,
+      },
       { status: 409 },
     );
   }
@@ -810,8 +932,12 @@ async function respondToSessionSubmission(
       ? { executionIntent: spawnOptions.executionIntent ?? submission.input.routing?.executionIntent }
       : {}),
   }, logLabel, submission.session.id);
-  if (spawnResult instanceof Response) return spawnResult;
-  await context.sessionBroker.bindAgent(submission.session.id, spawnResult.id);
+  if (spawnResult instanceof Response) {
+    await releaseUnstartedInput(context, submission.session.id, submission.input.id, spawnResult);
+    return spawnResult;
+  }
+  const unbound = await bindSpawnedAgent(context, submission.session.id, spawnResult.id, submission.input.id);
+  if (unbound) return unbound;
   context.queueSurfaceReplyFromBinding(submission.routeBinding, {
     agentId: spawnResult.id,
     task: taskText,
@@ -823,14 +949,68 @@ async function respondToSessionSubmission(
       return session ? toSharedSessionRecordResponse(submission.session.id, session) : null;
     })(),
     message: submission.userMessage ?? null,
-    input: {
-      ...submission.input,
-      state: 'spawned',
-      activeAgentId: spawnResult.id,
-    },
+    // The row as the broker holds it after the claim, never an assumed
+    // 'spawned': a caller polling this input must see what actually happened to it.
+    input: readSessionInput(context, submission.session.id, submission.input.id) ?? submission.input,
     mode: submission.mode,
     agentId: spawnResult.id,
   }, { status: 202 }));
+}
+
+function readSessionInput(context: DaemonRuntimeRouteContext, sessionId: string, inputId: string): unknown | null {
+  const inputs = context.sessionBroker.getInputs(sessionId, Number.MAX_SAFE_INTEGER);
+  return inputs.find((entry) => isJsonRecord(entry) && entry.id === inputId) ?? null;
+}
+
+/**
+ * Bind a freshly spawned agent to its session input. When the broker cannot
+ * record the binding the agent would run with nothing tracking it while the
+ * input stays queued, so the agent is cancelled and the input is ended with the
+ * reason. Returns the refusal to send, or null once bound.
+ */
+async function bindSpawnedAgent(
+  context: DaemonRuntimeRouteContext,
+  sessionId: string,
+  agentId: string,
+  inputId: string,
+): Promise<Response | null> {
+  try {
+    await context.sessionBroker.bindAgent(sessionId, agentId, inputId);
+    return null;
+  } catch (error) {
+    try { context.agentManager.cancel(agentId); } catch { /* the agent may already have ended */ }
+    const reason = error instanceof Error && error.message.trim() ? error.message : 'the session could not record it';
+    const message = `The agent was started but could not be attached to the session (${reason}), so it was cancelled. Send the input again to retry.`;
+    const broker = context.sessionBroker;
+    try {
+      if (broker.failInput) await broker.failInput(sessionId, inputId, message);
+      else await broker.cancelInput(sessionId, inputId);
+    } catch { /* the input may already be settled; the refusal below still tells the caller */ }
+    return jsonErrorResponse({ error: message, code: 'SESSION_AGENT_BIND_FAILED' }, { status: 500 });
+  }
+}
+
+/**
+ * An input whose agent could not be started is ended with the reason, so it
+ * does not stay queued forever (which reads as a busy daemon and a dispatch
+ * that never resolves). The refusal itself is still what the caller receives.
+ */
+async function releaseUnstartedInput(
+  context: DaemonRuntimeRouteContext,
+  sessionId: string,
+  inputId: string,
+  refusal: Response,
+): Promise<void> {
+  let reason = `No agent could be started for this input (HTTP ${refusal.status}). Send it again to retry.`;
+  try {
+    const body: unknown = await refusal.clone().json();
+    if (isJsonRecord(body) && typeof body.error === 'string' && body.error.trim()) {
+      reason = `No agent could be started for this input: ${body.error}. Send it again to retry.`;
+    }
+  } catch { /* a non-JSON refusal keeps the status-only reason */ }
+  const broker = context.sessionBroker;
+  if (broker.failInput) await broker.failInput(sessionId, inputId, reason);
+  else await broker.cancelInput(sessionId, inputId);
 }
 
 function handleRuntimeTaskAction(context: DaemonRuntimeRouteContext, taskId: string, action: 'cancel' | 'retry', _req: Request): Response {

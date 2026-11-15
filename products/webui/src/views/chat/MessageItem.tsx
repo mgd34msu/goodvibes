@@ -42,6 +42,8 @@ interface MessageItemProps {
   revisionOf?: string;
   /** True when this message is the current search jump-to-message target, flashes a brief highlight. */
   isHighlighted?: boolean;
+  /** Whether Resend is offered on a user message; defaults to "it has text". */
+  canResend?: boolean;
   onCopyMessage: (message: ChatMessage) => void;
   onResendMessage: (message: ChatMessage) => void;
   onRegenerateFrom: (messageId: string) => void;
@@ -58,6 +60,7 @@ export function MessageItem({
   reason,
   revisionOf,
   isHighlighted = false,
+  canResend,
   onCopyMessage,
   onResendMessage,
   onRegenerateFrom,
@@ -195,14 +198,16 @@ export function MessageItem({
                 : state === 'local' ? 'Pending'
                   : state === 'cancelled' ? 'Stopped before completion: this is the partial reply that existed when the turn was stopped'
                     : state === 'queued' ? 'Queued: will run after the current reply finishes'
-                      : 'Sent'
+                      : state === 'unanswered' ? 'Not answered: this chat closed or the daemon restarted before this queued message ran. Send it again to get a reply'
+                        : 'Sent'
             }
           >
             {state === 'failed' ? <><X size={12} aria-hidden="true" /> Not sent</>
               : state === 'cancelled' ? <><X size={12} aria-hidden="true" /> Stopped</>
                 : state === 'queued' ? <><Clock size={12} aria-hidden="true" /> Queued</>
-                  : state === 'local' ? <><Clock size={12} aria-hidden="true" /> Sending</>
-                    : <Check size={12} aria-label="Sent" />}
+                  : state === 'unanswered' ? <><X size={12} aria-hidden="true" /> Not answered</>
+                    : state === 'local' ? <><Clock size={12} aria-hidden="true" /> Sending</>
+                      : <Check size={12} aria-label="Sent" />}
           </span>
         )}
 
@@ -236,7 +241,7 @@ export function MessageItem({
           )}
 
           {/* Resend / Regenerate */}
-          {canRetry && !isEditing && (
+          {(isAssistant ? canRetry : (canResend ?? canRetry)) && !isEditing && (
             <IconButton
               size="sm"
               label={isAssistant ? 'Regenerate response' : 'Resend message'}

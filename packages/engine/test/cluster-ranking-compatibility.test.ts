@@ -1,4 +1,4 @@
-/** Actual codec/election regressions, intentionally UNRUN during coding first. */
+/** Actual codec/election regressions. */
 import { expect, spyOn, test } from 'bun:test';
 import * as crypto from 'node:crypto';
 import { compareStableRank, compareVersions } from '../platform/src/platform/cluster/ranking.js';

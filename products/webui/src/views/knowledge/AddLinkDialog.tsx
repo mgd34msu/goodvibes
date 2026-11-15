@@ -68,10 +68,27 @@ export function AddLinkDialog({ open, onClose, onIngested }: AddLinkDialogProps)
   });
 
   useEffect(() => {
-    if (!open) ingest.reset();
+    if (open) return;
+    ingest.reset();
+    // A closed dialog opens blank: a leftover "Allow private hosts" must not
+    // carry over to the next link.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setUrl('');
+    setTitle('');
+    setTags('');
+    setFolderPath('');
+    setSourceType('url');
+    setAllowPrivateHosts(false);
+    /* eslint-enable react-hooks/set-state-in-effect */
     // reset() is stable per mutation; only the open flag should retrigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Closing does not cancel the request, so while one is running the dialog
+  // stays: a late result would otherwise navigate away after the user cancelled.
+  function requestClose() {
+    if (!ingest.isPending) onClose();
+  }
 
   function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -81,12 +98,12 @@ export function AddLinkDialog({ open, onClose, onIngested }: AddLinkDialogProps)
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
       title="Add link"
       description="GoodVibes reads the page and adds it to its knowledge."
       footer={(
         <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" disabled={ingest.isPending} onClick={requestClose}>Cancel</Button>
           <Button type="submit" form="library-add-link" variant="primary" disabled={ingest.isPending || !url.trim()} aria-busy={ingest.isPending}>
             {ingest.isPending ? 'Ingesting…' : 'Ingest URL'}
           </Button>

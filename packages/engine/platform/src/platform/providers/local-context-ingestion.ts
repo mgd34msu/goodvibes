@@ -19,6 +19,8 @@
 
 import { logger } from '../utils/logger.js';
 import { discoverContextWindows } from './context-discovery.js';
+import { LEGACY_GUESSED_CONTEXT_WINDOW } from './context-window-catalog.js';
+import type { ContextWindowProvenance as RegistryContextWindowProvenance } from './registry-types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,9 +31,9 @@ import { discoverContextWindows } from './context-discovery.js';
  *
  * - `provider_api`  , sourced from the provider's /v1/models endpoint
  * - `configured_cap`, explicit value from the custom provider config file
- * - `fallback`      , DEFAULT_CONTEXT_WINDOW (no config, no API response)
+ * - `fallback`      , DEFAULT_CONTEXT_WINDOW (no config, no API response); a guess, not a measured limit
  */
-export type ContextWindowProvenance = 'provider_api' | 'configured_cap' | 'fallback';
+export type ContextWindowProvenance = Extract<RegistryContextWindowProvenance, 'provider_api' | 'configured_cap' | 'fallback'>;
 
 /**
  * A fully-resolved context window with its provenance and metadata.
@@ -61,7 +63,7 @@ export interface ResolvedContextWindow {
  * Default fallback context window when neither the API nor the config
  * provides a value.
  */
-export const DEFAULT_CONTEXT_WINDOW = 8_192;
+export const DEFAULT_CONTEXT_WINDOW = LEGACY_GUESSED_CONTEXT_WINDOW;
 
 /**
  * Grace period between ingestion attempts for the same provider.
@@ -101,12 +103,15 @@ interface CacheEntry {
 export class LocalContextIngestionService {
   private readonly providerCache = new Map<string, CacheEntry>();
 
+  /** `now` is injectable so the cache lifetime can be driven without waiting. */
+  constructor(private readonly now: () => number = Date.now) {}
+
   async ingestProviderContextWindows(
     providerName: string,
     baseURL: string,
     apiKey?: string,
   ): Promise<Map<string, number> | null> {
-    const now = Date.now();
+    const now = this.now();
     const cached = this.providerCache.get(providerName);
     if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
       return cached.failed ? null : cached.models;

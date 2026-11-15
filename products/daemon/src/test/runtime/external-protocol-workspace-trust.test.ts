@@ -16,7 +16,7 @@ for (const mode of ['ask-on-risk', 'allow-all'] as const) test(`explicit workspa
   try {
     await f.daemon.services.workspaceTrustManager.setLevel('restricted');
     f.registry.setServerTrustMode('owned-protocol', mode);
-    await expect(f.call()).rejects.toThrow();
+    await expect(f.call()).rejects.toThrow('Explicit restricted workspace forbids');
     expect(f.calls).toHaveLength(0); expect(f.human).not.toHaveBeenCalled();
   } finally { await f.close(); }
 });
@@ -40,8 +40,9 @@ test('restricted daemon origin prevents initial ACP and MCP process spawn', asyn
   const spawn = spyOn(Bun, 'spawn');
   try {
     await f.daemon.services.workspaceTrustManager.setLevel('restricted');
-    await expect(f.spawn('Original owner goal')).rejects.toThrow();
-    await expect(f.daemon.daemon.registerMcpServer({ name: 'must-not-start', command: process.execPath, args: ['--version'] })).rejects.toThrow();
+    await expect(f.spawn('Original owner goal')).rejects.toThrow('ACP gateway 500');
+    expect(f.acpRefusals.join('\n')).toContain('Explicit restricted workspace forbids');
+    await expect(f.daemon.daemon.registerMcpServer({ name: 'must-not-start', command: process.execPath, args: ['--version'] })).rejects.toThrow('Explicit restricted workspace forbids');
     expect(protocolSpawns(spawn.mock.calls, f.daemon.workingDirectory)).toEqual([]); expect(f.human).not.toHaveBeenCalled();
   } finally { spawn.mockRestore(); await f.close(); }
 });
@@ -57,7 +58,8 @@ test('ACP target capability is shared with physical aliases and cannot borrow tr
     expect(trustFor(alias)).toBe(trustFor(other));
     await f.daemon.services.workspaceTrustManager.setLevel('trusted');
     await trustFor(other).setLevel('restricted');
-    await expect(f.spawn('Original owner goal', 'permission-reject-first', alias)).rejects.toThrow();
+    await expect(f.spawn('Original owner goal', 'permission-reject-first', alias)).rejects.toThrow('ACP gateway 500');
+    expect(f.acpRefusals.join('\n')).toContain('Explicit restricted workspace forbids');
     expect(protocolSpawns(spawn.mock.calls, f.daemon.workingDirectory)).toEqual([]); expect(f.human).not.toHaveBeenCalled();
   } finally { spawn.mockRestore(); await f.close(); }
 });
@@ -89,7 +91,7 @@ for (const protocol of ['MCP', 'ACP']) test(`${protocol} trust ABA during record
     changed = true; await trust.setLevel('restricted'); await trust.setLevel('trusted');
   });
   try {
-    if (protocol === 'MCP') { await expect(f.call()).rejects.toThrow(); expect(f.calls).toHaveLength(0); }
+    if (protocol === 'MCP') { await expect(f.call()).rejects.toThrow('Workspace trust changed before autonomous dispatch'); expect(f.calls).toHaveLength(0); }
     else {
       const hook = async () => { if (!changed) { changed = true; await trust.setLevel('restricted'); await trust.setLevel('trusted'); } };
       f.onAdmission(undefined);
@@ -135,7 +137,7 @@ for await (const line of createInterface({input:process.stdin})) { const req=JSO
     // rather than waiting on wall-clock scheduling or a child crash heuristic.
     await client!.disconnect();
     await f.daemon.services.workspaceTrustManager.setLevel('restricted');
-    await expect(internal._startProcess()).rejects.toThrow();
+    await expect(internal._startProcess()).rejects.toThrow('Workspace trust changed before autonomous dispatch');
     expect(protocolSpawns(spawn.mock.calls, f.daemon.workingDirectory)).toEqual([[process.execPath, peer]]); expect(client?.isConnected).toBe(false);
   } finally { spawn.mockRestore(); await f.close(); }
 });
@@ -170,7 +172,7 @@ test('MCP post-dispatch trust ABA prevents an elicitation continuation', async (
     if (changed || !f.calls.length) return;
     changed = true; await trust.setLevel('restricted'); await trust.setLevel('trusted');
   });
-  try { await expect(f.call()).rejects.toThrow(); expect(changed).toBe(true); expect(f.calls).toHaveLength(1); }
+  try { await expect(f.call()).rejects.toThrow('Workspace trust changed before autonomous dispatch'); expect(changed).toBe(true); expect(f.calls).toHaveLength(1); }
   finally { await f.close(); }
 });
 
@@ -181,7 +183,8 @@ test('an autonomous protocol owner with missing workspace capability fails close
   try {
     f.registry.setServerTrustMode('owned-protocol', 'allow-all');
     await expect(f.call()).rejects.toThrow('workspace trust owner');
-    await expect(f.spawn('Original owner goal')).rejects.toThrow();
+    await expect(f.spawn('Original owner goal')).rejects.toThrow('ACP gateway 500');
+    expect(f.acpRefusals.join('\n')).toContain('External process has no workspace trust owner');
     expect(f.calls).toHaveLength(0); expect(f.human).not.toHaveBeenCalled();
   } finally { host.workspaceTrust = trust; await f.close(); }
 });

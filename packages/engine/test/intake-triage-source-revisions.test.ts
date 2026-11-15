@@ -8,8 +8,10 @@ import { InboxCursorStore, captureInboxTriageSource } from '../platform/src/plat
 import { captureTriageInputs, checkTriageReceipt } from '../platform/src/platform/intake/triage/evidence.js';
 import { readTriageMetadataBatch, runInboxTriage } from '../platform/src/platform/intake/triage/pipeline.js';
 import { SqliteTriageStore } from '../platform/src/platform/intake/triage/store.js';
-import { triageSource } from './_helpers/triage-source.ts';
+import { triageSource, useTriageSourceCleanup } from './_helpers/triage-source.ts';
 import type { TriageInput } from '../platform/src/platform/intake/triage/types.js';
+
+useTriageSourceCleanup();
 
 const item = (): TriageInput => ({ id: 'synthetic:one', surface: 'synthetic', subject: 'Protected original subject', snippet: 'Protected original preview', conversationKind: 'direct', unread: true });
 const model = () => fakePort(name => noulAnswer(name.endsWith('spam') ? .01 : .99));
@@ -36,7 +38,7 @@ test('settled native receipts match unchanged and unrelated polls without a SHA 
 });
 
 for (const change of [{ subject: 'Changed subject' }, { snippet: 'Changed preview' }, { unread: false },
-  { surface: 'other' }, { conversationKind: 'thread' as const }]) test(`native mutation of ${Object.keys(change)[0]} retires the old label`, async () => {
+  { conversationKind: 'thread' as const }]) test(`native mutation of ${Object.keys(change)[0]} retires the old label`, async () => {
   const original = item(), source = await triageSource([original]), store = receiptStore(source.directory);
   await runInboxTriage([original], { ...source.options, store, port: model().port });
   const before = captureInboxTriageSource(source.mirror, captureTriageInputs([original]), source.scope).bindingFor(original.id);

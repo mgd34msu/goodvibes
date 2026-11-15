@@ -68,6 +68,11 @@ function createOpsRuntimeContextState(config: OpsRuntimeContextConfig): OpsRunti
   return state;
 }
 
+/** The context of the enclosing `withOpsRuntimeContext` call, or null outside one. */
+export function getOpsRuntimeContext(): OpsRuntimeContextState | null {
+  return scopedContext.getStore() ?? null;
+}
+
 export async function withOpsRuntimeContext<T>(
   config: OpsRuntimeContextConfig,
   fn: () => Promise<T> | T,

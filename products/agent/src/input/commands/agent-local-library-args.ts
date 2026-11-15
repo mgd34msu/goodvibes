@@ -1,3 +1,6 @@
+import type { CommandContext } from '../command-registry.ts';
+import { requireShellPaths } from './runtime-services.ts';
+
 export interface ParsedAgentLocalLibraryArgs {
   readonly rest: readonly string[];
   readonly flags: ReadonlyMap<string, string>;
@@ -49,4 +52,19 @@ export function parseAgentLocalLibraryArgs(
     rest.push(token);
   }
   return { rest, flags, yes };
+}
+
+/**
+ * A file argument resolved the way every other Agent command resolves one: relative
+ * to the workspace, `~` meaning the Agent home. A model-run command may only name
+ * a place inside the workspace; the owner typing the command may name any path.
+ * Returns null after printing why when the path is refused.
+ */
+export function resolveCommandFilePath(ctx: CommandContext, raw: string, purpose: 'read' | 'write'): string | null {
+  const shellPaths = requireShellPaths(ctx);
+  if (ctx.invokedByModel === true && !shellPaths.isWithinWorkingDirectory(raw)) {
+    ctx.print(`Refused: ${raw} is outside the workspace (${shellPaths.workingDirectory}). A command run by the model can ${purpose} only inside the workspace; the owner can type the command with that path.`);
+    return null;
+  }
+  return shellPaths.resolveWorkspacePath(raw);
 }

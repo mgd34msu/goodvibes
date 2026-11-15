@@ -42,6 +42,7 @@ function makeHarness(options: {
   readonly answer?: ExternalDaemonAttachRead;
   readonly clientVersion?: string;
   readonly daemonFloor?: string;
+  readonly adoptThrows?: boolean;
 }) {
   const adopted: Array<{ mode: string; reason?: string | undefined; token: string }> = [];
   const refusals: HostServiceStatus[] = [];
@@ -55,10 +56,11 @@ function makeHarness(options: {
     readDaemonStatus: () => status,
     recordRefusal: (refused) => { refusals.push(refused); status = refused; },
     adopt: (adoptedStatus, token) => {
+      if (options.adoptThrows) throw new Error('spine refused');
       adopted.push({ mode: adoptedStatus.mode, reason: adoptedStatus.reason, token });
     },
     notify: (text) => { notices.push(text); },
-    ...(options.daemonFloor === undefined ? {} : { daemonFloor: options.daemonFloor }),
+    daemonFloor: options.daemonFloor ?? '1.28.0',
     read: async (deps) => {
       reads.push({ baseUrl: deps.baseUrl, consumeReceipts: deps.consumeReceipts === true });
       return options.answer ?? unanswered();
@@ -122,7 +124,7 @@ describe('a daemon below this build\'s floor', () => {
     expect(h.adopted).toEqual([{ mode: 'incompatible', reason: h.refusals[0]!.reason, token: 'shared-bearer' }]);
   });
 
-  test('says so once, and says nothing about a client floor it has no business honoring', async () => {
+  test('says so once, still renders the receipts that read consumed, and says nothing about a client floor it has no business honoring', async () => {
     const h = makeHarness({
       answer: answered({ version: '1.27.1', clientFloor: '2.0.0', notices: ['a receipt'] }),
       daemonFloor: '1.28.0',
@@ -135,7 +137,30 @@ describe('a daemon below this build\'s floor', () => {
     expect(h.notices.filter((line) => line.includes('update the daemon'))).toHaveLength(1);
     // A daemon this terminal refused does not get to pause its work.
     expect(h.clientBuildGuard.maySharedSessionWork()).toBe(true);
-    expect(h.notices).not.toContain('a receipt');
+    // The read that refused the daemon also consumed its receipts, so they are shown.
+    expect(h.notices).toContain('a receipt');
+  });
+});
+
+describe('receipts the read consumed', () => {
+  test('are rendered even when adopting the daemon throws', async () => {
+    const h = makeHarness({ answer: answered({ notices: ['a receipt'] }), adoptThrows: true });
+
+    await expect(h.handshake.attach('shared-bearer')).rejects.toThrow('spine refused');
+
+    expect(h.notices).toEqual(['a receipt']);
+  });
+
+  test('are rendered once even when refusing the daemon throws', async () => {
+    const h = makeHarness({
+      answer: answered({ version: '1.27.1', notices: ['a receipt'] }),
+      daemonFloor: '1.28.0',
+      adoptThrows: true,
+    });
+
+    await expect(h.handshake.attach('shared-bearer')).rejects.toThrow('spine refused');
+
+    expect(h.notices.filter((line) => line === 'a receipt')).toHaveLength(1);
   });
 });
 

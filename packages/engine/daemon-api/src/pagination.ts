@@ -88,6 +88,13 @@ export interface PaginateItemsOptions {
    * of sort direction.  Defaults to `false` (ascending / oldest-first).
    */
   readonly descending?: boolean | undefined;
+  /**
+   * What to do when the cursor's item is gone and there is no `createdAt` to
+   * find its place: `'restart'` (default) starts again from the first item,
+   * `'error'` refuses so the client restarts the walk on purpose. Use `'error'`
+   * for lists a client could otherwise re-read or loop on.
+   */
+  readonly onMissingCursor?: 'restart' | 'error' | undefined;
 }
 
 /**
@@ -159,6 +166,8 @@ export function paginateItems<T>(
           },
         );
         startIndex = insertionIndex === -1 ? items.length : insertionIndex;
+      } else if (options?.onMissingCursor === 'error') {
+        return { error: 'Cursor expired: the item it points at no longer exists. Restart the listing without a cursor.' };
       } else {
         startIndex = 0;
       }

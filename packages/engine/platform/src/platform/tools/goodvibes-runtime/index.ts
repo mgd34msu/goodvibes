@@ -8,6 +8,7 @@ import {
 } from '../../config/daemon-config-route.js';
 import {
   applyRoutedConfigWrite,
+  describeIncompleteLocalReset,
   localStorePathForKey,
   readRoutedConfigValue,
   readRoutedConfigValues,
@@ -82,6 +83,8 @@ export interface GoodVibesRuntimeToolDeps {
    * than by this client's copy of it.
    */
   readonly configRouting?: ConfigRoutingOptions | undefined;
+  /** The daemon's own auth token reader; Cloudflare status counts it as the operator token when none is stored. */
+  readonly cloudflareAuthToken?: (() => string | null) | undefined;
 }
 
 export function createGoodVibesContextTool(deps: GoodVibesRuntimeToolDeps): Tool {
@@ -254,7 +257,11 @@ async function resetRoutedSetting(
   routing: ConfigRoutingOptions,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const route = resolveConfigWriteRoute(key, resolveRouterDeps(configManager, routing));
-  if (route.mode === 'daemon') {
+  // A client-owned key in a hosted turn belongs to the originating surface's
+  // file, exactly as for set; resetting the host's store would change the
+  // wrong surface.
+  const clientOwned = routing.clientOwnedStore !== undefined && configKeyScope(key) === 'client';
+  if (route.mode === 'daemon' || clientOwned) {
     const setting = configManager.getSchema().find((entry) => entry.key === key);
     if (!setting) return { success: false, error: `No schema default is known for ${key}, so it cannot be reset.` };
     const applied = await applyRoutedConfigWrite(configManager, key, setting.default, routing);
@@ -271,6 +278,10 @@ async function resetRoutedSetting(
     });
   }
   configManager.reset(key);
+  const defaultValue = configManager.getSchema().find((entry) => entry.key === key)?.default;
+  // The in-process object says "reset" whatever the stores hold; read them back as a set does.
+  const incomplete = describeIncompleteLocalReset(configManager, key, defaultValue);
+  if (incomplete) return { success: false, error: incomplete };
   return ok({
     key,
     action: 'reset',
@@ -286,6 +297,13 @@ async function resetRoutedSetting(
 async function buildRuntimeSummary(deps: GoodVibesRuntimeToolDeps): Promise<JsonRecord> {
   const currentModel = safeCall(() => deps.providerRegistry.getCurrentModel());
   const cloudflareStatus = await safeAsync(() => createCloudflareManager(deps).describeStatus());
+  // Read through the owning runtime, like config_get, so the two modes cannot disagree about one key.
+  const summaryReads = await readRoutedConfigValues(
+    deps.configManager,
+    ['batch.mode', 'batch.queueBackend', 'tts.provider', 'tts.voice'],
+    deps.configRouting ?? {},
+  );
+  const [batchMode, batchQueueBackend, ttsProvider, ttsVoice] = summaryReads as [ConfigReadResult, ConfigReadResult, ConfigReadResult, ConfigReadResult];
   const channels = await safeAsync(async () => ({
     descriptors: deps.channelRegistry?.listDescriptors() ?? [],
     status: deps.channelRegistry ? await deps.channelRegistry.listStatus() : [],
@@ -320,12 +338,12 @@ async function buildRuntimeSummary(deps: GoodVibesRuntimeToolDeps): Promise<Json
       channels: channels.value ?? channels.error,
       cloudflare: cloudflareStatus.value ? await redactCloudflareStatus(cloudflareStatus.value) : { error: cloudflareStatus.error },
       batch: {
-        mode: deps.configManager.get('batch.mode'),
-        queueBackend: deps.configManager.get('batch.queueBackend'),
+        mode: routedValue(batchMode),
+        queueBackend: routedValue(batchQueueBackend),
       },
       tts: {
-        provider: deps.configManager.get('tts.provider'),
-        voice: deps.configManager.get('tts.voice') ? 'configured' : 'default',
+        provider: routedValue(ttsProvider),
+        voice: ttsVoice.available ? (ttsVoice.value ? 'configured' : 'default') : routedValue(ttsVoice),
       },
     },
     tools: {
@@ -348,7 +366,10 @@ async function buildRuntimeSummary(deps: GoodVibesRuntimeToolDeps): Promise<Json
  * cannot be told apart from the truth.
  */
 async function buildConfigSnapshot(deps: GoodVibesRuntimeToolDeps, args: JsonRecord): Promise<JsonRecord> {
-  const schema = selectSchema(deps.configManager.getSchema(), args);
+  const matching = selectSchema(deps.configManager.getSchema(), args);
+  // `limit` bounds a broad dump the way it bounds the tools listing; what was left out is said.
+  const limit = args.limit === undefined ? undefined : clampLimit(args.limit, 1000, 5000);
+  const schema = limit === undefined ? matching : matching.slice(0, limit);
   const reads = await readRoutedConfigValues(
     deps.configManager,
     schema.map((setting) => setting.key),
@@ -359,6 +380,7 @@ async function buildConfigSnapshot(deps: GoodVibesRuntimeToolDeps, args: JsonRec
   const unreachable = reads.filter((read): read is Extract<ConfigReadResult, { available: false }> => !read.available);
   return {
     settings,
+    ...(schema.length < matching.length ? { truncated: { returned: schema.length, total: matching.length, note: 'Narrow with key, prefix or category, or raise limit, to see the rest.' } } : {}),
     ...(unreachable.length > 0
       ? {
           unavailable: {
@@ -403,7 +425,7 @@ async function buildIntegrationSnapshot(deps: GoodVibesRuntimeToolDeps, args: Js
     channels,
     services,
     cloudflare: await redactCloudflareStatus(await createCloudflareManager(deps).describeStatus()),
-    configuredSurfaces: await listSurfaceConfig(deps.configManager),
+    configuredSurfaces: await listSurfaceConfig(deps),
   };
 }
 
@@ -474,19 +496,27 @@ function listConfigCategories(schema: readonly ConfigSetting[]): string[] {
   return [...new Set(schema.map((setting) => setting.key.split('.')[0]!))].sort();
 }
 
-async function listSurfaceConfig(configManager: ConfigManager): Promise<JsonRecord[]> {
+/** Surface settings, each read from the runtime that owns it; a value its owner could not supply is listed as unavailable, never as a default. */
+async function listSurfaceConfig(deps: GoodVibesRuntimeToolDeps): Promise<JsonRecord[]> {
   const surfaces = new Map<string, JsonRecord>();
-  const fields = configManager.getSchema().flatMap((setting) => {
+  const fields = deps.configManager.getSchema().flatMap((setting) => {
     const match = /^surfaces\.([^.]+)\.(.+)$/.exec(setting.key);
     return match ? [{ setting, surface: match[1]!, field: match[2]! }] : [];
   });
-  const values = await mapWithConcurrency(fields, REDACTION_CONCURRENCY, ({ setting }) =>
-    redactConfigValue(setting.key, configManager.get(setting.key), setting.default));
+  const reads = await readRoutedConfigValues(deps.configManager, fields.map(({ setting }) => setting.key), deps.configRouting ?? {});
+  const values = await mapWithConcurrency(fields, REDACTION_CONCURRENCY, ({ setting }, index) => {
+    const read = reads[index]!;
+    return read.available ? redactConfigValue(setting.key, read.value, setting.default) : Promise.resolve(null);
+  });
   fields.forEach(({ surface, field }, index) => {
-    const entry = surfaces.get(surface) ?? { surface, settings: {} };
+    const read = reads[index]!;
+    const entry = surfaces.get(surface) ?? { surface, settings: {}, sources: {}, unavailable: [] };
     (entry.settings as JsonRecord)[field] = values[index];
+    (entry.sources as JsonRecord)[field] = { owner: read.scope, source: read.source };
+    if (!read.available) (entry.unavailable as string[]).push(field);
     surfaces.set(surface, entry);
   });
+  for (const entry of surfaces.values()) if ((entry.unavailable as string[]).length === 0) delete entry.unavailable;
   return [...surfaces.values()].sort((a, b) => String(a.surface).localeCompare(String(b.surface)));
 }
 
@@ -513,6 +543,7 @@ function createCloudflareManager(deps: GoodVibesRuntimeToolDeps): CloudflareCont
   return new CloudflareControlPlaneManager({
     configManager: deps.configManager,
     secretsManager: deps.secretsManager ?? null,
+    ...(deps.cloudflareAuthToken ? { authToken: deps.cloudflareAuthToken } : {}),
   });
 }
 
@@ -522,6 +553,11 @@ async function redactCloudflareStatus(status: unknown): Promise<JsonRecord> {
     ...record,
     config: await redactObjectByPath('cloudflare', record.config),
   };
+}
+
+/** The value of a routed read, or a marker saying its owning runtime could not supply it. */
+function routedValue(read: ConfigReadResult): unknown {
+  return read.available ? read.value : { unavailable: true, reason: read.reason };
 }
 
 function rejectsRawSecretValue(value: unknown): boolean {

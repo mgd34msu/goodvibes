@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => { installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture(kind: 'config' | 'secret-config' | 'subscription' = 'config') {
+function fixture(kind: 'config' | 'secret-config' | 'credential-clear' | 'subscription' = 'config') {
   const root = makeProjectTempDir('nested-settings-plan'); roots.push(root);
   const config = new ConfigManager({ configDir: join(root, 'config') });
   const secrets = new SecretsManager({ surfaceRoot: 'agent', projectRoot: join(root, 'project'), globalHome: root, daemonHome: join(root, 'daemon') });
@@ -51,8 +51,9 @@ function fixture(kind: 'config' | 'secret-config' | 'subscription' = 'config') {
       const subscriptionImport = kind === 'subscription' ? { owner: subscriptions, mutation: subscriptions.prepareImport([{ kind: 'pending', value: {
         provider: 'synthetic', state: 'private-state', verifier: 'private-verifier', redirectUri: 'http://localhost/synthetic', createdAt: 1,
       } }]) } : undefined;
+      const secretDeletion = kind === 'credential-clear' ? { owner: secrets, mutation: secrets.prepareScopedDeletion('SYNTHETIC_CREDENTIAL', 'daemon') } : undefined;
       const settingsMutation: ToolPreparedSettingsMutation = mutation
-        ? { owner: config, mutation, secretImport, assertSourceCurrent: () => { assertSource(); } }
+        ? { owner: config, mutation, secretImport, ...(secretDeletion ? { secretDeletion } : {}), assertSourceCurrent: () => { assertSource(); } }
         : subscriptionImport ? { owner: config, subscriptionImport, assertSourceCurrent: () => { assertSource(); } }
           : (() => { throw new Error('Empty synthetic plan'); })();
       const effect = { kind, key: 'provider.model', configured: true };
@@ -109,6 +110,40 @@ test('a secret import and config plan consume actual private native handles', as
   expect(await f.secrets.get('SYNTHETIC_IMPORT')).toBe('private-test-value');
   expect(f.secrets.getCredentialMutationState()).toEqual({ generation: 2, pending: false });
 });
+test('clearing a credential publishes the configuration first, so a failure between leaves an orphan credential, never a dangling reference', async () => {
+  const f = fixture('credential-clear');
+  await f.secrets.set('SYNTHETIC_CREDENTIAL', 'stored-secret', { scope: 'daemon' });
+  const observed: string[] = [];
+  const locked = f.secrets.withPreparedScopedDeletion.bind(f.secrets);
+  f.secrets.withPreparedScopedDeletion = (async (handle: Parameters<typeof locked>[0], operation: Parameters<typeof locked>[1]) =>
+    locked(handle, (finish) => operation((assertCurrent) => {
+      observed.push(`config=${String(f.config.get('provider.model'))}`);
+      return finish(assertCurrent);
+    }))) as typeof locked;
+  const result = await f.run();
+  expect(result).toMatchObject({ success: true });
+  expect(observed).toEqual(['config=openai:synthetic-one']);
+  expect(await f.secrets.get('SYNTHETIC_CREDENTIAL')).toBeNull();
+  const receipt = JSON.parse(result.output ?? '') as { status: string; completedPaths: string[] };
+  expect(receipt.status).toBe('committed');
+  expect(receipt.completedPaths).toHaveLength(2);
+});
+test('a configuration reload landing while the credential locks are awaited does not leave the credential behind', async () => {
+  const f = fixture('credential-clear');
+  await f.secrets.set('SYNTHETIC_CREDENTIAL', 'stored-secret', { scope: 'daemon' });
+  const locked = f.secrets.withPreparedScopedDeletion.bind(f.secrets);
+  f.secrets.withPreparedScopedDeletion = (async (handle: Parameters<typeof locked>[0], operation: Parameters<typeof locked>[1]) => {
+    // The file watcher reports the manager's own configuration write as a change. If the configuration were already
+    // published while the locks are awaited, this reload would invalidate the completed-mutation proof.
+    await Promise.resolve();
+    if (f.config.get('provider.model') === 'openai:synthetic-one') f.config.load();
+    return locked(handle, operation);
+  }) as typeof locked;
+  const result = await f.run();
+  expect(result).toMatchObject({ success: true });
+  expect((JSON.parse(result.output ?? '') as { status: string }).status).toBe('committed');
+  expect(await f.secrets.get('SYNTHETIC_CREDENTIAL')).toBeNull();
+});
 test('cancellation at exact secret onset prevents private publication and later config effect', async () => {
   const f = fixture('secret-config'); const off = f.secrets.onDidInvalidateCredentials(() => f.controller.abort());
   await expect(f.run()).rejects.toThrow(); off(); expect(f.writes).toBe(0);
@@ -122,7 +157,7 @@ test('retired private source at publication stops the real native plan', async (
 test('postcommit cancellation retains the authentic child receipt and dispatches no sibling', async () => {
   const f = fixture(); f.config.subscribe('provider.model', () => f.controller.abort());
   const result = await f.run(); expect(result).toMatchObject({ success: false, cancelled: true });
-  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()] });
+  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()], effect: expect.stringContaining('The change WAS applied and saved. Do not repeat it.') });
   expect(f.writes).toBe(1); expect(f.config.get('provider.model')).toBe('openai:synthetic-one');
   expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
 });
@@ -130,14 +165,14 @@ test('postcommit cancellation retains the authentic child receipt and dispatches
 test('later parent cancellation preserves its prior private receipt without reviving authority', async () => {
   const f = fixture(); f.setAfterFirst(() => f.controller.abort());
   const result = await f.run(); expect(result).toMatchObject({ success: false, cancelled: true });
-  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()] });
+  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()], effect: expect.stringContaining('The change WAS applied and saved. Do not repeat it.') });
   expect(f.writes).toBe(1); expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
 });
 
 test('postcommit unrelated owner mutation preserves the receipt and holds remaining child work', async () => {
   const f = fixture(); f.config.subscribe('provider.model', () => f.config.save());
   const result = await f.run(); expect(result.success).toBe(false);
-  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()] });
+  expect(JSON.parse(result.output ?? '')).toEqual({ status: 'committed', completedPaths: [f.config.getConfigPath()], effect: expect.stringContaining('The change WAS applied and saved. Do not repeat it.') });
   expect(f.writes).toBe(1); expect(log.query({ site: 'engine.gate.autonomous-tool' })).toHaveLength(0);
 });
 

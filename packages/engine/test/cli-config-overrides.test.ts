@@ -193,14 +193,6 @@ describe('parseConfigValueText', () => {
     expect(parseConfigValueText('')).toBe('');
     expect(parseConfigValueText('   ')).toBe('');
   });
-
-  test('agrees with what applyRuntimeConfigOverrides writes for the same text', () => {
-    // The override path splits `key=value` and hands the value half to this
-    // function; if the two ever diverge, `--config x=false` and
-    // `config set x false` stop meaning the same thing.
-    expect(parseConfigValueText('false')).toBe(false);
-    expect(parseConfigValueText('false')).not.toBe('false');
-  });
 });
 
 describe('applyRuntimeConfigOverrides', () => {
@@ -241,12 +233,41 @@ describe('applyRuntimeConfigOverrides', () => {
     expect(errors.length).toBe(1);
   });
 
-  test('applies multiple overrides', () => {
+  test('applies multiple overrides, each coerced to its own key type', () => {
     const errors = applyRuntimeConfigOverrides(cm, [
       'display.stream=false',
+      'display.collapseThreshold=42',
+      'display.lineNumbers=all',
     ]);
     expect(errors).toEqual([]);
     expect(cm.get('display.stream')).toBe(false);
+    expect(cm.get('display.collapseThreshold')).toBe(42);
+    expect(cm.get('display.lineNumbers')).toBe('all');
+  });
+
+  test('one bad override is reported and does not stop the valid ones around it', () => {
+    const errors = applyRuntimeConfigOverrides(cm, [
+      'display.stream=false',
+      'display.collapseThreshold=not-a-number',
+      'display.lineNumbers=code',
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('Invalid --config override');
+    expect(cm.get('display.stream')).toBe(false);
+    expect(cm.get('display.lineNumbers')).toBe('code');
+  });
+
+  test('writes what a `config set` of the same text writes', () => {
+    // `config set` hands the text to parseConfigValueText and then writes the
+    // parsed value; a --config override must land on the same stored value.
+    const viaSet = createConfigManager(tmpDir);
+    for (const [key, text] of [['display.stream', 'false'], ['display.collapseThreshold', '42'], ['display.lineNumbers', 'all']] as const) {
+      applyRuntimeConfigValue(viaSet, key, parseConfigValueText(text));
+    }
+    expect(applyRuntimeConfigOverrides(cm, ['display.stream=false', 'display.collapseThreshold=42', 'display.lineNumbers=all'])).toEqual([]);
+    for (const key of ['display.stream', 'display.collapseThreshold', 'display.lineNumbers'] as const) {
+      expect(cm.get(key)).toEqual(viaSet.get(key));
+    }
   });
 });
 
@@ -287,7 +308,9 @@ describe('applyRuntimeFeatureFlagOverrides', () => {
       disableFeatures: ['fetch-sanitization'],
     });
     expect(featureErrors.length).toBe(2);
+    expect(featureErrors[0]).toContain('--enable no-such-feature');
     expect(featureErrors[0]).toContain('unknown feature id');
+    expect(featureErrors[0]).toContain('output-schema-fingerprint');
     expect(featureErrors[1]).toContain('no off switch');
   });
 

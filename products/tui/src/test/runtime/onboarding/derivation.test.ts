@@ -224,44 +224,16 @@ describe('onboarding derivation helpers', () => {
       },
     };
 
-    expect(deriveStep1Capabilities(snapshot)).toEqual([
-      {
-        id: 'local-tui-only',
-        label: 'Local TUI Only (No Servers)',
-        selected: false,
-        detail: 'Turn off browser access, HTTP listeners, external app surfaces, and network setup. The loopback-only background daemon keeps running by default for cross-surface visibility unless you turn it off in Settings > daemon.',
-      },
-      {
-        id: 'browser-access',
-        label: 'Open GoodVibes in a Browser',
-        selected: true,
-        detail: 'Keep the background service and web UI enabled. Network reachability is controlled on the next screen.',
-      },
-      {
-        id: 'network-access',
-        label: 'Let other devices use GoodVibes',
-        selected: true,
-        detail: 'Keep enabled GoodVibes services reachable from other devices on your LAN. Local authentication is required.',
-      },
-      {
-        id: 'webhook-events',
-        label: 'Receive webhooks or events from other tools',
-        selected: true,
-        detail: 'Keep the HTTP listener available for incoming webhooks, callbacks, and automation events.',
-      },
-      {
-        id: 'external-integrations',
-        label: 'Connect GoodVibes to external apps and services',
-        selected: true,
-        detail: 'Review and configure 1 detected external app, service, or surface integration signal(s).',
-      },
-      {
-        id: 'cloudflare-batch',
-        label: 'Use Cloudflare for batch or remote daemon work',
-        selected: false,
-        detail: 'Optionally configure Cloudflare Workers and Queues for explicit or eligible background batch jobs. Immediate local daemon behavior stays the default unless enabled.',
-      },
+    // Wording is copy; which capabilities are offered, and which are pre-selected, is the behaviour.
+    expect(deriveStep1Capabilities(snapshot).map(({ id, selected }) => ({ id, selected }))).toEqual([
+      { id: 'local-tui-only', selected: false },
+      { id: 'browser-access', selected: true },
+      { id: 'network-access', selected: true },
+      { id: 'webhook-events', selected: true },
+      { id: 'external-integrations', selected: true },
+      { id: 'cloudflare-batch', selected: false },
     ]);
+    expect(deriveStep1Capabilities(snapshot).find((item) => item.id === 'external-integrations')?.detail).toContain('1 detected');
 
     expect(deriveStep1CapabilityFlags(snapshot)).toEqual({
       providers: true,
@@ -381,6 +353,20 @@ describe('onboarding derivation helpers', () => {
 
     expect(capabilities.find((capability) => capability.id === 'network-access')?.selected).toBe(false);
     expect(capabilities.find((capability) => capability.id === 'webhook-events')?.selected).toBe(true);
+  });
+
+  test('reports a loopback control plane as local even when allowRemote is set', () => {
+    const base = buildBaseSnapshot();
+    const snapshot: OnboardingSnapshotState = {
+      ...base,
+      bindSettings: {
+        ...base.bindSettings,
+        daemonEnabled: true,
+        controlPlane: { ...base.bindSettings.controlPlane, enabled: true, hostMode: 'local', host: '127.0.0.1', allowRemote: true },
+      },
+    };
+
+    expect(deriveStep1Capabilities(snapshot).find((capability) => capability.id === 'network-access')?.selected).toBe(false);
   });
 
   test('does not treat custom loopback binds as other-device access', () => {
@@ -506,43 +492,14 @@ describe('onboarding derivation helpers', () => {
       },
     };
 
-    expect(deriveStep1Capabilities(snapshot)).toEqual([
-      {
-        id: 'local-tui-only',
-        label: 'Local TUI Only (No Servers)',
-        selected: true,
-        detail: 'Use GoodVibes only in this terminal. No browser access, HTTP listener, external app surface, or network setup. A loopback-only background daemon still runs by default so sessions here stay visible to other GoodVibes surfaces on this machine; turn it off in Settings > daemon if you want none at all.',
-      },
-      {
-        id: 'browser-access',
-        label: 'Open GoodVibes in a Browser',
-        selected: false,
-        detail: 'Run the background service and web UI. GoodVibes will use the local network by default; you can restrict or customize it next.',
-      },
-      {
-        id: 'network-access',
-        label: 'Let other devices use GoodVibes',
-        selected: false,
-        detail: 'Make enabled GoodVibes services reachable from other devices on your LAN. Local authentication is required.',
-      },
-      {
-        id: 'webhook-events',
-        label: 'Receive webhooks or events from other tools',
-        selected: false,
-        detail: 'Turn on the HTTP listener for incoming webhooks, callbacks, and automation events.',
-      },
-      {
-        id: 'external-integrations',
-        label: 'Connect GoodVibes to external apps and services',
-        selected: false,
-        detail: 'Enable setup screens for Slack, Discord, Telegram, Home Assistant, Teams, Matrix, and other app surfaces you choose.',
-      },
-      {
-        id: 'cloudflare-batch',
-        label: 'Use Cloudflare for batch or remote daemon work',
-        selected: false,
-        detail: 'Optionally configure Cloudflare Workers and Queues for explicit or eligible background batch jobs. Immediate local daemon behavior stays the default unless enabled.',
-      },
+    // Wording is copy; which capabilities are offered, and which are pre-selected, is the behaviour.
+    expect(deriveStep1Capabilities(snapshot).map(({ id, selected }) => ({ id, selected }))).toEqual([
+      { id: 'local-tui-only', selected: true },
+      { id: 'browser-access', selected: false },
+      { id: 'network-access', selected: false },
+      { id: 'webhook-events', selected: false },
+      { id: 'external-integrations', selected: false },
+      { id: 'cloudflare-batch', selected: false },
     ]);
   });
 

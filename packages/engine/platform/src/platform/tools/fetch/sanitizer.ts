@@ -75,7 +75,10 @@ function sanitizeSafeText(content: string): SanitizeResult {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     // Strip C1 control characters (0x80-0x9F)
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x80-\x9F]/g, '');
+    .replace(/[\x80-\x9F]/g, '')
+    // Invisible characters that carry text the reader cannot see: tag characters,
+    // zero-width space/non-joiner, bidi marks and overrides, word joiner, BOM.
+    .replace(/[\u{E0000}-\u{E007F}\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu, '');
 
   return {
     content: sanitized,

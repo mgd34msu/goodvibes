@@ -1,4 +1,4 @@
-import { agentOrchestrationSummary, describeAgentOrchestrationAgent } from '../../tools/agent-harness-agent-orchestration.ts';
+import { agentOrchestrationSummary, describeAgentOrchestrationAgent, remoteEvidenceCaveats } from '../../tools/agent-harness-agent-orchestration.ts';
 import { remoteReadModelSnapshot, captureNativeRemoteReadModelSnapshot, settleNativeRemotePublisherSemantics, currentNativeRemoteReadModelSnapshot } from '../../tools/agent-harness-remote-read-models.ts';
 import { captureCatalogMethods } from '../../tools/agent-harness-catalog-ranking.ts';
 import { protectPersonalOpsData } from '../../tools/agent-harness-personal-ops-source.ts';
@@ -97,7 +97,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       armed = true;
       expect(() => currentNativeRemoteReadModelSnapshot(f.fixture.context, owned.token)).toThrow();
       expect(f.outcome.summary).toBe('Changed after the final arbitrary callback.');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   }, 60_000);
 
 
@@ -119,7 +119,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(requests.filter(request => request.context?.battery === 'agent.remote-publisher.outcome-kind')).toHaveLength(1);
       expect(JSON.stringify(requests)).toContain('previous schema certificate was revoked');
       expect(f.outcome.schemaStatus).toBe('certified');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   }, 60_000);
 
 
@@ -133,7 +133,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       if (result.status !== 'found') throw new Error('Missing native exact-ID remote result');
       expect<unknown>(result.agent).toMatchObject({ managedPlanCard: { liveOutcomeTrail: [{ id: 'remote-publisher-paraphrase', kind: 'closeout', certification: { schemaStatus: 'certified' } }] } });
       expect(f.outcome.kind).toBe('Finalize runner work with its completion report.');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   }, 60_000);
 
 
@@ -148,7 +148,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     try {
       await expect(agentOrchestrationSummary(f.fixture.context, f.fixture.toolRegistry, { includeParameters: true }, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
       expect(f.outcome.kind).toBe('capture'); expect(f.outcome.schemaStatus).toBe('certified');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   }, 60_000);
 
 
@@ -162,7 +162,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
     } });
     try {
       await expect(agentOrchestrationSummary(f.fixture.context, f.fixture.toolRegistry, { includeParameters: true }, { sourceOwner: ordinaryResearchOwner() })).rejects.toThrow();
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   }, 60_000);
 
 
@@ -204,8 +204,45 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       f.outcome.summary = 'Native source changed after successful query';
       expect(() => retained.forEach(guard => guard())).toThrow();
       expect(observed).toHaveLength(requests);
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
+  }, 120_000);
+
+
+  test('a limit below the matching agents says how many matched', async () => {
+    const f = makeOrchestrationQueryFixture();
+    try {
+      const result = await agentOrchestrationSummary(f.fixture.context, f.fixture.toolRegistry, { limit: 1 }, { sourceOwner: ordinaryResearchOwner() });
+      expect(result.returned).toBe(1);
+      expect(String(result.policy)).toContain('Showing the first 1 of 2 matching agents (limit).');
+    } finally { await f.fixture.cleanup(); }
+  }, 120_000);
+
+
+  test('remote evidence names dropped records and failed read-model methods, and stays silent when nothing is missing', () => {
+    expect(remoteEvidenceCaveats({})).toEqual({});
+    expect(remoteEvidenceCaveats({ dropped: { withoutRunner: 0, duplicates: 0 } })).toEqual({});
+    const caveats = remoteEvidenceCaveats({ dropped: { withoutRunner: 1, duplicates: 2 }, sourceErrors: ['context.platform.readModels.remoteRuntime.captureOutcomes.getSnapshot()'] });
+    expect(caveats.dropped).toEqual({ withoutRunner: 1, duplicates: 2 });
+    expect(String(caveats.droppedNote)).toContain('not in liveOutcomes');
+    expect(caveats.sourceErrors).toEqual(['context.platform.readModels.remoteRuntime.captureOutcomes.getSnapshot()']);
   });
+
+
+  test('the orchestration summary says a runner-less remote record is counted but not listed', async () => {
+    const f = makeOrchestrationQueryFixture();
+    try {
+      const { runnerId: _runnerId, ...runnerless } = f.outcome;
+      f.snapshot.records = [runnerless] as unknown as typeof f.snapshot.records;
+      f.snapshot.records = [runnerless] as unknown as typeof f.snapshot.records;
+      const result = await agentOrchestrationSummary(f.fixture.context, f.fixture.toolRegistry, { includeParameters: true }, { sourceOwner: ordinaryResearchOwner() });
+      const remote = (result as unknown as { readonly managedExecutionPlan: { readonly remoteEvidence: Record<string, unknown> } }).managedExecutionPlan.remoteEvidence;
+      // A throwing read-model method rejects the whole summary (every source read is guarded), so only dropped records reach this field.
+      expect(remote.liveOutcomes).toEqual([]);
+      expect(remote.dropped).toEqual({ withoutRunner: 1, duplicates: 0 });
+      expect(String(remote.droppedNote)).toContain('not in liveOutcomes');
+      expect(remote.sourceErrors).toBeUndefined();
+    } finally { await f.fixture.cleanup(); }
+  }, 120_000);
 
 
   test('orchestration withholds complete header tails before every source reader', async () => {
@@ -227,7 +264,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
       expect(f.outcome.summary).toBe(rawHeader);
       expect(f.agents[0]?.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -257,7 +294,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
       expect(first.task).toContain('ORCHESTRATION_TASK_PRIVATE');
       expect(first.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -295,7 +332,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       for (const wire of [JSON.stringify(observed), JSON.stringify(screening.calls), publicText]) expect(wire).not.toContain('ORCHESTRATION_DETAIL_PRIVATE');
       expect(first.task).toContain('ORCHESTRATION_DETAIL_PRIVATE');
       expect(first.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -323,7 +360,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       } }]);
       expect<unknown>(result.managedExecutionPlan).toMatchObject({ remoteEvidence: { workspaceEvidence: [{ id: 'query-native-workspace', worktreeRef: nativeReference }] } });
       const candidateWire = observed.filter(request => request.context?.battery === 'engine.tools.registry-rank').map(request => JSON.stringify(request.state)).join('\n');
-      expect(candidateWire).toContain('unselected-worktree');
+      expect(candidateWire).not.toContain('unselected-worktree');
       for (const wire of [JSON.stringify(observed), JSON.stringify(screening.calls), JSON.stringify(result)]) {
         expect(wire).not.toContain('ORCHESTRATION_PATH_PRIVATE');
         expect(wire).not.toContain('ORCHESTRATION_UNSELECTED_PATH_PRIVATE');
@@ -331,7 +368,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
       expect(workspace.workspace.workspacePath).toBe(path);
       expect(workspace.status).toBe('ready'); expect(f.agents[0]?.status).toBe('running');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -348,7 +385,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       await expect(agentOrchestrationSummary(f.fixture.context, f.fixture.toolRegistry, { query: 'auth', limit: 1 }, { sourceOwner: screening.owner })).rejects.toBeInstanceOf(ToolInputProjectionError);
       expect(observed).toHaveLength(0); expect(screening.calls).toHaveLength(0);
       expect(workspace.worktreePath).toBe(path); expect(workspace.status).toBe('ready'); expect(f.agents).toHaveLength(0);
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -365,7 +402,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(wire).not.toContain('ORCHESTRATION_SCALAR_PRIVATE'); expect(wire).not.toContain('ORCHESTRATION_SCALAR_TAIL');
       }
       expect(f.outcome.summary).toContain('ORCHESTRATION_SCALAR_TAIL');
-    } finally { f.fixture.cleanup(); }
+    } finally { await f.fixture.cleanup(); }
   });
 
 
@@ -397,7 +434,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         }
         expect(observed).toHaveLength(0); expect(screening.calls).toHaveLength(0);
         expect(f.agents[0]?.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-      } finally { f.fixture.cleanup(); }
+      } finally { await f.fixture.cleanup(); }
     });
 
 
@@ -438,7 +475,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           { query: kind === 'raw-marker-query' ? 'token=<redacted>' : 'auth', limit: 1 }, { sourceOwner: screening.owner })).rejects.toThrow();
         expect(observed).toHaveLength(0); expect(screening.calls).toHaveLength(0);
         expect(f.agents[0]?.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-      } finally { f.fixture.cleanup(); }
+      } finally { await f.fixture.cleanup(); }
     });
 
 
@@ -466,7 +503,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(entered).toBe(true); expect(touched).toBe(0); expect(ranked).toBe(false);
         expect(screening.calls).toHaveLength(0);
         expect(f.agents[0]?.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-      } finally { f.fixture.cleanup(); }
+      } finally { await f.fixture.cleanup(); }
     });
 
 
@@ -490,7 +527,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(screening.calls.length).toBeGreaterThan(0);
         expect(JSON.stringify(screening.calls)).not.toContain('ORCHESTRATION_SYNTHETIC_PRIVATE');
         expect(f.agents[0]?.status).toBe('running'); expect(f.agents[1]?.status).toBe('completed');
-      } finally { f.fixture.cleanup(); }
+      } finally { await f.fixture.cleanup(); }
     });
 
 
@@ -630,6 +667,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 schemaVersion: 'goodvibes.remote-runtime.outcome.v1',
                 publicationGuarantee: 'daemon publishes remote capture and closeout outcomes token=remote-outcome-secret',
                 publisher: 'goodvibes-daemon',
+                inspectRoute: 'agent_harness mode:"agent_orchestration_agent" agentId:"agent-alpha" includeParameters:true',
                 provenance: ['method remoteRuntime.captureOutcomes.list', 'sourceTool remote-runtime'],
                 cursor: 'remote-cursor-1',
                 receiptId: 'remote-alpha-live-receipt',
@@ -649,6 +687,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               schemaVersion: 'goodvibes.remote-runtime.workspace.v1',
               publicationGuarantee: 'daemon publishes remote workspace isolation secret=remote-workspace-secret',
               publisher: 'goodvibes-daemon',
+              inspectRoute: 'agent_harness mode:"agent_orchestration_agent" agentId:"agent-alpha" includeParameters:true',
               provenance: ['method remoteRuntime.workspaceIsolation.list', 'sourceTool remote-runtime'],
               cursor: 'remote-workspace-cursor-1',
               receiptId: 'workspace-alpha-receipt',
@@ -760,6 +799,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               readonly workspaceEvidence?: number;
               readonly linkedWorkPlanItems?: number;
               readonly dispatchReceipts?: number;
+              readonly dispatchReceiptBasis?: string;
               readonly autoAttachedRemoteArtifacts?: number;
               readonly liveRemoteOutcomes?: number;
               readonly routes?: { readonly contracts?: string; readonly artifacts?: string };
@@ -787,17 +827,15 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
                 readonly runnerId: string;
                 readonly status: string;
                 readonly summary: string | null;
-                readonly sourcePath: string;
                 readonly modelRoute: string;
-                readonly certification: { readonly schemaStatus: string; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
+                readonly certification: { readonly schemaStatus: string; readonly provenance?: readonly string[]; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
               }[];
               readonly workspaceEvidence: readonly {
                 readonly id: string;
                 readonly runnerId: string;
                 readonly status: string;
                 readonly worktreeRef: string | null;
-                readonly sourcePath: string;
-                readonly certification: { readonly schemaStatus: string; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
+                readonly certification: { readonly schemaStatus: string; readonly provenance?: readonly string[]; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
               }[];
               readonly workPlanLinks: readonly {
                 readonly itemId: string;
@@ -837,14 +875,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
               readonly liveOutcomes: readonly {
                 readonly id: string;
                 readonly summary: string | null;
-                readonly sourcePath: string;
-                readonly certification: { readonly schemaStatus: string; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
+                readonly certification: { readonly schemaStatus: string; readonly provenance?: readonly string[]; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
               }[];
               readonly workspaceEvidence: readonly {
                 readonly id: string;
                 readonly worktreeRef: string | null;
-                readonly sourcePath: string;
-                readonly certification: { readonly schemaStatus: string; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
+                readonly certification: { readonly schemaStatus: string; readonly provenance?: readonly string[]; readonly publicationGuarantee?: string; readonly receiptId?: string; readonly missingSignals: readonly string[] };
               }[];
               readonly sourceCounts: Record<string, number>;
               readonly policy: string;
@@ -873,7 +909,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         });
         expect(posture.managedExecutionPlan.status).toBe('active');
         expect(posture.managedExecutionPlan.summary).toContain('2 visible agents');
-        expect(posture.managedExecutionPlan.summary).toContain('2 dispatch receipts');
+        expect(posture.managedExecutionPlan.summary).toContain('2 dispatch receipt notes');
         expect(posture.managedExecutionPlan.policy).toContain('read-only');
         const agentWorkMilestone = posture.managedExecutionPlan.milestones.find((milestone) => milestone.id === 'visible-agent-work');
         expect(agentWorkMilestone?.status).toBe('active');
@@ -888,6 +924,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         const closeoutMilestone = posture.managedExecutionPlan.milestones.find((milestone) => milestone.id === 'review-and-closeout');
         expect(closeoutMilestone?.linkedWorkPlanItems).toBe(2);
         expect(closeoutMilestone?.dispatchReceipts).toBe(2);
+        expect(closeoutMilestone?.dispatchReceiptBasis).toContain('not owner-verified');
         expect(closeoutMilestone?.autoAttachedRemoteArtifacts).toBe(2);
         expect(closeoutMilestone?.liveRemoteOutcomes).toBe(1);
         expect(closeoutMilestone?.workspaceEvidence).toBe(1);
@@ -905,7 +942,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.id).toBe('capture-alpha-live');
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.summary).toContain('token=[REDACTED]');
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.summary).not.toContain('REMOTESECRET');
-        expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.sourcePath).toContain('context.platform.readModels.remoteRuntime.captureOutcomes');
+        expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.certification.provenance?.join(' ')).toContain('context.platform.readModels.remoteRuntime.captureOutcomes');
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.certification.schemaStatus).toBe('certified');
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.certification.publicationGuarantee).toContain('token=[REDACTED]');
         expect(posture.managedExecutionPlan.remoteEvidence.liveOutcomes[0]?.certification.receiptId).toBe('remote-alpha-live-receipt');
@@ -924,7 +961,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(alphaPlanItem?.lane).toBe('remote-runner');
         expect(alphaPlanItem?.milestoneId).toBe('visible-agent-work');
         expect(alphaPlanItem?.artifactTrail[0]?.id).toBe(durableAlphaReceipt.id);
-        expect(alphaPlanItem?.artifactTrail[0]?.modelRoute).toContain('agent_artifacts show');
+        expect(alphaPlanItem?.artifactTrail[0]?.modelRoute).toContain('agent_artifacts mode:"show"');
         expect(alphaPlanItem?.liveOutcomeTrail[0]?.id).toBe('capture-alpha-live');
         expect(alphaPlanItem?.liveOutcomeTrail[0]?.summary).toContain('token=[REDACTED]');
         expect(alphaPlanItem?.liveOutcomeTrail[0]?.certification.missingSignals).toEqual([]);
@@ -948,14 +985,14 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(alphaPlanItem?.closeout.remoteOutcomeCount).toBe(1);
         expect(alphaPlanItem?.closeout.workspaceEvidenceCount).toBe(1);
         expect(alphaPlanItem?.closeout.autoAttachedRemoteArtifacts[0]?.id).toBe(durableAlphaReceipt.id);
-        expect(alphaPlanItem?.closeout.autoAttachedRemoteArtifacts[0]?.modelRoute).toContain('agent_artifacts show');
+        expect(alphaPlanItem?.closeout.autoAttachedRemoteArtifacts[0]?.modelRoute).toContain('agent_artifacts mode:"show"');
         expect(alphaPlanItem?.closeout.autoAttachedRemoteArtifacts[0]?.redaction).toBe('metadata-only');
         expect(alphaPlanItem?.closeout.liveRemoteOutcomes[0]?.id).toBe('capture-alpha-live');
         expect(alphaPlanItem?.closeout.liveRemoteOutcomes[0]?.certification?.schemaStatus).toBe('certified');
         expect(alphaPlanItem?.closeout.workspaceEvidence[0]?.id).toBe('workspace-alpha');
         expect(alphaPlanItem?.closeout.workspaceEvidence[0]?.certification?.schemaStatus).toBe('certified');
         expect(alphaPlanItem?.closeout.reviewRoutes.join('\n')).toContain(alphaWorkPlan.id);
-        expect(alphaPlanItem?.closeout.reviewRoutes.join('\n')).toContain(`agent_artifacts show artifactId:"${durableAlphaReceipt.id}"`);
+        expect(alphaPlanItem?.closeout.reviewRoutes.join('\n')).toContain(`agent_artifacts mode:"show" artifactId:"${durableAlphaReceipt.id}"`);
         expect(alphaPlanItem?.closeout.reviewRoutes.join('\n')).toContain('agent_orchestration_agent');
         expect(alphaPlanItem?.reviewGate.status).toBe('pending-work');
         expect(alphaPlanItem?.reviewGate.requiredEvidence).toContain('diff');
@@ -1031,11 +1068,12 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(detail.managedPlanCard?.workPlanLinks[0]?.itemId).toBe(alphaWorkPlan.id);
         expect(detail.managedPlanCard?.workPlanLinks[0]?.latestDispatchReceipt).toContain('agent-alpha');
         expect(detail.managedPlanCard?.closeout.dispatchReceiptCount).toBe(1);
+        expect(String((detail.managedPlanCard?.closeout as Record<string, unknown>).dispatchReceiptBasis)).toContain('not owner-verified');
         expect(detail.managedPlanCard?.closeout.remoteReceiptCount).toBe(1);
         expect(detail.managedPlanCard?.closeout.remoteOutcomeCount).toBe(1);
         expect(detail.managedPlanCard?.closeout.workspaceEvidenceCount).toBe(1);
         expect(detail.managedPlanCard?.closeout.reviewRoutes.join('\n')).toContain(alphaWorkPlan.id);
-        expect(detail.managedPlanCard?.closeout.reviewRoutes.join('\n')).toContain(`agent_artifacts show artifactId:"${durableAlphaReceipt.id}"`);
+        expect(detail.managedPlanCard?.closeout.reviewRoutes.join('\n')).toContain(`agent_artifacts mode:"show" artifactId:"${durableAlphaReceipt.id}"`);
         expect(JSON.stringify(detail)).not.toContain('remote-outcome-secret');
         expect(JSON.stringify(detail)).not.toContain('remote-workspace-secret');
       }
@@ -1082,7 +1120,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
 
   test('saves redacted setup smoke evidence artifacts when user-run output is provided', async () => {
     const clock = spyOn(Date, 'now').mockReturnValue(1760000000008);
-    const fixture = makeFixture();
+    // A fixture that fails to build must not leave the clock mocked for later tests.
+    const fixture = (() => { try { return makeFixture(); } catch (error) { clock.mockRestore(); throw error; } })();
     const artifacts = { store: new ArtifactStore({ rootDir: join(fixture.root, 'artifacts') }) };
     Object.assign(fixture.context.platform, { artifactStore: artifacts.store });
     try {
@@ -1109,7 +1148,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         },
       });
 
-      expect(smokeRun.status).toBe('executed');
+      expect(smokeRun.status).toBe('blocked');
       expect(smokeRun.artifact.status).toBe('saved');
       const artifactId = artifacts.store.list(1)[0]?.id;
       expect(artifactId).toBeDefined();
@@ -1228,7 +1267,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(setupLane?.summary).toContain('Trend first-run');
       expect(setupLane?.nextAction).toContain('saved smoke artifact');
     } finally {
-      clock.mockRestore(); fixture.cleanup();
+      clock.mockRestore(); await fixture.cleanup();
     }
   });
 
@@ -1315,6 +1354,8 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(finished.status).toBe('onboarding_completed');
         expect(finished.checkMarker).toMatchObject({ exists: true, source: 'wizard', mode: 'new' });
         expect(finished.completionMarker).toMatchObject({ exists: true, source: 'wizard', mode: 'new' });
+        expect(finished.checkMarker).not.toHaveProperty('path');
+        expect(finished.completionMarker).not.toHaveProperty('path');
         expect(finished.policy.effect).toBe('confirmed-onboarding-marker-write');
         expect(finished.policy.boundary).toContain('does not mutate provider credentials');
 
@@ -1327,7 +1368,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
           requiresConfirmation: false,
         });
       } finally {
-        fixture.cleanup();
+        await fixture.cleanup();
       }
     });
   });
@@ -1346,7 +1387,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(plan.get('connected-host-auth')).toBe('ready');
         expect(plan.get('provider-access')).toBe('blocked');
         expect(posture.setupCloseout).toMatchObject({ status: 'blocked', primaryStepId: 'provider-access' });
-      } finally { fixture.cleanup(); }
+      } finally { await fixture.cleanup(); }
     }));
   });
 
@@ -1414,6 +1455,10 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(hostItem.bootstrapPlan?.status).toBe('recommended');
       expect(hostItem.bootstrapPlan?.recommendedWhen).toContain('runtime connection is enabled but unreachable');
 
+      // The knowledge route lives on the host: an unreachable host cannot leave it reported as recommended.
+      const posture = await executeHarnessJson<{ readonly readinessPlan: readonly { readonly setupItemId: string; readonly status: string }[] }>(fixture, { mode: 'setup_posture' });
+      expect(posture.readinessPlan.find((item) => item.setupItemId === 'agent-knowledge')?.status).toBe('check');
+
       const start = hostItem.repairCards?.find((card) => card.id === 'service-start');
       const install = hostItem.repairCards?.find((card) => card.id === 'service-install');
       const restart = hostItem.repairCards?.find((card) => card.id === 'service-restart');
@@ -1430,7 +1475,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       expect(restart?.recommendation).toBe('inspect-first');
       expect(restart?.outcome?.target).toBe('restarted-running-service');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

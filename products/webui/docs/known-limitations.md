@@ -32,8 +32,9 @@ mistaken for hidden contracts.
 
 - Calendar is bring-your-own CalDAV. An unconfigured daemon renders a pointer
   to the config keys below, and a daemon build with no calendar handler at
-  all says the capability is missing. There is no bundled OAuth provider
-  flow. The keys the daemon needs before events flow:
+  all says the capability is missing. The engine has a separate Google and Microsoft OAuth
+  connector, but the WebUI Calendar view reads only the CalDAV keys, so
+  connecting through it does not change what the view shows. The keys the daemon needs before events flow:
 
   | Config key | Holds |
   | --- | --- |

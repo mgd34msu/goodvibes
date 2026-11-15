@@ -4,12 +4,13 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { WORK_LEDGER_WRITE_SCOPE } from '../method-catalog-native-work-submission.js';
 import { WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
+import { NativeConversationStorageError } from '../../workflow/work-ledger/native-intake-types.js';
 import { NativeConversationIntakeError, type NativeConversationIntakeHost } from '../../workflow/work-ledger/native-intake.js';
 import {
   nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema, nativeConversationIntakeTransitionRequestSchema,
   nativeConversationIntakeResultSchema, nativeConversationIntakeLookupResultSchema, NATIVE_CONVERSATION_INTAKE_MAX_REQUEST_BYTES,
 } from '../../workflow/work-ledger/native-intake-wire.js';
-import { GatewayVerbError } from './gateway-verb-error.js';
+import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -41,7 +42,9 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
           const parsed = nativeConversationIntakeCaptureRequestSchema.safeParse(input);
           if (!parsed.success) throw new GatewayVerbError('Invalid native conversation source', 'INVALID_ARGUMENT', 400);
           const result = await host.capture(parsed.data, authority, options);
-          invocation.signal?.throwIfAborted(); authorize(invocation); return nativeConversationIntakeResultSchema.parse(result);
+          invocation.signal?.throwIfAborted();
+          try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, 'The capture was recorded.'); }
+          return nativeConversationIntakeResultSchema.parse(result);
         }
         if (operation === 'get') {
           const parsed = nativeConversationIntakeLookupRequestSchema.safeParse(input);
@@ -52,7 +55,9 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
         const parsed = nativeConversationIntakeTransitionRequestSchema.safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid native intake source identity', 'INVALID_ARGUMENT', 400);
         const result = await host[operation](parsed.data, authority, options);
-        invocation.signal?.throwIfAborted(); authorize(invocation); return nativeConversationIntakeResultSchema.parse(result);
+        invocation.signal?.throwIfAborted();
+        try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, `The ${operation} request was applied.`); }
+        return nativeConversationIntakeResultSchema.parse(result);
       } catch (error) {
         if (error instanceof GatewayVerbError) throw error;
         if (error instanceof NativeSelectedDiffError) throw new GatewayVerbError(`Selected diff ${error.code}; inspect the current changes before submitting a new original`, `NATIVE_SELECTED_DIFF_${error.code.toUpperCase()}`, error.code === 'oversize' ? 413 : error.code === 'unsupported' ? 400 : 409);
@@ -62,6 +67,22 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
           throw new GatewayVerbError(error.code === 'indeterminate'
             ? 'Native intake outcome is unknown. Look up the original input before choosing recovery.'
             : `Native conversation intake ${error.code}`, `NATIVE_INTAKE_${error.code.replaceAll('-', '_').toUpperCase()}`, status);
+        }
+        if (error instanceof NativeConversationStorageError) {
+          // The record on disk, not the request, is what is wrong: a record
+          // written by a newer daemon needs an upgrade, and an unreadable one
+          // needs the owner. Neither is cured by retrying the same input.
+          const stored = error.code === 'future-version'
+            ? { status: 409, text: 'A stored conversation record was written by a newer version of this daemon. Upgrade the daemon, then retry.' }
+            : error.code === 'invalid'
+              ? { status: 500, text: 'A stored conversation record is unreadable. Retrying the same input will not help; check the daemon storage.' }
+              : error.code === 'not-found'
+                ? { status: 404, text: 'No stored conversation record matches this input.' }
+                : error.code === 'conflict' || error.code === 'cancelled'
+                  ? { status: 409, text: `The stored conversation record is ${error.code === 'cancelled' ? 'cancelled' : 'in conflict with this request'}; look up the original input before choosing a move. ${error.message}` }
+                  : { status: 503, text: 'Conversation storage is unavailable or closing. Retain the original input identity and retry.' };
+          logger.error('Native conversation storage refused the intake', { operation, code: error.code });
+          throw new GatewayVerbError(stored.text, `NATIVE_INTAKE_STORAGE_${error.code.replaceAll('-', '_').toUpperCase()}`, stored.status);
         }
         logger.error('Native conversation intake failed', { operation, error: summarizeError(error) });
         throw new GatewayVerbError(`Native conversation intake failed: ${summarizeError(error)}; retain the original input identity`, 'NATIVE_INTAKE_UNAVAILABLE', 503);

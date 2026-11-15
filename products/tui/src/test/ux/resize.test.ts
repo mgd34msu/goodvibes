@@ -180,21 +180,21 @@ describe('ux:resize; setContentWidth updates prompt wrapping width', () => {
     input.setContentWidth(80);
   });
 
-  test('getVisiblePromptLineCount reflects new width after setContentWidth', () => {
-    // A 40-char prompt at width 80 fits in 1 line; at width 10 it wraps.
-    const longPrompt = 'a'.repeat(40);
-    input.prompt = longPrompt;
+  test('the stored width drives wrapping when no width is passed', () => {
+    // A 40-char prompt fits one line at width 80 and wraps at width 10.
+    input.prompt = 'a'.repeat(40);
 
     input.setContentWidth(80);
-    const lineCountWide = input.getVisiblePromptLineCount(80);
+    const lineCountWide = input.getVisiblePromptLineCount();
+    const wideLines = input.getWrappedPromptInfo(80).wrappedLines.length;
 
     input.setContentWidth(10);
-    const lineCountNarrow = input.getVisiblePromptLineCount(10);
+    const lineCountNarrow = input.getVisiblePromptLineCount();
 
-    // Narrower width must require at least as many lines as wider width.
-    expect(lineCountNarrow).toBeGreaterThanOrEqual(lineCountWide);
-    // At width 10, a 40-char prompt definitely wraps to more than 1 line.
+    expect(lineCountWide).toBe(1);
+    expect(wideLines).toBe(1);
     expect(lineCountNarrow).toBeGreaterThan(1);
+    expect(lineCountNarrow).toBe(Math.min(input.getWrappedPromptInfo(10).wrappedLines.length, input.composerMaxRows));
   });
 
 });

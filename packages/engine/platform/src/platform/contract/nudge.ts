@@ -78,6 +78,8 @@ export interface NudgeFindings {
   readonly failedGates: readonly QualityGateResult[];
   /** Paths the report claimed that are not on disk; `noChanges` when nothing changed and nothing was claimed by a unit that must write. */
   readonly claims?: { readonly missingPaths: readonly string[]; readonly noChanges: boolean } | undefined;
+  /** This check's one-sentence reason per criterion id (what evidence was missing), when the judge gave one. */
+  readonly rationales?: ReadonlyMap<string, string> | undefined;
 }
 
 /** n from a check id `<scope>.k<n>`. */
@@ -106,6 +108,12 @@ function line(criterion: Pick<Criterion, 'id' | 'text'>, suffix = ''): string {
   return `- [${criterion.id}] ${criterion.text}${suffix}`;
 }
 
+/** This check's reason for the criterion, as an indented line under it. */
+function withRationale(findings: Pick<NudgeFindings, 'rationales'>, criterion: Pick<Criterion, 'id'>, text: string): string {
+  const rationale = findings.rationales?.get(criterion.id)?.trim();
+  return rationale ? `${text}\n  Why: ${rationale}` : text;
+}
+
 /** A section: its heading and lines, or nothing when it has no lines. */
 function section(heading: string, lines: readonly string[]): string[] {
   return lines.length === 0 ? [] : [heading, ...lines];
@@ -130,14 +138,14 @@ export function buildNudge(unit: Pick<ContractUnit, 'title' | 'goal' | 'criteria
   const notMet = has('unmet')
     ? withVerdict('unmet').filter((criterion) => !regressed.has(criterion.id)).map((criterion) => {
       const severity = latestSeverity(criterion);
-      return line(criterion, severity === undefined ? '' : ` (${severity})`);
+      return withRationale(findings, criterion, line(criterion, severity === undefined ? '' : ` (${severity})`));
     })
     : [];
   const regressedCriteria = has('regression') ? judged.filter((criterion) => regressed.has(criterion.id)) : [];
   const metAt = [...new Set(regressedCriteria.map((criterion) => checkNumberOf(regressed.get(criterion.id)!.metAtCheckId)))].sort((a, b) => a - b);
   const notShown = has('unshown')
     ? [
-      ...withVerdict('unshown').map((criterion) => line(criterion)),
+      ...withVerdict('unshown').map((criterion) => withRationale(findings, criterion, line(criterion))),
       ...(findings.goalVerdict === 'unshown' ? [`- [goal] ${unit.goal}`] : []),
       ...findings.qualityUnshown.map((item) => `- [quality] ${QUALITY_EVIDENCE_SENTENCES[item]}`),
     ]

@@ -136,11 +136,10 @@ export function readDependencyManifest(fs: FsReader, path: string, fallbackName:
   let parsed: { name?: unknown; dependencies?: unknown; optionalDependencies?: unknown };
   try {
     parsed = JSON.parse(fs.readText(path)) as typeof parsed;
-  } catch {
-    // An unreadable manifest is not a silent pass: the caller gets nothing to
-    // externalise from it, so the compile behaves exactly as it did before this
-    // existed rather than pretending it screened something.
-    return null;
+  } catch (error) {
+    // A manifest that exists but cannot be parsed is a failure, not a pass: a
+    // null here would let the compile run without screening its required packages.
+    throw new Error(`Cannot read ${path} (${fallbackName}): ${error instanceof Error ? error.message : String(error)}`);
   }
   const names = (value: unknown): string[] => (
     value !== null && typeof value === 'object' ? Object.keys(value as Record<string, unknown>) : []

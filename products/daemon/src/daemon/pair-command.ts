@@ -138,8 +138,10 @@ function runLocalReprint(input: RunPairCommandInput): DaemonCommandResult {
     );
   }
 
-  // A local reprint is a non-writing configured view. It cannot observe an
-  // unrelated process's runtime overrides; an explicit --port carries that
+  // A local reprint writes no token and no setting of its own. The dispatcher
+  // may first have run the daemon-config migration that moves legacy values into
+  // the daemon store, so the binding read here is the migrated one. It cannot
+  // observe an unrelated process's runtime overrides; an explicit --port carries that
   // choice through for the bundled control-plane surface.
   const binding = flags.port === undefined ? undefined
     : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port: flags.port };

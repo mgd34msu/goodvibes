@@ -5,8 +5,8 @@ import { flushSync } from 'react-dom';
 import { normaliseCombo, eventToCombo, useHotkeys } from './useHotkeys';
 import type { HotkeyBinding } from './useHotkeys';
 
-// In the test environment, navigator is undefined, so isMac() returns false.
-// Therefore "mod" normalises to "Control".
+// The test environment (happy-dom) defines navigator with a fixed non-Mac user
+// agent, so isMac() returns false and "mod" normalises to "Control".
 
 describe('normaliseCombo', () => {
   test('normalises single letter to lowercase', () => {
@@ -14,7 +14,7 @@ describe('normaliseCombo', () => {
   });
 
   test('normalises mod+k to Control+k (non-Mac env)', () => {
-    // In test env: no navigator -> isMac() = false -> mod = Control
+    // happy-dom's fixed non-Mac user agent -> isMac() = false -> mod = Control
     expect(normaliseCombo('mod+k')).toBe('Control+k');
   });
 

@@ -1,3 +1,4 @@
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
@@ -36,11 +37,6 @@ function readPositiveInteger(value: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.max(1, Math.trunc(parsed));
-}
-
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
 }
 
 function splitList(value: string): readonly string[] {
@@ -346,7 +342,7 @@ export function buildAgentArtifactPromoteKnowledgePromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Artifact Knowledge promotion',
-      detail: 'Submitted a confirmed request to ingest one saved artifact into isolated Agent Knowledge.',
+      detail: 'Asked the model to ingest one saved artifact into isolated Agent Knowledge. Nothing is ingested until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -415,7 +411,7 @@ export function buildAgentArtifactExportPromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Artifact export',
-      detail: 'Submitted a confirmed request to copy one saved artifact to a workspace file.',
+      detail: 'Asked the model to copy one saved artifact to a workspace file. Nothing is written until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };
@@ -487,7 +483,7 @@ export function buildAgentArtifactPackagePromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Artifact package export',
-      detail: `Submitted a confirmed request to copy selected saved artifacts to a workspace ${outputKind}.`,
+      detail: `Asked the model to copy selected saved artifacts to a workspace ${outputKind}. Nothing is written until the model calls the tool and its result appears in the conversation.`,
       safety: 'safe',
     },
   };

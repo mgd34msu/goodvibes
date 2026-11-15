@@ -59,7 +59,7 @@ function assertDirectories(before: readonly DirectoryRevision[], after: readonly
 interface AccountCapture {
   readonly owner: AgentAccountsToolOptions;
   readonly assertCurrent: () => void;
-  readonly didWrite: (stage: 'parent' | 'temporary' | 'store', content: string) => void;
+  readonly didWrite: (stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) => void;
 }
 const contexts = new WeakMap<object, AccountCapture>();
 
@@ -140,7 +140,7 @@ export function agentAccountsWriteGuard(owner: AgentAccountsToolOptions, args: R
     if (!context || !capture || capture.owner !== owner) throw new ToolInputProjectionError('held');
     assertProjectionExecution(context, args); capture.assertCurrent();
   };
-  return { assertCurrent, didWrite(stage: 'parent' | 'temporary' | 'store', content: string) {
+  return { assertCurrent, didWrite(stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) {
     const context = options?.inputProjectionContext, capture = context && contexts.get(context);
     if (!context || !capture || capture.owner !== owner) throw new ToolInputProjectionError('held');
     assertProjectionExecution(context, args); capture.didWrite(stage, content);

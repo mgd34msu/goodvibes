@@ -5,7 +5,7 @@ import type {
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
 import { MODAL_TONES } from './modal-theme.ts';
-import { infoRow, headerRow } from './modal-surface-helpers.ts';
+import { infoRow, headerRow, runModalCommand } from './modal-surface-helpers.ts';
 import {
   loadEcosystemCatalog,
   listInstalledEcosystemEntries,
@@ -214,11 +214,9 @@ class MarketplaceModalSurface implements ConfigModalSurface {
     const entry = this.entryFor(ctx.row);
     if (!entry) return;
     if (id === 'install' && !entry.installed) {
-      void ctx.executeCommand?.('marketplace', ['install', entry.kind, entry.entry.id]);
-      ctx.setStatus(`Dispatched /marketplace install ${entry.kind} ${entry.entry.id} (see transcript).`);
+      runModalCommand(ctx, 'marketplace', ['install', entry.kind, entry.entry.id], `/marketplace install ${entry.kind} ${entry.entry.id}`, { afterSettle: () => { void this.refresh(); } });
     } else if (id === 'uninstall' && entry.installed) {
-      void ctx.executeCommand?.('marketplace', ['uninstall', entry.kind, entry.entry.id]);
-      ctx.setStatus(`Dispatched /marketplace uninstall ${entry.kind} ${entry.entry.id} (see transcript).`);
+      runModalCommand(ctx, 'marketplace', ['uninstall', entry.kind, entry.entry.id], `/marketplace uninstall ${entry.kind} ${entry.entry.id}`, { afterSettle: () => { void this.refresh(); } });
     }
   }
 }

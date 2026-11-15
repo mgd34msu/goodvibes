@@ -54,6 +54,8 @@ import type { PermissionPromptDecision, PermissionPromptRequest, PermissionReque
 import type { TurnEvent } from '../../events/turn.js';
 import type { ToolEvent } from '../../events/tools.js';
 import type { McpServerConfig } from '../mcp/config.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /** Factory seam for the embedded-session substrate (tests inject fakes). */
 export type EmbeddedSessionFactory = (options: {
@@ -128,11 +130,15 @@ interface AcpSessionState {
   readonly embedded: EmbeddedSession;
   /** Runtime session ids whose envelopes belong to this ACP session. */
   readonly knownIds: Set<string>;
+  /** The prompt in flight, from the moment it is accepted until it resolves. At most one per session. */
   activePrompt: {
-    readonly inputId: string | undefined;
+    /** True while `submit` is still resolving: there is nothing to abort yet. */
+    submitting: boolean;
+    /** Set once the broker has accepted the input. */
+    inputId: string | undefined;
     resolve: (stopReason: StopReason) => void;
-    unsubscribe: () => void;
   } | null;
+  /** `session/cancel` arrived for the current prompt. Reset when the next prompt starts. */
   cancelled: boolean;
 }
 
@@ -169,6 +175,13 @@ export function mapStopReason(event: TurnEvent): StopReason | null {
     default:
       return null;
   }
+}
+
+/** The line shown to the editor when a turn ends in a failure, or null for a turn that did not fail. */
+export function turnFailureText(event: TurnEvent): string | null {
+  if (event.type === 'TURN_ERROR') return `Turn failed (${event.stopReason}): ${event.error}`;
+  if (event.type === 'PREFLIGHT_FAIL') return `Turn could not start (${event.stopReason}): ${event.reason}`;
+  return null;
 }
 
 /** Map an ACP permission outcome back onto the platform decision shape. */
@@ -258,15 +271,31 @@ export class GoodVibesAcpAgent implements Agent {
   async prompt(params: PromptRequest): Promise<PromptResponse> {
     const state = this.sessions.get(params.sessionId);
     if (!state) throw new Error(`Unknown ACP session: ${params.sessionId}`);
+    if (state.activePrompt) {
+      throw new Error(
+        `ACP session ${params.sessionId} already has a prompt running; wait for it to finish or send session/cancel before prompting again.`,
+      );
+    }
     state.cancelled = false;
 
-    const submission = await state.embedded.submit(promptText(params.prompt));
-    state.knownIds.add(submission.session.id);
-    if (submission.activeAgentId) state.knownIds.add(submission.activeAgentId);
+    return new Promise<PromptResponse>((resolvePrompt, rejectPrompt) => {
+      let finished = false;
+      let submitted = false;
+      // Events that arrive while `submit` is still resolving. A turn that ends
+      // fast (no provider key, preflight failure) can finish before submit
+      // returns the ids that tell this session's events apart, so they are
+      // held and replayed instead of missed.
+      const held: Array<() => void> = [];
+      const deliver = (handle: () => void): void => {
+        if (submitted) handle();
+        else held.push(handle);
+      };
 
-    return new Promise<PromptResponse>((resolvePrompt) => {
       const finish = (stopReason: StopReason): void => {
-        state.activePrompt?.unsubscribe();
+        if (finished) return;
+        finished = true;
+        offTurn();
+        offTool();
         state.activePrompt = null;
         resolvePrompt({ stopReason });
       };
@@ -277,34 +306,67 @@ export class GoodVibesAcpAgent implements Agent {
       };
 
       const offTurn = state.embedded.events.onDomain('turn', (envelope) => {
-        if (!matches(envelope.sessionId)) return;
-        const event = envelope.payload;
-        if (event.type === 'STREAM_DELTA' && event.content) {
-          void this.conn.sessionUpdate({
-            sessionId: params.sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: { type: 'text', text: event.content },
-            },
-          });
-        }
-        const stop = mapStopReason(event);
-        if (stop) finish(state.cancelled ? 'cancelled' : stop);
+        deliver(() => {
+          if (!matches(envelope.sessionId)) return;
+          const event = envelope.payload;
+          if (event.type === 'STREAM_DELTA' && event.content) {
+            this.notify({
+              sessionId: params.sessionId,
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: event.content } },
+            });
+          }
+          const stop = mapStopReason(event);
+          if (!stop) return;
+          // The stop reason alone cannot say why a turn failed; the editor gets the text.
+          const failure = turnFailureText(event);
+          if (failure) {
+            this.notify({
+              sessionId: params.sessionId,
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: failure } },
+            });
+          }
+          finish(state.cancelled ? 'cancelled' : stop);
+        });
       });
 
       const offTool = state.embedded.events.onDomain('tools', (envelope) => {
-        if (!matches(envelope.sessionId)) return;
-        this.forwardToolEvent(params.sessionId, envelope.payload);
+        deliver(() => {
+          if (!matches(envelope.sessionId)) return;
+          this.forwardToolEvent(params.sessionId, envelope.payload);
+        });
       });
 
-      state.activePrompt = {
-        inputId: submission.input?.id,
-        resolve: finish,
-        unsubscribe: () => {
+      state.activePrompt = { submitting: true, inputId: undefined, resolve: finish };
+
+      void (async () => {
+        let submission: Awaited<ReturnType<EmbeddedSession['submit']>>;
+        try {
+          submission = await state.embedded.submit(promptText(params.prompt));
+        } catch (error) {
+          finished = true;
           offTurn();
           offTool();
-        },
-      };
+          state.activePrompt = null;
+          rejectPrompt(error);
+          return;
+        }
+        state.knownIds.add(submission.session.id);
+        if (submission.activeAgentId) state.knownIds.add(submission.activeAgentId);
+        if (state.activePrompt) {
+          state.activePrompt.submitting = false;
+          state.activePrompt.inputId = submission.input?.id;
+        }
+        // A cancel that arrived while submit was resolving had nothing to abort
+        // yet; apply it now that the agent and input ids are known.
+        if (state.cancelled) {
+          await this.cancelWork(state, submission.input?.id);
+          held.length = 0;
+          finish('cancelled');
+          return;
+        }
+        submitted = true;
+        for (const handle of held.splice(0)) handle();
+      })();
     });
   }
 
@@ -313,20 +375,44 @@ export class GoodVibesAcpAgent implements Agent {
     if (!state) return;
     state.cancelled = true;
     const active = state.activePrompt;
-    // Real cancellation: abort the session's active agent(s) in-flight so the
-    // running turn stops mid-provider-call and emits its cancelled outcome,
-    // rather than running to completion. (knownIds carries the shared session id
-    // too; cancelActive ignores non-agent ids.)
+    // Still inside `submit`: no ids to abort yet. `prompt` applies the cancel
+    // as soon as the submission returns, and resolves it then.
+    if (!active) {
+      state.embedded.cancelActive(state.knownIds);
+      return;
+    }
+    if (active.submitting) return;
+    await this.cancelWork(state, active.inputId);
+    active.resolve('cancelled');
+  }
+
+  /**
+   * Real cancellation: abort the session's active agent(s) in-flight so the
+   * running turn stops mid-provider-call and emits its cancelled outcome,
+   * rather than running to completion. (knownIds carries the shared session id
+   * too; cancelActive ignores non-agent ids.) A still-queued input, which
+   * cancelActive cannot reach because it has not been delivered to an agent,
+   * is cancelled through the broker.
+   */
+  private async cancelWork(state: AcpSessionState, inputId: string | undefined): Promise<void> {
     state.embedded.cancelActive(state.knownIds);
-    // Also cancel a still-queued input (the pre-execution case cancelActive
-    // cannot reach, the input has not been delivered to an agent yet).
-    if (active?.inputId) {
+    if (inputId) {
       const sharedId = [...state.knownIds][0];
       if (sharedId) {
-        await state.embedded.sessions.cancelInput(sharedId, active.inputId).catch(() => null);
+        await state.embedded.sessions.cancelInput(sharedId, inputId).catch(() => null);
       }
     }
-    active?.resolve('cancelled');
+  }
+
+  /** Send a session update; a closed or failing client connection is logged, never an unhandled rejection. */
+  private notify(notification: Parameters<AgentSideConnection['sessionUpdate']>[0]): void {
+    try {
+      Promise.resolve(this.conn.sessionUpdate(notification)).catch((error: unknown) => {
+        logger.warn('ACP session update could not be delivered', { error: summarizeError(error) });
+      });
+    } catch (error) {
+      logger.warn('ACP session update could not be delivered', { error: summarizeError(error) });
+    }
   }
 
   /** Tear down every embedded session (used by serveAcpAgent on stream end). */
@@ -354,7 +440,7 @@ export class GoodVibesAcpAgent implements Agent {
 
   private forwardToolEvent(acpSessionId: string, event: ToolEvent): void {
     if (event.type === 'TOOL_EXECUTING') {
-      void this.conn.sessionUpdate({
+      this.notify({
         sessionId: acpSessionId,
         update: {
           sessionUpdate: 'tool_call',
@@ -366,7 +452,7 @@ export class GoodVibesAcpAgent implements Agent {
       return;
     }
     if (event.type === 'TOOL_SUCCEEDED' || event.type === 'TOOL_FAILED') {
-      void this.conn.sessionUpdate({
+      this.notify({
         sessionId: acpSessionId,
         update: {
           sessionUpdate: 'tool_call_update',
@@ -381,6 +467,12 @@ export class GoodVibesAcpAgent implements Agent {
   }
 }
 
+/** The byte streams an ACP agent speaks over; the process's stdin/stdout unless supplied. */
+export interface AcpStdio {
+  readonly input: ReadableStream<Uint8Array>;
+  readonly output: WritableStream<Uint8Array>;
+}
+
 /**
  * Serve a GoodVibes ACP agent over stdio. Call from a headless entry point;
  * returns the connection and a dispose handle (the caller owns process exit).
@@ -390,21 +482,29 @@ export class GoodVibesAcpAgent implements Agent {
  * the returned promise rejects with an error naming it, which is the honest
  * answer for an entry point whose whole job is to speak that protocol.
  */
-export async function serveAcpAgent(options: AcpAgentOptions = {}): Promise<{
+export async function serveAcpAgent(options: AcpAgentOptions = {}, stdio?: AcpStdio): Promise<{
   connection: AgentSideConnection;
   dispose: () => Promise<void>;
 }> {
   const { AgentSideConnection, ndJsonStream } = await loadAcpLibrary();
   let agent: GoodVibesAcpAgent | null = null;
-  const stdout = new WritableStream<Uint8Array>({
+  const stdout = stdio?.output ?? new WritableStream<Uint8Array>({
     write(chunk) {
       process.stdout.write(chunk);
     },
   });
-  const stdin = new ReadableStream<Uint8Array>({
+  const stdin = stdio?.input ?? new ReadableStream<Uint8Array>({
     start(controller) {
-      process.stdin.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+      process.stdin.on('data', (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk));
+        // Stop reading while the protocol layer is behind; `pull` resumes.
+        if ((controller.desiredSize ?? 1) <= 0) process.stdin.pause();
+      });
       process.stdin.on('end', () => controller.close());
+      process.stdin.on('error', (error) => controller.error(error));
+    },
+    pull() {
+      process.stdin.resume();
     },
   });
   const connection = new AgentSideConnection((conn) => {

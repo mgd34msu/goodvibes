@@ -40,6 +40,7 @@ describe('Explicit ApprovalBroker -> executeToolCalls edit selection', () => {
 
     let receivedArgs: Record<string, unknown> | undefined;
     const toolRegistry = {
+      isDangerous: () => false,
       execute: async (callId: string, _name: string, args: Record<string, unknown>): Promise<ToolResult> => {
         receivedArgs = args;
         return { callId, success: true, output: 'ok' };
@@ -85,6 +86,7 @@ describe('Explicit ApprovalBroker -> executeToolCalls edit selection', () => {
 
     let receivedArgs: Record<string, unknown> | undefined;
     const toolRegistry = {
+      isDangerous: () => false,
       execute: async (callId: string, _name: string, args: Record<string, unknown>): Promise<ToolResult> => {
         receivedArgs = args;
         return { callId, success: true, output: 'ok' };

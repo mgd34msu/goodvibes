@@ -58,7 +58,7 @@ function compareFixture(options: { mode?: PermissionMode; artifactText?: string;
   const provider: LLMProvider = { name: 'synthetic', models: ['a', 'b'], async chat(request) { chatRequests.push(request); chats++; await options.beforeChat?.(); drained++; return { content: `${request.model} synthetic response`, toolCalls: [], usage: { inputTokens: 11, outputTokens: 7 }, stopReason: 'completed' }; } };
   let currentProvider = provider;
   const providerRegistry = { getForModel: () => currentProvider };
-  const raw = createAgentModelCompareTool({ toolRegistry: owner.registry, artifactStore: store,
+  const raw = createAgentModelCompareTool({ toolRegistry: owner.registry, artifactStore: store, random: () => 0.999999,
     modelCatalog: { async listModels() { await options.beforeModels?.(); return ['a', 'b'].map(modelId => ({ modelId, providerId: 'synthetic', registryKey: `synthetic:${modelId}`, selectable: true })); } },
     providerRegistry,
   });

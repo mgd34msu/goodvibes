@@ -147,6 +147,11 @@ const KNOWLEDGE_JOB_RUN_REINDEX_RESULT_SCHEMA = objectSchema({
   issueCount: NUMBER_SCHEMA,
   provenance: enumSchema(['classic']),
   semanticEnrichment: enumSchema(['attempted', 'not-evaluated']),
+  recompileFailed: NUMBER_SCHEMA,
+  recompileFailures: arraySchema(objectSchema({
+    sourceId: STRING_SCHEMA,
+    error: STRING_SCHEMA,
+  }, ['sourceId', 'error'], { additionalProperties: false })),
 }, ['sourceCount', 'issueCount'], { additionalProperties: false });
 const KNOWLEDGE_JOB_RUN_REFRESH_RESULT_SCHEMA = objectSchema({
   refreshed: NUMBER_SCHEMA,
@@ -221,24 +226,21 @@ export const KNOWLEDGE_JOB_RUN_REQUEST_SCHEMA = objectSchema({
   sourceIds: STRING_LIST_SCHEMA,
   limit: NUMBER_SCHEMA,
 }, [], { additionalProperties: false });
-export const KNOWLEDGE_CONNECTOR_INGEST_INPUT_SCHEMA = {
-  type: 'object',
-  properties: {
+export const KNOWLEDGE_CONNECTOR_INGEST_INPUT_SCHEMA: Record<string, unknown> = branchedSchema(
+  objectSchema({
     connectorId: STRING_SCHEMA,
     input: JSON_VALUE_SCHEMA,
     content: STRING_SCHEMA,
     path: STRING_SCHEMA,
     sessionId: STRING_SCHEMA,
     allowPrivateHosts: BOOLEAN_SCHEMA,
-  },
-  required: ['connectorId'],
-  anyOf: [
-    { required: ['input'] },
-    { required: ['content'] },
-    { required: ['path'] },
+  }, ['connectorId']),
+  [
+    requirementBranch({ input: JSON_VALUE_SCHEMA }, ['input']),
+    requirementBranch({ content: STRING_SCHEMA }, ['content']),
+    requirementBranch({ path: STRING_SCHEMA }, ['path']),
   ],
-  additionalProperties: false,
-} as const;
+);
 export const KNOWLEDGE_INJECTION_PROVENANCE_SCHEMA = objectSchema({
   source: enumSchema(['project-memory']),
   links: arraySchema(objectSchema({
@@ -545,10 +547,25 @@ export const KNOWLEDGE_SOURCES_OUTPUT_SCHEMA = {
       items: arraySchema(KNOWLEDGE_SOURCE_SCHEMA),
       hasMore: BOOLEAN_SCHEMA,
       nextCursor: STRING_SCHEMA,
+      truncated: BOOLEAN_SCHEMA,
+      total: NUMBER_SCHEMA,
+      loaded: NUMBER_SCHEMA,
     }, ['items', 'hasMore']),
   ],
 };
-export const KNOWLEDGE_NODES_OUTPUT_SCHEMA = listOutputSchema('nodes', KNOWLEDGE_NODE_SCHEMA);
+export const KNOWLEDGE_NODES_OUTPUT_SCHEMA = {
+  anyOf: [
+    listOutputSchema('nodes', KNOWLEDGE_NODE_SCHEMA),
+    objectSchema({
+      items: arraySchema(KNOWLEDGE_NODE_SCHEMA),
+      hasMore: BOOLEAN_SCHEMA,
+      nextCursor: STRING_SCHEMA,
+      truncated: BOOLEAN_SCHEMA,
+      total: NUMBER_SCHEMA,
+      loaded: NUMBER_SCHEMA,
+    }, ['items', 'hasMore']),
+  ],
+};
 export const KNOWLEDGE_ISSUES_OUTPUT_SCHEMA = listOutputSchema('issues', KNOWLEDGE_ISSUE_SCHEMA);
 export const KNOWLEDGE_ISSUE_REVIEW_OUTPUT_SCHEMA = objectSchema({
   ok: BOOLEAN_SCHEMA,

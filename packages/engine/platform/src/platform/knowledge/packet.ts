@@ -187,8 +187,13 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
       metadata: { detail, writeScope: [...packet.writeScope], ...(item.provenance ? { provenance: item.provenance } : {}) } });
   }
   assertCurrent();
-  context.emitIfReady((bus, ctx) => emitKnowledgePacketBuilt(bus, ctx, { task, itemCount: items.length, estimatedTokens, detail }));
+  context.emitIfReady((bus, ctx) => emitKnowledgePacketBuilt(bus, ctx, { task: eventTaskPreview(task), itemCount: items.length, estimatedTokens, detail }));
   return { packet, assertCurrent };
+}
+
+/** The event stream reaches every subscriber: carry a bounded preview, not the whole task text. */
+function eventTaskPreview(task: string): string {
+  return task.length > 80 ? `${task.slice(0, 80)}...` : task;
 }
 
 /** Usage is descriptive metadata and never admits or ranks candidates. */

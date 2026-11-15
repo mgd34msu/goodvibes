@@ -9,8 +9,9 @@
  *
  * Seams covered:
  *   1. CLI / command resume, session-workflow.ts calls replayJournalForSession
- *      after fromJSON + rebuildHistory. Here we call the same function through
- *      the same arguments to verify the path is correctly wired.
+ *      after fromJSON + rebuildHistory. The first describe calls the engine
+ *      function directly; the parity describe at the end drives the real
+ *      `/session resume` handler.
  *   2. In-TUI session-browser resume, createResumeSessionHandler with a real journal.
  *      Asserts replayed messages appear after the session-browser resume handler runs.
  *
@@ -38,6 +39,9 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { ConversationManager } from '../../core/conversation.ts';
 import { createResumeSessionHandler } from '../../runtime/bootstrap-hook-bridge.ts';
+import { handleSessionWorkflowCommand } from '../../input/commands/session-workflow.ts';
+import type { CommandContext } from '../../input/command-registry.ts';
+import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ResumeSessionOptions } from '../../runtime/bootstrap-hook-bridge.ts';
 import { makeTestSurface } from '../helpers/session-surface.ts';
 
@@ -244,6 +248,34 @@ describe('seam-replay: seam 2; in-TUI session-browser resume (createResumeSessio
     expect(persistCalled).toBe(true);
     // Journal cleaned up.
     expect(existsSync(journalPath)).toBe(false);
+  });
+
+  test('resuming another session closes the one this process was running on the daemon spine, then reopens the resumed one', async () => {
+    const homeDirectory = tmpDir;
+    const sessionMeta = { title: 'resumed', titleSource: 'auto' as const, timestamp: Date.now() - 5000, model: 'test-model', provider: 'test-provider', returnContext: undefined };
+    const spineCalls: string[] = [];
+    const runtime = { sessionId: 'previous-session', model: 'test-model', provider: 'test-provider' };
+    const options: ResumeSessionOptions = {
+      surface: makeTestSurface(homeDirectory),
+      conversation: new ConversationManager(() => 80),
+      requestRender: () => {},
+      runtimeBus: { emit: () => {} } as never,
+      runtime: runtime as never,
+      onSessionIdChanged: () => {},
+      sharedSessionBroker: { reopenSession: () => Promise.resolve(null) },
+      sessionSpine: {
+        reopen: (record) => { spineCalls.push(`reopen:${record.sessionId}`); },
+        close: (sessionId) => { spineCalls.push(`close:${sessionId}`); },
+      },
+      project: 'test-project',
+      writeLastSessionPointer: () => {},
+      hookDispatcher: { fire: () => Promise.resolve({ fired: 0 }) } as never,
+      sessionManager: { load: () => ({ messages: [], meta: sessionMeta }), save: () => {}, list: () => [] } as never,
+      configManager: { get: () => 'off', getCategory: () => ({}) } as never,
+      providerRegistry: { get: () => null, getCurrentModel: () => 'test-model', getForModel: () => null, require: () => { throw new Error('not available'); } } as never,
+    };
+    await createResumeSessionHandler(options)('resumed-session');
+    expect(spineCalls).toEqual(['close:previous-session', 'reopen:resumed-session']);
   });
 
   // footer token-counter hydration after resume. createResumeSessionHandler
@@ -523,3 +555,68 @@ describe('seam-replay: seq-collision authoritative-record selection (T30)', () =
   });
 });
 
+// ── Parity: the same saved session and journal through both real seams ────────
+
+describe('seam-replay: both real seams restore the same conversation from the same session and journal', () => {
+  const texts = (conversation: ConversationManager): string[] =>
+    conversation.getMessageSnapshot().map((message) => `${message.role}:${JSON.stringify(message.content)}`);
+
+  function saveSessionWithJournal(sm: SessionManager, sessionId: string): void {
+    const snapshotTimestamp = Date.now() - 5000;
+    sm.save(sessionId, [{ role: 'user', content: 'snapshot-user' }, { role: 'assistant', content: 'snapshot-assistant' }], {
+      title: 'Parity', model: 'test-model', provider: 'test-provider', timestamp: snapshotTimestamp,
+    });
+    writeJournalWithRecords(journalPathFor(makeTestSurface(tmpDir), sessionId), sessionId, 2, snapshotTimestamp);
+  }
+
+  test('/session resume and the session-browser handler restore identical messages, replaying the journal in both', async () => {
+    const surface = makeTestSurface(tmpDir);
+    const sm = new SessionManager(tmpDir, { surface });
+    saveSessionWithJournal(sm, 'parity-command');
+    saveSessionWithJournal(sm, 'parity-browser');
+
+    // Seam 1: the real /session resume handler.
+    const commandConversation = new ConversationManager(() => 80);
+    const commandRuntime = { sessionId: 'previous-session', model: 'old-model', provider: 'old-provider' };
+    const printed: string[] = [];
+    const ctx = {
+      print: (text: string) => { printed.push(text); },
+      renderRequest: () => {},
+      session: { conversationManager: commandConversation, runtime: commandRuntime, sessionManager: sm },
+      workspace: { surface },
+      clients: { providerApi: { selectModel: async (model: string) => ({ registryKey: model, providerId: 'test-provider' }) } },
+      platform: { configManager: { get: () => 'off' } },
+    } as unknown as CommandContext;
+    await handleSessionWorkflowCommand(['resume', 'parity-command'], ctx);
+    expect(printed.join('\n')).toContain('Replayed');
+
+    // Seam 2: the session-browser handler.
+    const browserConversation = new ConversationManager(() => 80);
+    const options: ResumeSessionOptions = {
+      surface,
+      conversation: browserConversation,
+      requestRender: () => {},
+      runtimeBus: { emit: () => {} } as never,
+      runtime: { sessionId: 'previous-session', model: 'old-model', provider: 'old-provider' } as never,
+      onSessionIdChanged: () => {},
+      sharedSessionBroker: { reopenSession: () => Promise.resolve(null) },
+      sessionSpine: { reopen: () => {} },
+      project: 'test-project',
+      writeLastSessionPointer: () => {},
+      hookDispatcher: { fire: () => Promise.resolve({ fired: 0 }) } as never,
+      sessionManager: sm as never,
+      configManager: { get: () => 'off', getCategory: () => ({}) } as never,
+      providerRegistry: { get: () => null, getCurrentModel: () => 'test-model', getForModel: () => null, require: () => { throw new Error('not available'); } } as never,
+    };
+    await createResumeSessionHandler(options)('parity-browser');
+
+    const fromCommand = texts(commandConversation);
+    // The last journal record carries the full history, which supersedes the two snapshot messages.
+    expect(fromCommand).toHaveLength(3);
+    expect(fromCommand.join('\n')).toContain('seam-msg-2');
+    expect(fromCommand.join('\n')).not.toContain('snapshot-user');
+    expect(texts(browserConversation)).toEqual(fromCommand);
+    expect(existsSync(journalPathFor(surface, 'parity-command'))).toBe(false);
+    expect(existsSync(journalPathFor(surface, 'parity-browser'))).toBe(false);
+  });
+});

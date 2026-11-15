@@ -568,7 +568,30 @@ describe('fleet registry: activity side-table via runtime bus', () => {
     emitAgentStreamDelta(bus, emitterCtx, { agentId: 'ag-tap', content: 'x', accumulated: 'x' });
     await flushBus();
     expect(nodeById(fresh, 'ag-tap').state).toBe('streaming');
+    // Dispose dropped the overlay, so the disposed registry shows the record's own state; a live tap would show 'streaming'.
+    expect(nodeById(registry, 'ag-tap').state).toBe('executing-tool');
     fresh.dispose();
+  });
+});
+
+describe('fleet registry: activity entries of departed agents', () => {
+  test('an agent the manager dropped does not bring its old live state back under a reused id', async () => {
+    const agents: AgentRecord[] = [makeAgent({ id: 'ag-gone' })];
+    const bus = new RuntimeEventBus();
+    const registry = createProcessRegistry(makeDeps({
+      agentManager: { list: () => agents, cancel: () => false },
+      runtimeBus: bus,
+      now: () => T0 + 1_000,
+    }));
+    emitAgentStreamDelta(bus, emitterCtx, { agentId: 'ag-gone', content: 'x', accumulated: 'x' });
+    await flushBus();
+    expect(nodeById(registry, 'ag-gone').state).toBe('streaming');
+
+    agents.length = 0;
+    expect(registry.query().nodes.some((node) => node.id === 'ag-gone')).toBe(false);
+    agents.push(makeAgent({ id: 'ag-gone' }));
+    expect(nodeById(registry, 'ag-gone').state).not.toBe('streaming');
+    registry.dispose();
   });
 });
 
@@ -1411,16 +1434,22 @@ describe('fleet registry: overlay keeps terminal and cancelled agents out of liv
   }
   const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
 
-  test('STREAM_RETRY does not overwrite a failed agent with retrying', async () => {
+  test('STREAM_RETRY after AGENT_FAILED leaves the overlay empty instead of retrying', async () => {
     const agent = makeAgent({ id: 'ag-f' });
     const { registry, bus } = setup(agent);
+    // The record stays running: only the overlay can say failed here, so a guard that
+    // let STREAM_RETRY overwrite it (or kept the old activity) would show through.
+    emitAgentStreamDelta(bus, emitterCtx, { agentId: 'ag-f', content: 'a', accumulated: 'a' });
+    await flush();
+    expect(nodeById(registry, 'ag-f').state).toBe('streaming');
     emitAgentFailed(bus, emitterCtx, { agentId: 'ag-f', error: 'x', durationMs: 1 });
     await flush();
+    expect(nodeById(registry, 'ag-f').state).toBe('executing-tool');
     emitStreamRetry(bus, { ...emitterCtx, agentId: 'ag-f' }, {
       turnId: 't1', provider: 'anthropic', attempt: 1, maxAttempts: 3, delayMs: 100, reason: 'overloaded',
     });
     await flush();
-    expect(nodeById(registry, 'ag-f').state).not.toBe('retrying');
+    expect(nodeById(registry, 'ag-f').state).toBe('executing-tool');
     registry.dispose();
   });
 
@@ -1432,7 +1461,7 @@ describe('fleet registry: overlay keeps terminal and cancelled agents out of liv
     expect(nodeById(registry, 'ag-c').state).toBe('streaming');
     emitAgentCancelled(bus, emitterCtx, { agentId: 'ag-c' });
     await flush();
-    expect(nodeById(registry, 'ag-c').state).not.toBe('streaming');
+    expect(nodeById(registry, 'ag-c').state).toBe('executing-tool');
     registry.dispose();
   });
 });

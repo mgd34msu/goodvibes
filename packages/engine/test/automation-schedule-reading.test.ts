@@ -155,7 +155,7 @@ describe('engine-owned natural-language schedule reading', () => {
     const f = fixture({});
     expect((await readNaturalLanguageSchedule({ phrase: '', now, timezone: 'UTC' }, { port: f.port })).kind).toBe('unknown');
     expect((await readNaturalLanguageSchedule({ phrase: 'daily', now: NaN, timezone: 'UTC' }, { port: f.port })).kind).toBe('unknown');
-    await expect(readNaturalLanguageSchedule({ phrase: 'daily', now, timezone: 'invalid/zone' }, { port: f.port })).rejects.toThrow();
+    expect(await readNaturalLanguageSchedule({ phrase: 'daily', now, timezone: 'invalid/zone' }, { port: f.port })).toEqual({ kind: 'unknown', reason: 'invalid', confidence: null });
     expect(f.requests).toHaveLength(0);
   });
 });

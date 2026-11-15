@@ -30,8 +30,8 @@ test('registration close drains an accepted save and its persistence before owne
   const { ctx } = fixture();
   const entered = deferred(); const release = deferred();
   const original = DraftSyncStore.prototype.upsert;
-  const delayed = spyOn(DraftSyncStore.prototype, 'upsert').mockImplementation(async function (this: DraftSyncStore, input) {
-    entered.resolve(); await release.promise; return original.call(this, input);
+  const delayed = spyOn(DraftSyncStore.prototype, 'upsert').mockImplementation(async function (this: DraftSyncStore, ...args: Parameters<typeof original>) {
+    entered.resolve(); await release.promise; return original.apply(this, args);
   });
   const registration = registerDraftMethods(ctx);
   const saving = invoke(ctx, 'channels.drafts.save', { id: 'fixture', message: 'fixture body held during shutdown', confirm: true });

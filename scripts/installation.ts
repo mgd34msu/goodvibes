@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const PACKAGE = 'goodvibes-jev';
@@ -146,7 +146,48 @@ export function assertOwnedFiles(receipt: Installation): void {
   const current = join(receipt.prefix, 'current');
   if (present(current) && (!lstatSync(current).isSymbolicLink() || readlinkSync(current) !== `releases/${receipt.release}`)) throw new Error('Installation current link has changed.');
   plainPath(join(receipt.prefix, 'releases', receipt.release));
-  if (readDataId(receipt) !== receipt.id) throw new Error('User data does not belong to this installation.');
+  // A data directory that is gone has no owner to contradict the receipt; a directory that exists must still carry this installation's marker.
+  if (present(receipt.dataDir) && readDataId(receipt) !== receipt.id) throw new Error('User data does not belong to this installation.');
+}
+const RELEASE_NAME = /^[0-9a-f]{40}-[0-9a-f-]{36}$/;
+export function switchRelease(prefix: string, release: string): void {
+  const temporary = join(prefix, `current-${process.pid}`);
+  symlinkSync(`releases/${release}`, temporary);
+  try { renameSync(temporary, join(prefix, 'current')); } finally { rmSync(temporary, { force: true }); }
+}
+/** Written by an update just before it moves `current`, removed once the new receipt is saved. */
+export const pendingPath = (prefix: string): string => join(prefix, 'installation.pending');
+/**
+ * An update that was killed outright (hang-up, SIGKILL, power loss) after it moved `current` leaves the
+ * receipt naming the previous release while `current` and the generated files are already the new ones.
+ * Put the receipt's release back so update and uninstall can proceed; the abandoned release is removed by
+ * the next successful update. Returns whether a recovery was needed.
+ */
+export function recoverInterruptedUpdate(receipt: Installation): boolean {
+  const marker = pendingPath(receipt.prefix); plainPath(marker);
+  if (!present(marker)) return false;
+  if (!RELEASE_NAME.test(readFileSync(marker, 'utf8').trim())) throw new Error(`Unreadable interrupted-update marker ${marker}. Remove it only if no install is running, then retry.`);
+  const previous = join(receipt.prefix, 'releases', receipt.release); plainPath(previous);
+  if (!present(previous)) throw new Error(`An earlier update was interrupted and the previous release ${previous} is gone, so it cannot be restored. Remove ${receipt.prefix} and install again; user data is kept.`);
+  switchRelease(receipt.prefix, receipt.release);
+  if (receipt.schema === 2) {
+    for (const name of COMMANDS) atomicWrite(join(receipt.prefix, 'commands', name), receipt.wrappers[name]!, 0o755);
+    if (receipt.service && present(unitPath(receipt))) atomicWrite(unitPath(receipt), receipt.unit, 0o644);
+  } else {
+    // A digest receipt cannot regenerate the previous files. The interrupted update itself wrote what is on disk,
+    // so adopt that exact text in a v2 receipt rather than reporting the installer's own files as edited.
+    const wrappers: Record<string, string> = {};
+    for (const name of COMMANDS) {
+      const file = join(receipt.prefix, 'commands', name); plainPath(file);
+      wrappers[name] = present(file) ? readFileSync(file, 'utf8') : receipt.wrappers[name]!;
+    }
+    const unit = unitPath(receipt); plainPath(unit);
+    Object.assign(receipt, { schema: 2, wrappers, unit: receipt.service && present(unit) ? readFileSync(unit, 'utf8') : receipt.unit });
+    atomicWrite(join(receipt.prefix, 'installation.json'), JSON.stringify(receipt, null, 2) + '\n');
+  }
+  rmSync(marker, { force: true });
+  console.warn(`An earlier update was interrupted; restored the previous release ${receipt.release.slice(0, 12)}.`);
+  return true;
 }
 export function processStartTime(pid: number): string | undefined {
   try {
@@ -184,19 +225,19 @@ function acquireLock(lock: string): void {
   try { mkdirSync(lock, { mode: 0o700 }); }
   catch {
     const owner = readLockOwner(lock);
-    if (!owner) refuse(`This lock has no owner record (created by an older version, or being created right now). Check that no install or uninstall is running, then remove it with: rmdir '${lock}'`);
-    else if (!ownerIsDead(owner!)) refuse(`It is held by running process ${owner!.pid}. Wait for it to finish, or stop it first.`);
-    // The owner is gone. Move the lock aside atomically so only one contender reclaims it,
-    // and confirm that what we moved is still the dead owner's record before deleting it.
-    const aside = `${lock}.stale-${process.pid}`;
-    try { renameSync(lock, aside); } catch { refuse('Another process is reclaiming it; retry in a moment.'); }
-    const moved = readLockOwner(aside);
-    if (moved?.pid !== owner!.pid || moved?.startTime !== owner!.startTime) {
-      try { renameSync(aside, lock); } catch { /* a new lock now exists; leave the moved one for inspection */ }
-      refuse('The lock changed while it was being reclaimed; retry in a moment.');
-    }
-    rmSync(aside, { recursive: true, force: true });
-    try { mkdirSync(lock, { mode: 0o700 }); } catch { refuse('Another process took it first; retry in a moment.'); }
+    if (!owner) return refuse(`This lock has no owner record (created by an older version, or being created right now). Check that no install or uninstall is running, then remove it with: rmdir '${lock}'`);
+    if (!ownerIsDead(owner)) return refuse(`It is held by running process ${owner.pid}. Wait for it to finish, or stop it first.`);
+    // The owner is gone. Only one contender at a time may reclaim: a second reclaimer that judged the same
+    // dead owner would otherwise delete the live lock the first one just created.
+    const reclaim = `${lock}.reclaim`;
+    try { mkdirSync(reclaim, { mode: 0o700 }); }
+    catch { return refuse(`Another process is reclaiming it; retry in a moment. If none is running, remove it with: rmdir '${reclaim}'`); }
+    try {
+      const again = readLockOwner(lock);
+      if (again?.pid !== owner.pid || again?.startTime !== owner.startTime) return refuse('The lock changed while it was being reclaimed; retry in a moment.');
+      rmSync(lock, { recursive: true, force: true });
+      try { mkdirSync(lock, { mode: 0o700 }); } catch { return refuse('Another process took it first; retry in a moment.'); }
+    } finally { rmSync(reclaim, { recursive: true, force: true }); }
   }
   const startTime = processStartTime(process.pid);
   writeFileSync(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, ...(startTime ? { startTime } : {}) }), { mode: 0o600 });
@@ -230,6 +271,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
     if (!receipt) { console.log(`No Jev installation at ${prefix}. Preserved data remains untouched.`); return; }
     await withLock(receipt.dataDir, async () => {
       if (realpathSync(process.env.HOME ?? '') !== receipt.home) throw new Error('Run uninstall as the user who owns this installation.');
+      recoverInterruptedUpdate(receipt);
       assertOwnedFiles(receipt);
       if (receipt.service) {
         // A re-run after a failure that came after the unit was removed: nothing is left to stop or disable.
@@ -242,7 +284,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
       }
       for (const name of COMMANDS) rmSync(join(receipt.binDir, name), { force: true });
       // Data lives outside the program prefix. Only an explicit purge removes it.
-      if (purge) { plainPath(receipt.dataDir); rmSync(receipt.dataDir, { recursive: true }); }
+      if (purge) { plainPath(receipt.dataDir); rmSync(receipt.dataDir, { recursive: true, force: true }); }
       rmSync(prefix, { recursive: true });
       console.log(purge ? 'GoodVibes Jev uninstalled, including its data.' : `GoodVibes Jev uninstalled. Data and credentials preserved at ${receipt.dataDir}`);
     });

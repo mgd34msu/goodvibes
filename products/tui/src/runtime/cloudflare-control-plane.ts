@@ -1,6 +1,8 @@
-import { join } from 'node:path';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveControlPlaneBaseUrl } from './client/operator-endpoint.ts';
 
 export const CLOUDFLARE_COMPONENT_IDS = [
   'workers',
@@ -135,6 +137,8 @@ export interface CloudflareProvisionResult {
   readonly r2?: { readonly bucketName: string; readonly storageClass: 'Standard' };
   readonly secretsStore?: { readonly storeName: string; readonly storeId: string };
   readonly verification?: CloudflareVerifyResult;
+  /** Messages of steps that were skipped or failed; ok stays true for a partial run, so check this too. */
+  readonly warnings?: readonly string[];
   readonly generatedSecrets?: {
     readonly workerClientToken?: string;
     readonly tunnelToken?: string;
@@ -270,41 +274,45 @@ export interface CloudflareDaemonClient {
 export interface CloudflareDaemonClientOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly homeDirectory: string;
+  /** Injectable fetch for tests; defaults to the global fetch. */
+  readonly fetch?: typeof fetch | undefined;
 }
 
-function connectHostForBindHost(host: string): string {
-  if (host === '0.0.0.0' || host === '::' || host.trim().length === 0) return '127.0.0.1';
-  return host;
+/**
+ * Where the Cloudflare routes are dialled: the same address every other operator
+ * seam dials (scheme from the TLS mode, wildcard binds mapped to loopback), or
+ * null when the daemon is disabled or no address is configured, so the bearer
+ * token is never sent to a guessed scheme or port.
+ */
+export function resolveCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
+  if (!resolveDaemonEnabled(configManager)) return null;
+  return resolveControlPlaneBaseUrl(configManager);
 }
 
-function hostForUrl(host: string): string {
-  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-}
-
-export function resolveCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
-  // An explicitly DECLARED external address (tunnel / proxy) wins; otherwise the
-  // URL is built from the bind below. The old `controlPlane.baseUrl` this read
-  // was a stored mirror of the bind with no writers, so it drifted from it.
-  const configuredBaseUrl = String(configManager.get('controlPlane.publicBaseUrl' as never) ?? '').trim();
-  if (configuredBaseUrl) return configuredBaseUrl.replace(/\/+$/, '');
-  const host = hostForUrl(connectHostForBindHost(String(configManager.get('controlPlane.host' as never) ?? '127.0.0.1')));
-  const portValue = Number(configManager.get('controlPlane.port' as never) ?? 3421);
-  const port = Number.isFinite(portValue) && portValue > 0 ? portValue : 3421;
-  return `http://${host}:${port}`;
-}
-
-export function buildDefaultCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
+export function buildDefaultCloudflareDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
   return resolveCloudflareDaemonBaseUrl(configManager);
 }
 
 function readDaemonToken(homeDirectory: string): string {
-  const daemonHomeDir = join(homeDirectory, '.goodvibes', 'daemon');
+  const daemonHomeDir = resolveGoodVibesDaemonHome(homeDirectory);
   return getOrCreateCompanionToken('tui', { daemonHomeDir }).token;
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-  const body = text.trim().length > 0 ? JSON.parse(text) as unknown : {};
+  let body: unknown = {};
+  if (text.trim().length > 0) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      // A proxy or crashed route can answer with HTML or plain text; say what came back instead of a JSON syntax error.
+      throw new CloudflareDaemonRouteError(
+        `Cloudflare daemon route answered HTTP ${response.status} with a body that is not JSON: ${text.slice(0, 200)}`,
+        response.status,
+        'CLOUDFLARE_DAEMON_ROUTE_ERROR',
+      );
+    }
+  }
   if (!response.ok) {
     const record = body && typeof body === 'object' ? body as Record<string, unknown> : {};
     const message = typeof record.error === 'string' ? record.error : `Cloudflare daemon route failed with HTTP ${response.status}`;
@@ -319,10 +327,17 @@ export function createCloudflareDaemonClient(options: CloudflareDaemonClientOpti
   const token = readDaemonToken(options.homeDirectory);
 
   const requestJson = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+    if (!baseUrl) {
+      throw new CloudflareDaemonRouteError(
+        'The daemon is not reachable from here: it is disabled (daemon.enabled=false) or no control-plane address is configured (controlPlane.host and controlPlane.port, or controlPlane.publicBaseUrl). Enable the daemon or set the address in /settings, then retry.',
+        503,
+        'CLOUDFLARE_DAEMON_UNAVAILABLE',
+      );
+    }
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${token}`);
     if (init.body !== undefined) headers.set('Content-Type', 'application/json');
-    const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+    const response = await (options.fetch ?? fetch)(`${baseUrl}${path}`, { ...init, headers });
     return await readJsonResponse<T>(response);
   };
 

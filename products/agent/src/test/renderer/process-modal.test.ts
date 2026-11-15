@@ -173,10 +173,38 @@ test('process summaries use current typed records and omit entries removed durin
     getStatus: id => processes.get(id),
     stop: () => false,
   } });
-  expect(listed.find(row => row.id === completed)?.done).toBe(true);
-  expect(listed.find(row => row.id === activeWithTerminalText)?.done).toBe(false);
-  expect(processes.get(completed)?.done).toBe(true);
   modal.refresh();
   expect(modal.entries.map(row => row.id)).toEqual([active, activeWithTerminalText]);
   expect(modal.entries[0]!.elapsedMs).toBeGreaterThanOrEqual(1200);
+});
+
+describe('ProcessModal selection follows the process', () => {
+  test('a process ahead of the selection exiting does not retarget stop to another process', () => {
+    const a = seedProcess('sleep a');
+    const b = seedProcess('sleep b');
+    const c = seedProcess('sleep c');
+    const modal = createProcessModal();
+    modal.open();
+    modal.moveDown();
+    expect(modal.getSelected()?.id).toBe(b);
+    processes.get(a)!.done = true;
+    modal.refresh();
+    expect(modal.getSelected()?.id).toBe(b);
+    expect(modal.stopSelected()).toBe(true);
+    expect(processes.get(b)!.done).toBe(true);
+    expect(processes.get(c)!.done).toBe(false);
+    modal.close();
+  });
+
+  test('when the selected process itself exits the selection stays inside the list', () => {
+    seedProcess('sleep a');
+    const b = seedProcess('sleep b');
+    const modal = createProcessModal();
+    modal.open();
+    modal.moveDown();
+    processes.get(b)!.done = true;
+    modal.refresh();
+    expect(modal.selectedIndex).toBe(0);
+    modal.close();
+  });
 });

@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { noul, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { AuthenticatedPrincipal } from '@goodvibes-jev/engine/daemon-api';
@@ -37,7 +38,7 @@ test.each(['TYPESAFE_BASE_URL', 'TYPESAFE_API_KEY', 'TYPESAFE_DEFAULT_MODEL'] as
       answers: Object.fromEntries(Object.keys(input.questions).map((name) => [name, { type: 'noul', noul: 0.99 }])) as never };
   } };
   const cleanup: (() => void | Promise<void>)[] = [];
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log }, env,
+  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env,
     methods: new GatewayMethodCatalog(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
@@ -198,7 +199,8 @@ test('the product injects its recorded port and aborts/drains accepted browser c
     expect(events).toEqual(['browser closing', 'call aborted', 'call aborted', 'browser drained', 'log disposed']);
     expect(logDisposeCalls).toBe(1);
     for (const release of releases) release.resolve();
-    await Bun.sleep(5); expect(logDisposeCalls).toBe(1);
+    for (let turn = 0; turn < 10; turn++) await setImmediate();
+    expect(logDisposeCalls).toBe(1);
     expect(() => services!.judgment.decisionLog.query()).toThrow();
     expect(intervals.remaining()).toEqual([]);
     // Reopen the actual product store: revoked browser snapshots must not
@@ -298,7 +300,7 @@ test('default configured browser policy admits only the issued mail-subject purp
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
       answers: { already_reply: { type: 'noul', noul: 0.99 } } as never };
   } };
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log }, env: {},
+  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env: {},
     methods: new GatewayMethodCatalog(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
@@ -325,7 +327,7 @@ test.each(['webui.config.credential-key', 'webui.settings.card-material-key'] as
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
       answers: { [battery === 'webui.config.credential-key' ? 'credential' : 'material']: { type: 'noul', noul: 0.001 } } as never };
   } };
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log }, env: {},
+  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env: {},
     methods: new GatewayMethodCatalog(), config, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
   });
@@ -351,7 +353,7 @@ test('daemon composition explicitly authorizes canonical chat speech seams on th
       answers: Object.fromEntries(Object.keys(input.questions).map(name => [name, { type: 'noul', noul: 0.999 }])) as never };
   } };
   const cleanup: (() => void | Promise<void>)[] = [];
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log },
+  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } },
     env: { TYPESAFE_BASE_URL: 'http://127.0.0.1:9876', TYPESAFE_API_KEY: 'synthetic-speech-key', TYPESAFE_DEFAULT_MODEL: 'jev-1.13.0' },
     methods: new GatewayMethodCatalog(), config: configuration().configManager, secrets: { onDidChange: () => () => {} },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },
@@ -388,7 +390,7 @@ test.each(['config', 'credentials', 'registry'] as const)('catalog browser compo
     return { requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', requestId: undefined, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1,
       answers: { matches: { type: 'noul', noul: 0.999 } } } as never;
   } };
-  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log }, env: {},
+  const service = composeBrowserJudgment({ judgment: { port: withDecisionLog(inner, log), decisionLog: log, volumeMonitor: { lastAlert: () => undefined } }, env: {},
     methods: new GatewayMethodCatalog(), config, providers: () => registry,
     secrets: { onDidChange(listener) { changed = listener; return () => {}; } },
     disposal: { add(_label, dispose) { cleanup.push(dispose); } },

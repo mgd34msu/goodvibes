@@ -15,14 +15,26 @@
 /** Header carrying an opaque WebAuthn step-up assertion on a tunneled request. */
 export const STEP_UP_ASSERTION_HEADER = 'x-goodvibes-stepup-assertion';
 
+/** The request a step-up assertion is presented for. */
+export interface StepUpRequestContext {
+  readonly method: string;
+  readonly path: string;
+  /** The session the request addresses, when its path names one. */
+  readonly sessionId?: string | undefined;
+  /** The daemon's relay rendezvous the request arrived through, when known. */
+  readonly rendezvousId?: string | undefined;
+}
+
 /**
  * Verifies a step-up assertion. Returns true only on genuine verification
  * (StepUpService.createVerifier is the daemon's implementation). `context`
- * carries the request essentials a verifier binds against.
+ * is the request the assertion is presented for: a challenge that was minted
+ * for a particular session, rendezvous, method or path is accepted only for
+ * that request.
  */
 export type StepUpAssertionVerifier = (
   assertion: string,
-  context: { readonly method: string; readonly path: string },
+  context: StepUpRequestContext,
 ) => Promise<boolean>;
 
 /** The outcome of a step-up policy evaluation. */

@@ -3,8 +3,10 @@ import {
   buildStatus,
   normalizeBaseUrl,
   readFirstEnv,
+  signalInit,
+  voiceFetch,
 } from './shared.js';
-import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
+
 
 export function createVydraProvider(): VoiceProvider {
   const envVars = ['VYDRA_API_KEY'] as const;
@@ -40,7 +42,8 @@ export function createVydraProvider(): VoiceProvider {
       if (!apiKey) throw new Error('Vydra API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://www.vydra.ai/api/v1');
       const model = request.modelId?.trim() || 'elevenlabs/tts';
-      const response = await instrumentedFetch(`${baseUrl}/models/${model}`, {
+      const response = await voiceFetch(`${baseUrl}/models/${model}`, {
+        ...signalInit(request.signal),
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -66,7 +69,7 @@ export function createVydraProvider(): VoiceProvider {
       ].filter((value): value is string => Boolean(value && value.trim()));
       const audioUrl = urls[0]!;
       if (!audioUrl) throw new Error('Vydra speech synthesis response missing audio URL');
-      const audioResponse = await instrumentedFetch(audioUrl);
+      const audioResponse = await voiceFetch(audioUrl, signalInit(request.signal));
       if (!audioResponse.ok) throw new Error(`Vydra audio download failed: HTTP ${audioResponse.status}`);
       const mimeType = audioResponse.headers.get('content-type')?.trim() || 'audio/mpeg';
       return {

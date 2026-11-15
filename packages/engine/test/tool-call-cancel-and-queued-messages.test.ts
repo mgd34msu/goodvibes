@@ -39,7 +39,7 @@ import { ConversationManager } from '../platform/src/platform/core/conversation.
 
 const allowAll = { check: async () => true } as unknown as PermissionManager;
 
-function makeRegistryWithTools(): ToolRegistry {
+function makeRegistryWithTools(onSlowEntered: () => void = () => {}): ToolRegistry {
   const registry = new ToolRegistry();
   // A slow, signal-aware tool: resolves cancelled-early when aborted, or
   // completes after 5s otherwise (the test cancels it long before that).
@@ -51,6 +51,7 @@ function makeRegistryWithTools(): ToolRegistry {
         clearTimeout(timer);
         resolve({ success: false, error: 'aborted' });
       });
+      onSlowEntered();
     }),
   });
   registry.register({
@@ -63,8 +64,11 @@ function makeRegistryWithTools(): ToolRegistry {
 describe('per-tool cancel: one call dies, the turn continues', () => {
   test('cancelling one call mid-flight yields a structured cancelled result; the sibling call still executes', async () => {
     const aborts = new ToolCallAbortRegistry();
+    // Cancel the slow call as soon as it is running (calls run sequentially:
+    // slow first, then fast, exactly the mid-turn shape).
+    let cancelled: boolean | undefined;
     const deps = {
-      toolRegistry: makeRegistryWithTools(),
+      toolRegistry: makeRegistryWithTools(() => { cancelled = aborts.cancel('call-slow'); }),
       permissionManager: allowAll,
       hookDispatcher: null,
       runtimeBus: null,
@@ -73,17 +77,12 @@ describe('per-tool cancel: one call dies, the turn continues', () => {
       toolCallSignals: aborts,
     };
 
-    // Cancel the slow call shortly after it starts (calls run sequentially:
-    // slow first, then fast, exactly the mid-turn shape).
-    setTimeout(() => {
-      expect(aborts.cancel('call-slow')).toBe(true);
-    }, 50);
-
     const results = await executeToolCalls(deps, 'turn-1', [
       { id: 'call-slow', name: 'slow', arguments: {} },
       { id: 'call-fast', name: 'fast', arguments: {} },
     ]);
 
+    expect(cancelled).toBe(true);
     // BOTH results exist, the batch (and thus the turn) continued.
     expect(results.length).toBe(2);
     const slow = results.find((r) => r.callId === 'call-slow')!;

@@ -4,7 +4,7 @@ import { declaredNoticePresentation } from '../runtime/runtime-event-notices.js'
 import { prepareSystemMessagePresentation, type SystemMessagePresentation } from '../runtime/system-message-presentation.js';
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
 import type { ProviderMessage, ContentPart } from '../providers/interface.js';
-import type { ToolCall, ToolResult } from '../types/tools.js';
+import type { ToolCall, ToolHostEvidence, ToolResult } from '../types/tools.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { CompactionContext } from './context-compaction.js';
 import type { CompactionReceipt } from './compaction-types.js';
@@ -21,7 +21,7 @@ import {
 } from './conversation-utils.js';
 import { applyDiffContent, parseDiffForApply } from './conversation-diff.js';
 import { logger } from '../utils/logger.js';
-import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, mergeVerificationArchive, resetVerificationArchives,
+import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, isVerificationRuntimeMessage, mergeVerificationArchive, resetVerificationArchives,
   restoreVerificationBranch, restoreVerificationMessages, retainVerificationMessagePositions, switchVerificationArchive, updateVerificationMessage } from './verification/archive.js';
 import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
 
@@ -56,6 +56,8 @@ export type ConversationMessageSnapshot =
     toolName?: string;
     /** Typed execution state. Absent on legacy/imported results whose outcome is unknown. */
     outcome?: 'ok' | 'error' | 'cancelled';
+    /** Host-only facts the tool reported beside its text (a read's observations); saved with the message, never shown to the model. */
+    hostEvidence?: ToolHostEvidence | undefined;
   };
 
 type Message = ConversationMessageSnapshot;
@@ -67,6 +69,8 @@ export interface BlockMeta {
   filePath?: string | undefined;
   diffOriginal?: string | undefined;
   diffUpdated?: string | undefined;
+  /** Why the diff cannot be applied as one replacement (several hunks or files). */
+  unsupported?: string | undefined;
 }
 
 function sameTokenUsage(a: TokenUsage | undefined, b: TokenUsage | undefined): boolean {
@@ -258,16 +262,19 @@ export class ConversationManager {
     let lastUserIdx = -1;
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const msg = this.messages[i];
-      if (msg?.role === 'user') {
+      // Host-made user-role messages (tool-result images) belong to the turn, not start it.
+      if (msg?.role === 'user' && !isVerificationRuntimeMessage(this, i)) {
         lastUserIdx = i;
         break;
       }
     }
     if (lastUserIdx === -1) return false;
-    const turn = this.messages.splice(lastUserIdx);
+    const turn = this.messages.slice(lastUserIdx);
+    // Archive first: if the journal write fails, conversation and archive are both unchanged.
+    detachVerificationMessages(this, lastUserIdx, turn);
+    this.messages.splice(lastUserIdx);
     this.undoStack.push(turn);
     this._messagesRevision++;
-    detachVerificationMessages(this, lastUserIdx, turn);
     return true;
   }
 
@@ -277,11 +284,12 @@ export class ConversationManager {
    */
   public redo(): boolean {
     if (this.undoStack.length === 0) return false;
-    const turn = this.undoStack.pop()!;
+    const turn = this.undoStack[this.undoStack.length - 1]!;
     const start = this.messages.length;
+    restoreVerificationMessages(this, start, turn);
+    this.undoStack.pop();
     this.messages.push(...turn);
     this._messagesRevision++;
-    restoreVerificationMessages(this, start, turn);
     return true;
   }
 
@@ -302,6 +310,7 @@ export class ConversationManager {
         content,
         outcome: result.cancelled === true ? 'cancelled' : result.success ? 'ok' : 'error',
         ...(toolName ? { toolName } : {}),
+        ...(result.hostEvidence ? { hostEvidence: structuredClone(result.hostEvidence) } : {}),
       });
     }
     this._messagesRevision++;
@@ -320,7 +329,7 @@ export class ConversationManager {
   public getLastUserMessage(): string | null {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const msg = this.messages[i];
-      if (msg?.role === 'user') {
+      if (msg?.role === 'user' && !isVerificationRuntimeMessage(this, i)) {
         return typeof msg.content === 'string' ? msg.content : null;
       }
     }
@@ -403,12 +412,17 @@ export class ConversationManager {
     return cloneMessages(this.messages);
   }
 
+  /** True when a system message satisfies the test; scans in place so a per-check liveness probe does not deep-copy the history. */
+  public hasSystemMessage(test: (message: Readonly<Extract<ConversationMessageSnapshot, { role: 'system' }>>) => boolean): boolean {
+    return this.messages.some((message) => message.role === 'system' && test(message));
+  }
+
   /** Retain the actual message fields used by completion, including externally
    * shared nested arguments. Compare identities/slots, never reserialize large
    * source strings on every verifier question. Presentation can update freely. */
   public captureMessageEvidence(): { snapshot: ConversationMessageSnapshot[]; native: boolean; assertCurrent: () => void; assertFinalized: (response: string) => void } {
     const messages = this.messages, revision = this._messagesRevision, snapshot = this.getMessageSnapshot;
-    const fields = ['role', 'content', 'toolCalls', 'callId', 'outcome'] as const;
+    const fields = ['role', 'content', 'toolCalls', 'callId', 'outcome', 'hostEvidence'] as const;
     const captured = messages.map(message => ({ message, slots: fields.map(key => ({ key, descriptor: Object.getOwnPropertyDescriptor(message, key) })) }));
     const nested = captured.flatMap(entry => entry.slots.flatMap(slot => {
       if (slot.descriptor && !('value' in slot.descriptor)) throw new Error('Conversation evidence contains an accessor');
@@ -465,6 +479,8 @@ export class ConversationManager {
     archiveVerificationCompaction(this, this.getMessageSnapshot(), cloneMessages([...systemMessages, ...kept]));
     this.messages = [...systemMessages, ...kept];
     this.streamingMessageIndex = -1;
+    // A turn undone before the rewrite no longer follows the history it was removed from.
+    this.undoStack = [];
     this._messagesRevision++;
   }
 
@@ -514,6 +530,9 @@ export class ConversationManager {
   public forkBranch(name?: string, force = false): string {
     const branchName = name?.trim() || `branch-${Date.now()}`;
     if (!force && this.branches.has(branchName)) {
+      // The existing branch is kept, not overwritten; callers that report a
+      // fork must check hasBranch first so they do not claim one was made.
+      logger.warn('[conversation] fork skipped; a branch with this name already exists', { branch: branchName });
       return branchName;
     }
     const messages = cloneMessages(this.messages);
@@ -548,24 +567,68 @@ export class ConversationManager {
     }
     this.currentBranch = name;
     this.streamingMessageIndex = -1;
+    // The undo stack holds turns removed from the branch just left; redoing
+    // them onto another branch would put the owner's old request there.
+    this.undoStack = [];
     this._messagesRevision++;
     return true;
+  }
+
+  /** Whether a branch with this name has been saved (see forkBranch). */
+  public hasBranch(name: string): boolean {
+    return this.branches.has(name);
+  }
+
+  /**
+   * Whether `mergeBranch(name)` can append the branch's own messages.
+   *  - `ok`: the current history is a prefix of the branch (or the branch adds nothing).
+   *  - `not-found`: no branch with that name.
+   *  - `diverged`: both the current history and the branch grew past their shared
+   *    prefix, so appending the branch tail would splice two different histories.
+   */
+  public checkBranchMerge(name: string): 'ok' | 'not-found' | 'diverged' {
+    const stored = this.branches.get(name);
+    if (!stored) return 'not-found';
+    const common = this.sharedPrefixLength(stored);
+    return common === this.messages.length || common === stored.length ? 'ok' : 'diverged';
+  }
+
+  /** Messages from the start that the current history and `other` hold identically. */
+  private sharedPrefixLength(other: readonly Message[]): number {
+    // The presentation is rebuilt on every branch switch, so it is not content.
+    const content = (message: Message) => JSON.stringify(message, (key, value: unknown) => key === 'presentation' ? undefined : value);
+    const limit = Math.min(this.messages.length, other.length);
+    let index = 0;
+    while (index < limit && content(this.messages[index]!) === content(other[index]!)) index++;
+    return index;
   }
 
   public mergeBranch(name: string): boolean {
     const stored = this.branches.get(name);
     if (!stored) return false;
-    const commonLength = Math.min(this.messages.length, stored.length);
+    const status = this.checkBranchMerge(name);
+    if (status !== 'ok') {
+      logger.warn('[conversation] branch merge refused; the branch and the current history diverged', { branch: name });
+      return false;
+    }
+    const commonLength = this.sharedPrefixLength(stored);
     const toAppend = stored.slice(commonLength);
     if (toAppend.length === 0) return true;
     mergeVerificationArchive(this, name, commonLength, this.messages.length);
     this.messages.push(...cloneMessages(toAppend));
+    // An undone turn belongs to the history it was removed from.
+    this.undoStack = [];
     this._messagesRevision++;
     return true;
   }
 
   public getCurrentBranch(): string {
     return this.currentBranch;
+  }
+
+  /** Side branches and the open branch's name, for saving with a session; cheap when /branch was never used. */
+  public branchState(): { branches: Record<string, Message[]>; currentBranch: string } {
+    return { branches: cloneBranchMap(this.branches), currentBranch: this.currentBranch };
   }
 
   public toJSON(): object {

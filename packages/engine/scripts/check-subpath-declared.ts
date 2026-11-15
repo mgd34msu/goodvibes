@@ -3,12 +3,15 @@
  * Internal child modules can be reached through their parent's public barrel.
  * The five daemon-owned modules listed below are deliberately reached through
  * control-plane verbs and configuration instead of direct consumer imports.
- * check-exports-coverage.ts records the ownership reason for each one.
+ * engine-package-lists.ts records the ownership reason for each one, and
+ * check-exports-coverage.ts reads the same list.
  * A new undeclared module, or a stale entry after publishing one, fails.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { INTENTIONALLY_INTERNAL } from './engine-package-lists.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -16,13 +19,9 @@ const PACKAGE_DIR = resolve(ENGINE_ROOT, 'platform');
 const PLATFORM_DIR = resolve(PACKAGE_DIR, 'src', 'platform');
 
 /** Daemon-owned modules exposed through control-plane methods, not engine imports. */
-const KNOWN_UNDECLARED: readonly string[] = [
-  './platform/channel-profiles',
-  './platform/channel-sync',
-  './platform/checkin',
-  './platform/principals',
-  './platform/push',
-];
+export const KNOWN_UNDECLARED: readonly string[] = Object.keys(INTENTIONALLY_INTERNAL)
+  .map((name) => `./platform/${name}`)
+  .sort();
 
 function declaredSubpaths(): ReadonlySet<string> {
   const manifest = JSON.parse(readFileSync(join(ENGINE_ROOT, 'package.json'), 'utf8')) as {
@@ -78,7 +77,7 @@ function main(): void {
   if (fixed.length > 0) {
     lines.push(
       '',
-      'These are now declared. Remove them from KNOWN_UNDECLARED:',
+      'These are now declared. Remove them from INTENTIONALLY_INTERNAL in scripts/engine-package-lists.ts:',
       ...fixed.map((subpath) => `  - ${subpath}`),
     );
   }

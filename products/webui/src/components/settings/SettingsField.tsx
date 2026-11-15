@@ -1,6 +1,6 @@
 import { validEndpointURL } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
-import { JudgmentModelField, JudgmentProviderField } from "./JudgmentModelFields";
+import { JudgmentModelField, JudgmentProviderField, commitJudgmentDestination } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
 /**
  * SettingsField, one typed config editor row, driven by the platform schema. Laid
@@ -61,7 +61,6 @@ import { Toggle } from "../ui/Toggle";
 import { isMoneyField } from "../../lib/money";
 import type { ConfigFieldModel } from "../../lib/settings-model";
 import type { ConfigSetOutcome } from "../../lib/goodvibes";
-import { secretStoreSetCommandFor } from "../../lib/secret-store-only-config-keys";
 import { ModelPricesEditor } from "./ModelPricesEditor";
 import { TimezonePicker } from "./TimezonePicker";
 import { MoneyField } from "./MoneyField";
@@ -70,6 +69,8 @@ import { CvvHandlingField } from "./CvvHandlingField";
 interface SettingsFieldProps {
   readonly field: ConfigFieldModel;
   readonly onCommit: (key: string, value: unknown) => Promise<void>;
+  /** Removes this key's explicit value on the daemon so it reads as its default again. */
+  readonly onReset?: (key: string) => Promise<void>;
   /** What the daemon reported for the last successful config.set of THIS key this
    *  session (SettingsModal's persistedByKey, looked up by the caller), undefined
    *  until this row has been saved at least once. */
@@ -78,6 +79,25 @@ interface SettingsFieldProps {
    *  to label the amount input; defaults to the schema's own default ('USD')
    *  when the caller does not pass one. */
   readonly currency?: string;
+  /** The daemon's current value for a key, read just before an editor that rewrites a whole object saves. */
+  readonly readLatest?: (key: string) => Promise<unknown>;
+}
+
+/** True when any own property on the way down is an accessor: reading it would run daemon-supplied code. */
+function hasAccessor(v: unknown, depth = 0): boolean {
+  if (v === null || typeof v !== "object") return false;
+  if (depth > 8) return true;
+  for (const d of Object.values(Object.getOwnPropertyDescriptors(v))) {
+    if (d.get || d.set || hasAccessor(d.value, depth + 1)) return true;
+  }
+  return false;
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  // A value with accessors is never serialised to compare it; it counts as different so the row stays resettable.
+  if (hasAccessor(a) || hasAccessor(b)) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function effectiveValue(field: ConfigFieldModel): unknown {
@@ -92,7 +112,7 @@ function scalarToText(v: unknown): string {
   return JSON.stringify(v);
 }
 
-export function SettingsField({ field, onCommit, persisted, currency }: SettingsFieldProps) {
+export function SettingsField({ field, onCommit, onReset, persisted, currency, readLatest }: SettingsFieldProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Secret replacements are write-only: never seed them from live config.
@@ -159,37 +179,12 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
           <ModelPricesEditor
             value={effectiveValue(field)}
             onCommit={(next) => onCommit(field.key, next)}
+            {...(readLatest ? { readLatest: () => readLatest(field.key) } : {})}
           />
         );
       }
       return (
         <ObjectJsonField field={field} saving={saving} onCommit={(value) => void commit(value)} />
-      );
-    }
-
-    // Secret string whose real value the daemon resolves ONLY from its own
-    // secret store (secret-store-only-config-keys.ts), never editable here.
-    // A config.set write would save a plaintext copy the mail/calendar
-    // connector never reads, while reporting success. Refuse and name the
-    // real command instead of offering a write that cannot work.
-    //
-    // FIRST among the special cases on purpose: this branch is a refusal, and
-    // a refusal has to be reached before anything below can offer an editor
-    // for the same key. None of the three payments/timezone editors that
-    // follow currently matches a secret-store-only key, so the order is not
-    // load-bearing today, it is what keeps it from becoming load-bearing.
-    if (field.isSecret && field.type === "string" && field.secretStoreOnly) {
-      const raw = effectiveValue(field);
-      const masked = typeof raw === "string" && raw ? maskSecretValue(raw) : "(unset)";
-      return (
-        <div className="settings-field-secret settings-field-secret--store-only">
-          <span className="settings-value settings-value--secret">{masked}</span>
-          <p className="settings-field-secret-store-only-note" role="note">
-            Only readable from the daemon's own secret store. A value saved here would never be
-            used. Run <code>{secretStoreSetCommandFor(field.key)}</code> from a terminal with daemon
-            access to set it.
-          </p>
-        </div>
       );
     }
 
@@ -336,7 +331,10 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
             }
             // Changing a destination never implicitly forwards the previous
             // target's credential. The owner selects its source explicitly.
-            if (value !== effectiveValue(field)) await onCommit("judgment.keySource", "none");
+            if (value !== effectiveValue(field)) {
+              await commitJudgmentDestination(onCommit, field.key, value, "endpoint");
+              return;
+            }
           }
           await onCommit(field.key, value);
         }}
@@ -344,12 +342,12 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
     );
   })();
 
-  // Wide editors (structured objects, a revealed secret, the timezone picker,
-  // a store-only secret note) sit under the text instead of beside it.
+  // Wide editors (structured objects, a revealed secret, the timezone picker)
+  // sit under the text instead of beside it.
   const stacked =
     field.type === "object" ||
     field.key === "daemon.timezone" ||
-    (field.isSecret && field.type === "string" && (field.secretStoreOnly || revealing));
+    (field.isSecret && field.type === "string" && revealing);
 
   return (
     <div
@@ -377,7 +375,31 @@ export function SettingsField({ field, onCommit, persisted, currency }: Settings
         </div>
         {field.description && <p className="settings-field-desc">{field.description}</p>}
       </div>
-      <div className="settings-field-control">{control}</div>
+      <div className="settings-field-control">
+        {control}
+        {onReset && field.present && !field.isSecret && !sameValue(field.liveValue, field.default) && (
+          <Button
+            size="sm"
+            className="settings-field-reset"
+            disabled={saving}
+            title="Remove the saved value so this setting follows the built-in default again."
+            onClick={() => {
+              if (inFlight.current) return;
+              inFlight.current = true;
+              setSaving(true);
+              setError(null);
+              onReset(field.key)
+                .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+                .finally(() => {
+                  inFlight.current = false;
+                  setSaving(false);
+                });
+            }}
+          >
+            Reset to default
+          </Button>
+        )}
+      </div>
       {persisted?.persistedTo && (
         <p className="settings-field-persisted" role="status">
           Saved: stored in {persisted.persistedTo}.

@@ -224,7 +224,8 @@ export interface LLMProvider {
   /**
    * Optional self-declared capability overrides for this provider instance.
    * When present, these take precedence over the built-in `PROVIDER_DEFAULTS`
-   * table in `capabilities.ts` but are overridden by per-model `MODEL_OVERRIDES`.
+   * table in `capabilities.ts` but are overridden by the per-model tables (`MODEL_LIMIT_FALLBACKS`,
+   * live facts and `MODEL_QUIRKS`) in `capabilities.ts`.
    *
    * @remarks Useful for custom / dynamically-discovered providers that know
    * their own capabilities and want to participate in explainable routing.

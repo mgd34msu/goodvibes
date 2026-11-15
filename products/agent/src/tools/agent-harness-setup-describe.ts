@@ -8,6 +8,7 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import { collectSnapshot, lookupFromArgs, readLimit, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 import type { AgentHarnessSetupArgs, SetupHandoffCard, SetupPlanItem, SetupRepairCard, SetupRepairDecision, SetupServiceLifecycleDecision } from './agent-harness-setup-posture-types.ts';
+import { connectedHostAuthNeedsVerificationOnly } from './agent-harness-setup-connected-host.ts';
 
 export function describeRepairCard(card: SetupRepairCard): Record<string, unknown> {
   return {
@@ -40,7 +41,7 @@ export function describeServiceLifecycleDecision(decision: SetupServiceLifecycle
   return {
     status: decision.status,
     recommendedAction: decision.recommendedAction,
-    modelRoute: previewHarnessText(decision.modelRoute, 160),
+    modelRoute: decision.modelRoute,
     reason: previewHarnessText(decision.reason, 180),
     evidence: decision.evidence,
     receiptRules: decision.receiptRules,
@@ -55,7 +56,7 @@ export function describeHandoffCard(card: SetupHandoffCard, includeParameters: b
     kind: card.kind,
     effect: card.effect,
     userRoute: previewHarnessText(card.userRoute, includeParameters ? 140 : 96),
-    modelRoute: previewHarnessText(card.modelRoute, includeParameters ? 220 : 120),
+    modelRoute: card.modelRoute,
     nextStep: previewHarnessText(card.nextStep, includeParameters ? 180 : 120),
     safety: previewHarnessText(card.safety, includeParameters ? 180 : 120),
     ...(card.requiresConfirmation ? { requiresConfirmation: true } : {}),
@@ -69,7 +70,7 @@ export function describeRepairDecision(decision: SetupRepairDecision, includePar
     label: decision.label,
     status: decision.status,
     effect: decision.effect,
-    modelRoute: previewHarnessText(decision.modelRoute, includeParameters ? 220 : 140),
+    modelRoute: decision.modelRoute,
     userRoute: previewHarnessText(decision.userRoute, includeParameters ? 160 : 120),
     nextStep: previewHarnessText(decision.nextStep, includeParameters ? 220 : 140),
     reason: previewHarnessText(decision.reason, includeParameters ? 220 : 140),
@@ -144,8 +145,8 @@ export function primarySetupRepairDecision(item: SetupPlanItem): SetupRepairDeci
         handoff.requiresConfirmation ? 'confirmed-repair-available' : 'inspect-first',
         item.authPosture?.operatorToken.path === 'Agent host-bound pairing store' && !item.authPosture.operatorToken.usable
           ? 'Host-bound pairing needs read-only review; shared-token provisioning cannot resolve an unknown or unsafe pairing store.'
-          : item.authPosture?.operatorToken.usable
-          ? 'Connected-host token is usable; verify protected daemon route readiness before relying on automation.'
+          : item.authPosture && connectedHostAuthNeedsVerificationOnly(item.authPosture)
+          ? 'Connected-host auth needs verification, not repair; verify protected daemon route readiness before relying on automation.'
           : 'Connected-host token is missing or unusable; token provisioning is the narrow confirmed repair.',
       );
     }
@@ -288,7 +289,7 @@ export function describePlanItem(item: SetupPlanItem, includeParameters: boolean
     summary: previewHarnessText(item.reason, includeParameters ? 180 : 96),
     nextAction: previewHarnessText(item.nextAction, includeParameters ? 180 : 96),
     userRoute: previewHarnessText(item.userRoute, includeParameters ? 140 : 96),
-    modelRoute: previewHarnessText(item.modelRoute, includeParameters ? 140 : 96),
+    modelRoute: item.modelRoute,
     ...(primaryHandoff ? { primaryHandoff: describeHandoffCard(primaryHandoff, includeParameters) } : {}),
     ...(item.relatedSetupItemId ? { relatedSetupItemId: item.relatedSetupItemId } : {}),
     ...(item.signals && item.signals.length > 0 ? { signals: item.signals.slice(0, includeParameters ? 10 : 3) } : {}),
@@ -336,11 +337,11 @@ export function nextSetupHandoffSummaries(plan: readonly SetupPlanItem[], limit:
         label: item.label,
         status: item.status,
         nextAction: previewHarnessText(item.nextAction, 140),
-        modelRoute: previewHarnessText(item.modelRoute, 96),
+        modelRoute: item.modelRoute,
         ...(primaryHandoff ? {
           handoffLabel: primaryHandoff.label,
           handoffKind: primaryHandoff.kind,
-          handoffRoute: previewHarnessText(primaryHandoff.modelRoute, 140),
+          handoffRoute: primaryHandoff.modelRoute,
           handoffUserRoute: previewHarnessText(primaryHandoff.userRoute, 120),
           ...(primaryHandoff.requiresConfirmation ? { requiresConfirmation: true } : {}),
         } : {}),
@@ -436,7 +437,7 @@ export function describeItem(
         modelAccess: {
           inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
           inspectSetupItem: 'setup action:"item"',
-          openOnboarding: 'agent_harness mode:"open_ui_surface" surfaceId:"onboarding" confirm:true explicitUserRequest:"..."',
+          openOnboarding: 'agent_harness mode:"open_ui_surface" surfaceId:"onboarding" explicitUserRequest:"..."',
           setupWorkspace: 'agent_harness mode:"workspace_action" target:"setup"',
           settings: 'settings action:"list|get|set|reset"; compatibility detail remains in agent_harness settings modes',
           providerRouting: 'models action:"status"',

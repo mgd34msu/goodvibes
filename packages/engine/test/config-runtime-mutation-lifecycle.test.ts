@@ -56,7 +56,7 @@ test.each(['set', 'category', 'remove', 'reset', 'full-reset'] as const)('%s fai
   config.save(); expect(readFileSync(config.getConfigPath(), 'utf8')).not.toContain('synthetic:cli');
 });
 
-test('a later category write failure leaves complete memory intact even after the daemon file changed', () => {
+test('a later category write failure leaves complete memory intact and puts the daemon file back', () => {
   const { config } = fixture();
   config.setRuntimeOverride('controlPlane.host', 'cli.example.test');
   config.setRuntimeOverride('controlPlane.port', 4311);
@@ -66,7 +66,7 @@ test('a later category write failure leaves complete memory intact even after th
   try {
     expect(() => config.mergeCategory('controlPlane', { host: 'disk.example.test', port: 4312 })).toThrow();
     expect(config.getRaw()).toEqual(before);
-    expect(readFileSync(config.getDaemonTierPath()!, 'utf8')).toContain('disk.example.test');
+    expect(readFileSync(config.getDaemonTierPath()!, 'utf8')).not.toContain('disk.example.test');
   } finally { failure.mockRestore(); }
   config.load(); expect(config.get('controlPlane.host')).toBe('cli.example.test');
   expect(config.get('controlPlane.port')).toBe(4311);

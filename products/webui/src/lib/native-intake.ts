@@ -17,7 +17,7 @@ import {
 import { getActiveRoute } from "./relay-connection";
 import { getStoredRelayPairing } from "./relay-pairing";
 import { randomUuid } from "./uuid";
-import { createNativeIntakeExecution } from "./native-execution";
+import { createNativeIntakeExecution, nativeExecutionCanResume } from "./native-execution";
 import { createNativeIntakeTurn } from "./native-turn";
 import {
   createNativeExecutionBrowserJournal,
@@ -189,6 +189,19 @@ export async function openNativeIntake(
       await journal.confirm(record);
       check();
     };
+    // Releasing must work from any form: the journal's capacity counts every saved original
+    // for this owner, including those saved under other sessions or selected changes.
+    const confirmOwned = async (record: NativeIntakeBrowserRecord) => {
+      check();
+      if (!sameBinding(binding, record.binding))
+        throw new Error("This request belongs to a different native owner.");
+      await journal.confirm(record);
+      check();
+    };
+    const inScope = (record: NativeIntakeBrowserRecord) =>
+      record.command.continuation?.sessionId === continuationSessionId &&
+      (!selectedDiff ||
+        JSON.stringify(record.command.continuation?.selectedDiff) === JSON.stringify(selectedDiff));
     const validate = (
       record: NativeIntakeBrowserRecord,
       result: NativeIntakeResult
@@ -219,6 +232,34 @@ export async function openNativeIntake(
         await client.get({ inputId: record.command.inputId }, { signal: combined(operation) })
       );
     };
+    const inspectOwned = async (record: NativeIntakeBrowserRecord, operation?: AbortSignal) => {
+      await confirmOwned(record);
+      return validate(
+        record,
+        await client.get({ inputId: record.command.inputId }, { signal: combined(operation) })
+      );
+    };
+    const releaseExecution = createNativeIntakeExecution({
+      binding,
+      client: executionClient,
+      journal: executionJournal,
+      confirm: confirmOwned,
+      inspect: inspectOwned,
+      active(operation) {
+        check();
+        combined(operation).throwIfAborted();
+      },
+    });
+    const releaseTurn = createNativeIntakeTurn({
+      binding,
+      invoke: (method, input, operation) => invoke(method, input, { signal: combined(operation) }),
+      confirm: confirmOwned,
+      inspect: inspectOwned,
+      active(operation) {
+        check();
+        combined(operation).throwIfAborted();
+      },
+    });
     const execution = createNativeIntakeExecution({
       binding,
       client: executionClient,
@@ -273,10 +314,14 @@ export async function openNativeIntake(
         await authorize();
         const records = await journal.list(binding);
         check();
-        return records.filter(
-          (record) => record.command.continuation?.sessionId === continuationSessionId &&
-            (!selectedDiff || JSON.stringify(record.command.continuation?.selectedDiff) === JSON.stringify(selectedDiff))
-        );
+        return records.filter(inScope);
+      },
+      /** Saved originals for this owner that belong to other sessions or selected changes. They count toward the journal's capacity. */
+      async listOtherScopes() {
+        await authorize();
+        const records = await journal.list(binding);
+        check();
+        return records.filter((record) => !inScope(record));
       },
       async submit(
         source: NativeIntakeSource,
@@ -335,6 +380,39 @@ export async function openNativeIntake(
             { signal: combined(operation) }
           )
         );
+      },
+      /**
+       * Retire a saved original that is no longer needed, to free room in this browser's
+       * journal. Only when the daemon itself reports the request finished (nothing was
+       * admitted, or its conversation turn or work execution reached a terminal state);
+       * otherwise nothing is removed and the daemon's current answer comes back instead.
+       */
+      async release(record: NativeIntakeBrowserRecord, operation?: AbortSignal) {
+        const found = await inspectOwned(record, operation);
+        let settled = false;
+        if (found.kind === "blocked" || found.kind === "refused" || found.kind === "cancelled") settled = true;
+        else if (found.kind === "turn") {
+          const observed = await releaseTurn.inspect(record, operation);
+          settled =
+            observed.kind === "recorded" &&
+            (observed.snapshot.state === "completed" || observed.snapshot.state === "cancelled");
+        } else if (found.kind === "work") {
+          const observed = await releaseExecution.inspect(record, operation);
+          settled =
+            observed.kind === "recorded" &&
+            observed.snapshot.kind === "execution" &&
+            (observed.snapshot.state === "cancelled" || observed.snapshot.recovery === "terminal") &&
+            !nativeExecutionCanResume(observed.snapshot);
+        }
+        if (!settled) return { released: false as const, result: found };
+        await confirmOwned(record);
+        // The execution target goes first: if retiring the original then fails, the
+        // original is still there and the target is re-derived from the daemon.
+        const target = await executionJournal.get(binding, record.command.inputId);
+        if (target) await executionJournal.remove(target);
+        await journal.remove(record);
+        check();
+        return { released: true as const, result: found };
       },
       dispose() {
         disposed = true;

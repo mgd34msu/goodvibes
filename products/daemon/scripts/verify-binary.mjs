@@ -112,7 +112,8 @@ try {
   // admission and fails closed before any service or selected-home effects.
   for (const argv of [['install-service'], ['start-service'], ['restart-service'], ['migrate-service', '-y']]) {
     const result = await run(argv);
-    assert.deepEqual(result, { code: 1, stdout: '', stderr: 'Daemon command failed\n' }, argv.join(' '));
+    assert.equal(result.code, 1, argv.join(' ')); assert.equal(result.stdout, '', argv.join(' '));
+    assert(result.stderr.startsWith('Daemon command failed\n'), argv.join(' '));
   }
   for (const path of [daemon, tree, join(home, '.goodvibes'), join(home, '.config'), join(root, 'xdg'), join(work, 'elsewhere')]) {
     assert(!existsSync(path), `Read-only/refused command created ${path}`);

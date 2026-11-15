@@ -15,7 +15,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext } from '../../input/command-registry.ts';
-import { compactConversation } from '../../input/commands/runtime-services.ts';
+import { CompactBusyError, compactConversation } from '../../input/commands/runtime-services.ts';
 import type { AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CompactionContext } from '@goodvibes-jev/engine/platform/platform/core';
 
@@ -129,5 +129,39 @@ describe('compactConversation: originalTask wiring ("Original task" mislabel bug
 
     expect(captured.value).not.toBeNull();
     expect(captured.value!.originalTask).toBeUndefined();
+  });
+});
+
+describe('compactConversation: small-window compaction rewrites the transcript in place', () => {
+  function smallWindowContext(busy: boolean, replaced: unknown[]): CommandContext {
+    const context = makeContext({ exportedAgents: [], originalTask: null, capturedCtx: { value: null } }) as unknown as {
+      session: { conversationManager: { replaceMessagesForLLM: (messages: unknown) => void } };
+      provider: { providerRegistry: { getKnownContextWindowForModel: () => number } };
+      isGenerating: () => boolean;
+    };
+    context.provider.providerRegistry.getKnownContextWindowForModel = () => 8_000;
+    context.session.conversationManager.replaceMessagesForLLM = (messages) => { replaced.push(messages); };
+    context.isGenerating = () => busy;
+    return context as unknown as CommandContext;
+  }
+
+  test('refuses while a turn is running and leaves the transcript alone', async () => {
+    const replaced: unknown[] = [];
+    await expect(compactConversation(smallWindowContext(true, replaced))).rejects.toBeInstanceOf(CompactBusyError);
+    expect(replaced).toEqual([]);
+  });
+
+  test('compacts when no turn is running', async () => {
+    const replaced: unknown[] = [];
+    await compactConversation(smallWindowContext(false, replaced));
+    expect(replaced).toHaveLength(1);
+  });
+});
+
+describe('compactConversation: the compaction context names its session', () => {
+  test('the session id reaches CompactionContext so the event log can be read back per session', async () => {
+    const captured: { value: CompactionContext | null } = { value: null };
+    await compactConversation(makeContext({ exportedAgents: [], originalTask: null, capturedCtx: captured }));
+    expect(captured.value?.sessionId).toBe('session-1');
   });
 });

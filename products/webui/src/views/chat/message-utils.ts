@@ -7,6 +7,16 @@ export function messageText(message: unknown): string {
   return parts.map((part) => firstString(part, ['text', 'content', 'body'])).filter(Boolean).join('\n');
 }
 
+/**
+ * Whether a user message can be sent again as it was. Text alone can; a message
+ * with attachments only when their files are still held, because resending just
+ * the text would look like a normal send while the files were silently left out.
+ */
+export function canResendUserMessage(message: unknown, filesHeld: boolean): boolean {
+  if (messageAttachments(message).length > 0) return filesHeld;
+  return Boolean(messageText(message));
+}
+
 export function messageAttachments(message: unknown): unknown[] {
   const record = asRecord(message);
   if (Array.isArray(record.attachments)) return record.attachments;
@@ -182,7 +192,7 @@ const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped
  * result from `current` when `proposed` arrives:
  *
  * - once the user pressed Stop (`stopping`), delta/tool frames (`streaming`,
- *   `tooling`) do not un-stop the turn; only a terminal outcome resolves it;
+ *   `tooling`) and a stream drop (`reconnecting`) do not un-stop the turn; only a terminal outcome resolves it;
  * - a settled turn (`completed`, `stopped`, `stopped locally`, `session expired`)
  *   is not overwritten by a late `error`.
  *
@@ -191,7 +201,7 @@ const SETTLED_TURN_STATES: readonly string[] = ['completed', 'stopped', 'stopped
  * constrained here.
  */
 export function nextTurnStatus(current: string, proposed: TurnState): string {
-  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling')) return current;
+  if (current === 'stopping' && (proposed === 'streaming' || proposed === 'tooling' || proposed === 'reconnecting')) return current;
   if (proposed === 'error' && SETTLED_TURN_STATES.includes(current)) return current;
   return proposed;
 }
@@ -254,13 +264,16 @@ export function deriveChatTitle(text: string, maxLength = 52): string {
   return `${onWordBoundary.replace(/[\s.,;:!?-]+$/, '')}…`;
 }
 
-export function deliveryState(message: unknown): 'sent' | 'failed' | 'local' | 'cancelled' | 'queued' | '' {
+export function deliveryState(message: unknown): 'sent' | 'failed' | 'local' | 'cancelled' | 'queued' | 'unanswered' | '' {
   const state = firstString(message, ['deliveryState', 'status', 'state']).toLowerCase();
   // Exact daemon markers first, 'cancelled' (an assistant partial whose turn
-  // was stopped) and 'queued' (a user message whose turn has not started)
-  // must never fall through to the 'sent' default and masquerade as normal.
+  // was stopped), 'queued' (a user message whose turn has not started) and
+  // 'unanswered' (a queued message whose turn can never run, the chat having
+  // closed or the daemon restarted) must never fall through to the 'sent'
+  // default and masquerade as normal.
   if (state === 'cancelled') return 'cancelled';
   if (state === 'queued') return 'queued';
+  if (state === 'unanswered') return 'unanswered';
   if (state === 'failed' || state === 'error') return 'failed';
   if (state === 'local' || state === 'pending') return 'local';
   if (messageTone(message) === 'user') return 'sent';

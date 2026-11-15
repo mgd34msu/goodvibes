@@ -8,6 +8,8 @@ import {
   defaultStore, getResolvedSettingLookup, getSettingsControlPlaneSnapshot, stageManagedSettingsBundle,
 } from '../platform/src/platform/runtime/settings.ts';
 
+const runsAsRoot = process.getuid?.() === 0; // chmod does not deny uid 0, so the denial cases cannot run there
+
 const KEY = 'behavior.hostPrivacyExample';
 const definition: HostBooleanSetting = { key: KEY, type: 'boolean', default: true, description: 'Restrict this host capability by default.' };
 const roots: string[] = [];
@@ -161,6 +163,7 @@ describe('public instance-owned boolean host settings', () => {
   });
 
   test('an inaccessible project parent is a failed read, never absence revealing global false', () => {
+    if (runsAsRoot) return;
     const { config, options } = fixture();
     config.getHostBooleanSetting(KEY).set(false); config.getHostBooleanSetting(KEY).setProjectValue(true);
     const directory = join(options.workingDir, '.goodvibes', 'agent');
@@ -196,6 +199,7 @@ describe('public instance-owned boolean host settings', () => {
   });
 
   test('host watcher sees absent-to-unreadable once, does not churn, and observes readable recovery', async () => {
+    if (runsAsRoot) return;
     const { config, options } = fixture();
     config.getHostBooleanSetting(KEY).set(false);
     const changes: unknown[] = [];
@@ -220,6 +224,7 @@ describe('public instance-owned boolean host settings', () => {
   });
 
   test('no-host watcher retains its existing absent-file observation behavior', async () => {
+    if (runsAsRoot) return;
     const { options } = fixture([]);
     const config = new ConfigManager(options);
     config.set('behavior.autoApprove', true);

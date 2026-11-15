@@ -274,7 +274,7 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Validate HMAC-SHA256 signatures when policy bundles load: managed mode rejects bundles with invalid or missing signatures; non-managed mode permits unsigned bundles with a warning. Restart to apply. Default off until divergence evidence clears the governance gate.',
+      'Require a valid HMAC-SHA256 signature on every policy bundle: a bundle that is unsigned, altered or signed with another key is refused, and so is every bundle when no signing key is set. The key is read from the GOODVIBES_POLICY_SIGNING_KEY environment variable (hex, at least 16 bytes). Restart to apply. Default off until divergence evidence clears the governance gate.',
   },
   {
     key: 'policy.bundleSource',

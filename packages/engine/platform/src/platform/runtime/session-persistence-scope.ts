@@ -33,6 +33,9 @@ export type SessionSnapshot = {
   returnContext?: SessionReturnContextSummary | undefined;
   /** The trees of the contracts started in the session, saved as its contract lines. */
   contracts?: readonly ContractView[] | undefined;
+  /** Side branches made with /branch, and the one open, saved with the session. */
+  branches?: Readonly<Record<string, readonly object[]>> | undefined;
+  currentBranch?: string | undefined;
 };
 
 /**

@@ -15,9 +15,10 @@ import type { AnswerContext } from './plan-support.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type AgentScript, type Harness } from './runner-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 const writes = (text: string): AgentScript => () => [{ files: { 'src/csv.ts': text }, text: `parser written: ${text.trim()}` }];
@@ -83,6 +84,28 @@ describe('the fleet verbs through the runner', () => {
     expect(done.units[0]!.attemptSelection?.pickedId).toBe('u1#a1');
     expect(done.decisions.find((decision) => decision.action === 'attempts-selected')?.reason).toContain('picked by the operator');
     expect(git(h.root, 'show', `${done.branch!}:src/csv.ts`)).toBe('export const parse = 1;\n');
+  });
+
+  test('a pick of an attempt that no longer waits to merge is refused before anything changes', async () => {
+    const h = makeHarness({
+      plan: oneUnitPlan(1),
+      contract: { isolation: 'auto', defaultAttempts: 2 },
+      scripts: { 'u1#a0': writes('export const parse = 0;\n'), 'u1#a1': writes('export const parse = 1;\n') },
+      port: noneSelected,
+    });
+    harness = h;
+    const { contract } = (await startContract(h));
+    await waitFor(() => h.store.get(contract.id)?.status === 'awaiting-owner', 'the attempts to go to the owner', 20_000);
+    const controls = h.runner.fleetControls();
+    const group = (await controls.listHeldMergeGroups())[0]!;
+    const live = h.store.get(contract.id)!;
+    live.units[0]!.attemptUnits![1]!.status = 'failed';
+    await expect(controls.pickAttemptWinner(group.groupId, `${contract.id}:u1#a1`)).rejects.toThrow('only an attempt that passed and waits to merge can be taken');
+    const after = h.store.get(contract.id)!;
+    expect(after.units[0]!.attemptSelection?.pickedId).toBeUndefined();
+    expect(after.units[0]!.status).toBe('awaiting-owner');
+    expect(after.status).toBe('awaiting-owner');
+    expect(after.escalations.some((escalation) => escalation.resolvedAt === undefined)).toBe(true);
   });
 
   test('verbs naming a contract that is not running find nothing or are refused', async () => {

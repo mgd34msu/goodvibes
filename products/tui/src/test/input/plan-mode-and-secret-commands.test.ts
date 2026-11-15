@@ -6,15 +6,25 @@ import type { ConcealedInputRequest } from '../../input/concealed-input.ts';
 
 interface FakeConfig {
   store: Record<string, unknown>;
+  listeners: Record<string, Array<(next: unknown) => void>>;
   get(key: string): unknown;
   set(key: string, value: unknown): void;
+  subscribe(key: string, cb: (next: unknown) => void): () => void;
 }
 
 function makeConfig(initial: Record<string, unknown> = {}): FakeConfig {
   return {
     store: { 'permissions.mode': 'prompt', ...initial },
     get(key) { return this.store[key]; },
-    set(key, value) { this.store[key] = value; },
+    set(key, value) {
+      this.store[key] = value;
+      for (const cb of [...(this.listeners[key] ?? [])]) cb(value);
+    },
+    listeners: {},
+    subscribe(key, cb) {
+      (this.listeners[key] ??= []).push(cb);
+      return () => { this.listeners[key] = (this.listeners[key] ?? []).filter((x) => x !== cb); };
+    },
   };
 }
 
@@ -40,11 +50,11 @@ describe('/plan mode toggle', () => {
     expect(out.at(-1)).toContain('Plan mode ON');
 
     await registry.execute('plan', [], makeCtx(config, out));
-    expect(config.store['permissions.mode']).toBe('safe-owner');
+    expect(config.store['permissions.mode']).toBe('prompt');
     expect(out.at(-1)).toContain('Plan mode OFF');
   });
 
-  test('/plan on and /plan off are explicit and idempotent', async () => {
+  test('/plan on is idempotent and /plan off restores the mode that was active before plan mode', async () => {
     const registry = new CommandRegistry();
     registerPlanningRuntimeCommands(registry);
     const config = makeConfig({ 'permissions.mode': 'accept-edits' });
@@ -54,8 +64,45 @@ describe('/plan mode toggle', () => {
     expect(config.store['permissions.mode']).toBe('plan');
     await registry.execute('plan', ['on'], makeCtx(config, out));
     expect(config.store['permissions.mode']).toBe('plan');
+    expect(out.at(-1)).toContain('already ON');
 
     await registry.execute('plan', ['off'], makeCtx(config, out));
+    expect(config.store['permissions.mode']).toBe('accept-edits');
+    expect(out.at(-1)).toContain('Plan mode OFF');
+  });
+
+  test('/plan off after Shift+Tab left and re-entered plan mode does not restore the stale mode', async () => {
+    const registry = new CommandRegistry();
+    registerPlanningRuntimeCommands(registry);
+    const config = makeConfig({ 'permissions.mode': 'allow-all' });
+    const out: string[] = [];
+
+    await registry.execute('plan', ['on'], makeCtx(config, out));
+    config.set('permissions.mode', 'safe-owner'); // Shift+Tab out of plan mode
+    config.set('permissions.mode', 'plan'); // Shift+Tab back into plan mode
+
+    await registry.execute('plan', ['off'], makeCtx(config, out));
+    expect(config.store['permissions.mode']).not.toBe('allow-all');
+    expect(out.at(-1)).toContain('Plan mode OFF');
+  });
+
+  test('/plan off when plan mode is not on leaves the current mode alone and says so', async () => {
+    const registry = new CommandRegistry();
+    registerPlanningRuntimeCommands(registry);
+    const config = makeConfig({ 'permissions.mode': 'accept-edits' });
+    const out: string[] = [];
+
+    await registry.execute('plan', ['off'], makeCtx(config, out));
+    expect(config.store['permissions.mode']).toBe('accept-edits');
+    expect(out.at(-1)).toContain('not on');
+  });
+
+  test('plan mode entered elsewhere exits to safe-owner', async () => {
+    const registry = new CommandRegistry();
+    registerPlanningRuntimeCommands(registry);
+    const config = makeConfig({ 'permissions.mode': 'plan' });
+
+    await registry.execute('plan', ['off'], makeCtx(config, []));
     expect(config.store['permissions.mode']).toBe('safe-owner');
   });
 

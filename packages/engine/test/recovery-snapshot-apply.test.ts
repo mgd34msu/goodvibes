@@ -56,6 +56,8 @@ class TestConversation {
   title = '';
   /** When true, fromJSON throws, the "the conversation refused the restore" case. */
   rejectRestore = false;
+  /** When true, only the first fromJSON throws, so putting the live state back can succeed. */
+  rejectFirstRestore = false;
 
   resetAll(): void {
     this.resets += 1;
@@ -68,6 +70,7 @@ class TestConversation {
 
   fromJSON(data: { messages: unknown[]; title?: string | undefined }): void {
     if (this.rejectRestore) throw new Error('conversation refused');
+    if (this.rejectFirstRestore) { this.rejectFirstRestore = false; throw new Error('conversation refused'); }
     this.messages = data.messages as Array<Record<string, unknown>>;
     if (typeof data.title === 'string') this.title = data.title;
   }
@@ -260,7 +263,29 @@ describe('refusals say what happened', () => {
 
     expect(result.applied).toBe(false);
     expect(result.refusal).toBe('apply-failed');
-    // The load already retired it, reported honestly rather than claimed otherwise.
-    expect(result.retired).toBe(true);
+    // The conversation did not accept it, so the only copy stays on disk and is not reported as retired.
+    expect(result.retired).toBe(false);
+    expect(existsSync(surface.recoveryFile('sess-e'))).toBe(true);
+  });
+
+  test('a refused restore puts the live conversation back', () => {
+    const surface = tempSurface();
+    writeRecoveryFile({ messages: messages(2) }, 'sess-f', '', { surface });
+
+    const conversation = makeConversation();
+    conversation.messages = messages(3, 'live');
+    conversation.rejectFirstRestore = true;
+
+    const result = applyRecoverySnapshot({
+      surface,
+      sessionId: 'sess-f',
+      conversation,
+      persistSnapshot: () => {},
+      confirmation: yes,
+    });
+
+    expect(result.applied).toBe(false);
+    expect(conversation.messages.map((m) => m['content'])).toEqual(['live-0', 'live-1', 'live-2']);
+    expect(existsSync(surface.recoveryFile('sess-f'))).toBe(true);
   });
 });

@@ -33,12 +33,17 @@ Content-Type: application/json
 Response (`202 Accepted`):
 
 ```json
-{ "messageId": "<uuid>", "routedTo": "conversation", "sessionId": "<sessionId>" }
+{ "messageId": "companion-<uuid>", "routedTo": "conversation", "sessionId": "<sessionId>" }
 ```
 
-`messageId` is a stable UUID for this message, the same value carried in the
+`messageId` identifies this message, the same value carried in the
 `ConversationMessageEnvelope` published for it (see "Control-plane event"
-below).
+below). The daemon makes it `companion-<uuid>` unless the request names one.
+
+To make a retry safe, send your own `messageId` (1 to 128 characters of letters,
+digits, `.`, `_`, `:` or `-`; anything else is a `400 INVALID_MESSAGE_ID`). If a
+message with that id is already stored in the session, the daemon answers the
+same `202` and does not add a second turn.
 
 - No agent is spawned.
 - The live TUI should treat the event as operator chat and start a normal LLM
@@ -47,12 +52,14 @@ below).
 - `kind: 'task'` explicitly routes through the session broker and can spawn an
   agent continuation or start a contract.
 
-This route does not accept a `'followup'` kind. To steer an already-running
-session instead of starting a new task, use the dedicated follow-up route
-described below, `POST /api/sessions/:id/follow-up`, which queues a follow-up
-without spawning a fresh continuation. Building an ad-hoc `kind` value onto
-`/messages` for that purpose does not work; the two are separate routes with
-separate input shapes.
+- `kind: 'followup'` queues a follow-up the same way `POST /api/sessions/:id/follow-up`
+  does (see below) and answers with that route's shape, not `{ messageId, routedTo }`:
+  `202` with `session`, `message`, `input`, `mode` and `agentId`, or `409` with the
+  same fields when the broker rejects the input. Any other `kind` is a
+  `400 INVALID_KIND`.
+
+To steer an already-running session instead of starting a new task, use the
+dedicated steer route, `POST /api/sessions/:id/steer`.
 
 ## Control-plane event
 
@@ -62,7 +69,7 @@ payload is a `ConversationMessageEnvelope`:
 ```ts
 {
   sessionId: string;        // target operator session
-  messageId: string;        // stable UUID for this message
+  messageId: string;        // `companion-<uuid>`, or the id the request named
   body: string;             // message text
   source: 'companion-followup';
   timestamp: number;        // epoch ms
@@ -118,7 +125,13 @@ matches `TURN_SUBMITTED` and `TURN_COMPLETED` by message id and publishes only
 the matching model response back to the originating ntfy topic.
 
 Clients should pass origin metadata so reply correlation uses the stable message
-id instead of prompt text.
+id instead of prompt text. Without a message id, a turn in another session is matched
+by identical prompt text only within two minutes of the ntfy message, and only when no
+second message waits on the same text; a later identical prompt is never taken for it.
+
+A queued ntfy message waits ten minutes for its turn to start. Once a turn is matched,
+the reply stays pending for up to six hours so a long turn still answers. A turn that
+is cancelled publishes a short "cancelled" notice to the topic instead of nothing.
 
 The ntfy provider runtime subscribes to route topics as live ingress. It starts
 from the current Unix timestamp rather than `since=latest`, because ntfy uses
@@ -146,7 +159,7 @@ Other session routes cover adjacent use cases. Use the one that matches your int
 | `POST /api/sessions/:id/messages` | Inject a companion main-chat message visible to the operator | Yes, when the live TUI delegates `COMPANION_MESSAGE_RECEIVED` to `handleUserInput()` |
 | `GET  /api/sessions/:id/inputs` | List pending inputs awaiting a response on the active turn | No |
 | `POST /api/sessions/:id/steer` | Steer the active turn with new guidance | Yes |
-| `POST /api/sessions/:id/follow-up` | Queue a follow-up, delivered after the current agent completes, or spawned immediately if the session is idle | Yes, on delivery |
+| `POST /api/sessions/:id/follow-up` | Queue a follow-up for delivery after the current agent completes; on an idle session an agent is started for it immediately (`mode: "spawn"`). A rejected input answers `409` | Yes, on delivery |
 | `POST /api/sessions/:id/inputs/:inputId/cancel` | Cancel a specific pending input on the active turn | Depends on the input |
 | `GET  /api/sessions/:id/messages` | Fetch the full conversation history for the session | n/a |
 | `PATCH /api/companion/chat/sessions/:id` | Update a true remote companion-chat session's own provider/model metadata | No immediate turn; affects subsequent remote-session turns |
@@ -186,9 +199,25 @@ All companion-chat routes are registered in the live method catalog. Fetch the c
 | `PATCH /api/companion/chat/sessions/:id` | Update session provider/model metadata |
 | `POST /api/companion/chat/sessions/:id/messages` | Send a message to the companion-chat session |
 | `GET /api/companion/chat/sessions/:id/messages` | Fetch the message history for the session |
+| `GET /api/companion/chat/sessions/:id` | Fetch one companion-chat session |
+| `POST /api/companion/chat/sessions/:id/close` | Soft-close a session; its record and messages are kept |
+| `DELETE /api/companion/chat/sessions/:id` | Permanently remove a session (it must be closed first) |
+| `POST /api/companion/chat/sessions/:id/messages/retry` | Regenerate an assistant response; the earlier response is kept as superseded history |
+| `POST /api/companion/chat/sessions/:id/messages/edit` | Edit a user message and branch the conversation from it |
+| `POST /api/companion/chat/sessions/:id/messages/steer` | Send a message that interrupts the in-flight turn and runs immediately |
+| `POST /api/companion/chat/sessions/:id/turns/cancel` | Stop the in-flight turn; any partial reply is kept marked as cancelled |
+| `GET /api/companion/chat/sessions/:id/events` | Stream the session's turn events |
 | `GET /api/companion/chat/sessions/:id/events` | Stream events for the session |
 | `GET /api/companion/chat/sessions/:id` | Get session details |
 | `DELETE /api/companion/chat/sessions/:id` | Delete the session |
+
+### Companion chat rate limit
+
+Remote companion-chat sessions accept a bounded number of messages per 60-second
+window per session. The limit comes from `runtime.companionChatLimiter.perSessionLimit`
+when that key is set to a positive integer. Otherwise the daemon reads the
+`GOODVIBES_CHAT_LIMITER_THRESHOLD` environment variable once at startup, and
+falls back to its built-in default of 10 when neither is set.
 
 ## Next reads
 

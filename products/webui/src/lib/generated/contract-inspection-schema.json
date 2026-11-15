@@ -2219,6 +2219,33 @@
                     "worktree",
                     "shared"
                   ]
+                },
+                "selectedModel": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "registryKey": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "registryKey",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                },
+                "taskEvidence": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -2482,6 +2509,33 @@
                     "worktree",
                     "shared"
                   ]
+                },
+                "selectedModel": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "registryKey": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "registryKey",
+                    "displayName"
+                  ],
+                  "additionalProperties": false
+                },
+                "taskEvidence": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -3151,6 +3205,9 @@
                 },
                 "severityDecisionId": {
                   "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -3350,6 +3407,9 @@
                         "type": "string"
                       },
                       "severityDecisionId": {
+                        "type": "string"
+                      },
+                      "rationale": {
                         "type": "string"
                       }
                     },
@@ -4160,6 +4220,9 @@
                         "type": "string"
                       },
                       "severityDecisionId": {
+                        "type": "string"
+                      },
+                      "rationale": {
                         "type": "string"
                       }
                     },
@@ -5447,6 +5510,9 @@
                               "type": "string"
                             },
                             "severityDecisionId": {
+                              "type": "string"
+                            },
+                            "rationale": {
                               "type": "string"
                             }
                           },
@@ -7367,6 +7433,12 @@
             "items": {
               "type": "string"
             }
+          },
+          "failurePause": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "resolvedAt": {
             "type": "number"

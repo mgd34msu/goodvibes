@@ -115,6 +115,11 @@ describe('AttemptComparison', () => {
 
     expect(judgeCalls).toEqual(['g-1']);
     expect(container.textContent).toContain('fewer tool calls');
+    // The proposal is labelled as model judgment, names who scored it, and is not a pick.
+    expect(container.textContent).toContain('Model judgment');
+    expect(container.textContent).toContain('This is a proposal only; a human still confirms.');
+    expect(container.textContent).toContain('Proposes attempt B (scored by claude)');
+    expect(pickCalls).toHaveLength(0);
     unmount();
   });
 
@@ -132,15 +137,22 @@ describe('AttemptComparison', () => {
     unmount();
   });
 
-  test('a 409 conflict (group no longer ready) makes exactly one pick call', async () => {
+  test('a 409 conflict (group no longer ready) shows the conflict, keeps the dialog usable, and never reports a pick', async () => {
     pickError = { status: 409, code: 'CONFLICT', message: 'group not ready' };
-    const { container, unmount } = render();
+    let picked = false;
+    let closed = false;
+    const { container, unmount } = render(() => { picked = true; }, () => { closed = true; });
     click(container.querySelector('.attempt-cmp__pick-btn'));
     await settle(2);
     click(container.querySelector('.gv-confirm__confirm'));
     await settle(3);
 
     expect(pickCalls).toHaveLength(1);
+    expect(container.querySelector('.attempt-cmp__error')?.textContent).toContain('no longer ready to pick');
+    expect(picked).toBe(false);
+    expect(closed).toBe(false);
+    // The operator can still act: the pick button is there to try again after a refresh.
+    expect(container.querySelector('.attempt-cmp__pick-btn')).not.toBeNull();
     unmount();
   });
 

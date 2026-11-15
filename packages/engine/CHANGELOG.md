@@ -1087,6 +1087,10 @@ separate repository opt-in.
 
 ## [Unreleased]
 
+### Added
+
+- `serveAcpAgent` takes an optional second argument, `AcpStdio` (`{ input, output }` byte streams), to serve over streams other than the process's stdin/stdout.
+
 ## [3.0.0-dev.0] - 2026-11-05
 
 ### Changed

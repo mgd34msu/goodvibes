@@ -51,7 +51,7 @@ function runtimeContext(
 }
 
 describe('phased tool phase warnings', () => {
-  test('large output maps completely without an implicit size warning', async () => {
+  test('a large output under the default ceiling maps completely without a size warning', async () => {
     const executor = createPhasedExecutor({
       enableHooks: false,
       enablePermissions: false,
@@ -60,14 +60,14 @@ describe('phased tool phase warnings', () => {
 
     const result = await executor.execute(
       { id: 'call-map', name: 'large_output_tool', arguments: {} },
-      outputTool('large_output_tool', 'x'.repeat(205 * 1024)),
+      outputTool('large_output_tool', 'x'.repeat(90 * 1024)),
       runtimeContext(),
     );
 
     const mapped = executor.getRecord('call-map')?.phases.find((phase) => phase.phase === 'mapped');
     expect(result.success).toBe(true);
     expect(result.warnings ?? []).toEqual([]);
-    expect(result.output).toBe('x'.repeat(205 * 1024));
+    expect(result.output).toBe('x'.repeat(90 * 1024));
     expect(mapped?.success).toBe(true);
     expect(mapped?.error).toBeUndefined();
     expect(mapped?.warnings?.[0]).toBe(result.warnings?.[0]);

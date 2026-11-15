@@ -1,13 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import { enableServicePosture } from './management-utils.ts';
 import { buildCliServicePosture, createPlatformServiceManager, formatCliServicePosture, getServiceStateRoot } from './service-posture.ts';
 import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
 
-function enableServicePosture(runtime: CliCommandRuntime): void {
-  runtime.configManager.setDynamic('service.enabled', true);
-  runtime.configManager.setDynamic('service.autostart', true);
-  runtime.configManager.setDynamic('service.restartOnFailure', true);
-}
+const POSTURE_KEYS = ['service.enabled', 'service.autostart', 'service.restartOnFailure'] as const;
 
 export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   const [sub = 'status'] = runtime.cli.commandArgs;
@@ -21,16 +18,31 @@ export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<
   }
   if (sub === 'install' || sub === 'start' || sub === 'restart' || sub === 'stop' || sub === 'uninstall') {
     const manager = createPlatformServiceManager(runtime);
-    if (sub === 'install' || sub === 'start' || sub === 'restart') enableServicePosture(runtime);
-    if (sub === 'install' || sub === 'start' || sub === 'restart') {
-      mkdirSync(getServiceStateRoot(runtime), { recursive: true });
+    const enabling = sub === 'install' || sub === 'start' || sub === 'restart';
+    // The manager refuses while service.enabled is off, so the flags go on first and are put back if the action fails.
+    const previous = POSTURE_KEYS.map((key) => [key, runtime.configManager.get(key)] as const);
+    if (enabling) enableServicePosture(runtime.configManager);
+    const restorePosture = () => {
+      for (const [key, value] of previous) runtime.configManager.setDynamic(key, value);
+    };
+    let result: ReturnType<typeof manager.install>;
+    try {
+      if (enabling) mkdirSync(getServiceStateRoot(runtime), { recursive: true });
+      result =
+        sub === 'install' ? manager.install()
+          : sub === 'start' ? manager.start()
+            : sub === 'restart' ? manager.restart()
+              : sub === 'stop' ? manager.stop()
+                : manager.uninstall();
+    } catch (error) {
+      if (enabling) restorePosture();
+      throw error;
     }
-    const result =
-      sub === 'install' ? manager.install()
-        : sub === 'start' ? manager.start()
-          : sub === 'restart' ? manager.restart()
-            : sub === 'stop' ? manager.stop()
-              : manager.uninstall();
+    if (enabling && result.actionError) restorePosture();
+    if (sub === 'uninstall' && !result.actionError) {
+      runtime.configManager.setDynamic('service.enabled', false);
+      runtime.configManager.setDynamic('service.autostart', false);
+    }
     const posture = await buildCliServicePosture(runtime);
     const text = [
       `Service ${sub}: ${result.actionError ? 'failed' : 'ok'}`,

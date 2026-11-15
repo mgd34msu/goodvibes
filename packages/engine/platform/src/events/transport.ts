@@ -32,14 +32,9 @@ export type TransportEvent =
   /** An SSE subscriber disconnected from the event stream. */
   | { type: 'STREAM_SUBSCRIBER_DISCONNECTED'; streamId: string; subscriberId: string; streamType: string; reason?: string }
   /**
-   * The outbound WebSocket queue has saturated and messages are being dropped.
-   *
-   * This event is emitted when `MAX_OUTBOUND_QUEUE` entries or `MAX_OUTBOUND_QUEUE_BYTES`
-   * total bytes are exceeded, or when a single message exceeds `MAX_OUTBOUND_MESSAGE_BYTES`.
-   * Subscribe to this in UI layers to show a "connection lagging" indicator.
-   *
-   * The `onBackpressure` callback in `RuntimeEventConnectorOptions` fires at the same
-   * time and provides identical information for non-event-bus consumers.
+   * Declared, not yet emitted: the realtime connector's outbound queue is unbounded
+   * (messages are retained in order across reconnects and never dropped), so nothing
+   * publishes this event and `onBackpressure` is never called.
    */
   | {
       type: 'TRANSPORT_BACKPRESSURE';

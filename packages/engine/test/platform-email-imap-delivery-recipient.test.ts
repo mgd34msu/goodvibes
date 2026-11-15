@@ -127,14 +127,18 @@ async function fetchOneEnvelope(
     socket.destroy();
     fake.close();
   };
-  await client.open();
-  const envelopes = await client.fetchEnvelopes([4]);
-  const envelope = envelopes[0];
-  if (envelope === undefined) {
+  // A failure before `close` is handed to the caller would leave the server
+  // and both sockets open, so every path through here releases them.
+  try {
+    await client.open();
+    const envelopes = await client.fetchEnvelopes([4]);
+    const envelope = envelopes[0];
+    if (envelope === undefined) throw new Error('fake server returned no envelope');
+    return { envelope, commands: fake.commands, close };
+  } catch (error) {
     close();
-    throw new Error('fake server returned no envelope');
+    throw error;
   }
-  return { envelope, commands: fake.commands, close };
 }
 
 // ---------------------------------------------------------------------------

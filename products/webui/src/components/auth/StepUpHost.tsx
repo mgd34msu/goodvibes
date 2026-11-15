@@ -94,7 +94,11 @@ export function StepUpHost() {
     const completion = Promise.resolve().then(async () => {
       try {
         if (!isCurrent()) return;
-        const challenge = await platformClient.operator.stepup.mintChallenge({}, controller.signal);
+        const challenge = await platformClient.operator.stepup.mintChallenge(
+          // Bound to the request being retried, so the assertion cannot authorize any other call.
+          { method: ownedRequest.context.method, path: ownedRequest.context.path },
+          controller.signal,
+        );
         if (!isCurrent()) return;
         const registered = getRegisteredCredential();
         const { headerValue } = await runAssertion({

@@ -1,7 +1,7 @@
 /** Historical comparison inputs are pinned objects, never a mount of the owner's Git directory. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawnSync } from 'node:child_process';
-import { closeSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
@@ -44,38 +44,55 @@ interface ComparisonInputs {
   readonly before: { readonly ref: string; readonly commit: string };
   readonly after: { readonly ref: string; readonly commit: string };
 }
-export interface AnalyzeGitReader extends Pick<GitService, 'diffBetween' | 'diffStat'> {
+export interface AnalyzeGitReader {
   readonly comparisonInputs?: ComparisonInputs;
+  diffBetween(before: string, after: string, files?: string[]): Promise<string>;
+  /** `files` narrows a captured reader's stat; the live reader reports the whole range and callers narrow it. */
+  diffStat(before: string, after: string, files?: string[]): Promise<string>;
 }
+
+/** Longest a fixed Git read may run, and the most output it may produce. */
+const GIT_READ_TIMEOUT_MS = 60_000;
+const GIT_READ_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Only fixed metadata/diff commands reach this helper. Never inherit Git routing or executable diff drivers. */
 function git(cwd: string, args: readonly string[], gitDir?: string): string {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
   const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-git-read-'));
-  const outputPath = join(scratch, 'output');
-  const fd = openSync(outputPath, 'wx', 0o600);
+  let fd: number | undefined;
   try {
-  const result = spawnSync('git', [
-    '--no-replace-objects', '--no-optional-locks', '-C', cwd,
-    '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
-    '-c', 'core.attributesFile=/dev/null', '-c', 'core.quotePath=false',
-    '-c', 'diff.orderFile=/dev/null',
-    ...(gitDir === undefined ? [] : [`--git-dir=${gitDir}`, '--bare']), ...args,
-  ], {
-    env: {
-      ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_GLOBAL: '/dev/null',
-      GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1',
-    },
-    stdio: ['ignore', fd, 'ignore'],
-  });
-  // Neither subprocess diagnostics nor partially read bytes are deliverable on failure.
-  if (result.status !== 0) throw new Error('captured historical Git read failed');
-  const bytes = readFileSync(outputPath);
-  const output = bytes.toString('utf8');
-  if (!Buffer.from(output).equals(bytes)) throw new Error('captured historical Git output is not UTF-8');
-  return output;
-  } finally { closeSync(fd); rmSync(scratch, { recursive: true, force: true }); }
+    const outputPath = join(scratch, 'output');
+    fd = openSync(outputPath, 'wx', 0o600);
+    const result = spawnSync('git', [
+      '--no-replace-objects', '--no-optional-locks', '-C', cwd,
+      '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false',
+      '-c', 'core.attributesFile=/dev/null', '-c', 'core.quotePath=false',
+      '-c', 'diff.orderFile=/dev/null',
+      ...(gitDir === undefined ? [] : [`--git-dir=${gitDir}`, '--bare']), ...args,
+    ], {
+      env: {
+        ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1',
+      },
+      stdio: ['ignore', fd, 'ignore'],
+      // A stuck Git must not hold the event loop; the output goes to a file, so its size is checked before it is read.
+      timeout: GIT_READ_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+    });
+    // Neither subprocess diagnostics nor partially read bytes are deliverable on failure.
+    if (result.status !== 0) throw new Error('captured historical Git read failed');
+    if (fstatSync(fd).size > GIT_READ_MAX_BYTES) throw new Error('captured historical Git output is too large');
+    const bytes = readFileSync(outputPath);
+    const output = bytes.toString('utf8');
+    if (!Buffer.from(output).equals(bytes)) throw new Error('captured historical Git output is not UTF-8');
+    return output;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
+
+const registeredGitAssertions = new WeakMap<ContractInputAuthority, Set<string>>();
 
 function identity(path: string): string {
   const stat = lstatSync(path, { bigint: true });
@@ -159,12 +176,22 @@ export async function createAnalyzeGitReader(projectRoot: string, before: string
     before: Object.freeze({ ref: before, commit: beforeCommit }),
     after: Object.freeze({ ref: after, commit: afterCommit }),
   });
-  const assertObjectsCurrent = async (): Promise<void> => {
-    await assertContractInputGitAuthority(context.authority, context.signal);
+  const objectsCurrent = (signal: AbortSignal | undefined) => async (): Promise<void> => {
+    await assertContractInputGitAuthority(context.authority, signal);
     if (identity(gitDir) !== directoryIdentity) throw new Error('captured Git directory changed');
-    context.signal?.throwIfAborted();
+    signal?.throwIfAborted();
   };
-  registerContractInputReadAssertion(context.authority, assertObjectsCurrent);
+  // The authority's later read sweeps outlive this call: register one
+  // assertion per Git directory, bound to the authority alone, so a cancelled
+  // call cannot fail every later sweep and repeated calls add nothing.
+  const assertionKey = `${gitDir}\0${directoryIdentity}`;
+  let registeredKeys = registeredGitAssertions.get(context.authority);
+  if (!registeredKeys) registeredGitAssertions.set(context.authority, registeredKeys = new Set());
+  if (!registeredKeys.has(assertionKey)) {
+    registerContractInputReadAssertion(context.authority, objectsCurrent(undefined));
+    registeredKeys.add(assertionKey);
+  }
+  const assertObjectsCurrent = objectsCurrent(context.signal);
   const assertCurrent = async (): Promise<void> => {
     await assertObjectsCurrent();
     await assertCapturedToolAccessCurrent();
@@ -192,6 +219,6 @@ export async function createAnalyzeGitReader(projectRoot: string, before: string
   return {
     comparisonInputs,
     diffBetween: async (_before: string, _after: string, files?: string[]) => diff(false, files),
-    diffStat: async () => diff(true),
+    diffStat: async (_before: string, _after: string, files?: string[]) => diff(true, files),
   };
 }

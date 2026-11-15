@@ -25,6 +25,7 @@ async function loadProviderAccountSnapshot(context: CommandContext): Promise<Pro
     environment: {
       hasEnvironmentVariable: (name: string) => Boolean(process.env[name]),
     },
+    secrets: context.platform.secretsManager,
   });
 }
 

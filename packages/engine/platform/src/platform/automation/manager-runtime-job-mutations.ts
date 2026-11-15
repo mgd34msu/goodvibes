@@ -1,4 +1,4 @@
-import { ensureAutomationCronPhase } from './schedules.js';
+import { ensureAutomationCronPhase, withCronTimezone } from './schedules.js';
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -45,7 +45,7 @@ export async function createAutomationJobRecord(
   const now = Date.now();
   const enabled = input.enabled ?? true;
   const jobId = `auto-${randomUUID().slice(0, 8)}`;
-  const schedule = ensureAutomationCronPhase(input.schedule);
+  const schedule = ensureAutomationCronPhase(withCronTimezone(input.schedule));
   const job: AutomationJob = {
     id: jobId,
     labels: [],
@@ -69,7 +69,8 @@ export async function createAutomationJobRecord(
     successCount: 0,
     failureCount: 0,
     pausedReason: enabled ? undefined : 'created-disabled',
-    deleteAfterRun: input.deleteAfterRun ?? Boolean(context.configManager.get('automation.deleteAfterRun')),
+    // The setting is a default for one-shot jobs only: a recurring job deleted after its first run would silently stop recurring.
+    deleteAfterRun: input.deleteAfterRun ?? (schedule.kind === 'at' && Boolean(context.configManager.get('automation.deleteAfterRun'))),
     archivedAt: undefined,
   };
   const committed = await context.commitJob(undefined, job, options);
@@ -87,15 +88,21 @@ export async function toggleAutomationJobEnabled(
 ): Promise<ManagedAutomationJob | null> {
   const job = context.jobs.get(jobId);
   if (!job) return null;
+  const nextRunAt = enabled ? computeNextRun(job.schedule, Date.now()) : undefined;
+  // A one-time schedule already in the past has nothing left to run: enabling
+  // it would leave an enabled job that never fires, so it stays disabled and
+  // says why.
+  const expired = enabled && nextRunAt === undefined;
+  const effectiveEnabled = enabled && !expired;
   const updated: AutomationJob = {
     ...job,
-    ...jobEnablement(enabled),
-    pausedReason: enabled ? undefined : 'operator-disabled',
+    ...jobEnablement(effectiveEnabled),
+    pausedReason: expired ? 'schedule-expired' : enabled ? undefined : 'operator-disabled',
     updatedAt: Date.now(),
-    nextRunAt: enabled ? computeNextRun(job.schedule, Date.now()) : undefined,
+    nextRunAt,
     source: {
       ...job.source,
-      enabled,
+      enabled: effectiveEnabled,
       updatedAt: Date.now(),
     },
   };
@@ -123,7 +130,7 @@ export async function updateAutomationJobRecord(
     ? normalizeProviderQualifiedModelList(patch.fallbackModels, 'Automation fallback models', models)
     : undefined;
   const thinkingPatch = normalizeOptionalString(patch.thinking);
-  const nextSchedule = ensureAutomationCronPhase(patch.schedule ?? job.schedule, job.schedule);
+  const nextSchedule = ensureAutomationCronPhase(patch.schedule ? withCronTimezone(patch.schedule) : job.schedule, job.schedule);
   const nextModelProvider = patch.provider !== undefined
     ? normalizeOptionalString(patch.provider)
     : job.execution.modelProvider;

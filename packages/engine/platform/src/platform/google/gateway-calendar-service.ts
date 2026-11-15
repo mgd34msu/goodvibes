@@ -85,7 +85,9 @@ function statusFor(failure: GoogleApiFailure): number {
   if (failure.status === 403) return 403;
   if (failure.status === 404) return 404;
   if (failure.status === 429) return 429;
-  if (failure.status === null) return 400;
+  // No answer from Google at all (unreachable, or no token could be had) is
+  // a gateway failure a caller may retry, not a bad request.
+  if (failure.status === null) return failure.transport === undefined ? 400 : 502;
   return failure.status >= 500 ? 502 : 400;
 }
 
@@ -114,6 +116,7 @@ function toSummary(record: CalendarEventRecord): CalendarGatewayEventSummary {
     end: record.end,
     ...(record.location.length > 0 ? { location: record.location } : {}),
     ...(record.description.length > 0 ? { description: record.description } : {}),
+    ...(record.attendees === undefined || record.attendees.length === 0 ? {} : { attendees: record.attendees }),
   };
 }
 
@@ -121,7 +124,11 @@ function toDetail(record: CalendarEventRecord): CalendarGatewayEventDetail {
   // Google's event id IS the stable identifier a caller round-trips, so `uid`
   // reports the same value rather than inventing a second one that would then
   // disagree with what `events.list` handed back.
-  return { ...toSummary(record), uid: record.id };
+  return {
+    ...toSummary(record),
+    uid: record.id,
+    ...(record.recurrence === undefined || record.recurrence.length === 0 ? {} : { recurrence: record.recurrence.join('\n') }),
+  };
 }
 
 /**
@@ -166,15 +173,34 @@ function renderIcs(events: readonly CalendarEventRecord[], stampMs: number): str
   return `${lines.join('\r\n')}\r\n`;
 }
 
-/** A parsed .ics datetime back to what the Calendar API accepts. */
-function toApiDateTime(value: EventDateTime): string {
-  return value.kind === 'date' ? value.value : value.value;
+/**
+ * The zone Google needs beside a parsed .ics date-time, or the reason the
+ * event cannot be created faithfully. A wall-clock time with no zone would be
+ * guessed at, and a guessed time is a meeting at the wrong hour.
+ */
+function zoneFor(
+  start: EventDateTime,
+  end: EventDateTime,
+  recurring: boolean,
+): { readonly timeZone?: string; readonly refusal?: string } {
+  if (start.kind === 'date' || end.kind === 'date') return {};
+  if (start.zone === 'floating' || end.zone === 'floating') {
+    return { refusal: 'its times have no time zone, so the hour cannot be placed' };
+  }
+  if (start.zone === 'tzid') {
+    if (end.zone !== 'tzid' || end.tzid !== start.tzid) return { refusal: 'its start and end are in different time zones' };
+    return start.tzid === undefined ? { refusal: 'its time zone is not named' } : { timeZone: start.tzid };
+  }
+  if (end.zone !== 'utc') return { refusal: 'its start and end are in different time zones' };
+  // Google needs a zone on every recurring event, even for UTC times.
+  return recurring ? { timeZone: 'UTC' } : {};
 }
 
 export function createGoogleCalendarGatewayService(
   options: GoogleCalendarGatewayServiceOptions,
 ): CalendarGatewayService {
   const now = options.now ?? ((): number => Date.now());
+  const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
   /**
    * Opened per call rather than cached: credentials can be connected, adopted
@@ -249,7 +275,13 @@ export function createGoogleCalendarGatewayService(
 
   return {
     async listEvents(input) {
-      return (await readEvents(input)).map(toSummary);
+      // With no window the answer is what is coming up: Google orders by start
+      // time, so an unbounded list returns the oldest events first. Export
+      // shares `readEvents` and keeps reading everything.
+      const windowed = input.from === undefined && input.to === undefined
+        ? { ...input, from: new Date(now() - DEFAULT_LOOKBACK_MS).toISOString() }
+        : input;
+      return (await readEvents(windowed)).map(toSummary);
     },
 
     async getEvent(eventId, calendarId) {
@@ -263,11 +295,21 @@ export function createGoogleCalendarGatewayService(
       const connection = await connect();
       await requireCalendarWrite(connection);
       const { client } = connection;
+      const startMs = Date.parse(input.start);
+      const endMs = Date.parse(input.end);
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs < startMs) {
+        throw new GatewayVerbError("Field 'end' must not be before 'start'.", 'INVALID_ARGUMENT', 400);
+      }
       const created = unwrap(
         await client.createEvent({
           summary: input.title,
           start: input.start,
           end: input.end,
+          // The route already required the owner's confirmation for this
+          // call, with the attendee list in front of them.
+          ...(input.attendees === undefined || input.attendees.length === 0
+            ? {}
+            : { attendees: input.attendees, notifyAttendees: true }),
           ...(input.location === undefined ? {} : { location: input.location }),
           ...(input.description === undefined ? {} : { description: input.description }),
           ...(input.calendarId === undefined ? {} : { calendarId: input.calendarId }),
@@ -309,16 +351,48 @@ export function createGoogleCalendarGatewayService(
           errors.push(`"${event.summary || event.uid}" has no end time, so it was not imported.`);
           continue;
         }
+        const label = `"${event.summary || event.uid}"`;
+        if (event.isOverride === true) {
+          errors.push(`${label} was not imported: it replaces a single occurrence of a recurring series (RECURRENCE-ID), which this import cannot apply.`);
+          continue;
+        }
+        if (event.hasSeriesExceptions === true) {
+          errors.push(`${label} was not imported: its recurrence would be sent without the parts that change it (${event.recurrence?.unsupportedReason ?? 'EXDATE, RDATE or RECURRENCE-ID'}), so excluded or extra dates would be wrong.`);
+          continue;
+        }
+        const zone = zoneFor(event.start, event.end, event.recurrence !== undefined);
+        if (zone.refusal !== undefined) {
+          errors.push(`${label} was not imported: ${zone.refusal}.`);
+          continue;
+        }
+        // Importing the same file twice must not double the calendar.
+        const existing = await client.listEvents({
+          ...(calendarId === undefined ? {} : { calendarId }),
+          sourceUid: event.uid,
+          maxResults: 1,
+        });
+        if (!existing.ok) {
+          errors.push(`${label} was not imported because it could not be checked against events already imported: ${existing.problem} ${existing.fix}`);
+          continue;
+        }
+        if (existing.value.length > 0) {
+          errors.push(`${label} was skipped: an event imported from this .ics entry is already in the calendar.`);
+          continue;
+        }
         const created = await client.createEvent({
           summary: event.summary,
-          start: toApiDateTime(event.start),
-          end: toApiDateTime(event.end),
+          start: event.start.value,
+          end: event.end.value,
+          sourceUid: event.uid,
+          ...(zone.timeZone === undefined ? {} : { timeZone: zone.timeZone }),
+          ...(event.recurrence === undefined ? {} : { recurrence: [`RRULE:${event.recurrence.rule}`] }),
+          ...(event.attendees === undefined ? {} : { attendees: event.attendees }),
           ...(event.location === undefined ? {} : { location: event.location }),
           ...(event.description === undefined ? {} : { description: event.description }),
           ...(calendarId === undefined ? {} : { calendarId }),
         });
         if (created.ok) eventIds.push(created.value.id);
-        else errors.push(`"${event.summary || event.uid}" was not imported: ${created.problem} ${created.fix}`);
+        else errors.push(`${label} was not imported: ${created.problem} ${created.fix}`);
       }
       return { imported: eventIds.length, eventIds, errors };
     },

@@ -275,6 +275,7 @@ function agentMark(agent: UsageAgentEntry): { mark: string; fg: string } {
   const t = activeTokens();
   if (agent.status === 'running') return { mark: '◐', fg: t.brand };
   if (agent.status === 'failed') return { mark: '✕', fg: t.error };
+  if (agent.status === 'cancelled') return { mark: '⊘', fg: t.textMuted };
   return { mark: '✓', fg: t.success };
 }
 
@@ -285,9 +286,11 @@ function drawAgents(f: ModalFrame, view: UsageModalView, y: number): void {
   const planCost = agents.reduce((sum, a) => sum + a.cost, 0) + session.usd;
   const running = agents.filter((a) => a.status === 'running').length;
   const failed = agents.filter((a) => a.status === 'failed').length;
+  const cancelled = agents.filter((a) => a.status === 'cancelled').length;
   const parts = [`plan total ${!view.tracker.available() ? 'unavailable' : session.priced ? formatUsd(planCost) : 'price unknown'}`, `${agents.length} agent${agents.length === 1 ? '' : 's'}`];
   if (running > 0) parts.push(`${running} running`);
   if (failed > 0) parts.push(`${failed} failed`);
+  if (cancelled > 0) parts.push(`${cancelled} cancelled`);
   const yy = drawTextBlock(f.canvas, f.l, y, f.r - f.l + 1, [{ text: parts.join(' · '), style: { fg: t.textMuted } }], f.bottom);
   if (agents.length === 0) {
     drawTextBlock(f.canvas, f.l, yy + 1, f.r - f.l + 1, [{ text: 'No agents spawned this session. Agent costs appear here once delegated or background agents start.', style: { fg: t.textMuted } }], f.bottom);

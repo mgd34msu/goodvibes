@@ -46,8 +46,8 @@ export function listSharedSessionMessages(
  * reply twice, and because the next turn's prompt is built from that
  * transcript, the model was shown every one of its own answers twice.
  *
- * Matching is by agent id plus the presence of a terminal `status` in the
- * message metadata, which only the completion path writes. Reading it back off
+ * Matching is by agent id plus a terminal `status` (completed, failed or
+ * cancelled) in the message metadata, which only the completion path writes. Reading it back off
  * the stored bucket rather than an in-memory set means a restart mid-flight
  * cannot lose the fact that the agent already reported.
  */
@@ -61,7 +61,8 @@ export function findAgentCompletionMessage(
   for (let index = bucket.length - 1; index >= 0; index -= 1) {
     const message = bucket[index]!;
     if (message.agentId !== agentId) continue;
-    if (typeof message.metadata?.status === 'string') return message;
+    const status = message.metadata?.status;
+    if (status === 'completed' || status === 'failed' || status === 'cancelled') return message;
   }
   return undefined;
 }

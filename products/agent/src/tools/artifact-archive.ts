@@ -124,11 +124,14 @@ export function createZipArchive(entries: readonly ArtifactPackageEntry[]): Buff
     }
     const checksum = crc32(entry.buffer);
     const method = 8;
+    // Without the UTF-8 flag (bit 11) unzip tools read names as CP437 and garble
+    // anything outside ASCII. ASCII names keep the plain flags.
+    const flags = /^[\x00-\x7f]*$/.test(safePath) ? 0 : 0x0800;
 
     const localHeader = Buffer.alloc(30);
     localHeader.writeUInt32LE(0x04034b50, 0);
     localHeader.writeUInt16LE(20, 4);
-    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(flags, 6);
     localHeader.writeUInt16LE(method, 8);
     localHeader.writeUInt16LE(timestamp.time, 10);
     localHeader.writeUInt16LE(timestamp.date, 12);
@@ -143,7 +146,7 @@ export function createZipArchive(entries: readonly ArtifactPackageEntry[]): Buff
     centralHeader.writeUInt32LE(0x02014b50, 0);
     centralHeader.writeUInt16LE(20, 4);
     centralHeader.writeUInt16LE(20, 6);
-    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(flags, 8);
     centralHeader.writeUInt16LE(method, 10);
     centralHeader.writeUInt16LE(timestamp.time, 12);
     centralHeader.writeUInt16LE(timestamp.date, 14);

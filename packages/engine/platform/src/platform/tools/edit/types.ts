@@ -2,6 +2,11 @@
 
 export type OccurrenceSpec = 'first' | 'last' | 'all' | number;
 
+/**
+ * One text edit. `find` and `replace` may be absent at run time when their
+ * `_base64` twin is sent; the executor refuses an item with neither, or with an
+ * empty find (see resolveEditText in match.ts).
+ */
 export interface EditItem {
   path: string;
   find: string;

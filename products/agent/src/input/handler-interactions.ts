@@ -3,7 +3,6 @@ import '@goodvibes-jev/engine/terminal-shell/input-content';
 import {
   expandPrompt,
   handleBlockCopy,
-  handleBlockRerun,
   handleBlockSave,
   handleBlockToggle,
   handleBookmark,
@@ -75,18 +74,7 @@ export function executeBlockActionForHandler(handler: InputHandler, actionId: st
     case 'toggle':
       handler.handleBlockToggle();
       break;
-    case 'rerun':
-      handler.handleBlockRerun();
-      break;
   }
-}
-
-/**
- * handleBlockRerun - Re-run the tool call for the nearest tool block.
- * Emits a tool-rerun event for the orchestrator to handle.
- */
-export function handleBlockRerunForHandler(handler: InputHandler): void {
-  handleBlockRerun(handler.conversationManager, handler.getScrollTop, handler.requestRender);
 }
 
 /**

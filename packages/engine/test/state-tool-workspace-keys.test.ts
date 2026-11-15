@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { createStateTool } from '../platform/src/platform/tools/state/index.ts';
 import { KVState } from '../platform/src/platform/state/kv-state.ts';
 import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
+import { trackDisposables } from './_helpers/disposables.ts';
+
+const disposables = trackDisposables();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,19 +16,20 @@ import { ProjectIndex } from '../platform/src/platform/state/project-index.ts';
 function tempDir(): string {
   const d = join(tmpdir(), `gv-state-keys-${Date.now()}-${crypto.randomUUID()}`);
   mkdirSync(d, { recursive: true });
+  disposables.defer(() => { rmSync(d, { recursive: true, force: true }); });
   return d;
 }
 
 function makeStateTool(
   workingDir: string,
   daemonHomeDir: string,
-  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string }> },
+  swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; persisted?: boolean; requiresRestart?: readonly string[] }> },
 ) {
   const memDir = join(tempDir(), 'memory');
   mkdirSync(memDir, { recursive: true });
   const stateDir = join(tempDir(), 'state');
   mkdirSync(stateDir, { recursive: true });
-  const kvState = new KVState({ stateDir });
+  const kvState = disposables.add(new KVState({ stateDir }));
   const projectIndex = new ProjectIndex(workingDir);
   return createStateTool(kvState, projectIndex, {
     memoryDir: memDir,
@@ -76,11 +80,27 @@ describe('state tool: runtime.workingDir set', () => {
     expect(calls).toEqual(['/xyz']);
   });
 
+  test('a swap that did not save, or left subsystems on the old root, says so', async () => {
+    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({ ok: true, persisted: false, requiresRestart: ['code index'] }) });
+    const result = await tool.execute({ mode: 'set', values: { 'runtime.workingDir': '/xyz' } });
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.output!)).toMatchObject({ swapped: true, persisted: false, requiresRestart: ['code index'] });
+  });
+
+  test('a failed re-root names the code and tells the caller to check which root is in effect', async () => {
+    const tool = makeStateTool('/abc', '/def', { requestSwap: async () => ({ ok: false, code: 'REROOT_FAILED', reason: 'store would not reopen' }) });
+    const result = await tool.execute({ mode: 'set', values: { 'runtime.workingDir': '/xyz' } });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('REROOT_FAILED');
+    expect(result.error).toContain('read runtime.workingDir');
+  });
+
   test('set runtime.workingDir without swap manager returns error', async () => {
     const tool = makeStateTool('/abc', '/def');
     const result = await tool.execute({ mode: 'set', values: { 'runtime.workingDir': '/xyz' } });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/no swap manager/);
+    expect(result.error).toMatch(/cannot switch workspaces/);
+    expect(result.error).not.toContain('POST /config');
   });
 
   test('set daemon.homeDir returns error with READONLY_KEY or equivalent', async () => {

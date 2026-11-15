@@ -227,9 +227,16 @@ describe('DraftSyncStore', () => {
   });
 
   test('list clamps an over-large limit to MAX_DRAFT_LIST_LIMIT', async () => {
-    for (let i = 0; i < 3; i += 1) await store.upsert({ message: `m${i}` });
+    for (let i = 0; i < MAX_DRAFT_LIST_LIMIT + 1; i += 1) await store.upsert({ message: `m${i}` });
     const drafts = store.list({ limit: MAX_DRAFT_LIST_LIMIT + 10_000 });
-    expect(drafts.length).toBe(3);
+    expect(drafts.length).toBe(MAX_DRAFT_LIST_LIMIT);
+  });
+
+  test('list floors a zero or negative limit to one row', async () => {
+    for (let i = 0; i < 3; i += 1) await store.upsert({ message: `m${i}` });
+    expect(store.list({ limit: 0 }).length).toBe(1);
+    expect(store.list({ limit: -5 }).length).toBe(1);
+    expect(store.list({ limit: 2 }).length).toBe(2);
   });
 
   test('get returns null for an unknown id; delete reports existence', async () => {

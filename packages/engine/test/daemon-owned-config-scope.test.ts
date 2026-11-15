@@ -373,10 +373,13 @@ describe('a daemon KNOWN to be there vs an address merely derived from config', 
       daemonHomeDir: h,
       readRuntimeRecord: () => null,
       readDaemonBinding: () => binding,
-      fetchImpl: (async (_url: string, init?: RequestInit) => new Response(
-        JSON.stringify({ success: true, key: 'surfaces.telegram.defaultChatId', value: '999', persistedTo: '/d/settings.json' }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )) as unknown as typeof fetch,
+      // A real daemon refuses the anonymous probe with its authentication error and accepts the authenticated write.
+      fetchImpl: (async (_url: string, init?: RequestInit) => init?.method === 'GET'
+        ? Response.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401 })
+        : new Response(
+          JSON.stringify({ success: true, key: 'surfaces.telegram.defaultChatId', value: '999', persistedTo: '/d/settings.json' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )) as unknown as typeof fetch,
     });
     // A foreground daemon writes no detached-daemon record. Before the binding
     // fallback existed it looked absent, and daemon-owned writes went to the

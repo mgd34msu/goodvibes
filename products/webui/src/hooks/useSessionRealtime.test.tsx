@@ -5,7 +5,7 @@ import { getActiveRoute, setActiveRoute } from '../lib/relay-connection';
  *
  * This is a red-if-broken test: it feeds a RAW SSE frame named `session-update` (the
  * un-domained wire event) and asserts queryKeys.sessions is invalidated. Against the
- * pre-W2B code, which bound domain('session') 'SESSION_UPDATED' through viaSse(), whose
+ * earlier code, which bound domain('session') 'SESSION_UPDATED' through viaSse(), whose
  * per-domain filter drops the un-domained frame, this path never fired. The companion
  * negative test documents the dead path: a frame named 'session' carrying a payload
  * `{type:'SESSION_UPDATED'}` must NOT be relied on to invalidate.
@@ -21,6 +21,8 @@ import type { ServerSentEventHandlers } from '@goodvibes-jev/engine/transport-ht
 // Capture what the hook opens and the handlers it registers.
 let capturedHandlers: ServerSentEventHandlers | null = null;
 const openCalls: string[] = [];
+const closers: Array<ReturnType<typeof mock>> = [];
+const cleanups: Array<() => void> = [];
 
 mock.module('../lib/goodvibes', () => ({
   DEFAULT_SSE_RECONNECT: { enabled: true, baseDelayMs: 1, maxDelayMs: 2, backoffFactor: 2, maxAttempts: 3 },
@@ -33,7 +35,9 @@ mock.module('../lib/goodvibes', () => ({
       open: (pathOrUrl: string, handlers: ServerSentEventHandlers) => {
         openCalls.push(pathOrUrl);
         capturedHandlers = handlers;
-        return Promise.resolve(() => {});
+        const close = mock(() => {});
+        closers.push(close);
+        return Promise.resolve(close);
       },
     },
   },
@@ -64,42 +68,55 @@ function renderHook(): { client: QueryClient; invalidate: ReturnType<typeof mock
     );
   });
 
+  // Registered for afterEach so a failed assertion cannot leave the root mounted.
+  let mounted = true;
+  const unmount = () => {
+    if (!mounted) return;
+    mounted = false;
+    flushSync(() => root.unmount());
+    if (container.parentNode) container.parentNode.removeChild(container);
+  };
+  cleanups.push(unmount);
+
   return {
     client,
     invalidate,
     state: () => latest,
-    unmount: () => {
-      flushSync(() => root.unmount());
-      if (container.parentNode) container.parentNode.removeChild(container);
-    },
+    unmount,
   };
 }
 
+/** The hook stores the closer from the open() promise one microtask later. */
+async function settleOpen(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+  closers.length = 0;
   capturedHandlers = null;
   openCalls.length = 0;
 });
 
 describe('useSessionRealtime', () => {
   test('a transport error body (raw 401 JSON) never reaches the returned error', () => {
-    const { state, unmount } = renderHook();
+    const { state } = renderHook();
     flushSync(() => capturedHandlers?.onError?.(new Error('{"error":"Authentication required","code":"AUTH_REQUIRED","status":401}')));
     expect(state().error).not.toBeNull();
     expect(state().error).not.toContain('AUTH_REQUIRED');
     expect(state().error).not.toContain('{');
-    unmount();
   });
 
   test('opens the un-domained control-plane events stream, not a per-domain viaSse feed', () => {
-    const { unmount } = renderHook();
+    renderHook();
     expect(openCalls.length).toBe(1);
     expect(openCalls[0]).toContain('/api/control-plane/events');
     expect(openCalls[0]).toContain('domains=session');
-    unmount();
   });
 
   test('a raw `session-update` frame INVALIDATES queryKeys.sessions (the fix)', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     expect(capturedHandlers).not.toBeNull();
 
     capturedHandlers?.onEvent?.('session-update', { event: 'session-created', payload: { sessionId: 's1' } });
@@ -107,59 +124,52 @@ describe('useSessionRealtime', () => {
     expect(invalidate).toHaveBeenCalled();
     const arg = invalidate.mock.calls[0][0] as { queryKey: unknown };
     expect(arg.queryKey).toEqual(['sessions']);
-    unmount();
   });
 
   test('every lifecycle intent (created/updated/steered/closed) invalidates', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     for (const event of ['session-created', 'session-message-appended', 'session-input-delivered', 'session-closed']) {
       capturedHandlers?.onEvent?.('session-update', { event, payload: { sessionId: 's1' } });
     }
     expect(invalidate.mock.calls.length).toBe(4);
-    unmount();
   });
 
   test('hosted lifecycle frames invalidate the hosted list on the shared session stream', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('hosted-session-update', {
       event: 'hosted-session-created', session: { id: 'hosted-1' }, createdAt: 1,
     });
     expect(openCalls).toHaveLength(1);
     expect(invalidate.mock.calls).toEqual([[{ queryKey: ['hosted-sessions'] }]]);
-    unmount();
   });
 
   test('a relay overflow revalidates both ordinary and hosted session lists', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('relay-overflow', { dropped: 2 });
     expect(invalidate.mock.calls).toEqual([
       [{ queryKey: ['sessions'] }], [{ queryKey: ['hosted-sessions'] }],
     ]);
-    unmount();
   });
 
   test('an UNKNOWN future wire event still invalidates defensively (never dropped)', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('session-update', { event: 'session-teleported', payload: {} });
     expect(invalidate).toHaveBeenCalled();
-    unmount();
   });
 
   test('NEGATIVE: a frame named "session" (the dead viaSse path) is NOT relied on', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     // This is exactly what the old domain('session') binding assumed, a 'session'
     // event carrying a 'SESSION_UPDATED' type. The raw stream must ignore it.
     capturedHandlers?.onEvent?.('session', { type: 'SESSION_UPDATED', payload: { sessionId: 's1' } });
     expect(invalidate).not.toHaveBeenCalled();
-    unmount();
   });
 
   test('non-session event names are ignored', () => {
-    const { invalidate, unmount } = renderHook();
+    const { invalidate } = renderHook();
     capturedHandlers?.onEvent?.('heartbeat', {});
     capturedHandlers?.onEvent?.('turn-started', {});
     expect(invalidate).not.toHaveBeenCalled();
-    unmount();
   });
 
   test('sessionIdFromUpdateFrame reads the id off the inner payload', () => {
@@ -174,18 +184,35 @@ describe('useSessionRealtime', () => {
   });
 });
 
-test('identity and route changes retire old stream callbacks and reopen the stream', () => {
-  const { invalidate, unmount } = renderHook();
+describe('useSessionRealtime stream lifecycle', () => {
+  test('unmount closes the opened stream exactly once', async () => {
+    const { unmount } = renderHook();
+    await settleOpen();
+    expect(closers.length).toBe(1);
+    expect(closers[0]?.mock.calls.length).toBe(0);
+    unmount();
+    expect(closers[0]?.mock.calls.length).toBe(1);
+  });
+});
+
+test('identity and route changes retire old stream callbacks, close the old stream and reopen', async () => {
+  const { invalidate } = renderHook();
+  const originalRoute = getActiveRoute();
   try {
+    await settleOpen();
     const old = capturedHandlers;
     flushSync(() => invalidateClientLifetime());
     expect(openCalls.length).toBe(2);
+    expect(closers[0]?.mock.calls.length).toBe(1);
     old?.onEvent?.('hosted-session-update', { session: { id: 's1' } });
     old?.onEvent?.('session-update', { payload: { sessionId: 's1' } });
     expect(invalidate).not.toHaveBeenCalled();
-    const originalRoute = getActiveRoute();
+    await settleOpen();
     flushSync(() => setActiveRoute(originalRoute === 'direct' ? 'relay' : 'direct'));
     expect(openCalls.length).toBe(3);
+    expect(closers[1]?.mock.calls.length).toBe(1);
+  } finally {
+    // The route is process-wide: restore it even when an assertion above fails.
     flushSync(() => setActiveRoute(originalRoute));
-  } finally { unmount(); }
+  }
 });

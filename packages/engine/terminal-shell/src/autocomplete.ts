@@ -54,6 +54,8 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
    * Activates the dropdown whenever query changes.
    */
   update(query: string): void {
+    // A re-ranked list makes the old numeric index point at an unrelated command; only a repeat of the same query keeps the highlight.
+    if (query !== this.state.query || !this.state.active) this.state.selectedIndex = 0;
     this.state.query = query;
     this.state.results = this.registry.fuzzyMatch(query);
     this.state.active = true;

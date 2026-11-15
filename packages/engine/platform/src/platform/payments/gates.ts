@@ -19,6 +19,11 @@ export interface GateInput {
   readonly enabled: boolean;
   /** A card is configured and its material is present in the secret store. */
   readonly hasUsableCard: boolean;
+  /**
+   * The named card is configured, but `payments.cvvHandling` is 'prompt', so its
+   * code is not supplied. Only changes the refusal text when `hasUsableCard` is false.
+   */
+  readonly cardWithheldByCvvPrompt?: boolean;
   /** A shipping address is configured. */
   readonly hasShippingAddress: boolean;
   /**
@@ -30,13 +35,13 @@ export interface GateInput {
    */
   readonly isOwnerDirectRequest: boolean;
   /**
-   * This node is the one elected to serve payments.
+   * This daemon may serve payments: it is not part of a cluster.
    *
    * Required, never defaulted. Config replication carries the LIMITS to every
    * opted-in node but not today's SPEND (cluster/config-replication-policy.ts),
    * so a second node acting would start from a clean daily budget and could
-   * spend it a second time. Until the spend ledger itself replicates, exactly
-   * one node may act.
+   * spend it a second time. Until the spend ledger itself replicates, payments
+   * run only on a single, unclustered daemon.
    */
   readonly isPaymentsLeader: boolean;
 }
@@ -74,9 +79,18 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
     return {
       code: 'disabled',
       reason:
-        'Refused: this machine is not the one currently serving payments. Only the elected node '
-        + 'may spend, because today\'s totals live on it and a second machine would start from a '
-        + 'clean daily budget.',
+        'Refused: purchasing is off on this machine because it is part of a cluster; payments run '
+        + 'only on a single, unclustered daemon today (a second machine would start from a clean '
+        + 'daily budget). Turn clustering off (cluster.enabled false) on the machine that should buy.',
+    };
+  }
+  if (!input.hasUsableCard && input.cardWithheldByCvvPrompt === true) {
+    return {
+      code: 'no-card',
+      reason:
+        'Refused: payments.cvvHandling is set to prompt, so the card verification value is not '
+        + 'stored, and there is no purchase-time prompt to type it yet. Set payments.cvvHandling to '
+        + 'stored, then add the card again if it was created under prompt, to let purchases go ahead.',
     };
   }
   if (!input.hasUsableCard) {

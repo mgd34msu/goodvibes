@@ -17,11 +17,20 @@ import {
   sortWork,
   summarizeValue,
 } from './distributed-runtime-utils.js';
+import { bridgeQueuedDistributedWork } from './distributed-runtime-bridges.js';
 import {
+  DistributedRuntimeRefusalError,
+  distributedWorkLifecycle,
+  nextDistributedPeerStatus,
+  refusalReason,
+} from './distributed-runtime-lifecycles.js';
+import {
+  bridgeSettledAndRemember,
   persistDistributedRuntime,
   pruneAndPersistDistributedRuntime,
   publishDistributedRuntimeEvent,
   recordDistributedRuntimeAudit,
+  requeueDistributedExpiredClaims,
   resolveDistributedRuntimeWaiters,
   startDistributedRuntime,
   waitForDistributedWork,
@@ -120,10 +129,17 @@ export async function enqueueDistributedWork(
   await startDistributedRuntime(state);
   const peer = state.peers.get(input.peerId);
   if (!peer) throw new Error(`Unknown distributed peer: ${input.peerId}`);
+  if (peer.status === 'revoked') {
+    // A revoked peer holds no usable token, so it could never pull this work.
+    throw new DistributedRuntimeRefusalError(
+      `Remote peer ${peer.id} is revoked and cannot receive work; rotate its token or pair it again first.`,
+      'REMOTE_PEER_REVOKED',
+    );
+  }
   if (admission) {
     admission.signal.throwIfAborted(); admission.assertCurrent(); admission.signal.throwIfAborted();
     if (startingPeerRevision !== undefined && state.peerRevision(input.peerId) !== startingPeerRevision) throw new Error('Distributed peer changed during admission startup.');
-    if (state.peerMutationPending(input.peerId) || peer.status === 'revoked' || reservedAdmissions.has(originalAdmission!)) throw new Error('Distributed work admission is unavailable or already reserved.');
+    if (state.peerMutationPending(input.peerId) || state.peers.get(input.peerId)?.status === 'revoked' || reservedAdmissions.has(originalAdmission!)) throw new Error('Distributed work admission is unavailable or already reserved.');
     reservedAdmissions.add(originalAdmission!);
   }
   const now = Date.now();
@@ -250,6 +266,8 @@ export async function claimDistributedWork(
   if (!peer) return [];
   const maxItems = Math.min(10, Math.max(1, Math.trunc(input.maxItems ?? 4)));
   const leaseMs = Math.max(5_000, Math.trunc(input.leaseMs ?? 45_000));
+  // Work past its deadline expires here, before it can be claimed and offered to the peer.
+  requeueDistributedExpiredClaims(state);
   const queued = sortWork(state.work.values())
     .filter((item) => item.peerId === peer.id && item.status === 'queued')
     .slice(0, maxItems);
@@ -269,6 +287,8 @@ export async function claimDistributedWork(
       claimedAt: now,
       leaseExpiresAt: now + leaseMs,
       updatedAt: now,
+      // Kept so a heartbeat can renew the lease by the length the peer asked for.
+      metadata: { ...item.metadata, leaseMs },
     };
     state.work.set(item.id, next);
     claimed.push(next);
@@ -286,7 +306,15 @@ export async function claimDistributedWork(
     });
   }
   const delivered: DistributedPendingWork[] = [];
-  for (const item of claimed) {
+  for (const claimedItem of claimed) {
+    // The prune above can expire a claim whose deadline fell after it was taken; never offer settled work.
+    // A heartbeat landing during that await legitimately replaces the record with an extended lease, so
+    // work without a host admission is delivered from the stored record while this token still holds it.
+    const stored = state.work.get(claimedItem.id);
+    const admissionOwned = claimedItem.metadata[ADMISSION_REQUIRED] === true || state.workAdmissions.has(claimedItem.id);
+    if (!stored) continue;
+    if (admissionOwned ? stored !== claimedItem : (stored.status !== 'claimed' || stored.claimTokenId !== auth.token.id)) continue;
+    const item = stored;
     try {
       const owner = assertAdmission(state, item, true);
       if (owner) {
@@ -300,6 +328,7 @@ export async function claimDistributedWork(
   }
   // No awaits after final validation and before returning peer work.
   return delivered.filter(item => {
+    if (state.work.get(item.id) !== item) return false;
     try {
       const owner = assertAdmission(state, item, false);
       if (owner && owner.peerTokenId !== auth.token.id) throw new Error('Distributed pull token changed.');
@@ -332,6 +361,18 @@ export async function completeDistributedWork(
     } catch { refuseAdmission(state, workId); await persistDistributedRuntime(state); return state.work.get(workId) ?? null; }
   }
   const status = input.status ?? (input.error ? 'failed' : 'completed');
+  // A settled record is final: a repeated report, a report on work an operator
+  // cancelled, or one that arrives after the work expired leaves it as it is,
+  // and none of them reaches the bridges a second time.
+  if (!distributedWorkLifecycle.can(current.status, status)) {
+    if (current.status !== status) {
+      logger.info('Distributed work completion refused', {
+        workId,
+        reason: refusalReason(distributedWorkLifecycle.check(current.status, status)),
+      });
+    }
+    return current;
+  }
   const updated: DistributedPendingWork = {
     ...current,
     status,
@@ -348,12 +389,15 @@ export async function completeDistributedWork(
     },
   };
   releaseAdmission(state, workId);
-  state.work.set(workId, updated);
+  // The record that is stored, published and bridged carries no capture bytes;
+  // only the caller waiting on this work gets them, in memory.
+  const recorded = withoutCaptureMedia(updated);
+  state.work.set(workId, recorded);
   const peer = state.peers.get(auth.peer.id);
   if (peer) {
     state.peers.set(peer.id, {
       ...peer,
-      status: 'connected',
+      status: nextDistributedPeerStatus(peer.status, 'connected'),
       lastSeenAt: Date.now(),
       lastConnectedAt: Date.now(),
     });
@@ -365,21 +409,32 @@ export async function completeDistributedWork(
     {
       peerId: auth.peer.id,
       workId,
-      note: status === 'completed' ? summarizeValue(input.result) || 'no result' : (input.error ?? status),
+      note: status === 'completed' ? summarizeValue(recorded.result) || 'no result' : (input.error ?? status),
     },
   ));
-  await bridgeCompletedDistributedWork(
-    state,
-    state.peers.get(auth.peer.id) ?? ensurePlaceholderPeer(state, auth.peer.id, current.peerKind),
-    updated,
-  );
+  const bridgePeer = state.peers.get(auth.peer.id) ?? ensurePlaceholderPeer(state, auth.peer.id, current.peerKind);
   await pruneAndPersistDistributedRuntime(state);
+  await bridgeSettledAndRemember(state, bridgePeer, recorded);
   publishDistributedRuntimeEvent(state, 'remote-work-settled', {
     peer: sanitizePeer(state.peers.get(auth.peer.id)!),
-    work: updated,
+    work: recorded,
   });
   resolveDistributedRuntimeWaiters(state, updated);
-  return updated;
+  return recorded;
+}
+
+/**
+ * A device capture's bytes belong to the device service that took them (which
+ * applies its own consent and retention). They must not also sit in the work
+ * history on disk or ride an event to every control-plane subscriber.
+ */
+function withoutCaptureMedia(work: DistributedPendingWork): DistributedPendingWork {
+  if (work.type !== 'device.capability') return work;
+  const result = work.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return work;
+  const { mediaBase64, ...rest } = result as Record<string, unknown>;
+  if (typeof mediaBase64 !== 'string') return work;
+  return { ...work, result: { ...rest, mediaOmitted: true } };
 }
 
 export async function cancelDistributedWork(
@@ -394,7 +449,7 @@ export async function cancelDistributedWork(
   const current = state.work.get(workId);
   if (!current) return null;
   releaseAdmission(state, workId);
-  if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
+  if (!distributedWorkLifecycle.can(current.status, 'cancelled')) {
     return current;
   }
   const updated: DistributedPendingWork = {
@@ -411,93 +466,12 @@ export async function cancelDistributedWork(
     workId,
     note: updated.error,
   }));
-  await bridgeCompletedDistributedWork(
-    state,
-    state.peers.get(updated.peerId) ?? ensurePlaceholderPeer(state, updated.peerId, updated.peerKind),
-    updated,
-  );
+  const bridgePeer = state.peers.get(updated.peerId) ?? ensurePlaceholderPeer(state, updated.peerId, updated.peerKind);
   await pruneAndPersistDistributedRuntime(state);
+  await bridgeSettledAndRemember(state, bridgePeer, updated);
   publishDistributedRuntimeEvent(state, 'remote-work-cancelled', updated);
   resolveDistributedRuntimeWaiters(state, updated);
   return updated;
-}
-
-async function bridgeQueuedDistributedWork(
-  state: DistributedRuntimeManagerState,
-  peer: DistributedPeerRecord,
-  work: DistributedPendingWork,
-): Promise<void> {
-  if (work.sessionId && state.sessionBridge) {
-    await state.sessionBridge.appendSystemMessage(
-      work.sessionId,
-      `Queued remote ${peer.kind} work on ${peer.label}: ${work.command}`,
-      {
-        remotePeerId: peer.id,
-        remotePeerKind: peer.kind,
-        remoteWorkId: work.id,
-        remoteWorkStatus: work.status,
-        automationRunId: work.automationRunId,
-        approvalId: work.approvalId,
-      },
-    );
-  }
-}
-
-async function bridgeCompletedDistributedWork(
-  state: DistributedRuntimeManagerState,
-  peer: DistributedPeerRecord,
-  work: DistributedPendingWork,
-): Promise<void> {
-  const statusLabel = work.status === 'completed'
-    ? 'completed'
-    : work.status === 'failed'
-      ? 'failed'
-      : 'cancelled';
-  const summary = work.status === 'completed'
-    ? summarizeValue(work.result) || 'no result'
-    : (work.error ?? statusLabel);
-
-  if (work.sessionId && state.sessionBridge) {
-    await state.sessionBridge.appendSystemMessage(
-      work.sessionId,
-      `Remote ${peer.kind} ${peer.label} ${statusLabel}: ${work.command}${summary ? `\n${summary}` : ''}`,
-      {
-        remotePeerId: peer.id,
-        remotePeerKind: peer.kind,
-        remoteWorkId: work.id,
-        remoteWorkStatus: work.status,
-        automationRunId: work.automationRunId,
-        approvalId: work.approvalId,
-      },
-    );
-  }
-
-  if (work.approvalId && state.approvalBridge) {
-    await state.approvalBridge.recordRemoteUpdate(work.approvalId, {
-      actor: peer.id,
-      actorSurface: 'service',
-      note: `Remote ${peer.kind} ${peer.label} ${statusLabel}: ${work.command}`,
-      metadata: {
-        remotePeerId: peer.id,
-        remoteWorkId: work.id,
-        remoteWorkStatus: work.status,
-      },
-    });
-  }
-
-  if (work.automationRunId && state.automationBridge) {
-    await state.automationBridge.recordExternalRunResult(work.automationRunId, {
-      status: work.status === 'completed' ? 'completed' : work.status === 'failed' ? 'failed' : 'cancelled',
-      result: work.result,
-      error: work.error,
-      telemetry: work.telemetry,
-      metadata: {
-        remotePeerId: peer.id,
-        remoteWorkId: work.id,
-        remotePeerKind: peer.kind,
-      },
-    });
-  }
 }
 
 function ensurePlaceholderPeer(

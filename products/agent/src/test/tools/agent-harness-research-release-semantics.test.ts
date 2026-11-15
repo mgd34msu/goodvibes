@@ -264,7 +264,7 @@ describe('research and release catalog source contracts', () => {
     const result = await researchLiveReadModelSnapshot({ platform: { readModels: { research: { browserRuns: [{ id: 'native-presence', status: 'running', schemaVersion: 'synthetic-v1', publicationGuarantee: 'native synthetic publication', publisher: 'synthetic-host' }] } } } }, { sourceOwner: screening.owner });
     expect(result.browserRunnerRecords[0]?.certification.schemaStatus).toBe('certified'); expect(port.requests).toHaveLength(0);
   });
-  test('complete native publication metadata preserves original precedence over a settled negative prose claim', async () => {
+  test('a settled negative claim is not overridden by complete native publication metadata', async () => {
     const row = { id: 'native-metadata-negative', status: 'running', schemaStatus: 'verification failed',
       schemaVersion: 'synthetic-v1', publicationGuarantee: 'native synthetic publication', publisher: 'synthetic-host' };
     const screening = researchScreeningFixture();
@@ -276,7 +276,7 @@ describe('research and release catalog source contracts', () => {
     });
     installJudgmentPort(port.port);
     const result = await recorded(() => researchLiveReadModelSnapshot({ platform: { readModels: { research: { browserRuns: [row] } } } }, { sourceOwner: screening.owner }));
-    expect(result.browserRunnerRecords[0]?.certification.schemaStatus).toBe('certified'); expect(port.requests).toHaveLength(1);
+    expect(result.browserRunnerRecords[0]?.certification.schemaStatus).toBe('legacy'); expect(port.requests).toHaveLength(1);
     expect(result.browserRunnerRecords[0]?.certification.publisher).toBe('synthetic-host');
     expect(result.browserRunnerRecords[0]?.certification.missingSignals.length).toBeGreaterThan(0);
   });

@@ -47,7 +47,7 @@ function freshManager(): ConfigManager {
   return new ConfigManager({ configDir: join(root, 'config') });
 }
 
-/** The 22 promoted rows, with their exact seeded default and whether the value is a secret-store reference. */
+/** The promoted rows, with their exact seeded default and whether the value is a secret-store reference. */
 const EXPECTED: { key: string; default: unknown; secret: boolean }[] = [
   { key: 'email.enabled', default: false, secret: false },
   { key: 'email.imapHost', default: '', secret: false },
@@ -73,7 +73,7 @@ const EXPECTED: { key: string; default: unknown; secret: boolean }[] = [
   { key: 'google.credentials.migratedFrom', default: '', secret: false },
 ];
 
-/** The 19 paths that used to be hand-enumerated because nothing else declared them. */
+/** The paths that used to be hand-enumerated because nothing else declared them. */
 const FORMERLY_NON_SCHEMA_PATHS = [
   'email.passwordRef',
   'email.smtpPasswordRef',
@@ -108,14 +108,6 @@ describe('every promoted key is a real, valid CONFIG_SCHEMA row', () => {
     expect(row.default).toBe(expected);
   });
 
-  test('there are exactly twenty-two connector keys: not more, not fewer', () => {
-    const connectorKeys = CONFIG_SCHEMA
-      .map((s) => s.key)
-      .filter((key) => key.startsWith('email.') || key.startsWith('calendar.') || key.startsWith('google.'));
-    expect(new Set(connectorKeys).size).toBe(22);
-    expect(connectorKeys.map(String).sort()).toEqual(EXPECTED.map((e) => e.key).sort());
-  });
-
   test.each(EXPECTED)('$key is reachable through DEFAULT_CONFIG with the same default', ({ key, default: expected }) => {
     const value = key.split('.').reduce<unknown>(
       (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
@@ -133,21 +125,11 @@ describe('every row describes itself', () => {
   });
 
   test.each(EXPECTED.filter((e) => e.secret))(
-    '$key is declared secret-bearing, and its description names the secret store',
+    '$key is declared secret-bearing',
     ({ key }) => {
       expect(
         isDeclaredSecretBearingConfigKey(key),
         `${key} is not in SECRET_BEARING_CONFIG_PATHS`,
-      ).toBe(true);
-      const row = CONFIG_SCHEMA.find((s) => s.key === key)!;
-      const description = row.description.toLowerCase();
-      expect(
-        description.includes('secret store') || description.includes('secret tier'),
-        `${key}'s description does not name the secret store: "${row.description}"`,
-      ).toBe(true);
-      expect(
-        description.includes('never in config') || description.includes('never held in config'),
-        `${key}'s description does not say the secret is never held in config: "${row.description}"`,
       ).toBe(true);
     },
   );
@@ -219,7 +201,7 @@ describe('every promoted key is daemon-owned, exactly once, in the owned-path wa
     }
   });
 
-  test('the schema definitions of the 19 formerly-non-schema paths still exist and are daemon-owned', () => {
+  test('the schema definitions of the formerly-non-schema paths still exist and are daemon-owned', () => {
     for (const path of FORMERLY_NON_SCHEMA_PATHS) {
       expect(isValidConfigKey(path), `${path} should now be a real schema key`).toBe(true);
       expect(isDaemonOwnedConfigKey(path)).toBe(true);

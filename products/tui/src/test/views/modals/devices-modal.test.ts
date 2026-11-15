@@ -93,7 +93,11 @@ describe('devices modal actions', () => {
     const printed: string[] = [];
     surface.onAction?.('migrateShared', actionCtx(null, { print: (m: string) => printed.push(m) }));
     expect(state.migrated).not.toBeNull();
-    expect(printed.join('\n')).toContain('secret');
+    // The one-time token is shown masked in the modal, never printed into the transcript.
+    expect(printed.join('\n')).not.toContain('secret');
+    expect(tabText(surface.buildView(), 'devices')).toContain('One-time token for "migrated device"');
+    surface.onAction?.('toggleReveal', actionCtx(null));
+    expect(tabText(surface.buildView(), 'devices')).toContain('secret');
   });
 
   test('revoke shared token flips the legacy line and disables the action', () => {

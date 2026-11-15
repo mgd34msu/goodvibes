@@ -35,6 +35,11 @@ Patch:
 - Documentation lookup uses constant Bash scripts with positional parameters;
   completion labels never enter executable shell text. Malformed resolve metadata
   is ignored. Keep the documentation-injection regression when refreshing.
+- Flag completion (typing `-` after a command) is not offered. Upstream spawns
+  `src/get-options.sh`, which this package never shipped, so it silently
+  returned nothing; the script also sources system completion code that can
+  run the typed program. `getCommandOptions` now returns an empty list without
+  spawning anything.
 - `dependencies.editorconfig` is changed from `2.0.1` to `3.0.2`.
 - `out/util/fs.js` imports the checked-in fast-glob source by relative path.
   Its discovery implementation and matching options remain unchanged.

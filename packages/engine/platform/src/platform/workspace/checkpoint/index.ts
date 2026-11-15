@@ -20,4 +20,5 @@ export type {
   CheckpointSessionChanges,
   RestoreResult,
 } from './types.js';
+export { CheckpointRestoreError } from './types.js';
 export { SideGitRunner, CHECKPOINT_REF_PREFIX, EMPTY_TREE_HASH } from './side-git.js';

@@ -25,7 +25,7 @@ test('actual TUI import history preserves source details without masquerading as
   const surface = createNativeWorkLedgerModalSurface(() => ({ available: true, identity: 'fixture-binding', projectId, bind: onUnavailable => { revoke = onUnavailable; return { available: true, client: {
     projectId, readSnapshot: async () => ({ ...snapshot, provenance }), history: async cursor => cursor ? [] : [event], subscribe: listener => { notify = listener; return () => { unsubscribed++; }; }, dispose: () => { disposed++; },
   } }; } }));
-  const modal = new ConfigModal(); modal.open(surface); await new Promise(resolve => setTimeout(resolve, 5));
+  const modal = new ConfigModal(); modal.open(surface); await new Promise<void>(resolve => { setImmediate(resolve); });
   const route = { configModal: modal, requestRender: () => {}, handleEscape: () => modal.close() };
   const key = (logicalName: string) => handleConfigModalToken(route, { type: 'key', logicalName } as never);
   const render = () => frameFromLayer(renderConfigModal(modal, 180, 45), 180, 45).map(line => line.map(cell => cell.char).join('')).join('\n');
@@ -51,7 +51,7 @@ test('actual TUI import history preserves source details without masquerading as
   expect(render()).toContain('Protected legacy provenance');
   expect(surface.buildView().tabs.find(tab => tab.id === 'imports')?.rows.map(row => row.label).join('\n')).not.toContain('Historical detail');
   expect(render()).toContain('durable cursor 1');
-  provenance = 'available'; notify({ ...snapshot, provenance }); await new Promise(resolve => setTimeout(resolve, 5));
+  provenance = 'available'; notify({ ...snapshot, provenance }); await new Promise<void>(resolve => { setImmediate(resolve); });
   expect(surface.buildView().tabs.find(tab => tab.id === 'imports')?.rows.map(row => row.label).join('\n')).toContain('Historical detail');
   // Revoked source-read authority must purge even frozen, scrolled historical data.
   revoke(new Error('Ledger history access revoked.'));
@@ -69,7 +69,7 @@ test('limited TUI reader preserves native history while naming protected legacy 
   const surface = createNativeWorkLedgerModalSurface(() => ({ available: true, identity: 'limited-host', projectId: snapshot.projectId, bind: () => ({ available: true, client: {
     projectId: snapshot.projectId, readSnapshot: async () => snapshot, history: async cursor => cursor ? [] : [event], subscribe: () => () => {}, dispose: () => {},
   } }) }));
-  const modal = new ConfigModal(); modal.open(surface); await new Promise(resolve => setTimeout(resolve, 5));
+  const modal = new ConfigModal(); modal.open(surface); await new Promise<void>(resolve => { setImmediate(resolve); });
   const route = { configModal: modal, requestRender: () => {}, handleEscape: () => modal.close() };
   for (let i = 0; i < 4; i++) handleConfigModalToken(route, { type: 'key', logicalName: 'right' } as never);
   expect(modal.getActiveTabId()).toBe('imports');

@@ -1,11 +1,12 @@
 import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryRecallSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
+import type { AgentSkillSnapshot } from './skill-registry-types.ts';
 import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
 import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.ts';
 import {
@@ -21,13 +22,16 @@ import {
   isPromptActiveMemory,
   rankMemoryForTurn,
   relevanceBand,
+  DEFAULT_LIMIT,
 } from './memory-prompt.ts';
-import { AgentPersonaRegistry, buildActivePersonaPrompt } from './persona-registry.ts';
-import { buildProjectContextPrompt, discoverProjectContextFiles } from './project-context-files.ts';
-import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.ts';
+import { AgentPersonaRegistry, buildActivePersonaPrompt, type AgentPersonaSnapshot } from './persona-registry.ts';
+import { buildProjectContextPrompt, discoverProjectContextFiles, type AgentProjectContextSnapshot } from './project-context-files.ts';
+import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.ts';
 import {
   AgentSkillRegistry,
   buildEnabledSkillsPrompt,
+  skillStorePath,
+  skillStoreUnreadableNotice,
   evaluateAgentSkillBundleReadiness,
   evaluateAgentSkillReadiness,
 } from './skill-registry.ts';
@@ -238,30 +242,71 @@ function resolveMemoryRecords(input: RuntimePromptCompositionInput): readonly Me
   return input.memoryRecallSnapshot ? input.memoryRecallSnapshot.records : input.memoryRegistry.getAll();
 }
 
+/**
+ * The prompt sections that are read from local stores. They are built once per
+ * composition and fed to both the prompt and its receipt, so the receipt shows
+ * the text that was injected even when a store file changes in between.
+ */
+interface ComposedPromptParts {
+  readonly vibe: string;
+  readonly projectContext: string;
+  readonly routines: string;
+  readonly skills: string;
+  readonly persona: string;
+  readonly projectContextFiles: AgentProjectContextSnapshot;
+  readonly routineSnapshot: AgentRoutineSnapshot;
+  /** Null when the skill store could not be read; the prompt then carries the repair notice. */
+  readonly skillSnapshot: AgentSkillSnapshot | null;
+  readonly skillStoreError: unknown;
+  readonly personaSnapshot: AgentPersonaSnapshot;
+}
+
 function buildRuntimePromptReceiptSegments(
   input: RuntimePromptCompositionInput,
   memoryRecords: readonly MemoryRecord[],
   memoryRanking: MemoryTurnRankingResult,
   memoryPrompt: string,
+  composed: ComposedPromptParts,
 ): readonly PromptContextReceiptSegment[] {
   const vibe = discoverVibeFiles(input.shellPaths);
   // The VIBE prompt is a PROJECTION of persona/constraint records, not a
   // re-read of the files (discoverVibeFiles above stays for the file-discovery receipt).
-  const vibePrompt = buildVibeProjectionPrompt(input.memoryRegistry) ?? '';
-  const projectContext = discoverProjectContextFiles(input.shellPaths);
-  const projectContextPrompt = buildProjectContextPrompt(input.shellPaths) ?? '';
-  const activeMemory = memoryRanking.records.slice(0, 10);
+  const vibePrompt = composed.vibe;
+  const projectContext = composed.projectContextFiles;
+  const projectContextPrompt = composed.projectContext;
+  const activeMemory = memoryRanking.records.slice(0, DEFAULT_LIMIT);
   const activeMemoryIds = new Set(activeMemory.map((record) => record.id));
   const suppressedMemory = memoryRecords.filter((record) => !activeMemoryIds.has(record.id));
-  const routineSnapshot = AgentRoutineRegistry.fromShellPaths(input.shellPaths).snapshot();
-  const activeRoutines = routineSnapshot.enabledRoutines.filter(
+  const routineSnapshot = composed.routineSnapshot;
+  const readyRoutines = routineSnapshot.enabledRoutines.filter(
     (routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready,
   );
+  // Only the first few ready routines reach the prompt; the receipt counts what
+  // was injected, and reports the cut ones as suppressed rather than applied.
+  const activeRoutines = readyRoutines.slice(0, ENABLED_ROUTINES_PROMPT_LIMIT);
   const suppressedRoutines = routineSnapshot.enabledRoutines.filter(
     (routine) => !activeRoutines.some((active) => active.id === routine.id),
   );
-  const routinePrompt = buildEnabledRoutinesPrompt(input.shellPaths) ?? '';
-  const skillSnapshot = AgentSkillRegistry.fromShellPaths(input.shellPaths).snapshot();
+  const routinePrompt = composed.routines;
+  // A corrupt skills.json must not fail the turn: the prompt already carries the
+  // repair notice (buildEnabledSkillsPrompt), so the receipt reads an empty
+  // snapshot and says the same thing.
+  let skillSnapshot: AgentSkillSnapshot;
+  let skillStoreProblem: string | undefined;
+  if (composed.skillSnapshot) {
+    skillSnapshot = composed.skillSnapshot;
+  } else {
+    const error = composed.skillStoreError;
+    skillSnapshot = {
+      path: skillStorePath(input.shellPaths),
+      skills: [],
+      enabledSkills: [],
+      bundles: [],
+      enabledBundles: [],
+      activeSkills: [],
+    };
+    skillStoreProblem = skillStoreUnreadableNotice(skillSnapshot.path, error).split('\n')[1];
+  }
   const activeBundles = skillSnapshot.enabledBundles.filter((bundle) => {
     if (bundle.reviewState !== 'reviewed') return false;
     const readiness = evaluateAgentSkillBundleReadiness(bundle, skillSnapshot.skills);
@@ -282,10 +327,10 @@ function buildRuntimePromptReceiptSegments(
     (skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id),
   );
   const suppressedBundles = skillSnapshot.enabledBundles.filter((bundle) => !activeBundles.some((active) => active.id === bundle.id));
-  const skillPrompt = buildEnabledSkillsPrompt(input.shellPaths) ?? '';
-  const personaSnapshot = AgentPersonaRegistry.fromShellPaths(input.shellPaths).snapshot();
+  const skillPrompt = composed.skills;
+  const personaSnapshot = composed.personaSnapshot;
   const activePersona = personaSnapshot.activePersona;
-  const personaPrompt = buildActivePersonaPrompt(input.shellPaths) ?? '';
+  const personaPrompt = composed.persona;
   const tierPrompt = input.tierPrompt;
   const capabilitySummaryText = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null) ?? '';
 
@@ -379,7 +424,7 @@ function buildRuntimePromptReceiptSegments(
         // Honest, per-record reason (confidence + reviewState + provenance), never a
         // blanket "not reviewed"/"outside prompt limit" guess. A record lands in
         // "suppressed" either because it genuinely failed eligibility, or because it
-        // passed eligibility but the top-10 prompt slice cut it off, those are
+        // passed eligibility but the top-N prompt slice cut it off, those are
         // different situations and must read differently. When the slice was
         // relevance-ranked, say what this record's relevance to the turn was too, so a
         // budget-limited cut reads as "less relevant than the other ten", not arbitrary.
@@ -392,7 +437,7 @@ function buildRuntimePromptReceiptSegments(
           reviewState: record.reviewState,
           confidence: record.confidence,
           reason: eligibility.eligible
-            ? `eligible (${eligibility.reason}) but outside the top-10 prompt slice${relevanceSuffix}, budget-limited, not a trust problem`
+            ? `eligible (${eligibility.reason}) but outside the top-${DEFAULT_LIMIT} prompt slice${relevanceSuffix}, budget-limited, not a trust problem`
             : eligibility.reason,
         };
       }),
@@ -411,13 +456,15 @@ function buildRuntimePromptReceiptSegments(
         id: routine.id,
         reviewState: routine.reviewState,
         missingRequirements: evaluateAgentRoutineReadiness(routine).missing.length,
+        ...(readyRoutines.includes(routine) ? { reason: `ready, but outside the first ${ENABLED_ROUTINES_PROMPT_LIMIT} routines the prompt carries` } : {}),
       })),
     }),
     receiptSegment({
       id: 'skills',
       label: 'Reviewed setup-ready skills and bundles',
       order: 7,
-      status: statusFor(activeSkills.length + activeBundles.length, suppressedSkills.length + suppressedBundles.length),
+      status: skillStoreProblem ? 'attention' : statusFor(activeSkills.length + activeBundles.length, suppressedSkills.length + suppressedBundles.length),
+      ...(skillStoreProblem ? { note: skillStoreProblem } : {}),
       activeCount: activeSkills.length + activeBundles.length,
       suppressedCount: suppressedSkills.length + suppressedBundles.length,
       promptChars: skillPrompt.length,
@@ -495,19 +542,43 @@ export async function composeRuntimePromptWithReceipt(
   const currentModel = modelLabel(input.model);
   const supplement = input.tierPrompt;
   const capabilitySummary = buildCapabilitySummaryPrompt(input.capabilityIndex ?? null);
+  // Each store is read once; the prompt text and the receipt are both derived from these reads.
+  const projectContextFiles = discoverProjectContextFiles(input.shellPaths);
+  const routineSnapshot = AgentRoutineRegistry.fromShellPaths(input.shellPaths).snapshot();
+  let skillSnapshot: AgentSkillSnapshot | null = null;
+  let skillStoreError: unknown;
+  try {
+    skillSnapshot = AgentSkillRegistry.fromShellPaths(input.shellPaths).snapshot();
+  } catch (error) {
+    skillStoreError = error;
+  }
+  const personaSnapshot = AgentPersonaRegistry.fromShellPaths(input.shellPaths).snapshot();
+  const composed: ComposedPromptParts = {
+    vibe: buildVibeProjectionPrompt(input.memoryRegistry) ?? '',
+    projectContext: buildProjectContextPrompt(input.shellPaths, projectContextFiles) ?? '',
+    routines: buildEnabledRoutinesPrompt(input.shellPaths, routineSnapshot) ?? '',
+    // An unreadable store has no snapshot to hand over, so the builder reads it itself and returns the repair notice.
+    skills: buildEnabledSkillsPrompt(input.shellPaths, skillSnapshot ?? undefined) ?? '',
+    persona: buildActivePersonaPrompt(input.shellPaths, personaSnapshot) ?? '',
+    projectContextFiles,
+    routineSnapshot,
+    skillSnapshot,
+    skillStoreError,
+    personaSnapshot,
+  };
   const prompt = joinPromptParts(
     input.runtimePrompt,
     capabilitySummary,
-    buildVibeProjectionPrompt(input.memoryRegistry),
-    buildProjectContextPrompt(input.shellPaths),
+    composed.vibe,
+    composed.projectContext,
     input.operatorPolicy,
     memoryPrompt,
-    buildEnabledRoutinesPrompt(input.shellPaths),
-    buildEnabledSkillsPrompt(input.shellPaths),
-    buildActivePersonaPrompt(input.shellPaths),
+    composed.routines,
+    composed.skills,
+    composed.persona,
     supplement,
   );
-  const segments = buildRuntimePromptReceiptSegments(input, memoryRecords, memoryRanking, memoryPrompt);
+  const segments = buildRuntimePromptReceiptSegments(input, memoryRecords, memoryRanking, memoryPrompt, composed);
   const activeRecords = segments.reduce((total, segment) => total + segment.activeCount, 0);
   const suppressedRecords = segments.reduce((total, segment) => total + segment.suppressedCount, 0);
   return {
@@ -580,7 +651,7 @@ export class AgentPromptContextReceiptStore {
 
   /** Re-apply both bounds to the on-disk journal now; a no-op when nothing needs dropping, so repeated calls never churn the file. */
   public compactNow(): PromptContextReceiptCompaction | null {
-    this.compact('append-threshold');
+    this.locked(() => this.compact('append-threshold'));
     return this.lastCompactionSummary;
   }
 
@@ -590,7 +661,8 @@ export class AgentPromptContextReceiptStore {
     const createdAt = Date.now();
     const receipt: PromptContextReceipt = {
       ...draft,
-      receiptId: `promptctx-${createdAt.toString(36)}-${sequence.toString(36)}`,
+      // The random tail keeps two processes sharing one journal from minting the same id in the same millisecond.
+      receiptId: `promptctx-${createdAt.toString(36)}-${sequence.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       createdAt,
       sequence,
     };
@@ -636,17 +708,45 @@ export class AgentPromptContextReceiptStore {
   }
 
   private append(receipt: PromptContextReceipt): void {
-    if (!this.receiptPath) return;
-    mkdirSync(dirname(this.receiptPath), { recursive: true });
-    appendFileSync(this.receiptPath, `${JSON.stringify(receipt)}\n`, 'utf-8');
-    this.noteAppend();
+    this.appendLine(`${JSON.stringify(receipt)}\n`);
   }
 
   private appendTurnOutcome(outcome: PromptContextTurnOutcome): void {
-    if (!this.receiptPath) return;
-    mkdirSync(dirname(this.receiptPath), { recursive: true });
-    appendFileSync(this.receiptPath, `${JSON.stringify({ kind: 'turn_outcome', outcome })}\n`, 'utf-8');
-    this.noteAppend();
+    this.appendLine(`${JSON.stringify({ kind: 'turn_outcome', outcome })}\n`);
+  }
+
+  /**
+   * The journal is a diagnostic record: a full disk or a read-only directory
+   * leaves a gap in it, it must not fail the turn that was being composed. The
+   * append and any compaction it triggers share one cross-process lock, so a
+   * compaction never rewrites the file from a read that missed another
+   * process's append.
+   */
+  private appendLine(line: string): void {
+    const path = this.receiptPath;
+    if (!path) return;
+    try {
+      this.locked(() => {
+        mkdirSync(dirname(path), { recursive: true });
+        appendFileSync(path, line, 'utf-8');
+        this.noteAppend();
+      });
+    } catch (error) {
+      logger.warn('Prompt context receipt journal append failed; the receipt is kept in memory only', { path, error: summarizeError(error) });
+    }
+  }
+
+  /** Run `fn` under the journal's cross-process lock; where the lock itself cannot be taken (read-only directory), run it unlocked. */
+  private locked<T>(fn: () => T): T {
+    const path = this.receiptPath;
+    if (!path) return fn();
+    let started = false;
+    try {
+      return runStoreFileUpdateSync(path, () => { started = true; return fn(); });
+    } catch (error) {
+      if (started) throw error;
+      return fn();
+    }
   }
 
   /** Bound the journal DURING a long run, not only at the next start: once enough appends pile up since the last compaction, rewrite the file. */
@@ -657,7 +757,7 @@ export class AgentPromptContextReceiptStore {
 
   private load(): void {
     if (!this.receiptPath || !existsSync(this.receiptPath)) return;
-    const survivors = this.compact('load');
+    const survivors = this.locked(() => this.compact('load'));
     if (!survivors) return;
     const recentReceipts = [...survivors.receipts];
     for (const outcome of survivors.outcomes) {

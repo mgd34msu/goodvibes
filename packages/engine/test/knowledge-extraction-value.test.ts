@@ -15,9 +15,13 @@ import { enrichKnowledgeSource } from '../platform/src/platform/knowledge/semant
 import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.js';
 
 let previous: JudgmentPort | undefined;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
+afterEach(async () => {
+  installJudgmentPort(previous);
+  for (const store of stores.splice(0)) await store.close();
+  roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true }));
+});
 
 function input(text = 'AC-7 mass: 12 kg.') {
   return { source: { title: 'AC-7', sourceType: 'manual', status: 'indexed', summary: '', description: '',
@@ -164,7 +168,7 @@ describe('concrete semantic extraction value', () => {
 
 async function fixture(text: string) {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-extraction-value-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store);
   const source = await store.upsertSource({ id: 'short-source', connectorId: 'fixture', sourceType: 'manual', title: 'AC-7', status: 'indexed' });
   const extraction = await store.upsertExtraction({ sourceId: source.id, extractorId: 'fixture', format: 'text', excerpt: text });
   return { store, source, extraction };

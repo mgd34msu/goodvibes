@@ -8,7 +8,6 @@ import type { Tool } from '../types/tools.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { ModeManager } from '../state/mode-manager.js';
-import { HookDispatcher } from '../hooks/dispatcher.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import type { ConfigManager } from '../config/manager.js';
 import { isEffectiveDangerMode } from '../config/index.js';
@@ -22,10 +21,14 @@ import { createEditTool } from './edit/index.js';
 import { TypeScriptSyntaxDiagnosticsProvider } from './shared/post-edit-diagnostics.js';
 import { createRepoMapTool } from './repo-map/index.js';
 import { ContextAccountingHolder, createContextAccountingTool } from './context-accounting/index.js';
+import { createContractSelfCheckTool } from './contract-self-check/index.js';
 import { createFindTool } from './find/index.js';
+import { CodeIntelligence } from '../intelligence/index.js';
+import { createShellPathService } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
 import { detectSandboxAvailability, probeSandboxHost, type ExecSandboxRuntime } from './exec/sandbox.js';
+import { createSandboxRuntimeConfig } from './exec/sandbox-config-lists.js';
 import {
   detectPtyAvailability,
   probePtyHost,
@@ -34,15 +37,16 @@ import {
   type ExecPromptAnswer,
 } from './exec/interactive.js';
 import type { ExecContainmentRequirement } from './exec/containment.js';
-import type { OwnerTerminalGuard } from './exec/owner-terminal-guard.js';
 import { createAnalyzeTool } from './analyze/index.js';
 import { InspectTool } from './inspect/index.js';
 import { createAgentTool } from './agent/index.js';
-import { createFetchTool } from './fetch/index.js';
+import { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 import { createStateTool } from './state/index.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
+import { setTriggerCredentialEnvScrub } from '../workflow/trigger-executor.js';
 import { createRegistryTool } from './registry-tool/index.js';
-import { KVState } from '../state/kv-state.js';
+import type { KVState } from '../state/kv-state.js';
+import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
 import { createTaskTool } from './task/index.js';
 import { createTeamTool } from './team/index.js';
 import { createWorklistTool } from './worklist/index.js';
@@ -52,7 +56,7 @@ import { createQueryTool } from './query/index.js';
 import { createRemoteTool } from './remote-trigger/index.js';
 import { createReplTool } from './repl/index.js';
 import { createCapturedReplTool } from './repl/captured.js';
-import { controlTool } from './control/index.js';
+import { createControlTool, type ControlToolOptions } from './control/index.js';
 import { createProfileTool } from './profile/index.js';
 import { createChannelTool } from './channel/index.js';
 import { createWebSearchTool } from './web-search/index.js';
@@ -172,22 +176,15 @@ export type {
   PtyAvailability,
   PtyHostProbe,
 } from './exec/interactive.js';
-// The two composition-stated exec postures: whether the boundary is REQUIRED
-// (containment) and whether the owner's terminal is off limits. Both default to
-// the historical behaviour when a composition says nothing, so naming them here
-// is what lets a composition say something.
+// The composition-stated exec posture: whether the boundary is REQUIRED
+// (containment). It defaults to the historical behaviour when a composition says
+// nothing, so naming it here is what lets a composition say something.
 export { decideExecContainment } from './exec/containment.js';
 export type {
   ExecContainmentPosture,
   ExecContainmentRequirement,
   ExecContainmentDecision,
 } from './exec/containment.js';
-export { decideOwnerTerminalAccess, PLATFORM_TMUX_SESSION_PREFIX } from './exec/owner-terminal-guard.js';
-export type {
-  OwnerTerminalGuard,
-  OwnerTerminalGuardPosture,
-  OwnerTerminalDecision,
-} from './exec/owner-terminal-guard.js';
 export { formatDenialResponse, guardExecCommand } from './exec/ast-guard.js';
 export { createAnalyzeTool } from './analyze/index.js';
 export { InspectTool } from './inspect/index.js';
@@ -199,9 +196,11 @@ export { createAgentTool } from './agent/index.js';
 export { cancelAllAgentRuns, type CancellableAgentRuns } from './agent/index.js';
 export { createChannelTool } from './channel/index.js';
 export { registerChannelAgentTools } from './channel/agent-tools.js';
-export { controlTool } from './control/index.js';
+export { controlTool, createControlTool, PACKAGED_COMMANDS } from './control/index.js';
+export type { ControlToolOptions } from './control/index.js';
 export { readCredentialHeader } from './credential-header-reading.js';
-export { createFetchTool } from './fetch/index.js';
+export { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
+export type { ConfiguredFetchDepsOptions } from './fetch/index.js';
 export { applySanitizer, resolveSanitizeMode } from './fetch/sanitizer.js';
 export type { SanitizeMode } from './fetch/sanitizer.js';
 export { TRUST_TIER_EVENTS, classifyHostTrustTier, extractHostname } from './fetch/trust-tiers.js';
@@ -239,19 +238,9 @@ export function registerToolWithContractGate(
   }, registration);
 }
 
-/**
- * Split a comma-separated host config value (fetch.trustedHosts / blockedHosts)
- * into a trimmed, non-empty host list. Returns undefined when empty so the fetch
- * runtime keeps its "no default list" semantics.
- */
-function splitHostConfig(value: unknown): string[] | undefined {
-  if (typeof value !== 'string') return undefined;
-  const hosts = value
-    .split(',')
-    .map((h) => h.trim())
-    .filter((h) => h.length > 0);
-  return hosts.length > 0 ? hosts : undefined;
-}
+/** Session key-value stores not yet disposed; one shared exit hook flushes them, however many registries were built. */
+const liveKvStates = new Set<KVState>();
+let kvExitHookInstalled = false;
 
 /**
  * Register all built-in tools into the given registry.
@@ -285,6 +274,11 @@ export function registerAllTools(
      * run, the bounds still apply, but nothing is keyed to a real session.
      */
     resolveSessionId?: (() => string) | undefined;
+    /**
+     * Whether the host still holds the session a keyed state file belongs to
+     * (by its file-name token). Without it keyed state files are never reclaimed.
+     */
+    isSessionResumable?: ((sessionToken: string) => boolean) | undefined;
     sandboxSessionRegistry?: SandboxSessionRegistry | undefined;
     workingDirectory: string;
     surfaceRoot: string;
@@ -299,6 +293,11 @@ export function registerAllTools(
      * look unset. Hosts that embed or can reach a daemon should supply this.
      */
     configRouting?: import('./goodvibes-runtime/config-routing.js').ConfigRoutingOptions | undefined;
+    /**
+     * The daemon's own auth token reader. The Cloudflare status the `goodvibes_context` tool reports counts it as
+     * the Worker-to-daemon operator token when none is stored, exactly as the daemon's own status route does.
+     */
+    cloudflareAuthToken?: (() => string | null) | undefined;
     archetypeLoader?: Pick<ArchetypeLoader, 'loadArchetype'> | undefined;
     configManager?: ConfigManager | undefined;
     providerRegistry?: ProviderRegistry | undefined;
@@ -310,6 +309,8 @@ export function registerAllTools(
     changeTracker?: SessionChangeTracker | undefined;
     /** Project memory registry, when present, `state mode=memory set` mirrors writes into retrievable records. */
     memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
+    /** True while memory is served by a connected host; the state tool then does not mirror into the local registry. */
+    memoryRoutedOverWire?: (() => boolean) | undefined;
     /**
      * Where the owner profile store and occasions service arrive once the
      * gateway composition has built them. Supplying it registers the `profile`
@@ -336,7 +337,7 @@ export function registerAllTools(
     /**
      * Per-file read-permission decision shared with search / list / map tools
      * (find, repo_map). Wired at the composition root to
-     * PermissionManager.readAccess so a file the read tool would gate
+     * PermissionManager.readAccess so a file the owner denied reads for
      * never leaks its content through a search. Omitted → all files allowed.
      */
     readAccessFilter?: import('./shared/read-access.js').ReadAccessFilter | undefined;
@@ -391,14 +392,14 @@ export function registerAllTools(
      * wire, or a tool argument. See exec/containment.ts.
      */
     execContainment?: ExecContainmentRequirement | undefined;
-    /**
-     * Whether commands that drive an existing tmux session this platform did
-     * not create are refused. Omitted → `off`, so every existing caller is
-     * unchanged. See exec/owner-terminal-guard.ts.
-     */
-    ownerTerminalGuard?: OwnerTerminalGuard | undefined;
+    /** The commands and panels this product really has, for the `control` tool; omitted lists the engine's full set. */
+    controlSurfaces?: ControlToolOptions | undefined;
+    /** The host's real hook dispatcher; supplying it offers `state mode=hooks`. */
+    hookDispatcher?: import('../hooks/index.js').HookDispatcher | undefined;
+    /** Approval for model-requested hook changes; the host wires it to the permission manager. Without it hooks can be listed, not changed. */
+    hookChangeGate?: import('./state/index.js').HookChangeGate | undefined;
   },
-): { fileCache: FileStateCache; projectIndex: ProjectIndex } {
+): { fileCache: FileStateCache; projectIndex: ProjectIndex; /** Flushes and stops the session key-value store; call at shutdown. */ dispose: () => Promise<void> } {
   const fileCache = deps?.fileCache ?? new FileStateCache();
   if (
     !deps?.fileUndoManager ||
@@ -434,6 +435,7 @@ export function registerAllTools(
   const workflowServices = deps.workflowServices;
   // Scheduled workflow commands get the same credential-env scrub settings as exec.
   workflowServices.scheduleManager.setCredentialEnvScrub(deps.credentialEnvScrub);
+  setTriggerCredentialEnvScrub(deps.credentialEnvScrub);
   const mcpRegistry = deps?.mcpRegistry;
   if (!deps?.configManager || !deps?.providerRegistry || !deps?.toolLLM) {
     throw new Error('registerAllTools requires configManager, providerRegistry, and toolLLM');
@@ -469,6 +471,7 @@ export function registerAllTools(
       homeDirectory: deps.configManager.getHomeDirectory() ?? undefined,
       surfaceRoot: deps.surfaceRoot,
       configRouting: deps.configRouting,
+      ...(deps.cloudflareAuthToken ? { cloudflareAuthToken: deps.cloudflareAuthToken } : {}),
     }),
   );
   registerTool(
@@ -502,7 +505,7 @@ export function registerAllTools(
   }
   const readConfigManager = deps.configManager;
   const allowOutsideProject = () => isEffectiveDangerMode(readConfigManager);
-  registerTool(new ReadTool(projectIndex, fileCache, undefined, deps.capturedReadAccess, allowOutsideProject),
+  registerTool(new ReadTool(projectIndex, fileCache, undefined, deps.capturedReadAccess, allowOutsideProject, () => readConfigManager.get('tools.defaultTokenBudget')),
     deps.readAdmissionPolicy === 'agent-main-conversation'
       ? { inputProjection: createAgentReadInputProjector(projectIndex, allowOutsideProject) } : undefined);
   // One post-edit diagnostics provider shared by write and edit. Default: the
@@ -514,18 +517,17 @@ export function registerAllTools(
   // Per-command exec sandbox: only probe the host (a bwrap spawn) when the
   // graduation-gated flag AND the sandbox.enabled config switch are both on, so
   // the default path stays zero-cost and byte-for-byte unchanged.
-  const sandboxCategory = deps.configManager.getCategory('sandbox');
+  const sandboxConfigManager = deps.configManager;
+  const sandboxCategory = sandboxConfigManager.getCategory('sandbox');
   const execSandbox: ExecSandboxRuntime | null =
     (deps.featureFlags?.isEnabled('exec-sandbox') ?? false) && sandboxCategory.enabled
       ? {
-          config: {
-            enabled: sandboxCategory.enabled,
-            egressAllowlist: sandboxCategory.egressAllowlist ?? [],
-            workspaceWritable: sandboxCategory.workspaceWritable ?? [],
-          },
+          // Read at each command: an allowlist or writable-path change applies to the next command. Only the
+          // host probe and the decision to wire a sandbox at all are made at startup.
+          config: createSandboxRuntimeConfig(sandboxConfigManager),
           availability: detectSandboxAvailability(probeSandboxHost()),
           featureEnabled: true,
-          homeDir: deps.configManager.getHomeDirectory() ?? undefined,
+          homeDir: sandboxConfigManager.getHomeDirectory() ?? undefined,
           ...(deps.sandboxEscalationHandler ? { requestEscalation: deps.sandboxEscalationHandler } : {}),
           ...(deps.onSandboxedRun ? { onSandboxedRun: deps.onSandboxedRun } : {}),
         }
@@ -559,8 +561,15 @@ export function registerAllTools(
       diagnosticsProvider,
     }),
   );
+  // One facade for the find tool: tree-sitter for `expand_to`, and a language server service for
+  // `references`. Without a home directory the language configs cannot be resolved, so find builds
+  // its own tree-sitter-only instance and `references` says it has no language server.
+  const findHomeDirectory = deps.configManager.getHomeDirectory();
+  const findIntelligence = findHomeDirectory
+    ? new CodeIntelligence({ shellPaths: createShellPathService({ workingDirectory, homeDirectory: findHomeDirectory }) })
+    : undefined;
   registerTool(
-    createFindTool(workingDirectory, deps.featureFlags, undefined, deps.readAccessFilter, deps.capturedReadAccess, allowOutsideProject),
+    createFindTool(workingDirectory, deps.featureFlags, undefined, deps.readAccessFilter, deps.capturedReadAccess, allowOutsideProject, findIntelligence),
   );
   registerTool(
     createRepoMapTool({
@@ -570,6 +579,7 @@ export function registerAllTools(
     }),
   );
   registerTool(createContextAccountingTool(deps.contextAccountingHolder ?? new ContextAccountingHolder()));
+  if (deps.contractRunner) registerTool(createContractSelfCheckTool(deps.contractRunner));
   // PTY prompt-answer path: only probe the host (a `command -v script` spawn)
   // when the composition root wired a prompt-answer handler, so the default
   // path stays zero-cost and byte-for-byte unchanged.
@@ -589,11 +599,10 @@ export function registerAllTools(
       ...(execSandbox ? { sandbox: execSandbox } : {}),
       ...(execInteraction ? { interaction: execInteraction } : {}),
       ...(deps.execContainment ? { containment: deps.execContainment } : {}),
-      ...(deps.ownerTerminalGuard ? { ownerTerminal: deps.ownerTerminalGuard } : {}),
     }),
   );
   registerTool(createAnalyzeTool(deps.toolLLM, deps.featureFlags, workingDirectory));
-  registerTool(new InspectTool(deps.featureFlags, workingDirectory));
+  registerTool(new InspectTool(deps.featureFlags, workingDirectory, allowOutsideProject));
   registerTool(
     createAgentTool({
       manager: agentManager,
@@ -618,17 +627,42 @@ export function registerAllTools(
   // timer, so no call is needed here. Passing legacyStateDir is what lets the
   // age-bounded sweep reach the old unscoped directory, whose copy-forward
   // sources nothing else reclaims.
-  const kvState = new KVState({
-    stateDir: resolveScopedDirectory(workingDirectory, deps.surfaceRoot, 'state'),
-    legacyStateDir: join(workingDirectory, '.goodvibes', 'state'),
-  });
-  const hookDispatcher = new HookDispatcher();
+  // The host's real session id keys the file, and follows the host when it resumes or forks a session, so
+  // state set before a restart is read back when that session resumes; a registry with no host session
+  // (a worker's) gets a generated id, as before.
+  const reclaimCheck = createKeyedStateReclaimCheck(deps.isSessionResumable);
+  const kvBinding = createSessionBoundKvState(
+    {
+      stateDir: resolveScopedDirectory(workingDirectory, deps.surfaceRoot, 'state'),
+      legacyStateDir: join(workingDirectory, '.goodvibes', 'state'),
+      ...(reclaimCheck ? { canReclaimKeyedState: reclaimCheck } : {}),
+    },
+    deps.resolveSessionId,
+    { onBind: (live) => { liveKvStates.add(live); }, onRelease: (live) => { liveKvStates.delete(live); } },
+  );
+  const kvState = kvBinding.state;
+  // KVState writes behind a debounce timer; flush the last write when the loop drains. A host that
+  // shuts down explicitly calls the returned `dispose` instead, which does the same and unregisters.
+  if (!kvExitHookInstalled) {
+    kvExitHookInstalled = true;
+    process.on('beforeExit', () => { for (const live of liveKvStates) void live.dispose(); liveKvStates.clear(); });
+  }
+  const dispose = async (): Promise<void> => {
+    await findIntelligence?.dispose();
+    await kvBinding.dispose();
+  };
+  // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).
+  // Without one the state tool does not offer mode=hooks. With one but no gate it lists hooks and refuses changes.
   registerTool(
     createStateTool(kvState, projectIndex, {
+      ...(deps.hookDispatcher ? { hookDispatcher: deps.hookDispatcher } : {}),
+      ...(deps.hookChangeGate ? { hookGate: deps.hookChangeGate } : {}),
       memoryDir: join(workingDirectory, '.goodvibes', 'memory'),
-      hookDispatcher,
+      workingDir: workingDirectory,
+      daemonHomeDir: deps.configManager.getHomeDirectory() ?? undefined,
       modeManager,
       ...(deps.memoryRegistry ? { memoryRegistry: deps.memoryRegistry } : {}),
+      ...(deps.memoryRoutedOverWire ? { memoryRoutedOverWire: deps.memoryRoutedOverWire } : {}),
     }),
   );
   registerTool(
@@ -640,16 +674,12 @@ export function registerAllTools(
   );
   const fetchConfigManager = deps.configManager;
   registerTool(
-    createFetchTool({
+    createFetchTool(createConfiguredFetchDeps({
       serviceRegistry: deps.serviceRegistry,
       featureFlags: deps.featureFlags,
-      defaultSanitizeMode: fetchConfigManager.get('fetch.sanitizeMode'),
-      defaultTrustedHosts: splitHostConfig(fetchConfigManager.get('fetch.trustedHosts')),
-      defaultBlockedHosts: splitHostConfig(fetchConfigManager.get('fetch.blockedHosts')),
-      // Live read: a persisted approval takes effect on the very next fetch.
-      isLocalhostAllowed: () => fetchConfigManager.get('fetch.allowLocalhost'),
-      ...(deps.localhostFetchApproval ? { approveLocalhostFetch: deps.localhostFetchApproval } : {}),
-    }),
+      configManager: fetchConfigManager,
+      localhostFetchApproval: deps.localhostFetchApproval,
+    })),
   );
   if (webSearchService) {
     registerTool(createWebSearchTool(webSearchService));
@@ -671,26 +701,28 @@ export function registerAllTools(
       ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}),
     }),
   );
-  registerTool(createTeamTool({ surfaceRoot: deps.surfaceRoot }));
-  registerTool(createWorklistTool({ surfaceRoot: deps.surfaceRoot }));
+  registerTool(createTeamTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
+  registerTool(createWorklistTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }
   registerTool(createPacketTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
   registerTool(createQueryTool({ workingDirectory, surfaceRoot: deps.surfaceRoot }));
   if (remoteRunnerRegistry) {
-    registerTool(createRemoteTool(remoteRunnerRegistry));
+    registerTool(createRemoteTool(remoteRunnerRegistry, { importRoot: workingDirectory }));
   }
   registerTool(
     deps.capturedExec
       ? createCapturedReplTool(deps.capturedExec, deps.featureFlags, deps.capturedReplHistory)
       : createReplTool(deps.configManager, deps.sandboxSessionRegistry, {
           surfaceRoot: deps.surfaceRoot,
+          workingDirectory,
         }),
   );
-  registerTool(controlTool);
+  // A caller that supplies no lists has no commands or panels to name; the full engine list would describe ones it lacks.
+  registerTool(createControlTool(deps.controlSurfaces ?? { commands: [], panels: [] }));
   registerTool(createChannelTool(channelRegistry));
-  return { fileCache, projectIndex };
+  return { fileCache, projectIndex, dispose };
 }
 export { booleanValue, booleanValuePolicy } from './batteries/boolean-value.js';
 export type { NativeDecisionPolicy } from './batteries/decision-policy.js';

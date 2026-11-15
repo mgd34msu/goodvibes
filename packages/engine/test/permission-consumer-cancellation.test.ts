@@ -120,7 +120,8 @@ test('a wire-raised approval remains live when its coalesced in-process consumer
 for (const timed of [false, true]) test(`a restored ${timed ? 'timed' : 'untimed'} approval keeps its durable owner`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'permission-restored-owner-')); const path = join(root, 'approvals.json');
   const first = new ApprovalBroker({ storePath: path }); await first.start();
-  const raised = await first.raiseApproval({ request: request('restored'), ...(timed ? { timeoutMs: 60_000 } : {}) });
+  // Raised over the wire, so its owner may be in another process: that is what survives a restart without a deadline.
+  const raised = await first.raiseApproval({ request: request('restored'), metadata: { raisedVia: 'approvals.raise' }, ...(timed ? { timeoutMs: 60_000 } : {}) });
   const restored = new ApprovalBroker({ storePath: path }); await restored.start();
   try {
     const controller = new AbortController();

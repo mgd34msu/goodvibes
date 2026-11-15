@@ -28,9 +28,13 @@
  *     dry-run plan.
  *   - NEW-UP-THEN-OLD-DOWN. The new unit is installed, started, and verified
  *     healthy (a fresh, honest systemd `is-active` read through the injected
- *     actionRunner) BEFORE the legacy unit is stopped, disabled, or removed.
- *     A new unit that fails or doesn't come up healthy rolls itself back
- *     (uninstalled) and never touches the legacy one.
+ *     actionRunner) BEFORE the legacy unit is touched. A new unit that fails or
+ *     doesn't come up healthy rolls itself back (uninstalled) and never touches
+ *     the legacy one. Both units want the same port, so the legacy unit is then
+ *     only STOPPED and the new unit must be seen listening on the port; if it
+ *     never does, the legacy unit is started again and the new one rolled back.
+ *     Only a listening new unit lets the legacy unit be disabled and removed,
+ *     and a failed stop or disable keeps the unit file and reports failure.
  *   - ADOPT-OR-WARN, NEVER KILL. If the legacy unit file is simply absent but
  *     something is already listening on the configured host:port (this dev
  *     host's real case: a manually `nohup`'d daemon with no unit at all),
@@ -358,7 +362,13 @@ export interface RunLegacyDaemonMigrationParams {
   readonly legacyUnitFileRemove?: ((path: string) => void) | undefined;
   /** Injectable systemctl runner for the legacy stop/disable/daemon-reload steps. */
   readonly actionRunner?: ManagedServiceActionRunner | undefined;
+  /** Injectable pause between listen checks of the new unit. Defaults to a real timer. */
+  readonly sleep?: ((ms: number) => Promise<void>) | undefined;
 }
+
+/** How long the new unit gets to start listening once the legacy unit has released the port. */
+const NEW_UNIT_LISTEN_ATTEMPTS = 20;
+const NEW_UNIT_LISTEN_INTERVAL_MS = 250;
 
 /**
  * Belt-and-braces guard: throws if the resolved unit `status` is the
@@ -487,8 +497,9 @@ export async function runLegacyDaemonMigration(
         'migrate-service (dry run: re-run with confirmation to execute): this would',
         `  1. install and start the new ${resolvedUnitName}.service unit`,
         '  2. verify it comes up healthy (a fresh, honest systemd is-active check)',
-        `  3. only if that succeeds, stop, disable, and remove the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit ` +
-          'and run `systemctl --user daemon-reload`',
+        `  3. stop the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit to release the port, and confirm the new unit listens on it ` +
+          '(otherwise the install-script unit is started again and the new unit is rolled back)',
+        `  4. only then disable and remove the install-script unit and run \`systemctl --user daemon-reload\``,
         'Nothing has been changed. Nothing is migrated automatically: re-run with explicit confirmation ' +
           "(the CLI's -y/--yes flag) to execute this plan.",
       ],
@@ -537,10 +548,72 @@ export async function runLegacyDaemonMigration(
     };
   }
 
-  // New unit verified healthy, now, and only now, retire the legacy unit.
+  // The new unit reads as running, which only proves its process is alive: the
+  // legacy unit still holds the port, so the new one cannot have bound it yet.
+  // Release the port by stopping the legacy unit (it stays enabled and its file
+  // stays until the new unit is proven), then require the new unit to listen.
   const run: ManagedServiceActionRunner = params.actionRunner ?? defaultActionRunner(SYSTEMCTL_TIMEOUT_MS);
-  const stopResult = run('systemctl', ['--user', 'stop', `${LEGACY_SERVICE_UNIT_NAME}.service`]);
-  const disableResult = run('systemctl', ['--user', 'disable', `${LEGACY_SERVICE_UNIT_NAME}.service`]);
+  const legacyUnit = `${LEGACY_SERVICE_UNIT_NAME}.service`;
+  const describeFailure = (result: ManagedServiceActionResult): string => String(result.stderr || result.stdout || 'no output').trim();
+  const stopResult = run('systemctl', ['--user', 'stop', legacyUnit]);
+  if ((stopResult.status ?? 1) !== 0) {
+    return {
+      ok: false,
+      exitCode: 1,
+      lines: [
+        `migrate-service incomplete: the new ${resolvedUnitName}.service unit is installed and running, but stopping the install-script unit failed (${describeFailure(stopResult)}).`,
+        `The install-script ${legacyUnit} unit was left enabled, with its unit file in place at ${legacy.path}; it may still be running on ${params.host}:${params.port}, so the new unit may not be able to bind that port.`,
+        `Stop it yourself with \`systemctl --user stop ${legacyUnit}\` and re-run migrate-service.`,
+      ],
+      status: healthCheck,
+    };
+  }
+  const probe = params.portProbe ?? defaultPortProbe;
+  const sleep = params.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let listening = false;
+  for (let attempt = 0; attempt < NEW_UNIT_LISTEN_ATTEMPTS && !listening; attempt += 1) {
+    if (attempt > 0) await sleep(NEW_UNIT_LISTEN_INTERVAL_MS);
+    listening = await probe(params.host, params.port);
+  }
+  if (!listening) {
+    // Put the world back the way it was: the legacy unit was only stopped, so
+    // starting it again restores the daemon the owner had.
+    assertUnitIsNotLegacy(installed, legacy, 'roll back (uninstall) the new unit');
+    const rollback = manager.uninstall();
+    const restart = run('systemctl', ['--user', 'start', legacyUnit]);
+    const restartNote = (restart.status ?? 1) === 0
+      ? `The install-script ${legacyUnit} unit was started again and is unchanged.`
+      : `Starting the install-script ${legacyUnit} unit again failed (${describeFailure(restart)}): start it by hand with \`systemctl --user start ${legacyUnit}\`.`;
+    return {
+      ok: false,
+      exitCode: 1,
+      lines: [
+        `migrate-service aborted: the new ${resolvedUnitName}.service unit is running but never began listening on ${params.host}:${params.port} once the install-script unit released it.`,
+        rollback.actionError
+          ? `rolling back the new unit hit an error (${rollback.actionError}): remove ${installed.path} by hand.`
+          : 'the newly-written unit has been rolled back (removed).',
+        restartNote,
+      ],
+      status: healthCheck,
+    };
+  }
+
+  // The new unit answers on the configured port, now, and only now, retire the
+  // legacy unit for good. A failed disable keeps the unit file: removing it
+  // would leave a dangling enablement that still starts at login.
+  const disableResult = run('systemctl', ['--user', 'disable', legacyUnit]);
+  if ((disableResult.status ?? 1) !== 0) {
+    return {
+      ok: false,
+      exitCode: 1,
+      lines: [
+        `migrate-service incomplete: the new ${resolvedUnitName}.service unit is installed, enabled, and listening on ${params.host}:${params.port}, and the install-script unit is stopped, but disabling it failed (${describeFailure(disableResult)}).`,
+        `Its unit file was left in place at ${legacy.path} so it does not become a dangling enablement.`,
+        `Run \`systemctl --user disable ${legacyUnit}\`, remove that file, then \`systemctl --user daemon-reload\`.`,
+      ],
+      status: healthCheck,
+    };
+  }
   const removeFile = params.legacyUnitFileRemove ?? ((path: string) => rmSync(path, { force: true }));
   let removeError: string | undefined;
   try {
@@ -551,22 +624,10 @@ export async function runLegacyDaemonMigration(
   run('systemctl', ['--user', 'daemon-reload']);
 
   const lines = [`migrated: the new ${resolvedUnitName}.service unit is installed, enabled, and running.`];
-  if ((stopResult.status ?? 1) !== 0) {
-    lines.push(
-      `note: stopping the install-script unit reported a non-zero exit (${stopResult.stderr ?? stopResult.stdout ?? 'no output'}); ` +
-        'it may already have been stopped.',
-    );
-  }
-  if ((disableResult.status ?? 1) !== 0) {
-    lines.push(
-      `note: disabling the install-script unit reported a non-zero exit (${disableResult.stderr ?? disableResult.stdout ?? 'no output'}); ` +
-        'it may already have been disabled.',
-    );
-  }
   if (removeError) {
     lines.push(`note: could not remove the install-script unit file at ${legacy.path}: ${removeError}; remove it by hand.`);
   } else {
-    lines.push(`the install-script ${LEGACY_SERVICE_UNIT_NAME}.service unit has been stopped, disabled, and removed.`);
+    lines.push(`the install-script ${legacyUnit} unit has been stopped, disabled, and removed.`);
   }
   lines.push('ran `systemctl --user daemon-reload`.');
   return { ok: true, exitCode: 0, lines, status: healthCheck };

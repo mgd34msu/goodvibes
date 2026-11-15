@@ -71,6 +71,11 @@ export interface DaemonConfigClient {
    * success.
    */
   set(key: string, value: unknown): Promise<void>;
+  /**
+   * Remove a daemon-owned key's explicit value so it reads as its default again
+   * and follows later default changes. Absent on a client built before `config.reset`.
+   */
+  reset?(key: string): Promise<void>;
   /** Read a daemon-owned key; `undefined` when the daemon could not answer. */
   get(key: string): Promise<unknown>;
   /** The daemon's whole resolved config snapshot, for a settings view that opens cold. */
@@ -103,18 +108,18 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
       const handle = await captureImport(request, restriction); importHandles.add(handle); return handle;
     },
     inspect: (handle: RemoteSettingsImportPrecondition) => {
-      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable.');
+      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the import again.');
       return inspectRemoteSettingsImportPrecondition(handle);
     },
     assertCurrent: (handle: RemoteSettingsImportPrecondition) => {
-      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable.');
+      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the import again.');
       assertRemoteSettingsImportPrecondition(handle);
     },
   }) : undefined;
   const capture = verbs.captureSettingsPrecondition?.bind(verbs);
   const handles = new WeakSet<RemoteSettingsPrecondition>();
   const assertCurrent = (handle: RemoteSettingsPrecondition): void => {
-    if (!handles.has(handle)) throw new Error('Settings owner precondition unavailable.');
+    if (!handles.has(handle)) throw new Error('Settings owner precondition unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the setting again.');
     assertRemoteSettingsPrecondition(handle);
   };
   const preparedSettings: PreparedDaemonSettingsClient | undefined = capture ? Object.freeze({
@@ -123,7 +128,7 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
       const handle = await capture(request); handles.add(handle); return handle;
     },
     inspect: (handle: RemoteSettingsPrecondition) => {
-      if (!handles.has(handle)) throw new Error('Settings owner precondition unavailable.');
+      if (!handles.has(handle)) throw new Error('Settings owner precondition unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the setting again.');
       return inspectRemoteSettingsPrecondition(handle);
     },
     assertCurrent,
@@ -141,6 +146,14 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
       }
       // The route takes a body envelope, not a flat pair.
       await verbs.invoke('config.set', { key, value });
+    },
+
+    reset: async (key) => {
+      const probe = verbs.probe();
+      if (!probe.available) {
+        throw new Error(`'${key}' is a daemon-owned setting and ${probe.reason}`);
+      }
+      await verbs.invoke('config.reset', { key });
     },
 
     get: async (key) => {

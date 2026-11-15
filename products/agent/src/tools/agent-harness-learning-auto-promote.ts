@@ -1,6 +1,8 @@
 import { learningPromotionReference } from './agent-harness-learning-curator-common.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { types as nodeTypes } from 'node:util';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { previewHarnessText } from './agent-harness-text.ts';
 import { prepareMemoryApiAdd } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -24,7 +26,7 @@ export interface AutoPromoteResult {
   readonly eligible: number;
   /** Records successfully promoted this pass. */
   readonly promoted: number;
-  /** Candidates skipped due to errors, missing data, or secret-scan rejection. */
+  /** Candidates skipped: a write that did not complete, a proposal target this pass cannot write, or missing data. Each one has a line in `log`. */
   readonly skipped: number;
   /** Duplicate records marked stale with originals retained. */
   readonly consolidated: number;
@@ -93,6 +95,8 @@ function writeLocalRecord(
   intent: TransitionIntent,
   write: (effects: ReturnType<LearningCandidateCollection['prepareTransition']>['effects']) => LocalRecord,
   context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void,
+  /** Called the moment the write is durable, before the checks that can still stop the pass. */
+  onDurable?: () => void,
 ): LocalRecord {
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']>;
   try { assertOwnership(); assertLearningCandidateCollection(collection, context, options); assertOwnership(); transition = collection.prepareTransition(intent); }
@@ -106,6 +110,7 @@ function writeLocalRecord(
         catch (error) { restricted = true; throw error; }
       },
       onEffect: published => {
+        if (published === true) onDurable?.();
         try { assertOwnership(); transition.effects.onEffect(published); assertOwnership(); }
         catch (error) { restricted = true; throw error; }
       },
@@ -125,6 +130,7 @@ function writeLocalRecord(
 async function promoteMemory(
   api: MemoryApi, candidate: LearningCandidate, collection: LearningCandidateCollection,
   options: CatalogRankingOptions, context: LearningCuratorNativeContext, assertOwnership: () => void,
+  onDurable?: () => void,
 ): Promise<string> {
   const fields = candidate.proposalFields ?? {};
   const summary = (fields.summary ?? fields.detail ?? candidate.label).trim();
@@ -155,6 +161,7 @@ async function promoteMemory(
         if (!published) owned.effects.assertCurrent();
       },
       onPublished: receipt => {
+        onDurable?.();
         assertOwnership(); plan.assertPublication(receipt);
         owned.effects.onEffect(true);
         owned.commit(plan.record);
@@ -169,7 +176,7 @@ async function promoteMemory(
   }
 }
 
-function promotePersona(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void): string {
+function promotePersona(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void, onDurable?: () => void): string {
   const fields = candidate.proposalFields ?? {};
   const name = (fields.name ?? candidate.label).trim();
   const body = (fields.body ?? fields.detail ?? '').trim();
@@ -180,11 +187,11 @@ function promotePersona(paths: ShellPathService, candidate: LearningCandidate, c
     tags: splitList(fields.tags), source: 'agent', provenance: learningPromotionReference(candidate.id),
   } satisfies Parameters<AgentPersonaRegistry['create']>[0];
   const record = writeLocalRecord(collection, { kind: 'create', domain: 'persona', input },
-    effects => AgentPersonaRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership);
+    effects => AgentPersonaRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership, onDurable);
   return `persona:${record.id}  ${name.slice(0, 60)}`;
 }
 
-function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void): string {
+function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void, onDurable?: () => void): string {
   const fields = candidate.proposalFields ?? {};
   const name = (fields.name ?? candidate.label).trim();
   const steps = (fields.steps ?? fields.notes ?? fields.detail ?? '').trim();
@@ -192,55 +199,71 @@ function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, c
   const input = {
     name, description: (fields.description ?? name).trim(),
     steps,
-    triggers: splitList(fields.triggers), tags: splitList(fields.tags), enabled: true,
+    // Text from notes and sessions becomes a standing routine only after the owner enables it.
+    triggers: splitList(fields.triggers), tags: splitList(fields.tags), enabled: false,
     source: 'agent', provenance: learningPromotionReference(candidate.id),
   } satisfies Parameters<AgentRoutineRegistry['create']>[0];
   const record = writeLocalRecord(collection, { kind: 'create', domain: 'routine', input },
-    effects => AgentRoutineRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership);
+    effects => AgentRoutineRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership, onDurable);
   return `routine:${record.id}  ${name.slice(0, 60)}`;
+}
+
+/** Writes already made by a consolidation, kept outside the call so a later failure cannot hide them. */
+interface ConsolidationProgress { count: number; readonly lines: string[] }
+
+/** Duplicates not yet staged; a staged one is only waiting for deletion and is never rewritten. */
+function pendingDuplicates(plan: NonNullable<LearningCandidate['consolidation']>): readonly string[] {
+  const staged = new Set(plan.staleDuplicateIds ?? []);
+  return plan.duplicateIds.filter(id => !staged.has(id));
+}
+
+function failureKind(error: unknown): string {
+  return previewHarnessText(summarizeError(error), 100);
+}
+
+/** Records what an interrupted pass already changed on the error, and in the log, so completed writes are never lost from view. */
+function withPartialProgress(failure: unknown, ledger: readonly string[]): unknown {
+  if (ledger.length === 0) return failure;
+  logger.warn('Learning auto-promotion stopped after completed writes', { completed: ledger });
+  if (failure !== null && typeof failure === 'object') Object.assign(failure, { completedWrites: [...ledger] });
+  // A projection error's text says "nothing was executed"; with writes already made that would be false.
+  if (failure instanceof Error) failure.message = `${failure.message} Writes already made before it stopped: ${ledger.join('; ')}.`;
+  return failure;
+}
+
+/** The writes an interrupted promotion pass had already made, if it was interrupted after any. */
+export function completedPromotionWrites(error: unknown): readonly string[] {
+  if (error === null || typeof error !== 'object') return [];
+  const writes: unknown = (error as { readonly completedWrites?: unknown }).completedWrites;
+  return Array.isArray(writes) ? writes.filter((line): line is string => typeof line === 'string') : [];
 }
 
 function consolidate(
   paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection,
   context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void,
-): { readonly count: number; readonly lines: readonly string[] } {
+  progress: ConsolidationProgress,
+): void {
   const plan = candidate.consolidation;
   const domain = candidate.domain;
   if (!plan || (domain !== 'persona' && domain !== 'skill' && domain !== 'routine'))
     throw new Error('Unsupported local consolidation.');
-  const lines: string[] = [];
-  const update = plan.updateFields;
-  if (update) {
-    const input = {
-      ...(update.description === undefined ? {} : { description: update.description }),
-      ...(update.tags === undefined ? {} : { tags: [...update.tags] }),
-      ...(update.triggers === undefined ? {} : { triggers: [...update.triggers] }),
-      provenance: 'learning-curator-consolidation',
-    };
-    writeLocalRecord(collection, { kind: 'update', domain, id: plan.survivorId, input }, effects => {
-      if (domain === 'persona') return AgentPersonaRegistry.fromShellPaths(paths, effects).update(plan.survivorId, input);
-      if (domain === 'skill') return AgentSkillRegistry.fromShellPaths(paths, effects).update(plan.survivorId, input);
-      return AgentRoutineRegistry.fromShellPaths(paths, effects).update(plan.survivorId, input);
-    }, context, options, assertOwnership);
-    lines.push(`merged survivor ${domain}:${plan.survivorId}`);
-  }
-  let count = 0;
-  for (const id of plan.duplicateIds) {
+  // The survivor is never rewritten: it keeps its own provenance, which may be the reference that marks a candidate as already promoted.
+  for (const id of pendingDuplicates(plan)) {
     const reason = `Duplicate of ${plan.survivorId}; staged by learning curator consolidation.`;
     writeLocalRecord(collection, { kind: 'stale', domain, id, reason }, effects => {
       if (domain === 'persona') return AgentPersonaRegistry.fromShellPaths(paths, effects).markStale(id, reason);
       if (domain === 'skill') return AgentSkillRegistry.fromShellPaths(paths, effects).markStale(id, reason);
       return AgentRoutineRegistry.fromShellPaths(paths, effects).markStale(id, reason);
-    }, context, options, assertOwnership);
-    count++; lines.push(`consolidated duplicate ${domain}:${id} -> ${plan.survivorId}`);
+    }, context, options, assertOwnership, () => {
+      progress.count++; progress.lines.push(`consolidated duplicate ${domain}:${id} -> ${plan.survivorId}`);
+    });
   }
-  return { count, lines };
 }
 
 /** Use the caller's recorded admission for all planned local promotions. */
 async function runAutoPromoterOnce(
   context: LearningCuratorNativeContext, skillRegistry: AgentSkillRegistry, memoryApi: MemoryApi,
-  options: CatalogRankingOptions,
+  options: CatalogRankingOptions, memoryServedByDaemon: boolean,
 ): Promise<AutoPromoteResult> {
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
   const signal = options.signal, caller = options.assertCurrent;
@@ -296,7 +319,8 @@ async function runAutoPromoterOnce(
   const promotions = collection.candidates.filter(candidate => candidate.status === 'ready-to-promote'
     || candidate.status === 'proposal-ready');
   const consolidations = collection.candidates.filter(candidate => candidate.status === 'needs-consolidation'
-    && candidate.consolidation !== undefined && candidate.domain !== 'memory');
+    && candidate.consolidation !== undefined && candidate.domain !== 'memory'
+    && pendingDuplicates(candidate.consolidation).length > 0);
   const eligible = promotions.length + consolidations.length;
   const log: string[] = [], domains: Record<string, number> = {};
   let promoted = 0, skipped = 0, consolidated = 0;
@@ -311,31 +335,47 @@ async function runAutoPromoterOnce(
     assertCurrent();
     collection.assertCandidateCurrent(candidate);
     assertCurrent();
+    // An adopted daemon is the single writer of the shared memory store; this pass only
+    // holds the boot-time local copy, so writing there would fork the two.
+    if (candidate.proposalTarget === 'memory' && memoryServedByDaemon) {
+      skipped++;
+      log.push(`Skipped ${candidate.id}: memory is served by the connected daemon, which this pass cannot write to. Create it with agent_local_registry domain:"memory" action:"create".`);
+      continue;
+    }
+    // Set once the record is durable and cleared when it is logged, so a stop in between still reports it.
+    let durable = false;
+    const onDurable = () => { durable = true; };
+    const ledger = () => durable ? [...log, `wrote ${candidate.proposalTarget} for ${candidate.id}; the checks after the write stopped the pass`] : log;
     try {
       let line: string;
-      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership);
-      else if (candidate.proposalTarget === 'persona') line = promotePersona(paths, candidate, collection, context, options, assertOwnership);
-      else if (candidate.proposalTarget === 'routine') line = promoteRoutine(paths, candidate, collection, context, options, assertOwnership);
-      else { skipped++; continue; }
+      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable);
+      else if (candidate.proposalTarget === 'persona') line = promotePersona(paths, candidate, collection, context, options, assertOwnership, onDurable);
+      else if (candidate.proposalTarget === 'routine') line = promoteRoutine(paths, candidate, collection, context, options, assertOwnership, onDurable);
+      else { skipped++; log.push(`Skipped ${candidate.id}: the ${candidate.proposalTarget ?? 'unknown'} proposal target is not written by this pass.`); continue; }
       assertCurrent();
-      promoted++; bump(candidate.proposalTarget); log.push(`promoted ${line}`);
+      promoted++; bump(candidate.proposalTarget); log.push(`promoted ${line}`); durable = false;
     } catch (error) {
-      if (error instanceof PromotionRestrictionFailure) throw error.failure;
-      if (error instanceof ToolInputProjectionError || signal?.aborted) throw error;
-      assertCurrent(); skipped++; log.push('Promotion did not complete.');
+      if (error instanceof PromotionRestrictionFailure) throw withPartialProgress(error.failure, ledger());
+      if (error instanceof ToolInputProjectionError || signal?.aborted) throw withPartialProgress(error, ledger());
+      assertCurrent(); skipped++; log.push(`Promotion of ${candidate.id} did not complete (${failureKind(error)}).`);
     }
   }
   for (const candidate of consolidations) {
     assertCurrent();
     collection.assertCandidateCurrent(candidate);
     assertCurrent();
+    // Each stale write is counted as it lands, so a later failure in the same group still reports the earlier ones.
+    const progress: ConsolidationProgress = { count: 0, lines: [] };
+    const settle = () => { consolidated += progress.count; if (progress.count > 0) bump(candidate.domain); log.push(...progress.lines); };
     try {
-      const result = consolidate(paths, candidate, collection, context, options, assertOwnership);
-      assertCurrent(); consolidated += result.count; bump(candidate.domain); log.push(...result.lines);
+      consolidate(paths, candidate, collection, context, options, assertOwnership, progress);
+      assertCurrent(); settle();
     } catch (error) {
-      if (error instanceof PromotionRestrictionFailure) throw error.failure;
-      if (error instanceof ToolInputProjectionError || signal?.aborted) throw error;
-      assertCurrent(); skipped++; log.push('Consolidation did not complete.');
+      settle();
+      if (error instanceof PromotionRestrictionFailure) throw withPartialProgress(error.failure, log);
+      if (error instanceof ToolInputProjectionError || signal?.aborted) throw withPartialProgress(error, log);
+      assertCurrent(); skipped++;
+      log.push(`Consolidation of ${candidate.id} did not complete after ${progress.count} of ${candidate.consolidation ? pendingDuplicates(candidate.consolidation).length : 0} duplicates (${failureKind(error)}).`);
     }
   }
   assertCurrent();
@@ -345,12 +385,12 @@ async function runAutoPromoterOnce(
 const activePromotions = new Map<string, Promise<AutoPromoteResult>>();
 /** Serialize native writes; each caller keeps its own source/permission lifetime. */
 export async function runAutoPromoter(context: LearningCuratorNativeContext, skills: AgentSkillRegistry,
-  memory: MemoryApi, options: CatalogRankingOptions): Promise<AutoPromoteResult> {
+  memory: MemoryApi, options: CatalogRankingOptions, memoryServedByDaemon = false): Promise<AutoPromoteResult> {
   const assertContext = captureCatalogMethods(context, ['workspace']);
   const workspace = modelReadingServicePath(context, ['workspace']);
   const paths = modelReadingServicePath(context, ['workspace', 'shellPaths']);
   const root = modelReadingServicePath(context, ['workspace', 'shellPaths', 'userGoodVibesRoot']);
-  if (typeof root !== 'string' || !root) return runAutoPromoterOnce(context, skills, memory, options);
+  if (typeof root !== 'string' || !root) return runAutoPromoterOnce(context, skills, memory, options, memoryServedByDaemon);
   const assertOptions = captureCatalogMethods(options, ['signal', 'assertCurrent']);
   const signal = options.signal;
   const current = () => {
@@ -363,7 +403,7 @@ export async function runAutoPromoter(context: LearningCuratorNativeContext, ski
   const previous = activePromotions.get(root);
   const pass = (async () => {
     if (previous) await previous.catch(() => {});
-    current(); return runAutoPromoterOnce(context, skills, memory, options);
+    current(); return runAutoPromoterOnce(context, skills, memory, options, memoryServedByDaemon);
   })();
   activePromotions.set(root, pass);
   const cleanup = () => { if (activePromotions.get(root) === pass) activePromotions.delete(root); };

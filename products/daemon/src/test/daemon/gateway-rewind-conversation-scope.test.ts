@@ -34,7 +34,7 @@ interface Applied {
   receipt: { conversation: { rewound: boolean; droppedMessages: number } | null; warnings: readonly string[] } | null;
 }
 function invoke(methodId: string, body: unknown): Promise<unknown> {
-  return fixture().services.gatewayMethods.invoke(methodId, { methodId, body } as never);
+  return fixture().services.gatewayMethods.invoke(methodId, { methodId, body, context: { principalId: 'rewind-fixture', principalKind: 'user' }, isAuthorized: () => true } as never);
 }
 
 describe('product-composed conversation rewind', () => {

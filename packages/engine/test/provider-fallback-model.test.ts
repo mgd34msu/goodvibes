@@ -13,6 +13,7 @@ import {
   ensureConfiguredModelIsRoutable,
 } from '../platform/src/platform/providers/fallback-model.ts';
 import { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
+import type { ProviderRefreshableModel } from '../platform/src/platform/providers/registry-live-model-discovery.ts';
 import type { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
@@ -150,6 +151,52 @@ describe('ensureConfiguredModelIsRoutable', () => {
     ensureConfiguredModelIsRoutable(registry, makeConfigManager(configuredModel));
 
     expect(registry.listModels().some((m) => m.registryKey === configuredModel)).toBe(true);
+  });
+
+  test('adds the configured model beside the runtime models the provider already has', () => {
+    const registry = createLaunchTolerantAwareRegistry();
+    const template = registry.listModels()[0];
+    const provider = template ? registry.tryGet(template.provider) : undefined;
+    if (!template || !provider) throw new Error('test setup expects at least one built-in provider to exist');
+    const runtimeModel = (id: string) => ({ ...buildFallbackModelDefinition(template.provider, id), registryKey: `${template.provider}:${id}` });
+    registry.registerRuntimeProvider({ provider, replace: true, models: [runtimeModel('plugin-model-a'), runtimeModel('plugin-model-b')] });
+
+    ensureConfiguredModelIsRoutable(registry, makeConfigManager(`${template.provider}:configured-model`));
+
+    const keys = registry.listModels().map((m) => m.registryKey);
+    expect(keys).toContain(`${template.provider}:plugin-model-a`);
+    expect(keys).toContain(`${template.provider}:plugin-model-b`);
+    expect(keys).toContain(`${template.provider}:configured-model`);
+  });
+});
+
+describe('refreshLiveModelDiscovery', () => {
+  test('overlapping refreshes finish in the order they were asked, so the newest answer stays', async () => {
+    const registry = createLaunchTolerantAwareRegistry();
+    const template = registry.listModels()[0];
+    const provider = template ? registry.tryGet(template.provider) : undefined;
+    if (!template || !provider) throw new Error('test setup expects at least one built-in provider to exist');
+    const firstAnswer = Promise.withResolvers<void>();
+    let calls = 0;
+    // The registry's discovery sweep calls this optional method on the registered provider object.
+    const refreshable: ProviderRefreshableModel = provider;
+    refreshable.refreshModels = async () => {
+      calls += 1;
+      if (calls === 1) {
+        await firstAnswer.promise;
+        return { models: ['answer-old'], source: 'live' as const, added: ['answer-old'], removed: [] };
+      }
+      return { models: ['answer-new'], source: 'live' as const, added: ['answer-new'], removed: [] };
+    };
+
+    const first = registry.refreshLiveModelDiscovery(template.provider, { force: true });
+    const second = registry.refreshLiveModelDiscovery(template.provider, { force: true });
+    firstAnswer.resolve();
+    await Promise.all([first, second]);
+
+    const keys = registry.listModels().map((m) => m.registryKey);
+    expect(keys).toContain(`${template.provider}:answer-new`);
+    expect(keys).not.toContain(`${template.provider}:answer-old`);
   });
 });
 

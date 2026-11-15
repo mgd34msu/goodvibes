@@ -13,11 +13,8 @@ export type { GoodVibesConfig, ConfigKey, ConfigValue, ConfigSetting, Permission
 export { DEFAULT_CONFIG, CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 export { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
 
-import { readFileSync } from 'fs';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from './provider-model.ts';
 
 export function getConfigSnapshot(configManager: Pick<ConfigManager, 'getRaw'>): Readonly<GoodVibesConfig> {
@@ -44,18 +41,7 @@ export function getWorkingDirectory(configManager: Pick<ConfigManager, 'getWorki
   return configManager.getWorkingDirectory();
 }
 
-export function getConfiguredSystemPrompt(configManager: Pick<ConfigManager, 'get'>): string | undefined {
-  const file = configManager.get('provider.systemPromptFile');
-  if (!file) return undefined;
-  try {
-    return readFileSync(file, 'utf-8');
-  } catch (err) {
-    logger.debug('systemPrompt file read failed (non-fatal)', { file, error: summarizeError(err) });
-    return undefined;
-  }
-}
-
-export { getConfiguredApiKeys, resolveApiKeys } from '@goodvibes-jev/engine/platform/platform/config';
+export { getConfiguredApiKeys, getConfiguredSystemPrompt, resolveApiKeys } from '@goodvibes-jev/engine/platform/platform/config';
 
 // The daemon-client credential STATUS read (secret-free, honest-degrade).
 // Value reads above stay local/env; only the status VISIBILITY path moves to the daemon.

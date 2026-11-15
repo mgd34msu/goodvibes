@@ -12,14 +12,14 @@
     "method": "GET",
     "path": "/api/control-plane/auth",
     "status": 200,
-    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-66769cdd-ee91-412f-8c12-141ba91a1464\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
+    "body": "{\"authenticated\":true,\"authMode\":\"session\",\"tokenPresent\":true,\"authorizationHeaderPresent\":true,\"sessionCookiePresent\":false,\"principalId\":\"pairing:pair-620b324b-25c5-4871-a6e4-8a951cefd8f7\",\"principalKind\":\"token\",\"admin\":true,\"scopes\":[\"read:accounts\",\"read:approvals\",\"read:artifacts\",\"read:auth\",\"read:automation\",\"read:batch\",\"read:browser\",\"read:calendar\",\"read:channels\",\"read:checkin\",\"read:checkpoints\",\"read:ci\",\"read:cloudflare\",\"read:config\",\"read:continuity\",\"read:control-plane\",\"read:deliveries\",\"read:email\",\"read:events\",\"read:fleet\",\"read:health\",\"read:intelligence\",\"read:knowledge\",\"read:mcp\",\"read:media\",\"read:memory\",\"read:occasions\",\"read:panels\",\"read:payments\",\"read:principals\",\"read:profile\",\"read:profile-document\",\"read:providers\",\"read:push\",\"read:relay\",\"read:remote\",\"read:routes\",\"read:services\",\"read:sessions\",\"read:settings\",\"read:skills\",\"read:tasks\",\"read:telemetry\",\"read:telemetry-sensitive\",\"read:voice\",\"read:watchers\",\"read:web-search\",\"read:work-ledger\",\"read:workspaces\",\"read:worktrees\",\"write:approvals\",\"write:artifacts\",\"write:auth\",\"write:automation\",\"write:batch\",\"write:browser\",\"write:calendar\",\"write:channels\",\"write:checkin\",\"write:checkpoints\",\"write:ci\",\"write:cloudflare\",\"write:config\",\"write:control-plane\",\"write:email\",\"write:fleet\",\"write:judgment\",\"write:knowledge\",\"write:mcp\",\"write:media\",\"write:memory\",\"write:occasions\",\"write:panels\",\"write:payments\",\"write:principals\",\"write:profile\",\"write:providers\",\"write:push\",\"write:relay\",\"write:remote\",\"write:routes\",\"write:services\",\"write:sessions\",\"write:skills\",\"write:tasks\",\"write:voice\",\"write:watchers\",\"write:web-search\",\"write:work-ledger\",\"write:work-ledger-import\",\"write:workspaces\",\"write:worktrees\"],\"roles\":[]}"
   },
   "project": {
     "methodId": "workLedger.project",
     "method": "GET",
     "path": "/api/work-ledger/project",
     "status": 200,
-    "body": "{\"projectId\":\"workspace-3935c5a9d9\"}"
+    "body": "{\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}"
   },
   "lookupBefore": {
     "methodId": "workLedger.intake.get",
@@ -42,7 +42,7 @@
       "text": "  Add JSON export.\nKeep CSV output unchanged. 🌻\nKeep CSV output unchanged.  ",
       "unsupportedSources": []
     },
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}}"
   },
   "getCaptured": {
     "methodId": "workLedger.intake.get",
@@ -52,11 +52,11 @@
     "requestBody": {
       "inputId": "webui-native-cancelled-input"
     },
-    "body": "{\"kind\":\"captured\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"}}"
+    "body": "{\"kind\":\"captured\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}}"
   },
   "transition": {
     "inputId": "webui-native-cancelled-input",
-    "sourceRevision": "ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b"
+    "sourceRevision": "61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714"
   },
   "pending": {
     "methodId": "workLedger.intake.get",
@@ -66,7 +66,7 @@
     "requestBody": {
       "inputId": "webui-native-cancelled-input"
     },
-    "body": "{\"kind\":\"processing\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"},\"stage\":\"extracting\",\"recovery\":\"pending\"}"
+    "body": "{\"kind\":\"processing\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"},\"stage\":\"extracting\",\"recovery\":\"pending\"}"
   },
   "admit": {
     "methodId": "workLedger.intake.admit",
@@ -75,9 +75,9 @@
     "status": 503,
     "requestBody": {
       "inputId": "webui-native-cancelled-input",
-      "sourceRevision": "ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b"
+      "sourceRevision": "61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714"
     },
-    "body": "{\"error\":\"Native conversation intake is unavailable; retain the original input identity\",\"hint\":\"The provider is temporarily unavailable. Retry shortly or switch providers if the issue persists.\",\"code\":\"NATIVE_INTAKE_UNAVAILABLE\",\"category\":\"service\",\"status\":503}"
+    "body": "{\"error\":\"Native conversation intake failed: The operation was aborted.; retain the original input identity\",\"hint\":\"The provider is temporarily unavailable. Retry shortly or switch providers if the issue persists.\",\"code\":\"NATIVE_INTAKE_UNAVAILABLE\",\"category\":\"service\",\"status\":503,\"errorRef\":\"e6d3d6b7-a5c4-42c4-8961-58c7536145d2\"}"
   },
   "get": {
     "methodId": "workLedger.intake.get",
@@ -87,7 +87,7 @@
     "requestBody": {
       "inputId": "webui-native-cancelled-input"
     },
-    "body": "{\"kind\":\"cancelled\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"}}"
+    "body": "{\"kind\":\"cancelled\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}}"
   },
   "resume": {
     "methodId": "workLedger.intake.resume",
@@ -96,9 +96,9 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-cancelled-input",
-      "sourceRevision": "ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b"
+      "sourceRevision": "61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714"
     },
-    "body": "{\"kind\":\"cancelled\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"}}"
+    "body": "{\"kind\":\"cancelled\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}}"
   },
   "cancel": {
     "methodId": "workLedger.intake.cancel",
@@ -107,8 +107,8 @@
     "status": 200,
     "requestBody": {
       "inputId": "webui-native-cancelled-input",
-      "sourceRevision": "ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b"
+      "sourceRevision": "61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714"
     },
-    "body": "{\"kind\":\"cancelled\",\"projectId\":\"workspace-3935c5a9d9\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"30a1fc8c29551f56cab6b87c2718520348ba48d06f47f374df7cfa5a37e77862\",\"sourceRevision\":\"ed715df4ec2302de9ba9d8ff4983f6828c5a61bcf08bd27efda739ffed73a83b\",\"sessionId\":\"native-work:workspace-3935c5a9d9\"}}"
+    "body": "{\"kind\":\"cancelled\",\"projectId\":\"project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\",\"requestId\":\"webui-native-cancelled-request\",\"sourceRef\":{\"version\":1,\"inputId\":\"webui-native-cancelled-input\",\"sourceId\":\"paflmeik-kcon-eppp-igic-njcjlgbcoahf\",\"sourceRevision\":\"61fbec3d1b91f12f9e43ae99497b015571df3ed2a3d54ff1f0fc726694a7e714\",\"sessionId\":\"native-work:project-mapmegmp-mpbj-ehmb-jhji-ljbechjpgeom\"}}"
   }
 }

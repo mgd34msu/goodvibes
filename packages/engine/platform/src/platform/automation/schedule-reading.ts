@@ -148,7 +148,8 @@ export const scheduleReading: NaturalLanguageScheduleDecision = {
     options.signal?.throwIfAborted();
     if (!source.phrase.trim() || !Number.isSafeInteger(source.now) || source.now <= 0 || !Number.isFinite(new Date(source.now).getTime())) return { kind: 'unknown', reason: 'invalid', confidence: null };
     // Validate the source zone before any semantic request; no guessed UTC fallback.
-    new Intl.DateTimeFormat('en-US', { timeZone: source.timezone }).format(source.now);
+    try { new Intl.DateTimeFormat('en-US', { timeZone: source.timezone }).format(source.now); }
+    catch (error) { if (error instanceof RangeError) return { kind: 'unknown', reason: 'invalid', confidence: null }; throw error; }
     assertJudgmentInput({ phrase: source.phrase, timezone: source.timezone });
     const checkSource = () => {
       original.assertCurrent(); options.signal?.throwIfAborted();

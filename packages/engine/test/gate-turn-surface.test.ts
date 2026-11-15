@@ -4,7 +4,7 @@
  * outside a turn sees one.
  */
 import { describe, expect, test } from 'bun:test';
-import { currentTurnSurfaceId, turnSurfaceOf, withTurnSurface } from '../platform/src/platform/security/turn-boundary.js';
+import { currentTurnSurfaceId, turnSurfaceOf, withTurnSurface, withTurnSurfaceId } from '../platform/src/platform/security/turn-boundary.js';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -24,5 +24,13 @@ describe('turn surface scope', () => {
     ]);
     expect(seen).toEqual(['email', undefined, 'telegram']);
     expect(currentTurnSurfaceId()).toBeUndefined();
+  });
+
+  test('work started inside a surface scope keeps it after the starting call has returned', async () => {
+    let continuation: Promise<string | undefined> = Promise.resolve(undefined);
+    withTurnSurfaceId('email', () => { continuation = Promise.resolve().then(() => currentTurnSurfaceId()); });
+    expect(currentTurnSurfaceId()).toBeUndefined();
+    expect(await continuation).toBe('email');
+    expect(withTurnSurfaceId(undefined, () => currentTurnSurfaceId())).toBeUndefined();
   });
 });

@@ -17,7 +17,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
     'get (detailed agent info including messages), ' +
     'budget (token usage for an agent), ' +
     'plan (execution plan: task + template + tools), ' +
-    'wait (returns current status immediately if terminal, or polls up to timeoutMs capped at 5000ms; always non-blocking for the main conversation), ' +
+    'wait (returns current status immediately if terminal, or waits up to timeoutMs capped at 30000ms, returning as soon as the agent ends), ' +
     'message (send a message to an agent), ' +
     'contracts (list the contracts of the current session with their status, goal, units and criteria met), ' +
     'contract-history (the decisions, checks and escalations of one contract, by contractId), ' +
@@ -59,11 +59,11 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       },
       model: {
         type: 'string',
-        description: 'Model for the spawned agent (mode: spawn). A bare model id (e.g. "claude-fable-5") resolves automatically; use the provider:model form only when the id exists on more than one provider.',
+        description: 'Model for the spawned agent (mode: spawn). A bare model id (e.g. "claude-fable-5") resolves automatically; use the provider:model form only when the id exists on more than one provider.' + ' Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
       },
       provider: {
         type: 'string',
-        description: 'Provider override for the spawned agent (mode: spawn).',
+        description: 'Provider override for the spawned agent (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
       },
       fallbackModels: {
         type: 'array',
@@ -94,7 +94,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
           },
         },
         additionalProperties: false,
-        description: 'Explicit execution-intent hints for policy-aware runtimes (mode: spawn).',
+        description: 'Explicit execution-intent hints for policy-aware runtimes (mode: spawn). Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
       },
       reasoningEffort: {
         type: 'string',
@@ -106,26 +106,27 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
         items: { type: 'string' },
         description:
           'Explicit tool subset for the agent (mode: spawn). ' +
-          'Defaults to template defaults. The "agent" tool is never included.',
+          'Defaults to template defaults. The "agent" tool is never included.' +
+          ' Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
       },
       context: {
         type: 'string',
-        description: 'Additional context to provide to the spawned agent (mode: spawn).',
+        description: 'Additional context to provide to the spawned agent (mode: spawn). On a contract it is passed only as continuation evidence, not as a requirement.',
       },
       successCriteria: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Concrete success criteria the spawned agent must satisfy (mode: spawn).',
+        description: 'Concrete success criteria the spawned agent must satisfy (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
       },
       requiredEvidence: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Evidence the spawned agent must return before completion (mode: spawn).',
+        description: 'Evidence the spawned agent must return before completion (mode: spawn). Applies only with outsideContract=true; without it the work runs as a contract and this is not carried.',
       },
       writeScope: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Expected file or path scope for writes owned by the spawned agent (mode: spawn).',
+        description: 'Expected file or path scope for writes owned by the spawned agent (mode: spawn). Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
       },
       executionProtocol: {
         type: 'string',
@@ -163,7 +164,8 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
         description:
           'If true, use ONLY the specified tools (override mode). ' +
           'If false or omitted, specified tools are merged with template defaults (additive mode). ' +
-          'Only applies when tools is also provided (mode: spawn).',
+          'Only applies when tools is also provided (mode: spawn).' +
+          ' Needs outsideContract=true: on a contract this is refused, because the contract planner chooses the tools and write scope of each unit.',
         default: false,
       },
       outsideContract: {
@@ -216,7 +218,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       // mode: spawn, batch-spawn, list, cohort-status, cohort-report
       cohort: {
         type: 'string',
-        description: 'Cohort name to group agents together (mode: spawn, batch-spawn). Filter by cohort (mode: list, cohort-status, cohort-report).',
+        description: 'Cohort name to group agents together (mode: spawn, batch-spawn; applies to agents run with outsideContract=true, not to a contract\'s owner). Filter by cohort (mode: list, cohort-status, cohort-report).',
       },
       // mode: status / cancel / get / budget / plan / wait / message
       agentId: {
@@ -231,7 +233,7 @@ export const AGENT_TOOL_SCHEMA: ToolDefinition = {
       // mode: wait
       timeoutMs: {
         type: 'number',
-        description: 'Timeout in milliseconds for the wait action (mode: wait). Default: 0 (non-blocking, returns immediately). Max: 5000ms. If agent is still running, returns current status with a hint to poll again via mode=status.',
+        description: 'Timeout in milliseconds for the wait action (mode: wait). Default: 0 (non-blocking, returns immediately). Max: 30000ms; returns as soon as the agent ends. If the agent is still running at the timeout, returns its current status with a hint to wait or poll again.',
       },
       // mode: message
       message: {

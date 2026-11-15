@@ -13,13 +13,15 @@ interface Graph {
   outputs: Record<string, { imports: { path: string; external?: boolean }[] }>;
 }
 
+// Resolved through the `bun` source condition: the published `import` condition points at build
+// output, which a unit run must not depend on.
 test('public catalogs and the real palette caller exclude server provider, logging and SQLite graphs', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gv-webui-browser-catalogs-'));
   try {
     const scope = join(dir, 'node_modules', '@goodvibes-jev');
     mkdirSync(scope, { recursive: true }); symlinkSync(ENGINE, join(scope, 'engine'), 'dir');
-    for (const source of [true, false]) for (const caller of [false, true]) {
-      const name = `${source ? 'source' : 'published'}-${caller ? 'caller' : 'catalogs'}`;
+    for (const caller of [false, true]) {
+      const name = caller ? 'caller' : 'catalogs';
       const entry = join(dir, `${name}.ts`);
       // A real package lookup, without aliases, externals or host shims.
       writeFileSync(entry, caller
@@ -27,7 +29,7 @@ test('public catalogs and the real palette caller exclude server provider, loggi
         : `import * as catalogs from ${JSON.stringify(PUBLIC_ENTRY)}; globalThis.testCatalogs = catalogs;`);
       const outfile = join(dir, `${name}.js`);
       const metafile = join(dir, `${name}-meta.json`);
-      const child = Bun.spawn([process.execPath, 'build', entry, '--target=browser', '--format=iife', ...(source ? ['--conditions=bun'] : []), `--outfile=${outfile}`, `--metafile=${metafile}`],
+      const child = Bun.spawn([process.execPath, 'build', entry, '--target=browser', '--format=iife', '--conditions=bun', `--outfile=${outfile}`, `--metafile=${metafile}`],
         { cwd: dir, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
       const out = new Response(child.stdout).text(); const err = new Response(child.stderr).text();
       try {
@@ -41,7 +43,7 @@ test('public catalogs and the real palette caller exclude server provider, loggi
       // Bun records unused re-export edges as external in its input metadata.
       // The emitted IIFE must be self-contained, with no remaining import edges.
       expect(Object.values(graph.outputs).flatMap((output) => output.imports)).toEqual([]);
-      expect(paths.some((path) => path.endsWith(`/judgment-browser/batteries/catalogs.${source ? 'ts' : 'js'}`))).toBe(true);
+      expect(paths.some((path) => path.endsWith(`/judgment-browser/batteries/catalogs.ts`))).toBe(true);
       if (caller) expect(paths.some((path) => path.endsWith('/webui/src/lib/command-judgment.ts'))).toBe(true);
       else {
         const catalogs = runInNewContext(`${readFileSync(outfile, 'utf8')}\ntestCatalogs`, Object.create(null), { timeout: 5_000 }) as typeof import('../platform/src/platform/judgment-browser/batteries/catalogs.ts');

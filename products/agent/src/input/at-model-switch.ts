@@ -38,14 +38,23 @@ export function applyAtModelSwitches(text: string, options: AtModelSwitchOptions
   AT_MODEL_RE.lastIndex = 0;
   while ((match = AT_MODEL_RE.exec(text)) !== null) {
     const modelId = match[1];
+    let def: ReturnType<AtModelSwitchOptions['providerRegistry']['getCurrentModel']>;
     try {
       options.providerRegistry.setCurrentModel(modelId as string);
-      const def = options.providerRegistry.getCurrentModel();
+      def = options.providerRegistry.getCurrentModel();
+    } catch {
+      options.notify(`[Model] Unknown model: ${modelId}`);
+      processedText = processedText.replace(match[0], '').trim();
+      continue;
+    }
+    // The switch is live from here, so a later failure is not "unknown model".
+    try {
       options.onModelChanged({ id: def.id, provider: def.provider });
       options.configManager.set('provider.model', def.registryKey);
       options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) via @model:`);
-    } catch {
-      options.notify(`[Model] Unknown model: ${modelId}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) for this session, but saving or showing the change failed: ${reason}`);
     }
     processedText = processedText.replace(match[0], '').trim();
   }

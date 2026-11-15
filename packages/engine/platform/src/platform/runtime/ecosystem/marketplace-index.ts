@@ -57,6 +57,8 @@ function validateSource(raw: unknown, path: string, errors: string[]): raw is Pi
   }
   if (typeof rec.location !== 'string' || rec.location.length === 0) {
     errors.push(`${path}.source.location: required non-empty string`);
+  } else if (rec.kind === 'url' && !URL.canParse(rec.location)) {
+    errors.push(`${path}.source.location: a url source needs an absolute URL`);
   }
   if (typeof rec.sha256 !== 'string' || !HEX64.test(rec.sha256.toLowerCase())) {
     errors.push(`${path}.source.sha256: required 64-char hex SHA-256 pin (unpinned entries are not representable)`);
@@ -73,9 +75,14 @@ function validateCapabilities(raw: unknown, path: string, errors: string[]): voi
     return;
   }
   const rec = raw as Record<string, unknown>;
-  if (!Array.isArray(rec.runtime)) errors.push(`${path}.capabilities.runtime: required array`);
+  if (!Array.isArray(rec.runtime) || !rec.runtime.every((item) => typeof item === 'string')) {
+    errors.push(`${path}.capabilities.runtime: required array of strings`);
+  }
   for (const key of ['toolCount', 'hookCount', 'configDomainCount', 'channelCount'] as const) {
-    if (typeof rec[key] !== 'number') errors.push(`${path}.capabilities.${key}: required number`);
+    const count = rec[key];
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+      errors.push(`${path}.capabilities.${key}: required non-negative integer`);
+    }
   }
   if (typeof rec.highRisk !== 'boolean') errors.push(`${path}.capabilities.highRisk: required boolean`);
 }
@@ -115,7 +122,13 @@ export function parseMarketplaceIndex(value: unknown): MarketplaceIndexValidatio
     validateCapabilities(e.capabilities, path, errors);
   });
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, index: value as PinnedMarketplaceIndex };
+  // The pin is documented as lowercase hex and compared as such downstream, so
+  // an uppercase pin that validated is handed on in lowercase.
+  const bundles = (rec.bundles as readonly PinnedMarketplaceIndexEntry[]).map((entry) => ({
+    ...entry,
+    source: { ...entry.source, sha256: entry.source.sha256.toLowerCase() },
+  }));
+  return { ok: true, index: { ...(value as PinnedMarketplaceIndex), bundles } };
 }
 
 /**

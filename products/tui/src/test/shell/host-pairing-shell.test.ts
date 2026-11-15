@@ -171,7 +171,8 @@ describe('host pairing shell over the real InputHandler', () => {
       const phrase = s.phrase();
       s.input.feed('P');
       const concealed: string[] = [];
-      if (surface === 'modal stack') s.input.modalStack.push('help');
+      // A stacked name only counts while its modal is on screen; a name left behind by a closed modal is dropped.
+      if (surface === 'modal stack') { s.input.modalStack.push('help'); s.input.helpOverlayActive = true; }
       if (surface === 'search') s.input.searchManager.open();
       if (surface === 'history search') s.input.historySearch.open('');
       if (surface === 'concealed field') s.input.concealedInput = { onSubmit: value => concealed.push(value) };
@@ -214,7 +215,7 @@ describe('host pairing shell over the real InputHandler', () => {
     const beforeRelease = s.text();
     s.fixture.release();
     await untilPairing(() => s.fixture.returned() === 2, 'late authority');
-    await Bun.sleep(10);
+    await s.controller.settled();
     expect(s.text()).toBe(beforeRelease);
     expectNoGrant(s);
   }, { holdAuth: 2 })));

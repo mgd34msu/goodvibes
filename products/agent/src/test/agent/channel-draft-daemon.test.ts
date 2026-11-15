@@ -184,19 +184,20 @@ describe('reading drafts across surfaces', () => {
     expect(merged[0]!.origin).toBe('local');
   });
 
-  test('the daemon\'s copy wins for a draft both stores hold', async () => {
-    await saveDraft(shellPaths, { id: 'shared-1', message: 'stale local text' }, { invoke: unreachableDaemon() });
+  test('for a draft both stores hold, the local text stays: the daemon only ever answers [redacted]', async () => {
+    await saveDraft(shellPaths, { id: 'shared-1', message: 'the real local text' }, { invoke: unreachableDaemon() });
     const local = readChannelDrafts(shellPaths).drafts;
     const fromDaemon = await fetchDaemonDrafts(
-      acceptingDaemon([], [daemonDraft(local[0]!.id, 'newer text from another surface', '2026-03-01T00:00:00.000Z')]),
+      acceptingDaemon([], [daemonDraft(local[0]!.id, '[redacted]', '2099-03-01T00:00:00.000Z')]),
     );
     if (!('drafts' in fromDaemon)) throw new Error('expected drafts');
 
     const merged = mergeDraftViews(fromDaemon.drafts, local);
 
     expect(merged).toHaveLength(1);
-    expect(merged[0]!.message).toBe('newer text from another surface');
-    expect(merged[0]!.origin).toBe('daemon');
+    expect(merged[0]!.message).toBe('the real local text');
+    expect(merged[0]!.daemonSyncState).toBe('synced');
+    expect(merged[0]!.updatedAt).toBe('2099-03-01T00:00:00.000Z');
   });
 
   test('both stores together are one list, newest first', async () => {

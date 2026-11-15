@@ -148,13 +148,15 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
       readonly clientKind?: string | undefined;
+      /** The daemon-assigned id of the connection the call arrived on; separates one client's untrusted-content window from another's under the same principal. */
+      readonly connectionId?: string | undefined;
     };
   }) => Promise<{ status: number; ok: boolean; body: unknown }>;
   readonly syncSpawnedAgentTask: (record: import('../tools/agent/index.js').AgentRecord, sessionId?: string) => void;
   readonly syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void;
   readonly surfaceDeliveryEnabled: (surface: 'slack' | 'discord' | 'ntfy' | 'webhook' | 'homeassistant' | 'telegram' | 'google-chat' | 'signal' | 'whatsapp' | 'telephony' | 'imessage' | 'msteams' | 'bluebubbles' | 'mattermost' | 'matrix') => boolean;
   readonly signWebhookPayload: (body: string, secret: string) => string;
-  readonly handleApprovalAction: (approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request) => Promise<Response>;
+  readonly handleApprovalAction: (approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request, interaction?: { readonly surface: string; readonly userId: string } | undefined) => Promise<Response>;
   readonly tlsState: () => ResolvedInboundTlsContext | null;
   /**
    * WorkspaceSwapManager instance, forwarded from DaemonConfig.swapManager.

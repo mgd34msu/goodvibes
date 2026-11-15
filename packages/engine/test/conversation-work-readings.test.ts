@@ -1,5 +1,6 @@
 import { withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.ts';
 import { decisionModelPolicyState, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 /** Deterministic qualification of actual callers; not live Jev calibration. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -17,6 +18,19 @@ let previous: ReturnType<typeof installJudgmentPort>;
 let log: SqliteDecisionLog;
 let answer: string; let confidence: number; let calls: unknown[];
 let pause: (() => Promise<void>) | undefined;
+/** What a refused reading must throw, so a fixture mistake cannot pass as the refusal under test. */
+function expectRefusal(error: unknown, failure: 'unavailable' | 'invalid' | 'canceled' | 'changed' | 'stale' | 'private'): void {
+  if (failure === 'unavailable' || failure === 'invalid') {
+    expect(error).toBeInstanceOf(JudgmentError);
+    expect((error as JudgmentError).kind).toBe('internal');
+  } else if (failure === 'canceled') {
+    expect((error as Error).name).toBe('AbortError');
+  } else if (failure === 'changed' || failure === 'stale') {
+    expect((error as Error).message).toContain('no longer current');
+  } else {
+    expect(error).toBeInstanceOf(JudgmentInputError);
+  }
+}
 beforeEach(() => {
   answer = 'conversation'; confidence = 0.99; calls = []; pause = undefined;
   const fake = fakePort((name, question) => {
@@ -73,7 +87,7 @@ describe('canonical inbound work reading at actual spawn boundary', () => {
     if (failure === 'canceled') pause = async () => { abort.abort(); };
     if (failure === 'changed') pause = async () => { origin.text = 'replacement'; };
     if (failure === 'private') origin.text = 'Authorization: Bearer synthetic-secret';
-    try { await expect(gateSurfaceSpawn({ ...h.deps, readingOptions: { signal: abort.signal } }, origin, { mode: 'spawn', task: 'fix login' })).rejects.toBeDefined(); expect(h.spawns).toEqual([]); expect(h.store.listPending()).toEqual([]); if (failure === 'private') expect(calls).toEqual([]); if (failure === 'stale' || failure === 'changed' || failure === 'canceled') expect(log.query({})).toEqual([]); }
+    try { const error = await gateSurfaceSpawn({ ...h.deps, readingOptions: { signal: abort.signal } }, origin, { mode: 'spawn', task: 'fix login' }).then(() => undefined, (caught: unknown) => caught ?? new Error('rejected with nothing')); expect(error).toBeDefined(); expectRefusal(error, failure as 'unavailable' | 'invalid' | 'canceled' | 'changed' | 'private'); expect(h.spawns).toEqual([]); expect(h.store.listPending()).toEqual([]); if (failure === 'private') expect(calls).toEqual([]); if (failure === 'changed' || failure === 'canceled') expect(log.query({})).toEqual([]); }
     finally { h.store.dispose(); }
   });
 });
@@ -107,7 +121,7 @@ describe('exact pending proposal is bound before reading', () => {
     if (failure === 'stale') pause = async () => { h.store.resolve(p.id, 'declined'); };
     if (failure === 'invalid') answer = 'invented';
     const input = failure === 'private' ? { ...h.input, text: 'Authorization: Bearer synthetic-secret' } : h.input;
-    try { await expect(tryResolveWorkProposalReplyFromChannel(input, { ...h.replyDeps, readingOptions: { signal: abort.signal } })).rejects.toBeDefined(); expect(h.spawns).toEqual([]); if (failure === 'private') expect(calls).toEqual([]); if (failure === 'stale' || failure === 'changed' || failure === 'canceled') expect(log.query({})).toEqual([]); }
+    try { const error = await tryResolveWorkProposalReplyFromChannel(input, { ...h.replyDeps, readingOptions: { signal: abort.signal } }).then(() => undefined, (caught: unknown) => caught ?? new Error('rejected with nothing')); expect(error).toBeDefined(); expectRefusal(error, failure as 'unavailable' | 'invalid' | 'canceled' | 'stale' | 'private'); expect(h.spawns).toEqual([]); if (failure === 'private') expect(calls).toEqual([]); if (failure === 'stale' || failure === 'canceled') expect(log.query({})).toEqual([]); }
     finally { h.store.dispose(); }
   });
 });

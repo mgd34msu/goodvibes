@@ -1,5 +1,5 @@
 import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
@@ -110,11 +110,20 @@ export function probeTcp(host: string, port: number, timeoutMs = 750): Promise<b
 export async function withRuntimeServices<T>(
   runtime: CliCommandRuntime,
   fn: (services: RuntimeServices) => Promise<T> | T,
-  options: { readonly modelData?: 'background' | 'skip'; readonly catalog?: ProviderCatalogOptions } = {},
+  options: {
+    readonly modelData?: 'background' | 'skip';
+    readonly catalog?: ProviderCatalogOptions;
+    /**
+     * `'claim'` (default) refuses to run while another process holds the agent home as its single
+     * writer. A command that only reads passes `'off'` so it still answers while the agent is open;
+     * a command that writes the shared stores keeps the claim.
+     */
+    readonly homeSingleWriter?: 'claim' | 'off';
+  } = {},
 ): Promise<T> {
   // Full runtime composition owns native work and therefore activates the
   // selected project. Readonly project inspection has its own preparation API.
-  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, 'knowledge-agent.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { activate: true });
   // Point the bus listener cap at runtime.eventBus.maxListeners before the
   // first bus exists, so every bus this process builds later uses it.
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => runtime.configManager.get(key)));
@@ -129,13 +138,14 @@ export async function withRuntimeServices<T>(
     runtimeStore,
     workingDir: runtime.workingDirectory,
     homeDirectory: runtime.homeDirectory,
+    homeSingleWriter: options.homeSingleWriter ?? 'claim',
   });
-  if (options.modelData !== 'skip') {
-    services.providerRegistry.initModelLimits();
-    services.benchmarkStore.initBenchmarks();
-    services.providerRegistry.initCatalog(options.catalog);
-  }
   try {
+    if (options.modelData !== 'skip') {
+      services.providerRegistry.initModelLimits();
+      services.benchmarkStore.initBenchmarks();
+      services.providerRegistry.initCatalog(options.catalog);
+    }
     await services.providerRegistry.ready();
     return await fn(services);
   } finally {
@@ -146,6 +156,19 @@ export async function withRuntimeServices<T>(
     // the rest running until the process happened to exit.
     await services.close();
   }
+}
+
+/**
+ * For commands that list or show and never write the shared stores. A function
+ * declaration, not a const: management-commands.ts reads it while this module is
+ * still loading.
+ */
+export function withReadOnlyRuntimeServices<T>(
+  runtime: CliCommandRuntime,
+  fn: (services: RuntimeServices) => Promise<T> | T,
+  options: Parameters<typeof withRuntimeServices>[2] = {},
+): Promise<T> {
+  return withRuntimeServices(runtime, fn, { ...options, homeSingleWriter: 'off' });
 }
 
 export function readAuthPaths(runtime: CliCommandRuntime) {
@@ -298,9 +321,10 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         return { handled: true, exitCode: result.exitCode };
       }
       case 'owner-profile': {
-        // A shell invocation prints to his terminal and nowhere else, no model
-        // reads it, so his own People list is not withheld from him here.
-        const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: false });
+        // Only a terminal is certain to be the owner reading. Captured stdout (a
+        // pipe, or a shell tool a model drives) is treated as model-visible, so
+        // the People section is counted there and listed only on a terminal.
+        const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: process.stdout.isTTY !== true });
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
@@ -364,11 +388,15 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       case 'tasks': {
         const output = await handleTasks(runtime);
         if (output) console.log(output);
-        return { handled: true, exitCode: exitCodeForText(output) };
+        // The submit stub refuses with prose that starts with the product name, which no generic prefix matches.
+        return { handled: true, exitCode: output.startsWith('GoodVibes Agent blocks CLI task submission') ? 2 : exitCodeForText(output) };
       }
-      case 'pair':
-        console.log(await renderPairing(runtime));
-        return { handled: true, exitCode: 0 };
+      case 'pair': {
+        const output = await renderPairing(runtime);
+        console.log(output);
+        // A missing token is a refusal, not a pairing payload.
+        return { handled: true, exitCode: output.startsWith('Connected-host operator token is required.') ? 1 : 0 };
+      }
       case 'bundle': {
         const result = await handleBundleCommand(runtime);
         console.log(result.output);
@@ -391,7 +419,7 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
   }
 }
 
-const { renderProviders, renderModels } = createCliProviderViews<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+const { renderProviders, renderModels } = createCliProviderViews<CliCommandRuntime, RuntimeServices>(withReadOnlyRuntimeServices, {
   surface: 'agent',
   enrichModelFamilies: false,
   syntheticCatalog: false,

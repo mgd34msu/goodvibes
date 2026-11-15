@@ -45,11 +45,17 @@ function caller(kind: 'route' | 'harness', channels = new ChannelPluginRegistry(
     ? createAgentRouteTool(ownedContext, { channelRegistry: channels }, registry)
     : createAgentHarnessTool({ commandContext: ownedContext, commandRegistry: {} as CommandRegistry, toolRegistry: registry, taskRouteSources: { channelRegistry: channels } });
 }
-const args = { action: 'plan', mode: 'route_decision', query: 'change the theme setting', includeParameters: true, limit: 1 };
+// The route tool treats `mode` as an alias of `action` and refuses a mode it does not know; only the harness selects a mode.
+const args = { action: 'plan', ...(kind === 'harness' ? { mode: 'route_decision' } : {}), query: 'change the theme setting', includeParameters: true, limit: 1 };
 
 function observeInvocation(pending: ReturnType<Tool['execute']>) {
   return pending.then(result => ({ status: 'resolved' as const, result }),
     (error: unknown) => ({ status: 'rejected' as const, error }));
+}
+
+/** Lets every already-queued promise continuation run before a negative assertion. */
+function macrotask(): Promise<void> {
+  return new Promise<void>(resolve => { setImmediate(resolve); });
 }
 
 /** Start follows actual native acquisition; an earlier refusal is still a failure. */
@@ -206,7 +212,7 @@ describe(`${kind} engine task-route consumer`, () => {
     const outcome = observeInvocation(pending).then(result => { settled = true; return result; });
     try {
       await waitForReadingStart(began, pending);
-      await Bun.sleep(10);
+      await macrotask();
       expect(seen.length).toBeGreaterThan(0);
       expect(settled).toBe(false);
       expect(seen.every(signal => signal !== undefined && !signal.aborted)).toBe(true);
@@ -373,7 +379,7 @@ describe(`${kind} engine task-route consumer`, () => {
     const outcome = observeInvocation(pending);
     try {
       await waitForReadingStart(began, pending);
-      await Bun.sleep(10); controller.abort(); release();
+      controller.abort(); release();
       await expect(pending).rejects.toBe(controller.signal.reason);
     } finally {
       release();
@@ -411,16 +417,16 @@ describe(`${kind} engine task-route consumer`, () => {
     };
     try {
       await Promise.race([began, pending.then(result => { throw new Error('Native source settled before its deferred acquisition', { cause: result }); })]); controller.abort();
-      // The regression must finish before releasing the non-cancellable source.
-      for (let tick = 0; tick < 20 && !settled; tick++) await Promise.resolve();
-      expect(settled).toBe(true);
+      // The abort must settle the call while the non-cancellable source is still
+      // held: awaiting it here never returns if the call waits on that source.
       const result = await pending;
+      expect(settled).toBe(true);
       expect(result).toBe(controller.signal.reason);
       expect(laterReads).toBe(0);
       expect(fake.requests).toHaveLength(0);
       releaseSource();
       await snapshot.catch(() => undefined);
-      for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+      await macrotask();
       expect(laterReads).toBe(0);
       expect(fake.requests).toHaveLength(0);
     } finally {

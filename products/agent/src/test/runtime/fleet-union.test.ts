@@ -107,6 +107,23 @@ describe('createAgentFleetUnion', () => {
     union.stop();
   });
 
+  test('a capped daemon answer is labelled partial, and a complete one is not', async () => {
+    const capped = createAgentFleetUnion({
+      local: { nodes: () => [nodeOf('local-1')] },
+      verbs: verbsDouble({ answer: () => ({ nodes: [nodeOf('daemon-1')], capturedAt: 42, truncated: true, totalCount: 40 }) }),
+    });
+    await settle();
+    expect(capped.partial()).toEqual({ shown: 1, total: 40 });
+    capped.stop();
+    const whole = createAgentFleetUnion({
+      local: { nodes: () => [nodeOf('local-1')] },
+      verbs: verbsDouble({ answer: () => ({ nodes: [nodeOf('daemon-1')], capturedAt: 42 }) }),
+    });
+    await settle();
+    expect(whole.partial()).toBeNull();
+    whole.stop();
+  });
+
   test('stop is idempotent', () => {
     const union = createAgentFleetUnion({
       local: { nodes: () => [] },

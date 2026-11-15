@@ -130,8 +130,35 @@ type SurfaceReplyRefusal =
   | 'surface-delivery-disabled'
   | 'no-deliverable-target';
 
+/**
+ * How long a pending surface reply may wait for an agent this process cannot
+ * see. A turn run by another process (a TUI that died before reporting back)
+ * or a record the agent manager already evicted never becomes terminal here,
+ * so without a bound its entry was polled every two seconds until the daemon
+ * stopped. Agents this process can see keep their entry while they run.
+ */
+export const ORPHANED_SURFACE_REPLY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+const UNDELIVERED_BODY_EXCERPT_CHARS = 2000;
+
+function truncateUndeliveredBody(body: string): string {
+  return body.length <= UNDELIVERED_BODY_EXCERPT_CHARS
+    ? body
+    : `${body.slice(0, UNDELIVERED_BODY_EXCERPT_CHARS)}... [${body.length - UNDELIVERED_BODY_EXCERPT_CHARS} more characters not kept]`;
+}
+
 export class DaemonSurfaceDeliveryHelper {
-  constructor(private readonly context: DaemonSurfaceDeliveryContext) {}
+  /** One poll at a time: an overlapping tick would sync and complete the same agent twice. */
+  private polling = false;
+  /** Agents whose final answer is being written and delivered right now. */
+  private readonly finalizingReplies = new Set<string>();
+  /** Agents whose session copy could not be written; the pipeline reports undelivered replies without options, so the reporter reads this. */
+  private readonly sessionWriteFailed = new Set<string>();
+
+  constructor(
+    private readonly context: DaemonSurfaceDeliveryContext,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   /**
    * Track the reply an agent owes a conversation.
@@ -230,8 +257,9 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   /** Record a reply that reached the pipeline but never reached the conversation. */
-  recordUndeliveredReply(reply: UndeliveredChannelReply): void {
+  recordUndeliveredReply(reply: UndeliveredChannelReply, options: { readonly sessionCopyKept?: boolean } = {}): void {
     if (reply.phase !== 'final') return;
+    const sessionCopyKept = options.sessionCopyKept ?? !this.sessionWriteFailed.has(reply.agentId);
     const route = reply.routeId ? this.context.routeBindings.getBinding(reply.routeId) : undefined;
     this.recordLedger({
       deliveryId: `surface-reply:${reply.agentId}`,
@@ -241,7 +269,10 @@ export class DaemonSurfaceDeliveryHelper {
       surfaceKind: reply.surfaceKind,
       targetId: route?.channelId ?? route?.externalId ?? reply.routeId ?? 'unknown',
       phase: 'failed',
-      error: reply.reason,
+      // Point at the session copy only when one exists; otherwise the ledger is the last place the answer survives, so carry a bounded excerpt.
+      error: reply.sessionId && sessionCopyKept
+        ? `${reply.reason} (the answer is kept in session ${reply.sessionId})`
+        : `${reply.reason} (no session copy exists; the answer began: ${truncateUndeliveredBody(reply.body)})`,
     });
   }
 
@@ -347,14 +378,14 @@ export class DaemonSurfaceDeliveryHelper {
     };
     if (!binding) return refuse('no-route-binding');
     if (!text.trim()) return refuse('empty-text');
-    if (!isSupportedDeliverySurface(binding.surfaceKind)) return refuse('unsupported-delivery-surface');
-    if (!this.context.surfaceDeliveryEnabled(binding.surfaceKind)) return refuse('surface-delivery-disabled');
-    const pending = this.buildPendingSurfaceReply(binding, {
-      agentId: `notice:${binding.id}:${Date.now()}`,
-      task: text,
-    });
-    if (!pending) return refuse('no-deliverable-target');
     try {
+      if (!isSupportedDeliverySurface(binding.surfaceKind)) return refuse('unsupported-delivery-surface');
+      if (!this.context.surfaceDeliveryEnabled(binding.surfaceKind)) return refuse('surface-delivery-disabled');
+      const pending = this.buildPendingSurfaceReply(binding, {
+        agentId: `notice:${binding.id}:${Date.now()}`,
+        task: text,
+      });
+      if (!pending) return refuse('no-deliverable-target');
       const rendered = await this.context.channelPlugins.render(binding.surfaceKind as ChannelSurface, {
         surface: binding.surfaceKind as ChannelSurface,
         // 'progress' rather than 'final': a notice is not an agent's answer, and
@@ -366,7 +397,7 @@ export class DaemonSurfaceDeliveryHelper {
         title: NOTICE_TITLE,
         text,
         events: [],
-        pending: pending as unknown as Record<string, unknown>,
+        pending: { ...pending },
         metadata: { notice: true },
       });
       if (rendered?.delivered) return { delivered: true };
@@ -384,6 +415,20 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   queueWebhookReply(input: WebhookReplyInput): void {
+    const callback = {
+      callbackUrl: input.callbackUrl,
+      callbackCorrelationId: input.callbackCorrelationId,
+      callbackSignature: input.callbackSignature,
+    };
+    // bindAgent may already have queued this agent's reply from the shared binding. The callback
+    // belongs to this request alone, so it is written onto that entry in place: what the reply
+    // pipeline has collected for the agent, and any delivery already in flight, stay on it.
+    const existing = this.context.pendingSurfaceReplies.get(input.agentId);
+    if (existing) {
+      Object.assign(existing, callback);
+      if (!this.context.channelReplyPipeline.has(input.agentId)) this.context.channelReplyPipeline.trackPending(existing);
+      return;
+    }
     const pending: PendingSurfaceReply = {
       agentId: input.agentId,
       surfaceKind: 'webhook',
@@ -391,9 +436,7 @@ export class DaemonSurfaceDeliveryHelper {
       createdAt: Date.now(),
       sessionId: input.sessionId,
       routeId: input.routeId,
-      callbackUrl: input.callbackUrl,
-      callbackCorrelationId: input.callbackCorrelationId,
-      callbackSignature: input.callbackSignature,
+      ...callback,
     };
     this.context.pendingSurfaceReplies.set(input.agentId, pending);
     this.context.channelReplyPipeline.trackPending(pending);
@@ -420,16 +463,39 @@ export class DaemonSurfaceDeliveryHelper {
     readonly body: string;
     readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
   }): Promise<boolean> {
+    // A repeated report (a retried POST) must not deliver or store the answer a
+    // second time while the first is still awaiting its session write or channel.
+    if (this.finalizingReplies.has(input.agentId)) return false;
+    this.finalizingReplies.add(input.agentId);
+    try { return await this.completeSurfaceReplyOnce(input); }
+    finally { this.finalizingReplies.delete(input.agentId); }
+  }
+
+  private async completeSurfaceReplyOnce(input: {
+    readonly agentId: string;
+    readonly sessionId?: string | undefined;
+    readonly body: string;
+    readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
+  }): Promise<boolean> {
     const pending = this.context.pendingSurfaceReplies.get(input.agentId);
+    // Claimed before the first await so the poll loop cannot also deliver it.
+    if (pending) this.context.pendingSurfaceReplies.delete(input.agentId);
     const status = input.status ?? 'completed';
     const sessionId = input.sessionId ?? pending?.sessionId;
     if (sessionId) {
-      await this.context.sessionBroker.completeAgent(sessionId, input.agentId, input.body, {
-        status,
-        ...(pending?.routeId ? { routeId: pending.routeId } : {}),
-      });
+      try {
+        await this.context.sessionBroker.completeAgent(sessionId, input.agentId, input.body, {
+          status,
+          ...(pending?.routeId ? { routeId: pending.routeId } : {}),
+        });
+      } catch (error) {
+        // Nothing was delivered: hand the entry back so the poll loop still can.
+        if (pending) this.context.pendingSurfaceReplies.set(input.agentId, pending);
+        throw error;
+      }
     }
     if (!pending) return false;
+    this.recordReplyPhase(pending, 'started');
     try {
       await this.context.channelReplyPipeline.deliverFinal(input.agentId, input.body, {
         keepTracking: pending.surfaceKind === 'ntfy' && typeof pending.contractId === 'string',
@@ -450,14 +516,49 @@ export class DaemonSurfaceDeliveryHelper {
         phase: 'final',
         body: input.body,
         reason: summarizeError(error),
-      });
+      }, { sessionCopyKept: sessionId !== undefined });
     }
-    this.context.pendingSurfaceReplies.delete(input.agentId);
     return true;
   }
 
+  /**
+   * Drop every pending reply, recording each as failed with the reason, so a
+   * stop or a failed start never makes a queued answer vanish without a trace.
+   */
+  abandonPendingSurfaceReplies(reason: string): void {
+    for (const pending of this.context.pendingSurfaceReplies.values()) {
+      this.recordReplyPhase(pending, 'failed', reason);
+      try { this.context.channelReplyPipeline.untrack(pending.agentId); }
+      catch (error) { logger.warn('Surface reply could not be untracked', { agentId: pending.agentId, error: summarizeError(error) }); }
+    }
+    this.context.pendingSurfaceReplies.clear();
+  }
+
+  /** Ledger bookkeeping only: it never throws into the delivery it describes. */
+  private recordReplyPhase(pending: PendingSurfaceReply, phase: 'started' | 'failed', error?: string): void {
+    let route: ReturnType<RouteBindingManager['getBinding']>;
+    try { route = pending.routeId ? this.context.routeBindings.getBinding(pending.routeId) : undefined; }
+    catch { route = undefined; }
+    this.recordLedger({
+      deliveryId: `surface-reply:${pending.agentId}`,
+      agentId: pending.agentId,
+      sessionId: pending.sessionId,
+      routeId: pending.routeId,
+      surfaceKind: pending.surfaceKind,
+      targetId: route?.channelId ?? route?.externalId ?? pending.channelId ?? pending.routeId ?? 'unknown',
+      phase,
+      ...(error !== undefined ? { error } : {}),
+    });
+  }
+
   async pollPendingSurfaceReplies(syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void): Promise<void> {
-    if (this.context.pendingSurfaceReplies.size === 0) return;
+    if (this.context.pendingSurfaceReplies.size === 0 || this.polling) return;
+    this.polling = true;
+    try { await this.pollPendingSurfaceRepliesOnce(syncFinishedAgentTask); }
+    finally { this.polling = false; }
+  }
+
+  private async pollPendingSurfaceRepliesOnce(syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void): Promise<void> {
     const completed: string[] = [];
     for (const pending of this.context.pendingSurfaceReplies.values()) {
       if (!this.context.channelReplyPipeline.has(pending.agentId)) {
@@ -496,17 +597,51 @@ export class DaemonSurfaceDeliveryHelper {
           }
         }
       }
+      if (!record && this.now() - pending.createdAt > ORPHANED_SURFACE_REPLY_MAX_AGE_MS) {
+        // Nothing in this process will ever finish this agent; say so instead
+        // of polling an entry nobody can complete until the daemon stops.
+        logger.warn('Surface reply abandoned: its agent is not known to this daemon and never reported back', {
+          surface: pending.surfaceKind,
+          agentId: pending.agentId,
+          sessionId: pending.sessionId ?? null,
+          bindingId: pending.routeId ?? null,
+        });
+        this.recordReplyPhase(pending, 'failed', 'no answer arrived: the agent is not known to this daemon and never reported back');
+        try { this.context.channelReplyPipeline.untrack(pending.agentId); }
+        catch (error) { logger.warn('Surface reply could not be untracked', { agentId: pending.agentId, error: summarizeError(error) }); }
+        completed.push(pending.agentId);
+        continue;
+      }
       if (!record || (record.status !== 'completed' && record.status !== 'failed' && record.status !== 'cancelled')) {
         continue;
       }
+      // The surface that ran the turn may be reporting this same answer; whoever
+      // removes the entry first delivers it.
+      if (this.context.pendingSurfaceReplies.get(pending.agentId) !== pending) continue;
+      this.context.pendingSurfaceReplies.delete(pending.agentId);
       const message = this.renderAgentCompletionForSurface(record);
       syncFinishedAgentTask(record);
+      let sessionCopyKept = false;
       if (pending.sessionId) {
-        await this.context.sessionBroker.completeAgent(pending.sessionId, pending.agentId, message, {
-          status: record.status,
-          routeId: pending.routeId,
-        });
+        // The session transcript is a second copy of the answer. Failing to
+        // write it must not keep the conversation from getting the answer, or
+        // hold up every reply queued behind this one on each tick.
+        try {
+          await this.context.sessionBroker.completeAgent(pending.sessionId, pending.agentId, message, {
+            status: record.status,
+            routeId: pending.routeId,
+          });
+          sessionCopyKept = true;
+        } catch (error) {
+          this.sessionWriteFailed.add(pending.agentId);
+          logger.warn('DaemonServer: the answer could not be written to its session; delivering it to the conversation anyway', {
+            agentId: pending.agentId,
+            sessionId: pending.sessionId,
+            error: summarizeError(error),
+          });
+        }
       }
+      this.recordReplyPhase(pending, 'started');
       try {
         await this.context.channelReplyPipeline.deliverFinal(pending.agentId, message, {
           keepTracking: pending.surfaceKind === 'ntfy' && typeof pending.contractId === 'string',
@@ -531,7 +666,9 @@ export class DaemonSurfaceDeliveryHelper {
           phase: 'final',
           body: message,
           reason: summarizeError(error),
-        });
+        }, { sessionCopyKept });
+      } finally {
+        this.sessionWriteFailed.delete(pending.agentId);
       }
       completed.push(pending.agentId);
     }
@@ -554,6 +691,8 @@ export class DaemonSurfaceDeliveryHelper {
       resolveSlackWebhookUrl: () => this.resolveSlackWebhookUrl(),
       resolveSlackBotToken: () => this.resolveSlackBotToken(),
       resolveWebhookDefaultTarget: () => this.resolveConfigSecret(this.context.configManager.get('surfaces.webhook.defaultTarget')),
+      resolveNtfyToken: () => this.resolveNtfyToken(),
+      resolveDiscordBotToken: () => this.resolveDiscordBotToken(),
       signWebhookPayload: (body, secret) => this.signWebhookPayload(body, secret),
     };
   }
@@ -630,6 +769,8 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   private buildPendingSurfaceReply(binding: RouteBinding, input: SurfaceReplyInput): PendingSurfaceReply | null {
+    // A row persisted before bindings carried metadata has none.
+    const metadata: Readonly<Record<string, unknown>> = binding.metadata ?? {};
     const shared = {
       agentId: input.agentId,
       task: input.task,
@@ -646,7 +787,7 @@ export class DaemonSurfaceDeliveryHelper {
         return {
           ...shared,
           surfaceKind: 'slack',
-          responseUrl: typeof binding.metadata.responseUrl === 'string' ? binding.metadata.responseUrl : undefined,
+          responseUrl: typeof metadata.responseUrl === 'string' ? metadata.responseUrl : undefined,
           channelId: binding.channelId,
           targetAddress: binding.channelId ?? binding.externalId,
         };
@@ -655,8 +796,8 @@ export class DaemonSurfaceDeliveryHelper {
           ...shared,
           surfaceKind: 'discord',
           channelId: binding.channelId,
-          applicationId: typeof binding.metadata.applicationId === 'string' ? binding.metadata.applicationId : undefined,
-          interactionToken: typeof binding.metadata.interactionToken === 'string' ? binding.metadata.interactionToken : undefined,
+          applicationId: typeof metadata.applicationId === 'string' ? metadata.applicationId : undefined,
+          interactionToken: typeof metadata.interactionToken === 'string' ? metadata.interactionToken : undefined,
           targetAddress: binding.channelId ?? binding.externalId,
         };
       case 'ntfy':
@@ -670,11 +811,8 @@ export class DaemonSurfaceDeliveryHelper {
         return {
           ...shared,
           surfaceKind: 'webhook',
-          callbackUrl: typeof binding.metadata.callbackUrl === 'string' ? binding.metadata.callbackUrl : undefined,
-          callbackCorrelationId: typeof binding.metadata.correlationId === 'string' ? binding.metadata.correlationId : undefined,
-          callbackSignature: typeof binding.metadata.callbackSignature === 'string'
-            ? binding.metadata.callbackSignature as PendingSurfaceReply['callbackSignature']
-            : undefined,
+          // The binding is shared by every call on the route and may hold another caller's callback;
+          // a webhook reply carries only the callback its own request supplied (queueWebhookReply).
         };
       case 'homeassistant':
         return {
@@ -684,11 +822,11 @@ export class DaemonSurfaceDeliveryHelper {
           targetAddress: binding.channelId ?? binding.externalId,
           surfaceId: binding.surfaceId,
           externalId: binding.externalId,
-          conversationId: typeof binding.metadata.conversationId === 'string'
-            ? binding.metadata.conversationId
+          conversationId: typeof metadata.conversationId === 'string'
+            ? metadata.conversationId
             : binding.externalId,
-          messageId: typeof binding.metadata.messageId === 'string' ? binding.metadata.messageId : undefined,
-          replyToMessageId: typeof binding.metadata.messageId === 'string' ? binding.metadata.messageId : undefined,
+          messageId: typeof metadata.messageId === 'string' ? metadata.messageId : undefined,
+          replyToMessageId: typeof metadata.messageId === 'string' ? metadata.messageId : undefined,
         };
       case 'telegram':
       case 'google-chat':
@@ -725,6 +863,8 @@ export class DaemonSurfaceDeliveryHelper {
       controlPlaneWebUrl: (input) => this.controlPlaneWebUrl(input),
       resolveSlackWebhookUrl: () => this.resolveSlackWebhookUrl(),
       resolveSlackBotToken: () => this.resolveSlackBotToken(),
+      resolveNtfyToken: () => this.resolveNtfyToken(),
+      resolveDiscordBotToken: () => this.resolveDiscordBotToken(),
       signWebhookPayload: (body, secret) => this.signWebhookPayload(body, secret),
     };
   }
@@ -755,6 +895,20 @@ export class DaemonSurfaceDeliveryHelper {
     return await this.context.serviceRegistry.resolveSecret('slack', 'primary')
       ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.slack.botToken'))
       ?? process.env.SLACK_BOT_TOKEN
+      ?? null;
+  }
+
+  private async resolveNtfyToken(): Promise<string | null> {
+    return await this.context.serviceRegistry.resolveSecret('ntfy', 'primary')
+      ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.ntfy.token'))
+      ?? process.env.NTFY_ACCESS_TOKEN
+      ?? null;
+  }
+
+  private async resolveDiscordBotToken(): Promise<string | null> {
+    return await this.context.serviceRegistry.resolveSecret('discord', 'primary')
+      ?? await this.resolveConfigSecret(this.context.configManager.get('surfaces.discord.botToken'))
+      ?? process.env.DISCORD_BOT_TOKEN
       ?? null;
   }
 

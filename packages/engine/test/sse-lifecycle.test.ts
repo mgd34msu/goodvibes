@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { waitFor } from './_helpers/test-timeout.js';
 
 /**
  * SSE subscriber lifecycle, verifies that STREAM_SUBSCRIBER_CONNECTED
@@ -17,7 +18,7 @@ describe('sse lifecycle', () => {
       subscriberId: 'sub-001',
       streamType: 'events',
     });
-    await new Promise<void>((r) => setTimeout(r, 0));
+    await waitFor(() => events.length >= 1);
     expect(events.length).toBe(1);
     const envelope = events[0] as { payload: { type: string; streamId: string; subscriberId: string } };
     expect(envelope.payload.type).toBe('STREAM_SUBSCRIBER_CONNECTED');
@@ -37,7 +38,7 @@ describe('sse lifecycle', () => {
       streamType: 'events',
       reason: 'client closed',
     });
-    await new Promise<void>((r) => setTimeout(r, 0));
+    await waitFor(() => events.length >= 1);
     const envelope = events[0] as { payload: { type: string; reason?: string } };
     expect(envelope.payload.type).toBe('STREAM_SUBSCRIBER_DISCONNECTED');
     expect(envelope.payload.reason).toBe('client closed');
@@ -72,8 +73,7 @@ describe('sse lifecycle', () => {
     const req = new Request('http://localhost/events', { signal: controller.signal });
     gateway.createEventStream(req, { clientId: 'test-sse-001', transport: 'sse' });
 
-    // Allow microtasks to flush (ReadableStream start callback is sync, but give it a tick)
-    await new Promise<void>((r) => setTimeout(r, 0));
+    await waitFor(() => transportEvents.some((e) => e.type === 'STREAM_SUBSCRIBER_CONNECTED'));
 
     const connected = transportEvents.find((e) => e.type === 'STREAM_SUBSCRIBER_CONNECTED');
     expect(connected).toBeDefined();
@@ -81,7 +81,7 @@ describe('sse lifecycle', () => {
 
     // Abort signal triggers teardown
     controller.abort();
-    await new Promise<void>((r) => setTimeout(r, 0));
+    await waitFor(() => transportEvents.some((e) => e.type === 'STREAM_SUBSCRIBER_DISCONNECTED'));
 
     const disconnected = transportEvents.find((e) => e.type === 'STREAM_SUBSCRIBER_DISCONNECTED');
     expect(disconnected).toBeDefined();

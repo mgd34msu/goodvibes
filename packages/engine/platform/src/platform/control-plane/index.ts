@@ -208,7 +208,7 @@ export { registerNativeConversationIntakeGatewayMethods } from './routes/native-
 export { createNativeInboundSourceOwner, NativeInboundSourceError, sameNativeInboundSourceRef } from './native-inbound-source.js';
 export type { NativeInboundBrokerIdentity, NativeInboundSourceRef, NativeInboundOrigin, NativeInboundOriginal, NativeInboundSourceHandle, NativeInboundResolvedSource, NativeInboundSourceResolver } from './native-inbound-source.js';
 
-export { createNativeInboundHandoff } from './native-inbound-handoff.js';
+export { createNativeInboundHandoff, NativeInboundReceiverRefusal } from './native-inbound-handoff.js';
 export type { NativeMutationHost } from './native-mutation.js';
 export { captureOccasionsGatewayTarget } from './routes/native-profile-mutation.js';
 export { registerNativeAutomationGatewayMethods } from '../daemon/http/native-automation.js';

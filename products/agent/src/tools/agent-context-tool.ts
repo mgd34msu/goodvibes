@@ -32,6 +32,10 @@ interface AgentContextToolDeps {
   readonly harnessTool?: Tool;
 }
 
+function error(message: string): { readonly success: false; readonly error: string } {
+  return { success: false, error: message };
+}
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -48,9 +52,11 @@ function normalizeContextAction(value: unknown): AgentContextAction | null {
   return null;
 }
 
-function readAction(args: AgentContextToolArgs): AgentContextAction {
+function readAction(args: AgentContextToolArgs): AgentContextAction | null {
   const explicit = normalizeContextAction(args.action) ?? normalizeContextAction(args.mode);
   if (explicit) return explicit;
+  // An action or mode that was given but is not one of ours is not a request to guess: answering with another view would read as the requested one.
+  if (readString(args.action) || readString(args.mode)) return null;
   if (readString(args.receiptId) || readString(args.turnId) || readString(args.outcomeStatus)) return 'receipt';
   if (readString(args.contextFileId)) return 'file';
   if (readString(args.target) || readString(args.query)) return 'files';
@@ -99,6 +105,7 @@ export function createAgentContextTool(deps: AgentContextToolDeps): Tool {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentContextToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
+      if (action === null) return error('Unknown context action. Use action (or mode) as one of: status, files, file, prompt, receipts, receipt.');
 
       if (action === 'files') {
         return forward(compactArgs({

@@ -1,104 +1,35 @@
-import { describe, expect, test } from 'bun:test';
-import { isAbsolute, join } from 'node:path';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 
+const roots: string[] = [];
 function tempDir(label: string): string {
-  const dir = join(tmpdir(), `gv-path-${label}-${randomUUID()}`);
-  mkdirSync(dir, { recursive: true });
+  const dir = mkdtempSync(join(tmpdir(), `gv-path-${label}-`));
+  roots.push(dir);
   return dir;
 }
+afterEach(() => { for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 describe('ConfigManager path accessors', () => {
-  test('getConfigPath() returns the settings.json path inside configDir', () => {
+  test('an explicit configDir holds the global settings file and is the control-plane directory', () => {
     const configDir = tempDir('config-path');
-    try {
-      const mgr = new ConfigManager({ configDir });
-      const configPath = mgr.getConfigPath();
-
-      expect(typeof configPath).toBe('string');
-      expect(configPath).toEndWith('settings.json');
-      expect(configPath).toContain(configDir);
-    } finally {
-      rmSync(configDir, { recursive: true, force: true });
-    }
+    const mgr = new ConfigManager({ configDir });
+    expect(mgr.getConfigPath()).toBe(join(configDir, 'settings.json'));
+    expect(mgr.getControlPlaneConfigDir()).toBe(configDir);
   });
 
-  test('getProjectConfigPath() returns undefined when no workingDir was provided', () => {
-    const configDir = tempDir('no-working-dir');
-    try {
-      const mgr = new ConfigManager({ configDir });
-      expect(mgr.getProjectConfigPath()).toBeUndefined();
-    } finally {
-      rmSync(configDir, { recursive: true, force: true });
-    }
+  test('there is no project settings path without a working directory', () => {
+    expect(new ConfigManager({ configDir: tempDir('no-working-dir') }).getProjectConfigPath()).toBeUndefined();
   });
 
-  test('getProjectConfigPath() returns a path ending in settings.json when workingDir is provided', () => {
+  test('home and working directories derive the global and project paths under the surface directory', () => {
     const homeDir = tempDir('home');
     const workingDir = tempDir('working');
-    try {
-      const mgr = new ConfigManager({
-        homeDir,
-        workingDir,
-        surfaceRoot: 'cli',
-      });
-      const projectPath = mgr.getProjectConfigPath();
-
-      expect(typeof projectPath).toBe('string');
-      expect(projectPath).toEndWith('settings.json');
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-      rmSync(workingDir, { recursive: true, force: true });
-    }
-  });
-
-  test('getConfigPath() returns an absolute path', () => {
-    const configDir = tempDir('abs-path');
-    try {
-      const mgr = new ConfigManager({ configDir });
-      const configPath = mgr.getConfigPath();
-
-      // node:path isAbsolute check
-      expect(isAbsolute(configPath)).toBe(true);
-    } finally {
-      rmSync(configDir, { recursive: true, force: true });
-    }
-  });
-
-  test('getConfigPath() is consistent with getControlPlaneConfigDir()', () => {
-    const configDir = tempDir('consistency');
-    try {
-      const mgr = new ConfigManager({ configDir });
-      const cpDir = mgr.getControlPlaneConfigDir();
-      const cfgPath = mgr.getConfigPath();
-
-      // The config path must be inside the control plane config dir
-      expect(cfgPath.startsWith(cpDir)).toBe(true);
-    } finally {
-      rmSync(configDir, { recursive: true, force: true });
-    }
-  });
-
-  test('getProjectConfigPath() is a distinct path from getConfigPath()', () => {
-    const homeDir = tempDir('home2');
-    const workingDir = tempDir('working2');
-    try {
-      const mgr = new ConfigManager({
-        homeDir,
-        workingDir,
-        surfaceRoot: 'cli',
-      });
-      const globalPath = mgr.getConfigPath();
-      const projectPath = mgr.getProjectConfigPath();
-
-      expect(projectPath).toBeDefined();
-      expect(projectPath).not.toBe(globalPath);
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-      rmSync(workingDir, { recursive: true, force: true });
-    }
+    const mgr = new ConfigManager({ homeDir, workingDir, surfaceRoot: 'cli' });
+    expect(mgr.getConfigPath()).toBe(join(homeDir, '.goodvibes', 'cli', 'settings.json'));
+    expect(mgr.getProjectConfigPath()).toBe(join(workingDir, '.goodvibes', 'cli', 'settings.json'));
+    expect(mgr.getControlPlaneConfigDir()).toBe(join(homeDir, '.goodvibes', 'cli'));
   });
 });

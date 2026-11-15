@@ -48,13 +48,11 @@ function failTurn(bus: RuntimeEventBus, id: string, cancelled = false): void {
 }
 
 function manager(bus: RuntimeEventBus): CompactionManager {
-  return new CompactionManager({ sessionId: 'owned-session', bus, contextWindow: 100_000,
-    flags: { isEnabled: () => true } as unknown as ConstructorParameters<typeof CompactionManager>[0]['flags'] });
+  return new CompactionManager({ sessionId: 'owned-session', bus, contextWindow: 100_000 });
 }
 const messages = (): ProviderMessage[] => Array.from({ length: 40 }, (_, i) => ({
   role: i % 2 ? 'assistant' : 'user', content: `synthetic message ${i} ${'context '.repeat(120)}`,
 }));
-const compactOpts = () => ({ messages: messages(), tokenCount: 70_000, trigger: 'manual' as const });
 
 function conversation(onReplace?: () => void) {
   let current = messages(); let replacements = 0; let lineage = 0;
@@ -141,37 +139,18 @@ describe('forensics report ownership', () => {
 });
 
 describe('compaction manager ownership', () => {
-  test.each([false, true])('disposal during ignored-abort quality settles promptly and consumes late rejection=%s', async (rejectLate) => {
-    using log = new SqliteDecisionLog(':memory:');
-    const held = heldPort(compactionQualityPort().port, 'engine.compaction.retention', rejectLate);
-    installJudgmentPort(withDecisionLog(held.port, log));
-    const bus = new RuntimeEventBus(); const owner = manager(bus); const events: string[] = [];
-    bus.onDomain('compaction', (env) => { events.push(env.payload.type); });
-    const pending = owner.compact(compactOpts());
-    try {
-      await held.entered.promise; owner.dispose();
-      expect(await pending).toBeNull(); expect(owner.lastCommit).toBeNull(); expect(owner.state).toBe('idle');
-      const before = events.slice(); const stored = log.query().length;
-      expect(before).not.toContain('COMPACTION_QUALITY_SCORE');
-      expect(before).not.toContain('COMPACTION_BOUNDARY_COMMIT'); expect(before).not.toContain('COMPACTION_DONE');
-      held.release.resolve(); await flush();
-      expect(events).toEqual(before); expect(log.query()).toHaveLength(stored);
-      expect(await owner.compact(compactOpts())).toBeNull();
-      held.unblockNew(); const successor = manager(bus);
-      expect(await successor.compact(compactOpts())).not.toBeNull(); expect(successor.lastCommit).not.toBeNull(); successor.dispose();
-    } finally { held.release.resolve(); owner.dispose(); }
-  });
-
-  test.each(['COMPACTION_CHECK', 'COMPACTION_QUALITY_SCORE', 'COMPACTION_BOUNDARY_COMMIT'])('reentrant disposal in %s prevents later publication', async (event) => {
-    installJudgmentPort(compactionQualityPort().port);
+  test('reentrant disposal while the check is announced stops the run before it executes', async () => {
     const events: string[] = [];
     // An emitter is a borrowed callback; this fixture really disposes synchronously.
     const bus = { emit(_domain: string, env: { payload: { type: string } }) {
-      events.push(env.payload.type); if (env.payload.type === event) owner.dispose();
+      events.push(env.payload.type); if (env.payload.type === 'COMPACTION_CHECK') owner.dispose();
     } } as unknown as RuntimeEventBus;
     const owner = manager(bus);
-    expect(await owner.compact(compactOpts())).toBeNull();
-    expect(events.at(-1)).toBe(event); expect(owner.lastCommit).toBeNull(); expect(owner.state).toBe('idle');
+    let executed = 0;
+    const result = await owner.runLifecycle({ trigger: 'manual', strategy: 'autocompact', messages: messages(), tokenCount: 70_000,
+      execute: async () => { executed += 1; return 'x'; }, outcome: () => null }).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(Error); expect(executed).toBe(0);
+    expect(events).toEqual(['COMPACTION_CHECK']); expect(owner.lastCommit).toBeNull(); expect(owner.state).toBe('idle');
   });
 
   test('a queued lifecycle never calls execute after disposal; an applied predecessor retains its truthful result', async () => {
@@ -273,18 +252,6 @@ describe('source and conversation currentness', () => {
       expect(reports.count()).toBe(0); expect(log.query()).toEqual([]);
       expect((collector as unknown as { _pending: Set<Promise<void>> })._pending.size).toBe(0);
     } finally { held.release.resolve(); collector.dispose(); }
-  });
-
-  test('source replacement cancels old quality and leaves the same manager usable by its successor', async () => {
-    const held = heldPort(compactionQualityPort().port, 'engine.compaction.retention');
-    installJudgmentPort(held.port); const bus = new RuntimeEventBus(); const owner = manager(bus);
-    const pending = owner.compact(compactOpts());
-    try {
-      await held.entered.promise; installJudgmentPort(compactionQualityPort().port);
-      expect(await pending).toBeNull(); expect(owner.state).toBe('idle'); expect(owner.lastCommit).toBeNull();
-      const successor = await owner.compact(compactOpts()); expect(successor).not.toBeNull();
-      const commit = owner.lastCommit; held.release.resolve(); await flush(); expect(owner.lastCommit).toBe(commit);
-    } finally { held.release.resolve(); owner.dispose(); }
   });
 
   test('a collector cannot publish an old-source report after the source is replaced', async () => {

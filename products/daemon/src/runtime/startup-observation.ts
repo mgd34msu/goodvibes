@@ -1,7 +1,8 @@
 import { writeSync } from 'node:fs';
+import { envFlag } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DeviceHousekeepingOptions } from '@goodvibes-jev/engine/platform/platform/devices';
 
-const OBSERVATION_ENABLED = process.env['GOODVIBES_NATIVE_STARTUP_OBSERVATION'] === '1';
+const OBSERVATION_ENABLED = envFlag(process.env['GOODVIBES_NATIVE_STARTUP_OBSERVATION']);
 const observed = new Set<NativeStartupPhase>();
 let stopped = false;
 

@@ -24,10 +24,15 @@ import { assertJudgmentInput } from '../../gate/judgment-input.js';
 /** Maximum complete order summary. Terms after a cutoff cannot be ignored. */
 export const MAX_SUMMARY_CHARS = 20_000;
 
+/** The summary is longer than a reading can take whole; the owner or agent must send a shorter one. */
+export class OrderSummaryTooLongError extends JudgmentError {
+  constructor() { super('invalid-request', 'The complete order summary exceeds the judgment budget'); }
+}
+
 /** What the reading sees: the complete order summary, or an explicit budget failure. */
 export function orderSummaryView(orderSummaryText: string): { order_summary: string } {
   assertJudgmentInput({ order_summary: orderSummaryText });
-  if (orderSummaryText.length > MAX_SUMMARY_CHARS) throw new JudgmentError('invalid-request', 'The complete order summary exceeds the judgment budget');
+  if (orderSummaryText.length > MAX_SUMMARY_CHARS) throw new OrderSummaryTooLongError();
   return { order_summary: orderSummaryText };
 }
 

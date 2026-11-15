@@ -63,6 +63,8 @@ function readPersistedSettings(root: string): string {
   const candidates = [
     join(root, '.goodvibes', 'global-tui', 'settings.json'),
     join(root, '.goodvibes', 'global-tui', 'user-settings.json'),
+    // email.* is daemon-owned, so the daemon store is where the reference lands.
+    join(root, '.goodvibes', 'daemon', 'settings.json'),
   ];
   return candidates.filter((f) => existsSync(f)).map((f) => readFileSync(f, 'utf-8')).join('');
 }
@@ -186,6 +188,10 @@ describe('submitAgentWorkspaceEmailConnectWizardEditor', () => {
     // workspace status line, or the rendered action result.
     const persisted = readPersistedSettings(tmpDir);
     expect(persisted).not.toContain(RAW_PASSWORD);
+    // The daemon store holds the secret reference, proving the guard reads the file the value lands in.
+    const passwordRef = cm.get('email.passwordRef');
+    expect(typeof passwordRef === 'string' && passwordRef.startsWith('goodvibes://secrets/')).toBe(true);
+    expect(persisted).toContain(passwordRef as string);
     expect(host.status).not.toContain(RAW_PASSWORD);
     expect(JSON.stringify(host.lastActionResult)).not.toContain(RAW_PASSWORD);
 

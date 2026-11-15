@@ -22,7 +22,7 @@ function fixture() {
   const ctx = {
     runtime: { sessionId: 'session', model: 'model', provider: 'provider' },
     uiServices: { agents: { contractRunner: runner, agentManager: { list: () => [], cancel() {} } } },
-    runtimeBus: { on: (name: string, callback: (event: { payload: Record<string, unknown> }) => void) => { events.set(name, callback); return () => { events.delete(name); }; } },
+    runtimeBus: { on: (name: string, callback: (event: { source?: string; payload: Record<string, unknown> }) => void) => { events.set(name, callback); return () => { events.delete(name); }; } },
     orchestrator: {
       abort() {},
       async handleUserInput() {
@@ -80,4 +80,21 @@ test('headless waits for standalone agents even when the foreground response is 
   await ready.promise; await Promise.resolve(); expect(settled).toBe(false);
   agent.fullOutput = 'Completed standalone review.'; agent.status = 'completed'; done.resolve();
   expect(await pending).toMatchObject({ exitCode: 0, response: 'Completed standalone review.' });
+});
+
+test('--max-turns aborts the foreground turn and reports max_turns', async () => {
+  const events = new Map<string, (event: { source?: string; payload: Record<string, unknown> }) => void>();
+  let aborted = 0;
+  const ctx = {
+    runtime: { sessionId: 'session', model: 'model', provider: 'provider' },
+    uiServices: { agents: { contractRunner: { list: () => [] }, agentManager: { list: () => [], cancel() {} } } },
+    runtimeBus: { on: (name: string, callback: (event: { payload: Record<string, unknown> }) => void) => { events.set(name, callback); return () => events.delete(name); } },
+    orchestrator: { abort() { aborted++; }, async handleUserInput() {
+      events.get('LLM_RESPONSE_RECEIVED')!({ source: 'orchestrator', payload: { turnId: 't', provider: 'p', model: 'm', toolCallCount: 1, inputTokens: 1, outputTokens: 1 } });
+      events.get('TURN_CANCEL')!({ payload: { stopReason: 'cancelled' } });
+    } },
+  } as unknown as BootstrapContext;
+  const result = await executeHeadlessTurn(ctx, 'Loop', new AbortController().signal, 'json', { maxTurns: 1 });
+  expect(aborted).toBe(1);
+  expect(result).toMatchObject({ exitCode: 1, stopReason: 'max_turns', usage: { modelCalls: 1 } });
 });

@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
 import { extname, isAbsolute, relative } from 'node:path';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { logger } from '../../utils/logger.js';
@@ -9,6 +10,7 @@ import { CodeIntelligence } from '../../intelligence/facade.js';
 import type { ImageMode } from './media.js';
 import {
   IMAGE_SIZE_LIMIT,
+  IMAGE_MEDIA_TYPES,
   RESIZE_TARGETS,
   isImageFile as isImageFileByExt,
   isArchiveFile,
@@ -18,6 +20,7 @@ import {
   isBinaryByContent,
   humanSize,
   resizeImage,
+  tryLoadSharp,
   convertToPortableFormat,
   listArchiveContents,
 } from './media.js';
@@ -36,6 +39,8 @@ export interface FileReadResult {
   tokenEstimate: number;
   extract: ExtractMode;
   binary?: boolean | undefined;
+  /** Why a file's content was not returned (for example a binary skip). */
+  skipped?: string | undefined;
   image?: boolean | undefined;
   mediaType?: string | undefined;
   error?: string | undefined;
@@ -62,14 +67,24 @@ export interface FileReadResult {
 export interface ReadOutput {
   success: boolean;
   error?: string | undefined;
-  files?: FileReadResult[] | undefined;
+  /** Standard format omits the per-file tokenEstimate and resolvedPath (host facts); verbose keeps them. */
+  files?: Array<Omit<FileReadResult, 'tokenEstimate' | 'resolvedPath'> & { tokenEstimate?: number | undefined; resolvedPath?: string | undefined }> | undefined;
   images?: Array<{ path: string; base64: string; mediaType: string; description: string }> | undefined;
   summary: {
     files_read: number;
     files_binary: number;
     files_errored: number;
     total_lines: number;
+    /** Whole-file token estimate of the files read, not of what was returned. */
     total_tokens: number;
+    /** Same value as total_tokens, under a name that says what it measures. */
+    source_tokens?: number | undefined;
+    /** Estimated tokens of the content actually returned. */
+    returned_tokens?: number | undefined;
+    /** Files whose returned content stops before the requested end; continue from next_start_line. */
+    truncated?: Array<{ path: string; returned_lines: number; next_start_line: number; reason: 'max_tokens' | 'max_per_item' }> | undefined;
+    /** Wall time of a slow call. */
+    elapsed_ms?: number | undefined;
   };
   pagination?: {
     page: number;
@@ -78,16 +93,44 @@ export interface ReadOutput {
   };
 }
 
+/**
+ * Every reader loads the whole file synchronously, so a file past this size is
+ * refused up front rather than freezing or exhausting the process.
+ */
+export const MAX_READ_FILE_BYTES = 128 * 1024 * 1024;
+
+function oversizeReadError(target: ReadTarget): FileReadResult | undefined {
+  let size: number;
+  try {
+    size = statSync(target.resolvedPath).size;
+  } catch {
+    return undefined; // The reader reports the real failure (missing file, directory, permissions).
+  }
+  if (size <= MAX_READ_FILE_BYTES) return undefined;
+  return createReadErrorResult(
+    target,
+    `File is ${humanSize(size)}, over the ${humanSize(MAX_READ_FILE_BYTES)} read limit, so it was not read. Search it with find or read a smaller file.`,
+    size,
+  );
+}
+
 function isPdfFile(ext: string): boolean {
   return ext.toLowerCase() === '.pdf';
 }
 
+/** Text shown by a PDF's content streams, in file order. Page boundaries are not recoverable without a PDF parser. */
 function extractPdfText(body: string, pages?: string): string {
   const texts: string[] = [];
   const streamRe = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let m: RegExpExecArray | null;
   while ((m = streamRe.exec(body)) !== null) {
-    const chunk = m[1]!;
+    let chunk = m[1]!;
+    // Most content streams are Flate-compressed; the text operators are only visible once inflated.
+    try {
+      chunk = inflateSync(Buffer.from(chunk, 'binary'), { maxOutputLength: 16 * 1024 * 1024 }).toString('binary');
+    } catch {
+      // Not compressed (or not Flate): scan the bytes as they are.
+    }
     const parenRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)/g;
     let pm: RegExpExecArray | null;
     while ((pm = parenRe.exec(chunk)) !== null) {
@@ -103,17 +146,17 @@ function extractPdfText(body: string, pages?: string): string {
     }
   }
 
+  const pagesNote = pages ? ` The pages argument (${pages}) was not applied: page boundaries are not available, so this is the document's text as a whole.` : '';
   if (texts.length === 0) {
     return JSON.stringify({
-      note: 'PDF text extraction requires a dedicated library for complex PDFs. No readable text streams found.',
-      byteSize: Buffer.byteLength(body, 'utf-8'),
+      approximate: true,
+      note: `PDF text extraction requires a dedicated library for complex PDFs. No readable text streams found.${pagesNote}`,
+      byteSize: Buffer.byteLength(body, 'binary'),
       pages: pages ?? 'all',
     });
   }
 
-  const joined = texts.join(' ');
-  if (pages) return `[pages: ${pages}]\n${joined}`;
-  return joined;
+  return `[approximate PDF text: strings found in the file's content streams, not a layout-aware extraction.${pagesNote}]\n${texts.join(' ')}`;
 }
 
 interface NotebookCell {
@@ -174,6 +217,8 @@ export interface ReadExecutionContext {
   globalImageMode?: ImageMode | undefined;
   maxImageSize: number;
   codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'> | undefined;
+  /** Image-library loader; tests inject one, production uses the lazy sharp import. */
+  loadSharp?: typeof tryLoadSharp | undefined;
 }
 
 export interface ReadTarget {
@@ -236,12 +281,24 @@ async function readImageFile(
   }
 
   const magicResult = validateMagicBytes(imgBuffer, extname(target.resolvedPath));
-  if (!magicResult.valid) {
-    logger.warn('[read] image magic bytes mismatch', {
-      path: target.resolvedPath,
-      expected: extname(target.resolvedPath),
-      detected: magicResult.detectedType ?? 'unknown',
-    });
+  // The bytes decide what the provider will decode, not the file name. A real image of another
+  // type is sent under its true media type; anything else (a Git LFS pointer, text) is refused
+  // because a bad image block stays in the conversation and every later turn fails on it.
+  let detectedMediaType: string | undefined;
+  if (!magicResult.valid && extname(target.resolvedPath).toLowerCase() !== '.svg') {
+    detectedMediaType = magicResult.detectedType ? IMAGE_MEDIA_TYPES[`.${magicResult.detectedType}`] : undefined;
+    if (!detectedMediaType) {
+      logger.warn('[read] image magic bytes mismatch', {
+        path: target.resolvedPath,
+        expected: extname(target.resolvedPath),
+        detected: magicResult.detectedType ?? 'unknown',
+      });
+      return createReadErrorResult(
+        target,
+        `${extname(target.resolvedPath)} file is not an image${magicResult.detectedType ? ` (its bytes look like ${magicResult.detectedType})` : ' (its bytes do not match any image format)'}. Read it with extract:'content' and force_text:true if it is text.`,
+        byteSize,
+      );
+    }
   }
 
   const rawMeta = getImageMetadata(imgBuffer, extname(target.resolvedPath));
@@ -267,7 +324,7 @@ async function readImageFile(
   }
 
   let processedBuffer = imgBuffer;
-  let mediaType = getImageMediaType(extname(target.resolvedPath)) ?? 'application/octet-stream';
+  let mediaType = detectedMediaType ?? getImageMediaType(extname(target.resolvedPath)) ?? 'application/octet-stream';
   let resized = false;
   let converted = false;
   let originalFormat: string | undefined;
@@ -283,11 +340,13 @@ async function readImageFile(
 
   const resizeTarget = RESIZE_TARGETS[imageMode]!;
   if (resizeTarget !== null) {
-    const resizeResult = await resizeImage(processedBuffer, mediaType, resizeTarget);
+    const resizeResult = await resizeImage(processedBuffer, mediaType, resizeTarget, context.loadSharp);
     context.assertCurrent?.();
     if (resizeResult.resized) {
       processedBuffer = resizeResult.buffer;
       resized = true;
+      // Resizing re-encodes (PNG, or JPEG for JPEG input), whatever the file extension said.
+      if (resizeResult.mediaType) mediaType = resizeResult.mediaType;
       if (resizeResult.width) rawMeta.width = resizeResult.width;
       if (resizeResult.height) rawMeta.height = resizeResult.height;
     }
@@ -318,7 +377,12 @@ function readArchiveFile(target: ReadTarget, context: ReadExecutionContext): Fil
     return createReadErrorResult(target, `Cannot read archive: ${message}`);
   }
 
-  const listing = listArchiveContents(target.resolvedPath, archiveBuffer, extname(target.resolvedPath));
+  let listing: string;
+  try {
+    listing = listArchiveContents(target.resolvedPath, archiveBuffer, extname(target.resolvedPath));
+  } catch (err) {
+    return createReadErrorResult(target, `Cannot list archive: ${summarizeError(err)}`, archiveBuffer.length);
+  }
   const tokenEst = Math.ceil(listing.length / 4);
   indexReadFile(context, target.resolvedPath, tokenEst);
   return { ...createReadBaseResult(target, archiveBuffer.length, tokenEst), content: listing, lineCount: listing.split('\n').length, archive: true };
@@ -374,9 +438,10 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
     return createReadErrorResult(target, `Cannot read file: ${message}`);
   }
 
-  if (isBinaryByContent(fullBuf)) {
+  if (!fileInput.force_text && isBinaryByContent(fullBuf)) {
     logger.debug('read tool: binary file skipped', { path: target.resolvedPath });
-    return { ...createReadBaseResult(target, fullBuf.length, 0), binary: true };
+    return { ...createReadBaseResult(target, fullBuf.length, 0), binary: true,
+      skipped: `contains a NUL byte at offset ${fullBuf.indexOf(0)}; pass force_text: true for this file to read it as text anyway` };
   }
 
   let rawContent: string;
@@ -396,7 +461,17 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
   indexReadFile(context, target.resolvedPath, tokenEstimate);
 
   const lines = rawContent.split('\n');
-  const lineCount = lines.length;
+  // The element after a final newline is not a line.
+  const lineCount = lines.length > 1 && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length;
+
+  const range = fileInput.range;
+  if (range && (target.extract === 'content' || target.extract === 'lines') && (range.end < range.start || range.start > lineCount)) {
+    return {
+      ...createReadBaseResult(target, byteSize, 0),
+      lineCount,
+      error: `Requested lines ${range.start}-${range.end} are outside this file, which has ${lineCount} line${lineCount === 1 ? '' : 's'}.`,
+    };
+  }
 
   let extractedContent: string | undefined;
   if (shouldIncludeContent(context.format)) {
@@ -458,6 +533,7 @@ export async function readOneFile(
   codeIntelligence?: Pick<CodeIntelligence, 'getOutline' | 'getSymbols'>,
   assertCurrent?: () => void,
   allowOutsideProject = false,
+  loadSharp?: typeof tryLoadSharp,
 ): Promise<FileReadResult> {
   assertCurrent?.();
   const extract: ExtractMode = fileInput.extract ?? globalExtract;
@@ -472,6 +548,8 @@ export async function readOneFile(
   }
 
   const target: ReadTarget = { fileInput, resolvedPath, extract };
+  const oversize = oversizeReadError(target);
+  if (oversize) return oversize;
   const context: ReadExecutionContext = {
     format,
     includeLineNumbers,
@@ -482,6 +560,7 @@ export async function readOneFile(
     maxImageSize: globalMaxImageSize ?? IMAGE_SIZE_LIMIT,
     codeIntelligence,
     assertCurrent,
+    loadSharp,
   };
 
   const ext = extname(resolvedPath);

@@ -629,6 +629,41 @@ describe('useChatStream: onReconnect: a daemon blip / SSE drop is honest, not a 
   });
 });
 
+describe('useChatStream: a pending Stop survives a stream drop', () => {
+  test('a drop while stopping keeps "stopping", and the reconnect hands it to the history resync', () => {
+    const ctx = renderHookHelper({ activeSessionId: 'session-stop-drop', initialTurnState: 'stopping' });
+    const ctrl = activeStreamControl;
+    expect(ctrl).not.toBeNull();
+
+    ctrl!.options.onReconnect?.({ attempt: 1, delayMs: 1000 });
+    expect(ctx.turnState).toBe('stopping');
+
+    // turn.cancelled was lost while the stream was down; the refreshed history settles it.
+    ctrl!.options.onReady?.();
+    expect(ctx.turnState).toBe('syncing');
+    ctx.unmount();
+  });
+});
+
+describe('useChatStream: a local stop does not end live updates for the session', () => {
+  test('after the no-cancel fallback, the next send opens a fresh stream', async () => {
+    turnsCancelBehavior = () => Promise.reject(Object.assign(new Error('Unknown gateway method'), { status: 404, code: 'METHOD_NOT_FOUND' }));
+    const ctx = renderHookHelper({ activeSessionId: 'session-local-stop', initialTurnState: 'streaming' });
+    expect(streamCallCount).toBe(1);
+    activeStreamControl!.resolveFn(activeStreamControl!.disconnect);
+    await Promise.resolve();
+
+    ctx.result.stop();
+    await waitFor(() => ctx.turnState === 'stopped locally');
+    expect(streamCallCount).toBe(1);
+
+    // The next turn: without a reconnect its frames would never arrive.
+    ctx.rerender('sending');
+    await waitFor(() => streamCallCount === 2);
+    ctx.unmount();
+  });
+});
+
 describe('useChatStream: onTerminate: the built-in reconnect gave up ("stream paused")', () => {
   test('onTerminate sets turnState to "stream paused" and isStreaming goes false', () => {
     const ctx = renderHookHelper({ activeSessionId: 'session-terminate', initialTurnState: 'streaming' });
@@ -893,19 +928,30 @@ describe('useChatStream: turn.cancelled terminal event', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    ctrl!.options.onEvent?.('companion-chat.turn.cancelled', {
-      type: 'turn.cancelled',
-      sessionId: 'session-cancelled',
-      turnId: 't1',
-      stoppedBy: 'user',
-      partialPersisted: true,
-      assistantMessageId: 'a1',
-      envelope: { sessionId: 'session-cancelled', messageId: 'a1', body: 'partial ', source: 'companion-chat-assistant', timestamp: 1 },
+    flushSync(() => {
+      ctrl!.options.onEvent?.('companion-chat.turn.delta', { type: 'turn.delta', sessionId: 'session-cancelled', delta: 'partial ' });
+    });
+    expect(renderedLiveText).toBe('partial ');
+    invalidatedSessions = [];
+
+    flushSync(() => {
+      ctrl!.options.onEvent?.('companion-chat.turn.cancelled', {
+        type: 'turn.cancelled',
+        sessionId: 'session-cancelled',
+        turnId: 't1',
+        stoppedBy: 'user',
+        partialPersisted: true,
+        assistantMessageId: 'a1',
+        envelope: { sessionId: 'session-cancelled', messageId: 'a1', body: 'partial ', source: 'companion-chat-assistant', timestamp: 1 },
+      });
     });
 
-    // Terminal like turn.completed: the state settles and the stream itself
-    // was NOT torn down (the same event converges every other client too).
+    // Terminal like turn.completed: the state settles, the live text is cleared, the
+    // persisted partial is refetched, and the stream itself was NOT torn down (the
+    // same event converges every other client too).
     expect(ctx.turnState).toBe('stopped');
+    expect(renderedLiveText).toBe('');
+    expect(invalidatedSessions).toEqual(['session-cancelled']);
     expect(ctrl!.disconnect).toHaveBeenCalledTimes(0);
 
     ctx.unmount();

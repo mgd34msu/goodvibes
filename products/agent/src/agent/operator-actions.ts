@@ -1,5 +1,5 @@
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { requireOperatorHttpBinding } from './operator-contract-routes.ts';
+import { assertSafeOperatorPathValue, requireOperatorHttpBinding } from './operator-contract-routes.ts';
 import { scheduleNextRouteLines } from './schedule-next-routes.ts';
 
 export type JsonRecord = Record<string, unknown>;
@@ -175,7 +175,7 @@ export function readOperatorActionBoolean(value: unknown): boolean {
 }
 
 export function isOperatorActionId(value: unknown): value is OperatorActionId {
-  return typeof value === 'string' && value in OPERATOR_ACTION_SPECS;
+  return typeof value === 'string' && Object.hasOwn(OPERATOR_ACTION_SPECS, value);
 }
 
 export function targetValue(args: OperatorActionArgs, descriptor: OperatorActionDescriptor): string {
@@ -184,6 +184,7 @@ export function targetValue(args: OperatorActionArgs, descriptor: OperatorAction
 }
 
 export function renderOperatorActionPath(descriptor: OperatorActionDescriptor, targetId: string): string {
+  assertSafeOperatorPathValue(targetId, descriptor.targetField);
   return descriptor.pathTemplate.replace(`{${descriptor.targetField}}`, encodeURIComponent(targetId));
 }
 

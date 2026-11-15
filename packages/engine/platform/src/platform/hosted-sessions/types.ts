@@ -162,6 +162,8 @@ export interface CreateHostedSessionInput {
   readonly detachPolicy?: HostedDetachPolicy | undefined;
   /** The client creating it, attached immediately when given. */
   readonly clientId?: string | undefined;
+  /** The authenticated principal creating it; only that principal can later detach `clientId`. */
+  readonly principalId?: string | undefined;
   /**
    * The surface this session was created FOR, `agent`, `tui`, `webui`.
    *

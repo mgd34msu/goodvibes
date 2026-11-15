@@ -6,8 +6,6 @@
  * fallback.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -422,13 +420,6 @@ describe('planContract: failure, with no single-item fallback', () => {
     expect(contract.status).toBe('shaping');
   });
 
-  test('the planner never reaches the heuristic decomposition or a single-item proposal', () => {
-    const source = readFileSync(join(import.meta.dir, '../../platform/src/platform/contract/planner.ts'), 'utf8');
-    const imports = source.match(/^import[\s\S]*?from '[^']+';$/gm)!.join('\n');
-    expect(imports).toContain('DecompositionRunner,');
-    for (const name of ['decomposeGoal', 'singleItemProposal', 'assemblePlanProposal', 'AdaptivePlanner']) expect(imports).not.toContain(name);
-  });
-
   test('planning without a shape is a programming error', async () => {
     await expect(planContract(queuedContract(), harness([]).deps)).rejects.toThrow('no request shape');
   });
@@ -452,6 +443,15 @@ describe('acceptEscalatedPlan', () => {
     expect(contract.criteria.find((criterion) => criterion.id === 'c3')!.disposition).toBe('excluded');
     expect(contract.decisions.at(-1)!.action).toBe('plan-accepted');
     expect(contract.decisions.at(-1)!.reason).toContain('approved by the owner');
+  });
+
+  test('an approval that arrives after the contract left planning cannot replace its work', async () => {
+    const { contract, run } = await escalated();
+    install(({ name, state }) => (name === 'topology_only' && String(state['criterion']).includes('convert') ? noulAnswer(0.95) : undefined));
+    contract.status = 'running';
+    await expect(acceptEscalatedPlan(contract, contract.escalations[0]!, run.deps)).rejects.toThrow('past planning');
+    expect(contract.units).toEqual([]);
+    expect(contract.groups).toEqual([]);
   });
 
   test('a plan the engine cannot run is refused even with approval', async () => {

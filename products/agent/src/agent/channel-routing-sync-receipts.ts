@@ -20,9 +20,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreJson } from '@/utils/store-file.ts';
+import { keepUnreadableStoreCopy } from './unreadable-store-copy.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
-export type ChannelRoutingSyncOutcomeKind = 'synced' | 'refused';
+/** `withdraw_failed`: a route removed locally mid-offer could not be withdrawn from the daemon, which may still route on `daemonAssignmentId`. */
+export type ChannelRoutingSyncOutcomeKind = 'synced' | 'refused' | 'withdraw_failed';
 
 export interface ChannelRoutingSyncReceipt {
   readonly version: 1;
@@ -91,7 +93,7 @@ function parseReceipt(value: unknown): ChannelRoutingSyncReceipt | null {
   const methodId = readString(value.methodId);
   if (!id || !createdAt || !routeId || !surfaceKind || !profileId || !methodId) return null;
   if (Number.isNaN(Date.parse(createdAt))) return null;
-  const outcome = value.outcome === 'synced' ? 'synced' : 'refused';
+  const outcome = value.outcome === 'synced' || value.outcome === 'withdraw_failed' ? value.outcome : 'refused';
   return {
     version: RECEIPT_VERSION,
     id,
@@ -141,6 +143,7 @@ export function appendChannelRoutingSyncReceipts(
     version: RECEIPT_VERSION,
     receipts: [...receipts, ...existing].slice(0, RECEIPT_LIMIT),
   };
+  keepUnreadableStoreCopy(path, 'receipts', parseReceipt);
   writeStoreJson(path, file);
   return path;
 }
@@ -165,7 +168,9 @@ export function formatChannelRoutingSyncReceipts(
       : receipt.surfaceKind;
     const tail = receipt.outcome === 'synced'
       ? `daemon assignment=${receipt.daemonAssignmentId ?? 'unknown'}`
-      : `refused: ${receipt.error ?? 'no reason given'}`;
+      : receipt.outcome === 'withdraw_failed'
+        ? `withdrawal failed, the daemon may still route on assignment=${receipt.daemonAssignmentId ?? 'unknown'}: ${receipt.error ?? 'no reason given'}`
+        : `refused: ${receipt.error ?? 'no reason given'}`;
     lines.push(
       `  ${receipt.createdAt}  ${receipt.routeId}  channel=${channel} → profile=${receipt.profileId}  was=${receipt.previousSyncState}  ${tail}`,
     );

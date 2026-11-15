@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { DurableIdentityManager } from './identity.js';
 import { ReconnectEngine } from './reconnect.js';
-import { RemoteStateSyncer, createNoOpSyncCallbacks } from './sync.js';
+import { RemoteStateSyncer, createNoOpSyncCallbacks, transportStateForHealth } from './sync.js';
 import { RemoteObservabilityProvider } from './observability.js';
 import type {
   RemoteSubstrateConfig,
@@ -29,39 +29,6 @@ import type {
 import type { SyncStoreCallbacks } from './sync.js';
 import type { TransportAdapter, ReconnectEngineCallbacks } from './reconnect.js';
 import { logger } from '../../utils/logger.js';
-
-// Host-side backend registration, distinct from paired distributed peers.
-export { PeerRegistry, PeerRegistryValidationError, normalizeBackendConfig } from './host/peer-registry.js';
-export type {
-  BackendKind,
-  CloudProvider,
-  DockerBackendConfig,
-  SshBackendConfig,
-  CloudTerminalBackendConfig,
-  LocalProcessBackendConfig,
-  BackendConfig,
-  PeerRecord,
-  PeerRegistrationInput,
-} from './host/peer-registry.js';
-export type { RemoteHostCredentialStore, RemoteHostLogger } from './host/context.js';
-export type { Backend, BackendContext, BackendDispatchResult, DispatchPayload } from './host/backends/types.js';
-export {
-  BackendDispatchError,
-  DEFAULT_SYNC_TIMEOUT_MS,
-  MAX_SYNC_TIMEOUT_MS,
-  resolveTimeout,
-  buildRemoteShellCommand,
-} from './host/backends/types.js';
-export { createLocalProcessBackend, tokenizeCommand } from './host/backends/local-process.js';
-export { createDockerBackend } from './host/backends/docker.js';
-export { createCloudTerminalBackend } from './host/backends/cloud-terminal.js';
-export { createSshBackend } from './host/backends/ssh.js';
-export { createBackends } from './host/backends/index.js';
-export { RemoteDispatcher, STDOUT_PREVIEW_LIMIT } from './host/dispatcher.js';
-export type { RemoteWorkItemInput, RemoteWorkEnqueuer, RemoteInvokeResult, RemoteDispatcherOptions, DispatchRequest } from './host/dispatcher.js';
-export { HostDistributedRuntime } from './host/service.js';
-export { registerRemoteSurface } from './host/surface.js';
-export type { RemoteSurfaceContext, RemoteInvokeAdapter, RemoteSurfaceRegistration, RegisterRemoteSurfaceOptions } from './host/surface.js';
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
@@ -255,7 +222,6 @@ export class RemoteSubstrate {
   private _syncer: RemoteStateSyncer;
   private _engine: ReconnectEngine | null = null;
   private _session: RemoteSession;
-  private _epoch = 0;
   private _disposed = false;
 
   constructor(
@@ -301,16 +267,25 @@ export class RemoteSubstrate {
   /**
    * Establish the initial connection to the remote substrate.
    *
-   * @returns True if connected successfully, false on terminal failure.
+   * @returns True if connected. False when not: `connectOutcome()` tells a failure
+   * that `reconnect()` can clear from a terminal one.
    */
   async connect(): Promise<boolean> {
-    if (this._disposed || !this._engine) {
+    return (await this.connectOutcome()) === 'connected';
+  }
+
+  /** Like `connect()`, but says whether a failed attempt is worth retrying with `reconnect()`. */
+  async connectOutcome(): Promise<'connected' | 'retry' | 'terminal'> {
+    const engine = this._engine;
+    if (this._disposed || !engine) {
       logger.error('RemoteSubstrate.connect: substrate disposed or no adapter attached');
-      return false;
+      return 'terminal';
     }
 
     const authToken = await this._getAuthToken();
-    return this._engine.connect(authToken);
+    // Disposed or re-attached while the token was fetched: this engine is no longer ours to drive.
+    if (this._disposed || this._engine !== engine) return 'terminal';
+    return engine.connectOutcome(authToken);
   }
 
   /**
@@ -343,9 +318,16 @@ export class RemoteSubstrate {
    * @param task - Remote task snapshot from the transport.
    */
   receiveTaskUpdate(task: RemoteTask): void {
+    const held = this._session.remoteTasks.get(task.taskId);
+    // A finished task stays finished, and a replayed older update must not
+    // overwrite a newer one: after a reconnect the replay redelivers history.
+    if (held && (isFinishedRemoteTask(held) || held.updatedAt > task.updatedAt)) {
+      logger.debug('RemoteSubstrate: ignoring stale task update', { taskId: task.taskId, held: held.status, received: task.status });
+      return;
+    }
     const tasks = new Map(this._session.remoteTasks);
     tasks.set(task.taskId, task);
-    this._session = { ...this._session, remoteTasks: tasks };
+    this._session = { ...this._session, remoteTasks: tasks, messagesReceived: this._session.messagesReceived + 1 };
     this._syncer.syncTaskUpdate(this._session, task);
     this._observability.updateSession(this._session);
   }
@@ -356,8 +338,18 @@ export class RemoteSubstrate {
    * @param health - Remote health snapshot from the transport.
    */
   receiveHealthUpdate(health: RemoteHealth): void {
-    this._session = { ...this._session, health };
+    this._session = { ...this._session, health, messagesReceived: this._session.messagesReceived + 1 };
+    // Health refines a live connection only; it never revives or overrides a failed one.
+    if (this._session.transportState === 'connected' || this._session.transportState === 'degraded') {
+      this._session = { ...this._session, transportState: transportStateForHealth(health) };
+    }
     this._syncer.syncHealthUpdate(this._session, health);
+    this._observability.updateSession(this._session);
+  }
+
+  /** Count one message the transport sent, so the session and panel totals reflect real traffic. */
+  recordMessageSent(): void {
+    this._session = { ...this._session, messagesSent: this._session.messagesSent + 1 };
     this._observability.updateSession(this._session);
   }
 
@@ -412,8 +404,7 @@ export class RemoteSubstrate {
         this._observability.updateSession(this._session);
         this._syncer.syncTransportState(this._session);
       },
-      onConnected: (token: HandshakeToken, epoch: number) => {
-        this._epoch = epoch;
+      onConnected: (token: HandshakeToken, _epoch: number) => {
         this._session = {
           ...this._session,
           transportState: 'connected',
@@ -427,6 +418,14 @@ export class RemoteSubstrate {
       },
       onSyncing: () => {
         this._session = { ...this._session, transportState: 'syncing' };
+        this._observability.updateSession(this._session);
+        this._syncer.syncTransportState(this._session);
+      },
+      onSynced: (ok, error) => {
+        // Replay finished: leave `syncing`. A failed replay may have lost messages, so say so.
+        this._session = ok
+          ? { ...this._session, transportState: 'connected' }
+          : { ...this._session, transportState: 'degraded', lastError: `Replay after reconnect failed; messages may be missing: ${error ?? 'unknown error'}` };
         this._observability.updateSession(this._session);
         this._syncer.syncTransportState(this._session);
       },
@@ -486,6 +485,10 @@ export class RemoteSubstrate {
     }
     return '';
   }
+}
+
+function isFinishedRemoteTask(task: RemoteTask): boolean {
+  return task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 }
 
 // ── Factory function ──────────────────────────────────────────────────────────

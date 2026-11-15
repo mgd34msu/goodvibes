@@ -11,12 +11,15 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Build the anchored header matcher for a version under the given convention. */
+/**
+ * Build the anchored header matcher for a version under the given convention.
+ * Nothing but whitespace may follow the version, so `## 1.2.3-rc.1` is not `1.2.3`.
+ */
 export function changelogHeaderPattern(version: string, heading: ChangelogHeading): RegExp {
   const v = escapeRegExp(version);
   if (heading === 'bracket') return new RegExp(`^##\\s*\\[${v}\\]`, 'm');
-  if (heading === 'plain') return new RegExp(`^##\\s*${v}(?:\\s|$|-)`, 'm');
-  return new RegExp(`^##\\s*(?:\\[${v}\\]|${v}(?:\\s|$|-))`, 'm');
+  if (heading === 'plain') return new RegExp(`^##\\s*${v}(?:\\s|$)`, 'm');
+  return new RegExp(`^##\\s*(?:\\[${v}\\]|${v}(?:\\s|$))`, 'm');
 }
 
 /** True when `changelog` contains a section for `version`. */

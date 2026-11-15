@@ -125,7 +125,7 @@ describe('resolveEmailPassword', () => {
     expect(value).toBe('resolved-password');
   });
 
-  test('passes non-goodvibes refs directly to secretsManager', async () => {
+  test('refuses a ref of another form instead of asking the store for it as a key', async () => {
     const calls: string[] = [];
     const secrets = {
       get: async (key: string) => {
@@ -133,15 +133,15 @@ describe('resolveEmailPassword', () => {
         return 'env-password';
       },
     };
-    await resolveEmailPassword('op://Private/Email/password', secrets);
-    expect(calls[0]).toBe('op://Private/Email/password');
+    await expect(resolveEmailPassword('op://Private/Email/password', secrets)).rejects.toThrow('email.passwordRef');
+    expect(calls).toEqual([]);
   });
 
   test('a missing secret is a named, terminal capability failure naming the fix', async () => {
     const secrets = makeSecretsManager({});
     let caught: unknown;
     try {
-      await resolveEmailPassword('goodvibes://secrets/goodvibes/MISSING_KEY', secrets);
+      await resolveEmailPassword('goodvibes://secrets/goodvibes/MISSING_MAIL_KEY', secrets);
     } catch (err) {
       caught = err;
     }
@@ -157,7 +157,7 @@ describe('resolveEmailPassword', () => {
     // ...including that another surface's store is not searched, because doing
     // so would work on one machine and fail on every other.
     expect(notice?.ownerMessage).toContain('not visible here');
-    expect(notice?.serverMessage).toContain('MISSING_KEY');
+    expect(notice?.serverMessage).toContain('MISSING_MAIL_KEY');
   });
 });
 
@@ -176,24 +176,6 @@ describe('EmailService.getStatus', () => {
     const status = service.getStatus();
     expect(status.ready).toBe(true);
     expect(status.errors).toHaveLength(0);
-  });
-
-  test('EmailSummary includes bodyPreview field', () => {
-    // Verify the type shape, bodyPreview is always present, empty string by default
-    const summary: import('../platform/src/platform/email/email-service.ts').EmailSummary = {
-      uid: 1,
-      messageId: '<msg-1@example.test>',
-      from: 'a@b.test',
-      subject: 'Hi',
-      date: '2026-01-01',
-      unread: true,
-      bodyPreview: '',
-      mailbox: 'INBOX',
-      deliveredTo: [],
-      unverifiedToHeaderClaim: '',
-      senderClaim: testDescribeSenderClaim('sender@example.com'),
-    };
-    expect(summary.bodyPreview).toBe('');
   });
 
   test('returns ready=false when disabled', () => {
@@ -226,30 +208,6 @@ describe('EmailService.getStatus', () => {
 // ---------------------------------------------------------------------------
 
 describe('EmailService.checkInbox', () => {
-  test('returns summaries from IMAP client; messages stay unread', async () => {
-    const opened: string[] = [];
-    const service = new EmailService({
-      getConfig: (k) => makeConfig()[k],
-      secretsManager: makeSecretsManager({
-        GOODVIBES_EMAIL_PASSWORD: 'test-password',
-      }),
-      transport: throwingEmailTransport,
-      describeSenderClaim: testDescribeSenderClaim,
-      imapSocketFactory: async () => {
-        opened.push('connected');
-        return stubSocket;
-      },
-    });
-
-    // Stub out the ImapClient by monkey-patching the module's behavior
-    // via the socket factory, since ImapClient requires real socket I/O,
-    // we test the service wiring by overriding the IMAP socket factory
-    // and verifying the service handles errors from the client gracefully.
-    await expect(service.checkInbox(5)).rejects.toThrow();
-    // Socket factory was called (connection was attempted)
-    expect(opened).toHaveLength(1);
-  });
-
   test('throws when email is disabled', async () => {
     const service = new EmailService({
       getConfig: (k) => makeConfig({ 'email.enabled': false })[k],
@@ -326,28 +284,6 @@ describe('EmailService smtpSecurity: socket factory selection', () => {
     expect(calls[0]?.port).toBe(587);
   });
 
-  test('smtpSecurity=auto on port 465 uses defaultSmtpSocketFactory (TLS path)', async () => {
-    // With auto + port 465, the default factory chooses direct TLS.
-    // We verify by not injecting a factory override and observing no crash from the
-    // socket selection path (it will fail later when trying to connect, not earlier).
-    const service = new EmailService({
-      getConfig: (k) => makeConfig({
-        'email.smtpPort': 465,
-        'email.smtpSecurity': 'auto',
-      })[k],
-      secretsManager: makeSecretsManager({ GOODVIBES_EMAIL_PASSWORD: 'pass' }),
-      transport: throwingEmailTransport,
-      describeSenderClaim: testDescribeSenderClaim,
-      // No smtpSocketFactory, use the default factory selection
-      // This will fail to connect to smtp.example.test but that's expected in tests
-      smtpSocketFactory: async () => stubSocket,
-    });
-    await expect(
-      service.sendMail({ to: 'a@b.test', subject: 'Hi', body: 'Body', confirm: true }),
-    ).rejects.toThrow();
-    // If we reach here, the factory selection itself didn't throw, wiring is correct
-  });
-
   // With the transports behind a port, the selection rule itself is now
   // observable without a socket: the recording transport reports which of the
   // three members the service reached for.
@@ -420,7 +356,7 @@ describe('EmailService imapSecurity: socket factory selection', () => {
     test(`imapSecurity=${security ?? 'unset'} reaches for ${expected}`, async () => {
       const transport = recordingEmailTransport();
       const service = new EmailService({
-        getConfig: (k) => makeConfig(security === undefined ? {} : { 'email.imapSecurity': security })[k],
+        getConfig: (k) => makeConfig(security === undefined ? {} : { 'email.imapSecurity': security, 'email.imapHost': '127.0.0.1' })[k],
         secretsManager: makeSecretsManager({ GOODVIBES_EMAIL_PASSWORD: 'pass' }),
         transport: transport.port,
         describeSenderClaim: testDescribeSenderClaim,
@@ -432,7 +368,7 @@ describe('EmailService imapSecurity: socket factory selection', () => {
 
   test('every IMAP entry point honours the key, not just checkInbox', async () => {
     const plaintextService = (): EmailService => new EmailService({
-      getConfig: (k) => makeConfig({ 'email.imapSecurity': 'plaintext' })[k],
+      getConfig: (k) => makeConfig({ 'email.imapSecurity': 'plaintext', 'email.imapHost': '127.0.0.1' })[k],
       secretsManager: makeSecretsManager({ GOODVIBES_EMAIL_PASSWORD: 'pass' }),
       transport: recorded.port,
       describeSenderClaim: testDescribeSenderClaim,
@@ -448,7 +384,7 @@ describe('EmailService imapSecurity: socket factory selection', () => {
 
   test('a transport with no plaintext member is refused by name rather than silently upgraded', async () => {
     const service = new EmailService({
-      getConfig: (k) => makeConfig({ 'email.imapSecurity': 'plaintext' })[k],
+      getConfig: (k) => makeConfig({ 'email.imapSecurity': 'plaintext', 'email.imapHost': '127.0.0.1' })[k],
       secretsManager: makeSecretsManager({ GOODVIBES_EMAIL_PASSWORD: 'pass' }),
       // A transport predating connectImapPlain: TLS is present, plaintext is not.
       transport: {
@@ -644,6 +580,48 @@ describe('EmailService.testConnection', () => {
     const result = await service.testConnection();
     expect(result.ok).toBe(false);
     expect(result.stage).toBe('smtp');
+  });
+
+  test('closes the IMAP socket when authentication fails, and the SMTP socket when SMTP auth fails', async () => {
+    const imap = await connectFake((socket) => {
+      write(socket, '* OK IMAP4rev1 Fake Server ready');
+      socket.on('data', (chunk) => {
+        const line = chunk.toString().trim();
+        if (line.includes('LOGIN')) write(socket, `${line.split(' ')[0] ?? 'A0001'} NO [AUTHENTICATIONFAILED] Invalid credentials`);
+      });
+    });
+    const smtp = await connectFake((socket) => {
+      write(socket, '220 fake.smtp.example.test ESMTP ready');
+      socket.on('data', (chunk) => {
+        const line = chunk.toString().trim().toUpperCase();
+        if (line.startsWith('EHLO')) { write(socket, '250-fake.smtp.example.test Hello'); write(socket, '250 AUTH PLAIN'); }
+        else if (line.startsWith('AUTH PLAIN')) write(socket, '535 5.7.8 Authentication failed');
+      });
+    });
+    const imapSockets: Socket[] = [];
+    const smtpSockets: Socket[] = [];
+    const build = (imapPort: number) => new EmailService({
+      getConfig: (k) => makeConfig({
+        'email.imapHost': imap.host, 'email.imapPort': imapPort,
+        'email.smtpHost': smtp.host, 'email.smtpPort': smtp.port,
+      })[k],
+      secretsManager: makeSecretsManager({ GOODVIBES_EMAIL_PASSWORD: 'pw' }),
+      transport: throwingEmailTransport,
+      describeSenderClaim: testDescribeSenderClaim,
+      imapSocketFactory: async (host, port) => { const s = connect({ host, port }); imapSockets.push(s); return s; },
+      smtpSocketFactory: async (host, port) => { const s = connect({ host, port }); smtpSockets.push(s); return s; },
+    });
+
+    const imapFailure = await build(imap.port).testConnection();
+    expect(imapFailure.stage).toBe('imap');
+    expect(imapSockets).toHaveLength(1);
+    expect(imapSockets[0]?.destroyed).toBe(true);
+
+    const goodImap = await connectFake(fakeImapSuccessScript);
+    const smtpFailure = await build(goodImap.port).testConnection();
+    expect(smtpFailure.stage).toBe('smtp');
+    expect(smtpSockets).toHaveLength(1);
+    expect(smtpSockets[0]?.destroyed).toBe(true);
   });
 
   test('never returns the raw password in a failure result', async () => {

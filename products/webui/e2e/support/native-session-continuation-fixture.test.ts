@@ -56,6 +56,7 @@ describe("native continuation genuine HTTP recordings", () => {
       throw new Error("Missing native conversation disposition");
     expect(source.continuation?.messages).toEqual(capture.initial.attachment!.history);
     expect(source.sourceRef.continuation).toEqual({
+      version: 2,
       sessionId: capture.sessionId,
       revision: source.continuation.revision,
     });

@@ -6,7 +6,14 @@
  */
 import type { Playbook, DiagnosticCheckResult } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+import { getOpsRuntimeContext } from '../runtime-context.js';
 import type { OpsRuntimeContextState } from '../runtime-context.js';
+import type { TurnState, ToolExecutionState } from '../../store/domains/conversation.js';
+
+/** Turn states in which a turn is still in flight. A finished turn keeps its id and start time. */
+const IN_FLIGHT_TURN_STATES: ReadonlySet<TurnState> = new Set(['preflight', 'streaming', 'tool_dispatch', 'post_hooks']);
+/** Tool calls stay in the map after they finish, until the next turn is submitted. */
+const FINISHED_TOOL_STATES: ReadonlySet<ToolExecutionState> = new Set(['succeeded', 'failed', 'cancelled']);
 
 export function createStuckTurnPlaybook(
   getRuntimeContext: () => OpsRuntimeContextState | null = () => null,
@@ -35,15 +42,18 @@ export function createStuckTurnPlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
           const { conversation } = runtime.store.getState();
-          if (!conversation.currentTurnId || !conversation.turnStartedAt || conversation.turnState === 'idle') {
+          if (!conversation.currentTurnId || !conversation.turnStartedAt || !IN_FLIGHT_TURN_STATES.has(conversation.turnState)) {
             return {
               passed: true,
-              summary: 'No active turn is currently in flight.',
+              summary: conversation.currentTurnId && conversation.turnState !== 'idle'
+                ? `No turn is in flight; the last turn ${conversation.currentTurnId} is ${conversation.turnState}.`
+                : 'No active turn is currently in flight.',
               severity: 'info',
             };
           }
@@ -75,8 +85,9 @@ export function createStuckTurnPlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
           const inactiveMs = runtime.now() - runtime.lastEventAt;
@@ -106,23 +117,26 @@ export function createStuckTurnPlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
-          const { conversation, permissions } = runtime.store.getState();
-          const pendingToolCalls = conversation.activeToolCalls.size;
-          const awaitingDecision = permissions.awaitingDecision;
-          const blocked = pendingToolCalls > 0 || awaitingDecision;
+          const { conversation } = runtime.store.getState();
+          const pendingToolCalls = [...conversation.activeToolCalls.values()]
+            .filter((call) => !FINISHED_TOOL_STATES.has(call.state)).length;
+          const blocked = pendingToolCalls > 0;
+          // Pending permission prompts are not visible here: the gate reports a
+          // request only after its decision. They are listed by the approval
+          // broker, so the summary points there instead of claiming none exist.
           return {
             passed: !blocked,
             summary: blocked
-              ? `Detected ${pendingToolCalls} active tool call(s)${awaitingDecision ? ' with a permission decision still pending' : ''}.`
-              : 'No active tool calls or pending permission decisions detected.',
+              ? `Detected ${pendingToolCalls} unfinished tool call(s). Pending permission prompts are listed under approvals.`
+              : 'No unfinished tool calls recorded. Pending permission prompts are listed under approvals.',
             severity: blocked ? 'warning' : 'info',
             context: {
               pendingToolCalls,
-              awaitingDecision,
             },
           };
         }),
@@ -146,7 +160,6 @@ export function createStuckTurnPlaybook(
         'Inspect the PhasedToolExecutor queue for tools awaiting permissions or locks. ' +
         'Cross-reference with PermissionManager.pendingRequests().',
       kind: 'observe',
-      command: 'runtime.tools.executor.dumpState()',
       expectedOutcome: 'Tool queue is empty or shows a specific blocked tool.',
       automatable: false,
     },
@@ -157,9 +170,8 @@ export function createStuckTurnPlaybook(
         'Emit a task.cancel event on the RuntimeEventBus with the stuck taskId. ' +
         'The TaskStateMachine should transition to CANCELLED within 1 s.',
       kind: 'command',
-      command: 'eventBus.emit("task.cancel", { taskId })',
       expectedOutcome: 'Turn transitions to CANCELLED; health check recovers.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 4,
@@ -168,7 +180,6 @@ export function createStuckTurnPlaybook(
         'Re-submit the failed turn with a shorter LLM timeout (e.g. 30 s) and ' +
         'tool-use disabled to isolate whether the model or a tool is the root cause.',
       kind: 'command',
-      command: 'runtime.submitTurn({ ...turnPayload, timeoutMs: 30_000, tools: [] })',
       expectedOutcome: 'Turn completes or fails fast with a clear error.',
       automatable: false,
     },
@@ -194,4 +205,4 @@ export function createStuckTurnPlaybook(
 }
 
 /** Stuck turn / task resolution playbook. */
-export const stuckTurnPlaybook: Playbook = createStuckTurnPlaybook();
+export const stuckTurnPlaybook: Playbook = createStuckTurnPlaybook(getOpsRuntimeContext);

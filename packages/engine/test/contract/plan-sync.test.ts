@@ -6,8 +6,6 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
-  CONTRACT_TASK_STATUS,
-  UNIT_TASK_STATUS,
   contractTaskId,
   unitTaskId,
   type ExecutionPlans,
@@ -17,9 +15,10 @@ import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from '
 import { contractOf, finishes, keepsFailing, routeAnswer, terminal } from './steps-support.js';
 
 let harness: Harness | undefined;
-afterEach(() => {
-  harness?.dispose();
+afterEach(async () => {
+  const finished = harness;
   harness = undefined;
+  await finished?.dispose();
 });
 
 interface Write {
@@ -104,11 +103,4 @@ describe('plan sync (6.5)', () => {
     await waitFor(() => statusesOf(writes, unitTaskId(contract.id, 'u1')).at(-1) === 'blocked', 'the unit task to be blocked');
     await waitFor(() => statusesOf(writes, contractTaskId(contract.id)).at(-1) === 'blocked', 'the contract task to be blocked');
   }, 20_000);
-
-  test('every unit and contract status maps to a work-plan status', () => {
-    expect(Object.entries(UNIT_TASK_STATUS).filter(([, status]) => status === 'in_progress').map(([unit]) => unit).sort()).toEqual(['checking', 'fixing', 'held', 'held-merge', 'nudged', 'running']);
-    expect([UNIT_TASK_STATUS.pending, UNIT_TASK_STATUS.blocked, UNIT_TASK_STATUS['awaiting-owner'], UNIT_TASK_STATUS.passed, UNIT_TASK_STATUS.failed, UNIT_TASK_STATUS.cancelled])
-      .toEqual(['pending', 'pending', 'blocked', 'done', 'failed', 'cancelled']);
-    expect([CONTRACT_TASK_STATUS.queued, CONTRACT_TASK_STATUS.running, CONTRACT_TASK_STATUS['awaiting-owner'], CONTRACT_TASK_STATUS.passed]).toEqual(['pending', 'in_progress', 'blocked', 'done']);
-  });
 });

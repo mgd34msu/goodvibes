@@ -179,6 +179,8 @@ export interface BeginCheckoutInput {
 /** Host-only invocation facts; never read from the checkout's wire input. */
 export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
   readonly retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'];
+  /** Host-only; see CheckoutFlowDeps.keepWindowOnStop. */
+  readonly keepWindowOnStop?: CheckoutFlowDeps['keepWindowOnStop'];
   /** Original request's host-captured sources, retained before async preflight. */
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly gates?: GateInput | undefined;
@@ -269,17 +271,18 @@ export class PaymentsGatewayServiceImpl {
     if (this.closed) throw new CheckoutOwnershipError();
     const purchaseId = options.purchaseId;
     const retainWindowCheckpoint = options.retainWindowCheckpoint?.bind(options);
+    const keepWindowOnStop = options.keepWindowOnStop?.bind(options);
     const gates = { ...(options.gates ?? this.deps.gates()) };
     const owner = this.ownership(options);
     owner.assertCurrent?.();
     const taintEvidence = options.taintEvidence === undefined ? retainTaintEvidence(this.deps.untrusted)
       : captureOwnedJson(options.taintEvidence) as RetainedTaintEvidence;
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint, resumption, restoredDriver));
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint, keepWindowOnStop, resumption, restoredDriver));
   }
 
   private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence,
-    retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'], resumption?: CheckoutWindowResumption,
-    restoredDriver?: CheckoutPageDriver): Promise<PaymentBeginResult> {
+    retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'], keepWindowOnStop?: CheckoutFlowDeps['keepWindowOnStop'],
+    resumption?: CheckoutWindowResumption, restoredDriver?: CheckoutPageDriver): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -346,6 +349,7 @@ export class PaymentsGatewayServiceImpl {
     const outcome = await runCheckout(request, input.reading, controls, {
       resumeWindow: resumption,
       retainWindowCheckpoint,
+      keepWindowOnStop,
       signal: options.signal,
       assertCurrent: options.assertCurrent,
       registry: this.registry,

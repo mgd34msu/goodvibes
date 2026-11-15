@@ -31,6 +31,13 @@
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 
+/**
+ * Secret-store names a calendar password reference may point at. The reference
+ * is a config value; without this a reference to any stored secret would be
+ * sent to the configured server as the Basic password.
+ */
+const CALENDAR_SECRET_PREFIX = 'GOODVIBES_SURFACES_CALENDAR_';
+
 export const CALDAV_URL_KEY = 'surfaces.calendar.caldavUrl';
 export const CALDAV_USER_KEY = 'surfaces.calendar.caldavUser';
 export const CALDAV_PASSWORD_KEY = 'surfaces.calendar.caldavPassword';
@@ -73,10 +80,15 @@ export function createCalDavSecretPort(
       // `goodvibes://secrets/<provider>/<key>`, the key is the last segment,
       // percent-decoded, exactly as `buildGoodVibesSecretRef` wrote it. Any
       // other string is taken as a bare store key.
-      const key = normalized.startsWith('goodvibes://secrets/')
-        ? decodeURIComponent(normalized.split('/').pop() ?? '')
-        : normalized;
-      if (key.length === 0) return null;
+      let key: string;
+      try {
+        key = normalized.startsWith('goodvibes://secrets/')
+          ? decodeURIComponent(normalized.split('/').pop() ?? '')
+          : normalized;
+      } catch {
+        return null;
+      }
+      if (!key.startsWith(CALENDAR_SECRET_PREFIX)) return null;
       return secretsManager.get(key);
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {
@@ -152,15 +164,13 @@ export async function resolveCalDavGatewayConfig(
   }
 
   const passwordConfig = readConfigString(config, CALDAV_PASSWORD_KEY);
-  let password: string | null = null;
-  if (passwordConfig) {
-    password = await secrets.resolveRef(passwordConfig);
-  }
-  if (!password) {
-    // Fall back to the config-key-derived secret, which is where setup stores
-    // it when the operator typed a password rather than pasting a reference.
-    password = await secrets.resolveConfigSecret(CALDAV_PASSWORD_KEY);
-  }
+  // A configured reference that does not resolve is an error, not a cue to use
+  // a different credential than the one the operator named. The config-key
+  // derived secret is only the answer when no reference is configured, which
+  // is where setup stores a password the operator typed.
+  const password = passwordConfig
+    ? await secrets.resolveRef(passwordConfig)
+    : await secrets.resolveConfigSecret(CALDAV_PASSWORD_KEY);
   if (!password) {
     throw new GatewayVerbError(
       'CalDAV password is not available in the credential store.',
@@ -238,10 +248,25 @@ export function isHrefLike(eventId: string): boolean {
  */
 export function resolveResourceUrl(collectionUrl: string, baseUrl: string, eventId: string): string {
   const trimmed = eventId.trim();
-  if (trimmed.startsWith('/')) {
-    return `${originOf(baseUrl)}${trimmed}`;
+  const candidate = trimmed.startsWith('/')
+    ? `${originOf(baseUrl)}${trimmed}`
+    : joinUrl(collectionUrl, trimmed);
+  // `..` segments are resolved by the HTTP client, so an id could otherwise
+  // name any path on the server under the account's credentials.
+  let resolved: URL;
+  let collection: URL;
+  try {
+    resolved = new URL(candidate);
+    collection = new URL(collectionUrl);
+  } catch {
+    return candidate;
   }
-  return joinUrl(collectionUrl, trimmed);
+  const collectionPath = stripTrailingSlash(collection.pathname);
+  if (resolved.origin !== collection.origin
+    || (collectionPath.length > 0 && !resolved.pathname.startsWith(`${collectionPath}/`))) {
+    throw new GatewayVerbError(`Event id '${eventId}' is not inside the requested calendar.`, 'INVALID_ARGUMENT', 400);
+  }
+  return resolved.href;
 }
 
 /** The host-relative collection path implied by an absolute collection URL. */
@@ -261,6 +286,9 @@ export function collectionPathFor(
   if (mapped) return mapped;
   if (id === config.defaultCalendarId) return '';
   // Unknown logical id with no mapping: treat the id as a child collection name.
+  if (id === '.' || id === '..') {
+    throw new GatewayVerbError(`Calendar id '${id}' is not a calendar name.`, 'INVALID_ARGUMENT', 400);
+  }
   return `/${encodeURIComponent(id)}/`;
 }
 

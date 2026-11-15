@@ -30,7 +30,8 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
   armCommandWithoutRegistry: false,
   recoverDesyncedCommands: false,
   scheduleCommandArguments: () => undefined,
-  mouseRowOffset: 1,
+  // InputTokenizer already reports zero-based rows.
+  mouseRowOffset: 0,
   clipMouseToTranscript: false,
   requireBlockForCollapse: false,
 });

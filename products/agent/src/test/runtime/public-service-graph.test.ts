@@ -32,12 +32,15 @@ test('the actual Agent graph exposes the published contract services and dispose
     expect(services.asDaemonGradeView().contractRunner).toBe(services.contractRunner);
     expect(services.runtimeStore.getState().contracts.contracts.size).toBe(0);
     const lines: string[] = [];
+    let threeLines = () => {};
+    const allThreeLines = new Promise<void>(resolve => { threeLines = resolve; });
+    const record = (line: string) => { lines.push(line); if (lines.length === 3) threeLines(); };
     let rendered!: () => void;
     const didRender = new Promise<void>(resolve => { rendered = resolve; });
     const bridge = registerAgentRuntimeEvents({
       runtimeBus, domainDispatch: createDomainDispatch(services.runtimeStore), configManager,
       agentManager: services.agentManager, contractRunner: services.contractRunner, toolRegistry: new ToolRegistry(),
-      getSystemMessageRouter: () => ({ contract: line => lines.push(line), high: line => lines.push(line), low: line => lines.push(line) }),
+      getSystemMessageRouter: () => ({ contract: record, high: record, low: record }),
       requestRender: rendered,
     });
     try {
@@ -53,8 +56,7 @@ test('the actual Agent graph exposes the published contract services and dispose
       emitContractEvent(runtimeBus, 'agent-graph-session', {
         type: 'CONTRACT_PASSED', contractId: 'ctr-agent-graph', criteriaMet: 1, criteriaJudged: 1, excluded: 0, nudges: 0,
       });
-      // The event bus queues each synchronous lifecycle handler on a microtask.
-      await Promise.resolve();
+      await allThreeLines;
       expect(lines).toHaveLength(3);
       expect(lines[1]).toBe('[Contract] ctr-agent-graph started: Verify the Agent graph contract caller');
       expect(lines[2]).toBe('[Contract] ✓ ctr-agent-graph PASSED: 1 of 1 criteria met, 0 corrections');

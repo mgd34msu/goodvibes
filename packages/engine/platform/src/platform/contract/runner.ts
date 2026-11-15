@@ -55,7 +55,7 @@ import { delegationForbidden } from './batteries/request-shape.js';
 import { createUnitCheckLoop, queueSessionNudge, type ContractSessionHooks } from './agent-hooks.js';
 import { readContractConfig, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
-import type { OwnerReplyOutcome } from './escalation.js';
+import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
 import { createGroupRunner, takeBaseline, type ContractEngineInput } from './group-runner.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
 import { captureContractInput, releaseContractInputObservations, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
@@ -64,8 +64,10 @@ import type { NativeContractDecisionHost, NativeContractServices } from './nativ
 import { bindNativeContractSource, captureNativeContractSource, nativeSourceCriteria } from './native-source.js';
 import { createContractPlanSync, type ExecutionPlans, type WorkPlanService } from './plan-sync.js';
 import { ContractExecutionWork } from './owned-execution-work.js';
+import { claimContractLease } from './lease.js';
 import { createContractResume, findZombieCause, type ResumeReport } from './resume.js';
 import { numberDraft } from './draft-plan.js';
+import { WorktreeRegistry } from '../runtime/worktree/registry.js';
 import { createContractFleetControls, type ContractFleetControls } from './fleet-controls.js';
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 import { ContractRun, failureFromError, type RunEnv } from './run-context.js';
@@ -129,6 +131,10 @@ export interface ContractRunnerDeps {
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   readonly repositoryMap?: ((projectRoot: string) => Promise<string>) | undefined;
   readonly now?: (() => number) | undefined;
+  /** Where an ended worktree-mode contract's tree is handed for removal (default: the project's worktree registry). */
+  readonly worktrees?: Pick<WorktreeRegistry, 'releaseEnded'> | undefined;
+  /** Waits `ms` or until `signal` aborts; defaults to a timer. A test injects its own so no real time passes. */
+  readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
 }
 
 export interface StartedContract {
@@ -153,6 +159,18 @@ export interface ContractStartOptions {
 
 /** The session a contract gets when an agent spawn starts it with no conversation session (AgentManager's own event session). */
 export const AGENT_MANAGER_SESSION_ID = 'agent-manager';
+
+/** The longest a shutdown waits for queued work-plan writes; a stuck service must not hold the process open. */
+const WORK_PLAN_FLUSH_LIMIT_MS = 5_000;
+
+async function boundedWait(work: Promise<void>, limitMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([work, new Promise<void>((resolve) => { timer = setTimeout(resolve, limitMs); timer.unref?.(); })]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 export interface ContractRunner {
   /** Source-less legacy entry points/records must not activate approval fallback in a native owner. */
@@ -193,8 +211,22 @@ export interface ContractRunner {
     readonly includeInputSnapshot?: boolean | undefined }): ContractView[];
   /** Stops a contract and everything it runs. False when it is unknown or already ended. */
   cancel(contractId: string, reason: string): boolean;
+  /**
+   * Resolves once the project work plan holds the contracts' latest statuses, or after a bounded wait. A host that
+   * is about to exit awaits it after `dispose`, which cannot: `dispose` is synchronous. Optional for custom runners;
+   * the factory always supplies it.
+   */
+  flushWorkPlan?(): Promise<void>;
   /** An owner's free-text reply to an open escalation, read with the reply pattern. */
   reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>;
+  /**
+   * A native session contract's turn keeps failing: it pauses (awaiting-owner, its
+   * work kept) and asks the owner to retry or cancel. The answer goes through
+   * `reply`; "retry" returns the contract to running, "cancel" stops it. This is
+   * not an approval path: native contracts still have no owner approval of the work.
+   * Throws for any contract that is not a running native session contract.
+   */
+  pauseForOwnerRetry(contractId: string, failure: FailurePauseInput): { readonly escalationId: string };
   /**
    * At startup: every contract on disk that had not ended
    * resumes at the step it was on, or is reaped as a zombie when what it needs
@@ -227,6 +259,18 @@ export async function currentBase(projectRoot: string, signal: AbortSignal = new
   return resolveContractBase(projectRoot, signal);
 }
 
+/** The contract id a snapshot names, when it can be read at all. */
+function snapshotContractId(snapshotJson: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(snapshotJson);
+    const contract = parsed !== null && typeof parsed === 'object' && 'contract' in parsed ? parsed.contract : undefined;
+    const id = contract !== null && typeof contract === 'object' && contract !== undefined && 'id' in contract ? contract.id : undefined;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The count of distinct files the contract's units changed, as their checks recorded them. */
 export function filesModified(contract: Pick<Contract, 'units'>): number {
   return new Set(contract.units.flatMap((unit) => unit.touchedPaths)).size;
@@ -236,6 +280,26 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const now = deps.now ?? Date.now;
   const durableAdmissions = new DurableContractAdmissions(deps.store.projectRoot);
   const durableLeases = new Map<string, () => void>();
+  /** The claim this runner holds on each contract it runs, so a second process does not resume it. Released once the run's final checkpoint is written. */
+  const processLeases = new Map<string, () => void>();
+  function releaseProcessLease(contractId: string): void {
+    const release = processLeases.get(contractId);
+    processLeases.delete(contractId);
+    release?.();
+  }
+  function claimProcessLease(contractId: string): boolean {
+    if (processLeases.has(contractId)) return true;
+    let release: (() => void) | null;
+    try { release = claimContractLease(deps.store.projectRoot, contractId); }
+    catch (error) {
+      // A claim that cannot be made (unwritable directory) must not stop a contract this process already owns.
+      logger.warn('contract runner: the run claim could not be taken', { contractId, error: summarizeError(error) });
+      return true;
+    }
+    if (release === null) return false;
+    processLeases.set(contractId, release);
+    return true;
+  }
   // Placement is prepared before a ContractRun exists. Disposal still owns
   // those children, and admission awaits their real close before releasing its lease.
   const placementAbort = new AbortController();
@@ -256,6 +320,19 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       settlements.set(contractId, entry);
     }
     return entry;
+  }
+
+  /**
+   * Hands the ended contract's worktree, and the captured input view made for it, to the retention rules.
+   * Never throws: a tree that stays is only disk use.
+   */
+  function releaseEndedWorktree(contract: Contract): void {
+    const worktrees = deps.worktrees ?? new WorktreeRegistry(contract.projectRoot);
+    const targets = [{ path: contract.worktreePath!, baseBranch: contract.baseBranch },
+      ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch }])];
+    void worktrees.releaseEnded(targets).catch((error: unknown) => {
+      logger.warn('contract worktree could not be released', { contractId: contract.id, error: summarizeError(error) });
+    });
   }
 
   // Separate from outward terminal events: an abort/status is never a join.
@@ -307,7 +384,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (checkpointed) {
         durableLeases.get(run.id)?.();
         durableLeases.delete(run.id);
+        releaseProcessLease(run.id);
       }
+      // A worktree-mode contract's tree has nothing left to do now that its work drained. The retention rules
+      // remove it only when it holds nothing unique (no uncommitted changes, no commits missing from the base).
+      if (checkpointed && !disposed && run.contract.worktreePath !== undefined) releaseEndedWorktree(run.contract);
       entry.resolve();
       settlements.delete(run.id);
       settling.delete(run.id);
@@ -318,6 +399,20 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
   /** Contracts holding an active slot: admitted past the queue and not yet ended. */
   const admitted = new Set<string>();
+  /**
+   * A contract paused on its owner after a failed session turn is not running, so it does not count
+   * against the active limit: queued contracts, in any session, must not wait indefinitely on an owner
+   * who has not answered. Other waits for the owner still hold their slot.
+   */
+  const activeCount = (): number => {
+    let count = 0;
+    for (const id of admitted) {
+      const contract = runs.get(id)?.contract;
+      const paused = contract?.status === 'awaiting-owner' && contract.escalations.some((item) => item.resolvedAt === undefined && item.failurePause === true);
+      if (!paused) count++;
+    }
+    return count;
+  };
   const queue: ContractRun[] = [];
   const pricing = { priceUsage: deps.priceUsage, priceProvenance: deps.priceProvenance };
   const getStatus = (agentId: string): AgentRecord | null => deps.agentManager.getStatus(agentId);
@@ -343,9 +438,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const env: RunEnv = {
     native,
     now,
+    ...(deps.wait === undefined ? {} : { wait: deps.wait }),
     config: () => readContractConfig(deps.configManager),
     emit,
     touchAgent: (agentId) => watchdog.touch(agentId),
+    contractMoved: (contract) => setOwnerProgress(contract),
   };
 
   deps.messageBus.registerAgent({ agentId: CONTRACT_RUNNER_AGENT_ID, role: 'orchestrator' });
@@ -397,6 +494,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         }
         signal.addEventListener('abort', onAbort, { once: true });
         runtime.settlement = entry;
+        // Independent of the silence watchdog (off by default): once the
+        // agent's execution drained, an end that published no event still settles the unit.
+        void deps.agentManager.join?.(agentId).then(() => {
+          setTimeout(() => { if (!run.terminal) failures.reconcile(agentId); }, 0).unref?.();
+        });
       });
     },
     beforeSpawn(item, signal) {
@@ -546,7 +648,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   function dequeue(): void {
     const cap = env.config().maxActiveContracts;
-    while (queue.length > 0 && admitted.size < cap && !disposed) {
+    while (queue.length > 0 && activeCount() < cap && !disposed) {
       const next = queue.shift()!;
       if (next.terminal) continue;
       next.decide('queued', next.id, 'a slot opened; starting');
@@ -707,7 +809,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         }
         const run = runs.get(id);
         if (run !== undefined && !run.terminal && !disposed) {
-          if (admitted.size < env.config().maxActiveContracts) {
+          if (activeCount() < env.config().maxActiveContracts) {
             admitted.add(id);
             try { await launchDurable(run); }
             catch (error) { cancelRun(run, 'native admission launch was not validated'); throw error; }
@@ -765,12 +867,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       catch (error) { durableLeases.delete(admission.contractId); lease(); throw error; }
       const run = newRun(contract);
       run.requireSettlement = true;
-      resume.prepareNative(run);
+      try { resume.prepareNative(run); }
+      catch (error) { fail(run, 'zombie', `native contract checkpoint cannot resume: ${summarizeError(error)}`, true); return durableResult(admission); }
       const zombie = findZombieCause(contract);
       if (zombie !== null) { fail(run, 'zombie', 'native contract checkpoint cannot resume', true); return durableResult(admission); }
       // Preserve the restart step even while queued. The persisted native binding never grants launch.
       contract.resumeFrom = contract.resumeFrom ?? contract.status;
-      if (admitted.size < env.config().maxActiveContracts) {
+      if (activeCount() < env.config().maxActiveContracts) {
         admitted.add(run.id);
         try { await launchDurable(run); }
         catch (error) { cancelRun(run, 'native admission resume was not validated'); throw error; }
@@ -1001,7 +1104,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (owner.status === 'cancelled') cancelRun(run, 'the owner was cancelled during spawn');
     if (run.terminal || deferAdmission) {
       // Re-entrant creation/spawn listeners can stop the owner before admission.
-    } else if (admitted.size < config.maxActiveContracts) {
+    } else if (activeCount() < config.maxActiveContracts) {
       admit(run);
     } else {
       queue.push(run);
@@ -1020,6 +1123,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     }, contract.proposedUnits, new ContractExecutionWork(reserveSettlement(contract.id).promise));
     reserveSettlement(contract.id);
     runs.set(contract.id, run);
+    // A resumed contract already holds its claim; a new contract's id is unused, so this only records it.
+    claimProcessLease(contract.id);
     const sourceSignal = getContractActionSignal(contract);
     if (sourceSignal) {
       // Runner shutdown retires this signal too. Its normal disposal path
@@ -1047,6 +1152,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       ...(deps.repositoryMap === undefined ? {} : { repositoryMap: deps.repositoryMap }),
       readAccessFilter: deps.readAccessFilter,
       now,
+      ...(deps.wait === undefined ? {} : { wait: deps.wait }),
     };
   }
 
@@ -1135,6 +1241,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (outcome.kind === 'shaped' || outcome.kind === 'accepted') return !run.terminal;
     if (outcome.kind === 'failed') settleEnded(run);
     if (outcome.kind === 'cancelled' && run.contract.nativeSource !== undefined && !run.terminal) cancelRun(run, 'Native judgment was cancelled or superseded');
+    // A planner stopped while the contract still runs leaves nothing to run: say so instead of waiting.
+    else if (outcome.kind === 'cancelled' && !run.terminal) fail(run, 'planning', `contract ${run.id} has no plan: its planner was stopped before it produced one`);
     if (outcome.kind === 'awaiting-owner') updateOwnerProgress(run);
     return false;
   }
@@ -1173,10 +1281,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     run.decide('spawned', contract.id, 'session mode: the session\'s next turn takes the work; no sub-agent is spawned');
   }
 
-  /** The session-mode unit waiting for work in a session. */
-  function sessionUnit(sessionId: string): { readonly run: ContractRun; readonly unit: ContractRun['contract']['units'][number] } | null {
+  /**
+   * The session-mode unit waiting for work in a session. `except` names contracts the caller has fenced (a
+   * cancel still in flight), so the next waiting contract is not held behind one that is already ending.
+   */
+  function sessionUnit(sessionId: string, except?: ReadonlySet<string>): { readonly run: ContractRun; readonly unit: ContractRun['contract']['units'][number] } | null {
     for (const run of runs.values()) {
-      if (run.terminal || run.contract.sessionMode !== true || run.contract.sessionId !== sessionId) continue;
+      if (run.terminal || run.contract.sessionMode !== true || run.contract.sessionId !== sessionId || except?.has(run.id) === true) continue;
       const unit = run.contract.units.find((candidate) => candidate.status === 'running' || candidate.status === 'nudged');
       if (unit !== undefined) return { run, unit };
     }
@@ -1193,8 +1304,12 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   }
 
   function updateOwnerProgress(run: ContractRun): void {
-    const owner = getStatus(run.contract.ownerAgentId);
-    if (owner !== null && owner.status === 'running') setAgentProgress(owner, ownerProgress(run.contract), 'operator');
+    setOwnerProgress(run.contract);
+  }
+
+  function setOwnerProgress(contract: Contract): void {
+    const owner = getStatus(contract.ownerAgentId);
+    if (owner !== null && owner.status === 'running') setAgentProgress(owner, ownerProgress(contract), 'operator');
   }
 
   // ── Ending ──────────────────────────────────────────────────────────────────
@@ -1288,6 +1403,17 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return true;
   }
 
+  /**
+   * A contract whose checkpoint cannot be written reads healthy until the process exits and the work is lost.
+   * The read view says so; the stored contract is left as it is, so the warning is never itself persisted.
+   */
+  function withCheckpointWarning<T extends Pick<ContractView, 'id' | 'status' | 'statusLine'>>(view: T): T {
+    const failure = deps.store.writeFailure(view.id);
+    if (failure === null) return view;
+    const base = view.statusLine ?? `Contract ${view.id} ${view.status}`;
+    return { ...view, statusLine: `${base} (warning: ${failure.message} Progress since the last saved checkpoint is not durable.)` };
+  }
+
   function finishPassed(run: ContractRun, result: { readonly answer: string; readonly statusLine: string }): void {
     if (run.terminal) return;
     const { contract } = run;
@@ -1316,6 +1442,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     nativeOnly: deps.nativeDecisions !== undefined,
     store: deps.store,
     isLive: (contractId) => runs.has(contractId),
+    claim: claimProcessLease,
     adopt: (contract) => {
       deps.store.hold(contract);
       const run = newRun(contract);
@@ -1327,10 +1454,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       return run;
     },
-    hasSlot: () => admitted.size < env.config().maxActiveContracts,
+    hasSlot: () => activeCount() < env.config().maxActiveContracts,
     takeSlot: (run) => { admitted.add(run.id); },
     enqueue: (run) => { queue.push(run); },
     fail,
+    failUnit: (run, unit, kind, reason) => failures.failUnit(run, unit, kind, reason),
     groups,
     checks,
     steps,
@@ -1369,25 +1497,46 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     inspectIntegration: (contractId) => inspectContractIntegration(runs.get(contractId), disposed),
     get: (contractId) => {
       const contract = deps.store.get(contractId);
-      return contract === null ? null : structuredClone(contract);
+      return contract === null ? null : withCheckpointWarning(structuredClone(contract));
     },
     list: (filter = {}) => deps.store.list()
       .filter((contract) => filter.sessionId === undefined || contract.sessionId === filter.sessionId)
       .filter((contract) => filter.includeTerminal === true || !isTerminalContractStatus(contract.status))
-      .map((contract) => structuredClone(filter.includeInputSnapshot === false
-        ? { ...contract, inputSnapshot: undefined } : contract)),
+      .map((contract) => withCheckpointWarning(structuredClone(filter.includeInputSnapshot === false
+        ? { ...contract, inputSnapshot: undefined } : contract))),
     cancel: (contractId, reason) => {
       const run = runs.get(contractId);
       return run === undefined ? false : cancelRun(run, reason);
     },
     reply: async (contractId, escalationId, text) => {
       const run = runs.get(contractId);
-      if (run === undefined || run.terminal) throw new Error(`contract ${contractId} is not running`);
-      if (run.contract.nativeSource !== undefined) throw new Error('Native contracts do not accept owner approval replies');
+      if (run === undefined || run.terminal) throw new OwnerReplyRefusedError(`contract ${contractId} is not running`, 'ended');
+      // Only a failure pause (retry or cancel) is answerable on a native contract; it grants no approval.
+      const failurePause = run.contract.escalations.some((item) => item.id === escalationId && item.failurePause === true);
+      if (run.contract.nativeSource !== undefined && !failurePause) throw new OwnerReplyRefusedError('Native contracts do not accept owner approval replies', 'unsupported');
       return steps.reply(run, escalationId, text);
     },
+    pauseForOwnerRetry: (contractId, failure) => {
+      const run = runs.get(contractId);
+      if (run === undefined || run.terminal) throw new Error(`contract ${contractId} is not running`);
+      // Synchronous on purpose: the caller must see the pause recorded before it does anything else.
+      const escalationId = ownSteps.pauseForOwnerRetry(run, failure).id;
+      // The paused contract gives up its slot: start whatever was waiting for one.
+      dequeue();
+      return { escalationId };
+    },
+    flushWorkPlan: () => boundedWait(planSync.flush(), WORK_PLAN_FLUSH_LIMIT_MS),
     resumeAll: () => resume.resumeAll(),
-    importContract: (snapshotJson, force = false) => deps.store.importContract(snapshotJson, force),
+    importContract: (snapshotJson, force = false) => {
+      // Replacing the stored object under a live run would leave that run
+      // mutating a detached copy whose final checkpoint is then refused.
+      const id = snapshotContractId(snapshotJson);
+      if (id !== undefined && (runs.has(id) || settling.has(id))) {
+        logger.warn('contract runner: import refused, the contract is running or still settling here; cancel it or wait for it to end first', { contractId: id });
+        return false;
+      }
+      return deps.store.importContract(snapshotJson, force);
+    },
     serializeContract: (contractId) => deps.store.serialize(contractId),
     hooks: () => checks.hooks,
     fleetControls: () => fleetControls,
@@ -1424,6 +1573,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         groups.stopRun(run);
         settleWork(run);
       }
+      // A disposed runner no longer drives any contract; one whose work never drains (a planner that does not answer)
+      // would otherwise hold its claim until the process ends and keep a rebuilt runner from resuming it.
+      for (const id of [...processLeases.keys()]) releaseProcessLease(id);
       listeners.clear();
     },
   };

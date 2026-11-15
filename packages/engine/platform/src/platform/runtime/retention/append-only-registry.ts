@@ -455,6 +455,9 @@ export function runAppendOnlyRetentionSweep(
           owner: store.owner,
           reclaimedBytes: storeReclaimedBytes,
           countCappedFiles: countCapped.deletedFiles.length,
+          // The count cap is fixed, unlike the age and size caps, so a reader
+          // whose retention settings are generous needs to see which one acted.
+          ...(countCapped.deletedFiles.length > 0 ? { maxFilesPerStore: maxFiles } : {}),
           prunedFiles: storePruned,
         });
       }
@@ -468,6 +471,7 @@ export function runAppendOnlyRetentionSweep(
     logger.info('[retention] append-only retention sweep reclaimed files', {
       deletedFiles,
       countCappedFiles,
+      ...(countCappedFiles > 0 ? { maxFilesPerStore: maxFiles } : {}),
       reclaimedBytes,
       sweptStores: swept,
     });
@@ -593,6 +597,11 @@ export class AppendOnlyRetentionScheduler {
 
   private scheduleNext(): void {
     if (!this.running) return;
+    // A manual tick while a timer is armed must replace it, not run beside it.
+    if (this.timer !== null) {
+      (this.options.clearTimer ?? clearTimeout)(this.timer);
+      this.timer = null;
+    }
     const setTimer = this.options.setTimer ?? setTimeout;
     this.timer = setTimer(() => {
       this.timer = null;

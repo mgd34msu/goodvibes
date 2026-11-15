@@ -254,3 +254,28 @@ test('pending or lost native start acknowledgement never turns a session-mode ed
     expect(f.localModeWrites).toEqual([]);
   } finally { release.resolve(); await f.close(); }
 });
+
+test('a message refused because native intake is unavailable reports it was not sent, so what was taken for it can be given back', async () => {
+  const f = fixture(); let notSent = 0;
+  try {
+    await f.wiring.routeNativeOrExplain(source, undefined, () => { notSent++; });
+    expect(notSent).toBe(1);
+    expect(f.notices.join('\n')).toContain('intake is unavailable');
+  } finally { await f.close(); }
+});
+
+test.each(['invalid', 'unavailable', 'pending'] as const)('a hosted intake that refuses with %s reports the message was not sent', async status => {
+  const f = fixture(); let notSent = 0;
+  try {
+    await f.wiring.routeNativeOrExplain(source, intake({ submit: async () => ({ status, message: 'Refused.' }) }), () => { notSent++; });
+    expect(notSent).toBe(1);
+  } finally { await f.close(); }
+});
+
+test('a hosted intake that answers unknown does not report the message as not sent', async () => {
+  const f = fixture(); let notSent = 0;
+  try {
+    await f.wiring.routeNativeOrExplain(source, intake({ submit: async () => ({ status: 'unknown', message: 'Outcome unknown.' }) }), () => { notSent++; });
+    expect(notSent).toBe(0);
+  } finally { await f.close(); }
+});

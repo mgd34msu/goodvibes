@@ -10,7 +10,7 @@ import { finishes, git, terminal } from './steps-support.js';
 
 const extraRoots: string[] = [];
 let harness: Harness | undefined;
-afterEach(() => { harness?.dispose(); harness = undefined; for (const root of extraRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { const finished = harness; harness = undefined; await finished?.dispose(); for (const root of extraRoots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 for (const stale of [false, true]) {
   test(`${stale ? 'later independent owner edits are revalidated and preserved' : 'dirty owner input applies only result delta'} without changing index/history`, async () => {
@@ -82,7 +82,7 @@ test('cancel during capture starts no map, shape/planner or member', async () =>
   const h = harness = makeHarness({ contract: { isolation: 'worktree' }, scripts: {}, repositoryMap: async () => { calls++; return ''; }, planner: { async run() { calls++; return { status: 'failed', output: '', elapsedMs: 0 }; } } });
   const { contract } = (await startContract(h));
   h.runner.cancel(contract.id, 'cancel admission');
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await h.runner.join(contract.id);
   expect(h.store.get(contract.id)?.status).toBe('cancelled'); expect(calls).toBe(0); expect(h.agentsOf('u1')).toEqual([]);
   expect(h.events.some((event) => event.type === 'CONTRACT_SHAPED')).toBe(false);
 });
@@ -168,7 +168,7 @@ test('a real pending empty owner merge after capture is held without aborting th
 
 
 
-test('a failed merge after the final check retains concurrent owner writes and its Git state for inspection', async () => {
+test('a failed merge after the final check is undone, keeps the concurrent owner write and leaves the work on its branch', async () => {
   const h = harness = makeHarness({ plan: oneUnitPlan(1), contract: { isolation: 'worktree' }, scripts: { u1: finishes('export const parse = 10;') } });
   const hook = join(h.root, '.git/hooks/pre-merge-commit');
   // Member integration can fast-forward. The owner's no-ff commit reaches this real hook after the readset check.
@@ -179,15 +179,29 @@ test('a failed merge after the final check retains concurrent owner writes and i
   await waitFor(() => h.store.get(contract.id)?.commit?.status === 'failed', 'failed merge without owner rollback', 15_000);
   const done = h.store.get(contract.id)!;
   expect(done.status).not.toBe('passed'); expect(done.commit?.status).toBe('failed');
-  expect(existsSync(join(h.root, '.git/MERGE_HEAD'))).toBe(true);
+  expect(existsSync(join(h.root, '.git/MERGE_HEAD'))).toBe(false);
   expect(readFileSync(join(h.root, 'README.md'), 'utf8')).toBe('owner write during final merge\n');
   expect(git(h.root, 'rev-parse', 'HEAD')).toBe(head);
-  expect(done.commit?.note).toContain('inspect owner Git state'); expect(existsSync(done.worktreePath!)).toBe(true);
+  expect(done.commit?.note).toContain('the unfinished merge was undone'); expect(done.commit?.note).toContain(`the work stays on branch ${done.branch}`);
+  expect(existsSync(done.worktreePath!)).toBe(true);
 }, 20_000);
 
-test('an owner index lock created after capture holds apply without deleting the lock or changing the index', async () => {
+/** A wait that passes at once for the short backoffs and holds the parked tree poll until the test releases it. */
+function publicationWaits() {
+  const requested: number[] = [];
+  const polls: Array<() => void> = [];
+  const wait = (ms: number, signal: AbortSignal): Promise<void> => {
+    requested.push(ms);
+    if (ms < 30_000) return Promise.resolve();
+    return new Promise<void>((resolve) => { polls.push(resolve); signal.addEventListener('abort', () => resolve(), { once: true }); });
+  };
+  return { requested, wait, releasePoll: () => polls.splice(0).forEach((resolve) => resolve()) };
+}
+
+test('an owner index lock created after capture holds apply, parks the retries after six attempts and publishes once the lock is gone', async () => {
   const plan = oneUnitPlan(1); let index: Buffer<ArrayBuffer>;
-  const h = harness = makeHarness({ plan, contract: { isolation: 'worktree', autoCommit: false }, scripts: { u1: finishes('export const parse = 10;') }, planner: {
+  const waits = publicationWaits();
+  const h = harness = makeHarness({ plan, wait: waits.wait, contract: { isolation: 'worktree', autoCommit: false }, scripts: { u1: finishes('export const parse = 10;') }, planner: {
     async run() {
       writeFileSync(join(h.root, '.git/index.lock'), 'owner lock\n'); index = readFileSync(join(h.root, '.git/index'));
       return { status: 'completed', output: plannerOutput(plan), elapsedMs: 0 };
@@ -206,13 +220,25 @@ test('an owner index lock created after capture holds apply without deleting the
   expect(existsSync(join(h.root, 'src/csv.ts'))).toBe(false); expect(existsSync(done.worktreePath!)).toBe(true);
   expect(done.status).not.toBe('passed');
   const checked = done.checks.length;
-  await waitFor(() => done.decisions.filter(decision => decision.reason.startsWith('publication pending:')).length >= 2,
-    'a retained publication retry while the owner lock remains', 5_000);
+  const pendingDecisions = () => done.decisions.filter(decision => decision.reason.startsWith('publication pending:')).length;
+  // Six backed-off attempts, then the runner waits for the project tree instead of retrying an unchanged tree.
+  await waitFor(() => waits.requested.includes(30_000), 'the retries to park', 15_000);
+  expect(waits.requested).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000]);
+  // Retries against the same obstacle add no further decision.
+  expect(pendingDecisions()).toBe(1);
+  expect(h.manager.getStatus(done.ownerAgentId)?.progress).toContain('publication pending');
+  // An unchanged tree wakes the poll but starts no attempt.
+  waits.releasePoll();
+  await waitFor(() => waits.requested.length === 7, 'the next tree poll');
+  expect(waits.requested.at(-1)).toBe(30_000);
+  expect(done.status).not.toBe('passed');
   expect(done.checks).toHaveLength(checked);
   expect(h.agentsOf('u1')).toHaveLength(1);
   expect(readFileSync(join(h.root, '.git/index.lock'), 'utf8')).toBe('owner lock\n');
+  // The owner clears the lock: the next poll sees the tree changed and publishes.
   rmSync(join(h.root, '.git/index.lock'));
-  await waitFor(() => terminal(h, contract.id), 'publication after the owner released its index lock', 5_000);
+  waits.releasePoll();
+  await waitFor(() => terminal(h, contract.id), 'publication after the owner released its index lock', 15_000);
   expect(h.store.get(contract.id)?.status).toBe('passed');
   expect(readFileSync(join(h.root, 'src/csv.ts'), 'utf8')).toBe('export const parse = 10;\n');
-}, 20_000);
+}, 30_000);

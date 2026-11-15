@@ -175,7 +175,7 @@ export async function fillCard(
     throw new FillCardRefusal(
       `Refused: this purchase is at the "${checkout.phase}" stage, and the card is only typed once `
       + 'the decision and the window have both settled.',
-      'Let the purchase reach the payment stage before filling the card.',
+      'The checkout types the card itself when it reaches the payment stage; read the purchase status instead of retrying this fill.',
     );
   }
   const assertCheckout = (): void => {

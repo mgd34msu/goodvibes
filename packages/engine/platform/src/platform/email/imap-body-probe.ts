@@ -227,7 +227,10 @@ export function assessFetchedBody(input: {
  */
 export class ImapBodyCapabilityError extends Error {
   readonly mailbox: string;
-  /** The server's own words, or '' when it said nothing and merely returned nothing. */
+  /**
+   * Always '': the server's wording can carry mailbox content, so it is not
+   * kept on the error. The routable `notice` gives the owner the remedy.
+   */
   readonly serverMessage: string;
   /** Always true: no amount of reconnecting grants an account access rights. */
   readonly terminal = true;

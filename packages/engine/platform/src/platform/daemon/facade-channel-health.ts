@@ -50,39 +50,52 @@ export function buildDaemonChannelHealthWatcher(runtime: ResolvedDaemonFacadeRun
   const deliveryRouter = runtime.deliveryManager.getDeliveryRouter();
   return new ChannelHealthWatcher({
     listStatus: () => runtime.channelPlugins.listStatus(),
-    announce: async (alert) => {
-      const carriers = (await runtime.channelPlugins.listStatus()).filter((entry) =>
+    announce: async (alert, signal) => {
+      const candidates = (await runtime.channelPlugins.listStatus()).filter((entry) =>
         entry.surface !== alert.surface
         && entry.enabled
-        && isChannelWorking(entry.state)
         && DELIVERABLE_ALERT_SURFACES.has(entry.surface));
-      if (carriers.length === 0) {
+      // A surface served by an inbound webhook cannot be observed running, so it reads `unknown`
+      // though it is configured and not failing. Confirmed-working carriers go first; these are the fallback.
+      const confirmed = candidates.filter((entry) => isChannelWorking(entry.state));
+      const unconfirmed = candidates.filter((entry) => entry.state === 'unknown');
+      if (confirmed.length === 0 && unconfirmed.length === 0) {
         logger.error('A channel changed state and no surviving channel could carry the notice', {
           surface: alert.surface,
           state: alert.state,
           detail: alert.message,
-          action: 'configure a second channel so a dead one can be reported over another',
+          action: 'configure and enable a second channel so a dead one can be reported over another',
         });
-        return;
+        return false;
       }
-      for (const carrier of carriers) {
-        try {
-          await deliveryRouter.deliver({
-            target: { kind: 'surface', surfaceKind: carrier.surface as ChannelDeliveryTarget['surfaceKind'] },
-            body: alert.message,
-            title: alert.kind === 'recovered' ? 'Channel recovered' : 'Channel not working',
-            jobId: 'channel-health',
-            runId: `channel-health-${alert.surface}-${Date.now()}`,
-            includeLinks: false,
-          });
-        } catch (error) {
-          logger.warn('Channel health notice could not be delivered over one surface', {
-            surface: carrier.surface,
-            about: alert.surface,
-            error: summarizeError(error),
-          });
+      const deliverOver = async (carriers: typeof candidates): Promise<boolean> => {
+        // One carrier that takes the notice is enough: trying the rest would tell the owner again
+        // on every one of them, and a retried alert would repeat that.
+        for (const carrier of carriers) {
+          if (signal?.aborted) return false;
+          try {
+            await deliveryRouter.deliver({
+              target: { kind: 'surface', surfaceKind: carrier.surface as ChannelDeliveryTarget['surfaceKind'] },
+              body: alert.message,
+              title: alert.kind === 'recovered' ? 'Channel recovered' : 'Channel not working',
+              jobId: 'channel-health',
+              runId: `channel-health-${alert.surface}-${Date.now()}`,
+              includeLinks: false,
+              ...(signal ? { signal } : {}),
+            });
+            return true;
+          } catch (error) {
+            logger.warn('Channel health notice could not be delivered over one surface', {
+              surface: carrier.surface,
+              about: alert.surface,
+              error: summarizeError(error),
+            });
+          }
         }
-      }
+        return false;
+      };
+      const delivered = await deliverOver(confirmed) || await deliverOver(unconfirmed);
+      return delivered;
     },
   });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { summarizeRunningAgents } from '../../renderer/process-summary.ts';
+import { contractIsWorking, summarizeRunningAgents } from '../../renderer/process-summary.ts';
 import { contractFixture, contractUnit } from '../helpers/contract-work-tree-fixtures.ts';
 
 describe('summarizeRunningAgents', () => {
@@ -29,5 +29,14 @@ describe('summarizeRunningAgents', () => {
   });
   test('terminal agent statuses and typed owner roles are respected even without retained contracts', () => {
     expect(summarizeRunningAgents([{ id: 'old', status: 'cancelled' }, { id: 'owner', contractRole: 'owner' }], [{ id: 'owner2', contractRef: { contractId: 'c2', contractRole: 'owner' } }], []).count).toBe(0);
+  });
+  test('a contract waiting on the owner has not finished, so its members still count', () => {
+    const summary = summarizeRunningAgents([{ id: 'worker' }], [], [contractFixture({ status: 'awaiting-owner' })]);
+    expect(summary.count).toBe(1);
+    expect(summary.progress).toBe('Contract awaiting-owner');
+  });
+  test('contractIsWorking is false for finished contracts and for one waiting on the owner', () => {
+    expect(contractIsWorking('running')).toBe(true);
+    for (const status of ['passed', 'failed', 'cancelled', 'awaiting-owner'] as const) expect(contractIsWorking(status)).toBe(false);
   });
 });

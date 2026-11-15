@@ -1,12 +1,165 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 /** Actual configuration-owner epochs. File contents alone cannot preserve A -> B -> A history. */
 import { createHash, randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, rmdirSync, type BigIntStats } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync, type BigIntStats, type Stats } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { confirmFileDurable, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
 import { VERSION } from '../version.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
+import { processStartTime } from './process-start-time.js';
+
+/**
+ * Owner-lock directories (this module's epoch lock and the pairing store's
+ * owner lock) record the process that holds them, so a lock left by a crash
+ * can be reclaimed once its owner is PROVEN dead: the pid no longer exists,
+ * or it now belongs to a process with a different start time. Age never
+ * proves anything (a suspended owner is still an owner), and a lock with no
+ * readable owner record (written by an older build, or by a crash between
+ * creating the directory and recording its owner) is never reclaimed here.
+ */
+const LOCK_OWNER_FILE = 'owner';
+interface LockOwner { readonly pid: number; readonly start: string | null }
+
+const LOCK_WAIT_ATTEMPTS = 10;
+const LOCK_WAIT_SLICE_MS = 50;
+let ownerLockWait: (ms: number) => void = ms => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
+/** @internal Replace the bounded blocking wait used while another live process holds a lock; returns a restore function. */
+export function setOwnerLockWaitForTest(wait: (ms: number) => void): () => void {
+  const previous = ownerLockWait; ownerLockWait = wait;
+  return () => { ownerLockWait = previous; };
+}
+
+/** Another live process holds the owner lock. Nothing was changed; the caller may retry. */
+export class OwnerLockBusyError extends Error {
+  readonly refusalReason = 'owner-fault' as const;
+  constructor(readonly lockPath: string, readonly holderPid: number, options?: ErrorOptions) {
+    super(`Another process (pid ${holderPid}) is changing configuration right now and still holds ${lockPath}. Nothing was changed; retry in a moment.`, options);
+    this.name = 'OwnerLockBusyError';
+  }
+}
+
+function readLockOwner(lockPath: string): LockOwner | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(lockPath, LOCK_OWNER_FILE), 'utf8')) as { pid?: unknown; start?: unknown };
+    const pid = parsed.pid;
+    const start = parsed.start === null ? null : typeof parsed.start === 'string' && /^(\d+|ps:[A-Za-z0-9: ]{1,64})$/.test(parsed.start) ? parsed.start : undefined;
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0 || start === undefined) return null;
+    return { pid, start };
+  } catch { return null; }
+}
+
+/**
+ * A lock directory exists the instant `mkdirSync` returns, and its holder record
+ * is written a moment later. In that window another process sees a directory
+ * with no holder, which is a lock being taken, not one left by a crash. Only a
+ * holderless directory older than a few wait slices is treated as a fault.
+ */
+function lockIsBeingTaken(lockPath: string): boolean {
+  try {
+    const entry = lstatSync(lockPath);
+    if (!entry.isDirectory() || readLockOwner(lockPath) !== null) return false;
+    return Date.now() - Math.max(entry.birthtimeMs, entry.ctimeMs) < 4 * LOCK_WAIT_SLICE_MS;
+  } catch { return false; }
+}
+
+/**
+ * @internal For a caller whose own mkdir found the lock present: when the holder
+ * is only now taking it (directory created, holder record not yet written),
+ * wait one slice and return true so the caller retries; false once the wait
+ * budget is spent or the lock is not in that state.
+ */
+export function waitWhileLockIsBeingTaken(lockPath: string, attempt: number): boolean {
+  if (attempt >= LOCK_WAIT_ATTEMPTS || !lockIsBeingTaken(lockPath)) return false;
+  ownerLockWait(LOCK_WAIT_SLICE_MS);
+  return true;
+}
+
+function ownerProvenDead(owner: LockOwner): boolean {
+  try { process.kill(owner.pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  // The pid is in use: dead only when it now names a different process.
+  if (owner.start === null) return false;
+  const now = processStartTime(owner.pid);
+  // Tokens from the Linux kernel (digits) and from ps (`ps:`) are not comparable; a record written under the other scheme proves nothing.
+  return now !== null && now.startsWith('ps:') === owner.start.startsWith('ps:') && now !== owner.start;
+}
+
+/** @internal Record this process as the holder of a lock directory it just created. */
+export function recordOwnerLockHolder(lockPath: string): void {
+  writeFileSync(join(lockPath, LOCK_OWNER_FILE), JSON.stringify({ pid: process.pid, start: processStartTime(process.pid) }), { flag: 'wx', mode: 0o600 });
+}
+
+/** @internal Remove an owner-lock directory and its holder record. */
+export function removeOwnerLockDirectory(lockPath: string): void {
+  try { unlinkSync(join(lockPath, LOCK_OWNER_FILE)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  rmdirSync(lockPath);
+}
+
+/** @internal Who holds a lock directory, for a refusal a person can act on. */
+export function describeOwnerLock(lockPath: string): string {
+  const owner = readLockOwner(lockPath);
+  const ticket = `${lockPath}.reclaim`;
+  const ticketNote = existsSync(ticket) ? ` (a reclaim ticket ${ticket} also exists beside it)` : '';
+  return owner
+    ? `${lockPath} is held by process ${owner.pid}${ticketNote}`
+    : `${lockPath} exists without a recorded holder (left by an older build or a crash)${ticketNote}; if no GoodVibes process is running, remove ${ticketNote ? 'both' : 'it'}`;
+}
+
+/**
+ * @internal Remove an owner-lock directory whose recorded holder is proven dead.
+ * One reclaimer at a time (an exclusive ticket), and only the exact directory
+ * that was judged, so a fresh lock taken meanwhile is never removed.
+ */
+export function reclaimDeadOwnerLock(lockPath: string): boolean {
+  let judged: Stats;
+  try { judged = lstatSync(lockPath); } catch { return false; }
+  if (!judged.isDirectory() || judged.isSymbolicLink()) return false;
+  const owner = readLockOwner(lockPath);
+  if (!owner || !ownerProvenDead(owner)) return false;
+  const ticket = `${lockPath}.reclaim`;
+  if (!takeReclaimTicket(ticket)) return false;
+  try {
+    const current = lstatSync(lockPath);
+    const again = readLockOwner(lockPath);
+    if (!current.isDirectory() || current.dev !== judged.dev || current.ino !== judged.ino || current.birthtimeMs !== judged.birthtimeMs
+      || !again || again.pid !== owner.pid || again.start !== owner.start || !ownerProvenDead(again)) return false;
+    removeOwnerLockDirectory(lockPath);
+    logger.warn('Reclaimed an owner lock left by a process that no longer exists', { lockPath, pid: owner.pid });
+    return true;
+  } catch (error) {
+    logger.warn('Could not reclaim an owner lock left by a dead process', { lockPath, error: summarizeError(error) });
+    return false;
+  } finally {
+    try { removeOwnerLockDirectory(ticket); } catch { /* the ticket records our pid; a later reclaim removes it once we are gone */ }
+  }
+}
+
+/**
+ * Take the exclusive reclaim ticket. The ticket records its holder, so one left
+ * by a reclaimer that died is removed when that holder is proven dead (or the
+ * record never got written and the directory is no longer fresh); otherwise a
+ * crash while reclaiming would refuse every later reclaim of this lock.
+ */
+function takeReclaimTicket(ticket: string): boolean {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      mkdirSync(ticket, { mode: 0o700 });
+      try { recordOwnerLockHolder(ticket); } catch (error) { rmdirSync(ticket); throw error; }
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt > 0) return false;
+      const holder = readLockOwner(ticket);
+      const abandoned = holder ? ownerProvenDead(holder) : !lockIsBeingTaken(ticket);
+      if (!abandoned) return false;
+      try { removeOwnerLockDirectory(ticket); } catch { return false; }
+    }
+  }
+  return false;
+}
 
 interface Epoch { readonly version: 1 | 2; readonly incarnation: string; readonly fileIdentity: string; }
 export type ConfigurationPolicyFormat = 'configuration-policy-epochs-v2' | 'configuration-policy-snapshots-v3' | 'configuration-private-policy-snapshots-v1';
@@ -127,8 +280,10 @@ function fileIdentity(path: string, observations: PolicyObservations, version: E
   return FILE_OBSERVATION_PREFIX + observed;
 }
 function assertUnlocked(path: string): void {
-  try { lstatSync(`${path}.owner-lock`); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-  throw new Error('Durable policy epoch has outstanding ownership');
+  const lock = `${path}.owner-lock`;
+  try { lstatSync(lock); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  if (reclaimDeadOwnerLock(lock)) return;
+  throw new Error(`Durable policy epoch has outstanding ownership: ${describeOwnerLock(lock)}`);
 }
 function read(path: string, observations: PolicyObservations): Epoch {
   const observed = physical(path), retained = observations.epochs.get(path);
@@ -151,17 +306,70 @@ function read(path: string, observations: PolicyObservations): Epoch {
   observations.epochs.set(path, { observation: observed, value: captured });
   return captured;
 }
+/**
+ * Wait (bounded) until no OTHER live process holds the lock, throwing the busy
+ * refusal when one still does. Run for every root before any root advances, so a
+ * refusal never follows a partly advanced set of epochs.
+ */
+function awaitLockFree(path: string): void {
+  const lock = `${path}.owner-lock`;
+  for (let attempt = 0;; attempt++) {
+    try { lstatSync(lock); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+    if (reclaimDeadOwnerLock(lock)) return;
+    const holder = readLockOwner(lock);
+    if (!holder && lockIsBeingTaken(lock) && attempt < LOCK_WAIT_ATTEMPTS) { ownerLockWait(LOCK_WAIT_SLICE_MS); continue; }
+    if (!holder || holder.pid === process.pid) return; // not contention; the normal path reports it
+    if (attempt >= LOCK_WAIT_ATTEMPTS) throw new OwnerLockBusyError(lock, holder.pid);
+    ownerLockWait(LOCK_WAIT_SLICE_MS);
+  }
+}
 function locked<T>(path: string, operation: (assertOwned: () => void) => T): T {
   ancestry(path, true); // Do not create directories through an existing alias.
   mkdirSync(dirname(path), { recursive: true }); const rootIdentity = ancestry(path); const lock = `${path}.owner-lock`;
-  mkdirSync(lock); const owned = lstatSync(lock);
+  for (let attempt = 0;; attempt++) {
+    try { mkdirSync(lock); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (reclaimDeadOwnerLock(lock)) continue;
+      const holder = readLockOwner(lock);
+      // A live holder in ANOTHER process releases shortly; wait for it a few
+      // times. A holder in this very process cannot release while we block, and
+      // a lock with no readable holder is a fault, not contention.
+      if (holder && holder.pid !== process.pid) {
+        if (attempt < LOCK_WAIT_ATTEMPTS) { ownerLockWait(LOCK_WAIT_SLICE_MS); continue; }
+        throw new OwnerLockBusyError(lock, holder.pid, { cause: error });
+      }
+      // A holder record not yet written means the lock is being taken right now.
+      if (!holder && attempt < LOCK_WAIT_ATTEMPTS && lockIsBeingTaken(lock)) { ownerLockWait(LOCK_WAIT_SLICE_MS); continue; }
+      throw new Error(`Configuration ownership lock ${describeOwnerLock(lock)}`, { cause: error });
+    }
+  }
+  const owned = lstatSync(lock);
+  try { recordOwnerLockHolder(lock); }
+  catch (error) { rmdirSync(lock); throw error; }
   const assertOwned = () => {
     if (!isDeepStrictEqual(ancestry(path), rootIdentity)) throw new Error('Durable policy epoch root changed');
     const current = lstatSync(lock);
     if (!current.isDirectory() || current.dev !== owned.dev || current.ino !== owned.ino || current.birthtimeMs !== owned.birthtimeMs) throw new Error('Durable policy epoch ownership changed');
   };
+  let failure: { readonly error: unknown } | undefined;
   try { assertOwned(); const result = operation(assertOwned); assertOwned(); return result; }
-  finally { assertOwned(); rmdirSync(lock); }
+  catch (error) { failure = { error }; throw error; }
+  finally {
+    // Release the lock whatever happened: left behind, it is held by THIS pid
+    // and is never reclaimed, so every later change in the process would refuse.
+    // Only the directory this call created is removed; one that was replaced
+    // belongs to someone else.
+    let ownershipFault: unknown;
+    try { assertOwned(); } catch (error) { ownershipFault = error; }
+    let stillOurs = false;
+    try {
+      const current = lstatSync(lock);
+      stillOurs = current.isDirectory() && current.dev === owned.dev && current.ino === owned.ino && current.birthtimeMs === owned.birthtimeMs;
+    } catch { /* gone: nothing to release */ }
+    if (stillOurs) removeOwnerLockDirectory(lock);
+    if (ownershipFault !== undefined && failure === undefined) throw ownershipFault;
+  }
 }
 
 /**
@@ -277,8 +485,9 @@ export class DurablePolicyEpochOwner {
       }
       if (!this.active) return;
     }
+    const accepted = new Map<string, Epoch>();
     try {
-      const accepted = new Map<string, Epoch>();
+      for (const root of this.roots) awaitLockFree(`${root}.policy-epoch.json`);
       for (const root of this.roots) {
         const path = `${root}.policy-epoch.json`;
         locked(path, () => {
@@ -303,8 +512,11 @@ export class DurablePolicyEpochOwner {
       this.accepted = accepted;
       this.failed = false;
     } catch (error) {
+      // A holder that is alive and about to release is contention, not damage:
+      // refuse this change and leave this owner's state alone.
+      if (error instanceof OwnerLockBusyError && accepted.size === 0) throw error;
       this.failed = true;
-      throw new Error('Durable configuration mutation intent could not be persisted', { cause: error });
+      throw Object.assign(new Error(`Durable configuration mutation intent could not be persisted: ${summarizeError(error)}`, { cause: error }), { refusalReason: 'owner-fault' as const });
     }
   }
 

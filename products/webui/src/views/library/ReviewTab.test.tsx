@@ -10,6 +10,7 @@ import { click, fakeRecord, renderInto, waitFor, type FakeRecord } from './test-
 let queue: FakeRecord[] = [];
 let receipts: () => Promise<unknown> = () => Promise.resolve({ receipts: [], pendingProposals: [] });
 let candidates: unknown[] = [];
+let failSaves = false;
 const saves: { id: string; input: unknown }[] = [];
 
 mock.module('../../lib/goodvibes', () => ({
@@ -21,7 +22,7 @@ mock.module('../../lib/goodvibes', () => ({
       memory: {
         reviewQueue: () => Promise.resolve({ records: queue }),
         consolidation: { receipts: () => receipts() },
-        updateReview: (id: string, input: unknown) => { saves.push({ id, input }); return Promise.resolve({ record: fakeRecord() }); },
+        updateReview: (id: string, input: unknown) => { saves.push({ id, input }); return failSaves ? Promise.reject(new Error('save refused')) : Promise.resolve({ record: fakeRecord() }); },
         delete: (id: string) => Promise.resolve({ id, deleted: true }),
       },
     },
@@ -35,6 +36,7 @@ afterEach(() => {
   receipts = () => Promise.resolve({ receipts: [], pendingProposals: [] });
   candidates = [];
   saves.length = 0;
+  failSaves = false;
 });
 
 describe('ReviewTab', () => {
@@ -85,6 +87,30 @@ describe('ReviewTab', () => {
     const { el, unmount } = renderInto(React.createElement(ReviewTab, {}));
     await waitFor(() => (el.textContent ?? '').includes('Promote the keepalive decision'));
     expect(el.textContent).toContain('0.86');
+    unmount();
+  });
+
+  test('a failed save on one record shows no error in the pane of another record', async () => {
+    failSaves = true;
+    queue = [fakeRecord({ id: 'r1', summary: 'First record' }), fakeRecord({ id: 'r2', summary: 'Second record' })];
+    const { el, unmount } = renderInto(React.createElement(ReviewTab, {}));
+    await waitFor(() => (el.textContent ?? '').includes('Second record'));
+    const rows = () => [...el.querySelectorAll('ul[aria-label="Review queue"] button.gv-row__main')];
+    click(rows()[0]);
+    await waitFor(() => Boolean(el.querySelector('[aria-label="Review item"]')));
+    click([...el.querySelectorAll('button')].find((b) => b.textContent === 'Save review'));
+    await waitFor(() => (el.querySelector('[aria-label="Review item"]')?.textContent ?? '').includes('save refused'));
+    click(rows()[1]);
+    await waitFor(() => (el.querySelector('[aria-label="Review item"]')?.textContent ?? '').includes('Second record'));
+    expect(el.querySelector('[aria-label="Review item"]')?.textContent).not.toContain('save refused');
+    unmount();
+  });
+
+  test('a full page of queued records says more may be waiting', async () => {
+    queue = Array.from({ length: 50 }, (_, i) => fakeRecord({ id: `r${i}`, summary: `Record ${i}` }));
+    const { el, unmount } = renderInto(React.createElement(ReviewTab, {}));
+    await waitFor(() => (el.textContent ?? '').includes('Record 49'));
+    expect(el.textContent).toContain('Showing the first 50');
     unmount();
   });
 });

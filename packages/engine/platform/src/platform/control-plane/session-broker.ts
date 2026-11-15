@@ -48,9 +48,13 @@ import {
 import {
   recordSharedSessionInput,
   applySurfaceInputDelivery,
+  cancelQueuedSessionInputs,
   claimNextQueuedSessionInput,
+  moveSharedSessionInput,
+  moveSharedSessionInputOrKeep,
   filterSessionInputsSince,
   finalizeAgentSessionInputs,
+  retireAbandonedSurfaceInputs,
   refreshPendingInputCount,
   touchSharedSession,
   updateSharedSessionInput,
@@ -64,6 +68,7 @@ import {
 } from './session-broker-messages.js';
 import {
   SESSION_SURFACE_MANAGED_METADATA_KEY,
+  SURFACE_ROUTE_FRESHNESS_MS,
   attachSharedSessionParticipantAndRoute,
   bindSharedSessionAgent,
   closeSharedSessionRecord,
@@ -75,20 +80,26 @@ import {
 } from './session-broker-sessions.js';
 import { applyBootOrphanSweep, sweepSharedSessions } from './session-broker-gc.js';
 import { SharedSessionRuntimeBusBridge } from './session-broker-runtime-bus.js';
-import { handleSharedSessionIntent } from './session-broker-intent.js';
+import { handleSharedSessionIntent, PROVIDER_MESSAGE_KEY_FIELD } from './session-broker-intent.js';
 import { isDelegatedSessionInput } from './session-intents.js';
 import { submitDelegatedSessionMessage, type DelegatedSessionInputBinding, type DelegatedSessionSubmission } from './session-broker-delegated.js';
 
+/** Closed sessions are history, so the stored transcript is never trimmed. */
 const MAX_PERSISTED_MESSAGES = Infinity;
-const MAX_CONTINUATION_MESSAGES = Infinity;
+/** Most recent messages put into one continuation prompt; the stored transcript is untouched. */
+const MAX_CONTINUATION_MESSAGES = 100;
 /**
  * Default retention for CLOSED sessions (HISTORY): `POSITIVE_INFINITY` = retain
  * indefinitely, so the GC sweep NEVER deletes a closed session. A finite value
  * (constructor `deletionRetentionMs`) is the opt-in deletion authority. The store
  * is a full snapshot of memory, so there is no separate memory/disk eviction here
- * (unlike the companion manager); memory is bounded by the per-session cap below.
+ * (unlike the companion manager): memory grows with retained sessions and messages
+ * until a finite retention is configured.
  */
 const SESSION_DELETION_RETENTION_MS = Number.POSITIVE_INFINITY;
+
+/** How long a started-but-unbound agent holds back a session's other messages if nothing ends the claim. */
+const SPAWN_IN_FLIGHT_MS = 30_000;
 
 export class SharedSessionBroker {
   private readonly store: PersistentStore<SharedSessionStoreSnapshot>;
@@ -103,12 +114,25 @@ export class SharedSessionBroker {
   private readonly inputs = new Map<string, SharedSessionInputRecord[]>();
   private readonly runtimeBusBridge = new SharedSessionRuntimeBusBridge();
   private readonly writes = new StoreWriteQueue();
+  private readonly changeListeners = new Set<() => void>();
+  private intakeHold: (() => boolean) | null = null;
+  /** provider message key -> the input that holds it; built from the persisted rows on first use. */
+  private providerMessageIndex: Map<string, { sessionId: string; inputId: string }> | null = null;
   private eventPublisher: SharedSessionEventPublisher | null = null;
   private continuationRunner: SharedSessionContinuationRunner | null = null;
   private surfaceReplyBinder: SharedSessionSurfaceReplyBinder | null = null;
   private surfaceNoticeSender: ((routeId: string, text: string) => void) | null = null;
   private loaded = false;
+  /** One load at a time: a second early caller must not clear maps the first already filled. */
+  private loading: Promise<void> | null = null;
+  /** Follow-ups a continuation run is already handling, so a second completion does not start another. */
+  private readonly followUpsRunning = new Set<string>();
+  /** Sessions with an agent being started: session id to the time the claim lapses if nothing ends it. */
+  private readonly spawnsInFlight = new Map<string, number>();
+  /** Tail of the work queued per route or session key; see `serialized`. */
+  private readonly serialChains = new Map<string, Promise<void>>();
   private _gcInterval: ReturnType<typeof setInterval> | null = null;
+  private loadedAt = 0;
   private externalLivenessProbe: ((session: SharedSessionRecord) => boolean) | null = null; // see setExternalLivenessProbe
 
   /** Default idle threshold for zero-message sessions (ms). */
@@ -151,6 +175,24 @@ export class SharedSessionBroker {
 
   setEventPublisher(publisher: SharedSessionEventPublisher | null): void {
     this.eventPublisher = publisher;
+  }
+
+  /**
+   * While the hold answers true, new turns are refused with a retryable
+   * WORKSPACE_BUSY (409) instead of being recorded against stores that are
+   * moving to another working directory. Set post-construction by the host
+   * that owns the workspace swap.
+   */
+  setIntakeHold(hold: (() => boolean) | null): void {
+    this.intakeHold = hold;
+  }
+
+  private assertIntakeOpen(): void {
+    if (this.intakeHold?.() !== true) return;
+    throw Object.assign(
+      new Error('A workspace swap is in progress, so this message was not recorded. Retry in a moment, once the swap has finished.'),
+      { code: 'WORKSPACE_BUSY', status: 409, retryAfterMs: 1000 },
+    );
   }
 
   /**
@@ -287,6 +329,14 @@ export class SharedSessionBroker {
 
   async start(): Promise<void> {
     if (this.loaded) return;
+    this.loading ??= this.load().catch((error: unknown) => {
+      this.loading = null;
+      throw error;
+    });
+    await this.loading;
+  }
+
+  private async load(): Promise<void> {
     await this.routeBindings.start();
     const { sessions, messages, inputs } = loadSessionBrokerState(await this.store.load());
     this.sessions.clear();
@@ -301,20 +351,45 @@ export class SharedSessionBroker {
     for (const [sessionId, bucket] of inputs.entries()) {
       this.inputs.set(sessionId, bucket);
     }
-    this.loaded = true;
+    this.loadedAt = Date.now();
     // Boot reconciliation: cancel stuck spawned/delivered inputs, clear stale activeAgentId.
     for (const sessionId of reconcileSessionBrokerBoot(this.sessions, this.inputs)) {
       this.refreshPendingInputCount(sessionId);
     }
     // Close (with the reason, never silently) sessions a dead process left active; see applyBootOrphanSweep for why "active at boot" alone is not the test.
     applyBootOrphanSweep(this.sessions, { idleEmptyMs: this._idleEmptyMs, idleLongMs: this._idleLongMs }, (event, payload) => this.publishUpdate(event, payload));
-    await this.persist();
+    this.updateActiveSessionsGauge();
+    // The sweep timer is installed before the first write so a store that fails
+    // it cannot leave a broker that later reports loaded but never reaps.
     if (!this._gcInterval) {
       // .unref() so the GC interval does not keep the process alive past shutdown.
       const iv = setInterval(() => { this.gcSweep(); }, 60_000);
       (iv as unknown as { unref?: () => void }).unref?.();
       this._gcInterval = iv;
     }
+    await this.persist();
+    // Loaded only once the load fully succeeded: a failed first write is retried by the next start().
+    this.loaded = true;
+  }
+
+  /** Run `work` after everything already queued under `key`; a different key never waits. */
+  private async serialized<T>(key: string | null, work: () => Promise<T>): Promise<T> {
+    if (key === null) return work();
+    const previous = this.serialChains.get(key) ?? Promise.resolve();
+    const current = previous.then(work);
+    const tail = current.then(() => undefined, () => undefined);
+    this.serialChains.set(key, tail);
+    try {
+      return await current;
+    } finally {
+      if (this.serialChains.get(key) === tail) this.serialChains.delete(key);
+    }
+  }
+
+  private updateActiveSessionsGauge(): void {
+    let active = 0;
+    for (const session of this.sessions.values()) if (session.status === 'active') active += 1;
+    sessionsActive.set(active);
   }
 
   listSessions(limit = 100, options: ListSharedSessionsOptions = {}): SharedSessionRecord[] {
@@ -345,6 +420,10 @@ export class SharedSessionBroker {
   }
 
   async ensureSession(input: EnsureSharedSessionInput = {}): Promise<SharedSessionRecord> {
+    return this.serialized(input.sessionId ? `session:${input.sessionId}` : null, () => this.ensureSessionUnlocked(input));
+  }
+
+  private async ensureSessionUnlocked(input: EnsureSharedSessionInput): Promise<SharedSessionRecord> {
     await this.start();
     const existing = input.sessionId ? this.sessions.get(input.sessionId) : undefined;
     if (existing) {
@@ -372,16 +451,19 @@ export class SharedSessionBroker {
    * sees active-but-not-yet-managed and hits the executor path). */
   async register(input: RegisterSharedSessionInput): Promise<SharedSessionRegisterResult> {
     await this.start();
-    const createManaged = (i: CreateSharedSessionInput) =>
-      this.createSession({ ...i, metadata: { ...i.metadata, [SESSION_SURFACE_MANAGED_METADATA_KEY]: true } });
-    const result = await registerSharedSession({
-      getSession: (id) => this.sessions.get(id) ?? null,
-      createSession: createManaged,
-      reopenSession: (id) => this.reopenSession(id),
-      attachParticipant: (s, a) => this.attachParticipantAndRoute(s, a),
-    }, input);
-    const marked = await this.markSurfaceManaged(result.record.id); // backstop; no-op if already set
-    return marked ? { ...result, record: marked } : result;
+    // Two heartbeats for one new id would otherwise both see "absent" across the create's awaits.
+    return this.serialized(`session:${input.sessionId}`, async () => {
+      const createManaged = (i: CreateSharedSessionInput) =>
+        this.createSession({ ...i, metadata: { ...i.metadata, [SESSION_SURFACE_MANAGED_METADATA_KEY]: true } });
+      const result = await registerSharedSession({
+        getSession: (id) => this.sessions.get(id) ?? null,
+        createSession: createManaged,
+        reopenSession: (id) => this.reopenSession(id),
+        attachParticipant: (s, a) => this.attachParticipantAndRoute(s, a),
+      }, input);
+      const marked = await this.markSurfaceManaged(result.record.id); // backstop; no-op if already set
+      return marked ? { ...result, record: marked } : result;
+    });
   }
 
   private async markSurfaceManaged(sessionId: string): Promise<SharedSessionRecord | null> {
@@ -410,12 +492,15 @@ export class SharedSessionBroker {
   async createSession(input: CreateSharedSessionInput = {}): Promise<SharedSessionRecord> {
     await this.start();
     const session = createSharedSessionRecord(input);
+    // A caller-chosen id that is already taken names that session: replacing it would reset its counts and status.
+    const taken = input.id ? this.sessions.get(session.id) : undefined;
+    if (taken) return taken;
     this.sessions.set(session.id, session);
     if (input.routeBinding?.id) {
       await this.routeBindings.patchBinding(input.routeBinding.id, { sessionId: session.id });
     }
     await this.persist();
-    sessionsActive.set(this.sessions.size);
+    this.updateActiveSessionsGauge();
     this.publishUpdate('session-created', session);
     return session;
   }
@@ -431,10 +516,14 @@ export class SharedSessionBroker {
       ...closed, channelPermissionModeRevision: (touched.channelPermissionModeRevision ?? 0) + 1,
     };
     this.sessions.set(sessionId, updated);
+    // A deliberate close ends what was waiting to start in it; left queued, the
+    // rows keep the daemon "busy" and a later completion would start them.
+    const cancelled = cancelQueuedSessionInputs(this.sessionInputStore(), sessionId, 'session closed');
     await this.persist();
-    sessionsActive.set(this.sessions.size);
-    this.publishUpdate('session-closed', updated);
-    return updated;
+    this.updateActiveSessionsGauge();
+    this.publishUpdate('session-closed', this.sessions.get(sessionId) ?? updated);
+    for (const input of cancelled) this.publishInputLifecycleEvent('session-input-cancelled', input);
+    return this.sessions.get(sessionId) ?? updated;
   }
 
   async reopenSession(sessionId: string): Promise<SharedSessionRecord | null> {
@@ -447,6 +536,7 @@ export class SharedSessionBroker {
     };
     this.sessions.set(sessionId, updated);
     await this.persist();
+    this.updateActiveSessionsGauge();
     this.publishUpdate('session-reopened', updated);
     return updated;
   }
@@ -470,11 +560,13 @@ export class SharedSessionBroker {
     const session = this.sessions.get(sessionId);
     if (!session) return 'not-found';
     if (session.status !== 'closed') return 'active';
+    // A hosted loop the engine still vouches for would register itself again as an empty active record.
+    if (this.externalLivenessProbe?.(session) === true) return 'active';
     this.sessions.delete(sessionId);
     this.messages.delete(sessionId);
     this.inputs.delete(sessionId);
     await this.persist();
-    sessionsActive.set(this.sessions.size);
+    this.updateActiveSessionsGauge();
     this.publishUpdate('session-deleted', { sessionId });
     return 'deleted';
   }
@@ -494,22 +586,63 @@ export class SharedSessionBroker {
     const { session: updated, changed } = detachSharedSessionParticipant(session, surfaceId);
     if (!changed) return session;
     this.sessions.set(sessionId, updated);
+    // A surface that detached will not collect what was queued for it. Only
+    // rows nobody else is heartbeating for are failed; others stay for them.
+    const retired = retireAbandonedSurfaceInputs(this.sessionInputStore(), Date.now(), { minAgeMs: 0, sessionId });
     await this.persist();
     this.publishUpdate('session-detached', {
       sessionId: updated.id,
       surfaceId,
       participants: updated.participants.length,
     });
-    return updated;
+    for (const input of retired) this.publishInputLifecycleEvent('session-input-failed', input);
+    return this.sessions.get(sessionId) ?? updated;
   }
 
-  async bindAgent(sessionId: string, agentId: string): Promise<SharedSessionRecord | null> {
+  /**
+   * Record that an agent is about to be started for this session, so a message
+   * that arrives before it is bound queues behind it instead of starting a
+   * second agent. Returns the release for a start that ends without an agent;
+   * `bindAgent` ends the claim itself, and a claim nothing ends lapses.
+   */
+  beginSpawn(sessionId: string): () => void {
+    const claim = Date.now() + SPAWN_IN_FLIGHT_MS;
+    this.spawnsInFlight.set(sessionId, claim);
+    return () => {
+      if (this.spawnsInFlight.get(sessionId) !== claim) return;
+      this.spawnsInFlight.delete(sessionId);
+      // Nothing was started, so what queued behind the claim must not wait for an agent that never comes.
+      void this.runQueuedFollowUp(sessionId).catch((error: unknown) => {
+        logger.warn('A message queued behind a spawn that did not start could not be run', { sessionId, error: summarizeError(error) });
+      });
+    };
+  }
+
+  private hasSpawnInFlight(sessionId: string): boolean {
+    const claim = this.spawnsInFlight.get(sessionId);
+    if (claim === undefined) return false;
+    if (claim > Date.now()) return true;
+    this.spawnsInFlight.delete(sessionId);
+    return false;
+  }
+
+  /**
+   * Make `agentId` the session's active agent and claim the input it was
+   * started for: exactly `inputId` when given, else the oldest queued input. A
+   * closed session is returned unchanged, it takes no new agent.
+   */
+  async bindAgent(sessionId: string, agentId: string, inputId?: string): Promise<SharedSessionRecord | null> {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
+    if (session.status !== 'active') {
+      logger.warn('An agent was not bound to a closed session', { sessionId, agentId });
+      return session;
+    }
     const updated = bindSharedSessionAgent(session, agentId);
     this.sessions.set(sessionId, updated);
-    const claimed = claimNextQueuedSessionInput(this.sessionInputStore(), sessionId, agentId);
+    this.spawnsInFlight.delete(sessionId);
+    const claimed = claimNextQueuedSessionInput(this.sessionInputStore(), sessionId, agentId, inputId);
     await this.persist();
     this.publishUpdate('session-agent-bound', updated);
     if (claimed) {
@@ -542,11 +675,23 @@ export class SharedSessionBroker {
       submit: (message, bind) => this.handleIntent('submit', message, false, bind),
       read: (sessionId, inputId) => this.inputs.get(sessionId)?.find(entry => entry.id === inputId) ?? null,
       complete: async (sessionId, inputId) => {
-        const updated = updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId,
-          entry => ({ ...entry, state: 'completed', updatedAt: Date.now() }))!;
-        await this.persist(true);
-        this.publishInputLifecycleEvent('session-input-completed', updated);
-        return updated;
+        const before = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+        const moved = moveSharedSessionInput(this.sessionInputStore(), sessionId, inputId, 'completed');
+        if (!moved || !before) throw new Error('Delegated input is no longer held by its session');
+        // Already completed: report the row as it is, without announcing a second completion.
+        if (!moved.ok) {
+          if (moved.input.state === 'completed') return moved.input;
+          throw new Error(`Delegated input could not be completed from state ${moved.input.state}: ${moved.reason}`);
+        }
+        try {
+          await this.persist(true);
+        } catch (error) {
+          // Not durable, so not completed: put the row back so the host can retry the same completion.
+          updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, () => before);
+          throw error;
+        }
+        this.publishInputLifecycleEvent('session-input-completed', moved.input);
+        return moved.input;
       },
     }, input, onQueued);
   }
@@ -561,6 +706,9 @@ export class SharedSessionBroker {
 
   async appendSystemMessage(sessionId: string, body: string, metadata: Record<string, unknown> = {}): Promise<SharedSessionMessage | null> {
     if (!body.trim()) return null;
+    // A message for an id the broker does not hold would be stored forever in a bucket no session owns.
+    await this.start();
+    if (!this.sessions.has(sessionId)) return null;
     return this.appendMessage(sessionId, {
       role: 'system',
       body,
@@ -585,6 +733,8 @@ export class SharedSessionBroker {
     },
   ): Promise<SharedSessionMessage | null> {
     if (!input.body.trim()) return null;
+    await this.start();
+    if (!this.sessions.has(sessionId)) return null;
     return this.appendMessage(sessionId, {
       role: 'user',
       body: input.body,
@@ -606,14 +756,18 @@ export class SharedSessionBroker {
     if (shouldStoreAgentCompletion(this.messageStore(), sessionId, agentId)) {
       await this.appendMessage(sessionId, { role, body, agentId, metadata });
     }
+    // The session can be deleted while the message above is being written; do not bring it back.
+    const current = this.sessions.get(sessionId);
+    if (!current) return null;
     const now = Date.now();
     const updated: SharedSessionRecord = {
-      ...(this.sessions.get(sessionId) ?? session),
-      activeAgentId: (this.sessions.get(sessionId)?.activeAgentId === agentId) ? undefined : this.sessions.get(sessionId)?.activeAgentId,
+      ...current,
+      activeAgentId: current.activeAgentId === agentId ? undefined : current.activeAgentId,
       lastAgentId: agentId,
       updatedAt: now,
       lastActivityAt: now,
-      ...(metadata.status === 'failed' ? { lastError: body } : {}),
+      // A later successful run clears the previous failure; a cancel leaves it as it was.
+      ...(metadata.status === 'failed' ? { lastError: body } : metadata.status === 'cancelled' ? {} : { lastError: undefined }),
     };
     this.sessions.set(sessionId, updated);
     const finalizedInputs = finalizeAgentSessionInputs(
@@ -640,21 +794,21 @@ export class SharedSessionBroker {
     };
   }
 
+  /**
+   * Cancel a queued input. Any other row is returned unchanged and no event is
+   * published, so subscribers never see a cancel that did not happen; the
+   * route answers that case with 409 and the row's actual state.
+   */
   async cancelInput(sessionId: string, inputId: string): Promise<SharedSessionInputRecord | null> {
     await this.start();
-    const updated = updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, (entry) => {
-      if (entry.state !== 'queued') return entry;
-      return {
-        ...entry,
-        state: 'cancelled',
-        updatedAt: Date.now(),
-      };
-    });
-    if (!updated) return null;
-    this.refreshPendingInputCount(sessionId);
+    const current = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+    if (!current) return null;
+    if (current.state !== 'queued') return current;
+    const moved = moveSharedSessionInput(this.sessionInputStore(), sessionId, inputId, 'cancelled');
+    if (!moved?.ok) return current;
     await this.persist();
-    this.publishInputLifecycleEvent('session-input-cancelled', updated);
-    return updated;
+    this.publishInputLifecycleEvent('session-input-cancelled', moved.input);
+    return moved.input;
   }
 
   async rebindRoute(bindingId: string, sessionId: string): Promise<SharedSessionRecord | null> {
@@ -726,6 +880,55 @@ export class SharedSessionBroker {
     return this.routeBindings.resolve(input.surfaceKind, input.externalId, input.threadId) ?? null;
   }
 
+  private providerMessageIndexed(): Map<string, { sessionId: string; inputId: string }> {
+    if (this.providerMessageIndex) return this.providerMessageIndex;
+    const index = new Map<string, { sessionId: string; inputId: string }>();
+    for (const [sessionId, rows] of this.inputs) {
+      for (const row of rows) {
+        const key = row.metadata[PROVIDER_MESSAGE_KEY_FIELD];
+        if (typeof key === 'string') index.set(key, { sessionId, inputId: row.id });
+      }
+    }
+    this.providerMessageIndex = index;
+    return index;
+  }
+
+  /**
+   * The earlier submission for a provider message that was already recorded,
+   * rebuilt from the persisted rows so it holds across a restart.
+   */
+  private findProviderMessage(key: string): SharedSessionSubmission | null {
+    const index = this.providerMessageIndexed();
+    const held = index.get(key);
+    if (!held) return null;
+    const session = this.sessions.get(held.sessionId);
+    const row = this.inputs.get(held.sessionId)?.find((entry) => entry.id === held.inputId);
+    if (!session || !row) { index.delete(key); return null; }
+    // Only a row somebody is already answering (or has answered) makes the repeat a duplicate. One still queued may never have reached its runner, so the redelivery is the retry.
+    if (row.state !== 'delivered' && row.state !== 'spawned' && row.state !== 'completed') return null;
+    const stored = this.messages.get(held.sessionId)?.find((entry) => entry.id === row.causationId);
+    const userMessage: SharedSessionMessage = stored ?? {
+      id: row.causationId ?? row.id,
+      sessionId: held.sessionId,
+      role: 'user',
+      body: row.body,
+      createdAt: row.createdAt,
+      metadata: {},
+    };
+    return {
+      session,
+      userMessage,
+      ...(row.routeId ? { routeBinding: this.routeBindings.getBinding(row.routeId) } : {}),
+      input: row,
+      intent: row.intent,
+      mode: 'continued-live',
+      state: row.state,
+      ...(row.activeAgentId ? { activeAgentId: row.activeAgentId } : {}),
+      created: false,
+      duplicate: true,
+    };
+  }
+
   private buildContinuationTask(sessionId: string): string {
     return buildSharedSessionContinuationTask({
       session: this.sessions.get(sessionId) ?? null,
@@ -740,10 +943,30 @@ export class SharedSessionBroker {
     const state = { sessions: this.sessions, messages: this.messages, inputs: this.inputs };
     const snapshot = createSessionBrokerSnapshot(state, MAX_PERSISTED_MESSAGES);
     await this.writes.run(() => this.store.persist(snapshot, { durable }));
+    this.notifyChanged();
+  }
+
+  /**
+   * Be told after sessions, messages or inputs change (every published update
+   * and every persisted write), so a read model can refresh instead of polling.
+   * The listener carries no payload: read the sessions again. Returns the unsubscribe.
+   */
+  subscribe(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
+  }
+
+  private notifyChanged(): void {
+    for (const listener of [...this.changeListeners]) {
+      try { listener(); } catch (error) {
+        logger.warn('[session-broker] change listener failed', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   private publishUpdate(event: string, payload: unknown): void {
     this.eventPublisher?.('session-update', { event, payload, createdAt: Date.now() });
+    this.notifyChanged();
   }
 
   private publishInputLifecycleEvent(event: string, input: SharedSessionInputRecord, extra: Record<string, unknown> = {}): void {
@@ -765,6 +988,20 @@ export class SharedSessionBroker {
     allowSpawnFallback: boolean,
     onQueued?: (input: SharedSessionInputRecord) => void,
   ): Promise<SharedSessionSubmission> {
+    this.assertIntakeOpen();
+    // Concurrent webhook deliveries for one conversation must not both see "no session yet" and each create one.
+    const routeKey = input.routeId
+      ? `route:${input.routeId}`
+      : input.externalId ? `route:${input.surfaceKind ?? ''}|${input.externalId}|${input.threadId ?? ''}` : null;
+    return this.serialized(routeKey, () => this.handleIntentUnlocked(intent, input, allowSpawnFallback, onQueued));
+  }
+
+  private async handleIntentUnlocked(
+    intent: SharedSessionInputIntent,
+    input: SubmitSharedSessionMessageInput,
+    allowSpawnFallback: boolean,
+    onQueued?: (input: SharedSessionInputRecord) => void,
+  ): Promise<SharedSessionSubmission> {
     return handleSharedSessionIntent(
       {
         sessions: this.sessions,
@@ -778,11 +1015,14 @@ export class SharedSessionBroker {
         sessionInputStore: () => this.sessionInputStore(),
         publishInputLifecycleEvent: (event, i, extra) => this.publishInputLifecycleEvent(event, i, extra),
         resolveActiveAgentId: (session) => this.resolveActiveAgentId(session),
+        hasSpawnInFlight: (sessionId) => this.hasSpawnInFlight(sessionId),
         persist: (durable) => this.persist(durable),
         publishUpdate: (event, payload) => this.publishUpdate(event, payload),
         announceSurfaceReply: (binding) => this.announceSurfaceReply(binding),
         ...(this.surfaceNoticeSender ? { sendSurfaceNotice: this.surfaceNoticeSender } : {}),
         buildContinuationTask: (sessionId) => this.buildContinuationTask(sessionId),
+        findProviderMessage: (key) => this.findProviderMessage(key),
+        noteProviderMessage: (key, sessionId, inputId) => { this.providerMessageIndexed().set(key, { sessionId, inputId }); },
         ...(this.conversationGateConfig ? { conversationGateConfig: this.conversationGateConfig } : {}),
       },
       intent,
@@ -794,6 +1034,7 @@ export class SharedSessionBroker {
 
   /** Host-private native reservation. Never queues into the legacy retry/spawn path. */
   async reserveNativeTurnInput(sessionId: string, permit: NativeConversationTurnPermit): Promise<SharedSessionInputRecord> {
+    this.assertIntakeOpen();
     const source = readNativeConversationTurnPermit(permit);
     await revalidateNativeConversationTurnPermit(permit);
     await this.start();
@@ -804,7 +1045,7 @@ export class SharedSessionBroker {
       message: { sessionId, surfaceKind: 'service', surfaceId: 'daemon:native-conversation', body: source.text,
         metadata: { nativeConversation: { projectId: source.projectId, requestId: source.requestId, sourceRef: { ...source.sourceRef } } } },
     });
-    const reserved = updateSharedSessionInput(this.sessionInputStore(), sessionId, entry.id, value => ({ ...value, state: 'delivered' }))!;
+    const reserved = moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, entry.id, 'delivered')!;
     // The exact canonical id and body must be durable before any native turn.
     const snapshot = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
     try { await this.writes.run(() => this.store.persist(snapshot, { durable: true })); }
@@ -812,7 +1053,7 @@ export class SharedSessionBroker {
       // No caller received this reservation, so no turn can have started. A
       // monotonic failed observation clears local busy ownership without ever
       // rolling back possibly published reservation bytes or granting replay.
-      updateSharedSessionInput(this.sessionInputStore(), sessionId, reserved.id, value => ({ ...value, state: 'failed', error: 'Native reservation durability failed' }));
+      moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, reserved.id, 'failed', { error: 'Native reservation durability failed' });
       const failed = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
       await this.writes.run(() => this.store.persist(failed, { durable: true })).catch(() => {});
       throw error;
@@ -829,7 +1070,8 @@ export class SharedSessionBroker {
     if (!current || current.body !== source.text || current.correlationId !== `session-input:${inputId}`
       || JSON.stringify(current.metadata['nativeConversation']) !== JSON.stringify({ projectId: source.projectId, requestId: source.requestId, sourceRef: source.sourceRef })
       || (current.state !== 'delivered' && current.state !== state)) throw new Error('Native hosted broker settlement mismatch');
-    const updated = updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, item => ({ ...item, state, updatedAt: Date.now() }))!;
+    // Settling the same outcome again is the identity; any other move goes through the lifecycle.
+    const updated = current.state === state ? current : moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, inputId, state)!;
     const snapshot = createSessionBrokerSnapshot({ sessions: this.sessions, messages: this.messages, inputs: this.inputs }, MAX_PERSISTED_MESSAGES);
     await this.writes.run(() => this.store.persist(snapshot, { durable: true }));
     this.publishInputLifecycleEvent(`session-input-${state}`, updated);
@@ -850,7 +1092,7 @@ export class SharedSessionBroker {
   async markInputDelivered(
     sessionId: string,
     inputId: string,
-    options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly beforeApply?: (() => void) | undefined } = {},
+    options: { readonly consumed?: boolean | undefined; readonly agentId?: string | undefined; readonly claim?: boolean | undefined; readonly beforeApply?: (() => void) | undefined } = {},
   ): Promise<SharedSessionInputRecord | null> {
     await this.start();
     // The async startup boundary must not turn a stale source into a claim.
@@ -881,10 +1123,9 @@ export class SharedSessionBroker {
    */
   async failInput(sessionId: string, inputId: string, error: string): Promise<SharedSessionInputRecord | null> {
     await this.start();
-    const updated = updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, (entry) => {
-      if (entry.state !== 'queued' && entry.state !== 'delivered') return entry;
-      return { ...entry, state: 'failed', updatedAt: Date.now(), error };
-    });
+    const current = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+    if (!current || (current.state !== 'queued' && current.state !== 'delivered')) return null;
+    const updated = moveSharedSessionInputOrKeep(this.sessionInputStore(), sessionId, inputId, 'failed', { error });
     if (!updated || updated.state !== 'failed') return null;
     this.refreshPendingInputCount(sessionId);
     await this.persist();
@@ -893,9 +1134,21 @@ export class SharedSessionBroker {
   }
 
   private async runQueuedFollowUp(sessionId: string): Promise<{ input: SharedSessionInputRecord; agentId: string } | null> {
+    if (this.sessions.get(sessionId)?.status !== 'active') return null;
     const bucket = this.inputs.get(sessionId) ?? [];
     const next = bucket.find((entry) => entry.intent === 'follow-up' && entry.state === 'queued' && !isDelegatedSessionInput(entry));
-    if (!next) return null;
+    // Follow-ups run one at a time, in order: a second completion while this
+    // one is being started leaves it to the run already handling it.
+    if (!next || this.followUpsRunning.has(next.id)) return null;
+    this.followUpsRunning.add(next.id);
+    try {
+      return await this.runFollowUp(sessionId, next);
+    } finally {
+      this.followUpsRunning.delete(next.id);
+    }
+  }
+
+  private async runFollowUp(sessionId: string, next: SharedSessionInputRecord): Promise<{ input: SharedSessionInputRecord; agentId: string } | null> {
     if (!this.continuationRunner) {
       // A queued follow-up with nobody to run it is a message that will never
       // be answered. Harmless for a local caller that polls its own inputs;
@@ -912,18 +1165,34 @@ export class SharedSessionBroker {
     }
     const routeBinding = next.routeId ? this.routeBindings.getBinding(next.routeId) : undefined;
     const task = this.buildContinuationTask(sessionId);
-    const spawned = await this.continuationRunner({
-      sessionId,
-      input: next,
-      task,
-      routeBinding,
-    });
+    let spawned: Awaited<ReturnType<SharedSessionContinuationRunner>>;
+    try {
+      spawned = await this.continuationRunner({
+        sessionId,
+        input: next,
+        task,
+        routeBinding,
+      });
+    } catch (error) {
+      // A refused start (fleet full, spawn policy) will not retry by itself: a row left queued reads as busy forever.
+      logger.warn('A queued follow-up could not be started', { sessionId, inputId: next.id, error: summarizeError(error) });
+      await this.failInput(sessionId, next.id, `The follow-up was not started: ${summarizeError(error)}. Send it again to retry.`);
+      return null;
+    }
     if (spawned?.disposition === 'transferred') {
       if (spawned.requestId.trim() && !spawned.inputConsumed) await this.markInputDelivered(sessionId, next.id, { consumed: true });
       return null;
     }
-    if (!spawned?.agentId) return null;
-    await this.bindAgent(sessionId, spawned.agentId);
+    if (!spawned?.agentId) {
+      // Nothing will retry this follow-up: say so on the row instead of leaving
+      // it queued, which reads as "busy" forever and never gets an answer.
+      const reason = spawned?.disposition === 'held' || spawned?.disposition === 'unknown'
+        ? `The follow-up was not started: ${spawned.reason}`
+        : 'The follow-up was not started: no agent could be run for it. Send it again to retry.';
+      await this.failInput(sessionId, next.id, reason);
+      return null;
+    }
+    await this.bindAgent(sessionId, spawned.agentId, next.id);
     const claimed = this.inputs.get(sessionId)?.find((entry) => entry.activeAgentId === spawned.agentId && entry.state === 'spawned') ?? null;
     if (claimed) {
       this.publishInputLifecycleEvent('session-follow-up-spawned', claimed, {
@@ -971,7 +1240,27 @@ export class SharedSessionBroker {
     this.gcSweep();
   }
 
+  /**
+   * Fail inputs queued for a surface once no surface is left heartbeating the
+   * session. Surfaces re-register after a daemon restart, so nothing is judged
+   * until one freshness window has passed since this broker loaded.
+   */
+  async retireAbandonedSurfaceInputs(now: number = Date.now()): Promise<SharedSessionInputRecord[]> {
+    await this.start();
+    if (now - this.loadedAt < SURFACE_ROUTE_FRESHNESS_MS) return [];
+    const retired = retireAbandonedSurfaceInputs(this.sessionInputStore(), now);
+    if (retired.length === 0) return retired;
+    await this.persist();
+    for (const input of retired) this.publishInputLifecycleEvent('session-input-failed', input);
+    return retired;
+  }
+
   private gcSweep(): void {
+    void this.retireAbandonedSurfaceInputs().catch((error: unknown) => {
+      logger.warn('[session-broker] retiring inputs no surface collected failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     const anyChanged = sweepSharedSessions(
       { sessions: this.sessions, messages: this.messages, inputs: this.inputs },
       {
@@ -983,6 +1272,7 @@ export class SharedSessionBroker {
       },
     );
     if (anyChanged) {
+      this.updateActiveSessionsGauge();
       void this.persist().catch((error: unknown) => {
         logger.warn('[session-broker] GC persistence failed', {
           error: error instanceof Error ? error.message : String(error),

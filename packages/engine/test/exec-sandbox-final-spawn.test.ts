@@ -9,11 +9,14 @@ import { detectPtyAvailability, probePtyHost } from '../platform/src/platform/to
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { useToolReadings } from './_helpers/tool-readings.ts';
+import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
 
 const command = 'printf owned-final-spawn';
 useToolReadings([], [[command, { needsNetwork: true }]]);
 const availability = detectSandboxAvailability(probeSandboxHost());
 const pty = detectPtyAvailability(probePtyHost());
+requireLiveHost('sandbox', availability.available);
+requireLiveHost('PTY', pty.available);
 let root: string | undefined;
 afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {

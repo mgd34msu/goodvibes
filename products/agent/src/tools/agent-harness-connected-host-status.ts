@@ -4,6 +4,9 @@ import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../cli/external-runtime.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { harnessDisplayPath } from './agent-harness-display-path.ts';
+import { CONNECTED_HOST_LIFECYCLE_STATEMENT } from './agent-harness-connected-host-capabilities.ts';
+import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 import {
   blockedConnectedHostCapabilities,
   connectedHostCapabilityMap,
@@ -27,6 +30,7 @@ function resolveWorkingDirectory(context: CommandContext): string {
 function connectedHostFindings(
   runtime: CliExternalRuntimeSnapshot,
   tokenUsable: boolean,
+  tokenPath: string,
 ): readonly Record<string, unknown>[] {
   const findings: Record<string, unknown>[] = [];
 
@@ -53,7 +57,7 @@ function connectedHostFindings(
       id: 'connected-host-token-missing',
       severity: 'warning',
       summary: 'Connected-host operator token is missing or unreadable.',
-      cause: `No usable operator token was found at ${runtime.operatorToken.path}.`,
+      cause: `No usable operator token was found at ${tokenPath}.`,
       action: 'Provision or repair connected-host access through the owning GoodVibes host.',
     });
   }
@@ -85,6 +89,7 @@ export async function connectedHostStatusSummary(
     timeoutMs: CONNECTED_HOST_STATUS_TIMEOUT_MS,
   });
   const tokenUsable = Boolean(token.token);
+  const tokenPath = harnessDisplayPath(token.path, homeDirectory);
 
   return {
     ownership: 'external-connected-host',
@@ -94,10 +99,10 @@ export async function connectedHostStatusSummary(
       modelRoute: 'agent_harness mode:"connected_host_status" or mode:"service_posture"',
     },
     timeoutMs: CONNECTED_HOST_STATUS_TIMEOUT_MS,
-    lifecycle: 'GoodVibes Agent can inspect daemon readiness and use confirmed operator methods for supported lifecycle/listener changes.',
+    lifecycle: CONNECTED_HOST_LIFECYCLE_STATEMENT,
     paths: {
-      workingDirectory,
-      homeDirectory,
+      workingDirectory: harnessDisplayPath(workingDirectory, homeDirectory),
+      homeDirectory: '~',
     },
     endpoints: {
       controlPlane: {
@@ -116,10 +121,10 @@ export async function connectedHostStatusSummary(
     operatorToken: {
       present: token.present,
       usable: tokenUsable,
-      path: token.path,
+      path: tokenPath,
       error: token.error ?? null,
     },
-    liveStatus: runtime,
+    liveStatus: { ...runtime, operatorToken: { ...runtime.operatorToken, path: tokenPath } },
     routeReadiness: [
       {
         id: 'status',
@@ -136,7 +141,7 @@ export async function connectedHostStatusSummary(
         statusCode: runtime.agentKnowledge.statusCode,
       },
     ],
-    findings: connectedHostFindings(runtime, tokenUsable),
+    findings: connectedHostFindings(runtime, tokenUsable, tokenPath),
     capabilitySummary: {
       routeFamilies: connectedHostRouteFamilies().length,
       availableCapabilities: connectedHostCapabilityMap(toolRegistry).filter((capability) => capability.available === true).length,
@@ -145,7 +150,7 @@ export async function connectedHostStatusSummary(
     ...(options.includeParameters ? { modelAccess: {
       diagnostics: 'Use host action:"status" for live readiness, action:"services|service" for endpoint posture, and action:"capabilities|capability" for capability inventory.',
       daemonAliases: 'mode:"daemon_status" is an alias for mode:"connected_host_status"; mode:"daemon" is an alias for mode:"connected_host".',
-      lifecycle: 'Use setup or agent_operator_method with confirm:true and explicitUserRequest for supported daemon service methods.',
+      lifecycle: `Use setup or agent_operator_method for supported daemon service methods. ${EFFECT_ADMISSION_SENTENCE}`,
       cliMirrors: ['goodvibes-agent status --json', 'goodvibes-agent doctor', 'goodvibes-agent compat'],
       tuiMirrors: ['/health', '/compat', 'Agent Workspace -> Connected Host'],
     },

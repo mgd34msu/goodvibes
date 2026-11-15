@@ -1,8 +1,9 @@
 /** Phone/desktop lifecycle ownership and unknown-outcome proofs over synthetic HTTP. */
 import { expect, test, type Page } from '@playwright/test';
+import { E2E_OPERATOR_TOKEN } from './support/seed';
 import { detailPane, expectNoHorizontalScroll, listRow, nextFrames, openRow } from './support/app';
 import {
-  installSessionLifecycleDaemon, LIFECYCLE_SESSION, LIFECYCLE_TOKEN,
+  installSessionLifecycleDaemon, LIFECYCLE_SESSION,
   REPLACEMENT_SESSION, replaceSessionIdentity,
 } from './support/session-lifecycle-fixture';
 
@@ -40,7 +41,7 @@ function expectWrites(daemon: Daemon, actions: ('close' | 'reopen' | 'delete')[]
   expect(daemon.writes).toEqual(actions.map(action => ({
     method: action === 'delete' ? 'DELETE' : 'POST',
     path: action === 'delete' ? ORIGINAL_PATH : `${ORIGINAL_PATH}/${action}`,
-    authorization: `Bearer ${LIFECYCLE_TOKEN}`,
+    authorization: `Bearer ${E2E_OPERATOR_TOKEN}`,
   })));
 }
 

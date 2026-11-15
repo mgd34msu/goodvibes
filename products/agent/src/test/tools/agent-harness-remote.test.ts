@@ -14,24 +14,13 @@
  *      HARNESS_MODE_DESCRIPTORS with the correct kinds and safety annotations.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { ProcessManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
-import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { PolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/security';
+import { rmSync } from 'node:fs';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
-import { ConfigManager } from '../../config/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
-import { createShellPathService } from '@/runtime/index.ts';
-import { registerAgentHarnessTool } from '../../tools/agent-harness-tool.ts';
 import { AGENT_HARNESS_MODES } from '../../tools/agent-harness-tool-schema.ts';
 import { HARNESS_MODE_DESCRIPTORS } from '../../tools/agent-harness-mode-catalog.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
-import { makeProjectTempDir } from '../helpers/project-temp.ts';
+import { makeHandoffFixture } from './agent-harness-handoff-fixture.ts';
 
 const REMOTE_READ_MODES = ['remote_snapshot', 'remote_peers', 'remote_work', 'remote_pair_requests'] as const;
 const REMOTE_MUTATION_MODES = ['remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel'] as const;
@@ -66,132 +55,19 @@ beforeEach(() => {
 afterEach(() => { installJudgmentPort(previousPort); decisionLog[Symbol.dispose](); });
 
 function makeRemoteFixture() {
-  const root = makeProjectTempDir('gv-remote');
-  mkdirSync(join(root, '.goodvibes', 'daemon'), { recursive: true });
-  const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-  const commandRegistry = new CommandRegistry();
-  const configManager = new ConfigManager({
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
-    configDir: paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT),
-    workingDir: paths.workingDirectory,
-    homeDir: paths.homeDirectory,
-  });
-  configManager.flushConfigFileChanges();
-  const permissionManager = new PermissionManager(undefined, createPermissionConfigReader(configManager), new PolicyRuntimeState());
-  const toolRegistry = new ToolRegistry(permissionManager);
-  const processManager = new ProcessManager();
-  const fileUndoManager = new FileUndoManager();
-  const workPlanStore = new WorkPlanStore({ homeDirectory: root, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, projectId: 'remote-test', projectRoot: root });
-
-  const context = {
-    print: (_text: string) => {},
-    renderRequest: () => {},
-    executeCommand: async (name: string, args: string[]) => commandRegistry.execute(name, args, context as CommandContext),
-    openWorkspacePicker: () => {},
-    openAgentWorkspace: () => {},
-    dismissAgentWorkspace: () => false,
-    openSettingsModal: () => {},
-    openMcpWorkspace: () => {},
-    openModelPicker: () => {},
-    openModelPickerWithTarget: () => true,
-    openProviderPicker: () => {},
-    openProviderModelPickerWithTarget: () => true,
-    openReasoningEffortPicker: () => ({ opened: true, model: 'test', levels: [] }),
-    openSessionPicker: () => {},
-    openProfilePicker: () => {},
-    openBookmarkModal: () => {},
-    openProcessModal: () => {},
-    openLiveTail: () => ({ opened: true, processId: 'bg-test', label: 'test' }),
-    openConversationSearch: () => {},
-    openPromptHistorySearch: () => {},
-    openSlashCommandMode: () => true,
-    openFilePicker: () => true,
-    openBlockActions: () => true,
-    openContextInspector: () => {},
-    openHelpOverlay: () => {},
-    openShortcutsOverlay: () => {},
-    openSelection: () => {},
-    workspace: { shellPaths: paths, processManager, bookmarkManager: { list: () => [], listSavedFiles: () => [] }, fileUndoManager, workPlanStore },
-    platform: {
-      configManager,
-      serviceRegistry: { getAll: () => ({}), inspect: async () => null },
-      localUserAuthManager: {
-        inspect: () => ({
-          userStorePath: join(root, '.goodvibes', 'auth', 'users.json'),
-          bootstrapCredentialPath: join(root, '.goodvibes', 'auth', 'bootstrap.txt'),
-          persisted: true,
-          bootstrapCredentialPresent: false,
-          userCount: 0,
-          sessionCount: 0,
-          users: [],
-          sessions: [],
-        }),
-      },
-      subscriptionManager: { list: () => [], listPending: () => [], get: () => null, getPending: () => null },
-      voiceProviderRegistry: { list: () => [] },
-      voiceService: { listVoices: async () => [] },
-      readModels: {
-        security: {
-          getSnapshot: () => ({
-            audit: { totalTokens: 0, results: [], blocked: [], scopeViolations: [], rotationWarnings: [], rotationOverdue: [] },
-            policy: { preflightStatus: 'ok', preflightIssueCount: 0, lintFindingCount: 0 },
-            mcpServers: [], plugins: [], incidents: [], deniedPermissions: 0,
-          }),
-        },
-      },
-    },
-    clients: {
-      mcpApi: {
-        listServerSecurity: () => [],
-        listAllTools: async () => [],
-      },
-    },
-    session: {
-      runtime: { sessionId: 'remote-session', provider: 'openai', model: 'gpt-4.1', reasoningEffort: 'medium' },
-      conversationManager: { title: 'Remote test', getMessageCount: () => 0, getMessageSnapshot: () => [], getTranscriptEventIndex: () => ({ events: [], groups: [] }) },
-      sessionManager: { list: () => [], search: () => [] },
-    },
-    provider: {
-      providerRegistry: {
-        listModels: () => [],
-        getContextWindowForModel: () => 128_000,
-      },
-    },
-    ops: {
-      executionLedger: {
-        getSnapshot: () => ({ records: [], total: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 }),
-        subscribe: () => () => {},
-        dispose: () => {},
-      },
-    },
-    extensions: { toolRegistry },
-  } as unknown as CommandContext;
-
-  registerAgentHarnessTool(toolRegistry, commandRegistry, context);
-  const tool = toolRegistry.list().find(candidate => candidate.definition.name === 'agent_harness');
-  if (!tool) throw new Error('Registered remote harness fixture is unavailable');
+  const base = makeHandoffFixture({ label: 'gv-remote' });
   const source = { goal: 'Inspect an operator handoff in an isolated local fixture',
     criteria: ['Preserve the exact remote route and input', 'Perform no remote effects'] };
-  let sequence = 0;
-  async function admit(args: Record<string, unknown>, signal?: AbortSignal) {
-    configManager.flushConfigFileChanges();
-    const call = await toolRegistry.prepareCall(`remote-handoff-${++sequence}`, 'agent_harness', args, { signal });
-    const admission = await permissionManager.admitAutonomous(call.callId, call.name, call.args, {
-      sourceOf: () => source, signal, schemaRevision: call.schemaRevision, preparedCall: { registry: toolRegistry, call },
-    });
-    expect(admission.result.approved).toBe(true);
-    expect(admission.result.autonomousDecision).toBeUndefined();
-    return { call, admission };
-  }
+  const admit = (args: Record<string, unknown>, signal?: AbortSignal) => base.admit(source, args, signal);
 
   return {
-    tool,
-    toolRegistry, configManager, source, admit,
+    tool: base.tool,
+    toolRegistry: base.toolRegistry, configManager: base.configManager, source, admit,
     async run(args: Record<string, unknown>, signal?: AbortSignal) {
       const { call, admission } = await admit(args, signal);
-      return toolRegistry.executePrepared(call, admission);
+      return base.toolRegistry.executePrepared(call, admission);
     },
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    cleanup: () => rmSync(base.root, { recursive: true, force: true }),
   };
 }
 
@@ -244,14 +120,12 @@ describe('agent_harness remote surface', () => {
         expect(parsed.methodId).toBe(expected.methodId);
         expect(parsed.effect).toBe(expected.effect);
         expect(typeof parsed.modelRoute).toBe('string');
-        // modelRoute is a preview string (max 56 chars) so long methodIds may be truncated.
-        // Verify it starts with the tool name prefix, and that methodId is separately correct.
-        expect(String(parsed.modelRoute)).toContain('agent_operator_method');
+        expect(parsed.modelRoute).toBe(`agent_operator_method methodId:"${expected.methodId}" input:{}`);
         expect(parsed.recordedAdmissionRequired).toBe(false);
         expect(Object.hasOwn(parsed, 'confirmationRequired')).toBe(false);
       }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -260,7 +134,8 @@ describe('agent_harness remote surface', () => {
     try {
       for (const mode of REMOTE_MUTATION_MODES) {
         for (const extra of [{}, { confirm: true, explicitUserRequest: 'Caller-authored remote request' }]) {
-          const result = await fixture.tool.execute({ mode, ...extra });
+          // Ids are supplied so the refusal under test is the missing admission, not the missing input.
+          const result = await fixture.tool.execute({ mode, target: 'remote-id-1', command: 'status', ...extra });
           expect(result.success).toBe(false);
           expect(result.error).toContain('recorded effect admission');
           expect(result.output).toBeUndefined();
@@ -269,7 +144,7 @@ describe('agent_harness remote surface', () => {
       expect(readings.requests).toHaveLength(0);
       expect(decisionLog.query()).toHaveLength(0);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -284,7 +159,7 @@ describe('agent_harness remote surface', () => {
       };
 
       for (const [mode, expectedMethodId] of Object.entries(methodIdMap)) {
-        const result = await fixture.run({ mode });
+        const result = await fixture.run({ mode, requestId: 'req-1', peerId: 'peer-1', command: 'inspect', workId: 'work-1' });
         expect(result.success).toBe(true);
         const parsed = JSON.parse(result.output ?? '{}') as Record<string, unknown>;
         expect(parsed.methodId).toBe(expectedMethodId);
@@ -292,16 +167,14 @@ describe('agent_harness remote surface', () => {
         expect(parsed.recordedAdmissionRequired).toBe(true);
         expect(Object.hasOwn(parsed, 'confirmationRequired')).toBe(false);
         expect(typeof parsed.modelRoute).toBe('string');
-        // modelRoute is a preview string (max 56 chars), verify tool prefix is present.
-        // methodId identity is already asserted above via the parsed.methodId field.
-        expect(String(parsed.modelRoute)).toContain('agent_operator_method');
+        expect(String(parsed.modelRoute)).toBe(`agent_operator_method methodId:"${expectedMethodId}" input:${JSON.stringify(parsed.input)}`);
         expect(parsed.modelRoute).not.toContain('confirm:');
         expect(parsed.modelRoute).not.toContain('explicitUserRequest:');
         expect(parsed.policy).toContain('fresh admission');
         if (mode !== 'remote_work_cancel') expect(parsed.policy).toContain('native pairing protocol');
       }
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -320,7 +193,7 @@ describe('agent_harness remote surface', () => {
       expect(inputField.requestId).toBe('req-abc-123');
       expect(inputField.note).toBe('approved by user');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -342,7 +215,7 @@ describe('agent_harness remote surface', () => {
       expect(inputField.command).toBe('run-task');
       expect(inputField.payload).toEqual(payload);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -361,7 +234,7 @@ describe('agent_harness remote surface', () => {
       expect(inputField.workId).toBe('work-001');
       expect(inputField.reason).toBe('user requested cancellation');
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -380,7 +253,7 @@ describe('agent_harness remote surface', () => {
       expect(decisionLog.query({ site: 'engine.gate.autonomous-tool' }).flatMap(entry => entry.status === 'answered'
         ? entry.notes.filter(note => note.kind === 'action' && note.action.startsWith('autonomous:claim:')) : [])).toHaveLength(0);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
@@ -398,13 +271,12 @@ describe('agent_harness remote surface', () => {
       expect(decisionLog.query()).toHaveLength(0);
       expect(getterCalls).toBe(0);
     } finally {
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 
-  test('remote modes are discoverable by keyword search in listHarnessModes', () => {
-    const { HARNESS_MODE_DESCRIPTORS: descriptors } = require('../../tools/agent-harness-mode-catalog.ts') as typeof import('../../tools/agent-harness-mode-catalog.ts');
-    const remoteDescriptors = descriptors.filter((d) => d.family === 'remote');
+  test('the remote family in the mode catalog is exactly the eight remote modes', () => {
+    const remoteDescriptors = HARNESS_MODE_DESCRIPTORS.filter((d) => d.family === 'remote');
     expect(remoteDescriptors).toHaveLength(8);
     const ids = remoteDescriptors.map((d) => d.id).sort();
     expect(ids).toEqual(

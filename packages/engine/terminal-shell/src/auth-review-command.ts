@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { requireYesFlag } from './command-confirmation.js';
 import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
@@ -87,8 +87,10 @@ export function createAuthBundleHandler<Context extends AuthReviewContext, Bundl
         activeSubscriptions: services.subscriptions.list().map((entry) => entry.provider),
         pendingSubscriptions: services.subscriptions.listPending().map((entry) => entry.provider),
       });
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+      writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+      // The mode above applies only when the file is created; an export over an older, wider file must still end owner-only.
+      chmodSync(target, 0o600);
       context.print(`Auth review bundle exported to ${target}`);
     } else {
       try {

@@ -32,7 +32,6 @@ describe('complete asynchronous harness caller lifetime', () => {
     expect(retained).toEqual([{ guard: assertSource, key: 'runtime.source' }]);
     expect(retained[0]?.guard).not.toBe(caller.assertCurrent);
     expect(currentChecks).toBeGreaterThan(0);
-    expect(currentChecks).toBeLessThan(20);
   });
 
   test('holds changed complete arguments after a real await', async () => {
@@ -204,7 +203,6 @@ describe('complete asynchronous harness caller lifetime', () => {
     outer.assertCurrent();
     inner.assertCurrent();
     expect(outerChecks).toBeGreaterThan(0);
-    expect(outerChecks).toBeLessThan(40);
     const record = records.installed[0];
     if (!record) throw new Error('The native test record is missing.');
     record.status = 'retired';

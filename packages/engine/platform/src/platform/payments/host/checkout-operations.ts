@@ -11,10 +11,12 @@ import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { logger } from '../../utils/logger.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
-import type { CheckoutJournal, InFlightCheckout } from '../checkout-registry.js';
+import { CheckoutPageClaimedError, type CheckoutJournal, type CheckoutPhase, type InFlightCheckout } from '../checkout-registry.js';
 import type { BeginCheckoutInput, PaymentBeginResult } from '../payments-gateway-service.js';
-import { isLivePaymentOperation, type PaymentOperationView, type PaymentOperationCancellation } from '../operation-view.js';
+import { isLivePaymentOperation, paymentOperationDescription, type PaymentOperationState, type PaymentOperationView, type PaymentOperationCancellation } from '../operation-view.js';
+import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { DurablePaymentOperations, PaymentOperationStoreError, checkoutRequestId, type PaymentOperationWriter } from './operation-store.js';
+import type { PaymentUnreadableOperation } from '../window-view.js';
 import type { DaemonPurchaseLedger } from './purchase-ledger.js';
 import type { RetainedTaintEvidence } from '../../security/untrusted-content.js';
 import type { PaymentRequestHostFacts, PaymentRequestStore, ProtectedPaymentRequest } from './protected-requests.js';
@@ -42,6 +44,8 @@ export interface DetachedCheckoutOwner {
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly retainWindowCheckpoint?: ((checkpoint: CheckoutWindowCheckpoint) => Promise<void>) | undefined;
+  /** True only while the host is stopping and this window is durably saved as its journal record reads. */
+  readonly keepWindowOnStop?: (() => boolean) | undefined;
   readonly readReplyHistory?: (() => Promise<PaymentReplyHistory | undefined>) | undefined;
 }
 interface ActiveOperation {
@@ -51,6 +55,15 @@ interface ActiveOperation {
   protectedRequest: boolean;
   continuation: NativeContinuationGrant | undefined;
   history?: RetainedPaymentReplyHistory | undefined;
+  /** The owner asked to stop it; a host shutdown aborts the same signal. */
+  cancelRequested: boolean;
+  /** Admission was acknowledged and the checkout itself started. */
+  launched: boolean;
+  /** The window checkpoint's durable write is in flight; a stop waits for it. */
+  saving: boolean;
+  abortWhenSaved: boolean;
+  /** The journal record the last durable checkpoint matches, while the journal still reads exactly that. */
+  savedWindow: InFlightCheckout | undefined;
 }
 export interface RecoveredCheckoutExecution {
   readonly source: DetachedCheckoutSource;
@@ -66,7 +79,71 @@ interface PreparingRecovery {
   started: boolean;
   readonly releaseOriginalWindow: () => Promise<boolean>;
   history?: RetainedPaymentReplyHistory | undefined;
+  cancelRequested: boolean;
 }
+
+/**
+ * Every state a purchase operation can move to. Refused, cancelled and failed
+ * are final: once one is recorded, later cleanup cannot relabel it, and in
+ * particular cannot erase the `cancelled` outcome that stops a cancelled
+ * window resuming after restart. `completed` moves only by an owner's
+ * merchant-history reconciliation of an unverified submission.
+ */
+const operationLifecycle = defineLifecycle<PaymentOperationState>('purchase operation', {
+  accepted: ['running', 'cancelling', 'completed', 'refused', 'cancelled', 'attention', 'interrupted', 'uncertain', 'failed'],
+  running: ['running', 'cancelling', 'completed', 'refused', 'cancelled', 'attention', 'interrupted', 'uncertain', 'failed'],
+  cancelling: ['cancelling', 'completed', 'refused', 'cancelled', 'attention', 'interrupted', 'uncertain', 'failed'],
+  attention: ['attention', 'uncertain', 'completed'],
+  uncertain: ['uncertain', 'interrupted', 'completed'],
+  interrupted: ['interrupted', 'running', 'uncertain', 'refused', 'cancelled'],
+  completed: ['completed', 'uncertain'],
+  refused: [],
+  cancelled: [],
+  failed: [],
+});
+
+/** Recorded when a daemon stop, not the owner, ended a purchase before submission. */
+const DAEMON_STOPPED = 'refused:daemon-stopped';
+
+function mayHaveSubmitted(phase: CheckoutPhase | null | undefined): boolean {
+  return phase === 'submit-pending' || phase === 'submitted';
+}
+
+/** Failures whose meaning holds whatever the journal says. */
+function failureOutcome(error: unknown): string | null {
+  if (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable') return 'decision-unavailable';
+  if (error instanceof DecisionModelsDisabledError) return 'decision-disabled';
+  if (!(error instanceof PaymentReplyWindowError)) return null;
+  switch (error.kind) {
+    case 'source-unavailable': return 'reply-source-unavailable';
+    case 'receive-uncovered': return 'refused:receive-uncovered';
+    case 'coverage-unrecorded': return 'refused:receive-unrecorded';
+    case 'history-unavailable': return 'refused:reply-history-unavailable';
+    default: return null;
+  }
+}
+
+/** Why a purchase stopped before any submission, when the journal proves it never reached one. */
+function stoppedOutcome(error: unknown): string | null {
+  if (error instanceof PaymentReplyWindowError) {
+    switch (error.kind) {
+      case 'unsettled-reply': return 'refused:reply-unsettled';
+      case 'reading-failed': return 'refused:reply-unreadable';
+      case 'clock-unavailable': return 'refused:clock-unavailable';
+      case 'invalid': case 'duplicate': case 'stale': return 'refused:window-unavailable';
+      default: return null;
+    }
+  }
+  if (error instanceof CheckoutPageClaimedError) return 'refused:page-in-use';
+  return error instanceof CheckoutOwnershipError ? 'refused:owner-changed' : null;
+}
+function mismatchedOperation(id: string): PaymentOperationStoreError {
+  return new PaymentOperationStoreError('invalid', `That operationId is not purchase ${id}'s current operation. Read payments.purchase.status for the operationId to stop.`);
+}
+function finishedOperation(operation: PaymentOperationView): PaymentOperationStoreError {
+  return new PaymentOperationStoreError('invalid', `Purchase ${operation.purchaseId} is ${operation.state} and can no longer be stopped. ${paymentOperationDescription(operation)}`);
+}
+
 export class CheckoutOperations {
   // Constructed with the registration, before request dispatch. Background
   // work must not inherit a request's tool proof, signal or notice sink.
@@ -76,6 +153,8 @@ export class CheckoutOperations {
   private readonly preparingRecovery = new Map<string, PreparingRecovery>();
   private readonly errors: unknown[] = [];
   private closed = false;
+  /** Set before anything is aborted, so a release point can tell a host stop from an owner cancel. */
+  private stopping = false;
   private recovered = false;
   private readonly reserved = new Set<string>();
   private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow' | 'appendReply' | 'recordReceiveCoverage'> | undefined;
@@ -124,28 +203,54 @@ export class CheckoutOperations {
       for (const record of entries) {
         if (record.phase !== 'awaiting-window' || this.preparingRecovery.has(record.purchaseId) || this.active.has(record.purchaseId)) continue;
         if (this.closed) throw new CheckoutOwnershipError();
-        const status = this.store.get(record.purchaseId);
-        if (!status || status.state === 'cancelling' || status.outcome === 'cancelled' || status.phase !== 'awaiting-window'
-          || !(isLivePaymentOperation(status.state) || status.state === 'interrupted')) continue;
-        if (this.purchases.get(record.purchaseId)) continue;
-        const writer = this.store.recover(record.purchaseId); if (!writer) continue;
-        let retained = false;
-        try {
-          const current = () => { if (this.closed) throw new CheckoutOwnershipError(); writer.assertCurrent(); };
-          current(); if (!isDeepStrictEqual(writer.read(), status)) continue;
-          const request = await requests.read(record.purchaseId, status.operationId, current); current();
-          if (request.principalId !== writer.principalId || status.currency !== record.currency || status.totalMinorUnits !== record.totalMinorUnits
-            || !request.host.continuation || !request.host.browser || !request.host.browserControls || !request.window
-            || !isDeepStrictEqual(request.window.record, record)) continue;
-          const latest = await this.journal.list(); current();
-          if (!isDeepStrictEqual(latest.find(row => row.purchaseId === record.purchaseId), record)) continue;
-          const releaseOriginalWindow = retainCleanup(request, () => writer.assertCurrent());
-          const recovery: PreparingRecovery = { writer, request, abort: new AbortController(), started: false, releaseOriginalWindow };
-          this.preparingRecovery.set(record.purchaseId, recovery);
-          recovery.history = this.retainHistory(writer, request.window); retained = true;
-        } finally { if (!retained) { this.preparingRecovery.delete(record.purchaseId); writer.release(); } }
+        // One unreadable or unrestorable record must not stop boot recovery
+        // for every other purchase. It is never resumed; the ordinary journal
+        // sweep that follows settles it as not submitted under its own lease.
+        try { await this.retainInterruptedWindow(record, requests, retainCleanup); }
+        catch (error) {
+          if (this.closed) throw error;
+          try { logger.warn('A payment window could not be prepared to resume after restart. Boot recovery settles it as not submitted; read payments.purchase.status for its outcome.'); }
+          catch { /* Keep recovering the remaining records. */ }
+        }
       }
     });
+  }
+
+  private async retainInterruptedWindow(record: InFlightCheckout, requests: Pick<PaymentRequestStore, 'read'>,
+    retainCleanup: (request: ProtectedPaymentRequest, assertEvidenceCurrent: () => void) => () => Promise<boolean>): Promise<void> {
+    const status = this.store.get(record.purchaseId);
+    // A graceful stop ended its window and revoked its continuation; only a
+    // crash leaves a window to resume.
+    if (!status || status.state === 'cancelling' || status.outcome === 'cancelled' || status.outcome === DAEMON_STOPPED || status.phase !== 'awaiting-window'
+      || !(isLivePaymentOperation(status.state) || status.state === 'interrupted')) return;
+    if (this.purchases.get(record.purchaseId)) return;
+    const writer = this.store.recover(record.purchaseId); if (!writer) return;
+    let retained = false;
+    try {
+      const current = () => { if (this.closed) throw new CheckoutOwnershipError(); writer.assertCurrent(); };
+      current(); if (!isDeepStrictEqual(writer.read(), status)) return;
+      const request = await requests.read(record.purchaseId, status.operationId, current); current();
+      if (request.principalId !== writer.principalId || status.currency !== record.currency || status.totalMinorUnits !== record.totalMinorUnits
+        || !request.host.continuation || !request.host.browser || !request.host.browserControls || !request.window
+        || !isDeepStrictEqual(request.window.record, record)) return;
+      const latest = await this.journal.list(); current();
+      if (!isDeepStrictEqual(latest.find(row => row.purchaseId === record.purchaseId), record)) return;
+      const releaseOriginalWindow = retainCleanup(request, () => writer.assertCurrent());
+      const recovery: PreparingRecovery = { writer, request, abort: new AbortController(), started: false, releaseOriginalWindow, cancelRequested: false };
+      this.preparingRecovery.set(record.purchaseId, recovery);
+      recovery.history = this.retainHistory(writer, request.window); retained = true;
+    } catch (error) {
+      // Say why it will not resume while the lease is still held.
+      if (!this.closed) {
+        try {
+          const latest = writer.read();
+          if (isLivePaymentOperation(latest.state) || latest.state === 'interrupted') {
+            this.transition(writer, { ...latest, state: 'interrupted', outcome: 'refused:recovery-unavailable', updatedAtMs: this.now() });
+          }
+        } catch { /* The record stays exactly as found. */ }
+      }
+      throw error;
+    } finally { if (!retained) { this.preparingRecovery.delete(record.purchaseId); writer.release(); } }
   }
 
   /** Launch only after the ordinary sweep has finished. Preparation may await
@@ -166,7 +271,8 @@ export class CheckoutOperations {
             abort.signal.throwIfAborted(); writer.assertCurrent();
           };
           try {
-            current(); writer.update({ ...writer.read(), state: 'running', outcome: null, updatedAtMs: this.now() });
+            current();
+            if (!this.transition(writer, { ...writer.read(), state: 'running', outcome: null, updatedAtMs: this.now() })) throw new PaymentOperationStoreError('unavailable');
             await withConfiguredDecisionModelPolicy(async () => {
               await Promise.resolve(); current();
               restored = await prepare(request, { signal: abort.signal, assertCurrent: current,
@@ -177,25 +283,39 @@ export class CheckoutOperations {
                 } }); current();
               restored.source.assertCurrent();
               if (restored.source.principalId !== request.principalId) throw new CheckoutOwnershipError();
-              operation = { writer, abort, source: restored.source, protectedRequest: true, continuation: request.host.continuation, history: recovery.history };
+              operation = { writer, abort, source: restored.source, protectedRequest: true, continuation: request.host.continuation, history: recovery.history,
+                cancelRequested: recovery.cancelRequested, launched: true, saving: false, abortWhenSaved: false, savedWindow: request.window?.record };
               this.active.set(writer.purchaseId, operation); this.preparingRecovery.delete(writer.purchaseId);
               await this.run(restored.input, operation, restored.execute.bind(restored));
             });
           } catch (error) {
             if (operation) await this.settleFailure(operation, error);
-            else writer.update({ ...writer.read(), state: 'interrupted', outcome: abort.signal.aborted ? 'cancelled' : 'refused:recovery-unavailable', updatedAtMs: this.now() });
+            // Stopped before the resumed checkout took over: its original window
+            // is untouched and stays resumable, as after a crash.
+            else if (!(this.stopping && !recovery.cancelRequested)) this.transition(writer, { ...writer.read(), state: 'interrupted', updatedAtMs: this.now(),
+              outcome: recovery.cancelRequested ? 'cancelled' : abort.signal.aborted ? DAEMON_STOPPED : 'refused:recovery-unavailable' });
           } finally {
+            const keeping = operation ? this.keeping(operation) : this.stopping && !recovery.cancelRequested;
             try {
               await (operation?.history ?? recovery.history)?.retire();
               if (operation) operation.history = undefined;
-              let released: boolean;
-              try { released = await recovery.releaseOriginalWindow(); }
-              catch (error) {
-                writer.update({ ...writer.read(), state: 'uncertain', outcome: null, updatedAtMs: this.now() }); throw error;
-              }
-              if (!operation && released) {
-                writer.update({ ...writer.read(), state: abort.signal.aborted ? 'cancelled' : 'refused', updatedAtMs: this.now() });
-                await this.requests?.remove(writer.purchaseId, request.operationId, () => writer.assertCurrent());
+              if (!keeping) {
+                let released: boolean;
+                try { released = await recovery.releaseOriginalWindow(); }
+                catch (error) {
+                  // Cleanup failure leaves evidence to inspect, but never relabels
+                  // a settled result or drops its outcome.
+                  const latest = writer.read();
+                  if (isLivePaymentOperation(latest.state) || latest.state === 'interrupted') {
+                    this.transition(writer, { ...latest, state: 'uncertain', updatedAtMs: this.now() });
+                  }
+                  throw error;
+                }
+                if (!operation && released) {
+                  this.transition(writer, { ...writer.read(), updatedAtMs: this.now(),
+                    state: recovery.cancelRequested ? 'cancelled' : abort.signal.aborted ? 'interrupted' : 'refused' });
+                  await this.requests?.remove(writer.purchaseId, request.operationId, () => writer.assertCurrent());
+                }
               }
               if (operation) await this.releaseProtectedRequest(operation);
             }
@@ -222,7 +342,10 @@ export class CheckoutOperations {
     consumeApproval: () => void): Promise<PaymentOperationView> {
     checkoutRequestId(id);
     if (this.closed) throw new CheckoutOwnershipError();
-    if (!this.recovered || this.errors.length > 0) throw new PaymentOperationStoreError('unavailable');
+    if (!this.recovered) throw new PaymentOperationStoreError('unavailable', 'New purchases wait until boot recovery of earlier purchases has finished on this payment host, '
+      + 'and only the elected payment host recovers them. If this persists, look for "payments boot recovery failed" in the daemon log, fix its cause, then restart the daemon.');
+    if (this.errors.length > 0) throw new PaymentOperationStoreError('unavailable', 'An earlier purchase on this payment host did not settle its records cleanly, '
+      + 'so new purchases are refused until the daemon restarts. Read payments.purchase.status, then restart the daemon.');
     if (this.reserved.has(id)) throw new PaymentOperationStoreError('exists');
     if (this.active.size + this.preparingRecovery.size >= 128) throw new PaymentOperationStoreError('busy');
     // Existing identities never create another executor, even after restart or
@@ -248,7 +371,8 @@ export class CheckoutOperations {
     const operation: PaymentOperationView = Object.freeze({ purchaseId: id, operationId: `payment-operation:${opaqueUuid()}`,
       state: 'accepted', phase: null, createdAtMs: now, updatedAtMs: now, outcome: null, totalMinorUnits: null, currency: null });
     const writer = this.store.create(operation, source.principalId, current);
-    const active: ActiveOperation = { writer, source, abort: new AbortController(), protectedRequest: false, continuation: undefined };
+    const active: ActiveOperation = { writer, source, abort: new AbortController(), protectedRequest: false, continuation: undefined,
+      cancelRequested: false, launched: false, saving: false, abortWhenSaved: false, savedWindow: undefined };
     this.active.set(id, active);
     let launched = false;
     try {
@@ -291,6 +415,7 @@ export class CheckoutOperations {
 
   private launch(input: BeginCheckoutInput, operation: ActiveOperation): void {
     const { writer } = operation;
+    operation.launched = true;
     this.execution.runInAsyncScope(() => {
       const pending = this.work.run(async () => {
         try {
@@ -311,10 +436,15 @@ export class CheckoutOperations {
     });
   }
   private async releaseProtectedRequest(operation: ActiveOperation): Promise<void> {
+    // Request and continuation are the evidence the next boot resumes from.
+    if (this.keeping(operation)) return;
     const { writer } = operation;
     const status = writer.read();
     const settled = ['refused', 'cancelled', 'failed'].includes(status.state)
-      || status.state === 'completed' && (status.outcome === 'purchased' || status.outcome === 'refunded');
+      || status.state === 'completed' && (status.outcome === 'purchased' || status.outcome === 'refunded')
+      // A daemon stop before submission whose own journal record was removed:
+      // nothing of it remains to resume or reconcile.
+      || status.state === 'interrupted' && status.phase === null;
     // A stop can race an unknown merchant result. Retire future authority
     // while retaining the original evidence needed to reconcile that result.
     if (operation.continuation && (settled || operation.abort.signal.aborted)) {
@@ -327,8 +457,14 @@ export class CheckoutOperations {
     operation.protectedRequest = false;
   }
   private current(operation: ActiveOperation): void {
-    if (this.closed || this.active.get(operation.writer.purchaseId) !== operation) throw new CheckoutOwnershipError();
-    operation.abort.signal.throwIfAborted(); operation.writer.assertCurrent(); operation.source.assertCurrent();
+    // A stop lets a window checkpoint's own write finish, so what the next boot
+    // resumes is exactly what was saved. That write only persists an already
+    // captured checkpoint; the next boot re-validates its authority and settings.
+    const finishing = this.closed && operation.saving;
+    if (this.closed && !finishing || this.active.get(operation.writer.purchaseId) !== operation) throw new CheckoutOwnershipError();
+    operation.abort.signal.throwIfAborted(); operation.writer.assertCurrent();
+    if (finishing) return;
+    operation.source.assertCurrent();
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     operation.abort.signal.throwIfAborted();
   }
@@ -336,19 +472,27 @@ export class CheckoutOperations {
     const { writer } = operation;
     try {
       this.current(operation);
-      writer.update({ ...writer.read(), state: 'running', updatedAtMs: this.now() });
+      if (!this.transition(writer, { ...writer.read(), state: 'running', updatedAtMs: this.now() })) throw new PaymentOperationStoreError('unavailable');
       const result = await execute(input, writer.purchaseId, { signal: operation.abort.signal,
         assertCurrent: () => this.current(operation), taintEvidence: operation.source.taintEvidence,
+        keepWindowOnStop: () => this.keeping(operation),
         ...(this.requests ? { retainWindowCheckpoint: checkpoint => this.checkpointWindow(input, operation, checkpoint) } : {}) });
+      if (this.keeping(operation)) return;
       // Completion records facts even after owner cancellation; it grants no
       // further act. Actual journal phase wins over a generic refusal string.
+      // The recorded phase is cleared only when this checkout's own journal
+      // record was removed before any click (see released), so a clean
+      // pre-click refusal settles as refused rather than uncertain.
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);
       const previous = writer.read();
       const recorded = this.purchases.get(writer.purchaseId);
-      const state = recorded ? 'completed' : retained?.phase === 'submit-pending' || retained?.phase === 'submitted' || previous.phase === 'submit-pending' || previous.phase === 'submitted'
+      const state: PaymentOperationState = recorded ? 'completed' : mayHaveSubmitted(retained?.phase) || mayHaveSubmitted(previous.phase)
         ? result.outcome.startsWith('challenge:') ? 'attention' : 'uncertain'
-        : operation.abort.signal.aborted || result.outcome === 'cancelled' ? 'cancelled' : result.outcome.startsWith('refused') ? 'refused' : 'failed';
-      writer.update({ ...previous, state, updatedAtMs: this.now(), outcome: recorded?.outcome ?? (state === 'cancelled' ? 'cancelled' : result.outcome),
+        : result.outcome === 'cancelled' || operation.cancelRequested ? 'cancelled'
+          : operation.abort.signal.aborted ? 'interrupted'
+            : result.outcome.startsWith('refused') ? 'refused' : 'failed';
+      this.transition(writer, { ...previous, state, updatedAtMs: this.now(),
+        outcome: recorded?.outcome ?? (state === 'cancelled' ? 'cancelled' : state === 'interrupted' ? DAEMON_STOPPED : result.outcome),
         totalMinorUnits: recorded?.totalMinorUnits ?? result.totalMinorUnits ?? previous.totalMinorUnits,
         currency: recorded?.currency ?? result.currency ?? previous.currency });
     } catch (error) { await this.settleFailure(operation, error); }
@@ -376,47 +520,112 @@ export class CheckoutOperations {
     // Recapture the exact selected native controls for this quote, rather than
     // keep the admission snapshot after a reprice or intervening native read.
     const receiveSpans = await this.captureReceiveSpans?.(writer.purchaseId, checkpoint, current); current();
-    await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current, receiveSpans);
+    operation.saving = true;
+    try {
+      await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current, receiveSpans);
+      operation.savedWindow = checkpoint.record;
+    } finally {
+      operation.saving = false;
+      // A stop that landed during the write was held back until it finished.
+      if (operation.abortWhenSaved) operation.abort.abort(new CheckoutOwnershipError());
+    }
     current();
     operation.history ??= this.retainHistory(writer, checkpoint);
   }
 
   private async settleFailure(operation: ActiveOperation, error: unknown): Promise<void> {
+    // A stop that left a durably saved window settles nothing: that window is
+    // the state a crash would leave, and the next boot resumes or settles it.
+    if (this.keeping(operation)) return;
     const { writer } = operation, previous = writer.read();
-    let state: PaymentOperationView['state'] = 'uncertain';
-    let outcome: string | null = previous.outcome ?? (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable'
-      ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled'
-        : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable'
-          : error instanceof PaymentReplyWindowError && error.kind === 'receive-uncovered' ? 'refused:receive-uncovered'
-          : error instanceof PaymentReplyWindowError && error.kind === 'coverage-unrecorded' ? 'refused:receive-unrecorded'
-          : error instanceof PaymentReplyWindowError && error.kind === 'history-unavailable' ? 'refused:reply-history-unavailable' : null);
+    let state: PaymentOperationState = 'uncertain';
+    let outcome: string | null = previous.outcome ?? failureOutcome(error);
     try {
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);
       const recorded = this.purchases.get(writer.purchaseId);
       if (recorded) { state = 'completed'; outcome = recorded.outcome; }
-      else if (retained?.phase === 'submit-pending' || retained?.phase === 'submitted' || previous.phase === 'submit-pending' || previous.phase === 'submitted') state = 'uncertain';
-      else state = operation.abort.signal.aborted ? 'cancelled' : 'failed';
+      else if (mayHaveSubmitted(retained?.phase) || mayHaveSubmitted(previous.phase)) state = 'uncertain';
+      else if (operation.cancelRequested) { state = 'cancelled'; outcome = 'cancelled'; }
+      // A shutdown is not the owner's stop. Before launch the begin call itself
+      // reports the failure, so only a running checkout records the stop.
+      else if (operation.abort.signal.aborted) {
+        if (operation.launched) { state = 'interrupted'; outcome = DAEMON_STOPPED; } else state = 'cancelled';
+      } else { state = 'failed'; outcome ??= stoppedOutcome(error); }
     } catch { /* Unreadable financial evidence remains uncertain. */ }
-    writer.update({ ...previous, state, outcome, updatedAtMs: this.now() });
+    this.transition(writer, { ...previous, state, outcome, updatedAtMs: this.now() });
   }
   /** Called only after the real journal put is durably confirmed. */
   progress(record: InFlightCheckout): void {
     const operation = this.active.get(record.purchaseId); if (!operation) return;
+    // Any later journal write means the saved window no longer matches it.
+    if (operation.savedWindow && !isDeepStrictEqual(operation.savedWindow, record)) operation.savedWindow = undefined;
     const previous = operation.writer.read();
-    operation.writer.update({ ...previous, phase: record.phase, totalMinorUnits: record.totalMinorUnits,
+    this.transition(operation.writer, { ...previous, phase: record.phase, totalMinorUnits: record.totalMinorUnits,
       currency: record.currency, updatedAtMs: this.now() });
+  }
+  /** Called only after this registry's own journal removal is durably
+   * confirmed. A checkout removes its own record only before the click or
+   * after its purchase is recorded, so with no purchase record nothing of it
+   * remains in flight and its last phase no longer describes it. */
+  released(purchaseId: string): void {
+    const operation = this.active.get(purchaseId); if (!operation) return;
+    operation.savedWindow = undefined;
+    try {
+      if (this.purchases.get(purchaseId)) return;
+      const previous = operation.writer.read();
+      if (previous.phase !== null) this.transition(operation.writer, { ...previous, phase: null, updatedAtMs: this.now() });
+    } catch { /* The last phase stays; a stale submit phase only ever reads as uncertain. */ }
+  }
+  /** Whether this host is running, or preparing to resume, that purchase. */
+  isActive(purchaseId: string): boolean {
+    return this.active.has(purchaseId) || this.preparingRecovery.has(purchaseId);
+  }
+
+  /** One owner for every state write here: a refused move is logged and the
+   * stored state is left as it was. */
+  private transition(writer: PaymentOperationWriter, next: PaymentOperationView): boolean {
+    const move = operationLifecycle.check(writer.read().state, next.state);
+    if (!move.ok) {
+      try { logger.warn(`Purchase operation status was kept: ${move.reason}.`); } catch { /* Keep the original state. */ }
+      return false;
+    }
+    writer.update(next);
+    return true;
+  }
+
+  /** Mark a host stop before anything aborts. Idempotent; owner cancels are unaffected. */
+  beginStop(): void { this.stopping = true; }
+  /** A host stop (never an owner cancel) found this window durably saved as its journal reads. */
+  private keeping(operation: ActiveOperation): boolean {
+    return this.stopping && !operation.cancelRequested && operation.savedWindow !== undefined;
   }
 
   status(id?: string): readonly PaymentOperationView[] { return this.store.list(id); }
+  /** The listing degrades per record: readable rows plus the records that could not be read. */
+  statusReport(id?: string): { readonly operations: readonly PaymentOperationView[]; readonly unreadable: readonly PaymentUnreadableOperation[] } {
+    return id === undefined ? this.store.report() : { operations: this.store.list(id), unreadable: [] };
+  }
   cancel(id: string, operationId: string): PaymentOperationCancellation {
-    if (this.closed) throw new CheckoutOwnershipError();
-    const operation = this.active.get(id) ?? this.preparingRecovery.get(id); if (!operation) throw new PaymentOperationStoreError('busy');
+    if (this.closed) throw new PaymentOperationStoreError('busy', 'This payment host is shutting down and no longer takes stop requests. '
+      + `Read payments.purchase.status for purchase ${id} once the daemon is running again.`);
+    const operation = this.active.get(id) ?? this.preparingRecovery.get(id); if (!operation) throw this.cancelRefusal(id, operationId);
     const previous = operation.writer.read();
-    if (previous.operationId !== operationId || !isLivePaymentOperation(previous.state)) throw new PaymentOperationStoreError('invalid');
-    operation.writer.update({ ...previous, state: 'cancelling', updatedAtMs: this.now() });
+    if (previous.operationId !== operationId) throw mismatchedOperation(id);
+    if (!isLivePaymentOperation(previous.state)) throw finishedOperation(previous);
+    operation.cancelRequested = true;
+    this.transition(operation.writer, { ...previous, state: 'cancelling', updatedAtMs: this.now() });
     operation.abort.abort(new CheckoutOwnershipError());
-    return Object.freeze({ purchaseId: id, operationId, accepted: true,
-      mayHaveSubmitted: previous.phase === 'submit-pending' || previous.phase === 'submitted' });
+    return Object.freeze({ purchaseId: id, operationId, accepted: true, mayHaveSubmitted: mayHaveSubmitted(previous.phase) });
+  }
+  private cancelRefusal(id: string, operationId: string): PaymentOperationStoreError {
+    let existing: PaymentOperationView | null;
+    try { existing = this.store.get(id); }
+    catch (error) { return error instanceof PaymentOperationStoreError ? error : new PaymentOperationStoreError('unavailable'); }
+    if (!existing) return new PaymentOperationStoreError('invalid', `No purchase ${id} exists on this payment host. `
+      + 'Read payments.purchase.status for the purchaseId and operationId to stop.');
+    if (existing.operationId !== operationId) return mismatchedOperation(id);
+    if (isLivePaymentOperation(existing.state)) return new PaymentOperationStoreError('busy', `Purchase ${id} is ${existing.state} on another payment host. Stop it on that host.`);
+    return finishedOperation(existing);
   }
 
   /** No receipt/status can resurrect an executor. Reconcile evidence after the
@@ -434,7 +643,7 @@ export class CheckoutOperations {
         if (!isDeepStrictEqual(current, previous)) continue;
         if (writer.reconciliation()) continue;
         const retained = entries.find(row => row.purchaseId === current.purchaseId);
-        let state: PaymentOperationView['state'] = 'uncertain', outcome = current.outcome;
+        let state: PaymentOperationState = 'uncertain', outcome = current.outcome;
         let total = current.totalMinorUnits, currency = current.currency;
         try {
           const recorded = this.purchases.get(current.purchaseId);
@@ -442,7 +651,7 @@ export class CheckoutOperations {
           else if (current.phase !== 'submit-pending' && current.phase !== 'submitted'
             && (!retained || (retained.phase !== 'submit-pending' && retained.phase !== 'submitted'))) state = 'interrupted';
         } catch { /* Unknown evidence is never absence or permission to resubmit. */ }
-        writer.update({ ...current, state, outcome, totalMinorUnits: total, currency, updatedAtMs: this.now() });
+        this.transition(writer, { ...current, state, outcome, totalMinorUnits: total, currency, updatedAtMs: this.now() });
       } finally { writer.release(); }
     }
     if (this.closed) throw new CheckoutOwnershipError();
@@ -452,8 +661,13 @@ export class CheckoutOperations {
     if (this.closing) return this.closing;
     let resolve!: () => void, reject!: (error: unknown) => void;
     this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
-    this.closed = true;
-    for (const operation of this.active.values()) operation.abort.abort(new CheckoutOwnershipError());
+    this.beginStop(); this.closed = true;
+    for (const operation of this.active.values()) {
+      // An owner cancel has already aborted; a window checkpoint mid-write is
+      // allowed to finish first so a restart resumes what is actually saved.
+      if (operation.saving && !operation.cancelRequested) operation.abortWhenSaved = true;
+      else operation.abort.abort(new CheckoutOwnershipError());
+    }
     for (const operation of this.preparingRecovery.values()) operation.abort.abort(new CheckoutOwnershipError());
     // Prepared leases not yet launched also belong to this registration.
     for (const [id, operation] of this.preparingRecovery) if (!operation.started) {

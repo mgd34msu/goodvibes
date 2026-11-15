@@ -394,11 +394,13 @@ describe('outward effects after reading a page', () => {
       screenshotDirectory: SCREENSHOT_DIRECTORY,
       untrusted: recording,
     });
-    await recorded.launch({ headless: true });
-    await recorded.readText({});
-    const snapshot = await recorded.snapshot({});
-    const submit = (snapshot.elements as { ref: string; name: string }[]).find((entry) => entry.name === 'Confirm and send')!;
-    await expect(recorded.click({}, { ref: submit.ref })).rejects.toThrow(UntrustedEffectError);
+    try {
+      await recorded.launch({ headless: true });
+      await recorded.readText({});
+      const snapshot = await recorded.snapshot({});
+      const submit = (snapshot.elements as { ref: string; name: string }[]).find((entry) => entry.name === 'Confirm and send')!;
+      await expect(recorded.click({}, { ref: submit.ref })).rejects.toThrow(UntrustedEffectError);
+    } finally { await recorded.shutdown(); }
 
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain('browser.submit|');

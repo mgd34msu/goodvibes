@@ -35,6 +35,11 @@ export interface ProbeContext {
    * to the model without leaking a password or a token.
    */
   readonly configValuePresent: (key: string) => boolean;
+  /**
+   * Whether a secret-store entry holds a value, answered yes or no like
+   * `configValuePresent`. Absent when the caller has no secret store to ask.
+   */
+  readonly secretPresent?: (key: string) => boolean;
 }
 
 export interface ProbeResult {
@@ -152,6 +157,15 @@ export function runCapabilityProbe(probe: CapabilityProbe, context: ProbeContext
       return context.configValuePresent(probe.key)
         ? { satisfied: true, detail: `${probe.label} is configured (${probe.key})` }
         : { satisfied: false, detail: `${probe.label} is not configured (${probe.key} is unset)` };
+
+    case 'secret-present': {
+      if (!context.secretPresent) {
+        return { satisfied: false, detail: `${probe.label} cannot be checked: no secret store is available to this check` };
+      }
+      return context.secretPresent(probe.key)
+        ? { satisfied: true, detail: `${probe.label} is stored` }
+        : { satisfied: false, detail: `${probe.label} is not in the encrypted store` };
+    }
 
     case 'module-resolvable': {
       try {

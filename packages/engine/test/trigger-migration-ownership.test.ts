@@ -1,4 +1,3 @@
-/** Actual trigger migration/execution lifetimes. Authored source; UNRUN. */
 import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';

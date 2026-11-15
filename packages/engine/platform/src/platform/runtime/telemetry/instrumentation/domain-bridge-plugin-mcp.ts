@@ -2,7 +2,7 @@ import type { McpEvent } from '../../../../events/mcp.js';
 import type { PluginEvent } from '../../../../events/plugins.js';
 import { endMcpSpan, recordMcpPhase, startMcpSpan } from '../spans/mcp.js';
 import { endPluginSpan, recordPluginPhase, startPluginSpan } from '../spans/plugin.js';
-import type { DomainBridgeAttachmentInput, Env, SpanMap } from './domain-bridge-shared.js';
+import { trackSpan, type DomainBridgeAttachmentInput, type Env, type SpanMap } from './domain-bridge-shared.js';
 
 export function attachPluginDomain(
   { bus, helpers }: DomainBridgeAttachmentInput,
@@ -19,7 +19,7 @@ export function attachPluginDomain(
           version: env.payload.version,
           traceId: env.traceId ?? '',
         });
-        pluginSpans.set(env.payload.pluginId, span);
+        trackSpan(pluginSpans, env.payload.pluginId, span);
       });
     }),
   );
@@ -117,7 +117,7 @@ export function attachMcpDomain(
           url: env.payload.url,
           traceId: env.traceId ?? '',
         });
-        mcpSpans.set(env.payload.serverId, span);
+        trackSpan(mcpSpans, env.payload.serverId, span);
       });
     }),
   );

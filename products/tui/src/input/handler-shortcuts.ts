@@ -109,7 +109,13 @@ function cycleSessionPermissionMode(state: GlobalShortcutRouteState): void {
   if (!configManager) return;
   const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
   const next = nextPermissionMode(current);
-  configManager.set('permissions.mode', next);
+  // A project settings file that holds the mode stricter makes the write throw; report it, do not crash the input loop.
+  try {
+    configManager.set('permissions.mode', next);
+  } catch (error) {
+    state.commandContext?.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')}: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
   state.commandContext?.print(`[Permissions] Mode: ${permissionModeLabel(next)}`);
   state.requestRender();
 }

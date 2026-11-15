@@ -79,6 +79,8 @@ export interface ChannelDeliveryReceipt {
 export interface ChannelDeliveryResult {
   readonly responseId?: string | undefined;
   readonly receipt?: ChannelDeliveryReceipt | undefined;
+  /** True when the message was shortened to fit the surface; what went out is not the whole text. */
+  readonly truncated?: boolean | undefined;
 }
 
 export interface ChannelDeliveryStrategy {

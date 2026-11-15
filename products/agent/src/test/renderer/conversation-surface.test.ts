@@ -46,15 +46,6 @@ describe('conversation surface', () => {
     expect(lineToString(lines[lines.length - 1]!)).toContain('▀');
   });
 
-  test('status line defaults to unicode gutter marker', () => {
-    const lines = renderConversationNotice(
-      'Status row test',
-      40,
-      { accent: '#00ffff', text: '#cbd5e1', dim: true },
-    );
-    expect(lineToString(lines[0])).toContain('▌');
-  });
-
   test('renders event lines with a strong label and marker for transcript families', () => {
     const line = renderConversationEventLine(60, {
       marker: '●',

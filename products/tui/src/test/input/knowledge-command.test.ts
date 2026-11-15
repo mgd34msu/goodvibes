@@ -232,17 +232,15 @@ describe('knowledgeCommand', () => {
       );
     } finally { installJudgmentPort(previous); }
 
-    const failureRequests = blockedReading.requests.filter(request => request.state === `Message: ${blockedError}`);
-    expect(failureRequests).toHaveLength(1);
-    expect(failureRequests.map(request => request.context)).toEqual([{
-      battery: 'engine.failure-reading', batteryVersion: 2, pattern: 'battery', site: 'engine.knowledge.ingest-failure',
-    }]);
-    expect(failureRequests.map(request => Object.keys(request.questions))).toEqual([[
-      'category', 'billing', 'rate_limited', 'context_exceeded', 'transient_network',
-      'provider_unusable', 'connection_failure', 'before_response',
-    ]]);
+    // The policy refusal carries a 400 status, which already settles its category, so no
+    // failure-wording reading is requested for it.
+    expect(blockedReading.requests.filter(request => request.context?.site === 'engine.knowledge.ingest-failure')).toEqual([]);
+    expect(blockedReading.requests.filter(request => request.context?.battery === 'engine.failure-reading')).toEqual([]);
 
-    expect(printed.join('\n')).toContain('Ingested');
+    const blockedOutput = printed.join('\n');
+    expect(blockedOutput).toContain('Ingest failed');
+    expect(blockedOutput).toContain('Artifact URI blocked by SSRF policy');
+    expect(blockedOutput).not.toContain('Ingested');
     expect(fetchedPages).toBe(fetchedBefore);
 
     const sources = knowledgeStore.listSources(10);

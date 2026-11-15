@@ -48,9 +48,23 @@ The optional multipart text fields each carry one piece of artifact metadata.
 | `kind` | The artifact kind classification used by downstream consumers |
 | `sourceUri` | Where the content originally came from, kept as provenance |
 | `retentionMs` | How long the artifact lives before expiry sweeps remove it |
-| `tags` | Labels for lookup; accepts a JSON array or a comma-separated string |
 | `metadata` | Arbitrary JSON object attached to the artifact record |
-| `allowPrivateHosts` | Boolean opt-in for URI fetches that resolve to private hosts |
+
+A field that cannot be read is refused with a 400 that names it: invalid JSON in
+`metadata` (multipart field or raw-upload query parameter) or a `retentionMs` that
+is not a number. The artifact record has no tags and an upload fetches no URI, so
+`POST /api/artifacts` ignores `tags` and `allowPrivateHosts`. `POST
+/api/knowledge/ingest/artifact` accepts an upload with `title`, `folderPath`,
+`tags`, `sessionId`, `sourceType`, `connectorId` and `metadata` and attaches them
+to the ingested source; any other field is ignored.
+
+`GET /api/artifacts/{id}/content` (admin only, like the artifact list) always sends
+`X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`. Images
+(PNG, JPEG, GIF, WebP, AVIF, BMP), audio, video, plain text and JSON are shown inline
+when `?download=0` is passed; every other type (HTML, SVG, XML, scripts, PDF) is
+served as `application/octet-stream` with `Content-Disposition: attachment`. An id
+that does not exist answers 404; a failure reading a known artifact (an I/O error, a
+size or checksum mismatch) answers 500.
 
 Small JSON control bodies are intended for inline text, daemon-local paths, and
 remote URI references. PDFs, photos, website snapshots, and other large

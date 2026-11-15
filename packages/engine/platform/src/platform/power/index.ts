@@ -2,8 +2,8 @@
  * power/, sleep ownership: automatic work inhibition, sleep-edge honesty,
  * and the owner's keep-awake toggle (see manager.ts for the ruling's shape).
  */
-export { PowerManager, LID_SWITCH_HONEST_SPLIT } from './manager.js';
-export type { PowerState, PowerInhibitorView, PowerManagerOptions, PowerSleepEdgeHooks } from './manager.js';
+export { PowerManager, LID_SWITCH_HONEST_SPLIT, KEEP_AWAKE_NOT_HELD, keepAwakeCondition } from './manager.js';
+export type { KeepAwakeCondition, PowerState, PowerInhibitorView, PowerManagerOptions, PowerSleepEdgeHooks } from './manager.js';
 export { createLinuxLogindSeam, reapOrphanedInhibitors } from './linux-logind.js';
 export type { OrphanReaperDeps, SleepWatchSpawner } from './child-hygiene.js';
 export { createDarwinCaffeinateSeam, reapOrphanedDarwinSleepWatchers } from './darwin-caffeinate.js';

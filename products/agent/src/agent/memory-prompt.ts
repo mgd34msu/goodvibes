@@ -16,7 +16,8 @@ import type { MemoryPromptEligibility } from '@goodvibes-jev/engine/platform/pla
 export { MIN_PROMPT_MEMORY_CONFIDENCE, describeMemoryPromptEligibility, isPromptActiveMemory };
 export type { MemoryPromptEligibility };
 
-const DEFAULT_LIMIT = 10;
+/** How many ranked memories one prompt carries; the receipt of that prompt counts against the same number. */
+export const DEFAULT_LIMIT = 10;
 
 function sortMemoryForPrompt(left: MemoryRecord, right: MemoryRecord): number {
   if (right.confidence !== left.confidence) return right.confidence - left.confidence;
@@ -120,7 +121,10 @@ export async function rankMemoryForTurn(
   // at 500 candidates regardless, so there is no point asking for more than that.
   const requestLimit = Math.min(500, Math.max(eligible.length, 50));
   const results = await memoryRegistry.searchSemantic({ query: trimmedTurnText, limit: requestLimit });
-  const consultedSemanticIndex = results.some((entry) => entry.similarity > 0);
+  const eligibleIds = new Set(eligible.map((record) => record.id));
+  // Hits for records the gate excluded say nothing about the records that are
+  // in the prompt: scoring counts only when an eligible record was matched.
+  const consultedSemanticIndex = results.some((entry) => entry.similarity > 0 && eligibleIds.has(entry.record.id));
   if (!consultedSemanticIndex) {
     return {
       records: fallbackOrder(),
@@ -129,7 +133,6 @@ export async function rankMemoryForTurn(
       degradedReason: "no semantic match for this turn's text, using stored confidence/recency order",
     };
   }
-  const eligibleIds = new Set(eligible.map((record) => record.id));
   const relevanceById = new Map<string, number>();
   for (const entry of results) {
     if (!eligibleIds.has(entry.record.id)) continue;

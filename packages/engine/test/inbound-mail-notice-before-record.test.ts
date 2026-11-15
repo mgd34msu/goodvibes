@@ -144,29 +144,34 @@ describe('a failing record write cannot produce a repeated announcement', () => 
     expect(rig.sent).toHaveLength(0);
   });
 
-  test('the same failure with the notice SUPPRESSED behaves identically, so the count is about ordering', async () => {
-    // A control. If the zero above came from the notice never being reached
-    // for some unrelated reason, this would be indistinguishable from it,
-    // here the notice is deliberately not attempted, and the failure shape is
-    // the same, which is what makes the previous case's zero mean something.
+  test('a store that recovers after three failed passes announces exactly once, on the pass that recorded it', async () => {
+    // The counterpart to the zero above: the notice IS reachable here, and it
+    // goes out only once a pre-notice record has been written. Sending before
+    // recording would put three notices on the phone before the store recovers.
     const dir = scratch();
     const registry = registryAt(dir);
-    const sent: unknown[] = [];
-    const intake = createInboundMailIntake({
-      expectations: registry.matcher,
+    const store = new InboundMailStore(join(dir, 'records.json'), { now: () => NOW.getTime() });
+    let writes = 0;
+    const rig = watcher({
+      registry,
       records: {
-        findByMessage: async () => null,
-        record: async () => { throw new Error('ENOSPC: no space left on device'); },
+        findByMessage: (key: InboundMailMessageKey) => store.findByMessage(key),
+        record: async (input: InboundMailRecordInput) => {
+          writes += 1;
+          if (writes <= 3) throw new Error('ENOSPC: no space left on device');
+          return store.record(input);
+        },
       } as never,
-      notices: {
-        resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }),
-        send: async (notice) => { sent.push(notice); return { delivered: true }; },
-      },
-      noticeMode: () => 'none',
-      now: () => NOW,
+      send: async () => ({ delivered: true }),
     });
-    await expect(intake(mail())).rejects.toThrow(/ENOSPC/);
-    expect(sent).toHaveLength(0);
+
+    for (let i = 0; i < 3; i += 1) await rig.pass();
+    expect(rig.failures).toHaveLength(3);
+    expect(rig.sent).toHaveLength(0);
+
+    await rig.pass();
+    expect(rig.failures).toHaveLength(3);
+    expect(rig.sent).toHaveLength(1);
   });
 });
 

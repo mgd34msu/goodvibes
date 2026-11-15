@@ -165,9 +165,18 @@ describe('resolveAtRestPolicy: honest defaults + config overrides', () => {
     expect(policy.retention.maxTotalBytes).toBe(5 * 1024 * 1024);
   });
 
-  test('a throwing/invalid getter falls back to defaults, never propagates', () => {
-    const policy = resolveAtRestPolicy(() => undefined);
+  test('a throwing getter falls back to defaults, never propagates', () => {
+    const policy = resolveAtRestPolicy(() => { throw new Error('config unavailable'); });
     expect(policy).toEqual(DEFAULT_AT_REST_POLICY);
+  });
+
+  test('values of the wrong type or out of range fall back to defaults', () => {
+    const cfg: Record<string, unknown> = {
+      [AT_REST_CONFIG_KEYS.redactEnabled]: 'no',
+      [AT_REST_CONFIG_KEYS.maxAgeDays]: -3,
+      [AT_REST_CONFIG_KEYS.maxTotalMb]: 'big',
+    };
+    expect(resolveAtRestPolicy((key) => cfg[key])).toEqual(DEFAULT_AT_REST_POLICY);
   });
 });
 

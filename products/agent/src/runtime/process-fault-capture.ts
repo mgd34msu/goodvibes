@@ -15,8 +15,9 @@
  *      timestamp, in the bounded crash log under the surface root;
  *   2. a line in the shared activity log, flushed SYNCHRONOUSLY (the logger
  *      batches on a timer that a dying process never reaches);
- *   3. a descriptor write to stderr, which the full-screen output guard cannot
- *      intercept, so the operator sees it even mid-TUI;
+ *   3. the terminal handed back to the user's own screen, then a descriptor
+ *      write to stderr, which the full-screen output guard cannot intercept,
+ *      so the line survives the exit instead of vanishing with the alt screen;
  *   4. only then, the exit.
  *
  * Ordering is deliberate and matches cli/tui-startup.ts's fatal-boot path: the
@@ -60,6 +61,11 @@ export interface ProcessFaultCaptureDeps {
   readonly shellPaths: { resolveUserPath: (...segments: string[]) => string };
   /** Read at fault time, not at install time, the active session changes. */
   readonly activeSessionId: () => string | null;
+  /**
+   * Hand the terminal back (leave the alternate screen) before the crash lines
+   * are written; otherwise the exit's own restore erases them with that screen.
+   */
+  readonly restoreTerminal?: () => void;
   /** Injectable for tests; defaults to the real process exit. */
   readonly exit?: (code: number) => void;
   /** Injectable for tests; defaults to the guaranteed descriptor write. */
@@ -125,6 +131,11 @@ export function createProcessFaultHandlers(deps: ProcessFaultCaptureDeps): Proce
 
   const onUncaughtException = (error: unknown): void => {
     capture('uncaughtException', error);
+    try {
+      deps.restoreTerminal?.();
+    } catch {
+      // A failed restore must not cost the console line or the exit.
+    }
     try {
       const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
       // A descriptor write cannot be intercepted by the full-screen output

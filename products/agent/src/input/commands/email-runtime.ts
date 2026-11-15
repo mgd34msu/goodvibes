@@ -48,6 +48,15 @@ const KNOWN_EMAIL_FIELDS = new Set([
   'fromAddress',
 ]);
 
+/**
+ * Header and body text comes from the sender. Control characters (newlines, escape
+ * sequences) and bidirectional overrides are replaced so a message cannot start its
+ * own transcript lines or recolour the terminal.
+ */
+function plainText(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ');
+}
+
 function readLimitArg(arg: string | undefined, fallback: number): number {
   if (!arg) return fallback;
   const n = parseInt(arg, 10);
@@ -98,6 +107,13 @@ export async function persistEmailConfigField(
   secretsManager: EmailSecretsManagerLike,
   fieldName: string,
   rawValue: string,
+  /**
+   * How a validated non-secret value is written. Defaults to the local
+   * setDynamic; a caller that must reach a connected host's own settings (the
+   * email keys are daemon-owned) passes a routed writer so the value lands in
+   * the same store as the password reference.
+   */
+  writeValue?: (key: string, value: unknown) => Promise<unknown> | unknown,
 ): Promise<PersistEmailConfigFieldResult> {
   if (!KNOWN_EMAIL_FIELDS.has(fieldName)) {
     return { ok: false, error: `Unknown email config key: ${fieldName}` };
@@ -149,7 +165,8 @@ export async function persistEmailConfigField(
     }
   }
 
-  cm.setDynamic(configKey, coerced);
+  if (writeValue) await writeValue(configKey, coerced);
+  else cm.setDynamic(configKey, coerced);
   return { ok: true, configKey };
 }
 
@@ -209,19 +226,8 @@ const SENDER_CONFIDENCE_LABEL: Readonly<Record<DisplayedSenderConfidence, string
   'failed-verification': 'SENDER VERIFICATION FAILED',
 };
 
-async function handleCheck(
-  args: readonly string[],
-  ctx: CommandContext,
-): Promise<void> {
-  const limit = readLimitArg(args[0], 10);
-  const service = buildEmailService(ctx);
-  const summaries = await service.checkInbox(limit);
-
-  if (summaries.length === 0) {
-    ctx.print('Inbox: no unread messages.');
-    return;
-  }
-
+/** The inbox listing. Every header-derived field is passed through `plainText`, so exported for its own test. */
+export function formatInboxSummaries(summaries: Awaited<ReturnType<EmailService['checkInbox']>>): string {
   const lines = [
     `Inbox: ${summaries.length} unread message${summaries.length !== 1 ? 's' : ''}`,
     '  policy: read-only; messages are not marked read',
@@ -234,9 +240,9 @@ async function handleCheck(
     const msg = summaries[i];
     if (!msg) continue;
     lines.push(
-      `  ${i + 1}. claims-from=${msg.senderClaim.claimedAddress || '(unknown)'}` +
+      `  ${i + 1}. claims-from=${plainText(msg.senderClaim.claimedAddress || '(unknown)')}` +
       ` [${SENDER_CONFIDENCE_LABEL[msg.senderClaim.displayedConfidence]}]` +
-      ` subject=${msg.subject || '(none)'} date=${msg.date || '(none)'}`,
+      ` subject=${plainText(msg.subject || '(none)')} date=${plainText(msg.date || '(none)')}`,
     );
   }
 
@@ -250,12 +256,26 @@ async function handleCheck(
       .slice(0, 2)
       .join(' … ');
     if (preview) {
-      lines.push(`  newest: ${newest.senderClaim.display}`);
-      lines.push(`  preview: ${preview}`);
+      lines.push(`  newest: ${plainText(newest.senderClaim.display)}`);
+      lines.push(`  preview: ${plainText(preview)}`);
     }
   }
+  return lines.join('\n');
+}
 
-  ctx.print(lines.join('\n'));
+async function handleCheck(
+  args: readonly string[],
+  ctx: CommandContext,
+): Promise<void> {
+  const limit = readLimitArg(args[0], 10);
+  const service = buildEmailService(ctx);
+  const summaries = await service.checkInbox(limit);
+
+  if (summaries.length === 0) {
+    ctx.print('Inbox: no unread messages.');
+    return;
+  }
+  ctx.print(formatInboxSummaries(summaries));
 }
 
 /**
@@ -345,7 +365,10 @@ async function handleSet(
     return;
   }
 
-  if (rawValue === '') {
+  // The mailbox password is taken through the masked prompt when the terminal has
+  // one, so it is never typed into the command line or kept in input history.
+  const maskedPasswordEntry = fieldName === 'passwordRef' && rawValue === '' && ctx.beginConcealedInput !== undefined;
+  if (rawValue === '' && !maskedPasswordEntry) {
     ctx.print(`Usage: /email set ${configKey} <value>\nValue is required.`);
     return;
   }
@@ -369,23 +392,48 @@ async function handleSet(
         '          goodvibes:// reference is stored there',
       ];
       ctx.print(lines.join('\n'));
-      requireYesFlag(ctx, 'set email.passwordRef secret', '/email set email.passwordRef <password> --yes');
+      requireYesFlag(
+        ctx,
+        'set email.passwordRef secret',
+        ctx.beginConcealedInput === undefined ? '/email set email.passwordRef <password> --yes' : '/email set email.passwordRef --yes (the password is then asked for masked)',
+      );
       return;
     }
 
     const secretsManager = requireSecretsManager(ctx);
-    const result = await persistEmailConfigField(cm, secretsManager, fieldName, rawValue);
-    if (!result.ok) {
-      ctx.print(result.error ?? `Could not store ${configKey}.`);
+    const storePassword = async (password: string): Promise<void> => {
+      const result = await persistEmailConfigField(cm, secretsManager, fieldName, password);
+      if (!result.ok) {
+        ctx.print(result.error ?? `Could not store ${configKey}.`);
+        return;
+      }
+      cm.save();
+      ctx.print(
+        `Email config updated\n` +
+        `  key:  ${configKey}\n` +
+        `  value: [stored as secret; reference: ${(result.secretRef ?? '').slice(0, 40)}...]\n` +
+        '  policy: raw password stored in secrets manager; settings.json contains only the goodvibes:// ref',
+      );
+    };
+    if (maskedPasswordEntry) {
+      ctx.print('[email] Enter the mailbox password (masked), Enter to store, Esc to stop.');
+      ctx.beginConcealedInput?.({
+        label: 'Email password',
+        onSubmit: async (value) => {
+          if (value.length === 0) {
+            ctx.print('[email] No password entered; nothing was stored.');
+            return;
+          }
+          await storePassword(value);
+        },
+        onCancel: () => { ctx.print('[email] Stopped. Nothing was stored.'); },
+      });
       return;
     }
-    cm.save();
-    ctx.print(
-      `Email config updated\n` +
-      `  key:  ${configKey}\n` +
-      `  value: [stored as secret; reference: ${(result.secretRef ?? '').slice(0, 40)}...]\n` +
-      '  policy: raw password stored in secrets manager; settings.json contains only the goodvibes:// ref',
-    );
+    if (ctx.beginConcealedInput !== undefined) {
+      ctx.print('Note: the password was typed on the command line and may be kept in input history. Next time run /email set email.passwordRef --yes to enter it masked.');
+    }
+    await storePassword(rawValue);
     return;
   }
 

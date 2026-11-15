@@ -96,11 +96,12 @@ const REACT_NATIVE_KEYCHAIN_MODULE: string = 'react-native-keychain';
 
 let _mod: KeychainModule | null = null;
 
-async function loadKeychain(): Promise<KeychainModule> {
-  if (_mod !== null) return _mod;
+async function loadKeychain(load?: () => Promise<unknown>): Promise<KeychainModule> {
+  if (load === undefined && _mod !== null) return _mod;
   try {
-    _mod = (await import(REACT_NATIVE_KEYCHAIN_MODULE)) as KeychainModule;
-    return _mod;
+    const mod = (await (load === undefined ? import(REACT_NATIVE_KEYCHAIN_MODULE) : load())) as KeychainModule;
+    if (load === undefined) _mod = mod;
+    return mod;
   } catch {
     throw new GoodVibesError(
       'react-native-keychain is not installed, the iOS Keychain token store cannot be initialised. ' +
@@ -184,10 +185,7 @@ export function createIOSKeychainTokenStore(
   const accessGroup = options.accessGroup;
 
   async function resolveModule(): Promise<KeychainModule> {
-    if (__loadModule !== undefined) {
-      return __loadModule() as Promise<KeychainModule>;
-    }
-    return loadKeychain();
+    return loadKeychain(__loadModule);
   }
 
   function buildOptions(mod: KeychainModule): KeychainOptions {

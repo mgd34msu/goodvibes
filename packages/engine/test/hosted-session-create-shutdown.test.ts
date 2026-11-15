@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,6 +11,7 @@ import type { HostedDetachPolicy, HostedSessionUpdatePayload } from '../platform
 import { createClientRuntimeServices } from '../platform/src/platform/runtime/client-services.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
+import { resolveScopedDirectory } from '../platform/src/platform/runtime/surface-root.js';
 
 let root: string;
 let workspace: string;
@@ -35,7 +36,7 @@ function deferred() {
 }
 
 async function settle(): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, 0));
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
 }
 
 function buildManager(options: {
@@ -314,4 +315,28 @@ test('native close rejection still drains a pending create save and every close 
   expect(cleanup.count).toBe(1);
   expect(events.some(event => event.event === 'hosted-session-created')).toBe(false);
   expect((await store.load()).restored[0]?.record.terminatedReason).toBe('daemon-shutdown');
+});
+
+type SessionsView = { sessions: Map<string, { runtime: { toolRegistry: { execute(id: string, name: string, args: Record<string, unknown>): Promise<{ success: boolean }> } } }> };
+
+test('a hosted session reclaims stale keyed tool state of sessions the manager no longer holds, and keeps a held one', async () => {
+  const { manager } = buildManager();
+  await manager.init();
+  const held = await manager.create({ workspaceRoot: workspace, clientId: 'owned-client' });
+  const active = await manager.create({ workspaceRoot: workspace, clientId: 'owned-client' });
+  const stateDir = resolveScopedDirectory(workspace, 'goodvibes', 'state');
+  mkdirSync(stateDir, { recursive: true });
+  const longAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  const staleToken = 'hosted-00000000-0000-4000-8000-000000000000';
+  const staleFile = join(stateDir, `session-${staleToken}.json`);
+  const heldFile = join(stateDir, `session-${held.id}.json`);
+  for (const file of [staleFile, heldFile]) {
+    writeFileSync(file, '{}');
+    utimesSync(file, longAgo, longAgo);
+  }
+  const runtime = (manager as unknown as SessionsView).sessions.get(active.id)!.runtime;
+  const got = await runtime.toolRegistry.execute('c1', 'state', { mode: 'get', keys: ['x'] });
+  expect(got.success).toBe(true);
+  expect(existsSync(staleFile)).toBe(false);
+  expect(existsSync(heldFile)).toBe(true);
 });

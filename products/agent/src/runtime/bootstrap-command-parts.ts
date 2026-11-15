@@ -14,6 +14,7 @@ import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { AgentPromptContextReceiptStore } from '../agent/prompt-context-receipts.ts';
 import type { HookApi } from '@goodvibes-jev/engine/platform/platform/hooks';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OpsApi } from '@/runtime/index.ts';
@@ -133,6 +134,7 @@ export interface BootstrapCommandSectionOptions {
   readonly writeLastSessionPointer?: (sessionId: string) => void;
   /** Reload a resumed session's persisted rewind anchors. Bound at bootstrap to the runtime's SessionSurface; returns how many were restored. */
   readonly restoreTurnAnchors?: (sessionId: string) => number;
+  readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   readonly surface?: import('@/runtime/index.ts').SessionSurface;
   readonly hydrateSessionUsage?: () => void;
   readonly agentManager?: ShellAgentManagerService;
@@ -147,6 +149,7 @@ export interface BootstrapCommandSectionOptions {
   readonly peerClient?: PeerClient;
   readonly providerApi?: ProviderApi;
   readonly agentKnowledgeApi?: KnowledgeApi;
+  readonly memorySpine?: MemorySpineClient;
   readonly promptContextReceipts?: AgentPromptContextReceiptStore;
   readonly hookApi?: HookApi;
   readonly mcpApi?: McpApi;
@@ -236,6 +239,7 @@ export function createBootstrapCommandSessionSection(
     | 'changeTracker'
     | 'writeLastSessionPointer'
     | 'restoreTurnAnchors'
+    | 'announceSessionResumed'
     | 'surface'
     | 'hydrateSessionUsage'
   >,
@@ -244,6 +248,7 @@ export function createBootstrapCommandSessionSection(
     ...projectCommandSessionSection(options),
     writeLastSessionPointer: options.writeLastSessionPointer,
     restoreTurnAnchors: options.restoreTurnAnchors,
+    announceSessionResumed: options.announceSessionResumed,
     surface: options.surface,
   };
 }
@@ -330,6 +335,7 @@ export function createBootstrapCommandClientsSection(
     | 'peerClient'
     | 'providerApi'
     | 'agentKnowledgeApi'
+    | 'memorySpine'
     | 'promptContextReceipts'
     | 'hookApi'
     | 'mcpApi'
@@ -342,6 +348,7 @@ export function createBootstrapCommandClientsSection(
   return {
     ...projectCommandClientsSection(options),
     agentKnowledgeApi: options.agentKnowledgeApi,
+    memorySpine: options.memorySpine,
     promptContextReceipts: options.promptContextReceipts,
     ...(memoryConsolidationScheduler
       ? { memoryConsolidation: { listPendingProposals: () => listPendingConsolidationProposals(memoryConsolidationScheduler) } }

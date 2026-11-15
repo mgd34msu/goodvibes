@@ -93,6 +93,12 @@ export interface OtlpConfig {
    */
   readonly timeoutMs: number;
   /**
+   * Longest a span waits in the pending buffer before it is sent, so a quiet
+   * session still reaches the collector without filling a batch.
+   * Default: 5000.
+   */
+  readonly flushIntervalMs?: number | undefined;
+  /**
    * Optional HTTP headers to include in OTLP requests
    * (e.g. authentication tokens).
    */

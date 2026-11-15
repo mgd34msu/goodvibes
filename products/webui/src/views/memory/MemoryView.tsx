@@ -129,7 +129,9 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
     );
   }
 
-  const mutationError = remove.error ?? saveReview.error;
+  // The mutations are shared by every row: an error belongs to the record it was for.
+  const mutationError = (remove.error && remove.variables?.id === selectedId ? remove.error : null)
+    ?? (saveReview.error && saveReview.variables?.id === selectedId ? saveReview.error : null);
 
   const listPane = (
     <>

@@ -6,9 +6,20 @@
  * exports map exactly as a consumer install would, a subpath missing from the
  * manifest fails here even though the source file exists on disk.
  */
-import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const voiceRoots: string[] = [];
+function makeVoiceRoot(label: string): string {
+  const root = mkdtempSync(join(tmpdir(), `voice-setup-${label}-`));
+  voiceRoots.push(root);
+  return root;
+}
+afterAll(() => {
+  for (const root of voiceRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 const PACKAGE = '@goodvibes-jev/engine/platform';
 
@@ -135,7 +146,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
 
     const config = new Map<string, string>();
     let resetCalls = 0;
-    const managedVoiceRoot = join(import.meta.dir, '.test-tmp', `voice-setup-${process.pid}-${Date.now()}`);
+    const managedVoiceRoot = makeVoiceRoot('composed');
 
     const service = createVoiceSetupService({
       managedVoiceRoot,
@@ -199,7 +210,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
     // text did not work. A proof that fails is an honest "not provisioned".
     const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
     const service = createVoiceSetupService({
-      managedVoiceRoot: join(import.meta.dir, '.test-tmp', `voice-setup-unproven-${process.pid}-${Date.now()}`),
+      managedVoiceRoot: makeVoiceRoot('unproven'),
       getConfig: () => '',
       setConfig: () => {},
       resetLocalEngineFailureState: () => {},
@@ -236,7 +247,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
     const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
     let provisionCalls = 0;
     const service = createVoiceSetupService({
-      managedVoiceRoot: join(import.meta.dir, '.test-tmp', `voice-setup-denied-${process.pid}-${Date.now()}`),
+      managedVoiceRoot: makeVoiceRoot('denied'),
       getConfig: () => '',
       setConfig: () => {},
       resetLocalEngineFailureState: () => {},

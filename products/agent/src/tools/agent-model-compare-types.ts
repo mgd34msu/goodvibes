@@ -69,6 +69,8 @@ export interface AgentModelCompareToolDeps {
   readonly modelCatalog: AgentModelCompareModelCatalog;
   readonly providerRegistry: AgentModelCompareProviderRegistry;
   readonly artifactStore?: AgentModelCompareArtifactStore;
+  /** Random source for the blind-label order; tests fix it. Defaults to Math.random. */
+  readonly random?: () => number;
   readonly applyModelRoute?: (registryKey: string, options?: ToolExecuteOptions, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => AgentModelCompareRouteUpdateResult | Promise<AgentModelCompareRouteUpdateResult>;
 }
 
@@ -169,6 +171,8 @@ export const DEFAULT_CANDIDATE_COUNT = 2;
 export const DEFAULT_MAX_TOKENS = 0;
 export const DEFAULT_CANDIDATE_OUTPUT_CHARS = 12_000;
 export const MAX_HANDOFF_ARTIFACT_BYTES = 40_000;
+/** Total source bytes a handoff archive may package. */
+export const MAX_HANDOFF_ARCHIVE_BYTES = 64 * 1024 * 1024;
 export const MAX_HANDOFF_DIFF_INPUT_LINES = 360;
 export const MAX_HANDOFF_DIFF_ROWS = 120;
 export const MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS = 180;

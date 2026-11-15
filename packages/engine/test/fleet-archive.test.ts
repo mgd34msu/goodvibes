@@ -153,11 +153,16 @@ describe('withFleetArchive', () => {
     expect(archived.getNode('finished')?.id).toBe('finished');
   });
 
-  test('dispose() clears listeners and disposes the underlying registry', () => {
+  test('dispose() stops delivering ticks to listeners and disposes the underlying registry', () => {
     const fake = makeFakeRegistry([]);
     const archived = withFleetArchive(fake.registry);
-    archived.subscribe(() => {});
+    let calls = 0;
+    archived.subscribe(() => { calls++; });
+    fake.fireTick();
+    expect(calls).toBe(1);
     archived.dispose();
     expect(fake.disposed()).toBe(true);
+    fake.fireTick();
+    expect(calls).toBe(1);
   });
 });

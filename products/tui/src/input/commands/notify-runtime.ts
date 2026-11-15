@@ -6,7 +6,7 @@ const commands = createNotifyRuntimeCommands<CommandContext>(requireWebhookNotif
   usage: 'add <url> | remove <url> | list | clear | test',
   argsHint: 'add|remove|list|clear|test',
   confirmMutations: false,
-  maskUrls: false,
+  maskUrls: true,
   allowSend: false,
   emptyList: 'No webhook URLs configured.\nUse: /notify add <url>',
   emptyTest: 'No webhook URLs configured. Use: /notify add <url>',

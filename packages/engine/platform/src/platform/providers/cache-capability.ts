@@ -2,8 +2,6 @@
 
 /** Cache capability types for LLM providers. */
 
-import { providerAdapterKind } from './adapter-kind.js';
-
 export type CacheType = 'explicit' | 'automatic' | 'implicit' | 'none';
 
 export interface ExplicitCacheCapability {
@@ -111,11 +109,10 @@ const PROVIDER_CACHE_CAPABILITIES = {
 /**
  * Get the cache capability for a provider.
  *
- * The provider's own row when the table has one. Otherwise a provider
- * registered on the Anthropic-compatible adapter (its catalog `kind` or
- * custom-provider `type` is 'anthropic-compat', recorded at registration in
- * adapter-kind.ts) caches the way Anthropic does. Every other provider has
- * no caching.
+ * The provider's own row when the table has one; every other provider has no
+ * caching. A provider on the Anthropic-compatible or SDK adapters is
+ * deliberately not given the Anthropic row: those adapters send no
+ * `cache_control` blocks, so claiming explicit caching for them would be false.
  */
 export function getCacheCapability(providerName: string): ProviderCacheCapability {
   // Normalize provider name (lowercase, strip trailing whitespace)
@@ -125,10 +122,6 @@ export function getCacheCapability(providerName: string): ProviderCacheCapabilit
   const normalizedKey = normalized as keyof typeof PROVIDER_CACHE_CAPABILITIES;
   if (PROVIDER_CACHE_CAPABILITIES[normalizedKey]) {
     return PROVIDER_CACHE_CAPABILITIES[normalizedKey];
-  }
-
-  if (providerAdapterKind(providerName) === 'anthropic-compat') {
-    return PROVIDER_CACHE_CAPABILITIES.anthropic;
   }
 
   // Unknown provider, no caching

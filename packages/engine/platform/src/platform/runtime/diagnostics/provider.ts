@@ -22,6 +22,8 @@
  */
 import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeHealthAggregator } from '../health/aggregator.js';
+import type { SloCollector } from '../perf/slo-collector.js';
+import type { CascadeTimer } from '../health/cascade-timing.js';
 import type {
   ToolCallEntry,
   AgentEntry,
@@ -53,6 +55,10 @@ export interface DiagnosticsProviderConfig {
    * Pass one adapter per runtime store domain.
    */
   readonly domains?: readonly InspectableDomain[] | undefined;
+  /** Adds SLO rows to the health dashboard when given. */
+  readonly sloCollector?: SloCollector | undefined;
+  /** Adds remediation suggestions to the health dashboard when given. */
+  readonly cascadeTimer?: CascadeTimer | undefined;
   /** Optional per-panel buffer configuration. */
   readonly panelConfig?: ComponentConfig | undefined;
 }
@@ -92,7 +98,7 @@ export class DiagnosticsProvider {
     this._stateInspector = new StateInspectorPanel(
       config.domains ? [...config.domains] : []
     );
-    this._health = new HealthPanel(config.healthAggregator);
+    this._health = new HealthPanel(config.healthAggregator, config.sloCollector ?? null, config.cascadeTimer ?? null);
     this._toolContracts = new ToolContractsPanel(pc);
   }
 

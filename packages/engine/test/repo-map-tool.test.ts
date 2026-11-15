@@ -7,8 +7,8 @@
  * (incl. contract verification), budget respected, stable ranking by import
  * centrality, and top-level export extraction.
  */
-import { describe, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRepoMapTool, extractTopLevelExports } from '../platform/src/platform/tools/repo-map/index.ts';
@@ -16,9 +16,15 @@ import { ImportGraph } from '../platform/src/platform/intelligence/import-graph.
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { estimateTokens } from '../platform/src/platform/core/compaction-types.ts';
 
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
 /** A small repo where core.ts is imported by two files (highest centrality). */
 function makeRepo(): string {
   const root = mkdtempSync(join(tmpdir(), 'repo-map-'));
+  roots.push(root);
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src', 'core.ts'), 'export const CORE = 1;\nexport function coreFn() { return CORE; }\n');
   writeFileSync(join(root, 'src', 'a.ts'), "import { CORE } from './core.js';\nexport const a = CORE;\n");

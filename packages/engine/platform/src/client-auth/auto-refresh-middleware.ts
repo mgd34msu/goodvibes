@@ -25,7 +25,8 @@ import type { TransportContext, TransportMiddleware } from '@goodvibes-jev/engin
 import type { HttpJsonTransport } from '@goodvibes-jev/engine/transport-http/http-core';
 import type { GoodVibesTokenStore } from './types.js';
 import type { AutoRefreshCoordinator } from './auto-refresh.js';
-import { is401Error } from './auto-refresh.js';
+import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { is401Error, type RefreshOutcome } from './auto-refresh.js';
 
 /** Request-local flag key that never conflicts with public HttpJsonRequestOptions fields. */
 const ATTEMPTED_FLAG = '__gv_ar_attempted';
@@ -78,8 +79,9 @@ export function createAutoRefreshMiddleware(
     // After refresh, update ctx.headers.Authorization with the fresh token so
     // consumer middleware (which runs after this one in the chain) sees the
     // current Bearer token, not the stale one that was set when ctx was built.
+    let refreshOutcome: RefreshOutcome;
     try {
-      await coordinator.ensureFreshToken();
+      refreshOutcome = await coordinator.ensureFreshToken();
     } catch (error) {
       ctx.error = error;
       return;
@@ -91,8 +93,17 @@ export function createAutoRefreshMiddleware(
       ctx.error = error;
       return;
     }
+    // The pre-flight refresh was rejected for good and cleared the store: the
+    // header built before it holds a token the daemon will refuse, so drop it
+    // rather than send it. (A store that simply has no token is left alone: a
+    // caller-supplied Authorization header is not ours to remove.)
+    const sessionCleared = refreshOutcome === 'cleared' && !freshToken;
     if (freshToken) {
       ctx.headers['Authorization'] = `Bearer ${freshToken}`;
+    } else if (sessionCleared) {
+      for (const key of Object.keys(ctx.headers)) {
+        if (key.toLowerCase() === 'authorization') delete ctx.headers[key];
+      }
     }
 
     // ── Dispatch request ─────────────────────────────────────────────────────
@@ -123,6 +134,16 @@ export function createAutoRefreshMiddleware(
       return;
     }
 
+    if (sessionCleared) {
+      // The request went out without a token because the session was rejected
+      // at refresh time, so a second refresh cannot help. Say what happened.
+      ctx.error = new GoodVibesError(
+        'Authentication failed · The session was rejected when its token was refreshed and the stored token was cleared · Re-login to obtain a fresh token.',
+        { category: 'authentication', source: 'transport', status: 401, recoverable: false },
+      );
+      return;
+    }
+
     // ── Reactive 401 retry ─────────────────────────────────────────────────
     // Release the original 401 error before we await the refresh + retry. The
     // transport's end-of-chain catch (composeMiddleware) sets `ctx.error` to
@@ -142,7 +163,15 @@ export function createAutoRefreshMiddleware(
     // Build retry options that preserve the original request attributes and
     // carry the loop-prevention flag so the next pass through this middleware
     // just calls next() without re-entering the refresh logic.
+    // The caller's own options (headers, methodId, idempotent, retry, ...) are
+    // carried over so the retried request behaves like the original; only the
+    // fields the middleware chain may have changed are taken from ctx. The
+    // original Idempotency-Key is reused so the daemon can recognise the retry.
+    const idempotencyHeader = Object.entries(ctx.headers).find(([k]) => k.toLowerCase() === 'idempotency-key');
+    const callerHeaders = (ctx.options['headers'] ?? {}) as Record<string, string>;
     const retryOptions: Record<string, unknown> = {
+      ...ctx.options,
+      ...(idempotencyHeader ? { headers: { ...callerHeaders, [idempotencyHeader[0]]: idempotencyHeader[1] } } : {}),
       method: ctx.method,
       body: ctx.body,
       signal: ctx.signal,
@@ -163,7 +192,7 @@ export function createAutoRefreshMiddleware(
         // transport.requestJson goes through the full middleware chain; the
         // ATTEMPTED_FLAG ensures this middleware is a passthrough on that call.
         return transport.requestJson<unknown>(ctx.url, retryOptions as never);
-      });
+      }, freshToken);
     } catch (retryErr) {
       // Place onto ctx.error, transport's post-chain check will rethrow it
       // without the middleware-wrapping treatment.
@@ -187,7 +216,8 @@ export function createAutoRefreshMiddleware(
     // successfully, we must clear it so the transport's `if (ctx.error) throw`
     // guard does not re-raise the already-resolved error.
     ctx.error = undefined;
-    ctx.response = new Response(JSON.stringify(retryResult), {
+    // An empty result (undefined) is sent as JSON null so `.json()` still parses.
+    ctx.response = new Response(JSON.stringify(retryResult ?? null), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

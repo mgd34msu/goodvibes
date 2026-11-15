@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createDecipheriv, createECDH, createHmac, randomBytes } from 'node:crypto';
 import { CURRENT_CONTRACT_SCHEMA_VERSION, serializeContract, type Contract } from '@goodvibes-jev/engine/platform/platform/contract';
 import { emptyWorkItemUsage } from '@goodvibes-jev/engine/platform/platform/orchestration';
@@ -35,7 +35,17 @@ const sink = Bun.serve({
 });
 const sinkOrigin = `http://127.0.0.1:${sink.port}`;
 
+// The daemon refuses non-public push endpoints unless told otherwise; this
+// test's own sink is exactly that deployment.
+let previousAllowLocal: string | undefined;
+beforeAll(() => {
+  previousAllowLocal = process.env.GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS;
+  process.env.GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS = '1';
+});
+
 afterAll(() => {
+  if (previousAllowLocal === undefined) delete process.env.GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS;
+  else process.env.GOODVIBES_PUSH_ALLOW_LOCAL_ENDPOINTS = previousAllowLocal;
   sink.stop(true);
 });
 
@@ -126,7 +136,7 @@ describe('fleet needs-input push fan-out (composed daemon)', () => {
     await services.gatewayMethods.invoke('push.subscriptions.create', {
       methodId: 'push.subscriptions.create',
       body: { endpoint: `${sinkOrigin}${devicePath}`, keys: { p256dh, auth } },
-      context: { principalId: 'test-operator' },
+      context: { principalId: 'test-operator', admin: true },
     } as never);
 
     expect(services.sessionBroker.getSession('session-no-presence')).toBeNull();
@@ -149,7 +159,7 @@ describe('fleet needs-input push fan-out (composed daemon)', () => {
     await services.gatewayMethods.invoke('push.subscriptions.create', {
       methodId: 'push.subscriptions.create',
       body: { endpoint: `${sinkOrigin}${devicePath}`, keys: { p256dh, auth } },
-      context: { principalId: 'test-operator' },
+      context: { principalId: 'test-operator', admin: true },
     } as never);
 
     // An operator surface heartbeats onto this session, sessionPresence.isAttached
@@ -159,27 +169,23 @@ describe('fleet needs-input push fan-out (composed daemon)', () => {
       participant: { surfaceKind: 'tui', surfaceId: 'test-surface', lastSeenAt: Date.now() },
     });
 
-    const before = captured.filter((p) => p.path === devicePath).length;
     const attached = await block('session-with-presence');
-    // Grace period: no positive event to await, so poll a short fixed window,
-    // the sibling assertion below proves the pipeline is alive, ruling out a
-    // false pass from a dead pipe rather than genuine suppression.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const afterSuppressed = captured.filter((p) => p.path === devicePath).length;
-    expect(afterSuppressed).toBe(before);
-
+    // Suppression has no positive event to await. The sibling block is raised
+    // after the attached one, so its push arriving proves the pipeline is alive
+    // and had already decided the attached node; then no push may name it.
     await services.sessionBroker.createSession({ id: 'session-without-presence-sibling' });
     const sibling = await block('session-without-presence-sibling');
-    const push = await waitForPush((p) => p.path === devicePath);
+    const nodeIdOf = (p: CapturedPush) => decryptPush(p.body).data?.nodeId;
+    const push = await waitForPush((p) => p.path === devicePath && nodeIdOf(p) === `contract:${sibling.id}`);
     expect(push).not.toBeNull();
-    const decrypted = decryptPush(push!.body);
-    expect(decrypted.data?.nodeId).toBe(`contract:${sibling.id}`);
+    const suppressed = captured.filter((p) => p.path === devicePath && nodeIdOf(p) === `contract:${attached.id}`);
+    expect(suppressed).toEqual([]);
     await unblock(attached); await unblock(sibling);
   });
   test('a stale participant does not suppress the actual registry-to-encrypted-push path', async () => {
     const services = fixture().services;
     const devicePath = '/push/needs-input-stale';
-    await services.gatewayMethods.invoke('push.subscriptions.create', { methodId: 'push.subscriptions.create', body: { endpoint: `${sinkOrigin}${devicePath}`, keys: { p256dh, auth } }, context: { principalId: 'test-operator' } } as never);
+    await services.gatewayMethods.invoke('push.subscriptions.create', { methodId: 'push.subscriptions.create', body: { endpoint: `${sinkOrigin}${devicePath}`, keys: { p256dh, auth } }, context: { principalId: 'test-operator', admin: true } } as never);
     await services.sessionBroker.createSession({ id: 'session-stale', participant: { surfaceKind: 'tui', surfaceId: 'stale-surface', lastSeenAt: Date.now() - 10 * 60_000 } });
     expect(services.sessionBroker.getSession('session-stale')?.participants[0]?.lastSeenAt).toBeLessThan(Date.now() - 9 * 60_000);
     const contract = await block('session-stale');

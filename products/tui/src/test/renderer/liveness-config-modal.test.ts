@@ -24,6 +24,7 @@ import {
   DEFAULT_STRUCTURAL_GLYPHS,
 } from '../helpers/liveness.ts';
 import { frameFromLayer } from '../helpers/surface-frame.ts';
+import { waitFor } from '../helpers/wait-for.ts';
 import { activeTokens } from '../../renderer/theme.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
@@ -36,7 +37,6 @@ function selectionRow(frame: Line[]): number {
 
 const W = 120;
 const H = 28;
-const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 15));
 
 describe('liveness contract: providers-modal (values-only update, real host path)', () => {
   test('a model-count value update on a NON-selected provider row repaints in place: no reflow, cursor unchanged, one row differs', async () => {
@@ -52,8 +52,9 @@ describe('liveness contract: providers-modal (values-only update, real host path
     const surface = createProviderHealthModalSurface(runtime);
     const modal = new ConfigModal();
     try {
-      modal.open(surface, () => {});
-      await tick(); // let the async reinspect populate the cache
+      let repaints = 0;
+      modal.open(surface, () => { repaints++; });
+      await waitFor(() => repaints > 0); // the async reinspect populated the cache and asked for a repaint
       modal.moveDown(); // interaction boundary: re-freeze structure with the loaded cache, select row 2
 
       const frameA = frameFromLayer(renderConfigModal(modal, W, H), W, H);
@@ -154,8 +155,9 @@ describe('liveness contract: memory-modal (group-B ported surface, values-only u
     });
     const modal = new ConfigModal();
     try {
-      modal.open(surface, () => {});
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); // let the async onOpen refresh land
+      let repaints = 0;
+      modal.open(surface, () => { repaints++; });
+      await waitFor(() => repaints > 0); // the async onOpen refresh landed and asked for a repaint
       modal.moveDown(); // interaction boundary: select the second record, freeze structure
 
       const frameA = frameFromLayer(renderConfigModal(modal, W, H), W, H);

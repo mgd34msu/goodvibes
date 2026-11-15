@@ -27,7 +27,7 @@ beforeEach(() => {
     fixtureLog = new SqliteDecisionLog(':memory:');
     previousPort = installJudgmentPort(withDecisionLog(createHarnessFixtureReadings(), fixtureLog));
   });
-afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); contractGetter.mockRestore(); });
+afterEach(() => { setSystemTime(); resetAgentMcpCallRouteForTests(); installJudgmentPort(previousPort); fixtureLog[Symbol.dispose](); contractGetter.mockRestore(); });
 
 
   test.each(['ops', 'inboxIntake', 'draftIntake', 'calendarIntake', 'missingRead', 'unavailableRead', 'executedRead', 'briefing', 'compactBriefing', 'blockedWrite', 'lane', 'queue', 'compactQueue', 'compactQueueOwnerChange'] as const)('surfaces email and calendar MCP connectors as Personal Ops setup routes: %s', async surface => {
@@ -335,7 +335,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(inbox?.liveRecords?.some(record => record.id === 'mcp:gmail-inbox')).toBe(true);
         const inboxSearchRecord = inbox?.liveRecords?.find((record) => record.id === 'mcp:gmail-inbox:gmail.search_messages');
         expect(inboxSearchRecord?.label).toContain('Inbox read');
-        expect(inboxSearchRecord?.modelRoute).toContain('mcp schema');
+        expect(inboxSearchRecord?.modelRoute).toContain('mcp mode:"schema"');
         expect(inboxSearchRecord?.effect).toBe('read-only');
         expect(inboxSearchRecord?.capability).toBe('inbox-read');
         expect(inboxSearchRecord?.requiredFields).toEqual(['query']);
@@ -363,7 +363,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(calendar?.workflows?.[0]?.status).toBe('attention');
         expect(calendar?.workflows?.[0]?.prerequisites?.join('\n')).toContain('trust/schema');
         const agendaRecord = calendar?.liveRecords?.find((record) => record.id === 'mcp:caldav-agenda:caldav.list_events');
-        expect(agendaRecord?.modelRoute).toContain('mcp schema');
+        expect(agendaRecord?.modelRoute).toContain('mcp mode:"schema"');
         expect(agendaRecord?.requiredFields).toEqual(['end', 'start']);
         expect(agendaRecord?.sampleInput?.start).toBe('<start-iso>');
         expect(agendaRecord?.freshness?.status).toBe('connector-attention');
@@ -615,7 +615,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
         expect(executedRead.nextRoutes?.refresh?.modelRoute).toContain('personal_ops action:"read"');
         expect(executedRead.nextRoutes?.refresh?.modelRoute).toContain('recordId:"mcp:gmail-inbox:gmail.search_messages"');
         expect(executedRead.nextRoutes?.refresh?.requiresConfirmation).toBe(true);
-        expect(executedRead.nextRoutes?.artifact?.modelRoute).toBe(`agent_artifacts show artifactId:"${artifactId}" includeContent:true`);
+        expect(executedRead.nextRoutes?.artifact?.modelRoute).toBe(`agent_artifacts mode:"show" artifactId:"${artifactId}" includeContent:true`);
         expect(executedRead.nextRoutes?.artifact?.requiresConfirmation).toBe(false);
         expect(executedRead.nextRoutes?.savedQueue?.modelRoute).toBe(`personal_ops action:"queue" query:"${artifactId}" includeParameters:true`);
         expect(executedRead.nextRoutes?.localDraft?.effect).toBe('local-only');
@@ -893,7 +893,7 @@ afterEach(() => { resetAgentMcpCallRouteForTests(); installJudgmentPort(previous
       }
     } finally {
       setSystemTime();
-      fixture.cleanup();
+      await fixture.cleanup();
     }
   });
 });

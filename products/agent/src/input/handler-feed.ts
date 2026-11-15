@@ -75,7 +75,7 @@ import type { FocusTracker } from '@/runtime/index.ts';
  *     unbracketed-paste-flood guard's sliding-window state, mutated in place
  *     across tokens by trackPasteFloodGuard (see paste-flood-guard.ts).
  *     Never reallocated. `burstSuppressedCount` is this wiring layer's own
- *     bookkeeping (not part of the ported module) for the honest resolution
+ *     bookkeeping (not part of the shared guard) for the honest resolution
  *     notice, see feedInputTokens below.
  *   - `focusTracker` (the platform's FocusTracker), tracks OS-level
  *     terminal focus from `\x1b[I`/`\x1b[O` tokens (DECSET ?1004h, enabled in
@@ -113,9 +113,9 @@ export interface InputFeedContext {
   contentWidth: number;
   readonly pasteRegistry: Map<string, string>;
   readonly imageRegistry: Map<string, { data: string; mediaType: string }>;
-  /** Ported from goodvibes-tui's paste-flood guard, mutated in place, never reallocated. */
+  /** State for the shared unbracketed-paste-flood guard (terminal-shell), mutated in place, never reallocated. */
   readonly burstGuard: PasteBurstGuardState;
-  /** Wiring-layer bookkeeping (not part of the ported module) for the honest suppressed-count notice. */
+  /** Wiring-layer bookkeeping (not part of the shared guard) for the honest suppressed-count notice. */
   burstSuppressedCount: number;
   /** OS-level terminal focus, fed from the 'focus' tokens below. */
   readonly focusTracker: FocusTracker;
@@ -193,7 +193,11 @@ export interface InputFeedContext {
 }
 
 export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
-  surfaceModalTokens: 'text-key',
+  // Every token goes to an open kit modal, mouse included: the modals ignore a mouse
+  // token, so a click or wheel over one never reaches the transcript underneath.
+  surfaceModalTokens: 'all',
+  // Command handlers set the overlay flags on the handler itself mid-feed; the pipeline
+  // must not restore its older copy over them.
   guardModalWrites: true,
   pairing: (context, token) => context.handleSetupPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(

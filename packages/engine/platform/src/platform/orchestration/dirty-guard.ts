@@ -1,12 +1,18 @@
 /** Owner-residue protection for scoped commits. Original bytes stay private to
  * the actual launch snapshot; public values describe states, never content. */
 import { resolve } from 'node:path';
-import { captureDirtyFile, captureDirtyTreeRoot, equalDirtyFiles, type CapturedDirtyFile, type DirtyTreeRoot } from './dirty-file-observation.js';
+import { captureDirtyFile, captureDirtyTreeRoot, digestDirtyFile, equalDirtyFiles, type CapturedDirtyFile, type DirtyFileDigest, type DirtyTreeRoot } from './dirty-file-observation.js';
 
 const INTERNAL_STATE_PREFIX = '.goodvibes/';
+/** Original bytes are held in memory per engine, so a very large dirty file, or a very large dirty tree, is left unread. */
+const DEFAULT_PER_FILE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_TOTAL_BYTES = 64 * 1024 * 1024;
+/** A file left unread is compared by a content digest instead, so it stays decidable; past this size it is uncertain. */
+const DIGEST_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+export interface DirtySnapshotLimits { readonly perFileBytes?: number | undefined; readonly totalBytes?: number | undefined }
 export interface DirtyPathState { readonly kind: CapturedDirtyFile['kind'] }
 export type DirtyLaunchSnapshot = ReadonlyMap<string, DirtyPathState>;
-interface NativeSnapshot { readonly root: string; readonly selection: DirtyTreeRoot | undefined; readonly entries: ReadonlyMap<string, CapturedDirtyFile>; readonly available: boolean; readonly latest: Map<string, CapturedDirtyFile> }
+interface NativeSnapshot { readonly root: string; readonly selection: DirtyTreeRoot | undefined; readonly entries: ReadonlyMap<string, CapturedDirtyFile>; readonly available: boolean; readonly latest: Map<string, CapturedDirtyFile>; readonly digests: ReadonlyMap<string, DirtyFileDigest> }
 const snapshots = new WeakMap<DirtyLaunchSnapshot, NativeSnapshot>();
 
 /**
@@ -67,15 +73,30 @@ function dirtyPaths(cwd: string, selection = captureDirtyTreeRoot(cwd)): { reado
 export function listDirtyTreePaths(cwd: string): readonly string[] { return dirtyPaths(cwd).paths; }
 /** Snapshot once, synchronously before an engine can launch its first phase.
  * No SHA is required for local exact equality; no bytes are put on this map. */
-export function snapshotDirtyTree(cwd: string): DirtyLaunchSnapshot {
+export function snapshotDirtyTree(cwd: string): DirtyLaunchSnapshot { return snapshotDirtyTreeWithin(cwd, {}); }
+/** The same snapshot with its read bounds stated; the public entry point uses the defaults. */
+export function snapshotDirtyTreeWithin(cwd: string, limits: DirtySnapshotLimits): DirtyLaunchSnapshot {
   let available = true, selection: DirtyTreeRoot | undefined, entries: ReadonlyMap<string, CapturedDirtyFile>;
+  const digests = new Map<string, DirtyFileDigest>();
+  const perFile = limits.perFileBytes ?? DEFAULT_PER_FILE_BYTES;
+  let remaining = limits.totalBytes ?? DEFAULT_TOTAL_BYTES;
   try {
     selection = captureDirtyTreeRoot(cwd); const selected = dirtyPaths(cwd, selection); available = selected.available;
-    entries = new Map(selected.paths.map(path => [path, captureDirtyFile(cwd, path, selection)] as const)); selection.assertCurrent();
+    const captured = new Map<string, CapturedDirtyFile>();
+    for (const path of selected.paths) {
+      const file = captureDirtyFile(cwd, path, selection, Math.min(perFile, remaining));
+      if (file.kind === 'file') remaining -= file.bytes.length;
+      else if (file.kind === 'unavailable') {
+        const digest = digestDirtyFile(cwd, path, selection, DIGEST_MAX_BYTES);
+        if (digest !== undefined) digests.set(path, digest);
+      }
+      captured.set(path, file);
+    }
+    entries = captured; selection.assertCurrent();
   }
   catch { available = false; entries = new Map(); }
   const snapshot = new Map([...entries].map(([path, value]) => [path, Object.freeze({ kind: value.kind })] as const));
-  snapshots.set(snapshot, { root: resolve(cwd), selection, entries, available, latest: new Map(entries) }); return snapshot;
+  snapshots.set(snapshot, { root: resolve(cwd), selection, entries, available, latest: new Map(entries), digests }); return snapshot;
 }
 /** Internal native baseline seam. Only an original snapshot of this root can
  * supply its own captures; copied maps or JSON cannot mint byte provenance. */
@@ -104,6 +125,14 @@ function currentDirtyFile(owner: NativeSnapshot, cwd: string, path: string): Cap
   }
   const file = captureDirtyFile(cwd, path, owner.selection); owner.latest.set(path, file); return file;
 }
+/** A file too large to keep is compared by digest: unchanged, changed, or undecidable if it cannot be read now. */
+function equalToLaunchDigest(owner: NativeSnapshot, launch: DirtyFileDigest, path: string): boolean | undefined {
+  if (!owner.selection) return undefined;
+  const now = digestDirtyFile(owner.root, path, owner.selection, DIGEST_MAX_BYTES);
+  if (now === undefined) return undefined;
+  if (launch.kind !== now.kind) return false;
+  return launch.kind === 'missing' || (now.kind === 'file' && launch.digest === now.digest && launch.executable === now.executable);
+}
 export function excludeUntouchedLaunchResidue(cwd: string, candidatePaths: readonly string[], launchSnapshot: DirtyLaunchSnapshot): ScopedCommitExclusion {
   const original = nativeDirtySnapshotEntries(launchSnapshot, cwd), owner = snapshots.get(launchSnapshot);
   if (!owner) throw new Error('Original dirty snapshot is unavailable');
@@ -111,7 +140,8 @@ export function excludeUntouchedLaunchResidue(cwd: string, candidatePaths: reado
   for (const path of candidatePaths) {
     const initial = original.get(path);
     if (initial === undefined) { included.push(path); continue; }
-    const equal = equalDirtyFiles(initial, currentDirtyFile(owner, cwd, path));
+    const launchDigest = initial.kind === 'unavailable' ? owner.digests.get(path) : undefined;
+    const equal = launchDigest !== undefined ? equalToLaunchDigest(owner, launchDigest, path) : equalDirtyFiles(initial, currentDirtyFile(owner, cwd, path));
     if (equal === false) included.push(path);
     else { excluded.push(path); if (equal === undefined) uncertain.push(path); }
   }

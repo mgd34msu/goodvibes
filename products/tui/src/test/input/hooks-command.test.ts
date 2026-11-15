@@ -151,6 +151,16 @@ describe('hooks command', () => {
 
     out.length = 0;
     await hooks!.handler(['import', bundlePath, 'replace'], ctx);
+    expect(out.join('\n')).toContain('Nothing was imported');
+    expect(out.join('\n')).toContain('--yes');
+    expect(existsSync(configManager.get('tools.hooksFile') as string) ? readFileSync(configManager.get('tools.hooksFile') as string, 'utf-8') : '').not.toContain('after-tool');
+
+    out.length = 0;
+    await hooks!.handler(['import', bundlePath, 'replcae'], ctx);
+    expect(out.join('\n')).toContain('Unknown import strategy "replcae"');
+
+    out.length = 0;
+    await hooks!.handler(['import', bundlePath, 'replace', '--yes'], ctx);
     expect(out.join('\n')).toContain('Imported managed hooks');
     expect(readFileSync(configManager.get('tools.hooksFile') as string, 'utf-8')).toContain('after-tool');
   });

@@ -3,22 +3,40 @@ import { fireTriggers } from '../platform/src/platform/workflow/trigger-executor
 import type { HookEvent } from '../platform/src/platform/hooks/types.ts';
 import type { TriggerDefinition } from '../platform/src/platform/tools/workflow/index.ts';
 
-// An empty action reaches executeAction but cannot launch a process. Its
-// explicit error distinguishes a passed condition from a rejected condition.
-async function conditionPasses(condition: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+// A passed condition reaches the command guard before anything is launched; the guard
+// refuses, so no process starts. `reached` is therefore true only for a passed
+// condition, and a failed one reports why in `error`.
+async function runCondition(condition: string, payload: Record<string, unknown> = {}): Promise<{ reached: boolean; error: string | undefined }> {
   const event: HookEvent = { path: 'Post:tool:exec', phase: 'Post', category: 'tool',
     specific: 'exec', sessionId: 'synthetic-condition', timestamp: 0, payload };
-  const trigger = { id: 'synthetic-condition', enabled: true, event: event.path, condition, action: '' } as TriggerDefinition;
-  const [result] = await fireTriggers(event, { list: () => [trigger] });
+  const trigger = { id: 'synthetic-condition', enabled: true, event: event.path, condition, action: 'true' } as TriggerDefinition;
+  let reached = false;
+  const [result] = await fireTriggers(event, { list: () => [trigger] }, {
+    guardCommand: async () => { reached = true; return 'stopped by test'; },
+  });
   expect(result?.executed).toBe(false);
-  return result?.error === 'Empty action command';
+  return { reached, error: result?.error };
+}
+
+const REFUSED = 'Action refused by command policy: stopped by test';
+
+async function conditionPasses(condition: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+  const { reached, error } = await runCondition(condition, payload);
+  if (reached) expect(error).toBe(REFUSED);
+  return reached;
 }
 
 describe('trigger condition data boundary', () => {
   test.each(['__proto__', 'constructor', 'prototype'])('rejects %s even when the condition tests for absence', async (part) => {
-    expect(await conditionPasses(`payload.${part} === undefined`)).toBe(false);
-    expect(await conditionPasses(`payload.nested.${part} !== undefined`, { nested: {} })).toBe(false);
-    expect(await conditionPasses(`payload.${part} === 'synthetic'`, { [part]: 'synthetic' })).toBe(false);
+    for (const [condition, payload] of [
+      [`payload.${part} === undefined`, {}],
+      [`payload.nested.${part} !== undefined`, { nested: {} }],
+      [`payload.${part} === 'synthetic'`, { [part]: 'synthetic' }],
+    ] as const) {
+      const { reached, error } = await runCondition(condition, payload);
+      expect(reached).toBe(false);
+      expect(error).toStartWith('Condition could not be evaluated:');
+    }
   });
 
   test('does not consult inherited properties', async () => {

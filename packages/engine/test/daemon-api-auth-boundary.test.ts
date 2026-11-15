@@ -1,11 +1,12 @@
 /**
  * Daemon authorization boundary.
  *
- * Verifies that each handler derives authorization from the per-call
+ * Verifies, for a representative handler of each route family (system,
+ * integration, runtime session), that authorization comes from the per-call
  * request, not from a closure-captured factory-time request. An admin
- * request must be permitted; a non-admin request to the same handler
+ * request must be served (200); a non-admin request to the same handler
  * must be denied, even when the factory was initialized with a
- * different request object.
+ * different request object. Handlers not named here are not covered.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -15,13 +16,13 @@ import {
   dispatchGatewayRestRoutes,
   dispatchDaemonApiRoutes,
   GATEWAY_REST_ROUTES,
-} from '../daemon-api/dist/index.js';
-import { AccountsSnapshotResponseSchema } from '../contracts/dist/index.js';
+} from '../daemon-api/src/index.js';
+import { AccountsSnapshotResponseSchema } from '../contracts/src/index.js';
 import type {
   DaemonSystemRouteContext,
   DaemonIntegrationRouteContext,
   DaemonRuntimeRouteContext,
-} from '../daemon-api/dist/index.js';
+} from '../daemon-api/src/index.js';
 
 // ---------------------------------------------------------------------------
 // Minimal stub builders
@@ -129,8 +130,8 @@ describe('createDaemonSystemRouteHandlers per-request auth', () => {
     const handlers = createDaemonSystemRouteHandlers(makeContext());
 
     const allowed = await handlers.installService(adminReq);
-    // May succeed (200) or service-unavailable (5xx) depending on stub, but must NOT be 403
-    expect(allowed.status).not.toBe(403);
+    // The stub context serves an admin request, so a 5xx here is a failure, not an allowed call.
+    expect(allowed.status).toBe(200);
 
     const denied = await handlers.installService(nonAdminReq);
     expect(denied.status).toBe(403);
@@ -140,7 +141,7 @@ describe('createDaemonSystemRouteHandlers per-request auth', () => {
     const handlers = createDaemonSystemRouteHandlers(makeContext());
 
     const allowed = await handlers.getConfig(adminReq);
-    expect(allowed.status).not.toBe(403);
+    expect(allowed.status).toBe(200);
 
     const denied = await handlers.getConfig(nonAdminReq);
     expect(denied.status).toBe(403);
@@ -225,7 +226,7 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
     const handlers = createDaemonIntegrationRouteHandlers(makeContext());
 
     const allowed = await handlers.getLocalAuth(adminReq);
-    expect(allowed.status).not.toBe(403);
+    expect(allowed.status).toBe(200);
 
     const denied = await handlers.getLocalAuth(nonAdminReq);
     expect(denied.status).toBe(403);
@@ -235,7 +236,7 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
     const handlers = createDaemonIntegrationRouteHandlers(makeContext());
 
     const allowed = await handlers.deleteBootstrapFile(adminReq);
-    expect(allowed.status).not.toBe(403);
+    expect(allowed.status).toBe(200);
 
     const denied = await handlers.deleteBootstrapFile(nonAdminReq);
     expect(denied.status).toBe(403);
@@ -321,7 +322,7 @@ describe('createDaemonRuntimeSessionRouteHandlers getSharedSessionEvents auth', 
     const handlers = createDaemonRuntimeSessionRouteHandlers(makeContext());
 
     const allowed = await handlers.getSharedSessionEvents('sess-1', adminReq);
-    expect(allowed.status).not.toBe(403);
+    expect(allowed.status).toBe(200);
 
     const denied = await handlers.getSharedSessionEvents('sess-1', nonAdminReq);
     expect(denied.status).toBe(403);

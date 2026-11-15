@@ -119,60 +119,6 @@ export const ATTACHED_PAYMENTS_METHOD_IDS: readonly string[] = [
 ];
 
 /**
- * The one descriptor in this family this PRODUCT authors, because the id is
- * product-owned: the platform's catalog holds the seven `payments.*` verbs it
- * ships and no `payments.checkout.approve`, and the approve act is this
- * daemon's own composition (its store, its confirmation gate, its wire
- * shape). contracts.ts's never-author-a-descriptor rule is about not
- * RE-declaring an platform id, which this is not; the parity test
- * (gateway-verb-family-parity.test.ts) pins this id the same way it pins the
- * rest, so it cannot drift in silently.
- */
-const CHECKOUT_APPROVE_DESCRIPTOR: GatewayMethodDescriptor = {
-  id: 'payments.checkout.approve',
-  title: 'Approve One Purchase',
-  description:
-    'Record that a human approves one specific purchase, out of band from the conversation that will run '
-    + 'it: the merchant\'s registrable domain, the item, and the amount (the same string a later begin call '
-    + 'passes as requestedMax). Mints a persisted, single-use approval bound to exactly those fields, '
-    + 'expiring in five minutes; payments.checkout.begin consumes it and refuses without one. Requires '
-    + 'confirm: true and the explicit-user-request context, the same confirmation gate every destructive '
-    + 'verb on this daemon uses. The response never carries card material; this verb never touches a card '
-    + 'at all. ws-only invoke verb; no REST binding: the gateway REST table is the daemon-api\'s and this '
-    + 'product cannot add rows to it, the same shape sessions.hosted.* already has.',
-  category: 'payments',
-  source: 'builtin',
-  access: 'admin',
-  transport: ['ws'],
-  scopes: ['write:payments'],
-  dangerous: true,
-  inputSchema: {
-    type: 'object',
-    properties: {
-      confirm: { type: 'boolean' },
-      merchantDomain: { type: 'string' },
-      item: { type: 'string' },
-      amount: { type: 'string' },
-    },
-    required: ['confirm', 'merchantDomain', 'item', 'amount'],
-    additionalProperties: false,
-  },
-  outputSchema: {
-    type: 'object',
-    properties: {
-      approved: { type: 'boolean' },
-      action: { type: 'string' },
-      merchantDomain: { type: 'string' },
-      item: { type: 'string' },
-      amount: { type: 'string' },
-      expiresAt: { type: 'string' },
-    },
-    required: ['approved', 'action', 'merchantDomain', 'item', 'amount', 'expiresAt'],
-    additionalProperties: false,
-  },
-};
-
-/**
  * Kept, empty, rather than deleted: `gateway-payments-verbs.test.ts` and
  * `register.test.ts` iterate this to assert the unattached set, and an empty
  * array keeps that assertion meaningful (a future verb added here without a
@@ -388,7 +334,11 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps, holder: Checkout
         for (const card of deps.cards.list()) {
           built.push(cardView(card, await deps.cards.materialComplete(card.id)));
         }
-        return { cards: built, defaultCardId: readDefaultCardId(deps.config) };
+        // A default that names a card which no longer exists (deleted since it was
+        // chosen) is reported as no default, so a surface does not render a stale
+        // choice as if it were usable.
+        const configured = readDefaultCardId(deps.config);
+        return { cards: built, defaultCardId: built.some((card) => card.id === configured) ? configured : '' };
       });
     },
 
@@ -449,9 +399,8 @@ export interface PaymentsRegistration {
 }
 
 /**
- * Attach the eight `payments.*` handlers: seven to the descriptors the platform
- * catalog already holds, and `payments.checkout.approve` to the one
- * descriptor this product authors (see `CHECKOUT_APPROVE_DESCRIPTOR` above).
+ * Attach the eight `payments.*` handlers to the descriptors the platform
+ * catalog holds.
  *
  * The platform's `registerPaymentsGatewayMethods` runs its boot recovery sweep
  * before attaching, so it returns a promise and attaches a beat after this
@@ -532,6 +481,12 @@ export function registerPaymentsMethods(
     }
     const cardholderName = readString(params, 'cardholderName');
     const rawCap = params['issuerCapMinorUnits'];
+    // Absent or null means no declared cap. Anything else that is not a whole,
+    // non-negative number is refused: storing the card without it would show the
+    // owner an uncapped card they did not ask for.
+    if (rawCap !== undefined && rawCap !== null && !(typeof rawCap === 'number' && Number.isSafeInteger(rawCap) && rawCap >= 0)) {
+      throw invalid('issuerCapMinorUnits', 'must be a non-negative whole number or absent.');
+    }
 
     const card = await service.createCard({
       label,
@@ -541,7 +496,7 @@ export function registerPaymentsMethods(
       expiryYear,
       cvv,
       cardholderName,
-      issuerCapMinorUnits: typeof rawCap === 'number' && Number.isInteger(rawCap) ? rawCap : null,
+      issuerCapMinorUnits: typeof rawCap === 'number' ? rawCap : null,
     });
     return { card };
   };
@@ -585,14 +540,6 @@ export function registerPaymentsMethods(
       restoreDescriptors();
       return;
     }
-    // The approve descriptor is product-authored (see its declaration above),
-    // so it is placed on the catalog here, handler-less, exactly where the
-    // platform's own descriptors already sit, and then attached through the same
-    // `registerCatalogHandlers` path as the other local wrappers. `replace:
-    // true` so a registration over a catalog that already carries it (a
-    // recompose that skipped teardown) replaces rather than throws.
-    catalog.register(CHECKOUT_APPROVE_DESCRIPTOR, undefined, { replace: true });
-
     localTeardown = registerCatalogHandlers(catalog, [
       { id: 'payments.cards.create', handler: cardsCreate as TypedHandler<unknown, unknown> },
       { id: 'payments.purchases.list', handler: purchasesList as TypedHandler<unknown, unknown> },

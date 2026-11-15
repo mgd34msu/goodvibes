@@ -272,16 +272,17 @@ describe('InputHistory persistence', () => {
     expect(h2.up('beta')).toBe('alpha');
   });
 
-  test('round-trip: paste marker recall content survives save+load', () => {
+  test('round-trip: only the typed marker is persisted, the pasted body stays in memory', () => {
     const path = makeTmpPath();
     const pasted = 'first pasted line\nsecond pasted line\nthird pasted line';
     const h1 = new InputHistory({ historyPath: path, persist: true });
     h1.add('[TEXT: p1, 3 lines]', { recallText: pasted });
 
+    expect(h1.up('')).toBe(pasted);
     const h2 = new InputHistory({ historyPath: path, persist: true });
-    expect(h2.up('')).toBe(pasted);
+    expect(h2.up('')).toBe('[TEXT: p1, 3 lines]');
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    expect(raw).toEqual([{ text: '[TEXT: p1, 3 lines]', recallText: pasted }]);
+    expect(raw).toEqual(['[TEXT: p1, 3 lines]']);
   });
 
   test('creates missing directory on save', () => {

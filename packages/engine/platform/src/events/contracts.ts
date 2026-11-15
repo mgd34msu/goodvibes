@@ -231,13 +231,13 @@ export function validateKnownEvent(event: unknown): import('./contracts/shared.j
   if (!isObject(event)) return { valid: false, violations: ['event must be an object'] };
   const type = event['type'];
   if (!isString(type)) return { valid: false, violations: ['event.type must be a string'] };
-  const validator = EVENT_VALIDATORS[type];
+  const validator = Object.hasOwn(EVENT_VALIDATORS, type) ? EVENT_VALIDATORS[type] : undefined;
   if (!validator) return { valid: false, violations: [`unknown event type: '${type}'`] };
   return validator(event);
 }
 
 export function isKnownEventType(type: unknown): type is string {
-  return isString(type) && type in EVENT_VALIDATORS;
+  return isString(type) && Object.hasOwn(EVENT_VALIDATORS, type);
 }
 
 export function registeredEventTypes(): readonly string[] {

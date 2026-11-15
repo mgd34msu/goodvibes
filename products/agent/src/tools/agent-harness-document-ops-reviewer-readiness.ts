@@ -1,6 +1,7 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AgentDocumentRegistry, type AgentDocumentRecord } from '../agent/document-registry.ts';
+import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from './agent-review-packet-presets-core.ts';
 import type { ReviewerReadinessCheck, ReviewerReadinessChecklist, ReviewerReadinessStatus } from './agent-harness-document-ops-types.ts';
 
 function readMetadataString(value: unknown): string {
@@ -34,7 +35,7 @@ function isModelCompareJudgmentArtifact(artifact: ArtifactDescriptor): boolean {
 }
 
 function isModelCompareRouteDecisionArtifact(artifact: ArtifactDescriptor): boolean {
-  return artifactPurpose(artifact) === 'agent-model-compare-route-decision';
+  return hasPurpose(artifact, PURPOSE_MODEL_COMPARE_ROUTE_DECISION);
 }
 
 function isModelCompareHandoffArtifact(artifact: ArtifactDescriptor): boolean {
@@ -44,22 +45,51 @@ function isModelCompareHandoffArtifact(artifact: ArtifactDescriptor): boolean {
   return readMetadataString(artifact.filename).startsWith('blind-model-comparison-handoff-');
 }
 
-function readDocuments(context: CommandContext): readonly AgentDocumentRecord[] {
+/** How many artifacts one readiness pass inspects; a store holding more is reported as only partly checked. */
+const ARTIFACT_SCAN_LIMIT = 1000;
+
+interface StoreRead<T> {
+  readonly items: readonly T[];
+  /** Why the store could not be read in full, when it could not. */
+  readonly problem?: string;
+}
+
+function problemText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readDocuments(context: CommandContext): StoreRead<AgentDocumentRecord> {
   const shellPaths = context.workspace?.shellPaths;
-  if (!shellPaths) return [];
+  if (!shellPaths) return { items: [], problem: 'no workspace is active, so no documents were looked up' };
   try {
-    return AgentDocumentRegistry.fromShellPaths(shellPaths).list();
-  } catch {
-    return [];
+    return { items: AgentDocumentRegistry.fromShellPaths(shellPaths).list() };
+  } catch (error) {
+    return { items: [], problem: `the document registry could not be read (${problemText(error)})` };
   }
 }
 
-function readArtifacts(context: CommandContext): readonly ArtifactDescriptor[] {
+function readArtifacts(context: CommandContext): StoreRead<ArtifactDescriptor> {
+  const store = context.platform.artifactStore;
+  if (!store?.list) return { items: [] };
   try {
-    return context.platform.artifactStore?.list?.(100) ?? [];
-  } catch {
-    return [];
+    const listed = store.list(ARTIFACT_SCAN_LIMIT + 1);
+    return listed.length > ARTIFACT_SCAN_LIMIT
+      ? { items: listed.slice(0, ARTIFACT_SCAN_LIMIT), problem: `only the newest ${ARTIFACT_SCAN_LIMIT} artifacts were checked` }
+      : { items: listed };
+  } catch (error) {
+    return { items: [], problem: `the artifact store could not be read (${problemText(error)})` };
   }
+}
+
+/**
+ * A check whose evidence was not fully read is never a pass: an unread store
+ * says nothing about whether review work is waiting in it.
+ */
+function withReadProblem<T extends { status: ReviewerReadinessCheck['status']; detail: string }>(check: T, problem: string | undefined): T {
+  if (!problem) return check;
+  return check.status === 'pass'
+    ? { ...check, status: 'attention', detail: `Not verified: ${problem}, so this cannot be reported as clear.` }
+    : { ...check, detail: `${check.detail} (Counts may be incomplete: ${problem}.)` };
 }
 
 function reviewerReadinessStatus(checks: readonly ReviewerReadinessCheck[]): ReviewerReadinessStatus {
@@ -76,12 +106,14 @@ export function buildReviewerReadinessChecklist(
     readonly artifactBrowserReady: boolean;
   },
 ): ReviewerReadinessChecklist {
-  const documents = readDocuments(context);
+  const documentRead = readDocuments(context);
+  const documents = documentRead.items;
   const reviewDocuments = documents.filter((document) => document.status !== 'archived');
   const openComments = reviewDocuments.reduce((total, document) => total + document.comments.filter((comment) => comment.status === 'open').length, 0);
   const proposedSuggestions = reviewDocuments.reduce((total, document) => total + document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length, 0);
   const documentsMissingSourceArtifacts = reviewDocuments.filter((document) => document.attachments.length === 0 && !document.lastArtifactId).length;
-  const artifacts = readArtifacts(context);
+  const artifactRead = readArtifacts(context);
+  const artifacts = artifactRead.items;
   const comparisons = artifacts.filter(isModelCompareArtifact);
   const judgments = artifacts.filter(isModelCompareJudgmentArtifact);
   const routeDecisions = artifacts.filter(isModelCompareRouteDecisionArtifact);
@@ -118,7 +150,7 @@ export function buildReviewerReadinessChecklist(
   const firstRevealedJudgment = revealedJudgmentsWaitingOnRouteDecision[0];
   const firstHandoffMissingRelated = handoffs.find((artifact) => readMetadataStringList(artifact.metadata.relatedArtifactIds).length === 0);
 
-  const checks: ReviewerReadinessCheck[] = [
+  const rawChecks: ReviewerReadinessCheck[] = [
     {
       id: 'review-tooling',
       label: 'Review tooling',
@@ -210,6 +242,15 @@ export function buildReviewerReadinessChecklist(
         : undefined,
     },
   ];
+  const sourceProblem = [documentRead.problem, artifactRead.problem].filter((entry): entry is string => entry !== undefined).join('; ') || undefined;
+  const problemFor = (id: string): string | undefined => {
+    if (id === 'document-review-state') return documentRead.problem;
+    if (id === 'source-artifacts') return sourceProblem;
+    if (id === 'comparison-reveal' || id === 'route-change-decision' || id === 'handoff-archive-evidence') return artifactRead.problem;
+    return undefined;
+  };
+  const checks = rawChecks.map((check) => withReadProblem(check, problemFor(check.id)));
+  const readProblems = [documentRead.problem, artifactRead.problem].filter((entry): entry is string => entry !== undefined);
   const status = reviewerReadinessStatus(checks);
   const firstAction = checks.find((check) => check.status === 'attention' || check.status === 'needs-setup');
   return {
@@ -225,9 +266,11 @@ export function buildReviewerReadinessChecklist(
       savedComparisons: comparisons.length,
       unrevealedComparisons: unrevealedComparisons.length,
       hiddenJudgments: hiddenJudgments.length,
-      revealedJudgments: revealedJudgmentsWaitingOnRouteDecision.length,
+      revealedJudgments: revealedJudgments.length,
+      judgmentsAwaitingRouteDecision: revealedJudgmentsWaitingOnRouteDecision.length,
       handoffsMissingRelatedArtifacts,
     },
+    ...(readProblems.length > 0 ? { readProblems } : {}),
     checks,
     policy: 'Reviewer readiness is read-only. It flags unresolved review work and returns exact existing routes; document exports, comparison handoffs, archives, and model route updates require their own current recorded effect admission.',
   };

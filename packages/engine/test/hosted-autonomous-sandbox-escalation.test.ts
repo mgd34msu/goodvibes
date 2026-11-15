@@ -16,18 +16,19 @@ import { WorkspaceTrustManager } from '../platform/src/platform/runtime/workspac
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
 import { detectSandboxAvailability, probeSandboxHost, resolveExecSandboxPlan } from '../platform/src/platform/tools/exec/sandbox.ts';
 import { toolReadingsPort } from './_helpers/tool-readings.ts';
-import { forgetCredentialEnvReadings } from '../platform/src/platform/tools/exec/credential-env.ts';
 import { forgetGateReadings } from './_helpers/gate-readings.ts';
+import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
 
 const command = 'printf owned-sandbox-fixture';
 const availability = detectSandboxAvailability(probeSandboxHost());
+requireLiveHost('sandbox', availability.available);
 let root: string; let workspaceTrust: WorkspaceTrustManager; let services: ClientRuntimeServices; let runtime: HostedSessionRuntime;
 let restore: () => void; let deps: ToolExecutionDeps;
-let denyEscalation: boolean; let revokeBeforeSpawn: (() => void | Promise<void>) | undefined; let sawEscalation: boolean;
+let denyEscalation: boolean; let sawEscalation: boolean;
 let humanAsks: string[]; let requests: JudgmentRequest<Questions>[];
 
 beforeEach(() => {
-  forgetGateReadings(); forgetCredentialEnvReadings(); humanAsks = []; requests = []; denyEscalation = false; sawEscalation = false; revokeBeforeSpawn = undefined;
+  forgetGateReadings(); humanAsks = []; requests = []; denyEscalation = false; sawEscalation = false;
   root = mkdtempSync(join(tmpdir(), 'hosted-sandbox-escalation-'));
   const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(root, 'config'), workingDir: root, homeDir: root });
   workspaceTrust = new WorkspaceTrustManager({ shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }), surfaceRoot: 'tui' });
@@ -42,7 +43,6 @@ beforeEach(() => {
   const recorded = withDecisionLog({ model: readings.port.model, async ask(request) {
     request.signal?.throwIfAborted(); request.beforeAttempt?.(); requests.push(request as JudgmentRequest<Questions>);
     if ('disposition' in request.questions && JSON.stringify(request.state).includes('sandboxEscalation')) sawEscalation = true;
-    if (sawEscalation && 'credential' in request.questions && revokeBeforeSpawn) { const revoke = revokeBeforeSpawn; revokeBeforeSpawn = undefined; await revoke(); }
     return 'disposition' in request.questions ? semantic.port.ask(request) : readings.port.ask(request);
   } }, services.judgment.decisionLog);
   const spy = spyOn(services.judgment.port, 'ask').mockImplementation(recorded.ask); restore = () => spy.mockRestore();
@@ -93,14 +93,14 @@ test.skipIf(!availability.available)('owned sandbox permit is frozen and single-
   expect(humanAsks).toEqual([]);
 }, 15000);
 
-test.skipIf(!availability.available)('explicit restricted workspace refuses sandbox admission without a human trust prompt', async () => {
+test('explicit restricted workspace refuses sandbox admission without a human trust prompt', async () => {
   const trust = new WorkspaceTrustManager({ shellPaths: createShellPathService({ workingDirectory: root, homeDirectory: root }), surfaceRoot: 'tui' });
   await trust.setLevel('restricted');
   expect(await directPermit(trust)).toBe(false); expect(humanAsks).toEqual([]); expect(sawEscalation).toBe(false);
 }, 15000);
 
 
-test.skipIf(!availability.available)('actual hosted explicit restricted workspace sends no sandbox process and never asks a human', async () => {
+test('actual hosted explicit restricted workspace sends no sandbox process and never asks a human', async () => {
   await workspaceTrust.setLevel('restricted');
   let spawns = 0; const original = Bun.spawn;
   const spy = spyOn(Bun, 'spawn').mockImplementation(((...args: Parameters<typeof Bun.spawn>) => { spawns++; return original(...args); }) as typeof Bun.spawn);

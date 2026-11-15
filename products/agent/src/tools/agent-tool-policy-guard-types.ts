@@ -64,9 +64,7 @@ export type AgentToolPolicyGuardOptions = {
 export type ModeRestrictedToolPolicy = {
   readonly allowedModes: readonly string[];
   readonly modeSet: ReadonlySet<string>;
-  readonly description: string;
   readonly denial: string;
-  readonly removedProperties?: readonly string[];
 };
 
 export interface AgentToolPolicyInvocationExplanation {

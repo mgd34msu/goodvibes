@@ -126,10 +126,14 @@ async function outwardCheck(input: BoundaryInput, content: Record<string, string
     return {
       check: 'outward-effect',
       result: 'refuse',
-      detail: assessment.reason === 'protected-input' ? 'protected source withheld from judgment' : 'incomplete source text for comparison',
+      detail: assessment.reason === 'protected-input'
+        ? 'protected source withheld from judgment'
+        : assessment.reason === 'over-limit' ? 'content too long to compare whole' : 'incomplete source text for comparison',
       approvable: true,
       reason: assessment.reason === 'protected-input'
         ? 'Untrusted source text contains protected material and cannot be sent for a derivation reading. The owner must approve this exact outward call.'
+        : assessment.reason === 'over-limit'
+        ? `A field of this ${input.toolName} call, or the untrusted text this turn read, is too long to be compared whole, so whether the call repeats it cannot be established. Shorten the field and send it in parts, or the owner can approve this exact outward call.`
         : `This turn read ${origins.join(', ')}, but the complete source text cannot be compared, so whether this ${input.toolName} call repeats it cannot be established. The owner must approve this exact outward call.`,
     };
   }

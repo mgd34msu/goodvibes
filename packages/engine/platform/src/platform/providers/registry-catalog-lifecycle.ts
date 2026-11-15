@@ -60,13 +60,27 @@ export function initProviderCatalog(ctx: CatalogLifecycleContext): void {
  * Extracted from ProviderRegistry.refreshCatalog() to isolate catalog
  * refresh logic from provider management concerns.
  */
-export async function refreshProviderCatalog(ctx: CatalogLifecycleContext): Promise<void> {
+export function refreshProviderCatalog(ctx: CatalogLifecycleContext): Promise<void> {
+  // One refresh per cache file at a time: two overlapping runs would write the
+  // same temp file and diff against stale snapshots. A second caller joins the
+  // refresh already running and gets its outcome.
+  const key = ctx.getCatalogCachePaths().cachePath;
+  const running = refreshesInFlight.get(key);
+  if (running) return running;
+  const refresh = applyCatalogRefresh(ctx).finally(() => { refreshesInFlight.delete(key); });
+  refreshesInFlight.set(key, refresh);
+  return refresh;
+}
+
+const refreshesInFlight = new Map<string, Promise<void>>();
+
+async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> {
   const previous = [...ctx.getCatalogModels()];
   const { cachePath, tmpPath } = ctx.getCatalogCachePaths();
   const models = await fetchCatalog({ accessPath: getProviderAccessPath(dirname(cachePath)) });
   if (models.length === 0) {
-    logger.warn('[model-catalog] Refresh returned 0 models, keeping existing catalog');
-    return;
+    // Not a success: the caller asked for a refresh and nothing was refreshed.
+    throw new Error('The model catalog feed returned no models, so the existing catalog was kept unchanged.');
   }
   saveCatalogCache(models, cachePath, tmpPath);
   ctx.updateCatalogState(models);

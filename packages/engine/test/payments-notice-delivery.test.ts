@@ -9,8 +9,11 @@
  * the window against a report nobody produced, so an in-budget purchase would
  * proceed on a "silence" that was really a message never sent.
  *
- * These run the whole path against a FAKE CHANNEL that records what it
- * received: render → deliver → report → window → outcome. The four cases are
+ * These run the real notifier against a FAKE CHANNEL that records what it
+ * received, then feed its delivery report to the real window transition
+ * functions: deliver → report → window → outcome. The glue between them is
+ * written in the test, not taken from the checkout flow; payments-purchase-
+ * execution.test.ts drives the flow itself. The four cases are
  * the two window kinds crossed with delivered and undeliverable, because that
  * is exactly the matrix the owner's undeliverable ruling covers and the two
  * kinds resolve it oppositely:
@@ -139,7 +142,7 @@ describe('the notice reaches a channel, and the report is what really happened',
 
 // ═══ The four cases the undeliverable ruling covers ════════════════════════
 
-describe('render → deliver → report → window, for each of the four cases', () => {
+describe('real notifier report → real window transitions, for each of the four cases', () => {
   async function runWindow(input: {
     readonly kind: 'approval' | 'veto';
     readonly deliverable: boolean;

@@ -40,7 +40,7 @@ function isKnownCapability(value: string): value is PluginCapability {
  *
  * Evaluation order:
  *   1. Unknown capability strings are filtered out (warn + ignore).
- *   2. Trust-tier constraints are applied, high-risk capabilities blocked
+ *   2. Trust-tier constraints are applied, high-risk capabilities flagged
  *      unless the plugin has the `trusted` tier.
  *   3. The runtime capability policy callback is applied to the remaining set.
  *
@@ -74,9 +74,8 @@ export function resolveCapabilityManifest(
   const trustResult = filterCapabilitiesByTrust(requested, trustTier);
   if (trustResult.blocked.length > 0) {
     logger.warn(
-      `[plugin-lifecycle:${pluginName}] Trust tier '${trustTier}' blocks` +
-      ` high-risk capabilities: [${trustResult.blocked.join(', ')}]` +
-      ', trust escalation required',
+      `[plugin-lifecycle:${pluginName}] Capabilities requested above trust tier '${trustTier}':` +
+      ` [${trustResult.blocked.join(', ')}] (withheld from the granted set)`,
     );
   }
 
@@ -133,6 +132,12 @@ export function hasCapability(
 }
 
 /**
+ * A plugin name becomes part of tool names, command names and gateway ids, so
+ * spaces, dots and capitals would produce invalid or colliding identifiers.
+ */
+export const PLUGIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
  * validateManifestV2, Light validation of the PluginManifestV2 shape.
  * Returns null on success or an error string on failure.
  */
@@ -143,6 +148,9 @@ export function validateManifestV2(manifest: unknown): string | null {
   const m = manifest as Record<string, unknown>;
   if (typeof m['name'] !== 'string' || !m['name']) {
     return "manifest.name must be a non-empty string";
+  }
+  if (!PLUGIN_NAME_PATTERN.test(m['name'])) {
+    return `manifest.name must be lowercase letters, digits and hyphens, starting with a letter or digit (got '${m['name']}'); for example 'my-plugin'`;
   }
   if (typeof m['version'] !== 'string' || !m['version']) {
     return "manifest.version must be a non-empty string";

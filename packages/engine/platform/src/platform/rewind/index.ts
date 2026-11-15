@@ -54,6 +54,8 @@ export {
   ANCHOR_SIDECAR_SETTLE_MS,
   ANCHOR_TMP_MAX_AGE_MS,
   clearTurnAnchors,
+  discardTurnAnchorsAfter,
+  restoreDiscardedTurnAnchors,
   getTurnAnchors,
   persistTurnAnchors,
   reapOrphanedAnchorSidecars,

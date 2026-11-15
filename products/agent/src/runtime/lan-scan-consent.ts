@@ -248,8 +248,10 @@ export function runGatedLanScan(options: LanScanGateOptions): BackgroundRuntimeT
   }
 
   const framed = createFramedDiscoverySink(systemMessageRouter, requestRender);
+  // The user turned the network scan on so the servers it finds can be chat providers.
   return startDiscovery({
     ...options,
+    registerNetworkServers: true,
     systemMessageRouter: framed.sink,
     requestRender: framed.requestRender,
   });

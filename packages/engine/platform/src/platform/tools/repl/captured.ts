@@ -1,7 +1,7 @@
 /** One-shot evaluation and authority-owned attempt history. No host eval,
  * shared VM or model-selected workspace is available here. */
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, mkdirSync, openSync, readSync, writeSync } from 'node:fs';
+import { closeSync, constants, mkdirSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -21,7 +21,16 @@ import { capturedReplScript } from './captured-script.js';
 import type { ReplToolInput } from './schema.js';
 
 const tools = new WeakMap<Tool, ContractInputAuthority>();
-const HELD = 'Captured REPL held: original-owner/view authority is unavailable, changed, cancelled or restricted. Output withheld.';
+const HELD = 'Captured REPL held: original-owner/view authority is unavailable, changed or restricted. Output withheld.';
+const CANCELLED = 'Captured REPL cancelled. Output withheld.';
+/** Bounds an eval that never finishes; an explicit timeout_ms of 0 still waits for completion or cancellation. */
+const DEFAULT_EVAL_TIMEOUT_MS = 120_000;
+
+/** The eval deadline for a call: omitted means the default bound, 0 means wait; anything else invalid is undefined. */
+export function resolveEvalTimeoutMs(requested: unknown): number | undefined {
+  const timeoutMs = requested ?? DEFAULT_EVAL_TIMEOUT_MS;
+  return typeof timeoutMs === 'number' && Number.isSafeInteger(timeoutMs) && timeoutMs >= 0 ? timeoutMs : undefined;
+}
 type Runtime = NonNullable<ReplToolInput['runtime']>;
 interface HistoryEntry {
   readonly ts: number;
@@ -44,7 +53,8 @@ interface History {
   readonly signal?: AbortSignal | undefined;
   readonly entries: RetainedEntry[];
   bytes: number;
-  readonly fd: number;
+  /** Opened on the first retained attempt, so a run that never evaluates leaves nothing behind. */
+  readonly file: { fd: number | undefined };
 }
 // A copied root, serialized session ID or newly minted authority never selects
 // another execution's journal. Weak ownership also lets disposed runs be freed.
@@ -52,20 +62,39 @@ export interface CapturedReplHistory {
   readonly kind: 'captured-repl-history';
 }
 const histories = new WeakMap<CapturedReplHistory, History>();
+// A run that never disposes its journal (a caller that took the default owner) still releases the descriptor once the owner is collected.
+const unreleased = new FinalizationRegistry<{ fd: number | undefined }>((file) => {
+  if (file.fd !== undefined) { try { closeSync(file.fd); } catch { /* already closed */ } file.fd = undefined; }
+});
 
 /** Mint once per actual agent run, then reuse only for its registry rebuilds. */
 export function createCapturedReplHistory(authority: ContractInputAuthority, signal?: AbortSignal): CapturedReplHistory {
   const owner = Object.freeze({ kind: 'captured-repl-history' as const });
+  const file: { fd: number | undefined } = { fd: undefined };
+  histories.set(owner, { authority, signal, entries: [], bytes: 0, file });
+  unreleased.register(owner, file);
+  return owner;
+}
+
+/**
+ * The journal is private to one run, so its file is unlinked as soon as it is
+ * open: the descriptor is all that reads and writes need, and nothing is left on
+ * disk when the run ends or the process dies.
+ */
+function journalFd(history: History): number {
+  if (history.file.fd !== undefined) return history.file.fd;
   const directory = join(process.env.GOODVIBES_HOME ?? join(homedir(), '.local', 'share', 'goodvibes-jev-data'), '.goodvibes', 'repl-history');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const fd = openSync(join(directory, `${randomUUID()}.jsonl`), constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
-  histories.set(owner, { authority, signal, entries: [], bytes: 0, fd });
-  return owner;
+  const path = join(directory, `${randomUUID()}.jsonl`);
+  const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
+  try { unlinkSync(path); } catch (error) { closeSync(fd); throw error; }
+  history.file.fd = fd;
+  return fd;
 }
 
 export function disposeCapturedReplHistory(owner: CapturedReplHistory): void {
   const history = histories.get(owner);
-  if (history) closeSync(history.fd);
+  if (history?.file.fd !== undefined) { closeSync(history.file.fd); history.file.fd = undefined; }
   histories.delete(owner);
 }
 
@@ -78,8 +107,9 @@ function historyOf(owner: CapturedReplHistory, authority: ContractInputAuthority
 
 function retain(history: History, entry: HistoryEntry, check: RetainedEntry['check'], signal?: AbortSignal): void {
   const data = Buffer.from(JSON.stringify(entry) + '\n');
+  const fd = journalFd(history);
   let written = 0;
-  while (written < data.length) written += writeSync(history.fd, data, written, data.length - written, history.bytes + written);
+  while (written < data.length) written += writeSync(fd, data, written, data.length - written, history.bytes + written);
   history.entries.push({ offset: history.bytes, bytes: data.length, check, signal });
   history.bytes += data.length;
 }
@@ -138,7 +168,7 @@ export function createCapturedReplTool(
           const output = JSON.stringify({ count: history.entries.length, history: entries.map(entry => {
             const data = Buffer.alloc(entry.bytes);
             let read = 0;
-            while (read < data.length) { const n = readSync(history.fd, data, read, data.length - read, entry.offset + read); if (!n) throw new Error('Incomplete REPL journal'); read += n; }
+            while (read < data.length) { const n = readSync(journalFd(history), data, read, data.length - read, entry.offset + read); if (!n) throw new Error('Incomplete REPL journal'); read += n; }
             return JSON.parse(data.toString('utf8')) as HistoryEntry;
           }), ...(offset > 0 || entries.length < history.entries.length ? { offset, returned: entries.length, has_more: offset + entries.length < history.entries.length, ...(entries.length && offset + entries.length < history.entries.length ? { next_offset: offset + entries.length } : {}) } : {}) });
           for (const originalCheck of previousChecks) await originalCheck(signal);
@@ -151,8 +181,8 @@ export function createCapturedReplTool(
         const runtime = args.runtime ?? 'javascript';
         if (typeof runtime !== 'string' || !['javascript', 'typescript', 'python', 'sql', 'graphql'].includes(runtime))
           return { success: false, error: 'Captured REPL runtime is invalid.' };
-        const timeoutMs = args.timeout_ms ?? 0;
-        if (typeof timeoutMs !== 'number' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 0) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
+        const timeoutMs = resolveEvalTimeoutMs(args.timeout_ms);
+        if (timeoutMs === undefined) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
         const attempt = { ts: Date.now(), runtime: runtime as Runtime, expression: args.expression, sessionId: `captured_repl_${randomUUID()}` };
         const finish = async (result: Omit<ToolResult, 'callId'>, details: Partial<HistoryEntry> = {}): Promise<Omit<ToolResult, 'callId'>> => {
           await check(signal);
@@ -191,7 +221,9 @@ export function createCapturedReplTool(
         }
         const result = await runCapturedCommand({ ...binding, bunRuntimeInput }, command, {}, binding.root, timeoutMs, signal, 'disabled', {}, { script: { name: scriptName, content: script } });
         await check(signal);
-        const error = result.timed_out ? `Captured REPL evaluation timed out after ${timeoutMs}ms.` : result.stderr;
+        const error = result.timed_out ? `Captured REPL evaluation timed out after ${timeoutMs}ms.`
+          : result.stderr || (!result.success && !result.denied && result.exit_code !== null
+            ? `Captured REPL evaluation exited with code ${result.exit_code} and printed no error output.` : '');
         return await finish({
           success: result.success,
           ...(result.cancelled ? { cancelled: true } : {}),
@@ -207,7 +239,7 @@ export function createCapturedReplTool(
           result: result.stdout || undefined, error: error || undefined,
         });
       } catch {
-        return { success: false, error: HELD, ...(signal?.aborted ? { cancelled: true } : {}) };
+        return signal?.aborted ? { success: false, error: CANCELLED, cancelled: true } : { success: false, error: HELD };
       }
     },
   };

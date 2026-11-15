@@ -1,5 +1,5 @@
 import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
-import { createSessionSaveCommand, restoreConversationContent } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { createSessionSaveCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import 'node:fs';
 import 'node:fs/promises';
@@ -8,6 +8,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
 import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
 import { sessionCommand } from './session.ts';
+import { loadSavedSessionIntoLive } from './session-load.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
@@ -57,15 +58,15 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
       }
       const sessionManager = requireSessionManager(ctx);
       try {
-        const { meta, messages, agentRecords } = sessionManager.load(args[0]);
-        restoreConversationContent(ctx.session.conversationManager, readConversationMessageSnapshots(messages), meta.title);
+        const loaded = loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
         ctx.renderRequest();
         ctx.print(
           [
             'Session loaded',
             `  id ${args[0]}`,
-            `  messages ${messages.length}`,
-            ...(agentRecords.length > 0 ? [`  ignored connected-host records ${agentRecords.length}`] : []),
+            `  messages ${loaded.messageCount}`,
+            ...(loaded.agentRecordCount > 0 ? [`  ignored connected-host records ${loaded.agentRecordCount}`] : []),
+            ...(loaded.restoredAnchorCount > 0 ? [`  rewind points ${loaded.restoredAnchorCount} restored`] : []),
           ].join('\n'),
         );
       } catch (e) {
@@ -83,6 +84,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     handler(args, ctx) {
       if (args.length > 0) {
         ctx.print('Usage: /undo\n  Removes the last conversation turn. Use execution action:"recovery" for local file edit undo.');
+        return;
+      }
+      if (ctx.isGenerating?.()) {
+        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /undo.');
         return;
       }
       const success = ctx.session.conversationManager.undo();
@@ -103,6 +108,10 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     handler(args, ctx) {
       if (args.length > 0) {
         ctx.print('Usage: /redo\n  Restores the last undone conversation turn. Use execution action:"recovery" for local file edit redo.');
+        return;
+      }
+      if (ctx.isGenerating?.()) {
+        ctx.print('A turn is still running. Stop it with Esc or let it finish, then /redo.');
         return;
       }
       const success = ctx.session.conversationManager.redo();
@@ -165,10 +174,9 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
   selected: (ctx, sessionManager, _sessions, result) => {
     if (!result) return;
     try {
-      const { meta, messages } = sessionManager.load(result.item.id);
-      restoreConversationContent(ctx.session.conversationManager, readConversationMessageSnapshots(messages), meta.title);
+      const loaded = loadSavedSessionIntoLive(ctx, sessionManager, result.item.id);
       ctx.renderRequest();
-      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${messages.length}`].join('\n'));
+      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${loaded.messageCount}`].join('\n'));
     } catch (e) {
       ctx.print(formatSessionFailure('load session', e));
     }

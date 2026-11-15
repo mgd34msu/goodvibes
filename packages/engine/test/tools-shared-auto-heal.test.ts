@@ -168,18 +168,16 @@ describe('AutoHealer: never throws', () => {
   test('does not throw on empty inputs', async () => {
     const healer = makeHealer(true);
     const result = await healer.heal('', '', ['']);
-    expect(typeof result.healed).toBe('boolean');
-    expect(typeof result.content).toBe('string');
+    expect(result.healed).toBe(false);
+    expect(result.content).toBe('');
+    expect(result.method).toBeUndefined();
   });
 });
 
 describe('AutoHealer: HealResult shape', () => {
-  test('result always has healed (boolean) and content (string)', async () => {
-    const healer = makeHealer(true);
-    const result = await healer.heal('test.ts', VALID_TS, ['some error']);
-    expect(typeof result.healed).toBe('boolean');
-    expect(typeof result.content).toBe('string');
-  });
+  let restore: () => void;
+  beforeEach(() => { restore = disableWhich(); });
+  afterEach(() => { restore(); });
 
   test('result.method is undefined when config gate blocks execution', async () => {
     const healer = makeHealer(false);
@@ -188,10 +186,9 @@ describe('AutoHealer: HealResult shape', () => {
     expect(result.method).toBeUndefined();
   });
 
-  test('result.method is one of formatter|linter|llm|undefined', async () => {
-    const validMethods = ['formatter', 'linter', 'llm', undefined];
+  test('with no formatter, linter or LLM repair available the content is returned unchanged and unhealed', async () => {
     const healer = makeHealer(true);
     const result = await healer.heal('test.ts', VALID_TS, ['error']);
-    expect(validMethods).toContain(result.method);
+    expect(result).toEqual({ healed: false, content: VALID_TS, warnings: ['Auto-heal LLM returned an empty response'] });
   });
 });

@@ -1,20 +1,11 @@
 import * as nativeFs from 'node:fs';
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
-import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
 import { AgentManager, type AgentRecord } from '@goodvibes-jev/engine/platform/platform/tools';
-import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { BenchmarkStore, ProviderRegistry, type ModelDefinition } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { LLMProvider, ChatRequest, ChatResponse } from '@goodvibes-jev/engine/platform/platform/providers';
+import { BenchmarkStore, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createWorkLedger, createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { PairingTokenManager } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { registerNativeWorkExecutionGatewayMethods, registerWorkLedgerGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -22,22 +13,15 @@ import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/intake';
 import { WorkspaceRegistrationStore } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { NativeWorkExecutionError, type NativePairedExecutionAuthority } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
+import { NativeWorkExecutionError } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionActivation } from '../../runtime/native-work-execution-activation.js';
 import * as nativeComposition from '../../runtime/native-work-execution-composition.js';
 import * as activationComposition from '../../runtime/native-work-execution-activation.js';
 import * as runtimeComposition from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { startDaemonFixture } from '../../testing/daemon-fixture.js';
-
-async function waitFor(predicate: () => boolean, label: string) {
-  const deadline = Date.now() + 10000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`Timed out: ${label}`);
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-}
-const answer = (content: string): ChatResponse => ({ content, toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'completed' });
+import { settleTurns } from '../helpers/turns.js';
+import { answer, createNativeWorkFixture, waitFor } from '../helpers/native-work-fixture.js';
 
 /** Lose only the acknowledgement after this original database was renamed.
  * Native publication remains real; private constructor-captured IO is untouched. */
@@ -59,82 +43,7 @@ function failNativePublicationAcknowledgment(file: string, message: string) {
   return { failed: () => failed, restore() { sync.mockRestore(); rename.mockRestore(); } };
 }
 
-async function fixture(pairingOwner?: PairingTokenManager) {
-  const root = makeOwnedTempDir('native-activation'); const workspace = join(root, 'workspace');
-  mkdirSync(workspace); writeFileSync(join(workspace, 'README.md'), '# Owned native fixture\n');
-  for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Fixture']])
-    if (spawnSync('git', args, { cwd: workspace }).status !== 0) throw new Error('Fixture git failed');
-  const configManager = new ConfigManager({ workingDir: workspace, homeDir: root, configDir: join(root, 'config'), surfaceRoot: 'daemon' });
-  const runtimeBus = new RuntimeEventBus();
-  const services = createClientRuntimeServices({ configManager, runtimeBus, runtimeStore: createRuntimeStore(),
-    surfaceRoot: 'daemon', workingDir: workspace, homeDirectory: root, requestApproval: async () => ({ approved: false }), modelDiscovery: 'skip' });
-  const log = new SqliteDecisionLog(join(root, 'decisions.sqlite'));
-  const readings = fakePort((name, question) => {
-    if (question.type === 'noul') return noulAnswer(name === 'forbids_delegation' || name === 'checkable' || name.startsWith('fit') ? 0.99 : 0.01);
-    if (question.type === 'score') return scoreAnswer(question, 0, 0.99);
-    const choices = question.type === 'choice' ? Object.keys(question.criteria) : [];
-    const preferred: Record<string, string> = { disposition: 'act', relation: 'supports', role: 'research', tier: 'standard', intent: 'chat', strategy: 'single', category: 'unknown', connection_failure: 'none' };
-    const pick = preferred[name];
-    return choiceAnswer(question, pick && choices.includes(pick) ? pick : choices.find(key => key !== 'none')!, 0.99);
-  });
-  const port = withDecisionLog(readings.port, log); const previous = installJudgmentPort(port);
-  const goal = 'Answer the native request yourself without delegation. Preserve the complete original request.';
-  const criteria = ['The answer says native execution is complete.'];
-  const plan = { goal, criteria: [{ id: 'c1', text: criteria[0], quote: criteria[0] }], groups: [{
-    id: 'g1', title: 'Answer', goal, kind: 'work', dependsOn: [], criteria: [], units: [{ id: 'u1', title: 'Answer', goal,
-      role: 'research', brief: 'Say native execution is complete.', dependsOn: [], files: [], criteria: [{ id: 'u1.c1', text: criteria[0], serves: ['c1'] }] }],
-  }] };
-  const requests: ChatRequest[] = [];
-  let hold: ((request: ChatRequest) => Promise<ChatResponse>) | undefined;
-  const provider = { name: 'native-fixture', models: ['model'], credentialAuthority: 'anonymous', modelSource: { kind: 'dated-static', asOf: '2026-01-01' },
-    isConfigured: () => true, async chat(request: ChatRequest) {
-      requests.push(request);
-      if (request.systemPrompt?.includes('You plan a contract')) return answer(`\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``);
-      return hold ? hold(request) : answer('native execution is complete');
-    } } as unknown as LLMProvider;
-  const model = { id: 'model', provider: 'native-fixture', registryKey: 'native-fixture:model', displayName: 'Native fixture model', description: 'Synthetic test model',
-    capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false }, contextWindow: 100000, selectable: true, tier: 'standard' } as unknown as ModelDefinition;
-  services.providerRegistry.registerRuntimeProvider({ provider, models: [model], replace: true });
-  // Routing must never select a built-in local proxy or make a live request.
-  const catalog = spyOn(services.providerRegistry, 'listModels').mockReturnValue([model]);
-  services.providerRegistry.setCurrentModel(model.registryKey);
-  const knowledgeStore = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
-  let id = 0;
-  const ledger = createWorkLedger({ projectId: 'project', storage: await knowledgeStore.openWorkLedgerStorage('project'),
-    clock: { now: () => Date.now(), newId: kind => `${kind}-${++id}` } });
-  const tokens = pairingOwner ?? new PairingTokenManager(join(root, 'pairing.json')); const paired = tokens.mint({ name: 'Synthetic fixture' });
-  const scopesGranted = ['read:work-ledger', 'write:fleet'];
-  const authority: NativePairedExecutionAuthority = {
-    current() { const current = tokens.authenticateNative(paired.token); return current ? { ...current, scopes: scopesGranted } : null; },
-    withCurrent(expected, callback) { return tokens.withNativeAuthority(paired.token, expected, assertCurrent => callback(() => ({ ...assertCurrent(), scopes: scopesGranted }))); },
-  };
-  const actor = ledger.authority.issueActor({ projectId: 'project', actorId: authority.current()!.principalId, role: 'coordinator' });
-  const created = await ledger.service.execute({ type: 'create', expectedRevision: 0, requestId: 'create', title: 'Display title', goal, criteria }, actor);
-  if (created.kind !== 'accepted' || created.event.type === 'import_legacy') throw new Error(`Fixture create failed: ${JSON.stringify(created)}`);
-  const claimed = await ledger.service.execute({ type: 'claim', expectedRevision: 1, requestId: 'claim', workId: created.event.workId }, actor);
-  if (claimed.kind !== 'accepted' || claimed.event.type === 'import_legacy') throw new Error('Fixture claim failed');
-  const work = claimed.event.work; const attempt = claimed.event.attempts[0]!;
-  const target = { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision };
-  const scopes = new WorkspaceRegistrationStore({ path: join(root, 'registrations.json'), homeDir: root, daemonStateDir: join(root, '.goodvibes') });
-  await scopes.add(workspace);
-  const options = { runtimeBus, configManager, providerRegistry: services.providerRegistry, projectRoot: workspace,
-    projectId: 'project', sessionId: 'native-fixture', knowledgeStore, nativeScopes: scopes, judgmentPort: port, decisionLog: log,
-    acpHost: { list: () => [] }, permissionManager: services.permissionManager, hookDispatcher: services.hookDispatcher, featureFlags: services.featureFlags,
-    toolDependencies: { ...services, contractHooks: services.contractRunner.hooks(), workflowServices: services.workflow } };
-  const activation = createDaemonNativeWorkExecutionActivation(options);
-  return { root, activation, options, services, target, authority, paired, requests, readings, log, goal, criteria,
-    hold(fn: typeof hold) { hold = fn; },
-    async anotherTarget() {
-      const revision = (await ledger.service.readSnapshot(actor)).revision;
-      const created = await ledger.service.execute({ type: 'create', expectedRevision: revision, requestId: `create-${revision}`, title: 'Another display title', goal, criteria }, actor);
-      if (created.kind !== 'accepted' || created.event.type === 'import_legacy') throw new Error('Second fixture create failed');
-      const claimed = await ledger.service.execute({ type: 'claim', expectedRevision: revision + 1, requestId: `claim-${revision}`, workId: created.event.workId }, actor);
-      if (claimed.kind !== 'accepted' || claimed.event.type === 'import_legacy') throw new Error('Second fixture claim failed');
-      const work = claimed.event.work; const attempt = claimed.event.attempts[0]!;
-      return { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision };
-    },
-    async close() { await activation.close(); await ledger.service.close(); await knowledgeStore.close(); catalog.mockRestore(); installJudgmentPort(previous); services.dispose(); log[Symbol.dispose](); } };
-}
+const fixture = (pairingOwner?: PairingTokenManager) => createNativeWorkFixture(pairingOwner);
 
 test('native activation stays lazy, single-flights its separate manager and retains the real read owner', async () => {
   const discovery = spyOn(ProviderRegistry.prototype, 'refreshLiveModelDiscovery').mockResolvedValue([]);
@@ -459,7 +368,7 @@ test('ordinary, lazy native and ACP ownership share the original cap through nat
     expect(() => ordinary.spawn(input)).toThrow('fleet.maxSize=2'); expect(() => native.spawn(input)).toThrow('fleet.maxSize=2');
     expect(ordinary.list()).toHaveLength(1); expect(native.list()).toHaveLength(1);
     let closed = false; const closing = owner.close().then(() => { closed = true; });
-    await new Promise(resolve => setTimeout(resolve, 0)); expect(closed).toBe(false);
+    await settleTurns(); expect(closed).toBe(false);
     expect(owner.fleetOwnership()).toContainEqual({ id: second.id, active: true });
     expect(ordinaryProbe()).toMatchObject({ active: 2, maxSize: 2 }); expect(() => ordinary.spawn(input)).toThrow('fleet.maxSize=2');
     releases.get(second.id)!(); await closing;
@@ -506,7 +415,7 @@ test('cancel fences a queued foreground admission before awaiting durable cancel
     });
     const started = await execution.start(f.target, f.authority);
     await waitFor(() => phase, 'cancel requested on session-running event');
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await settleTurns();
     expect(entered).toBe(0); expect(ended).toBe(false);
     releaseCancel(); await stopping;
     expect(ended).toBe(true); expect(entered).toBe(0);
@@ -530,7 +439,7 @@ test('cancelled foreground retains the existing owner fleet slot until actual pr
     await waitFor(() => entered, 'foreground entered');
     expect(f.activation.fleetOwnership().filter(record => record.id === started.admission.ownerAgentId && record.active)).toHaveLength(1);
     stopping = execution.cancel(started.admission.key, f.authority, 'Owned occupancy cancellation');
-    await waitFor(() => aborted, 'foreground aborted'); await new Promise(resolve => setTimeout(resolve, 20));
+    await waitFor(() => aborted, 'foreground aborted'); await settleTurns();
     const retained = f.activation.fleetOwnership().some(record => record.id === started.admission.ownerAgentId && record.active);
     f.options.configManager.set('fleet.maxSize', 1);
     const ordinary = new AgentManager({ configManager: f.options.configManager, additionalFleetOwnership: f.activation.fleetOwnership,
@@ -573,7 +482,9 @@ test('cancel authority failure is value-free and propagates only after the foreg
     // Borrowed authority failures cross the public boundary only after draining,
     // as a bounded native error, never the owner's raw message or causal object.
     expect(observed).toBeInstanceOf(NativeWorkExecutionError);
-    expect(observed).toMatchObject({ code: 'unavailable', message: 'Native work execution: unavailable' });
+    expect(observed).toMatchObject({ code: 'unavailable' });
+    expect(observed.message).toStartWith('Native work execution: unavailable. ');
+    expect(observed.message).toContain('retry, or cancel it');
     expect(observed).not.toBe(failure); expect(observed.cause).toBeUndefined();
     expect(String(observed)).not.toContain(failure.message);
   } finally { release(); lock?.mockRestore(); await f.close(); identities.mockRestore(); benchmarks.mockRestore(); }
@@ -647,7 +558,7 @@ test('review: late-association cancellation still drains foreground when authori
       if (native.runner.list({ includeTerminal: true }).some(contract => contract.status === 'cancelled')) tokens.revoke(f.paired.id);
     });
     releaseCancel(); await waitFor(() => aborted, 'late foreground was aborted');
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await settleTurns();
     expect(ended).toBe(false);
     releaseProvider(); expect(await stopping).toMatchObject({ code: 'unsupported-authority' }); expect(ended).toBe(true);
   } finally { unsubscribe?.(); releaseStart(); releaseCancel(); releaseProvider(); await Promise.allSettled([start, stopping]); await f.close(); factory.mockRestore(); identities.mockRestore(); benchmarks.mockRestore(); }
@@ -698,7 +609,7 @@ test('review: ambiguous late-association cancellation still owns foreground clea
     };
     releaseCancel(); await waitFor(() => ended || aborted, 'failed cancel or foreground abort observed');
     fault.restore(); restoreFault = undefined;
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await settleTurns();
     expect(fault.failed()).toBe(true); expect({ ended, aborted }).toEqual({ ended: false, aborted: true });
     releaseProvider(); expect(await stopping).toMatchObject({ code: 'unavailable' }); expect(ended).toBe(true);
   } finally { restoreFault?.(); unsubscribe?.(); releaseStart(); releaseCancel(); releaseProvider(); await Promise.allSettled([start, stopping]); await f.close(); factory.mockRestore(); identities.mockRestore(); benchmarks.mockRestore(); }

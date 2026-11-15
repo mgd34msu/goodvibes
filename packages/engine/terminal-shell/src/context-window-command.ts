@@ -97,8 +97,10 @@ export function handleContextWindowSubcommand(args: readonly string[], ctx: Cont
       output = `Invalid size '${args[0]}'. Use a token count between 1 and ${MAX_CONTEXT_WINDOW_OVERRIDE.toLocaleString()}, e.g. 120000, 200k, 1m, or 'clear'.`;
     } else {
       const was = registry.getKnownContextWindowForModel(model);
-      registry.setModelContextCap(model.registryKey, size);
-      output = `Context window for ${model.displayName} set to ${size.toLocaleString()} tokens (was ${was === null ? 'unknown' : `${was.toLocaleString()} tokens`}). Clear with /context window clear.`;
+      let notSaved: string | undefined;
+      registry.setModelContextCap(model.registryKey, size, (reason) => { notSaved = reason; });
+      output = `Context window for ${model.displayName} set to ${size.toLocaleString()} tokens (was ${was === null ? 'unknown' : `${was.toLocaleString()} tokens`}). Clear with /context window clear.`
+        + (notSaved === undefined ? '' : ` Not saved: ${notSaved}. It applies to this session only.`);
     }
   }
 

@@ -58,10 +58,20 @@ import type { DaemonVerbCaller } from './daemon-verbs.js';
 /** How often the daemon's rows are re-read. A local half is push-driven. */
 export const DEFAULT_FLEET_REFRESH_MS = 15_000;
 
+/**
+ * Consecutive failed polls after which the daemon's last rows are dropped.
+ * One blip keeps them; a daemon that has stopped answering must not go on
+ * showing its agents as running.
+ */
+const MISSED_POLLS_BEFORE_DROP = 3;
+
 /** A daemon that answered, or an honest absence. Never a fabricated empty fleet. */
 export interface DaemonFleetRows {
   readonly nodes: readonly ProcessNode[];
   readonly capturedAt: number;
+  /** True when the daemon capped its answer: `nodes` is part of the fleet, `totalCount` says how large the whole is. */
+  readonly truncated?: boolean;
+  readonly totalCount?: number;
 }
 
 /**
@@ -72,10 +82,20 @@ export interface DaemonFleetRows {
 export function readDaemonFleetRows(payload: unknown, now: () => number = Date.now): DaemonFleetRows | null {
   if (!payload || typeof payload !== 'object') return null;
   const record = payload as Record<string, unknown>;
-  const nodes = Array.isArray(record['nodes']) ? (record['nodes'] as readonly ProcessNode[]) : null;
+  const nodes = Array.isArray(record['nodes'])
+    ? (record['nodes'] as readonly unknown[]).filter((node): node is ProcessNode => (
+      typeof node === 'object' && node !== null && typeof (node as { id?: unknown }).id === 'string'
+    ))
+    : null;
   if (!nodes) return null;
   const capturedAt = typeof record['capturedAt'] === 'number' ? record['capturedAt'] : now();
-  return { nodes, capturedAt };
+  const totalCount = typeof record['totalCount'] === 'number' ? record['totalCount'] : undefined;
+  return {
+    nodes,
+    capturedAt,
+    ...(record['truncated'] === true ? { truncated: true } : {}),
+    ...(totalCount === undefined ? {} : { totalCount }),
+  };
 }
 
 /**
@@ -122,9 +142,10 @@ export interface DaemonFleetRowsPoller {
  *
  * Inert until the first refresh lands: before then, and whenever the daemon
  * cannot answer, `rows()` is null, which is the honest answer, not a degraded
- * one. A daemon that stops answering keeps its LAST known rows rather than
- * dropping them, so a momentary blip does not make half the fleet blink out and
- * back.
+ * one. A daemon that misses a poll keeps its LAST known rows, so a momentary
+ * blip does not make half the fleet blink out and back; after
+ * {@link MISSED_POLLS_BEFORE_DROP} misses in a row, or as soon as no daemon is
+ * configured, the rows are dropped and listeners are told.
  */
 export function createDaemonFleetRowsPoller(options: DaemonFleetRowsPollerOptions): DaemonFleetRowsPoller {
   const log = options.log ?? logger;
@@ -132,26 +153,50 @@ export function createDaemonFleetRowsPoller(options: DaemonFleetRowsPollerOption
   let current: DaemonFleetRows | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let inFlight = false;
+  let missedPolls = 0;
   const listeners = new Set<() => void>();
+  const notify = (): void => {
+    for (const listener of listeners) listener();
+  };
+  const drop = (reason: string): void => {
+    if (current === null) return;
+    current = null;
+    log.debug(`[fleet] dropped the daemon's rows: ${reason}`);
+    notify();
+  };
+  const miss = (): void => {
+    missedPolls += 1;
+    if (missedPolls >= MISSED_POLLS_BEFORE_DROP) drop(`${missedPolls} polls in a row went unanswered`);
+  };
 
   const refresh = async (): Promise<void> => {
     if (inFlight) return;
     const probe = options.verbs.probe();
-    if (!probe.available) return; // no daemon configured: the local view IS the fleet
+    if (!probe.available) {
+      // No daemon configured: the local view IS the fleet, and rows from a
+      // daemon that was adopted earlier describe nothing this surface can see.
+      missedPolls = 0;
+      drop('no daemon is configured');
+      return;
+    }
     inFlight = true;
     try {
       const next = readDaemonFleetRows(await options.verbs.invoke('fleet.snapshot', {}), now);
       if (next) {
+        missedPolls = 0;
         current = next;
-        for (const listener of listeners) listener();
+        notify();
+      } else {
+        miss();
       }
     } catch (error) {
-      // Keep the last known rows. A failed poll is a stale view, which the
-      // capturedAt on the snapshot already discloses; dropping them would make
-      // the daemon's half of the fleet disappear on one bad request.
-      log.debug("[fleet] the daemon's rows could not be refreshed; keeping the last set", {
+      // Keep the last known rows for a short grace. A failed poll is a stale
+      // view, which the capturedAt on the snapshot discloses; dropping them on
+      // one bad request would make the daemon's half of the fleet blink out.
+      log.debug("[fleet] the daemon's rows could not be refreshed; keeping the last set for now", {
         error: summarizeError(error),
       });
+      miss();
     } finally {
       inFlight = false;
     }
@@ -192,7 +237,7 @@ export function createFleetUnionRowsPoller(options: DaemonFleetRowsPollerOptions
     mergedRows(local) {
       const remote = poller.rows();
       if (!remote || remote.nodes.length === 0) return null;
-      return { nodes: mergeFleetNodes(local, remote.nodes), capturedAt: remote.capturedAt };
+      return { ...remote, nodes: mergeFleetNodes(local, remote.nodes) };
     },
   };
 }

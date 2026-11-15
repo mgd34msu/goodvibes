@@ -174,3 +174,17 @@ test('malformed endpoint errors never include private URL material', async () =>
   expect((failure as Error).message).toBe('Settings owner precondition unavailable; fresh capture and admission required.');
   expect(JSON.stringify(failure)).not.toContain(marker); expect(calls).toBe(0);
 });
+test('an owner refusal before any effect is reported as refused, a lost answer as unknown', async () => {
+  const f = fixture();
+  const fetchImpl = (async (_url: unknown, init?: RequestInit) => f.post(JSON.parse(String(init?.body)))) as typeof fetch;
+  const endpoint = { baseUrl: 'http://synthetic.invalid', source: 'test' };
+  const stale = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, { fetchImpl });
+  f.mutate();
+  expect(await applyRemoteSettingsPrecondition(stale)).toEqual({ status: 'unknown', completedPaths: [], refused: true });
+  expect(f.effects()).toBe(0);
+  let calls = 0;
+  const lost = await captureRemoteSettingsPrecondition(endpoint, { operation: 'set', key: 'controlPlane.port', value: 42 }, {
+    fetchImpl: (async (url: unknown, init?: RequestInit) => ++calls === 1 ? fetchImpl(url as string, init) : new Response('', { status: 503 })) as typeof fetch,
+  });
+  expect(await applyRemoteSettingsPrecondition(lost)).toEqual({ status: 'unknown', completedPaths: [] });
+});

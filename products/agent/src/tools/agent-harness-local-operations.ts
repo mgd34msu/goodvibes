@@ -62,10 +62,33 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function isScalarField(entry: unknown): entry is string | number | boolean {
+  return typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean';
+}
+
 function readFieldMap(value: unknown): Readonly<Record<string, string>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, typeof entry === 'string' ? entry : String(entry)]));
+  // An object or array has no faithful text form; String() would store "[object Object]" in a record.
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => isScalarField(entry)).map(([key, entry]) => [key, String(entry)]));
 }
+
+function nonScalarFieldNames(value: unknown): readonly string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+  return Object.entries(value).filter(([, entry]) => !isScalarField(entry)).map(([key]) => key);
+}
+
+function invalidFieldsResult(fields: unknown): { readonly success: false; readonly error: string } | null {
+  const names = nonScalarFieldNames(fields);
+  return names.length > 0 ? error(`Field values must be text, numbers or booleans. Not accepted: ${names.join(', ')}. Resend them as plain text.`) : null;
+}
+
+const NOTE_PROMOTION_PREFIX = 'agent-harness-note-promotion';
+
+function isNotePromotion(operation: AgentWorkspaceLocalOperation): boolean {
+  return operation.startsWith('note-promote-');
+}
+
+let nestedCallSequence = 0;
 
 function describeEditor(editor: AgentWorkspaceLocalEditor): Record<string, unknown> {
   return {
@@ -167,18 +190,44 @@ function editorForOperation(context: AgentHarnessLocalOperationDeps['commandCont
   return null;
 }
 
+/** The record an earlier promotion of this note already created in the target domain, if any. */
+function existingNotePromotion(context: AgentHarnessLocalOperationDeps['commandContext'], operation: AgentWorkspaceLocalOperation, noteId: string, editor: AgentWorkspaceLocalEditor, fields: Readonly<Record<string, string>>): { readonly domain: string; readonly id: string } | null {
+  const shellPaths = context.workspace.shellPaths;
+  const marker = `${NOTE_PROMOTION_PREFIX}:${noteId}`;
+  if (operation === 'note-promote-persona' && shellPaths) {
+    const found = AgentPersonaRegistry.fromShellPaths(shellPaths).list().find((record) => record.provenance === marker);
+    return found ? { domain: 'persona', id: found.id } : null;
+  }
+  if (operation === 'note-promote-skill' && shellPaths) {
+    const found = AgentSkillRegistry.fromShellPaths(shellPaths).list().find((record) => record.provenance === marker);
+    return found ? { domain: 'skill', id: found.id } : null;
+  }
+  if (operation === 'note-promote-routine' && shellPaths) {
+    const found = AgentRoutineRegistry.fromShellPaths(shellPaths).list().find((record) => record.provenance === marker);
+    return found ? { domain: 'routine', id: found.id } : null;
+  }
+  if (operation === 'note-promote-memory') {
+    const read = fieldReader(editor, fields);
+    const summary = read('summary').trim().toLowerCase(), detail = read('detail').trim();
+    const found = context.clients?.agentKnowledgeApi?.memory?.getAll().find((record) => record.summary.trim().toLowerCase() === summary && (record.detail ?? '').trim() === detail);
+    return found ? { domain: 'memory', id: found.id } : null;
+  }
+  return null;
+}
+
 type RegistryArgsResult =
   | { readonly success: true; readonly args: Record<string, unknown> }
   | { readonly success: false; readonly error: string };
 
-function localRegistryArgsFromEditor(editor: AgentWorkspaceLocalEditor, fields: Readonly<Record<string, string>>, id?: string): RegistryArgsResult {
+function localRegistryArgsFromEditor(editor: AgentWorkspaceLocalEditor, fields: Readonly<Record<string, string>>, id?: string, sourceNoteId?: string): RegistryArgsResult {
   const read = fieldReader(editor, fields);
   const supplied = (field: string) => editor.mode !== 'update' || Object.hasOwn(fields, field);
   const args: Record<string, unknown> = {
     domain: editor.kind,
     action: editor.mode === 'update' ? 'update' : 'create',
     ...(id ? { id } : {}),
-    provenance: editor.recordId ? 'agent-harness-local-operation' : 'agent-harness-note-promotion',
+    // The note id in the promotion marker is what lets a repeated promotion be recognised and refused.
+    provenance: editor.recordId ? 'agent-harness-local-operation' : sourceNoteId ? `${NOTE_PROMOTION_PREFIX}:${sourceNoteId}` : NOTE_PROMOTION_PREFIX,
   };
   const textFields = editor.kind === 'memory' ? ['cls', 'scope', 'summary', 'detail']
     : editor.kind === 'note' ? ['title', 'body', 'sourceUrl']
@@ -238,7 +287,7 @@ function localRegistryArgsForTarget(target: RegistryTarget, args: AgentHarnessLo
 
 async function executeTool(toolRegistry: ToolRegistry, name: string, toolArgs: Record<string, unknown>, options: Parameters<Tool['execute']>[1]): Promise<HarnessResult> {
   if (!toolRegistry.has(name)) return output({ status: 'model_tool_required', modelExecution: { tool: name, args: toolArgs } });
-  const result = await toolRegistry.executeNested(`agent-harness-${name}-${Date.now()}`, name, toolArgs, options) as { readonly success: boolean; readonly output?: string; readonly error?: string };
+  const result = await toolRegistry.executeNested(`agent-harness-${name}-${Date.now()}-${++nestedCallSequence}`, name, toolArgs, options) as { readonly success: boolean; readonly output?: string; readonly error?: string };
   if (!result.success) return error(result.error ?? `${name} failed.`);
   return output({ status: 'executed_model_tool', tool: name, output: result.output ?? '' });
 }
@@ -269,6 +318,8 @@ export async function runLocalWorkspaceEditorAction(
   }
   const confirmationError = requireConfirmedAction(args, options, 'Workspace local registry editor action');
   if (confirmationError) return error(confirmationError);
+  const invalidFields = invalidFieldsResult(args.fields);
+  if (invalidFields) return invalidFields;
   if (
     editor.kind !== 'memory'
     && editor.kind !== 'note'
@@ -302,17 +353,31 @@ export async function runLocalWorkspaceAction(
   if (!operation) return output({ status: 'local_registry_action', action: action.id, modelExecution: describeLocalWorkspaceModelExecution(action) });
   const target = registryTarget(operation);
   const recordId = readRecordId(args);
-  if (target?.requiresRecordId && !recordId) return output({ status: 'needs_record_id', action: action.id, modelExecution: describeLocalWorkspaceModelExecution(action) });
+  if ((target?.requiresRecordId || isNotePromotion(operation)) && !recordId) return output({ status: 'needs_record_id', action: action.id, modelExecution: describeLocalWorkspaceModelExecution(action) });
   const editor = recordId ? editorForOperation(deps.commandContext, operation, recordId) : null;
+  if (!editor && recordId && isNotePromotion(operation)) {
+    // Without an editor nothing can be built, so say why instead of returning a generic hand-off.
+    const shellPaths = deps.commandContext.workspace.shellPaths;
+    const noteExists = shellPaths ? AgentNoteRegistry.fromShellPaths(shellPaths).get(recordId) !== null : false;
+    const noSourceUrl = operation === 'note-promote-knowledge-url' && noteExists;
+    return output({ status: noSourceUrl ? 'note_has_no_source_url' : 'record_not_found', action: action.id, recordId, domain: 'note',
+      reason: noSourceUrl ? 'The note has no source URL to ingest.' : 'No note with that id was found.' });
+  }
   if (editor && !hasExecutionFields(args)) return output({ status: 'editor', action: action.id, editor: describeEditor(editor), modelExecution: describeLocalWorkspaceModelExecution(action) });
   const confirmationError = requireConfirmedAction(args, options, 'Workspace local registry action');
   if (confirmationError) return error(confirmationError);
+  const invalidFields = invalidFieldsResult(args.fields);
+  if (invalidFields) return invalidFields;
   if (editor) {
     const fields = readFieldMap(args.fields);
     const missing = missingRequiredFields(editor, fields);
     if (missing.length > 0) return output({ status: 'missing_required_fields', missing, action: action.id, editor: describeEditor(editor) });
     if (editor.kind === 'knowledge-url') return executeTool(deps.toolRegistry, 'agent_knowledge_ingest', { sourceKind: 'url', url: fieldReader(editor, fields)('url'), tags: splitList(fieldReader(editor, fields)('tags')), folderPath: fieldReader(editor, fields)('folder'), ...(readString(args.explicitUserRequest) ? { explicitUserRequest: readString(args.explicitUserRequest) } : {}) }, options);
-    const built = localRegistryArgsFromEditor(editor, fields, recordId);
+    if (isNotePromotion(operation)) {
+      const existing = existingNotePromotion(deps.commandContext, operation, recordId, editor, fields);
+      if (existing) return output({ status: 'already_promoted', action: action.id, noteId: recordId, existing, note: 'This note was already promoted into that domain, so nothing new was created. Edit the existing record instead.' });
+    }
+    const built = localRegistryArgsFromEditor(editor, fields, isNotePromotion(operation) ? undefined : recordId, isNotePromotion(operation) ? recordId : undefined);
     if (!built.success) return built;
     return executeTool(deps.toolRegistry, 'agent_local_registry', built.args, options);
   }

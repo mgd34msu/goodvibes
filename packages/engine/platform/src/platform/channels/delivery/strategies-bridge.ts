@@ -4,18 +4,19 @@ import { ServiceRegistry } from '../../config/service-registry.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ChannelDeliveryStrategy } from './types.js';
 import {
-  appendAttachmentSummary,
   deliveryFetch,
   extractResponseId,
   firstNonEmpty,
+  fitForSurface,
   normalizeBaseUrl,
   postBridgePayload,
   requireOkResponse,
   resolveAttachments,
+  resolveBridgeUrl,
   resolveDeliveryCredential,
   resolveChannelDeliverySurfaceKind,
+  stableSendId,
   success,
-  trimForSurface,
 } from './shared.js';
 
 export function createSignalDeliveryStrategy(
@@ -33,12 +34,15 @@ export function createSignalDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
-      const bridgeUrl = firstNonEmpty(
-        request.target.address?.startsWith('https://') ? request.target.address : undefined,
-        String(configManager.get('surfaces.signal.bridgeUrl') ?? ''),
-        serviceRegistry.get('signal')?.baseUrl,
-        process.env.SIGNAL_BRIDGE_URL,
-      );
+      const bridgeUrl = resolveBridgeUrl({
+        label: 'Signal',
+        address: request.target.address,
+        configured: [
+          String(configManager.get('surfaces.signal.bridgeUrl') ?? ''),
+          serviceRegistry.get('signal')?.baseUrl,
+          process.env.SIGNAL_BRIDGE_URL,
+        ],
+      });
       const recipient = firstNonEmpty(
         request.target.address?.startsWith('https://') ? undefined : request.target.address,
         request.binding?.channelId,
@@ -47,6 +51,7 @@ export function createSignalDeliveryStrategy(
       );
       if (!bridgeUrl) throw new Error('Missing Signal bridge URL');
       if (!recipient) throw new Error('Missing Signal recipient');
+      const fitted = fitForSurface(request.body, attachments, 8_000);
       const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
         serviceName: 'signal',
         serviceField: 'primary',
@@ -57,7 +62,7 @@ export function createSignalDeliveryStrategy(
         surface: 'signal',
         account: firstNonEmpty(String(configManager.get('surfaces.signal.account') ?? '')),
         recipient,
-        text: trimForSurface(appendAttachmentSummary(request.body, attachments), 8_000),
+        text: fitted.text,
         title: request.title,
         jobId: request.jobId,
         runId: request.runId,
@@ -69,7 +74,7 @@ export function createSignalDeliveryStrategy(
         lifetime: request,
         token,
       });
-      return success(responseId ?? recipient);
+      return success(responseId ?? recipient, fitted);
     },
   };
 }
@@ -97,24 +102,27 @@ export function createWhatsAppDeliveryStrategy(
         String(configManager.get('surfaces.whatsapp.defaultRecipient') ?? ''),
       );
       if (!recipient) throw new Error('Missing WhatsApp recipient');
+      const fitted = fitForSurface(request.body, attachments, 4_096);
       if (provider === 'bridge') {
-        const bridgeUrl = firstNonEmpty(
-          request.target.address?.startsWith('https://') ? request.target.address : undefined,
-          serviceRegistry.get('whatsapp')?.baseUrl,
-          process.env.WHATSAPP_BRIDGE_URL,
-        );
+        const bridgeUrl = resolveBridgeUrl({
+          label: 'WhatsApp',
+          address: request.target.address,
+          configured: [serviceRegistry.get('whatsapp')?.baseUrl, process.env.WHATSAPP_BRIDGE_URL],
+        });
         if (!bridgeUrl) throw new Error('Missing WhatsApp bridge URL');
         const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
           serviceName: 'whatsapp',
           serviceField: 'primary',
           configKey: 'surfaces.whatsapp.accessToken',
-          environmentValue: process.env.WHATSAPP_ACCESS_TOKEN,
+          // The bridge's own token first; the Meta access token is only the
+          // fallback older bridge setups relied on.
+          environmentValue: firstNonEmpty(process.env.WHATSAPP_BRIDGE_TOKEN, process.env.WHATSAPP_ACCESS_TOKEN),
         });
         const responseId = await postBridgePayload(bridgeUrl, {
           surface: 'whatsapp',
           provider,
           recipient,
-          text: trimForSurface(appendAttachmentSummary(request.body, attachments), 4_096),
+          text: fitted.text,
           title: request.title,
           jobId: request.jobId,
           runId: request.runId,
@@ -125,7 +133,7 @@ export function createWhatsAppDeliveryStrategy(
           lifetime: request,
           token,
         });
-        return success(responseId ?? recipient);
+        return success(responseId ?? recipient, fitted);
       }
 
       const phoneNumberId = firstNonEmpty(String(configManager.get('surfaces.whatsapp.phoneNumberId') ?? ''));
@@ -151,12 +159,12 @@ export function createWhatsAppDeliveryStrategy(
           type: 'text',
           text: {
             preview_url: true,
-            body: trimForSurface(appendAttachmentSummary(request.body, attachments), 4_096),
+            body: fitted.text,
           },
         }),
       });
       const payload = await requireOkResponse('WhatsApp delivery failed', response);
-      return success(extractResponseId(payload) ?? recipient);
+      return success(extractResponseId(payload) ?? recipient, fitted);
     },
   };
 }
@@ -196,15 +204,19 @@ export function createTelephonyDeliveryStrategy(
         String(configManager.get('surfaces.telephony.defaultRecipient') ?? ''),
       );
       if (!recipient) throw new Error('Missing telephony recipient');
-      const text = trimForSurface(appendAttachmentSummary(request.body, attachments), mode === 'voice' ? 1_400 : 1_600);
+      const fitted = fitForSurface(request.body, attachments, mode === 'voice' ? 1_400 : 1_600);
+      const text = fitted.text;
 
       if (provider === 'bridge' || mode === 'bridge') {
-        const bridgeUrl = firstNonEmpty(
-          targetAddressIsBridgeUrl ? targetAddress : undefined,
-          String(configManager.get('surfaces.telephony.bridgeUrl') ?? ''),
-          serviceRegistry.get('telephony')?.baseUrl,
-          process.env.TELEPHONY_BRIDGE_URL,
-        );
+        const bridgeUrl = resolveBridgeUrl({
+          label: 'Telephony',
+          address: targetAddress,
+          configured: [
+            String(configManager.get('surfaces.telephony.bridgeUrl') ?? ''),
+            serviceRegistry.get('telephony')?.baseUrl,
+            process.env.TELEPHONY_BRIDGE_URL,
+          ],
+        });
         if (!bridgeUrl) throw new Error('Missing telephony bridge URL');
         const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
           serviceName: 'telephony', serviceField: 'primary', configKey: 'surfaces.telephony.token',
@@ -227,7 +239,7 @@ export function createTelephonyDeliveryStrategy(
           lifetime: request,
           token,
         });
-        return success(responseId ?? recipient);
+        return success(responseId ?? recipient, fitted);
       }
 
       const accountSid = firstNonEmpty(String(configManager.get('surfaces.telephony.accountSid') ?? ''), process.env.TWILIO_ACCOUNT_SID);
@@ -260,7 +272,7 @@ export function createTelephonyDeliveryStrategy(
         body: body.toString(),
       });
       const payload = await requireOkResponse(`Telephony ${mode === 'voice' ? 'call' : 'message'} delivery failed`, response);
-      return success(extractResponseId(payload) ?? recipient);
+      return success(extractResponseId(payload) ?? recipient, fitted);
     },
   };
 }
@@ -280,12 +292,15 @@ export function createIMessageDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager);
-      const bridgeUrl = firstNonEmpty(
-        request.target.address?.startsWith('https://') ? request.target.address : undefined,
-        String(configManager.get('surfaces.imessage.bridgeUrl') ?? ''),
-        serviceRegistry.get('imessage')?.baseUrl,
-        process.env.IMESSAGE_BRIDGE_URL,
-      );
+      const bridgeUrl = resolveBridgeUrl({
+        label: 'iMessage',
+        address: request.target.address,
+        configured: [
+          String(configManager.get('surfaces.imessage.bridgeUrl') ?? ''),
+          serviceRegistry.get('imessage')?.baseUrl,
+          process.env.IMESSAGE_BRIDGE_URL,
+        ],
+      });
       const chatId = firstNonEmpty(
         request.target.address?.startsWith('https://') ? undefined : request.target.address,
         request.binding?.channelId,
@@ -294,6 +309,7 @@ export function createIMessageDeliveryStrategy(
       );
       if (!bridgeUrl) throw new Error('Missing iMessage bridge URL');
       if (!chatId) throw new Error('Missing iMessage chat id');
+      const fitted = fitForSurface(request.body, attachments, 8_000);
       const token = await resolveDeliveryCredential(configManager, serviceRegistry, secretsManager, {
         serviceName: 'imessage',
         serviceField: 'primary',
@@ -304,7 +320,7 @@ export function createIMessageDeliveryStrategy(
         surface: 'imessage',
         account: firstNonEmpty(String(configManager.get('surfaces.imessage.account') ?? '')),
         chatId,
-        text: trimForSurface(appendAttachmentSummary(request.body, attachments), 8_000),
+        text: fitted.text,
         title: request.title,
         jobId: request.jobId,
         runId: request.runId,
@@ -316,7 +332,7 @@ export function createIMessageDeliveryStrategy(
         lifetime: request,
         token,
       });
-      return success(responseId ?? chatId);
+      return success(responseId ?? chatId, fitted);
     },
   };
 }
@@ -335,7 +351,7 @@ export function createBlueBubblesDeliveryStrategy(
       return resolveChannelDeliverySurfaceKind(request.target) === 'bluebubbles';
     },
     async deliver(request) {
-      const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
+      const attachments = await resolveAttachments(request, artifactStore, configManager);
       const serverUrl = firstNonEmpty(
         String(configManager.get('surfaces.bluebubbles.serverUrl') ?? ''),
         serviceRegistry.get('bluebubbles')?.baseUrl,
@@ -357,17 +373,18 @@ export function createBlueBubblesDeliveryStrategy(
       if (!serverUrl) throw new Error('Missing BlueBubbles server URL');
       if (!password) throw new Error('Missing BlueBubbles password');
       if (!chatGuid) throw new Error('Missing BlueBubbles chat guid');
+      const fitted = fitForSurface(request.body, attachments, 8_000);
       const response = await deliveryFetch(request, `${normalizeBaseUrl(serverUrl)}/api/v1/message/text?password=${encodeURIComponent(password)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chatGuid,
-          tempGuid: crypto.randomUUID(),
-          message: trimForSurface(appendAttachmentSummary(request.body, attachments), 8_000),
+          tempGuid: stableSendId(request.runId, chatGuid, fitted.text),
+          message: fitted.text,
         }),
       }, 'opaque-url');
       const payload = await requireOkResponse('BlueBubbles delivery failed', response);
-      return success(extractResponseId(payload) ?? chatGuid);
+      return success(extractResponseId(payload) ?? chatGuid, fitted);
     },
   };
 }

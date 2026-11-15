@@ -169,7 +169,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
     title: 'List Retained Device Captures',
     description: 'The camera and screen captures still inside their retention window, newest first, with when each was captured, when it will be deleted, and the reason the request stated. Expired captures are never listed, retention is enforced by the store, not by this verb filtering them out of a longer list.',
     category: 'runtime',
-    scopes: ['read:remote'],
+    scopes: ['write:remote'],
     http: { method: 'GET', path: '/api/devices/artifacts' },
     inputSchema: objectSchema({ nodeId: STRING_SCHEMA, limit: NUMBER_SCHEMA }, []),
     outputSchema: objectSchema({
@@ -183,7 +183,7 @@ export const builtinGatewayDeviceMethodDescriptors: readonly GatewayMethodDescri
     title: 'Read a Retained Device Capture',
     description: 'Return one retained capture\'s bytes, base64-encoded, for a caller that is not running on the daemon host and so cannot open the file itself. The store re-hashes the bytes against the digest recorded when the capture was retained and refuses to serve a mismatch, so a torn or half-written file is never handed back as if it were the picture that was taken. A capture that is gone, expired, swept, missing, or corrupted, is an honest 404 naming which of those it was.',
     category: 'runtime',
-    scopes: ['read:remote'],
+    scopes: ['write:remote'],
     http: { method: 'GET', path: '/api/devices/artifacts/{artifactId}' },
     inputSchema: objectSchema({ artifactId: STRING_SCHEMA }, ['artifactId']),
     outputSchema: objectSchema({

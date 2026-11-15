@@ -1,6 +1,9 @@
 import { toJSONSchema, type z } from 'zod/v4';
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, nativeHostedTurnLookupSchema, nativeHostedSessionRequestSchema, nativeHostedSessionLookupSchema } from '../hosted-sessions/native-turn-wire.js';
 import { methodDescriptor, type GatewayMethodDescriptor } from './method-catalog-shared.js';
+import { WORK_LEDGER_WRITE_SCOPE } from './method-catalog-native-work-submission.js';
+/** The one scope list both the descriptor advertises and the host enforces. */
+export const NATIVE_HOSTED_TURN_SCOPES = ['read:work-ledger', WORK_LEDGER_WRITE_SCOPE, 'write:sessions'] as const;
 const json = (schema: z.ZodType): Record<string, unknown> => toJSONSchema(schema, {
   override({ jsonSchema }) { if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; } },
 });
@@ -9,7 +12,7 @@ export const builtinGatewayNativeHostedTurnMethodDescriptors: readonly GatewayMe
   description: operation === 'start' || operation === 'startAgent' ? `Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the ${operation === 'startAgent' ? 'Agent' : 'WebUI'} settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.`
     : operation === 'status' ? 'Read native hosted dispatch status. Does not admit, claim, retry or execute.'
     : 'Persist cancellation of the exact native hosted dispatch and drain its owned turn. Cancellation does not undo effects already performed.',
-  access: 'admin', scopes: ['read:work-ledger', 'write:work-ledger', 'write:sessions'], metadata: { requiresFreshOperatorAuth: true },
+  access: 'admin', scopes: [...NATIVE_HOSTED_TURN_SCOPES], metadata: { requiresFreshOperatorAuth: true },
   http: { method: 'POST', path: `/api/work-ledger/turn/${operation}` },
   inputSchema: json(operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema), outputSchema: json(nativeHostedTurnLookupSchema),
 })), methodDescriptor({

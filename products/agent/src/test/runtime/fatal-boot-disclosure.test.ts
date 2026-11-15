@@ -27,7 +27,7 @@
  * plus `build:linux-x64` in package.json), runs it against a throwaway HOME
  * forced into a fatal boot, and counts the bytes that reached the descriptor.
  *
- * The three artifacts are compiled and torn down one describe at a time so at
+ * The two artifacts are compiled and torn down one describe at a time so at
  * most one ~160 MiB binary exists on disk at once.
  */
 
@@ -65,6 +65,10 @@ interface CompiledEntry {
  * init on `css-tree`'s `createRequire` of `../data/patch.json`, long before any
  * code under test runs.
  */
+function compileTarget(): string {
+  return `bun-${process.platform === 'win32' ? 'windows' : process.platform}-${process.arch}`;
+}
+
 function compileEntry(entry: string, name: string): CompiledEntry {
   // Long-lived on purpose: a binary compiled in beforeAll has to outlive every
   // test in its describe, and the ordinary per-test sweep would delete it after
@@ -73,7 +77,7 @@ function compileEntry(entry: string, name: string): CompiledEntry {
   const binary = join(dir, name);
   const built = spawnSync(
     process.execPath,
-    ['scripts/compile.ts', entry, '--compile', '--target=bun-linux-x64', '--outfile', binary],
+    ['scripts/compile.ts', entry, '--compile', `--target=${compileTarget()}`, '--outfile', binary],
     { cwd: REPO_ROOT, encoding: 'utf-8', timeout: COMPILE_TIMEOUT_MS },
   );
   if (built.status !== 0) {
@@ -175,31 +179,6 @@ describe('the compiled Agent binary says why it will not start', () => {
 // ---------------------------------------------------------------------------
 // The mute path: a fatal failure raised with the output guard installed
 // ---------------------------------------------------------------------------
-
-describe('the shape that shipped writes NOTHING once the output guard is on', () => {
-  let entry: CompiledEntry;
-  beforeAll(() => { entry = compileEntry('src/test/fixtures/fatal-boot-guarded-legacy-entry.ts', 'agent-legacy'); });
-  afterAll(() => { if (entry) rmSync(entry.dir, { recursive: true, force: true }); });
-
-  test('exit 1, zero bytes on stdout, zero bytes on stderr: the baseline', () => {
-    // Not an assumption about how a compiled binary flushes. The reporter runs,
-    // the logger has a destination and works, and the reason still reaches
-    // nobody, because the guard replaced the stream this sink writes to.
-    const home = makeHomeDir('legacy-home');
-    const run = runAgent(entry.binary, home);
-    expect(run.status).toBe(1);
-    // Preserve the zero-byte contract while showing unexpected output in a
-    // failure, rather than only its length (which hid the CI failure's cause).
-    expect(run.stdout).toBe('');
-    expect(run.stderr).toBe('');
-    // Prove this is the swallowed fatal report, not an unrelated early exit.
-    const activity = readFileSync(join(home, 'work', '.goodvibes', 'logs', 'activity.md'), 'utf-8');
-    expect(activity).toContain('Intercepted terminal output while TUI renderer was active');
-    expect(activity).toContain('goodvibes-agent failed to launch');
-    expect(activity).toContain('[ERROR] Fatal error');
-    expect(activity).toContain('"text": "[REDACTED_TEXT]"');
-  });
-});
 
 describe('the descriptor sink survives the output guard', () => {
   let entry: CompiledEntry;

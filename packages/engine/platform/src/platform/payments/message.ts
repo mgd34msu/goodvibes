@@ -26,6 +26,7 @@
  */
 import { isPlainHostname, sanitizeNoticeField, sanitizeOwnerNoticeField } from '../security/notice-text.js';
 import type { PoolSnapshot } from './budget.js';
+import { minorUnitExponent } from './money-parsing.js';
 import type {
   CurrencyCode,
   MinorUnits,
@@ -86,16 +87,6 @@ export interface PurchaseFacts {
   readonly destination?: string | null | undefined;
 }
 
-/** Minor units per major unit. Three-decimal currencies are handled explicitly. */
-const THREE_DECIMAL = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
-const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'XAF', 'XOF', 'XPF']);
-
-function exponentFor(currency: string): number {
-  if (ZERO_DECIMAL.has(currency)) return 0;
-  if (THREE_DECIMAL.has(currency)) return 3;
-  return 2;
-}
-
 /**
  * Render money from integer minor units.
  *
@@ -108,7 +99,7 @@ export function formatMinorUnits(amount: MinorUnits, currency: CurrencyCode): st
   if (!Number.isSafeInteger(amount) || amount < 0) {
     throw new RangeError(`Refusing to render a non-integer or negative amount: ${String(amount)}`);
   }
-  const exponent = exponentFor(currency);
+  const exponent = minorUnitExponent(currency);
   if (exponent === 0) return `${currency} ${amount.toLocaleString('en-US')}`;
   const divisor = 10 ** exponent;
   const major = Math.floor(amount / divisor);
@@ -338,7 +329,8 @@ export function renderPurchaseReport(input: {
  * number to a message the owner was going to get anyway.
  */
 export function renderConfirmationReport(input: {
-  readonly facts: PurchaseFacts;
+  /** Only what the report prints; a stored purchase row carries all four. */
+  readonly facts: Pick<PurchaseFacts, 'item' | 'totalMinorUnits' | 'currency' | 'cardLast4'>;
   readonly confirmation: {
     readonly orderNumber: string | null;
     readonly shipDate: string | null;

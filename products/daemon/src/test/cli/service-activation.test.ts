@@ -176,7 +176,9 @@ test('migration retirement after stopping the old unit preserves its definition 
   expect(existsSync(f.unit)).toBe(true); expect(readFileSync(f.legacy, 'utf8')).toBe('synthetic legacy unit');
   expect(f.calls.some(call => call.args.includes('stop') && call.args.includes('goodvibes-daemon.service'))).toBe(true);
   expect(f.calls.some(call => call.args.includes('disable') && call.args.includes('goodvibes-daemon.service'))).toBe(false);
-  expect(f.calls.some(call => call.args.includes('daemon-reload'))).toBe(false);
+  // The new unit's own install reloads systemd before the old unit is stopped; nothing after the stop may.
+  const stopIndex = f.calls.findIndex(call => call.args.includes('stop') && call.args.includes('goodvibes-daemon.service'));
+  expect(f.calls.slice(stopIndex + 1).some(call => call.args.includes('daemon-reload'))).toBe(false);
 });
 
 test('native screening/runtime composition remains mandatory even with a valid executable resolver', async () => {

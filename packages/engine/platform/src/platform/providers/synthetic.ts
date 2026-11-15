@@ -1,4 +1,4 @@
-import type { LLMProvider, ChatRequest, ChatResponse, ProviderModelSource } from './interface.js';
+import type { LLMProvider, ChatRequest, ChatResponse, ProviderModelSource, StreamDelta } from './interface.js';
 import { ProviderError, isBillingOrCreditError, isRateLimitOrQuotaError, readRetryWait } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import type { BenchmarkEntry } from './model-benchmarks.js';
@@ -44,6 +44,12 @@ function hasKey(backend: SyntheticBackend): boolean {
     const val = process.env[v]!;
     return typeof val === 'string' && val.length > 0;
   });
+}
+
+/** True when the call ended because the caller cancelled it. */
+function isAbort(err: unknown, signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted) return true;
+  return err instanceof Error && err.name === 'AbortError';
 }
 
 export type SyntheticTier = 'free' | 'paid' | 'subscription';
@@ -207,6 +213,13 @@ function resolveNextBestFree(
 
 // --- Default cooldown ---
 const DEFAULT_COOLDOWN_MS = 60_000;
+/** A provider-stated wait never benches a backend longer than this. */
+const MAX_COOLDOWN_MS = 3_600_000;
+
+/** The cooldown for a stated wait: the default when none, never above the ceiling. */
+export function boundedCooldownMs(waitMs: number | undefined): number {
+  return Math.min(waitMs && waitMs > 0 ? waitMs : DEFAULT_COOLDOWN_MS, MAX_COOLDOWN_MS);
+}
 
 /** Short cooldown applied to a backend that returns a transient/server error (5xx, network, timeout). */
 const TRANSIENT_COOLDOWN_MS = 5_000;
@@ -258,6 +271,10 @@ export class SyntheticProvider implements LLMProvider {
   private cooldowns = new Map<string, number[]>();
   // Track active backend index per resolved model ID
   private activeBackend = new Map<string, number>();
+  // Parallel to `cooldowns`: the auth/permission/model-missing error behind a
+  // backend's cooldown. Waiting out such a cooldown cannot help, so it is
+  // never auto-waited for and its error is reported when every backend fails.
+  private clientFailures = new Map<string, Array<ProviderError | undefined>>();
   private readonly resolveProvider: (providerName: string) => LLMProvider;
 
   constructor(options: {
@@ -328,6 +345,12 @@ export class SyntheticProvider implements LLMProvider {
     if (cooldownArr.length !== backends.length) {
       cooldownArr = new Array(backends.length).fill(0);
       this.cooldowns.set(syntheticId, cooldownArr);
+      this.clientFailures.delete(syntheticId);
+    }
+    let failureArr = this.clientFailures.get(syntheticId);
+    if (!failureArr || failureArr.length !== backends.length) {
+      failureArr = new Array<ProviderError | undefined>(backends.length).fill(undefined);
+      this.clientFailures.set(syntheticId, failureArr);
     }
 
     // Reset to preferred backend if its cooldown expired
@@ -345,9 +368,15 @@ export class SyntheticProvider implements LLMProvider {
       const backend = backends[idx]!;
 
       // Skip if still in cooldown
-      if (cooldownArr[idx]! > now) {
-        const remaining = cooldownArr[idx]! - now;
-        if (remaining < shortestCooldown) shortestCooldown = remaining;
+      const loopNow = Date.now();
+      if (cooldownArr[idx]! > loopNow) {
+        const clientFailure = failureArr[idx];
+        if (clientFailure) {
+          errors.push({ backend, error: clientFailure });
+        } else {
+          const remaining = cooldownArr[idx]! - loopNow;
+          if (remaining < shortestCooldown) shortestCooldown = remaining;
+        }
         continue;
       }
 
@@ -360,23 +389,31 @@ export class SyntheticProvider implements LLMProvider {
         continue;
       }
 
-      // Attempt the call
-      // Note: if onDelta is set and a rate limit occurs mid-stream, partial content
-      // from this backend will already have been delivered to the caller. The next
-      // backend starts fresh, which may produce garbled output. In practice, rate
-      // limits reject before streaming begins (at the HTTP level), so this is
-      // unlikely to trigger.
+      // Attempt the call. Once a backend has delivered any delta the caller
+      // holds that text, so a later backend would append a second answer to it:
+      // from that point the failure is surfaced instead of rotated past.
+      let delivered = false;
       try {
         const response = await provider.chat({
           ...params,
           model: backend.modelId,
+          ...(params.onDelta
+            ? { onDelta: (delta: StreamDelta) => { delivered = true; params.onDelta!(delta); } }
+            : {}),
         });
 
         // Success, update active backend
         this.activeBackend.set(syntheticId, idx);
+        failureArr[idx] = undefined;
         logger.info(`[Synthetic] ${syntheticId} served by ${backend.providerName} (${backend.modelId})`);
         return response;
       } catch (err) {
+        // A cancel is not a backend fault: no cooldown, no rotation.
+        if (isAbort(err, params.signal)) throw err;
+        if (delivered) {
+          logger.warn(`[Synthetic] ${backend.providerName} failed mid-stream for ${syntheticId}; not rotating after partial output`, { error: summarizeError(err) });
+          throw err;
+        }
         // Rotating to the next backend is the right response to BOTH a rate
         // limit and a spent account, a different key may well have credit,
         // so they share this branch. They are still named apart in the log,
@@ -387,8 +424,9 @@ export class SyntheticProvider implements LLMProvider {
         if (outOfCredit || await isRateLimitOrQuotaError(err, 'providers.synthetic.rotate')) {
           // Record cooldown: the wait the provider gave (its Retry-After, or
           // the wait its message states, read by Jev), else the default.
-          const cooldownMs = (await readRetryWait(err, 'providers.synthetic.rotate')) || DEFAULT_COOLDOWN_MS;
-          cooldownArr[idx]! = now + cooldownMs;
+          const cooldownMs = boundedCooldownMs(await readRetryWait(err, 'providers.synthetic.rotate'));
+          cooldownArr[idx]! = Date.now() + cooldownMs;
+          failureArr[idx] = undefined;
           this.cooldowns.set(syntheticId, cooldownArr);
           if (cooldownMs < shortestCooldown) shortestCooldown = cooldownMs;
 
@@ -412,16 +450,17 @@ export class SyntheticProvider implements LLMProvider {
           && err.statusCode < 500;
 
         if (isProviderClientError) {
-          cooldownArr[idx]! = now + DEFAULT_COOLDOWN_MS;
+          cooldownArr[idx]! = Date.now() + DEFAULT_COOLDOWN_MS;
+          failureArr[idx] = err as ProviderError;
           this.cooldowns.set(syntheticId, cooldownArr);
-          if (DEFAULT_COOLDOWN_MS < shortestCooldown) shortestCooldown = DEFAULT_COOLDOWN_MS;
           logger.info(`[Synthetic] ${backend.providerName} returned ${(err as ProviderError).statusCode} for ${syntheticId}, trying next backend`);
           errors.push({ backend, error: err as Error });
           continue;
         }
 
         // Transient/server error, short cooldown, failover to next backend
-        cooldownArr[idx]! = now + TRANSIENT_COOLDOWN_MS;
+        cooldownArr[idx]! = Date.now() + TRANSIENT_COOLDOWN_MS;
+        failureArr[idx] = undefined;
         this.cooldowns.set(syntheticId, cooldownArr);
         if (TRANSIENT_COOLDOWN_MS < shortestCooldown) shortestCooldown = TRANSIENT_COOLDOWN_MS;
         logger.debug(`[Synthetic] ${backend.providerName} failed for ${syntheticId}: ${summarizeError(err) ?? err}, trying next backend`);
@@ -437,6 +476,7 @@ export class SyntheticProvider implements LLMProvider {
       let waitIdx = 0;
       let minExpiry = Infinity;
       for (let i = 0; i < cooldownArr.length; i++) {
+        if (failureArr[i]) continue;
         if (cooldownArr[i]! > nowForWait && cooldownArr[i]! < minExpiry) {
           minExpiry = cooldownArr[i]!;
           waitIdx = i;
@@ -483,11 +523,15 @@ export class SyntheticProvider implements LLMProvider {
       });
 
       // Single retry attempt on the backend that just came off cooldown
+      let retryDelivered = false;
       try {
         const waitProvider = this.resolveProvider(waitBackend.providerName);
         const response = await waitProvider.chat({
           ...params,
           model: waitBackend.modelId,
+          ...(params.onDelta
+            ? { onDelta: (delta: StreamDelta) => { retryDelivered = true; params.onDelta!(delta); } }
+            : {}),
         });
         this.activeBackend.set(syntheticId, waitIdx);
         logger.info(
@@ -495,6 +539,9 @@ export class SyntheticProvider implements LLMProvider {
         );
         return response;
       } catch (retryErr) {
+        if (isAbort(retryErr, params.signal)) throw retryErr;
+        // The caller already holds this backend's partial text; a fallback model would append a second answer.
+        if (retryDelivered) throw retryErr;
         // Retry failed, fall through to throw below
         logger.debug(
           `[Synthetic] Auto-wait retry failed for ${syntheticId} via ${
@@ -505,7 +552,7 @@ export class SyntheticProvider implements LLMProvider {
     }
 
     // All backends exhausted (or cooldown exceeded threshold, or retry failed)
-    const cooldownSec = shortestCooldown === Infinity ? '?' : Math.round(shortestCooldown / 1000);
+    const cooldownSec = shortestCooldown === Infinity ? 'n/a (no backend is cooling down for a retryable reason)' : `${Math.round(shortestCooldown / 1000)}s`;
 
     // Cross-model failover for free tier only
     if (canonical.tier === 'free') {
@@ -521,11 +568,15 @@ export class SyntheticProvider implements LLMProvider {
         }
 
         for (const backend of fallbackResult.backends) {
+          let fallbackDelivered = false;
           try {
             const provider = this.resolveProvider(backend.providerName);
             const response = await provider.chat({
               ...params,
               model: backend.modelId,
+              ...(params.onDelta
+                ? { onDelta: (delta: StreamDelta) => { fallbackDelivered = true; params.onDelta!(delta); } }
+                : {}),
             });
 
             this.activeBackend.set(fallbackId, 0);
@@ -549,6 +600,7 @@ export class SyntheticProvider implements LLMProvider {
 
             return response;
           } catch (err) {
+            if (isAbort(err, params.signal) || fallbackDelivered) throw err;
             logger.debug(`[Synthetic] Fallback ${fallbackId} via ${backend.providerName} failed: ${summarizeError(err)}`);
             continue;
           }
@@ -571,8 +623,8 @@ export class SyntheticProvider implements LLMProvider {
     }
 
     throw new ProviderError(
-      `All backends for ${syntheticId} exhausted. Shortest cooldown expires in ${cooldownSec}s. ` +
-      `Tried: ${errors.map(e => `${e.backend.providerName} (${e.error.message})`).join(', ')}`,
+      `All backends for ${syntheticId} exhausted. Shortest cooldown expires in ${cooldownSec}. ` +
+      `Tried: ${errors.map(e => `${e.backend.providerName} (${e.error instanceof ProviderError && e.error.statusCode !== undefined ? `${e.error.statusCode} ` : ''}${e.error.message})`).join(', ')}`,
       {
         statusCode: 429,
         provider: this.name,

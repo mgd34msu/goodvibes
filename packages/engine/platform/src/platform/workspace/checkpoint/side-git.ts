@@ -29,7 +29,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, isAbsolute, dirname, sep } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import { createSimpleGit } from '../../git/optional-simple-git.js';
 import { logger } from '../../utils/logger.js';
@@ -203,6 +203,7 @@ export class SideGitRunner {
     await (await this.git()).raw(['config', 'user.name', FALLBACK_IDENTITY.name]);
     await (await this.git()).raw(['config', 'user.email', FALLBACK_IDENTITY.email]);
     this.ensureGoodvibesIgnored();
+    this.excludeOwnStorage();
   }
 
   /**
@@ -235,6 +236,29 @@ export class SideGitRunner {
       logger.warn('SideGitRunner.ensureGoodvibesIgnored: failed to write .goodvibes/.gitignore', {
         error: summarizeError(err),
       });
+    }
+  }
+
+  /**
+   * Keep the side repo's own storage directory (the git dir and its manifest)
+   * out of its own work tree via the side repo's `info/exclude`. The
+   * `.goodvibes/.gitignore` above covers only `<workspaceRoot>/.goodvibes`; when
+   * the work tree is an enclosing repo's top level and the storage lives under
+   * a subdirectory's `.goodvibes`, that directory is a different one and would
+   * otherwise be staged into the checkpoint.
+   */
+  private excludeOwnStorage(): void {
+    const rel = relative(this.workspaceRoot, dirname(this.gitDir));
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return;
+    const pattern = `/${rel.split(sep).join('/').replace(/[\\*?[\]]/g, '\\$&')}/`;
+    const excludePath = join(this.gitDir, 'info', 'exclude');
+    try {
+      mkdirSync(dirname(excludePath), { recursive: true });
+      const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : '';
+      if (existing.split('\n').some((line) => line === pattern)) return;
+      writeFileSync(excludePath, `${existing.replace(/\s*$/, '')}${existing.trim() ? '\n' : ''}${pattern}\n`, 'utf-8');
+    } catch (err) {
+      logger.warn('SideGitRunner.excludeOwnStorage: failed to write the side repo exclude file', { error: summarizeError(err) });
     }
   }
 
@@ -345,10 +369,26 @@ export class SideGitRunner {
       .filter((entry) => entry.id.length > 0 && entry.commit.length > 0);
   }
 
-  /** Files tracked in a commit's tree (recursive, name-only). */
+  /** Commit time (ms) and subject of a commit, or null when it cannot be read. */
+  async commitInfo(commit: string): Promise<{ createdAt: number; subject: string } | null> {
+    try {
+      const out: string = await (await this.git()).raw(['show', '-s', '--format=%ct%x00%s', commit]);
+      const [seconds, subject] = out.replace(/\n$/, '').split('\0');
+      const createdAt = Number(seconds) * 1000;
+      return Number.isFinite(createdAt) ? { createdAt, subject: subject ?? '' } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Files tracked in a commit's tree (recursive, name-only). NUL-separated:
+   * without `-z` git quotes any name with non-ASCII bytes or a newline
+   * (`"\\346..."`), and a quoted name matches no file on disk.
+   */
   async listTrackedFiles(commitOrTree: string): Promise<string[]> {
-    const out: string = await (await this.git()).raw(['ls-tree', '-r', '--name-only', commitOrTree]);
-    return out.split('\n').map((line: string) => line.trim()).filter(Boolean);
+    const out: string = await (await this.git()).raw(['ls-tree', '-r', '--name-only', '-z', commitOrTree]);
+    return splitNul(out);
   }
 
   /** Reset the side index to exactly match a commit's tree (does not touch the working tree). */
@@ -361,24 +401,33 @@ export class SideGitRunner {
     await (await this.git()).raw(['checkout-index', '-a', '-f']);
   }
 
-  /** `git diff` between two commit-ish values. Omit `to` to diff against the live working tree. */
+  /**
+   * `git diff` between two commit-ish values. Omit `to` to diff the side index
+   * against `from`; stage the work tree first (`stageAll`) so the index is the
+   * live tree, otherwise files created since the last stage are not listed.
+   */
   async diff(from: string, to?: string): Promise<string> {
-    return (await this.git()).raw(to ? ['diff', from, to] : ['diff', from]);
+    return (await this.git()).raw(to ? ['diff', from, to] : ['diff', '--cached', from]);
   }
 
-  /** `git diff --stat` between two commit-ish values. Omit `to` to diff against the live working tree. */
+  /** `git diff --stat` between two commit-ish values. Omit `to` to diff the side index (see `diff`). */
   async diffStat(from: string, to?: string): Promise<string> {
-    return (await this.git()).raw(to ? ['diff', '--stat', from, to] : ['diff', '--stat', from]);
+    return (await this.git()).raw(to ? ['diff', '--stat', from, to] : ['diff', '--stat', '--cached', from]);
   }
 
-  /** `git diff --name-only` between two commit-ish values. Omit `to` to diff against the live working tree. */
+  /** `git diff --name-only` between two commit-ish values. Omit `to` to diff the side index (see `diff`). */
   async diffNameOnly(from: string, to?: string): Promise<string[]> {
-    const out: string = await (await this.git()).raw(to ? ['diff', '--name-only', from, to] : ['diff', '--name-only', from]);
-    return out.split('\n').map((line: string) => line.trim()).filter(Boolean);
+    const out: string = await (await this.git()).raw(to ? ['diff', '--name-only', '-z', from, to] : ['diff', '--name-only', '-z', '--cached', from]);
+    return splitNul(out);
   }
 
   /** `git gc --prune=now` on the side repo. */
   async gc(): Promise<void> {
     await (await this.git()).raw(['gc', '--prune=now', '--quiet']);
   }
+}
+
+/** Split `-z` git output. Names are kept byte-exact: a leading or trailing space is part of the name. */
+function splitNul(out: string): string[] {
+  return out.split('\0').filter((name) => name.length > 0);
 }

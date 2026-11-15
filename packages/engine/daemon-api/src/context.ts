@@ -57,7 +57,7 @@ export interface DaemonSessionRouteHandlers
 
 /** Route handler for the integration sessions listing endpoint. */
 export interface DaemonSessionOverviewRouteHandlers {
-  /** @param url - When present and contains `limit`/`cursor` params, returns a `PaginatedResponse`. Otherwise returns the legacy session broker snapshot. */
+  /** @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned. */
   getIntegrationSessions(url?: URL): MaybeResponse;
 }
 
@@ -157,7 +157,7 @@ export interface DaemonIntegrationOverviewRouteHandlers {
   getIntegrationSession(): MaybeResponse;
   getIntegrationTasks(): MaybeResponse;
   getIntegrationAutomation(): MaybeResponse;
-  /** @param url - When present and contains `limit`/`cursor` params, returns a `PaginatedResponse`. Otherwise returns the legacy session broker snapshot. */
+  /** @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned. */
   getIntegrationSessions(url?: URL): MaybeResponse;
 }
 
@@ -173,8 +173,8 @@ export interface DaemonPlatformStatusRouteHandlers {
   getProviders(): MaybeResponse;
   getProvider(providerId: string): MaybeResponse;
   getProviderUsage(providerId: string): MaybeResponse;
-  getSettings(): MaybeResponse;
-  getSecuritySettings(): MaybeResponse;
+  getSettings(req: Request): MaybeResponse;
+  getSecuritySettings(req: Request): MaybeResponse;
   getContinuity(): MaybeResponse;
   getWorktrees(): MaybeResponse;
   getIntelligence(): MaybeResponse;
@@ -192,7 +192,7 @@ export interface DaemonMemoryRouteHandlers {
   postMemoryRecordSearch(req: Request): MaybeResponse;
   getMemoryRecord(id: string): MaybeResponse;
   postMemoryRecordReview(id: string, req: Request): MaybeResponse;
-  deleteMemoryRecord(id: string): MaybeResponse;
+  deleteMemoryRecord(id: string, req: Request): MaybeResponse;
   // Full-detach catalog (1.2.0): list, semantic search, edit, links, export/import.
   postMemoryRecordList(req: Request): MaybeResponse;
   postMemoryRecordSearchSemantic(req: Request): MaybeResponse;
@@ -231,7 +231,7 @@ export interface DaemonSystemRouteHandlers {
   patchWatcher(watcherId: string, req: Request): MaybeResponse;
   watcherAction(watcherId: string, action: 'start' | 'stop' | 'run', req: Request): MaybeResponse;
   deleteWatcher(watcherId: string, req: Request): MaybeResponse;
-  getServiceStatus(): MaybeResponse;
+  getServiceStatus(req?: Request): MaybeResponse;
   installService(req: Request): MaybeResponse;
   startService(req: Request): MaybeResponse;
   stopService(req: Request): MaybeResponse;
@@ -241,10 +241,12 @@ export interface DaemonSystemRouteHandlers {
   postRouteBinding(req: Request): MaybeResponse;
   patchRouteBinding(bindingId: string, req: Request): MaybeResponse;
   deleteRouteBinding(bindingId: string, req: Request): MaybeResponse;
-  getApprovals(): MaybeResponse;
+  getApprovals(url?: URL): MaybeResponse;
   approvalAction(approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request): MaybeResponse;
   getConfig(req: Request): MaybeResponse;
   postConfig(req: Request): MaybeResponse;
+  /** `config.reset`, admin + write:config: remove one key's explicit value so it reads as its default. */
+  postConfigReset(req: Request): MaybeResponse;
   /**
    * `credentials.get`, admin + read:config. Returns secret-free credential
    * STATUS metadata for the daemon's shared store (never plaintext). An optional
@@ -351,9 +353,9 @@ export interface DaemonWebSearchRouteHandlers {
 
 /** Route handlers for artifact storage: listing, creation, retrieval, and content access. */
 export interface DaemonArtifactRouteHandlers {
-  getArtifacts(): MaybeResponse;
+  getArtifacts(req: Request): MaybeResponse;
   postArtifact(req: Request): MaybeResponse;
-  getArtifact(artifactId: string): MaybeResponse;
+  getArtifact(artifactId: string, req: Request): MaybeResponse;
   getArtifactContent(artifactId: string, req: Request): MaybeResponse;
 }
 

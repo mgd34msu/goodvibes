@@ -1,4 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
+import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
 
@@ -30,9 +31,33 @@ function readOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : undefined;
 }
 
-function isAffirmative(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized === 'yes' || normalized === 'true';
+const SECRET_QUERY_NAME = /token|secret|passw|apikey|api[-_]key|signature|credential|bearer|jwt|session|auth|^(?:key|sig|pwd)$/i;
+
+/**
+ * The form's URL goes into a prompt the model provider and transcript see before the tool can redact it,
+ * so a URL carrying a login or a secret-looking query value is refused here instead of being sent.
+ */
+function sourceUrlCredentialProblem(url: string): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // Without a scheme the text may still carry a login or token ("user:pass@host", "//u:p@host", "host/doc?token=..."), so it is never sent as-is.
+    return 'The URL must start with http:// or https://. Fix it, then press Enter again. Nothing was sent.';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'The URL must start with http:// or https://. Fix it, then press Enter again. Nothing was sent.';
+  }
+  if (parsed.username || parsed.password) {
+    return 'The URL contains a username or password. Remove it from the URL, then press Enter again. Nothing was sent.';
+  }
+  for (const name of parsed.searchParams.keys()) {
+    if (SECRET_QUERY_NAME.test(name)) {
+      return `The URL has a "${name}" query value that looks like a credential. Remove that parameter, then press Enter again. Nothing was sent.`;
+    }
+  }
+  return null;
 }
 
 export function createAgentResearchSourceEditor(): AgentWorkspaceLocalEditor {
@@ -45,7 +70,7 @@ export function createAgentResearchSourceEditor(): AgentWorkspaceLocalEditor {
     fields: [
       { id: 'question', label: 'Question', value: '', required: true, multiline: true, hint: 'Research question or topic this source supports.' },
       { id: 'title', label: 'Source title', value: '', required: true, multiline: false, hint: 'Readable source title.' },
-      { id: 'url', label: 'URL', value: '', required: false, multiline: false, hint: 'Optional HTTP or HTTPS URL. Secret-like query values are redacted.' },
+      { id: 'url', label: 'URL', value: '', required: false, multiline: false, hint: 'Optional HTTP or HTTPS URL. A URL with a login or a secret-like query value is refused.' },
       { id: 'publisher', label: 'Publisher', value: '', required: false, multiline: false, hint: 'Optional source owner, publication, repo, or docs site.' },
       { id: 'publishedAt', label: 'Published', value: '', required: false, multiline: false, hint: 'Optional source date if known.' },
       { id: 'summary', label: 'Summary', value: '', required: true, multiline: true, hint: 'Short source summary. Ctrl-J inserts a new line.' },
@@ -133,6 +158,14 @@ export function buildAgentResearchSourcePromptSubmission(
     readField,
     'Add one reviewed or candidate source to the project-local research queue.',
   );
+  const urlProblem = sourceUrlCredentialProblem(args.url ?? '');
+  if (urlProblem) {
+    return {
+      kind: 'editor',
+      editor: { ...editor, message: urlProblem },
+      status: 'Research source URL withheld: it looks like it carries a credential.',
+    };
+  }
   const prompt = [
     'Add this source to the project-local research source queue.',
     'Use the `research` tool with these arguments:',
@@ -160,7 +193,7 @@ export function buildAgentResearchSourcePromptSubmission(
     actionResult: {
       kind: 'guidance',
       title: 'Research source queue',
-      detail: 'Submitted a request to add one source to the local research queue.',
+      detail: 'Asked the model to add one source to the local research queue. Nothing is added until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

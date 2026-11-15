@@ -171,11 +171,11 @@ export function createNetworkTransportError(
     ? error.message.trim()
     : `Transport request failed before receiving a response for ${url}`;
   const hint = `Transport could not reach ${url}. Verify the baseUrl is reachable.`;
-  // only mark network/connection errors as recoverable (i.e. fetch-thrown).
-  // TypeError or other programmer errors should not trigger retries.
-  const isNetworkError = error instanceof TypeError
-    || (error instanceof Error && /^(?:EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EPIPE|ECONNABORTED)$/.test((error as { code?: string }).code ?? ''))
-    || (error instanceof Error && /^UND_ERR_/.test((error as { code?: string }).code ?? ''));
+  // Any failure thrown by fetch before a response is a connection failure worth
+  // retrying (Node reports codes such as ECONNREFUSED, undici UND_ERR_*, Bun a
+  // plain Error with code 'ConnectionRefused'), except a deliberate abort,
+  // which the caller asked for.
+  const isNetworkError = !(error instanceof Error && error.name === 'AbortError');
   const networkError = new HttpStatusError(message, {
     category: 'network',
     source: 'transport',
@@ -226,6 +226,15 @@ function addQueryValue(url: URL, key: string, value: unknown): void {
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   const normalized = name.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === normalized);
+}
+
+/** Sets a header, replacing any spelling of it already present: two spellings reach the server as one comma-joined value. */
+function setHeader(headers: Record<string, string>, name: string, value: string): void {
+  const normalized = name.toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === normalized) delete headers[key];
+  }
+  headers[name] = value;
 }
 
 function splitContractInput(path: string, input: Record<string, unknown> = {}): {
@@ -312,6 +321,30 @@ export async function readJsonBody(response: Response): Promise<unknown> {
 }
 
 /**
+ * Reads the body of a 2xx response. An empty body is `null`; anything else must
+ * be JSON. A proxy, captive portal or truncated reply that answers 200 with HTML
+ * is a protocol failure here, not a string typed as the caller's `T`.
+ */
+async function readSuccessBody(response: Response, url: string, method: string): Promise<unknown> {
+  const text = await response.text();
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (cause) {
+    const preview = text.trim().slice(0, 80);
+    throw new GoodVibesError(`Expected a JSON response from ${url} but received a ${response.status} body that is not JSON: ${preview}`, {
+      category: 'protocol',
+      source: 'transport',
+      recoverable: false,
+      url,
+      method,
+      cause,
+      hint: 'A proxy or captive portal may be answering instead of the daemon. Check the baseUrl.',
+    });
+  }
+}
+
+/**
  * Low-level one-shot JSON request helper.
  *
  * This deliberately bypasses transport auth, middleware, retry policy,
@@ -329,12 +362,11 @@ export async function requestJsonRaw<T>(
   } catch (error) {
     throw createNetworkTransportError(error, url, init.method ?? 'GET');
   }
-  const body = await readJsonBody(response);
   if (!response.ok) {
     const retryAfterMs = parseRetryAfterMs(response.headers);
-    throw createTransportError(response.status, url, init.method ?? 'GET', body, retryAfterMs);
+    throw createTransportError(response.status, url, init.method ?? 'GET', await readJsonBody(response), retryAfterMs);
   }
-  return body as T;
+  return await readSuccessBody(response, url, init.method ?? 'GET') as T;
 }
 
 export function createHttpJsonTransport(options: HttpJsonTransportOptions): HttpJsonTransport {
@@ -391,10 +423,10 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         requestOptions.headers ?? {},
       );
       if (token) {
-        mergedHeaders['Authorization'] = `Bearer ${token}`;
+        setHeader(mergedHeaders, 'Authorization', `Bearer ${token}`);
       }
       if (requestOptions.body !== undefined) {
-        mergedHeaders['Content-Type'] = 'application/json';
+        setHeader(mergedHeaders, 'Content-Type', 'application/json');
       }
 
       // merge pre-pinned traceparent headers (captured once before the retry loop)
@@ -440,11 +472,11 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         } catch (error) {
           throw createNetworkTransportError(error, c.url, c.method);
         }
-        const body = await readJsonBody(response);
         if (!response.ok) {
           const retryAfterMs = parseRetryAfterMs(response.headers);
-          throw createTransportError(response.status, c.url, c.method, body, retryAfterMs);
+          throw createTransportError(response.status, c.url, c.method, await readJsonBody(response), retryAfterMs);
         }
+        const body = await readSuccessBody(response, c.url, c.method);
         // stash the already-parsed body so the no-middleware fast path can
         // read it directly without a JSON.stringify → JSON.parse round-trip.
         _parsedBodyCache = body;
@@ -534,7 +566,17 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
         // Precedence: explicit perMethodPolicy > contract.idempotent flag > HTTP-verb default.
         const hasPerMethodOverride = methodId !== undefined && baseRetry.perMethodPolicy[methodId] !== undefined;
         const canRetry = !isMutatingMethod || hasPerMethodOverride || contractIdempotent;
-        const shouldRetry = canRetry && attempt < resolvedRetry.maxAttempts && (
+        // A reply whose own body says it is final (`recoverable: false`, or a billing
+        // limit) is not retried however transient its status looks: a 429 for an
+        // exhausted budget will not clear by asking again. Only the body counts here,
+        // the error's `recoverable` default would also veto statuses a caller opted into.
+        const replyBody = typeof wrappedError === 'object' && wrappedError !== null && 'transport' in wrappedError
+          ? (wrappedError as { readonly transport?: { readonly body?: unknown } }).transport?.body
+          : undefined;
+        const declaredFinal = typeof replyBody === 'object' && replyBody !== null
+          && ((replyBody as { readonly recoverable?: unknown }).recoverable === false
+            || (replyBody as { readonly category?: unknown }).category === 'billing');
+        const shouldRetry = canRetry && !declaredFinal && attempt < resolvedRetry.maxAttempts && (
           (typeof status === 'number' && status > 0 && isRetryableHttpStatus(method, status, resolvedRetry))
           || (typeof status === 'number' && status === 0 && recoverable !== false && isRetryableNetworkError(method, resolvedRetry))
         );

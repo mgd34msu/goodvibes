@@ -178,7 +178,19 @@ function escapeHtml(value: string): string {
  */
 export type LoopbackRedirectOutcome =
   | { readonly kind: 'code'; readonly result: LoopbackCodeResult; readonly body: string; readonly status: 200 }
-  | { readonly kind: 'error'; readonly error: Error; readonly body: string; readonly status: 400 };
+  | {
+      readonly kind: 'error';
+      readonly error: Error;
+      readonly body: string;
+      readonly status: 400;
+      /**
+       * True when the redirect carried this run's `state`, so the failure is
+       * Google's real answer and ends the wait. False for any other hit on
+       * the port (a probe, a prefetch, a page the person has open): it is
+       * answered with the error page and the wait carries on.
+       */
+      readonly settlesWait: boolean;
+    };
 
 export function classifyLoopbackRedirect(
   requestUrl: string,
@@ -189,12 +201,14 @@ export function classifyLoopbackRedirect(
   const stateParam = url.searchParams.get('state');
   const codeParam = url.searchParams.get('code');
 
+  const stateMatches = stateParam === expectedState;
   if (errorParam) {
     return {
       kind: 'error',
       error: new Error(`Google returned an authorization error: ${errorParam}`),
       body: renderLoopbackErrorPage(`Google reported: ${errorParam}. You can close this tab and try again.`),
       status: 400,
+      settlesWait: stateMatches,
     };
   }
   if (stateParam !== expectedState) {
@@ -203,6 +217,7 @@ export function classifyLoopbackRedirect(
       error: new Error('The redirect state parameter did not match the value this run generated.'),
       body: renderLoopbackErrorPage('This sign-in link does not match the request that started it. Please try again.'),
       status: 400,
+      settlesWait: false,
     };
   }
   if (!codeParam) {
@@ -211,6 +226,7 @@ export function classifyLoopbackRedirect(
       error: new Error('Google redirected with no authorization code.'),
       body: renderLoopbackErrorPage('No authorization code was returned. Please try again.'),
       status: 400,
+      settlesWait: true,
     };
   }
   return {
@@ -290,19 +306,30 @@ export async function refreshAccessToken(
   return postToken(fetchPort, body, [options.clientSecret, options.refreshToken]);
 }
 
+/** A token request that has not answered in this long has failed, not stalled forever. */
+const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+
 async function postToken(
   fetchPort: GoogleFetchPort,
   body: URLSearchParams,
   secretsToRedact: readonly string[],
 ): Promise<TokenResponse> {
+  const signal = AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS);
+  const timedOut = (): TokenResponse => ({
+    ok: false,
+    problem: `The token endpoint did not answer within ${TOKEN_REQUEST_TIMEOUT_MS / 1000} seconds.`,
+    fix: 'Check network access to oauth2.googleapis.com and try again.',
+  });
   let response: Response;
   try {
     response = await fetchPort.fetch(TOKEN_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal,
     });
   } catch (error) {
+    if (signal.aborted) return timedOut();
     return {
       ok: false,
       problem: `The token request could not be sent: ${redactSecretsFromMessage(describeError(error), secretsToRedact)}`,
@@ -314,6 +341,7 @@ async function postToken(
   try {
     payload = await response.json();
   } catch {
+    if (signal.aborted) return timedOut();
     return {
       ok: false,
       problem: 'Google did not return a parseable JSON response from the token endpoint.',

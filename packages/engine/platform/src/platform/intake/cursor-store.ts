@@ -371,7 +371,14 @@ export class InboxCursorStore {
     this.assertOpen();
     if (items.length === 0) return 0;
     let inserted = 0;
-    this.store.transaction(() => { inserted = upsertRows(this.store, items); });
+    this.store.transaction(() => {
+      // The same ownership rule the commit paths enforce: an id another provider owns is never overwritten.
+      for (const item of items) {
+        const existing = this.store.get<{ provider: string }>('SELECT provider FROM items WHERE id = ?', [item.id]);
+        if (existing && existing.provider !== item.provider) throw new Error('Inbox item id belongs to another provider');
+      }
+      inserted = upsertRows(this.store, items);
+    });
     this.revision += 1;
     return inserted;
   }

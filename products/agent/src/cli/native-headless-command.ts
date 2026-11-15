@@ -3,8 +3,9 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/pla
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
-import { executeNativeHeadless, writeNativeHeadlessResult, type NativeHeadlessHost } from './native-headless.ts';
-import { executeAdmittedHeadlessTurn } from './native-headless-turn.ts';
+import { executeNativeHeadless, runWithHeadlessTimeout, writeNativeHeadlessResult, type NativeHeadlessHost } from './native-headless.ts';
+import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
+import { executeAdmittedHeadlessTurn, settleHeadlessTurn } from './native-headless-turn.ts';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 
 import { resolveConnectedHostConnection } from '../runtime/client/daemon-verbs.ts';
@@ -12,7 +13,43 @@ import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 
-export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
+/**
+ * A run that could not start (for example `--resume` named a session that is not
+ * there) still tears the runtime down through `shutdown`, which saves the
+ * conversation under the fresh session id. Nothing was said in it, so the saved
+ * file is only an empty entry in the session list; take it back out.
+ */
+export function discardUnusedSession(
+  sessionManager: { delete(name: string): void },
+  sessionId: string,
+  sessionReady: boolean,
+  messageCount: number,
+): boolean {
+  if (sessionReady || messageCount > 0) return false;
+  try {
+    sessionManager.delete(sessionId);
+    return true;
+  } catch {
+    // Already absent, or the save itself failed: there is nothing to take back.
+    return false;
+  }
+}
+
+/** Shuts the runtime down, then either records the session pointer or takes back an empty session. */
+export async function closeHeadlessSession(close: {
+  readonly shutdown: () => Promise<unknown>;
+  readonly sessionManager: { delete(name: string): void };
+  readonly sessionId: string;
+  readonly sessionReady: boolean;
+  readonly messageCount: number;
+  readonly writeSessionPointer: () => void;
+}): Promise<void> {
+  await close.shutdown();
+  discardUnusedSession(close.sessionManager, close.sessionId, close.sessionReady, close.messageCount);
+  if (close.sessionReady) close.writeSessionPointer();
+}
+
+export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const hostSelection = { configManager, homeDirectory, observation: new OwnedSelectionObservation() };
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
@@ -23,7 +60,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   };
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
-    async run(prompt, mode, signal) {
+    run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
       const result = await executeNativeHeadless({
         mode,
         prompt,
@@ -33,7 +70,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
           const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
           let sessionReady = false;
-          try {
+          return settleHeadlessTurn(async () => {
             await restoreHeadlessSession(cli.flags, {
               surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
               conversation: ctx.conversation, runtime: ctx.runtime,
@@ -41,23 +78,29 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               canResume: () => !ctx.commandContext.isGenerating?.(),
             }, signal);
             sessionReady = true;
-            return await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat);
-          } finally {
-            const messages = ctx.conversation.getMessageSnapshot();
-            const snapshot: SessionSnapshot = {
-              messages: conversationMessagesAsSessionRecords(messages),
-              timestamp: Date.now(),
-              title: ctx.conversation.title,
-              ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
-                pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
-              }),
-            };
-            await ctx.shutdown(snapshot);
-            if (sessionReady) ctx._writeLastSessionPointer(ctx.runtime.sessionId);
-          }
+            return executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
+          }, {
+            shutdown: () => {
+              const messages = ctx.conversation.getMessageSnapshot();
+              const snapshot: SessionSnapshot = {
+                messages: conversationMessagesAsSessionRecords(messages),
+                timestamp: Date.now(),
+                title: ctx.conversation.title,
+                ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
+                  pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
+                }),
+              };
+              return ctx.shutdown(snapshot);
+            },
+            sessionReady: () => sessionReady,
+            discardUnusedSession: () => {
+              discardUnusedSession(ctx.services.sessionManager, ctx.runtime.sessionId, sessionReady, ctx.conversation.getMessageSnapshot().length);
+            },
+            writeSessionPointer: () => ctx._writeLastSessionPointer(ctx.runtime.sessionId),
+          });
         },
       });
       return result;
-    },
+    }),
   });
 }

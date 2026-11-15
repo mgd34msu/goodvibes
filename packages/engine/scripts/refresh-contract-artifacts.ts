@@ -22,9 +22,10 @@
  *   bun run scripts/refresh-contract-artifacts.ts
  *   bun run scripts/refresh-contract-artifacts.ts --check   # exit 1 if any artifact drifted
  *
- * After a successful refresh, run `bun run docs:generate` to refresh
- * docs/reference-*.md from the new artifacts. engine package preparation copies
- * the checked-in contract package artifacts into the published engine dist.
+ * `bun run refresh:contracts` finishes by regenerating docs/reference-*.md from
+ * the new artifacts, and `validate` fails when they are out of sync.
+ * Engine package preparation copies the checked-in contract package artifacts
+ * into the published engine dist.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';

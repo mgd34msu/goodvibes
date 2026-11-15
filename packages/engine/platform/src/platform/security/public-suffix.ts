@@ -27,13 +27,10 @@
  * matters is the opposite direction, a multi-label suffix we do not know
  * about, e.g. a newly delegated `something.xx`, would make two distinct
  * registrants compare equal. So the list must be refreshed, and refreshing it
- * is a data change with no code change:
- *
- *   curl -s https://publicsuffix.org/list/public_suffix_list.dat
- *
- * take the ICANN DOMAINS section, keep the rules containing a dot plus the
- * wildcard and exception rules, and replace the tables below. A test pins the
- * cases that motivated each group, so a bad refresh fails rather than silently
+ * is a data change with no code change: run `bun scripts/generate-public-suffix-data.ts`
+ * (never edit generated/public-suffix-data.ts by hand), then
+ * `bun scripts/check-public-suffix-drift.ts`. A test pins the cases that
+ * motivated each group, so a bad refresh fails rather than silently
  * widening what compares equal.
  */
 

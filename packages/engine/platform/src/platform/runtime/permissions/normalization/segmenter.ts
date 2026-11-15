@@ -7,12 +7,28 @@
  */
 
 import type { CommandSegment, CommandToken } from './types.js';
-import { canonicalize } from './canonicalizer.js';
+import { canonicalize, isEnvAssignmentToken } from './canonicalizer.js';
 
 /** Operator token types that act as segment boundaries. */
 type SegmentBoundary = '&&' | '||' | ';' | '|';
 
 const BOUNDARY_VALUES = new Set<string>(['&&', '||', ';', '|']);
+
+/**
+ * The word a token contributes as the command, or undefined when the token only
+ * precedes it: an environment assignment, a `{` / `!` group opener, a `}` closer,
+ * or the parentheses of a `(subshell)` (`(git` names git).
+ */
+function commandWordOf(token: CommandToken): string | undefined {
+  if (token.type !== 'command' && token.type !== 'argument' && token.type !== 'path') return undefined;
+  const value = token.value;
+  if (isEnvAssignmentToken(value) || value === '{' || value === '}' || value === '!') return undefined;
+  if (value.startsWith('(') || value === ')') {
+    const inner = value.replace(/^\(+/, '').replace(/\)+$/, '');
+    return inner === '' ? undefined : inner;
+  }
+  return value;
+}
 
 /**
  * Builds a single CommandSegment from a slice of tokens and an optional
@@ -26,12 +42,20 @@ function buildSegment(
   tokens: CommandToken[],
   operator?: SegmentBoundary,
 ): CommandSegment {
-  const commandToken = tokens.find((t) => t.type === 'command');
-  const rawCommand = commandToken?.value ?? '';
+  let commandIndex = -1;
+  let rawCommand = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const word = commandWordOf(tokens[i]!);
+    if (word !== undefined) {
+      commandIndex = i;
+      rawCommand = word;
+      break;
+    }
+  }
   const command = canonicalize(rawCommand);
 
   const args = tokens
-    .filter((t) => t.type === 'argument')
+    .filter((t, i) => i > commandIndex && t.type === 'argument')
     .map((t) => t.value);
 
   const flags = tokens

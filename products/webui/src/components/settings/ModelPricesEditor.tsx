@@ -4,7 +4,10 @@
  * input / output / cache-read / cache-write USD-per-1M-token fields, plus
  * add, edit, and remove. Every change writes the WHOLE table through the
  * caller's commit (config.set pricing.modelPrices), the daemon's real
- * one-key write contract; there is no JSON blob involved.
+ * one-key write contract; there is no JSON blob involved. Because the write
+ * replaces the table, the one change is applied to the daemon's current table
+ * (readLatest) rather than the one on screen, so a price another client added
+ * since the last refresh is kept.
  *
  * Shared by the settings surface (SettingsField's object branch) and the
  * "set a price" affordance on cost displays, so a manual price entered from
@@ -23,6 +26,7 @@ import {
   removeModelPrice,
   upsertModelPrice,
   type ModelPriceDraft,
+  type ModelPriceTable,
 } from '../../lib/model-prices';
 import '../../styles/components/pricing.css';
 
@@ -33,9 +37,11 @@ export interface ModelPricesEditorProps {
   readonly onCommit: (next: Record<string, unknown>) => Promise<void>;
   /** Pre-fill the add form with this model key (from a cost display's "set price"). */
   readonly initialModelKey?: string;
+  /** Reads the daemon's current raw `pricing.modelPrices` just before a write; without it the table on screen is the base. */
+  readonly readLatest?: () => Promise<unknown>;
 }
 
-export function ModelPricesEditor({ value, onCommit, initialModelKey }: ModelPricesEditorProps) {
+export function ModelPricesEditor({ value, onCommit, initialModelKey, readLatest }: ModelPricesEditorProps) {
   const table = readModelPriceTable(value);
   const rows = modelPriceRows(table);
   const [draft, setDraft] = useState<ModelPriceDraft>(() =>
@@ -49,11 +55,21 @@ export function ModelPricesEditor({ value, onCommit, initialModelKey }: ModelPri
   const [saving, setSaving] = useState(false);
   const [formOpen, setFormOpen] = useState<boolean>(() => Boolean(initialModelKey) || rows.length === 0);
 
-  async function commitTable(next: Record<string, unknown>): Promise<void> {
+  async function commitTable(change: (base: ModelPriceTable) => ModelPriceTable): Promise<void> {
     setSaving(true);
     setError(null);
     try {
-      await onCommit(next);
+      let base: ModelPriceTable = table;
+      if (readLatest) {
+        try {
+          base = readModelPriceTable(await readLatest());
+        } catch (err) {
+          throw new Error(
+            `Could not read the current prices, so nothing was changed (${err instanceof Error ? err.message : String(err)}).`,
+          );
+        }
+      }
+      await onCommit(change(base));
       setDraft(EMPTY_MODEL_PRICE_DRAFT);
       setEditingKey(null);
       setFormOpen(false);
@@ -70,13 +86,14 @@ export function ModelPricesEditor({ value, onCommit, initialModelKey }: ModelPri
       setError(parsed.error);
       return;
     }
-    let next = table;
-    // Renaming an entry under edit removes the old key.
-    if (editingKey !== null && editingKey !== parsed.modelKey) {
-      next = removeModelPrice(next, editingKey);
-    }
-    next = upsertModelPrice(next, parsed.modelKey, parsed.entry);
-    void commitTable({ ...next });
+    void commitTable((base) => {
+      let next = base;
+      // Renaming an entry under edit removes the old key.
+      if (editingKey !== null && editingKey !== parsed.modelKey) {
+        next = removeModelPrice(next, editingKey);
+      }
+      return { ...upsertModelPrice(next, parsed.modelKey, parsed.entry) };
+    });
   }
 
   function beginEdit(modelKey: string): void {
@@ -129,7 +146,7 @@ export function ModelPricesEditor({ value, onCommit, initialModelKey }: ModelPri
                   variant="ghost"
                   disabled={saving}
                   aria-label={`Remove price for ${modelKey}`}
-                  onClick={() => void commitTable({ ...removeModelPrice(table, modelKey) })}
+                  onClick={() => void commitTable((base) => ({ ...removeModelPrice(base, modelKey) }))}
                 >
                   Remove
                 </Button>

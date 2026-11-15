@@ -14,8 +14,8 @@
  * the key is gone from the schema and swept from disk with a receipt, and the
  * adoption policy's port-free ruling has no embed outcome left to reach.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { migrateDaemonEmbedInProcessRemoval } from '../platform/src/platform/config/migrations.js';
@@ -106,8 +106,14 @@ describe('migrateDaemonEmbedInProcessRemoval (pure function)', () => {
 });
 
 describe('applyDaemonEmbedInProcessMigrationPass', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   function settingsFile(contents: Record<string, unknown>): string {
     const dir = mkdtempSync(join(tmpdir(), 'gv-daemon-embed-'));
+    dirs.push(dir);
     const file = join(dir, 'settings.json');
     writeFileSync(file, JSON.stringify(contents));
     return file;
@@ -161,12 +167,17 @@ describe('applyDaemonEmbedInProcessMigrationPass', () => {
     // The file rewrite is best-effort; a read-only tree must not stop the
     // process from running on the corrected shape, and the next start retries.
     const receipts: string[] = [];
+    // A regular file as the parent directory cannot be written beneath, whoever runs the test.
+    const target = join(settingsFile({}), 'settings.json');
     const result = applyDaemonEmbedInProcessMigrationPass(
       { daemon: { enabled: true, embedInProcess: true } },
-      join(tmpdir(), 'gv-nonexistent-dir-for-embed-migration', 'settings.json'),
+      target,
       (id) => receipts.push(id),
     );
     expect(result['daemon']).toEqual({ enabled: true });
+    // A receipt says the key is gone from the file; with no write there is nothing to claim.
+    expect(receipts).toEqual([]);
+    expect(existsSync(target)).toBe(false);
   });
 });
 

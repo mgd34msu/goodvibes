@@ -25,33 +25,34 @@ import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 /**
- * Only timers created BY the scheduler are counted, matched on the creation
- * stack. The suite runs every file in one process, so a global pending-timer
- * count also sees unrelated in-flight work left by earlier files, which made
- * this test pass alone and fail in-suite, measuring the suite rather than the
- * subject.
+ * Only timers created BY the scheduler are counted: the frame that called
+ * setTimeout must be scheduling.ts, so a timer another module creates while the
+ * scheduler calls into it (the store, the logger) is not the subject.
  */
 const OWNER = /knowledge\/scheduling\.ts/;
 let pending: Map<unknown, string>;
 let root: string;
+const stores: KnowledgeStore[] = [];
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'knowledge-dispose-race-'));
   pending = new Map<unknown, string>();
   globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
     const stack = new Error().stack ?? '';
+    const caller = stack.split('\n')[2] ?? '';
     let handle: unknown;
     const wrapped = (...a: unknown[]): void => { pending.delete(handle); (fn as (...x: unknown[]) => void)(...a); };
     handle = realSetTimeout(wrapped as never, ms as never, ...(rest as never[]));
-    if (OWNER.test(stack)) pending.set(handle, stack.split('\n')[2]?.trim() ?? '');
+    if (OWNER.test(caller)) pending.set(handle, caller.trim());
     return handle as ReturnType<typeof globalThis.setTimeout>;
   }) as typeof globalThis.setTimeout;
   globalThis.clearTimeout = ((h: never) => { pending.delete(h); return realClearTimeout(h); }) as typeof globalThis.clearTimeout;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.setTimeout = realSetTimeout;
   globalThis.clearTimeout = realClearTimeout;
+  for (const store of stores.splice(0)) await store.close();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -62,6 +63,7 @@ function buildService(): KnowledgeScheduleService {
     configManager: { getControlPlaneConfigDir: () => root },
     family: 'wiki',
   } as never);
+  stores.push(store);
   return new KnowledgeScheduleService({
     store,
     emitIfReady: () => undefined,
@@ -75,16 +77,15 @@ test('dispose() during in-flight schedule initialization leaves nothing armed', 
   service.dispose();
 
   // Let the initializer run to completion against a disposed service.
-  await new Promise((resolve) => realSetTimeout(resolve, 500));
+  await service.whenReady();
 
   expect([...pending.values()]).toEqual([]);
 });
 
 test('dispose() after initialization has settled also leaves nothing armed', async () => {
   const service = buildService();
-  await new Promise((resolve) => realSetTimeout(resolve, 500));
+  await service.whenReady();
   service.dispose();
-  await new Promise((resolve) => realSetTimeout(resolve, 100));
 
   expect([...pending.values()]).toEqual([]);
 });

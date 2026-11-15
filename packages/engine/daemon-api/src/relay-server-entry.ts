@@ -4,9 +4,10 @@
 // The Bun.serve adapter and standalone entry point for the rendezvous relay.
 // This is what you deploy on a VPS:
 //
-//     bun packages/daemon-api/dist/relay-server-entry.js
-//   or, once published:
-//     bunx --bun @goodvibes-jev/engine/daemon-api/relay-server
+//     GOODVIBES_RELAY_PORT=8787 bun node_modules/@goodvibes-jev/engine/daemon-api/dist/relay-server-entry.js
+//
+// GOODVIBES_RELAY_PORT sets the port (default 8787). GOODVIBES_RELAY_HOST sets
+// the interface to bind (default: all interfaces).
 //
 // It binds a WebSocket endpoint and drives the runtime-neutral RelayHub. All the
 // zero-knowledge properties live in the hub and the transport-core relay crypto;

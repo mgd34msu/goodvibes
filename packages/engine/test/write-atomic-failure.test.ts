@@ -196,11 +196,11 @@ for (const failure of [
 
 test('ordinary atomic snapshot mode exception rolls back earlier writes and preserves history', async () => {
   const f = fixture();
-  const actualStat = fs.lstatSync;
-  const stat = spyOn(fs, 'lstatSync').mockImplementation(((...args: Parameters<typeof fs.lstatSync>) => {
+  const actualStat = fs.statSync;
+  const stat = spyOn(fs, 'statSync').mockImplementation(((...args: Parameters<typeof fs.statSync>) => {
     if (args[0] === join(f.root, 'second.txt')) throw new Error('synthetic snapshot mode failure');
     return actualStat(...args);
-  }) as typeof fs.lstatSync);
+  }) as typeof fs.statSync);
   try {
     const result = await f.tool.execute({ files: [first, second, { path: 'later.txt', content: 'must not write' }], transaction: { mode: 'atomic' } });
     expect(result.success).toBe(false);

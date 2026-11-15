@@ -93,7 +93,7 @@ describe('streaming render: byte-identical final output', () => {
 describe('streaming render: 16ms throttle gate', () => {
 
   test('burst of deltas within 16ms does not re-render every token', () => {
-    // We mock Date.now to control timing.
+    // Date.now is the throttle's only clock, so a fixed value makes the window exact.
     let mockNow = 1000;
     const origDateNow = Date.now;
     Date.now = () => mockNow;
@@ -104,42 +104,28 @@ describe('streaming render: 16ms throttle gate', () => {
       cm.addUserMessage('q');
       cm.startStreamingBlock();
 
-      // First delta at t=1000, renders (0ms since start, throttle resets)
-      cm.updateStreamingBlock('a');
-      const afterFirst = cm.getDisplayBlocks().length;
-      expect(afterFirst).toBeGreaterThan(0);
+      // Each delta carries one more paragraph, so what the display shows says which delta was rendered last.
+      const upTo = (n: number) => Array.from({ length: n + 1 }, (_, i) => `para${i}marker`).join('\n\n');
+      const shown = () => cm.getDisplayBlocks().map(l => lineToString(l as { char: string }[])).join('\n');
 
-      // Advance time by only 5ms (within the 16ms window)
+      // The first delta always renders.
+      cm.updateStreamingBlock(upTo(0));
+      expect(shown()).toContain('para0marker');
+
+      // Deltas inside the 16ms window are throttled: none of their text is rendered.
       mockNow = 1005;
-      // Record buffer line count BEFORE the throttled delta
-      const lineCountBefore = cm.getDisplayBlocks().length;
+      for (let i = 1; i <= 10; i++) cm.updateStreamingBlock(upTo(i));
+      const throttled = shown();
+      expect(throttled).toContain('para0marker');
+      expect(throttled).not.toContain('para1marker');
+      expect(throttled).not.toContain('para10marker');
 
-      // These deltas arrive within 16ms of the last render, throttled
-      for (let i = 0; i < 10; i++) {
-        cm.updateStreamingBlock('a'.repeat(i + 2));
-      }
-
-      // Line count should be unchanged (renderMarkdown not called again within 16ms)
-      const lineCountAfter = cm.getDisplayBlocks().length;
-      // Note: getDisplayBlocks calls flushHistory which may rebuild from dirty state
-      // but since we are still streaming (streamingStartLine >= 0), it uses the
-      // throttled path and does NOT re-render from within updateStreamingBlock.
-      // The line count may change only if flushHistory is called by getDisplayBlocks.
-      // The key invariant: no more than ceil((elapsed / 16) + 1) render calls.
-      // We cannot easily count renderMarkdown calls without mocking, so we assert
-      // that at minimum, the throttle field is working by checking that the same
-      // content at 5ms offset did not trigger a new render pass.
-      // The buffer line count stays the same from the last throttled-path update.
-      expect(lineCountAfter).toBe(lineCountBefore);
-
-      // Now advance past the 16ms window, next delta should render
+      // Past the window the next delta renders everything accumulated so far.
       mockNow = 1017;
-      const contentFinal = 'a'.repeat(20);
-      cm.updateStreamingBlock(contentFinal);
-      // After 16ms+ gap, line count may change (new render)
-      // Just verify no crash and a valid line count
-      const lineCountFinal = cm.getDisplayBlocks().length;
-      expect(lineCountFinal).toBeGreaterThanOrEqual(0);
+      cm.updateStreamingBlock(upTo(11));
+      const rendered = shown();
+      expect(rendered).toContain('para1marker');
+      expect(rendered).toContain('para11marker');
     } finally {
       Date.now = origDateNow;
     }

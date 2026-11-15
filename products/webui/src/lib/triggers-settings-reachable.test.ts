@@ -19,6 +19,8 @@ const TRIGGER_KEYS = CONFIG_SCHEMA_ENTRIES
   .filter((entry) => entry.key.startsWith('watchers.triggers.'))
   .map((entry) => entry.key);
 
+const MIN_DESCRIPTION_LENGTH = 40;
+
 describe('trigger settings reachability', () => {
   test('every trigger key is routed into the settings workspace', () => {
     const groups = buildSettingsModel({});
@@ -38,7 +40,15 @@ describe('trigger settings reachability', () => {
     const groups = buildSettingsModel({});
     const watchersGroup = groups.find((group) => group.id === 'watchers');
     expect(watchersGroup).toBeDefined();
-    expect(watchersGroup?.label).toBe(groupLabelForNamespace('watchers'));
+    expect(watchersGroup?.label).toBe('Watchers');
     expect(categoryLabelForKey('watchers.triggers.enabled')).toBe(groupLabelForNamespace('watchers'));
+  });
+
+  test('every trigger key ships a written purpose, not a restatement of its name', () => {
+    expect(TRIGGER_KEYS.length).toBeGreaterThan(0);
+    const terse = CONFIG_SCHEMA_ENTRIES
+      .filter((entry) => TRIGGER_KEYS.includes(entry.key) && entry.description.trim().length < MIN_DESCRIPTION_LENGTH)
+      .map((entry) => entry.key);
+    expect(terse).toEqual([]);
   });
 });

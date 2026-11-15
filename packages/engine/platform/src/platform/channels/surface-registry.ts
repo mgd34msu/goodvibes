@@ -1,5 +1,6 @@
 import { createDomainDispatch } from '../runtime/store/index.js';
 import { resolveWebBinding } from '../daemon/host-resolver.js';
+import { isSurfaceIngressEnabled } from '../daemon/surface-policy.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { SurfaceRecord } from '../runtime/store/domains/surfaces.js';
 import { ConfigManager } from '../config/manager.js';
@@ -40,6 +41,7 @@ export class SurfaceRegistry {
     const pluginDescriptors = this.pluginRegistry?.listDescriptors() ?? [];
     const enabledForSurface = (surface: string): boolean => {
       if (!isSurfaceFeatureGateEnabled(this.featureFlags, surface)) return false;
+      if (!isSurfaceIngressEnabled(this.configManager, surface)) return false;
       if (surface === 'tui') {
         const surfaces = this.configManager.getCategory('surfaces');
         return !('tui' in surfaces && surfaces.tui !== null && typeof surfaces.tui === 'object'
@@ -132,7 +134,7 @@ export class SurfaceRegistry {
         enabled: enabledForSurface('slack'),
         state: enabledForSurface('slack') ? 'healthy' : 'disabled',
         configuredAt,
-        accountId: String(this.configManager.get('surfaces.slack.workspaceId') || ''),
+        ...(accountIdForSurface('slack') ? { accountId: accountIdForSurface('slack') } : {}),
         capabilities: ['ingress', 'egress', 'threaded_reply', 'interactive_actions'],
         metadata: {
           defaultChannel: this.configManager.get('surfaces.slack.defaultChannel'),
@@ -145,7 +147,7 @@ export class SurfaceRegistry {
         enabled: enabledForSurface('discord'),
         state: enabledForSurface('discord') ? 'healthy' : 'disabled',
         configuredAt,
-        accountId: String(this.configManager.get('surfaces.discord.applicationId') || ''),
+        ...(accountIdForSurface('discord') ? { accountId: accountIdForSurface('discord') } : {}),
         capabilities: ['ingress', 'egress', 'interactive_actions'],
         metadata: {
           defaultChannelId: this.configManager.get('surfaces.discord.defaultChannelId'),
@@ -183,6 +185,14 @@ export class SurfaceRegistry {
       },
     ];
 
+    // A surface that dropped out of this list (its feature gate went off, its
+    // plugin was unregistered) must not stay `healthy` in the runtime store from
+    // an earlier sync. The store has no removal, so it is published as disabled.
+    const current = new Set(records.map((record) => record.id));
+    for (const gone of this.surfaces.values()) {
+      if (current.has(gone.id)) continue;
+      this.runtimeDispatch?.syncSurface({ ...gone, enabled: false, state: 'disabled' }, 'surfaces.sync');
+    }
     this.surfaces.clear();
     for (const record of records) {
       this.surfaces.set(record.id, record);

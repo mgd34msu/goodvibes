@@ -13,60 +13,40 @@
  * Then: bun scripts/check-public-suffix-drift.ts   (should print OK)
  */
 
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-const UPSTREAM_URL = 'https://publicsuffix.org/list/public_suffix_list.dat';
-const ICANN_BEGIN = '// ===BEGIN ICANN DOMAINS===';
-const ICANN_END = '// ===END ICANN DOMAINS===';
-
-/**
- * Private-section entries kept by hand.
- *
- * The private section is thousands of entries that churn constantly, so
- * bundling all of it would make the drift check permanently red. These are the
- * hosting suffixes where getting it wrong makes two unrelated sites compare
- * equal, the failure that actually matters for link validation.
- */
-const CURATED_PRIVATE = [
-  'github.io', 'gitlab.io', 'pages.dev', 'workers.dev', 'vercel.app', 'netlify.app',
-  'herokuapp.com', 'azurewebsites.net', 'cloudfront.net', 'r2.dev', 'web.app', 'firebaseapp.com',
-  's3.amazonaws.com', 'blogspot.com', 'wordpress.com', 'sharepoint.com', 'myshopify.com',
-];
-
-const response = await fetch(UPSTREAM_URL);
-if (!response.ok) throw new Error(`upstream fetch failed: HTTP ${String(response.status)}`);
-const text = await response.text();
-
-const start = text.indexOf(ICANN_BEGIN);
-const end = text.indexOf(ICANN_END);
-if (start === -1 || end === -1) throw new Error('ICANN section markers not found');
-
-const multiLabel = new Set<string>();
-const wildcardParents = new Set<string>();
-const exceptions = new Set<string>();
-
-for (const raw of text.slice(start, end).split('\n')) {
-  const line = raw.trim();
-  if (line.length === 0 || line.startsWith('//')) continue;
-  if (line.startsWith('!')) {
-    exceptions.add(line.slice(1).toLowerCase());
-    continue;
-  }
-  if (line.startsWith('*.')) {
-    wildcardParents.add(line.slice(2).toLowerCase());
-    continue;
-  }
-  if (line.includes('.')) multiLabel.add(line.toLowerCase());
-}
-
-for (const suffix of CURATED_PRIVATE) multiLabel.add(suffix);
+import {
+  CURATED_PRIVATE_SUFFIXES,
+  MIN_MULTI_LABEL_SUFFIXES,
+  parsePublicSuffixList,
+  UPSTREAM_URL,
+} from './public-suffix-source.ts';
 
 function serialize(values: Iterable<string>): string {
   return [...values].sort().map((value) => `  '${value}',`).join('\n');
 }
 
-const file = `// GENERATED FILE — do not edit by hand.
+/**
+ * The generated data file for an upstream list text. Throws, writing nothing,
+ * when the list does not look like the real one.
+ */
+export function renderPublicSuffixData(text: string, snapshotDate: string): {
+  readonly source: string;
+  readonly multiLabel: number;
+  readonly wildcardParents: number;
+  readonly exceptions: number;
+} {
+  const parsed = parsePublicSuffixList(text);
+  const multiLabel = new Set(parsed.multiLabel);
+  for (const suffix of CURATED_PRIVATE_SUFFIXES) multiLabel.add(suffix);
+  if (parsed.multiLabel.size < MIN_MULTI_LABEL_SUFFIXES) {
+    throw new Error(
+      `public-suffix: the upstream list has only ${String(parsed.multiLabel.size)} multi-label ICANN suffixes `
+      + `(expected more than ${String(MIN_MULTI_LABEL_SUFFIXES)}); refusing to overwrite the bundled data.`,
+    );
+  }
+  const { wildcardParents, exceptions } = parsed;
+  const source = `// GENERATED FILE — do not edit by hand.
 //
 // Regenerate with:  bun scripts/generate-public-suffix-data.ts
 // Drift is caught by the weekly Public Suffix Drift workflow, which FAILS
@@ -77,7 +57,7 @@ const file = `// GENERATED FILE — do not edit by hand.
 // private-section hosting suffixes where two sites under one suffix are
 // genuinely different registrants.
 //
-// Snapshot taken: ${new Date().toISOString().slice(0, 10)}
+// Snapshot taken: ${snapshotDate}
 
 /** Multi-label public suffixes. Single-label suffixes need no rule, see the module header. */
 export const PUBLIC_SUFFIX_MULTI_LABEL: readonly string[] = [
@@ -95,12 +75,23 @@ ${serialize(exceptions)}
 ];
 `;
 
-const target = join(
-  import.meta.dir,
-  '..',
-  'platform/src/platform/security/generated/public-suffix-data.ts',
-);
-writeFileSync(target, file, 'utf8');
-console.log(
-  `wrote ${target}\n  multi-label: ${String(multiLabel.size)}\n  wildcard parents: ${String(wildcardParents.size)}\n  exceptions: ${String(exceptions.size)}`,
-);
+  return { source, multiLabel: multiLabel.size, wildcardParents: wildcardParents.size, exceptions: exceptions.size };
+}
+
+if (import.meta.main) {
+  const response = await fetch(UPSTREAM_URL);
+  if (!response.ok) throw new Error(`upstream fetch failed: HTTP ${String(response.status)}`);
+  const rendered = renderPublicSuffixData(await response.text(), new Date().toISOString().slice(0, 10));
+  const target = join(
+    import.meta.dir,
+    '..',
+    'platform/src/platform/security/generated/public-suffix-data.ts',
+  );
+  // Write beside the target and rename, so an interrupted run never leaves half a file.
+  const staging = `${target}.tmp`;
+  writeFileSync(staging, rendered.source, 'utf8');
+  renameSync(staging, target);
+  console.log(
+    `wrote ${target}\n  multi-label: ${String(rendered.multiLabel)}\n  wildcard parents: ${String(rendered.wildcardParents)}\n  exceptions: ${String(rendered.exceptions)}`,
+  );
+}

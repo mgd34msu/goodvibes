@@ -249,7 +249,7 @@ describe('DiffEngine run-coalescing: output correctness', () => {
     expect(countCursorMoves(diff)).toBe(1);
   });
 
-  test('non-coalesced (null oldBuffer) emits cursor per changed cell', () => {
+  test('first frame (null oldBuffer) still coalesces a same-style run into one cursor move', () => {
     // When oldBuffer is null (first frame), all cells are "different" regardless
     // of position. However, runs of same-SGR contiguous cells still coalesce.
     const W = 5;
@@ -325,11 +325,10 @@ describe('DiffEngine run-coalescing: wide-char safety', () => {
     buf.blitLine(0, row);
 
     const diff = engine.diff(null, buf);
-    // The run A-B is contiguous (1 move), then wide char at x=2 starts a new run.
-    // The placeholder (char='') is skipped. D at x=4 is NOT adjacent to the wide
-    // char position (x=2), so it requires a new cursor address.
-    // Minimum expected: 3 cursor sequences (A-B run, wide char, D-E run)
-    expect(countCursorMoves(diff)).toBeGreaterThanOrEqual(2);
+    // A, B and the wide char form one contiguous run (the wide char is drawn right after B).
+    // Its placeholder cell is skipped, so D at x=4 is not where the cursor stands after the
+    // 2-column glyph and needs a new cursor address: exactly 2 moves.
+    expect(countCursorMoves(diff)).toBe(2);
     // All non-placeholder chars must appear in output
     expect(diff).toContain('A');
     expect(diff).toContain('B');

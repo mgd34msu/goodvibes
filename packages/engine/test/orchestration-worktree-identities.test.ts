@@ -1,4 +1,4 @@
-/** UNRUN native resource lifecycle regressions: actual Git and private identity
+/** Native resource lifecycle regressions: actual Git and private identity
  * bookkeeping, no model answers or generated fixture expectations. */
 import crypto from 'node:crypto';
 import * as lockModule from '../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
@@ -78,8 +78,10 @@ test('borrowed successful creation cannot publish a native acquisition or cleanu
   const f = fixture(), ws = stream(); let path = '';
   const fake = spyOn(GitService.prototype, 'worktreeAdd').mockImplementation(async target => { path = target; mkdirSync(target, { recursive: true }); writeFileSync(join(target, 'foreign'), 'preserve'); });
   const owner = manager(f.root);
-  try { await expect(owner.ensureWorktree(ws, ws.items[0]!)).rejects.toThrow(); }
-  finally { fake.mockRestore(); }
+  try {
+    await expect(owner.ensureWorktree(ws, ws.items[0]!)).rejects.toThrow();
+    expect(fake).toHaveBeenCalled();
+  } finally { fake.mockRestore(); }
   await owner.cleanupTerminated(ws, ws.items[0]!);
   expect(ws.items[0]!.worktreePath).toBeUndefined(); expect(readFileSync(join(path, 'foreign'), 'utf8')).toBe('preserve');
   expect(new WorktreeIdentityRegistry(f.common).find(key)?.state).toBe('reserved');
@@ -183,6 +185,10 @@ test('actual installed writer publishes the capability floor before native Git a
 test('ordinary fresh allocation and current native restore never run the old SHA namespace matcher', async () => {
   const f = fixture(), hashing = spyOn(crypto, 'createHash');
   try {
+    // Control: the spy sees a hash taken through the module, so an empty list below is meaningful.
+    crypto.createHash('sha256').update('control').digest('hex');
+    expect(hashing.mock.calls).toHaveLength(1);
+    hashing.mockClear();
     const ws = stream(), owner = manager(f.root); await owner.ensureWorktree(ws, ws.items[0]!);
     const resumed = stream(), restarted = manager(f.root); restarted.reconcileOrphans(resumed);
     expect<unknown>((await restarted.ensureWorktree(resumed, resumed.items[0]!)).path).toBe(ws.items[0]!.worktreePath);
@@ -197,7 +203,9 @@ test('lock replacement immediately after actual native acquisition cannot be ado
     if (release && selected === lock) { const bytes = readFileSync(lock); renameSync(lock, `${lock}.original`); writeFileSync(lock, bytes); }
     return release;
   });
-  try { await expect(new WorktreeIdentityRegistry(f.common).reserve(key)).rejects.toThrow(); }
-  finally { native.mockRestore(); }
+  try {
+    await expect(new WorktreeIdentityRegistry(f.common).reserve(key)).rejects.toThrow();
+    expect(native).toHaveBeenCalled();
+  } finally { native.mockRestore(); }
   expect(existsSync(path)).toBe(false); expect(existsSync(lock)).toBe(true); expect(existsSync(`${lock}.original`)).toBe(true);
 });

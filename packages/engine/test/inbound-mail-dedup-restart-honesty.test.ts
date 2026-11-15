@@ -14,20 +14,11 @@
  * still at 204, the message is fetched again into an empty cache, and the owner
  * is told a second time.
  *
- * This file pins both halves of the correction.
- *
- *  1. **What the cache genuinely cannot do.** The first test drives a real
- *     supervisor through a restart and shows the same message handled twice.
- *     It is not a fail-first reproduction of a wrong answer, it is a statement
- *     of an ABSENCE OF CAPABILITY, written down so the false comments cannot
- *     come back. It passes before and after the fix, by construction.
- *
- *  2. **What actually covers the restart.** The rest exercise the mechanism
- *     that does: the intake asks the record store whether this exact message
- *     was already announced, and that store is on disk. The failure direction
- *     is checked as carefully as the success one, anything the store cannot
- *     answer leads to announcing, because §6's ruling is that a duplicate beats
- *     silence.
+ * What covers the restart is the mechanism below: the intake asks the record
+ * store whether this exact message was already announced, and that store is on
+ * disk. The failure direction is checked as carefully as the success one,
+ * anything the store cannot answer leads to announcing, because §6's ruling is
+ * that a duplicate beats silence.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,20 +27,10 @@ import { join } from 'node:path';
 import {
   createInboundMailIntake,
   InboundExpectationRegistry,
-  InboundMailHousekeeper,
   InboundMailStore,
-  InboundMailSupervisor,
-  MailboxCursorStore,
   PersistedExpectationStore,
-  type InboundMailSourceFactory,
-  type InboundMailSupervisorDeps,
 } from '../platform/src/platform/email/inbound/index.ts';
-import type { DedupingInboundMailSink } from '../platform/src/platform/email/inbound/sink.ts';
-import type { InboundMailSource } from '../platform/src/platform/email/inbound/source.ts';
-import type {
-  ImapInboundMessage,
-  InboundCapabilityVerdict,
-} from '../platform/src/platform/email/inbound/ports.ts';
+import type { ImapInboundMessage } from '../platform/src/platform/email/inbound/ports.ts';
 
 const NOW = new Date('2026-07-28T09:00:00.000Z');
 const ACCOUNT = 'primary';
@@ -86,110 +67,7 @@ function mail(uid = 205, overrides: Partial<ImapInboundMessage> = {}): ImapInbou
 }
 
 // ---------------------------------------------------------------------------
-// 1. What the in-memory cache cannot do, stated rather than claimed away
-// ---------------------------------------------------------------------------
-
-const HEALTHY: InboundCapabilityVerdict = {
-  state: 'healthy',
-  reason: 'idle-push',
-  detail: 'The server advertised IDLE and is pushing.',
-  fix: '',
-};
-
-/** A source that hands its sink back so a test can deliver through it. */
-class SinkCapturingSource implements InboundMailSource {
-  readonly kind = 'imap' as const;
-  readonly latency = { kind: 'push' } as const;
-
-  async start(): Promise<InboundCapabilityVerdict> { return HEALTHY; }
-
-  async run(signal: AbortSignal): Promise<void> {
-    await new Promise<void>((resolve) => {
-      if (signal.aborted) { resolve(); return; }
-      signal.addEventListener('abort', () => { resolve(); }, { once: true });
-    });
-  }
-
-  async stop(): Promise<void> { /* nothing to release */ }
-}
-
-describe('the dedup cache does not survive a restart, and no TTL changes that', () => {
-  test('a config-change restart hands the source a fresh cache, so the same message is handled twice', async () => {
-    // Honest framing: this is not a wrong answer being caught. It is the
-    // capability the comments claimed and the mechanism does not have, written
-    // down so the claim cannot be restated. `start()` is what the cluster gate
-    // and a config change both call, and it builds a new cache every time.
-    const dir = scratch();
-    const sinks: DedupingInboundMailSink[] = [];
-    const source = new SinkCapturingSource();
-    const sources: InboundMailSourceFactory = {
-      create: async (input) => { sinks.push(input.sink); return source; },
-    };
-    const handled: string[] = [];
-    const cursors = new MailboxCursorStore(join(dir, 'cursors.json'), {
-      isAccountConfigured: (account) => account === ACCOUNT,
-    });
-    const records = new InboundMailStore(join(dir, 'records.json'), { now: () => NOW.getTime() });
-    const expectationStore = new PersistedExpectationStore(join(dir, 'expectations.json'), {
-      now: () => NOW,
-    });
-    const supervisor = new InboundMailSupervisor({
-      config: {
-        get: (key: string) => ({
-          'surfaces.email.inbound.enabled': true,
-          'surfaces.email.inbound.source': 'imap',
-          // The largest value the schema accepts. If the TTL could cover a
-          // restart at ANY setting, it would cover it at this one.
-          'surfaces.email.inbound.dedupTtlMinutes': 1440,
-        } as Record<string, unknown>)[key],
-      } as unknown as InboundMailSupervisorDeps['config'],
-      account: ACCOUNT,
-      mailbox: MAILBOX,
-      sources,
-      selectionFacts: async () => ({ googleAdopted: false, mailAccountIsGmail: false }),
-      cursors,
-      records,
-      expectations: new InboundExpectationRegistry({ store: expectationStore, now: () => NOW }),
-      expectationPolicy: expectationStore,
-      housekeeper: new InboundMailHousekeeper({
-        cursors,
-        records,
-        expectations: expectationStore,
-        disclosurePath: join(dir, 'housekeeping.json'),
-      }),
-      handle: async (message) => {
-        // Only the IMAP variant has a UID, the Gmail one is keyed on
-        // historyId, so the identity is chosen on the discriminant. The old
-        // `message.uid ?? 0` read a field that does not exist on half the
-        // union, which is a different thing from a UID that is absent.
-        const uid = message.source === 'imap' ? message.uid : 0;
-        handled.push(`${message.account}:${String(uid)}`);
-      },
-    });
-
-    try {
-      await supervisor.start();
-      await sinks[0]!.deliver(mail(205));
-      // Within one process the cache does its job.
-      await sinks[0]!.deliver(mail(205));
-      expect(handled).toHaveLength(1);
-
-      // The restart. Same supervisor, same config, same 1440-minute TTL.
-      await supervisor.start();
-      expect(sinks).toHaveLength(2);
-      await sinks[1]!.deliver(mail(205));
-    } finally {
-      await supervisor.stop();
-    }
-
-    // Handled again. The claim was not expired, the object holding it was
-    // replaced. This is the number the three comments said could not happen.
-    expect(handled).toHaveLength(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 2. What actually covers the restart: the record store
+// What covers a restart: the record store
 // ---------------------------------------------------------------------------
 
 function intakeOver(store: InboundMailStore, dir: string, sent: unknown[]) {

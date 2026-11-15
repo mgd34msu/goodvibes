@@ -64,6 +64,7 @@ import {
 } from './companion-chat-branching.js';
 import {
   executeCompanionToolCalls,
+  runToolExhaustionFinalizer,
 } from './companion-chat-turn-execution.js';
 import { planCompanionSweep } from './companion-chat-gc.js';
 import type { CompanionSessionBrokerBridge } from './companion-chat-broker-bridge.js';
@@ -78,6 +79,8 @@ import type { HookEvent, HookResult } from '../hooks/types.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { AtomicWriteDurabilityError } from '../utils/atomic-json-store.js';
+import type { ConfigManager } from '../config/manager.js';
 
 // ---------------------------------------------------------------------------
 // Turn control (per-turn abort scope, cancel finalization, pending queue),
@@ -115,7 +118,7 @@ export interface CompanionChatEventPublisher {
   publishEvent(
     event: string,
     payload: unknown,
-    filter?: { clientId?: string },
+    filter?: { clientId?: string; clientIdPrefix?: string },
   ): void;
 }
 
@@ -126,7 +129,18 @@ export interface CompanionChatEventPublisher {
 const DEFAULT_IDLE_ACTIVE_MS = 30 * 60 * 1_000; // 30 minutes with messages
 const DEFAULT_IDLE_EMPTY_MS = 5 * 60 * 1_000;   // 5 minutes empty session
 const DEFAULT_CLOSED_MEMORY_GRACE_MS = 5 * 60 * 1_000; // evict closed bodies from RAM after 5 min
+const MAX_REMEMBERED_CLIENT_MESSAGE_IDS = 500; // per session
 const GC_INTERVAL_MS = 60 * 1_000;               // sweep every minute
+
+/**
+ * Most model/tool rounds one reply may take. A model that keeps asking for
+ * tools would otherwise spend provider budget forever and leave the chat
+ * "replying"; past this the model is asked, once more and without tools, to
+ * answer with what it has.
+ */
+export const COMPANION_MAX_TOOL_ROUNDS = 24;
+const TOOL_EXHAUSTION_FINALIZER_PROMPT =
+  'You have used all the tool rounds available for this reply. Do not call any more tools. Answer now with what you already have, and say plainly what you could not finish.';
 function assertCompleteProviderModelRoute(
   input: { readonly model?: string | undefined; readonly provider?: string | undefined },
 ): void {
@@ -147,16 +161,17 @@ interface InternalSession {
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
   pendingTurns?: QueuedCompanionTurn[];
   preparingTurns?: number;
+  /** Client-chosen send ids already accepted, so a re-sent request answers with the first message instead of a second turn. Memory only: forgotten with the session or on a restart. */
+  clientMessageIds?: Map<string, string>;
   routingUpdatePending?: boolean;
   lastActivityAt: number;
-  // The SSE client ID for this session (set when a subscriber connects)
-  subscriberClientId: string | null;
   /**
-   * True once the GC has evicted this closed session's heavy in-memory handles
-   * (ConversationManager + message bodies). Meta stays listable; the on-disk
-   * copy is untouched. Prevents repeated eviction work across sweeps.
+   * True once the GC has dropped this closed session's replay state (its
+   * ConversationManager). The transcript itself stays resident because the
+   * session and message routes serve it from memory; evicting it would show a
+   * closed chat as empty and let a later save overwrite the file with nothing.
    */
-  messagesEvicted?: boolean;
+  replayEvicted?: boolean;
 }
 
 type MutableSessionMeta = {
@@ -201,6 +216,8 @@ export interface CompanionChatManagerConfig {
   readonly hookDispatcher?: HookDispatcherLike | null | undefined;
   /** Optional runtime event bus for typed tool telemetry. */
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
+  /** Source of `runtime.toolBudget.*`; omitted means tool calls run without a budget. */
+  readonly configManager?: Pick<ConfigManager, 'get'> | undefined;
   /** Optional artifact store used to resolve and inline chat attachments. */
   readonly artifactStore?: CompanionChatArtifactStore | null | undefined;
   /** Directory for session JSON files. Default `<homeDirectory>/.goodvibes/companion-chat/sessions/`
@@ -247,6 +264,7 @@ export class CompanionChatManager {
   private readonly permissionManager: PermissionManager | null;
   private readonly hookDispatcher: HookDispatcherLike | null;
   private readonly runtimeBus: RuntimeEventBus | null;
+  private readonly configManager: Pick<ConfigManager, 'get'> | undefined;
   private readonly artifactStore: CompanionChatArtifactStore | null;
   private readonly persistence: CompanionChatPersistence | null;
   private readonly rateLimiter: CompanionChatRateLimiter | null;
@@ -269,6 +287,7 @@ export class CompanionChatManager {
    */
   private readonly _pendingSaves = new Map<string, Promise<void>>();
   private readonly saveFailures = new Map<string, unknown>();
+  private readonly recoveringSaves = new Set<string>();
   private readonly activeWork = new Set<Promise<unknown>>();
   private closing: Promise<void> | undefined;
 
@@ -281,6 +300,7 @@ export class CompanionChatManager {
     this.permissionManager = config.permissionManager ?? null;
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.runtimeBus = config.runtimeBus ?? null;
+    this.configManager = config.configManager;
     this.artifactStore = config.artifactStore ?? null;
     this.idleActiveMs = config.idleActiveMs ?? DEFAULT_IDLE_ACTIVE_MS;
     this.idleEmptyMs = config.idleEmptyMs ?? DEFAULT_IDLE_EMPTY_MS;
@@ -308,6 +328,9 @@ export class CompanionChatManager {
     this.gcTimer = setInterval(() => {
       this._gcSweep();
       this.rateLimiter?.cleanup();
+      void this.recoverFailedSaves().catch((error: unknown) => {
+        logger.warn('[companion-chat] retrying failed chat saves threw', { error: summarizeError(error) });
+      });
     }, gcIntervalMs);
     // Don't block node process on this timer
     this.gcTimer.unref?.();
@@ -329,6 +352,14 @@ export class CompanionChatManager {
     }
 
     const stored = await this.persistence.loadAll();
+    const rejected = this.persistence.rejectedOnLoad();
+    if (rejected.length > 0) {
+      // Set-aside chats are not in the list; say so at startup so a missing chat is explained.
+      logger.warn('[companion-chat] saved chats could not be loaded and were set aside', {
+        rejected: rejected.length,
+        rejectedFiles: rejected.map((entry) => `${entry.file}: ${entry.reason}`),
+      });
+    }
     for (const { meta, messages } of stored) {
       const normalizedMessages = messages.map((message) => this.normalizeMessage(message));
       const conversation = new ConversationManager();
@@ -345,14 +376,17 @@ export class CompanionChatManager {
         }
       }
 
-      this.sessions.set(meta.id, {
+      const loaded: InternalSession = {
         meta,
         conversation,
         messages: normalizedMessages,
         abortController: new AbortController(),
         lastActivityAt: meta.updatedAt,
-        subscriberClientId: null,
-      });
+      };
+      this.sessions.set(meta.id, loaded);
+      // A queued send lived in memory only; nothing is left to run it after a
+      // restart, so the transcript must stop saying it is waiting.
+      if (this._markUnanswered(loaded)) this._persist(meta.id);
     }
 
     this.initCompleted = true;
@@ -392,7 +426,6 @@ export class CompanionChatManager {
       messages: [],
       abortController: new AbortController(),
       lastActivityAt: now,
-      subscriberClientId: null,
     });
 
     this._persist(id);
@@ -484,7 +517,7 @@ export class CompanionChatManager {
     if (routing) session.routingUpdatePending = true;
     try {
       return await this.queueSave(sessionId, () => {
-        if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw new Error('Original chat ended before metadata publication');
+        if (this.sessions.get(sessionId) !== session || session.meta.status !== 'active') throw Object.assign(new Error('Original chat ended before metadata publication'), { chatEnded: true });
         const patch = this.prepareSessionPatch(session, admitted, routing);
         const updated = { ...session.meta, ...patch };
         if (this.persistence) this.persistence.saveSync({ meta: updated, messages: session.messages });
@@ -492,7 +525,13 @@ export class CompanionChatManager {
         this._brokerSync.track(committed.id, () => this._brokerSync.registerSession(committed));
         return committed;
       });
-    } catch { throw this.storageUnavailable(); }
+    } catch (error) {
+      // A failed write is named as one: the failure is recorded for the chat a
+      // tick later, so the generic "shutting down or changed" text would send
+      // the operator to a restart when the disk is the problem.
+      const chatEnded = typeof error === 'object' && error !== null && (error as { chatEnded?: unknown }).chatEnded === true;
+      throw this.storageUnavailable(chatEnded ? undefined : sessionId, chatEnded ? undefined : error);
+    }
     finally { if (routing) session.routingUpdatePending = false; }
   }
 
@@ -514,10 +553,15 @@ export class CompanionChatManager {
     return patch;
   }
 
-  registerSubscriber(sessionId: string, clientId: string): void {
+  /**
+   * A reader opened a stream on the session. Events are published to every
+   * stream of the session by prefix, not to one remembered client id: a second
+   * reader would otherwise displace the first, and a closed last reader would
+   * leave the survivor with a stale id and no events.
+   */
+  registerSubscriber(sessionId: string, _clientId: string): void {
     const session = this.sessions.get(sessionId);
     if (session) {
-      session.subscriberClientId = clientId;
       session.lastActivityAt = Date.now();
     }
   }
@@ -532,6 +576,7 @@ export class CompanionChatManager {
     if (session.meta.status === 'closed') return session.meta;
 
     session.abortController.abort();
+    this._abandonQueuedTurns(session, 'This chat was closed before this queued message was answered.');
     const now = Date.now();
     const updated = this._updateMeta(session, { status: 'closed', closedAt: now, updatedAt: now });
 
@@ -643,6 +688,10 @@ export class CompanionChatManager {
       /** Steer: jump the pending queue (the caller cancels the active turn). */
       readonly steer?: boolean | undefined;
       readonly ownerDirect?: boolean | undefined;
+      /** Idempotency key chosen by the sender: a second post with the same key returns the first message's id and starts nothing. */
+      readonly clientMessageId?: string | undefined;
+      /** Called synchronously as the message joins the queue, with the turn running at that instant. */
+      readonly onEnqueued?: ((activeTurn: ActiveCompanionTurn | null) => void) | undefined;
     } = {},
   ): Promise<string> {
     this.assertAvailable(sessionId);
@@ -653,6 +702,11 @@ export class CompanionChatManager {
     if (session.meta.status === 'closed') {
       throw Object.assign(new Error('Session is closed'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
     }
+
+    // A re-sent request (the first answer never arrived) is answered with the
+    // first message, before it can count against the rate limit or run again.
+    const alreadyAccepted = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
+    if (alreadyAccepted !== undefined) return alreadyAccepted;
 
     // Rate-limit check (throws GoodVibesError on violation)
     this.rateLimiter?.check(sessionId, clientId);
@@ -668,22 +722,6 @@ export class CompanionChatManager {
     const messageId = randomUUID();
     const now = Date.now();
 
-    // A send that lands while another turn is running QUEUES (visible in the
-    // transcript immediately, marked 'queued', answered after the current
-    // turn), it must never start a concurrent turn against the same
-    // conversation. A steer jumps the queue instead (see steerMessage).
-    const queuedBehindActiveTurn = session.activeTurn != null && options.steer !== true;
-    const userMsg: CompanionChatMessage = {
-      id: messageId,
-      sessionId,
-      role: 'user',
-      content,
-      attachments,
-      ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
-      createdAt: now,
-      ...(queuedBehindActiveTurn ? { deliveryState: 'queued' as const } : {}),
-    };
-
     // Provider-ready content is built at post time but committed to the
     // conversation only when the turn STARTS, committing now would leak a
     // queued message into the active turn's later tool rounds, which re-read
@@ -698,6 +736,34 @@ export class CompanionChatManager {
       throw Object.assign(new Error('The original chat ended before its message was prepared.'), { code: EngineErrorCodes.SESSION_CLOSED, status: 409 });
     }
 
+    // A send that lands while another turn is running QUEUES (visible in the
+    // transcript immediately, marked 'queued', answered after the current
+    // turn), it must never start a concurrent turn against the same
+    // conversation. A steer jumps the queue instead (see steerMessage). Decided
+    // here, after the preparation await, because a turn that started during it
+    // is the one this message waits behind.
+    // A duplicate that was still being prepared when the first one landed.
+    const acceptedWhilePreparing = options.clientMessageId === undefined ? undefined : session.clientMessageIds?.get(options.clientMessageId);
+    if (acceptedWhilePreparing !== undefined) return acceptedWhilePreparing;
+    if (options.clientMessageId !== undefined) {
+      const accepted = (session.clientMessageIds ??= new Map());
+      accepted.set(options.clientMessageId, messageId);
+      if (accepted.size > MAX_REMEMBERED_CLIENT_MESSAGE_IDS) {
+        const oldest = accepted.keys().next().value;
+        if (oldest !== undefined) accepted.delete(oldest);
+      }
+    }
+    const queuedBehindActiveTurn = session.activeTurn != null && options.steer !== true;
+    const userMsg: CompanionChatMessage = {
+      id: messageId,
+      sessionId,
+      role: 'user',
+      content,
+      attachments,
+      ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+      createdAt: now,
+      ...(queuedBehindActiveTurn ? { deliveryState: 'queued' as const } : {}),
+    };
     session.messages.push(this.normalizeMessage(userMsg));
     session.lastActivityAt = now;
     this._updateMeta(session, {
@@ -721,6 +787,7 @@ export class CompanionChatManager {
     const queue = (session.pendingTurns ??= []);
     if (options.steer === true) queue.unshift(entry);
     else queue.push(entry);
+    options.onEnqueued?.(session.activeTurn ?? null);
     this._startNextTurn(session);
 
     return messageId;
@@ -736,7 +803,12 @@ export class CompanionChatManager {
     void this.closing.catch(() => {});
     this.disposed = true;
     if (this.gcTimer) { clearInterval(this.gcTimer); this.gcTimer = null; }
-    for (const session of this.sessions.values()) session.abortController.abort();
+    for (const session of this.sessions.values()) {
+      session.abortController.abort();
+      const hadQueued = session.messages.some((message) => message.deliveryState === 'queued');
+      this._abandonQueuedTurns(session, 'The companion chat service shut down before this queued message was answered.');
+      if (hadQueued) this._persist(session.meta.id);
+    }
     void (async () => {
       while (this.activeWork.size) await Promise.allSettled([...this.activeWork]);
       while (this._pendingSaves.size) await Promise.allSettled([...this._pendingSaves.values()]);
@@ -763,12 +835,20 @@ export class CompanionChatManager {
     clientId = '',
     options: CompanionPostMessageOptions = {},
   ): Promise<SteerCompanionChatMessageOutput> {
-    const activeBefore = this.sessions.get(sessionId)?.activeTurn ?? null;
-    const messageId = await this._postMessageInternal(sessionId, content, clientId, { ...options, steer: true });
+    // The turn to stop is the one running when the message joined the queue,
+    // not the one running before the message was prepared: a turn that started
+    // during preparation is what this message would otherwise wait behind.
+    let activeAtEnqueue: ActiveCompanionTurn | null = null;
+    const messageId = await this._postMessageInternal(sessionId, content, clientId, {
+      ...options,
+      steer: true,
+      onEnqueued: (turn) => { activeAtEnqueue = turn; },
+    });
     let cancelledTurnId: string | undefined;
-    if (activeBefore) {
+    const running = activeAtEnqueue as ActiveCompanionTurn | null;
+    if (running) {
       try {
-        const result = await this.cancelTurn(sessionId, { turnId: activeBefore.turnId });
+        const result = await this.cancelTurn(sessionId, { turnId: running.turnId });
         cancelledTurnId = result.turnId;
       } catch (err: unknown) {
         // Benign races: the turn finished naturally (NO_ACTIVE_TURN), or the
@@ -776,17 +856,26 @@ export class CompanionChatManager {
         // (TURN_MISMATCH). The turnId guard is what makes this safe: a steer
         // must never cancel its own turn or an unrelated newer one.
         const code = (err as { code?: string }).code;
-        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') throw err;
+        if (code !== 'NO_ACTIVE_TURN' && code !== 'TURN_MISMATCH') {
+          // The message is already queued, so failing here would invite a
+          // retry that sends it twice. Report what happened instead.
+          logger.warn('[companion-chat] a steer could not stop the running reply', { sessionId, error: summarizeError(err) });
+        }
       }
     }
     const session = this.sessions.get(sessionId);
     if (session) this._startNextTurn(session);
+    // The steer sits at the front of the queue, so it has started exactly when
+    // it has left the queue; otherwise it is waiting for a reply that is still
+    // finishing.
+    const turnStarted = session !== undefined && session.meta.status === 'active'
+      && !(session.pendingTurns?.some((entry) => entry.userMessageId === messageId) ?? false);
     return {
       sessionId,
       messageId,
       steered: true,
       ...(cancelledTurnId !== undefined ? { cancelledTurnId } : {}),
-      turnStarted: true,
+      turnStarted,
     };
   }
 
@@ -845,7 +934,14 @@ export class CompanionChatManager {
       ...(effort === undefined ? {} : { reasoningEffort: effort }) });
   }
 
-  private async _runTurn(session: InternalSession, userMessageId: string, onTurnEvent?: (event: CompanionChatTurnEvent) => void, route = this.captureTurnRoute(session.meta)): Promise<void> {
+  private async _runTurn(
+    session: InternalSession,
+    userMessageId: string,
+    onTurnEvent?: (event: CompanionChatTurnEvent) => void,
+    route = this.captureTurnRoute(session.meta),
+    /** Runs inside the turn, after it owns the active slot and before the first provider round. */
+    prepareConversation?: () => Promise<void>,
+  ): Promise<void> {
     const turnId = randomUUID();
     const sessionId = session.meta.id;
 
@@ -854,7 +950,6 @@ export class CompanionChatManager {
     // never be aborted for a single-turn stop.
     const scope = createTurnAbortScope(turnId, session.abortController.signal);
     const abortSignal = scope.abortSignal;
-    session.activeTurn = scope.activeTurn;
 
     // Track announced-but-unresolved tool calls so a cancelled turn can close
     // them (every turn.tool_call gets a turn.tool_result before the terminal
@@ -870,7 +965,10 @@ export class CompanionChatManager {
       this.eventPublisher.publishEvent(
         `companion-chat.${event.type}`,
         event,
-        session.subscriberClientId ? { clientId: session.subscriberClientId } : undefined,
+        // Never unfiltered: with no stream open the gateway would deliver the turn to every client.
+        // Streams register as `companion-chat:<sessionId>:<suffix>`, so the prefix reaches every
+        // reader of this session, including one that opens later, and no one else's.
+        { clientIdPrefix: `companion-chat:${session.meta.id}:` },
       );
       // In-process tap (e.g. the HA SSE route); a throwing listener must not break the turn.
       try { onTurnEvent?.(event); } catch { /* isolate listener */ }
@@ -886,8 +984,6 @@ export class CompanionChatManager {
       timestamp: userMsg?.createdAt ?? Date.now(),
       ...(userMsg?.attachments?.length ? { attachments: userMsg.attachments } : {}),
     };
-
-    publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
 
     let assistantContent = '';
     // The tail not yet committed to the conversation history (completed tool
@@ -921,9 +1017,15 @@ export class CompanionChatManager {
     let decisionRoute: import('../providers/decision-router.js').DecisionRouterRouteInfo | undefined;
     let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     try {
+      // Inside the try so a throwing publisher still releases the slot and drains the queue.
+      session.activeTurn = scope.activeTurn;
+      publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const toolDefinitions = this.toolRegistry?.getToolDefinitions() ?? [];
+      if (prepareConversation) await prepareConversation();
 
+      let rounds = 0;
       while (!abortSignal.aborted) {
+        rounds += 1;
         const stream = this.provider.chatStream([...session.conversation.getMessagesForLLM()], {
           routingContext: { sessionId, turnId, ...(userMsg ? { prompt: userMsg.content } : {}) },
           systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(route.systemPrompt),
@@ -1000,15 +1102,43 @@ export class CompanionChatManager {
           break;
         }
 
-        session.conversation.addAssistantMessage(uncommittedContent, { toolCalls });
-        uncommittedContent = '';
+        const closeUnrun = (reason: string): void => {
+          for (const call of toolCalls) {
+            publish({ type: 'turn.tool_result', sessionId, turnId, toolCallId: call.id, toolName: call.name, result: reason, isError: true });
+          }
+        };
 
         if (!this.toolRegistry) {
+          // Nothing will answer these calls, so they stay out of the history: a
+          // provider rejects a later turn that carries a tool call with no result.
+          if (uncommittedContent) session.conversation.addAssistantMessage(uncommittedContent);
+          uncommittedContent = '';
           break;
         }
 
+        if (rounds >= COMPANION_MAX_TOOL_ROUNDS) {
+          if (uncommittedContent) session.conversation.addAssistantMessage(uncommittedContent);
+          uncommittedContent = '';
+          closeUnrun(`Not run: this reply reached its limit of ${String(COMPANION_MAX_TOOL_ROUNDS)} tool rounds.`);
+          const finalText = await runToolExhaustionFinalizer(
+            { provider: this.provider, finalizerPrompt: TOOL_EXHAUSTION_FINALIZER_PROMPT },
+            { meta: { id: sessionId, model: route.model, provider: route.provider, reasoningEffort: route.reasoningEffort, systemPrompt: route.systemPrompt }, conversation: session.conversation },
+            abortSignal, turnId, publish,
+          );
+          assistantContent += finalText;
+          uncommittedContent = finalText;
+          if (!abortSignal.aborted) {
+            session.conversation.addAssistantMessage(finalText);
+            uncommittedContent = '';
+          }
+          break;
+        }
+
+        session.conversation.addAssistantMessage(uncommittedContent, { toolCalls });
+        uncommittedContent = '';
+
         const toolResults = await executeCompanionToolCalls(
-          { toolRegistry: this.toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus },
+          { toolRegistry: this.toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus, configManager: this.configManager },
           toolCalls, publish, sessionId, turnId,
         );
         session.conversation.addToolResults(toolResults);
@@ -1054,8 +1184,9 @@ export class CompanionChatManager {
     } catch (err: unknown) {
       if (!abortSignal.aborted) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-        publish({ type: 'turn.error', sessionId, turnId, error: errorMessage });
+        // The waiter is answered first: a publisher that threw once may throw again.
         this.resolvePendingReply(userMessageId, { messageId: userMessageId, error: errorMessage });
+        publish({ type: 'turn.error', sessionId, turnId, error: errorMessage });
       } else {
         finalizeCancelled();
       }
@@ -1086,12 +1217,15 @@ export class CompanionChatManager {
   regenerateMessage(
     sessionId: string,
     input: RegenerateCompanionChatMessageInput = {},
+    options: { readonly ownerDirect?: boolean | undefined; readonly clientId?: string | undefined } = {},
   ): RegenerateCompanionChatMessageOutput {
     const session = this._requireOpenSession(sessionId);
-    this.rateLimiter?.check(sessionId, '');
+    this._assertNoTurnInFlight(session, 'regenerate a reply');
+    this.rateLimiter?.check(sessionId, options.clientId ?? '');
+    const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
     const plan = planRegenerate(session, input.messageId, now);
-    this._commitBranchAndRun(session, sessionId, plan.anchorUserMessageId, now);
+    this._commitBranchAndRun(session, sessionId, plan.anchorUserMessageId, now, route, options.ownerDirect === true);
     const { regeneratedFrom, supersededMessageIds } = plan;
     return { sessionId, regeneratedFrom, supersededMessageIds, turnStarted: true };
   }
@@ -1105,14 +1239,32 @@ export class CompanionChatManager {
   editMessage(
     sessionId: string,
     input: EditCompanionChatMessageInput,
+    options: { readonly ownerDirect?: boolean | undefined; readonly clientId?: string | undefined } = {},
   ): EditCompanionChatMessageOutput {
     const session = this._requireOpenSession(sessionId);
-    this.rateLimiter?.check(sessionId, '');
+    this._assertNoTurnInFlight(session, 'edit a message');
+    this.rateLimiter?.check(sessionId, options.clientId ?? '');
+    const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
     const plan = applyEditBranch(session, sessionId, input, this.artifactStore, now);
-    this._commitBranchAndRun(session, sessionId, plan.newMessageId, now);
+    this._commitBranchAndRun(session, sessionId, plan.newMessageId, now, route, options.ownerDirect === true);
     const { editedFrom, newMessageId, supersededMessageIds } = plan;
     return { sessionId, editedFrom, messageId: newMessageId, supersededMessageIds, turnStarted: true };
+  }
+
+  /**
+   * Regenerate and edit replace the conversation and start a turn of their
+   * own, so they cannot run beside a reply, a message being prepared, or
+   * queued sends: the older turn would keep streaming into the new branch.
+   */
+  private _assertNoTurnInFlight(session: InternalSession, action: string): void {
+    const queued = session.pendingTurns?.length ?? 0;
+    if (!session.activeTurn && !session.preparingTurns && !queued && !session.routingUpdatePending) return;
+    const state = session.activeTurn ? 'is still replying' : queued ? `has ${String(queued)} queued message${queued === 1 ? '' : 's'} waiting` : 'is still preparing a message';
+    throw Object.assign(
+      new Error(`This chat ${state}, so it cannot ${action} now. Stop the current reply (or wait for it and any queued messages to finish), then try again.`),
+      { code: 'CHAT_TURN_BUSY', status: 409 },
+    );
   }
 
   /** Look up an active (open) session or throw the closed/not-found machine codes. */
@@ -1138,17 +1290,31 @@ export class CompanionChatManager {
     sessionId: string,
     anchorUserMessageId: string,
     now: number,
+    route: QueuedCompanionTurn['route'],
+    ownerDirect: boolean,
   ): void {
     session.messages = session.messages.map(message => this.normalizeMessage(message));
     const conversation = new ConversationManager();
+    let anchor: CompanionChatMessage | undefined;
     for (const msg of activeMessages(session.messages)) {
+      if (msg.id === anchorUserMessageId) { anchor = msg; continue; }
       if (msg.role === 'user') conversation.addUserMessage(buildReplayUserContent(msg));
       else conversation.addAssistantMessage(msg.content);
     }
     session.conversation = conversation;
     this._updateMeta(session, { messageCount: session.messages.length, updatedAt: now });
     this._persist(sessionId);
-    this.ownTurn(this._runTurn(session, anchorUserMessageId), (error: unknown) => {
+    // Same funnel as a fresh send: an owner-driven edit restarts the
+    // untrusted-content window; a caller that cannot attest ownership does not.
+    startTurnForOwnerInput({ ownerDirect });
+    // The message the turn answers goes to the model the way a fresh send
+    // does, with its files read in, not as the text-only summary used to
+    // rebuild older history. Built inside the turn so its read is owned by it.
+    const prepareAnchor = async (): Promise<void> => {
+      if (!anchor) return;
+      conversation.addUserMessage(await buildProviderUserContent(anchor.content, anchor.attachments ?? [], this.artifactStore));
+    };
+    this.ownTurn(this._runTurn(session, anchorUserMessageId, undefined, route, prepareAnchor), (error: unknown) => {
       logger.warn('[companion-chat] branch turn execution failed', { sessionId, error: summarizeError(error) });
     });
   }
@@ -1160,7 +1326,7 @@ export class CompanionChatManager {
   /**
    * Periodic GC sweep. Deletion authority is SPLIT (charter: closed sessions are
    * HISTORY): close-idle closes an idle active session; evict-memory drops a
-   * long-closed session's in-memory handles (meta + on-disk copy kept);
+   * long-closed session's replay state (transcript, meta and on-disk copy kept);
    * delete-persistent removes the file ONLY under an explicit finite retention
    * window (default retains indefinitely, see {@link planCompanionSweep}).
    */
@@ -1172,7 +1338,7 @@ export class CompanionChatManager {
           status: session.meta.status,
           closedAt: session.meta.closedAt,
           lastActivityAt: session.lastActivityAt,
-          hasMessagesInMemory: !session.messagesEvicted && session.messages.length > 0,
+          hasReplayInMemory: !session.replayEvicted,
           isEmpty: session.messages.length === 0,
         },
         {
@@ -1186,16 +1352,20 @@ export class CompanionChatManager {
 
       switch (action.kind) {
         case 'close-idle':
+          // A long reply or queued work is activity, however long ago the last message landed.
+          if (session.activeTurn || session.preparingTurns || session.pendingTurns?.length) break;
           session.abortController.abort();
+          this._abandonQueuedTurns(session, 'This chat was closed for inactivity before this queued message was answered.');
           this._updateMeta(session, { status: 'closed', closedAt: now, updatedAt: now });
           this._persist(id);
           this._brokerSync.track(id, () => this._brokerSync.closeSession(id));
           break;
         case 'evict-memory':
-          // Free heavy handles; keep meta (listable) and the persisted file.
-          session.messages = [];
+          // Free the replay state only. The transcript stays: the routes serve
+          // it from memory, and a later save writes it, so dropping it would
+          // show an empty chat and could replace the saved file with nothing.
           session.conversation = new ConversationManager();
-          session.messagesEvicted = true;
+          session.replayEvicted = true;
           break;
         case 'delete-persistent':
           void this._hardRemove(id).catch((error: unknown) => {
@@ -1243,10 +1413,18 @@ export class CompanionChatManager {
    * resurrect the file post-unlink.
    */
   private async _hardRemove(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
-    const pendingSave = this._pendingSaves.get(sessionId);
-    if (pendingSave) await pendingSave.catch(() => {});
-    await this.persistence?.delete(sessionId);
+    try {
+      const pendingSave = this._pendingSaves.get(sessionId);
+      if (pendingSave) await pendingSave.catch(() => {});
+      await this.persistence?.delete(sessionId);
+    } catch (error) {
+      // The file is still on disk, so the chat must stay known: otherwise it is
+      // gone from the API, back after a restart, and the delete cannot be retried.
+      if (session && !this.sessions.has(sessionId)) this.sessions.set(sessionId, session);
+      throw error;
+    }
   }
 
   /**
@@ -1270,17 +1448,25 @@ export class CompanionChatManager {
   async flushSession(sessionId: string): Promise<void> {
     try {
       await this._pendingSaves.get(sessionId);
-      if (this.saveFailures.has(sessionId)) throw this.storageUnavailable();
-    } catch { throw this.storageUnavailable(); }
+      if (this.saveFailures.has(sessionId)) throw this.storageUnavailable(sessionId);
+    } catch { throw this.storageUnavailable(sessionId); }
   }
 
-  private storageUnavailable(): Error & { readonly code: string; readonly status: number } {
-    return Object.assign(new Error('Chat storage or its original owner is unavailable. Reopen this chat after checking its saved state.'), { code: 'CHAT_PERSISTENCE_UNAVAILABLE', status: 503 });
+  private storageUnavailable(sessionId?: string, cause?: unknown): Error & { readonly code: string; readonly status: number } {
+    // A failed save is not retried by the change that follows it: a later snapshot could land out of order. The chat refuses changes until recoverFailedSaves() writes its current state in one piece.
+    const failure = sessionId !== undefined && this.saveFailures.has(sessionId) ? this.saveFailures.get(sessionId) : cause;
+    const held = failure instanceof AtomicWriteDurabilityError && failure.phase === 'published-indeterminate';
+    const message = failure === undefined
+      ? 'The companion chat service is shutting down, or this chat changed while the request was running. Retry the request; if the service is shutting down, retry after it restarts.'
+      : held
+        ? `Saving this chat may have partly succeeded (${summarizeError(failure)}), so the daemon cannot tell what is on disk and the chat accepts no more changes. Restart the daemon: it reloads the saved chat, and the chat opens again.`
+        : `Saving this chat failed (${summarizeError(failure)}), so it accepts no more changes for now. The daemon retries saving it on its own and opens the chat again once that works; check that the companion chat storage directory is writable and has space, then try again in a minute.`;
+    return Object.assign(new Error(message), { code: 'CHAT_PERSISTENCE_UNAVAILABLE', status: 503 });
   }
 
   private assertAvailable(sessionId?: string): void {
     if (this.disposed || sessionId !== undefined && this.saveFailures.has(sessionId)) {
-      throw this.storageUnavailable();
+      throw this.storageUnavailable(sessionId);
     }
   }
 
@@ -1301,6 +1487,50 @@ export class CompanionChatManager {
     if (this.saveFailures.has(sessionId)) throw this.saveFailures.get(sessionId);
   }
 
+  /**
+   * Try again to save every chat whose save failed, and reopen the ones that
+   * work.
+   *
+   * Safe against an older snapshot landing over a newer one: a chat with a
+   * recorded failure refuses every change and every queued save, so once its
+   * saves already in flight have settled nothing else can be writing it, and
+   * the snapshot taken here is the latest there is. Run by the periodic sweep.
+   * Returns how many chats were reopened.
+   */
+  async recoverFailedSaves(): Promise<number> {
+    if (!this.persistence || this.disposed) return 0;
+    let reopened = 0;
+    for (const sessionId of [...this.saveFailures.keys()]) {
+      if (this.recoveringSaves.has(sessionId)) continue;
+      // A write that may already have been published is held for a restart to
+      // reload from disk: what it published is not necessarily this chat's
+      // in-memory state (a refused route change), so rewriting would guess.
+      const failure = this.saveFailures.get(sessionId);
+      if (failure instanceof AtomicWriteDurabilityError && failure.phase === 'published-indeterminate') continue;
+      this.recoveringSaves.add(sessionId);
+      try {
+        await this._pendingSaves.get(sessionId)?.catch(() => undefined);
+        const session = this.sessions.get(sessionId);
+        if (!session) { this.saveFailures.delete(sessionId); continue; }
+        if (this.disposed) return reopened;
+        try {
+          await this.persistence.save({ meta: session.meta, messages: session.messages });
+        } catch (error) {
+          this.saveFailures.set(sessionId, error);
+          logger.debug('[companion-chat] retrying a failed chat save did not work yet', { sessionId, error: summarizeError(error) });
+          continue;
+        }
+        this.saveFailures.delete(sessionId);
+        reopened += 1;
+        logger.info('[companion-chat] a chat whose save had failed saved again and accepts changes', { sessionId });
+        // A turn that was already running while the chat was refused may have
+        // appended since the snapshot above; its own saves were refused.
+        this._persist(sessionId);
+      } finally { this.recoveringSaves.delete(sessionId); }
+    }
+    return reopened;
+  }
+
   private _persist(sessionId: string): void {
     if (!this.persistence) return;
     void this.queueSave(sessionId, () => this._doSave(sessionId));
@@ -1312,6 +1542,31 @@ export class CompanionChatManager {
     if (!session) return;
     this.assertEffortPublication(session.meta.reasoningEffort);
     await this.persistence.save({ meta: session.meta, messages: session.messages });
+  }
+
+  /**
+   * Queued sends whose turn can no longer start (the chat closed, or the
+   * service is going away): answer every waiter with an error instead of
+   * leaving it pending forever, and move each from `queued` to the terminal
+   * `unanswered` in the transcript so nothing keeps showing a message as
+   * waiting for a turn that will never run. The caller persists.
+   */
+  private _abandonQueuedTurns(session: InternalSession, reason: string): void {
+    for (const entry of session.pendingTurns?.splice(0) ?? []) {
+      this.resolvePendingReply(entry.userMessageId, { messageId: entry.userMessageId, error: reason });
+    }
+    this._markUnanswered(session);
+  }
+
+  /** Every user message still marked `queued` becomes `unanswered`. True when any changed. */
+  private _markUnanswered(session: InternalSession): boolean {
+    let changed = false;
+    session.messages = session.messages.map((message) => {
+      if (message.role !== 'user' || message.deliveryState !== 'queued') return message;
+      changed = true;
+      return this.normalizeMessage({ ...message, deliveryState: 'unanswered' });
+    });
+    return changed;
   }
 
   private resolvePendingReply(messageId: string, result: CompanionChatReplyResult): void {

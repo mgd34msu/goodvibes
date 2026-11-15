@@ -12,11 +12,14 @@
  * authenticates to its daemon with, honoring a non-interactive override.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { getOrCreateCompanionToken } from '../pairing/companion-token.js';
 import type { CompanionPairingResult } from '../pairing/companion-token.js';
+import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /**
  * The absolute operator-tokens.json paths a workspace may hold from an older
@@ -109,12 +112,15 @@ export function resolveDaemonCompanionToken(
     createdAt: existingCreatedAt ?? Date.now(),
   };
   try {
-    mkdirSync(dirname(tokenPath), { recursive: true });
-    writeFileSync(tokenPath, JSON.stringify(record, null, 2), { encoding: 'utf-8', mode: 0o600 });
-    chmodSync(tokenPath, 0o600);
-  } catch {
-    // Best-effort persistence, the override still applies for this process
-    // even if the file could not be written (e.g. a read-only home directory).
+    // Atomic like the companion-token writer: a reader of this shared file must
+    // never see a truncated record, or it quarantines it and mints a new token.
+    writeJsonFileAtomic(tokenPath, record, { mode: 0o600, mkdirp: true, trailingNewline: false });
+  } catch (error) {
+    // The override still applies for this process, but it will not be durable.
+    logger.warn('The daemon token override could not be saved to the operator token store', {
+      path: tokenPath,
+      error: summarizeError(error),
+    });
   }
   return record;
 }

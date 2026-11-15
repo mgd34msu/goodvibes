@@ -29,11 +29,14 @@ import { createWorklistTool } from '../platform/src/platform/tools/worklist/inde
 import type { LLMProvider } from '../platform/src/platform/providers/interface.ts';
 import type { ProviderRegistry } from '../platform/src/platform/providers/registry.ts';
 
-function tempDir(label: string): string {
-  return join(tmpdir(), `gv-${label}-${randomUUID()}`);
-}
-
 const disposables = trackDisposables();
+
+/** A path under the temp directory, removed after the test that asked for it. */
+function tempDir(label: string): string {
+  const dir = join(tmpdir(), `gv-${label}-${randomUUID()}`);
+  disposables.defer(() => { rmSync(dir, { recursive: true, force: true }); });
+  return dir;
+}
 
 describe('state persistence failures', () => {
   test('PersistentStore rejects invalid JSON instead of returning an empty store', async () => {
@@ -248,26 +251,32 @@ describe('state persistence failures', () => {
     expect(existsSync(join(dir, `${quarantined[0]}.why`))).toBe(true);
   });
 
-  test('worklist tool rejects malformed persisted state instead of overwriting it', async () => {
+  test('worklist tool keeps malformed persisted state aside instead of overwriting it', async () => {
     const dir = tempDir('worklist-store');
     mkdirSync(join(dir, '.goodvibes'), { recursive: true });
     writeFileSync(join(dir, '.goodvibes', 'worklists.json'), '{bad', 'utf-8');
 
-    await expect(createWorklistTool().execute({
-      storageRoot: dir,
-      mode: 'list',
-    })).rejects.toThrow();
+    const result = await createWorklistTool({ workingDirectory: dir }).execute({ mode: 'list' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('unreadable');
+    const kept = readdirSync(join(dir, '.goodvibes')).filter((name) => name.startsWith('worklists.json.corrupt-') && !name.endsWith('.why'));
+    expect(kept.length).toBe(1);
+    // The owner's bytes survive untouched in the quarantined copy.
+    expect(readFileSync(join(dir, '.goodvibes', kept[0]!), 'utf-8')).toBe('{bad');
   });
 
-  test('team tool rejects malformed persisted state instead of overwriting it', async () => {
+  test('team tool keeps malformed persisted state aside instead of overwriting it', async () => {
     const dir = tempDir('team-store');
     mkdirSync(join(dir, '.goodvibes'), { recursive: true });
     writeFileSync(join(dir, '.goodvibes', 'teams.json'), '{bad', 'utf-8');
 
-    await expect(createTeamTool().execute({
-      storageRoot: dir,
-      mode: 'list',
-    })).rejects.toThrow();
+    const result = await createTeamTool({ workingDirectory: dir }).execute({ mode: 'list' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('unreadable');
+    const kept = readdirSync(join(dir, '.goodvibes')).filter((name) => name.startsWith('teams.json.corrupt-') && !name.endsWith('.why'));
+    expect(kept.length).toBe(1);
+    // The owner's bytes survive untouched in the quarantined copy.
+    expect(readFileSync(join(dir, '.goodvibes', kept[0]!), 'utf-8')).toBe('{bad');
   });
 
   test('automation stores reject malformed snapshots instead of resetting collections', async () => {

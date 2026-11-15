@@ -2,6 +2,7 @@ import type { DaemonSystemRouteHandlers } from './context.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
+  isJsonRecord,
   readBoundedBodyInteger,
   readOptionalStringField,
   type JsonRecord,
@@ -33,6 +34,7 @@ const WATCHER_SOURCE_RECORD_KIND_MAP: Readonly<Record<string, 'webhook' | 'hook'
   stream: 'hook',
   api: 'hook',
 };
+const CUSTOM_RUN_METADATA_KEY = 'customRun';
 const DEFAULT_WATCHER_INTERVAL_MS = 60_000;
 const MIN_WATCHER_INTERVAL_MS = 1_000;
 const MAX_WATCHER_INTERVAL_MS = 86_400_000;
@@ -90,14 +92,24 @@ export function createDaemonSystemRouteHandlers(
         ? Response.json({ removed: true, id: watcherId })
         : jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
     },
-    getServiceStatus: () => Response.json({
-      ...context.platformServiceManager.status(),
-      network: {
-        controlPlane: context.inspectInboundTls('controlPlane'),
-        httpListener: context.inspectInboundTls('httpListener'),
-        outbound: context.inspectOutboundTls(),
-      },
-    }),
+    // Admin only: the status carries the installed unit file, which can hold the
+    // operator token, and install/start/stop beside it are admin only too.
+    getServiceStatus: (req?: Request) => {
+      // A caller that cannot pass the request cannot be checked, so it never
+      // receives the unit file.
+      const admin = req ? context.requireAdmin(req) : null;
+      if (admin) return admin;
+      const full = context.platformServiceManager.status();
+      const { contents: _unitFile, ...withoutUnitFile } = full;
+      return Response.json({
+        ...(req ? full : withoutUnitFile),
+        network: {
+          controlPlane: context.inspectInboundTls('controlPlane'),
+          httpListener: context.inspectInboundTls('httpListener'),
+          outbound: context.inspectOutboundTls(),
+        },
+      });
+    },
     installService: (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
@@ -183,17 +195,25 @@ export function createDaemonSystemRouteHandlers(
         ? Response.json({ removed: true, id: bindingId })
         : jsonErrorResponse({ error: 'Unknown route binding' }, { status: 404 });
     },
-    getApprovals: () => {
+    getApprovals: (url?: URL) => {
       if (!context.integrationHelpers) {
         return jsonErrorResponse({ error: 'Integration helper service unavailable' }, { status: 503 });
       }
-      return Response.json(context.integrationHelpers.getApprovalSnapshot());
+      const approvalId = url?.searchParams.get('approvalId')?.trim();
+      return Response.json(context.integrationHelpers.getApprovalSnapshot(approvalId || undefined));
     },
-    approvalAction: (approvalId, action, req) => handleApprovalAction(context, approvalId, action, req),
+    // A decision grants or withholds tool execution (and can persist a durable
+    // rule), so it takes the same authority as the other state changes here.
+    // Shared and paired-device tokens are admin; only a non-admin user session is refused.
+    approvalAction: (approvalId, action, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      return handleApprovalAction(context, approvalId, action, req);
+    },
     getConfig: (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
-      return Response.json(context.configManager.getAll());
+      return Response.json(redactSecretConfigValues(context, context.configManager.getAll()));
     },
     getCredentials: async (req) => {
       const admin = context.requireAdmin(req);
@@ -247,6 +267,20 @@ export function createDaemonSystemRouteHandlers(
       if (!context.isValidConfigKey(key)) {
         return jsonErrorResponse({ error: 'Invalid config key' }, { status: 400 });
       }
+      // A credential never goes into a config file as a literal. The settings
+      // precondition lane files it in the secret store and leaves a reference;
+      // a value that already is such a reference is safe to write here.
+      if (context.isSecretBearingConfigKey?.(key) && !isSecretReference(value)) {
+        return jsonErrorResponse(
+          {
+            error: `Config key ${key} holds a credential and cannot be written as plain text. Nothing was changed. `
+              + 'Write it through the settings precondition (capture, then apply), which stores it in the secret store, '
+              + 'or pass a goodvibes://secrets/ reference.',
+            code: 'SECRET_CONFIG_KEY',
+          },
+          { status: 400 },
+        );
+      }
       try {
         context.configManager.setDynamic(key, value);
       } catch (error: unknown) {
@@ -268,11 +302,12 @@ export function createDaemonSystemRouteHandlers(
       // would name the wrong file, which is the confusion this replaces.
       const persistedTo = (source?.daemonOwned ? source.daemonTierPath : null)
         ?? context.configManager.getConfigPath?.();
-      if (!configValuesMatch(current, value)) {
+      if (!configValuesMatch(current, value) && !configValuesMatch(current, normalizeRequested(context, key, value))) {
         return jsonErrorResponse(
           {
             error: `Config key ${key} did not take the requested value`
-              + `${persistedTo ? ` in ${persistedTo}` : ''}. The host now reports ${JSON.stringify(current)}.`,
+              + `${persistedTo ? ` in ${persistedTo}` : ''}.`
+              + `${context.isSecretBearingConfigKey?.(key) ? '' : ` The host now reports ${JSON.stringify(current)}.`}`,
             code: 'CONFIG_SET_NOT_APPLIED',
           },
           { status: 409 },
@@ -290,12 +325,85 @@ export function createDaemonSystemRouteHandlers(
           ...(source.effectiveOrigin ? { effectiveOrigin: source.effectiveOrigin } : {}) } : {}),
       });
     },
+    postConfigReset: async (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      const payload = await context.parseJsonBody(req);
+      if (payload instanceof Response) return payload;
+      // Body parsing yields. Reacquire current admin before the write.
+      const currentAdmin = context.requireAdmin(req);
+      if (currentAdmin) return currentAdmin;
+      const { key } = payload;
+      if (!key || typeof key !== 'string') {
+        return jsonErrorResponse({ error: 'Missing or invalid key' }, { status: 400 });
+      }
+      if (key === 'runtime.workingDir' || !context.isValidConfigKey(key)) {
+        return jsonErrorResponse({ error: 'Invalid config key' }, { status: 400 });
+      }
+      // Resetting would leave the stored secret behind with nothing pointing at it.
+      if (context.isSecretBearingConfigKey?.(key)) {
+        return jsonErrorResponse(
+          {
+            error: `Config key ${key} holds a credential. Nothing was changed. Remove it with credentials.delete, which clears the stored secret and then the reference.`,
+            code: 'SECRET_CONFIG_KEY',
+          },
+          { status: 400 },
+        );
+      }
+      if (!context.configManager.reset) {
+        return jsonErrorResponse({ error: 'This host cannot reset a setting. Nothing was changed.', code: 'CONFIG_RESET_UNSUPPORTED' }, { status: 409 });
+      }
+      try {
+        context.configManager.reset(key);
+      } catch (error: unknown) {
+        return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to reset config' });
+      }
+      const source = context.configManager.describeConfigKeySource?.(key);
+      const persistedTo = (source?.daemonOwned ? source.daemonTierPath : null) ?? context.configManager.getConfigPath?.();
+      return Response.json({
+        success: true,
+        key,
+        value: context.configManager.get(key),
+        ...(persistedTo ? { persistedTo } : {}),
+        ...(source ? { tier: source.tier, daemonOwned: source.daemonOwned,
+          ...(source.effectiveOrigin ? { effectiveOrigin: source.effectiveOrigin } : {}) } : {}),
+      });
+    },
   };
+}
+
+/**
+ * A watcher's request headers are stored with the watcher and returned by the
+ * watcher routes, so a header that carries a credential must be a
+ * `goodvibes://secrets/` reference, which the registry resolves when it makes
+ * the request. A literal value is refused before anything is stored.
+ */
+function refuseLiteralWatcherHeaders(body: Record<string, unknown>): Response | null {
+  const metadata = isJsonRecord(body.metadata) ? body.metadata : {};
+  const sourceMetadata = isJsonRecord(body.source) && isJsonRecord(body.source.metadata) ? body.source.metadata : {};
+  const literal = new Set<string>();
+  for (const headers of [body.headers, metadata.headers, sourceMetadata.headers]) {
+    if (!isJsonRecord(headers)) continue;
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === 'string' && !isSecretReference(value)) literal.add(name);
+    }
+  }
+  if (literal.size === 0) return null;
+  return jsonErrorResponse(
+    {
+      error: `Watcher header${literal.size > 1 ? 's' : ''} ${[...literal].join(', ')} would be stored as plain text. Nothing was changed. `
+        + 'Store the value in the secret store and pass a goodvibes://secrets/ reference as the header value.',
+      code: 'WATCHER_HEADER_LITERAL',
+    },
+    { status: 400 },
+  );
 }
 
 async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Request): Promise<Response> {
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
+  const literalHeaders = refuseLiteralWatcherHeaders(body);
+  if (literalHeaders) return literalHeaders;
   const label = typeof body.label === 'string' && body.label.trim().length > 0 ? body.label.trim() : '';
   const id = typeof body.id === 'string' && body.id.trim().length > 0
     ? body.id.trim()
@@ -323,6 +431,13 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
     ...(typeof body.address === 'string' ? { address: body.address } : {}),
     ...(typeof body.headers === 'object' && body.headers !== null ? { headers: body.headers } : {}),
   };
+  // Registering is an upsert, so a repeat would silently replace the first watcher.
+  if (context.watcherRegistry.getWatcher(id)) {
+    return jsonErrorResponse(
+      { error: `Watcher ${id} already exists. PATCH it to change it, or choose a different label or id.`, code: 'WATCHER_EXISTS' },
+      { status: 409 },
+    );
+  }
   const record = context.watcherRegistry.registerWatcher({
     id,
     label,
@@ -339,7 +454,8 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
       metadata: sourceMetadata,
     },
     intervalMs,
-    metadata: sourceMetadata,
+    // The run text is kept in the metadata so a later PATCH can carry it over.
+    metadata: typeof body.run === 'string' ? { ...sourceMetadata, [CUSTOM_RUN_METADATA_KEY]: body.run } : sourceMetadata,
     ...(typeof body.run === 'string' ? { run: () => body.run as string } : {}),
   });
   return Response.json(record, { status: 201 });
@@ -358,15 +474,22 @@ async function handleWorkingDirectoryConfig(
   }
   const result = await context.swapManager.requestSwap(value);
   if (result.ok) {
-    return Response.json({ success: true, key, value: result.current, previous: result.previous });
+    return Response.json({
+      success: true, key, value: result.current, previous: result.previous,
+      // The new root works now but did not save (it is lost at restart), or some subsystems still use the old root until restart.
+      ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
+      ...(result.requiresRestart?.length ? { requiresRestart: result.requiresRestart } : {}),
+    });
   }
   return jsonErrorResponse(
     {
       error: result.reason,
       code: result.code,
-      ...(result.code === 'WORKSPACE_BUSY' ? { retryAfter: result.retryAfter } : {}),
+      // The swap manager counts seconds; the wire (and the retry layers) read milliseconds.
+      ...(result.code === 'WORKSPACE_BUSY' && typeof result.retryAfter === 'number' ? { retryAfterMs: result.retryAfter * 1000 } : {}),
     },
-    { status: result.code === 'WORKSPACE_BUSY' ? 409 : 400 },
+    // REROOT_FAILED is the daemon failing to move its own stores, not a bad request.
+    { status: result.code === 'WORKSPACE_BUSY' ? 409 : result.code === 'REROOT_FAILED' ? 500 : 400 },
   );
 }
 
@@ -389,10 +512,14 @@ function readWatcherIntervalMs(value: unknown, fallbackValue: unknown): number {
 async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId: string, req: Request): Promise<Response> {
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
+  const literalHeaders = refuseLiteralWatcherHeaders(body);
+  if (literalHeaders) return literalHeaders;
   const current = context.watcherRegistry.getWatcher(watcherId);
   if (!current) {
     return jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
   }
+  const storedRun = current.metadata?.[CUSTOM_RUN_METADATA_KEY];
+  const customRun = typeof storedRun === 'string' ? storedRun : undefined;
   const nextSourceKind = typeof body.sourceKind === 'string'
     ? WATCHER_SOURCE_RECORD_KIND_MAP[body.sourceKind] ?? 'watcher'
     : current.source.kind;
@@ -421,6 +548,8 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
     },
     intervalMs: body.intervalMs !== undefined ? readWatcherIntervalMs(body.intervalMs, current.intervalMs) : (current.intervalMs ?? DEFAULT_WATCHER_INTERVAL_MS),
     metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : current.metadata,
+    // Re-registering rebuilds the default run strategy unless told otherwise.
+    ...(customRun !== undefined ? { run: () => customRun } : {}),
   });
   return Response.json(updated);
 }
@@ -456,19 +585,27 @@ async function handleApprovalAction(
   req: Request,
 ): Promise<Response> {
   const body = await context.parseOptionalJsonBody(req);
-  const payload = body instanceof Response || body === null ? {} as JsonRecord : body;
+  if (body instanceof Response) return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, body);
+  const payload = body ?? {} as JsonRecord;
   const actor = context.requireAuthenticatedSession(req)?.username ?? 'operator';
   const note = typeof payload.note === 'string' ? payload.note : undefined;
   if (action === 'claim') {
-    const approval = await context.approvalBroker.claimApproval(approvalId, actor, 'web', note);
+    const outcome: { applied?: boolean | undefined } = {};
+    const approval = await context.approvalBroker.claimApproval(approvalId, actor, 'web', note, outcome);
     return approval
-      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
+      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
       : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
   }
   if (action === 'cancel') {
-    const approval = await context.approvalBroker.cancelApproval(approvalId, actor, 'web', note);
+    const outcome: { applied?: boolean | undefined } = {};
+    // A surface leaving an ask it raised releases its own claim; the ask is
+    // cancelled only once no other surface that raised it is still waiting.
+    const holdId = typeof payload.holdId === 'string' && payload.holdId.length > 0 ? payload.holdId : undefined;
+    const approval = payload.release === true && context.approvalBroker.releaseApproval
+      ? await context.approvalBroker.releaseApproval(approvalId, actor, 'web', note, outcome, holdId)
+      : await context.approvalBroker.cancelApproval(approvalId, actor, 'web', note, outcome);
     return approval
-      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval }))
+      ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome) }))
       : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
   }
   // Legacy generic callbacks choose this URL from a boolean. The URL alone
@@ -506,8 +643,10 @@ async function handleApprovalAction(
     return context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, modifiedArgs);
   }
   let approval: unknown | null;
+  const outcome: { applied?: boolean | undefined } = {};
   try {
     approval = await context.approvalBroker.resolveApproval(approvalId, {
+      outcome,
       approved: action === 'approve',
       ...(disposition !== undefined ? { disposition: disposition as 'approved' | 'denied' | 'amended' } : {}),
       remember: typeof payload.remember === 'boolean' ? payload.remember : false,
@@ -531,7 +670,7 @@ async function handleApprovalAction(
     );
   }
   return approval
-    ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, recorded: recordedDecision(approval) }))
+    ? context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({ approval, ...approvalActionOutcome(approval, action, actor, outcome), recorded: recordedDecision(approval) }))
     : context.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, jsonErrorResponse({ error: 'Unknown approval' }, { status: 404 }));
 }
 
@@ -544,11 +683,53 @@ async function handleApprovalAction(
  */
 function configValuesMatch(current: unknown, requested: unknown): boolean {
   if (Object.is(current, requested)) return true;
+  // The manager coerces a scalar to the key's type ("8080" becomes 8080, "true"
+  // becomes true) and trims strings; that is the write taking, not failing.
+  if (isScalar(current) && isScalar(requested)) return String(current).trim() === String(requested).trim();
   try {
     return JSON.stringify(current) === JSON.stringify(requested);
   } catch {
     return false;
   }
+}
+
+function normalizeRequested(context: DaemonSystemRouteContext, key: string, value: unknown): unknown {
+  try {
+    return context.coerceConfigValue ? context.coerceConfigValue(key, value) : value;
+  } catch {
+    return value;
+  }
+}
+
+function isScalar(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+function isSecretReference(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().startsWith('goodvibes://secrets/');
+}
+
+const REDACTED_CONFIG_VALUE = '[redacted]';
+
+/**
+ * Copy of the config with every credential-bearing literal replaced, so a read
+ * never returns a secret that an older write or a hand edit left in the file.
+ * A `goodvibes://secrets/` reference is the correct at-rest shape and stays.
+ */
+function redactSecretConfigValues(context: DaemonSystemRouteContext, config: Record<string, unknown>): Record<string, unknown> {
+  const isSecret = context.isSecretBearingConfigKey;
+  if (!isSecret) return config;
+  const walk = (node: Record<string, unknown>, prefix: string): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(node)) {
+      const path = prefix ? `${prefix}.${name}` : name;
+      if (isJsonRecord(value)) out[name] = walk(value, path);
+      else if (typeof value === 'string' && value !== '' && isSecret(path) && !isSecretReference(value)) out[name] = REDACTED_CONFIG_VALUE;
+      else out[name] = value;
+    }
+    return out;
+  };
+  return walk(config, '');
 }
 
 /**
@@ -576,6 +757,42 @@ function readModifiedArgs(value: unknown): Record<string, unknown> | undefined |
     return jsonErrorResponse({ error: 'modifiedArgs must be an object of tool arguments.' }, { status: 400 });
   }
   return value as Record<string, unknown>;
+}
+
+const APPROVAL_ACTION_TARGET = { claim: 'claimed', approve: 'approved', deny: 'denied', cancel: 'cancelled' } as const;
+
+/**
+ * Whether this call changed the approval, as reported by the broker call itself.
+ *
+ * An action on an approval that already ended returns that record unchanged
+ * with 200, deliberately: a surface that raced a decision made elsewhere, and
+ * a write-back retried after a failed write, both must not fail. `applied`
+ * is what tells such a caller that nothing changed, and `refusal` says why in
+ * terms a person or an agent can act on, rather than a success toast for an
+ * expired ask.
+ */
+function approvalActionOutcome(
+  approval: unknown,
+  action: keyof typeof APPROVAL_ACTION_TARGET,
+  actor: string,
+  outcome: { applied?: boolean | undefined },
+): { applied: boolean; refusal?: string } {
+  const record = isJsonRecord(approval) ? approval : {};
+  const status = typeof record.status === 'string' ? record.status : 'unknown';
+  const target = APPROVAL_ACTION_TARGET[action];
+  const by = action === 'claim' ? record.claimedBy : record.resolvedBy;
+  // The broker says whether this call moved the record; callers sharing one
+  // actor name cannot be told apart by comparing names. A broker that does not
+  // report it falls back to comparing the actor.
+  const applied = typeof outcome.applied === 'boolean' ? outcome.applied && status === target : status === target && by === actor;
+  if (applied) return { applied: true };
+  const resolvedBy = typeof record.resolvedBy === 'string' ? ` by ${record.resolvedBy}` : '';
+  return {
+    applied: false,
+    refusal: status === 'pending' || status === 'claimed'
+      ? `Approval is still ${status}; this ${action} was not recorded. Read the approval again and retry.`
+      : `Approval is ${status}${resolvedBy}, which is final; it cannot become ${target}. Nothing changed.`,
+  };
 }
 
 /**

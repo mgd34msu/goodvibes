@@ -200,6 +200,15 @@ export class LspClient {
       return;
     }
 
+    // A message with both `method` and `id` is the server asking the client for
+    // something, not an answer. Its id is the server's own and may equal one of
+    // ours, so it must never be matched against pending requests.
+    const asked = msg as { id?: unknown; method?: unknown; params?: unknown };
+    if (typeof asked.method === 'string' && (typeof asked.id === 'number' || typeof asked.id === 'string')) {
+      this._answerServerRequest(asked.id, asked.method, asked.params);
+      return;
+    }
+
     const response = msg as JsonRpcResponse;
     if ('id' in response && typeof response.id === 'number') {
       const pending = this.pendingRequests.get(response.id);
@@ -236,6 +245,21 @@ export class LspClient {
     }
 
     logger.warn('LspClient: received unrecognized JSON-RPC message', { message: msg });
+  }
+
+  /**
+   * Answer a server-to-client request. This client offers no workspace
+   * features, so the answer is empty: null, or one null per configuration item.
+   */
+  private _answerServerRequest(id: number | string, method: string, params: unknown): void {
+    const items = (params as { items?: unknown } | null | undefined)?.items;
+    const result = method === 'workspace/configuration' && Array.isArray(items) ? items.map(() => null) : null;
+    try {
+      const frame = LspClient.encodeFrame(JSON.stringify({ jsonrpc: '2.0', id, result }));
+      (this.proc?.stdin as import('bun').FileSink | undefined)?.write(frame);
+    } catch (err) {
+      logger.warn('LspClient: failed to answer a server request', { method, err: summarizeError(err) });
+    }
   }
 
   /** Encode a JSON-RPC frame (Content-Length framing). Exposed for testing. */

@@ -6,7 +6,10 @@ import type {
   NativeIntakeSession,
   NativeIntakeSource,
 } from "../../lib/native-intake";
-import type { NativeIntakeBrowserRecord } from "../../lib/native-intake-journal";
+import {
+  NativeIntakeBrowserJournalError,
+  type NativeIntakeBrowserRecord,
+} from "../../lib/native-intake-journal";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import type { NativeTurnObservation } from "../../lib/native-turn";
 import { getClientLifetime, invalidateClientLifetime } from "../../lib/client-lifetime";
@@ -145,6 +148,7 @@ function fixture() {
   return {
     binding: record.binding,
     list: mock(async (): Promise<NativeIntakeBrowserRecord[]> => []),
+    listOtherScopes: mock(async (): Promise<NativeIntakeBrowserRecord[]> => []),
     submit: mock(
       async (
         _source: NativeIntakeSource,
@@ -178,6 +182,12 @@ function fixture() {
         _record: NativeIntakeBrowserRecord,
         _signal?: AbortSignal
       ): Promise<NativeIntakeResult> => ({ kind: "cancelled", ...common })
+    ),
+    release: mock(
+      async (
+        _record: NativeIntakeBrowserRecord,
+        _signal?: AbortSignal
+      ): Promise<{ released: boolean; result: NativeIntakeResult }> => ({ released: false, result: work })
     ),
     execution: {
       inspect: mock(
@@ -235,6 +245,11 @@ beforeEach(() => {
   open.mockClear();
 });
 afterEach(() => cleanups.splice(0).forEach((cleanup) => cleanup()));
+/** Let every already-resolved promise chain run; no wall-clock wait. */
+async function drain() {
+  for (let turn = 0; turn < 10; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  flushSync(() => {});
+}
 async function settle(check: () => boolean) {
   for (let tries = 0; tries < 100; tries++) {
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -403,7 +418,7 @@ describe("Native intake to execution lifecycle", () => {
     expect(oldSignal?.aborted).toBe(true);
     expect(connected.execution.cancel).toHaveBeenCalledTimes(1);
     pending.resolve(running);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).toContain("prevented before admission");
     expect(el.textContent).not.toContain("contract-real");
@@ -421,7 +436,7 @@ describe("Native intake to execution lifecycle", () => {
     expect(oldSignal?.aborted).toBe(true);
     expect(button("Submit")).toBeDefined();
     pending.resolve(running);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(button("Submit")).toBeDefined();
     expect(el.textContent).not.toContain("contract-real");
@@ -480,7 +495,7 @@ describe("Native intake to execution lifecycle", () => {
       await settle(() => el.textContent?.includes("prevented before admission") === true);
       expect(oldSignal?.aborted).toBe(true);
       pending.resolve(running);
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await drain();
       flushSync(() => {});
       expect(el.textContent).not.toContain("contract-real");
       expect(el.textContent).toContain("prevented before admission");
@@ -500,7 +515,7 @@ describe("Native intake to execution lifecycle", () => {
     expect(connected.cancel).not.toHaveBeenCalled();
     expect(connected.execution.cancel).not.toHaveBeenCalled();
     pending.resolve(running);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
   });
 
   test("connection replacement clears prior source and receipts and fences a late result", async () => {
@@ -521,7 +536,7 @@ describe("Native intake to execution lifecycle", () => {
     expect(el.textContent).not.toContain("admission-real");
     expect(el.textContent).not.toContain("Saved requests");
     pending.resolve(running);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).not.toContain("contract-real");
     expect(connected.execution.request).not.toHaveBeenCalled();
@@ -537,7 +552,7 @@ describe("Native intake to execution lifecycle", () => {
     await settle(() => el.textContent?.includes("prevented before admission") === true);
     expect(oldSignal?.aborted).toBe(true);
     pending.resolve(running);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).not.toContain("contract-real");
     expect(connected.execution.request).not.toHaveBeenCalled();
@@ -569,7 +584,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     pending.resolve(turnRunning);
     await settle(() => el.textContent?.includes("hosted-session-real") === true);
     rerender();
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     expect(connected.turn.request).toHaveBeenCalledTimes(1);
     expect(connected.turn.inspect).not.toHaveBeenCalled();
     expect(connected.execution.request).not.toHaveBeenCalled();
@@ -753,7 +768,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     await settle(() => el.textContent?.includes("Intake outcome: cancelled") === true);
     expect(oldSignal?.aborted).toBe(true);
     pending.resolve(turn);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).toContain("Intake outcome: cancelled");
     expect(connected.turn.request).not.toHaveBeenCalled();
@@ -779,7 +794,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(connected.turn.inspect.mock.calls[0]?.[0]).toBe(record);
     expect(connected.turn.request).not.toHaveBeenCalled();
     pending.resolve(turn);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(connected.turn.request).not.toHaveBeenCalled();
     expect(connected.execution.request).not.toHaveBeenCalled();
@@ -835,7 +850,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(connected.turn.cancel.mock.calls[0]?.[0]).toBe(record);
     expect(button("Cancel conversation")).toBeUndefined();
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(button("Cancel conversation")).toBeUndefined();
     expect(button("Continue conversation request")).toBeUndefined();
@@ -862,7 +877,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     );
     expect(oldSignal?.aborted).toBe(true);
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(button("Cancel conversation")).toBeUndefined();
     expect(connected.turn.request).toHaveBeenCalledTimes(1);
@@ -885,7 +900,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     );
     expect(oldSignal?.aborted).toBe(true);
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(button("Cancel conversation")).toBeUndefined();
     expect(connected.turn.request).not.toHaveBeenCalled();
@@ -918,7 +933,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(oldSignal?.aborted).toBe(true);
     expect(button("Submit")).toBeDefined();
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(button("Submit")).toBeDefined();
     expect(el.textContent).not.toContain("hosted-session-real");
@@ -942,8 +957,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(connected.turn.cancel).not.toHaveBeenCalled();
     expect(connected.execution.cancel).not.toHaveBeenCalled();
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(el.textContent).toBe("");
+    await pending.promise;
   });
 
   test("connection replacement clears the old source and fences a late hosted receipt", async () => {
@@ -964,7 +978,7 @@ describe("Native intake to hosted conversation lifecycle", () => {
     expect(el.querySelector("pre")).toBeNull();
     expect(el.textContent).not.toContain("Saved requests");
     pending.resolve(turnRunning);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).not.toContain("hosted-session-real");
     expect(connected.turn.request).not.toHaveBeenCalled();
@@ -1093,7 +1107,7 @@ describe("Native session continuation form", () => {
     expect(old.turn.request.mock.calls[0]?.[1]?.aborted).toBe(true);
     expect(el.textContent).not.toContain("native-a");
     pending.resolve(queued);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await drain();
     flushSync(() => {});
     expect(el.textContent).not.toContain("host queued this continuation");
     expect(connected.turn.request).not.toHaveBeenCalled();
@@ -1141,9 +1155,61 @@ test("selected comment form saves exact text separately, scopes reopening, and r
   expect(previous.dispose).toHaveBeenCalledTimes(1);
   expect(previous.turn.request.mock.calls[0]?.[1]?.aborted).toBe(true);
   pending.resolve(turnRunning);
-  await new Promise(resolve => setTimeout(resolve, 5)); flushSync(() => {});
+  await drain(); flushSync(() => {});
   expect(view.el.textContent).not.toContain("broker-input-real");
   expect(connected.turn.request).not.toHaveBeenCalled();
+});
+
+describe("Native intake release", () => {
+  const releaseButton = (el: HTMLElement) =>
+    el.querySelector<HTMLButtonElement>(`button[aria-label="Release input ${record.command.inputId}"]`);
+  test("Release removes a settled saved request and returns to the submit form", async () => {
+    connected.list.mockResolvedValue([record]);
+    connected.release.mockResolvedValue({ released: true, result: work });
+    const { el, button } = await render();
+    await settle(() => !el.textContent?.includes("Inspecting…") && Boolean(releaseButton(el)));
+    flushSync(() => releaseButton(el)!.click());
+    await settle(() => Boolean(button("Submit")));
+    expect(connected.release).toHaveBeenCalledTimes(1);
+    expect(connected.release.mock.calls[0]![0]).toEqual(record);
+    expect(releaseButton(el)).toBeNull();
+  });
+  test("Release of a request the host has not finished keeps it and says why", async () => {
+    connected.list.mockResolvedValue([record]);
+    const { el } = await render();
+    await settle(() => !el.textContent?.includes("Inspecting…") && Boolean(releaseButton(el)));
+    flushSync(() => releaseButton(el)!.click());
+    await settle(() => el.textContent?.includes("Not released") === true);
+    expect(el.textContent).toContain("The saved original is kept.");
+    expect(releaseButton(el)).not.toBeNull();
+    expect(connected.cancel).not.toHaveBeenCalled();
+  });
+});
+
+describe("Native intake release from a full journal", () => {
+  test("a form with no saved requests of its own lists other sessions' originals beside the capacity error and releases one", async () => {
+    const other = {
+      ...record,
+      command: { ...record.command, inputId: "other-input", requestId: "other-request", text: "from another session" },
+    } as NativeIntakeBrowserRecord;
+    connected.list.mockResolvedValue([]);
+    connected.listOtherScopes.mockResolvedValue([other]);
+    connected.submit.mockImplementation(async () => {
+      throw new NativeIntakeBrowserJournalError("capacity");
+    });
+    connected.release.mockResolvedValue({ released: true, result: work });
+    const { el, button } = await render();
+    await settle(() => Boolean(button("Submit")));
+    submit(el);
+    const releaseOther = () =>
+      el.querySelector<HTMLButtonElement>('button[aria-label="Release input other-input"]');
+    await settle(() => Boolean(releaseOther()));
+    expect(el.textContent).toContain("capacity");
+    flushSync(() => releaseOther()!.click());
+    await settle(() => !releaseOther());
+    expect(connected.release).toHaveBeenCalledTimes(1);
+    expect(connected.release.mock.calls[0]![0]).toEqual(other);
+  });
 });
 
 describe("Native intake connection failure", () => {

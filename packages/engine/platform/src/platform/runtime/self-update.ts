@@ -293,6 +293,67 @@ export interface UpdateTransactionReceipt {
   readonly recoveryErrors: readonly string[];
 }
 
+/**
+ * Another live process (an installer, a CLI or TUI apply, a second daemon)
+ * holds the installation's transaction claim. Nothing was changed; the
+ * attempt is retryable, unlike a claim left by a process that died.
+ */
+export class UpdateTransactionContendedError extends Error {
+  constructor(readonly holderPid: number, readonly startedAt: number) {
+    super(`another goodvibes update or install (process ${holderPid}, started ${new Date(startedAt).toISOString()}) holds the installation;`
+      + ' this attempt changed nothing and can be retried once it finishes.');
+    this.name = 'UpdateTransactionContendedError';
+  }
+}
+
+const TRANSIENT_SLOT_SUFFIXES = ['.update-download', '.update-previous', '.rollback-exchange'] as const;
+
+/**
+ * One operator-facing sentence for a fenced transaction: which retained files
+ * exist, and the one action that is safe. Fences are never removed
+ * automatically; this only tells a person when removing them by hand is safe.
+ */
+export function describeTransactionRecovery(receipt: UpdateTransactionReceipt): string {
+  const paths = receipt.recoveryPaths;
+  if (paths.length === 0) return 'Inspect the installation directory before retrying.';
+  const listed = `Retained files: ${paths.join(', ')}.`;
+  const transient = paths.some(path => TRANSIENT_SLOT_SUFFIXES.some(suffix => path.endsWith(suffix)));
+  const claims = paths.filter(path => path.endsWith('.update-transaction'));
+  if (!receipt.committed && receipt.phase === 'claim' && receipt.recoveryErrors.length === 0 && !transient && claims.length > 0) {
+    // With no download, saved-previous or exchange slot left, an interrupted
+    // transaction either never renamed anything or finished every rename, so
+    // the installed files are whole and only its claims block the next one.
+    return `${listed} An earlier update or install stopped while holding the installation, but no partial file is left beside any target,`
+      + ` so the installed files are whole. After confirming no goodvibes install or update is running, remove ${claims.join(', ')} and retry.`;
+  }
+  return `${listed} Inspect them before retrying; never remove a .update-transaction file while a .update-download, .update-previous or .rollback-exchange file remains beside its target.`;
+}
+
+/** How long a claim held by a live process counts as an update in progress rather than one that hung or whose pid was reused. */
+const CLAIM_CONTENTION_WINDOW_MS = 10 * 60 * 1000;
+
+/** The live process holding a claim written by this module, or null when the claim is stale, foreign or unreadable. */
+function liveClaimHolder(path: string, io: UpdateFileIo): { readonly pid: number; readonly startedAt: number } | null {
+  try {
+    const raw = io.readFile?.(path);
+    if (!raw || raw.byteLength > 64 * 1024) return null;
+    const parsed: unknown = JSON.parse(raw.toString('utf8'));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { pid, startedAt, fenced } = parsed as { pid?: unknown; startedAt?: unknown; fenced?: unknown };
+    // A recovery fence is written by a transaction that already failed; its holder is idle, so no
+    // attempt is "in progress" and nothing will finish for a caller to wait on.
+    if (fenced === true) return null;
+    // A claim from this process cannot belong to a live transaction: transact is synchronous.
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return null;
+    if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return null;
+    const age = Date.now() - startedAt;
+    if (age < -60_000 || age > CLAIM_CONTENTION_WINDOW_MS) return null;
+    try { process.kill(pid, 0); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EPERM') return null; }
+    return { pid, startedAt };
+  } catch { return null; }
+}
+
 export class UpdateTransactionError extends Error {
   constructor(readonly receipt: UpdateTransactionReceipt, cause: unknown) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -404,7 +465,11 @@ function transact(
   const physical = () => restrictions.directory?.assertCurrent();
   const assertClaims = () => { for (const claim of activeClaims) { const owner = created.get(claim); if (!owner) throw new Error('Native update claim is unavailable'); owner.assertAt(claim); } };
   const current = () => { physical(); assertClaims(); assertSynchronousCurrent(restrictions.current); physical(); assertClaims(); };
-  const claimData = Buffer.from(JSON.stringify({ operation, targets: paths, instruction: 'Interrupted transaction: inspect retained files before removing any fence. Do not blindly retry.' }));
+  const claimFields = { operation, targets: paths, pid: process.pid, startedAt: Date.now(),
+    instruction: 'Interrupted transaction: inspect retained files before removing any fence. Do not blindly retry.' };
+  const claimData = Buffer.from(JSON.stringify(claimFields));
+  // The same claim, marked as a recovery fence, for a failed transaction to leave behind.
+  const fenceData = Buffer.from(JSON.stringify({ ...claimFields, fenced: true }));
   const create = (path: string, bytes: Buffer, mode: number) => {
     current();
     const owner = nativeIo ? createOwnedNativeUpdateFile(path, bytes, mode, physical) : createLogicalUpdateFile(path, bytes, mode, io);
@@ -435,7 +500,15 @@ function transact(
       if (restrictions.directory) restrictions.directory.ensure(dirname(path.target)); else io.mkdir(dirname(path.target));
       current();
       try { create(path.claim, claimData, 0o600); }
-      catch (error) { blockedClaim = true; try { physical(); blockedClaim = io.exists(path.claim); } catch { /* Unknown creation retains its fence. */ } throw error; }
+      catch (error) {
+        blockedClaim = true;
+        try { physical(); blockedClaim = io.exists(path.claim); } catch { /* Unknown creation retains its fence. */ }
+        // A claim held by another live updater is contention, not a crash:
+        // nothing here was touched, and this attempt is simply retryable.
+        const holder = blockedClaim ? liveClaimHolder(path.claim, io) : null;
+        if (holder) { blockedClaim = false; throw new UpdateTransactionContendedError(holder.pid, holder.startedAt); }
+        throw error;
+      }
       claims.push(path.claim); activeClaims.add(path.claim); current();
     }
     for (const path of paths) for (const slot of [path.stage, path.saved, path.exchange]) {
@@ -476,7 +549,14 @@ function transact(
     const staleSlot = phase === 'claim' && claims.length === paths.length;
     const needsFence = committed || recoveryErrors.length > 0 || staleSlot || blockedStage;
     if (!needsFence) for (const claim of claims) attempt(() => removeCreated(claim));
-    if (needsFence) for (const claim of claims) attempt(() => { physical(); if (!io.exists(claim)) { create(claim, claimData, 0o600); activeClaims.add(claim); } });
+    // The claim this attempt wrote is unfenced and names a live pid, so a second updater
+    // would be told to wait; replace it with the fenced copy rather than leave it.
+    if (needsFence) for (const claim of claims) attempt(() => {
+      physical();
+      if (io.exists(claim)) removeCreated(claim);
+      try { create(claim, fenceData, 0o600); activeClaims.add(claim); }
+      catch (error) { if (io.exists(claim)) throw error; io.writeExclusive!(claim, fenceData); }
+    });
     const recoveryRequired = needsFence || recoveryErrors.length > 0 || blockedClaim;
     const recoveryPaths: string[] = [];
     for (const path of paths) for (const slot of Object.values(path)) {

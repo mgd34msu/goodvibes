@@ -223,11 +223,23 @@ export interface DecisionExportResult {
   readonly reason?: string | undefined;
   /** The OTLP signals that were POSTed. */
   readonly signals: readonly ('span' | 'log')[];
+  /** Signals that were attempted and failed. Non-empty with `exported: true` means a partial export. */
+  readonly failedSignals?: readonly ('span' | 'log')[] | undefined;
 }
 
 /** Join an endpoint base with a signal path, tolerating a trailing slash. */
 function endpointFor(base: string, path: string): string {
   return base.endsWith('/') ? `${base}${path}` : `${base}/${path}`;
+}
+
+/** The collector address for logs: origin and path only, never userinfo or a query that may carry a key. */
+export function describeEndpoint(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '[invalid endpoint url]';
+  }
 }
 
 async function postOtlp(
@@ -246,12 +258,12 @@ async function postOtlp(
       signal: controller.signal,
     });
     if (!response.ok) {
-      logger.warn('[decision-otlp] endpoint rejected export', { url, status: response.status });
+      logger.warn('[decision-otlp] endpoint rejected export', { endpoint: describeEndpoint(url), status: response.status });
       return false;
     }
     return true;
   } catch (err) {
-    logger.warn('[decision-otlp] export failed', { url, error: summarizeError(err) });
+    logger.warn('[decision-otlp] export failed', { endpoint: describeEndpoint(url), error: summarizeError(err) });
     return false;
   } finally {
     clearTimeout(timer);
@@ -275,6 +287,7 @@ export async function exportDecisions(
 
   const serviceName = config.serviceName ?? 'goodvibes-platform';
   const signals: ('span' | 'log')[] = [];
+  const failedSignals: ('span' | 'log')[] = [];
 
   if (config.signal === 'span' || config.signal === 'both') {
     const ok = await postOtlp(
@@ -282,7 +295,7 @@ export async function exportDecisions(
       buildTracePayload(entries, serviceName, ctx),
       config,
     );
-    if (ok) signals.push('span');
+    (ok ? signals : failedSignals).push('span');
   }
   if (config.signal === 'log' || config.signal === 'both') {
     const ok = await postOtlp(
@@ -290,10 +303,10 @@ export async function exportDecisions(
       buildLogsPayload(entries, serviceName, ctx),
       config,
     );
-    if (ok) signals.push('log');
+    (ok ? signals : failedSignals).push('log');
   }
 
   return signals.length > 0
-    ? { exported: true, signals }
-    : { exported: false, reason: 'all OTLP exports failed', signals: [] };
+    ? { exported: true, signals, ...(failedSignals.length > 0 ? { failedSignals } : {}) }
+    : { exported: false, reason: 'all OTLP exports failed', signals: [], failedSignals };
 }

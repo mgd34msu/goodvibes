@@ -1,8 +1,8 @@
 import type { UiRuntimeEvents } from '@/runtime/index.ts';
 import type { StreamMetrics } from './stream-metrics.ts';
-import { createStreamStallWatchdog } from './stream-stall-watchdog.ts';
+import { createStreamStallWatchdog, type StallTimers } from './stream-stall-watchdog.ts';
 import { buildRoutingChip, FALLBACK_CORRELATION_WINDOW_MS } from './model-routing-chip.ts';
-import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine } from './format-user-error.ts';
+import { createErrorNoticeOwner, unavailableErrorLine, userErrorLine, type ErrorNoticeTimers } from './format-user-error.ts';
 import type { PendingFailoverNotice } from './turn-event-wiring.ts';
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
 import type { FailoverTurnState } from './active-model-identity.ts';
@@ -122,6 +122,8 @@ export interface WireStreamEventMetricsOptions {
   readonly beginFailoverNotice?: (turnId: string) => PendingFailoverNotice;
   /** Narration deadline; does not affect semantic classification. */
   readonly errorNoticeTimeoutMs?: number;
+  /** Timer seam for the error-notice deadline so tests can drive it; production callers omit it. */
+  readonly errorNoticeTimers?: ErrorNoticeTimers;
   /**
    * When provided and enabled, the optimizer is consulted on TURN_ERROR to
    * attempt the next viable provider before surfacing the error to the user.
@@ -180,6 +182,8 @@ export interface WireStreamEventMetricsOptions {
    * callers omit it.
    */
   readonly stallThresholdMs?: number | undefined;
+  /** Timer seam for the stall watchdog so tests can drive the clock; production callers omit it. */
+  readonly stallTimers?: StallTimers | undefined;
   /**
    * Shared holder for the live failover record (core/active-model-identity.ts).
    * Set when failover switches the registry off the user's configured
@@ -321,12 +325,12 @@ export function wireStreamEventMetrics(
   const {
     events, metrics, orchestrator, providerRegistry,
     systemMessageRouter, render, providerOptimizer, retryTurn, onFailoverRetry, costLookup,
-    isApprovalPending, stallThresholdMs, failoverState, getConfiguredRegistryKey,
+    isApprovalPending, stallThresholdMs, stallTimers, failoverState, getConfiguredRegistryKey,
     getConfiguredReasoningEffort,
   } = options;
 
   const unsubs: Array<() => void> = [];
-  const errorNotices = createErrorNoticeOwner(options.errorNoticeTimeoutMs);
+  const errorNotices = createErrorNoticeOwner(options.errorNoticeTimeoutMs, options.errorNoticeTimers);
   const setupReadings = new ProviderSetupReadings();
   let setupGeneration = 0;
   // Both custom-provider reload and credential refresh emit this owner event.
@@ -337,6 +341,8 @@ export function wireStreamEventMetrics(
   let noticeGeneration = 0;
   let currentTurnId: string | undefined;
   let settledTurnId: string | undefined;
+  // A tool started in this user turn. Re-submitting the turn on another provider would run it again.
+  let toolStartedInTurn = false;
   let pendingRecovery: { readonly isCurrent: () => boolean; readonly hold: PendingFailoverNotice | undefined; registryKey: string | undefined } | undefined;
   const invalidateErrorNotices = (): void => {
     noticeGeneration++;
@@ -349,6 +355,7 @@ export function wireStreamEventMetrics(
     invalidateErrorNotices();
     currentTurnId = event.turnId;
     settledTurnId = undefined;
+    toolStartedInTurn = false;
   }));
 
   /**
@@ -581,14 +588,28 @@ export function wireStreamEventMetrics(
     if (currentTurnId !== undefined && event.turnId !== currentTurnId) return;
     if (event.turnId !== undefined && event.turnId === settledTurnId) return;
     metrics.modelActive = false;
-    const errVal = event.error;
+    // The wire text alone can only be read by wording. When the emitter also carries the
+    // provider's status or errno code, the reader fixes 401, 429 and network failures from those.
+    const facts = event as { readonly status?: unknown; readonly code?: unknown };
+    const status = typeof facts.status === 'number' ? facts.status : undefined;
+    const code = typeof facts.code === 'string' ? facts.code : undefined;
+    const errVal: unknown = status === undefined && code === undefined
+      ? event.error
+      : { message: event.error, ...(status === undefined ? {} : { status }), ...(code === undefined ? {} : { code }) };
     const generation = noticeGeneration;
     const sessionId = options.getSessionId?.();
     const registryKey = providerRegistry.getCurrentModel().registryKey;
-    const hold = providerOptimizer?.enabled && retryTurn ? options.beginFailoverNotice?.(event.turnId) : undefined;
+    // Failover re-submits the whole user turn, which is only safe when the failure was the
+    // provider's and nothing has run yet: a denied call would be asked again, and tools
+    // already executed would run a second time with their results rolled out of the transcript.
+    // An event without a stop reason comes from an older emitter and is read as a provider failure.
+    const providerFailure = event.stopReason === undefined || event.stopReason === 'provider_error' || event.stopReason === 'provider_exhausted';
+    const failoverAllowed = providerFailure && !toolStartedInTurn;
+    const failoverEligible = providerOptimizer?.enabled === true && retryTurn !== undefined && failoverAllowed;
+    const hold = failoverEligible ? options.beginFailoverNotice?.(event.turnId) : undefined;
     const isTurnCurrent = () => generation === noticeGeneration && sessionId === options.getSessionId?.()
       && options.isActive?.() !== false && (hold?.isCurrent() ?? true);
-    const recovery = providerOptimizer?.enabled && retryTurn ? { isCurrent: isTurnCurrent, hold, registryKey } : undefined;
+    const recovery = failoverEligible ? { isCurrent: isTurnCurrent, hold, registryKey } : undefined;
     if (recovery) pendingRecovery = recovery;
     const readingSetupGeneration = setupGeneration;
     let setups: ReadonlyMap<string, ProviderSetupClassification> = new Map();
@@ -607,7 +628,7 @@ export function wireStreamEventMetrics(
       isCurrent: () => isTurnCurrent()
         && registryKey === providerRegistry.getCurrentModel().registryKey,
       discard: () => hold?.cancel(),
-      prepare: providerOptimizer?.enabled && retryTurn && providerRegistry.describeRuntime ? async (signal) => {
+      prepare: failoverEligible && providerRegistry.describeRuntime ? async (signal) => {
         const from = providerRegistry.getCurrentModel().provider;
         // Reading a candidate's declared setup is not selection/authorization.
         // Delivery still uses the optimizer's current chain and existing fences.
@@ -638,7 +659,7 @@ export function wireStreamEventMetrics(
           // viable provider in the fallback chain before surfacing the error.  When
           // the optimizer is absent or disabled, behaviour is identical to baseline:
           // error surfaces after its bounded reading.
-          if (providerOptimizer?.enabled && retryTurn) {
+          if (failoverAllowed && providerOptimizer?.enabled && retryTurn) {
             const fromProvider = providerRegistry.getCurrentModel().provider;
             // Mark the failing provider as visited so it will never be selected again
             // in this turn, even if a second TURN_ERROR arrives (e.g. ping-pong).
@@ -730,7 +751,9 @@ export function wireStreamEventMetrics(
             return;
           }
 
-          // Baseline: optimizer disabled or not wired, surface the owned reading.
+          // Baseline: optimizer disabled, not wired, or failover would repeat work or hide a
+          // denial. The turn is over, so a switch made on an earlier hop loses its authority.
+          if (providerOptimizer?.enabled) restoreConfiguredSelection();
           systemMessageRouter.high(`[Error] ${errorClass}`);
           notifyErrorSurfaced(false);
           render();
@@ -769,6 +792,7 @@ export function wireStreamEventMetrics(
     getProviderName: () => providerRegistry.getCurrentModel().provider,
     // thresholdMs defaults to 30 000 in the watchdog; only unit tests override it.
     ...(stallThresholdMs !== undefined ? { thresholdMs: stallThresholdMs } : {}),
+    ...(stallTimers !== undefined ? { timers: stallTimers } : {}),
   });
   unsubs.push(() => stallWatchdog.dispose());
 
@@ -799,6 +823,7 @@ export function wireStreamEventMetrics(
     metrics.toolArgsByCallId.set(ev.callId, ev.args ?? {});
   }));
   unsubs.push(events.tools.on('TOOL_EXECUTING', (ev) => {
+    toolStartedInTurn = true;
     metrics.activeToolStartedAtMs = ev.startedAt;
     metrics.activeToolName = ev.tool;
     metrics.activeToolCallId = ev.callId;

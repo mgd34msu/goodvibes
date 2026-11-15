@@ -103,7 +103,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '30000,60000,300000,900000,3600000',
     description:
-      'Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens.',
+      'Comma-separated retry ladder in milliseconds, walked one rung per consecutive failure of a trigger check. The default climbs 30s, 60s, 5m, 15m, 60m so a briefly unreachable endpoint recovers fast while a genuinely broken one stops hammering. The last rung repeats until the breaker opens. Read once when the daemon starts; restart to apply a change.',
     validate: (value) => typeof value === 'string'
       && value.split(',').length > 0
       && value.split(',').every((part) => {
@@ -117,7 +117,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 5,
     description:
-      'Consecutive check failures that open the trigger\'s breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast.',
+      'Consecutive check failures that open the trigger\'s breaker. An open breaker parks the trigger in a visible circuit-open state with the last error attached instead of retrying forever; the operator resets it explicitly. Raise it for a flaky-but-recoverable source, lower it to fail fast. Read once when the daemon starts; restart to apply a change.',
     ...intRange(1, 50),
   },
   {
@@ -149,7 +149,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 200,
     description:
-      'Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring.',
+      'Observations kept per trigger in its persisted ring buffer. Every rule, change, transition, rate-of-change, windowed aggregation, is a pure function over this buffer, so this is the memory depth available to them. Larger windows need a larger ring. Read once when the daemon starts; restart to apply a change.',
     ...intRange(2, 10_000),
   },
   {
@@ -157,7 +157,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 50,
     description:
-      'Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name.',
+      'Run records kept per trigger (when it ran, what it observed, whether it fired, what the action returned). Bounded on purpose: an append-only history is a disk leak with a nicer name. Read once when the daemon starts; restart to apply a change.',
     ...intRange(1, 5_000),
   },
   {
@@ -165,7 +165,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 168,
     description:
-      'Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed.',
+      'Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.',
     ...intRange(1, 24 * 365),
   },
   {
@@ -173,7 +173,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 500,
     description:
-      'Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit.',
+      'Entries retained in the shared event log that cross-watcher correlation rules read. This log is the only channel through which one trigger can observe another, and it is bounded so correlation cannot grow without limit. Read once when the daemon starts; restart to apply a change.',
     ...intRange(10, 50_000),
   },
   {
@@ -181,7 +181,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 24,
     description:
-      'Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window.',
+      'Age ceiling in hours on the shared correlation event log. Correlation windows longer than this cannot see the older side of the pair, so raise it together with any long correlation window. Read once when the daemon starts; restart to apply a change.',
     ...intRange(1, 24 * 90),
   },
   {
@@ -189,7 +189,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 300_000,
     description:
-      'Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps.',
+      'Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.',
     ...intRange(10_000, 24 * 60 * 60 * 1000),
   },
   {
@@ -197,7 +197,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 1_000,
     description:
-      'How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds.',
+      'How often the supervisor checks whether a supervised on-exit child has terminated and whether any condition check is due. This is the floor on how quickly an on-exit trigger notices its process ended; raise it to trade detection latency for less polling on a machine running long builds. Read once when the daemon starts; restart to apply a change.',
     ...intRange(250, 5 * 60 * 1000),
   },
   {

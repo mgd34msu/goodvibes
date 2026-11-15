@@ -17,11 +17,12 @@ import type { KnowledgeSemanticAnswerInput } from '../platform/src/platform/know
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
 
 const spaceId = 'homeassistant:search-lifecycle';
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => {
+afterEach(async () => {
   installJudgmentPort(previous);
+  await Promise.all(stores.splice(0).map(store => store.close()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -29,6 +30,7 @@ async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-homegraph-search-lifecycle-'));
   roots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
   await store.init();
   const source = await store.upsertSource({ id: 'manual', connectorId: 'fixture', sourceType: 'manual', title: 'Manual', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
   await store.upsertExtraction({ sourceId: source.id, extractorId: 'fixture', format: 'text', excerpt: 'A switch restores factory settings.', metadata: { knowledgeSpaceId: spaceId } });

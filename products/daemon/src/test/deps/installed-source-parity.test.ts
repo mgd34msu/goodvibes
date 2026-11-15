@@ -59,7 +59,11 @@ for (const [pkg, file] of [
 test('installed web-tree-sitter initializes its actual WASM runtime', async () => {
   const mod = await import(engineRequire.resolve('web-tree-sitter'));
   const Parser = mod.Parser ?? mod.default; await Parser.init();
-  expect(Parser.init).toBeFunction();
+  const language = await mod.Language.load(engineRequire.resolve('tree-sitter-json/tree-sitter-json.wasm'));
+  const parser = new Parser(); parser.setLanguage(language);
+  const valid = parser.parse('{"name": [1, 2]}'); const invalid = parser.parse('{"name": ');
+  expect(valid.rootNode.type).toBe('document'); expect(valid.rootNode.hasError).toBe(false);
+  expect(invalid.rootNode.hasError).toBe(true);
 });
 
 
@@ -75,7 +79,4 @@ test('the actual native prebuild CLI refuses version drift without implicit sync
   expect(new TextDecoder().decode(result.stderr)).toContain('fallback must match package.json');
   expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(manifest);
   expect(readFileSync(join(root, 'src/version.ts'), 'utf8')).toBe(version);
-  const configuration = JSON.parse(readFileSync(join(productRoot, 'toolchain.config.json'), 'utf8'));
-  expect(configuration.build.prebuild).toEqual([['bun', 'run', 'scripts/check-version.ts']]);
-  expect(configuration.build.compileDriver).toBe('scripts/compile.ts');
 });

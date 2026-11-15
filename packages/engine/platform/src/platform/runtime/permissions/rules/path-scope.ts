@@ -3,7 +3,8 @@
  *
  * PathScopeRule matches tool calls that operate on file paths, restricting
  * or allowing access based on whether the path argument matches any of the
- * specified path patterns. Supports glob-style `**` wildcards.
+ * specified path patterns. Supports glob-style `*`, `**` and `?` wildcards and
+ * directory prefixes.
  * Independently testable.
  */
 
@@ -77,15 +78,21 @@ function globToRegex(pattern: string): RegExp {
 /**
  * pathMatchesPattern, Returns true if `absolutePath` matches `pattern`.
  *
- * Relative patterns are resolved against cwd before matching.
+ * Relative patterns are resolved against cwd before matching. A pattern with no
+ * wildcard names a directory (or file) and covers everything beneath it, and
+ * `dir/**` covers `dir` itself as well as its contents.
  */
-function pathMatchesPattern(absolutePath: string, pattern: string, projectRoot?: string): boolean {
+export function pathMatchesPattern(absolutePath: string, pattern: string, projectRoot?: string): boolean {
   if (!pattern.startsWith('/') && !projectRoot) {
     return false;
   }
   const resolvedPattern = pattern.startsWith('/') ? pattern : resolve(projectRoot as string, pattern);
-  const regex = globToRegex(resolvedPattern);
-  return regex.test(absolutePath);
+  if (!/[*?]/.test(resolvedPattern)) {
+    const base = resolvedPattern.length > 1 ? resolvedPattern.replace(/\/+$/, '') : resolvedPattern;
+    return absolutePath === base || absolutePath.startsWith(base.endsWith('/') ? base : `${base}/`);
+  }
+  if (resolvedPattern.endsWith('/**') && absolutePath === resolvedPattern.slice(0, -3)) return true;
+  return globToRegex(resolvedPattern).test(absolutePath);
 }
 
 /**

@@ -11,7 +11,7 @@ const { validateConfigValue } = createOnboardingConfigValidator<Extract<Onboardi
 });
 import { createOnboardingApplyPrimitives } from '@goodvibes-jev/engine/terminal-shell/onboarding-apply-primitives';
 import { createOnboardingFileHelpers, type RollbackAction } from '@goodvibes-jev/engine/terminal-shell/onboarding-file-helpers';
-const { isPlainObject, readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
+const { readJsonObject, writeJsonObject, setNestedValue, restoreFile, snapshotFileRollback, runRollbacks } =
   createOnboardingFileHelpers();
 import { existsSync, readFileSync } from 'node:fs';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -33,17 +33,6 @@ interface BootstrapCredential {
   readonly password: string;
 }
 
-interface PersistedAuthUser {
-  readonly username: string;
-  readonly passwordHash: string;
-  readonly roles?: readonly string[];
-}
-
-interface MutableAuthManager {
-  readonly users?: Map<string, PersistedAuthUser>;
-  readonly sessions?: Map<string, { readonly token: string; readonly username: string; readonly expiresAt: number }>;
-}
-
 function parseBootstrapCredential(content: string | null): BootstrapCredential | null {
   if (content === null) return null;
   let username = '';
@@ -54,20 +43,6 @@ function parseBootstrapCredential(content: string | null): BootstrapCredential |
     if (line.startsWith('password=')) password = line.slice('password='.length);
   }
   return username.length > 0 && password.length > 0 ? { username, password } : null;
-}
-
-function parsePersistedAuthUsers(content: string): readonly PersistedAuthUser[] {
-  const parsed = JSON.parse(content) as unknown;
-  if (!isPlainObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.users)) {
-    throw new Error('Expected a version 1 local auth user store.');
-  }
-  return parsed.users.filter(
-    (user): user is PersistedAuthUser =>
-      isPlainObject(user) &&
-      typeof user.username === 'string' &&
-      typeof user.passwordHash === 'string' &&
-      (user.roles === undefined || (Array.isArray(user.roles) && user.roles.every((role) => typeof role === 'string'))),
-  );
 }
 
 function validateAuthOperation(
@@ -142,57 +117,19 @@ function buildAuthRollbackAction(
 ): RollbackAction {
   validateAuthOperation(deps, operation);
   const auth = deps.auth!;
-  const mutable = auth as unknown as MutableAuthManager;
-  const username = operation.username.trim();
   const before = auth.inspect();
-  const existingUser = before.users.find((user) => user.username === username);
-  const existingSessionIds = new Set(
-    before.sessions.filter((session) => session.username === username).map((session) => session.id),
-  );
+  const state = auth.snapshotState();
   const userStoreSnapshot = existsSync(before.userStorePath) ? readFileSync(before.userStorePath, 'utf-8') : null;
   const bootstrapCredentialSnapshot = existsSync(before.bootstrapCredentialPath)
     ? readFileSync(before.bootstrapCredentialPath, 'utf-8')
     : null;
-  const bootstrapCredential = parseBootstrapCredential(bootstrapCredentialSnapshot);
-  const beforeSessions =
-    mutable.sessions instanceof Map ? [...mutable.sessions.entries()].map(([token, session]) => [token, { ...session }] as const) : [];
 
   return () => {
-    for (const session of auth.inspect().sessions) {
-      if (session.username === username && !existingSessionIds.has(session.id)) {
-        auth.revokeSession(session.id);
-      }
-    }
-
-    if (bootstrapCredential && !auth.getUser(bootstrapCredential.username)) {
-      auth.addUser(bootstrapCredential.username, bootstrapCredential.password, ['admin']);
-    }
-
-    if (!existingUser && auth.getUser(username)) {
-      try {
-        auth.deleteUser(username);
-      } catch (error) {
-        if (mutable.users instanceof Map) mutable.users.delete(username);
-        else throw error;
-      }
-    }
-
     restoreFile(before.bootstrapCredentialPath, bootstrapCredentialSnapshot);
     restoreFile(before.userStorePath, userStoreSnapshot);
-
-    if (mutable.users instanceof Map) {
-      if (userStoreSnapshot === null) {
-        if (before.users.length === 0) mutable.users.clear();
-      } else {
-        mutable.users.clear();
-        for (const user of parsePersistedAuthUsers(userStoreSnapshot)) mutable.users.set(user.username, user);
-      }
-    }
-
-    if (mutable.sessions instanceof Map) {
-      mutable.sessions.clear();
-      for (const [token, session] of beforeSessions) mutable.sessions.set(token, session);
-    }
+    // The files are back; the live accounts and sessions return to exactly what they were, including
+    // sessions this apply created and a bootstrap user it retired.
+    auth.restoreState(state);
   };
 }
 

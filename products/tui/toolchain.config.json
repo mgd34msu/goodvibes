@@ -61,42 +61,6 @@
     "bannerPrefix": "goodvibes ",
     "binaryDefault": "dist/goodvibes-linux-x64"
   },
-  "releaseCut": {
-    "branch": "main",
-    "versionFiles": [
-      "platform-packages/linux-x64/package.json",
-      "platform-packages/linux-arm64/package.json",
-      "platform-packages/darwin-x64/package.json",
-      "platform-packages/darwin-arm64/package.json"
-    ],
-    "syncCommands": [
-      [
-        "bun",
-        "run",
-        "scripts/sync-platform-optional-deps.ts"
-      ],
-      [
-        "bun",
-        "run",
-        "scripts/release-prepare.ts",
-        "--no-bump",
-        "--no-changelog"
-      ]
-    ],
-    "commitPaths": [
-      "package.json",
-      "src/version.ts",
-      "README.md",
-      "CHANGELOG.md",
-      "docs/foundation-artifacts",
-      "platform-packages",
-      "bun.lock",
-      "docs/commands-reference.md",
-      ".github/workflows"
-    ],
-    "changelogHeading": "bracket",
-    "changelogInsertMarker": "first-separator"
-  },
   "publish": {
     "packageName": "@goodvibes-jev/tui",
     "defaultRegistry": "https://registry.npmjs.org",

@@ -206,17 +206,19 @@ function browserInvocationRoutes(
     routes.push({
       kind: 'first-class-tool',
       toolName: 'browser',
-      modelRoute: 'browser action:"navigate" url:"https://example.com"',
+      modelRoute: 'browser action:"navigate" url:"<page url>"',
       summary: 'Drive a real browser directly: navigate, snapshot, click, type, read the page, screenshot. Provisions its own browser on first use.',
     });
   }
-  if (certifiedExecuteRoute) {
+  const certifiedTool = certifiedExecuteRoute?.split(/\s+/)[0] ?? '';
+  if (certifiedExecuteRoute && registeredNames.has(certifiedTool)) {
     // A certified daemon record counts only when it declares a route that
-    // RUNS something. A record that offers inspection alone describes browser
-    // control without providing it, which is not readiness.
+    // RUNS something and the tool that route starts with is registered here.
+    // Published route text with no tool behind it describes browser control
+    // without providing it; it stays visible in certifiedRuntimeRecords.
     routes.push({
       kind: 'daemon-certified-route',
-      toolName: certifiedExecuteRoute.split(' ')[0] ?? 'execution',
+      toolName: certifiedTool,
       modelRoute: certifiedExecuteRoute,
       summary: 'Run browser or desktop control through the connected host, using the route its certified record declares.',
     });
@@ -260,6 +262,9 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
     ? []
     : [
       'No browser route can be invoked from this session.',
+      ...(certifiedExecuteRoute && !registeredNames.has(certifiedExecuteRoute.split(/\s+/)[0] ?? '')
+        ? ['A certified daemon record publishes an execute route, but no tool in this session starts that route, so it is context only.']
+        : []),
       ...(mcpServers.length > 0 && !isAgentMcpCallRouteInstalled()
         ? ['MCP browser servers are connected but this session has no route that can call them.']
         : []),
@@ -423,10 +428,14 @@ function browserControlDecision(
       modelRoute: route?.modelRoute ?? (firstToolRoute || firstReadyMcpRoute || posture.recommendedRoute || posture.executionRoute),
       userRoute: 'Agent Workspace -> Work & Approvals or Tools & MCP',
       nextStep: route
-        ? `Call ${route.modelRoute} directly. ${route.summary}`
+        ? `Call ${route.modelRoute} directly, replacing any <placeholder> with a real value. ${route.summary}`
         : `Inspect the configured ${workflow.label.toLowerCase()} tool/server before acting.`,
       reason: route
-        ? `${route.toolName} is registered and can be invoked from this session.`
+        ? route.kind === 'daemon-certified-route'
+          ? `A certified daemon record declares this route and ${route.toolName} is registered in this session.`
+          : route.kind === 'mcp-tool-call'
+            ? 'The mcp tool is registered and a connected MCP browser server has fresh schemas and a trusted mode.'
+            : `${route.toolName} is registered and can be invoked from this session.`
         : 'A browser/desktop control tool or fresh trusted MCP server is configured.',
       safety: workflow.safety,
     };

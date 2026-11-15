@@ -1,32 +1,5 @@
 import { SecretsManager, type SecretsManagerOptions } from './secrets.js';
-import { isSecretRefInput } from './secret-refs.js';
-import { isGoodVibesSecretReferenceValue } from './secret-backed-config.js';
-const RAW_SECRET_LITERAL_PREFIX = '__GOODVIBES_LITERAL_V1__';
-function shouldStoreAsLiteral(value: string): boolean {
-    return value.startsWith(RAW_SECRET_LITERAL_PREFIX)
-        || (isSecretRefInput(value) && !isGoodVibesSecretReferenceValue(value));
-}
-function encodeLiteralSecret(value: string): string {
-    return `${RAW_SECRET_LITERAL_PREFIX}${Buffer.from(JSON.stringify({ value }), 'utf-8').toString('base64url')}`;
-}
-function decodeLiteralSecret(value: string): string | null {
-    if (!value.startsWith(RAW_SECRET_LITERAL_PREFIX))
-        return null;
-    try {
-        const decoded = Buffer.from(value.slice(RAW_SECRET_LITERAL_PREFIX.length), 'base64url').toString('utf-8');
-        const parsed = JSON.parse(decoded) as unknown;
-        if (!parsed || typeof parsed !== 'object' || typeof (parsed as {
-            value?: unknown | undefined;
-        }).value !== 'string')
-            return null;
-        return (parsed as {
-            value: string;
-        }).value;
-    }
-    catch {
-        return null;
-    }
-}
+import { decodeLiteralSecret, encodeLiteralSecret, shouldStoreAsLiteral } from './secret-literal-codec.js';
 /** Marks a manager that already carries the raw-literal read/write pair. */
 const RAW_LITERAL_HANDLING_INSTALLED = Symbol.for('goodvibes.agent.rawSecretLiteralHandling');
 /**

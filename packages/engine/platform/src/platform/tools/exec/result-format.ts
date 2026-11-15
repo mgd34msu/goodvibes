@@ -98,6 +98,31 @@ function sandboxFields(result: ExecCommandResult): Record<string, unknown> {
   };
 }
 
+/** Notes that must reach the caller at every verbosity, never shortened with the output. */
+function noticeFields(result: ExecCommandResult): Record<string, unknown> {
+  return {
+    ...(result.prompts_dropped
+      ? {
+        prompts_dropped: result.prompts_dropped,
+        prompt_dropped_note: `${result.prompts_dropped} typed answer(s) were not sent because the program printed more output before the answer arrived; the prompt is asked again.`,
+      }
+      : {}),
+    ...(result.tty_note && { tty_note: result.tty_note }),
+    // What a caller needs to act on or to understand a failure, at every
+    // verbosity: the handle of a detached process, why a zero exit still failed,
+    // that a run was stopped, and where its progress was written.
+    ...(result.process_id && { process_id: result.process_id, pid: result.pid }),
+    ...(result.expectation_error && { expectation_error: result.expectation_error }),
+    ...(result.timed_out && { timed_out: true }),
+    ...(result.cancelled && { cancelled: true }),
+    ...(result.retries !== undefined && { retries: result.retries }),
+    ...(result.progress_file && { progress_file: result.progress_file }),
+    ...(result.warnings && { warnings: result.warnings }),
+    ...(result.pending_prompt && { pending_prompt: result.pending_prompt }),
+    ...(result.prompt_declined && { prompt_declined: true }),
+  };
+}
+
 export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity): Record<string, unknown> {
   if (result.skipped) {
     return { cmd: result.cmd, success: false, skipped: true };
@@ -116,6 +141,8 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
       success: false,
       denied: true,
       ...(result.captured_exec_unsupported_options && { captured_exec_unsupported_options: result.captured_exec_unsupported_options }),
+      ...(result.captured_changes_published && { captured_changes_published: true }),
+      ...(result.cancelled && { cancelled: true }),
       ...sandboxFields(result),
       // `stderr` stays populated so existing consumers keep reading the reason
       // where they always have; `denial_reason` adds the same text under a name
@@ -145,6 +172,7 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
         ...(result.stdout_truncated && { stdout_truncated: true }),
         ...(result.stderr_truncated && { stderr_truncated: true }),
         ...sandboxFields(result),
+        ...noticeFields(result),
       };
     case 'minimal': {
       return {
@@ -159,23 +187,16 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
         // see regardless of how quiet it asked the output to be.
         ...(result.stdout_truncated && { stdout_truncated: true }),
         ...(result.stderr_truncated && { stderr_truncated: true }),
-        ...(result.expectation_error && { expectation_error: result.expectation_error }),
-        ...(result.timed_out && { timed_out: true }),
-        ...(result.cancelled && { cancelled: true }),
-        ...(result.process_id && { process_id: result.process_id, pid: result.pid }),
-        ...(result.progress_file && { progress_file: result.progress_file }),
-        ...(result.warnings && { warnings: result.warnings }),
         ...(result.withheld_env && result.withheld_env.length > 0 && { withheld_env: result.withheld_env }),
-        ...(result.pending_prompt && { pending_prompt: result.pending_prompt }),
-        ...(result.prompt_declined && { prompt_declined: true }),
         ...sandboxFields(result),
+        ...noticeFields(result),
       };
     }
     case 'verbose':
       // Everything, plus the overflow marker inside the stream text: `verbose`
       // can still be handed an already-cut stream, and the flag alone reads as
       // metadata rather than as missing content.
-      return { ...result, stdout: stdout.text, stderr: stderr.text };
+      return { ...result, stdout: stdout.text, stderr: stderr.text, ...noticeFields(result) };
     case 'standard':
     default:
       return {
@@ -184,21 +205,13 @@ export function formatResult(result: ExecCommandResult, verbosity: ExecVerbosity
         success: result.success,
         stdout: stdout.text,
         stderr: stderr.text,
-        ...(result.expectation_error && { expectation_error: result.expectation_error }),
-        ...(result.timed_out && { timed_out: true }),
-        ...(result.cancelled && { cancelled: true }),
-        ...(result.process_id && { process_id: result.process_id, pid: result.pid }),
         ...(result.stdout_truncated && { stdout_truncated: true }),
         ...(result.stderr_truncated && { stderr_truncated: true }),
-        ...(result.retries !== undefined && { retries: result.retries }),
-        ...(result.progress_file && { progress_file: result.progress_file }),
-        ...(result.warnings && { warnings: result.warnings }),
         ...(result.withheld_env && result.withheld_env.length > 0 && { withheld_env: result.withheld_env }),
         ...(result.pty && { pty: true }),
         ...(result.prompts_answered !== undefined && { prompts_answered: result.prompts_answered }),
-        ...(result.pending_prompt && { pending_prompt: result.pending_prompt }),
-        ...(result.prompt_declined && { prompt_declined: true }),
         ...sandboxFields(result),
+        ...noticeFields(result),
       };
   }
 }

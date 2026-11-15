@@ -1,233 +1,116 @@
 /**
- * UX Anti-Regression: Plugin Reload (v3 §18.5)
+ * UX Anti-Regression: Plugin Reload
  *
- * Verifies that reloading a plugin leaves the other runtime domains intact,
- * plugin metadata updates correctly, and the plugin registry stays
- * consistent through the reload lifecycle.
- *
- * All tests use pure state manipulation, no real I/O, no event bus.
+ * Drives the real runtime store with plugin bus events (unload, load, activate)
+ * and checks that the plugin registry, the active list and the reload flag stay
+ * consistent while other plugins and other domains are left alone.
  */
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { createInitialRuntimeState } from '../../runtime/store/state.ts';
-import type { RuntimeState } from '../../runtime/store/state.ts';
+import { describe, test, expect } from 'bun:test';
+import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import {
   selectPlugins,
   selectOverlays,
   selectConversation,
 } from '../../runtime/store/selectors/index.ts';
-import type { PluginDomainState, RuntimePlugin } from '@/runtime/index.ts';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Fixed timestamp used in test helpers to avoid non-deterministic Date.now() calls. */
-const TEST_TIMESTAMP = 1700000000000;
-
-function makePlugin(
-  name: string,
-  status: RuntimePlugin['status'] = 'active',
-): RuntimePlugin {
-  return {
-    name,
-    displayName: `Plugin ${name}`,
-    version: '1.0.0',
-    description: `Test plugin ${name}`,
-    status,
-    enabled: true,
-    active: status === 'active',
-    toolCount: 3,
-    loadedAt: TEST_TIMESTAMP - 5000,
-    config: {},
-    hookInvocations: 12,
-  };
-}
-
-/** Build plugin domain state with given plugins active. */
-function makePluginState(
-  plugins: RuntimePlugin[],
-  reloadInProgress = false,
-): PluginDomainState {
-  const pluginMap = new Map<string, RuntimePlugin>();
-  const activeNames: string[] = [];
-  const erroredNames: string[] = [];
-
-  for (const plugin of plugins) {
-    pluginMap.set(plugin.name, plugin);
-    if (plugin.status === 'active') activeNames.push(plugin.name);
-    if (plugin.status === 'error') erroredNames.push(plugin.name);
+function storeWithActivePlugins(...names: string[]) {
+  const store = createRuntimeStore();
+  const dispatch = createDomainDispatch(store);
+  for (const name of names) {
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_DISCOVERED', pluginId: name, path: `/plugins/${name}`, version: '1.0.0' });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADED', pluginId: name, version: '1.0.0', capabilities: ['a', 'b', 'c'] });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_ACTIVE', pluginId: name });
   }
-
-  return {
-    revision: 1,
-    lastUpdatedAt: TEST_TIMESTAMP,
-    source: 'plugin-reload-test',
-    plugins: pluginMap,
-    activePluginNames: activeNames,
-    erroredPluginNames: erroredNames,
-    totalDiscovered: plugins.length,
-    totalActive: activeNames.length,
-    totalToolsContributed: activeNames.length * 3,
-    initialLoadComplete: true,
-    reloadInProgress,
-  };
+  return { store, dispatch };
 }
-
-/** Simulate reload: plugin goes unloading → loading → active. */
-function applyPluginReload(
-  state: RuntimeState,
-  pluginName: string,
-): { unloading: RuntimeState; loading: RuntimeState; reloaded: RuntimeState } {
-  const plugins = state.plugins;
-  const plugin = plugins.plugins.get(pluginName);
-  if (!plugin) throw new Error(`Plugin ${pluginName} not found`);
-
-  const unloadingMap = new Map(plugins.plugins);
-  unloadingMap.set(pluginName, { ...plugin, status: 'unloading', active: false });
-  const unloadingState: RuntimeState = {
-    ...state,
-    plugins: {
-      ...plugins,
-      plugins: unloadingMap,
-      activePluginNames: plugins.activePluginNames.filter((n) => n !== pluginName),
-      totalActive: plugins.totalActive - 1,
-      reloadInProgress: true,
-      revision: plugins.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'plugin-unloading',
-    },
-  };
-
-  const loadingMap = new Map(unloadingState.plugins.plugins);
-  loadingMap.set(pluginName, { ...plugin, status: 'loading', active: false });
-  const loadingState: RuntimeState = {
-    ...unloadingState,
-    plugins: {
-      ...unloadingState.plugins,
-      plugins: loadingMap,
-      reloadInProgress: true,
-      revision: unloadingState.plugins.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'plugin-loading',
-    },
-  };
-
-  const reloadedMap = new Map(loadingState.plugins.plugins);
-  const reloadedPlugin: RuntimePlugin = {
-    ...plugin,
-    status: 'active',
-    active: true,
-    loadedAt: TEST_TIMESTAMP,
-    hookInvocations: 0, // reset on reload
-  };
-  reloadedMap.set(pluginName, reloadedPlugin);
-  const reloadedState: RuntimeState = {
-    ...loadingState,
-    plugins: {
-      ...loadingState.plugins,
-      plugins: reloadedMap,
-      activePluginNames: [...plugins.activePluginNames],
-      totalActive: plugins.totalActive,
-      reloadInProgress: false,
-      revision: loadingState.plugins.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'plugin-active',
-    },
-  };
-
-  return { unloading: unloadingState, loading: loadingState, reloaded: reloadedState };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ux:plugin-reload: plugin reload', () => {
-  let state: RuntimeState;
+  test('a reloading plugin goes unloading, loading, then active again', () => {
+    const { store, dispatch } = storeWithActivePlugins('precision-engine', 'analytics');
+    const status = () => selectPlugins(store.getState()).plugins.get('precision-engine')?.status;
+    expect(status()).toBe('active');
 
-  beforeEach(() => {
-    state = createInitialRuntimeState();
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_UNLOADING', pluginId: 'precision-engine', reason: 'reload' });
+    expect(status()).toBe('unloading');
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADING', pluginId: 'precision-engine', path: '/plugins/precision-engine' });
+    expect(status()).toBe('loading');
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADED', pluginId: 'precision-engine', version: '1.0.1', capabilities: ['a', 'b', 'c'] });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_ACTIVE', pluginId: 'precision-engine' });
+    expect(status()).toBe('active');
+    expect(selectPlugins(store.getState()).plugins.get('precision-engine')?.version).toBe('1.0.1');
   });
 
-  describe('plugin lifecycle state transitions', () => {
-    test('plugin transitions unloading → loading → active during reload', () => {
-      const plugins = [makePlugin('precision-engine'), makePlugin('goodvibes-analytics')];
-      const pluginState = makePluginState(plugins);
-      const withPlugins: RuntimeState = { ...state, plugins: pluginState };
+  test('reloadInProgress is set while unloading or loading and cleared once the plugin is loaded', () => {
+    const { store, dispatch } = storeWithActivePlugins('my-plugin');
+    const inProgress = () => selectPlugins(store.getState()).reloadInProgress;
+    expect(inProgress()).toBe(false);
 
-      const { unloading, loading, reloaded } = applyPluginReload(withPlugins, 'precision-engine');
-
-      expect(selectPlugins(unloading).plugins.get('precision-engine')?.status).toBe('unloading');
-      expect(selectPlugins(loading).plugins.get('precision-engine')?.status).toBe('loading');
-      expect(selectPlugins(reloaded).plugins.get('precision-engine')?.status).toBe('active');
-    });
-
-    test('reloadInProgress flag is set during reload and cleared after', () => {
-      const plugins = [makePlugin('my-plugin')];
-      const withPlugins: RuntimeState = { ...state, plugins: makePluginState(plugins) };
-      const { unloading, loading, reloaded } = applyPluginReload(withPlugins, 'my-plugin');
-
-      expect(selectPlugins(unloading).reloadInProgress).toBe(true);
-      expect(selectPlugins(loading).reloadInProgress).toBe(true);
-      expect(selectPlugins(reloaded).reloadInProgress).toBe(false);
-    });
-
-    test('other plugins remain active during reload of one plugin', () => {
-      const plugins = [
-        makePlugin('plugin-a'),
-        makePlugin('plugin-b'),
-        makePlugin('plugin-c'),
-      ];
-      const withPlugins: RuntimeState = { ...state, plugins: makePluginState(plugins) };
-      const { unloading, loading, reloaded } = applyPluginReload(withPlugins, 'plugin-a');
-
-      for (const phase of [unloading, loading, reloaded]) {
-        expect(selectPlugins(phase).plugins.get('plugin-b')?.status).toBe('active');
-        expect(selectPlugins(phase).plugins.get('plugin-c')?.status).toBe('active');
-      }
-    });
-
-    test('plugin registry size stays constant through reload cycle', () => {
-      const plugins = [makePlugin('my-plugin'), makePlugin('other-plugin')];
-      const withPlugins: RuntimeState = { ...state, plugins: makePluginState(plugins) };
-      const { unloading, loading, reloaded } = applyPluginReload(withPlugins, 'my-plugin');
-
-      expect(selectPlugins(withPlugins).plugins.size).toBe(2);
-      expect(selectPlugins(unloading).plugins.size).toBe(2);
-      expect(selectPlugins(loading).plugins.size).toBe(2);
-      expect(selectPlugins(reloaded).plugins.size).toBe(2);
-    });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_UNLOADING', pluginId: 'my-plugin' });
+    expect(inProgress()).toBe(true);
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADING', pluginId: 'my-plugin', path: '/plugins/my-plugin' });
+    expect(inProgress()).toBe(true);
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADED', pluginId: 'my-plugin', version: '1.0.0', capabilities: [] });
+    expect(inProgress()).toBe(false);
   });
 
-  describe('other runtime domains survive plugin reload', () => {
-    test('overlay and conversation slices are untouched through the reload cycle', () => {
-      const withPlugins: RuntimeState = { ...state, plugins: makePluginState([makePlugin('my-plugin')]) };
+  test('the reloading plugin leaves the active list and its tools stop counting until it is active again', () => {
+    const { store, dispatch } = storeWithActivePlugins('plugin-a', 'plugin-b');
+    expect(selectPlugins(store.getState()).totalToolsContributed).toBe(6);
 
-      const { unloading, loading, reloaded } = applyPluginReload(withPlugins, 'my-plugin');
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_UNLOADING', pluginId: 'plugin-a' });
+    let plugins = selectPlugins(store.getState());
+    expect(plugins.activePluginNames).toEqual(['plugin-b']);
+    expect(plugins.totalActive).toBe(1);
+    expect(plugins.totalToolsContributed).toBe(3);
 
-      for (const phase of [unloading, loading, reloaded]) {
-        expect(selectOverlays(phase)).toBe(selectOverlays(withPlugins));
-        expect(selectConversation(phase)).toBe(selectConversation(withPlugins));
-      }
-    });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADED', pluginId: 'plugin-a', version: '1.0.0', capabilities: ['a', 'b', 'c'] });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_ACTIVE', pluginId: 'plugin-a' });
+    plugins = selectPlugins(store.getState());
+    expect([...plugins.activePluginNames].sort()).toEqual(['plugin-a', 'plugin-b']);
+    expect(plugins.totalToolsContributed).toBe(6);
   });
 
-  describe('plugin metadata after reload', () => {
-    test('loadedAt timestamp is refreshed after reload', () => {
-      const plugin = makePlugin('my-plugin');
-      const originalLoadedAt = plugin.loadedAt!;
-      const withPlugin: RuntimeState = { ...state, plugins: makePluginState([plugin]) };
+  test('other plugins stay active and the registry size is constant through a reload', () => {
+    const { store, dispatch } = storeWithActivePlugins('plugin-a', 'plugin-b', 'plugin-c');
+    const events: Array<Parameters<typeof dispatch.dispatchPluginEvent>[0]> = [
+      { type: 'PLUGIN_UNLOADING', pluginId: 'plugin-a' },
+      { type: 'PLUGIN_LOADING', pluginId: 'plugin-a', path: '/plugins/plugin-a' },
+      { type: 'PLUGIN_LOADED', pluginId: 'plugin-a', version: '1.0.0', capabilities: [] },
+      { type: 'PLUGIN_ACTIVE', pluginId: 'plugin-a' },
+    ];
+    for (const event of events) {
+      dispatch.dispatchPluginEvent(event);
+      const { plugins } = selectPlugins(store.getState());
+      expect(plugins.size).toBe(3);
+      expect(plugins.get('plugin-b')?.status).toBe('active');
+      expect(plugins.get('plugin-c')?.status).toBe('active');
+    }
+  });
 
-      const { reloaded } = applyPluginReload(withPlugin, 'my-plugin');
-      const reloadedPlugin = selectPlugins(reloaded).plugins.get('my-plugin');
+  test('a reload that fails is listed as errored with its message, not as active', () => {
+    const { store, dispatch } = storeWithActivePlugins('my-plugin');
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_UNLOADING', pluginId: 'my-plugin' });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADING', pluginId: 'my-plugin', path: '/plugins/my-plugin' });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_ERROR', pluginId: 'my-plugin', error: 'syntax error', fatal: true });
 
-      expect(reloadedPlugin?.loadedAt).toBe(TEST_TIMESTAMP);
-      expect(reloadedPlugin?.loadedAt).toBeGreaterThan(originalLoadedAt);
-    });
+    const plugins = selectPlugins(store.getState());
+    expect(plugins.plugins.get('my-plugin')?.status).toBe('error');
+    expect(plugins.plugins.get('my-plugin')?.error).toBe('syntax error');
+    expect(plugins.activePluginNames).toEqual([]);
+    expect(plugins.erroredPluginNames).toEqual(['my-plugin']);
+    expect(plugins.reloadInProgress).toBe(false);
+  });
 
-    test('hook invocation counter resets after reload', () => {
-      const plugin = { ...makePlugin('my-plugin'), hookInvocations: 42 };
-      const withPlugin: RuntimeState = { ...state, plugins: makePluginState([plugin]) };
+  test('overlay and conversation slices are untouched through the reload cycle', () => {
+    const { store, dispatch } = storeWithActivePlugins('my-plugin');
+    const overlays = selectOverlays(store.getState());
+    const conversation = selectConversation(store.getState());
 
-      const { reloaded } = applyPluginReload(withPlugin, 'my-plugin');
-      const reloadedPlugin = selectPlugins(reloaded).plugins.get('my-plugin');
-      expect(reloadedPlugin?.hookInvocations).toBe(0);
-    });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_UNLOADING', pluginId: 'my-plugin' });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_LOADING', pluginId: 'my-plugin', path: '/plugins/my-plugin' });
+    dispatch.dispatchPluginEvent({ type: 'PLUGIN_ACTIVE', pluginId: 'my-plugin' });
+
+    expect(selectOverlays(store.getState())).toBe(overlays);
+    expect(selectConversation(store.getState())).toBe(conversation);
   });
 });

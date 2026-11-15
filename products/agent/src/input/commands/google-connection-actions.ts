@@ -31,7 +31,10 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 
 import type { CommandContext } from '../command-registry.ts';
 import { requirePlatform, requireSecretsManager, requireShellPaths } from './runtime-services.ts';
+import { subscriptionRegistryForWrite } from './calendar-subscription-runtime.ts';
 import {
+  GOOGLE_CONFIG_KEYS,
+  GOOGLE_SECRET_KEYS,
   adoptExistingGoogleCredentials,
   buildGoogleSetupRunners,
   createGoogleBrowserPort,
@@ -126,9 +129,11 @@ export const googleFilePort = nodeGoogleFilePort;
  * warn that the flow will pause, an unattended run cannot get past it.
  */
 export function googleBrowserFactory(ctx: CommandContext): () => Promise<GoogleBrowserPort> {
+  const existing = googleBrowserFactories.get(ctx);
+  if (existing !== undefined) return existing;
   const homeDirectory = requireShellPaths(ctx).homeDirectory;
   let port: GoogleBrowserPort | null = null;
-  return async () => {
+  const factory = async () => {
     if (port !== null) return port;
     const engine = createAgentBrowserEngine({
       profileRoot: agentBrowserProfileRoot(homeDirectory),
@@ -138,7 +143,14 @@ export function googleBrowserFactory(ctx: CommandContext): () => Promise<GoogleB
     port = createGoogleBrowserPort(engine, { launch: { profileName: 'google', headless: false } });
     return port;
   };
+  // One browser per shell context: a step that stops for the person leaves the
+  // window open, and the re-run must drive that window. A second engine would
+  // try to launch the same profile and be refused as already open.
+  googleBrowserFactories.set(ctx, factory);
+  return factory;
 }
+
+const googleBrowserFactories = new WeakMap<CommandContext, () => Promise<GoogleBrowserPort>>();
 
 const googleSetupRequests = new WeakMap<CommandContext, object>();
 
@@ -306,11 +318,14 @@ export async function runGoogleSetup(
 }
 
 /** Work out how to connect, without changing anything. */
-export async function planGoogleConnectionFor(ctx: CommandContext): Promise<GoogleConnectionPlan> {
+export async function planGoogleConnectionFor(
+  ctx: CommandContext,
+  commands: GoogleSetupActionDeps['commands'] = createProcessCommandPort(),
+): Promise<GoogleConnectionPlan> {
   return await planGoogleConnection({
     config: googleConfigPort(ctx),
     secrets: googleSecretPort(ctx),
-    commands: createProcessCommandPort(),
+    commands,
     homeDirectory: requireShellPaths(ctx).homeDirectory,
   });
 }
@@ -389,19 +404,22 @@ export async function connectGoogle(
 
 /**
  * `/google reauthorize`, a fresh consent covering every scope, without
- * deleting anything.
+ * losing the working token if the consent does not complete.
  *
  * This is the command the old error text pointed at and which did not exist.
  * It runs the existing-client path, which is consent and proof only: the
  * client is already there, so nothing about the project or the console is
  * touched. The stored refresh token is replaced by Google issuing a new one on
  * a fresh consent, the person's approval IS the confirmation, which is why
- * this does not additionally prompt.
+ * this does not additionally prompt. If the consent does not finish, the
+ * previous token is put back.
  */
 export async function reauthorizeGoogle(
   ctx: CommandContext,
   progress: GoogleProgressPort,
   announceConsentUrl: (url: string) => void,
+  /** Replaces real machine ports (the loopback listener, the network) with the caller's own. */
+  portOverrides: Partial<GoogleSetupActionDeps> = {},
 ): Promise<GoogleConnectOutcome> {
   const config = googleConfigPort(ctx);
   const secrets = googleSecretPort(ctx);
@@ -414,16 +432,19 @@ export async function reauthorizeGoogle(
     };
   }
 
-  const plan = await planGoogleConnectionFor(ctx);
-  const deps: GoogleSetupActionDeps = {
+  const plan = await planGoogleConnectionFor(ctx, portOverrides.commands);
+  // Built after the removal below: the setup ports pin the credential and
+  // configuration state they were created against, and the removal changes both.
+  const buildDeps = (): GoogleSetupActionDeps => ({
     ...googleActionDeps(ctx),
     announceConsentUrl,
     ...(plan.intendedAccount === null ? {} : { loginHint: plan.intendedAccount }),
     // Google returns a new refresh token on a fresh consent, and the authorize
     // step stores it. Forcing the step to run means clearing the "already
-    // authorized" short-circuit, which is what the removal below is for, and
-    // it is the one removal that does not need a separate yes, because the
-    // person is about to approve a replacement on the consent screen.
+    // authorized" short-circuit, which is what the removal below is for. The
+    // old token is kept aside and put back unless the consent produced a
+    // replacement, so a closed consent page does not disconnect a working mail
+    // connection.
     proveConnection: async () => {
       const connection = await openConnection(ctx, plan.gcloud?.account ?? null);
       if (connection === null) return { ok: false, detail: 'No usable credential after consent.' };
@@ -432,24 +453,51 @@ export async function reauthorizeGoogle(
         ? { ok: true, detail: proof.summary }
         : { ok: false, detail: proof.summary, problem: proof.calendar.problem ?? proof.mail.problem ?? proof.summary };
     },
-  };
+    ...portOverrides,
+  });
 
+  const previousToken = await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+  const previousReference = config.get(GOOGLE_CONFIG_KEYS.oauthRefreshToken);
   const removal = await removeGoogleCredentials(
     { secrets, config },
     { items: ['refresh-token'], confirmed: true, reason: 'Replacing it with the token this consent produces.' },
   );
 
-  const report = await runGoogleSetupFlow('existing-client', {
-    progress,
-    runners: buildGoogleSetupRunners('existing-client', deps),
-  });
+  // A token that is still stored would be taken for a finished authorization
+  // and the consent would never be asked for, so stop here and say what is left.
+  if ('partial' in removal) return { connected: false, text: removal.detail };
+  if ('refused' in removal) return { connected: false, text: removal.prompt };
+
+  const restorePreviousToken = async (): Promise<boolean> => {
+    if (typeof previousToken !== 'string' || previousToken.trim().length === 0) return false;
+    const current = await secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+    if (typeof current === 'string' && current.trim().length > 0) return false;
+    await secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, previousToken);
+    if (previousReference !== undefined && previousReference !== null) config.set(GOOGLE_CONFIG_KEYS.oauthRefreshToken, previousReference);
+    return true;
+  };
+
+  let report: GoogleSetupReport;
+  try {
+    report = await runGoogleSetupFlow('existing-client', {
+      progress,
+      runners: buildGoogleSetupRunners('existing-client', buildDeps()),
+    });
+  } catch (error) {
+    await restorePreviousToken().catch(() => false);
+    throw error;
+  }
+  const restored = report.ok ? false : await restorePreviousToken();
 
   const preamble = removal.confirmed && removal.removed.length > 0
     ? 'Replacing the existing refresh token with a fresh consent covering mail and calendar together.'
     : 'Asking for a fresh consent covering mail and calendar together.';
 
-  return { connected: report.ok, text: [preamble, '', report.summary].join('\n') };
+  const restoredNote = restored ? ['', 'The consent did not complete, so the previous refresh token was kept and nothing was disconnected.'] : [];
+  return { connected: report.ok, text: [preamble, '', report.summary, ...restoredNote].join('\n') };
 }
+
+export const GOOGLE_CALENDAR_SUBSCRIPTION_NAME = 'Google calendar';
 
 /**
  * `/google forget`, remove stored credentials, only ever with an explicit yes.
@@ -468,7 +516,23 @@ export async function forgetGoogleCredentials(
     { items, confirmed },
   );
 
-  if (result.confirmed) return result.detail;
+  if (result.confirmed) {
+    // The private calendar address also lives as the 'Google calendar' feed
+    // subscription's stored URL; forgetting the address without it would leave
+    // a live copy that /calendar refresh keeps reading. Every caller (command
+    // and workspace card) gets this because it lives here.
+    if (!items.includes('calendar-address')) return result.detail;
+    const registry = subscriptionRegistryForWrite(ctx);
+    if (registry === null) return result.detail;
+    const feed = await registry.unsubscribeWithReport(GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
+    if (!feed.removed) return result.detail;
+    return [
+      result.detail,
+      feed.secret === 'failed'
+        ? `The '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' calendar feed was removed, but its stored address (${feed.secretKey ?? 'unknown key'}) could not be deleted: remove it with /secrets.`
+        : `Removed the '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' calendar feed and its stored address.`,
+    ].join('\n');
+  }
   if ('refused' in result) return result.prompt;
   return [result.prompt, 'Confirm with: /google forget --yes'].join('\n');
 }

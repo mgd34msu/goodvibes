@@ -4,7 +4,9 @@
  * = 'adopt' fields. Extracted from handler-onboarding.ts to keep that file
  * under the architecture line cap.
  */
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveDaemonCompanionToken } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { isLoopbackAddress } from './onboarding/onboarding-wizard-helpers.ts';
@@ -43,6 +45,13 @@ import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
  */
 export async function handleConnectExistingDaemonForHandler(handler: InputHandler): Promise<void> {
   if (handler.onboardingApplyPending) return;
+  // An invalid host or port must stop here: the getters below would otherwise fall back to
+  // 127.0.0.1 / 3421 and adopt an endpoint the user never typed.
+  const fieldErrors = handler.onboardingWizard.getBlockingFieldLabels().filter(label => label.includes('Existing daemon host') || label.includes('Existing daemon port'));
+  if (fieldErrors.length > 0) {
+    handler.commandContext?.print?.(['Connect to existing daemon: fix these fields first.', ...fieldErrors.map(label => `  ${label}`)].join('\n'));
+    return;
+  }
   const host = handler.onboardingWizard.getStringFieldValue('network.adopt-daemon-host', '127.0.0.1').trim() || '127.0.0.1';
   const port = handler.onboardingWizard.getPortFieldValue('network.adopt-daemon-port', 3421);
   const token = handler.onboardingWizard.getStringFieldValue('network.adopt-daemon-token', '').trim();
@@ -59,20 +68,48 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
 
   handler.onboardingApplyPending = true;
   handler.requestRender();
+  const configManager = handler.uiServices.platform.configManager;
+  const daemonHomeDir = resolveGoodVibesDaemonHome(handler.uiServices.environment.homeDirectory);
+  const tokenFile = join(daemonHomeDir, 'operator-tokens.json');
+  // What the attempt changes is written before the daemon is known to be reachable,
+  // so a failed attempt puts it back instead of leaving the TUI on a dead endpoint.
+  const previous = {
+    hostMode: configManager.get('controlPlane.hostMode'),
+    host: configManager.get('controlPlane.host'),
+    port: configManager.get('controlPlane.port'),
+    tokenFile: existsSync(tokenFile) ? readFileSync(tokenFile) : undefined,
+  };
+  const restorePrevious = async (): Promise<string> => {
+    try {
+      configManager.setDynamic('controlPlane.hostMode', previous.hostMode);
+      configManager.setDynamic('controlPlane.host', previous.host);
+      configManager.setDynamic('controlPlane.port', previous.port);
+      if (previous.tokenFile === undefined) rmSync(tokenFile, { force: true });
+      else writeFileSync(tokenFile, previous.tokenFile, { mode: 0o600 });
+    } catch (restoreError) {
+      return `The previous host, port and token could not be restored (${summarizeError(restoreError)}); check controlPlane.host, controlPlane.port and operator-tokens.json.`;
+    }
+    // The failed attempt's restart already moved the live connection to the new endpoint, so it has to move back too.
+    try {
+      await externalServices.restart();
+      return 'The previous host, port and token were restored and the connection was restarted on them.';
+    } catch (restartError) {
+      return `The previous host, port and token were restored, but restarting the connection on them failed (${summarizeError(restartError)}); the live connection may still be on the failed endpoint until the TUI restarts.`;
+    }
+  };
   try {
-    const daemonHomeDir = join(handler.uiServices.environment.homeDirectory, '.goodvibes', 'daemon');
     resolveDaemonCompanionToken(daemonHomeDir, GOODVIBES_TUI_SURFACE_ROOT, token);
     // hostMode has to move with the host. The control-plane URL is DERIVED from
     // hostMode/host/port, and 'local' pins the dial target to 127.0.0.1 no
     // matter what host is stored, so adopting a daemon on another machine
     // while leaving hostMode alone would derive a loopback URL for a remote
     // daemon. Adopting a loopback address stays 'local'.
-    handler.uiServices.platform.configManager.setDynamic(
+    configManager.setDynamic(
       'controlPlane.hostMode',
       isLoopbackAddress(host) ? 'local' : 'custom',
     );
-    handler.uiServices.platform.configManager.setDynamic('controlPlane.host', host);
-    handler.uiServices.platform.configManager.setDynamic('controlPlane.port', port);
+    configManager.setDynamic('controlPlane.host', host);
+    configManager.setDynamic('controlPlane.port', port);
 
     const state = await externalServices.restart();
     const binding = { label: 'GoodVibes daemon', host, port };
@@ -80,18 +117,19 @@ export async function handleConnectExistingDaemonForHandler(handler: InputHandle
       handler.commandContext?.print?.([
         'Connect to existing daemon: succeeded.',
         `  ${formatRuntimeActiveSuccessMessage('daemon', state)}`,
-        '  This host/port and token are applied now; Apply at the end of the wizard will persist them.',
+        '  This host/port and token are applied now and stay in place; they are not rolled back if you leave the wizard.',
       ].join('\n'));
     } else {
       const status = getRuntimeEndpointStatus(state, 'daemon');
       handler.commandContext?.print?.([
         'Connect to existing daemon: could not verify a connection.',
         `  ${runtimePortDiagnostic(binding, undefined, status)}`,
+        `  ${await restorePrevious()}`,
         '  Check the host, port, and token, then try again.',
       ].join('\n'));
     }
   } catch (error) {
-    handler.commandContext?.print?.(`Connect to existing daemon failed: ${summarizeError(error)}`);
+    handler.commandContext?.print?.(`Connect to existing daemon failed: ${summarizeError(error)}\n  ${await restorePrevious()}`);
   } finally {
     handler.onboardingApplyPending = false;
     handler.requestRender();

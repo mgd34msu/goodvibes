@@ -158,8 +158,23 @@ describe('product breadth commands', () => {
     }
   });
 
+  // The fake memory store behind makeContext: records really are stored, and
+  // export and the review queue really filter by scope, so a scope that is not
+  // passed through shows up in what the commands write and print.
+  let memoryRecords: MemoryRecord[] = [];
+  const recordsInScope = (scope: MemoryScope | undefined) => memoryRecords.filter((record) => scope === undefined || record.scope === scope);
+
+  function seedMemory(scope: MemoryScope, summary: string): void {
+    memoryRecords.push({
+      id: `seed-${memoryRecords.length + 1}`, scope, cls: 'decision', summary, tags: [], provenance: [],
+      reviewState: 'fresh', confidence: 70, createdAt: 1, updatedAt: 1,
+    });
+  }
+  const exportedSummaries = (path: string): string[] =>
+    (JSON.parse(readFileSync(path, 'utf8')) as { records: Array<{ summary: string }> }).records.map((record) => record.summary).sort();
+
   function makeContext(out: string[]): CommandContext {
-    const memoryRecords: Array<{ id: string; scope: string; cls: string; summary: string }> = [];
+    memoryRecords = [];
     const forensicsRegistry = new ForensicsRegistry();
     const runtimeStore = runtimeServices.runtimeStore;
     const integrationHelpers = new IntegrationHelperService({
@@ -354,15 +369,11 @@ describe('product breadth commands', () => {
     }
     const memoryRegistry: Parameters<typeof createMemoryApi>[0] = {
       add: async (opts: MemoryAddOptions) => {
-        const simpleRecord = {
+        const record: MemoryRecord = {
           id: `mem-${memoryRecords.length + 1}`,
           scope: opts.scope ?? 'project',
           cls: opts.cls,
           summary: opts.summary,
-        };
-        memoryRecords.push(simpleRecord);
-        const record: MemoryRecord = {
-          ...simpleRecord,
           tags: opts.tags ?? [],
           provenance: opts.provenance ?? [],
           reviewState: 'fresh',
@@ -370,20 +381,24 @@ describe('product breadth commands', () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
+        memoryRecords.push(record);
         return record;
       },
       search: async () => [],
       searchSemantic: async () => [],
-      reviewQueue: async (_limit?: number) => [],
-      exportBundle: (filter) => ({
-        schemaVersion: 'v1',
-        exportedAt: Date.now(),
-        scope: (filter?.scope as MemoryScope | 'all' | undefined) ?? 'all',
-        recordCount: memoryRecords.length,
-        linkCount: 0,
-        records: [],
-        links: [],
-      }),
+      reviewQueue: async (limit?: number, scope?: MemoryScope) => recordsInScope(scope).slice(0, limit ?? 10),
+      exportBundle: (filter) => {
+        const records = recordsInScope(filter?.scope);
+        return {
+          schemaVersion: 'v1',
+          exportedAt: Date.now(),
+          scope: (filter?.scope as MemoryScope | 'all' | undefined) ?? 'all',
+          recordCount: records.length,
+          linkCount: 0,
+          records,
+          links: [],
+        };
+      },
       importBundle: async () => ({
         importedRecords: 0,
         skippedRecords: 0,
@@ -443,7 +458,7 @@ describe('product breadth commands', () => {
       update: async () => null,
       link: async () => null,
       linksFor: async () => [],
-      reviewQueue: (limit) => Promise.resolve(memoryRegistry.reviewQueue(limit ?? 10)),
+      reviewQueue: (limit, scope) => Promise.resolve(memoryRegistry.reviewQueue(limit ?? 10, scope)),
       exportBundle: (filter) => Promise.resolve(memoryRegistry.exportBundle(filter)),
       importBundle: (bundle) => memoryRegistry.importBundle(bundle),
       vectorStats: async () => ({
@@ -666,6 +681,7 @@ describe('product breadth commands', () => {
     await command!.handler(['inspect', 'github'], ctx);
     expect(out.join('\n')).toContain('Service github');
     expect(out.join('\n')).toContain('authType: bearer');
+    expect(out.join('\n')).toContain('authType: bearer');
 
     out.length = 0;
     await command!.handler(['resolve', 'github'], ctx);
@@ -674,10 +690,12 @@ describe('product breadth commands', () => {
     out.length = 0;
     await command!.handler(['doctor'], ctx);
     expect(out.join('\n')).toContain('Service Doctor');
+    expect(out.join('\n')).toContain('configured: 1');
 
     out.length = 0;
     await command!.handler(['auth-review'], ctx);
     expect(out.join('\n')).toContain('Service Auth Review');
+    expect(out.join('\n')).toContain('configured: 1');
     expect(out.join('\n')).toContain('bearer: 1');
 
     const exported = join(root, 'artifacts', 'services.json');
@@ -723,10 +741,12 @@ describe('product breadth commands', () => {
     await accounts!.handler(['routes', 'openai'], ctx);
     expect(out.join('\n')).toContain('Provider Routes openai');
     expect(out.join('\n')).toContain('preferred: subscription');
+    expect(out.join('\n')).toContain('preferred: subscription');
 
     out.length = 0;
     await accounts!.handler(['repair', 'openai'], ctx);
     expect(out.join('\n')).toContain('Provider Account Repair openai');
+    expect(out.join('\n')).toContain('active route: api-key');
     expect(out.join('\n')).toContain('fallback:');
 
     out.length = 0;
@@ -807,12 +827,14 @@ describe('product breadth commands', () => {
     out.length = 0;
     await setup!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Startup Readiness Review');
+    expect(out.join('\n')).toContain('session: sess-product');
     expect(out.join('\n')).toContain('skills discovered:');
     expect(out.join('\n')).toContain('sandbox backend:');
 
     out.length = 0;
     await setup!.handler(['doctor'], ctx);
     expect(out.join('\n')).toContain('Startup Doctor');
+    expect(out.join('\n')).toContain('[PASS] providers: 1 model(s) available');
     expect(out.join('\n')).toContain('[PASS] providers:');
 
     out.length = 0;
@@ -825,6 +847,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await setup!.handler(['sandbox'], ctx);
     expect(out.join('\n')).toContain('Setup Sandbox Review');
+    expect(out.join('\n')).toContain('backend: local');
     expect(out.join('\n')).toContain('/sandbox doctor');
 
     const exportPath = join(root, 'artifacts', 'startup-review.json');
@@ -870,39 +893,47 @@ describe('product breadth commands', () => {
 
     await guidance!.handler(['review'], ctx as never);
     expect(out.join('\n')).toContain('Guidance Review');
+    expect(out.join('\n')).toContain('[recovery] Context pressure needs attention');
     expect(out.join('\n')).toMatch(/Maintenance:/);
     expect(out.join('\n')).toContain('dismiss: /guidance dismiss');
 
     out.length = 0;
     await health!.handler(['review'], ctx as never);
     expect(out.join('\n')).toContain('Health Review');
+    expect(out.join('\n')).toContain('see also: the providers modal; /health provider');
     expect(out.join('\n')).toMatch(/Maintenance:/);
 
     out.length = 0;
     await intelligence!.handler(['review'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Review');
+    expect(out.join('\n')).toContain('diagnostics: unavailable');
     expect(out.join('\n')).toContain('/intelligence symbols <file>');
 
     out.length = 0;
     await intelligence!.handler(['diagnostics'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Diagnostics');
+    expect(out.join('\n')).toContain('No diagnostics are currently tracked.');
 
     out.length = 0;
     await intelligence!.handler(['repair'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Repair');
     expect(out.join('\n')).toContain('verify: /health intelligence');
+    expect(out.join('\n')).toContain('verify: /health intelligence');
 
     out.length = 0;
     await health!.handler(['intelligence'], ctx as never);
     expect(out.join('\n')).toContain('Health Review: Intelligence');
+    expect(out.join('\n')).toContain('diagnostics: unavailable');
 
     out.length = 0;
     await health!.handler(['mcp'], ctx as never);
     expect(out.join('\n')).toContain('Health Review: MCP');
+    expect(out.join('\n')).toContain('servers: 0');
 
     out.length = 0;
     await health!.handler(['continuity'], ctx as never);
     expect(out.join('\n')).toContain('Health Review: Continuity');
+    expect(out.join('\n')).toContain('return context mode: off');
 
     const intelligenceFile = join(root, 'src', 'intel-fixture.txt');
     mkdirSync(dirname(intelligenceFile), { recursive: true });
@@ -911,22 +942,27 @@ describe('product breadth commands', () => {
     out.length = 0;
     await intelligence!.handler(['symbols', intelligenceFile], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Symbols:');
+    expect(out.join('\n')).toContain('source: best-effort tree-sitter/LSP fallback');
 
     out.length = 0;
     await intelligence!.handler(['outline', intelligenceFile], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Outline:');
+    expect(out.join('\n')).toContain('source: tree-sitter outline extraction');
 
     out.length = 0;
     await intelligence!.handler(['definition', intelligenceFile, '1', '1'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Definition:');
+    expect(out.join('\n')).toContain('status: best-effort');
 
     out.length = 0;
     await intelligence!.handler(['references', intelligenceFile, '1', '1'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence References:');
+    expect(out.join('\n')).toContain('status: unavailable');
 
     out.length = 0;
     await intelligence!.handler(['hover', intelligenceFile, '1', '1'], ctx as never);
     expect(out.join('\n')).toContain('Intelligence Hover:');
+    expect(out.join('\n')).toContain('status: unavailable');
 
     out.length = 0;
     await health!.handler(['repair', 'intelligence'], ctx as never);
@@ -968,10 +1004,12 @@ describe('product breadth commands', () => {
     out.length = 0;
     await session!.handler(['groups'], ctx as never);
     expect(out.join('\n')).toContain('Transcript Groups');
+    expect(out.join('\n')).toContain('groups: 2');
 
     out.length = 0;
     await session!.handler(['hotspots'], ctx as never);
     expect(out.join('\n')).toContain('Transcript Hotspots');
+    expect(out.join('\n')).toContain('remote_status        1');
     expect(out.join('\n')).toContain('remote_status');
 
     out.length = 0;
@@ -1011,14 +1049,17 @@ describe('product breadth commands', () => {
 
     await remoteSetup!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Remote Setup Review');
+    expect(out.join('\n')).toContain('daemon enabled: yes');
 
     out.length = 0;
     await remoteEnv!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Remote Environment');
+    expect(out.join('\n')).toContain('export GOODVIBES_REMOTE_SESSION=\'sess-product\'');
 
     out.length = 0;
     await tunnel!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Remote Tunnel Review');
+    expect(out.join('\n')).toContain('transport: self-hosted ACP / daemon relay');
 
     const bootstrapPath = join(root, 'artifacts', 'bootstrap.json');
     out.length = 0;
@@ -1036,15 +1077,18 @@ describe('product breadth commands', () => {
     out.length = 0;
     await approval!.handler(['matrix'], ctx);
     expect(out.join('\n')).toContain('Approval Matrix');
+    expect(out.join('\n')).toContain('shell      Shell execution approval with side-effect and credential review.');
 
     out.length = 0;
     await approval!.handler(['review', 'sandbox'], ctx);
     expect(out.join('\n')).toContain('Approval Review: sandbox');
+    expect(out.join('\n')).toContain('Sandbox isolation/policy change approval with WSL/VM review.');
     expect(out.join('\n')).toContain('sandbox');
 
     out.length = 0;
     await voice!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Voice Review');
+    expect(out.join('\n')).toContain('always-speak: off');
   });
 
   test('memory product commands expose sync, handoff, and scoped session/team flows', async () => {
@@ -1068,23 +1112,33 @@ describe('product breadth commands', () => {
       return true;
     };
 
+    seedMemory('project', 'Project decision');
+    seedMemory('team', 'Team decision');
+    seedMemory('session', 'Session decision');
+
     const exportPath = join(root, 'artifacts', 'memory.json');
     await memorySync!.handler(['export', exportPath, 'project'], ctx);
     expect(out.join('\n')).toContain('Exported');
+    expect(exportedSummaries(exportPath)).toEqual(['Project decision']);
 
     out.length = 0;
     const handoffPath = join(root, 'artifacts', 'handoff.json');
     await handoff!.handler(['export', handoffPath, 'team'], ctx);
     expect(out.join('\n')).toContain('handoff bundle');
+    expect(exportedSummaries(handoffPath)).toEqual(['Team decision']);
 
     out.length = 0;
     await sessionMemory!.handler(['queue', '3'], ctx);
     expect(out.join('\n')).toContain('Review queue');
+    expect(out.join('\n')).toContain('Session decision');
+    expect(out.join('\n')).not.toContain('Team decision');
+    expect(out.join('\n')).not.toContain('Project decision');
 
     out.length = 0;
     const teamPath = join(root, 'artifacts', 'team-handoff.json');
     await teamMemory!.handler(['export', teamPath], ctx);
     expect(out.join('\n')).toContain('handoff bundle');
+    expect(exportedSummaries(teamPath)).toEqual(['Team decision']);
   });
 
   test('security command prints review and attack-path summaries', async () => {
@@ -1154,11 +1208,14 @@ describe('product breadth commands', () => {
 
     await security!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Security Review');
+    expect(out.join('\n')).toContain('tokens: 0');
     expect(out.join('\n')).toContain('mcp attack-path findings');
 
     out.length = 0;
     await security!.handler(['attack-paths'], ctx);
     expect(out.join('\n')).toContain('MCP Attack-Path Review');
+    expect(out.join('\n')).toContain('CRITICAL weird');
+    expect(out.join('\n')).toContain('schema for server \'weird\' is quarantined');
   });
 
   test('plugin command exposes directory and review surfaces', async () => {
@@ -1195,19 +1252,23 @@ describe('product breadth commands', () => {
 
     await plugin!.handler(['dirs'], ctx);
     expect(out.join('\n')).toContain('Plugin Search Directories');
+    expect(out.join('\n')).toContain(join('.goodvibes', 'plugins'));
 
     out.length = 0;
     await plugin!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Plugin Security Review');
+    expect(out.join('\n')).toContain('total: 0');
 
     out.length = 0;
     await plugin!.handler(['browse'], ctx);
     expect(out.join('\n')).toContain('Curated Plugin Catalog');
+    expect(out.join('\n')).toContain('deploy-audit  Deploy Audit  [security, release]  Reviews deploy surfaces before release');
     expect(out.join('\n')).toContain('deploy-audit');
 
     out.length = 0;
     await plugin!.handler(['install-hint', 'deploy-audit'], ctx);
     expect(out.join('\n')).toContain('Plugin Install Guidance');
+    expect(out.join('\n')).toContain('id: deploy-audit');
 
     out.length = 0;
     await plugin!.handler(['publish-local', 'ops-helper', './catalog/plugins/deploy-audit', 'Operator', 'deploy', 'helper'], ctx);
@@ -1217,6 +1278,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await plugin!.handler(['catalog-review', 'deploy-audit'], ctx);
     expect(out.join('\n')).toContain('Plugin Catalog Review');
+    expect(out.join('\n')).toContain('id: deploy-audit');
     expect(out.join('\n')).toContain('sourceKind: local-path');
 
     out.length = 0;
@@ -1278,11 +1340,13 @@ describe('product breadth commands', () => {
 
     await skills!.handler(['browse'], ctx);
     expect(out.join('\n')).toContain('Curated Skill Catalog');
+    expect(out.join('\n')).toContain('release-gate  Release Gate  [release, ops]  Runs release certification and deploy checks');
     expect(out.join('\n')).toContain('release-gate');
 
     out.length = 0;
     await skills!.handler(['install-hint', 'release-gate'], ctx);
     expect(out.join('\n')).toContain('Skill Install Guidance');
+    expect(out.join('\n')).toContain('id: release-gate');
 
     out.length = 0;
     await skills!.handler(['publish-local', 'ops-playbook', './catalog/skills/release-gate', 'Ops', 'release', 'playbook'], ctx);
@@ -1292,6 +1356,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await skills!.handler(['catalog-review', 'release-gate'], ctx);
     expect(out.join('\n')).toContain('Skill Catalog Review');
+    expect(out.join('\n')).toContain('id: release-gate');
     expect(out.join('\n')).toContain('sourceKind: local-path');
 
     out.length = 0;
@@ -1333,6 +1398,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await setup!.handler(['transfer', 'inspect', transferPath], ctx);
     expect(out.join('\n')).toContain('Setup Transfer Review');
+    expect(out.join('\n')).toContain('schemaVersion: v1');
 
     out.length = 0;
     await setup!.handler(['link', 'security', 'incident-1'], ctx);
@@ -1343,6 +1409,7 @@ describe('product breadth commands', () => {
     await setup!.handler(['open-link', 'goodvibes://open/security?target=incident-1'], ctx);
     expect(out.join('\n')).toContain('opened-security-view');
     expect(out.join('\n')).toContain('Opened setup link for security');
+    expect(out.join('\n')).toContain('Opened setup link for security (incident-1).');
   });
 
   test('incident command can summarize, export, and capture bundles', async () => {
@@ -1367,6 +1434,8 @@ describe('product breadth commands', () => {
     out.length = 0;
     await incident!.handler(['capture', 'latest'], ctx);
     expect(out.join('\n')).toContain('Captured incident incident-1 into durable memory');
+    expect(memoryRecords).toHaveLength(1);
+    expect(memoryRecords[0]!.summary).toBe('deploy tool failed');
   });
 
   test('trust command exports review posture and portable trust bundles', async () => {
@@ -1404,6 +1473,7 @@ describe('product breadth commands', () => {
 
     await trust!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Trust Review');
+    expect(out.join('\n')).toContain('permission mode: safe-owner');
     expect(out.join('\n')).toContain('permission mode:');
 
     const bundlePath = join(root, 'artifacts', 'trust-bundle.json');
@@ -1415,6 +1485,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await trust!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Trust Bundle Review');
+    expect(out.join('\n')).toContain('permission mode: safe-owner');
   });
 
   test('marketplace command exposes combined ecosystem flows', async () => {
@@ -1505,14 +1576,17 @@ describe('product breadth commands', () => {
     await marketplace!.handler(['overview'], ctx);
     expect(out.join('\n')).toContain('Marketplace Overview');
     expect(out.join('\n')).toContain('curated plugins: 1');
+    expect(out.join('\n')).toContain('curated plugins: 1');
 
     out.length = 0;
     await marketplace!.handler(['recommend'], ctx);
     expect(out.join('\n')).toContain('Marketplace Recommendations');
+    expect(out.join('\n')).toContain('No contextual recommendations right now.');
 
     out.length = 0;
     await marketplace!.handler(['browse'], ctx);
     expect(out.join('\n')).toContain('Marketplace Browse');
+    expect(out.join('\n')).toContain('plugins: 1');
     expect(out.join('\n')).toContain('deploy-audit');
     expect(out.join('\n')).toContain('release-gate');
     expect(out.join('\n')).toContain('guard-pack');
@@ -1521,16 +1595,19 @@ describe('product breadth commands', () => {
     out.length = 0;
     await marketplace!.handler(['review', 'plugin', 'deploy-audit'], ctx);
     expect(out.join('\n')).toContain('Marketplace Review: Deploy Audit');
+    expect(out.join('\n')).toContain('kind: plugin');
     expect(out.join('\n')).toContain('compatibility:');
 
     out.length = 0;
     await marketplace!.handler(['provenance', 'plugin', 'deploy-audit'], ctx);
     expect(out.join('\n')).toContain('Marketplace Provenance: Deploy Audit');
+    expect(out.join('\n')).toContain('source: ./catalog/plugins/deploy-audit');
     expect(out.join('\n')).toContain('curated-local');
 
     out.length = 0;
     await marketplace!.handler(['install-hint', 'skill', 'release-gate'], ctx);
     expect(out.join('\n')).toContain('Marketplace Install Guidance: Release Gate');
+    expect(out.join('\n')).toContain('kind: skill');
 
     out.length = 0;
     await marketplace!.handler(['install', 'hook-pack', 'guard-pack', 'project'], ctx);
@@ -1556,6 +1633,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await marketplace!.handler(['receipt', 'plugin', 'deploy-audit', 'project'], ctx);
     expect(out.join('\n')).toContain('Marketplace Receipt: Deploy Audit');
+    expect(out.join('\n')).toContain('scope: project');
     expect(out.join('\n')).toContain(`targetPath: ${join(root, '.goodvibes', 'plugins', 'deploy-audit')}`);
     expect(out.join('\n')).toContain('provenance: curated-local');
     expect(out.join('\n')).toContain('compatibility: supported');
@@ -1586,10 +1664,12 @@ describe('product breadth commands', () => {
     out.length = 0;
     await marketplace!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Marketplace Bundle Review');
+    expect(out.join('\n')).toContain('scope: project');
 
     out.length = 0;
     await marketplace!.handler(['bundle', 'import', bundlePath, 'user'], ctx);
     expect(out.join('\n')).toContain('Marketplace bundle imported');
+    expect(out.join('\n')).toContain('merged into existing entries by kind and id; 0 rejected');
 
     out.length = 0;
     await marketplace!.handler(['uninstall', 'plugin', 'deploy-audit', 'project'], ctx);
@@ -1662,10 +1742,12 @@ describe('product breadth commands', () => {
 
     await bridge!.handler(['status'], ctx);
     expect(out.join('\n')).toContain('Bridge Status');
+    expect(out.join('\n')).toContain('remote pools: 1');
 
     out.length = 0;
     await bridge!.handler(['pools'], ctx);
     expect(out.join('\n')).toContain('Bridge Pools');
+    expect(out.join('\n')).toContain('ops-pool  runners=1  trust=self-hosted-acp');
     expect(out.join('\n')).toContain('ops-pool');
 
     out.length = 0;
@@ -1698,11 +1780,13 @@ describe('product breadth commands', () => {
 
     await release!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Release Review');
+    expect(out.join('\n')).toContain('provider/model: (unset)/(unset)');
     expect(out.join('\n')).toContain('eval suites:');
 
     out.length = 0;
     await release!.handler(['checklist'], ctx);
     expect(out.join('\n')).toContain('Release Checklist');
+    expect(out.join('\n')).toContain('1. Run /setup review and /setup doctor');
     expect(out.join('\n')).toContain('/eval gate <suite>');
 
     const bundlePath = join(root, 'artifacts', 'release-bundle.json');
@@ -1714,6 +1798,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await release!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Release Bundle Review');
+    expect(out.join('\n')).toContain('provider/model: (unset)/(unset)');
   });
 
   test('profilesync command exports and imports portable profile bundles', async () => {
@@ -1740,6 +1825,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await profilesync!.handler(['inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Profile Sync Bundle Review');
+    expect(out.join('\n')).toContain('profiles: 1');
 
     out.length = 0;
     await profilesync!.handler(['import', bundlePath, 'team'], ctx);
@@ -1787,6 +1873,7 @@ describe('product breadth commands', () => {
       out.length = 0;
       await managed!.handler(['inspect', bundlePath], ctx);
       expect(out.join('\n')).toContain('Managed Settings Review');
+      expect(out.join('\n')).toContain('profileName: ops');
       expect(out.join('\n')).toContain('risk: medium');
       expect(out.join('\n')).toContain('changes:');
 
@@ -1794,6 +1881,12 @@ describe('product breadth commands', () => {
       ctx.session.runtime.model = 'openai:changed-model';
       out.length = 0;
       await managed!.handler(['apply', bundlePath], ctx);
+      // A medium-risk bundle is staged for review first, and changes nothing.
+      expect(out.join('\n')).toContain('nothing was applied');
+      expect(ctx.session.runtime.model).toBe('openai:changed-model');
+
+      out.length = 0;
+      await managed!.handler(['apply', bundlePath, '--yes'], ctx);
       expect(out.join('\n')).toContain('Managed settings bundle applied');
       expect(ctx.session.runtime.model).toBe('openai:model-1');
 
@@ -1803,6 +1896,7 @@ describe('product breadth commands', () => {
       out.length = 0;
       await managed!.handler(['rollback', rollbackToken!], ctx);
       expect(out.join('\n')).toContain('Managed rollback');
+    expect(out.join('\n')).toContain(rollbackToken!);
 
       const syncPath = join(root, 'artifacts', 'settings-sync.json');
       out.length = 0;
@@ -1812,10 +1906,12 @@ describe('product breadth commands', () => {
       out.length = 0;
       await settingsSync!.handler(['inspect', syncPath], ctx);
       expect(out.join('\n')).toContain('Settings Sync Bundle');
+    expect(out.join('\n')).toMatch(/settings: [1-9]\d*/);
 
       out.length = 0;
       await settingsSync!.handler(['show', 'provider.model'], ctx);
       expect(out.join('\n')).toContain('Resolved Setting Review');
+      expect(out.join('\n')).toContain('key: provider.model');
       expect(out.join('\n')).toContain('key: provider.model');
 
       runtimeServices.configManager.setDynamic('provider.model', 'openai:sync-model');
@@ -1831,6 +1927,7 @@ describe('product breadth commands', () => {
       out.length = 0;
       await managed!.handler(['staged'], ctx);
       expect(out.join('\n')).toContain('Staged Managed Bundle Review');
+      expect(out.join('\n')).toContain('profileName: ops');
     } finally { installJudgmentPort(previousJudgment); }
   });
 
@@ -1845,20 +1942,21 @@ describe('product breadth commands', () => {
     ctx.session.runtime.sessionId = 'sess-demo';
     (ctx.session as { conversationManager: CommandContext['session']['conversationManager'] }).conversationManager = {
       title: 'Resume Me',
+      branchState: () => ({ branches: {}, currentBranch: 'main' }),
       workTree: { foldState: () => new Map(), turnOutcomes: () => new Map() },
       toJSON: () => ({
         messages: [{ role: 'user', content: 'hello' }],
         title: 'Resume Me',
         returnContext: {
           summary: 'returning to blocked work',
-          lines: ['Pending approvals spotted: 2', 'Remote runners: runner-a', 'Worktree paths: /tmp/demo-worktree', 'Open panels: remote, approval'],
+          lines: ['Pending approvals spotted: 2', 'Remote runners: runner-a', `Worktree paths: ${root}/demo-worktree`, 'Open panels: remote, approval'],
           pendingApprovals: 2,
           activeTasks: 1,
           blockedTasks: 1,
           remoteContracts: 1,
           remoteRunners: ['runner-a'],
           worktreeCount: 1,
-          worktreePaths: ['/tmp/demo-worktree'],
+          worktreePaths: [`${root}/demo-worktree`],
           // Legacy open-view list (from an older session file): /session save drops it.
           openPanels: ['remote', 'approval'],
         },
@@ -1877,7 +1975,7 @@ describe('product breadth commands', () => {
     await session!.handler(['info', 'resume-demo'], ctx);
     expect(out.join('\n')).toContain('Pending approvals spotted: 2');
     expect(out.join('\n')).toContain('Remote runners: runner-a');
-    expect(out.join('\n')).toContain('Worktree paths: /tmp/demo-worktree');
+    expect(out.join('\n')).toContain(`Worktree paths: ${root}/demo-worktree`);
     expect(out.join('\n')).not.toContain('Open panels');
   });
 
@@ -1892,6 +1990,8 @@ describe('product breadth commands', () => {
 
     await install!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Install Review');
+    expect(out.join('\n')).toContain('profiles: 0');
+    expect(out.join('\n')).toContain('secret keys: 0');
 
     const bundlePath = join(root, 'artifacts', 'install.json');
     out.length = 0;
@@ -1902,6 +2002,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await install!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Install Bundle Review');
+    expect(out.join('\n')).toContain(`workingDirectory: ${root}`);
   });
 
   test('private update review and bundle commands give rebuild guidance without exporting', async () => {
@@ -1941,11 +2042,13 @@ describe('product breadth commands', () => {
 
     await auth!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Auth Review');
+    expect(out.join('\n')).toContain('daemon login route: /login');
     expect(out.join('\n')).toContain('pending subscriptions: 1 (openai)');
 
     out.length = 0;
     await auth!.handler(['show', 'openai'], ctx);
     expect(out.join('\n')).toContain('Auth Provider openai');
+    expect(out.join('\n')).toContain('configured: yes');
     expect(out.join('\n')).toContain('callbackMode: local');
     expect(out.join('\n')).toContain('pendingLogin: yes');
 
@@ -1957,13 +2060,14 @@ describe('product breadth commands', () => {
     out.length = 0;
     await auth!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Auth Review Bundle');
+    expect(out.join('\n')).toContain('stored secrets: 0');
     expect(out.join('\n')).toContain('active subscriptions: 0');
 
     seedBenchmarkCacheFixture({ homeDirectory: root, workingDirectory: root, surfaceRoot: 'goodvibes' });
     const { DaemonServer } = await import('@goodvibes-jev/engine/platform/platform/daemon');
     const { UserAuthManager } = await import('@goodvibes-jev/engine/platform/platform/security');
     const daemon = new DaemonServer({
-      port: 39451,
+      port: 0,
       host: '127.0.0.1',
       runtimeServices,
       userAuth: new UserAuthManager({
@@ -1979,8 +2083,9 @@ describe('product breadth commands', () => {
     await daemon.start();
     try {
       out.length = 0;
-      await auth!.handler(['login', 'daemon', 'http://127.0.0.1:39451', 'admin', 'admin', 'DAEMON_SESSION'], ctx);
+      await auth!.handler(['login', 'daemon', `http://127.0.0.1:${daemon.boundPort}`, 'admin', 'admin', 'DAEMON_SESSION'], ctx);
       expect(out.join('\n')).toContain('Stored daemon session token');
+      expect(out.join('\n')).toContain('Stored daemon session token in secure storage as DAEMON_SESSION.');
     } finally {
       await daemon.stop();
     }
@@ -2000,6 +2105,7 @@ describe('product breadth commands', () => {
 
     await login!.handler(['provider', 'openai', 'start', '--manual', '--no-browser'], ctx);
     expect(out.join('\n')).toContain('Subscription OAuth Start: openai');
+    expect(out.join('\n')).toContain('source: builtin');
     expect(out.join('\n')).toContain('source: builtin');
     expect(out.join('\n')).toContain('browser: skipped');
 
@@ -2027,6 +2133,8 @@ describe('product breadth commands', () => {
 
     await sandbox!.handler(['probe'], ctx);
     expect(out.join('\n')).toContain('Sandbox Probe');
+    expect(out.join('\n')).toContain('backend: local');
+    expect(out.join('\n')).toContain('secure sandbox: not ready');
 
     const bundlePath = join(root, 'artifacts', 'sandbox.json');
     out.length = 0;
@@ -2036,6 +2144,8 @@ describe('product breadth commands', () => {
     out.length = 0;
     await sandbox!.handler(['bundle', 'inspect', bundlePath], ctx);
     expect(out.join('\n')).toContain('Sandbox Bundle Review');
+    expect(out.join('\n')).toMatch(/reviewText: [1-9]\d* chars/);
+    expect(out.join('\n')).toMatch(/profilesText: [1-9]\d* chars/);
 
     out.length = 0;
     await sandbox!.handler(['session', 'start', 'eval-py', 'Python', 'isolation'], ctx);
@@ -2056,9 +2166,13 @@ describe('product breadth commands', () => {
     expect(out.join('\n')).toContain('profile: eval-py');
 
     out.length = 0;
-    await sandbox!.handler(['session', 'run', sessionIdMatch![0], 'bash', '-lc', 'printf session-run-ok'], ctx);
+    await sandbox!.handler(['session', 'run', sessionIdMatch![0], 'printf', 'session-run-ok'], ctx);
     expect(out.join('\n')).toContain('Sandbox session run');
     expect(out.join('\n')).toContain('session-run-ok');
+
+    out.length = 0;
+    await sandbox!.handler(['session', 'stop', sessionIdMatch![0]], ctx);
+    expect(out.join('\n')).toContain(`Stopped sandbox session ${sessionIdMatch![0]}.`);
 
     // VM provisioning was retired with the local-only platform backend.
     out.length = 0;
@@ -2078,10 +2192,12 @@ describe('product breadth commands', () => {
 
     await subscription!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('No provider subscriptions stored yet');
+    expect(out.join('\n')).toContain('No provider subscriptions stored yet.');
 
     out.length = 0;
     await subscription!.handler(['login', 'openai', 'start', '--manual', '--no-browser'], ctx);
     expect(out.join('\n')).toContain('Subscription OAuth Start: openai');
+    expect(out.join('\n')).toContain('source: builtin');
     expect(out.join('\n')).toContain('source: builtin');
     expect(out.join('\n')).toContain('browser: skipped');
     expect(out.join('\n')).toContain('authorizationUrl:');
@@ -2094,11 +2210,13 @@ describe('product breadth commands', () => {
     out.length = 0;
     await subscription!.handler(['login', 'openai', 'finish', 'oauth-code-123'], ctx);
     expect(out.join('\n')).toContain('Stored subscription session for openai');
+    expect(out.join('\n')).toContain('tokenType: Bearer');
     expect(out.join('\n')).toContain('stored for subscription-backed flows only');
 
     out.length = 0;
     await subscription!.handler(['inspect', 'openai'], ctx);
     expect(out.join('\n')).toContain('Subscription openai');
+    expect(out.join('\n')).toContain('configured: yes');
     expect(out.join('\n')).toContain('freshness: expiring');
     expect(out.join('\n')).toContain('callbackMode: local');
 
@@ -2118,15 +2236,18 @@ describe('product breadth commands', () => {
 
     await sandbox!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Sandbox Review');
+    expect(out.join('\n')).toContain('repl isolation: shared-vm');
     expect(out.join('\n')).toContain('repl isolation');
 
     out.length = 0;
     await sandbox!.handler(['recommend'], ctx);
     expect(out.join('\n')).toContain('Sandbox Recommendation');
+    expect(out.join('\n')).toContain('current repl isolation: shared-vm');
 
     out.length = 0;
     await sandbox!.handler(['profiles'], ctx);
     expect(out.join('\n')).toContain('Sandbox Profiles');
+    expect(out.join('\n')).toContain('eval-js  [eval/shared]  vm=yes  JavaScript Eval');
 
     out.length = 0;
     await sandbox!.handler(['set-mcp', 'per-server-vm'], ctx);
@@ -2152,11 +2273,13 @@ describe('product breadth commands', () => {
 
     await storage!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Secure Storage Review');
+    expect(out.join('\n')).toContain('policy: preferred_secure');
     expect(out.join('\n')).toContain('policy:');
 
     out.length = 0;
     await helpers!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Integration Helper Review');
+    expect(out.join('\n')).toContain('sessions: 0');
     expect(out.join('\n')).toContain('GET /api/session');
     expect(out.join('\n')).toContain('GET /api/settings');
 
@@ -2169,6 +2292,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await deeplink!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Deep Link Review');
+    expect(out.join('\n')).toContain('goodvibes://open/cockpit');
     expect(out.join('\n')).toContain('goodvibes://open/marketplace');
 
     out.length = 0;
@@ -2224,17 +2348,20 @@ describe('product breadth commands', () => {
     try {
     await teamwork!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Teamwork Review');
+    expect(out.join('\n')).toContain('modes: 9');
     expect(out.join('\n')).toContain('modes:');
 
     out.length = 0;
     await teamwork!.handler(['modes'], ctx);
     expect(out.join('\n')).toContain('Teamwork Modes');
+    expect(out.join('\n')).toContain('local-engineer     agent       local-engineer   gather-plan-apply  template=engineer');
     expect(out.join('\n')).toContain('remote-engineer');
     expect(out.join('\n')).toContain('dream');
 
     out.length = 0;
     await teamwork!.handler(['recipes'], ctx);
     expect(out.join('\n')).toContain('Teamwork Recipes');
+    expect(out.join('\n')).toContain('remote-certification       Remote engineer execution with local review and integration.');
     expect(out.join('\n')).toContain('remote-certification');
     expect(out.join('\n')).toContain('dream-then-certify');
 
@@ -2265,6 +2392,7 @@ describe('product breadth commands', () => {
     out.length = 0;
     await teamwork!.handler(['validate'], ctx);
     expect(out.join('\n')).toContain('Teamwork Archetype Validation');
+    expect(out.join('\n')).toContain('All discovered archetypes are currently valid.');
 
     out.length = 0;
     await teamwork!.handler(['archetype', 'doc-specialist'], ctx);
@@ -2333,27 +2461,34 @@ describe('product breadth commands', () => {
 
     await health!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('Health Review');
+    expect(out.join('\n')).toContain('see also: the providers modal; /health provider');
     expect(out.join('\n')).toContain('Next steps:');
+    expect(out.join('\n')).toContain('see also: the providers modal; /health provider');
 
     out.length = 0;
     await health!.handler(['services'], ctx);
     expect(out.join('\n')).toContain('Health Review: Services');
+    expect(out.join('\n')).toContain('configured: 0');
 
     out.length = 0;
     await health!.handler(['sandbox'], ctx);
     expect(out.join('\n')).toContain('Health Review: Sandbox');
+    expect(out.join('\n')).toContain('backend: local');
 
     out.length = 0;
     await health!.handler(['auth'], ctx);
     expect(out.join('\n')).toContain('Health Review: Local Auth');
+    expect(out.join('\n')).toContain('users: 1');
 
     out.length = 0;
     await health!.handler(['settings'], ctx);
     expect(out.join('\n')).toContain('Health Review: Settings');
+    expect(out.join('\n')).toContain('available: no');
 
     out.length = 0;
     await registry.get('settingssync')!.handler(['conflicts'], ctx);
     expect(out.join('\n')).toContain('Settings Sync Conflicts');
+    expect(out.join('\n')).toContain('No settings conflicts recorded.');
 
     const syncBundlePath = join(root, 'artifacts', 'settings-sync.json');
     out.length = 0;
@@ -2373,22 +2508,27 @@ describe('product breadth commands', () => {
     out.length = 0;
     await registry.get('settingssync')!.handler(['failures'], ctx);
     expect(out.join('\n')).toContain('Settings Sync Failures');
+    expect(out.join('\n')).toContain('No recent sync or managed-setting failures recorded.');
 
     out.length = 0;
     await registry.get('managed')!.handler(['rollback-history'], ctx);
     expect(out.join('\n')).toContain('Managed Rollback History');
+    expect(out.join('\n')).toContain('No managed rollback records yet.');
 
     out.length = 0;
     await health!.handler(['remote'], ctx);
     expect(out.join('\n')).toContain('Health Review: Remote');
+    expect(out.join('\n')).toContain('sessions: 0');
 
     out.length = 0;
     await health!.handler(['worktrees'], ctx);
     expect(out.join('\n')).toContain('Health Review: Worktrees');
+    expect(out.join('\n')).toContain('total: 0');
 
     out.length = 0;
     await health!.handler(['repair', 'remote'], ctx);
     expect(out.join('\n')).toContain('Health Repair');
+    expect(out.join('\n')).toContain('domain: remote');
     expect(out.join('\n')).toContain('/remote supervisor');
 
     out.length = 0;
@@ -2403,22 +2543,39 @@ describe('product breadth commands', () => {
     await remote!.handler(['recover'], ctx);
     expect(out.join('\n')).toContain('No remote supervisor sessions are currently tracked.');
 
-    out.length = 0;
-    await worktree!.handler(['attach', '/tmp/demo-worktree', 'session', 'demo-session'], ctx);
-    expect(out.join('\n')).toContain('Attached /tmp/demo-worktree to session demo-session.');
+    // Attaching is refused for a path git does not list, so give it a real worktree.
+    const shellPaths = ctx.workspace.shellPaths;
+    if (!shellPaths) throw new Error('the test context has no shell paths');
+    const repoDir = shellPaths.workingDirectory;
+    const worktreePath = `${repoDir}-demo-worktree`;
+    const git = (...args: string[]) => {
+      const r = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, stdout: 'pipe', stderr: 'pipe' });
+      expect(r.exitCode).toBe(0);
+    };
+    git('init', '-q');
+    git('commit', '-q', '--allow-empty', '-m', 'seed');
+    git('worktree', 'add', '-q', '--detach', worktreePath);
 
     out.length = 0;
-    await worktree!.handler(['inspect', '/tmp/demo-worktree'], ctx);
+    await worktree!.handler(['attach', worktreePath, 'session', 'demo-session'], ctx);
+    expect(out.join('\n')).toContain(`Attached ${worktreePath} to session demo-session.`);
+
+    out.length = 0;
+    await worktree!.handler(['inspect', worktreePath], ctx);
     expect(out.join('\n')).toContain('Worktree Inspect');
+    expect(out.join('\n')).toContain('kind: manual');
     expect(out.join('\n')).toContain('/worktree session demo-session');
 
     out.length = 0;
     await worktree!.handler(['session', 'demo-session'], ctx);
     expect(out.join('\n')).toContain('Worktree Attachment Review: session demo-session');
+    expect(out.join('\n')).toContain(worktreePath);
 
     out.length = 0;
     await worktree!.handler(['recover', 'session', 'demo-session'], ctx);
     expect(out.join('\n')).toContain('Worktree Recovery: session demo-session');
+    expect(out.join('\n')).toContain(`/worktree keep ${worktreePath}`);
+    expect(out.join('\n')).toContain('/session info demo-session');
   });
 
   test('auth command exposes local admin management surface', async () => {
@@ -2434,22 +2591,27 @@ describe('product breadth commands', () => {
 
     await auth!.handler(['local', 'review'], ctx);
     expect(out.join('\n')).toContain('Local Auth Review');
+    expect(out.join('\n')).toContain('bootstrap credentials: cleared');
     expect(out.join('\n')).toContain('bootstrap file');
 
     out.length = 0;
     await auth!.handler(['repair', 'openai'], ctx);
     expect(out.join('\n')).toContain('Auth Repair openai');
+    expect(out.join('\n')).toContain('configured: yes');
 
     out.length = 0;
     await mcp!.handler(['review'], ctx);
     expect(out.join('\n')).toContain('MCP Review');
+    expect(out.join('\n')).toContain('servers: 1');
 
     out.length = 0;
     await mcp!.handler(['auth-review'], ctx);
     expect(out.join('\n')).toContain('MCP Auth Review');
+    expect(out.join('\n')).toContain('next: /services auth-review');
 
     out.length = 0;
     await mcp!.handler(['repair'], ctx);
     expect(out.join('\n')).toContain('MCP Repair');
+    expect(out.join('\n')).toContain('connected: no');
   });
 });

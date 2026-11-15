@@ -23,8 +23,8 @@
  * switch. A retired guard whose scaffolding survives is one array edit away from
  * coming back, which is exactly how this one lasted as long as it did.
  * Reinstating a blanket block should require writing the code and arguing for
- * it. Hazardous keys are handled instead by the narrow, self-explaining
- * confirmation list in `src/tools/agent-settings-write-policy.ts`.
+ * it. A hazardous write is decided at the settings tool by the recorded
+ * admission for its exact effect.
  *
  * ## What hiding is still for
  *
@@ -32,16 +32,14 @@
  * hidden key cannot name itself, state a hazard, or be confirmed, it simply is
  * not there, and the surface silently disagrees with the schema. `danger.` was
  * listed here for that reason and has been removed; `danger.httpListener` is now
- * shown and gated at write time.
+ * shown, and its write is decided by the recorded admission for its exact effect.
  *
  * What remains is internal plumbing with nothing for the owner to decide.
  */
 
 const AGENT_HIDDEN_SETTING_PREFIXES: readonly string[] = [];
 
-const AGENT_HIDDEN_SETTING_KEYS = new Set<string>([
-  'ui.wrfcMessages',
-]);
+const AGENT_HIDDEN_SETTING_KEYS = new Set<string>();
 
 export function isAgentHiddenSettingKey(key: string): boolean {
   return AGENT_HIDDEN_SETTING_KEYS.has(key)

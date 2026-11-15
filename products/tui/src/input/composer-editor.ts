@@ -16,7 +16,6 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { tokenizeCommand } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { TerminalLifecycle } from '@goodvibes-jev/engine/terminal-shell';
 
 export interface EditorSpawnResult {
@@ -38,6 +37,34 @@ export interface ComposerEditorDeps {
   readonly resume: () => void;
   readonly notify: (message: string) => void;
   readonly spawn?: EditorSpawn;
+}
+
+/** Split an editor command into argv, honoring single/double quotes; throws on an unterminated quote or trailing escape. */
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  let started = false;
+  for (const ch of command) {
+    if (escaped) { current += ch; escaped = false; started = true; continue; }
+    if (ch === '\\' && quote !== "'") { escaped = true; started = true; continue; }
+    if (quote) {
+      if (ch === quote) quote = null; else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
+    if (ch === ' ' || ch === '\t' || ch === '\n') {
+      if (started) { tokens.push(current); current = ''; started = false; }
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (escaped) throw new Error('Trailing escape in editor command.');
+  if (quote) throw new Error('Unterminated quote in editor command.');
+  if (started) tokens.push(current);
+  return tokens;
 }
 
 /** Resolve $VISUAL/$EDITOR into a command + fixed args, or null when unset. */

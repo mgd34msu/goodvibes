@@ -89,6 +89,25 @@ function rememberCapturedRoot(snapshot: unknown): unknown {
   if (snapshot && typeof snapshot === 'object') applyCapturedRoot(capturedRootAdd, capturedJsonRoots, [snapshot]);
   return snapshot;
 }
+const isFrozenJson = Object.isFrozen;
+/** True only when every node is a frozen data object; such a tree cannot change after capture. */
+function isDeepFrozenJson(value: unknown): boolean {
+  const seen = new Set<object>();
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (typeof entry === 'function') return false;
+    if (entry === null || typeof entry !== 'object' || seen.has(entry)) continue;
+    seen.add(entry);
+    if (!isFrozenJson(entry)) return false;
+    for (const key of ownJsonKeys(entry)) {
+      const descriptor = ownJsonDescriptor(entry, key);
+      if (!descriptor || !('value' in descriptor)) return false;
+      pending.push(descriptor.value);
+    }
+  }
+  return true;
+}
 export function captureOwnedJson(value: unknown, rejectObject?: (value: object) => boolean): unknown {
   // A caller-supplied rejection predicate must always inspect the actual input.
   // Nested snapshots still traverse normally, preserving aggregate size limits.
@@ -100,11 +119,11 @@ export function captureOwnedJson(value: unknown, rejectObject?: (value: object) 
 /** Retain original data slots while the canonical traversal detaches its snapshot. */
 export function retainOwnedJson(value: unknown, rejectObject?: (value: object) => boolean): RetainedOwnedJson {
   const objects: RetainedJsonObject[] = [];
-  // Our own snapshots have immutable data slots throughout the tree. Still run
-  // caller restrictions and aggregate admission, but there are no mutable slots
-  // to rewalk at every asynchronous reading boundary.
+  // Our own snapshots and fully frozen data trees have immutable data slots
+  // throughout. Still run caller restrictions and aggregate admission, but there
+  // are no mutable slots to rewalk at every asynchronous reading boundary.
   const immutable = value !== null && typeof value === 'object'
-    && applyCapturedRoot(capturedRootHas, capturedJsonRoots, [value]);
+    && (applyCapturedRoot(capturedRootHas, capturedJsonRoots, [value]) || isDeepFrozenJson(value));
   const snapshot = rememberCapturedRoot(captureOwnedJsonInternal(value, rejectObject, immutable ? undefined : objects));
   const assertCurrent = () => {
     try {

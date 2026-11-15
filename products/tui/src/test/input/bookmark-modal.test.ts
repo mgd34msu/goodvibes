@@ -3,13 +3,14 @@
  */
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { BookmarkModal } from '../../input/bookmark-modal.ts';
+import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
 import { createTestManagers } from '../helpers/test-managers.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-let bookmarkManager = createTestManagers().bookmarkManager;
+let bookmarkManager: BookmarkManager;
 
 function seedBookmarks(count: number): void {
   const bm = bookmarkManager;

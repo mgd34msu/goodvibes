@@ -91,10 +91,14 @@ export interface InboundMailSource {
    * is nothing to wake and asking is deliberately a no-op, a settings save is
    * not a reason to drop a working IDLE connection and rebuild it.
    *
-   * `GmailMailSource` does not implement it. Its `insufficient` states are
-   * grants changed in Google's console, and no edit to this daemon's settings
-   * clears one, so an immediate re-probe would spend a request to learn what
-   * was already known.
+   * `GmailMailSource` implements it too, and acts only while its verdict is
+   * `insufficient`: it wakes the wait between capability re-probes, so a
+   * settings save or a stored credential is tried now rather than after
+   * `capabilityRecheckMinutes`. Some Gmail refusals are a grant changed in
+   * Google's console, which no edit here clears, and those simply fail the
+   * re-probe again; others (a rate limit, say) clear by themselves, so a
+   * maintainer must not read `insufficient` as always meaning "needs a new
+   * grant". A source that is not `insufficient` ignores the call.
    */
   recheckNow?(): void;
 }

@@ -5,8 +5,9 @@
  *
  * - Constructs a real ControlPlaneGateway with an in-memory RuntimeEventBus
  * - Opens a live SSE event stream via gateway.createEventStream()
- * - Emits a MODEL_CHANGED envelope on the runtime bus while reading the stream
- * - Asserts exactly ONE SSE frame arrives with domain 'providers' carrying the
+ * - Emits a MODEL_CHANGED envelope on the runtime bus, then a sentinel event on
+ *   another domain, and reads the stream up to the sentinel
+ * - Asserts exactly ONE SSE frame arrived with domain 'providers' carrying the
  *   MODEL_CHANGED payload
  *
  * The cheap "DEFAULT_DOMAINS includes 'providers'" sanity check is also retained.
@@ -16,7 +17,6 @@ import { describe, expect, test } from 'bun:test';
 import { ControlPlaneGateway, DEFAULT_DOMAINS_TEST_EXPORT } from '../platform/src/platform/control-plane/gateway.js';
 import { RuntimeEventBus, createEventEnvelope } from '../platform/src/platform/runtime/events/index.js';
 import type { RuntimeEventDomain } from '../platform/src/platform/runtime/events/index.js';
-import { settleEvents } from './_helpers/test-timeout.js';
 
 // ---------------------------------------------------------------------------
 // DEFAULT_DOMAINS includes 'providers' (cheap sanity check)
@@ -45,7 +45,7 @@ describe('ControlPlaneGateway SSE: real end-to-end', () => {
     const bus = new RuntimeEventBus();
     const gateway = new ControlPlaneGateway({ runtimeBus: bus });
 
-    // AbortController lets us cleanly close the stream after receiving the frame
+    // AbortController lets us cleanly close the stream once the sentinel is read
     const abort = new AbortController();
 
     const req = new Request('http://localhost/api/companion/chat/sessions/test-session/events', {
@@ -66,79 +66,47 @@ describe('ControlPlaneGateway SSE: real end-to-end', () => {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
 
-    // Collect received frames (event:, data: pairs)
-    const received: Array<{ event: string; data: unknown }> = [];
-    let buffer = '';
-
-    // Promise resolves when we see at least one 'providers' domain frame
-    const modelChangedPromise = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Timed out waiting for MODEL_CHANGED SSE frame'));
-      }, 5000);
-
-      async function readLoop(): Promise<void> {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            // Parse complete SSE events (separated by \n\n)
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() ?? '';
-            for (const part of parts) {
-              const lines = part.split('\n').filter(Boolean);
-              let event = '';
-              let data = '';
-              for (const line of lines) {
-                if (line.startsWith('event: ')) event = line.slice(7).trim();
-                else if (line.startsWith('data: ')) data = line.slice(6).trim();
-              }
-              if (event && data) {
-                let parsed: unknown;
-                try { parsed = JSON.parse(data); } catch { parsed = data; }
-                received.push({ event, data: parsed });
-                if (event === 'providers') {
-                  clearTimeout(timeout);
-                  resolve();
-                  return;
-                }
-              }
-            }
-          }
-        } catch (err) {
-          // Stream aborted after we found what we needed, that's fine
-          if ((err as Error).name === 'AbortError') {
-            clearTimeout(timeout);
-            resolve();
-          } else {
-            clearTimeout(timeout);
-            reject(err);
-          }
-        }
-      }
-
-      void readLoop();
-    });
-
-    // Wait a tick for subscriptions to register, then emit the event.
-    await settleEvents(10);
-
+    // Subscriptions are registered before createEventStream returns, so the
+    // events below need no settling wait. A sentinel on another domain is
+    // emitted after MODEL_CHANGED; the stream preserves order, so once the
+    // sentinel arrives every providers frame there will ever be has been read.
     const envelope = createEventEnvelope('MODEL_CHANGED', {
       type: 'MODEL_CHANGED' as const,
       registryKey: 'inception:mercury-2',
       provider: 'inception',
     }, { sessionId: 'test-session', source: 'test', traceId: 'test-trace' });
-
     bus.emit('providers', envelope);
+    bus.emit('tasks', createEventEnvelope('TASK_STARTED', {
+      type: 'TASK_STARTED' as const,
+      taskId: 'sentinel',
+    }, { sessionId: 'test-session', source: 'test', traceId: 'test-trace' }));
 
-    // Wait for the frame to arrive
-    await modelChangedPromise;
+    const received: Array<{ event: string; data: unknown }> = [];
+    let buffer = '';
+    let sentinelSeen = false;
+    while (!sentinelSeen) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        let event = '';
+        let data = '';
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) event = line.slice(7).trim();
+          else if (line.startsWith('data: ')) data = line.slice(6).trim();
+        }
+        if (!event || !data) continue;
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { parsed = data; }
+        received.push({ event, data: parsed });
+        if (event === 'tasks') sentinelSeen = true;
+      }
+    }
+    expect(sentinelSeen).toBe(true);
 
-    // Abort the stream cleanly
     abort.abort();
-
-    // Give the teardown a moment.
-    await settleEvents(10);
 
     // Assert exactly ONE 'providers' domain frame was received (the MODEL_CHANGED one)
     const providerFrames = received.filter((f) => f.event === 'providers');

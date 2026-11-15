@@ -33,7 +33,11 @@ const SURFACE_ROOT = 'test-surface';
 
 const tempDirs: string[] = [];
 
+/** Every store a test opens is closed in afterEach, so a failed assertion cannot leak a handle. */
+const stores: { close(): void }[] = [];
+
 afterEach(() => {
+  for (const store of stores.splice(0)) store.close();
   while (tempDirs.length > 0) rmSync(tempDirs.pop()!, { recursive: true, force: true });
 });
 
@@ -70,6 +74,7 @@ describe('createCodeIndexServices: real CodeIndexStore wiring', () => {
     const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
 
     const { codeIndexStore } = createCodeIndexServices({ workingDirectory, surfaceRoot: SURFACE_ROOT, configManager, memoryEmbeddingRegistry });
+    stores.push(codeIndexStore);
     // The open started by construction; awaiting init again waits for it.
     await codeIndexStore.init();
 
@@ -92,9 +97,12 @@ describe('createCodeIndexServices: real CodeIndexStore wiring', () => {
 
     expect(isCodeIndexAutoStartEnabled(configManager)).toBe(false);
     const { codeIndexStore } = createCodeIndexServices({ workingDirectory, surfaceRoot: SURFACE_ROOT, configManager, memoryEmbeddingRegistry });
+    stores.push(codeIndexStore);
 
-    // Give any accidental fire-and-forget build a moment to have started.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Construction schedules its build from the continuation of this same
+    // init promise, which was attached first, so by the time this await
+    // resumes any accidental auto-start has already begun.
+    await codeIndexStore.init();
     expect(codeIndexStore.isBuilding()).toBe(false);
     expect(codeIndexStore.stats().lastBuild).toBeNull();
 
@@ -109,6 +117,7 @@ describe('createCodeIndexServices: real CodeIndexStore wiring', () => {
 
     const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
     const { codeIndexStore } = createCodeIndexServices({ workingDirectory, surfaceRoot: SURFACE_ROOT, configManager, memoryEmbeddingRegistry });
+    stores.push(codeIndexStore);
     // The build is scheduled once the open started by construction settles.
     await codeIndexStore.init();
     expect(codeIndexStore.isBuilding()).toBe(true);
@@ -137,6 +146,7 @@ describe('createCodeIndexServices: real CodeIndexStore wiring', () => {
     const configManager = makeConfigManager(workingDirectory);
     const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
     const { codeIndexStore } = createCodeIndexServices({ workingDirectory, surfaceRoot: SURFACE_ROOT, configManager, memoryEmbeddingRegistry });
+    stores.push(codeIndexStore);
 
     const newWorkingDirectory = makeScratchWorkingDirectory();
     await codeIndexStore.reroot(newWorkingDirectory, codeIndexDbPath(newWorkingDirectory, SURFACE_ROOT));

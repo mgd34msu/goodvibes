@@ -4,8 +4,8 @@
  * Covers the capability-bundle format, SHA-256-pinned distribution, quarantine-
  * on-install, and the governed marketplace index.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -118,6 +118,15 @@ describe('quarantine on install (planBundleActivation)', () => {
     expect(plan.guard.mayUseCapability('register.tool')).toBe(true);
   });
 
+  test('the denial reason says the capability is withheld, matching the guard that denies it', () => {
+    const plan = planBundleActivation(overreaching, { trustTier: 'untrusted' });
+    const reason = plan.capabilityManifest.denialReasons['shell.exec'];
+    expect(reason).toContain('withheld from the granted set');
+    expect(reason).not.toContain('not enforced');
+    expect(plan.capabilityManifest.granted).not.toContain('shell.exec');
+    expect(plan.guard.mayUseCapability('shell.exec')).toBe(false);
+  });
+
   test('trusted tier grants high-risk and does not quarantine', () => {
     const plan = planBundleActivation(overreaching, { trustTier: 'trusted' });
     expect(plan.quarantine.required).toBe(false);
@@ -126,6 +135,11 @@ describe('quarantine on install (planBundleActivation)', () => {
 });
 
 describe('SHA-256 pinned distribution', () => {
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   const bytes = new TextEncoder().encode('bundle payload v1');
   const digest = computeSha256(bytes);
 
@@ -140,6 +154,7 @@ describe('SHA-256 pinned distribution', () => {
 
   test('file source: happy path returns verified bytes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bundle-pin-'));
+    dirs.push(dir);
     const path = join(dir, 'payload.bin');
     writeFileSync(path, bytes);
     const source: PinnedBundleSource = { kind: 'file', location: path, sha256: digest };
@@ -149,6 +164,7 @@ describe('SHA-256 pinned distribution', () => {
 
   test('mismatched pin is a hard refusal', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bundle-pin-'));
+    dirs.push(dir);
     const path = join(dir, 'payload.bin');
     writeFileSync(path, bytes);
     const source: PinnedBundleSource = { kind: 'file', location: path, sha256: 'b'.repeat(64) };

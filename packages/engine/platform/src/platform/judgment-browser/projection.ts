@@ -70,18 +70,6 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
     } else if ((request.battery === 'webui.models.catalog-provider-match' || request.battery === 'webui.credentials.provider-key' || request.battery === 'webui.config.credential-key' || request.battery === 'webui.settings.card-material-key')) {
       judgmentRecord(result.readings, request.input.keys.map((_, index) => `key_${index}`));
       if (readings.some(reading => reading.kind !== 'yes-no')) return invalid();
-    } else if (request.battery === 'webui.pwa.install-platform') {
-      judgmentRecord(result.readings, ['platform']);
-      const reading = result.readings.platform;
-      if (reading?.kind !== 'choice' || !['ios-share-menu', 'other'].includes(reading.choice)) return invalid();
-      judgmentRecord(reading.probabilities, ['ios-share-menu', 'other']);
-    } else if (request.battery === 'webui.status.badge-tone') {
-      const name = request.input.vocabulary === 'badge' ? 'badge' : 'library_dot';
-      judgmentRecord(result.readings, [name]);
-      const reading = result.readings[name];
-      const tones = request.input.vocabulary === 'badge' ? ['ok', 'warning', 'bad', 'neutral'] : ['ok', 'warn', 'bad', 'info', 'idle'];
-      if (reading?.kind !== 'choice' || !tones.includes(reading.choice)) return invalid();
-      judgmentRecord(reading.probabilities, tones);
     } else {
       judgmentRecord(result.readings, request.input.candidates.map((_, index) => `candidate_${index}`));
       if (readings.some((reading) => reading.kind !== 'yes-no')) return invalid();
@@ -122,16 +110,6 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
         const reading = result.readings[`key_${index}`];
         if (typeof match !== 'boolean' || reading?.kind !== 'yes-no' || match !== (reading.verdict === 'yes')) return invalid();
       });
-    } else if (request.battery === 'webui.pwa.install-platform') {
-      const value = judgmentRecord(result.value, ['platform']);
-      if (readings[0]?.kind !== 'choice' || readings[0].choice !== value.platform) return invalid();
-    } else if (request.battery === 'webui.status.badge-tone') {
-      const value = judgmentRecord(result.value, ['vocabulary', 'tone']);
-      if (value.vocabulary !== request.input.vocabulary) return invalid();
-      const tones = value.vocabulary === 'badge' ? ['ok', 'warning', 'bad', 'neutral'] : ['ok', 'warn', 'bad', 'info', 'idle'];
-      if (!tones.includes(String(value.tone))) return invalid();
-      if (readings.length !== 1 || readings[0]?.kind !== 'choice' || readings[0].choice !== value.tone) return invalid();
-      judgmentRecord(readings[0].probabilities, tones);
     } else {
       const value = judgmentRecord(result.value, ['registryVersion', 'accepted', 'rejected']);
       if (value.registryVersion !== request.input.registryVersion || !Array.isArray(value.accepted) || !Array.isArray(value.rejected)) return invalid();

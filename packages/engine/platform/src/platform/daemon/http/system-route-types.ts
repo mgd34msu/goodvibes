@@ -20,7 +20,7 @@ export type {
 } from '@goodvibes-jev/engine/daemon-api';
 
 export interface IntegrationApprovalSnapshotSourceLike {
-  getApprovalSnapshot(): unknown;
+  getApprovalSnapshot(approvalId?: string): unknown;
 }
 
 export interface RouteBindingRecordInput {

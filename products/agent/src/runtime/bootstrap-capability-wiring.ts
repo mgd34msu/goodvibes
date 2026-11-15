@@ -1,6 +1,6 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { runCapabilityBootCheck } from '../capabilities/capability-boot-check.ts';
-import { configValueIsPresent, safeMcpServerPosture, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
+import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
 import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 
@@ -16,6 +16,8 @@ export function wireCapabilityIndex(input: {
   readonly toolRegistry: ToolRegistry;
   readonly commandContext: CommandContext;
   readonly configManager: unknown;
+  /** The encrypted secret store; without it no credential-backed capability can be reported ready. */
+  readonly secretsManager?: unknown;
   readonly homeDirectory: string;
   readonly workingDirectory: string;
 }): CapabilityIndexReport {
@@ -24,6 +26,7 @@ export function wireCapabilityIndex(input: {
     homeDirectory: input.homeDirectory,
     workingDirectory: input.workingDirectory,
     configValuePresent: (key) => configValueIsPresent(input.configManager, key),
+    secretPresent: (key) => secretValueIsPresent(input.secretsManager, key),
     mcpServers: safeMcpServerPosture(input.commandContext),
     servedOperatorMethodIds: servedOperatorMethodIds(),
   });

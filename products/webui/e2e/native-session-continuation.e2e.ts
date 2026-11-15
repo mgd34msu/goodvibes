@@ -1,6 +1,7 @@
 /** Production UI + Chromium IndexedDB + unchanged real paired native-turn HTTP bytes. */
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { detailPane, expectNoHorizontalScroll, openRow } from "./support/app";
+import { E2E_OPERATOR_TOKEN } from "./support/seed";
 import {
   isLegacyExecutionMutation,
   nativeBrowserRecords,
@@ -64,7 +65,7 @@ function noLegacyDelivery(fixture: Fixture) {
     []
   );
   expect(
-    fixture.nativeRequests.every((request) => request.authorization === "Bearer e2e-operator-token")
+    fixture.nativeRequests.every((request) => request.authorization === `Bearer ${E2E_OPERATOR_TOKEN}`)
   ).toBe(true);
   expect(
     fixture.requests.filter((request) => request.path.startsWith("/api/work-ledger/execution/"))

@@ -4,18 +4,19 @@
  * Local execution runs a command directly on the host and does not isolate it,
  * so every eval path refuses before running anything, with one fixed message.
  * What still happens: the sandbox session for the runtime's eval profile starts
- * (and runs no command in it), the attempt lands in the runtime-tagged history
- * with the refusal as its error, history mode reads the file back, and a
- * workspaceRoot is required.
+ * (and runs no command in it) and is stopped again, the attempt lands in the runtime-tagged history
+ * with the refusal as its error, and history mode reads the file back. The
+ * history lives in the host's project directory; a model-supplied workspaceRoot
+ * is never honoured.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { SandboxSessionRegistry } from '../platform/src/platform/runtime/sandbox/session-registry.ts';
 import { createReplTool, REPL_NO_ISOLATING_BACKEND_ERROR } from '../platform/src/platform/tools/repl/index.ts';
-import { REPL_TOOL_SCHEMA } from '../platform/src/platform/tools/repl/schema.ts';
+import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import type { Tool } from '../platform/src/platform/types/tools.ts';
 
 const EXPECTED_REFUSAL =
@@ -25,10 +26,6 @@ let workspaceRoot = '';
 let registry: SandboxSessionRegistry;
 let replTool: Tool;
 
-function withWorkspace(input: Record<string, unknown>): Record<string, unknown> {
-  return { workspaceRoot, ...input };
-}
-
 function historyPath(): string {
   return join(workspaceRoot, '.goodvibes', 'tui', 'repl-history.json');
 }
@@ -37,7 +34,7 @@ beforeEach(() => {
   workspaceRoot = makeProjectTempDir('goodvibes-repl-');
   const configManager = new ConfigManager({ configDir: join(workspaceRoot, 'config') });
   registry = new SandboxSessionRegistry(workspaceRoot);
-  replTool = createReplTool(configManager, registry, { surfaceRoot: 'tui' });
+  replTool = createReplTool(configManager, registry, { surfaceRoot: 'tui', workingDirectory: workspaceRoot });
 });
 
 const RUNTIMES = [
@@ -55,7 +52,7 @@ describe('repl tool', () => {
 
   for (const { runtime, expression, profileId } of RUNTIMES) {
     test(`${runtime} eval refuses with the exact message and starts one ${profileId} session that runs nothing`, async () => {
-      const result = await replTool.execute(withWorkspace({ mode: 'eval', runtime, expression }));
+      const result = await replTool.execute(({ mode: 'eval', runtime, expression }));
       expect(result.success).toBe(false);
       expect(result.error).toBe(EXPECTED_REFUSAL);
       const sessions = registry.list();
@@ -67,7 +64,7 @@ describe('repl tool', () => {
   }
 
   test('eval defaults to javascript: one eval-js session labelled repl:javascript with no execution', async () => {
-    const result = await replTool.execute(withWorkspace({ mode: 'eval', expression: '21 + 21' }));
+    const result = await replTool.execute(({ mode: 'eval', expression: '21 + 21' }));
     expect(result.error).toBe(EXPECTED_REFUSAL);
     const sessions = registry.list();
     expect(sessions).toHaveLength(1);
@@ -76,15 +73,21 @@ describe('repl tool', () => {
     expect(sessions[0]?.executionCount).toBeUndefined();
   });
 
+  test('a refused eval leaves no sandbox session running', async () => {
+    await replTool.execute(({ mode: 'eval', runtime: 'javascript', expression: '1' }));
+    await replTool.execute(({ mode: 'eval', runtime: 'python', expression: '1' }));
+    expect(registry.list().filter((session) => session.state === 'running')).toHaveLength(0);
+  });
+
   test('evaluated code never runs on the host', async () => {
     const jsMarker = join(workspaceRoot, 'js-ran');
     const pyMarker = join(workspaceRoot, 'py-ran');
-    await replTool.execute(withWorkspace({
+    await replTool.execute(({
       mode: 'eval',
       runtime: 'javascript',
       expression: `require('node:fs').writeFileSync(${JSON.stringify(jsMarker)}, 'x')`,
     }));
-    await replTool.execute(withWorkspace({
+    await replTool.execute(({
       mode: 'eval',
       runtime: 'python',
       expression: `open(${JSON.stringify(pyMarker)}, 'w').write('x')`,
@@ -94,8 +97,8 @@ describe('repl tool', () => {
   });
 
   test('records runtime-tagged history entries carrying the refusal', async () => {
-    await replTool.execute(withWorkspace({ mode: 'eval', runtime: 'javascript', expression: '7 * 6' }));
-    await replTool.execute(withWorkspace({ mode: 'eval', runtime: 'sql', expression: 'select 1;' }));
+    await replTool.execute(({ mode: 'eval', runtime: 'javascript', expression: '7 * 6' }));
+    await replTool.execute(({ mode: 'eval', runtime: 'sql', expression: 'select 1;' }));
     expect(existsSync(historyPath())).toBe(true);
     const onDisk = JSON.parse(readFileSync(historyPath(), 'utf-8')) as Array<Record<string, unknown>>;
     const sessionIds = registry.list().map((session) => session.id).sort();
@@ -108,10 +111,10 @@ describe('repl tool', () => {
   });
 
   test('history mode returns the recorded attempts', async () => {
-    const empty = await replTool.execute(withWorkspace({ mode: 'history' }));
+    const empty = await replTool.execute(({ mode: 'history' }));
     expect(empty).toEqual({ success: true, output: JSON.stringify({ count: 0, history: [] }) });
-    await replTool.execute(withWorkspace({ mode: 'eval', runtime: 'javascript', expression: '7 * 6' }));
-    const history = await replTool.execute(withWorkspace({ mode: 'history' }));
+    await replTool.execute(({ mode: 'eval', runtime: 'javascript', expression: '7 * 6' }));
+    const history = await replTool.execute(({ mode: 'history' }));
     expect(history.success).toBe(true);
     const parsed = JSON.parse(history.output ?? '') as { count: number; history: Array<Record<string, unknown>> };
     expect(parsed.count).toBe(1);
@@ -119,22 +122,59 @@ describe('repl tool', () => {
     expect(history.output).toContain('"runtime":"javascript"');
   });
 
-  test('requires an explicit workspace root', async () => {
+  test('history is answered from the host project directory, with no workspaceRoot argument', async () => {
     const result = await replTool.execute({ mode: 'history' });
-    expect(result).toEqual({ success: false, error: 'repl requires workspaceRoot.' });
-    expect(registry.list()).toHaveLength(0);
+    expect(result).toEqual({ success: true, output: JSON.stringify({ count: 0, history: [] }) });
+  });
+
+  test('a workspaceRoot argument is not honoured', async () => {
+    const elsewhere = makeProjectTempDir('goodvibes-repl-elsewhere-');
+    await replTool.execute({ mode: 'eval', expression: '1', workspaceRoot: elsewhere });
+    expect(existsSync(join(elsewhere, '.goodvibes'))).toBe(false);
+    expect(existsSync(historyPath())).toBe(true);
+  });
+
+  test('history pages with offset and limit', async () => {
+    for (const expression of ['1', '2', '3']) await replTool.execute({ mode: 'eval', expression });
+    const page = await replTool.execute({ mode: 'history', offset: 1, limit: 1 });
+    const parsed = JSON.parse(page.output ?? '') as { count: number; history: Array<{ expression: string }>; has_more: boolean };
+    expect(parsed.count).toBe(3);
+    expect(parsed.history.map((entry) => entry.expression)).toEqual(['2']);
+    expect(parsed.has_more).toBe(true);
+  });
+
+  test('a history file that cannot be parsed is reported and never overwritten', async () => {
+    mkdirSync(join(workspaceRoot, '.goodvibes', 'tui'), { recursive: true });
+    writeFileSync(historyPath(), '{ not json');
+    const history = await replTool.execute({ mode: 'history' });
+    expect(history.success).toBe(false);
+    expect(history.error).toContain('cannot be read');
+    const evaluation = await replTool.execute({ mode: 'eval', expression: '1' });
+    expect(evaluation.success).toBe(false);
+    expect(evaluation.error).toContain('cannot be read');
+    expect(readFileSync(historyPath(), 'utf-8')).toBe('{ not json');
+  });
+
+  test('without a host project directory history says so and eval gives the backend refusal', async () => {
+    const bare = createReplTool(new ConfigManager({ configDir: join(workspaceRoot, 'bare-config') }), registry, { surfaceRoot: 'tui' });
+    const history = await bare.execute({ mode: 'history' });
+    expect(history.success).toBe(false);
+    expect(history.error).toContain('project directory');
+    expect(await bare.execute({ mode: 'eval', expression: '1' })).toEqual({ success: false, error: EXPECTED_REFUSAL });
   });
 
   test('eval without an expression starts no session and records nothing', async () => {
-    const result = await replTool.execute(withWorkspace({ mode: 'eval', runtime: 'javascript' }));
+    const result = await replTool.execute(({ mode: 'eval', runtime: 'javascript' }));
     expect(result).toEqual({ success: false, error: 'eval requires expression.' });
     expect(registry.list()).toHaveLength(0);
     expect(existsSync(historyPath())).toBe(false);
   });
 
-  test('the tool definition keeps its name and parameter schema', () => {
-    expect(replTool.definition.name).toBe('repl');
-    expect(replTool.definition.parameters).toBe(REPL_TOOL_SCHEMA.parameters);
-    expect(replTool.definition.description).toBe(REPL_TOOL_SCHEMA.description);
+  test('a registry hands the model a tool whose first call (history, no workspaceRoot) succeeds', async () => {
+    const tools = new ToolRegistry();
+    tools.register(replTool);
+    expect(tools.getToolDefinitions().map((definition) => definition.name)).toContain('repl');
+    const result = await tools.execute('call-1', 'repl', { mode: 'history' });
+    expect(result).toMatchObject({ success: true, output: JSON.stringify({ count: 0, history: [] }) });
   });
 });

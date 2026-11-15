@@ -22,6 +22,30 @@ import type { CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
+/** Read a settings sync bundle, refusing in words (never a stack) a file that is unreadable, not JSON, or not shaped like a bundle. */
+function readSettingsSyncBundle(sourcePath: string): SettingsSyncBundle {
+  let text: string;
+  try {
+    text = readFileSync(sourcePath, 'utf-8');
+  } catch (error) {
+    throw new Error(`Cannot read ${sourcePath}: ${summarizeError(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${sourcePath} is not valid JSON, so it is not a settings sync bundle.`);
+  }
+  const bundle = parsed as Partial<Record<keyof SettingsSyncBundle, unknown>> | null;
+  const settings = bundle?.settings;
+  if (typeof bundle !== 'object' || bundle === null || Array.isArray(bundle)
+    || typeof settings !== 'object' || settings === null || Array.isArray(settings)
+    || typeof bundle.exportedAt !== 'number' || !Number.isFinite(bundle.exportedAt) || Number.isNaN(new Date(bundle.exportedAt).getTime())) {
+    throw new Error(`${sourcePath} is not a settings sync bundle: expected a JSON object with a numeric exportedAt and a settings object. Nothing was applied.`);
+  }
+  return parsed as SettingsSyncBundle;
+}
+
 export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'settings-sync',
@@ -83,9 +107,14 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
           ctx.print(`No synced conflict found for ${key}.`);
           return;
         }
-        ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
-        ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
-        ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
+        // The live selection follows config only for the key that was resolved: a model
+        // chosen this session and not saved must not change because an unrelated key resolved.
+        if (key === 'provider.model') {
+          ctx.session.runtime.model = String(ctx.platform.configManager.get('provider.model'));
+          ctx.session.runtime.provider = getProviderIdFromModel(ctx.platform.configManager.get('provider.model'));
+        } else if (key === 'provider.reasoningEffort') {
+          ctx.session.runtime.reasoningEffort = ctx.platform.configManager.get('provider.reasoningEffort') as string;
+        }
         ctx.print(`Resolved synced conflict for ${key} using the ${resolution} value.`);
         return;
       }
@@ -138,8 +167,12 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
           return;
         }
         const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
-        const bundle = JSON.parse(readFileSync(sourcePath, 'utf-8')) as SettingsSyncBundle;
-        ctx.print(inspectSettingsSyncBundle(bundle));
+        try {
+          ctx.print(inspectSettingsSyncBundle(readSettingsSyncBundle(sourcePath)));
+        } catch (error) {
+          recordSettingsSyncFailure('settings-sync', summarizeError(error), controlPlaneConfigDir);
+          ctx.print(`/settings-sync inspect failed: ${summarizeError(error)}`);
+        }
         return;
       }
       if (sub === 'pull') {
@@ -150,9 +183,9 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
         }
         const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
         try {
-          const bundle = JSON.parse(readFileSync(sourcePath, 'utf-8')) as SettingsSyncBundle;
+          const bundle = readSettingsSyncBundle(sourcePath);
           const result = applySettingsSyncBundle(ctx.platform.configManager, bundle, sourcePath);
-          ctx.print(`Settings sync bundle pulled from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts).`);
+          ctx.print(`Settings sync bundle pulled from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts${result.skippedLockedKeys ? `, ${result.skippedLockedKeys.length} skipped because managed locks own them: ${result.skippedLockedKeys.join(', ')}` : ''}).`);
         } catch (error) {
           recordSettingsSyncFailure('settings-sync', summarizeError(error), controlPlaneConfigDir);
           ctx.print(summarizeError(error));

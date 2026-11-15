@@ -14,12 +14,31 @@ import type { Exec, Logger, Sleep } from './effects.js';
 import { realExec, consoleLogger, realSleep } from './effects.js';
 import { DEFAULT_REGISTRY } from '../config.js';
 
+type PublishedLookup =
+  | { readonly state: 'found'; readonly version: string }
+  | { readonly state: 'absent' }
+  | { readonly state: 'error'; readonly detail: string };
+
+/**
+ * Ask the registry for name@version. A not-found answer (E404) is "absent"; any
+ * other failure (network, auth, timeout) is an error, because treating it as
+ * absent would make a re-run of an already published version fail at publish.
+ */
+function lookupPublishedVersion(exec: Exec, name: string, version: string, registry: string): PublishedLookup {
+  const res = exec('npm', ['view', `${name}@${version}`, 'version', '--registry', registry], { timeoutMs: 60_000 });
+  if (res.status !== 0) {
+    const reason = res.stderr.trim();
+    if (reason === '' || /E404|404 Not Found|is not in this registry/i.test(reason)) return { state: 'absent' };
+    return { state: 'error', detail: reason.slice(0, 300) };
+  }
+  const out = res.stdout.trim();
+  return out.length > 0 ? { state: 'found', version: out } : { state: 'absent' };
+}
+
 /** Query the published version of name@version; null when absent (or on error). */
 export function getPublishedVersion(exec: Exec, name: string, version: string, registry: string): string | null {
-  const res = exec('npm', ['view', `${name}@${version}`, 'version', '--registry', registry]);
-  if (res.status !== 0) return null;
-  const out = res.stdout.trim();
-  return out.length > 0 ? out : null;
+  const found = lookupPublishedVersion(exec, name, version, registry);
+  return found.state === 'found' ? found.version : null;
 }
 
 export interface PublishOptions {
@@ -86,8 +105,11 @@ export function runPublishPackage(options: PublishOptions): PublishResult {
     if (options.dryRun) {
       return { ok: true, skipped: false, detail: `dry-run: tarball identity verified (${tarball})` };
     }
-    const alreadyTarball = getPublishedVersion(exec, options.name, options.version, registry);
-    if (alreadyTarball === options.version) {
+    const alreadyTarball = lookupPublishedVersion(exec, options.name, options.version, registry);
+    if (alreadyTarball.state === 'error') {
+      return { ok: false, skipped: false, detail: `could not check whether ${options.name}@${options.version} is already published: ${alreadyTarball.detail}` };
+    }
+    if (alreadyTarball.state === 'found' && alreadyTarball.version === options.version) {
       logger.info(`[publish-package] ${options.name}@${options.version} already published, skipping`);
       return { ok: true, skipped: true, detail: 'already published' };
     }
@@ -104,8 +126,11 @@ export function runPublishPackage(options: PublishOptions): PublishResult {
     return { ok: res.status === 0, skipped: false, detail: res.status === 0 ? 'dry-run pack ok' : `dry-run pack failed: ${res.stderr.trim()}` };
   }
 
-  const already = getPublishedVersion(exec, options.name, options.version, registry);
-  if (already === options.version) {
+  const already = lookupPublishedVersion(exec, options.name, options.version, registry);
+  if (already.state === 'error') {
+    return { ok: false, skipped: false, detail: `could not check whether ${options.name}@${options.version} is already published: ${already.detail}` };
+  }
+  if (already.state === 'found' && already.version === options.version) {
     logger.info(`[publish-package] ${options.name}@${options.version} already published, skipping`);
     return { ok: true, skipped: true, detail: 'already published' };
   }

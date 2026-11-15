@@ -81,6 +81,20 @@ describe('replayJournalIntoConversation', () => {
     expect(existsSync(journalPath)).toBe(false);
   });
 
+  test('a journal that cannot be applied is reported as failed, and the journal is kept', () => {
+    const journalPath = join(tmpDir, 'unappliable.journal');
+    writeJournalWithRecords(journalPath, 'unappliable', 2);
+    const conversation = new ConversationManager();
+    conversation.fromJSON = () => { throw new Error('message shape not understood'); };
+    let persisted = false;
+    const result = replayJournalIntoConversation({ journalPath, sessionId: 'unappliable', snapshotTimestamp: 0, conversation,
+      persistSnapshot: () => { persisted = true; } });
+    expect(result.replayed).toBe(0);
+    expect(result.failed).toContain('message shape not understood');
+    expect(persisted).toBe(false);
+    expect(existsSync(journalPath)).toBe(true);
+  });
+
   test('e2e: replays journal records onto conversation, writes snapshot, rotates journal', () => {
     const journalPath = join(tmpDir, 'transcript-e2e.journal');
     const sessionId = 'ses-e2e-test';

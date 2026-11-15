@@ -124,6 +124,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
     { label: 'hosted sessions', query: hosted },
     { label: 'tasks', query: tasks },
     { label: 'CI watches', query: ciWatches },
+    { label: 'best-of-N groups', query: attempts },
     ...(!archived ? [{ label: 'contracts', query: contracts }] : []),
   ].filter(({ label, query }) => query.isError && (label === 'contracts' || !isMethodUnavailableError(query.error)));
 

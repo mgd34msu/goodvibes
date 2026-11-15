@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { client as platformClient, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
+import { client as platformClient, DEFAULT_SSE_RECONNECT, GOODVIBES_BASE_URL, WEBUI_VERSION, getCurrentAuth } from '../lib/goodvibes';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../lib/client-lifetime';
 import {
   evaluateClientCompatibility,
@@ -37,6 +37,9 @@ const HEALTH_PROBE_INTERVAL_MS = 15_000;
  * the daemon is up but unauthenticated).
  */
 const PING_PATH = '/api/local-auth';
+
+/** The turn domain is the lightest stream; the daemon answers it with a `ready` frame. */
+const HEALTH_EVENTS_PATH = '/api/control-plane/events?domains=turn';
 
 // ---------------------------------------------------------------------------
 // Internal latency probe
@@ -80,7 +83,7 @@ async function probeCall(fn: () => Promise<unknown>): Promise<{ ok: boolean; sta
  *
  * - Probes the daemon every 15 s via a lightweight fetch (no throw on failure).
  * - Reuses the existing queryClient pattern for tasks + model (separate queries).
- * - Subscribes to `platform.realtime.viaSse()` for SSE state tracking.
+ * - Opens the turn-domain event stream for SSE state tracking.
  */
 export function useDaemonHealth(): DaemonHealth {
   // -- Route state ------------------------------------------------------------
@@ -109,55 +112,50 @@ export function useDaemonHealth(): DaemonHealth {
     : evaluateClientCompatibility({ clientVersion: WEBUI_VERSION, floor: observedFloor });
 
   // -- SSE state ------------------------------------------------------------
-  // Stays 'connecting' until the first real envelope arrives, do NOT set
-  // 'active' synchronously before any event, as that would show "Live" even
-  // on a dead/stalled stream.
+  // Stays 'connecting' until the daemon's `ready` frame (or any event) arrives, do NOT
+  // set 'active' synchronously before that, as it would show "Live" on a dead stream.
   const [sseState, setSseState] = useState<SseState>('connecting');
 
   useEffect(() => {
-    // The platform opens SSE through routedFetch on both direct and relay routes.
+    // The stream opens through routedFetch on both direct and relay routes (the relay
+    // tunnel carries event streams, see lib/relay-connection.ts).
     // A route change retires this subscription before opening a fresh one, with
     // reconnect and authentication still owned by the existing platform transport.
     setSseState('connecting');
     let mounted = true;
     const controller = new AbortController();
-    const unsubs: (() => void)[] = [];
     const isCurrent = () => mounted && !controller.signal.aborted && isClientLifetimeCurrent(sourceLifetime);
-    const onError = () => {
-      if (isCurrent()) setSseState('error');
-    };
+    let dispose: (() => void) | null = null;
 
-    try {
-      const events = platformClient.realtime.viaSse({ signal: controller.signal, onError });
-
-      // Subscribe to a lightweight domain to confirm the SSE pipe is alive.
-      // The 'turn' domain fires on any agent turn event.
-      const turnDomain = (events as Record<string, unknown>).turn as
-        | { onEnvelope?: (name: string, cb: (e: unknown) => void) => () => void }
-        | undefined;
-
-      if (turnDomain?.onEnvelope) {
-        // Only flip to 'active' when the first real envelope arrives from the
-        // stream, proving the transport is genuinely delivering events.
-        const unsubTurn = turnDomain.onEnvelope('TURN_STARTED', () => {
-          if (isCurrent()) setSseState('active');
-        });
-        const unsubTurnEnd = turnDomain.onEnvelope('TURN_COMPLETED', () => {
-          if (isCurrent()) setSseState('active');
-        });
-        unsubs.push(unsubTurn, unsubTurnEnd);
-        // Intentionally NOT setting 'active' here, stay 'connecting' until
-        // an envelope actually arrives.
-      }
-      // else: domain absent, remain 'connecting'; cannot confirm stream health.
-    } catch {
-      onError();
-    }
+    // The daemon writes a `ready` frame as soon as it accepts the stream, so an idle
+    // daemon (no turn running) still proves the transport is delivering. Any later
+    // error or termination pauses the status until the reconnect's own `ready`.
+    platformClient.streams
+      .open(
+        HEALTH_EVENTS_PATH,
+        {
+          onReady: () => { if (isCurrent()) setSseState('active'); },
+          onEvent: () => { if (isCurrent()) setSseState('active'); },
+          onError: () => { if (isCurrent()) setSseState('error'); },
+          onTerminate: () => { if (isCurrent()) setSseState('error'); },
+        },
+        { signal: controller.signal, reconnect: DEFAULT_SSE_RECONNECT },
+      )
+      .then((close) => {
+        if (!mounted) {
+          close();
+          return;
+        }
+        dispose = close;
+      })
+      .catch(() => {
+        if (isCurrent()) setSseState('error');
+      });
 
     return () => {
       mounted = false;
       controller.abort();
-      for (const fn of unsubs) fn();
+      dispose?.();
       // Don't flip to error on unmount, component teardown, not a real failure
     };
   }, [storeRoute, sourceLifetime]);

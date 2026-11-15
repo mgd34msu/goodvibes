@@ -25,6 +25,15 @@ export interface DeliveryDomainState {
   readonly totalSucceeded: number;
   readonly totalFailed: number;
   readonly totalDeadLettered: number;
+  /** What finished attempts dropped from `deliveryAttempts` (the registry is bounded) contributed to the totals above, so the totals keep counting them. */
+  readonly retiredAttempts?: RetiredAttemptCounts | undefined;
+}
+
+export interface RetiredAttemptCounts {
+  readonly queued: number;
+  readonly started: number;
+  readonly succeeded: number;
+  readonly deadLettered: number;
 }
 
 export function createInitialDeliveryState(): DeliveryDomainState {

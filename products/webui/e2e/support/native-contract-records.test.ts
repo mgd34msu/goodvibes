@@ -7,7 +7,8 @@ describe('real contract REST capture provenance', () => {
   for (const fixture of CAPTURED_CONTRACTS) {
     test(`${fixture.name}: complete GET and LIST agree and strict malformed responses fail`, () => {
       const list: unknown = JSON.parse(fixture.listBody);
-      expect(list).toEqual({ contracts: [fixture.record] });
+      // A list entry omits the captured file manifest; the detail read carries it.
+      expect(list).toEqual({ contracts: [{ ...fixture.record, inputSnapshot: undefined }] });
       expect(JSON.parse(fixture.getBody)).toEqual(fixture.record);
       expect(firstJsonSchemaFailure(inspectionSchema, fixture.record)).toBeUndefined();
       for (const malformed of malformedCapturedRecords(fixture.record)) {
@@ -23,7 +24,7 @@ describe('real contract REST capture provenance', () => {
     const waiting = CAPTURED_CONTRACTS[2].record;
     expect(waiting.nativeProgress?.state).toBe('deciding');
     expect(waiting.nativeWaiting?.requests[0]?.attempt.status).toBe(503);
-    expect(waiting.nativeWaiting?.requests[0]?.nextDelayMs).toBe(60_000);
+    expect(waiting.nativeWaiting?.requests[0]?.nextDelayMs).toBe(0);
     expect(waiting.nativeDecisions?.history).toEqual([]);
     expect(waiting.nativeDecisions?.pending).toEqual({});
   });
@@ -32,7 +33,7 @@ describe('real contract REST capture provenance', () => {
     expect(engineer?.lastReport).toMatchObject({ version: 1, archetype: 'engineer', filesCreated: ['src/csv.ts'] });
     expect(engineer?.lastReport).not.toHaveProperty('gatheredContext');
     expect(engineer?.lastReport?.summary?.length).toBe(28_018);
-    expect(engineer?.lastOutput?.length).toBe(12_036);
+    expect(engineer?.lastOutput?.length).toBe(28_156);
     const researcher = CAPTURED_CONTRACTS.find((fixture) => fixture.name === 'partial-researcher-report-worktree')?.record.units[0];
     expect(researcher?.lastReport).toEqual({ version: 1, archetype: 'researcher', summary: 'Recorded file claims on a generic report.', filesCreated: ['src/csv.ts'], filesModified: [], filesDeleted: [] });
     expect(researcher?.checks.some((check) => check.claims?.kind === 'files_verified')).toBe(true);

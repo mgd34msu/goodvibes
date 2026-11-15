@@ -2,6 +2,7 @@ import type { McpApi, McpConfigScope, McpReloadResult, McpServerConfig } from '@
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
+import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
 import { quoteSlashCommandArg } from './slash-command-parser.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 export interface McpCommandContext extends CommandConfirmationContext {
@@ -16,9 +17,34 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     readonly hidden: boolean;
     readonly confirmMutations: boolean;
     readonly allowAllOnAdd: boolean;
-    readonly present: (message: string) => string;
+    /** Product-specific wording; the defaults are the Agent's. */
+    readonly wording?: {
+      /** How the product names itself in "from inside ...". */
+      readonly host?: string;
+      /** Whose flags a server argument can be confused with. */
+      readonly flagOwner?: string;
+      /** Where the user adds a server outside the command line. */
+      readonly addServerPointer?: string;
+      /** The command that reviews connector auth. */
+      readonly authReviewCommand?: string;
+      /** Describes the add/remove/reload actions in the /mcp summary. */
+      readonly confirmedActions?: string;
+      /** States how trust, role and quarantine commands are authorised. */
+      readonly commandPolicy?: string;
+    };
   },
 ) {
+  const wording = {
+    host: 'Agent',
+    flagOwner: 'Agent',
+    addServerPointer: 'Agent Workspace -> Tools & MCP -> Add MCP server',
+    authReviewCommand: '/auth review',
+    confirmedActions: 'confirmed add/remove/reload actions',
+    commandPolicy: 'trust, role, and quarantine command actions still require explicit --yes confirmation.',
+    ...policy.wording,
+  };
+  // The --yes hint only applies where the command asks for confirmation.
+  const present = (message: string): string => (policy.confirmMutations ? message : message.replaceAll(' --yes', ''));
   const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
   const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
@@ -72,7 +98,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     return { rest, yes };
   }
   function formatMcpTrustMode(mode: McpDisplayTrustMode): string {
-    if (mode === 'ask-on-risk') return 'ask on risky actions';
+    if (mode === 'ask-on-risk') return 'allow inside scope, deny outside';
     if (mode === 'allow-all') return 'allow all actions';
     return mode.replace(/[_-]+/g, ' ');
   }
@@ -194,16 +220,15 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       description: 'Manage MCP servers and their tools',
       ...(policy.hidden ? { hidden: true } : {}),
       usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]]',
-      argsHint: '[servers|review|tools|config|add --yes|remove --yes]',
+      argsHint: present('[servers|review|tools|config|add --yes|remove --yes]'),
       async handler(args, ctx) {
-        const print = (message: string) => ctx.print(policy.present(message));
+        const print = (message: string) => ctx.print(present(message));
         const mcpApi = requireMcpApi(ctx);
         const listServerSecurity = () => mcpApi.listServerSecurity();
-        const confirmation = policy.confirmMutations
-          ? args[0] === 'add'
-            ? stripMcpAddYesFlag(args)
-            : stripYesFlag(args)
-          : { rest: args, yes: true };
+        // A trailing --yes is never a server argument, whether or not this
+        // product asks for confirmation; only tokens after -- are passed on.
+        const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+        const confirmation = policy.confirmMutations ? stripped : { rest: stripped.rest, yes: true };
         const commandArgs = [...confirmation.rest];
         const subcommand = commandArgs[0];
         if (!subcommand && ctx.openMcpWorkspace) {
@@ -240,7 +265,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 '  ~/.config/claude/claude_desktop_config.json  (Claude Desktop)\n' +
                 '  .mcp/mcp.json                        (project-local)\n' +
                 '  .goodvibes/mcp.json                  (goodvibes project)\n' +
-                '\nOpen /mcp and choose Add or update server, or use Agent Workspace -> Tools & MCP -> Add MCP server.',
+                `\nOpen /mcp and choose Add or update server, or use ${wording.addServerPointer}.`,
             );
             return;
           }
@@ -289,7 +314,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                     (server) =>
                       `  ${server.name}  connected ${server.connected ? 'yes' : 'no'}  status ${formatMcpFreshness(server.schemaFreshness)}  trust ${formatMcpTrustMode(server.trustMode)}`,
                   ),
-                  '  next: /auth review',
+                  `  next: ${wording.authReviewCommand}`,
                   '  next: /mcp repair <server>',
                 ].join('\n')
               : 'MCP Auth Review\n  No MCP servers currently need auth or quarantine recovery.',
@@ -310,7 +335,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             selected.schemaFreshness === 'quarantined'
               ? `/mcp quarantine ${quoteSlashCommandArg(selected.name)} approve operator --yes`
               : null,
-            !selected.connected ? '/auth review' : null,
+            !selected.connected ? wording.authReviewCommand : null,
             '/mcp review',
             '/health review',
           ].filter((entry): entry is string => entry !== null);
@@ -350,7 +375,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               return;
             }
             mcpApi.setServerTrustMode(serverName, mode);
-            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)}.`);
+            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           if (serverName || requestedMode) {
@@ -375,7 +400,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               return;
             }
             mcpApi.setServerRole(serverName, role);
-            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)}.`);
+            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           if (serverName || requestedRole) {
@@ -409,7 +434,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 `  path ${result.path}`,
                 ...(parsedAdd.scope === 'global' ? ['  global config'] : []),
                 `  Runtime reload: ${connected ? 'connected' : 'server saved; connection needs attention'} (+${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged})`,
-                `  command ${parsedAdd.server.command}${parsedAdd.server.args?.length ? ` ${parsedAdd.server.args.join(' ')}` : ''}`,
+                `  command ${parsedAdd.server.command}${parsedAdd.server.args?.length ? ` ${maskLaunchArgs(parsedAdd.server.args).join(' ')}` : ''}`,
                 '  next /mcp tools',
               ].join('\n'),
             );
@@ -489,13 +514,13 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 ...effective.servers.map((entry) => {
                   const server = entry.server;
                   const envKeys = Object.keys(server.env ?? {});
-                  return `  - ${server.name}: ${server.command}${server.args?.length ? ` ${server.args.join(' ')}` : ''}  origin ${entry.source.scope}/${entry.source.kind}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
+                  return `  - ${server.name}: ${server.command}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}  origin ${entry.source.scope}/${entry.source.kind}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
                 }),
                 '',
-                'Add or update from inside Agent with explicit confirmation',
-                '  Open /mcp and choose Add or update server, or use Agent Workspace -> Tools & MCP -> Add MCP server.',
+                `Add or update from inside ${wording.host} with explicit confirmation`,
+                `  Open /mcp and choose Add or update server, or use ${wording.addServerPointer}.`,
                 '  Use Settings -> MCP for allow-all decisions.',
-                '  Use -- before server args that look like Agent flags.',
+                `  Use -- before server args that look like ${wording.flagOwner} flags.`,
                 'Automation equivalent',
                 `  ${MCP_ADD_COMMAND_USAGE}`,
               ].join('\n'),
@@ -519,6 +544,15 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 `approve MCP tool-definition quarantine override for ${serverName}`,
                 '/mcp quarantine <server> approve [operatorId] --yes',
               );
+              return;
+            }
+            const target = listServerSecurity().find((server) => server.name === serverName);
+            if (!target) {
+              print(`No MCP server named ${serverName}. Nothing was approved. Run /mcp servers to list configured servers.`);
+              return;
+            }
+            if (target.schemaFreshness !== 'quarantined') {
+              print(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
               return;
             }
             const operatorId = commandArgs[3] || 'operator';
@@ -545,7 +579,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               '  ~/.config/claude/claude_desktop_config.json  (Claude Desktop)\n' +
               '  .mcp/mcp.json                        (project-local)\n' +
               '  .goodvibes/mcp.json                  (goodvibes project)\n' +
-              '\nOpen /mcp and choose Add or update server, or use Agent Workspace -> Tools & MCP -> Add MCP server.\n' +
+              `\nOpen /mcp and choose Add or update server, or use ${wording.addServerPointer}.\n` +
               '\nFormat: { "servers": [{ "name": "my-server", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] }] }',
           );
           return;
@@ -570,11 +604,11 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     if (connected.length > 0) {
       lines.push('');
       lines.push(
-        'Open "/mcp" for the fullscreen MCP workspace with server status, tools, config paths, and confirmed add/remove/reload actions.',
+        `Open "/mcp" for the fullscreen MCP workspace with server status, tools, config paths, and ${wording.confirmedActions}.`,
       );
       lines.push('Use "/mcp tools" for a compact tool list, or "/mcp tools <server>" for one server.');
       lines.push(
-        'Use Settings -> MCP for allow-all decisions; trust, role, and quarantine command actions still require explicit --yes confirmation.',
+        `Use Settings -> MCP for allow-all decisions; ${wording.commandPolicy}`,
       );
       lines.push('Use /settings -> MCP to explicitly enable allow-all for a server.');
     }

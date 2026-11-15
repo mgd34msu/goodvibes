@@ -7,7 +7,7 @@
 import type { Playbook, DiagnosticCheckResult } from '../types.js';
 import { safeCheck } from '../safe-check.js';
 import { existsSync } from 'fs';
-import { readRecoveryFileMetadata } from '../runtime-context.js';
+import { getOpsRuntimeContext, readRecoveryFileMetadata } from '../runtime-context.js';
 import type { OpsRuntimeContextState } from '../runtime-context.js';
 
 export function createSessionUnrecoverablePlaybook(
@@ -37,8 +37,9 @@ export function createSessionUnrecoverablePlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
           const { session } = runtime.store.getState();
@@ -66,8 +67,9 @@ export function createSessionUnrecoverablePlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
           const recoveryMeta = readRecoveryFileMetadata(runtime.recoveryFilePath);
@@ -96,8 +98,9 @@ export function createSessionUnrecoverablePlaybook(
           if (!runtime) {
             return {
               passed: false,
-              summary: 'Ops runtime context is not configured.',
-              severity: 'warning',
+              evaluated: false,
+              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
+              severity: 'info',
             };
           }
           if (!runtime.sessionRecoveryFailedAt) {
@@ -143,12 +146,11 @@ export function createSessionUnrecoverablePlaybook(
       step: 2,
       title: 'Attempt graceful session restart',
       action:
-        'Call runtime.session.restart() to attempt a clean session re-initialization. ' +
+        'Restart the session to attempt a clean session re-initialization. ' +
         'This resets all domain health, clears the event queue, and reinitialises plugins.',
       kind: 'command',
-      command: 'runtime.session.restart()',
       expectedOutcome: 'Session health returns to healthy; all domains reinitialise.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 3,
@@ -157,9 +159,8 @@ export function createSessionUnrecoverablePlaybook(
         'If restart fails, remove or rename the corrupted session state file and restart. ' +
         'This loses in-progress turns but allows the runtime to boot fresh.',
       kind: 'command',
-      command: 'runtime.session.clearState()',
       expectedOutcome: 'Clean session state; turns must be re-submitted.',
-      automatable: true,
+      automatable: false,
     },
     {
       step: 4,
@@ -193,4 +194,4 @@ export function createSessionUnrecoverablePlaybook(
 }
 
 /** Session unrecoverable resolution playbook. */
-export const sessionUnrecoverablePlaybook: Playbook = createSessionUnrecoverablePlaybook();
+export const sessionUnrecoverablePlaybook: Playbook = createSessionUnrecoverablePlaybook(getOpsRuntimeContext);

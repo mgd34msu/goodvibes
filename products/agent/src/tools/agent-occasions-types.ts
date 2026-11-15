@@ -211,11 +211,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** The renderers read these list items field by field, so the shape is checked once here. */
+function isListOccasionView(value: unknown): boolean {
+  if (!isRecord(value) || !isRecord(value.occasion)) return false;
+  const occasion = value.occasion;
+  return typeof occasion.title === 'string' && typeof occasion.recurrence === 'string' && typeof occasion.kind === 'string';
+}
+
+function isNudgeSubject(value: unknown): boolean {
+  return isRecord(value) && typeof value.occasionId === 'string' && typeof value.title === 'string' && typeof value.kind === 'string';
+}
+
+function isInterviewProgress(value: unknown): boolean {
+  return isRecord(value) && typeof value.interviewId === 'string' && typeof value.complete === 'boolean'
+    && (value.nextStep === null || (isRecord(value.nextStep) && typeof value.nextStep.id === 'string' && typeof value.nextStep.prompt === 'string'));
+}
+
 export function narrowOccasionsList(value: unknown): OccasionsListResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.today !== 'string' || typeof value.timezone !== 'string') return null;
   if (!Array.isArray(value.occasions) || !Array.isArray(value.conflicts)) return null;
   if (!Array.isArray(value.unparsed)) return null;
+  if (!value.occasions.every(isListOccasionView)) return null;
+  if (!value.conflicts.every(conflict => isRecord(conflict) && typeof conflict.title === 'string' && Array.isArray(conflict.dates))) return null;
+  if (!value.unparsed.every(line => isRecord(line) && typeof line.text === 'string')) return null;
   return value as unknown as OccasionsListResponse;
 }
 
@@ -227,7 +246,11 @@ export function narrowOccasionsPending(value: unknown): OccasionsPendingResponse
   if (!isRecord(value)) return null;
   if (typeof value.today !== 'string') return null;
   if (value.nudge !== null && !isRecord(value.nudge)) return null;
+  if (isRecord(value.nudge) && (typeof value.nudge.message !== 'string' || !Array.isArray(value.nudge.subjects)
+    || !value.nudge.subjects.every(isNudgeSubject))) return null;
   if (!Array.isArray(value.conflicts) || !Array.isArray(value.interviews)) return null;
+  if (!value.conflicts.every(conflict => isRecord(conflict) && typeof conflict.message === 'string' && typeof conflict.occasionId === 'string')) return null;
+  if (!value.interviews.every(isInterviewProgress)) return null;
   if (value.provenance !== undefined && value.provenance !== 'classic') return null;
   if (value.semanticAssessment !== undefined && value.semanticAssessment !== 'not-evaluated') return null;
   if (value.open !== undefined && (!Array.isArray(value.open) || value.open.some(item => !isRecord(item)
@@ -308,5 +331,6 @@ export function narrowOccasionsPlans(value: unknown): OccasionsPlansResponse | n
   if (typeof value.today !== 'string' || !Array.isArray(value.plans)) return null;
   if (!Array.isArray(value.unparsed)) return null;
   if (value.awayNow !== null && !isRecord(value.awayNow)) return null;
+  if (!value.plans.every(plan => isRecord(plan) && typeof plan.title === 'string')) return null;
   return value as unknown as OccasionsPlansResponse;
 }

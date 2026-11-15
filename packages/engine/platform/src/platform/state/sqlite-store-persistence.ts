@@ -173,9 +173,9 @@ export class SQLiteStorePersistence {
   writeIfCurrent(data: Uint8Array): void {
     const current = this.#readImage();
     if (current.data === null || this.#baseline === null ? current.data !== this.#baseline : !current.data.equals(this.#baseline)) {
-      throw new Error('SQLiteStore: persisted state changed; pending local changes were not saved');
+      throw new SQLitePersistedStateChangedError();
     }
-    if (this.#currentIdentity() !== current.identity) throw new Error('SQLiteStore: persisted state changed before save');
+    if (this.#currentIdentity() !== current.identity) throw new SQLitePersistedStateChangedError('SQLiteStore: persisted state changed before save');
     this.#write(data);
   }
 
@@ -308,6 +308,18 @@ export class SQLiteStorePersistence {
     syncDirectoryAncestry(dirname(this.#path), this.#io, assertCurrent);
   }
 
+}
+
+/**
+ * Another owner published after this writer's accepted baseline, so this
+ * writer's image was not saved. Both images are intact; the writer must adopt
+ * the current one (SQLiteStore.reloadFromDisk) before it can save again.
+ */
+export class SQLitePersistedStateChangedError extends Error {
+  constructor(message = 'SQLiteStore: persisted state changed; pending local changes were not saved') {
+    super(message);
+    this.name = 'SQLitePersistedStateChangedError';
+  }
 }
 
 export class SQLitePublicationError extends Error {

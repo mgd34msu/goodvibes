@@ -4,6 +4,7 @@ import type { Page } from '@playwright/test';
 import { parseBrowserJudgmentRequest, type BrowserJudgmentRequest } from '@goodvibes-jev/engine/daemon-api';
 import type { OperatorMethodOutput } from '../../src/lib/goodvibes';
 import { installMockDaemon } from './mock-daemon';
+import { E2E_OPERATOR_TOKEN } from './seed';
 
 type Input = BrowserJudgmentRequest<'webui.mail.reply-subject'>;
 interface Capture { message: OperatorMethodOutput<'email.inbox.read'>; requestBody: Input; status: number; body: string }
@@ -30,7 +31,7 @@ export async function installMailReplySubjectDaemon(page: Page, options: { subje
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(message) });
   });
   await page.route('**/api/judgment/batteries/run', async route => {
-    if (route.request().headers()['authorization'] !== 'Bearer e2e-operator-token') throw new Error('Mail judgment lost operator authentication.');
+    if (route.request().headers()['authorization'] !== `Bearer ${E2E_OPERATOR_TOKEN}`) throw new Error('Mail judgment lost operator authentication.');
     const request = parseBrowserJudgmentRequest(route.request().postDataJSON());
     if (request.battery !== 'webui.mail.reply-subject' || request.input.subjectRef !== capture.message.replySubjectRef) throw new Error('Mail judgment changed its source binding.');
     judgments.push(request);

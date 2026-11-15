@@ -132,8 +132,10 @@ export function renderGoodVibesDaemonHelp(
     `Run \`${binary} help <command>\` for a command's own arguments and flags.`,
     `Run \`${binary} --help --json\` for the versioned machine command catalog.`,
     '',
-    'Global options (accepted by every command):',
+    `Global options (accepted by every command except ${passthroughNames()}):`,
     ...GLOBAL_FLAGS.map(renderFlagLine),
+    '',
+    `Those commands read their own arguments. Select another daemon home or working directory for them with ${PASSTHROUGH_ENVIRONMENT}.`,
     '',
     'Serving options (a bare invocation, or `serve`):',
     ...daemonCommandSpec('serve').flags.map(renderFlagLine),
@@ -146,6 +148,17 @@ export function renderGoodVibesDaemonHelp(
     `${pad('  3')}service-status only: installed, but not running`,
     `${pad('  4')}service-status only: not installed`,
   ].join('\n');
+}
+
+const PASSTHROUGH_ENVIRONMENT = 'the GOODVIBES_DAEMON_HOME and GOODVIBES_WORKING_DIR environment variables';
+
+/** True when a passthrough command prints usage for `--help`. */
+export function answersHelpFlag(spec: { readonly passthroughFlags?: readonly { readonly tokens: readonly string[] }[] | undefined }): boolean {
+  return (spec.passthroughFlags ?? []).some((flag) => flag.tokens.includes('--help'));
+}
+
+function passthroughNames(): string {
+  return DAEMON_COMMANDS.filter((spec) => spec.passthrough).map((spec) => spec.name).join(', ');
 }
 
 /** Side-effect-free machine discovery; command membership comes from the dispatch catalog. */
@@ -181,7 +194,8 @@ export function renderDaemonCommandHelp(
   if (spec.passthrough) {
     lines.push(
       '',
-      `This command has its own flags; run \`${binary} ${spec.name}\` with none to see them.`,
+      ...(answersHelpFlag(spec) ? [`This command has its own flags; run \`${binary} ${spec.name} --help\` to see them.`] : []),
+      `It does not accept the global options below; set ${PASSTHROUGH_ENVIRONMENT} instead.`,
     );
   }
   lines.push('', 'Global options:', ...GLOBAL_FLAGS.map(renderFlagLine));

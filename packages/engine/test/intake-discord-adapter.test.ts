@@ -38,6 +38,7 @@ type Request = { path: string; params: URLSearchParams; request: Parameters<Disc
 type Reply = Awaited<ReturnType<DiscordInboxHttp>>;
 const ok = (body: unknown): Reply => ({ ok: true, body });
 const catalog = (ids = [CHANNEL]) => ({ complete: true, accountId: SELF, channels: ids.map(id => ({ id, type: 1 as const })) });
+const protocolViolations: string[] = [];
 function fixture(options: {
   reply?: (request: Request) => Reply | Promise<Reply>;
   listDmChannels?: DiscordInboxCatalog;
@@ -61,9 +62,11 @@ function fixture(options: {
     now: options.now ?? (() => NOW), mapItem: options.mapItem ?? mapper,
     listDmChannels: async input => { catalogs.push(input); return options.listDmChannels ? options.listDmChannels(input) : catalog(); },
     http: async (url, request) => {
-      expect(url.origin).toBe('https://discord.com');
-      expect(request.method).toBe('GET');
-      expect(url.pathname).not.toBe('/api/v10/users/@me/channels');
+      // Recorded, not asserted here: the adapter turns a port exception into a generic
+      // `unavailable`, which would hide a wrong origin or method behind a passing negative test.
+      if (url.origin !== 'https://discord.com') protocolViolations.push(`origin ${url.origin}`);
+      if (request.method !== 'GET') protocolViolations.push(`method ${request.method}`);
+      if (url.pathname === '/api/v10/users/@me/channels') protocolViolations.push(`path ${url.pathname}`);
       const call = { path: url.pathname.slice('/api/v10'.length), params: url.searchParams, request };
       calls.push(call);
       if (options.reply) return options.reply(call);
@@ -91,7 +94,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  expect(protocolViolations.splice(0)).toEqual([]);
+});
 async function integrated(f: ReturnType<typeof fixture>, limit = 50) {
   const dir = makeProjectTempDir('discord-inbox');
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
@@ -354,7 +360,9 @@ describe('Discord complete-window pagination and durable cursor', () => {
   test('20 full pages without completion are unavailable instead of truncating history', async () => {
     const data = { [CHANNEL]: Array.from({ length: 1_000 }, (_, i) => message(BASE + i)) };
     const f = fixture({ reply: historyServer(data) });
-    expectUnavailable(await f.adapter.poll({ limit: 50 }), true); expect(f.calls).toHaveLength(21);
+    // The pages stop at the oldest millisecond, so the poll delivers that stretch whole and leaves the rest for the next poll.
+    const result = await f.adapter.poll({ limit: 50 });
+    expect(result.state).toBe('ready'); expect(result.items.map(item => item.receivedAt)).toEqual([BASE]); expect(f.calls.length).toBeLessThanOrEqual(201);
   });
   test('short page completing at exact per-channel cap succeeds', async () => {
     const data = { [CHANNEL]: Array.from({ length: 999 }, (_, i) => message(BASE + i)) };
@@ -378,6 +386,33 @@ describe('Discord complete-window pagination and durable cursor', () => {
     expectUnavailable(await f.adapter.poll({ limit: 50 }), true); expect(f.calls).toHaveLength(3);
     const future = fixture({ reply: historyFixture(() => ok([message(NOW)])) });
     expectUnavailable(await future.adapter.poll({ limit: 50 }), true);
+  });
+});
+
+describe('Discord busy conversations narrow the window instead of failing the poll', () => {
+  const burst = (from: number, span: number) => Array.from({ length: 1_200 }, (_, i) => from + Math.floor(i * span / 1_200));
+  const quietIds = (count: number) => Array.from({ length: count }, (_, i) => String(i + 1_000));
+  test.each([
+    { name: 'concentrated in the last stretch, no other conversations', quiet: 0, from: BASE + 50_000, span: 49_000 },
+    { name: 'concentrated in the last stretch, 120 quiet conversations', quiet: 120, from: BASE + 50_000, span: 49_000 },
+    { name: 'spread over the whole window, 170 quiet conversations', quiet: 170, from: BASE, span: 99_000 },
+  ])('1,200 messages $name still completes with the oldest items', async ({ quiet, from, span }) => {
+    const busy = burst(from, span);
+    const data: Record<string, Record<string, unknown>[]> = { [CHANNEL]: busy.map(ms => message(ms)) };
+    for (const id of quietIds(quiet)) data[id] = [message(BASE + 99_500)];
+    const f = fixture({ listDmChannels: async () => catalog([...quietIds(quiet), CHANNEL]), reply: historyServer(data) });
+    const result = await f.adapter.poll({ limit: 5 });
+    expect(result.state).toBe('ready');
+    expect(result.items.map(item => item.receivedAt)).toEqual([...busy].sort((a, b) => a - b).slice(0, 5));
+    expect(f.calls.filter(call => call.path.endsWith('/messages')).length).toBeLessThan(200);
+  });
+  test('two messages sharing the millisecond where the dense pages stop are still delivered', async () => {
+    const rows = [message(BASE), message(BASE, {}, 1), ...Array.from({ length: 1_999 }, (_, i) => message(BASE + 100 + i * 40))];
+    const f = fixture({ reply: historyServer({ [CHANNEL]: rows }) });
+    const result = await f.adapter.poll({ limit: 5 });
+    expect(result.state).toBe('ready');
+    // The oldest stretch, including both messages of the shared millisecond, is delivered; the rest waits for the next poll.
+    expect(result.items.map(item => item.receivedAt).slice(0, 3)).toEqual([BASE, BASE, BASE + 100]);
   });
 });
 

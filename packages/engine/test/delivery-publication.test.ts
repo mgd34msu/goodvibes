@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { allowLocalPushEndpoints } from './_helpers/local-push-endpoints.ts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +28,7 @@ import type { VapidManager } from '../platform/src/platform/push/vapid.js';
 import { SmtpClient } from '../platform/src/platform/email/smtp-client.js';
 import { gateReadingsPort, forgetGateReadings } from './_helpers/gate-readings.js';
 
+allowLocalPushEndpoints();
 const cleanup: Array<() => void | Promise<void>> = [];
 let log: SqliteDecisionLog;
 let previous: ReturnType<typeof installJudgmentPort>;
@@ -144,12 +146,24 @@ test('publication cannot skip, replay, substitute a result or invoke a retired c
 
 test('each pinned connection attempt re-enters publication after the previous failure', async () => {
   let attempts = 0, publications = 0;
-  const mock = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => { attempts++; throw new Error('Owned refusal'); },
-    { preconnect() {} })); cleanup.push(() => mock.mockRestore());
+  // Only a refused connection proves a POST never reached a server, so only that failure moves to the next address.
+  const mock = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => {
+    attempts++; throw Object.assign(new Error('Owned refusal'), { code: 'ECONNREFUSED' });
+  }, { preconnect() {} })); cleanup.push(() => mock.mockRestore());
   await expect(pinnedFetch('http://owned.example.invalid/post', { method: 'POST' },
     [{ address: '127.0.0.1', family: 4 }, { address: '127.0.0.2', family: 4 }], 'opaque-url', undefined,
     async operation => { if (++publications === 2) throw new Error('Owned retired retry'); return operation(() => {}); })).rejects.toThrow('retired retry');
   expect(publications).toBe(2); expect(attempts).toBe(1);
+});
+
+test('a POST failure that is not a refused connection is not repeated against another address', async () => {
+  let attempts = 0, publications = 0;
+  const mock = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => { attempts++; throw new Error('Owned reset'); },
+    { preconnect() {} })); cleanup.push(() => mock.mockRestore());
+  await expect(pinnedFetch('http://owned.example.invalid/post', { method: 'POST' },
+    [{ address: '127.0.0.1', family: 4 }, { address: '127.0.0.2', family: 4 }], 'opaque-url', undefined,
+    async operation => { publications++; return operation(() => {}); })).rejects.toThrow('Owned reset');
+  expect(publications).toBe(1); expect(attempts).toBe(1);
 });
 
 test('native encrypted push prepares credentials outside publication and preserves a real accepted receipt', async () => {

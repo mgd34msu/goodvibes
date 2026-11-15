@@ -262,22 +262,22 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
               `Agent starter template exported: ${template.id}`,
               `  path ${template.path ?? targetPath}`,
               template.vibeIncluded ? '  vibe included' : '',
-              '  edit it, then import it with /agent-profile template import <path> --yes',
+              '  edit it, then import it with /agent-profile template import <path> [--replace] --yes',
             ].filter(Boolean).join('\n'));
             return;
           }
           if (mode === 'import') {
             const pathArg = commandArgs[2];
             if (!pathArg) {
-              ctx.print('Usage: /agent-profile template import <path> --yes');
+              ctx.print('Usage: /agent-profile template import <path> [--replace] --yes');
               return;
             }
             if (!parsed.yes) {
-              requireYesFlag(ctx, 'import Agent starter template', '/agent-profile template import <path> --yes');
+              requireYesFlag(ctx, 'import Agent starter template', '/agent-profile template import <path> [--replace] --yes');
               return;
             }
             const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
-            const template = importAgentRuntimeProfileTemplate(homeDirectory, sourcePath);
+            const template = importAgentRuntimeProfileTemplate(homeDirectory, sourcePath, { replace: commandArgs.includes('--replace') });
             ctx.print(`Agent starter template imported: ${template.id}\n  origin ${formatAgentRecordSource(template.source).toLowerCase()}\n  use /agent-profile create <name> --template ${template.id} --yes`);
             return;
           }
@@ -385,7 +385,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           return;
         }
 
-        ctx.print('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name> --yes]');
+        ctx.print('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name> --yes]');
       } catch (error) {
         ctx.print([
           'Error',

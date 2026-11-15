@@ -31,7 +31,7 @@ describe('CLI help/version', () => {
     expect(completion).toContain('knowledge');
     expect(completion).toContain('delegate');
     expect(completion).toContain('--runtime-url');
-    expect(completion).not.toContain(' tasks ');
+    expect(completion).toContain(' tasks ');
     expect(completion).not.toContain(' remote ');
     expect(completion).not.toContain(' bridge ');
     expect(completion).not.toContain(' serve ');

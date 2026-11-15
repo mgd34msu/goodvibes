@@ -1,4 +1,3 @@
-/** Actual installer function/claim regressions; intentionally UNRUN in coding-first work. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -50,7 +49,7 @@ test('driver publication preserves the original installed tree and an unrelated 
   expect(result.stdout).toContain('retained');
 });
 
-test('a superseded previous driver tree is removed only at the commit step, after the whole swap finished', () => {
+test('a superseded previous driver tree is retained when the swap fails after publication', () => {
   const target = oldDriver(); writeFileSync(join(target, '.goodvibes-release.json'), '{"schema":1,"version":"3.0.0"}\n');
   // The swap fails after the driver was published: nothing may have been deleted.
   const failed = run('driver', '', 'rollback_install_swap; exit 9'); expect(failed.status).toBe(9);

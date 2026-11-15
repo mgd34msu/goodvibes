@@ -579,6 +579,53 @@ describe('a confirmed wake drives the whole downstream chain', () => {
     await harness.runtime.stop();
   });
 
+  test('autoSubmit changed while listening applies to the next utterance', async () => {
+    const harness = makeWakeHarness({
+      config: { 'voice.wake.activationSound': 'none' },
+      scores: [0.1, 0.95, 0.95, 0.0],
+      transcript: 'run the tests',
+    });
+    await harness.runtime.refresh();
+    const recorder = harness.spawns.processes[0]!;
+    await primeFrontEnd(recorder);
+    harness.config.set('voice.wake.autoSubmit', true);
+    recorder.emitBytes(pcmBytes(loudSamples(SAMPLES_PER_FRAME)));
+    await flush(2);
+    for (let i = 0; i < 5; i++) {
+      recorder.emitBytes(pcmBytes(silentSamples(SAMPLES_PER_FRAME)));
+      await flush(2);
+    }
+    await flush();
+
+    expect(harness.submitted).toEqual(['run the tests']);
+    expect(harness.drafts).toEqual([]);
+    await harness.runtime.stop();
+  });
+
+  test('retainAudio changed while listening applies to the next utterance', async () => {
+    const managedRoot = makeProjectTempDir('goodvibes-wake-live');
+    cleanupPaths.push(managedRoot);
+    const harness = makeWakeHarness({
+      managedRoot,
+      config: { 'voice.wake.activationSound': 'none' },
+      scores: [0.1, 0.95, 0.95, 0.0],
+    });
+    await harness.runtime.refresh();
+    const recorder = harness.spawns.processes[0]!;
+    await primeFrontEnd(recorder);
+    harness.config.set('voice.wake.retainAudio', 'session-temp');
+    recorder.emitBytes(pcmBytes(loudSamples(SAMPLES_PER_FRAME)));
+    await flush(2);
+    for (let i = 0; i < 5; i++) {
+      recorder.emitBytes(pcmBytes(silentSamples(SAMPLES_PER_FRAME)));
+      await flush(2);
+    }
+    await flush();
+
+    expect(readdirSync(resolveManagedWakePaths(managedRoot).retainedDir).length).toBe(1);
+    await harness.runtime.stop();
+  });
+
   test('retainAudio: session-temp writes the clip where the platform sweeper can reap it', async () => {
     const managedRoot = makeProjectTempDir('goodvibes-wake');
     cleanupPaths.push(managedRoot);
@@ -799,7 +846,8 @@ describe('a recorder that keeps dying is restarted, then latched', () => {
     harness.spawns.processes[0]!.emitStderr('pw-record: failed to connect\n');
     harness.spawns.processes[0]!.emitClose(1);
     await flush();
-    expect(harness.runtime.status()).toBeNull();
+    // Stopped, but wake is still enabled: the stopped chip shows instead of no chip at all.
+    expect(harness.runtime.status()?.kind).toBe('wake-latched');
     expect(harness.notices.join('\n')).toContain('failure could not be safely determined');
     expect(harness.timers.some(timer => timer.ms === 100)).toBe(false);
     expect(harness.spawns.calls).toHaveLength(1);
@@ -938,7 +986,7 @@ describe('the two rows that used to be refused now run a real stage', () => {
 // enabling still never downloads.
 // ---------------------------------------------------------------------------
 describe('enabling wake detection after the installation provisioned the model', () => {
-  test('the listener starts on the two enablement rows alone, loading the artifacts the installer wrote', async () => {
+  test('with provisioning reported ready the listener starts on the two enablement rows alone and loads the managed artifact paths', async () => {
     const managedRoot = makeProjectTempDir('wake-install');
     // The paths the install policy writes to. Nothing here re-derives them: they
     // come from the same platform function the installer, the daemon and the detector
@@ -946,6 +994,7 @@ describe('enabling wake detection after the installation provisioned the model',
     // directory the detector never reads would report success and detect nothing.
     const paths = resolveManagedWakePaths(managedRoot);
 
+    // Provisioning status is stubbed ready here; the real content check is covered by the tests below.
     const harness = makeWakeHarness({ managedRoot });
     await harness.runtime.refresh();
 

@@ -31,6 +31,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { PersistentStore } from '../state/persistent-store.js';
+import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
+import { logger } from '../utils/logger.js';
 import { isDeviceCapabilityId, type DeviceCapabilityId, type DeviceNodeKind } from './device-capability-contract.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
 
@@ -142,6 +144,9 @@ export interface DeviceGrantStoreOptions {
   readonly now?: (() => number) | undefined;
   readonly ownership?: DeviceGrantOwnership | undefined;
 }
+
+/** How long a write waits for another process's write to the same ledger. */
+const GRANT_LOCK_TIMEOUT_MS = 10_000;
 
 const EMPTY_SNAPSHOT: DeviceGrantSnapshot = { version: 1, grants: [], audit: [] };
 
@@ -291,25 +296,39 @@ export class DeviceGrantStore {
     return (await this.readWithDrops()).snapshot;
   }
 
-  /** Serialise writes within this process; across processes the write is atomic. */
+  /**
+   * Serialise writes within this process, and across processes by holding the
+   * store's advisory lock around the whole read-modify-write: a revocation made
+   * by another process between this write's read and its publish would
+   * otherwise be overwritten by a stale snapshot and the revoked grant would
+   * come back.
+   */
   private async mutate<T>(
     fn: (snapshot: DeviceGrantSnapshot, malformed: number) => Promise<{ next: DeviceGrantSnapshot; result: T }>,
     beforePublish?: () => void,
   ): Promise<T> {
     const run = this.writeChain.then(async () => {
-      const { snapshot, malformed } = await this.readWithDrops();
-      const { next, result } = await fn(snapshot, malformed);
-      await this.store.persist(next, { beforePublish, afterPublish: () => {
-        this.memoryGeneration++;
-        if (result && typeof result === 'object') {
-          const lock = this.store.lockPath;
-          if (lock && JSON.stringify(JSON.parse(readFileSync(lock.slice(0, -5), 'utf8'))) !== JSON.stringify(next)) {
-            throw new Error('Device ledger changed at publication');
+      const lock = this.store.lockPath;
+      const release = lock ? await acquireCrossProcessLock(lock, { totalTimeoutMs: GRANT_LOCK_TIMEOUT_MS }) : null;
+      try {
+        const { snapshot, malformed } = await this.readWithDrops();
+        const { next, result } = await fn(snapshot, malformed);
+        await this.store.persist(next, { beforePublish, afterPublish: () => {
+          this.memoryGeneration++;
+          if (result && typeof result === 'object') {
+            const path = this.store.lockPath?.slice(0, -5);
+            if (path && JSON.stringify(JSON.parse(readFileSync(path, 'utf8'))) !== JSON.stringify(next)) {
+              // The write is already durable, so this is not a failed write. No
+              // receipt is minted, which keeps an autonomous admission of this
+              // exact record failing closed.
+              logger.warn('Device grant ledger differs from what was just published; the write stands', { path });
+              return;
+            }
+            this.publicationReceipts.set(result, this.getObservationRevision());
           }
-          this.publicationReceipts.set(result, this.getObservationRevision());
-        }
-      } });
-      return result;
+        } });
+        return result;
+      } finally { release?.(); }
     });
     this.writeChain = run.then(() => undefined, () => undefined);
     return run;

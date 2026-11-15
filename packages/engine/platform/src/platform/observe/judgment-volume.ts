@@ -1,5 +1,6 @@
 import type { DecisionEntry, DecisionVolumeEntry } from '@goodvibes-jev/judgment';
 import { array, strictObject, string, number } from 'zod/v4';
+import { UNNAMED } from './unnamed.js';
 
 export type JudgmentVolumeEntry = DecisionEntry | DecisionVolumeEntry;
 
@@ -65,7 +66,7 @@ function tallyVolume(values: readonly JudgmentVolumeEntry[]) {
 export function judgmentVolume(entries: readonly JudgmentVolumeEntry[]): JudgmentVolume {
   const groups = new Map<string, JudgmentVolumeEntry[]>();
   for (const entry of entries) {
-    const key = JSON.stringify([entry.context.battery ?? '<unnamed>', entry.context.site ?? '<unnamed>']);
+    const key = JSON.stringify([entry.context.battery ?? UNNAMED, entry.context.site ?? UNNAMED]);
     const group = groups.get(key) ?? []; group.push(entry); groups.set(key, group);
   }
 

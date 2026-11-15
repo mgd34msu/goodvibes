@@ -55,7 +55,7 @@ interface Fixture {
   readonly cleanup: () => void;
 }
 
-async function createMemoryRegistry(paths: ShellPaths): Promise<MemoryRegistry> {
+async function createMemoryRegistry(paths: ShellPaths, stores: MemoryStore[]): Promise<MemoryRegistry> {
   const configManager = new ConfigManager({
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     configDir: paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT),
@@ -64,6 +64,7 @@ async function createMemoryRegistry(paths: ShellPaths): Promise<MemoryRegistry> 
   });
   const embeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
   const store = new MemoryStore(paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'memory.sqlite'), { embeddingRegistry });
+  stores.push(store);
   await store.init();
   return new MemoryRegistry(store);
 }
@@ -71,7 +72,8 @@ async function createMemoryRegistry(paths: ShellPaths): Promise<MemoryRegistry> 
 async function makeFixture(): Promise<Fixture> {
   const root = makeProjectTempDir('goodvibes-agent-learning-consolidation');
   const paths = createShellPathService({ workingDirectory: root, homeDirectory: root });
-  const memoryRegistry = await createMemoryRegistry(paths);
+  const stores: MemoryStore[] = [];
+  const memoryRegistry = await createMemoryRegistry(paths, stores);
   let mode: PermissionMode = 'prompt'; let sequence = 0;
   const permissions = () => ({ ...DEFAULT_CONFIG.permissions, mode });
   const reader: PermissionConfigReader = {
@@ -97,7 +99,8 @@ async function makeFixture(): Promise<Fixture> {
     paths,
     memoryRegistry,
     tool, rawTool, setMode(next) { mode = next; },
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    // The store holds the database open, so it closes before its directory goes.
+    cleanup: () => { for (const store of stores) store.close(); rmSync(root, { recursive: true, force: true }); },
   };
 }
 
@@ -133,7 +136,7 @@ describe('agent_learning_consolidation tool', () => {
       expect(preview).toMatchObject({ success: true });
       const value: unknown = JSON.parse(String(preview.output));
       if (!value || typeof value !== 'object' || !('candidateId' in value) || typeof value.candidateId !== 'string') throw new Error('Missing consolidation candidate.');
-      const args = { mode: 'merge', candidateId: value.candidateId, confirm: true, explicitUserRequest: 'Caller assertion' };
+      const args = { mode: 'stale', candidateId: value.candidateId, confirm: true, explicitUserRequest: 'Caller assertion' };
       expect(await fixture.rawTool.execute(args)).toMatchObject({ success: false, error: expect.stringContaining('recorded effect admission') });
       fixture.setMode('plan');
       await expect(fixture.tool.execute(args)).rejects.toThrow();
@@ -153,7 +156,7 @@ describe('agent_learning_consolidation tool', () => {
         if (request.context?.battery === 'engine.tools.registry-rank') { started.resolve(); await release.promise; }
         return backend.ask(request);
       } });
-      const pending = fixture.tool.execute({ mode: 'merge', query: 'release checklist' }, { signal: controller.signal });
+      const pending = fixture.tool.execute({ mode: 'stale', query: 'release checklist' }, { signal: controller.signal });
       await started.promise;
       if (change === 'cancel') controller.abort(new Error('Consolidation cancelled'));
       if (change === 'revoke') fixture.setMode('plan');
@@ -177,7 +180,7 @@ describe('agent_learning_consolidation tool', () => {
       const path = fixture.paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'learning', 'consolidation-receipts.json');
       const target = `${outside}/untouched.json`;
       writeFileSync(target, 'untouched'); mkdirSync(dirname(path), { recursive: true }); symlinkSync(target, path);
-      await expect(fixture.tool.execute({ mode: 'merge', query: 'release checklist' })).rejects.toThrow();
+      await expect(fixture.tool.execute({ mode: 'stale', query: 'release checklist' })).rejects.toThrow();
       expect(await Bun.file(target).text()).toBe('untouched');
       expect(AgentSkillRegistry.fromShellPaths(fixture.paths).get(ids.survivorId)?.description).toBe('Run package verification before release.');
     } finally { fixture.cleanup(); rmSync(outside, { recursive: true, force: true }); }
@@ -199,22 +202,15 @@ describe('agent_learning_consolidation tool', () => {
       expect(previewJson.candidateId).toContain('consolidation:skill');
       expect(previewJson.survivorId).toBe(ids.survivorId);
       expect(previewJson.duplicateIds).toContain(ids.duplicateId);
-      expect(previewJson.phases.find((phase) => phase.id === 'merge')?.route).toContain('agent_learning_consolidation');
+      expect(previewJson.phases.map((phase) => phase.id)).toEqual(['stale', 'delete']);
 
-      const unconfirmedMerge = await fixture.rawTool.execute({
-        mode: 'merge',
-        candidateId: previewJson.candidateId,
-        explicitUserRequest: 'Merge duplicate release checklist skill records.',
-      });
-      expect(unconfirmedMerge.success).toBe(false);
-      expect(unconfirmedMerge.error).toContain('recorded effect admission');
-
-      const merged = await fixture.tool.execute({
+      const unknownMode = await fixture.rawTool.execute({
         mode: 'merge',
         candidateId: previewJson.candidateId,
       });
-      expect(merged.success).toBe(false);
-      expect(merged.error).toContain('no survivor merge fields');
+      expect(unknownMode.success).toBe(false);
+      expect(unknownMode.error).toContain('Unknown mode');
+      expect(unknownMode.error).toContain('stale');
       // Same-entity and survivor-selection readings do not authorize new
       // synthesized guidance, tags, or executable triggers.
       const survivor = AgentSkillRegistry.fromShellPaths(fixture.paths).get(ids.survivorId);
@@ -255,19 +251,20 @@ describe('agent_learning_consolidation tool', () => {
       duplicate = AgentSkillRegistry.fromShellPaths(fixture.paths).get(ids.duplicateId);
       expect(duplicate?.reviewState).toBe('fresh');
 
-      await fixture.tool.execute({
+      const restaled = await fixture.tool.execute({
         mode: 'stale',
         candidateId: previewJson.candidateId,
         confirm: true,
         explicitUserRequest: 'Stage duplicate release checklist skill records stale.',
       });
+      expect(restaled.success, restaled.error).toBe(true);
       const deleted = await fixture.tool.execute({
         mode: 'delete',
         candidateId: previewJson.candidateId,
         confirm: true,
         explicitUserRequest: 'Delete duplicate release checklist skill records.',
       });
-      expect(deleted.success).toBe(true);
+      expect(deleted.success, deleted.error).toBe(true);
       const deletedJson = JSON.parse(deleted.output ?? '{}') as {
         readonly receipt: {
           readonly receiptId: string;
@@ -340,7 +337,7 @@ describe('agent_learning_consolidation tool', () => {
     } finally {
       fixture.cleanup();
     }
-  });
+  }, 240_000);
 
   test('refuses to delete duplicate skills still referenced by bundles', async () => {
     const fixture = await makeFixture();

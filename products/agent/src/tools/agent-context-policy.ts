@@ -1,5 +1,6 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
 
 const AGENT_CONTEXT_TOOL_MODES = [
   'summary',
@@ -98,7 +99,9 @@ export function wrapAgentContextToolForAgentPolicy(tool: Tool, registry?: ToolRe
       includeParameters: args.includeParameters,
       limit: args.limit,
     };
-    const result = await harnessTool.execute(dropUndefined(harnessArgs), options);
+    // The harness binds an invocation to the args object it was admitted with, so the
+    // forward goes through the same guarded path as the sibling tools.
+    const result = await forwardHarnessCatalogCall(harnessTool, rawArgs as Record<string, unknown>, dropUndefined(harnessArgs), options);
     if (!result.success) return result;
     return ok({
       source: 'agent_harness',
@@ -140,7 +143,7 @@ function buildAgentCapabilitiesContract(registry?: ToolRegistry): Record<string,
     answerStyle: 'Answer user capability questions from this contract. Do not dump inventory counts.',
     currentContract: {
       autonomy: 'Operator agent working on the owner\'s behalf. It can inspect, plan, edit, run tools, perform confirmed effects, create accounts on services it needs, and run work in the background. The constraint is visibility, not prohibition: work that continues past the current turn is registered where the owner can list and cancel it, and every account created is recorded in the account register with the service, the alias used, what it is for, and the secret-store key its credential lives under.',
-      confirmations: 'External sends, reminders, media generation, settings writes, slash-command execution, workspace actions, packet preset saves, and operator actions require an explicit user request plus confirm:true where the tool requires it.',
+      confirmations: 'External sends, reminders, media generation, settings writes, slash-command execution, workspace actions, packet preset saves, and operator actions require an explicit user request. Settings writes and settings imports are applied only for what the owner asked in this turn; confirm and explicitUserRequest on the settings tool are context, not authority.',
       secrets: 'Do not reveal raw secrets. Use configured secret refs, provider accounts, and channel readiness routes.',
     },
     canDoNow: [
@@ -203,7 +206,7 @@ function buildAgentCapabilitiesContract(registry?: ToolRegistry): Record<string,
     ],
     needsSetupOrIntegration: [
       'Email and calendar are built in: the google tool reads and sends Gmail and reads and writes Google Calendar. No MCP server or plugin is involved.',
-      'Connecting an account is YOUR job, not a command to hand over. Walk the user to the Google console only for what has no API, creating the OAuth client, and when they paste the client id and secret, call google action:"connect.client" with both: that registers them and returns a consent link to hand straight back. If they name a path to a client JSON instead, call google action:"connect.clientFile" with it. Two pasted values or a path IS the continuation of the walkthrough; treat them as such rather than asking what to do with them.',
+      'Connecting an account is YOUR job, not a command to hand over. Walk the user to the Google console only for what has no API, creating the OAuth client, and when they paste the client id, call google action:"connect.client" clientId:"..." once the client secret is in the native secure credential store: that registers the client and returns a consent link to hand straight back. Never take a client secret as a tool argument; the google tool refuses it, and a secret pasted into chat is exposed. Send the user to native secure credential setup for the secret instead. If they name a path to a client JSON, call google action:"connect.clientFile" with it. A pasted client id or a path IS the continuation of the walkthrough; treat it as such rather than asking what to do with it.',
       'Signing up for a third-party service in service of work the owner asked for is authorized and does not need separate permission. Record it with accounts action:\"record\" at creation time, service, URL, alias, purpose, and the secret-store key name, so it can be listed and revoked. Never record the credential itself, only the name of the secret-store entry holding it.',
       'Long-running work belongs on an explicit schedule, routine, automation, research run, or connected-host route so it appears in the autonomy queue and can be cancelled. Starting such work is authorized; starting it where the owner cannot see it is not.',
       'New capabilities can come from installed plugins, MCP servers, configured services, or code changes; the Agent should inspect what is installed before claiming a capability exists.',
@@ -213,17 +216,17 @@ function buildAgentCapabilitiesContract(registry?: ToolRegistry): Record<string,
       executionPosture: 'execution action:"status"; inspect one route with action:"route"; use terminal command:"..." background:true confirm:true explicitUserRequest:"..." for visible tracked long-running commands and process action:"list|poll|log|wait|kill|write" to manage them; inspect tracked processes with action:"processes|process", recent work with action:"history|record", and recovery posture with action:"recovery"; prefer local read/edit/exec for the current workspace, delegation action:"status" for isolation/parallel/remote',
       delegation: 'delegation action:"status"; inspect one route with action:"route" delegationRouteId:"..."; delegated submission uses workspace action:"run" actionId:"delegate-task" or workspace action:"run_command" command:"/delegate ..." only after explicit confirmation',
       fileRecovery: 'execution action:"recovery"; apply one snapshot with agent_harness mode:"run_file_recovery" recoveryAction:"undo|redo" confirm:true explicitUserRequest:"..."',
-      personalOps: 'personal_ops action:"briefing"; use action:"queue" for saved inbox/calendar review queues and refresh routes; use action:"intake" query:"<personal request>" to choose the safest lane; inspect one lane with action:"lane" laneId:"..."; run one live inbox/calendar read with action:"read" confirm:true explicitUserRequest:"..."; use schedule action:"list|create|remind|edit|run|pause|resume|delete" for connected schedules/reminders after explicit confirmation',
+      personalOps: 'personal_ops action:"briefing"; use action:"queue" for saved inbox/calendar review queues and refresh routes; use action:"intake" query:"<personal request>" to choose the safest lane; inspect one lane with action:"lane" laneId:"..."; run one live inbox/calendar read with personal_ops action:"read" laneId:"inbox|calendar" recordId:"..." fields:{...}; a read takes its authority from recorded admission, not from confirm or explicitUserRequest arguments; use schedule action:"list|create|remind|edit|run|pause|resume|delete" for connected schedules/reminders after explicit confirmation',
       promptContext: 'context action:"prompt"; add includeParameters:true only when bounded prompt previews are needed; inspect context files with action:"files|file" and receipts with action:"receipts|receipt"',
       memoryPosture: 'memory action:"status"; inspect one embedding or external-memory provider with action:"provider"; write/rebuild/change routes stay confirmed',
       autonomyIntake: 'autonomy action:"intake" query:"<ongoing work request>"; use returned route and missing fields before creating background work',
       autonomyQueue: 'autonomy action:"queue"; inspect one card with action:"item"; use returned live records/log tails when present',
       setup: 'setup action:"status"; inspect one row with action:"item" setupItemId:"..."; use action:"checkpoint"; confirmed effects use action:"save_checkpoint|clear_checkpoint|token|smoke|finish|import_settings" confirm:true explicitUserRequest:"..."',
       vibe: 'vibe action:"status"; inspect one file with action:"show" scope:"project|global"; confirmed effects use action:"init|import_persona" confirm:true explicitUserRequest:"..."',
-      settings: 'settings action:"list"; inspect one setting with action:"get" key:"..."; confirmed changes use action:"set|reset" confirm:true explicitUserRequest:"..."; import existing GoodVibes settings with action:"import" and confirm:true only after approval',
+      settings: 'settings action:"list"; inspect one setting with action:"get" key:"..."; changes use action:"set|reset" and apply only for what the owner asked in this turn (confirm and explicitUserRequest are not authority); import existing GoodVibes settings with action:"import" (applies under recorded admission) after action:"preview_import" shows what it would change',
       host: 'host action:"status"; inspect capabilities/services/methods with action:"capabilities|capability|services|service|methods|method"; execute exact daemon operations separately with agent_operator_method after confirmation',
-      settingsImport: 'settings action:"import"; previews by default and applies with confirm:true explicitUserRequest:"..." after user approval; import_goodvibes_settings remains available for compatibility',
-      computer: 'computer action:"status|plan|control|browser|setup|mcp"; open the connected browser cockpit with action:"open_browser" confirm:true explicitUserRequest:"..."; use this route for browser/PWA, browser/screenshot/desktop-control planning, screen, and computer-use posture',
+      settingsImport: 'settings action:"preview_import" shows what would change without applying; settings action:"import" applies it, only when the owner asked for the import in this turn (confirm is not authority); import_goodvibes_settings remains available for compatibility',
+      computer: 'computer action:"status|plan|control|browser|setup|mcp"; open the connected browser cockpit with action:"open_browser" explicitUserRequest:"..." (opening needs recorded owner approval; confirm is context only); use this route for browser/PWA, browser/screenshot/desktop-control planning, screen, and computer-use posture',
       device: 'device action:"status"; inspect one capability/route with action:"capability" capabilityId:"..."; inspect voice/media with action:"voice"; inspect one provider with action:"provider"; browser/PWA and desktop-control compatibility routes remain available but computer is the primary route',
       models: 'models action:"status"; inspect one model/local endpoint route with action:"route" modelRouteId:"..."; inspect local cookbook with action:"local"; inspect providers with action:"providers"; inspect one provider with action:"provider" providerId:"..."; run local model server checks with action:"smoke" confirm:true explicitUserRequest:"..."',
       learningCurator: 'memory action:"curator"; inspect one card with action:"candidate"; apply duplicate phases with agent_learning_consolidation mode:"preview|merge|stale|delete|rollback"',
@@ -233,9 +236,9 @@ function buildAgentCapabilitiesContract(registry?: ToolRegistry): Record<string,
       reviewPacketShare: 'agent_review_packet_share archiveArtifactId:"..." channel:"..." confirm:true explicitUserRequest:"..."; sends a plain-text archive reference only',
       artifacts: 'agent_artifacts mode:"list"; inspect with mode:"show"; export one with mode:"export"; package selected ids with mode:"package" or mode:"archive"; promote reviewed artifact ids with agent_knowledge_ingest sourceKind:"artifact"',
       researchWorkflow: 'research action:"briefing" query:"<research request>"; returns one read-only next-action queue across visible runs, sources, saved reports, browser readiness, and exact follow-up routes. Use action:"plan" for route planning, action:"search" for bounded public source candidates, and action:"runner" for browser-backed readiness only',
-      researchRuns: 'research action:"runs"; create visible run state with action:"create_run" confirm:true explicitUserRequest:"..."; checkpoint/pause/resume/cancel/complete use confirmed research lifecycle actions; no hidden background work starts from the ledger',
-      researchSources: 'research action:"sources"; capture with action:"add_source" confirm:true explicitUserRequest:"..."; review with action:"review_source" confirm:true explicitUserRequest:"..."; bundle with action:"bundle"; no Knowledge ingest occurs unless agent_knowledge_ingest is called separately',
-      researchReports: 'research action:"reports" lists saved sourced report artifacts; action:"report_artifact" previews one; save with action:"report" reviewed sources, citation coverage repair metadata, optional requireCitationCoverage:true, confirm:true, and explicitUserRequest',
+      researchRuns: 'research action:"runs"; create visible run state with action:"create_run"; checkpoint/pause/resume/cancel/complete use confirmed research lifecycle actions; no hidden background work starts from the ledger',
+      researchSources: 'research action:"sources"; capture with action:"add_source"; review with action:"review_source"; bundle with action:"bundle"; no Knowledge ingest occurs unless agent_knowledge_ingest is called separately',
+      researchReports: 'research action:"reports" lists saved sourced report artifacts; action:"report_artifact" previews one; save with action:"report" reviewed sources, citation coverage repair metadata, optional requireCitationCoverage:true; saving needs a recorded owner admission',
       localModelCookbook: 'models action:"local"; inspect hardware fit with action:"route" modelRouteId:"local-model-cookbook"; confirmed local server checks use action:"smoke" confirm:true explicitUserRequest:"..."',
       listTools: 'agent_harness mode:"tools" query:"<task>"',
       inspectTool: 'agent_harness mode:"tool" toolName:"<tool>"',
@@ -244,7 +247,7 @@ function buildAgentCapabilitiesContract(registry?: ToolRegistry): Record<string,
       listWorkspaceActions: 'workspace action:"actions" query:"<task>"',
       runWorkspaceAction: 'workspace action:"run" actionId:"<id>" confirm:true explicitUserRequest:"..."',
       inspectSettings: 'settings action:"list" query:"<setting>"',
-      setSetting: 'settings action:"set" key:"<key>" value:<value> confirm:true explicitUserRequest:"..."',
+      setSetting: 'settings action:"set" key:"<key>" value:<value> (applies only for a change the owner asked for in this turn)',
       webResearch: `multi-step: research action:"briefing" query:"<research request>"; route plan: research action:"plan" query:"<research request>"; public source candidates: research action:"search" query:"<research request>"; browser readiness: research action:"runner"; raw single-shot fallback: ${has('web_search') ? 'web_search query:"<research request>" verbosity:"evidence" maxResults:10 evidenceTopN:3' : 'web_search not registered'}`,
       channels: 'channels action:"status|channel|setup|triage|deliveries"; send with agent_channel_send only after explicit user request',
     },

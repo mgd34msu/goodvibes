@@ -197,7 +197,7 @@ export function loadedReturnContext(raw: unknown): SessionReturnContextSummary |
   const { openPanels: _legacyPaneList, ...rest } = raw as Record<string, unknown>;
   const lines = Array.isArray(rest['lines'])
     ? rest['lines'].filter((line: unknown) => !(typeof line === 'string' && line.startsWith('Open panels: ')))
-    : rest['lines'];
+    : [];
   return { ...rest, lines } as unknown as SessionReturnContextSummary;
 }
 

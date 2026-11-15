@@ -4,6 +4,7 @@ import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine
 import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
 import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
 export function initializeTerminalCatalog(
   provider: ProviderRegistry,
   benchmarks: BenchmarkStore,
@@ -22,13 +23,16 @@ export function seedTerminalControlPlane(
   sessionId: string,
   client: Pick<Parameters<DomainDispatch['syncControlPlaneClient']>[0], 'id' | 'kind' | 'label' | 'capabilities' | 'metadata'>,
 ): void {
+  const enabled = Boolean(config.get('controlPlane.enabled'));
+  // The address is the one the platform would bind; nothing has started yet, so the state is not running until the gateway reports it.
+  const binding = resolveRuntimeEndpointBinding(config, 'controlPlane');
   dispatch.syncControlPlaneState(
     {
-      enabled: Boolean(config.get('controlPlane.enabled')),
-      host: String(config.get('controlPlane.host') ?? '127.0.0.1'),
-      port: Number(config.get('controlPlane.port') ?? 3421),
-      connectionState: config.get('controlPlane.enabled') ? 'connected' : 'disabled',
-      isRunning: Boolean(config.get('controlPlane.enabled')),
+      enabled,
+      host: binding.host,
+      port: binding.port,
+      connectionState: enabled ? 'initializing' : 'disabled',
+      isRunning: false,
     },
     'bootstrap.control-plane',
   );

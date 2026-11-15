@@ -91,14 +91,19 @@ async function readUntil(
 ): Promise<string> {
   const decoder = new TextDecoder();
   let acc = '';
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate(acc)) return acc;
-    const { done, value } = await reader.read();
-    if (done) return acc;
-    if (value) acc += decoder.decode(value, { stream: true });
-  }
-  throw new Error(`predicate not satisfied within ${timeoutMs}ms; got: ${acc}`);
+  // The ceiling covers a read that never returns, not only the gaps between reads.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`predicate not satisfied within ${timeoutMs}ms; got: ${acc}`)), timeoutMs);
+  });
+  try {
+    for (;;) {
+      if (predicate(acc)) return acc;
+      const { done, value } = await Promise.race([reader.read(), expired]);
+      if (done) return acc;
+      if (value) acc += decoder.decode(value, { stream: true });
+    }
+  } finally { clearTimeout(timer); }
 }
 
 function deferred<T>() {
@@ -194,7 +199,7 @@ describe('relay event streaming', () => {
 
     await reader.cancel(); // sends stream-close to the daemon
     // The daemon should cancel its source reader in response.
-    for (let i = 0; i < 100 && !source.cancelled; i += 1) await new Promise((r) => setTimeout(r, 20));
+    await waitForStreamCondition(() => source.cancelled);
     expect(source.cancelled).toBe(true);
 
     client.close();

@@ -20,6 +20,20 @@ export interface AgentWorkspaceLearnedBehaviorResult {
   readonly name: string;
 }
 
+/**
+ * Runs the second write of a two-write save (the record, then its enabled/active flag).
+ * The registries have no single-write form, so when the second write fails the record is
+ * already on disk; the error says so, which stops a retry from creating a duplicate.
+ */
+export function runFollowUpWrite(saved: string, followUp: string, write: () => void): void {
+  try {
+    write();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${saved} was saved, but ${followUp} failed: ${reason}. Open it from the list to finish; do not create it again.`, { cause: error });
+  }
+}
+
 export function createAgentWorkspaceLearnedBehavior(
   shellPaths: ShellPathService,
   input: AgentWorkspaceLearnedBehaviorInput,
@@ -37,7 +51,10 @@ export function createAgentWorkspaceLearnedBehavior(
       source: 'agent',
       provenance: 'agent-workspace-learned-behavior',
     });
-    if (input.enable) { assertCurrent?.(); registry.setActive(created.id); }
+    if (input.enable) {
+      assertCurrent?.();
+      runFollowUpWrite(`Persona "${created.name}"`, 'making it active', () => registry.setActive(created.id));
+    }
     return { kind: 'persona', id: created.id, name: created.name };
   }
 

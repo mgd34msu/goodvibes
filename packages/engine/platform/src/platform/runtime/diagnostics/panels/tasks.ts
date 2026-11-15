@@ -97,6 +97,7 @@ export class TasksPanel {
           traceId,
           sessionId,
         });
+        this._retireStaleActive();
         this._notify();
         break;
       }
@@ -169,6 +170,22 @@ export class TasksPanel {
     }
   }
 
+  /**
+   * A task whose terminal event never arrives (emitter died, bus disconnected)
+   * would stay live forever and grow the active map without limit; the oldest
+   * is retired into history in its last known state with a note saying why.
+   */
+  private _retireStaleActive(): void {
+    while (this._active.size > this._config.bufferLimit) {
+      const oldest = this._active.values().next();
+      if (oldest.done) return;
+      const record = oldest.value;
+      record.error = 'no terminal event was observed for this task; it was retired from the live list';
+      logger.warn('[TasksPanel] retired a task with no terminal event: too many are outstanding', { taskId: record.taskId, limit: this._config.bufferLimit });
+      this._finalize(record);
+    }
+  }
+
   private _finalize(record: MutableTaskRecord): void {
     this._active.delete(record.taskId);
     const entry: TaskEntry = {
@@ -218,7 +235,7 @@ export class TasksPanel {
       });
     }
     const combined: TaskEntry[] = [...this._history, ...activeEntries];
-    return applyFilter(combined, filter, (e) => e.createdAt);
+    return applyFilter(combined, filter, (e) => e.createdAt, this._config.bufferLimit);
   }
 
   /**

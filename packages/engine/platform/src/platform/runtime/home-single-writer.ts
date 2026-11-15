@@ -150,10 +150,18 @@ export function surfaceHomeClaimPath(homeDirectory: string, surfaceRoot: string)
 }
 
 /**
- * This process's identity string: its argv, joined. Short, stable for the life
- * of the process, and comparable against what `/proc` reports for a pid.
+ * This process's identity string, recorded the same way another process reads
+ * it back. On Linux that is `/proc/<pid>/cmdline`, whose argv[0] is the name the
+ * process was launched with and so differs from `process.argv[0]` (an absolute
+ * path); recording argv would never match what a second process reads. Where
+ * `/proc` is absent the joined argv is the fallback, and the reader returns
+ * null there anyway.
  */
 export function currentProcessIdentity(argv: readonly string[] = process.argv): string {
+  if (argv === process.argv) {
+    const observed = readProcessIdentity(process.pid);
+    if (observed !== null) return observed;
+  }
   return argv.join(' ').slice(0, 512);
 }
 
@@ -258,7 +266,7 @@ export function claimSurfaceHome(options: ClaimSurfaceHomeOptions): SurfaceHomeC
   const unlock = tryAcquireCrossProcessLock(`${path}.lock`);
   if (!unlock) {
     const existing = readClaim(path);
-    throw new SurfaceHomeInUseError(`Another process is claiming or releasing this home: ${path}`, existing?.pid ?? 0);
+    throw new SurfaceHomeInUseError(`Another process is claiming or releasing this home: ${path}. Wait a moment and start again; if it keeps happening, check that no other copy is starting up.`, existing?.pid ?? 0);
   }
   try { return claimLockedHome(options, path); }
   finally { unlock(); }

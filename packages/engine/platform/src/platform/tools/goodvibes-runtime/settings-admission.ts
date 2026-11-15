@@ -3,6 +3,7 @@ import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
 import type { ConfigManager, PreparedConfigMutationFacts } from '../../config/manager.js';
 import { isValidConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
+import { isStructuredCredentialReferenceConfigKey } from '../../config/structured-credential-config.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
 import { readHostSettingsFile } from '../../config/manager-host-settings.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
@@ -50,8 +51,14 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       const key = args.key.trim();
       if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
       // Validate the declared credential storage format before preparing any local or remote write.
-      if (args.mode === 'set' && isSecretBearingConfigKey(key) && typeof args.value === 'string'
-        && args.value.trim() && !isSecretReferenceValue(args.value)) throw new ToolInputProjectionError('held');
+      // A literal is refused whatever its shape (the legacy path refuses objects and numbers the same way);
+      // a structured credential key carries its own reference shape and validates it itself.
+      if (args.mode === 'set' && isSecretBearingConfigKey(key) && !isStructuredCredentialReferenceConfigKey(key)) {
+        const raw = typeof args.value === 'string'
+          ? args.value.trim() !== '' && !isSecretReferenceValue(args.value)
+          : args.value !== undefined && args.value !== null && args.value !== '';
+        if (raw) throw new ToolInputProjectionError('held');
+      }
       // Hosted originating-surface files have a separate owner contract. The
       // main Agent composition never supplies this override; never borrow the
       // hosting manager's authority for a distinct file.
@@ -144,11 +151,19 @@ export async function executeAdmittedAgentSettings(args: Record<string, unknown>
       });
     } catch { /* A committed effect cannot be relabeled no-effect because readback failed. */ }
   }
+  const refused = 'refused' in receipt && receipt.refused === true;
   return { success: receipt.status === 'committed', output: JSON.stringify({ key: capture.key, action: capture.operation,
-    status: receipt.status, previous: presentation.previous,
+    status: refused ? 'refused' : receipt.status, previous: presentation.previous,
     ...(receipt.status === 'committed' && verified && (capture.operation === 'set' || capture.remote) ? { current: presentation.current } : {}),
     persistedTo: capture.source, appliedBy: capture.local ? 'local' : 'daemon', owner: configKeyScope(capture.key),
     ownership: describeConfigOwnership(capture.key), verifiedInOwningStore: verified,
     completedPaths: receipt.completedPaths, ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
-    ...(receipt.status !== 'committed' ? { error: 'Settings mutation outcome is partial or unknown; it was not retried.' } : {}) };
+    ...(receipt.status !== 'committed' ? { error: settingsOutcomeError(receipt.status, refused) } : {}) };
+}
+
+/** What a caller may do next depends on whether anything may have been written. */
+function settingsOutcomeError(status: 'partial' | 'unknown', refused: boolean): string {
+  if (refused) return 'The settings owner refused this change before applying anything (its precondition was stale or unavailable). Nothing changed; read the setting and request the change again.';
+  if (status === 'partial') return 'The settings change was partly applied: the files in completedPaths were written and uncertainPath may or may not have been. It was not retried; read the setting before deciding whether to change it again.';
+  return 'The settings change has an unknown outcome: the owner gave no definite answer, so it may or may not have been applied. It was not retried; read the setting to see whether it changed before requesting it again.';
 }

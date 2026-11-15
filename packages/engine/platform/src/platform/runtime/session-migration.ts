@@ -77,9 +77,10 @@
  *    reclaimed by the append-only retention sweep (legacy-event-store), not
  *    by migration, it has no live reader to migrate FOR.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSharedDirectory } from './surface-root.js';
 import { isLegacyAgentJournalFile } from './retention/legacy-agent-journal-patterns.js';
@@ -198,17 +199,15 @@ function readCompletedMarker(surface: SessionSurface): { schemaVersion: number }
  * Write the completion marker with the content that makes it verifiable:
  * schema version, timestamp, surface, and exactly what was moved and how many.
  *
- * Written to a sibling temp file and renamed into place, so an interruption
- * leaves either no marker at all (the pass retries) or the complete previous
- * one, never a half-written file that a later boot would trust. The temp name
- * carries the pid so two processes racing to migrate the same surface cannot
- * scribble over each other's partial file; `rename` onto the final path is
- * atomic, and both processes write the same "completed" assertion, so whichever
- * lands last is equally correct.
+ * Published through the shared atomic writer, so an interruption leaves either
+ * no marker at all (the pass retries) or the complete previous one, never a
+ * half-written file that a later boot would trust. Its staging name is unique
+ * per call, so two processes racing to migrate the same surface cannot
+ * scribble over each other's partial file; both write the same "completed"
+ * assertion, so whichever lands last is equally correct.
  */
 function writeCompletedMarker(surface: SessionSurface, summary: MigrationSummary): void {
   const path = markerPath(surface);
-  const temp = `${path}.${process.pid}.tmp`;
   const body = JSON.stringify(
     {
       schemaVersion: MARKER_SCHEMA_VERSION,
@@ -227,18 +226,7 @@ function writeCompletedMarker(surface: SessionSurface, summary: MigrationSummary
     null,
     2,
   ) + '\n';
-  mkdirSync(dirname(path), { recursive: true });
-  try {
-    writeFileSync(temp, body, 'utf-8');
-    renameSync(temp, path);
-  } catch (error) {
-    try {
-      rmSync(temp, { force: true });
-    } catch {
-      // The temp file is inert; failing to clean it up is not worth a second error.
-    }
-    throw error;
-  }
+  writeFileAtomic(path, body, { mode: 0o644, durable: false });
 }
 
 /** Copy `from` forward to `to`, creating `to`'s parent directory if needed. Throws on failure, callers wrap this. */

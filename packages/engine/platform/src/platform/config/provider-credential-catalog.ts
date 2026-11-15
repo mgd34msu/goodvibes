@@ -13,8 +13,10 @@ export const BUILTIN_PROVIDER_ENV_KEYS: Record<string, readonly string[]> = {
   huggingface: ['HF_API_KEY', 'HUGGINGFACE_API_KEY', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN'],
   nvidia: ['NVIDIA_API_KEY', 'NIM_API_KEY'],
   llm7: ['LLM7_API_KEY'],
-  'amazon-bedrock': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
-  'amazon-bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
+  // AWS_PROFILE configures the provider on its own. AWS_REGION and AWS_SESSION_TOKEN are
+  // deliberately not listed: every name here counts as "configured" when set, and neither is a credential.
+  'amazon-bedrock': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'],
+  'amazon-bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'],
   'anthropic-vertex': ['GOOGLE_APPLICATION_CREDENTIALS', 'ANTHROPIC_VERTEX_PROJECT_ID', 'GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT_ID'],
   deepseek: ['DEEPSEEK_API_KEY'],
   fireworks: ['FIREWORKS_API_KEY'],

@@ -141,16 +141,18 @@ describe('PermissionPromptUI: attribution + remember-scope preview (Item 3 b/c)'
     return { callId: 'c', tool, args, category, analysis: analyzePermissionRequest(tool, args, category), resolve: () => {} };
   }
 
-  test('rememberScopeKey mirrors the platform getApprovalKey: path, then command, then tool-only', () => {
-    expect(PermissionPromptUI.rememberScopeKey(req('edit', { path: 'src/a.ts' }, 'write'))).toBe('edit:src/a.ts');
-    expect(PermissionPromptUI.rememberScopeKey(req('bash', { command: 'npm test' }, 'execute'))).toBe('bash:npm test');
-    expect(PermissionPromptUI.rememberScopeKey(req('list', {}, 'read'))).toBe('list');
+  test('rememberScope names the scope the platform stores: path, command class, exact command, then whole tool', () => {
+    expect(PermissionPromptUI.rememberScope(req('edit', { path: 'src/a.ts' }, 'write'))).toBe('edit on src/a.ts');
+    expect(PermissionPromptUI.rememberScope(req('exec', { commands: [{ cmd: 'git status' }] }, 'execute'))).toBe('every git command');
+    expect(PermissionPromptUI.rememberScope(req('exec', { commands: [{ cmd: 'git status; rm -rf x' }] }, 'execute'))).toBe('this exact command');
+    expect(PermissionPromptUI.rememberScope(req('bash', { command: 'npm test' }, 'execute'))).toBe('this exact bash command');
+    expect(PermissionPromptUI.rememberScope(req('list', {}, 'read'))).toBe('every list call');
   });
 
   test('the details show the exact rule "Allow for session" will remember, before it is written', () => {
     const text = promptCardText(80, req('bash', { command: 'rm build' }, 'execute'), undefined, true).join('\n');
     expect(text).toContain('Remembers');
-    expect(text).toContain('bash:rm build');
+    expect(text).toContain('this exact bash command');
   });
 
   test('the title row names the requesting agent/process when known, and omits it when not', () => {

@@ -47,31 +47,30 @@ function addImportGraphWarning(diagnostics: ImportGraphDiagnostics, warning: str
 }
 
 // ---------------------------------------------------------------------------
-// Import extraction (line-by-line, no catastrophic backtracking)
+// Import extraction (whole file, no nested quantifiers)
 // ---------------------------------------------------------------------------
 
-const IMPORT_RE = /(?:import|export)\s.*?from\s+['"]([^'"]+)['"]/;
-const SIDE_EFFECT_IMPORT_RE = /^\s*import\s+['"]([^'"]+)['"]/;
-const DYNAMIC_IMPORT_RE = /import\(\s*['"]([^'"]+)['"]\s*\)/;
-const REQUIRE_RE = /require\(['"]([^'"]+)['"]\)/;
+// A wrapped import list (`import {\n a,\n b,\n} from './x'`) spans lines, so
+// these run over the whole text. The clause between the keyword and `from`
+// cannot contain a quote or semicolon, which bounds each match.
+const IMPORT_RE = /\b(?:import|export)\s+[^;'"`]*?\bfrom\s*['"]([^'"]+)['"]/g;
+const SIDE_EFFECT_IMPORT_RE = /^[ \t]*import\s+['"]([^'"]+)['"]/gm;
+const DYNAMIC_IMPORT_RE = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
+const REQUIRE_RE = /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 /**
  * Extract all module specifiers (import/export/require) from a file's text.
  * Returns only relative specifiers (starting with '.').
  */
 function extractRelativeSpecifiers(content: string): string[] {
-  const specs: string[] = [];
-  for (const line of content.split('\n')) {
-    const im = IMPORT_RE.exec(line);
-    if (im?.[1]?.startsWith('.')) specs.push(im[1]);
-    const sideEffect = SIDE_EFFECT_IMPORT_RE.exec(line);
-    if (sideEffect?.[1]?.startsWith('.')) specs.push(sideEffect[1]);
-    const dynamic = DYNAMIC_IMPORT_RE.exec(line);
-    if (dynamic?.[1]?.startsWith('.')) specs.push(dynamic[1]);
-    const rq = REQUIRE_RE.exec(line);
-    if (rq?.[1]?.startsWith('.')) specs.push(rq[1]);
+  const specs = new Set<string>();
+  for (const pattern of [IMPORT_RE, SIDE_EFFECT_IMPORT_RE, DYNAMIC_IMPORT_RE, REQUIRE_RE]) {
+    for (const match of content.matchAll(pattern)) {
+      const spec = match[1];
+      if (spec?.startsWith('.')) specs.add(spec);
+    }
   }
-  return specs;
+  return [...specs];
 }
 
 export const extractRelativeSpecifiersForTest = extractRelativeSpecifiers;
@@ -217,6 +216,12 @@ export class ImportGraph {
   /** Whether graph is stale and needs a rebuild */
   private dirty = true;
 
+  /** Bumped by markDirty(), so a build that was running during an edit does not mark its stale result clean. */
+  private generation = 0;
+
+  /** Builds run one at a time: a second caller waits for the first and then sees its result. */
+  private buildQueue: Promise<void> = Promise.resolve();
+
   /** Warnings from the most recent graph build. */
   private warnings: string[] = [];
 
@@ -228,13 +233,24 @@ export class ImportGraph {
    */
   markDirty(): void {
     this.dirty = true;
+    this.generation += 1;
   }
 
   /**
    * Build (or rebuild) the import graph by scanning all source files under
    * `projectRoot`. Idempotent when not dirty and root hasn't changed.
    */
-  async build(projectRoot: string, readAccessFilter?: ReadAccessFilter): Promise<void> {
+  build(projectRoot: string, readAccessFilter?: ReadAccessFilter): Promise<void> {
+    // Read at the call, not when the build gets its turn: an edit announced
+    // after this call may or may not be in what the scan reads, so the result
+    // stays marked stale.
+    const generation = this.generation;
+    const run = this.buildQueue.then(() => this.buildNow(projectRoot, generation, readAccessFilter));
+    this.buildQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async buildNow(projectRoot: string, generation: number, readAccessFilter?: ReadAccessFilter): Promise<void> {
     if (!readAccessFilter && !this.dirty && this.scannedRoot === projectRoot) return;
 
     const checkpoint = scanCheckpoint();
@@ -290,7 +306,7 @@ export class ImportGraph {
     this.imports = imports;
     this.dependents = dependents;
     this.scannedRoot = projectRoot;
-    this.dirty = readAccessFilter !== undefined;
+    this.dirty = readAccessFilter !== undefined || this.generation !== generation;
     this.warnings = diagnostics.warnings;
   }
 

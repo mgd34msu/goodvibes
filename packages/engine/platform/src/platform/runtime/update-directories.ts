@@ -33,7 +33,7 @@ export interface PreparedNativeUpdateDirectory {
   commit(): void;
   /** Reverse only this handle's completed renames, including a partial commit. */
   restore(): void;
-  /** Keep the outgoing live tree at .previous. Unknown older trees are preserved. */
+  /** Keep the outgoing live tree at .previous. An older marked release is removed; unknown older trees are preserved. */
   finish(): NativeDirectoryFinishResult;
   /** Discard owned staging after restoration. Never silently undo a committed update. */
   dispose(): NativeDirectoryFinishResult;
@@ -362,7 +362,16 @@ function prepare(selected: string, members: readonly TarEntry[] | undefined, opt
       if (closed) return result();
       if (!committed || recoveryRequired) throw new NativeDirectoryUpdateError(recoveryRequired, [work!, claimPath]);
       current();
-      if (previous?.path === join(work!, 'superseded')) preservedPaths.push(previous.path);
+      const superseded = previous?.path === join(work!, 'superseded') ? previous : undefined;
+      if (superseded) {
+        // The outgoing live tree is the one backup this update keeps, so the generation before it is
+        // superseded. A tree carrying our release marker is ours to remove (removeTree re-proves every
+        // entry); anything else, or a removal that is refused, stays and is reported.
+        try {
+          if (previousVersion === undefined) throw new Error('Superseded native tree is not a marked release');
+          removeTree(superseded);
+        } catch { if (superseded.active) preservedPaths.push(superseded.path); }
+      }
       removeEmptyWork(); release(); closed = true; return result();
     },
     preserve() {

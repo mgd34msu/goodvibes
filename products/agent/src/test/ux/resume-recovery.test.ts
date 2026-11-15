@@ -1,120 +1,100 @@
 /**
- * UX Anti-Regression: Resume/Recovery With Active State (v3 §18.5)
+ * UX Anti-Regression: Resume/Recovery With Active State
  *
- * Verifies that recovering a session keeps the runtime state consistent:
- * overlays stay hidden, and session metadata is reconciled.
- *
- * All tests use pure state manipulation, no real I/O, no event bus.
+ * Drives the real runtime store: the session resume-repair event decides whether
+ * recovery is ready, session metadata patches merge without losing identity, and
+ * overlays and the conversation are left alone.
  */
-import { describe, test, expect, beforeEach } from 'bun:test';
-import { createInitialRuntimeState } from '../../runtime/store/state.ts';
-import type { RuntimeState } from '../../runtime/store/state.ts';
+import { describe, test, expect } from 'bun:test';
+import { createRuntimeStore, createDomainDispatch } from '../../runtime/store/index.ts';
 import {
   selectSession,
   selectAnyOverlayVisible,
+  selectConversation,
 } from '../../runtime/store/selectors/index.ts';
-import type { SessionDomainState } from '@/runtime/index.ts';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Fixed timestamp used in test helpers to avoid non-deterministic Date.now() calls. */
-const TEST_TIMESTAMP = 1700000000000;
-
-/** Simulate a suspended state: session status suspended. */
-function buildSuspendedState(activeState: RuntimeState): RuntimeState {
-  return {
-    ...activeState,
-    session: {
-      ...activeState.session,
-      status: 'suspended',
-      revision: activeState.session.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'suspend',
-    },
-  };
+function makeStore() {
+  const store = createRuntimeStore();
+  const dispatch = createDomainDispatch(store);
+  dispatch.syncSessionState({ id: 'sess-1', status: 'suspended', recoveryState: 'loading', isResumed: false }, 'suspend');
+  return { store, dispatch };
 }
-
-/** Simulate Agent session recovery: update session metadata. */
-function applyResume(
-  suspendedState: RuntimeState,
-  snapshot: { session?: Partial<SessionDomainState> } = {},
-): RuntimeState {
-  return {
-    ...suspendedState,
-    session: {
-      ...suspendedState.session,
-      ...(snapshot.session ?? {}),
-      status: 'active',
-      isResumed: true,
-      recoveryState: 'ready',
-      revision: suspendedState.session.revision + 1,
-      lastUpdatedAt: TEST_TIMESTAMP,
-      source: 'resume',
-    },
-  };
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('ux:resume-recovery: resume session', () => {
-  let state: RuntimeState;
+  test('a repair that is safe to resume moves recovery to ready and records the repair', () => {
+    const { store, dispatch } = makeStore();
 
-  beforeEach(() => {
-    state = createInitialRuntimeState();
+    dispatch.dispatchCompactionEvent({
+      type: 'COMPACTION_RESUME_REPAIR',
+      sessionId: 'sess-1',
+      repaired: true,
+      actionsCount: 2,
+      safeToResume: true,
+    });
+
+    const session = selectSession(store.getState());
+    expect(session.recoveryState).toBe('ready');
+    expect(session.wasRepaired).toBe(true);
   });
 
-  describe('overlay state after resume', () => {
-    test('no overlays are visible in initial resumed state', () => {
-      expect(selectAnyOverlayVisible(state)).toBe(false);
+  test('a repair that is not safe to resume leaves recovery where it was', () => {
+    const { store, dispatch } = makeStore();
 
-      const suspended = buildSuspendedState(state);
-      const resumed = applyResume(suspended);
-      expect(selectAnyOverlayVisible(resumed)).toBe(false);
+    dispatch.dispatchCompactionEvent({
+      type: 'COMPACTION_RESUME_REPAIR',
+      sessionId: 'sess-1',
+      repaired: true,
+      actionsCount: 4,
+      safeToResume: false,
     });
+
+    const session = selectSession(store.getState());
+    expect(session.recoveryState).toBe('loading');
+    expect(session.wasRepaired).toBe(true);
   });
 
-  describe('session metadata reconciliation', () => {
-    test('session ID is preserved across resume', () => {
-      const sessionId = state.session.id;
-      const suspended = buildSuspendedState(state);
-      const resumed = applyResume(suspended, { session: { id: sessionId } });
-      expect(selectSession(resumed).id).toBe(sessionId);
+  test('marking the session resumed keeps its id and unrelated fields, and advances the revision', () => {
+    const { store, dispatch } = makeStore();
+    const before = selectSession(store.getState());
+
+    dispatch.syncSessionState({ status: 'active', isResumed: true }, 'resume');
+
+    const after = selectSession(store.getState());
+    expect(after.id).toBe('sess-1');
+    expect(after.status).toBe('active');
+    expect(after.isResumed).toBe(true);
+    expect(after.recoveryState).toBe(before.recoveryState);
+    expect(after.revision).toBeGreaterThan(before.revision);
+    expect(after.source).toBe('resume');
+  });
+
+  test('repeated suspend and resume cycles end in the last state written', () => {
+    const { store, dispatch } = makeStore();
+    for (let i = 0; i < 5; i++) {
+      dispatch.syncSessionState({ status: 'suspended' }, 'suspend');
+      dispatch.syncSessionState({ status: 'active', isResumed: true }, 'resume');
+    }
+
+    const session = selectSession(store.getState());
+    expect(session.status).toBe('active');
+    expect(session.isResumed).toBe(true);
+    expect(session.id).toBe('sess-1');
+  });
+
+  test('resume leaves overlays hidden and the conversation untouched', () => {
+    const { store, dispatch } = makeStore();
+    const conversation = selectConversation(store.getState());
+
+    dispatch.dispatchCompactionEvent({
+      type: 'COMPACTION_RESUME_REPAIR',
+      sessionId: 'sess-1',
+      repaired: false,
+      actionsCount: 0,
+      safeToResume: true,
     });
+    dispatch.syncSessionState({ status: 'active', isResumed: true }, 'resume');
 
-    test('resume revision is greater than suspended revision', () => {
-      const suspended = buildSuspendedState(state);
-      const resumed = applyResume(suspended);
-      expect(selectSession(resumed).revision).toBeGreaterThan(selectSession(suspended).revision);
-    });
-
-    test('source is set to resume after recovery', () => {
-      const resumed = applyResume(buildSuspendedState(state));
-      expect(selectSession(resumed).source).toBe('resume');
-    });
-
-    test('session status transitions to active after resume', () => {
-      const suspended = buildSuspendedState(state);
-      expect(selectSession(suspended).status).toBe('suspended');
-
-      const resumed = applyResume(suspended);
-      expect(selectSession(resumed).status).toBe('active');
-    });
-
-    test('isResumed flag is set after recovery', () => {
-      const resumed = applyResume(buildSuspendedState(state));
-      expect(selectSession(resumed).isResumed).toBe(true);
-    });
-
-    test('multiple resume cycles produce correct final state', () => {
-      let current = state;
-      for (let i = 0; i < 5; i++) {
-        current = buildSuspendedState(current);
-        current = applyResume(current);
-      }
-
-      expect(selectSession(current).isResumed).toBe(true);
-      expect(selectSession(current).status).toBe('active');
-      expect(selectSession(current).revision).toBe(state.session.revision + 10);
-    });
+    expect(selectAnyOverlayVisible(store.getState())).toBe(false);
+    expect(selectConversation(store.getState())).toBe(conversation);
   });
 });

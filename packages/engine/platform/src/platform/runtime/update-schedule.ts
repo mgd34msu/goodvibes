@@ -85,9 +85,14 @@ export class PeriodicUpdateLoop {
     }
   }
 
-  /** One iteration; exposed so tests drive the loop without waiting on real time. */
-  async tick(): Promise<void> {
-    if (this.stopped || this.running) return;
+  /**
+   * One iteration; exposed so tests drive the loop without waiting on real time.
+   * Says what happened: `ran` (a check ran, whatever its result), `already-in-flight`
+   * (another iteration is still running, nothing was started) or `stopped` (the loop is off).
+   */
+  async tick(): Promise<'ran' | 'already-in-flight' | 'stopped'> {
+    if (this.stopped) return 'stopped';
+    if (this.running) return 'already-in-flight';
     this.running = true;
     try {
       this.deferred = (await this.options.runCheck()) === 'deferred';
@@ -98,6 +103,7 @@ export class PeriodicUpdateLoop {
       this.running = false;
       this.scheduleNext(this.deferred ? this.busyRetryMs : this.checkIntervalMs);
     }
+    return 'ran';
   }
 
   private scheduleNext(delayMs: number): void {

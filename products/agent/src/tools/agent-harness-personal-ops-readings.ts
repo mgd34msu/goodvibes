@@ -34,16 +34,54 @@ async function withPersonalOpsReading<S, T>(source: S, options: CatalogRankingOp
 
 export type DiscoveryLane = 'inbox' | 'calendar' | 'tasks' | 'reminders' | 'approvals' | 'automation' | 'schedules';
 
+/**
+ * Classic lane membership, by explicit method id. The lane word is not searched for
+ * in a method's text: the schedule methods say "schedule", never "reminders", so a
+ * word match leaves the reminders lane empty. An entry ending in a dot is a prefix.
+ */
+const CLASSIC_LANE_METHODS: Readonly<Record<DiscoveryLane, readonly string[]>> = {
+  inbox: ['email.', 'channels.inbox.'],
+  calendar: ['calendar.'],
+  tasks: ['tasks.', 'projectPlanning.workPlan.task'],
+  reminders: ['automation.schedules.'],
+  approvals: ['approvals.'],
+  automation: ['automation.'],
+  schedules: ['automation.schedules.'],
+};
+
+/**
+ * Methods the lane's own tools dispatch, whatever a reading or the lane word says.
+ * agent_schedule_edit calls automation.jobs.update, so the reminders lane must see it.
+ */
+export const LANE_DEPENDENCY_METHODS: Readonly<Partial<Record<DiscoveryLane, readonly string[]>>> = {
+  reminders: ['automation.jobs.update'],
+};
+
+/**
+ * `unassessed` receives the entries a reading could not settle (not acted on, or
+ * uncertain). They are left out of the lane rather than failing the whole lane,
+ * and the caller reports how many there were.
+ */
 export async function personalOpsLaneMembers<T>(entries: readonly T[], lane: DiscoveryLane, describe: (entry: T) => {
   readonly id: string; readonly description: string; readonly evidence: unknown;
-}, options: CatalogRankingOptions): Promise<readonly T[]> {
+}, options: CatalogRankingOptions, unassessed?: (entries: readonly T[]) => void,
+  /** False when the entry ids are not contract method ids (connector server names): Classic then keeps every entry. */
+  idsAreMethods = true): Promise<readonly T[]> {
   if (!entries.length) return [];
   const result = await rankHarnessCatalog(entries, lane, describe, `agent.personal-ops.lane-member:${lane}`,
     { ...options, requirePreservedSource: true }, 'agent.personal-ops.lane-member');
-  if (result.judgments.some(({ reading }) => reading.outcome !== 'act' || reading.verdict === 'uncertain'))
-    throw new ToolInputProjectionError('held');
-  if (result.provenance === 'classic') return result.matches.map(({ entry }) => entry);
-  return result.matches.filter(({ judgment }) => judgment?.reading.outcome === 'act' && judgment?.reading.verdict === 'yes').map(({ entry }) => entry);
+  if (result.provenance === 'classic') {
+    if (!idsAreMethods) return entries;
+    const prefixes = CLASSIC_LANE_METHODS[lane];
+    return entries.filter((entry) => { const id = describe(entry).id; return prefixes.some((prefix) => id.startsWith(prefix)); });
+  }
+  const members: T[] = [], unsettled: T[] = [];
+  for (const { entry, judgment } of result.matches) {
+    if (judgment?.reading.outcome !== 'act' || judgment.reading.verdict === 'uncertain') unsettled.push(entry);
+    else if (judgment.reading.verdict === 'yes') members.push(entry);
+  }
+  if (unsettled.length) unassessed?.(unsettled);
+  return members;
 }
 
 export interface PersonalOpsToolContract {

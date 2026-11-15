@@ -36,6 +36,8 @@ function resolveBrowserBaseUrl(baseUrl?: string): string {
   );
 }
 
+export { forSession } from './companion-realtime.js';
+
 /**
  * Create a GoodVibes platform instance for browser environments.
  *
@@ -54,10 +56,8 @@ function resolveBrowserBaseUrl(baseUrl?: string): string {
  *   authToken: sessionStorage.getItem('gv-token') ?? undefined,
  * });
  *
- * const agents = await platform.operator.agents.list();
+ * const sessions = await platform.operator.sessions.list();
  */
-export { forSession } from './companion-realtime.js';
-
 export function createBrowserGoodVibesPlatform(
   options: BrowserGoodVibesPlatformOptions = {},
 ): GoodVibesPlatform {

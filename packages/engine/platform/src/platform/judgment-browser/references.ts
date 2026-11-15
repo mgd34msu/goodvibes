@@ -9,6 +9,9 @@ export interface BrowserJudgmentReferenceSource {
   readonly mayRead: (principal: AuthenticatedPrincipal) => boolean;
 }
 const held = (): never => { throw new BrowserJudgmentError('JUDGMENT_REFERENCE_HELD'); };
+/** A principal never holds more than this many live references: a failing loop or a hostile client fills its own slots, not the shared ones. */
+const PER_PRINCIPAL_LIMIT = 8;
+const TOTAL_LIMIT = 64;
 type OwnedReference = BrowserJudgmentReferenceSource & { readonly identity: symbol; readonly lifetime: AbortController };
 
 /** Ephemeral owned references. No HTTP mint endpoint and no persistence or implicit access grant. */
@@ -27,11 +30,11 @@ export class BrowserJudgmentReferences {
     try {
       const { principalId, battery, revision, expiresAt, assertCurrent, mayRead } = entry;
       if (this.#closed || !principalId || !revision || !Number.isFinite(now) || !Number.isFinite(expiresAt)
-        || expiresAt <= now || expiresAt > now + 300_000 || this.#entries.size >= 64
+        || expiresAt <= now || expiresAt > now + 300_000 || this.#full(principalId)
         || typeof mayRead !== 'function' || typeof assertCurrent !== 'function') return held();
       captured = { principalId, battery, revision, expiresAt, assertCurrent, mayRead };
       requireSynchronousAssertion(() => assertCurrent.call(entry), 'JUDGMENT_REFERENCE_HELD');
-      if (this.#closed || this.#entries.size >= 64) return held();
+      if (this.#closed || this.#full(principalId)) return held();
       // Read the supplied snapshot exactly once, only after admission and the
       // source assertion, within the same value-free failure boundary.
       snapshot = snapshotJudgmentInput(entry.snapshot);
@@ -42,8 +45,8 @@ export class BrowserJudgmentReferences {
     const admittedAt = this.now();
     // Supplied callbacks and input accessors may have closed or filled the
     // store. No ownership is acquired until after those callbacks finish.
-    if (this.#closed || this.#entries.size >= 64 || this.#entries.has(id)
-      || !Number.isFinite(admittedAt) || expiresAt <= admittedAt) return held();
+    if (this.#closed || this.#entries.has(id) || !Number.isFinite(admittedAt) || expiresAt <= admittedAt
+      || !this.#makeRoom(principalId)) return held();
     const identity = Symbol();
     this.#entries.set(id, { principalId, battery, revision, expiresAt, snapshot, identity, lifetime: new AbortController(),
       assertCurrent: assertCurrent.bind(entry), mayRead: mayRead.bind(entry),
@@ -59,6 +62,23 @@ export class BrowserJudgmentReferences {
       timer.unref?.();
     } catch { this.revoke(id); return held(); }
     return id;
+  }
+
+  /** True when no slot can be freed for this principal: the store is full of other principals' references. */
+  #full(principalId: string): boolean {
+    if (this.#entries.size < TOTAL_LIMIT) return false;
+    for (const entry of this.#entries.values()) if (entry.principalId === principalId) return false;
+    return true;
+  }
+
+  /** Frees the principal's oldest references so that, with the new one, it holds at most its limit. */
+  #makeRoom(principalId: string): boolean {
+    const own = [...this.#entries].filter(([, entry]) => entry.principalId === principalId);
+    let drop = Math.max(0, own.length - (PER_PRINCIPAL_LIMIT - 1));
+    // A full store still yields one slot when this principal holds one.
+    if (this.#entries.size - drop >= TOTAL_LIMIT && own.length > drop) drop += 1;
+    for (const [id] of own.slice(0, drop)) this.revoke(id);
+    return this.#entries.size < TOTAL_LIMIT;
   }
 
   resolve<S>(id: string, currentPrincipal: () => AuthenticatedPrincipal, battery: BrowserJudgmentBatteryId, parse: (value: unknown) => S): BrowserJudgmentResolvedInput<S> {

@@ -44,8 +44,16 @@ export interface BinaryTarget {
   /** Native-addon filename, e.g. `vec0.so` / `vec0.dylib`. */
   readonly nativeAddonFile?: string;
   /** Stage an ordinary pinned Bun interpreter beside each compiled Linux artifact. */
-  readonly capturedBunRuntime?: '1.3.14';
+  readonly capturedBunRuntime?: typeof CAPTURED_BUN_RUNTIME_VERSION;
 }
+
+/**
+ * The one Bun version a compiled artifact may carry as its captured runtime.
+ * Moving it is a deliberate act: it must follow root `engines.bun`, and each
+ * downloadable distribution's sha256 and integrity in captured-bun-runtime.ts
+ * and the license notice in bun-runtime-notices.ts must be reviewed with it.
+ */
+export const CAPTURED_BUN_RUNTIME_VERSION = '1.3.14';
 
 /** build-binaries parameters. */
 export interface BuildConfig {
@@ -111,6 +119,8 @@ export interface PublishPackageConfig {
   readonly forbiddenTarballPrefixes: readonly string[];
   /** Hard cap on unpacked tarball size in bytes. */
   readonly maxTarballBytes: number;
+  /** Bin shims that must exist, be executable and start with the shebang. Checked when listed. */
+  readonly bins?: readonly { readonly name: string; readonly path: string; readonly shebang: string }[];
 }
 
 /** The complete repo config. All sections are optional so a repo declares only the tools it uses. */
@@ -172,7 +182,7 @@ const BinaryTargetSchema = z.object({
   daemonArtifact: z.string().optional(),
   nativeAddonPackage: z.string().optional(),
   nativeAddonFile: z.string().optional(),
-  capturedBunRuntime: z.literal('1.3.14').optional(),
+  capturedBunRuntime: z.literal(CAPTURED_BUN_RUNTIME_VERSION).optional(),
 }).catchall(z.unknown());
 
 const BuildConfigSchema = z.object({
@@ -211,6 +221,7 @@ const PublishPackageConfigSchema = z.object({
   requiredTarballPaths: z.array(z.string()),
   forbiddenTarballPrefixes: z.array(z.string()),
   maxTarballBytes: z.number(),
+  bins: z.array(z.object({ name: z.string(), path: z.string(), shebang: z.string() }).catchall(z.unknown())).optional(),
 }).catchall(z.unknown());
 
 const ToolchainConfigSchema = z.object({

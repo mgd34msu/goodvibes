@@ -21,12 +21,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   AGENT_DAEMON_BUILD_FLOOR,
   DaemonBuildGuard,
+  createDaemonAdoptionGate,
   readDaemonStatusPayload,
 } from '../../runtime/daemon-build-compatibility.ts';
 
 describe('the floor this product declares', () => {
 
-  test('a daemon below 1.28.0 is refused adoption, through the constant this build actually declares', () => {
+  test('a 3.x daemon older than the verbs this build uses is refused adoption, through the declared constant', () => {
     const notices: string[] = [];
     const guard = new DaemonBuildGuard({
       floor: AGENT_DAEMON_BUILD_FLOOR,
@@ -34,20 +35,20 @@ describe('the floor this product declares', () => {
     });
 
     // The question the adoption path actually asks.
-    const verdict = guard.judgeForAdoption({ status: 'running', version: '1.27.1' });
+    const verdict = guard.judgeForAdoption({ status: 'running', version: '3.1.1' });
 
     expect(verdict.status).toBe('daemon-update-required');
-    expect(verdict.message).toContain('1.27.1');
-    expect(verdict.message).toContain('1.28.0');
+    expect(verdict.message).toContain('3.1.1');
+    expect(verdict.message).toContain('3.1.2');
     // Refused, not merely noted: this is what leaves the spine local.
     expect(guard.mayUseDaemonCapabilities()).toBe(false);
     expect(notices).toHaveLength(1);
   });
 
-  test('a daemon at or above 1.28.0 is adopted, through the constant this build actually declares', () => {
+  test('a daemon at the floor is adopted, through the declared constant', () => {
     const guard = new DaemonBuildGuard({ floor: AGENT_DAEMON_BUILD_FLOOR });
 
-    const verdict = guard.judgeForAdoption({ status: 'running', version: '1.28.0' });
+    const verdict = guard.judgeForAdoption({ status: 'running', version: '3.1.2' });
 
     expect(verdict.status).toBe('ok');
     expect(guard.mayUseDaemonCapabilities()).toBe(true);
@@ -243,20 +244,18 @@ describe('reading the daemon build off /status', () => {
 });
 
 /**
- * The composed gate: /status read + verdict -> adopt or refuse.
- *
- * Mirrors services.mayAdoptDaemonBuild rather than constructing the whole
- * services graph, the same way daemon-receipts.test.ts mirrors
- * services.consumeDaemonReceipts. What it proves is the composition the
- * reconciler depends on: which readings refuse, and which do not.
+ * The composed gate services.ts uses: /status read + verdict -> adopt or refuse.
+ * What it proves is the composition the reconciler depends on: which readings
+ * refuse, and which do not.
  */
-describe('the adoption gate as services composes it', () => {
+describe('the adoption gate services composes', () => {
+  const connection = { baseUrl: 'http://127.0.0.1:3421', token: null };
   function gate(guard: DaemonBuildGuard, fetchImpl: typeof fetch) {
-    return async (): Promise<boolean> => {
-      const status = await readDaemonStatusPayload({ baseUrl: 'http://127.0.0.1:3421', token: null }, { fetchImpl });
-      if (status === null) return true;
-      return guard.judgeForAdoption(status, 'http://127.0.0.1:3421').status !== 'daemon-update-required';
-    };
+    return createDaemonAdoptionGate({
+      resolveConnection: () => connection,
+      readStatus: (c) => readDaemonStatusPayload(c, { fetchImpl }),
+      guard,
+    });
   }
 
   const respond = (body: unknown): typeof fetch => (async () => new Response(JSON.stringify(body), {
@@ -270,16 +269,16 @@ describe('the adoption gate as services composes it', () => {
       onDaemonUpdateRequired: (verdict) => { notices.push(verdict.message); },
     });
 
-    expect(await gate(guard, respond({ status: 'running', version: '1.27.1' }))()).toBe(false);
+    expect(await gate(guard, respond({ status: 'running', version: '3.1.1' }))()).toBe(false);
 
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain('1.27.1');
-    expect(notices[0]).toContain('1.28.0');
+    expect(notices[0]).toContain('3.1.1');
+    expect(notices[0]).toContain('3.1.2');
   });
 
   test('a daemon at the floor adopts', async () => {
     const guard = new DaemonBuildGuard({ floor: AGENT_DAEMON_BUILD_FLOOR });
-    expect(await gate(guard, respond({ status: 'running', version: '1.28.0' }))()).toBe(true);
+    expect(await gate(guard, respond({ status: 'running', version: '3.1.2' }))()).toBe(true);
   });
 
   test('an unreachable daemon adopts: a dropped read is not evidence of an old build', async () => {
@@ -300,8 +299,27 @@ describe('the adoption gate as services composes it', () => {
   test('an updated daemon flips the gate back to adopt without restarting the process', async () => {
     const guard = new DaemonBuildGuard({ floor: AGENT_DAEMON_BUILD_FLOOR });
 
-    expect(await gate(guard, respond({ version: '1.27.1' }))()).toBe(false);
-    expect(await gate(guard, respond({ version: '1.28.3' }))()).toBe(true);
+    expect(await gate(guard, respond({ version: '3.1.1' }))()).toBe(false);
+    expect(await gate(guard, respond({ version: '3.2.1' }))()).toBe(true);
     expect(guard.mayUseDaemonCapabilities()).toBe(true);
+  });
+});
+
+describe('the adoption gate reads the connection it was given', () => {
+  test('the status read goes to the resolved base URL, and the gate refuses on the version it returned', async () => {
+    const urls: string[] = [];
+    const guard = new DaemonBuildGuard({ floor: AGENT_DAEMON_BUILD_FLOOR });
+    const fetchImpl = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ version: '3.1.1' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const gate = createDaemonAdoptionGate({
+      resolveConnection: () => ({ baseUrl: 'http://daemon.test:9', token: null }),
+      readStatus: (c) => readDaemonStatusPayload(c, { fetchImpl }),
+      guard,
+    });
+
+    expect(await gate()).toBe(false);
+    expect(urls).toEqual(['http://daemon.test:9/status']);
   });
 });

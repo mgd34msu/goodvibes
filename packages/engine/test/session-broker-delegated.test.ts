@@ -130,11 +130,14 @@ describe('host-private delegated broker admission', () => {
     await restored.start();
     const row = restored.getInputs(f.input.sessionId!)[0]!;
     expect(row.id).toBe(selected.submission.input.id);
-    expect(row.state).toBe('queued');
+    // Its binding died with the previous process, so nothing could ever
+    // complete it; it ends instead of keeping the session busy forever.
+    expect(row.state).toBe('cancelled');
+    expect(restored.getSession(row.sessionId)?.pendingInputCount).toBe(0);
     expect(restored.getInputsSince(row.sessionId)).toEqual([]);
     expect(await restored.markInputDelivered(row.sessionId, row.id, { consumed: true })).toBeNull();
     await restored.bindAgent(row.sessionId, 'new-agent');
-    expect(restored.getInputs(row.sessionId)[0]!.state).toBe('queued');
+    expect(restored.getInputs(row.sessionId)[0]!.state).toBe('cancelled');
     expect(f.owner.resolver.reference({ sessionId: row.sessionId, inputId: row.id })).toBeNull();
     await expect(selected.complete(f.receipt())).rejects.toThrow('no longer current');
   });

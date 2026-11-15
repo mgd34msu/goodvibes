@@ -14,7 +14,7 @@ function fixture(bytes) {
   return { root, baseline, selected };
 }
 for (const size of [0, 1, 65_536, 65_537, 196_657]) {
-  test(`direct byte comparison accepts an unchanged ${size}-byte binary without retaining it in the report`, async () => {
+  test(`direct byte comparison accepts an unchanged ${size}-byte binary and reports only its size`, async () => {
     const f = fixture(Buffer.alloc(size, 173));
     assert.equal(await assertLocalPayloadEqual(f.baseline, f.selected, 'Fixture payload'), size);
   });

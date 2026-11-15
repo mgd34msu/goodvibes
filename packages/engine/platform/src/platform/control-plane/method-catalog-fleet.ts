@@ -178,7 +178,7 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'fleet.attempts.pick',
     title: 'Pick a Best-of-N Winner',
-    description: 'Accept one attempt as the winner of its best-of-N group: its worktree branch is merged through the existing sequential integration lane and every losing sibling\'s worktree is cleaned. The winner must be a held (passed) candidate of a group whose siblings are all terminal, an unknown/not-ready group or an invalid winner is an honest 409, never a partial merge.',
+    description: 'Accept one attempt as the winner of its best-of-N group. Without `confirm: true` nothing is merged or cleaned: the call returns `applied: false` and `requiresConfirm: true` with the group\'s candidates as a preview, so check `applied` before reporting a winner as picked. With `confirm: true` its worktree branch is merged through the existing sequential integration lane and every losing sibling\'s worktree is cleaned. The winner must be a held (passed) candidate of a group whose siblings are all terminal, an unknown/not-ready group or an invalid winner is an honest 409, never a partial merge.',
     category: 'fleet',
     scopes: ['write:fleet'],
     dangerous: true,
@@ -189,9 +189,9 @@ export const builtinGatewayFleetMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'fleet.attempts.judge',
     title: 'Propose a Best-of-N Winner (Model Judgment)',
-    description: 'Run the optional judge model over a best-of-N group\'s candidates and PROPOSE a winner, with reasons. The output is explicitly model judgment (scoredBy:"model"), it never auto-picks unless the source item opted into auto-accept; a human still confirms via fleet.attempts.pick. An engine with no judge configured returns an honest 501.',
+    description: 'Run the optional judge model over a best-of-N group\'s candidates (a paid model call that also records the proposal on the group) and PROPOSE a winner, with reasons. The output is explicitly model judgment (scoredBy:"model"), it never auto-picks unless the source item opted into auto-accept; a human still confirms via fleet.attempts.pick. An engine with no judge configured returns an honest 501.',
     category: 'fleet',
-    scopes: ['read:fleet'],
+    scopes: ['write:fleet'],
     transport: ['ws'],
     inputSchema: FLEET_ATTEMPTS_JUDGE_INPUT_SCHEMA,
     outputSchema: FLEET_ATTEMPTS_JUDGE_OUTPUT_SCHEMA,

@@ -97,15 +97,16 @@ describe('runProviderKeyIntake: selection completes after intake', () => {
   test('stores the key, re-registers live, then runs the original selection exactly once', async () => {
     const bag = makeDeps();
     let completed = 0;
-    runProviderKeyIntake('acme', bag.deps, () => { completed += 1; });
+    let markSettled: () => void = () => {};
+    const settled = new Promise<void>((resolve) => { markSettled = resolve; });
+    runProviderKeyIntake('acme', bag.deps, () => { completed += 1; markSettled(); });
 
     // The prompt opened; selection has not completed yet.
     expect(bag.begun).toHaveLength(1);
     expect(completed).toBe(0);
 
     bag.begun[0]!.onSubmit('sk-secret-value');
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled;
 
     expect(bag.setCalls).toEqual([
       // Daemon scope, not user scope: the daemon is the process that runs the

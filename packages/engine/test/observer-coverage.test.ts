@@ -1,21 +1,12 @@
 /**
- * Coverage backfill for packages/platform/src/observer/index.ts
- *
- * Targets uncovered lines 147-165:
- * - createConsoleObserver debug-level: onTransportActivity, onEvent actually log
- * - createConsoleObserver onError actually logs
- * - createOpenTelemetryObserver: onError, onTransportActivity (recv with durationMs), onEvent
+ * Console observer output and invokeObserver error isolation
+ * (platform/src/observer/index.ts). The OpenTelemetry observer is covered by
+ * observer-otel.test.ts.
  */
-import { describe, expect, test, mock } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import {
   createConsoleObserver,
-  createOpenTelemetryObserver,
   invokeObserver,
-} from '../platform/src/observer/index.js';
-import type {
-  OtelTracer,
-  OtelMeter,
-  OtelSpan,
 } from '../platform/src/observer/index.js';
 import { GoodVibesError } from '../errors/src/index.js';
 import { captureConsole } from './_helpers/test-timeout.js';
@@ -101,150 +92,6 @@ describe('createConsoleObserver: debug level', () => {
     } finally {
       capture.restore();
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createOpenTelemetryObserver, all callback paths
-// ---------------------------------------------------------------------------
-
-function makeMockOtel(): {
-  tracer: OtelTracer;
-  meter: OtelMeter;
-  spans: Array<{ name: string; attrs: Record<string, unknown>; ended: boolean; exceptions: unknown[]; status?: unknown }>;
-  counters: Array<{ name: string; value: number; attrs?: Record<string, unknown> }>;
-  histRecords: Array<{ value: number; attrs?: Record<string, unknown> }>;
-} {
-  const spans: Array<{ name: string; attrs: Record<string, unknown>; ended: boolean; exceptions: unknown[]; status?: unknown }> = [];
-  const counters: Array<{ name: string; value: number; attrs?: Record<string, unknown> }> = [];
-  const histRecords: Array<{ value: number; attrs?: Record<string, unknown> }> = [];
-
-  function makeSpan(name: string): OtelSpan {
-    const entry = { name, attrs: {} as Record<string, unknown>, ended: false, exceptions: [] as unknown[], status: undefined as unknown };
-    spans.push(entry);
-    return {
-      setAttribute(key, value) { entry.attrs[key] = value; return this; },
-      setStatus(s) { entry.status = s; return this; },
-      recordException(e) { entry.exceptions.push(e); return this; },
-      end() { entry.ended = true; },
-    };
-  }
-
-  const tracer: OtelTracer = {
-    startSpan: (name) => makeSpan(name),
-    startActiveSpan: (name, fn) => {
-      const span = makeSpan(name);
-      return fn(span) as ReturnType<typeof fn>;
-    },
-  };
-
-  const meter: OtelMeter = {
-    createCounter: (name) => ({
-      add: (value, attrs) => { counters.push({ name, value, ...(attrs !== undefined ? { attrs } : {}) }); },
-    }),
-    createHistogram: (_name) => ({
-      record: (value, attrs) => { histRecords.push({ value, ...(attrs !== undefined ? { attrs } : {}) }); },
-    }),
-  };
-
-  return { tracer, meter, spans, counters, histRecords };
-}
-
-describe('createOpenTelemetryObserver: onError', () => {
-  test('onError increments error counter and ends span with ERROR status', () => {
-    const { tracer, meter, spans, counters } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    const err = new GoodVibesError('something failed', { category: 'rate_limit' });
-    obs.onError?.(err);
-    expect(counters.some((c) => c.name === 'platform.errors' && c.value === 1)).toBe(true);
-    const errSpan = spans.find((s) => s.name === 'platform.error');
-    expect(errSpan?.name).toBe('platform.error');
-    expect(errSpan!.ended).toBe(true);
-    expect(errSpan!.attrs['platform.error.kind']).toBe('rate-limit');
-    expect(errSpan!.attrs['platform.error.category']).toBe('rate_limit');
-    expect(errSpan!.attrs['platform.error.recoverable']).toBe(false);
-    expect(errSpan!.exceptions).toContain(err);
-    expect((errSpan!.status as { code: number }).code).toBe(2); // SPAN_STATUS_ERROR
-  });
-});
-
-describe('createOpenTelemetryObserver: onTransportActivity', () => {
-  test('recv with durationMs records histogram entry', () => {
-    const { tracer, meter, histRecords } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    obs.onTransportActivity?.({
-      direction: 'recv',
-      url: 'http://localhost/api',
-      kind: 'http',
-      status: 200,
-      durationMs: 55,
-    });
-    expect(histRecords).toHaveLength(1);
-    expect(histRecords[0]!.value).toBe(55);
-    expect((histRecords[0]!.attrs as Record<string, unknown>)['kind']).toBe('http');
-    expect((histRecords[0]!.attrs as Record<string, unknown>)['status']).toBe(200);
-  });
-
-  test('recv without durationMs does NOT record histogram entry', () => {
-    const { tracer, meter, histRecords } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    obs.onTransportActivity?.({
-      direction: 'recv',
-      url: 'http://localhost/api',
-      kind: 'http',
-    });
-    expect(histRecords).toHaveLength(0);
-  });
-
-  test('send direction is skipped (does not record histogram)', () => {
-    const { tracer, meter, histRecords } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    obs.onTransportActivity?.({
-      direction: 'send',
-      url: 'http://localhost/api',
-      kind: 'http',
-      durationMs: 10,
-    });
-    expect(histRecords).toHaveLength(0);
-  });
-
-  test('recv without status records histogram without status attribute', () => {
-    const { tracer, meter, histRecords } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    obs.onTransportActivity?.({
-      direction: 'recv',
-      url: 'http://localhost/api',
-      kind: 'sse',
-      durationMs: 100,
-    });
-    expect(histRecords).toHaveLength(1);
-    expect((histRecords[0]!.attrs as Record<string, unknown>)['kind']).toBe('sse');
-    expect('status' in (histRecords[0]!.attrs ?? {})).toBe(false);
-  });
-});
-
-describe('createOpenTelemetryObserver: onEvent', () => {
-  test('onEvent is a no-op (does not throw, makes no span)', () => {
-    const { tracer, meter, spans } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    const initialSpans = spans.length;
-    expect(() => obs.onEvent?.({ type: 'runtime.turn.start' } as unknown as Parameters<NonNullable<typeof obs.onEvent>>[0])).not.toThrow();
-    // onEvent is intentionally a no-op, no new spans
-    expect(spans.length).toBe(initialSpans);
-  });
-});
-
-describe('createOpenTelemetryObserver: onAuthTransition', () => {
-  test('fires auth counter and span on transition', () => {
-    const { tracer, meter, spans, counters } = makeMockOtel();
-    const obs = createOpenTelemetryObserver(tracer, meter);
-    obs.onAuthTransition?.({ from: 'anonymous', to: 'token', reason: 'login' });
-    expect(counters.some((c) => c.name === 'platform.auth.transitions' && c.value === 1)).toBe(true);
-    const authSpan = spans.find((s) => s.name === 'platform.auth.transition');
-    expect(authSpan?.ended).toBe(true);
-    expect(authSpan?.attrs['platform.auth.from']).toBe('anonymous');
-    expect(authSpan?.attrs['platform.auth.to']).toBe('token');
-    expect(authSpan?.attrs['platform.auth.reason']).toBe('login');
   });
 });
 

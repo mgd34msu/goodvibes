@@ -38,6 +38,7 @@
  */
 import { parseMoneyAmount } from '../config/money-value.js';
 import { minorUnitExponent } from './money-parsing.js';
+import { DEFAULT_MARKETPLACE_LISTING_THRESHOLDS } from './marketplace-listing.js';
 import { merchantPolicyFromConfig, type MerchantPolicy } from './merchant-recourse.js';
 import { parseCurrencyCode, type CurrencyCode, type ShippingTier } from './types.js';
 import type { BudgetLimits } from './budget.js';
@@ -100,10 +101,9 @@ function readTier(config: PaymentsConfigReader): ShippingTier {
  * Whether the CVV is stored, which decides whether purchasing can be
  * unattended at all.
  *
- * `'prompt'` means every purchase stops and waits for a human to type it, the
- * veto window still runs, but nothing completes while the owner is away. Exposed here
- * so the daemon can report that honestly rather than a purchase mysteriously
- * hanging.
+ * `'prompt'` stores no CVV and there is no place to type one at purchase time yet,
+ * so every purchase is refused as having no usable card. Exposed here so the daemon
+ * can report that honestly rather than a purchase mysteriously failing.
  */
 export function readCvvHandling(config: PaymentsConfigReader): 'stored' | 'prompt' {
   return readString(config, 'payments.cvvHandling', 'stored') === 'prompt' ? 'prompt' : 'stored';
@@ -192,7 +192,7 @@ export function readMerchantPolicy(config: PaymentsConfigReader): MerchantPolicy
   return merchantPolicyFromConfig({
     majorRetailersAdditional: readString(config, 'payments.majorRetailersAdditional', ''),
     majorRetailersExcluded: readString(config, 'payments.majorRetailersExcluded', ''),
-    ebayMinSellerFeedbackCount: readInteger(config, 'payments.ebayMinSellerFeedbackCount', 0),
-    ebayMinSellerPositivePercent: readInteger(config, 'payments.ebayMinSellerPositivePercent', 0),
+    ebayMinSellerFeedbackCount: readInteger(config, 'payments.ebayMinSellerFeedbackCount', DEFAULT_MARKETPLACE_LISTING_THRESHOLDS.minSellerFeedbackCount),
+    ebayMinSellerPositivePercent: readInteger(config, 'payments.ebayMinSellerPositivePercent', DEFAULT_MARKETPLACE_LISTING_THRESHOLDS.minSellerPositivePercent),
   });
 }

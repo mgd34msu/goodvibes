@@ -23,7 +23,7 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 const SCAN_DELAY_MS = 2000;
 
 export interface McpSuggestionScanOptions {
-  readonly mcpRegistry: Pick<McpRegistry, 'serverNames'>;
+  readonly mcpRegistry: Pick<McpRegistry, 'serverNames' | 'disconnectAll'>;
   readonly systemMessageRouter: { low(message: string): void };
   readonly requestRender: () => void;
   readonly shellPaths: Omit<Parameters<typeof scanMcpServers>[0], 'surfaceRoot'>;
@@ -31,7 +31,8 @@ export interface McpSuggestionScanOptions {
 }
 
 export interface McpSuggestionScanHandle {
-  stop(): void;
+  /** Cancels the scan and releases servers that were started on first use; await it at shutdown. */
+  stop(): Promise<void>;
 }
 
 /**
@@ -70,12 +71,16 @@ export function scheduleMcpSuggestionScanOnFirstUse(
   (timer as unknown as { unref?: () => void }).unref?.();
 
   return {
-    stop: (): void => {
+    stop: (): Promise<void> => {
       stopped = true;
       if (timer) {
         clearTimeout(timer);
         timer = null;
       }
+      // Servers are started lazily on first use; nothing else owns their stdio children at shutdown.
+      return options.mcpRegistry.disconnectAll().catch((error: unknown) => {
+        logger.warn('MCP disconnect at shutdown failed', { error: summarizeError(error) });
+      });
     },
   };
 }

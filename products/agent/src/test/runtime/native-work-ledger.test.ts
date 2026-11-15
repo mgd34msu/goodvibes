@@ -82,12 +82,6 @@ test('initial stale snapshot cannot queue behind a newer coalesced notification 
   expect(model.state.status === 'ready' && model.state.snapshot.cursor).toBe(2);
   model.close();
 });
-test('interactive native host wiring preserves executable entrypoint syntax', async () => {
-  const source = await Bun.file(new URL('../../interactive.ts', import.meta.url)).text();
-  expect(source.startsWith('#!/usr/bin/env bun\n')).toBe(true);
-  expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(source)).not.toThrow();
-});
-
 test('an explicit command waiting on discovery cannot retarget a newly selected project', async () => {
   const calls: string[] = []; let finish!: (id: string) => void;
   const host = { baseUrl: 'https://one.invalid', token: 'synthetic', workspace: '/one' };

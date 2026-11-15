@@ -32,9 +32,22 @@ export class PauseController {
   private readonly paused = new Set<string>();
   private readonly resumeWaiters = new Map<string, Array<() => void>>();
 
-  /** Register a job. Returns a deregister fn. A job registered while paused stays paused. */
+  private pressureProbe: (() => string | undefined) | undefined;
+
+  /**
+   * Install the question "is memory pressure holding jobs paused right now?",
+   * answered with the pause reason or undefined. A job registered after pressure
+   * began is paused on arrival instead of running until the next tier change.
+   */
+  setPressureProbe(probe: () => string | undefined): void {
+    this.pressureProbe = probe;
+  }
+
+  /** Register a job. Returns a deregister fn. A job registered while pressure holds jobs paused starts paused. */
   register(job: PausableJob): () => void {
     this.jobs.set(job.id, job);
+    const reason = this.pressureProbe?.();
+    if (reason !== undefined) this.pauseOne(job, reason);
     return () => {
       this.jobs.delete(job.id);
       this.paused.delete(job.id);

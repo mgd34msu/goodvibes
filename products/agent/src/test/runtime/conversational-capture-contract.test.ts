@@ -9,13 +9,13 @@
  * account.
  *
  * Both halves are pinned here: the capture contract the turn is given, and the
- * boundary it is held to. Modelled on the platform's
+ * boundary stated in the policy text it is held to (the policy sentence is the
+ * only statement of that boundary, so those tests are labelled prompt-contract pins). Modelled on the platform's
  * test/personal-information-capture.test.ts, same fake-port shape, same
  * insistence that each reason the capture could not have happened gets its own
  * test so none of them come back quietly.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
+import { describe, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import type { OccasionsGatewayInvoke } from '../../agent/occasions-gateway.ts';
@@ -31,21 +31,8 @@ import {
   resolveAgentTurnCaptureAuthority,
 } from '../../runtime/agent-conversational-capture.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from '../../runtime/agent-operator-policy.ts';
-import {
-  installAgentPlatformBoundaryGuard,
-  isGoodVibesPlatformSourcePath,
-  ownerAskedAboutPlatformSource,
-  validatePlatformBoundaryForAgentPolicy,
-} from '../../tools/agent-platform-boundary-policy.ts';
 import { registerAgentOccasionsTool } from '../../tools/agent-occasions-tool.ts';
 import { registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
-
-/** The itinerary as the agent actually found it in his mail. */
-const ITINERARY_DETAILS = [
-  'confirmation B79YKY',
-  'Southwest flight 995 DAL 07:55 to MSY 09:20 on Thu Aug 06',
-  'return flight 3175 MSY 15:40 to DAL 17:10 on Sun Aug 09',
-];
 
 /** A stand-in tool that records the args it was called with and always succeeds. */
 function stubTool(name: string): Tool & { calls: unknown[] } {
@@ -65,24 +52,6 @@ function stubTool(name: string): Tool & { calls: unknown[] } {
   return tool as unknown as Tool & { calls: unknown[] };
 }
 
-
-// Authored semantic answers; the live battery owns language qualification.
-const requestedSourceMessages = new Set([
-  'read /home/x/Projects/goodvibes/packages/engine/platform/src/a.ts', 'show me the goodvibes platform source',
-  'go fix the daemon', 'look at the tui repo', 'read src/main.ts in goodvibes-agent',
-  'show me how the platform does this', 'fix the goodvibes tui source',
-  String.raw`C:\project\node_modules\@goodvibes-jev\engine\platform\index.js`,
-  String.raw`C:\project\node_modules\@goodvibes-jev\engine\src\index.ts`,
-]);
-let originalPort: ReturnType<typeof installJudgmentPort>;
-beforeEach(() => {
-  originalPort = installJudgmentPort(fakePort((name, question, request) => {
-    if (name !== 'platform_requested' || question.type !== 'noul') throw new Error('Unauthored platform reading');
-    const state = request as { source: { goal: string } };
-    return noulAnswer(requestedSourceMessages.has(state.source.goal) ? 0.9999 : 0.0001);
-  }).port);
-});
-afterEach(() => { installJudgmentPort(originalPort); });
 
 // ── 1. The capture tools a conversational turn actually has ─────────────────
 
@@ -219,97 +188,11 @@ describe('the capture contract the operator policy carries', () => {
     expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('Never choose the kind for him');
   });
 
-  test('the platform boundary is stated in the policy too, not only in the guard', async () => {
+  // Prompt-contract pin: the policy text is the only statement of this boundary,
+  // so the sentence that carries it must stay in the block every turn is given.
+  test('the policy tells the turn the platform source is not a tool for finishing his request', async () => {
     expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('is not a tool for finishing his request');
     expect(GOODVIBES_AGENT_OPERATOR_POLICY.toLowerCase()).toContain('wait for his answer');
-  });
-});
-
-// ── 3. The conversational-session boundary ──────────────────────────────────
-
-describe('platform source path detection', () => {
-  test('the platform repositories are recognised', async () => {
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes/packages/engine/platform/src/a.ts')).toBe(true);
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-agent/src/main.ts')).toBe(true);
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-daemon/src/b.ts')).toBe(true);
-    // A worktree of one is still one.
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/goodvibes-agent-wt-capture/src/main.ts')).toBe(true);
-    // And the published packages, wherever they are installed.
-    expect(isGoodVibesPlatformSourcePath('node_modules/@goodvibes-jev/engine/platform/dist/index.js')).toBe(true);
-  });
-
-  test('canonical installed workspace packages are platform source, without matching lookalikes', async () => {
-    for (const name of ['engine', 'judgment', 'daemon', 'agent', 'tui', 'webui']) {
-      expect(isGoodVibesPlatformSourcePath(`node_modules/@goodvibes-jev/${name}/src/index.ts`)).toBe(true);
-    }
-    expect(isGoodVibesPlatformSourcePath('C:\\project\\node_modules\\@goodvibes-jev\\engine\\platform\\index.js')).toBe(true);
-    for (const path of [
-      'node_modules/@goodvibes-jev/engine-helper/index.js',
-      'node_modules/@someone/engine/index.js',
-      '/home/x/notes/@goodvibes-jev/engine/trip.md',
-      '/home/x/Projects/engine/src/index.ts',
-    ]) expect(isGoodVibesPlatformSourcePath(path)).toBe(false);
-  });
-
-  test('the owner\'s own state directory is not platform source', async () => {
-    // `.goodvibes` is read constantly for entirely ordinary reasons. The
-    // leading dot is the whole difference and it has to keep working.
-    expect(isGoodVibesPlatformSourcePath('/home/x/.goodvibes/agent/sessions/user-a.jsonl')).toBe(false);
-    expect(isGoodVibesPlatformSourcePath('/home/x/Documents/trip.md')).toBe(false);
-    expect(isGoodVibesPlatformSourcePath('/home/x/Projects/my-app/src/index.ts')).toBe(false);
-  });
-});
-
-describe('did he ask about the platform source this turn', () => {
-  test('the messages from the live session did not', async () => {
-    expect(await ownerAskedAboutPlatformSource('can you see your email?')).toBe(false);
-    expect(await ownerAskedAboutPlatformSource('I SAID TO LOGIN TO A FUCKING EMAIL ACCOUNT')).toBe(false);
-    expect(await ownerAskedAboutPlatformSource('fuck it. check your fucking email')).toBe(false);
-    expect(await ownerAskedAboutPlatformSource('')).toBe(false);
-    expect(await ownerAskedAboutPlatformSource(null)).toBe(false);
-  });
-
-  test('naming the path, the source, or the repair all count as asking', async () => {
-    expect(await ownerAskedAboutPlatformSource('read /home/x/Projects/goodvibes/packages/engine/platform/src/a.ts')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('show me the goodvibes platform source')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('go fix the daemon')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('look at the tui repo')).toBe(true);
-    // Pointing you at it counts, not only asking for a repair. Refusing these
-    // would be the opposite mistake to the one being corrected.
-    expect(await ownerAskedAboutPlatformSource('read src/main.ts in goodvibes-agent')).toBe(true);
-    expect(await ownerAskedAboutPlatformSource('show me how the platform does this')).toBe(true);
-  });
-
-  test('naming the platform without pointing at its innards is not asking', async () => {
-    // He talks about the product constantly. Mentioning it is not permission to
-    // go editing it.
-    expect(await ownerAskedAboutPlatformSource('is the daemon running?')).toBe(false);
-    expect(await ownerAskedAboutPlatformSource('restart goodvibes')).toBe(false);
-    // And an ordinary request with no platform word in it at all.
-    expect(await ownerAskedAboutPlatformSource('show me my calendar')).toBe(false);
-  });
-});
-
-describe('source paths do not add implicit approval gates', () => {
-  test.each([
-    '/home/x/Projects/goodvibes/packages/engine/platform/src/platform/google/oauth-wizard.ts',
-    'node_modules/@goodvibes-jev/engine/platform/index.ts',
-    'C:\\project\\node_modules\\@goodvibes-jev\\engine\\src\\index.ts',
-    '/home/x/Documents/notes.md',
-  ])('the compatibility guard preserves calls for %s', async path => {
-    const registry = new ToolRegistry();
-    const read = stubTool('read'), edit = stubTool('edit');
-    registry.register(read); registry.register(edit);
-    installAgentPlatformBoundaryGuard(registry, () => 'Complete the current request');
-    expect((await registry.execute('read-source', 'read', { files: [{ path }] })).success).toBe(true);
-    expect((await registry.execute('edit-source', 'edit', { edits: [{ path, find: 'a', replace: 'b' }] })).success).toBe(true);
-    expect(read.calls).toHaveLength(1); expect(edit.calls).toHaveLength(1);
-    expect(await validatePlatformBoundaryForAgentPolicy({ paths: [path], lastUserMessage: 'Complete the current request' })).toBeNull();
-  });
-
-  test('the compatibility boundary still observes cancellation', async () => {
-    const controller = new AbortController(); const cancelled = new Error('cancel source check'); controller.abort(cancelled);
-    await expect(validatePlatformBoundaryForAgentPolicy({ paths: ['/source.ts'], lastUserMessage: 'read source' }, controller.signal)).rejects.toBe(cancelled);
   });
 });
 
@@ -411,10 +294,9 @@ describe('a found itinerary is recorded as a plan', () => {
     expect(result.output).toContain('Do not try again with different values');
   });
 
-  test('the details the itinerary carried are the reason it exists', async () => {
-    // Pinned as data rather than prose: the policy tells the turn not to
-    // summarise these away, and this is the list it must not summarise.
-    expect(ITINERARY_DETAILS.some((detail) => detail.includes('confirmation'))).toBe(true);
+  // Prompt-contract pin: the policy has to tell the turn not to summarise the
+  // itinerary's details away.
+  test('the policy tells the turn to keep the confirmation number and details', async () => {
     expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('confirmation number');
     expect(GOODVIBES_AGENT_OPERATOR_POLICY).toContain('Do not summarise those away');
   });

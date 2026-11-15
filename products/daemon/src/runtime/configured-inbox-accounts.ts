@@ -1,6 +1,6 @@
 /** Native account selectors remain independent of permission to screen message text. */
-import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import type { EmailInboxAccount, SlackInboxAccount, OwnedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
+import type { EmailInboxAccount, SlackInboxAccount, OwnedInboxSource, OwnedInboxRead, ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
@@ -9,10 +9,11 @@ import { createSlackDaemonInboxSourceFactory, type SlackDaemonInboxSourceFactori
 import { createEmailDaemonInboxSourceFactory, type EmailDaemonInboxSourceFactories } from './email-inbox-composition.js';
 import { createConfiguredDiscordDaemonInboxSourceFactory, type DiscordDaemonInboxSourceFactories } from './discord-inbox-composition.js';
 import type { HostedInboxScreeningOperation } from './hosted-source-screening-composition.js';
+import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionReason, type InboxAdmissionReason } from './inbox-admission-refusal.js';
 
 const slackKeys = ['surfaces.slack.enabled', 'surfaces.slack.workspaceId', 'surfaces.slack.inboxUserId'] as const;
 const emailKeys = ['surfaces.email.imap.host', 'surfaces.email.host', 'surfaces.email.imapHost',
-  'surfaces.email.user', 'surfaces.email.username', 'surfaces.email.imapUser', 'surfaces.email.imap.port',
+  'surfaces.email.user', 'surfaces.email.username', 'surfaces.email.imapUser', 'surfaces.email.imap.user', 'surfaces.email.imap.port',
   'surfaces.email.imapPort', 'surfaces.email.imap.secure', 'surfaces.email.imap.mailbox'] as const;
 const discordKeys = ['surfaces.discord.enabled', 'surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
 type Context = Parameters<DaemonInboxFactory>[0];
@@ -45,7 +46,7 @@ function selectedAccount<T>(context: Context, controls: Controls, provider: 'sla
       if (closed || !quarantine || quarantine.some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
         || entry.key === `surfaces.${provider}` || entry.key.startsWith(`surfaces.${provider}.`))
         || keys.some((key, index) => context.configManager.get(key) !== values[index])) {
-        throw new Error('Configured inbox account changed or is unavailable');
+        throw new InboxAdmissionRefusal('settings-changing', 'Configured inbox account changed or is unavailable');
       }
     };
     assertCurrent();
@@ -64,20 +65,19 @@ export function selectConfiguredSlackInboxAccount(context: Context, controls: Co
     const reader: { get(key: string): unknown } = context.configManager;
     const workspaceId = reader.get('surfaces.slack.workspaceId'), userId = reader.get('surfaces.slack.inboxUserId');
     if (reader.get('surfaces.slack.enabled') !== true || !boundedName(workspaceId) || workspaceId.length > 200
-      || !boundedName(userId) || userId.length > 200) throw new Error('Slack inbox requires its expected workspace and user identity');
+      || !boundedName(userId) || userId.length > 200) throw new InboxAdmissionRefusal('account-incomplete', 'Slack inbox requires its expected workspace and user identity');
     return Object.freeze({ workspaceId, userId });
   });
 }
 
 export function selectConfiguredEmailInboxAccount(context: Context, controls: Controls) {
   return selectedAccount(context, controls, 'email', emailKeys, (): EmailInboxAccount => {
-    const reader: { get(key: string): unknown } = context.configManager;
-    const mail = createSurfaceEmailInboxConfigReader(key => reader.get(key));
+    const mail = createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager));
     const host = mail('email.imapHost'), username = mail('email.username'), mailbox = mail('email.mailbox');
     const port = mail('email.imapPort');
     if (!boundedName(host) || !boundedName(username) || !boundedName(mailbox)
       || mail('email.imapSecurity') !== 'tls' || typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error('Email inbox requires its expected TLS host, account, port and mailbox');
+      throw new InboxAdmissionRefusal('account-incomplete', 'Email inbox requires its expected TLS host, account, port and mailbox');
     }
     return Object.freeze({ host, username, mailbox, port, security: 'tls' });
   });
@@ -90,10 +90,10 @@ export function selectConfiguredDiscordInboxAccount(context: Context, controls: 
     const snowflake = (value: unknown): value is string => typeof value === 'string'
       && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) < (1n << 64n);
     if (context.configManager.get('surfaces.discord.enabled') !== true || !snowflake(userId)
-      || typeof registry !== 'string' || registry.length > 4_300) throw new Error('Discord inbox requires its expected bot and one-to-one DM registry');
+      || typeof registry !== 'string' || registry.length > 4_300) throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires its expected bot and one-to-one DM registry');
     const channelIds = registry.split(',').map(value => value.trim());
     if (channelIds.length < 1 || channelIds.length > 200 || channelIds.some(id => !snowflake(id))
-      || new Set(channelIds).size !== channelIds.length) throw new Error('Discord inbox requires 1–200 unique canonical one-to-one DM channel IDs');
+      || new Set(channelIds).size !== channelIds.length) throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires 1–200 unique canonical one-to-one DM channel IDs');
     return Object.freeze({ userId, channelIds: Object.freeze(channelIds) });
   });
 }
@@ -138,9 +138,59 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
   };
 }
 
+/**
+ * After a failed admission the source retries on its own, a bounded number of
+ * times, because the event that would normally trigger a replacement (a settings
+ * or credential write settling) may already have fired while admission was
+ * being refused. Past the last delay it waits for the next native notification.
+ */
+const ADMISSION_RETRY_DELAYS_MS: readonly number[] = Object.freeze([2_000, 10_000, 60_000]);
+
+export interface ReacquiringInboxOptions {
+  /** Backoff between admission retries; an empty list disables retrying. */
+  readonly retryDelaysMs?: readonly number[] | undefined;
+  /** Schedules a callback and returns its canceller. Injected so tests own time. */
+  readonly schedule?: ((callback: () => void, delayMs: number) => () => void) | undefined;
+}
+
+function scheduleWithTimer(callback: () => void, delayMs: number): () => void {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
+
+/**
+ * What a source whose account is not admitted answers a read with: no items and
+ * a provider status that says `unavailable` and why. It carries no provider
+ * data, and it fails its currentness check as soon as the source is replaced or
+ * closed, so a composite read over several providers still serves the others.
+ */
+function unavailableRead(provider: string, reason: InboxAdmissionReason | 'reacquiring',
+  assertSourceCurrent: () => void): OwnedInboxRead {
+  let released = false;
+  // `polled` is true so the wire shows `error` with the reason rather than a
+  // `pending` that would read as "still starting": the admission result is settled.
+  const status: ProviderStatus = { id: provider, state: 'unavailable', configured: true, itemCount: 0, polled: true, error: reason };
+  const current = (): void => { if (released) throw new Error('Inbox read is retired'); assertSourceCurrent(); };
+  return {
+    providerIds: [provider],
+    release: () => { released = true; },
+    assertCurrent: current,
+    async validate() { current(); },
+    sources: {
+      store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
+        maxReceivedAt: () => 0, getImapCheckpoint: () => null },
+      poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
+        isProviderRunning: () => false },
+    },
+  };
+}
+
 /** Replace a revoked native source only after its real storage and poll owners drain. */
 export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'email' | 'discord',
-  factory: DaemonInboxSourceFactory): DaemonInboxSourceFactory {
+  factory: DaemonInboxSourceFactory, options: ReacquiringInboxOptions = {}): DaemonInboxSourceFactory {
+  const retryDelays = options.retryDelaysMs ?? ADMISSION_RETRY_DELAYS_MS;
+  const schedule = options.schedule ?? scheduleWithTimer;
   return (context, routing, controls) => {
     const subscribe = controls.onAccountInvalidation;
     if (!subscribe) throw new Error('Native inbox source requires account invalidation');
@@ -149,7 +199,9 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
     let closed = false;
     let requested = false;
     let retirementFailed = false;
-    let admissionFailure: { readonly error: unknown } | undefined;
+    let admissionFailure: { readonly error: unknown; readonly reason: InboxAdmissionReason } | undefined;
+    let retryAttempts = 0;
+    let cancelRetry: (() => void) | undefined;
     let current: OwnedInboxSource | undefined;
     let retiring: Promise<void> = Promise.resolve();
     let running: Promise<void> | undefined;
@@ -181,6 +233,21 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       lifetime.signal.addEventListener('abort', stop, { once: true });
       return () => { lifetime.signal.removeEventListener('abort', stop); stopNative(); };
     } };
+    const stopRetry = (): void => {
+      const cancel = cancelRetry;
+      cancelRetry = undefined;
+      try { cancel?.(); } catch { /* A timer that cannot be cancelled still finds the source closed. */ }
+    };
+    const retryAdmission = (): void => {
+      if (closed || retirementFailed || cancelRetry || retryAttempts >= retryDelays.length) return;
+      const delay = retryDelays[retryAttempts++]!;
+      cancelRetry = schedule(() => {
+        cancelRetry = undefined;
+        if (closed || retirementFailed || current) return;
+        requested = true;
+        void queue().catch(() => {});
+      }, delay);
+    };
     const reconcile = async (): Promise<void> => {
       while (requested && !closed && !retirementFailed) {
         requested = false;
@@ -200,13 +267,20 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
           }
           current = candidate;
           admissionFailure = undefined;
+          retryAttempts = 0;
+          stopRetry();
         } catch (error) {
-          admissionFailure = { error };
+          const reason = inboxAdmissionReason(error);
+          admissionFailure = { error, reason };
           if (candidate) await retire(candidate);
           if (retirementFailed) throw error;
-          // Mutation onset can legitimately refuse new admission. Settlement
-          // supplies another native notification; do not reuse a retired owner.
-          try { context.logger.warn('Native inbox source admission is unavailable'); } catch { /* Reporting cannot grant admission. */ }
+          // Mutation onset can legitimately refuse new admission, and the
+          // notification that would replace this source may already have
+          // fired, so retry a bounded number of times as well. A retired owner
+          // is never reused. Only the fixed reason is reported: the error
+          // itself can sit next to account or credential material.
+          try { context.logger.warn('Native inbox source admission is unavailable', { provider, reason, action: INBOX_ADMISSION_ACTIONS[reason] }); } catch { /* Reporting cannot grant admission. */ }
+          retryAdmission();
         }
       }
     };
@@ -226,12 +300,20 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       if (closed) return;
       revision++;
       retireCurrent();
+      // A fresh native notification replaces the failure state and the backoff.
+      admissionFailure = undefined;
+      retryAttempts = 0;
+      stopRetry();
       void queue().catch(() => {});
     };
     const unsubscribe = subscribe(changed);
     const ready = queue().then(() => {
       if (closed || retirementFailed) throw unavailable();
       if (!current) {
+        // An account that cannot be admitted yet degrades this provider alone:
+        // reads report it unavailable with the reason. Any other failure still
+        // stops the start, because it may mean unproven storage.
+        if (admissionFailure && admissionFailure.error instanceof InboxAdmissionRefusal) return;
         if (admissionFailure) throw admissionFailure.error;
         throw unavailable();
       }
@@ -242,6 +324,7 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       const deferred = Promise.withResolvers<void>();
       closing = deferred.promise;
       closed = true; revision++;
+      stopRetry();
       const failures: unknown[] = [];
       try { lifetime.abort(); } catch (error) { failures.push(error); }
       try { unsubscribe(); } catch (error) { failures.push(error); }
@@ -264,7 +347,13 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       async acquireRead(requireFinalProof) {
         await ready;
         const source = current, captured = revision;
-        if (closed || !source || retirementFailed) throw unavailable();
+        if (closed || retirementFailed) throw unavailable();
+        if (!source) {
+          if (!admissionFailure) throw unavailable();
+          return unavailableRead(provider, admissionFailure.reason, () => {
+            if (closed || captured !== revision || retirementFailed) throw unavailable();
+          });
+        }
         const read = await source.acquireRead(requireFinalProof);
         const assertCurrent = (): void => {
           if (closed || current !== source || captured !== revision || retirementFailed) throw unavailable();

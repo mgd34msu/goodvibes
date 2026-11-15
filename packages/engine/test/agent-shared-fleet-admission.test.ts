@@ -97,7 +97,8 @@ test('shared wake refuses at cap, then reserves one same-id queued replacement t
   try {
     // A same-id queued replacement is not a second fleet agent.
     expect(a.wakeWithSteer(record.id, 'continue')).toMatchObject({ woke: true });
-    expect(a.getStatus(record.id)?.status).toBe('pending'); expect(starts).toBe(1);
+    // The previous outcome stays on the record until the queued run starts.
+    expect(a.getStatus(record.id)?.status).toBe('failed'); expect(starts).toBe(1);
     expect(() => b.spawn(input)).toThrow('fleet.maxSize=1');
     first.release(); await new Promise(resolve => setTimeout(resolve, 0)); expect(starts).toBe(2);
     expect(() => b.spawn(input)).toThrow('fleet.maxSize=1');

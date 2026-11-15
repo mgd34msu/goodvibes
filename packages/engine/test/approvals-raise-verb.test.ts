@@ -16,6 +16,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { waitFor } from './_helpers/test-timeout.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
@@ -58,11 +59,25 @@ function invocation(params: Record<string, unknown>): GatewayMethodInvocation {
 }
 
 describe('approvals.raise: creating an ask from a surface', () => {
+  test('hands the raiser the hold it must name when it releases the ask', async () => {
+    const { broker, cleanup } = makeBroker();
+    try {
+      const handler = createApprovalRaiseHandler(broker);
+      const first = await handler(invocation({ request: ask('call-hold') })) as { holdId?: string };
+      const second = await handler(invocation({ request: ask('call-hold') })) as { holdId?: string; coalesced: boolean };
+      expect(second.coalesced).toBe(true);
+      expect(first.holdId).toBeTruthy();
+      expect(second.holdId).toBeTruthy();
+      expect(second.holdId).not.toBe(first.holdId);
+    } finally {
+      cleanup();
+    }
+  });
+
   test('returns the pending record immediately and does not wait for a decision', async () => {
     const { broker, cleanup } = makeBroker();
     try {
       const handler = createApprovalRaiseHandler(broker);
-      const started = Date.now();
       const result = await handler(invocation({ request: ask('call-1') })) as {
         approval: { id: string; status: string; callId: string; metadata: Record<string, unknown> };
         coalesced: boolean;
@@ -74,7 +89,6 @@ describe('approvals.raise: creating an ask from a surface', () => {
       expect(result.decided).toBe(false);
       expect(result.coalesced).toBe(false);
       // Nobody answered, and the call still came back. The point of the verb.
-      expect(Date.now() - started).toBeLessThan(2_000);
 
       // The record is real: listable, and decidable by the existing verbs.
       const listed = broker.listApprovals();
@@ -257,7 +271,7 @@ describe('the in-process path still resolves', () => {
     try {
       const pending = broker.requestApproval({ request: ask('call-10') as never });
       // Answer once the record exists.
-      await Bun.sleep(20);
+      await waitFor(() => broker.listApprovals().length > 0);
       const record = broker.listApprovals()[0]!;
       await broker.resolveApproval(record.id, { approved: true, actor: 'operator', actorSurface: 'tui' });
       await expect(pending).resolves.toMatchObject({ approved: true });

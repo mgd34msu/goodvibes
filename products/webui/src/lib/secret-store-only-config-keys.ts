@@ -37,16 +37,12 @@
  * never looks at that value. The UI reporting "Saved, stored in ..." on
  * that write is a lie by omission.
  *
- * There is no operator-exposed RPC that can write into the daemon's secret
- * store instead (searched the platform's control-plane method catalog,
- * `method-catalog-admin.ts` exposes `credentials.get`, read-only, and no
- * `secrets.set`/`secrets.write` method at all). So the honest behavior for a
- * REMOTE browser client, which can only ever reach the daemon over this
- * wire, is to refuse the write for these keys and name the real mechanism:
- * setting the credential from a terminal with daemon access, which is where
- * `/secrets set` (the mechanism `surface-config.ts` and
- * `caldav-gateway-config.ts` both describe as "where setup stores it") is
- * available.
+ * The daemon's operator method `credentials.set`
+ * (control-plane/routes/credentials-write.ts) stores the value in its secret
+ * store, reads it back, then swaps the config value for a reference. The
+ * settings editor writes these keys through it and never through config.set.
+ * Only a daemon that answers METHOD_NOT_FOUND gets a refusal, which names the
+ * `/secrets set` command to run from a terminal with daemon access.
  */
 
 /** Every config key whose real value only ever comes from the daemon's secret

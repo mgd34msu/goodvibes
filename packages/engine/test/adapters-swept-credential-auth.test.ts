@@ -118,6 +118,7 @@ function makeContext(options: HarnessOptions) {
             mode: 'spawn',
             task: { prompt: 'hello' },
             session: { id: 'session-1' },
+            input: { id: 'input-1' },
             routeBinding: binding,
           };
         },

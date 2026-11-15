@@ -79,7 +79,7 @@ export function gmailMcpLayout(homeDirectory: string): GmailMcpLayout {
   const root = `${homeDirectory.replace(/\/+$/, '')}/.gmail-mcp`;
   return {
     clientFile: `${root}/gcp-oauth.keys.json`,
-    // Two shapes exist in the wild; both are read, newest usable one wins.
+    // Two shapes exist in the wild; the first file in this order that holds a usable token wins.
     tokenFiles: [`${root}/google-workspace-credentials.json`, `${root}/credentials.json`],
   };
 }
@@ -134,7 +134,9 @@ function readClientFile(file: GoogleFilePort, path: string): ClientFileContents 
   return {
     clientId,
     clientSecret,
-    tokenUri: readString(inner.token_uri) ?? 'https://oauth2.googleapis.com/token',
+    // Never taken from the file: another tool's file must not choose where
+    // this client's secret and refresh token are sent.
+    tokenUri: 'https://oauth2.googleapis.com/token',
   };
 }
 

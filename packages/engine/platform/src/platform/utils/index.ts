@@ -1,6 +1,7 @@
 export * from './clipboard.js';
 export * from './concurrency.js';
 export * from './delivery-lifetime.js';
+export * from './env-flag.js';
 export * from './error-display.js';
 export * from './fetch-with-timeout.js';
 export * from './file-observation.js';
@@ -24,7 +25,6 @@ export * from './single-flight.js';
 export * from './terminal-width.js';
 export * from './url-safety.js';
 export * from './walk-dir.js';
-export { readWalkDirectories } from './directory-reading.js';
 export type { WalkDirectoryCandidate } from './directory-reading.js';
 export { fieldKind } from './batteries/field-kind.js';
 export { redactionCredential, residualCredential } from './batteries/redaction.js';

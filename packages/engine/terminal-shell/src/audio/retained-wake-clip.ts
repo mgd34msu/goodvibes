@@ -22,13 +22,14 @@ export function retainWakeClip(
 ): void {
   const retainedDir = resolveManagedWakePaths(deps.managedRoot).retainedDir;
   try {
-    mkdirSync(retainedDir, { recursive: true });
+    mkdirSync(retainedDir, { recursive: true, mode: 0o700 });
     // The platform owns the filename, and it is load-bearing rather than cosmetic: the
     // recovery sweeper reads the owning session id from the first `--`-delimited
     // segment, so a name invented here would get a live session's clips reaped as
     // orphans (or leave them unreaped forever).
     const target = join(retainedDir, retainedClipFileName(deps.sessionId, (deps.now ?? Date.now)()));
-    writeFileSync(target, encodeWavPcm16(utterance.samples, utterance.sampleRate));
+    // A voice recording is private to the owner on a shared host.
+    writeFileSync(target, encodeWavPcm16(utterance.samples, utterance.sampleRate), { mode: 0o600 });
   } catch (error) {
     deps.warn('retaining the wake clip failed', { error: error instanceof Error ? error.message : String(error) });
   }

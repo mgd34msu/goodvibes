@@ -105,10 +105,11 @@ export function composeMiddleware(
 
     let dispatchCount = 0;
     const dispatch = async (i: number): Promise<void> => {
+      // A full chain makes one dispatch per middleware plus one for the real fetch.
       // count actual re-entrant dispatch() invocations rather than
       // reusing `i` (which is the chain index and cannot exceed chain length).
       dispatchCount += 1;
-      if (dispatchCount > MAX_MIDDLEWARE_DEPTH) {
+      if (dispatchCount > MAX_MIDDLEWARE_DEPTH + 1) {
         throw new GoodVibesError(`Transport middleware recursion exceeded the maximum depth of ${MAX_MIDDLEWARE_DEPTH}.`, {
           category: 'internal',
           source: 'transport',

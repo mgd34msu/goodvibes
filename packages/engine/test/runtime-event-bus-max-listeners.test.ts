@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   RuntimeEventBus,
+  createEventEnvelope,
   MAX_LISTENERS,
   configureRuntimeEventBusDefaults,
   runtimeEventBusOptionsFrom,
@@ -23,6 +24,12 @@ import {
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { logger } from '../platform/src/platform/utils/logger.ts';
 import type { SessionEvent } from '../platform/src/events/session.js';
+
+/** Listener that counts its calls. */
+function countingListener(): { fn: () => void; calls: () => number } {
+  let n = 0;
+  return { fn: () => { n++; }, calls: () => n };
+}
 
 /** No-op listener factory, each call returns a distinct function reference. */
 function makeListener(): () => void {
@@ -176,21 +183,30 @@ describe('overflow in development mode: throw RangeError', () => {
     }).toThrow(RangeError);
   });
 
-  test('dev-mode throw does not leave the listener registered', () => {
+  test('dev-mode throw does not leave the rejected listener registered', async () => {
     const cap = 3;
     const bus = new RuntimeEventBus({ maxListeners: cap });
-    registerN(bus, 'SESSION_STARTED', cap);
-    // This should throw, listener must NOT be added
-    try {
-      bus.on<SessionEvent>('SESSION_STARTED', makeListener() as Parameters<typeof bus.on>[1]);
-    } catch {
-      // expected
-    }
-    // Register one more valid listener, if state is corrupt this will also throw
-    // when it should not.
+    const unsubs = registerN(bus, 'SESSION_STARTED', cap);
+    const rejected = countingListener();
+    expect(() => {
+      bus.on<SessionEvent>('SESSION_STARTED', rejected.fn as Parameters<typeof bus.on>[1]);
+    }).toThrow(RangeError);
+
+    // Free exactly one slot. A retained rejected listener would still occupy
+    // cap+1 slots, so the next registration would overflow again.
+    unsubs[0]!();
     expect(() => {
       bus.on<SessionEvent>('SESSION_STARTED', makeListener() as Parameters<typeof bus.on>[1]);
-    }).toThrow(RangeError); // still at cap+1 (cap+rejected+1 would overflow too)
+    }).not.toThrow();
+
+    // And the rejected listener must never be called when an event fires.
+    bus.emit('session', createEventEnvelope(
+      'SESSION_STARTED' as const,
+      { type: 'SESSION_STARTED' as const, sessionId: 's', profileId: 'p', workingDir: '/' },
+      { sessionId: 's', traceId: 't', source: 'test' },
+    ));
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+    expect(rejected.calls()).toBe(0);
   });
 });
 

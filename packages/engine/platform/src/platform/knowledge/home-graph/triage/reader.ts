@@ -122,7 +122,17 @@ export async function prepareHomeGraphTriageReadings(inputs: readonly TriageRead
           plans[index] = { reference: input.reference, action: action.choice, probability: action.confidence,
             facts, decisionIds, model: applicable.result.model, requestedModel: applicable.result.requestedModel,
             origin: 'automatic-judgment', batteries };
-        } catch (error) { const failure = error instanceof Held ? error : new Held('unavailable'); stop(failure); throw failure; }
+        } catch (error) {
+          const failure = error instanceof Held ? error : new Held('unavailable');
+          // One ambiguous issue is held for a person; it must not block the others or be re-read identically every run.
+          if (failure.reason === 'unsettled' || failure.reason === 'unsupported-fact' || failure.reason === 'owner-threshold') {
+            check();
+            plans[index] = { reference: input.reference, action: 'review', probability: 0, facts: {}, decisionIds: [],
+              model: port.model, requestedModel: port.model, origin: 'automatic-judgment', batteries: [], heldReason: failure.reason };
+            continue;
+          }
+          stop(failure); throw failure;
+        }
       }
     }));
     check(); return freezeSupport(plans);

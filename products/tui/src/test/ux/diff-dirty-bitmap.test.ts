@@ -18,11 +18,9 @@ function countCursorMoves(diff: string): number {
 
 function rowsInDiff(diff: string): Set<number> {
   const rows = new Set<number>();
-  const re = /\x1b\[(\.\d+);\d+H/g;
-  // Use manual match loop to capture group 1
-  const re2 = /\x1b\[([0-9]+);[0-9]+H/g;
+  const cursorMove = /\x1b\[([0-9]+);[0-9]+H/g;
   let m: RegExpExecArray | null;
-  while ((m = re2.exec(diff)) !== null) {
+  while ((m = cursorMove.exec(diff)) !== null) {
     rows.add(parseInt(m[1]!, 10));
   }
   return rows;
@@ -111,5 +109,60 @@ describe('DiffEngine row-level dirty skip (β2 perf)', () => {
     const newBuf = new TerminalBuffer(W, H);
     const diff = engine.diff(buf, newBuf);
     expect(diff).toBe('');
+  });
+
+  const STYLE = { fg: '', bg: '', bold: false, dim: false, underline: false, italic: false, strikethrough: false };
+
+  function blankBuffer(): TerminalBuffer {
+    const buf = new TerminalBuffer(W, H);
+    for (let y = 0; y < H; y++) {
+      buf.blitLine(y, new Array(W).fill({ char: ' ', ...STYLE }));
+    }
+    return buf;
+  }
+
+  test('a row whose content changed but was never marked dirty is skipped, because the flag is the contract', () => {
+    const engine = new DiffEngine();
+    const oldBuf = blankBuffer();
+    // Rewrite the row's cells directly: the content now differs from oldBuf, the flag stays clean.
+    const newBuf = new TerminalBuffer(W, H);
+    newBuf.cells[10]![0] = { char: 'Z', ...STYLE };
+    expect(newBuf.dirtyRows[10]).toBe(false);
+
+    expect(engine.diff(oldBuf, newBuf)).toBe('');
+  });
+
+  test('the same content change made through setCell is marked dirty and emitted', () => {
+    const engine = new DiffEngine();
+    const oldBuf = blankBuffer();
+    const newBuf = new TerminalBuffer(W, H);
+    newBuf.setCell(0, 10, { char: 'Z', ...STYLE });
+
+    const diff = engine.diff(oldBuf, newBuf);
+    expect([...rowsInDiff(diff)]).toEqual([11]);
+    expect(diff).toContain('Z');
+  });
+
+  test('a dirty row that ends up equal to the old row emits nothing', () => {
+    const engine = new DiffEngine();
+    const oldBuf = blankBuffer();
+    const newBuf = new TerminalBuffer(W, H);
+    // Written and then restored: the row is flagged dirty but ends identical to oldBuf.
+    newBuf.setCell(0, 10, { char: 'X', ...STYLE });
+    newBuf.setCell(0, 10, { char: ' ', ...STYLE });
+    expect(newBuf.dirtyRows[10]).toBe(true);
+
+    expect(engine.diff(oldBuf, newBuf)).toBe('');
+  });
+
+  test('a row dirty only in the old buffer is still compared against the new one', () => {
+    const engine = new DiffEngine();
+    const oldBuf = new TerminalBuffer(W, H);
+    oldBuf.setCell(0, 5, { char: 'Q', ...STYLE });
+    const newBuf = new TerminalBuffer(W, H);
+    newBuf.cells[5]![0] = { char: ' ', ...STYLE };
+
+    const diff = engine.diff(oldBuf, newBuf);
+    expect([...rowsInDiff(diff)]).toEqual([6]);
   });
 });

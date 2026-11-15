@@ -137,22 +137,23 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
     if (!memory) {
       return;
     }
-    if (!context.extensions.forensicsRegistry) {
-      context.print(`${presentation.tag} Forensics registry not available.`);
-      return;
-    }
     const target = args[0];
     if (target === 'incident') {
+      const forensicsRegistry = context.extensions.forensicsRegistry;
+      if (!forensicsRegistry) {
+        context.print(`${presentation.tag} Forensics registry not available.`);
+        return;
+      }
       const requestedId = args[1];
       const report =
         !requestedId || requestedId === 'latest'
-          ? context.extensions.forensicsRegistry.latest()
-          : context.extensions.forensicsRegistry.getById(requestedId);
+          ? forensicsRegistry.latest()
+          : forensicsRegistry.getById(requestedId);
       if (!report) {
         context.print(`${presentation.tag} Incident not found${presentation.missingItemSeparator}${requestedId ?? 'latest'}`);
         return;
       }
-      const bundle = context.extensions.forensicsRegistry.buildBundle(report.id);
+      const bundle = forensicsRegistry.buildBundle(report.id);
       if (!bundle) {
         context.print(`${presentation.tag} Failed to build incident bundle${presentation.missingItemSeparator}${report.id}`);
         return;

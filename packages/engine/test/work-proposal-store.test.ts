@@ -7,10 +7,10 @@
  * later: an expired record is gone, and resolving it fails rather than
  * starting work the owner asked for and forgot about.
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   WORK_PROPOSAL_SCHEMA_VERSION,
   WorkProposalStore,
@@ -44,9 +44,21 @@ function propose(
   return store.markDelivered(record.id) ?? record;
 }
 
+const storeDirectories: string[] = [];
+
+afterEach(async () => {
+  for (const dir of storeDirectories.splice(0)) await rm(dir, { recursive: true, force: true });
+});
+
 async function tempStorePath(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'gv-work-proposals-'));
+  storeDirectories.push(dir);
   return join(dir, 'work-proposals.json');
+}
+
+async function preservedCopies(path: string): Promise<string[]> {
+  const names = await readdir(dirname(path));
+  return names.filter((name) => name.startsWith(`${basename(path)}.corrupt-`) && !name.endsWith('.why'));
 }
 
 describe('WorkProposalStore lifecycle', () => {
@@ -145,6 +157,38 @@ describe('WorkProposalStore expiry', () => {
     store.reap();
     expect(store.disclose().reaped.expired).toBe(1);
     expect(store.disclose().pending).toBe(0);
+    store.dispose();
+  });
+});
+
+describe('WorkProposalStore unanswered proposals', () => {
+  test('an expired or cap-evicted proposal is handed to onUnanswered once, with the ids of its held message; an answered one is not', () => {
+    let now = 1_000_000;
+    const dropped: WorkProposalRecord[] = [];
+    const store = new WorkProposalStore({ maxPending: 2, now: () => now, onUnanswered: (record) => { dropped.push(record); } });
+    const answered = propose(store, makeInput({ sessionId: 's-a', inputId: 'i-a' }));
+    store.resolve(answered.id, 'declined');
+    const expiring = propose(store, makeInput({ ttlMs: 60_000, sessionId: 's-1', inputId: 'i-1' }));
+    now += 60_001;
+    store.reap();
+    store.reap();
+    expect(dropped.map((record) => [record.id, record.sessionId, record.inputId])).toEqual([[expiring.id, 's-1', 'i-1']]);
+
+    const evicted = propose(store, makeInput({ sessionId: 's-2', inputId: 'i-2' }));
+    now += 1_000;
+    propose(store, makeInput());
+    now += 1_000;
+    propose(store, makeInput());
+    expect(dropped.map((record) => record.id)).toContain(evicted.id);
+    store.dispose();
+  });
+
+  test('a throwing onUnanswered does not stop the reap', () => {
+    let now = 1_000_000;
+    const store = new WorkProposalStore({ now: () => now, onUnanswered: () => { throw new Error('broker gone'); } });
+    propose(store, makeInput({ ttlMs: 60_000 }));
+    now += 60_001;
+    expect(store.reap().expired).toBe(1);
     store.dispose();
   });
 });
@@ -263,6 +307,24 @@ describe('WorkProposalStore persistence and recovery', () => {
     const store = new WorkProposalStore({ storePath: path });
     await expect(store.init()).resolves.toBeDefined();
     expect(store.listPending()).toHaveLength(0);
+    expect(store.disclose().unreadableStore).toMatchObject({ preserved: true });
+    store.dispose();
+  });
+
+  test('a new proposal never overwrites an unreadable store file: the bytes are preserved beside it', async () => {
+    const path = await tempStorePath();
+    const garbage = '{ this is not json';
+    await writeFile(path, garbage, 'utf-8');
+    const store = new WorkProposalStore({ storePath: path });
+    await store.init();
+    propose(store, makeInput());
+    await store.flush();
+    const copies = await preservedCopies(path);
+    expect(copies).toHaveLength(1);
+    expect(await readFile(join(dirname(path), copies[0]!), 'utf-8')).toBe(garbage);
+    const written = JSON.parse(await readFile(path, 'utf-8')) as { version: number; proposals: unknown[] };
+    expect(written.version).toBe(WORK_PROPOSAL_SCHEMA_VERSION);
+    expect(written.proposals).toHaveLength(1);
     store.dispose();
   });
 
@@ -275,13 +337,33 @@ describe('WorkProposalStore persistence and recovery', () => {
     const store = new WorkProposalStore({ storePath: path });
     await store.init();
     expect(store.listPending()).toHaveLength(0);
+    expect(store.disclose().unreadableStore).toMatchObject({ preserved: true });
     store.dispose();
   });
 
-  test('a missing store file is not an error', async () => {
+  test('proposals written by a newer schema survive the next write in a preserved copy', async () => {
+    const path = await tempStorePath();
+    const newer = JSON.stringify({
+      version: WORK_PROPOSAL_SCHEMA_VERSION + 1,
+      proposals: [{ id: 'wp_newer', createdAt: 1, expiresAt: Date.now() + 60_000, status: 'pending', surfaceKind: 'ntfy', task: 't', summary: 's' }],
+    });
+    await writeFile(path, newer, 'utf-8');
+    const store = new WorkProposalStore({ storePath: path });
+    await store.init();
+    propose(store, makeInput());
+    await store.flush();
+    const copies = await preservedCopies(path);
+    expect(copies).toHaveLength(1);
+    expect(await readFile(join(dirname(path), copies[0]!), 'utf-8')).toBe(newer);
+    store.dispose();
+  });
+
+  test('a missing store file is not an error and is not reported as unreadable', async () => {
     const path = await tempStorePath();
     const store = new WorkProposalStore({ storePath: path });
     await expect(store.init()).resolves.toBeDefined();
+    expect(store.disclose().unreadableStore).toBeUndefined();
+    expect(await preservedCopies(path)).toEqual([]);
     store.dispose();
   });
 
@@ -293,6 +375,21 @@ describe('WorkProposalStore persistence and recovery', () => {
     await store.flush();
     const parsed = JSON.parse(await readFile(path, 'utf-8')) as { version: number };
     expect(parsed.version).toBe(WORK_PROPOSAL_SCHEMA_VERSION);
+    store.dispose();
+  });
+});
+
+describe('WorkProposalStore live cap', () => {
+  test('a cap given as a function is read at each prune', () => {
+    let now = 1_000_000;
+    let cap = 5;
+    const store = new WorkProposalStore({ maxPending: () => cap, now: () => now });
+    for (let index = 0; index < 5; index += 1) { now += 1_000; propose(store, makeInput({ summary: `job ${index}` })); }
+    expect(store.listPending()).toHaveLength(5);
+    cap = 2;
+    now += 1_000;
+    propose(store, makeInput({ summary: 'job 5' }));
+    expect(store.listPending().map((record) => record.summary)).toEqual(['job 5', 'job 4']);
     store.dispose();
   });
 });

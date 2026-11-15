@@ -73,9 +73,13 @@ export function handleCascadeEffect(
   context: EffectHandlerContext,
 ): void {
   const { aggregator, eventBus } = context;
+  // Cancellation and tool deregistration are requests for the host that owns
+  // the signal or registry; every other effect is complete once state is written.
+  let enforced = true;
 
   switch (effect.type) {
     case 'CANCEL_INFLIGHT': {
+      enforced = false;
       // Publish the request for the host that owns the operation's cancellation signal.
       if (result.target !== 'ALL') {
         aggregator.updateDomainHealth(result.target, 'degraded', {
@@ -108,7 +112,9 @@ export function handleCascadeEffect(
           : ([result.target] as const);
 
       for (const childDomain of childDomains) {
-        aggregator.updateDomainHealth(childDomain, 'failed', {
+        // 'blocked' children can take no new work but are not failed.
+        aggregator.updateDomainHealth(childDomain, effect.status === 'failed' ? 'failed' : 'degraded', {
+          ...(effect.status === 'blocked' ? { degradedCapabilities: ['dispatch'] } : {}),
           failureReason: `Marked ${effect.status} by cascade from '${result.source}'${effect.notifyParent ? ' (parent notified)' : ''}`,
         });
       }
@@ -116,8 +122,9 @@ export function handleCascadeEffect(
     }
 
     case 'DEREGISTER_TOOLS': {
+      enforced = false;
       // Publish the request for the host that owns the tool registry.
-      const pluginId = result.sourceContext?.['pluginId'];
+      const pluginId = effect.pluginId ?? result.sourceContext?.['pluginId'];
       const scope = pluginId ? `plugin:${pluginId}` : 'all-plugins';
 
       if (result.target !== 'ALL') {
@@ -170,7 +177,7 @@ export function handleCascadeEffect(
   }
 
   // Emit CASCADE_APPLIED event for observability
-  const appliedEvent = createCascadeAppliedEvent(result);
+  const appliedEvent = createCascadeAppliedEvent(result, enforced);
   const appliedEnvelope = createEventEnvelope(
     'CASCADE_APPLIED',
     appliedEvent,

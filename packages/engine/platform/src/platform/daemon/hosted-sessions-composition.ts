@@ -29,6 +29,7 @@ import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 
 import { existsSync, statSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
@@ -82,6 +83,8 @@ export interface HostedSessionCompositionInput {
   readonly liveTurns: SessionLiveTurnControlsHolder;
   readonly eventPublisher: HostedSessionEventPublisher;
   readonly spine?: HostedSessionSpine | undefined;
+  /** The daemon's bearer token, read live; a hosted session's Cloudflare status counts it as the Worker operator token. */
+  readonly cloudflareAuthToken?: (() => string | null) | undefined;
 }
 
 /** The default prompt: what this session is, stated plainly. */
@@ -139,6 +142,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     systemPrompt: input.options.systemPrompt ?? defaultHostedSystemPrompt,
     liveTurns: input.liveTurns,
     ...(input.spine === undefined ? {} : { spine: input.spine }),
+    ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
     isWorkspaceUsable: input.options.isWorkspaceUsable ?? isExistingDirectory,
   });
   if (input.options.nativeConversation) {
@@ -164,6 +168,7 @@ export function composeHostedSessionsForFacade(
   configManager: ConfigManager,
   runtimeBus: RuntimeEventBus,
   eventPublisher: HostedSessionEventPublisher,
+  cloudflareAuthToken?: () => string | null,
 ): HostedSessionManager | null {
   // No options is the honest off state, not a missing wire: this daemon hosts
   // no conversation loops, and the verbs say so with the catalog's own coded
@@ -182,15 +187,39 @@ export function composeHostedSessionsForFacade(
     liveTurns: runtimeServices.sessionLiveTurnControls,
     eventPublisher,
     spine: runtimeServices.sessionBroker,
+    ...(cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken }),
   });
   // Hand the broker's idle reaper a way to ask this engine whether a hosted
   // session is mid-turn. Without it the reaper judges a hosted session only by
   // signals a hosted turn never emits, and closes it 'idle-reaped' while its
   // turn is still running.
   runtimeServices.sessionBroker.setExternalLivenessProbe(createHostedSessionLivenessProbe(manager));
+  // Closing the broker record of a hosted session ends the hosted session too; otherwise its
+  // next registration re-opens the record the operator just closed.
+  attachHostedSessionCloseSync(manager, runtimeServices.sessionBroker);
   // The contracts.* methods read and act across the hosted floors' runners too.
   runtimeServices.contractOperator.attachHosted(manager.contractRunners());
   return manager;
+}
+
+/**
+ * Terminate each live hosted session whose broker record was closed from
+ * outside the engine. Returns the unsubscribe.
+ */
+export function attachHostedSessionCloseSync(
+  manager: Pick<HostedSessionManager, 'list' | 'kill'>,
+  broker: Pick<SharedSessionBroker, 'getSession' | 'subscribe'>,
+): () => void {
+  return broker.subscribe(() => {
+    for (const record of manager.list()) {
+      const brokered = broker.getSession(record.id);
+      // No record is not a close: a session is hosted a moment before it is registered with the broker.
+      if (brokered?.status !== 'closed') continue;
+      manager.kill(record.id).catch((error: unknown) => {
+        logger.warn('[hosted-sessions] could not end a hosted session whose broker record is closed', { sessionId: record.id, error: summarizeError(error) });
+      });
+    }
+  });
 }
 
 /**

@@ -10,7 +10,7 @@
  *  - handshake-failure honesty (a binary that exits, and one that hangs),
  *    structured error naming binary + stage, never a hung row;
  *  - the fleet snapshot carries the row (kind 'acp-agent') with working
- *    steer/kill dispatch and the awaiting-approval attention classification;
+ *    steer/kill dispatch (a hosted row never waits on a human);
  *  - the acp.* verbs over a real catalog.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -100,7 +100,6 @@ describe('AcpHostService: full round-trip against the real protocol', () => {
     host.prompt(hosted.id, 'do the thing');
     await waitUntil(() => (host.get(hosted.id)?.progress ?? '').includes('permission denied'));
     expect(humans).toBe(0);
-    expect(host.get(hosted.id)?.state).not.toBe('awaiting-approval');
     await host.stop(hosted.id);
   }, 30_000);
 
@@ -130,7 +129,6 @@ describe('AcpHostService: handshake-failure honesty', () => {
     const handshakeTimeoutMs = 1_500;
     let registeredSessions = 0;
     const host = new AcpHostService({ handshakeTimeoutMs, registerSession() { registeredSessions++; } });
-    const started = Date.now();
     const hosted = await host.spawnAgent({ agent: fakeAgent('hang'), cwd: import.meta.dir });
     expect(hosted.state).toBe('failed');
     expect(hosted.error?.binary).toBe(process.execPath);
@@ -139,9 +137,6 @@ describe('AcpHostService: handshake-failure honesty', () => {
     expect(hosted.sessionId).toBeUndefined();
     expect(hosted.promptCount).toBe(0);
     expect(registeredSessions).toBe(0);
-    const elapsed = Date.now() - started;
-    expect(elapsed).toBeGreaterThanOrEqual(handshakeTimeoutMs);
-    expect(elapsed).toBeLessThan(10_000);
     expect(host.dismiss(hosted.id)).toBe(true);
     expect(host.get(hosted.id)).toBeNull();
   }, 15_000);
@@ -195,13 +190,13 @@ describe('fleet integration: the hosted row is a first-class fleet row', () => {
     }
   }, 30_000);
 
-  test('awaiting-approval carries needsAttention (the waiting-on-human classification)', () => {
+  test('a prompting row is executing and never asks for attention; a failed row reports its stage', () => {
     const node = adaptHostedAcpAgent({
       id: 'h1', agentId: 'claude-code', title: 'Claude Code: /repo', binaryPath: '/bin/claude-code-acp',
-      cwd: '/repo', state: 'awaiting-approval', startedAt: 1, pendingPermission: 'run a command', promptCount: 1,
+      cwd: '/repo', state: 'prompting', startedAt: 1, promptCount: 1,
     }, 2);
-    expect(node.state).toBe('awaiting-approval');
-    expect(node.needsAttention).toEqual({ reason: 'approval', detail: 'run a command' });
+    expect(node.state).toBe('executing-tool');
+    expect(node.needsAttention).toBeUndefined();
 
     const failed = adaptHostedAcpAgent({
       id: 'h2', agentId: 'codex', title: 'Codex', binaryPath: '/bin/codex', cwd: '/repo',

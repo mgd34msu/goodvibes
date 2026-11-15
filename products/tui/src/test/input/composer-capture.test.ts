@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { applyComposerCapture } from '@/input/composer-capture.ts';
+import { applyComposerCapture, shouldSendAfterCapture } from '@/input/composer-capture.ts';
 
 function harness() {
   const added: string[] = [];
@@ -73,5 +73,19 @@ describe('applyComposerCapture', () => {
     applyComposerCapture(`# ${long}`, h.deps);
     expect(h.messages[0].length).toBeLessThan(120);
     expect(h.messages[0]).toContain('...');
+  });
+});
+
+describe('shouldSendAfterCapture', () => {
+  test('a saved note with an attached image sends nothing', () => {
+    const h = harness();
+    const capture = applyComposerCapture('# remember this', h.deps);
+    expect(shouldSendAfterCapture(capture, true)).toBe(false);
+  });
+
+  test('an image with no text still sends, and a pinned prompt sends', () => {
+    const h = harness();
+    expect(shouldSendAfterCapture(applyComposerCapture('', h.deps), true)).toBe(true);
+    expect(shouldSendAfterCapture(applyComposerCapture('!# keep this', h.deps), false)).toBe(true);
   });
 });

@@ -57,6 +57,11 @@ export function registerQrcodeRuntimeCommands(registry: CommandRegistry): void {
     hidden: true,
     usage: '',
     handler(args, ctx) {
+      // The QR payload and the --show-token text both carry the host's admin token.
+      if (ctx.invokedByModel === true) {
+        ctx.print('Pairing details contain the connected host operator token, so /qrcode is refused when a model runs it. The owner can type /qrcode in the live Agent terminal.');
+        return;
+      }
       const shellPaths = requireShellPaths(ctx);
       const configManager = requirePlatform(ctx).configManager;
       const tokenRecord = readConnectedHostOperatorToken(shellPaths.homeDirectory);

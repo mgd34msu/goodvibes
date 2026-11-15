@@ -12,7 +12,7 @@
  * client that opened them; a single session can also override the setting when
  * it is created.
  */
-import { type ConfigSettingDefinition } from './schema-shared.js';
+import { intRange, type ConfigSettingDefinition } from './schema-shared.js';
 
 export interface HostedSessionsSettings {
   detachPolicy: 'kill' | 'survive';
@@ -81,24 +81,28 @@ export const hostedSessionsConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     default: 8,
     description: 'How many daemon-hosted sessions may be live at once. Creating one past this is refused with the count and this setting named, rather than accepted and starved. Terminated sessions do not count.',
+    ...intRange(1, 1_000),
   },
   {
     key: 'hostedSessions.maxMessagesPerSession',
     type: 'number',
     default: 500,
     description: 'How many of a hosted session\'s most recent messages are written to disk. The transcript in memory is unaffected; this bounds what a restart can restore, so one long conversation cannot grow its file without limit.',
+    ...intRange(1, 100_000),
   },
   {
     key: 'hostedSessions.terminatedRetentionMs',
     type: 'number',
     default: 24 * 60 * 60_000,
     description: 'How long a terminated hosted session\'s record is kept before it is retired, in milliseconds. Until then it is still listable with its termination reason, so a session that ended can be asked about rather than having simply vanished.',
+    ...intRange(0, 31_536_000_000),
   },
   {
     key: 'hostedSessions.attachmentTtlMs',
     type: 'number',
     default: 10 * 60_000,
-    description: 'How long a client stays attached to a daemon-hosted session without renewing, in milliseconds. Attaching again renews it, and a client whose control-plane connection is still open renews automatically. A client that crashed or closed its tab never detaches, so without this its attachment stands forever and a kill-policy session waits for a departure that never comes. When the last attachment lapses the session is treated as detached, and hostedSessions.detachPolicy decides what happens next. Clamped to at least 30 seconds and at most a day.',
+    description: 'How long a client stays attached to a daemon-hosted session without renewing, in milliseconds. Attaching again renews it, and a client whose control-plane connection is still open renews automatically. A client that crashed or closed its tab never detaches, so without this its attachment stands forever and a kill-policy session waits for a departure that never comes. When the last attachment lapses the session is treated as detached, and hostedSessions.detachPolicy decides what happens next. Between 30 seconds and a day.',
+    ...intRange(30_000, 86_400_000),
   },
   {
     key: 'hostedSessions.promoteInboundConversations',
@@ -110,6 +114,6 @@ export const hostedSessionsConfigSettings: ConfigSettingDefinition[] = [
     key: 'hostedSessions.routeConversationTurns',
     type: 'boolean',
     default: true,
-    description: 'Run this surface\'s own conversation turns inside the connected daemon rather than in this process. On (the default) and with a connected daemon reachable: the first message of a conversation creates a daemon-hosted session rooted at this surface\'s working directory, every later message is steered into it, and this surface renders the turn from the daemon\'s event stream, so the turn survives this process closing and every surface sees one conversation. The daemon holds the authoritative transcript; this surface still keeps its own local record of what the stream delivered. Off: every turn runs in this process, as it always did. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason, it is never silent about where a turn ran. This is about what happens when you press enter; hostedSessions.promoteInboundConversations is the same question for messages arriving from a channel.',
+    description: 'Only goodvibes-agent routes its conversation turns this way; the terminal product (goodvibes) always runs turns in its own process and ignores this setting. Run the agent\'s own conversation turns inside the connected daemon rather than in this process. On (the default) and with a connected daemon reachable: the first message of a conversation creates a daemon-hosted session rooted at this surface\'s working directory, every later message is steered into it, and this surface renders the turn from the daemon\'s event stream, so the turn survives this process closing and every surface sees one conversation. The daemon holds the authoritative transcript; this surface still keeps its own local record of what the stream delivered. Off: every turn runs in this process, as it always did. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason, it is never silent about where a turn ran. This is about what happens when you press enter; hostedSessions.promoteInboundConversations is the same question for messages arriving from a channel.',
   },
 ];

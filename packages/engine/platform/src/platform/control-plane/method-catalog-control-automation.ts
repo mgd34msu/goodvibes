@@ -55,7 +55,8 @@ import { METADATA_SCHEMA } from './operator-contract-schemas-shared.js';
  * required for an interval schedule. The union below is discriminated on
  * `kind`, with the cron branch appearing twice because the handler also
  * accepts the expression nested as `schedule.expression`, that path works
- * today and stays valid.
+ * today and stays valid. The `every` and `at` branches also require `kind`:
+ * the handler would otherwise read `{ every }` as a cron schedule.
  */
 function automationScheduleInputSchema(
   properties: Record<string, Record<string, unknown>>,
@@ -68,11 +69,13 @@ function automationScheduleInputSchema(
     every: STRING_SCHEMA,
     at: STRING_SCHEMA,
   };
+  // The handler reads a missing `kind` as `'cron'`, so only the cron branches
+  // may leave it out; an interval or one-shot schedule must say which it is.
   const branch = (kinds: readonly string[], scheduleField: string): Record<string, unknown> =>
     requirementBranch({
       kind: stringEnumSchema([...kinds]),
       [scheduleField]: branchProperty[scheduleField] as Record<string, unknown>,
-    }, [scheduleField]);
+    }, kinds.includes('cron') ? [scheduleField] : ['kind', scheduleField]);
   return branchedSchema(
     bodyEnvelopeSchema({
       ...properties,
@@ -119,6 +122,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Create a durable automation job.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/jobs' },
     events: [runtimeEventId('automation')],
     inputSchema: automationScheduleInputSchema({
@@ -161,6 +165,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'PATCH', path: '/api/automation/jobs/{jobId}' },
     events: [runtimeEventId('automation')],
     inputSchema: bodyEnvelopeSchema({
@@ -191,7 +196,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
       enabled: BOOLEAN_SCHEMA,
       deleteAfterRun: BOOLEAN_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['jobId']),
     outputSchema: AUTOMATION_JOB_SCHEMA,
   }),
   methodDescriptor({
@@ -200,6 +205,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Delete a durable automation job.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'DELETE', path: '/api/automation/jobs/{jobId}' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['jobId']),
@@ -212,6 +218,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Enable a durable automation job.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/jobs/{jobId}/enable' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['jobId']),
@@ -223,6 +230,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Disable a durable automation job.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/jobs/{jobId}/disable' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['jobId']),
@@ -241,6 +249,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Trigger an automation job immediately.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/jobs/{jobId}/run' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA }, ['jobId']),
@@ -276,6 +285,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Cancel an active automation run.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/runs/{runId}/cancel' },
     inputSchema: objectSchema({ runId: STRING_SCHEMA }, ['runId']),
     outputSchema: AUTOMATION_RUN_ACTION_OUTPUT_SCHEMA,
@@ -286,6 +296,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Retry a completed or failed automation run.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/runs/{runId}/retry' },
     inputSchema: objectSchema({ runId: STRING_SCHEMA }, ['runId']),
     outputSchema: AUTOMATION_RUN_ACTION_OUTPUT_SCHEMA,
@@ -306,6 +317,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Process automation jobs queued for the next heartbeat.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/heartbeat' },
     events: [runtimeEventId('automation')],
     inputSchema: bodyEnvelopeSchema({ source: STRING_SCHEMA }),
@@ -348,6 +360,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Create a schedule record.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/schedules' },
     inputSchema: automationScheduleInputSchema({
       name: STRING_SCHEMA,
@@ -385,6 +398,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Delete a schedule record.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'DELETE', path: '/api/automation/schedules/{scheduleId}' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['scheduleId']),
     outputSchema: REMOVE_WITH_ID_OUTPUT_SCHEMA,
@@ -396,6 +410,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Enable a schedule record.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/enable' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['scheduleId']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, enabled: BOOLEAN_SCHEMA }, ['id', 'enabled'], { additionalProperties: true }),
@@ -406,6 +421,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Disable a schedule record.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/disable' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA, admission: stringEnumSchema(['autonomous']) }, ['scheduleId']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, enabled: BOOLEAN_SCHEMA }, ['id', 'enabled'], { additionalProperties: true }),
@@ -416,6 +432,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     description: 'Trigger a schedule immediately.',
     category: 'automation',
     scopes: ['write:automation'],
+    access: 'admin',
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/run' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA }, ['scheduleId']),
     outputSchema: AUTOMATION_RUN_TRIGGER_OUTPUT_SCHEMA,
@@ -447,6 +464,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'List Route Bindings',
     description: 'Return configured route bindings.',
     category: 'routes',
+    access: 'admin',
     scopes: ['read:routes'],
     http: { method: 'GET', path: '/api/routes/bindings' },
     events: [runtimeEventId('routes')],
@@ -502,7 +520,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
       runId: STRING_SCHEMA,
       title: STRING_SCHEMA,
       metadata: METADATA_SCHEMA,
-    }),
+    }, ['bindingId']),
     outputSchema: ROUTE_BINDING_SCHEMA,
   }),
   methodDescriptor({

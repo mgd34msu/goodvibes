@@ -13,6 +13,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { ArtifactStore } from '../artifacts/index.js';
 import type { MemoryRegistry } from '../state/index.js';
+import { SQLiteObservationRetiredError } from '../state/sqlite-store.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { createDefaultKnowledgeConnectorRegistry, KnowledgeConnectorRegistry } from './connectors.js';
 import { renderKnowledgeMap, type KnowledgeMapRenderOptions } from './map.js';
@@ -20,6 +21,8 @@ import { normalizeKnowledgeMapFilters } from './map-filters.js';
 import { KnowledgeProjectionService } from './projections.js';
 import { KnowledgeSemanticService } from './semantic/index.js';
 import { KnowledgeStore } from './store.js';
+import { KnowledgeRefinementTaskRefusedError } from './store-conflict.js';
+import { knowledgeRefinementTaskLifecycle } from './types.js';
 import {
   reviewKnowledgeNodeRecord,
   queryKnowledgeIssues,
@@ -125,7 +128,12 @@ export interface KnowledgeServiceConfig {
   readonly configManager?: {
     getControlPlaneConfigDir?: (() => string) | undefined;
   };
-  readonly memoryRegistry: Pick<MemoryRegistry, 'add' | 'getAll' | 'getStore'>;
+  /**
+   * `subscribe`, when present, keeps the knowledge copy of memory current: a
+   * memory that is deleted, retracted or edited leaves knowledge search at once
+   * instead of at the next unrelated ingest.
+   */
+  readonly memoryRegistry: Pick<MemoryRegistry, 'add' | 'getAll' | 'getStore'> & Partial<Pick<MemoryRegistry, 'subscribe'>>;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
   /** Borrowed; its creator must dispose it after this service's work drains. */
   readonly semanticService?: KnowledgeSemanticService | undefined;
@@ -135,6 +143,15 @@ export interface KnowledgeServiceConfig {
    * refused with an honest structured error instead of piling on allocation.
    */
   readonly admitExpensiveWork?: ((label: string) => { allowed: boolean; reason?: string | undefined }) | undefined;
+}
+
+/** `recompileFailures` lists sources that could not be recompiled; every other source was. */
+export interface KnowledgeReindexResult {
+  readonly status: KnowledgeStatus;
+  readonly issues: readonly KnowledgeIssueRecord[];
+  readonly provenance?: 'classic';
+  readonly recompileFailures?: readonly { readonly sourceId: string; readonly error: string }[];
+  readonly semanticEnrichment: 'attempted' | 'not-evaluated';
 }
 
 export interface KnowledgeServiceStatus extends KnowledgeStatus {
@@ -147,6 +164,11 @@ export class KnowledgeService {
   private readonly semanticService: KnowledgeSemanticService;
   private readonly ownsSemanticService: boolean;
   private closing: Promise<void> | undefined;
+  private readonly unsubscribeMemory: (() => void) | undefined;
+  private memoryMirror: Promise<void> = Promise.resolve();
+  private memorySync: Promise<unknown> = Promise.resolve();
+  private memoryMirrorRunning = false;
+  private memoryMirrorPending = false;
   private runtimeBus: RuntimeEventBus | null;
 
   constructor(
@@ -165,6 +187,7 @@ export class KnowledgeService {
     const semanticService = options.semanticService;
     this.ownsSemanticService = semanticService === undefined;
     this.semanticService = semanticService ?? new KnowledgeSemanticService(this.store);
+    this.unsubscribeMemory = options.memoryRegistry.subscribe?.(() => this.queueMemoryMirror());
     this.scheduleService = new KnowledgeScheduleService({
       store: this.store,
       emitIfReady: this.emitIfReady.bind(this),
@@ -218,6 +241,14 @@ export class KnowledgeService {
 
   attachRuntimeBus(runtimeBus: RuntimeEventBus | null | undefined): void {
     if (runtimeBus) this.runtimeBus = runtimeBus;
+  }
+
+  /**
+   * Adopt a knowledge file another process saved since this store last loaded or wrote it.
+   * Call it only at the start of a read a person asked for; never inside a multi-step operation.
+   */
+  refreshFromDisk(): Promise<boolean> {
+    return this.store.refreshIfChanged();
   }
 
   async getStatus(scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeServiceStatus> {
@@ -391,13 +422,19 @@ export class KnowledgeService {
   }
 
   async listExtractions(limit = 100, sourceId?: string, scope: KnowledgeSpaceScopeInput = {}, options: KnowledgeScopeSelectionOptions = {}): Promise<KnowledgeExtractionRecord[]> {
-    const selection = await prepareKnowledgeScopeSelection(this.store, scope, options);
+    // A single-source lookup only needs that source judged, not every record in the space.
+    const bounded: KnowledgeScopeSelectionOptions = sourceId
+      ? { ...options, kinds: ['source'], sourceIds: options.sourceIds ? options.sourceIds.filter((id) => id === sourceId) : [sourceId] }
+      : options;
+    const selection = await prepareKnowledgeScopeSelection(this.store, scope, bounded);
     return this.selectedExtractions(selection, limit, sourceId);
   }
 
   private selectedExtractions(selection: KnowledgeScopeSelection, limit: number, sourceId?: string): KnowledgeExtractionRecord[] {
-    const records = this.store.listExtractions(Number.MAX_SAFE_INTEGER)
-      .filter((entry) => !sourceId || entry.sourceId === sourceId)
+    const candidates = sourceId
+      ? [this.store.getExtractionBySourceId(sourceId)].filter((entry): entry is KnowledgeExtractionRecord => entry !== null)
+      : this.store.listExtractions(Number.MAX_SAFE_INTEGER);
+    const records = candidates
       .filter((entry) => {
         const source = this.store.getSource(entry.sourceId);
         return Boolean(source && selection.source(source));
@@ -662,7 +699,9 @@ export class KnowledgeService {
     readonly path: string;
     readonly sessionId?: string | undefined;
     readonly allowPrivateHosts?: boolean | undefined;
+    readonly metadata?: Record<string, unknown> | undefined;
   }): Promise<KnowledgeBatchIngestResult> {
+    this.requireAdmission('knowledge bookmark import');
     return importKnowledgeBookmarksFromFile(this.getIngestContext(), input);
   }
 
@@ -670,7 +709,9 @@ export class KnowledgeService {
     readonly path: string;
     readonly sessionId?: string | undefined;
     readonly allowPrivateHosts?: boolean | undefined;
+    readonly metadata?: Record<string, unknown> | undefined;
   }): Promise<KnowledgeBatchIngestResult> {
+    this.requireAdmission('knowledge url import');
     return importKnowledgeUrlsFromFile(this.getIngestContext(), input);
   }
 
@@ -680,8 +721,10 @@ export class KnowledgeService {
     sourceType: KnowledgeSourceType = 'bookmark',
     connectorId = 'bookmark',
     allowPrivateHosts?: boolean,
+    metadata?: Record<string, unknown>,
   ): Promise<KnowledgeBatchIngestResult> {
-    return ingestKnowledgeBookmarkSeeds(this.getIngestContext(), seeds, sessionId, sourceType, connectorId, allowPrivateHosts);
+    this.requireAdmission('knowledge bookmark ingestion');
+    return ingestKnowledgeBookmarkSeeds(this.getIngestContext(), seeds, sessionId, sourceType, connectorId, allowPrivateHosts, metadata);
   }
 
   async ingestWithConnector(
@@ -689,8 +732,10 @@ export class KnowledgeService {
     input: unknown,
     sessionId?: string,
     allowPrivateHosts?: boolean,
+    metadata?: Record<string, unknown>,
   ): Promise<KnowledgeBatchIngestResult> {
-    return ingestKnowledgeWithConnector(this.getIngestContext(), connectorId, input, sessionId, allowPrivateHosts);
+    this.requireAdmission('knowledge connector ingestion');
+    return ingestKnowledgeWithConnector(this.getIngestContext(), connectorId, input, sessionId, allowPrivateHosts, metadata);
   }
 
   async ingestConnectorInput(input: {
@@ -700,13 +745,16 @@ export class KnowledgeService {
     readonly path?: string | undefined;
     readonly sessionId?: string | undefined;
     readonly allowPrivateHosts?: boolean | undefined;
+    readonly metadata?: Record<string, unknown> | undefined;
   }): Promise<KnowledgeBatchIngestResult> {
+    this.requireAdmission('knowledge connector ingestion');
     return ingestKnowledgeConnectorInput(this.getIngestContext(), input);
   }
 
   async syncBrowserHistory(
     input: BrowserKnowledgeIngestOptions = {},
   ): Promise<BrowserKnowledgeIngestResult> {
+    this.requireAdmission('knowledge browser history sync');
     return ingestBrowserKnowledge(this.getIngestContext(), input);
   }
 
@@ -784,18 +832,37 @@ export class KnowledgeService {
     }, selection, request);
   }
 
-  async reindex(): Promise<{ status: KnowledgeStatus; issues: readonly KnowledgeIssueRecord[]; provenance?: 'classic'; semanticEnrichment: 'attempted' | 'not-evaluated' }> {
+  async reindex(): Promise<KnowledgeReindexResult> {
+    this.requireAdmission('knowledge reindex');
+    return this.reindexAdmitted();
+  }
+
+  private async reindexAdmitted(): Promise<KnowledgeReindexResult> {
     return withConfiguredDecisionModelPolicy(async () => {
       await this.store.init();
-      for (const source of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
-        if (isGeneratedKnowledgeSource(source)) continue;
-        await recompileKnowledgeSource(this.getIngestContext(), source);
+      const recompileFailures: { sourceId: string; error: string }[] = [];
+      for (const listed of this.store.listSources(Number.MAX_SAFE_INTEGER)) {
+        if (isGeneratedKnowledgeSource(listed)) continue;
+        // Another writer may have removed it since the list was taken.
+        const source = this.store.getSource(listed.id);
+        if (!source) continue;
+        try {
+          await recompileKnowledgeSource(this.getIngestContext(), source);
+        } catch (error) {
+          // One source that moved or cannot be extracted must not leave the
+          // rest of the store unindexed; a fault in the store itself still stops the run.
+          if (error instanceof SQLiteObservationRetiredError || (error instanceof Error && error.message.startsWith('SQLiteStore:'))) throw error;
+          const reason = summarizeError(error);
+          logger.warn('Knowledge reindex could not recompile a source', { sourceId: source.id, error: reason });
+          recompileFailures.push({ sourceId: source.id, error: reason });
+        }
       }
       if (!isClassicOperation()) await this.semanticService.reindex({ force: false });
       await this.syncReviewedMemory();
       const issues = await lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) });
       return { status: this.store.status(), issues,
         ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+        ...(recompileFailures.length > 0 ? { recompileFailures } : {}),
         semanticEnrichment: isClassicOperation() ? 'not-evaluated' as const : 'attempted' as const };
     });
   }
@@ -822,8 +889,13 @@ export class KnowledgeService {
     readonly includeSources?: boolean | undefined;
     readonly includeConfidence?: boolean | undefined;
     readonly includeLinkedObjects?: boolean | undefined;
-  }) {
-    return this.semanticService.answer(input);
+  }, options: Pick<KnowledgeScopeSelectionOptions, 'signal' | 'assertCurrent'> = {}) {
+    options.assertCurrent?.();
+    await this.store.refreshIfChanged();
+    options.assertCurrent?.();
+    const answer = await this.semanticService.answer(options.signal ? { ...input, signal: options.signal } : input);
+    options.assertCurrent?.();
+    return answer;
   }
 
   async buildPacket(
@@ -914,6 +986,11 @@ export class KnowledgeService {
   async cancelRefinementTask(id: string): Promise<KnowledgeRefinementTaskRecord | null> {
     const task = this.store.getRefinementTask(id);
     if (!task) return null;
+    if (task.state === 'cancelled') return task;
+    // A closed or suppressed task is a final decision; the store would keep it
+    // unchanged and report success, so refuse and say why.
+    const move = knowledgeRefinementTaskLifecycle.check(task.state, 'cancelled');
+    if (!move.ok) throw new KnowledgeRefinementTaskRefusedError(task.id, task.state, move.reason);
     return this.store.upsertRefinementTask({
       id: task.id,
       spaceId: task.spaceId,
@@ -945,6 +1022,11 @@ export class KnowledgeService {
     readonly maxRunMs?: number | undefined;
     readonly force?: boolean | undefined;
   } = {}) {
+    // Inside the semantic service a limit of 0 means "every candidate"; a caller
+    // that passes 0 meaning "none" must be refused, not given an unbounded run.
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+      throw new Error(`Refinement limit must be a positive integer (received ${String(input.limit)}); omit it to process every candidate gap.`);
+    }
     return this.semanticService.selfImprove({
       knowledgeSpaceId: input.knowledgeSpaceId,
       gapIds: input.gapIds,
@@ -974,13 +1056,14 @@ export class KnowledgeService {
   ): Promise<Record<string, unknown>> {
     return runKnowledgeServiceJobByKind(kind, input, {
       lint: () => lintKnowledgeStore({ store: this.store, emitIfReady: this.emitIfReady.bind(this) }),
-      reindex: () => this.reindex(),
+      reindex: () => this.reindexAdmitted(),
       refreshSources: async (refreshKind, sourceIds, limit) =>
         refreshKnowledgeSources(
           this.getIngestContext(),
           pickKnowledgeRefreshCandidates({ store: this.store }, refreshKind, sourceIds, limit),
         ),
-      syncBrowserHistory: (options) => this.syncBrowserHistory(options),
+      // The job was admitted when it was requested; asking again would refuse it halfway.
+      syncBrowserHistory: (options) => ingestBrowserKnowledge(this.getIngestContext(), options),
       materializeProjection: (options) => this.materializeProjection(options),
       semanticService: this.semanticService,
       runConsolidation: (jobKind, options) =>
@@ -1009,8 +1092,30 @@ export class KnowledgeService {
     });
   }
 
-  private async syncReviewedMemory(): Promise<void> {
-    await syncKnowledgeMemoryNodes(this.store, this.options.memoryRegistry);
+  /** Mirror passes never overlap: two at once would each find the other's writes stale. */
+  private syncReviewedMemory(): Promise<void> {
+    const pass = this.memorySync.then(() => syncKnowledgeMemoryNodes(this.store, this.options.memoryRegistry));
+    this.memorySync = pass.catch(() => undefined);
+    return pass;
+  }
+
+  /** One mirror pass at a time; changes that arrive during a pass cause one more pass. */
+  private queueMemoryMirror(): void {
+    if (this.closing) return;
+    if (this.memoryMirrorRunning) { this.memoryMirrorPending = true; return; }
+    this.memoryMirrorRunning = true;
+    this.memoryMirror = (async () => {
+      try {
+        do {
+          this.memoryMirrorPending = false;
+          await this.syncReviewedMemory();
+        } while (this.memoryMirrorPending && !this.closing);
+      } catch (error) {
+        logger.warn('Knowledge memory mirror failed after a memory change', { error: summarizeError(error) });
+      } finally {
+        this.memoryMirrorRunning = false;
+      }
+    })();
   }
 
   /** Stop timers immediately and drain startup plus internally owned semantic
@@ -1023,12 +1128,15 @@ export class KnowledgeService {
     // Compatibility callers may still ignore dispose's return; close owners can
     // await the same promise and observe its original failure after all drains.
     drainOwned(this.closing);
+    this.unsubscribeMemory?.();
     let semanticDrain: Promise<void> | undefined;
+    let scheduleDrain: Promise<void> | undefined;
     try {
-      this.scheduleService.dispose();
+      // Settles this process's in-flight job runs while the store is still open.
+      scheduleDrain = this.scheduleService.dispose();
       semanticDrain = this.ownsSemanticService ? this.semanticService.dispose() : undefined;
     } catch (error) { semanticDrain = Promise.reject(error); }
-    void Promise.allSettled([this.scheduleService.whenReady(), semanticDrain]).then(results => {
+    void Promise.allSettled([this.scheduleService.whenReady(), scheduleDrain, semanticDrain, this.memoryMirror]).then(results => {
       const failure = results.find(result => result.status === 'rejected');
       if (failure?.status === 'rejected') closing.reject(failure.reason);
       else closing.resolve();

@@ -7,7 +7,8 @@ import { handleConfigModalToken } from '../../../input/handler-modal-routes.ts';
 import { renderConfigModal } from '../../../renderer/config-modal.ts';
 import { modalGeometry, MODAL_PAD_X } from '../../../renderer/surface-kit.ts';
 import { frameFromLayer } from '../../helpers/surface-frame.ts';
-const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+// One macrotask: every in-memory promise continuation has run before it resumes.
+const tick = () => new Promise<void>(resolve => { setImmediate(resolve); });
 const snapshot = (projectId = 'host-project', cursor = 0): WorkLedgerReadSnapshot => ({ projectId, revision: cursor, cursor, works: [{
   work: { source: null, id: 'work-1', title: 'Native title', goal: 'Native intent', criteria: ['real criterion'], revision: 3, criteriaRevision: 2, reportedState: 'complete', currentAttemptId: 'attempt-1', createdAt: 1, updatedAt: 2 },
   attempt: { id: 'attempt-1', workId: 'work-1', predecessorId: null, ownerId: 'worker', revision: 2, state: 'complete', report: 'done', blocker: null, createdAt: 1, updatedAt: 2 },

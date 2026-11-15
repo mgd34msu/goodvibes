@@ -46,7 +46,7 @@
  * handler takes a narrower `{ mode, baseUrl }` signal instead, so the adapting
  * happens inside this module rather than at the call site.
  */
-import { createHttpTransport, type HostServiceStatus } from '@/runtime/index.ts';
+import { createHttpTransport, type HostServiceStatus, type HttpTransportOptions } from '@/runtime/index.ts';
 import { createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -54,7 +54,10 @@ import { createTuiSpineTransport, type SpineSessionsClient } from '../session-sp
 import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 
 /** This module's own options: the platform's shape minus the two fields it builds itself. */
-export type SpineAdoptionOptions = Omit<PlatformSpineAdoptionOptions, 'connect' | 'activation'>;
+export type SpineAdoptionOptions = Omit<PlatformSpineAdoptionOptions, 'connect' | 'activation'> & {
+  /** Retry observers for the daemon wire, so its retries reach the runtime bus and the retry counter. */
+  readonly retryHooks?: Pick<HttpTransportOptions, 'onRetryScheduled' | 'onRetryExecuted'> | undefined;
+};
 
 /**
  * Build the "the adopted daemon changed" handler.
@@ -66,14 +69,15 @@ export type SpineAdoptionOptions = Omit<PlatformSpineAdoptionOptions, 'connect' 
 export function createSpineAdoptionSync(
   options: SpineAdoptionOptions,
 ): (daemonStatus: HostServiceStatus, sharedDaemonToken: string) => void {
+  const { retryHooks, ...platformOptions } = options;
   const sync = createPlatformSpineAdoptionSync({
-    ...options,
+    ...platformOptions,
     // This terminal has a boot discovery probe and can render "no daemon"
     // honestly, so it gates on the probe's verdict rather than wiring the
     // moment it is handed a base URL.
     activation: 'adopt-on-status',
     connect: (baseUrl, authToken) => {
-      const httpTransport = createHttpTransport({ baseUrl, authToken });
+      const httpTransport = createHttpTransport({ baseUrl, authToken, ...retryHooks });
       const sessionsClient: SpineSessionsClient = {
         register: (input) => httpTransport.operator.sessions.register(input),
         close: (sessionId) => httpTransport.operator.sessions.close(sessionId),
@@ -84,6 +88,8 @@ export function createSpineAdoptionSync(
           listInputs: async (sessionId, opts) => ({
             inputs: await httpTransport.operator.sessions.inputs(sessionId, opts.limit, { state: opts.state, since: opts.since }),
           }),
+          claimInput: (sessionId, inputId) =>
+            httpTransport.operator.sessions.deliverInput(sessionId, inputId, { claim: true }),
           deliverInput: (sessionId, inputId, opts) =>
             httpTransport.operator.sessions.deliverInput(sessionId, inputId, opts),
         },

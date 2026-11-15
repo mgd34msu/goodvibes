@@ -92,10 +92,14 @@ function relatedSettingCommands(
     const key = typeof setting.key === 'string' ? setting.key : '';
     const related = key ? settingDomainRelatedCommand(key) : undefined;
     if (!related || seen.has(related.command)) continue;
+    // A command with a subcommand is a flow the person types themselves (the card prompt): running only its
+    // root would be a different command, so no model route is offered for it.
+    const personOnly = related.command.trim().includes(' ');
     seen.set(related.command, {
       command: related.command,
       why: related.why,
-      modelRoute: `agent_harness mode:"run_command" commandName:"${related.command.replace(/^\//, '').split(' ')[0]}"`,
+      userRoute: related.command,
+      ...(personOnly ? {} : { modelRoute: `agent_harness mode:"run_command" commandName:"${related.command.replace(/^\//, '')}"` }),
     });
   }
   return Array.from(seen.values());

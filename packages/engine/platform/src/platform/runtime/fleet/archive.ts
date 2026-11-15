@@ -30,6 +30,12 @@ export interface FleetArchiveResult {
 }
 
 export interface FleetArchiveView {
+  /**
+   * The wrapped registry, with nothing hidden. Observers that diff the fleet over time
+   * (the emit bridge) attach here: archiving hides a node from the view, it must not
+   * read as that node ending, and unarchiving must not read as a new one starting.
+   */
+  readonly unfiltered: ProcessRegistry;
   /** Archive one finished subtree by root node id. Honest refusal for missing or still-running subtrees. */
   archive(id: string): FleetArchiveResult;
   /** Return an archived subtree to the live view. Returns the number of nodes unarchived. */
@@ -76,7 +82,17 @@ export function withFleetArchive(registry: ProcessRegistry): ArchivableProcessRe
     nodes: snapshot.nodes.filter((node) => !archivedIds.has(node.id)),
   });
 
+  // Forget archived ids the sources no longer hold, so the count is honest and
+  // an id the source reuses later is not born hidden. Only a full snapshot may
+  // prune: a filtered query omits nodes that still exist.
+  const prune = (full: FleetSnapshot): void => {
+    if (archivedIds.size === 0) return;
+    const present = new Set(full.nodes.map((node) => node.id));
+    for (const id of archivedIds) if (!present.has(id)) archivedIds.delete(id);
+  };
+
   const notifyAll = (source = registry.query()): void => {
+    prune(source);
     const snapshot = filterSnapshot(source);
     for (const listener of listeners) listener(snapshot);
   };
@@ -100,6 +116,7 @@ export function withFleetArchive(registry: ProcessRegistry): ArchivableProcessRe
 
   return {
     ...registry,
+    unfiltered: registry,
 
     query(filter) {
       return filterSnapshot(registry.query(filter));
@@ -155,6 +172,7 @@ export function withFleetArchive(registry: ProcessRegistry): ArchivableProcessRe
 
     listArchived() {
       const snapshot = registry.query();
+      prune(snapshot);
       return {
         capturedAt: snapshot.capturedAt,
         nodes: snapshot.nodes.filter((node) => archivedIds.has(node.id)),
@@ -162,6 +180,7 @@ export function withFleetArchive(registry: ProcessRegistry): ArchivableProcessRe
     },
 
     archivedCount() {
+      prune(registry.query());
       return archivedIds.size;
     },
 

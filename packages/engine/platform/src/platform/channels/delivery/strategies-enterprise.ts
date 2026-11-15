@@ -4,18 +4,18 @@ import { ServiceRegistry } from '../../config/service-registry.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ChannelDeliveryStrategy } from './types.js';
 import {
-  appendAttachmentSummary,
   deliveryFetch,
   extractResponseId,
   firstNonEmpty,
+  fitForSurface,
   normalizeBaseUrl,
   requireOkResponse,
   resolveAttachments,
   resolveDeliveryCredential,
   resolveChannelDeliverySurfaceKind,
   resolveMSTeamsAccessToken,
+  stableSendId,
   success,
-  trimForSurface,
 } from './shared.js';
 
 export function createMSTeamsDeliveryStrategy(
@@ -32,7 +32,7 @@ export function createMSTeamsDeliveryStrategy(
       return resolveChannelDeliverySurfaceKind(request.target) === 'msteams';
     },
     async deliver(request) {
-      const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
+      const attachments = await resolveAttachments(request, artifactStore, configManager);
       const configuredServiceUrl = firstNonEmpty(
         String(configManager.get('surfaces.msteams.serviceUrl') ?? ''),
         process.env.MSTEAMS_SERVICE_URL,
@@ -63,6 +63,7 @@ export function createMSTeamsDeliveryStrategy(
       const conversationId = threadId && !rawConversationId.includes(';messageid=')
         ? `${rawConversationId};messageid=${threadId}`
         : rawConversationId;
+      const fitted = fitForSurface(request.body, attachments, 4_000);
       const accessToken = await resolveMSTeamsAccessToken(configManager, serviceRegistry, secretsManager, request);
       const response = await deliveryFetch(request, `${normalizeBaseUrl(serviceUrl)}/v3/conversations/${encodeURIComponent(conversationId)}/activities`, {
         method: 'POST',
@@ -73,13 +74,13 @@ export function createMSTeamsDeliveryStrategy(
         },
         body: JSON.stringify({
           type: 'message',
-          text: trimForSurface(appendAttachmentSummary(request.body, attachments), 4_000),
+          text: fitted.text,
           textFormat: 'plain',
           ...(threadId ? { replyToId: threadId } : {}),
         }),
       });
       const payload = await requireOkResponse('Microsoft Teams delivery failed', response);
-      return success(extractResponseId(payload) ?? conversationId);
+      return success(extractResponseId(payload) ?? conversationId, fitted);
     },
   };
 }
@@ -98,7 +99,7 @@ export function createMattermostDeliveryStrategy(
       return resolveChannelDeliverySurfaceKind(request.target) === 'mattermost';
     },
     async deliver(request) {
-      const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
+      const attachments = await resolveAttachments(request, artifactStore, configManager);
       const baseUrl = firstNonEmpty(
         String(configManager.get('surfaces.mattermost.baseUrl') ?? ''),
         serviceRegistry.get('mattermost')?.baseUrl,
@@ -119,6 +120,7 @@ export function createMattermostDeliveryStrategy(
       if (!baseUrl) throw new Error('Missing Mattermost base URL');
       if (!botToken) throw new Error('Missing Mattermost bot token');
       if (!channelId) throw new Error('Missing Mattermost channel id');
+      const fitted = fitForSurface(request.body, attachments, 12_000);
       const response = await deliveryFetch(request, `${normalizeBaseUrl(baseUrl)}/api/v4/posts`, {
         method: 'POST',
         headers: {
@@ -127,12 +129,12 @@ export function createMattermostDeliveryStrategy(
         },
         body: JSON.stringify({
           channel_id: channelId,
-          message: trimForSurface(appendAttachmentSummary(request.body, attachments), 12_000),
+          message: fitted.text,
           ...(request.binding?.threadId ? { root_id: request.binding.threadId } : {}),
         }),
       });
       const payload = await requireOkResponse('Mattermost delivery failed', response);
-      return success(extractResponseId(payload) ?? channelId);
+      return success(extractResponseId(payload) ?? channelId, fitted);
     },
   };
 }
@@ -151,7 +153,7 @@ export function createMatrixDeliveryStrategy(
       return resolveChannelDeliverySurfaceKind(request.target) === 'matrix';
     },
     async deliver(request) {
-      const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
+      const attachments = await resolveAttachments(request, artifactStore, configManager);
       const homeserverUrl = firstNonEmpty(
         String(configManager.get('surfaces.matrix.homeserverUrl') ?? ''),
         serviceRegistry.get('matrix')?.baseUrl,
@@ -172,7 +174,10 @@ export function createMatrixDeliveryStrategy(
       if (!homeserverUrl) throw new Error('Missing Matrix homeserver URL');
       if (!accessToken) throw new Error('Missing Matrix access token');
       if (!roomId) throw new Error('Missing Matrix room id');
-      const txnId = crypto.randomUUID();
+      const fitted = fitForSurface(request.body, attachments, 8_000);
+      // Matrix drops a repeated transaction id as a duplicate, so a retried send is
+      // not delivered twice; the id covers the text so a different message is not dropped.
+      const txnId = stableSendId(request.runId, roomId, fitted.text);
       const threadId = request.binding?.threadId;
       const response = await deliveryFetch(request, `${normalizeBaseUrl(homeserverUrl)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`, {
         method: 'POST',
@@ -182,7 +187,7 @@ export function createMatrixDeliveryStrategy(
         },
         body: JSON.stringify({
           msgtype: 'm.text',
-          body: trimForSurface(appendAttachmentSummary(request.body, attachments), 8_000),
+          body: fitted.text,
           ...(threadId
             ? {
                 'm.relates_to': {
@@ -196,7 +201,7 @@ export function createMatrixDeliveryStrategy(
         }),
       });
       const payload = await requireOkResponse('Matrix delivery failed', response);
-      return success(extractResponseId(payload) ?? roomId);
+      return success(extractResponseId(payload) ?? roomId, fitted);
     },
   };
 }

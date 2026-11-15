@@ -7,7 +7,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { UnknownPreparedToolError } from '../tools/preparation-error.js';
 import type { PreparedToolCall } from '../tools/registry.js';
-import type { ProjectedToolCall } from '../tools/input-projection.js';
+import { describeToolInputProjectionProblem, ToolInputProjectionError, type ProjectedToolCall } from '../tools/input-projection.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { isAuthenticAutonomousAdmission, type AutonomousPermissionAdmission } from '../permissions/manager.js';
 import type { TurnHookOwner } from '../hooks/turn-ownership.js';
@@ -15,11 +15,12 @@ import { ToolError, PermissionError } from '../types/errors.js';
 import type { HookEvent, HookEventPath, HookResult } from '../hooks/types.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { ToolRegistry } from '../tools/registry.js';
+import type { ConfigManager } from '../config/manager.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import { buildToolDenial, buildDenialErrorMessage } from '../permissions/denial.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
-  emitContractSpawnGuardTriggered,
+  emitToolCancelled,
   emitToolExecuting,
   emitToolFailed,
   emitToolPermissioned,
@@ -30,15 +31,28 @@ import {
 } from '../runtime/emitters/index.js';
 import { buildSyntheticResult, detectUnresolvedToolCalls, type ReconciliationReason } from './tool-reconciliation.js';
 import { logger } from '../utils/logger.js';
-import type { ConfigManager } from '../config/manager.js';
-import type { AgentManager } from '../tools/agent/index.js';
-import type { AgentInput } from '../tools/agent/schema.js';
-import type { ExecutionPlan, ExecutionPlanManager, PlanItem } from './execution-plan.js';
-import type { ProviderRegistry } from '../providers/registry.js';
-import { evaluateOrchestrationSpawn } from '../runtime/orchestration/spawn-policy.js';
 import { summarizeError } from '../utils/error-display.js';
-import { isActiveAgent } from '../tools/agent/predicates.js';
+import { DEFAULT_CEILING_TOKENS, capToolText } from '../runtime/tools/output-policy.js';
+import { redactDiagnosticText } from '../utils/redaction.js';
 import { withCostOriginAsync, mcpServerOfToolName } from '../runtime/cost/cost-origin.js';
+
+/** Event payloads leave the process; hook and permission messages can quote secrets from arguments. */
+function redactedErrorResult<T extends { readonly error?: string | undefined }>(result: T): T {
+  return { ...result, error: redactDiagnosticText(result.error ?? '') };
+}
+
+/**
+ * Event previews leave the process and tool output or errors can echo a token:
+ * redact a window wider than the 100-character preview first, so a secret cut
+ * by the preview boundary is still recognised, then truncate.
+ */
+function redactedToolResultSummary(
+  result: Parameters<typeof toToolResultSummary>[0],
+): ReturnType<typeof toToolResultSummary> {
+  const summary = toToolResultSummary(result);
+  const source = result.success ? (result.output ?? '') : (result.error ?? 'unknown error');
+  return { ...summary, preview: redactDiagnosticText(source.slice(0, 512)).slice(0, 100) };
+}
 
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
@@ -82,15 +96,16 @@ async function resolvePermissionCheck(
   args: Record<string, unknown>,
   signal?: AbortSignal,
   hookOwner?: TurnHookOwner,
+  dangerous = false,
 ): Promise<import('../permissions/types.js').PermissionCheckResult> {
   const manager = permissionManager as {
     checkDetailed?: PermissionManager['checkDetailed'];
     check: PermissionManager['check'];
   };
   if (typeof manager.checkDetailed === 'function') {
-    return manager.checkDetailed(toolName, args, undefined, { signal, hookOwner });
+    return manager.checkDetailed(toolName, args, undefined, { signal, hookOwner, ...(dangerous ? { dangerous } : {}) });
   }
-  const approved = await manager.check(toolName, args, undefined, { signal, hookOwner });
+  const approved = await manager.check(toolName, args, undefined, { signal, hookOwner, ...(dangerous ? { dangerous } : {}) });
   return {
     approved,
     persisted: false,
@@ -121,7 +136,7 @@ export type ToolExecutionDeps = {
   onToolSettled?: ((result: ToolResult) => void) | undefined;
   toolRegistry: ToolRegistry;
   permissionManager: Pick<PermissionManager, 'checkDetailed' | 'check' | 'admitAutonomous' | 'autonomousPreparation'>
-    & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'getMode' | 'captureExecutionMode'>>;
+    & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'retireAutonomousSource' | 'getMode' | 'captureExecutionMode'>>;
   hookDispatcher: HookDispatcherLike | null;
   runtimeBus: RuntimeEventBus | null;
   sessionId: string;
@@ -144,10 +159,82 @@ export type ToolExecutionDeps = {
     open(callId: string): AbortSignal;
     close(callId: string): void;
   } | undefined;
+  /**
+   * Per-call budget (`runtime.toolBudget.*`), read once per call. Absent or
+   * undefined means no limit. A budget is checked after the tool returns, so a
+   * breach cannot undo the call's effect; it is reported on the result.
+   */
+  toolBudget?: (() => ToolBudget | undefined) | undefined;
 };
+
+const OUTPUT_CUT_GUIDANCE = 'Ask for a narrower part (a smaller path, range, query or page), or use the tool option that pages or limits its output.';
+
+/** A caller's own `max_tokens` (top level or under `output`) wins over the default ceiling, as it does in the tools that honour it. */
+function explicitOutputCeiling(args: Record<string, unknown>): number | undefined {
+  const nested = args['output'];
+  const candidates = [args['max_tokens'], nested && typeof nested === 'object' ? (nested as Record<string, unknown>)['max_tokens'] : undefined];
+  for (const value of candidates) if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  return undefined;
+}
+
+/** Limits for one tool call; a field that is absent is unlimited. */
+export type ToolBudget = { readonly maxMs?: number | undefined; readonly maxTokens?: number | undefined; readonly maxCostUsd?: number | undefined };
+
+/** The budget the configuration asks for, or undefined while enforcement is off or every limit is 0 (unlimited). */
+export function toolBudgetFromConfig(configManager: Pick<ConfigManager, 'get'> | undefined): ToolBudget | undefined {
+  if (!configManager || configManager.get('runtime.toolBudget.enforced') !== true) return undefined;
+  const maxMs = configManager.get('runtime.toolBudget.maxMs');
+  const maxTokens = configManager.get('runtime.toolBudget.maxTokens');
+  const maxCostUsd = configManager.get('runtime.toolBudget.maxCostUsd');
+  const budget: { maxMs?: number; maxTokens?: number; maxCostUsd?: number } = {};
+  if (maxMs > 0) budget.maxMs = maxMs;
+  if (maxTokens > 0) budget.maxTokens = maxTokens;
+  if (maxCostUsd > 0) budget.maxCostUsd = maxCostUsd;
+  return Object.keys(budget).length > 0 ? budget : undefined;
+}
+
+/**
+ * The first limit a finished call went over, as a sentence for the model, or
+ * null. The result keeps its output: the tool already ran, so the model is told
+ * to check its effect before repeating it. Token and cost limits apply only to
+ * tools that report `tokenCount` / `costUsd` on their result.
+ */
+function describeBudgetBreach(budget: ToolBudget, elapsedMs: number, result: ToolResult): string | null {
+  const reported = result as ToolResult & { readonly tokenCount?: unknown; readonly costUsd?: unknown };
+  if (budget.maxMs !== undefined && elapsedMs > budget.maxMs) return `it ran ${Math.round(elapsedMs)} ms against a limit of ${budget.maxMs} ms (runtime.toolBudget.maxMs)`;
+  if (budget.maxTokens !== undefined && typeof reported.tokenCount === 'number' && reported.tokenCount > budget.maxTokens) return `it used ${reported.tokenCount} tokens against a limit of ${budget.maxTokens} (runtime.toolBudget.maxTokens)`;
+  if (budget.maxCostUsd !== undefined && typeof reported.costUsd === 'number' && reported.costUsd > budget.maxCostUsd) return `it cost ${reported.costUsd} USD against a limit of ${budget.maxCostUsd} (runtime.toolBudget.maxCostUsd)`;
+  return null;
+}
+
+/**
+ * A finished call that went over its budget becomes a failed result that keeps
+ * its output; a call within budget, or already failed, is returned as is.
+ */
+export function applyToolBudget(budget: ToolBudget | undefined, toolName: string, elapsedMs: number, result: ToolResult): ToolResult {
+  if (!budget || !result.success) return result;
+  const breach = describeBudgetBreach(budget, elapsedMs, result);
+  if (!breach) return result;
+  return {
+    ...result,
+    success: false,
+    error: `Tool '${toolName}' finished but exceeded its budget: ${breach}. Its action may have taken effect, so check the result before repeating it.`,
+  };
+}
+
+/** Tools that clip and page their own output; a second cut would drop lines their continuation marker says were delivered. */
+const SELF_PAGING_TOOLS: ReadonlySet<string> = new Set(['read']);
+
+/** Keeps one tool result from putting its whole text into a conversation; used by every loop that appends tool results. */
+export function capToolResultOutput(toolName: string, args: Record<string, unknown>, result: ToolResult): ToolResult {
+  if (typeof result.output !== 'string' || SELF_PAGING_TOOLS.has(toolName)) return result;
+  const capped = capToolText(result.output, explicitOutputCeiling(args) ?? DEFAULT_CEILING_TOKENS.read, OUTPUT_CUT_GUIDANCE);
+  return capped === result.output ? result : { ...result, output: capped };
+}
 
 /** The human-readable per-call cancellation message the model sees. */
 export const TOOL_CALL_CANCELLED_MESSAGE = 'cancelled by user';
+export const TOOL_CALL_CANCELLED_AFTER_COMPLETION_MESSAGE = 'cancelled by user, but the call had already finished; its action may have taken effect, so check the result before repeating it';
 
 /**
  * Normalize a settled (or thrown-through) result of a call whose per-call
@@ -155,13 +242,15 @@ export const TOOL_CALL_CANCELLED_MESSAGE = 'cancelled by user';
  * "cancelled by user" with `cancelled: true`, keeping any partial output the
  * tool produced before it stopped. The tiny race where a tool completes
  * successfully in the same instant the user cancels still reports cancelled,
- * the user's decision is the truth the model should adapt to.
+ * the user's decision is the truth the model should adapt to. The wording then
+ * says the action may already have happened, so the model checks before it
+ * repeats a write or a send.
  */
 function toCancelledResult(callId: string, settled: ToolResult | null): ToolResult {
   return {
     callId,
     success: false,
-    error: TOOL_CALL_CANCELLED_MESSAGE,
+    error: settled?.success === true ? TOOL_CALL_CANCELLED_AFTER_COMPLETION_MESSAGE : TOOL_CALL_CANCELLED_MESSAGE,
     cancelled: true,
     ...(settled?.output !== undefined ? { output: settled.output } : {}),
     ...(settled?.autonomousDecision ? { autonomousDecision: settled.autonomousDecision } : {}),
@@ -209,6 +298,16 @@ async function executeToolCallsInMode(
       const recorded = { ...result, ...(resultPolicy.operation === 'classic' ? { decisionPolicy: resultPolicy } : {}) };
       settledResult = { ...recorded }; results.push(recorded);
     };
+    // The provider could not read this call's arguments: answer it with that, never run it on empty ones.
+    if (originalCall.argumentError !== undefined) {
+      const result: ToolResult = { callId: call.id, success: false, error: originalCall.argumentError };
+      if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+        callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(originalCall.argumentError),
+        durationMs: 0, result: redactedToolResultSummary(result),
+      });
+      appendResult(result);
+      continue;
+    }
     // Production managers/registries use the migrated path. The boolean seam is
     // retained only for pre-existing duck-typed test/embedding implementations.
     const autonomous = typeof deps.permissionManager.admitAutonomous === 'function'
@@ -248,8 +347,8 @@ async function executeToolCallsInMode(
           originalPreparation.assertCurrent();
           const result: ToolResult = { callId: call.id, success: false, error: error.message };
           if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-            callId: call.id, turnId, tool: call.name, error: error.message,
-            durationMs: 0, result: toToolResultSummary(result),
+            callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(error.message),
+            durationMs: 0, result: redactedToolResultSummary(result),
           });
           appendResult(result);
           continue;
@@ -290,7 +389,7 @@ async function executeToolCallsInMode(
           call = { id: prepared.callId, name: prepared.name, arguments: prepared.args };
         }
       } else {
-        checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner);
+        checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner, deps.toolRegistry.isDangerous(call.name));
       }
       assertTurnActive();
       if (checkResult.decisionPolicy) resultPolicy = checkResult.decisionPolicy;
@@ -324,9 +423,9 @@ async function executeToolCallsInMode(
             callId: call.id,
             turnId,
             tool: call.name,
-            error: err.message,
+            error: redactDiagnosticText(err.message),
             durationMs: 0,
-            result: toToolResultSummary(deniedResult),
+            result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
           });
         }
         continue;
@@ -367,26 +466,46 @@ async function executeToolCallsInMode(
                 callId: call.id,
                 turnId,
                 tool: call.name,
-                error: deniedResult.error ?? `Tool '${call.name}' denied by hook`,
+                error: redactDiagnosticText(deniedResult.error ?? `Tool '${call.name}' denied by hook`),
                 durationMs: Date.now() - startedAt,
-                result: toToolResultSummary(deniedResult),
+                result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
               });
             }
             appendResult(deniedResult);
             continue;
           }
         } catch (hookErr) {
-          logger.error('Orchestrator: Pre hook error', {
-            tool: call.name,
-            error: hookErr instanceof Error ? hookErr.message : String(hookErr),
-          });
+          // Cancellation is not a hook failure; it ends the turn.
+          assertTurnActive();
+          // A Pre hook may exist to deny this call, and a hook that crashed or
+          // timed out has not said yes. Fail closed, like the Pre:llm:chat hook.
+          const hookMessage = hookErr instanceof Error ? hookErr.message : String(hookErr);
+          logger.error('Orchestrator: Pre hook error', { tool: call.name, error: hookMessage });
+          const failedResult: ToolResult = {
+            callId: call.id,
+            success: false,
+            error: `Tool '${call.name}' was not run because its Pre hook failed (${hookMessage}). Fix or remove the hook, then retry.`,
+          };
+          if (deps.runtimeBus) {
+            emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+              callId: call.id,
+              turnId,
+              tool: call.name,
+              error: redactDiagnosticText(failedResult.error ?? 'Pre hook failed'),
+              durationMs: Date.now() - startedAt,
+              result: redactedToolResultSummary(redactedErrorResult(failedResult)),
+            });
+          }
+          appendResult(failedResult);
+          continue;
         }
       }
 
-      // The hook catch deliberately tolerates hook failures, but cannot swallow
-      // cancellation. No new call may acquire a fresh, un-aborted execution signal.
+      // No new call may acquire a fresh, un-aborted execution signal after a cancel.
       assertTurnActive();
       let result: ToolResult;
+      const budget = deps.toolBudget?.();
+      const executeStartedAt = performance.now();
       const perCallSignal = earlyCallSignal ?? deps.toolCallSignals?.open(call.id);
       const callSignal = turnSignal && perCallSignal ? AbortSignal.any([turnSignal, perCallSignal]) : turnSignal ?? perCallSignal;
       try {
@@ -418,16 +537,20 @@ async function executeToolCallsInMode(
           // The user cancelled THIS call mid-flight: the model sees a structured
           // cancelled result and the turn continues.
           result = toCancelledResult(call.id, result);
+        } else if (budget && result.success) {
+          result = applyToolBudget(budget, call.name, performance.now() - executeStartedAt, result);
         }
       } catch (err) {
         assertDecisionAvailable(err);
         const message = callSignal?.aborted
           ? TOOL_CALL_CANCELLED_MESSAGE
-          : err instanceof ToolError
-            ? err.message
-            : err instanceof Error
+          : err instanceof ToolInputProjectionError
+            ? describeToolInputProjectionProblem(err.problem, err.detail)
+            : err instanceof ToolError
               ? err.message
-              : summarizeError(err);
+              : err instanceof Error
+                ? err.message
+                : summarizeError(err);
         result = callSignal?.aborted
           ? toCancelledResult(call.id, null)
           : {
@@ -491,16 +614,16 @@ async function executeToolCallsInMode(
             turnId,
             tool: call.name,
             durationMs: Date.now() - startedAt,
-            result: toToolResultSummary(result),
+            result: redactedToolResultSummary(result),
           });
         } else {
           emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
             callId: call.id,
             turnId,
             tool: call.name,
-            error: result.error ?? 'unknown tool failure',
+            error: redactDiagnosticText(result.error ?? 'unknown tool failure'),
             durationMs: Date.now() - startedAt,
-            result: toToolResultSummary(result),
+            result: redactedToolResultSummary(result),
           });
         }
       }
@@ -553,6 +676,8 @@ async function executeToolCallsInMode(
         }
       }
 
+      result = capToolResultOutput(call.name, call.arguments, result);
+
       if (deps.onToolExecuted) {
         // Fire-and-forget: the scheduler only records a debounce timer; it must never block the
         // tool-result path. Args are the ones actually executed (post-permission modification).
@@ -569,11 +694,18 @@ async function executeToolCallsInMode(
       assertTurnActive();
       appendResult(result);
     } catch (error) {
-      if (earlyCallSignal?.aborted && !turnSignal?.aborted) appendResult(toCancelledResult(call.id, admission?.result.autonomousDecision
-        ? { callId: call.id, success: false, autonomousDecision: admission.result.autonomousDecision } : null));
-      else throw error;
+      if (earlyCallSignal?.aborted && !turnSignal?.aborted) {
+        // Cancelled during admission, before the tool body ran: observers saw
+        // the call received, so they must also see it end.
+        appendResult(toCancelledResult(call.id, admission?.result.autonomousDecision
+          ? { callId: call.id, success: false, autonomousDecision: admission.result.autonomousDecision } : null));
+        if (deps.runtimeBus) emitToolCancelled(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, turnId, tool: call.name, reason: TOOL_CALL_CANCELLED_MESSAGE,
+        });
+      } else throw error;
     } finally {
       if (earlyCallSignal) deps.toolCallSignals?.close(call.id);
+      if (autonomous) deps.permissionManager.retireAutonomousSource?.(sourceId);
       const choicesToRelease = choiceProjection;
       const inputToRelease = inputProjection;
       const cleanup = await Promise.allSettled([
@@ -637,9 +769,9 @@ export function reconcileUnresolvedToolCalls(
         callId: sr.callId,
         turnId,
         tool: unresolved.find((call) => call.id === sr.callId)?.name ?? 'unknown',
-        error: sr.error ?? 'synthetic tool reconciliation failure',
+        error: redactDiagnosticText(sr.error ?? 'synthetic tool reconciliation failure'),
         durationMs: 0,
-        result: toToolResultSummary(sr),
+        result: redactedToolResultSummary(sr),
       });
     }
   }
@@ -668,95 +800,4 @@ export function reconcileUnresolvedToolCalls(
   });
 
   deps.setPendingToolCalls([]);
-}
-
-export function autoSpawnPendingItems(
-  conversation: { addSystemMessage: (message: string) => void },
-  plan: ExecutionPlan,
-  items: PlanItem[],
-  agentManager: Pick<AgentManager, 'list' | 'spawn'>,
-  configManager: Pick<ConfigManager, 'get'>,
-  providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'>,
-  runtimeBus: RuntimeEventBus | null = null,
-  emitterContext: import('../runtime/emitters/index.js').EmitterContext | null = null,
-  planManager: Pick<ExecutionPlanManager, 'updateItem'> | null = null,
-): string[] {
-  const currentModel = providerRegistry.getCurrentModel();
-  const ctx = runtimeBus && emitterContext
-    ? {
-        ...emitterContext,
-        traceId: `${emitterContext.traceId}:plan:${plan.id}`,
-      }
-    : null;
-
-  let running = agentManager.list().filter(a => isActiveAgent(a)).length;
-  const spawnDecision = evaluateOrchestrationSpawn({
-    configManager,
-    mode: 'plan-auto',
-    activeAgents: running,
-    requestedDepth: 1,
-  });
-
-  if (!spawnDecision.allowed) {
-    if (runtimeBus && ctx) {
-      emitContractSpawnGuardTriggered(runtimeBus, ctx, {
-        agentId: 'conversation',
-        depth: 1,
-        activeAgents: running,
-        reason: spawnDecision.reason ?? 'plan auto-spawn is currently blocked',
-      });
-    }
-    return [];
-  }
-
-  const spawned: string[] = [];
-
-  for (const item of items) {
-    const decision = evaluateOrchestrationSpawn({
-      configManager,
-      mode: 'plan-auto',
-      activeAgents: running,
-      requestedDepth: 1,
-    });
-    if (!decision.allowed) {
-      if (runtimeBus && ctx) {
-        emitContractSpawnGuardTriggered(runtimeBus, ctx, {
-          agentId: 'conversation',
-          depth: 1,
-          activeAgents: running,
-          reason: decision.reason ?? 'plan auto-spawn is currently blocked',
-        });
-      }
-      conversation.addSystemMessage(
-        `[Plan] ${decision.reason ?? `Agent limit reached (${running}/${decision.maxAgents}). Remaining items will be spawned as agents complete.`}`
-      );
-      break;
-    }
-
-    try {
-      const spawnInput: AgentInput = {
-        mode: 'spawn',
-        task: item.description,
-        template: 'engineer',
-        model: currentModel.registryKey,
-        provider: currentModel.provider,
-      };
-      const agentRecord = agentManager.spawn(spawnInput);
-      planManager?.updateItem(plan.id, item.id, 'in_progress', agentRecord.id);
-      spawned.push(item.description);
-      running++;
-      logger.info('Orchestrator: Auto-spawned agent for plan item', {
-        agentId: agentRecord.id,
-        planItemId: item.id,
-        description: item.description,
-      });
-    } catch (spawnErr) {
-      logger.error('Orchestrator: Failed to auto-spawn agent for plan item', {
-        planItemId: item.id,
-        error: spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
-      });
-    }
-  }
-
-  return spawned;
 }

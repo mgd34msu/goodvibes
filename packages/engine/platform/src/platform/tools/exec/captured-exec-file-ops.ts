@@ -138,6 +138,7 @@ export async function executeCapturedFileOperations(
       ...(op.warnings !== undefined ? { warnings: op.warnings.map(restore) } : {}),
     })),
     ...(result.fileOpError !== undefined ? { fileOpError: restore(result.fileOpError) } : {}),
+    ...(result.fileOpFailedIndex !== undefined ? { fileOpFailedIndex: result.fileOpFailedIndex } : {}),
     ...(result.fileOpWarnings !== undefined ? { fileOpWarnings: result.fileOpWarnings.map(restore) } : {}),
   };
 }

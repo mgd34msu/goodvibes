@@ -84,19 +84,33 @@ function ntfyTopicGate(
  * The discriminator is the real workspace or application id, resolved before
  * anything is contested, see facade-cluster-sockets.ts for why a placeholder
  * would starve one of two differently-configured workspaces.
+ *
+ * A start the provider refuses (no socket opened) rejects, so the election
+ * knows this node is not reading the workspace, and `onStartFailed` hands the
+ * surface on the same way a dropped socket does. A refusal caused by this
+ * gate's own stop is not a failure and is left alone.
  */
-function socketProviderGate(
-  providerRuntime: ChannelProviderRuntimeManager,
+export function socketProviderGate(
+  providerRuntime: Pick<ChannelProviderRuntimeManager, 'start' | 'stop'>,
   kind: 'slack' | 'discord',
   surface: ClusterSurfaceKey,
+  onStartFailed: (message: string) => void,
 ): ClusterConsumerGate {
+  let generation = 0;
   return {
     id: `${kind}-socket`,
     surface,
     start: async () => {
-      await providerRuntime.start(kind);
+      const attempt = ++generation;
+      const result = await providerRuntime.start(kind);
+      if (result.ok || attempt !== generation) return;
+      // Deferred: withdrawing the gate from inside its own start would
+      // re-enter the registry while it is still starting this gate.
+      setTimeout(() => onStartFailed(result.message), 0);
+      throw new Error(`${kind} did not connect: ${result.message}`);
     },
     stop: async () => {
+      generation += 1;
       providerRuntime.stop(kind);
     },
   };
@@ -208,109 +222,325 @@ function inboundMailGate(
 }
 
 /**
- * Telegram ingress, registered only when this node can actually serve it.
+ * Inbound mail, registered only when a supervisor was composed for it.
  *
- * Extracted from `registerDaemonClusterSurfaces` for a structural reason, not
- * a stylistic one: the inert branch inside it ends the surface's registration
- * with an early `return`, and while that `return` sat in the middle of the
- * top-level function it also skipped every surface registered AFTER Telegram.
- * A new gate added below it would have been silently unregistered on any
- * machine whose Telegram token failed to resolve, a condition that produces
- * no error and looks exactly like a healthy node. Inside its own function the
- * `return` can only end Telegram's registration, which is all it ever meant.
+ * Switched off at boot, the surface is not contested, a node that won it would
+ * read nothing and stand a reading node down, but turning it on later must
+ * not need a restart, so the gate is registered the first time it is enabled.
+ * Turning it off again is the supervisor's to act on; the gate stays.
  */
-async function registerTelegramSurface(
-  coordinator: ClusterCoordinator,
-  config: ConfigManager,
-  collaborators: DaemonFacadeCollaborators,
-): Promise<void> {
-  if (!config.get('surfaces.telegram.enabled')) return;
-  const botId = await collaborators.builtinChannels.resolveServableTelegramBotId();
-  if (!botId) {
-    reportInert('telegram', 'no Telegram bot token resolved; set surfaces.telegram.botToken '
-      + '(a goodvibes://secrets/... reference is fine) or the TELEGRAM_BOT_TOKEN environment variable');
-    return;
-  }
-  const surface = telegramSurface(botId);
-  coordinator.register(telegramIngressGate(collaborators.builtinChannels, surface));
-  // Late-bound because the runtime is built before the coordinator exists: a
-  // Telegram 409 naming another consumer has to reach leadership, not a log.
-  // Routed at the Telegram surface specifically, a conflict over one bot
-  // token is no reason to give up an unrelated ntfy topic.
-  collaborators.builtinChannels.setConsumerConflictHandler(
-    (detail) => coordinator.reportConsumerConflict(detail, surface),
-  );
-}
-
-/** Inbound mail, registered only when a supervisor was composed for it. */
 function registerInboundMailSurface(
   coordinator: ClusterCoordinator,
   config: ConfigManager,
   collaborators: DaemonFacadeCollaborators,
 ): void {
-  if (!config.get('surfaces.email.inbound.enabled')) return;
   const mailbox = collaborators.builtinChannels.inboundMailIdentity();
   if (mailbox === null) {
+    if (!config.get('surfaces.email.inbound.enabled')) return;
     reportInert('email-inbound', 'inbound mail is enabled and this build composed no inbound-mail '
       + 'supervisor, so no mailbox is watched; the embedder must pass inboundMail to '
       + 'BuiltinChannelRuntime');
     return;
   }
-  coordinator.register(inboundMailGate(
-    collaborators.builtinChannels,
-    inboxSurface(`email:${mailbox.account}:${mailbox.mailbox}`),
-  ));
+  const register = (): void => {
+    coordinator.register(inboundMailGate(
+      collaborators.builtinChannels,
+      inboxSurface(`email:${mailbox.account}:${mailbox.mailbox}`),
+    ));
+  };
+  if (config.get('surfaces.email.inbound.enabled')) {
+    register();
+    return;
+  }
+  let unsubscribe: (() => void) | null = null;
+  let registered = false;
+  unsubscribe = config.subscribe('surfaces.email.inbound.enabled', (enabled) => {
+    if (!enabled || registered) return;
+    registered = true;
+    unsubscribe?.();
+    register();
+  });
 }
 
-/** Register a gate for every inbound surface this node can actually serve. */
+/**
+ * Which election keys each received channel is contested under, so channel
+ * health can tell a standby that is not reading by design from a reader that
+ * died. A channel with no key here was never contested and reports its own
+ * state; so does every channel before the coordinator runs.
+ */
+class ContestedSurfaces {
+  private readonly keys = new Map<string, Map<string, ClusterSurfaceKey>>();
+
+  add(channel: 'telegram' | 'slack' | 'discord' | 'ntfy', id: string, surface: ClusterSurfaceKey): void {
+    const list = this.keys.get(channel) ?? new Map<string, ClusterSurfaceKey>();
+    list.set(id, surface);
+    this.keys.set(channel, list);
+  }
+
+  remove(channel: 'telegram' | 'slack' | 'discord' | 'ntfy', id: string): void {
+    this.keys.get(channel)?.delete(id);
+  }
+
+  isResponsible(coordinator: ClusterCoordinator, channel: string): boolean {
+    const keys = this.keys.get(channel);
+    if (!coordinator.running || keys === undefined || keys.size === 0) return true;
+    return [...keys.values()].some((surface) => coordinator.holdsSurface(surface));
+  }
+}
+
+/** The settings and credentials whose change can make a surface servable or not. */
+const SURFACE_KEYS = [
+  'surfaces.telegram.enabled',
+  'surfaces.telegram.botToken',
+  'surfaces.ntfy.enabled',
+  'surfaces.ntfy.baseUrl',
+  'surfaces.ntfy.chatTopic',
+  'surfaces.ntfy.agentTopic',
+  'surfaces.ntfy.remoteTopic',
+  'surfaces.slack.enabled',
+  'surfaces.slack.botToken',
+  'surfaces.discord.enabled',
+  'surfaces.discord.botToken',
+] as const;
+
+/**
+ * Keeps this node's registered consumers in line with what it can serve NOW.
+ *
+ * Registration used to run once, at start, so a surface enabled or given a
+ * credential afterwards did nothing until a restart, and the status said only
+ * that the composition root never started it. Every step here is idempotent:
+ * it registers what became servable, withdraws what no longer is (a topic
+ * renamed, a surface switched off, a bot token swapped for another bot's), and
+ * leaves the rest alone, so it can run at every start and on every change.
+ */
+class DaemonSurfaceRegistrar {
+  private readonly contested = new ContestedSurfaces();
+  private readonly ntfy = new Map<string, () => void>();
+  private ntfyInertReported = false;
+  private readonly sockets = new Map<'slack' | 'discord', SocketSurfaceSupervisor>();
+  private telegram: { readonly botId: string; readonly withdraw: () => void } | null = null;
+  private telegramInertReported = false;
+  private inboundMailRegistered = false;
+  private watching = false;
+  private reconciling: Promise<void> | null = null;
+  private again: { refresh: boolean } | null = null;
+
+  constructor(
+    private readonly coordinator: ClusterCoordinator,
+    private readonly runtime: ResolvedDaemonFacadeRuntime,
+    private readonly collaborators: DaemonFacadeCollaborators,
+  ) {}
+
+  /** Register what is servable now, then keep doing so as settings and credentials change. */
+  async start(): Promise<void> {
+    this.collaborators.builtinChannels.setSurfaceResponsibility(
+      (surface) => this.contested.isResponsible(this.coordinator, surface),
+    );
+    await this.reconcile(false);
+    if (!this.inboundMailRegistered) {
+      this.inboundMailRegistered = true;
+      registerInboundMailSurface(this.coordinator, this.runtime.configManager, this.collaborators);
+    }
+    this.watch();
+  }
+
+  private watch(): void {
+    if (this.watching) return;
+    this.watching = true;
+    const config = this.runtime.configManager;
+    for (const key of SURFACE_KEYS) {
+      // A changed bot token may name a different workspace or bot, so those
+      // re-identify what is already registered; the rest only add and withdraw.
+      config.subscribe(key, () => { this.request(key.endsWith('botToken')); });
+    }
+    // The token usually lives in the secret store, which config does not see.
+    const secrets = this.runtime.runtimeServices?.secretsManager;
+    if (secrets && typeof secrets.onDidChange === 'function') {
+      secrets.onDidChange(() => { this.request(false); });
+    }
+  }
+
+  /** One reconcile at a time; a change that lands mid-run earns exactly one more. */
+  private request(refresh: boolean): void {
+    // A setting or credential change after the daemon stopped must not open consumers nobody will stop.
+    if (!this.coordinator.running) return;
+    if (this.reconciling) {
+      this.again = { refresh: refresh || (this.again?.refresh ?? false) };
+      return;
+    }
+    void this.reconcile(refresh);
+  }
+
+  private reconcile(refresh: boolean): Promise<void> {
+    if (this.reconciling) return this.reconciling;
+    const work = this.reconcileOnce(refresh).catch((error: unknown) => {
+      logger.error('cluster: could not bring the inbound consumers in line with the settings', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }).finally(() => {
+      this.reconciling = null;
+      const next = this.again;
+      this.again = null;
+      if (next && this.coordinator.running) void this.reconcile(next.refresh);
+    });
+    this.reconciling = work;
+    return work;
+  }
+
+  private async reconcileOnce(refresh: boolean): Promise<void> {
+    this.reconcileNtfy();
+    await this.reconcileSockets(refresh);
+    await this.reconcileTelegram();
+  }
+
+  private reconcileNtfy(): void {
+    const config = this.runtime.configManager;
+    const providerRuntime = this.collaborators.providerRuntime;
+    const wanted = new Map<string, { topic: string; baseUrl: string }>();
+    if (config.get('surfaces.ntfy.enabled')) {
+      const baseUrl = providerRuntime.ntfyBaseUrl();
+      const topics = providerRuntime.ntfyTopics();
+      if (topics.length === 0) {
+        if (!this.ntfyInertReported) {
+          this.ntfyInertReported = true;
+          reportInert('ntfy', 'no ntfy topic resolved; set surfaces.ntfy.agentTopic (and optionally chatTopic / remoteTopic)');
+        }
+      } else {
+        this.ntfyInertReported = false;
+      }
+      for (const topic of topics) wanted.set(`${baseUrl}\n${topic}`, { topic, baseUrl });
+    } else {
+      this.ntfyInertReported = false;
+    }
+    for (const [id, withdraw] of [...this.ntfy]) {
+      if (wanted.has(id)) continue;
+      this.ntfy.delete(id);
+      this.contested.remove('ntfy', id);
+      withdraw();
+    }
+    for (const [id, { topic, baseUrl }] of wanted) {
+      if (this.ntfy.has(id)) continue;
+      const gate = ntfyTopicGate(this.collaborators.providerRuntime, baseUrl, topic);
+      this.contested.add('ntfy', id, gate.surface);
+      this.ntfy.set(id, this.coordinator.register(gate));
+    }
+  }
+
+  /**
+   * Slack and Discord are contested under the identity the provider reports,
+   * never under a placeholder, a placeholder would put two different
+   * workspaces into one election and starve whichever lost.
+   */
+  private async reconcileSockets(refresh: boolean): Promise<void> {
+    const config = this.runtime.configManager;
+    const providerRuntime = this.collaborators.providerRuntime;
+    for (const kind of ['slack', 'discord'] as const) {
+      const enabled = Boolean(config.get(`surfaces.${kind}.enabled` as Parameters<ConfigManager['get']>[0]));
+      const existing = this.sockets.get(kind);
+      if (!enabled) {
+        if (existing) {
+          existing.dispose();
+          this.sockets.delete(kind);
+          this.contested.remove(kind, kind);
+        }
+        continue;
+      }
+      if (existing) {
+        await (refresh ? existing.refresh() : existing.begin());
+        this.noteSocketSurface(kind, existing);
+        continue;
+      }
+      const supervisor: SocketSurfaceSupervisor = new SocketSurfaceSupervisor({
+        kind,
+        resolveIdentity: () => providerRuntime.resolveSocketSurfaceIdentity(kind),
+        // A start that never connects is handled like a socket that dropped: the
+        // gate is withdrawn, a RESIGN lets another node try, and this one tries
+        // again later.
+        register: (surface) => {
+          this.contested.add(kind, kind, surface);
+          return this.coordinator.register(socketProviderGate(providerRuntime, kind, surface,
+            (message) => { this.sockets.get(kind)?.onSocketLost(message); }));
+        },
+        isRunning: () => this.coordinator.running,
+        reportInert,
+        logger,
+      });
+      this.sockets.set(kind, supervisor);
+      await supervisor.begin();
+    }
+    // A dropped socket means this node can no longer read that workspace, so
+    // it stands down rather than holding a surface it is not serving.
+    if (this.sockets.size > 0) {
+      providerRuntime.setSocketLostHandler((kind, reason, permanent) => {
+        this.sockets.get(kind)?.onSocketLost(reason, permanent);
+      });
+    }
+  }
+
+  /** A surface that was re-identified is contested under its new name only. */
+  private noteSocketSurface(kind: 'slack' | 'discord', supervisor: SocketSurfaceSupervisor): void {
+    const surface = supervisor.contestedSurface;
+    if (surface) this.contested.add(kind, kind, surface);
+    else this.contested.remove(kind, kind);
+  }
+
+  /** Telegram ingress, registered only when this node can actually serve it. */
+  private async reconcileTelegram(): Promise<void> {
+    const config = this.runtime.configManager;
+    if (!config.get('surfaces.telegram.enabled')) {
+      this.telegramInertReported = false;
+      this.withdrawTelegram();
+      return;
+    }
+    const botId = await this.collaborators.builtinChannels.resolveServableTelegramBotId();
+    if (!botId) {
+      this.withdrawTelegram();
+      if (!this.telegramInertReported) {
+        this.telegramInertReported = true;
+        reportInert('telegram', 'no Telegram bot token resolved; set surfaces.telegram.botToken '
+          + '(a goodvibes://secrets/... reference is fine) or the TELEGRAM_BOT_TOKEN environment variable');
+      }
+      return;
+    }
+    this.telegramInertReported = false;
+    if (this.telegram?.botId === botId) return;
+    // A token for another bot is another surface; the old one is stood down first.
+    this.withdrawTelegram();
+    const surface = telegramSurface(botId);
+    this.contested.add('telegram', 'telegram', surface);
+    this.telegram = {
+      botId,
+      withdraw: this.coordinator.register(telegramIngressGate(this.collaborators.builtinChannels, surface)),
+    };
+    // Late-bound because the runtime is built before the coordinator exists: a
+    // Telegram 409 naming another consumer has to reach leadership, not a log.
+    // Routed at the Telegram surface specifically, a conflict over one bot
+    // token is no reason to give up an unrelated ntfy topic.
+    this.collaborators.builtinChannels.setConsumerConflictHandler(
+      (detail) => this.coordinator.reportConsumerConflict(detail, surface),
+    );
+  }
+
+  private withdrawTelegram(): void {
+    if (!this.telegram) return;
+    this.telegram.withdraw();
+    this.telegram = null;
+    this.contested.remove('telegram', 'telegram');
+  }
+}
+
+const registrars = new WeakMap<ClusterCoordinator, DaemonSurfaceRegistrar>();
+
+/** Register a gate for every inbound surface this node can actually serve, and keep it so. */
 export async function registerDaemonClusterSurfaces(
   coordinator: ClusterCoordinator,
   runtime: ResolvedDaemonFacadeRuntime,
   collaborators: DaemonFacadeCollaborators,
 ): Promise<void> {
-  const config = runtime.configManager;
-  const providerRuntime = collaborators.providerRuntime;
-
-  if (config.get('surfaces.ntfy.enabled')) {
-    const baseUrl = providerRuntime.ntfyBaseUrl();
-    const topics = providerRuntime.ntfyTopics();
-    if (topics.length === 0) {
-      reportInert('ntfy', 'no ntfy topic resolved; set surfaces.ntfy.agentTopic (and optionally chatTopic / remoteTopic)');
-    }
-    for (const topic of topics) {
-      coordinator.register(ntfyTopicGate(providerRuntime, baseUrl, topic));
-    }
+  let registrar = registrars.get(coordinator);
+  if (!registrar) {
+    registrar = new DaemonSurfaceRegistrar(coordinator, runtime, collaborators);
+    registrars.set(coordinator, registrar);
   }
-
-  // Slack and Discord are contested under the identity the provider reports,
-  // never under a placeholder, a placeholder would put two different
-  // workspaces into one election and starve whichever lost.
-  const supervisors = new Map<'slack' | 'discord', SocketSurfaceSupervisor>();
-  for (const kind of ['slack', 'discord'] as const) {
-    if (!config.get(`surfaces.${kind}.enabled` as Parameters<ConfigManager['get']>[0])) continue;
-    const supervisor = new SocketSurfaceSupervisor({
-      kind,
-      resolveIdentity: () => providerRuntime.resolveSocketSurfaceIdentity(kind),
-      register: (surface) => coordinator.register(socketProviderGate(providerRuntime, kind, surface)),
-      isRunning: () => coordinator.running,
-      reportInert,
-      logger,
-    });
-    supervisors.set(kind, supervisor);
-    await supervisor.begin();
-  }
-  if (supervisors.size > 0) {
-    // A dropped socket means this node can no longer read that workspace, so
-    // it stands down rather than holding a surface it is not serving.
-    providerRuntime.setSocketLostHandler((kind, reason) => {
-      supervisors.get(kind)?.onSocketLost(reason);
-    });
-  }
-
-  // Every remaining surface registers through its own function, so no branch
-  // inside one can end the registration of another. Telegram is awaited
-  // because deciding whether it is servable resolves a credential; inbound
-  // mail's servability is a composition fact and needs no I/O.
-  await registerTelegramSurface(coordinator, config, collaborators);
-  registerInboundMailSurface(coordinator, config, collaborators);
+  await registrar.start();
 }

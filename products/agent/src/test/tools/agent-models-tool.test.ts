@@ -76,6 +76,17 @@ describe('models adapter', () => {
     ]);
   });
 
+  test('an unrecognised action is refused instead of being inferred from other arguments', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const tool = makeTool(calls);
+
+    const result = await tool.execute({ action: 'zzz' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown models action');
+    expect(calls).toEqual([]);
+  });
+
   test('registers the direct models adapter', () => {
     const registry = new ToolRegistry();
 

@@ -518,7 +518,6 @@ test('saved target counters must match the original independently recorded nativ
   expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(f.storage.current(f.key).settlement).toBeNull();
 });
 
-// Regression source UNRUN during the coding-first pass.
 for (const kind of ['async', 'nonvoid'] as const) test(`standalone native verification refuses a ${kind} owner guard before new readings or publication`, async () => {
   const f = await fixture(), started = await f.host.start(f.target, f.authority);
   await completed(f.harness, started.admission.contractId);

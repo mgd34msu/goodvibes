@@ -21,9 +21,13 @@
  * A conversational turn is not contract work. `conversation-continuation.ts`
  * already decides that a channel follow-up gets an answer rather than a
  * contract, and this list keeps that promise: no `write`,
- * no `edit`, no `exec`. Nothing here can start a workstream or touch the
- * project tree. What it can do is read, look things up, and record what the
- * owner just said about himself.
+ * no `edit`, no `exec`. Nothing here can start a workstream or change the
+ * project tree. What it can do is read project files (`read`, `find`), look
+ * things up on the web (`fetch`), and record what the owner just said about
+ * himself (`profile`). `profile` and `fetch` are given only to a channel the
+ * owner has declared theirs: a message from any other channel is untrusted
+ * text, and with both `read` and `fetch` it could be steered into sending
+ * what it read to an address of its choosing.
  *
  * Hoisted here rather than written at each spawn site because the daemon and
  * the platform's own runtime both spawn these turns, and a capability that exists
@@ -45,6 +49,12 @@ export const CONVERSATIONAL_TURN_TOOLS: readonly string[] = [
   'fetch',
   'profile',
 ];
+
+/**
+ * Tools only a channel with owner authority gets. `profile` reads and writes
+ * personal data; `fetch` sends requests to addresses the turn chooses.
+ */
+const OWNER_CHANNEL_TURN_TOOLS: readonly string[] = ['profile', 'fetch'];
 
 /**
  * What to do when the owner answers a reminder.
@@ -88,14 +98,18 @@ export const OCCASION_COMPLAINT_LADDER: readonly string[] = [
   'If the owner objects to being reminded about something, fix the SMALLEST thing that fixes',
   'it. In order, and stop at the first rung that answers what was said:',
   '',
-  '  1. Acknowledge that one occurrence, so it stops being raised. This is almost always the',
-  '     right rung, and it is one tool call.',
-  '  2. Change that one occasion, its kind, how far ahead it is raised, or removing it',
-  '     outright if that is what the owner asked for.',
-  '  3. Turn the whole occasions feature off. ONLY when the owner has said so explicitly and',
-  '     named the whole feature. "Stop reminding me about my birthday" is rung 1. It is never',
-  '     rung 3, and neither is a complaint with swearing in it, anger tells you how badly the',
+  '  1. Acknowledge that one occurrence with `profile` action `acknowledge_occasion`, so it stops',
+  '     being raised. This is almost always the right rung, and it is one tool call.',
+  '  2. Removing a date, changing how early one is raised, or turning reminders off is',
+  '     not something you can do from here. Say so plainly. To remove a date, the owner deletes',
+  '     its line in their profile document. To change the lead time or turn reminders off, they',
+  '     set occasions.leadDays or occasions.enabled in settings. Never say you removed or',
+  '     switched off something you have no tool for. "Stop reminding me about my birthday" is rung 1. It is never a reason to point at switching the whole feature',
+  '     off, and neither is a complaint with swearing in it, anger tells you how badly the',
   '     owner wants the noise to stop, not how much of their life to switch off.',
+  '',
+  'These rungs need the `profile` tool. When this turn cannot record to the profile (stated',
+  'below), say that plainly instead of acting.',
   '',
   'Whatever you do, say which occasion you silenced AND that the other dates still run. The',
   'owner cannot see the setting you changed, so an unnamed fix is indistinguishable from',
@@ -178,6 +192,7 @@ export function buildConversationalTurnContext(
       '',
       `Recording to the profile is not available on this turn: ${input.capture.reason}`,
       'If the owner tells you something worth keeping, say plainly that you cannot store it and why.',
+      'Fetching web pages is not available on this turn either; say so if the owner asks for it.',
     );
   }
 
@@ -239,10 +254,11 @@ export function conversationalTurnCapabilities(
   });
   return {
     // Routing may narrow the declared set, never widen it. Profile includes
-    // personal reads as well as writes, so an untrusted channel must not see
-    // that tool at all, even when its routing explicitly requested it.
+    // personal reads as well as writes, and fetch can carry what the turn read
+    // to any address, so an untrusted channel must not see either tool at all,
+    // even when its routing explicitly requested them.
     tools: (options.tools ?? CONVERSATIONAL_TURN_TOOLS).filter((tool) =>
-      CONVERSATIONAL_TURN_TOOLS.includes(tool) && (tool !== 'profile' || captureAuthority.canCapture)),
+      CONVERSATIONAL_TURN_TOOLS.includes(tool) && (!OWNER_CHANNEL_TURN_TOOLS.includes(tool) || captureAuthority.canCapture)),
     restrictTools: true,
     captureAuthority,
   };

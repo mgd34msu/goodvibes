@@ -12,8 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { TaskManager } from '../tasks/types.js';
 import type { RuntimeEventBus } from '../events/index.js';
-import { createDomainDispatch } from '../store/index.js';
-import type { RuntimeStore, DomainDispatch } from '../store/index.js';
+import type { RuntimeStore } from '../store/index.js';
 import type { TaskLifecycleState } from '../store/domains/tasks.js';
 import type { AgentLifecycleState } from '../store/domains/agents.js';
 import { canRetry, canTransition } from '../tasks/lifecycle.js';
@@ -47,6 +46,28 @@ export class OpsIllegalActionError extends GoodVibesError {
     this.action = action;
     this.currentState = currentState;
   }
+}
+
+/** Thrown when an ops action cannot be carried out by this control plane at all. */
+export class OpsActionUnavailableError extends GoodVibesError {
+  declare readonly code: 'OPS_ACTION_UNAVAILABLE';
+  public readonly targetId: string;
+  public readonly action: string;
+
+  public constructor(targetId: string, action: string, why: string) {
+    super(
+      `[OpsControlPlane] Action '${action}' is unavailable for ${targetId}: ${why}`,
+      { code: 'OPS_ACTION_UNAVAILABLE', category: 'permission', source: 'runtime', recoverable: false },
+    );
+    this.name = 'OpsActionUnavailableError';
+    this.targetId = targetId;
+    this.action = action;
+  }
+}
+
+/** What stops an agent's run: the agent manager's cancel (it publishes AGENT_CANCELLED, which updates the store). */
+export interface OpsAgentCanceller {
+  cancel(agentId: string, kind?: 'interrupt' | 'kill'): boolean;
 }
 
 /** Thrown when the target task or agent is not found. */
@@ -94,20 +115,21 @@ export class OpsControlPlane {
   private readonly _taskManager: TaskManager;
   private readonly _bus: RuntimeEventBus;
   private readonly _store: RuntimeStore;
-  private readonly _dispatch: DomainDispatch;
   private readonly _sessionId: string;
+  private readonly _agentCanceller: OpsAgentCanceller | undefined;
 
   public constructor(
     taskManager: TaskManager,
     bus: RuntimeEventBus,
     store: RuntimeStore,
-    sessionId: string
+    sessionId: string,
+    agentCanceller?: OpsAgentCanceller,
   ) {
     this._taskManager = taskManager;
     this._bus = bus;
     this._store = store;
-    this._dispatch = createDomainDispatch(store);
     this._sessionId = sessionId;
+    this._agentCanceller = agentCanceller;
   }
 
   // ── Task actions ──────────────────────────────────────────────────────────
@@ -138,7 +160,12 @@ export class OpsControlPlane {
       throw err;
     }
 
-    this._taskManager.cancelTask(taskId, { reason: note ?? 'operator-cancel' });
+    this._audited(
+      () => this._taskManager.cancelTask(taskId, { reason: note ?? 'operator-cancel' }),
+      (errorMessage) => emitOpsTaskCancelled(this._bus, this._makeCtx(taskId), {
+        taskId, reason: 'ops_cancel', note, outcome: 'error', errorMessage,
+      }),
+    );
 
     emitOpsTaskCancelled(this._bus, this._makeCtx(taskId), {
       taskId,
@@ -176,7 +203,12 @@ export class OpsControlPlane {
       throw err;
     }
 
-    this._taskManager.blockTask(taskId, note ?? 'operator-pause');
+    this._audited(
+      () => this._taskManager.blockTask(taskId, note ?? 'operator-pause'),
+      (errorMessage) => emitOpsTaskPaused(this._bus, this._makeCtx(taskId), {
+        taskId, reason: 'ops_pause', note, outcome: 'error', errorMessage,
+      }),
+    );
 
     emitOpsTaskPaused(this._bus, this._makeCtx(taskId), {
       taskId,
@@ -202,7 +234,7 @@ export class OpsControlPlane {
       throw new OpsTargetNotFoundError(taskId, 'task');
     }
 
-    if (!canTransition(task.status, 'running')) {
+    if (task.status !== 'blocked' || !canTransition(task.status, 'running')) {
       const err = new OpsIllegalActionError(taskId, 'resume', task.status);
       emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
         taskId,
@@ -214,7 +246,12 @@ export class OpsControlPlane {
       throw err;
     }
 
-    this._taskManager.startTask(taskId);
+    this._audited(
+      () => this._taskManager.startTask(taskId),
+      (errorMessage) => emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
+        taskId, reason: 'ops_resume', note, outcome: 'error', errorMessage,
+      }),
+    );
 
     emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
       taskId,
@@ -255,7 +292,12 @@ export class OpsControlPlane {
     }
 
     // Route retry through TaskManager for consistent state management and event emission.
-    this._taskManager.retryTask(taskId);
+    this._audited(
+      () => this._taskManager.retryTask(taskId),
+      (errorMessage) => emitOpsTaskRetried(this._bus, this._makeCtx(taskId), {
+        taskId, reason: 'ops_retry', note, outcome: 'error', errorMessage,
+      }),
+    );
 
     emitOpsTaskRetried(this._bus, this._makeCtx(taskId), {
       taskId,
@@ -271,17 +313,16 @@ export class OpsControlPlane {
    * Cancel a running agent.
    *
    * Only legal for agents in non-terminal states (spawning, running,
-   * awaiting_message, awaiting_tool, finalizing).
-   *
-   * The agent state update is dispatched directly to the store since there is
-   * no AgentManager interface with lifecycle methods (agents are managed
-   * by their hosting subsystem). The store update signals the UI; the
-   * underlying subsystem must observe the store and act accordingly.
+   * awaiting_message, awaiting_tool, finalizing). The cancel goes to the agent
+   * manager, which stops the run and publishes AGENT_CANCELLED; that event,
+   * not this method, moves the store record, so the store never reads
+   * cancelled for an agent that is still working.
    *
    * @param agentId - Target agent ID.
    * @param note - Optional operator note for the audit log.
    * @throws {OpsTargetNotFoundError} if the agent doesn't exist.
    * @throws {OpsIllegalActionError} if the agent is already in a terminal state.
+   * @throws {OpsActionUnavailableError} if no agent manager is wired, or it does not run this agent.
    */
   public cancelAgent(agentId: string, note?: string): void {
     const state = this._store.getState();
@@ -303,12 +344,30 @@ export class OpsControlPlane {
       throw err;
     }
 
-    this._dispatch.transitionRuntimeAgent(
-      agentId,
-      'cancelled',
-      { endedAt: Date.now() },
-      'ops-control-plane',
+    const refuse = (why: string): never => {
+      const err = new OpsActionUnavailableError(agentId, 'cancel', why);
+      emitOpsAgentCancelled(this._bus, this._makeCtx(undefined, agentId), {
+        agentId,
+        reason: 'ops_agent_cancel',
+        note,
+        outcome: 'rejected',
+        errorMessage: err.message,
+      });
+      throw err;
+    };
+    if (this._agentCanceller === undefined) {
+      refuse(`no agent manager is connected to this control plane, so nothing can stop the run; the agent is still ${agent.status}`);
+    }
+    const canceller = this._agentCanceller;
+    const cancelled = this._audited(
+      () => canceller?.cancel(agentId, 'kill'),
+      (errorMessage) => emitOpsAgentCancelled(this._bus, this._makeCtx(undefined, agentId), {
+        agentId, reason: 'ops_agent_cancel', note, outcome: 'error', errorMessage,
+      }),
     );
+    if (cancelled === false) {
+      refuse(`the agent manager does not run this agent; it is ${agent.status} in the runtime store only`);
+    }
 
     emitOpsAgentCancelled(this._bus, this._makeCtx(undefined, agentId), {
       agentId,
@@ -336,7 +395,7 @@ export class OpsControlPlane {
 
   public canResumeTask(taskId: string): boolean {
     const task = this._taskManager.getTask(taskId);
-    return task != null && canTransition(task.status, 'running');
+    return task != null && task.status === 'blocked' && canTransition(task.status, 'running');
   }
 
   public canRetryTask(taskId: string): boolean {
@@ -352,6 +411,16 @@ export class OpsControlPlane {
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /** Runs a mutation; if it throws, records the failure in the audit log and rethrows. */
+  private _audited<T>(run: () => T, recordFailure: (errorMessage: string) => void): T {
+    try {
+      return run();
+    } catch (error) {
+      recordFailure(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
 
   private _makeCtx(taskId?: string, agentId?: string) {
     return {

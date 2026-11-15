@@ -21,5 +21,5 @@ test('concrete HTTP embedding admission rejects revoked attempts before fetch an
   await expect(provider.embed!({ ...request, beforeAttempt: async () => {} })).rejects.toThrow('cancelled before dispatch');
   expect(fetches).toBe(1);
   await provider.embed!({ text: 'ordinary fixture', dimensions: 384, usage: 'record' });
-  expect(fetches).toBe(2); expect(redirect).toBeUndefined();
+  expect(fetches).toBe(2); expect(redirect).toBe('error'); expect(observedSignal).toBeInstanceOf(AbortSignal);
 });

@@ -35,8 +35,10 @@ import {
   joiningGroupKeyMaterial,
   MAX_KEY_GENERATIONS,
   type ClusterSecretStore,
+  type GroupKeyMaterial,
 } from './group-store.js';
 import { keyRotationGraceMs, type ClusterGroupSettings } from './group-settings.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { AdmissionFailure } from './group-admissions.js';
 import { ClusterMembershipOperationError, type ClusterMembershipOperation, type MembershipOperationFailure } from './membership-operation.js';
 
@@ -298,6 +300,8 @@ export interface JoinGroupResult {
   readonly groupId: string;
   readonly groupName: string;
   readonly memberCount: number;
+  /** Set when the machine joined but something after joining did not complete. */
+  readonly warning?: string;
 }
 
 /**
@@ -379,13 +383,24 @@ async function joinGroupOwned(
   await context.runtime.adoptMembership(material, grant.state, owner);
   // Ask for the group's settings straight away: a machine that has joined but
   // holds none of them cannot serve a surface it might win in a few seconds.
-  if (!owner.signal.aborted) await context.runtime.requestConfigSnapshot();
+  // The membership is already saved, so a failed request is not a failed join:
+  // reporting one would have the operator retry and be told the machine is
+  // already in a group. Housekeeping keeps asking until the settings arrive.
+  let warning: string | undefined;
+  if (!owner.signal.aborted) {
+    try {
+      await context.runtime.requestConfigSnapshot();
+    } catch (error) {
+      warning = `this machine joined the group, but its first request for the group's settings did not go out (${summarizeError(error)}); it asks again on its own`;
+    }
+  }
   return {
     ok: true,
     data: {
       groupId,
       groupName: grant.state.displayName,
       memberCount: grant.state.members.length,
+      ...(warning !== undefined ? { warning } : {}),
     },
   };
 }
@@ -462,6 +477,12 @@ export interface ForgetNodeResult {
   readonly displayName: string;
   readonly memberCount: number;
   readonly keyGeneration: number;
+  /**
+   * True when the group's join key was replaced as well. A machine that is
+   * added later needs the NEW key, shown by `cluster key`; the removed machine
+   * holds only the old one.
+   */
+  readonly joinKeyReplaced?: boolean;
 }
 
 /**
@@ -473,16 +494,39 @@ export interface ForgetNodeResult {
  * rotated IMMEDIATELY with no acceptance window, so the key still sitting on
  * that machine's disk stops being accepted by everyone who adopts the rotation.
  *
+ * The rotation replaces the JOIN key too. Without that the removed machine, which
+ * still holds the join key, could present it to any member and be put straight
+ * back. To undo a removal on purpose, give the machine the new join key from
+ * `cluster key`.
+ *
  * Members that have not yet adopted keep accepting the old key for the moments
  * it takes the announcement to reach them. That gap is inherent to a network
  * and is not papered over here: it closes as the rotation propagates, and the
  * tombstone, which is what governs re-entry, is effective immediately.
+ *
+ * It is one operation: it cannot overlap a join or a leave, and when the key
+ * cannot be replaced after the roster was changed the result says that the
+ * removal is half done and names the command that finishes it.
  */
-export async function forgetNode(
+export function forgetNode(
   context: GroupOperationsContext,
   nodeId: string,
 ): Promise<GroupOperationResult<ForgetNodeResult>> {
+  return membershipOperation(context, owner => forgetNodeOwned(context, nodeId, owner));
+}
+
+async function forgetNodeOwned(
+  context: GroupOperationsContext,
+  nodeId: string,
+  owner: ClusterMembershipOperation,
+): Promise<GroupOperationResult<ForgetNodeResult>> {
   const state = context.runtime.groupState;
+  if (!context.settings.enabled) {
+    return failed(
+      'sharing inbound work with your other machines is switched off on this machine, so a removal would not reach the group',
+      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
+    );
+  }
   if (!state) {
     return failed(
       'this machine is not in a group',
@@ -516,8 +560,23 @@ export async function forgetNode(
     );
   }
   const removed = removeMember(state, member.nodeId, 'removed by the operator', context.now());
+  context.runtime.assertMembershipOperation(owner);
   await context.runtime.commitState(removed, true);
-  const rotated = await context.runtime.rotate('revocation', `${member.nodeId} was removed from the group`);
+  let rotated: GroupKeyMaterial;
+  try {
+    rotated = await context.runtime.rotate('revocation', `${member.nodeId} was removed from the group`);
+  } catch (error) {
+    // The roster already says the machine is gone and has been gossiped, so a
+    // retry would answer "no machine called ..."; say what state it is in.
+    const kind = error instanceof ClusterMembershipOperationError ? error.kind : undefined;
+    return failed(
+      `'${member.displayName}' was taken off the roster, but the group key and join key could not be replaced (${summarizeError(error)}), so that machine still holds a key the group accepts and the join key`,
+      kind === 'persistence-unknown'
+        ? 'do not blindly retry: inspect cluster status and the membership store, then restart to reconcile the saved result, and run `cluster rotate --now`'
+        : 'run `cluster rotate --now` to finish the removal',
+      kind ? { failure: kind } : {},
+    );
+  }
   return {
     ok: true,
     data: {
@@ -525,6 +584,7 @@ export async function forgetNode(
       displayName: member.displayName,
       memberCount: removed.members.length,
       keyGeneration: rotated.currentGeneration,
+      joinKeyReplaced: true,
     },
   };
 }
@@ -535,6 +595,8 @@ export interface RotateKeyResult {
   readonly memberCount: number;
   readonly immediate: boolean;
   readonly acceptedGenerations: readonly number[];
+  /** True when the join key was replaced too (an immediate rotation); `cluster key` shows the new one. */
+  readonly joinKeyReplaced?: boolean;
 }
 
 /**
@@ -547,14 +609,24 @@ export interface RotateKeyResult {
  *     nothing is interrupted. This is the right answer for routine hygiene.
  *
  *   --now, the outgoing generation stops being accepted immediately, and the
- *     group's SIGNING key is replaced as well. This is the answer when a key is
- *     believed to have leaked: whatever was taken stops working the moment each
- *     machine adopts the replacement, and the cost is that a machine which is
- *     asleep right now has to ask to come back when it wakes.
+ *     group's SIGNING key and JOIN key are replaced as well. This is the answer
+ *     when a key is believed to have leaked: whatever was taken stops working the
+ *     moment each machine adopts the replacement, and the cost is that a machine
+ *     which is asleep right now has to ask to come back when it wakes, and a
+ *     machine to be added needs the new join key from `cluster key`.
  */
-export async function rotateGroupKey(
+export function rotateGroupKey(
   context: GroupOperationsContext,
   input: { readonly immediate?: boolean | undefined } = {},
+): Promise<GroupOperationResult<RotateKeyResult>> {
+  const captured = { ...input };
+  return membershipOperation(context, owner => rotateGroupKeyOwned(context, captured, owner));
+}
+
+async function rotateGroupKeyOwned(
+  context: GroupOperationsContext,
+  input: { readonly immediate?: boolean | undefined },
+  owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<RotateKeyResult>> {
   const material = context.runtime.keyMaterial;
   if (!material) {
@@ -570,10 +642,20 @@ export async function rotateGroupKey(
     );
   }
   const immediate = input.immediate === true;
-  const rotated = await context.runtime.rotate(
-    immediate ? 'revocation' : 'scheduled',
-    immediate ? 'replaced immediately by the operator' : 'replaced by the operator',
-  );
+  context.runtime.assertMembershipOperation(owner);
+  let rotated: GroupKeyMaterial;
+  try {
+    rotated = await context.runtime.rotate(
+      immediate ? 'revocation' : 'scheduled',
+      immediate ? 'replaced immediately by the operator' : 'replaced by the operator',
+    );
+  } catch (error) {
+    if (error instanceof ClusterMembershipOperationError) throw error;
+    return failed(
+      `the group key could not be replaced: ${summarizeError(error)}`,
+      'inspect cluster status, then try again',
+    );
+  }
   return {
     ok: true,
     data: {
@@ -582,6 +664,7 @@ export async function rotateGroupKey(
       memberCount: context.runtime.groupState?.members.length ?? 0,
       immediate,
       acceptedGenerations: context.runtime.keyring().acceptedGenerations(),
+      ...(immediate ? { joinKeyReplaced: true } : {}),
     },
   };
 }
@@ -628,18 +711,27 @@ export interface RenameGroupResult {
  * is visible to anything on the network, the setting's description says so
  * plainly, and the default is neutral for that reason.
  */
-export async function renameGroupTo(
+export function renameGroupTo(
   context: GroupOperationsContext,
   displayName: string,
 ): Promise<GroupOperationResult<RenameGroupResult>> {
-  const state = context.runtime.groupState;
-  const material = context.runtime.keyMaterial;
-  if (!state || !material) {
-    return failed('this machine is not in a group', 'create a group with `cluster create` first');
-  }
-  const renamed = renameGroup(state, displayName);
-  await context.runtime.commitState(renamed, true);
-  return { ok: true, data: { groupId: material.groupId, groupName: renamed.displayName } };
+  return membershipOperation(context, async (owner): Promise<GroupOperationResult<RenameGroupResult>> => {
+    const state = context.runtime.groupState;
+    const material = context.runtime.keyMaterial;
+    if (!state || !material) {
+      return failed('this machine is not in a group', 'create a group with `cluster create` first');
+    }
+    if (!context.settings.enabled) {
+      return failed(
+        'sharing inbound work with your other machines is switched off on this machine, so a new name would not reach the group',
+        'turn it on first: `config set cluster.enabled true`, then restart the daemon',
+      );
+    }
+    const renamed = renameGroup(state, displayName);
+    context.runtime.assertMembershipOperation(owner);
+    await context.runtime.commitState(renamed, true);
+    return { ok: true, data: { groupId: material.groupId, groupName: renamed.displayName } };
+  });
 }
 
 /** Groups seen advertising themselves on this network that this machine is not in. */
@@ -650,9 +742,11 @@ export function groupsOnTheNetwork(context: GroupOperationsContext): GroupOperat
 /**
  * Ask the group to take this machine back.
  *
- * Called on start by a machine that already has key material, and available by
- * hand when a return needs a nudge. Succeeds only if the node id is still on
- * the roster, see `decideAdmission`.
+ * Called on start by a machine that already has key material. No verb or route
+ * exposes it, so a running machine that falls out of step is brought back by
+ * the group's repeated key announcements (see `ClusterGroupRuntime.rotate`),
+ * not by hand. Succeeds only if the node id is still on the roster, see
+ * `decideAdmission`.
  */
 export function rejoinGroup(context: GroupOperationsContext): Promise<GroupOperationResult<JoinGroupResult>> {
   return membershipOperation(context, owner => rejoinGroupOwned(context, owner));

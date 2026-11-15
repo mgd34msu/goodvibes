@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createPlatformServiceManager, getServiceStateRoot, type CliServiceRuntime } from '../cli/service-posture.ts';
+import { createPlatformServiceManager, getServiceStateRoot, resolveCliServiceName, type CliServiceRuntime } from '../cli/service-posture.ts';
 
 type ManagedServiceAction = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status';
 
@@ -56,8 +56,8 @@ function commandError(result: CommandResult): string | null {
   return ((result.stderr ?? '') || (result.stdout ?? '') || `command exited with ${result.status}`).trim();
 }
 
-function serviceName(runtime: CliServiceRuntime, fallback = 'goodvibes'): string {
-  return String(runtime.configManager.get('service.serviceName') ?? fallback).trim() || fallback;
+function serviceName(runtime: CliServiceRuntime): string {
+  return resolveCliServiceName(runtime.configManager);
 }
 
 function runSystemd(runtime: CliServiceRuntime, args: readonly string[], options: ServiceSettingsSyncOptions): string | null {
@@ -199,6 +199,22 @@ function refreshInstalledSystemService(
   };
 }
 
+/**
+ * Turning the service on saves the setting before the OS install runs. When the
+ * install or start fails, leave the settings where they were so the toggle does
+ * not read ON with no service behind it (and so turning it on again retries).
+ */
+function revertEnableOnError(
+  runtime: CliServiceRuntime,
+  result: ServiceSettingsSyncResult,
+  before: { readonly autostart: unknown; readonly enabled: unknown },
+): ServiceSettingsSyncResult {
+  if (!result.error) return result;
+  runtime.configManager.setDynamic('service.autostart', before.autostart === true);
+  runtime.configManager.setDynamic('service.enabled', before.enabled === true);
+  return { ...result, message: `${result.message}; the setting was turned back off, so turning it on again retries` };
+}
+
 export function syncServiceSettingToPlatform(
   runtime: CliServiceRuntime,
   change: ServiceSettingsSyncChange,
@@ -213,10 +229,12 @@ export function syncServiceSettingToPlatform(
   try {
     if (change.key === 'service.autostart') {
       if (change.value === true) {
+        // The change is already saved, so its previous value is the one to restore.
+        const before = { autostart: change.previousValue, enabled: runtime.configManager.get('service.enabled') };
         if (runtime.configManager.get('service.enabled') !== true) {
           runtime.configManager.setDynamic('service.enabled', true);
         }
-        return installAndStartSystemService(runtime, manager, options);
+        return revertEnableOnError(runtime, installAndStartSystemService(runtime, manager, options), before);
       }
       return disableSystemService(runtime, manager, options);
     }
@@ -229,7 +247,11 @@ export function syncServiceSettingToPlatform(
         return disableSystemService(runtime, manager, options);
       }
       if (runtime.configManager.get('service.autostart') === true) {
-        return installAndStartSystemService(runtime, manager, options);
+        return revertEnableOnError(
+          runtime,
+          installAndStartSystemService(runtime, manager, options),
+          { autostart: runtime.configManager.get('service.autostart'), enabled: change.previousValue },
+        );
       }
       return {
         handled: true,

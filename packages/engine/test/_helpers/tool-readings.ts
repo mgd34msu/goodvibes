@@ -25,7 +25,6 @@ import type { JudgmentPort, Question, Questions } from '@goodvibes-jev/judgment'
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { forgetGateReadings, gateReadingsPort, type GateReadingTable } from './gate-readings.ts';
-import { forgetCredentialEnvReadings } from '../../platform/src/platform/tools/exec/credential-env.ts';
 import { forgetServerOnlyReadings } from '../../platform/src/platform/tools/inspect/frontend-readings.ts';
 import type { ExecFailureCategory } from '../../platform/src/platform/tools/batteries/exec-retry.ts';
 import type { ChildFailureReading } from '../../platform/src/platform/tools/batteries/child-failure-reason.ts';
@@ -43,8 +42,6 @@ export interface ToolReading {
   readonly fill?: string;
   readonly realSecret?: boolean | 'uncertain';
   readonly risky?: boolean | 'uncertain';
-  /** engine.tools.owner-terminal: the command acts on an existing terminal session (acts_on_session), none of them owned (owned_targets). */
-  readonly foreignTerminal?: boolean | 'uncertain';
   readonly severity?: 'high' | 'medium' | 'low';
   /** engine.tools.frontend-finding: the answer to whichever question the analyzer asks. */
   readonly finding?: boolean | 'uncertain';
@@ -143,8 +140,6 @@ function toolAnswers(table: ToolReadingTable) {
       case 'pick': return choiceAnswer(question, reading.fill ?? 'none', 0.95);
       case 'real_secret': return noul(reading.realSecret);
       case 'risky': return noul(reading.risky);
-      case 'acts_on_session': return noul(reading.foreignTerminal);
-      case 'owned_targets': return noul(reading.foreignTerminal === 'uncertain' ? 'uncertain' : reading.foreignTerminal !== true);
       case 'severity': return choiceAnswer(question, reading.severity ?? 'low', 0.95);
       case 'project_type': return choiceAnswer(question, reading.projectType ?? 'nodejs', 0.95);
       case 'package_manager': return choiceAnswer(question, reading.packageManager ?? 'npm', 0.95);
@@ -178,7 +173,6 @@ export function useToolReadings(table: ToolReadingTable = [], gateTable: GateRea
   const log: { requests: ReadonlyArray<ToolReadingRequest> } = { requests: [] };
   let previous: ReturnType<typeof installJudgmentPort>;
   beforeEach(() => {
-    forgetCredentialEnvReadings();
     forgetServerOnlyReadings();
     forgetGateReadings();
     const { port, requests } = toolReadingsPort(table, gateTable);
@@ -187,7 +181,6 @@ export function useToolReadings(table: ToolReadingTable = [], gateTable: GateRea
   });
   afterEach(() => {
     installJudgmentPort(previous);
-    forgetCredentialEnvReadings();
     forgetServerOnlyReadings();
     forgetGateReadings();
   });

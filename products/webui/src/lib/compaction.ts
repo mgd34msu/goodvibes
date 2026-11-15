@@ -106,10 +106,22 @@ function boolField(record: Record<string, unknown>, key: string): boolean {
   return record[key] === true;
 }
 
+/** The control-plane stream writes each frame as an envelope
+ *  `{ type, sessionId, ..., payload: <event> }`; the event's own fields live in
+ *  `payload`. A flat event record is read as-is. The event's sessionId wins over
+ *  the envelope's. */
+function eventRecord(frame: unknown): Record<string, unknown> {
+  const envelope = asRecord(frame);
+  const inner = asRecord(envelope.payload);
+  if (typeof inner.type !== 'string') return envelope;
+  const sessionId = typeof inner.sessionId === 'string' && inner.sessionId ? inner.sessionId : envelope.sessionId;
+  return { ...inner, sessionId };
+}
+
 /** Parse a raw 'compaction' domain frame into a CompactionReceipt, or null when
  *  it is not a COMPACTION_RECEIPT frame (or is malformed). */
 export function parseCompactionReceipt(payload: unknown, receivedAt: number = Date.now()): CompactionReceipt | null {
-  const record = asRecord(payload);
+  const record = eventRecord(payload);
   if (record.type !== 'COMPACTION_RECEIPT') return null;
   const sessionId = stringField(record, 'sessionId');
   if (!sessionId) return null;
@@ -141,7 +153,7 @@ export function parseCompactionReceipt(payload: unknown, receivedAt: number = Da
 /** Parse a raw 'compaction' domain frame into a CompactionCheck (the live
  *  token-usage signal), or null when it is not a COMPACTION_CHECK frame. */
 export function parseCompactionCheck(payload: unknown, receivedAt: number = Date.now()): CompactionCheck | null {
-  const record = asRecord(payload);
+  const record = eventRecord(payload);
   if (record.type !== 'COMPACTION_CHECK') return null;
   const sessionId = stringField(record, 'sessionId');
   if (!sessionId) return null;

@@ -252,6 +252,83 @@ describe('helper model routing', () => {
     await expect(helper.chat('compaction', 'plan')).rejects.toThrow('provider unavailable');
   });
 
+  test('a provider that never answers rejects after the timeout and was told to stop', async () => {
+    let seen: AbortSignal | undefined;
+    const hangingProvider: LLMProvider = {
+      ...provider('openai'),
+      chat(params) {
+        seen = params.signal;
+        return new Promise(() => {});
+      },
+    };
+    const helper = new HelperModel({
+      configManager: {
+        get: ((key: string) => {
+          if (key === 'helper.enabled') return true;
+          if (key === 'helper.globalProvider') return 'openai';
+          if (key === 'helper.globalModel') return 'gpt-4.1-mini';
+          return '';
+        }) as ConfigManager['get'],
+        getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
+      },
+      providerRegistry: {
+        getCurrentModel: () => model(),
+        getForModel: () => hangingProvider,
+        resolveModelPricing: resolveModelPricingStub,
+      },
+    });
+
+    await expect(helper.chat('compaction', 'plan', { timeoutMs: 5 })).rejects.toThrow('timed out after 5 ms');
+    expect(seen?.aborted).toBe(true);
+  });
+
+  test('a provider whose chat throws synchronously leaves no timeout timer armed', async () => {
+    const throwingProvider: LLMProvider = {
+      ...provider('openai'),
+      chat() {
+        throw new Error('invalid request');
+      },
+    };
+    const helper = new HelperModel({
+      configManager: {
+        get: ((key: string) => {
+          if (key === 'helper.enabled') return true;
+          if (key === 'helper.globalProvider') return 'openai';
+          if (key === 'helper.globalModel') return 'gpt-4.1-mini';
+          return '';
+        }) as ConfigManager['get'],
+        getCategory: (() => undefined) as unknown as ConfigManager['getCategory'],
+      },
+      providerRegistry: {
+        getCurrentModel: () => model(),
+        getForModel: () => throwingProvider,
+        resolveModelPricing: resolveModelPricingStub,
+      },
+    });
+
+    const realSetTimeout = globalThis.setTimeout;
+    const armed: unknown[] = [];
+    const cleared: unknown[] = [];
+    const realClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+      const handle = realSetTimeout(...args);
+      armed.push(handle);
+      return handle;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle?: Parameters<typeof clearTimeout>[0]) => {
+      cleared.push(handle);
+      return realClearTimeout(handle);
+    }) as typeof clearTimeout;
+    try {
+      await expect(helper.chat('compaction', 'plan', { timeoutMs: 60_000 })).rejects.toThrow('invalid request');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
+    // Every timer armed during the call (if any) was cleared.
+    for (const handle of armed) expect(cleared).toContain(handle);
+  });
+
   test('missing helper response content is not converted to an empty string', async () => {
     const badProvider: LLMProvider = {
       ...provider('openai'),

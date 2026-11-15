@@ -91,3 +91,24 @@ test('close retains already admitted persistence until its original promise sett
   } finally { release.resolve(); await closing; }
   expect(settled).toBe(true); expect(writes).toBe(1);
 });
+
+test('a server on another machine is neither registered nor remembered', async () => {
+  const remote: DiscoveredServer = { ...server, name: 'remote', host: '192.168.1.20', baseURL: 'http://192.168.1.20:9/v1' };
+  const registered: string[][] = []; const persisted: string[][] = [];
+  const owner = createDaemonProviderDiscovery(roots, (servers) => { registered.push(servers.map((s) => s.name)); }, {
+    async scan() { return { ...result, servers: [remote, server] }; },
+    persist(_roots, servers) { persisted.push(servers.map((s) => s.name)); },
+  });
+  owner.start(); await new Promise<void>((resolve) => setImmediate(resolve)); await owner.close();
+  expect(registered).toEqual([['fixture']]); expect(persisted).toEqual([['fixture']]);
+});
+
+test('a scan that finds only network servers registers and persists nothing', async () => {
+  const remote: DiscoveredServer = { ...server, host: '10.0.0.5', baseURL: 'http://10.0.0.5:9/v1' };
+  let registrations = 0; let writes = 0;
+  const owner = createDaemonProviderDiscovery(roots, () => { registrations++; }, {
+    async scan() { return { ...result, servers: [remote] }; }, persist() { writes++; },
+  });
+  owner.start(); await new Promise<void>((resolve) => setImmediate(resolve)); await owner.close();
+  expect(registrations).toBe(0); expect(writes).toBe(0);
+});

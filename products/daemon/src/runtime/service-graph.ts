@@ -1,4 +1,4 @@
-import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
@@ -9,14 +9,13 @@ import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { join } from 'node:path';
-import { ServiceRegistry, SubscriptionManager, ToolLLM, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry, SubscriptionManager, ToolLLM, resolveSecretInput, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import { AutomationDeliveryManager, AutomationManager, automationActionBinding } from '@goodvibes-jev/engine/platform/platform/automation';
 import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
-import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, buildSharedSessionAgentSpawnRoutingInput, controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { AcpHostService } from '@goodvibes-jev/engine/platform/platform/acp';
 import { createMcpAutonomousElicitationHandler } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { continuationContractOptions } from '@goodvibes-jev/engine/platform/platform/agents';
-import { PersonalCaptureHolder, conversationalTurnSpawnOptions } from '@goodvibes-jev/engine/platform/platform/personal-capture';
+import { PersonalCaptureHolder } from '@goodvibes-jev/engine/platform/platform/personal-capture';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
@@ -31,7 +30,9 @@ import { createWebKnowledgeGapRepairer } from '@goodvibes-jev/engine/platform/pl
 import { createKnowledgeServices } from './knowledge-services.js';
 import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '@goodvibes-jev/engine/platform/platform/media';
 import { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
-import { OverflowHandler, ProcessManager, cancelAllAgentRuns, createWorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
+import { CONVERSATIONAL_CONTAINMENT } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import { OverflowHandler, ProcessManager, cancelAllAgentRuns, createConfiguredFetchDeps, createWorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
 import { FileStateCache, FileUndoManager, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
 import { createBrokeredPermissionManager } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
@@ -47,6 +48,7 @@ import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engin
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
 import { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/store';
+import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { DistributedRuntimeManager, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, createShellPathService, createFeatureFlagManager, createNoopPanelManager, createNoopKeybindingsManager, PolicyRuntimeState } from './index.js';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '@goodvibes-jev/engine/platform/platform/voice';
 import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
@@ -58,6 +60,7 @@ import { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmar
 import { ProfileManager } from '@goodvibes-jev/engine/platform/platform/profiles';
 import { CrossSessionTaskRegistry, SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { ApiTokenAuditor, UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { createTokenAuditBusEmitter, startPairingTokenAudit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, createLaunchTolerantProviderRegistry, ensureConfiguredModelIsRoutable } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -117,7 +120,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const workingDirectory = options.workingDir;
     const homeDirectory = options.homeDirectory;
     observeNativeStartupPhase('base-project-context');
-    await prepareConfiguredProjectContext(options.configManager, workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
+    await prepareConfiguredProjectContext(options.configManager, workingDirectory, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
     const shellPaths = createShellPathService({
       workingDirectory,
       homeDirectory,
@@ -232,6 +235,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const watcherRegistry = new WatcherRegistry({
       storePath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'watchers.json'),
       featureFlags,
+      resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
     });
     disposalScope.ownUntilRegistered('watcher registry', () => watcherRegistry.dispose());
     watcherRegistry.attachRuntime({
@@ -273,38 +277,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       messageSender: agentMessageBus,
       conversationGateConfig: configManager, // without this the gate runs on DEFAULTS: an inbound message landing in a live session takes the handover and starts work whatever conversationGate.mode/gatedSurfaces say
     });
-    sessionBroker.setContinuationRunner(async ({ task, input }) => {
-      const record = agentManager.spawn({
-        mode: 'spawn',
-        task,
-        // Canonical continuation authority: only an explicit work marker or a
-        // local surface starts a contract. Other follow-ups remain conversations.
-        ...continuationContractOptions(input, {
-          configReader: {
-            get: (key: string) => configManager.get(key as never),
-            getCategory: (name: string) => configManager.getCategory(name as never),
-          },
-        }),
-        // What the answering agent is given and what it is told. `restrictTools:
-        // true` with no tool list used to mean an EMPTY registry: the agent could
-        // emit text and nothing else, which is why a trip pasted into a channel
-        // was answered and stored nowhere. This names the tools a conversational
-        // turn actually needs (read, find, fetch, and the `profile` capture tool),
-        // supplies the instruction that makes recording part of answering, and
-        // carries the write authority for the surface the message arrived on.
-        // It also supplies the run's context, which is why the bare
-        // `context: shared-session:<id>` line that used to sit below is gone.
-        // Spread BEFORE the routing builder so an explicit tool list coming from
-        // a routing intent still wins, that builder emits `tools` only when it
-        // actually has one.
-        ...conversationalTurnSpawnOptions(input, { configReader: configManager }),
-        // Spawn routing through the platform's shared model-reference resolver
-        // (unique-across-registry auto-qualifies; ambiguous and unknown ids throw
-        // errors naming real candidates), against the live registry's models.
-        ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { restrictTools: true, modelCandidates: providerRegistry.listModels() }),
-      });
-      return { agentId: record.id };
-    });
+    // No continuation runner here: DaemonServer's facade installs the single one
+    // (configureDaemonSessionContinuation) with the conversation gate, the reply
+    // queue and the shared-session context. A second runner on this broker would
+    // replace or be replaced by it depending on construction order. Until the
+    // facade is built the broker logs that a follow-up has no runner.
     const artifactStore = new ArtifactStore({ configManager });
     const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
     // Open the ONE home-scoped canonical store; legacy per-project memory folds in at boot.
@@ -313,6 +290,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       embeddingRegistry: memoryEmbeddingRegistry,
     });
     const memoryRegistry = new MemoryRegistry(memoryStore);
+    disposalScope.registry.add('memory store', () => memoryStore.close());
     // The daemon is the memory spine's HOST: it always serves the local store.
     // Clients construct the same facade in wire mode against this process.
     const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry) });
@@ -399,10 +377,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       env: process.env,
       serviceRegistry,
     });
-    const webSearchService = new WebSearchService(webSearchProviders, {
-      serviceRegistry,
-      featureFlags,
-    });
+    // The approval handlers are built further down; a loopback search evidence fetch reads them when it happens.
+    let localhostFetchApprovalForSearch: LocalhostFetchApproval | undefined;
+    const webSearchService = new WebSearchService(webSearchProviders, createConfiguredFetchDeps({
+      serviceRegistry, featureFlags, configManager, localhostFetchApprovalSource: () => localhostFetchApprovalForSearch,
+    }));
     for (const [semantic, ingest] of [[knowledgeSemanticService, knowledgeService], [agentKnowledgeSemanticService, agentKnowledgeService], [homeGraphSemanticService, homeGraphService]] as const) {
       semantic.setGapRepairer(createWebKnowledgeGapRepairer({ searchService: webSearchService, ingestService: ingest }));
     }
@@ -418,7 +397,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.ownUntilRegistered('plugins', () => pluginManager.close());
     const workflow = createWorkflowServices();
-    hookDispatcher.setTriggerManager(workflow.triggerManager);
+    disposalScope.registry.add('trigger dispatch', hookDispatcher.setTriggerManager(workflow.triggerManager, featureFlags));
     const channelPolicy = new ChannelPolicyManager({
       storePath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'channels', 'policies.json'),
     });
@@ -475,8 +454,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('MCP connections', closeMcpConnections);
     // Advisory reporting only: `managed` is hardcoded false here, so excess-scope
     // and overdue tokens are reported and never blocked.
-    const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags });
+    const tokenAuditor = new ApiTokenAuditor({ managed: false, featureFlags }, { emitter: createTokenAuditBusEmitter(options.runtimeBus) });
+    disposalScope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
     const componentHealthMonitor = new ComponentHealthMonitor();
+    const healthSystem = createWiredHealthSystem(options.runtimeBus);
+    disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
     const worktreeRegistry = new WorktreeRegistry(workingDirectory);
     const webhookNotifier = new WebhookNotifier([], {
       metadataOnly: () => readNotificationsMetadataOnly(() => configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as never)),
@@ -501,7 +483,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const processManager = new ProcessManager();
     disposalScope.registry.add('background processes', () => processManager.close());
     // The source-tree index shares memory embeddings; auto-build is config-gated and off by default.
-    const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({ workingDirectory, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, configManager, memoryEmbeddingRegistry, isReindexPaused: () => pauseController.isPaused('code-index-reindex'), admitExpensiveWork });
+    const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({ workingDirectory, getWorkingDirectory: () => projectIndex.baseDir, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, configManager, memoryEmbeddingRegistry, isReindexPaused: () => pauseController.isPaused('code-index-reindex'), admitExpensiveWork });
+    disposalScope.registry.add('code index store', () => codeIndexStore.close());
     disposalScope.ownUntilRegistered('code-index reindex scheduler', () => codeIndexReindexScheduler.dispose());
     // Store snapshots, the periodic append-only sweep, durable remembered-approval rules + the live credential chain.
     const { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch } = operations.createDurabilityServices({
@@ -522,16 +505,20 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.ownUntilRegistered('trigger manager', async () => { triggerManager.shutdown(); await triggerManager.join(); });
     // External protocols share the daemon's recorded owner and live policy.
+    // One gated raiser for every approval ask below: the tool permission asks
+    // and the sandbox-escalation, exec-prompt-answer and localhost-fetch asks
+    // must all pass the same workspace-trust check, as hosted floors do.
+    const gatedRequestApproval = trustGatedApprovalRaiser(
+      workspaceTrustManager,
+      (input) => approvalBroker.requestApproval(input),
+      createWorkspaceTrustDecisionAsk({
+        broker: approvalBroker,
+        workingDirectory,
+      }),
+    );
     const permissionManager = createBrokeredPermissionManager({
       workspaceTrust: workspaceTrustManager,
-      requestApproval: trustGatedApprovalRaiser(
-        workspaceTrustManager,
-        (input) => approvalBroker.requestApproval(input),
-        createWorkspaceTrustDecisionAsk({
-          broker: approvalBroker,
-          workingDirectory,
-        }),
-      ),
+      requestApproval: gatedRequestApproval,
       configManager,
       policyRuntimeState,
       hookDispatcher,
@@ -542,9 +529,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const autonomousHost = { port: judgment.port, permissionManager, config: configManager, signal: autonomousLifetime.signal, workspaceTrust: workspaceTrustManager,
       workspaceRoot: workingDirectory, workspaceTrustFor: createDaemonWorkspaceTrustResolver({ workingDirectory, homeDirectory, workspaceTrustManager }) };
     const { localhostFetchApproval, execPromptAnswerHandler, sandboxEscalationHandler } = createApprovalDerivedHandlers({
-      requestApproval: input => approvalBroker.requestApproval(input), configManager, featureFlags, autonomousHost,
+      requestApproval: gatedRequestApproval, configManager, featureFlags, autonomousHost,
       announcementStore: new FeatureAnnouncementStore(featureAnnouncementsPath(configManager)),
     });
+    localhostFetchApprovalForSearch = localhostFetchApproval;
     mcpRegistry.setPermissionHost(autonomousHost);
     mcpRegistry.setElicitationHandler(createMcpAutonomousElicitationHandler(autonomousHost));
     // Child prose never replaces the original host prompt; absent origins refuse.
@@ -579,7 +567,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       acpHost, // Folds live hosted-agent sessions into the fleet as 'acp' rows
     });
     disposalScope.ownUntilRegistered('fleet process registry', () => processRegistry.dispose());
-    const modeManager = new ModeManager({ featureFlags }); const fileUndoManager = new FileUndoManager();
+    const modeManager = new ModeManager({ featureFlags }); const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
     // Checkpoints, gated on live workspace registration, see workspace-checkpointing.ts.
     const checkpointing = createWorkspaceCheckpointing({
       workspaceRoot: workingDirectory, surface, runtimeBus: options.runtimeBus, configManager, shellPaths,
@@ -656,7 +644,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // The session intake attributes a sender on this policy's owner allowlist
       // to the owner principal instead of unknown.
       channelPolicy,
-      approvalBroker, requestApproval: (input) => approvalBroker.requestApproval(input),
+      approvalBroker,
       // approvals.raise, a surface CREATING an ask in this broker. Without it the
       // verb is cataloged and unhandled, and a client whose prompt runs outside
       // this process has no way to raise one.
@@ -677,7 +665,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       relayAvailable: () => configManager.get('relay.enabled') === true,
       pairingWebOrigin: () => resolvePairingWebOrigin(configManager).origin,
       disposal: disposalScope.registry,
-      ...wireFleetNeedsInputPush({ registry: processRegistry, runtimeBus: options.runtimeBus, sessionBroker }),
+      ...wireFleetNeedsInputPush({ registry: processRegistry.unfiltered, runtimeBus: options.runtimeBus, sessionBroker }),
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));
@@ -718,6 +706,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // Without this the `profile` tool is never registered, and a conversational
       // turn that was told to record what the owner said has nothing to call.
       personalCapture,
+      // Nobody watches a daemon worker's terminal: its exec requires the boundary
+      // unless a composed workstream is explicitly granted the host (see
+      // native-work-execution-activation.ts).
+      execContainment: CONVERSATIONAL_CONTAINMENT,
     };
     agentOrchestrator.setDependencies(agentToolDependencies);
     const nativeScopes = new WorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths),
@@ -765,7 +757,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       continuationScopeOwner: { current: () => { if (!continuationScopeOwner) throw new Error('Native CI scope owner is unavailable'); return continuationScopeOwner.current(); } },
       judgmentPort: judgment.port, decisionLog: judgment.decisionLog,
       permissionManager, hookDispatcher, featureFlags, toolDependencies: agentToolDependencies,
-      additionalFleetOwnership: () => agentManager.fleetOwnership(),
+      additionalFleetOwnership: () => agentManager.fleetOwnership(), contractOperator,
     });
     ciNativeContinuationRevocation = async watch => (await nativeWork.acquire()).revokeCiWatch(watch);
     ciNativeContinuationOwner = async watch => (await nativeWork.acquire()).recoverCiWatchOwner(watch);
@@ -869,6 +861,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       mcpRegistry,
       tokenAuditor,
       componentHealthMonitor,
+      healthAggregator: healthSystem.aggregator,
       worktreeRegistry,
       sandboxSessionRegistry,
       webhookNotifier,
@@ -959,6 +952,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       checkoutSeam: browserCheckoutSeam.get, channelDeliveryRouter, inboxFactory: options.inboxFactory,
       triagePermissionHost: autonomousHost,
       nativeMutationHost: autonomousHost,
+      hasProfile: (profileId: string): boolean => { try { profileManager.load(profileId); return true; } catch { return false; } },
     };
     return { services, handlerOptions, closeWorkLedger: () => { retireContinuationScope(); return fenceWorkLedger!(); }, closeBrowserJudgment: () => { retireContinuationScope(); return fenceBrowserJudgment!(); }, closeAutonomousPermissions, retireContinuationScope };
   } catch (startupError) {

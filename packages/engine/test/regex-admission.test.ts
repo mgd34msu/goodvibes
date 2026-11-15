@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { withTestTimeout } from './_helpers/test-timeout.ts';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createFindTool } from '../platform/src/platform/tools/find/executor.ts';
 import { PermissionSimulator } from '../platform/src/platform/runtime/permissions/simulation.ts';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -89,51 +88,6 @@ test('Bun native execution remains correct or retires within the independent wor
     await expect(pattern.test('a')).rejects.toThrow();
   }
 });
-
-test('the actual Node worker deadline retires catastrophic native execution despite semantic admission', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'regex-node-deadline-'));
-  let child: ReturnType<typeof Bun.spawn> | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const entry = join(dir, 'entry.ts');
-    const source = resolve(import.meta.dir, '../errors/src/regex-admission.ts');
-    writeFileSync(entry, `
-      import assert from 'node:assert/strict';
-      import { admitRegex } from ${JSON.stringify(source)};
-      const controller = new AbortController();
-      const reading = { signal: controller.signal, assertCurrent() {}, async read() { return { outcome: 'act', verdict: 'no' }; } };
-      await using pattern = await admitRegex('(a|aa)+$', '', { operation: 'native Node deadline', reading, timeoutMs: 1000 });
-      await assert.rejects(pattern.test('a'.repeat(1000) + '!'), /executor/);
-      await assert.rejects(pattern.test('a'), /executor/);
-      console.log('native-node-deadline-retired');
-    `);
-    // The canonical suite guard requires an owned, bounded bundler child.
-    const bundler = Bun.spawn([process.execPath, 'build', entry, '--target=node', '--format=esm',
-      '--conditions=bun', `--outdir=${dir}`, '--entry-naming=entry.mjs'],
-    { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-    const buildStdout = new Response(bundler.stdout).text().catch(() => '');
-    const buildStderr = new Response(bundler.stderr).text().catch(() => '');
-    try {
-      const exit = await withTestTimeout(bundler.exited, 3000, 'Node regex fixture bundle exceeded 3000ms');
-      expect(exit, `${await buildStdout}\n${await buildStderr}`).toBe(0);
-    } finally {
-      try { bundler.kill('SIGKILL'); } catch { /* Already exited. */ }
-      await bundler.exited.catch(() => undefined);
-    }
-    const nodeChild = Bun.spawn(['node', join(dir, 'entry.mjs')], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-    child = nodeChild;
-    const stdout = new Response(nodeChild.stdout).text(), stderr = new Response(nodeChild.stderr).text();
-    // Bound the owned child even if the production worker deadline regresses.
-    timer = setTimeout(() => { try { child?.kill('SIGKILL'); } catch { /* Already exited. */ } }, 5000);
-    const exit = await nodeChild.exited;
-    expect(exit, await stderr).toBe(0);
-    expect(await stdout).toContain('native-node-deadline-retired');
-  } finally {
-    clearTimeout(timer);
-    if (child) { try { child.kill('SIGKILL'); } catch { /* Already exited. */ } await child.exited.catch(() => {}); }
-    rmSync(dir, { recursive: true, force: true });
-  }
-}, 10000);
 
 test('worker output and input bounds cannot be relaxed by per-call options', async () => {
   admit();

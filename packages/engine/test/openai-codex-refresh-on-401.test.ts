@@ -366,5 +366,6 @@ for (const terminal of ['missing', 'incomplete']) test(`Codex ${terminal} stream
     { headers: { 'content-type': 'text/event-stream' } }), tokenExchange: sseSuccess });
   const result = new OpenAICodexProvider(manager).chat(CHAT_PARAMS);
   if (terminal === 'missing') await expect(result).rejects.toThrow('terminal response');
-  else expect((await result).stopReason).not.toBe('completed');
+  // An incomplete response with no stated reason is a truncation, never a completion.
+  else expect((await result).stopReason).toBe('max_tokens');
 });

@@ -11,8 +11,8 @@ function deferred() {
 }
 const roots: string[] = [];
 const harnesses: Harness[] = [];
-afterEach(() => {
-  for (const h of harnesses.splice(0)) h.dispose();
+afterEach(async () => {
+  await Promise.all(harnesses.splice(0).map(h => h.dispose()));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -22,11 +22,13 @@ test('dispose freezes resumable snapshots before cancellation, then joins real c
   const first = makeHarness({ root, plan: oneUnitPlan(1), scripts: {} });
   harnesses.push(first);
   const cleanup = deferred();
+  const abortSeen = deferred();
   first.manager.setExecutor({ runAgent: async (record) => {
     record.status = 'running';
     const signal = first.manager.getCancellationSignal(record.id)!;
     try {
       if (!signal.aborted) await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+      abortSeen.resolve();
     } finally { await cleanup.promise; }
   } });
   const { contract } = (await startContract(first));
@@ -43,6 +45,7 @@ test('dispose freezes resumable snapshots before cancellation, then joins real c
   expect(JSON.parse(itemBefore).workstream.items[0].state).toBe('in-phase');
   let settled = false;
   const barrier = first.runner.join(contract.id).then(() => { settled = true; });
+  await abortSeen.promise;
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   expect(settled).toBe(false);
   cleanup.resolve();

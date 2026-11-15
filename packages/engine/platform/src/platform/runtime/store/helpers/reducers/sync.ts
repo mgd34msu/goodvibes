@@ -18,7 +18,10 @@ import type { AutomationRouteBinding } from '../../../../automation/routes.js';
 import type { AutomationSurfaceKind } from '../../../../automation/types.js';
 import type { AutomationDeliveryAttempt } from '../../../../automation/delivery.js';
 import type { SessionDomainState } from '../../domains/session.js';
-import { now, uniq, updateDomainMetadata } from './shared.js';
+import { emptyBindingIdsBySurface } from '../../domains/routes.js';
+import { evictOldestEnded, now, uniq, updateDomainMetadata } from './shared.js';
+import type { RetiredRunCounts } from '../../domains/automation.js';
+import type { RetiredAttemptCounts } from '../../domains/deliveries.js';
 
 export function updateCommunicationState(
   domain: CommunicationDomainState,
@@ -117,15 +120,19 @@ export function updatePluginState(domain: PluginDomainState, event: PluginEvent)
     status: pluginStatusForEvent(event),
     version: 'version' in event ? event.version : plugin.version,
     description: 'path' in event ? event.path : plugin.description,
-    active: event.type === 'PLUGIN_ACTIVE' ? true : event.type === 'PLUGIN_DISABLED' ? false : plugin.active,
-    enabled: event.type === 'PLUGIN_DISABLED' ? false : plugin.enabled,
+    // `active` follows the status, so a plugin that moves on to error, degraded or unloading is not also listed as active.
+    active: event.type === 'PLUGIN_ACTIVE',
+    // Any event other than a disable means the plugin is being let run again.
+    enabled: event.type !== 'PLUGIN_DISABLED',
     toolCount: 'capabilities' in event ? event.capabilities.length : plugin.toolCount,
     error:
       event.type === 'PLUGIN_ERROR'
         ? event.error
         : event.type === 'PLUGIN_DEGRADED'
           ? event.reason
-          : plugin.error,
+          : event.type === 'PLUGIN_ACTIVE' || event.type === 'PLUGIN_LOADED'
+            ? undefined
+            : plugin.error,
     loadedAt: event.type === 'PLUGIN_LOADED' || event.type === 'PLUGIN_ACTIVE' ? timestamp : plugin.loadedAt,
     errorAt: event.type === 'PLUGIN_ERROR' || event.type === 'PLUGIN_DEGRADED' ? timestamp : plugin.errorAt,
   };
@@ -265,14 +272,19 @@ export function updateMcpState(domain: McpDomainState, event: McpEvent): McpDoma
           : event.type === 'MCP_CONNECTED'
             ? 'fresh'
             : server.schemaFreshness,
+    // An approved or freshly connected schema is no longer quarantined, so its reason goes with it.
     quarantineReason:
       event.type === 'MCP_SCHEMA_QUARANTINED'
         ? event.reason
-        : server.quarantineReason,
+        : event.type === 'MCP_SCHEMA_QUARANTINE_APPROVED' || event.type === 'MCP_CONNECTED'
+          ? undefined
+          : server.quarantineReason,
     quarantineDetail:
       event.type === 'MCP_SCHEMA_QUARANTINED'
         ? event.detail
-        : server.quarantineDetail,
+        : event.type === 'MCP_SCHEMA_QUARANTINE_APPROVED' || event.type === 'MCP_CONNECTED'
+          ? undefined
+          : server.quarantineDetail,
     quarantineApprovedBy:
       event.type === 'MCP_SCHEMA_QUARANTINE_APPROVED'
         ? event.operatorId
@@ -284,7 +296,9 @@ export function updateMcpState(domain: McpDomainState, event: McpEvent): McpDoma
           ? event.reason
           : event.type === 'MCP_SCHEMA_QUARANTINED'
             ? event.detail ?? String(event.reason)
-            : server.lastError,
+            : event.type === 'MCP_CONNECTED'
+              ? undefined
+              : server.lastError,
   });
   const connectedServerNames = [...servers.values()].filter((value) => value.status === 'connected').map((value) => value.name);
   return {
@@ -330,6 +344,38 @@ function transportStateForEvent(event: TransportEvent): AcpTransportState | Daem
   }
 }
 
+/**
+ * One ACP state for many subagent connections. Failures are reported beside
+ * live connections instead of being overwritten by them, and a connection that
+ * ends cleanly no longer counts.
+ */
+function aggregateAcpTransportState(states: ReadonlyMap<string, AcpTransportState>): AcpTransportState {
+  const values = [...states.values()];
+  if (values.length === 0) return 'disconnected';
+  const failed = values.filter((value) => value === 'terminal_failure').length;
+  if (failed === values.length) return 'terminal_failure';
+  if (failed > 0 || values.includes('degraded')) return 'degraded';
+  if (values.includes('reconnecting')) return 'reconnecting';
+  if (values.includes('syncing')) return 'syncing';
+  if (values.includes('connected')) return 'connected';
+  if (values.includes('authenticating')) return 'authenticating';
+  return 'initializing';
+}
+
+function nextAcpTransportStates(
+  current: ReadonlyMap<string, AcpTransportState>,
+  transportId: string,
+  state: AcpTransportState,
+): Map<string, AcpTransportState> {
+  const next = new Map(current);
+  if (state === 'disconnected') next.delete(transportId);
+  else next.set(transportId, state);
+  // A failure is kept only while it sits beside live connections, so a
+  // finished run does not leave ACP reported as failing indefinitely.
+  if (state === 'disconnected' && [...next.values()].every((value) => value === 'terminal_failure')) next.clear();
+  return next;
+}
+
 export function updateTransportState(
   acp: AcpDomainState,
   daemon: DaemonDomainState,
@@ -339,22 +385,30 @@ export function updateTransportState(
   // observability-only events have no transportId and no state to update.
   if (nextTransportState === null) return { acp, daemon };
   const transportId = 'transportId' in event ? event.transportId : '';
-  const isAcp = transportId.startsWith('acp');
+  // Transport ids are namespaced by their owner (`acp:<id>`, `daemon:<scheme>:<host>:<port>`).
+  // A transport owned by neither is not the daemon's, so it must not flip the daemon's state.
+  const isAcp = transportId.startsWith('acp:');
+  const isDaemon = transportId.startsWith('daemon:');
+  if (!isAcp && !isDaemon) return { acp, daemon };
+  const transportStates = isAcp
+    ? nextAcpTransportStates(acp.transportStates, transportId, nextTransportState as AcpTransportState)
+    : acp.transportStates;
   const nextAcp = isAcp
     ? {
         ...updateDomainMetadata(acp, event.type),
-        managerTransportState: nextTransportState as AcpTransportState,
+        transportStates,
+        managerTransportState: aggregateAcpTransportState(transportStates),
         initialized: acp.initialized || event.type === 'TRANSPORT_INITIALIZING',
       }
     : acp;
-  const nextDaemon = !isAcp
+  const nextDaemon = isDaemon
     ? {
         ...updateDomainMetadata(daemon, event.type),
         transportState: nextTransportState as DaemonTransportState,
         isRunning:
           event.type === 'TRANSPORT_CONNECTED'
             ? true
-            : event.type === 'TRANSPORT_DISCONNECTED'
+            : event.type === 'TRANSPORT_DISCONNECTED' || event.type === 'TRANSPORT_TERMINAL_FAILURE'
               ? false
               : daemon.isRunning,
         reconnectAttempts: event.type === 'TRANSPORT_RECONNECTING' ? event.attempt : daemon.reconnectAttempts,
@@ -396,16 +450,41 @@ export function updateAutomationDomainFromSource(domain: AutomationDomainState, 
   return { ...updateDomainMetadata(domain, source), sources, sourceIds };
 }
 
+const ENDED_RUN_STATUSES: ReadonlySet<AutomationRun['status']> = new Set(['completed', 'failed', 'cancelled', 'missed']);
+
+function deadLetteredIn(run: AutomationRun): number {
+  return run.deliveryAttempts?.filter((attempt) => attempt.status === 'dead_lettered').length ?? 0;
+}
+
+function addRetiredRuns(current: RetiredRunCounts | undefined, dropped: readonly AutomationRun[]): RetiredRunCounts {
+  const base = current ?? { runs: 0, succeeded: 0, failed: 0, cancelled: 0, deadLettered: 0 };
+  return {
+    runs: base.runs + dropped.length,
+    succeeded: base.succeeded + dropped.filter((run) => run.status === 'completed').length,
+    failed: base.failed + dropped.filter((run) => run.status === 'failed').length,
+    cancelled: base.cancelled + dropped.filter((run) => run.status === 'cancelled').length,
+    deadLettered: base.deadLettered + dropped.reduce((count, run) => count + deadLetteredIn(run), 0),
+  };
+}
+
+/** Run totals over the retained runs plus what bounded eviction already counted. */
+function runTotals(runs: readonly AutomationRun[], retired: RetiredRunCounts | undefined) {
+  return {
+    totalRuns: runs.length + (retired?.runs ?? 0),
+    totalSucceeded: runs.filter((run) => run.status === 'completed').length + (retired?.succeeded ?? 0),
+    totalFailed: runs.filter((run) => run.status === 'failed').length + (retired?.failed ?? 0),
+    totalCancelled: runs.filter((run) => run.status === 'cancelled').length + (retired?.cancelled ?? 0),
+    totalDeadLettered: runs.reduce((count, run) => count + deadLetteredIn(run), 0) + (retired?.deadLettered ?? 0),
+  };
+}
+
 export function updateAutomationDomainFromJob(domain: AutomationDomainState, job: AutomationJob, source: string): AutomationDomainState {
   const jobs = new Map(domain.jobs);
   const sources = new Map(domain.sources);
   jobs.set(job.id, job);
   sources.set(job.source.id, job.source);
   const allRuns = [...domain.runs.values()];
-  const totalDeadLettered = allRuns.reduce(
-    (count, run) => count + (run.deliveryAttempts?.filter((attempt) => attempt.status === 'dead_lettered').length ?? 0),
-    0,
-  );
+  const totals = runTotals(allRuns, domain.retiredRuns);
   return {
     ...updateDomainMetadata(domain, source),
     jobs,
@@ -413,11 +492,7 @@ export function updateAutomationDomainFromJob(domain: AutomationDomainState, job
     sources,
     sourceIds: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt).map((record) => record.id),
     totalJobs: jobs.size,
-    totalRuns: allRuns.length,
-    totalSucceeded: allRuns.filter((run) => run.status === 'completed').length,
-    totalFailed: allRuns.filter((run) => run.status === 'failed').length,
-    totalCancelled: allRuns.filter((run) => run.status === 'cancelled').length,
-    totalDeadLettered,
+    ...totals,
   };
 }
 
@@ -426,11 +501,10 @@ export function updateAutomationDomainFromRun(domain: AutomationDomainState, run
   const sources = new Map(domain.sources);
   runs.set(run.id, run);
   sources.set(run.triggeredBy.id, run.triggeredBy);
+  const dropped = evictOldestEnded(runs, (record) => ENDED_RUN_STATUSES.has(record.status), (record) => record.endedAt ?? record.queuedAt);
+  const retiredRuns = dropped.length > 0 ? addRetiredRuns(domain.retiredRuns, dropped) : domain.retiredRuns;
   const allRuns = [...runs.values()];
-  const totalDeadLettered = allRuns.reduce(
-    (count, record) => count + (record.deliveryAttempts?.filter((attempt) => attempt.status === 'dead_lettered').length ?? 0),
-    0,
-  );
+  const totals = runTotals(allRuns, retiredRuns);
   return {
     ...updateDomainMetadata(domain, source),
     runs,
@@ -440,24 +514,13 @@ export function updateAutomationDomainFromRun(domain: AutomationDomainState, run
     sources,
     sourceIds: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt).map((record) => record.id),
     totalJobs: domain.jobs.size,
-    totalRuns: allRuns.length,
-    totalSucceeded: allRuns.filter((record) => record.status === 'completed').length,
-    totalFailed: allRuns.filter((record) => record.status === 'failed').length,
-    totalCancelled: allRuns.filter((record) => record.status === 'cancelled').length,
-    totalDeadLettered,
+    ...totals,
+    ...(retiredRuns ? { retiredRuns } : {}),
   };
 }
 
 function buildBindingIdsBySurface(bindings: readonly AutomationRouteBinding[]): Readonly<Record<string, readonly string[]>> {
-  const grouped: Record<string, string[]> = {
-    slack: [],
-    discord: [],
-    web: [],
-    ntfy: [],
-    webhook: [],
-    tui: [],
-    service: [],
-  };
+  const grouped = emptyBindingIdsBySurface();
   for (const binding of bindings) {
     grouped[binding.surfaceKind] ??= [];
     grouped[binding.surfaceKind]?.push(binding.id);
@@ -468,6 +531,18 @@ function buildBindingIdsBySurface(bindings: readonly AutomationRouteBinding[]): 
 export function updateRoutesDomainFromBinding(domain: RoutesDomainState, binding: AutomationRouteBinding, source: string): RoutesDomainState {
   const bindings = new Map(domain.bindings);
   bindings.set(binding.id, binding);
+  return routesDomainFromBindings(domain, bindings, source);
+}
+
+/** A removed binding leaves the mirror; an unknown id returns the domain unchanged. */
+export function removeRoutesDomainBinding(domain: RoutesDomainState, bindingId: string, source: string): RoutesDomainState {
+  if (!domain.bindings.has(bindingId)) return domain;
+  const bindings = new Map(domain.bindings);
+  bindings.delete(bindingId);
+  return routesDomainFromBindings(domain, bindings, source);
+}
+
+function routesDomainFromBindings(domain: RoutesDomainState, bindings: Map<string, AutomationRouteBinding>, source: string): RoutesDomainState {
   const records = [...bindings.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.id.localeCompare(b.id));
   return {
     ...updateDomainMetadata(domain, source),
@@ -489,6 +564,8 @@ export function updateControlPlaneDomainFromClient(domain: ControlPlaneDomainSta
   const clients = new Map(domain.clients);
   const previous = clients.get(client.id);
   clients.set(client.id, client);
+  // Connection counters are cumulative, so dropping long-gone disconnected clients loses no total.
+  evictOldestEnded(clients, (record) => !record.connected, (record) => record.lastSeenAt ?? 0);
   const records = [...clients.values()].sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0) || a.id.localeCompare(b.id));
   const active = records.filter((record) => record.connected);
   return {
@@ -512,9 +589,22 @@ export function patchControlPlaneDomain(domain: ControlPlaneDomainState, patch: 
   };
 }
 
+function addRetiredAttempts(current: RetiredAttemptCounts | undefined, dropped: readonly AutomationDeliveryAttempt[]): RetiredAttemptCounts {
+  const base = current ?? { queued: 0, started: 0, succeeded: 0, deadLettered: 0 };
+  return {
+    queued: base.queued + dropped.length,
+    started: base.started + dropped.filter((record) => record.startedAt !== undefined || record.status !== 'pending').length,
+    succeeded: base.succeeded + dropped.filter((record) => record.status === 'sent').length,
+    deadLettered: base.deadLettered + dropped.filter((record) => record.status === 'dead_lettered').length,
+  };
+}
+
 export function updateDeliveryDomainFromAttempt(domain: DeliveryDomainState, attempt: AutomationDeliveryAttempt, source: string): DeliveryDomainState {
   const deliveryAttempts = new Map(domain.deliveryAttempts);
   deliveryAttempts.set(attempt.id, attempt);
+  // Only attempts that reached their end are dropped; a failed one may still be retried.
+  const dropped = evictOldestEnded(deliveryAttempts, (record) => record.status === 'sent' || record.status === 'dead_lettered', (record) => record.endedAt ?? record.startedAt ?? 0);
+  const retired = dropped.length > 0 ? addRetiredAttempts(domain.retiredAttempts, dropped) : domain.retiredAttempts;
   const attempts = [...deliveryAttempts.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.id.localeCompare(b.id));
   return {
     ...updateDomainMetadata(domain, source),
@@ -523,11 +613,12 @@ export function updateDeliveryDomainFromAttempt(domain: DeliveryDomainState, att
     pendingAttemptIds: attempts.filter((record) => record.status === 'pending' || record.status === 'sending').map((record) => record.id),
     failedAttemptIds: attempts.filter((record) => record.status === 'failed').map((record) => record.id),
     deadLetterIds: attempts.filter((record) => record.status === 'dead_lettered').map((record) => record.id),
-    totalQueued: attempts.length,
-    totalStarted: attempts.filter((record) => record.startedAt !== undefined || record.status !== 'pending').length,
-    totalSucceeded: attempts.filter((record) => record.status === 'sent').length,
+    totalQueued: attempts.length + (retired?.queued ?? 0),
+    totalStarted: attempts.filter((record) => record.startedAt !== undefined || record.status !== 'pending').length + (retired?.started ?? 0),
+    totalSucceeded: attempts.filter((record) => record.status === 'sent').length + (retired?.succeeded ?? 0),
     totalFailed: attempts.filter((record) => record.status === 'failed').length,
-    totalDeadLettered: attempts.filter((record) => record.status === 'dead_lettered').length,
+    totalDeadLettered: attempts.filter((record) => record.status === 'dead_lettered').length + (retired?.deadLettered ?? 0),
+    ...(retired ? { retiredAttempts: retired } : {}),
   };
 }
 
@@ -541,7 +632,8 @@ export function updateSurfaceDomainFromRecord(domain: SurfaceDomainState, record
     surfaceIds: records.map((entry) => entry.id),
     enabledSurfaceIds: records.filter((entry) => entry.enabled).map((entry) => entry.id),
     problemSurfaceIds: records.filter((entry) => entry.state === 'degraded' || entry.state === 'error').map((entry) => entry.id),
-    totalHealthy: records.filter((entry) => entry.state === 'healthy').length,
+    // A disabled surface is counted as disabled only, never also as healthy.
+    totalHealthy: records.filter((entry) => entry.enabled && entry.state === 'healthy').length,
     totalDegraded: records.filter((entry) => entry.state === 'degraded' || entry.state === 'error').length,
     totalDisabled: records.filter((entry) => !entry.enabled || entry.state === 'disabled').length,
   };
@@ -550,6 +642,18 @@ export function updateSurfaceDomainFromRecord(domain: SurfaceDomainState, record
 export function updateWatcherDomainFromRecord(domain: WatcherDomainState, record: WatcherRecord, source: string): WatcherDomainState {
   const watchers = new Map(domain.watchers);
   watchers.set(record.id, record);
+  return watcherDomainFromRecords(domain, watchers, source);
+}
+
+/** A removed watcher leaves the mirror; an unknown id returns the domain unchanged. */
+export function removeWatcherDomainRecord(domain: WatcherDomainState, watcherId: string, source: string): WatcherDomainState {
+  if (!domain.watchers.has(watcherId)) return domain;
+  const watchers = new Map(domain.watchers);
+  watchers.delete(watcherId);
+  return watcherDomainFromRecords(domain, watchers, source);
+}
+
+function watcherDomainFromRecords(domain: WatcherDomainState, watchers: Map<string, WatcherRecord>, source: string): WatcherDomainState {
   const records = [...watchers.values()].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
   return {
     ...updateDomainMetadata(domain, source),

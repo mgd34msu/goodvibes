@@ -20,6 +20,8 @@
  * IMAP `ENVELOPE` is not delivery evidence and is not accepted here.
  */
 
+import { normalizeEmailAddress } from './signup-address.js';
+
 /**
  * Brand. Not exported, so no code outside this module can produce a value
  * satisfying `DeliveredRecipient` without going through a constructor below.
@@ -48,14 +50,13 @@ export interface DeliveredRecipient {
   readonly [DELIVERY_EVIDENCE_BRAND]: true;
 }
 
-/** Lower-case and strip surrounding whitespace and angle brackets. */
+/**
+ * Lower-case, strip surrounding whitespace and the display name around an
+ * `<address>`. It is the same normalization the signup expectation stores its
+ * recipient with, so the two compare equal for the same mailbox.
+ */
 export function normalizeDeliveryAddress(value: string): string {
-  return value
-    .trim()
-    .replace(/^<+/, '')
-    .replace(/>+$/, '')
-    .trim()
-    .toLowerCase();
+  return normalizeEmailAddress(value);
 }
 
 function brand(address: string, source: DeliveryEvidenceSource): DeliveredRecipient {

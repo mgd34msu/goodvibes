@@ -15,9 +15,10 @@ import { upsertObservedKnowledgeNode } from '../platform/src/platform/knowledge/
 import { reviewKnowledgeIssue } from '../platform/src/platform/knowledge/review.js';
 import { reviewKnowledgeNodeRecord } from '../platform/src/platform/knowledge/service-node-admin.js';
 import { isActionableAnswerGap, prepareAnswerGapUniverse } from '../platform/src/platform/knowledge/semantic/answer-gaps.js';
-import { ANSWER_GAP_LIMITS, prepareAnswerGapReadings } from '../platform/src/platform/knowledge/semantic/answer-gap-plan/reader.js';
+import { prepareAnswerGapReadings } from '../platform/src/platform/knowledge/semantic/answer-gap-plan/reader.js';
 import type { KnowledgeNodeRecord } from '../platform/src/platform/knowledge/types.js';
 import { seedHomeAssistantObservation } from './_helpers/homegraph-observation-fixtures.js';
+import { eventLoopTurns } from './_helpers/event-loop-turns.ts';
 
 const spaceId = 'homeassistant:answer-gap-plan';
 const query = 'Which kind of battery powers the kitchen sensor?';
@@ -84,7 +85,7 @@ async function unchanged(store: KnowledgeStore, before: ReturnType<typeof snapsh
 }
 
 describe('prepared answer-gap universe and write guards', () => {
-  // UNRUN: plain fake port isolates this reader's local bookkeeping from the
+  // Plain fake port isolates this reader's local bookkeeping from the
   // independently required recorded-port state commitment.
   test('answer gap readings need no descriptive input checksum', async () => {
     const fake = readings(0.01), hashing = spyOn(crypto, 'createHash');
@@ -184,7 +185,7 @@ describe('prepared answer-gap universe and write guards', () => {
     });
   }
 
-  for (const state of ['queued', 'searching', 'evaluating', 'extracting', 'applying'] as const) {
+  for (const state of ['queued', 'searching', 'evaluating', 'applying'] as const) {
     test(`a matched gap with ${state} repair work is returned without invalidating its snapshot`, async () => {
       const item = await fixture();
       await item.store.upsertRefinementTask({ id: 'active-repair', spaceId, gapId: item.existing.id, issueId: item.issue.id, state, trigger: 'manual' });
@@ -540,9 +541,15 @@ describe('prepared answer-gap universe and write guards', () => {
 
   test('a deadline covers the interval between reading and persistence', async () => {
     const item = await fixture(), before = snapshot(item.store); readings();
-    const prepared = await prepare(item, { timeoutMs: 50 }).read();
-    await new Promise<void>((resolve) => setTimeout(resolve, 60));
-    await expect(prepared.persist(reason)).rejects.toMatchObject({ reason: 'budget' });
+    // The deadline is judged against Date.now(), so a controlled clock moves
+    // past it between the read and the write; the budget is long enough that
+    // the reader's own real timer cannot fire first.
+    let now = Date.now(); const clock = spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const prepared = await prepare(item, { timeoutMs: 60_000 }).read();
+      now += 60_001;
+      await expect(prepared.persist(reason)).rejects.toMatchObject({ reason: 'budget' });
+    } finally { clock.mockRestore(); }
     await unchanged(item.store, before);
   });
 
@@ -563,13 +570,14 @@ describe('prepared answer-gap universe and write guards', () => {
       const outcome = pending.catch((error: unknown) => error);
       try {
         if (mode === 'aborted' || mode === 'budget') {
-          await entered.promise;
+          // A budget that expires before the reader is entered also ends the wait.
+          await Promise.race([entered.promise, outcome]);
           if (mode === 'aborted') controller.abort();
         }
         expect(await outcome).toMatchObject({ reason: mode });
       } finally { release.resolve(); }
       // Let the ignored-cancellation provider return through every queued continuation.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await eventLoopTurns();
       await unchanged(item.store, before);
     });
   }

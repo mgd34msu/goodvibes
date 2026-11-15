@@ -41,8 +41,8 @@ function normalizeSupportAction(value: unknown): AgentSupportAction | null {
 }
 
 function readAction(args: AgentSupportToolArgs): AgentSupportAction | null {
-  const explicit = normalizeSupportAction(args.action) ?? normalizeSupportAction(args.mode);
-  if (explicit) return explicit;
+  // A word that was sent but is not an action is refused (null), not replaced by an inferred one.
+  if (readString(args.action) || readString(args.mode)) return normalizeSupportAction(args.action) ?? normalizeSupportAction(args.mode);
   if (readString(args.bundlePath) || readString(args.id)) return 'bundle';
   return 'status';
 }
@@ -107,10 +107,10 @@ export function createAgentSupportTool(deps: AgentSupportToolDeps): Tool {
       const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSupportToolArgs;
       const forward = (translated: Record<string, unknown>) => forwardHarnessCatalogCall(harnessTool, rawArgs, translated, options);
       const action = readAction(args);
-      if (!action) return error('Unknown support action. Use action:"status" or action:"bundle".');
+      if (!action) return error('Unknown support action. Use one of: status, bundle.');
       if (action === 'status') return forward(statusArgs(args));
       if (action === 'bundle') return forward(bundleArgs(args));
-      return error('Unknown support action. Use action:"status" or action:"bundle".');
+      return error('Unknown support action. Use one of: status, bundle.');
     },
   };
 }

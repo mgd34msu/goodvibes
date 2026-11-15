@@ -2,7 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { sourceReadsFromTurns, type ContractTurnRecord, type SourceReadEvidence } from '../contract/evidence.js';
-import { returnedReadRows } from '../tools/read/observation.js';
+import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
+import type { ToolResult } from '../types/tools.js';
 import type { OwnerEvidenceReader } from '../contract/owner-evidence.js';
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -67,10 +68,9 @@ export function createOwnerReadEvidenceReader(surfaceDirectory: string): OwnerEv
         const identity = JSON.stringify([message['callId'], message['content']]);
         if (seen.has(identity)) continue;
         seen.add(identity);
-        let parsed: unknown;
-        try { parsed = JSON.parse(message['content']); } catch { continue; }
-        if (!object(parsed)) continue;
-        const result = parsed;
+        // The read's observations travel beside its text on the stored message; a result stored before that carries them in the text.
+        const result = readBodyWithHostEvidence({ output: message['content'], hostEvidence: message['hostEvidence'] as ToolResult['hostEvidence'] });
+        if (result === undefined) continue;
         if (result['success'] !== true || !Array.isArray(result['files'])) continue;
         const files: { path: string; content: string; readObservation?: unknown }[] = [];
         for (const file of result['files']) {

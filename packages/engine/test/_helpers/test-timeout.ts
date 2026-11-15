@@ -29,8 +29,10 @@ export async function waitFor(
 ): Promise<void> {
   const timeoutMs = Math.max(options.timeoutMs ?? WAIT_FLOOR_MS, WAIT_FLOOR_MS);
   const intervalMs = options.intervalMs ?? 10;
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
+  // performance.now(), not Date.now(): tests freeze Date.now, and a frozen
+  // clock would keep a never-true predicate polling forever.
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() <= deadline) {
     if (await predicate()) return;
     await new Promise<void>((resolve) => {
       setTimeout(resolve, intervalMs);

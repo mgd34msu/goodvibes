@@ -38,14 +38,17 @@ function sortedKeys(value: object): string[] {
 }
 
 describe('foundation surface stability gate', () => {
+  // `installJudgmentPort` returns undefined when no port was installed before, so a flag, not the value, says whether to restore.
   let previousPort: ReturnType<typeof installJudgmentPort> | undefined;
+  let portInstalled = false;
   beforeEach(() => {
     resetTestRuntimeServices();
   });
 
   afterEach(() => {
-    if (previousPort) installJudgmentPort(previousPort);
+    if (portInstalled) installJudgmentPort(previousPort);
     previousPort = undefined;
+    portInstalled = false;
     resetTestRuntimeServices();
   });
 
@@ -134,6 +137,7 @@ describe('foundation surface stability gate', () => {
       throw new Error(`Unexpected foundation reading: ${name}`);
     });
     previousPort = installJudgmentPort(readings.port);
+    portInstalled = true;
     const configDir = runtimeServices.configManager.getControlPlaneConfigDir();
     for (const gateway of ['aihubmix', 'vercel-ai-gateway']) {
       writeFileSync(join(configDir, `gateway-pricing-${gateway}.json`), JSON.stringify({

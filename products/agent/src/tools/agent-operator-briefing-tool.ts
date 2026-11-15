@@ -115,28 +115,46 @@ function classifyHttpFailure(route: OperatorRouteDescriptor, status: number): Op
   };
 }
 
+const ROUTE_TIMEOUT_MS = 5_000;
+
 async function fetchOperatorRoute(
   baseUrl: string,
   token: string,
   route: OperatorRouteDescriptor,
   signal: AbortSignal,
 ): Promise<OperatorRouteResult> {
+  // Each route has its own budget: one slow route is reported as unavailable and the others are still read.
+  const routeSignal = AbortSignal.any([signal, AbortSignal.timeout(ROUTE_TIMEOUT_MS)]);
   try {
     const response = await fetch(`${baseUrl}${route.path}`, {
       headers: { authorization: `Bearer ${token}` },
-      signal,
+      signal: routeSignal,
     });
     const body = await readResponseBody(response);
     if (!response.ok) return classifyHttpFailure(route, response.status);
+    // A 200 that is not the route's documented shape (a proxy page, an error envelope) is not data.
+    if (!hasExpectedShape(route.id, body)) {
+      return { ok: false, route, kind: 'connected_host_error', error: 'unexpected response shape' };
+    }
     return { ok: true, route, body };
   } catch (error) {
     return {
       ok: false,
       route,
       kind: 'connected_host_unavailable',
-      error: 'request unavailable',
+      error: signal.aborted ? 'request unavailable' : routeSignal.aborted ? `no answer within ${ROUTE_TIMEOUT_MS / 1000}s` : 'request unavailable',
     };
   }
+}
+
+/** The minimum each formatter needs, so a shape it cannot read is reported instead of printed as zeros. */
+function hasExpectedShape(routeId: string, body: unknown): boolean {
+  if (!isRecord(body)) return false;
+  if (routeId === 'projectPlanning.workPlan.snapshot') return isRecord(body.counts) || Array.isArray(body.tasks);
+  if (routeId === 'approvals.list') return Array.isArray(body.approvals);
+  if (routeId === 'automation.integration.snapshot') return isRecord(body.totals) || Array.isArray(body.jobs);
+  if (routeId === 'automation.schedules.list') return Array.isArray(body.jobs);
+  return ['slotsInUse', 'slotsTotal', 'queueDepth'].some((key) => typeof body[key] === 'number');
 }
 
 function formatWorkPlan(body: unknown): string {
@@ -184,19 +202,25 @@ function formatRoute(result: OperatorRouteResult): string {
   return formatCapacity(result.body);
 }
 
-function formatBriefing(nativeWork: string, results: readonly OperatorRouteResult[]): string {
+interface NativeWorkReading {
+  readonly text: string;
+  readonly available: boolean;
+}
+
+function formatBriefing(nativeWork: NativeWorkReading, results: readonly OperatorRouteResult[]): string {
   const failures = results.filter((result): result is OperatorRouteFailure => !result.ok);
+  const unavailable = failures.length + (nativeWork.available ? 0 : 1);
   return [
     'Agent operator briefing',
     '  connected host: selected authenticated host',
     '  policy read-only public operator routes; no connected-host lifecycle, mutation routes, separate Agent jobs, delegated review, default knowledge, or non-Agent knowledge segments',
     '',
-    nativeWork,
+    nativeWork.text,
     ...results.map(formatRoute),
     '',
-    failures.length === 0 && !nativeWork.includes('unavailable (')
+    unavailable === 0
       ? '  warnings: none'
-      : `  warnings: ${failures.length + (nativeWork.includes('unavailable (') ? 1 : 0)} route(s) unavailable; retry after host/auth/version repair`,
+      : `  warnings: ${unavailable} route(s) unavailable; retry after host/auth/version repair`,
   ].join('\n');
 }
 
@@ -218,6 +242,7 @@ function formatNativeWork(snapshot: WorkLedgerReadSnapshot): string {
 export function createAgentOperatorBriefingTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  nativeReadTimeoutMs: number = ROUTE_TIMEOUT_MS,
 ): Tool {
   return {
     definition: {
@@ -237,8 +262,6 @@ export function createAgentOperatorBriefingTool(
       const onAbort = () => controller.abort();
       options?.signal?.addEventListener('abort', onAbort, { once: true });
       if (options?.signal?.aborted) controller.abort();
-      const timeout = setTimeout(onAbort, 5_000);
-      timeout.unref?.();
       let reader: WorkLedgerReadClient | undefined;
       let rejectCancelled = () => {};
       const cancelled = new Promise<never>((_resolve, reject) => {
@@ -267,14 +290,14 @@ export function createAgentOperatorBriefingTool(
             current();
             return response;
           } });
-        let nativeWork = '  native work: unavailable (read failed; no historical fallback)';
+        let nativeWork: NativeWorkReading = { text: '  native work: unavailable (read failed; no historical fallback)', available: false };
         try {
-          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal: controller.signal });
+          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(nativeReadTimeoutMs)]) });
           current();
-          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: 5_000 });
+          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: nativeReadTimeoutMs });
           const snapshot = await reader.readSnapshot();
           current();
-          nativeWork = formatNativeWork(snapshot);
+          nativeWork = { text: formatNativeWork(snapshot), available: true };
         } catch {
           current();
         } finally {
@@ -299,7 +322,6 @@ export function createAgentOperatorBriefingTool(
       } finally {
         controller.abort();
         reader?.dispose();
-        clearTimeout(timeout);
         controller.signal.removeEventListener('abort', rejectCancelled);
         options?.signal?.removeEventListener('abort', onAbort);
       }

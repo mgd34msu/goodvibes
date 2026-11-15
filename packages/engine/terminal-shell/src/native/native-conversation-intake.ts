@@ -5,7 +5,7 @@ import { nativeWorkExecutionLines, type NativeWorkExecutionState } from './nativ
 import { nativeConversationExecutionIntent, sameNativeExecutionIntent, inspectNativeConversationExecution, dispatchNativeConversationExecution } from './native-conversation-execution.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeResultSchema, sameNativeConversationSource, type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeResult, type NativeConversationIntakeSourceRef, type OperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 import type { NativeConversationInput } from './native-conversation-input.js';
-import type { NativeIntakeJournalBinding, NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
+import { NATIVE_INTAKE_JOURNAL_MAX_RECORDS, NativeIntakeJournalError, type NativeIntakeJournalBinding, type NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
 /** Construction-owned product capabilities, never selected by a decision or tool argument. */
 export interface NativeConversationIntakePolicy {
     readonly allowHosted: boolean;
@@ -28,17 +28,43 @@ export type NativeConversationIntakeSelection = {
     readonly endpoint: string;
     readonly projectId: string;
     readonly workspace: string;
-    readonly journal: Pick<NativeConversationIntakeJournal, 'read' | 'save' | 'confirm' | 'claimTurn' | 'saveExecutionIntent'> & Partial<Pick<NativeConversationIntakeJournal, 'saveHostedSource'>>;
+    readonly journal: Pick<NativeConversationIntakeJournal, 'read' | 'save' | 'confirm' | 'claimTurn' | 'saveExecutionIntent'> & Partial<Pick<NativeConversationIntakeJournal, 'saveHostedSource' | 'path' | 'releaseTurnClaim' | 'discardUncaptured'>>;
     readonly bind: () => NativeConversationIntakeBinding;
 };
+/** Non-secret reason a native operation failed, for scripts to branch on. */
+export type NativeIntakeFailureCause = 'journal_limit' | 'journal_conflict' | 'journal' | 'principal' | 'network' | 'schema' | 'host_changed' | 'unknown';
+export function nativeIntakeFailureCause(error: unknown): NativeIntakeFailureCause {
+    if (error instanceof NativeIntakeJournalError)
+        return error.code === 'journal_limit' ? 'journal_limit' : error.code === 'conflict' ? 'journal_conflict' : 'journal';
+    if (!(error instanceof Error))
+        return 'unknown';
+    const code = (error as { readonly code?: unknown }).code;
+    const kind = (error as { readonly kind?: unknown }).kind;
+    if (error.name === 'ZodError' || code === 'invalid_response' || kind === 'contract' || kind === 'protocol' || kind === 'validation')
+        return 'schema';
+    if (kind === 'auth' || /principal|authority/i.test(error.message))
+        return 'principal';
+    if (/selection changed|project changed/i.test(error.message))
+        return 'host_changed';
+    if (kind === 'network' || code === 'aborted' || error instanceof TypeError || error.name === 'TimeoutError' || error.name === 'AbortError')
+        return 'network';
+    return 'unknown';
+}
 export interface NativeConversationIntakeState {
     readonly status: 'pending' | 'recorded' | 'unknown' | 'invalid' | 'unavailable';
     readonly message: string;
+    /** Why a failed operation failed, as a code a script can branch on; set on `unknown`/`unavailable` states from a thrown error. */
+    readonly cause?: NativeIntakeFailureCause | undefined;
     readonly request?: Readonly<Pick<NativeConversationIntakeCaptureRequest, 'requestId' | 'inputId'>> | undefined;
     readonly result?: NativeConversationIntakeResult | undefined;
     /** Durable local dispatch claim acquired by this call only, never get/status. */
     readonly turnReady?: boolean | undefined;
     readonly turnPermit?: NativeConversationTurnPermit | undefined;
+    /**
+     * Present with a permit. Give the claim back when the turn is known never to have started, so an explicit
+     * intake-retry can dispatch it; resolves false when the claim stays (it then reads as possibly run).
+     */
+    readonly releaseTurnClaim?: (() => Promise<boolean>) | undefined;
     readonly execution?: NativeWorkExecutionState | undefined;
     readonly hostedTurn?: NativeHostedTurnLookup | undefined;
     /** Selection fence survives operation completion, never grants authority. */
@@ -111,7 +137,11 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
     }
     stop(): Promise<NativeConversationIntakeState | undefined> {
         const expected = this.currentRequest();
-        this.close();
+        // Stop is not a selection change: unlike close(), it leaves selectionLifetime alone so a turn
+        // already being observed keeps its selection fence and can still be cancelled.
+        ++this.epoch;
+        this.active?.detach();
+        this.active = undefined;
         return expected ? this.cancel(expected) : Promise.resolve(undefined);
     }
     private async run(mode: Mode, source?: NativeConversationInput | undefined, options?: NativeConversationIntakeSubmitOptions | undefined, expected?: NativeConversationIntakeRequestIdentity | undefined): Promise<NativeConversationIntakeState | undefined> {
@@ -288,9 +318,12 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (!execution.snapshot)
                     return { status: 'recorded', message: 'The original admitted work has an unresolved dispatch. Inspect status or use /work intake-retry before submitting another input.', request: request(), result, execution };
             }
+            const unsaved = !result && command !== undefined && retained !== undefined && !retained.persisted && sameCommand(command, retained.command) && stored?.command.requestId !== command.requestId;
             if (mode === 'submit') {
                 if (command && (!result || !terminal(result)))
-                    return { status: 'unknown', message: 'An original input is unresolved. Use /work intake-status, intake-retry or intake-resume before submitting another input.', request: request(), ...(result ? { result } : {}) };
+                    return { status: 'unknown', message: unsaved
+                            ? 'An earlier input was never saved to the intake journal and the host has no record of it. Use /work intake-retry to save and send it, or /work intake-cancel to discard it, before submitting another input.'
+                            : 'An original input is unresolved. Use /work intake-status, intake-retry, intake-resume or intake-cancel before submitting another input.', request: request(), ...(result ? { result } : {}) };
                 command = nativeConversationIntakeCaptureRequestSchema.parse({ requestId: this.newId(), inputId: this.newId(), text: source!.text, unsupportedSources: source!.unsupportedSources, ...(nextContinuation !== undefined ? { continuation: { sessionId: nextContinuation } } : {}) });
                 delivery = options?.delivery;
                 observedSource = undefined;
@@ -333,6 +366,24 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (!current())
                     return;
                 eligibleTurn = result.kind === 'turn';
+            }
+            if (mode === 'cancel' && unsaved) {
+                // Never saved and never captured, so nothing exists anywhere that could still run or be replayed.
+                if (this.retained === retained)
+                    this.retained = undefined;
+                return { status: 'unavailable', message: 'The earlier input was never saved to the intake journal and the host has no record of it. It was discarded and nothing ran; submit a new input.' };
+            }
+            if (mode === 'cancel' && !result && retained && !retained.persisted && sameCommand(command, retained.command)
+                && stored?.command.requestId === command.requestId && selected.journal.discardUncaptured) {
+                // The save reported a durability failure after publishing its bytes, so the journal holds the text, but
+                // no capture was ever requested (that waits for a confirmed save) and the host has no record of it.
+                phase = 'journal-confirm';
+                await selected.journal.discardUncaptured(scope, command);
+                if (!current())
+                    return;
+                if (this.retained === retained)
+                    this.retained = undefined;
+                return { status: 'unavailable', message: 'The earlier input was written to the intake journal but never sent to the host. It was removed from the journal and nothing ran; submit a new input.' };
             }
             if (!result)
                 return { status: 'unknown', message: 'Original input was not found at this lookup. Only intake-retry may replay its exact durable capture.', request: request() };
@@ -384,11 +435,28 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 eligibleTurn = result.kind === 'turn';
             }
             let turnReady = false;
+            const claimedCommand = command;
+            const claimedRevision = result.sourceRef.sourceRevision;
+            const releaseClaim = async (): Promise<boolean> => {
+                if (!selected.journal.releaseTurnClaim)
+                    return false;
+                try {
+                    await selected.journal.releaseTurnClaim(scope, claimedCommand, claimedRevision);
+                    return true;
+                }
+                catch {
+                    return false;
+                }
+            };
             if (delivery !== 'hosted' && result.kind === 'turn' && eligibleTurn && mode !== 'status' && mode !== 'cancel') {
                 phase = 'journal-claim';
                 turnReady = await selected.journal.claimTurn(scope, command, result.sourceRef.sourceRevision);
-                if (!current())
+                if (!current()) {
+                    // Detached after the claim and before any permit was handed out: nothing ran.
+                    if (turnReady)
+                        await releaseClaim();
                     return;
+                }
             }
             let hostedTurn: NativeHostedTurnLookup | undefined;
             if (result.kind === 'turn' && delivery === 'hosted') {
@@ -420,12 +488,15 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 }
             }
             const turnPermit = turnReady ? binding.client.bindTurn(result) : undefined;
-            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit } : {}) };
+            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim } : {}) };
         }
-        catch {
+        catch (error) {
             if (!current())
                 return;
-            return { status: command ? 'unknown' : 'unavailable', request: request(), message: isJournalPhase(phase)
+            const full = isJournalPhase(phase) && error instanceof NativeIntakeJournalError && error.code === 'journal_limit';
+            return { status: command ? 'unknown' : 'unavailable', cause: nativeIntakeFailureCause(error), request: request(), message: full
+                    ? `The intake journal${selected.journal.path ? ` ${selected.journal.path}` : ''} is full: it keeps at most ${NATIVE_INTAKE_JOURNAL_MAX_RECORDS} host, project, workspace and principal bindings within 2 MB, and every other binding holds an input the host may not have captured, or a local turn already started, so none was evicted. No request or turn was sent. Use /work intake-cancel to discard this input, or move the journal file aside and use /work intake-retry; inputs in the moved file that the host never captured are then no longer recoverable here, and a local turn that already started could run again if it is retried.`
+                    : isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
                     : 'Native intake outcome is unknown or unavailable. Inspect /work intake-status before retrying the same input; an interrupted request may already have taken effect.' };
         }

@@ -156,7 +156,7 @@ describe('Personal Ops actual producer privacy and lifetimes', () => {
   test('watcher startup facts never read private text through semantic transport', () => {
     const fake = fakePort(() => { throw new Error('Startup acquired hosted reader'); }); installJudgmentPort(fake.port);
     const source = context({ readModels: { watchers: { runs: [{ runId: 'run-1', status: 'running', outputChunks: ['password=synthetic-private'] }], sources: [{ sourceId: 'source-1', enabled: false }] } } });
-    expect(watcherReadModelNativeFacts(source)).toEqual([{ status: 'running' }, { status: 'blocked' }]); expect(fake.requests).toHaveLength(0);
+    expect(watcherReadModelNativeFacts(source)).toEqual([{ status: 'running' }, { status: 'paused' }]); expect(fake.requests).toHaveLength(0);
   });
   test('watcher details protect the whole source before clipping and retain original method identity', async () => {
     const fake = privacyFixture(); installJudgmentPort(fake.port);

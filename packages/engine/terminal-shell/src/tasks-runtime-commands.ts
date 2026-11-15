@@ -9,6 +9,8 @@ import type { TaskKind } from '@goodvibes-jev/engine/platform/platform/runtime/s
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
+/** Rows `/tasks list` prints; the header total and a trailing line say how many more exist. */
+const TASK_LIST_ROWS = 20;
 interface TaskCommandContext {
   print(message: string): void;
 }
@@ -47,6 +49,11 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
         if (policy.beforeRead(args, ctx)) return;
         const subcommand = args[0]?.toLowerCase() ?? 'list';
         const tasksClient = createTasksClient({ local: policy.local(ctx), verbs: policy.verbs(ctx) });
+        // A task missing because the daemon could not answer is not an unknown task.
+        const missingTaskMessage = (taskId: string, daemonUnavailable: string | null): string =>
+          daemonUnavailable
+            ? `Task ${taskId} is not on this terminal, and the daemon could not be asked: ${daemonUnavailable.replace(/\.+$/, '')}. Try again when it is reachable.`
+            : policy.unknown(taskId);
         if (subcommand === 'list') {
           const { tasks: union, daemonUnavailable } = await tasksClient.list(500);
           const tasks = sortUnionTasks(union);
@@ -60,7 +67,10 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
             ctx.print([filter ? `No tasks matched "${filter}".` : 'No tasks recorded yet.', ...daemonNote].join('\n'));
             return;
           }
-          ctx.print([`${policy.listTitle} (${filtered.length})`, ...filtered.slice(0, 20).map(policy.row), ...daemonNote].join('\n'));
+          const shown = filtered.slice(0, TASK_LIST_ROWS);
+          const hidden = filtered.length - shown.length;
+          const more = hidden > 0 ? [`  ... and ${hidden} more (filter by status or kind, for example /tasks list running)`] : [];
+          ctx.print([`${policy.listTitle} (${filtered.length})`, ...shown.map(policy.row), ...more, ...daemonNote].join('\n'));
           return;
         }
 
@@ -70,9 +80,9 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
             ctx.print('Usage: /tasks show <taskId>');
             return;
           }
-          const found = await tasksClient.get(taskId);
+          const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
-            ctx.print(policy.unknown(taskId));
+            ctx.print(missingTaskMessage(taskId, daemonUnavailable));
             return;
           }
           ctx.print(policy.detail(ctx, found).join('\n'));
@@ -85,9 +95,9 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
             ctx.print('Usage: /tasks output <taskId>');
             return;
           }
-          const found = await tasksClient.get(taskId);
+          const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
-            ctx.print(policy.unknown(taskId));
+            ctx.print(missingTaskMessage(taskId, daemonUnavailable));
             return;
           }
           const { task } = found;
@@ -147,9 +157,9 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
         // Which registry owns this id decides what may be done to it. An act
         // aimed at a daemon task must never be applied to a local record that
         // does not exist, that reports success and changes nothing.
-        const found = await tasksClient.get(taskId);
+        const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
         if (!found) {
-          ctx.print(policy.unknown(taskId));
+          ctx.print(missingTaskMessage(taskId, daemonUnavailable));
           return;
         }
 

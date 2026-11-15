@@ -13,7 +13,7 @@
  *    at all, silently.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,11 +46,19 @@ import {
 } from '../platform/src/platform/voice/setup-chain.js';
 import { SETUP_INTENT_CONTRACT_PROMPT } from '../platform/src/platform/runtime/setup-contract.js';
 import { namedCommandsAndKeys } from './_helpers/setup-vocabulary.ts';
+import { trackDisposables } from './_helpers/disposables.ts';
+
+const disposables = trackDisposables();
+
+/** A fresh temp directory, removed after the test that asked for it. */
+function scratch(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  disposables.defer(() => { rmSync(dir, { recursive: true, force: true }); });
+  return dir;
+}
 
 function daemonHome(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-daemon-home-'));
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  return scratch('gv-daemon-home-');
 }
 
 /** A local config manager stub, enough for the write path. */
@@ -249,7 +257,7 @@ describe('speech-to-text goes to the connected host first', () => {
   });
 
   test('every attempt is recorded with provider, config source and the verbatim error', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-voice-diag-'));
+    const root = scratch('gv-voice-diag-');
     await expect(transcribeThroughBestRoute(audio, {
       connectedHost: {
         route: 'connected-host',
@@ -268,7 +276,7 @@ describe('speech-to-text goes to the connected host first', () => {
   });
 
   test('the diagnostics store is bounded by count', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-voice-diag-bound-'));
+    const root = scratch('gv-voice-diag-bound-');
     for (let index = 0; index < 12; index += 1) {
       recordVoiceDiagnostic(root, {
         at: new Date().toISOString(),
@@ -286,7 +294,7 @@ describe('speech-to-text goes to the connected host first', () => {
   });
 
   test('a torn diagnostics file is not served as data', () => {
-    const root = mkdtempSync(join(tmpdir(), 'gv-voice-diag-torn-'));
+    const root = scratch('gv-voice-diag-torn-');
     writeFileSync(join(root, 'voice-diagnostics.json'), '{"entries":[{"at":"x"');
     expect(readVoiceDiagnostics(root)).toEqual([]);
   });
@@ -357,7 +365,7 @@ describe('provisioning ends by proving the round trip', () => {
       sttEngine: 'whisper-cpp',
       sttBinary: '/managed/whisper-cli',
       sttModelPath: '/managed/ggml-tiny.en.bin',
-      scratchDir: mkdtempSync(join(tmpdir(), 'gv-proof-')),
+      scratchDir: scratch('gv-proof-'),
       runner: async (input) => {
         if (input.binary === '/managed/piper') {
           writeFileSync(String(input.args[input.args.indexOf('--output_file') + 1]), 'RIFFwav-bytes');
@@ -380,7 +388,7 @@ describe('provisioning ends by proving the round trip', () => {
       sttEngine: 'whisper-cpp',
       sttBinary: '/managed/whisper-cli',
       sttModelPath: '/managed/ggml-tiny.en.bin',
-      scratchDir: mkdtempSync(join(tmpdir(), 'gv-proof-bad-')),
+      scratchDir: scratch('gv-proof-bad-'),
       runner: async (input) => {
         if (input.binary === '/managed/piper') {
           writeFileSync(String(input.args[input.args.indexOf('--output_file') + 1]), 'RIFFwav-bytes');
@@ -401,7 +409,7 @@ describe('provisioning ends by proving the round trip', () => {
       sttEngine: 'whisper-cpp',
       sttBinary: '/managed/whisper-cli',
       sttModelPath: '/managed/ggml-tiny.en.bin',
-      scratchDir: mkdtempSync(join(tmpdir(), 'gv-proof-fail-')),
+      scratchDir: scratch('gv-proof-fail-'),
       runner: async () => { throw new Error('piper: SIGABRT'); },
     });
     expect(proof.proved).toBe(false);

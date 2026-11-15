@@ -41,6 +41,7 @@ import { CodeIndexStore, CodeIndexReindexScheduler } from '../state/index.js';
 import type { MemoryEmbeddingProviderRegistry } from '../state/index.js';
 import type { ConfigKey, ConfigManager } from '../config/index.js';
 import { readBooleanConfig } from './alert-gating.js';
+import { summarizeError } from '../utils/error-display.js';
 
 /**
  * Host-local synthetic config key (not in the ConfigKey union) that
@@ -62,6 +63,8 @@ export const CODE_INDEX_MAX_TOTAL_BYTES = Infinity;
 
 export interface CodeIndexServicesDeps {
   readonly workingDirectory: string;
+  /** Current working directory when the workspace can be swapped at runtime; relative reindex paths resolve against it. */
+  readonly getWorkingDirectory?: (() => string) | undefined;
   /** The owning product's storage scope, the `<surfaceRoot>` the index file sits under. */
   readonly surfaceRoot: string;
   readonly configManager: Pick<ConfigManager, 'get'>;
@@ -114,15 +117,47 @@ export function codeIndexDbPath(workingDirectory: string, surfaceRoot: string): 
  * were consolidated away.
  */
 export function createStoreRerooter(deps: {
-  readonly codeIndexStore: Pick<CodeIndexStore, 'reroot'>;
-  readonly projectIndex: { reroot(dir: string): Promise<unknown> };
+  readonly codeIndexStore: Pick<CodeIndexStore, 'reroot' | 'stats' | 'isBuilding' | 'scheduleBuild'>;
+  /** `baseDir` is the current root; the code index moves with it, so it is also where a failed swap returns both. */
+  readonly projectIndex: { reroot(dir: string): Promise<unknown>; readonly baseDir: string };
   /** The owning product's storage scope, so the rerooted index lands in its own directory. */
   readonly surfaceRoot: string;
 }): (newWorkingDir: string) => Promise<void> {
   return async (newWorkingDir: string): Promise<void> => {
+    const previousDir = deps.projectIndex.baseDir;
+    // An index that was built (or building) at the old root is rebuilt at the
+    // new one; reroot() deliberately leaves that decision to the caller, and
+    // without it retrieval would be silently empty after the swap.
+    const before = deps.codeIndexStore.stats();
+    const wasBuilt = deps.codeIndexStore.isBuilding() || before.lastBuild !== null || before.indexedChunks > 0;
     await deps.codeIndexStore.reroot(newWorkingDir, codeIndexDbPath(newWorkingDir, deps.surfaceRoot));
-    await deps.projectIndex.reroot(newWorkingDir);
+    try {
+      await deps.projectIndex.reroot(newWorkingDir);
+    } catch (error) {
+      // The swap reports failure and keeps the old working directory, so the
+      // code index must not stay on the new tree.
+      await rollBack('code index', () => deps.codeIndexStore.reroot(previousDir, codeIndexDbPath(previousDir, deps.surfaceRoot)), error);
+      if (wasBuilt) deps.codeIndexStore.scheduleBuild();
+      throw error;
+    }
+    if (wasBuilt) deps.codeIndexStore.scheduleBuild();
   };
+}
+
+/**
+ * Returns a store to its previous root after a later store failed to move.
+ * When the return also fails, the thrown error names both failures instead of
+ * hiding the first.
+ */
+export async function rollBack(store: string, restore: () => Promise<unknown>, cause: unknown): Promise<void> {
+  try {
+    await restore();
+  } catch (rollbackError) {
+    throw new Error(
+      `${summarizeError(cause)}; returning the ${store} to its previous root also failed: ${summarizeError(rollbackError)}. `
+      + 'It is now on the new root while the workspace is not; restart to reopen it at the configured working directory.',
+    );
+  }
 }
 
 /**
@@ -160,7 +195,7 @@ export function createCodeIndexServices(deps: CodeIndexServicesDeps): CodeIndexS
   });
   const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
     target: codeIndexStore,
-    workingDirectory: deps.workingDirectory,
+    workingDirectory: deps.getWorkingDirectory ?? deps.workingDirectory,
     // Honor governor backpressure: a paused code-index reindex job stops
     // scheduling new work until the governor resumes it, and the critical
     // memory tier refuses new reindex work outright (mirrors the platform).

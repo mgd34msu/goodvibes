@@ -20,6 +20,11 @@ export interface RepairResult {
   repairs: string[];
   /** Repair failures callers can surface as warning metadata. */
   warnings?: string[] | undefined;
+  /**
+   * Arguments the schema does not declare, which the tool will ignore, each
+   * as a model-facing sentence (with a likely intended name when one is close).
+   */
+  unknownParameters?: string[] | undefined;
   /** Operation provenance; individual repairs describe only changes actually made. */
   provenance?: 'classic';
 }
@@ -64,7 +69,7 @@ async function repairOwnedToolCall(
   let fixed: Record<string, unknown>;
   const repairs: string[] = [];
   const booleanStrings: Array<{ key: string; value: string }> = [];
-  const params = schema.parameters as Record<string, unknown> | undefined;
+  const params = schema.parameters as JsonSchemaNode | undefined;
   const declared = params?.properties;
   const properties = (declared !== null && typeof declared === 'object' ? declared : {}) as Record<string, Record<string, unknown>>;
   const required = (Array.isArray(params?.required) ? params.required : []).filter((key): key is string => typeof key === 'string');
@@ -81,6 +86,15 @@ async function repairOwnedToolCall(
       }
     }
 
+    // --- Rule 6: one naming convention. A key spelled in the other case
+    // style of a declared key (timeoutMs / timeout_ms) is renamed to it. ---
+    renameCaseVariants(fixed, params, '', repairs);
+    // --- Rule 7: one vocabulary. Another tool's name for the same thing (cwd / working_dir,
+    // fail_fast / stop_on_error, verbosity / output.format) is renamed to the declared one. ---
+    renameAliases(fixed, params, '', repairs);
+    relocateVerbosity(fixed, params, repairs);
+    coerceNestedNumbers(fixed, params, '', repairs);
+
     // --- Rule 3 & 4 & 5: Per-property coercions ---
     for (const [key, propSchema] of Object.entries(properties)) {
       if (!(key in fixed)) {
@@ -92,12 +106,15 @@ async function repairOwnedToolCall(
       const expectedType = propSchema['type'] as string | undefined;
       const enumValues = propSchema['enum'] as unknown[] | undefined;
 
-      // Rule 3: String → number coercion
-      if (expectedType === 'number' && typeof value === 'string') {
+      // Rule 3: String → number coercion. Only plain decimal text is read: Number()
+      // would also turn '0x10', '1e3' and 'Infinity' into values nobody wrote as a count.
+      // An integer parameter takes the same repair when the text is a whole number.
+      if ((expectedType === 'number' || expectedType === 'integer') && typeof value === 'string') {
         const coerced = Number(value);
-        if (value.trim().length > 0 && !Number.isNaN(coerced)) {
+        if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim()) && Number.isFinite(coerced)
+          && (expectedType === 'number' || Number.isInteger(coerced))) {
           fixed[key] = coerced;
-          repairs.push(`coerced ${key} from string '${value}' to number ${coerced}`);
+          repairs.push(`coerced ${key} from string '${value}' to ${expectedType === 'integer' ? 'integer' : 'number'} ${coerced}`);
         }
         continue;
       }
@@ -120,9 +137,11 @@ async function repairOwnedToolCall(
         const exactMatch = enumValues.includes(value);
         if (!exactMatch) {
           const lower = value.toLowerCase();
+          const spelling = (text: string): string => text.toLowerCase().replace(/[-\s]+/g, '_');
+          // Case differences first, then kebab / snake / spaced spellings of the same word.
           const normalized = enumValues.find(
             (e) => typeof e === 'string' && e.toLowerCase() === lower,
-          );
+          ) ?? enumValues.find((e) => typeof e === 'string' && spelling(e) === spelling(value));
           if (normalized !== undefined) {
             fixed[key] = normalized;
             repairs.push(`normalized ${key} from '${value}' to enum value '${normalized}'`);
@@ -191,6 +210,8 @@ async function repairOwnedToolCall(
 
   assertRepairActive(signal);
   const repaired = repairs.length > 0;
+  const unknownParameters: string[] = [];
+  try { collectUnknownParameters(fixed, params, '', toolName, unknownParameters); } catch { /* advisory only */ }
 
   if (repaired) {
     logger.debug('repairToolCall: repaired malformed tool call', {
@@ -201,6 +222,7 @@ async function repairOwnedToolCall(
 
   return { repaired, original: args, fixed, repairs,
     ...(warnings.length ? { warnings } : {}),
+    ...(unknownParameters.length ? { unknownParameters } : {}),
     ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
   };
 }
@@ -208,6 +230,221 @@ async function repairOwnedToolCall(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+type JsonSchemaNode = Record<string, unknown>;
+
+function schemaObject(value: unknown): JsonSchemaNode | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonSchemaNode : undefined;
+}
+
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function declaredProperties(schema: JsonSchemaNode | undefined): Record<string, unknown> | undefined {
+  return schemaObject(schema?.['properties']);
+}
+
+function toSnakeCase(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
+function toCamelCase(key: string): string {
+  return key.replace(/_([a-z0-9])/g, (_match, letter: string) => letter.toUpperCase());
+}
+
+/** Visits the declared object properties and array items of `value` under `schema`. */
+function forEachDeclaredChild(
+  value: Record<string, unknown>,
+  properties: Record<string, unknown>,
+  path: string,
+  visit: (child: Record<string, unknown>, schema: JsonSchemaNode, path: string) => void,
+): void {
+  for (const [key, child] of Object.entries(value)) {
+    const childSchema = schemaObject(properties[key]);
+    if (!childSchema) continue;
+    if (Array.isArray(child)) {
+      const items = schemaObject(childSchema['items']);
+      if (!items) continue;
+      for (const item of child) {
+        const entry = plainObject(item);
+        if (entry) visit(entry, items, `${path}${key}[].`);
+      }
+    } else {
+      const entry = plainObject(child);
+      if (entry) visit(entry, childSchema, `${path}${key}.`);
+    }
+  }
+}
+
+function renameCaseVariants(value: Record<string, unknown>, schema: JsonSchemaNode | undefined, path: string, repairs: string[]): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  for (const key of Object.keys(value)) {
+    if (Object.hasOwn(properties, key)) continue;
+    const target = [toSnakeCase(key), toCamelCase(key)]
+      .find((candidate) => candidate !== key && Object.hasOwn(properties, candidate) && !Object.hasOwn(value, candidate));
+    if (target === undefined) continue;
+    value[target] = value[key];
+    delete value[key];
+    repairs.push(`renamed ${path}${key} to ${path}${target}`);
+  }
+  forEachDeclaredChild(value, properties, path, (child, childSchema, childPath) => renameCaseVariants(child, childSchema, childPath, repairs));
+}
+
+/**
+ * Names that mean the same thing across tools. The first of each group is the one new schemas use;
+ * a call that sends another spelling of a name the tool does not declare, where the tool declares
+ * exactly one member of the group, is renamed to it. The old names keep working this way.
+ */
+const ALIAS_FAMILIES: readonly (readonly string[])[] = [
+  ['working_dir', 'cwd', 'working_directory', 'workdir'],
+  ['stop_on_error', 'fail_fast'],
+  ['max_results', 'limit', 'page_size'],
+  ['tool', 'tool_name'],
+  ['command', 'cli_command', 'command_name'],
+  ['session_id', 'session'],
+];
+
+function renameAliases(value: Record<string, unknown>, schema: JsonSchemaNode | undefined, path: string, repairs: string[]): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  for (const key of Object.keys(value)) {
+    if (Object.hasOwn(properties, key)) continue;
+    const family = ALIAS_FAMILIES.find((members) => members.includes(toSnakeCase(key)));
+    if (!family) continue;
+    // A tool may declare a member in its own case style (`toolName` for `tool_name`); the rename uses the declared spelling.
+    const declaredSpellings = Object.keys(properties).filter((name) => family.includes(toSnakeCase(name)));
+    const target = declaredSpellings.length === 1 ? declaredSpellings[0]! : undefined;
+    if (target === undefined || Object.hasOwn(value, target)) continue;
+    value[target] = value[key];
+    delete value[key];
+    repairs.push(`renamed ${path}${key} to ${path}${target}`);
+  }
+  forEachDeclaredChild(value, properties, path, (child, childSchema, childPath) => renameAliases(child, childSchema, childPath, repairs));
+}
+
+/** Rule 3 for numbers inside declared objects and array items; the top level is handled by the per-property pass. */
+function coerceNestedNumbers(value: Record<string, unknown>, schema: JsonSchemaNode | undefined, path: string, repairs: string[]): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  if (path !== '') {
+    for (const [key, raw] of Object.entries(value)) {
+      const expectedType = schemaObject(properties[key])?.['type'];
+      if ((expectedType !== 'number' && expectedType !== 'integer') || typeof raw !== 'string') continue;
+      const coerced = Number(raw);
+      if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(raw.trim()) && Number.isFinite(coerced)
+        && (expectedType === 'number' || Number.isInteger(coerced))) {
+        value[key] = coerced;
+        repairs.push(`coerced ${path}${key} from string '${raw}' to ${expectedType === 'integer' ? 'integer' : 'number'} ${coerced}`);
+      }
+    }
+  }
+  forEachDeclaredChild(value, properties, path, (child, childSchema, childPath) => coerceNestedNumbers(child, childSchema, childPath, repairs));
+}
+
+const VERBOSITY_KEYS = ['verbosity', 'view', 'detail'];
+
+/**
+ * Tools spell their output-detail choice as a top-level `verbosity` / `view` / `detail` or as
+ * `output.format`, each with its own values. A value sent in the other place is moved to the one
+ * declared place whose values include it; anything that fits nowhere or fits two places is left alone.
+ */
+function relocateVerbosity(value: Record<string, unknown>, schema: JsonSchemaNode | undefined, repairs: string[]): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  const targets: Array<{ name: string; values: readonly unknown[]; nested: boolean }> = [];
+  for (const key of VERBOSITY_KEYS) {
+    const values = schemaObject(properties[key])?.['enum'];
+    if (Array.isArray(values)) targets.push({ name: key, values, nested: false });
+  }
+  const outputProperties = declaredProperties(schemaObject(properties['output']));
+  const formatValues = schemaObject(outputProperties?.['format'])?.['enum'];
+  if (Array.isArray(formatValues)) targets.push({ name: 'output.format', values: formatValues, nested: true });
+  if (targets.length === 0) return;
+
+  const spelling = (text: string): string => text.toLowerCase().replace(/[-\s]+/g, '_');
+  const sources: Array<{ name: string; read: () => unknown; remove: () => void }> = [];
+  for (const key of VERBOSITY_KEYS) {
+    if (!Object.hasOwn(properties, key) && Object.hasOwn(value, key)) sources.push({ name: key, read: () => value[key], remove: () => { delete value[key]; } });
+  }
+  const output = plainObject(value['output']);
+  if (output && Object.hasOwn(output, 'format') && !(outputProperties && Object.hasOwn(outputProperties, 'format'))) {
+    sources.push({ name: 'output.format', read: () => output['format'], remove: () => { delete output['format']; } });
+  }
+  for (const source of sources) {
+    const sent = source.read();
+    if (typeof sent !== 'string') continue;
+    const fits = targets.filter((target) => target.values.some((allowed) => typeof allowed === 'string' && spelling(allowed) === spelling(sent)));
+    if (fits.length !== 1) continue;
+    const target = fits[0]!;
+    const canonical = target.values.find((allowed) => typeof allowed === 'string' && spelling(allowed) === spelling(sent)) as string;
+    const occupied = target.nested ? Boolean(plainObject(value['output']) && Object.hasOwn(plainObject(value['output'])!, 'format')) : Object.hasOwn(value, target.name);
+    if (occupied) continue;
+    if (target.nested) value['output'] = { ...(plainObject(value['output']) ?? {}), format: canonical };
+    else value[target.name] = canonical;
+    source.remove();
+    if (source.name === 'output.format' && output && Object.keys(output).length === 0) delete value['output'];
+    repairs.push(`moved ${source.name} to ${target.name}`);
+  }
+}
+
+function editDistance(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = previous[0]!;
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const above = previous[j]!;
+      previous[j] = Math.min(previous[j]! + 1, previous[j - 1]! + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[b.length]!;
+}
+
+function collectUnknownParameters(
+  value: Record<string, unknown>,
+  schema: JsonSchemaNode | undefined,
+  path: string,
+  toolName: string,
+  out: string[],
+): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  const declared = Object.keys(properties);
+  // Report only where the schema describes its keys: extra keys allowed, or an
+  // empty property list with no explicit closing, say nothing about extras.
+  const additional = schema?.['additionalProperties'];
+  const closed = additional === false || (additional === undefined && declared.length > 0);
+  if (closed) {
+    for (const key of Object.keys(value)) {
+      if (Object.hasOwn(properties, key)) continue;
+      const closest = declared
+        .map((name) => ({ name, distance: editDistance(key.toLowerCase(), name.toLowerCase()) }))
+        .filter(({ distance, name }) => distance <= Math.max(1, Math.floor(Math.min(key.length, name.length) / 3)))
+        .sort((left, right) => left.distance - right.distance)[0];
+      out.push(`Unknown parameter '${path}${key}' for ${toolName}: it is not in the tool's schema and is likely ignored.`
+        + (closest ? ` Did you mean '${path}${closest.name}'?`
+          : declared.length > 0 ? ` Accepted here: ${declared.join(', ')}.` : ' It takes no parameters here.'));
+    }
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const childSchema = schemaObject(properties[key]);
+    if (!childSchema) continue;
+    const entry = plainObject(child);
+    if (entry) { collectUnknownParameters(entry, childSchema, `${path}${key}.`, toolName, out); continue; }
+    // Array items are checked only where one object shape describes them. A union (oneOf / anyOf / allOf)
+    // or a reference says an item may legitimately hold keys this schema does not list.
+    const items = schemaObject(childSchema['items']);
+    if (!Array.isArray(child) || !items || items['oneOf'] !== undefined || items['anyOf'] !== undefined
+      || items['allOf'] !== undefined || items['$ref'] !== undefined) continue;
+    child.forEach((item, index) => {
+      const itemEntry = plainObject(item);
+      if (itemEntry) collectUnknownParameters(itemEntry, items, `${path}${key}[${index}].`, toolName, out);
+    });
+  }
+}
 
 function assertRepairActive(signal?: AbortSignal): void {
   // A caller's arbitrary abort reason can contain private context. Keep the

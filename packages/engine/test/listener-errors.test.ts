@@ -24,9 +24,9 @@ function makeSessionEnvelope() {
   });
 }
 
-/** Drain N microtask ticks. */
-async function drainMicrotasks(n = 5): Promise<void> {
-  for (let i = 0; i < n; i++) await Promise.resolve();
+/** Listeners run from queued microtasks; a macrotask turn runs every microtask queued before it, however deep the chain. */
+async function flushBus(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 describe('listener_errors_total counter', () => {
@@ -41,7 +41,7 @@ describe('listener_errors_total counter', () => {
     });
 
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks();
+    await flushBus();
 
     expect(listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' })).toBe(before + 1);
   });
@@ -55,7 +55,7 @@ describe('listener_errors_total counter', () => {
     bus.on<SessionEvent>('SESSION_STARTED', () => { /* no-op */ });
 
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks();
+    await flushBus();
 
     expect(listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' })).toBe(before);
   });
@@ -74,7 +74,7 @@ describe('listener_errors_total counter', () => {
     bus.emit('session', makeSessionEnvelope());
     bus.emit('session', makeSessionEnvelope());
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks(10);
+    await flushBus();
 
     expect(listenerErrorsTotal.value({ event_type: 'SESSION_STARTED' })).toBe(before + 3);
   });
@@ -95,7 +95,7 @@ describe('OPS_LISTENER_MISBEHAVING OpsEvent emission', () => {
     });
 
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks(8);
+    await flushBus();
 
     expect(opsEvents.length).toBe(1);
     expect(opsEvents[0]!.payload.type).toBe('OPS_LISTENER_MISBEHAVING');
@@ -123,7 +123,7 @@ describe('OPS_LISTENER_MISBEHAVING OpsEvent emission', () => {
     for (let i = 0; i < 5; i++) {
       bus.emit('session', makeSessionEnvelope());
     }
-    await drainMicrotasks(20);
+    await flushBus();
 
     // Only one OPS_LISTENER_MISBEHAVING should have been emitted (first-occurrence dedup).
     expect(opsEvents.length).toBe(1);
@@ -138,7 +138,7 @@ describe('OPS_LISTENER_MISBEHAVING OpsEvent emission', () => {
     bus.on<SessionEvent>('SESSION_STARTED', () => { /* well-behaved */ });
 
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks(5);
+    await flushBus();
 
     expect(opsEvents.length).toBe(0);
   });
@@ -154,7 +154,7 @@ describe('OPS_LISTENER_MISBEHAVING OpsEvent emission', () => {
     });
 
     bus.emit('session', makeSessionEnvelope());
-    await drainMicrotasks(8);
+    await flushBus();
 
     expect(domainEvents.length).toBeGreaterThanOrEqual(1);
     const found = (domainEvents as Array<{ payload: { type: string } }>).some(

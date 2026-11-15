@@ -1,6 +1,5 @@
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterAll, expect, spyOn, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -10,6 +9,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerAgentTools } from '../../runtime/bootstrap-agent-tools.ts';
+import { fullToolDefinition } from '../../tools/tool-definition-compaction.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { cleanupResearchScreeningFixtures, researchScreeningFixture } from '../helpers/research-screening.ts';
@@ -18,7 +18,6 @@ afterAll(cleanupResearchScreeningFixtures);
 
 test('actual default Agent registration fits full protected schema bounds before model-tool discovery', async () => {
   const root = makeProjectTempDir('agent-catalog-bootstrap');
-  execFileSync('git', ['init', '-q'], { cwd: root });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent') });
   const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' }));
   const screening = researchScreeningFixture();
@@ -47,7 +46,9 @@ test('actual default Agent registration fits full protected schema bounds before
     const output = JSON.parse(String(result.output));
     expect(output.tools).toHaveLength(1);
     expect(output.tools[0].name).toBe('agent_harness');
-    expect(output.tools[0].parameters).toEqual(registry.getToolDefinitions().find(tool => tool.name === 'agent_harness')!.parameters);
+    // Detail lookups return the full definition; the advertised one is the short form.
+    expect(output.tools[0].parameters).toEqual(fullToolDefinition(registry, 'agent_harness')!.parameters);
+    expect(JSON.stringify(output.tools[0].parameters).length).toBeGreaterThan(JSON.stringify(registry.getToolDefinitions().find(tool => tool.name === 'agent_harness')!.parameters).length);
     expect(registry.list().length).toBeGreaterThan(25);
     expect(fake.requests.filter(request => request.context?.site === 'agent.harness.tools')).toHaveLength(registry.list().length);
     const batches = screening.calls.filter(call => call.path === '/v1/chat/completions').map(call => JSON.parse((call.body.messages as { content: string }[])[1]!.content) as { parts: string[] });

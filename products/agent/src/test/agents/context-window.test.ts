@@ -6,11 +6,9 @@ import { authoredPrivacyAnswer, errorText } from '../helpers/authored-diagnostic
  * Agent context window awareness tests.
  *
  * Tests:
- *  1. estimateTokenCount utility (chars/4 approximation)
- *  2. Pre-call compaction triggers at 85% threshold
- *  3. Layered system prompt assembly (drop conventions → project context)
- *  4. Retry on context-size-exceeded provider error
- *  5. Feature flag disabled → no compaction, error re-thrown
+ *  1. The pre-call guard trims the system prompt once the estimate passes 85% of the window
+ *  2. Retry on context-size-exceeded provider error
+ *  3. Feature flag disabled → no compaction, error re-thrown
  */
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { AgentOrchestrator } from '@goodvibes-jev/engine/platform/platform/agents';
@@ -128,6 +126,9 @@ async function withMockProvider<T>(
 // ---------------------------------------------------------------------------
 
 describe('AgentOrchestrator context-window awareness', () => {
+  // The flag test installs a manager on the shared orchestrator; start every test from a clean runtime.
+  beforeEach(() => { resetTestRuntimeServices(); });
+
   test('completes successfully when context is within limits', async () => {
     const provider = makeMockProvider([{ content: 'done' }]);
     const record = makeRecord({ id: 'g01-normal-01' });
@@ -179,9 +180,7 @@ describe('AgentOrchestrator context-window awareness', () => {
   });
 
   test('non-context errors are re-thrown without compaction retry', async () => {
-    const networkError = new Error('ECONNREFUSED: connection refused');
-    // Network errors use separate retry logic with delays, so we provide enough
-    // mock responses to exhaust retries; simplest: use a non-retryable error.
+    // Network errors use separate retry logic with delays, so use a non-retryable error.
     const authError = new Error('401 Unauthorized');
     const provider = makeMockProvider([
       { content: '', throws: authError },
@@ -199,69 +198,35 @@ describe('AgentOrchestrator context-window awareness', () => {
     expect((provider.chat as ReturnType<typeof mock>).mock.calls.length).toBe(1);
   });
 
-  test('pre-call compaction: provider.chat receives fewer messages when context exceeds 85% threshold', async () => {
-    // MOCK_MODEL_SMALL contextWindow=4096; 85% threshold ≈ 3481 tokens.
-    // Strategy: create a provider that captures params.messages on each call,
-    // then run with a task large enough (plus system prompt) to push over threshold.
-    // We also seed the conversation with many prior turns by running the agent
-    // in a way that each response adds a user follow-up, but the simplest approach
-    // is to directly verify the compaction path runs when a large task is provided.
-    //
-    // The task text (~3150 chars ≈ 790 tokens) + system prompt (~200 tokens) = ~990.
-    // 990 / 4096 ≈ 24%, not enough alone. We need many messages.
-    // Simulate prior turns: make the first response emit a tool call so the orchestrator
-    // adds a tool-result message and loops, building up message history quickly.
-    // After enough turns, compaction triggers. Then reply 'done'.
-    //
-    // Simpler approach that definitely works: create a task and use a model where
-    // the total (system + 1 msg) already exceeds 85% of a tiny context.
-    // Use contextWindow = 1000 tokens instead by overriding MOCK_MODEL_SMALL.
-
-    const capturedMessageCounts: number[] = [];
-    const TINY_WINDOW = 1000; // tokens
-
-    const MOCK_MODEL_TINY = {
-      ...MOCK_MODEL_SMALL,
-      displayName: 'Mock Tiny',
-      contextWindow: TINY_WINDOW,
+  test('pre-call guard: the system prompt is trimmed only when the estimate passes 85% of the window', async () => {
+    const runOnce = async (model: typeof MOCK_MODEL_SMALL, id: string, task: string): Promise<{ readonly systemPrompt: string; readonly messageCount: number }> => {
+      const captured: Array<{ readonly systemPrompt: string; readonly messageCount: number }> = [];
+      const provider: LLMProvider = {
+        name: 'mock',
+        models: ['mock-model'],
+        chat: mock(async (params: ChatRequest): Promise<ChatResponse> => {
+          captured.push({ systemPrompt: params.systemPrompt ?? '', messageCount: params.messages.length });
+          return { content: 'done', toolCalls: [], usage: { inputTokens: 10, outputTokens: 5 }, stopReason: 'completed' };
+        }),
+      };
+      const record = makeRecord({ id, task });
+      await withMockProvider(provider, model, async () => {
+        const orch = (await getTestAgentOrchestrator());
+        await orch.runAgent(record);
+      });
+      expect(record.status).toBe('completed');
+      expect(captured).toHaveLength(1);
+      return captured[0]!;
     };
 
-    // The system prompt alone (~250-400 tokens) + task message (~200 tokens)
-    // = ~450-600 tokens. 85% of 1000 = 850. We need more.
-    // Use a long task (~1600 chars ≈ 400 tokens) to push over 850.
-    const longTask = 'Reply with a short confirmation. Context: a harmless note. '.repeat(50);
+    const roomy = await runOnce(MOCK_MODEL_SMALL, 'g01-precompact-roomy', 'Reply with a short confirmation.');
+    const cramped = await runOnce(MOCK_MODEL_SMALL, 'g01-precompact-tiny', 'Reply with a short confirmation. Context: a harmless note. '.repeat(250));
 
-    let responseIdx = 0;
-    const provider: LLMProvider = {
-      name: 'mock',
-      models: ['mock-model'],
-      chat: mock(async (params: ChatRequest): Promise<ChatResponse> => {
-        capturedMessageCounts.push(params.messages.length);
-        responseIdx++;
-        return {
-          content: 'done',
-          toolCalls: [],
-          usage: { inputTokens: 10, outputTokens: 5 },
-          stopReason: 'completed',
-        };
-      }),
-    };
-
-    const record = makeRecord({ id: 'g01-precompact-01', task: longTask });
-
-    await withMockProvider(provider, MOCK_MODEL_TINY, async () => {
-      const orch = (await getTestAgentOrchestrator());
-      await orch.runAgent(record);
-    });
-
-    expect(record.status).toBe('completed');
-    expect(capturedMessageCounts.length).toBeGreaterThanOrEqual(1);
-    // When compaction fires, replaceMessagesForLLM reduces the conversation.
-    // With a tiny window (1000 tokens) and a large task, the context guard fires.
-    // The compacted message count should be ≤ the original message count (1 task msg).
-    // Since we only have 1 turn, capturedMessageCounts[0] should be 1 (the task message).
-    // The key assertion: provider.chat was called (compaction didn't break execution).
-    expect(capturedMessageCounts[0]).toBeGreaterThanOrEqual(1);
+    // Both runs share one window (the registry's 4096-token entry for the mock model);
+    // only the task size differs. The long task pushes the estimate past 85% of the
+    // window, so the guard rebuilds a shorter system prompt into the remaining room.
+    expect(roomy.systemPrompt.length).toBeGreaterThan(0);
+    expect(cramped.systemPrompt.length).toBeLessThan(roomy.systemPrompt.length);
   });
 
   test('feature flag disabled: context-exceeded error is not retried', async () => {

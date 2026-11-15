@@ -92,12 +92,16 @@ export class AgentsPanel {
           traceId,
           sessionId,
         });
+        this._retireStaleActive();
         this._notify();
         break;
       }
       case 'AGENT_RUNNING': {
-        const evt = p as { type: 'AGENT_RUNNING'; agentId: string };
-        const record = this._active.get(evt.agentId);
+        const evt = p as { type: 'AGENT_RUNNING'; agentId: string; wake?: true };
+        let record = this._active.get(evt.agentId);
+        // A woken agent finished before and runs again: it belongs back in the
+        // live set, not frozen in history with its old terminal state.
+        if (!record && evt.wake === true) record = this._reviveFromHistory(evt.agentId);
         if (record) {
           record.state = 'running';
           record.blockedOnCallId = undefined;
@@ -174,8 +178,45 @@ export class AgentsPanel {
     }
   }
 
+  private _reviveFromHistory(agentId: string): MutableAgentRecord | undefined {
+    const index = this._history.findIndex((entry) => entry.agentId === agentId);
+    if (index === -1) return undefined;
+    const [entry] = this._history.splice(index, 1);
+    const record: MutableAgentRecord = {
+      agentId: entry!.agentId,
+      taskId: entry!.taskId,
+      task: entry!.task,
+      state: 'running',
+      spawnedAt: entry!.spawnedAt,
+      traceId: entry!.traceId,
+      sessionId: entry!.sessionId,
+    };
+    this._active.set(agentId, record);
+    return record;
+  }
+
+  /**
+   * Bound the live set. A record whose terminal event never arrived (the
+   * emitter died, or the event was dropped) would otherwise stay "active"
+   * forever and grow without limit; the oldest is retired into history in its
+   * last known state with a note saying why.
+   */
+  private _retireStaleActive(): void {
+    while (this._active.size > this._config.bufferLimit) {
+      const oldest = this._active.values().next();
+      if (oldest.done) return;
+      const record = oldest.value;
+      record.error = 'no terminal event was observed for this agent; it was retired from the live list';
+      logger.warn('[AgentsPanel] retired an agent with no terminal event: too many are outstanding', { agentId: record.agentId, limit: this._config.bufferLimit });
+      this._finalize(record);
+    }
+  }
+
   private _finalize(record: MutableAgentRecord): void {
     this._active.delete(record.agentId);
+    // A finished agent is not waiting on a tool, whatever it was last blocked on.
+    record.blockedOnCallId = undefined;
+    record.blockedOnTool = undefined;
     const entry: AgentEntry = {
       agentId: record.agentId,
       taskId: record.taskId,
@@ -219,7 +260,7 @@ export class AgentsPanel {
       });
     }
     const combined: AgentEntry[] = [...this._history, ...activeEntries];
-    return applyFilter(combined, filter, (e) => e.spawnedAt);
+    return applyFilter(combined, filter, (e) => e.spawnedAt, this._config.bufferLimit);
   }
 
   /**
@@ -240,6 +281,8 @@ export class AgentsPanel {
       this._unsub = null;
     }
     this._subscribers.clear();
+    this._active.clear();
+    this._history.length = 0;
   }
 
   private _notify(): void {

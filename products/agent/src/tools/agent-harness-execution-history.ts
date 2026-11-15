@@ -9,6 +9,7 @@ import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type Cat
 import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatus } from '../runtime/execution-ledger.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessExecutionHistoryArgs {
   readonly executionRecordId?: unknown;
@@ -39,9 +40,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(500, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 500);
 }
 
 function iso(value: number | undefined): string | null {
@@ -248,10 +247,20 @@ function verificationSummary(records: readonly AgentExecutionRecord[], includePa
   };
 }
 
+/**
+ * Undo reverts only the newest entry on the stack, so only the record whose
+ * write produced that entry can be rolled back through file recovery. The entry
+ * is stamped while its tool call runs, which places it inside that record's span.
+ */
+function holdsNewestUndoEntry(context: CommandContext, record: AgentExecutionRecord): boolean {
+  if (!isRecoverableRoute(record)) return false;
+  const stamp = fileRecoveryCatalogStatus(context).nextUndoAt;
+  const at = typeof stamp === 'string' ? Date.parse(stamp) : NaN;
+  return Number.isFinite(at) && at >= record.receivedAt && at <= (record.completedAt ?? record.updatedAt);
+}
+
 function recoverableRecordIds(context: CommandContext, records: readonly AgentExecutionRecord[]): readonly string[] {
-  const undoDepth = fileRecoveryCatalogStatus(context).undoDepth as number | undefined;
-  if (!undoDepth || undoDepth < 1) return [];
-  return records.filter(isRecoverableRoute).map((record) => record.id);
+  return records.filter((record) => holdsNewestUndoEntry(context, record)).map((record) => record.id);
 }
 
 function processOutputAttachment(context: CommandContext, records: readonly AgentExecutionRecord[], includeParameters: boolean): Record<string, unknown> | null {
@@ -366,7 +375,7 @@ function describeRecord(
   observations: VerificationObservations,
   lookup?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const recoverable = isRecoverableRoute(record) && (fileRecoveryCatalogStatus(context).undoDepth as number | undefined ?? 0) > 0;
+  const recoverable = holdsNewestUndoEntry(context, record);
   return {
     ...(isClassicOperation() ? { provenance: 'classic' } : {}),
     executionRecordId: record.id,

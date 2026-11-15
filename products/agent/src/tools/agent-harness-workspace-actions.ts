@@ -1,4 +1,4 @@
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogMethods, captureCatalogSnapshot, combineCatalogGuards, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, captureHarnessCatalogSelectionSource, selectHarnessCatalog, selectHarnessCatalogGroup } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -12,6 +12,7 @@ import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { describeLocalWorkspaceModelExecution } from './agent-harness-local-operations.ts';
 import { describeWorkspaceEditorModelExecution } from './agent-harness-workspace-editor-execution.ts';
+import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export { AGENT_WORKSPACE_CATEGORIES };
 
@@ -34,6 +35,8 @@ export interface WorkspaceEditorContext {
   readonly recentReviewerHandoffArtifacts: AgentWorkspaceRuntimeSnapshot['recentReviewerHandoffArtifacts'];
   readonly reviewPacketDefaults: AgentWorkspaceRuntimeSnapshot['reviewPacketDefaults'] | null;
   readonly calendarOAuthConfigStatus: AgentWorkspaceRuntimeSnapshot['calendarOAuthConfigStatus'] | null;
+  /** Set when the runtime snapshot could not be read: the lists above are empty because of that, not because nothing exists. */
+  readonly contextUnavailable?: string;
 }
 
 export interface WorkspaceActionLookup {
@@ -60,9 +63,7 @@ function readString(value: unknown): string {
 }
 
 function readLimit(value: unknown, fallback: number): number {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(1000, Math.trunc(parsed)));
+  return clampReadLimit(value, fallback, 1000);
 }
 
 function readFieldMap(value: unknown): Readonly<Record<string, string>> {
@@ -94,7 +95,8 @@ function captureWorkspaceCategories(): () => void {
     bindings.push(captureCatalogMethods(category, ['actions']));
     bindings.push(captureCatalogMethods(category.actions, ['length', ...category.actions.map((_action, index) => String(index))]));
   }
-  return () => { for (const guard of bindings) guard(); assertSource(AGENT_WORKSPACE_CATEGORIES); for (const guard of bindings) guard(); };
+  const assertBindings = combineCatalogGuards(bindings);
+  return () => { assertBindings(); assertSource(AGENT_WORKSPACE_CATEGORIES); assertBindings(); };
 }
 
 export function describeWorkspaceCategory(category: AgentWorkspaceCategory): Record<string, unknown> {
@@ -138,6 +140,16 @@ function commandRouteHint(command: string): string {
 }
 
 function editorRouteHint(editorKind: AgentWorkspaceEditorKind): string {
+  const hint = editorFirstClassRoute(editorKind);
+  // The execution table is what the runner dispatches through, so it decides the tool. A first-class
+  // route with an action (`research action:"..."`) is another entry point to the same effect and stays.
+  const executionTool = describeWorkspaceEditorModelExecution(editorKind).tool;
+  if (typeof executionTool !== 'string' || !executionTool) return hint;
+  if (hint === executionTool || (hint.includes(' ') && !hint.startsWith('agent_harness '))) return hint;
+  return executionTool === 'agent_harness' ? 'agent_harness mode:"run_workspace_action"' : executionTool;
+}
+
+function editorFirstClassRoute(editorKind: AgentWorkspaceEditorKind): string {
   if (
     editorKind === 'memory'
     || editorKind === 'note'
@@ -196,7 +208,7 @@ function editorRouteHint(editorKind: AgentWorkspaceEditorKind): string {
     editorKind.startsWith('approval-')
     || editorKind.startsWith('automation-')
   ) return 'agent_operator_action';
-  if (editorKind.startsWith('workplan-') || editorKind.startsWith('plan-') || editorKind.startsWith('task-')) return 'agent_work_plan';
+  if (editorKind.startsWith('workplan-') || editorKind.startsWith('task-')) return 'agent_work_plan';
   return 'agent_harness mode:"run_workspace_action"';
 }
 
@@ -213,11 +225,8 @@ function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
     if (action.setupCheckpointOperation === 'clear') return 'agent_harness mode:"clear_setup_checkpoint"';
     return 'agent_harness mode:"setup_checkpoint"';
   }
-  if (action.id === 'account-route-readiness') return 'models action:"status" includeParameters:true';
-  if (action.id === 'account-local-model-cookbook') return 'models action:"local"';
   if (action.id === 'account-local-server-health') return 'models action:"smoke"';
   if (action.id === 'account-run-local-model-benchmark') return 'agent_model_compare';
-  if (action.id === 'account-local-benchmark-evidence') return 'models action:"local" includeParameters:true';
   if (action.id === 'assistant-browser-cockpit') return 'computer action:"open_browser"';
   if (action.id === 'research-briefing') return 'research action:"briefing"';
   if (action.id === 'research-workflow-plan') return 'research action:"plan"';
@@ -274,13 +283,15 @@ export function buildWorkspaceEditorContext(context: CommandContext, args: Agent
       reviewPacketDefaults: snapshot.reviewPacketDefaults,
       calendarOAuthConfigStatus: snapshot.calendarOAuthConfigStatus,
     };
-  } catch {
+  } catch (err) {
+    if (err instanceof ToolInputProjectionError) throw err;
     return {
       runtimeStarterTemplates: [],
       selectedRoutine: null,
       recentReviewerHandoffArtifacts: [],
       reviewPacketDefaults: null,
       calendarOAuthConfigStatus: null,
+      contextUnavailable: `The workspace runtime snapshot could not be read (${err instanceof Error ? err.message : String(err)}), so starter templates, the selected routine, reviewer handoff artifacts and OAuth status are not listed.`,
     };
   }
 }
@@ -313,7 +324,7 @@ export function describeWorkspaceAction(
     detail: action.detail,
     kind: action.kind,
     safety: action.safety,
-    modelRoute: previewText(workspaceActionRouteHint(action), 72),
+    modelRoute: workspaceActionRouteHint(action),
     ...(action.command ? { command: action.command } : {}),
     ...(action.targetCategoryId ? { targetCategoryId: action.targetCategoryId } : {}),
     ...(action.editorKind ? { editorKind: action.editorKind } : {}),
@@ -321,6 +332,7 @@ export function describeWorkspaceAction(
     ...(action.localOperation ? { localOperation: action.localOperation } : {}),
     ...(options.lookup ? { lookup: options.lookup } : {}),
     ...(editor ? { editor: describeWorkspaceEditor(editor) } : {}),
+    ...(editor && options.editorContext?.contextUnavailable ? { contextUnavailable: options.editorContext.contextUnavailable } : {}),
     ...(action.kind === 'settings-import' ? {
       modelExecution: {
         route: 'settings-import',
@@ -375,7 +387,7 @@ function describeWorkspaceActionSummary(
     summary: previewText(action.detail),
     kind: action.kind,
     safety: action.safety,
-    modelRoute: previewText(workspaceActionRouteHint(action), 72),
+    modelRoute: workspaceActionRouteHint(action),
     ...(action.command ? { command: action.command } : {}),
     ...(action.targetCategoryId ? { targetCategoryId: action.targetCategoryId } : {}),
     ...(action.editorKind ? { editorKind: action.editorKind } : {}),

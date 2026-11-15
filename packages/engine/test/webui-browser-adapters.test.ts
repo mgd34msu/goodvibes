@@ -3,15 +3,14 @@ import { SqliteDecisionLog, withDecisionLog, type JudgmentPort, type JudgmentReq
 import { choiceAnswer, fakePort, noulAnswer, type Answerer } from '@goodvibes-jev/judgment/testing';
 import { BrowserJudgmentError, type AuthenticatedPrincipal, type BrowserJudgmentInputMap, type BrowserJudgmentRequest } from '../daemon-api/src/index.ts';
 import { BrowserJudgmentReferences, BrowserJudgmentRegistry, BrowserJudgmentService } from '../platform/src/platform/judgment-browser/index.ts';
-import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, webuiStatusToneAdapter, type WebuiPaletteSources } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
-import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
+import { createWebuiCommandRankAdapter, webuiDaemonRefusalAdapter, type WebuiPaletteSources } from '../platform/src/platform/judgment-browser/batteries/webui-adapters.ts';
 import { WEBUI_BUILTIN_COMMANDS, WEBUI_COMMAND_CATALOG_VERSION } from '../platform/src/platform/judgment-browser/batteries/webui-command-catalog.ts';
 import { readStructuredDaemonRefusal } from '../platform/src/platform/judgment-browser/batteries/webui-readers.ts';
 import { readWebuiStatusCatalog } from '../platform/src/platform/judgment-browser/batteries/webui-status-catalog.ts';
 import type { ResolvedCommandRank } from '../platform/src/platform/judgment-browser/batteries/webui-types.ts';
+import { withWebuiAnswerBoundary } from '../platform/src/platform/judgment-browser/batteries/webui-answers.ts';
 
 const ERRORS = 'webui.errors.daemon-refusal';
-const STATUS = 'webui.status.badge-tone';
 const PALETTE = 'webui.palette.command-rank';
 const owner: AuthenticatedPrincipal = { principalId: 'fixture-owner', principalKind: 'user', admin: false, scopes: ['write:judgment', 'read:sessions'] };
 const body = <K extends keyof BrowserJudgmentInputMap>(battery: K, input: BrowserJudgmentInputMap[K]): BrowserJudgmentRequest<K> => ({ protocolVersion: 1, requestId: crypto.randomUUID(), battery, batteryVersion: 1, input }) as BrowserJudgmentRequest<K>;
@@ -24,7 +23,6 @@ function harness(options: { answer?: Answerer; sources?: WebuiPaletteSources; au
   const references = new BrowserJudgmentReferences();
   const registry = new BrowserJudgmentRegistry();
   registry.register(webuiDaemonRefusalAdapter);
-  registry.register(webuiStatusToneAdapter);
   if (options.sources) registry.register(createWebuiCommandRankAdapter(options.sources));
   let current = owner;
   let active = 0;
@@ -134,49 +132,11 @@ describe('actual WebUI descriptors through the published service', () => {
     }
   });
 
-  test('current status catalogs use exhaustive structural mappings and never call a provider', async () => {
+  test('current status catalogs use exhaustive structural mappings', () => {
     expect(readWebuiStatusCatalog('session.closed', 'badge')).toEqual({ vocabulary: 'badge', tone: 'neutral' });
     expect(readWebuiStatusCatalog('knowledge-job.running', 'library-dot')).toEqual({ vocabulary: 'library-dot', tone: 'info' });
     expect(readWebuiStatusCatalog('knowledge-job.completed', 'library-dot')).toEqual({ vocabulary: 'library-dot', tone: 'ok' });
     expect(readWebuiStatusCatalog('knowledge-job.future-status', 'badge')).toBeUndefined();
-    const f = harness();
-    try {
-      await expect(f.execute(body(STATUS, { vocabulary: 'badge', source: { kind: 'catalog', labelId: 'session.closed' } }))).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
-      expect(f.requests).toHaveLength(0); expect(f.log.query()).toHaveLength(0);
-    } finally { await f.close(); }
-  });
-
-  test('unresolved status references preserve independent confidence and selected probability', async () => {
-    const f = harness({ answer: () => ({ type: 'choice', choice: 'ok', confidence: 0.61, probabilities: { ok: 0.42, warning: 0.28, bad: 0.2, neutral: 0.1 } }) });
-    try {
-      const ref = f.issue(STATUS, { kind: 'text', vocabulary: 'badge', status: 'Operational with a minor advisory.', domain: 'session' });
-      const result = await f.execute(body(STATUS, { vocabulary: 'badge', source: { kind: 'daemon', statusRef: ref } }));
-      expect(result).toMatchObject({ status: 'settled', value: { vocabulary: 'badge', tone: 'ok' }, readings: { badge: { confidence: 0.61, probabilities: { ok: 0.42 }, outcome: 'act' } } });
-      expect(f.requests).toHaveLength(1); expect(f.log.query()).toHaveLength(1);
-      expect(Object.keys(f.requests[0]!.questions)).toEqual(['badge']);
-    } finally { await f.close(); }
-  });
-
-  test('library-dot asks its separate fixed choice and preserves unsettled evidence without a tone', async () => {
-    const f = harness({ answer: (_name, question) => choiceAnswer(question, 'info', 0.57) });
-    try {
-      const ref = f.issue(STATUS, { kind: 'text', vocabulary: 'library-dot', status: 'Work remains in progress.', domain: 'knowledge-job' });
-      const result = await f.execute(body(STATUS, { vocabulary: 'library-dot', source: { kind: 'daemon', statusRef: ref } }));
-      expect(result).toMatchObject({ status: 'held', outcome: 'confirm', readings: { library_dot: { choice: 'info', confidence: 0.57, outcome: 'confirm' } } });
-      expect(result).not.toHaveProperty('value');
-      expect(f.requests).toHaveLength(1); expect(Object.keys(f.requests[0]!.questions)).toEqual(['library_dot']);
-      expect(f.log.query()).toHaveLength(1);
-    } finally { await f.close(); }
-  });
-
-  test('no free-form status issuer or cross-vocabulary ref is assumed', async () => {
-    const f = harness({ answer: (_name, question) => choiceAnswer(question, 'ok') });
-    try {
-      await expect(f.execute(body(STATUS, { vocabulary: 'badge', source: { kind: 'daemon', statusRef: 'not-issued' } }))).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-      const ref = f.issue(STATUS, { kind: 'text', vocabulary: 'library-dot', status: 'indexing', domain: 'knowledge-job' });
-      await expect(f.execute(body(STATUS, { vocabulary: 'badge', source: { kind: 'daemon', statusRef: ref } }))).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-      expect(f.requests).toHaveLength(0);
-    } finally { await f.close(); }
   });
 
   test('palette reads every opaque index, preserves actual probabilities and keeps private identities out of the log', async () => {
@@ -259,7 +219,7 @@ describe('adapter source ownership and full-input admission', () => {
     try {
       const ref = f.issue(ERRORS, source(), { mayRead: () => false });
       await expect(f.execute(body(ERRORS, { errorRef: ref }))).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
-      const wrongPurpose = f.issue(STATUS, source());
+      const wrongPurpose = f.issue(PALETTE, source());
       await expect(f.execute(body(ERRORS, { errorRef: wrongPurpose }))).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });
       const nonBoolean = f.issue(ERRORS, source(), { mayRead: (async () => true) as unknown as () => boolean });
       await expect(f.execute(body(ERRORS, { errorRef: nonBoolean }))).rejects.toMatchObject({ code: 'JUDGMENT_REFERENCE_HELD' });

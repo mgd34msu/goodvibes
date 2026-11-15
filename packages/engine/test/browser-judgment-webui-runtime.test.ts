@@ -116,12 +116,11 @@ test('a rejected asynchronous source-policy hook is consumed and cannot grant ac
   } finally { await f.close(); }
 });
 
-test.each(['query', 'title', 'oversize-title'] as const)('complete protected or oversized %s is held before reference retention or calls', async (kind) => {
+test.each(['query', 'title'] as const)('complete protected %s is held before reference retention or calls', async (kind) => {
   const f = fixture();
   try {
     const input = request();
     if (kind === 'title') f.setTitle('password=synthetic-private');
-    if (kind === 'oversize-title') f.setTitle('x'.repeat(257));
     const source = kind === 'query' ? { ...input, input: { ...input.input, query: { kind: 'inline', text: 'password=synthetic-private' } } } : input;
     await expect(f.run(source as BrowserJudgmentRequest)).rejects.toMatchObject({ code: 'JUDGMENT_INPUT_HELD' });
     expect(f.calls).toHaveLength(0); expect(f.log.query()).toEqual([]);

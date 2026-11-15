@@ -1,146 +1,121 @@
 /**
- * Chaos: Provider failure simulation.
+ * Chaos: provider failures through the real provider transport.
  *
- * Simulates provider timeouts, 429 (rate limit), and 5xx (server error)
- * scenarios. These are unit tests, no real network calls are made.
- * Instead we test the health aggregator domain transitions that would
- * be triggered by a provider failure handler, and verify the correct
- * downstream health state.
+ * A provider that answers 429, 5xx, or never answers must be retried a bounded
+ * number of times and then fail with the status the caller can act on; one that
+ * recovers part way through must deliver its answer. The provider's own `chat`
+ * runs here against a fake `fetch`, so no network is involved and the backoff
+ * delay is zeroed.
  */
 
-import { describe, test, expect } from 'bun:test';
-import { RuntimeHealthAggregator } from './_helpers/runtime-seam.ts';
-import { CascadeEngine } from './_helpers/runtime-seam.ts';
-import { CASCADE_RULES } from './_helpers/runtime-seam.ts';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { AnthropicCompatProvider } from '../platform/src/platform/providers/anthropic-compat.ts';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
-function makeSystem() {
-  const clock = { t: 1000 };
-  const aggregator = new RuntimeHealthAggregator(() => clock.t);
-  const engine = new CascadeEngine(CASCADE_RULES, aggregator, () => clock.t);
-  return { aggregator, engine, clock };
+const BASE_URL = 'https://provider-failures.invalid/v1';
+
+const SSE_BODY = [
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"recovered"}}',
+  '',
+  'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}',
+  '',
+  'data: {"type":"message_stop"}',
+  '',
+  '',
+].join('\n');
+
+/**
+ * Answers only requests aimed at BASE_URL: `globalThis.fetch` is process-wide and
+ * other work in the same process must not be counted or handed this file's replies.
+ */
+function installFetch(respond: (attempt: number) => Response | Promise<Response>): { readonly count: () => number } {
+  let calls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith(BASE_URL)) return new Response('not this test\'s request', { status: 404 });
+    calls += 1;
+    return respond(calls);
+  }) as typeof fetch;
+  return { count: () => calls };
 }
 
-// Simulate what a provider failure handler would do:
-// mark providerHealth as failed, then evaluate cascades.
-function simulateProviderFailure(
-  sys: ReturnType<typeof makeSystem>,
-  status: 'failed' | 'degraded',
-  reason: string,
-) {
-  sys.aggregator.updateDomainHealth('providerHealth', status, { failureReason: reason });
-  return sys.engine.evaluate('providerHealth', status, { reason });
+function makeProvider(name: string): AnthropicCompatProvider {
+  return new AnthropicCompatProvider({
+    name,
+    baseURL: BASE_URL,
+    apiKey: 'test-key',
+    defaultModel: 'test-model',
+    models: ['test-model'],
+    retryConfig: { initialDelayMs: 0, maxDelayMs: 0 },
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Provider timeout
-// ---------------------------------------------------------------------------
+async function chat(provider: AnthropicCompatProvider, retries: number[]) {
+  return provider.chat({
+    model: 'test-model',
+    messages: [{ role: 'user', content: 'hello' }],
+    onRetry: (attempt) => { retries.push(attempt); },
+  });
+}
 
 describe('chaos: provider failures', () => {
-  describe('provider timeout', () => {
-    test('timeout marks providerHealth as failed', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', 'timeout');
-      const health = sys.aggregator.getDomainHealth('providerHealth');
-      expect(health.status).toBe('failed');
-      expect(health.failureReason).toBe('timeout');
-    });
+  test('a provider that keeps answering 429 is retried a bounded number of times, then fails with the 429', async () => {
+    const fetched = installFetch(() => new Response('slow down', { status: 429 }));
+    const retries: number[] = [];
 
-    test('timeout degrades composite health', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', 'timeout');
-      const composite = sys.aggregator.getCompositeHealth();
-      expect(composite.overall).toBe('failed');
-      expect(composite.failedDomains).toContain('providerHealth');
-    });
+    await expect(chat(makeProvider('rate-limited'), retries)).rejects.toMatchObject({ statusCode: 429 });
 
-    test('timeout as degraded marks composite degraded not failed', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'degraded', 'timeout-partial');
-      const composite = sys.aggregator.getCompositeHealth();
-      expect(composite.overall).toBe('degraded');
-      expect(composite.degradedDomains).toContain('providerHealth');
-      expect(composite.failedDomains).not.toContain('providerHealth');
-    });
+    // One first try plus three retries; an unbounded loop would never get here.
+    expect(fetched.count()).toBe(4);
+    expect(retries).toEqual([1, 2, 3]);
   });
 
-  describe('provider 429 (rate limit)', () => {
-    test('429 burst marks providerHealth failed', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', '429-rate-limit');
-      const health = sys.aggregator.getDomainHealth('providerHealth');
-      expect(health.status).toBe('failed');
-      expect(health.failureReason).toBe('429-rate-limit');
-    });
+  test('a provider that keeps answering 5xx is retried a bounded number of times, then fails with the 5xx', async () => {
+    const fetched = installFetch(() => new Response('upstream broke', { status: 503 }));
+    const retries: number[] = [];
 
-    test('429 canExecute blocks operations on providerHealth failure', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', '429-rate-limit');
-      // canExecute returns { allowed: boolean }
-      const result = sys.aggregator.canExecute('providerHealth', 'stream-response');
-      expect(result.allowed).toBe(false);
-    });
+    await expect(chat(makeProvider('server-error'), retries)).rejects.toMatchObject({ statusCode: 503 });
+
+    expect(fetched.count()).toBe(4);
+    expect(retries).toEqual([1, 2, 3]);
   });
 
-  describe('provider 5xx (server error)', () => {
-    test('5xx marks providerHealth failed', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', '5xx-server-error');
-      const health = sys.aggregator.getDomainHealth('providerHealth');
-      expect(health.status).toBe('failed');
-    });
+  test('a provider that fails twice and then answers delivers the answer', async () => {
+    const fetched = installFetch((attempt) => attempt === 1
+      ? new Response('slow down', { status: 429 })
+      : attempt === 2
+        ? new Response('upstream broke', { status: 502 })
+        : new Response(SSE_BODY, { status: 200 }));
+    const retries: number[] = [];
 
-    test('5xx failure is tracked in failedDomains', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', '5xx-server-error');
-      const composite = sys.aggregator.getCompositeHealth();
-      expect(composite.failedDomains).toContain('providerHealth');
-    });
+    const response = await chat(makeProvider('recovering'), retries);
+
+    expect(response.content).toBe('recovered');
+    expect(fetched.count()).toBe(3);
+    expect(retries).toEqual([1, 2]);
   });
 
-  describe('recovery after failure', () => {
-    test('updating providerHealth to healthy removes from failedDomains', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', 'timeout');
-      expect(sys.aggregator.getCompositeHealth().failedDomains).toContain('providerHealth');
-
-      // Provider recovers
-      sys.aggregator.updateDomainHealth('providerHealth', 'healthy');
-      const composite = sys.aggregator.getCompositeHealth();
-      expect(composite.failedDomains).not.toContain('providerHealth');
+  test('a provider that times out reaches the caller as the timeout, not as an empty answer', async () => {
+    installFetch(() => {
+      const timeout = new Error('The operation timed out');
+      timeout.name = 'TimeoutError';
+      throw timeout;
     });
 
-    test('recovery transitions from failed to healthy updates overall status', () => {
-      const sys = makeSystem();
-      simulateProviderFailure(sys, 'failed', 'timeout');
-      sys.aggregator.updateDomainHealth('providerHealth', 'healthy');
-
-      // Verify composite recovers if no other domain is failed
-      const composite = sys.aggregator.getCompositeHealth();
-      expect(['healthy', 'unknown']).toContain(composite.overall);
-    });
+    await expect(chat(makeProvider('timing-out'), [])).rejects.toThrow('The operation timed out');
   });
 
-  describe('subscriber notification on failure', () => {
-    test('subscriber is called when providerHealth fails', () => {
-      const sys = makeSystem();
-      let notified = false;
-      sys.aggregator.subscribe(() => { notified = true; });
+  test('a failure that cannot succeed on retry is not retried', async () => {
+    const fetched = installFetch(() => new Response('bad key', { status: 401 }));
+    const retries: number[] = [];
 
-      simulateProviderFailure(sys, 'failed', 'timeout');
-      expect(notified).toBe(true);
-    });
+    await expect(chat(makeProvider('rejected-key'), retries)).rejects.toMatchObject({ statusCode: 401 });
 
-    test('subscriber receives updated composite health on failure', () => {
-      const sys = makeSystem();
-      let receivedOverall = '';
-      sys.aggregator.subscribe((health) => { receivedOverall = health.overall; });
-
-      simulateProviderFailure(sys, 'failed', '5xx');
-      expect(receivedOverall).toBe('failed');
-    });
+    expect(fetched.count()).toBe(1);
+    expect(retries).toEqual([]);
   });
 });

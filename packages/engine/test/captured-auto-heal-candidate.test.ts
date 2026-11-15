@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { noteSkippedContainment } from './_helpers/exec-containment-proof.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +18,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const availability = await probeCapturedExecAvailability();
 const supported = availability.available;
+noteSkippedContainment('captured-auto-heal-candidate.test.ts', supported);
 
 test('required captured auto-heal candidate proof cannot silently skip containment', () => {
   if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT !== undefined) {
@@ -111,23 +113,21 @@ for (const interruption of ['per-call abort', 'owner abort', 'authority revocati
   test.skipIf(!supported)(`candidate ${interruption} during a real subprocess withholds output and changes`, async () => {
     let allowed = true;
     const f = await fixture(() => allowed); const received: string[] = []; const call = new AbortController();
-    let started = false; let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
+    let started = false;
+    {
       const result = await withCapturedPublication(f.binding.authority, (lease) => run(f.binding,
         'printf CANDIDATE_PRIVATE_DIAGNOSTIC; sleep 1; printf changed > input.txt; printf side > side.txt', {
           ...candidate(lease, (content) => received.push(content)),
           onStarted: () => {
             started = true;
-            timer = setTimeout(() => {
-              if (interruption === 'per-call abort') call.abort();
-              else if (interruption === 'owner abort') f.controller.abort();
-              else if (interruption === 'authority revocation') revokeContractInputAuthority(f.binding.authority);
-              else allowed = false;
-            }, 80);
+            if (interruption === 'per-call abort') call.abort();
+            else if (interruption === 'owner abort') f.controller.abort();
+            else if (interruption === 'authority revocation') revokeContractInputAuthority(f.binding.authority);
+            else allowed = false;
           },
         }, call.signal));
       expect(started).toBe(true); assertHeld(result, received); assertUnpublished(f);
-    } finally { clearTimeout(timer); }
+    }
   });
 
 for (const kind of ['missing', 'forged', 'copied', 'settled', 'same-root rebound'] as const)

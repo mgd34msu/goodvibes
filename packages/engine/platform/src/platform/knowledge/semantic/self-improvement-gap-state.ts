@@ -13,6 +13,21 @@ import {
 
 export const SELF_IMPROVEMENT_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 
+/** Every `repairStatus` a gap's metadata records. */
+export type KnowledgeGapRepairStatus =
+  | 'open'
+  | 'not_applicable'
+  | 'repaired'
+  | 'deferred'
+  | 'failed'
+  | 'searched_no_sources'
+  | 'no_repairer'
+  | 'needs_context'
+  | 'skipped';
+
+/** Statuses after which a repair waits SELF_IMPROVEMENT_RETRY_DELAY_MS before the next attempt. */
+const RETRY_WINDOW_STATUSES: ReadonlySet<KnowledgeGapRepairStatus> = new Set(['searched_no_sources', 'failed', 'deferred']);
+
 export async function suppressGap(
   store: KnowledgeStore,
   gap: KnowledgeNodeRecord,
@@ -54,7 +69,7 @@ export async function markGapRepairAttempt(
   gap: KnowledgeNodeRecord,
   spaceId: string,
   details: {
-    readonly status: string;
+    readonly status: KnowledgeGapRepairStatus;
     readonly reason?: string | undefined;
     readonly query?: string | undefined;
     readonly acceptedSourceIds?: readonly string[] | undefined;
@@ -66,10 +81,15 @@ export async function markGapRepairAttempt(
   // Only the locally generated retry clock is encoded. Explicit caller values
   // remain untouched and undergo complete raw admission on later reads.
   const nextRepairAttemptAt = details.nextRepairAttemptAt ?? (
-    details.status === 'searched_no_sources' || details.status === 'failed' || details.status === 'deferred'
+    RETRY_WINDOW_STATUSES.has(details.status)
       ? knowledgeClockIso(Date.now() + SELF_IMPROVEMENT_RETRY_DELAY_MS)
       : undefined
   );
+  // An undefined key would erase the stored window on merge. Only a retry
+  // status sets it and only a repair clears it; any other status keeps it.
+  const retryWindow = nextRepairAttemptAt !== undefined
+    ? { nextRepairAttemptAt }
+    : details.status === 'repaired' ? { nextRepairAttemptAt: undefined } : {};
   const committed = await upsertObservedKnowledgeNode(store, {
     id: gap.id,
     kind: gap.kind,
@@ -88,7 +108,7 @@ export async function markGapRepairAttempt(
       ...((details.acceptedSourceIds?.length ?? 0) > 0 ? { acceptedSourceIds: details.acceptedSourceIds } : {}),
       ...(typeof details.promotedFactCount === 'number' ? { promotedFactCount: details.promotedFactCount } : {}),
       lastRepairAttemptAt: knowledgeClockIso(Date.now()),
-      nextRepairAttemptAt,
+      ...retryWindow,
       knowledgeSpaceId: spaceId,
     },
   }, 'research-task', gap, () => { details.assertCurrent?.(); return store.getNode(gap.id); });

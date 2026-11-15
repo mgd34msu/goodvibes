@@ -304,9 +304,18 @@ export class TtsEngine {
     if (played === 0) {
       this.set({ id: null, phase: null, skipped, error: 'The voice provider could not read this reply aloud.' });
     } else {
-      // Finished (possibly with some segments honestly skipped). Return to idle; a
-      // consumer that wants to surface the skip count can read it before the reset.
-      this.set(IDLE);
+      // Finished. A reply with skipped segments is not idle: the listener heard it with
+      // gaps, so the terminal state keeps the count and says so until the next speak().
+      this.set(skipped > 0
+        ? {
+          id: null,
+          phase: null,
+          skipped,
+          error: skipped === 1
+            ? '1 part of this reply could not be read aloud.'
+            : `${skipped} parts of this reply could not be read aloud.`,
+        }
+        : IDLE);
     }
   }
 }

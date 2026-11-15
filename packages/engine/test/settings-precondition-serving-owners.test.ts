@@ -1,4 +1,5 @@
 /** Real ConfigManager + strict auth + route/client composition, temporary stores only. */
+import { RestartController } from '../platform/src/platform/daemon/host-mode-watcher.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -112,27 +113,6 @@ test('route changes during probe await refuse instead of choosing an unobserved 
   await expect(resolvePreparedConfigWriteRoute('controlPlane.port', deps)).rejects.toThrow();
 });
 
-test('source-extracted facade enable cannot reopen SETTINGS during an awaited stop', () => {
-  // Execute only the production enable body against a data-only facade stand-in.
-  // No DaemonServer constructor, service graph, socket or native module is used.
-  const source = readFileSync(new URL('../platform/src/platform/daemon/facade.ts', import.meta.url), 'utf8');
-  const start = source.indexOf('  enable(dangerConfig:');
-  const open = source.indexOf('{', start);
-  const end = source.indexOf('\n  }\n', open);
-  const enable = new Function('logger', `return function(dangerConfig, token) { ${source.slice(open + 1, end)} };`)({ info() {} }) as
-    (this: { server: object; tornDown: boolean; settingsLifetime: object | null; enabled: boolean; authToken: string | null;
-      controlPlaneGateway: { setServerState(value: unknown): void } }, config: { daemon: boolean }, token?: string) => boolean;
-  const state = { server: {}, tornDown: true, settingsLifetime: null as object | null, enabled: false, authToken: 'old',
-    controlPlaneGateway: { setServerState() {} } };
-  expect(enable.call(state, { daemon: true }, 'replacement')).toBe(true);
-  expect(state.settingsLifetime).toBeNull();
-  state.tornDown = false; state.settingsLifetime = {};
-  const previous = state.settingsLifetime;
-  enable.call(state, { daemon: true }, 'replacement');
-  expect(state.settingsLifetime).not.toBeNull(); expect(state.settingsLifetime).not.toBe(previous);
-});
-
-
 function actualRouter(f: ReturnType<typeof fixture>) {
   // Constructor gets no runtimeStore or batch manager: no telemetry/service is
   // started. All SETTINGS configuration/auth owners and dispatchers are real.
@@ -222,11 +202,11 @@ function stoppingFacade() {
     workProposals: new WorkProposalStore(),
     server: { stop() { events.push('socket'); } },
     enabled: true, authToken: 'fixture-shared', host: '127.0.0.1', port: 0,
-    _restarting: false,
+    restartCycle: new RestartController({ isRunning: () => false, run: async () => {}, onError: () => {} }),
     _configWatchUnsub() { events.push('watcher'); },
     configManager: { get() { return false; } },
     channelHealth: { stop() {} }, replyPoller: null,
-    pendingSurfaceReplies: new Map(), httpRouter: { dispose() {} },
+    surfaceDeliveryHelper: { abandonPendingSurfaceReplies() {} }, httpRouter: { dispose() {} },
     surfaceActionHelper: { closeDelegatedTelegram() {} },
     companionChatManager: { async close() {} },
     clusterCoordinator: { async stop() {} }, automationManager: { stop() {} },

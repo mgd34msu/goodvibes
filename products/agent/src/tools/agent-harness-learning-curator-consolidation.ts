@@ -1,11 +1,12 @@
 import { requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
-import { localRegistryRoute, routeList, routeValue } from './agent-harness-learning-curator-common.ts';
+import { localRegistryRoute, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { LearningRecord } from './agent-harness-learning-curator-source.ts';
 import { readLearningDuplicatePair, readLearningSurvivor } from './agent-harness-learning-curator-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 const CONSOLIDATION_DOMAINS: readonly LocalLearningCandidateDomain[] = ['memory', 'persona', 'skill', 'routine'];
 
 function uniqueText(values: readonly string[]): readonly string[] {
@@ -28,16 +29,6 @@ function mergeableDescription(domain: LocalLearningCandidateDomain, item: AgentW
     return item.description === fallback ? '' : item.description;
   }
   return item.description;
-}
-
-function updateFieldsForConsolidation(
-  _domain: LocalLearningCandidateDomain,
-  _survivor: AgentWorkspaceLocalLibraryItem,
-  _duplicates: readonly AgentWorkspaceLocalLibraryItem[],
-): LearningConsolidationFields | undefined {
-  // Same-entity evidence cannot authorize synthesized descriptions or new triggers.
-  // Retain the exact selected record and reversible stale markers on duplicates.
-  return undefined;
 }
 
 function rollbackFieldsForConsolidation(
@@ -93,48 +84,6 @@ function consolidationDiffs(
   ].filter((diff): diff is LearningConsolidationDiff => diff !== null);
 }
 
-function updateRouteForConsolidation(
-  domain: LocalLearningCandidateDomain,
-  survivor: AgentWorkspaceLocalLibraryItem,
-  duplicates: readonly AgentWorkspaceLocalLibraryItem[],
-): string | undefined {
-  const updateFields = updateFieldsForConsolidation(domain, survivor, duplicates);
-  if (!updateFields) return undefined;
-  const fields: string[] = [];
-  if (domain === 'memory') {
-    if (updateFields.detail) fields.push(`detail:"${routeValue(updateFields.detail)}"`);
-    if (updateFields.tags && updateFields.tags.length > 0) fields.push(`tags:${routeList(updateFields.tags)}`);
-  } else {
-    if (updateFields.description) fields.push(`description:"${routeValue(updateFields.description)}"`);
-    if (updateFields.tags && updateFields.tags.length > 0) fields.push(`tags:${routeList(updateFields.tags)}`);
-    if (updateFields.triggers && updateFields.triggers.length > 0) fields.push(`triggers:${routeList(updateFields.triggers)}`);
-  }
-  if (fields.length === 0) return undefined;
-  return [
-    localRegistryRoute(domain, 'update', survivor.id),
-    ...fields,
-    'provenance:"learning-curator-consolidation"',
-  ].join(' ');
-}
-
-function rollbackUpdateRouteForConsolidation(domain: LocalLearningCandidateDomain, survivor: AgentWorkspaceLocalLibraryItem): string {
-  const rollbackFields = rollbackFieldsForConsolidation(domain, survivor);
-  const fields: string[] = [];
-  if (domain === 'memory') {
-    if (rollbackFields.detail) fields.push(`detail:"${routeValue(rollbackFields.detail)}"`);
-    fields.push(`tags:${routeList(rollbackFields.tags ?? [])}`);
-  } else {
-    if (rollbackFields.description) fields.push(`description:"${routeValue(rollbackFields.description)}"`);
-    fields.push(`tags:${routeList(rollbackFields.tags ?? [])}`);
-    fields.push(`triggers:${routeList(rollbackFields.triggers ?? [])}`);
-  }
-  return [
-    localRegistryRoute(domain, 'update', survivor.id),
-    ...fields,
-    'provenance:"rollback-learning-curator-consolidation"',
-  ].join(' ');
-}
-
 function consolidationProposalFields(plan: LearningConsolidationPlan): Readonly<Record<string, string>> {
   return {
     survivorId: plan.survivorId,
@@ -156,13 +105,12 @@ function consolidationCandidate(
   if (items.length < 2) return null;
   const duplicates = items.filter((item) => item.id !== survivor.id);
   if (duplicates.length === 0) return null;
-  const updateRoute = updateRouteForConsolidation(domain, survivor, duplicates);
-  const updateFields = updateFieldsForConsolidation(domain, survivor, duplicates);
   const rollbackFields = rollbackFieldsForConsolidation(domain, survivor);
   const staleRoutes = duplicates.map((item) => `${localRegistryRoute(domain, 'stale', item.id)} reason:"Duplicate of ${routeValue(survivor.id)}; staged by learning curator consolidation."`);
   const deleteRoutes = duplicates.map((item) => `${localRegistryRoute(domain, 'delete', item.id)}`);
+  // Same-entity evidence cannot authorize synthesized descriptions or new triggers, so the survivor is never rewritten;
+  // the only change is staging the duplicates as stale, and rollback is reviewing them again.
   const rollbackRoutes = [
-    ...(updateRoute ? [rollbackUpdateRouteForConsolidation(domain, survivor)] : []),
     ...duplicates.map((item) => localRegistryRoute(domain, 'review', item.id)),
   ];
   const diffs = consolidationDiffs(domain, survivor, duplicates);
@@ -170,10 +118,10 @@ function consolidationCandidate(
     survivorId: survivor.id,
     duplicateIds: duplicates.map((item) => item.id),
     sharedKey: key,
+    ...(duplicates.some(item => item.reviewState === 'stale')
+      ? { staleDuplicateIds: duplicates.filter(item => item.reviewState === 'stale').map(item => item.id) } : {}),
     diffs,
-    ...(updateFields ? { updateFields } : {}),
     rollbackFields,
-    ...(updateRoute ? { updateRoute } : {}),
     staleRoutes,
     deleteRoutes,
     rollbackRoutes,
@@ -196,7 +144,6 @@ function consolidationCandidate(
     modelRoute: 'memory action:"curator" query:"consolidation"',
     reviewRoute: localRegistryRoute(domain, 'review', survivor.id),
     ...(staleRoutes[0] ? { staleRoute: staleRoutes[0] } : {}),
-    ...(updateRoute ? { updateRoute } : {}),
     ...(deleteRoutes[0] ? { deleteRoute: deleteRoutes[0] } : {}),
     cleanupRoutes: staleRoutes,
     rollbackRoutes,
@@ -218,7 +165,15 @@ export async function consolidationCandidatesForDomain(
     for (let right = left + 1; right < records.length; right++) {
       const a = records[left], b = records[right];
       if (!a || !b) throw new ToolInputProjectionError('held');
-      const same = await readLearningDuplicatePair({ left: { domain, ...a }, right: { domain, ...b } }, options);
+      let same = false;
+      try { same = await readLearningDuplicatePair({ left: { domain, ...a }, right: { domain, ...b } }, options); }
+      catch (error) {
+        // An unsettled pair is "not shown to be the same": it proposes nothing, and must not stop the other domains from being read.
+        // A lost authority or abort still surfaces through the checks right below.
+        if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
+        options.signal?.throwIfAborted(); options.assertCurrent?.();
+        logger.warn('Learning duplicate pair reading was not settled; the pair is treated as distinct', { domain, left: a.item.id, right: b.item.id });
+      }
       options.signal?.throwIfAborted(); options.assertCurrent?.();
       if (same) { edges[left]?.add(right); edges[right]?.add(left); }
     }
@@ -234,15 +189,23 @@ export async function consolidationCandidatesForDomain(
       for (const neighbor of edges[current] ?? []) if (!visited.has(neighbor)) { visited.add(neighbor); indexes.push(neighbor); }
     }
     if (indexes.length < 2) continue;
-    // Alignment is not assumed transitive. Every proposed group must be a complete same-entity clique.
-    for (const left of indexes) for (const right of indexes)
-      if (left !== right && !edges[left]?.has(right)) throw new ToolInputProjectionError('held');
+    // Alignment is not assumed transitive. Every proposed group must be a complete same-entity clique;
+    // a group that is not one proposes nothing, and the rest of the curator still reads.
+    const complete = indexes.every(left => indexes.every(right => left === right || edges[left]?.has(right) === true));
+    if (!complete) {
+      logger.warn('Learning duplicate readings are not a complete same-entity group; nothing is proposed for it', { domain, records: indexes.length });
+      continue;
+    }
     const group = indexes.map(index => {
       const record = records[index]; if (!record) throw new ToolInputProjectionError('held'); return record;
     }).sort((left, right) => left.item.id.localeCompare(right.item.id));
-    const selected = await readLearningSurvivor({ domain, records: group, context }, options);
+    // A duplicate already staged stays in the group, so the stale-then-delete flow can still find its candidate, but it
+    // is never the survivor: only live records compete, so a second pass cannot flip the survivor onto a staged copy.
+    const live = group.filter(record => record.item.reviewState !== 'stale');
+    if (live.length === 0) continue;
+    const selected = live.length === 1 ? 0 : await readLearningSurvivor({ domain, records: live, context }, options);
     options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const survivor = group[selected]; if (!survivor) throw new ToolInputProjectionError('held');
+    const survivor = live[selected]; if (!survivor) throw new ToolInputProjectionError('held');
     const key = JSON.stringify(group.map(record => record.item.id));
     const candidate = consolidationCandidate(domain, key, group.map(record => record.item), survivor.item);
     if (candidate) result.push(candidate);

@@ -8,8 +8,10 @@ import type { KnowledgeIngestContext } from '../platform/src/platform/knowledge/
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 
 const tmpRoots: string[] = [];
+const stores: KnowledgeStore[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   for (const root of tmpRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -137,6 +139,7 @@ function createContext(): {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-knowledge-compile-'));
   tmpRoots.push(root);
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  stores.push(store);
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   return {
     store,

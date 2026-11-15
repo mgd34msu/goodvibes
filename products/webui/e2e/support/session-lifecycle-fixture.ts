@@ -1,11 +1,10 @@
 /** Synthetic session lifecycle responses. Never contacts a daemon or deletes user data. */
-import type { Page, Route } from '@playwright/test';
+import type { Page, Request, Route } from '@playwright/test';
 import { installMockDaemon } from './mock-daemon';
-import { FOLLOWUP_SESSION, STEERABLE_SESSION, contractMessage, sessionRecord } from './seed';
+import { E2E_OPERATOR_TOKEN, FOLLOWUP_SESSION, STEERABLE_SESSION, contractMessage, sessionRecord } from './seed';
 
 export const LIFECYCLE_SESSION = { ...STEERABLE_SESSION, title: 'Lifecycle original session' };
 export const REPLACEMENT_SESSION = { ...FOLLOWUP_SESSION, title: 'Lifecycle replacement session' };
-export const LIFECYCLE_TOKEN = 'e2e-operator-token';
 export type LifecycleStage = 'close' | 'reopen' | 'delete' | 'list';
 type Response = 'success' | 'disconnected' | 'server-error';
 
@@ -29,7 +28,7 @@ export async function installSessionLifecycleDaemon(page: Page, options: {
   const sessions = structuredClone([LIFECYCLE_SESSION, REPLACEMENT_SESSION]);
   const requests: LifecycleRequest[] = [];
   const writes: LifecycleRequest[] = [];
-  const pending: { stage: LifecycleStage; answer: () => Promise<void> }[] = [];
+  const pending: { stage: LifecycleStage; request: Request; answer: () => Promise<void> }[] = [];
   let held = options.hold;
   let deleted = false;
   let failed = false;
@@ -46,7 +45,7 @@ export async function installSessionLifecycleDaemon(page: Page, options: {
         await route.fulfill({ json: body });
       }
     };
-    if (held === stage && (stage !== 'list' || deleted)) pending.push({ stage, answer: respond });
+    if (held === stage && (stage !== 'list' || deleted)) pending.push({ stage, request: route.request(), answer: respond });
     else await respond();
   }
 
@@ -100,9 +99,18 @@ export async function installSessionLifecycleDaemon(page: Page, options: {
     writes,
     sessions,
     get pendingStages() { return pending.map(item => item.stage); },
+    /**
+     * Answer every held reply and wait until the page has received each body in
+     * full, so a spec's "the late reply changed nothing" check runs after the
+     * page had the reply, not merely after the fixture sent it.
+     */
     async release() {
       held = undefined;
-      await Promise.all(pending.splice(0).map(item => item.answer()));
+      await Promise.all(pending.splice(0).map(async item => {
+        await item.answer();
+        const response = await item.request.response();
+        await response?.finished();
+      }));
     },
   };
 }
@@ -116,5 +124,5 @@ export async function replaceSessionIdentity(page: Page, restoreOriginal: boolea
       localStorage.setItem(key, value);
       window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue: value, storageArea: localStorage }));
     }
-  }, { original: LIFECYCLE_TOKEN, restore: restoreOriginal });
+  }, { original: E2E_OPERATOR_TOKEN, restore: restoreOriginal });
 }

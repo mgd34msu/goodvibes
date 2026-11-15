@@ -22,3 +22,11 @@ test('actual daemon serve preparation preserves resolved provider/model and endp
   expect(config.get('controlPlane.host')).toBe('daemon.example.test'); expect(config.get('controlPlane.port')).toBe(4310);
   expect(readFileSync(config.getConfigPath(), 'utf8')).not.toContain('fixture-model');
 });
+
+test('a model id with a slash keeps the configured provider and the whole id', () => {
+  const config = fixture();
+  const parsed = parseDaemonCli(['serve', '--model', 'meta-llama/Llama-3.1-8B']);
+  expect(parsed.errors).toEqual([]); expect(parsed.flags.provider).toBeUndefined();
+  expect(prepareDaemonCliServe(config, parsed.flags)).toEqual([]);
+  expect(config.get('provider.model')).toBe('synthetic:meta-llama/Llama-3.1-8B');
+});

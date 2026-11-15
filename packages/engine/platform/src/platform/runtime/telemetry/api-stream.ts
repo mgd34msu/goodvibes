@@ -2,7 +2,6 @@ import { sseSubscribers } from '../metrics.js';
 import type {
   TelemetryCapabilities,
   TelemetryFilter,
-  TelemetryListResponse,
   TelemetryRecord,
   TelemetryViewMode,
 } from './api.js';
@@ -10,7 +9,7 @@ import {
   clampLimit,
   sanitizeRecord,
 } from './api-helpers.js';
-import { resolveTelemetryRecordCursor } from './api-query.js';
+import { listTelemetryRecordsAfterCursor, resolveTelemetryRecordCursor } from './api-query.js';
 
 export interface CreateTelemetryStreamInput {
   readonly request: Request;
@@ -21,15 +20,13 @@ export interface CreateTelemetryStreamInput {
   readonly records: readonly TelemetryRecord[];
   /** Resolve source aliases against the collector's live retained identities. */
   readonly matchesRecord: (record: TelemetryRecord, filter: TelemetryFilter) => boolean;
-  readonly listEventPage: (
-    filter: TelemetryFilter,
-    view: TelemetryViewMode,
-    rawAccessible: boolean,
-  ) => TelemetryListResponse<TelemetryRecord>;
   readonly subscribe: (listener: (record: TelemetryRecord) => void) => () => void;
   readonly getCapabilities: () => TelemetryCapabilities;
   readonly getSubscriberCount: () => number;
 }
+
+/** Chunks a stalled client may leave unread before its stream is closed. */
+const MAX_QUEUED_CHUNKS = 1024;
 
 export function createTelemetryEventStream(input: CreateTelemetryStreamInput): Response {
   input.assertViewAvailable();
@@ -62,19 +59,26 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
         }
       };
       if (requestedCursor) {
-        const replay = input.listEventPage({
-          ...input.filter,
-          cursor: requestedCursor,
-          limit: clampLimit(input.filter.limit, 100),
-        }, input.view, input.rawAccessible);
-        for (const record of [...replay.items].reverse()) {
+        const missed = listTelemetryRecordsAfterCursor(
+          input.records,
+          (record) => input.matchesRecord(record, input.filter),
+          requestedCursor,
+          clampLimit(input.filter.limit, 100),
+        );
+        for (const record of missed) {
           if (!checkAccess()) return;
-          controller.enqueue(encoder.encode(`id: ${record.id}\nevent: telemetry\ndata: ${JSON.stringify(record)}\n\n`));
+          const projected = sanitizeRecord(record, input.view);
+          controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
         }
       }
       unsub = input.subscribe((record) => {
         if (closed || !checkAccess()) return;
         if (!input.matchesRecord(record, input.filter)) return;
+        // A client that stopped reading would otherwise queue every event for the stream's lifetime.
+        if ((controller.desiredSize ?? 1) <= 0) {
+          stop();
+          return;
+        }
         const projected = sanitizeRecord(record, input.view);
         controller.enqueue(encoder.encode(`id: ${projected.id}\nevent: telemetry\ndata: ${JSON.stringify(projected)}\n\n`));
       });
@@ -93,6 +97,11 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
       };
       const abort = (): void => stop();
       input.request.signal.addEventListener('abort', abort, { once: true });
+      // An abort that happened before this listener existed will never fire it.
+      if (input.request.signal.aborted) {
+        stop();
+        return;
+      }
       controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({
         version: 1,
         capabilities: input.getCapabilities(),
@@ -104,7 +113,7 @@ export function createTelemetryEventStream(input: CreateTelemetryStreamInput): R
     cancel: () => {
       teardown();
     },
-  });
+  }, new CountQueuingStrategy({ highWaterMark: MAX_QUEUED_CHUNKS }));
 
   return new Response(stream, {
     headers: {
